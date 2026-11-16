@@ -41,11 +41,12 @@ pub struct ToolbarCustom {
 pub const MAX_QUICK_ACCESS: usize = 24;
 
 impl ToolbarCustom {
-    /// Whether a command still uses a compact gallery cell in this panel.
-    pub fn in_gallery(&self, tab: &str, panel: &str, id: &str) -> bool {
+    /// Whether a command still uses a compact gallery cell in this panel. `pinned`: constraints
+    /// the user pinned join the default six (the `pinned_constraints_in_grid` preference).
+    pub fn in_gallery(&self, tab: &str, panel: &str, id: &str, pinned: bool) -> bool {
         tab == "SKETCH"
             && panel == "CONSTRAIN"
-            && crate::workspace::CONSTRAINT_GALLERY.contains(&id)
+            && (crate::workspace::CONSTRAINT_GALLERY.contains(&id) || (pinned && crate::workspace::constraint_cell(id)))
             && !self.gallery_buttons.get(&format!("{WORKSPACE}/{tab}")).is_some_and(|ids| ids.iter().any(|c| c == id))
     }
 
@@ -287,6 +288,11 @@ pub fn remove(app: &mut SolveApp, tab: &str, id: &str) {
     app.toolbar_custom.panels.insert(key(tab, panel), ids);
 }
 
+/// [`ToolbarCustom::in_gallery`] with the user's preference.
+pub fn in_gallery(app: &SolveApp, tab: &str, panel: &str, id: &str) -> bool {
+    app.toolbar_custom.in_gallery(tab, panel, id, app.preferences.pinned_constraints_in_grid)
+}
+
 /// Move a button before another one (`before`: None puts it at the end of `panel`).
 pub fn reorder(app: &mut SolveApp, tab: &str, id: &str, panel: &str, before: Option<&str>) {
     if fixed(tab, panel, id) {
@@ -294,8 +300,11 @@ pub fn reorder(app: &mut SolveApp, tab: &str, id: &str, panel: &str, before: Opt
     }
     // A gallery command dropped on a gallery cell goes (back) into the gallery; dropped anywhere
     // else it becomes a full-size button.
-    if tab == "SKETCH" && crate::workspace::CONSTRAINT_GALLERY.contains(&id) {
-        let into_gallery = before.is_some_and(|b| app.toolbar_custom.in_gallery(tab, panel, b));
+    if tab == "SKETCH"
+        && (crate::workspace::CONSTRAINT_GALLERY.contains(&id)
+            || (app.preferences.pinned_constraints_in_grid && crate::workspace::constraint_cell(id)))
+    {
+        let into_gallery = before.is_some_and(|b| in_gallery(app, tab, panel, b));
         let ids = app.toolbar_custom.gallery_buttons.entry(format!("{WORKSPACE}/{tab}")).or_default();
         ids.retain(|c| c != id);
         if !into_gallery {
@@ -473,8 +482,13 @@ pub fn import(app: &mut SolveApp, v: &Value) -> Result<(), String> {
     Ok(())
 }
 
+/// A command's icon in the Customize Toolbar list: the one its ribbon button shows right now.
+fn row_icon(app: &SolveApp, command: &CommandSpec) -> &'static str {
+    crate::render_workspace::interactive_command_info(app, command).icon
+}
+
 /// Customize Toolbar: every command of the tab's panels with a check box (on the toolbar or
-/// not), how to drag them, and Reset Toolbar.
+/// not) and its ribbon icon, how to drag them, and Reset Toolbar.
 pub fn window(app: &mut SolveApp, ctx: &egui::Context) {
     if !app.toolbar_custom.customizing {
         return;
@@ -512,7 +526,7 @@ pub fn window(app: &mut SolveApp, ctx: &egui::Context) {
                                 let shown = buttons(app, &tab, panel, &cmds, n);
                                 for c in &cmds {
                                     let mut on = shown.iter().any(|b| b.id == c.id) || pinned_on(app, &tab, c.id).is_some();
-                                    let r = ui_kit::checkbox(ui, app.tr_label(c.label), &mut on);
+                                    let r = ui_kit::checkbox_icon(ui, app.tr_label(c.label), row_icon(app, c), &mut on);
                                     crate::scenario::publish_handle(&format!("customize:{}", c.id), r.rect.center());
                                     if r.changed() {
                                         changes.push((c.id, on));
@@ -538,6 +552,30 @@ pub fn window(app: &mut SolveApp, ctx: &egui::Context) {
         reset(app, &tab);
     }
     app.toolbar_custom.customizing = !closed && action != ui_kit::Action::Cancel;
+}
+
+#[cfg(test)]
+mod row_icon_tests {
+    use super::*;
+    use crate::scenario::Harness;
+
+    /// A row shows the icon its ribbon button shows, also while the command's state changes it:
+    /// Play History shows Stop while History plays.
+    #[test]
+    fn a_row_follows_the_ribbon_icon_of_play_history() {
+        let mut h = Harness::new();
+        h.app.home.open = false;
+        for corner in [[0, 0, 0], [30, 0, 0]] {
+            h.app.run("solid.box", json!({"corner": corner, "length": 10, "width": 10, "height": 10})).unwrap();
+        }
+        h.app.run("timeline.roll_to", json!({"position": 0})).unwrap();
+        let command = solidcraft_engine::find_command("timeline.play").unwrap();
+        assert_eq!(row_icon(&h.app, command), "timeline_play");
+        h.app.start(command.id);
+        assert!(h.app.timeline_playback.is_some(), "History plays");
+        assert_eq!(row_icon(&h.app, command), "timeline_stop");
+        assert_eq!(row_icon(&h.app, command), crate::render_workspace::interactive_command_info(&h.app, command).icon);
+    }
 }
 
 #[cfg(test)]

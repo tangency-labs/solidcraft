@@ -163,7 +163,7 @@ impl TextureSource {
         }
         Ok(self.bytes.clone())
     }
-    #[cfg(all(test, feature = "raytrace-cpu"))]
+    #[cfg(test)]
     pub(crate) fn encoded_weak(&self) -> std::sync::Weak<Vec<u8>> {
         Arc::downgrade(&self.bytes)
     }

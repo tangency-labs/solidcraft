@@ -88,7 +88,6 @@ fn round(k: &mut Kernel, b: &mut Brep, points: &[[f64; 3]], r: f64) -> i32 {
     let edges = pick(k, b, points);
     let code = {
         let mut s = FilletSession::new(k, b).unwrap();
-        s.set_blend_curve_at_thirds(false);
         s.prepare_per_edge_constant_radius(
             k,
             &edges,
@@ -393,16 +392,14 @@ fn revolution_round_crease_is_unchanged() {
     assert_eq!(on.volume.to_bits(), off.unwrap().volume.to_bits());
 }
 
-/// The blend corner alone (with the two fillet fixes the issue's preset needs to reach the
-/// crease round): the r 1
-/// round's End on the cylinder is a tangent end, its rail on the torus ending on the
-/// torus/cylinder seam where the round touches the cylinder. Without the tangent end
-/// (#2500) the rail end was taken as the rail's crossing of the cylinder, which has none
-/// there, and the cap edge was marched into the tangency: fillet code 5.
+/// The blend corner alone (with the SSI fix the issue's preset needs to reach the crease
+/// round): the r 1 round's End on the cylinder is a tangent end, its rail on the torus
+/// ending on the torus/cylinder seam where the round touches the cylinder. Without the
+/// tangent end (#2500) the rail end was taken as the rail's crossing of the cylinder, which
+/// has none there, and the cap edge was marched into the tangency: fillet code 5.
 #[test]
 fn the_blend_corner_alone_rounds_the_crease_to_its_tangent_end() {
     let mut k = Kernel::default();
-    k.fixes.fillet_torus_span_from_start_section = true;
     k.fixes.ssi_tangent_curve_tracer = true;
     let (code, built) = crease_round_with(k, Form::AsBuilt);
     assert_eq!(code, 0);

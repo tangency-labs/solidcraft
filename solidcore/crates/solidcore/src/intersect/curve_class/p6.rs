@@ -170,14 +170,20 @@ impl<O: ClassObject> CurveClassification<O> {
             let count = self.size();
             ignore_status(squeeze_out_smallest_interval(self))?;
             if self.size() >= count {
-                return Err(SolidError::sm_err(OP));
+                return Err(SolidError::intersect_failed(
+                    OP,
+                    "squeezing out the smallest interval did not shorten the classification",
+                ));
             }
         }
         while other.size() > self.size() {
             let count = other.size();
             ignore_status(squeeze_out_smallest_interval(other))?;
             if other.size() >= count {
-                return Err(SolidError::sm_err(OP));
+                return Err(SolidError::intersect_failed(
+                    OP,
+                    "squeezing out the smallest interval did not shorten the classification",
+                ));
             }
         }
         Ok(())
@@ -227,9 +233,9 @@ impl<O: ClassObject> CurveClassification<O> {
             if !self.insert_curve_interval_step(a, input)? {
                 return Ok(());
             }
-            restarts = restarts
-                .checked_sub(1)
-                .ok_or_else(|| SolidError::sm_err(OP))?;
+            restarts = restarts.checked_sub(1).ok_or_else(|| {
+                SolidError::intersect_failed(OP, "inserting the curve interval did not settle")
+            })?;
         }
     }
 
@@ -256,7 +262,12 @@ impl<O: ClassObject> CurveClassification<O> {
                 let (coin, end) =
                     are_coincident_maybe(a.kernel(), a.geometry(), self, self, index)?;
                 match coin {
-                    Coincident::Unsure => return Err(SolidError::sm_err(OP)),
+                    Coincident::Unsure => {
+                        return Err(SolidError::intersect_failed(
+                            OP,
+                            "whether the intervals coincide could not be decided",
+                        ))
+                    }
                     Coincident::Yes => {
                         connect_intervals(self, index, end, false)?;
                         return Ok(true);
@@ -342,7 +353,10 @@ impl<O: ClassObject> CurveClassification<O> {
             }
             i += 1;
         } else {
-            return Err(SolidError::sm_err(OP));
+            return Err(SolidError::intersect_failed(
+                OP,
+                "the interval's start is outside the classification",
+            ));
         }
         if pb == IntervalPosition::End {
             combine_in(a, &mut self.at_mut(i)?.end, &input.end)?;
@@ -354,7 +368,10 @@ impl<O: ClassObject> CurveClassification<O> {
             }
             self.insert_point_class_in(a, &input.end, input.max(), BIG_DOUBLE, false)?;
         } else {
-            return Err(SolidError::sm_err(OP));
+            return Err(SolidError::intersect_failed(
+                OP,
+                "the interval's end is outside the classification",
+            ));
         }
         combine_in(a, &mut self.at_mut(i)?.mid, &input.mid)?;
         Ok(false)
@@ -812,7 +829,10 @@ impl<O: ClassObject> CurveClassification<O> {
                 let mut uv = uv.copy(a.kernel())?;
                 // SM_CAST_PTR(SmBSplineCurve, ...) then NER
                 if !is_bspline_curve(&uv) {
-                    return Err(SolidError::null_pointer(OP));
+                    return Err(SolidError::intersect_missing(
+                        OP,
+                        "the B-spline form of the uv curve",
+                    ));
                 }
                 uv.trim(a.kernel(), &mut interval, TrimMode::default())?;
                 self.at_mut(index)?.interval = interval;
@@ -962,7 +982,10 @@ impl<O: ClassObject> CurveClassification<O> {
 
         // check state
         let (Some(start_vu), Some(end_vu)) = (start_vu, end_vu) else {
-            return Err(SolidError::null_pointer(OP));
+            return Err(SolidError::intersect_missing(
+                OP,
+                "a vertex use at an end of the edge",
+            ));
         };
 
         // insert the interval into the face
@@ -1033,13 +1056,21 @@ impl<O: ClassObject> CurveClassification<O> {
         let new_tolerance = {
             let k = a.kernel();
             let g = a.geometry();
-            let curve = super::p3::edge_curve(g, e)?.ok_or_else(|| SolidError::null_pointer(OP))?;
+            let curve = super::p3::edge_curve(g, e)?
+                .ok_or_else(|| SolidError::intersect_missing(OP, "the edge's curve"))?;
             let this_curve = self.curve_geometry(g)?;
 
             // Drop classificationInterval MidPoint to Edge->curve
             let pv = this_curve.evaluate(k, ivl.interval.evaluate(0.5), 1, true, true)?;
-            let p0 = *pv.first().ok_or_else(|| SolidError::sm_err(OP))?;
-            let t0 = *pv.get(1).ok_or_else(|| SolidError::sm_err(OP))?;
+            let p0 = *pv.first().ok_or_else(|| {
+                SolidError::intersect_failed(OP, "the classified curve's point was not evaluated")
+            })?;
+            let t0 = *pv.get(1).ok_or_else(|| {
+                SolidError::intersect_failed(
+                    OP,
+                    "the classified curve's first derivative was not evaluated",
+                )
+            })?;
             let drop = curve.drop_point(
                 k,
                 &edge_interval,
@@ -1053,7 +1084,12 @@ impl<O: ClassObject> CurveClassification<O> {
             if drop.success {
                 // we have a candidate - approximate max interval/Edge->Curve distance
                 let pv2 = curve.evaluate(k, drop.parameter, 1, true, true)?;
-                let t2 = *pv2.get(1).ok_or_else(|| SolidError::sm_err(OP))?;
+                let t2 = *pv2.get(1).ok_or_else(|| {
+                    SolidError::intersect_failed(
+                        OP,
+                        "the edge curve's first derivative was not evaluated",
+                    )
+                })?;
                 if t0.dot(t2) < 0.0 {
                     core::mem::swap(&mut d_start, &mut d_end);
                 }
@@ -1887,7 +1923,7 @@ fn vertex_point<O: ClassObject>(g: &impl ClassGeometry<O>, v: O) -> Result<Point
 fn vertex_brep_tolerance<O: ClassObject>(g: &impl ClassGeometry<O>, v: O) -> Result<f64> {
     match entity_of(g, v, "unresolved vertex (SmVertex::GetBrep)")? {
         (b, EntityRef::Vertex(v)) => Ok(topo_vertex::brep(b, v)?
-            .ok_or_else(|| SolidError::null_pointer(OP))?
+            .ok_or_else(|| SolidError::intersect_missing(OP, "the vertex's B-rep"))?
             .tolerance()),
         _ => Err(wrong_target("handle does not name a vertex")),
     }
@@ -1897,7 +1933,7 @@ fn vertex_brep_tolerance<O: ClassObject>(g: &impl ClassGeometry<O>, v: O) -> Res
 fn face_brep_tolerance<O: ClassObject>(g: &impl ClassGeometry<O>, f: O) -> Result<f64> {
     match entity_of(g, f, "unresolved face (SmFace::GetBrep)")? {
         (b, EntityRef::Face(f)) => Ok(crate::topology::face::p4::brep(b, f)?
-            .ok_or_else(|| SolidError::null_pointer(OP))?
+            .ok_or_else(|| SolidError::intersect_missing(OP, "the face's B-rep"))?
             .tolerance()),
         _ => Err(wrong_target("handle does not name a face")),
     }
@@ -1906,9 +1942,8 @@ fn face_brep_tolerance<O: ClassObject>(g: &impl ClassGeometry<O>, f: O) -> Resul
 /// `pFace->GetSurface()` (dereferenced upstream).
 fn face_surface<O: ClassObject>(g: &impl ClassGeometry<O>, f: O) -> Result<&Surface> {
     match entity_of(g, f, "unresolved face (SmFace::GetSurface)")? {
-        (b, EntityRef::Face(f)) => {
-            crate::topology::face::p2::surface(b, f)?.ok_or_else(|| SolidError::null_pointer(OP))
-        }
+        (b, EntityRef::Face(f)) => crate::topology::face::p2::surface(b, f)?
+            .ok_or_else(|| SolidError::intersect_missing(OP, "the face's surface")),
         _ => Err(wrong_target("handle does not name a face")),
     }
 }
@@ -1946,7 +1981,8 @@ fn face_point_classified(r: Result<()>) -> Result<bool> {
 fn edge_vertex<O: ClassObject>(g: &impl ClassGeometry<O>, e: O) -> Result<O> {
     match entity_of(g, e, "unresolved edge (SmEdge::GetVertex)")? {
         (b, EntityRef::Edge(e)) => {
-            let v = topo_edge::vertex(b, e)?.ok_or_else(|| SolidError::null_pointer(OP))?;
+            let v = topo_edge::vertex(b, e)?
+                .ok_or_else(|| SolidError::intersect_missing(OP, "the edge's vertex"))?;
             handle_in(g, b, EntityRef::Vertex(v))
         }
         _ => Err(wrong_target("handle does not name an edge")),
@@ -1958,9 +1994,10 @@ fn edge_vertex<O: ClassObject>(g: &impl ClassGeometry<O>, e: O) -> Result<O> {
 fn edge_vertices<O: ClassObject>(g: &impl ClassGeometry<O>, e: O) -> Result<(O, O)> {
     match entity_of(g, e, "unresolved edge (SmEdge::GetVertex)")? {
         (b, EntityRef::Edge(e)) => {
-            let v1 = topo_edge::vertex(b, e)?.ok_or_else(|| SolidError::null_pointer(OP))?;
+            let v1 = topo_edge::vertex(b, e)?
+                .ok_or_else(|| SolidError::intersect_missing(OP, "the edge's vertex"))?;
             let v2 = topo_edge::other_vertex(b, e, Some(v1))?
-                .ok_or_else(|| SolidError::null_pointer(OP))?;
+                .ok_or_else(|| SolidError::intersect_missing(OP, "the edge's other vertex"))?;
             Ok((
                 handle_in(g, b, EntityRef::Vertex(v1))?,
                 handle_in(g, b, EntityRef::Vertex(v2))?,
@@ -1979,7 +2016,7 @@ fn interval_degenerate<O: ClassObject>(
     let curve = cc
         .curve()
         .and_then(|o| geometry.curve(o))
-        .ok_or_else(|| SolidError::null_pointer(OP))?;
+        .ok_or_else(|| SolidError::intersect_missing(OP, "the classified curve"))?;
     let surface = cc
         .surface1()
         .map(|o| {
@@ -2026,7 +2063,10 @@ fn homogenize_boundaries<O: ClassObject>(
         let found = dst.find_interval(k, geometry, param, last, tol)?;
         let mut pos = found.position;
         if pos == IntervalPosition::Outside {
-            return Err(SolidError::sm_err(OP));
+            return Err(SolidError::intersect_failed(
+                OP,
+                "the point class's parameter is outside the destination classification",
+            ));
         }
         let mut force = false;
         if pos != IntervalPosition::Inside && found.end_dist_3d.abs() > point.scaled_zero() {
@@ -2069,7 +2109,10 @@ fn homogenize_boundaries<O: ClassObject>(
                 }
             }
             if !dst.insert_point_class(k, access.geometry(), &new_pc, param, last, force)? {
-                return Err(SolidError::sm_err(OP));
+                return Err(SolidError::intersect_failed(
+                    OP,
+                    "the point class could not be inserted into the destination classification",
+                ));
             }
         }
         last = param;

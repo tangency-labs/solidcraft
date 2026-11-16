@@ -17,20 +17,20 @@ struct Moments {
 /// reconstruct integer coverage from FLOAT32 alpha or allocate another image.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct PixelCounts {
-    covered: u16,
-    samples: u16,
-    planned: u16,
+    covered: u32,
+    samples: u32,
+    planned: u32,
 }
 impl PixelCounts {
-    pub fn covered(self) -> u16 {
+    pub fn covered(self) -> u32 {
         self.covered
     }
-    pub fn samples(self) -> u16 {
+    pub fn samples(self) -> u32 {
         self.samples
     }
     pub fn alpha8(self) -> Result<u8> {
-        let samples = u32::from(self.samples);
-        let covered = u32::from(self.covered);
+        let samples = self.samples;
+        let covered = self.covered;
         if samples == 0 || covered > samples {
             return Err(invalid("adaptive coverage has no valid sample denominator"));
         }
@@ -218,14 +218,26 @@ impl AdaptiveCameraFilm {
     /// None means this production pixel has already reached its pilot allocation;
     /// the caller must perform skip_one WITHOUT tracing or consuming a variate.
     pub fn sampling_identity(&self, index: usize) -> Result<Option<SamplingIdentity>> {
-        let counts = self.ordered(index)?;
+        self.identity_for_counts(self.ordered(index)?)
+    }
+    /// Native camera workers may inspect any uncommitted pixel in the current
+    /// sweep while the owner holds the film immutable. Publication still uses
+    /// sampling_identity/add/skip_one and must follow the exact owner cursor.
+    #[cfg(any(feature = "raytrace-cpu", test))]
+    pub(crate) fn sampling_identity_in_pass(&self, index: usize) -> Result<Option<SamplingIdentity>> {
+        if !self.ready() || self.stage == Stage::Reset || self.stage == Stage::Done || index < self.next_pixel || index >= self.count {
+            return Err(invalid("adaptive sampling needs an uncommitted pixel in the active sweep"));
+        }
+        self.identity_for_counts(self.counts.pixel(index)?)
+    }
+    fn identity_for_counts(&self, counts: PixelCounts) -> Result<Option<SamplingIdentity>> {
         if self.stage == Stage::Pilot {
             if self.completed >= self.options.pilot_samples {
                 return Err(invalid("complete pilots require an explicit production reset"));
             }
             return Ok(Some(SamplingIdentity { seed: self.seed ^ 0xa511_e9b3, ordinal: self.completed, stage: PreviewStage::Pilot }));
         }
-        if u32::from(counts.samples) >= u32::from(counts.planned) {
+        if counts.samples >= counts.planned {
             return Ok(None);
         }
         Ok(Some(SamplingIdentity { seed: self.seed, ordinal: self.completed, stage: PreviewStage::Production }))
@@ -262,11 +274,11 @@ impl AdaptiveCameraFilm {
         let mut moments = self.moments.get(index).copied().ok_or_else(|| invalid("adaptive moments disappeared"))?;
         let mut counts = self.counts.pixel(index)?;
         let samples = counts.samples.checked_add(1).ok_or_else(|| limit("adaptive sample count overflow"))?;
-        if u32::from(samples) != self.completed + 1 {
+        if samples != self.completed + 1 {
             return Err(invalid("adaptive pixel count disagrees with its active ordinal"));
         }
         let hits =
-            counts.covered.checked_add(u16::from(covered)).filter(|hits| *hits <= samples).ok_or_else(|| limit("adaptive coverage overflow"))?;
+            counts.covered.checked_add(u32::from(covered)).filter(|hits| *hits <= samples).ok_or_else(|| limit("adaptive coverage overflow"))?;
         if self.stage == Stage::Pilot {
             let value = [rgb[0], rgb[1], rgb[2], f64::from(u8::from(covered))];
             for ((mean, m2), value) in moments.value.iter_mut().zip(moments.m2.iter_mut()).zip(value) {
@@ -274,9 +286,8 @@ impl AdaptiveCameraFilm {
                 *mean += delta / f64::from(samples);
                 *m2 += delta * (value - *mean);
             }
-            if u32::from(samples) == self.options.pilot_samples {
-                counts.planned = u16::try_from(self.options.target(moments.value, moments.m2, self.maximum)?)
-                    .map_err(|_| limit("adaptive target exceeds exact count representation"))?;
+            if samples == self.options.pilot_samples {
+                counts.planned = self.options.target(moments.value, moments.m2, self.maximum)?;
             }
         } else {
             for (sum, value) in moments.value.iter_mut().take(3).zip(rgb) {
@@ -291,8 +302,8 @@ impl AdaptiveCameraFilm {
         // Accumulate bounded report metadata with the existing pixel transaction;
         // final publication never needs a synchronous image-sized report scan.
         let mut report = self.report.clone();
-        if self.stage == Stage::Pilot && u32::from(samples) == self.options.pilot_samples {
-            let target = u32::from(counts.planned);
+        if self.stage == Stage::Pilot && samples == self.options.pilot_samples {
+            let target = counts.planned;
             report.minimum_production_samples = report.minimum_production_samples.min(target);
             report.maximum_production_samples = report.maximum_production_samples.max(target);
             report.production_samples =
@@ -361,7 +372,7 @@ impl AdaptiveCameraFilm {
         let index = self.next_pixel;
         let moments = self.moments.get_mut(index).ok_or_else(|| invalid("adaptive reset index exceeds admission"))?;
         let counts = self.counts.values.get_mut(index).ok_or_else(|| invalid("adaptive reset count disappeared"))?;
-        if !(self.options.min_samples..=self.maximum).contains(&u32::from(counts.planned)) {
+        if !(self.options.min_samples..=self.maximum).contains(&counts.planned) {
             return Err(invalid("adaptive reset has no admitted production allocation"));
         }
         charge()?;
@@ -380,7 +391,7 @@ impl AdaptiveCameraFilm {
         if self.stage == Stage::Pilot && (self.next_pixel != 0 || self.completed != self.options.pilot_samples) {
             return Err(invalid("adaptive allocations require the complete pilot pass"));
         }
-        Ok(u32::from(self.counts.pixel(index)?.planned))
+        Ok(self.counts.pixel(index)?.planned)
     }
     pub fn report(&self) -> Result<SamplingReport> {
         if !self.is_final() {

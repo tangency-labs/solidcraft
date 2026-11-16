@@ -9,7 +9,7 @@ use crate::schema::{ParamCheck, input_schema_for, output_schema_for};
 
 #[test]
 fn schemas_and_the_key_check_agree() {
-    assert_keys(input_schema_for::<InsertMeshParams>(), &["folder", "name", "names", "origin", "path", "units", "up"]);
+    assert_keys(input_schema_for::<InsertMeshParams>(), &["crease_angle_degrees", "folder", "name", "names", "origin", "path", "units", "up"]);
 }
 
 #[test]
@@ -23,10 +23,12 @@ fn strict_keeps_todays_errors() {
         ("file.insert_mesh", json!({"path": null})),
         ("file.insert_mesh", json!({"path": long})),
         ("file.insert_mesh", json!({"up": "q", "units": "yd"})),
+        ("file.insert_mesh", json!({"crease_angle_degrees": "smooth"})),
         // The kind of file is refused before anything else is read.
         ("file.insert_mesh", json!({"path": "x.step"})),
         ("file.insert_mesh", json!({"path": "x.step", "up": "q", "units": 5, "origin": 1})),
         ("file.insert_mesh", json!({"path": "x.step", "name": 5})),
+        ("file.insert_mesh", json!({"path": "x.step", "crease_angle_degrees": "smooth"})),
         // `up` is for a glTF file only, whatever it says.
         ("file.insert_mesh", json!({"path": "x.stl", "up": "y"})),
         ("file.insert_mesh", json!({"path": "x.stl", "up": "q"})),
@@ -43,6 +45,10 @@ fn strict_keeps_todays_errors() {
         ("file.insert_mesh", json!({"path": "x.glb", "units": "mm"})),
         ("file.insert_mesh", json!({"path": "x.stl", "origin": "yes"})),
         ("file.insert_mesh", json!({"path": "x.stl", "origin": 1})),
+        ("file.insert_mesh", json!({"path": "x.obj", "crease_angle_degrees": -1})),
+        ("file.insert_mesh", json!({"path": "x.obj", "crease_angle_degrees": 181})),
+        ("file.insert_mesh", json!({"path": "x.obj", "crease_angle_degrees": "40"})),
+        ("file.insert_mesh", json!({"path": "x.obj", "crease_angle_degrees": true})),
         // The kind of file is read in any case, and a PLY file is a mesh too.
         ("file.insert_mesh", json!({"path": "X.GLB", "up": "q"})),
         ("file.insert_mesh", json!({"path": "X.STL", "up": "y"})),
@@ -72,6 +78,11 @@ fn the_types_read_each_key_as_the_handler_does() {
     assert_eq!(k.folder, Some(true));
     assert_eq!(k.units.map(|u| u.0), Some("in".to_string()));
     assert_eq!(k.origin, Some(false));
+    for angle in [0.0, -0.0, 40.5, 180.0] {
+        assert_eq!(keys(json!({"path": "a.obj", "crease_angle_degrees": angle})).crease_angle_degrees, Some(angle));
+    }
+    assert!(keys(json!({"path": "a.obj"})).crease_angle_degrees.is_none());
+    assert!(keys(json!({"path": "a.obj", "crease_angle_degrees": null})).crease_angle_degrees.is_none());
     assert_eq!(keys(json!({"path": "a.glb", "up": "Z"})).up, Some(UpAxis::Z));
     let none = keys(json!({"path": "a.stl", "name": null, "up": null, "names": null, "folder": null, "units": null, "origin": null}));
     assert!(none.name.is_none() && none.up.is_none() && none.units.is_none() && none.origin.is_none());
@@ -83,7 +94,7 @@ fn the_types_read_each_key_as_the_handler_does() {
         json!({"path": "a.glb", "names": 5, "folder": "x"}),
         json!({"path": "a.glb", "up": null, "names": 5, "folder": "x"}),
         json!({"path": "a.stl", "up": "sideways", "names": 5}),
-        json!({"path": "a.step", "up": 1, "names": 5, "folder": 5, "units": 5, "origin": 5}),
+        json!({"path": "a.step", "up": 1, "names": 5, "folder": 5, "units": 5, "origin": 5, "crease_angle_degrees": "smooth"}),
     ] {
         parse(p.clone()).unwrap_or_else(|e| panic!("{p}: {e}"));
     }
@@ -103,6 +114,9 @@ fn the_types_read_each_key_as_the_handler_does() {
         (json!({"path": "a.3mf", "units": []}), "`units` must be one of mm, cm, m, in, ft"),
         (json!({"path": "a.stl", "origin": "yes"}), "`origin` must be true"),
         (json!({"path": "a.glb", "up": "z", "folder": 0}), "`folder` must be true"),
+        (json!({"path": "a.obj", "crease_angle_degrees": -1}), "crease_angle_degrees must be between 0 and 180 degrees"),
+        (json!({"path": "a.obj", "crease_angle_degrees": 181}), "crease_angle_degrees must be between 0 and 180 degrees"),
+        (json!({"path": "a.obj", "crease_angle_degrees": "40"}), "crease_angle_degrees must be between 0 and 180 degrees"),
         (json!({}), "`path` is required"),
         (json!({"path": " "}), "`path` is required"),
         (json!({"up": "x", "path": 5}), "`path` is required"),
@@ -120,6 +134,10 @@ fn the_check_names_what_is_wrong() {
     assert_eq!(issues(json!({"path": "a.stl", "unit": "in"})), ["unknown key `unit`; did you mean `units`?"]);
     assert_eq!(issues(json!({"path": "a.stl", "units": "yd"})), ["`units` must be one of mm, cm, m, in, ft (not `yd`)"]);
     assert_eq!(issues(json!({"path": "a.stl", "name": 5})), ["`name` must be text"]);
+    assert_eq!(
+        issues(json!({"path": "a.obj", "crease_angle_degree": 40})),
+        ["unknown key `crease_angle_degree`; did you mean `crease_angle_degrees`?"]
+    );
     assert_eq!(issues(json!({})), ["`path` is required"]);
     // `name` is read as text or not at all; a number is ignored by the handler but is a mistake.
     assert_eq!(issues(json!({"path": "a.stl", "name": null})), Vec::<String>::new());
@@ -138,6 +156,10 @@ fn the_schema_takes_what_the_handler_reads() {
         (json!({"path": "a.glb", "up": "Y", "names": "Auto", "folder": true, "name": "N"}), true),
         (json!({"path": "a.stl", "units": "in", "origin": true}), true),
         (json!({"path": "a.stl", "units": null, "origin": null, "up": null}), true),
+        (json!({"path": "a.obj", "crease_angle_degrees": null}), true),
+        (json!({"path": "a.obj", "crease_angle_degrees": 0}), true),
+        (json!({"path": "a.obj", "crease_angle_degrees": 40.5}), true),
+        (json!({"path": "a.obj", "crease_angle_degrees": 180}), true),
         // Left unread, so not shaped.
         (json!({"path": "a.stl", "names": 5, "folder": "x"}), true),
         (json!({"path": "a.glb", "up": null, "names": 5, "folder": "x"}), true),
@@ -148,6 +170,10 @@ fn the_schema_takes_what_the_handler_reads() {
         (json!({"path": "a.stl", "folder": "x", "up": "y"}), false),
         (json!({"path": "a.glb", "up": "y", "names": 5}), false),
         (json!({"path": "a.stl", "name": 5}), false),
+        (json!({"path": "a.obj", "crease_angle_degrees": -1}), false),
+        (json!({"path": "a.obj", "crease_angle_degrees": 181}), false),
+        (json!({"path": "a.obj", "crease_angle_degrees": "40"}), false),
+        (json!({"path": "a.obj", "crease_angle_degrees": true}), false),
     ] {
         assert_eq!(conforms(schema, schema, &p), takes, "{p}");
     }
@@ -254,6 +280,9 @@ fn replies_match_the_output_schema() {
     assert_eq!(named["component_name"], "Block", "{named}");
     assert!(named["moved_to_origin"].as_array().is_some_and(|a| a.len() == 3), "{named}");
     run(json!({"path": stl, "units": "cm", "origin": false, "up": null, "name": null}));
+    for angle in [Value::Null, json!(0), json!(40.5), json!(180)] {
+        run(json!({"path": stl, "crease_angle_degrees": angle}));
+    }
     // Keys left unread, with values that would be refused if they were read.
     run(json!({"path": stl, "names": 5, "folder": "x"}));
     run(json!({"path": threemf, "names": [], "folder": {}}));
@@ -281,7 +310,14 @@ fn strict_runs_the_calls_that_work() {
     let (stl, _) = cube_files(&dir);
     let robot = glb(&dir);
     let mut s = Session { param_check: ParamCheck::Strict, ..Session::default() };
-    for p in [json!({"path": stl, "units": "mm"}), json!({"path": robot, "up": "y", "names": "auto", "folder": false})] {
+    for p in [
+        json!({"path": stl, "units": "mm"}),
+        json!({"path": stl, "crease_angle_degrees": null}),
+        json!({"path": stl, "crease_angle_degrees": 0}),
+        json!({"path": stl, "crease_angle_degrees": 40.5}),
+        json!({"path": stl, "crease_angle_degrees": 180}),
+        json!({"path": robot, "up": "y", "names": "auto", "folder": false}),
+    ] {
         s.execute("file.insert_mesh", &p).unwrap_or_else(|e| panic!("{p}: {e}"));
     }
     let e = s.execute("file.insert_mesh", &json!({"path": stl, "unit": "in"})).err().map(|e| e.to_string()).unwrap_or_default();

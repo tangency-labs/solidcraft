@@ -7,8 +7,8 @@
 use solidcraft_geom::prelude::*;
 use std::collections::HashSet;
 
+use solidcore_ops::pcurve::{SURFACE_GAP_MARGIN, TrimFace, Trims};
 use solidcore_record::brep::{self as b, Curve2, EdgeUseRef, Loop, OrientedEdge, OrientedFace, Region, Shell, Vertex};
-use solidcraft_geom::brep::pcurve::{SURFACE_GAP_MARGIN, TrimFace, Trims};
 
 /// [`Trims`] by SMLib.
 #[derive(Clone, Copy, Debug, Default)]
@@ -59,7 +59,10 @@ fn trims(face: &TrimFace<'_>) -> Result<Vec<Vec<Curve2>>, String> {
             let found = made_uses.iter().find(|m| m.edge as usize == e && m.forward == (u.forward != reversed));
             let pc = found.ok_or("a use SMLib did not keep")?.pcurve.clone();
             let tolerance = held.get(u.edge as usize).copied().unwrap_or(ours.tolerance).max(ours.tolerance);
-            pcs.push(on_our_interval(pc, ours, edge.interval, tolerance)?);
+            // How far each end may move: within its vertex's tolerance where the caller covers the
+            // gap ([`TrimFace::vertex_tolerances`]), else within the edge's.
+            let reach = ours.vertices.map(|v| face.vertex_tolerances.get(v as usize).copied().unwrap_or(0.0));
+            pcs.push(on_our_interval(pc, ours, edge.interval, tolerance, reach)?);
         }
         result.push(pcs);
     }
@@ -103,16 +106,20 @@ fn cover_gaps(body: &crate::Brep, face: &TrimFace<'_>, bare: &HashSet<(u32, u32,
 /// A pcurve SMLib made on its edge's interval `theirs`, on ours. SMLib may set an edge's end to
 /// a parameter of its own (a knot its vertex lies at, the end of the part on the face: where an
 /// edge runs past its face's patch, SMLib ends it where its drop onto the patch ends, when that
-/// is within the edge's cross-section tolerance of its vertex): where each end it chose is
-/// within `tolerance` of ours on the edge's curve (the edge's tolerance as SMLib held it,
-/// [`cover_gaps`]), the pcurve is mapped onto our interval by the affine change of parameter
-/// (exact for a B-spline: its knots move), and the record's check measures it against the edge
-/// as any pcurve. Farther is SMLib trimming the edge, refused with how far.
+/// is within the edge's cross-section tolerance of its vertex; where an edge's first few um lie
+/// across a closed patch's seam, SMLib drops that piece and starts the edge on the seam): where
+/// each end it chose is within `tolerance` of ours on the edge's curve (the edge's tolerance as
+/// SMLib held it, [`cover_gaps`]), or within `reach` of it (that end's vertex's tolerance, where
+/// the caller covers the gap the move makes, [`TrimFace::vertex_tolerances`]), the pcurve is
+/// mapped onto our interval by the affine change of parameter (exact for a B-spline: its knots
+/// move), and the record's check measures it against the edge as any pcurve. Farther is SMLib
+/// trimming the edge, refused with how far.
 pub(crate) fn on_our_interval(
     pc: Curve2,
-    ours: &solidcraft_geom::brep::pcurve::TrimEdge<'_>,
+    ours: &solidcore_ops::pcurve::TrimEdge<'_>,
     theirs: [f64; 2],
     tolerance: f64,
+    reach: [f64; 2],
 ) -> Result<Curve2, String> {
     let [a, b] = ours.interval;
     let [c, d] = theirs;
@@ -121,10 +128,12 @@ pub(crate) fn on_our_interval(
     }
     let curve = solidcraft_geom::brep::eval::CurveEval::new(ours.nurbs.unwrap_or(ours.curve)).map_err(|e| e.to_string())?;
     let at = |t: f64| curve.point(t).ok_or_else(|| format!("the edge's curve has no point at {t}"));
-    let shift = at(a)?.dist(at(c)?).max(at(b)?.dist(at(d)?));
-    if !(shift <= tolerance) || !(d > c) {
+    let moved = [at(a)?.dist(at(c)?), at(b)?.dist(at(d)?)];
+    let within = moved.iter().zip(reach).all(|(m, r)| *m <= tolerance.max(r));
+    if !within || !(d > c) {
+        let shift = moved[0].max(moved[1]);
         return Err(format!(
-            "SMLib moved an edge's interval from {:?} to {:?}, its ends {shift} mm along its curve (tolerance {tolerance} mm)",
+            "SMLib moved an edge's interval from {:?} to {:?}, its ends {shift} mm along its curve (tolerance {tolerance} mm, its vertices' {reach:?} mm)",
             ours.interval, theirs
         ));
     }

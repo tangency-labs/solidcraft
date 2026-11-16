@@ -1,5 +1,5 @@
-//! Fork tangency-labs/smlib@37af643 under `Kernel::fixes.offset_keep_cavity_regions`
-//! (WR-667): an inset keeps the regions that are cavity, not every finite region.
+//! Fork tangency-labs/smlib@37af643 (WR-667), the kernel's default: an inset keeps the
+//! regions that are cavity, not every finite region.
 //!
 //! SolidCraft rig case shell/545's frame, rebuilt from the commit message: a 20 x 20 x 5
 //! block with a recess from the top ((5, 5)..(15, 15), z 3..5) and a square ring cut from
@@ -8,7 +8,7 @@
 //! edges, merged) open at the ring cut's outer wall x = 18: the floor is no thicker than
 //! the wall, its two faces' offsets cross, and the merge closes the region between them.
 //! Upstream's `MakeManifold` keeps every finite region ("we will need to select regions
-//! to keep"), so the result is no manifold solid. With the flag only the cavity is kept.
+//! to keep"), so the result is no manifold solid. The kernel keeps only the cavity.
 //!
 //! Closed form (sharp offsets, the open face's neighbours' walls ending at its plane):
 //! the cavity is z 0.5..2.5 over the core (7.5..12.5)^2 and the outer band
@@ -27,15 +27,14 @@ mod offset_fixture;
 
 use offset_fixture::{planar_faces_at, volume, Notifications};
 use solidcore::boolean::api_brep::boolean_difference;
-use solidcore::error::offset::{OffsetFailure, Unsoundness};
-use solidcore::error::Reason;
 use solidcore::kernel::UpstreamFixes;
 use solidcore::math::Point3;
 use solidcore::offset::offset_executive::p1::OffsetExecutive;
 use solidcore::offset::offset_executive::p2::{OffsetOptions, ShellOptions};
 use solidcore::primitive::api_primitives::create_box;
 use solidcore::query::api_queries::brep_is_manifold_solid;
-use solidcore::{Brep, Kernel, SolidError};
+use solidcore::topology::brep::validation::{check_brep, CheckLevel};
+use solidcore::{Brep, Kernel};
 
 /// The frame, the ring cut's top at `ring_top` (2.5: a 0.5 floor under the recess).
 fn frame(k: &mut Kernel, ring_top: f64) -> Brep {
@@ -46,6 +45,18 @@ fn frame(k: &mut Kernel, ring_top: f64) -> Brep {
     let ring = boolean_difference(k, outer, inner).unwrap();
     let recessed = boolean_difference(k, block, recess).unwrap();
     boolean_difference(k, recessed, ring).unwrap()
+}
+
+fn shell_options() -> ShellOptions {
+    ShellOptions {
+        offset: OffsetOptions {
+            distance: -0.5,
+            extend_convex_edges: true,
+            merge_results: true,
+        },
+        create_offset_solid: true,
+        merge_sheet_side_walls: true,
+    }
 }
 
 /// The frame shelled 0.5 inward open at the ring cut's outer wall (x = 18), under
@@ -61,15 +72,7 @@ fn shell_result(fixes: &UpstreamFixes, ring_top: f64) -> (Kernel, solidcore::Res
     let mut wall = OffsetExecutive::shell_brep(
         &mut k,
         part,
-        ShellOptions {
-            offset: OffsetOptions {
-                distance: -0.5,
-                extend_convex_edges: true,
-                merge_results: true,
-            },
-            create_offset_solid: true,
-            merge_sheet_side_walls: true,
-        },
+        shell_options(),
         &open,
         &mut notifications.context(),
     )
@@ -89,58 +92,28 @@ fn shell(fixes: &UpstreamFixes, ring_top: f64) -> (bool, f64) {
     (manifold, volume(&k, &mut wall).unwrap())
 }
 
-fn keep_cavity() -> UpstreamFixes {
-    let mut f = UpstreamFixes::default();
-    f.offset_keep_cavity_regions = true;
-    f
-}
-
-/// Upstream (flag off): the sliver between the floor's crossing offsets is kept too and
-/// the result is no manifold solid (five regions, eight edges that are not manifold); the
-/// shell refuses it (`OffsetFailure::Unsound`, `NotManifoldSolid`, #3094) instead of
-/// returning it.
+/// Only the cavity is made manifold; the shell is the closed form and passes `check_brep`
+/// at every level.
 #[test]
-fn flag_off_refuses_the_shell_with_the_sliver_region() {
-    let (_, result) = shell_result(&UpstreamFixes::default(), 2.5);
-    let error = result.unwrap_err();
-    let SolidError::Failed(failure) = &error else {
-        panic!("not a refusal: {error}");
-    };
-    assert_eq!(
-        failure.reason,
-        Reason::Offset(OffsetFailure::Unsound {
-            what: Unsoundness::NotManifoldSolid
-        })
-    );
-}
-
-/// The flag: only the cavity is made manifold; the shell is the closed form.
-#[test]
-fn flag_on_keeps_only_the_cavity() {
-    let (manifold, v) = shell(&keep_cavity(), 2.5);
+fn keeps_only_the_cavity() {
+    let (mut k, wall) = shell_result(&UpstreamFixes::default(), 2.5);
+    let mut wall = wall.unwrap();
+    for level in [CheckLevel::Level0, CheckLevel::Level1, CheckLevel::Level2] {
+        let checked = check_brep(&mut k, &mut wall, level).unwrap();
+        assert!(checked.is_valid(), "{level:?}: {:?}", checked.lines());
+    }
+    let (manifold, v) = shell(&UpstreamFixes::default(), 2.5);
     assert!(manifold);
     assert!((v - 638.75).abs() <= 1e-9 * 638.75, "{v}");
 }
 
-/// With the SolidCraft set's offset fixes that touch this path as well (WR-345's crossing
-/// loops, WR-455's one-pass stitch), the flag gives the same shell.
+/// Control: a 1.0 floor (ring top at 2) has no crossing offsets and one finite region, so
+/// there is nothing to select. Closed form as above: the body is 2000 - 200 - 220 x 2 =
+/// 1360; the cavity is z 0.5..2.5 over the core and the band ((25 + 80.5) x 2: 211) and
+/// z 2.5..4.5 over (0.5..19.5)^2 less the recess walls (240 x 2: 480), 691; a shell of 669.
 #[test]
-fn flag_on_with_offset_fixes() {
-    let mut fixes = keep_cavity();
-    fixes.offset_resolve_crossing_loops = true;
-    fixes.offset_stitch_at_body_tolerance = true;
-    fixes.offset_extended_edges_mated = true;
-    let (manifold, v) = shell(&fixes, 2.5);
+fn thicker_floor_is_the_closed_form() {
+    let (manifold, v) = shell(&UpstreamFixes::default(), 2.0);
     assert!(manifold);
-    assert!((v - 638.75).abs() <= 1e-9 * 638.75, "{v}");
-}
-
-/// Control: a 1.0 floor (ring top at 2) has no crossing offsets, one finite region, and
-/// shells the same with the flag off and on.
-#[test]
-fn thicker_floor_is_unchanged() {
-    let off = shell(&UpstreamFixes::default(), 2.0);
-    let on = shell(&keep_cavity(), 2.0);
-    assert!(off.0 && on.0);
-    assert_eq!(off.1.to_bits(), on.1.to_bits());
+    assert!((v - 669.0).abs() <= 1e-9 * 669.0, "{v}");
 }

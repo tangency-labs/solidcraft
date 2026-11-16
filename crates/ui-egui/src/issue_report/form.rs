@@ -114,7 +114,7 @@ pub(super) fn show(app: &mut SolveApp, draft: &mut Draft, ctx: &egui::Context) -
     // the header's close button remains available when the redundant closing action is omitted.
     let actions_width = ctx.fonts_mut(|fonts| {
         [
-            ("Open GitHub issue form", crate::fonts::bold(t.font_label), t.space_16),
+            ("Open GitHub issue form", crate::ui_kit::type_face::bold(t.font_label), t.space_16),
             ("Copy report", egui::FontId::proportional(t.font_label), t.space_12),
             ("Close draft", egui::FontId::proportional(t.font_label), t.space_12),
         ]

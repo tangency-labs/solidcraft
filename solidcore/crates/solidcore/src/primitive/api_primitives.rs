@@ -147,8 +147,9 @@ pub fn create_plane(k: &mut Kernel, origin: Point3, x: f64, y: f64) -> Result<Br
     let frame = xy_frame(origin);
     let mut brep = p1::create_rectangle(k, 1.0e-5, x, y, &frame)?;
     if brep.face_list().is_empty() {
-        return Err(SolidError::sm_err(
+        return Err(SolidError::primitive_failed(
             "primitive::api_primitives::create_plane",
+            "the rectangle has no face",
         ));
     }
     // (not upstream: the port's cached topology fields, true for the caller)
@@ -181,8 +182,9 @@ pub fn create_planar_circle(k: &mut Kernel, origin: Point3, radius: f64) -> Resu
     let frame = xy_frame(origin);
     let mut brep = p1::create_circle(k, 1.0e-5, radius, &frame)?;
     if brep.face_list().is_empty() {
-        return Err(SolidError::sm_err(
+        return Err(SolidError::primitive_failed(
             "primitive::api_primitives::create_planar_circle",
+            "the disc has no face",
         ));
     }
     // (not upstream: the port's cached topology fields, true for the caller)
@@ -1059,7 +1061,13 @@ mod tests {
     #[test]
     fn blend_success_can_return_a_face_or_no_face() {
         let mut k = Kernel::default();
-        for (edge2_index, face2_index, has_face) in [(3, 2, false), (2, 2, true), (1, 1, true)] {
+        // (1, 1): edges 0 and 1 of face 1 meet at a corner, where the reference curve
+        // point lies on the boundary curve, so the blend surface's `GetSampleValues`
+        // fails. Upstream drops that status and skins samples the failure left unset; the
+        // fork passes it on (`SER( pDSDef->GetSampleValues(..) )`, tangency-labs/smlib
+        // 21dcf69, WR-663), so no blend surface is made, and the edge-use overload's
+        // status is ignored here as upstream: success with no face.
+        for (edge2_index, face2_index, has_face) in [(3, 2, false), (2, 2, true), (1, 1, false)] {
             let mut brep = create_box(&mut k, Vec3::ZERO, 1.0, 1.0, 1.0).unwrap();
             let edges = crate::topology::brep::p1::edges(&brep, None).unwrap();
             let faces = crate::topology::brep::p1::faces(&brep, None).unwrap();

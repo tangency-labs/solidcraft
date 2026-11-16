@@ -20,7 +20,7 @@ use std::f64::consts::{PI, TAU};
 
 use solidcore_record::Vec3;
 
-use crate::surface::{MIN_ROUGHNESS, OpaqueSurface, SurfaceError, unit_direction};
+use solidcraft_viewport::surface::{MIN_ROUGHNESS, OpaqueSurface, SurfaceError, unit_direction};
 
 /// Admission or finite-arithmetic failure in the anisotropic numerical contract.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

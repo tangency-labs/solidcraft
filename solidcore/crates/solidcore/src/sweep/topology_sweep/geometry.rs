@@ -45,7 +45,10 @@ impl SweepGeometry {
         match self {
             Self::Translation(g) => g.end_coord_system(point),
             Self::Rotation(g) => g.end_coord_system(point),
-            Self::Base(_) => Err(SolidError::sm_err(OP)),
+            Self::Base(_) => Err(SolidError::sweep_failed(
+                OP,
+                "the base sweep geometry builds no geometry",
+            )),
         }
     }
 
@@ -62,7 +65,10 @@ impl SweepGeometry {
         match self {
             Self::Translation(g) => g.start_coord_system(point),
             Self::Rotation(g) => g.start_coord_system(point),
-            Self::Base(_) => Err(SolidError::sm_err(OP)),
+            Self::Base(_) => Err(SolidError::sweep_failed(
+                OP,
+                "the base sweep geometry builds no geometry",
+            )),
         }
     }
 
@@ -71,7 +77,10 @@ impl SweepGeometry {
         match self {
             Self::Translation(g) => Ok(g.sweep_transform()),
             Self::Rotation(g) => Ok(g.sweep_transform()),
-            Self::Base(_) => Err(SolidError::sm_err(OP)),
+            Self::Base(_) => Err(SolidError::sweep_failed(
+                OP,
+                "the base sweep geometry builds no geometry",
+            )),
         }
     }
 
@@ -80,7 +89,10 @@ impl SweepGeometry {
         match self {
             Self::Translation(g) => g.vertex_sweep_same(b, v),
             Self::Rotation(g) => g.vertex_sweep_same(b, v),
-            Self::Base(_) => Err(SolidError::sm_err(OP)),
+            Self::Base(_) => Err(SolidError::sweep_failed(
+                OP,
+                "the base sweep geometry builds no geometry",
+            )),
         }
     }
 
@@ -95,7 +107,10 @@ impl SweepGeometry {
                 )))
             }
             Self::Rotation(g) => g.vertex_sweep_higher(b, v),
-            Self::Base(_) => Err(SolidError::sm_err(OP)),
+            Self::Base(_) => Err(SolidError::sweep_failed(
+                OP,
+                "the base sweep geometry builds no geometry",
+            )),
         }
     }
 
@@ -104,7 +119,10 @@ impl SweepGeometry {
         match self {
             Self::Translation(g) => g.edge_sweep_same(k, b, e),
             Self::Rotation(g) => g.edge_sweep_same(k, b, e),
-            Self::Base(_) => Err(SolidError::sm_err(OP)),
+            Self::Base(_) => Err(SolidError::sweep_failed(
+                OP,
+                "the base sweep geometry builds no geometry",
+            )),
         }
     }
 
@@ -118,7 +136,10 @@ impl SweepGeometry {
         match self {
             Self::Translation(g) => g.face_sweep_same(k, b, f).map(Some),
             Self::Rotation(g) => g.face_sweep_same(k, b, f),
-            Self::Base(_) => Err(SolidError::sm_err(OP)),
+            Self::Base(_) => Err(SolidError::sweep_failed(
+                OP,
+                "the base sweep geometry builds no geometry",
+            )),
         }
     }
 
@@ -126,7 +147,10 @@ impl SweepGeometry {
     pub fn edge_sweep_higher(&self, k: &Kernel, b: &Brep, e: EdgeId) -> Result<EdgeSweepHigher> {
         match self {
             Self::Rotation(g) => g.edge_sweep_higher(k, b, e),
-            Self::Base(_) => Err(SolidError::sm_err(OP)),
+            Self::Base(_) => Err(SolidError::sweep_failed(
+                OP,
+                "the base sweep geometry builds no geometry",
+            )),
             Self::Translation(g) => {
                 let r = g.edge_sweep_higher(k, b, e)?;
                 Ok(EdgeSweepHigher {
@@ -137,19 +161,19 @@ impl SweepGeometry {
                         .curve_tolerances
                         .first()
                         .copied()
-                        .ok_or(SolidError::sm_err(OP))?,
+                        .ok_or_else(|| SolidError::sweep_failed(OP, "the translational edge sweep has no tolerance for one of its curves"))?,
                     far_end_curve: Some(2),
                     edge_tol: r
                         .curve_tolerances
                         .get(2)
                         .copied()
-                        .ok_or(SolidError::sm_err(OP))?,
+                        .ok_or_else(|| SolidError::sweep_failed(OP, "the translational edge sweep has no tolerance for one of its curves"))?,
                     start_vert_curve: Some(r.start_vertex_curve),
                     start_vert_edge_tol: r
                         .curve_tolerances
                         .get(r.start_vertex_curve)
                         .copied()
-                        .ok_or(SolidError::sm_err(OP))?,
+                        .ok_or_else(|| SolidError::sweep_failed(OP, "the translational edge sweep has no tolerance for one of its curves"))?,
                     end_vert_curve: r.end_vertex_curve,
                     end_vert_edge_tol: r
                         .end_vertex_curve

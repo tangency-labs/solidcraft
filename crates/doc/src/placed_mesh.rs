@@ -162,8 +162,22 @@ impl ModelBody {
         if same_triangles(&self.body, &old.body) {
             self.mesh = old.mesh.clone();
             self.plan = old.plan.clone();
+            self.gpu_plan = old.gpu_plan.clone();
             self.plan_mesh = old.plan_mesh.clone();
             self.opposite_hand = old.opposite_hand.clone();
+        }
+    }
+
+    /// Draw this body, which is `old` moved by `transform` (a body moved to another component),
+    /// from `old`'s triangles and display plans: the very ones for the identity, moved for
+    /// another rigid motion. Moving a pattern of bodies then meshes none of them again.
+    pub(crate) fn drawn_as_moved(&mut self, old: &ModelBody, transform: &crate::Mat) {
+        if crate::is_identity(transform) && same_triangles(&self.body, &old.body) {
+            self.keep_meshes_of(old);
+            self.mesh_placement = old.mesh_placement.clone();
+            self.mirrored_mesh = old.mirrored_mesh.clone();
+        } else {
+            self.mesh_placement = PlacedMesh::new(old, transform).map(Arc::new);
         }
     }
 }
@@ -293,6 +307,7 @@ fn proper_rigid(m: &crate::Mat) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use solidcraft_geom::tess::EvaluateMesh as _;
 
     #[test]
     fn mesh_outlines_keep_boundaries_and_creases_without_smooth_facet_lines() {
@@ -433,10 +448,10 @@ mod tests {
             let plans: Vec<_> = placed.iter().map(|p| p.display_plan_at(q).unwrap()).collect();
             assert!(source.plan.get(q.index()).unwrap().get().is_some(), "placing plans the definition, in its own cell");
             let own = source.display_plan_at(q).unwrap();
-            let local = own.evaluate();
+            let local = own.evaluate_mesh();
             for (m, plan) in [a, b].iter().zip(&plans) {
                 assert!(!Arc::ptr_eq(plan, &own));
-                let moved = plan.evaluate();
+                let moved = plan.evaluate_mesh();
                 assert_eq!(moved.triangles, local.triangles);
                 for (p, q) in local.positions.iter().zip(&moved.positions) {
                     assert!(crate::apply_point(m, *p).dist(*q) < 1e-9, "{p:?} -> {q:?}");

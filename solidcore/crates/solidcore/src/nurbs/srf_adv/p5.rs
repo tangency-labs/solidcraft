@@ -20,7 +20,7 @@
 //!   `rail` are `Option<[Option<_>; 2]>` (upstream's `NULL` array and `NULL`
 //!   entries), `ts` and `kns` are `Option<Vec<f64>>` (`kns` holds all knots of the
 //!   skinning direction).
-//! - Errors are [`SolidError::Nlib`] values with the upstream `NL_*_ERR` number. When
+//! - Errors are [`SolidError::Failed`] values (a [`NurbsFailure`] reason) with the upstream `NL_*_ERR` number. When
 //!   the surface's weights are invalid upstream returns `NL_WEI_ERR` with the surface
 //!   built; the Rust function returns only the error.
 //! - With derivative surfaces and [`Direction::UV`] upstream uses an uninitialised
@@ -42,7 +42,7 @@
 //!   `cmp` says so, rails that are not compatible with each other, too few `ts`
 //!   values) the function returns [`SolidError::InvalidInput`].
 
-use crate::error::{NlibCode, Result, SolidError};
+use crate::error::{nurbs::NurbsFailure, Result, SolidError};
 use crate::math::Vec3;
 use crate::nurbs::basis_adv::insert_knots;
 use crate::nurbs::crv_basic::{cross_bound_deriv_crv_non_rat_srf, Boundary, Curve};
@@ -51,7 +51,7 @@ use crate::nurbs::crv_fit::p1::{
     DerivEnd, ParamMethod,
 };
 use crate::nurbs::crv_fit::p2::{calc_matrix, cpts_with_matrix, deriv_matrix, MatrixEnds};
-use crate::nurbs::crv_tool::p2::make_compatible_knot_tol_traced;
+use crate::nurbs::crv_tool::p2::{make_compatible_knot_tol_mapped, KnotMap};
 use crate::nurbs::funcs_basic::CurveFunction;
 use crate::nurbs::geom::{cpts_are_colinear, dist_cpolygon, dist_pt_pt, ColinearDim};
 use crate::nurbs::index;
@@ -181,7 +181,7 @@ fn oob() -> SolidError {
 }
 
 fn bad_input() -> SolidError {
-    SolidError::nlib(OP, NlibCode::Input)
+    SolidError::nurbs(OP, NurbsFailure::Input)
 }
 
 /// `v[i]`.
@@ -307,14 +307,29 @@ fn adjust_cols(
 ///
 /// # Errors
 ///
-/// [`NlibCode::Input`] for rails without `ts`, a cross section missing a rail by more
+/// [`NurbsFailure::Input`] for rails without `ts`, a cross section missing a rail by more
 /// than `NL_MTOL`, derivative data not G1 (C1) with the rails, too few cross sections
-/// for the degree, or a `kns` of the wrong size; [`NlibCode::Weight`] for weights out of
+/// for the degree, or a `kns` of the wrong size; [`NurbsFailure::Weight`] for weights out of
 /// range in the input or the result; errors of the called routines; `InvalidInput`
 /// for an empty `cur` and the cases listed in the module notes.
 pub fn create_skin_srf_boundary_continuity(
     cur: &mut [Curve],
     opt: &mut SkinBoundaryOptions,
+) -> Result<Surface> {
+    create_skin_srf_boundary_continuity_mapped(cur, opt, None)
+}
+
+/// [`create_skin_srf_boundary_continuity`], also composing into `maps` (one per curve of
+/// `cur`, when given) where each section's knots went when it makes the sections compatible
+/// ([`KnotMap`]). The surface is the one made without `maps`.
+///
+/// # Errors
+///
+/// Those of [`create_skin_srf_boundary_continuity`].
+pub(crate) fn create_skin_srf_boundary_continuity_mapped(
+    cur: &mut [Curve],
+    opt: &mut SkinBoundaryOptions,
+    maps: Option<&mut [Option<KnotMap>]>,
 ) -> Result<Surface> {
     use Boundary::{Bottom, Left, Right, Top};
     let k = dec1(cur.len())?;
@@ -877,7 +892,18 @@ pub fn create_skin_srf_boundary_continuity(
                 extra.push(1);
             }
         }
-        let res = make_compatible_knot_tol_traced(&mut all, 0.0);
+        // (the maps: the sections', then the derivative curves', which are not kept)
+        let mut all_maps: Option<Vec<Option<KnotMap>>> = maps.is_some().then(|| {
+            all.iter()
+                .map(|c| Some(KnotMap::identity(c.knots())))
+                .collect()
+        });
+        let res = make_compatible_knot_tol_mapped(&mut all, 0.0, all_maps.as_deref_mut());
+        if let (Some(m), Some(made)) = (maps, all_maps) {
+            for (map, step) in m.iter_mut().zip(made) {
+                KnotMap::follow(map, step);
+            }
+        }
         let mut it = all.into_iter();
         for c in cur.iter_mut() {
             if let Some(x) = it.next() {
@@ -1380,13 +1406,7 @@ mod tests {
             ..SkinBoundaryOptions::default()
         };
         let e = create_skin_srf_boundary_continuity(&mut cs, &mut opt).unwrap_err();
-        assert!(matches!(
-            e,
-            SolidError::Nlib {
-                code: NlibCode::Input,
-                ..
-            }
-        ));
+        assert!(matches!(e.nurbs_failure(), Some(NurbsFailure::Input)));
         let mut opt = SkinBoundaryOptions {
             deg: 5,
             ..SkinBoundaryOptions::default()

@@ -58,7 +58,7 @@ mod vertex;
 use std::borrow::Cow;
 use std::collections::BTreeMap;
 
-use super::{object_info, validate_pointers, Object, SUCCESS};
+use super::{object_info, validate_pointers, validate_pointers_excluding, Object, SUCCESS};
 use crate::error::{EntityRef, Result, SolidError};
 use crate::geom::assert_array::{
     obj_type_string, AssertArray, AssertReport, ObjectKey, ReportSpec,
@@ -102,6 +102,24 @@ impl CheckLevel {
     pub const fn code(self) -> u8 {
         self as u8
     }
+}
+
+/// What a check holds the tolerance pass to ([`check_brep_scoped`], [`assert_valid_scoped`]).
+///
+/// [`ValidityScope::Body`] is the rule for every body: a vertex's gaps to its edges and faces
+/// within half its tolerance, an edge's gap to its faces within its tolerance. A body a stitch
+/// produced ([`ValidityScope::Stitched`]) may also carry a gap past those, up to the sum of the
+/// two zones it spans (vertex and edge, vertex and face, edge and face), where the tolerance ball
+/// that covers it is proven to reach no topology it does not bound
+/// ([`pointers::vertex_ball_reaches`], [`pointers::edge_tube_reaches`]: boxes, never samples; a
+/// proof that cannot be made leaves the gap reported).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ValidityScope {
+    /// The rule for every body.
+    #[default]
+    Body,
+    /// A body a stitch produced.
+    Stitched,
 }
 
 /// The result of [`check_brep`]: the pointer check, then (when it found nothing) the
@@ -327,6 +345,20 @@ fn report_line(r: &AssertReport) -> String {
 /// builder's identities to [`check_brep_with_keys`]); those of
 /// [`check_brep_with_keys`].
 pub fn check_brep(k: &mut Kernel, b: &mut Brep, level: CheckLevel) -> Result<BrepCheck> {
+    check_brep_scoped(k, b, level, ValidityScope::Body)
+}
+
+/// [`check_brep`] holding the tolerance pass to `scope`.
+///
+/// # Errors
+///
+/// As [`check_brep`].
+pub fn check_brep_scoped(
+    k: &mut Kernel,
+    b: &mut Brep,
+    level: CheckLevel,
+    scope: ValidityScope,
+) -> Result<BrepCheck> {
     let naming = b.naming();
     if naming == NamingScheme::Unknown {
         return Err(SolidError::invalid_input(
@@ -338,7 +370,7 @@ pub fn check_brep(k: &mut Kernel, b: &mut Brep, level: CheckLevel) -> Result<Bre
     let recorded = b.geometry_owner_keys().clone();
     let keys =
         |e: EntityRef| crate::topology::owner_identity_of(naming, recorded.get(&e).copied(), e);
-    check_brep_with_keys(k, b, level, &keys)
+    check_brep_with_keys_scoped(k, b, level, &keys, scope)
 }
 
 /// The capi `smlib_brep_check(brep, level)`: [`validate_pointers`] at `level` (its
@@ -356,6 +388,21 @@ pub fn check_brep_with_keys(
     level: CheckLevel,
     keys: &dyn Fn(EntityRef) -> ObjectRef,
 ) -> Result<BrepCheck> {
+    check_brep_with_keys_scoped(k, b, level, keys, ValidityScope::Body)
+}
+
+/// [`check_brep_with_keys`] holding the tolerance pass to `scope`.
+///
+/// # Errors
+///
+/// As [`check_brep_with_keys`].
+pub fn check_brep_with_keys_scoped(
+    k: &mut Kernel,
+    b: &mut Brep,
+    level: CheckLevel,
+    keys: &dyn Fn(EntityRef) -> ObjectRef,
+    scope: ValidityScope,
+) -> Result<BrepCheck> {
     let mut pointer_reports = AssertArray::new();
     let pointers_status =
         validate_pointers(k, b, Some(&mut pointer_reports), level.code(), false, keys)?;
@@ -363,13 +410,14 @@ pub fn check_brep_with_keys(
     let assert_valid = if pointer_reports.reports().iter().any(|r| !r.ok) {
         None
     } else {
-        Some(assert_valid(
+        Some(assert_valid_scoped(
             k,
             b,
             Some(&mut reports),
             level.code(),
             true,
             keys,
+            scope,
         )?)
     };
     Ok(BrepCheck {
@@ -401,6 +449,23 @@ pub fn assert_valid(
     walk: bool,
     keys: &dyn Fn(EntityRef) -> ObjectRef,
 ) -> Result<bool> {
+    assert_valid_scoped(k, b, reports, level, walk, keys, ValidityScope::Body)
+}
+
+/// [`assert_valid`] holding the tolerance pass to `scope`.
+///
+/// # Errors
+///
+/// As [`assert_valid`].
+pub fn assert_valid_scoped(
+    k: &mut Kernel,
+    b: &mut Brep,
+    reports: Option<&mut AssertArray>,
+    level: u8,
+    walk: bool,
+    keys: &dyn Fn(EntityRef) -> ObjectRef,
+    scope: ValidityScope,
+) -> Result<bool> {
     if level > LEVEL_GIVEN {
         return Err(super::invalid("invalid assert test level"));
     }
@@ -409,6 +474,7 @@ pub fn assert_valid(
         rep: Rep {
             array: reports,
             level,
+            stitched: scope == ValidityScope::Stitched,
         },
         keys,
         index,
@@ -422,19 +488,19 @@ pub use brep::ToleranceGaps;
 /// `SmBrep::ValidateAndUpdateTolerances(bValidateOnly, rbTolerancesViolatedOrUpdated,
 /// .., pAList, eTestLevel)`: for every face's upward-faceuse edge use (an edge use and
 /// its mate once) the vertex/edge and vertex/face gaps at both ends and the edge/face
-/// gap. Unless `validate_only`, a vertex with a gap over its tolerance (over half of
-/// it with [`crate::kernel::UpstreamFixes::validate_tolerances_fixes_reported_gaps`],
-/// WR-679) is grown to twice its larger gap, and an edge with an edge/face gap over its
-/// tolerance is grown (with its vertices) to twice the gap when the gap is under the
-/// B-rep's box diagonal / 800; tolerances only grow. The gaps still over half the vertex
-/// tolerance (tests 0-3) or over the edge tolerance (test 4) are then reported into
-/// `reports` (list 2 of `SmBrep`, about the edge use) at `level` (0..4), in native
-/// order. Returns whether a gap was over its tolerance and the largest vertex gaps.
+/// gap. Unless `validate_only`, a vertex with a gap over half its tolerance (not upstream,
+/// WR-679: upstream takes the whole tolerance) is grown to twice its larger gap, and an
+/// edge with an edge/face gap over its tolerance is grown (with its vertices) to twice the
+/// gap when the gap is under the B-rep's box diagonal / 800; tolerances only grow. The
+/// gaps still over half the vertex tolerance (tests 0-3) or over the edge tolerance (test
+/// 4) are then reported into `reports` (list 2 of `SmBrep`, about the edge use) at
+/// `level` (0..4), in native order. Returns whether a gap was over its tolerance and the largest vertex gaps.
 ///
 /// # Errors
 ///
-/// [`SolidError::Upstream`] (`SM_ERR`) for an edge use end without vertex (upstream's
-/// `NER`, after the reports and updates of the earlier edge uses);
+/// [`crate::error::topology::TopologyFailure::Failed`] (`SM_ERR`) for an edge use end
+/// without vertex (upstream's `NER`, after the reports and updates of the earlier edge
+/// uses);
 /// [`SolidError::InvalidInput`] for a level above 4 or broken topology links upstream
 /// would dereference; those of the gap and bounding box computations.
 pub fn validate_and_update_tolerances(
@@ -450,11 +516,13 @@ pub fn validate_and_update_tolerances(
     let mut rep = Rep {
         array: reports,
         level,
+        stitched: false,
     };
     let (status, gaps) = brep::validate_and_update(k, b, &mut rep, validate_only)?;
     if status != SUCCESS {
-        return Err(SolidError::sm_err(
+        return Err(SolidError::topology_failed(
             "topology::brep::validation::validate_and_update_tolerances",
+            "an edge use's vertex use has no vertex",
         ));
     }
     Ok(gaps)
@@ -512,6 +580,8 @@ impl Cx<'_> {
 struct Rep<'a> {
     array: Option<&'a mut AssertArray>,
     level: u8,
+    /// The tolerance pass runs under [`ValidityScope::Stitched`].
+    stitched: bool,
 }
 
 /// The key of a curve or surface object (see the `seams` key note): the shim's
@@ -660,6 +730,39 @@ mod class {
 mod tests {
     use super::*;
     use crate::geom::assert_array::labels::BREP_TYPE;
+
+    /// An edge use end without vertex makes the tolerance update an `SM_ERR` that says
+    /// so.
+    #[test]
+    fn an_edge_use_end_without_vertex_is_a_typed_failure() {
+        let mut k = Kernel::default();
+        let mut b = crate::primitive::api_primitives::create_box(
+            &mut k,
+            crate::math::Point3::ZERO,
+            1.0,
+            1.0,
+            1.0,
+        )
+        .unwrap();
+        let e = b.edge_list()[0];
+        let eu = b.edge(e).unwrap().edgeuses[0];
+        let vu = crate::topology::edgeuse::p1::vertexuse(&b, eu)
+            .unwrap()
+            .unwrap();
+        b.vertexuse_mut(vu).unwrap().vertex = None;
+        let err = validate_and_update_tolerances(&mut k, &mut b, true, None, 0).unwrap_err();
+        assert_eq!(err.upstream_status(), Some(crate::error::SM_ERR), "{err:?}");
+        assert_eq!(
+            err.operation(),
+            "topology::brep::validation::validate_and_update_tolerances"
+        );
+        assert_eq!(
+            err.topology_failure(),
+            Some(&crate::error::topology::TopologyFailure::Failed(
+                "an edge use's vertex use has no vertex"
+            ))
+        );
+    }
 
     /// A `SmBrep::AssertValid` check (`assert_valid`) whose list holds the failed report
     /// of `SmBrep` test `index` (list 0) with owner type `owner`.

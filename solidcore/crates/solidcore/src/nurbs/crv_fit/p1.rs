@@ -41,7 +41,7 @@
 //!   cannot occur), control points as `Vec<CPoint>`. Entries upstream leaves
 //!   unwritten in a caller buffer (interior parameters when the total chord length
 //!   is at most [`PTOL`], interior knots of [`knot_vector_deriv`] for `p == 0`) are
-//!   `0.0`. Errors are [`SolidError::Nlib`] values with the upstream `NL_*_ERR`
+//!   `0.0`. Errors are [`SolidError::Failed`] values (a [`NurbsFailure`] reason) with the upstream `NL_*_ERR`
 //!   number; outputs upstream leaves partly written on error are not returned.
 //! - Upstream's 2D work arrays and banded matrices are single row-major blocks, and
 //!   the port indexes them the same way: `N_FitCrvFirstDerivAndKnots` writes the
@@ -51,7 +51,7 @@
 //!   initialised (a [`cpts_from_srf_data`] matrix larger than the extracted row or
 //!   column) return [`SolidError::InvalidInput`] instead of undefined behaviour.
 //! - The `NL_STACKS` arguments and the routine-name strings have no counterpart.
-//! - Work arrays that cannot be reserved return [`NlibCode::Memory`] (upstream's
+//! - Work arrays that cannot be reserved return [`NurbsFailure::Memory`] (upstream's
 //!   `NL_MEM_ERR` from a failed `N_Malloc`) instead of aborting. Index arithmetic on
 //!   caller counts (`n + p + 1`, `p + 1`, `2 * p`, ...) that would overflow `NL_INDEX`
 //!   (undefined behaviour upstream) returns [`SolidError::InvalidInput`]; where the
@@ -59,7 +59,7 @@
 //!   mismatch (`NL_INP_ERR`, as upstream's wrapped sum), and sums whose degree check
 //!   comes later are formed after that check (the order is not observable).
 
-use crate::error::{NlibCode, Result, SolidError};
+use crate::error::{nurbs::NurbsFailure, Result, SolidError};
 use crate::math::Vec3;
 use crate::nurbs::basis_basic::{basis_derivs, PTOL};
 use crate::nurbs::crv_basic::Curve;
@@ -334,7 +334,7 @@ pub fn knot_vector_end_derivs(u: &[f64], p: usize) -> Result<Vec<f64>> {
 ///
 /// # Errors
 ///
-/// [`NlibCode::Input`] when `p > k + 1`; `InvalidInput` for empty `u`, or `p == 1`
+/// [`NurbsFailure::Input`] when `p > k + 1`; `InvalidInput` for empty `u`, or `p == 1`
 /// with a single parameter (upstream reads `u[1]` or `u[-1]`).
 pub fn knot_vector_deriv(u: &[f64], p: usize, whr: DerivEnd) -> Result<Vec<f64>> {
     const OP: &str = "nurbs::crv_fit::p1::knot_vector_deriv";
@@ -343,7 +343,7 @@ pub fn knot_vector_deriv(u: &[f64], p: usize, whr: DerivEnd) -> Result<Vec<f64>>
 
     // Check error.
     if p > k + 1 {
-        return Err(SolidError::nlib(OP, NlibCode::Input));
+        return Err(SolidError::nurbs(OP, NurbsFailure::Input));
     }
 
     // Compute knot vector.
@@ -416,7 +416,7 @@ pub fn knot_vector_deriv(u: &[f64], p: usize, whr: DerivEnd) -> Result<Vec<f64>>
 ///
 /// # Errors
 ///
-/// [`NlibCode::Input`] when `n > m`; `InvalidInput` for empty `u`.
+/// [`NurbsFailure::Input`] when `n > m`; `InvalidInput` for empty `u`.
 pub fn knot_vector_approx(u: &[f64], n: usize, p: usize) -> Result<Vec<f64>> {
     const OP: &str = "nurbs::crv_fit::p1::knot_vector_approx";
     let m = hi(u, OP, "no parameters")?;
@@ -425,7 +425,7 @@ pub fn knot_vector_approx(u: &[f64], n: usize, p: usize) -> Result<Vec<f64>> {
 
     // Check state: as many or more sample points than control points.
     if n > m {
-        return Err(SolidError::nlib(OP, NlibCode::Input));
+        return Err(SolidError::nurbs(OP, NurbsFailure::Input));
     }
 
     // Set first and last p+1 knots to the first and last sample parameters.
@@ -478,7 +478,7 @@ pub fn knot_vector_approx(u: &[f64], n: usize, p: usize) -> Result<Vec<f64>> {
 ///
 /// # Errors
 ///
-/// [`NlibCode::Input`] when `knt` does not have `n + p + 2` knots or a basis span
+/// [`NurbsFailure::Input`] when `knt` does not have `n + p + 2` knots or a basis span
 /// falls outside the matrix band; errors of [`KnotVector::basis_eval`] and of the
 /// LU decomposition and solve (`NL_NUM_ERR` for a singular system); `InvalidInput`
 /// for empty `a` or too few parameters.
@@ -497,7 +497,7 @@ pub fn interp_given_params<P: FitPoint>(
     // An overflowing `n + p + 1` cannot equal `m` (upstream's wrapped sum does not).
     let mc = n.checked_add(p).and_then(|x| x.checked_add(1));
     if Some(m) != mc {
-        return Err(SolidError::nlib(OP, NlibCode::Input));
+        return Err(SolidError::nurbs(OP, NurbsFailure::Input));
     }
     let uc = copy_knots(knt, m, OP)?;
     let mut pw = alloc(n, CPoint::default(), OP)?;
@@ -525,7 +525,7 @@ pub fn interp_given_params<P: FitPoint>(
         let (j, nb) = basis(knt, p, at(u, i, OP)?, OP)?;
         let l = sp - i + j;
         if l < 0 || l + p >= bw {
-            return Err(SolidError::nlib(OP, NlibCode::Input));
+            return Err(SolidError::nurbs(OP, NurbsFailure::Input));
         }
         for k in 0..=p {
             mset(&mut cm, i, l + k, at(&nb, k, OP)?, OP)?;
@@ -547,7 +547,7 @@ pub fn interp_given_params<P: FitPoint>(
 ///
 /// # Errors
 ///
-/// [`NlibCode::Input`] when `p < 2`, `p > kk + 2`, `knt` does not have `kk + p + 4`
+/// [`NurbsFailure::Input`] when `p < 2`, `p > kk + 2`, `knt` does not have `kk + p + 4`
 /// knots or a basis span falls outside the matrix band; errors of
 /// [`KnotVector::basis_eval`] and of the LU decomposition and solve; `InvalidInput`
 /// for empty `a` or too few parameters.
@@ -568,11 +568,11 @@ pub fn interp_knots_and_derivs<P: FitPoint>(
     let uk = knt.knots();
     let n = kk + 2;
     if p < 2 || p > kk + 2 {
-        return Err(SolidError::nlib(OP, NlibCode::Input));
+        return Err(SolidError::nurbs(OP, NurbsFailure::Input));
     }
     let mc = n + p + 1;
     if m != mc {
-        return Err(SolidError::nlib(OP, NlibCode::Input));
+        return Err(SolidError::nurbs(OP, NurbsFailure::Input));
     }
     let uc = copy_knots(knt, m, OP)?;
 
@@ -595,7 +595,7 @@ pub fn interp_knots_and_derivs<P: FitPoint>(
         let (j, nb) = basis(knt, p, at(u, i - 1, OP)?, OP)?;
         let l = sp - i + j;
         if l < 0 || l + p >= bw {
-            return Err(SolidError::nlib(OP, NlibCode::Input));
+            return Err(SolidError::nurbs(OP, NurbsFailure::Input));
         }
         for k in 0..=p {
             mset(&mut cm, i, l + k, at(&nb, k, OP)?, OP)?;
@@ -626,7 +626,7 @@ pub fn interp_knots_and_derivs<P: FitPoint>(
 ///
 /// # Errors
 ///
-/// [`NlibCode::Input`] when `p < 2`, `p > kk + 1`, `knt` does not have `kk + p + 3`
+/// [`NurbsFailure::Input`] when `p < 2`, `p > kk + 1`, `knt` does not have `kk + p + 3`
 /// knots or a basis span falls outside the matrix band; errors of
 /// [`KnotVector::basis_eval`] and of the LU decomposition and solve; `InvalidInput`
 /// for empty `a` or too few parameters.
@@ -647,11 +647,11 @@ pub fn interp_knots_and_deriv<P: FitPoint>(
     let uk = knt.knots();
     let n = kk + 1;
     if p < 2 || p > n {
-        return Err(SolidError::nlib(OP, NlibCode::Input));
+        return Err(SolidError::nurbs(OP, NurbsFailure::Input));
     }
     let mc = n + p + 1;
     if m != mc {
-        return Err(SolidError::nlib(OP, NlibCode::Input));
+        return Err(SolidError::nurbs(OP, NurbsFailure::Input));
     }
     let uc = copy_knots(knt, m, OP)?;
 
@@ -663,7 +663,7 @@ pub fn interp_knots_and_deriv<P: FitPoint>(
         let (j, nb) = basis(knt, p, ui, OP)?;
         let l = if p == 2 { 0 } else { j - i - 1 };
         if l < 0 || l + p >= bw {
-            return Err(SolidError::nlib(OP, NlibCode::Input));
+            return Err(SolidError::nurbs(OP, NurbsFailure::Input));
         }
         for k in 0..=p {
             mset(cm, i, l + k, at(&nb, k, OP)?, OP)?;
@@ -724,7 +724,7 @@ pub fn interp_knots_and_deriv<P: FitPoint>(
 ///
 /// # Errors
 ///
-/// [`NlibCode::Degree`] when `p` is not 2 or 3; [`NlibCode::Input`] when `knt` does
+/// [`NurbsFailure::Degree`] when `p` is not 2 or 3; [`NurbsFailure::Input`] when `knt` does
 /// not have `2*kk + p + 3` knots or a basis span falls outside the matrix band;
 /// errors of [`basis_derivs`] and of the LU decomposition and solve; `InvalidInput`
 /// for empty `a`, too few derivatives or parameters.
@@ -744,11 +744,11 @@ pub fn interp_first_derivs_and_knots<P: FitPoint>(
     let uk = knt.knots();
     let n = 2 * kk + 1;
     if !(2..=3).contains(&p) {
-        return Err(SolidError::nlib(OP, NlibCode::Degree));
+        return Err(SolidError::nurbs(OP, NurbsFailure::Degree));
     }
     let mc = n + p + 1;
     if m != mc {
-        return Err(SolidError::nlib(OP, NlibCode::Input));
+        return Err(SolidError::nurbs(OP, NurbsFailure::Input));
     }
     let uc = copy_knots(knt, m, OP)?;
 
@@ -771,7 +771,7 @@ pub fn interp_first_derivs_and_knots<P: FitPoint>(
         let ii = 2 * i;
         let l = j - ii - 1;
         if l < 0 || l + hp >= bw {
-            return Err(SolidError::nlib(OP, NlibCode::Input));
+            return Err(SolidError::nurbs(OP, NurbsFailure::Input));
         }
         for k in 0..=hp {
             mset(&mut cm, ii, l + k, at(nd0, k, OP)?, OP)?;
@@ -809,7 +809,7 @@ pub fn interp_first_derivs_and_knots<P: FitPoint>(
 ///
 /// # Errors
 ///
-/// [`NlibCode::Input`] when `n < p`, `knt` does not have `n + p + 2` knots,
+/// [`NurbsFailure::Input`] when `n < p`, `knt` does not have `n + p + 2` knots,
 /// `m < n`, or some interior basis function gets no sample; errors of
 /// [`KnotVector::basis_eval`], [`KnotVector::basis_i_eval`] and of the LU
 /// decomposition and solve; `InvalidInput` for empty `a`, too few knots (upstream
@@ -827,7 +827,7 @@ pub fn approx_knots<P: FitPoint>(
     let p = sg(p, OP)?;
 
     if n < p {
-        return Err(SolidError::nlib(OP, NlibCode::Input));
+        return Err(SolidError::nurbs(OP, NurbsFailure::Input));
     }
     let mk = sg(knt.last_index(), OP)?;
 
@@ -845,10 +845,10 @@ pub fn approx_knots<P: FitPoint>(
 
     // Check error.
     if mk != mc {
-        return Err(SolidError::nlib(OP, NlibCode::Input));
+        return Err(SolidError::nurbs(OP, NurbsFailure::Input));
     }
     if n < 2 || p > n || m < n {
-        return Err(SolidError::nlib(OP, NlibCode::Input));
+        return Err(SolidError::nurbs(OP, NurbsFailure::Input));
     }
 
     // Compute coefficient matrix.
@@ -893,7 +893,7 @@ pub fn approx_knots<P: FitPoint>(
     }
 
     if sj < n - 2 || at(&end, 0, OP)? == -1 {
-        return Err(SolidError::nlib(OP, NlibCode::Input));
+        return Err(SolidError::nurbs(OP, NurbsFailure::Input));
     }
     for i in 0.max(ej + 1)..=n - 2 {
         put(&mut end, i, m - 2, OP)?;
@@ -1077,10 +1077,7 @@ mod tests {
         assert_eq!(k.len(), 10);
         assert!(matches!(
             knot_vector_deriv(&u, 6, DerivEnd::End),
-            Err(SolidError::Nlib {
-                code: NlibCode::Input,
-                ..
-            })
+            Err(ref e) if matches!(e.nurbs_failure(), Some(NurbsFailure::Input))
         ));
         let k = knot_vector_approx(&u, 3, 2).unwrap();
         assert_eq!(k.len(), 7);
@@ -1148,10 +1145,7 @@ mod tests {
         assert!((eval(&c, 0.5) - a[1]).length() < 1e-9);
         assert!(matches!(
             interp_first_derivs_and_knots(&a, &d, &u, &knt, 4),
-            Err(SolidError::Nlib {
-                code: NlibCode::Degree,
-                ..
-            })
+            Err(ref e) if matches!(e.nurbs_failure(), Some(NurbsFailure::Degree))
         ));
     }
 
@@ -1202,10 +1196,7 @@ mod tests {
         assert!(knot_vector_approx(&u, 2, big).is_err());
         assert!(matches!(
             interp_knot_vector(&u, 1 << 61),
-            Err(SolidError::Nlib {
-                code: NlibCode::Memory,
-                ..
-            })
+            Err(ref e) if matches!(e.nurbs_failure(), Some(NurbsFailure::Memory))
         ));
         let a = pts(&[[0.0, 0.0, 0.0], [1.0, 1.0, 0.0], [2.0, 0.0, 0.0]]);
         let kv = [0.0, 0.0, 0.0, 1.0, 1.0, 1.0];
@@ -1213,17 +1204,11 @@ mod tests {
         // An overflowing n + p + 1 never matches the knot count: NL_INP_ERR.
         assert!(matches!(
             interp_given_params(&a, &u, &knt, big),
-            Err(SolidError::Nlib {
-                code: NlibCode::Input,
-                ..
-            })
+            Err(ref e) if matches!(e.nurbs_failure(), Some(NurbsFailure::Input))
         ));
         assert!(matches!(
             interp_knots_and_derivs(&a, &u, &knt, big, a[0], a[1]),
-            Err(SolidError::Nlib {
-                code: NlibCode::Input,
-                ..
-            })
+            Err(ref e) if matches!(e.nurbs_failure(), Some(NurbsFailure::Input))
         ));
         assert!(approx_knots(&a, &u, &knt, big, big).is_err());
         let cm = RealMatrix::new(4, 4, MatrixType::Full, 0).unwrap();

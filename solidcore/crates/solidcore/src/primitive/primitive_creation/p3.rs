@@ -9,7 +9,7 @@
 //! | [`PrimitiveCreation::create_partial_rotational_sweep`] | partial `CreateRotationalSweep` |
 //! | [`PrimitiveCreation::create_swung_primitive`] | `CreateSwungPrimitive` |
 //! | [`PrimitiveCreation::create_curve_sweep`] | `CreateCurveSweep` |
-//! | [`PrimitiveCreation::create_skin_from_faces`] | `CreateSkinFromFaces` |
+//! | [`PrimitiveCreation::create_skin_from_faces`], [`PrimitiveCreation::create_skin_from_faces_traced`] | `CreateSkinFromFaces` |
 //! | [`PrimitiveCreation::create_blend_primitive`] | `CreateBlendPrimitive` |
 //! | [`ruled_surface_from_offset`] | `sm_CreateRuledSurfaceFromOffsetCurve` |
 //!
@@ -25,11 +25,13 @@ mod access;
 mod construct;
 mod geometry;
 mod ruled;
+pub mod skin_sources;
 mod sweeps;
 
 pub use super::p1::PrimitiveCreation;
 pub use access::PrimitiveAccess;
 pub use construct::BlendPrimitiveOptions;
+pub(super) use geometry::bspline_with_nurb;
 pub use geometry::{prepare_curve_sweep, PreparedCurveSweep};
 pub use ruled::{ruled_surface_from_offset, OffsetRuleOptions};
 pub use sweeps::RepeatedSweepOptions;

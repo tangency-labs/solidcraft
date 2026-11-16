@@ -47,6 +47,7 @@ pub mod topology;
 
 pub mod blend;
 pub mod boolean;
+pub mod cell_grid;
 pub mod curve;
 pub mod eval;
 pub mod geom;
@@ -62,7 +63,7 @@ pub mod query;
 pub mod surface;
 pub mod sweep;
 
-pub use error::{EntityRef, NlibCode, Result, SolidError};
+pub use error::{EntityRef, Result, SolidError};
 pub use heal::face_props::Tri;
 pub use kernel::{Caches, CancelToken, Kernel, KernelOptions, Rng, Tolerances};
 pub use math::{Point2, Point3, Transform, Vec2, Vec3};

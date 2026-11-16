@@ -332,7 +332,12 @@ fn find_additional_tangent_guess(
     let pv = curve.evaluate(k, current_t, 1, true, true)?;
     let (pv0, pv1) = match pv.as_slice() {
         [a, b, ..] => (*a, *b),
-        _ => return Err(SolidError::sm_err("intersect::ray_tracer")),
+        _ => {
+            return Err(SolidError::intersect_failed(
+                "intersect::ray_tracer",
+                "the curve's first derivative was not evaluated",
+            ))
+        }
     };
     // First do a quick test to determin the angle of intersection between the
     // tangent plane of the surface ane the tangent of the curve.  If not within 20
@@ -353,9 +358,12 @@ fn find_additional_tangent_guess(
 
     // Get the geometric properties of the curve at the intersection
     let geom_vec = evaluate_geometric(k, curve, current_t, 2, true)?;
-    let mut curvature_vector = *geom_vec
-        .get(2)
-        .ok_or_else(|| SolidError::sm_err("intersect::ray_tracer"))?;
+    let mut curvature_vector = *geom_vec.get(2).ok_or_else(|| {
+        SolidError::intersect_failed(
+            "intersect::ray_tracer",
+            "the curve's curvature vector was not evaluated",
+        )
+    })?;
     let curve_curvature = curvature_vector.length();
     if curve_curvature > EFF_ZERO {
         curvature_vector = curvature_vector.unitize()?;
@@ -722,7 +730,10 @@ impl Lsi3LocalSolver {
         let mut ii = 0_usize;
         while ii < total_points {
             let (Some(&gu), Some(&gv)) = (uv_points.get(ii * 2), uv_points.get(ii * 2 + 1)) else {
-                return Err(SolidError::sm_err("intersect::ray_tracer::local_solve"));
+                return Err(SolidError::intersect_failed(
+                    "intersect::ray_tracer::local_solve",
+                    "a guess point has no u or v parameter",
+                ));
             };
             uv_point = Vec2::new(gu, gv);
 
@@ -1071,10 +1082,9 @@ impl<'s> RayTracer<'s> {
                                     operation: OP,
                                     reason: "polygon grid element of no listed poly B-rep",
                                 })?;
-                        let tree = traced
-                            .cache
-                            .surface_tree()
-                            .ok_or(SolidError::null_pointer(OP))?;
+                        let tree = traced.cache.surface_tree().ok_or_else(|| {
+                            SolidError::intersect_missing(OP, "the poly B-rep cache's surface tree")
+                        })?;
 
                         // Handle polygon ray firing
                         let hit = find_poly_hit(
@@ -1239,10 +1249,9 @@ impl<'s> RayTracer<'s> {
         mut cache: SurfaceCache<usize>,
     ) -> Result<()> {
         const OP: &str = "intersect::ray_tracer::add_surface_with_cache";
-        let top = cache
-            .get_tree(k)?
-            .top_node()
-            .ok_or(SolidError::sm_err(OP))?;
+        let top = cache.get_tree(k)?.top_node().ok_or_else(|| {
+            SolidError::intersect_failed(OP, "the surface cache's tree has no top node")
+        })?;
         let bbox = cache.get_tree(k)?.node(top)?.bbox;
         let id = self.add_surface_with_bbox(surface, &bbox)?;
 
@@ -1269,8 +1278,12 @@ impl<'s> RayTracer<'s> {
         mut cache: SurfaceCache<usize>,
     ) -> Result<()> {
         const OP: &str = "intersect::ray_tracer::add_surface_with_fetched_cache";
-        let tree = cache.tree().ok_or(SolidError::sm_err(OP))?;
-        let top = tree.top_node().ok_or(SolidError::sm_err(OP))?;
+        let tree = cache
+            .tree()
+            .ok_or_else(|| SolidError::intersect_failed(OP, "the surface cache has no tree"))?;
+        let top = tree.top_node().ok_or_else(|| {
+            SolidError::intersect_failed(OP, "the surface cache's tree has no top node")
+        })?;
         let bbox = tree.node(top)?.bbox;
         let id = self.add_surface_with_bbox(surface, &bbox)?;
         self.grid.expand_hierarchy_fetched(k, id, &mut cache)
@@ -1304,7 +1317,9 @@ impl<'s> RayTracer<'s> {
         let cache = make_brep_cache(k, CacheSource::PolyBrep(&*poly_brep), &arena_identity)?;
 
         // get all Surface Tree Nodes
-        let tree = cache.surface_tree().ok_or(SolidError::null_pointer(OP))?;
+        let tree = cache.surface_tree().ok_or_else(|| {
+            SolidError::intersect_missing(OP, "the poly B-rep cache's surface tree")
+        })?;
         let index = self.poly_breps.len();
 
         // For every Surface Tree Node
@@ -1660,7 +1675,10 @@ fn find_poly_hit(
         // for every object in pNode
         for list in tree.node_object_list(node)? {
             let Some(CacheObject::PolyFace(poly_face)) = tree.list(list)?.object else {
-                return Err(SolidError::null_pointer(OP));
+                return Err(SolidError::intersect_missing(
+                    OP,
+                    "the poly face of a tree node object",
+                ));
             };
 
             // skip already processed PolyFaces (and mark this one)
@@ -1685,10 +1703,10 @@ fn find_poly_hit(
             let (normal, _) = brep.face_normal(k, poly_face, false, true)?;
             let poly_loop = brep
                 .face_outer_poly_loop(poly_face)?
-                .ok_or(SolidError::null_pointer(OP))?;
+                .ok_or_else(|| SolidError::intersect_missing(OP, "the poly face's outer loop"))?;
             let first_edge = brep
                 .loop_first_poly_edge(poly_loop)?
-                .ok_or(SolidError::null_pointer(OP))?;
+                .ok_or_else(|| SolidError::intersect_missing(OP, "the poly loop's first edge"))?;
             let origin = brep.edge_start_point(first_edge)?;
             let Ok(t_param) = gu::line_plane_intersect(ray.point, ray.vector, origin, normal)
             else {

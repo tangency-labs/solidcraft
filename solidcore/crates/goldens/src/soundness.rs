@@ -11,11 +11,14 @@
 use std::cell::RefCell;
 
 use solidcore::kernel::Kernel;
+use solidcore::mass::enclosure::{enclose_volume, VolumeEnclosure, VolumeSign};
 use solidcore::topology::brep::validation;
 use solidcore::topology::Brep;
 
 thread_local! {
     static CAPTURED: RefCell<Option<Vec<Soundness>>> = const { RefCell::new(None) };
+    /// With [`start_enclosing`]: the relative width the volume enclosure is refined to.
+    static ENCLOSE: RefCell<Option<f64>> = const { RefCell::new(None) };
 }
 
 /// What [`measure`] found of one result body.
@@ -25,17 +28,20 @@ pub struct Soundness {
     pub check: Result<Vec<String>, String>,
     /// Whether the body is a manifold solid.
     pub manifold: Option<bool>,
-    /// Its volume, when it is a manifold solid.
-    pub volume: Option<f64>,
+    /// Its volume's sign, when it is a manifold solid.
+    pub volume: Option<VolumeSign>,
     /// Its face, edge and vertex counts.
     pub counts: [usize; 3],
+    /// With [`start_enclosing`], a manifold solid's volume enclosure refined
+    /// ([`enclose_volume`]) to the relative width asked for, or its error; `None` otherwise.
+    pub enclosure: Option<Result<VolumeEnclosure, String>>,
 }
 
 impl Soundness {
     /// Whether the check is clean and a manifold body has a positive volume.
     pub fn sound(&self) -> bool {
         self.check.as_ref().is_ok_and(Vec::is_empty)
-            && (self.manifold != Some(true) || self.volume.is_some_and(|v| v > 0.0))
+            && (self.manifold != Some(true) || matches!(self.volume, Some(VolumeSign::Positive(_))))
     }
 
     /// One line: `sound`, the check's line count, manifold, volume and counts.
@@ -64,11 +70,21 @@ impl Soundness {
 
 /// Starts capturing the bodies [`measure`] is handed on this thread.
 pub fn start() {
+    // a `start_enclosing` left without its `take` (a panicking test) ends here
+    ENCLOSE.with(|e| *e.borrow_mut() = None);
     CAPTURED.with(|c| *c.borrow_mut() = Some(Vec::new()));
+}
+
+/// [`start`], and each manifold solid measured also gets its volume enclosure refined to
+/// `relative_width` of the volume ([`Soundness::enclosure`]).
+pub fn start_enclosing(relative_width: f64) {
+    start();
+    ENCLOSE.with(|e| *e.borrow_mut() = Some(relative_width));
 }
 
 /// Stops capturing and returns what was measured since [`start`].
 pub fn take() -> Vec<Soundness> {
+    ENCLOSE.with(|e| *e.borrow_mut() = None);
     CAPTURED.with(|c| c.borrow_mut().take().unwrap_or_default())
 }
 
@@ -98,17 +114,29 @@ fn measured(brep: &mut Brep) -> Soundness {
     // geometry records (a runner's export bookkeeping names them as it pleases), the manifold
     // test and the volume
     match validation::soundness(&mut k, brep) {
-        Ok(found) => Soundness {
-            check: Ok(found.check.lines()),
-            manifold: Some(found.manifold),
-            volume: found.volume,
-            counts,
-        },
+        Ok(found) => {
+            // the width asked for, relative to the larger end of the sign's enclosure
+            let enclosure = match (ENCLOSE.with(|e| *e.borrow()), &found.volume) {
+                (Some(rel), Some(VolumeSign::Positive(e))) => Some(
+                    enclose_volume(&k, brep, rel * e.hi.abs().max(e.lo.abs()))
+                        .map_err(|err| err.to_string()),
+                ),
+                _ => None,
+            };
+            Soundness {
+                check: Ok(found.check.lines()),
+                manifold: Some(found.manifold),
+                volume: found.volume,
+                counts,
+                enclosure,
+            }
+        }
         Err(e) => Soundness {
             check: Err(e.to_string()),
             manifold: None,
             volume: None,
             counts,
+            enclosure: None,
         },
     }
 }
@@ -164,7 +192,7 @@ pub fn probe(runner: &dyn crate::UnitDiff) {
 
 #[cfg(test)]
 mod tests {
-    use super::{measure, start, take};
+    use super::{measure, start, take, VolumeSign};
     use solidcore::kernel::Kernel;
 
     fn cube() -> solidcore::topology::Brep {
@@ -198,8 +226,7 @@ mod tests {
         assert!(s.sound(), "{}", s.line());
         assert_eq!(s.manifold, Some(true));
         assert!(
-            s.volume
-                .is_some_and(|v| (v - 1000.0).abs() <= 1e-6 * 1000.0),
+            matches!(s.volume, Some(VolumeSign::Positive(e)) if e.lo <= 1000.0 && 1000.0 <= e.hi),
             "{}",
             s.line()
         );

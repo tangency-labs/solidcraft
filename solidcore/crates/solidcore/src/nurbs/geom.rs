@@ -88,10 +88,10 @@
 //!   [`Frame`]s.
 //! - Polygons and nets are slices; an empty polygon or net is `InvalidInput` for the
 //!   bounding boxes (upstream reads `P[0]`).
-//! - Errors are [`SolidError::Nlib`] values with upstream's `NL_*_ERR` number
+//! - Errors are [`SolidError::Failed`] values (a [`NurbsFailure`] reason) with upstream's `NL_*_ERR` number
 //!   (`NL_GEO_ERR` for a zero-length vector, `NL_NUM_ERR` for a bad division).
 
-use crate::error::{NlibCode, Result, SolidError};
+use crate::error::{nurbs::NurbsFailure, Result, SolidError};
 use crate::math::Vec3;
 use crate::nurbs::math::{
     combine2_pts, float_op_is_bad, CPoint, FloatOp, MatrixType, RealMatrix, MODEL_TOL, NOW, NOZ,
@@ -118,10 +118,6 @@ const OP_DIST_PERP: &str = "nurbs::geom::dist_perp_pt_line_seg";
 const OP_BBOX: &str = "nurbs::geom::polygon_bbox";
 const OP_NET_BBOX: &str = "nurbs::geom::net_bbox";
 const OP_ROTATION: &str = "nurbs::geom::rotation_matrix_about_axis";
-
-fn nlib(operation: &'static str, code: NlibCode) -> SolidError {
-    SolidError::Nlib { operation, code }
-}
 
 // ---- structures -------------------------------------------------------------------
 
@@ -325,7 +321,7 @@ pub fn pt_along_vector(p: Vec3, alpha: f64, v: Vec3) -> Vec3 {
 pub fn normalize(a: Vec3) -> Result<(Vec3, f64)> {
     let d = a.length();
     if float_op_is_bad(1.0, d, FloatOp::Division) {
-        return Err(nlib(OP_NORMALIZE, NlibCode::Geometry));
+        return Err(SolidError::nurbs(OP_NORMALIZE, NurbsFailure::Geometry));
     }
     let invd = 1.0 / d;
     Ok((Vec3::new(invd * a.x, invd * a.y, invd * a.z), d))
@@ -339,7 +335,7 @@ pub fn vectors_cos_angle(a: Vec3, b: Vec3) -> Result<f64> {
     let mb = b.x * b.x + b.y * b.y + b.z * b.z;
     let den = (ma * mb).sqrt();
     if float_op_is_bad(dot, den, FloatOp::Division) {
-        return Err(nlib(OP_COS_ANGLE, NlibCode::Geometry));
+        return Err(SolidError::nurbs(OP_COS_ANGLE, NurbsFailure::Geometry));
     }
     // Upstream's two ifs; `clamp` gives the same result, NaN included.
     Ok((dot / den).clamp(-1.0, 1.0))
@@ -352,7 +348,7 @@ pub fn vectors_angle(a: Vec3, b: Vec3) -> Result<f64> {
     let ma = a.length();
     let mb = b.length();
     if float_op_is_bad(dot, ma * mb, FloatOp::Division) {
-        return Err(nlib(OP_ANGLE, NlibCode::Geometry));
+        return Err(SolidError::nurbs(OP_ANGLE, NurbsFailure::Geometry));
     }
     // Upstream's two ifs; `clamp` gives the same result, NaN included.
     let arg = (dot / (ma * mb)).clamp(-1.0, 1.0);
@@ -401,14 +397,14 @@ pub fn isect_line_line(ls1: LineSeg, ls2: LineSeg) -> Result<Option<LineLineIsec
     if float_op_is_bad(numa, den, FloatOp::Division)
         || float_op_is_bad(numb, den, FloatOp::Division)
     {
-        return Err(nlib(OP_ISECT_LL, NlibCode::Numerical));
+        return Err(SolidError::nurbs(OP_ISECT_LL, NurbsFailure::Numerical));
     }
     let alpha = numa / den;
     let beta = numb / den;
 
     if float_op_is_bad(alpha, m1, FloatOp::Division) || float_op_is_bad(beta, m2, FloatOp::Division)
     {
-        return Err(nlib(OP_ISECT_LL, NlibCode::Numerical));
+        return Err(SolidError::nurbs(OP_ISECT_LL, NurbsFailure::Numerical));
     }
     let u1 = alpha / m1;
     let u2 = beta / m2;
@@ -466,11 +462,11 @@ pub fn isect_line_plane(lsg: LineSeg, pln: Plane) -> Result<LinePlaneIsect> {
     }
     let num = pl.dot(n);
     if float_op_is_bad(num, den, FloatOp::Division) {
-        return Err(nlib(OP_ISECT_LP, NlibCode::Numerical));
+        return Err(SolidError::nurbs(OP_ISECT_LP, NurbsFailure::Numerical));
     }
     let alpha = num / den;
     if float_op_is_bad(alpha, mv, FloatOp::Division) {
-        return Err(nlib(OP_ISECT_LP, NlibCode::Numerical));
+        return Err(SolidError::nurbs(OP_ISECT_LP, NurbsFailure::Numerical));
     }
     let t = alpha / mv;
 
@@ -544,7 +540,7 @@ pub fn dist_pt_line_seg_tol(p: Vec3, a: Vec3, b: Vec3, mtol: f64) -> Result<f64>
         let num = pa.cross(ba).length();
         let den = dotab;
         if float_op_is_bad(num, den, FloatOp::Division) {
-            return Err(nlib(OP_DIST_LSEG, NlibCode::Numerical));
+            return Err(SolidError::nurbs(OP_DIST_LSEG, NurbsFailure::Numerical));
         }
         Ok(num / den)
     } else if dotap < 0.0 {
@@ -589,7 +585,7 @@ pub fn dist_perp_pt_line_seg_tol(q: Vec3, a: Vec3, b: Vec3, mtol: f64) -> Result
     }
     let den = dotab.sqrt();
     if float_op_is_bad(num, den, FloatOp::Division) {
-        return Err(nlib(OP_DIST_PERP, NlibCode::Numerical));
+        return Err(SolidError::nurbs(OP_DIST_PERP, NurbsFailure::Numerical));
     }
     Ok(Some(num / den))
 }
@@ -915,13 +911,7 @@ mod tests {
     #[test]
     fn normalize_zero_is_geo_error() {
         let e = normalize(Vec3::ZERO).unwrap_err();
-        assert!(matches!(
-            e,
-            SolidError::Nlib {
-                code: NlibCode::Geometry,
-                ..
-            }
-        ));
+        assert!(matches!(e.nurbs_failure(), Some(NurbsFailure::Geometry)));
         let (u, m) = normalize(v(3.0, 0.0, 4.0)).unwrap();
         assert_eq!(m, 5.0);
         assert_eq!(u, v(0.2 * 3.0, 0.0, 0.2 * 4.0));

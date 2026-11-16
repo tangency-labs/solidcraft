@@ -1,7 +1,7 @@
 //! Regression test for WR-578 (the fork's tangency-labs/smlib 7ff0a94 and 34318f4): a
 //! solid offset leaves a face loop's vertex behind where two consecutive edges' offsets
-//! run parallel and never meet, and the merge refuses the shell (1001). With
-//! `offset_closes_loop_gaps` the gap is closed by the straight edge between the two ends.
+//! run parallel and never meet, and the merge refuses the shell (1001). The gap is
+//! closed by the straight edge between the two ends (the default path since #2981).
 //!
 //! SolidCraft rig case shell/1494, rebuilt: a 47.5 x 45 x 30 box joined with an r7.5
 //! cylinder along x from its side x = 47.5 to 77.5, the axis in the front face's plane
@@ -13,8 +13,9 @@
 //!
 //! 34318f4: a 30 x 35 x 7.5 box notched 22.5 x 5 down to z = 2.5 at its far corner, shelled
 //! 1.5 inward open at the far side under the notch: the wall moves the strip's top corner
-//! past the end of its edge, `SM_ERR_OFFSET_EDGE_VANISHES` (1043). Open at the notch's
-//! floor it shells.
+//! past the end of its edge. The fork refused it as `SM_ERR_OFFSET_EDGE_VANISHES` (1043).
+//! Now that offset faces whose loops cross are always rebuilt (WR-345), it shells into the
+//! closed form's solid. Open at the notch's floor it shells too.
 #![allow(
     clippy::unwrap_used,
     clippy::expect_used,
@@ -25,25 +26,24 @@
 #[path = "support/offset_fixture.rs"]
 mod offset_fixture;
 
+#[path = "support/volume_leak.rs"]
+mod volume_leak;
 use offset_fixture::{planar_faces_at, report, shell};
 use solidcore::boolean::api_brep::{boolean_difference, boolean_union};
 use solidcore::curve::curve::Curve;
 use solidcore::geom::axis2_placement::Axis2Placement;
+use solidcore::mass::integrator::properties::brep_area;
 use solidcore::math::{Point3, Vec3};
 use solidcore::primitive::api_curves::{create_arc, create_line_segment};
 use solidcore::primitive::api_primitives::{create_box, create_cylinder};
+use solidcore::query::api_queries::brep_bounding_box;
 use solidcore::sweep::api_brep::create_linear_sweep;
 use solidcore::topology::brep::p5::transform;
+use solidcore::topology::brep::validation::{check_brep, CheckLevel};
 use solidcore::topology::proto_topology::p1::api_transform::{api_rotate, TransformObject};
 use solidcore::{Brep, Kernel};
 
 const SHELL_1494: f64 = 8864.598272772;
-
-fn kernel(fixed: bool) -> Kernel {
-    let mut k = Kernel::default();
-    k.fixes.offset_closes_loop_gaps = fixed;
-    k
-}
 
 /// The box joined with the cylinder, its seam `seam_deg` from +y towards +z.
 fn box_and_cylinder(k: &mut Kernel, seam_deg: f64) -> Brep {
@@ -62,8 +62,8 @@ fn box_and_cylinder(k: &mut Kernel, seam_deg: f64) -> Brep {
     b
 }
 
-fn shell_1494(fixed: bool, seam_deg: f64) -> (Kernel, solidcore::Result<Brep>) {
-    shell_1494_with(kernel(fixed), seam_deg)
+fn shell_1494(seam_deg: f64) -> (Kernel, solidcore::Result<Brep>) {
+    shell_1494_with(Kernel::default(), seam_deg)
 }
 
 fn shell_1494_with(mut k: Kernel, seam_deg: f64) -> (Kernel, solidcore::Result<Brep>) {
@@ -81,7 +81,7 @@ fn shell_1494_with(mut k: Kernel, seam_deg: f64) -> (Kernel, solidcore::Result<B
 #[ignore = "open: volume 2.7e-7 / 7.7e-7 off the fork's (WR-578)"]
 fn wr_578_box_and_cylinder_shell_closes_the_loop_gaps() {
     for seam in [30.0, 55.0] {
-        let (k, result) = shell_1494(true, seam);
+        let (k, result) = shell_1494(seam);
         assert!(report(
             &k,
             &format!("wr_578 shell/1494 seam {seam}"),
@@ -92,12 +92,12 @@ fn wr_578_box_and_cylinder_shell_closes_the_loop_gaps() {
     }
 }
 
-/// Seam 200 with the opt-in alone: each face's surface extended by its offset's reach (not
+/// Seam 200 on the default path: each face's surface extended by its offset's reach (not
 /// five offsets), the shell is sound as at seams 30 and 55 (manifold, integrity clean), its
 /// volume 1.5e-7 off the fork's closed form as theirs are (WR-578's divergence).
 #[test]
 fn wr_578_seam_200_shells_sound() {
-    let (k, result) = shell_1494(true, 200.0);
+    let (k, result) = shell_1494(200.0);
     assert!(report(
         &k,
         "wr_578 shell/1494 seam 200",
@@ -113,7 +113,7 @@ fn wr_578_seam_200_shells_sound() {
 #[ignore = "open: the port returns a non-manifold body for these seams (WR-578)"]
 fn wr_578_box_and_cylinder_shell_other_seams() {
     for seam in [125.0, 200.0] {
-        let (k, result) = shell_1494(true, seam);
+        let (k, result) = shell_1494(seam);
         assert!(report(
             &k,
             &format!("wr_578 shell/1494 seam {seam}"),
@@ -129,7 +129,7 @@ fn wr_578_box_and_cylinder_shell_other_seams() {
 /// its base edge runs along, and the shell is sound as at seam 200.
 #[test]
 fn wr_578_seam_125_shells_sound() {
-    let (k, result) = shell_1494(true, 125.0);
+    let (k, result) = shell_1494(125.0);
     assert!(report(
         &k,
         "wr_578 shell/1494 seam 125",
@@ -139,11 +139,11 @@ fn wr_578_seam_125_shells_sound() {
     ));
 }
 
-/// Without the opt-in the shell is not that sound body (upstream refuses it, 1001).
+/// Loop-gap closure is now the default, so the formerly refused shell is sound.
 #[test]
-fn wr_578_box_and_cylinder_shell_without_the_opt_in() {
-    let (k, result) = shell_1494(false, 30.0);
-    assert!(!report(
+fn wr_578_box_and_cylinder_shell_on_the_default_path() {
+    let (k, result) = shell_1494(30.0);
+    assert!(report(
         &k,
         "wr_578 shell/1494 default",
         result,
@@ -160,21 +160,64 @@ fn notched(k: &mut Kernel) -> Brep {
     b
 }
 
+/// Open at the far side under the notch: the floor under the notch (2.5 thick) is thinner
+/// than the two walls' 2 x 1.5, so the cavity never reaches under it and the strip's top
+/// edge vanishes. The fork refused that (1043); with offset faces whose loops cross
+/// rebuilt (WR-345) the shell is built, `check_brep` Level 2 clean and a manifold solid.
+///
+/// Closed form: the notched block 30 x 35 x 7.5 - 22.5 x 5 x 5 = 7312.5 less the cavity,
+/// the block shrunk 1.5 except at the open side y = 35 (x 1.5..28.5, y 1.5..35,
+/// z 1.5..6: 27 x 33.5 x 4.5) less the notch grown 1.5 into it (x < 24, y > 28.5,
+/// z > 1: 22.5 x 6.5 x 4.5), so 7312.5 - (4070.25 - 658.125) = 3900.375.
+///
+/// The shape is pinned beyond its volume too: 16 faces (the block's 9, its y = 35 side
+/// now holed, and the cavity's 7: z 1.5 and 6, x 1.5, 28.5 and 24, y 1.5 and 28.5), the
+/// block's box, and the area. The notched block's surface is the box's 3075 (the notch
+/// moves its top, far and x = 0 pieces to the floor and walls it cuts), less the opening
+/// 4.5 x 4.5 (x 24..28.5, z 1.5..6). The cavity's is twice its L section (27 x 33.5 -
+/// 22.5 x 6.5 = 758.25) plus its sides (perimeter 121, 4.5 high) less the same opening:
+/// 3075 - 20.25 + 2 x 758.25 + 121 x 4.5 - 20.25 = 5095.5.
 #[test]
-fn wr_578_shell_thicker_than_a_step_is_edge_vanishes() {
-    let mut k = kernel(true);
+fn wr_578_shell_thicker_than_a_step_shells_where_its_edge_vanishes() {
+    let mut k = Kernel::default();
     let b = notched(&mut k);
     let strip = planar_faces_at(&k, &b, 1, 35.0);
     assert_eq!(strip.len(), 1, "the far side under the notch");
-    match shell(&mut k, b, -1.5, &strip) {
-        Err(e) => assert_eq!(e.sm_status(), Some(1043)),
-        other => panic!("SM_ERR_OFFSET_EDGE_VANISHES expected: {other:?}"),
+    let mut result = shell(&mut k, b, -1.5, &strip).unwrap();
+    result.use_arena_naming().unwrap();
+    let lines = check_brep(&mut k, &mut result, CheckLevel::Level2)
+        .unwrap()
+        .lines();
+    assert!(lines.is_empty(), "{lines:?}");
+    assert_eq!(result.face_list().len(), 16);
+    let bb = brep_bounding_box(&k, &result, true).unwrap();
+    for (i, hi) in [30.0, 35.0, 7.5].into_iter().enumerate() {
+        assert!(bb.min_at(i).abs() <= 1e-9, "box min {i}: {}", bb.min_at(i));
+        assert!(
+            (bb.max_at(i) - hi).abs() <= 1e-9 * hi,
+            "box max {i}: {}",
+            bb.max_at(i)
+        );
     }
+    let area = brep_area(&k, &mut result, 1e-9).unwrap();
+    let want_area = 3075.0 - 20.25 + 2.0 * 758.25 + 121.0 * 4.5 - 20.25;
+    assert!(
+        (area - want_area).abs() <= 1e-9 * want_area,
+        "area {area}, closed form {want_area}"
+    );
+    let want = 7312.5 - (27.0 * 33.5 * 4.5 - 22.5 * 6.5 * 4.5);
+    assert!(report(
+        &k,
+        "wr_578 notched open under the notch",
+        Ok(result),
+        Some(want),
+        1e-9
+    ));
 }
 
 #[test]
 fn wr_578_notched_box_open_at_the_floor_shells() {
-    let mut k = kernel(true);
+    let mut k = Kernel::default();
     let b = notched(&mut k);
     let floor = planar_faces_at(&k, &b, 2, 2.5);
     assert_eq!(floor.len(), 1, "the notch's floor");
@@ -192,7 +235,7 @@ fn wr_578_notched_box_open_at_the_floor_shells() {
 /// a half circle r 10 (x < 0), a blind hole r 5 along x through the round side at
 /// (y, z) = (12.5, 12.5) from x = -10 to 7.5, shelled 2 inward, open at x = 42.5, on a
 /// clean operand. A prior mass-properties query on the operand changes what the shell
-/// reads (UV trims, a snapped trim, gap caches: WR-583), and the opt-in then refuses it;
+/// reads (UV trims, a snapped trim, gap caches: WR-583), and closure then refuses it;
 /// nothing here measures the operand.
 fn plate_1528(k: &mut Kernel) -> Brep {
     // the profile swept 27.5 along z (one curved side face), as the #1528 fixture builds it
@@ -220,8 +263,8 @@ fn plate_1528(k: &mut Kernel) -> Brep {
     b
 }
 
-fn shell_1528(fixed: bool) -> (Kernel, solidcore::Result<Brep>) {
-    let mut k = kernel(fixed);
+fn shell_1528() -> (Kernel, solidcore::Result<Brep>) {
+    let mut k = Kernel::default();
     let b = plate_1528(&mut k);
     let open = planar_faces_at(&k, &b, 0, 42.5);
     assert_eq!(open.len(), 1, "the far end");
@@ -231,29 +274,21 @@ fn shell_1528(fixed: bool) -> (Kernel, solidcore::Result<Brep>) {
 
 #[test]
 fn wr_578_issue_1528_plate_shells_on_a_clean_operand() {
-    let (k0, default) = shell_1528(false);
-    let default = default.unwrap();
-    assert_eq!(default.face_list().len(), 16, "the default shell's faces");
-    assert_eq!(default.edge_list().len(), 37, "the default shell's edges");
-    assert!(report(
-        &k0,
-        "wr_578 #1528 plate default",
-        Ok(default),
-        None,
-        0.0
-    ));
-    let (k, fixed) = shell_1528(true);
-    let fixed = fixed.unwrap();
-    assert_eq!(fixed.face_list().len(), 16, "the opt-in shell's faces");
-    assert_eq!(fixed.edge_list().len(), 36, "the opt-in shell's edges");
+    let (k, fixed) = shell_1528();
+    let mut fixed = fixed.unwrap();
+    assert_eq!(fixed.face_list().len(), 16, "the default shell's faces");
+    let (old, new) = (10400.212852557255, 10400.212432293585);
+    volume_leak::assert_moved_by_the_old_leak(&k, &mut fixed, old, new, 1e-6);
+    assert_eq!(fixed.edge_list().len(), 36, "the default shell's edges");
     assert!(report(
         &k,
-        "wr_578 #1528 plate opt-in",
+        "wr_578 #1528 plate default",
         Ok(fixed),
         // since #2890 (precise properties integrate from the trims' base): +4.8e-4 from the
         // closed form 10400.212373846494 (issue_1950's), within the volume's accuracy
-        // (1e-6); it was 10400.21299138017, +6.2e-4
-        Some(10400.212852557255),
+        // (1e-6); it was 10400.21299138017, +6.2e-4. Since `brep_volume` closes tolerant
+        // edges' gaps (#16735), +5.6e-9 from it (MEASURED); it was 10400.212852557255
+        Some(new),
         1e-9
     ));
 }

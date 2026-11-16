@@ -1,5 +1,6 @@
-//! Original Z-up equirectangular sampling; RGB remains in the decoded SOURCE space.
-//! Uniform solid-angle sampling deliberately has no luminance CDF or extra pixel copy.
+//! Z-up equirectangular lookup; RGB remains in the decoded SOURCE space.
+//! The captured view borrows either the legacy uniform proposal or an optional
+//! exact-solid-angle importance table prepared and admitted by its owner.
 
 use super::{DecodedHdr, HdrError, HdrErrorCode, MAX_HDR_HEIGHT, MAX_HDR_PIXELS, MAX_HDR_WIDTH, Result};
 use solidcore_record::Vec3;
@@ -14,6 +15,7 @@ fn invalid(message: &str) -> HdrError {
 /// This is not a declaration that source RGB is linear sRGB.
 pub struct Environment<'a> {
     decoded: &'a DecodedHdr,
+    importance: Option<&'a super::environment::PreparedEnvironment>,
     rotation: f64,
     intensity: f64,
 }
@@ -58,7 +60,7 @@ impl<'a> EnvironmentPreparation<'a> {
         if !rotation_radians.is_finite() || !intensity.is_finite() || !(0.0..=64.0).contains(&intensity) {
             return Err(invalid("environment rotation must be finite and intensity within 0..64"));
         }
-        Ok(Self { environment: Some(Environment { decoded, rotation: rotation_radians.rem_euclid(TAU), intensity }), inspected: 0 })
+        Ok(Self { environment: Some(Environment { decoded, importance: None, rotation: rotation_radians.rem_euclid(TAU), intensity }), inspected: 0 })
     }
 
     /// Returns true when validated. Any error consumes preparation; no partial view escapes.
@@ -98,7 +100,15 @@ impl<'a> EnvironmentPreparation<'a> {
     }
 }
 
-impl Environment<'_> {
+impl<'a> Environment<'a> {
+    #[cfg(any(feature = "raytrace-cpu", test))]
+    pub(crate) fn with_importance(mut self, importance: Option<&'a super::environment::PreparedEnvironment>) -> Result<Self> {
+        if importance.is_some_and(|table| table.dimensions() != [self.decoded.info().width, self.decoded.info().height]) {
+            return Err(invalid("environment importance dimensions differ from decoded input"));
+        }
+        self.importance = importance.filter(|table| table.preserves_positive_support());
+        Ok(self)
+    }
     /// Only decoder-owned output can reach this internal consumer fast path.
     /// HdrDecodeTask already validates every corrected texel incrementally.
     #[cfg(feature = "raytrace-cpu")]
@@ -125,7 +135,7 @@ impl Environment<'_> {
     pub fn direct_sample_linear_srgb(
         &self,
         u: [f64; 2],
-        surface: crate::surface::OpaqueSurface,
+        surface: solidcraft_viewport::surface::OpaqueSurface,
         shading_normal: Vec3,
         geometric_normal: Vec3,
         view: Vec3,
@@ -173,6 +183,10 @@ impl Environment<'_> {
     }
 
     pub fn pdf_solid_angle(&self, direction: Vec3) -> Result<f64> {
+        if let Some(table) = self.importance {
+            let [u, v] = self.uv(direction)?;
+            return table.pdf_at_uv([u, v]).map(f64::from).map_err(|e| invalid(&e.to_string()));
+        }
         normalized(direction)?;
         Ok(1.0 / (4.0 * PI))
     }
@@ -183,6 +197,16 @@ impl Environment<'_> {
     pub fn sample(&self, u: [f64; 2]) -> Result<EnvironmentSample> {
         if u.iter().any(|v| !v.is_finite() || *v <= 0.0 || *v >= 1.0) {
             return Err(invalid("environment variates must be finite and strictly between zero and one"));
+        }
+        if let Some(table) = self.importance {
+            let (local, rgb, pdf) = table.sample_pair(u).map_err(|e| invalid(&e.to_string()))?;
+            let (sine, cosine) = self.rotation.sin_cos();
+            let direction = Vec3::new(cosine * local.x - sine * local.y, sine * local.x + cosine * local.y, local.z);
+            return Ok(EnvironmentSample {
+                direction,
+                radiance_source_rgb: Vec3::new(f64::from(rgb[0]), f64::from(rgb[1]), f64::from(rgb[2])) * self.intensity,
+                pdf_solid_angle: f64::from(pdf),
+            });
         }
         let z = 1.0 - 2.0 * u[0];
         let radius = ((1.0 - z) * (1.0 + z)).max(0.0).sqrt();

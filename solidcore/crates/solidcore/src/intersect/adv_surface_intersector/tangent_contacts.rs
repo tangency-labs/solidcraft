@@ -1,12 +1,12 @@
-//! Opt-in search for isolated tangential contact points inside both surfaces
-//! (`Kernel::fixes.ssi_tangent_contact_points`, WR-74, tangency-labs/solidcore#394).
+//! Search for isolated tangential contact points inside both surfaces
+//! (WR-74, tangency-labs/solidcore#394).
 //!
 //! Not upstream: the SolidCraft fork's change to `SmAdvSurfaceIntersector.cpp`
 //! (tangency-labs/smlib@c26edbc). `FindInteriorCurves` only traces crossing curves:
 //! a leaf pair whose normals are within 5 degrees at the seed, whose local
 //! intersection finds nothing, or whose normals are within 2 degrees at the solution
 //! is dropped, so a point where the surfaces merely touch inside both patches is
-//! never reported. With the fix those pairs seed a Newton solve for a tangential
+//! never reported. Here those pairs seed a Newton solve for a tangential
 //! contact (Yang, Jia & Yan 2023: zeros of `S1 - S2` with parallel normals):
 //!
 //! ```text
@@ -28,7 +28,8 @@
 //! | `tp_newton` (private)             | `tp_Newton`                                      |
 //!
 //! Deviations: out-params become return values; `std::min`/`std::max` keep their
-//! operand order (`cpp_min`/`cpp_max`); the ignored `SetMinMax` status is ignored.
+//! operand order (`cpp_min`/`cpp_max`); the `SetMinMax` status SMLib ignores is passed
+//! on (WR-658, fork e7ebc8d).
 //! Not reached for higher-order contacts (equal curvature at the point), where the
 //! system is singular.
 
@@ -197,19 +198,16 @@ struct NewtonResult {
 }
 
 /// `seed` grown by half its size on each side (`tp_Newton`'s `sLocA`/`sLocB`).
-fn grown(seed: &Extent2d, pass_on: bool) -> Result<Extent2d> {
+fn grown(seed: &Extent2d) -> Result<Extent2d> {
     let mut loc = *seed;
     let grow = seed.size();
-    // (the status is ignored: the extent is kept; fork e7ebc8d passes it on: `SER`)
-    let set = loc.set_min_max_coords(
+    // (upstream ignores the status and keeps the extent; fork e7ebc8d passes it on: `SER`)
+    loc.set_min_max_coords(
         seed.min().x - 0.5 * grow.x,
         seed.min().y - 0.5 * grow.y,
         seed.max().x + 0.5 * grow.x,
         seed.max().y + 0.5 * grow.y,
-    );
-    if pass_on {
-        set?;
-    }
+    )?;
     Ok(loc)
 }
 
@@ -231,8 +229,8 @@ fn tp_newton(
 ) -> Result<Option<NewtonResult>> {
     // a seed only has to find a contact near its own patch pair: give up when the
     // iteration leaves the seed patches grown by half their size each side
-    let loc_a = grown(seed_a, k.fixes.brep_edit_statuses_pass_on)?;
-    let loc_b = grown(seed_b, k.fixes.brep_edit_statuses_pass_on)?;
+    let loc_a = grown(seed_a)?;
+    let loc_b = grown(seed_b)?;
 
     let mut converged = false;
     let size_a = dom_a.size();

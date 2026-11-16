@@ -464,9 +464,9 @@ fn rust_err(e: &SolidError) -> Output {
     if let Some(d) = Output::unported(e) {
         return d;
     }
-    match e {
-        SolidError::Upstream { code, .. } => status_err(f64::from(*code)),
-        _ => Output::err(format!("rust_error: {e}")),
+    match solidcore::error::upstream_status(e) {
+        Some(code) => status_err(f64::from(code)),
+        None => Output::err(format!("rust_error: {e}")),
     }
 }
 

@@ -77,6 +77,7 @@ fn cache_kernel(k: &Kernel, context: &Context) -> Kernel {
             crate::topology::topology::NotifyRecords::new(),
         ),
         blend_w_memo: core::cell::RefCell::default(),
+        loop_area_memo: core::cell::RefCell::default(),
         // (inside the caller's operation: a scope opened on the copy keeps its memo)
         blend_operation_scopes: std::sync::Arc::new(core::sync::atomic::AtomicU32::new(
             k.blend_operation_scopes
@@ -761,7 +762,7 @@ impl<'keys> ManifoldKernelAdapter<'keys> {
             .face(face)?
             .surface
             .as_ref()
-            .ok_or_else(|| SolidError::null_pointer(OP))?;
+            .ok_or_else(|| SolidError::entity_missing(OP, "the face has no surface"))?;
         Ok(surface
             .owner()
             .unwrap_or_else(|| arena_identity(CacheObject::Face(face))))
@@ -1592,13 +1593,8 @@ mod tests {
                 &mut deleted,
             )
             .unwrap_err();
-        assert!(matches!(
-            error,
-            SolidError::Upstream {
-                code: crate::error::SM_ERR_NULL_POINTER,
-                ..
-            }
-        ));
+        assert_eq!(error.sm_status(), Some(crate::error::SM_ERR_NULL_POINTER));
+        assert_eq!(error.kind(), crate::error::ErrorKind::Missing);
         assert!(made);
         assert!(deleted.0.is_empty() && deleted.1.is_empty());
         assert!(!adapter.topology_deleted());

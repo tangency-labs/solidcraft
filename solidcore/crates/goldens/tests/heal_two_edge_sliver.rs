@@ -19,7 +19,7 @@
 )] // test helpers
 
 use goldens::step::{build_rust_constructor, Record};
-use step_import::model::{
+use solidcore_record::step::model::{
     BSplineCurve, Body, BodyKind, Bound, Curve, Edge, Face, Frame, Loop, OrientedEdge, Shell,
     Surface, Vertex, P3,
 };
@@ -195,7 +195,7 @@ fn doubled_edge_cube(sag: f64, b_reversed: bool, b_curved: bool) -> Body {
             .collect(),
     };
     // Both kernels build from the decoded encoding, as `--step-case` does.
-    step_import::flat::decode(&step_import::flat::encode(&body)).unwrap()
+    goldens::flat::decode(&goldens::flat::encode(&body)).unwrap()
 }
 
 fn stage<'a>(r: &'a Record, name: &str) -> &'a [f64] {
