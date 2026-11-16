@@ -31,6 +31,14 @@ fn scene_with(auto_to_object: bool) -> Harness {
     let d = h.app.dialog.as_mut().unwrap();
     d.inputs[0].items = vec![Sel::Profile { sketch, index: 0 }];
     d.active = 0;
+    // Extrude decides its operation off the window thread after the profile is picked; Join
+    // shows Target Bodies and New does not, so the form has its final rows only then (#17657).
+    for _ in 0..500 {
+        h.frames(1);
+        if !h.app.dialog.as_ref().is_some_and(|d| d.op_auto.pending) {
+            break;
+        }
+    }
     h.frames(2);
     h
 }

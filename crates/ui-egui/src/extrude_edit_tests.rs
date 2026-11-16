@@ -1028,3 +1028,86 @@ fn double_click_on_the_arrow_reverses_the_direction() {
     h.step(&json!({"widget":"OK"})).unwrap();
     assert_eq!(extent(&h).direction, Direction::Symmetric, "Symmetric stays symmetric");
 }
+
+/// Two boxes and a sketch on the first one's top face whose rectangle reaches over the second
+/// one's top too, as when one extrusion should bridge parts (#17657).
+fn two_boxes_and_a_bridge() -> (Harness, u64) {
+    let mut h = Harness::new();
+    h.app.run("solid.box", json!({"length":10,"width":10,"height":10,"body_name":"Left"})).unwrap();
+    h.app.run("solid.box", json!({"corner":[20,0,0],"length":10,"width":10,"height":10,"body_name":"Right"})).unwrap();
+    let sketch =
+        h.app.run("sketch.create", json!({"plane":{"face":[5,5,10]},"name":"Bridge","project_edges":false})).unwrap()["sketch"].as_u64().unwrap();
+    let plane = crate::open_meshing::session_world(&h.app.session).sketch(sketch).unwrap().plane;
+    let at = |x: f64, y: f64| {
+        use solidcraft_engine::geom::prelude::*;
+        let q = plane.to_local(solidcore_record::Vec3::new(x, y, 10.0));
+        json!([q.x, q.y])
+    };
+    h.app.run("sketch.rectangle.two_point", json!({"p0": at(2.0, 2.0), "p1": at(28.0, 8.0)})).unwrap();
+    h.app.run("sketch.finish", json!({})).unwrap();
+    h.frames(4);
+    (h, sketch)
+}
+
+fn target_bodies(h: &Harness) -> Option<Vec<String>> {
+    use crate::selection::SelectionExt;
+    let d = h.app.dialog.as_ref()?;
+    d.inputs.iter().find(|i| i.label == "Target Bodies").map(|i| i.items.body_names())
+}
+
+/// Extrude's Join shows Target Bodies, and joins the bodies picked there; with none picked it
+/// joins the body its sketch is on, as before. Editing the extrude shows the stored bodies, and
+/// another operation hides the input (#17657).
+#[test]
+fn extrude_join_joins_the_target_bodies_picked_in_the_dialog() {
+    for picked in [vec![], vec!["Left", "Right"]] {
+        let (mut h, sketch) = two_boxes_and_a_bridge();
+        let state = crate::open_meshing::session_world(&h.app.session);
+        assert_eq!(state.sketch(sketch).unwrap().profiles.len(), 1, "one rectangle, no projected outline");
+        let index = 0;
+        h.app.session.selection = vec![solidcraft_engine::Sel::Profile { sketch, index }];
+        h.app.start("solid.extrude");
+        h.frames(4);
+        {
+            let d = h.app.dialog.as_mut().unwrap();
+            let crate::dialogs::Kind::Extrude { operation, auto_op, distance, .. } = &mut d.kind else { panic!("extrude") };
+            *operation = 1;
+            *auto_op = false;
+            *distance = "3 mm".into();
+        }
+        h.frames(2);
+        assert_eq!(target_bodies(&h), Some(vec![]), "Join shows an empty Target Bodies");
+        assert_eq!(h.app.dialog.as_ref().unwrap().active, 0, "the profiles stay the active input");
+        if !picked.is_empty() {
+            let d = h.app.dialog.as_mut().unwrap();
+            d.active = d.inputs.iter().position(|i| i.label == "Target Bodies").unwrap();
+            for name in &picked {
+                d.pick(&h.app.session, solidcraft_engine::Sel::Body { name: (*name).into() });
+            }
+            h.frames(2);
+            assert_eq!(target_bodies(&h), Some(picked.iter().map(|n| n.to_string()).collect()));
+        }
+        h.step(&json!({"widget":"OK"})).unwrap();
+        assert!(h.app.dialog.is_none());
+        let FeatureKind::Extrude { targets, .. } = &h.app.session.doc.features.last().unwrap().kind else { panic!("extrude") };
+        let targets: Vec<String> = targets.iter().map(|t| t.0.clone()).collect();
+        let bodies = crate::open_meshing::session_world(&h.app.session).bodies.len();
+        if picked.is_empty() {
+            assert_eq!(targets, ["Left"], "none picked: the body the sketch is on");
+            assert_eq!(bodies, 2, "Right stays apart");
+        } else {
+            assert_eq!(targets, picked, "the picked bodies");
+            assert_eq!(bodies, 1, "the bridge joins both boxes");
+        }
+        // The editor shows the stored bodies; Cut hides them.
+        let name = h.app.session.doc.features.last().unwrap().name.clone();
+        h.step(&json!({"call":"ui.editFeature","params":{"feature":name}})).unwrap();
+        h.frames(4);
+        assert_eq!(target_bodies(&h), Some(targets.clone()));
+        if let Some(crate::dialogs::Kind::Extrude { operation, .. }) = h.app.dialog.as_mut().map(|d| &mut d.kind) {
+            *operation = 2;
+        }
+        h.frames(2);
+        assert_eq!(target_bodies(&h), None, "Cut has no Target Bodies");
+    }
+}
