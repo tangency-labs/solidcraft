@@ -110,6 +110,7 @@ pub(crate) mod inspect;
 mod interference;
 pub(crate) mod joints;
 mod libraries;
+mod markups;
 pub mod mass_properties;
 mod material_properties;
 mod materials;
@@ -476,6 +477,7 @@ pub fn command_specs() -> Vec<&'static CommandSpec> {
     v.extend(mass_properties::COMMANDS.iter());
     v.extend(browser::COMMANDS.iter());
     v.extend(notes::COMMANDS.iter());
+    v.extend(markups::COMMANDS.iter());
     v.extend(delete::COMMANDS.iter());
     v.extend(edit::COMMANDS.iter());
     v.extend(selection::COMMANDS.iter());
