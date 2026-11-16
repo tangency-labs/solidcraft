@@ -1105,17 +1105,8 @@ mod tests {
     /// The contacts `(t0, t1)` (each point and both ends of each range) of the
     /// intersection `trim_gap` runs in the `gap` cases whose answer moved when WR-455's
     /// contacts at curve ends became the default, as they were before.
-    const OLD_GAP_CONTACTS: [(&str, &[[f64; 2]]); 2] = [
-        ("gen0952", &[[6.145018443004455, -0.9998192898087154]]),
-        (
-            "gen1582",
-            &[
-                [5.506870692968933, 2.1552991104219967],
-                [5.691737667125862, 2.1383307108789595],
-                [7.936480763836001, 1.7024305640764859],
-            ],
-        ),
-    ];
+    const OLD_GAP_CONTACTS: [(&str, &[[f64; 2]]); 1] =
+        [("gen0952", &[[6.145018443004455, -0.9998192898087154]])];
 
     /// WR-455: every moved `gap` row comes from `trim_gap`'s intersection naming a
     /// contact at a curve's end, certified ([`certify_gap_move`]: each solution now is a

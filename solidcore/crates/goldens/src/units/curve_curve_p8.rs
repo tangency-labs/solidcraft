@@ -1044,23 +1044,18 @@ mod tests {
     /// The solution parameters `(t1, t2)` of each `gci` case whose answer
     /// `move_contacts_to_curve_ends` (WR-455) changed when it became the default, as they
     /// were before (point solutions, then both ends of each range, in record order).
-    const OLD_CONTACTS: [(&str, &[[f64; 2]]); 21] = [
-        ("cov_gci_same_cubic_tiny_overlap_split_range", &[[0.5000001, 0.5000001000000001], [0.5, 0.5]]),
+    const OLD_CONTACTS: [(&str, &[[f64; 2]]); 16] = [
         ("gen0170",&[[0.10293145096888041, 0.031106245991575233]]),
-        ("gen0220", &[[0.0, 1.0], [0.125, 0.6733602207082353], [0.25, 0.0]]),
         ("gen0230", &[[0.7605265560887936, 0.08238745303667289]]),
         ("gen0648", &[[0.11942085598003092, 0.16260333259519716]]),
         ("gen0842", &[[0.9441013506215542, 0.19953048265572657], [1.0, 0.21302593458524718]]),
         ("gen0908", &[[0.25, 2.394693425867854], [0.9375, 0.8719219599388043], [1.0, 0.79640986421498]]),
-        ("gen1129", &[[0.5, 0.5242050870766283], [0.625, 0.5961358649703274], [0.6632103192347607, 0.5961358649703274]]),
         ("gen1229", &[[0.7876313347539292, 5.366572686344663]]),
-        ("gen1290", &[[0.5430830025804114, 0.3493738175301483], [0.5625, 0.8592424072925322], [0.5651686847757508, 0.8731142755790283]]),
         ("gen1765", &[[0.7386392440093962, 0.9793042473447834]]),
         ("gen1928",&[[4.996225869481043, 0.532331997056718], [6.370210839904233, 0.3439000040339467]]),
         ("gen2013", &[[4.346141525285653, 0.4911440119946375], [4.548536339158071, 0.6065392749467079]]),
         ("gen2170", &[[0.055671431092715926, 2.1443561827736546]]),
         ("gen2269", &[[-1.1667157446583754, -1.1667157446583754], [-0.2697971714248598, -0.2697971714248598]]),
-        ("gen2279",&[[0.0, 0.07814605425275784], [0.0625, 0.08013287428747595], [0.1875, 0.08586129379790076], [0.3478671618863374, 0.09506073108283451]]),
         ("gen2286", &[[0.9217885018468838, 0.7349578489826648], [1.0, 0.743593012780076]]),
         ("gen2505", &[[0.6520361039435884, -4.186100806676266], [0.840165745577176, -4.184956949731657]]),
         ("gen2606", &[[0.2298402861503189, 0.200803245287278]]),
@@ -1151,11 +1146,10 @@ mod tests {
     /// The certified move took that point onto the range's end `(0.5000001, 0.5000001)`,
     /// and the later passes turned the short range into points at both its ends, so the
     /// contact at `0.5000001` was reported twice (three points, the first and last
-    /// equal). The move now drops a solution landing exactly on a contact another
-    /// solution names. With no point beside it the range is kept: the overlap is
-    /// reported as the one range it is, from `(0.5, 0.5)` to `(0.5000001, 0.5000001)`,
-    /// whose ends are the two points reported before the move (main's answer), and the
-    /// curves stay within the tolerance along it (certified).
+    /// equal). The range overlaps the point's stretch, so it already reports that
+    /// contact and the point is not moved across it (`crosses_a_range`). The answer is
+    /// the solver's: the overlap's two ends, each named once, and the curves stay within
+    /// the tolerance between them (certified).
     #[test]
     fn a_move_onto_a_named_contact_does_not_report_it_twice() {
         let name = "cov_gci_same_cubic_tiny_overlap_split_range";
@@ -1169,15 +1163,13 @@ mod tests {
         let out = rust(&op).unwrap();
         assert_eq!(out.ints["status"], vec![0]);
         let sols = solutions(&out.values["out"]);
-        let range = f64::from(SolutionType::RangeOfValues as i32);
+        let point = f64::from(SolutionType::SingleValue as i32);
         assert_eq!(
             sols,
-            vec![(
-                range,
-                [0.0, 1.0],
-                [0.5, 0.5],
-                Some([0.5000001, 0.5000001000000001])
-            )]
+            vec![
+                (point, [0.0, 1.0], [0.5000001, 0.5000001000000001], None),
+                (point, [0.0, 1.0], [0.5, 0.5], None),
+            ]
         );
         let OpIn::Gci { c1, c2, tol, .. } = &op;
         let a = build(c1).unwrap();
@@ -1185,7 +1177,7 @@ mod tests {
         let k = Kernel::default();
         let within =
             curves_stay_within(&k, &a, &b, [0.5, 0.5], [0.5000001, 0.5000001000000001], *tol);
-        assert!(within.unwrap(), "the range is a coincidence within {tol}");
+        assert!(within.unwrap(), "the curves stay within {tol} between the two ends");
     }
 
     /// WR-455 regression: the move to curve ends is not run on a self intersection. There
