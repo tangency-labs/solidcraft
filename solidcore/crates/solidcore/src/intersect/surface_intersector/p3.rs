@@ -279,11 +279,23 @@ pub(crate) struct DeferredTouching {
     tsp: TsectPnt,
 }
 
+#[cfg(test)]
+impl DeferredTouching {
+    /// A deferred touching point at `point` from `tsp`.
+    pub(crate) fn new(point: Point3, tsp: TsectPnt) -> Self {
+        Self { point, tsp }
+    }
+}
+
 /// Appends the touching curve of `tsp` to `out`: degenerate 3D and UV curves at
 /// `point` and the UV points of `tsp`, of type touching, deviated by the distance
 /// between `tsp`'s surface points (the degenerate point branch of
 /// `FindBoundaryStartPoints`).
-fn push_touching_curve(out: &mut TsectCurves, point: Point3, tsp: &TsectPnt) -> Result<()> {
+pub(crate) fn push_touching_curve(
+    out: &mut TsectCurves,
+    point: Point3,
+    tsp: &TsectPnt,
+) -> Result<()> {
     // 3D curve, then the UV curves
     let c3 = BSplineCurve::create_degenerate_curve(3, point)?;
     out.curves_3d.push(Curve::from(c3));
