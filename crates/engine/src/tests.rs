@@ -4487,7 +4487,8 @@ fn z_span_and_volume(s: &mut Session, body: &str) -> (f64, f64, f64) {
 /// extruded 5 mm From the slope, runs from z 22 - 4 / 2 = 18 at x 24 up to 22 + 5 = 27 at x 16.
 /// A design saved before keeps its flat start at the slope's level under the disc's centre,
 /// z 20 to 25 (#17639). It keeps that start through an edit that keeps its From face, and an
-/// edit that picks another face, the top of a ramp z = 15 + x / 2 over the wedge, starts on that
+/// edit that picks another face on the same plane, even with no name to match, and an edit that
+/// picks a face on another plane, the top of a ramp z = 15 + x / 2 over the wedge, starts on that
 /// face: z 25 - 2 = 23 at x 16 up to 25 + 2 + 6 = 33 at x 24 for a 6 mm post.
 #[test]
 fn extrude_from_a_slanted_face_starts_on_the_face() {
@@ -4511,6 +4512,11 @@ fn extrude_from_a_slanted_face_starts_on_the_face() {
     let mut legacy: Value = serde_json::from_str(&s.doc.to_json()).unwrap();
     legacy["format"] = json!("solidcraft/57");
     legacy.as_object_mut().unwrap().remove("format_pending");
+    // Without the From face's name, as after a paste or in a design named in an older form, the
+    // edits below still find the face by where it is.
+    let names =
+        legacy["features"].as_array_mut().and_then(|f| f.last_mut()).and_then(Value::as_object_mut).and_then(|post| post.remove("face_names"));
+    assert!(names.is_some(), "the post had stored face names");
     let dir = std::env::temp_dir().join(format!("solidcraft-17639-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     let design = dir.join("post.solidcraft");

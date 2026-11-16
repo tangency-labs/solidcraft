@@ -1527,15 +1527,15 @@ fn edit_feature(s: &mut Session, p: &Value) -> Result<Value> {
     if nf.kind.face_points() != f.kind.face_points() || f.kind.face_point_fields().iter().any(|path| sets_path(set, path)) {
         nf.face_names = solidcraft_doc::face_point_names(&s.doc, &s.model.state_before(id), &nf.kind, nf.component)?;
     }
-    if !sets_path(set, "extent.from_level") {
-        keep_from_level_on_the_same_face(&f, &mut nf);
-    }
     // A new To or From Object pick measures against the placements shown now (#16732).
     if let (FeatureKind::Extrude { extent: a, .. }, FeatureKind::Extrude { extent: b, .. }) = (&nf.kind, &f.kind)
         && (a.to != b.to || a.from != b.from)
     {
         let before = s.model.state_before(id);
         super::component::pin_picked_placements_in(s, &mut nf.kind, nf.component, &before);
+    }
+    if !sets_path(set, "extent.from_level") {
+        keep_from_level_on_the_same_face(s, &f, &mut nf);
     }
     if let Some(slot) = s.doc_mut().feature_mut(id) {
         *slot = nf;
@@ -2117,24 +2117,24 @@ fn input_keys(kind: &FeatureKind) -> Vec<(String, solidcraft_doc::expr::Kind)> {
 }
 
 /// An old design's From Object keeps starting at the face's level (`from_level`) through an edit
-/// that keeps its From face: the same pick, or a pick whose face has the same name. A From picked
-/// on another face is a new choice, so it starts on that face, as a new extrude does. `after`'s
-/// face names must already name its picks.
-fn keep_from_level_on_the_same_face(before: &Feature, after: &mut Feature) {
-    let (FeatureKind::Extrude { extent: was, .. }, FeatureKind::Extrude { extent: now, .. }) = (&before.kind, &mut after.kind) else {
+/// that keeps its From face: the same pick, or a pick of a face on the same plane, found as the
+/// build finds it in the model before the feature. A From picked on another plane is a new
+/// choice, so it starts on that face, as a new extrude does. `after`'s face names and picked
+/// placements must already be its own.
+fn keep_from_level_on_the_same_face(s: &Session, before: &Feature, after: &mut Feature) {
+    let (FeatureKind::Extrude { extent: was, .. }, FeatureKind::Extrude { extent: now, .. }) = (&before.kind, &after.kind) else {
         return;
     };
-    // The From face's name follows the To face's in a feature's face names.
-    let from_name =
-        |extent: &solidcraft_doc::Extent, names: &[String]| names.get(usize::from(extent.to.is_some())).filter(|name| !name.is_empty()).cloned();
-    let same_face = match (&was.from, &now.from) {
-        (Some(a), Some(b)) => {
-            a.dist(b.0) < 1e-8
-                || from_name(was, &before.face_names).is_some_and(|name| from_name(now, &after.face_names).as_deref() == Some(name.as_str()))
-        }
-        _ => false,
-    };
-    now.from_level = was.from_level && same_face;
+    let keep = was.from_level
+        && match (&was.from, &now.from) {
+            (Some(a), Some(b)) => {
+                a.dist(b.0) < 1e-8 || solidcraft_doc::same_extrude_from_plane(&s.doc, &s.model.state_before(before.id), before, after)
+            }
+            _ => false,
+        };
+    if let FeatureKind::Extrude { extent, .. } = &mut after.kind {
+        extent.from_level = keep;
+    }
 }
 
 fn redefine(s: &mut Session, p: &Value) -> Result<Value> {
@@ -2315,7 +2315,7 @@ fn redefine(s: &mut Session, p: &Value) -> Result<Value> {
     {
         after.to_body_apart = before.to_body_apart;
     }
-    keep_from_level_on_the_same_face(&old, &mut new);
+    keep_from_level_on_the_same_face(s, &old, &mut new);
     // A boundary surface's loop of sketch curves and its curve network are one command's two
     // forms: an edit may turn one into the other.
     let boundary = |k: &FeatureKind| matches!(k, FeatureKind::SurfaceBoundary { .. } | FeatureKind::SurfaceNetwork { .. });
