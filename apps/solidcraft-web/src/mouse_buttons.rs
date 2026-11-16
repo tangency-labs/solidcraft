@@ -261,7 +261,7 @@ mod web {
                         let _ = canvas.set_pointer_capture(e.pointer_id());
                     }
                     let mut tracker = tracker.borrow_mut();
-                    if source == "pen" && e.button() == 0 && name != "pointermove" {
+                    if source == "pen" && web_sys::MouseEvent::button(e) == 0 && name != "pointermove" {
                         tracker.note_pen(e.pointer_id(), name == "pointerdown", down_on_canvas, at());
                     }
                     if tracker.note(Happened::Pointer { buttons: e.buttons(), down_on_canvas }) {
