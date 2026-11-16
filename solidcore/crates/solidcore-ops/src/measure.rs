@@ -3,6 +3,7 @@
 //! application's picks compare, and each face's area, centroid and plane normal and each edge's
 //! length and middle. Every number is the kernel's; ops converts and compares.
 
+use solidcore::curve::from_parameters;
 use solidcore::error::EntityRef;
 use solidcore::geom::attribute::{AttributeStore, ObjectKey};
 use solidcore::geom::object::Shape;
@@ -17,10 +18,12 @@ use solidcore::query::api_queries::{
     edge_face_gap_samples, face_normal_at_edge,
 };
 use solidcore::query::brep::{BrepClassifier, BrepQuery, LiveBrepObjects};
+use solidcore::query::face::p1 as face_p1;
 use solidcore::topology::brep::outward_solid_failure;
+use solidcore::topology::edgeuse::p1 as eu1;
 use solidcore::topology::face::p2::{self as face_p2, face_side_regions};
 use solidcore::topology::{edge, face};
-use solidcore::topology::{Brep, BrepId, FaceId, FaceuseId, RegionId};
+use solidcore::topology::{Brep, BrepId, EdgeId, FaceId, FaceuseId, RegionId};
 use solidcore::{Kernel, Point3, Vec3};
 
 use crate::blend::middle;
@@ -37,6 +40,16 @@ impl Answer for [f64; 3] {}
 impl Answer for Vec<Option<f64>> {}
 impl Answer for Vec<Vec<Option<f64>>> {}
 impl Answer for Vec<Result<PointClass>> {}
+impl Answer for Vec<f64> {}
+
+/// A planar face square to a direction ([`Body::face_square_level`]).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct SquareFaceLevel {
+    /// The signed distance from the origin to the face's plane, along the direction.
+    pub level: f64,
+    /// The face's own tolerance: levels closer than this are the same level on the face.
+    pub tolerance: f64,
+}
 
 fn array(v: Vec3) -> [f64; 3] {
     [v.x, v.y, v.z]
@@ -305,6 +318,24 @@ pub struct Normal {
 pub fn point_distance(a: [f64; 3], b: [f64; 3]) -> Result<Distance> {
     let (a, b) = (point(a)?, point(b)?);
     q::point_distance(a, b).map(Distance::from).map_err(status)
+}
+
+/// The largest distance from `p` to a point of the box `[lo, hi]`: to its farthest corner
+/// (`query::api_queries::box_max_distance_to_point`).
+///
+/// # Errors
+/// [`Error::Argument`] for a coordinate that is not finite.
+pub fn box_max_distance_to_point(lo: [f64; 3], hi: [f64; 3], p: [f64; 3]) -> Result<f64> {
+    q::box_max_distance_to_point(point(lo)?, point(hi)?, point(p)?).map_err(status)
+}
+
+/// Whether two points meet: their distance is within `tol` (the rounded distance of
+/// [`point_distance`], not more than `tol`).
+///
+/// # Errors
+/// Those of [`point_distance`].
+pub fn points_meet(a: [f64; 3], b: [f64; 3], tol: f64) -> Result<bool> {
+    Ok(point_distance(a, b)?.value <= tol)
 }
 
 impl Body {
@@ -616,6 +647,134 @@ impl Body {
         })
     }
 
+    /// The rim of record faces `faces`: the record edges with a face of the set on one side only,
+    /// in record order. A seam (its face on both sides) and an edge between two faces of the set
+    /// are not on it, whether the faces meet smoothly there or not. Empty when the faces close up
+    /// on their own, as a whole sphere's do. [`Body::outline_cuts`] cuts with this rim.
+    ///
+    /// # Errors
+    /// [`Error::Argument`] for an index past the faces or a face with no side that faces out;
+    /// [`Error::Unsupported`] for a face with material on both sides; any other kernel error.
+    pub fn rim_edges(&self, order: &Order, faces: &[usize]) -> Result<Vec<usize>> {
+        let set = faces
+            .iter()
+            .map(|&i| order::face(order, i))
+            .collect::<Result<Vec<_>>>()?;
+        with_body("rim_edges", self, |_, b| {
+            let rims = match rim_edges(b, &set)? {
+                Ok(rims) => rims,
+                Err(e) => return Ok(Err(e)),
+            };
+            let indices = (0..order.edges.len())
+                .filter(|&i| order.edges.get(i).is_some_and(|e| rims.contains(e)));
+            Ok(Ok(indices.collect()))
+        })?
+    }
+
+    /// Where the rim of record faces `faces` cuts `outline`, a curve over `interval` (the record's
+    /// parameter) that lies in the plane through `point` with normal `normal`: the outline's
+    /// parameters, in order. The rim is [`Body::rim_edges`]: the edges with a face of the set on
+    /// one side only, so not a seam or an edge between two faces of the set, smooth or not. A
+    /// crossing of a rim edge with the plane (`edge_plane_crossings`; a stretch gives its two ends)
+    /// is a cut when the kernel's closest point of the outline to it is within the edge's tolerance
+    /// and inside `interval`; a crossing at a vertex already cut is not cut again. So an outline
+    /// that is one line of the plane keeps only the crossings on that line, and two edges meeting
+    /// at a vertex on it cut it once.
+    ///
+    /// A crossing inside an edge is cut where the outline meets the surface of the face across the
+    /// edge (`edge_crossing_on_face`): the edge's curve holds the rim only to its tolerance (a
+    /// traced curve's), the face's surface exactly. So the cut is exact when the outline lies on
+    /// the set's own surface, as a contour lies on a sphere and a silhouette on a cone. A crossing
+    /// at a vertex is the vertex's, and a stretch's ends are where the edge leaves the plane within
+    /// its tolerance.
+    ///
+    /// # Errors
+    /// [`Error::Argument`] for an index past the faces, a face with no side that faces out, a
+    /// coordinate that is not finite or an outline the kernel can't hold; [`Error::Unsupported`]
+    /// for a rim edge without exactly one face across it (a sheet's free edge, an edge of three
+    /// faces); the kernel's refusal of a normal of no direction or an interval that doesn't
+    /// increase, and of a cut its solve doesn't reach within the edge's tolerance
+    /// ([`Error::Status`]); any other kernel error.
+    pub fn outline_cuts(
+        &self,
+        order: &Order,
+        faces: &[usize],
+        outline: &solidcore_record::brep::Curve,
+        interval: [f64; 2],
+        point_on: [f64; 3],
+        normal: [f64; 3],
+    ) -> Result<Vec<f64>> {
+        let set = faces
+            .iter()
+            .map(|&i| order::face(order, i))
+            .collect::<Result<Vec<_>>>()?;
+        let (on, normal) = (point(point_on)?, point(normal)?);
+        let record = solidcore_convert::curve(outline).map_err(|_| Error::Argument)?;
+        with_body("outline_cuts", self, |k, b| {
+            let made = from_parameters::from_parameters(k, &record, interval)?;
+            let rims = match rim_edges(b, &set)? {
+                Ok(rims) => rims,
+                Err(e) => return Ok(Err(e)),
+            };
+            let (mut cuts, mut cut_vertices) = (Vec::new(), Vec::new());
+            for e in rims {
+                let tolerance = b.edge(e)?.tolerance;
+                for crossing in q::edge_plane_crossings(k, b, e, on, normal)? {
+                    let (ends, stretch) = match crossing {
+                        q::PlaneCrossing::Point(p) => (vec![p], false),
+                        q::PlaneCrossing::Along { start, end } => (vec![start, end], true),
+                    };
+                    for end in ends {
+                        if end.vertex.is_some_and(|v| cut_vertices.contains(&v)) {
+                            continue;
+                        }
+                        // a cut only within the edge's tolerance of the outline (written to
+                        // accept: a distance that isn't a number is no cut)
+                        let near = q::curve_closest_point(k, &made.curve, end.point)?;
+                        let within = near.closest.distance <= tolerance;
+                        if !within {
+                            continue;
+                        }
+                        // Inside the edge, its curve holds the rim only to its tolerance: the cut
+                        // is where the outline meets the face across the edge. A vertex is its own
+                        // point, and a stretch ends where the edge leaves the plane's tolerance.
+                        let at = if stretch || end.vertex.is_some() {
+                            near.parameter
+                        } else {
+                            let face = match across(b, e, &set)? {
+                                Ok(face) => face,
+                                Err(refusal) => return Ok(Err(refusal)),
+                            };
+                            q::edge_crossing_on_face(
+                                k,
+                                b,
+                                e,
+                                face,
+                                &made.curve,
+                                &made.interval,
+                                near.parameter,
+                            )?
+                        };
+                        let t = from_parameters::record_parameter(
+                            &record,
+                            interval,
+                            at,
+                            made.curve.evaluate_point(k, at)?,
+                        );
+                        // on its interval as the kernel classifies it: a cut a solve rounds just
+                        // past an end is on that end
+                        if let Some(t) = from_parameters::on_interval(interval, t) {
+                            cuts.push(t);
+                            cut_vertices.extend(end.vertex);
+                        }
+                    }
+                }
+            }
+            cuts.sort_by(f64::total_cmp);
+            Ok(Ok(cuts))
+        })?
+    }
+
     /// The distance from record vertex `vertex`'s point to `p`, with its proved rounding bound.
     ///
     /// # Errors
@@ -677,6 +836,32 @@ impl Body {
             return Err(Error::Status(crate::error::INVALID_INPUT));
         }
         Ok(a)
+    }
+
+    /// The point of record face `face`'s surface nearest `p`, when `p` lies on that face itself
+    /// within `tolerance` (on its trimmed area, an edge or a vertex of it), else `None`: the
+    /// kernel drops `p` onto the surface and classifies it against the face's own trim loops
+    /// (`query::face::p1::point_on_face`), so a point on another face of the same surface is
+    /// not on this one.
+    ///
+    /// # Errors
+    /// [`Error::Argument`] for an index past the faces, a coordinate that is not finite or a
+    /// tolerance that is not finite and positive; the kernel's error.
+    pub fn point_on_face(
+        &self,
+        order: &Order,
+        face: usize,
+        p: [f64; 3],
+        tolerance: f64,
+    ) -> Result<Option<[f64; 3]>> {
+        let f = order::face(order, face)?;
+        let p = point(p)?;
+        if !(tolerance.is_finite() && tolerance > 0.0) {
+            return Err(Error::Argument);
+        }
+        with_body("point_on_face", self, |k, b| {
+            face_p1::point_on_face(k, b, f, p, tolerance).map(|n| Ok(n.map(|n| [n.x, n.y, n.z])))
+        })?
     }
 
     /// The area of record face `face` and the centroid of that area
@@ -747,6 +932,50 @@ impl Body {
         }))
     }
 
+    /// Where record face `face` lies along `direction`, when it is a plane square to it: the
+    /// signed distance from `origin` to the face's plane measured along `direction` (a point of
+    /// the face, its centroid, dotted with the unit `direction`), and the face's own tolerance
+    /// (`SmFace::GetTolerance`), the distance within which the kernel takes a point for being on
+    /// the face. `None` for a face that is not planar ([`Body::face_plane_normal`]) or whose
+    /// normal is not parallel to `direction`: the normal's cross with the unit `direction` is
+    /// longer than the normal's proved bound plus the kernel's model tolerance
+    /// (`NL_MTOL`, `nurbs::math::MODEL_TOL`), the tilt below which the kernel takes two
+    /// directions for the same.
+    ///
+    /// # Errors
+    /// [`Error::Argument`] for an index past the faces, a `direction` or `origin` that is not
+    /// finite, or input the kernel's query refuses (a `direction` of no length); the errors of
+    /// [`Body::face_plane_normal`] and [`Body::face_centroid`].
+    pub fn face_square_level(
+        &self,
+        order: &Order,
+        face: usize,
+        direction: [f64; 3],
+        origin: [f64; 3],
+    ) -> Result<Option<SquareFaceLevel>> {
+        let f = order::face(order, face)?;
+        let direction = point(direction)?;
+        let origin = point(origin)?;
+        let Some(n) = self.face_plane_normal(order, face)? else {
+            return Ok(None);
+        };
+        let on_face = point(self.face_centroid(order, face, 1e-8)?.centroid)?;
+        let Some(level) =
+            q::face_square_level(point(n.value)?, n.bound, on_face, direction, origin).map_err(
+                |e| match e {
+                    solidcore::SolidError::InvalidInput { .. } => Error::Argument,
+                    e => status(e),
+                },
+            )?
+        else {
+            return Ok(None);
+        };
+        let tolerance = with_body("face_tolerance", self, |_k, b| {
+            Ok(Ok::<f64, Error>(face::tolerance(b, f)?))
+        })??;
+        Ok(Some(SquareFaceLevel { level, tolerance }))
+    }
+
     /// The length of record edge `edge` (`SmApiEdgeComputeLength`) at `relative_accuracy`, as
     /// the kernel's contract takes it (ops passes it on as given).
     ///
@@ -800,6 +1029,43 @@ impl Body {
 /// # Errors
 /// The kernel's `UnsureRegion` for a side it is unsure is material; `NotFound` for a dangling
 /// id.
+/// The rim of the faces `set` ([`Body::outline_cuts`]): each of their edges that lies once on the
+/// set's outward uses ([`outer_faceuse`]), so with a face of the set on one side only, in the
+/// faces' edge order. A seam lies twice on its face's use and an edge between two faces of the
+/// set once on each, so neither is a rim; whether the faces meet smoothly there does not matter.
+///
+/// # Errors
+/// [`Error::Argument`] or [`Error::Unsupported`] (inner) for a face with no side that faces out;
+/// the kernel's errors (outer).
+fn rim_edges(b: &Brep, set: &[FaceId]) -> solidcore::Result<Result<Vec<EdgeId>>> {
+    let mut outward = Vec::with_capacity(set.len());
+    for &f in set {
+        match outer_faceuse(b, f)? {
+            Ok(fu) => outward.push(fu),
+            Err(e) => return Ok(Err(e)),
+        }
+    }
+    let (mut seen, mut rims) = (Vec::new(), Vec::new());
+    for &f in set {
+        for e in face::edges(b, f, None, false, None)? {
+            if seen.contains(&e) {
+                continue;
+            }
+            seen.push(e);
+            let mut on_set = 0;
+            for u in edge::edgeuses(b, e, None, None)? {
+                if eu1::faceuse(b, u)?.is_some_and(|fu| outward.contains(&fu)) {
+                    on_set += 1;
+                }
+            }
+            if on_set == 1 {
+                rims.push(e);
+            }
+        }
+    }
+    Ok(Ok(rims))
+}
+
 pub(crate) fn outer_faceuse(b: &Brep, f: FaceId) -> solidcore::Result<Result<FaceuseId>> {
     let (Some(x), Some(y)) = face_p2::faceuses(b, f)? else {
         return Ok(Err(Error::Argument));
@@ -820,10 +1086,36 @@ pub(crate) fn outer_faceuse(b: &Brep, f: FaceId) -> solidcore::Result<Result<Fac
     })
 }
 
+/// The face across rim edge `e` from the faces `set` ([`Body::outline_cuts`]): the one face of
+/// the edge's uses that is not in the set.
+///
+/// # Errors
+/// [`Error::Unsupported`] (inner) for an edge with no face across it (a sheet's free edge) or
+/// more than one (an edge of three faces or more); the kernel's errors (outer).
+fn across(b: &Brep, e: EdgeId, set: &[FaceId]) -> solidcore::Result<Result<FaceId>> {
+    let mut faces = Vec::new();
+    for u in edge::edgeuses(b, e, None, None)? {
+        let face = match eu1::faceuse(b, u)? {
+            Some(fu) => b.faceuse(fu)?.face,
+            None => None,
+        };
+        if let Some(f) = face.filter(|f| !set.contains(f) && !faces.contains(f)) {
+            faces.push(f);
+        }
+    }
+    Ok(match faces.as_slice() {
+        [f] => Ok(*f),
+        _ => Err(Error::Unsupported(
+            "a rim edge without exactly one face across it",
+        )),
+    })
+}
+
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
     use crate::{make_box, session};
+    use solidcore::surface::surface::SurfaceKind;
 
     fn all_fixes() {
         session::set_thread_fixes(solidcore::kernel::UpstreamFixes::NAMES.iter().copied()).unwrap();
@@ -879,6 +1171,9 @@ pub(crate) mod tests {
         }
         let d = point_distance([1.0, 2.0, 3.0], [4.0, 6.0, 15.0]).unwrap();
         assert_eq!(d.value, 13.0);
+        assert!(points_meet([1.0, 2.0, 3.0], [4.0, 6.0, 15.0], 13.0).unwrap());
+        assert!(!points_meet([1.0, 2.0, 3.0], [4.0, 6.0, 15.0], 12.9).unwrap());
+        assert!(points_meet([f64::NAN, 0.0, 0.0], [0.0; 3], 1.0).is_err());
         // the outward normal of each face at each of its edges is an axis, pointing away from the
         // box's middle
         let mut normals = 0;
@@ -1290,6 +1585,50 @@ pub(crate) mod tests {
         assert!(rel(area, 36.0 * PI), "{area}");
     }
 
+    /// A box's faces square to +Z: the top and the bottom, at their closed-form levels measured
+    /// from an origin off the box; the four sides are not square to it, and nor is a direction
+    /// tilted past the model tolerance; a sphere has no planar face.
+    #[test]
+    fn a_box_face_square_to_a_direction_is_found_at_its_level() {
+        all_fixes();
+        let b = make_box([0.0, 0.0, 1.0], [2.0, 3.0, 4.0]).unwrap();
+        let o = kernel_order(&b);
+        let mut levels = Vec::new();
+        for f in 0..o.faces.len() {
+            if let Some(s) = b
+                .face_square_level(&o, f, [0.0, 0.0, 2.0], [5.0, 5.0, 0.5])
+                .unwrap()
+            {
+                assert!(s.tolerance > 0.0 && s.tolerance < 1e-3, "{s:?}");
+                levels.push(s.level);
+            }
+        }
+        levels.sort_by(f64::total_cmp);
+        assert_eq!(levels.len(), 2, "{levels:?}");
+        assert!(
+            (levels[0] - 0.5).abs() < 1e-9 && (levels[1] - 4.5).abs() < 1e-9,
+            "{levels:?}"
+        );
+        for f in 0..o.faces.len() {
+            assert_eq!(
+                b.face_square_level(&o, f, [0.0, 0.01, 1.0], [0.0; 3])
+                    .unwrap(),
+                None
+            );
+        }
+        let ball = crate::make_sphere([0.0, 0.0, 0.0], 3.0).unwrap();
+        let ob = kernel_order(&ball);
+        assert_eq!(
+            ball.face_square_level(&ob, 0, [0.0, 0.0, 1.0], [0.0; 3])
+                .unwrap(),
+            None
+        );
+        assert!(matches!(
+            b.face_square_level(&o, 0, [0.0; 3], [0.0; 3]),
+            Err(Error::Argument)
+        ));
+    }
+
     /// The partition of two merged boxes: its plane normal refused (no side faces out), as
     /// [`Body::face_normal_at_edge`] refuses it, while the outer box's faces have theirs.
     #[test]
@@ -1354,5 +1693,279 @@ pub(crate) mod tests {
         for (i, row) in t.iter().enumerate() {
             assert_eq!(row[i], m.moments[i], "{t:?}");
         }
+    }
+
+    /// The faces of `b` (in its kernel order `o`) whose surface `is` picks.
+    fn faces_on(b: &Body, o: &Order, is: fn(&SurfaceKind) -> bool) -> Vec<usize> {
+        let brep = b.lock();
+        (0..o.faces.len())
+            .filter(|&i| is(face::surface(&brep, o.faces[i]).unwrap().unwrap().kind()))
+            .collect()
+    }
+
+    /// The faces of `b` (in its kernel order `o`) whose area centroid `at` picks.
+    fn faces_at(b: &Body, o: &Order, at: impl Fn([f64; 3]) -> bool) -> Vec<usize> {
+        (0..o.faces.len())
+            .filter(|&i| at(b.face_centroid(o, i, 1e-8).unwrap().centroid))
+            .collect()
+    }
+
+    fn close(cuts: &[f64], want: &[f64]) -> bool {
+        cuts.len() == want.len() && cuts.iter().zip(want).all(|(a, b)| (a - b).abs() <= 1e-9)
+    }
+
+    #[test]
+    fn outline_cuts_of_a_sphere_with_a_hole_are_the_contour_s_closed_form_angles() {
+        // a sphere of radius 5 less a cylinder of radius 1 about x = 3, y = 0: seen along y, its
+        // contour is the circle x^2 + z^2 = 25 in y = 0, which the hole's rims cross where
+        // x = 2 (z = +-sqrt 21) and x = 4 (z = +-3). The face set is the sphere's: its rim is the
+        // hole's two rims; its seam, which lies on the contour, is on the sphere on both sides
+        all_fixes();
+        let sphere = crate::make_sphere([0.0, 0.0, 0.0], 5.0).unwrap();
+        let hole = crate::make_cylinder([3.0, 0.0, -10.0], 1.0, 20.0).unwrap();
+        let b = crate::boolean::boolean(sphere, hole, crate::BooleanOp::Subtract)
+            .unwrap()
+            .unwrap();
+        let o = kernel_order(&b);
+        let contour = solidcore_record::brep::Curve::Circle {
+            frame: solidcore_record::brep::Frame {
+                origin: [0.0, 0.0, 0.0],
+                x_axis: [1.0, 0.0, 0.0],
+                y_axis: [0.0, 0.0, 1.0],
+            },
+            radius: 5.0,
+        };
+        let turn = std::f64::consts::TAU;
+        let cuts = b
+            .outline_cuts(
+                &o,
+                &faces_on(&b, &o, |s| matches!(s, SurfaceKind::Sphere(_))),
+                &contour,
+                [0.0, turn],
+                [0.0, 0.0, 0.0],
+                [0.0, 1.0, 0.0],
+            )
+            .unwrap();
+        // atan2(3, 4) and atan2(sqrt 21, 2)
+        let (near, far) = (0.643_501_108_793_284_4, 1.159_279_480_727_408_5);
+        assert!(
+            close(&cuts, &[near, far, turn - far, turn - near]),
+            "{cuts:?}"
+        );
+    }
+
+    #[test]
+    fn outline_cuts_of_a_hole_seen_off_axis_are_exact_inside_its_rims() {
+        // the sphere with the hole above, seen along (7, -24, 0) / 25: its contour is the circle of
+        // radius 5 in the plane of the z axis and d = (24, 7, 0) / 25, at angle t from d towards
+        // +z. A point s along d is on the hole where s^2 - 6 s (24 / 25) + 8 = 0, so at
+        // s = (72 -+ sqrt 184) / 25, and the hole's rims cut the contour at acos(s / 5) and at
+        // their mirrors. They cross the contour's plane at the hole's angles 73.4 and 139.1
+        // degrees, away from its seam and the sphere's (in y = 0): inside the rim edges, whose
+        // curves the boolean traced
+        all_fixes();
+        let sphere = crate::make_sphere([0.0, 0.0, 0.0], 5.0).unwrap();
+        let hole = crate::make_cylinder([3.0, 0.0, -10.0], 1.0, 20.0).unwrap();
+        let b = crate::boolean::boolean(sphere, hole, crate::BooleanOp::Subtract)
+            .unwrap()
+            .unwrap();
+        let o = kernel_order(&b);
+        let contour = solidcore_record::brep::Curve::Circle {
+            frame: solidcore_record::brep::Frame {
+                origin: [0.0, 0.0, 0.0],
+                x_axis: [0.96, 0.28, 0.0],
+                y_axis: [0.0, 0.0, 1.0],
+            },
+            radius: 5.0,
+        };
+        let turn = std::f64::consts::TAU;
+        let cuts = b
+            .outline_cuts(
+                &o,
+                &faces_on(&b, &o, |s| matches!(s, SurfaceKind::Sphere(_))),
+                &contour,
+                [0.0, turn],
+                [0.0, 0.0, 0.0],
+                [0.28, -0.96, 0.0],
+            )
+            .unwrap();
+        // acos((72 + sqrt 184) / 125) and acos((72 - sqrt 184) / 125)
+        let (near, far) = (0.816_855_004_760_949_2, 1.084_355_294_332_124_4);
+        assert!(
+            close(&cuts, &[near, far, turn - far, turn - near]),
+            "{cuts:?}"
+        );
+    }
+
+    #[test]
+    fn outline_cuts_of_a_cut_cone_keep_only_its_own_silhouette() {
+        // a frustum of base radius 4 and top radius 1, 6 high: its apex would be at z = 8, and its
+        // right silhouette seen along y runs from the apex to (4, 0, 0), x = 4 - z / 2. Less the
+        // part past x = 2, its cut edge (a hyperbola) crosses that silhouette at (2, 0, 4), a
+        // half of the way; the top circle meets it at (1, 0, 6), a quarter of the way. The face set
+        // is the cone's; its seam lies on that silhouette and is on the cone on both sides
+        all_fixes();
+        let silhouette = solidcore_record::brep::Curve::Line {
+            start: [0.0, 0.0, 8.0],
+            end: [4.0, 0.0, 0.0],
+        };
+        // less the box from x = from_x, 10 wide
+        let cut = |from_x: f64| {
+            let cone = crate::make_cone([0.0, 0.0, 0.0], 4.0, 1.0, 6.0).unwrap();
+            let past = make_box([from_x, -10.0, -1.0], [10.0, 20.0, 10.0]).unwrap();
+            let b = crate::boolean::boolean(cone, past, crate::BooleanOp::Subtract)
+                .unwrap()
+                .unwrap();
+            let o = kernel_order(&b);
+            b.outline_cuts(
+                &o,
+                &faces_on(&b, &o, |s| matches!(s, SurfaceKind::Cone(_))),
+                &silhouette,
+                [0.0, 1.0],
+                [0.0, 0.0, 0.0],
+                [0.0, 1.0, 0.0],
+            )
+            .unwrap()
+        };
+        let cuts = cut(2.0);
+        assert!(close(&cuts, &[0.25, 0.5]), "{cuts:?}");
+        // less the part where x < -2 instead: its hyperbola crosses the mirror silhouette at
+        // (-2, 0, 4), which is no cut of this one; the base circle's (4, 0, 0) is its end
+        let other = cut(-12.0);
+        assert!(close(&other, &[0.25, 1.0]), "{other:?}");
+    }
+
+    #[test]
+    fn outline_cuts_at_a_vertex_cut_once() {
+        // the unit box's front face, y = 0, and the line through (-1, 0, 0) and (2, 0, 0) in z = 0:
+        // the face's bottom edge lies on it from (0, 0, 0) to (1, 0, 0), and its two upright edges
+        // end at those corners; each corner is one cut, a third and two thirds along
+        all_fixes();
+        let b = make_box([0.0, 0.0, 0.0], [1.0, 1.0, 1.0]).unwrap();
+        let o = kernel_order(&b);
+        let line = solidcore_record::brep::Curve::Line {
+            start: [-1.0, 0.0, 0.0],
+            end: [2.0, 0.0, 0.0],
+        };
+        let cuts = b
+            .outline_cuts(
+                &o,
+                &faces_at(&b, &o, |c| c[1].abs() <= 1e-9),
+                &line,
+                [0.0, 1.0],
+                [0.0, 0.0, 0.0],
+                [0.0, 0.0, 1.0],
+            )
+            .unwrap();
+        assert!(close(&cuts, &[1.0 / 3.0, 2.0 / 3.0]), "{cuts:?}");
+    }
+
+    #[test]
+    fn outline_cuts_keep_a_rim_where_the_faces_meet_smoothly() {
+        // a hemisphere of radius 5 below z = 0 and a cylinder of radius 5 from z = 0 to 5 above it,
+        // one revolved solid: they meet smoothly on the circle of radius 5 in z = 0. Seen along y,
+        // the hemisphere's contour is the circle of radius 5 in y = 0, at angle t from -z towards
+        // +x; that rim crosses it at (5, 0, 0) and (-5, 0, 0), t = pi / 2 and -pi / 2
+        all_fixes();
+        let arc = crate::sweep::Curve::Arc {
+            center: [0.0; 3],
+            axis: [0.0, 1.0, 0.0],
+            reference: [1.0, 0.0, 0.0],
+            radius: 5.0,
+            start: 0.0,
+            end: std::f64::consts::FRAC_PI_2,
+        };
+        let line = |start: [f64; 3], end: [f64; 3]| crate::sweep::Curve::Line { start, end };
+        let profile = [
+            arc,
+            line([0.0, 0.0, -5.0], [0.0, 0.0, 5.0]),
+            line([0.0, 0.0, 5.0], [5.0, 0.0, 5.0]),
+            line([5.0, 0.0, 5.0], [5.0, 0.0, 0.0]),
+        ];
+        let turn = std::f64::consts::TAU;
+        let b = crate::sweep::revolve(&profile, [0.0; 3], [0.0, 0.0, 1.0], turn, true).unwrap();
+        let o = kernel_order(&b);
+        let below = faces_at(&b, &o, |c| c[2] < 0.0);
+        assert_eq!(below.len(), 1, "{below:?}");
+        let contour = solidcore_record::brep::Curve::Circle {
+            frame: solidcore_record::brep::Frame {
+                origin: [0.0, 0.0, 0.0],
+                x_axis: [0.0, 0.0, -1.0],
+                y_axis: [1.0, 0.0, 0.0],
+            },
+            radius: 5.0,
+        };
+        let half = std::f64::consts::PI;
+        let cuts = b
+            .outline_cuts(
+                &o,
+                &below,
+                &contour,
+                [-half, half],
+                [0.0, 0.0, 0.0],
+                [0.0, 1.0, 0.0],
+            )
+            .unwrap();
+        let quarter = std::f64::consts::FRAC_PI_2;
+        assert!(close(&cuts, &[-quarter, quarter]), "{cuts:?}");
+    }
+
+    #[test]
+    fn outline_cuts_refuse_what_they_cannot_read() {
+        all_fixes();
+        let b = make_box([0.0, 0.0, 0.0], [1.0, 1.0, 1.0]).unwrap();
+        let o = kernel_order(&b);
+        let line = solidcore_record::brep::Curve::Line {
+            start: [-1.0, 0.0, 0.0],
+            end: [2.0, 0.0, 0.0],
+        };
+        let past = b.outline_cuts(
+            &o,
+            &[o.faces.len()],
+            &line,
+            [0.0, 1.0],
+            [0.0; 3],
+            [0.0, 0.0, 1.0],
+        );
+        assert!(matches!(past, Err(Error::Argument)), "{past:?}");
+        for bad in [f64::NAN, f64::INFINITY] {
+            let point = b.outline_cuts(
+                &o,
+                &[0],
+                &line,
+                [0.0, 1.0],
+                [bad, 0.0, 0.0],
+                [0.0, 0.0, 1.0],
+            );
+            assert!(matches!(point, Err(Error::Argument)), "{point:?}");
+            let normal = b.outline_cuts(&o, &[0], &line, [0.0, 1.0], [0.0; 3], [0.0, bad, 1.0]);
+            assert!(matches!(normal, Err(Error::Argument)), "{normal:?}");
+        }
+        // a normal of no direction is the kernel's refusal
+        assert!(b
+            .outline_cuts(&o, &[0], &line, [0.0, 1.0], [0.0; 3], [0.0; 3])
+            .is_err());
+    }
+
+    #[test]
+    fn rim_edges_are_the_edges_with_the_set_on_one_side() {
+        // a box's top face: its four edges, in record order; all six faces, and a whole sphere's
+        // faces (whose seam has the sphere on both sides), close up and have none
+        all_fixes();
+        let b = make_box([0.0, 0.0, 0.0], [1.0, 1.0, 1.0]).unwrap();
+        let o = kernel_order(&b);
+        let top = faces_at(&b, &o, |c| (c[2] - 1.0).abs() <= 1e-9);
+        let on_top: Vec<usize> = (0..o.edges.len())
+            .filter(|&i| (b.edge_middle(&o, i).unwrap()[2] - 1.0).abs() <= 1e-9)
+            .collect();
+        assert_eq!(on_top.len(), 4, "{on_top:?}");
+        assert_eq!(b.rim_edges(&o, &top), Ok(on_top));
+        let all: Vec<usize> = (0..o.faces.len()).collect();
+        assert_eq!(b.rim_edges(&o, &all), Ok(Vec::new()));
+        assert_eq!(b.rim_edges(&o, &[o.faces.len()]), Err(Error::Argument));
+        let ball = crate::make_sphere([0.0, 0.0, 0.0], 5.0).unwrap();
+        let ball_order = kernel_order(&ball);
+        let whole = faces_on(&ball, &ball_order, |s| matches!(s, SurfaceKind::Sphere(_)));
+        assert_eq!(ball.rim_edges(&ball_order, &whole), Ok(Vec::new()));
     }
 }

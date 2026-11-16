@@ -371,6 +371,7 @@ impl Builder {
                 second_follows_first: false,
                 corner: None,
                 to_body_apart: false,
+                picked_placements: Vec::new(),
             },
             operation,
             targets,

@@ -1251,7 +1251,7 @@ impl Lit {
         *self.from_view.get_or_insert_with(|| {
             #[cfg(test)]
             FROM_VIEW_WORKED_OUT.with(|n| n.set(n.get() + 1));
-            [crate::timeline::hovered_feature(app), crate::timeline::picked_feature(app)]
+            [crate::timeline::hovered_feature(app).or(app.viewport.hover_feature), crate::timeline::picked_feature(app)]
         })
     }
 
@@ -1303,7 +1303,15 @@ impl Lit {
             Some(Hit::Plane { name, .. }) => Some(Thing::Plane(name.clone())),
             Some(Hit::Axis { name }) => Some(Thing::Axis(name.clone())),
             Some(Hit::ConstructionPoint { name }) => Some(Thing::Point(name.clone())),
-            None => None,
+            None => app.viewport.hover_feature.and_then(|id| {
+                app.session.doc.feature(id).and_then(|f| match &f.kind {
+                    FeatureKind::Sketch { .. } => Some(Thing::Sketch(id)),
+                    FeatureKind::ConstructionPlane { .. } => Some(Thing::Plane(f.name.clone())),
+                    FeatureKind::ConstructionAxis { .. } => Some(Thing::Axis(f.name.clone())),
+                    FeatureKind::ConstructionPoint { .. } => Some(Thing::Point(f.name.clone())),
+                    _ => None,
+                })
+            }),
         };
         // Unless the Browser follows the 3D view, a body's placement is not looked up for the rows
         // above it (that names every placement again after each edit): only the one Find in
@@ -3637,21 +3645,20 @@ pub(crate) fn occurrence_triad(app: &mut SolveApp, ui: &mut egui::Ui, painter: &
     app.tree.occurrence_move = Some(m);
 }
 
-/// Dimensions of finished sketches whose dimensions are shown (Show Dimensions), drawn over the
-/// viewport like the sketch being edited draws its own (`crate::dim_view`). A double-click on a
-/// value edits it in place without editing the sketch (`crate::dim_view::model_double_click`).
-pub fn dims_overlay(app: &SolveApp, ctx: &egui::Context) {
+/// Dimensions of finished sketches whose dimensions are shown (Show Dimensions), drawn with the
+/// viewport's own `painter` like the sketch being edited draws its own (`crate::dim_view`), so
+/// panels and the ribbon over the viewport cover them (#16846). A double-click on a value edits
+/// it in place without editing the sketch (`crate::dim_view::model_double_click`).
+pub fn dims_overlay(app: &SolveApp, painter: &egui::Painter, proj: &crate::viewport::Proj) {
     use solidcore_record::Vec2;
     use solidcraft_engine::sketch::{DimFrame, chain_centres, default_text, dim_layout_reaching, dim_reach};
     crate::dim_view::set_model_drawn(Vec::new());
-    let Some(rect) = app.viewport.rect else { return };
     if app.session.visibility.shown_dimensions.is_empty() {
         return;
     }
+    let rect = painter.clip_rect();
     let mut drawn = Vec::new();
     let tk = Tokens::get();
-    let proj = crate::viewport::projection(app, rect);
-    let painter = ctx.layer_painter(egui::LayerId::background()).with_clip_rect(rect);
     let st = crate::open_meshing::session_world(&app.session);
     for id in app
         .session
@@ -3694,7 +3701,7 @@ pub fn dims_overlay(app: &SolveApp, ctx: &egui::Context) {
             }
             for (tip, dir) in &lay.arrows {
                 if let (Some(t), Some(back)) = (to(*tip), to(*tip - *dir * px)) {
-                    crate::icons::markers::dimension_arrow(&painter, t, back, col);
+                    crate::icons::markers::dimension_arrow(painter, t, back, col);
                 }
             }
             let Some(tc) = to(lay.text) else { continue };

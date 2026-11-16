@@ -158,6 +158,19 @@ impl ExecutiveAccess<Handle> for Access {
     fn solver_edge(&self, _: Handle) -> Result<Handle> {
         Ok(Handle(5))
     }
+    // scripted: every rail and end section on its face (no cliff overflow to choose)
+    fn solver_rails_fit_judged(&mut self, _: &mut Kernel, _: Handle) -> Result<RailsFit> {
+        Ok(RailsFit {
+            fit: true,
+            rolls_over: false,
+            into_material: false,
+            left_across: Vec::new(),
+            wraps_past_both_ends: false,
+        })
+    }
+    fn solver_end_sections_fit(&mut self, _: &mut Kernel, _: Handle) -> Result<bool> {
+        Ok(true)
+    }
     fn solver_approx_tolerance(&self, _: Handle) -> Result<f64> {
         Ok(self.solver_tolerance.unwrap_or(0.125))
     }
@@ -735,6 +748,7 @@ fn state() -> FilletExecutive<Handle> {
         open_ends: Vec::new(),
         overflow_first: false,
         classify_only: false,
+        roll_over_pass: false,
         overflow_edges: Vec::new(),
         mitred_edges: Vec::new(),
         fan_split_points: Vec::new(),

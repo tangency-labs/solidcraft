@@ -515,6 +515,28 @@ impl JsonSchema for ChainTarget {
     }
 }
 
+/// `appearance.copy` takes one parameter, the `appearance.chain` target whose look goes into the
+/// session's look clipboard. Unlike `appearance.pick_up`, which asks the UI to sample one, this call
+/// has no form without a target.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct AppearanceCopyParams {
+    /// The body, face or component whose look to copy.
+    pub target: ChainTarget,
+}
+
+/// What a copy request answers: the look that went into the clipboard, which is what
+/// `appearance.paste` then applies. The clipboard is transient session state: nothing is saved with
+/// the design and no dialog opens.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct AppearanceCopyResult {
+    /// The look that was copied.
+    pub look: LookReply,
+    /// In the warn parameter-check mode: what the call's parameters got wrong.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub param_warnings: Vec<String>,
+}
+
 #[cfg(test)]
 #[path = "appearance_tests.rs"]
 mod tests;

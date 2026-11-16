@@ -1,6 +1,6 @@
 //! A projected edge stays the edge that was picked: its link keeps the edge's persistent name,
 //! so the edge is found by that name wherever a change of the body takes it, and no other edge
-//! is taken for it when it is split or gone: the sketch fails, asking for the edge again.
+//! is taken for it when it is split or gone: the sketch fails, naming the projection it lost.
 
 use serde_json::{Value, json};
 use solidcore_record::{Vec2, Vec3};
@@ -120,17 +120,27 @@ fn a_projected_edge_stays_that_edge_when_the_body_changes_size() {
     assert!(matches!(&stored(&s).source, LinkSource::Edge { body, at } if body == "Body1" && at.dist(Vec3::new(400.0, 25.0, 20.0)) < 1e-6));
 }
 
-/// What sketch `Top` asks to be picked again, when it fails for a reference it lost.
-fn reselect(s: &Session) -> Option<String> {
+/// The projections sketch `Top` says are lost, when it fails for them.
+fn lost(s: &Session) -> Option<String> {
     let r = s.model.result(s.doc.find_feature("Top").unwrap().id).unwrap();
-    r.error.as_deref().and_then(solidcraft_doc::reselect_parts).filter(|(feature, _)| *feature == "Top").map(|(_, reference)| reference.to_string())
+    r.error.as_deref().and_then(solidcraft_doc::lost_projection_parts).filter(|t| t.feature == "Top").map(|t| t.listed.to_string())
+}
+
+/// How sketch `Top` names its projected edge: by its body and its curve, never by the edge's
+/// persistent name `name`.
+#[track_caller]
+fn assert_lost_edge(s: &Session, name: &str) {
+    let sk = s.doc.sketch(s.doc.find_feature("Top").unwrap().id).unwrap();
+    let curve = &sk.curves[sk.link_curves(&sk.links[0].id)[0]].id;
+    assert_eq!(lost(s), Some(format!("projected edge of Body1 (curve {curve})")), "{}", trouble(s));
+    assert!(!trouble(s).contains(name), "{}", trouble(s));
 }
 
 /// A slot cut through the plate from x = 80 to 120, y = 20 to 30 leaves the picked edge in two
-/// pieces, y = 0..20 and y = 30..50. Neither is the edge: the sketch fails, asking for it again
+/// pieces, y = 0..20 and y = 30..50. Neither is the edge: the sketch fails, naming its projection
 /// (never the piece nearest the pick); without the slot it is the whole edge again.
 #[test]
-fn a_projected_edge_that_was_split_fails_its_sketch_asking_for_the_edge_again() {
+fn a_projected_edge_that_was_split_fails_its_sketch_naming_the_lost_projection() {
     let mut s = Session::default();
     plate(&mut s);
     run(&mut s, "sketch.create", json!({"plane": "XY", "name": "SlotSketch"}));
@@ -142,15 +152,15 @@ fn a_projected_edge_that_was_split_fails_its_sketch_asking_for_the_edge_again() 
     assert_line(&s, 100.0, (0.0, 50.0), "drawn");
     let name = stored(&s).edge_name.unwrap();
     run(&mut s, "timeline.suppress", json!({"feature": "Slot", "suppressed": false}));
-    assert_eq!(reselect(&s), Some(name), "{}", trouble(&s));
+    assert_lost_edge(&s, &name);
     run(&mut s, "timeline.suppress", json!({"feature": "Slot", "suppressed": true}));
     assert_line(&s, 100.0, (0.0, 50.0), "whole again");
     assert_eq!(trouble(&s), "");
 }
 
 /// A fillet of radius 4 takes the picked edge away. Its two tangent edges are 4 from the picked
-/// point, the nearest edges there are now: the sketch takes neither of them, it fails, asking for
-/// its edge again. Without the fillet the link has its edge again.
+/// point, the nearest edges there are now: the sketch takes neither of them, it fails, naming its
+/// projection. Without the fillet the link has its edge again.
 #[test]
 fn a_projected_edge_that_is_gone_fails_its_sketch_not_replaced() {
     let mut s = Session::default();
@@ -161,7 +171,7 @@ fn a_projected_edge_that_is_gone_fails_its_sketch_not_replaced() {
     assert_line(&s, 100.0, (0.0, 50.0), "drawn");
     let name = stored(&s).edge_name.unwrap();
     run(&mut s, "timeline.suppress", json!({"feature": "Round", "suppressed": false}));
-    assert_eq!(reselect(&s), Some(name), "{}", trouble(&s));
+    assert_lost_edge(&s, &name);
     run(&mut s, "timeline.suppress", json!({"feature": "Round", "suppressed": true}));
     assert_eq!(trouble(&s), "");
     assert!(!link(&s).lost);
@@ -190,12 +200,12 @@ fn a_sketch_that_lost_its_projected_edge_opens_with_its_curves_and_the_link_mark
     let curves = |s: &mut Session| run(s, "sketch.inspect", json!({"sketch": "Top"}))["curves"].as_array().map_or(0, Vec::len);
     let name = stored(&s).edge_name.unwrap();
     run(&mut s, "timeline.suppress", json!({"feature": "Round", "suppressed": false}));
-    assert_eq!(reselect(&s), Some(name.clone()), "{}", trouble(&s));
+    assert_lost_edge(&s, &name);
     assert!(s.model.state().sketch(top).is_none(), "a failed sketch not edited is not shown");
     assert!(boss_error(&s).is_some());
 
     run(&mut s, "sketch.edit", json!({"sketch": "Top", "restore_marker": false}));
-    assert_eq!(reselect(&s), Some(name.clone()), "still fails while edited");
+    assert_lost_edge(&s, &name);
     assert!(boss_error(&s).is_some(), "the extrude does not build from the held sketch");
     assert!(link(&s).lost);
     assert_line(&s, 100.0, (0.0, 50.0), "kept where it was");
@@ -451,4 +461,87 @@ fn dependent_sketch_on_extruded_corners_survives_parameter_jump_15324() {
         assert!(a.dist(Vec2::new(0.0, h)) < 1e-6, "Hoehe={h}: vertex 0 moved to {a:?}");
         assert!(b.dist(Vec2::new(1.5, h)) < 1e-6, "Hoehe={h}: vertex 1 moved to {b:?}");
     }
+}
+
+/// The closed-path sweep "Tube" with the sketch "Top" projecting its outer top corner.
+fn tube_with_projected_corner() -> Session {
+    let mut s = Session::default();
+    run(&mut s, "parameters.add", json!({"name": "Hoehe", "expression": "6 mm"}));
+    // The corners are rounded unevenly: walls that mirror each other would tie when their pieces
+    // are numbered by place, and which of them is first then follows the tessellation.
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Path"}));
+    run(&mut s, "sketch.line", json!({"points": [[-20, -20], [22, -20]], "infer": false, "ids": ["l1"]}));
+    run(&mut s, "sketch.arc.center_point", json!({"center": [22, -12], "start": [22, -20], "end": [30, -12], "id": "a1"}));
+    run(&mut s, "sketch.line", json!({"points": [[30, -12], [30, 14]], "infer": false, "ids": ["l2"]}));
+    run(&mut s, "sketch.arc.center_point", json!({"center": [24, 14], "start": [30, 14], "end": [24, 20], "id": "a2"}));
+    run(&mut s, "sketch.line", json!({"points": [[24, 20], [-22, 20]], "infer": false, "ids": ["l3"]}));
+    run(&mut s, "sketch.arc.center_point", json!({"center": [-22, 12], "start": [-22, 20], "end": [-30, 12], "id": "a3"}));
+    run(&mut s, "sketch.line", json!({"points": [[-30, 12], [-30, -10]], "infer": false, "ids": ["l4"]}));
+    run(&mut s, "sketch.arc.center_point", json!({"center": [-20, -10], "start": [-30, -10], "end": [-20, -20], "id": "a4"}));
+    run(&mut s, "sketch.finish", json!({}));
+    // A 2 wide, Hoehe tall section square to l1 at its middle: world y -21..-19, z 0..Hoehe.
+    run(&mut s, "sketch.create", json!({"plane": {"origin": [0, -20, 0], "x_dir": [0, 1, 0], "y_dir": [0, 0, 1]}, "name": "Prof"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [-1, 0], "p1": [1, "Hoehe"]}));
+    run(&mut s, "sketch.finish", json!({}));
+    let path = json!(["l1", "a1", "l2", "a2", "l3", "a3", "l4", "a4"]);
+    run(&mut s, "solid.sweep", json!({"sketch": "Prof", "path_sketch": "Path", "path": path, "operation": "new", "body_name": "Tube"}));
+    let faces = run(&mut s, "model.faces", json!({"body": "Tube"}));
+    for f in faces["faces"].as_array().unwrap() {
+        let name = f["name"].as_str().unwrap();
+        assert!(f["exact"] == json!(true) && name.contains(":side:"), "every wall named by its profile curve exactly: {f}");
+    }
+    // The outer top corner where the arc a2 meets the line l3, half way round from the profile.
+    run(&mut s, "sketch.create", json!({"plane": "YZ", "name": "Top"}));
+    run(&mut s, "sketch.project", json!({"refs": [{"vertex": [24, 21, 6], "body": "Tube"}]}));
+    run(&mut s, "sketch.finish", json!({}));
+    s
+}
+
+/// #17229: a sweep round a closed path of lines and arcs makes a wall along each segment of the
+/// path, and every one of them is named, from the sweep's exact history, by the profile curve it
+/// is swept from. A vertex where two of those walls meet, far round the path from the profile,
+/// is projected into a sketch: when an upstream parameter makes the profile taller, the link
+/// finds that vertex by its name, where it went.
+#[test]
+fn a_projected_vertex_of_a_sweep_round_a_closed_path_follows_a_taller_profile() {
+    let mut s = tube_with_projected_corner();
+    assert!(stored(&s).vertex_name.is_some(), "the projected vertex stores its name");
+    for h in [9.0, 16.0, 4.0] {
+        run(&mut s, "parameters.change", json!({"name": "Hoehe", "expression": format!("{h} mm")}));
+        assert_eq!(trouble(&s), "", "Hoehe {h}");
+        assert!(!link(&s).lost, "Hoehe {h}");
+        let st = s.model.state();
+        let sk = &st.sketch(s.doc.find_feature("Top").unwrap().id).unwrap().sketch;
+        let at = sk.points[sk.link_points(&sk.links[0].id)[0]].pos;
+        assert!(at.dist(Vec2::new(21.0, h)) < 1e-6, "Hoehe {h}: the vertex is at {at:?}");
+    }
+}
+
+/// #17229: a design saved with the vertex link's guessed name dropped, and rolled back to before
+/// the sweep, stores the name the link has on the whole timeline as it opens, so a taller profile
+/// afterwards cannot move the link to the nearer vertex at the bottom.
+#[test]
+fn a_dropped_vertex_name_of_a_design_opened_rolled_back_is_stored_as_it_opens() {
+    let s = tube_with_projected_corner();
+    let want = stored(&s).vertex_name.clone().expect("stored name");
+    let mut doc = (*s.doc).clone();
+    let top = doc.find_feature("Top").unwrap().id;
+    let sweep = doc.features.iter().position(|f| f.name != "Top" && matches!(f.kind, solidcraft_doc::FeatureKind::Sweep { .. })).unwrap();
+    if let Ok(sk) = doc.sketch_mut(top) {
+        for l in &mut sk.links {
+            l.vertex_name = None;
+            l.name_dropped = true;
+        }
+    }
+    doc.marker = Some(sweep);
+    let mut s = Session::opened_at(solidcraft_doc::Document::from_json(&doc.to_json()).unwrap(), None, None);
+    let l = s.doc.sketch(top).unwrap().links[0].clone();
+    assert!(!l.name_dropped && l.vertex_name.as_deref() == Some(want.as_str()), "stored at open: {l:?}");
+    run(&mut s, "timeline.roll_to", json!({"position": "end"}));
+    run(&mut s, "parameters.change", json!({"name": "Hoehe", "expression": "16 mm"}));
+    assert_eq!(trouble(&s), "");
+    let st = s.model.state();
+    let sk = &st.sketch(top).unwrap().sketch;
+    let at = sk.points[sk.link_points(&sk.links[0].id)[0]].pos;
+    assert!(at.dist(Vec2::new(21.0, 16.0)) < 1e-6, "the vertex is at {at:?}");
 }

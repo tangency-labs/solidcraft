@@ -288,6 +288,29 @@ fn a_body_cut_in_pieces_twice_gets_pieces_of_their_own_names() {
     assert!(names.contains(&"Bar (2)".to_string()), "{names:?}");
 }
 
+/// The pieces a cut leaves of a body are made of what the body was: each takes its physical
+/// material and appearance. Before, a piece past the first came out with neither.
+#[test]
+fn pieces_cut_off_a_body_keep_its_material_and_appearance() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 40, "width": 5, "height": 5, "body_name": "Bar"}));
+    run(&mut s, "material.assign", json!({"bodies": ["Bar"], "material": "Steel"}));
+    run(&mut s, "appearance.assign", json!({"bodies": ["Bar"], "color": "#d01c1c"}));
+    run(&mut s, "solid.box", json!({"corner": [19, -1, -1], "length": 2, "width": 7, "height": 7, "body_name": "Gap"}));
+    let r = run(&mut s, "solid.combine", json!({"target": "Bar", "tools": ["Gap"], "operation": "cut"}));
+    let pieces: Vec<String> = s.model.state().bodies.iter().map(|b| b.name.clone()).collect();
+    assert_eq!(pieces.len(), 2, "{pieces:?} {r}");
+    let look = s.doc.appearances.bodies.get("Bar").cloned();
+    assert!(look.is_some());
+    for piece in &pieces {
+        assert_eq!(s.doc.materials.get(piece).map(String::as_str), Some("Steel"), "{piece}");
+        assert_eq!(s.doc.appearances.bodies.get(piece), look.as_ref(), "{piece}");
+    }
+    // Undone, the cut takes the pieces' material and look with it.
+    run(&mut s, "edit.undo", json!({}));
+    assert!(pieces.iter().filter(|p| *p != "Bar").all(|p| !s.doc.materials.contains_key(p) && !s.doc.appearances.bodies.contains_key(p)));
+}
+
 /// A join that bridges two bodies makes them one body, not an overlap of the first and the second.
 #[test]
 fn extrude_a_face_where_another_body_lies_flush_on_it() {
@@ -1153,6 +1176,7 @@ fn hostile_params_never_panic() {
         "size",
         "web",
         "clip",
+        "margin",
         "through_all",
         "depth",
         "dot_grid",
@@ -1176,6 +1200,12 @@ fn hostile_params_never_panic() {
                         // call behind one lock, so building the box for each of the ~3000 calls
                         // ran one after another on every thread (over half an hour in CI).
                         let mut start = Session::default();
+                        // Hostile plugin ids must never name packages in the user's real install folder.
+                        start.plugin_state.plugins_dir = Some(solidcraft_io::vfs::temp_dir().join(format!(
+                            "solidcraft-hostile-plugins-{}-{}",
+                            std::process::id(),
+                            id.replace('.', "-")
+                        )));
                         let _ = start.execute("solid.box", &json!({"length": 10, "width": 10, "height": 10}));
                         let _ = start.execute("sketch.create", &json!({"plane": "XY"}));
                         let _ = start.execute("sketch.rectangle.two_point", &json!({"p0": [0, 0], "p1": [5, 5]}));
@@ -1269,7 +1299,7 @@ fn only_own_ids_name_commands() {
 fn unknown_commands_suggest_the_closest_ids() {
     let mut s = Session::default();
     let mut msg = |id: &str| s.execute(id, &serde_json::json!({})).unwrap_err().to_string();
-    assert_eq!(msg("file.open"), "unknown command `file.open` (did you mean `doc.open` or `panel.open`?)");
+    assert_eq!(msg("file.open"), "unknown command `file.open` (did you mean `doc.open`, `panel.open` or `tab.view.open`?)");
     assert!(msg("solid.extrud").starts_with("unknown command `solid.extrud` (did you mean `solid.extrude`"), "{}", msg("solid.extrud"));
     assert!(msg("Extrude").contains("`solid.extrude`"), "{}", msg("Extrude"));
     assert_eq!(msg("FusionFilletEdgesCommand"), "unknown command `FusionFilletEdgesCommand`");
@@ -1501,6 +1531,39 @@ fn step_box_file(tag: &str) -> std::path::PathBuf {
     p
 }
 
+/// #15111: a STEP file just opened is a design never saved, yet closing it loses nothing the file
+/// doesn't hold: `unchanged_import` says so until the design changes, a body is hidden or it is
+/// saved as a design. A design file opened is never one.
+#[test]
+fn an_opened_step_file_is_an_unchanged_import_until_it_changes() {
+    let p = step_box_file("unchanged");
+    let open = || {
+        let mut s = Session::default();
+        run(&mut s, "doc.open", json!({"path": p.to_string_lossy()}));
+        s
+    };
+    let mut s = open();
+    assert!(s.is_dirty() && s.unchanged_import());
+    run(&mut s, "inspect.measure", json!({}));
+    assert!(s.unchanged_import(), "measuring changes nothing");
+    let body = s.model.state().bodies[0].name.clone();
+    run(&mut s, "browser.visibility", json!({"items": [body], "visible": false}));
+    assert!(!s.unchanged_import(), "a hidden body is a change to save");
+    run(&mut s, "edit.undo", json!({}));
+    assert!(s.unchanged_import(), "undone, the design is the file again");
+    run(&mut s, "solid.box", json!({"length": 5, "width": 5, "height": 5, "corner": [100, 0, 0]}));
+    assert!(!s.unchanged_import(), "a new feature is a change");
+
+    let mut s = open();
+    let saved = p.with_extension("sc");
+    run(&mut s, "file.save_as", json!({"path": saved.to_string_lossy()}));
+    assert!(!s.is_dirty() && !s.unchanged_import(), "saved, it is a design like any other");
+    let mut again = Session::default();
+    run(&mut again, "doc.open", json!({"path": saved.to_string_lossy()}));
+    assert!(!again.unchanged_import(), "a design file is not an import");
+    let _ = std::fs::remove_dir_all(p.parent().unwrap());
+}
+
 /// File → Open of a STEP file gives an Import base feature, and features work on its faces.
 #[test]
 fn step_open_then_model_on_it() {
@@ -1583,6 +1646,63 @@ fn join_onto_a_finely_faceted_import() {
     run(&mut d, "solid.extrude", json!({"sketch": "Pin", "distance": 25, "operation": "join"}));
     assert_eq!(d.model.state().bodies.len(), 1);
     assert!(rel(volume(&mut d), prism + 10.0 * 10.0 * 15.0) < 1e-6, "{}", volume(&mut d));
+}
+
+/// #8192: `file.insert_step`'s `matrix` translation takes length expressions. The import keeps the
+/// ones that name parameters and follows them, through undo, a save and an open; numbers keep
+/// working; a bad expression, or one outside the translation column, is refused before the file is
+/// read and leaves the design as it was.
+#[test]
+fn step_insert_matrix_translation_follows_its_parameters() {
+    let p = step_box_file("insert-expr");
+    let mut d = Session::default();
+    run(&mut d, "solid.box", json!({"length": 5, "width": 5, "height": 5, "corner": [100, 0, 0]}));
+    run(&mut d, "parameters.add", json!({"name": "station", "expression": "10 mm"}));
+    let r = run(&mut d, "file.insert_step", json!({"path": p.to_string_lossy(), "matrix": [1, 0, 0, "station", 0, 1, 0, "2 mm", 0, 0, 1, 0]}));
+    let occ = r["occurrence"].as_u64().unwrap();
+    // A grounded occurrence stays put (its expressions keep up), so the import is let go.
+    run(&mut d, "occurrence.ground", json!({"occurrence": occ, "grounded": false}));
+    let x = |d: &Session| d.doc.occurrences.iter().find(|o| o.id == occ).unwrap().transform[3];
+    assert_eq!(x(&d)[..3], [10.0, 2.0, 0.0], "{r}");
+    assert_eq!(r["transform"][3][0], 10.0, "{r}");
+    let o = d.doc.occurrences.iter().find(|o| o.id == occ).unwrap();
+    assert_eq!(o.expressed_moves.len(), 1);
+    assert_eq!(o.expressed_moves[0].translate, [Some("station".to_string()), None, None], "text that names no parameter is a number");
+
+    run(&mut d, "parameters.change", json!({"name": "station", "expression": "25 mm"}));
+    assert_eq!(x(&d)[..3], [25.0, 2.0, 0.0]);
+    run(&mut d, "edit.undo", json!({}));
+    assert_eq!(x(&d)[..3], [10.0, 2.0, 0.0]);
+    run(&mut d, "edit.redo", json!({}));
+    assert_eq!(x(&d)[..3], [25.0, 2.0, 0.0]);
+
+    // Saved and opened, it still follows.
+    let saved = p.with_file_name("placed.sc");
+    run(&mut d, "file.save", json!({"path": saved.to_string_lossy()}));
+    let mut opened = Session::default();
+    run(&mut opened, "doc.open", json!({"path": saved.to_string_lossy()}));
+    run(&mut opened, "parameters.change", json!({"name": "station", "expression": "40 mm"}));
+    let o = opened.doc.occurrences.iter().find(|o| o.id == occ).unwrap();
+    assert_eq!(o.transform[3][..3], [40.0, 2.0, 0.0]);
+
+    // Numbers work as they did and keep nothing.
+    let mut n = Session::default();
+    run(&mut n, "solid.box", json!({"length": 5, "width": 5, "height": 5, "corner": [100, 0, 0]}));
+    let r = run(&mut n, "file.insert_step", json!({"path": p.to_string_lossy(), "matrix": [1, 0, 0, 10, 0, 1, 0, 2, 0, 0, 1, 0]}));
+    assert_eq!(r["transform"][3][0], 10.0, "{r}");
+    assert!(n.doc.occurrences.iter().all(|o| o.expressed_moves.is_empty()));
+
+    // Refused: the design is as it was, and the file is not read for a bad matrix.
+    let before = d.doc.clone();
+    for (matrix, expected) in [
+        (json!([1, 0, 0, "nope", 0, 1, 0, 0, 0, 0, 1, 0]), "matrix translation `nope`"),
+        (json!([1, 0, 0, "30 deg", 0, 1, 0, 0, 0, 0, 1, 0]), "matrix translation `30 deg`"),
+        (json!([1, 0, 0, 0, 0, "station", 0, 0, 0, 0, 1, 0]), "only its translation column"),
+    ] {
+        let e = d.execute("file.insert_step", &json!({"path": p.to_string_lossy(), "matrix": matrix})).unwrap_err().to_string();
+        assert!(e.contains(expected), "{e}");
+        assert_eq!(d.doc, before);
+    }
 }
 
 /// Shell an imported body; insert STEP into an existing design; extension case; bad files.
@@ -1983,6 +2103,33 @@ fn measure_origin_planes_axes_and_points() {
     // The XY plane and the Z axis meet: nothing between them.
     let r = run(&mut s, "inspect.measure", json!({"items": [{"type": "plane", "name": "XY"}, {"type": "axis", "name": "Z"}]}));
     assert!(r["distance_mm"].as_f64().unwrap().abs() < 1e-9, "{r}");
+    // An axis runs on for ever: it meets a plane past the ends of the segment it is drawn as.
+    run(&mut s, "construct.plane.offset", json!({"base": "XY", "offset": 2e6, "name": "Far"}));
+    let r = run(&mut s, "inspect.measure", json!({"items": [{"type": "axis", "name": "Z"}, {"type": "plane", "name": "Far"}]}));
+    assert!(r["distance_mm"].as_f64().unwrap().abs() < 1e-9, "{r}");
+    // An axis parallel to a tilted plane, 5 off it: its ends' heights differ only by rounding,
+    // which is no crossing.
+    for (i, (a, b)) in [(0.3, 0.7), (1.1, -0.45), (0.123, 2.5), (-0.77, 0.31)].into_iter().enumerate() {
+        let k = (1.0f64 + a * a + b * b).sqrt();
+        let n = [-a / k, -b / k, 1.0 / k];
+        let o = [7.0 + 5.0 * n[0], -3.0 + 5.0 * n[1], 10.0 + 7.0 * a - 3.0 * b + 5.0 * n[2]];
+        run(
+            &mut s,
+            "construct.plane.three_points",
+            json!({"a": {"point": [0, 0, 10]}, "b": {"point": [1, 0, 10.0 + a]}, "c": {"point": [0, 1, 10.0 + b]}, "name": format!("Tilt{i}")}),
+        );
+        run(
+            &mut s,
+            "construct.axis.two_points",
+            json!({"a": {"point": o}, "b": {"point": [o[0] + 1.0, o[1] + 2.0, o[2] + a + 2.0 * b]}, "name": format!("Along{i}")}),
+        );
+        let r = run(
+            &mut s,
+            "inspect.measure",
+            json!({"items": [{"type": "axis", "name": format!("Along{i}")}, {"type": "plane", "name": format!("Tilt{i}")}]}),
+        );
+        assert!((r["distance_mm"].as_f64().unwrap() - 5.0).abs() < 1e-6, "tilt {a} {b}: {r}");
+    }
 }
 
 #[test]
@@ -5129,6 +5276,45 @@ fn fillet_edge_removed_by_a_larger_overflowing_round_is_noted() {
     let id = out["feature"].as_u64().unwrap();
     let warning = s.model.result(id).and_then(|r| r.warning.clone()).unwrap_or_default();
     assert_eq!(warning, "the edge at (0, 0, 10) was removed by the larger round, so it is not rounded");
+}
+
+/// #16768: a 50 x 35 x 5 plate with a boss 1 mm high, a circular segment (a chord on y = 5.5 and
+/// an arc over it), its arc-side top edge rounded at 1 mm. Rounding the flat side's top edge and
+/// the two short edges that run down from its ends (the arc round's edges on the flat wall) at 1
+/// mm asked a ball as large as the arc round's own radius to roll along the round, whose offset
+/// collapses to a curve: it failed with the bare status 1001. It is refused at once, saying
+/// why.
+fn segment_boss_with_arc_round() -> Session {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 50, "width": 35, "height": 5}));
+    run(&mut s, "sketch.create", json!({"plane": {"origin": [0, 0, 5], "x_dir": [1, 0, 0], "y_dir": [0, 1, 0]}}));
+    run(&mut s, "sketch.line", json!({"points": [[11, 5.5], [40.004310024546356, 5.5]]}));
+    run(
+        &mut s,
+        "sketch.arc.three_point",
+        json!({"start": [40.004310024546356, 5.5], "end": [11, 5.5], "through": [25.502155012273178, 13.007100059797995]}),
+    );
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"distance": 1, "operation": "join"}));
+    run(&mut s, "solid.fillet", json!({"edges": [[25.502155, 13.0071, 6]], "radius": 1}));
+    s
+}
+
+#[test]
+fn a_round_as_large_as_the_round_it_runs_along_is_refused_not_failed() {
+    let flat_and_ends = json!([[25.502155, 5.5, 6], [11.419996686869673, 5.5, 5.748661225447015], [39.584311999041034, 5.5, 5.748656748207975]]);
+    // The flat edge alone builds at 1 mm (its round meets the wall's foot exactly).
+    let mut s = segment_boss_with_arc_round();
+    assert!(s.execute("solid.fillet", &json!({"edges": [[25.502155, 5.5, 6]], "radius": 1, "tangent_chain": false})).is_ok());
+    // With the two edges that run on from it, a ball of the arc round's radius cannot roll: refused,
+    // with the chain off and (the chain being those edges) on.
+    for chain in [false, true] {
+        let mut s = segment_boss_with_arc_round();
+        let picks = if chain { json!([[25.502155, 5.5, 6]]) } else { flat_and_ends.clone() };
+        let e = s.execute("solid.fillet", &json!({"edges": picks, "radius": 1, "tangent_chain": chain})).unwrap_err().to_string();
+        assert!(!e.contains("1001"), "chain {chain}: {e}");
+        assert!(e.contains("larger than the faces beside its edges allow"), "chain {chain}: {e}");
+    }
 }
 
 #[test]
