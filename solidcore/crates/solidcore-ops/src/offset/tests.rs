@@ -184,8 +184,12 @@ fn a_basin_shells_past_its_rim_to_its_closed_form() {
 #[test]
 fn a_frustum_on_a_ledge_tangent_into_its_wall_shells_closed() {
     all_fixes();
-    let (r, h, len, a) = (27.5, 30.0, 69.94, 1.0_f64.to_radians());
-    let tan = a.tan();
+    // ops computes no trigonometry, so the draft's numbers are written out.
+    // tan(1 degree).
+    let tan = 0.017_455_064_928_217_585;
+    // cos(1 degree).
+    let cos = 0.999_847_695_156_391_3;
+    let (r, h, len) = (27.5, 30.0, 69.94);
     let body = crate::boolean::union_all(vec![
         crate::make_cone([0.0; 3], r, r + h * tan, h).unwrap(),
         make_cylinder([0.0, 0.0, -h], r, h).unwrap(),
@@ -197,10 +201,10 @@ fn a_frustum_on_a_ledge_tangent_into_its_wall_shells_closed() {
     assert!(rel(volume(&body), whole) < 1e-9);
     for t in [0.5, 1.0, 2.0] {
         let wall = r - t;
-        let inner = |z: f64| r + z * tan - t / a.cos();
+        let inner = |z: f64| r + z * tan - t / cos;
         // the integral of inner(z)^2 from z0 to z1
         let squared = |z0: f64, z1: f64| (inner(z1).powi(3) - inner(z0).powi(3)) / (3.0 * tan);
-        let z1 = t * (1.0 / a.cos() - 1.0) / tan;
+        let z1 = t * (1.0 / cos - 1.0) / tan;
         let cavity = (PI * wall * wall / 2.0 + 2.0 * wall * len) * (h - 2.0 * t)
             + PI * wall * wall / 2.0 * (z1 + t)
             + PI / 2.0 * squared(-t, z1)
