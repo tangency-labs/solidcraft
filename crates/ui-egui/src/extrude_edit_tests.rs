@@ -1111,3 +1111,43 @@ fn extrude_join_joins_the_target_bodies_picked_in_the_dialog() {
         assert_eq!(target_bodies(&h), None, "Cut has no Target Bodies");
     }
 }
+
+/// A body picked into Target Bodies stops Extrude choosing its operation at once, in the pick:
+/// on the web the check runs before the form is drawn again, and a New Body it chose would take
+/// the row and the pick away (#17657).
+#[test]
+fn a_target_body_pick_stops_the_automatic_operation_at_once() {
+    let (mut h, sketch) = two_boxes_and_a_bridge();
+    h.app.session.selection = vec![solidcraft_engine::Sel::Profile { sketch, index: 0 }];
+    h.app.start("solid.extrude");
+    h.frames(4);
+    assert!(
+        matches!(h.app.dialog.as_ref().unwrap().kind, crate::dialogs::Kind::Extrude { operation: 1, auto_op: true, .. }),
+        "a profile on a body's face: Extrude chooses Join"
+    );
+    let d = h.app.dialog.as_mut().unwrap();
+    d.active = d.inputs.iter().position(|i| i.label == "Target Bodies").expect("Join shows Target Bodies");
+    d.pick(&h.app.session, solidcraft_engine::Sel::Body { name: "Right".into() });
+    assert!(matches!(d.kind, crate::dialogs::Kind::Extrude { auto_op: false, operation: 1, .. }), "{:?}", d.kind);
+    h.frames(4);
+    assert_eq!(target_bodies(&h), Some(vec!["Right".to_string()]), "the pick stays");
+}
+
+/// Switching To Object off keeps From Object the active input when Target Bodies follows it
+/// (#17657): the active input is the same one, not the input that moved into its place.
+#[test]
+fn removing_an_earlier_input_keeps_the_active_one() {
+    use crate::selection::{BODIES, FACES, SelInput, VERTICES};
+    let mut inputs = vec![
+        SelInput::new("Profiles", FACES, true),
+        SelInput::new("To Object", FACES | VERTICES, false),
+        SelInput::new("From Object", FACES | VERTICES, false),
+        SelInput::new("Target Bodies", BODIES, true),
+    ];
+    let mut active = 2;
+    crate::dialogs::set_object_accepting(&mut inputs, &mut active, "To Object", FACES | VERTICES, false);
+    assert_eq!(inputs[active].label, "From Object");
+    // The active input itself going leaves the input after it active, as before.
+    crate::dialogs::set_object_accepting(&mut inputs, &mut active, "From Object", FACES | VERTICES, false);
+    assert_eq!(inputs[active].label, "Target Bodies");
+}

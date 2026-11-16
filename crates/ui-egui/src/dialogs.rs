@@ -1936,6 +1936,13 @@ impl Dialog {
             retain_profile_sketch(&self.kind, inp, &sel);
         }
         let is_fillet = matches!(self.kind, Kind::Fillet { .. }) && self.active == 0;
+        // A body picked into Target Bodies is a choice by hand: Extrude stops choosing its
+        // operation now, before a check (at once on the web) can turn Join and the pick away.
+        if self.inputs.get(self.active).is_some_and(|i| i.label == JOIN_TARGETS)
+            && let Kind::Extrude { auto_op, .. } = &mut self.kind
+        {
+            *auto_op = false;
+        }
         let Some(inp) = self.inputs.get_mut(self.active) else { return };
         if is_fillet {
             self.chain_applied = chain;
@@ -1997,6 +2004,12 @@ impl Dialog {
         let chain = matches!(self.kind, Kind::Fillet { chain: true, .. });
         if is_fillet && !add {
             self.picked_edges.clear();
+        }
+        // As a click there: bodies boxed into Target Bodies stop Extrude choosing its operation.
+        if self.inputs.get(self.active).is_some_and(|i| i.label == JOIN_TARGETS)
+            && let Kind::Extrude { auto_op, .. } = &mut self.kind
+        {
+            *auto_op = false;
         }
         let Some(inp) = self.inputs.get_mut(self.active) else { return };
         // Only an explicit add opts into grouped Thread selection; a replacement keeps one face.
@@ -4917,8 +4930,15 @@ pub(crate) fn set_object_accepting(inputs: &mut Vec<SelInput>, active: &mut usiz
         let at = inputs.iter().position(|i| i.label == JOIN_TARGETS).unwrap_or(inputs.len());
         inputs.insert(at, SelInput::new(label, accept, false));
         *active = at;
-    } else if !on && object_on(inputs, label) {
-        inputs.retain(|i| i.label != label);
+    } else if let Some(at) = inputs.iter().position(|i| i.label == label)
+        && !on
+    {
+        inputs.remove(at);
+        // The active input stays the same one when an earlier input goes; the removed one's
+        // place goes to the input after it (or the last).
+        if *active > at {
+            *active -= 1;
+        }
         *active = (*active).min(inputs.len().saturating_sub(1));
     }
 }
