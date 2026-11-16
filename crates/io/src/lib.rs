@@ -65,7 +65,7 @@ pub use safe_write::{backup_path, write_atomic};
 pub use sketch2d::{Geom2, MAX_DRAWING_BYTES};
 pub use svg::{decode_svg, read_svg, svg_nothing_to_import, svg_sheet};
 mod gltf_in;
-pub use gltf_in::{GltfImport, Loader, MAX_GLTF_BYTES, MeshPlan, PlanPlace, glb_container, is_gltf_path, read_gltf};
+pub use gltf_in::{GltfImport, Loader, MeshPlan, PlanPlace, glb_container, is_gltf_path, read_gltf};
 mod kicad_in;
 pub use kicad_in::{
     DEFAULT_BOARD_COLOR, KicadBoard, KicadCopper, KicadDrill, KicadFootprint, KicadImport, KicadLoader, KicadModel, KicadModelFile, KicadOptions,
@@ -85,6 +85,10 @@ use solidcore_record::Vec3;
 use solidcraft_doc::{Document, Metadata, ModelState};
 use solidcraft_geom::prelude::*;
 use solidcraft_geom::{MassProperties, Mesh};
+
+/// Source commit of the checkout at build time, or `"unknown"` without Git.
+/// Identifies committed source; uncommitted changes are not marked.
+pub const SOURCE_COMMIT: &str = env!("SOLIDCRAFT_SOURCE_COMMIT");
 
 /// Design file extension: new designs, autosaves and recovery files are written as `.sc`.
 pub const DESIGN_EXT: &str = "sc";

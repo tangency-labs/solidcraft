@@ -15,11 +15,13 @@
 //!   with 1001 without it. With the defaults the shell takes another path and never
 //!   samples that many.
 //!
-//! Expected: one solid, V = 40 L - 28 (L - 0.5) = 1299.48668 with L = 60 + 15 pi. The
-//! port gives 1299.48231 with SolidCraft's fixes (3.4e-6 below; SolidCraft measured
-//! 1299.48275 on an older main), pinned to 1e-9; the operand's own volume is 1.2e-2 below
-//! its closed form. With the kernel's own defaults the volume is checked against the
-//! closed form only.
+//! Expected: one solid, V = 40 L - 28 (L - 0.5) = 1299.48668 with L = 60 + 15 pi, the ideal
+//! shape's. With SolidCraft's fixes the port gives the closed B-rep's volume, 1299.48310,
+//! origin-independent since #16735, pinned to 1e-9; the operand's own volume is 1.2e-2 below
+//! its closed form. (The earlier pin, 1299.48231, integrated one wall clamped, its trims
+//! 1.5e-6 past its plane's domain. #15946, closing the faces
+//! independently, pins 1299.4830955384505, 2e-15 from this pin.) With the kernel's own
+//! defaults the volume is checked against the closed form only.
 //!
 //! With `shell_edges_on_analytics_exact` (WR-545) on as well, as the SolidCraft rig runs
 //! it, `make_edges_on_analytics_exact` intersected the walls' face-owned surfaces without
@@ -40,7 +42,7 @@ mod solidcraft_fixes;
 
 use offset_fixture::{planar_faces_at, volume, Notifications};
 use solidcore::curve::curve::p2::{Curve, CurveKind};
-use solidcore::geom::attribute::AttributeStore;
+use solidcore::geom::attribute::{AttributeStore, ObjectKey};
 use solidcore::kernel::UpstreamFixes;
 use solidcore::offset::offset_executive::p1::OffsetExecutive;
 use solidcore::offset::offset_executive::p2::{OffsetOptions, ShellOptions};
@@ -153,7 +155,7 @@ fn issue_1476_swept_bar_shells_with_solidcraft_fixes() {
     // The preset has it on; this test is SolidCraft's configuration without it (the last
     // test in this file turns it on).
     fixes.shell_edges_on_analytics_exact = false;
-    assert_eq!(check(&fixes, Some(1299.482314966473)), 16);
+    assert_eq!(check(&fixes, Some(1299.4830955384534)), 16);
 }
 
 /// `shell_edges_on_analytics_exact` (WR-545) alone: `make_edges_on_analytics_exact`
@@ -182,5 +184,99 @@ fn issue_1476_swept_bar_shells_with_edges_on_analytics_exact() {
 fn issue_1476_swept_bar_shells_with_solidcraft_fixes_and_edges_on_analytics_exact() {
     let mut fixes = solidcraft_fixes();
     fixes.shell_edges_on_analytics_exact = true;
-    assert_eq!(check(&fixes, Some(1299.482314966473)), 18);
+    assert_eq!(check(&fixes, Some(1299.4830955384534)), 18);
+}
+
+/// The shell's volume is the closed B-rep's, origin-independent (#16735; adapted from
+/// #15946's test by @bherbruck). One wall's trims leave its plane's analytic domain by
+/// 1.5e-6 in u: integrated clamped while its strips start on the continued trims, the
+/// volume moved with the origin's z. About the box's middle and 100 above and below it,
+/// and moved 1e3 up about the world origin, the volume agrees within the integration's own
+/// error scale ([`integration_scale`]) of the two volumes compared.
+#[test]
+fn issue_1476_volume_is_origin_independent() {
+    use solidcore::mass::integrator::properties::{
+        brep_properties, MassPropertyBehavior, PropertyAttributes,
+    };
+    use solidcore::math::{Point3, Vec3};
+    use solidcore::query::brep::{calculate_bounding_box, BoundingBoxOptions};
+    use solidcore::topology::proto_topology::p1::api_transform::{api_translate, TransformObject};
+    const ACCURACY: f64 = 1e-9;
+    let (mut k, result) = shell(&UpstreamFixes::default());
+    let mut b = result.unwrap();
+    b.refresh_cached_topology();
+    let store = AttributeStore::default();
+    let attrs = PropertyAttributes {
+        store: &store,
+        key_of: &|_| ObjectKey(0),
+    };
+    let volume = |k: &Kernel, b: &mut Brep, origin: Point3| -> f64 {
+        brep_properties(
+            k,
+            b,
+            ACCURACY,
+            origin,
+            MassPropertyBehavior::default(),
+            &attrs,
+        )
+        .unwrap()
+        .volume
+    };
+    let mid = calculate_bounding_box(&k, &mut b, BoundingBoxOptions::default())
+        .unwrap()
+        .mid();
+    let got: Vec<_> = [0.0, 100.0, -100.0]
+        .iter()
+        .map(|&dz| {
+            let origin = mid + Vec3::new(0.0, 0.0, dz);
+            (
+                volume(&k, &mut b, origin),
+                integration_scale(&k, &mut b, origin, ACCURACY),
+            )
+        })
+        .collect();
+    for (i, (vi, ei)) in got.iter().enumerate() {
+        for (vj, ej) in got.iter().skip(i + 1) {
+            let spread = (vi - vj).abs();
+            assert!(spread <= ei + ej, "spread {spread:e} above {:e}", ei + ej);
+        }
+    }
+    let here = volume(&k, &mut b, Point3::ZERO);
+    let eh = integration_scale(&k, &mut b, Point3::ZERO, ACCURACY);
+    api_translate(
+        &mut k,
+        Some(TransformObject::Brep(&mut b)),
+        Vec3::new(0.0, 0.0, 1e3),
+    )
+    .unwrap();
+    let there = volume(&k, &mut b, Point3::ZERO);
+    let et = integration_scale(&k, &mut b, Point3::ZERO, ACCURACY);
+    assert!(
+        (here - there).abs() <= eh + et,
+        "{here} moved 1e3 up: {there} (allowed {:e})",
+        eh + et
+    );
+}
+
+/// The integration's own error scale for a body's volume about `origin` at `accuracy`: what
+/// `brep_properties` holds each face's volume to (`boundary_properties`' scale for the
+/// volume component: the area scale `estimated / 10`, `estimated` the body box's largest
+/// size squared over 100, times a length, the larger of `10 sqrt(estimated)` and the face's
+/// distance from the origin; taken here at the body box's farthest point, which no face is
+/// farther than), summed over the faces. An estimate the integrator steps by, not a proved
+/// bound (ARGUED).
+fn integration_scale(
+    k: &Kernel,
+    b: &mut Brep,
+    origin: solidcore::math::Point3,
+    accuracy: f64,
+) -> f64 {
+    use solidcore::geom::extent3d::Extent3d;
+    use solidcore::query::brep::{calculate_bounding_box, BoundingBoxOptions};
+    let bbox = calculate_bounding_box(k, &mut *b, BoundingBoxOptions::default()).unwrap();
+    let size = bbox.max_dimension();
+    let estimated = size * size / 100.0;
+    let far = bbox.max_distance(&Extent3d::from_point(origin));
+    let length = (10.0 * estimated.sqrt()).max(far);
+    accuracy * (estimated / 10.0) * length * b.face_list().len() as f64
 }

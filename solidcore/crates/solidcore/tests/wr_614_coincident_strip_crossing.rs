@@ -552,18 +552,16 @@ fn wr_614_union_below_the_collapse_offsets_is_two_touching_solids() {
 }
 
 /// The narrow strip at d = 1e-6, on the collapse boundary (B's corner P0 and A's corner C
-/// 20.02 d = 2.002e-5 apart, just past the intersection tolerance 2e-5, so two points): the
-/// vertex the imprint makes at one corner needs a tolerance covering its certified gaps whose
-/// ball reaches the other, which it does not bound. No valid body holds both, so each
-/// Boolean is refused at the imprint, naming the tolerance needed and the one that fits,
-/// computed from the distances (never by building again). Here no tolerance fits (`None`):
-/// an earlier imprint at this offset made an edge 4 mm long with
-/// tolerance 8 (its curve dropped 4 mm off its face), and its vertex is one the ball
-/// would reach. That imprint is a separate defect; the refusal reports it as it finds it.
+/// 20.02 d = 2.002e-5 apart, just past the intersection tolerance 2e-5, so two points). An
+/// earlier imprint at this offset makes an edge 4 mm long with tolerance 8 (its curve dropped
+/// 4 mm off its face), a separate defect. The topology intersector cannot evaluate a point
+/// class of the face intersection on its face (no single nearest point on the face's
+/// surface), and `SetPointClassParameters` fails. C++ SMLib ignores that status and goes on
+/// with the point unevaluated; the fork passes it on (WR-658, tangency-labs/smlib e7ebc8d),
+/// so each Boolean is refused there, before any vertex tolerance is sized from the
+/// unevaluated point. No valid body is returned either way.
 #[test]
-fn wr_614_strip_at_its_collapse_boundary_is_refused_naming_the_size() {
-    use solidcore::error::boolean::BooleanFailure;
-    use solidcore::error::Reason;
+fn wr_614_strip_at_its_collapse_boundary_is_refused() {
     use solidcore::SolidError;
     for op in ["union", "intersection", "difference"] {
         let mut k = Kernel::default();
@@ -573,16 +571,15 @@ fn wr_614_strip_at_its_collapse_boundary_is_refused_naming_the_size() {
             "intersection" => boolean_intersection(&mut k, a, b),
             _ => boolean_difference(&mut k, a, b),
         };
-        let Err(SolidError::Failed(f)) = &r else {
+        let Err(e @ SolidError::Failed(_)) = &r else {
             panic!("{op}: a refusal, got {:?}", r.map(|b| shape(&b)));
         };
-        let Reason::Boolean(BooleanFailure::MergedVertexReaches { needed, fits_below }) = f.reason
-        else {
-            panic!("{op}: a merged vertex that reaches, got {f:?}");
-        };
         assert!(
-            needed > 0.0 && needed < 1e-4 && fits_below.is_none(),
-            "{op}: needed {needed}, fits below {fits_below:?}"
+            e.operation()
+                == "intersect::point_class::PointClassification::compute_point_parameters"
+                && e.sm_status() == Some(1001)
+                && e.to_string().contains("no single nearest point"),
+            "{op}: {e:?}"
         );
     }
 }
