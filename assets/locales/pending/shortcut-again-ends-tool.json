@@ -1,0 +1,6 @@
+{
+  "en": {
+    "prefs.sketch.shortcut_again_ends_tool": "Pressing an active tool's shortcut again closes it",
+    "prefs.sketch.shortcut_again_ends_tool_tip": "Pressing the shortcut for the active tool or dialog again closes it, as Esc does. Off: pressing the shortcut restarts the tool or dialog."
+  }
+}

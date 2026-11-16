@@ -1767,6 +1767,9 @@ preference_settings! {
     sketch_construction_lines: bool = true, PAGE_SKETCH;
     /// Use the only straight construction line in the preselection as Mirror's reference.
     sketch_mirror_auto_line: bool = true, PAGE_SKETCH;
+    /// Pressing an active tool or dialog's shortcut again closes it, as Esc does. Off: the key
+    /// starts the tool or dialog again.
+    shortcut_again_ends_tool: bool = true, PAGE_SKETCH;
     /// A sketch tool's shortcut pressed again before the first point steps to the tool's next
     /// creation mode (#2459). Off (the default): the key starts the tool again, as it always has.
     shortcut_cycles_modes: bool = false, PAGE_SKETCH;
@@ -8587,6 +8590,7 @@ mod tests {
                 ("sketch_construction_lines", "prefs.sketch_construction_lines"),
                 ("sketch_auto_dimensions", "prefs.sketch.auto_dimensions"),
                 ("sketch_auto_locate", "prefs.sketch.auto_locate"),
+                ("shortcut_again_ends_tool", "prefs.sketch.shortcut_again_ends_tool"),
                 ("shortcut_cycles_modes", "prefs.sketch.shortcut_cycles_modes"),
                 ("ribbon_click_ends_tool", "prefs.ribbon_click_ends_tool"),
                 ("project_options_dialog", "prefs.sketch.project_options"),
