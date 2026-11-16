@@ -134,7 +134,6 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.fillet_knife_edge_rounds = true;
     f.revolution_round_offset_collapses = true;
     f.proto_edge_splits_at_captured_vertices = true;
-    f.imprint_reuses_coincident_face_edge = true;
     f.boolean_new_face_closure_both_sides = true;
     f.linear_sweep_arc_is_cylinder = true;
     f.loops_go_on_round_the_vertex = true;

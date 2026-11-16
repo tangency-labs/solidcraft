@@ -13,12 +13,12 @@
 //! `SmApiCreateCylinder` (seam at its frame's +X) turned about Z to put the seam where the
 //! bench's circle starts, about Y onto the axis, and moved to the base, as the
 //! `boolean.api_brep` fixture `issue_1519_bench_tubes.json` does on both sides. The union
-//! is run with `proto_edge_splits_at_captured_vertices` (WR-579, #1517) set in both runs,
-//! as the fork had it. At the default fixes (the C++ fixture's state, whose check record
-//! matches the C++ exactly) the union already succeeds with the coincident edges.
+//! is run both with `proto_edge_splits_at_captured_vertices` (WR-579, #1517) set, as the
+//! fork had it, and without it.
 //!
-//! Expected with `imprint_reuses_coincident_face_edge`: one manifold solid whose level-2
-//! check reports nothing.
+//! Expected: `Imprint` takes the seat's end circle as the curve's edge on the cap (the
+//! two whole curves proved within tolerance on their control points), and the union is
+//! one manifold solid whose level-2 check reports nothing.
 #![allow(
     clippy::unwrap_used,
     clippy::expect_used,
@@ -48,12 +48,10 @@ fn tube(k: &mut Kernel, origin: [f64; 3], length: f64, z_deg: f64, y_deg: f64) -
     b
 }
 
-/// The union with WR-579 set to `split` and this fix to `fixed`: the check's failure
-/// lines, or what went wrong.
-fn join(split: bool, fixed: bool) -> Result<Vec<String>, String> {
+/// The union with WR-579 set to `split`: the check's failure lines, or what went wrong.
+fn join(split: bool) -> Result<Vec<String>, String> {
     let mut k = Kernel::default();
     k.fixes.proto_edge_splits_at_captured_vertices = split;
-    k.fixes.imprint_reuses_coincident_face_edge = fixed;
     let top = tube(
         &mut k,
         [-150.0, 0.0, 820.0],
@@ -77,31 +75,14 @@ fn join(split: bool, fixed: bool) -> Result<Vec<String>, String> {
         .lines())
 }
 
-fn coincident(lines: &[String]) -> bool {
-    lines
-        .iter()
-        .any(|l| l.contains("Test #33") || l.contains("Test #34"))
-}
-
 #[test]
 fn wr580_tube_joint_no_coincident_edges() {
-    // the default fixes, which the boolean.api_brep fixture compares with the C++
-    let default = join(false, false).unwrap();
-    println!("default fixes: {default:?}");
-    assert!(
-        coincident(&default),
-        "upstream's union has no coincident edges at the default fixes: {default:?}"
-    );
-
-    let unfixed = join(true, false).unwrap();
-    println!("flag off: {unfixed:?}");
-    assert!(
-        coincident(&unfixed),
-        "upstream's union has no coincident edges: {unfixed:?}"
-    );
-
-    let fixed = join(true, true).unwrap();
-    println!("flag on: {fixed:?}");
-    // exactly nothing: no coincident edges and no other report
-    assert!(fixed.is_empty(), "the check fails: {fixed:?}");
+    for split in [true, false] {
+        let lines = join(split).unwrap();
+        // exactly nothing: no coincident edges (`SmFace` tests 33 and 34) and no other report
+        assert!(
+            lines.is_empty(),
+            "WR-579 {split}: the check fails: {lines:?}"
+        );
+    }
 }

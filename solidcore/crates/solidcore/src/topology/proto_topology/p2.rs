@@ -91,12 +91,13 @@
 //!   back to itself whose curve ends find two of its definitions at each other definition
 //!   of that proto vertex lying on the curve, then resolves the proto vertex (the SMLib
 //!   fork's tangency-labs/smlib@9eec159); upstream keeps the edge whole past that vertex.
-//! - **Opt-in fix (WR-580, #1519).** With `Kernel::fixes.imprint_reuses_coincident_face_edge`,
+//! - **Not upstream (WR-580, #1519; the SMLib fork's tangency-labs/smlib@81cd61a).**
 //!   [`ProtoTopologyManager::imprint_edge_definition`] takes an edge Brep2's face already
-//!   has between the definition's two vertices along its curve
-//!   ([`ProtoBrep::face_coincident_edge`], `SmTools::FindCoincidentEdge`) as the
-//!   definition's edge there instead of making a second one (the SMLib fork's
-//!   tangency-labs/smlib@81cd61a).
+//!   has between the definition's two vertices along its curve as the definition's edge
+//!   there instead of making a second one; upstream makes it, and the merge leaves
+//!   coincident edges. The fork finds the edge with `SmTools::FindCoincidentEdge` (30
+//!   samples); here the two whole curves must be proved within tolerance on control points
+//!   (`curve_runs_along`).
 //! - **Not upstream (WR-619, #1794; own design).**
 //!   [`ProtoTopologyManager::imprint_edge_definition`] makes no edge for a definition whose ends
 //!   are one proto vertex and one vertex in each B-rep, along a speck within that vertex's
@@ -145,6 +146,7 @@ use crate::geom::extent2d::Extent2d;
 use crate::geom::global_solver::{SolutionRequested, SolverOperation};
 use crate::geom::solution_array::{ObjectKind, SolutionObject};
 use crate::geom::tol::{xsect_tol3d, ScaledZero};
+use crate::intersect::curve_class::p3::curve_runs_along;
 use crate::intersect::curve_class::p6::MergeContext;
 use crate::intersect::curve_class::{CurveClassification, CurveInterval};
 use crate::intersect::point_class::{
@@ -257,11 +259,10 @@ pub trait ProtoBrep<O>: ProtoGeometry<O> + ProtoTopology<O> {
     ///
     /// Those of the implementation's topology walk.
     fn vertex_common_edges(&self, v1: O, v2: O) -> Result<Vec<O>>;
-    /// Not upstream (WR-580, #1519; read only with
-    /// `Kernel::fixes.imprint_reuses_coincident_face_edge`): `SmTools::FindCoincidentEdge`
-    /// over `face`'s edges (`SmFace::GetEdges`) for an edge between `start` and `end` whose
-    /// geometry lies along `curve` over `interval` within `tolerance`. Returns the first
-    /// such edge and its sampled maximum deviation.
+    /// Not upstream (#16937; read by the topology intersector's `edges_coincide`):
+    /// `SmTools::FindCoincidentEdge` over `face`'s edges (`SmFace::GetEdges`) for an edge
+    /// between `start` and `end` whose geometry lies along `curve` over `interval` within
+    /// `tolerance`. Returns the first such edge and its sampled maximum deviation.
     ///
     /// # Errors
     ///
@@ -1082,6 +1083,55 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
         ends_are_a_stretch(gap, d.raw_tolerance(), [tol1, tol2])
     }
 
+    /// Not upstream (WR-580, #1519): the edge Brep2's face of definition `ed` already has
+    /// between `start` and `end` (the definition's vertices in Brep2) along the definition's
+    /// curve, which is then the definition's edge in Brep2; `None` when the face has none.
+    ///
+    /// An edge qualifies when it is an edge of the face joining the two vertices
+    /// (`SmVertex::GetCommonEdges`, `SmEdge::IsConnectedToFace`) and its curve over its
+    /// interval and the definition's curve over its interval are proved within the larger of
+    /// the face's and the definition's tolerance of each other as wholes
+    /// ([`curve_runs_along`]: a bound on control points, never samples). The first such edge
+    /// is taken.
+    ///
+    /// # Errors
+    ///
+    /// Those of the topology walks and of the bound's evaluations; a dangling handle.
+    fn along_face_edge(
+        &self,
+        k: &Kernel,
+        brep: &impl ProtoBrep<O>,
+        ed: EdgeDefId,
+        start: O,
+        end: O,
+    ) -> Result<Option<O>> {
+        let d = self.ed_ref(ed)?;
+        let Some(curve) = d.xsect_curve_3d() else {
+            return Ok(None);
+        };
+        let curve = curve_of(brep, Some(curve))?;
+        let interval = d.xsect_interval();
+        let face = as_kind(d.src_topo(2), ClassObjectKind::Face)
+            .ok_or(dangling("the definition's second source is not a face"))?;
+        let face_tol = brep
+            .topology_tolerance(face)
+            .ok_or(dangling("face handle is unknown"))?;
+        let tol = max2(face_tol, d.raw_tolerance());
+        for edge in brep.vertex_common_edges(start, end)? {
+            if !brep.edge_is_connected_to_face(edge, face)? {
+                continue;
+            }
+            let edge_curve = curve_of(brep, Some(edge_curve_of(brep, edge)?))?;
+            let edge_interval = brep
+                .edge_interval(edge)
+                .ok_or(dangling("edge handle is unknown"))?;
+            if curve_runs_along(k, curve, &interval, edge_curve, &edge_interval, tol)? {
+                return Ok(Some(edge));
+            }
+        }
+        Ok(None)
+    }
+
     /// The body of [`ProtoTopologyManager::imprint_edge_definition`]; `edited` is set
     /// before the first B-rep edit.
     fn imprint_edge_definition_inner(
@@ -1214,40 +1264,18 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
             self.ed_mut(ed)?.set_final_edge(1, e);
         }
 
-        // Not upstream (WR-580, #1519; opt-in, the fork's tangency-labs/smlib@81cd61a): in
-        // Brep2 the face may already have an edge between this edge's two vertices that
-        // lies along the curve within tolerance (the curve runs along the face's own
-        // boundary there). That edge is this edge in Brep2: imprinted again, the face had
-        // two coincident edges, and the merge put a copy of the boundary edge beside this
-        // one in Brep1 (`SmFace` tests 33 and 34).
-        let mut along_edge2 = None;
-        if k.fixes.imprint_reuses_coincident_face_edge
-            && type2 == PointClassType::Face
-            && start_vtx2 != end_vtx2
-        {
-            let d = self.ed_ref(ed)?;
-            if let Some(curve) = d.xsect_curve_3d() {
-                let face2 = as_kind(d.src_topo(2), ClassObjectKind::Face).ok_or_else(null)?;
-                let face_tol = brep
-                    .topology_tolerance(face2)
-                    .ok_or(dangling("face handle is unknown"))?;
-                let along_tol = max2(face_tol, d.raw_tolerance());
-                let found = brep.face_coincident_edge(
-                    k,
-                    face2,
-                    start_vtx2,
-                    end_vtx2,
-                    curve_of(brep, Some(curve))?,
-                    d.xsect_interval(),
-                    along_tol,
-                )?;
-                if let Some((edge, deviation)) = found {
-                    if deviation <= along_tol {
-                        along_edge2 = Some(edge);
-                    }
-                }
-            }
-        }
+        // Not upstream (WR-580, #1519; the fork's tangency-labs/smlib@81cd61a): in Brep2 the
+        // face may already have an edge between this edge's two vertices that lies along the
+        // curve within tolerance (the curve runs along the face's own boundary there). That
+        // edge is this edge in Brep2: imprinted again, the face had two coincident edges, and
+        // the merge put a copy of the boundary edge beside this one in Brep1 (`SmFace` tests
+        // 33 and 34). The fork takes it on `SmTools::FindCoincidentEdge`'s 30 samples; here
+        // only an enclosure of the two whole curves takes it (`along_face_edge`).
+        let along_edge2 = if type2 == PointClassType::Face && start_vtx2 != end_vtx2 {
+            self.along_face_edge(k, brep, ed, start_vtx2, end_vtx2)?
+        } else {
+            None
+        };
 
         // Now do Brep 2.
         let d = self.ed_ref(ed)?;
