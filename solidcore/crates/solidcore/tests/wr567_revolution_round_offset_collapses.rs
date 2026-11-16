@@ -291,20 +291,28 @@ fn collapsing_side(k: &Kernel) -> f64 {
 /// radius of `+-6e-5`, far from the tolerance: the curvature read at one point decided it
 /// the other way (a face dropped, or a real collapse missed). The answer now follows the
 /// circle, or is refused where the curvature read there disagrees; never the other way.
+/// Each bulge has one offset decided and one refused (pinned, so refusing all fails).
 #[test]
 fn wr567_a_near_arc_at_its_radius_follows_the_circle() {
     let k = Kernel::default();
     let side = collapsing_side(&k);
-    for bulge in [5e-8, -5e-8] {
+    // (outward bulges bend harder at the middle: the offset just short of the radius is
+    // refused there, and the one past it decided; inward ones the other way round)
+    for (bulge, short_decided) in [(5e-8, false), (-5e-8, true)] {
         let s = revolved(&k, round_generatrix_at(&[15, 16], bulge));
-        for (scale, collapses) in [(1.0 - 4e-5, false), (1.0 + 4e-5, true)] {
+        for (scale, collapses, decided) in [
+            (1.0 - 4e-5, false, short_decided),
+            (1.0 + 4e-5, true, !short_decided),
+        ] {
             let d = side * scale;
-            match s.offset_collapses(&k, d, 1e-7) {
-                Ok(c) => assert_eq!(c, collapses, "bulge {bulge}, d {d}"),
-                Err(e) => assert!(
-                    matches!(e, SolidError::Unsupported { .. }),
-                    "bulge {bulge}, d {d}: {e:?}"
-                ),
+            let r = s.offset_collapses(&k, d, 1e-7);
+            if decided {
+                assert_eq!(r.unwrap(), collapses, "bulge {bulge}, d {d}");
+            } else {
+                assert!(
+                    matches!(r, Err(SolidError::Unsupported { .. })),
+                    "bulge {bulge}, d {d}: {r:?}"
+                );
             }
             if !collapses {
                 assert!(
@@ -346,6 +354,38 @@ fn wr567_a_generatrix_at_the_tolerance_edge_is_refused() {
                 s.create_offset_surface(&k, d, tol),
                 Err(SolidError::Unsupported { .. })
             ),
+            "{d}"
+        );
+    }
+}
+
+/// solidcraft#17907's second review: a circle in a plane square to the axis, turned about
+/// it, sweeps a flat annulus. Its normal is the axis, so the generatrix does not bend along
+/// it (`N . k = 0`) and no side can be read: the collapse test is refused, and no offset by
+/// twice the radius either way is dropped. Taking `0` as the side `+1` reported one of them
+/// collapsed (main built both).
+#[test]
+fn wr567_a_circle_with_no_side_is_refused() {
+    let k = Kernel::default();
+    let circle = Ellipse::new_circle(
+        &k,
+        Point3::new(10.0, 0.0, 0.0),
+        Vec3::new(1.0, 0.0, 0.0),
+        Vec3::new(0.0, 1.0, 0.0),
+        Extent1d::from_min_max(0.0, 90.0),
+        R,
+        &EllipseOptions::default(),
+    )
+    .unwrap();
+    let s = revolved(&k, Curve::from(circle));
+    for d in [2.0 * R, -2.0 * R] {
+        let r = s.offset_collapses(&k, d, 1e-7);
+        assert!(
+            matches!(r, Err(SolidError::Unsupported { .. })),
+            "{d}: {r:?}"
+        );
+        assert!(
+            !matches!(s.create_offset_surface(&k, d, 1e-7), Ok(None)),
             "{d}"
         );
     }
