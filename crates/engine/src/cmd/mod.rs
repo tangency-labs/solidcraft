@@ -53,7 +53,7 @@ pub(crate) use face::{FaceRefForm, face_ref_form};
 pub(crate) use features::move_matrix_params;
 pub(crate) use features::profiles as feature_profiles;
 pub(crate) use features::{EdgeRefForm, PLANE_FORMS, axis_dir_form, axis_line_object, edge_ref_form, explicit_plane, plane_name_problem, sketch_key};
-pub use features::{auto_operation, clearance_diameter, clearance_sizes, extrude_reach, head_counterbore, shown_scope};
+pub use features::{auto_operation, clearance_diameter, clearance_sizes, extrude_reach, head_counterbore, large_thread_size, shown_scope};
 pub(crate) use features::{rail_fit_form, sweep_orientation};
 pub(crate) use features_more::{MAX_SKETCH_ID, SidePoint, SketchFrameId, axes_mask, side_point, sketch_frame_id};
 pub(crate) use file::import::realign_imports;
@@ -163,6 +163,7 @@ mod surface_match;
 mod tab_views;
 mod view_dxf;
 mod view_navigation;
+mod view_pick;
 
 use serde::Serialize;
 use serde_json::Value;
@@ -416,6 +417,7 @@ pub fn command_specs() -> Vec<&'static CommandSpec> {
     v.extend(section::COMMANDS.iter());
     v.extend(view_navigation::COMMANDS.iter());
     v.extend(tab_views::COMMANDS.iter());
+    v.extend(view_pick::COMMANDS.iter());
     v.extend(view_dxf::COMMANDS.iter());
     v.extend(settings::COMMANDS.iter());
     v.extend(diagnostics::COMMANDS.iter());

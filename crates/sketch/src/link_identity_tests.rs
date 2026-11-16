@@ -424,6 +424,7 @@ fn edge_on_face_saved_as_a_line_pair_keeps_the_line_an_offset_follows() {
         sk.points[point].link = Some(link.clone());
     }
     sk.links.push(Link {
+        sketch_placements: Vec::new(),
         id: link.clone(),
         kind: LinkKind::Project,
         source: face(),

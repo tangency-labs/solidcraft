@@ -33,12 +33,14 @@ solidcraft --control 7878 &
 solidcraft-cli mcp --connect 127.0.0.1:7878
 ```
 
-Picking geometry with `execute` `view.pick` requires a connection to the running SolidCraft
-app. It is unavailable with `--headless` or when automatic discovery starts a headless session.
-`frame: "model"` chooses the pixels of a rendered model image; it does not enable headless MCP
-picking. The app handles this command outside the engine registry, so `list_commands` and
-`describe_command` do not include it, even when connected. See `ui.pick` in the
-[control protocol](control-protocol.md) for pixel and ray parameters.
+`execute` `view.pick` with `rays: [{origin, dir}…]` answers in every session, headless too:
+for each world ray, the body, face index, world `point`, outward `normal` and `depth` where it
+first meets the design's shown bodies, decided on their exact faces (`null` where it meets
+nothing; `all: true` lists every body it meets, nearest first). With `--headless`, or when
+automatic discovery starts a headless session, the engine answers; connected, the app does.
+Picking screenshot `pixels` requires a connection to the running SolidCraft app; `frame:
+"model"` chooses the pixels of a rendered model image and does not enable headless pixel picks.
+See `ui.pick` in the [control protocol](control-protocol.md) for pixel and ray parameters.
 
 ### The app listens when turned on
 
@@ -65,6 +67,9 @@ launch's token. When the app quits or crashes mid-session, the next call says th
 that was running when it went away says the app did not answer and may have quit or crashed,
 after running the call or not, so inspect the design before sending a change again.
 A `batch` that could not be sent says the app is not running, so it is safe to send again.
+The app serves 16 connections at once, and every bridged server, CLI run or script connected to
+it holds one; a call past that says the app refused it without running it, so it is safe to send
+again once one of them has ended.
 
 stdout carries only protocol messages; errors go to stderr. Bridged screenshots are written to a
 temporary file by the app and read back by the server, so both must run on the same machine.

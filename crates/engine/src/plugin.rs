@@ -2,8 +2,8 @@
 
 use crate::{EngineError, Result, Session};
 pub use craft_plugin::{
-    API, Effect, Entry, FileGrant, HostLimits, Limits, MAX_COMPONENT_BYTES, MAX_JSON_BYTES, MAX_MANIFEST_BYTES, MAX_MEMORY_MIB, Manifest,
-    RuntimeManifest, UiSlot, valid_id,
+    API, Effect, Entry, EntryKind, FileGrant, HostLimits, Limits, LossItem, LossReport, LossSeverity, MAX_COMPONENT_BYTES, MAX_JSON_BYTES,
+    MAX_MANIFEST_BYTES, MAX_MEMORY_MIB, Manifest, RuntimeManifest, UiSlot, valid_id,
 };
 use craft_plugin::{CommandSchema, HostError, PluginHost};
 use serde_json::{Value, json};
@@ -38,6 +38,10 @@ pub struct Grants {
     /// its manifest asks for, approved at install. Bound to `package_hash` like the rest.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub memory_mib: Option<usize>,
+    /// An importer may read the other files in the folder of the file it opens (its manifest's
+    /// `input_folder`), approved at install.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub input_folder: bool,
 }
 
 /// Trusted host state, never loaded from a design or supplied by guest code.
@@ -162,7 +166,7 @@ pub fn read_package(path: &str) -> Result<Package> {
     let manifest = parse_manifest(&bytes, folder)?;
     let component = if let Some(runtime) = &manifest.runtime {
         let module_path = dir.join(&runtime.module);
-        solidcraft_io::vfs::read(&module_path.to_string_lossy(), MAX_COMPONENT_BYTES).map_err(|e| error(e.to_string()))?
+        solidcraft_io::vfs::read(&module_path.to_string_lossy(), runtime.max_component_bytes()).map_err(|e| error(e.to_string()))?
     } else {
         Vec::new()
     };
@@ -180,6 +184,9 @@ pub fn host_limits_for(session: &Session, id: &str, approval: &str) -> HostLimit
     }
     limits
 }
+
+/// The most files and folders one plugin folder holds; install and removal both stop there.
+pub(super) const MAX_FILES: usize = 1024;
 
 pub(super) fn package_hash(manifest: &[u8], component: &[u8]) -> String {
     let mut digest = Sha256::new();
@@ -243,12 +250,14 @@ pub fn run(session: &mut Session, package: Package, entry: &str, params: &serde_
     }
 }
 
+mod import;
 pub mod install;
 #[cfg(not(target_arch = "wasm32"))]
 mod package;
 #[cfg(not(target_arch = "wasm32"))]
 pub use package::{remove, store_grants, validate_grants};
 
+pub use import::{Importer, describe as describe_importers, import_file, importer_for, importers, open_filters};
 #[cfg(test)]
 mod tests;
 
@@ -414,7 +423,7 @@ pub fn describe_entry(s: &Session, id: &str) -> Result<Option<Value>> {
     let Some(path) = s.plugin_state.packages.get(package) else { return Ok(None) };
     let package = read_package(path)?;
     let Some(runtime) = package.manifest.runtime else { return Ok(None) };
-    let Some(entry) = runtime.entries.iter().find(|e| e.name == name) else { return Ok(None) };
+    let Some(entry) = runtime.entries.iter().find(|e| e.name == name && e.kind == EntryKind::Command) else { return Ok(None) };
     Ok(Some(json!({"id":id,"label":name,"params":"approval, params: declared entry inputs",
         "input":{"type":"object","required":["approval","params"],"additionalProperties":false,"properties":{
             "approval":{"type":"string"},"params":entry.input_schema}},
