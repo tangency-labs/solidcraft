@@ -928,6 +928,10 @@ fn cell_patch(k: &Kernel, surface: &Surface, cell: &Extent2d) -> Result<Option<B
     let Some(base) = patch_base(k, surface)? else {
         return Ok(None);
     };
+    // A face's domain may overhang its surface's by the rounding of the arithmetic that
+    // made it (WR-660's swept cap: -2.6100000000000123 against -2.610000000000012). Such a
+    // cell is the surface's domain: it is clamped to it, so its subpatch still decides it.
+    let cell = &clamp_to_domain(cell, &base.natural_uv_domain());
     // CopySubPatch snaps to knots: a patch short of the cell says nothing about the rest.
     let Ok(patch) = base.copy_sub_patch(cell) else {
         return Ok(None);
@@ -941,6 +945,29 @@ fn cell_patch(k: &Kernel, surface: &Surface, cell: &Extent2d) -> Result<Option<B
         return Ok(None);
     }
     Ok(Some(patch))
+}
+
+/// `cell` with each side that lies past `domain`'s by no more than rounding (16 ulps of
+/// the larger of the domain's bound and its width) moved onto it; a side further out is
+/// kept, so [`cell_patch`] still refuses a cell that leaves its surface.
+fn clamp_to_domain(cell: &Extent2d, domain: &Extent2d) -> Extent2d {
+    let (c0, c1, d0, d1) = (cell.min(), cell.max(), domain.min(), domain.max());
+    let side = |c: f64, d: f64, width: f64, below: bool| {
+        let slack = 16.0 * f64::EPSILON * d.abs().max(width);
+        let past = if below { d - c } else { c - d };
+        if past > 0.0 && past <= slack {
+            d
+        } else {
+            c
+        }
+    };
+    let (wu, wv) = (d1.x - d0.x, d1.y - d0.y);
+    Extent2d::from_bounds(
+        side(c0.x, d0.x, wu, true),
+        side(c0.y, d0.y, wv, true),
+        side(c1.x, d1.x, wu, false),
+        side(c1.y, d1.y, wv, false),
+    )
 }
 
 /// The B-spline base whose subpatches [`cell_patch`] takes (what `SmBSplineSurface`
@@ -3656,6 +3683,24 @@ mod tests {
     /// finite, holding the face's points, and as small as the patch. The search would have
     /// taken the empty box of its edges as its bounds and returned them as points, +-1e20 on
     /// every axis.
+    /// WR-660's swept cap: a face domain past its surface's by rounding is the surface's
+    /// (so its subpatch decides the cell); one past it by more is kept, and refused.
+    #[test]
+    fn a_cell_past_its_surfaces_domain_by_rounding_is_clamped_to_it() {
+        let domain = Extent2d::from_bounds(-2.610000000000012, -1.122, 3.11, 1.0);
+        let cell = Extent2d::from_bounds(-2.6100000000000123, -1.122, 0.25, -0.061);
+        let clamped = clamp_to_domain(&cell, &domain);
+        assert_eq!(
+            clamped.min().x.to_bits(),
+            (-2.610000000000012_f64).to_bits()
+        );
+        assert_eq!(clamped.max().x.to_bits(), 0.25_f64.to_bits());
+        let far = Extent2d::from_bounds(-2.62, -1.122, 0.25, 1.0 + 1e-9);
+        let kept = clamp_to_domain(&far, &domain);
+        assert_eq!(kept.min().x.to_bits(), (-2.62_f64).to_bits());
+        assert_eq!(kept.max().y.to_bits(), (1.0 + 1e-9_f64).to_bits());
+    }
+
     #[test]
     fn tight_box_of_a_face_without_edges_is_its_surfaces_box() {
         edgeless_face_box_holds_its_surface(&crowned_height_field(0.0));
