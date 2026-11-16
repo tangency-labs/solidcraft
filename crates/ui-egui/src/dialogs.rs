@@ -6705,7 +6705,7 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
                         // A clearance counterbore sized to a cap screw's head sends the head,
                         // and the diameter or depth only when they are not the head's.
                         let head = if opts.clearance { crate::dialogs_hole::SCREW_HEADS.get(opts.head).and_then(|h| h.1) } else { None };
-                        if let Some(standard) = head {
+                        if let Some(standard) = head.filter(|s| crate::dialogs_hole::head_hole_kind(s) == 1) {
                             if let Some(problem) = crate::dialogs_hole::head_problem(opts) {
                                 return Err(problem);
                             }
@@ -6730,8 +6730,25 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
                         }
                     }
                     2 => {
-                        params["cs_diameter"] = json!(cs_diameter);
-                        params["cs_angle"] = json!(cs_angle);
+                        // A clearance countersink sized to a countersunk screw's head sends the
+                        // head, and the diameter or angle only when they are not the head's.
+                        let head = if opts.clearance { crate::dialogs_hole::SCREW_HEADS.get(opts.head).and_then(|h| h.1) } else { None };
+                        if let Some(standard) = head.filter(|s| crate::dialogs_hole::head_hole_kind(s) == 2) {
+                            if let Some(problem) = crate::dialogs_hole::head_problem_for(opts, 2) {
+                                return Err(problem);
+                            }
+                            let (d, a) = crate::dialogs_hole::head_texts(opts, 2).unwrap_or_default();
+                            params["head"] = json!(standard);
+                            if cs_diameter.trim() != d {
+                                params["cs_diameter"] = json!(cs_diameter);
+                            }
+                            if cs_angle.trim() != a {
+                                params["cs_angle"] = json!(cs_angle);
+                            }
+                        } else {
+                            params["cs_diameter"] = json!(cs_diameter);
+                            params["cs_angle"] = json!(cs_angle);
+                        }
                     }
                     _ => {}
                 }

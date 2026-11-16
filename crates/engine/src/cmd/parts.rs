@@ -583,7 +583,10 @@ pub(crate) fn cap_screw_head(standard: &str, size: &str) -> std::result::Result<
         s if s.eq_ignore_ascii_case("ISO 4762") || s.eq_ignore_ascii_case("socket_head_cap_screw") => ("ISO 4762", &SHCS),
         s if s.eq_ignore_ascii_case("ISO 7380-1") || s.eq_ignore_ascii_case("button_head_cap_screw") => ("ISO 7380-1", &BHCS),
         other => {
-            return Err(format!("no head standard `{}`: ISO 4762 (socket head) or ISO 7380-1 (button head)", super::features::brief(other)));
+            return Err(format!(
+                "no head standard `{}`: ISO 4762 (socket head), ISO 7380-1 (button head) or ISO 10642 (countersunk head)",
+                super::features::brief(other)
+            ));
         }
     };
     let size = size.trim().split(['x', 'X']).next().unwrap_or("").trim();
@@ -593,6 +596,25 @@ pub(crate) fn cap_screw_head(standard: &str, size: &str) -> std::result::Result<
         .find(|r| r.0.eq_ignore_ascii_case(size))
         .map(|r| (r.1, r.2))
         .ok_or_else(|| format!("no {name} head for `{}`: {first} to {last}", super::features::brief(size)))
+}
+
+/// The head a countersink seats, for `solid.hole`'s `head`: the theoretical head diameter dk of
+/// a metric countersunk screw (ISO 10642 socket countersunk head, or the family name `parts.insert`
+/// takes), the 90° cone's width at the top plane. The size is written as `clearance` takes it.
+/// `None` for a standard that is not a countersunk head; the error names a size the table lacks.
+pub(crate) fn countersunk_head(standard: &str, size: &str) -> Option<std::result::Result<f64, String>> {
+    let s = standard.trim();
+    if !(s.eq_ignore_ascii_case("ISO 10642") || s.eq_ignore_ascii_case("countersunk_socket_screw")) {
+        return None;
+    }
+    let size = size.trim().split(['x', 'X']).next().unwrap_or("").trim();
+    let (first, last) = (CSK.first().map_or("", |r| r.0), CSK.last().map_or("", |r| r.0));
+    Some(
+        CSK.iter()
+            .find(|r| r.0.eq_ignore_ascii_case(size))
+            .map(|r| r.1)
+            .ok_or_else(|| format!("no ISO 10642 head for `{}`: {first} to {last}", super::features::brief(size))),
+    )
 }
 
 fn default_length(d: f64) -> f64 {
