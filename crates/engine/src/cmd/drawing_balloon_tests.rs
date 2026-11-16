@@ -643,6 +643,36 @@ fn a_balloon_reads_a_components_list_below_it() {
     assert_eq!(read(&mut s, &balloon)["row_status"], json!("not_found"));
 }
 
+/// A balloon on a parts list that a file made, listing another design's file, reads no row and says
+/// why: it is never numbered from the design the drawing is in (`Session::drawn`). Not on inspect, not
+/// on the sheet, and the list counts no balloons against this design's rows.
+#[test]
+fn a_balloon_on_a_list_of_a_linked_design_is_never_numbered() {
+    let (mut s, view, [_, occurrence]) = placed();
+    let balloon = add(&mut s, view, occurrence)["balloon"].as_str().unwrap().to_string();
+    let table = list(&mut s, json!({}));
+    assert_eq!(read(&mut s, &balloon)["row_status"], json!("ok"), "read from this design while it lists it");
+    let mut d = (**s.drawing("test").unwrap()).clone();
+    let linked = d.sources.iter().map(|source| source.id).max().unwrap() + 1;
+    d.sources.push(solidcraft_doc::drawing::Source { id: linked, path: Some("plate.solidcraft".into()) });
+    let at = d.tables.index_of(ids::decode(&table).unwrap()).unwrap();
+    if let solidcraft_doc::drawing::table::Kind::PartsList(list) = &mut Arc::make_mut(d.tables.get_mut(at).unwrap()).kind {
+        list.of.source = linked;
+    }
+    s.doc_mut().put_drawing(Arc::new(d));
+    s.drawing("test").unwrap().validate().unwrap();
+
+    let reply = read(&mut s, &balloon);
+    assert_eq!((&reply["row_status"], reply.get("item"), &reply["parts_list"]), (&json!("unread"), None, &json!(table)), "{reply}");
+    let warned = reply["warnings"].as_array().unwrap().iter().any(|w| w.as_str().is_some_and(|w| w.contains("linked design")));
+    assert!(warned, "{reply}");
+    let (_, word) = on_sheet(&mut s, &balloon);
+    assert!(word["why"].as_str().is_some_and(|why| why.contains("linked design")), "{word}");
+    let inspected = s.execute("drawing.inspect", &json!({})).unwrap();
+    let listed = inspected["parts_lists"].as_array().unwrap().iter().find(|l| l["table"] == json!(table)).cloned().unwrap();
+    assert_eq!(listed["ballooned"], Value::Null, "no rows counted from this design: {listed}");
+}
+
 /// That `reply` reads ok with its arrow on `p`, to within what the joints' solve places parts to.
 fn ends_near(reply: &Value, p: [f64; 3]) {
     let point: Vec<f64> = reply["point"].as_array().unwrap_or_else(|| panic!("no point: {reply}")).iter().map(|x| x.as_f64().unwrap()).collect();

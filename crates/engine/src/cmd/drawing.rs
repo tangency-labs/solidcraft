@@ -463,7 +463,7 @@ fn inspect(s: &mut Session, _p: &Value) -> Result<Value> {
         }
         sheets.push(listed);
     }
-    let parts_lists = parts_lists(d, &mut tree);
+    let parts_lists = parts_lists(s, d, &mut tree);
     Ok(json!({
         "id": ids::encode(d.id),
         "name": d.name,
@@ -501,9 +501,9 @@ fn listed_source(design: Option<&str>, source: &Source) -> Value {
 }
 
 /// Each parts list with how many balloons point at each of its rows, its editor's ballooned column
-/// (`drawing.inspect`): null for a list that can't be made, its component deleted or too large.
-fn parts_lists(d: &Drawing, tree: &mut Tree<'_>) -> Vec<Value> {
-    let lists = ballooned(d, tree).into_iter().map(|(id, rows)| {
+/// (`drawing.inspect`): null for a list that can't be made, its component deleted or too large, or its design unread.
+fn parts_lists(s: &Session, d: &Drawing, tree: &mut Tree<'_>) -> Vec<Value> {
+    let lists = ballooned(s, d, tree).into_iter().map(|(id, rows)| {
         let rows = rows.map(|rows| rows.into_iter().map(|(item, balloons)| json!({"item": item, "balloons": balloons})).collect::<Vec<_>>());
         json!({"table": ids::encode(id), "ballooned": rows})
     });
@@ -512,13 +512,17 @@ fn parts_lists(d: &Drawing, tree: &mut Tree<'_>) -> Vec<Value> {
 
 /// Each parts list of `d` by id, with how many balloons point at each of its rows by item, in its
 /// order: none for a list that can't be made. One count for `drawing.inspect` and `drawing.check`.
-pub(super) fn ballooned(d: &Drawing, tree: &mut Tree<'_>) -> Vec<(u64, Option<Vec<(String, usize)>>)> {
+/// `tree` is this design's (`s`), so a list counts only when its source means this design
+/// ([`Session::drawn`]): a list of a design that can't be read, or of another, counts none.
+pub(super) fn ballooned(s: &Session, d: &Drawing, tree: &mut Tree<'_>) -> Vec<(u64, Option<Vec<(String, usize)>>)> {
     let reading = d.balloons_by_list();
     let lists = d.tables.iter().filter_map(|t| if let Kind::PartsList(list) = &t.kind { Some((t.id, list)) } else { None });
     lists
         .map(|(id, list)| {
-            let rows = bom::list_with(tree, &list.request(), true)
-                .ok()
+            let this_design = s.drawn(d, list.of.source).is_ok_and(|on| std::ptr::eq(on, s));
+            let rows = this_design
+                .then(|| bom::list_with(tree, &list.request(), true).ok())
+                .flatten()
                 .map(|listed| balloons_by_row(reading.get(&id).map_or(&[], Vec::as_slice), &listed, tree));
             (id, rows)
         })

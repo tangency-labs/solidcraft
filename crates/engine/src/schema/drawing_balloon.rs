@@ -136,7 +136,7 @@ pub struct BalloonResult {
     /// Its row's item in that list ("1.2").
     #[serde(skip_serializing_if = "Option::is_none")]
     pub item: Option<String>,
-    /// `ok`, `no_list`, `reference`, `no_row` or `not_found`.
+    /// `ok`, `no_list`, `reference`, `no_row`, `not_found` or `unread` (its list's design can't be read).
     pub row_status: String,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub warnings: Vec<String>,

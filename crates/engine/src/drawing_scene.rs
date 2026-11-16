@@ -39,7 +39,7 @@
 //!
 //! A balloon (#3874) rides the same path as one more kind: read with its view, kept and read again
 //! by the same rules, and also after any change to the document, as its number reads a parts list and
-//! the design's parts ([`Document::balloon_rows`]). Its circle, number and leader are
+//! the design's parts ([`balloon_rows`]). Its circle, number and leader are
 //! [`crate::drawing_balloon_paper`]'s.
 //!
 //! A deferred drawing ([`Updates::Deferred`]) draws nothing once the model has moved on from its last
@@ -68,7 +68,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use solidcore_record::{Loop2, Region2, Seg2, Vec2};
 use solidcraft_doc::bom::{Tree, Unlisted};
-use solidcraft_doc::drawing::balloon::{Balloon, RowRead};
+use solidcraft_doc::drawing::balloon::{Balloon, RowRead, balloon_rows};
 use solidcraft_doc::drawing::dimension::{self, Dimension};
 use solidcraft_doc::drawing::note::{Anchor, Note};
 use solidcraft_doc::drawing::view::{ResolvedView, View};
@@ -834,7 +834,7 @@ fn drawn_notes(
 
 /// `balloons`, each on its view (`frame`, as [`draw_dimensions`] gives it), read once, their edges
 /// as dimensions are ([`read_with`]): their rows by the one rule `drawing.balloon.inspect` reads them
-/// by ([`Document::balloon_rows`]), and each one's leader to its edge's middle now, through the view's
+/// by ([`balloon_rows`]), and each one's leader to its edge's middle now, through the view's
 /// frame. One with no row has an empty circle and says why; one whose view isn't drawn has no lines;
 /// one that can't be read says so.
 fn drawn_balloons(
@@ -851,7 +851,7 @@ fn drawn_balloons(
     let on: Vec<(u64, u64)> = balloons.iter().map(|balloon| (balloon.id, balloon.view)).collect();
     let read = read_with(s, sessions, d, &on, solidcraft_doc::Document::resolve_balloons);
     let records: Vec<&Balloon> = balloons.iter().map(|balloon| balloon.as_ref()).collect();
-    let rows = s.doc.balloon_rows(&s.model.state(), d, &records);
+    let rows = balloon_rows(d, &records, |source| s.source_design(d, source));
     let one = |(at, (balloon, row)): (usize, (&Balloon, RowRead))| {
         let unread = || dimension::Status::Unmeasurable(format!("balloon {} can't be read", ids::encode(balloon.id)));
         let resolved = read.as_ref().ok().and_then(|all| all.get(at));
@@ -870,7 +870,7 @@ fn drawn_balloons(
 }
 
 /// Why a balloon shows no number, in a sentence: none when it has one.
-fn row_why(row: &RowRead) -> Option<String> {
+pub(crate) fn row_why(row: &RowRead) -> Option<String> {
     let why = match row {
         RowRead::Item { .. } => return None,
         RowRead::NoList(choices) if choices.is_empty() => "it has no parts list to read",
@@ -878,6 +878,7 @@ fn row_why(row: &RowRead) -> Option<String> {
         RowRead::Unlisted { why: Unlisted::NotFound, .. } => "its parts list can't be read for its part",
         RowRead::Unlisted { why: Unlisted::Reference, .. } => "it points at a reference, which no parts list counts",
         RowRead::Unlisted { why: Unlisted::NoRow, .. } => "its parts list has no row for its part",
+        RowRead::Unread { why, .. } => return Some(format!("its parts list can't be read: {why}")),
     };
     Some(why.to_string())
 }

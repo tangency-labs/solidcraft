@@ -230,7 +230,7 @@ fn fields_and_rows(s: &Session, d: &Drawing, sheets: &[u64]) -> Vec<Finding> {
         });
     }
     // A parts list that can't be made has no rows to count.
-    for (table, rows) in super::drawing::ballooned(d, &mut tree) {
+    for (table, rows) in super::drawing::ballooned(s, d, &mut tree) {
         let Some(sheet) = d.tables.by_id(table).map(|t| t.sheet).filter(|sheet| sheets.contains(sheet)) else { continue };
         for (item, _) in rows.into_iter().flatten().filter(|(_, balloons)| *balloons == 0) {
             let why = format!("no balloon points at row {item}");
