@@ -103,9 +103,10 @@ use crate::blend::fillet_geom::p2::{srf_srf_intersection, SrfSrfOptions};
 use crate::blend::fillet_geom::p3::SplitCorners;
 use crate::blend::fillet_geom::p4::{set_edge_curve, set_vertex_point};
 use crate::blend::fillet_solver::p1::{
-    check_edge_curve_domains, test_manifold_tangent_rollover, test_side_edge_convexity, FilStatus,
-    FilletSolver, FilletSolverOps, FilletSphereSolveEnfo, FilletSurfaceGenerator,
-    FilletSurfaceGeneratorType, RailRailIntersectEnfo, RailUvCurveIntersectEnfo,
+    check_edge_curve_domains, test_manifold_tangent_rollover, test_side_edge_convexity,
+    wrap_closed_directions, FilStatus, FilletSolver, FilletSolverOps, FilletSphereSolveEnfo,
+    FilletSurfaceGenerator, FilletSurfaceGeneratorType, RailRailIntersectEnfo,
+    RailUvCurveIntersectEnfo, SeamDomain,
 };
 use crate::curve::curve::p1::GlobalPointSolveOptions;
 use crate::curve::curve::Curve;
@@ -2049,6 +2050,19 @@ impl FilletSolver {
         );
 
         let mut periodicities = vec![false, false, false, false];
+        // Not upstream (#15767): the ball's section solve wraps a closed base across its seam
+        if ops.solver().seam_domain == SeamDomain::Wrapped {
+            for rail in 0..2 {
+                let Some(base) = ops
+                    .solver()
+                    .surface(rail)?
+                    .map(|s| s.surface.base_surface().clone())
+                else {
+                    continue;
+                };
+                wrap_closed_directions(k, &base, &mut intervals, &mut periodicities, 2 * rail)?;
+            }
+        }
         let mut guess_t = vec![uv1.x, uv1.y, uv2.x, uv2.y];
 
         let do_surf2_calcs = false; // Don't do surface2 calculations
@@ -3006,7 +3020,6 @@ fn edge_zone_kernel(k: &Kernel, tol: f64) -> Kernel {
     tk.rng = k.rng.clone();
     tk.cancel.clone_from(&k.cancel);
     tk.fixes.bspline_trim_preserves_uv_spans = k.fixes.bspline_trim_preserves_uv_spans;
-    tk.fixes.bspline_trim_keeps_rational_end_spans = k.fixes.bspline_trim_keeps_rational_end_spans;
     tk
 }
 

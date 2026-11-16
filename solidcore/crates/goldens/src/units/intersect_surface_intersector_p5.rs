@@ -1075,6 +1075,40 @@ impl UnitDiff for Runner {
     }
 }
 
+/// The certificate of a touching point that `DoIntersection` adds for a start point
+/// that traced nothing (WR-51): `r` is that one touching curve, its UV points lie in
+/// the domains, the surfaces evaluated there are `r`'s deviation apart and closer than
+/// `tol`, and its 3D point lies midway between them.
+#[cfg(test)]
+pub(crate) fn certify_restored_touching_point(
+    k: &Kernel,
+    s: [&Surface; 2],
+    d: [&Extent2d; 2],
+    tol: f64,
+    r: &SurfaceIntersection,
+) {
+    use solidcore::surface::surface::p2::TsectCurveType;
+    assert_eq!(r.curves_3d.len(), 1, "{r:?}");
+    assert_eq!(r.curve_types, [TsectCurveType::Touching]);
+    let c3 = &r.curves_3d[0];
+    let p = c3.evaluate_point(k, 0.0).unwrap();
+    assert_eq!(p, c3.evaluate_point(k, 1.0).unwrap(), "a degenerate curve");
+    let uv = |c: &Option<Curve>| c.as_ref().unwrap().evaluate_point(k, 0.0).unwrap();
+    let (uv1, uv2) = (uv(&r.surface1_uv_curves[0]), uv(&r.surface2_uv_curves[0]));
+    let (uv1, uv2) = (Point2::new(uv1.x, uv1.y), Point2::new(uv2.x, uv2.y));
+    assert!(d[0].contains_point(uv1, 0.0) && d[1].contains_point(uv2, 0.0));
+    let p1 = s[0].evaluate_point(k, uv1).unwrap();
+    let p2 = s[1].evaluate_point(k, uv2).unwrap();
+    let dev = r.deviations[0];
+    // the intersector evaluated its points through other paths (the boundary curve,
+    // the surface caches): their rounding, far below any tolerance here
+    let slack = 1e-9 * (p1.length() + p2.length() + 1.0);
+    assert!((p1.distance(p2) - dev).abs() <= slack, "{} vs {dev}", p1.distance(p2));
+    assert!(dev < tol, "deviation {dev} not below the tolerance {tol}");
+    assert!(p1.distance(p2) < tol, "surface points not within the tolerance {tol}");
+    assert!(p.distance((p1 + p2) / 2.0) <= slack + 1e-9 * dev, "{p:?} {p1:?} {p2:?}");
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1166,6 +1200,55 @@ mod tests {
                 assert_eq!(cache.aux(id).unwrap().polar_box, before);
             }
         }
+    }
+
+    /// WR-51: the touching points `DoIntersection` adds for a start point that traced
+    /// nothing, in the five cases where the boundary search drops one: gen0236 (two
+    /// plane patches 9.9 apart at their corners, kept since upstream already reported
+    /// it) and the four that upstream left with no answer. Each is certified on both
+    /// surfaces and within the tolerance.
+    #[test]
+    fn wr51_restored_touching_points_are_certified_contacts() {
+        use solidcore::intersect::surface_intersector::p1::SurfaceIntersector;
+        let ctx = CaseContext {
+            root: crate::case::repo_root(),
+            seeds: 16,
+        };
+        let names = ["gen0133", "gen0236", "gen0247", "gen0351", "gen0840"];
+        let mut seen = 0;
+        for case in Runner.cases(&ctx).unwrap() {
+            if !names.contains(&case.name.as_str()) {
+                continue;
+            }
+            seen += 1;
+            let i: Inputs = case.parse().unwrap();
+            let a = rust_surface_with(&i.a, i.raw_knots[0]).unwrap();
+            let b_owned = i.b.as_ref().map(|b| rust_surface_with(b, i.raw_knots[1]).unwrap());
+            let b = b_owned.as_ref().unwrap_or(&a);
+            let (dom1, dom2) = (ext(i.dom1), ext(i.dom2));
+            let k = Kernel::default();
+            let (r, tol) = match &i.trees {
+                None => {
+                    let si = SurfaceIntersector::new(&k, &a, &dom1, b, &dom2, false).unwrap();
+                    let tol = i.tol.unwrap_or(si.this_approx_tol_3d);
+                    let r = do_intersection(&k, &a, &dom1, b, &dom2, i.edges, i.tol, i.ang);
+                    (r.unwrap(), tol)
+                }
+                Some((ta, tb)) => {
+                    let mut caches = vec![rust_cache(a.clone(), ta, H(0)).unwrap()];
+                    if let Some(tb) = tb {
+                        caches.push(rust_cache(b.clone(), tb, H(1)).unwrap());
+                    }
+                    let mut ssi: AdvSurfaceIntersector<'_, '_, H> =
+                        AdvSurfaceIntersector::new(&k, &a, &dom1, b, &dom2, false).unwrap();
+                    ssi.base.set_use_surface_edges(i.edges[0], i.edges[1]);
+                    let r = ssi.do_intersection_with_caches(&k, &mut caches, i.tol, i.ang);
+                    (r.unwrap(), ssi.base.this_approx_tol_3d)
+                }
+            };
+            certify_restored_touching_point(&k, [&a, b], [&dom1, &dom2], tol, &r);
+        }
+        assert_eq!(seen, names.len());
     }
 
     #[test]

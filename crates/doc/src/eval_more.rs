@@ -76,7 +76,11 @@ pub(super) fn eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, 
             Ok(())
         }
         FeatureKind::Rib { .. } => {
-            let tools = rib_tools(vals, st, f, None)?;
+            // The rib is built against the bodies where its sketch is drawn: a body of another,
+            // moved component is met where it is shown (#17655), whether it takes part or only
+            // stops the wall.
+            let shown = targets_as_shown(st, f, &["*".to_string()])?;
+            let tools = rib_tools(vals, &shown, f, None)?;
             apply_op(doc, st, f, tools, Operation::Join, &[])
         }
         FeatureKind::ReplaceFace { faces, target, body } => {
@@ -408,9 +412,20 @@ fn rib_tool(st: &ModelState, ss: &SolvedSketch, ids: &[String], t: f64, depth: O
     let limit = depth.unwrap_or(reach * 2.0 + 1.0);
     let step = (limit.min(reach * 2.0 + 1.0) / 400.0).max(1e-3);
     let overlap = (len / samples as f64 * 2.0).max(step * 2.0).min(t);
+    // An end of the curves often sits exactly on a wall (a rib from wall to wall), where the
+    // body's inside is ambiguous; search from just inside the curve there, so the end does not
+    // read the wall it touches as the body ahead and the end face stays square.
+    let nudge = len / samples as f64 * 0.01;
     let mut far = Vec::with_capacity(along.len());
-    for q in &along {
-        let hit = entry(*q, n, limit);
+    for (i, q) in along.iter().enumerate() {
+        let from = if i == 0 {
+            point_on_polyline(&pts, nudge)
+        } else if i == samples {
+            point_on_polyline(&pts, len - nudge)
+        } else {
+            *q
+        };
+        let hit = entry(from, n, limit);
         let h = match (hit, depth) {
             (Some((h, _)), Some(d)) if h >= d => d,
             (Some((h, out)), _) => h + overlap.min(0.5 * (out - h)),

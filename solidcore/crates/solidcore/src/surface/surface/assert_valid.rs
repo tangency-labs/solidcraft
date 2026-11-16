@@ -95,8 +95,8 @@
 //!   (`labels::CURVE_BOUNDED_SURFACE`, UB-273). With no report list,
 //!   failed boundary checks return false normally, as upstream. At levels 0..2,
 //!   the inherited base continuity test reads an unwritten output: this class uses
-//!   the generic failing `GetKnots`. The existing continuity guard returns
-//!   `InvalidInput`; `LEVEL_GIVEN` skips that base call and is defined.
+//!   the generic failing `GetKnots`. Continuities that cannot be computed fail test 4
+//!   (WR-663, as the fork); `LEVEL_GIVEN` skips that base call.
 //! - **Wrapping surfaces.** `SmOffsetSurface` and `SmSrfInVolume` are in the `wrapped`
 //!   submodule (its own deviations); the latter calls `Volume::assert_valid`.
 //! - **Face context.** Upstream's solves reach a face-owned surface's face through the
@@ -598,20 +598,15 @@ fn assert_test_surface1(k: &Kernel, s: &Surface) -> Result<(bool, f64, f64)> {
 
 /// `sm_AssertTestSurface4`: at least G1 across every knot in both directions.
 fn assert_test_surface4(k: &Kernel, s: &Surface) -> Result<bool> {
-    // Surface continuities across U and V knots (statuses ignored: a failed call
-    // leaves the minimum it had reached)
-    // (with the opt-in fix continuities that cannot be computed fail the test, WR-663,
+    // Surface continuities across U and V knots
+    // (continuities that cannot be computed fail the test, as the fork does, WR-663,
     // tangency-labs/smlib 21dcf69: `None`)
-    let fails = k.fixes.query_statuses_pass_on;
     let cont = |dir| -> Result<Option<ContinuityType>> {
         let mut reached = None;
         match s.calculate_continuities_reached(k, dir, &mut reached) {
             Ok((c, _)) => Ok(Some(c)),
             Err(e) if e.is_unported_or_cancelled() => Err(e),
-            Err(_) if fails => Ok(None),
-            Err(_) => reached.map(Some).ok_or_else(|| {
-                invalid("continuity output never written (upstream reads it uninitialised)")
-            }),
+            Err(_) => Ok(None),
         }
     };
     let Some(cont_u) = cont(SurfParamType::U)? else {
@@ -666,14 +661,13 @@ fn assert_test_surface6(k: &Kernel, s: &Surface) -> Result<bool> {
         }
 
         // Get iso parameter boundaries
-        // (a failed CreateIsoBoundaries leaves the curves uninitialised upstream)
-        // (with the opt-in fix boundaries that cannot be built or compared fail the
-        // test, WR-663, tangency-labs/smlib 21dcf69)
-        let fails = k.fixes.query_statuses_pass_on;
+        // (a failed CreateIsoBoundaries leaves the curves uninitialised upstream;
+        // boundaries that cannot be built or compared fail the test, as the fork does,
+        // WR-663, tangency-labs/smlib 21dcf69)
         let (crv1, crv2) = match s.create_iso_boundaries(k, dir, a_tol) {
             Ok(Some(c)) => c,
             Err(e) if e.is_unported_or_cancelled() => return Err(e),
-            Err(_) if fails => return Ok(false),
+            Err(_) => return Ok(false),
             _ => {
                 return Err(invalid(
                     "no iso boundaries (upstream reads uninitialised curves)",
@@ -706,7 +700,7 @@ fn assert_test_surface6(k: &Kernel, s: &Surface) -> Result<bool> {
             ],
         ) {
             Ok(f) => f,
-            Err(e) if fails && !e.is_unported_or_cancelled() => return Ok(false),
+            Err(e) if !e.is_unported_or_cancelled() => return Ok(false),
             Err(e) => return Err(e),
         };
 
@@ -3803,7 +3797,7 @@ mod curve_bounded_tests {
     }
 
     #[test]
-    fn curve_bounded_given_is_defined_and_base_continuity_is_guarded() {
+    fn curve_bounded_given_is_defined_and_base_continuity_fails_test_4() {
         let k = Kernel::default();
         let surface = wrap(wrap(plane(1.0), vec![], vec![]), vec![], vec![]);
         let mut list = AssertArray::new();
@@ -3812,14 +3806,13 @@ mod curve_bounded_tests {
             .unwrap());
         assert!(list.is_empty());
         assert!(!list.last_add());
+        // The inherited base check reaches `sm_AssertTestSurface4`, whose
+        // `CalculateContinuities` fails here (a curve-bounded surface's generic `GetKnots`
+        // fails) without writing its output. Upstream reads that output uninitialised;
+        // the fork fails test 4 instead (tangency-labs/smlib 21dcf69, WR-663), so the
+        // surface is reported invalid.
         for level in [0, 1, 2] {
-            assert!(matches!(
-                surface.assert_valid(&k, None, level, ObjectKey(1)),
-                Err(SolidError::InvalidInput {
-                    reason: "continuity output never written (upstream reads it uninitialised)",
-                    ..
-                })
-            ));
+            assert!(!surface.assert_valid(&k, None, level, ObjectKey(1)).unwrap());
         }
     }
 
