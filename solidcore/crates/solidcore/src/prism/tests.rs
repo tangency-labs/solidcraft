@@ -885,8 +885,9 @@ fn a_moved_input_is_refused() {
 /// #17707: a few hundredths of a millimetre of a circle or an ellipse bends off its chord by
 /// about 1e-5. That is under the tolerance a part's edges are read with (1e-6 of its size,
 /// 7.7e-5 for the report's part) but over the 1e-5 an edge may lie off its face; read as a line,
-/// it gave an Extrude To Object prism a flat side off the cylinder it lies on. It is read as the
-/// curve it is; a conic whose control points lie on one line stays that line.
+/// it gave an Extrude To Object prism a flat side off the cylinder it lies on. It is read as an
+/// arc (within the reading tolerance, the ellipse's as its circle of curvature); a rational piece
+/// within the zone tolerance of its chord, or on it, stays a line.
 #[test]
 fn a_short_piece_of_a_circle_or_an_ellipse_is_not_a_line() {
     let k = Kernel::default();
@@ -926,18 +927,21 @@ fn a_short_piece_of_a_circle_or_an_ellipse_is_not_a_line() {
             );
         }
     }
-    // a rational quadratic whose control points lie on one line is that line
-    let (line, iv) = spline(
-        &k,
-        knots,
-        vec![
-            [0.0, 0.0, 0.0, 1.0],
-            [2.5, 0.0, 0.0, 0.5],
-            [10.0, 0.0, 0.0, 1.0],
-        ],
-    );
-    let r = read(&k, &line, iv, true, &xy(), tol).unwrap();
-    assert!(matches!(r[..], [Seg2::Line { .. }]), "{r:?}");
+    // a rational quadratic whose middle control point lies on its chord, or 2e-7 off it (well
+    // within the 1e-5 zone tolerance; as an arc, its radius would be some 190 km), is that line
+    for off in [0.0, 2e-7] {
+        let (line, iv) = spline(
+            &k,
+            knots.clone(),
+            vec![
+                [0.0, 0.0, 0.0, 1.0],
+                [2.5, 0.5 * off, 0.0, 0.5],
+                [10.0, 0.0, 0.0, 1.0],
+            ],
+        );
+        let r = read(&k, &line, iv, true, &xy(), tol).unwrap();
+        assert!(matches!(r[..], [Seg2::Line { .. }]), "{off}: {r:?}");
+    }
 }
 
 /// Samples do not certify: a C0 quadratic spline on the x axis at every knot k/16 and bowing 1

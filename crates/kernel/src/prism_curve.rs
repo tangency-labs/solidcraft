@@ -482,19 +482,22 @@ fn read(run: &Run, plane: &Plane, tol: f64, work: &mut usize, each_span: bool, w
     {
         return None;
     }
-    let line = a.dist(b) > tol && spans.iter().all(|s| line_span(s, a, b, tol, error, work).is_some());
-    // A conic (rational spans) whose control points leave its chord by more than their rounding
-    // bends, however short: read as a line within `tol`, a few hundredths of a millimetre of a
-    // circle made a flat prism side 1e-5 mm off the cylinder it lies on (#17707). It is read as
-    // the arc or conic it is, and as the line only when it is neither.
-    let rational = spans.iter().flatten().any(|p| (p[2] - 1.).abs() > 1e-12);
-    if line && !(rational && off_chord(&spans.iter().flatten().map(|p| point(*p)).collect::<Vec<_>>()) > error) {
-        return Some(vec![Seg2::Line { a, b }]);
+    if a.dist(b) > tol && spans.iter().all(|s| line_span(s, a, b, tol, error, work).is_some()) {
+        // Within `tol` of its chord the piece is that line, unless it is rational (a circle's or
+        // a conic's) and its control points leave the chord by more than the zone tolerance an
+        // edge keeps to its face: the piece lies in their hull, so only then can the line lie
+        // farther off it. Read as the line, a few hundredths of a millimetre of a circle made a
+        // flat prism side 1e-5 mm off its cylinder (#17707). Such a piece is the arc it is proved
+        // on within `tol`; one that is no arc stays the line.
+        let rational = spans.iter().flatten().any(|p| (p[2] - 1.).abs() > 1e-12);
+        let zone = solidcore_ops::sweep::zone_tolerance().unwrap_or(f64::INFINITY);
+        let bends = rational && off_chord(&spans.iter().flatten().map(|p| point(*p)).collect::<Vec<_>>()) > zone;
+        let proved = if bends { arc(&eval, (ts, te), &spans, plane, a, b, tol, error, work, whole) } else { None };
+        return Some(proved.unwrap_or_else(|| vec![Seg2::Line { a, b }]));
     }
     arc(&eval, (ts, te), &spans, plane, a, b, tol, error, work, whole)
         .or_else(|| free_form(&spans, a, b, tol))
         .or_else(|| if each_span { span_by_span(&spans, a, b, tol) } else { None })
-        .or_else(|| line.then(|| vec![Seg2::Line { a, b }]))
 }
 
 /// A polyline from parameter `ts` to `te` (either way round; segment i spans [i, i + 1]) as its
@@ -866,7 +869,9 @@ mod tests {
     /// about 1e-5 mm. That is under the tolerance a part's edges are read with (1e-6 of its size,
     /// 7.7e-5 mm for the report's part) but over the 1e-5 mm an edge may lie off its face. Read
     /// as a line, it gave an Extrude To Object prism a flat side off the cylinder it lies on, and
-    /// the join was refused. It is read as the curve it is; a conic that is straight stays a line.
+    /// the join was refused. It is read as an arc (within the reading tolerance, the ellipse's as
+    /// its circle of curvature); a rational piece within the zone tolerance of its chord, or on
+    /// it, stays a line.
     #[test]
     fn a_short_piece_of_a_circle_or_an_ellipse_is_not_a_line() {
         let tol = 7.7e-5;
@@ -892,9 +897,14 @@ mod tests {
                 assert!(seg.mid().dist(mid) < 1e-9, "{seg:?} misses the curve's middle {mid:?}");
             }
         }
-        // A rational quadratic whose control points lie on one line is that line.
-        let line = Curve::RationalSpline { knots: bezier_knots(2), homogeneous: vec![[0., 0., 0., 1.], [2.5, 0., 0., 0.5], [10., 0., 0., 1.]] };
-        assert!(matches!(segment(&run(&line, true), &Plane::XY, tol, &mut 2_000_000).unwrap()[..], [Seg2::Line { .. }]));
+        // A rational quadratic whose middle control point lies on its chord, or 2e-7 off it (well
+        // within the 1e-5 zone tolerance; as an arc, its radius would be some 190 km), is that line.
+        for off in [0., 2e-7] {
+            let line =
+                Curve::RationalSpline { knots: bezier_knots(2), homogeneous: vec![[0., 0., 0., 1.], [2.5, 0.5 * off, 0., 0.5], [10., 0., 0., 1.]] };
+            let segs = segment(&run(&line, true), &Plane::XY, tol, &mut 2_000_000).unwrap();
+            assert!(matches!(segs[..], [Seg2::Line { .. }]), "{off}: {segs:?}");
+        }
     }
 
     #[test]
