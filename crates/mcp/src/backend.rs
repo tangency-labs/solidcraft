@@ -68,6 +68,10 @@ pub use remote::{Auto, Remote};
 /// `batch` uses it to tell "never sent" from "sent, reply lost".
 pub(crate) const NOT_RUNNING: &str = "no SolidCraft app is listening at";
 
+/// What a call refused at the app's connection limit says (#10967): the app ran nothing, so
+/// `batch` says that, not that the steps may have run.
+pub(crate) const REFUSED_UNRUN: &str = "refused this call without running it";
+
 /// An in-process headless session (no window); renders with the CPU rasterizer.
 pub struct Headless {
     pub session: Session,
