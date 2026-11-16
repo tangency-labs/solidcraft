@@ -212,7 +212,9 @@ pub enum BlendFailure {
 pub const fn no_room_class(reason: NoRoomReason) -> ErrorKind {
     use NoRoomReason as R;
     match reason {
-        R::BallDoesNotFit => ErrorKind::BallDoesNotFit,
+        // a Join's: the round's ball does not fit its face where its contact line must cross
+        // the edge between the rounds' faces
+        R::BallDoesNotFit | R::JoinRailMissesSideEdge => ErrorKind::BallDoesNotFit,
         R::RailLeavesFace | R::ConcaveOverflow => ErrorKind::RailLeavesFace,
         R::FaceConsumed => ErrorKind::FaceConsumed,
         R::BandsOverlap => ErrorKind::BandsOverlap,
@@ -838,6 +840,10 @@ mod tests {
             (
                 BlendFailure::NoRoom(R::JoinOffsetsDiffer),
                 ErrorKind::JoinOffsetsDiffer,
+            ),
+            (
+                BlendFailure::NoRoom(R::JoinRailMissesSideEdge),
+                ErrorKind::BallDoesNotFit,
             ),
             (
                 BlendFailure::NoRoom(R::StripBelowResolution),

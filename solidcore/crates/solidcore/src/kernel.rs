@@ -605,8 +605,6 @@ pub struct UpstreamFixes {
     /// Off by default for pinned C++ parity. This is not the WR-406 trim-reversal check:
     /// validation still repairs existing trims as before.
     pub validation_does_not_make_uv_trims: bool,
-    /// Before the piecewise merge, `do_extended_offset` rebuilds every offset face whose loops cross from the stretches of its loops that bound it (WR-345, #854).
-    pub offset_resolve_crossing_loops: bool,
     /// [`crate::topology::edgeuse::p2::is_convex_radial_sector`]
     /// (`SmEdgeuse::IsConvexRadialSector`) propagates a failing
     /// [`crate::topology::edgeuse::p2::evaluate_binormal_step_off`] status on either this
@@ -636,8 +634,6 @@ pub struct UpstreamFixes {
     /// removes it, so the trim passes the check (#2129). Off by default for pinned SMLib
     /// compatibility.
     pub bspline_trim_preserves_uv_spans: bool,
-    /// `BSplineCurve::trim` keeps a short end span of a rational curve (its control points carry weights, `N_IsCrvRat`: a conic's NURB) instead of removing it with `N_CrvRemoveDegenSegs`, which stretches the remaining spans over its length and so moves a conic off its circle or ellipse (a trimmed half circle of radius 16 by about 1e-6, enough for its edge and vertex gaps to pass the tolerance); non-rational curves are cleaned as upstream (WR-575, #1529). An end span whose control points all lie within check test #15's pole tolerance (`SM_ZONE_TOL_3D / 10`) is not kept: the trim ends at its interior knot instead, on the conic and within that tolerance of the requested end, so the curve passes the check (#2090). Off by default for pinned SMLib compatibility.
-    pub bspline_trim_keeps_rational_end_spans: bool,
     /// The Boolean's topology intersector treats a self-loop proto edge whose ends a vertex definition on a vertex combined (`CanCombineVertexDefinitions`) as degenerate, instead of `SmProtoEdge::Resolve` splitting it onto that one vertex, after which `SmMerge::MakeFaceuse` returns `SM_ERR` (WR-214, #480; `plan/upstream-issues/WR-214--smprotoedge-resolve-splits-a-self-loop-proto-edge-onto-one.md`).
     pub proto_edge_self_loop_on_vertex_degenerate: bool,
     /// The B-rep's own edits, its `StitchAndOrient`, the offset and shell stitches and the

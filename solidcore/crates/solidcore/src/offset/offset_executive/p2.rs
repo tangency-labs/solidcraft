@@ -1132,13 +1132,10 @@ impl OffsetExecutive {
             // trim bounds; restore the original before reporting an out-of-domain error.
             self.extend_result_faces_prefix(kernel, mark_type, notifications)?;
 
-            // Not upstream (WR-345, tangency-labs/solidcore#854), opt-in
-            // `Kernel::fixes.offset_resolve_crossing_loops`: an offset face whose loops cross
-            // (an inner loop's offset grown past the outer loop's) is rebuilt from the
+            // Not upstream (WR-345, tangency-labs/solidcore#854): an offset face whose loops
+            // cross (an inner loop's offset grown past the outer loop's) is rebuilt from the
             // stretches of its loops that bound it, before the merge sees it.
-            if kernel.fixes.offset_resolve_crossing_loops {
-                self.resolve_crossing_loops(kernel, original, notifications)?;
-            }
+            self.resolve_crossing_loops(kernel, original, notifications)?;
 
             // (not upstream) each kept edge is the original edge on both its faces
             self.restore_kept_edges(kernel, original, notifications)?;
@@ -5308,7 +5305,6 @@ mod tests {
     fn issue_977_closed_shell_excess_faces_after_merge() {
         let shell = || -> Result<Brep> {
             let mut kernel = Kernel::default();
-            kernel.fixes.offset_resolve_crossing_loops = true;
             let part = plate_with_hole_near_side(&mut kernel);
             let mut notifications = NotificationFixture::new(&part);
             OffsetExecutive::shell_brep(
@@ -5481,7 +5477,6 @@ mod tests {
     #[test]
     fn issue_854_offset_face_crossing_loops_resolved() {
         let mut kernel = Kernel::default();
-        kernel.fixes.offset_resolve_crossing_loops = true;
         let (part, top) = plate_with_hole_by_side(&mut kernel);
         assert_eq!(top.len(), 1);
         let mut notifications = NotificationFixture::new(&part);
@@ -5797,7 +5792,6 @@ mod tests {
         let shell = |contacts_at_ends: bool| -> Result<Option<f64>> {
             use crate::primitive::api_primitives::{create_box, create_cylinder};
             let mut kernel = Kernel::default();
-            kernel.fixes.offset_resolve_crossing_loops = true;
             kernel.fixes.curve_contacts_at_curve_ends = contacts_at_ends;
             let plate =
                 create_box(&mut kernel, Vec3::new(0.0, 0.0, 0.0), 40.0, 40.0, 10.0).unwrap();

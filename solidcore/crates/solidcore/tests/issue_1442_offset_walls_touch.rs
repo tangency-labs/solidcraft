@@ -6,9 +6,9 @@
 //! The hole lies 4 = 2 x 2 from the front face, so shelled 2 the hole wall's offset
 //! (r 5) is tangent to the front wall's offset (y = 2) at (22.5, 2): the offset face on
 //! z = 0 has loops that touch without crossing, the walls meet along a line and the
-//! offset bounds no solid there. With `offset_resolve_crossing_loops` the shell fails with
-//! `SM_ERR_OFFSET_WALLS_TOUCH` (1042), not `SM_ERR_BAD_INTERSECTIONS` (1027) as the fork
-//! did before a759622. Thicknesses 1.5 and 2.5 (loops apart or crossing) build.
+//! offset bounds no solid there. The shell fails with `SM_ERR_OFFSET_WALLS_TOUCH` (1042),
+//! not `SM_ERR_BAD_INTERSECTIONS` (1027) as the fork did before a759622. Thicknesses 1.5
+//! and 2.5 (loops apart or crossing) build.
 #![allow(
     clippy::unwrap_used,
     clippy::expect_used,
@@ -40,7 +40,6 @@ fn part(k: &mut Kernel) -> Brep {
 
 fn shell(distance: f64) -> (Kernel, solidcore::Result<Brep>) {
     let mut k = Kernel::default();
-    k.fixes.offset_resolve_crossing_loops = true;
     let mut part = part(&mut k);
     let bottom = planar_faces_at(&k, &part, 2, 0.0);
     assert_eq!(bottom.len(), 1);
@@ -120,7 +119,6 @@ fn issue_1442_thinner_and_thicker_walls_still_build() {
 /// tangent at (1.5, 20) and the walls touch.
 fn plate_shell(hole_x: f64) -> (Kernel, solidcore::Result<Brep>) {
     let mut k = Kernel::default();
-    k.fixes.offset_resolve_crossing_loops = true;
     let plate = create_box(&mut k, Point3::new(0.0, 0.0, 0.0), 40.0, 40.0, 10.0).unwrap();
     let hole = create_cylinder(&mut k, Point3::new(hole_x, 20.0, -1.0), 2.0, 12.0).unwrap();
     let part = boolean_difference(&mut k, plate, hole).unwrap();
