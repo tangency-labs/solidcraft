@@ -1260,6 +1260,281 @@ fn sheet_editor() -> (Session, u64, u64, Value) {
     (s, d, sk, made)
 }
 
+/// A 40 by 20 paper-mm rectangle with an optional 10 by 10 hole.
+fn sheet_fill_fixture(hole: bool) -> (Session, u64, u64, Value, Value) {
+    let (mut s, drawing, sketch, made) = sheet_editor();
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0":[15,10],"p1":[55,30]}));
+    if hole {
+        run(&mut s, "sketch.rectangle.two_point", json!({"p0":[25,15],"p1":[35,25]}));
+    }
+    run(&mut s, "sketch.finish", json!({}));
+    let inspected = run(&mut s, "drawing.fill.profiles", json!({"sketch":made["sketch"]}));
+    assert_eq!(inspected["fill_profiles"]["uncertified"], 0);
+    let boundary = inspected["fill_profiles"]["boundaries"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|boundary| boundary["holes"].as_array().unwrap().len() == usize::from(hole))
+        .unwrap()
+        .clone();
+    (s, drawing, sketch, made, boundary)
+}
+
+#[test]
+fn sheet_fills_keep_complete_holes_paper_units_and_drawing_history() {
+    use solidcraft_geom::paper::{Item, ObjectKind};
+    let (mut s, drawing, _, made, boundary) = sheet_fill_fixture(true);
+    let model = s.model.state();
+    let features = s.doc.features.clone();
+    let (evaluations, undo) = (s.evaluations, s.undo.len());
+    let result = run(&mut s, "drawing.sketch.fill", json!({"sketch":made["sketch"],"boundary":boundary,"paint":{"kind":"solid"}}));
+    let fill = ids::decode(result["fills"][0]["fill"].as_str().unwrap()).unwrap();
+    assert_eq!(result["fills"][0]["boundary"], boundary);
+    assert_eq!(result["fills"][0]["status"], "current");
+    assert_eq!((s.undo.len(), s.undo.last().unwrap().part), (undo + 1, Some(drawing)));
+    let owner = open_one(&s);
+    let scene = crate::drawing_scene::build(&s, &owner, owner.sheets[0].id).unwrap();
+    let group = scene.scene.groups.iter().find(|group| group.object == fill).unwrap();
+    assert_eq!(group.kind, ObjectKind::Fill);
+    let [Item::Fill { region }] = group.items.as_slice() else { panic!("not one solid fill: {group:?}") };
+    assert_eq!(region.holes.len(), 1);
+    assert_eq!(region.outer.signed_area().abs() - region.holes.iter().map(|hole| hole.signed_area().abs()).sum::<f64>(), 700.0);
+    let before = s.doc.clone();
+    run(&mut s, "drawing.fill.edit", json!({"fill":ids::encode(fill),"paint":{"kind":"solid"}}));
+    assert!(Arc::ptr_eq(&before, &s.doc), "unchanged paint keeps the saved drawing");
+    assert_eq!(s.undo.len(), undo + 1);
+    run(&mut s, "edit.undo", json!({}));
+    assert!(open_one(&s).fills.is_empty());
+    run(&mut s, "edit.redo", json!({}));
+    assert_eq!(open_one(&s).fills[0].id, fill);
+    assert!(Arc::ptr_eq(&model, &s.model.state()));
+    assert_eq!((s.evaluations, &s.doc.features), (evaluations, &features));
+}
+
+#[test]
+fn sheet_hatch_dots_are_eighty_real_disks_and_never_zero_length_strokes() {
+    use solidcraft_geom::paper::Item;
+    let (mut s, _, _, made, boundary) = sheet_fill_fixture(true);
+    let imported = run(&mut s, "drawing.pattern.import", json!({"kind":"pat","source":"*DOTS,Original analytic dots\n0,0,0,0,2,0,-4\n\n"}));
+    let pattern = imported["patterns"][0]["id"].clone();
+    let result = run(
+        &mut s,
+        "drawing.sketch.fill",
+        json!({"sketch":made["sketch"],"boundary":boundary,"paint":{"kind":"hatch","pattern":pattern,"pen_width_mm":0.25}}),
+    );
+    let fill = ids::decode(result["fills"][0]["fill"].as_str().unwrap()).unwrap();
+    let owner = open_one(&s);
+    let built = crate::drawing_scene::build(&s, &owner, owner.sheets[0].id).unwrap();
+    let group = built.scene.groups.iter().find(|group| group.object == fill).unwrap();
+    // Nine strict-interior y rows, ten x marks each, less ten inside the hole.
+    assert_eq!(group.items.len(), 80);
+    for item in &group.items {
+        let Item::Fill { region } = item else { panic!("dot became a stroke: {item:?}") };
+        assert!(region.holes.is_empty());
+        let area = region.outer.signed_area().abs();
+        assert!((area - std::f64::consts::PI * 0.125_f64.powi(2)).abs() < 1e-10, "dot area {area}");
+    }
+    let prepared = built.scene.prepare().unwrap();
+    let (svg, _) = solidcraft_io::paper::paper_svg(&prepared, &solidcraft_geom::paper::NoPictures, 300.0).unwrap();
+    assert!(String::from_utf8(svg).unwrap().contains("fill-rule=\"evenodd\""));
+}
+
+#[test]
+fn sheet_pattern_snapshots_preserve_duplicates_phase_units_and_references() {
+    let (mut s, _, _, made, boundary) = sheet_fill_fixture(false);
+    let source = "*PHASE,Original\n0,1,2,-1,2,1,-1,0,-2\n\n*PHASE,Separate definition\n90,0,0,0,3\n\n";
+    let imported = run(&mut s, "drawing.pattern.import", json!({"kind":"pat","source":source,"units":"inches","scale":0.5}));
+    assert_eq!(imported["patterns"].as_array().unwrap().len(), 2);
+    let first = imported["patterns"][0]["id"].clone();
+    let second = imported["patterns"][1]["id"].clone();
+    assert_ne!(first, second);
+    let family = &imported["patterns"][0]["families"][0];
+    assert_eq!(family["origin"], json!([12.7, 25.4]));
+    assert_eq!(family["delta_x"], -12.7);
+    assert_eq!(family["dashes"], json!([12.7, -12.7, 0.0, -25.4]));
+    run(
+        &mut s,
+        "drawing.sketch.fill",
+        json!({"sketch":made["sketch"],"boundary":boundary,"paint":{"kind":"hatch","pattern":first,"pen_width_mm":0.25}}),
+    );
+    let before = s.doc.clone();
+    assert!(refused(&mut s, "drawing.pattern.delete", json!({"pattern":first})).contains("referenced"));
+    assert!(Arc::ptr_eq(&before, &s.doc));
+    run(&mut s, "drawing.pattern.delete", json!({"pattern":second}));
+    assert_eq!(run(&mut s, "drawing.pattern.inspect", json!({"pattern":first}))["patterns"][0], imported["patterns"][0]);
+}
+
+#[test]
+fn sheet_fill_loss_retains_the_last_region_reopens_and_refuses_export_atomically() {
+    let (mut s, drawing, _, made, boundary) = sheet_fill_fixture(true);
+    let result = run(&mut s, "drawing.sketch.fill", json!({"sketch":made["sketch"],"boundary":boundary,"paint":{"kind":"solid"}}));
+    let fill = result["fills"][0]["fill"].clone();
+    let saved_region = open_one(&s).fills[0].last_region.clone();
+    run(&mut s, "drawing.sketch.edit", json!({"sketch":made["sketch"]}));
+    run(&mut s, "sketch.delete", json!({"entities":[boundary["outer"][0]]}));
+    run(&mut s, "sketch.finish", json!({}));
+    assert_eq!(run(&mut s, "drawing.fill.inspect", json!({"fill":fill}))["fills"][0]["status"], "lost_boundary");
+    assert_eq!(open_one(&s).fills[0].last_region, saved_region);
+    let built = run(&mut s, "drawing.scene", json!({"sheet":made["sheet"]}));
+    assert_eq!(built["fills"][0]["status"], "lost_boundary");
+    let folder = Folder::new("drawing-fill-lost");
+    let path = folder.path("existing.svg");
+    std::fs::write(&path, b"retain previous output").unwrap();
+    let why = refused(&mut s, "drawing.export", json!({"sheet":made["sheet"],"path":path}));
+    assert!(why.contains(fill.as_str().unwrap()) && why.contains("lost boundary"), "{why}");
+    assert_eq!(std::fs::read(&path).unwrap(), b"retain previous output");
+    let absent = folder.path("absent.svg");
+    refused(&mut s, "drawing.export", json!({"sheet":made["sheet"],"path":absent}));
+    assert!(!std::path::Path::new(&absent).exists());
+    let mut reopened = Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap());
+    run(&mut reopened, "drawing.open", json!({"drawing":ids::encode(drawing)}));
+    assert_eq!(run(&mut reopened, "drawing.fill.inspect", json!({"fill":fill}))["fills"][0]["status"], "lost_boundary");
+    assert_eq!(open_one(&reopened).fills[0].last_region, saved_region);
+    run(&mut s, "edit.undo", json!({}));
+    assert_eq!(run(&mut s, "drawing.fill.inspect", json!({"fill":fill}))["fills"][0]["status"], "current");
+}
+
+#[test]
+fn sheet_fill_refusals_are_atomic_and_retired_ids_are_not_reused() {
+    let (mut s, _, _, made, boundary) = sheet_fill_fixture(true);
+    for request in [
+        json!({"sketch":made["sheet"],"boundary":boundary,"paint":{"kind":"solid"}}),
+        json!({"sketch":made["sketch"],"boundary":{"outer":boundary["outer"],"holes":[]},"paint":{"kind":"solid"}}),
+        json!({"sketch":made["sketch"],"boundary":boundary,"paint":{"kind":"hatch","pattern":made["sheet"],"pen_width_mm":0.25}}),
+    ] {
+        let before = s.doc.clone();
+        let history = (s.undo.len(), s.redo.len(), s.evaluations);
+        refused(&mut s, "drawing.sketch.fill", request);
+        assert!(Arc::ptr_eq(&before, &s.doc));
+        assert_eq!((s.undo.len(), s.redo.len(), s.evaluations), history);
+    }
+    let request = json!({"sketch":made["sketch"],"boundary":boundary,"paint":{"kind":"solid"}});
+    let first = run(&mut s, "drawing.sketch.fill", request.clone())["fills"][0]["fill"].clone();
+    run(&mut s, "edit.undo", json!({}));
+    let second = run(&mut s, "drawing.sketch.fill", request)["fills"][0]["fill"].clone();
+    assert_ne!(first, second);
+}
+
+#[test]
+fn sheet_fill_commands_have_checked_schemas_and_hostile_requests_do_not_publish() {
+    use crate::schema::drawing_fill::{Patterns, Readings};
+    use crate::schema::tests::conforms;
+    use crate::schema::{ParamCheck, output_schema_for};
+    let commands = [
+        "drawing.sketch.fill",
+        "drawing.fill.edit",
+        "drawing.fill.delete",
+        "drawing.fill.inspect",
+        "drawing.fill.profiles",
+        "drawing.pattern.import",
+        "drawing.pattern.inspect",
+        "drawing.pattern.delete",
+    ];
+    let (s, _, _, _, _) = sheet_fill_fixture(false);
+    for command in commands {
+        let spec = find_command(command).unwrap();
+        assert!(spec.contract.is_some() && spec.output.is_some(), "{command}");
+        for value in crate::tests::hostile_values() {
+            for request in [value.clone(), json!({"fill":value}), json!({"pattern":value}), json!({"boundary":value}), json!({"kind":value})] {
+                let mut copy = s.scratch();
+                let before = copy.doc.clone();
+                let history = (copy.undo.len(), copy.redo.len(), copy.evaluations);
+                assert!(!matches!(copy.execute(command, &request), Err(crate::EngineError::Internal(..))), "{command}: {request}");
+                assert!(Arc::ptr_eq(&before, &copy.doc), "{command} published hostile request {request}");
+                assert_eq!((copy.undo.len(), copy.redo.len(), copy.evaluations), history);
+            }
+        }
+    }
+    for level in [ParamCheck::Off, ParamCheck::Strict] {
+        let (mut s, _, _, made, boundary) = sheet_fill_fixture(false);
+        s.param_check = level;
+        let patterns = run(&mut s, "drawing.pattern.import", json!({"kind":"builtin","pattern":"lines_45"}));
+        let schema = output_schema_for::<Patterns>();
+        assert!(conforms(schema.as_value(), schema.as_value(), &patterns), "{patterns}");
+        let result = run(&mut s, "drawing.sketch.fill", json!({"sketch":made["sketch"],"boundary":boundary,"paint":{"kind":"solid"}}));
+        let schema = output_schema_for::<Readings>();
+        assert!(conforms(schema.as_value(), schema.as_value(), &result), "{result}");
+        let fill = result["fills"][0]["fill"].clone();
+        assert_eq!(run(&mut s, "drawing.fill.inspect", json!({"fill":fill})), result);
+        let count = s.undo.len();
+        run(&mut s, "drawing.fill.delete", json!({"fill":fill}));
+        assert!(open_one(&s).fills.is_empty());
+        assert_eq!(s.undo.len(), count + 1);
+        run(&mut s, "edit.undo", json!({}));
+        assert_eq!(run(&mut s, "drawing.fill.inspect", json!({"fill":fill})), result);
+    }
+}
+
+#[test]
+fn sheet_fill_profiles_refuse_equation_metadata_without_disabling_sketch_inspection() {
+    let (mut s, _, sketch, made, boundary) = sheet_fill_fixture(false);
+    let mut candidate = (*open_one(&s)).clone();
+    let record = candidate.sketches.iter_mut().find(|record| record.id == sketch).unwrap();
+    let record = Arc::make_mut(record);
+    record.sketch.equations.push(solidcraft_sketch::EquationCurve {
+        curve: record.sketch.curves[0].id.clone(),
+        x: None,
+        y: "x".into(),
+        start: "0".into(),
+        end: "1".into(),
+        variable_unit: solidcraft_sketch::VariableUnit::Number,
+        tolerance: 0.01,
+    });
+    let before = s.doc.clone();
+    let history = (s.undo.len(), s.redo.len(), s.evaluations);
+    let why = s
+        .edit_drawing("test", |drawing| {
+            *drawing = candidate.clone();
+            Ok(())
+        })
+        .unwrap_err()
+        .to_string();
+    assert!(why.contains("equation"), "{why}");
+    assert!(Arc::ptr_eq(&before, &s.doc));
+    assert_eq!((s.undo.len(), s.redo.len(), s.evaluations), history);
+    // Refused metadata never replaces the admitted sketch, which remains inspectable.
+    let reading = run(&mut s, "drawing.sketch.inspect", json!({"sketch":made["sketch"]}));
+    assert_eq!(reading["curves"].as_array().unwrap().len(), 4);
+    assert!(Arc::ptr_eq(&before, &s.doc));
+    assert_eq!((s.undo.len(), s.redo.len(), s.evaluations), history);
+
+    // Deliberately corrupt only a scratch session to exercise defensive fill commands
+    // beyond public admission. Such a record cannot be edited in, loaded or saved.
+    let mut malformed = s.scratch();
+    malformed.doc_mut().put_drawing(Arc::new(candidate));
+    let malformed_before = malformed.doc.clone();
+    let malformed_history = (malformed.undo.len(), malformed.redo.len(), malformed.evaluations);
+    for (command, request) in [
+        ("drawing.fill.profiles", json!({"sketch":made["sketch"]})),
+        ("drawing.sketch.fill", json!({"sketch":made["sketch"],"boundary":boundary,"paint":{"kind":"solid"}})),
+    ] {
+        let why = refused(&mut malformed, command, request);
+        assert!(why.contains("equation"), "{command}: {why}");
+        assert!(Arc::ptr_eq(&malformed_before, &malformed.doc));
+        assert_eq!((malformed.undo.len(), malformed.redo.len(), malformed.evaluations), malformed_history);
+    }
+    assert!(Arc::ptr_eq(&before, &s.doc));
+    assert_eq!((s.undo.len(), s.redo.len(), s.evaluations), history);
+}
+
+#[test]
+fn sheet_hatch_dot_precision_refusal_never_publishes_the_candidate_fill() {
+    let (mut s, _, _, made, boundary) = sheet_fill_fixture(false);
+    let pattern = run(&mut s, "drawing.pattern.import", json!({"kind":"pat","source":"*DOTS,Original precision fixture\n0,0,0,0,2,0,-4\n\n"}));
+    let before = s.doc.clone();
+    let history = (s.undo.len(), s.redo.len(), s.evaluations);
+    let why = refused(
+        &mut s,
+        "drawing.sketch.fill",
+        json!({"sketch":made["sketch"],"boundary":boundary,
+        "paint":{"kind":"hatch","pattern":pattern["patterns"][0]["id"],"pen_width_mm":1e-14}}),
+    );
+    assert!(why.contains("dot") || why.contains("disk"), "{why}");
+    assert!(Arc::ptr_eq(&before, &s.doc));
+    assert_eq!((s.undo.len(), s.redo.len(), s.evaluations), history);
+    assert!(open_one(&s).fills.is_empty());
+}
+
 #[test]
 fn sheet_editor_sketch_ids_follow_the_sessions_seed_and_survive_refusal() {
     let made = |seed: u64, fail: bool| {
@@ -3844,6 +4119,112 @@ fn sheet_editor_restore_editor_preserves_ids_consumed_after_its_original() {
     assert!(s.doc.drawings.is_empty());
     let next = run(&mut s, "drawing.create", json!({"name":"Later paper"}));
     assert_ne!(next["id"], retired, "restoring an old editor model must not rewind the live id source");
+}
+
+/// Source A puts the inner rectangle wholly outside its former outer boundary;
+/// B returns it to [25,35], while C moves it to [30,40]. The actual source fields
+/// use millimetres even though sheet_editor's display/source units are inches.
+fn w38d_source_history_fixture() -> (Session, u64, u64, solidcore_record::Region2) {
+    let (mut s, drawing, _, made, boundary) = sheet_fill_fixture(true);
+    s.doc_mut().set_param("FillHistoryShift", "40 mm", Some("mm"), None).unwrap();
+    let mut owner = (**s.doc.drawing(drawing).unwrap()).clone();
+    let record = Arc::make_mut(&mut owner.sketches[0]);
+    let mut driven = 0;
+    for point in record.sketch.points.iter_mut().skip(1) {
+        if [25.0, 35.0].contains(&point.pos.x) && [15.0, 25.0].contains(&point.pos.y) {
+            point.exprs = Some(Box::new(solidcraft_sketch::PointExprs { x: Some(format!("FillHistoryShift + {} mm", point.pos.x)), y: None }));
+            driven += 1;
+        }
+    }
+    assert_eq!(driven, 4);
+    s.doc_mut().put_drawing(Arc::new(owner));
+    run(&mut s, "drawing.close", json!({}));
+    run(&mut s, "parameters.change", json!({"name":"FillHistoryShift","expression":"0 mm"}));
+    run(&mut s, "drawing.open", the(drawing));
+    let created = run(&mut s, "drawing.sketch.fill", json!({"sketch":made["sketch"],"boundary":boundary,"paint":{"kind":"solid"}}));
+    let fill = ids::decode(created["fills"][0]["fill"].as_str().unwrap()).unwrap();
+    let region = s.doc.drawing(drawing).unwrap().sheet_fill(fill).unwrap().last_region.clone();
+    assert_eq!(region.holes.len(), 1);
+    assert_eq!(region.holes[0].segs.iter().map(|seg| seg.start().x).fold(f64::INFINITY, f64::min), 25.0);
+    run(&mut s, "drawing.close", json!({}));
+    (s, drawing, fill, region)
+}
+
+fn w38d_history_resolved(s: &Session, drawing: u64, fill: u64) -> solidcraft_doc::drawing::ResolvedSketchFill {
+    s.doc.drawing(drawing).unwrap().resolve_sheet_fill(&s.doc, fill).unwrap()
+}
+
+#[test]
+fn sheet_fill_source_history_valid_valid_lost_undo_redo_keeps_the_last_valid_region() {
+    use solidcraft_doc::drawing::FillRegionStatus;
+    let (mut s, drawing, fill, at_b) = w38d_source_history_fixture();
+    let drawing_steps = s.undo.iter().filter(|step| step.part == Some(drawing)).count();
+    run(&mut s, "parameters.change", json!({"name":"FillHistoryShift","expression":"5 mm"}));
+    let at_c = s.doc.drawing(drawing).unwrap().sheet_fill(fill).unwrap().last_region.clone();
+    assert_ne!(at_c, at_b);
+    assert_eq!(at_c.holes[0].segs.iter().map(|seg| seg.start().x).fold(f64::INFINITY, f64::min), 30.0);
+    run(&mut s, "edit.undo", json!({})); // C -> B, valid -> valid.
+    assert_eq!(w38d_history_resolved(&s, drawing, fill).status, FillRegionStatus::Current);
+    assert_eq!(s.doc.drawing(drawing).unwrap().sheet_fill(fill).unwrap().last_region, at_b);
+    run(&mut s, "edit.undo", json!({})); // B -> A, valid -> lost.
+    let lost = w38d_history_resolved(&s, drawing, fill);
+    assert!(matches!(lost.status, FillRegionStatus::LostBoundary(_)));
+    assert_eq!(lost.region, at_b, "the retained hole must be B's, never the future C snapshot");
+    run(&mut s, "edit.redo", json!({})); // A -> B.
+    assert_eq!(w38d_history_resolved(&s, drawing, fill).region, at_b);
+    run(&mut s, "edit.redo", json!({})); // B -> C.
+    assert_eq!(w38d_history_resolved(&s, drawing, fill).region, at_c);
+    assert_eq!(s.doc.drawing(drawing).unwrap().sheet_fill(fill).unwrap().last_region, at_c);
+    assert_eq!(s.undo.iter().filter(|step| step.part == Some(drawing)).count(), drawing_steps, "source history adds no drawing steps");
+}
+
+#[test]
+fn sheet_fill_source_checkpoint_restores_its_complete_lost_snapshot_and_history() {
+    use solidcraft_doc::drawing::FillRegionStatus;
+    let (mut s, drawing, fill, at_b) = w38d_source_history_fixture();
+    run(&mut s, "parameters.change", json!({"name":"FillHistoryShift","expression":"40 mm"}));
+    assert!(matches!(w38d_history_resolved(&s, drawing, fill).status, FillRegionStatus::LostBoundary(_)));
+    let checkpoint = run(&mut s, "edit.checkpoint", json!({}))["checkpoint"].clone();
+    let kept = s.checkpoints.len();
+    let saved = s.doc.clone();
+    let history = (s.undo.len(), s.redo.len());
+    run(&mut s, "parameters.change", json!({"name":"FillHistoryShift","expression":"5 mm"}));
+    let at_c = s.doc.drawing(drawing).unwrap().sheet_fill(fill).unwrap().last_region.clone();
+    assert_ne!(at_c, at_b);
+    run(&mut s, "edit.restore_checkpoint", json!({"checkpoint":checkpoint}));
+    assert_eq!(s.checkpoints.len(), kept - 1);
+    let lost = w38d_history_resolved(&s, drawing, fill);
+    assert!(matches!(lost.status, FillRegionStatus::LostBoundary(_)));
+    assert_eq!(lost.region, at_b, "whole checkpoint restoration keeps its own retained region, not later C");
+    assert_eq!(s.doc.drawing(drawing).unwrap().sheet_fill(fill).unwrap().last_region, at_b);
+    assert_eq!(*s.doc, *saved, "a checkpoint restores its complete saved Document");
+    assert_eq!((s.undo.len(), s.redo.len()), history);
+}
+
+#[test]
+fn sheet_fill_source_updates_preserve_independent_drawing_redo_and_its_latest_retention() {
+    use solidcraft_doc::drawing::FillRegionStatus;
+    let (mut s, drawing, fill, at_b) = w38d_source_history_fixture();
+    run(&mut s, "drawing.open", the(drawing));
+    run(&mut s, "drawing.pattern.import", json!({"kind":"builtin","pattern":"lines_45"}));
+    run(&mut s, "edit.undo", json!({}));
+    assert!(s.doc.drawing(drawing).unwrap().patterns.is_empty());
+    let redo = s.redo.iter().find(|step| step.part == Some(drawing)).unwrap().clone();
+    run(&mut s, "drawing.close", json!({}));
+    run(&mut s, "parameters.change", json!({"name":"FillHistoryShift","expression":"5 mm"}));
+    let at_c = s.doc.drawing(drawing).unwrap().sheet_fill(fill).unwrap().last_region.clone();
+    assert_ne!(at_c, at_b);
+    run(&mut s, "parameters.change", json!({"name":"FillHistoryShift","expression":"40 mm"}));
+    let kept = s.redo.iter().find(|step| step.part == Some(drawing)).unwrap();
+    assert_eq!(kept.label, redo.label);
+    assert!(Arc::ptr_eq(&kept.doc, &redo.doc), "source edits preserve the independent drawing redo entry");
+    assert_eq!(w38d_history_resolved(&s, drawing, fill).region, at_c);
+    run(&mut s, "drawing.open", the(drawing));
+    run(&mut s, "edit.redo", json!({}));
+    assert_eq!(s.doc.drawing(drawing).unwrap().patterns.len(), 1, "the unrelated pattern redo is still applied");
+    let lost = w38d_history_resolved(&s, drawing, fill);
+    assert!(matches!(lost.status, FillRegionStatus::LostBoundary(_)));
+    assert_eq!(lost.region, at_c, "pattern-only redo must not rewind retained geometry to its older B snapshot");
 }
 
 /// A sheet sketch shares the drawing's complete object namespace, including image files

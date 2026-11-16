@@ -16,7 +16,7 @@ use solidcraft_io::paper::{DPI, PaperColour, PngColour, PngOptions};
 
 use super::CommandSpec;
 use crate::drawing_pictures::SheetPictures;
-use crate::drawing_scene::{SketchStatus, Status, sheet_id};
+use crate::drawing_scene::{FillStatus, SketchStatus, Status, sheet_id};
 use crate::params::bad;
 use crate::schema::drawing_export::{ExportColour, ExportFormat, ExportParams, ExportReport, ExportResult};
 use crate::schema::{TypedContract, output_schema_for};
@@ -34,7 +34,7 @@ pub static COMMANDS: &[CommandSpec] = &[CommandSpec::new(CMD, "Export Sheet", cr
     .doc_only()
     .contract(&CONTRACT)
     .output(output_schema_for::<ExportResult>)
-    .params("sheet: id or name; format?: svg (default) | png (dxf is not supported yet); path?: a file with the format's extension (else the reply holds the document: its text as svg, its base64 as data for png, at most 64 MiB); png only: dpi?: 25 to 2400 (default the sheet's own), colour?: grey (default) | black_white | rgb | transparent; paper?: white (default) | blueprint | prussian_blue, whose png is rgb → {sheet, format, bytes, path | svg | data, report: {widths_snapped, pieces_merged, pixels?: [width, height]}, views: [{view, status: drawn|placeholder|failed, reason?, stats?}]}. The sheet as drawing.scene draws it: its drawing border, each image on it, then each view's lines, then its parts lists and revision tables, then its title block's lines. Refused, naming them, while any view or sketch on the sheet failed or any image won't decode; a placeholder view draws nothing. A view of another configuration evaluates a copy of the design; the design is unchanged.")];
+    .params("sheet: id or name; format?: svg (default) | png (dxf is not supported yet); path?: a file with the format's extension (else the reply holds the document: its text as svg, its base64 as data for png, at most 64 MiB); png only: dpi?: 25 to 2400 (default the sheet's own), colour?: grey (default) | black_white | rgb | transparent; paper?: white (default) | blueprint | prussian_blue, whose png is rgb → {sheet, format, bytes, path | svg | data, report: {widths_snapped, pieces_merged, pixels?: [width, height]}, views: [{view, status: drawn|placeholder|failed, reason?, stats?}]}. The sheet as drawing.scene draws it: its drawing border, each image on it, then each view's lines, then its parts lists and revision tables, then its title block's lines. Refused, naming them, while any view or sketch on the sheet failed or any fill failed or lost its boundary or any image won't decode; a placeholder view draws nothing. A view of another configuration evaluates a copy of the design; the design is unchanged.")];
 
 /// A document held for the reply, refused once it passes `limit` bytes: a larger one goes to a file.
 struct Held {
@@ -107,12 +107,24 @@ fn export(s: &mut Session, p: &Value) -> Result<Value> {
             SketchStatus::Drawn => None,
         })
         .collect();
+    let failed_fills: Vec<String> = built
+        .fills
+        .iter()
+        .filter_map(|fill| match &fill.status {
+            FillStatus::Drawn => None,
+            FillStatus::LostBoundary(reason) => Some(format!("{} (lost boundary: {reason})", ids::encode(fill.fill))),
+            FillStatus::Failed(reason) => Some(format!("{} ({reason})", ids::encode(fill.fill))),
+        })
+        .collect();
     let mut failures = Vec::new();
     if !failed.is_empty() {
         failures.push(format!("views on the sheet failed: {}", failed.join(", ")));
     }
     if !failed_sketches.is_empty() {
         failures.push(format!("sketches on the sheet failed: {}", failed_sketches.join(", ")));
+    }
+    if !failed_fills.is_empty() {
+        failures.push(format!("fills on the sheet failed or lost their boundary: {}", failed_fills.join(", ")));
     }
     if !failures.is_empty() {
         return Err(bad(CMD, format!("not written: {}", failures.join("; "))));
@@ -158,6 +170,7 @@ fn export(s: &mut Session, p: &Value) -> Result<Value> {
         tables: super::drawing_scene::table_results(built.tables),
         out_of_date: built.out_of_date.iter().map(|id| ids::encode(*id)).collect(),
         sketches: built.sketches.into_iter().map(Into::into).collect(),
+        fills: built.fills.into_iter().map(Into::into).collect(),
         param_warnings: Vec::new(),
     };
     serde_json::to_value(reply).map_err(|e| EngineError::Other(e.to_string()))

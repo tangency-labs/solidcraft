@@ -72,7 +72,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .output(output_schema_for::<SheetsResult>)
         .params(
             "sheet: id or name (a drawing keeps at least one); contents?: delete, to delete the views on it, their dimensions and \
-             balloons, and the images and sheet sketches on it, with it (without it a sheet with anything on it is refused, naming what) → the drawing's sheets. One undo step.",
+             balloons, and the images and sheet sketches and fills on it, with it (without it a sheet with anything on it is refused, naming what) → the drawing's sheets. One undo step.",
         ),
 ];
 
@@ -111,6 +111,7 @@ fn listed(on: &OnSheet) -> String {
         kind("table", &on.tables),
         kind("note", &on.notes),
         kind("sheet sketch", &on.sketches),
+        kind("sheet fill", &on.fills),
     ]
     .into_iter()
     .flatten()

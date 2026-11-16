@@ -2147,6 +2147,7 @@ fn a_replys_text_and_fonts_keep_to_its_schema() {
         objects: Vec::new(),
         dimensions: Vec::new(),
         sketches: Vec::new(),
+        fills: Vec::new(),
         notes: Vec::new(),
         balloons: Vec::new(),
         tables: Vec::new(),
@@ -4400,6 +4401,391 @@ fn held_sheet_sketch_survives_close_reopen_and_scratch_export() {
     let updated = settled(&mut s, sheet);
     assert!(updated.stale_sketches.is_empty());
     assert_eq!(bytes_of(cached_sketch_group(&updated.scene, sketch)), marks);
+}
+
+fn w38d_scene_fixture() -> (Session, u64, u64, u64, Value) {
+    let (mut s, drawing, sketch) = stroke_editor();
+    let sheet = s.drawing("test").unwrap().sheets[0].id;
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0":[15,10],"p1":[55,30]}));
+    run(&mut s, "sketch.finish", json!({}));
+    let inspected = run(&mut s, "drawing.fill.profiles", json!({"sketch":ids::encode(sketch)}));
+    let boundary = inspected["fill_profiles"]["boundaries"][0].clone();
+    (s, drawing, sheet, sketch, boundary)
+}
+
+fn w38d_create_fill(s: &mut Session, sketch: u64, boundary: &Value, paint: Value) -> u64 {
+    let reply = run(s, "drawing.sketch.fill", json!({"sketch":ids::encode(sketch),"boundary":boundary,"paint":paint}));
+    ids::decode(reply["fills"][0]["fill"].as_str().unwrap()).unwrap()
+}
+
+#[test]
+fn sheet_fill_provider_extract_does_no_work_and_multiple_fills_share_one_region_solve() {
+    let (mut s, drawing, sheet, sketch, boundary) = w38d_scene_fixture();
+    let a = w38d_create_fill(&mut s, sketch, &boundary, json!({"kind":"solid"}));
+    let b = w38d_create_fill(&mut s, sketch, &boundary, json!({"kind":"solid"}));
+    let mut expected = [a, b];
+    expected.sort_unstable();
+    let doc = s.doc.clone();
+    let model = s.model.state();
+    let counters = (s.evaluations, s.undo.len(), s.redo.len(), s.revision);
+    let initial = extract(&mut s, sheet).unwrap();
+    assert_eq!(initial.stale_fills, expected);
+    assert!(initial.fills.is_empty());
+    assert_eq!((s.drawing_scenes.fill_solves, s.drawing_scenes.fill_expansions), (0, 0));
+    assert!(step(&mut s));
+    let partial = extract(&mut s, sheet).unwrap();
+    assert_eq!(partial.fills.len(), 1);
+    assert_eq!(partial.stale_fills.len(), 1);
+    assert_eq!((s.drawing_scenes.fill_solves, s.drawing_scenes.fill_expansions), (1, 1));
+    let complete = settled(&mut s, sheet);
+    assert!(complete.stale_fills.is_empty() && complete.stale_sketches.is_empty());
+    assert_eq!(
+        complete.fills.iter().map(|fill| (fill.fill, fill.sketch, fill.status.name())).collect::<Vec<_>>(),
+        expected.map(|id| (id, sketch, "drawn"))
+    );
+    assert_eq!((s.drawing_scenes.fill_solves, s.drawing_scenes.fill_expansions, s.drawing_scenes.sketch_solves), (1, 2, 1));
+    assert_eq!(bytes(&complete.scene), bytes(&build(&s, s.doc.drawing(drawing).unwrap(), sheet).unwrap().scene));
+    assert!(Arc::ptr_eq(&doc, &s.doc) && Arc::ptr_eq(&model, &s.model.state()));
+    assert_eq!((s.evaluations, s.undo.len(), s.redo.len(), s.revision), counters);
+    let again = extract(&mut s, sheet).unwrap();
+    assert!(Arc::ptr_eq(&complete.scene, &again.scene));
+    assert!(!step(&mut s));
+}
+
+#[test]
+fn sheet_fill_provider_delete_undo_sheet_switch_and_reopen_forget_the_right_entries() {
+    let (mut s, drawing, sheet, sketch, boundary) = w38d_scene_fixture();
+    let fill = w38d_create_fill(&mut s, sketch, &boundary, json!({"kind":"solid"}));
+    let other = run(&mut s, "drawing.sheet.add", json!({"name":"Other"}))["sheet"].as_str().and_then(ids::decode).unwrap();
+    let before = settled(&mut s, sheet);
+    let count = s.drawing_scenes.fill_solves;
+    let blank = settled(&mut s, other);
+    assert!(blank.fills.is_empty() && blank.stale_fills.is_empty());
+    assert_eq!(bytes(&settled(&mut s, sheet).scene), bytes(&before.scene));
+    assert_eq!(s.drawing_scenes.fill_solves, count, "switching sheets does not change a source dependency");
+    run(&mut s, "drawing.fill.delete", json!({"fill":ids::encode(fill)}));
+    let deleted = extract(&mut s, sheet).unwrap();
+    assert!(deleted.fills.is_empty() && deleted.scene.groups.iter().all(|group| group.kind != ObjectKind::Fill));
+    assert!(!s.drawing_scenes.fills.contains_key(&fill) && !s.drawing_scenes.fill_regions.contains_key(&sketch));
+    run(&mut s, "edit.undo", json!({}));
+    assert_eq!(extract(&mut s, sheet).unwrap().stale_fills, [fill]);
+    assert_eq!(bytes(&settled(&mut s, sheet).scene), bytes(&before.scene));
+    run(&mut s, "drawing.close", json!({}));
+    assert!(s.drawing_scenes.fills.is_empty() && s.drawing_scenes.fill_regions.is_empty());
+    run(&mut s, "drawing.open", json!({"drawing":ids::encode(drawing)}));
+    assert_eq!(extract(&mut s, sheet).unwrap().stale_fills, [fill]);
+    assert_eq!(bytes(&settled(&mut s, sheet).scene), bytes(&before.scene));
+    run(&mut s, "drawing.sheet.delete", json!({"sheet":ids::encode(sheet),"contents":"delete"}));
+    assert!(!step(&mut s));
+    assert!(extract(&mut s, sheet).is_err());
+    assert!(settled(&mut s, other).fills.is_empty());
+    assert!(s.drawing_scenes.fills.is_empty() && s.drawing_scenes.fill_regions.is_empty());
+}
+
+#[test]
+fn sheet_fill_paints_between_views_and_sketches_in_physical_paper_coordinates() {
+    let (mut s, sheet, [front, _]) = front_and_top();
+    let drawing = s.open_drawing.unwrap();
+    run(&mut s, "drawing.close", json!({}));
+    run(&mut s, "document.units", json!({"units":"in"}));
+    run(&mut s, "drawing.open", json!({"drawing":ids::encode(drawing)}));
+    run(&mut s, "drawing.set", json!({"units":"in"}));
+    let created = run(&mut s, "drawing.sketch.create", json!({"owner":ids::encode(sheet)}));
+    let sketch = ids::decode(created["sketch"].as_str().unwrap()).unwrap();
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0":[15,10],"p1":[55,30]}));
+    run(&mut s, "sketch.finish", json!({}));
+    let boundary = run(&mut s, "drawing.fill.profiles", json!({"sketch":ids::encode(sketch)}))["fill_profiles"]["boundaries"][0].clone();
+    let fill = w38d_create_fill(&mut s, sketch, &boundary, json!({"kind":"solid"}));
+    let before = settled(&mut s, sheet);
+    let kinds: Vec<_> = before.scene.groups.iter().map(|group| group.kind).collect();
+    assert_eq!(&kinds[kinds.len() - 4..], &[ObjectKind::View, ObjectKind::View, ObjectKind::Fill, ObjectKind::Sketch]);
+    let paint = before.scene.groups.iter().find(|group| group.object == fill && group.kind == ObjectKind::Fill).unwrap();
+    let Item::Fill { region } = &paint.items[0] else { panic!("solid region disappeared") };
+    assert!((region.area() - 800.0).abs() < 1e-7);
+    assert!(region.outer.segs.iter().any(|seg| seg.start().dist(Vec2::new(15.0, 10.0)) < 1e-9));
+    let projections = s.drawing_scenes.projections;
+    let solves = s.drawing_scenes.fill_solves;
+    let data = serde_json::to_string(paint).unwrap();
+    run(&mut s, "drawing.view.edit", json!({"view":ids::encode(front),"set":{"place":{"at":[200,150]}}}));
+    let moved = extract(&mut s, sheet).unwrap();
+    assert!(moved.stale_fills.is_empty());
+    assert_eq!((s.drawing_scenes.projections, s.drawing_scenes.fill_solves), (projections, solves));
+    assert_eq!(
+        serde_json::to_string(moved.scene.groups.iter().find(|group| group.object == fill && group.kind == ObjectKind::Fill).unwrap()).unwrap(),
+        data
+    );
+    assert!(!step(&mut s));
+}
+
+#[test]
+fn sheet_fill_provider_failed_source_is_cached_and_draws_no_retained_fill() {
+    let (mut s, drawing, sheet, sketch, _) = w38d_scene_fixture();
+    // Setters refuse unknown expressions. Start from a real, valid global
+    // source, then remove it only after the initial fill has been certified.
+    s.doc_mut().set_param("MissingFillSource", "Inset", Some("mm"), None).unwrap();
+    let mut owner = (**s.doc.drawing(drawing).unwrap()).clone();
+    for point in Arc::make_mut(&mut owner.sketches[0]).sketch.points.iter_mut().skip(1) {
+        point.exprs = Some(Box::new(solidcraft_sketch::PointExprs { x: Some(format!("MissingFillSource + {} mm", point.pos.x - 25.4)), y: None }));
+    }
+    s.doc_mut().put_drawing(Arc::new(owner));
+    let boundary = run(&mut s, "drawing.fill.profiles", json!({"sketch":ids::encode(sketch)}))["fill_profiles"]["boundaries"][0].clone();
+    let fill = w38d_create_fill(&mut s, sketch, &boundary, json!({"kind":"solid"}));
+    let before = settled(&mut s, sheet);
+    assert_eq!(before.fills.len(), 1);
+    assert_eq!(before.fills[0].status, FillStatus::Drawn);
+    assert!(before.scene.groups.iter().any(|group| group.kind == ObjectKind::Fill && group.object == fill));
+    let retained = s.doc.drawing(drawing).unwrap().fills[0].last_region.clone();
+    assert!(s.doc.param_users("MissingFillSource").is_empty(), "sheet expressions are resolved from declared source definitions");
+    s.doc_mut().remove_param("MissingFillSource").unwrap();
+    assert!(s.doc.param("MissingFillSource").is_none());
+    let doc = s.doc.clone();
+    let evaluations = s.evaluations;
+    let failed = settled(&mut s, sheet);
+    assert!(matches!(&failed.fills[0].status, FillStatus::Failed(why) if why.contains("MissingFillSource") && why.contains(&ids::encode(fill))));
+    assert!(failed.scene.groups.iter().all(|group| group.kind != ObjectKind::Fill));
+    assert_eq!(s.doc.drawing(drawing).unwrap().fills[0].last_region, retained);
+    let solves = s.drawing_scenes.fill_solves;
+    assert!(!step(&mut s));
+    assert_eq!(s.drawing_scenes.fill_solves, solves);
+    assert!(Arc::ptr_eq(&doc, &s.doc) && s.evaluations == evaluations);
+    s.doc_mut().set_param("MissingFillSource", "2 in", Some("in"), None).unwrap();
+    let repaired = settled(&mut s, sheet);
+    assert_eq!(repaired.fills[0].status, FillStatus::Drawn);
+    assert_eq!(s.drawing_scenes.fill_solves, solves + 1);
+    assert_eq!(s.evaluations, evaluations);
+}
+
+#[test]
+fn sheet_fill_named_feature_source_change_updates_retention_without_drawing_history() {
+    let (mut s, drawing, sheet, sketch, _) = w38d_scene_fixture();
+    let feature = s.doc.features.iter().find(|feature| !feature.param_names.is_empty()).unwrap();
+    let name = feature.param_names[0].clone();
+    let mut owner = (**s.doc.drawing(drawing).unwrap()).clone();
+    for point in Arc::make_mut(&mut owner.sketches[0]).sketch.points.iter_mut().skip(1) {
+        point.exprs = Some(Box::new(solidcraft_sketch::PointExprs { x: Some(format!("{name} + {} mm", point.pos.x - 40.0)), y: None }));
+    }
+    s.doc_mut().put_drawing(Arc::new(owner));
+    let boundary = run(&mut s, "drawing.fill.profiles", json!({"sketch":ids::encode(sketch)}))["fill_profiles"]["boundaries"][0].clone();
+    let fill = w38d_create_fill(&mut s, sketch, &boundary, json!({"kind":"solid"}));
+    let before = s.doc.drawing(drawing).unwrap().fills[0].last_region.clone();
+    assert!(before.outer.segs.iter().any(|seg| seg.start().dist(Vec2::new(15.0, 10.0)) < 1e-7));
+    let user_params = s.doc.params.clone();
+    let drawing_steps = s.undo.iter().filter(|step| step.part == Some(drawing)).count();
+    run(&mut s, "drawing.close", json!({}));
+    run(&mut s, "parameters.change", json!({"name":name,"expression":"60 mm"}));
+    assert_eq!(s.doc.params, user_params, "named feature inputs are outside user parameter storage");
+    assert_eq!(s.undo.iter().filter(|step| step.part == Some(drawing)).count(), drawing_steps);
+    let newest = s.doc.drawing(drawing).unwrap().sheet_fill(fill).unwrap().last_region.clone();
+    assert!(newest.outer.segs.iter().any(|seg| seg.start().dist(Vec2::new(35.0, 10.0)) < 1e-7));
+    run(&mut s, "drawing.open", json!({"drawing":ids::encode(drawing)}));
+    run(&mut s, "drawing.sketch.edit", json!({"sketch":ids::encode(sketch)}));
+    run(&mut s, "sketch.delete", json!({"entities":[boundary["outer"][0]]}));
+    run(&mut s, "sketch.finish", json!({}));
+    let lost = settled(&mut s, sheet);
+    assert!(matches!(&lost.fills[0].status, FillStatus::LostBoundary(_)));
+    assert_eq!(s.doc.drawing(drawing).unwrap().sheet_fill(fill).unwrap().last_region, newest);
+    let mut reopened = Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap());
+    run(&mut reopened, "drawing.open", json!({"drawing":ids::encode(drawing)}));
+    let restored = settled(&mut reopened, sheet);
+    assert!(matches!(&restored.fills[0].status, FillStatus::LostBoundary(_)));
+    assert_eq!(bytes(&restored.scene), bytes(&lost.scene));
+}
+
+#[test]
+fn sheet_fill_dots_are_physical_disks_and_unrepresentable_widths_refuse() {
+    use solidcraft_doc::drawing::FillPaint;
+    let (mut s, drawing, _, sketch, boundary) = w38d_scene_fixture();
+    let imported = run(&mut s, "drawing.pattern.import", json!({"kind":"pat","source":"*DOTS,Original dots\n0,0,0,0,5,0,-5\n\n"}));
+    let pattern = ids::decode(imported["patterns"][0]["id"].as_str().unwrap()).unwrap();
+    let fill_id = w38d_create_fill(&mut s, sketch, &boundary, json!({"kind":"hatch","pattern":ids::encode(pattern),"pen_width_mm":0.25}));
+    let owner = s.doc.drawing(drawing).unwrap();
+    let resolved = owner.resolve_sheet_fill(&s.doc, fill_id).unwrap();
+    let group = fill::paper_group(owner, &resolved).unwrap();
+    assert_eq!(group.kind.layer(), "FILL");
+    assert_eq!(group.items.len(), 21, "seven strict-interior dots on each of y=15,20,25");
+    let mut centers = Vec::new();
+    for item in &group.items {
+        let Item::Fill { region } = item else { panic!("a dot became a stroke") };
+        assert!(region.holes.is_empty());
+        assert!((region.area() - std::f64::consts::PI * 0.125f64.powi(2)).abs() < 1e-10);
+        let Seg2::Arc { center, radius, .. } = region.outer.segs[0] else { panic!("a disk was sampled") };
+        assert_eq!(radius, 0.125);
+        centers.push((center.x as i32, center.y as i32));
+    }
+    centers.sort_unstable();
+    let expected: Vec<_> = (4..=10).flat_map(|x| (3..=5).map(move |y| (x * 5, y * 5))).collect();
+    assert_eq!(centers, expected);
+    let scene = Scene::new(Vec2::new(80.0, 50.0), vec![group]);
+    let prepared = scene.prepare().unwrap();
+    let svg = solidcraft_io::paper::paper_svg(&prepared, &NoPictures, 300.0).unwrap().0;
+    assert_eq!(String::from_utf8(svg).unwrap().matches("fill-rule=\"evenodd\"").count(), 21);
+    let mut png = Vec::new();
+    let report = solidcraft_io::paper::paper_png(
+        &prepared,
+        solidcraft_io::paper::PngOptions { dpi: 254.0, colour: solidcraft_io::paper::PngColour::Grey },
+        &NoPictures,
+        &mut png,
+    )
+    .unwrap();
+    assert_eq!(report.pixels, [800, 500]);
+    assert_eq!(&png[..8], b"\x89PNG\r\n\x1a\n");
+    for width in [f64::from_bits(1), 1e-11, 1e-6, 1e-4] {
+        let mut candidate = (**owner).clone();
+        Arc::make_mut(candidate.fills.iter_mut().find(|fill| fill.id == fill_id).unwrap()).paint = FillPaint::Hatch { pattern, pen_width_mm: width };
+        let selected = candidate.resolve_sheet_fill(&s.doc, fill_id).unwrap();
+        let why = fill::paper_group(&candidate, &selected).unwrap_err().to_string();
+        assert!(why.contains("dot") && why.contains(&ids::encode(fill_id)), "{width}: {why}");
+    }
+    let mut candidate = (**owner).clone();
+    Arc::make_mut(candidate.fills.iter_mut().find(|fill| fill.id == fill_id).unwrap()).paint = FillPaint::Hatch { pattern, pen_width_mm: 1e-11 };
+    let mut selected = candidate.resolve_sheet_fill(&s.doc, fill_id).unwrap();
+    for seg in &mut selected.region.outer.segs {
+        *seg = seg.mapped(|p| p + Vec2::new(99900.0, 99900.0), solidcraft_geom::ArcMap::turn(0.0, false));
+    }
+    let why = fill::paper_group(&candidate, &selected).unwrap_err().to_string();
+    assert!(why.contains("filled disk at the dot centre"), "{why}");
+}
+
+#[test]
+fn sheet_fill_solid_regions_keep_conic_and_quartic_bezier_geometry_exact() {
+    use solidcraft_sketch::{CurveKind, Sketch};
+    for conic in [true, false] {
+        let (mut s, drawing, sheet, sketch, _) = w38d_scene_fixture();
+        let mut owner = (**s.doc.drawing(drawing).unwrap()).clone();
+        let mut geometry = Sketch::new();
+        let controls = if conic {
+            vec![[10.0, 10.0], [20.0, 30.0], [30.0, 10.0]]
+        } else {
+            vec![[10.0, 10.0], [10.0, 30.0], [20.0, 40.0], [30.0, 30.0], [30.0, 10.0]]
+        };
+        let points: Vec<_> = controls.iter().map(|p| geometry.add_point(Vec2::new(p[0], p[1]), None).unwrap()).collect();
+        let first = points[0];
+        let last = *points.last().unwrap();
+        let kind = if conic {
+            CurveKind::Conic { a: first, b: last, apex: points[1], rho: 0.4 }
+        } else {
+            CurveKind::Spline { pts: points, degree: 4, control: true, periodic: false, nurbs: None, handles: Vec::new() }
+        };
+        geometry.add_curve(kind, Some("cap")).unwrap();
+        geometry.add_line_pts(last, first, Some("closing")).unwrap();
+        for point in &mut geometry.points {
+            point.fixed = true;
+        }
+        for curve in &mut geometry.curves {
+            curve.fixed = true;
+        }
+        Arc::make_mut(&mut owner.sketches[0]).sketch = geometry;
+        s.doc_mut().put_drawing(Arc::new(owner));
+        let profiles = s.doc.drawing(drawing).unwrap().sheet_fill_profiles(&s.doc, sketch).unwrap();
+        assert_eq!(profiles.uncertified, 0);
+        assert_eq!(profiles.profiles.len(), 1);
+        let boundary = serde_json::to_value(&profiles.profiles[0].boundary).unwrap();
+        let id = w38d_create_fill(&mut s, sketch, &boundary, json!({"kind":"solid"}));
+        let scene = settled(&mut s, sheet);
+        assert_eq!(scene.fills[0].status, FillStatus::Drawn);
+        let group = scene.scene.groups.iter().find(|group| group.object == id && group.kind == ObjectKind::Fill).unwrap();
+        let Item::Fill { region } = &group.items[0] else { panic!("solid fill lost its exact region") };
+        let curve = region
+            .outer
+            .segs
+            .iter()
+            .find(|seg| if conic { matches!(seg, Seg2::Conic { .. }) } else { matches!(seg, Seg2::Bezier { n: 4, .. }) })
+            .unwrap();
+        let expected = Vec2::new(20.0, if conic { 18.0 } else { 31.25 });
+        assert!(curve.point_at(0.5).dist(expected) < 1e-8, "analytic midpoint: {:?}", curve.point_at(0.5));
+        // Current A3b admits this exact conic/quartic fill. Inspect its own SVG
+        // group, so a surviving border or sketch stroke cannot mask a dropped fill.
+        let prepared = scene.scene.prepare().unwrap();
+        let written = solidcraft_io::paper::paper_svg(&prepared, &NoPictures, 300.0).unwrap().0;
+        assert_eq!(solidcraft_io::paper::paper_svg(&prepared, &NoPictures, 300.0).unwrap().0, written, "deterministic actual fill export");
+        let svg = std::str::from_utf8(&written).unwrap();
+        let tag = format!("<g data-object=\"{id}\" data-kind=\"fill\">");
+        assert_eq!(svg.matches(tag.as_str()).count(), 1, "the authored fill has its own layer-kind group");
+        let painted = svg.split_once(tag.as_str()).unwrap().1.split_once("</g>").unwrap().0;
+        assert_eq!(painted.matches("<path ").count(), 1, "one actual filled contour");
+        assert!(painted.contains("<path fill=\"#000\" stroke=\"none\" fill-rule=\"evenodd\" d=\""), "opaque black even-odd fill: {painted}");
+        assert!(!svg.contains("opacity=") && !painted.contains("<image"), "the fixture is painted at default full opacity");
+        let data = painted.split_once(" d=\"").unwrap().1.split_once('"').unwrap().0;
+        assert_eq!(data.matches('M').count(), 1);
+        assert_eq!(data.matches('Z').count(), 1);
+        assert!(data.ends_with('Z'), "the fill remains closed");
+        let commands: Vec<_> = data.char_indices().filter(|(_, op)| op.is_ascii_alphabetic()).collect();
+        let baseline = scene.scene.size_mm.y - 10.0;
+        let (left, right) = (Vec2::new(10.0, baseline), Vec2::new(30.0, baseline));
+        let (mut current, mut first_curve, mut last_curve) = (None, None, None);
+        let (mut curves, mut lines, mut visible_curve) = (0usize, 0usize, false);
+        for (at, &(start, op)) in commands.iter().enumerate() {
+            let end = commands.get(at + 1).map_or(data.len(), |(next, _)| *next);
+            let points: Vec<f64> = data[start + 1..end].split_whitespace().map(|number| number.parse().unwrap()).collect();
+            assert!(points.iter().all(|number| number.is_finite()));
+            match op {
+                'M' => {
+                    assert_eq!(points.len(), 2);
+                    current = Some(Vec2::new(points[0], points[1]));
+                }
+                'C' => {
+                    assert_eq!(points.len(), 6);
+                    if first_curve.is_none() {
+                        first_curve = Some(current.unwrap());
+                    }
+                    let end = Vec2::new(points[4], points[5]);
+                    last_curve = Some(end);
+                    current = Some(end);
+                    visible_curve |= points[1] < baseline - 1.0 || points[3] < baseline - 1.0;
+                    curves += 1;
+                }
+                'L' => {
+                    assert_eq!(points.len(), 2);
+                    let end = Vec2::new(points[0], points[1]);
+                    let start = current.unwrap();
+                    assert!((start == left && end == right) || (start == right && end == left));
+                    current = Some(end);
+                    lines += 1;
+                }
+                'Z' => assert!(points.is_empty()),
+                _ => panic!("unexpected command in the actual conic/quartic filled path: {op}"),
+            }
+        }
+        let (a, b) = (first_curve.unwrap(), last_curve.unwrap());
+        assert!((a == left && b == right) || (a == right && b == left), "the actual curve retains both authored endpoints");
+        assert!(curves > 0 && lines <= 1 && visible_curve, "the curved cap is visible; Z may supply its one closing line");
+        let grid = prepared.on_grid(solidcraft_geom::paper::Grid::NANOMETRE).unwrap();
+        let target = grid.groups.iter().find(|group| group.object == id && group.kind == ObjectKind::Fill).unwrap();
+        let solidcraft_geom::paper::GridItem::Fill { loops } = &target.items[0] else { panic!("filled grid contour") };
+        assert_eq!(loops.len(), 1);
+        let cubics = loops[0].pieces.iter().filter(|piece| matches!(piece, solidcraft_geom::paper::Piece::Cubic { .. })).count();
+        assert_eq!(curves, cubics, "every admitted curve piece is emitted in the fill's own path");
+        let reopened = solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap();
+        assert_eq!(&reopened.drawing(drawing).unwrap().sheet_fill(id).unwrap().last_region, region);
+    }
+}
+
+#[test]
+fn held_sheet_fills_survive_close_reopen_and_scratch_export() {
+    let (mut s, drawing, sheet, sketch, boundary) = w38d_scene_fixture();
+    let fill = w38d_create_fill(&mut s, sketch, &boundary, json!({"kind":"solid"}));
+    run(&mut s, "drawing.set", json!({"updates":"deferred"}));
+    run(&mut s, "drawing.update", json!({}));
+    let before = settled(&mut s, sheet);
+    let paint = bytes_of(group_of(&before.scene, fill));
+    run(&mut s, "drawing.close", json!({}));
+    assert!(s.drawing_scenes.fills.is_empty() && s.drawing_scenes.fill_regions.is_empty());
+    let kept = s.drawing_scenes.kept.of(drawing).unwrap();
+    assert_eq!(bytes_of(kept.fills[&fill].drawn.group.as_ref().unwrap()), paint);
+    run(&mut s, "drawing.open", json!({"drawing":ids::encode(drawing)}));
+    let export = json!({"sheet":ids::encode(sheet),"format":"svg"});
+    let there = s.scratch_as_shown().execute("drawing.export", &export).unwrap();
+    let here = run(&mut s, "drawing.export", export);
+    assert_eq!((&there["svg"], &there["out_of_date"]), (&here["svg"], &here["out_of_date"]));
+    assert!(here["out_of_date"].as_array().unwrap().contains(&json!(ids::encode(fill))), "{here}");
+    let held = extract(&mut s, sheet).unwrap();
+    assert_eq!(bytes_of(group_of(&held.scene, fill)), paint);
+    assert_eq!(held.stale_fills, [fill]);
+    assert!(!step(&mut s));
+    run(&mut s, "drawing.update", json!({}));
+    let current = settled(&mut s, sheet);
+    assert!(current.stale_fills.is_empty());
+    assert_eq!(bytes_of(group_of(&current.scene, fill)), paint);
 }
 
 #[test]

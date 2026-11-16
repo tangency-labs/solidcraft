@@ -1383,11 +1383,104 @@ impl Session {
         if d.id != open.id {
             return Err(params::bad(cmd, "a drawing keeps its id"));
         }
+        // Preserve the last valid filled region immediately before a geometry
+        // edit loses its identity. Only changed, filled sketches are solved;
+        // changing names, sheets, patterns or other paper data does no such work.
+        let affected: std::collections::BTreeSet<u64> = open
+            .sketches
+            .iter()
+            .filter_map(|previous| d.sheet_sketch(previous.id).filter(|next| previous.sketch != next.sketch).map(|_| previous.id))
+            .collect();
+        if !affected.is_empty() && !d.fills.is_empty() {
+            let mut previous = (**open).clone();
+            previous.refresh_fill_regions(&self.doc, &affected).map_err(|error| params::bad(cmd, error.to_string()))?;
+            for slot in &mut d.fills {
+                if let Some(saved) = previous.sheet_fill(slot.id)
+                    && saved.sketch == slot.sketch
+                    && saved.boundary == slot.boundary
+                    && saved.last_region != slot.last_region
+                {
+                    let mut fill = (**slot).clone();
+                    fill.last_region = saved.last_region.clone();
+                    *slot = Arc::new(fill);
+                }
+            }
+            d.refresh_fill_regions(&self.doc, &affected).map_err(|error| params::bad(cmd, error.to_string()))?;
+        }
         d.validate().map_err(|e| params::bad(cmd, e.to_string()))?;
         if d != **open {
             self.doc_mut().put_drawing(Arc::new(d));
         }
         Ok(out)
+    }
+
+    /// Source parameters can change a paper sketch without editing its record.
+    /// Retention snapshots join that same model command, never a new Drawing
+    /// undo step. Prepare every replacement before publishing any of them.
+    fn refresh_sheet_fill_sources(&mut self, previous: &Arc<Document>, cmd: &str) -> Result<()> {
+        self.doc = Self::refreshed_sheet_fill_source_document(previous, &self.doc, cmd)?;
+        Ok(())
+    }
+
+    fn refreshed_sheet_fill_source_document(previous: &Arc<Document>, current: &Arc<Document>, cmd: &str) -> Result<Arc<Document>> {
+        if current.drawings.iter().all(|drawing| drawing.fills.is_empty()) {
+            return Ok(current.clone());
+        }
+        if Arc::ptr_eq(current, previous) {
+            return Ok(current.clone());
+        }
+        if current.units == previous.units && current.param_defs() == previous.param_defs() {
+            return Ok(current.clone());
+        }
+        let mut changed = Vec::new();
+        let mut sketches = 0usize;
+        for drawing in &current.drawings {
+            if drawing.fills.is_empty() {
+                continue;
+            }
+            let Some(before) = previous.drawing(drawing.id) else { continue };
+            sketches = sketches
+                .checked_add(drawing.fills.iter().map(|fill| fill.sketch).collect::<std::collections::BTreeSet<_>>().len())
+                .filter(|count| *count <= solidcraft_doc::drawing::MAX_FILLED_SKETCHES)
+                .ok_or_else(|| params::bad(cmd, "source update exceeds the filled-sketch refresh budget"))?;
+            let mut candidate = (**drawing).clone();
+            candidate.refresh_fill_regions_after_source_change(before, previous, current).map_err(|error| params::bad(cmd, error.to_string()))?;
+            if candidate != **drawing {
+                changed.push(Arc::new(candidate));
+            }
+        }
+        let mut result = current.clone();
+        if !changed.is_empty() {
+            let doc = Arc::make_mut(&mut result);
+            for drawing in changed {
+                doc.put_drawing(drawing);
+            }
+        }
+        Ok(result)
+    }
+
+    /// History adoption prepares retained geometry before either history stack
+    /// changes. Drawing history keeps current retention only for matching fill
+    /// identities; complete checkpoints retain their own complete snapshots.
+    fn refreshed_sheet_fill_history_document(
+        previous: &Arc<Document>,
+        current: &Arc<Document>,
+        part: Option<u64>,
+        cmd: &str,
+    ) -> Result<Arc<Document>> {
+        let Some(id) = part else { return Self::refreshed_sheet_fill_source_document(previous, current, cmd) };
+        let (Some(before), Some(after)) = (previous.drawing(id), current.drawing(id)) else { return Ok(current.clone()) };
+        if after.fills.is_empty() {
+            return Ok(current.clone());
+        }
+        let mut drawing = (**after).clone();
+        drawing.refresh_fill_regions_after_source_change(before, previous, current).map_err(|error| params::bad(cmd, error.to_string()))?;
+        if drawing == **after {
+            return Ok(current.clone());
+        }
+        let mut result = current.clone();
+        Arc::make_mut(&mut result).put_drawing(Arc::new(drawing));
+        Ok(result)
     }
 
     /// The open design's version, for an issued revision to name: nothing in the browser, for an
@@ -2022,6 +2115,12 @@ impl Session {
         let r = match r {
             Ok((v, live_edit)) if params::has_definition(params) => self.define_inline(spec.id, v).map(|v| (v, live_edit)),
             r => r,
+        };
+        let r = match r {
+            Ok(value) if outermost && spec.undoable && self.replacements == replacements => {
+                self.refresh_sheet_fill_sources(&before.doc, spec.id).map(|()| value)
+            }
+            value => value,
         };
         // A parameter error that did not name the command names it here: the engine knows which
         // command ran, and the reader of the parameters may not (#6651).

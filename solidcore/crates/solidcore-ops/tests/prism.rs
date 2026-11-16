@@ -875,3 +875,49 @@ fn directed_planar_sweep_preserves_record_coordinates() {
         None
     );
 }
+
+#[test]
+fn hatch_record_admission_bounds_conversion_before_geometry() {
+    use solidcore_ops::hatch::generate;
+    use solidcore_record::hatch::{Invalid, Pattern};
+    let pattern = Pattern::lines_45();
+    let line = Seg2::Line {
+        a: v(0.0, 0.0),
+        b: v(1.0, 0.0),
+    };
+    let mut region = Region2 {
+        outer: Loop2 {
+            segs: vec![line; solidcore::hatch::MAX_INPUT_PIECES + 1],
+        },
+        holes: Vec::new(),
+    };
+    assert_eq!(
+        generate(&pattern, &region),
+        Err(Invalid("input piece budget exhausted"))
+    );
+    region.outer.segs.pop();
+    assert_ne!(
+        generate(&pattern, &region),
+        Err(Invalid("input piece budget exhausted")),
+        "the exact ceiling remains inclusive"
+    );
+    let circle = Loop2::circle(v(0.0, 0.0), 5.0);
+    region = Region2 {
+        outer: circle.clone(),
+        holes: vec![circle.clone(), circle],
+    };
+    assert_eq!(
+        generate(&pattern, &region),
+        Err(Invalid("not supported yet: multiple circular hatch holes"))
+    );
+    region = Region2 {
+        outer: Loop2 {
+            segs: vec![line; 3],
+        },
+        holes: vec![Loop2::default(); solidcore::hatch::MAX_INPUT_PIECES / 3 + 1],
+    };
+    assert_eq!(
+        generate(&pattern, &region),
+        Err(Invalid("too many region holes"))
+    );
+}

@@ -89,6 +89,10 @@ drawing.dimension.from_model      a drawing: its tests in crates/engine/src/cmd/
 drawing.dimension.inspect         a drawing: its tests in crates/engine/src/cmd/drawing*_tests.rs
 drawing.dimension.repair          a drawing: its tests in crates/engine/src/cmd/drawing*_tests.rs
 drawing.export                    a drawing: its tests in crates/engine/src/cmd/drawing*_tests.rs
+drawing.fill.delete               a drawing fill: crates/engine/src/cmd/drawing_tests.rs
+drawing.fill.edit                 a drawing fill: crates/engine/src/cmd/drawing_tests.rs
+drawing.fill.inspect              a drawing fill: crates/engine/src/cmd/drawing_tests.rs
+drawing.fill.profiles             drawing profile choices: crates/engine/src/cmd/drawing_tests.rs
 drawing.image.add                 a drawing: its tests in crates/engine/src/cmd/drawing*_tests.rs
 drawing.inspect                   a drawing: its tests in crates/engine/src/cmd/drawing*_tests.rs
 drawing.list                      a drawing: its tests in crates/engine/src/cmd/drawing*_tests.rs
@@ -96,6 +100,9 @@ drawing.note.add                  a drawing: its tests in crates/engine/src/cmd/
 drawing.note.edit                 a drawing: its tests in crates/engine/src/cmd/drawing*_tests.rs
 drawing.note.inspect              a drawing: its tests in crates/engine/src/cmd/drawing*_tests.rs
 drawing.open                      a drawing: its tests in crates/engine/src/cmd/drawing*_tests.rs
+drawing.pattern.delete            paper hatch patterns: crates/engine/src/cmd/drawing_tests.rs
+drawing.pattern.import            paper hatch patterns: crates/engine/src/cmd/drawing_tests.rs and crates/io/src/pat_tests.rs
+drawing.pattern.inspect           paper hatch patterns: crates/engine/src/cmd/drawing_tests.rs
 drawing.properties                a drawing: its tests in crates/engine/src/cmd/drawing*_tests.rs
 drawing.properties.remove         a drawing: its tests in crates/engine/src/cmd/drawing*_tests.rs
 drawing.properties.set            a drawing: its tests in crates/engine/src/cmd/drawing*_tests.rs
@@ -116,6 +123,7 @@ drawing.sheet.reorder             a drawing: its tests in crates/engine/src/cmd/
 drawing.sheet.set                 a drawing: its tests in crates/engine/src/cmd/drawing*_tests.rs
 drawing.sketch.create             sheet sketch lifecycle: its tests in crates/engine/src/cmd/drawing_tests.rs
 drawing.sketch.edit               sheet sketch lifecycle: its tests in crates/engine/src/cmd/drawing_tests.rs
+drawing.sketch.fill               a drawing fill: crates/engine/src/cmd/drawing_tests.rs and solidcore hatch tests
 drawing.sketch.inspect            sheet sketch lifecycle: its tests in crates/engine/src/cmd/drawing_tests.rs
 drawing.status                    a drawing: its tests in crates/engine/src/cmd/drawing*_tests.rs
 drawing.symbol.define             a drawing: its tests in crates/engine/src/cmd/drawing*_tests.rs

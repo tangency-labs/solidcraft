@@ -5,6 +5,9 @@ embedded-drawing receiver and shared sketch store. R1 adds records, R2 read-only
 solving and atomic edits, R3 composes the shared store, and R4 connects a bounded
 command lifecycle. Later increments extend that same receiver and solver.
 
+Saved solid fills and hatch-pattern snapshots extend this receiver in
+[Fills and hatch patterns on a sheet](drawing-sketch-fills.md).
+
 ## Current integration source — 2 November 2026
 
 The local integration starts from `drawings` at `d5fd14135f0e220b45171010722a0064683c63f1`,
