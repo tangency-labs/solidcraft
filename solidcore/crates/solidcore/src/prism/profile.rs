@@ -834,6 +834,123 @@ fn crossings_odd(span: Vec<H2>, p: Point2) -> Option<bool> {
     Some(odd)
 }
 
+/// Most halvings of one boundary span in [`regions_overlap`].
+const MAX_OVERLAP_DEPTH: u32 = 40;
+
+/// The Bézier spans of a region's loops, with a straight join wherever a span ends away from
+/// where the next starts (as [`Loop2::holds`] closes them).
+fn boundary_spans(r: &Region2) -> Option<Vec<Vec<H2>>> {
+    let mut out = Vec::new();
+    for lp in r.loops() {
+        let mut spans: Vec<Vec<H2>> = Vec::new();
+        for s in &lp.segs {
+            spans.extend(s.spans()?);
+        }
+        for (here, next) in spans.iter().zip(spans.iter().cycle().skip(1)) {
+            let end = point_of(*here.last()?);
+            let start = point_of(*next.first()?);
+            out.push(here.clone());
+            if end != start {
+                out.push(vec![[end.x, end.y, 1.0], [start.x, start.y, 1.0]]);
+            }
+        }
+    }
+    Some(out)
+}
+
+/// The box of a span's control points, `(lo, hi)`.
+fn hull_box(c: &[H2]) -> (Point2, Point2) {
+    let inf = f64::INFINITY;
+    c.iter().map(|q| point_of(*q)).fold(
+        (Point2::new(inf, inf), Point2::new(-inf, -inf)),
+        |(lo, hi), p| {
+            (
+                Point2::new(lo.x.min(p.x), lo.y.min(p.y)),
+                Point2::new(hi.x.max(p.x), hi.y.max(p.y)),
+            )
+        },
+    )
+}
+
+fn boxes_meet(a: (Point2, Point2), b: (Point2, Point2), m: f64) -> bool {
+    a.0.x <= b.1.x + m && b.0.x <= a.1.x + m && a.0.y <= b.1.y + m && b.0.y <= a.1.y + m
+}
+
+/// Whether `r` holds `p` by the even–odd rule over all its loops; `None` on its boundary.
+fn region_holds(r: &Region2, p: Point2) -> Option<bool> {
+    let mut odd = false;
+    for lp in r.loops() {
+        odd ^= lp.holds(p)?;
+    }
+    Some(odd)
+}
+
+/// What halving `a`'s boundary against `b`'s found: a piece clear of `b`'s boundary lying
+/// inside `b`, and the pieces left within `eps` of `b`'s boundary (as chords).
+fn pieces_against(a: &Region2, b: &Region2, eps: f64) -> Option<(bool, Vec<(Point2, Point2)>)> {
+    let other: Vec<(Point2, Point2)> = boundary_spans(b)?.iter().map(|c| hull_box(c)).collect();
+    let mut near = Vec::new();
+    let mut todo: Vec<(Vec<H2>, u32)> = boundary_spans(a)?.into_iter().map(|c| (c, 0)).collect();
+    while let Some((c, depth)) = todo.pop() {
+        let bx = hull_box(&c);
+        if !other.iter().any(|o| boxes_meet(bx, *o, eps)) {
+            if region_holds(b, point_of(casteljau(&c, 0.5)))? {
+                return Some((true, near));
+            }
+            continue;
+        }
+        let (lo, hi) = bx;
+        if (hi.x - lo.x).max(hi.y - lo.y) <= eps || depth >= MAX_OVERLAP_DEPTH {
+            near.push((point_of(*c.first()?), point_of(*c.last()?)));
+            continue;
+        }
+        let (l, r) = halves(&c);
+        todo.push((l, depth + 1));
+        todo.push((r, depth + 1));
+    }
+    Some((false, near))
+}
+
+/// Whether two regions (outer loops counter-clockwise, holes clockwise) share area beyond a
+/// band of `eps` (mm) round their boundaries. Each boundary is halved until each piece is clear
+/// of the other boundary by `eps` or within `eps` of it; a clear piece inside the other region
+/// has its region's inside next to it, so the two share area there. When no clear piece is
+/// inside, they still share area where their boundaries run together the same way (the insides
+/// on the same side), as for two equal regions. `None` when a point cannot be decided or a
+/// region is malformed.
+pub fn regions_overlap(a: &Region2, b: &Region2, eps: f64) -> Option<bool> {
+    if !(eps.is_finite() && eps > 0.0) {
+        return None;
+    }
+    let (a_in_b, a_near) = pieces_against(a, b, eps)?;
+    if a_in_b {
+        return Some(true);
+    }
+    let (b_in_a, b_near) = pieces_against(b, a, eps)?;
+    if b_in_a {
+        return Some(true);
+    }
+    let along = |(s, e): &(Point2, Point2)| Point2::new(e.x - s.x, e.y - s.y);
+    Some(a_near.iter().any(|pa| {
+        let da = along(pa);
+        b_near.iter().any(|pb| {
+            let db = along(pb);
+            let meet = boxes_meet(
+                (
+                    Point2::new(pa.0.x.min(pa.1.x), pa.0.y.min(pa.1.y)),
+                    Point2::new(pa.0.x.max(pa.1.x), pa.0.y.max(pa.1.y)),
+                ),
+                (
+                    Point2::new(pb.0.x.min(pb.1.x), pb.0.y.min(pb.1.y)),
+                    Point2::new(pb.0.x.max(pb.1.x), pb.0.y.max(pb.1.y)),
+                ),
+                eps,
+            );
+            meet && da.dot(db) > 0.5 * da.length() * db.length()
+        })
+    }))
+}
+
 /// Why a profile is refused ([`check_regions`]).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ProfileRefusal {

@@ -2823,3 +2823,42 @@ mod path_export_regressions {
         assert_eq!(pts.len(), 5);
     }
 }
+
+/// Two regions share area when a piece of one boundary lies clear inside the other, or when
+/// their boundaries run together the same way; touching along an edge or at a corner is none.
+#[test]
+fn regions_overlap_only_where_they_share_area() {
+    use super::profile::regions_overlap;
+    let eps = 1e-6;
+    let sq = rectangle(p(0.0, 0.0), p(2.0, 2.0));
+    // a plus sign: no corner of one inside the other
+    let wide = rectangle(p(-1.0, 0.5), p(3.0, 1.5));
+    let tall = rectangle(p(0.5, -1.0), p(1.5, 3.0));
+    assert_eq!(regions_overlap(&wide, &tall, eps), Some(true));
+    // one inside the other, either way round
+    let inner = rectangle(p(0.5, 0.5), p(1.0, 1.0));
+    assert_eq!(regions_overlap(&sq, &inner, eps), Some(true));
+    assert_eq!(regions_overlap(&inner, &sq, eps), Some(true));
+    // the same region
+    assert_eq!(regions_overlap(&sq, &sq.clone(), eps), Some(true));
+    // touching along an edge, at a corner, apart
+    let right = rectangle(p(2.0, 0.0), p(4.0, 2.0));
+    let corner = rectangle(p(2.0, 2.0), p(3.0, 3.0));
+    let apart = rectangle(p(5.0, 5.0), p(6.0, 6.0));
+    assert_eq!(regions_overlap(&sq, &right, eps), Some(false));
+    assert_eq!(regions_overlap(&sq, &corner, eps), Some(false));
+    assert_eq!(regions_overlap(&sq, &apart, eps), Some(false));
+    // an inner square sitting in a hole: no shared area
+    let framed = Region2 {
+        outer: rectangle(p(-2.0, -2.0), p(4.0, 4.0)).outer,
+        holes: vec![sq.outer.reversed()],
+    };
+    assert_eq!(regions_overlap(&framed, &inner, eps), Some(false));
+    // a circle crossing the square's edge
+    let disc = Region2 {
+        outer: circle(p(2.0, 1.0), 0.5),
+        holes: vec![],
+    };
+    assert_eq!(regions_overlap(&sq, &disc, eps), Some(true));
+    assert_eq!(regions_overlap(&sq, &inner, 0.0), None);
+}
