@@ -1062,7 +1062,7 @@ impl SurfaceIntersector<'_> {
 
         // Not upstream (#17110): a UV trim on a sphere is made monotone in its sweep
         // coordinate wherever the 3D curve is monotone in longitude, certified, or the
-        // curve is refused
+        // whole intersection is refused (IntersectFailed)
         for (srf, ctrl) in [SrfIndex::First, SrfIndex::Second]
             .into_iter()
             .zip(&mut ctrl_uv)
@@ -1908,13 +1908,22 @@ pub fn compute_law_point_values_with<'s, V: IntersectorVirtuals<'s> + ?Sized>(
 /// ([`sphere_span::fit_monotone_sweep`]).
 const fn sweep_refusal(why: sphere_span::SweepRefusal) -> &'static str {
     match why {
+        sphere_span::SweepRefusal::Off(sphere_span::Refusal::Off) => {
+            "the UV trim on the sphere made monotone in its sweep coordinate where the curve \
+             is monotone in longitude lies off the 3D curve by more than the tolerance"
+        }
         sphere_span::SweepRefusal::Off(_) => {
-            "no UV trim on the sphere monotone in its sweep coordinate where the curve is \
-             monotone in longitude lies within the tolerance of the 3D curve"
+            "the UV trim on the sphere made monotone in its sweep coordinate where the curve \
+             is monotone in longitude could not be certified within the tolerance of the 3D \
+             curve"
         }
         sphere_span::SweepRefusal::TurnsBack => {
             "the UV trim on the sphere turns back in its sweep coordinate where the curve \
              does not in longitude, and no handles make it monotone"
+        }
+        sphere_span::SweepRefusal::Degenerate => {
+            "the UV trim on the sphere made monotone in its sweep coordinate has a zero \
+             derivative at a joint"
         }
         sphere_span::SweepRefusal::Shape => {
             "the UV and 3D control points of the traced curve are not matching cubic spans"
