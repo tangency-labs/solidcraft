@@ -245,7 +245,6 @@ fn default_kernel_builds_the_depths_below_the_floor() {
 /// SolidCraft's `UpstreamFixes` preset (183 flags).
 fn solidcraft_flags(k: &mut Kernel) {
     k.fixes.analytic_copy_keeps_parameterization = true;
-    k.fixes.boolean_splits_definition_across_split = true;
     k.fixes.boolean_vertex_by_best_crossing = true;
     k.fixes.box_face_failures_propagate = true;
     k.fixes.bspline_trim_preserves_uv_spans = true;
@@ -255,8 +254,6 @@ fn solidcraft_flags(k: &mut Kernel) {
     k.fixes.curve_loop_normal_from_area = true;
     k.fixes.cylinder_rebuild_mean_radius = true;
     k.fixes.degenerate_proto_edge_in_one_vertex = true;
-    k.fixes.delete_vertex_joins_seam_iso_curve = true;
-    k.fixes.edge_check_orders_tangent_faces = true;
     k.fixes.ellipse_trim_seam_lines_span_cone_height = true;
     k.fixes.face_tight_box_searches_trim = true;
     k.fixes.fillet_chamfer_cone_on_arc = true;

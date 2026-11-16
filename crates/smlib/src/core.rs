@@ -113,11 +113,9 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.shell_edges_on_analytics_exact = true;
     f.ssi_pole_point_keeps_its_tangent = true;
     f.fillet_patch_keeps_fillet_edges = true;
-    f.boolean_splits_definition_across_split = true;
     f.fillet_refuse_overlapping_bands = true;
     f.ssi_tangent_curve_tracer = true;
     f.local_operation_step_walls = true;
-    f.edge_check_orders_tangent_faces = true;
     f.thicken_planar_side_walls = true;
     f.fillet_knife_edge_rounds = true;
     f.revolution_round_offset_collapses = true;
@@ -125,7 +123,6 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.imprint_reuses_coincident_face_edge = true;
     f.linear_sweep_arc_is_cylinder = true;
     f.fillet_trace_reaches_rails = true;
-    f.delete_vertex_joins_seam_iso_curve = true;
     f.box_face_failures_propagate = true;
     f.fillet_removal_takes_ring_fillets = true;
     // The fork's commits that reached `SMLIB_REV` at eaa998a (tangency-labs/smlib#68, #69, #70).
@@ -166,7 +163,6 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.geometric_g2_continuity = true;
     f.degen_param_tiebreak_uses_actual_param = true;
     f.local_surface_intersect_guards_max_boundary_retry = true;
-    f.validate_tolerances_fixes_reported_gaps = true;
     f.edgeuse_convexity_propagates_step_off_failure = true;
     f.cone_create_canonical_preserves_inside_out_and_checks_height = true;
     f.point_class_gap_3d_propagates_no_drop_error = true;
@@ -523,6 +519,18 @@ mod tests {
         for name in HELD_BACK {
             assert!(flags.contains(&(*name, false)), "{name} is on or gone: drop it from HELD_BACK");
         }
+    }
+
+    /// solidcore's tests and kernel rig read this preset from `kernel_cases/fixes.json`: the file
+    /// names exactly the flags `fixes()` turns on.
+    #[test]
+    fn the_kernel_corpus_fix_list_is_this_preset() {
+        let listed: Vec<String> = serde_json::from_str(include_str!("../../../solidcore/crates/solidcore/tests/kernel_cases/fixes.json")).unwrap();
+        let mut listed: Vec<&str> = listed.iter().map(String::as_str).collect();
+        listed.sort_unstable();
+        let mut on: Vec<&str> = fixes().flags().filter(|(_, on)| *on).map(|(name, _)| name).collect();
+        on.sort_unstable();
+        assert_eq!(listed, on, "kernel_cases/fixes.json must list exactly the flags fixes() turns on");
     }
 
     #[test]
