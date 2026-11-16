@@ -764,6 +764,38 @@ mod tests {
         assert_eq!(back, expected);
     }
 
+    /// A frame without a moving layer lets the layer's scene go: the same key handed in again
+    /// with nothing in its slot draws nothing, and a new key takes the scene waiting in its slot.
+    /// So who leaves its layer out of a frame (a preview hidden for a pick) hands the scene over
+    /// again under a new key (on this machine's GPU, skipped without one).
+    #[test]
+    fn a_moving_layer_left_out_of_a_frame_is_drawn_again_only_under_a_new_key() {
+        let Ok(capturer) = Capturer::headless_single_sample(crate::test_env::policy()) else {
+            eprintln!("skipping: no GPU adapter");
+            return;
+        };
+        let wide = Mesh { positions: vec![Vec3::new(-1.0, 0.0, -0.5), Vec3::new(0.2, 0.0, -0.5), Vec3::new(-0.4, 0.0, 0.6)], ..(*sheet()).clone() };
+        let body = scene_geometry(&Scene { meshes: vec![SceneMesh::solid(Arc::new(wide), Rgb(200, 30, 30))], ..Default::default() });
+        let cam = Camera { distance: 6.0, ..Camera::default() };
+        let size = [64, 64];
+        let transform = [[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0], [0.0, 0.0, 0.0, 1.0]];
+        let Ok(mut state) = capturer.state.lock() else { panic!("capturer state") };
+        // The picture of an empty model scene with the layer `moving`, and how much of it is red.
+        let mut picture = |model: u64, moving: Option<(u64, Option<GpuScene>)>| {
+            let mut f = frame(&Scene::default(), &cam, size, model, None);
+            f.moving = moving.map(|(key, scene)| crate::view::MovingLayer { key, slot: Arc::new(Mutex::new(scene)), transform });
+            let drawn = capturer.picture(&mut state, &f, BACKGROUND, size).unwrap().0;
+            let red = drawn.chunks(4).filter(|p| p[0] > p[1].saturating_add(60)).count();
+            (drawn, red)
+        };
+        let (shown, red) = picture(1, Some((7, Some(body.clone()))));
+        assert!(red > 50, "the layer's body shows");
+        assert_eq!(picture(2, Some((7, None))).0, shown, "the same key again: the scene taken stays");
+        assert_eq!(picture(3, None).1, 0, "a frame without the layer");
+        assert_eq!(picture(4, Some((7, None))).1, 0, "the scene went with that frame: its key alone brings nothing back");
+        assert_eq!(picture(5, Some((8, Some(body)))).0, shown, "handed over again under a new key");
+    }
+
     /// A dragged component's parts drawn as instances (one copy of a part's triangles, placed
     /// many times) move with its layer too, lit flat or smooth: the layer built where the drag
     /// found them and moved by its transform draws what the model scene draws with the

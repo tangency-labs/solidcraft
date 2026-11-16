@@ -80,7 +80,7 @@ fn shallow_crease_round_contact_profiles() {
     use solidcore::kernel::UpstreamFixes;
     use solidcore::topology::brep::validation::{check_brep, CheckLevel};
     let mut invalid = Vec::new();
-    for profile in ["default", "half_degree", "new_blend", "all_fixes"] {
+    for profile in ["default", "new_blend", "all_fixes"] {
         for (turn, radius, multi) in [
             (2.5, 0.12, false),
             (0.6, 2.0, false),
@@ -93,9 +93,6 @@ fn shallow_crease_round_contact_profiles() {
             (1.9, 1.0, true),
         ] {
             let mut k = Kernel::default();
-            if profile == "half_degree" {
-                k.fixes.fillet_half_degree_crease = true;
-            }
             if profile == "new_blend" {
                 // The current generic-blend construction and supporting fillet fixes;
                 // leave unrelated boolean, sweep and validation fixes at default.

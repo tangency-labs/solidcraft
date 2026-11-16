@@ -381,6 +381,245 @@ fn a_cylinders_side_split_along_its_rulings_moves_out_as_one() {
     moved_to(&b, &all, 4.0, PI * 2916.0 * 100.0, [5, 9, 6]);
 }
 
+/// Pieces of split cylinders and cones given surfaces a few roundings off the kept piece's
+/// axis or slope, or a real angle off it (#13722), and three cylinder faces at a corner.
+mod near_parallel {
+    use super::*;
+    use crate::session::with_body;
+    use solidcore::geom::axis2_placement::Axis2Placement;
+    use solidcore::offset::draft::Draft;
+    use solidcore::offset::offset_executive::p2::local_operation_simple;
+    use solidcore::surface::implicit::AnalyticSupport;
+    use solidcore::surface::surface::{Surface, SurfaceKind};
+    use solidcore::{FaceId, Vec3};
+
+    /// The faces of `b` through `points` (each once) given, by the kernel's local operation, the
+    /// surface `given` makes for each: the body after it, or the kernel's refusal (the body then
+    /// as it came in).
+    fn given_surfaces(
+        b: &Body,
+        points: &[[f64; 3]],
+        given: &dyn Fn(&mut Kernel, &solidcore::Brep, FaceId) -> Surface,
+    ) -> solidcore::Result<()> {
+        let o = order(b);
+        let mut faces: Vec<FaceId> = points.iter().map(|&p| o.faces[through(b, &o, p)]).collect();
+        faces.sort_unstable();
+        faces.dedup();
+        let mut refusal = None;
+        with_body("LocalOperation", b, |k, brep| {
+            let surfaces = faces.iter().map(|&f| given(k, brep, f)).collect();
+            if let Err(e) = local_operation_simple(k, brep, &faces, surfaces) {
+                refusal = Some(e);
+            }
+            Ok(refusal.is_none())
+        })
+        .unwrap();
+        refusal.map_or(Ok(()), Err)
+    }
+
+    /// `b` one closed, sound solid of `expected` volume, with `counts` faces, edges and vertices.
+    fn sound(b: &Body, expected: f64, counts: [usize; 3]) {
+        let measured = volume(b);
+        assert!(rel(measured, expected) < 1e-9, "{measured} vs {expected}");
+        assert_eq!(b.counts().unwrap(), counts);
+        assert!(b.is_manifold_solid().unwrap());
+        b.check_solid().unwrap();
+        let report = b.check(crate::CheckLevel::All).unwrap();
+        assert_eq!(report.failures, 0, "{}", report.text);
+    }
+
+    /// A cylinder's or cone's axis, the radius at its origin and its semi-angle in degrees.
+    #[allow(clippy::disallowed_methods)] // reads the premise back, not ops geometry
+    fn support(s: &Surface) -> (Vec3, f64, f64) {
+        let axis = |p: &Axis2Placement| p.x_axis().cross(p.y_axis());
+        match AnalyticSupport::of(s) {
+            Some(AnalyticSupport::Cylinder { placement, radius }) => {
+                (axis(&placement), radius, 0.0)
+            }
+            Some(AnalyticSupport::Cone {
+                placement,
+                base_radius,
+                semi_angle_deg,
+            }) => (axis(&placement), base_radius, semi_angle_deg),
+            other => panic!("not a cylinder or a cone: {other:?}"),
+        }
+    }
+
+    /// The surface of face `f` of `b`, a cylinder or cone, moved out 4 along its normals (its
+    /// offset, the parameters kept), then turned about the axis along (1, 2, 0) through (0, 0, z) by
+    /// each (angle, z) of `turns` (radians) and drafted about its circle at z = 50 by each of `drafts` (radians),
+    /// its NURBS form with it: turned and drafted there and back, an offset computed apart from
+    /// the surface it moves off, its axis or slope a few roundings off.
+    #[allow(clippy::disallowed_methods)] // the test input's turn, not ops geometry
+    fn moved_out(
+        k: &Kernel,
+        b: &solidcore::Brep,
+        f: FaceId,
+        turns: &[(f64, f64)],
+        drafts: &[f64],
+    ) -> Surface {
+        let own = b.face(f).unwrap().surface.as_ref().unwrap();
+        let (axis, radius, semi) = support(own);
+        let offset = |d: f64| own.create_offset_surface(k, d, 1e-9).unwrap().unwrap();
+        let mut moved = offset(4.0);
+        // out: the larger radius at the origin
+        if support(&moved).1 < radius {
+            moved = offset(-4.0);
+        }
+        for &(turn, z) in turns {
+            let mut turned = Axis2Placement::IDENTITY;
+            turned.rotate_about_axis_at_point(
+                turn,
+                Vec3::new(0.0, 0.0, z),
+                Vec3::new(1.0, 2.0, 0.0),
+            );
+            moved.transform(k, &turned, None).unwrap();
+        }
+        for &angle in drafts {
+            let draft = Draft::new(Vec3::new(0.0, 0.0, 50.0), Vec3::Z, Vec3::Z, angle).unwrap();
+            let SurfaceKind::Cone(cone) = moved.kind() else {
+                panic!("not a cone");
+            };
+            moved = Surface::from(cone.drafted_about_plane(k, true, &draft).unwrap().unwrap());
+        }
+        // the premise: the axis or the slope is not the kept surface's
+        let (moved_axis, _, moved_semi) = support(&moved);
+        assert!(
+            moved_axis != axis || moved_semi.to_bits() != semi.to_bits(),
+            "{moved_axis:?} {moved_semi}"
+        );
+        moved
+    }
+
+    /// SolidCraft's `cyl_half_band` (#13722): the upper half of a cylinder's side (r 50, z 0 to
+    /// 100, split at z = 50) given its offset r 54 turned 3e-16 radians about an axis along
+    /// (1, 2, 0) through (0, 0, 1e5), so its axis is a few roundings off its own (as SolidCraft's
+    /// offset came out about `(2.3245e-16, 1.6354e-16, 1)`) and about 3e-11 off its line. The
+    /// axes are not one vector, so the exact parallel test does not take them, but over the body
+    /// the two cylinders stay within 1e-10 of coaxial, 4 apart: the annulus at z = 50 closes the
+    /// step, as for the exact axis. V = 2500 pi 100 + (54² - 50²) pi 50 = 850743.291 (the turn
+    /// moves the moved side by under 1e-10 over its area of 2 pi 54 50, so the volume by under
+    /// 2e-6, a relative 3e-12), with the exact axis's 5 faces, 7 edges and 4 vertices.
+    #[test]
+    fn half_a_cylinders_side_moves_out_on_an_axis_a_few_roundings_off() {
+        all_fixes();
+        let b = split_at_height(
+            &make_cylinder([0.0; 3], 50.0, 100.0).unwrap(),
+            [50.0, 0.0, 25.0],
+            50.0,
+        );
+        given_surfaces(&b, &[[50.0, 0.0, 75.0]], &|k, brep, f| {
+            moved_out(k, brep, f, &[(3e-16, 1e5)], &[])
+        })
+        .unwrap();
+        let v = PI * 2500.0 * 100.0 + PI * (54.0 * 54.0 - 2500.0) * 50.0;
+        sound(&b, v, [5, 7, 4]);
+    }
+
+    /// The volume of the frustum r 50 at z = 0 to r 30 at z = 100 with the upper half of its side
+    /// moved out 4 ([`half_a_cones_side_moves_out_over_a_step`]).
+    #[allow(clippy::disallowed_methods)] // closed-form oracle, not ops geometry
+    fn half_cone_moved_out_volume() -> f64 {
+        let w = 1.04_f64.sqrt();
+        let region = [
+            (40.0, 50.0),
+            (40.0 + 4.0 / w, 50.0 + 0.8 / w),
+            (30.0 + 4.0 * w, 100.0),
+            (30.0, 100.0),
+        ];
+        // ∫∫ r dr dz over the polygon, by Green's theorem
+        let moment: f64 = (0..4)
+            .map(|i| {
+                let ((r0, z0), (r1, z1)) = (region[i], region[(i + 1) % 4]);
+                (r0 + r1) * (r0 * z1 - r1 * z0) / 6.0
+            })
+            .sum();
+        PI * 4900.0 * 100.0 / 3.0 + 2.0 * PI * moment.abs()
+    }
+
+    /// A cone isogrid's band (#13722): the upper half of a frustum's side (r 50 at z = 0 to r 30
+    /// at z = 100, split at z = 50) given its offset 4 out drafted 0.01 radians about its circle
+    /// at z = 50 and back, so its slope is a few roundings off the kept half's (as SolidCraft's
+    /// offset came out,
+    /// `tan_angle` −0.22499999999999998 against −0.22499999999999995). The slopes are not one
+    /// number, so the exact parallel test does not take them, but
+    /// over the body the cones stay within 1e-13 of parallel, 4 apart: the cone of normals
+    /// through the split circle closes the step, as for the exact slope. V as
+    /// [`half_a_cones_side_moves_out_over_a_step`] (the slope moves the moved side by at most
+    /// 1e-16 x 100 over its area, so the volume by a relative 1e-15), with its faces, edges and
+    /// vertices.
+    #[test]
+    fn half_a_cones_side_moves_out_on_a_slope_a_few_roundings_off() {
+        all_fixes();
+        let b = split_at_height(
+            &crate::make_cone([0.0; 3], 50.0, 30.0, 100.0).unwrap(),
+            [45.0, 0.0, 25.0],
+            50.0,
+        );
+        given_surfaces(&b, &[[35.0, 0.0, 75.0]], &|k, brep, f| {
+            moved_out(k, brep, f, &[], &[0.01, -0.01])
+        })
+        .unwrap();
+        sound(&b, half_cone_moved_out_volume(), [5, 7, 4]);
+    }
+
+    /// A cylinder's side (r 50, z 0 to 100) split at z = 50 and its upper half split along its
+    /// rulings by the plane x = 0, the upper pieces moved out 4: where a ruling meets the circle at
+    /// z = 50, three cylinder faces meet at a vertex with no plane, two moved to the cylinder
+    /// r 54 and the kept one r 50, every two of them one surface or apart: they meet in no one
+    /// point, and the annulus at z = 50 closes the step, as for the upper half moved whole.
+    /// V = 2500 pi 100 + (54² - 50²) pi 50 = 850743.291.
+    #[test]
+    fn three_cylinder_faces_at_a_corner_move_out_over_a_step() {
+        all_fixes();
+        let halves = split_at_height(
+            &make_cylinder([0.0; 3], 50.0, 100.0).unwrap(),
+            [50.0, 0.0, 25.0],
+            50.0,
+        );
+        let b = split_by_plane(
+            &halves,
+            [-50.0, 0.0, 75.0],
+            ([0.0; 3], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]),
+        );
+        let upper = [[-50.0, 0.0, 75.0], [30.0, 40.0, 75.0], [30.0, -40.0, 75.0]];
+        let v = PI * 2500.0 * 100.0 + PI * (54.0 * 54.0 - 2500.0) * 50.0;
+        moved_to(&b, &upper, 4.0, v, [9, 17, 10]);
+    }
+
+    /// [`three_cylinder_faces_at_a_corner_move_out_over_a_step`] with each upper piece given its
+    /// offset r 54 turned 3e-16 radians about the axis along (1, 2, 0) through (0, 0, 1e5), as
+    /// [`half_a_cylinders_side_moves_out_on_an_axis_a_few_roundings_off`] turns the band: at the
+    /// corners where a ruling meets the circle at z = 50, the kept lower band and the two moved
+    /// pieces are three cylinders every two of which are parallel, a pair of them only within
+    /// a ball (the turned axis is not the kept one's vector), so the corner's decision holds only
+    /// where the face's extension lies inside that ball, which is checked. The cylinders stay
+    /// within 1e-10 of coaxial over the body: V = 2500 pi 100 + (54² - 50²) pi 50 = 850743.291
+    /// (the turn moves the moved sides by under 1e-10 over their area, a relative 3e-12), with
+    /// the exact move's 9 faces, 17 edges and 10 vertices.
+    #[test]
+    fn three_cylinder_faces_at_a_corner_move_out_on_an_axis_a_few_roundings_off() {
+        all_fixes();
+        let halves = split_at_height(
+            &make_cylinder([0.0; 3], 50.0, 100.0).unwrap(),
+            [50.0, 0.0, 25.0],
+            50.0,
+        );
+        let b = split_by_plane(
+            &halves,
+            [-50.0, 0.0, 75.0],
+            ([0.0; 3], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]),
+        );
+        let upper = [[-50.0, 0.0, 75.0], [30.0, 40.0, 75.0], [30.0, -40.0, 75.0]];
+        given_surfaces(&b, &upper, &|k, brep, f| {
+            moved_out(k, brep, f, &[(3e-16, 1e5)], &[])
+        })
+        .unwrap();
+        let v = PI * 2500.0 * 100.0 + PI * (54.0 * 54.0 - 2500.0) * 50.0;
+        sound(&b, v, [9, 17, 10]);
+    }
+}
+
 #[test]
 fn hostile_arguments_are_refused() {
     all_fixes();

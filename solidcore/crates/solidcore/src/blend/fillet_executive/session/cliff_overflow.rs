@@ -1,7 +1,7 @@
 //! The cliff overflow's subtraction on the live session (not upstream): the fork's
 //! `SmFilletExecutive::SubtractRemovalRegion` and `sm_HoldsItsLaw`
 //! (`source/SMLib/src/SmFilletCliffOverflow.cpp`, tangency-labs/smlib `8ba4667`, `ae2a6de`,
-//! rev `68fb9162`; `fixes.fillet_cliff_overflow`, WR-631, WR-638). The construction steps
+//! rev `68fb9162`; WR-631, WR-638). The construction steps
 //! are in [`crate::blend::fillet_cliff_overflow`].
 //!
 //! | Rust                                       | Fork                                      |

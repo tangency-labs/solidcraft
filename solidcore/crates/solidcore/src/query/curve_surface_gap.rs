@@ -429,9 +429,24 @@ pub fn curve_face_gap_bound(
             }
         })
         .collect();
-    let mut uvs = Vec::new();
-    let mut guess = None;
-    for &t in &params {
+    // The nearest points are followed from the middle of the curve out to each end, each drop
+    // started from its neighbour's: an end on a side of the net collapsed to one point (the apex
+    // of a loft between curves that meet there) has every parameter of that side for its nearest
+    // point, and a drop with nothing to start from takes any of them, so `W` would jump there
+    // and run past the net. Continued from its neighbour it takes the neighbour's; the bound holds
+    // for any `W`, only whether the bisection closes depends on this.
+    let n = params.len();
+    let mid = n / 2;
+    let order: Vec<(usize, Option<usize>)> = (mid..n)
+        .map(|i| (i, (i > mid).then(|| i - 1)))
+        .chain((0..mid).rev().map(|i| (i, Some(i + 1))))
+        .collect();
+    let mut found: Vec<Option<Point2>> = vec![None; n];
+    for (i, from) in order {
+        let Some(&t) = params.get(i) else {
+            return Ok(None);
+        };
+        let guess = from.and_then(|j| found.get(j).copied().flatten());
         let Some(point) =
             ignored(evaluated.evaluate(k, t, 0, true, false))?.and_then(|d| d.into_iter().next())
         else {
@@ -447,9 +462,11 @@ pub fn curve_face_gap_bound(
         if !drop.success {
             return Ok(None);
         }
-        guess = Some(drop.result_uv);
-        uvs.push(drop.result_uv);
+        if let Some(slot) = found.get_mut(i) {
+            *slot = Some(drop.result_uv);
+        }
     }
+    let uvs: Vec<Point2> = found.into_iter().flatten().collect();
     let Some(net) = NetSurface::of(k, &surface, &uvs)? else {
         return Ok(None);
     };
