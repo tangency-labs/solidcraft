@@ -85,8 +85,9 @@ struct State {
     extras: HashMap<String, String>,
     open_blocks: HashSet<String>,
     seen_blocks: HashSet<String>,
-    /// Where the last control this pass hid would have been drawn: the ui and its cursor then.
-    hidden_at: Option<(Id, Pos2)>,
+    /// The uis a control lives in, innermost first, when the last control this pass gated was
+    /// hidden. A control drawn since clears it.
+    hidden_in: Option<Vec<Id>>,
 }
 
 /// Held until the preferences body finishes. A dropdown value learned while a row was hidden
@@ -134,7 +135,7 @@ pub fn begin(ui: &Ui, filter: &str, prefix: &str) -> SearchFrame {
         state.nav.clear();
         state.dirty = false;
         state.child_matched = false;
-        state.hidden_at = None;
+        state.hidden_in = None;
     });
     SearchFrame { ctx: ui.ctx().clone() }
 }
@@ -280,6 +281,7 @@ pub fn begin_page(ui: &Ui, index: usize, label: &str) {
         state.section_matches = false;
         state.section_shown.clear();
         state.heading_open = false;
+        state.hidden_in = None;
     });
 }
 
@@ -293,6 +295,7 @@ pub fn begin_section(ui: &Ui, title: &str) {
         // A dropdown with no row of its own must not store its value under the last row's key.
         state.key.clear();
         state.heading_open = false;
+        state.hidden_in = None;
     });
 }
 
@@ -413,24 +416,28 @@ pub fn note_unlabelled(ui: &Ui, texts: &[&str]) {
 /// off-screen when it needs the widget's current value.
 pub fn visible(ui: &mut Ui, texts: &[&str]) -> bool {
     let show = wanted(ui, texts);
+    let hiding = with(ui, |state| state.hiding > 0).unwrap_or(false);
     if show && querying(ui) {
-        if with(ui, |state| state.hiding > 0).unwrap_or(false) {
+        if hiding {
             with(ui, |state| state.child_matched = true);
         } else {
             reveal(ui);
+            with(ui, |state| state.hidden_in = None);
         }
-    } else if !show {
-        let at = (ui.scope_id(), ui.cursor().min);
-        with(ui, |state| state.hidden_at = Some(at));
+    } else if !show && !hiding {
+        let chain: Vec<Id> = ui.stack().iter().map(|node| node.unique_id).collect();
+        with(ui, |state| state.hidden_in = Some(chain));
     }
     show
 }
 
-/// Whether the control just before this point in `ui` was hidden by the search, so a help icon
-/// that follows it is hidden too. A control drawn since moves the cursor, and this is false.
+/// Whether the last control the search gated was hidden and lives in `ui` or a ui inside it, so
+/// a help icon drawn in `ui` after it is hidden too. A control shown since clears this, so an
+/// icon after a shown control stays. The control may sit in a child layout of the row the icon
+/// is drawn in.
 pub fn follows_hidden(ui: &Ui) -> bool {
-    let at = (ui.scope_id(), ui.cursor().min);
-    with(ui, |state| state.hidden_at == Some(at)).unwrap_or(false)
+    let me = ui.unique_id();
+    with(ui, |state| state.hidden_in.as_ref().is_some_and(|chain| chain.contains(&me))).unwrap_or(false)
 }
 
 /// The rectangle a search outline draws around a setting: the setting's own, with room on every
@@ -962,28 +969,43 @@ mod tests {
     }
 
     /// A help icon belongs to the control before it: when the search hides the setting, its icon
-    /// goes too, and with no search both stay (#16115).
+    /// goes too, and with no search both stay (#16115). The checkbox is drawn straight in the row
+    /// (layout 0) or inside a child layout of the row, as the General page does (layout 1), and
+    /// the matching row comes first or last, so an icon after a shown control stays.
     #[test]
     fn a_help_icon_goes_with_the_setting_the_search_hides() {
-        let ctx = crate::test_support::context();
-        for (filter, shown) in [("Quality", [true, false]), ("", [true, true])] {
-            let mut icons = Vec::new();
-            for _ in 0..3 {
-                icons.clear();
-                crate::test_support::raw_frame(&ctx, Default::default(), |ui| {
-                    let _search = begin(ui, filter, "prefs");
-                    begin_page(ui, PAGE_LAYOUT, "Layout");
-                    for label in ["Quality", "Performance"] {
-                        ui.horizontal(|ui| {
-                            let mut on = false;
-                            crate::checkbox(ui, label, &mut on);
-                            icons.push(crate::help_icon(ui, "Help").rect);
+        for layout in 0..2 {
+            for order in [["Quality", "Performance"], ["Performance", "Quality"]] {
+                for filter in ["Quality", ""] {
+                    let ctx = crate::test_support::context();
+                    let mut icons = Vec::new();
+                    for _ in 0..3 {
+                        icons.clear();
+                        crate::test_support::raw_frame(&ctx, Default::default(), |ui| {
+                            let _search = begin(ui, filter, "prefs");
+                            begin_page(ui, PAGE_LAYOUT, "Layout");
+                            for label in order {
+                                ui.horizontal(|ui| {
+                                    let mut on = false;
+                                    if layout == 0 {
+                                        crate::checkbox(ui, label, &mut on);
+                                    } else {
+                                        let size = vec2(200.0, 20.0);
+                                        ui.allocate_ui_with_layout(size, egui::Layout::left_to_right(egui::Align::Center), |ui| {
+                                            crate::checkbox(ui, label, &mut on);
+                                        });
+                                    }
+                                    icons.push(crate::help_icon(ui, "Help").rect);
+                                });
+                            }
+                            store_nav(ui);
                         });
                     }
-                    store_nav(ui);
-                });
+                    let shown: Vec<bool> = order.iter().map(|label| filter.is_empty() || *label == "Quality").collect();
+                    let drawn: Vec<bool> = icons.iter().map(|rect| rect.is_positive()).collect();
+                    assert_eq!(drawn, shown, "layout {layout}, order {order:?}, filter {filter:?}");
+                }
             }
-            assert_eq!(icons.iter().map(|rect| rect.is_positive()).collect::<Vec<_>>(), shown, "filter {filter:?}");
         }
     }
 
