@@ -2924,4 +2924,66 @@ mod tests {
         let p = a.base().evaluate_point(sol.start.parameters[0]).unwrap();
         assert!(p.distance(x) < 1e-6, "{p:?} vs {x:?}");
     }
+
+    /// The touch of a line a hair inside a circle (#14599) lies on both curves or the
+    /// crossings stay. A line parallel to the circle's plane 8e-6 above it and 8e-6 inside
+    /// the circle, at a tolerance and contact tolerance of 1e-5, keeps its two crossings
+    /// (8e-6 off the line each): the chord's midpoint lies 1.13e-5 off the circle. A line
+    /// that starts at the chord's midpoint, past the end of an arc that ends 0.005 from it
+    /// on the stretch, touches the arc at that end, not at its own start off the arc.
+    #[test]
+    fn a_line_a_hair_inside_a_circle_touches_it_only_where_both_reach() {
+        let k = kernel();
+        let c = Vec3::new(1.0, 2.0, 3.0);
+        let a = circle(&k, 0.0, 360.0, 10.0, false);
+        let ivl = a.base().natural_interval();
+        let above = Line::from_points(
+            c + Vec3::new(-20.0, 10.0 - 8e-6, 8e-6),
+            c + Vec3::new(20.0, 10.0 - 8e-6, 8e-6),
+            3,
+        );
+        let r = above
+            .intersect_with_ellipse::<i64>(
+                &k,
+                &above.natural_interval(),
+                &a,
+                &ivl,
+                1e-5,
+                1e-5,
+                None,
+                None,
+            )
+            .expect("above");
+        assert_eq!(r.solutions.len(), 2, "above");
+        for sol in &r.solutions {
+            let p = above.evaluate_point(sol.start.parameters[0]);
+            let q = a.base().evaluate_point(sol.start.parameters[1]).unwrap();
+            assert!(p.distance(q) <= 1e-5, "above: {p:?} vs {q:?}");
+        }
+        let theta = 0.0005_f64.acos();
+        let arc = circle(&k, 0.0, theta.to_degrees(), 10.0, false);
+        let end = c + Vec3::new(10.0 * theta.cos(), 10.0 * theta.sin(), 0.0);
+        let half = Line::from_points(
+            c + Vec3::new(0.0, 10.0 - 5e-6, 0.0),
+            c + Vec3::new(20.0, 10.0 - 5e-6, 0.0),
+            3,
+        );
+        let r = half
+            .intersect_with_ellipse::<i64>(
+                &k,
+                &half.natural_interval(),
+                &arc,
+                &arc.base().natural_interval(),
+                1e-5,
+                1e-5,
+                None,
+                None,
+            )
+            .expect("half");
+        let [sol] = r.solutions.as_slice() else {
+            panic!("half: one solution expected, {}", r.solutions.len());
+        };
+        let p = arc.base().evaluate_point(sol.start.parameters[1]).unwrap();
+        assert!(p.distance(end) < 1e-6, "half: {p:?} vs {end:?}");
+    }
 }
