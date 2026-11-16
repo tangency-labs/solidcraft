@@ -571,24 +571,10 @@ pub struct UpstreamFixes {
     pub degen_param_tiebreak_uses_actual_param: bool,
     /// `RemoveCoincidentNoEdgeProtoVertex` reports a miss as `false` (WR-73, #848).
     pub proto_vertex_miss_is_false: bool,
-    /// `SmSurfaceCache::GetSurfaceContinuity` checks the last internal V knot (`iv + 1 < rVConts.GetSize()`) rather than skipping it (`iv + 1 < rVConts.GetSize() - 1`) (WR-42).
-    pub surface_continuity_checks_last_v_knot: bool,
-    /// `SmSurface::LocalSurfaceIntersect`'s out-of-bounds boundary retries guard both
-    /// the minimum and maximum boundary tests of the second through fourth parameter
-    /// branches (`v` of `this`, `u` of `other`, `v` of `other`) with `!bFoundSolution`,
-    /// matching step 1, instead of binding `!bFoundSolution` only to the minimum test
-    /// via `!bFoundSolution && min || max` and re-running `sm_IntersectSrfBndryCrv` at
-    /// a maximum boundary where a failed solve overwrites an already-found boundary
-    /// solution (WR-99, #2210;
-    /// `plan/upstream-issues/WR-99--addendum-2026-11-01-guard-max-boundary-retry.md`).
-    /// Off by default for pinned C++ parity.
-    pub local_surface_intersect_guards_max_boundary_retry: bool,
     /// A rotational sweep (whole or partial turn) makes each line and circular arc of its profile its cylinder, cone, sphere or torus, not only a one-curve profile's (WR-448, #545; SolidCraft change, tangency-labs/smlib 0b143f7 (commit not in fork history at 26cc451)).
     pub revolve_analytic_profile_faces: bool,
     /// `CreateLinearSweep` makes a circular arc short of a whole turn that is swept square to its plane an `SmCylinder` bounded 0..its sweep angle by 0..the distance, its frame turned to the arc's start (for a sweep against the arc's normal, to its end and then flipped), where upstream makes a cylinder only of a whole circle and an `SmSurfOfExtrusion` of any other arc; a sweep that is not square stays a surface of extrusion (WR-565, #1477; SolidCraft change, tangency-labs/smlib 12918e9).
     pub linear_sweep_arc_is_cylinder: bool,
-    /// Planar faces from curves join a loop touching another loop at a vertex into that loop (WR-405, #892).
-    pub join_touching_loops: bool,
     /// [`crate::topology::edgeuse::p2::is_convex_radial_sector`]
     /// (`SmEdgeuse::IsConvexRadialSector`) propagates a failing
     /// [`crate::topology::edgeuse::p2::evaluate_binormal_step_off`] status on either this
