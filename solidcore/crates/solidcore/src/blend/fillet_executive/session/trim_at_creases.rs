@@ -65,6 +65,7 @@ use crate::blend::fillet_overflow::{
 use crate::blend::fillet_solver::p5::is_concave_edge;
 use crate::curve::curve::{Curve, CurveKind};
 use crate::curve::line::Line;
+use crate::error::blend::BlendFailure;
 use crate::error::{EntityRef, Result, SolidError};
 use crate::geom::attribute::ids;
 use crate::geom::global_solver::SolverOperation;
@@ -747,8 +748,62 @@ fn crosses_surface(
     Ok(found.map(|(_, p)| p))
 }
 
-/// The refusal of a crease piece whose end cannot be put on its meet: a curve kind with
-/// no control polygon (#17673; never a piece left short of its meet).
+/// `piece`'s curve kind, as a crease end refusal names it.
+fn kind_name(piece: &Curve) -> &'static str {
+    match piece.kind() {
+        CurveKind::Line(_) => "line",
+        CurveKind::BSpline(_) => "B-spline",
+        CurveKind::Ellipse(_) => "ellipse",
+        CurveKind::Hyperbola(_) => "hyperbola",
+        CurveKind::Parabola(_) => "parabola",
+        CurveKind::Hermite(_) => "Hermite",
+        CurveKind::Projected(_) => "projected",
+        CurveKind::Iso(_) => "iso-parametric",
+        CurveKind::Offset(_) => "offset",
+        CurveKind::Conic(_) => "conic",
+        CurveKind::CrvInVolume(_) => "curve-in-volume",
+        CurveKind::CrvOnSurf(_) => "curve-on-surface",
+        CurveKind::TangentField(_) => "tangent-field",
+        CurveKind::Composite(_) => "composite",
+    }
+}
+
+/// The refusal of a crease piece (its kind `kind`) whose first end with a meet (the start
+/// at `start.0` where it has one, else the end at `end.0`) has no construction to put it on
+/// its meet: a curve kind with no control polygon, or a B-spline not clamped there, whose
+/// end is not its classified end (#17673; never a piece left short of its meet).
+fn piece_end_unbuildable(
+    kind: &'static str,
+    start: (f64, Option<Point3>),
+    end: (f64, Option<Point3>),
+) -> SolidError {
+    let (at_end, t) = match start.1 {
+        Some(_) => (false, start.0),
+        None => (true, end.0),
+    };
+    SolidError::blend(
+        OP,
+        BlendFailure::CreasePieceEndUnbuildable { kind, at_end, t },
+    )
+}
+
+/// `crease` with each B-spline clamped at both ends: an unclamped one as the same curve
+/// over its domain ([`clamped_spline`]), whose natural ends are its real ends; any other
+/// as it is. The trim classifies, meets and ends its pieces on this curve, so an end it
+/// records is the piece's end (#17673 review: an unclamped crease's natural end is its end
+/// control point, off the curve, and the kernel cannot evaluate it inside its domain).
+fn crease_as_clamped(crease: &Curve) -> Result<std::borrow::Cow<'_, Curve>> {
+    Ok(match crease.kind() {
+        CurveKind::BSpline(spline) if !spline_clamped(spline)? => {
+            std::borrow::Cow::Owned(Curve::from(clamped_spline(spline)?))
+        }
+        _ => std::borrow::Cow::Borrowed(crease),
+    })
+}
+
+/// An invariant of the crease piece's end construction that did not hold (a B-spline
+/// with too few knots or control points, or one not clamped where its end is moved):
+/// `Unsupported`, never a piece left short of its meet.
 const fn piece_end_unsupported(reason: &'static str) -> SolidError {
     SolidError::Unsupported {
         operation: OP,
@@ -945,7 +1000,7 @@ fn pieces_in_face_to_ends(
 /// ends the piece where the crease comes within `tol` of the edge, short of their meet by
 /// up to the length of that run. The piece is trimmed to the meet's parameter and ends
 /// exactly on the meet ([`piece_ending_at`], by a construction chosen from its geometry;
-/// `Unsupported` for a curve kind it has none for). An end with no such meet is left as
+/// a typed refusal for a curve kind it has none for). An end with no such meet is left as
 /// classified. Where the two meets come out of order (each past the other), the piece
 /// keeps both its classified ends (as before #17673).
 fn pieces_ending_at_meets(
@@ -958,6 +1013,9 @@ fn pieces_ending_at_meets(
     tol: f64,
     pieces: &mut Vec<Curve>,
 ) -> Result<()> {
+    // classified, met and ended on the crease clamped, so every recorded end is its piece's
+    let clamped = crease_as_clamped(crease)?;
+    let crease: &Curve = &clamped;
     let natural = crease.natural_interval();
     let runs = face::p2::classify_free_curve_on_face(k, sheet, s, crease, natural, tol, true)?;
     for (i, run) in runs.iter().enumerate() {
@@ -1036,7 +1094,7 @@ fn pieces_ending_at_meets(
         } else {
             classified
         };
-        pieces.push(piece_ending_at(k, crease, start, end)?);
+        pieces.push(piece_ending_at(k, crease, start, end, tol)?);
     }
     Ok(())
 }
@@ -1044,13 +1102,17 @@ fn pieces_ending_at_meets(
 /// `crease` trimmed to `start.0 .. end.0`, each end that has a meet ending exactly on it,
 /// by a construction chosen from the piece's geometry:
 /// - a line: the line between its two ends, each meet in place of its end (a line still,
-///   every point within `|q - end|` of where it was);
+///   every point within `|q - end|` of where it was); `Degenerate` where the two are within
+///   `tol` of each other;
 /// - a B-spline, or a conic (an ellipse or circle, hyperbola or parabola, taken as its
-///   exact rational B-spline, the kernel's own NURB of it): clamped at both ends where it
-///   is not ([`clamped_spline`]), then each end's control point moved onto its meet
-///   ([`move_spline_end`]);
-/// - any other kind (a curve with no control polygon): `Unsupported`, never a piece left
-///   ending short of its meet.
+///   exact rational B-spline, the kernel's own NURB of it), clamped at both ends: each
+///   end's control point moved onto its meet ([`move_spline_end`]). One not clamped (its
+///   natural end a control point off the curve, not the end the caller classified) is
+///   refused ([`BlendFailure::CreasePieceEndUnbuildable`]); the trim's creases are clamped
+///   before they are classified ([`crease_as_clamped`]);
+/// - any other kind (a curve with no control polygon):
+///   [`BlendFailure::CreasePieceEndUnbuildable`], naming the kind and the first end with a
+///   meet, never a piece left ending short of its meet.
 ///
 /// Both meets are applied, or none and the error: a meet taken at one end is never
 /// dropped because of the other. A piece with no meet is the trimmed crease as it is.
@@ -1059,6 +1121,7 @@ fn piece_ending_at(
     crease: &Curve,
     start: (f64, Option<Point3>),
     end: (f64, Option<Point3>),
+    tol: f64,
 ) -> Result<Curve> {
     let mut piece = crease_piece(k, crease, start.0, end.0)?;
     if start.1.is_none() && end.1.is_none() {
@@ -1075,6 +1138,13 @@ fn piece_ending_at(
                 Some(q) => q,
                 None => piece.evaluate_point(k, ivl.max())?,
             };
+            // the meets within `tol` of each other: no line between them
+            if a.distance(z) <= tol {
+                return Err(SolidError::Degenerate {
+                    operation: OP,
+                    entity: None,
+                });
+            }
             let mut line = Line::from_points(a, z, piece.dim());
             line.make_nurb()?;
             Ok(Curve::from(line))
@@ -1083,17 +1153,27 @@ fn piece_ending_at(
         | CurveKind::Ellipse(_)
         | CurveKind::Hyperbola(_)
         | CurveKind::Parabola(_) => {
-            // a clamped B-spline is edited in place, as it is; any other is replaced by
-            // its clamped B-spline
-            let in_place = match piece.kind() {
-                CurveKind::BSpline(spline) => spline_clamped(spline)?,
-                _ => false,
-            };
-            if !in_place {
+            // a B-spline is edited in place; a conic is replaced by its exact NURB. Either
+            // must be clamped at both ends: an unclamped one's ends are not its classified
+            // ends ([`crease_as_clamped`] clamps the trim's creases first)
+            let replacement = {
                 let base = piece.b_spline_base().ok_or_else(|| {
                     piece_end_unsupported("a crease piece with no B-spline of its own")
                 })?;
-                piece = Curve::from(clamped_spline(base)?);
+                if !spline_clamped(base)? {
+                    let kind = match piece.kind() {
+                        CurveKind::BSpline(_) => "unclamped B-spline",
+                        _ => "conic with an unclamped NURB",
+                    };
+                    return Err(piece_end_unbuildable(kind, start, end));
+                }
+                match piece.kind() {
+                    CurveKind::BSpline(_) => None,
+                    _ => Some(base.clone_exact()),
+                }
+            };
+            if let Some(nurb) = replacement {
+                piece = Curve::from(nurb);
             }
             let CurveKind::BSpline(spline) = piece.kind_mut() else {
                 return Err(piece_end_unsupported(
@@ -1116,9 +1196,7 @@ fn piece_ending_at(
         | CurveKind::CrvInVolume(_)
         | CurveKind::CrvOnSurf(_)
         | CurveKind::TangentField(_)
-        | CurveKind::Composite(_) => Err(piece_end_unsupported(
-            "a crease piece of a curve kind with no control polygon to end it at its meet",
-        )),
+        | CurveKind::Composite(_) => Err(piece_end_unbuildable(kind_name(&piece), start, end)),
     }
 }
 
@@ -2617,6 +2695,64 @@ mod tests {
     use crate::nurbs::crv_basic::Curve as NlCurve;
     use crate::nurbs::math::{CPoint, NOW};
 
+    /// The trim tolerance the end-construction tests pass.
+    const TOL: f64 = 1e-6;
+
+    /// The control points of `c` (a B-spline), each with its weight.
+    fn control_polygon(c: &BSplineCurve) -> Vec<(Point3, f64)> {
+        (0..c.number_control_points().unwrap())
+            .map(|i| {
+                c.control_point(ControlPointForm::EuclideanRational, i)
+                    .unwrap()
+            })
+            .collect()
+    }
+
+    /// A certificate that `piece` is `before` with only its end control points moved: the
+    /// same degree and knots, every control point and weight bit-identical but the first
+    /// (where `q0` is given) and the last (where `q1` is), each of which is its meet (moved
+    /// by `q - old`), its weight unchanged. A moved point is stored homogeneous (`q w`) and
+    /// read back divided by `w`: equal to `q` but for that product's and quotient's
+    /// rounding, 2 ulps of each coordinate (exact where `w = 1`).
+    fn assert_only_ends_moved(
+        before: &BSplineCurve,
+        piece: &Curve,
+        q0: Option<Point3>,
+        q1: Option<Point3>,
+    ) {
+        let CurveKind::BSpline(after) = piece.kind() else {
+            panic!("a B-spline piece: {:?}", piece.kind());
+        };
+        let (nb, na) = (before.nurb_ref().unwrap(), after.nurb_ref().unwrap());
+        assert_eq!(na.degree(), nb.degree(), "the degree");
+        assert_eq!(na.knots(), nb.knots(), "the knots");
+        let (pb, pa) = (control_polygon(before), control_polygon(after));
+        assert_eq!(pa.len(), pb.len(), "the control points' count");
+        let last = pb.len() - 1;
+        for (i, (&(b, wb), &(a, wa))) in pb.iter().zip(&pa).enumerate() {
+            assert_eq!(wa, wb, "control point {i}'s weight");
+            let want = match (i, q0, q1) {
+                (0, Some(q), _) => q,
+                (i, _, Some(q)) if i == last => q,
+                _ => b,
+            };
+            if want == b {
+                assert_eq!(a, b, "control point {i} unmoved");
+            } else {
+                for (x, y) in [(a.x, want.x), (a.y, want.y), (a.z, want.z)] {
+                    let ulps = 2.0 * f64::EPSILON * y.abs().max(f64::MIN_POSITIVE);
+                    assert!(
+                        (x - y).abs() <= ulps,
+                        "control point {i}: {a:?} on its meet {want:?}"
+                    );
+                }
+                if wa == 1.0 {
+                    assert_eq!(a, want, "control point {i}: exact at weight 1");
+                }
+            }
+        }
+    }
+
     /// A cubic S through (0, 0, 0) and (3, 0, 0) that crosses its chord at its middle:
     /// its ends and midpoint lie on the line, its quarter points `0.2887 h` off it.
     fn s_curve(h: f64) -> Curve {
@@ -2760,14 +2896,21 @@ mod tests {
             Point3::new(-2e-6, 3e-7, 0.0),
             Point3::new(10.0 + 4e-6, -1e-7, 0.0),
         );
-        let piece =
-            piece_ending_at(&k, &crease, (ivl.min(), Some(q0)), (ivl.max(), Some(q1))).unwrap();
+        let piece = piece_ending_at(
+            &k,
+            &crease,
+            (ivl.min(), Some(q0)),
+            (ivl.max(), Some(q1)),
+            TOL,
+        )
+        .unwrap();
         assert!(matches!(piece.kind(), CurveKind::Line(_)), "still a line");
         let (a, z) = ends(&k, &piece);
         assert!(a.distance(q0) <= 1e-15, "start {a:?} on its meet {q0:?}");
         assert!(z.distance(q1) <= 1e-14, "end {z:?} on its meet {q1:?}");
         // one meet only: the other end stays where it was
-        let piece = piece_ending_at(&k, &crease, (ivl.min(), None), (ivl.max(), Some(q1))).unwrap();
+        let piece =
+            piece_ending_at(&k, &crease, (ivl.min(), None), (ivl.max(), Some(q1)), TOL).unwrap();
         let (a, z) = ends(&k, &piece);
         assert_eq!(a, Point3::ZERO);
         assert!(z.distance(q1) <= 1e-14, "end {z:?} on its meet {q1:?}");
@@ -2795,8 +2938,12 @@ mod tests {
         let ivl = crease.natural_interval();
         let (a0, z0) = ends(&k, &crease);
         let q = z0 + Vec3::new(3e-6, -2e-6, 1e-6);
-        let piece = piece_ending_at(&k, &crease, (ivl.min(), None), (ivl.max(), Some(q))).unwrap();
+        let piece =
+            piece_ending_at(&k, &crease, (ivl.min(), None), (ivl.max(), Some(q)), TOL).unwrap();
         assert!(matches!(piece.kind(), CurveKind::BSpline(_)));
+        // certificate: the circle's own exact NURB, only its last control point moved
+        let before = clamped_spline(crease.b_spline_base().unwrap()).unwrap();
+        assert_only_ends_moved(&before, &piece, None, Some(q));
         let (a, z) = ends(&k, &piece);
         assert!(a.distance(a0) <= 1e-14, "start {a:?} stays at {a0:?}");
         assert!(z.distance(q) <= 1e-14, "end {z:?} on its meet {q:?}");
@@ -2850,11 +2997,12 @@ mod tests {
 
     /// #17673 review: a B-spline unclamped at both ends is a curve over its domain
     /// `[U_p, U_{m-p}]` (the kernel's evaluation gives the end control point at `U0` and
-    /// `Um`, off the end spans): it is clamped to the same curve over that domain, and then
-    /// ends on both its meets and runs on to them. Before, its end control points were
-    /// moved, leaving the curve's spans where they were, short of the meets.
+    /// `Um`, off the end spans, and fails inside the domain). The trim clamps it first
+    /// ([`crease_as_clamped`]) and ends its pieces on the clamped curve: they end on both
+    /// their meets and run on to them. The unclamped curve itself is refused, naming its
+    /// first met end, never ended away from its classified end.
     #[test]
-    fn an_unclamped_crease_piece_is_clamped_and_ends_on_its_meets() {
+    fn an_unclamped_crease_is_clamped_first_and_its_piece_ends_on_its_meets() {
         let k = Kernel::default();
         let crease = quadratic(
             &[
@@ -2871,7 +3019,7 @@ mod tests {
         };
         assert!(!spline_clamped(spline).unwrap());
         // the clamped curve is the curve over its domain [U_p, U_{m-p}] = [2, 4]
-        let clamped = Curve::from(clamped_spline(spline).unwrap());
+        let clamped = crease_as_clamped(&crease).unwrap().into_owned();
         let CurveKind::BSpline(c) = clamped.kind() else {
             panic!("a B-spline");
         };
@@ -2902,11 +3050,19 @@ mod tests {
                 "t {t}: {got:?} against {want:?}"
             );
         }
-        // meets near the domain's ends
+        // meets near the domain's ends, classified on the clamped curve
         let (d0, d1) = (Vec3::new(2e-6, 1e-6, 0.0), Vec3::new(-1e-6, 0.0, 3e-6));
         let (q0, q1) = (half(0) + d0, half(2) + d1);
-        let piece =
-            piece_ending_at(&k, &crease, (ivl.min(), Some(q0)), (ivl.max(), Some(q1))).unwrap();
+        let piece = piece_ending_at(
+            &k,
+            &clamped,
+            (civl.min(), Some(q0)),
+            (civl.max(), Some(q1)),
+            TOL,
+        )
+        .unwrap();
+        // certificate: the clamped curve, only its two end control points moved
+        assert_only_ends_moved(c, &piece, Some(q0), Some(q1));
         let (a, z) = ends(&k, &piece);
         assert!(a.distance(q0) <= 1e-14, "start {a:?} on its meet {q0:?}");
         assert!(z.distance(q1) <= 1e-14, "end {z:?} on its meet {q1:?}");
@@ -2926,14 +3082,34 @@ mod tests {
                 "t {t}: moved {moved}"
             );
         }
+        // the unclamped curve itself: refused at its start, never ended off its
+        // classified ends
+        let err = piece_ending_at(
+            &k,
+            &crease,
+            (ivl.min(), Some(q0)),
+            (ivl.max(), Some(q1)),
+            TOL,
+        )
+        .expect_err("an unclamped piece's ends are not its classified ends");
+        assert_eq!(
+            err.blend_failure(),
+            Some(&BlendFailure::CreasePieceEndUnbuildable {
+                kind: "unclamped B-spline",
+                at_end: false,
+                t: ivl.min(),
+            }),
+            "{err:?}"
+        );
     }
 
-    /// #17673 review: a B-spline clamped at its start (its end control point, movable) but
-    /// not at its end, a meet at each: both are applied, the start's in place and the end
-    /// after clamping, and the curve runs on to both. The start's meet is kept with the
-    /// end's or alone.
+    /// #17673 review (review comment 4587418682): a B-spline clamped at its start but not at
+    /// its end, its start's meet alone. Clamped first, the end the trim records is the
+    /// clamped curve's end, and the piece's un-met end is that end bit for bit, not the
+    /// original end control point (4, 0, 1), 1.118 away. Both meets together are kept
+    /// too; the unclamped curve itself is refused, naming its start.
     #[test]
-    fn a_meet_at_a_movable_end_is_kept_when_the_other_end_is_unclamped() {
+    fn a_meet_at_one_end_of_a_crease_unclamped_at_the_other_keeps_the_recorded_end() {
         let k = Kernel::default();
         let crease = quadratic(
             &[
@@ -2945,24 +3121,56 @@ mod tests {
             vec![0.0, 0.0, 0.0, 1.0, 2.0, 3.0, 4.0],
         );
         let ivl = crease.natural_interval();
-        // the domain is [U_2, U_4] = [0, 2]; the kernel cannot evaluate the unclamped
-        // crease inside it, so its end is the clamped curve's
-        let CurveKind::BSpline(spline) = crease.kind() else {
+        let original_end = crease.evaluate_point(&k, ivl.max()).unwrap();
+        assert_eq!(
+            original_end,
+            Point3::new(4.0, 0.0, 1.0),
+            "the end control point"
+        );
+        // clamped first: the curve over its domain [U_2, U_4] = [0, 2]
+        let clamped = crease_as_clamped(&crease).unwrap().into_owned();
+        let civl = clamped.natural_interval();
+        assert_eq!((civl.min(), civl.max()), (0.0, 2.0));
+        let CurveKind::BSpline(before) = clamped.kind() else {
             panic!("a B-spline");
         };
-        let clamped = Curve::from(clamped_spline(spline).unwrap());
-        let (a0, z0) = (
-            crease.evaluate_point(&k, 0.0).unwrap(),
-            clamped.evaluate_point(&k, 2.0).unwrap(),
-        );
+        // the ends the trim records: the clamped curve's, evaluated
+        let (a0, z0) = ends(&k, &clamped);
         // closed form: the uniform quadratic's end (P2+P3)/2
         assert!(z0.distance(Point3::new(3.5, 1.0, 1.0)) <= 1e-14, "{z0:?}");
+        assert!(
+            z0.distance(original_end) > 1.0,
+            "the clamp moved the natural end"
+        );
         let (q0, q1) = (
             a0 + Vec3::new(0.0, 2e-6, 1e-6),
             z0 + Vec3::new(1e-6, 1e-6, 0.0),
         );
-        let piece =
-            piece_ending_at(&k, &crease, (ivl.min(), Some(q0)), (ivl.max(), Some(q1))).unwrap();
+        // the start's meet alone: the piece's end is the recorded end, bit for bit
+        let piece = piece_ending_at(
+            &k,
+            &clamped,
+            (civl.min(), Some(q0)),
+            (civl.max(), None),
+            TOL,
+        )
+        .unwrap();
+        assert_only_ends_moved(before, &piece, Some(q0), None);
+        let (a, z) = ends(&k, &piece);
+        assert_eq!(a, q0, "the start's meet");
+        assert_eq!(z, z0, "the un-met end is the recorded (clamped) end");
+        assert_ne!(z, original_end);
+        assert!(end_gap(&k, &piece, true) <= 1e-8);
+        // both meets: both kept
+        let piece = piece_ending_at(
+            &k,
+            &clamped,
+            (civl.min(), Some(q0)),
+            (civl.max(), Some(q1)),
+            TOL,
+        )
+        .unwrap();
+        assert_only_ends_moved(before, &piece, Some(q0), Some(q1));
         let (a, z) = ends(&k, &piece);
         assert_eq!(a, q0, "the start's meet is kept");
         assert!(z.distance(q1) <= 1e-14, "end {z:?} on its meet {q1:?}");
@@ -2970,12 +3178,19 @@ mod tests {
             let gap = end_gap(&k, &piece, at_end);
             assert!(gap <= 1e-8, "end {at_end}: the curve {gap} off its end");
         }
-        // the start's meet alone: the end is the domain's
-        let piece = piece_ending_at(&k, &crease, (ivl.min(), Some(q0)), (ivl.max(), None)).unwrap();
-        let (a, z) = ends(&k, &piece);
-        assert_eq!(a, q0);
-        assert!(z.distance(z0) <= 1e-14, "end {z:?} at the domain's {z0:?}");
-        assert!(end_gap(&k, &piece, true) <= 1e-8);
+        // the unclamped curve itself: refused, naming its met start, never a piece whose
+        // un-met end is not the one recorded
+        let err = piece_ending_at(&k, &crease, (ivl.min(), Some(q0)), (ivl.max(), None), TOL)
+            .expect_err("an unclamped piece's end is not its classified end");
+        assert_eq!(
+            err.blend_failure(),
+            Some(&BlendFailure::CreasePieceEndUnbuildable {
+                kind: "unclamped B-spline",
+                at_end: false,
+                t: ivl.min(),
+            }),
+            "{err:?}"
+        );
     }
 
     /// #17673 review: a crease piece of a curve kind with no control polygon (an offset
@@ -2993,13 +3208,120 @@ mod tests {
         let ivl = crease.natural_interval();
         let (_, z0) = ends(&k, &crease);
         let q = z0 + Vec3::new(1e-6, 0.0, 0.0);
-        let err = piece_ending_at(&k, &crease, (ivl.min(), None), (ivl.max(), Some(q)))
+        let err = piece_ending_at(&k, &crease, (ivl.min(), None), (ivl.max(), Some(q)), TOL)
             .expect_err("no construction for its end");
-        assert!(
-            matches!(err, SolidError::Unsupported { operation: OP, .. }),
+        assert_eq!(
+            err.blend_failure(),
+            Some(&BlendFailure::CreasePieceEndUnbuildable {
+                kind: "offset",
+                at_end: true,
+                t: ivl.max(),
+            }),
             "{err:?}"
         );
-        let piece = piece_ending_at(&k, &crease, (ivl.min(), None), (ivl.max(), None)).unwrap();
+        assert_eq!(err.kind(), crate::error::ErrorKind::Unsupported);
+        // the first end with a meet is named: the start, where both have one
+        let q0 = ends(&k, &crease).0 + Vec3::new(0.0, 1e-6, 0.0);
+        let err = piece_ending_at(
+            &k,
+            &crease,
+            (ivl.min(), Some(q0)),
+            (ivl.max(), Some(q)),
+            TOL,
+        )
+        .expect_err("no construction for its ends");
+        assert_eq!(
+            err.blend_failure(),
+            Some(&BlendFailure::CreasePieceEndUnbuildable {
+                kind: "offset",
+                at_end: false,
+                t: ivl.min(),
+            }),
+            "{err:?}"
+        );
+        let piece =
+            piece_ending_at(&k, &crease, (ivl.min(), None), (ivl.max(), None), TOL).unwrap();
         assert!(matches!(piece.kind(), CurveKind::Offset(_)));
+    }
+
+    /// #17673 review: a trimmed circular arc's piece is the trimmed arc's own exact NURB
+    /// (the conic's base follows `crease_piece`'s trim), only its end control point moved:
+    /// its start is the circle's point at the trim's start, the unmoved base ends on the
+    /// circle's point at the trim's end, and the piece ends on its meet.
+    #[test]
+    fn a_trimmed_circle_crease_piece_is_its_trimmed_arc_with_its_end_on_its_meet() {
+        let k = Kernel::default();
+        let (r, centre) = (5.0, Point3::new(1.0, 2.0, 3.0));
+        let place = crate::geom::axis2_placement::Axis2Placement::new(centre, Vec3::X, Vec3::Y);
+        let domain = crate::geom::extent1d::Extent1d::from_min_max(0.0, 270.0);
+        let circle = crate::curve::ellipse::Ellipse::create_canonical_circle(
+            &k,
+            &place,
+            r,
+            Some(&domain),
+            None,
+        )
+        .unwrap();
+        let crease = Curve::from(circle);
+        // 30 and 200 degrees along the 270-degree arc, in its natural parameter
+        let ivl = crease.natural_interval();
+        let at = |deg: f64| ivl.min() + (ivl.max() - ivl.min()) * deg / 270.0;
+        let (t0, t1) = (at(30.0), at(200.0));
+        let (p0, p1) = (
+            crease.evaluate_point(&k, t0).unwrap(),
+            crease.evaluate_point(&k, t1).unwrap(),
+        );
+        // the trimmed arc's exact NURB runs from the circle's point at t0 to its point at t1
+        let trimmed = crease_piece(&k, &crease, t0, t1).unwrap();
+        assert!(matches!(trimmed.kind(), CurveKind::Ellipse(_)));
+        let base = clamped_spline(trimmed.b_spline_base().unwrap()).unwrap();
+        let base_curve = Curve::from(base.clone_exact());
+        let (b0, b1) = ends(&k, &base_curve);
+        assert!(b0.distance(p0) <= 1e-12, "base start {b0:?} at {p0:?}");
+        assert!(b1.distance(p1) <= 1e-12, "base end {b1:?} at {p1:?}");
+        // and it is on the circle throughout: the base is the trimmed arc, not the 270 one
+        let bivl = base_curve.natural_interval();
+        for i in 0..=100 {
+            let t = bivl.min() + (bivl.max() - bivl.min()) * f64::from(i) / 100.0;
+            let p = base_curve.evaluate_point(&k, t).unwrap();
+            let off = ((p - centre).length() - r).abs();
+            assert!(off <= 1e-12, "t {t}: {off} off the circle");
+        }
+        let q = p1 + Vec3::new(-2e-6, 1e-6, 3e-6);
+        let piece = piece_ending_at(&k, &crease, (t0, None), (t1, Some(q)), TOL).unwrap();
+        assert_only_ends_moved(&base, &piece, None, Some(q));
+        let (a, z) = ends(&k, &piece);
+        assert!(a.distance(p0) <= 1e-12, "start {a:?} at the trim's {p0:?}");
+        assert!(z.distance(q) <= 1e-14, "end {z:?} on its meet {q:?}");
+    }
+
+    /// #17673 review: a line piece whose two meets are within the trim tolerance of each
+    /// other is refused as degenerate, never built as a degenerate line.
+    #[test]
+    fn a_line_crease_piece_whose_meets_coincide_is_refused() {
+        let k = Kernel::default();
+        let mut line = Line::from_points(Point3::ZERO, Point3::new(10.0, 0.0, 0.0), 3);
+        line.make_nurb().unwrap();
+        let crease = Curve::from(line);
+        let ivl = crease.natural_interval();
+        let q = Point3::new(5.0, 0.0, 0.0);
+        let err = piece_ending_at(
+            &k,
+            &crease,
+            (ivl.min(), Some(q)),
+            (ivl.max(), Some(q + Vec3::new(TOL * 0.5, 0.0, 0.0))),
+            TOL,
+        )
+        .expect_err("no line between coinciding meets");
+        assert!(
+            matches!(
+                err,
+                SolidError::Degenerate {
+                    operation: OP,
+                    entity: None
+                }
+            ),
+            "{err:?}"
+        );
     }
 }
