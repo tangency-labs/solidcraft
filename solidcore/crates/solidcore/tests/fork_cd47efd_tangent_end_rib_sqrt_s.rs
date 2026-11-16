@@ -107,7 +107,6 @@ fn front_top(b: &Brep) -> EdgeId {
 /// Level 2 at every commit from 7102bc5 to 729f893.
 fn kernel() -> Kernel {
     let mut k = Kernel::default();
-    k.fixes.fillet_nx1_tangent_side_edge = true;
     k.fixes.fillet_trace_reaches_rails = true;
     k.fixes.fillet_chamfer_cone_on_arc = true;
     k

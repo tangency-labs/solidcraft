@@ -71,7 +71,6 @@
   "offset_extension_from_base",
   "offset_extension_as_itself",
   "fillet_cleanup_keeps_target_faces",
-  "fillet_nx1_tangent_side_edge",
   "fillet_mitre_concave_face_corners",
   "offset_open_edge_second_trim_point",
   "cone_create_canonical_preserves_inside_out_and_checks_height",
