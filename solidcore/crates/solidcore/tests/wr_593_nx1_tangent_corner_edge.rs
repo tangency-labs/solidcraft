@@ -119,10 +119,14 @@ fn residue_round_with_the_fix() {
 
 #[test]
 fn exact_round_builds() {
-    // main's volume, bit-identical with the flag on and off there; the closed form holds
-    // to the round's approximation, as for the residue round
+    // the volume measured here, bit-identical with the flag on and off before the flag
+    // retired; the closed form holds to the round's approximation, as for the residue round.
+    // Since the trim pieces integrate by Gauss-Kronrod (#14460): forced to accuracy 1e-10
+    // to 1e-12 Gauss-Kronrod gives it to 1 ulp and the earlier Runge-Kutta trim pieces
+    // forced to 1e-12 give the same bits; with Runge-Kutta at this 1e-6 it was
+    // 3581.9837276735275, 5.4e-10 low
     let v = fillet(0.0).unwrap();
-    let pinned = 3_581.983_727_673_527_5_f64;
+    let pinned = 3_581.983_729_589_946_5_f64;
     assert_eq!(v.to_bits(), pinned.to_bits(), "{v} vs {pinned}");
     let want = expected_volume();
     assert!((v - want).abs() < 1e-3 * want, "{v} vs {want}");
