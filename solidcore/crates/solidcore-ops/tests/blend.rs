@@ -2748,6 +2748,74 @@ fn a_round_on_a_revolved_torus_end_edge_survives_reload() {
     }
 }
 
+/// A closed section in the plane x = `x` about (0, 20): 12 cubic Bezier pieces through the
+/// points of the circle of radius `r` at every 30 degrees from `phase`. The end tangents
+/// are the circle's, a third of the piece's chord long, times `1 + skew` after every third
+/// joint from the first and `1 - skew` before it, and the reverse at the joint after: two
+/// pieces join with one tangent direction, at speeds `skew` apart.
+fn bezier_circle(x: f64, r: f64, phase: f64, skew: f64) -> Vec<Curve> {
+    let at = |i: u32| {
+        let t = phase + std::f64::consts::TAU * f64::from(i % 12) / 12.0;
+        let sign = match i % 3 {
+            1 => 1.0,
+            2 => -1.0,
+            _ => 0.0,
+        };
+        (
+            Vec3::new(x, r * t.sin(), 20.0 - r * t.cos()),
+            Vec3::new(0.0, t.cos(), t.sin()),
+            skew * sign,
+        )
+    };
+    (0..12)
+        .map(|i| {
+            let ((p0, t0, k0), (p3, t3, k3)) = (at(i), at(i + 1));
+            let third = p0.distance(p3) / 3.0;
+            let p1 = p0 + t0 * (third * (1.0 + k0));
+            let p2 = p3 - t3 * (third * (1.0 - k3));
+            Curve::Nurbs {
+                degree: 3,
+                points: [p0, p1, p2, p3].map(|p| [p.x, p.y, p.z, 1.0]).to_vec(),
+                knots: vec![0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0],
+            }
+        })
+        .collect()
+}
+
+/// A round on the end rim of a ruled loft whose one side face is G1 only to about 1e-10
+/// rad at its knot lines (tangency-labs/solidcraft#15858). The loft runs from a circle of
+/// radius 15 to one of radius 20 turned 0.01 rad, each 12 Bezier pieces that join with one
+/// tangent direction. The first circle's pieces join at equal speeds and the second's at
+/// speeds 1e-7 apart, and the two sections' tangents at a joint are 0.01 rad apart, so the
+/// ruled face's derivative along the section, `(1 - u) a0 T0 + u a1 T1` before a joint and
+/// `(1 - u) b0 T0 + u b1 T1` after it, turns the face's normal there. The round's stations
+/// on those lines were solved on the pieces after and before them, a jump apart, and the
+/// round did not close on itself (`NotSolid`; with the issue's own sections, where the jump
+/// is 4e-10 rad, a station's feet did not converge).
+///
+/// The round must build. What it removes is the cone's round: the section between the end
+/// plane and a wall 85.236 degrees from it (the wall leans atan(5 / 60)),
+/// `r^2 (cot(alpha / 2) - (pi - alpha) / 2)` = 1.0393 for r = 2, swept round at its
+/// centroid's radius, 19.46: 127.1.
+#[test]
+fn a_round_runs_over_knot_lines_where_a_loft_face_s_normal_turns() {
+    all_fixes();
+    let sections = [
+        bezier_circle(-30.0, 15.0, 0.0, 0.0),
+        bezier_circle(30.0, 20.0, 0.01, 1.0e-7),
+    ];
+    let b = solidcore_ops::sweep::loft(&sections, 1, true).unwrap();
+    let before = volume(&b);
+    let rim = edge_at(
+        &b,
+        [30.0, 20.0 * f64::sin(0.01), 20.0 - 20.0 * f64::cos(0.01)],
+    );
+    let made = blend(&b, Blend::Round, &[rim], &[2.0], &[], Corners::Filled).unwrap();
+    assert_eq!(made.dropped, vec![false]);
+    let removed = before - volume(&b);
+    assert!((removed - 127.1).abs() < 1.0, "removed {removed}");
+}
+
 /// The plate of [`shallow_corner_plate`] drafted `draft` degrees in (its walls meet the cap at
 /// z = 0, its outline, at 90 - `draft` degrees), with the record indices of the two edges of
 /// that cap at the kink.
