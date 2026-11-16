@@ -1259,14 +1259,15 @@ fn face_join_targets(s: &Session, p: &Value, operation: Operation, sketches: &[u
 /// The bodies a Join, Cut or Intersect that names none may change, less the hidden ones, when
 /// some of them are hidden: stored as the feature's `targets`, so a hidden body is left alone
 /// (#3961, #6901) and showing it again later doesn't change the model. None when every one is
-/// shown; empty when none is.
+/// shown; empty when none is. A shown surface body is left out: naming one as a target is
+/// refused ("a cut needs a solid"), while an operation that names none skips it (#18083).
 pub fn shown_scope(s: &Session) -> Option<Vec<String>> {
     let st = s.model.state();
     let scope = active_scope(s, &st);
     if scope.iter().all(|b| s.body_visible(&b.name)) {
         return None;
     }
-    Some(scope.into_iter().filter(|b| s.body_visible(&b.name)).map(|b| b.name.clone()).collect())
+    Some(scope.into_iter().filter(|b| s.body_visible(&b.name) && !b.is_surface()).map(|b| b.name.clone()).collect())
 }
 
 /// The bodies a feature of the active component works on when it names none: the component's

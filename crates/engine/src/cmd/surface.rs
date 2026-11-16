@@ -1987,6 +1987,21 @@ mod tests {
         }
     }
 
+    /// With a body hidden, the shown scope an automatic cut names leaves out a shown surface, so
+    /// the cut runs instead of being refused for a named surface (#18083).
+    #[test]
+    fn shown_scope_skips_surface_bodies() {
+        let mut s = Session::default();
+        run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [0, 0, 0], "body_name": "Block"}));
+        sheet(&mut s, "XY", "Sheet", [0.0, 0.0], [10.0, 10.0]);
+        run(&mut s, "solid.box", json!({"length": 5, "width": 5, "height": 5, "corner": [30, 0, 0], "operation": "new", "body_name": "Small"}));
+        run(&mut s, "browser.visibility", json!({"items": ["Small"], "visible": false}));
+        assert_eq!(crate::shown_scope(&s), Some(vec!["Block".to_string()]));
+        let shown = crate::shown_scope(&s).unwrap();
+        run(&mut s, "solid.cylinder", json!({"radius": 2, "height": 12, "base": [5, 5, -1], "operation": "cut", "targets": shown}));
+        assert!((volume(&s, "Block") - (1000.0 - 40.0 * std::f64::consts::PI)).abs() < 1e-6);
+    }
+
     /// Sheet-metal machining preserves separate surfaces before cutting any ordinary solids.
     #[test]
     fn automatic_solid_cuts_preserve_surfaces_beside_sheet_metal() {
