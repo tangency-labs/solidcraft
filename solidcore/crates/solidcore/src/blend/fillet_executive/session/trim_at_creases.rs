@@ -995,10 +995,7 @@ fn pieces_ending_at_meets(
         } else {
             // an end that cannot be moved onto its meet (a piece that is no B-spline, or
             // an end that is not its control point): the ends as classified, as before
-            let (start, end) = classified;
-            piece_ending_at(k, crease, start, end, tol)?.ok_or_else(|| {
-                SolidError::blend_failed(OP, "a crease piece with no meet to move onto")
-            })?
+            crease_piece(k, crease, ivl.min(), ivl.max())?
         };
         pieces.push(piece);
     }
@@ -1007,7 +1004,7 @@ fn pieces_ending_at_meets(
 
 /// `crease` trimmed to `start.0 .. end.0` with each end that has a meet moved onto it
 /// ([`move_end_to`]); `None` when an end cannot be moved (the piece is then not built,
-/// never left ending short of its meet). With no meets it is always built.
+/// never left ending short of its meet).
 fn piece_ending_at(
     k: &Kernel,
     crease: &Curve,
@@ -1015,16 +1012,7 @@ fn piece_ending_at(
     end: (f64, Option<Point3>),
     tol: f64,
 ) -> Result<Option<Curve>> {
-    let mut piece = crease.copy(k)?;
-    let trim_to = crate::geom::extent1d::Extent1d::from_min_max(start.0, end.0);
-    if trim_to != piece.natural_interval() {
-        let mut trim = trim_to;
-        piece.trim(
-            k,
-            &mut trim,
-            crate::nurbs::b_spline_curve_n_lib::TrimMode::Notify,
-        )?;
-    }
+    let mut piece = crease_piece(k, crease, start.0, end.0)?;
     if let Some(q) = start.1 {
         if !move_end_to(k, &mut piece, false, q, tol)? {
             return Ok(None);
@@ -1036,6 +1024,21 @@ fn piece_ending_at(
         }
     }
     Ok(Some(piece))
+}
+
+/// `crease` trimmed to `t0 .. t1`.
+fn crease_piece(k: &Kernel, crease: &Curve, t0: f64, t1: f64) -> Result<Curve> {
+    let mut piece = crease.copy(k)?;
+    let trim_to = crate::geom::extent1d::Extent1d::from_min_max(t0, t1);
+    if trim_to != piece.natural_interval() {
+        let mut trim = trim_to;
+        piece.trim(
+            k,
+            &mut trim,
+            crate::nurbs::b_spline_curve_n_lib::TrimMode::Notify,
+        )?;
+    }
+    Ok(piece)
 }
 
 /// A refusal with its fillet error and typed reason.
