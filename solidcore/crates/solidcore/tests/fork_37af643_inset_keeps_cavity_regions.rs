@@ -107,14 +107,12 @@ fn keeps_only_the_cavity() {
     assert!((v - 638.75).abs() <= 1e-9 * 638.75, "{v}");
 }
 
-/// With the SolidCraft set's offset fixes that touch this path as well (WR-345's crossing
-/// loops, WR-455's one-pass stitch), the same shell.
+/// With the SolidCraft set's offset fix that touches this path as well (WR-455's one-pass
+/// stitch; WR-345's crossing loops are always resolved now), the same shell.
 #[test]
 fn keeps_only_the_cavity_with_offset_fixes() {
     let mut fixes = UpstreamFixes::default();
-    fixes.offset_resolve_crossing_loops = true;
     fixes.offset_stitch_at_body_tolerance = true;
-    fixes.offset_extended_edges_mated = true;
     let (manifold, v) = shell(&fixes, 2.5);
     assert!(manifold);
     assert!((v - 638.75).abs() <= 1e-9 * 638.75, "{v}");

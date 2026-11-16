@@ -206,7 +206,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .at("SOLID", "MODIFY")
         .icon("presspull")
         .key("Q")
-        .params("face: [x,y,z] and distance: expr (positive adds material, negative cuts), or edges: [[x,y,z]…] and distance (a fillet); body?: the body the face or edges are on (for edges, as for solid.fillet)"),
+        .params("face: [x,y,z] and distance: expr (positive adds material, negative cuts), or edges: [[x,y,z]…] and distance (a fillet); body?: the body the face or edges are on (for edges, as for solid.fillet); face_body?: the body a flat face is on, used when body is omitted"),
     CommandSpec::new("solid.move", "Move/Copy", crate::checked!("solid.move", move_bodies))
         .at("SOLID", "MODIFY").icon("move").key("M").enabled(not_in_sketch)
         .contract(&MOVE_CONTRACT).output(output_schema_for::<MoveResult>)
@@ -2150,7 +2150,16 @@ fn press_pull(s: &mut Session, p: &Value) -> Result<Value> {
         _ => Expr::new(format!("-({distance})")),
     };
     let (dist, dir, op) = if d > 0.0 { (distance, "positive", "join") } else { (flipped, "negative", "cut") };
-    extrude(s, &json!({"face": face, "distance": dist, "direction": dir, "operation": op}))
+    let mut q = json!({"face": face, "distance": dist, "direction": dir, "operation": op});
+    // Match the frame mapper's precedence so the face point and body name stay together.
+    if let Some(body) = p.get("body").or_else(|| p.get("face_body")).filter(|body| body.is_string()) {
+        q["face_body"] = body.clone();
+        q["targets"] = json!([body]);
+    }
+    extrude(s, &q).map_err(|error| match error {
+        EngineError::BadParams { msg, .. } => bad(cmd, msg),
+        other => other,
+    })
 }
 
 fn fillet(s: &mut Session, p: &Value) -> Result<Value> {
