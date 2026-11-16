@@ -162,8 +162,9 @@ pub fn check_updates(app: &SolveApp) -> bool {
 
 // ---- user interface ---------------------------------------------------------------------------
 
-/// Room the badge's full label leaves for the document tabs; past it the badge says just "Managed".
-const TAB_ROOM: f32 = 300.0;
+/// Room the badge's full label leaves for the document tabs (about one tab and its +); with less,
+/// the badge says just "Managed".
+const TAB_ROOM: f32 = 140.0;
 
 /// The application bar's "Managed by {name}" badge at the right of `span`, while a policy is set:
 /// it opens Preferences › General. Its rect (None: not shown).
