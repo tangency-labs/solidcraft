@@ -17,6 +17,8 @@
 //! | [`Bearing`], [`bearing`] | none   |
 //! | [`touch_offset`]       | none     |
 //! | [`PlateFaces`], [`plate_faces`] | none |
+//! | [`Contact`], [`contact`] | none   |
+//! | [`Defect`], [`stretches`] | none  |
 
 use crate::error::{Result, SolidError};
 use crate::math::{Point3, Vec3};
@@ -209,6 +211,117 @@ pub fn plate_faces(
         Some(_) if tied => Err(NoPlateFaces::NotAPlate),
         Some(p) => Ok(p),
     })
+}
+
+/// How `T` meets a candidate plane `P` of `S`.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Contact {
+    /// A planar face of `T` facing `−n` lies within `tol` of `P` over an area of `S`'s face:
+    /// `δ` its signed level along `n` from `P` (`|δ| ≤ tol`). The strip is that face's part.
+    Touch {
+        /// The face's level along `n`, measured from `P`.
+        delta: f64,
+    },
+    /// No touch, but `T`'s material crosses `P` by more than `tol` over an area of `S`'s face.
+    /// The strip is `T`'s section there.
+    Overlap,
+    /// Neither, with the bodies within `tol` of each other: `T` meets `S` but not on a flat end.
+    EndNotFlat,
+    /// Neither, with the bodies further apart than `tol`: the distance between them.
+    NoContact {
+        /// Their exact distance.
+        distance: f64,
+    },
+}
+
+/// The contact of `T` with `P` (design 5.3), from what the caller read: whether `T`'s faces on
+/// `P` cover an area of `S`'s face (`on_has_area`), the touch level of such a face
+/// ([`touch_offset`]), whether `T`'s section by `P` covers an area of it (`across_has_area`),
+/// and, only when neither holds, the bodies' distance (`distance`, asked for then and only then).
+///
+/// # Errors
+///
+/// [`SolidError::InvalidInput`] for a non-finite or negative `tol` or distance, or a touch level
+/// outside `±tol`; and whatever `distance` returns.
+pub fn contact(
+    on_has_area: bool,
+    touch: Option<f64>,
+    across_has_area: bool,
+    tol: f64,
+    distance: impl FnOnce() -> Result<f64>,
+) -> Result<Contact> {
+    check_tol(tol)?;
+    if let Some(delta) = touch {
+        if delta.is_nan() || delta.abs() > tol {
+            return Err(invalid("a touch level lies outside the tolerance"));
+        }
+        if on_has_area {
+            return Ok(Contact::Touch { delta });
+        }
+    }
+    if across_has_area {
+        return Ok(Contact::Overlap);
+    }
+    let distance = distance()?;
+    if !(distance.is_finite() && distance >= 0.0) {
+        return Err(invalid(
+            "the bodies' distance is not finite and non-negative",
+        ));
+    }
+    Ok(if distance <= tol {
+        Contact::EndNotFlat
+    } else {
+        Contact::NoContact { distance }
+    })
+}
+
+/// One defect of `Band − Σ` (design 5.5): its extent along the strip (`u`) and its width across
+/// the strip (along `w`).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Defect {
+    /// Its least and greatest `u`.
+    pub along: (f64, f64),
+    /// Its extent along `w`.
+    pub across: f64,
+}
+
+/// The stretches of a strip (design 5.5, v2's sliver rule): `band`, `Σ`'s extent along `u`, less
+/// the `u`-extent of every defect wider across the strip than `tol`; the closed intervals left
+/// that are longer than `tol`, in increasing `u`.
+///
+/// # Errors
+///
+/// [`SolidError::InvalidInput`] for a non-finite or negative `tol`, or a band or defect whose
+/// numbers are not finite and ordered.
+pub fn stretches(band: (f64, f64), defects: &[Defect], tol: f64) -> Result<Vec<(f64, f64)>> {
+    check_tol(tol)?;
+    let ordered = |(a, b): (f64, f64)| a.is_finite() && b.is_finite() && a <= b;
+    if !ordered(band) {
+        return Err(invalid("the strip's extent is not finite and ordered"));
+    }
+    let mut cuts = Vec::with_capacity(defects.len());
+    for d in defects {
+        if !(ordered(d.along) && d.across.is_finite() && d.across >= 0.0) {
+            return Err(invalid("a defect's extent is not finite and ordered"));
+        }
+        if d.across > tol {
+            cuts.push(d.along);
+        }
+    }
+    cuts.sort_by(|a, b| a.0.total_cmp(&b.0));
+    let mut out = Vec::new();
+    let mut from = band.0;
+    for (a, b) in cuts {
+        let to = a.min(band.1);
+        if to - from > tol {
+            out.push((from, to));
+        }
+        from = from.max(b);
+    }
+    if band.1 - from > tol {
+        out.push((from, band.1));
+    }
+    Ok(out)
 }
 
 /// Of two opposite unit normals, whether `v` is the one taken as `m`: the first of its components

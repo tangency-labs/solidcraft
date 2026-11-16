@@ -196,3 +196,89 @@ fn plate_faces_refuses_bad_input() {
     let nan = |_: Vec3| -> Result<(f64, f64)> { Ok((f64::NAN, 1.0)) };
     assert!(plate_faces(&wall(), Vec3::Z, TOL, nan).is_err());
 }
+
+#[test]
+fn contact_is_touch_then_overlap_then_the_distance() {
+    let never = || -> Result<f64> { panic!("the distance is asked for only without contact") };
+    // Wall on Bottom, its foot 2e-4 under P: a touch at that level.
+    assert_eq!(
+        contact(true, Some(-2.0e-4), true, TOL, never).unwrap(),
+        Contact::Touch { delta: -2.0e-4 }
+    );
+    // A touch level whose face covers none of S's face does not count; the crossing does.
+    assert_eq!(
+        contact(false, Some(0.0), true, TOL, never).unwrap(),
+        Contact::Overlap
+    );
+    // Neither: within tol is an end that is not flat, beyond it no contact with the distance.
+    assert_eq!(
+        contact(false, None, false, TOL, || Ok(5.0e-4)).unwrap(),
+        Contact::EndNotFlat
+    );
+    assert_eq!(
+        contact(false, None, false, TOL, || Ok(4.0)).unwrap(),
+        Contact::NoContact { distance: 4.0 }
+    );
+    // Refusals: a touch level outside tol, a NaN distance, a negative tol.
+    assert!(contact(true, Some(2.0e-3), false, TOL, never).is_err());
+    assert!(contact(false, None, false, TOL, || Ok(f64::NAN)).is_err());
+    assert!(contact(true, Some(0.0), false, -1.0, never).is_err());
+}
+
+#[test]
+fn a_hole_across_the_strip_splits_it_and_a_sliver_does_not() {
+    // Wall's strip runs u in [20, 140]; a 20 mm hole in Bottom across it at u in [70, 90] (wider
+    // than the strip, so 6 across) leaves [20, 70] and [90, 140].
+    let hole = Defect {
+        along: (70.0, 90.0),
+        across: 6.0,
+    };
+    assert_eq!(
+        stretches((20.0, 140.0), &[hole], TOL).unwrap(),
+        vec![(20.0, 70.0), (90.0, 140.0)]
+    );
+    // A STEP end face 5e-4 off A's plane leaves a sliver 5e-4 across the whole strip: ignored.
+    let sliver = Defect {
+        along: (20.0, 140.0),
+        across: 5.0e-4,
+    };
+    assert_eq!(
+        stretches((20.0, 140.0), &[sliver, hole], TOL).unwrap(),
+        vec![(20.0, 70.0), (90.0, 140.0)]
+    );
+    // Overlapping defects, given out of order, and one reaching past the end; a piece left no
+    // longer than tol (the 5e-4 at the start) is dropped.
+    let defects = [
+        Defect {
+            along: (100.0, 150.0),
+            across: 6.0,
+        },
+        Defect {
+            along: (20.0005, 40.0),
+            across: 6.0,
+        },
+        Defect {
+            along: (30.0, 50.0),
+            across: 1.0,
+        },
+    ];
+    assert_eq!(
+        stretches((20.0, 140.0), &defects, TOL).unwrap(),
+        vec![(50.0, 100.0)]
+    );
+    // No defects: one stretch; refusals for disordered or non-finite numbers.
+    assert_eq!(
+        stretches((20.0, 140.0), &[], TOL).unwrap(),
+        vec![(20.0, 140.0)]
+    );
+    assert!(stretches((140.0, 20.0), &[], TOL).is_err());
+    assert!(stretches(
+        (20.0, 140.0),
+        &[Defect {
+            along: (1.0, f64::NAN),
+            across: 1.0
+        }],
+        TOL
+    )
+    .is_err());
+}
