@@ -184,8 +184,5 @@ fn solidcraft_profile_pipe_gn_round_completes() {
 /// `keep_operand_uv_trims`, always on since that flag was retired).
 #[test]
 fn reduced_profile_pipe_gn_round_completes() {
-    check_round(&[
-        "offset_extension_from_base",
-        "offset_extension_as_itself",
-    ]);
+    check_round(&["offset_extension_from_base", "offset_extension_as_itself"]);
 }

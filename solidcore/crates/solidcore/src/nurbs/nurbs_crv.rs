@@ -36,6 +36,11 @@
 //! | [`crv_hull_points`]                | none (not upstream)                         |
 //!
 //! Deviations:
+//! - [`crv_split`] and [`crv_trim`] insert knots with [`CPoint::affine2`]: a coordinate
+//!   the two combined control points share is kept exactly (upstream's rounded
+//!   `alf*x + (1 - alf)*x` can land an ulp off it), so a piece of a curve along an
+//!   iso-line stays on that iso-line (WR-361: a UV trim on a seam split at an edge's
+//!   new vertex ended an ulp past its face's domain).
 //! - [`crv_span_boxes`] and its helpers are not upstream: the boxes of the control
 //!   points of every knot span, a certified cover of the curve used to prune coincidence
 //!   queries; [`crv_hull_points`] gives the control points themselves, whose convex hull
@@ -586,8 +591,7 @@ pub fn crv_split(cur: &Curve, u: f64) -> Result<(Curve, Curve)> {
             for j in 0..=p - i - mlt {
                 let alf =
                     (u - get(uk, k + j, OP)?) / (get(uk, spn + j + 1, OP)? - get(uk, k + j, OP)?);
-                let oma = 1.0 - alf;
-                let v = CPoint::combine2(alf, get(&sw, j + 1, OP)?, oma, get(&sw, j, OP)?);
+                let v = CPoint::affine2(alf, get(&sw, j + 1, OP)?, get(&sw, j, OP)?);
                 set(&mut sw, j, v, OP)?;
             }
             set(lw, k, get(&sw, 0, OP)?, OP)?;
@@ -671,8 +675,7 @@ pub fn crv_trim(cur: &Curve, ul: f64, ur: f64) -> Result<Curve> {
         for j in 0..=p - i - mll {
             let left = get(up, ll + i + j, OP)?;
             let alf = (ul - left) / (get(up, spl + j + 1, OP)? - left);
-            let oma = 1.0 - alf;
-            let v = CPoint::combine2(alf, get(qw, j + 1, OP)?, oma, get(qw, j, OP)?);
+            let v = CPoint::affine2(alf, get(qw, j + 1, OP)?, get(qw, j, OP)?);
             set(qw, j, v, OP)?;
         }
     }
@@ -689,8 +692,7 @@ pub fn crv_trim(cur: &Curve, ul: f64, ur: f64) -> Result<Curve> {
                 left = ul;
             }
             let alf = (ur - left) / (get(up, spr + j + 1, OP)? - left);
-            let oma = 1.0 - alf;
-            let v = CPoint::combine2(alf, get(qw, k, OP)?, oma, get(qw, k - 1, OP)?);
+            let v = CPoint::affine2(alf, get(qw, k, OP)?, get(qw, k - 1, OP)?);
             set(qw, k, v, OP)?;
             j -= 1;
         }
@@ -2580,6 +2582,25 @@ mod tests {
             crv_trim(&c, 0.5, 0.5),
             Err(ref e) if matches!(e.nurbs_failure(), Some(NurbsFailure::Input))
         ));
+    }
+
+    /// WR-361: a piece of a curve along an iso-line stays on it. `issue_2479`'s seam trim
+    /// (u = 6 pi, v 0 to 22) cut at v = 1 got u an ulp past 6 pi from the rounded
+    /// `alf*u + (1 - alf)*u`.
+    #[test]
+    fn split_and_trim_keep_a_shared_coordinate() {
+        let u = 18.849_555_921_538_76;
+        let pw = vec![
+            CPoint::new(u, 0.0, NOZ, NOW),
+            CPoint::new(u, 22.0, NOZ, NOW),
+        ];
+        let c = Curve::new(pw, 1, vec![0.0, 0.0, 22.0, 22.0]).unwrap();
+        let t = crv_trim(&c, 1.0, 21.0).unwrap();
+        let (l, r) = crv_split(&c, 1.0).unwrap();
+        for p in t.cpts().iter().chain(l.cpts()).chain(r.cpts()) {
+            assert_eq!(p.x, u);
+        }
+        assert_eq!(t.cpts()[0].y, 1.0);
     }
 
     #[test]

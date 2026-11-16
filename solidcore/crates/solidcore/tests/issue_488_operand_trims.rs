@@ -66,4 +66,3 @@ fn issue_488_operand_face_keeps_its_exact_trims() {
         "the void's side faces carry the cylinder's trims"
     );
 }
-

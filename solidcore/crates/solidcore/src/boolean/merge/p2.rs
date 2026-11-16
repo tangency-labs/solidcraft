@@ -884,11 +884,17 @@ pub fn make_faceuse_attempt_with(
     // NULL; module docs)
     let face_record = other.face(face_to_make)?;
     let uv_domain = face_record.uv_domain;
-    let new_surface = face_record
+    let other_surface = face_record
         .surface
         .as_ref()
-        .ok_or(dangling(OP_FACEUSE, "face without surface"))?
-        .copy_and_add_analytics(ctx.kernel())?;
+        .ok_or(dangling(OP_FACEUSE, "face without surface"))?;
+    let new_surface = other_surface.copy_and_add_analytics(ctx.kernel())?;
+    // The copy is in the other surface's parameterisation where it is of the same kind:
+    // `CopyAndAddAnalytics` returns every kind but the B-spline, and a B-spline it does
+    // not replace by a recognised analytic (which has its own parameterisation), as a
+    // plain copy
+    let keeps_parameterization =
+        std::mem::discriminant(other_surface.kind()) == std::mem::discriminant(new_surface.kind());
 
     // If we have the case of a faceuse bordering an infinite region in the other
     // brep being merged into the infinite region in this brep, temporarily set Brep's
@@ -972,8 +978,11 @@ pub fn make_faceuse_attempt_with(
     relations.relate_faces(brep, new_face, other, face_to_make)?;
 
     // Not upstream (tangency-labs/solidcore#488, WR-361): MakeFace does not take the
-    // other face's UV trims over; carry the exact ones across
-    copy_uv_trim_curves_of_other_face(ctx.kernel(), brep, other, faceuse, new_face, relations)?;
+    // other face's UV trims over; carry the exact ones across where the new surface
+    // keeps the other's parameterisation
+    if keeps_parameterization {
+        copy_uv_trim_curves_of_other_face(ctx.kernel(), brep, other, faceuse, new_face, relations)?;
+    }
     let (source, dest) = (
         (copy.face_source_key)(face_to_make),
         (copy.face_destination_key)(new_face),
@@ -999,9 +1008,11 @@ pub fn make_faceuse_attempt_with(
 /// the new edge is the primary mate of the other edge, runs on a copy of its curve
 /// (the same points and first derivatives at its interval's ends and middle: a closed
 /// curve run the other way round has the same points there, its derivatives reversed)
-/// over the same interval, and the
-/// new face lies on the copy `MakeFaceuse` made of the other face's surface (always,
-/// here). The new face's face use of the other face use's orientation lists its edge
+/// over the same interval, has at least the other edge's tolerance, and the
+/// new face lies on the copy `MakeFaceuse` made of the other face's surface. The caller
+/// calls it only when that copy keeps the other surface's parameterisation (not for a
+/// B-spline recognised as an analytic in its own parameterisation). The new face's
+/// face use of the other face use's orientation lists its edge
 /// uses in the other's order (as `MakeFace` assigns `cpOptUVCurves`). Elsewhere the
 /// new edge use keeps what `MakeFace` gave it.
 ///
@@ -1052,6 +1063,12 @@ fn copy_uv_trim_curves_of_other_face(
             continue;
         }
         let (other_record, new_record) = (other.edge(other_edge)?, brep.edge(new_edge)?);
+        // A trim lies on its edge only within that edge's tolerance (the other operand's
+        // edges may have grown theirs to cover trims that point off them, as WR-450's
+        // split faces do), so it stays within tolerance only on an edge as tolerant.
+        if new_record.tolerance < other_record.tolerance {
+            continue;
+        }
         let interval = other_record.interval;
         let new_interval = new_record.interval;
         if new_interval.min() != interval.min() || new_interval.max() != interval.max() {
