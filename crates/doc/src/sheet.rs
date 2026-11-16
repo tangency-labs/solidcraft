@@ -6912,8 +6912,8 @@ pub fn contour_flange(body: &str, rule: &str, rv: &RuleValues, plane: &Plane, pt
 /// normal. A line is a flat panel; an arc is a bend of its own radius. The arc is the profile
 /// surface: when the bend turns toward the material the sheet is outside that surface, so the
 /// bend's inner radius is the arc's less the thickness; when it turns away the arc is the inner
-/// surface and its radius is the bend's. A line-line corner is a sharp corner and gets a bend of
-/// the rule's radius, as a chain of lines always did.
+/// surface and its radius is the bend's. A sharp corner gets a bend of the rule's radius,
+/// tangent to the curves on either side.
 pub fn contour_flange_path(body: &str, rule: &str, rv: &RuleValues, plane: &Plane, segs: &[Seg2], width: f64, flip: bool) -> Result<SheetBody> {
     if segs.is_empty() {
         return Err(DocError::Invalid("a contour flange needs an open profile".into()));
@@ -6938,9 +6938,10 @@ pub fn contour_flange_path(body: &str, rule: &str, rv: &RuleValues, plane: &Plan
     let ysign = if frame.y.dot(plane.normal()) >= 0.0 { 1.0 } else { -1.0 };
     let (y0, y1) = if ysign > 0.0 { (0.0, width) } else { (-width, 0.0) };
     let setback = |ang: f64, up: bool| if up { (r + t) * (ang / 2.0).tan() } else { r * (ang / 2.0).tan() };
-    // The junction after each segment: a sharp line-line corner (its unsigned turn and whether
-    // it bends toward the material), or none where a line meets an arc tangentially.
+    // The junction after each segment: a sharp corner (its unsigned turn and whether it bends
+    // toward the material), or none at a tangent join. Arc corners trim both adjoining curves.
     let mut sharp: Vec<Option<(f64, bool)>> = Vec::with_capacity(segs.len().saturating_sub(1));
+    let mut trims = vec![(0.0, 1.0); segs.len()];
     for i in 0..segs.len().saturating_sub(1) {
         let (Some(a), Some(b)) = (segs.get(i), segs.get(i + 1)) else { continue };
         if a.end().dist(b.start()) > 1e-5 {
@@ -6959,33 +6960,92 @@ pub fn contour_flange_path(body: &str, rule: &str, rv: &RuleValues, plane: &Plan
             let (Some(ta), Some(tb)) = (a.end_tangent().normalized(), b.start_tangent().normalized()) else {
                 return Err(DocError::Invalid("zero-length curve in the contour".into()));
             };
-            if ta.dot(tb) < 1.0 - 1e-6 {
-                return Err(DocError::Invalid(
-                    "the contour arcs must be tangent to the curves beside them; a sharp corner beside an arc is not a bend of that arc's radius"
-                        .into(),
-                ));
+            if ta.dot(tb) >= 1.0 - 1e-6 {
+                sharp.push(None);
+                continue;
             }
-            sharp.push(None);
+            let up = ta.cross(tb) * side < 0.0;
+            let turn = if up { -side } else { side };
+            let radius = if up { r + t } else { r };
+            let mut angle = ta.dot(tb).clamp(-1.0, 1.0).acos();
+            if radius > 0.0 {
+                use solidcraft_sketch::{Shape, intersections};
+                // The bend centre lies on both curves offset toward the inside of the turn.
+                let offset = |s: &Seg2| match *s {
+                    Seg2::Line { a, b } => (b - a).normalized().map(|d| {
+                        let shift = d.perp() * (turn * radius);
+                        Shape::Line { a: a + shift, b: b + shift }
+                    }),
+                    Seg2::Arc { center, radius: rr, sweep, .. } => {
+                        let rr = rr - sweep.signum() * turn * radius;
+                        (rr > 0.0).then_some(Shape::Round { c: center, r: rr, start: 0.0, sweep: std::f64::consts::TAU })
+                    }
+                    _ => None,
+                };
+                let candidates = offset(a).zip(offset(b)).map(|(a, b)| intersections(&a, &b)).unwrap_or_default();
+                let mut best: Option<(f64, f64, f64, f64)> = None;
+                let tangent = |s: &Seg2, u| s.derivatives(u, 1).and_then(|d| d.first().copied());
+                for center in candidates {
+                    let (u, v) = (a.closest_param(center), b.closest_param(center));
+                    if !(u > 0.0 && u < 1.0 && v > 0.0 && v < 1.0) {
+                        continue;
+                    }
+                    let (pa, pb) = (a.point_at(u), b.point_at(v));
+                    if (pa.dist(center) - radius).abs() > 1e-6 || (pb.dist(center) - radius).abs() > 1e-6 {
+                        continue;
+                    }
+                    let (Some(da), Some(db)) = (tangent(a, u), tangent(b, v)) else { continue };
+                    let bend = da.cross(db).atan2(da.dot(db));
+                    if bend * turn <= 0.0 {
+                        continue;
+                    }
+                    let score = pa.dist(a.end()) + pb.dist(b.start());
+                    if best.is_none_or(|old| score < old.0) {
+                        best = Some((score, u, v, bend.abs()));
+                    }
+                }
+                let (_, u, v, bend) = best.ok_or_else(|| DocError::Invalid("the rule's bend radius does not fit the contour corner".into()))?;
+                if let Some(trim) = trims.get_mut(i) {
+                    trim.1 = u;
+                }
+                if let Some(trim) = trims.get_mut(i + 1) {
+                    trim.0 = v;
+                }
+                angle = bend;
+            }
+            sharp.push(Some((angle, up)));
         }
     }
     // Panels and bends in path order: every line is a panel, every arc a bend, every sharp
-    // line-line corner a bend of the rule's radius. A panel loses the tangent setback at each
-    // sharp corner it ends on.
+    // corner a bend of the rule's radius. A panel loses the tangent setback at each sharp
+    // line-line corner; arc corners already have their exact trim parameters.
     enum Piece {
         Panel { len: f64 },
         Bend { angle: f64, radius: f64 },
     }
     let mut pieces: Vec<Piece> = Vec::with_capacity(segs.len().saturating_mul(2));
     for (i, s) in segs.iter().enumerate() {
+        let (lo, hi) = trims.get(i).copied().unwrap_or((0.0, 1.0));
+        if lo >= hi {
+            return Err(DocError::Invalid("a contour curve is shorter than its bends".into()));
+        }
         match *s {
             Seg2::Line { a, b } => {
                 let l = a.dist(b);
                 if !(l.is_finite() && l > 1e-12) {
                     return Err(DocError::Invalid("zero-length line in the contour".into()));
                 }
-                let before = if i == 0 { 0.0 } else { sharp.get(i - 1).copied().flatten().map(|(ang, up)| setback(ang, up)).unwrap_or(0.0) };
-                let after = sharp.get(i).copied().flatten().map(|(ang, up)| setback(ang, up)).unwrap_or(0.0);
-                let len = l - before - after;
+                let before = if i > 0 && matches!(segs.get(i - 1), Some(Seg2::Line { .. })) {
+                    sharp.get(i - 1).copied().flatten().map(|(ang, up)| setback(ang, up)).unwrap_or(0.0)
+                } else {
+                    0.0
+                };
+                let after = if matches!(segs.get(i + 1), Some(Seg2::Line { .. })) {
+                    sharp.get(i).copied().flatten().map(|(ang, up)| setback(ang, up)).unwrap_or(0.0)
+                } else {
+                    0.0
+                };
+                let len = l * (hi - lo) - before - after;
                 if !len.is_finite() || len < -1e-9 {
                     return Err(DocError::Invalid("a contour line is shorter than its bends".into()));
                 }
@@ -6998,7 +7058,7 @@ pub fn contour_flange_path(body: &str, rule: &str, rv: &RuleValues, plane: &Plan
                 if !(sweep.is_finite() && sweep.abs() > 1e-9 && sweep.abs() < std::f64::consts::TAU - 1e-9) {
                     return Err(DocError::Invalid("a contour arc must be shorter than a full turn".into()));
                 }
-                let angle = -sweep * side;
+                let angle = -sweep * (hi - lo) * side;
                 let up = angle >= 0.0;
                 let inner = if up { radius - t } else { radius };
                 if !(inner.is_finite() && inner > 1e-9) {
@@ -7396,6 +7456,38 @@ mod tests {
         let m = kernel::measure(&b).unwrap();
         assert!((m.bbox.max.z - 32.5).abs() < 1e-6 && (m.bbox.max.y - 50.0).abs() < 1e-6, "{:?}", m.bbox);
         assert!((s.flat_size().unwrap().0 - 96.309734).abs() < 1e-5, "{:?}", s.flat_size());
+    }
+
+    #[test]
+    fn contour_flange_rounds_two_arcs_tangentially() {
+        use std::f64::consts::FRAC_PI_2;
+
+        let arcs = [
+            Seg2::Arc { center: Vec2::ZERO, radius: 10.0, start: -FRAC_PI_2, sweep: FRAC_PI_2 },
+            Seg2::Arc { center: Vec2::new(10.0, 10.0), radius: 10.0, start: -FRAC_PI_2, sweep: FRAC_PI_2 },
+        ];
+        for flip in [false, true] {
+            for backwards in [false, true] {
+                let path: Vec<_> = if backwards { arcs.iter().rev().map(Seg2::reversed).collect() } else { arcs.to_vec() };
+                let sheet =
+                    contour_flange_path("Body1", "Steel (mm)", &steel(), &Plane::named("XY").unwrap(), &path, 20.0, flip != backwards).unwrap();
+                let profile_radius = if flip { 2.5 } else { 5.0 };
+                // The two offset circles have centres (0,0), (10,10) and radius 10 + R.
+                // Their near intersection is (5 + q, 5 - q), q² = (10 + R)²/2 - 25.
+                let q = (((10.0f64 + profile_radius).powi(2) / 2.0) - 25.0).sqrt();
+                let trim = (q - 5.0).atan2(q + 5.0);
+                let arc = FRAC_PI_2 - trim;
+                let bend = FRAC_PI_2 - 2.0 * trim;
+                let inner = if flip { 7.5 } else { 10.0 };
+                let length = 2.0 * arc * (inner + 1.1) + bend * 3.6;
+                assert_eq!(sheet.flanges.len(), 3);
+                assert!((sheet.flanges[0].angle.abs() - arc).abs() < 1e-9);
+                assert!((sheet.flanges[1].angle.abs() - bend).abs() < 1e-9);
+                assert_eq!(sheet.flanges[1].radius, 2.5);
+                assert!((sheet.flanges[2].angle.abs() - arc).abs() < 1e-9);
+                assert!((sheet.flat_size().unwrap().0 - length).abs() < 1e-9);
+            }
+        }
     }
 
     #[test]
