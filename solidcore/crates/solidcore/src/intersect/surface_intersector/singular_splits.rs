@@ -258,13 +258,24 @@ pub(crate) fn split_curves_at_singular_points(
         if splits.is_empty() {
             continue;
         }
-        let (Some(parent_3), Some(parent_uv1), Some(parent_uv2)) = (
-            curves_3d.get(ii).cloned(),
-            uv1_curves.get(ii).cloned(),
-            uv2_curves.get(ii).cloned(),
+        // the parents stay as they are, for the pieces' deviations and to be put back; the
+        // splits work on exact copies (`clone_for_evaluation`: no copy-constructor knot
+        // fix-up, so the copies are the parents bit for bit)
+        let (Some(c3), Some(uv1), Some(uv2)) = (
+            curves_3d.get_mut(ii),
+            uv1_curves.get_mut(ii),
+            uv2_curves.get_mut(ii),
         ) else {
             continue;
         };
+        let (work_3, work_uv1, work_uv2) = (
+            c3.clone_for_evaluation()?,
+            uv1.clone_for_evaluation()?,
+            uv2.clone_for_evaluation()?,
+        );
+        let parent_3 = core::mem::replace(c3, work_3);
+        let parent_uv1 = core::mem::replace(uv1, work_uv1);
+        let parent_uv2 = core::mem::replace(uv2, work_uv2);
         let mut tails = Vec::new();
         for &split in splits.iter().rev() {
             let (Some(c3), Some(uv1), Some(uv2)) = (
