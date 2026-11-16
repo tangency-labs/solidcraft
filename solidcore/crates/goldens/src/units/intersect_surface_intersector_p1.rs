@@ -1865,15 +1865,12 @@ mod wr51_tests {
                 }
                 rec.extend_from_slice(&o);
                 if let Some((real, pinned)) = expect {
-                    match real {
-                        Some(f) => {
-                            assert_eq!(o, vec![0.0, b(f)], "{}: not the definition", case.name);
-                            answers += 1;
-                        }
-                        None => {
-                            assert_eq!(o.len(), 1, "{}: {o:?}", case.name);
-                            assert_ne!(o[0], 0.0, "{}", case.name);
-                        }
+                    if let Some(f) = real {
+                        assert_eq!(o, vec![0.0, b(f)], "{}: not the definition", case.name);
+                        answers += 1;
+                    } else {
+                        assert_eq!(o.len(), 1, "{}: {o:?}", case.name);
+                        assert_ne!(o[0], 0.0, "{}", case.name);
                     }
                     if real != pinned {
                         flips += 1;
