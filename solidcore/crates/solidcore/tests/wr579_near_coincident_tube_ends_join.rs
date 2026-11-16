@@ -35,6 +35,8 @@
     clippy::indexing_slicing
 )] // test helpers
 
+#[path = "support/volume_leak.rs"]
+mod volume_leak;
 use solidcore::boolean::api_brep::{boolean, boolean_union};
 use solidcore::geom::a_object::BooleanOperation;
 use solidcore::geom::attribute::{AttributeStore, ObjectKey};
@@ -540,7 +542,9 @@ fn wr741_e3_cone_minus_the_notched_tool() {
     assert!(is_manifold_solid(&r).unwrap());
     assert_eq!(r.face_list().len(), 8);
     let v = fine_volume(&k, &mut r);
-    assert!((v - 100_808.551_793).abs() < 1e-5, "{v}");
+    // 100808.551793 until `brep_volume` closed tolerant edges' gaps (#16735)
+    assert!((v - 100_808.552_462_565).abs() < 1e-5, "{v}");
+    volume_leak::assert_moved_by_the_old_leak(&k, &mut r, 100_808.551_793, v, 1e-9);
     checks_clean(&mut k, &mut r);
 }
 

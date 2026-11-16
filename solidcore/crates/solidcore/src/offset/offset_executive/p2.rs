@@ -1158,25 +1158,33 @@ impl OffsetExecutive {
             // WR-455 (#855; tangency-labs/smlib@601d804): [`stitch_merged_offset`].
             let to_be_solid = self.create_offset_solid() || brep_is_manifold_solid(original)?;
             stitch_merged_offset(kernel, &mut result, to_be_solid)?;
-            // Opt-in (WR-667; tangency-labs/smlib@37af643): an inset keeps the regions
-            // that are cavity, not every finite region (upstream's TODO here: "we will
-            // need to select regions to keep"). Where the body is no thicker than the
-            // wall, the offsets of a floor's two faces cross and the merge closes the
-            // region between them, touching the cavity's pieces along edges; kept, the
-            // cavity was no manifold solid and the shell failed (1001). (SER.)
+            // WR-667 (tangency-labs/smlib@37af643): an inset keeps the regions that are
+            // cavity, not every finite region (upstream's TODO here: "we will need to
+            // select regions to keep"). Where the body is no thicker than the wall, the
+            // offsets of a floor's two faces cross and the merge closes the region
+            // between them, touching the cavity's pieces along edges; kept, the cavity
+            // was no manifold solid and the shell failed (1001). (SER.)
+            //
+            // Only a choice between two or more finite regions can select anything: with
+            // one, `make_manifold` keeps it whether it is cavity or not (a lone cavity
+            // region is every region; a lone other region leaves no cavity to keep), so
+            // the body's point solves are not run for it, nor the live classification
+            // whose trims, caches and tolerance growth they would leave on `result`.
             let mut cavities = Vec::new();
             let mut select = false;
-            if kernel.fixes.offset_keep_cavity_regions
-                && self.inset()
-                && self.operation() == OffsetOperation::SolidOffset
-            {
-                let infinite = result.infinite_region();
-                let regions = bp1::regions(&result, None)?;
+            let finite: Vec<RegionId> =
+                if self.inset() && self.operation() == OffsetOperation::SolidOffset {
+                    let infinite = result.infinite_region();
+                    bp1::regions(&result, None)?
+                        .into_iter()
+                        .filter(|&region| Some(region) != infinite)
+                        .collect()
+                } else {
+                    Vec::new()
+                };
+            if finite.len() > 1 {
                 let mut body_cache = None;
-                for region in regions {
-                    if Some(region) == infinite {
-                        continue;
-                    }
+                for region in finite {
                     if body_cache.is_none() {
                         body_cache = Some(super::p1::make_original_brep_cache(kernel, original)?);
                     }

@@ -9,12 +9,14 @@ use std::io::Read as _;
 use serde_json::Value;
 use solidcore::topology::vertex::corner;
 use solidcore_ops::boolean::{boolean, imprint, union_all};
+use solidcore_ops::prism::extrude_planar_regions;
 use solidcore_ops::sweep::{extrude, join_arcs, revolve, zone_tolerance, Curve, DraftCorner, Join};
 use solidcore_ops::{
     blend, make_box, make_cone, make_sphere, session, Blend, Body, BooleanOp, CheckLevel, Corners,
     Error,
 };
 use solidcore_record::brep::Brep as Record;
+use solidcore_record::{Loop2, Plane, Region2, Seg2, Vec2};
 
 fn all_fixes() {
     session::set_thread_fixes(solidcore::kernel::UpstreamFixes::NAMES.iter().copied()).unwrap();
@@ -1948,5 +1950,127 @@ fn a_join_whose_hole_lines_up_with_a_bore_run_the_other_way_is_one_bore() {
     let want = 40.0 * 30.0 * 16.0 - PI * 4.0 * 16.0;
     for split in [0.0, 60.0, 135.0] {
         one_valid_solid_of_volume(&join_on_a_holed_plate(split), [7, 15, 10], want, 1e-9);
+    }
+}
+
+/// A counter-clockwise arc from `a` to `b` about `c`, of radius |a − c|.
+#[allow(clippy::disallowed_methods)] // the test's operand geometry, not ops computing it
+fn arc_through(a: Vec2, b: Vec2, c: Vec2) -> Seg2 {
+    let start = (a.y - c.y).atan2(a.x - c.x);
+    let mut end = (b.y - c.y).atan2(b.x - c.x);
+    while end <= start {
+        end += TAU;
+    }
+    Seg2::Arc {
+        center: c,
+        radius: ((a.x - c.x).powi(2) + (a.y - c.y).powi(2)).sqrt(),
+        start,
+        sweep: end - start,
+    }
+}
+
+/// `l` run the other way round.
+fn reversed(l: Loop2) -> Loop2 {
+    let segs = l.segs.into_iter().rev().map(|s| match s {
+        Seg2::Line { a, b } => Seg2::Line { a: b, b: a },
+        Seg2::Arc {
+            center,
+            radius,
+            start,
+            sweep,
+        } => Seg2::Arc {
+            center,
+            radius,
+            start: start + sweep,
+            sweep: -sweep,
+        },
+        s => s,
+    });
+    Loop2 {
+        segs: segs.collect(),
+    }
+}
+
+/// The two bodies of tangency-labs/solidcraft#11749. A half pipe along x from -40 to 40: the
+/// region 23 ≤ r ≤ 25, z ≥ 0 of the YZ plane, closed by two half discs below z = 0 whose centres
+/// sit at (±24, -0.005) (the sketch's numbers), so their radius is 1.0000125 and they bulge
+/// 1.25e-5 past y = ±25. And a ring from z = -h to h: an 84 × 54 rectangle less a rounded
+/// rectangle, its sides y = ±25 and x = ±40 joined by corner arcs of radius 24 about (±16, ±1).
+fn half_pipe_and_ring(h: f64) -> (Body, Body) {
+    let v = Vec2::new;
+    let dz = -0.005_000_000_000_023_874;
+    let inner = reversed(Loop2 {
+        segs: vec![arc_through(v(23.0, 0.0), v(-23.0, 0.0), v(0.0, 0.0))],
+    });
+    let pipe = Loop2 {
+        segs: [
+            vec![
+                arc_through(v(25.0, 0.0), v(-25.0, 0.0), v(0.0, 0.0)),
+                arc_through(v(-25.0, 0.0), v(-23.0, 0.0), v(-24.0, dz)),
+            ],
+            inner.segs,
+            vec![arc_through(v(23.0, 0.0), v(25.0, 0.0), v(24.0, dz))],
+        ]
+        .concat(),
+    };
+    let pipe = Region2 {
+        outer: pipe,
+        holes: vec![],
+    };
+    let arc = |c: Vec2, start: f64| Seg2::Arc {
+        center: c,
+        radius: 24.0,
+        start,
+        sweep: PI / 2.0,
+    };
+    let line = |a: Vec2, b: Vec2| Seg2::Line { a, b };
+    let hole = Loop2 {
+        segs: vec![
+            line(v(-16.0, -25.0), v(16.0, -25.0)),
+            arc(v(16.0, -1.0), -PI / 2.0),
+            line(v(40.0, -1.0), v(40.0, 1.0)),
+            arc(v(16.0, 1.0), 0.0),
+            line(v(16.0, 25.0), v(-16.0, 25.0)),
+            arc(v(-16.0, 1.0), PI / 2.0),
+            line(v(-40.0, 1.0), v(-40.0, -1.0)),
+            arc(v(-16.0, -1.0), PI),
+        ],
+    };
+    let ring = Region2 {
+        outer: Loop2::polygon(&[
+            v(-42.0, -27.0),
+            v(42.0, -27.0),
+            v(42.0, 27.0),
+            v(-42.0, 27.0),
+        ]),
+        holes: vec![reversed(hole)],
+    };
+    (
+        extrude_planar_regions(&Plane::YZ, &[pipe], -40.0, 40.0).unwrap(),
+        extrude_planar_regions(&Plane::XY, &[ring], -h, h).unwrap(),
+    )
+}
+
+/// A symmetric cut through the half pipe gives the same body for every length past the pipe
+/// (tangency-labs/solidcraft#11749). At each corner (±16, ±25, 0) the ring's corner cylinder
+/// only touches a cap: along x the cap is straight and the corner cylinder curves away from it.
+/// A longer ring once read one of those touches as a 5e-4 crossing curve, which split the
+/// pipe's edge there and kept that corner of the pipe whole (+575.19 mm³ and one face less per
+/// corner: 9 faces at h = 36.75, 8 at 250).
+#[test]
+fn a_symmetric_cut_through_a_half_pipe_is_the_same_for_every_length_past_it() {
+    all_fixes();
+    for h in [30.0, 36.65, 36.75, 50.0, 250.0] {
+        let (pipe, ring) = half_pipe_and_ring(h);
+        let cut = boolean(pipe, ring, BooleanOp::Subtract).unwrap().unwrap();
+        let report = cut.check(CheckLevel::All).unwrap();
+        assert!(report.is_valid(), "h {h}: {}", report.text);
+        assert_eq!(cut.solid_count().unwrap(), 1, "h {h}");
+        assert_eq!(cut.counts().unwrap(), [10, 28, 20], "h {h}");
+        assert!(
+            near(volume(&cut), 10_015.883_451_427),
+            "h {h}: {}",
+            volume(&cut)
+        );
     }
 }

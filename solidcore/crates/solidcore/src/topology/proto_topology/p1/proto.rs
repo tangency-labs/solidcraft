@@ -2188,11 +2188,6 @@ pub struct ProtoTopologyManager<O> {
     pe_store: Vec<Option<ProtoEdge>>,
     /// Every proto face made.
     pf_store: Vec<Option<ProtoFace<O>>>,
-    /// Not upstream: `SmProtoEdge::Resolve` splits a self-loop proto edge even when
-    /// its vertex definition is on a vertex (`true`, the default and upstream's
-    /// behaviour); `false` drops such a proto edge instead (tangency-labs/solidcore#480,
-    /// see `topology::proto_topology::p2`).
-    split_self_loops_on_vertices: bool,
     /// Not upstream (WR-619): final vertices `(vertex, max_gap, speck_start, speck_end)`
     /// whose collapsed speck definition `SmEdgeDefinition::Imprint` skipped, so
     /// `ImprintIntersections` grows each vertex's tolerance to cover the speck's span.
@@ -2202,6 +2197,11 @@ pub struct ProtoTopologyManager<O> {
     /// coincident interval, so a point where the two cross is no event and gets no vertex
     /// definition ([`ProtoTopologyManager::set_coincident_edges`]).
     coincident_edges: Vec<(O, O)>,
+    /// Not upstream (WR-214): the first refusal of a proto edge from a proto vertex back
+    /// to itself whose curve leaves its ends' reach of a definition on a vertex; the
+    /// Boolean returns it once every proto edge is resolved
+    /// ([`ProtoTopologyManager::take_self_loop_refusal`]).
+    self_loop_refusal: Option<SolidError>,
 }
 
 fn push_store<T>(store: &mut Vec<Option<T>>, item: T) -> Result<u32> {
@@ -2259,26 +2259,10 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
             pv_store: Vec::new(),
             pe_store: Vec::new(),
             pf_store: Vec::new(),
-            split_self_loops_on_vertices: true,
             skipped_speck_vertices: Vec::new(),
             coincident_edges: Vec::new(),
+            self_loop_refusal: None,
         })
-    }
-
-    /// Whether resolving a proto edge from a proto vertex back to itself splits it
-    /// even when its vertex definition is on a vertex in either B-rep (`true`, the
-    /// default, as upstream). Not upstream.
-    #[must_use]
-    pub const fn split_self_loops_on_vertices(&self) -> bool {
-        self.split_self_loops_on_vertices
-    }
-
-    /// Sets [`ProtoTopologyManager::split_self_loops_on_vertices`]; the Boolean's
-    /// topology intersector sets it to `false` when
-    /// `Kernel::fixes.proto_edge_self_loop_on_vertex_degenerate` is on
-    /// (tangency-labs/solidcore#480, WR-214). Not upstream.
-    pub fn set_split_self_loops_on_vertices(&mut self, split: bool) {
-        self.split_self_loops_on_vertices = split;
     }
 
     /// Sets the coincident line edge pairs (B-rep 1's edge, B-rep 2's edge): two straight
@@ -2307,6 +2291,20 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
     #[must_use]
     pub fn skipped_speck_vertices(&self) -> &[(O, f64, Point3, Point3)] {
         &self.skipped_speck_vertices
+    }
+
+    /// Takes the refusal a proto edge from a proto vertex back to itself left
+    /// (WR-214): its curve leaves its ends' reach of a definition on a vertex, so it can be
+    /// neither split nor dropped. Not upstream.
+    pub fn take_self_loop_refusal(&mut self) -> Option<SolidError> {
+        self.self_loop_refusal.take()
+    }
+
+    /// Records the first such refusal (WR-214).
+    pub(crate) fn note_self_loop_refusal(&mut self, refusal: SolidError) {
+        if self.self_loop_refusal.is_none() {
+            self.self_loop_refusal = Some(refusal);
+        }
     }
 
     /// Records a final vertex whose collapsed speck definition was skipped at imprint.
