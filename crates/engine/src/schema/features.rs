@@ -1097,10 +1097,15 @@ pub struct PatternFaceParams {
     /// The face to copy onto: a point on it ({"face": [x, y, z]}, kept by the face's persistent
     /// name, so the copies follow the face as the model changes) or a reference as saved.
     pub face: GeoRefParam,
-    /// Cells across the face (round a cylinder, its first direction).
-    pub count1: NumberExpr,
-    /// Cells along the face (its second direction).
-    pub count2: NumberExpr,
+    /// Cells across the face (round a cylinder, its first direction). Required without `random`.
+    #[serde(default)]
+    pub count1: Option<NumberExpr>,
+    /// Cells along the face (its second direction). Required without `random`.
+    #[serde(default)]
+    pub count2: Option<NumberExpr>,
+    /// Instances at random places instead of on a grid.
+    #[serde(default)]
+    pub random: Option<RandomParams>,
     /// Every other column moves half a cell along.
     #[serde(default)]
     pub staggered: Option<bool>,
@@ -1113,7 +1118,8 @@ pub struct PatternFaceParams {
     /// The copies stand on the other side of the face.
     #[serde(default)]
     pub flip: Option<bool>,
-    /// The point of the copied bodies that goes onto the face. Default: the origin.
+    /// The point of the copied bodies that goes onto the face. Default: the centre of the bottom
+    /// of their bounding box.
     #[serde(default)]
     pub anchor: Option<PointExpr3>,
     /// Put the copies into a group in the browser's Bodies folder, named after the feature.
@@ -1182,6 +1188,31 @@ pub struct AttractParams {
     /// out at both ends).
     #[serde(default)]
     pub falloff: Option<FalloffParam>,
+}
+
+/// A face pattern's random placement.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct RandomParams {
+    /// How many instances.
+    pub count: NumberExpr,
+    /// Fixes where they go: the same seed gives the same places. Default: 0.
+    #[serde(default)]
+    pub seed: Option<u32>,
+    /// How they spread: white (independent), blue (evenly spread, no clumps), pink (loose
+    /// clusters) or brown (large clusters). Default: white.
+    #[serde(default)]
+    pub noise: Option<NoiseParam>,
+}
+
+/// How a random placement spreads its instances.
+#[derive(Clone, Copy, Debug, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum NoiseParam {
+    White,
+    Blue,
+    Pink,
+    Brown,
 }
 
 /// How an attractor's effect changes between its near and far distances.

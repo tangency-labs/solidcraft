@@ -2438,13 +2438,14 @@ fn a_face_pattern_on_a_torus_stands_copies_on_its_surface() {
     let copies = copies_of(&s, &r);
     assert_eq!(copies.len(), 72);
     for (name, _, _) in &copies {
-        // A bead centred on the surface: its centre is 5 mm from the tube's centre circle. Its
-        // centre of mass, as a turned sphere's outline box is not tight.
+        // A bead standing on the surface (its bottom on the face, the default anchor): its centre
+        // is 5 + 1 mm from the tube's centre circle. Its centre of mass, as a turned sphere's
+        // outline box is not tight.
         let m = run(&mut s, "inspect.measure", json!({"bodies": [name]}));
         let c = &m["bodies"][0]["center_of_mass"];
         let c = solidcore_record::Vec3::new(c[0].as_f64().unwrap(), c[1].as_f64().unwrap(), c[2].as_f64().unwrap());
         let ring = ((c.x * c.x + c.y * c.y).sqrt() - 20.0).hypot(c.z);
-        assert!((ring - 5.0).abs() < 1e-3, "{name} sits on the surface: {ring}");
+        assert!((ring - 6.0).abs() < 1e-3, "{name} stands on the surface: {ring}");
     }
 }
 
@@ -2614,4 +2615,98 @@ fn face_pattern_hold_zones_between_two_edges() {
         }
     }
     assert!(held_near > 0 && held_far > 0 && ramped > 0, "copies in each zone: {held_near} {ramped} {held_far}");
+}
+
+/// A body modelled away from the origin stands on the face just as one at the origin: the
+/// default anchor is the centre of the bottom of its bounding box, not the origin.
+#[test]
+fn a_face_pattern_stands_a_body_modelled_anywhere_on_the_face() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 100, "width": 60, "height": 10, "body_name": "Plate"}));
+    run(&mut s, "solid.box", json!({"length": 4, "width": 4, "height": 6, "corner": [200, 150, 40], "body_name": "Post"}));
+    let r = run(&mut s, "solid.pattern.face", json!({"bodies": ["Post"], "face": {"face": [50, 30, 10]}, "count1": 4, "count2": 3}));
+    let copies = copies_of(&s, &r);
+    assert_eq!(copies.len(), 12);
+    let mut got: Vec<(i64, i64)> = Vec::new();
+    for (name, min, max) in &copies {
+        assert!((min.z - 10.0).abs() < 1e-6 && (max.z - 16.0).abs() < 1e-6, "{name} stands on the top face: {min:?} {max:?}");
+        let c = centre(*min, *max);
+        got.push(((c.x * 10.0).round() as i64, (c.y * 10.0).round() as i64));
+    }
+    got.sort_unstable();
+    let cells = |nx: usize, ny: usize| {
+        let mut v: Vec<(i64, i64)> = (0..nx)
+            .flat_map(|i| {
+                (0..ny).map(move |j| (((i as f64 + 0.5) * 1000.0 / nx as f64).round() as i64, ((j as f64 + 0.5) * 600.0 / ny as f64).round() as i64))
+            })
+            .collect();
+        v.sort_unstable();
+        v
+    };
+    assert!(got == cells(4, 3) || got == cells(3, 4), "at the cell centres: {got:?}");
+}
+
+/// The places of a random face pattern's instances, by the centre of each one's base.
+fn random_places(s: &mut Session, random: Value, margin: f64) -> Vec<solidcore_record::Vec3> {
+    let r =
+        run(s, "solid.pattern.face", json!({"bodies": ["Pin"], "face": {"face": [50, 30, 10]}, "random": random, "margin": margin, "group": false}));
+    pin_heights(s, &r).into_iter().map(|(c, _)| c).collect()
+}
+
+fn nearest_gaps(p: &[solidcore_record::Vec3]) -> Vec<f64> {
+    p.iter().enumerate().map(|(i, a)| p.iter().enumerate().filter(|(j, _)| *j != i).map(|(_, b)| a.dist(*b)).fold(f64::INFINITY, f64::min)).collect()
+}
+
+/// A random placement makes the quantity asked for, on the face and clear of its edges by the
+/// margin, the same for the same seed and different for another.
+#[test]
+fn a_random_face_pattern_is_seeded_and_stays_on_the_face() {
+    let mut s = Session::default();
+    plate_and_pin(&mut s);
+    for noise in ["white", "blue", "pink", "brown"] {
+        let a = random_places(&mut s, json!({"count": 40, "seed": 7, "noise": noise}), 3.0);
+        assert_eq!(a.len(), 40, "{noise}");
+        for c in &a {
+            assert!((c.z - 10.0).abs() < 1e-6, "{noise}: stands on the top face {c:?}");
+            assert!(c.x >= 3.0 - 1e-9 && c.x <= 97.0 + 1e-9 && c.y >= 3.0 - 1e-9 && c.y <= 57.0 + 1e-9, "{noise}: 3 mm clear of the edges {c:?}");
+        }
+        let b = random_places(&mut s, json!({"count": 40, "seed": 7, "noise": noise}), 3.0);
+        assert_eq!(a, b, "{noise}: the same seed, the same places");
+        let c = random_places(&mut s, json!({"count": 40, "seed": 8, "noise": noise}), 3.0);
+        assert_ne!(a, c, "{noise}: another seed, other places");
+    }
+}
+
+/// Blue noise spreads its instances evenly: its closest pair is farther apart than white noise's,
+/// and no instance is far from its neighbours. Brown noise clusters them: its nearest-neighbour
+/// gaps vary more than blue noise's.
+#[test]
+fn random_face_pattern_noise_colours_spread_differently() {
+    let mut s = Session::default();
+    plate_and_pin(&mut s);
+    let gaps = |s: &mut Session, noise: &str| nearest_gaps(&random_places(s, json!({"count": 60, "seed": 3, "noise": noise}), 0.0));
+    let spread = |g: &[f64]| {
+        let mean = g.iter().sum::<f64>() / g.len() as f64;
+        (g.iter().map(|x| (x - mean).powi(2)).sum::<f64>() / g.len() as f64).sqrt() / mean
+    };
+    let white = gaps(&mut s, "white");
+    let blue = gaps(&mut s, "blue");
+    let brown = gaps(&mut s, "brown");
+    let min = |g: &[f64]| g.iter().copied().fold(f64::INFINITY, f64::min);
+    assert!(min(&blue) > 2.0 * min(&white), "blue's closest pair {} vs white's {}", min(&blue), min(&white));
+    assert!(spread(&brown) > spread(&blue), "brown's gaps vary more: {} vs {}", spread(&brown), spread(&blue));
+}
+
+/// A random placement refuses what it can't use, and changes nothing.
+#[test]
+fn a_random_face_pattern_refuses_bad_input() {
+    let mut s = Session::default();
+    plate_and_pin(&mut s);
+    for random in [json!({"seed": 1}), json!({"count": 0}), json!({"count": 5, "noise": "green"}), json!({"count": 5, "seed": -1})] {
+        let before = s.doc.features.len();
+        let p = json!({"bodies": ["Pin"], "face": {"face": [50, 30, 10]}, "random": random});
+        assert!(s.execute("solid.pattern.face", &p).is_err(), "{p}");
+        assert_eq!(s.doc.features.len(), before);
+    }
+    assert!(s.execute("solid.pattern.face", &json!({"bodies": ["Pin"], "face": {"face": [50, 30, 10]}})).is_err(), "no counts and no random");
 }

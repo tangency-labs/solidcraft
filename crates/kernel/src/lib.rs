@@ -209,7 +209,9 @@ pub use helix::{loft_to_point, sweep_helix, sweep_helix_mesh, sweep_helix_radial
 pub use iges_in::{MAX_IGES_BYTES, iges_import, iges_to_step};
 pub use iges_out::iges_export_bodies;
 pub use intersection::{MeetingEdge, meeting_edges};
-pub use iso::{FaceStation, IsoLine, MAX_ISO_COUNT, MAX_STATION_COUNT, PointDistance, face_stations, iso_curves, iso_grid};
+pub use iso::{
+    FaceStation, IsoLine, MAX_ISO_COUNT, MAX_STATION_COUNT, Noise, PointDistance, face_random_stations, face_stations, iso_curves, iso_grid,
+};
 pub use lip::{LipRefusal, raise_band, rim_band};
 pub use loft_blend::loft_blend;
 pub use matchsurf::{match_surface, seam_continuity};

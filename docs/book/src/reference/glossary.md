@@ -473,6 +473,21 @@ The maximum number of shaded surfaces in a rendering path, starting with the fir
 - **In SolidCraft:** CPU `path.max_depth` is 1–16; longer paths are truncated.
 - **For translators:** a count, not a geometric depth in millimetres or timeline depth.
 
+### noise (pattern)
+
+How a random pattern spreads its instances over a face, named by the colour of the noise that
+places them.
+
+*White* noise places each instance independently, equally likely anywhere on the face's area.
+*Blue* noise is random but evenly spread, with no clumps and no gaps. *Pink* and *brown* noise
+cluster the instances, brown in larger clusters with bare patches between them.
+
+- **In SolidCraft:** `solid.pattern.face`'s `random` (`count`, `seed`, `noise`: `white`, `blue`,
+  `pink`, `brown`); the Random layout of Pattern on Face.
+- **Don't use:** jitter, scatter type.
+- **Elsewhere:** random distribution, Poisson-disk sampling (for blue noise).
+- **For translators:** the colours name noise spectra, not appearance colours.
+
 ### pattern instance
 
 One copy that a pattern makes of its features, bodies or sketch entities.

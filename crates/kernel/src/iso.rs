@@ -643,3 +643,156 @@ impl<'a> FaceProbe<'a> {
         Some((q, p.dist(at)))
     }
 }
+
+/// How a random placement on a face spreads its points: the colour of the noise that places them.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Noise {
+    /// Independent places, equally likely on every part of the face's area.
+    White,
+    /// Random but evenly spread: each point as far from the others as a few tries allow
+    /// (best-candidate sampling), so no clumps and no gaps.
+    Blue,
+    /// Loose clusters: the density follows a random field whose waves weaken as 1/f.
+    Pink,
+    /// Large clusters and bare patches: the density follows a field whose waves weaken as 1/f².
+    Brown,
+}
+
+/// A small deterministic random source (SplitMix64), so a seed always gives the same placement.
+struct Seeded(u64);
+
+impl Seeded {
+    fn next(&mut self) -> f64 {
+        self.0 = self.0.wrapping_add(0x9E37_79B9_7F4A_7C15);
+        let mut z = self.0;
+        z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
+        z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
+        z ^= z >> 31;
+        (z >> 11) as f64 / (1u64 << 53) as f64
+    }
+}
+
+/// Tries per point a random placement makes before it stops short.
+const RANDOM_TRIES: usize = 400;
+/// Candidates per point blue noise chooses the farthest of.
+const BLUE_CANDIDATES: usize = 12;
+
+/// `count` points placed at random on face `face` of `body`, the same for the same `seed`, spread
+/// as `noise` says, none nearer than `margin` to the face's boundary. Places are uniform over the
+/// face's area (not its parameters), inside its trims. Fewer come back when the face has no room
+/// for more within the tries allowed.
+pub fn face_random_stations(body: &Body, face: usize, count: usize, seed: u64, noise: Noise, margin: f64) -> Result<Vec<FaceStation>> {
+    if count > MAX_STATION_COUNT {
+        return Err(KernelError::Invalid(format!("pattern on a face: at most {MAX_STATION_COUNT} random instances")));
+    }
+    if !(margin.is_finite() && margin >= 0.0) {
+        return Err(KernelError::Invalid("pattern on a face: the margin must not be negative".into()));
+    }
+    if body.is_mesh() {
+        return Err(KernelError::Invalid("pattern on a face: a mesh body has no faces; use Convert Mesh first".into()));
+    }
+    let trims = FaceTrims::new(body, face)?;
+    let [[u0, u1], [v0, v1]] = trims.extent();
+    if !(u1 > u0 && v1 > v0) {
+        return Err(KernelError::Invalid("pattern on a face: the face has no extent".into()));
+    }
+    let boundary = boundary_polylines(body, face, &trims)?;
+    let at = |x: f64, y: f64| [u0 + x * (u1 - u0), v0 + y * (v1 - v0)];
+    // The area element |S_u × S_v|, so places are even over the area: its largest value bounds
+    // the rejection.
+    let area = |q: [f64; 2]| trims.eval.derivs(q[0], q[1]).map(|(_, su, sv)| su.cross(sv).len());
+    const GRID: usize = 48;
+    let mut most: f64 = 0.0;
+    for i in 0..=GRID {
+        for j in 0..=GRID {
+            if let Some(a) = area(at(i as f64 / GRID as f64, j as f64 / GRID as f64)) {
+                most = most.max(a);
+            }
+        }
+    }
+    if !(most > 0.0 && most.is_finite()) {
+        return Err(KernelError::Invalid("pattern on a face: the face has no area".into()));
+    }
+    let mut rng = Seeded(seed ^ 0x005E_ED0F_FACE);
+    // Pink and brown: a random density field over the face, from waves whose strength falls
+    // off as 1/f or 1/f², normalised to 0..1.
+    let waves: Vec<(f64, f64, f64, f64)> = match noise {
+        Noise::White | Noise::Blue => Vec::new(),
+        Noise::Pink | Noise::Brown => {
+            let power = if noise == Noise::Pink { 1.0 } else { 2.0 };
+            let mut w = Vec::new();
+            for kx in -6i32..=6 {
+                for ky in 0i32..=6 {
+                    if ky == 0 && kx <= 0 {
+                        continue;
+                    }
+                    let f = f64::from(kx * kx + ky * ky).sqrt();
+                    w.push((f64::from(kx), f64::from(ky), f.powf(-power), rng.next() * std::f64::consts::TAU));
+                }
+            }
+            w
+        }
+    };
+    let field =
+        |x: f64, y: f64| -> f64 { waves.iter().map(|(kx, ky, a, phase)| a * (std::f64::consts::TAU * (kx * x + ky * y) + phase).cos()).sum() };
+    let (mut lo, mut hi) = (f64::INFINITY, f64::NEG_INFINITY);
+    if !waves.is_empty() {
+        for i in 0..=GRID {
+            for j in 0..=GRID {
+                let f = field(i as f64 / GRID as f64, j as f64 / GRID as f64);
+                lo = lo.min(f);
+                hi = hi.max(f);
+            }
+        }
+    }
+    let density = |x: f64, y: f64| -> f64 {
+        if waves.is_empty() || !(hi > lo) {
+            1.0
+        } else {
+            let t = ((field(x, y) - lo) / (hi - lo)).clamp(0.0, 1.0);
+            t * t
+        }
+    };
+    // One random place on the face, or none after the tries allowed.
+    let candidate = |rng: &mut Seeded| -> Option<FaceStation> {
+        for _ in 0..RANDOM_TRIES {
+            let (x, y) = (rng.next(), rng.next());
+            let q = at(x, y);
+            if !trims.inside(q) || rng.next() * most > area(q).unwrap_or(0.0) || rng.next() > density(x, y) {
+                continue;
+            }
+            let Some((point, su, sv)) = trims.eval.derivs(q[0], q[1]) else { continue };
+            let Some(normal) = su.cross(sv).normalized() else { continue };
+            let Some(along) = (su - normal * su.dot(normal)).normalized() else { continue };
+            let to_edge = boundary.iter().map(|l| polyline_distance(l, point)).fold(f64::INFINITY, f64::min);
+            if to_edge < margin {
+                continue;
+            }
+            return Some(FaceStation { point, normal, along, margin: to_edge });
+        }
+        None
+    };
+    let mut out: Vec<FaceStation> = Vec::with_capacity(count);
+    while out.len() < count {
+        let picked = if noise == Noise::Blue && !out.is_empty() {
+            // The candidate farthest from the points already placed.
+            let mut best: Option<(f64, FaceStation)> = None;
+            for _ in 0..BLUE_CANDIDATES {
+                let Some(c) = candidate(&mut rng) else { break };
+                let gap = out.iter().map(|s| s.point.dist(c.point)).fold(f64::INFINITY, f64::min);
+                if best.as_ref().is_none_or(|(g, _)| gap > *g) {
+                    best = Some((gap, c));
+                }
+            }
+            best.map(|(_, c)| c)
+        } else {
+            candidate(&mut rng)
+        };
+        match picked {
+            Some(s) => out.push(s),
+            None => break,
+        }
+    }
+    orient_outward(body, &mut out)?;
+    Ok(out)
+}

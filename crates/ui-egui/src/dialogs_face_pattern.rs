@@ -5,7 +5,7 @@
 
 use serde_json::{Value, json};
 use solidcraft_engine::Sel;
-use solidcraft_engine::doc::{Attract, Falloff, PatternKind};
+use solidcraft_engine::doc::{Attract, Falloff, Noise, PatternKind};
 
 use crate::SolveApp;
 use crate::dialogs::{Dialog, Kind, form_row, set_object_accepting};
@@ -40,12 +40,16 @@ pub(crate) fn set_attractor_inputs(d: &mut Dialog, on: bool) {
 pub struct Form {
     pub count1: String,
     pub count2: String,
-    /// 0: rows; 1: every other column half a cell along.
+    /// 0: grid; 1: grid with every other column half a cell along; 2: random.
     pub layout: usize,
+    /// Random: how many instances, the seed, and the noise (0 white, 1 blue, 2 pink, 3 brown).
+    pub random_count: String,
+    pub seed: String,
+    pub noise: usize,
     pub angle: String,
     pub margin: String,
     pub flip: bool,
-    /// The copies go into a browser group (on by default).
+    /// The instances go into a browser group (on by default).
     pub group: bool,
     /// The Advanced section's switch.
     pub attract: bool,
@@ -75,6 +79,9 @@ impl Default for Form {
             count1: "5".into(),
             count2: "5".into(),
             layout: 0,
+            random_count: "25".into(),
+            seed: "1".into(),
+            noise: 1,
             angle: String::new(),
             margin: String::new(),
             flip: false,
@@ -116,16 +123,22 @@ pub(crate) fn draw(app: &SolveApp, d: &mut Dialog, ui: &mut egui::Ui) -> bool {
     let between = between || !f.saved_far_geometry.is_empty() || !f.saved_far_bodies.is_empty();
     let doc = &app.session.doc;
     let mut enter = false;
-    enter |= crate::dialogs::quantity_row(ui, doc, "Across", &mut f.count1);
-    enter |= crate::dialogs::quantity_row(ui, doc, "Along", &mut f.count2);
-    choice_row(ui, "Layout", "fp_layout", &mut f.layout, &["Grid", "Staggered"]);
-    enter |= hint_row(ui, "Grid angle", &mut f.angle, "none");
+    choice_row(ui, "Layout", "fp_layout", &mut f.layout, &["Grid", "Staggered", "Random"]);
+    if f.layout == 2 {
+        enter |= crate::dialogs::quantity_row(ui, doc, "Quantity", &mut f.random_count);
+        enter |= expr_row(ui, "Seed", &mut f.seed);
+        choice_row(ui, "Noise", "fp_noise", &mut f.noise, &["White noise", "Blue noise", "Pink noise", "Brown noise"]);
+    } else {
+        enter |= crate::dialogs::quantity_row(ui, doc, "Quantity", &mut f.count1);
+        enter |= crate::dialogs::quantity_row(ui, doc, "Quantity 2", &mut f.count2);
+        enter |= hint_row(ui, "Grid angle", &mut f.angle, "none");
+    }
     enter |= hint_row(ui, "Margin", &mut f.margin, "none");
     form_row(ui, "", |ui| {
-        ui_kit::checkbox(ui, "Flip side", &mut f.flip);
+        ui_kit::checkbox(ui, "Flip", &mut f.flip);
     });
     form_row(ui, "", |ui| {
-        ui_kit::checkbox(ui, "Group copies", &mut f.group);
+        ui_kit::checkbox(ui, "Group Instances", &mut f.group);
     });
     let mut attract = f.attract;
     ui_kit::section(ui, "face_pattern_advanced", "Advanced", f.attract, |ui| {
@@ -134,13 +147,13 @@ pub(crate) fn draw(app: &SolveApp, d: &mut Dialog, ui: &mut egui::Ui) -> bool {
         });
         if attract {
             if between {
-                ui_kit::status_line(ui, "Copies change from the attractors to the far attractors", ui_kit::StatusTone::Dim);
+                ui_kit::status_line(ui, "Instances change from the attractors to the far attractors", ui_kit::StatusTone::Dim);
                 enter |= hint_row(ui, "Near distance", &mut f.near, "hold near values within");
                 enter |= hint_row(ui, "Far distance", &mut f.far, "hold far values within");
             } else {
-                ui_kit::status_line(ui, "Each copy changes with its distance to the nearest attractor", ui_kit::StatusTone::Dim);
-                enter |= hint_row(ui, "Near distance", &mut f.near, "nearest copy");
-                enter |= hint_row(ui, "Far distance", &mut f.far, "farthest copy");
+                ui_kit::status_line(ui, "Each instance changes with its distance to the nearest attractor", ui_kit::StatusTone::Dim);
+                enter |= hint_row(ui, "Near distance", &mut f.near, "nearest instance");
+                enter |= hint_row(ui, "Far distance", &mut f.far, "farthest instance");
             }
             enter |= expr_row(ui, "Scale near", &mut f.scale_near);
             enter |= expr_row(ui, "Scale far", &mut f.scale_far);
@@ -171,13 +184,23 @@ pub(crate) fn params(app: &SolveApp, d: &Dialog) -> Result<Value, String> {
         Some(Sel::Face { point, .. }) => json!({"face": pt(*point)}),
         _ => f.saved_face.clone().ok_or("select the face to pattern on")?,
     };
-    let mut p = json!({"bodies": bodies, "face": face, "count1": f.count1.trim(), "count2": f.count2.trim()});
+    let mut p = json!({"bodies": bodies, "face": face});
+    if f.layout == 2 {
+        let seed: u32 = f.seed.trim().parse().map_err(|_| "the seed is a whole number from 0 to 4294967295".to_string())?;
+        let noise = ["white", "blue", "pink", "brown"].get(f.noise).copied().unwrap_or("white");
+        p["random"] = json!({"count": f.random_count.trim(), "seed": seed, "noise": noise});
+    } else {
+        p["count1"] = json!(f.count1.trim());
+        p["count2"] = json!(f.count2.trim());
+    }
     let mut put = |key: &str, v: &str| {
         if !v.trim().is_empty() {
             p[key] = json!(v.trim());
         }
     };
-    put("angle", &f.angle);
+    if f.layout != 2 {
+        put("angle", &f.angle);
+    }
     put("margin", &f.margin);
     if f.layout == 1 {
         p["staggered"] = json!(true);
@@ -244,7 +267,7 @@ pub(crate) fn params(app: &SolveApp, d: &Dialog) -> Result<Value, String> {
 
 /// The dialog's values for a saved face pattern.
 pub(crate) fn form_of(pattern: &PatternKind) -> Option<Form> {
-    let PatternKind::Face { face, count1, count2, staggered, angle, margin, flip, anchor: _, attract } = pattern else { return None };
+    let PatternKind::Face { face, count1, count2, staggered, random, angle, margin, flip, anchor: _, attract } = pattern else { return None };
     let s = |e: &Option<solidcraft_engine::doc::Expr>| e.as_deref().map(str::to_string).unwrap_or_default();
     let mut f = Form {
         count1: count1.to_string(),
@@ -256,6 +279,17 @@ pub(crate) fn form_of(pattern: &PatternKind) -> Option<Form> {
         saved_face: serde_json::to_value(face).ok(),
         ..Form::default()
     };
+    if let Some(r) = random {
+        f.layout = 2;
+        f.random_count = r.count.to_string();
+        f.seed = r.seed.to_string();
+        f.noise = match r.noise {
+            Noise::White => 0,
+            Noise::Blue => 1,
+            Noise::Pink => 2,
+            Noise::Brown => 3,
+        };
+    }
     if let Some(a) = attract.as_deref() {
         let Attract {
             geometry,
