@@ -324,6 +324,90 @@ fn wr567_a_near_arc_at_its_radius_follows_the_circle() {
     }
 }
 
+/// solidcraft#17907's second review: as [`wr567_a_near_arc_at_its_radius_follows_the_circle`]
+/// with arc 5 bulged instead, away from the middle of the generatrix where the side is
+/// read. The curvature read there is the circle's, so one sample agreed with the circle
+/// and the collapse was decided from its radius alone: the inward bulge (radius of
+/// curvature from `r` up to about `r (1 + 8.3e-5)` on arc 5) at `r (1 + 4e-5)` was
+/// reported collapsed and its face dropped, though the offset passes the centres of
+/// curvature only off arc 5. The collapse is now proved over the whole generatrix: the
+/// outcomes are those of arcs 15 and 16 (a radius of curvature from about
+/// `r (1 - 8.3e-5)` to `r` outward, `r` to `r (1 + 8.3e-5)` inward), each bulge with one
+/// offset decided and one refused (pinned, so refusing all fails).
+#[test]
+fn wr567_a_near_arc_off_the_middle_follows_its_curvature() {
+    let k = Kernel::default();
+    let side = collapsing_side(&k);
+    for (bulge, short_decided) in [(5e-8, false), (-5e-8, true)] {
+        let s = revolved(&k, round_generatrix_at(&[5], bulge));
+        for (scale, collapses, decided) in [
+            (1.0 - 4e-5, false, short_decided),
+            (1.0 + 4e-5, true, !short_decided),
+        ] {
+            let d = side * scale;
+            let r = s.offset_collapses(&k, d, 1e-7);
+            if decided {
+                assert_eq!(r.unwrap(), collapses, "bulge {bulge}, d {d}");
+            } else {
+                assert!(
+                    matches!(r, Err(SolidError::Unsupported { .. })),
+                    "bulge {bulge}, d {d}: {r:?}"
+                );
+                assert!(
+                    !matches!(s.create_offset_surface(&k, d, 1e-7), Ok(None)),
+                    "bulge {bulge}, d {d}"
+                );
+            }
+        }
+        // far from the radius the bulge decides nothing: the collapse at twice the radius
+        // is still found, and the offset at half of it still built
+        assert!(s.offset_collapses(&k, 2.0 * side, 1e-7).unwrap(), "{bulge}");
+        assert!(
+            !s.offset_collapses(&k, 0.5 * side, 1e-7).unwrap(),
+            "{bulge}"
+        );
+        assert!(s
+            .create_offset_surface(&k, 2.0 * side, 1e-7)
+            .unwrap()
+            .is_none());
+    }
+}
+
+/// solidcraft#17907's second review (the reviewer's counterexample): the circle r 1.5 about
+/// (10, 0, 0) with axes X and `(0, 1/2, sqrt 3 / 2)`, from 30 to 90 degrees, turned about
+/// Z. Its plane holds no line through the axis, so the generatrix is not the surface's
+/// profile and its radius is not where the offset folds. Its curvature read at the middle
+/// agreed with the circle, and the circle shortcut decided the collapse from the radius: at
+/// `r` and `2 r` towards the centre the face was dropped (`Ok(None)`). The generatrix is not
+/// in a plane through the axis: the collapse test is refused on both sides and no offset is
+/// dropped.
+#[test]
+fn wr567_a_tilted_circle_is_refused() {
+    let k = Kernel::default();
+    let circle = Ellipse::new_circle(
+        &k,
+        Point3::new(10.0, 0.0, 0.0),
+        Vec3::new(1.0, 0.0, 0.0),
+        Vec3::new(0.0, 0.5, 3.0_f64.sqrt() / 2.0),
+        Extent1d::from_min_max(30.0, 90.0),
+        R,
+        &EllipseOptions::default(),
+    )
+    .unwrap();
+    let s = revolved(&k, Curve::from(circle));
+    for d in [R, -R, 2.0 * R, -2.0 * R] {
+        let r = s.offset_collapses(&k, d, 1e-7);
+        assert!(
+            matches!(r, Err(SolidError::Unsupported { .. })),
+            "{d}: {r:?}"
+        );
+        assert!(
+            !matches!(s.create_offset_surface(&k, d, 1e-7), Ok(None)),
+            "{d}"
+        );
+    }
+}
+
 /// A generatrix whose bulge comes exactly to the tolerance (its peak deviation from the
 /// circle its samples nominate) is neither proved on the circle nor off it: the collapse
 /// test and the offset are refused with `Unsupported`, the face is never dropped.

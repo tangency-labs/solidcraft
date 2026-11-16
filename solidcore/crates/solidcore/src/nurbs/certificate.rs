@@ -9,6 +9,7 @@
 //! | [`span_bound`]     | (none)   |
 //! | [`turn_about_axis`] | (none)  |
 //! | [`on_circle`]      | (none)   |
+//! | [`meridian_collapse`] | (none) |
 //!
 //! **What is bounded.** Between two stations the rail runs from parameter `t_a` to `t_b`
 //! and the surface holds a point near each end, at `(u_a, v_a)` and `(u_b, v_b)`. With
@@ -72,7 +73,9 @@
 //! caller decides (a station there, or a refusal).
 //!
 //! Deviations: not upstream. No recursion: the intervals wait on a work list ([`on_circle`]'s
-//! pieces too, at most [`MAX_CIRCLE_HALVINGS`] deep and [`MAX_CIRCLE_PIECES`] in all).
+//! pieces too, at most [`MAX_CIRCLE_HALVINGS`] deep and [`MAX_CIRCLE_PIECES`] in all, and
+//! [`meridian_collapse`]'s, at most [`MAX_COLLAPSE_HALVINGS`] deep and
+//! [`MAX_COLLAPSE_PIECES`] in all).
 
 use crate::error::{Result, SolidError};
 use crate::geom::vector2d::Point2;
@@ -80,7 +83,7 @@ use crate::kernel::Kernel;
 use crate::math::{Point3, Vec3};
 use crate::nurbs::crv_basic::Curve as NurbCurve;
 use crate::nurbs::math::{gamma, CPoint, NOW};
-use crate::offset::construction::bernstein::{Bernstein2, Binomials};
+use crate::offset::construction::bernstein::{Bernstein2, Binomials, MAX_DEGREE};
 use crate::query::distance_bound::{pieces_about, Piece};
 use crate::surface::surface::Surface;
 
@@ -120,14 +123,24 @@ impl RailSpans {
     ///
     /// # Errors
     ///
-    /// `Unsupported` for a weight that is not positive or coefficients that are not finite;
-    /// those of the decomposition.
+    /// `Unsupported` for a point `p`, a control point, a weight or a knot that is not finite
+    /// (checked before any bound is taken: `f64::max` passes a NaN over), a weight that is
+    /// not positive, or coefficients that are not finite; those of the decomposition.
     pub fn about(nurb: &NurbCurve, p: Point3) -> Result<Self> {
         let r = nurb.degree();
         let w = |c: &CPoint| if c.w == NOW { 1.0 } else { c.w };
+        if !(p.x.is_finite() && p.y.is_finite() && p.z.is_finite()) {
+            return Err(failed("a rail's centre that is not finite"));
+        }
+        if !nurb.knots().iter().all(|u| u.is_finite()) {
+            return Err(failed("a rail's knot that is not finite"));
+        }
         let mut net_size = 0.0_f64;
         let mut max_w = 0.0_f64;
         for c in nurb.cpts() {
+            if ![c.x, c.y, c.z, w(c)].iter().all(|v| v.is_finite()) {
+                return Err(failed("a rail's control point that is not finite"));
+            }
             net_size = net_size
                 .max(c.x.abs())
                 .max(c.y.abs())
@@ -705,9 +718,12 @@ pub enum OnCircle {
 /// # Errors
 ///
 /// `Unsupported` for a centre, normal, radius or tolerance that is not finite, a radius
-/// that is not positive, a zero normal or a negative tolerance; those of
-/// [`RailSpans::about`] and of the products.
+/// that is not positive, a normal whose length is zero or not finite (a finite normal such
+/// as `(0, 0, 1e200)` overflows it, and dividing by it would make every plane bound zero)
+/// or a negative tolerance; those of [`RailSpans::about`] and of the products;
+/// [`SolidError::Cancelled`] when `k`'s cancel token is set (polled once per piece).
 pub fn on_circle(
+    k: &Kernel,
     nurb: &NurbCurve,
     center: Point3,
     normal: Vec3,
@@ -725,8 +741,10 @@ pub fn on_circle(
     }
     let normal_len = normal.length();
     #[allow(clippy::neg_cmp_op_on_partial_ord)] // refuses NaN too
-    if !(normal_len > 0.0) {
-        return Err(failed("a circle's zero normal"));
+    if !(normal_len > 0.0) || !normal_len.is_finite() {
+        return Err(failed(
+            "a circle's normal whose length is zero or not finite",
+        ));
     }
     let spans = RailSpans::about(nurb, center)?;
     let bi = Binomials::new();
@@ -739,6 +757,7 @@ pub fn on_circle(
         .collect();
     let mut pieces = 0_usize;
     while let Some((i, [u0, u1], h, e, depth)) = work.pop() {
+        k.check_cancelled(OP)?;
         pieces += 1;
         if pieces > MAX_CIRCLE_PIECES {
             return Ok(OnCircle::Unproved);
@@ -847,6 +866,315 @@ fn circle_point_outside(
     radial > tol || plane > tol
 }
 
+/// Most pieces [`meridian_collapse`] bounds in all (a resource bound; past it:
+/// [`Collapse::Unproved`]).
+pub const MAX_COLLAPSE_PIECES: usize = 1 << 12;
+/// Most halvings of one Bézier span in [`meridian_collapse`].
+pub const MAX_COLLAPSE_HALVINGS: usize = 30;
+
+/// What [`meridian_collapse`] proves of a generatrix and an offset.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Collapse {
+    /// The generatrix lies in a plane through the axis, bends to one side all along, and at
+    /// every point its radius of curvature less the offset is below the tolerance: the
+    /// offset passes every point's centre of curvature.
+    Everywhere,
+    /// As [`Self::Everywhere`], but at every point the radius of curvature less the offset
+    /// is at least the tolerance: no point's offset reaches its centre of curvature.
+    Nowhere,
+    /// Neither: the generatrix is not proved to lie in a plane through the axis or to bend
+    /// to one side all along, its radius of curvature comes to the offset plus the
+    /// tolerance (or crosses it), or the bounds do not settle within
+    /// [`MAX_COLLAPSE_HALVINGS`] and [`MAX_COLLAPSE_PIECES`].
+    Unproved,
+}
+
+/// Whether the offset by `along` towards the centres of curvature of the generatrix `nurb`
+/// of a surface of revolution about the axis through `axis_point` along `axis` passes
+/// every point's centre of curvature (its radius of curvature `rho` less `along` below
+/// `tol` all along) or none (`rho - along >= tol` all along). `center` is a point near the
+/// generatrix (its arc's centre) the coefficients are taken about, to keep them small. Not
+/// upstream (solidcraft#17907's review: the collapse of a revolved arc was decided from
+/// its circle's radius and one curvature sample).
+///
+/// **The plane.** A surface of revolution is the revolution of its generatrix's profile;
+/// the generatrix's own curvature is the profile's only when it lies in a plane through the
+/// axis. The plane is the one through the axis and the control point farthest from it, of
+/// normal `m`. In homogeneous form about `center` (`X - center = H / W`,
+/// [`RailSpans::about`]), `m . (X - axis_point) = G / W` with `G = m . H + (m . (center -
+/// axis_point)) W`. Every span's `G` must have no coefficient larger than its own rounding
+/// (`|m|_1` times the coefficients' error, `gamma_5` of the terms' size, the centre's offset
+/// `gamma_4` of `|m| . (|center| + |axis_point|)`) plus the plane's tilt from the axis
+/// (`|m . axis| + gamma_3 |m|_1 |axis|_1`, as computed) times the span's reach along the
+/// axis: the generatrix is in that plane to the rounding the test can show, or the
+/// answer is [`Collapse::Unproved`]. A circle out of every plane through the axis (tilted,
+/// or square to it) is refused here.
+///
+/// **The curvature.** With `A = W H' - W' H` (so `X' = A / W^2`) and `B = (A x A') . m`,
+/// the curvature is `B W^2 / |A|^3` and `rho = |A|^3 / (W^2 |B|)`. `B` must keep one strict
+/// sign over every piece, the same over the whole generatrix (it bends to one side; the
+/// caller reads which side its offset moves to at one point, and with `B` of one sign that
+/// side holds all along). For `q = along + tol <= 0` (rounding keeps the sign of a sum, and
+/// gives zero only for an exact zero) no point collapses: `rho - along >= rho + tol >=
+/// tol`. Otherwise `rho < q` exactly where `P = (A . A)^3 - q^2 W^4 B^2 < 0` (degree
+/// `12 r - 6`). A piece whose `P` has every coefficient below minus its error collapses,
+/// one with every coefficient above its error does not, and pieces must agree; an
+/// undecided piece is halved (de Casteljau at `1/2`) at most [`MAX_COLLAPSE_HALVINGS`]
+/// deep and [`MAX_COLLAPSE_PIECES`] pieces in all. No recursion: the pieces wait on a work
+/// list. A degree past [`MAX_DEGREE`]'s reach (`12 r - 6`) is [`Collapse::Unproved`].
+///
+/// **The coefficients' error**, from the spans' own: each derivative (`n` times
+/// differences) `2 n e + gamma_2 2 n` of the largest coefficient; each product as
+/// [`product`]; each difference or sum of two `gamma_1`, of three `gamma_2`, `B`'s three
+/// scaled terms `gamma_4`, of the terms' sizes on top of their errors; `q^2` and its scaling
+/// `gamma_4` of `q^2 |W^4 B^2|`; each halving `gamma_(2r + 4)` as [`on_circle`]'s.
+///
+/// # Errors
+///
+/// `Unsupported` for an axis, a point, an offset or a tolerance that is not finite, an
+/// axis whose length is zero or not finite, or a negative tolerance; those of
+/// [`RailSpans::about`] and of the products; [`SolidError::Cancelled`] when `k`'s cancel
+/// token is set (polled once per piece).
+pub fn meridian_collapse(
+    k: &Kernel,
+    nurb: &NurbCurve,
+    axis_point: Point3,
+    axis: Vec3,
+    center: Point3,
+    along: f64,
+    tol: f64,
+) -> Result<Collapse> {
+    let finite = |v: Vec3| v.x.is_finite() && v.y.is_finite() && v.z.is_finite();
+    if !finite(axis_point) || !finite(axis) || !finite(center) || !along.is_finite() {
+        return Err(failed("an axis, centre or offset that is not finite"));
+    }
+    #[allow(clippy::neg_cmp_op_on_partial_ord)] // refuses NaN too
+    if !(tol >= 0.0) || !tol.is_finite() {
+        return Err(failed("a tolerance that is not finite and non-negative"));
+    }
+    let axis_len = axis.length();
+    #[allow(clippy::neg_cmp_op_on_partial_ord)] // refuses NaN too
+    if !(axis_len > 0.0) || !axis_len.is_finite() {
+        return Err(failed("an axis whose length is zero or not finite"));
+    }
+    let a = axis / axis_len;
+    // (finite control points and positive weights: checked here first)
+    let spans = RailSpans::about(nurb, center)?;
+    if 12 * nurb.degree() > MAX_DEGREE + 6 {
+        return Ok(Collapse::Unproved);
+    }
+    // the plane through the axis and the control point farthest from it
+    let mut farthest: Option<(f64, Vec3)> = None;
+    for c in nurb.cpts() {
+        let w = if c.w == NOW { 1.0 } else { c.w };
+        let v = a.cross(Point3::new(c.x / w, c.y / w, c.z / w) - axis_point);
+        let l = v.length();
+        if l.is_finite() && farthest.is_none_or(|(best, _)| l > best) {
+            farthest = Some((l, v));
+        }
+    }
+    let Some((l, v)) = farthest.filter(|&(l, _)| l > 0.0) else {
+        return Ok(Collapse::Unproved);
+    };
+    let m = v / l;
+    let bi = Binomials::new();
+    let one = |v: Vec3| v.x.abs() + v.y.abs() + v.z.abs();
+    let cp = center - axis_point;
+    let s = m.dot(cp);
+    let z = a.dot(cp);
+    let es = gamma(4)
+        * (m.x.abs() * (center.x.abs() + axis_point.x.abs())
+            + m.y.abs() * (center.y.abs() + axis_point.y.abs())
+            + m.z.abs() * (center.z.abs() + axis_point.z.abs()));
+    let tilt = m.dot(a).abs() + gamma(3) * one(m) * one(a);
+    for (_, [hx, hy, hz, hw]) in &spans.spans {
+        let g = hx
+            .scale(m.x)
+            .add(&hy.scale(m.y), &bi)?
+            .add(&hz.scale(m.z), &bi)?
+            .add(&hw.scale(s), &bi)?;
+        let w_max = hw.max_abs_coefficient();
+        let size = m.x.abs() * hx.max_abs_coefficient()
+            + m.y.abs() * hy.max_abs_coefficient()
+            + m.z.abs() * hz.max_abs_coefficient()
+            + s.abs() * w_max;
+        let reach = a.x.abs() * hx.max_abs_coefficient()
+            + a.y.abs() * hy.max_abs_coefficient()
+            + a.z.abs() * hz.max_abs_coefficient()
+            + z.abs() * w_max
+            + (one(a) + z.abs()) * spans.err;
+        let eg = (one(m) + s.abs()) * spans.err
+            + es * (w_max + spans.err)
+            + gamma(5) * size
+            + tilt * reach;
+        #[allow(clippy::neg_cmp_op_on_partial_ord)] // refuses NaN too
+        if !(g.max_abs_coefficient() <= eg) {
+            return Ok(Collapse::Unproved);
+        }
+    }
+
+    let q = along + tol;
+    let mut work: Vec<([Bernstein2; 4], f64, usize)> = spans
+        .spans
+        .iter()
+        .rev()
+        .map(|(_, h)| (h.clone(), spans.err, 0))
+        .collect();
+    let mut side: Option<bool> = None;
+    let mut answer: Option<bool> = None;
+    let mut pieces = 0_usize;
+    while let Some((h, e, depth)) = work.pop() {
+        k.check_cancelled(OP)?;
+        pieces += 1;
+        if pieces > MAX_COLLAPSE_PIECES {
+            return Ok(Collapse::Unproved);
+        }
+        match collapse_piece(&h, e, m, q, &bi)? {
+            PieceCollapse::Decided(bends, collapses) => {
+                if side.is_some_and(|b| b != bends) || answer.is_some_and(|c| c != collapses) {
+                    return Ok(Collapse::Unproved);
+                }
+                side = Some(bends);
+                answer = Some(collapses);
+            }
+            PieceCollapse::Halve => {
+                if depth >= MAX_COLLAPSE_HALVINGS {
+                    return Ok(Collapse::Unproved);
+                }
+                let d = h[3].degrees().0;
+                let e = e + gamma(2 * d + 4) * (largest(&h) + e);
+                let halves = h.map(|c| c.split_u(0.5));
+                let left = halves.clone().map(|(l, _)| l);
+                let right = halves.map(|(_, r)| r);
+                work.push((right, e, depth + 1));
+                work.push((left, e, depth + 1));
+            }
+            PieceCollapse::Unbounded => return Ok(Collapse::Unproved),
+        }
+    }
+    Ok(match answer {
+        Some(true) => Collapse::Everywhere,
+        Some(false) => Collapse::Nowhere,
+        None => Collapse::Unproved,
+    })
+}
+
+/// What [`collapse_piece`] finds on one piece.
+enum PieceCollapse {
+    /// `B`'s sign (`true` positive) and whether the offset passes every centre of
+    /// curvature there.
+    Decided(bool, bool),
+    /// Not settled at this size: halve it.
+    Halve,
+    /// A bound that is not finite: halving does not help.
+    Unbounded,
+}
+
+/// [`meridian_collapse`] on one piece `h` (homogeneous about the centre, within `e`), with
+/// the plane's normal `m` and `q = along + tol`.
+fn collapse_piece(
+    h: &[Bernstein2; 4],
+    e: f64,
+    m: Vec3,
+    q: f64,
+    bi: &Binomials,
+) -> Result<PieceCollapse> {
+    let [hx, hy, hz, hw] = h;
+    if hw.degrees().0 == 0 {
+        // a point: no tangent
+        return Ok(PieceCollapse::Unbounded);
+    }
+    // the derivative (`n` times differences) and its error
+    #[allow(clippy::cast_precision_loss)]
+    let deriv = |p: &Bernstein2, e: f64| {
+        let n = 2.0 * p.degrees().0 as f64;
+        (p.deriv_u(), n * e + gamma(2) * n * p.max_abs_coefficient())
+    };
+    // `l r' - l' r` style differences of two products, and their error
+    let diff = |a: (&Bernstein2, f64),
+                b: (&Bernstein2, f64),
+                c: (&Bernstein2, f64),
+                d: (&Bernstein2, f64)|
+     -> Result<(Bernstein2, f64)> {
+        let (l, el) = product(a.0, a.1, b.0, b.1, bi)?;
+        let (r, er) = product(c.0, c.1, d.0, d.1, bi)?;
+        let size = l.max_abs_coefficient() + r.max_abs_coefficient();
+        Ok((l.sub(&r, bi)?, el + er + gamma(1) * size))
+    };
+    let (dw, edw) = deriv(hw, e);
+    // A = W H' - W' H, a component at a time
+    let tangent = |hi: &Bernstein2| {
+        let (dh, edh) = deriv(hi, e);
+        diff((hw, e), (&dh, edh), (&dw, edw), (hi, e))
+    };
+    let (ax, eax) = tangent(hx)?;
+    let (ay, eay) = tangent(hy)?;
+    let (az, eaz) = tangent(hz)?;
+    let (dax, edax) = deriv(&ax, eax);
+    let (day, eday) = deriv(&ay, eay);
+    let (daz, edaz) = deriv(&az, eaz);
+    let (cx, ecx) = diff((&ay, eay), (&daz, edaz), (&az, eaz), (&day, eday))?;
+    let (cy, ecy) = diff((&az, eaz), (&dax, edax), (&ax, eax), (&daz, edaz))?;
+    let (cz, ecz) = diff((&ax, eax), (&day, eday), (&ay, eay), (&dax, edax))?;
+    let b = cx
+        .scale(m.x)
+        .add(&cy.scale(m.y), bi)?
+        .add(&cz.scale(m.z), bi)?;
+    let eb = m.x.abs() * ecx
+        + m.y.abs() * ecy
+        + m.z.abs() * ecz
+        + gamma(4)
+            * (m.x.abs() * cx.max_abs_coefficient()
+                + m.y.abs() * cy.max_abs_coefficient()
+                + m.z.abs() * cz.max_abs_coefficient());
+    let (lo, hi) = (b.min_coefficient(), b.max_coefficient());
+    if !eb.is_finite() || !lo.is_finite() || !hi.is_finite() {
+        return Ok(PieceCollapse::Unbounded);
+    }
+    let bends = if lo > eb {
+        true
+    } else if hi < -eb {
+        false
+    } else {
+        return Ok(PieceCollapse::Halve);
+    };
+    // (rounding keeps a sum's sign: `q <= 0` is `along + tol <= 0` exactly)
+    if q <= 0.0 {
+        return Ok(PieceCollapse::Decided(bends, false));
+    }
+    let (xx, exx) = product(&ax, eax, &ax, eax, bi)?;
+    let (yy, eyy) = product(&ay, eay, &ay, eay, bi)?;
+    let (zz, ezz) = product(&az, eaz, &az, eaz, bi)?;
+    let aa = xx.add(&yy, bi)?.add(&zz, bi)?;
+    let eaa = exx
+        + eyy
+        + ezz
+        + gamma(2)
+            * (xx.max_abs_coefficient() + yy.max_abs_coefficient() + zz.max_abs_coefficient());
+    let (aa2, eaa2) = product(&aa, eaa, &aa, eaa, bi)?;
+    let (aa3, eaa3) = product(&aa2, eaa2, &aa, eaa, bi)?;
+    let (w2, ew2) = product(hw, e, hw, e, bi)?;
+    let (w4, ew4) = product(&w2, ew2, &w2, ew2, bi)?;
+    let (b2, eb2) = product(&b, eb, &b, eb, bi)?;
+    let (wb, ewb) = product(&w4, ew4, &b2, eb2, bi)?;
+    let q2 = q * q;
+    let t = wb.scale(q2);
+    let et = q2 * ewb + gamma(4) * q2 * wb.max_abs_coefficient();
+    let p = aa3.sub(&t, bi)?;
+    let ep = eaa3 + et + gamma(1) * (aa3.max_abs_coefficient() + t.max_abs_coefficient());
+    let (lo, hi) = (p.min_coefficient(), p.max_coefficient());
+    if !ep.is_finite() || !lo.is_finite() || !hi.is_finite() {
+        return Ok(PieceCollapse::Unbounded);
+    }
+    Ok(if hi < -ep {
+        PieceCollapse::Decided(bends, true)
+    } else if lo > ep {
+        PieceCollapse::Decided(bends, false)
+    } else {
+        PieceCollapse::Halve
+    })
+}
+
 #[cfg(test)]
 mod turn_tests {
     #![allow(clippy::unwrap_used)] // test helpers
@@ -939,17 +1267,27 @@ mod circle_tests {
     const C: Point3 = Point3::new(5.0, 0.0, 1.0);
     const Z: Vec3 = Vec3::new(0.0, 0.0, 1.0);
 
+    fn kernel() -> Kernel {
+        Kernel::default()
+    }
+
     /// An exact arc is proved on its circle at once; at a tolerance of zero (its rounding
     /// is never below it, and no point is off by more) it is neither proved nor refuted.
     #[test]
     fn an_exact_arc_is_proved_on_its_circle() {
         let c = quarter(0.0);
-        assert_eq!(on_circle(&c, C, Z, 2.0, 1e-9).unwrap(), OnCircle::Within);
         assert_eq!(
-            on_circle(&c, C, Z * 3.0, 2.0, 1e-12).unwrap(),
+            on_circle(&kernel(), &c, C, Z, 2.0, 1e-9).unwrap(),
             OnCircle::Within
         );
-        assert_eq!(on_circle(&c, C, Z, 2.0, 0.0).unwrap(), OnCircle::Unproved);
+        assert_eq!(
+            on_circle(&kernel(), &c, C, Z * 3.0, 2.0, 1e-12).unwrap(),
+            OnCircle::Within
+        );
+        assert_eq!(
+            on_circle(&kernel(), &c, C, Z, 2.0, 0.0).unwrap(),
+            OnCircle::Unproved
+        );
     }
 
     /// A bulge of 1e-4 of the radius is found past a tolerance of 1e-7 with its point as a
@@ -958,11 +1296,14 @@ mod circle_tests {
     #[test]
     fn a_bulge_or_another_circle_is_refuted() {
         let c = quarter(1e-4);
-        let OnCircle::Outside(t) = on_circle(&c, C, Z, 2.0, 1e-7).unwrap() else {
+        let OnCircle::Outside(t) = on_circle(&kernel(), &c, C, Z, 2.0, 1e-7).unwrap() else {
             panic!("the bulge is a witness");
         };
         assert!((0.0..=1.0).contains(&t), "{t}");
-        assert_eq!(on_circle(&c, C, Z, 2.0, 1e-3).unwrap(), OnCircle::Within);
+        assert_eq!(
+            on_circle(&kernel(), &c, C, Z, 2.0, 1e-3).unwrap(),
+            OnCircle::Within
+        );
         let exact = quarter(0.0);
         for (center, normal, radius) in [
             (C, Z, 2.001),
@@ -971,7 +1312,7 @@ mod circle_tests {
         ] {
             assert!(
                 matches!(
-                    on_circle(&exact, center, normal, radius, 1e-7).unwrap(),
+                    on_circle(&kernel(), &exact, center, normal, radius, 1e-7).unwrap(),
                     OnCircle::Outside(_)
                 ),
                 "{center:?} {normal:?} {radius}"
@@ -994,7 +1335,7 @@ mod circle_tests {
             .collect();
         let moved = NurbCurve::new(moved, 2, c.knots().to_vec()).unwrap();
         assert_eq!(
-            on_circle(&moved, C + far, Z, 2.0, 1e-9).unwrap(),
+            on_circle(&kernel(), &moved, C + far, Z, 2.0, 1e-9).unwrap(),
             OnCircle::Within
         );
     }
@@ -1003,10 +1344,141 @@ mod circle_tests {
     #[test]
     fn a_circle_that_is_not_finite_is_refused() {
         let c = quarter(0.0);
-        assert!(on_circle(&c, C, Z, f64::NAN, 1e-7).is_err());
-        assert!(on_circle(&c, C, Z, 0.0, 1e-7).is_err());
-        assert!(on_circle(&c, C, Vec3::new(0.0, 0.0, 0.0), 2.0, 1e-7).is_err());
-        assert!(on_circle(&c, C, Z, 2.0, f64::NAN).is_err());
-        assert!(on_circle(&c, C, Z, 2.0, -1.0).is_err());
+        assert!(on_circle(&kernel(), &c, C, Z, f64::NAN, 1e-7).is_err());
+        assert!(on_circle(&kernel(), &c, C, Z, 0.0, 1e-7).is_err());
+        assert!(on_circle(&kernel(), &c, C, Vec3::new(0.0, 0.0, 0.0), 2.0, 1e-7).is_err());
+        assert!(on_circle(&kernel(), &c, C, Z, 2.0, f64::NAN).is_err());
+        assert!(on_circle(&kernel(), &c, C, Z, 2.0, -1.0).is_err());
+    }
+
+    /// solidcraft#17907's review: a finite normal whose length overflows, `(0, 0, 1e200)`,
+    /// is refused. Divided by its infinite length every plane bound was zero, and an arc a
+    /// unit off the plane through `(5, 0, 0)` (at the radius `sqrt 5` from it) was `Within`.
+    #[test]
+    fn a_normal_whose_length_overflows_is_refused() {
+        let c = quarter(0.0);
+        let r = on_circle(
+            &kernel(),
+            &c,
+            Point3::new(5.0, 0.0, 0.0),
+            Vec3::new(0.0, 0.0, 1e200),
+            5.0_f64.sqrt(),
+            1e-7,
+        );
+        assert!(matches!(r, Err(SolidError::Unsupported { .. })), "{r:?}");
+        // the same normal at a length that does not overflow finds the unit gap
+        assert!(matches!(
+            on_circle(
+                &kernel(),
+                &c,
+                Point3::new(5.0, 0.0, 0.0),
+                Vec3::new(0.0, 0.0, 1e100),
+                5.0_f64.sqrt(),
+                1e-7
+            )
+            .unwrap(),
+            OnCircle::Outside(_)
+        ));
+    }
+
+    /// solidcraft#17907's review: a NaN control point or weight is refused before any bound
+    /// is taken (`f64::max` passes a NaN over, so the bounds alone missed it).
+    #[test]
+    fn a_curve_that_is_not_finite_is_refused() {
+        let good = quarter(0.0);
+        for (i, field) in [(1, 0), (1, 3), (2, 2)] {
+            let mut pw = good.cpts().to_vec();
+            let p = pw.get_mut(i).unwrap();
+            match field {
+                0 => p.x = f64::NAN,
+                2 => p.z = f64::NAN,
+                _ => p.w = f64::NAN,
+            }
+            let c = NurbCurve::new(pw, 2, good.knots().to_vec()).unwrap();
+            let r = on_circle(&kernel(), &c, C, Z, 2.0, 1e-7);
+            assert!(
+                matches!(r, Err(SolidError::Unsupported { .. })),
+                "{i} {field}: {r:?}"
+            );
+            let r = meridian_collapse(&kernel(), &c, P, X, C, 4.0, 1e-7);
+            assert!(
+                matches!(r, Err(SolidError::Unsupported { .. })),
+                "{i} {field}: {r:?}"
+            );
+        }
+    }
+
+    /// solidcraft#17907's review: both certificates poll the kernel's cancel token.
+    #[test]
+    fn the_circle_certificates_poll_the_cancel_token() {
+        let mut k = kernel();
+        let token = crate::kernel::CancelToken::new();
+        token.cancel();
+        k.set_cancel_token(token);
+        let c = quarter(0.0);
+        assert!(matches!(
+            on_circle(&k, &c, C, Z, 2.0, 1e-7),
+            Err(SolidError::Cancelled { .. })
+        ));
+        assert!(matches!(
+            meridian_collapse(&k, &c, P, X, C, 4.0, 1e-7),
+            Err(SolidError::Cancelled { .. })
+        ));
+    }
+
+    /// A point of the axis in the arc's plane `z = 1`, and the axis along X in it: the arc
+    /// turned about it is a torus' quarter, the arc in a plane through the axis.
+    const P: Point3 = Point3::new(0.0, 0.0, 1.0);
+    const X: Vec3 = Vec3::new(1.0, 0.0, 0.0);
+
+    /// An exact arc r 2 in a plane through the axis: its offset collapses past its radius,
+    /// not short of it nor away from its centre, and at the radius less the tolerance (its
+    /// radius of curvature exactly the offset plus the tolerance) it is not proved either
+    /// way. Just past that edge, at the radius, it collapses.
+    #[test]
+    fn an_exact_arc_through_the_axis_collapses_past_its_radius() {
+        let k = kernel();
+        let c = quarter(0.0);
+        let at = |along: f64| meridian_collapse(&k, &c, P, X, C, along, 1e-7).unwrap();
+        assert_eq!(at(4.0), Collapse::Everywhere);
+        assert_eq!(at(2.0), Collapse::Everywhere);
+        assert_eq!(at(2.0 - 1e-6), Collapse::Nowhere);
+        assert_eq!(at(1.0), Collapse::Nowhere);
+        assert_eq!(at(-4.0), Collapse::Nowhere);
+        assert_eq!(at(2.0 - 1e-7), Collapse::Unproved);
+    }
+
+    /// An arc out of every plane through the axis (its plane square to the axis, or tilted
+    /// from it) is not proved: its own radius is not where its offset folds.
+    #[test]
+    fn an_arc_out_of_the_axis_plane_is_not_proved() {
+        let k = kernel();
+        let c = quarter(0.0);
+        for axis in [Z, Vec3::new(1.0, 0.0, 1e-6), Vec3::new(1.0, 1.0, 1.0)] {
+            assert_eq!(
+                meridian_collapse(&k, &c, P, axis, C, 4.0, 1e-7).unwrap(),
+                Collapse::Unproved,
+                "{axis:?}"
+            );
+        }
+        // the plane through the axis must hold the axis's point too
+        assert_eq!(
+            meridian_collapse(&k, &c, Point3::new(0.0, 0.0, 1.001), X, C, 4.0, 1e-7).unwrap(),
+            Collapse::Unproved
+        );
+    }
+
+    /// An arc bulged by 1e-4 of its radius: its radius of curvature varies by more than the
+    /// offset's distance from the radius, so an offset at the radius is on both sides of it
+    /// and not proved; far from the radius it is decided on both sides (a real collapse is
+    /// still found, and a real non-collapse still built).
+    #[test]
+    fn a_bulged_arc_is_decided_only_away_from_its_radius() {
+        let k = kernel();
+        let c = quarter(1e-4);
+        let at = |along: f64| meridian_collapse(&k, &c, P, X, C, along, 1e-7).unwrap();
+        assert_eq!(at(2.0), Collapse::Unproved);
+        assert_eq!(at(4.0), Collapse::Everywhere);
+        assert_eq!(at(1.0), Collapse::Nowhere);
     }
 }
