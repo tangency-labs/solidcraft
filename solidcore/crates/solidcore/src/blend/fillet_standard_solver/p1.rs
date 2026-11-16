@@ -17,6 +17,7 @@
 //! | [`ConstantRadiusAssistedFs::jacobian_size`]              | `SmConstantRadiusFS::GetJacobianSize`                 |
 //! | [`ConstantRadiusAssistedFs::offset_radii_can_change`]    | `SmConstantRadiusFS::OffsetRadiiCanChange`            |
 //! | [`ConstantRadiusAssistedFs::fillet_radius`]              | `SmConstantRadiusFS::GetFilletRadius`                 |
+//! | [`ConstantRadiusAssistedFs::oriented_offsets`]           | none (#15906): `m_dFilletRadii[i]*m_dOrientations[i]` |
 //! | [`CONSTANT_RADIUS_FS_TYPE`], [`constant_radius_is_kind_of`] | `SmConstantRadiusFS::GetType`, `GetTypeString`, `IsKindOf` |
 //! | [`CONSTANT_RADIUS_ASSISTED_FS_TYPE`]                     | `SmConstantRadiusAssistedFS::GetType`, `GetTypeString` (`Drop` is the destructor) |
 //! | [`SurfaceSurfaceFs`]                                     | `SmSurfaceSurfaceFS` (members; `Drop` is the destructor) |
@@ -53,6 +54,11 @@
 //! | [`JacobianSurfaces`]                                     | the `rpSurface1`, `rpSurface2` arguments of `LoadJacobian` |
 //!
 //! Deviations:
+//! - **Rails that meet end at one point.** (WR-594, the fork's tangency-labs/smlib
+//!   `5fdefb9`; no longer opt-in) `CircularCrossSectionFsg::create_surface_from_curves`
+//!   moves both rails' end control points to their midpoint at an end where they lie
+//!   within the approximation tolerance of each other, so the point section there lies
+//!   on both rails.
 //! - **Exact circles of one arc count.** (WR-711, not upstream or in the fork)
 //!   `CircularCrossSectionFsg::create_surface_from_curves` with exact arcs takes a second pass when its circles' arc counts differ, building
 //!   each circle of fewer arcs again with the most (`ArcCounts`), as the approximated
@@ -750,6 +756,20 @@ impl ConstantRadiusAssistedFs {
         self.set_offset_by_radius(0)?;
         self.set_offset_by_radius(1)?;
         Ok(offset_dist)
+    }
+
+    /// Not upstream (#15906): the offset distances
+    /// [`ConstantRadiusAssistedFs::setup_offset_values`] gives the two surfaces, each rail's
+    /// fillet radius times its orientation. They are the solver's fixed data, unlike the
+    /// offset surfaces' distances, which `SetSurfacesToZeroOffset` and the offset setups
+    /// overwrite.
+    ///
+    /// # Errors
+    ///
+    /// Those of [`ConstantRadiusAssistedFs::fillet_radius`].
+    pub fn oriented_offsets(&self) -> Result<[f64; 2]> {
+        let [o0, o1] = self.solver.orientations;
+        Ok([self.fillet_radius(0)? * o0, self.fillet_radius(1)? * o1])
     }
 
     /// `GetSurface(i)->SetOffsetDistance(m_dFilletRadii[i]*m_dOrientations[i])`.
@@ -2869,7 +2889,8 @@ impl CircularCrossSectionFsg {
     /// a knot insertion that adds no knot; `SM_ERR_INVALID_INPUT` from `Unitize`; those
     /// of the curve and surface constructions; [`SolidError::InvalidInput`] where
     /// upstream indexes past its cross sections (a second pass for a ruled or revolved
-    /// surface).
+    /// surface), and for an `approx_tol_3d` that is not finite (before either rail is
+    /// edited).
     ///
     /// `center_line` is upstream's `SmBSplineCurve & rCenterLine`: an `SmBSplineCurve`
     /// kind (B-spline, line, ellipse, hyperbola or parabola) whose `GetDegree`, `IsLine`,
@@ -2932,6 +2953,14 @@ impl CircularCrossSectionFsg {
                 "the centre line is not an SmBSplineCurve kind",
             ));
         }
+        // A tolerance that is not finite decides no proximity test below (the rails' ends
+        // would be moved together for a NaN one): refused before either rail is edited.
+        if !approx_tol_3d.is_finite() {
+            return Err(SolidError::invalid_input(
+                OP,
+                "the approximation tolerance is not finite",
+            ));
+        }
         let knots = rail1.knots(None)?.0;
         let knots2 = rail2.knots(None)?.0;
 
@@ -2970,33 +2999,36 @@ impl CircularCrossSectionFsg {
         )?;
 
         // Where the rails meet at an end of the fillet (a degenerate corner whose cross
-        // section is a point), both rails end at that one point: each rail is lifted
-        // from its own surface, and their ends differ by the model's accuracy, so the
-        // skinned surface came out close to singular there instead of exactly
-        // (tangency-labs/smlib@5fdefb9, WR-594).
-        if k.fixes.fillet_rails_meet_at_one_end_point {
-            for end in 0..2 {
-                let ivl = rail1.natural_interval();
-                let t = if end == 0 { ivl.min() } else { ivl.max() };
-                let end1 = rail1.evaluate_point(t)?;
-                let end2 = rail2.evaluate_point(t)?;
-                if end1.distance(end2) >= approx_tol_3d {
-                    continue;
-                }
-                let meet = (end1 + end2) / 2.0;
-                for rail in [&mut *rail1, &mut *rail2] {
-                    let idx = if end == 0 {
-                        0
-                    } else {
-                        rail.number_control_points()?
-                            .checked_sub(1)
-                            .ok_or_else(|| {
-                                SolidError::blend_failed(OP, "the rail has no control points")
-                            })?
-                    };
-                    let (_, w) = rail.control_point(ControlPointForm::EuclideanRational, idx)?;
-                    rail.set_control_point(ControlPointForm::EuclideanRational, idx, meet, w)?;
-                }
+        // section is a point, or a trace that ends where the blend closes up), both rails
+        // end at that one point (not upstream: tangency-labs/smlib@5fdefb9, WR-594). Each
+        // rail is lifted from its own surface, so their ends differ by up to the
+        // approximation tolerance. The cross sections below make a point section wherever
+        // the rails are closer than that tolerance, at the first rail's point, and the
+        // skinning then refuses the second rail for missing it (by more than `MODEL_TOL`)
+        // or keeps a near pole. Ends closer than the tolerance are one point to that
+        // tolerance: their midpoint lies within half of it of both.
+        for end in 0..2 {
+            let ivl = rail1.natural_interval();
+            let t = if end == 0 { ivl.min() } else { ivl.max() };
+            let end1 = rail1.evaluate_point(t)?;
+            let end2 = rail2.evaluate_point(t)?;
+            let one_point = end1.distance(end2) < approx_tol_3d;
+            if !one_point {
+                continue;
+            }
+            let meet = (end1 + end2) / 2.0;
+            for rail in [&mut *rail1, &mut *rail2] {
+                let idx = if end == 0 {
+                    0
+                } else {
+                    rail.number_control_points()?
+                        .checked_sub(1)
+                        .ok_or_else(|| {
+                            SolidError::blend_failed(OP, "the rail has no control points")
+                        })?
+                };
+                let (_, w) = rail.control_point(ControlPointForm::EuclideanRational, idx)?;
+                rail.set_control_point(ControlPointForm::EuclideanRational, idx, meet, w)?;
             }
         }
 
@@ -3633,6 +3665,9 @@ mod tests {
         let r = fs.setup_offset_values(&TsectPnt::new()).expect("setup");
         assert_eq!(r, 1.0);
         assert_eq!(fs.surface(0).expect("s0").offset_distance(), 1.0);
+        // the radii times the orientations, whatever the surfaces' distances hold
+        fs.solver.set_surfaces_to_zero_offset().expect("zero");
+        assert_eq!(fs.oriented_offsets().expect("offsets"), [1.0, -2.0]);
         assert!(constant_radius_is_kind_of(CONSTANT_RADIUS_FS_TYPE));
         assert!(constant_radius_is_kind_of(FILLET_SOLVER_TYPE));
         assert!(!constant_radius_is_kind_of(CONSTANT_DISTANCE_FS_TYPE));

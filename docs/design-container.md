@@ -139,7 +139,7 @@ recorded once. Face names are kept as worked out (saving works out any not asked
 for yet), so a body taken from the file is named exactly as when it was saved.
 A design whose stored names predate format 14 (marked `?`) saves without a model:
 those names find no face or edge, and the features holding them ask for their
-references to be picked again.
+references to be picked again (a sketch names the projections it lost instead).
 
 Both entries are Deflate-compressed (level one) under either compression policy: the
 encoded bodies shrink about fourfold (an imported assembly) to tenfold (modelled parts),
@@ -204,7 +204,12 @@ features (400 marked cylinders: 34 of a 37 MB manifest); each marking is written
 names its markings as runs of places, and a thinned cache keeps all of them. So are the states' sketch keys (the evaluation key of each
 sketch before the state): each distinct set is written once, as the keys it sets and drops
 relative to the set written before it, and a state names its set by place; a thinned cache
-keeps all of them too. When the rest of the
+keeps all of them too. Resolved face points are also stored once per feature and distinct value,
+with each state naming its entries as sorted runs of table positions. These are the points
+found before a feature ran: a pattern or mirror of a cut needs them when the cut split its
+target face. Thinning keeps and budgets the whole table. A cache without this table is
+discarded, so opening rebuilds the points from the design's history.
+When the rest of the
 manifest (the bodies' table, the slices) then leaves too little room, the choice
 is made again within that much less, and the final state alone is always tried.
 A feature whose state is left out records none. The cache is left out (and the

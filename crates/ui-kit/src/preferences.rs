@@ -842,21 +842,14 @@ pub(super) fn rounded_perimeter(r: Rect, radius: f32) -> Vec<Pos2> {
         .collect()
 }
 
-pub use super::preferences_figure_data::{
-    paint_browser_card, paint_browser_column, paint_history_bottom, paint_history_in_browser, paint_history_left, paint_history_under_browser,
-};
-
 #[derive(Clone, Copy)]
 pub struct LayoutPreview {
     pub compact: bool,
     pub labels: bool,
-    pub history: usize,
-    pub translucent: bool,
-    pub dialog_left: bool,
+    pub history_in_browser: bool,
 }
 
-/// One live shell specimen follows workspace, toolbar, panel and dialog placement choices;
-/// `note` is the host's hover text for it.
+/// A schematic of window styling, toolbar labels and History visibility.
 pub fn layout_preview(ui: &mut Ui, state: LayoutPreview, note: &str) {
     super::preferences_figures::paint_layout(ui, state, note);
 }

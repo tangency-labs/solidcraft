@@ -51,6 +51,51 @@ pub fn rotation(point: [f64; 3], axis: [f64; 3], angle: f64) -> Result<Matrix> {
     taken(Transform::rotation(vec3(point), vec3(axis), angle))
 }
 
+/// The orthonormal axes along `x` and in the plane of `x` and `y` (on `y`'s side),
+/// using the kernel's [`Transform::orthonormal_frame`]. If `y` is parallel to `x` or has
+/// no length, the kernel chooses a perpendicular direction. This restores a unit frame after
+/// carrying its axes through a rigid motion.
+///
+/// # Errors
+/// [`Error::Argument`] for non-finite axes or an axis the kernel refuses.
+pub fn orthonormal_axes(x: [f64; 3], y: [f64; 3]) -> Result<[[f64; 3]; 2]> {
+    if !finite(&x) || !finite(&y) {
+        return Err(Error::Argument);
+    }
+    let [x, y] = Transform::orthonormal_frame(vec3(x), vec3(y)).map_err(|_| Error::Argument)?;
+    Ok([[x.x, x.y, x.z], [y.x, y.y, y.z]])
+}
+
+/// Carry planar axes by a rigid `matrix`, keeping UV scales and keeping square source
+/// axes square, through [`Transform::rigid_plane_axes`]. The caller establishes that the
+/// matrix is a rigid motion; skew source axes retain their parametrisation.
+///
+/// # Errors
+/// [`Error::Argument`] for axes or a map the kernel refuses.
+pub fn rigid_plane_axes(matrix: &Matrix, u: [f64; 3], v: [f64; 3]) -> Result<[[f64; 3]; 2]> {
+    let [u, v] = Transform { m: *matrix }
+        .rigid_plane_axes(vec3(u), vec3(v))
+        .map_err(|_| Error::Argument)?;
+    Ok([[u.x, u.y, u.z], [v.x, v.y, v.z]])
+}
+
+/// Carry a plane given by its origin and two points through a rigid motion, as an origin
+/// and axes, through [`Transform::rigid_plane_through`]. The caller establishes a rigid map.
+///
+/// # Errors
+/// [`Error::Argument`] for coordinates or a map the kernel refuses.
+pub fn rigid_plane_through(
+    matrix: &Matrix,
+    origin: [f64; 3],
+    u: [f64; 3],
+    v: [f64; 3],
+) -> Result<([f64; 3], [[f64; 3]; 2])> {
+    let (o, [u, v]) = Transform { m: *matrix }
+        .rigid_plane_through(vec3(origin), vec3(u), vec3(v))
+        .map_err(|_| Error::Argument)?;
+    Ok(([o.x, o.y, o.z], [[u.x, u.y, u.z], [v.x, v.y, v.z]]))
+}
+
 /// The scale by `factor` in every direction about `centre`, which it keeps.
 ///
 /// # Errors
@@ -100,6 +145,31 @@ pub fn inverse(matrix: &Matrix) -> Result<Matrix> {
     taken(map.inverse())
 }
 
+/// How far `point` stands from `origin` along `direction`: the dot product of `point - origin`
+/// with `direction`, which is as many lengths as `direction` is long (a unit direction gives
+/// the distance itself). Negative behind `origin`.
+pub fn distance_along(origin: [f64; 3], direction: [f64; 3], point: [f64; 3]) -> f64 {
+    Vec3::from(point).distance_along(Vec3::from(origin), Vec3::from(direction))
+}
+
+/// How far the turn in `matrix` (its rows 0 to 2; a translation in it is ignored) moves the
+/// point `pivot` that it is about, as the move to add to the turn about the origin to make it
+/// the turn about `pivot`, through [`Transform::pivot_displacement`].
+///
+/// # Errors
+/// [`Error::Argument`] for a matrix or pivot with a number not finite, or a displacement not.
+pub fn pivot_displacement(matrix: &Matrix, pivot: [f64; 3]) -> Result<[f64; 3]> {
+    if !finite(matrix.as_flattened()) || !finite(&pivot) {
+        return Err(Error::Argument);
+    }
+    let d = Transform { m: *matrix }.pivot_displacement(vec3(pivot));
+    let d = [d.x, d.y, d.z];
+    if !finite(&d) {
+        return Err(Error::Argument);
+    }
+    Ok(d)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -145,6 +215,29 @@ mod tests {
             assert!(regular(&m));
             assert_eq!(then(&m, &m).unwrap(), IDENTITY);
         }
+    }
+
+    #[test]
+    fn the_displacement_of_a_pivot_is_what_a_turn_about_it_adds() {
+        let q = std::f64::consts::FRAC_PI_2;
+        let about_origin = rotation([0.0; 3], [0.0, 0.0, 1.0], q).unwrap();
+        let pivot = [0.0, 10.0, 0.0];
+        let d = pivot_displacement(&about_origin, pivot).unwrap();
+        // The turn about the pivot is the turn about the origin, then this move.
+        let about_pivot = rotation(pivot, [0.0, 0.0, 1.0], q).unwrap();
+        for p in [[1.0, 0.5, 0.5], [-3.0, 2.0, 7.0]] {
+            let turned = apply(&about_origin, p);
+            assert!(near(
+                [turned[0] + d[0], turned[1] + d[1], turned[2] + d[2]],
+                apply(&about_pivot, p),
+                1e-12
+            ));
+        }
+        assert_eq!(pivot_displacement(&IDENTITY, pivot).unwrap(), [0.0; 3]);
+        assert_eq!(
+            pivot_displacement(&about_origin, [f64::NAN, 0.0, 0.0]),
+            Err(Error::Argument)
+        );
     }
 
     #[test]
@@ -226,5 +319,13 @@ mod tests {
         // a stack whose numbers overflow
         let far = translation([1e308, 0.0, 0.0]).unwrap();
         assert_eq!(then(&far, &far), Err(Error::Argument));
+    }
+
+    #[test]
+    fn distance_along_is_signed_and_ignores_the_sideways_offset() {
+        let (o, d) = ([1.0, 2.0, 3.0], [0.0, 1.0, 0.0]);
+        assert!((distance_along(o, d, [9.0, 6.0, -4.0]) - 4.0).abs() < 1e-12);
+        assert!((distance_along(o, d, [1.0, -1.0, 3.0]) + 3.0).abs() < 1e-12);
+        assert_eq!(distance_along(o, d, o), 0.0);
     }
 }

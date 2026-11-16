@@ -458,17 +458,18 @@ pub enum Constraint {
 }
 
 impl Constraint {
+    /// Every rule, the likeliest first for a pair of references (see [`Constraint::fitting`]).
     pub const ALL: [Constraint; 10] = [
         Constraint::Mate,
         Constraint::Flush,
-        Constraint::Distance,
         Constraint::Concentric,
         Constraint::Insert,
+        Constraint::Tangent,
+        Constraint::PointOnAxis,
+        Constraint::Distance,
         Constraint::Parallel,
         Constraint::Perpendicular,
         Constraint::Angle,
-        Constraint::Tangent,
-        Constraint::PointOnAxis,
     ];
 
     /// The rule's command name (`mate`, `point_on_axis`).
@@ -487,6 +488,51 @@ impl Constraint {
         }
     }
 
+    /// How the rule is kept as a joint between references of shapes `a` and `b`; `None` when they
+    /// don't fit it. The one table of which rules fit which references: the commands refuse what it
+    /// refuses, and the Constrain dialog offers what it fits.
+    pub fn fit(self, a: RefShape, b: RefShape) -> Option<Fit> {
+        use RefShape::*;
+        let fixed = |kind, flip| Some(Fit { kind, flip: Some(flip), swap: false });
+        let facing = |kind| Some(Fit { kind, flip: None, swap: false });
+        // A line: a round face's or edge's axis, or an axis itself.
+        let axial = |s: RefShape| matches!(s, Round | Axis);
+        // A position: a point, or an edge's middle.
+        let spot = |s: RefShape| matches!(s, Point | Edge);
+        // An orientation rule turns b by both references' directions: a point has none (its frame's
+        // z is only a default), so it fits none of them.
+        let directed = a != Point && b != Point;
+        // A rule between one plane or axis and something else: the plane or axis on side a.
+        let onto = |kind, want: &dyn Fn(RefShape) -> bool, other_ok: &dyn Fn(RefShape) -> bool| {
+            if want(a) && other_ok(b) {
+                Some(Fit { kind, flip: Some(false), swap: false })
+            } else if want(b) && other_ok(a) {
+                Some(Fit { kind, flip: Some(false), swap: true })
+            } else {
+                None
+            }
+        };
+        match (self, a, b) {
+            (Constraint::Mate, Plane, Plane) => fixed(JointKind::Planar, false),
+            (Constraint::Flush, Plane, Plane) => fixed(JointKind::Planar, true),
+            (Constraint::Distance, Plane, Plane) => facing(JointKind::Planar),
+            (Constraint::Distance, ..) => onto(JointKind::PointOnPlane, &|s| s == Plane, &|s| s == Round || spot(s)),
+            (Constraint::Concentric, ..) if axial(a) && axial(b) => facing(JointKind::Cylindrical),
+            (Constraint::Insert, Round, Round) => facing(JointKind::Revolute),
+            (Constraint::Parallel, ..) if directed => facing(JointKind::Parallel),
+            (Constraint::Perpendicular, ..) if directed => fixed(JointKind::Perpendicular, false),
+            (Constraint::Angle, ..) if directed => fixed(JointKind::Angle, false),
+            (Constraint::Tangent, ..) => onto(JointKind::LineOnPlane, &|s| s == Plane, &|s| s == Round),
+            (Constraint::PointOnAxis, ..) => onto(JointKind::PointOnLine, &axial, &spot),
+            _ => None,
+        }
+    }
+
+    /// The rules references of shapes `a` and `b` fit, the likeliest first.
+    pub fn fitting(a: RefShape, b: RefShape) -> Vec<Constraint> {
+        Constraint::ALL.into_iter().filter(|c| c.fit(a, b).is_some()).collect()
+    }
+
     /// Case, spaces, `_` and `-` are ignored; `coincident` and `axis` are also taken.
     pub fn parse(s: &str) -> Option<Constraint> {
         let key = s.to_ascii_lowercase().replace([' ', '_', '-'], "");
@@ -496,6 +542,45 @@ impl Constraint {
             _ => Constraint::ALL.into_iter().find(|c| c.name().replace('_', "") == key),
         }
     }
+}
+
+/// What an assembly constraint's reference is, for the rules that need one kind.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RefShape {
+    /// A planar face, a frame or a datum plane: its plane and normal.
+    Plane,
+    /// A round face's or edge's centre and axis.
+    Round,
+    /// A point (a vertex, a sketch point): its position only.
+    Point,
+    /// A datum or construction axis: a line, with no rim or radius.
+    Axis,
+    /// A straight or curved edge that is not round: its middle (or a corner), and the direction of
+    /// the face it bounds.
+    Edge,
+}
+
+impl RefShape {
+    /// The shape of a joint origin's snap.
+    pub fn of(snap: &Snap) -> RefShape {
+        match snap {
+            Snap::FaceCenter { .. } | Snap::Frame { .. } | Snap::Plane { .. } => RefShape::Plane,
+            Snap::Axis { .. } => RefShape::Axis,
+            Snap::CircleCenter { .. } => RefShape::Round,
+            Snap::Edge { .. } => RefShape::Edge,
+            Snap::Point { .. } => RefShape::Point,
+        }
+    }
+}
+
+/// How a rule is kept as a joint: its kind, whether b faces along a (`flip`), and whether the two
+/// references go the other way round (the plane or axis on side a).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Fit {
+    pub kind: JointKind,
+    /// `Some` where the rule fixes the facing; `None` keeps the parts' facing now.
+    pub flip: Option<bool>,
+    pub swap: bool,
 }
 
 /// A joint between two occurrences.
@@ -1023,7 +1108,7 @@ fn nearest_plane(doc: &Document, st: &ModelState, o: &JointOrigin, pick: Vec3) -
     }
     let (_, b, f, n) = best.ok_or_else(|| DocError::Invalid("joint origin: no planar face there".into()))?;
     // The face's middle: its outline's on a face with holes.
-    let c = face::outline_centre(&b.mesh(), f.index, f.centroid, n).unwrap_or(f.centroid);
+    let c = face::outline_centre(&b.body, f.index, f.centroid, n).unwrap_or(f.centroid);
     Ok(match doc.model_body_offset(b) {
         Some(m) => (apply_point(m, c), apply_vector(m, n)),
         None => (c, n),
@@ -1101,6 +1186,45 @@ pub fn resolve_origin(doc: &Document, st: &ModelState, o: &JointOrigin) -> Resul
         let on_part = resolve_origin(doc, st, &JointOrigin::new(o.part(), o.snap.clone()))?;
         return Ok(mat_mul(&inside_transform(doc, o)?, &on_part));
     }
+    // A face, edge or round face is found by searching the bodies' triangles, and its frame does
+    // not depend on the joint's values: kept for as long as the component's bodies are the same.
+    if matches!(o.snap, Snap::FaceCenter { .. } | Snap::Edge { .. } | Snap::CircleCenter { .. }) {
+        let kept = origin_key(doc, st, o);
+        if let Some((key, bodies)) = &kept
+            && let Some(found) = st.origin_frames.get(key, bodies)
+        {
+            return Ok(found);
+        }
+        let made = resolve_snap(doc, st, o)?;
+        st.origin_frames.note_resolved();
+        if let Some((key, bodies)) = kept {
+            st.origin_frames.put(key, made, bodies);
+        }
+        return Ok(made);
+    }
+    resolve_snap(doc, st, o)
+}
+
+/// What [`ModelState::origin_frames`] keys an origin by: its definition, its component, and each
+/// body of the component's identity and offset, with the bodies themselves to check a hit
+/// against. `None` when a body has no identity to key by.
+fn origin_key(doc: &Document, st: &ModelState, o: &JointOrigin) -> Option<((String, u64, Vec<u64>), Vec<solidcraft_kernel::Body>)> {
+    use std::hash::{Hash, Hasher};
+    let comp = component_of(doc, o.part()).ok()?;
+    let (mut bodies, mut kept) = (Vec::new(), Vec::new());
+    for b in component_bodies(doc, st, comp) {
+        let mut h = std::collections::hash_map::DefaultHasher::new();
+        b.name.hash(&mut h);
+        doc.model_body_offset(b).iter().flat_map(|m| m.iter().flatten()).for_each(|v| v.to_bits().hash(&mut h));
+        bodies.push(b.geometry_key()?);
+        bodies.push(h.finish());
+        kept.push(b.body.clone());
+    }
+    Some(((format!("{:?}", o.snap), comp, bodies), kept))
+}
+
+/// [`resolve_origin`] of an origin on one part, from the bodies.
+fn resolve_snap(doc: &Document, st: &ModelState, o: &JointOrigin) -> Result<Mat> {
     let bad = || DocError::Invalid("joint origin: degenerate frame".into());
     match &o.snap {
         Snap::Frame { origin, z, x } => frame(*origin, *z, *x).ok_or_else(bad),
@@ -2519,7 +2643,23 @@ fn build<'a>(doc: &'a Document, st: &'a ModelState, vals: &Values, sol: &mut Sol
             (Ok(fa), Ok(fb)) => {
                 frames.insert(j.id, JointFrames::new(fa, fb));
             }
-            (Err(e), _) | (_, Err(e)) => sol.errors.push((j.id, j.name.clone(), e.to_string())),
+            (Err(e), _) | (_, Err(e)) => {
+                sol.errors.push((j.id, j.name.clone(), e.to_string()));
+                // A rigid joint whose origin is lost (its face is gone) still holds its two
+                // parts as they are now: leaving it out would cut every part joined through it
+                // from the grounded ones, and driving a joint on the far side would move nothing.
+                if j.kind == JointKind::Rigid {
+                    // Traversal applies the joint's constant link (its flip, angle and offset),
+                    // so the frame carries that link's inverse and the part lands on its saved pose.
+                    let link = link_of(j, &[]);
+                    let held = mat_inverse(&occurrence_world(doc, j.a.occurrence))
+                        .map(|inv| mat_mul(&inv, &occurrence_world(doc, j.b.occurrence)))
+                        .and_then(|held| mat_inverse(&link).map(|inv| mat_mul(&held, &inv)));
+                    if let Some(held) = held {
+                        frames.insert(j.id, JointFrames::new(held, IDENTITY));
+                    }
+                }
+            }
         }
     }
     // Fixed: the root, grounded occurrences; with neither involved, the first joint's A side.
@@ -3078,8 +3218,15 @@ mod tests {
     /// values land on their joints; a value for a missing joint is skipped.
     #[test]
     fn a_solution_places_occurrences_in_their_moved_parents() {
-        let occurrence =
-            |id, component, parent| crate::Occurrence { id, component, parent, name: format!("O{id}"), transform: IDENTITY, grounded: false };
+        let occurrence = |id, component, parent| crate::Occurrence {
+            id,
+            component,
+            parent,
+            name: format!("O{id}"),
+            transform: IDENTITY,
+            grounded: false,
+            expressed_moves: Vec::new(),
+        };
         // Component 1 sits at the root twice (its first occurrence is the frame its children sit
         // in), component 2 inside 1 and component 3 inside 2.
         let mut doc = Document {

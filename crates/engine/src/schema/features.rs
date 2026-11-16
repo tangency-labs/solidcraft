@@ -581,6 +581,10 @@ pub struct BoundingSolidParams {
     /// How much larger than the bodies on every side. Default: 0.
     #[serde(default)]
     pub margin: Option<LengthExpr>,
+    /// A margin for each side instead of `margin`, in this order: -X, +X, -Y, +Y, -Z, +Z. A
+    /// negative one sets that side into the bodies, but not past their opposite side.
+    #[serde(default)]
+    pub margins: Option<[LengthExpr; 6]>,
     #[serde(flatten, deserialize_with = "feature_common")]
     pub common: FeatureCommon,
 }
@@ -858,6 +862,9 @@ pub struct PressPullParams {
     /// The body the face or edges are on. Default: found from the points.
     #[serde(default)]
     pub body: Option<String>,
+    /// The body the flat face is on, when `body` is omitted. Disambiguates touching faces.
+    #[serde(default)]
+    pub face_body: Option<String>,
 }
 
 /// A fillet's or chamfer's face was pressed or pulled: the feature it belongs to changed size.

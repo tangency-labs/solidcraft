@@ -66,8 +66,13 @@ pub const TABLE: &[(&str, Class)] = &[
     ("gpu", Class::Layer(5)),
     ("mcp", Class::Layer(5)),
     ("testkit", Class::Testkit),
+    // App-agnostic plugin contracts and the component runtime (RFC 0002 §6b).
+    ("craft-plugin", Class::Shared),
+    ("craft-plugin-wasm", Class::Shared),
     // the sRGB transfer rule and the surface-analysis palette, read by the renderer and the theme (#13291)
     ("color", Class::Shared),
+    // length display: a millimetre value in a design unit with its decimal places (no dependencies)
+    ("display-units", Class::Shared),
     // the widget handle and rect registry UI components publish into and scenarios/the control channel read (#12936)
     ("ui-registry", Class::Shared),
     // message catalogs' machinery and bidirectional text: lookup, formatting, language choice (#13290)
@@ -197,6 +202,11 @@ pub enum Violation {
         krate: String,
         dep: String,
     },
+    PluginDependsOnSolidCraft {
+        krate: String,
+        via: String,
+        dep: String,
+    },
 }
 
 impl std::fmt::Display for Violation {
@@ -222,6 +232,9 @@ impl std::fmt::Display for Violation {
             }
             Violation::SharedDependsOnApp { krate, dep } => {
                 write!(f, "{krate}: shared crate must depend only on other shared crates, solidcore and external crates, not workspace crate {dep}")
+            }
+            Violation::PluginDependsOnSolidCraft { krate, via, dep } => {
+                write!(f, "{krate}: plugin host reaches SolidCraft crate `{dep}` through {via}; plugin crates must be app-agnostic (RFC 0002 §6b)")
             }
         }
     }
@@ -290,8 +303,31 @@ fn check_with(crates: &[Crate], classify: impl Fn(&str) -> Option<Class>) -> Vec
         }
     }
     out.extend(ui_reached_below_l5(crates, &classify));
+    out.extend(plugin_reaches_solidcraft(crates));
     out.sort_by_key(|v| v.to_string());
     out.dedup();
+    out
+}
+
+/// Plugin contracts and runtimes must remain independent of every SolidCraft crate, including
+/// shared crates and test dependencies. Follow workspace dependencies to catch indirect uses too.
+fn plugin_reaches_solidcraft(crates: &[Crate]) -> Vec<Violation> {
+    let by_name: std::collections::HashMap<&str, &Crate> = crates.iter().map(|c| (c.name.as_str(), c)).collect();
+    let mut out = Vec::new();
+    for c in crates.iter().filter(|c| matches!(c.name.as_str(), "craft-plugin" | "craft-plugin-wasm")) {
+        let (mut seen, mut todo) = (std::collections::BTreeSet::new(), vec![c.name.as_str()]);
+        while let Some(name) = todo.pop() {
+            let Some(k) = by_name.get(name) else { continue };
+            for d in &k.deps {
+                if d.name == "solidcraft" || d.name.starts_with("solidcraft-") {
+                    out.push(Violation::PluginDependsOnSolidCraft { krate: c.name.clone(), via: name.to_owned(), dep: d.name.clone() });
+                }
+                if d.workspace && seen.insert(d.name.as_str()) {
+                    todo.push(d.name.as_str());
+                }
+            }
+        }
+    }
     out
 }
 
@@ -721,6 +757,49 @@ mod tests {
     fn shared_crate_must_not_use_testkit_even_in_tests() {
         let v = check(&[c("solidcraft-ui-registry", &[("solidcraft-testkit", Dev, true)])]);
         assert!(matches!(v[..], [Violation::SharedDependsOnApp { .. }]));
+    }
+
+    #[test]
+    fn plugin_crates_are_shared_and_may_use_each_other() {
+        assert_eq!(classify("craft-plugin"), Some(Class::Shared));
+        assert_eq!(classify("craft-plugin-wasm"), Some(Class::Shared));
+        let g =
+            [c("craft-plugin", &[("serde", Normal, false)]), c("craft-plugin-wasm", &[("craft-plugin", Normal, true), ("wasmtime", Normal, false)])];
+        assert!(check(&g).is_empty());
+    }
+
+    #[test]
+    fn plugin_crates_must_not_use_any_solidcraft_crate() {
+        for plugin in ["craft-plugin", "craft-plugin-wasm"] {
+            for kind in [Normal, Dev, Build] {
+                // Even shared SolidCraft crates and dependencies outside the workspace are forbidden.
+                for dep in ["solidcraft-ui-text", "solidcraft-engine", "solidcraft-testkit", "solidcraft"] {
+                    for workspace in [true, false] {
+                        let v = check(&[c(plugin, &[(dep, kind, workspace)])]);
+                        assert!(
+                            v.iter().any(
+                                |v| matches!(v, Violation::PluginDependsOnSolidCraft { krate, dep: found, .. } if krate == plugin && found == dep)
+                            ),
+                            "{plugin}: {dep} [{kind:?}], workspace={workspace}"
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn plugin_crates_must_not_reach_solidcraft_indirectly() {
+        let classes = |pkg: &str| if pkg == "generic-helper" { Some(Class::Shared) } else { classify(pkg) };
+        let g = [
+            c("craft-plugin-wasm", &[("craft-plugin", Normal, true)]),
+            c("craft-plugin", &[("generic-helper", Dev, true)]),
+            c("generic-helper", &[("solidcraft-ui-text", Build, true), ("craft-plugin", Normal, true)]),
+        ];
+        let v = check_with(&g, classes);
+        for plugin in ["craft-plugin", "craft-plugin-wasm"] {
+            assert!(v.iter().any(|v| matches!(v, Violation::PluginDependsOnSolidCraft { krate, via, dep } if krate == plugin && via == "generic-helper" && dep == "solidcraft-ui-text")));
+        }
     }
 
     const PUB: &str = "# public\nsolidcore-ops\nsolidcore-tess\nsolidcore-record\n";

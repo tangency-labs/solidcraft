@@ -84,6 +84,9 @@ pub struct Request {
     /// Insert the file as a mesh whatever its extension says: a PLY goes to `pointcloud.insert`
     /// unless the person chose Insert Mesh for it (then it needs its faces).
     pub mesh: bool,
+    /// Insert the board this file (a zip, or any file in its folder) belongs to: its Gerber and
+    /// Excellon files as one (`file.insert_gerber` with the file as its `set`).
+    pub gerber: bool,
     /// The level the caller's own `param_check` named and the warnings it found before the run:
     /// the reply says both (#9184).
     pub(crate) param_check: Option<(solidcraft_engine::schema::ParamCheck, Vec<String>)>,
@@ -96,6 +99,9 @@ pub struct Request {
     pub tab: Option<u64>,
     /// How many times it ran again because the design changed while it ran.
     pub tries: u8,
+    /// The Verify preference added `verify` to the options; unlike a caller's own option it must
+    /// not stop an already-open design from being reused. Its check then runs separately.
+    pub(crate) auto_verify: bool,
 }
 
 impl Request {
@@ -110,11 +116,13 @@ impl Request {
             design: None,
             chat_turn: None,
             mesh: false,
+            gerber: false,
             param_check: None,
             note: None,
             serial: crate::operations::serial(),
             tab: None,
             tries: 0,
+            auto_verify: false,
         }
     }
     /// It adds what it reads to the active design.
@@ -134,6 +142,11 @@ impl Request {
     fn command(&self) -> (&'static str, Value) {
         match &self.kind {
             Kind::Open => ("doc.open", self.params()),
+            Kind::Insert if self.gerber => {
+                let mut params = self.options.clone();
+                params.insert("set".into(), json!(self.path));
+                ("file.insert_gerber", Value::Object(params))
+            }
             Kind::Insert if self.mesh || solidcraft_engine::io::is_mesh_path(&self.path) => ("file.insert_mesh", self.params()),
             Kind::Insert if solidcraft_engine::io::is_point_cloud_path(&self.path) => ("pointcloud.insert", self.params()),
             Kind::Insert => (insert_command(&self.path), self.params()),
@@ -288,7 +301,7 @@ pub struct FileLoad {
     /// second run doesn't read it again.
     warm: Option<(u64, Box<Session>)>,
     /// Whether the card over the design is showing this frame: the file operation's progress and
-    /// Cancel when the operations panel cannot show its row (Wait for files, off, or no room).
+    /// Cancel when the operations panel cannot show its row (Home, Wait for files, off, or no room).
     pub(crate) card_shown: bool,
     /// Tests: the next load waits before this feature until cancelled.
     #[cfg(test)]
@@ -446,7 +459,27 @@ pub fn begin(app: &mut SolveApp, path: &str, insert: bool) {
     if crate::mesh_units::ask(app, path, insert) {
         return;
     }
-    let _ = begin_request(app, Request::new(path, if insert { Kind::Insert } else { Kind::Open }));
+    let mut request = Request::new(path, if insert { Kind::Insert } else { Kind::Open });
+    if !insert && app.preferences.verify_opened_designs && solidcraft_engine::io::is_design_path(path) {
+        request.options.insert("verify".into(), json!(true));
+        request.auto_verify = true;
+    }
+    let _ = begin_request(app, request);
+}
+
+/// Insert PCB: insert the board the picked `path` belongs to, beside the window. On the `web`
+/// only a zip is taken: some browsers (iPhone, iPad) don't filter the picker, and one uploaded
+/// file would be read with whatever else was uploaded before.
+pub(crate) fn insert_board(app: &mut SolveApp, path: &str, web: bool) {
+    if web && !solidcraft_engine::io::is_zip_path(path) {
+        app.set_status(solidcraft_ui_text::tr("ui.insert_pcb.web_zip"), true);
+        return;
+    }
+    let mut request = Request::new(path, Kind::Insert);
+    request.gerber = true;
+    if let Err(e) = begin_request(app, request) {
+        app.set_status(e, true);
+    }
 }
 
 /// A STEP, IGES, FreeCAD or Rhino file the app opens or inserts gets a `Group #N` history folder
@@ -458,16 +491,49 @@ pub(crate) fn step_folder_option(app: &SolveApp, path: &str, options: &mut serde
     }
 }
 
+/// The preference's `reuse_import` default for an import-backed open only: a native design's
+/// request keeps empty options, so `reuse_open` can still switch to its open tab.
+fn default_reuse_import(app: &SolveApp, request: &mut Request) {
+    if request.kind == Kind::Open && solidcraft_engine::io::is_step_path(&request.path) {
+        request.options.entry("reuse_import").or_insert(Value::Bool(app.preferences.reuse_imports));
+    }
+}
+
+/// Import options the preferences add for `path` (with `history: solids` a FreeCAD file brings
+/// only its solids, as before its history was rebuilt).
+pub(crate) fn preferred_options(app: &SolveApp, path: &str) -> serde_json::Map<String, Value> {
+    let mut out = serde_json::Map::new();
+    let freecad = std::path::Path::new(path).extension().and_then(|e| e.to_str()).is_some_and(|e| e.eq_ignore_ascii_case("fcstd"));
+    if freecad && !app.preferences.freecad_history {
+        out.insert("history".into(), json!("solids"));
+    }
+    out
+}
+
 /// Queue a file operation; on the web (no threads) it runs now.
 pub fn begin_request(app: &mut SolveApp, mut request: Request) -> Result<(), String> {
+    if request.kind == Kind::Open
+        && app.preferences.verify_opened_designs
+        && solidcraft_engine::io::is_design_path(&request.path)
+        && !request.options.contains_key("verify")
+    {
+        request.options.insert("verify".into(), json!(true));
+        request.auto_verify = true;
+    }
     if crate::control::chat_turn_cancelled(request.chat_turn.as_deref()) {
         request.answer(Err("the agent chat turn ended".into()));
         return Ok(());
     }
+    default_reuse_import(app, &mut request);
     if app.file_load.idle() && reuse_open(app, &request) {
         return Ok(());
     }
     if matches!(request.kind, Kind::Open | Kind::Insert) {
+        // After `reuse_open`: an already open tab is kept whatever the import preferences say,
+        // as the folder option is.
+        for (k, v) in preferred_options(app, &request.path) {
+            request.options.entry(k).or_insert(v);
+        }
         step_folder_option(app, &request.path, &mut request.options);
     }
     #[cfg(target_arch = "wasm32")]
@@ -478,6 +544,10 @@ pub fn begin_request(app: &mut SolveApp, mut request: Request) -> Result<(), Str
             return Ok(());
         }
         let r = match &request.kind {
+            Kind::Insert if request.gerber => {
+                let (command, params) = request.command();
+                app.run(command, params)
+            }
             Kind::Insert => {
                 app.insert_path_with(&request.path, &request.options, request.mesh);
                 Ok(Value::Null)
@@ -487,6 +557,11 @@ pub fn begin_request(app: &mut SolveApp, mut request: Request) -> Result<(), Str
                 let r = solidcraft_engine::io::vfs::allowing_hosts(&request.allow_hosts, || app.run(command, params));
                 if r.is_ok() {
                     app.fit_view();
+                    if request.note.is_none()
+                        && let Some(note) = linked_signing_note(&request.path)
+                    {
+                        app.set_status(note, false);
+                    }
                     if let Some(note) = &request.note {
                         app.set_status(note.clone(), false);
                     }
@@ -558,8 +633,11 @@ fn reuse_open(app: &mut SolveApp, request: &Request) -> bool {
     }
     let reused = solidcraft_engine::io::vfs::scoped(request.scope.clone(), || {
         solidcraft_engine::io::vfs::check(&request.path).map_err(|e| e.to_string())?;
-        // Let the command validate import-specific options, even for an existing tab.
-        if !request.options.is_empty() {
+        // Let the command validate import-specific options, even for an existing tab. The
+        // caller's own `verify` is such an option; the Verify preference's automatic one is not.
+        let only_auto_verify =
+            request.auto_verify && request.options.len() == 1 && request.options.get("verify").and_then(Value::as_bool) == Some(true);
+        if !request.options.is_empty() && !only_auto_verify {
             return Ok(false);
         }
         crate::agent_chat::with_tool_request(app, request.chat_turn.as_ref(), |app| crate::documents::reuse_path(app, &request.path))
@@ -567,6 +645,11 @@ fn reuse_open(app: &mut SolveApp, request: &Request) -> bool {
     match reused {
         Ok(false) => false,
         Ok(true) => {
+            // The session is already open; its saved file still gets the check the preference
+            // asked for (on a worker, so a large design does not hold up this request).
+            if request.auto_verify {
+                crate::verify_job::start_after_reuse(app);
+            }
             let s = &app.session;
             request.answer(Ok(json!({"path": request.path, "features": s.doc.features.len(),
                 "errors": s.model.results.iter().filter(|r| r.error.is_some()).count(), "name": s.doc.name})));
@@ -648,14 +731,28 @@ pub fn control(app: &mut SolveApp, req: crate::control::ControlRequest) -> Optio
         design: None,
         chat_turn: req.chat_turn,
         mesh: false,
+        gerber: false,
         param_check,
         note: None,
         serial: crate::operations::serial(),
         tab: None,
         tries: 0,
+        auto_verify: false,
     };
     let _ = begin_request(app, request);
     None
+}
+
+/// What to say once a linked design is inserted: whether its file carries a signature, without
+/// reading every payload to check it. `None` for an unsigned file (nothing to add to the usual
+/// "Inserted …" message).
+fn linked_signing_note(path: &str) -> Option<String> {
+    let summary = solidcraft_engine::io::read_design_provenance_summary_file(path)?;
+    let name = std::path::Path::new(path).file_name().map_or_else(|| path.to_string(), |name| name.to_string_lossy().into_owned());
+    Some(match &summary.signer {
+        Some(signer) => solidcraft_ui_text::format("ui.insert_signed", &[("name", &name), ("key", signer)]),
+        None => solidcraft_ui_text::format("ui.insert_signed_unknown", &[("name", &name)]),
+    })
 }
 
 /// An autosave that failed to load goes back in the recovery list, so it can be discarded (or
@@ -1465,6 +1562,7 @@ fn behind(app: &mut SolveApp, mut running: Running) {
             crate::operations::ended(app, &key, Outcome::Done);
             if request.kind == Kind::Open {
                 app.home.add_recent(&request.path);
+                crate::documents::design_opened(app, &request.path);
             }
             // A recovered design takes its entry with it into the background tab: saved there
             // first, so the old entry can go without the design being lost to a crash.
@@ -1647,10 +1745,18 @@ fn land_now(app: &mut SolveApp, mut running: Running) {
                     );
                     if !request.insert() {
                         app.say_newer_file();
+                        app.say_signature(&made.result);
+                    } else if request.note.is_none()
+                        && let Some(note) = linked_signing_note(&request.path)
+                    {
+                        app.set_status(note, false);
                     }
                     if let Some(note) = &request.note {
                         app.set_status(note.clone(), false);
                     }
+                }
+                if request.kind == Kind::Open {
+                    crate::documents::design_opened(app, &request.path);
                 }
                 request.answer(Ok(made.result));
             }
@@ -1735,10 +1841,10 @@ fn load_steps(
 
 pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     // The operations panel shows the file operation as a row with its progress and Cancel; the
-    // card is the fallback where it cannot: "Wait for files to open", the panel turned off, or no
-    // room for it in the view. The panel is laid out after this decision, so the last frame's
+    // card is the fallback where it cannot: Home, "Wait for files to open", the panel turned off,
+    // or no room for it in the view. The panel is laid out after this decision, so the last frame's
     // `panel_drew` says whether it had room (true until the first frame: the default panel fits).
-    let panel_shows = app.preferences.operations_panel && app.operations.panel_drew;
+    let panel_shows = !app.home.open && app.preferences.operations_panel && app.operations.panel_drew;
     app.file_load.card_shown = app.preferences.file_operations_wait || !panel_shows;
     if !app.file_load.card_shown {
         return;
@@ -1993,6 +2099,58 @@ mod tests {
         assert!(reply.try_recv().is_ok_and(|r| r["ok"] == json!(false)), "the caller hears it failed");
     }
 
+    /// Insert PCB inserts the board the picked file belongs to straight away, beside the window:
+    /// each file's layer is found from what it says, and one undo removes the board (#12797).
+    #[test]
+    fn insert_pcb_inserts_the_picked_files_board_in_one_undo_step() {
+        const OUTLINE: &str = "%FSLAX46Y46*%
+%MOMM*%
+%ADD10C,0.1*%
+D10*
+X0Y0D02*
+X30000000Y0D01*
+X30000000Y20000000D01*
+X0Y20000000D01*
+X0Y0D01*
+M02*
+";
+        const DRILLS: &str = "M48
+METRIC
+T1C3.0
+%
+T1
+X5.0Y5.0
+X25.0Y5.0
+M30
+";
+        let dir = std::env::temp_dir().join(format!("solidcraft-insert-pcb-{}", std::process::id())).join("Picked");
+        let _ = std::fs::create_dir_all(&dir);
+        for (file, text) in [("board.GKO", OUTLINE), ("board.DRL", DRILLS), ("notes.txt", "hello")] {
+            std::fs::write(dir.join(file), text).unwrap();
+        }
+        let picked = dir.join("board.DRL").to_string_lossy().into_owned();
+        let mut h = crate::scenario::Harness::new();
+        h.app.services.pick_open = Some(Box::new(move |_| Box::pin(std::future::ready(Some(picked.clone())))));
+        h.app.start("file.insert_gerber");
+        h.frames(3);
+        assert!(h.app.dialog.is_none(), "no window to fill in");
+        h.settle();
+        let c = h.app.session.doc.components.iter().find(|c| c.name == "Picked").unwrap_or_else(|| panic!("no board: {:?}", h.app.status));
+        assert_eq!(c.properties.get("pcb.outline").map(String::as_str), Some("board.GKO"));
+        h.app.run("edit.undo", json!({})).unwrap();
+        h.settle();
+        assert!(!h.app.session.doc.components.iter().any(|c| c.name == "Picked"), "one undo removes the board");
+        // On the web a file that isn't the board's zip is refused, whatever else was uploaded.
+        let picked = dir.join("board.GKO").to_string_lossy().into_owned();
+        let components = h.app.session.doc.components.len();
+        insert_board(&mut h.app, &picked, true);
+        assert!(h.app.file_load.idle(), "no import starts");
+        h.settle();
+        assert_eq!(h.app.session.doc.components.len(), components);
+        assert!(h.app.status.as_ref().is_some_and(|(s, _, error)| *error && s.contains("zip")), "{:?}", h.app.status);
+        let _ = std::fs::remove_dir_all(dir.parent().unwrap_or(&dir));
+    }
+
     #[test]
     fn a_ply_is_a_point_cloud_unless_inserted_as_a_mesh() {
         let mut request = Request::new("scan.ply", Kind::Insert);
@@ -2000,6 +2158,39 @@ mod tests {
         assert_eq!(Request::new("scan.ply", Kind::Open).command().0, "doc.open");
         request.mesh = true;
         assert_eq!(request.command().0, "file.insert_mesh");
+        // Insert PCB: the picked file is the board's set.
+        let mut request = Request::new("board.zip", Kind::Insert);
+        request.gerber = true;
+        assert_eq!(request.command(), ("file.insert_gerber", json!({"set": "board.zip"})));
+    }
+
+    /// A FreeCAD file comes in as its rebuilt features; with the preference off, as its solids in
+    /// one Import feature, as before.
+    #[test]
+    fn freecad_history_preference_keeps_the_solids_only_import() {
+        let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../io/src/native_cad/fixtures/bracket.FCStd");
+        assert!(crate::prefs::Prefs::default().freecad_history, "on by default");
+        for (on, types) in [(true, vec!["Sketch", "ExtrudeFeature", "Sketch", "ExtrudeFeature", "FilletFeature"]), (false, vec!["BaseFeature"])] {
+            let mut app = SolveApp::new(Session::default(), Default::default());
+            app.preferences.freecad_history = on;
+            app.insert_path(path);
+            let got: Vec<&str> = app.session.doc.features.iter().map(|f| f.kind.type_name()).collect();
+            assert_eq!(got, types, "preference {on}");
+        }
+    }
+
+    #[test]
+    fn the_reuse_import_default_is_added_to_import_opens_only() {
+        let mut app = SolveApp::new(Session::default(), Default::default());
+        for (path, expected) in [("part.step", Some(true)), ("part.IGS", Some(true)), ("design.sc", None), ("old.solidcraft", None)] {
+            let mut request = Request::new(path, Kind::Open);
+            default_reuse_import(&app, &mut request);
+            assert_eq!(request.options.get("reuse_import").and_then(Value::as_bool), expected, "{path}");
+        }
+        app.preferences.reuse_imports = false;
+        let mut request = Request::new("part.step", Kind::Open);
+        default_reuse_import(&app, &mut request);
+        assert_eq!(request.options.get("reuse_import").and_then(Value::as_bool), Some(false), "the old value restores the old behaviour");
     }
 
     #[test]
@@ -2036,6 +2227,22 @@ mod tests {
             assert_eq!(rx.try_recv().unwrap()["ok"], true);
             assert!(rx.try_recv().is_err());
         }
+    }
+
+    #[test]
+    fn automatic_verify_still_reuses_an_open_design() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        let path = h.dir.join("Plate.solidcraft");
+        h.app.run("file.save_as", json!({"path": path.to_string_lossy()})).unwrap();
+        h.app.preferences.verify_opened_designs = true;
+        let tabs = h.app.docs.count();
+        let mut request = Request::new(&path.to_string_lossy(), Kind::Open);
+        request.options.insert("verify".into(), json!(true));
+        request.auto_verify = true;
+        begin_request(&mut h.app, request).unwrap();
+        assert_eq!(h.app.docs.count(), tabs, "the open design is reused, not opened again");
+        assert!(h.app.verifying.is_some(), "the automatic check runs separately");
     }
 
     #[test]

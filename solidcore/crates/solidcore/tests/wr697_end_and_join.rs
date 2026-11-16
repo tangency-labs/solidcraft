@@ -12,6 +12,8 @@
     clippy::panic,
     clippy::indexing_slicing
 )] // test helpers
+#[path = "support/volume_leak.rs"]
+mod volume_leak;
 use solidcore::blend::blend_corner::{BlendCornerEvent, BlendEnd};
 use solidcore::blend::fillet_corner::p3::FilletCornerKind;
 use solidcore::blend::fillet_executive::session::FilletSession;
@@ -27,6 +29,7 @@ use solidcore::primitive::api_primitives::{create_box, create_cylinder, create_s
 use solidcore::query::api_queries::{get_edges, get_faces};
 use solidcore::topology::brep::p5::{stitch_and_orient, transform, StitchAndOrientOptions};
 use solidcore::topology::brep::validation::{check_brep, CheckLevel};
+use solidcore::topology::vertex::corner;
 use solidcore::topology::{edge, vertex, EdgeId};
 use solidcore::{Brep, Kernel};
 use std::f64::consts::PI;
@@ -120,9 +123,16 @@ fn at(cs: &[Corner], p: [f64; 3]) -> (FilletCornerKind, Option<Event>) {
 }
 
 fn volume(k: &Kernel, b: &mut Brep) -> f64 {
-    volume_at(k, b, 1e-12)
-        .or_else(|_| volume_at(k, b, 1e-9))
-        .unwrap()
+    volume_and_accuracy(k, b).0
+}
+
+/// [`volume`] and the accuracy it was integrated to (1e-12, or 1e-9 where that fails), for
+/// checks that must measure at the same accuracy.
+fn volume_and_accuracy(k: &Kernel, b: &mut Brep) -> (f64, f64) {
+    match volume_at(k, b, 1e-12) {
+        Ok(v) => (v, 1e-12),
+        Err(_) => (volume_at(k, b, 1e-9).unwrap(), 1e-9),
+    }
 }
 
 /// `SmApiBrepComputeVolume` at `accuracy`.
@@ -232,14 +242,17 @@ fn a_mixed_convexity_end_s_rail_ends_on_the_end_face_s_surface() {
     assert_eq!(kind, FilletCornerKind::NByOne);
     assert_eq!(event, Some((BlendCornerEvent::End, BlendEnd::OnEndFace)));
     round(&mut k, &mut b, &[[30.0, 0.0, 10.0]], 2.0);
-    let v = volume(&k, &mut b);
+    let (v, accuracy) = volume_and_accuracy(&k, &mut b);
     let off = nearest_vertex(&b, Point3::new(396.0_f64.sqrt(), 0.0, 8.0));
     eprintln!("volume {v:.15} want {want:.15}; rail end off {off:.3e}");
     clean(&mut k, &mut b);
     assert!((v - want).abs() <= 1e-9 * want, "{v} vs {want}");
     assert!(off <= 1e-13, "{off}");
+    // the fork's 21407.602511807886913, pinned here to 1e-10 until `brep_volume` closed
+    // tolerant edges' gaps (#16735): it leaks through them as this integrator did
     let fork = 21407.602511807886913;
-    assert!((v - fork).abs() <= 1e-10, "{v} vs the fork's {fork}");
+    assert!((v - 21_407.602_507_916_15).abs() <= 1e-10, "{v} vs {fork}");
+    volume_leak::assert_moved_by_the_old_leak(&k, &mut b, fork, v, accuracy);
 }
 
 /// The step with its upper block's profile (0, 10), (20, 10), (17, 20), (0, 20) swept
@@ -531,11 +544,17 @@ fn teardrop_boss(k: &mut Kernel) -> Brep {
 /// volumes moved by 5.5e-7 (r 0.5, from 7133.840421559223614) and 8.9e-6 (r 1, from
 /// 7140.722593330715): each net, sampled at 401 x 9 points of each face, is within its
 /// bound of its definition (r 0.5: 2.3e-6 of 3.9e-6; r 1: 3.2e-6 of 4.0e-6), and the
-/// areas times the bounds (1.3e-4 and 2.7e-4) hold both moves.
+/// areas times the bounds (1.3e-4 and 2.7e-4) hold both moves. Since `brep_volume` closes
+/// tolerant edges' gaps (#16735) they are 7133.840430093693 (from 7133.840421010035243) and
+/// 7140.722600128098 (from 7140.722584425828245), each move checked within the old integrator's leak
+/// bound.
 #[test]
 fn a_closed_edge_meeting_itself_at_an_angle_is_the_closed_turn() {
     let foot = [[15.5, 0.0, 0.0]];
-    for (r, want) in [(0.5, 7133.840421010035243), (1.0, 7140.722584425828245)] {
+    for (r, was, want) in [
+        (0.5, 7133.840421010035243, 7133.840430093693),
+        (1.0, 7140.722584425828245, 7140.722600128098),
+    ] {
         let mut k = all_fixes();
         let mut b = teardrop_boss(&mut k);
         let cs = corners(&mut k, &mut b.clone_standing_for_self().unwrap(), &foot, r);
@@ -550,11 +569,12 @@ fn a_closed_edge_meeting_itself_at_an_angle_is_the_closed_turn() {
             )
         );
         round(&mut k, &mut b, &foot, r);
-        let v = volume(&k, &mut b);
+        let (v, accuracy) = volume_and_accuracy(&k, &mut b);
         eprintln!("r {r}: volume {v:.15}, {} faces", faces(&b));
         clean(&mut k, &mut b);
         assert_eq!(faces(&b), 10);
         assert!((v - want).abs() <= 1e-12 * want, "{v} vs {want}");
+        volume_leak::assert_moved_by_the_old_leak(&k, &mut b, was, v, accuracy);
     }
 }
 
@@ -688,5 +708,362 @@ fn an_end_patch_off_its_support_is_refused() {
             .unwrap_err()
             .to_string();
         assert!(why.contains("off its support face"), "{why}");
+    }
+}
+
+/// A plate 2 thick whose top outline runs 50 along x and then 40 turning `kink` degrees
+/// (towards the plate for `convex`, away from it else), its other sides square to those two
+/// (the plate of solidcore-ops' `shallow_corner_plate`). The top edges are at (25, 0, 2) and
+/// halfway along the second; the corner's vertex at (50, 0, 2).
+fn kinked_plate(k: &mut Kernel, kink: f64, convex: bool) -> (Brep, [[f64; 3]; 2]) {
+    let t = if convex { -kink } else { kink }.to_radians();
+    let (u, n) = ([t.cos(), t.sin()], [t.sin(), -t.cos()]);
+    let p = [
+        [0.0, 0.0],
+        [50.0, 0.0],
+        [50.0 + 40.0 * u[0], 40.0 * u[1]],
+        [50.0 + 40.0 * u[0] + 30.0 * n[0], 40.0 * u[1] + 30.0 * n[1]],
+        [0.0, -30.0],
+    ];
+    let curves: Vec<solidcore::curve::curve::Curve> = (0..p.len())
+        .map(|i| {
+            let (a, c) = (p[i], p[(i + 1) % p.len()]);
+            solidcore::curve::curve::Curve::from(
+                solidcore::primitive::api_curves::create_line_segment(
+                    Point3::new(a[0], a[1], 0.0),
+                    Point3::new(c[0], c[1], 0.0),
+                )
+                .unwrap(),
+            )
+        })
+        .collect();
+    let refs: Vec<Option<&solidcore::curve::curve::Curve>> = curves.iter().map(Some).collect();
+    let b = solidcore::sweep::api_brep::create_linear_sweep(k, &refs, Vec3::Z, 2.0, true).unwrap();
+    (
+        b,
+        [[25.0, 0.0, 2.0], [50.0 + 20.0 * u[0], 20.0 * u[1], 2.0]],
+    )
+}
+
+/// The largest gap the check measures between a vertex within 3 of `near` and its faces
+/// (`SmVertex::IsWithinXSectTol3dOfFaces`, recomputed).
+fn joint_gap(k: &Kernel, b: &mut Brep, near: [f64; 3]) -> f64 {
+    let mut vs = Vec::new();
+    for e in get_edges(b).unwrap() {
+        let v0 = edge::vertex(b, e).unwrap();
+        let v1 = edge::other_vertex(b, e, v0).unwrap();
+        for v in [v0, v1].into_iter().flatten() {
+            if !vs.contains(&v) {
+                vs.push(v);
+            }
+        }
+    }
+    let mut gap = 0.0_f64;
+    for v in vs {
+        let p = vertex::point(b, v).unwrap();
+        if (p - Point3::new(near[0], near[1], near[2])).length() < 3.0 {
+            let (_, g, _) = corner::is_within_xsect_tol_3d_of_faces(k, b, v, true).unwrap();
+            gap = gap.max(g);
+        }
+    }
+    gap
+}
+
+/// #16627: two rounds r 1 meeting at a corner a kink off straight join on one shared section
+/// only while their sections there stand closer than the B-rep's intersection tolerance, which
+/// the check holds the joint vertex to. At a concave corner the shared section lies behind the
+/// second round's end, `1 x kink` off it (the B-rep's tolerance is 1e-5, the check's 2e-5): just
+/// below that (1.14e-3 degrees, 1.99e-5 apart) the corner is the Join; just above (1.15e-3
+/// degrees, 2.007e-5 apart) it is the Turn. The Join used to be allowed up to the corner's
+/// approximation tolerance (4e-5): a concave corner 1.5e-3 degrees off straight was joined and
+/// failed the check. At a convex corner the shared section lies over the second round, whose
+/// own section in its plane stands `sec(kink) - 1` off (#13911, `blend_corner::join_gap`): the
+/// Join up to 0.35 degrees (1.87e-5), the Turn at 0.375 (2.14e-5). Each builds and passes the
+/// check, and at each Join the check's vertex gap is that closed form (`kink` concave,
+/// `sec(kink) - 1` convex) to 1e-4 relative. That tolerance is MEASURED, not derived: the
+/// largest observed error is 3.7e-5 relative (convex, 0.35 degrees), 1.7e-6 at 1.14e-3
+/// degrees convex and 2.5e-6 concave, the solvers' and the check's own error included.
+#[test]
+fn a_near_straight_corner_joins_only_below_the_intersection_tolerance() {
+    use BlendCornerEvent::{Join, Turn};
+    for (kink, convex, want) in [
+        (1.14e-3, false, Join),
+        (1.14e-3, true, Join),
+        (1.15e-3, false, Turn),
+        (1.15e-3, true, Join),
+        (1.5e-3, false, Turn),
+        (1.5e-3, true, Join),
+        (0.35, true, Join),
+        (0.375, true, Turn),
+    ] {
+        {
+            let mut k = all_fixes();
+            let (mut b, at_edges) = kinked_plate(&mut k, kink, convex);
+            assert_eq!(b.tolerance(), 1e-5);
+            let cs = corners(
+                &mut k,
+                &mut b.clone_standing_for_self().unwrap(),
+                &at_edges,
+                1.0,
+            );
+            assert_eq!(
+                at(&cs, [50.0, 0.0, 2.0]).1.map(|e| e.0),
+                Some(want),
+                "{kink} degrees (convex {convex})"
+            );
+            round(&mut k, &mut b, &at_edges, 1.0);
+            clean(&mut k, &mut b);
+            // the check's gap at the joint: R (sec beta - 1) over the second round, R kink
+            // behind it (reach R = 1 on the cap, the walls square to it)
+            let gap = joint_gap(&k, &mut b, [50.0, 0.0, 2.0]);
+            let beta = kink.to_radians();
+            let want_gap = if convex { 1.0 / beta.cos() - 1.0 } else { beta };
+            if want == Join {
+                assert!(
+                    (gap - want_gap).abs() <= 1e-4 * want_gap,
+                    "{kink} degrees (convex {convex}): gap {gap:e}, closed form {want_gap:e}"
+                );
+            }
+        }
+    }
+}
+
+/// #13911: the over-side bound (`blend_corner::join_gap`) covers a three-edge ring whose
+/// unblended edge is the two walls' common edge. On the kinked plate's convex corner it
+/// gives the solvers' tolerance for that ring; a four-edge ring, or a three-edge ring whose
+/// unblended edge is another (here the bottom edge, not at the corner), falls back to the
+/// first-order bound.
+#[test]
+fn the_over_side_join_holds_only_for_a_ring_of_the_two_walls() {
+    use solidcore::blend::blend_corner::join_gap::{join_tolerance_deg, JoinBlend};
+    use solidcore::topology::edgeuse::p1 as eu1;
+    let mut k = all_fixes();
+    let (mut b, at_edges) = kinked_plate(&mut k, 1.15e-3, true);
+    let any_eu = |b: &Brep, e: EdgeId| edge::edgeuses(b, e, None, None).unwrap()[0];
+    let blend = |b: &Brep, e: EdgeId| {
+        let eu = any_eu(b, e);
+        let radial = eu1::radial(b, eu).unwrap().unwrap();
+        JoinBlend {
+            eu,
+            faces: [
+                (eu1::face(b, eu).unwrap(), 1.0),
+                (eu1::face(b, radial).unwrap(), 1.0),
+            ],
+        }
+    };
+    let (e1, e2) = (pick(&k, &b, at_edges[0]), pick(&k, &b, at_edges[1]));
+    let side = pick(&k, &b, [50.0, 0.0, 1.0]);
+    let bottom = pick(&k, &b, [25.0, 0.0, 0.0]);
+    let v = [
+        edge::vertex(&b, side).unwrap(),
+        edge::other_vertex(&b, side, edge::vertex(&b, side).unwrap()).unwrap(),
+    ]
+    .into_iter()
+    .flatten()
+    .find(|&v| (vertex::point(&b, v).unwrap().z - 2.0).abs() < 1e-9)
+    .unwrap();
+    let (j1, j2) = (blend(&b, e1), blend(&b, e2));
+    let (eu1_, eu2_, eu_side, eu_bottom) = (j1.eu, j2.eu, any_eu(&b, side), any_eu(&b, bottom));
+    let (tangency, behind) = (10.0, 0.0);
+    let mut deg = |ring: &[_]| {
+        join_tolerance_deg(&k, &mut b, v, [&j1, &j2], ring, 2e-5, tangency, behind).unwrap()
+    };
+    assert_eq!(deg(&[eu1_, eu2_, eu_side]), tangency);
+    assert_eq!(deg(&[eu1_, eu2_, eu_side, eu_bottom]), behind);
+    assert_eq!(deg(&[eu1_, eu2_, eu_bottom]), behind);
+}
+
+/// #13911 (the review of #17022): a variable-radius round's offset is its law at one
+/// parameter, not a constant reach, so the over-side bound (`blend_corner::join_gap`) does
+/// not take it. The kinked plate's convex corner 0.35 degrees off straight is the Join for
+/// constant rounds r 1; rounded by a variable-radius law whose radii can change
+/// (`OffsetRadiiCanChange`: a cubic law, here of control radii all 1) it falls back to the
+/// first-order bound and is the Turn.
+#[test]
+fn a_variable_radius_round_takes_only_the_first_order_join_bound() {
+    use solidcore::blend::fillet_standard_solver::p1::FilletLaw;
+    use solidcore::geom::extent1d::Extent1d;
+    use solidcore::nurbs::b_spline_curve::p1::{
+        BSplineCurve, BSplineCurveForm, CanonicalData, KnotType,
+    };
+    let mut k = all_fixes();
+    let (b, at_edges) = kinked_plate(&mut k, 0.35, true);
+    let constant = corners(
+        &mut k,
+        &mut b.clone_standing_for_self().unwrap(),
+        &at_edges,
+        1.0,
+    );
+    assert_eq!(
+        at(&constant, [50.0, 0.0, 2.0]).1.map(|e| e.0),
+        Some(BlendCornerEvent::Join)
+    );
+    let control = [Vec3::new(1.0, 0.0, 0.0); 4];
+    let curve = BSplineCurve::create_canonical(&CanonicalData {
+        dim: 3,
+        degree: 3,
+        control_points: &control,
+        form: BSplineCurveForm::default(),
+        knot_multiplicities: &[4, 4],
+        knots: &[0.0, 1.0],
+        knot_type: KnotType::default(),
+        weights: None,
+        trim: None,
+    })
+    .unwrap();
+    let law = FilletLaw::bspline(curve, &Extent1d::from_min_max(0.0, 1.0));
+    let mut target = b.clone_standing_for_self().unwrap();
+    let edges: Vec<EdgeId> = at_edges.iter().map(|&p| pick(&k, &target, p)).collect();
+    let mut s = FilletSession::new(&mut k, &mut target).unwrap();
+    s.prepare_variable_radius_edges(&mut k, &edges, 1.0, law, 1, 1)
+        .unwrap();
+    s.create_corners(&k, None).unwrap();
+    let mut event = None;
+    for id in s.fillet_corners().unwrap() {
+        let c = s.corner(id).unwrap();
+        let v = c.filleted_vertex().unwrap();
+        if vertex::point(s.target(), v)
+            .unwrap()
+            .distance(Point3::new(50.0, 0.0, 2.0))
+            < 1e-6
+        {
+            event = c.blend.map(|bc| bc.event);
+        }
+    }
+    assert_eq!(event, Some(BlendCornerEvent::Turn));
+}
+
+/// #16627: the Join is bounded by the B-rep's intersection tolerance, not by the solvers'
+/// approximation tolerance (four times the blended edges' tolerance). With the two top edges
+/// at tolerance 2.5e-4 (the solvers' tolerance 1e-3) and the B-rep's at 1e-5, a concave corner
+/// 0.01 degrees off straight (the sections 1.75e-4 apart) is the Turn and passes the check.
+/// Bounded by the solvers' tolerance it was the Join, its vertex 1.75e-4 off a round.
+#[test]
+fn a_near_straight_corner_s_join_is_bounded_by_the_brep_not_the_solvers() {
+    let mut k = all_fixes();
+    let (mut b, at_edges) = kinked_plate(&mut k, 0.01, false);
+    for p in at_edges {
+        let e = pick(&k, &b, p);
+        edge::set_tolerance(&mut b, e, 2.5e-4, true, true).unwrap();
+    }
+    assert_eq!(b.tolerance(), 1e-5);
+    let cs = corners(
+        &mut k,
+        &mut b.clone_standing_for_self().unwrap(),
+        &at_edges,
+        1.0,
+    );
+    assert_eq!(
+        at(&cs, [50.0, 0.0, 2.0]).1.map(|e| e.0),
+        Some(BlendCornerEvent::Turn)
+    );
+    round(&mut k, &mut b, &at_edges, 1.0);
+    clean(&mut k, &mut b);
+}
+
+/// The plate of [`kinked_plate`] (its outline at z = 0) drafted 2 down z (the sweep runs
+/// against z) with its walls drafted 30 degrees in, its caps on: the walls meet the cap at z = 0
+/// at 60 degrees and the cap at z = -2 at 120.
+/// The two edges at `z` running from the kink, as points halfway along them, and the kink's
+/// vertex there.
+fn drafted_plate(
+    k: &mut Kernel,
+    kink: f64,
+    convex: bool,
+    z: f64,
+) -> (Brep, [[f64; 3]; 2], [f64; 3]) {
+    let t = if convex { -kink } else { kink }.to_radians();
+    let (u, n) = ([t.cos(), t.sin()], [t.sin(), -t.cos()]);
+    let p = [
+        [0.0, 0.0],
+        [50.0, 0.0],
+        [50.0 + 40.0 * u[0], 40.0 * u[1]],
+        [50.0 + 40.0 * u[0] + 30.0 * n[0], 40.0 * u[1] + 30.0 * n[1]],
+        [0.0, -30.0],
+    ];
+    let curves: Vec<solidcore::curve::curve::Curve> = (0..p.len())
+        .map(|i| {
+            let (a, c) = (p[i], p[(i + 1) % p.len()]);
+            solidcore::curve::curve::Curve::from(
+                solidcore::primitive::api_curves::create_line_segment(
+                    Point3::new(a[0], a[1], 0.0),
+                    Point3::new(c[0], c[1], 0.0),
+                )
+                .unwrap(),
+            )
+        })
+        .collect();
+    let refs: Vec<Option<&solidcore::curve::curve::Curve>> = curves.iter().map(Some).collect();
+    let b = solidcore::sweep::api_brep::create_draft_sweep(k, &refs, 2.0, 30.0, false, 3).unwrap();
+    // the kink's vertex at z, and the two edges there leaving it
+    let mut kv = None;
+    let mut ends = Vec::new();
+    for e in get_edges(&b).unwrap() {
+        let v0 = edge::vertex(&b, e).unwrap();
+        let v1 = edge::other_vertex(&b, e, v0).unwrap();
+        let (Some(v0), Some(v1)) = (v0, v1) else {
+            continue;
+        };
+        let (a, c) = (
+            vertex::point(&b, v0).unwrap(),
+            vertex::point(&b, v1).unwrap(),
+        );
+        if (a.z - z).abs() > 1e-9 || (c.z - z).abs() > 1e-9 {
+            continue;
+        }
+        for (q, o) in [(a, c), (c, a)] {
+            if (q.x - 50.0).abs() < 2.0 && q.y.abs() < 2.0 {
+                kv = Some([q.x, q.y, q.z]);
+                ends.push([(q.x + o.x) / 2.0, (q.y + o.y) / 2.0, z]);
+            }
+        }
+    }
+    assert_eq!(ends.len(), 2, "{ends:?}");
+    (b, [ends[0], ends[1]], kv.unwrap())
+}
+
+/// #16627: rounds r 1 joined at the drafted plate's kink leave the shared section `2 r tan(a /
+/// 2)` off, `a` the angle between the drafted walls (`cos a = cos^2 30 cos kink + sin^2 30`, so
+/// `a` is `cos 30` of the kink): each ball centre lies on its wall's offset at r, and the
+/// shared one where the two offsets cross (`blend_corner::join_within_xsect_tolerance_deg`).
+/// That holds on the 60 degree wedge at z = 0 and the 120 degree one at z = -2 alike: the
+/// radius, not the round's reach along the faces (`r cot(w / 2)`, sqrt 3 and 1 / sqrt 3). So
+/// the corner is the Join at 0.97 of the kink where `2 r tan(a / 2)` reaches the intersection
+/// tolerance 2e-5, and the Turn at 1.03, on both wedges and with the kink either way, and each
+/// passes the check. A bound on the reach fails both ways: at 120 degrees it joins at 1.03
+/// (joined at 1.925e-3 degrees, the check finds the vertex 2.91e-5 off, `r a` to eight
+/// digits), and at 60 degrees it turns at 0.97.
+#[test]
+fn a_near_straight_corner_s_join_holds_on_acute_and_obtuse_wedges() {
+    let d = 30.0_f64.to_radians();
+    let a_max = 2e-5_f64;
+    let (c, s) = (d.cos(), d.sin());
+    let a_max = 2.0 * (a_max / 2.0).atan();
+    let k_max = ((a_max.cos() - s * s) / (c * c)).acos().to_degrees();
+    for z in [0.0, -2.0] {
+        for (f, want) in [
+            (0.97, BlendCornerEvent::Join),
+            (1.03, BlendCornerEvent::Turn),
+        ] {
+            for convex in [false, true] {
+                let kink = f * k_max;
+                let mut k = all_fixes();
+                let (mut b, at_edges, kv) = drafted_plate(&mut k, kink, convex, z);
+                assert_eq!(b.tolerance(), 1e-5);
+                let cs = corners(
+                    &mut k,
+                    &mut b.clone_standing_for_self().unwrap(),
+                    &at_edges,
+                    1.0,
+                );
+                assert_eq!(
+                    at(&cs, kv).1.map(|e| e.0),
+                    Some(want),
+                    "edges at z {z}, {kink} degrees (convex {convex})"
+                );
+                round(&mut k, &mut b, &at_edges, 1.0);
+                clean(&mut k, &mut b);
+            }
+        }
     }
 }

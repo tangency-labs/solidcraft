@@ -22,7 +22,8 @@
 //!
 //! The families: [`measure`] (mass properties, area, box, point class, gap samples, the picks'
 //! distances and normals), [`contact`] (whether bodies meet, their boundary distance),
-//! [`boolean`], [`stitch`], [`prism`] (planar region booleans and extrusion, prism sections).
+//! [`boolean`], [`stitch`], [`prism`] (planar region booleans and extrusion, prism sections),
+//! [`cell_grid`] (the cells of a grid over a profile).
 //!
 //! Operations change the body they are given, as the kernel does. An application that keeps
 //! its input copies it first ([`Body::copy`]).
@@ -31,27 +32,37 @@
 #![cfg_attr(not(test), deny(clippy::float_arithmetic))]
 
 pub mod affine;
+pub mod axial_section;
 pub mod blend;
 pub mod blend_definition;
+pub mod blend_surface;
 pub mod body;
 pub mod boolean;
 pub mod cancel;
+pub mod cap;
+pub mod cell_grid;
 pub mod check;
 pub mod contact;
 pub mod continuity;
 pub mod curve;
 pub mod curve_fit;
+pub mod curve_gap;
 pub mod curve_knots;
 pub mod curve_plane;
+pub mod cylinder_wall;
 pub mod error;
+pub mod export_geometry;
 pub mod extend;
 pub mod face_surface;
 pub mod file;
+pub mod import_geometry;
+pub mod joint_turn;
 pub mod label;
 pub mod measure;
 pub mod network;
 pub mod offset;
 pub mod order;
+pub mod path_export;
 pub mod pcurve;
 pub mod prism;
 pub mod provenance;
@@ -64,27 +75,34 @@ pub mod surface;
 pub mod surface_cvs;
 pub mod sweep;
 pub mod tangent;
+pub mod trim;
 pub mod untrim;
+pub mod vertex_meet;
 
 pub use blend::{
-    band_room, blend, blend_ordered, chamfer_sides, chamfer_sides_ordered, edge_faces_along,
-    edge_faces_along_ordered, fillet_variable, fillet_variable_ordered, tangent_chain, BandRoom,
-    Blend, BlendOptions, Blended, ChamferCorner, ChamferSecond, Corners, EndRoom, Hole, HoleEdge,
-    Room, SetBack, Turn,
+    band_room, blend, blend_ordered, carried_faces, carried_faces_ordered, chamfer_sides,
+    chamfer_sides_ordered, edge_faces_along, edge_faces_along_ordered, fillet_variable,
+    fillet_variable_ordered, tangent_chain, BandRoom, Blend, BlendOptions, Blended, CarriedFace,
+    ChamferCorner, ChamferSecond, Corners, EndRoom, Hole, HoleEdge, Room, SetBack, Turn,
 };
-pub use body::{make_box, make_cone, make_cylinder, make_sphere, make_torus, Body};
+pub use body::{make_box, make_cone, make_cylinder, make_sphere, make_torus, Body, TurnedOver};
 pub use boolean::BooleanOp;
 pub use check::{CheckLevel, CheckReport};
 pub use contact::Gap;
-pub use error::{Error, FitKind, OffsetRefusal, Result, RoomReason, SolidTest, Unblendable};
+pub use error::{
+    Error, FitKind, OffsetRefusal, RecordEntity, Result, RoomReason, SolidTest, Unblendable,
+    Unsoundness,
+};
 pub use measure::{
-    point_distance, Distance, EdgePoint, FaceCentroid, GapSample, MassPropertiesEstimate, Normal,
-    PointClass,
+    point_distance, points_meet, Distance, EdgeCurve, EdgePoint, EdgeRayPoint, FaceCentroid,
+    GapSample, MassPropertiesEstimate, MembersClosest, Normal, PointClass, SquareFaceLevel,
 };
 pub use offset::{draft, offset_faces, offset_sheet, shell, thicken};
 pub use order::Order;
 pub use step_assembly::{placed_bodies, PlacedBody};
 
+#[cfg(test)]
+mod ball_corner_tests;
 #[cfg(test)]
 mod noisy_round_tests;
 #[cfg(test)]
