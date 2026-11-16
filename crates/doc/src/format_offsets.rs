@@ -271,7 +271,9 @@ mod tests {
         assert!(matches!(whole_profile_selection_from_value(&good).unwrap(), ProfileSel::WholeBoundaries { profiles } if profiles.len() == 1));
         // Two holes may share a curve: a curve splitting an island bounds both halves (#17613).
         let split = json!({"type":"whole_boundaries","profiles":[{"outer":["o"],"holes":[["a","m"],["b","m"]]}]});
-        assert!(matches!(whole_profile_selection_from_value(&split).unwrap(), ProfileSel::WholeBoundaries { profiles } if profiles[0].holes.len() == 2));
+        assert!(
+            matches!(whole_profile_selection_from_value(&split).unwrap(), ProfileSel::WholeBoundaries { profiles } if profiles[0].holes.len() == 2)
+        );
         assert!(validate_raw(&json!({"features":[{"type":"extrude","profiles":split}]})).is_ok());
         let malformed = [
             json!({"type":"whole_boundaries","profiles":[]}),
