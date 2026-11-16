@@ -3663,7 +3663,7 @@ mod tests {
             let mut state = ArenaNotifyState::new(&b);
             let mut env = state.env(None);
             let mut marks = crate::topology::topology_traverser::Marks::default();
-            let this_face = |f: FaceId| crate::topology::loopuse::notify_ref(EntityRef::Face(f));
+            let this_face = |f: FaceId| loopuse::notify_ref(EntityRef::Face(f));
             let mut fenv = FaceBuildEnv {
                 env: &mut env,
                 marks: &mut marks,
