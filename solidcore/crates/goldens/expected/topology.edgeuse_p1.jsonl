@@ -2404,12 +2404,12 @@
 {"case":"face_pinched_huge_fu1_1","deferred":null,"error":null,"ints":{"q":[0,0,0,0,2,16022,0,1,1,1,1,1,0,0,0]},"topology":{"adjacency":{"lists":[[1,1],[4,5,6,7],[0],[]]},"entities":{}},"values":{}}
 {"case":"face_pinched_huge_fu2_0","deferred":null,"error":null,"ints":{"q":[0,0,0,1,1,16022,0,1,1,1,1,1,0,0,0]},"topology":{"adjacency":{"lists":[[0],[0,1,2,3],[1],[]]},"entities":{}},"values":{}}
 {"case":"face_pinched_huge_fu2_1","deferred":null,"error":null,"ints":{"q":[0,0,0,1,1,16022,0,1,1,1,1,1,0,0,0]},"topology":{"adjacency":{"lists":[[0,0],[0,1,2,3],[1],[]]},"entities":{}},"values":{}}
-{"case":"face_pinched_huge_gaps0_0_0","deferred":null,"error":null,"ints":{},"topology":null,"values":{"state":[1.0,1.0,0.0,1.0,5.278275086186592e-9,0.6,8.533646267170155e-13,0.6]}}
-{"case":"face_pinched_huge_gaps0_0_1","deferred":null,"error":null,"ints":{},"topology":null,"values":{"state":[1.0,1.0,0.0,1.0,5.278275086186592e-9,0.6,8.533646267170155e-13,0.6]}}
+{"case":"face_pinched_huge_gaps0_0_0","deferred":null,"error":null,"ints":{},"topology":null,"values":{"state":[1.0,1.0,0.0,1.0,2.1600499167107046e-12,0.3,0.0,0.299999999999996]}}
+{"case":"face_pinched_huge_gaps0_0_1","deferred":null,"error":null,"ints":{},"topology":null,"values":{"state":[1.0,1.0,0.0,1.0,2.1600499167107046e-12,0.3,0.0,0.299999999999996]}}
 {"case":"face_pinched_huge_gaps0_1_0","deferred":null,"error":null,"ints":{},"topology":null,"values":{"state":[1.0,0.0,1.0,0.0,0.0,0.0,0.0]}}
 {"case":"face_pinched_huge_gaps0_1_1","deferred":null,"error":null,"ints":{},"topology":null,"values":{"state":[1.0,0.0,1.0,0.0,0.0,0.0,0.0]}}
-{"case":"face_pinched_huge_gaps0_2_0","deferred":null,"error":null,"ints":{},"topology":null,"values":{"state":[0.0,1.0,0.0,0.0,0.0,5.278275086186592e-9,0.6,8.533646267170155e-13,0.6]}}
-{"case":"face_pinched_huge_gaps0_2_1","deferred":null,"error":null,"ints":{},"topology":null,"values":{"state":[0.0,0.0,1.0,0.0,1.0,5.278275086186592e-9,0.6,8.533646267170155e-13,0.6]}}
+{"case":"face_pinched_huge_gaps0_2_0","deferred":null,"error":null,"ints":{},"topology":null,"values":{"state":[0.0,1.0,0.0,0.0,0.0,2.1600499167107046e-12,0.3,0.0,0.299999999999996]}}
+{"case":"face_pinched_huge_gaps0_2_1","deferred":null,"error":null,"ints":{},"topology":null,"values":{"state":[0.0,0.0,1.0,0.0,1.0,2.1600499167107046e-12,0.3,0.0,0.299999999999996]}}
 {"case":"face_pinched_huge_gaps0_3_0","deferred":null,"error":null,"ints":{},"topology":null,"values":{"state":[0.0,1.0,0.0,0.0,0.0,0.0,0.0,0.0]}}
 {"case":"face_pinched_huge_gaps0_3_1","deferred":null,"error":null,"ints":{},"topology":null,"values":{"state":[0.0,0.0,0.0,1.0,0.0,0.0,0.0,0.0]}}
 {"case":"face_pinched_huge_gaps1_0_0","deferred":null,"error":null,"ints":{},"topology":null,"values":{"state":[1.0,1.0,0.0,1.0,5.232374181090697e-12,0.3,0.2999999999999984,0.0]}}

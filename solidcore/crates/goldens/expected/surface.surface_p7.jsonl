@@ -3140,8 +3140,8 @@
 {"case":"good_drop_big_step_v_-1.0","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[0.0,0.0]}}
 {"case":"good_drop_big_step_v_0.1","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[0.0,0.0]}}
 {"case":"good_drop_big_step_v_2.0","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[0.0,0.0]}}
-{"case":"good_drop_distance_equal_guess_and_result","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[0.0,1.0]}}
-{"case":"good_drop_distance_guess_nearer_than_result","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[0.0,1.0]}}
+{"case":"good_drop_distance_equal_guess_and_result","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[0.0,0.0]}}
+{"case":"good_drop_distance_guess_nearer_than_result","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[0.0,0.0]}}
 {"case":"good_drop_distance_result_nearer_than_guess","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[0.0,0.0]}}
 {"case":"good_drop_interior_-1.0","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[0.0,0.0]}}
 {"case":"good_drop_interior_0.1","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[0.0,0.0]}}
