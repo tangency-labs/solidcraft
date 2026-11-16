@@ -585,6 +585,41 @@ fn leaving_directions_match_one_to_one() {
     assert!(super::loops::same_leaving(&[], &[]));
 }
 
+/// #17732: a projected outline set to construction stays construction when the link is rebuilt
+/// because its hole rim, saved as two halves, is one circle now. Were it to turn into profile
+/// geometry, a circle drawn around the plate would extrude the disc minus the plate.
+#[test]
+fn a_rebuilt_link_keeps_its_curves_set_to_construction() {
+    let mut sk = Sketch::new();
+    let (east, west) = (Vec2::new(5.0, 0.0), Vec2::new(-5.0, 0.0));
+    let corners = [Vec2::new(-20.0, -10.0), Vec2::new(20.0, -10.0), Vec2::new(20.0, 10.0), Vec2::new(-20.0, 10.0)];
+    let mut saved: Vec<LinkGeom> = (0..4).map(|k| LinkGeom::Line(corners[k], corners[(k + 1) % 4])).collect();
+    saved.push(LinkGeom::Arc { c: Vec2::ZERO, a: east, b: west });
+    saved.push(LinkGeom::Arc { c: Vec2::ZERO, a: west, b: east });
+    let face = LinkSource::Edge { body: "Body1".into(), at: Vec3::new(5.0, 0.0, 0.0) };
+    let link = sk.add_link(LinkKind::Project, face, &saved).unwrap();
+    let outline: Vec<String> =
+        sk.link_curves(&link).iter().filter(|c| matches!(sk.curves[**c].kind, CurveKind::Line { .. })).map(|c| sk.curves[*c].id.clone()).collect();
+    assert_eq!(outline.len(), 4);
+    for c in sk.link_curves(&link) {
+        if matches!(sk.curves[c].kind, CurveKind::Line { .. }) {
+            sk.curves[c].construction = true;
+        }
+    }
+    let mut now: Vec<LinkGeom> = (0..4).map(|k| LinkGeom::Line(corners[k], corners[(k + 1) % 4])).collect();
+    now.push(LinkGeom::Circle(Vec2::ZERO, 5.0));
+    assert!(sk.update_link(&link, &now).unwrap());
+    for id in &outline {
+        let c = sk.curves.iter().find(|c| &c.id == id).unwrap_or_else(|| panic!("{id} is still in the sketch"));
+        assert!(c.construction, "{id} is still construction after the rebuild");
+    }
+    let [circle] = sk.link_curves(&link).iter().copied().filter(|c| matches!(sk.curves[*c].kind, CurveKind::Circle { .. })).collect::<Vec<_>>()[..]
+    else {
+        panic!("one circle")
+    };
+    assert!(!sk.curves[circle].construction);
+}
+
 /// #17172: a closed circular edge was once projected as its two halves, and is one circle now.
 /// A saved sketch's projection of it becomes that circle: the first half's id names it, a
 /// dimension on the second half moves to it, and a line drawn to a point where the halves met
