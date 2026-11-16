@@ -598,8 +598,6 @@ pub struct UpstreamFixes {
     /// `plan/upstream-issues/WR-57--addendum-2026-11-01-degen-param-tiebreak.md`). Off
     /// by default for pinned C++ parity.
     pub degen_param_tiebreak_uses_actual_param: bool,
-    /// `RemoveCoincidentNoEdgeProtoVertex` reports a miss as `false` (WR-73, #848).
-    pub proto_vertex_miss_is_false: bool,
     /// `CheckLoop` measures a gap against at least its vertex's zone tolerance (WR-381, #476).
     pub check_loop_vertex_tolerance: bool,
     /// `CheckLoop` compares an end projected from its vertex (no UV trim) with its neighbour on the nearest natural period of a closed direction, so a one-period seam jump is not an `SM_ERR` (WR-440, #530).
@@ -694,18 +692,6 @@ pub struct UpstreamFixes {
     pub linear_sweep_arc_is_cylinder: bool,
     /// Planar faces from curves join a loop touching another loop at a vertex into that loop (WR-405, #892).
     pub join_touching_loops: bool,
-    /// `sm_CheckEdgeuseGeometry` evaluates the clockwise neighbour in UV space with
-    /// `SmEdgeuse::NormalizedEvaluate(.., TRUE, ..)`, whose `GetOrCreateUVTrimCurve`
-    /// stores a new UV trim curve on that neighbour: a `const` validation
-    /// (`SmBrep::ValidatePointers`, e.g. from `SmBrepConstructor::EndShell(TRUE)`) then
-    /// changes the B-rep it is asked to check (WR-446;
-    /// `plan/upstream-issues/WR-446--brepconstructor-endshell-validatepointers-makes-uv-trim-curves.md`).
-    /// With this set the neighbour is evaluated with `ok_to_make_uv_trim_curve = FALSE`:
-    /// the 3D point is still evaluated and dropped onto the existing face, but no trim
-    /// is made; the self evaluation, the existing trims and the statuses are unchanged.
-    /// Off by default for pinned C++ parity. This is not the WR-406 trim-reversal check:
-    /// validation still repairs existing trims as before.
-    pub validation_does_not_make_uv_trims: bool,
     /// `SmBrep::ValidateAndUpdateTolerances` grows a vertex's tolerance when one of its
     /// edge use's vertex/edge or vertex/face gaps is over half the tolerance, the test its
     /// report applies. Upstream grows it only past the whole tolerance, so the update
@@ -841,12 +827,6 @@ pub struct UpstreamFixes {
     pub boolean_splits_definition_across_split: bool,
     /// `SmProtoEdge::Resolve` splits a proto edge from a proto vertex back to itself whose curve ends find two of its vertex definitions at each other definition of that proto vertex lying on the curve (`DropPoint` within the larger of the two tolerances, farther than twice it from both ends), then resolves the proto vertex; upstream keeps the edge whole past that third vertex, a vertex of its own face, and the merge fails (`SM_ERR`; two equal tubes a hair apart end to end) (WR-579, #1517; the fork's tangency-labs/smlib@9eec159).
     pub proto_edge_splits_at_captured_vertices: bool,
-    /// `SmProtoEdge::Split` gives the new upper child proto edge the split parameter to this
-    /// edge's old maximum, `[dT, old_max]`, where pinned v1.0.1 reads this edge's maximum
-    /// after clamping it and the upper child gets the empty interval `[dT, dT]` (WR-101;
-    /// `plan/upstream-issues/WR-101--addendum-2026-10-31-opt-in-upper-interval.md`). The
-    /// lower child is `[old_min, dT]` either way. Off by default for pinned C++ parity.
-    pub proto_edge_split_upper_keeps_the_old_max: bool,
     /// `SmMerge::BooleanPostProcess` also checks the merged face's edges that a face merge left with that face on both sides (slits), not only the intersection edges (WR-304, #1120).
     pub boolean_cleanup_removes_slits: bool,
     /// `SmFace::CurveOnClassify` classifies an interval whose two ends lie on one face edge (or its vertices) and whose midpoint is within the intersection tolerance of it as on that edge (the fork's `ClassifyEdgeInterval`, WR-305, #1057). Curved pieces only: a straight interval along a straight edge is always classified, by a certificate on its two ends (the distance is affine along it), with or without this flag.
@@ -857,10 +837,6 @@ pub struct UpstreamFixes {
     pub degenerate_proto_edge_in_one_vertex: bool,
     /// `MakeEdgeInFaceWithVU` grows each end vertex's tolerance to twice its gap to the new edge's end (only if larger), after `RefreshTolerance` keeps it as it was, so `AssertValid` does not refuse the edge (WR-469, #870; a solidcore-only fix, not in the SolidCraft fork at tangency-labs/smlib@26cc451, whose `MakeEdgeInFaceWithVU` ends with `RefreshTolerance` only; `plan/upstream-issues/WR-469--make-edge-in-face-vertex-tolerance-gap.md`).
     pub new_edge_vertex_tolerance_covers_gap: bool,
-    /// `SmBrep::Transform` changes no tolerance under a scale of 1 (a rotation or reflection), and under a scale s sets each vertex, edge and face tolerance to the larger of its own times s and the new body tolerance, not every one to the body tolerance (WR-507, #1520; tangency-labs/smlib#49).
-    pub transform_scales_each_tolerance: bool,
-    /// `SmBrep::Transform` takes a scaled body's model size from the body's bounding box (vertices, edges and faces, not grown by tolerances), not from its vertices alone, so a body with no vertices (a lone torus) does not get a zero tolerance (WR-508, #1521; tangency-labs/smlib#50).
-    pub transform_model_size_from_body_box: bool,
     /// A torus rebuilt from its NURB measures its generating interval signed (WR-408, #1112).
     pub torus_signed_gen_curve_interval: bool,
     /// `SmTorus::IsNurbSurfaceTorus` measures the major radius from the torus origin (the minor circle's centre projected onto the common line), not from the first sweep circle's centre, which lies off the equator when the NURB's tube does not start there (WR-501, #1470; tangency-labs/smlib@6136a04).

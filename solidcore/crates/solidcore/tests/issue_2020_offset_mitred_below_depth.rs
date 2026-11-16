@@ -283,7 +283,6 @@ fn solidcraft_flags(k: &mut Kernel) {
     k.fixes.point_solve_keeps_triangle_guess = true;
     k.fixes.proto_edge_self_loop_on_vertex_degenerate = true;
     k.fixes.proto_edge_splits_at_captured_vertices = true;
-    k.fixes.proto_vertex_miss_is_false = true;
     k.fixes.revolution_round_offset_collapses = true;
     k.fixes.revolve_analytic_profile_faces = true;
     k.fixes.revolve_holed_profile_void = true;
@@ -305,7 +304,5 @@ fn solidcraft_flags(k: &mut Kernel) {
     k.fixes.torus_iso_circle_axis_from_midpoint = true;
     k.fixes.torus_major_radius_from_origin = true;
     k.fixes.torus_signed_gen_curve_interval = true;
-    k.fixes.transform_model_size_from_body_box = true;
-    k.fixes.transform_scales_each_tolerance = true;
     k.fixes.uv_trim_corner_end_points_only = true;
 }

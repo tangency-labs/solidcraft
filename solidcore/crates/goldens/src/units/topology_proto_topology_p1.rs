@@ -4292,6 +4292,17 @@ fn run_proto(
                             let res = r
                                 .mgr
                                 .remove_coincident_no_edge_proto_vertex(k, &r.pool, e, v);
+                            // WR-73 certificate, replayed on every case by the unit's
+                            // tests: `true` means the proto vertex was removed, so a
+                            // `true` answer leaves it unlisted (upstream answered `true`
+                            // on a miss and kept it listed).
+                            #[cfg(test)]
+                            if let Ok(true) = res {
+                                assert!(
+                                    !r.mgr.proto_vertices().contains(&v),
+                                    "WR-73: `true` for a proto vertex still listed"
+                                );
+                            }
                             match st(res)? {
                                 Ok(f) => out.push(b(f)),
                                 Err(s) => {
@@ -4589,7 +4600,27 @@ fn run_proto(
                         if interior && (!r.pe_split_ok(e) || !r.ed_curves_unique()) {
                             skip = true;
                         } else {
+                            #[cfg(test)]
+                            let old = r.mgr.proto_edge(e).map(solidcore::topology::proto_topology::ProtoEdge::xsect_interval);
                             let called = st3(r.mgr.proto_edge_split(k, &mut r.pool, e, t))?;
+                            // WR-101 certificate, replayed on every case by the unit's
+                            // tests: a split at `t` leaves `[old_min, t]` and
+                            // `[t, old_max]` (upstream gave the upper child `[t, t]`).
+                            #[cfg(test)]
+                            if let (Ok((_, Some(upper))), Some(old)) = (&called, old) {
+                                let lo = r.mgr.proto_edge(e).map(solidcore::topology::proto_topology::ProtoEdge::xsect_interval);
+                                let hi = r.mgr.proto_edge(*upper).map(solidcore::topology::proto_topology::ProtoEdge::xsect_interval);
+                                assert_eq!(
+                                    lo.map(|x| (x.min(), x.max())),
+                                    Some((old.min(), t)),
+                                    "WR-101: the lower child's interval"
+                                );
+                                assert_eq!(
+                                    hi.map(|x| (x.min(), x.max())),
+                                    Some((t, old.max())),
+                                    "WR-101: the upper child's interval"
+                                );
+                            }
                             super::topology_proto_topology_p2::sync_counts(&mut r);
                             match called {
                                 Ok((pv, pe)) => {
@@ -5060,7 +5091,43 @@ fn constructed_transform_body(k: &mut Kernel, obj: &TObjIn) -> Result<Brep, Fail
     })
 }
 
+#[cfg(not(test))]
 fn apply_transform_op(
+    k: &mut Kernel,
+    target: Option<TransformObject<'_>>,
+    op: &TOpIn,
+) -> solidcore::Result<()> {
+    apply_transform_op_inner(k, target, op)
+}
+
+/// [`apply_transform_op`] checked against the WR-507 / WR-508 tolerance certificate
+/// (`topology_brep_p5::transform_certificate`) when the target is a B-rep. The API
+/// transforms scale tolerances (`bScaleTol` `TRUE`); only the scales have a scale.
+#[cfg(test)]
+fn apply_transform_op(
+    k: &mut Kernel,
+    target: Option<TransformObject<'_>>,
+    op: &TOpIn,
+) -> solidcore::Result<()> {
+    use super::topology_brep_p5::transform_certificate::Snapshot;
+    match target {
+        Some(TransformObject::Brep(b)) => {
+            let s = match op {
+                TOpIn::Scale { s } | TOpIn::ScaleByPt { s, .. } => Some(v3(*s)),
+                _ => None,
+            };
+            let before = Snapshot::before_transform(k, b, s)?;
+            let r = apply_transform_op_inner(k, Some(TransformObject::Brep(&mut *b)), op);
+            if r.is_ok() {
+                before.check(k, b, s, true, "proto_topology_p1")?;
+            }
+            r
+        }
+        other => apply_transform_op_inner(k, other, op),
+    }
+}
+
+fn apply_transform_op_inner(
     k: &mut Kernel,
     target: Option<TransformObject<'_>>,
     op: &TOpIn,
@@ -7409,6 +7476,30 @@ impl UnitDiff for Runner {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Every case of this unit and of `topology.proto_topology_p3` (which runs on this
+    /// unit's script engine) replays through the runner's test-only certificates: the
+    /// WR-73 one at each `RemoveCoincidentNoEdgeProtoVertex` (a `true` answer leaves the
+    /// proto vertex unlisted) and the WR-507 / WR-508 transform one at each API transform
+    /// of a B-rep. A case that fails or defers still ran every call before its failure.
+    #[test]
+    fn every_case_meets_the_wr73_and_transform_certificates() {
+        let ctx = CaseContext {
+            root: crate::case::repo_root(),
+            seeds: 16,
+        };
+        let p1_cases = Runner.cases(&ctx).unwrap();
+        assert!(p1_cases.iter().any(|c| c.name == "public_scale_cone_nonuniform"));
+        for case in &p1_cases {
+            eprintln!("p1 case {}", case.name);
+            let _ = Runner.run_rust(case);
+        }
+        let p3 = super::super::topology_proto_topology_p3::Runner;
+        for case in &p3.cases(&ctx).unwrap() {
+            eprintln!("p3 case {}", case.name);
+            let _ = p3.run_rust(case);
+        }
+    }
 
     #[test]
     fn manager_classifications_keep_the_actual_body_in_region_identity() {

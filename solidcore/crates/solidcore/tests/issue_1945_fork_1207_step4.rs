@@ -51,7 +51,6 @@ fn sc_fixes(k: &mut Kernel) {
     k.fixes.thicken_planar_side_walls = true;
     k.fixes.keep_operand_uv_trims = true;
     k.fixes.geometric_g2_continuity = true;
-    k.fixes.proto_vertex_miss_is_false = true;
     k.fixes.check_loop_vertex_tolerance = true;
     k.fixes.check_loop_projected_seam_ends = true;
     k.fixes.edge_check_orders_tangent_faces = true;
@@ -91,8 +90,6 @@ fn sc_fixes(k: &mut Kernel) {
     k.fixes.ellipse_trim_seam_lines_span_cone_height = true;
     k.fixes.degenerate_proto_edge_in_one_vertex = true;
     k.fixes.new_edge_vertex_tolerance_covers_gap = true;
-    k.fixes.transform_scales_each_tolerance = true;
-    k.fixes.transform_model_size_from_body_box = true;
     k.fixes.torus_signed_gen_curve_interval = true;
     k.fixes.torus_major_radius_from_origin = true;
     k.fixes.torus_iso_circle_axis_from_midpoint = true;

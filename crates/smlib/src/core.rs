@@ -82,7 +82,6 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.offset_clip_right_side_out = true;
     f.offset_extended_edges_mated = true;
     f.keep_operand_uv_trims = true;
-    f.proto_vertex_miss_is_false = true;
     f.check_loop_vertex_tolerance = true;
     f.check_loop_projected_seam_ends = true;
     f.flat_corners_test_bits = true;
@@ -100,8 +99,6 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.torus_iso_circle_axis_from_midpoint = true;
     f.internal_pole_row_through_knot = true;
     f.extrusion_origin_scaled_zero = true;
-    f.transform_scales_each_tolerance = true;
-    f.transform_model_size_from_body_box = true;
     f.offset_collapsed_rounds_mated = true;
     f.uv_trim_corner_end_points_only = true;
     f.bspline_trim_preserves_uv_spans = true;
@@ -194,8 +191,6 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.mirror_curve_keeps_euclidean_control_points = true;
     f.dupin_bottom_hyperbola_axis = true;
     f.offset_swap_uv_extended_distance = true;
-    f.validation_does_not_make_uv_trims = true;
-    f.proto_edge_split_upper_keeps_the_old_max = true;
     f.point_on_start_point_squared_tolerance = true;
     f.bspline_trim_keeps_rational_end_spans = true;
     f.fillet_exact_round_classes = true;

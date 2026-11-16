@@ -275,13 +275,23 @@ fn rust_record(k: &mut Kernel, b: &mut Brep, i: &Inputs) -> SolidResult<Vec<f64>
                 out.deleted_edges.len() as f64,
             ]
         }
-        12 => vec![status(p5::transform(
-            k,
-            b,
-            &Axis2Placement::new(v(i.origin), v(i.x), v(i.y)),
-            i.scale.map(v),
-            i.scale_tolerances,
-        ))?],
+        12 => {
+            #[cfg(test)]
+            let before = transform_certificate::Snapshot::before_transform(k, b, i.scale.map(v))?;
+            let r = p5::transform(
+                k,
+                b,
+                &Axis2Placement::new(v(i.origin), v(i.x), v(i.y)),
+                i.scale.map(v),
+                i.scale_tolerances,
+            );
+            #[cfg(test)]
+            if r.is_ok() {
+                let s = i.scale.map(v);
+                before.check(k, b, s, i.scale_tolerances, "brep_p5 op 12")?;
+            }
+            vec![status(r)?]
+        }
         13 => vec![status(
             p5::create_wire_edge_from_curve(k, b, curve(), Extent1d::from_min_max(-2., 3.))
                 .map(|_| ()),
@@ -648,3 +658,203 @@ impl UnitDiff for Runner {
     }
 }
 
+#[cfg(test)]
+mod transform_certificate_tests {
+    use super::*;
+
+    /// Every `Transform` case (op 12) replays through [`transform_certificate`], including
+    /// the three whose golden rows moved when the WR-507 / WR-508 flags were retired.
+    #[test]
+    fn every_transform_meets_the_wr507_wr508_certificate() {
+        let ctx = CaseContext {
+            root: crate::case::repo_root(),
+            seeds: 16,
+        };
+        let mut replayed = Vec::new();
+        for case in Runner.cases(&ctx).unwrap() {
+            let i: Inputs = case.parse().unwrap();
+            if i.op == 12 {
+                Runner.run_rust(&case).unwrap();
+                replayed.push(case.name.clone());
+            }
+        }
+        for moved in ["identity_scale_delta_1e-11", "gen0162", "gen0427"] {
+            assert!(
+                replayed.iter().any(|n| n == moved),
+                "{moved} is not a transform case"
+            );
+        }
+    }
+}
+
+/// The WR-507 / WR-508 certificate of `SmBrep::Transform`'s tolerances, checked after each
+/// transform a runner makes when the goldens crate's tests run (the binary skips it):
+/// - a scale whose largest absolute component `s` is 1 within `SM_EFF_ZERO` (a rotation,
+///   reflection or move), or tolerance scaling off, changes no vertex, edge or face
+///   tolerance and not the body's model size estimate;
+/// - any other scale sets the model size estimate to the length of the scaled body's
+///   bounding box diagonal (vertices, edges and faces, not grown by tolerances: WR-508)
+///   and each tolerance `t` to `max(zone, t * s)`, `zone` the body tolerance that size
+///   gives (WR-507), bit for bit as the closed form computes it.
+///
+/// Every case of `topology.brep_p5`, `topology.brep_mirror` and
+/// `topology.proto_topology_p1` replays through it in those units' tests.
+#[cfg(test)]
+pub(super) mod transform_certificate {
+    use solidcore::kernel::Kernel;
+    use solidcore::math::{max2, Vec3, EFF_ZERO};
+    use solidcore::query::brep::{calculate_bounding_box, BoundingBoxOptions};
+    use solidcore::geom::tol::are_same;
+    use solidcore::topology::brep::p1;
+    use solidcore::topology::brep::p5::turn_to_nurbs_plain;
+    use solidcore::topology::{edge, face, vertex, Brep};
+    use solidcore::Result;
+
+    /// `max(|x|, |y|, |z|)` of a transform's scale, as `SmBrep::Transform` takes it.
+    pub(crate) fn tol_scale(s: Vec3) -> f64 {
+        max2(s.x.abs(), max2(s.y.abs(), s.z.abs()))
+    }
+
+    /// The tolerances and model size estimate of a body before a transform.
+    pub(crate) struct Snapshot {
+        vertices: Vec<f64>,
+        edges: Vec<f64>,
+        faces: Vec<f64>,
+        size: f64,
+    }
+
+    impl Snapshot {
+        /// The body's tolerances in list order, and its own model size estimate.
+        pub(crate) fn of(k: &Kernel, b: &Brep) -> Result<Self> {
+            Ok(Self {
+                vertices: p1::vertices(b, None)?
+                    .into_iter()
+                    .map(|v| vertex::tolerance(b, v))
+                    .collect::<Result<_>>()?,
+                edges: p1::edges(b, None)?
+                    .into_iter()
+                    .map(|e| edge::tolerance(b, e))
+                    .collect::<Result<_>>()?,
+                faces: p1::faces(b, None)?
+                    .into_iter()
+                    .map(|f| face::p2::tolerance(b, f))
+                    .collect::<Result<_>>()?,
+                size: b.this_model_size_estimate(k, false),
+            })
+        }
+
+        /// [`Self::of`] the body as `SmBrep::Transform` with scale `scale` has it when it
+        /// scales the tolerances: a non-uniform or tiny scale first turns the body to
+        /// NURBS (`TurnToNURBS`, flag-independent, its status ignored), which may grow
+        /// vertex tolerances, so those are read from a copy so converted.
+        pub(crate) fn before_transform(
+            k: &mut Kernel,
+            b: &Brep,
+            scale: Option<Vec3>,
+        ) -> Result<Self> {
+            let converts = scale.is_some_and(|s| {
+                !are_same(s.x, s.y) || !are_same(s.x, s.z) || s.x < EFF_ZERO
+            });
+            if !converts {
+                return Self::of(k, b);
+            }
+            let mut copy = b.clone_standing_for_self()?;
+            let _ = turn_to_nurbs_plain(k, &mut copy);
+            let mut snapshot = Self::of(k, &copy)?;
+            // (the size is the body's own, which the conversion leaves alone)
+            snapshot.size = b.this_model_size_estimate(k, false);
+            Ok(snapshot)
+        }
+
+        /// Whether nothing the certificate records changed.
+        pub(crate) fn unchanged(&self, after: &Self) -> bool {
+            after.vertices == self.vertices
+                && after.edges == self.edges
+                && after.faces == self.faces
+                && after.size.to_bits() == self.size.to_bits()
+        }
+
+        /// Panics unless the body's tolerances after a successful transform whose
+        /// tolerance-scaling step has scale `scale` (`None`: no scale) are the closed
+        /// form's. A scale `approx_eq` to `(1, 1, 1)` may also take `SmBrep::Transform`'s
+        /// identity exit, which changes nothing. The model size is checked bit for bit.
+        pub(crate) fn check(
+            &self,
+            k: &mut Kernel,
+            b: &mut Brep,
+            scale: Option<Vec3>,
+            scale_tolerances: bool,
+            what: &str,
+        ) -> Result<()> {
+            let after = Self::of(k, b)?;
+            assert_eq!(
+                (after.vertices.len(), after.edges.len(), after.faces.len()),
+                (self.vertices.len(), self.edges.len(), self.faces.len()),
+                "{what}: a transform changed the topology"
+            );
+            let s = scale.map(tol_scale);
+            let scaled = s.filter(|s| scale_tolerances && (s - 1.0).abs() > EFF_ZERO);
+            let Some(s) = scaled else {
+                assert_eq!(after.vertices, self.vertices, "{what}: vertex tolerances");
+                assert_eq!(after.edges, self.edges, "{what}: edge tolerances");
+                assert_eq!(after.faces, self.faces, "{what}: face tolerances");
+                assert_eq!(
+                    after.size.to_bits(),
+                    self.size.to_bits(),
+                    "{what}: model size estimate"
+                );
+                return Ok(());
+            };
+            if scale.is_some_and(|v| v.approx_eq(Vec3::new(1.0, 1.0, 1.0)))
+                && self.unchanged(&after)
+            {
+                return Ok(());
+            }
+            // The size is taken from the transformed body before its tolerances are
+            // scaled (the edge and face boxes depend on them): the box of a copy given
+            // back its old tolerances.
+            let mut copy = b.clone_standing_for_self()?;
+            for (v, t) in p1::vertices(&copy, None)?.into_iter().zip(&self.vertices) {
+                vertex::set_tolerance(&mut copy, v, *t, false, false)?;
+            }
+            for (e, t) in p1::edges(&copy, None)?.into_iter().zip(&self.edges) {
+                edge::set_tolerance(&mut copy, e, *t, false, false)?;
+            }
+            for (f, t) in p1::faces(&copy, None)?.into_iter().zip(&self.faces) {
+                face::p3::set_tolerance(&mut copy, f, *t, false, false)?;
+            }
+            let model_box = calculate_bounding_box(
+                k,
+                &mut copy,
+                BoundingBoxOptions {
+                    approx: false,
+                    tight: false,
+                    expand_by_zone_tol_3d: false,
+                },
+            )?;
+            let size = model_box.size().length();
+            assert_eq!(
+                after.size.to_bits(),
+                size.to_bits(),
+                "{what}: model size {} against the box diagonal {size}",
+                after.size
+            );
+            let zone = b.tolerance();
+            for (name, old, new) in [
+                ("vertex", &self.vertices, &after.vertices),
+                ("edge", &self.edges, &after.edges),
+                ("face", &self.faces, &after.faces),
+            ] {
+                for (i, (t, got)) in old.iter().zip(new).enumerate() {
+                    let want = max2(zone, t * s);
+                    assert_eq!(
+                        got.to_bits(),
+                        want.to_bits(),
+                        "{what}: {name} {i} tolerance {got:e}, closed form max({zone:e}, {t:e} * {s}) = {want:e}"
+                    );
+                }
+            }
+            Ok(())
+        }
+    }
+}
