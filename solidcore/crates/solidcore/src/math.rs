@@ -263,6 +263,16 @@ impl Transform {
         )
     }
 
+    /// Maps a list of point coordinates in place, preserving their order.
+    /// Each point uses [`Self::transform_point`]'s row-vector convention and rounding.
+    pub fn transform_points(&self, points: &mut [[f64; 3]]) {
+        for point in points {
+            let [x, y, z] = *point;
+            let image = self.transform_point(Point3::new(x, y, z));
+            *point = [image.x, image.y, image.z];
+        }
+    }
+
     /// The rigid placement `p` as a transform: its axes' images and its origin (the
     /// z axis as the placement derives it).
     #[must_use]
@@ -628,6 +638,22 @@ impl Transform {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn point_arrays_keep_their_order_under_an_affine_map() {
+        let map = Transform {
+            m: [
+                [2.0, 0.0, 0.0, 0.0],
+                [1.0, -1.0, 0.0, 0.0],
+                [0.0, 0.0, 1.0, 0.0],
+                [10.0, 20.0, 30.0, 1.0],
+            ],
+        };
+        let mut points = [[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]];
+        map.transform_points(&mut points);
+        assert_eq!(points, [[14.0, 18.0, 33.0], [23.0, 15.0, 36.0]]);
+        map.transform_points(&mut []);
+    }
 
     #[test]
     fn repeated_rigid_turns_keep_plane_axes_square_and_keep_uv_scales() {
