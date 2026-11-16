@@ -388,6 +388,13 @@ impl ModelBody {
         self.mesh.clone()
     }
 
+    /// For a rigidly placed copy of another body (a placement of a component's body, a pattern
+    /// copy), whose display cells are its definition's moved: the identity of that definition,
+    /// the same for every copy of it. `None` for a body with display cells of its own.
+    pub fn placed_definition(&self) -> Option<usize> {
+        self.mesh_placement.as_deref().map(placed_mesh::PlacedMesh::definition_id)
+    }
+
     /// Identity of the display cells of the solid this body shows: its own, or for a rigidly
     /// placed copy its definition's (shared by every placement of it).
     fn solid_id(&self) -> usize {
