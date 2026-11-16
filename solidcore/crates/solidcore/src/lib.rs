@@ -56,6 +56,7 @@ pub mod intersect;
 pub mod mass;
 pub mod nurbs;
 pub mod offset;
+pub mod plate_contact;
 pub mod primitive;
 pub mod prism;
 pub mod profile;
