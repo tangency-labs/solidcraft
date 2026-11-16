@@ -1969,10 +1969,19 @@ fn a_traced_cut_by_each_of_ten_wedges_in_turn_is_the_target_less_the_wedges() {
 /// so each join adds the part the cut leaves behind, 6.8e-5. The sliver of a groove's round in
 /// a wedge's thin edge lies on the wedge's plane within the tolerance; the plane is kept, so
 /// the sliver goes. Classified as a coincident face the join keeps, it was kept beside the
-/// plane, and the first join left a body that was not closed. Nine of the joins add 7.3e-5 each,
-/// 5e-6 more than the cut leaves. The sixth adds 1.3e-4 more than the others, although its result
-/// has the same faces and vertices as theirs, rotated; only the area of the top face differs, by
-/// 3.7e-6 mm2, so the bound below allows 3e-5 a wedge.
+/// plane, and the first join left a body that was not closed; the face count and the check below
+/// catch that.
+///
+/// The volume bound is the precision of the volume of these traced bodies, not a tolerance on the
+/// joins. The bodies' edges may end anywhere within the tolerance of their vertices: the sixth
+/// wedge as traced (`wedge5`) has an arc on the top face that ends 4.5e-7 short of its vertex,
+/// where `wedge0`'s ends on it. The join keeps that arc, so the result's top face is open by that
+/// gap, and its integrated area is 2.1e-6 larger than in the first join (half the cross product of
+/// the arc's end with the gap); the volume integration over the open loops then depends on the
+/// point it is taken about. Moved 40 above the centre of the bounding box, where `Body::volume`
+/// takes it, that point changes the target's own volume by 1.3e-4 and what the sixth join adds by
+/// 1.8e-4. So nine joins add 7.3e-5 each, the sixth 1.0e-4 alone and 2.0e-4 after the other five,
+/// and the bound allows 3e-5 a wedge.
 #[test]
 fn a_traced_join_of_each_of_ten_wedges_in_turn_adds_what_lies_outside_the_target() {
     all_fixes();
