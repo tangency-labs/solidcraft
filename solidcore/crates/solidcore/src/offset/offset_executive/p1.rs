@@ -384,6 +384,12 @@ impl OffsetExecutive {
         &self.closing_faces
     }
 
+    /// Notes a face made to close a gap in the offset exactly, which the face extensions
+    /// leave as it is.
+    pub(super) fn push_closing_face(&mut self, face: FaceId) {
+        self.closing_faces.push(face);
+    }
+
     /// Sets `m_bInset`.
     pub fn set_inset(&mut self, value: bool) {
         self.inset = value;
