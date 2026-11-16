@@ -2804,8 +2804,7 @@ mod tests {
                         for (u, v) in [(0.0_f64, 0.0), (75.0, 2.5), (290.0, 40.0)] {
                             let p = def_cone.evaluate_step_point(Point2::new(u, v)).unwrap();
                             let r = 1.0 + v * t;
-                            let want =
-                                Vec3::new(r * deg2rad(u).cos(), r * deg2rad(u).sin(), v);
+                            let want = Vec3::new(r * deg2rad(u).cos(), r * deg2rad(u).sin(), v);
                             assert!(
                                 p.distance(want) <= 1e-12 * (1.0 + want.length()),
                                 "height = {height}, ({u}, {v}): {p:?} vs {want:?}"
