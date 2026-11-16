@@ -168,7 +168,10 @@ fn resolve_uncached(
             let name = st.bodies.get(bi).map(|b| b.name.clone()).unwrap_or_else(|| body.clone());
             source = LinkSource::Face { body: name, at: q };
             match kind {
-                LinkKind::Intersect => section(plane, &mesh, Some(f)),
+                LinkKind::Intersect => match st.bodies.get(bi).map(|b| axial_section(b, plane, f)).transpose()?.flatten() {
+                    Some(exact) => exact,
+                    None => section(plane, &mesh, Some(f)),
+                },
                 _ => {
                     let target = st.bodies.get(bi).ok_or_else(|| lost("the projection body"))?;
                     // A mesh body is one face with no edges: the flat patch of triangles picked,
@@ -1082,7 +1085,10 @@ fn resolve_named_face(st: &ModelState, plane: &Plane, kind: LinkKind, body: &str
     let face_index = Some(index);
     let index = u32::try_from(index).map_err(|_| DocError::Invalid("named projection face index exceeds limit".into()))?;
     let geom = if kind == LinkKind::Intersect {
-        section(plane, &mesh, Some(index))
+        match axial_section(target, plane, index)? {
+            Some(exact) => exact,
+            None => section(plane, &mesh, Some(index)),
+        }
     } else {
         let geom = projected_edges(target, &mesh, plane, &projection_face_edges(target, &mesh, index, plane)?);
         let geom = merge_split_circles(geom);
@@ -1151,7 +1157,10 @@ pub fn resolve_face_indices(st: &ModelState, plane: &Plane, kind: LinkKind, body
     if kind == LinkKind::Intersect {
         for index in indices {
             let index = u32::try_from(*index).map_err(|_| DocError::Invalid("anchored face index exceeds format bounds".into()))?;
-            geometry.extend(section(plane, &mesh, Some(index)));
+            match axial_section(body, plane, index)? {
+                Some(exact) => geometry.extend(exact),
+                None => geometry.extend(section(plane, &mesh, Some(index))),
+            }
         }
     } else {
         let edges = if let [index] = indices {
@@ -2369,6 +2378,28 @@ fn face_facing(body: &solidcraft_kernel::Body, face: u32, n: Vec3, sum: f64) -> 
         FaceSurface::Cone { axis, .. } if axis.vec().dot(n).abs() > 1.0 - 1e-12 => Some(side),
         _ => None,
     }
+}
+
+/// The section of face `face` of `body` by the sketch plane, exactly, when the face's surface is
+/// one of revolution (a cylinder, cone, sphere or torus) and the plane holds its axis: lines
+/// and circles from the kernel, trimmed at the face's edges ([`solidcraft_kernel::axial_face_section`],
+/// #17496, #17498, #17499, #17500). `None` for any other face or plane, which [`section`] cuts.
+fn axial_section(body: &crate::ModelBody, plane: &Plane, face: u32) -> Result<Option<Vec<LinkGeom>>> {
+    use solidcraft_kernel::AxialPiece;
+    let Some(pieces) = solidcraft_kernel::axial_face_section(&body.body, face as usize, plane).map_err(|e| DocError::Invalid(e.to_string()))? else {
+        return Ok(None);
+    };
+    let local = |[x, y, z]: [f64; 3]| plane.to_local(Vec3::new(x, y, z));
+    Ok(Some(
+        pieces
+            .into_iter()
+            .map(|piece| match piece {
+                AxialPiece::Line { start, end } => LinkGeom::Line(local(start), local(end)),
+                AxialPiece::Arc { centre, start, end } => LinkGeom::Arc { c: local(centre), a: local(start), b: local(end) },
+                AxialPiece::Circle { centre, radius } => LinkGeom::Circle(local(centre), radius),
+            })
+            .collect(),
+    ))
 }
 
 /// Section of a mesh (or one of its faces) with the sketch plane.

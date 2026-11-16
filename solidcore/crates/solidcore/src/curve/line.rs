@@ -1325,9 +1325,9 @@ impl Line {
 
     /// Intersections of this line over `interval` with the ellipse `other` over
     /// `other_interval` (`IntersectWithEllipse`: [`Ellipse::intersect_with_line`] with
-    /// the objects and parameters of every solution swapped). Solutions name
-    /// `this_obj` and `other_obj`; `start.parameters` holds `[this param, other
-    /// param]`.
+    /// the objects and parameters of every solution swapped; `contact_tol` as there).
+    /// Solutions name `this_obj` and `other_obj`; `start.parameters` holds `[this param,
+    /// other param]`.
     ///
     /// # Errors
     ///
@@ -1339,6 +1339,7 @@ impl Line {
         other: &Ellipse,
         other_interval: &Extent1d,
         tol: f64,
+        contact_tol: f64,
         this_obj: Option<O>,
         other_obj: Option<O>,
     ) -> Result<LineLineIntersection<O>> {
@@ -1349,6 +1350,7 @@ impl Line {
             self,
             interval,
             tol,
+            contact_tol,
             other_obj,
             this_obj,
         )?;

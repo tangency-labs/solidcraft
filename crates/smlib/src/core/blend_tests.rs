@@ -762,7 +762,7 @@ fn an_edge_tag_crosses_a_cliff_overflow() {
 /// Solidcore alone: the pocket rim chamfered 5.5, as `fillet_mitre_concave_face_corners`' own test
 /// does it, with `keep_operand_uv_trims` on too, on the body the boolean gives:
 /// 21000 - (50 d² + 4/3 d³) = 19265.666666667 (the fork, and the same body through the flat
-/// arrays). Without `fillet_run_on_bspline_trims` it is refused: error 3, Corner Edge Computation
+/// arrays). Before WR-654's B-spline run-on it was refused: error 3, Corner Edge Computation
 /// Failure (solidcore#1981).
 #[test]
 fn pocket_chamfer_on_a_boolean_body() {
@@ -776,7 +776,6 @@ fn pocket_chamfer_on_a_boolean_body() {
     k.fixes.fillet_trace_reaches_rails = true;
     k.fixes.fillet_mitre_concave_face_corners = true;
     k.fixes.keep_operand_uv_trims = true;
-    k.fixes.fillet_run_on_bspline_trims = true;
     let plate = create_box(&mut k, Point3::ZERO, 60.0, 40.0, 10.0).unwrap();
     let cut = create_box(&mut k, p(15.0, 10.0, 5.0), 30.0, 20.0, 6.0).unwrap();
     let mut b = boolean_difference(&mut k, plate, cut).unwrap();

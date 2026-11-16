@@ -23,8 +23,8 @@
 //! classification curve's cache has no owner in reach through the caller's geometry and
 //! still builds on the system tolerance. An edge's circle and the source circle that
 //! overlap past touching by less than [`contact_tol_3d`] touch at one point (WR-787,
-//! #15429). Ignored native evaluation
-//! and drop statuses preserve initialized outputs; unported errors propagate. The
+//! #15429), and so do a line and a circle, either one the edge's (#14599). Ignored native
+//! evaluation and drop statuses preserve initialized outputs; unported errors propagate. The
 //! native checked-drop guess aliases its output and is reset to zero before solving;
 //! the Rust call explicitly uses that zero guess. A 3D trim-boundary source returns
 //! `InvalidInput` instead of upstream's debug-only assertion.
@@ -417,7 +417,8 @@ impl<O: ClassObject> CurveClassification<O> {
                 source_cache,
                 &mut None,
                 [None, Some(edge_zone)],
-                // rims a hair less than tangent touch at one point (WR-787, #15429)
+                // rims, or a rim and a line, a hair less than tangent touch at one point
+                // (WR-787, #15429, #14599)
                 contact_tol_3d(k),
             )?;
             solutions.extend(
