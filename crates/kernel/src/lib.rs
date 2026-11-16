@@ -99,6 +99,8 @@ mod ops;
 #[cfg(test)]
 mod outline_tests;
 mod par;
+#[cfg(test)]
+mod split_cone_tests;
 pub use par::{KERNEL_STACK, for_each_on_threads, kernel_thread, map_on_threads, map_with_local_pools};
 #[cfg(test)]
 mod display_plan_tests;
@@ -223,16 +225,16 @@ pub use solidcraft_smlib::hold_a_kernel;
 pub use solidcraft_smlib::stop::Stop;
 pub use solidcraft_smlib::trace as smlib_trace;
 pub use splitface::{SplitTool, face_split_if_on_face, has_cap_at, split_body, split_faces, split_faces_with_map};
-pub use step::step_export;
+pub use step::{step_export, step_export_with_face_ids};
 /// The largest STEP text the importer parses; `solidcraft_io::limits` keeps it at the limit in force (#13329).
 pub use step_in::p21::{max_bytes as step_max_bytes, set_max_bytes as set_step_max_bytes};
 pub use step_in::{
     ImportIssue, ImportReport, ImportedBody, IssueKind, StepImport, StepNode, StepReading, step_cache_alive, step_import, step_import_shared,
     step_orientation_errors, step_validate,
 };
-pub use step_out::{ExportBody, ExportProduct, StepHeader, step_export_bodies, step_export_products};
+pub use step_out::{ExportBody, ExportProduct, StepExport, StepHeader, step_export_bodies, step_export_bodies_with_face_ids, step_export_products};
 pub use surface_extend::{ExtendLimit, ExtendMode, ExtendOptions, extend_surface};
-pub use surface_kind::{EdgeCircle, FaceSurface, edge_circle, face_edge_indices, face_surface};
+pub use surface_kind::{AxialPiece, EdgeCircle, FaceSurface, axial_face_section, edge_circle, face_edge_indices, face_surface};
 pub use surface_offset::offset_surface;
 pub use surface_ruled::{Ruled, RuledCorners, RuledMode, ruled_far_handles, ruled_surface, ruled_surface_with};
 pub use surface_trim::{TrimKeep, mutual_trim, trim, trim_keep};

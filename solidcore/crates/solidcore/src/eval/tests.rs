@@ -1304,6 +1304,63 @@ fn a_face_box_reaches_its_boundary_extremes() {
     );
 }
 
+/// A loop that goes round a cylinder once and backs up a little (along a notch: a slot wall, the
+/// curve where two drill points meet) has a box a little wider than a turn, but it does not wind:
+/// its face is one turn wide, like any other band. A loop that goes back more than a turn (a
+/// thread's flank, a screw's cylinder down its thread) keeps its box.
+#[test]
+fn a_loop_that_goes_round_once_and_backs_up_a_little_does_not_wind() {
+    let (r, h) = (20.0f64, 60.0);
+    let cylinder = Surface::Cylinder {
+        frame: Frame {
+            origin: [0.; 3],
+            x_axis: [1., 0., 0.],
+            y_axis: [0., 1., 0.],
+        },
+        radius: r,
+    };
+    let ring = |z: f64| Curve::Circle {
+        frame: Frame {
+            origin: [0., 0., z],
+            x_axis: [1., 0., 0.],
+            y_axis: [0., 1., 0.],
+        },
+        radius: r,
+    };
+    let ruling = |turns: f64| {
+        let a = turns * TAU;
+        Curve::Line {
+            start: [r * a.cos(), r * a.sin(), 0.],
+            end: [r * a.cos(), r * a.sin(), h],
+        }
+    };
+    let (bottom, top) = (ring(0.), ring(h));
+    // Once round and `back` turns back: forward 1 + back turns along the bottom, up the ruling
+    // there, back `back` turns along the top, down the ruling at the start.
+    let width = |back: f64| {
+        let (up, down) = (ruling(back), ruling(0.));
+        let l = vec![
+            (&bottom, [0., (1.0 + back) * TAU], true),
+            (&up, [0., 1.], true),
+            (&top, [0., back * TAU], false),
+            (&down, [0., 1.], false),
+        ];
+        let [u, _] = form::extent(&cylinder, &[l], 1e-9)
+            .unwrap()
+            .expect("an extent");
+        u[1] - u[0]
+    };
+    for back in [0.01, 0.1, 0.5] {
+        let w = width(back);
+        assert!((w - TAU).abs() < 1e-9, "backed up {back} turn: {w}");
+        assert!(!form::winds([[0.0, w], [0.0, 1.0]]));
+    }
+    // Back more than a turn: the box is the whole loop's.
+    let w = width(1.1);
+    assert!((w - 2.1 * TAU).abs() < 1e-9, "{w}");
+    assert!(form::winds([[0.0, w], [0.0, 1.0]]));
+}
+
 /// One edge that winds 33 times round a cylinder (a plane's section of it, run on for 33 turns)
 /// is measured 33 turns wide: sampled at 32 points it would step a turn and a thirty-second at a
 /// time and read as one turn.

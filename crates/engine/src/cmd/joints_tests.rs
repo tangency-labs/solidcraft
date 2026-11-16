@@ -692,11 +692,11 @@ fn a_to_object_extrude_to_another_component_moves_rigidly_with_its_slider() {
     }
 }
 
-/// The design as the last release saved it, before the pending changes: its format number one
-/// back and no list of the changes it has, so each pending step runs as it opens.
+/// The design as it was saved before the format that pins a To Object extrude's placements
+/// (format 57, `v57/extrude-to-object-keeps-picked-placements.rs`): that step runs as it opens,
+/// whatever changes are pending after it, and no list of the changes it has says otherwise.
 fn as_last_release_saved(file: &mut Value) {
-    let number = file["format"].as_str().and_then(|f| f.rsplit('/').next()).and_then(|n| n.parse::<u32>().ok()).unwrap_or(1);
-    file["format"] = json!(format!("solidcraft/{}", number.saturating_sub(1)));
+    file["format"] = json!("solidcraft/56");
     if let Some(o) = file.as_object_mut() {
         o.remove("format_pending");
     }
@@ -3846,4 +3846,29 @@ fn a_rigid_joint_with_a_lost_origin_still_holds_its_part() {
     let fix = run(&mut s, "joint.inspect", json!({"joint": "Fix"}))["joints"][0].clone();
     assert!(!fix["errors"].as_array().is_none_or(Vec::is_empty), "{fix}");
     assert!(same(&pose(&s), &saved), "and after the drive: {:?}", pose(&s));
+}
+
+/// A drive moves the parts it carries by their placement alone: the faces the joint's origins
+/// were picked on are not searched again, however many times the joints are solved (#17074).
+#[test]
+fn driving_a_slider_does_not_resolve_its_face_origins_again() {
+    let mut s = Session::default();
+    for (name, x) in [("A", 0), ("B", 20)] {
+        run(&mut s, "component.activate", json!({"component": 0}));
+        run(&mut s, "component.create", json!({"name": name}));
+        run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [x, 0, 0]}));
+    }
+    let a = occ(&s, "A");
+    run(&mut s, "occurrence.ground", json!({"occurrence": a, "grounded": true}));
+    run(&mut s, "joint.create", json!({"type": "slider", "a": {"face": [10, 5, 5]}, "b": {"face": [20, 5, 5]}, "name": "Rail"}));
+    let probe = Vec3::new(25.0, 5.0, 5.0);
+    run(&mut s, "joint.drive", json!({"joint": "Rail", "value": 5}));
+    let (resolved, before) = (s.model.state().origin_resolutions(), place(&s, "B", probe));
+    assert!(resolved > 0, "the first solve found the origins");
+    for value in [6.0, 7.0, 8.0] {
+        let r = run(&mut s, "joint.drive", json!({"joint": "Rail", "value": value}));
+        assert_eq!(r["moved"], true, "{r}");
+    }
+    assert_eq!(s.model.state().origin_resolutions(), resolved, "origins resolved again by a drive that only moved a part");
+    assert!(near(place(&s, "B", probe), before + Vec3::new(3.0, 0.0, 0.0)), "B follows the slider: {:?}", place(&s, "B", probe));
 }

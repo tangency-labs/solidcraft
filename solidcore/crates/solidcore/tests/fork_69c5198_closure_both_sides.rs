@@ -6,11 +6,11 @@
 //! The repro is an open box: a 10 mm cube with its top face deleted, all ten face uses
 //! of the five walls in one shell. The bottom face's edges are all shared with walls (no
 //! lamina edge), and its two sides meet over the walls' lamina top edges, so it closes
-//! nothing. Upstream's walk marks face uses before it reaches the mate; with
-//! `UpstreamFixes::boolean_new_face_closure_both_sides` the two-sided search marks none
-//! and gives the same answer (no split). On the whole cube the two traversals agree for
-//! every face use (closed), and a union of two boxes comes out the same with the flag
-//! on and off.
+//! nothing. Upstream's walk marks face uses before it reaches the mate; the two-sided
+//! search `TestClosureSplitRegion` now runs marks none and gives the same answer (no
+//! split). On the whole cube and the open box the two traversals agree for every face
+//! use, and a union of two boxes overlapping at a corner has the polyhedron's faces,
+//! edges and vertices.
 #![allow(
     clippy::unwrap_used,
     clippy::expect_used,
@@ -30,6 +30,7 @@ use solidcore::math::Vec3;
 use solidcore::primitive::api_primitives::create_box;
 use solidcore::topology::brep::{p3, p6};
 use solidcore::topology::edge::NotifyEnv;
+use solidcore::topology::edgeuse::p1 as edgeuse_p1;
 use solidcore::topology::topology::NotifyRecords;
 use solidcore::topology::topology_traverser::{
     closure_traversal, closure_traversal_from_both_sides, Entity, Marks,
@@ -94,9 +95,8 @@ fn open_box(k: &mut Kernel) -> Brep {
 
 /// `TestClosureSplitRegion` on the open box's bottom face use: its outputs, and how many
 /// face uses the caller's marks hold a record for afterwards.
-fn split_bottom(fix: bool) -> (bool, usize, usize, usize) {
+fn split_bottom() -> (bool, usize, usize, usize) {
     let mut k = Kernel::default();
-    k.fixes.boolean_new_face_closure_both_sides = fix;
     let mut b = open_box(&mut k);
     let bottom = face_at_z(&b, 0.0);
     let fu = b.face(bottom).unwrap().faceuse.unwrap();
@@ -134,18 +134,8 @@ fn split_bottom(fix: bool) -> (bool, usize, usize, usize) {
 }
 
 #[test]
-fn open_face_upstream_walks_and_marks_the_shell() {
-    let (split, marked, faceuses, faces) = split_bottom(false);
-    assert_eq!(faces, 5);
-    assert_eq!(faceuses, 10);
-    assert!(!split, "an open face splits nothing");
-    // the depth-first walk marks the bottom face use and more before it meets the mate
-    assert!(marked >= 2, "upstream walk marked {marked} face uses");
-}
-
-#[test]
 fn open_face_both_sides_marks_nothing() {
-    let (split, marked, faceuses, faces) = split_bottom(true);
+    let (split, marked, faceuses, faces) = split_bottom();
     assert_eq!(faces, 5);
     assert_eq!(faceuses, 10);
     assert!(!split, "an open face splits nothing");
@@ -187,9 +177,8 @@ fn both_traversals_agree_closed_cube_and_open_box() {
 
 /// Face, edge and vertex counts and the vertex coordinates (sorted) of a union of two
 /// overlapping boxes.
-fn union(fix: bool) -> (usize, usize, usize, Vec<[u64; 3]>) {
+fn union() -> (usize, usize, usize, Vec<[u64; 3]>) {
     let mut k = Kernel::default();
-    k.fixes.boolean_new_face_closure_both_sides = fix;
     let a = create_box(&mut k, Vec3::new(0.0, 0.0, 0.0), 10.0, 10.0, 10.0).unwrap();
     let b = create_box(&mut k, Vec3::new(5.0, 5.0, 5.0), 10.0, 10.0, 10.0).unwrap();
     let r = sm::boolean(&mut k, a, b, BooleanOperation::Union)
@@ -215,11 +204,80 @@ fn union(fix: bool) -> (usize, usize, usize, Vec<[u64; 3]>) {
     )
 }
 
+/// The union of [0, 10]^3 and [5, 15]^3: 6 + 6 faces (3 of each cut by the other); the
+/// 7 corners of each cube outside the other plus the 6 points where two planes of one
+/// cube meet a plane of the other ((10, 10, 5), (5, 5, 10) and their permutations), 20
+/// vertices; and 12 + 20 - 2 = 30 edges (Euler, one closed genus-0 shell).
 #[test]
-fn union_of_two_boxes_unchanged() {
-    let off = union(false);
-    let on = union(true);
-    // two cubes overlapping at a corner: 6 + 6 faces, 3 of each split by the other
-    assert_eq!(off.0, 12);
-    assert_eq!(off, on);
+fn union_of_two_boxes_is_the_corner_polyhedron() {
+    let (faces, edges, vertices, points) = union();
+    assert_eq!((faces, edges, vertices), (12, 30, 20));
+    let mut expected: Vec<[u64; 3]> = Vec::new();
+    for (lo, hi) in [(0.0_f64, 10.0_f64), (5.0, 15.0)] {
+        for x in [lo, hi] {
+            for y in [lo, hi] {
+                for z in [lo, hi] {
+                    // the corner inside the other cube is gone
+                    if (lo == 0.0 && x == hi && y == hi && z == hi)
+                        || (lo == 5.0 && x == lo && y == lo && z == lo)
+                    {
+                        continue;
+                    }
+                    expected.push([x.to_bits(), y.to_bits(), z.to_bits()]);
+                }
+            }
+        }
+    }
+    for p in [
+        [10.0_f64, 10.0, 5.0],
+        [10.0, 5.0, 10.0],
+        [5.0, 10.0, 10.0],
+        [5.0, 5.0, 10.0],
+        [5.0, 10.0, 5.0],
+        [10.0, 5.0, 5.0],
+    ] {
+        expected.push([p[0].to_bits(), p[1].to_bits(), p[2].to_bits()]);
+    }
+    expected.sort_unstable();
+    assert_eq!(points, expected);
+}
+
+/// A broken shell: one edge use of the open box's bottom face taken out of its edge's
+/// edge use list, so it has no radial. Both searches fail on it (the fork's skipped it
+/// and answered), and `TestClosureSplitRegion` fails before adding a shell or region.
+#[test]
+fn a_missing_radial_fails_both_searches_before_any_split() {
+    let mut k = Kernel::default();
+    let mut b = open_box(&mut k);
+    let bottom = face_at_z(&b, 0.0);
+    let fu = b.face(bottom).unwrap().faceuse.unwrap();
+    let lu = b.faceuse(fu).unwrap().loopuses[0];
+    let broken = edgeuse_p1::loopuse_edgeuses(&b, lu).unwrap()[0];
+    let edge = b.edgeuse(broken).unwrap().edge.unwrap();
+    b.edge_mut(edge).unwrap().edgeuses.retain(|&e| e != broken);
+    assert_eq!(edgeuse_p1::radial(&b, broken).unwrap(), None);
+
+    let mut lock = MarkLock::new(std::slice::from_mut(&mut k.context), 0, ALL_MARKS).unwrap();
+    let old = closure_traversal(&mut k, &b, &mut Marks::default(), fu, &lock, None);
+    lock.release(std::slice::from_mut(&mut k.context)).unwrap();
+    assert!(old.is_err(), "the one-sided walk fails: {old:?}");
+    let new = closure_traversal_from_both_sides(&b, fu);
+    assert!(new.is_err(), "the two-sided search fails too: {new:?}");
+
+    let shells = b.shells().len();
+    let regions = b.regions().len();
+    let mut records = NotifyRecords::new();
+    let mut attributes = AttributeStore::default();
+    let key_of = original_key;
+    let mut env = NotifyEnv {
+        records: &mut records,
+        attributes: &mut attributes,
+        context: None,
+        key_of: &key_of,
+    };
+    let split =
+        p6::test_closure_split_region(&mut k, &mut b, &mut Marks::default(), &mut env, false, fu);
+    assert!(split.is_err(), "{split:?}");
+    assert_eq!(b.shells().len(), shells, "no shell added");
+    assert_eq!(b.regions().len(), regions, "no region added");
 }

@@ -150,6 +150,8 @@ impl UnitDiff for Runner {
 mod exact_only_tests {
     use super::{path, Inputs};
     use solidcore::blend::fillet_removal::FilletRemoval;
+    use solidcore::error::blend::BlendFailure;
+    use solidcore::error::{ErrorKind, SolidError};
     use solidcore::kernel::Kernel;
     use solidcore::topology::brep::p1 as bp1;
     use solidcore::topology::face::p2 as face2;
@@ -199,14 +201,19 @@ mod exact_only_tests {
     }
 
     /// `SmFilletRemoval(face, face tolerance)` on face `index` of `file`, exact only or
-    /// not, with editing enabled: whether it succeeded, `NotExact`, and the solid's
-    /// snapshot before and after.
+    /// not, with editing enabled: its error, `NotExact`, and the solid's snapshot before
+    /// and after.
     #[allow(clippy::type_complexity)]
     fn remove(
         file: &str,
         index: usize,
         exact_only: bool,
-    ) -> (bool, bool, (usize, usize, Vec<[f64; 3]>), (usize, usize, Vec<[f64; 3]>)) {
+    ) -> (
+        Option<SolidError>,
+        bool,
+        (usize, usize, Vec<[f64; 3]>),
+        (usize, usize, Vec<[f64; 3]>),
+    ) {
         let mut k = Kernel::default();
         let mut b = read(&mut k, file);
         let f = bp1::faces(&b, None).unwrap()[index];
@@ -217,7 +224,7 @@ mod exact_only_tests {
         removal.set_exact_only(exact_only);
         let r = removal.remove_face(&mut k, &mut b);
         b.refresh_cached_topology();
-        (r.is_ok(), removal.not_exact(), before, snapshot(&b))
+        (r.err(), removal.not_exact(), before, snapshot(&b))
     }
 
     #[test]
@@ -228,14 +235,24 @@ mod exact_only_tests {
             let mut k = Kernel::default();
             let count = bp1::faces(&read(&mut k, file), None).unwrap().len();
             for index in 0..count {
-                let (ok, not_exact, before, after) = remove(file, index, true);
+                let (error, not_exact, before, after) = remove(file, index, true);
+                let ok = error.is_none();
                 if not_exact {
                     assert!(!ok, "{file} face {index}: not exact but removed");
                     assert_eq!(after, before, "{file} face {index}: refused but changed");
+                    // every not-exact refusal is class 130, a refusal, never a stage failure
+                    let e = error.unwrap();
+                    assert_eq!(e.kind(), ErrorKind::RemovalNotExact, "{file} face {index}: {e}");
+                    assert!(e.is_refusal() && !e.is_defect(), "{file} face {index}: {e}");
+                    assert_ne!(
+                        e.blend_failure(),
+                        Some(&BlendFailure::StageFailed),
+                        "{file} face {index}"
+                    );
                     refused.push(format!("{file} face {index}"));
                 } else if ok {
-                    let (default_ok, _, _, default_after) = remove(file, index, false);
-                    assert!(default_ok, "{file} face {index}: exact only removed, default not");
+                    let (default_error, _, _, default_after) = remove(file, index, false);
+                    assert!(default_error.is_none(), "{file} face {index}: exact only removed, default not");
                     assert_eq!(after.0, default_after.0, "{file} face {index}: faces");
                     assert_eq!(after.1, default_after.1, "{file} face {index}: edges");
                     exact += 1;
