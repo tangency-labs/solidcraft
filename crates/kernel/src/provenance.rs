@@ -317,24 +317,21 @@ pub fn offset_origins(result: &Body, input: &Body, thickness: f64, prov: &mut Hi
 /// which only the tool's own history names ([`sweep_origins`]).
 pub fn swept_origins(tool: &Body, plane: &Plane, regions: &[Region2]) -> Result<Vec<FaceOrigin>> {
     let size = tool.size().max(1e-9);
-    let m = tool.mesh(&crate::MeshTolerance::chord(size * 2e-4))?;
-    let faces = face_tris(&m);
+    let faces = tool.faces((size * 1e-3).max(1e-3))?;
     let segs = segments(regions);
     let flat = |p: Vec3| plane.height(p).abs() <= size * 1e-6;
     let mut out = Vec::with_capacity(faces.len());
     for (fi, f) in faces.iter().enumerate() {
-        if f.tris.iter().all(|(t, _)| t.iter().all(|p| flat(*p))) {
+        if f.plane_normal.is_some() && flat(f.centroid) {
             out.push(FaceOrigin::Cap { end: false });
             continue;
         }
         // Its edges in the profile's plane, as 2D points.
-        let pts: Vec<Vec2> = m
-            .edges
-            .iter()
-            .zip(&m.edge_faces)
-            .filter(|(_, fs)| fs.contains(&(fi as u32)))
-            .filter(|(e, _)| e.len() >= 2 && e.iter().all(|p| flat(*p)))
-            .flat_map(|(e, _)| e.windows(2).map(|w| plane.to_local((w[0] + w[1]) * 0.5)).collect::<Vec<_>>())
+        let pts: Vec<Vec2> = tool
+            .face_edge_polylines(fi)
+            .into_iter()
+            .filter(|e| e.len() >= 2 && e.iter().all(|p| flat(*p)))
+            .flat_map(|e| e.windows(2).map(|w| plane.to_local((w[0] + w[1]) * 0.5)).collect::<Vec<_>>())
             .collect();
         match (pts.is_empty(), nearest_segment(&segs, &pts)) {
             (false, Some(k)) => out.push(FaceOrigin::Profile { segment: k }),
