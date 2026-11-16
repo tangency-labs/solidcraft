@@ -70,7 +70,9 @@
 //!   tolerance along the parameter path between the two contacts by a Lipschitz bound
 //!   from the curves' own data ([`curves_stay_within`], [`Curve::speed_bound`]); a
 //!   stretch it cannot certify (a curve kind with no speed bound, at most 4096 halved
-//!   pieces) keeps the solution where upstream puts it. After a move the solutions are sorted
+//!   pieces) keeps the solution where upstream puts it, and so does a stretch a coincident
+//!   range solution overlaps (the range already reports that contact; the point beside it
+//!   is left for the later passes to combine with it). After a move the solutions are sorted
 //!   again on the first parameter, which the later passes assume; a move landing exactly on a
 //!   contact another solution names is dropped instead (the contact is not reported
 //!   twice).
@@ -178,7 +180,8 @@ impl<'a, O: SolutionObject> Named<'a, O> {
 /// end. It moves there when that end lies within `dist_tol` of the other
 /// curve and the two curves are certified to stay within `dist_tol` of each other over
 /// the whole stretch between the solution and the end ([`curves_stay_within`]; the fork
-/// samples the stretch instead). After a move the solutions are sorted on the first parameter;
+/// samples the stretch instead), and no range solution overlaps that stretch
+/// (`crosses_a_range`). After a move the solutions are sorted on the first parameter;
 /// one that would land exactly on a contact another solution names (a point or a range
 /// end) is dropped instead, so the contact is not reported twice.
 fn move_contacts_to_curve_ends<O: SolutionObject>(
@@ -249,6 +252,23 @@ fn move_contacts_to_curve_ends<O: SolutionObject>(
                     continue;
                 }
                 let drop_t = dropped.parameter;
+                // A range solution overlapping the stretch (in either curve's parameter)
+                // already reports that contact as a coincidence. Moving the point across
+                // it onto the range's far end would drop the point there as named twice,
+                // losing where the contact goes on past the range; the solution stays
+                // where upstream puts it, for the later passes to combine with the range.
+                // Point solutions on the stretch do not block: the stretch is certified
+                // within tolerance, so they are the same contact and move to the same end.
+                if crosses_a_range(
+                    sols,
+                    ii,
+                    &named_twice,
+                    which,
+                    [sol_on_end, end_t],
+                    [sol_on_drop, drop_t],
+                ) {
+                    continue;
+                }
                 // The curves within tolerance of one another over the whole stretch from
                 // the solution to the end, certified along a parameter path between the
                 // two contacts ([`curves_stay_within`]; a path monotone in
@@ -319,6 +339,50 @@ fn move_contacts_to_curve_ends<O: SolutionObject>(
     }
     sols.set_size(order.len());
     Ok(())
+}
+
+/// Whether a range solution other than `ii` (and those in `gone`) overlaps the stretch of a
+/// move of solution `ii`: its parameter interval on the end curve (parameter index `which`)
+/// meets the open stretch `end_stretch`, or its interval on the drop curve (the other index)
+/// meets `drop_stretch`. The open stretch is shrunk at both ends by their scaled zero, as
+/// upstream's `SM_IS_BETWEEN`, so a range only touching the stretch's start or end (the same
+/// parameter to the kernel's zero) does not overlap it. A NaN parameter overlaps (the move is
+/// refused).
+fn crosses_a_range<O: SolutionObject>(
+    sols: &SolutionArray<O>,
+    ii: usize,
+    gone: &[usize],
+    which: usize,
+    end_stretch: [f64; 2],
+    drop_stretch: [f64; 2],
+) -> bool {
+    let end_idx = which.min(1);
+    let drop_idx = 1 - end_idx;
+    // `[a, b]` meets the open stretch shrunk by its ends' scaled zero; a NaN meets
+    // (`f64::min` and `max` would drop it)
+    let meets = |[s, e]: [f64; 2], a: f64, b: f64| {
+        if [s, e, a, b].iter().any(|v| v.is_nan()) {
+            return true;
+        }
+        let z = scaled_zero2(&s, &e);
+        let (lo, hi) = (s.min(e) + z, s.max(e) - z);
+        let (a, b) = (a.min(b), a.max(b));
+        !(b <= lo || a >= hi)
+    };
+    sols.as_slice().iter().enumerate().any(|(jj, o)| {
+        if jj == ii || gone.contains(&jj) || o.solution_type != SolutionType::RangeOfValues {
+            return false;
+        }
+        [(end_idx, end_stretch), (drop_idx, drop_stretch)]
+            .into_iter()
+            .any(|(i, stretch)| {
+                let (Some(&a), Some(&b)) = (o.start.parameters.get(i), o.end.parameters.get(i))
+                else {
+                    return true;
+                };
+                meets(stretch, a, b)
+            })
+    })
 }
 
 /// `all` without the entries at `gone`, sorted on `key` (stable: entries with equal keys
@@ -2258,6 +2322,87 @@ mod tests {
 
     fn unit() -> Extent1d {
         Extent1d::from_min_max(0.0, 1.0)
+    }
+
+    /// A solution `[t0, t1]` (a point) or `[t0, t1]..[e0, e1]` (a range).
+    fn sol(kind: SolutionType, start: [f64; 2], end: [f64; 2]) -> Solution<H> {
+        let mut s = Solution::new();
+        s.solution_type = kind;
+        s.num_variables = 2;
+        s.start.parameters[..2].copy_from_slice(&start);
+        s.end.parameters[..2].copy_from_slice(&end);
+        s
+    }
+
+    /// A point contact beside a coincident range is not moved across that range onto the
+    /// curve end the range already reaches (where it would be dropped as named twice): the
+    /// contact stays where the solve put it, for the later passes to combine with the range.
+    /// The offset rows `overlap_pc_extrudeHoles1_f*_k0.37_out_rnd` lost such points (the
+    /// curves coincide from the start to the point) and built unsound bodies reported as
+    /// success. A lone contact with the same stretch still moves, and so does a chain of
+    /// point contacts along one tangential stretch (b27's sliver round): they all land on the
+    /// end, and the later ones are dropped as named twice.
+    #[test]
+    fn a_contact_beside_a_coincident_range_is_not_moved_across_it() {
+        let k = Kernel::default();
+        // identical over t in [0, 0.5], apart past it
+        let a = polyline(&[[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [2.0, 0.0, 0.0]]);
+        let b = polyline(&[[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [2.0, 1.0, 0.0]]);
+        let tol = 1e-3;
+        let range = sol(SolutionType::RangeOfValues, [0.0, 0.0], [0.48, 0.48]);
+        let point = sol(SolutionType::SingleValue, [0.5, 0.5], [0.0, 0.0]);
+        let mut sols = SolutionArray::new();
+        sols.add(&range);
+        sols.add(&point);
+        move_contacts_to_curve_ends(&k, &a, &unit(), &b, &unit(), tol, &mut sols).unwrap();
+        assert_eq!(sols.len(), 2, "the point is kept");
+        let kept = sols.get(1).unwrap();
+        assert_eq!(kept.solution_type, SolutionType::SingleValue);
+        assert_eq!(kept.start.parameters[..2], [0.5, 0.5], "and not moved");
+        assert_eq!(sols.get(0).unwrap().end.parameters[..2], [0.48, 0.48]);
+
+        // the same point alone: its contact runs on to the start of both curves (certified),
+        // so it moves there
+        let mut alone = SolutionArray::new();
+        alone.add(&point);
+        move_contacts_to_curve_ends(&k, &a, &unit(), &b, &unit(), tol, &mut alone).unwrap();
+        assert_eq!(alone.len(), 1);
+        assert_eq!(alone.get(0).unwrap().start.parameters[..2], [0.0, 0.0]);
+
+        // a chain of points on one stretch: all move to the start, one is kept
+        let mut chain = SolutionArray::new();
+        for t in [0.1, 0.3, 0.5] {
+            chain.add(&sol(SolutionType::SingleValue, [t, t], [0.0, 0.0]));
+        }
+        move_contacts_to_curve_ends(&k, &a, &unit(), &b, &unit(), tol, &mut chain).unwrap();
+        assert_eq!(chain.len(), 1);
+        assert_eq!(chain.get(0).unwrap().start.parameters[..2], [0.0, 0.0]);
+
+        let crosses = |others: &[Solution<H>], gone: &[usize]| {
+            let mut s = SolutionArray::new();
+            s.add(&point);
+            for o in others {
+                s.add(o);
+            }
+            crosses_a_range(&s, 0, gone, 0, [0.5, 0.0], [0.5, 0.0])
+        };
+        // a range only touching the stretch's end, or to the kernel's zero, does not block
+        let touching = sol(SolutionType::RangeOfValues, [0.5, 0.5], [0.52, 0.52]);
+        let at_zero = sol(SolutionType::RangeOfValues, [0.5 - 1e-13, 0.6], [0.7, 0.7]);
+        assert!(!crosses(&[touching, at_zero], &[]));
+        // nor does a point inside it
+        assert!(!crosses(
+            &[sol(SolutionType::SingleValue, [0.2, 0.2], [0.0, 0.0])],
+            &[]
+        ));
+        // a range inside the stretch in the drop curve's parameter only blocks it
+        let inside_drop = sol(SolutionType::RangeOfValues, [0.9, 0.2], [0.95, 0.25]);
+        assert!(crosses(&[inside_drop], &[]));
+        // ... unless it is already dropped
+        assert!(!crosses(&[inside_drop], &[1]));
+        // NaN refuses
+        let nan = sol(SolutionType::RangeOfValues, [f64::NAN, 0.9], [0.95, 0.95]);
+        assert!(crosses(&[nan], &[]));
     }
 
     #[test]
