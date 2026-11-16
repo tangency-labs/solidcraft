@@ -1091,12 +1091,16 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
     /// "another entity is already related to the other one".
     ///
     /// So when another definition of a proto edge between this definition's two proto
-    /// vertices is sourced in B-rep `which` on an edge that runs between this definition's
-    /// two final vertices there (`start` and `end`, distinct), bounds `face`, and is proved
-    /// within `along_tol` plus its own tolerance of this definition's curve over the whole of
-    /// both ([`Curve::proved_within`], a certified bound, never samples), that edge is this
-    /// definition's edge. `along_tol` is the tolerance the edge would be made with (the
-    /// face's or the definition's, the larger), as WR-580 takes it in Brep2.
+    /// vertices is that mirror pair, sourced in B-rep `which` on an edge that runs between
+    /// this definition's two final vertices there (`start` and `end`, distinct) and bounds
+    /// `face`, and in the other B-rep on a face that this definition's edge there bounds, and
+    /// the edge is proved within `along_tol` plus its own tolerance of this definition's curve
+    /// over the whole of both ([`Curve::proved_within`], a certified bound, never samples),
+    /// that edge is this definition's edge. Only that pair is one curve found twice: beside
+    /// a definition sourced on an edge in both B-reps, this one is a curve of its own, even
+    /// within tolerance of it (the two rims of a sheet shelled to `2 * tolerance` keep both
+    /// their edges). `along_tol` is the tolerance the edge would be made with (the face's or
+    /// the definition's, the larger), as WR-580 takes it in Brep2.
     ///
     /// # Errors
     ///
@@ -1121,6 +1125,14 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
             self.pv_live(self.edge_def_end_proto_vertex(ed)?)?,
         );
         let d = self.ed_ref(ed)?;
+        // this definition's source in the other B-rep, which must be an edge
+        let across = 3 - which;
+        if d.src_topo_type(across) != PointClassType::Edge {
+            return Ok(None);
+        }
+        let Some(own_edge) = as_kind(d.src_topo(across), ClassObjectKind::Edge) else {
+            return Ok(None);
+        };
         let curve = curve_of(brep, d.xsect_curve_3d())?;
         let interval = d.xsect_interval();
         let proto_edges = self
@@ -1136,9 +1148,14 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
                 .to_vec();
             for other in siblings.into_iter().filter(|&o| o != ed) {
                 let o = self.ed_ref(other)?;
-                if o.src_topo_type(which) != PointClassType::Edge {
+                if o.src_topo_type(which) != PointClassType::Edge
+                    || o.src_topo_type(across) != PointClassType::Face
+                {
                     continue;
                 }
+                let Some(other_face) = as_kind(o.src_topo(across), ClassObjectKind::Face) else {
+                    continue;
+                };
                 let Some(edge) = as_kind(o.src_topo(which), ClassObjectKind::Edge) else {
                     continue;
                 };
@@ -1153,7 +1170,10 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
                 let e = brep.edge_other_vertex(edge, s)?;
                 let between =
                     (s, e) == (Some(start), Some(end)) || (s, e) == (Some(end), Some(start));
-                if !between || !brep.edge_is_connected_to_face(edge, face)? {
+                if !between
+                    || !brep.edge_is_connected_to_face(edge, face)?
+                    || !brep.edge_is_connected_to_face(own_edge, other_face)?
+                {
                     continue;
                 }
                 let edge_curve = brep
