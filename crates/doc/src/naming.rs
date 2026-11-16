@@ -1122,17 +1122,16 @@ pub fn edge_names(b: &ModelBody) -> Vec<String> {
 
 /// Names of a body's edges from its faces' names `faces`.
 fn edge_names_from(b: &ModelBody, faces: &[String]) -> Vec<String> {
-    let m = b.mesh();
-    let mut names: Vec<String> = m
-        .edge_faces
+    let edges = b.body.edge_faces_and_points();
+    let mut names: Vec<String> = edges
         .iter()
-        .map(|fs| {
+        .map(|(fs, _)| {
             let mut n: Vec<&str> = fs.iter().filter_map(|f| faces.get(*f as usize).map(String::as_str)).collect();
             n.sort();
             n.join("|")
         })
         .collect();
-    let pts: Vec<Vec<Vec3>> = m.edges.clone();
+    let pts: Vec<Vec<Vec3>> = edges.into_iter().map(|(_, p)| p).collect();
     number_pieces(&mut names, &pts, '~');
     names
 }

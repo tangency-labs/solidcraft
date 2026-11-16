@@ -769,6 +769,23 @@ impl Body {
         }
     }
 
+    /// For each edge of `self`, its incident face indices and exact polyline points.
+    pub fn edge_faces_and_points(&self) -> Vec<(Vec<u32>, Vec<Vec3>)> {
+        if self.is_mesh() {
+            return Vec::new();
+        }
+        let chord = (self.size() * 1e-3).max(1e-4);
+        self.record
+            .edges
+            .iter()
+            .map(|e| {
+                let fs: Vec<u32> = e.uses.iter().map(|u| u.face).collect();
+                let pts = edge_points(e, chord).unwrap_or_default();
+                (fs, pts)
+            })
+            .collect()
+    }
+
     /// The face of `self` nearest `p` and its exact distance, or `None` for a mesh body or empty body.
     pub fn nearest_face(&self, p: Vec3) -> Option<(f64, usize)> {
         let (ops, order) = self.ops_body()?;
