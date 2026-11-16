@@ -17,7 +17,7 @@ use solidcore_ops::prism::{
     prism_section, region_area, PrismSection,
 };
 use solidcore_ops::{make_box, make_cylinder, session, Body, BooleanOp, CheckLevel, Error};
-use solidcore_record::{Loop2, Plane, Region2, Seg2, Vec2};
+use solidcore_record::{Loop2, Plane, Region2, Seg2, Vec2, Vec3};
 
 fn all_fixes() {
     session::set_thread_fixes(solidcore::kernel::UpstreamFixes::NAMES.iter().copied()).unwrap();
@@ -1335,6 +1335,76 @@ fn planar_region_api_rejects_hostile_values_and_budgets() {
         planar_regions_boolean(&many, &[], BooleanOp::Union, 1e-7),
         Err(Error::Profile(_))
     ));
+}
+
+#[test]
+fn a_prism_section_does_not_depend_on_the_query_frame_origin() {
+    all_fixes();
+    let body = make_cylinder([50.0, 50.0, -3.0], 5.0, 6.0).unwrap();
+    let exact_volume = 150.0 * PI;
+    for offset in [0.0, 300.0, 1000.0, 10000.0, -10000.0] {
+        let plane = Plane {
+            origin: Vec3::new(offset, offset, 7.0),
+            ..Plane::XY
+        };
+        let section = prism_section(&body, &plane)
+            .unwrap()
+            .unwrap_or_else(|| panic!("the same cylinder is a prism at origin {offset}"));
+        assert!((section.lo + 10.0).abs() <= section.tolerance);
+        assert!((section.hi + 4.0).abs() <= section.tolerance);
+        assert!(section.volume.lo <= exact_volume && exact_volume <= section.volume.hi);
+        assert!(section.region.holes.is_empty());
+        for segment in &section.region.outer.segs {
+            let Seg2::Arc { center, radius, .. } = segment else {
+                panic!("a cylinder's section is circular: {segment:?}");
+            };
+            assert!((center.x + offset - 50.0).abs() < 1e-8);
+            assert!((center.y + offset - 50.0).abs() < 1e-8);
+            assert!((radius - 5.0).abs() < 1e-8);
+        }
+    }
+    for offset in [1e20, f64::MAX] {
+        let plane = Plane {
+            origin: Vec3::new(offset, offset, 7.0),
+            ..Plane::XY
+        };
+        assert!(prism_section(&body, &plane).unwrap().is_none());
+    }
+    let moved = make_cylinder([500.0, 500.0, -3.0], 5.0, 6.0).unwrap();
+    let plane = Plane {
+        origin: Vec3::new(500.0, 500.0, 0.0),
+        ..Plane::XY
+    };
+    let section = prism_section(&moved, &plane).unwrap().unwrap();
+    assert!((section.lo + 3.0).abs() <= section.tolerance);
+    assert!((section.hi - 3.0).abs() <= section.tolerance);
+    assert!(section.volume.lo <= exact_volume && exact_volume <= section.volume.hi);
+}
+
+#[test]
+fn a_prism_section_refuses_a_wall_displaced_from_its_caps() {
+    use solidcore_record::brep::Surface;
+
+    all_fixes();
+    let body = make_cylinder([50.0, 50.0, -3.0], 5.0, 6.0).unwrap();
+    let (mut record, _) = body.to_record().unwrap();
+    let wall = record
+        .faces
+        .iter_mut()
+        .find(|face| matches!(face.surface, Surface::Cylinder { .. }))
+        .unwrap();
+    let Surface::Cylinder { frame, .. } = &mut wall.surface else {
+        unreachable!()
+    };
+    frame.origin[2] += 1000.0;
+    let Some(Surface::RationalSpline { homogeneous, .. }) = &mut wall.nurbs else {
+        panic!("the cylinder's wall has a rational net")
+    };
+    for p in homogeneous.iter_mut().flatten() {
+        p[2] += 1000.0 * p[3];
+    }
+    let (displaced, _) = Body::from_record(&record, true).unwrap();
+    assert!(prism_section(&displaced, &Plane::XY).unwrap().is_none());
 }
 
 /// A box cut by a cylinder through it, moved: a prism along its moved axis, and the same prism

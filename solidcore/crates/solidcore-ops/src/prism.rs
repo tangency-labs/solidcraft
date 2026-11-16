@@ -262,7 +262,7 @@ pub struct PrismSection {
     pub hi: f64,
     /// Its section, exact: lines and arcs, the outer loop counter-clockwise, the holes clockwise.
     pub region: Region2,
-    /// How far the levels may be off the body's caps.
+    /// How far the levels and section may be off the body's caps, including frame conversion.
     pub tolerance: f64,
     /// An enclosure of its volume.
     pub volume: Interval,
@@ -299,7 +299,7 @@ pub fn prism_equivalent(a: &Body, b: &Body) -> Result<Option<bool>> {
         });
     }
     run_on("prism_equivalent", &[("a", a), ("b", b)], |k| {
-        let (ga, gb) = (a.lock(), b.lock());
+        let (ga, gb) = Body::lock_pair(a, b);
         Ok(measure::equivalent(k, &ga, &gb))
     })
 }

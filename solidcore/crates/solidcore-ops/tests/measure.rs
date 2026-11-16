@@ -4,8 +4,12 @@
 
 use std::f64::consts::PI;
 
+use solidcore_ops::face_surface::FaceSurface;
 use solidcore_ops::session;
-use solidcore_ops::{make_box, make_sphere, make_torus, PointClass};
+use solidcore_ops::surface::ruled;
+use solidcore_ops::sweep::{planar_faces, Curve as SweepCurve};
+use solidcore_ops::{make_box, make_sphere, make_torus, Body, Order, PointClass};
+use solidcore_record::brep::{Brep, Curve};
 
 fn all_fixes() {
     session::set_thread_fixes(solidcore::kernel::UpstreamFixes::NAMES.iter().copied()).unwrap();
@@ -214,6 +218,283 @@ fn a_ray_beside_a_box_is_nearest_the_edge_it_passes() {
         b.edge_closest_to_ray(&order, order.edges.len(), [0.0; 3], [0.0, 0.0, 1.0]),
         Err(solidcore_ops::Error::Argument)
     );
+}
+
+/// A tube: the ruled sheet between the radius-5 circles about z at z = 0 and z = 10, one face.
+/// Each circle is the exact rational quadratic on the square around it (Piegl and Tiller, The
+/// NURBS Book, 7.5): corners weighted sqrt(2) / 2, the circle's seam at (5, 0).
+fn tube() -> (Body, Brep, Order) {
+    let r = 5.0;
+    let w = std::f64::consts::FRAC_1_SQRT_2;
+    let ring = |z: f64| Curve::RationalSpline {
+        knots: vec![
+            0.0, 0.0, 0.0, 0.25, 0.25, 0.5, 0.5, 0.75, 0.75, 1.0, 1.0, 1.0,
+        ],
+        homogeneous: [
+            (r, 0.0, 1.0),
+            (r, r, w),
+            (0.0, r, 1.0),
+            (-r, r, w),
+            (-r, 0.0, 1.0),
+            (-r, -r, w),
+            (0.0, -r, 1.0),
+            (r, -r, w),
+            (r, 0.0, 1.0),
+        ]
+        .map(|(x, y, w)| [x * w, y * w, z * w, w])
+        .to_vec(),
+    };
+    let sheet = ruled(&ring(0.0), &ring(10.0), false).unwrap();
+    let (body, _) = Body::from_record(&sheet, false).unwrap();
+    let (record, order) = body.to_record().unwrap();
+    (body, record, order)
+}
+
+/// Whether two points are within 1e-6 of each other in every coordinate.
+fn close(p: [f64; 3], q: [f64; 3]) -> bool {
+    p.iter().zip(q).all(|(a, b)| (a - b).abs() <= 1e-6)
+}
+
+/// A ray along +x at y = 3, z = 4 crosses the radius-5 tube twice, at x = -4 and x = 4 (a 3-4-5
+/// triangle in the plane z = 4). From x = -20 the first hit is (-4, 3, 4), 16 along the ray,
+/// whatever the direction's length; its (u, v) is on the face it names, the face's own surface
+/// evaluating back to the point. From inside the tube only the far side is ahead. The same ray
+/// from x = 20 points away from the tube and meets nothing, as does one at y = 6, past the
+/// radius; a direction of no length and a coordinate that is not finite are refused.
+#[test]
+fn a_ray_through_a_tube_hits_its_nearer_side_with_the_face_and_uv() {
+    all_fixes();
+    let (b, record, order) = tube();
+    for direction in [[1.0, 0.0, 0.0], [2.5, 0.0, 0.0], [1e200, 0.0, 0.0]] {
+        let hit = b
+            .face_hit_by_ray(&order, [-20.0, 3.0, 4.0], direction)
+            .unwrap()
+            .unwrap();
+        assert!(close(hit.point, [-4.0, 3.0, 4.0]), "{hit:?}");
+        assert!(near(hit.distance, 16.0, 1e-6), "{hit:?}");
+        let on = FaceSurface::of(&record, hit.face)
+            .unwrap()
+            .point(hit.uv)
+            .unwrap();
+        assert!(close(on, hit.point), "{hit:?} evaluates to {on:?}");
+    }
+    let inside = b
+        .face_hit_by_ray(&order, [0.0, 3.0, 4.0], [1.0, 0.0, 0.0])
+        .unwrap()
+        .unwrap();
+    assert!(close(inside.point, [4.0, 3.0, 4.0]), "{inside:?}");
+    assert!(near(inside.distance, 4.0, 1e-6), "{inside:?}");
+    assert_eq!(
+        b.face_hit_by_ray(&order, [20.0, 3.0, 4.0], [1.0, 0.0, 0.0]),
+        Ok(None)
+    );
+    assert_eq!(
+        b.face_hit_by_ray(&order, [-20.0, 6.0, 4.0], [1.0, 0.0, 0.0]),
+        Ok(None)
+    );
+    for (origin, direction) in [
+        ([-20.0, 3.0, 4.0], [0.0, 0.0, 0.0]),
+        ([f64::NAN, 3.0, 4.0], [1.0, 0.0, 0.0]),
+        ([-20.0, 3.0, 4.0], [f64::INFINITY, 0.0, 0.0]),
+    ] {
+        assert_eq!(
+            b.face_hit_by_ray(&order, origin, direction),
+            Err(solidcore_ops::Error::Argument),
+            "{origin:?} {direction:?}"
+        );
+    }
+}
+
+/// A doubly curved face: a ray along +z through (1.72, 2.96) runs (0.72, 0.96) off the axis of
+/// the radius-2 sphere about (1, 2, 3), 1.2 from it (a 3-4-5 triangle scaled by 0.24), which
+/// leaves sqrt(4 - 1.44) = 1.6 in z: the ray meets the sphere first at z = 3 - 1.6 = 1.4, 11.4
+/// along it from z = -10, the face's (u, v) evaluating back to the point.
+#[test]
+fn a_ray_through_a_sphere_hits_its_near_side() {
+    all_fixes();
+    let s = make_sphere([1.0, 2.0, 3.0], 2.0).unwrap();
+    let (record, order) = s.to_record().unwrap();
+    let hit = s
+        .face_hit_by_ray(&order, [1.72, 2.96, -10.0], [0.0, 0.0, 1.0])
+        .unwrap()
+        .unwrap();
+    assert!(close(hit.point, [1.72, 2.96, 1.4]), "{hit:?}");
+    assert!(near(hit.distance, 11.4, 1e-6), "{hit:?}");
+    let on = FaceSurface::of(&record, hit.face)
+        .unwrap()
+        .point(hit.uv)
+        .unwrap();
+    assert!(close(on, hit.point), "{hit:?} evaluates to {on:?}");
+}
+
+/// The unit vectors along x, y and z.
+const X: [f64; 3] = [1.0, 0.0, 0.0];
+const Y: [f64; 3] = [0.0, 1.0, 0.0];
+const Z: [f64; 3] = [0.0, 0.0, 1.0];
+
+fn dot(p: [f64; 3], q: [f64; 3]) -> f64 {
+    p.iter().zip(q).map(|(a, b)| a * b).sum()
+}
+
+/// The record face of a box that lies in the plane `dot(axis, p) = at`, found from the faces' own
+/// surfaces (the point and normal in the middle of each face's domain), apart from any ray.
+fn box_face(record: &Brep, order: &Order, axis: [f64; 3], at: f64) -> usize {
+    let in_plane: Vec<usize> = (0..order.faces.len())
+        .filter(|&f| {
+            let surface = FaceSurface::of(record, f).unwrap();
+            let [[u0, u1], [v0, v1]] = surface.domain();
+            let middle = [(u0 + u1) / 2.0, (v0 + v1) / 2.0];
+            let p = surface.point(middle).unwrap();
+            let n = surface.normal(middle).unwrap();
+            near(dot(axis, p), at, 1e-9) && near(dot(axis, n).abs(), 1.0, 1e-9)
+        })
+        .collect();
+    match in_plane.as_slice() {
+        &[face] => face,
+        other => unreachable!("faces in {axis:?} . p = {at}: {other:?}"),
+    }
+}
+
+/// A box [0, 30] x [0, 20] x [0, 10] has six faces, and a ray meets the one whose plane it
+/// crosses first: from x = -7 along +x the face x = 0 at 7; from y = 26 along -y the face y = 20
+/// at 6; from z = 16 along -z the face z = 10 at 6. From inside, at x = 12, a ray along +x meets
+/// the face ahead, x = 30 at 18, not x = 0 behind it; along -y from y = 5 it meets y = 0 at 5.
+/// Each face is named by its plane, and its (u, v) evaluates back to the point.
+#[test]
+fn a_ray_at_a_box_hits_the_face_whose_plane_it_crosses_first() {
+    all_fixes();
+    let b = make_box([0.0; 3], [30.0, 20.0, 10.0]).unwrap();
+    let (record, order) = b.to_record().unwrap();
+    assert_eq!(order.faces.len(), 6);
+    for (origin, direction, (axis, at), point, distance) in [
+        (
+            [-7.0, 5.0, 4.0],
+            [1.0, 0.0, 0.0],
+            (X, 0.0),
+            [0.0, 5.0, 4.0],
+            7.0,
+        ),
+        (
+            [10.0, 26.0, 4.0],
+            [0.0, -1.0, 0.0],
+            (Y, 20.0),
+            [10.0, 20.0, 4.0],
+            6.0,
+        ),
+        (
+            [12.0, 5.0, 16.0],
+            [0.0, 0.0, -1.0],
+            (Z, 10.0),
+            [12.0, 5.0, 10.0],
+            6.0,
+        ),
+        (
+            [12.0, 5.0, 4.0],
+            [1.0, 0.0, 0.0],
+            (X, 30.0),
+            [30.0, 5.0, 4.0],
+            18.0,
+        ),
+        (
+            [12.0, 5.0, 4.0],
+            [0.0, -1.0, 0.0],
+            (Y, 0.0),
+            [12.0, 0.0, 4.0],
+            5.0,
+        ),
+    ] {
+        let hit = b
+            .face_hit_by_ray(&order, origin, direction)
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            hit.face,
+            box_face(&record, &order, axis, at),
+            "{origin:?} {direction:?}: {hit:?}"
+        );
+        assert!(close(hit.point, point), "{hit:?}");
+        assert!(near(hit.distance, distance, 1e-6), "{hit:?}");
+        let on = FaceSurface::of(&record, hit.face)
+            .unwrap()
+            .point(hit.uv)
+            .unwrap();
+        assert!(close(on, point), "{hit:?} evaluates to {on:?}");
+    }
+}
+
+/// A ray crossing a face's plane outside its trim does not hit it. On the box [0, 2]^3 the ray
+/// from (-1.5, 6, 1) along (3, -4, 0) (unit (0.6, -0.8, 0)) crosses the plane x = 0 at (0, 4, 1),
+/// above the face there, and then meets the face y = 2 at (1.5, 2, 1), 5 along it (a 3-4-5
+/// triangle). A disk of radius 5 in z = 0 is hit at (2, 1, 0) from either side, 10 from z = 10
+/// or z = -10; a ray down through (4, 4), sqrt(32) from the centre, crosses the disk's plane
+/// outside the disk and meets nothing.
+#[test]
+fn a_ray_through_a_faces_plane_outside_its_trim_misses_that_face() {
+    all_fixes();
+    let b = make_box([0.0; 3], [2.0; 3]).unwrap();
+    let (record, order) = b.to_record().unwrap();
+    let hit = b
+        .face_hit_by_ray(&order, [-1.5, 6.0, 1.0], [3.0, -4.0, 0.0])
+        .unwrap()
+        .unwrap();
+    assert_eq!(hit.face, box_face(&record, &order, Y, 2.0), "{hit:?}");
+    assert!(close(hit.point, [1.5, 2.0, 1.0]), "{hit:?}");
+    assert!(near(hit.distance, 5.0, 1e-6), "{hit:?}");
+
+    let disk = planar_faces(&[SweepCurve::Arc {
+        center: [0.0; 3],
+        axis: [0.0, 0.0, 1.0],
+        reference: [1.0, 0.0, 0.0],
+        radius: 5.0,
+        start: 0.0,
+        end: 2.0 * PI,
+    }])
+    .unwrap();
+    let (_, order) = disk.to_record().unwrap();
+    assert_eq!(order.faces.len(), 1);
+    for (z, direction) in [(10.0, [0.0, 0.0, -1.0]), (-10.0, [0.0, 0.0, 1.0])] {
+        let hit = disk
+            .face_hit_by_ray(&order, [2.0, 1.0, z], direction)
+            .unwrap()
+            .unwrap();
+        assert_eq!(hit.face, 0, "{hit:?}");
+        assert!(close(hit.point, [2.0, 1.0, 0.0]), "{hit:?}");
+        assert!(near(hit.distance, 10.0, 1e-6), "{hit:?}");
+    }
+    assert_eq!(
+        disk.face_hit_by_ray(&order, [4.0, 4.0, 10.0], [0.0, 0.0, -1.0]),
+        Ok(None)
+    );
+}
+
+/// A ray through an edge meets both of its faces at the same distance and returns one of them:
+/// on the box [0, 2]^3 the ray from (-3, -4, 1) along (3, 4, 0) passes the edge x = 0, y = 0 at
+/// (0, 0, 1), 5 along it; the face is x = 0 or y = 0, whichever, and its (u, v) evaluates to the
+/// point on the edge.
+#[test]
+fn a_ray_through_a_box_edge_hits_one_of_its_two_faces_on_the_edge() {
+    all_fixes();
+    let b = make_box([0.0; 3], [2.0; 3]).unwrap();
+    let (record, order) = b.to_record().unwrap();
+    let hit = b
+        .face_hit_by_ray(&order, [-3.0, -4.0, 1.0], [3.0, 4.0, 0.0])
+        .unwrap()
+        .unwrap();
+    let faces = [
+        box_face(&record, &order, X, 0.0),
+        box_face(&record, &order, Y, 0.0),
+    ];
+    assert!(
+        faces.contains(&hit.face),
+        "{hit:?} is on neither of {faces:?}"
+    );
+    assert!(close(hit.point, [0.0, 0.0, 1.0]), "{hit:?}");
+    assert!(near(hit.distance, 5.0, 1e-6), "{hit:?}");
+    let on = FaceSurface::of(&record, hit.face)
+        .unwrap()
+        .point(hit.uv)
+        .unwrap();
+    assert!(close(on, [0.0, 0.0, 1.0]), "{hit:?} evaluates to {on:?}");
 }
 
 #[test]
