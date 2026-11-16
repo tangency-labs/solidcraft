@@ -94,8 +94,9 @@ pub(super) fn interference(s: &mut Session, p: &Value) -> Result<Value> {
     let paths: HashMap<String, Vec<u64>> = s.doc.body_frames(&s.model.state()).into_iter().map(|(name, _, path, _)| (name, path)).collect();
     let path_of = |name: &str| paths.get(name).map_or(&[][..], Vec::as_slice);
     let excluded = excluded_pairs(s, p, &st, cmd)?;
+    // With `envelopes`, a body named in a pair means the envelope standing in for it.
     let matches = |side: &Side, name: &str| match side {
-        Side::Body(n) => n == name,
+        Side::Body(n) => n == name || (use_envelopes && envelopes.standing_in(n) == name),
         Side::Occurrence(o) => path_of(name).contains(o),
     };
     let left_out = |i: usize, j: usize| {

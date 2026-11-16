@@ -243,6 +243,9 @@ fn an_envelope_stands_in_for_its_components_bodies_when_asked() {
     assert_eq!(names(&env), vec![["Envelope".to_string(), "Lid".to_string()]], "{env}");
     assert!((f(&env["interferences"][0]["volume_mm3"]) - 1.0).abs() < 1e-6, "{env}");
     assert_eq!(env["checked"], 2, "{env}");
+    // A pair naming a body inside the envelope excludes the envelope's pair.
+    let excluded = run(&mut s, "inspect.interference", json!({"envelopes": true, "exclude_pairs": [["Housing", "Lid"]]}));
+    assert_eq!((excluded["count"].as_u64(), excluded["pairs_excluded"].as_u64()), (Some(0), Some(1)), "{excluded}");
     // Named, the envelope is checked, but not against the housing it encloses.
     let named = run(&mut s, "inspect.interference", json!({"bodies": ["Envelope", "Housing", "Lid"]}));
     assert_eq!(names(&named), vec![["Envelope".to_string(), "Lid".to_string()]], "{named}");

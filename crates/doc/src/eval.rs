@@ -192,13 +192,13 @@ impl ModelBody {
         }
     }
 
-    /// A surface body: some shell does not close ([`Body::is_surface`]), worked out once.
     /// Whether a feature `f` that names no bodies works on this one: a body of its component
     /// (not the component's envelope), or one `f` made itself.
     pub fn in_default_scope(&self, f: &Feature) -> bool {
         (self.component == f.component && !self.envelope) || self.feature == f.id
     }
 
+    /// A surface body: some shell does not close ([`Body::is_surface`]), worked out once.
     pub fn is_surface(&self) -> bool {
         !self.body.is_mesh() && self.is_open()
     }
