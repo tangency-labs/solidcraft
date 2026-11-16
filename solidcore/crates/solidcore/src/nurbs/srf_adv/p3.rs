@@ -26,7 +26,7 @@
 //!   stronger than upstream's allocation policy and excludes allocator overhead,
 //!   basis arrays, control-point copies and other workspace; those existing
 //!   allocations are not all fallible.
-//! - Errors are [`SolidError::Nlib`] values with the upstream `NL_*_ERR` number
+//! - Errors are [`SolidError::Failed`] values (a [`NurbsFailure`] reason) with the upstream `NL_*_ERR` number
 //!   instead of a flag plus the global `NL_ERROR` record. `N_CreateSkinSrf` builds the
 //!   surface before it reports invalid weights (`NL_WEI_ERR`); [`create_skin_srf`]
 //!   returns only the error then.
@@ -59,7 +59,7 @@
 //!   `ns + p + 1` for a degree near `isize::MAX`, where upstream's signed overflow is
 //!   undefined) is `InvalidInput`.
 
-use crate::error::{NlibCode, Result, SolidError};
+use crate::error::{nurbs::NurbsFailure, Result, SolidError};
 use crate::math::Vec3;
 use crate::nurbs::basis_adv::basis_derivs_array;
 use crate::nurbs::bezier::PASCAL_TRI;
@@ -134,13 +134,13 @@ fn grid_output_bytes(rows: usize, cols: usize) -> Option<usize> {
 fn admit_grid_output(bytes: Option<usize>) -> Result<()> {
     match bytes {
         Some(bytes) if bytes <= crate::limits::MAX_ALLOC_BYTES => Ok(()),
-        _ => Err(SolidError::nlib(OP_GRID, NlibCode::Memory)),
+        _ => Err(SolidError::nurbs(OP_GRID, NurbsFailure::Memory)),
     }
 }
 
 /// Reserve every output allocation before filling it; never clone populated rows.
 fn grid_output(rows: usize, cols: usize) -> Result<Vec<Vec<Vec3>>> {
-    let memory = || SolidError::nlib(OP_GRID, NlibCode::Memory);
+    let memory = || SolidError::nurbs(OP_GRID, NurbsFailure::Memory);
     let mut grid = Vec::new();
     grid.try_reserve_exact(rows).map_err(|_| memory())?;
     for _ in 0..rows {
@@ -170,10 +170,10 @@ pub struct GridPtsNormals {
 ///
 /// # Errors
 ///
-/// [`NlibCode::Index`] for an empty `u` or `v`; [`NlibCode::Parameter`] when
+/// [`NurbsFailure::Index`] for an empty `u` or `v`; [`NurbsFailure::Parameter`] when
 /// `u[0] < U[0]`, `u[last] > U[r]` (or the same in v); errors of
 /// [`basis_derivs_array`] and [`Surface::eval_pt_normal_at_pole`].
-/// [`NlibCode::Memory`] if the two output grids' aggregate requested storage,
+/// [`NurbsFailure::Memory`] if the two output grids' aggregate requested storage,
 /// including row-vector metadata, overflows or exceeds
 /// [`crate::limits::MAX_ALLOC_BYTES`], or an output reservation fails. This local
 /// budget excludes allocator overhead and other workspace and is checked after
@@ -193,13 +193,13 @@ pub fn grid_pts_normals(
 
     // Check parameters.
     let (Some(mu), Some(mv)) = (u.len().checked_sub(1), v.len().checked_sub(1)) else {
-        return Err(SolidError::nlib(OP, NlibCode::Index));
+        return Err(SolidError::nurbs(OP, NurbsFailure::Index));
     };
     if at(u, 0, OP)? < get(uk, 0, OP)? || at(u, mu, OP)? > get(uk, sx(idx.r, OP)?, OP)? {
-        return Err(SolidError::nlib(OP, NlibCode::Parameter));
+        return Err(SolidError::nurbs(OP, NurbsFailure::Parameter));
     }
     if at(v, 0, OP)? < get(vk, 0, OP)? || at(v, mv, OP)? > get(vk, sx(idx.s, OP)?, OP)? {
-        return Err(SolidError::nlib(OP, NlibCode::Parameter));
+        return Err(SolidError::nurbs(OP, NurbsFailure::Parameter));
     }
 
     let cross_tol = 0.001 * MODEL_TOL;
@@ -361,7 +361,7 @@ fn reorient(mut s: Surface, udir: bool) -> Surface {
 ///
 /// # Errors
 ///
-/// [`NlibCode::Geometry`] for a degenerate reflection plane; [`NlibCode::Weight`] when
+/// [`NurbsFailure::Geometry`] for a degenerate reflection plane; [`NurbsFailure::Weight`] when
 /// a C-max extension creates a weight outside `[WEIGHT_MIN, WEIGHT_MAX]`; errors of the
 /// span search, knot insertion and removal, least-squares solve and reflection;
 /// [`SolidError::NotConverged`] after [`MAX_EXTEND_DEPTH`] nested splits.
@@ -722,7 +722,7 @@ fn extend_rec(
             let p1 = g2(&rw, ii, kby, OP)?.to_euclid();
             let p2 = g2(&rw, ii, kby + 1, OP)?.to_euclid();
             let (v, _) =
-                normalize(p1 - p2).map_err(|_| SolidError::nlib(OP, NlibCode::Geometry))?;
+                normalize(p1 - p2).map_err(|_| SolidError::nurbs(OP, NurbsFailure::Geometry))?;
             let pln = Plane::new(p1, v);
             let mut k = kby - 1;
             for jj in 1..=kby {
@@ -788,7 +788,7 @@ fn extend_rec(
             let p1 = g2(&rw, ii, kby, OP)?.to_euclid();
             let p2 = g2(&rw, ii, kby - 1, OP)?.to_euclid();
             let (v, _) =
-                normalize(p1 - p2).map_err(|_| SolidError::nlib(OP, NlibCode::Geometry))?;
+                normalize(p1 - p2).map_err(|_| SolidError::nurbs(OP, NurbsFailure::Geometry))?;
             let pln = Plane::new(p1, v);
             let mut k = 2 * kby;
             for jj in 0..kby {
@@ -1028,7 +1028,7 @@ fn cmax_points(
                 for jj in 0..pq {
                     let w = g2(rw, ii, jj, OP)?.w;
                     if w < WEIGHT_MIN || w > WEIGHT_MAX {
-                        return Err(SolidError::nlib(OP, NlibCode::Weight));
+                        return Err(SolidError::nurbs(OP, NurbsFailure::Weight));
                     }
                 }
             }
@@ -1069,7 +1069,7 @@ fn cmax_points(
                 for jj in 1..=pq {
                     let w = g2(rw, ii, kby + jj, OP)?.w;
                     if w < WEIGHT_MIN || w > WEIGHT_MAX {
-                        return Err(SolidError::nlib(OP, NlibCode::Weight));
+                        return Err(SolidError::nurbs(OP, NurbsFailure::Weight));
                     }
                 }
             }
@@ -1183,7 +1183,7 @@ pub fn create_trans_sweep_srf(cur_t: &Curve, cur_s: &Curve) -> Result<Surface> {
 ///
 /// # Errors
 ///
-/// [`NlibCode::Call`] for [`Direction::UV`]; [`NlibCode::Weight`] when a weight of the
+/// [`NurbsFailure::CallFailed`] for [`Direction::UV`]; [`NurbsFailure::Weight`] when a weight of the
 /// surface is outside `[WEIGHT_MIN, WEIGHT_MAX]`; errors of the compatibility,
 /// parametrisation and interpolation routines; `InvalidInput` for an empty curve set,
 /// a closed skin of one curve, or curves of different sizes.
@@ -1224,7 +1224,7 @@ pub fn create_skin_srf(
     let udir = match dir {
         Direction::U => true,
         Direction::V => false,
-        Direction::UV => return Err(SolidError::nlib(OP, NlibCode::Call)),
+        Direction::UV => return Err(SolidError::nurbs(OP, NurbsFailure::CallFailed)),
     };
 
     // Get indexes and control point data (the cross-section direction is "c": its
@@ -1410,7 +1410,7 @@ mod tests {
         ] {
             assert_eq!(
                 grid_pts_normals(&s, u, v, Side::Left, Side::Left).unwrap_err(),
-                SolidError::nlib(OP_GRID, NlibCode::Index)
+                SolidError::nurbs(OP_GRID, NurbsFailure::Index)
             );
         }
         for (u, v) in [
@@ -1423,7 +1423,7 @@ mod tests {
         ] {
             assert_eq!(
                 grid_pts_normals(&s, u, v, Side::Left, Side::Left).unwrap_err(),
-                SolidError::nlib(OP_GRID, NlibCode::Parameter)
+                SolidError::nurbs(OP_GRID, NurbsFailure::Parameter)
             );
         }
     }
@@ -1437,7 +1437,7 @@ mod tests {
         assert_ne!(grid_output_bytes(4, 3), grid_output_bytes(3, 4));
         let cols = (limit / 2 - row) / point;
         assert!(admit_grid_output(grid_output_bytes(1, cols)).is_ok());
-        let memory = SolidError::nlib(OP_GRID, NlibCode::Memory);
+        let memory = SolidError::nurbs(OP_GRID, NurbsFailure::Memory);
         assert_eq!(
             admit_grid_output(grid_output_bytes(1, cols + 1)),
             Err(memory.clone())
@@ -1495,7 +1495,7 @@ mod tests {
         let s = plane_srf(false);
         assert_eq!(
             grid_pts_normals(&s, &valid, &valid, Side::Left, Side::Left).unwrap_err(),
-            SolidError::nlib(OP_GRID, NlibCode::Memory)
+            SolidError::nurbs(OP_GRID, NurbsFailure::Memory)
         );
         // A basis-invalid inner domain endpoint wins over the output budget in
         // either direction, and the u basis still runs first when both fail.

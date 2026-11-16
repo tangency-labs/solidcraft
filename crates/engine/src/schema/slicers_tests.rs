@@ -32,7 +32,7 @@ fn the_type_reads_no_key_as_the_handler_reads_none() {
 fn strict_keeps_todays_behaviour() {
     assert_strict_keeps_todays_errors(&[]);
     let mut s = Session { param_check: ParamCheck::Strict, ..Session::default() };
-    assert!(s.execute("file.slicers", &json!({})).is_ok());
+    matches(&s.execute("file.slicers", &json!({})).unwrap());
     assert!(s.execute("file.slicers", &json!({"slicer": "prusa"})).is_err());
 }
 
@@ -61,7 +61,9 @@ fn an_entry_serializes_with_null_for_what_is_missing() {
     let bare = SlicerInfo { id: "x".into(), name: "X".into(), program: None, icon: None };
     assert_eq!(serde_json::to_value(bare).unwrap_or_default(), json!({"id": "x", "name": "X", "program": null, "icon": null}));
     let none = SlicersResult { slicers: Vec::new(), param_warnings: Vec::new() };
-    assert_eq!(serde_json::to_value(none).unwrap_or_default(), json!({"slicers": []}));
+    let reply = serde_json::to_value(none).unwrap_or_default();
+    assert_eq!(reply, json!({"slicers": []}));
+    matches(&reply);
 }
 
 /// The real command in Warn, on this machine's own list, then on made-up ones (one with an icon

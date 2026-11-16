@@ -96,10 +96,15 @@ pub fn close(app: &mut SolveApp) {
 }
 
 /// Before an interactive Open of a design: when another SolidCraft has it open, hold the request
-/// and ask (`None`); otherwise hand it back to be opened.
+/// and ask (`None`); otherwise hand it back to be opened. Insert Design only reads the file, so
+/// it never asks.
 #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
 pub(crate) fn check_open(app: &mut SolveApp, request: Request) -> Option<Request> {
-    if app.locks.is_none() || request.reply.is_some() || !solidcraft_engine::io::is_design_path(&request.path) {
+    if app.locks.is_none()
+        || request.reply.is_some()
+        || request.kind == crate::file_load::Kind::InsertDesign
+        || !solidcraft_engine::io::is_design_path(&request.path)
+    {
         return Some(request);
     }
     match design_lock::held_elsewhere(std::path::Path::new(&request.path), design_lock::now_secs()) {
@@ -259,7 +264,11 @@ pub fn answer_disk(app: &mut SolveApp, answer: DiskAnswer) {
     match answer {
         DiskAnswer::SaveCopy => crate::toolbar::save_copy(app),
         DiskAnswer::Overwrite => {
-            if !crate::save_job::start(app, "file.save", json!({"overwrite": true})) {
+            if !crate::save_job::start(app, "file.save", {
+                let mut params = crate::toolbar::provenance_params(app);
+                params["overwrite"] = json!(true);
+                params
+            }) {
                 crate::documents::saved_for_close(app);
             }
         }

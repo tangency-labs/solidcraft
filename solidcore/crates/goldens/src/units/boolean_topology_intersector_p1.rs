@@ -1188,6 +1188,17 @@ impl CurveOnClassifyObjects<H> for Objs<'_> {
 }
 
 impl ProtoBrep<H> for Two {
+    fn raise_edge_tolerance(
+        &mut self,
+        k: &Kernel,
+        edge: H,
+        tolerance: f64,
+    ) -> solidcore::Result<()> {
+        if edge.kind != K_EDGE {
+            return Err(invalid("not an edge handle"));
+        }
+        IntersectorBrep::set_topology_tolerance(self, k, edge, tolerance, true, true)
+    }
     fn merge_point_class_into_brep(
         &mut self,
         k: &mut Kernel,
@@ -3214,8 +3225,8 @@ fn status<T>(r: Result<T, SolidError>, o: &mut Vec<f64>) -> Result<Option<T>, Fa
             o.push(0.0);
             Ok(Some(v))
         }
-        Err(SolidError::Upstream { code, .. }) => {
-            o.push(f64::from(code));
+        Err(e @ (SolidError::Upstream { .. } | SolidError::Failed(_))) => {
+            o.push(f64::from(e.sm_status().unwrap_or(solidcore::error::SM_ERR)));
             Ok(None)
         }
         Err(SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. }) => {
@@ -3461,7 +3472,9 @@ fn run_rust_script(i: &Inputs, p: Prepared) -> Result<(Vec<f64>, Vec<usize>), Fa
                 if let Some(e) = &r.status {
                     o.pop();
                     o.push(match e {
-                        SolidError::Upstream { code, .. } => f64::from(*code),
+                        SolidError::Upstream { .. } | SolidError::Failed(_) => {
+                            f64::from(e.sm_status().unwrap_or(solidcore::error::SM_ERR))
+                        }
                         _ => NULL_DEREF,
                     });
                 }

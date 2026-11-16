@@ -152,7 +152,7 @@ pub(super) fn validate_punctual_origins(scene: &ProductScene, origin: Vec3, opti
                     if !bounds.inflated(uncertainty).contains(point) {
                         continue;
                     }
-                    if let Ok(normal) = solidcraft_render::surface::unit_direction((points[1] - points[0]).cross(points[2] - points[0]))
+                    if let Ok(normal) = solidcraft_viewport::surface::unit_direction((points[1] - points[0]).cross(points[2] - points[0]))
                         && (point - points[0]).dot(normal).abs() <= uncertainty
                     {
                         return Err(JobError::new(
@@ -172,6 +172,8 @@ pub(super) struct Pipelines {
     pub(super) render: wgpu::ComputePipeline,
     clear: wgpu::ComputePipeline,
     emit: wgpu::ComputePipeline,
+    // The camera program with the indirect clamp compiled in, built by the first clamped job.
+    pub(super) clamped_render: std::sync::OnceLock<wgpu::ComputePipeline>,
 }
 impl Pipelines {
     pub(super) fn shared(context: &Context) -> Result<&Self> {
@@ -225,7 +227,13 @@ impl Pipelines {
                 cache: None,
             })
         };
-        let built = Self { render: pipeline("main"), clear: pipeline("photon_clear"), emit: pipeline("photon_emit"), layout };
+        let built = Self {
+            render: pipeline("main"),
+            clear: pipeline("photon_clear"),
+            emit: pipeline("photon_emit"),
+            layout,
+            clamped_render: std::sync::OnceLock::new(),
+        };
         checked(scopes)?;
         drop(compiling);
         let dummy = placeholder_bind(device, &built.layout, 8)?;
@@ -233,6 +241,42 @@ impl Pipelines {
             warm_up(device, &context.queue, pipeline, &dummy, &context.healthy)?;
         }
         Ok(context.photons.get_or_init(|| built))
+    }
+    /// The camera program with the indirect clamp (JobOptions::clamp_indirect), on the same layout.
+    fn clamped_render(&self, context: &Context) -> Result<&wgpu::ComputePipeline> {
+        if let Some(pipeline) = self.clamped_render.get() {
+            return Ok(pipeline);
+        }
+        let source = shader_source()?;
+        let _compiling = one_compile_at_a_time();
+        if let Some(pipeline) = self.clamped_render.get() {
+            return Ok(pipeline);
+        }
+        let device = &context.device;
+        let scopes = scopes(device);
+        let module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("gpu-path caustics clamped"),
+            source: wgpu::ShaderSource::Wgsl(source.into()),
+        });
+        let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("gpu-path caustics clamped"),
+            bind_group_layouts: &[Some(&self.layout)],
+            immediate_size: 0,
+        });
+        let mut constants = vec![("OPAQUE_SCENE", 0.0), ("HAS_TEXTURES", 1.0)];
+        constants.extend_from_slice(CLAMP_INDIRECT);
+        let pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+            label: Some("main"),
+            layout: Some(&pipeline_layout),
+            module: &module,
+            entry_point: Some("main"),
+            compilation_options: wgpu::PipelineCompilationOptions { constants: &constants, ..Default::default() },
+            cache: None,
+        });
+        checked(scopes)?;
+        warm_up(device, &context.queue, &pipeline, &placeholder_bind(device, &self.layout, 8)?, &context.healthy)?;
+        let _ = self.clamped_render.set(pipeline);
+        self.clamped_render.get().ok_or_else(|| gpu("clamped caustic pipeline publication failed"))
     }
 }
 pub(super) fn shader_source() -> Result<String> {
@@ -267,6 +311,7 @@ impl Resources {
         guide: Option<[f32; 4]>,
         bounds: Option<[f32; 6]>,
         sources: Option<&PhotonSourceDistribution>,
+        clamp: bool,
     ) -> Result<Self> {
         options.validate()?;
         let head_count = heads(options)?;
@@ -315,6 +360,7 @@ impl Resources {
             output.copy_from_slice(&word.to_le_bytes());
         }
         let pipelines = Pipelines::shared(context)?;
+        let render = if clamp { pipelines.clamped_render(context)?.clone() } else { pipelines.render.clone() };
         let size = buffer_bytes(options)?;
         let buffer = checked_creation(&context.device, || {
             let buffer = context.device.create_buffer(&wgpu::BufferDescriptor {
@@ -357,7 +403,7 @@ impl Resources {
         Ok(Self {
             buffer,
             layout: pipelines.layout.clone(),
-            render: pipelines.render.clone(),
+            render,
             clear: pipelines.clear.clone(),
             emit: pipelines.emit.clone(),
             photons: options.photons,

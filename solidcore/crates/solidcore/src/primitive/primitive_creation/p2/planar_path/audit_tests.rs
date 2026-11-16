@@ -271,10 +271,6 @@ fn inputs() -> (Vec<Curve>, Vec<Curve>) {
     (vec![profile.into()], vec![path.into()])
 }
 fn enable_audited_fixes(k: &mut Kernel) {
-    k.fixes.boolean_temporary_transform_statuses = true;
-    k.fixes.primitive_path_curve_statuses = true;
-    k.fixes.planar_path_profile_placement_statuses = true;
-    k.fixes.planar_path_sweep_statuses = true;
     k.fixes.fillet_trim_status = true;
 }
 #[test]
@@ -282,7 +278,6 @@ fn audit_483_planar_straight_sweep_keeps_valid_result_with_all_flags() {
     let (profiles, paths) = inputs();
     for combined in [false, true] {
         let mut k = Kernel::default();
-        k.fixes.planar_path_sweep_statuses = true;
         if combined {
             enable_audited_fixes(&mut k);
         }
@@ -349,9 +344,8 @@ fn audit_483_planar_failures_release_owned_bodies_and_stop() {
 #[test]
 fn audit_483_planar_trim_stops_before_second_operand_after_failure() {
     let (profiles, _) = inputs();
-    let cutting = as_bspline(&profiles[0]).unwrap();
     let mut k = Kernel::default();
-    k.fixes.planar_path_sweep_statuses = true;
+    let cutting = as_bspline(&k, &profiles[0]).unwrap().unwrap();
     let mut a = FaultAccess::new(&mut k, ("project_and_trim", 1));
     let id = a.new_brep(PrimitiveModel::MAIN).unwrap();
     let other = a.new_brep(PrimitiveModel::MAIN).unwrap();
@@ -383,7 +377,6 @@ fn audit_483_checked_sweep_supports_wr400_open_profiles() {
     ];
     let mut k = Kernel::default();
     enable_audited_fixes(&mut k);
-    k.fixes.planar_path_uncapped_open_profiles = true;
     let mut a = FaultAccess::new(&mut k, ("", 0));
     let id = PrimitiveCreation::create_sweep_along_planar_path(
         &mut a,

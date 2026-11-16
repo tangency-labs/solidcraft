@@ -4,9 +4,8 @@
 //! the circle to where it meets the axis; a line along the axis and one across close the
 //! profile. The circle reaches a hair past the axis, so the arc sweeps a spindle torus
 //! whose minor circles cross the axis where the sweep collapses the arc's end to a
-//! point, and the face's loop there comes out turned over. With
-//! `revolve_arc_touching_axis_is_horn_torus` the torus is the horn one (its major radius
-//! its minor) and the body passes the check (apart from `SmSurface` test #5, which the
+//! point, and the face's loop there comes out turned over. The
+//! torus is the horn one (its major radius its minor) and the body passes the check (apart from `SmSurface` test #5, which the
 //! torus fails by itself: see `revolve`).
 
 #![allow(
@@ -27,10 +26,9 @@ const R: f64 = 10.0;
 const DELTA: f64 = 1e-10;
 
 /// The revolve: the torus faces' (major, minor) radii and SMLib's check lines.
-fn revolve(horn: bool) -> (Vec<(f64, f64)>, Vec<String>) {
+fn revolve() -> (Vec<(f64, f64)>, Vec<String>) {
     let mut k = Kernel::default();
     k.fixes.revolve_analytic_profile_faces = true;
-    k.fixes.revolve_arc_touching_axis_is_horn_torus = horn;
     let r = R + DELTA;
     let s = (r * r - R * R).sqrt();
     let a_deg = s.atan2(-R).to_degrees();
@@ -77,7 +75,7 @@ fn revolve(horn: bool) -> (Vec<(f64, f64)>, Vec<String>) {
 
 #[test]
 fn wr_552_arc_touching_the_axis_sweeps_a_horn_torus() {
-    let (tori, lines) = revolve(true);
+    let (tori, lines) = revolve();
     assert_eq!(tori.len(), 1, "{tori:?}");
     // the face's torus is the snapped one up to rounding (its radii come back a few ulp
     // apart); the spindle torus it would otherwise be is DELTA apart

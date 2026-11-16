@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="980" height="560" viewBox="0 0 980 560">
+  <title>A plane beside a net, in one normal section of the edge</title>
+  <g id="Layer_1" data-name="Layer 1">
+    <rect x="0" y="0" width="980" height="560" fill="#ffffff"/>
+    <text transform="matrix(1 0 0 1 24 44)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="20" font-weight="bold" fill="#000000"><tspan x="0" y="0">A plane beside a net, in one normal section of the edge</tspan></text>
+    <polygon points="330,470 328.594,463.525 327.375,457.1 326.344,450.725 325.5,444.4 324.844,438.125 324.375,431.9 324.094,425.725 324,419.6 324.094,413.525 324.375,407.5 324.844,401.525 325.5,395.6 326.344,389.725 327.375,383.9 328.594,378.125 330,372.4 331.594,366.725 333.375,361.1 335.344,355.525 337.5,350 339.844,344.525 342.375,339.1 345.094,333.725 348,328.4 351.094,323.125 354.375,317.9 357.844,312.725 361.5,307.6 365.344,302.525 369.375,297.5 373.594,292.525 378,287.6 382.594,282.725 387.375,277.9 392.344,273.125 397.5,268.4 402.844,263.725 408.375,259.1 414.094,254.525 420,250 170,250 170,470" fill="#f0f0f0"/>
+    <text transform="matrix(1 0 0 1 190 440)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="12" fill="#555555"><tspan x="0" y="0">the solid</tspan></text>
+    <polyline points="330,470 328.594,463.525 327.375,457.1 326.344,450.725 325.5,444.4 324.844,438.125 324.375,431.9 324.094,425.725 324,419.6 324.094,413.525 324.375,407.5 324.844,401.525 325.5,395.6 326.344,389.725 327.375,383.9 328.594,378.125 330,372.4 331.594,366.725 333.375,361.1 335.344,355.525 337.5,350 339.844,344.525 342.375,339.1 345.094,333.725 348,328.4 351.094,323.125 354.375,317.9 357.844,312.725 361.5,307.6 365.344,302.525 369.375,297.5 373.594,292.525 378,287.6 382.594,282.725 387.375,277.9 392.344,273.125 397.5,268.4 402.844,263.725 408.375,259.1 414.094,254.525 420,250" fill="none" stroke="#1f6fb2" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+    <line x1="420" y1="250" x2="592" y2="121" fill="none" stroke="#1f6fb2" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" stroke-dasharray="9 6"/>
+    <line x1="386" y1="250" x2="454" y2="250" fill="none" stroke="#999999" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" stroke-dasharray="6 4"/>
+    <path d="M416.5 250 C416.5 248.067 418.067 246.5 420 246.5 C421.933 246.5 423.5 248.067 423.5 250 C423.5 251.933 421.933 253.5 420 253.5 C418.067 253.5 416.5 251.933 416.5 250 Z" fill="#555555"/>
+    <text transform="matrix(1 0 0 1 434 272)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="12" fill="#000000"><tspan x="0" y="0">the side of the net&apos;s box</tspan></text>
+    <line x1="150" y1="150" x2="860" y2="118" fill="none" stroke="#000000" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+    <text transform="matrix(1 0 0 1 690 100)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="14" fill="#000000"><tspan x="0" y="0">the moved plane&apos;s trace  x0 + τ u</tspan></text>
+    <line x1="330" y1="470" x2="315.242" y2="142.552" fill="none" stroke="#999999" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" stroke-dasharray="6 4"/>
+    <text transform="matrix(1 0 0 1 250 300)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="14" fill="#000000"><tspan x="0" y="0">|x0 − p|</tspan></text>
+    <line x1="314.251" y1="120.575" x2="574.134" y2="108.862" fill="none" stroke="#555555" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round"/>
+    <polygon points="578.13,108.682 567.915,104.137 568.366,114.127" fill="#555555"/>
+    <text transform="matrix(1 0 0 1 443.181 106.606)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="14" fill="#000000"><tspan x="0" y="0">τ</tspan></text>
+    <rect x="561.121" y="117.659" width="36" height="26" fill="#dce9f5" stroke="#555555" stroke-linecap="round" stroke-linejoin="round"/>
+    <line x1="561.121" y1="131.471" x2="597.121" y2="129.848" fill="none" stroke="#000000" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+    <line x1="568.721" y1="138.459" x2="589.521" y2="122.859" fill="none" stroke="#1f6fb2" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" stroke-dasharray="9 6"/>
+    <path d="M575.621 130.659 C575.621 128.726 577.188 127.159 579.121 127.159 C581.054 127.159 582.621 128.726 582.621 130.659 C582.621 132.592 581.054 134.159 579.121 134.159 C577.188 134.159 575.621 132.592 575.621 130.659 Z" fill="#000000"/>
+    <line x1="599.121" y1="142.659" x2="600" y2="210" fill="none" stroke="#999999" stroke-linecap="round" stroke-linejoin="round"/>
+    <text transform="matrix(1 0 0 1 606 206)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="14" fill="#000000"><tspan x="0" y="0">Krawczyk&apos;s box Y: K(Y) inside Y</tspan></text>
+    <text transform="matrix(1 0 0 1 606 226)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="12" fill="#000000"><tspan x="0" y="0">proves one meeting in it, for every</tspan></text>
+    <text transform="matrix(1 0 0 1 606 242)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="12" fill="#000000"><tspan x="0" y="0">section of a piece of the edge</tspan></text>
+    <circle cx="330" cy="470" r="4.5" fill="#000000"/>
+    <text transform="matrix(1 0 0 1 342 476)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="14" fill="#000000"><tspan x="0" y="0">p, a point of the edge</tspan></text>
+    <circle cx="315.242" cy="142.552" r="3.5" fill="#555555"/>
+    <text transform="matrix(1 0 0 1 285.242 128.552)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="14" fill="#000000"><tspan x="0" y="0">x0</tspan></text>
+    <text transform="matrix(1 0 0 1 352 400)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="14" fill="#000000"><tspan x="0" y="0">the net&apos;s trace</tspan></text>
+    <text transform="matrix(1 0 0 1 330 208)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="12" fill="#000000"><tspan x="0" y="0">past the side: the</tspan></text>
+    <text transform="matrix(1 0 0 1 330 224)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="12" fill="#000000"><tspan x="0" y="0">Ruled extension&apos;s line</tspan></text>
+    <text transform="matrix(1 0 0 1 560 420)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="14" fill="#000000"><tspan x="0" y="0">reach ≤ √(|x0 − p|² + τ²), the box&apos;s τ enclosed;</tspan></text>
+    <text transform="matrix(1 0 0 1 560 442)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="12" fill="#000000"><tspan x="0" y="0">|τ| is the arc along the moved plane&apos;s trace</tspan></text>
+    <text transform="matrix(1 0 0 1 560 462)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="12" fill="#000000"><tspan x="0" y="0">(over each piece of the edge&apos;s parameters,</tspan></text>
+    <text transform="matrix(1 0 0 1 560 478)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="12" fill="#000000"><tspan x="0" y="0">the foot and the direction by their mean values)</tspan></text>
+  </g>
+</svg>

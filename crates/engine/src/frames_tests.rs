@@ -173,6 +173,12 @@ fn canvases_move_with_their_component() {
     let part = s.active_component;
     assert_ne!(part, 0);
     run(&mut s, "canvas.insert", json!({"data": PNG, "plane": "XY", "name": "Plan"}));
+    run(
+        &mut s,
+        "construct.plane.three_points",
+        json!({"a": {"point": [50, 0, 5]}, "b": {"point": [51, 0, 5]}, "c": {"point": [50, 1, 5]}, "name": "ImagePlane"}),
+    );
+    run(&mut s, "canvas.insert", json!({"data": PNG, "plane": "ImagePlane", "name": "OnPoints"}));
     // From the root, on the moved block's top face (world).
     run(&mut s, "component.activate", json!({"component": "root"}));
     run(&mut s, "canvas.insert", json!({"data": PNG, "plane": {"face": [65, 10, 10]}, "name": "Lid", "width": 10}));
@@ -180,27 +186,29 @@ fn canvases_move_with_their_component() {
     let (vals, _) = s.doc.param_values();
     let world = |s: &Session, name: &str| {
         let c = s.doc.canvases.iter().find(|c| c.name == name).unwrap();
-        (c.component, s.doc.canvas_plane(&vals, c).unwrap())
+        (c.component, s.doc.canvas_plane(&vals, c, &s.model.state()).unwrap())
     };
     let (c, p) = world(&s, "Plan");
     assert_eq!(c, part);
     assert!(near(p.origin, Vec3::new(50.0, 0.0, 0.0)), "{:?}", p.origin);
+    assert!(near(world(&s, "OnPoints").1.origin, Vec3::new(50.0, 0.0, 5.0)));
     let (c, p) = world(&s, "Lid");
     assert_eq!(c, 0, "the active component's");
     let lid = s.doc.canvases.iter().find(|c| c.name == "Lid").unwrap();
     let centre = p.to_world(lid.center);
     assert!(near(centre, Vec3::new(65.0, 10.0, 10.0)), "{centre:?}");
     assert_eq!(world(&s, "Root").0, 0);
-    // Moving the occurrence carries its canvases, not the root's.
+    // Moving the occurrence carries its canvases and the root canvas attached to its face.
     run(&mut s, "occurrence.move", json!({"occurrence": "Part:1", "translate": [0, 40, 0]}));
     let (vals, _) = s.doc.param_values();
     let plan = s.doc.canvases.iter().find(|c| c.name == "Plan").unwrap();
-    assert!(near(s.doc.canvas_plane(&vals, plan).unwrap().origin, Vec3::new(50.0, 40.0, 0.0)));
+    assert!(near(s.doc.canvas_plane(&vals, plan, &s.model.state()).unwrap().origin, Vec3::new(50.0, 40.0, 0.0)));
+    assert!(near(world(&s, "OnPoints").1.origin, Vec3::new(50.0, 40.0, 5.0)));
     let lid = s.doc.canvases.iter().find(|c| c.name == "Lid").unwrap();
-    let centre = s.doc.canvas_plane(&vals, lid).unwrap().to_world(lid.center);
-    assert!(near(centre, Vec3::new(65.0, 10.0, 10.0)), "{centre:?}");
+    let centre = s.doc.canvas_plane(&vals, lid, &s.model.state()).unwrap().to_world(lid.center);
+    assert!(near(centre, Vec3::new(65.0, 50.0, 10.0)), "{centre:?}");
     let root = s.doc.canvases.iter().find(|c| c.name == "Root").unwrap();
-    assert!(near(s.doc.canvas_plane(&vals, root).unwrap().origin, Vec3::ZERO));
+    assert!(near(s.doc.canvas_plane(&vals, root, &s.model.state()).unwrap().origin, Vec3::ZERO));
     // The component survives a save and reopen.
     let back = solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap();
     assert_eq!(back.canvases, s.doc.canvases);
@@ -456,6 +464,85 @@ fn a_surface_revolve_about_a_picked_edge_of_a_moved_component() {
     assert!(near(edge.0, line.0) && near(edge.1, line.1), "{edge:?} against {line:?}");
 }
 
+/// A revolve axis written `{x, y, z}` maps into a moved or turned component like `[x, y, z]`:
+/// an origin of numbers or expressions, and a direction.
+#[test]
+fn an_object_form_axis_maps_into_a_moved_component() {
+    let made = |turned: bool, origin: Value, dir: Value| {
+        let mut s = moved_part();
+        run(&mut s, "parameters.add", json!({"name": "W", "expression": "50 mm"}));
+        if turned {
+            run(&mut s, "occurrence.move", json!({"occurrence": "Part:1", "axis": [0, 0, 1], "angle": "90 deg", "origin": [50, 0, 0]}));
+        }
+        run(&mut s, "sketch.create", json!({"plane": "XZ", "name": "Ring"}));
+        run(&mut s, "sketch.rectangle.two_point", json!({"p0": [5, 0], "p1": [10, 5]}));
+        run(&mut s, "sketch.finish", json!({}));
+        let axis = json!({"origin": origin, "dir": dir});
+        run(&mut s, "solid.revolve", json!({"sketch": "Ring", "axis": axis, "operation": "new", "body_name": "Ring"}));
+        world_bbox(&s, "Ring")
+    };
+    for turned in [false, true] {
+        // Origins, about the component's own Z axis (world x = 50, which a turn about Z keeps).
+        let array = made(turned, json!([50, 0, 0]), json!([0, 0, 1]));
+        for origin in [json!({"x": 50, "y": 0, "z": 0}), json!({"x": "W", "y": 0, "z": "0 mm"})] {
+            let object = made(turned, origin.clone(), json!([0, 0, 1]));
+            assert!(near(array.0, object.0) && near(array.1, object.1), "turned {turned}, {origin}: {array:?} against {object:?}");
+        }
+        // A direction, along the sketch's own X axis 8 mm below it: the world's X, or its Y once
+        // turned.
+        let (dir, dir_xyz) =
+            if turned { (json!([0, 1, 0]), json!({"x": 0, "y": 1, "z": 0})) } else { (json!([1, 0, 0]), json!({"x": 1, "y": 0, "z": 0})) };
+        let array = made(turned, json!([50, 0, -8]), dir);
+        let object = made(turned, json!([50, 0, -8]), dir_xyz);
+        assert!(near(array.0, object.0) && near(array.1, object.1), "turned {turned}, direction: {array:?} against {object:?}");
+    }
+}
+
+/// A hole whose position and direction are written `{x, y, z}` is drilled like one written
+/// `[x, y, z]`, in a turned component picked from the root: the direction turns with the body.
+#[test]
+fn an_object_form_hole_turns_with_the_picked_body() {
+    let drilled = |position: Value, direction: Value| {
+        let mut s = moved_part();
+        run(&mut s, "occurrence.move", json!({"occurrence": "Part:1", "axis": [1, 0, 0], "angle": "90 deg", "origin": [50, 0, 0]}));
+        run(&mut s, "component.activate", json!({"component": 0}));
+        let before = volume(&mut s);
+        run(&mut s, "solid.hole", json!({"position": position, "direction": direction, "diameter": 4, "depth": 5, "name": "Drill"}));
+        // Where and which way it was drilled, as saved in the component's frame.
+        let saved = run(&mut s, "timeline.inspect", json!({"feature": "Drill"}))["definition"].clone();
+        (before - volume(&mut s), saved)
+    };
+    // The block's face at the top of the world once turned, at its middle.
+    let mut s = moved_part();
+    run(&mut s, "occurrence.move", json!({"occurrence": "Part:1", "axis": [1, 0, 0], "angle": "90 deg", "origin": [50, 0, 0]}));
+    let body = s.model.state().bodies.first().map(|b| b.name.clone()).unwrap();
+    let (lo, hi) = world_bbox(&s, &body);
+    let (x, y, z) = ((lo.x + hi.x) / 2.0, (lo.y + hi.y) / 2.0, hi.z);
+    let (array, array_saved) = drilled(json!([x, y, z]), json!([0, 0, -1]));
+    let (object, object_saved) = drilled(json!({"x": x, "y": y, "z": z}), json!({"x": 0, "y": 0, "z": -1}));
+    // A flat-bottomed hole of radius 2, 5 deep.
+    let bore = std::f64::consts::PI * 4.0 * 5.0;
+    assert!((array - bore).abs() < 1e-6 * bore, "array form cut {array}");
+    assert!((object - bore).abs() < 1e-6 * bore, "object form cut {object}");
+    assert_eq!(array_saved, object_saved);
+}
+
+/// An edge picked with a point written `{x, y, z}` in a list is found in a moved component, as
+/// one written `[x, y, z]` is.
+#[test]
+fn an_object_form_pick_in_a_list_maps_into_a_moved_component() {
+    let filleted = |edge: Value| {
+        let mut s = moved_part();
+        let before = volume(&mut s);
+        // The edge along X at the top front: world (65, 0, 10).
+        run(&mut s, "solid.fillet", json!({"edges": [edge], "radius": 2}));
+        before - volume(&mut s)
+    };
+    let array = filleted(json!([65, 0, 10]));
+    let object = filleted(json!({"x": 65, "y": 0, "z": 10}));
+    assert!((array - object).abs() < 1e-9 * array.max(1.0), "{array} against {object}");
+}
+
 /// A revolve axis given only by its direction passes through the world origin in a moved
 /// component, as one with `origin: [0, 0, 0]` does: solid and surface revolves, made and edited.
 #[test]
@@ -577,6 +664,80 @@ fn root_picks_on_a_moved_component_build_where_it_is_shown() {
     run(&mut s, "construct.plane.along_path", json!({"path": {"edge": [65, 40, 0]}, "t": 0.5, "name": "Across"}));
     let across = crate::view::construction_planes(&s).into_iter().find(|(_, n, _)| n == "Across").unwrap().2;
     assert!((across.origin.y - 40.0).abs() < 1e-6, "{across:?}");
+}
+
+/// #17623: a root hole at a point of a sketch on one part's face, cutting every body, drills
+/// that part only: another part, turned and moved away, is met where it is shown, not at the
+/// same point in its own frame. Redefined with `targets`, the hole drills just those bodies.
+#[test]
+fn a_root_hole_at_sketch_points_drills_only_the_part_it_reaches() {
+    let mut s = two_parts(0.0, [0.0; 3]);
+    run(&mut s, "component.activate", json!({"component": "root"}));
+    run(&mut s, "occurrence.move", json!({"occurrence": "Cap:1", "axis": [0, 0, 1], "angle": "180 deg", "translate": [-10, 0, 0]}));
+    run(&mut s, "sketch.create", json!({"plane": {"face": [20, 15, 10]}, "name": "Pts", "project_edges": false}));
+    run(&mut s, "sketch.point", json!({"point": [20, 15], "id": "c"}));
+    run(&mut s, "sketch.finish", json!({}));
+    let hole = json!({"sketch": "Pts", "points": ["c"], "single": true, "diameter": 5, "depth": 4});
+    let mut every = hole.clone();
+    every["participants"] = json!(["*"]);
+    every["name"] = json!("H");
+    run(&mut s, "solid.hole", every);
+    assert!(body_volume(&s, "Base block") < BLOCK - 1.0, "the hole drills Base: {}", body_volume(&s, "Base block"));
+    assert!((body_volume(&s, "Cap block") - BLOCK).abs() < 1e-6, "Cap is not drilled: {}", body_volume(&s, "Cap block"));
+
+    let mut only = hole;
+    only["targets"] = json!(["Base block"]);
+    run(&mut s, "timeline.redefine", json!({"feature": "H", "command": "solid.hole", "params": only}));
+    assert_eq!(s.doc.find_feature("H").unwrap().participants, vec!["Base block".to_string()]);
+    assert!(body_volume(&s, "Base block") < BLOCK - 1.0 && (body_volume(&s, "Cap block") - BLOCK).abs() < 1e-6);
+}
+
+/// #17655: a root rib sketched across one part, with every body taking part, joins that part
+/// only: another part, turned and moved away, is met where it is shown, not at the same place in
+/// its own frame. Redefined with one body taking part, it is the same.
+#[test]
+fn a_root_rib_joins_only_the_part_its_sketch_is_across() {
+    let mut s = two_parts(0.0, [0.0; 3]);
+    run(&mut s, "component.activate", json!({"component": "root"}));
+    run(&mut s, "occurrence.move", json!({"occurrence": "Cap:1", "axis": [0, 0, 1], "angle": "180 deg", "translate": [-10, 0, 0]}));
+    run(&mut s, "sketch.create", json!({"plane": {"origin": [0, 15, 0], "x_dir": [1, 0, 0], "y_dir": [0, 0, 1]}, "name": "RibSketch"}));
+    run(&mut s, "sketch.line", json!({"points": [[10, 15], [30, 15]], "ids": ["l1"]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.rib", json!({"sketch": "RibSketch", "curves": ["l1"], "thickness": 4, "participants": ["*"], "name": "R"}));
+    // The wall is 20 long, 4 thick and 5 tall, from the line down to the top of Base.
+    assert!((body_volume(&s, "Base block") - 12400.0).abs() < 1e-6, "{}", body_volume(&s, "Base block"));
+    assert!((body_volume(&s, "Cap block") - BLOCK).abs() < 1e-6, "{}", body_volume(&s, "Cap block"));
+
+    run(
+        &mut s,
+        "timeline.redefine",
+        json!({"feature": "R", "command": "solid.rib", "params": {"sketch": "RibSketch", "curves": ["l1"], "thickness": 4, "participants": ["Base block"]}}),
+    );
+    assert_eq!(s.doc.find_feature("R").unwrap().participants, vec!["Base block".to_string()]);
+    assert!((body_volume(&s, "Base block") - 12400.0).abs() < 1e-6 && (body_volume(&s, "Cap block") - BLOCK).abs() < 1e-6);
+}
+
+/// #17655: an open-ended rib stops at the face of a moved body that does not take part, where that
+/// body is shown: Cap, shown beside Base and 2 mm up, is the floor under the part of the wall
+/// that runs past Base's end, not Cap's unmoved place.
+#[test]
+fn a_root_rib_stops_at_a_moved_part_that_does_not_take_part() {
+    let mut s = two_parts(0.0, [0.0; 3]);
+    run(&mut s, "component.activate", json!({"component": "root"}));
+    run(&mut s, "occurrence.move", json!({"occurrence": "Cap:1", "translate": [40, 0, 2]}));
+    run(&mut s, "sketch.create", json!({"plane": {"origin": [0, 15, 0], "x_dir": [1, 0, 0], "y_dir": [0, 0, 1]}, "name": "RibSketch"}));
+    run(&mut s, "sketch.line", json!({"points": [[30, 17], [60, 17]], "ids": ["l1"]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.rib", json!({"sketch": "RibSketch", "curves": ["l1"], "thickness": 4, "participants": ["Base block"]}));
+    // The wall is 4 thick and runs from the line at 17 down to a face, 2 mm into the body there (the
+    // overlap, as the samples are 1 mm apart): above Base's top (10) it is 7 tall over x 30..40
+    // (area 70), and above Cap's shown top (12) it reaches down to 10, 7 tall over x 40..60 (area
+    // 140), where Cap found unmoved would leave it 12 tall. The sample on the seam at x = 40
+    // meets Cap's top with the shared face 2 mm below it, so its overlap is 1, not 2: the wall's
+    // underside runs (39, 8), (40, 11), (41, 10), which leaves out 1/6 + 1/2 of area above 10.
+    // Volume 12000 + 4 * (70 + 140 - 2/3) = 12000 + 2512/3.
+    assert!((body_volume(&s, "Base block") - (12000.0 + 2512.0 / 3.0)).abs() < 1e-6, "{}", body_volume(&s, "Base block"));
+    assert!((body_volume(&s, "Cap block") - BLOCK).abs() < 1e-6, "{}", body_volume(&s, "Cap block"));
 }
 
 /// #6000: in a turned component, a named plane ("XY") is the component's own; an explicit
@@ -1038,4 +1199,57 @@ fn edge_picks_with_no_placement_to_look_through_are_checked() {
     assert!(err.contains("no edge at [20, 15, 10]"), "{err}");
     run(&mut s, "solid.chamfer", json!({"edges": [[20, 0, 0]], "distance": 1}));
     assert!((body_volume(&s, "Box") - (BLOCK - CUT)).abs() < 1e-3 * CUT, "{}", body_volume(&s, "Box"));
+}
+
+/// A sketch (and a construction plane) picked on another component's origin follows that
+/// component: the reference is saved as the placement's datum, not as a world plane frozen
+/// where the component was when it was picked (#7313).
+#[test]
+fn cross_component_sketch_refs_follow_the_component() {
+    use solidcraft_doc::construct::DatumItem;
+    let mut s = Session::default();
+    let made = run(&mut s, "component.create", json!({"name": "Assembly", "grounded": false}));
+    let (parent, first) = (made["component"].as_u64().unwrap(), made["occurrence"].as_u64().unwrap());
+    run(&mut s, "occurrence.move", json!({"occurrence": first, "translate": [100, 0, 0]}));
+    let child = run(&mut s, "component.create", json!({"name": "Child", "grounded": false}))["occurrence"].as_u64().unwrap();
+    run(&mut s, "occurrence.move", json!({"occurrence": child, "translate": [20, 0, 0]}));
+    run(&mut s, "component.activate", json!({"component": 0}));
+    run(&mut s, "occurrence.copy", json!({"component": parent, "translate": [50, 0, 0]}));
+    // A sketch on the child's XY in its first placement, and a plane offset from the same plane.
+    let plane = crate::origins::key(&[first, child], "XY");
+    let sid = run(&mut s, "sketch.create", json!({"plane": plane, "name": "On child"}))["sketch"].as_u64().unwrap();
+    let f = s.doc.feature(sid).unwrap();
+    let solidcraft_doc::FeatureKind::Sketch { plane: solidcraft_doc::PlaneRef::Datum { datum }, .. } = &f.kind else { panic!("{:?}", f.kind) };
+    assert_eq!(datum.item, DatumItem::XY);
+    assert_eq!(datum.path, vec![first, child]);
+    run(&mut s, "construct.plane.offset", json!({"base": plane, "offset": "5 mm", "name": "Off child"}));
+    // The sketch is where the child's XY is, and it follows the child when it moves.
+    let sketch_plane = |s: &Session| s.world_state().unwrap().sketch(sid).unwrap().plane;
+    assert!(near(sketch_plane(&s).origin, Vec3::new(120.0, 0.0, 0.0)), "{:?}", sketch_plane(&s));
+    run(&mut s, "occurrence.move", json!({"occurrence": child, "translate": [10, 0, 0]}));
+    assert!(near(sketch_plane(&s).origin, Vec3::new(130.0, 0.0, 0.0)), "{:?}", sketch_plane(&s));
+    // The offset plane, built on the datum, follows the move too - offset and all.
+    let (_, _, off) = crate::view::construction_planes(&s).into_iter().find(|(_, n, _)| n == "Off child").unwrap();
+    assert!(near(off.origin, Vec3::new(130.0, 0.0, 5.0)), "{off:?}");
+}
+
+/// #8192: a plane whose origin is length expressions, made in an active component that is moved
+/// and turned, is written in that component's frame still as expressions, so the sketch sits at
+/// the world point the expressions give and follows the parameter.
+#[test]
+fn a_plane_origin_given_as_expressions_maps_into_a_moved_and_turned_component() {
+    let mut s = block_in_component();
+    run(&mut s, "occurrence.move", json!({"occurrence": "C:1", "axis": [0, 0, 1], "angle": "90 deg"}));
+    run(&mut s, "occurrence.move", json!({"occurrence": "C:1", "translate": [100, 0, 0], "space": "world"}));
+    run(&mut s, "parameters.add", json!({"name": "station", "expression": "10 mm"}));
+    run(&mut s, "component.activate", json!({"component": "C"}));
+    run(&mut s, "sketch.create", json!({"name": "S", "plane": {"origin": ["station", 0, 0], "x_dir": [1, 0, 0], "y_dir": [0, 1, 0]}}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [1, 1]}));
+    run(&mut s, "sketch.finish", json!({}));
+    // The first sketch point is the plane's origin, in the world.
+    for (station, expected) in [("10 mm", Vec3::new(10.0, 0.0, 0.0)), ("20 mm", Vec3::new(20.0, 0.0, 0.0))] {
+        run(&mut s, "parameters.change", json!({"name": "station", "expression": station}));
+        let world = sketch_world_points(&mut s, "S");
+        assert!(world.iter().any(|p| near(*p, expected)), "station {station}: {world:?}");
+    }
 }

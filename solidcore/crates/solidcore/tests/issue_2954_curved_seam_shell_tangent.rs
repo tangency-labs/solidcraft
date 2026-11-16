@@ -242,19 +242,18 @@ fn check_quarter_torus_seam_case(mut k: Kernel) -> solidcore::Result<()> {
 
 #[test]
 fn curved_shell_tangent_quarter_torus_seam_tracks_boundary() -> solidcore::Result<()> {
-    // `offset_closes_loop_gaps` (WR-578) runs `CloseLoopGaps` — including
-    // `reconcile_shell_tangent_rails` — before `do_extended_offset` merges the shell.
+    // `CloseLoopGaps` — including `reconcile_shell_tangent_rails` — runs on the default
+    // path before `do_extended_offset` merges the shell (WR-578, the split flags are the
+    // only path since #2981).
     // 1. Default surface representations (`SmBSplineSurface` revolved wall and
     //    `SmOffsetSurface` over the B-spline top-rim round).
-    let mut k_bspline = Kernel::default();
-    k_bspline.fixes.offset_closes_loop_gaps = true;
+    let k_bspline = Kernel::default();
     check_quarter_torus_seam_case(k_bspline)?;
 
     // 2. Analytic wall and round (`revolve_analytic_profile_faces` produces `SmCone`
     //    for the cylindrical wall, and `fillet_exact_round_classes` produces `SmTorus`
     //    for the circular top-rim round).
     let mut k_analytic = Kernel::default();
-    k_analytic.fixes.offset_closes_loop_gaps = true;
     k_analytic.fixes.revolve_analytic_profile_faces = true;
     k_analytic.fixes.fillet_exact_round_classes = true;
     check_quarter_torus_seam_case(k_analytic)
@@ -262,11 +261,10 @@ fn curved_shell_tangent_quarter_torus_seam_tracks_boundary() -> solidcore::Resul
 
 #[test]
 fn shelled_box_open_inner_wall_shared_vertex_consistency() -> solidcore::Result<()> {
-    // Only `offset_closes_loop_gaps` (WR-578) is enabled so `do_extended_offset` runs
-    // `CloseLoopGaps` / `reconcile_shell_tangent_rails` across the open inner cavity
-    // wall's tangent corners before merging.
+    // `do_extended_offset` runs `CloseLoopGaps` / `reconcile_shell_tangent_rails`
+    // across the open inner cavity wall's tangent corners before merging (WR-578, the
+    // default path since #2981).
     let mut k = Kernel::default();
-    k.fixes.offset_closes_loop_gaps = true;
 
     // Issue #2954 geometry: `70 x 50 x 30` box (`[-35, 35] x [-25, 25] x [0, 30]`) with
     // vertical `R = 6` corner rounds, shelled `2 mm` inward open on top (`z = 30`), then

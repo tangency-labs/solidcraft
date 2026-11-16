@@ -49,9 +49,9 @@
 //!   pointer.
 //! - **Unported callees** return [`SolidError::Unported`] (see the `UNPORTED`
 //!   markers): none left for `surface.surface_p3`.
-//! - [`SurfaceSilhouette::local_point_solve`] forwards `k` to
-//!   [`circle_find_silhouette_points_with_kernel`] (`WR-11`,
-//!   [`crate::kernel::UpstreamFixes::circle_silhouette_perspective_center`]).
+//! - [`SurfaceSilhouette::local_point_solve`] finds the circle's perspective
+//!   silhouette points about the circle's centre ([`circle_find_silhouette_points`],
+//!   `WR-11`).
 //! - The `SM_DEBUG_CODE` drawing blocks and `Dump` are not ported. Recursion:
 //!   `ComputePointValues` calls itself only without a previous point, which does not
 //!   recurse again (depth at most 1); the Brent loop of `LocalPointSolve` stops after
@@ -63,7 +63,7 @@ use crate::curve::curve::Curve;
 use crate::error::{ignored, Result, SolidError};
 use crate::geom::extent1d::Extent1d;
 use crate::geom::extent2d::Extent2d;
-use crate::geom::geom_utility::p1::circle_find_silhouette_points_with_kernel;
+use crate::geom::geom_utility::p1::circle_find_silhouette_points;
 use crate::geom::global_solver::{Branch, GlobalSolver};
 use crate::geom::local_solve1d::{EvalFunction, FunctionValue, LocalSolve1d};
 use crate::geom::polar_box::PolarBox;
@@ -195,7 +195,12 @@ fn surface_drop_vector(k: &Kernel, surface: &Surface, uv: Point2, vector: Vec3) 
     drop_vectors_at(k, surface, uv, Side::Left, Side::Left, &[vector])?
         .first()
         .copied()
-        .ok_or(SolidError::sm_err(OP_DROP))
+        .ok_or_else(|| {
+            SolidError::intersect_failed(
+                OP_DROP,
+                "dropping the vector onto the surface gave no uv vector",
+            )
+        })
 }
 
 /// `SM_PI - a` for angles past a right angle: parallel and anti-parallel are alike.
@@ -391,7 +396,10 @@ impl<'s> SurfaceSilhouette<'s> {
         if norm.length_squared() < EFF_ZERO_SQ {
             norm = evaluate_normal(k, surface, uv)?;
             if norm.length_squared() < EFF_ZERO_SQ {
-                return Err(SolidError::sm_err(OP_CPV));
+                return Err(SolidError::intersect_failed(
+                    OP_CPV,
+                    "the surface has no normal at the point",
+                ));
             }
             if pnt.surface[1][0].length_squared() < EFF_ZERO_SQ {
                 pnt.surface[1][0] = pnt.surface[0][1].cross(norm);
@@ -414,7 +422,10 @@ impl<'s> SurfaceSilhouette<'s> {
         }
 
         if r.length_squared() < EFF_ZERO {
-            return Err(SolidError::sm_err(OP_CPV)); // point on surface must be at the eye point
+            return Err(SolidError::intersect_failed(
+                OP_CPV,
+                "the surface point is at the eye point",
+            ));
         }
 
         let du = pnt.surface[1][0];
@@ -659,7 +670,10 @@ impl<'s> SurfaceSilhouette<'s> {
                     // (operator/, not the guarded operator/=)
                     pnt.curve_3d[1] = (tan_vec / tan_len).unitize_or_z();
                 } else {
-                    return Err(SolidError::sm_err(OP_CPV));
+                    return Err(SolidError::intersect_failed(
+                        OP_CPV,
+                        "the silhouette's tangent is degenerate",
+                    ));
                 }
             }
         }
@@ -710,7 +724,10 @@ impl<'s> SurfaceSilhouette<'s> {
         if normal.length_squared() < EFF_ZERO_SQ {
             normal = evaluate_normal(k, surface, s_uv)?;
             if normal.length_squared() < EFF_ZERO_SQ {
-                return Err(SolidError::sm_err(OP));
+                return Err(SolidError::intersect_failed(
+                    OP,
+                    "the surface has no normal at the point",
+                ));
             }
             if eval[1][0].length_squared() < EFF_ZERO_SQ {
                 eval[1][0] = eval[0][1].cross(normal);
@@ -782,8 +799,7 @@ impl<'s> SurfaceSilhouette<'s> {
         let circle_normal = tangent_plane_dir.cross(normal);
 
         // Find the closest silhouette point on the normal circle
-        let Some((sil_point1, sil_point2)) = circle_find_silhouette_points_with_kernel(
-            k,
+        let Some((sil_point1, sil_point2)) = circle_find_silhouette_points(
             center,
             circle_normal,
             radius,
@@ -1145,7 +1161,10 @@ impl<'a> FindSilSingEfo<'a> {
                 r = pnt - self.eye;
             }
             if r.length_squared() < EFF_ZERO {
-                return Err(SolidError::sm_err(OP_EFO)); // point on surface must be at the eye point
+                return Err(SolidError::intersect_failed(
+                    OP_EFO,
+                    "the surface point is at the eye point",
+                ));
             }
             let mut dot1 = r.dot(g1.principle_curvature_vector1);
             if r.dot(g1.principle_curvature_vector2).abs() < dot1.abs() {
@@ -1159,7 +1178,10 @@ impl<'a> FindSilSingEfo<'a> {
                 r = pnt - self.eye;
             }
             if r.length_squared() < EFF_ZERO {
-                return Err(SolidError::sm_err(OP_EFO)); // point on surface must be at the eye point
+                return Err(SolidError::intersect_failed(
+                    OP_EFO,
+                    "the surface point is at the eye point",
+                ));
             }
             let mut dot2 = r.dot(g2.principle_curvature_vector1);
             if r.dot(g2.principle_curvature_vector2).abs() < dot2.abs() {

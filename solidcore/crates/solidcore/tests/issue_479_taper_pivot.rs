@@ -1,8 +1,7 @@
 //! tangency-labs/solidcore#479 (WR-402): a taper extrude of a profile of two curves that
 //! meet at both ends (a line and a half circle) pivots the draft at the profile's first
-//! corner. `Kernel::fixes.taper_pivot_nearest_corner` pivots at the nearest corner of the
-//! two links instead; the rest of the fix is covered by the unit test in
-//! `primitive::primitive_creation::p3::ruled`. This pins SMLib's result.
+//! corner. The taper pivots at the nearest corner of the two links instead; the rest of the
+//! fix is covered by the unit test in `primitive::primitive_creation::p3::ruled`.
 #![allow(
     clippy::unwrap_used,
     clippy::expect_used,
@@ -26,15 +25,13 @@ fn taper(k: &mut Kernel) -> solidcore::Result<Brep> {
     create_taper_extrude(k, &[Some(&line), Some(&arc)], 10.0, -3.0, 3, false)
 }
 
-/// Without the field the taper is SMLib's: the shell does not close, so the result is no
-/// manifold solid and encloses no volume (with the field: a manifold solid of volume
-/// 6555.9139).
+/// The taper pivots at the nearest corner: a manifold solid of volume 6555.9139 (upstream's
+/// shell does not close, so its result is no manifold solid and encloses no volume).
 #[test]
-fn taper_pivot_nearest_corner_is_off_by_default() {
+fn taper_pivots_at_the_nearest_corner() {
     let mut k = Kernel::default();
-    assert!(!k.fixes.taper_pivot_nearest_corner);
     let mut solid = taper(&mut k).unwrap();
-    assert!(!is_manifold_solid(&solid).unwrap());
+    assert!(is_manifold_solid(&solid).unwrap());
     let store = AttributeStore::default();
     let key_of = |_| ObjectKey(0);
     let attributes = PropertyAttributes {
@@ -42,5 +39,5 @@ fn taper_pivot_nearest_corner_is_off_by_default() {
         key_of: &key_of,
     };
     let volume = brep_volume(&k, &mut solid, 1e-6, &attributes).unwrap();
-    assert!(volume.abs() < 1e-9, "volume {volume}");
+    assert!((volume - 6555.9139).abs() < 1e-3, "volume {volume}");
 }

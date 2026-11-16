@@ -1,8 +1,6 @@
 //! WR-631 / WR-638 (#960; the fork's tangency-labs/smlib@8ba4667 and ae2a6de, rev 68fb9162):
-//! with `fillet_refuse_rails_leaving_faces` and `fillet_cliff_overflow`, a convex blend
-//! whose rail leaves its face across a cliff is built on the faces' continuations, closed
-//! into the region it removes and subtracted from the body. Without the flag the same blends
-//! are refused (`NoRoom`), as before.
+//! a convex blend whose rail leaves its face across a cliff is built on the faces'
+//! continuations, closed into the region it removes and subtracted from the body.
 //!
 //! Every expected volume is the body less the blend's corner region clipped to the body, in
 //! closed form: for a round of radius r on an edge between two perpendicular faces w and h
@@ -32,12 +30,9 @@ use solidcore::topology::brep::p2::is_manifold_solid;
 use solidcore::topology::{edge, EdgeId};
 use solidcore::{Brep, Kernel};
 
-fn kernel(cliff: bool) -> Kernel {
+fn kernel() -> Kernel {
     let mut k = Kernel::default();
-    k.fixes.fillet_refuse_rails_leaving_faces = true;
     k.fixes.fillet_trace_reaches_rails = true;
-    k.fixes.fillet_rail_end_on_continued_surface = true;
-    k.fixes.fillet_cliff_overflow = cliff;
     k
 }
 
@@ -47,7 +42,7 @@ fn volume(k: &Kernel, b: &mut Brep) -> f64 {
         store: &store,
         key_of: &|_| ObjectKey(0),
     };
-    brep_volume(k, b, 1e-6, &attrs).unwrap()
+    brep_volume(k, b, 1e-10, &attrs).unwrap()
 }
 
 /// The area of the section a round of radius `r` removes between faces `w` and `h` wide
@@ -92,15 +87,8 @@ enum Outcome {
 
 /// Rounds (`chamfer` false: circular section; true: linear) the edge from `p` to `q` of
 /// the body `make` builds, by `r`.
-fn blend(
-    cliff: bool,
-    make: fn(&mut Kernel) -> Brep,
-    p: Point3,
-    q: Point3,
-    r: f64,
-    chamfer: bool,
-) -> Outcome {
-    let mut k = kernel(cliff);
+fn blend(make: fn(&mut Kernel) -> Brep, p: Point3, q: Point3, r: f64, chamfer: bool) -> Outcome {
+    let mut k = kernel();
     let mut b = make(&mut k);
     let e = edge_between(&k, &b, p, q);
     let mut session = FilletSession::new(&mut k, &mut b).unwrap();
@@ -131,13 +119,6 @@ fn assert_builds(outcome: &Outcome, expected: f64, rel: f64) {
         "volume {v} against {expected} (rel {})",
         (v - expected).abs() / expected
     );
-}
-
-fn assert_no_room(outcome: &Outcome) {
-    let Outcome::Refused(code, _) = outcome else {
-        panic!("expected a refusal, got {outcome:?}");
-    };
-    assert_eq!(*code, FilletErrorType::NoRoom as i32, "{outcome:?}");
 }
 
 fn p(x: f64, y: f64, z: f64) -> Point3 {
@@ -184,8 +165,7 @@ fn a_round_over_a_step_rim_is_subtracted() {
     // r6 at (10, 0): the rail on the 5 high side runs past the step's rim
     let expected = 1700.0 - 20.0 * removed_area(6.0, 10.0, 5.0);
     let (a, b) = (p(10.0, 0.0, 0.0), p(10.0, 0.0, 20.0));
-    assert_builds(&blend(true, stepped_bar, a, b, 6.0, false), expected, 1e-8);
-    assert_no_room(&blend(false, stepped_bar, a, b, 6.0, false));
+    assert_builds(&blend(stepped_bar, a, b, 6.0, false), expected, 1e-8);
 }
 
 #[test]
@@ -194,11 +174,10 @@ fn a_chamfer_into_a_wall_foot_is_subtracted() {
     // triangle it removes lies inside the body
     let (a, b) = (p(10.0, 5.0, 0.0), p(10.0, 5.0, 20.0));
     assert_builds(
-        &blend(true, stepped_bar, a, b, 4.0, true),
+        &blend(stepped_bar, a, b, 4.0, true),
         1700.0 - 20.0 * 8.0,
         1e-9,
     );
-    assert_no_room(&blend(false, stepped_bar, a, b, 4.0, true));
 }
 
 #[test]
@@ -207,9 +186,8 @@ fn a_round_wider_than_a_bar_is_subtracted() {
     let (a, b) = (p(0.0, 5.0, 5.0), p(80.0, 5.0, 5.0));
     for r in [9.0, 10.0, 12.0] {
         let expected = 80.0 * 25.0 - 80.0 * removed_area(r, 5.0, 5.0);
-        assert_builds(&blend(true, bar, a, b, r, false), expected, 1e-8);
+        assert_builds(&blend(bar, a, b, r, false), expected, 1e-8);
     }
-    assert_no_room(&blend(false, bar, a, b, 10.0, false));
 }
 
 #[test]
@@ -219,9 +197,8 @@ fn a_round_just_past_a_box_side_is_subtracted() {
     let (a, b) = (p(0.0, 20.0, 10.0), p(40.0, 20.0, 10.0));
     for r in [10.05, 10.07, 12.0] {
         let expected = 8000.0 - 40.0 * removed_area(r, 20.0, 10.0);
-        assert_builds(&blend(true, box_40_20_10, a, b, r, false), expected, 1e-8);
+        assert_builds(&blend(box_40_20_10, a, b, r, false), expected, 1e-8);
     }
-    assert_no_room(&blend(false, box_40_20_10, a, b, 10.05, false));
 }
 
 /// A 40 x 20 x 10 block with a through hole of radius 3 at (20, 14.5) (#422, SolidCraft
@@ -240,12 +217,7 @@ fn a_round_over_a_hole_is_subtracted() {
     // 16)^2)) dy = 0.3758296360 (the fixture's formula, its value)
     let (a, b) = (p(0.0, 20.0, 10.0), p(40.0, 20.0, 10.0));
     let expected = 7580.287315387334;
-    assert_builds(
-        &blend(true, block_with_hole, a, b, 4.0, false),
-        expected,
-        1e-8,
-    );
-    assert_no_room(&blend(false, block_with_hole, a, b, 4.0, false));
+    assert_builds(&blend(block_with_hole, a, b, 4.0, false), expected, 1e-8);
 }
 
 /// The 10 x 20 x 30 box of `wr609_trace_reaches_rails`; its top edge at x = 0 is 20 long,
@@ -260,17 +232,12 @@ fn a_constant_round_past_a_box_top_is_subtracted() {
     let (a, b) = (p(0.0, 0.0, 30.0), p(0.0, 20.0, 30.0));
     let expected = 6000.0 - 20.0 * removed_area(12.0, 10.0, 30.0);
     assert!((expected - 5384.17828518).abs() < 1e-8);
-    assert_builds(
-        &blend(true, box_10_20_30, a, b, 12.0, false),
-        expected,
-        1e-8,
-    );
-    assert_no_room(&blend(false, box_10_20_30, a, b, 12.0, false));
+    assert_builds(&blend(box_10_20_30, a, b, 12.0, false), expected, 1e-8);
 }
 
 /// The variable round from `r0` to `r1` (linear) of the box's top edge at x = 0.
-fn variable_round(cliff: bool, r0: f64, r1: f64) -> Outcome {
-    let mut k = kernel(cliff);
+fn variable_round(r0: f64, r1: f64) -> Outcome {
+    let mut k = kernel();
     let mut b = box_10_20_30(&mut k);
     let e = edge_between(&k, &b, p(0.0, 0.0, 30.0), p(0.0, 20.0, 30.0));
     let mut session = FilletSession::new(&mut k, &mut b).unwrap();
@@ -289,35 +256,24 @@ fn variable_round(cliff: bool, r0: f64, r1: f64) -> Outcome {
     }
 }
 
-/// The box less the variable round's section along the edge, by the midpoint rule (the
-/// rolling ball's section across the edge is the circle of the radius there, to the
-/// accuracy of the round's cubic sections).
-fn variable_round_expected(r0: f64, r1: f64) -> f64 {
-    let n = 20_000;
-    let mut removed = 0.0;
-    for i in 0..n {
-        let t = (f64::from(i) + 0.5) / f64::from(n);
-        removed += removed_area(r0 + (r1 - r0) * t, 10.0, 30.0);
-    }
-    6000.0 - removed * 20.0 / f64::from(n)
-}
-
 #[test]
 fn a_variable_round_past_a_box_top_is_subtracted() {
-    // the fork's 2 -> 11, 20, 30, 50 (5789.69878, 5391.54581, 4819.37775, 3546.18768), from
-    // either end, to 1e-4 (the variable round's cubic sections' accuracy)
-    for (r1, fork) in [
-        (11.0, 5789.69878),
-        (20.0, 5391.54581),
-        (30.0, 4819.37775),
-        (50.0, 3546.18768),
+    // The round is the union of its balls (WR-685), here the balls' cone: the box less the corner
+    // between the planes and the cone, cut by the 10 wide top's far face and the box's bottom, by
+    // Gauss-Legendre quadrature of each plane across the edge (5 and 10 panels along it agree to
+    // 1e-9; 2 -> 11 is `wr685_variable_round_touch_circle`'s `CLIFF_2_11_VOLUME` within its 1e-5),
+    // from either end, to the subtraction's 1e-7. Upstream's approximated arcs (the fork's
+    // d01d7b0) kept up to 0.12 less (2 -> 50: 4693.48804); its great circles took off up to 1147
+    // more (3546.18768).
+    for (r1, closed) in [
+        (11.0, 5_802.443_145_423),
+        (20.0, 5_503.887_121_531),
+        (30.0, 5_184.057_273_581),
+        (50.0, 4_693.608_889_860),
     ] {
-        let expected = variable_round_expected(2.0, r1);
-        assert!((expected - fork).abs() < 1e-4, "{r1}: {expected}");
-        assert_builds(&variable_round(true, 2.0, r1), expected, 1e-4);
-        assert_builds(&variable_round(true, r1, 2.0), expected, 1e-4);
+        assert_builds(&variable_round(2.0, r1), closed, 1e-7);
+        assert_builds(&variable_round(r1, 2.0), closed, 1e-7);
     }
-    assert_no_room(&variable_round(false, 2.0, 11.0));
 }
 
 /// The 40 x 20 x 10 box with its x = 0 end cut concave by a vertical cylinder of radius 30
@@ -333,10 +289,10 @@ fn an_overflow_the_construction_cannot_cut_reports_its_own_error() {
     // WR-638 (ae2a6de): R12 on the top edge at y = 20 runs past the 10 high side; at the
     // cylinder end its rails miss their side edges, and the end face that would cut the
     // fillet off there is not planar. The refusal is the construction's own, not the generic
-    // "larger than the faces" (which the flag off still gives).
+    // "larger than the faces".
     let x0 = -25.0 + 800.0f64.sqrt();
     let (a, b) = (p(x0, 20.0, 10.0), p(40.0, 20.0, 10.0));
-    let Outcome::Refused(code, comment) = blend(true, box_with_round_end, a, b, 12.0, false) else {
+    let Outcome::Refused(code, comment) = blend(box_with_round_end, a, b, 12.0, false) else {
         panic!("expected a refusal");
     };
     assert_eq!(code, FilletErrorType::NoRoom as i32);
@@ -344,22 +300,13 @@ fn an_overflow_the_construction_cannot_cut_reports_its_own_error() {
         comment,
         "Fillet Error: a cliff overflow runs past a fillet end whose end face is not planar"
     );
-    let Outcome::Refused(code, comment) = blend(false, box_with_round_end, a, b, 12.0, false)
-    else {
-        panic!("expected a refusal");
-    };
-    assert_eq!(code, FilletErrorType::NoRoom as i32);
-    assert_eq!(
-        comment,
-        "Fillet Error: a rail leaves the face it rolls on (the blend is larger than the faces allow)"
-    );
 }
 
 #[test]
 fn a_cliff_overflow_is_deterministic() {
     let (a, b) = (p(10.0, 0.0, 0.0), p(10.0, 0.0, 20.0));
     let runs: Vec<f64> = (0..2)
-        .map(|_| match blend(true, stepped_bar, a, b, 6.0, false) {
+        .map(|_| match blend(stepped_bar, a, b, 6.0, false) {
             Outcome::Built(v) => v,
             other @ Outcome::Refused(..) => panic!("{other:?}"),
         })
@@ -376,7 +323,7 @@ fn an_overflow_whose_subtraction_leaves_no_solid_is_refused() {
     // status), and the body is left as it was.
     let (a, b) = (p(0.0, 20.0, 10.0), p(40.0, 20.0, 10.0));
     for r in [10.01, 10.02] {
-        let mut k = kernel(true);
+        let mut k = kernel();
         let mut body = box_40_20_10(&mut k);
         let e = edge_between(&k, &body, a, b);
         let mut session = FilletSession::new(&mut k, &mut body).unwrap();

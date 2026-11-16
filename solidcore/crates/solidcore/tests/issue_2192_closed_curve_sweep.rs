@@ -7,10 +7,9 @@
 //! An 8 mm square in the XZ plane, starting at the middle of its inner side, swept with
 //! the follow frame along the full circle of radius 30 about Z. The sweep puts that
 //! first point on the path start (30, 0, 0), so the square spans x 26..34, z 0..8.
-//! With `curve_sweep_closed_path_joins_ends` the sweep leaves the caps off and the
-//! stitch joins the ends: one closed tube of 64 * 2 pi * 30 (Pappus). The torus around
-//! it (R 30, r 8, centre circle at z = 4) less the tube is (64 pi - 64) * 2 pi * 30.
-//! The pinned default still caps both ends (two regions), as upstream does.
+//! The sweep leaves the caps off and the stitch joins the ends: one closed tube of
+//! 64 * 2 pi * 30 (Pappus). The torus around it (R 30, r 8, centre circle at z = 4)
+//! less the tube is (64 pi - 64) * 2 pi * 30. Upstream caps both ends (two regions).
 #![allow(
     clippy::unwrap_used,
     clippy::expect_used,
@@ -59,6 +58,7 @@ fn closed_tube(k: &mut Kernel) -> Brep {
         orient_profile_perpendicular_to_path: false,
         move_to_profile: false,
         profile_at_path_start: false,
+        up: None,
     };
     sweeps::create_curve_sweep(k, &refs, Some(&path), None, None, Some(&options))
         .unwrap()
@@ -118,7 +118,6 @@ fn bounded_regions(b: &Brep) -> usize {
 #[test]
 fn closed_sweep_joins_its_end_to_its_start() {
     let mut k = Kernel::default();
-    k.fixes.curve_sweep_closed_path_joins_ends = true;
     let mut tube = closed_tube(&mut k);
     assert_eq!(bounded_regions(&tube), 1);
     // five walls and no caps, closed on itself: V - E + F = 0
@@ -138,7 +137,6 @@ fn closed_sweep_joins_its_end_to_its_start() {
 #[test]
 fn closed_sweep_cuts_the_torus_around_it() {
     let mut k = Kernel::default();
-    k.fixes.curve_sweep_closed_path_joins_ends = true;
     let body = torus(&mut k);
     let tool = closed_tube(&mut k);
     let mut cut = boolean_difference(&mut k, body, tool).unwrap();
@@ -147,9 +145,44 @@ fn closed_sweep_cuts_the_torus_around_it() {
     assert!((v - want).abs() < 0.01, "volume {v}, expected {want}");
 }
 
+/// A path shorter than the B-rep's tolerance (1e-7 along Y) also brings the end sections
+/// onto the start sections, but it is no closed path: the sweep is not joined end to
+/// start into a closed tube of no length. It is capped as upstream caps it, and the
+/// stitch of the two coincident caps fails as upstream's does (1001).
 #[test]
-fn default_caps_both_ends_as_upstream() {
+fn a_path_shorter_than_the_tolerance_is_not_joined() {
     let mut k = Kernel::default();
-    let tube = closed_tube(&mut k);
-    assert_eq!(bounded_regions(&tube), 2);
+    let corners = [
+        Point3::new(0.0, 0.0, -4.0),
+        Point3::new(4.0, 0.0, -4.0),
+        Point3::new(4.0, 0.0, 4.0),
+        Point3::new(-4.0, 0.0, 4.0),
+        Point3::new(-4.0, 0.0, -4.0),
+    ];
+    let profile: Vec<Curve> = corners
+        .iter()
+        .zip(corners.iter().cycle().skip(1))
+        .map(|(a, b)| Curve::from(curves::create_line_segment(*a, *b).unwrap()))
+        .collect();
+    let path = Curve::from(
+        curves::create_line_segment(Point3::new(0.0, 0.0, 0.0), Point3::new(0.0, 1e-7, 0.0))
+            .unwrap(),
+    );
+    let refs: Vec<Option<&Curve>> = profile.iter().map(Some).collect();
+    let options = SweepOptions {
+        cap_ends: true,
+        translational_sweep: false,
+        move_profile_center_to_path: false,
+        orient_profile_perpendicular_to_path: false,
+        move_to_profile: false,
+        profile_at_path_start: false,
+        up: None,
+    };
+    let result = sweeps::create_curve_sweep(&mut k, &refs, Some(&path), None, None, Some(&options));
+    let error = result.map(|r| r.brep.face_list().len()).unwrap_err();
+    assert_eq!(
+        solidcore::error::upstream_status(&error),
+        Some(1001),
+        "{error}"
+    );
 }

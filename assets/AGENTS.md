@@ -2,7 +2,7 @@
 
 Read `assets/README.md` before changing media, fonts, artwork or their consumers.
 For **any UI icon, icon assignment or review-tool change**, also read
-`assets/icons/ui/AGENTS.md` and `assets/icons/ui/STYLE_GUIDE.md` before editing.
+`crates/look/icons/AGENTS.md` and `crates/look/icons/STYLE_GUIDE.md` before editing.
 These files are the specification; chat history and old previews are not required.
 
 - Keep one editable authority per resource. UI SVGs are masters, not exports of a

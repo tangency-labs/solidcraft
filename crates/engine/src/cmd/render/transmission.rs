@@ -3,11 +3,9 @@
 use crate::{Result, params::bad};
 use serde::Deserialize;
 use solidcore_record::Vec3;
-use solidcraft_render::{
-    ProductScene,
-    surface::{OpaqueSurface, srgb8_to_linear},
-    transmission::Transmission,
-};
+use solidcraft_geom::MeshGeom;
+use solidcraft_render::{ProductScene, transmission::Transmission};
+use solidcraft_viewport::surface::{OpaqueSurface, srgb8_to_linear};
 #[derive(Default, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub(super) struct Raytrace {

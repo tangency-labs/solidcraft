@@ -1,10 +1,10 @@
 //! tangency-labs/solidcore#1480 (#470, WR-498): the union of two crossing pleated loft
 //! skins. Where pleat ridges cross, two vertex definitions 3e-5 to 8e-5 apart fall in one
 //! proto vertex, which `Resolve` makes two vertices of; the proto vertex's position is
-//! their mean. With `imprint_extends_edge_to_proto_vertex` (and the trim flag) an
+//! their mean. With `imprint_extends_edge_to_proto_vertex` (and the end trim, WR-452) an
 //! intersection curve that already ended on its own vertex was continued to that mean,
 //! leaving edge ends up to 8.06e-5 off their vertices and dropping 104 short edges
-//! (992 edges, 608 vertices). The fork's ffaf4e8, folded into both flags, sends such an
+//! (992 edges, 608 vertices). The fork's ffaf4e8, folded into both end fits, sends such an
 //! end to its own vertex: the C++ fork's union has 1096 edges and 712 vertices, with
 //! every edge end within 1.206e-5 of its vertex.
 //!
@@ -18,6 +18,8 @@
     clippy::indexing_slicing
 )] // test helpers
 
+#[path = "support/volume_leak.rs"]
+mod volume_leak;
 use solidcore::boolean::api_brep as sm;
 use solidcore::curve::curve::Curve;
 use solidcore::curve::line::Line;
@@ -114,32 +116,32 @@ fn union_edge_ends(k: &mut Kernel) -> (usize, usize, f64) {
     (r.edge_list().len(), r.vertex_list().len(), worst)
 }
 
-/// The two imprint flags, with `new_edge_vertex_tolerance_covers_gap` (whose wider vertex
-/// tolerances gave the extension its reach in #1480's bisect). Without ffaf4e8 the flags-on
-/// union had 992 edges, 608 vertices and an edge end 8.061e-5 off its vertex. With every
-/// `UpstreamFixes` flag on (SolidCraft's set) the union is the C++ fork's: 1096 edges, 712
-/// vertices, worst edge end 1.206e-5.
-fn kernel(trim: bool, extend: bool) -> Kernel {
+/// The extension flag, with `new_edge_vertex_tolerance_covers_gap` (whose wider vertex
+/// tolerances gave the extension its reach in #1480's bisect). Without ffaf4e8 the
+/// extended union had 992 edges, 608 vertices and an edge end 8.061e-5 off its vertex. With
+/// every `UpstreamFixes` flag on (SolidCraft's set) the union is the C++ fork's: 1096 edges,
+/// 712 vertices, worst edge end 1.206e-5.
+fn kernel(extend: bool) -> Kernel {
     let mut k = Kernel::new(&KernelOptions::default());
     k.fixes.new_edge_vertex_tolerance_covers_gap = true;
-    k.fixes.imprint_trims_edge_to_proto_vertex = trim;
     k.fixes.imprint_extends_edge_to_proto_vertex = extend;
     k
 }
 
 #[test]
 fn issue_1480_union_edges_end_at_their_own_vertices() {
-    let mut k = kernel(true, true);
+    let mut k = kernel(true);
     let (edges, vertices, worst) = union_edge_ends(&mut k);
     assert_eq!((edges, vertices), (1096, 712));
     assert!(worst <= 2e-5, "worst edge end {worst:e} off its vertex");
 }
 
 #[test]
-fn issue_1480_union_without_the_imprint_fixes_is_upstream() {
-    let mut k = kernel(false, false);
+fn issue_1480_union_without_the_extension_keeps_upstream_s_ends() {
+    let mut k = kernel(false);
     let (edges, vertices, worst) = union_edge_ends(&mut k);
-    // Upstream moves no curve end: the same topology, every end within 7.5e-6.
+    // The end trim alone moves no curve end here: upstream's topology, every end within
+    // 7.5e-6.
     assert_eq!((edges, vertices), (1096, 712));
     assert!(worst < 7.5e-6, "worst edge end {worst:e} off its vertex");
 }
@@ -159,6 +161,9 @@ struct Union {
     volume: f64,
     tolerances: Vec<(Point3, f64)>,
     check: Vec<String>,
+    /// The volume's move from 44443.49387571212 (before `brep_volume` closed tolerant edges'
+    /// gaps, #16735) checked on the body: `volume_leak::moved_by_the_old_leak`'s figures.
+    moved: Result<String, String>,
 }
 
 fn union_with_only_the_new_edge_flag(fix: bool) -> Union {
@@ -198,6 +203,7 @@ fn union_with_only_the_new_edge_flag(fix: bool) -> Union {
         key_of: &|_| ObjectKey(0),
     };
     let volume = brep_volume(k, &mut r, 1e-8, &attrs).unwrap();
+    let moved = volume_leak::moved_by_the_old_leak(k, &mut r, 44443.49387571212, volume, 1e-8);
     let check = check_brep(k, &mut r, CheckLevel::Level2).unwrap();
     Union {
         faces: r.face_list().len(),
@@ -207,6 +213,7 @@ fn union_with_only_the_new_edge_flag(fix: bool) -> Union {
         worst_end_gap,
         volume,
         tolerances,
+        moved,
         check: check.lines(),
     }
 }
@@ -314,12 +321,16 @@ fn wr469_union_flag_alone_grows_eight_vertex_tolerances() {
         // crossing ridges' edges where they pass nearest their points (2.2476e-6 ->
         // 2.2417e-6 and 2.2381e-6 -> 2.2298e-6 off), not at the classifications'
         // parameters, 1.8e-8 along; topology, worst end gap and check are unchanged and
-        // the volume moves 4.0e-9 relative.
+        // the volume moves 4.0e-9 relative. 44443.49387571212 until `brep_volume` closed
+        // tolerant edges' gaps (#16735): -3.0e-8 relative with topology, end gap and check
+        // unchanged (MEASURED), the move within the old integrator's leak bound on the body
+        // (`moved`).
         assert!(
-            close(u.volume, 44443.49387571212),
+            close(u.volume, 44443.49253850169),
             "{name} volume {:?}",
             u.volume
         );
+        assert!(u.moved.is_ok(), "{name}: {:?}", u.moved);
     }
     // The two runs are deterministic: same vertices in the same order, same outcome.
     assert_eq!(off.tolerances.len(), on.tolerances.len());

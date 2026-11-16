@@ -147,6 +147,7 @@ mod tests {
                 }),
             ],
             rows: vec![ConfigRow {
+                id: 1,
                 name: "Default".into(),
                 cells: vec!["d1 * 2 + d2".into(), "4 mm".into(), "d1".into(), String::new(), String::new()],
             }],
@@ -159,6 +160,7 @@ mod tests {
                 condition: RuleCondition::Suppression { feature: 3, value: false },
                 effect: RuleEffect::DriveParameter { parameter: "d1".into(), expression: "d2 * 2 + d1".into() },
             }],
+            ..Default::default()
         };
         let original = table.clone();
         let maps = ConfigCloneMaps {
@@ -203,7 +205,7 @@ mod tests {
                     certificate: None,
                 }),
             ],
-            rows: vec![ConfigRow { name: "Default".into(), cells: vec!["2 mm".into(), String::new()] }],
+            rows: vec![ConfigRow { id: 2, name: "Default".into(), cells: vec!["2 mm".into(), String::new()] }],
             ..Default::default()
         };
         let original = table.clone();

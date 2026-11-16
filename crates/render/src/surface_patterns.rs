@@ -6,7 +6,7 @@ use solidcraft_geom::prelude::*;
 use std::f64::consts::TAU;
 
 use crate::job::{ErrorCode, JobError, Result};
-use crate::surface::{MIN_ROUGHNESS, OpaqueSurface, unit_direction};
+use solidcraft_viewport::surface::{MIN_ROUGHNESS, OpaqueSurface, unit_direction};
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]

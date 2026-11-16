@@ -382,7 +382,19 @@ fn row_contents(app: &mut SolveApp, ui: &mut egui::Ui) {
             state.imported = false;
         });
     } else {
-        ui_kit::theme_browser(ui, "appearance_theme_picker", visible.len(), state.grid, changed.then_some(selected_index).flatten(), &mut card);
+        let arrows = ui_kit::PageLabels {
+            previous: solidcraft_ui_text::tr("prefs.appearance.previous_themes"),
+            next: solidcraft_ui_text::tr("prefs.appearance.next_themes"),
+        };
+        ui_kit::theme_browser(
+            ui,
+            "appearance_theme_picker",
+            visible.len(),
+            state.grid,
+            changed.then_some(selected_index).flatten(),
+            &arrows,
+            &mut card,
+        );
     }
     ui.data_mut(|d| {
         d.insert_temp(key, state.clone());

@@ -1,10 +1,11 @@
 //! Frames: the profile library structural members are made of (#4003).
 //!
 //! A profile is a closed cross-section, an outline and its holes, built in code from a few
-//! dimensions ([`Profile`]). Every built-in profile is SolidCraft's own parametric definition:
-//! no vendor's or standard's size table is shipped. A dimension left out takes a default worked
-//! out from the others, so `{"kind": "rect_tube", "width": 40, "height": 40, "wall": 3}` is a
-//! complete profile. Any other section (a vendor's extrusion, say) comes from a sketch.
+//! dimensions ([`Profile`]). Every built-in profile is SolidCraft's own parametric definition. A
+//! dimension left out takes a default worked out from the others, so `{"kind": "rect_tube",
+//! "width": 40, "height": 40, "wall": 3}` is a complete profile. Standard steel sizes have names
+//! ([`sizes`]): `{"size": "RSC 203x89"}` is that channel with its published dimensions. Any other
+//! section (a vendor's extrusion, say) comes from a sketch.
 //!
 //! Features and commands hold a profile as a [`ProfileSpec`]: each dimension an expression over
 //! the design's parameters, worked out into a [`Profile`] when the feature is evaluated.
@@ -17,6 +18,7 @@ use solidcraft_geom::prelude::*;
 use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
+use solidcore_ops::prism::tapered_flange_ends;
 use solidcore_record::{Loop2, Region2, Seg2, Vec2, Vec3};
 
 use crate::expr::Kind;
@@ -25,6 +27,9 @@ use crate::{DocError, Expr, Result};
 #[cfg(test)]
 #[path = "frame_tests.rs"]
 mod tests;
+
+#[path = "frame_sizes.rs"]
+pub mod sizes;
 
 /// Most members one frame member feature makes.
 pub const MAX_MEMBERS: usize = 1000;
@@ -52,13 +57,15 @@ pub enum Profile {
     /// A solid circle.
     RoundBar { diameter: f64 },
     /// A rectangular or square hollow section. The outer corner radius defaults to twice the
-    /// wall; the inner radius is the outer one less the wall.
+    /// wall, the inner radius to the outer one less the wall.
     RectTube {
         width: f64,
         height: f64,
         wall: f64,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         outer_radius: Option<f64>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        inner_radius: Option<f64>,
     },
     /// A round hollow section (pipe or tube).
     RoundTube { diameter: f64, wall: f64 },
@@ -74,9 +81,12 @@ pub enum Profile {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         toe_radius: Option<f64>,
     },
-    /// A channel with parallel flanges, open towards +x: the web `web` thick along the left side,
-    /// flanges `width` long and `flange` thick. The root radius defaults to the web thickness (less
-    /// where the flanges or the web leave less room), the toe radius to none.
+    /// A channel open towards +x: the web `web` thick along the left side, flanges `width` long
+    /// and `flange` thick. The root radius defaults to the web thickness (less where the flanges
+    /// or the web leave less room), the toe radius to none. The flanges are parallel unless
+    /// `flange_slope` (degrees, default 0) tapers their inner faces, thicker at the web: then
+    /// `flange` is the thickness at the middle of a flange's inside length, between the web and
+    /// the toe, as tables of taper flange channels give it.
     Channel {
         height: f64,
         width: f64,
@@ -86,6 +96,8 @@ pub enum Profile {
         root_radius: Option<f64>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         toe_radius: Option<f64>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        flange_slope: Option<f64>,
     },
     /// An I or H beam with parallel flanges. The root radius defaults to the web thickness (less
     /// where the flanges or the web leave less room).
@@ -127,8 +139,8 @@ pub fn profile_kinds() -> Vec<ProfileKind> {
             kind: "rect_tube",
             label: "Rectangular Tube",
             required: &["width", "height", "wall"],
-            optional: &["outer_radius"],
-            example: Profile::RectTube { width: 40.0, height: 40.0, wall: 3.0, outer_radius: None },
+            optional: &["outer_radius", "inner_radius"],
+            example: Profile::RectTube { width: 40.0, height: 40.0, wall: 3.0, outer_radius: None, inner_radius: None },
         },
         ProfileKind {
             kind: "round_tube",
@@ -148,8 +160,8 @@ pub fn profile_kinds() -> Vec<ProfileKind> {
             kind: "channel",
             label: "Channel",
             required: &["height", "width", "web", "flange"],
-            optional: &["root_radius", "toe_radius"],
-            example: Profile::Channel { height: 100.0, width: 50.0, web: 6.0, flange: 8.0, root_radius: None, toe_radius: None },
+            optional: &["root_radius", "toe_radius", "flange_slope"],
+            example: Profile::Channel { height: 100.0, width: 50.0, web: 6.0, flange: 8.0, root_radius: None, toe_radius: None, flange_slope: None },
         },
         ProfileKind {
             kind: "i_beam",
@@ -175,40 +187,91 @@ pub fn dimension_label(name: &str) -> &'static str {
         "outer_radius" => "Outer radius",
         "root_radius" => "Root radius",
         "toe_radius" => "Toe radius",
+        "inner_radius" => "Inner radius",
+        "flange_slope" => "Flange slope",
         _ => "Dimension",
     }
+}
+
+/// What a profile dimension is: an angle (`flange_slope`) or a length (every other one).
+pub fn dimension_kind(name: &str) -> Kind {
+    if name == "flange_slope" { Kind::Angle } else { Kind::Length }
+}
+
+/// The steepest flange slope a channel may have, degrees.
+pub const MAX_FLANGE_SLOPE: f64 = 20.0;
+
+/// The longest size name a profile may give, in bytes.
+pub const MAX_SIZE_NAME: usize = 64;
+
+/// Why a command refuses a profile that gives `size` and dimensions as well: a size brings its own.
+pub const SIZE_ALONE: &str = "a `size` brings its own dimensions: give `size` alone (with `kind` at most)";
+
+/// Whether the profile `v`, as a command was given it, has a `size` and a dimension too, which
+/// commands refuse ([`SIZE_ALONE`]); a saved feature keeps both.
+pub fn size_with_dimensions(v: &serde_json::Value) -> bool {
+    v.as_object().is_some_and(|o| o.contains_key("size") && o.keys().any(|k| k != "size" && k != "kind"))
 }
 
 /// A built-in profile as a feature saves it and a command takes it: its kind and each dimension
 /// as an expression over the design's parameters (`"tube_wall"`, `"2 in"`, a number). Saved as
 /// one JSON object, `{"kind": "rect_tube", "width": "40", ...}`; numbers read as their text. A
-/// length without a unit is millimetres here: commands give bare numbers the design's unit first.
+/// length without a unit is millimetres here, an angle without one degrees: commands give bare
+/// lengths the design's unit first.
+///
+/// A standard size is given by name, `{"size": "RSC 203x89"}`, and read as its kind and
+/// dimensions ([`sizes::find`]), each with its unit. It is saved with them, so the design keeps
+/// the section it was made with whatever later releases' tables say, and the name is kept as
+/// what members are named after.
 #[derive(Clone, Debug, PartialEq)]
 pub struct ProfileSpec {
     pub kind: String,
     pub dims: BTreeMap<String, Expr>,
+    /// The standard size it was made from, by name (`RSC 203x89`).
+    pub size: Option<String>,
 }
 
 impl ProfileSpec {
-    /// The profile, each dimension worked out by `eval` (given the dimension's name and its
-    /// expression, returning millimetres).
-    pub fn resolve(&self, mut eval: impl FnMut(&str, &Expr) -> Result<f64>) -> Result<Profile> {
+    /// The profile, each dimension worked out by `eval` (given the dimension's name, its
+    /// expression and its kind, returning millimetres or radians).
+    pub fn resolve(&self, mut eval: impl FnMut(&str, &Expr, Kind) -> Result<f64>) -> Result<Profile> {
         let mut o = serde_json::Map::new();
         o.insert("kind".into(), serde_json::Value::String(self.kind.clone()));
         for (name, e) in &self.dims {
-            let v = eval(name, e)?;
-            let n = serde_json::Number::from_f64(v).ok_or_else(|| invalid(format!("profile `{name}` is not a finite length")))?;
+            let kind = dimension_kind(name);
+            let v = eval(name, e, kind)?;
+            // A profile holds its angles in degrees, as they are typed.
+            let v = if kind == Kind::Angle { v.to_degrees() } else { v };
+            let what = if kind == Kind::Angle { "angle" } else { "length" };
+            let n = serde_json::Number::from_f64(v).ok_or_else(|| invalid(format!("profile `{name}` is not a finite {what}")))?;
             o.insert(name.clone(), serde_json::Value::Number(n));
         }
         serde_json::from_value(serde_json::Value::Object(o)).map_err(|e| invalid(format!("profile: {e}")))
+    }
+
+    /// The spec of a standard size: its kind and each dimension with its unit.
+    pub fn of_size(size: &sizes::StandardSize) -> ProfileSpec {
+        let mut dims = BTreeMap::new();
+        if let serde_json::Value::Object(o) = serde_json::to_value(&size.profile).unwrap_or_default() {
+            for (name, v) in o {
+                if let Some(x) = v.as_f64() {
+                    let unit = if dimension_kind(&name) == Kind::Angle { "deg" } else { "mm" };
+                    dims.insert(name, Expr::new(format!("{} {unit}", short(x))));
+                }
+            }
+        }
+        ProfileSpec { kind: size.profile.kind().to_string(), dims, size: Some(size.name.clone()) }
     }
 }
 
 impl Serialize for ProfileSpec {
     fn serialize<S: serde::Serializer>(&self, s: S) -> std::result::Result<S::Ok, S::Error> {
         use serde::ser::SerializeMap;
-        let mut m = s.serialize_map(Some(self.dims.len() + 1))?;
+        let mut m = s.serialize_map(Some(self.dims.len() + 1 + usize::from(self.size.is_some())))?;
         m.serialize_entry("kind", &self.kind)?;
+        if let Some(size) = &self.size {
+            m.serialize_entry("size", size)?;
+        }
         for (k, v) in &self.dims {
             m.serialize_entry(k, v)?;
         }
@@ -220,9 +283,34 @@ impl<'de> Deserialize<'de> for ProfileSpec {
     fn deserialize<D: serde::Deserializer<'de>>(d: D) -> std::result::Result<Self, D::Error> {
         use serde::de::Error;
         let mut m = BTreeMap::<String, serde_json::Value>::deserialize(d)?;
+        let size = match m.remove("size") {
+            None => None,
+            Some(serde_json::Value::String(t)) if !t.trim().is_empty() && t.trim().len() <= MAX_SIZE_NAME => Some(t.trim().to_string()),
+            Some(_) => {
+                return Err(D::Error::custom(format!(
+                    "`size` must be a standard size's name, such as `RSC 203x89` (at most {MAX_SIZE_NAME} characters)"
+                )));
+            }
+        };
+        let given_kind = m.get("kind").cloned();
+        // A size alone is the standard size's dimensions; with dimensions (as a feature saves it)
+        // it only names them.
+        if let Some(name) = &size
+            && m.keys().all(|k| k == "kind")
+        {
+            let found =
+                sizes::find(name).ok_or_else(|| D::Error::custom(format!("unknown size `{name}` (frame.profile.list lists the standard sizes)")))?;
+            let spec = ProfileSpec::of_size(&found);
+            match given_kind {
+                None => {}
+                Some(serde_json::Value::String(k)) if k == spec.kind => {}
+                Some(_) => return Err(D::Error::custom(format!("size `{}` is a {} profile", found.name, spec.kind))),
+            }
+            return Ok(spec);
+        }
         let kind = match m.remove("kind") {
             Some(serde_json::Value::String(k)) => k,
-            _ => return Err(D::Error::custom("a profile needs `kind` (bar, round_bar, rect_tube, round_tube, angle, channel or i_beam)")),
+            _ => return Err(D::Error::custom("a profile needs `kind` (bar, round_bar, rect_tube, round_tube, angle, channel or i_beam) or `size`")),
         };
         let kinds = profile_kinds();
         let info = kinds.iter().find(|k| k.kind == kind).ok_or_else(|| {
@@ -243,19 +331,19 @@ impl<'de> Deserialize<'de> for ProfileSpec {
         if let Some(missing) = info.required.iter().find(|r| !dims.contains_key(**r)) {
             return Err(D::Error::custom(format!("a {kind} profile needs `{missing}`")));
         }
-        Ok(ProfileSpec { kind, dims })
+        Ok(ProfileSpec { kind, dims, size })
     }
 }
 
 impl crate::walk::Walk for ProfileSpec {
     fn walk_exprs<'a>(&'a self, f: &mut dyn FnMut(crate::walk::ExprItem<'a>)) {
         for (name, e) in &self.dims {
-            f((dimension_label(name), e, Kind::Length, crate::walk::ExprRole::Input));
+            f((dimension_label(name), e, dimension_kind(name), crate::walk::ExprRole::Input));
         }
     }
     fn walk_exprs_mut<'a>(&'a mut self, f: &mut dyn FnMut(crate::walk::ExprItemMut<'a>)) {
         for (name, e) in self.dims.iter_mut() {
-            f((dimension_label(name), e, Kind::Length, crate::walk::ExprRole::Input));
+            f((dimension_label(name), e, dimension_kind(name), crate::walk::ExprRole::Input));
         }
     }
 }
@@ -366,7 +454,7 @@ fn at_most(what: &str, r: f64, room: f64, why: &str) -> Result<()> {
 }
 
 /// A number for a name: up to four decimals, without trailing zeros.
-fn short(x: f64) -> String {
+pub(crate) fn short(x: f64) -> String {
     let t = format!("{x:.4}");
     let t = if t.contains('.') { t.trim_end_matches('0').trim_end_matches('.') } else { &t };
     if t == "-0" { "0".into() } else { t.to_string() }
@@ -408,9 +496,15 @@ impl Profile {
         let room = |x: f64| if x.is_finite() { x.max(0.0) } else { 0.0 };
         match *self {
             Profile::Bar { width, height, corner_radius } => Profile::Bar { width, height, corner_radius: Some(corner_radius.unwrap_or(0.0)) },
-            Profile::RectTube { width, height, wall, outer_radius } => {
+            Profile::RectTube { width, height, wall, outer_radius, inner_radius } => {
                 let r = outer_radius.unwrap_or_else(|| (2.0 * wall).min(width.min(height) / 2.0));
-                Profile::RectTube { width, height, wall, outer_radius: Some(r) }
+                // The default is the outer radius less the wall; one under the smallest radius is
+                // a sharp corner, so the filled profile passes the checks the original did.
+                let ri = inner_radius.unwrap_or_else(|| {
+                    let ri = room(r - wall);
+                    if ri < MIN_PROFILE_DIMENSION { 0.0 } else { ri }
+                });
+                Profile::RectTube { width, height, wall, outer_radius: Some(r), inner_radius: Some(ri) }
             }
             Profile::Angle { width, height, thickness: t, root_radius, toe_radius } => {
                 // Root and toe share the inside length of the shorter leg.
@@ -426,12 +520,14 @@ impl Profile {
                 };
                 Profile::Angle { width, height, thickness: t, root_radius: Some(r1), toe_radius: Some(r2) }
             }
-            Profile::Channel { height, width, web, flange, root_radius, toe_radius } => {
+            Profile::Channel { height, width, web, flange, root_radius, toe_radius, flange_slope } => {
                 let r2 = toe_radius.unwrap_or(0.0);
+                let slope = flange_slope.unwrap_or(0.0);
+                let (_, at_web) = tapered_flange_ends(width - web, flange, slope);
                 // The root shares a flange's inside length with the toe, and the web's inside
                 // height with the other root.
-                let r1 = root_radius.unwrap_or_else(|| web.min(room(width - web - r2)).min(room(height - 2.0 * flange) / 2.0));
-                Profile::Channel { height, width, web, flange, root_radius: Some(r1), toe_radius: Some(r2) }
+                let r1 = root_radius.unwrap_or_else(|| web.min(room(width - web - r2)).min(room(height - 2.0 * at_web) / 2.0));
+                Profile::Channel { height, width, web, flange, root_radius: Some(r1), toe_radius: Some(r2), flange_slope: Some(slope) }
             }
             Profile::IBeam { height, width, web, flange, root_radius } => {
                 let r = root_radius.unwrap_or_else(|| web.min(room(width - web) / 2.0).min(room(height - 2.0 * flange) / 2.0));
@@ -453,6 +549,19 @@ impl Profile {
         }
     }
 
+    /// The profile's own origin, in the bounding-box-centred coordinates [`Self::region`] uses:
+    /// the point its dimensions are measured from (a bar's or an angle's bottom-left corner, the
+    /// heel for an angle; the middle of a channel's web back; the centre of a round bar, a tube
+    /// or an I beam). A member placed with `locate` keeps that profile point on its line when the
+    /// section's size changes.
+    pub fn origin(&self) -> Vec2 {
+        match *self {
+            Profile::Bar { width, height, .. } | Profile::Angle { width, height, .. } => Vec2::new(-width / 2.0, -height / 2.0),
+            Profile::RoundBar { .. } | Profile::RoundTube { .. } | Profile::RectTube { .. } | Profile::IBeam { .. } => Vec2::ZERO,
+            Profile::Channel { width, .. } => Vec2::new(-width / 2.0, 0.0),
+        }
+    }
+
     /// The profile's cross-section, the bounding box centred on the origin. An error names the
     /// dimension that is out of range or does not fit.
     pub fn region(&self) -> Result<Region2> {
@@ -467,14 +576,30 @@ impl Profile {
                 Ok(Region2 { outer: rounded_rect(w, h, r)?, holes: Vec::new() })
             }
             Profile::RoundBar { diameter } => Ok(Region2 { outer: Loop2::circle(Vec2::ZERO, dim("diameter", diameter)? / 2.0), holes: Vec::new() }),
-            Profile::RectTube { width, height, wall, outer_radius } => {
+            Profile::RectTube { width, height, wall, outer_radius, inner_radius } => {
                 let (w, h, t) = (dim("width", width)?, dim("height", height)?, dim("wall", wall)?);
                 less_half("wall", t, "the smaller side", w.min(h))?;
                 let ro = radius("outer_radius", outer_radius.unwrap_or(0.0))?;
                 if ro > w.min(h) / 2.0 {
                     return Err(invalid(format!("profile `outer_radius` ({ro}) must be at most half the smaller side ({})", w.min(h) / 2.0)));
                 }
-                let ri = (ro - t).max(0.0);
+                let ri = radius("inner_radius", inner_radius.unwrap_or(0.0))?;
+                let inside = (w - 2.0 * t).min(h - 2.0 * t);
+                if ri > inside / 2.0 {
+                    return Err(invalid(format!("profile `inner_radius` ({ri}) must be at most half the inside's smaller side ({})", inside / 2.0)));
+                }
+                // The hole must stay inside the outline. Each corner's hole arc is centred `d`
+                // further out along both axes than the outer arc; with `d` 0 or less the wall is
+                // `wall` thick all round, and past 0 the two arcs come closest on the diagonal,
+                // `ro - ri - d√2` apart, which must be at least the smallest dimension (compared
+                // squared, as both sides are then positive).
+                let d = ro - t - ri;
+                let apart = ro - ri - MIN_PROFILE_DIMENSION;
+                if d > 0.0 && (apart < 0.0 || apart * apart < 2.0 * d * d) {
+                    return Err(invalid(format!(
+                        "profile `inner_radius` ({ri}) is too small for `outer_radius` ({ro}) and `wall` ({t}): the hole's corners come through the outer corners; an inner radius of at least the outer one less the wall always fits"
+                    )));
+                }
                 Ok(Region2 { outer: rounded_rect(w, h, ro)?, holes: vec![rounded_rect(w - 2.0 * t, h - 2.0 * t, ri)?.reversed()] })
             }
             Profile::RoundTube { diameter, wall } => {
@@ -493,16 +618,36 @@ impl Profile {
                 let radii = [0.0, 0.0, r2, r1, r2, 0.0];
                 Ok(Region2 { outer: rounded_polygon(&shifted(&pts, a, b), &radii)?, holes: Vec::new() })
             }
-            Profile::Channel { height, width, web, flange, root_radius, toe_radius } => {
+            Profile::Channel { height, width, web, flange, root_radius, toe_radius, flange_slope } => {
                 let (h, b, tw, tf) = (dim("height", height)?, dim("width", width)?, dim("web", web)?, dim("flange", flange)?);
                 less("web", tw, "width", b)?;
-                less_half("flange", tf, "the height", h)?;
+                let slope = flange_slope.unwrap_or(0.0);
+                if !(slope.is_finite() && (0.0..=MAX_FLANGE_SLOPE).contains(&slope)) {
+                    return Err(invalid(format!("profile `flange_slope` must be between 0 and {MAX_FLANGE_SLOPE} degrees (got {slope})")));
+                }
+                // Each flange's thickness at its toe and at the web: `tf` both, without a slope.
+                let (at_toe, at_web) = tapered_flange_ends(b - tw, tf, slope);
+                if slope == 0.0 {
+                    less_half("flange", tf, "the height", h)?;
+                } else {
+                    if at_toe < MIN_PROFILE_DIMENSION {
+                        return Err(invalid(format!(
+                            "profile `flange_slope` ({slope}°) leaves a flange {at_toe:.4} mm thick at its toe; it must be at least {MIN_PROFILE_DIMENSION} mm"
+                        )));
+                    }
+                    if 2.0 * at_web >= h {
+                        return Err(invalid(format!(
+                            "profile flanges at the web ({at_web:.4} mm thick) must be less than half the height ({})",
+                            h / 2.0
+                        )));
+                    }
+                }
                 let r1 = radius("root_radius", root_radius.unwrap_or(0.0))?;
                 let r2 = radius("toe_radius", toe_radius.unwrap_or(0.0))?;
-                at_most("`toe_radius`", r2, tf, "the flange thickness")?;
+                at_most("`toe_radius`", r2, at_toe, "the flange thickness at the toe")?;
                 at_most("`root_radius` + `toe_radius`", r1 + r2, b - tw, "the inside length of a flange")?;
-                at_most("`root_radius`", r1, (h - 2.0 * tf) / 2.0, "half the web's inside height")?;
-                let pts = [(0.0, 0.0), (b, 0.0), (b, tf), (tw, tf), (tw, h - tf), (b, h - tf), (b, h), (0.0, h)];
+                at_most("`root_radius`", r1, (h - 2.0 * at_web) / 2.0, "half the web's inside height")?;
+                let pts = [(0.0, 0.0), (b, 0.0), (b, at_toe), (tw, at_web), (tw, h - at_web), (b, h - at_toe), (b, h), (0.0, h)];
                 let radii = [0.0, 0.0, r2, r1, r1, r2, 0.0, 0.0];
                 Ok(Region2 { outer: rounded_polygon(&shifted(&pts, b, h), &radii)?, holes: Vec::new() })
             }

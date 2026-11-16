@@ -109,7 +109,7 @@ fn lookup(name: &str) -> Result<Op, HarnessError> {
 fn normalise(e: &SolidError) -> String {
     match e {
         SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. } => "status_1007".into(),
-        SolidError::Upstream { code, .. } => format!("status_{code}"),
+        err if solidcore::error::upstream_status(err).is_some() => format!("status_{}", solidcore::error::upstream_status(err).unwrap_or(-1)),
         other => format!("rust_error: {other}"),
     }
 }

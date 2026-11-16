@@ -8,6 +8,7 @@
 use std::f64::consts::PI;
 
 use solidcore_record::Vec3;
+use solidcraft_geom::MeshGeom;
 
 use crate::*;
 

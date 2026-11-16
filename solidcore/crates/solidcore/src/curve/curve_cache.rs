@@ -709,7 +709,7 @@ impl<O: Copy + PartialEq> CurveCache<O> {
                 }
 
                 bez = crv_trim(&bez, span_ivl.min(), span_ivl.max())
-                    .map_err(SolidError::nl_ser(OP_TESS))?;
+                    .map_err(SolidError::nurbs_routine(OP_TESS))?;
             }
 
             // control-polygon properties while checking all tolerances
@@ -773,7 +773,7 @@ impl<O: Copy + PartialEq> CurveCache<O> {
             // split pBez into two equal halves: the stack holds [max, min]
             let mut stack: Vec<Nurb> = Vec::new();
             let (bez_min, bez_max) = if is_bspline {
-                crv_split(&bez, span_ivl.mid()).map_err(SolidError::nl_ser(OP_TESS))?
+                crv_split(&bez, span_ivl.mid()).map_err(SolidError::nurbs_routine(OP_TESS))?
             } else {
                 split_segment(k, &bez, &self.curve)?
             };
@@ -855,7 +855,7 @@ impl<O: Copy + PartialEq> CurveCache<O> {
 
                 // split the current span in half, children onto the stack
                 let (bez_min, bez_max) = if is_bspline {
-                    crv_split(&top, ivl.mid()).map_err(SolidError::nl_ser(OP_TESS))?
+                    crv_split(&top, ivl.mid()).map_err(SolidError::nurbs_routine(OP_TESS))?
                 } else {
                     split_segment(k, &top, &self.curve)?
                 };
@@ -925,7 +925,7 @@ impl<O: Copy + PartialEq> CurveCache<O> {
         let span_count = self.spans.len();
         if span_count == 0 {
             self.tree = Some(tree);
-            return Err(SolidError::sm_err(OP_TREE));
+            return Err(SolidError::curve_failed(OP_TREE, "the curve has no spans"));
         }
 
         // decomposition control parameters
@@ -1270,15 +1270,24 @@ pub fn compute_constants(
 
     // the Euclidean control polygon
     let CurveKind::BSpline(bsp) = bez.kind() else {
-        return Err(SolidError::sm_err(OP_CONST));
+        return Err(SolidError::curve_failed(
+            OP_CONST,
+            "the span is not a B-spline",
+        ));
     };
     let polygon = bsp.polygon(&bsp.natural_interval())?;
     let poly_size = polygon.len();
     let (Some(&line_pnt), Some(&last_point)) = (polygon.first(), polygon.last()) else {
-        return Err(SolidError::sm_err(OP_CONST));
+        return Err(SolidError::curve_failed(
+            OP_CONST,
+            "the control polygon is empty",
+        ));
     };
     if poly_size < 2 {
-        return Err(SolidError::sm_err(OP_CONST));
+        return Err(SolidError::curve_failed(
+            OP_CONST,
+            "the control polygon has fewer than two points",
+        ));
     }
 
     let mut last_vec = Vec3::ZERO;
@@ -1474,7 +1483,10 @@ pub fn compute_constants(
 /// evaluations (whose other failures upstream ignores).
 pub fn build_bezier_spans(k: &Kernel, curve: &Curve, knots: &[f64]) -> Result<Vec<Nurb>> {
     if knots.len() < 2 {
-        return Err(SolidError::sm_err(OP_BUILD));
+        return Err(SolidError::curve_failed(
+            OP_BUILD,
+            "there are fewer than two knots",
+        ));
     }
     let mut out = Vec::new();
     let mut pv = [Vec3::UNDEF; 2];
@@ -1521,14 +1533,17 @@ pub fn create_bezier_segment_block(
     if let Some(n) = nurb {
         let span_count = n.knot_vector().map_or(0, |k| k.span_count(n.degree()));
         if span_count < 1 {
-            return Err(SolidError::sm_err(OP_BLOCK));
+            return Err(SolidError::curve_failed(OP_BLOCK, "the NURB has no spans"));
         }
-        create_bez_segments(n).map_err(SolidError::nl_ser(OP_BLOCK))
+        create_bez_segments(n).map_err(SolidError::nurbs_routine(OP_BLOCK))
     } else {
         // the knot vector matches CalculateContinuities (status ignored)
         let (knots, _) = knots_ignoring_status(curve.knots_with_status(k, None))?;
         if knots.len() < 2 {
-            return Err(SolidError::sm_err(OP_BLOCK));
+            return Err(SolidError::curve_failed(
+                OP_BLOCK,
+                "there are fewer than two knots",
+            ));
         }
         build_bezier_spans(k, curve, &knots)
     }

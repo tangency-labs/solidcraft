@@ -10,6 +10,7 @@ use solidcraft_doc::{
     render_surface::{EmbeddedSurfaceKind, EmbeddedSurfaceSource, SavedSurface, SurfaceSource},
     render_texture_resources::{MAX_TEXTURE_RESOURCE_BYTES, TextureProvenance, TextureResource, TextureResources},
 };
+use solidcraft_geom::MeshGeom;
 use solidcraft_render::job::textures::PlanarFrame;
 use solidcraft_render::texture_input::MapRole;
 use std::sync::Arc;
