@@ -61,8 +61,8 @@
 //!   gone (no flag). Solidcore-native, no fork commit.
 //! - **A tangent edge's ends and its other UV curve (#17514).** `trim_extended_edge` takes a
 //!   grazing cut by a neighbour's offset as a crossing where the end has no tangent
-//!   neighbour (the cut is then provably transversal: the neighbour's mated edge meets this
-//!   one there), and `extend_trim_edges` gives an edge whose two uses are on one surface (a
+//!   neighbour and the curve meets the offset at more than the tangency tolerance (the
+//!   angle that classed no neighbour tangent there), and `extend_trim_edges` gives an edge whose two uses are on one surface (a
 //!   seam) the extended UV curve moved onto the other use's side instead of a drop
 //!   (`same_surface_twin`). Solidcore-native, no fork commit.
 //! - **Object handles.** Every `SmObject*` (topology, curves, surfaces) is a caller
@@ -3311,7 +3311,7 @@ impl OffsetGeometryCreation {
     /// curve extended ten lengths each way; the intersections of the 3D curve with the
     /// extended surfaces of the offsets of non-tangent neighbours (non-grazing ones
     /// only; not upstream, #17514: a grazing one too at an end without a tangent
-    /// neighbour); or, without candidates, the drop of the base vertex onto the curve. The
+    /// neighbour, where it meets the curve at more than the tangency tolerance); or, without candidates, the drop of the base vertex onto the curve. The
     /// candidate closest to the base vertex (and not the start already chosen) wins.
     /// Not upstream: beside a neighbour already offset (marked) whose faces were tangent in
     /// the input and whose new surfaces cross in a local operation
@@ -3776,20 +3776,21 @@ impl OffsetGeometryCreation {
                     // round meets the top face tangentially) crosses it twice within the
                     // tolerance, so it crosses only where it passes through by more than
                     // the tolerance ([`passes_through`]).
-                    // Not upstream (#17514): a touch needs a tangent neighbour. With none at
-                    // this end, the base curve lies on its faces' offsets and each neighbour
-                    // here meets those faces at an edge that is neither a tangent sector nor
-                    // tangent to the base edge at the vertex (`collect_neighbour`): the
-                    // curve's tangent is in its face's tangent plane and not along that
-                    // face's meeting with the neighbour, so it is not in the neighbour's
-                    // tangent plane, and the curve passes through the neighbour's offset
-                    // however shallow the angle. The cut is then where the neighbour's mated
-                    // edge meets this one, the vertex the mate builds. Read as a touch (a
-                    // plane cutting a torus 2 degrees from its bottom circle, whose offsets
-                    // part by less than the tolerance there), the end fell back to the old
-                    // vertex's offset and the mate then moved the vertex along the edge.
+                    // Not upstream (#17514): at an end with no tangent neighbour, a curve
+                    // that meets the surface at more than the operation's tangency tolerance
+                    // (`tan_tol_deg`, the angle by which `collect_neighbour` found no
+                    // neighbour tangent here) is not tangent to it, so it passes through
+                    // however shallow the angle, even where it comes back within the
+                    // tolerance (a plane cutting a torus 2.09 degrees from its bottom circle:
+                    // the offset seam meets the floor's offset 2.96 degrees off it and dips
+                    // under it by less than the tolerance, which [`passes_through`] reads as
+                    // a touch; the end then fell back to the old vertex's offset and the mate
+                    // moved the vertex along the edge). A curve that meets the surface within
+                    // that angle is weighed by [`passes_through`] as before: an offset edge
+                    // tangent to a neighbour's offset away from the vertex is no cut.
+                    let transversal = tan_eus.is_empty() && (angle_deg - 90.0).abs() > tan_tol_deg;
                     let crosses = !(angle_deg < 85.0 || angle_deg > 95.0)
-                        && (tan_eus.is_empty()
+                        && (transversal
                             || passes_through(
                                 k,
                                 curve_of(brep, curve_3d)?,
