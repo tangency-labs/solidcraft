@@ -666,6 +666,32 @@ fn root_picks_on_a_moved_component_build_where_it_is_shown() {
     assert!((across.origin.y - 40.0).abs() < 1e-6, "{across:?}");
 }
 
+/// #17623: a root hole at a point of a sketch on one part's face, cutting every body, drills
+/// that part only: another part, turned and moved away, is met where it is shown, not at the
+/// same point in its own frame. Redefined with `targets`, the hole drills just those bodies.
+#[test]
+fn a_root_hole_at_sketch_points_drills_only_the_part_it_reaches() {
+    let mut s = two_parts(0.0, [0.0; 3]);
+    run(&mut s, "component.activate", json!({"component": "root"}));
+    run(&mut s, "occurrence.move", json!({"occurrence": "Cap:1", "axis": [0, 0, 1], "angle": "180 deg", "translate": [-10, 0, 0]}));
+    run(&mut s, "sketch.create", json!({"plane": {"face": [20, 15, 10]}, "name": "Pts", "project_edges": false}));
+    run(&mut s, "sketch.point", json!({"point": [20, 15], "id": "c"}));
+    run(&mut s, "sketch.finish", json!({}));
+    let hole = json!({"sketch": "Pts", "points": ["c"], "single": true, "diameter": 5, "depth": 4});
+    let mut every = hole.clone();
+    every["participants"] = json!(["*"]);
+    every["name"] = json!("H");
+    run(&mut s, "solid.hole", every);
+    assert!(body_volume(&s, "Base block") < BLOCK - 1.0, "the hole drills Base: {}", body_volume(&s, "Base block"));
+    assert!((body_volume(&s, "Cap block") - BLOCK).abs() < 1e-6, "Cap is not drilled: {}", body_volume(&s, "Cap block"));
+
+    let mut only = hole;
+    only["targets"] = json!(["Base block"]);
+    run(&mut s, "timeline.redefine", json!({"feature": "H", "command": "solid.hole", "params": only}));
+    assert_eq!(s.doc.find_feature("H").unwrap().participants, vec!["Base block".to_string()]);
+    assert!(body_volume(&s, "Base block") < BLOCK - 1.0 && (body_volume(&s, "Cap block") - BLOCK).abs() < 1e-6);
+}
+
 /// #6000: in a turned component, a named plane ("XY") is the component's own; an explicit
 /// `{origin, x_dir, y_dir}` is world unless `frame: "component"` says otherwise. The reply says
 /// which, with a note when the two differ.
