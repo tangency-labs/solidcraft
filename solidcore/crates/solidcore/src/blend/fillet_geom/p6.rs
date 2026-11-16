@@ -76,7 +76,8 @@
 //!   face's binormal turns past the face's own plane for a section that leaves its rail
 //!   steeper than 90 degrees, and then pointed at the wrong piece. Where no piece has a
 //!   dot above the floor the trim fails as a defect, `BlendFailure::StageFailed` (upstream
-//!   deleted no piece and went on).
+//!   deleted no piece and went on). A rail with no candidate piece at all (its edge uses on
+//!   none of the faces the main rail names) deletes none, as upstream.
 //!   [`inside_piece`] holds the choice.
 //! - **Statuses.** `SER`/`NER` failures are errors (`SM_ERR`, `SM_ERR_NULL_POINTER`);
 //!   ignored upstream statuses (curve and surface copies, `SetMinMax`, `Unitize`,
@@ -2729,14 +2730,6 @@ impl FilletBrep {
                     &BinormalOptions::default(),
                 )?;
                 let mid_pnt = fillet_eval.point;
-                // the fillet's side at the rail: the chord to the other rail, square to
-                // this one ([`fillet_side_at_rail`]), not the fillet face's binormal
-                let other = self.other_rail_point(k, geom, ii, mid_pnt)?;
-                let side = other
-                    .and_then(|o| fillet_side_at_rail(mid_pnt, fillet_eval.tangent, o))
-                    // no point on the other rail: the pseudo B-rep's rails run the whole
-                    // fillet, so a defect, never a size that would build
-                    .ok_or_else(|| SolidError::blend(OP_TRIM, BlendFailure::StageFailed))?;
 
                 // Drop the m_pFilletBrep->Edge->MidPoint onto the Orig
                 // m_pTargetBrep->Edge->Curve
@@ -2795,12 +2788,24 @@ impl FilletBrep {
                     }
                     pieces.push((index, bin2));
                 }
-                // no piece on the chord's side: the chord runs square to the face, so the
-                // faces are tangent along the edge, which is not blended this way (a defect)
-                let Some(inside) = inside_piece(side, &pieces) else {
-                    return Err(SolidError::blend(OP_TRIM, BlendFailure::StageFailed));
+                // No candidate piece (a rail whose edge uses lie on none of the faces the
+                // main rail names, as a rollover's other rail can): nothing is chosen and
+                // nothing deleted, as before. Otherwise the fillet's side at the rail is the
+                // chord to the other rail, square to this one ([`fillet_side_at_rail`]), not
+                // the fillet face's binormal; no point on the other rail (the pseudo B-rep's
+                // rails run the whole fillet) or no piece on the chord's side (the chord
+                // square to the face: faces tangent along the edge) is a defect, never a
+                // size that would build.
+                let inside = if pieces.is_empty() {
+                    None
+                } else {
+                    let defect = || SolidError::blend(OP_TRIM, BlendFailure::StageFailed);
+                    let side = self
+                        .other_rail_point(k, geom, ii, mid_pnt)?
+                        .and_then(|o| fillet_side_at_rail(mid_pnt, fillet_eval.tangent, o))
+                        .ok_or_else(defect)?;
+                    Some(inside_piece(side, &pieces).ok_or_else(defect)?)
                 };
-                let inside = Some(inside);
                 // (a loop, not a lookup, so the marking below keeps upstream's shape)
                 for (index, &eu) in edgeuses.iter().enumerate().step_by(2) {
                     // The inside piece (and all Faces connected to it) get marked for
