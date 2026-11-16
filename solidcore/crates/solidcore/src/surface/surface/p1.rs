@@ -162,7 +162,7 @@ use crate::math::{max2, min2, BIG_DOUBLE, EFF_ZERO, EFF_ZERO_SQ, EFF_ZERO_SQRT, 
 use crate::nurbs::b_spline_curve_n_lib::TrimMode;
 use crate::nurbs::b_spline_surface::{BSplineSurface, SurfParamType};
 use crate::nurbs::b_spline_surface_n_lib::p2::EvaluateFlags;
-use crate::nurbs::certificate::{meridian_collapse, on_circle, Collapse, OnCircle};
+use crate::nurbs::certificate::{axis_foot, meridian_collapse, on_circle, Collapse, OnCircle};
 use crate::nurbs::knots::Side;
 use crate::surface::offset_surface::{OffsetSurface, SS_UNKNOWN};
 use crate::surface::plane::Plane;
@@ -2707,12 +2707,13 @@ impl Surface {
     /// (`IsArc(9, tol)` nominates the circle, `r > tol`; a fillet's round along a
     /// circular edge), proved over the whole generatrix ([`generatrix_on_circle`]), and
     /// the offset passes every point's centre of curvature: its radius of curvature less
-    /// `d sign(N . k)` is below `tol` all along ([`meridian_collapse`], which also proves
-    /// the generatrix lies in a plane through the axis and bends to one side). `k` is the
-    /// curvature vector of the generatrix-direction iso-curve and `N` the surface normal,
-    /// both at the middle of the natural UV domain: only the side is read there. A failed
-    /// arc test or evaluation, a generatrix point proved off the circle, a pole there, or a
-    /// zero offset (the surface itself), is `false`.
+    /// `d sign(N . k)` is below `tol` all along ([`meridian_collapse`], which decides it on
+    /// the profile and also proves the profile keeps off the axis and bends to one side).
+    /// `k` is the profile's curvature vector (`profile_curvature`, from the
+    /// generatrix-direction iso-curve) and `N` the surface normal, both at the middle of
+    /// the natural UV domain: only the side is read there. A zero offset (the surface
+    /// itself, checked first), a failed arc test or evaluation, a generatrix point proved
+    /// off the circle, or a pole there, is `false`.
     ///
     /// # Errors
     ///
@@ -2722,8 +2723,9 @@ impl Surface {
     /// exact NURB form to bound, its NURB not made yet, or more pieces than
     /// [`on_circle`]'s bound), whose curvature where the side is read is not within half of
     /// the circle's (NaN or zero included), or whose collapse [`meridian_collapse`] does not
-    /// prove either way (out of every plane through the axis, an inflection, or a radius of
-    /// curvature on both sides of the offset): the offset is refused, not dropped;
+    /// prove either way (a generatrix crossing the axis, an inflection or a straight
+    /// profile, or a radius of curvature on both sides of the offset): the offset is
+    /// refused, not dropped;
     /// [`SolidError::Cancelled`] from the certificates.
     fn revolution_offset_collapses(
         &self,
@@ -2732,6 +2734,11 @@ impl Surface {
         signed_offset_distance: f64,
         tol: f64,
     ) -> Result<bool> {
+        // A zero offset is the surface itself: no point moves, so none passes its centre of
+        // curvature, whatever the generatrix (first, so it is never refused)
+        if signed_offset_distance == 0.0 {
+            return Ok(false);
+        }
         // a failure upstream answers FALSE (except an unported call here)
         let Some(gen) = s.gen_curve() else {
             return Ok(false);
@@ -2757,9 +2764,10 @@ impl Surface {
             }
         }
 
-        // the curvature of the generatrix direction's iso-curve, at the middle of the domain
+        // the profile's curvature, from the generatrix direction's iso-curve at the middle
+        // of the domain
         let uv = self.natural_uv_domain_with_nurb(k)?.mid();
-        let Some([_, du, dv, _, duu, dvv]) =
+        let Some([point, du, dv, _, duu, dvv]) =
             ignored_surface_result(self.evaluate_2nd_derivatives(k, uv, true, true))?
         else {
             return Ok(false);
@@ -2775,13 +2783,15 @@ impl Surface {
             // at a pole: no generatrix tangent to measure
             return Ok(false);
         }
-        let curvature = (d2 - d1 * (d2.dot(d1) / speed_sq)) / speed_sq;
+        let axis = s.position();
+        let curvature = profile_curvature(axis.origin(), axis.z_axis(), point, d1, d2);
 
-        // N . k r is +1 where the normal points at the centre, -1 away from it: only its
-        // sign is taken from this one point, which side of the generatrix the offset moves
-        // to. The certificate below proves the generatrix bends to one side all along, and
-        // the surface's normal is continuous, so that side holds at every point. The
-        // amount is decided there, over the whole generatrix.
+        // N . k r is +1 where the normal points at the profile's centre of curvature, -1
+        // away from it: only its sign is taken from this one point, which side of the
+        // profile the offset moves to. The certificate below proves the profile bends to one
+        // side all along and keeps off the axis (the normal is a fixed sign times the
+        // profile's normal there, and flips where the generatrix crosses the axis), so that
+        // side holds at every point. The amount is decided there, over the whole generatrix.
         let towards_centre = normal.dot(curvature) * radius;
         let sign = if towards_centre < 0.0 { -1.0 } else { 1.0 };
         // The side is taken only where the generatrix bends clearly as its circle does:
@@ -2798,24 +2808,18 @@ impl Surface {
             });
         }
         // The collapse is decided over the whole generatrix, never from the circle's radius
-        // or one curvature sample (solidcraft#17907's second review): the generatrix must
-        // lie in a plane through the axis (a tilted circle's radius is not where its offset
-        // folds) and bend to one side all along (so the side read here holds everywhere),
-        // and its radius of curvature less the offset must be below `tol` at every point,
-        // or at least `tol` at every point ([`meridian_collapse`]). Anything else is refused.
-        // A zero offset is the surface itself: no point moves, so none passes its centre of
-        // curvature, whatever the generatrix (as a circle of radius `tol` or less is `false`
-        // above).
-        if signed_offset_distance == 0.0 {
-            return Ok(false);
-        }
+        // or one curvature sample (solidcraft#17907's second review): the profile must keep
+        // off the axis and bend to one side all along (so the side read here holds
+        // everywhere), and its radius of curvature less the offset must be below `tol` at
+        // every point, or at least `tol` at every point ([`meridian_collapse`]: a tilted
+        // circle's radius is not where its offset folds, its profile's is). Anything else is
+        // refused.
         let Some(nurb) = gen.b_spline_base().and_then(|b| b.gw_nurb()) else {
             return Err(SolidError::Unsupported {
                 operation: OP_REV_COLLAPSE,
                 reason: "the generatrix has no exact NURB form to bound its curvature",
             });
         };
-        let axis = s.position();
         match meridian_collapse(
             k,
             nurb,
@@ -2829,7 +2833,7 @@ impl Surface {
             Collapse::Nowhere => Ok(false),
             Collapse::Unproved => Err(SolidError::Unsupported {
                 operation: OP_REV_COLLAPSE,
-                reason: "the generatrix is not proved in a plane through the axis, bending to one side, with its curvature on one side of the offset all along",
+                reason: "the generatrix's profile is not proved off the axis, bending to one side, with its curvature on one side of the offset all along",
             }),
         }
     }
@@ -4843,6 +4847,43 @@ pub(super) fn ignored_surface_result<T>(r: Result<T>) -> Result<Option<T>> {
 /// a circle-class ellipse whose radii differ is bounded as a NURB).
 fn is_exact_circle(gen: &Curve) -> bool {
     matches!(gen.kind(), CurveKind::Ellipse(e) if e.is_circle_class() && e.x_radius() == e.y_radius())
+}
+
+/// The curvature vector, at `point`, of the profile of a surface of revolution about the
+/// axis through `axis_point` along `axis` (the curve its generatrix traces in the
+/// half-plane through the axis and `point`), from the generatrix's first and second
+/// derivatives `d1` and `d2` there. Not upstream (solidcraft#18018's review: the side was
+/// read from the generatrix's own curvature, which is not the profile's off a plane through
+/// the axis). With `Y = point - foot` (the foot as [`axis_foot`]), `z = a . Y`, the radial
+/// part `R = Y - a z` and `rho = |R|`: `rho' = e . d1` (`e = R / rho`), `rho'' = (R . d2 +
+/// |d1 - a z'|^2 - rho'^2) / rho`, `z' = a . d1`, `z'' = a . d2`, and the plane curve
+/// `(rho, z)`'s curvature vector mapped back along `e` and `a`. For a generatrix in a
+/// plane through the axis it is the generatrix's own. All NaN on the axis, for a zero
+/// tangent, or where the foot cannot be found: the caller refuses a NaN side.
+fn profile_curvature(axis_point: Point3, axis: Vec3, point: Point3, d1: Vec3, d2: Vec3) -> Vec3 {
+    let nan = Vec3::new(f64::NAN, f64::NAN, f64::NAN);
+    let a = axis / axis.length();
+    let Some((foot, _)) = axis_foot(axis_point, axis, point) else {
+        return nan;
+    };
+    let y = point - foot;
+    let radial = y - a * a.dot(y);
+    let rho = radial.length();
+    #[allow(clippy::neg_cmp_op_on_partial_ord)] // refuses NaN too
+    if !(rho > 0.0) {
+        return nan;
+    }
+    let e = radial / rho;
+    let r1 = e.dot(d1);
+    let z1 = a.dot(d1);
+    let t1 = d1 - a * z1;
+    let r2 = (radial.dot(d2) + t1.dot(t1) - r1 * r1) / rho;
+    let z2 = a.dot(d2);
+    let speed_sq = r1 * r1 + z1 * z1;
+    let along = (r2 * r1 + z2 * z1) / speed_sq;
+    let kr = (r2 - r1 * along) / speed_sq;
+    let kz = (z2 - z1 * along) / speed_sq;
+    e * kr + a * kz
 }
 
 /// Whether the generatrix `gen` lies within `tol` of the circle its arc test nominated

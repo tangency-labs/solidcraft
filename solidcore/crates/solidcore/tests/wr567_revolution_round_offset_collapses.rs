@@ -373,19 +373,11 @@ fn wr567_a_near_arc_off_the_middle_follows_its_curvature() {
     }
 }
 
-/// solidcraft#17907's second review (the reviewer's counterexample): the circle r 1.5 about
-/// (10, 0, 0) with axes X and `(0, 1/2, sqrt 3 / 2)`, from 30 to 90 degrees, turned about
-/// Z. Its plane holds no line through the axis, so the generatrix is not the surface's
-/// profile and its radius is not where the offset folds. Its curvature read at the middle
-/// agreed with the circle, and the circle shortcut decided the collapse from the radius: at
-/// `r` and `2 r` towards the centre the face was dropped (`Ok(None)`). The generatrix is not
-/// in a plane through the axis: the collapse test is refused on both sides and no offset is
-/// dropped. A zero offset stays `false` (its offset is the surface itself).
-#[test]
-fn wr567_a_tilted_circle_is_refused() {
-    let k = Kernel::default();
-    let circle = Ellipse::new_circle(
-        &k,
+/// The tilted circle of [`wr567_a_tilted_circle_follows_its_profile`]: r 1.5 about
+/// (10, 0, 0) with axes X and `(0, 1/2, sqrt 3 / 2)`, from 30 to 90 degrees.
+fn tilted_circle(k: &Kernel) -> Ellipse {
+    Ellipse::new_circle(
+        k,
         Point3::new(10.0, 0.0, 0.0),
         Vec3::new(1.0, 0.0, 0.0),
         Vec3::new(0.0, 0.5, 3.0_f64.sqrt() / 2.0),
@@ -393,23 +385,142 @@ fn wr567_a_tilted_circle_is_refused() {
         R,
         &EllipseOptions::default(),
     )
-    .unwrap();
-    let s = revolved(&k, Curve::from(circle));
-    for d in [R, -R, 2.0 * R, -2.0 * R] {
-        let r = s.offset_collapses(&k, d, 1e-7);
+    .unwrap()
+}
+
+/// The smallest and largest radius of curvature of the profile `(sqrt(x^2 + y^2), z)` of
+/// `gen` (about Z) over `[t0, t1]`, by central differences at `n` steps (a measurement for
+/// the test's margins, independent of the certificate).
+fn profile_radius_range(k: &Kernel, gen: &Curve, t0: f64, t1: f64, n: usize) -> (f64, f64) {
+    let profile = |t: f64| {
+        let p = gen.evaluate_point(k, t).unwrap();
+        (p.x.hypot(p.y), p.z)
+    };
+    let h = (t1 - t0) / n as f64 * 1e-2;
+    let (mut lo, mut hi) = (f64::INFINITY, 0.0_f64);
+    for i in 1..n {
+        let t = t0 + (t1 - t0) * i as f64 / n as f64;
+        let (a, b, c) = (profile(t - h), profile(t), profile(t + h));
+        let (r1, z1) = ((c.0 - a.0) / (2.0 * h), (c.1 - a.1) / (2.0 * h));
+        let (r2, z2) = (
+            (c.0 - 2.0 * b.0 + a.0) / (h * h),
+            (c.1 - 2.0 * b.1 + a.1) / (h * h),
+        );
+        let rho = (r1 * r1 + z1 * z1).powf(1.5) / (r1 * z2 - z1 * r2).abs();
+        lo = lo.min(rho);
+        hi = hi.max(rho);
+    }
+    (lo, hi)
+}
+
+/// solidcraft#17907's second review (the reviewer's counterexample) and solidcraft#18018's
+/// review: the circle of [`tilted_circle`] turned about Z. Its plane holds no line through
+/// the axis, so the generatrix is not the surface's profile and its radius (1.5) is not
+/// where the offset folds: the profile's radius of curvature runs over a range inside
+/// `(1.1, 2)` that holds `r` (MEASURED below, to the test's margins). The circle
+/// shortcut decided `2 r` and `r` towards the centre from the radius (the face dropped at `r`, where the
+/// profile's radius straddles it). The collapse is now decided on the profile: offsets
+/// away from its centres of curvature, and towards them below its smallest radius, are
+/// built (as main built them); towards them past its largest radius it collapses (as main
+/// found); at `r` towards them it is refused, never dropped. A zero offset stays `false`
+/// (its offset is the surface itself).
+#[test]
+fn wr567_a_tilted_circle_follows_its_profile() {
+    let k = Kernel::default();
+    let gen = Curve::from(tilted_circle(&k));
+    let domain = gen.natural_interval();
+    let (lo, hi) = profile_radius_range(&k, &gen, domain.min(), domain.max(), 600);
+    // the margins below: 1 below the smallest radius, `r` inside the range, 3 above it
+    assert!(lo > 1.1 && lo < R && hi > R && hi < 2.0, "{lo} {hi}");
+    let s = revolved(&k, gen);
+    // the side towards the profile's centres of curvature collapses past its largest radius
+    let inward = s.offset_collapses(&k, 3.0, 1e-7).unwrap();
+    let outward = s.offset_collapses(&k, -3.0, 1e-7).unwrap();
+    assert!(
+        inward != outward,
+        "exactly one side collapses: {inward} {outward}"
+    );
+    let towards = if inward { 1.0 } else { -1.0 };
+    // (the reviewer measured main: `Ok(true)` at -3, so the centres are on the negative side)
+    assert_eq!(towards, -1.0);
+    assert!(s
+        .create_offset_surface(&k, 3.0 * towards, 1e-7)
+        .unwrap()
+        .is_none());
+    // below the smallest radius on the towards side, and anything on the other side: built
+    for d in [1e-9, 0.1, 0.5, 1.0] {
+        for dd in [d * towards, -d * towards] {
+            assert!(!s.offset_collapses(&k, dd, 1e-7).unwrap(), "{dd}");
+            assert!(
+                s.create_offset_surface(&k, dd, 1e-7).unwrap().is_some(),
+                "{dd}"
+            );
+        }
+    }
+    for d in [R, 3.0] {
+        assert!(!s.offset_collapses(&k, -d * towards, 1e-7).unwrap(), "{d}");
+    }
+    // at `r` towards the centres the profile's radius is on both sides of the offset
+    let r = s.offset_collapses(&k, R * towards, 1e-7);
+    assert!(matches!(r, Err(SolidError::Unsupported { .. })), "{r:?}");
+    assert!(!matches!(
+        s.create_offset_surface(&k, R * towards, 1e-7),
+        Ok(None)
+    ));
+    // a zero offset is the surface itself: no point passes its centre of curvature
+    // (`surface.offset_surface` gen1943 offsets a tilted circle's revolution by 0)
+    assert!(!s.offset_collapses(&k, 0.0, 1e-7).unwrap());
+    assert!(s.create_offset_surface(&k, 0.0, 1e-7).unwrap().is_some());
+}
+
+/// solidcraft#18018's review (B1): the circle r 1 about (0.5, 0, 0) in the XZ plane from 90
+/// to 140 degrees crosses the Z axis at 120 degrees. Turned about Z, the surface's normal
+/// flips there (`N ~ x (-z', 0, x')`) while the generatrix bends the same way, so past the
+/// axis the offset moves away from the centres of curvature: one side read at the middle
+/// (115 degrees, `x > 0`) reported the offset by 1, 2 or 3 towards the centre collapsed
+/// and the face was dropped, though the lobe past the axis offsets to a radius of `1 + d`.
+/// The generatrix's signed distance from the axis must keep one sign: it does not, so every
+/// offset is refused, never dropped. The arc from 60 to 110 degrees keeps off the axis and
+/// is decided.
+#[test]
+fn wr567_a_generatrix_crossing_the_axis_is_refused() {
+    let k = Kernel::default();
+    let arc = |from: f64, to: f64| {
+        Curve::from(
+            Ellipse::new_circle(
+                &k,
+                Point3::new(0.5, 0.0, 0.0),
+                Vec3::new(1.0, 0.0, 0.0),
+                Vec3::new(0.0, 0.0, 1.0),
+                Extent1d::from_min_max(from, to),
+                1.0,
+                &EllipseOptions::default(),
+            )
+            .unwrap(),
+        )
+    };
+    let crossing = revolved(&k, arc(90.0, 140.0));
+    for d in [-3.0, -2.0, -1.0, 1.0, 2.0, 3.0] {
+        let r = crossing.offset_collapses(&k, d, 1e-7);
         assert!(
             matches!(r, Err(SolidError::Unsupported { .. })),
             "{d}: {r:?}"
         );
         assert!(
-            !matches!(s.create_offset_surface(&k, d, 1e-7), Ok(None)),
+            !matches!(crossing.create_offset_surface(&k, d, 1e-7), Ok(None)),
             "{d}"
         );
     }
-    // a zero offset is the surface itself: no point passes its centre of curvature
-    // (`surface.offset_surface` gen1943 offsets a tilted circle's revolution by 0)
-    assert!(!s.offset_collapses(&k, 0.0, 1e-7).unwrap());
-    assert!(s.create_offset_surface(&k, 0.0, 1e-7).unwrap().is_some());
+    let clear = revolved(&k, arc(60.0, 110.0));
+    let inward = clear.offset_collapses(&k, 2.0, 1e-7).unwrap();
+    let outward = clear.offset_collapses(&k, -2.0, 1e-7).unwrap();
+    assert!(
+        inward != outward,
+        "exactly one side collapses: {inward} {outward}"
+    );
+    let towards = if inward { 1.0 } else { -1.0 };
+    assert!(!clear.offset_collapses(&k, 0.5 * towards, 1e-7).unwrap());
+    assert!(!clear.offset_collapses(&k, -2.0 * towards, 1e-7).unwrap());
 }
 
 /// A generatrix whose bulge comes exactly to the tolerance (its peak deviation from the

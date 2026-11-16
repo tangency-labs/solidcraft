@@ -875,59 +875,126 @@ pub const MAX_COLLAPSE_HALVINGS: usize = 30;
 /// What [`meridian_collapse`] proves of a generatrix and an offset.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Collapse {
-    /// The generatrix lies in a plane through the axis, bends to one side all along, and at
-    /// every point its radius of curvature less the offset is below the tolerance: the
-    /// offset passes every point's centre of curvature.
+    /// The surface's profile bends to one side all along (and the generatrix keeps to one
+    /// side of the axis, so the offset moves to the same side of it everywhere), and at
+    /// every point the profile's radius of curvature less the offset is below the
+    /// tolerance: the offset passes every point's centre of curvature.
     Everywhere,
     /// As [`Self::Everywhere`], but at every point the radius of curvature less the offset
     /// is at least the tolerance: no point's offset reaches its centre of curvature.
     Nowhere,
-    /// Neither: the generatrix is not proved to lie in a plane through the axis or to bend
-    /// to one side all along, its radius of curvature comes to the offset plus the
-    /// tolerance (or crosses it), or the bounds do not settle within
-    /// [`MAX_COLLAPSE_HALVINGS`] and [`MAX_COLLAPSE_PIECES`].
+    /// Neither: the profile is not proved to bend to one side all along, or the generatrix
+    /// to keep to one side of the axis (it crosses or touches it inside), its radius of
+    /// curvature comes to the offset plus the tolerance (or crosses it), or the bounds do
+    /// not settle within [`MAX_COLLAPSE_HALVINGS`] and [`MAX_COLLAPSE_PIECES`].
     Unproved,
 }
 
-/// Whether the offset by `along` towards the centres of curvature of the generatrix `nurb`
-/// of a surface of revolution about the axis through `axis_point` along `axis` passes
-/// every point's centre of curvature (its radius of curvature `rho` less `along` below
-/// `tol` all along) or none (`rho - along >= tol` all along). `center` is a point near the
-/// generatrix (its arc's centre) the coefficients are taken about, to keep them small. Not
-/// upstream (solidcraft#17907's review: the collapse of a revolved arc was decided from
-/// its circle's radius and one curvature sample).
+/// A point of the axis through `axis_point` along `axis` close to the foot of `near` on
+/// it, and a bound on how far each of its coordinates is from a point of that axis. Not
+/// upstream (solidcraft#18018's review: bounds taken about a far `axis_point` carry its
+/// rounding, which grows with its distance from the geometry).
 ///
-/// **The plane.** A surface of revolution is the revolution of its generatrix's profile;
-/// the generatrix's own curvature is the profile's only when it lies in a plane through the
-/// axis. The plane is the one through the axis and the control point farthest from it, of
-/// normal `m`. In homogeneous form about `center` (`X - center = H / W`,
-/// [`RailSpans::about`]), `m . (X - axis_point) = G / W` with `G = m . H + (m . (center -
-/// axis_point)) W`. Every span's `G` must have no coefficient larger than its own rounding
-/// (`|m|_1` times the coefficients' error, `gamma_5` of the terms' size, the centre's offset
-/// `gamma_4` of `|m| . (|center| + |axis_point|)`) plus the plane's tilt from the axis
-/// (`|m . axis| + gamma_3 |m|_1 |axis|_1`, as computed) times the span's reach along the
-/// axis: the generatrix is in that plane to the rounding the test can show, or the
-/// answer is [`Collapse::Unproved`]. A circle out of every plane through the axis (tilted,
-/// or square to it) is refused here.
+/// With `tau = axis . (near - axis_point) / |axis|^2` as rounded (any `tau` names a
+/// point of the axis), `axis_point + tau axis` is held exactly as an expansion
+/// ([`crate::geom::expansion`]) and rounded once per coordinate: off by at most
+/// `gamma_2` of the sum of its components' magnitudes ([`crate::geom::expansion::to_f64`]),
+/// charged as `gamma_4` of that sum (the sum and the bound rounded too). The bound is in
+/// the frame of the point found, not of `axis_point`: far along the axis it stays the
+/// rounding of a coordinate near `near`.
 ///
-/// **The curvature.** With `A = W H' - W' H` (so `X' = A / W^2`) and `B = (A x A') . m`,
-/// the curvature is `B W^2 / |A|^3` and `rho = |A|^3 / (W^2 |B|)`. `B` must keep one strict
-/// sign over every piece, the same over the whole generatrix (it bends to one side; the
-/// caller reads which side its offset moves to at one point, and with `B` of one sign that
-/// side holds all along). For `q = along + tol <= 0` (rounding keeps the sign of a sum, and
-/// gives zero only for an exact zero) no point collapses: `rho - along >= rho + tol >=
-/// tol`. Otherwise `rho < q` exactly where `P = (A . A)^3 - q^2 W^4 B^2 < 0` (degree
-/// `12 r - 6`). A piece whose `P` has every coefficient below minus its error collapses,
-/// one with every coefficient above its error does not, and pieces must agree; an
+/// `None` for a `tau` that is not finite (a zero axis) or a product out of the expansion's
+/// range ([`crate::geom::expansion::product`]).
+#[must_use]
+pub fn axis_foot(axis_point: Point3, axis: Vec3, near: Point3) -> Option<(Point3, f64)> {
+    use crate::geom::expansion;
+    let tau = axis.dot(near - axis_point) / axis.length_squared();
+    if !tau.is_finite() {
+        return None;
+    }
+    let mut foot = [0.0_f64; 3];
+    let mut off = 0.0_f64;
+    for (slot, (p, v)) in foot.iter_mut().zip([
+        (axis_point.x, axis.x),
+        (axis_point.y, axis.y),
+        (axis_point.z, axis.z),
+    ]) {
+        let exact = expansion::add(&[p], &expansion::product(v, tau)?);
+        *slot = expansion::to_f64(&exact);
+        let size: f64 = exact.iter().map(|c| c.abs()).sum();
+        off = off.max(gamma(4) * size);
+    }
+    let [x, y, z] = foot;
+    (x.is_finite() && y.is_finite() && z.is_finite() && off.is_finite())
+        .then(|| (Point3::new(x, y, z), off))
+}
+
+/// Whether the offset by `along` towards the centres of curvature of the profile of a
+/// surface of revolution, generatrix `nurb`, about the axis through `axis_point` along
+/// `axis`, passes every point's centre of curvature (the profile's radius of curvature
+/// `rho` less `along` below `tol` all along) or none (`rho - along >= tol` all along).
+/// `center` is a point near the generatrix (its arc's centre) the coefficients are taken
+/// about, to keep them small. Not upstream (solidcraft#17907's review: the collapse of a
+/// revolved arc was decided from its circle's radius and one curvature sample).
+///
+/// **The profile.** A surface of revolution is the revolution of its profile: the curve
+/// `(rho(t), z(t))` its generatrix traces in a half-plane through the axis (`rho` the
+/// distance from the axis, `z` the height along it). Its meridians are copies of the
+/// profile, and the offset folds where it passes their centres of curvature. The bounds
+/// are taken about a point of the axis near `center` ([`axis_foot`], its rounding charged),
+/// never about `axis_point`, so a far `axis_point` adds only its own coordinates' rounding.
+///
+/// **The side.** The caller reads at one point which side of the profile the offset moves
+/// to (`along > 0` towards the centre of curvature). It holds all along when the profile
+/// bends to one side and the surface's normal keeps to one side of the profile: with
+/// `S_t x S_theta = rho (rho' a - z' e_rho)` (`e_rho` the unit radial direction), the
+/// normal is a fixed sign (of the parametrisation) times the profile's left normal
+/// wherever `rho > 0`. So the generatrix must keep off the axis (in a meridian plane, its
+/// signed distance from the axis keeps one sign: the normal flips where it crosses).
+///
+/// **A generatrix in a plane through the axis** (the plane through the axis and the
+/// control point farthest from it, normal `m`, `G = m . (X - foot) W` with no coefficient
+/// above its rounding and the plane's tilt times the span's reach along the axis, as
+/// [`on_circle`]'s plane test) is its own profile, to the rounding the test can show. Its
+/// signed radial coordinate `x = (a x m) . (X - foot)` must keep one strict sign on every
+/// piece (Bernstein coefficients beyond their error), except a coefficient at an end of
+/// the generatrix within its error (a pole: the generatrix ends on the axis); with
+/// `A = W H' - W' H` (so `X' = A / W^2`) and `B = (A x A') . m` the curvature is
+/// `B W^2 / |A|^3`, `rho = |A|^3 / (W^2 |B|)`; `B` keeps one strict sign, and
+/// `rho < q` (`q = along + tol > 0`) exactly where `(A . A)^3 - q^2 W^4 B^2 < 0` (degree
+/// `12 r - 6`).
+///
+/// **Any other generatrix** is decided on its profile. With the axis `v` as given (no
+/// rounding of its direction), `Y = X - foot = H / W` (about the foot), `S = |v x Y|^2 =
+/// sigma / W^2` and `Z = v . Y = zeta / W` are the profile scaled by `|v|`; `sigma` must be
+/// strictly positive (off the axis). With `alpha = sigma' W - 2 sigma W'`,
+/// `beta = zeta' W - zeta W'`, `alpha_2 = alpha' W - 3 alpha W'`, `beta_2 = beta' W - 2
+/// beta W'` (so `S' = alpha / W^3`, `S'' = alpha_2 / W^4`, `Z' = beta / W^2`, `Z'' = beta_2
+/// / W^3`), the profile's curvature `(rho' Z'' - Z' rho'') / |(rho', Z')|^3` with
+/// `rho = sqrt S` is `2 K / D^(3/2)`, `K = 2 S S' Z'' - 2 S Z' S'' + Z' S'^2 = kappa / W^8`,
+/// `D = S'^2 + 4 S Z'^2 = delta / W^6`, where `kappa = 2 sigma alpha beta_2 - 2 sigma beta
+/// alpha_2 + beta alpha^2` and `delta = alpha^2 + 4 sigma beta^2`. `kappa` keeps one strict
+/// sign, and `|v| rho < |v| q` exactly where `delta^3 - 4 |v|^2 q^2 kappa^2 W^2 < 0` (degree
+/// `18 r - 6`). A generatrix that meets the axis is not proved this way (`sigma` comes to
+/// zero), nor is a profile with an inflection or a straight one (a circle square to the
+/// axis).
+///
+/// **Both.** For `q <= 0` (rounding keeps the sign of a sum, and gives zero only for an
+/// exact zero) no point collapses: `rho - along >= rho + tol >= tol`. A piece whose test
+/// polynomial has every coefficient below minus its error collapses, one with every
+/// coefficient above its error does not, and pieces must agree (and on the signs above); an
 /// undecided piece is halved (de Casteljau at `1/2`) at most [`MAX_COLLAPSE_HALVINGS`]
 /// deep and [`MAX_COLLAPSE_PIECES`] pieces in all. No recursion: the pieces wait on a work
-/// list. A degree past [`MAX_DEGREE`]'s reach (`12 r - 6`) is [`Collapse::Unproved`].
+/// list. A degree past [`MAX_DEGREE`]'s reach is [`Collapse::Unproved`].
 ///
 /// **The coefficients' error**, from the spans' own: each derivative (`n` times
 /// differences) `2 n e + gamma_2 2 n` of the largest coefficient; each product as
-/// [`product`]; each difference or sum of two `gamma_1`, of three `gamma_2`, `B`'s three
-/// scaled terms `gamma_4`, of the terms' sizes on top of their errors; `q^2` and its scaling
-/// `gamma_4` of `q^2 |W^4 B^2|`; each halving `gamma_(2r + 4)` as [`on_circle`]'s.
+/// [`product`]; each difference or sum of two `gamma_1`, of three `gamma_2`, a
+/// combination of three scaled terms `gamma_3` (`B`'s, `x`'s and `G`'s, with the foot's
+/// offset, `gamma_4`/`gamma_5`); a scaling by 3 `gamma_1` (by 2 or 4 exact); `q^2` and its
+/// scaling `gamma_4` of `q^2 |W^4 B^2|`, and `4 |v|^2 q^2` and its scaling `gamma_9`; the
+/// foot's distance from the axis times the weights; the direction of `a x m` (`gamma_6`
+/// of `|a|_1 |m|_1` times the reach); each halving `gamma_(2r + 4)` as [`on_circle`]'s.
 ///
 /// # Errors
 ///
@@ -960,39 +1027,98 @@ pub fn meridian_collapse(
     let a = axis / axis_len;
     // (finite control points and positive weights: checked here first)
     let spans = RailSpans::about(nurb, center)?;
-    if 12 * nurb.degree() > MAX_DEGREE + 6 {
+    // the bounds are taken about a point of the axis near the generatrix, never about a far
+    // `axis_point` (solidcraft#18018's review)
+    let Some((foot, off)) = axis_foot(axis_point, axis, center) else {
+        return Ok(Collapse::Unproved);
+    };
+    let bi = Binomials::new();
+    let q = along + tol;
+    if let Some(plane) = meridian_plane(nurb, &spans, a, foot, off, center, &bi)? {
+        if 12 * nurb.degree() > MAX_DEGREE + 6 {
+            return Ok(Collapse::Unproved);
+        }
+        return collapse_pieces(k, &spans, |h, e, ends| {
+            meridian_piece(h, e, ends, &plane, q, &bi)
+        });
+    }
+    if 18 * nurb.degree() > MAX_DEGREE + 6 {
         return Ok(Collapse::Unproved);
     }
-    // the plane through the axis and the control point farthest from it
+    let mut about_foot = RailSpans::about(nurb, foot)?;
+    // `foot` is within `off` of a point of the axis in every coordinate: about that point
+    // each coefficient moves by at most `off` times the weight's
+    let w_max = about_foot
+        .spans
+        .iter()
+        .map(|(_, h)| h[3].max_abs_coefficient())
+        .fold(0.0_f64, f64::max);
+    about_foot.err += gamma(2) * about_foot.err + off * (w_max + about_foot.err) * (1.0 + gamma(3));
+    // `4 |v|^2 q^2`, its rounding charged in `profile_piece`
+    let f = 4.0 * axis.length_squared() * (q * q);
+    collapse_pieces(k, &about_foot, |h, e, _| {
+        profile_piece(h, e, axis, q, f, &bi)
+    })
+}
+
+/// A generatrix proved in a plane through the axis ([`meridian_collapse`]): the plane's
+/// normal `m`, the radial direction `e = a x m` in it, `e . (center - foot)` and its error,
+/// and the error factor of `e`'s direction.
+struct Meridian {
+    m: Vec3,
+    e: Vec3,
+    s_e: f64,
+    es_e: f64,
+    cp_one: f64,
+    dir: f64,
+}
+
+/// [`meridian_collapse`]'s plane test: the plane through the axis (unit `a` through `foot`,
+/// within `off` of it) and the control point farthest from it, if every span lies in it to
+/// the test's rounding; `None` otherwise.
+fn meridian_plane(
+    nurb: &NurbCurve,
+    spans: &RailSpans,
+    a: Vec3,
+    foot: Point3,
+    off: f64,
+    center: Point3,
+    bi: &Binomials,
+) -> Result<Option<Meridian>> {
     let mut farthest: Option<(f64, Vec3)> = None;
     for c in nurb.cpts() {
         let w = if c.w == NOW { 1.0 } else { c.w };
-        let v = a.cross(Point3::new(c.x / w, c.y / w, c.z / w) - axis_point);
+        let v = a.cross(Point3::new(c.x / w, c.y / w, c.z / w) - foot);
         let l = v.length();
         if l.is_finite() && farthest.is_none_or(|(best, _)| l > best) {
             farthest = Some((l, v));
         }
     }
     let Some((l, v)) = farthest.filter(|&(l, _)| l > 0.0) else {
-        return Ok(Collapse::Unproved);
+        return Ok(None);
     };
     let m = v / l;
-    let bi = Binomials::new();
     let one = |v: Vec3| v.x.abs() + v.y.abs() + v.z.abs();
-    let cp = center - axis_point;
+    let cp = center - foot;
     let s = m.dot(cp);
     let z = a.dot(cp);
-    let es = gamma(4)
-        * (m.x.abs() * (center.x.abs() + axis_point.x.abs())
-            + m.y.abs() * (center.y.abs() + axis_point.y.abs())
-            + m.z.abs() * (center.z.abs() + axis_point.z.abs()));
-    let tilt = m.dot(a).abs() + gamma(3) * one(m) * one(a);
+    // `n . (center - foot)`: its rounding, and the foot's distance from the axis
+    let shift = |n: Vec3| {
+        gamma(4)
+            * (n.x.abs() * (center.x.abs() + foot.x.abs())
+                + n.y.abs() * (center.y.abs() + foot.y.abs())
+                + n.z.abs() * (center.z.abs() + foot.z.abs()))
+            + one(n) * off * (1.0 + gamma(3))
+    };
+    let es = shift(m);
+    // (the direction of `a`, normalised from the axis, is within `gamma_2` of it)
+    let tilt = m.dot(a).abs() + gamma(5) * one(m) * one(a);
     for (_, [hx, hy, hz, hw]) in &spans.spans {
         let g = hx
             .scale(m.x)
-            .add(&hy.scale(m.y), &bi)?
-            .add(&hz.scale(m.z), &bi)?
-            .add(&hw.scale(s), &bi)?;
+            .add(&hy.scale(m.y), bi)?
+            .add(&hz.scale(m.z), bi)?
+            .add(&hw.scale(s), bi)?;
         let w_max = hw.max_abs_coefficient();
         let size = m.x.abs() * hx.max_abs_coefficient()
             + m.y.abs() * hy.max_abs_coefficient()
@@ -1009,32 +1135,53 @@ pub fn meridian_collapse(
             + tilt * reach;
         #[allow(clippy::neg_cmp_op_on_partial_ord)] // refuses NaN too
         if !(g.max_abs_coefficient() <= eg) {
-            return Ok(Collapse::Unproved);
+            return Ok(None);
         }
     }
+    let e = a.cross(m);
+    Ok(Some(Meridian {
+        m,
+        e,
+        s_e: e.dot(cp),
+        es_e: shift(e),
+        cp_one: one(cp),
+        // `a x m` against the exact axis's: `a` within `gamma_2` of its direction, the
+        // cross product's rounding `gamma_2`, both of `|a|_1 |m|_1`
+        dir: gamma(6) * one(a) * one(m),
+    }))
+}
 
-    let q = along + tol;
-    let mut work: Vec<([Bernstein2; 4], f64, usize)> = spans
+/// [`meridian_collapse`]'s pieces: the spans' work list, each piece `decide`d (with whether
+/// it starts the generatrix and whether it ends it), halved where undecided. Every decided
+/// piece must agree on the signs it reports and on the collapse.
+fn collapse_pieces(
+    k: &Kernel,
+    spans: &RailSpans,
+    decide: impl Fn(&[Bernstein2; 4], f64, [bool; 2]) -> Result<PieceCollapse>,
+) -> Result<Collapse> {
+    let last = spans.spans.len().saturating_sub(1);
+    let mut work: Vec<([Bernstein2; 4], f64, usize, [bool; 2])> = spans
         .spans
         .iter()
+        .enumerate()
         .rev()
-        .map(|(_, h)| (h.clone(), spans.err, 0))
+        .map(|(i, (_, h))| (h.clone(), spans.err, 0, [i == 0, i == last]))
         .collect();
-    let mut side: Option<bool> = None;
+    let mut side: Option<[bool; 2]> = None;
     let mut answer: Option<bool> = None;
     let mut pieces = 0_usize;
-    while let Some((h, e, depth)) = work.pop() {
+    while let Some((h, e, depth, ends)) = work.pop() {
         k.check_cancelled(OP)?;
         pieces += 1;
         if pieces > MAX_COLLAPSE_PIECES {
             return Ok(Collapse::Unproved);
         }
-        match collapse_piece(&h, e, m, q, &bi)? {
-            PieceCollapse::Decided(bends, collapses) => {
-                if side.is_some_and(|b| b != bends) || answer.is_some_and(|c| c != collapses) {
+        match decide(&h, e, ends)? {
+            PieceCollapse::Decided(signs, collapses) => {
+                if side.is_some_and(|b| b != signs) || answer.is_some_and(|c| c != collapses) {
                     return Ok(Collapse::Unproved);
                 }
-                side = Some(bends);
+                side = Some(signs);
                 answer = Some(collapses);
             }
             PieceCollapse::Halve => {
@@ -1046,8 +1193,8 @@ pub fn meridian_collapse(
                 let halves = h.map(|c| c.split_u(0.5));
                 let left = halves.clone().map(|(l, _)| l);
                 let right = halves.map(|(_, r)| r);
-                work.push((right, e, depth + 1));
-                work.push((left, e, depth + 1));
+                work.push((right, e, depth + 1, [false, ends[1]]));
+                work.push((left, e, depth + 1, [ends[0], false]));
             }
             PieceCollapse::Unbounded => return Ok(Collapse::Unproved),
         }
@@ -1059,19 +1206,230 @@ pub fn meridian_collapse(
     })
 }
 
-/// What [`collapse_piece`] finds on one piece.
+/// What a piece of [`meridian_collapse`] finds.
 enum PieceCollapse {
-    /// `B`'s sign (`true` positive) and whether the offset passes every centre of
-    /// curvature there.
-    Decided(bool, bool),
+    /// The signs that must hold all along (the curvature's, `true` positive, and the
+    /// radial coordinate's in a meridian plane; `true` for a profile off the axis), and
+    /// whether the offset passes every centre of curvature there.
+    Decided([bool; 2], bool),
     /// Not settled at this size: halve it.
     Halve,
     /// A bound that is not finite: halving does not help.
     Unbounded,
 }
 
+/// The sign `p` keeps beyond `err` on its piece (`true` positive), a coefficient at an end
+/// of the generatrix (`ends`: the piece starts it, ends it) allowed within `err` of zero;
+/// `None` if no coefficient is beyond `err` or two have opposite signs (NaN included).
+fn one_sign(p: &Bernstein2, err: f64, ends: [bool; 2]) -> Option<bool> {
+    let c = p.coefficients();
+    let last = c.len().saturating_sub(1);
+    let mut sign: Option<bool> = None;
+    for (i, &x) in c.iter().enumerate() {
+        let at_end = (i == 0 && ends[0]) || (i == last && ends[1]);
+        let s = if x > err {
+            true
+        } else if x < -err {
+            false
+        } else if at_end && x.abs() <= err {
+            continue;
+        } else {
+            return None;
+        };
+        if sign.is_some_and(|t| t != s) {
+            return None;
+        }
+        sign = Some(s);
+    }
+    sign
+}
+
+/// [`meridian_collapse`] on one piece `h` of a generatrix in the plane `plane`
+/// (homogeneous about the centre, within `e`; `ends` as [`collapse_pieces`]'), with
+/// `q = along + tol`: the radial coordinate's sign, then [`collapse_piece`].
+fn meridian_piece(
+    h: &[Bernstein2; 4],
+    e: f64,
+    ends: [bool; 2],
+    plane: &Meridian,
+    q: f64,
+    bi: &Binomials,
+) -> Result<PieceCollapse> {
+    let [hx, hy, hz, hw] = h;
+    let n = plane.e;
+    let x = hx
+        .scale(n.x)
+        .add(&hy.scale(n.y), bi)?
+        .add(&hz.scale(n.z), bi)?
+        .add(&hw.scale(plane.s_e), bi)?;
+    let w_max = hw.max_abs_coefficient();
+    let (mx, my, mz) = (
+        hx.max_abs_coefficient(),
+        hy.max_abs_coefficient(),
+        hz.max_abs_coefficient(),
+    );
+    let size = n.x.abs() * mx + n.y.abs() * my + n.z.abs() * mz + plane.s_e.abs() * w_max;
+    let one_n = n.x.abs() + n.y.abs() + n.z.abs();
+    let ex = (one_n + plane.s_e.abs()) * e
+        + plane.es_e * (w_max + e)
+        + gamma(5) * size
+        + plane.dir * (mx + my + mz + 3.0 * e + plane.cp_one * (w_max + e));
+    if !ex.is_finite() {
+        return Ok(PieceCollapse::Unbounded);
+    }
+    let Some(outside) = one_sign(&x, ex, ends) else {
+        return Ok(PieceCollapse::Halve);
+    };
+    Ok(match collapse_piece(h, e, plane.m, q, bi)? {
+        PieceCollapse::Decided([bends, _], collapses) => {
+            PieceCollapse::Decided([bends, outside], collapses)
+        }
+        other => other,
+    })
+}
+
+/// A derivative (`n` times differences) and its error.
+fn deriv(p: &Bernstein2, e: f64) -> (Bernstein2, f64) {
+    #[allow(clippy::cast_precision_loss)]
+    let n = 2.0 * p.degrees().0 as f64;
+    (p.deriv_u(), n * e + gamma(2) * n * p.max_abs_coefficient())
+}
+
+/// `a b - c d` (each with its error) and its error.
+fn diff(
+    a: (&Bernstein2, f64),
+    b: (&Bernstein2, f64),
+    c: (&Bernstein2, f64),
+    d: (&Bernstein2, f64),
+    bi: &Binomials,
+) -> Result<(Bernstein2, f64)> {
+    let (l, el) = product(a.0, a.1, b.0, b.1, bi)?;
+    let (r, er) = product(c.0, c.1, d.0, d.1, bi)?;
+    let size = l.max_abs_coefficient() + r.max_abs_coefficient();
+    Ok((l.sub(&r, bi)?, el + er + gamma(1) * size))
+}
+
+/// The sign of `p` beyond `err` on the piece (`Some(true)` positive), or what to do.
+fn strict_sign(p: &Bernstein2, err: f64) -> std::result::Result<bool, PieceCollapse> {
+    let (lo, hi) = (p.min_coefficient(), p.max_coefficient());
+    if !err.is_finite() || !lo.is_finite() || !hi.is_finite() {
+        Err(PieceCollapse::Unbounded)
+    } else if lo > err {
+        Ok(true)
+    } else if hi < -err {
+        Ok(false)
+    } else {
+        Err(PieceCollapse::Halve)
+    }
+}
+
+/// [`meridian_collapse`] on one piece `h` of any generatrix, decided on its profile
+/// (homogeneous about the foot, within `e`), with the axis `v` as given, `q = along + tol`
+/// and `f = 4 |v|^2 q^2` as rounded.
+fn profile_piece(
+    h: &[Bernstein2; 4],
+    e: f64,
+    v: Vec3,
+    q: f64,
+    f: f64,
+    bi: &Binomials,
+) -> Result<PieceCollapse> {
+    let [hx, hy, hz, hw] = h;
+    if hw.degrees().0 == 0 {
+        // a point: no tangent
+        return Ok(PieceCollapse::Unbounded);
+    }
+    // `x0 p0 + x1 p1 + x2 p2` of the coordinates (exact factors) and its error
+    let lin = |terms: [(&Bernstein2, f64); 3]| -> Result<(Bernstein2, f64)> {
+        let [(p0, x0), (p1, x1), (p2, x2)] = terms;
+        let r = p0
+            .scale(x0)
+            .add(&p1.scale(x1), bi)?
+            .add(&p2.scale(x2), bi)?;
+        let size = x0.abs() * p0.max_abs_coefficient()
+            + x1.abs() * p1.max_abs_coefficient()
+            + x2.abs() * p2.max_abs_coefficient();
+        Ok((r, (x0.abs() + x1.abs() + x2.abs()) * e + gamma(3) * size))
+    };
+    // `v x H` and `v . H`
+    let (c1, ec1) = lin([(hz, v.y), (hy, -v.z), (hx, 0.0)])?;
+    let (c2, ec2) = lin([(hx, v.z), (hz, -v.x), (hy, 0.0)])?;
+    let (c3, ec3) = lin([(hy, v.x), (hx, -v.y), (hz, 0.0)])?;
+    let (zeta, ezeta) = lin([(hx, v.x), (hy, v.y), (hz, v.z)])?;
+    let (s1, es1) = product(&c1, ec1, &c1, ec1, bi)?;
+    let (s2, es2) = product(&c2, ec2, &c2, ec2, bi)?;
+    let (s3, es3) = product(&c3, ec3, &c3, ec3, bi)?;
+    let sigma = s1.add(&s2, bi)?.add(&s3, bi)?;
+    let esig = es1
+        + es2
+        + es3
+        + gamma(2)
+            * (s1.max_abs_coefficient() + s2.max_abs_coefficient() + s3.max_abs_coefficient());
+    // off the axis
+    match strict_sign(&sigma, esig) {
+        Ok(true) => {}
+        Ok(false) => return Ok(PieceCollapse::Unbounded),
+        Err(other) => return Ok(other),
+    }
+    let (dw, edw) = deriv(hw, e);
+    let (ds, eds) = deriv(&sigma, esig);
+    let (dz, edz) = deriv(&zeta, ezeta);
+    let sigma2 = sigma.scale(2.0);
+    let (alpha, ea) = diff((&ds, eds), (hw, e), (&sigma2, 2.0 * esig), (&dw, edw), bi)?;
+    let (beta, eb) = diff((&dz, edz), (hw, e), (&zeta, ezeta), (&dw, edw), bi)?;
+    let (da, eda) = deriv(&alpha, ea);
+    let (db, edb) = deriv(&beta, eb);
+    let alpha3 = alpha.scale(3.0);
+    let ea3 = 3.0 * ea + gamma(1) * alpha3.max_abs_coefficient();
+    let (alpha2, ea2) = diff((&da, eda), (hw, e), (&alpha3, ea3), (&dw, edw), bi)?;
+    let beta2x = beta.scale(2.0);
+    let (beta2, eb2) = diff((&db, edb), (hw, e), (&beta2x, 2.0 * eb), (&dw, edw), bi)?;
+    // kappa = 2 sigma alpha beta_2 - 2 sigma beta alpha_2 + beta alpha^2
+    let (ab2, eab2) = product(&alpha, ea, &beta2, eb2, bi)?;
+    let (t1, et1) = product(&sigma, esig, &ab2, eab2, bi)?;
+    let (ba2, eba2) = product(&beta, eb, &alpha2, ea2, bi)?;
+    let (t2, et2) = product(&sigma, esig, &ba2, eba2, bi)?;
+    let (aa, eaa) = product(&alpha, ea, &alpha, ea, bi)?;
+    let (t3, et3) = product(&beta, eb, &aa, eaa, bi)?;
+    let d12 = t1.sub(&t2, bi)?;
+    let ed12 = et1 + et2 + gamma(1) * (t1.max_abs_coefficient() + t2.max_abs_coefficient());
+    let kappa = d12.scale(2.0).add(&t3, bi)?;
+    let ek =
+        2.0 * ed12 + et3 + gamma(1) * (2.0 * d12.max_abs_coefficient() + t3.max_abs_coefficient());
+    let bends = match strict_sign(&kappa, ek) {
+        Ok(b) => b,
+        Err(other) => return Ok(other),
+    };
+    // (rounding keeps a sum's sign: `q <= 0` is `along + tol <= 0` exactly)
+    if q <= 0.0 {
+        return Ok(PieceCollapse::Decided([bends, true], false));
+    }
+    // delta = alpha^2 + 4 sigma beta^2
+    let (bb, ebb) = product(&beta, eb, &beta, eb, bi)?;
+    let (sbb, esbb) = product(&sigma, esig, &bb, ebb, bi)?;
+    let sbb4 = sbb.scale(4.0);
+    let delta = aa.add(&sbb4, bi)?;
+    let ed = eaa + 4.0 * esbb + gamma(1) * (aa.max_abs_coefficient() + sbb4.max_abs_coefficient());
+    let (d2, ed2) = product(&delta, ed, &delta, ed, bi)?;
+    let (d3, ed3) = product(&d2, ed2, &delta, ed, bi)?;
+    let (kk, ekk) = product(&kappa, ek, &kappa, ek, bi)?;
+    let (ww, eww) = product(hw, e, hw, e, bi)?;
+    let (kw, ekw) = product(&kk, ekk, &ww, eww, bi)?;
+    // `f` as rounded: `|v|^2` `gamma_3`, `q` `gamma_1` twice, `q q` and the product
+    // `gamma_1` each (the 4 exact); the scaling `gamma_1`
+    let t = kw.scale(f);
+    let et = f * ekw + gamma(9) * f * (kw.max_abs_coefficient() + ekw);
+    let p = d3.sub(&t, bi)?;
+    let ep = ed3 + et + gamma(1) * (d3.max_abs_coefficient() + t.max_abs_coefficient());
+    Ok(match strict_sign(&p, ep) {
+        Ok(above) => PieceCollapse::Decided([bends, true], !above),
+        Err(other) => other,
+    })
+}
+
 /// [`meridian_collapse`] on one piece `h` (homogeneous about the centre, within `e`), with
-/// the plane's normal `m` and `q = along + tol`.
+/// the plane's normal `m` and `q = along + tol`: `B`'s sign and the curvature test (the
+/// radial sign is [`meridian_piece`]'s).
 fn collapse_piece(
     h: &[Bernstein2; 4],
     e: f64,
@@ -1084,28 +1442,11 @@ fn collapse_piece(
         // a point: no tangent
         return Ok(PieceCollapse::Unbounded);
     }
-    // the derivative (`n` times differences) and its error
-    #[allow(clippy::cast_precision_loss)]
-    let deriv = |p: &Bernstein2, e: f64| {
-        let n = 2.0 * p.degrees().0 as f64;
-        (p.deriv_u(), n * e + gamma(2) * n * p.max_abs_coefficient())
-    };
-    // `l r' - l' r` style differences of two products, and their error
-    let diff = |a: (&Bernstein2, f64),
-                b: (&Bernstein2, f64),
-                c: (&Bernstein2, f64),
-                d: (&Bernstein2, f64)|
-     -> Result<(Bernstein2, f64)> {
-        let (l, el) = product(a.0, a.1, b.0, b.1, bi)?;
-        let (r, er) = product(c.0, c.1, d.0, d.1, bi)?;
-        let size = l.max_abs_coefficient() + r.max_abs_coefficient();
-        Ok((l.sub(&r, bi)?, el + er + gamma(1) * size))
-    };
     let (dw, edw) = deriv(hw, e);
     // A = W H' - W' H, a component at a time
     let tangent = |hi: &Bernstein2| {
         let (dh, edh) = deriv(hi, e);
-        diff((hw, e), (&dh, edh), (&dw, edw), (hi, e))
+        diff((hw, e), (&dh, edh), (&dw, edw), (hi, e), bi)
     };
     let (ax, eax) = tangent(hx)?;
     let (ay, eay) = tangent(hy)?;
@@ -1113,9 +1454,9 @@ fn collapse_piece(
     let (dax, edax) = deriv(&ax, eax);
     let (day, eday) = deriv(&ay, eay);
     let (daz, edaz) = deriv(&az, eaz);
-    let (cx, ecx) = diff((&ay, eay), (&daz, edaz), (&az, eaz), (&day, eday))?;
-    let (cy, ecy) = diff((&az, eaz), (&dax, edax), (&ax, eax), (&daz, edaz))?;
-    let (cz, ecz) = diff((&ax, eax), (&day, eday), (&ay, eay), (&dax, edax))?;
+    let (cx, ecx) = diff((&ay, eay), (&daz, edaz), (&az, eaz), (&day, eday), bi)?;
+    let (cy, ecy) = diff((&az, eaz), (&dax, edax), (&ax, eax), (&daz, edaz), bi)?;
+    let (cz, ecz) = diff((&ax, eax), (&day, eday), (&ay, eay), (&dax, edax), bi)?;
     let b = cx
         .scale(m.x)
         .add(&cy.scale(m.y), bi)?
@@ -1140,7 +1481,7 @@ fn collapse_piece(
     };
     // (rounding keeps a sum's sign: `q <= 0` is `along + tol <= 0` exactly)
     if q <= 0.0 {
-        return Ok(PieceCollapse::Decided(bends, false));
+        return Ok(PieceCollapse::Decided([bends, true], false));
     }
     let (xx, exx) = product(&ax, eax, &ax, eax, bi)?;
     let (yy, eyy) = product(&ay, eay, &ay, eay, bi)?;
@@ -1167,9 +1508,9 @@ fn collapse_piece(
         return Ok(PieceCollapse::Unbounded);
     }
     Ok(if hi < -ep {
-        PieceCollapse::Decided(bends, true)
+        PieceCollapse::Decided([bends, true], true)
     } else if lo > ep {
-        PieceCollapse::Decided(bends, false)
+        PieceCollapse::Decided([bends, true], false)
     } else {
         PieceCollapse::Halve
     })
@@ -1448,24 +1789,180 @@ mod circle_tests {
         assert_eq!(at(2.0 - 1e-7), Collapse::Unproved);
     }
 
-    /// An arc out of every plane through the axis (its plane square to the axis, or tilted
-    /// from it) is not proved: its own radius is not where its offset folds.
+    /// `c` (one rational span) at `t`.
+    fn point(c: &NurbCurve, t: f64) -> Point3 {
+        let b = [(1.0 - t) * (1.0 - t), 2.0 * t * (1.0 - t), t * t];
+        let mut h = [0.0_f64; 4];
+        for (p, bi) in c.cpts().iter().zip(b) {
+            h[0] += bi * p.x;
+            h[1] += bi * p.y;
+            h[2] += bi * p.z;
+            h[3] += bi * p.w;
+        }
+        Point3::new(h[0] / h[3], h[1] / h[3], h[2] / h[3])
+    }
+
+    /// The smallest and largest radius of curvature of `c`'s profile about the axis
+    /// through `p` along `axis`, by central differences at 400 inner steps (a measurement
+    /// for the tests' margins, independent of the certificate).
+    fn profile_radius_range(c: &NurbCurve, p: Point3, axis: Vec3) -> (f64, f64) {
+        let a = axis / axis.length();
+        let profile = |t: f64| {
+            let y = point(c, t) - p;
+            let z = a.dot(y);
+            ((y - a * z).length(), z)
+        };
+        let n = 400;
+        let h = 1e-4;
+        let (mut lo, mut hi) = (f64::INFINITY, 0.0_f64);
+        for i in 1..n {
+            let t = f64::from(i) / f64::from(n);
+            let (u, m, w) = (profile(t - h), profile(t), profile(t + h));
+            let (r1, z1) = ((w.0 - u.0) / (2.0 * h), (w.1 - u.1) / (2.0 * h));
+            let (r2, z2) = (
+                (w.0 - 2.0 * m.0 + u.0) / (h * h),
+                (w.1 - 2.0 * m.1 + u.1) / (h * h),
+            );
+            let rho = (r1 * r1 + z1 * z1).powf(1.5) / (r1 * z2 - z1 * r2).abs();
+            lo = lo.min(rho);
+            hi = hi.max(rho);
+        }
+        (lo, hi)
+    }
+
+    /// solidcraft#18018's review (B3): an arc out of every plane through the axis is
+    /// decided on its profile, whose radius of curvature is not the arc's. About the axis
+    /// along `(1, 1, 1)` through `P` and along `(1, 0, 2^-10)` through the origin (no point
+    /// of the arc on the axis), the offset below the profile's smallest radius (MEASURED)
+    /// is `Nowhere` and past its largest `Everywhere`, and one inside the range is not
+    /// proved. A straight profile (the plane square to the axis Z) is not proved, nor is
+    /// one whose generatrix starts with its tangent square to both the axis and the radial
+    /// direction (the arc's start, about the axes nearly along X: through `(0, 0, 1.001)`
+    /// along X, through `P` along `(1, 0, 1e-6)`, through the origin along
+    /// `(1, 0, 2^-10)`): the profile's parametrisation stops there, so the curvature's
+    /// numerator and denominator both come to zero at the end and no strict sign is shown.
+    /// Never answered the wrong way.
     #[test]
-    fn an_arc_out_of_the_axis_plane_is_not_proved() {
+    fn an_arc_out_of_the_axis_plane_is_decided_on_its_profile() {
         let k = kernel();
         let c = quarter(0.0);
-        for axis in [Z, Vec3::new(1.0, 0.0, 1e-6), Vec3::new(1.0, 1.0, 1.0)] {
+        for (p, axis) in [
+            (P, Vec3::new(1.0, 1.0, 1.0)),
+            (Point3::new(0.0, 0.0, 0.0), Vec3::new(1.0, 1.0, 1.0)),
+        ] {
+            let (lo, hi) = profile_radius_range(&c, p, axis);
+            assert!(lo > 0.1 && hi < 100.0 && hi > lo, "{axis:?}: {lo} {hi}");
+            let at = |along: f64| meridian_collapse(&k, &c, p, axis, C, along, 1e-7).unwrap();
+            assert_eq!(at(0.5 * lo), Collapse::Nowhere, "{axis:?}: {lo} {hi}");
+            assert_eq!(at(-2.0 * hi), Collapse::Nowhere, "{axis:?}: {lo} {hi}");
+            assert_eq!(at(2.0 * hi), Collapse::Everywhere, "{axis:?}: {lo} {hi}");
+            if hi > 1.01 * lo {
+                assert_eq!(
+                    at(0.5 * (lo + hi)),
+                    Collapse::Unproved,
+                    "{axis:?}: {lo} {hi}"
+                );
+            }
+        }
+        for along in [1.0, 4.0] {
             assert_eq!(
-                meridian_collapse(&k, &c, P, axis, C, 4.0, 1e-7).unwrap(),
-                Collapse::Unproved,
+                meridian_collapse(&k, &c, P, Z, C, along, 1e-7).unwrap(),
+                Collapse::Unproved
+            );
+        }
+        for (p, axis) in [
+            (Point3::new(0.0, 0.0, 1.001), X),
+            (P, Vec3::new(1.0, 0.0, 1e-6)),
+            (
+                Point3::new(0.0, 0.0, 0.0),
+                Vec3::new(1.0, 0.0, 1.0 / 1024.0),
+            ),
+        ] {
+            assert_ne!(
+                meridian_collapse(&k, &c, p, axis, C, 4.0, 1e-7).unwrap(),
+                Collapse::Nowhere,
+                "{axis:?}"
+            );
+            assert_ne!(
+                meridian_collapse(&k, &c, p, axis, C, 1.0, 1e-7).unwrap(),
+                Collapse::Everywhere,
                 "{axis:?}"
             );
         }
-        // the plane through the axis must hold the axis's point too
+    }
+
+    /// solidcraft#18018's review (B2): the bounds are taken about a point of the axis near
+    /// the arc, not about the axis's given point. Far along the axis (`1e12`, `1e14`,
+    /// `1e16`, held exactly) the answers are those of the near point: the planarity bound no
+    /// longer grows with the square of the distance, so a tilted axis is never taken for a
+    /// plane through it, and a meridian axis is still proved.
+    #[test]
+    fn a_far_axis_point_gives_the_near_answers() {
+        let k = kernel();
+        let c = quarter(0.0);
+        let alongs = [4.0, 3.0, 2.1, 2.0, 2.0 - 1e-6, 1.9, 1.0, 0.5, -4.0];
+        let answers_at = |p: Point3, axis: Vec3, alongs: &[f64]| -> Vec<Collapse> {
+            alongs
+                .iter()
+                .map(|&along| meridian_collapse(&k, &c, p, axis, C, along, 1e-7).unwrap())
+                .collect()
+        };
+        let answers = |p: Point3, axis: Vec3| answers_at(p, axis, &alongs);
+        // the meridian axis X through (L, 0, 1)
+        let near = answers(P, X);
         assert_eq!(
-            meridian_collapse(&k, &c, Point3::new(0.0, 0.0, 1.001), X, C, 4.0, 1e-7).unwrap(),
-            Collapse::Unproved
+            near,
+            [
+                Collapse::Everywhere,
+                Collapse::Everywhere,
+                Collapse::Everywhere,
+                Collapse::Everywhere,
+                Collapse::Nowhere,
+                Collapse::Nowhere,
+                Collapse::Nowhere,
+                Collapse::Nowhere,
+                Collapse::Nowhere
+            ]
         );
+        for l in [1e12, 1e14, 1e16] {
+            assert_eq!(answers(Point3::new(l, 0.0, 1.0), X), near, "{l}");
+        }
+        // tilted axes through the origin, and through `L` times their direction (exact)
+        let origin = Point3::new(0.0, 0.0, 0.0);
+        // (about the first the arc's start stops the profile's parametrisation, see
+        // `an_arc_out_of_the_axis_plane_is_decided_on_its_profile`: not proved near or far;
+        // before the foot, its planarity allowance proved it in a plane from `1e14` out)
+        for (axis, decided) in [
+            (Vec3::new(1.0, 0.0, 1.0 / 1024.0), false),
+            (Vec3::new(1.0, 1.0, 1.0), true),
+        ] {
+            let (lo, hi) = profile_radius_range(&c, origin, axis);
+            // far from the profile's radii (MEASURED): decided, and the same far out
+            let clear = [2.0 * hi, 0.5 * lo, -2.0 * hi];
+            let near_clear = answers_at(origin, axis, &clear);
+            let expected = if decided {
+                [Collapse::Everywhere, Collapse::Nowhere, Collapse::Nowhere]
+            } else {
+                [Collapse::Unproved; 3]
+            };
+            assert_eq!(near_clear, expected, "{axis:?}: {lo} {hi}");
+            let near = answers(origin, axis);
+            for l in [1e12, 1e14, 1e16] {
+                let far_point = Point3::new(l * axis.x, l * axis.y, l * axis.z);
+                assert_eq!(
+                    answers_at(far_point, axis, &clear),
+                    near_clear,
+                    "{axis:?} {l}"
+                );
+                let far = answers(far_point, axis);
+                for ((along, n), f) in alongs.iter().zip(&near).zip(&far) {
+                    assert!(
+                        f == n || *f == Collapse::Unproved,
+                        "{axis:?} {l} {along}: near {n:?}, far {f:?}"
+                    );
+                }
+            }
+        }
     }
 
     /// An arc bulged by 1e-4 of its radius: its radius of curvature varies by more than the
