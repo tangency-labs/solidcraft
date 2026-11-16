@@ -98,7 +98,6 @@ fn kernel(on: bool) -> Kernel {
         memoize_curve_caches: on,
         ..Kernel::default()
     };
-    k.fixes.fillet_gn_section_generator = true;
     k.fixes.fillet_round_as_definition = true;
     k
 }

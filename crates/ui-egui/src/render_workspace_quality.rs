@@ -1,4 +1,5 @@
 //! Shared quality controls. Edits retain the selected output size and saved shot intent.
+use crate::ui_kit::BackingTooltipExt as _;
 use crate::{SolveApp, ui_kit};
 use solidcraft_engine::render::job::{DenoiseGuideClass, MAX_CPU_THREADS};
 
@@ -168,7 +169,7 @@ pub(super) fn denoise_controls(app: &mut SolveApp, ui: &mut egui::Ui) {
         let label = app.tr("render.denoise_optical_filter").to_string();
         let response = ui_kit::checkbox(ui, &label, &mut app.render_workspace.view.studio.denoise_settings.optical_filter);
         publish_target("render:denoise-optical-filter", response.rect);
-        response.on_hover_text(app.tr("render.denoise_optical_filter_help"));
+        response.backing_on_hover_text(app.tr("render.denoise_optical_filter_help"));
     });
     ui_kit::text(ui, app.tr("render.denoise_settings_help"), ui_kit::Text::Note("render.denoise_settings_help"));
     let label = app.tr("render.denoise_diagnostics_enable").to_string();

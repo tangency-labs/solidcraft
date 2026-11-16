@@ -8,7 +8,9 @@
 //! failing glue as a half-edited B-rep and stop there as for UB-242, so the merge ended
 //! early and the feature's patch kept 1 face where the C++ has 4. It now goes on as
 //! upstream: no `IntersectInsertRelate` of the rebuild stops on UB-242, and the patch
-//! face counts are the C++ reference's (difftest `single_face_fillet1019_2`).
+//! face counts are the C++ reference's (difftest `single_face_fillet1019_2`). That patch
+//! leaves lamina edges off the loop, so it does not fill the hole: the defeature is refused
+//! and the base put back (WR-656), where upstream returns the base open.
 //!
 //! The model is the upstream test file, read by the Rust reader when the pinned upstream
 //! checkout is present (as the difftest does).
@@ -20,15 +22,15 @@
 )] // test helpers
 
 use solidcore::blend::feature_executive::{FeatureExecutive, RebuildBrepType};
+use solidcore::error::defeature::DefeatureFailure;
+use solidcore::error::{Reason, SM_ERR};
 use solidcore::geom::attribute::AttributeStore;
-use solidcore::geom::attribute::ObjectKey;
-use solidcore::geom::object::ObjectRef;
 use solidcore::topology::brep::p1 as bp1;
 use solidcore::topology::brep::p10::TopologyEnv;
 use solidcore::topology::brep::p7::read_from_file;
 use solidcore::topology::database_io::FileType;
 use solidcore::topology::topology::NotifyRecords;
-use solidcore::{Brep, EntityRef, Kernel};
+use solidcore::{Brep, EntityRef, Kernel, SolidError};
 
 /// `Fillet/fillet1019.smb`, read and arena-named as the difftest reader does.
 fn fillet1019(k: &mut Kernel) -> Option<Brep> {
@@ -46,10 +48,7 @@ fn fillet1019(k: &mut Kernel) -> Option<Brep> {
     let mut b = Brep::new_with_infinite_region().unwrap();
     let mut records = NotifyRecords::new();
     let mut attributes = AttributeStore::default();
-    let key = |_: EntityRef| ObjectRef {
-        key: ObjectKey(0),
-        type_code: 0,
-    };
+    let key = solidcore::topology::loopuse::notify_ref;
     let mut env = TopologyEnv {
         all_attributes: &[],
         attributes: &mut attributes,
@@ -60,20 +59,6 @@ fn fillet1019(k: &mut Kernel) -> Option<Brep> {
     read_from_file(k, &mut b, bytes, FileType::Ascii, false, &mut env).unwrap();
     b.use_arena_naming().unwrap();
     Some(b)
-}
-
-/// Per loop of the one feature: base and feature patch face counts (-1 for none).
-fn patch_faces(ex: &FeatureExecutive<'_>) -> Vec<(i64, i64)> {
-    let count = |p: Option<solidcore::blend::feature_executive::PatchId>| {
-        p.and_then(|p| ex.patch(p))
-            .map_or(-1, |b| bp1::faces(b, None).unwrap().len() as i64)
-    };
-    let feature = &ex.features()[0];
-    feature
-        .loops
-        .iter()
-        .map(|l| (count(l.base_patch), count(l.feat_patch)))
-        .collect()
 }
 
 #[test]
@@ -92,16 +77,30 @@ fn defeature_goes_on_past_a_failing_glue() {
     )
     .unwrap()
     .unwrap();
-    ex.do_defeature(&mut k).unwrap();
-    let got = patch_faces(&ex);
-    eprintln!("patch faces per loop: {got:?}");
-    assert_eq!(got, EXPECTED);
+    // the merge goes on to the C++'s 4-face patch, which leaves lamina edges off the loop
+    // (ValidatePatch), so the base patch is not built and the hole would stay open: refused,
+    // as WR-656 (the executive drops its features, so the patch's faces are not read back)
+    let r = ex.do_defeature(&mut k);
+    // refused at the open loop's edge, naming the limit: the faces along it, extended, do
+    // not enclose it (#3218); the status is still SM_ERR
+    match &r {
+        Err(e @ SolidError::Failed(f)) => {
+            assert!(
+                matches!(
+                    f.reason,
+                    Reason::Defeature(DefeatureFailure::NotEnclosed { .. })
+                ),
+                "{r:?}"
+            );
+            assert!(matches!(f.entity(), Some(EntityRef::Edge(_))), "{r:?}");
+            assert_eq!(e.sm_status(), Some(SM_ERR), "{r:?}");
+        }
+        other => panic!("{other:?}"),
+    }
+    assert!(ex.features().is_empty());
     assert!(
         !k.upstream_ub_passed.contains(&"UB-242"),
         "an IntersectInsertRelate stopped on UB-242: {:?}",
         k.upstream_ub_passed
     );
 }
-
-/// The C++ reference's patch face counts (difftest `single_face_fillet1019_2`).
-const EXPECTED: &[(i64, i64)] = &[(4, 4)];

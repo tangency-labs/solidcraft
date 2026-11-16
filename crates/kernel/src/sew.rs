@@ -14,11 +14,11 @@ use solidcraft_geom::prelude::*;
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use solidcore_ops::pcurve;
 use solidcore_record::Vec3;
 use solidcore_record::brep::{self as b, Curve2};
 use solidcraft_geom::Ring;
 use solidcraft_geom::brep::eval::{SurfaceEval, face_flux};
-use solidcraft_geom::brep::pcurve;
 
 use crate::body::Body;
 use crate::{KernelError, Result, guard};
@@ -1393,7 +1393,7 @@ pub(crate) fn assemble(parts: Parts, solid: bool) -> Result<Assembled> {
     let mut forms: Vec<Option<(b::Curve, [f64; 2])>> = Vec::with_capacity(edges.len());
     for ((e, frames), given) in edges.iter().zip(&frames_of).zip(&given_on) {
         if let Some(form) = &e.nurbs {
-            let on_label = solidcraft_geom::brep::label::curve_interval(&e.curve, Some(form), e.interval)
+            let on_label = solidcore_ops::label::curve_interval(&e.curve, Some(form), e.interval)
                 .ok_or_else(|| fail("an edge's NURBS form does not evaluate".into()))?;
             labels.push((e.curve.clone(), on_label));
             forms.push(Some((form.clone(), e.interval)));
@@ -1640,7 +1640,7 @@ fn domain_of(surface: &b::Surface, pcs: &[Vec<Curve2>]) -> Option<[[f64; 2]; 2]>
             }
         }
     }
-    let natural = solidcraft_geom::brep::label::surface_natural(surface);
+    let natural = solidcore_ops::label::surface_natural(surface);
     let mut out = [[0.0; 2]; 2];
     for d in 0..2 {
         let (mut a, mut z) = (lo[d], hi[d]);

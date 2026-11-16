@@ -8,9 +8,9 @@ use solidcore_record::Vec3;
 use solidcraft_render::{
     ProductScene,
     job::{CancelToken, ErrorCode, JobError, Result},
-    surface::{OpaqueSurface, srgb8_to_linear},
     transmission::Transmission,
 };
+use solidcraft_viewport::surface::{OpaqueSurface, srgb8_to_linear};
 
 pub(super) struct Triangle {
     pub p: [Vec3; 3],
@@ -132,7 +132,7 @@ pub(super) fn flatten_with_media(scene: &ProductScene, origin: Vec3, cancel: &Ca
             if !position.is_finite() || [position.x, position.y, position.z].iter().any(|x| x.abs() > 1e7) {
                 return Err(invalid("path geometry must be finite and within 1e7 mm of the camera target"));
             }
-            let normal = solidcraft_render::surface::unit_direction(*normal).map_err(|_| invalid("invalid mesh normal"))?;
+            let normal = solidcraft_viewport::surface::unit_direction(*normal).map_err(|_| invalid("invalid mesh normal"))?;
             vector(&mut vertices, position, 0.0);
             vector(&mut vertices, normal, 0.0);
         }

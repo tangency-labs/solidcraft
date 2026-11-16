@@ -639,7 +639,7 @@ pub fn interp_knots_and_tangents(
     if pu > MAX_DEGREE {
         return Err(SolidError::InvalidInput {
             operation: OP,
-            reason: "degree above NL_MAXDEG (upstream scratch array size)",
+            reason: "degree above the largest degree the NURBS routines handle",
         });
     }
     if per < 0.0 || per > 1.0 {

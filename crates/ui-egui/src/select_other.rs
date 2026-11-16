@@ -109,7 +109,7 @@ fn rows_capped(app: &SolveApp, proj: &Proj, pos: Pos2, through: bool) -> (Vec<Ro
     let mut found = crate::viewport::candidates(app, &hits);
     let dialog = app.dialog.as_ref().is_some_and(|d| d.wants_picks());
     // A body behind each face (body picking already turns faces into bodies).
-    if !dialog && !app.ui.pick_bodies {
+    if !dialog && !app.picks_bodies() {
         for h in &hits {
             if let Hit::Face { body, .. } = h {
                 found.push((h.clone(), Sel::Body { name: body.clone() }));
@@ -341,7 +341,9 @@ pub fn label(app: &SolveApp, sel: &Sel) -> String {
         Sel::Profile { sketch, index } => format!("Profile {} · {}", index + 1, sketch_name(app, *sketch)),
         Sel::Plane { name } if matches!(name.as_str(), "XY" | "XZ" | "YZ") => format!("{} Plane", app.preferences.origin_plane_names.label(name)),
         Sel::Axis { name } if matches!(name.as_str(), "X" | "Y" | "Z") => format!("{name} Axis"),
-        Sel::Plane { name } | Sel::Axis { name } | Sel::ConstructionPoint { name } => name.clone(),
+        Sel::Plane { name } | Sel::Axis { name } | Sel::ConstructionPoint { name } => {
+            crate::dialogs::component_origin_label(&app.session, app.preferences.origin_plane_names, name).unwrap_or_else(|| name.clone())
+        }
     }
 }
 
@@ -577,7 +579,7 @@ fn cycle_key(app: &SolveApp) -> u64 {
     }
     app.session.active_sketch.hash(&mut h);
     app.ui.pick_off.hash(&mut h);
-    app.ui.pick_bodies.hash(&mut h);
+    app.picks_bodies().hash(&mut h);
     app.dialog.is_some().hash(&mut h);
     h.finish()
 }

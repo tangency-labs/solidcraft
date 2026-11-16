@@ -657,7 +657,7 @@ mod tests {
             geometric_normal: Vec3::new(0.0, 0.0, 1.0),
             front_face: true,
             shading_normal: Vec3::new(0.0, 0.0, 1.0),
-            surface: crate::surface::OpaqueSurface::new(Vec3::new(0.5, 0.5, 0.5), 0.0, 0.5, 1.5).unwrap(),
+            surface: solidcraft_viewport::surface::OpaqueSurface::new(Vec3::new(0.5, 0.5, 0.5), 0.0, 0.5, 1.5).unwrap(),
             vertices: [Vec3::new(-1.0, -1.0, 0.0), Vec3::new(1.0, -1.0, 0.0), Vec3::new(0.0, 2.0, 0.0)],
             barycentric: [1.0 / 3.0; 3],
         }
@@ -691,7 +691,7 @@ mod tests {
             studio_weights: None,
             integrator: Default::default(),
             raytrace: None,
-            camera: crate::Camera::default(),
+            camera: solidcraft_viewport::Camera::default(),
             width: 1,
             height: 1,
             background: [0; 3],

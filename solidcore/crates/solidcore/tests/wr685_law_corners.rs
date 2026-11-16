@@ -278,15 +278,9 @@ fn law_corner_pieces(k: &Kernel, r: [f64; 3]) -> (LawCornerPieces, BSplineSurfac
     (kept, joined.unwrap())
 }
 
-fn gn_kernel() -> Kernel {
-    let mut k = Kernel::default();
-    k.fixes.fillet_gn_section_generator = true;
-    k
-}
-
 #[test]
 fn a_law_that_dips_has_the_corner_ball_s_zone_between_its_sides() {
-    let k = gn_kernel();
+    let k = Kernel::default();
     let (kept, _) = law_corner_pieces(&k, [4.0, 2.0, 4.0]);
     assert_eq!(
         kept.corners,
@@ -318,7 +312,7 @@ fn a_law_that_dips_has_the_corner_ball_s_zone_between_its_sides() {
 
 #[test]
 fn a_law_that_peaks_has_sides_that_run_past_each_other() {
-    let k = gn_kernel();
+    let k = Kernel::default();
     let (kept, _) = law_corner_pieces(&k, [2.0, 4.0, 2.0]);
     assert_eq!(
         kept.corners,
@@ -332,7 +326,7 @@ fn a_law_that_peaks_has_sides_that_run_past_each_other() {
 
 #[test]
 fn a_constant_radius_corner_matches() {
-    let k = gn_kernel();
+    let k = Kernel::default();
     let (kept, _) = law_corner_pieces(&k, [3.0, 3.0, 3.0]);
     let kinds: Vec<_> = kept.corners.iter().map(|corner| corner.kind).collect();
     assert_eq!(kinds, vec![LawCornerKind::Matching]);
@@ -342,7 +336,7 @@ fn a_constant_radius_corner_matches() {
 
 #[test]
 fn approximated_arcs_widen_the_pieces_accuracy() {
-    let k = gn_kernel();
+    let k = Kernel::default();
     let (kept, _) = law_corner_pieces(&k, [4.0, 2.0, 4.0]);
     let ([center_line, rail1, _], _) = law_curves([4.0, 2.0, 4.0]);
     let approx = LawCornerPieces::classify(
@@ -365,7 +359,7 @@ fn approximated_arcs_widen_the_pieces_accuracy() {
 
 #[test]
 fn a_rounds_pieces_are_found_by_its_corners_once() {
-    let k = gn_kernel();
+    let k = Kernel::default();
     let (dip, joined) = law_corner_pieces(&k, [4.0, 2.0, 4.0]);
     let (peak, _) = law_corner_pieces(&k, [2.0, 4.0, 2.0]);
     let mut kept = vec![peak, dip];

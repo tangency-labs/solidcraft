@@ -118,20 +118,49 @@ fn a_refused_inline_rename_keeps_the_editor_and_shows_the_error() {
     h.app.run("solid.box", json!({"length":10,"width":10,"height":10,"body_name":"B"})).unwrap();
     h.app.preferences.browser_bodies_folders = crate::prefs::BodiesFolders::Always;
     h.settle();
-    h.app.menu.rename = Some(crate::context_menu::Rename {
-        what: crate::context_menu::RenameWhat::Body("B".into()),
-        text: "A".into(),
-        at: egui::Pos2::ZERO,
-        focused: true,
-        inline: true,
-    });
-    h.frames(2);
+    // Open B's name for editing in its row (a delayed second click) and type a taken name.
+    h.step(&json!({"click":{"handle":"row:B"}})).unwrap();
+    h.frames(30);
+    h.step(&json!({"click":{"handle":"row:B"}})).unwrap();
+    h.frames(30);
+    assert!(h.app.menu.rename.as_ref().is_some_and(|r| r.inline), "B's row is being renamed");
+    h.step(&json!({"text":"A"})).unwrap();
     h.step(&json!({"key":"Enter"})).unwrap();
     h.frames(2);
     assert!(h.app.menu.rename.is_some(), "the editor stays open after a refused rename");
     let (text, _, error) = h.app.status.clone().expect("the refusal is shown");
     assert!(error && text.contains("another body is called"), "{text}");
     assert!(h.app.session.world_state().unwrap().body("B").is_some(), "the body keeps its name");
+}
+
+/// Renaming a component to a name another component has takes the next free number; a name
+/// nobody has stays as typed.
+#[test]
+fn a_component_renamed_to_a_taken_name_takes_the_next_number() {
+    let mut h = Harness::new();
+    let id = |v: Value| v["component"].as_u64().unwrap();
+    let a = id(h.app.run("component.create", json!({"name": "Bracket"})).unwrap());
+    h.app.run("component.activate", json!({"component": 0})).unwrap();
+    let b = id(h.app.run("component.create", json!({"name": "Plate"})).unwrap());
+    let name_of = |h: &Harness, c: u64| h.app.session.doc.components.iter().find(|k| k.id == c).map(|k| k.name.clone()).unwrap();
+    let rename = |h: &mut Harness, c: u64, text: &str| {
+        let r = crate::context_menu::Rename {
+            what: crate::context_menu::RenameWhat::Component(c),
+            text: text.into(),
+            at: egui::Pos2::ZERO,
+            focused: false,
+            inline: true,
+            inline_id: None,
+        };
+        crate::context_menu::commit_rename(&mut h.app, &r).unwrap();
+    };
+    rename(&mut h, b, "Bracket");
+    assert_eq!(name_of(&h, b), "Bracket (2)");
+    assert_eq!(name_of(&h, a), "Bracket", "the other keeps its name");
+    rename(&mut h, b, "Bracket (2)");
+    assert_eq!(name_of(&h, b), "Bracket (2)", "its own name is not taken");
+    rename(&mut h, a, "Base");
+    assert_eq!(name_of(&h, a), "Base");
 }
 
 #[test]
@@ -184,6 +213,8 @@ fn folder_visibility_shortcut_does_not_take_dialog_body_picks_or_chevrons() {
     h.step(&json!({"click":{"chevron":"Bodies"}})).unwrap();
     h.step(&json!({"key":"V"})).unwrap();
     assert!(!h.app.session.folder_hidden("c0/bodies"), "the fold arrow does not pick a visibility target");
+    // The click below picks the body, so Bodies must start empty (#13098 fills in an only body).
+    h.app.preferences.export_selects_only_body = false;
     h.app.start("file.save_mesh");
     h.settle();
     h.step(&json!({"click":{"handle":"row:Bodies"}})).unwrap();
@@ -267,6 +298,104 @@ fn browser_body_clicks_respect_the_active_dialog_input() {
 }
 
 #[test]
+fn browser_name_rows_rename_on_a_delayed_second_click() {
+    let mut h = Harness::new();
+    h.app.run("solid.box", json!({"length":10,"width":10,"height":10,"body_name":"One"})).unwrap();
+    h.app.tree.expanded.insert("c0/features".into());
+    h.settle();
+
+    h.step(&json!({"click":{"handle":"row:One"}})).unwrap();
+    assert!(h.app.menu.rename.is_none(), "the first click only selects the body");
+    h.frames(30);
+    h.step(&json!({"click":{"handle":"row:One"}})).unwrap();
+    h.frames(30);
+    assert!(matches!(
+        h.app.menu.rename.as_ref(),
+        Some(crate::context_menu::Rename { what: crate::context_menu::RenameWhat::Body(name), inline: true, .. }) if name == "One"
+    ));
+
+    h.step(&json!({"key":"Escape"})).unwrap();
+    let feature = h.app.session.doc.features.first().map(|feature| feature.id).unwrap();
+    let feature_row = format!("row:browser-feature:c0:{feature}");
+    h.step(&json!({"click":{"handle":feature_row}})).unwrap();
+    assert!(h.app.menu.rename.is_none(), "the first click only selects the feature");
+    h.frames(30);
+    h.step(&json!({"click":{"handle":feature_row}})).unwrap();
+    h.frames(30);
+    assert!(matches!(
+        h.app.menu.rename.as_ref(),
+        Some(crate::context_menu::Rename { what: crate::context_menu::RenameWhat::Feature(id), inline: true, .. }) if *id == feature
+    ));
+    let feature_name = h.app.session.doc.feature(feature).map(|feature| feature.name.clone()).unwrap_or_default();
+    assert!(crate::scenario::handle_at(&format!("rename:{feature_name}")).is_some(), "the feature name is edited in its row");
+    h.step(&json!({"text":"Renamed feature"})).unwrap();
+    h.step(&json!({"key":"Enter"})).unwrap();
+    assert_eq!(h.app.session.doc.feature(feature).map(|feature| feature.name.as_str()), Some("Renamed feature"));
+}
+
+/// With no dialog open a construction row is selected like any other row, so a delayed second
+/// click renames it.
+#[test]
+fn a_construction_row_renames_on_a_delayed_second_click() {
+    let mut h = Harness::new();
+    h.app.run("construct.plane.offset", json!({"base":"XY","offset":20})).unwrap();
+    h.app.tree.expanded.insert("c0/construction".into());
+    h.settle();
+    let feature = h.app.session.doc.features.last().map(|feature| feature.id).unwrap();
+    let name = h.app.session.doc.feature(feature).map(|feature| feature.name.clone()).unwrap_or_default();
+    let row = format!("row:{name}");
+    h.step(&json!({"click":{"handle":row}})).unwrap();
+    assert!(h.app.menu.rename.is_none(), "the first click only selects the plane");
+    h.frames(30);
+    h.step(&json!({"click":{"handle":row}})).unwrap();
+    h.frames(30);
+    assert!(
+        matches!(h.app.menu.rename.as_ref(), Some(crate::context_menu::Rename { inline: true, .. })),
+        "{:?}",
+        h.app.menu.rename.as_ref().map(|r| &r.what)
+    );
+}
+
+#[test]
+fn browser_sketch_rename_stays_inline() {
+    let mut h = Harness::new();
+    h.app.run("sketch.create", json!({"plane":"XY","name":"Profile"})).unwrap();
+    h.app.run("sketch.finish", json!({})).unwrap();
+    h.app.tree.expanded.insert("c0/sketches".into());
+    h.settle();
+
+    h.step(&json!({"click":{"handle":"row:Profile"}})).unwrap();
+    assert!(h.app.menu.rename.is_none(), "the first click only selects the sketch");
+    h.frames(30);
+    h.step(&json!({"click":{"handle":"row:Profile"}})).unwrap();
+    h.frames(30);
+    assert!(matches!(
+        h.app.menu.rename.as_ref(),
+        Some(crate::context_menu::Rename { what: crate::context_menu::RenameWhat::Feature(_), inline: true, .. })
+    ));
+    assert!(crate::scenario::handle_at("rename:Profile").is_some(), "the sketch name is edited in its row");
+    h.step(&json!({"text":"Profile renamed"})).unwrap();
+    h.step(&json!({"key":"Enter"})).unwrap();
+    assert_eq!(h.app.session.doc.features.first().map(|feature| feature.name.as_str()), Some("Profile renamed"));
+}
+
+#[test]
+fn browser_sketches_after_history_marker_are_not_listed() {
+    let mut h = Harness::new();
+    h.app.run("sketch.create", json!({"plane":"XY","name":"Earlier"})).unwrap();
+    h.app.run("sketch.finish", json!({})).unwrap();
+    h.app.run("sketch.create", json!({"plane":"XY","name":"Later"})).unwrap();
+    h.app.run("sketch.finish", json!({})).unwrap();
+    h.app.run("timeline.roll_to", json!({"position":1})).unwrap();
+    h.app.tree.expanded.insert("c0/sketches".into());
+    h.settle();
+
+    let labels: Vec<_> = drawn_rows().into_iter().map(|(label, ..)| label).collect();
+    assert!(labels.contains(&"Earlier".to_owned()), "{labels:?}");
+    assert!(!labels.contains(&"Later".to_owned()), "{labels:?}");
+}
+
+#[test]
 fn browser_card_shrinks_and_scrolls_without_covering_history() {
     let mut h = Harness::new();
     h.call("ui.resize", json!({"width":1400,"height":900}));
@@ -319,11 +448,11 @@ fn selected_row_paints_tab_soft_fill_and_accent_text_in_both_layouts() {
                 app.ui.layout = mode;
                 app.ui.tab = tab.into();
                 app.publish_tab_accent(&ctx);
-                let accent = solidcraft_theme::TabAccent::for_tab(&Tokens::get(), tab);
+                let accent = crate::workspace::tab_accent(&Tokens::get(), tab);
                 let mut row_rect = Rect::NOTHING;
                 let out = crate::test_support::frame(&ctx, egui::RawInput::default(), |ui| {
                     let row = Row { selected: true, label: "Selected body", dim: true, color: Some(Tokens::get().error), ..Default::default() };
-                    row_rect = draw_row(ui, egui::Id::unique("selected-row"), &row).rect.unwrap();
+                    row_rect = crate::ui_kit::tree_row(ui, egui::Id::unique("selected-row"), &row).rect.unwrap();
                 });
                 assert_eq!(row_rect.height(), 26.0);
                 assert!(out.shapes.iter().any(|s| matches!(&s.shape, egui::Shape::Rect(r) if r.rect == row_rect && r.fill == accent.soft)));
@@ -431,116 +560,35 @@ fn a_second_click_on_a_document_settings_entry_closes_its_window() {
     }
 }
 
-#[test]
-fn browser_header_folds_the_floating_card_to_its_header_and_back() {
-    let mut h = Harness::new();
-    h.call("ui.resize", json!({"width":1400,"height":900}));
-    h.settle();
-    let open = rect_of("browser:card").unwrap();
-    assert!(!h.app.preferences.browser_collapsed);
-    let at = handle_at("browser:header").unwrap();
-    h.call("ui.click", json!({"x":at.x,"y":at.y}));
-    h.settle();
-    let folded = rect_of("browser:card").unwrap();
-    assert!(h.app.preferences.browser_collapsed);
-    assert!(folded.height() < 60.0 && folded.height() < open.height(), "{folded:?} {open:?}");
-    assert_eq!(folded.top(), open.top());
-    assert!(drawn_rows().is_empty() || handle_at("row:Plate").is_none());
-    h.call("ui.click", json!({"x":at.x,"y":at.y}));
-    h.settle();
-    assert!(!h.app.preferences.browser_collapsed);
-    assert!((rect_of("browser:card").unwrap().height() - open.height()).abs() < 1.0);
+fn set_browser_collapsed(h: &mut Harness, collapsed: bool) {
+    use solidcraft_engine::panels::{InstanceId, LayoutAction, Mutation};
+    let layout = h.app.panel_runtime().unwrap().layout().layout();
+    let section = layout.containing(&InstanceId::new("browser").unwrap()).unwrap().id.clone();
+    h.app.dispatch_panel_layout(LayoutAction::Apply { expected_revision: None, mutations: vec![Mutation::Collapse { section, collapsed }] }).unwrap();
+    h.frames(3);
 }
 
-/// A folded browser stays folded in the next run, as the toolbar's pins do (#8692).
 #[test]
 fn the_folded_browser_is_remembered_across_runs() {
     let mut h = Harness::new();
-    h.call("ui.resize", json!({"width":1400,"height":900}));
-    h.settle();
+    h.app.home.open = false;
+    h.frames(3);
     let open = rect_of("browser:card").unwrap();
-    let at = handle_at("browser:header").unwrap();
-    h.call("ui.click", json!({"x":at.x,"y":at.y}));
-    h.settle();
-    assert!(h.app.preferences.browser_collapsed);
-    let saved = h.app.prefs();
-
-    let mut next = Harness::new();
-    next.app.load_prefs(&saved);
-    assert!(next.app.preferences.browser_collapsed, "the fold round-trips through the settings");
-    next.call("ui.resize", json!({"width":1400,"height":900}));
-    next.settle();
+    set_browser_collapsed(&mut h, true);
     let folded = rect_of("browser:card").unwrap();
-    assert!(folded.height() < 60.0 && folded.height() < open.height(), "the next run starts folded: {folded:?}");
-    let at = handle_at("browser:header").unwrap();
-    next.call("ui.click", json!({"x":at.x,"y":at.y}));
-    next.settle();
-    let mut after = SolveApp::new(Default::default(), Default::default());
-    after.load_prefs(&next.app.prefs());
-    assert!(!after.preferences.browser_collapsed, "unfolding is remembered too");
+    assert!(folded.height() < open.height());
+    assert_eq!(folded.width(), open.width());
+    let saved = h.app.prefs();
+    let mut next = Harness::new();
+    next.app.disable_panel_runtime().unwrap();
+    next.app.load_prefs(&saved);
+    next.app.home.open = false;
+    next.frames(6);
+    assert_eq!(rect_of("browser:card").unwrap().height(), folded.height());
+    set_browser_collapsed(&mut next, false);
+    assert!(rect_of("browser:card").unwrap().height() > folded.height());
 }
 
-/// Reveal on hover (#8692): the browser is out of sight until the pointer comes over the strip at
-/// its left edge or its place, stays while the pointer is inside it or its menu is open, and
-/// never folds, even if it was folded before.
-#[test]
-fn a_browser_that_reveals_on_hover_shows_and_hides_with_the_pointer() {
-    for mode in [LayoutMode::Floating, LayoutMode::Docked] {
-        let mut h = Harness::new();
-        h.app.ui.layout = mode;
-        h.app.run("solid.box", json!({"length":10,"width":10,"height":10,"operation":"new_body","body_name":"One"})).unwrap();
-        h.call("ui.resize", json!({"width":1400,"height":900}));
-        h.settle();
-        let shown = rect_of("browser:card").unwrap();
-        h.app.preferences.browser_collapsed = true;
-        h.app.preferences.browser_show = BrowserShow::Hover;
-        let away = json!({"x":900,"y":450});
-        h.call("ui.move", away.clone());
-        h.settle();
-        assert!(h.app.shell.browser_hidden, "{mode:?}: out of sight while the pointer is elsewhere");
-        let card = rect_of("browser:card").unwrap();
-        assert!((card.height() - shown.height()).abs() < 1.0, "{mode:?}: the card keeps its unfolded place: {card:?} {shown:?}");
-
-        let edge = handle_at("browser:edge").unwrap();
-        h.call("ui.move", json!({"x":edge.x,"y":edge.y}));
-        h.settle();
-        assert!(!h.app.shell.browser_hidden, "{mode:?}: the left edge reveals it");
-        let inside = rect_of("browser:card").unwrap().center();
-        h.call("ui.move", json!({"x":inside.x,"y":inside.y}));
-        h.settle();
-        assert!(!h.app.shell.browser_hidden, "{mode:?}: it stays while the pointer is inside");
-        h.call("ui.move", away.clone());
-        h.settle();
-        assert!(h.app.shell.browser_hidden, "{mode:?}: leaving hides it again");
-
-        h.call("ui.move", json!({"x":inside.x,"y":inside.y}));
-        h.settle();
-        let header = handle_at("browser:header").unwrap();
-        h.call("ui.click", json!({"x":header.x,"y":header.y}));
-        h.settle();
-        assert!(rect_of("browser:card").unwrap().height() > 60.0, "{mode:?}: the header does not fold it");
-        h.step(&json!({"click":{"handle":"row:One"},"button":"right"})).unwrap();
-        assert!(h.app.viewport.context_menu.is_some(), "{mode:?}: the row's menu opens");
-        h.call("ui.move", away.clone());
-        h.settle();
-        assert!(!h.app.shell.browser_hidden, "{mode:?}: its menu keeps it shown");
-        h.step(&json!({"key":"Escape"})).unwrap();
-        h.call("ui.move", away.clone());
-        h.settle();
-        assert!(h.app.shell.browser_hidden, "{mode:?}: closing the menu away from it hides it");
-
-        h.app.preferences.browser_show = BrowserShow::Shown;
-        h.settle();
-        assert!(!h.app.shell.browser_hidden);
-        assert!(rect_of("browser:card").unwrap().height() < 60.0, "{mode:?}: Shown folds it again as it was left");
-        let mut restored = SolveApp::new(Default::default(), Default::default());
-        h.app.preferences.browser_show = BrowserShow::Hover;
-        restored.load_prefs(&h.app.prefs());
-        assert_eq!(restored.preferences.browser_show, BrowserShow::Hover);
-    }
-}
-
-/// Tiny or odd window sizes never panic: the cards leave out what cannot fit.
 #[test]
 fn tiny_floating_windows_never_panic() {
     for (w, h) in [(100, 60), (240, 90), (320, 140), (700, 150), (700, 300), (1400, 120), (180, 800)] {
@@ -558,100 +606,6 @@ fn tiny_floating_windows_never_panic() {
     }
 }
 
-/// Both shell layouts share one content-hugging tree and one saved width.
-/// The translucency preference never creates a second browser renderer.
-#[test]
-fn one_browser_keeps_its_resized_width_across_layouts_and_overlay_preferences() {
-    let mut h = Harness::new();
-    h.call("ui.resize", json!({"width":1400,"height":900}));
-    for mode in [LayoutMode::Floating, LayoutMode::Docked] {
-        for overlay in [false, true] {
-            h.app.ui.layout = mode;
-            h.app.preferences.browser_float = overlay;
-            h.app.preferences.browser_width = 310.0;
-            h.settle();
-            assert!(rect_of("browser:card").is_some());
-            assert_eq!(crate::scenario::handles("browser:header").len(), 1, "only one browser header");
-            assert_eq!(drawn_rows().iter().filter(|(name, ..)| name == "Untitled").count(), 1, "only one tree");
-            assert!((rect_of("browser:card").unwrap().width() - 310.0).abs() < 1.0);
-            assert_eq!(h.app.viewport.rect.unwrap().left(), 0.0);
-            let rail = handle_at("left-browser-rail").unwrap();
-            h.call("ui.drag", json!({"x0":rail.x,"y0":rail.y,"x1":rail.x+60.0,"y1":rail.y,"steps":6}));
-            h.settle();
-            let width = h.app.preferences.browser_width;
-            assert!(width > 340.0 && width <= MAX_BROWSER_WIDTH, "{mode:?}, overlay={overlay}: {width}");
-            h.app.ui.layout = LayoutMode::Docked;
-            h.app.preferences.browser_float = false;
-            h.settle();
-            assert!((rect_of("browser:card").unwrap().width() - width).abs() < 1.0, "compact keeps the saved width");
-        }
-    }
-}
-#[test]
-fn browser_title_uses_a_single_semibold_run() {
-    let ctx = crate::fonts::test_context();
-    let mut app = SolveApp::new(Default::default(), Default::default());
-    let output = crate::test_support::frame(&ctx, egui::RawInput::default(), |ui| {
-        ui.set_width(250.0);
-        browser_header(&mut app, ui, true);
-    });
-    let title = solidcraft_ui_text::tr("ui.browser_title");
-    let titles: Vec<_> = output
-        .shapes
-        .iter()
-        .filter_map(|s| match &s.shape {
-            egui::Shape::Text(text) if text.galley.text() == title => Some(text),
-            _ => None,
-        })
-        .collect();
-    assert_eq!(titles.len(), 1);
-    assert_eq!(titles[0].galley.job.sections[0].format.font_id, crate::ui_kit::type_face::semibold(Tokens::get().font_heading));
-}
-
-#[test]
-fn resizing_browser_card_and_column_persists_width_including_floating_preference() {
-    for (mode, float, left_history) in [
-        (LayoutMode::Floating, false, false),
-        (LayoutMode::Docked, false, false),
-        (LayoutMode::Docked, true, false),
-        (LayoutMode::Floating, true, true),
-        (LayoutMode::Docked, true, true),
-    ] {
-        let mut h = Harness::new();
-        h.app.ui.layout = mode;
-        h.app.preferences.browser_float = float;
-        h.app.preferences.timeline_left = left_history;
-        h.call("ui.resize", json!({"width":1400,"height":900}));
-        h.settle();
-        let before = h.app.viewport.rect.unwrap();
-        let at = handle_at("left-browser-rail").unwrap();
-        h.call("ui.drag", json!({"x0":at.x,"y0":at.y,"x1":at.x+80.0,"y1":at.y,"steps":8}));
-        h.settle();
-        let width = h.app.preferences.browser_width;
-        assert!(width > crate::prefs::DEFAULT_BROWSER_WIDTH + 40.0, "{mode:?}, float={float}, width={width}");
-        assert!((rect_of("browser:card").unwrap().width() - width).abs() < 1.0);
-        assert_eq!(h.app.viewport.rect.unwrap(), before, "browser resizing leaves the projection intact");
-        let mut restored = SolveApp::new(Default::default(), Default::default());
-        restored.load_prefs(&h.app.prefs());
-        assert_eq!(restored.preferences.browser_width, width);
-        assert_eq!(restored.preferences.browser_float, float);
-    }
-}
-
-#[test]
-fn browser_width_rejects_hostile_preferences_and_tiny_windows_still_fit() {
-    for width in [f32::NAN, f32::INFINITY, f32::NEG_INFINITY] {
-        assert_eq!(browser_width(width), crate::prefs::DEFAULT_BROWSER_WIDTH);
-    }
-    assert_eq!(browser_width(-100.0), MIN_BROWSER_WIDTH);
-    assert_eq!(browser_width(f32::MAX), MAX_BROWSER_WIDTH);
-    let available = Rect::from_min_size(Pos2::ZERO, vec2(100.0, 300.0));
-    for top_gap in [0.0, crate::ui_kit::SHELL_GAP] {
-        let bounds = panel_bounds(available, None, MAX_BROWSER_WIDTH, top_gap);
-        assert!(available.contains_rect(bounds));
-    }
-}
-
 #[test]
 fn a_long_body_name_stays_inside_the_card_and_ends_in_an_ellipsis() {
     let mut h = Harness::new();
@@ -663,63 +617,6 @@ fn a_long_body_name_stays_inside_the_card_and_ends_in_an_ellipsis() {
     let label = rect_of(&format!("row_label:{name}")).expect("the body row is drawn");
     assert!(label.right() <= card.right(), "{label:?} spills out of {card:?}");
     assert!(label.width() > 100.0, "the name keeps the room it has: {label:?}");
-}
-
-#[test]
-fn collapsed_rail_shares_header_hover_inset_and_expands_from_its_whole_card() {
-    let previous = solidcraft_theme::is_dark();
-    for dark in [false, true] {
-        solidcraft_theme::set_dark(dark);
-        for collapsed in [false, true] {
-            let ctx = crate::fonts::test_context();
-            ctx.global_style_mut(|style| style.animation_time = 0.0);
-            let mut app = SolveApp::new(Default::default(), Default::default());
-            app.ui.tab = "SURFACE".into();
-            app.preferences.timeline_left = true;
-            app.preferences.timeline_left_browser_collapsed = collapsed;
-            app.publish_tab_accent(&ctx);
-            let bounds = Rect::from_min_size(Pos2::ZERO, vec2(600.0, 700.0));
-            let draw = |app: &mut SolveApp, events| {
-                crate::test_support::frame(&ctx, egui::RawInput { screen_rect: Some(bounds), events, ..Default::default() }, |ui| {
-                    browser(app, ui);
-                })
-            };
-            for _ in 0..3 {
-                draw(&mut app, vec![]);
-            }
-            let card = rect_of("browser:card").unwrap();
-            let header = rect_of("browser:header").unwrap();
-            // Hover at the bottom margin, far away from the disclosure and rotated title.
-            let at = if collapsed { card.center_bottom() - vec2(0.0, 2.0) } else { header.center() };
-            draw(&mut app, vec![egui::Event::PointerMoved(at)]);
-            let output = draw(&mut app, vec![egui::Event::PointerMoved(at)]);
-            assert_eq!(output.platform_output.cursor_icon, egui::CursorIcon::PointingHand);
-            let accent = solidcraft_theme::TabAccent::current(&ctx);
-            let mut hover = None;
-            for shape in &output.shapes {
-                crate::test_support::each_shape(&shape.shape, &mut |shape| {
-                    if let egui::Shape::Rect(rect) = shape
-                        && rect.fill == accent.soft
-                    {
-                        hover = Some(rect.clone());
-                    }
-                });
-            }
-            let hover =
-                hover.unwrap_or_else(|| panic!("dark={dark}, collapsed={collapsed}, at={at:?}, accent={accent:?}, shapes={:?}", output.shapes));
-            let inset = CARD_INSET + 1.0; // shared frame's inner margin and border
-            assert_eq!(hover.rect, if collapsed { card.shrink(inset) } else { header });
-            assert_eq!(hover.rect.left() - card.left(), inset);
-            assert_eq!(card.right() - hover.rect.right(), inset);
-            assert_eq!(hover.corner_radius, egui::CornerRadius::same(Tokens::get().radius_lg.saturating_sub(CARD_INSET as u8)));
-            if collapsed {
-                draw(&mut app, crate::test_support::pointer(at, true));
-                draw(&mut app, crate::test_support::pointer(at, false));
-                assert!(!app.preferences.timeline_left_browser_collapsed, "the bottom margin expands the rail");
-            }
-        }
-    }
-    solidcraft_theme::set_dark(previous);
 }
 
 /// #6907: a mesh body's row has its own icon and tooltip, so it can be told from a solid one.
@@ -1054,6 +951,39 @@ fn hiding_or_showing_body_or_sketch_updates_row_dimming() {
     assert!(!body_hidden(&h, "One"));
 }
 
+/// #7267: the design's top row is named after its file, like its tab, even when the file was
+/// renamed away from the name stored in the design; a rename since the last save shows at once.
+#[test]
+fn the_top_row_follows_the_file_name_like_the_tab() {
+    let mut h = Harness::new();
+    h.app.home.open = false;
+    h.app.run("component.rename", json!({"component": 0, "name": "Plate"})).unwrap();
+    h.app.session.mark_saved();
+    h.settle();
+    assert!(handle_at("row:Plate").is_some(), "an unsaved design shows its own name");
+    // The file was saved as one name and renamed on disk: the document itself is unchanged.
+    h.app.session.path = Some("parts/Plate rev C.solidcraft".into());
+    h.settle();
+    assert!(handle_at("row:Plate rev C").is_some(), "the top row shows the file's name");
+    assert!(handle_at("row:Plate").is_none(), "not the name stored in the design");
+    assert_eq!(crate::documents::tabs_info(&h.app)[0].0, "Plate rev C", "the tab shows the same name");
+    h.app.run("component.rename", json!({"component": 0, "name": "Lid"})).unwrap();
+    h.settle();
+    assert!(handle_at("row:Lid").is_some(), "a rename since the last save shows on the top row");
+    assert_eq!(crate::documents::tabs_info(&h.app)[0].0, "Lid");
+    // With the preference off, a saved design's tab and top row show its own name, as before.
+    h.app.session.mark_saved();
+    h.app.session.path = Some("parts/Plate rev D.solidcraft".into());
+    h.app.preferences.names_from_file = false;
+    h.settle();
+    assert!(handle_at("row:Lid").is_some(), "the design's own name, not the file's");
+    assert!(handle_at("row:Plate rev D").is_none());
+    assert_eq!(crate::documents::tabs_info(&h.app)[0].0, "Lid");
+    h.app.preferences.names_from_file = true;
+    h.settle();
+    assert!(handle_at("row:Plate rev D").is_some(), "on again: the file's name");
+}
+
 /// Draw content without either panel host. Changing submission order does not change IDs,
 /// screen placement or the input stream, so these exercise the adapters' shared boundary.
 fn semantic_frame(h: &mut Harness, owners: &[ContentOwner], events: Vec<egui::Event>, modifiers: egui::Modifiers) {
@@ -1141,8 +1071,7 @@ fn history_bodies_and_origin_work_with_browser_hidden() {
     let mut h = Harness::new();
     three_bodies(&mut h);
     h.app.ui.show_browser = false;
-    h.app.preferences.timeline_left = true;
-    h.app.preferences.timeline_left_width = 260.0;
+    h.app.run("view.history_layout", json!({"dock":"left","width":260})).unwrap();
     h.app.preferences.timeline_origin_bodies = true;
     h.app.tree.expanded.insert("origin".into());
     h.frames(4);
@@ -1300,10 +1229,9 @@ fn browser_body_reveal_survives_history_only_and_unrelated_presentations() {
     }
     h.app.ui.show_browser = true;
     h.app.ui.show_timeline = false;
-    h.app.preferences.browser_collapsed = true;
-    h.frames(3);
+    set_browser_collapsed(&mut h, true);
     assert_eq!(h.app.tree.reveal.as_deref(), Some("Three"), "collapsed Browser does not acknowledge a row");
-    h.app.preferences.browser_collapsed = false;
+    set_browser_collapsed(&mut h, false);
     for _ in 0..4 {
         semantic_frame(&mut h, &[ContentOwner::HISTORY, ContentOwner::BROWSER], Vec::new(), egui::Modifiers::NONE);
     }
@@ -1319,7 +1247,7 @@ fn history_reveal_survives_hidden_and_nonmatching_content_in_all_existing_compos
         let feature = h.app.run("solid.box", json!({"length":10,"width":10,"height":10,"name":"Target","body_name":"Body"})).unwrap()["feature"]
             .as_u64()
             .unwrap();
-        h.app.preferences.timeline_left = left;
+        h.app.run("view.history_layout", json!({"dock":if left { "left" } else { "bottom" }})).unwrap();
         h.app.preferences.history_in_browser = combined;
         h.app.ui.show_timeline = false;
         h.app.ui.show_browser = false;
@@ -1330,7 +1258,6 @@ fn history_reveal_survives_hidden_and_nonmatching_content_in_all_existing_compos
         assert_eq!(h.app.tree.timeline_reveal, Some(feature), "Bodies/Origin is not a feature presentation");
         if combined {
             h.app.ui.show_browser = true;
-            h.app.preferences.browser_collapsed = false;
             h.app.tree.collapsed.insert("c0/history".into());
             h.frames(3);
             assert_eq!(h.app.tree.timeline_reveal, Some(feature), "a folded combined History retains the request");
@@ -1476,7 +1403,7 @@ fn disappearing_semantic_drag_owner_releases_only_its_payload_and_widget_capture
             egui::Modifiers::NONE,
         );
         semantic_frame(&mut h, &[owner], vec![egui::Event::PointerMoved(from + vec2(10.0, 0.0))], egui::Modifiers::NONE);
-        assert!(egui::DragAndDrop::has_payload_of_type::<Drag>(&h.ctx));
+        assert!(egui::DragAndDrop::has_payload_of_type::<Dragged>(&h.ctx));
         semantic_frame(&mut h, &[], Vec::new(), egui::Modifiers::NONE);
         assert!(!egui::DragAndDrop::has_any_payload(&h.ctx));
         assert!(h.ctx.dragged_id().is_none());
@@ -1632,8 +1559,8 @@ fn switching_documents_cancels_body_payloads_before_matching_incoming_groups_can
             let to = semantic_at(owner, "Destination (0)");
             semantic_drag_start(&mut h, &owners, from);
             let outgoing = h.app.session.uid;
-            let payload = egui::DragAndDrop::payload::<Drag>(&h.ctx).unwrap();
-            assert_eq!(payload.source.session, outgoing);
+            let payload = egui::DragAndDrop::payload::<Dragged>(&h.ctx).unwrap();
+            assert_eq!(payload.source.scope, outgoing);
             let stale_payload = (*payload).clone();
             if !after_begin {
                 crate::documents::switch(&mut h.app, tab);
@@ -1648,7 +1575,7 @@ fn switching_documents_cancels_body_payloads_before_matching_incoming_groups_can
             assert_ne!(h.app.session.uid, outgoing);
             assert_eq!(h.app.session.doc.to_json(), document);
             assert_eq!(h.app.session.undo.len(), undo);
-            assert!(!egui::DragAndDrop::has_payload_of_type::<Drag>(&h.ctx));
+            assert!(!egui::DragAndDrop::has_payload_of_type::<Dragged>(&h.ctx));
             assert!(h.ctx.dragged_id().is_none());
             // Even a delayed payload reintroduced after cancellation must fail provenance
             // validation; matching body/group names cannot make it belong to the new tab.
@@ -1685,7 +1612,7 @@ fn switching_documents_cancels_occurrence_payloads_with_matching_component_and_p
         let from = semantic_occurrence_at(ContentOwner::BROWSER, occurrence);
         let to = semantic_occurrence_at(ContentOwner::BROWSER, destination);
         semantic_drag_start(&mut h, &owners, from);
-        assert!(egui::DragAndDrop::has_payload_of_type::<OccurrenceDrag>(&h.ctx));
+        assert!(egui::DragAndDrop::has_payload_of_type::<Dragged>(&h.ctx));
         if !after_begin {
             crate::documents::switch(&mut h.app, tab);
         }
@@ -1698,7 +1625,7 @@ fn switching_documents_cancels_occurrence_payloads_with_matching_component_and_p
         );
         assert_eq!(h.app.session.doc.to_json(), document);
         assert_eq!(h.app.session.undo.len(), undo);
-        assert!(!egui::DragAndDrop::has_payload_of_type::<OccurrenceDrag>(&h.ctx));
+        assert!(!egui::DragAndDrop::has_payload_of_type::<Dragged>(&h.ctx));
         assert!(h.ctx.dragged_id().is_none());
     }
 }
@@ -1749,9 +1676,9 @@ fn document_switch_drops_shift_anchors_without_changing_the_incoming_document_or
         }
         let at = semantic_at(owner, "One");
         semantic_click(&mut h, &owners, at, egui::Modifiers::NONE);
-        assert!(h.app.tree.content.owner(owner).unwrap().anchor.is_some());
+        assert!(h.app.tree.content.owner(owner).unwrap().browser.anchor().is_some());
         semantic_frame_switch(&mut h, &owners, Vec::new(), egui::Modifiers::NONE, Some(tab));
-        assert!(h.app.tree.content.owner(owner).unwrap().anchor.is_none());
+        assert!(h.app.tree.content.owner(owner).unwrap().browser.anchor().is_none());
         let at = semantic_at(owner, "Two");
         semantic_click(&mut h, &owners, at, egui::Modifiers { shift: true, ..Default::default() });
         assert_eq!(h.app.session.selection, [Sel::Body { name: "Two".into() }], "A's One anchor cannot extend B's selection");
@@ -1831,7 +1758,7 @@ fn hidden_body_or_group_drag_source_cannot_drop_through_a_surviving_history_targ
             let document = h.app.session.doc.to_json();
             let undo = h.app.session.undo.len();
             semantic_drag_start(&mut h, &owners, from);
-            assert!(egui::DragAndDrop::has_payload_of_type::<Drag>(&h.ctx));
+            assert!(egui::DragAndDrop::has_payload_of_type::<Dragged>(&h.ctx));
             let presented = if keep_source { &owners[..] } else { &[ContentOwner::HISTORY][..] };
             semantic_frame(
                 &mut h,
@@ -1849,7 +1776,7 @@ fn hidden_body_or_group_drag_source_cannot_drop_through_a_surviving_history_targ
                 assert_eq!(h.app.session.doc.to_json(), document);
                 assert_eq!(h.app.session.undo.len(), undo);
             }
-            assert!(!egui::DragAndDrop::has_payload_of_type::<Drag>(&h.ctx));
+            assert!(!egui::DragAndDrop::has_payload_of_type::<Dragged>(&h.ctx));
             assert!(h.ctx.dragged_id().is_none());
         }
     }
@@ -1877,7 +1804,7 @@ fn hidden_occurrence_source_cannot_reparent_or_reorder_through_a_surviving_adapt
             let document = h.app.session.doc.to_json();
             let undo = h.app.session.undo.len();
             semantic_drag_start(&mut h, &owners, from);
-            assert!(egui::DragAndDrop::has_payload_of_type::<OccurrenceDrag>(&h.ctx));
+            assert!(egui::DragAndDrop::has_payload_of_type::<Dragged>(&h.ctx));
             let presented = if keep_source { &owners[..] } else { std::slice::from_ref(&adapter) };
             semantic_frame(
                 &mut h,
@@ -1892,7 +1819,7 @@ fn hidden_occurrence_source_cannot_reparent_or_reorder_through_a_surviving_adapt
                 assert_eq!(h.app.session.doc.to_json(), document);
                 assert_eq!(h.app.session.undo.len(), undo);
             }
-            assert!(!egui::DragAndDrop::has_payload_of_type::<OccurrenceDrag>(&h.ctx));
+            assert!(!egui::DragAndDrop::has_payload_of_type::<Dragged>(&h.ctx));
             assert!(h.ctx.dragged_id().is_none());
         }
     }
@@ -1941,7 +1868,7 @@ fn semantic_entrypoints_reject_replaced_sessions_even_without_a_documents_hook()
     semantic_click(&mut h, &owners, from, egui::Modifiers::NONE);
     let to = semantic_at(ContentOwner::BROWSER, "Destination (0)");
     semantic_drag_start(&mut h, &owners, from);
-    assert!(egui::DragAndDrop::has_payload_of_type::<Drag>(&h.ctx));
+    assert!(egui::DragAndDrop::has_payload_of_type::<Dragged>(&h.ctx));
     h.app.session.replace_design(incoming);
     semantic_frame(
         &mut h,
@@ -1951,8 +1878,8 @@ fn semantic_entrypoints_reject_replaced_sessions_even_without_a_documents_hook()
     );
     assert_eq!(h.app.session.doc.to_json(), document);
     assert_eq!(h.app.session.undo.len(), undo);
-    assert!(h.app.tree.content.owner(ContentOwner::BROWSER).unwrap().anchor.is_none());
-    assert!(!egui::DragAndDrop::has_payload_of_type::<Drag>(&h.ctx));
+    assert!(h.app.tree.content.owner(ContentOwner::BROWSER).unwrap().browser.anchor().is_none());
+    assert!(!egui::DragAndDrop::has_payload_of_type::<Dragged>(&h.ctx));
     assert!(h.ctx.dragged_id().is_none());
 }
 
@@ -2200,4 +2127,46 @@ fn parked_reveals_are_pruned_against_their_own_document_when_the_target_is_remov
     assert_eq!(h.app.tree.timeline_reveal, Some(feature), "the request returns to A before ordinary target pruning");
     semantic_frame(&mut h, &[], Vec::new(), egui::Modifiers::NONE);
     assert_no_pending_reveals(&h);
+}
+
+/// #7533: the first click of a double-click that comes a little after a click on the same name
+/// does not rename it; the double-click edits the feature, and a rename waits out the
+/// double-click delay.
+#[test]
+fn a_double_click_after_a_slow_click_edits_instead_of_renaming() {
+    let mut h = Harness::new();
+    let feature = h.app.run("solid.box", json!({"length":10,"width":10,"height":10,"body_name":"One"})).unwrap()["feature"].as_u64().unwrap();
+    h.app.tree.expanded.insert("c0/features".into());
+    h.settle();
+    let row = json!({"handle": format!("row:browser-feature:c0:{feature}")});
+    h.step(&json!({"click": row})).unwrap();
+    h.frames(30);
+    h.step(&json!({"click": row})).unwrap();
+    assert!(h.app.menu.rename.is_none(), "the rename waits out the double-click delay");
+    h.step(&json!({"click": row, "double": true})).unwrap();
+    h.frames(30);
+    assert!(h.app.menu.rename.is_none(), "a double-click drops the held rename");
+    assert!(h.app.dialog.as_ref().is_some_and(|d| d.editing.is_some_and(|(id, _)| id == feature)), "the double-click edits the feature");
+    crate::dialogs::cancel(&mut h.app);
+    h.frames(40);
+    // A double-click a while after an earlier double-click edits again.
+    h.step(&json!({"click": row, "double": true})).unwrap();
+    h.frames(2);
+    assert!(h.app.menu.rename.is_none());
+    assert!(h.app.dialog.as_ref().is_some_and(|d| d.editing.is_some_and(|(id, _)| id == feature)), "the second double-click edits too");
+}
+
+/// A component's body placed twice appears as two Browser rows.
+#[test]
+fn the_browser_lists_one_body_per_placement() {
+    let (mut h, _, _) = crate::test_support::component_box();
+    h.app.preferences.browser_components_open = true;
+    h.settle();
+    h.app.run("occurrence.copy", json!({"component": "Block", "translate": [0, 40, 0]})).unwrap();
+    h.settle();
+    assert_eq!(crate::open_meshing::session_world(&h.app.session).bodies.len(), 2);
+    // One body row under each placement's row, both labelled with the body's own name.
+    let rows = drawn_rows();
+    let body_rows = rows.iter().filter(|(label, ..)| label == "Body1").count();
+    assert_eq!(body_rows, 2, "a body row per placement: {rows:?}");
 }

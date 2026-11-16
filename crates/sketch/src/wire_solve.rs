@@ -19,7 +19,7 @@ use solidcore_record::Vec3;
 use solidcraft_geom::prelude::*;
 
 use crate::linalg::{self, Mat};
-use crate::model::{MAX_CONSTRAINTS, Result, Sketch, SketchError, in_range3};
+use crate::model::{CEILING_CONSTRAINTS, Result, Sketch, SketchError, in_range3};
 use crate::union_find::{find, union};
 use crate::wire::{Wire, arc_from_3_points, arc_polyline, drawn_polyline};
 
@@ -571,7 +571,9 @@ impl Sketch {
 
     /// Check every stored 3D constraint.
     pub fn validate_wire_constraints(&self) -> Result<()> {
-        if self.wire_constraints.len() > MAX_CONSTRAINTS {
+        // The ceiling, as for a sketch's planar constraints: a design made where the limit was
+        // raised opens anywhere (#10874).
+        if self.wire_constraints.len() > CEILING_CONSTRAINTS {
             return Err(SketchError::TooLarge);
         }
         let drawn = self.drawn_wires();
@@ -616,7 +618,7 @@ impl Sketch {
         if let Some(same) = self.wire_constraints.iter().find(|c| c.kind.same_dimension(&kind)) {
             return Err(SketchError::Invalid(format!("that is already dimensioned by {}", same.id)));
         }
-        if self.constraints.len().saturating_add(self.wire_constraints.len()) >= MAX_CONSTRAINTS {
+        if self.constraints.len().saturating_add(self.wire_constraints.len()) >= crate::limits::max_constraints() {
             return Err(SketchError::TooLarge);
         }
         let id = self.fresh("k")?;

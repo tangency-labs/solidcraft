@@ -688,7 +688,8 @@ pub(super) fn assert_keys(schema: Schema, fields: &[&str]) {
 /// (strict's comes from `TypedContract::check` and serde), and the handler may stop first at
 /// one the contract can't see (against the design: a pick that finds nothing, a missing sketch,
 /// an expression that doesn't evaluate; one of two keys, such as `radius` or `diameter`; an
-/// empty list).
+/// empty list). A value a helper reads as another command's (the pick-up's `appearance.chain`
+/// target) names that command with the check off and the one that was called in strict.
 /// Each module's `strict_keeps_todays_errors` calls this with its commands' cases; each runs
 /// after `sketch_rectangle`.
 pub(super) fn assert_strict_keeps_todays_errors(cases: &[(&str, Value)]) {
@@ -1009,8 +1010,10 @@ fn references_match_the_reference_reader() {
         (json!({"plane": 2.5, "axis": "X"}), false),
         (json!({"point": [1, 2, 3], "plane": 2.5}), true),
         (json!({"axis": "X"}), true),
+        (json!({"axis": "o:2/3/origin/X"}), true),
         (json!({"axis": 1, "construct_point": "P"}), true),
         (json!({"construct_point": "P"}), true),
+        (json!({"construct_point": "o:2/3/origin/O"}), true),
         (json!({"construct_point": 1}), false),
         (json!("Shelf"), true),
         (json!(""), true),
@@ -1163,6 +1166,13 @@ fn revolve_axes_match_the_axis_reader() {
         (json!({"dir": [0, 1]}), false),
         (json!({"dir": "y"}), false),
         (json!({"dir": [0, 0, 1], "type": "sketch_line", "extra": 1}), true),
+        // A line of another sketch, named by its owner (#6548), also as saved with its type.
+        (json!({"sketch": 12, "curve": "l1"}), true),
+        (json!({"sketch": "Axis", "curve": "l1"}), true),
+        (json!({"curve": "l1"}), true),
+        (json!({"type": "sketch_line", "sketch": 12, "curve": "l1"}), true),
+        (json!({"sketch": 12}), false),
+        (json!({"sketch": 12, "curve": 5}), false),
         (json!({"type": "world", "axis": "X"}), true),
         (json!({"type": "world", "axis": "X", "origin": 5, "dir": "q"}), true),
         (json!({"type": "world", "axis": "x"}), false),

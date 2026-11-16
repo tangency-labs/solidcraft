@@ -1,4 +1,5 @@
 use super::*;
+use solidcraft_geom::MeshGeom;
 use solidcraft_render::transmission::{Transmission, subsurface::Subsurface};
 
 fn slab_body(name: &str, scale: Vec3, shift: Vec3, ior: f64, absorption: Vec3) -> ProductMesh {

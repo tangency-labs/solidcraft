@@ -86,6 +86,10 @@
 //!   above 2 are undefined behaviour upstream; here they return `None` or an error.
 //! - `SM_ASSERT*` checks and `SM_DEBUG_CODE` blocks are compiled out upstream (release
 //!   build) and omitted.
+//! - `IsPlanar`'s normal runs along the last flat interval's direction; upstream's is
+//!   `basis[0] × basis[1]` whichever interval is flat, which lies in the plane of a box
+//!   flat along its first or second basis vector only (WR-790). A box flat along its last,
+//!   or not flat, keeps upstream's normal.
 
 use crate::error::{Result, SolidError, SM_ERR};
 use crate::geom::extent1d::{Extent1d, ExtentPointType};
@@ -216,7 +220,9 @@ pub struct Planar {
     pub is_planar: bool,
     /// The box centre (`pOptPlanePoint`).
     pub point: Point3,
-    /// `basis[0] × basis[1]` (`pOptPlaneNormal`; not unitised, as upstream).
+    /// Along the last flat interval's direction: the cross product of the other two basis
+    /// vectors in cyclic order; `basis[0] × basis[1]` when the last interval is flat or
+    /// none is (`pOptPlaneNormal`; not unitised, as upstream).
     pub normal: Vec3,
     /// Smallest half interval length (`pOptActualDeviation`).
     pub deviation: f64,
@@ -446,17 +452,17 @@ impl PseudoBox {
     ///
     /// # Errors
     ///
-    /// `SM_ERR` ([`SolidError::Upstream`]) for an undefined box or a singular basis
+    /// `SM_ERR` ([`GeomFailure`](crate::error::geom::GeomFailure)) for an undefined box or a singular basis
     /// (`SM_IS_ZERO(det)`).
     pub fn invert_absolute(&self, p: Point3) -> Result<Point3> {
         const OP: &str = "geom::pseudo_box::PseudoBox::invert_absolute";
         if !self.assert_defined() {
-            return Err(SolidError::sm_err(OP));
+            return Err(SolidError::geom_failed(OP, "the box is not defined"));
         }
         let [b0, b1, b2] = self.basis;
         let det = determinant_3_vectors(b0, b1, b2);
         if is_zero(det) {
-            return Err(SolidError::sm_err(OP));
+            return Err(SolidError::geom_failed(OP, "the box's basis is singular"));
         }
         Ok(Vec3::new(
             determinant_3_vectors(p, b1, b2) / det,
@@ -694,7 +700,7 @@ impl PseudoBox {
 
     /// Whether some half interval length is below `tol` (`IsPlanar`; planes, lines and
     /// points are all planar; `tol == EFF_ZERO`, the upstream default, means "scaled
-    /// zero of the box").
+    /// zero of the box"), with the normal across the last flat interval.
     #[must_use]
     pub fn is_planar(&self, tol: f64) -> Planar {
         let [i0, i1, i2] = &self.intervals;
@@ -704,10 +710,22 @@ impl PseudoBox {
             .iter()
             .filter(|&&d| d / 2.0 < scaled_zero)
             .count();
+        // across the last flat interval: the other two basis vectors' cross product, in
+        // cyclic order (WR-790: upstream's is basis[0] x basis[1] whichever interval is
+        // flat); a box flat along its last, or not flat at all, keeps basis[0] x basis[1]
+        let [b0, b1, b2] = self.basis;
+        let flat = |d: f64| d / 2.0 < scaled_zero;
+        let normal = if !flat(d2) && flat(d1) {
+            b2.cross(b0)
+        } else if !flat(d2) && flat(d0) {
+            b1.cross(b2)
+        } else {
+            b0.cross(b1)
+        };
         Planar {
             is_planar: degen_dim_cnt >= 1,
             point: self.evaluate(0.5, 0.5, 0.5),
-            normal: self.basis[0].cross(self.basis[1]),
+            normal,
             deviation: min3(d0, d1, d2) / 2.0,
         }
     }
@@ -1221,7 +1239,6 @@ fn add_rotated_edge_extrema(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::kernel::Kernel;
 
     fn rotated_basis() -> [Vec3; 3] {
         let s = std::f64::consts::FRAC_1_SQRT_2;
@@ -1287,6 +1304,49 @@ mod tests {
         assert!(flat.is_planar(EFF_ZERO).is_planar);
     }
 
+    /// The normal of a flat box runs along its last flat basis vector: a box flat along its
+    /// first or second basis vector only (a half ring's box on the world axes is flat along
+    /// x) gets that vector, where `basis[0] × basis[1]` lay in the plane. A box flat along its
+    /// last, or flat nowhere, keeps `basis[0] × basis[1]`. Every set of flat intervals, the
+    /// flat ones a hair thick (below the box's scaled zero) or none.
+    #[test]
+    fn planar_normal_is_the_flat_direction() {
+        let basis = rotated_basis();
+        // (flat intervals, the basis vector the normal runs along)
+        let cases: [(&[usize], usize); 8] = [
+            (&[], 2),
+            (&[0], 0),
+            (&[1], 1),
+            (&[2], 2),
+            (&[0, 1], 1),
+            (&[0, 2], 2),
+            (&[1, 2], 2),
+            (&[0, 1, 2], 2),
+        ];
+        for (flat, along) in cases {
+            let mut pb = PseudoBox::new();
+            pb.set_basis(basis[0], basis[1], basis[2]).unwrap();
+            for i in 0..3 {
+                let ivl = if flat.contains(&i) {
+                    Extent1d::from_min_max(0.5, 0.5 + 1e-15)
+                } else {
+                    Extent1d::from_min_max(-1.0, 2.0)
+                };
+                pb.set_interval(i, ivl).unwrap();
+            }
+            let planar = pb.is_planar(EFF_ZERO);
+            assert_eq!(planar.is_planar, !flat.is_empty(), "flat {flat:?}");
+            let n = planar.normal.unitize().unwrap();
+            for (i, b) in basis.iter().enumerate() {
+                let want = if i == along { 1.0 } else { 0.0 };
+                assert!(
+                    (n.dot(*b).abs() - want).abs() < 1e-12,
+                    "flat {flat:?}: normal {n:?} against basis {i}"
+                );
+            }
+        }
+    }
+
     #[test]
     fn singular_basis_rejected() {
         let mut pb = PseudoBox::new();
@@ -1295,49 +1355,42 @@ mod tests {
         assert!(pb.set_interval(3, Extent1d::new()).is_err());
     }
 
-    /// Upstream quirk kept by `Extent3d::circumscribe`: the basis -> axis map is
-    /// read as axis -> basis. `Extent3d::circumscribe_with` reads it by basis behind
-    /// `Kernel::fixes.circumscribe_axis_map_by_basis` (WR-5).
+    /// `Extent3d::circumscribe` reads the basis -> axis map by basis (WR-5): a cycled
+    /// basis puts each interval on its basis's axis.
     #[test]
-    fn circumscribe_axis_cycle_quirk() {
+    fn circumscribe_axis_cycle_by_basis() {
         let ivl = Extent1d::from_min_max;
         let pb = PseudoBox::from_basis_intervals(
             [Vec3::Y, Vec3::Z, Vec3::X],
             [ivl(1.0, 2.0), ivl(3.0, 5.0), ivl(-7.0, -6.0)],
         );
         assert_eq!(pb.is_axis_aligned(), Some([2, 3, 1]));
-
-        // Pinned default: the map is read as axis -> basis, so basis 0's y interval
-        // lands on x, basis 1's z interval on y and basis 2's x interval on z.
-        let pinned = Extent3d::from_pseudo_box(&pb);
-        assert_eq!(pinned.min(), Vec3::new(3.0, -7.0, 1.0));
-        assert_eq!(pinned.max(), Vec3::new(5.0, -6.0, 2.0));
-
-        let mut k = Kernel::default();
-        k.fixes.circumscribe_axis_map_by_basis = true;
-        let fixed = Extent3d::from_pseudo_box_with(&pb, &k);
+        let fixed = Extent3d::from_pseudo_box(&pb);
         assert_eq!(fixed.min(), Vec3::new(-7.0, 1.0, 3.0));
         assert_eq!(fixed.max(), Vec3::new(-6.0, 2.0, 5.0));
 
-        // Controls: an identity basis and a pure sign flip read the same either way.
-        for (basis, intervals, map) in [
+        // Controls: an identity basis and a pure sign flip.
+        for (basis, map, min, max) in [
             (
                 [Vec3::X, Vec3::Y, Vec3::Z],
-                [ivl(1.0, 2.0), ivl(3.0, 5.0), ivl(-7.0, -6.0)],
                 [1, 2, 3],
+                Vec3::new(1.0, 3.0, -7.0),
+                Vec3::new(2.0, 5.0, -6.0),
             ),
             (
                 [-Vec3::X, Vec3::Y, -Vec3::Z],
-                [ivl(1.0, 2.0), ivl(3.0, 5.0), ivl(-7.0, -6.0)],
                 [-1, 2, -3],
+                Vec3::new(-2.0, 3.0, 6.0),
+                Vec3::new(-1.0, 5.0, 7.0),
             ),
         ] {
-            let control = PseudoBox::from_basis_intervals(basis, intervals);
+            let control = PseudoBox::from_basis_intervals(
+                basis,
+                [ivl(1.0, 2.0), ivl(3.0, 5.0), ivl(-7.0, -6.0)],
+            );
             assert_eq!(control.is_axis_aligned(), Some(map));
-            let pinned = Extent3d::from_pseudo_box(&control);
-            let fixed = Extent3d::from_pseudo_box_with(&control, &k);
-            assert_eq!(fixed.min(), pinned.min());
-            assert_eq!(fixed.max(), pinned.max());
+            let e = Extent3d::from_pseudo_box(&control);
+            assert_eq!((e.min(), e.max()), (min, max));
         }
     }
 

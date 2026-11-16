@@ -178,6 +178,7 @@ pub(super) fn draft(app: &SolveApp) -> Result<RenderSetup, String> {
                     linear_exr: studio.linear_exr,
                     tone_map: studio.tone_map,
                     denoise: studio.denoise,
+                    clamp_indirect: studio.clamp_indirect,
                     denoise_settings: studio.denoise_settings,
                     denoise_diagnostics: studio.denoise_diagnostics,
                     supersampling: studio.supersampling,
@@ -423,6 +424,7 @@ fn load_values(view: &mut super::ViewState, setup: RenderSetup) {
             view.studio.linear_exr = options.linear_exr;
             view.studio.tone_map = options.tone_map;
             view.studio.denoise = options.denoise;
+            view.studio.clamp_indirect = options.clamp_indirect;
             view.studio.denoise_settings = options.denoise_settings;
             view.studio.denoise_diagnostics = options.denoise_diagnostics;
             view.studio.supersampling = options.supersampling;
@@ -513,7 +515,9 @@ pub(super) fn same_model_source(app: &SolveApp, document: &std::sync::Weak<solid
         timeline_groups,
         browser_order,
         named_views,
+        notes,
         visibility,
+        plugin_data,
     )
 }
 

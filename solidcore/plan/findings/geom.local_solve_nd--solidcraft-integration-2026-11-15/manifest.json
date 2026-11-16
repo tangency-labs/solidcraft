@@ -1,0 +1,160 @@
+{
+  "date": "2026-11-15",
+  "scope": "Compact selected evidence only; no helpers, full Debug snapshots or build products",
+  "files": [
+    {
+      "file": "issue948-root-cause.json",
+      "bytes": 11067,
+      "sha256": "fef71bcbc77a515b22fda28ec9221b9051f28fe6688b3b04042826da7582fce5",
+      "source_identifier": "private-run/issue948-root-cause.json",
+      "notes": "Only provenance paths sanitized; numeric values unchanged."
+    },
+    {
+      "file": "issue948-root-cause.md",
+      "bytes": 5803,
+      "sha256": "5c2c142010abd7490dc135c8a2fb311045dfd9f2acd37bea66176fe57b0ff1fe",
+      "source_identifier": "private-run/issue948-root-cause.md",
+      "notes": "Private helper/log listing replaced by bundled evidence links; mathematical findings unchanged."
+    },
+    {
+      "file": "wr383-propagation.json",
+      "bytes": 36643,
+      "sha256": "88cbc1294b76b8684366d58be80c9750795f0eb3f38219b0ffa5110d9e06b025",
+      "source_identifier": "private-run/wr383-propagation.json",
+      "notes": "Compact: full UV geometry Debug strings omitted; numeric certificates, endpoints and failed reports preserved."
+    },
+    {
+      "file": "wr383-propagation.md",
+      "bytes": 11462,
+      "sha256": "f8af382139e2cb48be1db27a1e663e373fcaa1444861e8bacb1851a7dc5a78e9",
+      "source_identifier": "private-run/wr383-propagation.md",
+      "notes": "Local paths sanitized; archive scope and filed issue link added."
+    },
+    {
+      "file": "plane0599-certificate.json",
+      "bytes": 5438,
+      "sha256": "375aeb074c9c1298c52583bbdd248fc69dcf3c0f2fb7be7d7c52180aa7f18a39",
+      "source_identifier": "private-run/golden-review/plane0599-certificate.json",
+      "notes": "Exact copy; scientific plot/certificate of typed measured degree-one geometry."
+    },
+    {
+      "file": "plane0599-before.png",
+      "bytes": 127550,
+      "sha256": "88977544cb973c96336c12d78a6c7556a8c843ab32ddb3de2e32ef6bc9d9de30",
+      "source_identifier": "private-run/golden-review/plane0599-before.png",
+      "notes": "Exact copy; scientific plot/certificate of typed measured degree-one geometry."
+    },
+    {
+      "file": "plane0599-after.png",
+      "bytes": 125473,
+      "sha256": "45f69cbca67c3bf42eb1161c69088d5dbd4275f624f8445268cb0e8eb84beef1",
+      "source_identifier": "private-run/golden-review/plane0599-after.png",
+      "notes": "Exact copy; scientific plot/certificate of typed measured degree-one geometry."
+    },
+    {
+      "file": "mat0076-main-ci-off-off.png",
+      "bytes": 19114,
+      "sha256": "e8b131ba5fc264457ab0ae84ca9a48d7e1f897161a90ef5fabdfe404c5edcdff",
+      "source_identifier": "private-run/mat0076-render/main-ci-off-off/mat0076.png",
+      "notes": "Exact actual-body display mesh; not a body validity certificate."
+    },
+    {
+      "file": "mat0076-main-ci-both-old-options-on-on.png",
+      "bytes": 19106,
+      "sha256": "3f6828ff08dee2008ad78a5d22e5c5d0afb20934e6fcc44fed91993b2bc8d05d",
+      "source_identifier": "private-run/mat0076-render/main-ci-both-old-options-on-on/mat0076.png",
+      "notes": "Exact actual-body display mesh; not a body validity certificate."
+    },
+    {
+      "file": "mat0076-render-provenance.json",
+      "bytes": 9419,
+      "sha256": "cd74764f83ea1ca556db8132a4a5ac4ea66fff5c10ac9c16e66e5fb3dac8a50e",
+      "source_identifier": "private-run/mat0076-render/metadata",
+      "notes": "Compact actual mesh provenance and all-exact numerical equivalence checks, without geometry Debug dumps or local invocation paths."
+    },
+    {
+      "file": "wr383-schematic/wr383-endpoint-shift.vectorcraft",
+      "bytes": 134034,
+      "sha256": "c38d1a9b82e60fe8fb944b0dc559bb94c0284eaba9b42913675275ac82d81b9e",
+      "source_identifier": "private-run/wr383-schematic/wr383-endpoint-shift.vectorcraft",
+      "notes": "Exact exported diagram asset; mechanism schematic, not a new measured B-rep."
+    },
+    {
+      "file": "wr383-schematic/wr383-endpoint-shift.svg",
+      "bytes": 10689,
+      "sha256": "09420c2ec8faabb32f3647b3df2189f584be0bb0754e9f7523da74f0ab329f3d",
+      "source_identifier": "private-run/wr383-schematic/wr383-endpoint-shift.svg",
+      "notes": "Exact exported diagram asset; mechanism schematic, not a new measured B-rep."
+    },
+    {
+      "file": "wr383-schematic/wr383-endpoint-shift.png",
+      "bytes": 85496,
+      "sha256": "0e63cb5a9343ae0a3afd44f950ddd982741e0333b855e2049b10624f43692889",
+      "source_identifier": "private-run/wr383-schematic/wr383-endpoint-shift.png",
+      "notes": "Exact exported diagram asset; mechanism schematic, not a new measured B-rep."
+    },
+    {
+      "file": "wr383-schematic/commands.json",
+      "bytes": 29982,
+      "sha256": "463e62d6abcf0ebaf5b3376c6e9318818f1067e039fbe6dbf239e6104973176b",
+      "source_identifier": "private-run/wr383-schematic/commands.json",
+      "notes": "Official CLI drawing commands retained as document source data; output paths sanitized."
+    },
+    {
+      "file": "wr383-schematic/provenance.json",
+      "bytes": 3794,
+      "sha256": "20a26c604034a83f7adb5e8fbeed2ae1b08ff24ae0e77838bd254f306ac4800b",
+      "source_identifier": "private-run/wr383-schematic/provenance.json",
+      "notes": "Local paths sanitized; pre-sanitization JSON hashes retained and archived JSON hashes recorded separately."
+    },
+    {
+      "file": "wr383-schematic/README.md",
+      "bytes": 2121,
+      "sha256": "41715dd489377367a7a64c9ee8e1e1eb259e3f1c669686c4d6fc88ee9084bf16",
+      "source_identifier": "private-run/wr383-schematic/README.md",
+      "notes": "Drawing method, font limitation, live-text export and mathematical scope retained."
+    },
+    {
+      "file": "README.md",
+      "bytes": 3608,
+      "sha256": "532ec6c3b6b5500bf5ec018cb3b597fd4f28a181e9f24410cdfa4dba548a859c",
+      "source_identifier": "archive-selection",
+      "notes": "Artifact inventory, mathematical limits and provenance rules."
+    },
+    {
+      "file": "wr383-goldens.md",
+      "bytes": 7210,
+      "sha256": "60a20a7c103d302826629585526a4f4f7855ac55101da1dc7d5ae7081626f3cb",
+      "source_identifier": "private-run/wr383-goldens.md",
+      "notes": "P1/P8 analytic endpoint and exact-rational Bernstein certificate. Only local provenance paths sanitized; all numbers preserved. No helper included."
+    },
+    {
+      "file": "wr383-goldens.json",
+      "bytes": 56444,
+      "sha256": "02f8caa1bf5cffcdbd64c7c4c2411cbc5ee630f08c0057a07c338e347f1b063b",
+      "source_identifier": "private-run/wr383-goldens.json",
+      "notes": "P1/P8 analytic endpoint and exact-rational Bernstein certificate. Only local provenance paths sanitized; all numbers preserved. No helper included."
+    },
+    {
+      "file": "validation.json",
+      "bytes": 2653,
+      "sha256": "22c5c9094cc65c055c803201aaaa7f11b0a065fb2e313097e079e76d4fd9c814",
+      "source_identifier": "current integration verification",
+      "notes": "Curated final paired checks; app failure remains explicitly visible."
+    },
+    {
+      "file": "golden-delta.txt",
+      "bytes": 1895,
+      "sha256": "ce1ab614e5dccc539af88ba85e8f5f0c42cf3a1333086e2295b08bf02605502d",
+      "source_identifier": "current integration verification",
+      "notes": "Curated final paired checks; app failure remains explicitly visible."
+    },
+    {
+      "file": "gpu-fixture-audit.md",
+      "source_identifier": "private-run/gpu-flake-audit.md",
+      "notes": "Default-setting clean-main reproduction; local application gate stays failed. No helper or raw private log bundled.",
+      "bytes": 5007,
+      "sha256": "6dacfa9ce682bb5640dd15686505e7d3ea23bbf0facf8af64e4951abd05fbfbe"
+    }
+  ]
+}
