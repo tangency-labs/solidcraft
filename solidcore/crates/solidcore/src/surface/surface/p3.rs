@@ -359,7 +359,7 @@ pub enum ContinuationFold {
     },
     /// At `uv`, outside the surface's natural domain, the normal vanishes: its length
     /// `length` is not above `cutoff`, `SM_EFF_ZERO_SQRT` times the length of the normal
-    /// at the centre of the natural domain, or not above its own rounding bound. The
+    /// at the centre of the natural domain, or not above its own rounding bound `noise`. The
     /// continuation may run into a degenerate point (a pole or a cusp) there; the
     /// refusal is conservative and also catches a sample just past one of the surface's
     /// own degenerate edges.
@@ -368,8 +368,10 @@ pub enum ContinuationFold {
         uv: Point2,
         /// The length of the normal there.
         length: f64,
-        /// The cut-off it is not above.
+        /// The fork's cut-off.
         cutoff: f64,
+        /// The rounding bound of the normal there (`2 γ_4 |Du| |Dv|`).
+        noise: f64,
     },
     /// The first derivatives could not be evaluated at `uv` (or at the centre of the
     /// natural domain, for the cut-off of [`ContinuationFold::Vanishes`]), or the normal
@@ -1633,9 +1635,9 @@ impl Surface {
     /// samples (WR-407): two neighbouring samples whose unit normals turn back
     /// (`!(dot > 0)`, so a NaN dot refuses), a sample past the natural domain whose normal
     /// vanishes (not longer than `SM_EFF_ZERO_SQRT` times the normal at the natural
-    /// domain's centre, the fork's cut-off, or than its own rounding bound), or a sample that cannot be evaluated or whose
-    /// normal is not finite. Inside the natural domain (boundary included), a sample whose
-    /// computed normal is no longer than its own
+    /// domain's centre, the fork's cut-off, or than its own rounding bound), or a sample
+    /// that cannot be evaluated or whose normal is not finite. Inside the natural domain
+    /// (boundary included), a sample whose computed normal is no longer than its own
     /// rounding bound ([`Surface::step_normal_with_noise`]; an exact zero included, as
     /// at a degenerate edge where `Du` and `Dv` are parallel) has no direction and
     /// witnesses nothing; the next sample along its row and its column is compared with
@@ -1678,12 +1680,18 @@ impl Surface {
                 // neither is skipped there. A pole or a cusp the continuation runs into
                 // would become a singularity of the merged face. The refusal is sampled and
                 // conservative: a continuation sample just past one of the surface's own
-                // degenerate edges can be below the cut-off too, and also refuses.
+                // degenerate edges can be below the cut-off too, and also refuses. (A NaN
+                // `uv` would count as inside; the grid of a finite domain has none.)
                 if !Extent2d::from_points(uv, uv).is_contained_by(&natural, 0.0)
                     && (length.partial_cmp(&cutoff) != Some(core::cmp::Ordering::Greater)
                         || length <= noise)
                 {
-                    return Ok(Some(ContinuationFold::Vanishes { uv, length, cutoff }));
+                    return Ok(Some(ContinuationFold::Vanishes {
+                        uv,
+                        length,
+                        cutoff,
+                        noise,
+                    }));
                 }
                 // Inside the natural domain, no direction: within the cross product's own
                 // rounding (also an exact zero, and a normal whose length underflows).
@@ -2499,11 +2507,18 @@ mod tests {
         ])?;
         let domain = Extent2d::from_bounds(-1.0, 0.0, 1.0, 1.0);
         let fold = s.continuation_fold(&k, &domain)?;
-        let Some(ContinuationFold::Vanishes { uv, length, cutoff }) = fold else {
+        let Some(ContinuationFold::Vanishes {
+            uv,
+            length,
+            cutoff,
+            noise,
+        }) = fold
+        else {
             panic!("the collapsed edge at u = -1 refuses: {fold:?}");
         };
         assert_eq!(uv, Point2::new(-1.0, 0.0));
         assert!(length <= cutoff && cutoff > 0.0, "{length} {cutoff}");
+        assert!(noise.is_finite() && noise >= 0.0, "{noise}");
         // Within the natural domain the same surface is no fold.
         let inside = Extent2d::from_bounds(0.0, 0.0, 1.0, 1.0);
         assert_eq!(s.continuation_fold(&k, &inside)?, None);
