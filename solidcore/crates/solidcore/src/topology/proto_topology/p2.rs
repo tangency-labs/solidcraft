@@ -2136,8 +2136,9 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
     /// That needs both of `int_curve`'s ends to find one vertex definition of `start`,
     /// and every definition's curve, over its own interval, to lie within that
     /// definition's tolerance of its position, decided on a certified hull of the curve
-    /// ([`curve_piece_within`]). The vertex made from that definition then stands for
-    /// the whole curve. A curve with no certain hull, or one reaching past the
+    /// ([`curve_piece_within`]). That is what is proven; the vertex made from that
+    /// definition standing for the whole curve is argued: ImprintIntersections then fits
+    /// it to its edges and grows its tolerance to cover them. A curve with no certain hull, or one reaching past the
     /// tolerance, is not absorbed: the capture distance, which only says how far apart
     /// definitions are merged, never decides it.
     fn curve_inside_one_vertex(
@@ -2148,8 +2149,12 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
         int_curve: &Curve,
         eds: &[EdgeDefId],
     ) -> Result<bool> {
+        // A null or deleted proto vertex holds nothing: upstream's short branch raises
+        // no error for it, so neither does this test.
+        let Some(start) = start.filter(|&pv| self.proto_vertex(pv).is_some()) else {
+            return Ok(false);
+        };
         let ends = int_curve.ends(k)?;
-        let start = self.pv_live(start)?;
         let Some(vd0) = self.closest_vertex_definition(start, ends.start)? else {
             return Ok(false);
         };
@@ -2212,14 +2217,15 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
 
             // Not upstream (WR-306, #1058): a curve whose ends find one vertex definition
             // and that provably lies within that definition's tolerance is that vertex,
-            // not a closed edge on it. Upstream's test against twice our own tolerance
-            // stays as it is.
+            // not a closed edge on it, whether or not it is also shorter than upstream's
+            // test (twice our own tolerance), which stays as it is. Either way the
+            // vertex is marked for ImprintIntersections' fit, as the fork marks every
+            // speck it drops.
             let short = len < 2.0 * pe_tol;
-            let absorb =
-                !short && self.curve_inside_one_vertex(k, &*brep, start, int_curve, &eds)?;
+            let inside = self.curve_inside_one_vertex(k, &*brep, start, int_curve, &eds)?;
 
-            if short || absorb {
-                if absorb {
+            if short || inside {
+                if inside {
                     // The edges that end on our proto vertex end on our curve, up to its
                     // length away from the vertex: ImprintIntersections fits the vertex
                     // to them.
@@ -4169,8 +4175,16 @@ mod tests {
         // vertex's containment ball far wider than either line. The 5e-5 line lies within
         // the definition's tolerance, so the proto edge is that vertex (dropped, the proto
         // vertex marked). The 5e-4 line reaches past it: a real curve, which the capture
-        // distance alone never absorbs, so upstream's split runs.
-        for (length, absorbed) in [(5e-5, true), (5e-4, false)] {
+        // distance alone never absorbs, so upstream's split runs. Below upstream's short
+        // test (twice the proto edge's tolerance) the 1e-6 line is dropped either way, and
+        // the vertex is marked only when the line lies within the definition's tolerance
+        // (1e-4, not 1e-7).
+        for (length, vd_tol, dropped, marked) in [
+            (5e-5, 1e-4, true, true),
+            (5e-4, 1e-4, false, false),
+            (1e-6, 1e-4, true, true),
+            (1e-6, 1e-7, true, false),
+        ] {
             let k = Kernel::default();
             let mut geo = Geo::default();
             geo.curves.push(line([0.0, 0.0, 0.0], [length, 0.0, 0.0]));
@@ -4181,7 +4195,7 @@ mod tests {
             let pv = m.new_proto_vertex(p, 1e-5).unwrap();
             m.add_proto_vertex(pv);
             let (pc1, pc2) = (region_pc(R0), region_pc(R1));
-            let vd = VertexDefinition::new(&k, &geo, &pc1, &pc2, p, 1e-4, 1e-9, None).unwrap();
+            let vd = VertexDefinition::new(&k, &geo, &pc1, &pc2, p, vd_tol, 1e-9, None).unwrap();
             let vd = m.insert_vertex_definition(vd).unwrap();
             m.add_vertex_definition(pv, vd).unwrap();
 
@@ -4196,24 +4210,24 @@ mod tests {
                 .create_proto_edge(&k, &mut geo, Some(pv), Some(pv), &cc, &ci1, &cc, &ci2)
                 .unwrap();
             let pe_tol = m.proto_edge(pe).unwrap().raw_tolerance();
-            assert!(
+            assert_eq!(
                 length >= 2.0 * pe_tol,
-                "{length:e} is past upstream's short test"
+                length > 1e-6,
+                "{length:e} against upstream's short test ({pe_tol:e})"
             );
             let result = m.resolve_proto_edge(&k, &mut geo, pe);
-            if absorbed {
+            assert_eq!(m.proto_vertex(pv).unwrap().absorbed_proto_edge(), marked);
+            if dropped {
                 assert_eq!(
                     result.unwrap().len(),
                     1,
                     "the definition's curve copy is deleted"
                 );
                 assert_eq!(m.proto_edge(pe).unwrap().num_edge_definitions(), 0);
-                assert!(m.proto_vertex(pv).unwrap().absorbed_proto_edge());
             } else {
                 // the split branch ran (see `assert_split_attempted`)
                 assert!(result.is_err());
                 assert_eq!(m.proto_edge(pe).unwrap().num_edge_definitions(), 1);
-                assert!(!m.proto_vertex(pv).unwrap().absorbed_proto_edge());
             }
         }
     }

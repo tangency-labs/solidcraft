@@ -90,8 +90,30 @@ fn boolean(k: &mut Kernel, a: &Brep, b: &Brep, op: BooleanOperation) -> Brep {
     sm::boolean(k, ca, cb, op).unwrap().result
 }
 
-/// The union's (edges, vertices, worst edge-curve-end to vertex distance).
-fn union_edge_ends(k: &mut Kernel) -> (usize, usize, f64) {
+/// The body's worst edge-curve-end to vertex distance, and its worst ratio of that
+/// distance to the vertex's tolerance.
+fn end_gaps(k: &Kernel, r: &Brep) -> (f64, f64) {
+    let (mut worst, mut ratio): (f64, f64) = (0.0, 0.0);
+    for &e in r.edge_list() {
+        let er = r.edge(e).unwrap();
+        let c = er.curve.as_ref().unwrap();
+        for (param, v) in [er.interval.min(), er.interval.max()]
+            .into_iter()
+            .zip(er.vertices)
+        {
+            let p = c.evaluate_point(k, param).unwrap();
+            let v = r.vertex(v).unwrap();
+            let gap = p.distance(v.point);
+            worst = worst.max(gap);
+            ratio = ratio.max(gap / v.tolerance);
+        }
+    }
+    (worst, ratio)
+}
+
+/// The union's (edges, vertices, worst edge-curve-end to vertex distance, worst ratio of
+/// that distance to the vertex's tolerance).
+fn union_edge_ends(k: &mut Kernel) -> (usize, usize, f64, f64) {
     let outer = loft(k, &CONELO, &CONEHI);
     let inner = loft(k, &CONEINLO, &CONEINHI);
     let cone = boolean(k, &outer, &inner, BooleanOperation::Difference);
@@ -101,19 +123,8 @@ fn union_edge_ends(k: &mut Kernel) -> (usize, usize, f64) {
     let r = boolean(k, &cone, &lip, BooleanOperation::Union);
     assert_eq!(r.face_list().len(), 388);
     assert!(p2::is_manifold_solid(&r).unwrap());
-    let mut worst: f64 = 0.0;
-    for &e in r.edge_list() {
-        let er = r.edge(e).unwrap();
-        let c = er.curve.as_ref().unwrap();
-        for (param, v) in [er.interval.min(), er.interval.max()]
-            .into_iter()
-            .zip(er.vertices)
-        {
-            let p = c.evaluate_point(k, param).unwrap();
-            worst = worst.max(p.distance(r.vertex(v).unwrap().point));
-        }
-    }
-    (r.edge_list().len(), r.vertex_list().len(), worst)
+    let (worst, ratio) = end_gaps(k, &r);
+    (r.edge_list().len(), r.vertex_list().len(), worst, ratio)
 }
 
 /// The extension flag, with `new_edge_vertex_tolerance_covers_gap` (whose wider vertex
@@ -131,17 +142,21 @@ fn kernel(extend: bool) -> Kernel {
 #[test]
 fn issue_1480_union_edges_end_at_their_own_vertices() {
     let mut k = kernel(true);
-    let (edges, vertices, worst) = union_edge_ends(&mut k);
+    let (edges, vertices, worst, ratio) = union_edge_ends(&mut k);
     assert_eq!((edges, vertices), (1096, 712));
     assert!(worst <= 2e-5, "worst edge end {worst:e} off its vertex");
+    assert!(
+        ratio <= 0.5,
+        "an edge end {ratio} of its vertex's tolerance away"
+    );
 }
 
 #[test]
-fn issue_1480_union_without_the_extension_keeps_upstream_s_ends() {
+fn issue_1480_union_without_the_extension_keeps_upstream_s_topology() {
     let mut k = kernel(false);
-    let (edges, vertices, worst) = union_edge_ends(&mut k);
-    // The end trim alone moves no curve end here: upstream's topology. Every end was within
-    // 7.5e-6 until WR-306's absorb became the only path (#17888): the eight 1.43e-5 closed
+    let (edges, vertices, worst, ratio) = union_edge_ends(&mut k);
+    // The end trim alone moves no curve end here: upstream's topology. (Named
+    // `..._keeps_upstream_s_ends` until #17888.) Every end was within 7.5e-6 until WR-306's absorb became the only path (#17888): the eight 1.43e-5 closed
     // proto edges at the ridge crossings lie inside their vertex's tolerance, so they are
     // absorbed and the vertex pairs fitted to their edges, which moves those ends to
     // 1.2200e-5 (MEASURED). Each stays within its vertex's tolerance (3.84e-5; worst
@@ -151,6 +166,11 @@ fn issue_1480_union_without_the_extension_keeps_upstream_s_ends() {
     assert!(
         close(worst, 1.2200330381431168e-5),
         "worst edge end {worst:e} off its vertex"
+    );
+    // The property the pin stands for: every end within half its vertex's tolerance.
+    assert!(
+        ratio <= 0.5,
+        "an edge end {ratio} of its vertex's tolerance away"
     );
 }
 
@@ -165,6 +185,8 @@ struct Union {
     vertices: usize,
     manifold: bool,
     worst_end_gap: f64,
+    /// The worst ratio of an edge end's distance to its vertex's tolerance.
+    worst_ratio: f64,
     volume: f64,
     tolerances: Vec<(Point3, f64)>,
     check: Vec<String>,
@@ -184,18 +206,7 @@ fn union_with_only_the_new_edge_flag(fix: bool) -> Union {
     let inner = loft(k, &LIPINLO, &LIPINHI);
     let lip = boolean(k, &outer, &inner, BooleanOperation::Difference);
     let mut r = boolean(k, &cone, &lip, BooleanOperation::Union);
-    let mut worst_end_gap: f64 = 0.0;
-    for &e in r.edge_list() {
-        let er = r.edge(e).unwrap();
-        let c = er.curve.as_ref().unwrap();
-        for (param, v) in [er.interval.min(), er.interval.max()]
-            .into_iter()
-            .zip(er.vertices)
-        {
-            let p = c.evaluate_point(k, param).unwrap();
-            worst_end_gap = worst_end_gap.max(p.distance(r.vertex(v).unwrap().point));
-        }
-    }
+    let (worst_end_gap, worst_ratio) = end_gaps(k, &r);
     let tolerances = r
         .vertex_list()
         .iter()
@@ -218,6 +229,7 @@ fn union_with_only_the_new_edge_flag(fix: bool) -> Union {
         vertices: r.vertex_list().len(),
         manifold: p2::is_manifold_solid(&r).unwrap(),
         worst_end_gap,
+        worst_ratio,
         volume,
         tolerances,
         moved,
@@ -225,21 +237,151 @@ fn union_with_only_the_new_edge_flag(fix: bool) -> Union {
     }
 }
 
+/// The eight vertices whose tolerance `new_edge_vertex_tolerance_covers_gap` alone
+/// changed on the #1480 union until #17888, as `(x, y, z, tolerance with the flag off,
+/// with it on)`. The "on" values are the branch's `2 * gap`-sized stored values: the
+/// store-time gap is not observable from the final body (the p9 routine test bounds the
+/// growth at `>= 2 * gap`), and later booleans move the edge ends, so the end gaps were
+/// smaller (the fix's value only grows a tolerance).
+const WR469_VERTICES: [(f64, f64, f64, f64, f64); 8] = [
+    (
+        99.5929150054111,
+        57.49996907908349,
+        -0.30001241426386144,
+        1.70348595231800470e-5,
+        2.85897936527436294e-5,
+    ),
+    (
+        57.499969079083485,
+        99.5929150054111,
+        -0.3000124142638605,
+        1.70348595203878130e-5,
+        2.85897936668835265e-5,
+    ),
+    (
+        -57.49996907908349,
+        99.5929150054111,
+        -0.3000124142638637,
+        1.70348595232676946e-5,
+        2.85897936177208906e-5,
+    ),
+    (
+        -99.5929150054111,
+        57.49996907908349,
+        -0.30001241426386155,
+        1.70348595231860914e-5,
+        2.85897936786007297e-5,
+    ),
+    (
+        -99.5929150054111,
+        -57.49996907908349,
+        -0.3000124142638637,
+        1.70348595232676946e-5,
+        2.85897936268689989e-5,
+    ),
+    (
+        -57.49996907908349,
+        -99.5929150054111,
+        -0.30001241426386155,
+        1.70348595231860914e-5,
+        2.85897936891094169e-5,
+    ),
+    (
+        57.49996907908349,
+        -99.5929150054111,
+        -0.3000124142638637,
+        1.70348595232676946e-5,
+        2.85897936805655650e-5,
+    ),
+    (
+        99.5929150054111,
+        -57.49996907908349,
+        -0.30001241426386155,
+        1.70348595231860914e-5,
+        2.85897936891094169e-5,
+    ),
+];
+
+/// The same eight vertices since #17888, in the same order, as `(x, y, z, tolerance)` in
+/// both runs: WR-306's absorb fits each to its edges, moving it 2.0e-6 or 5.4e-6 and growing its
+/// tolerance past the flag's "on" value above, so the flag (which only grows a tolerance)
+/// leaves it as it is.
+const WR469_VERTICES_NOW: [(f64, f64, f64, f64); 8] = [
+    (
+        99.59291687949045,
+        57.49996447286864,
+        -0.30001043114010567,
+        3.84266947496713274e-5,
+    ),
+    (
+        57.49996743305864,
+        99.59291618106259,
+        -0.3000121926808409,
+        3.85082488974541789e-5,
+    ),
+    (
+        -57.49996447286864,
+        99.59291687949046,
+        -0.3000104311401014,
+        3.84266947660207844e-5,
+    ),
+    (
+        -99.59291618106259,
+        57.49996743305864,
+        -0.3000121926808419,
+        3.85082489097913696e-5,
+    ),
+    (
+        -99.59291687949046,
+        -57.49996447286864,
+        -0.3000104311401034,
+        3.84266947654568502e-5,
+    ),
+    (
+        -57.49996743305864,
+        -99.59291618106259,
+        -0.3000121926808419,
+        3.85082489193474260e-5,
+    ),
+    (
+        57.49996447286864,
+        -99.59291687949045,
+        -0.30001043114010123,
+        3.84266947534099953e-5,
+    ),
+    (
+        99.59291618106259,
+        -57.49996743305864,
+        -0.3000121926808419,
+        3.85082489193474260e-5,
+    ),
+];
+
+/// The vertices within `radius` of `point`, as `(position, tolerance)`.
+fn vertices_near(u: &Union, point: Point3, radius: f64) -> Vec<(Point3, f64)> {
+    u.tolerances
+        .iter()
+        .filter(|(p, _)| p.distance(point) <= radius)
+        .copied()
+        .collect()
+}
+
 fn close(got: f64, want: f64) -> bool {
     (got - want).abs() <= 1e-12 * want.abs()
 }
 
 /// WR-469, isolated: the union with `new_edge_vertex_tolerance_covers_gap` cleared, then
-/// set. Until WR-306's absorb became the only path (#17888) the flag grew eight vertex
-/// tolerances at the ridge crossings from 1.70e-5 to its `2 * gap`-sized 2.86e-5, and
-/// the union failed level 2 with 1.73 mm edge and vertex tolerances (upstream's
-/// millimetre tolerances, #1058). Now the eight 1.43e-5 closed proto edges there lie
-/// inside their vertex's tolerance, so they are absorbed and `ImprintIntersections`
-/// fits each vertex pair to its edges (tolerances 3.84e-5, above the flag's 2.86e-5; the
-/// flag only grows a tolerance). The flag then changes nothing on this rig: both runs are
-/// the same body, which passes level 2 (MEASURED). The flag's own growth stays covered
-/// by the p9 routine test (`>= 2 * gap`). The name is kept because the WR-469 records
-/// cite it.
+/// set. Until WR-306's absorb became the only path (#17888) the flag grew the eight
+/// vertex tolerances of `WR469_VERTICES` at the ridge crossings from 1.70e-5 to its
+/// `2 * gap`-sized 2.86e-5, and the union failed level 2 with 1.73 mm edge and vertex
+/// tolerances (upstream's millimetre tolerances, #1058). Now the eight 1.43e-5 closed
+/// proto edges there lie inside their vertex's tolerance, so they are absorbed and
+/// `ImprintIntersections` fits each vertex pair to its edges: the same eight vertices
+/// (`WR469_VERTICES_NOW`) move under 1e-5 and their tolerances grow to 3.84e-5, past the
+/// flag's value, which only grows a tolerance. The flag then changes no vertex on this
+/// rig: both runs are the same body, every edge end within half its vertex's tolerance,
+/// and level 2 passes (MEASURED). The flag's own growth stays covered by the p9 routine
+/// test (`>= 2 * gap`). The name is kept because the WR-469 records cite it.
 #[test]
 fn wr469_union_flag_alone_grows_eight_vertex_tolerances() {
     assert!(!Kernel::default().fixes.new_edge_vertex_tolerance_covers_gap);
@@ -248,12 +390,16 @@ fn wr469_union_flag_alone_grows_eight_vertex_tolerances() {
     for (name, u) in [("off", &off), ("on", &on)] {
         assert_eq!((u.faces, u.edges, u.vertices), (388, 1096, 712), "{name}");
         assert!(u.manifold, "{name}");
-        // 7.4750471556652e-6 until #17888 (above): every end stays within its vertex's
-        // tolerance, which the empty level-2 report below checks.
+        // 7.4750471556652e-6 until #17888 (above).
         assert!(
             close(u.worst_end_gap, 1.2200330381431168e-5),
             "{name} worst end gap {:e}",
             u.worst_end_gap
+        );
+        assert!(
+            u.worst_ratio <= 0.5,
+            "{name}: an edge end {} of its vertex's tolerance away",
+            u.worst_ratio
         );
         // 44443.49369572108 until WR-751 (#2621): `MergeIntoObject` now splits the eight
         // crossing ridges' edges where they pass nearest their points (2.2476e-6 ->
@@ -269,11 +415,28 @@ fn wr469_union_flag_alone_grows_eight_vertex_tolerances() {
             u.volume
         );
         assert!(u.moved.is_ok(), "{name}: {:?}", u.moved);
-        // Until #17888 the report held eight "Edge tolerance relative to brep tolerance"
-        // and "Vertex tolerance is too wide" (1.7255363) failures, and `AssertValid` was
-        // skipped.
+        // Until #17888 the report held four "Edge tolerance relative to brep tolerance"
+        // and eight "Vertex tolerance is too wide" failures (1.7255363), and
+        // `AssertValid` was skipped.
         assert!(u.check.is_empty(), "{name}: {:?}", u.check);
     }
     // The two runs are deterministic: same vertices in the same order, same tolerances.
     assert_eq!(off.tolerances, on.tolerances);
+    for (was, now) in WR469_VERTICES.iter().zip(WR469_VERTICES_NOW) {
+        let (x, y, z, off_tolerance, on_tolerance) = *was;
+        let point = Point3::new(x, y, z);
+        let at = Point3::new(now.0, now.1, now.2);
+        assert!(off_tolerance < on_tolerance, "at {point:?}");
+        for (name, u) in [("off", &off), ("on", &on)] {
+            // The vertex that was at `point` is the one there now: the only vertex within
+            // 1e-5 (the crossings' vertex pairs are 3e-5 to 8e-5 apart).
+            let near = vertices_near(u, point, 1e-5);
+            assert_eq!(near.len(), 1, "{name} at {point:?}: {near:?}");
+            let (p, tolerance) = near[0];
+            assert!(p.distance(at) <= 1e-9, "{name}: {p:?} is not {at:?}");
+            assert!(close(tolerance, now.3), "{name} {tolerance:.17e} at {at:?}");
+            // past the flag's value, so the flag leaves it as it is
+            assert!(tolerance > on_tolerance, "{name} at {at:?}");
+        }
+    }
 }
