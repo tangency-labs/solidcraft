@@ -428,7 +428,7 @@ impl<'a> InsertionGeometry<'a> {
     }
     /// `SmTools::FindCoincidentEdge` over an actual face's edges (`SmFace::GetEdges`):
     /// its first edge between the same-body vertices `start` and `end` along `curve`
-    /// within `tolerance`, with the sampled maximum deviation (WR-580, opt-in).
+    /// within `tolerance`, with the sampled maximum deviation (#16937).
     /// # Errors
     /// Invalid/cross-body operands, topology walks and the search's evaluations.
     #[allow(clippy::too_many_arguments)] // FindCoincidentEdge's in-params

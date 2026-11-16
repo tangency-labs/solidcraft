@@ -2927,6 +2927,7 @@ fn level_rows(
     picked: &mut Option<Item>,
 ) -> Seen {
     let mut seen = Seen::default();
+    let mut on_open = false;
     for (k, item) in rows.iter().enumerate() {
         if item.is_sep() || item.is_heading() {
             let _ = list_row_lit(ui, item, false);
@@ -2961,8 +2962,12 @@ fn level_rows(
         }
         if open == Some(k) {
             seen.anchor = Some(row.rect);
+            on_open |= row.hovered();
         }
     }
+    // A separator, a heading or the gap between two rows is not the open row either: its flyout
+    // goes on closing there instead of lighting its row again and starting the delay over (#17668).
+    seen.other_row |= !on_open && ui.rect_contains_pointer(ui.min_rect());
     seen
 }
 
