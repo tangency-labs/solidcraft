@@ -3,7 +3,9 @@
 //! `smlib_offset_faces`). Only the wall gets a new surface, so the tangent edge between
 //! it and the round is dropped across the 1 mm gap between them. Upstream ignores that
 //! ("will be fixed later") and returns a body with an edge as loose as the gap; here the
-//! local operation is refused, with or without `local_operation_refuses_loose_tangent_edges`.
+//! local operation is refused. A split block's top piece turned and raised off its
+//! coplanar twin reaches the refusal of the loose edge itself
+//! (`OffsetFailure::LooseTangentEdge`).
 #![allow(
     clippy::unwrap_used,
     clippy::expect_used,
@@ -67,9 +69,8 @@ fn wall(k: &Kernel, b: &Brep) -> Vec<FaceId> {
 }
 
 /// The boss's wall given the r11 cylinder: the wall's faces, and the operation's result.
-fn move_wall(fixed: bool) -> (Vec<FaceId>, solidcore::Result<()>) {
+fn move_wall() -> (Vec<FaceId>, solidcore::Result<()>) {
     let mut k = Kernel::default();
-    k.fixes.local_operation_refuses_loose_tangent_edges = fixed;
     let mut b = part(&mut k);
     let faces = wall(&k, &b);
     assert!(!faces.is_empty(), "the boss's wall");
@@ -92,25 +93,17 @@ fn move_wall(fixed: bool) -> (Vec<FaceId>, solidcore::Result<()>) {
     (faces, result)
 }
 
-#[test]
-fn wr_530_moved_boss_wall_beside_its_round_is_refused() {
-    match move_wall(true).1 {
-        Err(e) => assert_eq!(e.sm_status(), Some(SM_ERR)),
-        other => panic!("{other:?}"),
-    }
-}
-
-/// Without the opt-in upstream returns the body with the edge as loose as the gap. The
-/// wall meets itself across a seam, and its UV loops, copied onto the surface it takes,
-/// are in the r10 cylinder's parameters, which the r11 cylinder's domain does not carry:
+/// Upstream returns the body with the edge as loose as the gap. The wall meets itself
+/// across a seam, and its UV loops, copied onto the surface it takes, are in the r10
+/// cylinder's parameters, which the r11 cylinder's domain does not carry:
 /// the seam's two UV lines do not lift to one curve on it, so the seam would have no
 /// edge. The local operation refuses that up front, naming the wall's face, before
 /// anything is changed or reached.
 #[test]
-fn wr_530_without_the_opt_in_the_walls_seam_is_refused_as_opened() {
+fn wr_530_moved_boss_wall_beside_its_round_is_refused_as_its_seam_opened() {
     use solidcore::error::offset::OffsetFailure;
     use solidcore::error::Reason;
-    let (faces, result) = move_wall(false);
+    let (faces, result) = move_wall();
     let e = result.unwrap_err();
     assert!(
         matches!(
@@ -120,4 +113,86 @@ fn wr_530_without_the_opt_in_the_walls_seam_is_refused_as_opened() {
         "{e}"
     );
     assert_eq!(e.sm_status(), Some(SM_ERR));
+}
+
+/// A 60 x 40 x 20 block whose top is imprinted along x = 30 (the capi's `smlib_imprint`
+/// of a box over x > 30, z > 10).
+fn split_block(k: &mut Kernel) -> Brep {
+    use solidcore::boolean::api_brep::boolean_with_options;
+    use solidcore::boolean::merge::MergeOptions;
+    use solidcore::geom::a_object::BooleanOperation;
+    let block = create_box(k, Point3::new(0.0, 0.0, 0.0), 60.0, 40.0, 20.0).unwrap();
+    let cutter = create_box(k, Point3::new(30.0, -1.0, 10.0), 60.0, 42.0, 20.0).unwrap();
+    let mut b = boolean_with_options(
+        k,
+        block,
+        cutter,
+        BooleanOperation::Imprint,
+        MergeOptions::default(),
+    )
+    .unwrap()
+    .result;
+    b.refresh_cached_topology();
+    b
+}
+
+/// The split block's top piece x < 30 given its own plane turned by -0.02 rad about the
+/// split line (x = 30, z = 20) and raised 1: the piece's new plane is 1 above its twin
+/// along their tangent edge, and not parallel to it, so no step wall closes the gap
+/// (their normals differ by 0.02) and the planes, falling away from the edge, never meet
+/// over it. The edge, lifted onto the piece's plane and dropped onto its twin's, lands
+/// about 1 away: the local operation is refused by name
+/// ([`OffsetFailure::LooseTangentEdge`]), the input as it came in.
+#[test]
+fn wr_530_turned_and_raised_piece_beside_its_coplanar_twin_is_refused_as_loose() {
+    use solidcore::error::offset::OffsetFailure;
+    use solidcore::error::Reason;
+    use solidcore::geom::axis2_placement::Axis2Placement;
+    use solidcore::math::Vec3;
+    let mut k = Kernel::default();
+    let mut b = split_block(&mut k);
+    let piece = b
+        .face_list()
+        .iter()
+        .copied()
+        .find(|&f| {
+            let face = b.face(f).unwrap();
+            let s = face.surface.as_ref().unwrap();
+            let p = s.evaluate_point(&k, face.uv_domain.mid()).unwrap();
+            (p.z - 20.0).abs() < 1e-9 && p.x < 30.0
+        })
+        .expect("the top piece x < 30");
+    // the face's own plane turned and raised, so it keeps the face's parameterization
+    let theta: f64 = -0.02;
+    let (c, s) = (theta.cos(), theta.sin());
+    let pivot = Point3::new(30.0, 0.0, 20.0);
+    let turned_pivot = Point3::new(
+        c * pivot.x + s * pivot.z,
+        pivot.y,
+        -s * pivot.x + c * pivot.z,
+    );
+    let origin = pivot + Vec3::new(0.0, 0.0, 1.0) - turned_pivot;
+    let place = Axis2Placement::new(origin, Vec3::new(c, 0.0, -s), Vec3::new(0.0, 1.0, 0.0));
+    let mut surface = b.face(piece).unwrap().surface.clone().unwrap();
+    surface.transform(&k, &place, None).unwrap();
+    let mut notifications = Notifications::new(&mut b);
+    let before = format!("{b:?}");
+    let e = local_operation(
+        &mut k,
+        &mut b,
+        &[piece],
+        vec![surface],
+        &mut notifications.context(),
+    )
+    .unwrap_err();
+    drop(notifications);
+    assert!(
+        matches!(
+            e.failure().map(|f| &f.reason),
+            Some(Reason::Offset(OffsetFailure::LooseTangentEdge))
+        ),
+        "{e}"
+    );
+    assert_eq!(e.sm_status(), Some(SM_ERR));
+    assert_eq!(format!("{b:?}"), before, "refused, the input as it came in");
 }

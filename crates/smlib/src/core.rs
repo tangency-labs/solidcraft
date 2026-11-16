@@ -82,7 +82,6 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.revolve_holed_profile_void = true;
     f.join_touching_loops = true;
     f.offset_analytic_mate_edges = true;
-    f.local_operation_refuses_loose_tangent_edges = true;
     f.transform_scales_each_tolerance = true;
     f.transform_model_size_from_body_box = true;
     f.uv_trim_corner_end_points_only = true;
@@ -100,12 +99,10 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.curve_contacts_at_curve_ends = true;
     f.ssi_trace_tangent_curves_once = true;
     f.found_torus_sphere_keep_tested_nurb = true;
-    f.local_operation_box_holds_new_surfaces = true;
     f.shell_edges_on_analytics_exact = true;
     f.fillet_patch_keeps_fillet_edges = true;
     f.fillet_refuse_overlapping_bands = true;
     f.ssi_tangent_curve_tracer = true;
-    f.local_operation_step_walls = true;
     f.fillet_knife_edge_rounds = true;
     f.revolution_round_offset_collapses = true;
     f.proto_edge_splits_at_captured_vertices = true;
@@ -136,7 +133,6 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.fillet_exact_round_classes = true;
     f.offset_edges_keep_source_tolerance = true;
     f.surface_continuity_checks_last_v_knot = true;
-    f.offset_open_edge_second_trim_point = true;
     f.ssi_split_curves_at_singular_points = true;
     f.surface_parallel_to_vector_checks = true;
     f.geometric_g2_continuity = true;

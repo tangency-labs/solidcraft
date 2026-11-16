@@ -99,12 +99,14 @@
 //!   [`SolidError::InvalidInput`] with [`UNDEFINED_UPSTREAM`] as operation, which tells
 //!   it apart from a callee's real `SM_ERR_INVALID_INPUT`; the statuses upstream
 //!   ignores are ignored whatever they are, except these and [`SolidError::Unported`].
-//! - **Opt-in (WR-530, #402).** With `Kernel::fixes.local_operation_refuses_loose_tangent_edges`,
-//!   in a local operation ([`OffsetExecutive::is_local_operation`]) `ExtendTrimEdges`
+//! - **Loose tangent edges (WR-530, #402, not upstream).** In a local operation ([`OffsetExecutive::is_local_operation`]) `ExtendTrimEdges`
 //!   fails when the lifted edge drops onto the other extended surface farther than ten
-//!   times `max(edge tolerance, approximation tolerance)`, and `EdgeuseOffset` passes
-//!   that failure on (the fork's tangency-labs/smlib@23c5b0a).
-//! - **Opt-in (WR-530 addendum).** With `Kernel::fixes.local_operation_step_walls`, a
+//!   times `max(edge tolerance, approximation tolerance)`
+//!   ([`OffsetFailure::LooseTangentEdge`]), and `EdgeuseOffset` passes that refusal on
+//!   (the fork's tangency-labs/smlib@23c5b0a); any other failure of `ExtendTrimEdges` is
+//!   only reported, as upstream's (the fork's passed every failure on, refusing a lone
+//!   disc's lamina edge).
+//! - **Step walls (WR-530 addendum).** A
 //!   local operation's tangent edge whose two faces stay parallel but apart (one moved
 //!   along its normal) gets the ruled step wall between the two offset edges instead of
 //!   the extension (the fork's 5d428ae, 90aabff); `EdgeuseOffset::closing_wall` marks it.
@@ -377,6 +379,15 @@ fn is_tangent_end_off_curve(e: &SolidError) -> bool {
     )
 }
 
+/// Whether `e` is the refusal of a tangent edge whose new faces no longer meet along it
+/// ([`OffsetFailure::LooseTangentEdge`]).
+fn is_loose_tangent_edge(e: &SolidError) -> bool {
+    matches!(
+        e.failure().map(|f| &f.reason),
+        Some(Reason::Offset(OffsetFailure::LooseTangentEdge))
+    )
+}
+
 /// `SmTArray::FindElement`.
 fn contains<O: PartialEq>(list: &[O], item: &O) -> bool {
     list.iter().any(|x| x == item)
@@ -445,7 +456,7 @@ pub struct EdgeuseOffset<O> {
     pub trim_orientations: Vec<OrientType>,
     /// `rSelfIntersections` (never filled: the self-intersection block is `#if 0`).
     pub self_intersections: SsiData<O>,
-    /// Not upstream (`*pbOptClosingWall`, opt-in `Kernel::fixes.local_operation_step_walls`,
+    /// Not upstream (`*pbOptClosingWall`, the WR-530 addendum's step walls,
     /// fork tangency-labs/smlib 5d428ae): `surface` is a step wall, which spans the gap
     /// between two edges and is never extended (as a lamina side wall).
     pub closing_wall: bool,
@@ -783,7 +794,7 @@ pub trait OffsetBrep<O>: ProtoGeometry<O> {
     /// `SmEdgeuse::GetFaceuse` (`topology::edgeuse::p1::faceuse`).
     fn edgeuse_faceuse(&self, eu: O) -> Result<Option<O>>;
     /// `SmEdgeuse::GetOrientation` (`topology::edgeuse::p1::orientation`), read only by
-    /// the opt-in step walls (`Kernel::fixes.local_operation_step_walls`); an
+    /// the step walls (WR-530 addendum); an
     /// implementation that does not provide it fails there.
     ///
     /// # Errors
@@ -3752,15 +3763,13 @@ impl OffsetGeometryCreation {
 
             // search every solution for the one closest to the BaseVertex to use as the trimPoint
             let base_point = brep.vertex_point(base_vertex)?;
-            // `Kernel::fixes.offset_open_edge_second_trim_point` (WR-673, #2174; the fork's
+            // Not upstream (WR-673, #2174; the fork's
             // tangency-labs/smlib@7ee0876): an open edge's second trim point is where its
             // other vertex goes, never the first trim point again. On a closed 3D curve
             // (the whole offset circle lifted for half a sphere cap's rim) the first point's
             // twin across the curve's seam is another parameter but the same point: taken,
             // it gave the half edge the whole circle and the loop a gap.
-            let open_second = k.fixes.offset_open_edge_second_trim_point
-                && i == 1
-                && !brep.edge_is_closed(base_edge)?;
+            let open_second = i == 1 && !brep.edge_is_closed(base_edge)?;
             let first = if open_second {
                 Some(curve_of(brep, curve_3d)?.evaluate_point(k, trim_ivl.min())?)
             } else {
@@ -4602,17 +4611,18 @@ impl OffsetGeometryCreation {
                 true,
                 None,
             )?;
-            // Opt-in (WR-530, #402; the fork's tangency-labs/smlib@23c5b0a): the edge is
+            // Not upstream (WR-530, #402; the fork's tangency-labs/smlib@23c5b0a): the edge is
             // lifted onto one face's new surface and dropped onto the other's. Faces offset
             // alike stay tangent, so the drop lands on the edge; when only one of them got a
             // new surface (a local operation moving a face beside a blend, or one piece of a
             // split face), the drop crosses the gap between them and the faces no longer
             // meet there
-            if k.fixes.local_operation_refuses_loose_tangent_edges && executive.is_local_operation()
-            {
+            if executive.is_local_operation() {
                 let meet_tol = 10.0 * smos_max(off_tol, self.this_approx_tol_3d());
                 if dropped.max_drop_to_surf > meet_tol {
-                    return Err(sm_err(OP_EXTEND));
+                    return Err(
+                        Failure::new(OP_EXTEND, OffsetFailure::LooseTangentEdge).into_error()
+                    );
                 }
             }
             let uv_curves = dropped.uv_curves;
@@ -5284,8 +5294,8 @@ impl OffsetGeometryCreation {
         )
     }
 
-    /// Not upstream (`IsStepAcrossEdge`, fork tangency-labs/smlib 5d428ae, opt-in
-    /// `Kernel::fixes.local_operation_step_walls`): whether the faces of two offset edge
+    /// Not upstream (`IsStepAcrossEdge`, fork tangency-labs/smlib 5d428ae, the WR-530
+    /// addendum's step walls): whether the faces of two offset edge
     /// uses of one tangent edge stayed parallel across it but apart. At each of 11 samples
     /// along the first edge use the nearest point of the other's edge must lie farther
     /// than the edges meet within (`10 * max(edge tolerances, this_approx_tol_3d)`) and the
@@ -5404,7 +5414,7 @@ impl OffsetGeometryCreation {
     }
 
     /// Not upstream (`CreateStepWall`, fork tangency-labs/smlib 5d428ae and 90aabff,
-    /// opt-in `Kernel::fixes.local_operation_step_walls`): the ruled wall between two
+    /// the WR-530 addendum's step walls): the ruled wall between two
     /// offset edge uses whose faces lie apart ([`Self::is_step_across_edge`]), stored and
     /// returned as a handle. The rails are the two edges' trimmed NURBS curves; a rail
     /// whose weights are all one value (to `SM_EFF_ZERO` relative) is made non-rational
@@ -5566,15 +5576,11 @@ impl OffsetGeometryCreation {
             let tan_sec = !executive.crosses_at(original_edgeuse)
                 && brep.edgeuse_is_tangent_sector(k, original_edgeuse, tan_tol_deg)?;
 
-            // Not upstream (opt-in `Kernel::fixes.local_operation_step_walls`, fork
+            // Not upstream (WR-530 addendum, fork
             // tangency-labs/smlib 5d428ae): a local operation that moved only one of two
             // tangent faces along its normal leaves them parallel, one step apart: a wall
             // between their edges closes the body.
-            if k.fixes.local_operation_step_walls
-                && tan_sec
-                && !lamina
-                && executive.is_local_operation()
-            {
+            if tan_sec && !lamina && executive.is_local_operation() {
                 if let (Some(off), Some(other_off)) = (offset_edgeuse, other_offset_edgeuse) {
                     if self.is_step_across_edge(k, brep, off, other_off)? {
                         out.surface = Some(self.create_step_wall(k, brep, off, other_off)?);
@@ -5596,14 +5602,15 @@ impl OffsetGeometryCreation {
                     other_offset_edgeuse,
                     mark,
                 );
-                // Opt-in (WR-530): a local operation has no later step that would close
-                // the gap: it fails
-                if k.fixes.local_operation_refuses_loose_tangent_edges
-                    && executive.is_local_operation()
-                {
-                    extended?;
-                } else {
-                    let _ = ignore_soft(extended)?;
+                // Not upstream (WR-530): in a local operation, an edge whose faces no
+                // longer meet along it ([`OffsetFailure::LooseTangentEdge`]) has no later
+                // step that would close the gap: it fails. Any other problem is only
+                // reported, as upstream's
+                match extended {
+                    Err(e) if is_loose_tangent_edge(&e) => return Err(e),
+                    r => {
+                        let _ = ignore_soft(r)?;
+                    }
                 }
                 return Ok(out);
             }
