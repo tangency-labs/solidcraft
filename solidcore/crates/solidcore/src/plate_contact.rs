@@ -19,6 +19,9 @@
 //! | [`PlateFaces`], [`plate_faces`] | none |
 //! | [`Contact`], [`contact`] | none   |
 //! | [`Defect`], [`stretches`] | none  |
+//! | [`passes_through`]     | none     |
+//! | [`PairSkip`], [`PairJoint`], [`pair`] | none |
+//! | [`with_swap`]          | none     |
 
 use crate::error::{Result, SolidError};
 use crate::math::{Point3, Vec3};
