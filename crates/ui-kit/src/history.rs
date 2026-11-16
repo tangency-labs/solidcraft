@@ -74,6 +74,12 @@ pub struct HistoryChip<'a> {
 }
 
 impl HistoryChip<'_> {
+    /// Where the name starts in a chip drawn across `rect` with names ([`HistoryStyle::Names`]).
+    pub fn name_left(rect: Rect) -> f32 {
+        let t = Tokens::get();
+        rect.left() + t.space_8 + t.space_14 + 1.0 + t.space_6 + 1.0
+    }
+
     /// All strip variants use this painter; no connections are drawn between features.
     pub fn paint(&self, painter: &Painter, rect: Rect, style: HistoryStyle) {
         let t = Tokens::get();
@@ -136,7 +142,7 @@ impl HistoryChip<'_> {
             };
             let font = if self.selected { crate::type_face::semibold(t.font_body) } else { egui::FontId::proportional(t.font_body) };
             let text_rect = Rect::from_min_max(
-                pos2(icon.right() + t.space_6 + 1.0, rect.top()),
+                pos2(Self::name_left(rect), rect.top()),
                 pos2(rect.right() - if self.error || self.warning { t.space_16 } else { t.space_8 }, rect.bottom()),
             );
             let galley = p.layout_no_wrap(self.name.to_owned(), font, ink);
