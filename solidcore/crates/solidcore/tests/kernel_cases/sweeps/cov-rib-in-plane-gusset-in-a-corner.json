@@ -1,0 +1,167 @@
+{
+  "area": "sweeps",
+  "bodies": {
+    "b13": {
+      "keeping_splines": false,
+      "trusted": true
+    },
+    "b16": {
+      "keeping_splines": false,
+      "trusted": true
+    }
+  },
+  "calls": [
+    {
+      "inputs": [
+        "b13"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b14"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b14"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b15"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b16"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b17"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b17"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b18"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b15"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b19"
+      ],
+      "params": {
+        "operand": 0
+      }
+    },
+    {
+      "inputs": [
+        "b18"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b20"
+      ],
+      "params": {
+        "operand": 1
+      }
+    },
+    {
+      "inputs": [
+        "b19",
+        "b20"
+      ],
+      "op": "boolean",
+      "outputs": [
+        "b21"
+      ],
+      "params": {
+        "op": "union"
+      }
+    }
+  ],
+  "case": "cov-rib-in-plane-gusset-in-a-corner",
+  "expected": {
+    "bbox": {
+      "max": [
+        60,
+        40,
+        40
+      ],
+      "min": [
+        0,
+        0,
+        0
+      ]
+    },
+    "body_count": 1,
+    "method": "L bracket: base 60x40x5 + wall 5x40x35 above it = 19000; the line (5,25)-(25,5) in the plane y=20 closes with the wall x=5 and the base top z=5 a right triangle of legs 20: 200 mm^2, 2 thick across the plane: + 400",
+    "source": "analytic",
+    "sources": [],
+    "volume_mm3": 19400.0,
+    "what": "an in-plane rib (the default direction): a diagonal line across the inside corner of an L bracket fills to the two faces"
+  },
+  "expressible": true,
+  "operation_expressible": true,
+  "outcome": {
+    "ran": true,
+    "raw_counts": {
+      "edges": 195,
+      "faces": 67,
+      "vertices": 130
+    }
+  },
+  "records": "cov-rib-in-plane-gusset-in-a-corner.bodies.json.gz",
+  "result": [
+    {
+      "body": "Bracket",
+      "made": "b21"
+    }
+  ],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": {
+      "area_mm2": 9326.568542494906,
+      "body_count": 1,
+      "edges": 27,
+      "faces": 11,
+      "vertices": 18,
+      "volume_mm3": 19400.000000000015
+    },
+    "refused_with": null,
+    "status": "pass"
+  },
+  "sources": [],
+  "traced_ops": [
+    "extrude",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean"
+  ],
+  "ungraded": [],
+  "what": "an in-plane rib (the default direction): a diagonal line across the inside corner of an L bracket fills to the two faces",
+  "why_not": []
+}

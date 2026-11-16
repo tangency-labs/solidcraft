@@ -103,11 +103,12 @@ fn prune_params(doc: &mut Document) {
             used.extend(f.param_names.iter().cloned());
             used.extend(f.kind.expressions().into_iter().flat_map(references));
             if let FeatureKind::Sketch { sketch, .. } = &f.kind {
-                used.extend(sketch.constraints.iter().filter_map(|c| c.param.clone()));
+                used.extend(sketch.dimension_params().into_iter().cloned());
                 used.extend(sketch.text_exprs().into_iter().flat_map(|(_, e)| references(e)));
             }
         }
         used.extend(doc.assembly.exprs().into_iter().flat_map(|(_, _, e)| references(e)));
+        used.extend(doc.occurrences.iter().flat_map(|o| &o.expressed_moves).flat_map(|m| m.exprs()).flat_map(|(_, e)| references(e)));
         used.extend(doc.params.iter().flat_map(|p| references(&p.expr)));
         let before = doc.params.len();
         doc.params.retain(|p| used.contains(&p.name));
@@ -144,7 +145,7 @@ fn renamed(old: &ModelState, new: &[&ModelBody], name: &str, near: Vec3) -> Opti
 
 /// Joints on the placements `own` name faces of features that are gone: give them the names of
 /// the same faces of the linked bodies (Import feature `import`).
-fn rename_joint_faces(s: &mut Session, old: &ModelState, import: u64, own: &BTreeSet<u64>) {
+pub(super) fn rename_joint_faces(s: &mut Session, old: &ModelState, import: u64, own: &BTreeSet<u64>) {
     use solidcraft_doc::joints::{Coupling, JointOrigin, Size, Snap, cam::CamProfile};
     let state = s.model.state();
     let linked: Vec<&ModelBody> = state.bodies.iter().filter(|b| b.feature == import).collect();
@@ -154,7 +155,7 @@ fn rename_joint_faces(s: &mut Session, old: &ModelState, import: u64, own: &BTre
         }
     };
     let fix = |o: &mut JointOrigin| {
-        if own.contains(&o.occurrence) {
+        if own.contains(&o.part()) {
             let near = match &o.snap {
                 Snap::FaceCenter { pick, .. } | Snap::CircleCenter { pick, .. } | Snap::Edge { pick, .. } => *pick,
                 _ => Vec3::ZERO,
@@ -469,8 +470,8 @@ fn part_design(s: &Session, sc: &Scope, stem: &str, cmd: &str) -> Result<(Sessio
     // Joints from the component to the rest of the design stay here, so they are not copied
     let mut scope = Document { assembly: source.assembly.clone(), ..Document::default() };
     let mapped = |o: &u64| sc.occurrences.contains_key(o);
-    scope.assembly.joints.retain(|j| mapped(&j.a.occurrence) && mapped(&j.b.occurrence));
-    scope.assembly.origins.retain(|o| mapped(&o.origin.occurrence));
+    scope.assembly.joints.retain(|j| j.a.occurrences().chain(j.b.occurrences()).all(|o| mapped(&o)));
+    scope.assembly.origins.retain(|o| o.origin.occurrences().all(|o| mapped(&o)));
     scope.assembly.contact_sets.retain(|c| c.occurrences.iter().all(mapped));
     scope.assembly.exploded.retain(|v| v.moves.iter().all(|(o, _)| mapped(o)));
     let (mut notices, joints) =
@@ -771,7 +772,8 @@ pub(super) fn replace_with_link(s: &mut Session, p: &Value) -> Result<Value> {
     } else {
         let given = str_(p, "path").filter(|x| !x.trim().is_empty() && x.len() < 4096).ok_or_else(|| bad(cmd, "`with` or `path` is required"))?;
         let file = absolute(Path::new(given));
-        let existing = s.doc.links.iter().find(|(_, l)| absolute(&resolve(s.path.as_deref(), &l.path)) == file).map(|(c, _)| *c);
+        let existing =
+            s.doc.links.iter().find(|(_, l)| l.configuration.is_none() && absolute(&resolve(s.path.as_deref(), &l.path)) == file).map(|(c, _)| *c);
         match existing {
             Some(c) => c,
             None => {

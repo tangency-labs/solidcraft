@@ -9,10 +9,11 @@
 //! from those publications is incorporated here.
 //! Shading-normal measures follow Veach (1997), sections 5.3.3--5.3.4:
 //! https://graphics.stanford.edu/papers/veach_thesis/thesis.pdf.
-use crate::{surface::unit_direction, transmission};
+use crate::transmission;
 use serde::{Deserialize, Serialize};
 use solidcore_record::Vec3;
 use solidcraft_geom::Vec3Geom;
+use solidcraft_viewport::surface::unit_direction;
 use std::f64::consts::{PI, TAU};
 
 /// Fixed R, G, B representative bands. Thin films can alias in this approximation.
@@ -359,7 +360,8 @@ impl GlassModel {
             if cv == 0.0 {
                 return Ok(None);
             }
-            visible_normal(v, n, self.roughness * self.roughness, [uniforms[0], uniforms[1]])?
+            solidcraft_viewport::surface::visible_normal(v, n, self.roughness * self.roughness, [uniforms[0], uniforms[1]])
+                .map_err(|_| GlassModelError::Direction)?
         };
         let vm = v.dot(m).clamp(0.0, 1.0);
         let fresnel = self.fresnel(vm, ni, nt, wavelength_nm)?;
@@ -817,22 +819,6 @@ mod tests {
     }
 }
 
-fn visible_normal(v: Vec3, n: Vec3, alpha: f64, u: [f64; 2]) -> Result<Vec3> {
-    let tangent = direction(if n.z.abs() < 0.9 { Vec3::Z.cross(n) } else { Vec3::X.cross(n) })?;
-    let bitangent = n.cross(tangent);
-    let stretched = direction(Vec3::new(alpha * v.dot(tangent), alpha * v.dot(bitangent), v.dot(n)))?;
-    let side = if stretched.x == 0.0 && stretched.y == 0.0 { Vec3::X } else { direction(Vec3::new(-stretched.y, stretched.x, 0.0))? };
-    let vertical = stretched.cross(side);
-    let radius = u[0].sqrt();
-    let (sine, cosine) = (TAU * u[1]).sin_cos();
-    let x = radius * cosine;
-    let mix = 0.5 * (1.0 + stretched.z);
-    let y = (1.0 - mix) * (1.0 - x * x).max(0.0).sqrt() + mix * radius * sine;
-    let height = (1.0 - x * x - y * y).max(0.0).sqrt();
-    let hemisphere = side * x + vertical * y + stretched * height;
-    let local = direction(Vec3::new(alpha * hemisphere.x, alpha * hemisphere.y, hemisphere.z.max(0.0)))?;
-    direction(tangent * local.x + bitangent * local.y + n * local.z)
-}
 fn ggx_distribution(m: Vec3, n: Vec3, alpha: f64) -> f64 {
     let cosine = m.dot(n);
     if cosine <= 0.0 {

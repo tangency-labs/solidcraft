@@ -389,24 +389,26 @@ fn draft_tilts_a_side_about_its_line_on_the_neutral_plane() {
 }
 
 /// The corner of r5 rounds at (60, 40, 20) on a 60 x 40 x 20 box, set back 8 and left open: the
-/// box's six faces and the three rounds (9 faces, 30 edges, 22 vertices), a sheet SMLib's check
-/// passes, and one hole of twelve edges (each section and face curve in two), chained end to
-/// start, each bounding a different face than the patch's neighbours across it.
+/// box's six faces and the three rounds (9 faces, 27 edges, 19 vertices), a sheet SMLib's check
+/// passes, and one hole of nine edges, chained end to start, each bounding a different face than
+/// the patch's neighbours across it. The marked corner is the blend corner's Setback
+/// (tangency-labs/solidcore#2988), whose sections and face curves are one edge each; the N x N
+/// patch it replaced split each in two (12 edges, 30 and 22).
 #[test]
 fn a_setback_corner_left_open_returns_its_hole() {
     let b = Brep::make_box([0.0; 3], [60.0, 40.0, 20.0]).unwrap();
     let edges = [[30.0, 40.0, 20.0], [60.0, 20.0, 20.0], [60.0, 40.0, 10.0]];
     let (open, holes) = b.blend_setback_open(Blend::Round, &edges, &[5.0; 3], &[[60.0, 40.0, 20.0]], &[8.0], 0.1).unwrap();
     shot(&open, "setback_open");
-    assert_eq!(open.counts().unwrap(), [9, 30, 22]);
+    assert_eq!(open.counts().unwrap(), [9, 27, 19]);
     assert!(!open.is_manifold_solid().unwrap());
     let [hole] = holes.as_slice() else { panic!("one corner: {holes:?}") };
-    assert_eq!(hole.edges.len(), 12);
+    assert_eq!(hole.edges.len(), 9);
     let arrays = open.arrays().unwrap();
     let ends = &arrays.ints[&crate::flat::EDGE_VERTICES];
     let end = |h: &HoleEdge, last: bool| ends[2 * h.edge + usize::from(h.forward == last)];
     for (k, h) in hole.edges.iter().enumerate() {
-        let next = &hole.edges[(k + 1) % 12];
+        let next = &hole.edges[(k + 1) % 9];
         assert_eq!(end(h, true), end(next, false), "edge {k} ends where the next starts");
         assert!(h.face < 9);
     }

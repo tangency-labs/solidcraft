@@ -1,0 +1,190 @@
+{
+  "area": "shell",
+  "bodies": {
+    "b25": {
+      "keeping_splines": false,
+      "trusted": true
+    },
+    "b34": {
+      "keeping_splines": false,
+      "trusted": true
+    }
+  },
+  "calls": [
+    {
+      "inputs": [
+        "b34"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b35"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b35"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b36"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b25"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b37"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b37"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b38"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b36"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b39"
+      ],
+      "params": {
+        "operand": 0
+      }
+    },
+    {
+      "inputs": [
+        "b38"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b40"
+      ],
+      "params": {
+        "operand": 1
+      }
+    },
+    {
+      "inputs": [
+        "b39",
+        "b40"
+      ],
+      "op": "boolean",
+      "outputs": [
+        "b41"
+      ],
+      "params": {
+        "op": "subtract"
+      }
+    }
+  ],
+  "case": "391-deboss-text-on-flange-of-filleted-shelled-body",
+  "expected": {
+    "bbox": {
+      "max": [
+        57,
+        42,
+        35
+      ],
+      "min": [
+        -57,
+        -42,
+        0
+      ]
+    },
+    "body_count": 1,
+    "method": "the flange top (z=6) is planar and the text is clear of the walls and of the cavity below (z 2.5..3.5), so the deboss removes exactly 0.6 x the letters' area. Housing: flange 114 x 84 x 6 + the box drafted 2 deg (half-widths 45 - z k, 30 - z k, k = tan2) above it, z 6..35, less its r6 rounds as sloped prisms (section r^2 (tan(psi/2) - psi/2), psi = acos(sin^2 2), times height sqrt(1+2k^2)): 207002.5157. Shell 2.5 open at the top, every kept face moved 2.5 in and extended to meet: the flange's slab 109 x 79 x 1 (z 2.5..3.5) and the drafted box's offset (half-widths less 2.5/cos2, rounds r3.5) from z = 3.5 to 35: cavity 149670.2362, material 57332.2795. Rounding the cavity at the concave loop where the drafted walls meet the flange top (the true offset; under 298.32 mm, the walls 88 deg from the flange) enlarges it by at most 2.5^2 (tan44 - 44 deg) per mm: 368.6982. The letters, Liberation Sans' A and B at a 4 mm capital height (1409 units), are 598584.83 + 781544.83 units^2 (their quadratic outlines integrated exactly), 11.1229 mm^2: the deboss removes 6.6737. V = 56956.9075 .. 57325.6057",
+    "source": "analytic",
+    "sources": [
+      "tangency-labs/solidcraft#391"
+    ],
+    "volume_mm3": [
+      56956.9,
+      57325.7
+    ],
+    "what": "text debossed 0.6 mm into the flat flange top of a filleted and shelled tapered housing, well away from the curved walls"
+  },
+  "expressible": true,
+  "operation_expressible": true,
+  "outcome": {
+    "ran": true,
+    "raw_counts": {
+      "edges": 186,
+      "faces": 72,
+      "vertices": 124
+    }
+  },
+  "records": "391-deboss-text-on-flange-of-filleted-shelled-body.bodies.json.gz",
+  "result": [
+    {
+      "body": "H",
+      "made": "b41"
+    }
+  ],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": {
+      "area_mm2": 46605.36908224173,
+      "body_count": 1,
+      "edges": 186,
+      "faces": 72,
+      "vertices": 124,
+      "volume_mm3": 57325.606979838834
+    },
+    "refused_with": null,
+    "status": "pass"
+  },
+  "sources": [
+    "tangency-labs/solidcraft#391"
+  ],
+  "traced_ops": [
+    "extrude",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "copy",
+    "copy",
+    "tagged",
+    "blend_dropping",
+    "copy",
+    "copy",
+    "tagged",
+    "shell",
+    "extrude",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean"
+  ],
+  "ungraded": [],
+  "what": "text debossed 0.6 mm into the flat flange top of a filleted and shelled tapered housing, well away from the curved walls",
+  "why_not": []
+}

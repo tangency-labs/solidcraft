@@ -1,0 +1,12 @@
+#### WR-39. `SmBSplineSurface::IsParallelToVector` returns a status as a boolean and uses the wrong overload
+- **Severity:** Wrong result
+- **Area:** Surfaces and volumes
+- **Location:** `SmBSplineSurface.cpp:3146`, `SmBSplineSurface::IsParallelToVector`.
+- **What happens:**
+  - It returns `SER(sTestVec.Unitize())`'s `SM_ERR_INVALID_INPUT` as an `SmBoolean`, so a zero vector reads as TRUE.
+  - `smgu_LinePointDistance(LinePnt, LineEnd, Pnt, d)` binds the (point, direction) overload, so the second net point is used as the direction.
+- **Trigger:** A zero test vector.
+- **How found:** read during porting.
+- **Confirmed:** no.
+- **Severity:** wrong result.
+- **Rust port:** Ported as is.

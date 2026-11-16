@@ -1,0 +1,320 @@
+{
+  "area": "ladder/11-cumulative-parts",
+  "bodies": {
+    "b157": {
+      "keeping_splines": false,
+      "trusted": true
+    },
+    "b172": {
+      "keeping_splines": false,
+      "trusted": true
+    }
+  },
+  "calls": [
+    {
+      "inputs": [
+        "b172"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b173"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b173"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b174"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b157"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b175"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b175"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b176"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b174"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b177"
+      ],
+      "params": {
+        "operand": 0
+      }
+    },
+    {
+      "inputs": [
+        "b176"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b178"
+      ],
+      "params": {
+        "operand": 1
+      }
+    },
+    {
+      "inputs": [
+        "b177",
+        "b178"
+      ],
+      "op": "boolean",
+      "outputs": [
+        "b179"
+      ],
+      "params": {
+        "op": "subtract"
+      }
+    }
+  ],
+  "case": "003-threaded-flange",
+  "expected": {
+    "bbox": {
+      "max": [
+        40,
+        40,
+        30
+      ],
+      "min": [
+        -40,
+        -40,
+        0
+      ]
+    },
+    "body_count": 1,
+    "method": "the hub's cylinder (r15) runs from the r3 round at its root (z 13) to the 1.5 chamfer at its top (z 28.5): the M30 groove (P 3.5) stops w = 1.632286 clear of the round, a shoulder (06/007's rule), and runs out through the chamfer, a free end (06/006's): it removes the stock less 2 pi int int r m(r) dr dz over z 13 + w..28.5 at r 15 and the chamfer (r 15 - (z - 28.5)); the bore r8 is inside the root r 13.1. The M8 tap drills (6.8, the tap maker's) go through the 10 mm disk at r 28, 90 deg + k 120, clear of the bolt holes (30 deg apart): 3 pi 3.4^2 10. Bbox: the flange's",
+    "source": "analytic",
+    "sources": [],
+    "tolerance": {
+      "rel": 0.0001
+    },
+    "volume_mm3": 52962.097548983,
+    "what": "the flange with a modelled M30 thread on its hub, between the round and the chamfer, and M8 tapped holes in the disk"
+  },
+  "expressible": true,
+  "golden": {
+    "measured": {
+      "area_mm2": 17357.359407146,
+      "body_count": 1,
+      "edges": 104,
+      "faces": 38,
+      "vertices": 69,
+      "volume_mm3": 52962.097419669546
+    },
+    "status": "pass",
+    "unstable": null
+  },
+  "operation_expressible": true,
+  "outcome": {
+    "ran": true,
+    "raw_counts": {
+      "edges": 126,
+      "faces": 51,
+      "vertices": 78
+    }
+  },
+  "records": "003-threaded-flange.bodies.json.gz",
+  "result": [
+    {
+      "body": "Part",
+      "made": "b179"
+    }
+  ],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": {
+      "area_mm2": 17357.359407143776,
+      "body_count": 1,
+      "edges": 104,
+      "faces": 38,
+      "vertices": 69,
+      "volume_mm3": 52962.09741972123
+    },
+    "refused_with": null,
+    "status": "pass"
+  },
+  "sources": [],
+  "traced_ops": [
+    "revolve",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "extrude",
+    "extrude",
+    "extrude",
+    "extrude",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "copy",
+    "copy",
+    "tagged",
+    "blend_dropping",
+    "copy",
+    "copy",
+    "tagged",
+    "blend_dropping",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "extrude",
+    "screw_sweep",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "extrude",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean"
+  ],
+  "ungraded": [],
+  "what": "the flange with a modelled M30 thread on its hub, between the round and the chamfer, and M8 tapped holes in the disk",
+  "why_not": []
+}

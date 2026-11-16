@@ -1,0 +1,83 @@
+{
+ "coverage": "Defeature/extrusion.smb (TestFiles/pt_TestFiles) through DoSolidOffset with face 0 kept as a shell face, extend corners: inset 2, its round offsets to a cylinder off the lines its edges were lifted to, so MapEdgeuses builds their UV trim curves by the 101-point drop of CreateUVTrimCurve, whose measured surface distance raises the edge tolerances the closing stitch glues by; inset and outset 2.5 beside it.",
+ "cases": [
+  {
+   "name": "defeature_extrusion_face0_inset2_extended",
+   "inputs": {
+    "operation": "solid",
+    "source": {
+     "kind": "file",
+     "path": {
+      "$upstream_file": "Defeature/extrusion.smb"
+     }
+    },
+    "faces": [
+     {
+      "origin": "source",
+      "index": 0
+     }
+    ],
+    "tolerance": 0.0001,
+    "config": {
+     "member_distance": 2.0,
+     "member_approx_tol": 0.0001,
+     "inset": true,
+     "extend_convex": true,
+     "merge_results": false
+    }
+   }
+  },
+  {
+   "name": "defeature_extrusion_face0_inset2_5_extended",
+   "inputs": {
+    "operation": "solid",
+    "source": {
+     "kind": "file",
+     "path": {
+      "$upstream_file": "Defeature/extrusion.smb"
+     }
+    },
+    "faces": [
+     {
+      "origin": "source",
+      "index": 0
+     }
+    ],
+    "tolerance": 0.0001,
+    "config": {
+     "member_distance": 2.5,
+     "member_approx_tol": 0.0001,
+     "inset": true,
+     "extend_convex": true,
+     "merge_results": false
+    }
+   }
+  },
+  {
+   "name": "defeature_extrusion_face0_outset2_5_extended",
+   "inputs": {
+    "operation": "solid",
+    "source": {
+     "kind": "file",
+     "path": {
+      "$upstream_file": "Defeature/extrusion.smb"
+     }
+    },
+    "faces": [
+     {
+      "origin": "source",
+      "index": 0
+     }
+    ],
+    "tolerance": 0.0001,
+    "config": {
+     "member_distance": 2.5,
+     "member_approx_tol": 0.0001,
+     "inset": false,
+     "extend_convex": true,
+     "merge_results": false
+    }
+   }
+  }
+ ]
+}

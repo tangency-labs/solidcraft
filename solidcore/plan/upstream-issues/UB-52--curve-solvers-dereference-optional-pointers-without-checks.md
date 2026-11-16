@@ -1,0 +1,14 @@
+#### UB-52. Curve solvers dereference optional pointers without checks
+- **Severity:** Crash / undefined behaviour
+- **Area:** Curves
+- **Location:**
+  - `SmCurve.cpp:14907` `SmCurvePropertyEFO::Evaluate`: `SM_CP_PROJECTED_POINT_*` reads `m_cpOptVectors`; `SM_CP_DISTANCE_TO_POINT` / `SM_CP_CYLINDER_INTERSECTION` read `m_cpdPropertyValue`. Also, `SM_CP_MAXIMIZE_RADIUS_OF_CURVATURE` with zero curvature falls through into a 0/0.
+  - `:17170` `SmFindCCNormalENFO::Evaluate`: reads `m_cpOptVectors[0..1]` for `SM_SO_SIGNED_PIVOT_MINIMIZE`.
+  - `:4881` `SmCCIGlobalSolver::LocalSolve`: casts each leaf's `m_pData` to `SmBezierSpan` (the aux-type check is an `SM_ASSERT`), which reads past an `SmBezierAux1d` on pruned trees.
+  - `SmGlobalSolver.cpp:130` `SmGlobalSolver::SolveIt`: initialises `sStartBranch[i]` only for `i < m_lNumTrees`, so a one-tree solve passes an uninitialised `apBranch[1]`.
+- **What happens:** NULL dereference, out-of-object reads, uninitialised pointer use.
+- **Trigger:** A property solve of `SM_CP_PROJECTED_POINT_X` with no vectors.
+- **How found:** read during porting.
+- **Confirmed:** no.
+- **Severity:** crash/UB.
+- **Rust port:** Returns `InvalidInput`.

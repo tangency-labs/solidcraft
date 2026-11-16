@@ -6,8 +6,8 @@ use egui::{Pos2, Rect, pos2, vec2};
 use serde_json::{Value, json};
 use solidcraft_engine::command_specs;
 
-use crate::theme::Tokens;
 use crate::{SolveApp, ui_kit};
+use solidcraft_theme::Tokens;
 
 /// How many recent commands are kept.
 const RECENT: usize = 12;
@@ -177,6 +177,10 @@ fn keywords(id: &str) -> &'static str {
         "file.export_stl" | "file.export_3mf" => "mesh 3d print printing",
         "file.export_obj" => "mesh",
         "file.export_urdf" => "robot ros simulation",
+        "sketch.constraint.tangent" => "g1 tangency continuity smooth",
+        "sketch.constraint.curvature" => "g2 curvature continuity smooth",
+        "sketch.blend_curve" => "g1 g2 g3 g4 continuity tangent curvature bridge",
+        "solid.fillet" => "g1 g2 continuity curvature blend round",
         _ => "",
     }
 }
@@ -455,6 +459,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
                 ui_kit::scope(ui, |ui| {
                     ui.spacing_mut().item_spacing.y = 0.0;
                     let invalid = typed(&query).is_some_and(|(_, result)| result.is_err());
+                    let key = crate::keymap::display_for(app, "ui.palette");
                     let field = ui_kit::CommandSearch::field(
                         ui,
                         &mut query,
@@ -466,6 +471,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
                             progress,
                             radius: ui_kit::CommandSearch::field_radius(progress, ui_kit::Container::new(ctx, ui_kit::Surface::Chrome).floating()),
                         },
+                        key.as_deref(),
                         MAX_QUERY,
                     );
                     if !open && progress == 0.0 {
@@ -563,7 +569,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
                                             ui_kit::CommandSearch::heading(ui, if recent { "search.recent" } else { "search.commands" }, count);
                                             last_recent = Some(recent);
                                         }
-                                        let mut item = ui_kit::MenuItem::new(id, label, icon);
+                                        let mut item = ui_kit::MenuItem::new(id, label, *icon);
                                         item.enabled = enabled.get(index).copied().unwrap_or(false);
                                         item.highlighted = index == app.sbox.index;
                                         let shortcut = crate::keymap::display_for(app, id).unwrap_or_default();
@@ -876,6 +882,11 @@ mod tests {
         assert_eq!(search(&app, "extr").first().map(|x| x.0), Some("solid.extrude"));
         assert_eq!(search(&app, "solid.fil").first().map(|x| x.0), Some("solid.fillet"));
         assert!(search(&app, "constrain").iter().any(|x| x.0 == "sketch.constraint.parallel"), "by panel");
+        for (query, id) in
+            [("g1", "sketch.constraint.tangent"), ("g2", "sketch.constraint.curvature"), ("g2", "sketch.blend_curve"), ("g2", "solid.fillet")]
+        {
+            assert!(search(&app, query).iter().any(|x| x.0 == id), "{query:?} finds {id}");
+        }
         app.sbox.used("solid.shell");
         app.sbox.used("solid.revolve");
         let all = search(&app, "");
@@ -1096,7 +1107,7 @@ mod tests {
         let toolbar = crate::scenario::rect_of("toolbar").unwrap();
         assert_eq!(crate::toolbar::TAB_ROW_HEIGHT, 30.0);
         assert_eq!(crate::toolbar::RIBBON_HEIGHT, 117.0);
-        assert_eq!(closed.size(), vec2(ui_kit::CommandSearch::closed_width(&h.ctx), 22.0));
+        assert_eq!(closed.size(), vec2(ui_kit::CommandSearch::closed_width(&h.ctx, Some("S")), 22.0));
         assert_eq!(closed.right(), toolbar.right() - 4.0);
         assert_eq!(closed.top(), toolbar.top() + 4.0);
         assert_eq!(closed.center().y, toolbar.top() + 15.0);

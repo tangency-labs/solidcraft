@@ -1,0 +1,23 @@
+{
+  "cases": [
+    {
+      "name": "merge_p3_empty_forest",
+      "inputs": {"api": "trees", "breps": [], "tree": []}
+    },
+    {
+      "name": "merge_p3_defined_null_leaf_result",
+      "inputs": {
+        "api": "trees",
+        "breps": [
+          {"kind": "box", "origin": [0.0, 0.0, 0.0], "size": [1.0, 2.0, 3.0]},
+          {"kind": "box", "origin": [4.0, 0.0, 0.0], "size": [3.0, 2.0, 1.0]}
+        ],
+        "tree": [0, 0]
+      }
+    },
+    {
+      "name": "merge_p3_unreachable_bad_leaf",
+      "inputs": {"api": "trees", "breps": [], "tree": [-1, 64]}
+    }
+  ]
+}

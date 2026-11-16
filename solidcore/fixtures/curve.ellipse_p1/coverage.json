@@ -1,0 +1,183 @@
+{
+ "cases": [
+  {
+   "name": "cov_join_ellipse_tilted_normal",
+   "upstream_ref": "source/SMLib/src/SmEllipse.cpp:3420 (coverage: crates/solidcore/src/curve/ellipse/p1.rs:1732)",
+   "inputs": {
+    "build": {
+     "ellipse": {
+      "c": [
+       0,
+       0,
+       0
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "domain": [
+       0,
+       90
+      ],
+      "radii": [
+       2,
+       1
+      ]
+     }
+    },
+    "ops": [
+     {
+      "op": "join",
+      "end": 1,
+      "other": {
+       "ellipse": {
+        "c": [
+         0,
+         0,
+         0
+        ],
+        "x": [
+         1,
+         0,
+         0
+        ],
+        "y": [
+         0,
+         0.6,
+         0.8
+        ],
+        "domain": [
+         90,
+         180
+        ],
+        "radii": [
+         2,
+         1
+        ]
+       }
+      },
+      "other_end": 0
+     }
+    ]
+   }
+  },
+  {
+   "name": "cov_join_ellipse_rotated_axes",
+   "upstream_ref": "source/SMLib/src/SmEllipse.cpp:3427 (coverage: crates/solidcore/src/curve/ellipse/p1.rs:1739)",
+   "inputs": {
+    "build": {
+     "ellipse": {
+      "c": [
+       0,
+       0,
+       0
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "domain": [
+       0,
+       90
+      ],
+      "radii": [
+       2,
+       1
+      ]
+     }
+    },
+    "ops": [
+     {
+      "op": "join",
+      "end": 1,
+      "other": {
+       "ellipse": {
+        "c": [
+         0,
+         0,
+         0
+        ],
+        "x": [
+         0,
+         1,
+         0
+        ],
+        "y": [
+         -1,
+         0,
+         0
+        ],
+        "domain": [
+         90,
+         180
+        ],
+        "radii": [
+         2,
+         1
+        ]
+       }
+      },
+      "other_end": 0
+     }
+    ]
+   }
+  },
+  {
+   "name": "cov_offset_noncircular_ellipse",
+   "upstream_ref": "source/SMLib/src/SmBSplineCurve.cpp:2475 (coverage: crates/solidcore/src/curve/ellipse/p1.rs:914)",
+   "inputs": {
+    "build": {
+     "ellipse": {
+      "c": [
+       0,
+       0,
+       0
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "domain": [
+       0,
+       90
+      ],
+      "radii": [
+       2,
+       1
+      ]
+     }
+    },
+    "ops": [
+     {
+      "op": "offset",
+      "tol": 0.001,
+      "normal": [
+       0,
+       0,
+       1
+      ],
+      "dist": 0.1
+     }
+    ]
+   }
+  }
+ ]
+}

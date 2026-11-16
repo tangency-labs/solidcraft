@@ -29,7 +29,7 @@ fn matches(schema: schemars::Schema, id: &str, reply: &Value) {
 #[test]
 fn schemas_and_the_key_check_agree() {
     assert_keys(input_schema_for::<SilhouetteParams>(), &["bodies", "camera", "rows", "view"]);
-    assert_keys(input_schema_for::<ExportViewDxfParams>(), &["camera", "hidden", "path", "tolerance"]);
+    assert_keys(input_schema_for::<ExportViewDxfParams>(), &["camera", "curves", "hidden", "path", "tolerance", "zero"]);
 }
 
 /// Strict gives the handlers' messages for the calls they refuse for a key (a missing `camera`
@@ -70,7 +70,7 @@ fn strict_keeps_todays_errors() {
         (DXF, json!({"camera": {"target": [0, 0, 0], "yaw": 2e6, "pitch": 0, "distance": 1, "fov": 0}})),
         (DXF, json!({"camera": {"target": [0, 0, 0], "yaw": 0, "pitch": 0, "roll": 2e6, "distance": 1, "fov": 0}})),
         (DXF, json!({"camera": {"target": [0, 0, 0], "yaw": 0, "pitch": 0, "distance": 1, "fov": 3.2}})),
-        (DXF, json!({"camera": {"target": [0, 0, 0], "yaw": 0, "pitch": 0, "distance": 1}})),
+        (DXF, json!({"camera": {"target": [0, 0, 0], "yaw": 0, "pitch": 0, "fov": 0}})),
         (DXF, json!({"camera": camera(), "hidden": "dash"})),
         (DXF, json!({"camera": camera(), "hidden": "Omit"})),
         (DXF, json!({"camera": camera(), "hidden": null})),
@@ -132,6 +132,8 @@ fn the_types_read_each_key_as_the_handlers_do() {
         (DXF, json!({"camera": named(json!({"roll": 1, "up": "y", "pitch": 1.5}))})),
         (DXF, json!({"camera": named(json!({"pitch": std::f64::consts::FRAC_PI_2, "yaw": 1e6, "roll": -1e6}))})),
         (DXF, json!({"camera": named(json!({"fov": 3.1}))})),
+        // No `fov` is an orthographic view, as for the view commands (#13112).
+        (DXF, json!({"camera": {"target": [0, 0, 0], "yaw": 0, "pitch": 0, "distance": 100}})),
         (DXF, json!({"camera": camera(), "hidden": "omit"})),
         (DXF, json!({"camera": camera(), "hidden": "dashed", "tolerance": 1})),
         (DXF, json!({"camera": camera(), "tolerance": 0.0001})),
@@ -207,6 +209,10 @@ fn the_schemas_take_what_the_handlers_read() {
             (json!({"camera": camera(), "tolerance": 2}), false),
             (json!({"camera": camera(), "tolerance": 0}), false),
             (json!({"camera": camera(), "pathh": "a.dxf"}), false),
+            (json!({"camera": camera(), "zero": "origin"}), true),
+            (json!({"camera": camera(), "zero": "corner"}), false),
+            (json!({"camera": camera(), "curves": "arcs"}), true),
+            (json!({"camera": camera(), "curves": "splines"}), false),
         ],
     );
 }
@@ -221,6 +227,8 @@ fn the_check_names_what_is_wrong_with_a_key() {
     assert_eq!(issues(SIL, json!({"bodies": [1]})), ["`bodies` must contain names"]);
     assert_eq!(issues(DXF, json!({"camera": camera(), "hidden": 1})), ["hidden must be omit or dashed"]);
     assert_eq!(issues(DXF, json!({"camera": camera(), "tolerance": 3})), ["tolerance must be 0.0001..1 mm"]);
+    assert_eq!(issues(DXF, json!({"camera": camera(), "zero": "corner"})), ["zero must be target or origin"]);
+    assert_eq!(issues(DXF, json!({"camera": camera(), "curves": "splines"})), ["curves must be lines or arcs"]);
     assert_eq!(issues(DXF, json!({"camera": camera(), "path": " "})), ["invalid path"]);
     assert_eq!(issues(DXF, json!({"camera": 1})), ["invalid camera"]);
     // Left out, the handler's own refusal stands in for "is required".

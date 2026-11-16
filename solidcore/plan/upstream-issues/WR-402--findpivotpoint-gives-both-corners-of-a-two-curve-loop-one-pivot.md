@@ -1,0 +1,11 @@
+#### WR-402. `sm_FindPivotPoint` gives both corners of a two-curve loop the same pivot
+- **Severity:** Wrong result (not a closed solid)
+- **Area:** Primitive creation / taper extrude
+- **Location:** `source/SMLib/src/SmPrimitiveCreation.cpp`, `sm_FindPivotPoint`, called from `sm_CreateRuledSurfaceFromOffsetCurve` for a corner offset curve: it returns the first coincident end pair of the corner's two links (start-start, then end1-start2, else the second curve's end).
+- **What happens:** two links that close a loop (a line and an arc, two arcs) meet at both ends, so both corner offset curves are ruled to the same joint. One corner face collapses onto the wrong vertex and the shell does not close.
+- **Trigger:** `SmApiCreateTaperExtrude` with linear-extension corners and both caps on a half disc (line (-20,0)-(20,0) plus an arc r20 over the top), drafted 3 degrees outward over 10; a lens of two arcs likewise. The same half disc with its diameter as two lines is a valid solid of volume 6555.914.
+- **How found:** reported by jyviko (tangency-labs/solidcore#479); fixed in the SolidCraft fork (branch r-booleans, 335217b).
+- **Confirmed:** by reading `sm_FindPivotPoint`; not compared on the C++ reference here.
+- **Fix:** when the two links meet at more than one end pair, take the joint nearest the ends of the (untransformed) corner offset curve, which lies around its own joint. With a single joint the result is unchanged.
+- **Rust port:** `crates/solidcore/src/primitive/primitive_creation/p3/ruled.rs` (`pivot_nearest_corner`, used by `ruled_surface_from_offset`), opt-in `Kernel::fixes.taper_pivot_nearest_corner` (off by default: upstream's pivot, so `primitive.primitive_creation_p2` and `sweep.api_brep`, which compare taper extrudes, keep matching the C++). Test: `issue_479_two_curve_loop_taper_is_closed` in the same file (manifold solid, volume 6555.914).
+- Fixes tangency-labs/solidcore#479.

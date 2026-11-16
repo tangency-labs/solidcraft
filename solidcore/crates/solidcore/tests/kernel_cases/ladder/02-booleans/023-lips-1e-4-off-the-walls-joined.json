@@ -1,0 +1,164 @@
+{
+  "area": "ladder/02-booleans",
+  "bodies": {
+    "b4": {
+      "keeping_splines": false,
+      "trusted": true
+    },
+    "b7": {
+      "keeping_splines": false,
+      "trusted": true
+    }
+  },
+  "calls": [
+    {
+      "inputs": [
+        "b4"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b5"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b5"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b6"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b7"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b8"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b8"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b9"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b6"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b10"
+      ],
+      "params": {
+        "operand": 0
+      }
+    },
+    {
+      "inputs": [
+        "b9"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b11"
+      ],
+      "params": {
+        "operand": 1
+      }
+    },
+    {
+      "inputs": [
+        "b10",
+        "b11"
+      ],
+      "op": "boolean",
+      "outputs": [
+        "b12"
+      ],
+      "params": {
+        "op": "union"
+      }
+    }
+  ],
+  "case": "023-lips-1e-4-off-the-walls-joined",
+  "expected": {
+    "body_count": 1,
+    "method": "base area = 2 straight rails (2 x 20) x 2 + full annulus pi(25-9) = 80 + 16 pi, times 2 mm = 160 + 32 pi. Each lip is a half annulus pi(25-16)/2 = 4.5 pi, two lips x 18 mm = 162 pi. The lips sit above z=2, the base is below, so nothing overlaps (the crescent overhang is above z=2 too): V = 160 + 194 pi = 769.469. One body",
+    "source": "analytic",
+    "sources": [
+      "tangency-labs/solidcraft#2928"
+    ],
+    "volume_mm3": 769.468974796,
+    "what": "two half-annulus lips (r 4..5, from z=2 to 20) joined onto a stadium-ring base (z 0..2, r 3..5 arcs, centres 20 apart) with their cylinder walls 0.0001 mm off the base's: the lip cap touches the base top, leaving a 0.0001 mm crescent overhang. Layout is a hand-built variant of the PR's public reproduction"
+  },
+  "expressible": true,
+  "golden": {
+    "measured": {
+      "area_mm2": 1610.9399495877499,
+      "body_count": 1,
+      "edges": 54,
+      "faces": 22,
+      "vertices": 34,
+      "volume_mm3": 769.4689747685195
+    },
+    "status": "pass",
+    "unstable": null
+  },
+  "operation_expressible": true,
+  "outcome": {
+    "ran": true,
+    "raw_counts": {
+      "edges": 54,
+      "faces": 22,
+      "vertices": 34
+    }
+  },
+  "records": "023-lips-1e-4-off-the-walls-joined.bodies.json.gz",
+  "result": [
+    {
+      "body": "Base",
+      "made": "b12"
+    }
+  ],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": {
+      "area_mm2": 1610.9399495877499,
+      "body_count": 1,
+      "edges": 54,
+      "faces": 22,
+      "vertices": 34,
+      "volume_mm3": 769.4689747685195
+    },
+    "refused_with": null,
+    "status": "pass"
+  },
+  "sources": [
+    "tangency-labs/solidcraft#2928"
+  ],
+  "traced_ops": [
+    "extrude",
+    "extrude",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean"
+  ],
+  "ungraded": [],
+  "what": "two half-annulus lips (r 4..5, from z=2 to 20) joined onto a stadium-ring base (z 0..2, r 3..5 arcs, centres 20 apart) with their cylinder walls 0.0001 mm off the base's: the lip cap touches the base top, leaving a 0.0001 mm crescent overhang. Layout is a hand-built variant of the PR's public reproduction",
+  "why_not": []
+}

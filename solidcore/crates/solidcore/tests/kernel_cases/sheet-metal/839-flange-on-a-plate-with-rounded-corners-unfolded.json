@@ -1,0 +1,279 @@
+{
+  "area": "sheet-metal",
+  "bodies": {},
+  "calls": [
+    {
+      "inputs": [],
+      "op": "extrude",
+      "outputs": [
+        "b15"
+      ],
+      "params": {
+        "cap": true,
+        "corner": "curvature",
+        "direction": [
+          0.0,
+          0.0,
+          1.0
+        ],
+        "distance": 2.0,
+        "draft": 0.0,
+        "profile": [
+          {
+            "line": {
+              "end": [
+                198.24499799882412,
+                -37.1415926535898,
+                0.0
+              ],
+              "start": [
+                1.755002002,
+                -37.1415926535898,
+                0.0
+              ]
+            }
+          },
+          {
+            "line": {
+              "end": [
+                198.24499799882412,
+                2.999999999999993,
+                0.0
+              ],
+              "start": [
+                198.24499799882412,
+                -37.1415926535898,
+                0.0
+              ]
+            }
+          },
+          {
+            "arc": {
+              "axis": [
+                0.0,
+                0.0,
+                1.0
+              ],
+              "center": [
+                192.00000000002575,
+                7.999999999974247,
+                0.0
+              ],
+              "end": 3.2190916599006414e-12,
+              "radius": 7.999999999974582,
+              "reference": [
+                1.0,
+                0.0,
+                0.0
+              ],
+              "start": -0.6751315329354515
+            }
+          },
+          {
+            "line": {
+              "end": [
+                200.0,
+                92.0,
+                0.0
+              ],
+              "start": [
+                200.0,
+                8.0,
+                0.0
+              ]
+            }
+          },
+          {
+            "arc": {
+              "axis": [
+                0.0,
+                0.0,
+                1.0
+              ],
+              "center": [
+                192.00000000002726,
+                92.00000000002751,
+                0.0
+              ],
+              "end": 1.5707963267983,
+              "radius": 7.999999999972754,
+              "reference": [
+                1.0,
+                0.0,
+                0.0
+              ],
+              "start": -3.439026841090602e-12
+            }
+          },
+          {
+            "line": {
+              "end": [
+                8.0,
+                100.0,
+                0.0
+              ],
+              "start": [
+                192.0,
+                100.0,
+                0.0
+              ]
+            }
+          },
+          {
+            "arc": {
+              "axis": [
+                0.0,
+                0.0,
+                1.0
+              ],
+              "center": [
+                7.999999999973805,
+                92.0000000000262,
+                0.0
+              ],
+              "end": 3.141592653593067,
+              "radius": 7.9999999999738,
+              "reference": [
+                1.0,
+                0.0,
+                0.0
+              ],
+              "start": 1.5707963267916223
+            }
+          },
+          {
+            "line": {
+              "end": [
+                0.0,
+                8.0,
+                0.0
+              ],
+              "start": [
+                0.0,
+                92.0,
+                0.0
+              ]
+            }
+          },
+          {
+            "arc": {
+              "axis": [
+                0.0,
+                0.0,
+                1.0
+              ],
+              "center": [
+                7.999999999973986,
+                7.9999999999739835,
+                0.0
+              ],
+              "end": 3.816724186525262,
+              "radius": 7.999999999973986,
+              "reference": [
+                1.0,
+                0.0,
+                0.0
+              ],
+              "start": 3.1415926535865415
+            }
+          },
+          {
+            "line": {
+              "end": [
+                1.755002002,
+                -37.1415926535898,
+                0.0
+              ],
+              "start": [
+                1.755002002,
+                3.0,
+                0.0
+              ]
+            }
+          }
+        ]
+      }
+    }
+  ],
+  "case": "839-flange-on-a-plate-with-rounded-corners-unfolded",
+  "expected": {
+    "bbox": {
+      "max": [
+        200,
+        100,
+        2
+      ],
+      "min": [
+        0,
+        -37.1415926535898,
+        0
+      ]
+    },
+    "body_count": 1,
+    "method": "T = 2, R = 1, K = 0.5, BD(90) = 2.8584: the flat reaches 40 - BD = 37.1416 below the plate's bottom edge; the plate itself spans x 0..200 up to y = 100 (its top corners are the rounded ones); z 0..2",
+    "source": "analytic",
+    "sources": [
+      "tangency-labs/solidcraft#839"
+    ],
+    "what": "a 200 x 100 plate with its corners rounded 8 and one 40 mm inside flange on its bottom edge, unfolded: the trim made the outline's arcs chords"
+  },
+  "expressible": true,
+  "operation_expressible": true,
+  "outcome": {
+    "ran": true,
+    "raw_counts": {
+      "edges": 30,
+      "faces": 12,
+      "vertices": 20
+    }
+  },
+  "result": [
+    {
+      "body": "Body1",
+      "made": "b15"
+    }
+  ],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": {
+      "area_mm2": 55838.18756015275,
+      "body_count": 1,
+      "edges": 30,
+      "faces": 12,
+      "vertices": 20,
+      "volume_mm3": 54508.7715060468
+    },
+    "refused_with": null,
+    "status": "pass"
+  },
+  "sources": [
+    "tangency-labs/solidcraft#839"
+  ],
+  "traced_ops": [
+    "planar_faces",
+    "planar_faces",
+    "boolean2d",
+    "planar_faces",
+    "planar_faces",
+    "boolean2d",
+    "planar_faces",
+    "planar_faces",
+    "boolean2d",
+    "planar_faces",
+    "boolean2d",
+    "planar_faces",
+    "extrude",
+    "planar_faces",
+    "planar_faces",
+    "boolean2d",
+    "planar_faces",
+    "planar_faces",
+    "boolean2d",
+    "planar_faces",
+    "boolean2d"
+  ],
+  "ungraded": [],
+  "what": "a 200 x 100 plate with its corners rounded 8 and one 40 mm inside flange on its bottom edge, unfolded: the trim made the outline's arcs chords",
+  "why_not": []
+}

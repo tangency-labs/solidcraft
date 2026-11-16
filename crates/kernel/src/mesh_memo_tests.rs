@@ -1,5 +1,6 @@
 use super::*;
 use crate::{BoolOp, boolean, box_solid, cylinder, measure};
+use solidcraft_geom::tess::EvaluateMesh as _;
 
 /// A plate with a row of holes and a rounded rim along one edge (so that it is no prism the 2D
 /// route would take), as a large body many small regions are cut from.
@@ -78,7 +79,7 @@ fn a_placed_copy_is_planned_as_its_original_moved() {
     let copies: Vec<Body> =
         (0..2).map(|_| crate::transform(&part, shift, Vec3::ZERO, Vec3::Z, angle).unwrap().with_display_share(&share, t)).collect();
     let tol = crate::MeshTolerance::display_of(part.size());
-    let original = part.mesh_plan(&tol).unwrap().evaluate();
+    let original = part.mesh_plan(&tol).unwrap().evaluate_mesh();
     for copy in &copies {
         let m = copy.mesh_of(&copy.mesh_plan(&tol).unwrap()).unwrap();
         assert_eq!(m.triangles, original.triangles);
@@ -88,4 +89,17 @@ fn a_placed_copy_is_planned_as_its_original_moved() {
         assert!(far < 1e-9, "{far}");
     }
     assert_eq!(share.0.plans.lock().unwrap().len(), 1, "planned once for both copies");
+}
+
+/// The mesh path is strict about its spec (an angle past the shaping's bound is refused, never
+/// clamped), and a mesh body gives its own triangles with nothing to report.
+#[test]
+fn export_mesh_refuses_a_spec_out_of_range_and_gives_a_mesh_bodys_own_triangles() {
+    let part = box_solid(Vec3::ZERO, Vec3::new(30.0, 20.0, 10.0)).unwrap();
+    let e = part.export_mesh(&MeshSpec { min_angle: 31.0, ..MeshSpec::chord(0.01) }).unwrap_err().to_string();
+    assert!(e.contains("smallest angle"), "{e}");
+    let tri = crate::mesh_body(&[Vec3::ZERO, Vec3::X, Vec3::Y, Vec3::Z], &[[0, 2, 1], [0, 1, 3], [0, 3, 2], [1, 2, 3]]).unwrap();
+    let (mesh, stats) = tri.export_mesh(&MeshSpec::chord(0.01)).unwrap();
+    assert_eq!(mesh.triangles.len(), 4);
+    assert_eq!(stats, PlanStats::default());
 }

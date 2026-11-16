@@ -1,0 +1,1392 @@
+//! Merge orchestration (`SmMerge`'s tree, list and piecewise entry points), ported from
+//! upstream and checked against the unit's golden. Leaf-only trees move stable handles
+//! into an input pool imported before running the port. Results record
+//! identity/order/null slots, face/edge/vertex counts and ordered vertex positions read
+//! from the actual Rust B-rep. Curve/surface values and adjacency are not recorded.
+//! Geometric merges remain deferred at the exact missing dependency call.
+//! Family 2's lists may hold surface operands (`Operand::surface`, planes and spheres):
+//! solidcore copies them whole, where upstream's base copy constructor slices them and a
+//! surface list fails with `SM_ERR` (WR-196); a list with B-reps ignores its surfaces.
+//! The fixture `surface-operands.json` covers both.
+//! Family 6 runs `NonManifoldBoolean` through `DependencyMerge::with_engine` on a
+//! context-only engine with explicit members and at most one operand: it records the NER
+//! status, the restored manifold flag, the lamina mode
+//! the engine's intersector received and the null result (error-path coverage only).
+//! Family 4 constructs the merge (`MergeAccess(context, a, b, 0.0, 0.0, options)`, as
+//! the reference fixture) and runs `PiecewiseMerge` with that engine's intersector as `m_vTI`:
+//! `IntersectInsertRelate`, the mate clearing, subset, controls, SSI registration and
+//! wire processing all act on the one engine that `ManifoldBoolean` then uses.
+use std::collections::BTreeSet;
+
+use crate::{Case, CaseContext, HarnessError, Output, Rng, UnitDiff};
+use port::{BooleanDriver, PiecewiseAccess};
+use serde::{Deserialize, Serialize};
+use serde_json::{json, Value};
+use solidcore::boolean::merge::p1::MergeState;
+use solidcore::boolean::merge::p2::MergeOperand;
+use solidcore::boolean::merge::p4::{
+    BooleanKernels, KernelManifoldIntersector, ManifoldIntersector, ManifoldState,
+};
+use solidcore::boolean::merge::{p1::MergeOptions, p3 as port};
+use solidcore::boolean::topology_intersector::p1::TopologyIntersector;
+use solidcore::geom::a_object::BooleanOperation;
+use solidcore::geom::attribute::{ids, Attribute, AttributeStore, Behavior, ObjectKey};
+use solidcore::geom::context::MarkLock;
+use solidcore::geom::extent2d::Extent2d;
+use solidcore::kernel::Kernel;
+use solidcore::math::{Point3, Vec3};
+use solidcore::surface::plane::Plane;
+use solidcore::surface::sphere::{Sphere, SphereOptions};
+use solidcore::surface::surface::Surface;
+use solidcore::topology::brep_cache::{arena_identity, CacheObject};
+use solidcore::topology::topology_traverser::Marks;
+use solidcore::topology::{brep::p1 as bp, Brep, FaceId, NamingScheme};
+use solidcore::SolidError;
+
+/// The five merge functions of `boolean.merge_p3`.
+pub struct Runner;
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct Operand {
+    point: [f64; 3],
+    #[serde(default)]
+    size: Option<[f64; 3]>,
+    /// A surface operand of a `BooleanLists` list (family 2; shim kinds 2 and 3): `point`
+    /// is its origin (plane) or centre (sphere). A list with B-rep operands ignores its
+    /// surfaces, as upstream reads the surface list only when the B-rep list is empty.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    surface: Option<SurfaceOperand>,
+}
+/// The surface kinds a list operand can be.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum SurfaceOperand {
+    /// `SmPlane(origin, normal)`: the infinite plane through the point.
+    Plane { normal: [f64; 3] },
+    /// `SmSphere(centre, X, Y, [0, 360] x [-90, 90] degrees, radius)`.
+    Sphere { radius: f64 },
+}
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct Inputs {
+    family: u8,
+    operation: i32,
+    #[serde(default)]
+    options: Option<u8>,
+    #[serde(default)]
+    a: Vec<Operand>,
+    #[serde(default)]
+    b: Vec<Operand>,
+    #[serde(default)]
+    tree: Vec<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    expected_refusal: Option<String>,
+}
+fn harness(error: &(impl ToString + ?Sized)) -> HarnessError {
+    HarnessError::new(error.to_string())
+}
+fn refusal(i: &Inputs, expected: &str) -> Result<Output, HarnessError> {
+    match contract(i) {
+        Err(reason) if expected == "UB-190" && reason.starts_with("UB-190:") => {
+            // Guard-only check: no operation runs. Recorded as an error with no values,
+            // never as a deferral.
+            Ok(Output::err("ffi refusal: UB-190"))
+        }
+        _ => Err(harness("expected the specific UB-190 refusal")),
+    }
+}
+
+/// The largest list, and the largest operation or tree token magnitude.
+const MAX_OPERANDS: usize = 16;
+const MAX_TOKEN: i64 = 64;
+const MAX_TREE: usize = 128;
+
+/// The input contract of the reference wrapper (`SmMerge`'s entry points dereference what
+/// it rules out): a family up to 6 and an operation within `±64` (0 to 10 for families 3,
+/// 4 and 6); an option mask up to 31; at most 16 operands, in the list shape the family
+/// takes (family 0 no `b`, 3 and 4 one of each, 5 one `a`, 6 at most one in all); surface
+/// operands only in family 2; finite points, box sizes, plane normals and sphere radii,
+/// box sides and sphere radii positive, plane normals non-zero; no imprinting piecewise
+/// merge of a box other operand without keep-other (UB-190: the imprint early return
+/// deletes the other operand before its next surface reuses it); a tree only in family
+/// 0, of at most 128 tokens within `±64`, whose executed binary operations never take a
+/// leaf out of range or a null (already used) operand. The reason names the rule broken.
+fn contract(i: &Inputs) -> Result<(), String> {
+    let bad = |m: &str| Err(m.to_owned());
+    let (family, op) = (i.family, i64::from(i.operation));
+    let (na, nb) = (i.a.len(), i.b.len());
+    if family > 6 || !(-MAX_TOKEN..=MAX_TOKEN).contains(&op) {
+        return bad("family or operation out of range");
+    }
+    if i.options.is_some_and(|o| o > 31) {
+        return bad("option mask out of range");
+    }
+    if na > MAX_OPERANDS
+        || nb > MAX_OPERANDS
+        || na + nb > MAX_OPERANDS
+        || ((family == 3 || family == 4) && (na != 1 || nb != 1))
+        || (family == 0 && nb != 0)
+        || ((family == 3 || family == 4 || family == 6) && !(0..=10).contains(&op))
+        || (family == 5 && (na != 1 || nb != 0))
+        || (family == 6 && na + nb > 1)
+    {
+        return bad("operand list shape or enum");
+    }
+    for operand in i.a.iter().chain(&i.b) {
+        if operand.surface.is_some() && family != 2 {
+            return bad("surface operands belong to BooleanLists (family 2)");
+        }
+        if !operand.point.iter().all(|c| c.is_finite()) {
+            return bad("non-finite input");
+        }
+        match (&operand.surface, operand.size) {
+            (Some(SurfaceOperand::Plane { normal }), _) => {
+                if !normal.iter().all(|c| c.is_finite()) {
+                    return bad("non-finite input");
+                }
+                if normal.iter().all(|&c| c == 0.0) {
+                    return bad("zero plane normal");
+                }
+            }
+            (Some(SurfaceOperand::Sphere { radius }), _) => {
+                if !radius.is_finite() {
+                    return bad("non-finite input");
+                }
+                if *radius <= 0.0 {
+                    return bad("sphere radius must be positive");
+                }
+            }
+            (None, Some(size)) => {
+                if !size.iter().all(|c| c.is_finite()) {
+                    return bad("non-finite input");
+                }
+                if size.iter().any(|&d| d <= 0.0) {
+                    return bad("nonpositive box dimension");
+                }
+            }
+            (None, None) => {}
+        }
+    }
+    let other_is_box = i
+        .b
+        .first()
+        .is_some_and(|o| o.surface.is_none() && o.size.is_some());
+    if family == 4 && other_is_box && i.options.is_some_and(|o| o & 2 != 0 && o & 16 == 0) {
+        return bad("UB-190: piecewise imprinting requires keep-other");
+    }
+    if family != 0 && !i.tree.is_empty() {
+        return bad("unexpected tree");
+    }
+    tree_contract(na, &i.tree)
+}
+
+/// The tree part of [`contract`]: a postfix walk of `nodes` over `count` leaves, stopping
+/// at the first operation with fewer than two operands or past `-6`, in which no executed
+/// binary operation takes an operand that is null (a leaf already used once).
+fn tree_contract(count: usize, nodes: &[i64]) -> Result<(), String> {
+    let bad = |m: &str| Err(m.to_owned());
+    if count > MAX_OPERANDS || nodes.len() > MAX_TREE {
+        return bad("tree resource limit");
+    }
+    let mut used = vec![false; count];
+    let mut stack = Vec::new();
+    for &node in nodes {
+        if !(-MAX_TOKEN..=MAX_TOKEN).contains(&node) {
+            return bad("invalid tree token");
+        }
+    }
+    for &node in nodes {
+        if node >= 0 {
+            let Some(flag) = usize::try_from(node).ok().and_then(|n| used.get_mut(n)) else {
+                return bad("tree leaf out of range");
+            };
+            stack.push(!*flag);
+            *flag = true;
+        } else if stack.len() < 2 {
+            break;
+        } else {
+            let other = stack.pop().unwrap_or(false);
+            let primary = stack.pop().unwrap_or(false);
+            if !primary || !other {
+                return bad("binary operation dereferences a null operand");
+            }
+            if node < -6 {
+                break;
+            }
+            stack.push(true);
+        }
+    }
+    Ok(())
+}
+/// The deferral tag of merge calls with no constructed Rust-side engine.
+const HARNESS_ENGINE_STATE: &str = "harness:merge-engine-state";
+/// Family 6: `NonManifoldBoolean` on an adopted engine (see the module docs).
+const ENGINE_PROBE: u8 = 6;
+
+fn boolean_operation(code: i32) -> Result<BooleanOperation, HarnessError> {
+    Ok(match code {
+        0 => BooleanOperation::Unknown,
+        1 => BooleanOperation::Union,
+        2 => BooleanOperation::Intersection,
+        3 => BooleanOperation::Difference,
+        4 => BooleanOperation::ExclusiveOr,
+        5 => BooleanOperation::Merge,
+        6 => BooleanOperation::PartialMerge,
+        7 => BooleanOperation::Imprint,
+        8 => BooleanOperation::ImprintClassify,
+        9 => BooleanOperation::ExtractSeparate,
+        10 => BooleanOperation::Slice,
+        _ => return Err(harness("invalid operation")),
+    })
+}
+
+fn engine_output(status: i64, manifold: bool, lamina: u64, result: bool) -> Output {
+    Output::new()
+        .int("status", status)
+        .int("manifold", i64::from(manifold))
+        .int("lamina", lamina as i64)
+        .int("result", i64::from(result))
+}
+
+/// The engine mirrors the native `EngineAccess`: the context-only constructor's
+/// members (`KernelManifoldIntersector::new`), the same explicit tolerances and
+/// `SetMergeOptions`, manifold flag true and lamina mode 0 before the call.
+fn engine_probe(k: &mut Kernel, i: &Inputs, pool: &mut Pool) -> Result<Output, HarnessError> {
+    let mut breps = std::mem::take(&mut pool.breps).into_iter();
+    let mut primary = if i.a.is_empty() { None } else { breps.next() };
+    let mut other = if i.b.is_empty() { None } else { breps.next() };
+    let mut intersector = KernelManifoldIntersector::new(0).map_err(|error| harness(&error))?;
+    intersector.set_intersection_tolerances(1e-9, 0.3);
+    intersector
+        .merge
+        .set_merge_options(i.options.map(options).as_ref());
+    let mut driver = port::DependencyMerge::with_engine(port::MergeEngine {
+        intersector,
+        state: ManifoldState::default(),
+        attributes: AttributeStore::default(),
+    });
+    let mut manifold = true;
+    let mut lamina = 0;
+    let result = port::non_manifold_boolean(
+        k,
+        &mut driver,
+        &mut primary,
+        &mut other,
+        &mut manifold,
+        &mut lamina,
+        boolean_operation(i.operation)?,
+    );
+    let engine = driver
+        .into_engine()
+        .ok_or_else(|| harness("adopted engine was not returned"))?;
+    let code = match &result {
+        Ok(_) => 0,
+        Err(error) => match Output::unported(error) {
+            Some(deferred) => return Ok(deferred),
+            None => status(error),
+        },
+    };
+    Ok(engine_output(
+        code,
+        manifold,
+        engine.intersector.intersect_lamina_edges(),
+        matches!(result, Ok(Some(_))),
+    ))
+}
+
+fn options(mask: u8) -> MergeOptions {
+    MergeOptions::new(
+        mask & 1 != 0,
+        mask & 2 != 0,
+        mask & 4 != 0,
+        mask & 8 != 0,
+        mask & 16 != 0,
+    )
+}
+fn status(error: &SolidError) -> i64 {
+    match error {
+        SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. } => 1007,
+        SolidError::Upstream { .. } | SolidError::Failed(_) => error.sm_status().map_or(-1, i64::from),
+        _ => -1,
+    }
+}
+fn output(raw: &[f64], family: u8) -> Result<Output, HarnessError> {
+    let (&status, rest) = raw.split_first().ok_or_else(|| harness("empty result"))?;
+    if status != 0.0 {
+        return Ok(Output::err(format!("status={status}")));
+    }
+    let mut input = rest;
+    let mut controls = Vec::new();
+    if family >= 3 {
+        controls.push(take_count(&mut input)? as i64);
+        controls.push(take_count(&mut input)? as i64);
+    }
+    let count = take_count(&mut input)?;
+    let mut identities = Vec::new();
+    let mut topology_counts = Vec::new();
+    for _ in 0..count {
+        identities.push(take_number(&mut input)? as i64);
+        let length = take_count(&mut input)?;
+        let record = input
+            .get(..length)
+            .ok_or_else(|| harness("truncated result digest"))?;
+        input = input
+            .get(length..)
+            .ok_or_else(|| harness("truncated result digest"))?;
+        if length == 0 {
+            topology_counts.extend([-1, -1, -1]);
+        } else {
+            let mut counts = record;
+            for _ in 0..3 {
+                topology_counts.push(take_count(&mut counts)? as i64);
+            }
+            if record.len() != 3 + 3 * topology_counts.last().copied().unwrap_or(0) as usize {
+                return Err(harness("invalid result digest shape"));
+            }
+        }
+    }
+    let surface_count = if family == 2 {
+        take_count(&mut input)?
+    } else {
+        0
+    };
+    if !input.is_empty() {
+        return Err(harness("trailing result output"));
+    }
+    Ok(Output::new()
+        .int("status", status as i64)
+        .ints("operand_identity", identities)
+        .ints("topology_counts", topology_counts)
+        .ints("controls", controls)
+        .int("surface_count", surface_count as i64)
+        .values("record", rest.to_vec()))
+}
+
+/// The digest of a B-rep (`heal_stitch_p1::digest`'s layout: face, edge and vertex
+/// counts, then the vertex points) in the fixture walk's order: the native side's
+/// result arrives through the shim's export walk, so a Rust result listed in its own
+/// creation order would compare vertex slots of different vertices. The walk enters
+/// each edge loop at its canonical start
+/// ([`super::boolean_merge_p4::canonical_loop_starts`]): upstream's loop starts after a
+/// Boolean depend on heap addresses (ND-258), so the native walk's order changes from
+/// run to run. A B-rep with a loop that has no canonical start is walked as it is.
+fn record_brep(brep: &Brep, identity: i64, values: &mut Vec<f64>) -> solidcore::Result<()> {
+    let walk_error = |_| {
+        SolidError::invalid_input("difftest::boolean_merge_p3", "fixture walk failed")
+    };
+    let mut canonical = brep.clone_standing_for_self()?;
+    let brep = match super::boolean_merge_p4::canonical_loop_starts(&mut canonical) {
+        Ok(()) => &canonical,
+        Err(_) => brep,
+    };
+    let g = super::topology_brep_p3::walk(brep).map_err(walk_error)?;
+    let mut digest = vec![g.len(3) as f64, g.len(7) as f64, g.len(9) as f64];
+    for i in 0..g.len(9) {
+        let v = solidcore::topology::VertexId::from_index(g.at(9, i).map_err(walk_error)?);
+        let p = brep.vertex(v)?.point;
+        digest.extend([p.x, p.y, p.z]);
+    }
+    values.extend([identity as f64, digest.len() as f64]);
+    values.extend(digest);
+    Ok(())
+}
+
+fn take_number(input: &mut &[f64]) -> Result<f64, HarnessError> {
+    let (&number, rest) = input
+        .split_first()
+        .ok_or_else(|| harness("truncated record"))?;
+    *input = rest;
+    Ok(number)
+}
+
+fn take_count(input: &mut &[f64]) -> Result<usize, HarnessError> {
+    let value = take_number(input)?;
+    if !value.is_finite() || value < 0.0 || value.fract() != 0.0 || value > 16384.0 {
+        return Err(harness("invalid native record count"));
+    }
+    Ok(value as usize)
+}
+
+fn single_result(
+    pool: &Pool,
+    result: Option<usize>,
+    manifold: bool,
+    lamina: u64,
+    values: &mut Vec<f64>,
+) -> solidcore::Result<()> {
+    values.extend([f64::from(u8::from(manifold)), lamina as f64]);
+    values.push(f64::from(u8::from(result.is_some())));
+    if let Some(id) = result {
+        pool.record(id, values)?;
+    }
+    Ok(())
+}
+
+fn list_result(result: &port::BooleanListsResult, values: &mut Vec<f64>) -> solidcore::Result<()> {
+    values.push(result.breps.len() as f64);
+    for brep in &result.breps {
+        // BooleanLists returns independent copies, so no input pointer identity.
+        record_brep(brep, -1, values)?;
+    }
+    values.push(result.surfaces.len() as f64);
+    Ok(())
+}
+
+struct Pool {
+    breps: Vec<Brep>,
+    /// The first list's B-rep operands are `breps[..first_breps]`.
+    first_breps: usize,
+    /// The first and the second list's surface operands (family 2).
+    surfaces_a: Vec<Surface>,
+    surfaces_b: Vec<Surface>,
+    original_count: usize,
+    retired: BTreeSet<usize>,
+    attributes: AttributeStore,
+    primary: Option<usize>,
+    other: Option<usize>,
+    manifold: bool,
+    /// The engine the last `construct` built (`boolean.merge_p2`).
+    engine: Option<port::MergeEngine>,
+}
+impl Pool {
+    fn load(k: &mut Kernel, i: &Inputs) -> Result<Self, HarnessError> {
+        let mut breps = Vec::new();
+        let mut first_breps = 0;
+        let mut surfaces_a = Vec::new();
+        let mut surfaces_b = Vec::new();
+
+        let lists = i.a.iter().map(|o| (true, o)).chain(i.b.iter().map(|o| (false, o)));
+        for (first, operand) in lists {
+            let [x, y, z] = operand.point;
+            let point = Point3::new(x, y, z);
+            if let Some(surface) = &operand.surface {
+                let surface = match surface {
+                    SurfaceOperand::Plane { normal } => {
+                        let [nx, ny, nz] = *normal;
+                        Surface::from(Plane::from_normal(point, Vec3::new(nx, ny, nz)))
+                    }
+                    SurfaceOperand::Sphere { radius } => Surface::from(
+                        Sphere::new(
+                            k,
+                            point,
+                            Vec3::new(1.0, 0.0, 0.0),
+                            Vec3::new(0.0, 1.0, 0.0),
+                            Extent2d::from_bounds(0.0, -90.0, 360.0, 90.0),
+                            *radius,
+                            SphereOptions {
+                                swap_uv: false,
+                                inside_out: false,
+                                circle_nurb: None,
+                            },
+                        )
+                        .map_err(|error| harness(&error))?,
+                    ),
+                };
+                if first {
+                    surfaces_a.push(surface);
+                } else {
+                    surfaces_b.push(surface);
+                }
+                continue;
+            }
+            let mut brep = if let Some([dx, dy, dz]) = operand.size {
+                solidcore::primitive::api_primitives::create_box(k, point, dx, dy, dz)
+                    .map_err(|error| harness(&error))?
+            } else {
+                let mut b = empty_brep(
+                    k,
+                    solidcore::geom::tol::USE_DEFAULT,
+                    solidcore::geom::tol::USE_DEFAULT,
+                    None,
+                )
+                .map_err(|error| harness(&error))?;
+                let inf = b.infinite_region();
+                let mut state = solidcore::topology::brep::p2::ArenaNotifyState::new(&b);
+                solidcore::topology::brep::p9::make_shell_vertex(
+                    &mut b,
+                    inf,
+                    point,
+                    &mut state.env(Some(&mut k.context)),
+                )
+                .map_err(|error| harness(&error))?;
+                b
+            };
+            brep.use_arena_naming().map_err(|error| harness(&error))?;
+            breps.push(brep);
+            if first {
+                first_breps += 1;
+            }
+        }
+        let original_count = breps.len();
+        Ok(Self {
+            breps,
+            first_breps,
+            surfaces_a,
+            surfaces_b,
+            original_count,
+            retired: BTreeSet::new(),
+            attributes: AttributeStore::new(),
+            primary: Some(0),
+            other: Some(first_breps),
+            manifold: true,
+            engine: None,
+        })
+    }
+    /// Move a live B-rep out of its slot (an empty one stays behind).
+    fn take_brep(&mut self, id: usize) -> solidcore::Result<Brep> {
+        self.brep(id)?;
+        let slot = self
+            .breps
+            .get_mut(id)
+            .ok_or_else(|| SolidError::null_pointer("harness::merge_p3"))?;
+        Ok(std::mem::replace(slot, Brep::new()))
+    }
+    /// Put a B-rep back in its slot, or retire the slot when it was consumed.
+    fn restore_brep(&mut self, id: Option<usize>, brep: Option<Brep>) {
+        let Some(id) = id else { return };
+        match (brep, self.breps.get_mut(id)) {
+            (Some(brep), Some(slot)) => *slot = brep,
+            _ => {
+                self.retired.insert(id);
+            }
+        }
+    }
+    fn brep(&self, id: usize) -> solidcore::Result<&Brep> {
+        if self.retired.contains(&id) {
+            return Err(SolidError::invalid_input(
+                "harness::merge_p3",
+                "deleted B-rep handle",
+            ));
+        }
+        self.breps
+            .get(id)
+            .ok_or_else(|| SolidError::null_pointer("harness::merge_p3"))
+    }
+    fn surface_key(&self, surface: (usize, usize)) -> solidcore::Result<ObjectKey> {
+        let brep = self.brep(surface.0)?;
+        if surface.1 >= bp::surfaces(brep, None)?.len() {
+            return Err(SolidError::invalid_input(
+                "harness::merge_p3",
+                "bad surface handle",
+            ));
+        }
+        let b = u32::try_from(surface.0).map_err(|_| {
+            SolidError::invalid_input("harness::merge_p3", "surface owner overflow")
+        })?;
+        let s = u32::try_from(surface.1).map_err(|_| {
+            SolidError::invalid_input("harness::merge_p3", "surface index overflow")
+        })?;
+        Ok(ObjectKey(
+            ((u64::from(b) << 32) | u64::from(s))
+                .checked_add(1)
+                .ok_or_else(|| {
+                    SolidError::invalid_input("harness::merge_p3", "surface key overflow")
+                })?,
+        ))
+    }
+    /// The constructed merge (`boolean.merge_p2`), whose intersector is `m_vTI`.
+    fn engine_mut(&mut self) -> solidcore::Result<&mut port::MergeEngine> {
+        self.engine.as_mut().ok_or_else(|| {
+            SolidError::unported(
+                "SmMerge::PiecewiseMerge (pool engine state)",
+                HARNESS_ENGINE_STATE,
+            )
+        })
+    }
+    /// Run `action` on the merge and the current operands, moved out of their slots
+    /// and back (the engine and both B-reps return on every exit).
+    fn with_engine_pair<T>(
+        &mut self,
+        action: impl FnOnce(&mut port::MergeEngine, &mut Brep, &mut Brep) -> solidcore::Result<T>,
+    ) -> solidcore::Result<T> {
+        let (Some(p), Some(o)) = (self.primary, self.other) else {
+            return Err(SolidError::invalid_input(
+                "harness::merge_p3",
+                "the merge needs both operands",
+            ));
+        };
+        if p == o {
+            return Err(SolidError::invalid_input(
+                "harness::merge_p3",
+                "a merge of one B-rep with itself",
+            ));
+        }
+        self.engine_mut()?;
+        let mut a = self.take_brep(p)?;
+        let mut b = match self.take_brep(o) {
+            Ok(b) => b,
+            Err(error) => {
+                self.restore_brep(Some(p), Some(a));
+                return Err(error);
+            }
+        };
+        let result = match self.engine.as_mut() {
+            Some(engine) => action(engine, &mut a, &mut b),
+            None => Err(SolidError::null_pointer("harness::merge_p3")),
+        };
+        self.restore_brep(Some(p), Some(a));
+        self.restore_brep(Some(o), Some(b));
+        result
+    }
+    /// The face of a `GetSurfaces` handle: the `index`-th face owning its surface.
+    fn surface_face(&self, (id, index): (usize, usize)) -> solidcore::Result<FaceId> {
+        let brep = self.brep(id)?;
+        let mut owners = Vec::new();
+        for face in bp::faces(brep, None)? {
+            let owned = brep.face(face)?.surface.as_ref().is_some_and(|surface| {
+                surface.owner() == Some(arena_identity(CacheObject::Face(face)))
+            });
+            if owned {
+                owners.push(face);
+            }
+        }
+        owners.get(index).copied().ok_or_else(|| {
+            SolidError::invalid_input("harness::merge_p3", "bad surface handle")
+        })
+    }
+    fn record(&self, id: usize, values: &mut Vec<f64>) -> solidcore::Result<()> {
+        let brep = self.brep(id)?;
+        let identity = if id < self.original_count {
+            id as i64
+        } else {
+            -1
+        };
+        record_brep(brep, identity, values)
+    }
+}
+impl BooleanDriver for Pool {
+    type Operand = usize;
+    fn same_operand(&self, left: &usize, right: &usize) -> bool {
+        left == right
+    }
+    fn construct(
+        &mut self,
+        k: &mut Kernel,
+        primary: &mut Option<usize>,
+        other: &mut Option<usize>,
+        approx_tol: f64,
+        angle_tol: f64,
+        options: Option<&MergeOptions>,
+    ) -> solidcore::Result<()> {
+        // SmMerge(context, primary, other, tol, angle, options) (boolean.merge_p2): the
+        // pool's intersector takes the constructed tolerances, the manifold flag its
+        // m_bManifoldBoolean.
+        let primary = primary.ok_or(SolidError::invalid_input(
+            "harness::merge_p3",
+            "SmMerge without primary B-rep",
+        ))?;
+        let other = other.map(|o| self.brep(o)).transpose()?;
+        let merge = MergeState::<TopologyIntersector<MergeOperand>>::with_breps(
+            k,
+            (self.brep(primary)?, MergeOperand::Primary),
+            other.map(|o| (o, MergeOperand::Other)),
+            approx_tol,
+            angle_tol,
+            options,
+        )?;
+        self.manifold = merge.manifold_boolean.unwrap_or(self.manifold);
+        self.engine = Some(port::MergeEngine::from_merge(&merge)?);
+        Ok(())
+    }
+    fn manifold_boolean(
+        &mut self,
+        k: &mut Kernel,
+        primary: &mut Option<usize>,
+        other: &mut Option<usize>,
+        manifold: &mut bool,
+        lamina: &mut u64,
+        operation: BooleanOperation,
+        lock: Option<&mut MarkLock>,
+    ) -> solidcore::Result<Option<usize>> {
+        // ManifoldBoolean (boolean.merge_p4) on the engine `construct` built, run by
+        // port::DependencyMerge on the pool's B-reps, moved in and back.
+        let Some(engine) = self.engine.take() else {
+            // Every family constructs the merge before it runs: no engine means no
+            // SmMerge object was built on the Rust side.
+            return Err(SolidError::unported(
+                "SmMerge::ManifoldBoolean (pool engine state)",
+                HARNESS_ENGINE_STATE,
+            ));
+        };
+        if primary.is_some() && primary == other {
+            self.engine = Some(engine);
+            return Err(SolidError::invalid_input(
+                "harness::merge_p3",
+                "ManifoldBoolean of one B-rep with itself",
+            ));
+        }
+        let ids = (*primary, *other);
+        let mut a = ids.0.map(|id| self.take_brep(id)).transpose()?;
+        let mut b = match ids.1.map(|id| self.take_brep(id)).transpose() {
+            Ok(b) => b,
+            Err(error) => {
+                self.restore_brep(ids.0, a);
+                return Err(error);
+            }
+        };
+        let mut driver = port::DependencyMerge::with_engine(engine);
+        let result = driver.manifold_boolean(k, &mut a, &mut b, manifold, lamina, operation, lock);
+        self.engine = driver.into_engine();
+        // An assigned rpResult is the primary B-rep, back in its own slot.
+        let result = result.map(|assigned| match assigned {
+            Some(brep) => {
+                a = Some(brep);
+                true
+            }
+            None => false,
+        });
+        self.restore_brep(ids.0, a);
+        self.restore_brep(ids.1, b);
+        *primary = ids.0.filter(|id| !self.retired.contains(id));
+        *other = ids.1.filter(|id| !self.retired.contains(id));
+        result.map(|assigned| if assigned { ids.0 } else { None })
+    }
+}
+impl PiecewiseAccess for Pool {
+    type Surface = (usize, usize);
+    fn operands(&self) -> (Option<usize>, Option<usize>) {
+        (self.primary, self.other)
+    }
+    fn set_operands(&mut self, a: Option<usize>, b: Option<usize>) {
+        if let Some(engine) = self.engine.as_mut() {
+            if self.primary != a {
+                engine.state.primary_marks = Marks::default();
+            }
+            if self.other != b {
+                engine.state.other_marks = Marks::default();
+            }
+        }
+        self.primary = a;
+        self.other = b;
+    }
+    fn surfaces(&self, id: usize) -> solidcore::Result<Vec<Self::Surface>> {
+        let brep = self.brep(id)?;
+        Ok(bp::surfaces(brep, None)?
+            .iter()
+            .enumerate()
+            .map(|(s, _)| (id, s))
+            .collect())
+    }
+    fn intersect_insert_relate(&mut self, k: &mut Kernel) -> solidcore::Result<()> {
+        // m_vTI.IntersectInsertRelate() on the constructed merge's intersector
+        self.with_engine_pair(|engine, a, b| {
+            engine.intersector.intersect_insert_relate(
+                &mut BooleanKernels {
+                    primary: k,
+                    other: None,
+                },
+                a,
+                b,
+                &mut engine.attributes,
+            )?;
+            engine.adopt_operand_owners(Some(a), Some(b))
+        })
+    }
+    fn clear_relationships(&mut self) -> solidcore::Result<()> {
+        self.engine_mut()?.intersector.clear_relationships()
+    }
+    fn set_subset(&mut self, surfaces: &[Self::Surface]) {
+        // SetSubset by surface identity (the canonical B-rep cache's convention). The
+        // handles come from GetSurfaces of live B-reps, so each resolves.
+        let identities: Vec<_> = surfaces
+            .iter()
+            .filter_map(|&surface| {
+                let face = self.surface_face(surface).ok()?;
+                KernelManifoldIntersector::surface_identity(self.brep(surface.0).ok()?, face).ok()
+            })
+            .collect();
+        if let Some(engine) = self.engine.as_mut() {
+            engine.intersector.set_surface_subset(&identities);
+        }
+    }
+    fn surface_map(
+        &mut self,
+        surface: Self::Surface,
+        only_if_missing: bool,
+    ) -> solidcore::Result<()> {
+        let key = self.surface_key(surface)?;
+        if only_if_missing
+            && self
+                .attributes
+                .find_attribute(key, ids::SURFACEMAP)
+                .is_some()
+        {
+            return Ok(());
+        }
+        let attribute = self.attributes.insert(Attribute::pointer(
+            ids::SURFACEMAP,
+            key.0,
+            Behavior::Reference,
+        ))?;
+        self.attributes.add_attribute(key, attribute)
+    }
+    fn surface_map_users(
+        &self,
+        surface: Self::Surface,
+    ) -> solidcore::Result<Option<Vec<Self::Surface>>> {
+        let key = self.surface_key(surface)?;
+        let Some(attribute) = self.attributes.find_attribute(key, ids::SURFACEMAP) else {
+            return Ok(None);
+        };
+        let users = self.attributes.users(attribute)?;
+        users
+            .into_iter()
+            .map(|key| {
+                let key = key.0.checked_sub(1).ok_or_else(|| {
+                    SolidError::invalid_input("harness::merge_p3", "bad attribute user")
+                })?;
+                let surface = ((key >> 32) as usize, (key & u64::from(u32::MAX)) as usize);
+                self.surface_key(surface)?;
+                Ok(surface)
+            })
+            .collect::<solidcore::Result<Vec<_>>>()
+            .map(Some)
+    }
+    fn new_face_brep(&mut self, k: &mut Kernel, source: usize) -> solidcore::Result<usize> {
+        let mut result = empty_brep(
+            k,
+            solidcore::geom::tol::USE_DEFAULT,
+            solidcore::geom::tol::USE_DEFAULT,
+            None,
+        )?;
+        let tolerance = self.brep(source)?.tolerance();
+        set_tolerance(k, &mut result, tolerance, true, true)?;
+        result.set_editing_enabled(true);
+        result.set_naming(NamingScheme::Arena);
+        let id = self.breps.len();
+        self.breps.push(result); // append only: a handle is never reused
+        Ok(id)
+    }
+    fn manifold_flag(&self) -> bool {
+        self.manifold
+    }
+    fn set_controls(&mut self, manifold: bool, wires: bool, lamina: u64) {
+        self.manifold = manifold;
+        if let Some(engine) = self.engine.as_mut() {
+            engine.intersector.set_intersect_wire_edges(wires);
+            engine.intersector.set_intersect_lamina_edges(lamina);
+        }
+    }
+    fn process_wires(&mut self, k: &mut Kernel, lock: &MarkLock) -> solidcore::Result<()> {
+        // ProcessWiresAndShellVertices(SM_BO_MERGE, keep, mark1, mark2) (merge_p5) on the
+        // merge's own mates, state and attributes.
+        self.with_engine_pair(|engine, a, b| {
+            let mut keep = Vec::new(); // local and discarded, as upstream
+            engine.intersector.process_wires(
+                &mut BooleanKernels {
+                    primary: k,
+                    other: None,
+                },
+                a,
+                b,
+                &mut engine.state,
+                &mut engine.attributes,
+                BooleanOperation::Merge,
+                lock.mark_type1(),
+                lock.mark_type2(),
+                &mut keep,
+            )?;
+            engine.adopt_operand_owners(Some(a), Some(b))
+        })
+    }
+    fn release_marks(&mut self, k: &mut Kernel, lock: &mut MarkLock) -> solidcore::Result<()> {
+        lock.release(std::slice::from_mut(&mut k.context))
+    }
+    fn register_empty_ssi(&mut self, a: Self::Surface, b: Self::Surface) -> solidcore::Result<()> {
+        let (a, b) = (self.surface_face(a)?, self.surface_face(b)?);
+        self.engine_mut()?.intersector.register_empty_ssi(a, b);
+        Ok(())
+    }
+    fn clear_existing_ssi(&mut self) -> solidcore::Result<()> {
+        self.engine_mut()?.intersector.clear_existing_ssi();
+        Ok(())
+    }
+    fn notify_pre_edit(&mut self, k: &mut Kernel, a: usize) -> solidcore::Result<()> {
+        self.brep(a)?;
+        let brep = self
+            .breps
+            .get_mut(a)
+            .ok_or_else(|| SolidError::null_pointer("harness::merge_p3"))?;
+        let caller = solidcore::geom::object::ObjectRef {
+            key: brep.key(),
+            type_code: solidcore::geom::a_object::BREP_TYPE,
+        };
+        notify(
+            k,
+            brep,
+            solidcore::geom::object::NotifyOperation::PreEdit,
+            caller,
+            None,
+            None,
+        )
+    }
+    fn delete_other(&mut self, k: &mut Kernel) -> solidcore::Result<()> {
+        if let Some(id) = self.other {
+            self.brep(id)?;
+            let brep = self
+                .breps
+                .get_mut(id)
+                .ok_or_else(|| SolidError::null_pointer("harness::merge_p3"))?;
+            destroy_brep(k, brep, &mut self.attributes)?;
+            self.retired.insert(id);
+        }
+        self.set_operands(self.primary, None);
+        Ok(())
+    }
+}
+
+fn destroy_brep(
+    k: &mut Kernel,
+    brep: &mut Brep,
+    _attributes: &mut AttributeStore,
+) -> solidcore::Result<()> {
+    solidcore::topology::brep::p4::destroy(k, brep)
+}
+
+/// `new SmBrep(dSize, dRatio, pOptContextForStack)`
+/// (`topology::brep::p3::new_brep`; `pOptContextForStack` is the allocating kernel).
+fn empty_brep(
+    k: &mut Kernel,
+    model_size_estimate: f64,
+    large_small_size_ratio: f64,
+    stack_context: Option<&Kernel>,
+) -> solidcore::Result<Brep> {
+    let _ = stack_context;
+    solidcore::topology::brep::p3::new_brep(k, model_size_estimate, large_small_size_ratio)
+}
+
+/// `pNewBrep->SetTolerance(tol, bUpdateOnlyIfLarger, bCascadeToBndries)`
+/// (`topology::brep::p2::set_tolerance`); the status is ignored (`SmMerge.cpp:466`), so
+/// only [`SolidError::Unported`] propagates.
+fn set_tolerance(
+    k: &mut Kernel,
+    brep: &mut Brep,
+    tolerance: f64,
+    update_only_if_larger: bool,
+    cascade_to_boundaries: bool,
+) -> solidcore::Result<()> {
+    match solidcore::topology::brep::p2::set_tolerance(
+        k,
+        brep,
+        tolerance,
+        update_only_if_larger,
+        cascade_to_boundaries,
+    ) {
+        Err(e) if e.is_unported() => Err(e),
+        _ => Ok(()),
+    }
+}
+
+/// `SmBrep::Notify(op, caller, data1, data2)` (`topology::brep::p2::notify`). The fixture
+/// pool carries no attribute records, so the notification runs on an empty store over
+/// the B-rep's regions, as `heal.stitch_p1`'s `PRE_EDIT`; no Rust caller holds the
+/// B-rep's `SM_OC_BREP` cache.
+fn notify(
+    _k: &mut Kernel,
+    brep: &mut Brep,
+    operation: solidcore::geom::object::NotifyOperation,
+    caller: solidcore::geom::object::ObjectRef,
+    data1: Option<solidcore::geom::object::ObjectRef>,
+    data2: Option<solidcore::geom::object::ObjectRef>,
+) -> solidcore::Result<()> {
+    use solidcore::topology::brep::p2;
+    let mut state = p2::RegionNotifyState::new(brep);
+    p2::notify(
+        brep,
+        &mut state.env(),
+        None,
+        operation,
+        [
+            Some(p2::NotifyArg::Object(caller)),
+            data1.map(p2::NotifyArg::Object),
+            data2.map(p2::NotifyArg::Object),
+        ],
+    )
+}
+
+fn rust(i: &Inputs) -> Result<Output, HarnessError> {
+    if i.family > 4 && i.family != ENGINE_PROBE {
+        return Err(harness("fixture-only family is not a unit operation"));
+    }
+    contract(i).map_err(|reason| harness(&reason))?;
+    let mut k = Kernel::default();
+    let mut pool = Pool::load(&mut k, i)?;
+    if i.family == ENGINE_PROBE {
+        return engine_probe(&mut k, i, &mut pool);
+    }
+    let opts = i.options.map(options);
+    let mut values = vec![0.0];
+    let result: solidcore::Result<()> = match i.family {
+        0 => {
+            let mut ids: Vec<_> = (0..i.a.len()).map(Some).collect();
+            port::boolean_trees(&mut k, &mut ids, &i.tree, opts.as_ref(), &mut pool).and_then(
+                |()| {
+                    values.push(ids.len() as f64);
+                    for id in ids {
+                        if let Some(id) = id {
+                            pool.record(id, &mut values)?;
+                        } else {
+                            values.extend([-1.0, 0.0]);
+                        }
+                    }
+                    Ok(())
+                },
+            )
+        }
+        1 => {
+            let mut ids: Vec<_> = (0..i.a.len()).collect();
+            let op = u32::try_from(i.operation).unwrap_or(u32::MAX);
+            port::merge_breps(&mut k, &mut ids, op, opts.as_ref(), &mut pool).and_then(|id| {
+                values.push(1.0);
+                pool.record(id, &mut values)
+            })
+        }
+        2 => port::boolean_lists(
+            &mut k,
+            pool.breps
+                .get(..pool.first_breps)
+                .ok_or_else(|| harness("bad first list"))?,
+            &pool.surfaces_a,
+            pool.breps
+                .get(pool.first_breps..)
+                .ok_or_else(|| harness("bad second list"))?,
+            &pool.surfaces_b,
+            i.operation,
+            opts.as_ref(),
+        )
+        .and_then(|result| list_result(&result, &mut values)),
+        3 => {
+            let mut primary = Some(0);
+            let mut other = Some(1);
+            let mut manifold = true;
+            let mut lamina = 0;
+            let operation = boolean_operation(i.operation)?;
+            // MergeAccess merge(context, a, b, 0.0, 0.0, options), as the shim builds it.
+            pool.construct(&mut k, &mut primary, &mut other, 0.0, 0.0, opts.as_ref())
+                .and_then(|()| {
+                    port::non_manifold_boolean(
+                        &mut k,
+                        &mut pool,
+                        &mut primary,
+                        &mut other,
+                        &mut manifold,
+                        &mut lamina,
+                        operation,
+                    )
+                })
+                .and_then(|result| single_result(&pool, result, manifold, lamina, &mut values))
+        }
+        // MergeAccess merge(context, a, b, 0.0, 0.0, options), then PiecewiseMerge
+        4 => pool
+            .construct(&mut k, &mut Some(0), &mut Some(1), 0.0, 0.0, opts.as_ref())
+            .and_then(|()| {
+                port::piecewise_merge(
+                    &mut k,
+                    &mut pool,
+                    None,
+                    i.options.unwrap_or(0) & 1 != 0,
+                    i.options.unwrap_or(0) & 2 != 0,
+                )
+            })
+            .and_then(|result| {
+            let lamina = pool
+                .engine
+                .as_ref()
+                .map_or(0, |engine| engine.intersector.intersect_lamina_edges());
+            single_result(&pool, result, pool.manifold, lamina, &mut values)
+        }),
+        _ => return Err(harness("fixture-only family")),
+    };
+    match result {
+        Ok(()) => output(&values, i.family),
+        Err(error) => Ok(Output::unported(&error)
+            .unwrap_or_else(|| Output::err(format!("status={}", status(&error))))),
+    }
+}
+impl UnitDiff for Runner {
+    fn id(&self) -> &'static str {
+        "boolean.merge_p3"
+    }
+    fn cases(&self, ctx: &CaseContext) -> Result<Vec<Case>, HarnessError> {
+        crate::runner::default_cases(
+            self,
+            &CaseContext {
+                seeds: ctx.seeds.max(256),
+                ..ctx.clone()
+            },
+        )
+    }
+    fn run_rust(&self, case: &Case) -> Result<Output, HarnessError> {
+        let i: Inputs =
+            serde_json::from_value(case.inputs.clone()).map_err(|error| harness(&error))?;
+        if let Some(expected) = &i.expected_refusal {
+            return refusal(&i, expected);
+        }
+        rust(&i)
+    }
+    fn generate(&self, rng: &mut Rng) -> Option<Value> {
+        let family = match rng.below(10) {
+            0..=5 => 0,
+            6 => 1,
+            7 => 2,
+            8 => 3,
+            _ => 4,
+        };
+        let n = if family >= 3 {
+            1
+        } else {
+            rng.below(6) as usize
+        };
+        let m = if family == 0 || family == 1 {
+            0
+        } else if family >= 3 {
+            1
+        } else {
+            rng.below(3) as usize
+        };
+        let scale = *rng.choose(&[1.0e-9, 1.0e-3, 1.0, 1.0e6, 1.0e12])?;
+        let mut operand = || Operand {
+            point: rng.point3(-scale, scale),
+            size: None,
+            surface: None,
+        };
+        let a: Vec<_> = (0..n).map(|_| operand()).collect();
+        let b: Vec<_> = (0..m).map(|_| operand()).collect();
+        let mut tree: Vec<i64> = Vec::new();
+        if family == 0 {
+            let mut ids: Vec<_> = (0..n as i64).collect();
+            for j in (1..ids.len()).rev() {
+                ids.swap(j, rng.below((j + 1) as u64) as usize);
+            }
+            tree.extend(ids.into_iter().take(rng.below((n + 1) as u64) as usize));
+            if rng.below(3) == 0 {
+                tree.push(-rng.range_i64(1, 7));
+            }
+        }
+        let operation = if family >= 3 {
+            rng.below(11) as i32
+        } else {
+            rng.range_i64(-1, 5) as i32
+        };
+        let options = if rng.below(2) == 0 {
+            None
+        } else {
+            Some(rng.below(32) as u8)
+        };
+        Some(json!(Inputs {
+            family,
+            operation,
+            options,
+            a,
+            b,
+            tree,
+            expected_refusal: None,
+        }))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn inputs() -> Inputs {
+        Inputs {
+            family: 3,
+            operation: 1,
+            options: None,
+            a: vec![Operand {
+                point: [0.0, 0.0, 0.0],
+                size: Some([2.0, 3.0, 4.0]),
+                surface: None,
+            }],
+            b: vec![Operand {
+                point: [5.0, 0.0, 0.0],
+                size: None,
+                surface: None,
+            }],
+            tree: Vec::new(),
+            expected_refusal: None,
+        }
+    }
+
+    /// Each nested fixture completes with its expected vertex count.
+    #[test]
+    fn nested_postfix_fixtures_complete() {
+        let path = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../fixtures/boolean.merge_p3/nested_postfix.json"
+        );
+        let text = std::fs::read_to_string(path).unwrap();
+        let fixtures: Value = serde_json::from_str(&text).unwrap();
+        for fixture in fixtures["cases"].as_array().unwrap() {
+            let input: Inputs = serde_json::from_value(fixture["inputs"].clone()).unwrap();
+            let expected_vertices = fixture["expected_vertices"].as_i64().unwrap();
+            let result = rust(&input).unwrap();
+            assert!(result.error.is_none(), "{}: {:?}", fixture["name"], result.error);
+            assert!(result.deferred.is_none(), "{}: {:?}", fixture["name"], result.deferred);
+            assert!(result.rejected.is_none(), "{}: {:?}", fixture["name"], result.rejected);
+            assert_eq!(result.ints["status"], [0], "{}", fixture["name"]);
+            let vertices: i64 = result.ints["topology_counts"]
+                .as_chunks::<3>()
+                .0
+                .iter()
+                .map(|counts| counts[2].max(0))
+                .sum();
+            assert_eq!(vertices, expected_vertices, "{}", fixture["name"]);
+            assert!(!result.values["record"].is_empty(), "{}", fixture["name"]);
+        }
+    }
+
+    /// Surface operands: a surface list is copied whole (WR-196) and either builds or is
+    /// refused for its geometry, and surfaces next to B-reps are ignored (a real result).
+    #[test]
+    fn surface_operand_fixtures_end_as_expected() {
+        let path = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../fixtures/boolean.merge_p3/surface-operands.json"
+        );
+        let text = std::fs::read_to_string(path).unwrap();
+        let fixtures: Value = serde_json::from_str(&text).unwrap();
+        for fixture in fixtures["cases"].as_array().unwrap() {
+            let name = &fixture["name"];
+            let input: Inputs = serde_json::from_value(fixture["inputs"].clone()).unwrap();
+            let expected = fixture["expected_status"].as_i64().unwrap();
+            let rust = rust(&input).unwrap();
+            assert!(rust.deferred.is_none(), "{name}: {:?}", rust.deferred);
+            assert!(rust.rejected.is_none(), "{name}: {:?}", rust.rejected);
+            if expected == 0 {
+                assert_eq!(rust.ints["status"], [0], "{name}: {:?}", rust.error);
+                assert!(!rust.values["record"].is_empty(), "{name}");
+            } else {
+                let status = format!("status={expected}");
+                assert_eq!(rust.error.as_deref(), Some(status.as_str()), "{name}");
+            }
+        }
+    }
+
+    #[test]
+    fn single_success_records_show_geometry_controls_and_nulls() {
+        let mut pool = Pool::load(&mut Kernel::default(), &inputs()).unwrap();
+        let mut rust = vec![0.0];
+        single_result(&pool, Some(0), true, 1, &mut rust).unwrap();
+        for family in [3, 4] {
+            let base = output(&rust, family).unwrap();
+            assert_eq!(base.ints["controls"], [1, 1]);
+            let mut changed = vec![0.0];
+            single_result(&pool, Some(0), false, 3, &mut changed).unwrap();
+            assert_ne!(output(&changed, family).unwrap(), base);
+            let mut null = vec![0.0];
+            single_result(&pool, None, true, 1, &mut null).unwrap();
+            // no result: no record
+            let null = output(&null, family).unwrap();
+            assert!(null.ints["topology_counts"].is_empty());
+            assert!(null.ints["operand_identity"].is_empty());
+        }
+        let base = output(&rust, 3).unwrap();
+        let vertex = pool.breps[0].vertices().ids().next().unwrap();
+        pool.breps[0].vertex_mut(vertex).unwrap().point.x += 0.125;
+        let mut changed = vec![0.0];
+        single_result(&pool, Some(0), true, 1, &mut changed).unwrap();
+        assert_ne!(output(&changed, 3).unwrap(), base);
+    }
+
+    #[test]
+    fn list_success_records_show_outputs_and_surface_count() {
+        let pool = Pool::load(&mut Kernel::default(), &inputs()).unwrap();
+        let mut result = port::BooleanListsResult {
+            breps: vec![pool.breps[0].clone_standing_for_self().unwrap()],
+            surfaces: Vec::new(),
+        };
+        let mut rust = vec![0.0];
+        list_result(&result, &mut rust).unwrap();
+        let base = output(&rust, 2).unwrap();
+        assert_eq!(base.ints["surface_count"], [0]);
+        result.surfaces.push(
+            Plane::from_normal(
+                Vec3::ZERO,
+                Vec3::new(0.0, 0.0, 1.0),
+            )
+            .into(),
+        );
+        let mut changed = vec![0.0];
+        list_result(&result, &mut changed).unwrap();
+        let changed = output(&changed, 2).unwrap();
+        assert_eq!(changed.ints["surface_count"], [1]);
+        assert_ne!(changed, base);
+    }
+
+    #[test]
+    fn piecewise_adapter_uses_canonical_subset_attributes_controls_and_marks() {
+        fn engine(pool: &Pool) -> &KernelManifoldIntersector {
+            &pool.engine.as_ref().unwrap().intersector
+        }
+        let mut k = Kernel::default();
+        let mut pool = Pool::load(&mut k, &inputs()).unwrap();
+        pool.construct(&mut k, &mut Some(0), &mut Some(1), 0.0, 0.0, None)
+            .unwrap();
+        assert_eq!(pool.surfaces(0).unwrap().len(), 6);
+        assert!(pool.surfaces(1).unwrap().is_empty());
+        pool.set_subset(&[(0, 0), (0, 0)]);
+        assert_eq!(engine(&pool).surface_subset().unwrap().len(), 1);
+        pool.set_subset(&[]);
+        assert!(engine(&pool).surface_subset().is_none());
+        pool.surface_map((0, 0), false).unwrap();
+        assert_eq!(pool.surface_map_users((0, 0)).unwrap(), Some(vec![(0, 0)]));
+        let key = pool.surface_key((0, 0)).unwrap();
+        pool.surface_map((0, 0), true).unwrap();
+        assert_eq!(pool.attributes.attributes(key).len(), 1);
+        pool.surface_map((0, 0), false).unwrap();
+        assert_eq!(pool.attributes.attributes(key).len(), 2);
+        pool.set_controls(false, false, 3);
+        assert!(!pool.manifold_flag() && !engine(&pool).intersect_wire_edges());
+        assert_eq!(engine(&pool).intersect_lamina_edges(), 3);
+        pool.clear_relationships().unwrap();
+        pool.clear_existing_ssi().unwrap();
+        let mut lock = MarkLock::new(
+            std::slice::from_mut(&mut k.context),
+            0,
+            solidcore::geom::context::ALL_MARKS,
+        )
+        .unwrap();
+        pool.release_marks(&mut k, &mut lock).unwrap();
+        assert_eq!(lock, MarkLock::unbound());
+        pool.retired.insert(0); // the successful destructor's logical retirement
+        pool.set_operands(Some(0), None);
+        assert!(pool.surfaces(0).is_err());
+        assert!(pool.record(0, &mut Vec::new()).is_err());
+        assert!(pool.delete_other(&mut k).is_ok()); // delete NULL performs no call
+    }
+
+    #[test]
+    fn piecewise_dependency_errors_name_the_next_missing_owner() {
+        let mut k = Kernel::default();
+        let mut pool = Pool::load(&mut k, &inputs()).unwrap();
+        // without SmMerge's constructor the pool holds no m_vTI
+        assert!(matches!(
+            pool.clear_relationships(),
+            Err(SolidError::Unported {
+                unit: HARNESS_ENGINE_STATE,
+                ..
+            })
+        ));
+        pool.construct(&mut k, &mut Some(0), &mut Some(1), 0.0, 0.0, None)
+            .unwrap();
+        // the face B-rep is built (SmBrep constructor, topology.brep_p3;
+        // CreateFaceFromSurface, topology.brep_p8)
+        let r = pool.new_face_brep(&mut k, 0);
+        assert!(r.is_ok(), "new_face_brep: {r:?}");
+        // SmBrep::Notify is topology.brep_p2's (#149): PRE_EDIT of the fixture B-rep runs
+        let r = pool.notify_pre_edit(&mut k, 0);
+        assert!(r.is_ok(), "notify_pre_edit: {r:?}");
+        // RegisterExistingSSI of empty arrays on the merge's own intersector
+        let r = pool.register_empty_ssi((0, 0), (0, 1));
+        assert!(r.is_ok(), "register_empty_ssi: {r:?}");
+        // SmMerge's constructor and copy environment are boolean.merge_p2's (#229) and
+        // SmBrep::Point3DClassify is query.brep's: ProcessWiresAndShellVertices runs to
+        // completion on the fixture
+        let r = pool.process_wires(&mut k, &MarkLock::unbound());
+        assert!(r.is_ok(), "process_wires: {r:?}");
+        // ~SmBrep is topology.brep_p4's: the other operand is destroyed and released
+        let r = pool.delete_other(&mut k);
+        assert!(r.is_ok(), "delete_other: {r:?}");
+        assert_eq!(pool.other, None);
+    }
+}

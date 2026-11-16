@@ -1,7 +1,8 @@
 //! Dimension continuation (`solve_after_value_edit`): the triconnected linkage family (two
 //! triangles joined by three links, left to the iteration by the construction) under random
 //! dimension edits from its previous solved state, with every failure that remains proven
-//! infeasible; and the solve without continuation when nothing it could help with changed.
+//! infeasible; an edit the continuation cannot reach, solved in steps; and the solve without
+//! continuation when nothing it could help with changed.
 use solidcore_record::Vec2;
 use solidcraft_geom::prelude::*;
 
@@ -340,5 +341,50 @@ fn hostile_old_values_never_panic() {
         let rep = solve_after_value_edit(&mut s, &bad);
         assert!(rep.max_residual.is_finite());
         assert!(s.points.iter().all(|p| p.pos.x.is_finite() && p.pos.y.is_finite()));
+    }
+}
+
+#[test]
+fn an_edit_continuation_cannot_reach_is_solved_in_steps() {
+    // Every distance of the linkage changed at once, by 0.6× to 2.3×. The one-jump solve fails
+    // and so does the continuation from the layout (its branch ends); the edit made in steps
+    // reaches the new values with both triangles turning as before.
+    let new = [54.0, 59.0, 72.0, 31.0, 78.0, 76.0, 33.0, 61.0, 82.0];
+    let mut rng = Lcg(1);
+    let (mut sk, old) = linkage(&mut rng, 1.0, 1.0, false);
+    set_distances(&mut sk, &new);
+    let before = turns(&sk);
+    let mut jump = sk.clone();
+    assert!(!switch::without_differential(|| solve(&mut jump)).ok());
+    let mut edit = sk.clone();
+    let report = switch::without_differential(|| solve_after_value_edit(&mut edit, &old));
+    assert!(report.keeps_orientation(), "{report:?}");
+    assert_eq!(turns(&edit), before);
+    for (&(a, b), d) in PAIRS.iter().zip(new) {
+        let measured = edit.points[a + 1].pos.dist(edit.points[b + 1].pos);
+        assert!((measured - d).abs() < 1e-6, "{a}-{b}: {measured} for {d}");
+    }
+}
+
+/// #15766: a horizontal and a vertical distance from a fixed point to a free one drawn on their
+/// negative sides, each edited to zero and back. At zero the two points are level; the next
+/// value puts the free point back on the side it was drawn on, not on the mirrored one.
+#[test]
+fn an_axis_distance_edited_through_zero_keeps_its_side() {
+    let mut sk = Sketch::new();
+    let o = sk.add_point(Vec2::new(0.0, 0.0), None).unwrap();
+    let p = sk.add_point(Vec2::new(-10.0, -5.0), None).unwrap();
+    sk.add_constraint(ConstraintKind::Fix { p: o }, None).unwrap();
+    let dx = sk.add_constraint(ConstraintKind::DistanceX { p: o, q: p, value: 10.0 }, None).unwrap();
+    let dy = sk.add_constraint(ConstraintKind::DistanceY { p: o, q: p, value: 5.0 }, None).unwrap();
+    assert!(solve(&mut sk).ok());
+    let index = |id: &str| sk.constraints.iter().position(|c| c.id == id).unwrap();
+    let (dx, dy) = (index(&dx), index(&dy));
+    for (c, value, want) in [(dy, 0.0, (-10.0, 0.0)), (dy, 5.0, (-10.0, -5.0)), (dx, 0.0, (0.0, -5.0)), (dx, 4.0, (-4.0, -5.0))] {
+        let old = sk.driving_values();
+        sk.constraints[c].kind.set_value(value);
+        let rep = solve_after_value_edit(&mut sk, &old);
+        let at = sk.points[p].pos;
+        assert!(rep.ok() && (at.x - want.0).abs() < 1e-6 && (at.y - want.1).abs() < 1e-6, "{value}: {at:?} {rep:?}");
     }
 }

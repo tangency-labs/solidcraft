@@ -1,0 +1,39 @@
+{
+  "area": "assemblies",
+  "bodies": {},
+  "calls": [],
+  "case": "cov-component-extract-linked-refused",
+  "expected": {
+    "method": "Base: box 20x20x10 from (-10,-10,-10), grounded; Arm: box 40x10x10 from (0,-5,0), centre (20,0,5), Arm's box built inside Arm; after one extract Arm is linked; extracting it again is refused",
+    "outcome": "refused",
+    "refusal": "is linked to a design file already",
+    "source": "analytic",
+    "sources": [],
+    "what": "component.extract of a component that is already linked"
+  },
+  "expressible": false,
+  "operation_expressible": false,
+  "outcome": {
+    "engine_error": "step 9 (component.extract): invalid parameters for `component.extract`: Arm is linked to a design file already",
+    "ran": false
+  },
+  "result": [],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": null,
+    "refused_with": "step 9 (component.extract): invalid parameters for `component.extract`: Arm is linked to a design file already",
+    "status": "pass"
+  },
+  "sources": [],
+  "traced_ops": [
+    "extrude",
+    "extrude",
+    "extrude"
+  ],
+  "ungraded": [],
+  "what": "component.extract of a component that is already linked",
+  "why_not": [
+    "the failure is SolidCraft's, not a kernel operation's: step 9 (component.extract): invalid parameters for `component.extract`: Arm is linked to a design file already"
+  ]
+}

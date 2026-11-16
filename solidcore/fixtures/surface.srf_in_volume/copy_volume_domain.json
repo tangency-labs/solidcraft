@@ -1,0 +1,840 @@
+{
+  "cases": [
+    {
+      "name": "copy_plain_volume_owner0",
+      "upstream_ref": "source/SMLib/src/SmSrfInVolume.cpp (Copy is the copy constructor: it attempts crSurfaceToCopy.m_pVolume->Copy whenever the original owns either part, even for owner flag 1 whose result does not own the volume; the base SmVolume::Copy returns SM_ERR without setting the output pointer, source/SMLib/inc/SmVolume.h:580, so a result with effective owner flag 0 or 1 safely shares a plain SmVolume head, while owner flags 2 and 3 would delete the original's volume in ~SmSrfInVolume, source/SMLib/src/SmSrfInVolume.cpp:202)",
+      "inputs": {
+        "siv": {
+          "surface": {
+            "kind": "bspline",
+            "bss": {
+              "srf": {
+                "net": [
+                  [
+                    [
+                      0.0,
+                      0.0,
+                      0.0,
+                      1.0
+                    ],
+                    [
+                      0.0,
+                      2.0,
+                      0.0,
+                      1.0
+                    ]
+                  ],
+                  [
+                    [
+                      1.0,
+                      0.0,
+                      0.1,
+                      1.0
+                    ],
+                    [
+                      1.0,
+                      2.0,
+                      0.3,
+                      1.0
+                    ]
+                  ],
+                  [
+                    [
+                      2.0,
+                      0.0,
+                      0.4,
+                      1.0
+                    ],
+                    [
+                      2.0,
+                      2.0,
+                      0.6,
+                      1.0
+                    ]
+                  ],
+                  [
+                    [
+                      3.0,
+                      0.0,
+                      0.9000000000000001,
+                      1.0
+                    ],
+                    [
+                      3.0,
+                      2.0,
+                      0.8999999999999999,
+                      1.0
+                    ]
+                  ],
+                  [
+                    [
+                      4.0,
+                      0.0,
+                      1.6,
+                      1.0
+                    ],
+                    [
+                      4.0,
+                      2.0,
+                      1.2,
+                      1.0
+                    ]
+                  ],
+                  [
+                    [
+                      5.0,
+                      0.0,
+                      2.5,
+                      1.0
+                    ],
+                    [
+                      5.0,
+                      2.0,
+                      1.5,
+                      1.0
+                    ]
+                  ]
+                ],
+                "p": 3,
+                "q": 1,
+                "u": [
+                  0,
+                  0,
+                  0,
+                  0,
+                  0.3,
+                  0.7,
+                  1,
+                  1,
+                  1,
+                  1
+                ],
+                "v": [
+                  0,
+                  0,
+                  1,
+                  1
+                ]
+              }
+            },
+            "raw_knots": false
+          },
+          "volume": [
+            {
+              "kind": 0
+            }
+          ],
+          "in_param": false,
+          "copy": 0,
+          "owner": 0
+        },
+        "op": "copy"
+      }
+    },
+    {
+      "name": "copy_plain_volume_owner1",
+      "upstream_ref": "source/SMLib/src/SmSrfInVolume.cpp (Copy is the copy constructor: it attempts crSurfaceToCopy.m_pVolume->Copy whenever the original owns either part, even for owner flag 1 whose result does not own the volume; the base SmVolume::Copy returns SM_ERR without setting the output pointer, source/SMLib/inc/SmVolume.h:580, so a result with effective owner flag 0 or 1 safely shares a plain SmVolume head, while owner flags 2 and 3 would delete the original's volume in ~SmSrfInVolume, source/SMLib/src/SmSrfInVolume.cpp:202)",
+      "inputs": {
+        "siv": {
+          "surface": {
+            "kind": "bspline",
+            "bss": {
+              "srf": {
+                "net": [
+                  [
+                    [
+                      0.0,
+                      0.0,
+                      0.0,
+                      1.0
+                    ],
+                    [
+                      0.0,
+                      2.0,
+                      0.0,
+                      1.0
+                    ]
+                  ],
+                  [
+                    [
+                      1.0,
+                      0.0,
+                      0.1,
+                      1.0
+                    ],
+                    [
+                      1.0,
+                      2.0,
+                      0.3,
+                      1.0
+                    ]
+                  ],
+                  [
+                    [
+                      2.0,
+                      0.0,
+                      0.4,
+                      1.0
+                    ],
+                    [
+                      2.0,
+                      2.0,
+                      0.6,
+                      1.0
+                    ]
+                  ],
+                  [
+                    [
+                      3.0,
+                      0.0,
+                      0.9000000000000001,
+                      1.0
+                    ],
+                    [
+                      3.0,
+                      2.0,
+                      0.8999999999999999,
+                      1.0
+                    ]
+                  ],
+                  [
+                    [
+                      4.0,
+                      0.0,
+                      1.6,
+                      1.0
+                    ],
+                    [
+                      4.0,
+                      2.0,
+                      1.2,
+                      1.0
+                    ]
+                  ],
+                  [
+                    [
+                      5.0,
+                      0.0,
+                      2.5,
+                      1.0
+                    ],
+                    [
+                      5.0,
+                      2.0,
+                      1.5,
+                      1.0
+                    ]
+                  ]
+                ],
+                "p": 3,
+                "q": 1,
+                "u": [
+                  0,
+                  0,
+                  0,
+                  0,
+                  0.3,
+                  0.7,
+                  1,
+                  1,
+                  1,
+                  1
+                ],
+                "v": [
+                  0,
+                  0,
+                  1,
+                  1
+                ]
+              }
+            },
+            "raw_knots": false
+          },
+          "volume": [
+            {
+              "kind": 0
+            }
+          ],
+          "in_param": false,
+          "copy": 0,
+          "owner": 1
+        },
+        "op": "copy"
+      }
+    },
+    {
+      "name": "copy_plain_volume_raw_owner0",
+      "upstream_ref": "source/SMLib/src/SmSrfInVolume.cpp (Copy is the copy constructor: it attempts crSurfaceToCopy.m_pVolume->Copy whenever the original owns either part, even for owner flag 1 whose result does not own the volume; the base SmVolume::Copy returns SM_ERR without setting the output pointer, source/SMLib/inc/SmVolume.h:580, so a result with effective owner flag 0 or 1 safely shares a plain SmVolume head, while owner flags 2 and 3 would delete the original's volume in ~SmSrfInVolume, source/SMLib/src/SmSrfInVolume.cpp:202)",
+      "inputs": {
+        "siv": {
+          "surface": {
+            "kind": "bspline",
+            "bss": {
+              "srf": {
+                "net": [
+                  [
+                    [
+                      0.0,
+                      0.0,
+                      0.0,
+                      1.0
+                    ],
+                    [
+                      0.0,
+                      2.0,
+                      0.0,
+                      1.0
+                    ]
+                  ],
+                  [
+                    [
+                      1.0,
+                      0.0,
+                      0.1,
+                      1.0
+                    ],
+                    [
+                      1.0,
+                      2.0,
+                      0.3,
+                      1.0
+                    ]
+                  ],
+                  [
+                    [
+                      2.0,
+                      0.0,
+                      0.4,
+                      1.0
+                    ],
+                    [
+                      2.0,
+                      2.0,
+                      0.6,
+                      1.0
+                    ]
+                  ],
+                  [
+                    [
+                      3.0,
+                      0.0,
+                      0.9000000000000001,
+                      1.0
+                    ],
+                    [
+                      3.0,
+                      2.0,
+                      0.8999999999999999,
+                      1.0
+                    ]
+                  ],
+                  [
+                    [
+                      4.0,
+                      0.0,
+                      1.6,
+                      1.0
+                    ],
+                    [
+                      4.0,
+                      2.0,
+                      1.2,
+                      1.0
+                    ]
+                  ],
+                  [
+                    [
+                      5.0,
+                      0.0,
+                      2.5,
+                      1.0
+                    ],
+                    [
+                      5.0,
+                      2.0,
+                      1.5,
+                      1.0
+                    ]
+                  ]
+                ],
+                "p": 3,
+                "q": 1,
+                "u": [
+                  0,
+                  0,
+                  0,
+                  0,
+                  0.5,
+                  0.5000000001,
+                  1,
+                  1,
+                  1,
+                  1
+                ],
+                "v": [
+                  0,
+                  0,
+                  1,
+                  1
+                ]
+              }
+            },
+            "raw_knots": true
+          },
+          "volume": [
+            {
+              "kind": 0
+            }
+          ],
+          "in_param": false,
+          "copy": 0,
+          "owner": 0
+        },
+        "op": "copy"
+      }
+    },
+    {
+      "name": "copy_plain_volume_raw_owner1",
+      "upstream_ref": "source/SMLib/src/SmSrfInVolume.cpp (Copy is the copy constructor: it attempts crSurfaceToCopy.m_pVolume->Copy whenever the original owns either part, even for owner flag 1 whose result does not own the volume; the base SmVolume::Copy returns SM_ERR without setting the output pointer, source/SMLib/inc/SmVolume.h:580, so a result with effective owner flag 0 or 1 safely shares a plain SmVolume head, while owner flags 2 and 3 would delete the original's volume in ~SmSrfInVolume, source/SMLib/src/SmSrfInVolume.cpp:202)",
+      "inputs": {
+        "siv": {
+          "surface": {
+            "kind": "bspline",
+            "bss": {
+              "srf": {
+                "net": [
+                  [
+                    [
+                      0.0,
+                      0.0,
+                      0.0,
+                      1.0
+                    ],
+                    [
+                      0.0,
+                      2.0,
+                      0.0,
+                      1.0
+                    ]
+                  ],
+                  [
+                    [
+                      1.0,
+                      0.0,
+                      0.1,
+                      1.0
+                    ],
+                    [
+                      1.0,
+                      2.0,
+                      0.3,
+                      1.0
+                    ]
+                  ],
+                  [
+                    [
+                      2.0,
+                      0.0,
+                      0.4,
+                      1.0
+                    ],
+                    [
+                      2.0,
+                      2.0,
+                      0.6,
+                      1.0
+                    ]
+                  ],
+                  [
+                    [
+                      3.0,
+                      0.0,
+                      0.9000000000000001,
+                      1.0
+                    ],
+                    [
+                      3.0,
+                      2.0,
+                      0.8999999999999999,
+                      1.0
+                    ]
+                  ],
+                  [
+                    [
+                      4.0,
+                      0.0,
+                      1.6,
+                      1.0
+                    ],
+                    [
+                      4.0,
+                      2.0,
+                      1.2,
+                      1.0
+                    ]
+                  ],
+                  [
+                    [
+                      5.0,
+                      0.0,
+                      2.5,
+                      1.0
+                    ],
+                    [
+                      5.0,
+                      2.0,
+                      1.5,
+                      1.0
+                    ]
+                  ]
+                ],
+                "p": 3,
+                "q": 1,
+                "u": [
+                  0,
+                  0,
+                  0,
+                  0,
+                  0.5,
+                  0.5000000001,
+                  1,
+                  1,
+                  1,
+                  1
+                ],
+                "v": [
+                  0,
+                  0,
+                  1,
+                  1
+                ]
+              }
+            },
+            "raw_knots": true
+          },
+          "volume": [
+            {
+              "kind": 0
+            }
+          ],
+          "in_param": false,
+          "copy": 0,
+          "owner": 1
+        },
+        "op": "copy"
+      }
+    },
+    {
+      "name": "copy_plain_volume_chain_owner0",
+      "upstream_ref": "source/SMLib/src/SmSrfInVolume.cpp (Copy is the copy constructor: it attempts crSurfaceToCopy.m_pVolume->Copy whenever the original owns either part, even for owner flag 1 whose result does not own the volume; the base SmVolume::Copy returns SM_ERR without setting the output pointer, source/SMLib/inc/SmVolume.h:580, so a result with effective owner flag 0 or 1 safely shares a plain SmVolume head, while owner flags 2 and 3 would delete the original's volume in ~SmSrfInVolume, source/SMLib/src/SmSrfInVolume.cpp:202)",
+      "inputs": {
+        "siv": {
+          "surface": {
+            "kind": "bspline",
+            "bss": {
+              "srf": {
+                "net": [
+                  [
+                    [
+                      0.0,
+                      0.0,
+                      0.0,
+                      1.0
+                    ],
+                    [
+                      0.0,
+                      2.0,
+                      0.0,
+                      1.0
+                    ]
+                  ],
+                  [
+                    [
+                      1.0,
+                      0.0,
+                      0.1,
+                      1.0
+                    ],
+                    [
+                      1.0,
+                      2.0,
+                      0.3,
+                      1.0
+                    ]
+                  ],
+                  [
+                    [
+                      2.0,
+                      0.0,
+                      0.4,
+                      1.0
+                    ],
+                    [
+                      2.0,
+                      2.0,
+                      0.6,
+                      1.0
+                    ]
+                  ],
+                  [
+                    [
+                      3.0,
+                      0.0,
+                      0.9000000000000001,
+                      1.0
+                    ],
+                    [
+                      3.0,
+                      2.0,
+                      0.8999999999999999,
+                      1.0
+                    ]
+                  ],
+                  [
+                    [
+                      4.0,
+                      0.0,
+                      1.6,
+                      1.0
+                    ],
+                    [
+                      4.0,
+                      2.0,
+                      1.2,
+                      1.0
+                    ]
+                  ],
+                  [
+                    [
+                      5.0,
+                      0.0,
+                      2.5,
+                      1.0
+                    ],
+                    [
+                      5.0,
+                      2.0,
+                      1.5,
+                      1.0
+                    ]
+                  ]
+                ],
+                "p": 3,
+                "q": 1,
+                "u": [
+                  0,
+                  0,
+                  0,
+                  0,
+                  0.3,
+                  0.7,
+                  1,
+                  1,
+                  1,
+                  1
+                ],
+                "v": [
+                  0,
+                  0,
+                  1,
+                  1
+                ]
+              }
+            },
+            "raw_knots": false
+          },
+          "volume": [
+            {
+              "kind": 0
+            },
+            {
+              "kind": 1,
+              "t": [
+                [
+                  1.0,
+                  2.0,
+                  3.0
+                ],
+                [
+                  0.0,
+                  1.0,
+                  0.0
+                ],
+                [
+                  -1.0,
+                  0.0,
+                  0.0
+                ],
+                [
+                  0.0,
+                  0.0,
+                  1.0
+                ]
+              ]
+            }
+          ],
+          "in_param": false,
+          "copy": 0,
+          "owner": 0
+        },
+        "op": "copy"
+      }
+    },
+    {
+      "name": "copy_plain_volume_chain_owner1_param",
+      "upstream_ref": "source/SMLib/src/SmSrfInVolume.cpp (Copy is the copy constructor: it attempts crSurfaceToCopy.m_pVolume->Copy whenever the original owns either part, even for owner flag 1 whose result does not own the volume; the base SmVolume::Copy returns SM_ERR without setting the output pointer, source/SMLib/inc/SmVolume.h:580, so a result with effective owner flag 0 or 1 safely shares a plain SmVolume head, while owner flags 2 and 3 would delete the original's volume in ~SmSrfInVolume, source/SMLib/src/SmSrfInVolume.cpp:202)",
+      "inputs": {
+        "siv": {
+          "surface": {
+            "kind": "bspline",
+            "bss": {
+              "srf": {
+                "net": [
+                  [
+                    [
+                      0.0,
+                      0.0,
+                      0.0,
+                      1.0
+                    ],
+                    [
+                      0.0,
+                      2.0,
+                      0.0,
+                      1.0
+                    ]
+                  ],
+                  [
+                    [
+                      1.0,
+                      0.0,
+                      0.1,
+                      1.0
+                    ],
+                    [
+                      1.0,
+                      2.0,
+                      0.3,
+                      1.0
+                    ]
+                  ],
+                  [
+                    [
+                      2.0,
+                      0.0,
+                      0.4,
+                      1.0
+                    ],
+                    [
+                      2.0,
+                      2.0,
+                      0.6,
+                      1.0
+                    ]
+                  ],
+                  [
+                    [
+                      3.0,
+                      0.0,
+                      0.9000000000000001,
+                      1.0
+                    ],
+                    [
+                      3.0,
+                      2.0,
+                      0.8999999999999999,
+                      1.0
+                    ]
+                  ],
+                  [
+                    [
+                      4.0,
+                      0.0,
+                      1.6,
+                      1.0
+                    ],
+                    [
+                      4.0,
+                      2.0,
+                      1.2,
+                      1.0
+                    ]
+                  ],
+                  [
+                    [
+                      5.0,
+                      0.0,
+                      2.5,
+                      1.0
+                    ],
+                    [
+                      5.0,
+                      2.0,
+                      1.5,
+                      1.0
+                    ]
+                  ]
+                ],
+                "p": 3,
+                "q": 1,
+                "u": [
+                  0,
+                  0,
+                  0,
+                  0,
+                  0.3,
+                  0.7,
+                  1,
+                  1,
+                  1,
+                  1
+                ],
+                "v": [
+                  0,
+                  0,
+                  1,
+                  1
+                ]
+              }
+            },
+            "raw_knots": false
+          },
+          "volume": [
+            {
+              "kind": 0
+            },
+            {
+              "kind": 1,
+              "t": [
+                [
+                  1.0,
+                  2.0,
+                  3.0
+                ],
+                [
+                  0.0,
+                  1.0,
+                  0.0
+                ],
+                [
+                  -1.0,
+                  0.0,
+                  0.0
+                ],
+                [
+                  0.0,
+                  0.0,
+                  1.0
+                ]
+              ]
+            }
+          ],
+          "in_param": true,
+          "copy": 0,
+          "owner": 1
+        },
+        "op": "copy"
+      }
+    }
+  ]
+}

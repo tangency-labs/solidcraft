@@ -1,0 +1,636 @@
+{
+ "cases": [
+  {
+   "name": "api_transform_line_segment",
+   "upstream_ref": "tests/SM_API_test/src/TestSmGeneral.cpp:422",
+   "inputs": {
+    "script": "transform",
+    "obj": {
+     "curve": {
+      "owned": false,
+      "c": {
+       "line": {
+        "p": [
+         0.0,
+         0.0,
+         0.0
+        ],
+        "v": [
+         1.0,
+         0.0,
+         0.0
+        ],
+        "domain": [
+         0.0,
+         2.0
+        ],
+        "scale": 1.0,
+        "inside_out": false
+       }
+      }
+     }
+    },
+    "op": {
+     "transform": {
+      "o": [
+       1.0,
+       2.0,
+       3.0
+      ],
+      "x": [
+       1.0,
+       0.0,
+       0.0
+      ],
+      "y": [
+       0.0,
+       1.0,
+       0.0
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "api_transform_corner_surface",
+   "upstream_ref": "tests/SM_API_test/src/TestSmGeneral.cpp:445",
+   "inputs": {
+    "script": "transform",
+    "obj": {
+     "bsurf": {
+      "owned": false,
+      "s": {
+       "oob": false,
+       "net": [
+        [
+         [
+          0.0,
+          0.0,
+          0.0,
+          -1.7976931348623157e+308
+         ],
+         [
+          0.0,
+          2.0,
+          0.0,
+          -1.7976931348623157e+308
+         ]
+        ],
+        [
+         [
+          2.0,
+          0.0,
+          0.0,
+          -1.7976931348623157e+308
+         ],
+         [
+          2.0,
+          2.0,
+          0.0,
+          -1.7976931348623157e+308
+         ]
+        ]
+       ],
+       "p": 1,
+       "q": 1,
+       "u": [
+        0.0,
+        0.0,
+        1.0,
+        1.0
+       ],
+       "v": [
+        0.0,
+        0.0,
+        1.0,
+        1.0
+       ]
+      }
+     }
+    },
+    "op": {
+     "transform": {
+      "o": [
+       3.0,
+       -2.0,
+       5.0
+      ],
+      "x": [
+       1.0,
+       0.0,
+       0.0
+      ],
+      "y": [
+       0.0,
+       1.0,
+       0.0
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "api_transform_rotated_45_about_y",
+   "upstream_ref": "tests/SM_API_test/src/TestSmGeneral.cpp:410",
+   "inputs": {
+    "script": "transform",
+    "obj": {
+     "curve": {
+      "owned": false,
+      "c": {
+       "line": {
+        "p": [
+         0.0,
+         0.0,
+         0.0
+        ],
+        "v": [
+         1.0,
+         0.0,
+         0.0
+        ],
+        "domain": [
+         0.0,
+         2.0
+        ],
+        "scale": 1.0,
+        "inside_out": false
+       }
+      }
+     }
+    },
+    "op": {
+     "transform": {
+      "o": [
+       0.0,
+       0.0,
+       0.0
+      ],
+      "x": [
+       0.7071067811865476,
+       0.0,
+       -0.7071067811865476
+      ],
+      "y": [
+       0.0,
+       1.0,
+       0.0
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "api_scale_circle_uniform",
+   "upstream_ref": "tests/SM_API_test/src/TestSmGeneral.cpp:489",
+   "inputs": {
+    "script": "transform",
+    "obj": {
+     "curve": {
+      "owned": false,
+      "c": {
+       "conic": {
+        "center": [
+         2.0,
+         0.0,
+         0.0
+        ],
+        "x": [
+         1.0,
+         0.0,
+         0.0
+        ],
+        "y": [
+         0.0,
+         1.0,
+         0.0
+        ],
+        "domain": [
+         0.0,
+         360.0
+        ],
+        "rx": 1.0,
+        "ry": null,
+        "inside_out": false
+       }
+      }
+     }
+    },
+    "op": {
+     "scale": {
+      "s": [
+       2.0,
+       2.0,
+       2.0
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "api_scale_by_pt_circle_half",
+   "upstream_ref": "tests/SM_API_test/src/TestSmGeneral.cpp:499",
+   "inputs": {
+    "script": "transform",
+    "obj": {
+     "curve": {
+      "owned": false,
+      "c": {
+       "conic": {
+        "center": [
+         4.0,
+         0.0,
+         0.0
+        ],
+        "x": [
+         1.0,
+         0.0,
+         0.0
+        ],
+        "y": [
+         0.0,
+         1.0,
+         0.0
+        ],
+        "domain": [
+         0.0,
+         360.0
+        ],
+        "rx": 2.0,
+        "ry": null,
+        "inside_out": false
+       }
+      }
+     }
+    },
+    "op": {
+     "scale_by_pt": {
+      "r": [
+       1.0,
+       0.0,
+       0.0
+      ],
+      "s": [
+       0.5,
+       0.5,
+       0.5
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "api_scale_by_pt_circle_nonuniform_rejected",
+   "upstream_ref": "tests/SM_API_test/src/TestSmGeneral.cpp:508",
+   "inputs": {
+    "script": "transform",
+    "obj": {
+     "curve": {
+      "owned": false,
+      "c": {
+       "conic": {
+        "center": [
+         2.5,
+         0.0,
+         0.0
+        ],
+        "x": [
+         1.0,
+         0.0,
+         0.0
+        ],
+        "y": [
+         0.0,
+         1.0,
+         0.0
+        ],
+        "domain": [
+         0.0,
+         360.0
+        ],
+        "rx": 1.0,
+        "ry": null,
+        "inside_out": false
+       }
+      }
+     }
+    },
+    "op": {
+     "scale_by_pt": {
+      "r": [
+       1.0,
+       0.0,
+       0.0
+      ],
+      "s": [
+       2.0,
+       1.0,
+       1.0
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "api_scale_line_nonuniform",
+   "upstream_ref": "tests/SM_API_test/src/TestSmGeneral.cpp:473",
+   "inputs": {
+    "script": "transform",
+    "obj": {
+     "curve": {
+      "owned": false,
+      "c": {
+       "line": {
+        "p": [
+         0.0,
+         0.0,
+         0.0
+        ],
+        "v": [
+         1.0,
+         0.0,
+         0.0
+        ],
+        "domain": [
+         0.0,
+         2.0
+        ],
+        "scale": 1.0,
+        "inside_out": false
+       }
+      }
+     }
+    },
+    "op": {
+     "scale": {
+      "s": [
+       1.0,
+       2.0,
+       4.0
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "api_rotate_circle_about_y",
+   "upstream_ref": "tests/SM_API_test/src/TestSmGeneral.cpp:543",
+   "inputs": {
+    "script": "transform",
+    "obj": {
+     "curve": {
+      "owned": false,
+      "c": {
+       "conic": {
+        "center": [
+         0.0,
+         0.0,
+         0.0
+        ],
+        "x": [
+         1.0,
+         0.0,
+         0.0
+        ],
+        "y": [
+         0.0,
+         1.0,
+         0.0
+        ],
+        "domain": [
+         0.0,
+         360.0
+        ],
+        "rx": 1.0,
+        "ry": null,
+        "inside_out": false
+       }
+      }
+     }
+    },
+    "op": {
+     "rotate": {
+      "r": [
+       0.0,
+       0.0,
+       0.0
+      ],
+      "a": [
+       0.0,
+       1.0,
+       0.0
+      ],
+      "deg": 45.0
+     }
+    }
+   }
+  },
+  {
+   "name": "api_translate_circle",
+   "upstream_ref": "tests/SM_API_test/src/TestSmGeneral.cpp:605",
+   "inputs": {
+    "script": "transform",
+    "obj": {
+     "curve": {
+      "owned": false,
+      "c": {
+       "conic": {
+        "center": [
+         0.0,
+         0.0,
+         0.0
+        ],
+        "x": [
+         1.0,
+         0.0,
+         0.0
+        ],
+        "y": [
+         0.0,
+         1.0,
+         0.0
+        ],
+        "domain": [
+         0.0,
+         360.0
+        ],
+        "rx": 1.0,
+        "ry": null,
+        "inside_out": false
+       }
+      }
+     }
+    },
+    "op": {
+     "translate": {
+      "v": [
+       1.0,
+       2.0,
+       4.0
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "api_translate_owned_curve_rejected",
+   "upstream_ref": "tests/SM_API_test/src/TestSmGeneral.cpp:578",
+   "inputs": {
+    "script": "transform",
+    "obj": {
+     "curve": {
+      "owned": true,
+      "c": {
+       "line": {
+        "p": [
+         0.0,
+         0.0,
+         0.0
+        ],
+        "v": [
+         1.0,
+         0.0,
+         0.0
+        ],
+        "domain": [
+         0.0,
+         2.0
+        ],
+        "scale": 1.0,
+        "inside_out": false
+       }
+      }
+     }
+    },
+    "op": {
+     "translate": {
+      "v": [
+       1.0,
+       2.0,
+       4.0
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "api_translate_owned_surface_rejected",
+   "upstream_ref": "tests/SM_API_test/src/TestSmGeneral.cpp:589",
+   "inputs": {
+    "script": "transform",
+    "obj": {
+     "bsurf": {
+      "owned": true,
+      "s": {
+       "oob": false,
+       "net": [
+        [
+         [
+          0.0,
+          0.0,
+          0.0,
+          -1.7976931348623157e+308
+         ],
+         [
+          0.0,
+          2.0,
+          0.0,
+          -1.7976931348623157e+308
+         ]
+        ],
+        [
+         [
+          2.0,
+          0.0,
+          0.0,
+          -1.7976931348623157e+308
+         ],
+         [
+          2.0,
+          2.0,
+          0.0,
+          -1.7976931348623157e+308
+         ]
+        ]
+       ],
+       "p": 1,
+       "q": 1,
+       "u": [
+        0.0,
+        0.0,
+        1.0,
+        1.0
+       ],
+       "v": [
+        0.0,
+        0.0,
+        1.0,
+        1.0
+       ]
+      }
+     }
+    },
+    "op": {
+     "translate": {
+      "v": [
+       1.0,
+       2.0,
+       4.0
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "api_translate_face_rejected",
+   "upstream_ref": "tests/SM_API_test/src/TestSmGeneral.cpp:597",
+   "inputs": {
+    "script": "transform",
+    "obj": "other",
+    "op": {
+     "translate": {
+      "v": [
+       1.0,
+       2.0,
+       4.0
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "api_translate_box_brep",
+   "upstream_ref": "tests/SM_API_test/src/TestSmGeneral.cpp:571",
+   "inputs": {
+    "script": "transform",
+    "obj": "brep",
+    "op": {
+     "translate": {
+      "v": [
+       1.0,
+       2.0,
+       4.0
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "api_translate_poly_brep",
+   "upstream_ref": "tests/SM_API_test/src/TestSmGeneral.cpp:638",
+   "inputs": {
+    "script": "transform",
+    "obj": "poly",
+    "op": {
+     "translate": {
+      "v": [
+       1.0,
+       2.0,
+       4.0
+      ]
+     }
+    }
+   }
+  }
+ ]
+}

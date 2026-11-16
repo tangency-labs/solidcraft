@@ -1,0 +1,161 @@
+{
+  "area": "ladder/12-sheet-metal",
+  "bodies": {},
+  "calls": [
+    {
+      "inputs": [],
+      "op": "extrude",
+      "outputs": [
+        "b12"
+      ],
+      "params": {
+        "cap": true,
+        "corner": "curvature",
+        "direction": [
+          0.0,
+          0.0,
+          1.0
+        ],
+        "distance": 2.0,
+        "draft": 0.0,
+        "profile": [
+          {
+            "line": {
+              "end": [
+                0.0,
+                0.0,
+                0.0
+              ],
+              "start": [
+                0.0,
+                60.0,
+                0.0
+              ]
+            }
+          },
+          {
+            "line": {
+              "end": [
+                99.99999999958982,
+                0.0,
+                0.0
+              ],
+              "start": [
+                0.0,
+                0.0,
+                0.0
+              ]
+            }
+          },
+          {
+            "line": {
+              "end": [
+                100.0,
+                60.0,
+                0.0
+              ],
+              "start": [
+                100.0,
+                0.0,
+                0.0
+              ]
+            }
+          },
+          {
+            "line": {
+              "end": [
+                0.0,
+                60.0,
+                0.0
+              ],
+              "start": [
+                99.9999999995898,
+                60.0,
+                0.0
+              ]
+            }
+          }
+        ]
+      }
+    }
+  ],
+  "case": "011-fold-unfolded",
+  "expected": {
+    "bbox": {
+      "max": [
+        100.0,
+        60.0,
+        2.0
+      ],
+      "min": [
+        0,
+        0,
+        0
+      ]
+    },
+    "body_count": 1,
+    "method": "T = 2, R = 1, K = 0.5, the corner gap g = 0.5. A bend zone is BA = theta (R + K T) wide in the flat; folded it is an annular sector holding theta T (R + T/2) a mm of bend, T BA with K = 0.5, and every panel moves rigidly, so V = T x the flat area. An edge flange's outer virtual sharp is on the picked edge: the base is cut back s0 = (R + T) tan(theta/2), the bend starts there, and its panel is H - s0 long (H from the sharp along the outer face). A fold (sheet.rs add_fold) takes its bend zone out of the sheet, so the flat stays 100 x 60 and V = 2 x 6000 = 12000. Centred on the line x = 70 the zone runs from 70 - pi/2; the larger side stays, the 30 mm side folds up 90 deg about the axis at x = 70 - pi/2, z = T + R: its outer face (the flat bottom) stands at x = 70 - pi/2 + R + T = 71.429204 and its panel, 30 - pi/2 long, rises from z = R + T to 31.429204. Unfolded every panel lies in the base's plane where it was cut from: the 100 x 60 x 2 plate, the base in its place",
+    "source": "analytic",
+    "sources": [],
+    "volume_mm3": 12000.0,
+    "what": "010's fold unfolded: the flat 100 x 60 plate again"
+  },
+  "expressible": true,
+  "golden": {
+    "measured": {
+      "area_mm2": 12639.999999949137,
+      "body_count": 1,
+      "edges": 12,
+      "faces": 6,
+      "vertices": 8,
+      "volume_mm3": 11999.999999950778
+    },
+    "status": "pass",
+    "unstable": null
+  },
+  "operation_expressible": true,
+  "outcome": {
+    "ran": true,
+    "raw_counts": {
+      "edges": 12,
+      "faces": 6,
+      "vertices": 8
+    }
+  },
+  "result": [
+    {
+      "body": "Body1",
+      "made": "b12"
+    }
+  ],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": {
+      "area_mm2": 12639.999999949137,
+      "body_count": 1,
+      "edges": 12,
+      "faces": 6,
+      "vertices": 8,
+      "volume_mm3": 11999.999999950778
+    },
+    "refused_with": null,
+    "status": "pass"
+  },
+  "sources": [],
+  "traced_ops": [
+    "planar_faces",
+    "planar_faces",
+    "boolean2d",
+    "planar_faces",
+    "planar_faces",
+    "boolean2d",
+    "planar_faces",
+    "boolean2d",
+    "planar_faces",
+    "extrude"
+  ],
+  "ungraded": [],
+  "what": "010's fold unfolded: the flat 100 x 60 plate again",
+  "why_not": []
+}

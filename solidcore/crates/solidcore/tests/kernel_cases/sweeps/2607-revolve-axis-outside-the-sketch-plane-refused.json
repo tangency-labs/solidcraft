@@ -1,0 +1,41 @@
+{
+  "area": "sweeps",
+  "bodies": {},
+  "calls": [],
+  "case": "2607-revolve-axis-outside-the-sketch-plane-refused",
+  "expected": {
+    "method": "the revolve axis must lie in the profile plane (the Y axis is perpendicular to the XZ plane): the right behaviour is a clean refusal, with no body made.",
+    "outcome": "refused",
+    "refusal": "the Y axis does not lie in the sketch plane",
+    "source": "invariants",
+    "sources": [
+      "tangency-labs/solidcraft#3736",
+      "tangency-labs/solidcraft#2607"
+    ],
+    "what": "a profile on the XZ plane revolved about the world Y axis, which does not lie in the sketch plane"
+  },
+  "expressible": false,
+  "operation_expressible": false,
+  "outcome": {
+    "engine_error": "step 4 (solid.revolve): the Y axis does not lie in the sketch plane",
+    "ran": false
+  },
+  "result": [],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": null,
+    "refused_with": "step 4 (solid.revolve): the Y axis does not lie in the sketch plane",
+    "status": "pass"
+  },
+  "sources": [
+    "tangency-labs/solidcraft#3736",
+    "tangency-labs/solidcraft#2607"
+  ],
+  "traced_ops": [],
+  "ungraded": [],
+  "what": "a profile on the XZ plane revolved about the world Y axis, which does not lie in the sketch plane",
+  "why_not": [
+    "no kernel operation ran before the failure: step 4 (solid.revolve): the Y axis does not lie in the sketch plane"
+  ]
+}

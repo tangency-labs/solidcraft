@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="560" height="330" viewBox="0 0 560 330">
+  <title>The tangent end</title>
+  <g id="Layer_1" data-name="Layer 1">
+    <path d="M0 0 L560 0 L560 330 L0 330 Z" fill="#ffffff"/>
+    <path d="M300 30 L520 30 L520 230 L300 230 Z" fill="#f0f0f0"/>
+    <path d="M300 30 L300 230" fill="none" stroke="#000000" stroke-width="1.6" stroke-miterlimit="10"/>
+    <path d="M60 200 L300 200" fill="none" stroke="#000000" stroke-width="1.6" stroke-miterlimit="10"/>
+    <path d="M300 200 L299.5 195 L298.6 190 L297.5 185 L296.1 180 L294.6 175 L292.8 170 L291 165 L289 160 L286.9 155 L284.6 150 L282.2 145 L279.8 140 L277.2 135 L274.5 130 L271.7 125 L268.8 120 L265.9 115 L262.8 110 L259.7 105 L256.5 100 L253.1 95 L249.8 90 L246.3 85 L242.8 80 L239.1 75 L235.5 70 L231.7 65 L227.9 60 L224 55 L220 50" fill="none" stroke="#000000" stroke-width="1.2" stroke-miterlimit="10"/>
+    <path d="M60 291 L95 291" fill="none" stroke="#000000" stroke-width="1.2" stroke-miterlimit="10"/>
+    <path d="M300 200 L293.3 199.8 L286.7 199.3 L280 198.5 L273.3 197.3 L266.7 195.8 L260 194 L253.3 191.8 L246.7 189.3 L240 186.5 L233.3 183.3 L226.7 179.8 L220 176 L213.3 171.8 L206.7 167.3 L200 162.5 L193.3 157.3 L186.7 151.8 L180 146 L173.3 139.8 L166.7 133.3 L160 126.5 L153.3 119.3 L146.7 111.8 L140 104 L133.3 95.8 L126.7 87.3 L120 78.5 L113.3 69.3 L106.7 59.8 L100 50" fill="none" stroke="#000000" stroke-width="1.2" stroke-miterlimit="10" stroke-dasharray="5 3"/>
+    <path d="M60 251 L95 251" fill="none" stroke="#000000" stroke-width="1.2" stroke-miterlimit="10" stroke-dasharray="5 3"/>
+    <path d="M300 200 L160 50" fill="none" stroke="#1f6fb2" stroke-width="2.2" stroke-miterlimit="10"/>
+    <path d="M60 271 L95 271" fill="none" stroke="#1f6fb2" stroke-width="2.2" stroke-miterlimit="10"/>
+    <path d="M304 200 C304 197.791 302.209 196 300 196 C297.791 196 296 197.791 296 200 C296 202.209 297.791 204 300 204 C302.209 204 304 202.209 304 200 Z" fill="#000000"/>
+    <text transform="matrix(1 0 0 1 60 40)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="12" fill="#000000"><tspan x="0" y="0">face F (plan view)</tspan></text>
+    <text transform="matrix(1 0 0 1 330 62)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="12" fill="#000000"><tspan x="0" y="0">end face E</tspan></text>
+    <text transform="matrix(1 0 0 1 330 78)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="11" fill="#555555"><tspan x="0" y="0">(tangent to F along T)</tspan></text>
+    <text transform="matrix(1 0 0 1 306 24)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="12" fill="#000000"><tspan x="0" y="0">seam T</tspan></text>
+    <text transform="matrix(1 0 0 1 309 218)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="12" fill="#000000"><tspan x="0" y="0">P, the tangent end</tspan></text>
+    <text transform="matrix(1 0 0 1 62 216)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="12" fill="#000000"><tspan x="0" y="0">rail ρ (the round&apos;s contact with F)</tspan></text>
+    <text transform="matrix(1 0 0 1 102 255)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="11" fill="#000000"><tspan x="0" y="0">chamfer (n = 0): a ∝ s^1/2, a conic tangent to the rail</tspan></text>
+    <text transform="matrix(1 0 0 1 102 275)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="11" fill="#1f6fb2"><tspan x="0" y="0">round (n = 1): a ∝ s, a straight branch of the node at P</tspan></text>
+    <text transform="matrix(1 0 0 1 102 295)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="11" fill="#000000"><tspan x="0" y="0">curvature round (n = 2): a ∝ s^3/2, tangent to T, held in t = √s</tspan></text>
+    <text transform="matrix(1 0 0 1 60 318)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="11" fill="#555555"><tspan x="0" y="0">a runs along the rail, s along T. Each end curve (the end rib) is built from P outward.</tspan></text>
+  </g>
+</svg>

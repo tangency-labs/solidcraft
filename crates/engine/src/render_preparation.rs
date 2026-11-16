@@ -4,7 +4,7 @@ pub mod batch;
 pub(crate) mod batch_payload;
 
 use crate::{Result, Session, cmd::PreparedCapture};
-use serde_json::{Value, json};
+use serde_json::Value;
 use solidcraft_render::job::CancelToken;
 use std::{collections::BTreeMap, sync::Arc};
 
@@ -88,7 +88,7 @@ fn same_moves(a: &BTreeMap<u64, solidcraft_doc::Mat>, b: &BTreeMap<u64, solidcra
     a.len() == b.len()
         && a.iter().zip(b).all(|((ka, a), (kb, b))| ka == kb && a.iter().flatten().zip(b.iter().flatten()).all(|(a, b)| a.to_bits() == b.to_bits()))
 }
-fn camera_bits(camera: Option<solidcraft_render::Camera>) -> Option<(solidcraft_render::UpAxis, [u64; 8])> {
+fn camera_bits(camera: Option<solidcraft_viewport::Camera>) -> Option<(solidcraft_viewport::UpAxis, [u64; 8])> {
     camera.map(|camera| {
         (
             camera.up,
@@ -144,16 +144,12 @@ fn finish_inner(session: &mut Session, prepared: &mut Prepared, ticket: Option<b
     captured.check_cancel().map_err(crate::render_jobs::job_error)?;
     if prepared.kind == Kind::Check {
         prepared.completed = true;
-        return Ok(std::mem::take(&mut prepared.capture.reply));
+        return serde_json::to_value(&prepared.capture.reply).map_err(|e| crate::params::bad(prepared.kind.command(), e.to_string()));
     }
     let status = session
         .render_jobs
         .try_start_prepared_inner(session.revision, &mut prepared.capture.submission, prepared.capture.replace, prepared.shot.clone(), ticket)
         .map_err(crate::render_jobs::job_error)?;
     prepared.completed = true;
-    let mut status = json!(status);
-    if let (Some(out), Some(ignored)) = (status.as_object_mut(), prepared.capture.reply.get("ignored_controls")) {
-        out.insert("ignored_controls".into(), ignored.clone());
-    }
-    Ok(status)
+    Ok(crate::cmd::render_started(prepared.kind.command(), &status, &prepared.capture.reply))
 }

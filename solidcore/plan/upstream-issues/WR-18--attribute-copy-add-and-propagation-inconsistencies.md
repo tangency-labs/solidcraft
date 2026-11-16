@@ -1,0 +1,14 @@
+#### WR-18. Attribute copy, add and propagation inconsistencies
+- **Severity:** Wrong result
+- **Area:** Topology, attributes, solvers
+- **Location:**
+  - `SmAObject.cpp:540` `SmAObject::AddAttribute`: skips only if `FindAttribute(id)` returns that same attribute, so a second attribute with the same id is added, and re-adding duplicates the entry and the user.
+  - `SmAttribute.cpp:1101` `SmColorAttribute::PropagateRegionsThroughBooleans`: copies itself, not the colour it found.
+  - `SmLongAttribute`, `SmVector3dAttribute` and `SmColorAttribute::MakeCopy` drop the copy behaviour.
+  - `SmAttribute.cpp:17` `GOTO_NEXT_ATTLINE`: treats byte `0xFF` as EOF.
+- **What happens:** Duplicated entries, wrong propagated colour, lost `SM_AB_STANDALONE_COPY`, early end of input.
+- **Trigger:** Add two attributes with the same id; union two bodies where only one has a colour.
+- **How found:** generated difftest case (attribute scripts).
+- **Confirmed:** yes (all compared against C++).
+- **Severity:** wrong result.
+- **Rust port:** Ported as is.

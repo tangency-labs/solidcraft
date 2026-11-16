@@ -1,0 +1,1232 @@
+{
+  "cases": [
+    {
+      "name": "analytic_revolution_iso_0",
+      "upstream_ref": "source/SMLib/src/SmSurface.cpp:11644,14877; source/SMLib/src/SmSurfOfRevolution.cpp (canonical cylinder, real virtual iso curves)",
+      "inputs": {
+        "op": 1,
+        "analytic_plane": false,
+        "net": [
+          [
+            0.0,
+            0.0,
+            0.0
+          ],
+          [
+            0.0,
+            0.5,
+            0.0
+          ],
+          [
+            0.0,
+            1.0,
+            0.0
+          ],
+          [
+            0.5,
+            0.0,
+            0.0
+          ],
+          [
+            0.5,
+            0.5,
+            0.0
+          ],
+          [
+            0.5,
+            1.0,
+            0.0
+          ],
+          [
+            1.0,
+            0.0,
+            0.0
+          ],
+          [
+            1.0,
+            0.5,
+            0.0
+          ],
+          [
+            1.0,
+            1.0,
+            0.0
+          ]
+        ],
+        "direction": 0,
+        "controls": [
+          0.01,
+          0,
+          0
+        ],
+        "analytic_revolution": true
+      }
+    },
+    {
+      "name": "analytic_revolution_iso_1",
+      "upstream_ref": "source/SMLib/src/SmSurface.cpp:11644,14877; source/SMLib/src/SmSurfOfRevolution.cpp (canonical cylinder, real virtual iso curves)",
+      "inputs": {
+        "op": 1,
+        "analytic_plane": false,
+        "net": [
+          [
+            0.0,
+            0.0,
+            0.0
+          ],
+          [
+            0.0,
+            0.5,
+            0.0
+          ],
+          [
+            0.0,
+            1.0,
+            0.0
+          ],
+          [
+            0.5,
+            0.0,
+            0.0
+          ],
+          [
+            0.5,
+            0.5,
+            0.0
+          ],
+          [
+            0.5,
+            1.0,
+            0.0
+          ],
+          [
+            1.0,
+            0.0,
+            0.0
+          ],
+          [
+            1.0,
+            0.5,
+            0.0
+          ],
+          [
+            1.0,
+            1.0,
+            0.0
+          ]
+        ],
+        "direction": 1,
+        "controls": [
+          0.01,
+          0,
+          0
+        ],
+        "analytic_revolution": true
+      }
+    },
+    {
+      "name": "analytic_revolution_splits_0_0_0_no_diagonals",
+      "upstream_ref": "source/SMLib/src/SmSurface.cpp:11644,14877; source/SMLib/src/SmSurfOfRevolution.cpp (canonical cylinder, real virtual iso curves)",
+      "inputs": {
+        "op": 0,
+        "analytic_plane": false,
+        "net": [
+          [
+            0.0,
+            0.0,
+            0.0
+          ],
+          [
+            0.0,
+            0.5,
+            0.0
+          ],
+          [
+            0.0,
+            1.0,
+            0.0
+          ],
+          [
+            0.5,
+            0.0,
+            0.0
+          ],
+          [
+            0.5,
+            0.5,
+            0.0
+          ],
+          [
+            0.5,
+            1.0,
+            0.0
+          ],
+          [
+            1.0,
+            0.0,
+            0.0
+          ],
+          [
+            1.0,
+            0.5,
+            0.0
+          ],
+          [
+            1.0,
+            1.0,
+            0.0
+          ]
+        ],
+        "domain": [
+          0,
+          0,
+          1,
+          1
+        ],
+        "direction": 0,
+        "controls": [
+          0.02,
+          15,
+          0
+        ],
+        "diagonals": false,
+        "analytic_revolution": true
+      }
+    },
+    {
+      "name": "analytic_revolution_splits_0_0_1_no_diagonals",
+      "upstream_ref": "source/SMLib/src/SmSurface.cpp:11644,14877; source/SMLib/src/SmSurfOfRevolution.cpp (canonical cylinder, real virtual iso curves)",
+      "inputs": {
+        "op": 0,
+        "analytic_plane": false,
+        "net": [
+          [
+            0.0,
+            0.0,
+            0.0
+          ],
+          [
+            0.0,
+            0.5,
+            0.0
+          ],
+          [
+            0.0,
+            1.0,
+            0.0
+          ],
+          [
+            0.5,
+            0.0,
+            0.0
+          ],
+          [
+            0.5,
+            0.5,
+            0.0
+          ],
+          [
+            0.5,
+            1.0,
+            0.0
+          ],
+          [
+            1.0,
+            0.0,
+            0.0
+          ],
+          [
+            1.0,
+            0.5,
+            0.0
+          ],
+          [
+            1.0,
+            1.0,
+            0.0
+          ]
+        ],
+        "domain": [
+          0,
+          0,
+          1,
+          1
+        ],
+        "direction": 0,
+        "controls": [
+          0.02,
+          15,
+          0.5
+        ],
+        "diagonals": false,
+        "analytic_revolution": true
+      }
+    },
+    {
+      "name": "analytic_revolution_splits_0_0_2_no_diagonals",
+      "upstream_ref": "source/SMLib/src/SmSurface.cpp:11644,14877; source/SMLib/src/SmSurfOfRevolution.cpp (canonical cylinder, real virtual iso curves)",
+      "inputs": {
+        "op": 0,
+        "analytic_plane": false,
+        "net": [
+          [
+            0.0,
+            0.0,
+            0.0
+          ],
+          [
+            0.0,
+            0.5,
+            0.0
+          ],
+          [
+            0.0,
+            1.0,
+            0.0
+          ],
+          [
+            0.5,
+            0.0,
+            0.0
+          ],
+          [
+            0.5,
+            0.5,
+            0.0
+          ],
+          [
+            0.5,
+            1.0,
+            0.0
+          ],
+          [
+            1.0,
+            0.0,
+            0.0
+          ],
+          [
+            1.0,
+            0.5,
+            0.0
+          ],
+          [
+            1.0,
+            1.0,
+            0.0
+          ]
+        ],
+        "domain": [
+          0,
+          0,
+          1,
+          1
+        ],
+        "direction": 0,
+        "controls": [
+          0.02,
+          15,
+          -0.5
+        ],
+        "diagonals": false,
+        "analytic_revolution": true
+      }
+    },
+    {
+      "name": "analytic_revolution_splits_0_0_3_no_diagonals",
+      "upstream_ref": "source/SMLib/src/SmSurface.cpp:11644,14877; source/SMLib/src/SmSurfOfRevolution.cpp (canonical cylinder, real virtual iso curves)",
+      "inputs": {
+        "op": 0,
+        "analytic_plane": false,
+        "net": [
+          [
+            0.0,
+            0.0,
+            0.0
+          ],
+          [
+            0.0,
+            0.5,
+            0.0
+          ],
+          [
+            0.0,
+            1.0,
+            0.0
+          ],
+          [
+            0.5,
+            0.0,
+            0.0
+          ],
+          [
+            0.5,
+            0.5,
+            0.0
+          ],
+          [
+            0.5,
+            1.0,
+            0.0
+          ],
+          [
+            1.0,
+            0.0,
+            0.0
+          ],
+          [
+            1.0,
+            0.5,
+            0.0
+          ],
+          [
+            1.0,
+            1.0,
+            0.0
+          ]
+        ],
+        "domain": [
+          0,
+          0,
+          1,
+          1
+        ],
+        "direction": 0,
+        "controls": [
+          0,
+          15,
+          -0.5
+        ],
+        "diagonals": false,
+        "analytic_revolution": true
+      }
+    },
+    {
+      "name": "analytic_revolution_splits_0_1_0_no_diagonals",
+      "upstream_ref": "source/SMLib/src/SmSurface.cpp:11644,14877; source/SMLib/src/SmSurfOfRevolution.cpp (canonical cylinder, real virtual iso curves)",
+      "inputs": {
+        "op": 0,
+        "analytic_plane": false,
+        "net": [
+          [
+            0.0,
+            0.0,
+            0.0
+          ],
+          [
+            0.0,
+            0.5,
+            0.0
+          ],
+          [
+            0.0,
+            1.0,
+            0.0
+          ],
+          [
+            0.5,
+            0.0,
+            0.0
+          ],
+          [
+            0.5,
+            0.5,
+            0.0
+          ],
+          [
+            0.5,
+            1.0,
+            0.0
+          ],
+          [
+            1.0,
+            0.0,
+            0.0
+          ],
+          [
+            1.0,
+            0.5,
+            0.0
+          ],
+          [
+            1.0,
+            1.0,
+            0.0
+          ]
+        ],
+        "domain": [
+          0.2,
+          0.1,
+          0.85,
+          0.9
+        ],
+        "direction": 0,
+        "controls": [
+          0.02,
+          15,
+          0
+        ],
+        "diagonals": false,
+        "analytic_revolution": true
+      }
+    },
+    {
+      "name": "analytic_revolution_splits_0_1_1_no_diagonals",
+      "upstream_ref": "source/SMLib/src/SmSurface.cpp:11644,14877; source/SMLib/src/SmSurfOfRevolution.cpp (canonical cylinder, real virtual iso curves)",
+      "inputs": {
+        "op": 0,
+        "analytic_plane": false,
+        "net": [
+          [
+            0.0,
+            0.0,
+            0.0
+          ],
+          [
+            0.0,
+            0.5,
+            0.0
+          ],
+          [
+            0.0,
+            1.0,
+            0.0
+          ],
+          [
+            0.5,
+            0.0,
+            0.0
+          ],
+          [
+            0.5,
+            0.5,
+            0.0
+          ],
+          [
+            0.5,
+            1.0,
+            0.0
+          ],
+          [
+            1.0,
+            0.0,
+            0.0
+          ],
+          [
+            1.0,
+            0.5,
+            0.0
+          ],
+          [
+            1.0,
+            1.0,
+            0.0
+          ]
+        ],
+        "domain": [
+          0.2,
+          0.1,
+          0.85,
+          0.9
+        ],
+        "direction": 0,
+        "controls": [
+          0.02,
+          15,
+          0.5
+        ],
+        "diagonals": false,
+        "analytic_revolution": true
+      }
+    },
+    {
+      "name": "analytic_revolution_splits_0_1_2_no_diagonals",
+      "upstream_ref": "source/SMLib/src/SmSurface.cpp:11644,14877; source/SMLib/src/SmSurfOfRevolution.cpp (canonical cylinder, real virtual iso curves)",
+      "inputs": {
+        "op": 0,
+        "analytic_plane": false,
+        "net": [
+          [
+            0.0,
+            0.0,
+            0.0
+          ],
+          [
+            0.0,
+            0.5,
+            0.0
+          ],
+          [
+            0.0,
+            1.0,
+            0.0
+          ],
+          [
+            0.5,
+            0.0,
+            0.0
+          ],
+          [
+            0.5,
+            0.5,
+            0.0
+          ],
+          [
+            0.5,
+            1.0,
+            0.0
+          ],
+          [
+            1.0,
+            0.0,
+            0.0
+          ],
+          [
+            1.0,
+            0.5,
+            0.0
+          ],
+          [
+            1.0,
+            1.0,
+            0.0
+          ]
+        ],
+        "domain": [
+          0.2,
+          0.1,
+          0.85,
+          0.9
+        ],
+        "direction": 0,
+        "controls": [
+          0.02,
+          15,
+          -0.5
+        ],
+        "diagonals": false,
+        "analytic_revolution": true
+      }
+    },
+    {
+      "name": "analytic_revolution_splits_0_1_3_no_diagonals",
+      "upstream_ref": "source/SMLib/src/SmSurface.cpp:11644,14877; source/SMLib/src/SmSurfOfRevolution.cpp (canonical cylinder, real virtual iso curves)",
+      "inputs": {
+        "op": 0,
+        "analytic_plane": false,
+        "net": [
+          [
+            0.0,
+            0.0,
+            0.0
+          ],
+          [
+            0.0,
+            0.5,
+            0.0
+          ],
+          [
+            0.0,
+            1.0,
+            0.0
+          ],
+          [
+            0.5,
+            0.0,
+            0.0
+          ],
+          [
+            0.5,
+            0.5,
+            0.0
+          ],
+          [
+            0.5,
+            1.0,
+            0.0
+          ],
+          [
+            1.0,
+            0.0,
+            0.0
+          ],
+          [
+            1.0,
+            0.5,
+            0.0
+          ],
+          [
+            1.0,
+            1.0,
+            0.0
+          ]
+        ],
+        "domain": [
+          0.2,
+          0.1,
+          0.85,
+          0.9
+        ],
+        "direction": 0,
+        "controls": [
+          0,
+          15,
+          -0.5
+        ],
+        "diagonals": false,
+        "analytic_revolution": true
+      }
+    },
+    {
+      "name": "analytic_revolution_splits_1_0_0_no_diagonals",
+      "upstream_ref": "source/SMLib/src/SmSurface.cpp:11644,14877; source/SMLib/src/SmSurfOfRevolution.cpp (canonical cylinder, real virtual iso curves)",
+      "inputs": {
+        "op": 0,
+        "analytic_plane": false,
+        "net": [
+          [
+            0.0,
+            0.0,
+            0.0
+          ],
+          [
+            0.0,
+            0.5,
+            0.0
+          ],
+          [
+            0.0,
+            1.0,
+            0.0
+          ],
+          [
+            0.5,
+            0.0,
+            0.0
+          ],
+          [
+            0.5,
+            0.5,
+            0.0
+          ],
+          [
+            0.5,
+            1.0,
+            0.0
+          ],
+          [
+            1.0,
+            0.0,
+            0.0
+          ],
+          [
+            1.0,
+            0.5,
+            0.0
+          ],
+          [
+            1.0,
+            1.0,
+            0.0
+          ]
+        ],
+        "domain": [
+          0,
+          0,
+          1,
+          1
+        ],
+        "direction": 1,
+        "controls": [
+          0.02,
+          15,
+          0
+        ],
+        "diagonals": false,
+        "analytic_revolution": true
+      }
+    },
+    {
+      "name": "analytic_revolution_splits_1_0_1_no_diagonals",
+      "upstream_ref": "source/SMLib/src/SmSurface.cpp:11644,14877; source/SMLib/src/SmSurfOfRevolution.cpp (canonical cylinder, real virtual iso curves)",
+      "inputs": {
+        "op": 0,
+        "analytic_plane": false,
+        "net": [
+          [
+            0.0,
+            0.0,
+            0.0
+          ],
+          [
+            0.0,
+            0.5,
+            0.0
+          ],
+          [
+            0.0,
+            1.0,
+            0.0
+          ],
+          [
+            0.5,
+            0.0,
+            0.0
+          ],
+          [
+            0.5,
+            0.5,
+            0.0
+          ],
+          [
+            0.5,
+            1.0,
+            0.0
+          ],
+          [
+            1.0,
+            0.0,
+            0.0
+          ],
+          [
+            1.0,
+            0.5,
+            0.0
+          ],
+          [
+            1.0,
+            1.0,
+            0.0
+          ]
+        ],
+        "domain": [
+          0,
+          0,
+          1,
+          1
+        ],
+        "direction": 1,
+        "controls": [
+          0.02,
+          15,
+          0.5
+        ],
+        "diagonals": false,
+        "analytic_revolution": true
+      }
+    },
+    {
+      "name": "analytic_revolution_splits_1_0_2_no_diagonals",
+      "upstream_ref": "source/SMLib/src/SmSurface.cpp:11644,14877; source/SMLib/src/SmSurfOfRevolution.cpp (canonical cylinder, real virtual iso curves)",
+      "inputs": {
+        "op": 0,
+        "analytic_plane": false,
+        "net": [
+          [
+            0.0,
+            0.0,
+            0.0
+          ],
+          [
+            0.0,
+            0.5,
+            0.0
+          ],
+          [
+            0.0,
+            1.0,
+            0.0
+          ],
+          [
+            0.5,
+            0.0,
+            0.0
+          ],
+          [
+            0.5,
+            0.5,
+            0.0
+          ],
+          [
+            0.5,
+            1.0,
+            0.0
+          ],
+          [
+            1.0,
+            0.0,
+            0.0
+          ],
+          [
+            1.0,
+            0.5,
+            0.0
+          ],
+          [
+            1.0,
+            1.0,
+            0.0
+          ]
+        ],
+        "domain": [
+          0,
+          0,
+          1,
+          1
+        ],
+        "direction": 1,
+        "controls": [
+          0.02,
+          15,
+          -0.5
+        ],
+        "diagonals": false,
+        "analytic_revolution": true
+      }
+    },
+    {
+      "name": "analytic_revolution_splits_1_0_3_no_diagonals",
+      "upstream_ref": "source/SMLib/src/SmSurface.cpp:11644,14877; source/SMLib/src/SmSurfOfRevolution.cpp (canonical cylinder, real virtual iso curves)",
+      "inputs": {
+        "op": 0,
+        "analytic_plane": false,
+        "net": [
+          [
+            0.0,
+            0.0,
+            0.0
+          ],
+          [
+            0.0,
+            0.5,
+            0.0
+          ],
+          [
+            0.0,
+            1.0,
+            0.0
+          ],
+          [
+            0.5,
+            0.0,
+            0.0
+          ],
+          [
+            0.5,
+            0.5,
+            0.0
+          ],
+          [
+            0.5,
+            1.0,
+            0.0
+          ],
+          [
+            1.0,
+            0.0,
+            0.0
+          ],
+          [
+            1.0,
+            0.5,
+            0.0
+          ],
+          [
+            1.0,
+            1.0,
+            0.0
+          ]
+        ],
+        "domain": [
+          0,
+          0,
+          1,
+          1
+        ],
+        "direction": 1,
+        "controls": [
+          0,
+          15,
+          -0.5
+        ],
+        "diagonals": false,
+        "analytic_revolution": true
+      }
+    },
+    {
+      "name": "analytic_revolution_splits_1_1_0_no_diagonals",
+      "upstream_ref": "source/SMLib/src/SmSurface.cpp:11644,14877; source/SMLib/src/SmSurfOfRevolution.cpp (canonical cylinder, real virtual iso curves)",
+      "inputs": {
+        "op": 0,
+        "analytic_plane": false,
+        "net": [
+          [
+            0.0,
+            0.0,
+            0.0
+          ],
+          [
+            0.0,
+            0.5,
+            0.0
+          ],
+          [
+            0.0,
+            1.0,
+            0.0
+          ],
+          [
+            0.5,
+            0.0,
+            0.0
+          ],
+          [
+            0.5,
+            0.5,
+            0.0
+          ],
+          [
+            0.5,
+            1.0,
+            0.0
+          ],
+          [
+            1.0,
+            0.0,
+            0.0
+          ],
+          [
+            1.0,
+            0.5,
+            0.0
+          ],
+          [
+            1.0,
+            1.0,
+            0.0
+          ]
+        ],
+        "domain": [
+          0.2,
+          0.1,
+          0.85,
+          0.9
+        ],
+        "direction": 1,
+        "controls": [
+          0.02,
+          15,
+          0
+        ],
+        "diagonals": false,
+        "analytic_revolution": true
+      }
+    },
+    {
+      "name": "analytic_revolution_splits_1_1_1_no_diagonals",
+      "upstream_ref": "source/SMLib/src/SmSurface.cpp:11644,14877; source/SMLib/src/SmSurfOfRevolution.cpp (canonical cylinder, real virtual iso curves)",
+      "inputs": {
+        "op": 0,
+        "analytic_plane": false,
+        "net": [
+          [
+            0.0,
+            0.0,
+            0.0
+          ],
+          [
+            0.0,
+            0.5,
+            0.0
+          ],
+          [
+            0.0,
+            1.0,
+            0.0
+          ],
+          [
+            0.5,
+            0.0,
+            0.0
+          ],
+          [
+            0.5,
+            0.5,
+            0.0
+          ],
+          [
+            0.5,
+            1.0,
+            0.0
+          ],
+          [
+            1.0,
+            0.0,
+            0.0
+          ],
+          [
+            1.0,
+            0.5,
+            0.0
+          ],
+          [
+            1.0,
+            1.0,
+            0.0
+          ]
+        ],
+        "domain": [
+          0.2,
+          0.1,
+          0.85,
+          0.9
+        ],
+        "direction": 1,
+        "controls": [
+          0.02,
+          15,
+          0.5
+        ],
+        "diagonals": false,
+        "analytic_revolution": true
+      }
+    },
+    {
+      "name": "analytic_revolution_splits_1_1_2_no_diagonals",
+      "upstream_ref": "source/SMLib/src/SmSurface.cpp:11644,14877; source/SMLib/src/SmSurfOfRevolution.cpp (canonical cylinder, real virtual iso curves)",
+      "inputs": {
+        "op": 0,
+        "analytic_plane": false,
+        "net": [
+          [
+            0.0,
+            0.0,
+            0.0
+          ],
+          [
+            0.0,
+            0.5,
+            0.0
+          ],
+          [
+            0.0,
+            1.0,
+            0.0
+          ],
+          [
+            0.5,
+            0.0,
+            0.0
+          ],
+          [
+            0.5,
+            0.5,
+            0.0
+          ],
+          [
+            0.5,
+            1.0,
+            0.0
+          ],
+          [
+            1.0,
+            0.0,
+            0.0
+          ],
+          [
+            1.0,
+            0.5,
+            0.0
+          ],
+          [
+            1.0,
+            1.0,
+            0.0
+          ]
+        ],
+        "domain": [
+          0.2,
+          0.1,
+          0.85,
+          0.9
+        ],
+        "direction": 1,
+        "controls": [
+          0.02,
+          15,
+          -0.5
+        ],
+        "diagonals": false,
+        "analytic_revolution": true
+      }
+    },
+    {
+      "name": "analytic_revolution_splits_1_1_3_no_diagonals",
+      "upstream_ref": "source/SMLib/src/SmSurface.cpp:11644,14877; source/SMLib/src/SmSurfOfRevolution.cpp (canonical cylinder, real virtual iso curves)",
+      "inputs": {
+        "op": 0,
+        "analytic_plane": false,
+        "net": [
+          [
+            0.0,
+            0.0,
+            0.0
+          ],
+          [
+            0.0,
+            0.5,
+            0.0
+          ],
+          [
+            0.0,
+            1.0,
+            0.0
+          ],
+          [
+            0.5,
+            0.0,
+            0.0
+          ],
+          [
+            0.5,
+            0.5,
+            0.0
+          ],
+          [
+            0.5,
+            1.0,
+            0.0
+          ],
+          [
+            1.0,
+            0.0,
+            0.0
+          ],
+          [
+            1.0,
+            0.5,
+            0.0
+          ],
+          [
+            1.0,
+            1.0,
+            0.0
+          ]
+        ],
+        "domain": [
+          0.2,
+          0.1,
+          0.85,
+          0.9
+        ],
+        "direction": 1,
+        "controls": [
+          0,
+          15,
+          -0.5
+        ],
+        "diagonals": false,
+        "analytic_revolution": true
+      }
+    }
+  ]
+}

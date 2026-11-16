@@ -1,0 +1,268 @@
+{
+ "cases": [
+  {
+   "name": "ssi_near_coincident_end_plus_interior_0",
+   "upstream_ref": "source/SMLib/src/SmGeomUtility.cpp (smgu_SegmentSegmentIntersect: one end point found, interior point kept as second point) (coverage: geom/geom_utility/p2.rs:661)",
+   "inputs": {
+    "op": "segment_segment_intersect",
+    "x": [
+     0,
+     0,
+     0,
+     10,
+     0,
+     0,
+     2.0,
+     0.0,
+     0.005,
+     10,
+     0.08,
+     -0.395,
+     0.01
+    ]
+   }
+  },
+  {
+   "name": "ssi_near_coincident_end_plus_interior_0_swapped",
+   "upstream_ref": "source/SMLib/src/SmGeomUtility.cpp (smgu_SegmentSegmentIntersect: one end point found, interior point kept as second point) (coverage: geom/geom_utility/p2.rs:661)",
+   "inputs": {
+    "op": "segment_segment_intersect",
+    "x": [
+     2.0,
+     0.0,
+     0.005,
+     10,
+     0.08,
+     -0.395,
+     0,
+     0,
+     0,
+     10,
+     0,
+     0,
+     0.01
+    ]
+   }
+  },
+  {
+   "name": "ssi_near_coincident_end_plus_interior_1",
+   "upstream_ref": "source/SMLib/src/SmGeomUtility.cpp (smgu_SegmentSegmentIntersect: one end point found, interior point kept as second point) (coverage: geom/geom_utility/p2.rs:661)",
+   "inputs": {
+    "op": "segment_segment_intersect",
+    "x": [
+     0,
+     0,
+     0,
+     10,
+     0,
+     0,
+     2.0,
+     0.0,
+     0.004,
+     10,
+     0.16,
+     -0.636,
+     0.01
+    ]
+   }
+  },
+  {
+   "name": "ssi_near_coincident_end_plus_interior_1_swapped",
+   "upstream_ref": "source/SMLib/src/SmGeomUtility.cpp (smgu_SegmentSegmentIntersect: one end point found, interior point kept as second point) (coverage: geom/geom_utility/p2.rs:661)",
+   "inputs": {
+    "op": "segment_segment_intersect",
+    "x": [
+     2.0,
+     0.0,
+     0.004,
+     10,
+     0.16,
+     -0.636,
+     0,
+     0,
+     0,
+     10,
+     0,
+     0,
+     0.01
+    ]
+   }
+  },
+  {
+   "name": "ssi_near_coincident_end_plus_interior_2",
+   "upstream_ref": "source/SMLib/src/SmGeomUtility.cpp (smgu_SegmentSegmentIntersect: one end point found, interior point kept as second point) (coverage: geom/geom_utility/p2.rs:661)",
+   "inputs": {
+    "op": "segment_segment_intersect",
+    "x": [
+     0,
+     0,
+     0,
+     10,
+     0,
+     0,
+     2.0,
+     0.0,
+     0.006,
+     10,
+     0.064,
+     -0.314,
+     0.01
+    ]
+   }
+  },
+  {
+   "name": "ssi_near_coincident_end_plus_interior_2_swapped",
+   "upstream_ref": "source/SMLib/src/SmGeomUtility.cpp (smgu_SegmentSegmentIntersect: one end point found, interior point kept as second point) (coverage: geom/geom_utility/p2.rs:661)",
+   "inputs": {
+    "op": "segment_segment_intersect",
+    "x": [
+     2.0,
+     0.0,
+     0.006,
+     10,
+     0.064,
+     -0.314,
+     0,
+     0,
+     0,
+     10,
+     0,
+     0,
+     0.01
+    ]
+   }
+  },
+  {
+   "name": "ssi_near_coincident_end_plus_interior_3",
+   "upstream_ref": "source/SMLib/src/SmGeomUtility.cpp (smgu_SegmentSegmentIntersect: one end point found, interior point kept as second point) (coverage: geom/geom_utility/p2.rs:661)",
+   "inputs": {
+    "op": "segment_segment_intersect",
+    "x": [
+     0,
+     0,
+     0,
+     10,
+     0,
+     0,
+     2.0,
+     0.0,
+     0.005,
+     10,
+     0.08,
+     -0.395,
+     0.02
+    ]
+   }
+  },
+  {
+   "name": "ssi_near_coincident_end_plus_interior_3_swapped",
+   "upstream_ref": "source/SMLib/src/SmGeomUtility.cpp (smgu_SegmentSegmentIntersect: one end point found, interior point kept as second point) (coverage: geom/geom_utility/p2.rs:661)",
+   "inputs": {
+    "op": "segment_segment_intersect",
+    "x": [
+     2.0,
+     0.0,
+     0.005,
+     10,
+     0.08,
+     -0.395,
+     0,
+     0,
+     0,
+     10,
+     0,
+     0,
+     0.02
+    ]
+   }
+  },
+  {
+   "name": "ssi_near_coincident_end_plus_interior_4",
+   "upstream_ref": "source/SMLib/src/SmGeomUtility.cpp (smgu_SegmentSegmentIntersect: one end point found, interior point kept as second point) (coverage: geom/geom_utility/p2.rs:661)",
+   "inputs": {
+    "op": "segment_segment_intersect",
+    "x": [
+     0,
+     0,
+     0,
+     10,
+     0,
+     0,
+     2.0,
+     0.0,
+     0.002,
+     10,
+     0.024,
+     -0.158,
+     0.005
+    ]
+   }
+  },
+  {
+   "name": "ssi_near_coincident_end_plus_interior_4_swapped",
+   "upstream_ref": "source/SMLib/src/SmGeomUtility.cpp (smgu_SegmentSegmentIntersect: one end point found, interior point kept as second point) (coverage: geom/geom_utility/p2.rs:661)",
+   "inputs": {
+    "op": "segment_segment_intersect",
+    "x": [
+     2.0,
+     0.0,
+     0.002,
+     10,
+     0.024,
+     -0.158,
+     0,
+     0,
+     0,
+     10,
+     0,
+     0,
+     0.005
+    ]
+   }
+  },
+  {
+   "name": "ssi_near_coincident_end_plus_interior_5",
+   "upstream_ref": "source/SMLib/src/SmGeomUtility.cpp (smgu_SegmentSegmentIntersect: one end point found, interior point kept as second point) (coverage: geom/geom_utility/p2.rs:661)",
+   "inputs": {
+    "op": "segment_segment_intersect",
+    "x": [
+     0,
+     0,
+     0,
+     10,
+     0,
+     0,
+     2.0,
+     0.0,
+     -0.005,
+     10,
+     0.08,
+     0.395,
+     0.01
+    ]
+   }
+  },
+  {
+   "name": "ssi_near_coincident_end_plus_interior_5_swapped",
+   "upstream_ref": "source/SMLib/src/SmGeomUtility.cpp (smgu_SegmentSegmentIntersect: one end point found, interior point kept as second point) (coverage: geom/geom_utility/p2.rs:661)",
+   "inputs": {
+    "op": "segment_segment_intersect",
+    "x": [
+     2.0,
+     0.0,
+     -0.005,
+     10,
+     0.08,
+     0.395,
+     0,
+     0,
+     0,
+     10,
+     0,
+     0,
+     0.01
+    ]
+   }
+  }
+ ]
+}

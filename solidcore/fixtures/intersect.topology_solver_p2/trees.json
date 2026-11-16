@@ -1,0 +1,162 @@
+{
+  "cases": [
+    {
+      "name": "trees_point_vertices_minimize",
+      "inputs": {
+        "op": "trees",
+        "solver": {
+          "op": 3,
+          "req": 1,
+          "tol": 1e-06,
+          "best": 1e+20
+        },
+        "objects": [
+          {
+            "vertex": {
+              "p": [
+                1,
+                0,
+                0
+              ],
+              "tol": 0.0
+            }
+          },
+          {
+            "vertex": {
+              "p": [
+                0,
+                3,
+                0
+              ],
+              "tol": 0.0
+            }
+          }
+        ],
+        "local": {
+          "kind": 2,
+          "point": [
+            0,
+            0,
+            0
+          ]
+        },
+        "tree1": {
+          "point": {
+            "p": [
+              0,
+              0,
+              0
+            ],
+            "size": 0.0
+          }
+        },
+        "tree2": {
+          "spatial": {
+            "bbox": [
+              -4,
+              -4,
+              -4,
+              4,
+              4,
+              4
+            ],
+            "items": [
+              [
+                0,
+                [
+                  1,
+                  0,
+                  0,
+                  1,
+                  0,
+                  0
+                ]
+              ],
+              [
+                1,
+                [
+                  0,
+                  3,
+                  0,
+                  0,
+                  3,
+                  0
+                ]
+              ]
+            ]
+          }
+        }
+      },
+      "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp:3024 (LocalSolve traversal; reused p1 tree construction)"
+    },
+    {
+      "name": "trees_disjoint_intersect",
+      "inputs": {
+        "op": "trees",
+        "solver": {
+          "op": 0,
+          "req": 1,
+          "tol": 1e-06,
+          "best": 1e+20
+        },
+        "objects": [
+          {
+            "vertex": {
+              "p": [
+                1,
+                0,
+                0
+              ],
+              "tol": 0.0
+            }
+          }
+        ],
+        "local": {
+          "kind": 2,
+          "point": [
+            10,
+            10,
+            10
+          ]
+        },
+        "tree1": {
+          "point": {
+            "p": [
+              10,
+              10,
+              10
+            ],
+            "size": 0.0
+          }
+        },
+        "tree2": {
+          "spatial": {
+            "bbox": [
+              -4,
+              -4,
+              -4,
+              4,
+              4,
+              4
+            ],
+            "items": [
+              [
+                0,
+                [
+                  1,
+                  0,
+                  0,
+                  1,
+                  0,
+                  0
+                ]
+              ]
+            ]
+          }
+        },
+        "two": true
+      },
+      "upstream_ref": "source/SMLib/src/SmTopologySolver.cpp:3024 (LocalSolve traversal; reused p1 tree construction)"
+    }
+  ]
+}

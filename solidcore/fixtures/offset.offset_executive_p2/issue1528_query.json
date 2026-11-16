@@ -1,0 +1,109 @@
+{
+ "coverage": "tangency-labs/solidcore#1528 follow-up: does a volume query on the operand change the shell that follows? Each case shells as issue1528.json does (SmApiShellBrepFull -2, extended convex edges, merged results, open at x = 42.5) and compares SmApiBrepComputeVolume (accuracy 1e-6) through the measured entry point (sc_offset_offset_executive_p2_eval_measured): volume_query result = the result's volume after the call; source_first = also the operand's volume queried before the call (brep_volume on the Rust side), all at the default fixes. issue1528_box_cylinder.smb is the plate as a 42.5 x 20 x 27.5 box joined with a full cylinder r 10 through (0, 10) along z, less the same blind hole (crates/solidcore/tests/issue_1528_write_operand.rs, ignored test write_issue_1528_box_cylinder_operand); its open-face index is the one that test prints.",
+ "cases": [
+  {
+   "name": "issue1528_plate_api_shell_2_volume",
+   "upstream_ref": "tangency-labs/solidcore#1528 (operand: issue_1528_write_operand.rs)",
+   "inputs": {
+    "operation": "api_shell",
+    "source": {
+     "kind": "file",
+     "path": {
+      "$repo_file": "fixtures/offset.offset_executive_p2/data/issue1528_plate.smb"
+     }
+    },
+    "faces": [
+     {
+      "origin": "source",
+      "index": 1
+     }
+    ],
+    "tolerance": 1e-06,
+    "config": {
+     "offset_distance": -2.0,
+     "extend_convex": true,
+     "merge_results": true
+    },
+    "volume_query": "result"
+   }
+  },
+  {
+   "name": "issue1528_plate_api_shell_2_volume_first",
+   "upstream_ref": "tangency-labs/solidcore#1528 (operand: issue_1528_write_operand.rs)",
+   "inputs": {
+    "operation": "api_shell",
+    "source": {
+     "kind": "file",
+     "path": {
+      "$repo_file": "fixtures/offset.offset_executive_p2/data/issue1528_plate.smb"
+     }
+    },
+    "faces": [
+     {
+      "origin": "source",
+      "index": 1
+     }
+    ],
+    "tolerance": 1e-06,
+    "config": {
+     "offset_distance": -2.0,
+     "extend_convex": true,
+     "merge_results": true
+    },
+    "volume_query": "source_first"
+   }
+  },
+  {
+   "name": "issue1528_box_cylinder_api_shell_2_volume",
+   "upstream_ref": "tangency-labs/solidcore#1528 (operand: issue_1528_write_operand.rs, box and cylinder)",
+   "inputs": {
+    "operation": "api_shell",
+    "source": {
+     "kind": "file",
+     "path": {
+      "$repo_file": "fixtures/offset.offset_executive_p2/data/issue1528_box_cylinder.smb"
+     }
+    },
+    "faces": [
+     {
+      "origin": "source",
+      "index": 0
+     }
+    ],
+    "tolerance": 1e-06,
+    "config": {
+     "offset_distance": -2.0,
+     "extend_convex": true,
+     "merge_results": true
+    },
+    "volume_query": "result"
+   }
+  },
+  {
+   "name": "issue1528_box_cylinder_api_shell_2_volume_first",
+   "upstream_ref": "tangency-labs/solidcore#1528 (operand: issue_1528_write_operand.rs, box and cylinder)",
+   "inputs": {
+    "operation": "api_shell",
+    "source": {
+     "kind": "file",
+     "path": {
+      "$repo_file": "fixtures/offset.offset_executive_p2/data/issue1528_box_cylinder.smb"
+     }
+    },
+    "faces": [
+     {
+      "origin": "source",
+      "index": 0
+     }
+    ],
+    "tolerance": 1e-06,
+    "config": {
+     "offset_distance": -2.0,
+     "extend_convex": true,
+     "merge_results": true
+    },
+    "volume_query": "source_first"
+   }
+  }
+ ]
+}

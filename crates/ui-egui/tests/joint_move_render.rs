@@ -8,7 +8,7 @@ use solidcraft_engine::Sel;
 use solidcraft_engine::geom::prelude::*;
 use solidcraft_ui_egui::{
     scenario::{self, Harness},
-    theme, viewport,
+    viewport,
 };
 use std::collections::HashMap;
 
@@ -88,8 +88,8 @@ fn joint_move_has_readable_rotation_and_translation_in_both_themes() {
             h.app.preferences.theme = if dark { "dark" } else { "light" }.into();
             h.ctx = egui::Context::default();
             solidcraft_ui_egui::fonts::setup_fonts(&h.ctx);
-            theme::set_dark(dark);
-            theme::apply(&h.ctx);
+            solidcraft_theme::set_dark(dark);
+            solidcraft_theme::apply(&h.ctx);
             let mut textures = HashMap::new();
             raster::paint(&mut h, &mut textures, vec![]);
             h.app.start("occurrence.move");
@@ -101,7 +101,9 @@ fn joint_move_has_readable_rotation_and_translation_in_both_themes() {
                 .shapes
                 .iter()
                 .filter_map(|s| match &s.shape {
-                    egui::Shape::Path(path) if path.points.len() == 3 && path.fill == theme::Tokens::get().joint_manipulator => Some(&path.points),
+                    egui::Shape::Path(path) if path.points.len() == 3 && path.fill == solidcraft_theme::Tokens::get().joint_manipulator => {
+                        Some(&path.points)
+                    }
                     _ => None,
                 })
                 .collect();
@@ -158,8 +160,8 @@ fn joint_move_zero_degree_warning_is_readable_in_both_themes() {
         h.app.preferences.theme = if dark { "dark" } else { "light" }.into();
         h.ctx = egui::Context::default();
         solidcraft_ui_egui::fonts::setup_fonts(&h.ctx);
-        theme::set_dark(dark);
-        theme::apply(&h.ctx);
+        solidcraft_theme::set_dark(dark);
+        solidcraft_theme::apply(&h.ctx);
         let mut textures = HashMap::new();
         for _ in 0..4 {
             frame(&mut h, &mut textures, vec![]);

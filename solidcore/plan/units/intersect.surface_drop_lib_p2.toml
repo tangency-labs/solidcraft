@@ -1,0 +1,12 @@
+id = "intersect.surface_drop_lib_p2"
+upstream = ["source/SMLib/src/SmSurfaceDropLib.cpp"]
+rust_module = "intersect::surface_drop_lib::p2"
+depends_on = ["geom.extent1d", "geom.extent2d", "geom.geom_utility_p1", "geom.solution_array", "geom.tol", "geom.vector2d", "geom.vector3d", "intersect.surface_drop_lib_p1", "surface.surface_p1", "surface.surface_p5", "surface.surface_p7"]
+soft_depends_on = ["curve.curve_p2", "geom.object", "nurbs.b_spline_curve_p1", "surface.offset_surface", "surface.surface_p3", "surface.surface_p4"]
+est_lines = 1080
+layer = 32
+tests = ["prog_test:my_test_surface_closest_point", "prog_test:my_test_drop_point", "prog_test:my_test_matrix", "prog_test:my_test_reversed_line_join", "SM_API_test:TestSmCreateRectangle", "SM_API_test:TestSmCreateRegularPolygon"]
+status = "green"
+claimed_by = ""
+claimed_at = ""
+notes = "4 fns; largest: SmDropPt::SetProperties, SmDropPt::GetNextPoint, sm_AddToCurve, sm_FlushCrv; unit-SCC #22 (220 units); 317 upstream test entry points reach this unit; PARTIAL (PR #112): difftest 1531 cases (31 fixture cases on the shapes of TestSmCreateRectangle, my_test_reversed_line_join, my_test_drop_point and the smTopoTest cylinder, 1500 generated: SetProperties, GetNextPoint, sm_AddToCurve runs incl. 10000-point chains, sm_FlushCrv on planes, B-splines and surfaces of revolution), 1103 passed, 428 deferred: surface.surface_p5(260: SmSurface::LocalPointSolve, IsSingularity), surface.offset_surface(120: SmOffsetSurface::Evaluate via DropVectors/EvaluateDirectionalDerivs), surface.surface_p3(48: SmSurface::EvaluateGeometric); max_rel_err 0; DropCurve's SmOffsetSurface is intersect::surface_drop_lib::p2::DropOffset (offset distance + singularities over the drop surface) Re-run after merging PR #106 (surface.surface_point_solve_p3 wired, 2026-10-15): 1531 cases, 1304 pass, 227 deferred (surface.offset_surface 227), 0 failed, max_rel_err 0. Wired in the PR #106 merge: UNPORTED(surface.surface_p5) IsSingularity (both overloads) and LocalPointSolve (SER, caller kernel; sm_AddToCurve takes the kernel in place of crContext), UNPORTED(surface.surface_p3) EvaluateGeometric (status ignored, curvatures 0.0 on failure); the difftest builds planes with their NURB made on both sides (plan/findings.md). GREEN after PR #62 (surface.offset_surface, 2026-10-16): 1531 cases, 1531 pass, 0 failed, 0 deferred, max_rel_err 0; DropOffset builds the ported SmOffsetSurface over the drop surface, whose copy keeps that surface's owner as upstream's shared base does."
