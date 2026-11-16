@@ -222,7 +222,7 @@ pub fn plan(
         Some(c) => c,
         None => {
             found = closed_edges(field, plate);
-            &found
+            found.as_slice()
         }
     };
     let b = frame_box(field);
