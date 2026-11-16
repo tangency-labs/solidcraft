@@ -2711,9 +2711,10 @@ impl Surface {
     /// the profile and also proves the profile keeps off the axis and bends to one side).
     /// `k` is the profile's curvature vector (`profile_curvature`, from the
     /// generatrix-direction iso-curve) and `N` the surface normal, both at the middle of
-    /// the natural UV domain: only the side is read there. A zero offset (the surface
-    /// itself, checked first), a failed arc test or evaluation, a generatrix point proved
-    /// off the circle, or a pole there, is `false`.
+    /// the natural UV domain, or a quarter or three quarters along the generatrix where the
+    /// middle is within `tol` of the axis: only the side is read there. A zero offset (the
+    /// surface itself, checked first), a failed arc test or evaluation, a generatrix point
+    /// proved off the circle, or a pole at the middle, is `false`.
     ///
     /// # Errors
     ///
@@ -2765,26 +2766,64 @@ impl Surface {
         }
 
         // the profile's curvature, from the generatrix direction's iso-curve at the middle
-        // of the domain
-        let uv = self.natural_uv_domain_with_nurb(k)?.mid();
-        let Some([point, du, dv, _, duu, dvv]) =
-            ignored_surface_result(self.evaluate_2nd_derivatives(k, uv, true, true))?
-        else {
-            return Ok(false);
+        // of the domain; where the middle is within `tol` of the axis (a horn torus's touch:
+        // no side to read there), at a quarter or three quarters along the generatrix. The
+        // certificate below proves the side the same everywhere, so any point off the axis
+        // reads it. At the middle a failed evaluation or a pole is `false` (as before);
+        // at the other two points it reads nothing, and with nothing read the side is
+        // refused below.
+        let domain = self.natural_uv_domain_with_nurb(k)?;
+        let mid = domain.mid();
+        let along_generatrix = |f: f64| {
+            if s.swap_uv() {
+                let i = domain.u_interval();
+                Point2::new(i.min() + (i.max() - i.min()) * f, mid.y)
+            } else {
+                let i = domain.v_interval();
+                Point2::new(mid.x, i.min() + (i.max() - i.min()) * f)
+            }
         };
-        let Some(normal) =
-            ignored_surface_result(self.evaluate_normal(k, uv, side(true), side(true)))?
-        else {
-            return Ok(false);
-        };
-        let (d1, d2) = if s.swap_uv() { (du, duu) } else { (dv, dvv) };
-        let speed_sq = d1.length_squared();
-        if speed_sq < EFF_ZERO_SQ {
-            // at a pole: no generatrix tangent to measure
-            return Ok(false);
-        }
         let axis = s.position();
-        let curvature = profile_curvature(axis.origin(), axis.z_axis(), point, d1, d2);
+        let nan = Vec3::new(f64::NAN, f64::NAN, f64::NAN);
+        let finite = |v: Vec3| v.x.is_finite() && v.y.is_finite() && v.z.is_finite();
+        let (mut normal, mut curvature) = (nan, nan);
+        for (i, uv) in [mid, along_generatrix(0.25), along_generatrix(0.75)]
+            .into_iter()
+            .enumerate()
+        {
+            let first = i == 0;
+            let Some([point, du, dv, _, duu, dvv]) =
+                ignored_surface_result(self.evaluate_2nd_derivatives(k, uv, true, true))?
+            else {
+                if first {
+                    return Ok(false);
+                }
+                continue;
+            };
+            let (d1, d2) = if s.swap_uv() { (du, duu) } else { (dv, dvv) };
+            if d1.length_squared() < EFF_ZERO_SQ {
+                // at a pole: no generatrix tangent to measure
+                if first {
+                    return Ok(false);
+                }
+                continue;
+            }
+            let kappa = profile_curvature(axis.origin(), axis.z_axis(), point, d1, d2, tol);
+            if !finite(kappa) {
+                // within `tol` of the axis: no side to read here
+                continue;
+            }
+            let Some(n) =
+                ignored_surface_result(self.evaluate_normal(k, uv, side(true), side(true)))?
+            else {
+                if first {
+                    return Ok(false);
+                }
+                continue;
+            };
+            (normal, curvature) = (n, kappa);
+            break;
+        }
 
         // N . k r is +1 where the normal points at the profile's centre of curvature, -1
         // away from it: only its sign is taken from this one point, which side of the
@@ -4858,9 +4897,17 @@ fn is_exact_circle(gen: &Curve) -> bool {
 /// part `R = Y - a z` and `rho = |R|`: `rho' = e . d1` (`e = R / rho`), `rho'' = (R . d2 +
 /// |d1 - a z'|^2 - rho'^2) / rho`, `z' = a . d1`, `z'' = a . d2`, and the plane curve
 /// `(rho, z)`'s curvature vector mapped back along `e` and `a`. For a generatrix in a
-/// plane through the axis it is the generatrix's own. All NaN on the axis, for a zero
-/// tangent, or where the foot cannot be found: the caller refuses a NaN side.
-fn profile_curvature(axis_point: Point3, axis: Vec3, point: Point3, d1: Vec3, d2: Vec3) -> Vec3 {
+/// plane through the axis it is the generatrix's own. All NaN within `tol` of the axis
+/// (`rho <= tol`: no side to read there), for a zero tangent, or where the foot cannot be
+/// found: the caller reads elsewhere, or refuses a NaN side.
+fn profile_curvature(
+    axis_point: Point3,
+    axis: Vec3,
+    point: Point3,
+    d1: Vec3,
+    d2: Vec3,
+    tol: f64,
+) -> Vec3 {
     let nan = Vec3::new(f64::NAN, f64::NAN, f64::NAN);
     let a = axis / axis.length();
     let Some((foot, _)) = axis_foot(axis_point, axis, point) else {
@@ -4870,7 +4917,7 @@ fn profile_curvature(axis_point: Point3, axis: Vec3, point: Point3, d1: Vec3, d2
     let radial = y - a * a.dot(y);
     let rho = radial.length();
     #[allow(clippy::neg_cmp_op_on_partial_ord)] // refuses NaN too
-    if !(rho > 0.0) {
+    if !(rho > tol && rho > 0.0) {
         return nan;
     }
     let e = radial / rho;

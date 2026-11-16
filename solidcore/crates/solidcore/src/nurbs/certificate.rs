@@ -884,7 +884,8 @@ pub enum Collapse {
     /// is at least the tolerance: no point's offset reaches its centre of curvature.
     Nowhere,
     /// Neither: the profile is not proved to bend to one side all along, or the generatrix
-    /// to keep to one side of the axis (it crosses or touches it inside), its radius of
+    /// to keep to one side of the axis (it crosses it, comes more than the tolerance past
+    /// it at an end, or touches it inside other than where a piece ends), its radius of
     /// curvature comes to the offset plus the tolerance (or crosses it), or the bounds do
     /// not settle within [`MAX_COLLAPSE_HALVINGS`] and [`MAX_COLLAPSE_PIECES`].
     Unproved,
@@ -956,9 +957,17 @@ pub fn axis_foot(axis_point: Point3, axis: Vec3, near: Point3) -> Option<(Point3
 /// control point farthest from it, normal `m`, `G = m . (X - foot) W` with no coefficient
 /// above its rounding and the plane's tilt times the span's reach along the axis, as
 /// [`on_circle`]'s plane test) is its own profile, to the rounding the test can show. Its
-/// signed radial coordinate `x = (a x m) . (X - foot)` must keep one strict sign on every
-/// piece (Bernstein coefficients beyond their error), except a coefficient at an end of
-/// the generatrix within its error (a pole: the generatrix ends on the axis); with
+/// signed radial coordinate `x = (a x m) . (X - foot)` must keep one sign on every piece
+/// ([`one_sign`]: some Bernstein coefficient beyond its error with that sign, none beyond it
+/// with the other). **PROVEN:** then `x` keeps that sign along the whole generatrix to
+/// rounding, and within `tol` of the axis at an end of the generatrix: for a positive sign,
+/// `x >= -2 e / w` away from the ends and `x >= -max(tol, 2 e / w)` everywhere (`e` the
+/// coefficients' error, `w` the weight's lower bound; [`one_sign`], `meridian_piece`). So the generatrix may end on the axis (a pole) or up to `tol` past it (a pole
+/// snapped with noise, decided to the tolerance), and may touch the axis inside only where a
+/// piece ends with a zero (a horn torus, whose touch is a knot or a halving point; an
+/// interior touch elsewhere leaves a coefficient of the other sign and is refused). Where
+/// `x` keeps its sign the normal `N ~ x (x' a - z' e)` keeps its side of the profile; past a
+/// tangential touch it does not change. With
 /// `A = W H' - W' H` (so `X' = A / W^2`) and `B = (A x A') . m` the curvature is
 /// `B W^2 / |A|^3`, `rho = |A|^3 / (W^2 |B|)`; `B` keeps one strict sign, and
 /// `rho < q` (`q = along + tol > 0`) exactly where `(A . A)^3 - q^2 W^4 B^2 < 0` (degree
@@ -1039,7 +1048,7 @@ pub fn meridian_collapse(
             return Ok(Collapse::Unproved);
         }
         return collapse_pieces(k, &spans, |h, e, ends| {
-            meridian_piece(h, e, ends, &plane, q, &bi)
+            meridian_piece(h, e, ends, &plane, q, tol, &bi)
         });
     }
     if 18 * nurb.degree() > MAX_DEGREE + 6 {
@@ -1218,22 +1227,38 @@ enum PieceCollapse {
     Unbounded,
 }
 
-/// The sign `p` keeps beyond `err` on its piece (`true` positive), a coefficient at an end
-/// of the generatrix (`ends`: the piece starts it, ends it) allowed within `err` of zero;
-/// `None` if no coefficient is beyond `err` or two have opposite signs (NaN included).
-fn one_sign(p: &Bernstein2, err: f64, ends: [bool; 2]) -> Option<bool> {
+/// The sign `p` keeps on its piece (`true` positive): some coefficient beyond `err` of zero
+/// with that sign, none beyond `err` with the other, except a coefficient at an end of the
+/// generatrix (`ends`: the piece starts it, ends it), which may be within `end_allow`
+/// (at least `err`) of zero on either side. `None` if no coefficient is beyond `err`, two
+/// beyond it have opposite signs, or one is NaN.
+///
+/// **PROVEN (the bound it gives, for a positive answer; a negative one is its mirror).**
+/// Each true coefficient is within `err` of the computed one, so it is at least `-2 err`, or
+/// `-(end_allow + err)` at an end of the generatrix. The Bernstein basis is non-negative and
+/// sums to one, so on the piece `p >= -2 err (1 - B_end) - (end_allow + err) B_end >=
+/// -max(2 err, end_allow + err)`, `B_end` the end coefficients' basis functions summed.
+fn one_sign(p: &Bernstein2, err: f64, ends: [bool; 2], end_allow: f64) -> Option<bool> {
     let c = p.coefficients();
     let last = c.len().saturating_sub(1);
     let mut sign: Option<bool> = None;
     for (i, &x) in c.iter().enumerate() {
         let at_end = (i == 0 && ends[0]) || (i == last && ends[1]);
+        // at an end of the generatrix, a zero within the end's allowance signs nothing (a
+        // pole, to the tolerance)
+        if at_end && x.abs() <= end_allow.max(err) {
+            continue;
+        }
         let s = if x > err {
             true
         } else if x < -err {
             false
-        } else if at_end && x.abs() <= err {
+        } else if x.abs() <= err {
+            // a zero within rounding signs nothing (the generatrix touching the axis where
+            // a piece ends, as a horn torus's)
             continue;
         } else {
+            // NaN
             return None;
         };
         if sign.is_some_and(|t| t != s) {
@@ -1253,6 +1278,7 @@ fn meridian_piece(
     ends: [bool; 2],
     plane: &Meridian,
     q: f64,
+    tol: f64,
     bi: &Binomials,
 ) -> Result<PieceCollapse> {
     let [hx, hy, hz, hw] = h;
@@ -1277,7 +1303,18 @@ fn meridian_piece(
     if !ex.is_finite() {
         return Ok(PieceCollapse::Unbounded);
     }
-    let Some(outside) = one_sign(&x, ex, ends) else {
+    // At an end of the generatrix the radial coordinate may come up to `tol` past the axis
+    // (a pole snapped to the axis, to the tolerance; solidcraft#18018's second review):
+    // `w_lo` bounds the true weight below on the piece, so a true end coefficient
+    // `>= -(end_allow + ex) >= -tol w_lo` bounds `x / W >= -tol` there ([`one_sign`]). The
+    // rounding of `end_allow` (at most four roundings up) is charged by the `1 - gamma_4`.
+    let w_lo = hw.min_coefficient() - e;
+    let end_allow = if w_lo > 0.0 {
+        tol * w_lo * (1.0 - gamma(4)) - ex
+    } else {
+        ex
+    };
+    let Some(outside) = one_sign(&x, ex, ends, end_allow) else {
         return Ok(PieceCollapse::Halve);
     };
     Ok(match collapse_piece(h, e, plane.m, q, bi)? {

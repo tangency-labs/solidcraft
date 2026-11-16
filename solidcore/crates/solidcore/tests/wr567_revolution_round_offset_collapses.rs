@@ -589,3 +589,71 @@ fn wr567_a_circle_with_no_side_is_refused() {
         );
     }
 }
+
+/// The circle r 1 about `(cx, 0, 0)` in the XZ plane, from `from` to `to` degrees.
+fn xz_arc(k: &Kernel, cx: f64, from: f64, to: f64) -> Curve {
+    Curve::from(
+        Ellipse::new_circle(
+            k,
+            Point3::new(cx, 0.0, 0.0),
+            Vec3::new(1.0, 0.0, 0.0),
+            Vec3::new(0.0, 0.0, 1.0),
+            Extent1d::from_min_max(from, to),
+            1.0,
+            &EllipseOptions::default(),
+        )
+        .unwrap(),
+    )
+}
+
+/// solidcraft#18018's second review (R1): the arc of
+/// [`wr567_a_generatrix_crossing_the_axis_is_refused`] from 90 degrees to just past the Z
+/// axis (120 degrees and `1e-9` or `1e-6` more: its end `1.5e-11` or `1.5e-8` past the axis, a
+/// pole snapped to the axis with import noise). The part past the axis is within the
+/// tolerance `1e-7` of it, so the generatrix keeps to its side of the axis to the tolerance
+/// and its offset is decided as main decides it: `-3` collapses, `3` and `+-0.5` do not.
+/// Allowing only the rounding past the axis refused all four. An end `1.5e-6` past the axis
+/// (past the tolerance) is still refused.
+#[test]
+fn wr567_an_arc_ending_past_the_axis_within_the_tolerance_is_decided() {
+    let k = Kernel::default();
+    for past in [1e-9, 1e-6] {
+        let gen = xz_arc(&k, 0.5, 90.0, 120.0 + past);
+        let end = gen.evaluate_point(&k, 120.0 + past).unwrap();
+        assert!(end.x < 0.0 && end.x > -1e-7, "{past}: {end:?}");
+        let s = revolved(&k, gen);
+        assert!(s.offset_collapses(&k, -3.0, 1e-7).unwrap(), "{past}");
+        assert!(s.create_offset_surface(&k, -3.0, 1e-7).unwrap().is_none());
+        for d in [3.0, 0.5, -0.5] {
+            assert!(!s.offset_collapses(&k, d, 1e-7).unwrap(), "{past}: {d}");
+        }
+    }
+    let gen = xz_arc(&k, 0.5, 90.0, 120.0 + 1e-4);
+    assert!(gen.evaluate_point(&k, 120.0 + 1e-4).unwrap().x < -1e-6);
+    let s = revolved(&k, gen);
+    for d in [-3.0, 3.0, 0.5, -0.5] {
+        let r = s.offset_collapses(&k, d, 1e-7);
+        assert!(
+            matches!(r, Err(SolidError::Unsupported { .. })),
+            "{d}: {r:?}"
+        );
+    }
+}
+
+/// solidcraft#18018's second review (R1): the horn torus, the full circle r 1 about
+/// (1, 0, 0) in the XZ plane turned about Z. It touches the axis at 180 degrees (its tangent
+/// along the axis there) and keeps to one side of it everywhere else, so its normal does not
+/// flip, and every centre of curvature is the circle's centre: the offset by 2 towards the
+/// centres collapses, the one by 2 away and `+-0.5` do not (as main decides it). The middle of
+/// the generatrix, where the side was read, is the point on the axis: the side is read
+/// where the generatrix keeps off the axis.
+#[test]
+fn wr567_a_horn_torus_is_decided() {
+    let k = Kernel::default();
+    let s = revolved(&k, xz_arc(&k, 1.0, 0.0, 360.0));
+    assert!(s.offset_collapses(&k, -2.0, 1e-7).unwrap());
+    assert!(s.create_offset_surface(&k, -2.0, 1e-7).unwrap().is_none());
+    for d in [2.0, 0.5, -0.5] {
+        assert!(!s.offset_collapses(&k, d, 1e-7).unwrap(), "{d}");
+    }
+}
