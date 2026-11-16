@@ -14,5 +14,6 @@
     {"click": {"world": [40, 0, 0]}},
     {"expect": {"dialog": "square_to_line"}},
     {"widget": "OK"},
-    {"expect": {"errors": 0, "features": 2}}
+    {"expect": {"errors": 0, "features": 2}},
+    {"shot": "square-to-line-made"}
 ]
