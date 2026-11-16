@@ -55,6 +55,8 @@ fn same(a: &mut Session, b: &mut Session) {
     assert_eq!(a.doc.occurrences, b.doc.occurrences, "occurrences");
     assert_eq!(a.doc.assembly.origins, b.doc.assembly.origins, "named joint origins");
     assert_eq!(a.doc.assembly.links, b.doc.assembly.links, "motion links");
+    assert_eq!(a.doc.parts, b.doc.parts, "standard parts");
+    assert_eq!(a.doc.links, b.doc.links, "linked designs");
 }
 
 fn commands(script: &Value) -> Vec<&str> {
@@ -695,4 +697,88 @@ fn a_joint_made_as_an_assembly_constraint_is_refused() {
     );
     let e = s.execute("timeline.export_script", &json!({})).unwrap_err().to_string();
     assert!(e.contains("assembly constraint"), "{e}");
+}
+
+/// A standard part replays through parts.insert at its own ids: the library
+/// rebuilds its features, its seat joint travels through the joint pass (not
+/// as picks), and the part properties the design edited come back.
+#[test]
+fn a_standard_part_replays_with_its_seat_joint() {
+    let mut s = Session::default();
+    run(&mut s, "component.create", json!({"name": "Base", "grounded": true, "activate": true}));
+    run(&mut s, "solid.box", json!({"length": 40, "width": 40, "height": 5, "body_name": "Plate"}));
+    run(&mut s, "component.activate", json!({"component": "root"}));
+    run(&mut s, "parts.insert", json!({"family": "socket_head_cap_screw", "size": "M6", "length": 20, "at": [10, 10, 5]}));
+    run(&mut s, "component.metadata.set", json!({"component": "SHCS M6x20", "description": "cover screw"}));
+
+    let script = script(&mut s);
+    let steps = commands(&script);
+    assert!(steps.contains(&"parts.insert"), "{steps:?}");
+    assert!(steps.contains(&"joint.create"), "{steps:?}");
+    let insert = script["commands"].as_array().unwrap().iter().find(|c| c["command"] == "parts.insert").unwrap();
+    assert_eq!(insert["params"]["family"], "socket_head_cap_screw", "{insert}");
+    assert_eq!(insert["params"]["size"], "M6", "{insert}");
+    assert_eq!(insert["params"]["name"], "SHCS M6x20", "{insert}");
+    assert!(insert["params"].get("at").is_none(), "the seat joint travels through the joint pass, not as picks: {insert}");
+    let mut t = replay(&script);
+    same(&mut s, &mut t);
+}
+
+/// A standard part whose builder output someone changed is refused with its
+/// own message per kind of change: the replay would silently replace the
+/// changes with the library's.
+#[test]
+fn a_changed_standard_part_is_refused() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 40, "width": 40, "height": 5, "body_name": "Plate"}));
+    run(&mut s, "parts.insert", json!({"family": "socket_head_cap_screw", "size": "M6", "length": 20, "at": [10, 10, 5]}));
+    let comp = s.doc.components.iter().find(|c| c.name.starts_with("SHCS")).unwrap().id;
+    let built: Vec<u64> = s.doc.features.iter().filter(|f| f.component == comp).map(|f| f.id).collect();
+    assert!(built.len() >= 2, "{built:?}");
+    let target = *built.last().unwrap();
+    let name = s.doc.feature(target).unwrap().name.clone();
+
+    // Hand-edited: a renamed builder feature comes back under the library's name.
+    s.doc_mut().feature_mut(target).unwrap().name = "Renamed".to_string();
+    let e = s.execute("timeline.export_script", &json!({})).unwrap_err().to_string();
+    assert!(e.contains("hand-edited"), "{e}");
+    s.doc_mut().feature_mut(target).unwrap().name = name.clone();
+
+    // Suppressed.
+    run(&mut s, "timeline.suppress", json!({"feature": name, "suppressed": true}));
+    let e = s.execute("timeline.export_script", &json!({})).unwrap_err().to_string();
+    assert!(e.contains("suppressed"), "{e}");
+    run(&mut s, "timeline.suppress", json!({"feature": name, "suppressed": false}));
+
+    // Deleted.
+    run(&mut s, "timeline.delete", json!({"features": [name]}));
+    let e = s.execute("timeline.export_script", &json!({})).unwrap_err().to_string();
+    assert!(e.contains("deleted"), "{e}");
+}
+
+/// A linked design replays through component.insert_design: the constructor
+/// reads the file again and rebuilds the Import feature, the report says the
+/// file must be present at replay, and the design copies the link again like
+/// any component.
+#[test]
+fn a_linked_design_replays_and_copies() {
+    let dir = std::env::temp_dir().join(format!("solidcraft-link-script-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let source = dir.join("part.solidcraft");
+    let mut u = Session::default();
+    run(&mut u, "solid.box", json!({"length": 10, "width": 10, "height": 10, "body_name": "Cube"}));
+    run(&mut u, "file.save", json!({"path": source.to_string_lossy()}));
+
+    let mut s = Session::default();
+    run(&mut s, "component.insert_design", json!({"path": source.to_string_lossy(), "name": "Cube"}));
+    run(&mut s, "occurrence.copy", json!({"occurrence": "Cube:1", "translate": [30, 0, 0]}));
+
+    let r = run(&mut s, "timeline.export_script", json!({}));
+    assert!(r["omitted"].to_string().contains("must be present at replay"), "{r}");
+    let steps = commands(&r["script"]);
+    assert!(steps.contains(&"component.insert_design"), "{steps:?}");
+    assert!(steps.contains(&"occurrence.copy"), "{steps:?}");
+    let mut t = replay(&r["script"]);
+    same(&mut s, &mut t);
+    let _ = std::fs::remove_dir_all(&dir);
 }

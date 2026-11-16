@@ -220,9 +220,6 @@ fn not_supported(what: &str) -> EngineError {
 /// The steps that rebuild `doc` on an empty design, and what they leave out. `has_body` says
 /// whether the design has a body of that name now, for the columns of the configuration table.
 pub(crate) fn script_steps(doc: &Document, has_body: &dyn Fn(&str) -> bool) -> Result<(Vec<Value>, Vec<String>)> {
-    if !doc.parts.is_empty() || !doc.links.is_empty() {
-        return Err(not_supported("standard parts and linked designs"));
-    }
     if doc.components.iter().any(|c| c.parent != 0) {
         return Err(not_supported("nested components"));
     }
@@ -308,31 +305,6 @@ pub(crate) fn script_steps(doc: &Document, has_body: &dyn Fn(&str) -> bool) -> R
     // stay valid. Features whose timeline order differs from their id order
     // break the interleaving and are refused explicitly; joint ids travel
     // last and are referenced by name, so their position is free.
-    enum Event<'e> {
-        Create(&'e solidcraft_doc::Component),
-        Copy(&'e solidcraft_doc::Occurrence),
-        Feature(&'e Feature),
-    }
-    let mut events: Vec<(u64, Event<'_>)> = Vec::new();
-    let mut last_feature_id = 0u64;
-    for f in &doc.features {
-        if f.id < last_feature_id {
-            return Err(not_supported("a timeline reordered relative to creation order"));
-        }
-        last_feature_id = f.id;
-        events.push((f.id, Event::Feature(f)));
-    }
-    for c in &doc.components {
-        events.push((c.id, Event::Create(c)));
-    }
-    for o in &doc.occurrences {
-        if !doc.components.iter().any(|c| c.id == o.component && c.id.saturating_add(1) == o.id) {
-            events.push((o.id, Event::Copy(o)));
-        }
-    }
-    events.sort_by_key(|(id, _)| *id);
-    let mut sim_occ: Vec<(u64, String)> = Vec::new();
-
     // Each sketch brings the model parameters of its dimensions.
     let models: BTreeMap<&str, &Param> = doc.params.iter().filter(|p| p.model).map(|p| (p.name.as_str(), p)).collect();
     let mut owned: BTreeSet<&str> = BTreeSet::new();
@@ -351,6 +323,60 @@ pub(crate) fn script_steps(doc: &Document, has_body: &dyn Fn(&str) -> bool) -> R
     if let Some(p) = models.keys().find(|n| !owned.contains(*n)) {
         return Err(not_supported(&format!("model parameter `{p}` outside a sketch dimension")));
     }
+
+    // Standard parts rebuild themselves from their library entry at the
+    // part's step: their generated features are skipped below and come back
+    // with parts.insert, and their seat joints replay through the joint pass
+    // like every other joint.
+    let mut skipped: BTreeSet<u64> = BTreeSet::new();
+    let mut part_built: BTreeMap<u64, usize> = BTreeMap::new();
+    for (comp, part) in &doc.parts {
+        let fresh = rebuilt_part(doc, *comp, part, &brings)?;
+        for f in &fresh {
+            skipped.insert(f.id);
+        }
+        part_built.insert(*comp, fresh.len());
+    }
+
+    // A linked design rebuilds its Import feature from the file at its step.
+    for (comp, link) in &doc.links {
+        match doc.features.iter().find(|f| f.id == link.feature) {
+            Some(f) if f.component == *comp && matches!(f.kind, FeatureKind::Import { .. }) => {
+                skipped.insert(link.feature);
+            }
+            _ => {
+                let name = doc.components.iter().find(|c| c.id == *comp).map(|c| c.name.clone()).unwrap_or_default();
+                return Err(not_supported(&format!("a linked design whose import feature is missing or changed (`{name}`)")));
+            }
+        }
+    }
+
+    enum Event<'e> {
+        Create(&'e solidcraft_doc::Component),
+        Copy(&'e solidcraft_doc::Occurrence),
+        Feature(&'e Feature),
+    }
+    let mut events: Vec<(u64, Event<'_>)> = Vec::new();
+    let mut last_feature_id = 0u64;
+    for f in &doc.features {
+        if f.id < last_feature_id {
+            return Err(not_supported("a timeline reordered relative to creation order"));
+        }
+        last_feature_id = f.id;
+        if !skipped.contains(&f.id) {
+            events.push((f.id, Event::Feature(f)));
+        }
+    }
+    for c in &doc.components {
+        events.push((c.id, Event::Create(c)));
+    }
+    for o in &doc.occurrences {
+        if !doc.components.iter().any(|c| c.id == o.component && c.id.saturating_add(1) == o.id) {
+            events.push((o.id, Event::Copy(o)));
+        }
+    }
+    events.sort_by_key(|(id, _)| *id);
+    let mut sim_occ: Vec<(u64, String)> = Vec::new();
 
     // User parameters go in as soon as everything they refer to exists, so each step sees the
     // values the design has (parameters are global; the order only has to let each one evaluate).
@@ -372,9 +398,11 @@ pub(crate) fn script_steps(doc: &Document, has_body: &dyn Fn(&str) -> bool) -> R
             known.insert(p.name.clone());
         }
     };
+    let mut sim_next = 1u64;
     for (_id, event) in &events {
         match event {
             Event::Feature(f) => {
+                sim_next = sim_next.max(f.id.saturating_add(1));
                 flush(&mut pending, &mut known, &mut out);
                 let feature = serde_json::to_value(f).map_err(|e| EngineError::Other(e.to_string()))?;
                 let mut params = json!({"feature": feature});
@@ -398,17 +426,60 @@ pub(crate) fn script_steps(doc: &Document, has_body: &dyn Fn(&str) -> bool) -> R
             Event::Create(c) => {
                 let name = replay_occurrence_name(doc, &sim_occ, c.id);
                 sim_occ.push((c.id, name.clone()));
-                let mut params = json!({"name": c.name, "grounded": false, "activate": false});
-                if let Some(o) = params.as_object_mut()
-                    && c.parent != 0
-                {
-                    let parent = doc.components.iter().find(|p| p.id == c.parent).map(|p| p.name.clone()).unwrap_or_default();
-                    o.insert("parent".into(), json!(parent));
+                if let Some(part) = doc.parts.get(&c.id) {
+                    // A part rebuilds its features at the ids its own steps
+                    // allocate, so the counter must sit at the component's id:
+                    // steps that left gaps before the part would renumber what
+                    // it rebuilds, and a hand-made numbering cannot be asked
+                    // for. The builder's features are skipped above.
+                    let built = part_built.get(&c.id).copied().unwrap_or(0);
+                    if sim_next != c.id {
+                        return Err(not_supported(&format!("a standard part whose rebuilt features would not keep their ids (`{}`)", c.name)));
+                    }
+                    let mut o = Map::new();
+                    o.insert("family".into(), json!(part.family));
+                    o.insert("size".into(), json!(part.size));
+                    if let Some(length) = part.length {
+                        o.insert("length".into(), json!(length));
+                    }
+                    o.insert("name".into(), json!(c.name));
+                    out.push(step("parts.insert", Value::Object(o)));
+                    sim_next = c.id.saturating_add(2 + built as u64);
+                } else if let Some(link) = doc.links.get(&c.id) {
+                    // A linked design comes in through its own constructor,
+                    // which reads the file again and rebuilds the Import
+                    // feature at the id its steps allocate.
+                    if sim_next != c.id || link.feature != c.id.saturating_add(2) {
+                        return Err(not_supported(&format!("a linked design whose rebuilt feature would not keep its id (`{}`)", c.name)));
+                    }
+                    let mut o = Map::new();
+                    o.insert("path".into(), json!(link.path));
+                    o.insert("name".into(), json!(c.name));
+                    out.push(step("component.insert_design", Value::Object(o)));
+                    sim_next = c.id.saturating_add(3);
+                    omitted.push(format!("linked design `{}`: the file `{}` must be present at replay", c.name, link.path));
+                } else {
+                    let mut params = json!({"name": c.name, "grounded": false, "activate": false});
+                    if let Some(o) = params.as_object_mut()
+                        && c.parent != 0
+                    {
+                        let parent = doc.components.iter().find(|p| p.id == c.parent).map(|p| p.name.clone()).unwrap_or_default();
+                        o.insert("parent".into(), json!(parent));
+                    }
+                    out.push(step("component.create", params));
+                    sim_next = sim_next.saturating_add(2);
                 }
-                out.push(step("component.create", params));
                 place_occurrence(doc, c.id.saturating_add(1), &name, &mut out);
+                let (metadata, odd) = component_metadata_step(c)?;
+                if let Some(step) = metadata {
+                    out.push(step);
+                }
+                if !odd.is_empty() {
+                    omitted.push(format!("part properties of `{}` component.metadata.set can't set ({})", c.name, odd.join(", ")));
+                }
             }
             Event::Copy(o) => {
+                sim_next = sim_next.saturating_add(1);
                 let name = replay_occurrence_name(doc, &sim_occ, o.component);
                 sim_occ.push((o.component, name.clone()));
                 let source = doc
@@ -595,9 +666,14 @@ pub(crate) fn script_steps(doc: &Document, has_body: &dyn Fn(&str) -> bool) -> R
         out.push(step("parameters.favorite", json!({"name": name, "favorite": true})));
     }
 
-    // Materials and plastic rules of bodies, once the bodies exist.
+    // Materials and plastic rules of bodies, once the bodies exist. The
+    // default material is no assignment (material.assign removes one) and
+    // comes back with whatever inherited it, so it travels as nothing.
     let mut by_material: BTreeMap<&str, Vec<&str>> = BTreeMap::new();
     for (body, material) in &doc.materials {
+        if *material == solidcraft_doc::DEFAULT_MATERIAL {
+            continue;
+        }
         by_material.entry(material.as_str()).or_default().push(body.as_str());
     }
     for (material, bodies) in by_material {
@@ -802,10 +878,15 @@ fn coupling_kind(coupling: &solidcraft_doc::joints::Coupling) -> &'static str {
 }
 
 /// A placed occurrence: the move to its stored transform, then its grounding.
+/// The move wants the occurrence free: a design's first part is grounded when
+/// it is made, so it is ungrounded first and grounded again after.
 fn place_occurrence(doc: &Document, id: u64, name: &str, out: &mut Vec<Value>) {
     let Some(o) = doc.occurrences.iter().find(|o| o.id == id) else {
         return;
     };
+    if o.grounded {
+        out.push(step("occurrence.ground", json!({"occurrence": name, "grounded": false})));
+    }
     let m = o.transform;
     // Row-major: the stored columns read out across the rows.
     let to_matrix: Vec<f64> = (0..3).flat_map(|row| m.iter().map(move |col| col[row])).collect();
@@ -813,4 +894,84 @@ fn place_occurrence(doc: &Document, id: u64, name: &str, out: &mut Vec<Value>) {
     if o.grounded {
         out.push(step("occurrence.ground", json!({"occurrence": name, "grounded": true})));
     }
+}
+
+/// A standard part rebuilt at the part's own ids by `parts.insert`, in a
+/// scratch session whose next id is the component's and whose names are the
+/// ones the replay will have taken by then (the surviving features below the
+/// part's ids, with the input parameter names they carry). The rebuilt
+/// features must equal the design's own exactly: anything else is builder
+/// output someone hand-edited, deleted or suppressed, which the replay would
+/// silently replace with the library's, so the export refuses it instead. The
+/// features the builder made are returned: the timeline loop skips them and
+/// the part's step rebuilds them.
+fn rebuilt_part(doc: &Document, comp: u64, part: &solidcraft_doc::StandardPart, brings: &BTreeMap<u64, Vec<&Param>>) -> Result<Vec<Feature>> {
+    let name = doc.components.iter().find(|c| c.id == comp).map(|c| c.name.clone()).unwrap_or_default();
+    let what = |why: &str| not_supported(&format!("a standard part whose builder output was {why} (`{name}`)"));
+    let mut scratch = Session::default();
+    {
+        let d = scratch.doc_mut();
+        d.next_id = comp;
+        for f in doc.features.iter().filter(|f| f.id < comp) {
+            d.features.push(Feature { suppressed: true, ..f.clone() });
+        }
+        // The parameters in use below the part: its own come with its builder.
+        let earlier: BTreeSet<&str> = brings.range(..comp).flat_map(|(_, ps)| ps.iter().map(|p| p.name.as_str())).collect();
+        d.params = doc.params.iter().filter(|p| !p.model || earlier.contains(p.name.as_str())).cloned().collect();
+    }
+    let mut o = Map::new();
+    o.insert("family".into(), json!(part.family));
+    o.insert("size".into(), json!(part.size));
+    if let Some(length) = part.length {
+        o.insert("length".into(), json!(length));
+    }
+    o.insert("name".into(), json!(name));
+    scratch.execute("parts.insert", &Value::Object(o)).map_err(|_| what("not rebuildable from its library entry"))?;
+    // The export runs nested inside its own command, where a command pins no
+    // body names; the replay's parts.insert is outermost and pins them, as the
+    // design's own insert did.
+    scratch.pin_body_names();
+    let fresh: Vec<Feature> = scratch.doc.features.iter().filter(|f| f.id > comp.saturating_add(1)).cloned().collect();
+    for f in &fresh {
+        match doc.features.iter().find(|g| g.id == f.id) {
+            Some(g) if g == f => {}
+            Some(g) if g.suppressed => return Err(what("suppressed")),
+            Some(_) => return Err(what("hand-edited")),
+            None => return Err(what("deleted")),
+        }
+    }
+    Ok(fresh)
+}
+
+/// A component's part properties and free-text properties as one
+/// `component.metadata.set` step (the constructors seed defaults the design
+/// may have edited), with the keys the command would refuse listed out. The
+/// well-known keys the constructors seed and the design dropped are cleared.
+fn component_metadata_step(c: &solidcraft_doc::Component) -> Result<(Option<Value>, Vec<String>)> {
+    use solidcraft_doc::metadata::{BOM_KEYS, BOM_TYPE, Owner};
+    let mut values = Map::new();
+    let mut odd = Vec::new();
+    for (key, value) in &c.metadata.0 {
+        let mut probe = solidcraft_doc::Metadata::default();
+        if probe.set(Owner::Component, key, value.clone()).is_err() {
+            odd.push(key.clone());
+        } else {
+            values.insert(key.clone(), value.clone());
+        }
+    }
+    for key in BOM_KEYS.iter().chain([&BOM_TYPE]) {
+        if !c.metadata.0.contains_key(*key) {
+            values.insert((*key).to_string(), Value::Null);
+        }
+    }
+    if values.is_empty() && c.properties.is_empty() {
+        return Ok((None, odd));
+    }
+    let mut params = Map::new();
+    params.insert("component".into(), json!(c.name));
+    params.insert("values".into(), Value::Object(values));
+    if !c.properties.is_empty() {
+        params.insert("properties".into(), json!(c.properties));
+    }
+    Ok((Some(step("component.metadata.set", Value::Object(params))), odd))
 }
