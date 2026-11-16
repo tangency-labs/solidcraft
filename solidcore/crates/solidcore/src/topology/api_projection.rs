@@ -20,7 +20,7 @@
 //!   dereferences a null B-rep (`SmApiCreateSilhouetteCurves` with a usable normal) the
 //!   port returns [`SolidError::InvalidInput`].
 //! - **Statuses.** The `SM_ERR_INVALID_INPUT` and `SM_ERR` the wrappers return themselves
-//!   are [`SolidError::Upstream`] with that code.
+//!   are a [`TopologyFailure`](crate::error::topology::TopologyFailure) with that code.
 //! - **Overflowing normal (UB-169).** A normal whose squared length overflows unitizes
 //!   to a zero vector. `SmApiProjectBrepOntoPlane` then ignores the failed
 //!   `MakeUnitOrthoVectors` and places its plane with the uninitialised outputs; the port
@@ -52,7 +52,7 @@
 use crate::blend::hcr::{Hcr, HcrOptions};
 use crate::curve::crv_on_surf::CrvOnSurf;
 use crate::curve::curve::{Curve, CurveKind};
-use crate::error::{ignored, Result, SolidError, SM_ERR, SM_ERR_INVALID_INPUT};
+use crate::error::{ignored, Result, SolidError};
 use crate::geom::assert_array::labels::{EDGEUSE_TYPE, EDGE_TYPE};
 use crate::geom::attribute::ObjectKey;
 use crate::geom::axis2_placement::Axis2Placement;
@@ -74,18 +74,17 @@ use crate::EntityRef;
 const OP: &str = "topology::api_projection";
 const OP_PROJ: &str = "topology::api_projection::plane_projection";
 
-/// An `SmApiStatus` the wrapper returns itself.
-const fn status(code: i32) -> SolidError {
-    SolidError::Upstream {
-        operation: OP,
-        code,
-        entity: None,
-    }
+/// The wrapper's own `SM_ERR_INVALID_INPUT`: an input it is given is not usable, as the
+/// phrase says.
+fn invalid(what: &'static str) -> SolidError {
+    SolidError::topology_invalid_value(OP, what)
 }
 
 /// `sNormal.Unitize() != SM_SUCCESS` returns `SM_ERR_INVALID_INPUT`.
 fn unit_normal(normal: Vec3) -> Result<Vec3> {
-    normal.unitize().map_err(|_| status(SM_ERR_INVALID_INPUT))
+    normal
+        .unitize()
+        .map_err(|_| invalid("the plane normal has zero length"))
 }
 
 /// `pBrep->CalculateBoundingBox(BBox)` with its status ignored (the box then stays
@@ -165,7 +164,7 @@ pub fn project_brep_onto_plane(
     out: &mut Vec<Option<Curve>>,
 ) -> Result<()> {
     let Some(brep) = brep else {
-        return Err(status(SM_ERR_INVALID_INPUT));
+        return Err(invalid("no B-rep is given"));
     };
 
     let plane_normal = unit_normal(plane_normal)?;
@@ -234,8 +233,8 @@ pub fn create_silhouette_curves(
 
     let plane_normal = unit_normal(plane_normal)?;
 
-    let brep = brep
-        .ok_or_else(|| SolidError::invalid_input(OP, "SmApiCreateSilhouetteCurves: null B-rep"))?;
+    let brep =
+        brep.ok_or_else(|| SolidError::invalid_input(OP, "silhouette curves: null B-rep"))?;
     let (_, length) = box_and_length(k, brep)?;
 
     let approx_tol = length * 1.0e-4;
@@ -284,7 +283,7 @@ pub fn project_curve_onto_brep(
     out: &mut Vec<Option<Curve>>,
 ) -> Result<()> {
     let (Some(brep), Some(curve)) = (brep, curve) else {
-        return Err(status(SM_ERR_INVALID_INPUT));
+        return Err(invalid("no B-rep or curve is given"));
     };
 
     // The kernel resets its output array. Keep caller-owned curves out of it.
@@ -305,7 +304,10 @@ pub fn project_curve_onto_brep(
 
     // check result
     if projected.is_empty() {
-        return Err(status(SM_ERR));
+        return Err(SolidError::topology_failed(
+            OP,
+            "the projection gives no curves",
+        ));
     }
 
     let start_size = out.len();
@@ -344,7 +346,7 @@ pub fn project_curve_onto_surface(
     outputs: SurfaceProjection<'_>,
 ) -> Result<()> {
     let (Some(curve), Some(surface)) = (curve, surface) else {
-        return Err(status(SM_ERR_INVALID_INPUT));
+        return Err(invalid("no curve or surface is given"));
     };
 
     let interval = curve.natural_interval();
@@ -397,7 +399,7 @@ pub fn project_curve_onto_surface(
 /// makes with the curve's owner, on a copy when it has none yet), the `SmCrvOnSurf` override for a curve on a
 /// surface (and an `SmTangentField`, which inherits it); `SM_ERR` otherwise (the
 /// `SmCurve` base).
-fn plane_projection(
+pub(crate) fn plane_projection(
     k: &Kernel,
     curve: &Curve,
     plane_point: Point3,
@@ -480,7 +482,10 @@ fn plane_projection(
         | CurveKind::Offset(_)
         | CurveKind::Conic(_)
         | CurveKind::CrvInVolume(_)
-        | CurveKind::Composite(_) => Err(SolidError::sm_err(OP_PROJ)),
+        | CurveKind::Composite(_) => Err(SolidError::topology_failed(
+            OP_PROJ,
+            "the curve kind has no plane projection",
+        )),
     }
 }
 
@@ -534,7 +539,10 @@ fn crv_on_surf_plane_projection(
             | CurveKind::Parabola(_)
             | CurveKind::Hyperbola(_)
     ) {
-        return Err(SolidError::null_pointer(OP_PROJ));
+        return Err(SolidError::topology_missing(
+            OP_PROJ,
+            "the curve on surface's UV curve, as a B-spline",
+        ));
     }
 
     // Lift this curve to a BSplineCurve
@@ -554,11 +562,12 @@ fn crv_on_surf_plane_projection(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::error::SM_ERR_INVALID_INPUT;
 
     fn code(r: &Result<()>) -> Option<i32> {
         match r {
-            Err(SolidError::Upstream { code, .. }) => Some(*code),
-            _ => None,
+            Err(e) => e.upstream_status(),
+            Ok(()) => None,
         }
     }
 

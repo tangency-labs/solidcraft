@@ -303,8 +303,8 @@ pub fn create_draft_sweep(
 /// # Errors
 ///
 /// `InvalidInput` for no path curve, a radius `<= 0` (a NaN radius passes, as
-/// upstream), or a radius that reaches the centre of a bend in the path
-/// ([`path_bends_within`]; not upstream, which builds that pipe with its wall folded
+/// upstream), or a radius found to reach the centre of a bend in the path
+/// ([`bend_found_within`]; not upstream, which builds that pipe with its wall folded
 /// through itself, WR-774); [`SolidError::Unported`] otherwise
 /// (`SmBrep::SmBrep`, until the B-rep constructor is ported).
 pub fn create_pipe_sweep(
@@ -322,7 +322,9 @@ pub fn create_pipe_sweep(
     }
 
     let path = bspline_of(path_curve, OP_PIPE)?;
-    if path_bends_within(&path, pipe_radius) {
+    // Refusal only: a bend found refuses the pipe; none found proves nothing, and the pipe
+    // is built unchecked, as upstream builds it (definitions-and-certificates.md §7.6).
+    if bend_found_within(&path, pipe_radius).is_some() {
         return Err(SolidError::invalid_input(
             OP_PIPE,
             "the pipe radius reaches the centre of a bend in the path, so the pipe's wall \
@@ -348,45 +350,46 @@ pub fn create_pipe_sweep(
     })
 }
 
-/// The samples per knot span, both span ends included, at which [`path_bends_within`]
-/// measures a pipe path's curvature. A span is one polynomial or rational piece, whose
+/// The samples per knot span, both span ends included, at which [`bend_found_within`]
+/// looks for a bend tighter than a pipe. A span is one polynomial or rational piece, whose
 /// curvature rises and falls only a few times, so 16 samples find a bend well inside the
 /// pipe at a cost that is small beside the sweep itself. A bend tighter than the pipe that
-/// lies between two samples is missed, and that pipe is built as before.
+/// lies between two samples is not found, and that pipe is built as before.
 const PIPE_BEND_SAMPLES_PER_SPAN: u32 = 16;
 
-/// Whether `path` bends somewhere with a radius of at most `radius`, that is, with
-/// curvature at least `1 / radius`. A pipe of that radius folds its wall through itself on
-/// the inside of such a bend: the circles of neighbouring sections cross there, so the
-/// swept surface is singular (Maekawa, Patrikalakis, Sakkalis and Yu, "Analysis and
-/// applications of pipe surfaces", CAGD 15(5), 1998).
+/// A parameter at which `path` bends with a radius of at most `radius`, that is, with
+/// curvature at least `1 / radius`, if one is found. A pipe of that radius folds its wall
+/// through itself on the inside of such a bend: the circles of neighbouring sections cross
+/// there, so the swept surface is singular (Maekawa, Patrikalakis, Sakkalis and Yu,
+/// "Analysis and applications of pipe surfaces", CAGD 15(5), 1998).
 ///
-/// Measured at [`PIPE_BEND_SAMPLES_PER_SPAN`] samples per knot span. A `true` is proved by
-/// the sample that found the bend; a `false` only says that no sample found one. A sample
-/// whose curvature cannot be computed (a zero-length tangent) proves nothing and is
-/// skipped. A pipe that crosses itself between distant parts of its path is not found
-/// here.
-fn path_bends_within(path: &BSplineCurve, radius: f64) -> bool {
-    let Some(nurb) = path.nurb.as_ref() else {
-        return false;
-    };
+/// **Refusal only.** The path's curvature is evaluated at [`PIPE_BEND_SAMPLES_PER_SPAN`]
+/// samples per knot span. A `Some` is proved by the sample that found the bend, so it may
+/// refuse a pipe. A `None` proves nothing: it is not a certificate that the path bends no
+/// tighter than `radius` anywhere (definitions-and-certificates.md §7.6, "a check at sample
+/// points proves nothing"), and no caller may accept a construction on it. A certified
+/// check, a lower bound on the radius of curvature over each knot span enclosed on the
+/// Bernstein form of the curvature's numerator and denominator, is open work (#15038).
+/// A sample whose curvature cannot be computed (a zero-length tangent) proves nothing and
+/// is skipped. A pipe that crosses itself between distant parts of its path is not looked
+/// for here.
+fn bend_found_within(path: &BSplineCurve, radius: f64) -> Option<f64> {
+    let nurb = path.nurb.as_ref()?;
     // A clamped curve's spans run between knots[degree] and knots[n + 1].
-    let Some(span_knots) = nurb.knots().get(nurb.degree()..=nurb.n() + 1) else {
-        return false;
-    };
+    let span_knots = nurb.knots().get(nurb.degree()..=nurb.n() + 1)?;
     let reaches = |u: f64, side: Side| {
         nurb.eval_curvature(u, side, false)
             .is_ok_and(|c| c.kappa * radius >= 1.0)
     };
-    span_knots.windows(2).any(|ends| {
+    span_knots.windows(2).find_map(|ends| {
         let &[start, end] = ends else {
-            return false;
+            return None;
         };
         // A repeated knot spans nothing.
         if end <= start {
-            return false;
+            return None;
         }
-        (0..=PIPE_BEND_SAMPLES_PER_SPAN).any(|i| {
+        (0..=PIPE_BEND_SAMPLES_PER_SPAN).find_map(|i| {
             let at = f64::from(i) / f64::from(PIPE_BEND_SAMPLES_PER_SPAN);
             // At its end knot a span is evaluated from its own side, not the next span's.
             let side = if i == PIPE_BEND_SAMPLES_PER_SPAN {
@@ -394,7 +397,8 @@ fn path_bends_within(path: &BSplineCurve, radius: f64) -> bool {
             } else {
                 Side::Left
             };
-            reaches(start + at * (end - start), side)
+            let u = start + at * (end - start);
+            reaches(u, side).then_some(u)
         })
     })
 }
@@ -671,9 +675,8 @@ pub fn create_curve_sweep_from_edges(
 ///
 /// # Errors
 ///
-/// `InvalidInput` for no curves or a `None` curve, or for a corner refused under
-/// `fixes.taper_tangent_corner_planes` (WR-521; [`create_taper_extrude_with_corner`]
-/// reports why and where); the error of a failing curve copy; [`SolidError::Unported`]
+/// `InvalidInput` for no curves or a `None` curve, or for a refused tangent corner
+/// (WR-521; [`create_taper_extrude_with_corner`] reports why and where); the error of a failing curve copy; [`SolidError::Unported`]
 /// otherwise (`SmBrep::SmBrep`, until the B-rep constructor is ported).
 pub fn create_taper_extrude(
     k: &mut Kernel,
@@ -700,16 +703,16 @@ pub fn create_taper_extrude(
 /// as part of the result (SolidCraft change, tangency-labs/smlib 54148db: the fork's
 /// `SmApiCreateTaperExtrude(..., eCorner, rpResult, pOptRefusal, pOptRefusedCorner)`).
 ///
-/// - [`OffsetCornerType::LinearExtension`]: tangent lines across a corner's gap; with
-///   `fixes.taper_tangent_corner_planes` (WR-521, off by default) a profile of lines
-///   and circular arcs with a sharp corner continues its walls as their tangent planes
-///   instead (two lines meet at a corner edge) and may be refused.
+/// - [`OffsetCornerType::LinearExtension`]: tangent lines across a corner's gap; a
+///   profile of lines and circular arcs with a sharp corner continues its walls as their
+///   tangent planes instead (two lines meet at a corner edge, WR-521) and may be refused.
 /// - [`OffsetCornerType::FilletCorner`]: an arc about the corner.
 /// - [`OffsetCornerType::CurveExtension`]: each wall continues as itself (a line's
 ///   plane, an arc's cone) to meet its neighbour along their exact seam; a profile with
 ///   a curve that is neither a line nor an arc is refused at a sharp corner
 ///   ([`TaperCornerRefusal::NotExact`]), and so is a corner whose walls do not meet or
-///   a wall that closes before the far end. Without a sharp corner it is
+///   a wall that cannot close before the far end (a section that shrinks to one point,
+///   a pyramid's apex or a ridge's end, closes there). Without a sharp corner it is
 ///   `LinearExtension`.
 /// - [`OffsetCornerType::LinearChamfer`]: as the C++ passes it on to the offsetter.
 ///
@@ -1635,11 +1638,9 @@ mod tests {
         assert!((area - want).abs() <= 1e-6 * want, "{area} vs {want}");
     }
 
-    /// The volume of `wr471_whole_sphere`, 4/3 pi 5^3. WR-472's existing body-length error
-    /// scale converges on the face at 1e-8 and 1e-10. Without it the default integrator
-    /// converges at 1e-8 since #2890 (523.5987756272146, 5.5e-11 relative; upstream's
-    /// `SM_ERR` before) and still fails at 1e-10 (its step control: upstream's `SM_ERR`,
-    /// named by its cause). This is separate from WR-471's placement of the sphere's poles.
+    /// The volume of `wr471_whole_sphere`, 4/3 pi 5^3. WR-472's body-length error scale
+    /// converges on the face at 1e-8 and 1e-10. This is separate from WR-471's placement of
+    /// the sphere's poles.
     #[test]
     fn wr471_whole_sphere_volume() {
         use crate::geom::attribute::{AttributeStore, ObjectKey};
@@ -1651,28 +1652,13 @@ mod tests {
             key_of: &key_of,
         };
         for accuracy in [1e-8, 1e-10] {
-            for scaled in [false, true] {
-                let (mut k, mut b) = wr471_whole_sphere();
-                k.fixes.precise_properties_body_length_scale = scaled;
-                let result = brep_volume(&k, &mut b, accuracy, &attributes);
-                if scaled || accuracy >= 1e-8 {
-                    let volume = result.unwrap();
-                    let want = 4.0 / 3.0 * std::f64::consts::PI * 125.0;
-                    assert!(
-                        (volume - want).abs() <= accuracy * want,
-                        "accuracy={accuracy}: {volume} vs {want}"
-                    );
-                } else {
-                    assert!(
-                        matches!(
-                            &result,
-                            Err(e) if e.operation() == crate::mass::integrator::OP_STEP_CONTROL
-                                && e.upstream_status() == Some(crate::error::SM_ERR)
-                        ),
-                        "accuracy={accuracy}: {result:?}"
-                    );
-                }
-            }
+            let (k, mut b) = wr471_whole_sphere();
+            let volume = brep_volume(&k, &mut b, accuracy, &attributes).unwrap();
+            let want = 4.0 / 3.0 * std::f64::consts::PI * 125.0;
+            assert!(
+                (volume - want).abs() <= accuracy * want,
+                "accuracy={accuracy}: {volume} vs {want}"
+            );
         }
     }
 }

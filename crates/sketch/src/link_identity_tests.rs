@@ -361,6 +361,37 @@ fn edge_on_face_lays_out_as_one_silhouette_line_and_stays_current() {
     assert!(!sk.link(&link).unwrap().lost);
 }
 
+/// A face with a hole cut through the hole by the sketch plane: its section is two pieces on
+/// one line, one each side of the hole. Only a projection seen edge-on is one line end to end;
+/// a section keeps the gap (#14282).
+#[test]
+fn intersected_face_with_a_hole_keeps_both_pieces_on_one_line() {
+    // A pipe's top ring (bore 10, outside 22) cut through its axis.
+    let section = vec![LinkGeom::Line(Vec2::new(-22.0, 40.0), Vec2::new(-10.0, 40.0)), LinkGeom::Line(Vec2::new(10.0, 40.0), Vec2::new(22.0, 40.0))];
+    let ends = |sk: &Sketch, link: &str| -> Vec<[Vec2; 2]> {
+        sk.link_curves(link)
+            .iter()
+            .map(|c| match sk.curves[*c].kind {
+                CurveKind::Line { a, b } => [sk.points[a].pos, sk.points[b].pos],
+                _ => panic!("a line"),
+            })
+            .collect()
+    };
+    let mut sk = Sketch::new();
+    let link = sk.add_link(LinkKind::Intersect, face(), &section).unwrap();
+    let pieces = [[Vec2::new(-22.0, 40.0), Vec2::new(-10.0, 40.0)], [Vec2::new(10.0, 40.0), Vec2::new(22.0, 40.0)]];
+    assert_eq!(ends(&sk, &link), pieces, "one line each side of the hole");
+    assert!(!sk.update_link(&link, &section).unwrap(), "the same section keeps its curves");
+    assert_eq!(ends(&sk, &link), pieces);
+    assert!(!sk.link(&link).unwrap().lost);
+    // Intersecting the same face again finds both pieces already there, so nothing is added.
+    assert!(sk.link_geometry_or_points_present(&section), "the section is already linked");
+    // Projected, the same ring seen edge-on is still one line end to end.
+    let projected = sk.add_link(LinkKind::Project, face(), &section).unwrap();
+    let [[a, b]] = ends(&sk, &projected)[..] else { panic!("one line") };
+    assert!([a, b].contains(&Vec2::new(-22.0, 40.0)) && [a, b].contains(&Vec2::new(22.0, 40.0)), "{a:?} {b:?}");
+}
+
 /// A conic that comes with a link (projected geometry) takes the curve prefix `n` like a drawn
 /// one, not the constraints' `k` (#6173).
 #[test]
@@ -398,8 +429,10 @@ fn edge_on_face_saved_as_a_line_pair_keeps_the_line_an_offset_follows() {
         source: face(),
         face_name: None,
         edge_name: None,
+        vertex_name: None,
         auto_face: false,
         lost: false,
+        name_dropped: false,
     });
     let ids: Vec<String> = sk.link_curves(&link).iter().map(|c| sk.curves[*c].id.clone()).collect();
     assert_eq!(ids.len(), 2, "the saved link holds the pair");
@@ -550,4 +583,156 @@ fn leaving_directions_match_one_to_one() {
     assert!(!super::loops::same_leaving(&[right, near_right], &[right, left]), "one line turned round");
     assert!(!super::loops::same_leaving(&[right, up], &[right, up, left]));
     assert!(super::loops::same_leaving(&[], &[]));
+}
+
+/// #17172: a closed circular edge was once projected as its two halves, and is one circle now.
+/// A saved sketch's projection of it becomes that circle: the first half's id names it, a
+/// dimension on the second half moves to it, and a line drawn to a point where the halves met
+/// keeps its end there, held on the circle.
+#[test]
+fn a_circle_saved_as_two_halves_comes_back_as_one_circle_keeping_what_was_on_it() {
+    let mut sk = Sketch::new();
+    let (east, west) = (Vec2::new(5.0, 0.0), Vec2::new(-5.0, 0.0));
+    let halves = [LinkGeom::Arc { c: Vec2::ZERO, a: east, b: west }, LinkGeom::Arc { c: Vec2::ZERO, a: west, b: east }];
+    let rim = LinkSource::Edge { body: "Body1".into(), at: Vec3::new(5.0, 0.0, 0.0) };
+    let link = sk.add_link(LinkKind::Project, rim, &halves).unwrap();
+    let [first, second] = sk.link_curves(&link)[..] else { panic!("two halves") };
+    let first_id = sk.curves[first].id.clone();
+    let CurveKind::Arc { b: split, .. } = sk.curves[first].kind else { panic!("an arc") };
+    sk.add_constraint(ConstraintKind::Diameter { c: second, value: 10.0 }, None).unwrap();
+    let start = sk.add_point(Vec2::new(-20.0, 0.0), None).unwrap();
+    let line = sk.add_line_pts(start, split, None).unwrap();
+    let line = sk.curves[line].id.clone();
+    assert!(sk.update_link(&link, &[LinkGeom::Circle(Vec2::ZERO, 5.0)]).unwrap());
+    let [circle] = sk.link_curves(&link)[..] else { panic!("one circle") };
+    assert!(matches!(sk.curves[circle].kind, CurveKind::Circle { r, .. } if (r - 5.0).abs() < 1e-12));
+    assert_eq!(sk.curves[circle].id, first_id);
+    assert!(sk.constraints.iter().any(|k| matches!(k.kind, ConstraintKind::Diameter { c, .. } if c == circle)), "{:?}", sk.constraints);
+    let line = sk.curves.iter().position(|c| c.id == line).unwrap();
+    let CurveKind::Line { b: end, .. } = sk.curves[line].kind else { panic!("a line") };
+    assert_eq!(sk.points[end].pos, west);
+    let held = sk.constraints.iter().any(|k| matches!(k.kind, ConstraintKind::PointOnCurve { p, c } if p == end && c == circle));
+    assert!(held, "{:?}", sk.constraints);
+    assert!(solve(&mut sk).ok());
+    assert!(sk.points[end].pos.dist(west) < 1e-9);
+}
+
+#[test]
+fn a_projected_circle_read_again_a_hair_away_takes_the_fresh_reading() {
+    // #12920: a hole's rim saved as it was fitted, 1.3e-6 small and off centre, read again as
+    // the hole's circle exactly. It is the same circle (the same curve and point, so whatever
+    // is drawn on it stays), now where the model puts it.
+    let mut sk = Sketch::new();
+    let edge = LinkSource::Edge { body: "Body3".into(), at: Vec3::ZERO };
+    let fitted = [LinkGeom::Circle(Vec2::new(25.962298020754407, 4.500001583499248), 1.6999986845754604)];
+    let link = sk.add_link(LinkKind::Project, edge, &fitted).unwrap();
+    let curves = sk.link_curves(&link);
+    let points = sk.link_points(&link);
+    let exact = Vec2::new(25.96229670532913, 4.5);
+    assert!(!sk.update_link(&link, &[LinkGeom::Circle(exact, 1.7)]).unwrap());
+    assert_eq!((sk.link_curves(&link), sk.link_points(&link)), (curves.clone(), points));
+    let Some(CurveKind::Circle { c, r }) = curves.first().map(|ci| sk.curves[*ci].kind.clone()) else { panic!("{:?}", sk.curves) };
+    assert_eq!((sk.points[c].pos, r), (exact, 1.7));
+}
+
+/// #14249: a face with two round holes, saved with each hole split where an older build split
+/// it. Read again, the holes come back split at other points and the outline is read in
+/// another order: the projection is rebuilt. Its outline lines are where they were, so they
+/// keep their ids, though no constraint holds them: an extrude picks its profile by them.
+#[test]
+fn a_rebuilt_face_keeps_the_ids_of_lines_that_did_not_move() {
+    // A round hole about `c`, split into two arcs at `c + to` and `c - to`.
+    let hole = |c: Vec2, to: Vec2| [LinkGeom::Arc { c, a: c + to, b: c - to }, LinkGeom::Arc { c, a: c - to, b: c + to }];
+    let p = [Vec2::new(-96.0, 180.0), Vec2::new(-96.0, -6.0), Vec2::new(96.0, -6.0), Vec2::new(96.0, 180.0)];
+    let (big, small) = (Vec2::new(0.0, 90.0), Vec2::new(-48.44, 41.56));
+    let saved: Vec<LinkGeom> = [LinkGeom::Line(p[0], p[1]), LinkGeom::Line(p[1], p[2]), LinkGeom::Line(p[3], p[0]), LinkGeom::Line(p[2], p[3])]
+        .into_iter()
+        .chain(hole(big, Vec2::new(-57.0, 0.0)))
+        .chain(hole(small, Vec2::new(-1.6, 1.2)))
+        .collect();
+    let fresh: Vec<LinkGeom> = [LinkGeom::Line(p[1], p[0]), LinkGeom::Line(p[1], p[2]), LinkGeom::Line(p[0], p[3]), LinkGeom::Line(p[2], p[3])]
+        .into_iter()
+        .chain(hole(big, Vec2::new(57.0, 0.0)))
+        .chain(hole(small, Vec2::new(2.0, 0.0)))
+        .collect();
+    let mut sk = Sketch::new();
+    let link = sk.add_link(LinkKind::Project, face(), &saved).unwrap();
+    // Each curve's id, with where it lies: a line by its two ends, an arc by its centre.
+    let placed = |sk: &Sketch| -> Vec<(String, Vec<Vec2>)> {
+        let mut out: Vec<(String, Vec<Vec2>)> = sk
+            .link_curves(&link)
+            .iter()
+            .map(|c| {
+                let at = |p: usize| sk.points[p].pos;
+                let mut ends = match sk.curves[*c].kind {
+                    CurveKind::Line { a, b } => vec![at(a), at(b)],
+                    CurveKind::Arc { c, .. } => vec![at(c)],
+                    ref k => panic!("not a line or an arc: {k:?}"),
+                };
+                ends.sort_by(|p, q| p.x.total_cmp(&q.x).then(p.y.total_cmp(&q.y)));
+                (sk.curves[*c].id.clone(), ends)
+            })
+            .collect();
+        out.sort_by(|a, b| a.0.cmp(&b.0));
+        out
+    };
+    let before = placed(&sk);
+    assert!(sk.update_link(&link, &fresh).unwrap(), "the holes are split at other points: the projection is rebuilt");
+    assert!(!sk.link(&link).unwrap().lost);
+    assert_eq!(placed(&sk), before, "each line keeps its id on the same two ends, each arc on the same hole");
+    let picked: Vec<String> = before.iter().filter(|(_, ends)| ends.len() == 2).map(|(id, _)| id.clone()).collect();
+    assert_eq!(picked.len(), 4);
+    let profiles = crate::find_profiles(&sk);
+    let outline = crate::profile_by_curves(&profiles, &picked).expect("the extrude's saved pick finds its profile");
+    assert_eq!(profiles[outline].hole_curves.len(), 2, "with both holes in it");
+}
+
+/// #14249: matching the curves nothing holds never takes a match from one the sketch holds. A
+/// face's rounded corner goes back to a sharp one. Both ends of the round are as near to the
+/// new corner; a line of the sketch's own ends on one of them. That end becomes the corner, as
+/// when only held points were matched; the other end, which nothing holds, goes.
+#[test]
+fn a_held_round_end_keeps_the_corner_its_free_neighbour_is_as_near_to() {
+    let rounded = |round: bool| {
+        let (o, x, y) = (Vec2::ZERO, Vec2::new(100.0, 0.0), Vec2::new(0.0, 100.0));
+        let mut out = vec![LinkGeom::Line(o, x)];
+        if round {
+            let (a, b) = (Vec2::new(100.0, 95.0), Vec2::new(95.0, 100.0));
+            out.extend([LinkGeom::Line(x, a), LinkGeom::Arc { c: Vec2::new(95.0, 95.0), a, b }, LinkGeom::Line(b, y)]);
+        } else {
+            let corner = Vec2::new(100.0, 100.0);
+            out.extend([LinkGeom::Line(x, corner), LinkGeom::Line(corner, y)]);
+        }
+        out.push(LinkGeom::Line(y, o));
+        out
+    };
+    let mut sk = Sketch::new();
+    let link = sk.add_link(LinkKind::Project, face(), &rounded(true)).unwrap();
+    let end = sk.link_points(&link).into_iter().find(|p| sk.points[*p].pos == Vec2::new(100.0, 95.0)).unwrap();
+    let free = sk.add_point(Vec2::new(150.0, 95.0), None).unwrap();
+    sk.add_curve(CurveKind::Line { a: end, b: free }, Some("l_mine")).unwrap();
+    assert!(sk.update_link(&link, &rounded(false)).unwrap());
+    let mine = sk.curves.iter().find(|c| c.id == "l_mine").expect("the sketch's line survives the rebuild");
+    let CurveKind::Line { a, .. } = mine.kind else { panic!("not a line") };
+    assert_eq!(sk.points[a].pos, Vec2::new(100.0, 100.0), "it ends on the new corner");
+    assert_eq!(sk.points[a].link.as_deref(), Some(link.as_str()), "on the projected corner, not a point of its own");
+}
+
+/// #14249: among circles about one centre that nothing holds, one that kept its radius keeps
+/// its id, even when an old circle listed before it is nearest to it too.
+#[test]
+fn a_rebuilt_face_gives_an_unchanged_concentric_circle_its_own_id() {
+    let c = Vec2::new(0.0, 0.0);
+    let rings = |radii: &[f64]| square(10.0).into_iter().chain(radii.iter().map(|r| LinkGeom::Circle(c, *r))).collect::<Vec<_>>();
+    let mut sk = Sketch::new();
+    let link = sk.add_link(LinkKind::Project, face(), &rings(&[3.0, 4.0])).unwrap();
+    let id_of = |sk: &Sketch, r: f64| {
+        sk.link_curves(&link)
+            .into_iter()
+            .find(|i| matches!(sk.curves[*i].kind, CurveKind::Circle { r: s, .. } if s == r))
+            .map(|i| sk.curves[i].id.clone())
+    };
+    let four = id_of(&sk, 4.0).unwrap();
+    assert!(sk.update_link(&link, &rings(&[1.0, 4.0, 6.0])).unwrap());
+    assert_eq!(id_of(&sk, 4.0), Some(four), "the circle of radius 4 is where it was");
 }

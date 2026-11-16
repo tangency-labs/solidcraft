@@ -23,6 +23,10 @@ view.
   `SOLIDCRAFT_TITLEBAR=system` or put `"titlebar": "system"` in `graphics.json` in the settings
   folder (see [Troubleshooting](troubleshooting.md#reset-the-settings)) and restart; `app` (the
   default) puts the application bar back.
+  The operating system's window title automatically shows the active design, such as
+  `Bracket — SolidCraft`. Unsaved changes add an asterisk: `Bracket * — SolidCraft`.
+  Taskbars and window switchers use this title; the application bar itself is unchanged.
+  With no design open, the title is `SolidCraft`.
 - **Toolbar.** The workspace switcher (DESIGN) sits on the left. The tabs (MODEL, SURFACE,
   ASSEMBLE, INSERT, INSPECT, MANAGE, VIEW and SHEET METAL) hold sections of commands. SKETCH appears while
   editing a sketch; SHEET METAL is always there and is highlighted for the active sheet body. Both select automatically
@@ -128,7 +132,7 @@ view.
   home, framing what is shown now (Navigation › **Middle double-click** can make it Fit, which
   keeps the orientation, or turn it off).
   Interface › **OK and Cancel in the view's corner** puts a large check and cross at the view's
-  top right while a dialog or a sketch is open, and moves the axis view or cube down below them.
+  top right while a dialog or a sketch is open, and moves the axis view down below them.
   With a dialog open they do what its OK and Cancel do (the check is grey whenever OK is); in a
   sketch without a dialog they are Finish Sketch and Cancel Sketch.
   **View angles** in the navigation bar's View menu (or Preferences › Graphics, or the
@@ -305,7 +309,7 @@ colours and corner radii by name:
 Colours are `#rrggbb`, or `#rrggbbaa` for translucent ones. A few colours, such as the four
 Continuity Analysis seams (`continuity`), take a list. Any colour the file leaves out keeps the
 base palette's value. `axis_x`, `axis_y` and `axis_z` colour every X, Y and Z axis: the origin,
-the view triad, the navigation cube and the Move gizmo. A file from an earlier version may set
+the view triad, the axes navigator and the Move gizmo. A file from an earlier version may set
 `triad` or `gizmo` instead; it still reads, and those colours now go to every axis.
 
 `radii` is optional. Its six keys above accept integers from 0 to 32 in logical UI points;

@@ -64,6 +64,7 @@ fn joint_json(s: &Session, st: &ModelState, sol: &joints::Solution, j: &Joint, q
         errors: why(&sol.errors),
         conflicts: why(&sol.conflicts),
         expressions: (!j.exprs.is_empty()).then(|| j.exprs.clone()),
+        constraint: j.constraint,
     }
 }
 

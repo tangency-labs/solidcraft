@@ -182,7 +182,10 @@ fn rail_curve(pseudo: &FilletBrep, rail_edge: EdgeId) -> Result<Curve> {
 fn pv(values: &[Vec3]) -> Result<[Vec3; 2]> {
     match values {
         [p, d, ..] => Ok([*p, *d]),
-        _ => Err(SolidError::sm_err(OP)),
+        _ => Err(SolidError::blend_failed(
+            OP,
+            "the curve has no first derivative",
+        )),
     }
 }
 
@@ -223,7 +226,10 @@ fn compute_fillet_radius<S: SmoothingSolver + ?Sized>(
         &mut tsect_pnt,
     )?;
     if !found_solution {
-        return Err(SolidError::sm_err(OP_RADIUS));
+        return Err(SolidError::blend_failed(
+            OP_RADIUS,
+            "the fillet cross section has no solution",
+        ));
     }
 
     // extract radius at this fillet point for the
@@ -246,7 +252,10 @@ fn step_back(
     // step back param distance
     let mut tan_leng = prev_tangent.length();
     if is_zero(tan_leng) {
-        return Err(SolidError::sm_err(OP));
+        return Err(SolidError::blend_failed(
+            OP,
+            "the previous piece's tangent is zero",
+        ));
     }
     let mut prev_step = prev_t - step_distance / tan_leng;
 
@@ -258,7 +267,10 @@ fn step_back(
     // step forward param distance
     tan_leng = next_tangent.length();
     if is_zero(tan_leng) {
-        return Err(SolidError::sm_err(OP));
+        return Err(SolidError::blend_failed(
+            OP,
+            "the next piece's tangent is zero",
+        ));
     }
     let mut next_step = next_t + step_distance / tan_leng;
     if next_step >= next_trim_ivl.max() {
@@ -427,7 +439,10 @@ impl MakeCurveBlendSih {
 
         // previous piece of fillet geometry is in pFilletGeom object
         if pseudo.geom(geom)?.solver.is_none() {
-            return Err(SolidError::null_pointer(OP));
+            return Err(SolidError::blend_missing(
+                OP,
+                "the fillet geometry's solver",
+            ));
         }
 
         let prev_rail = [rail(pseudo, geom, 0)?, rail(pseudo, geom, 1)?];
@@ -435,9 +450,9 @@ impl MakeCurveBlendSih {
             let face = pseudo
                 .fillet_edge(rail_edge)?
                 .orig_face
-                .ok_or_else(|| SolidError::null_pointer(OP))?;
+                .ok_or_else(|| SolidError::blend_missing(OP, "the rail's original face"))?;
             if !fs.original_face_has_surface(face)? {
-                return Err(SolidError::null_pointer(OP));
+                return Err(SolidError::blend_missing(OP, "the original face's surface"));
             }
         }
         // (upstream checks pFace1, pFace2, then pSurf1, pSurf2; any NULL is the same
@@ -508,7 +523,10 @@ impl MakeCurveBlendSih {
                     .ok_or_else(|| undefined("rail index"))?;
                 let prev_tangent = prev_pv[1];
                 if is_zero(prev_tangent.length()) {
-                    return Err(SolidError::sm_err(OP));
+                    return Err(SolidError::blend_failed(
+                        OP,
+                        "the previous rail's tangent is zero",
+                    ));
                 }
                 let next_pv = pv(&next_rail.evaluate(next_t, 1, true, false)?)?;
                 step_back(
@@ -584,14 +602,20 @@ impl MakeCurveBlendSih {
             let step_distance = self.step_back_dist_factor * radius;
 
             if d_min > 3.0 * step_distance {
-                return Err(SolidError::sm_err(OP));
+                return Err(SolidError::blend_failed(
+                    OP,
+                    "the pieces are too far apart to blend",
+                ));
             }
 
             // stap back param distance (its zero-tangent test precedes the next
             // rail's evaluation, as upstream)
             let prev_tangent = prev_pv[1];
             if is_zero(prev_tangent.length()) {
-                return Err(SolidError::sm_err(OP));
+                return Err(SolidError::blend_failed(
+                    OP,
+                    "the previous rail's tangent is zero",
+                ));
             }
             let next_rail = next_rail_curves
                 .get(l_min)
@@ -649,11 +673,11 @@ impl MakeCurveBlendSih {
         for ii in 0..2 {
             let prev_rail_edge = rail(pseudo, geom, ii)?;
             let prev_mate_eu = rail_mate(pseudo, prev_rail_edge)?;
-            let mut prev_uv_curve =
-                mate_uv_curve(pseudo, prev_mate_eu)?.ok_or_else(|| SolidError::null_pointer(OP))?;
+            let mut prev_uv_curve = mate_uv_curve(pseudo, prev_mate_eu)?
+                .ok_or_else(|| SolidError::blend_missing(OP, "the rail mate's uv curve"))?;
             let mut prev_rail_curve = as_bspline(&rail_curve(pseudo, prev_rail_edge)?)
                 .cloned()
-                .ok_or_else(|| SolidError::null_pointer(OP))?;
+                .ok_or_else(|| SolidError::blend_missing(OP, "the rail's B-spline curve"))?;
 
             // Trim PrevRailEdge(ii), UVCurve, and RailCurve intervals
             crate::topology::edge::set_interval(pseudo.brep_mut(), prev_rail_edge, &prev_trim_ivl)?;
@@ -727,11 +751,11 @@ impl MakeCurveBlendSih {
         for (iii, mut uv_blend) in uv_blends.into_iter().enumerate() {
             let prev_rail_edge = rail(pseudo, geom, iii)?;
             let prev_mate_eu = rail_mate(pseudo, prev_rail_edge)?;
-            let mut prev_uv_curve =
-                mate_uv_curve(pseudo, prev_mate_eu)?.ok_or_else(|| SolidError::null_pointer(OP))?;
+            let mut prev_uv_curve = mate_uv_curve(pseudo, prev_mate_eu)?
+                .ok_or_else(|| SolidError::blend_missing(OP, "the rail mate's uv curve"))?;
             let mut prev_rail_curve = as_bspline(&rail_curve(pseudo, prev_rail_edge)?)
                 .cloned()
-                .ok_or_else(|| SolidError::null_pointer(OP))?;
+                .ok_or_else(|| SolidError::blend_missing(OP, "the rail's B-spline curve"))?;
 
             // adjust UVblend parameterization to arc length
             uv_blend.edit_parameterization(&arc_leng_ivl)?;

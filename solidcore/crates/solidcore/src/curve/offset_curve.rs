@@ -333,7 +333,7 @@ impl OffsetCurve {
     fn base(&self) -> Result<&Curve> {
         self.base
             .as_deref()
-            .ok_or(SolidError::null_pointer(OP_BASE))
+            .ok_or_else(|| SolidError::curve_missing(OP_BASE, "the offset curve's base curve"))
     }
 
     /// `operator==`: same dimension, equal base curves, normals and intervals, offset
@@ -454,7 +454,10 @@ impl OffsetCurve {
             }
 
             if pv[1].length_squared() < EFF_ZERO_SQ {
-                return Err(SolidError::sm_err(OP_EVAL));
+                return Err(SolidError::curve_failed(
+                    OP_EVAL,
+                    "the tangent has zero length",
+                ));
             }
         } // end zero-1st-deriv check.
 
@@ -487,7 +490,7 @@ impl OffsetCurve {
             let bin_tt = pv[3].cross(self.normal);
             let [a, b] = bin
                 .unitized_derivative2(bin_t, bin_tt)
-                .map_err(|_| SolidError::sm_err(OP_EVAL))?;
+                .map_err(|_| SolidError::curve_failed(OP_EVAL, "the binormal does not unitize"))?;
             ubin_t = a;
             ubin_tt = b;
         } else if num_calc == 3 {
@@ -496,7 +499,7 @@ impl OffsetCurve {
             let bin_ttt = pv[4].cross(self.normal);
             let [a, b, c] = bin
                 .unitized_derivative3(bin_t, bin_tt, bin_ttt)
-                .map_err(|_| SolidError::sm_err(OP_EVAL))?;
+                .map_err(|_| SolidError::curve_failed(OP_EVAL, "the binormal does not unitize"))?;
             ubin_t = a;
             ubin_tt = b;
             ubin_ttt = c;
@@ -619,7 +622,10 @@ impl OffsetCurve {
             }
             pv[1] = (pv2[0] - pv[0]) / (sign * EFF_ZERO_SQRT * self.interval.length());
             if pv[1].length_squared() < EFF_ZERO_SQ {
-                return Err(SolidError::sm_err(OP_EVAL_POINT));
+                return Err(SolidError::curve_failed(
+                    OP_EVAL_POINT,
+                    "the tangent has zero length",
+                ));
             }
         }
 
@@ -627,7 +633,10 @@ impl OffsetCurve {
         let tan = pv[1];
         let bin = tan.cross(self.normal); // Bin is right hand side of curve
         if bin.length_squared() < EFF_ZERO_SQ {
-            return Err(SolidError::sm_err(OP_EVAL_POINT));
+            return Err(SolidError::curve_failed(
+                OP_EVAL_POINT,
+                "the binormal has zero length",
+            ));
         }
         let bin = bin.unitize_or_z();
         Ok(pv[0] + bin * self.distance)
@@ -726,7 +735,10 @@ impl OffsetCurve {
         // Check compatibility with base curve.
         let base_ivl = self.base()?.natural_interval();
         if !self.interval.is_contained_by(&base_ivl, EFF_ZERO) {
-            return Err(SolidError::sm_err(OP_TRIM));
+            return Err(SolidError::curve_failed(
+                OP_TRIM,
+                "the interval is not within the base curve's",
+            ));
         }
 
         // Trim when asked
@@ -827,7 +839,7 @@ impl OffsetCurve {
         let base = self
             .base
             .as_deref()
-            .ok_or_else(|| SolidError::null_pointer(OP_WRITE))?;
+            .ok_or_else(|| SolidError::curve_missing(OP_WRITE, "the offset curve's base curve"))?;
         let n = self.normal;
         let (lo, hi) = (self.interval.min(), self.interval.max());
         let ascii = db.file_type() == FileType::Ascii;

@@ -240,14 +240,32 @@ pub struct Paint {
     /// 1 = opaque.
     pub opacity: f32,
     pub faces: Vec<FacePaint>,
+    /// The body colour's name in the file it came from (a STEP `COLOUR_RGB` name), if it had one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
 }
 
-/// A face's own colour: the B-rep face index (`face_iter` order), sRGB as 0..1, opacity.
+/// A face's own colour: the B-rep face index (`face_iter` order), sRGB as 0..1, opacity, and
+/// its name in the file it came from, if it had one.
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct FacePaint {
     pub face: usize,
     pub color: [f32; 3],
     pub opacity: f32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+}
+
+/// The most characters a colour name read from a file keeps (as a design look's name).
+pub const COLOUR_NAME_MAX: usize = 128;
+
+/// A colour name read from a file, made safe to show and keep: control characters dropped,
+/// surrounding space trimmed, at most [`COLOUR_NAME_MAX`] characters. `None` when nothing is left.
+pub fn colour_name(raw: &str) -> Option<String> {
+    let cleaned: String = raw.chars().filter(|c| !c.is_control()).collect();
+    let name: String = cleaned.trim().chars().take(COLOUR_NAME_MAX).collect();
+    let name = name.trim_end();
+    (!name.is_empty()).then(|| name.to_string())
 }
 
 /// A B-rep edge as seen by the rest of the application.
@@ -382,6 +400,15 @@ pub enum PointClass {
     OnBoundary,
 }
 
+/// SMLib's class of a point as the kernel's.
+fn point_class(c: solidcraft_smlib::PointClass) -> PointClass {
+    match c {
+        solidcraft_smlib::PointClass::Inside => PointClass::Inside,
+        solidcraft_smlib::PointClass::Outside => PointClass::Outside,
+        solidcraft_smlib::PointClass::OnBoundary => PointClass::OnBoundary,
+    }
+}
+
 /// The kind of surface a face lies on, as a person modelling would name it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SurfaceKind {
@@ -425,7 +452,7 @@ impl SurfaceKind {
             S::Cone { .. } => SurfaceKind::Cone,
             S::Sphere { .. } | S::BallPatch { .. } => SurfaceKind::Sphere,
             S::Torus { .. } => SurfaceKind::Torus,
-            S::Spline { .. } | S::RationalSpline { .. } | S::PlacedRevolution { .. } => SurfaceKind::Freeform,
+            S::Spline { .. } | S::RationalSpline { .. } | S::PlacedRevolution { .. } | S::Blend { .. } => SurfaceKind::Freeform,
         }
     }
 }
@@ -740,6 +767,14 @@ impl Body {
         }
     }
 
+    /// The face of `self` nearest `p` and its exact distance, or `None` for a mesh body or empty body.
+    pub fn nearest_face(&self, p: Vec3) -> Option<(f64, usize)> {
+        let (ops, order) = self.ops_body()?;
+        let reach = self.size().max(1.0) * 100.0;
+        let dists = ops.face_distances_within(order, &[[p.x, p.y, p.z]], reach).ok()?;
+        dists.into_iter().enumerate().filter_map(|(f, row)| Some((row.first().copied().flatten()?, f))).min_by(|a, b| a.0.total_cmp(&b.0))
+    }
+
     /// Certify the two caps of a body built by [`crate::cylinder`]. Its wall stays uncertified.
     pub fn with_cylinder_certificate(mut self, producer: u64) -> Result<Self> {
         if producer == 0 {
@@ -980,21 +1015,24 @@ impl Body {
         self.paint.as_deref()
     }
 
-    /// The same body with opacity and face colours for export (`None` or opaque with no face
-    /// colours clears them).
+    /// The same body with opacity, face colours and colour names for export (`None`, or opaque
+    /// with no face colours and no name, clears them).
     pub fn with_paint(mut self, p: Option<Paint>) -> Body {
         let clean = |x: f32| if x.is_finite() { x.clamp(0.0, 1.0) } else { 1.0 };
         self.paint = p
             .map(|mut p| {
                 p.opacity = clean(p.opacity);
+                p.name = p.name.as_deref().and_then(colour_name);
                 p.faces.retain(|f| f.color.iter().all(|x| x.is_finite()));
                 for f in &mut p.faces {
                     f.color = f.color.map(|x| x.clamp(0.0, 1.0));
                     f.opacity = clean(f.opacity);
+                    f.name = f.name.as_deref().and_then(colour_name);
                 }
                 p
             })
-            .filter(|p| p.opacity < 1.0 || !p.faces.is_empty())
+            // An opaque body colour's name is kept with it: the paint holds it.
+            .filter(|p| p.opacity < 1.0 || !p.faces.is_empty() || p.name.is_some())
             .map(std::sync::Arc::new);
         self.regularization_protected |= self.paint().is_some_and(|paint| !paint.faces.is_empty());
         self
@@ -1060,28 +1098,20 @@ impl Body {
         Ok(b)
     }
 
-    /// The body's volume from a mesh at `tol`, measured once per (record, tolerance): clones of
-    /// a body share the measurement. `None` when the body cannot be meshed, or a face of it was
-    /// left out of the mesh (an open mesh has no volume).
-    pub fn volume_at(&self, tol: f64) -> Option<f64> {
-        let key = if tol.is_finite() && tol > 0.0 { tol } else { 0.05 };
-        let key = key.to_bits();
+    /// The body's volume: measured with exact mass properties via SMLib for B-rep bodies,
+    /// or from mesh triangles for mesh bodies.
+    pub fn volume_at(&self, _tol: f64) -> Option<f64> {
         if let Some(cell) = &self.volume
             && let Ok(cached) = cell.lock()
-            && let Some((cached_tol, volume)) = *cached
-            && cached_tol == key
+            && let Some((_, volume)) = *cached
         {
             return Some(volume);
         }
-        let mesh = self.mesh(&MeshTolerance::chord(f64::from_bits(key))).ok()?;
-        if self.faces_without_triangles(&mesh) > 0 {
-            return None;
-        }
-        let volume = mesh.measure().volume;
+        let volume = crate::measure(self).ok()?.volume;
         if let Some(cell) = &self.volume
             && let Ok(mut slot) = cell.lock()
         {
-            *slot = Some((key, volume));
+            *slot = Some((0, volume));
         }
         Some(volume)
     }
@@ -1256,20 +1286,6 @@ impl Body {
         plan.faces_with_triangles(self.face_count()).iter().filter(|h| !**h).count()
     }
 
-    /// Faces of the body with no triangles in its mesh `m` (left out by the mesher).
-    fn faces_without_triangles(&self, m: &Mesh) -> usize {
-        if self.is_mesh() {
-            return 0;
-        }
-        let mut has = vec![false; self.face_count()];
-        for f in &m.tri_face {
-            if let Some(h) = has.get_mut(*f as usize) {
-                *h = true;
-            }
-        }
-        has.iter().filter(|h| !**h).count()
-    }
-
     /// A mesh with its edges flagged for display (seams, tangent joins, protected creases).
     fn flagged(&self, mut m: Mesh) -> Result<Mesh> {
         if self.is_mesh() {
@@ -1282,15 +1298,26 @@ impl Body {
 
     /// Edges with polylines (index = the record's edge index).
     pub fn edges(&self, tol: f64) -> Result<Vec<EdgeInfo>> {
-        let m = self.mesh(&MeshTolerance::chord(tol))?;
-        Ok(m.edges
-            .into_iter()
-            .enumerate()
-            .map(|(index, points)| {
-                let (mid, length) = polyline_mid(&points);
-                EdgeInfo { index, points, mid, length }
-            })
-            .collect())
+        if let Some(mb) = &self.mesh {
+            let m = mb.to_mesh();
+            return Ok(m
+                .edges
+                .into_iter()
+                .enumerate()
+                .map(|(index, points)| {
+                    let (mid, length) = polyline_mid(&points);
+                    EdgeInfo { index, points, mid, length }
+                })
+                .collect());
+        }
+        let rec = self.record();
+        let mut out = Vec::with_capacity(rec.edges.len());
+        for (index, edge) in rec.edges.iter().enumerate() {
+            let points = edge_points(edge, tol)?;
+            let (mid, length) = polyline_mid(&points);
+            out.push(EdgeInfo { index, points, mid, length });
+        }
+        Ok(out)
     }
 
     /// How far [`Body::planar_edges`] lets a piece it reads as a line or an arc lie from the
@@ -1302,21 +1329,114 @@ impl Body {
 
     /// Edges `indices` (record edge indices) in `plane`'s coordinates, exactly: lines, circular
     /// arcs, single free-form segments, and a free-form curve of several spans as the one
-    /// B-spline it is, for a sketch to project them. `None` for an edge that doesn't lie in a
-    /// plane parallel to `plane`, isn't read exactly or isn't there, and for every edge of a mesh
-    /// body.
+    /// B-spline it is, for a sketch to project them. An edge out of the plane that lies on a
+    /// cylinder whose axis is `plane`'s normal (a hole's rim on a curved wall) projects onto that
+    /// cylinder's circle: the arc of it ([`Body::projected_on_cylinder`]). `None` for any other
+    /// edge that doesn't lie in a plane parallel to `plane`, one that isn't read exactly or isn't
+    /// there, and for every edge of a mesh body.
     pub fn planar_edges(&self, plane: &solidcore_record::Plane, indices: &[usize]) -> Vec<Option<Vec<crate::PlanarPiece>>> {
         if self.is_mesh() {
             return vec![None; indices.len()];
         }
         let tol = self.planar_edges_tolerance();
+        let mut faces = None;
         indices
             .iter()
             .map(|i| {
                 let mut work = 262_144usize;
-                crate::prism_curve::Run::of(&self.record, *i, true).and_then(|run| crate::prism_curve::projected_curves(&run, plane, tol, &mut work))
+                let run = crate::prism_curve::Run::of(&self.record, *i, true)?;
+                crate::prism_curve::projected_curves(&run, plane, tol, &mut work).or_else(|| {
+                    let faces = faces.get_or_insert_with(|| crate::history::edge_faces(&self.record));
+                    let segs = self.projected_on_cylinder(plane, *i, faces.get(*i)?, tol)?;
+                    Some(segs.into_iter().map(crate::PlanarPiece::Seg).collect())
+                })
             })
             .collect()
+    }
+
+    /// Edge `edge` projected on `plane` as the arc it covers of the circle of a cylinder it
+    /// bounds (one of `faces`) whose axis is `plane`'s normal: everything on that cylinder
+    /// projects onto its circle, so the arc is exact where the edge itself is held only
+    /// approximately (a hole's rim on a round wall is an intersection curve). The arc runs from
+    /// the projection of the edge's start vertex as far round as the edge goes; a closed edge
+    /// is one arc right round, which a sketch takes as the circle, as it took the rim fitted.
+    /// `None` when no such cylinder holds the edge within `tol`, or the edge turns back round
+    /// the axis.
+    fn projected_on_cylinder(&self, plane: &solidcore_record::Plane, edge: usize, faces: &[usize], tol: f64) -> Option<Vec<solidcore_record::Seg2>> {
+        use solidcraft_geom::brep::eval::CurveEval;
+        const SAMPLES: u16 = 32;
+        let e = self.record.edges.get(edge)?;
+        let curve = CurveEval::new(e.parameters()).ok()?;
+        let [t0, t1] = e.interval;
+        let pts: Vec<Vec3> = (0..=SAMPLES).map(|k| curve.point(t0 + (t1 - t0) * f64::from(k) / f64::from(SAMPLES))).collect::<Option<_>>()?;
+        let n = plane.normal();
+        let size = self.size().max(1.0);
+        faces.iter().find_map(|&f| {
+            let Some(crate::FaceSurface::Cylinder { origin, axis, radius }) = crate::surface_kind::surface_of(&self.record, f) else { return None };
+            let axis = Vec3::from(axis);
+            // The axis off the normal by an angle moves the edge's projection by that angle
+            // times its distance along the axis, at most the body's size.
+            if !(radius > tol) || axis.cross(n).len() * size > tol * 0.1 {
+                return None;
+            }
+            let off_axis = |p: Vec3| {
+                let d = p - origin;
+                (d - axis * d.dot(axis)).len()
+            };
+            if pts.iter().any(|p| (off_axis(*p) - radius).abs() > tol) {
+                return None;
+            }
+            let first = *pts.first()?;
+            let center = plane.to_local(origin + axis * (first - origin).dot(axis));
+            // A quick reject on the samples: their angle must keep going one way, and no more
+            // than once round.
+            let angles: Vec<f64> = pts.iter().map(|p| (plane.to_local(*p) - center).angle()).collect();
+            let mut sign = 0.0;
+            let mut sampled = 0.0;
+            for w in angles.windows(2) {
+                let [a, b] = w else { continue };
+                let d = (b - a + std::f64::consts::PI).rem_euclid(std::f64::consts::TAU) - std::f64::consts::PI;
+                if d.abs() * radius <= tol * 1e-3 {
+                    continue;
+                }
+                if sign * d < 0.0 {
+                    return None;
+                }
+                sign = d.signum();
+                sampled += d;
+            }
+            if sampled.abs() > std::f64::consts::TAU + tol / radius {
+                return None;
+            }
+            // The proof (solidcore): the edge turns one way round the axis all along its
+            // interval, the same way the samples went; else no arc, and the caller fits.
+            let turn = solidcore_ops::curve_knots::turn_about_axis(e.parameters(), e.interval, [origin.x, origin.y, origin.z], [n.x, n.y, n.z])
+                .ok()
+                .flatten()?;
+            if turn != sign {
+                return None;
+            }
+            // The arc runs from the start vertex to the end vertex that way round (a closed
+            // edge all the way round).
+            let at = |v: u32| self.record.vertices.get(v as usize).map(|x| (plane.to_local(Vec3::from(x.point)) - center).angle());
+            let [v0, v1] = e.vertices;
+            let start = at(v0)?;
+            let sweep = if v0 == v1 {
+                turn * std::f64::consts::TAU
+            } else {
+                let d = (at(v1)? - start).rem_euclid(std::f64::consts::TAU);
+                if d * radius <= tol {
+                    return None;
+                }
+                if turn > 0.0 { d } else { d - std::f64::consts::TAU }
+            };
+            // The vertices' sweep is only taken where the samples agree with it: an edge that
+            // winds past a full turn (a helix seen along its axis) is no arc.
+            if (sampled - sweep).abs() > std::f64::consts::FRAC_PI_2 {
+                return None;
+            }
+            Some(vec![solidcore_record::Seg2::Arc { center, radius, start, sweep }])
+        })
     }
 
     /// Faces with area and centroid.
@@ -1395,11 +1515,56 @@ impl Body {
             });
         }
         let class = self.smlib()?.classify_point([p.x, p.y, p.z]).map_err(|e| KernelError::smlib("SMLib point classification", e))?;
-        Ok(match class {
-            solidcraft_smlib::PointClass::Inside => PointClass::Inside,
-            solidcraft_smlib::PointClass::Outside => PointClass::Outside,
-            solidcraft_smlib::PointClass::OnBoundary => PointClass::OnBoundary,
-        })
+        Ok(point_class(class))
+    }
+
+    /// The point of face `face_index` nearest `point`, when `point` lies on that face itself
+    /// within `tolerance`, else `None`: solidcore decides it exactly on the face's surface and
+    /// trim ([`solidcore_ops::Body::point_on_face`]), no mesh. `None` too for a mesh body, an
+    /// index out of range, a point or tolerance that is not usable; `Err` for the kernel's
+    /// failure.
+    pub fn point_lies_on_face(&self, face_index: usize, point: Vec3, tolerance: f64) -> Result<Option<Vec3>> {
+        let Some((body, order)) = self.ops_body() else { return Ok(None) };
+        if face_index >= self.record.faces.len() {
+            return Ok(None);
+        }
+        match body.point_on_face(order, face_index, [point.x, point.y, point.z], tolerance) {
+            Ok(found) => Ok(found.map(|p| Vec3::new(p[0], p[1], p[2]))),
+            Err(solidcore_ops::Error::Argument) => Ok(None),
+            Err(e) => Err(KernelError::Failed(format!("point on face: {e}"))),
+        }
+    }
+
+    /// Where face `face_index` lies along `direction` when it is a plane square to it: its level
+    /// from `origin` and the face's own tolerance ([`solidcore_ops::Body::face_square_level`]),
+    /// exact, no mesh. `None` for a face that is not, a mesh body, an index out of range or a
+    /// direction or origin that is not usable; `Err` for the kernel's failure.
+    pub fn face_square_level(&self, face_index: usize, direction: Vec3, origin: Vec3) -> Result<Option<solidcore_ops::SquareFaceLevel>> {
+        let Some((body, order)) = self.ops_body() else { return Ok(None) };
+        if face_index >= self.record.faces.len() {
+            return Ok(None);
+        }
+        match body.face_square_level(order, face_index, [direction.x, direction.y, direction.z], [origin.x, origin.y, origin.z]) {
+            Ok(found) => Ok(found),
+            Err(solidcore_ops::Error::Argument) => Ok(None),
+            Err(e) => Err(KernelError::Failed(format!("face square level: {e}"))),
+        }
+    }
+
+    /// [`Body::classify_point`] for each of `points`, in order, through one classification of
+    /// the body: SMLib's copy of it and its search structures are made once for all the points,
+    /// where a call a point makes them again each time (on a large body far more work than a
+    /// point's own solve). The first point that cannot be classified fails them all.
+    pub fn classify_points(&self, points: &[Vec3]) -> Result<Vec<PointClass>> {
+        if let Some(p) = points.iter().find(|p| !(p.x.is_finite() && p.y.is_finite() && p.z.is_finite())) {
+            return Err(KernelError::Invalid(format!("point classification: the point {p:?} is not finite")));
+        }
+        if self.mesh.is_some() || points.len() < 2 {
+            return points.iter().map(|&p| self.classify_point(p)).collect();
+        }
+        let at: Vec<[f64; 3]> = points.iter().map(|p| [p.x, p.y, p.z]).collect();
+        let classes = self.smlib()?.classify_points(&at).map_err(|e| KernelError::smlib("SMLib point classification", e))?;
+        classes.into_iter().map(|c| c.map(point_class).map_err(|e| KernelError::smlib("SMLib point classification", e))).collect()
     }
 
     /// B-rep faces (a mesh body is one face; [`crate::measure`] counts its triangles).

@@ -123,22 +123,19 @@ fn marker_moves_a_box_placed_by_its_centre_through_its_centre_fields() {
     h.settle();
     h.step(&json!({"call": "ui.editFeature", "params": {"feature": name}})).unwrap();
     h.settle();
-    // Edit Feature reads the stored corner back; choosing Center keeps the box where it is.
+    // Edit Feature reads the stored centre back with Center chosen (#14487).
     let at = h.at(&json!({"handle": "primitive:position"})).unwrap();
     let expect = h.at(&json!({"world": [20, 15, 10]})).unwrap();
     assert!((at[0] - expect[0]).hypot(at[1] - expect[1]) < 2.0, "the marker stands under the centre, on the bottom: {at:?} {expect:?}");
-    {
-        let d = h.app.dialog.as_mut().expect("a dialog");
-        d.extra.remove("corner");
-        d.extra.insert("center".into(), json!(["20 mm", "15 mm", "14 mm"]));
-    }
+    assert!(h.app.dialog.as_ref().is_some_and(|d| d.extra.contains_key("center") && !d.extra.contains_key("corner")));
     drag(&mut h, [60.0, 35.0, 10.0]);
     let d = h.app.dialog.as_ref().expect("the dialog is open");
     assert!(typed(&h, "center").dist(Vec3::new(60.0, 35.0, 14.0)) < 1e-3, "the centre fields took the drop: {:?}", d.extra.get("center"));
     ok(&mut h);
     let f = h.app.session.doc.find_feature(&name).expect("the Box is still there");
-    let FeatureKind::Box { corner, .. } = &f.kind else { panic!("a Box: {:?}", f.kind) };
-    assert!(point(&h, corner).dist(Vec3::new(55.0, 32.0, 10.0)) < 1e-3, "moved: {:?}", point(&h, corner));
+    let FeatureKind::Box { corner, centred, .. } = &f.kind else { panic!("a Box: {:?}", f.kind) };
+    assert!(*centred, "still placed by its centre");
+    assert!(point(&h, corner).dist(Vec3::new(60.0, 35.0, 14.0)) < 1e-3, "moved: {:?}", point(&h, corner));
     reopened_at(&mut h, &name, [60.0, 35.0, 10.0]);
 }
 
@@ -217,6 +214,31 @@ fn an_empty_placement_field_counts_as_zero_for_the_marker() {
     d.extra.insert("corner".into(), json!(["300", "", "400"]));
     let (base, _) = place(&h);
     assert!(base.dist(Vec3::new(300.0 + size.x / 2.0, size.y / 2.0, 400.0)) < 1e-6, "corner with y empty: {base:?}");
+}
+
+/// A typed corner is read as the size fields read it, by the marker and by OK alike: in an inch
+/// design a decimal comma, a unitless expression, a value with its unit and a bare number are all
+/// inches, and the marker stands over the corner of the box OK makes.
+#[test]
+fn a_typed_corner_is_in_the_design_unit_for_the_marker_and_for_ok() {
+    for (text, inches) in [("1,5", 1.5), ("2 * 1", 2.0), ("1,5 in", 1.5), ("3", 3.0)] {
+        let mut h = Harness::new();
+        h.app.preferences.placement_handles = true;
+        h.app.run("document.units", json!({"units": "in"})).unwrap();
+        h.settle();
+        start(&mut h, "solid.box");
+        let size = h.app.dialog.as_ref().map(|d| super::box_size(&h.app, d)).unwrap();
+        h.app.dialog.as_mut().unwrap().extra.insert("corner".into(), json!([text, text, text]));
+        let (base, _) = place(&h);
+        let marked = base - Vec3::new(size.x / 2.0, size.y / 2.0, 0.0);
+        ok(&mut h);
+        let r = h.app.session.execute("inspect.measure", &json!({})).unwrap();
+        let min = &r["bodies"][0]["bbox"]["min"];
+        let made = Vec3::new(min[0].as_f64().unwrap(), min[1].as_f64().unwrap(), min[2].as_f64().unwrap());
+        let want = Vec3::new(inches, inches, inches) * 25.4;
+        assert!(marked.dist(want) < 1e-6, "{text}: the marker's corner {marked:?}, want {want:?}");
+        assert!(made.dist(want) < 1e-6, "{text}: OK's corner {made:?}, want {want:?}");
+    }
 }
 
 /// A size typed as a bare expression ("2 * 1") is in the design's unit, as OK reads it: in an

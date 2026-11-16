@@ -50,6 +50,12 @@
 //! - **Bounded loops.** The start point loop pops one start point per pass; no pass
 //!   adds start points (`TraceCurve` adds none), so it ends after at most as many
 //!   passes as `FindBoundaryStartPoints` made points.
+//! - **Touching points left for a start point** (not upstream). After the interior
+//!   curves, a touching point `FindBoundaryStartPoints` dropped because a start point
+//!   lies on it is added when its surface points are within the tolerance and it is
+//!   on no curve found ([`SurfaceIntersector::add_deferred_touching_points`]); such
+//!   points come after the traced curves, where upstream's boundary pass would have
+//!   put them first.
 //! - **Opt-in fix (WR-76, #392).** With
 //!   [`UpstreamFixes::ssi_trace_tangent_curves_once`](crate::kernel::UpstreamFixes::ssi_trace_tangent_curves_once)
 //!   a traced curve removes, before it is flushed, the start points left in a tangent
@@ -72,7 +78,7 @@
 //!   caller), the unused context argument and the `SM_ASSERT`s.
 
 use crate::curve::curve::Curve;
-use crate::error::{ignored, passed_on, Result, SolidError};
+use crate::error::{ignored, passed_on, Result, SolidError, SM_ERR_NULL_POINTER};
 use crate::geom::extent1d::ExtentPointType;
 use crate::geom::extent2d::Extent2d;
 use crate::geom::extent3d::Extent3d;
@@ -159,7 +165,13 @@ fn intersection_surface_caches_in<O: Copy + PartialEq>(
         if e.is_unported_or_cancelled() {
             e
         } else {
-            SolidError::null_pointer(OP_CACHES)
+            crate::error::Failure::new(
+                OP_CACHES,
+                crate::error::intersect::IntersectFailure::StageFailed,
+            )
+            .with_status(SM_ERR_NULL_POINTER)
+            .caused_by(e)
+            .into_error()
         }
     };
     let [h1, h2] = handles;
@@ -511,6 +523,8 @@ impl<'t, O: SolutionObject + Copy + PartialEq + 't> AdvSurfaceIntersector<'_, 't
         trees_ready: bool,
     ) -> Result<SurfaceIntersection> {
         let mut result = SurfaceIntersection::default();
+        // filled by FindBoundaryStartPoints, read at the end (not upstream)
+        self.base.deferred_touching.clear();
         // filled by FindInteriorCurves, read by the tangential curve pass (WR-75)
         self.tangent_curve_seeds.clear();
 
@@ -524,7 +538,10 @@ impl<'t, O: SolutionObject + Copy + PartialEq + 't> AdvSurfaceIntersector<'_, 't
 
         // get surface caches and their decomposition trees (NER)
         if caches.is_empty() {
-            return Err(SolidError::null_pointer(OP_DI));
+            return Err(SolidError::intersect_stage_failed(
+                OP_DI,
+                SM_ERR_NULL_POINTER,
+            ));
         }
         for c in caches.iter_mut().take(2) {
             if !(trees_ready && c.tree().is_some()) {
@@ -532,7 +549,13 @@ impl<'t, O: SolutionObject + Copy + PartialEq + 't> AdvSurfaceIntersector<'_, 't
                     if e.is_unported_or_cancelled() {
                         e
                     } else {
-                        SolidError::null_pointer(OP_DI)
+                        crate::error::Failure::new(
+                            OP_DI,
+                            crate::error::intersect::IntersectFailure::StageFailed,
+                        )
+                        .with_status(SM_ERR_NULL_POINTER)
+                        .caused_by(e)
+                        .into_error()
                     }
                 })?;
             }
@@ -553,17 +576,21 @@ impl<'t, O: SolutionObject + Copy + PartialEq + 't> AdvSurfaceIntersector<'_, 't
         let mut planes1 = planes
             .first()
             .cloned()
-            .ok_or(SolidError::null_pointer(OP_DI))?;
+            .ok_or_else(|| SolidError::intersect_stage_failed(OP_DI, SM_ERR_NULL_POINTER))?;
         let mut planes2 = planes.get(1).cloned().unwrap_or_else(|| planes1.clone());
 
         let caches: &'t [SurfaceCache<O>] = caches;
-        let cache1 = caches.first().ok_or(SolidError::null_pointer(OP_DI))?;
+        let cache1 = caches
+            .first()
+            .ok_or_else(|| SolidError::intersect_stage_failed(OP_DI, SM_ERR_NULL_POINTER))?;
         let cache2 = caches.get(1).unwrap_or(cache1);
         self.bind_caches(cache1, cache2)?;
 
         // no work - root treeNode bounding boxes are disjoint
         let root_box = |c: &SurfaceCache<O>| -> Result<Extent3d> {
-            let tree = c.tree().ok_or(SolidError::null_pointer(OP_DI))?;
+            let tree = c
+                .tree()
+                .ok_or_else(|| SolidError::intersect_stage_failed(OP_DI, SM_ERR_NULL_POINTER))?;
             let top = tree
                 .top_node()
                 .ok_or(SolidError::invalid_input(OP_DI, "tree without top node"))?;
@@ -807,6 +834,30 @@ impl<'t, O: SolutionObject + Copy + PartialEq + 't> AdvSurfaceIntersector<'_, 't
             mut deviations,
         } = interior;
 
+        // not upstream: a touching point left out because a start point lies on it is
+        // added, last, when no curve found covers it
+        let mut found = TsectCurves {
+            curves_3d: core::mem::take(&mut curves_3d),
+            uv_curves: [
+                core::mem::take(&mut surface1_uv_curves),
+                core::mem::take(&mut surface2_uv_curves),
+            ],
+            curve_types: core::mem::take(&mut curve_types),
+            deviations: core::mem::take(&mut deviations),
+        };
+        self.base.add_deferred_touching_points(k, &mut found)?;
+        let TsectCurves {
+            curves_3d: found_3d,
+            uv_curves: [found_uv1, found_uv2],
+            curve_types: found_types,
+            deviations: found_deviations,
+        } = found;
+        curves_3d = found_3d;
+        surface1_uv_curves = found_uv1;
+        surface2_uv_curves = found_uv2;
+        curve_types = found_types;
+        deviations = found_deviations;
+
         // remove degenerate Curves whose points lie on nonDegenerate intersections
         let mut ii = 0;
         while let Some(curve) = curves_3d.get(ii) {
@@ -977,6 +1028,102 @@ mod tests {
         assert!(more);
     }
 
+    /// Two plane patches whose corners pass 9.9 apart (they do not cross: the line
+    /// where their planes meet leaves A at t = -23158.91 and enters B only up to
+    /// t = -23169.29), intersected with a tolerance of 2785 (goldens
+    /// `intersect.surface_intersector_p5` gen0236). The boundary search finds a
+    /// touching point at A's corner and a start point within the tolerance of it,
+    /// which traces no curve. The touching point used to be dropped for that start
+    /// point, leaving no answer; it is now added at the end, since no curve found
+    /// covers it (WR-51 made the start point test a real distance of the tolerance,
+    /// which reaches this start point).
+    #[test]
+    fn a_touching_point_no_curve_covers_is_kept() {
+        let k = &Kernel::default();
+        let la = 17_328.120_691_213_055;
+        let lb = 11_527.965_487_154_615;
+        let oa = [
+            -534.257_546_242_803_1,
+            3_609.235_629_132_970_6,
+            14_227.419_314_424_104,
+        ];
+        let xa = [
+            -0.996_769_538_633_399_7,
+            -0.073_244_498_176_162_2,
+            -0.032_950_422_447_696_89,
+        ];
+        let ya = [
+            -0.073_610_447_371_212_76,
+            0.669_038_560_874_377_2,
+            0.739_573_462_274_676_4,
+        ];
+        let ob = [
+            -27_685.723_579_420_985,
+            102.485_228_779_159_39,
+            26_996.495_008_515_747,
+        ];
+        let xb = [
+            0.967_335_014_604_463_7,
+            0.228_281_315_927_273_74,
+            -0.110_229_806_852_292_79,
+        ];
+        let yb = [
+            -0.222_193_158_638_955_42,
+            0.972_844_457_931_221_4,
+            0.064_837_187_836_549_17,
+        ];
+        let patch = |o, x, y, l: f64| {
+            Surface::from(Plane::new(
+                Vec3::from_array(o),
+                Vec3::from_array(x),
+                Vec3::from_array(y),
+                Point2::new(1.0, 1.0),
+                &Extent2d::from_bounds(0.0, 0.0, l, l),
+            ))
+        };
+        let (a, b) = (patch(oa, xa, ya, la), patch(ob, xb, yb, lb));
+        let (da, db) = (
+            Extent2d::from_bounds(0.0, 0.0, la, la),
+            Extent2d::from_bounds(0.0, 0.0, lb, lb),
+        );
+        let tol = 2_785.330_913_332_592_4;
+        let r = do_intersection(k, &a, &da, &b, &db, [false, true], Some(tol), None).unwrap();
+
+        assert_eq!(r.curves_3d.len(), 1, "{r:?}");
+        assert_eq!(r.curve_types, vec![TsectCurveType::Touching]);
+        let c3 = r.curves_3d.first().unwrap();
+        assert!(c3.is_degenerate(k, EFF_ZERO, None).unwrap());
+        let p = c3.evaluate_point(k, 0.0).unwrap();
+        let uv1 = r.surface1_uv_curves[0]
+            .as_ref()
+            .unwrap()
+            .evaluate_point(k, 0.0)
+            .unwrap();
+        let uv2 = r.surface2_uv_curves[0]
+            .as_ref()
+            .unwrap()
+            .evaluate_point(k, 0.0)
+            .unwrap();
+        // A's corner (la, la), on B's edge u = lb, inside B's v range
+        assert_eq!((uv1.x, uv1.y), (la, la));
+        assert_eq!(uv2.x, lb);
+        assert!(uv2.y > 0.0 && uv2.y < lb);
+        // The point is midway between its two surface points, which are its UV
+        // points on A and B; its deviation is their distance, and it lies within
+        // the tolerance of both patches.
+        let on = |o: [f64; 3], x: [f64; 3], y: [f64; 3], uv: Vec3| {
+            Vec3::from_array(o) + Vec3::from_array(x) * uv.x + Vec3::from_array(y) * uv.y
+        };
+        let (pa, pb) = (on(oa, xa, ya, uv1), on(ob, xb, yb, uv2));
+        let dev = *r.deviations.first().unwrap();
+        assert!((dev - pa.distance(pb)).abs() <= 1e-9 * dev);
+        // never closer than the patches' 9.9 separation, and far inside the tolerance
+        assert!(dev > 9.9 && dev < 11.0, "{dev}");
+        assert!(p.distance(pa) <= 0.5 * dev * (1.0 + 1e-9));
+        assert!(p.distance(pb) <= 0.5 * dev * (1.0 + 1e-9));
+        assert!(p.distance(pa) < tol && p.distance(pb) < tol);
+    }
+
     #[test]
     fn no_cache_is_a_null_pointer() {
         let a = plane([0.0; 3], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]);
@@ -988,13 +1135,11 @@ mod tests {
         let e = ssi
             .do_intersection_with_caches(&k, &mut caches, Some(0.5), Some(0.1))
             .unwrap_err();
-        assert!(matches!(
-            e,
-            SolidError::Upstream {
-                code: SM_ERR_NULL_POINTER,
-                ..
-            }
-        ));
+        assert_eq!(
+            e.intersect_failure(),
+            Some(&crate::error::intersect::IntersectFailure::StageFailed)
+        );
+        assert_eq!(e.upstream_status(), Some(SM_ERR_NULL_POINTER));
         // the tolerances are set first
         assert_eq!(ssi.base.this_approx_tol_3d, 0.5);
         assert_eq!(ssi.base.this_ang_tol_rad, 0.1);
@@ -1089,5 +1234,83 @@ mod tests {
             sphere_cut_with_trace_steps(&k, 1),
             Err(SolidError::InvalidInput { .. })
         ));
+    }
+
+    /// A cache context whose cache preparation fails (as a caller's identity
+    /// resolution can).
+    struct FailingContext;
+
+    impl SurfaceSolveContext<NoSurfaceHandle> for FailingContext {
+        fn build_surface_cache(
+            &mut self,
+            _k: &Kernel,
+            _surface: &Surface,
+            _handle: Option<NoSurfaceHandle>,
+        ) -> Result<SurfaceCache<NoSurfaceHandle>> {
+            Err(SolidError::invalid_input("test::identity", "no such face"))
+        }
+        fn face_queries(&self) -> Option<&dyn FaceQueries<NoSurfaceHandle>> {
+            None
+        }
+    }
+
+    #[test]
+    fn intersection_caches_keep_the_context_error_as_their_cause() {
+        let k = Kernel::default();
+        let a = plane([0.0; 3], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]);
+        let b = plane([0.0, 0.0, 1.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]);
+        let si = SurfaceIntersector::new(&k, &a, &unit(), &b, &unit(), false).unwrap();
+        let e = intersection_surface_caches_with_context(
+            &k,
+            &si,
+            [Some(NoSurfaceHandle), Some(NoSurfaceHandle)],
+            &mut FailingContext,
+        )
+        .unwrap_err();
+        assert_eq!(
+            e.intersect_failure(),
+            Some(&crate::error::intersect::IntersectFailure::StageFailed)
+        );
+        assert_eq!(
+            e.cause(),
+            Some(&SolidError::invalid_input("test::identity", "no such face"))
+        );
+    }
+
+    #[test]
+    fn do_intersection_keeps_the_tree_build_error_as_its_cause() {
+        let k = Kernel::default();
+        let a = plane([0.0; 3], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]);
+        let b = plane([0.0, 0.0, 1.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]);
+        let mut ssi: AdvSurfaceIntersector<'_, '_, NoSurfaceHandle> =
+            AdvSurfaceIntersector::new(&k, &a, &unit(), &b, &unit(), false).unwrap();
+        // a B-spline surface with no NURB: its tree cannot be built
+        let empty = Surface::from(BSplineSurface::new());
+        let mut cache: SurfaceCache<NoSurfaceHandle> = SurfaceCache::new(
+            empty.clone(),
+            unit(),
+            crate::surface::surface_cache::SurfaceCacheOptions::default(),
+        );
+        let built = cache.get_tree(&k).map(|_| ()).unwrap_err();
+        let mut caches = vec![
+            SurfaceCache::new(
+                empty.clone(),
+                unit(),
+                crate::surface::surface_cache::SurfaceCacheOptions::default(),
+            ),
+            SurfaceCache::new(
+                empty,
+                unit(),
+                crate::surface::surface_cache::SurfaceCacheOptions::default(),
+            ),
+        ];
+        let e = ssi
+            .do_intersection_with_caches(&k, &mut caches, Some(0.5), Some(0.1))
+            .unwrap_err();
+        assert_eq!(
+            e.intersect_failure(),
+            Some(&crate::error::intersect::IntersectFailure::StageFailed)
+        );
+        assert_eq!(e.cause(), Some(&built));
     }
 }

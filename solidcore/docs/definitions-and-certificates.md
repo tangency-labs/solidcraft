@@ -276,7 +276,11 @@ written as the operations it counts:
 | `blend::fillet_section::recertify::precision_floor` | G (D + γ_K M), K = 2(n + 1) + 6 | the net's rows from the stations |
 | `surface::procedural_sweep::ProceduralSweep::floor` | G γ_(2(p+3)+24) (A + (R + λ)Θ + R) | the sweep's net and evaluation |
 | `surface::implicit::lies_on` | γ_K, K = 4d(p + 1)(q + 1) + 16 | an implicit equation's Bernstein coefficient |
+| `query::tangent_edge` (`node_error`, `lebesgue`, `piece_bound`) | δ = (γ_4 π + 4u + γ_3(\|m\|/h + 1)) (1 + γ_4): the angle, its cosine (libm, 2 ulps) and the mapped node; Λ ×(1 + 16u); the atan/acos results ×(1 + 8u) | the Chebyshev nodes' rounding (the Markov term ΛδD²) and the tangency angle bound |
 | `sweep::stations` (`rail_crossing`) | γ_5 S_i, S_i = Σ_j (\|x_ij\| + \|p_j\| w_i) \|t_j\| | a rail's Bernstein distance coefficient from a station's plane; within it, taken as 0 |
+| `surface::extend::analytic` (private `certify_iso`) | γ_(12L+6) A_j, plus the plane's own (a parallel's height γ_(12L+7), a meridian's normal γ_(12L+8) + γ_12), × (1 + γ_16) | an extended analytic's iso control point off its plane; L de Boor levels, A_j its stencil's size (#15039) |
+| `surface::sphere::meridian_rounding` | S · 1.75 (γ_K + γ_33) \|P\| + 3.5 γ_4 \|P\| + γ_31 π r, K = 16(p + q + 2) | a half meridian's end angle as `IsArc` fits it; S its first-order conditioning, read off the fit (`end_angle_conditioning`) (#15039) |
+| `primitive::primitive_creation::p2::taper_walls` (`touch_bound`, `circles_may_meet`) | γ_16 (\|w\| + \|q\| + r); γ_12 (D² + (r_a ∓ r_b)²) | a draft's line's foot q off its circle (\|q\| − r) and circle/circle reach at a section crossing; within it, taken as touching |
 
 In `precision_floor`, D is the stations' term (a foot within L_u η_u + L_v η_v of its root,
 η = `STATION_STEP` (1 + max |knot|), L the support's derivative bounds), M the net's size about the
@@ -408,6 +412,8 @@ most 1e-6 d. `Extended::extension` is the extension's own certified bound agains
 An extension that cannot be made exactly is refused with `SolidError::ExtendRefused` and an
 `ExtendRefusal`, naming a distance that works: `WeightVanishes` (a weight would not be positive),
 `PastPole`, `PastApex`, `OverATurn`, `NotExact` (the length could not be measured to the stop).
+A curve's proportional extension (§6.7) refuses with `LengthNotMet`, naming no distance: the
+growth asked was not bracketed or found, or its certified enclosure is not within 1e-7 d of d.
 
 ### 6.4 Extended by the definition
 
@@ -457,8 +463,26 @@ derived reach is zero and the operation has no offset to add past it.
 ### 6.7 Curves
 
 Curve extension on main is still upstream's `Curve::extend_by_dist` (`nurbs/crv_adv`,
-`N_CrvExtendByDist`), whose `Cmax` case fits its length and removes knots again. An exact curve
-extension by arc length is open work; until it lands, a curve extension is not in the exact class.
+`N_CrvExtendByDist`), whose `Cmax` case fits its length and removes knots again. That extension
+is not in the exact class.
+
+The proportional extension, `Curve::extend_keeping_proportion` (`nurbs/crv_proportion.rs`,
+`CurveExtension::Proportion` in solidcore-ops), keeps the knots, degree and weights and stretches
+the control polygon along itself from the pinned end. Its stretch is bracketed by doubling (the
+arc length is not monotone in it where the polygon turns back) and solved by Illinois false
+position on the middles of certified length enclosures. The arc lengths of the curve and of the
+result are enclosed per Bézier piece: the chord below and the control polygon above (corner
+cutting, which holds for positive weights too); for a polynomial piece also a third-order bound
+from its squared speed q (Taylor's theorem about q's mean, with q's mean, its variance and its
+Bernstein hull computed exactly up to counted rounding); for a rational piece also a bound from
+its derivative; the tighter taken at each end. A polynomial piece's rounding is counted once per
+halving as a change in length, not carried into every piece below it. Pieces are halved until
+each enclosure is within d/4 · 1e-7, and the result is returned only when the enclosures differ
+by within 1e-7 d of d. The margin is
+relative to d, not to the curve's length, so no growth short of d (1 − 1e-7) is returned; a growth
+too small for the lengths to resolve is refused (`LengthNotMet`, §6.3). It moves the curve over its
+old domain, so it is not an extension of the curve in the sense of §6.1; what it certifies is the
+length.
 
 ## 7. Invariants
 
@@ -498,7 +522,18 @@ A reviewer checks each of these on a change that touches a definition, a net or 
     net and knots bit for bit; `Ruled` past the reach of rows whose end weight ratios differ keeps
     the surface and parameters within `Extended::source` (§6.2).
 12. **Bounded work.** Certificates run fixed loop counts (8 Krawczyk steps, levels 0 to 6, budgets
-    on cells and mirror steps) with no recursion, and poll the kernel's cancel token.
+    on cells and mirror steps) with no recursion, and poll the kernel's cancel token. The Gⁿ
+    section's certificate (`fillet_section::section`) halves at most 3 spans per first span (two
+    full levels of halving; first spans are the solver's stations and the knot-line crossings)
+    plus 128 (`GN_HALVINGS_PER_SPAN`, `GN_HALVING_BUDGET`). A round of halvings that would pass
+    that budget, or a certificate past the fork's 4096 stations, is refused as not certified
+    (`BlendFailure::NotCertified`). It names no size: invariant 3 names one only where the
+    cause's geometry gives it. The budget counts spans, so a model scaled with its tolerance,
+    which makes the same spans, gets the same budget. With the tolerance held, the solver placed
+    more first spans on larger copies of the tightest measured rounds, and the budget grew with
+    them. A budget predicted from each span's own bound is not enough: a round whose ball's
+    offset tube nearly collapses converges at its bounds' h⁴ rate once its spans are proved, so a
+    convergence budget allows its whole cost.
 
 ## 8. If you're stuck
 

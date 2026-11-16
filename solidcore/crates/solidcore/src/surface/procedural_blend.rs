@@ -330,7 +330,10 @@ fn read_curve(k: &Kernel, db: &mut DatabaseReader, version: u64) -> Result<BSpli
             Ok(b)
         }
         // "a curve of its definition is not a B-spline"
-        _ => Err(SolidError::sm_err(OP_READ)),
+        _ => Err(SolidError::surface_failed(
+            OP_READ,
+            "a curve of the definition is not a B-spline",
+        )),
     }
 }
 
@@ -588,6 +591,114 @@ impl ProceduralBlend {
     #[must_use]
     pub const fn chamfer(&self) -> Option<&ChamferDefinition> {
         self.def.chamfer.as_ref()
+    }
+
+    /// Not the fork's (#16651): the knots of a chamfer's net (order 0, the chord) across
+    /// which the chamfer may crease, as `(u, v)`, the one of them along its rails holding
+    /// them. Each station of the chord's net is a full-multiplicity knot whose row is the
+    /// chord between the feet there. Where a foot sits on a knot line of a face that is
+    /// only G1 (the old boundary of a face's extension) its s-derivative jumps with the
+    /// face's curvature, and the chord's normal `C x ((1 - w) A_1 + w A_2)` (`C` along the
+    /// chord, `A_i` the feet's tangents, `w` across) turns with it; the ball's circle does
+    /// not (its normal is `(P - c) / r`, continuous with the point and the centre).
+    ///
+    /// At each such knot the two sides' normals, from the net's rows either side of it,
+    /// are linear in `w`: their dot and cross products are quadratics bounded by their
+    /// Bernstein coefficients, and each normal is at least its segment's distance from the
+    /// origin. That bounds the sine of the turn over the whole chord, of the normals of
+    /// the net's control points as stored: the rounding of the normals and of the bound
+    /// is counted (`normal_turn_sine`, PROVEN). A knot is listed where the bound exceeds
+    /// a lower bound on the sine
+    /// of [`crate::geom::tol::ANG_TOL_DEG`] (`SM_CONTINUITY_ANGLE`, the G1 angle
+    /// `CalculateContinuities` and `check_brep`'s Test #4 judge knots by), or where it is
+    /// no bound (a dot coefficient that is not positive, a value that is not finite):
+    /// splitting at a knot that is G1 after all only adds an edge between faces that meet
+    /// smoothly; so is every full-multiplicity knot of a net that is not clamped (whose
+    /// rows are not read). Nothing for a blend of another order, or a net that is not the chord's
+    /// (not of degree 1 and two control points across, or rational with unequal weights).
+    ///
+    /// # Errors
+    ///
+    /// Those of the net's knots and control points.
+    pub fn chord_creases(&self) -> Result<(Vec<f64>, Vec<f64>)> {
+        let mut out = (Vec::new(), Vec::new());
+        if self.def.order != 0 || self.def.chamfer.is_none() {
+            return Ok(out);
+        }
+        let net = &self.net;
+        let cpn = net.control_point_net()?;
+        if let Some(&w0) = cpn.weights.first() {
+            if cpn.weights.iter().any(|&w| w != w0) {
+                return Ok(out);
+            }
+        }
+        // the direction along the rails: the other is the chord's, degree 1, two points
+        let (along, rows, across) = if net.degree(SurfParamType::V) == 1 && cpn.v_count == 2 {
+            (SurfParamType::U, cpn.u_count, false)
+        } else if net.degree(SurfParamType::U) == 1 && cpn.u_count == 2 {
+            (SurfParamType::V, cpn.v_count, true)
+        } else {
+            return Ok(out);
+        };
+        let at = |i: usize, j: usize| -> Option<Vec3> {
+            let index = if across {
+                j.checked_mul(cpn.v_count)?.checked_add(i)?
+            } else {
+                i.checked_mul(cpn.v_count)?.checked_add(j)?
+            };
+            cpn.points.get(index).copied()
+        };
+        let p = net.degree(along);
+        let (knots, mults) = net.knots(along, None)?;
+        let sin_turn = sin_turn_lower();
+        let last = knots.len().saturating_sub(1);
+        // the rows below are those of a clamped net (its first knot p + 1 times, as the
+        // Hermite nets are); another lists every full-multiplicity knot, unbounded
+        let clamped = p.checked_add(1).is_some_and(|q| mults.first() == Some(&q));
+        let mut first = mults.first().copied().unwrap_or(0);
+        for (kk, (&u, &m)) in knots.iter().zip(&mults).enumerate() {
+            if kk == 0 || kk >= last {
+                continue;
+            }
+            // the knot's row: its first place in the full knot vector, less one
+            let i = first.checked_sub(1);
+            first = first.saturating_add(m);
+            if m < p {
+                continue; // G1 or better by its multiplicity
+            }
+            let rows_at = i.filter(|_| clamped).and_then(|i| {
+                let (b, c, d) = (i.checked_sub(1)?, i, i.checked_add(1)?);
+                if d >= rows {
+                    return None;
+                }
+                Some([
+                    at(b, 0)?,
+                    at(b, 1)?,
+                    at(c, 0)?,
+                    at(c, 1)?,
+                    at(d, 0)?,
+                    at(d, 1)?,
+                ])
+            });
+            let creases = match rows_at {
+                Some([b0, b1, c0, c1, d0, d1]) => {
+                    let chord = c1 - c0;
+                    let (before, before_err) = rounded_normals(chord, [c0 - b0, c1 - b1]);
+                    let (after, after_err) = rounded_normals(chord, [d0 - c0, d1 - c1]);
+                    normal_turn_sine(before, before_err, after, after_err)
+                        .is_none_or(|sine| sine > sin_turn)
+                }
+                None => true,
+            };
+            if creases {
+                if across {
+                    out.1.push(u);
+                } else {
+                    out.0.push(u);
+                }
+            }
+        }
+        Ok(out)
     }
 
     /// `GetSupport(i)`: the surface S1 (0) or S2 (1) the ball rolls on.
@@ -856,7 +967,7 @@ impl ProceduralBlend {
         let (order, swapped, has_law, values) = if ascii {
             let st = db
                 .in_stream_mut()
-                .ok_or_else(|| SolidError::null_pointer(OP_READ))?;
+                .ok_or_else(|| SolidError::surface_missing(OP_READ, "the input stream"))?;
             let order = st.extract_ulong();
             let swapped = st.extract_int();
             let has_law = st.extract_int();
@@ -864,7 +975,7 @@ impl ProceduralBlend {
             let mut values = [0.0_f64; 10];
             let st = db
                 .in_stream_mut()
-                .ok_or_else(|| SolidError::null_pointer(OP_READ))?;
+                .ok_or_else(|| SolidError::surface_missing(OP_READ, "the input stream"))?;
             let mut read = true;
             for v in &mut values {
                 match st.extract_double() {
@@ -877,7 +988,12 @@ impl ProceduralBlend {
             match (order, swapped, has_law) {
                 (Some(o), Some(s), Some(h)) if read && !failed => (o, s != 0, h != 0, values),
                 // "its definition could not be read"
-                _ => return Err(SolidError::sm_err(OP_READ)),
+                _ => {
+                    return Err(SolidError::surface_failed(
+                        OP_READ,
+                        "the definition could not be read",
+                    ))
+                }
             }
         } else {
             let order = db.read_long()?;
@@ -901,7 +1017,7 @@ impl ProceduralBlend {
             let (kind, sizes) = if ascii {
                 let st = db
                     .in_stream_mut()
-                    .ok_or_else(|| SolidError::null_pointer(OP_READ))?;
+                    .ok_or_else(|| SolidError::surface_missing(OP_READ, "the input stream"))?;
                 let kind = st.extract_int();
                 let mut sizes = [0.0_f64; 3];
                 let mut read = true;
@@ -916,7 +1032,12 @@ impl ProceduralBlend {
                 match kind {
                     Some(kd) if read && !failed => (i64::from(kd), sizes),
                     // "its definition could not be read"
-                    _ => return Err(SolidError::sm_err(OP_READ)),
+                    _ => {
+                        return Err(SolidError::surface_failed(
+                            OP_READ,
+                            "the definition could not be read",
+                        ))
+                    }
                 }
             } else {
                 let kind = db.read_long()?;
@@ -981,7 +1102,10 @@ impl ProceduralBlend {
             seeds.first(),
             seeds.get(1),
         ) else {
-            return Err(SolidError::sm_err(OP_READ));
+            return Err(SolidError::surface_failed(
+                OP_READ,
+                "the definition has fewer than two supports or seeds",
+            ));
         };
         let input = BlendDefinitionInput {
             supports: [s0, s1],
@@ -1375,7 +1499,10 @@ impl ProceduralBlend {
         if let Some(sc) = scale {
             #[allow(clippy::neg_cmp_op_on_partial_ord)] // the fork's NaN-refusing test
             if !are_same(sc.x, sc.y) || !are_same(sc.x, sc.z) || !(sc.x > EFF_ZERO) {
-                return Err(SolidError::sm_err(OP_TRANSFORM));
+                return Err(SolidError::surface_failed(
+                    OP_TRANSFORM,
+                    "the scale is not uniform and positive",
+                ));
             }
             factor = sc.x;
         }
@@ -1421,11 +1548,13 @@ pub fn recertify_faces(k: &Kernel, b: &crate::topology::Brep) -> Result<()> {
                 if e.is_cancelled() {
                     return e;
                 }
-                SolidError::Upstream {
-                    operation: OP_RECERTIFY,
-                    code: crate::error::SM_ERR,
-                    entity: Some(crate::error::EntityRef::Face(f)),
-                }
+                SolidError::surface_at(
+                    OP_RECERTIFY,
+                    crate::error::surface::SurfaceFailure::Failed(
+                        "the face's net is not proved within its bound of its definition",
+                    ),
+                    crate::error::EntityRef::Face(f),
+                )
             })?;
         }
     }
@@ -1740,6 +1869,184 @@ fn pow_index(x: f64, n: usize) -> f64 {
     x.powf(e)
 }
 
+// Rounding in the chord's crease test (PROVEN). `u` is `UNIT` (2^-53), `γ_n` is
+// `gamma(n)`, `L(v)` is `v.length()` as computed and `|v|` the exact length of the vector
+// `v` as stored. Every operation of the bound's own arithmetic below is a rounded-to-nearest
+// operation on finite values followed by `up` or `down` (one place outward), so its result
+// encloses the exact one; `gamma_up(n)` is at least the exact `γ_n`. The error counts are
+// those of the standard model, `fl(x op y) = (x op y)(1 + δ)`, `|δ| <= u`:
+// - a length: three squares and two sums give the sum of squares within `γ_3`, the square
+//   root halves that and adds its own `u`, so `|v| <= (1 + γ_5) L(v)` and
+//   `|v| >= (1 - γ_4) L(v)` (`len_up`, `len_down`);
+// - a dot product: `|fl(x . y) - x . y| <= γ_3 Σ|x_i y_i| <= γ_3 |x| |y|`;
+// - a cross product: each component is two products and a difference, so
+//   `|fl(x × y) - x × y| <= γ_2 sqrt(2) |x| |y|` (each component within
+//   `γ_2 (|x_j y_k| + |x_k y_j|)`; the squares of those sum to at most `2 |x|^2 |y|^2`).
+// Underflow: the lengths of the chord, of the rows' steps and of the normals are refused
+// below `TINY` (1e-60, above 2^-200), so the absolute error of an underflowing product
+// (at most 2^-1075) is far inside the margin each count keeps (`γ_{n+1}` for `γ_n`, 1.5 or
+// 2 for `sqrt(2)`); the two lengths that can underflow, of `q - p` and of a cross product
+// of normals, carry an explicit absolute term or margin (`segment_distance_lower`,
+// `normal_turn_sine`).
+
+/// The smallest length of a chord, a row's step or a normal the crease test bounds
+/// (above 2^-200; see the rounding note above). Below it the test gives no bound and
+/// the knot is listed.
+const TINY: f64 = 1.0e-60;
+
+/// `x`, moved one place up: at least the exact result of the rounded-to-nearest
+/// operation that produced a finite `x`.
+fn up(x: f64) -> f64 {
+    crate::geom::certified::next_up(x)
+}
+
+/// `x`, moved one place down: at most the exact result of the rounded-to-nearest
+/// operation that produced a finite `x`.
+fn down(x: f64) -> f64 {
+    -crate::geom::certified::next_up(-x)
+}
+
+/// At least the exact `γ_n`: `n u` and `1 - n u` are exact, the quotient is rounded once.
+fn gamma_up(n: usize) -> f64 {
+    up(crate::nurbs::math::gamma(n))
+}
+
+/// At least `|v|`, from `l = L(v)`: `(1 + γ_5) l`.
+fn len_up(l: f64) -> f64 {
+    up(l * up(1.0 + gamma_up(5)))
+}
+
+/// At most `|v|`, from `l = L(v)`: `(1 - γ_4) l`.
+fn len_down(l: f64) -> f64 {
+    down(l * down(1.0 - gamma_up(4)))
+}
+
+/// A lower bound on the sine of [`crate::geom::tol::ANG_TOL_DEG`]: the angle in radians
+/// as computed is within `γ_3` of the exact one (the rounded `π`, the division and the
+/// product), and `sin x >= x - x^3 / 6` for `x >= 0`, increasing in `x` below `sqrt(2)`.
+/// PROVEN; no library sine (its rounding is not specified).
+fn sin_turn_lower() -> f64 {
+    let x = crate::geom::tol::ANG_TOL_DEG * (std::f64::consts::PI / 180.0);
+    let x = down(x * down(1.0 - gamma_up(3)));
+    let cube = up(up(x * x) * x);
+    down(x - up(cube / 6.0))
+}
+
+/// The normals `chord × v_i` of one side of a knot's row, as computed, and a radius
+/// `e` with `|n_i - ñ_i| <= e`, `ñ_i = (c_1 - c_0) × v~_i` the exact normal of the stored
+/// control points (`chord = fl(c_1 - c_0)`, `v_i` a rounded difference of two of them).
+/// Each component of `n_i` is two products of rounded differences and their difference,
+/// four roundings on each term, so `|n_i - ñ_i| <= γ_4 sqrt(2) |C~| |V~|`; with
+/// `|C~| <= |C| / (1 - u) <= (1 + γ_5) L(C) / (1 - u)` (and so for `V`),
+/// `sqrt(2) (1 + γ_5)^2 / (1 - u)^2 < 1.5` gives `e = 1.5 γ_4 L(C) max L(V_i)`. PROVEN.
+/// Infinite where a length is not finite or is below `TINY`.
+fn rounded_normals(chord: Vec3, v: [Vec3; 2]) -> ([Vec3; 2], f64) {
+    let [v0, v1] = v;
+    let normals = [chord.cross(v0), chord.cross(v1)];
+    let lc = chord.length();
+    let lv = [v0.length(), v1.length()];
+    if !std::iter::once(&lc)
+        .chain(&lv)
+        .all(|&l| l.is_finite() && l >= TINY)
+    {
+        return (normals, f64::INFINITY);
+    }
+    let [lv0, lv1] = lv;
+    let e = up(up(up(1.5 * gamma_up(4)) * lc) * lv0.max(lv1));
+    (normals, e)
+}
+
+/// A bound on the sine of the angle between the exact normals `ñ_a(w) = (1 - w) ã_0 +
+/// w ã_1` and `ñ_b(w)` over `w` in `[0, 1]` ([`ProceduralBlend::chord_creases`]), from the
+/// computed normals `a`, `b` and radii `ea`, `eb` with `|a_i - ã_i| <= ea`,
+/// `|b_i - b~_i| <= eb` ([`rounded_normals`]). PROVEN:
+/// - for the computed normals, `n_a(w) . n_b(w)` and `n_a(w) × n_b(w)` are quadratics in
+///   `w` whose Bernstein coefficients are the three `dots` and `crosses` below, exactly;
+///   each dot coefficient is computed within `γ_5 M` (`M` at least every `|a_i| |b_j|`;
+///   the middle one is two dots, a sum and an exact halving), so all three above `γ_5 M`
+///   make the angle `θ(w)` between `n_a(w)` and `n_b(w)` less than a quarter turn; each
+///   cross coefficient is within `sqrt(2) γ_3 M` of its computed value, which `2 γ_3 M`
+///   covers with the underflow of its length; and `|n_a(w)| >= D_a`, a lower bound on the
+///   distance from the origin to the segment `a_0 a_1` ([`segment_distance_lower`]), so
+///   `sin θ(w) <= s = T / (D_a D_b)`, `T` the largest cross coefficient's length;
+/// - `|n_a(w) - ñ_a(w)| <= ea` (a convex combination of the endpoints' errors), so the
+///   angle `α` between them has `sin α <= ra = ea / D_a`, and so `β`, `rb` for `b`;
+/// - the exact angle is at most `θ + α + β`; with `S = s + ra + rb < 1` each of the three
+///   is at most `π/2` times its sine bound (`asin x <= π x / 2` on `[0, 1]`), so their sum
+///   is below a quarter turn and `sin(θ + α + β) <= sin θ + sin α + sin β <= S`.
+///
+/// Returns `S`. `None` where that is no bound: a dot coefficient not above its rounding,
+/// a length not finite or below `TINY`, a distance bound not positive, or `S >= 1`.
+fn normal_turn_sine(a: [Vec3; 2], ea: f64, b: [Vec3; 2], eb: f64) -> Option<f64> {
+    let [a0, a1] = a;
+    let [b0, b1] = b;
+    let la = a0.length().max(a1.length());
+    let lb = b0.length().max(b1.length());
+    if ![a0, a1, b0, b1]
+        .iter()
+        .all(|v| v.length().is_finite() && v.length() >= TINY)
+    {
+        return None;
+    }
+    let m = up(len_up(la) * len_up(lb));
+    let dots = [a0.dot(b0), 0.5 * (a0.dot(b1) + a1.dot(b0)), a1.dot(b1)];
+    let dot_slack = up(gamma_up(5) * m);
+    if !dots.iter().all(|&x| x > dot_slack) {
+        return None;
+    }
+    let crosses = [
+        a0.cross(b0),
+        (a0.cross(b1) + a1.cross(b0)) * 0.5,
+        a1.cross(b1),
+    ];
+    let mut top = 0.0_f64;
+    for x in crosses {
+        let l = x.length();
+        if !l.is_finite() {
+            return None;
+        }
+        top = top.max(len_up(l));
+    }
+    let top = up(top + up(up(2.0 * gamma_up(3)) * m));
+    let da = segment_distance_lower(a0, a1);
+    let db = segment_distance_lower(b0, b1);
+    if da.is_nan() || db.is_nan() || da <= 0.0 || db <= 0.0 {
+        return None;
+    }
+    let s = up(top / down(da * db));
+    let total = up(up(s + up(ea / da)) + up(eb / db));
+    (total < 1.0).then_some(total)
+}
+
+/// A lower bound on the distance from the origin to the segment from `p` to `q` (finite,
+/// each at least `TINY` long; checked by [`normal_turn_sine`]). PROVEN: the distance is
+/// `|p|` where the foot of the perpendicular falls before `p` (`p . (q - p) > 0`), `|q|`
+/// where it falls past `q` (`q . (q - p) < 0`), and at least the line's distance
+/// `|p × q| / |q - p|` always; it is also at least `|p| - |q - p|` and `|q| - |q - p|`
+/// (the triangle inequality). The two sides' tests are computed as `p.q - p.p` and
+/// `q.q - p.q`, each within `γ_4 (|p| |q| + |p|^2)` (so for `q`): two dots within `γ_3`
+/// and a difference; a side is taken only beyond that. `|p × q|` is within
+/// `sqrt(2) γ_2 |p| |q|` (1.5 covers the underflow of its length), and
+/// `|q - p| <= (1 + γ_1) |fl(q - p)|`, plus 1e-150 for the underflow of a short
+/// difference's length (above 2^-536, the most it can lose).
+fn segment_distance_lower(p: Vec3, q: Vec3) -> f64 {
+    let (lp, lq) = (len_down(p.length()), len_down(q.length()));
+    if p == q {
+        return lp;
+    }
+    let (pu, qu) = (len_up(p.length()), len_up(q.length()));
+    let eu = up(up(len_up((q - p).length()) * up(1.0 + gamma_up(1))) + 1.0e-150);
+    let pq = up(pu * qu);
+    if p.dot(q) - p.dot(p) > up(gamma_up(4) * up(pq + up(pu * pu))) {
+        return lp; // the foot falls before p
+    }
+    if q.dot(q) - p.dot(q) < -up(gamma_up(4) * up(pq + up(qu * qu))) {
+        return lq; // the foot falls past q
+    }
+    let cross = down(len_down(p.cross(q).length()) - up(up(1.5 * gamma_up(2)) * pq));
+    down(lp - eu).max(down(lq - eu)).max(down(cross / eu))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2010,5 +2317,88 @@ mod tests {
             got.evaluate_point(uv).unwrap(),
             net.evaluate_point(uv).unwrap()
         );
+    }
+
+    #[test]
+    fn the_crease_threshold_is_a_lower_bound_on_the_g1_sine() {
+        let library = (crate::geom::tol::ANG_TOL_DEG * (std::f64::consts::PI / 180.0)).sin();
+        let lower = sin_turn_lower();
+        assert!(lower < library, "{lower} {library}");
+        assert!(lower > library * (1.0 - 1e-10), "{lower} {library}");
+    }
+
+    /// The bound of the chord's normal turn before the rounding was counted, for two
+    /// constant normals (`p == q`, so each distance was the normal's length).
+    fn uncounted_sine(a: Vec3, b: Vec3) -> f64 {
+        a.cross(b).length() / (a.length() * b.length())
+    }
+
+    #[test]
+    fn a_knot_at_the_crease_threshold_is_listed() {
+        // normals (0, 0, 1) before and (x, 0, 1) after: the largest x whose uncounted
+        // bound was at most the library sine of the G1 angle skipped the split; the counted
+        // bound must list it
+        let library = (crate::geom::tol::ANG_TOL_DEG * (std::f64::consts::PI / 180.0)).sin();
+        let a = Vec3::new(0.0, 0.0, 1.0);
+        let mut x = (crate::geom::tol::ANG_TOL_DEG * (std::f64::consts::PI / 180.0)).tan();
+        for _ in 0..200 {
+            x = down(x);
+        }
+        let mut last = None;
+        for _ in 0..400 {
+            if uncounted_sine(a, Vec3::new(x, 0.0, 1.0)) <= library {
+                last = Some(x);
+            }
+            x = up(x);
+        }
+        let x = last.unwrap();
+        let b = Vec3::new(x, 0.0, 1.0);
+        assert!(uncounted_sine(a, b) <= library);
+        let counted = normal_turn_sine([a, a], 0.0, [b, b], 0.0).unwrap();
+        assert!(counted > sin_turn_lower(), "{counted}");
+        // and a clearly smooth knot (a quarter of the angle) is still skipped
+        let smooth = Vec3::new(x * 0.25, 0.0, 1.0);
+        let counted = normal_turn_sine([a, a], 0.0, [smooth, smooth], 0.0).unwrap();
+        assert!(counted < sin_turn_lower(), "{counted}");
+    }
+
+    #[test]
+    fn the_normals_rounding_radius_widens_the_bound() {
+        let chord = Vec3::new(2.0, 0.0, 0.0);
+        let (normals, e) = rounded_normals(chord, [Vec3::new(0.0, 3.0, 0.0); 2]);
+        assert_eq!(normals, [Vec3::new(0.0, 0.0, 6.0); 2]);
+        // 1.5 γ_4 L(C) L(V), rounded outward
+        let want = 1.5 * crate::nurbs::math::gamma(4) * 6.0;
+        assert!(e >= want && e < want * (1.0 + 1e-14), "{e} {want}");
+        // a step shorter than TINY gives no radius
+        let (_, e) = rounded_normals(chord, [Vec3::new(0.0, 1e-61, 0.0); 2]);
+        assert_eq!(e, f64::INFINITY);
+        // a smooth knot is skipped with a radius of rounding size, listed with one that
+        // could turn the normals past the angle
+        let a = Vec3::new(0.0, 0.0, 1.0);
+        let b = Vec3::new(1e-3, 0.0, 1.0);
+        let tight = normal_turn_sine([a, a], 1e-15, [b, b], 1e-15).unwrap();
+        assert!(tight < sin_turn_lower(), "{tight}");
+        let wide = normal_turn_sine([a, a], 1e-2, [b, b], 0.0).unwrap();
+        assert!(wide > sin_turn_lower(), "{wide}");
+    }
+
+    #[test]
+    fn the_segment_distance_bound_is_below_and_near_the_distance() {
+        let sqrt2 = 2.0_f64.sqrt();
+        for (p, q, d) in [
+            // the foot inside, before p, past q; one point
+            (Vec3::new(-1.0, 1.0, 0.0), Vec3::new(1.0, 1.0, 0.0), 1.0),
+            (Vec3::new(1.0, 1.0, 0.0), Vec3::new(3.0, 1.0, 0.0), sqrt2),
+            (Vec3::new(-3.0, 1.0, 0.0), Vec3::new(-1.0, 1.0, 0.0), sqrt2),
+            (Vec3::new(0.0, 0.0, 2.0), Vec3::new(0.0, 0.0, 2.0), 2.0),
+            // normals of one direction, lengths 1 and 2: the line passes the origin
+            (Vec3::new(1.0, 0.0, 0.0), Vec3::new(2.0, 0.0, 0.0), 1.0),
+            // nearly equal: the triangle inequality holds it up
+            (Vec3::new(0.0, 0.0, 1.0), Vec3::new(1e-17, 0.0, 1.0), 1.0),
+        ] {
+            let low = segment_distance_lower(p, q);
+            assert!(low <= d && low > d * (1.0 - 1e-14), "{p:?} {q:?} {low} {d}");
+        }
     }
 }

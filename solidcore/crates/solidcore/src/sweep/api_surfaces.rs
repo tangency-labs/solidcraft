@@ -10,6 +10,7 @@
 //! | `validate_skin_primitive_inputs` (private)   | `SmApiValidateSkinPrimitiveInputs` (static)    |
 //! | `copy_skin_primitive_curves` (private)       | `SmApiCopySkinPrimitiveCurves` (static)        |
 //! | [`create_skin_primitive`], [`SkinPrimitive`] | `SmApiCreateSkinPrimitive`                     |
+//! | [`create_skin_primitive_with_sources`], [`SkinSources`], [`NotTraced`] | (not upstream: #3139) |
 //! | [`create_skin_from_faces`], [`SkinFromFaces`] | `SmApiCreateSkinFromFaces`                    |
 //! | [`create_extrude`]                           | `SmApiCreateExtrude`                           |
 //! | [`create_sweep`]                             | `SmApiCreateSweep`                             |
@@ -32,6 +33,10 @@
 //! - **Statuses.** `SM_ERR_INVALID_INPUT` is [`SolidError::InvalidInput`]; `SM_ERR` is
 //!   [`SolidError::Upstream`] with [`crate::error::SM_ERR`]. Errors of the called
 //!   constructors pass through unchanged.
+//! - **Skin sources** (not upstream, tangency-labs/solidcore#3139).
+//!   [`create_skin_primitive_with_sources`] builds the skin [`create_skin_primitive`]
+//!   builds and also says which profile curves each side face was swept from, traced
+//!   through the construction ([`SkinSources`]).
 //! - [`create_extrude`] makes a 2D curve's NURB 3D in place, as upstream (the curve
 //!   is the caller's, taken `&mut`).
 //! - The B-rep entry points ([`create_skin_primitive`], [`create_skin_from_faces`],
@@ -51,6 +56,8 @@ use crate::nurbs::b_spline_surface::{BSplineSurface, SurfParamType};
 use crate::nurbs::b_spline_surface_n_lib::p2::SkinnedSurfaceOptions;
 use crate::nurbs::knots::MAX_DEGREE;
 use crate::primitive::primitive_creation::model::PrimitiveModel;
+use crate::primitive::primitive_creation::p3::skin_sources::SkinTrace;
+pub use crate::primitive::primitive_creation::p3::skin_sources::{NotTraced, SkinSources};
 use crate::primitive::primitive_creation::p3::RepeatedSweepOptions;
 use crate::surface::surface::Surface;
 use crate::topology::{Brep, FaceId};
@@ -167,6 +174,57 @@ pub fn create_skin_primitive(
     degree: usize,
     cap_ends: bool,
 ) -> Result<SkinPrimitive> {
+    skin_primitive(k, curves_in_each_profile, curves_3d, degree, cap_ends, None)
+}
+
+/// [`create_skin_primitive`], also returning which of `curves_3d` each side face was
+/// swept from (not upstream: tangency-labs/solidcore#3139). The skin is the one
+/// [`create_skin_primitive`] makes, bit for bit.
+///
+/// The sources are traced through the construction, never matched by geometry
+/// ([`crate::primitive::primitive_creation::p3::skin_sources`]): each curve's edge in
+/// its profile's planar face, that edge's segment of the loop's joined B-spline, the
+/// segment's span of knots, and the knots each side face spans across the sections.
+/// [`SkinSources::Traced`] lists each side face, in [`SkinPrimitive::side_faces`]
+/// order, with the indices into `curves_3d` of its curves, ascending (profile by
+/// profile, and within a profile in the caller's order). The faces split at the
+/// skin's knots of continuity G1 or less, judged on the knots: each join of two curves
+/// is one, tangent or not (a rounded square's eight curves make eight walls), and a
+/// curve with a kink of its own spans several. [`SkinSources::NotTraced`] says why there is no answer: open
+/// profiles, or sections whose joined curves differ in degree or knots (the skin's
+/// compatibility step can then move a curve's ends; see [`NotTraced`]).
+///
+/// # Errors
+///
+/// Those of [`create_skin_primitive`]; the trace adds none.
+pub fn create_skin_primitive_with_sources(
+    k: &mut Kernel,
+    curves_in_each_profile: &[usize],
+    curves_3d: &[Option<&Curve>],
+    degree: usize,
+    cap_ends: bool,
+) -> Result<(SkinPrimitive, SkinSources)> {
+    let mut trace = SkinTrace::default();
+    let skin = skin_primitive(
+        k,
+        curves_in_each_profile,
+        curves_3d,
+        degree,
+        cap_ends,
+        Some(&mut trace),
+    )?;
+    Ok((skin, trace.into_sources()))
+}
+
+/// `SmApiCreateSkinPrimitive`, tracing the side faces' curves into `trace` when given.
+fn skin_primitive(
+    k: &mut Kernel,
+    curves_in_each_profile: &[usize],
+    curves_3d: &[Option<&Curve>],
+    degree: usize,
+    cap_ends: bool,
+    trace: Option<&mut SkinTrace>,
+) -> Result<SkinPrimitive> {
     validate_skin_primitive_inputs(curves_in_each_profile, curves_3d, degree)?;
 
     let curve_copies = copy_skin_primitive_curves(k, curves_3d)?;
@@ -177,19 +235,33 @@ pub fn create_skin_primitive(
         PrimitiveModel::build_new(k, |pc, model| {
             let (mut start, mut side, mut end) = (Vec::new(), Vec::new(), Vec::new());
             let mut transferred = Vec::new();
-            let status = pc.create_skin_primitive(
-                model,
-                PrimitiveModel::MAIN,
-                curves_in_each_profile,
-                &mut curves,
-                0.0,
-                degree,
-                cap_ends,
-                &mut start,
-                &mut side,
-                &mut end,
-                &mut transferred,
-            );
+            let status = match trace {
+                None => pc.create_skin_primitive(
+                    model,
+                    PrimitiveModel::MAIN,
+                    curves_in_each_profile,
+                    &mut curves,
+                    0.0,
+                    degree,
+                    cap_ends,
+                    &mut start,
+                    &mut side,
+                    &mut end,
+                    &mut transferred,
+                ),
+                Some(t) => pc.create_skin_primitive_traced(
+                    model,
+                    PrimitiveModel::MAIN,
+                    curves_in_each_profile,
+                    &mut curves,
+                    0.0,
+                    degree,
+                    cap_ends,
+                    [&mut start, &mut side, &mut end],
+                    &mut transferred,
+                    t,
+                ),
+            };
             match status {
                 Err(e) if e.is_unported_or_cancelled() => return Err(e),
                 // Ownership is indeterminate for copies without a report entry.
@@ -203,6 +275,9 @@ pub fn create_skin_primitive(
             }
             Ok((start, side, end))
         })?;
+    // Not upstream: the flat side walls are their planes (WR-782).
+    let mut brep = brep;
+    crate::sweep::skin_flat_walls::flat_walls_as_planes(k, &mut brep, &side_faces)?;
     Ok(SkinPrimitive {
         brep,
         start_faces,
@@ -373,6 +448,7 @@ pub fn create_skin(k: &Kernel, profiles: &[BSplineCurve]) -> Result<BSplineSurfa
             intersections_with_rails: None,
             deriv_surfs: Some([None, None]), // derivative surfaces
             degree: 3,
+            section_params: None,
         },
     )
 }
