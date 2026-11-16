@@ -184,6 +184,7 @@ const OP_APPROX_CRV: &str = "nurbs::b_spline_curve_n_lib::BSplineCurve::create_a
 const OP_DAMPEN: &str = "nurbs::b_spline_curve_n_lib::BSplineCurve::dampen_knot_spacing";
 const OP_DEG_RED: &str = "nurbs::b_spline_curve_n_lib::BSplineCurve::degree_reduction";
 const OP_INS_ONE: &str = "nurbs::b_spline_curve_n_lib::BSplineCurve::insert_one_knot";
+const OP_REMOVE_ONE: &str = "nurbs::b_spline_curve_n_lib::BSplineCurve::remove_one_knot";
 const OP_THROUGH: &str =
     "nurbs::b_spline_curve_n_lib::BSplineCurve::set_intersection_curve_through_point";
 const OP_EVEN: &str = "nurbs::b_spline_curve_n_lib::BSplineCurve::equally_spaced_points";
@@ -1205,6 +1206,25 @@ impl BSplineCurve {
             .map_err(SolidError::nurbs_routine(OP_REMOVE_KNOTS))?;
         self.swap_in_nurb(&cur_new);
         Ok(())
+    }
+
+    /// Not upstream: removes the interior knot `knot` `times` times when every removal
+    /// moves the curve by at most `tol` (`N_CrvRemoveKnot`, algorithm A5.8 with its
+    /// basis-maximum error bound, each removal bounded against the curve before it), so
+    /// the curve moves by at most `times * tol`. All or nothing: the curve is left as it
+    /// is, and `false` returned, when fewer removals pass.
+    ///
+    /// # Errors
+    ///
+    /// `SM_ERR` without a NURB; those of the removal for a knot on or outside the ends.
+    pub fn remove_one_knot(&mut self, knot: f64, times: usize, tol: f64) -> Result<bool> {
+        let cur_p = nurb_of(self, OP_REMOVE_ONE)?;
+        let removal = cur_p.remove_knot(knot, times, tol)?;
+        if removal.removed != times {
+            return Ok(false);
+        }
+        self.swap_in_nurb(&removal.curve);
+        Ok(true)
     }
 
     /// Inserts the interior knot `knot` `times` times (`InsertOneKnot`,

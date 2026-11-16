@@ -48,10 +48,6 @@
 //! R 10 below z = 4 is 4000 pi / 3 - 288 pi = 3284.011520552530, and the round r 2 (the
 //! ball's centre ring at z = 2, radius sqrt 60) takes away pi (40.5 - 2 sqrt 60 (pi -
 //! sqrt 3.75 / 4 - 2 asin 1 / 4)) = 22.492758031488, which leaves 3261.518762521043.
-//! One difference from the fork: the two pipes' union itself fails 1001 here without
-//! `ssi_split_curves_at_singular_points` (WR-77), so the pipes get that flag wherever the
-//! fork's mark is about their round.
-//!
 //! How this test drives the kernel differs from the capi: edges are picked as the nearest
 //! within 0.1 of each point, and `fillet_edges` runs with section type 1, continuity 1 and
 //! thumbweight 1, the arguments `round_edges` gives `SetFilletParameters`, without the capi's
@@ -599,9 +595,6 @@ fn check_all(mark: fn(&str) -> Mark, kernel: fn() -> Kernel, fitted_kind: RoundK
             case.kind = fitted_kind;
         }
         let mut k = kernel();
-        if case.name == PIPES {
-            k.fixes.ssi_split_curves_at_singular_points = true;
-        }
         let got = grade(&case, &mut k);
         println!("{}: {got:?}", case.name);
         if !holds(mark(case.name), &got) {
@@ -655,16 +648,6 @@ fn with_solidcraft_s_fixes_the_fitted_round_is_its_definition() {
         mark_with_section_fixes,
         solidcraft_kernel,
         RoundKind::Procedural,
-    );
-}
-
-#[test]
-fn the_pipes_join_only_with_wr77() {
-    let case = cases().into_iter().find(|c| c.name == PIPES).unwrap();
-    let got = grade(&case, &mut Kernel::default());
-    assert!(
-        matches!(&got, Graded::Body(e) if e.contains("status: 1001")),
-        "{got:?}"
     );
 }
 

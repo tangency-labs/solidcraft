@@ -133,7 +133,6 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.offset_edges_keep_source_tolerance = true;
     f.surface_continuity_checks_last_v_knot = true;
     f.offset_open_edge_second_trim_point = true;
-    f.ssi_split_curves_at_singular_points = true;
     f.surface_parallel_to_vector_checks = true;
     f.geometric_g2_continuity = true;
     f.degen_param_tiebreak_uses_actual_param = true;
