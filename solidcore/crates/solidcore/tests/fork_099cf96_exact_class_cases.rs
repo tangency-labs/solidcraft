@@ -651,6 +651,16 @@ fn with_solidcraft_s_fixes_the_fitted_round_is_its_definition() {
     );
 }
 
+/// The two pipes' union, which upstream's unsplit intersection curves fail with status
+/// 1001, builds: the curves are split at the node where the cylinders touch (WR-77).
+#[test]
+fn the_pipes_join() {
+    let case = cases().into_iter().find(|c| c.name == PIPES).unwrap();
+    if let Graded::Body(e) = grade(&case, &mut Kernel::default()) {
+        panic!("the pipes' union failed: {e}");
+    }
+}
+
 /// The grading sees what it's for: on a case that passes, a volume one part in 1e5 off and
 /// each wrong surface kind are refused, and the fork's marks on it don't hold.
 /// The ball's rim with one of its two edges picked, as the case was before #2441: the half
