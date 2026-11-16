@@ -16,7 +16,6 @@
   "surface_continuity_checks_last_v_knot",
   "local_surface_intersect_guards_max_boundary_retry",
   "revolve_analytic_profile_faces",
-  "revolve_holed_profile_void",
   "linear_sweep_arc_is_cylinder",
   "join_touching_loops",
   "edgeuse_convexity_propagates_step_off_failure",

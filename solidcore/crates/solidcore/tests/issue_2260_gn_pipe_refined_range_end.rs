@@ -95,7 +95,6 @@ const SOLIDCRAFT_C494A18: &[&str] = &[
     "proto_edge_splits_at_captured_vertices",
     "proto_vertex_miss_is_false",
     "revolve_analytic_profile_faces",
-    "revolve_holed_profile_void",
     "shell_edges_on_analytics_exact",
     "simple_coincidence_crossing_is_point",
     "ssi_low_angle_start_on_probation",
