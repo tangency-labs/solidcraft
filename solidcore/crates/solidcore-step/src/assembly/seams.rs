@@ -128,6 +128,25 @@ impl Turns {
     }
 }
 
+/// The middle of the widest stretch of angle `k` (0: longitude, 1: tube angle) that no sample
+/// of `samples` lies in, when it is clear of them by more than four times `tol` at `radius`
+/// (the smallest radius that angle is measured at); `None` otherwise.
+fn widest_free(samples: &[[f64; 2]], k: usize, radius: f64, tol: f64) -> Option<f64> {
+    let mut angles: Vec<f64> = samples.iter().filter_map(|q| q.get(k)).map(|a| a.rem_euclid(TAU)).collect();
+    angles.sort_by(f64::total_cmp);
+    let (first, last) = (*angles.first()?, *angles.last()?);
+    let mut best = (first + TAU - last, last);
+    for pair in angles.windows(2) {
+        if let [a, b] = pair
+            && b - a > best.0
+        {
+            best = (b - a, *a);
+        }
+    }
+    let (gap, from) = best;
+    (0.5 * gap * radius > 4.0 * tol).then(|| wrap(from + 0.5 * gap))
+}
+
 /// The path a slit runs out along: a loop that runs out along a chain of edges and straight back
 /// along it, each edge used once each way, started at one of its two turns; `None` for any
 /// other loop.
@@ -871,6 +890,151 @@ impl Assembly<'_> {
             completed += 1;
         }
         Ok(completed)
+    }
+
+    /// Complete every face on a torus that is the outside of its loops into the torus less what
+    /// they enclose (#17930). A loop runs counter-clockwise about the face's normal round the
+    /// region it bounds; on a torus, which is closed both ways, a loop that winds round neither
+    /// way (it encloses a patch) and runs clockwise bounds all the rest of the torus. A full
+    /// torus written as two faces sharing one loop, a patch and the rest round it, has the
+    /// rest so: read as the patch turned over, the solid came in with both faces on the patch
+    /// and no volume. Turning such a face over is still right where the file has its loop the
+    /// wrong way round, so a face is completed only where a face it shares an edge with lies on
+    /// the same torus facing the same way: then the patch is that face's, and this one is the
+    /// rest. The face gets the torus's two seams (a circle round the axis and one round the
+    /// tube, through a new vertex, in the middle of the widest stretches of longitude and tube
+    /// angle its loops keep clear of, where its torus is turned to start) as its outer bound,
+    /// and its loops become its holes. Returns how many faces were completed.
+    pub(crate) fn complete_outsides(&mut self) -> R<usize> {
+        let mut completed = 0;
+        for fi in 0..self.faces.len() {
+            let Some(face) = self.faces.get(fi) else { continue };
+            let BSurface::Torus { frame, major_radius, minor_radius, tube_start } = face.surface.clone() else { continue };
+            let loops: Vec<Vec<(u32, bool)>> = face
+                .loops
+                .iter()
+                .map(|l| match l {
+                    Bound::Edges(es) if !es.is_empty() && !super::seam_only(es) => Some(es.clone()),
+                    _ => None,
+                })
+                .collect::<Option<_>>()
+                .unwrap_or_default();
+            if loops.is_empty() {
+                continue;
+            }
+            let o = Vec3::from(frame.origin);
+            let (x, y) = (Vec3::from(frame.x_axis), Vec3::from(frame.y_axis));
+            let z = x.cross(y);
+            // Each loop's samples as (longitude, tube angle) about the torus, unwrapped along it.
+            let angles = |p: Vec3| -> [f64; 2] {
+                let d = p - o;
+                let h = d.dot(z);
+                let rho = (d - z * h).len();
+                [d.dot(y).atan2(d.dot(x)), h.atan2(rho - major_radius)]
+            };
+            let mut samples: Vec<[f64; 2]> = Vec::new();
+            let mut outside = true;
+            for l in &loops {
+                let mut path: Vec<[f64; 2]> = Vec::new();
+                for &(e, forward) in l {
+                    let edge = self.edges.get(e as usize).ok_or("edge reference")?;
+                    let c = CurveEval::new(&edge.curve).map_err(|m| m.to_string())?;
+                    let [lo, hi] = edge.interval;
+                    for k in 0..SAMPLES {
+                        let s = k as f64 / SAMPLES as f64;
+                        let t = if forward { lo + (hi - lo) * s } else { hi - (hi - lo) * s };
+                        let q = angles(c.point(t).ok_or("edge point")?);
+                        samples.push(q);
+                        let q = match path.last() {
+                            Some(l) => [l[0] + wrap(q[0] - l[0]), l[1] + wrap(q[1] - l[1])],
+                            None => q,
+                        };
+                        path.push(q);
+                    }
+                }
+                let (Some(first), Some(last)) = (path.first(), path.last()) else { continue };
+                // Back to the start: a loop that winds round the torus doesn't enclose a patch.
+                let back = [last[0] + wrap(first[0] - last[0]), last[1] + wrap(first[1] - last[1])];
+                if (back[0] - first[0]).abs() > PI || (back[1] - first[1]).abs() > PI {
+                    outside = false;
+                    break;
+                }
+                // Twice the signed area in (longitude, tube angle): the torus's natural normal is
+                // ∂u × ∂v, out of the tube, and the loops are kept about it.
+                let mut twice = 0.0;
+                for (a, b) in path.iter().zip(path.iter().skip(1).chain(std::iter::once(&back))) {
+                    twice += a[0] * b[1] - b[0] * a[1];
+                }
+                if !(twice < 0.0) {
+                    outside = false;
+                    break;
+                }
+            }
+            if !outside || !self.patch_beside(fi, &loops, o, z, major_radius, minor_radius)? {
+                continue;
+            }
+            // The seams go through the middle of the widest stretch of longitude and of tube
+            // angle the loops leave free (each clear of them by more than the tolerance), and
+            // the torus is turned to start there, as a whole torus starts at its seams.
+            let (Some(u), Some(w)) =
+                (widest_free(&samples, 0, major_radius - minor_radius, self.tol), widest_free(&samples, 1, minor_radius, self.tol))
+            else {
+                continue;
+            };
+            let Some(turned) = crate::kernel::form::turned(&face.surface, u).and_then(|s| crate::kernel::form::tube_turned(&s, w - tube_start))
+            else {
+                continue;
+            };
+            let radial = x * u.cos() + y * u.sin();
+            let ring_radius = major_radius + minor_radius * w.cos();
+            let p = o + radial * ring_radius + z * (minor_radius * w.sin());
+            let v = index(self.vertices.len())?;
+            self.vertices.push(Vertex { point: arr(p), tolerance: self.tol });
+            // Round the axis the way u runs, round the tube the way v runs: the torus's whole
+            // (u, v) box, counter-clockwise.
+            let ring = BCurve::Circle {
+                frame: Frame { origin: arr(o + z * (minor_radius * w.sin())), x_axis: arr(radial), y_axis: arr(z.cross(radial)) },
+                radius: ring_radius,
+            };
+            let tube_x = radial * w.cos() + z * w.sin();
+            let tube_y = z * w.cos() - radial * w.sin();
+            let tube = BCurve::Circle {
+                frame: Frame { origin: arr(o + radial * major_radius), x_axis: arr(tube_x), y_axis: arr(tube_y) },
+                radius: minor_radius,
+            };
+            let ring = self.new_edge(ring, [0.0, TAU], [v, v])?;
+            let tube = self.new_edge(tube, [0.0, TAU], [v, v])?;
+            let Some(face) = self.faces.get_mut(fi) else { continue };
+            face.surface = turned;
+            face.loops.insert(0, Bound::Edges(vec![(ring, true), (tube, true), (ring, false), (tube, false)]));
+            face.outer = Some(0);
+            face.extent = None;
+            completed += 1;
+        }
+        Ok(completed)
+    }
+
+    /// A face sharing an edge with one of `loops` (of face `fi`) lies on the torus about `o`
+    /// and `z` of radii `major` and `minor`, and faces the same way as face `fi`.
+    fn patch_beside(&self, fi: usize, loops: &[Vec<(u32, bool)>], o: Vec3, z: Vec3, major: f64, minor: f64) -> R<bool> {
+        let Some(forward) = self.faces.get(fi).map(|f| f.forward) else { return Ok(false) };
+        let edges: std::collections::HashSet<u32> = loops.iter().flatten().map(|u| u.0).collect();
+        for (gi, g) in self.faces.iter().enumerate() {
+            if gi == fi || g.forward != forward {
+                continue;
+            }
+            let BSurface::Torus { frame, major_radius, minor_radius, .. } = &g.surface else { continue };
+            let (go, gz) = (Vec3::from(frame.origin), Vec3::from(frame.x_axis).cross(Vec3::from(frame.y_axis)));
+            let same = go.dist(o) <= self.tol
+                && gz.cross(z).len() * (major + minor) <= self.tol
+                && (major_radius - major).abs() <= self.tol
+                && (minor_radius - minor).abs() <= self.tol;
+            let shares = g.loops.iter().any(|l| matches!(l, Bound::Edges(es) if es.iter().any(|u| edges.contains(&u.0))));
+            if same && shares {
+                return Ok(true);
+            }
+        }
+        Ok(false)
     }
 
     /// The slit made the meridian seam of `surface` when it is a surface of revolution closed

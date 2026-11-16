@@ -529,6 +529,12 @@ impl<'t> Assembly<'t> {
         // (a sphere's frame put on the slit), before anything is measured on the frame or split
         // at its poles.
         self.complete_slits()?;
+        // A face on a torus that is the rest of it round a patch its loop bounds gets the
+        // torus's seams, its loop a hole in it.
+        let outsides = self.complete_outsides()?;
+        if outsides > 0 {
+            notes.push(format!("{outsides} faces on a torus that are the outside of their loops given the torus's seams"));
+        }
         let slits = self.drop_inner_slits();
         if slits > 0 {
             notes.push(format!("{slits} slits of no area left out of the faces they lie in"));
