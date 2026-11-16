@@ -242,30 +242,6 @@ fn span_max_along(span: Vec<H2>, d: Vec2, eps: f64) -> Option<f64> {
     best.is_finite().then_some(best)
 }
 
-/// A homogeneous Bézier span split at its middle (de Casteljau): the two halves' control points.
-fn halves(span: &[H2]) -> (Vec<H2>, Vec<H2>) {
-    let mut left = Vec::with_capacity(span.len());
-    let mut right = Vec::with_capacity(span.len());
-    let mut q = span.to_vec();
-    while let (Some(&first), Some(&last)) = (q.first(), q.last()) {
-        left.push(first);
-        right.push(last);
-        q = q
-            .iter()
-            .zip(q.iter().skip(1))
-            .map(|(a, b)| {
-                [
-                    (a[0] + b[0]) * 0.5,
-                    (a[1] + b[1]) * 0.5,
-                    (a[2] + b[2]) * 0.5,
-                ]
-            })
-            .collect();
-    }
-    right.reverse();
-    (left, right)
-}
-
 /// A homogeneous control point `[x w, y w, w]`.
 pub type H2 = [f64; 3];
 
