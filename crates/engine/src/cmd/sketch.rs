@@ -103,7 +103,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .icon("sketch")
         .contract(&CREATE_CONTRACT)
         .output(output_schema_for::<CreateResult>)
-        .params("plane: XY|XZ|YZ (sketch x, y along world +X, +Y on XY; +X, -Z on XZ; +Y, +Z on YZ) | construction plane name or id | {origin?: [x,y,z] numbers in mm, default [0,0,0] (not an expression), x_dir, y_dir} (in world coordinates unless frame says otherwise; a named plane is the active component's own) | {face: [world x,y,z], body?: exact world body, index?: face index, path?: complete occurrence ids, fixed?: bool}; new face attachments require a unique certified source (a flat face of a sheet metal body attaches to its panel instead, in the flat pattern's coordinates), fixed:true explicitly freezes the selected plane; offset?: expr, flip?: bool | \"x\" | \"y\" (not on a face: sketch the plane from its other side, so the normal and the default extrude direction are reversed; a half turn about the plane's own x or y axis, true picks the one keeping the sketch's y axis upward; offset still moves along the unflipped normal), frame?: world (default) | component (which coordinates an explicit plane is in; the reply's `frame` says which, with a `note` when the active component is moved or turned), project_edges?: bool, activate_part?: bool (default false; on a face of a body of another component than the active one: activate that component at the picked placement first, as component.activate would, and make the sketch there; it stays active afterwards and the reply's `activated` names it), name?"),
+        .params("plane: XY|XZ|YZ (sketch x, y along world +X, +Y on XY; +X, -Z on XZ; +Y, +Z on YZ) | construction plane name or id | {origin?: [x,y,z] in mm, default [0,0,0], each a number or a length expression (an origin whose expressions name parameters is kept, and the sketch follows them when they change), x_dir, y_dir} (in world coordinates unless frame says otherwise; a named plane is the active component's own) | {face: [world x,y,z], body?: exact world body, index?: face index, path?: complete occurrence ids, fixed?: bool}; new face attachments require a unique certified source (a flat face of a sheet metal body attaches to its panel instead, in the flat pattern's coordinates), fixed:true explicitly freezes the selected plane; offset?: expr, flip?: bool | \"x\" | \"y\" (not on a face: sketch the plane from its other side, so the normal and the default extrude direction are reversed; a half turn about the plane's own x or y axis, true picks the one keeping the sketch's y axis upward; offset still moves along the unflipped normal), frame?: world (default) | component (which coordinates an explicit plane is in; the reply's `frame` says which, with a `note` when the active component is moved or turned), project_edges?: bool, activate_part?: bool (default false; on a face of a body of another component than the active one: activate that component at the picked placement first, as component.activate would, and make the sketch there; it stays active afterwards and the reply's `activated` names it), name?"),
     CommandSpec::new("sketch.edit", "Edit Sketch", crate::checked!("sketch.edit", edit_sketch))
         .noundo().icon("sketch")
         .contract(&EDIT_CONTRACT).output(output_schema_for::<EditResult>)
@@ -949,11 +949,39 @@ pub(crate) const PLANE_REF_FORMS: &str = "`plane` must be XY, XZ, YZ, a construc
 pub(crate) fn custom_plane_form(v: &Value) -> std::result::Result<Plane, &'static str> {
     let origin = match v.get("origin") {
         None | Some(Value::Null) => Vec3::ZERO,
-        Some(o) => vec3(o).ok_or("plane `origin` must be three numbers [x, y, z] in mm (expressions are not evaluated here)")?,
+        Some(o) => vec3(o).ok_or("plane `origin` must be three numbers [x, y, z] in mm")?,
     };
     let x = v.get("x_dir").and_then(vec3).ok_or("plane needs x_dir")?;
     let y = v.get("y_dir").and_then(vec3).ok_or("plane needs y_dir")?;
     Plane::new(origin, x, y).ok_or("degenerate plane")
+}
+
+/// An explicit plane whose origin has length expressions (`{origin: ["0 mm", "station", 0], x_dir,
+/// y_dir}`, #8192): kept as expressions where they name parameters, so the sketch follows them.
+fn expressed_plane(s: &Session, v: &Value, cmd: &str) -> Result<PlaneRef> {
+    let origin = super::features::point_param(s, v, "origin", cmd)?.unwrap_or_default();
+    let mut at = [0.0; 3];
+    for (slot, e) in at.iter_mut().zip(&origin) {
+        *slot = s.doc.eval(e, Kind::Length).map_err(|err| bad(cmd, format!("plane origin: {err}")))?;
+    }
+    let mut numbers = v.clone();
+    numbers["origin"] = json!(at);
+    let plane = custom_plane_form(&numbers).map_err(|why| bad(cmd, why))?;
+    if origin.iter().all(|e| solidcraft_doc::expr::is_literal(e)) {
+        return Ok(PlaneRef::Custom { plane });
+    }
+    Ok(PlaneRef::Placed { origin, x_dir: plane.x, y_dir: plane.y })
+}
+
+/// [`plane_ref`] for the commands whose explicit plane has an origin of numbers only
+/// (`canvas.insert`, `canvas.decal`, the browser's): length expressions are refused as before.
+pub(super) fn plane_ref_numbers(s: &Session, p: &Value, cmd: &str) -> Result<PlaneRef> {
+    if let Some(v @ Value::Object(o)) = p.get("plane")
+        && !o.contains_key("face")
+    {
+        custom_plane_form(v).map_err(|why| bad(cmd, why))?;
+    }
+    plane_ref(s, p, cmd)
 }
 
 pub(super) fn plane_ref(s: &Session, p: &Value, cmd: &str) -> Result<PlaneRef> {
@@ -964,6 +992,8 @@ pub(super) fn plane_ref(s: &Session, p: &Value, cmd: &str) -> Result<PlaneRef> {
         Some(v @ Value::Object(o)) => {
             if o.contains_key("face") {
                 face::capture(s, v, cmd)?
+            } else if o.get("origin").is_some_and(|origin| origin.as_array().is_some_and(|a| a.iter().any(Value::is_string))) {
+                expressed_plane(s, v, cmd)?
             } else {
                 PlaneRef::Custom { plane: custom_plane_form(v).map_err(|why| bad(cmd, why))? }
             }

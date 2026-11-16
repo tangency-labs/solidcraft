@@ -1082,6 +1082,124 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
         ends_are_a_stretch(gap, d.raw_tolerance(), [tol1, tol2])
     }
 
+    /// Not upstream (#17098): the edge of B-rep `which` that the face-sourced definition `ed`
+    /// stands for already, when there is one. One intersection curve can be found twice: as
+    /// an edge of B-rep `which` against a face of the other B-rep, and as this definition, the
+    /// face `face` of B-rep `which` against an edge of the other. Imprinted again, the face
+    /// had two edges between the same vertices along one curve, and the other B-rep's edge,
+    /// related to the first by the other definition, was then asked for the second as well:
+    /// "another entity is already related to the other one".
+    ///
+    /// So when another definition of a proto edge between this definition's two proto
+    /// vertices is that mirror pair, sourced in B-rep `which` on an edge that runs between
+    /// this definition's two final vertices there (`start` and `end`, distinct) and bounds
+    /// `face`, and in the other B-rep on a face that this definition's edge there bounds, and
+    /// the edge is proved within `along_tol` plus its own tolerance of this definition's curve
+    /// over the whole of both ([`Curve::proved_within`], a certified bound, never samples),
+    /// that edge is this definition's edge. Only that pair is one curve found twice: beside
+    /// a definition sourced on an edge in both B-reps, this one is a curve of its own, even
+    /// within tolerance of it (the two rims of a sheet shelled to `2 * tolerance` keep both
+    /// their edges). `along_tol` is the tolerance the edge would be made with (the face's or
+    /// the definition's, the larger), as WR-580 takes it in Brep2.
+    ///
+    /// # Errors
+    ///
+    /// Those of the topology walks and of the bound; [`SolidError::InvalidInput`] for a
+    /// deleted definition, proto edge or proto vertex, or a missing curve.
+    #[allow(clippy::too_many_arguments)] // the definition, its side, face, vertices and tolerance
+    fn sibling_edge_in_face(
+        &self,
+        k: &Kernel,
+        brep: &impl ProtoBrep<O>,
+        ed: EdgeDefId,
+        which: i32,
+        face: O,
+        (start, end): (O, O),
+        along_tol: f64,
+    ) -> Result<Option<O>> {
+        if start == end {
+            return Ok(None);
+        }
+        let ends = (
+            self.pv_live(self.edge_def_start_proto_vertex(ed)?)?,
+            self.pv_live(self.edge_def_end_proto_vertex(ed)?)?,
+        );
+        let d = self.ed_ref(ed)?;
+        // this definition's source in the other B-rep, which must be an edge
+        let across = 3 - which;
+        if d.src_topo_type(across) != PointClassType::Edge {
+            return Ok(None);
+        }
+        let Some(own_edge) = as_kind(d.src_topo(across), ClassObjectKind::Edge) else {
+            return Ok(None);
+        };
+        let curve = curve_of(brep, d.xsect_curve_3d())?;
+        let interval = d.xsect_interval();
+        let proto_edges = self
+            .proto_vertex(ends.0)
+            .ok_or(dangling("proto vertex is deleted"))?
+            .proto_edges()
+            .to_vec();
+        for pe in proto_edges {
+            let siblings = self
+                .proto_edge(pe)
+                .ok_or(dangling("proto edge is deleted"))?
+                .edge_definitions()
+                .to_vec();
+            for other in siblings.into_iter().filter(|&o| o != ed) {
+                let o = self.ed_ref(other)?;
+                if o.src_topo_type(which) != PointClassType::Edge
+                    || o.src_topo_type(across) != PointClassType::Face
+                {
+                    continue;
+                }
+                let Some(other_face) = as_kind(o.src_topo(across), ClassObjectKind::Face) else {
+                    continue;
+                };
+                let Some(edge) = as_kind(o.src_topo(which), ClassObjectKind::Edge) else {
+                    continue;
+                };
+                let other_ends = (
+                    self.pv_live(self.edge_def_start_proto_vertex(other)?)?,
+                    self.pv_live(self.edge_def_end_proto_vertex(other)?)?,
+                );
+                if other_ends != ends && other_ends != (ends.1, ends.0) {
+                    continue;
+                }
+                let s = brep.edge_start_vertex(edge)?;
+                let e = brep.edge_other_vertex(edge, s)?;
+                let between =
+                    (s, e) == (Some(start), Some(end)) || (s, e) == (Some(end), Some(start));
+                if !between
+                    || !brep.edge_is_connected_to_face(edge, face)?
+                    || !brep.edge_is_connected_to_face(own_edge, other_face)?
+                {
+                    continue;
+                }
+                let edge_curve = brep
+                    .edge_curve(edge)
+                    .ok_or(dangling("edge handle is unknown"))?;
+                let edge_curve = curve_of(brep, edge_curve)?;
+                let edge_interval = brep
+                    .edge_interval(edge)
+                    .ok_or(dangling("edge handle is unknown"))?;
+                let edge_tol = brep
+                    .topology_tolerance(edge)
+                    .ok_or(dangling("edge handle is unknown"))?;
+                if curve.proved_within(
+                    k,
+                    &interval,
+                    edge_curve,
+                    &edge_interval,
+                    along_tol + edge_tol,
+                )? {
+                    return Ok(Some(edge));
+                }
+            }
+        }
+        Ok(None)
+    }
+
     /// The body of [`ProtoTopologyManager::imprint_edge_definition`]; `edited` is set
     /// before the first B-rep edit.
     fn imprint_edge_definition_inner(
@@ -1167,7 +1285,32 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
         let mut new_f1 = None;
         let mut old_f1 = None;
 
-        if type1 == PointClassType::Face {
+        // Not upstream (#17098): a face that already has this curve as the edge another
+        // definition between the same proto vertices is sourced on keeps that edge.
+        let face1 = as_kind(d.src_topo(1), ClassObjectKind::Face);
+        let sibling1 = match face1 {
+            Some(face) if type1 == PointClassType::Face => {
+                let face_tol = brep
+                    .topology_tolerance(face)
+                    .ok_or(dangling("face handle is unknown"))?;
+                let along_tol = max2(face_tol, d.raw_tolerance());
+                self.sibling_edge_in_face(
+                    k,
+                    &*brep,
+                    ed,
+                    1,
+                    face,
+                    (start_vtx1, end_vtx1),
+                    along_tol,
+                )?
+            }
+            _ => None,
+        };
+        let d = self.ed_ref(ed)?;
+
+        if let Some(edge) = sibling1 {
+            self.ed_mut(ed)?.set_final_edge(1, Some(edge));
+        } else if type1 == PointClassType::Face {
             old_f1 = as_kind(d.src_topo(1), ClassObjectKind::Face);
             let face = old_f1.ok_or_else(null)?;
             let face_tol = brep
@@ -1246,6 +1389,27 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
                         along_edge2 = Some(edge);
                     }
                 }
+            }
+        }
+
+        // Not upstream (#17098): as in Brep1, the edge another definition between the same
+        // proto vertices is sourced on, when the search above found none.
+        if along_edge2.is_none() && type2 == PointClassType::Face {
+            let d = self.ed_ref(ed)?;
+            if let Some(face2) = as_kind(d.src_topo(2), ClassObjectKind::Face) {
+                let face_tol = brep
+                    .topology_tolerance(face2)
+                    .ok_or(dangling("face handle is unknown"))?;
+                let along_tol = max2(face_tol, d.raw_tolerance());
+                along_edge2 = self.sibling_edge_in_face(
+                    k,
+                    &*brep,
+                    ed,
+                    2,
+                    face2,
+                    (start_vtx2, end_vtx2),
+                    along_tol,
+                )?;
             }
         }
 

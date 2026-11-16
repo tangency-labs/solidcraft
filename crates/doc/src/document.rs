@@ -249,6 +249,8 @@ pub const CELL_GRID_MIN_SIZE: f64 = solidcore_ops::cell_grid::MIN_SIZE;
 
 /// The most sides of a polygon cell.
 pub const CELL_GRID_MAX_SIDES: u32 = solidcore_ops::cell_grid::MAX_SIDES;
+/// The most lattice lines a snapped field edge may be moved in.
+pub const CELL_GRID_MAX_SNAP_INSET: u32 = solidcore_ops::cell_grid::MAX_SNAP_INSET;
 
 fn default_cell_shape() -> solidcore_record::cell_grid::CellShape {
     solidcore_record::cell_grid::CellShape::Hexagon
@@ -1492,6 +1494,11 @@ pub enum FeatureKind {
         /// What happens to a cell a keep-out's edge crosses (default: the same as `clip`).
         #[serde(default, skip_serializing_if = "Option::is_none")]
         keepout_clip: Option<solidcore_record::cell_grid::Clip>,
+        /// With `clip: snap`, how many lattice lines further in each straight field edge moves
+        /// after it snaps (default 0).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[walk(unitless = "SnapInset")]
+        snap_inset: Option<Expr>,
         /// The least clearance from a cell to every edge of the field and its keep-outs, with
         /// `clip: whole` (default 0: a cell may touch an edge).
         #[serde(default, skip_serializing_if = "Option::is_none")]

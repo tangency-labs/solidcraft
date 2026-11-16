@@ -77,9 +77,13 @@ fn view_dxf_blind_back_hole_is_omitted_or_dashed_and_front_hole_is_visible() {
     assert_eq!(top["hidden"], 0);
     assert!(dashed["hidden"].as_u64().unwrap() > 12, "{dashed}");
     assert_eq!(top["visible"], dashed["visible"]);
-    assert!(!top["dxf"].as_str().unwrap().contains("HIDDEN"));
-    assert!(dashed["dxf"].as_str().unwrap().contains("LWPOLYLINE"));
-    assert!(dashed["dxf"].as_str().unwrap().contains("128\n"));
+    let top_file = solidcraft_io::read_dxf_file(top["dxf"].as_str().unwrap()).unwrap();
+    let dashed_file = solidcraft_io::read_dxf_file(dashed["dxf"].as_str().unwrap()).unwrap();
+    assert!(!top_file.layers().iter().any(|layer| layer.name() == "HIDDEN"));
+    let hidden = dashed_file.entities().iter().filter(|entity| dashed_file.layer(entity.layer()).unwrap().name() == "HIDDEN").collect::<Vec<_>>();
+    assert!(!hidden.is_empty());
+    assert!(hidden.iter().all(|entity| matches!(entity.geometry(), solidcraft_io::DxfShape::Polyline { points } if points.len() >= 2)));
+    assert!(hidden.iter().all(|entity| dashed_file.layer(entity.layer()).unwrap().linetype() == solidcraft_io::DxfLinetype::Hidden));
     let bottom = export(&mut s, camera(StandardView::Bottom), "omit");
     assert!(bottom["visible"].as_u64().unwrap() > top["visible"].as_u64().unwrap());
     assert_eq!(s.undo.len(), undo);
@@ -243,7 +247,11 @@ fn view_dxf_hides_finished_sketches_behind_bodies_but_draws_the_active_sketch_on
     };
     let active = export(&mut s, camera(StandardView::Top), "omit");
     assert_eq!(active["sketch"], 1, "{active}");
-    assert!((length(&active) - 80.).abs() < 1e-3 && active["dxf"].as_str().unwrap().contains("SKETCH"));
+    let active_file = solidcraft_io::read_dxf_file(active["dxf"].as_str().unwrap()).unwrap();
+    assert!(
+        (length(&active) - 80.).abs() < 1e-3
+            && active_file.entities().iter().any(|entity| active_file.layer(entity.layer()).unwrap().name() == "SKETCH")
+    );
     run(&mut s, "sketch.finish", json!({}));
     let finished = export(&mut s, camera(StandardView::Top), "omit");
     assert_eq!(finished["sketch"], 2, "{finished}");
