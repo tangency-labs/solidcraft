@@ -28,7 +28,10 @@
 //!   (`analytic`). A surface of revolution is extended along its generator as asked, on its
 //!   B-spline form row by row: its rows are one generator turned and weighted, every
 //!   construction here commutes with both, so the result is the revolution of the generator
-//!   extended; its side round its axis is left.
+//!   extended; its side round its axis is left, except where its generator is an arc of one
+//!   circle (a torus or sphere without its label, which the offset extends as itself): that
+//!   side turns on as the torus's does, its rows continued Natural, up to a quarter of the
+//!   turn it leaves open (`turn_on`, #14370).
 //!
 //! - **Ball patches as themselves.** A ball patch (the sphere's triangle with a pole) is
 //!   extended by its own net continued Natural (the source bit for bit, every point still on
@@ -45,6 +48,7 @@ use crate::kernel::Kernel;
 use crate::math::INFINITE_PARAMETER;
 use crate::nurbs::b_spline_surface::SurfParamType;
 use crate::surface::implicit::AnalyticSupport;
+use crate::surface::offset_surface::extends_as_itself;
 use crate::surface::side::{Across, BoxSide};
 use crate::surface::surface::{Surface, SurfaceKind};
 
@@ -88,6 +92,35 @@ pub(crate) fn round_the_axis(s: &Surface, side: BoxSide) -> Option<bool> {
         _ => return None,
     };
     Some(side.is_u() != swap)
+}
+
+/// How far side `side` of `face` (a side round the axis) of a surface of revolution whose
+/// generator is an arc of one circle turns on: a quarter of the turn the surface leaves open,
+/// the analytic kinds' cap (`analytic`), as that arc's length at the side's middle. Such a
+/// revolution is a torus or a sphere without its label (the offset of a round about a circle
+/// is one), which the offset extends as itself ([`extends_as_itself`], the fork's
+/// `sm_GeneratorIsCircle`). Each of its rows round the axis is a rational quadratic arc, so
+/// continued Natural it stays on the circle its point sweeps: the surface turned on. `None`
+/// for any other surface, a side on the axis, and no turn left open.
+///
+/// # Errors
+///
+/// Those of the evaluation at the side's middle.
+fn turn_on(k: &Kernel, s: &Surface, face: &Extent2d, side: BoxSide) -> Result<Option<f64>> {
+    let SurfaceKind::SurfOfRevolution(rev) = s.kind() else {
+        return Ok(None);
+    };
+    if !extends_as_itself(k, s) {
+        return Ok(None);
+    }
+    let open = (360.0 - (rev.end_angle_deg() - rev.start_angle_deg())).to_radians();
+    if open.is_nan() || open <= 0.0 {
+        return Ok(None);
+    }
+    let axis = rev.position();
+    let off = s.evaluate_point(k, side.point(face, 0.5))? - axis.origin();
+    let radius = (off - axis.z_axis() * off.dot(axis.z_axis())).length();
+    Ok((radius > 0.0).then_some(0.25 * open * radius))
 }
 
 /// A surface extended past several sides ([`Surface::extended_sides`]).
@@ -261,11 +294,17 @@ impl Surface {
             }
             // a revolution's side round its axis is left; along it, its B-spline form row by
             // row as asked, which is again a revolution (its rows are one generator turned
-            // and weighted, and every construction commutes with both)
-            if round_the_axis(own, source_side) == Some(true) {
-                *done = SideExtension::AroundAxis;
-                continue;
-            }
+            // and weighted, and every construction commutes with both). One whose generator
+            // is an arc of one circle turns on (`turn_on`).
+            let (how, distance, capped) = if round_the_axis(own, source_side) == Some(true) {
+                let Some(cap) = turn_on(k, own, &face, source_side)? else {
+                    *done = SideExtension::AroundAxis;
+                    continue;
+                };
+                (Continuity::Natural, distance.min(cap), distance > cap)
+            } else {
+                (how, distance, false)
+            };
             // measured at the face: the grown box with its extent along the side cut back to
             // the face's (the side's own coordinate is the grown box's)
             let at = if side.is_u() {
@@ -283,7 +322,11 @@ impl Surface {
             }
             source += grown.source;
             extension = extension.max(grown.extension);
-            *done = SideExtension::Extended(grown.across);
+            *done = if capped {
+                SideExtension::UpToLimit(grown.across)
+            } else {
+                SideExtension::Extended(grown.across)
+            };
             current = Some(grown);
         }
         // each side extended is measured again at the face: a side extended after another
