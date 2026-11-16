@@ -6278,9 +6278,9 @@ pub fn hole_start(st: &ModelState, f: &Feature, p: Vec3, dir: Vec3) -> Vec3 {
 /// names the faces to ask.
 fn on_a_brep_face(st: &ModelState, p: Vec3) -> bool {
     let reach = st.bodies.iter().map(ModelBody::display_tol).fold(0.0, f64::max);
-    faces_near(st, p, reach, &[]).into_iter().any(|(_, i, face, _)| {
-        st.bodies.get(i).is_some_and(|b| matches!(b.body.point_lies_on_face(face as usize, p, b.display_tol()), Ok(Some(_))))
-    })
+    faces_near(st, p, reach, &[])
+        .into_iter()
+        .any(|(_, i, face, _)| st.bodies.get(i).is_some_and(|b| matches!(b.body.point_lies_on_face(face as usize, p, b.display_tol()), Ok(Some(_)))))
 }
 
 fn in_hole_scope(scope: &[String], b: &ModelBody) -> bool {
