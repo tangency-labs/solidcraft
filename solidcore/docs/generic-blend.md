@@ -521,7 +521,11 @@ given.
 - **A boss or cut standing inside a round's band is kept** (its walls carried down to the round),
   as the "keep features" option of common practice; letting the round take it is a future option.
 - **A partly selected tangent chain** rounds exactly the selected edges and ends at the smooth vertex
-  with a real End.
+  with a real End. A vertex where the edge bends, within the tangency tolerance, is smooth. Where
+  the edge it runs on into turns towards the blend, the blend runs on past the vertex and out of the
+  part instead, ending on the end face. Not where the bend first takes that edge to the far side of
+  the blended edge continued, deeper than the face's zone tolerance: the part there stands across
+  the blend run on, which ends at the vertex (`blend_corner::end`, `run_on_leaves_the_part`).
 - **Folds are refused, never trimmed**, naming the radius.
 - **The user's geometry is never changed without consent**: no silent shrink, no auto-fit.
 - **The round is stored as its definition** with a certified net.

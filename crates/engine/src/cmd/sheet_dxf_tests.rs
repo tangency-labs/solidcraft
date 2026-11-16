@@ -1343,7 +1343,8 @@ mod byte_regressions {
 
         // The writer is the reachable API for arbitrary TEXT. Sheet text is outlines and
         // bend notes are generated ASCII; no synthetic public command is added to inject text.
-        use solidcraft_io::{DxfEntity, DxfLayer, DxfShape, IoError, write_dxf_drawing};
+        use solidcraft_io::test_support::{DxfEntity, DxfLayer, legacy_dxf_baseline as write_dxf_drawing};
+        use solidcraft_io::{DxfShape, IoError};
         let note = |text: String| DxfEntity {
             layer: "NOTES".into(),
             shape: DxfShape::Text { at: Vec2::new(30.0, 12.0), height: 3.0, angle_deg: 90.0, text },

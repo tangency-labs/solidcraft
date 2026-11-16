@@ -133,6 +133,8 @@ pub struct CellGridSpec {
     pub anchor: Vec2,
     /// What happens to a cell the field's edge crosses.
     pub clip: Clip,
+    /// What happens to a cell a keep-out's edge crosses (`None`: the same as `clip`).
+    pub keepout_clip: Option<Clip>,
     /// The least clearance from a cell's outline to every edge of the field and its keep-outs, with
     /// [`Clip::Whole`] (0: a cell may touch an edge). Measured exactly, on the edges' own curves.
     pub margin: f64,
@@ -149,6 +151,7 @@ impl Default for CellGridSpec {
             angle: 0.0,
             anchor: Vec2::ZERO,
             clip: Clip::Snap,
+            keepout_clip: None,
             margin: 0.0,
         }
     }
@@ -183,7 +186,9 @@ impl CellGridSpec {
                 self.margin
             )));
         }
-        if self.margin > 0.0 && self.clip != Clip::Whole {
+        if self.margin > 0.0
+            && (self.clip != Clip::Whole || self.keepout_clip.is_some_and(|c| c != Clip::Whole))
+        {
             return Err(CellGridError::Parameter(
                 "a margin needs `clip: whole`: snapped and trimmed cells meet the edge by design"
                     .into(),
@@ -349,13 +354,24 @@ pub fn plan(field: &[Loop2], spec: &CellGridSpec) -> Result<CellGridPlan, CellGr
     let lat = spec.lattice()?;
     let mut warnings = Vec::new();
     let (loops, edges, flattened) = lattice_loops(field, spec, &mut warnings)?;
-    let mut clip = spec.clip;
-    if clip == Clip::Snap && !lat.snappable() {
-        clip = Clip::Whole; // no lattice lines to snap to
-    }
+    // Without lattice lines there is nothing to snap to.
+    let usable = |c: Clip| {
+        if c == Clip::Snap && !lat.snappable() {
+            Clip::Whole
+        } else {
+            c
+        }
+    };
+    let field_clip = usable(spec.clip);
+    let keepout_clip = usable(spec.keepout_clip.unwrap_or(spec.clip));
+    let any_snap = field_clip == Clip::Snap || keepout_clip == Clip::Snap;
     let mut region = Region::from_loops(loops, lat.p);
-    if clip == Clip::Snap {
-        let (snapped, notes) = snap::snap_region(&region, &lat);
+    if any_snap {
+        let (snapped, notes) = snap::snap_region(
+            &region,
+            &lat,
+            (field_clip == Clip::Snap, keepout_clip == Clip::Snap),
+        );
         region = snapped;
         warnings.extend(notes);
     }
@@ -389,7 +405,7 @@ pub fn plan(field: &[Loop2], spec: &CellGridSpec) -> Result<CellGridPlan, CellGr
                 // The exact edges are the field as drawn. Snapping moves the straight loops off
                 // them (fields shrink, keep-outs grow), so with `Snap` the hits on the moved
                 // loops must stay: only the other modes may clear a hit the chords made.
-                if clip != Clip::Snap {
+                if !any_snap {
                     hits.clear();
                 }
             } else if hits.is_empty() {
@@ -416,6 +432,21 @@ pub fn plan(field: &[Loop2], spec: &CellGridSpec) -> Result<CellGridPlan, CellGr
             }
             continue;
         }
+        // A cell is clipped by the mode of the loops it meets; one that meets both kinds gets
+        // the stricter: dropped for whole, else trimmed for free, else cut along the grid.
+        let on_keepout = |h: &usize| region.keepout.get(*h).copied().unwrap_or(false);
+        let clip = match (
+            hits.iter().any(|h| !on_keepout(h)),
+            hits.iter().any(on_keepout),
+        ) {
+            (false, true) => keepout_clip,
+            (_, false) => field_clip,
+            (true, true) => match (field_clip, keepout_clip) {
+                (Clip::Whole, _) | (_, Clip::Whole) => Clip::Whole,
+                (Clip::Free, _) | (_, Clip::Free) => Clip::Free,
+                _ => Clip::Snap,
+            },
+        };
         match clip {
             Clip::Whole => {}
             Clip::Free => {
