@@ -730,6 +730,11 @@ pub struct FilletExecutive<O> {
     /// [`Self::overflow_edges`] the edges whose blends overflow (possibly none). Acts only
     /// with the flags of [`Self::overflow_first`].
     pub classify_only: bool,
+    /// Not upstream (#10876; `false` from the constructor): the session is the blend
+    /// corner's Roll-over's second pass, the concave chain
+    /// ([`crate::blend::blend_corner::rollover`]): its concave overflow across the cliff is
+    /// accepted (`choose_cliff_overflow`) and built as a cliff overflow.
+    pub roll_over_pass: bool,
     /// `m_vOverflowEdges` (the fork's, WR-634; cleared by `SetFilletParameters`): the
     /// edges of the blends that overflow, in solver order, when stopped so.
     pub overflow_edges: Vec<O>,
@@ -2641,6 +2646,23 @@ pub trait SolverGeometryAccess<O: ClassObject + SolutionObject + Ord> {
     fn geometry_overflow_edge(&self, solver: O) -> Result<Option<O>> {
         self.geometry_edge(solver).map(Some)
     }
+    /// Not upstream (#10876): whether `solver`'s overflow is the blend corner's Roll-over's
+    /// (its second pass): its edge ends at a vertex V where the concave chain meets the
+    /// cliff, and every run of its rails off their faces leaves across an edge of the
+    /// cliff's rim at that V (`left_across`, from the judged rails fit; at least one).
+    /// `false` by default (no second pass).
+    ///
+    /// # Errors
+    /// Missing actual solver topology; those of the rim's tests.
+    fn geometry_overflows_at_roll_over(
+        &mut self,
+        k: &mut Kernel,
+        solver: O,
+        left_across: &[Option<crate::topology::EdgeId>],
+    ) -> Result<bool> {
+        let _ = (k, solver, left_across);
+        Ok(false)
+    }
     /// The fork's mitred-pair test of the overflow-first stop (WR-634,
     /// tangency-labs/smlib@9ba2b12): for an Nx2 corner whose `IsMitre` is set, the edges
     /// of its two filleted edge uses (`GetFilletedEdgeuses`), in order; `None` for any
@@ -3041,6 +3063,9 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
         let mut overflow = false;
         let mut concave = false;
         let mut concave_overflow = false;
+        // Not upstream (#10876): the concave overflow of the Roll-over's second pass across
+        // the cliff, a blend whose edge ends at V: accepted, trimmed at the creases
+        let mut rolled_overflow = false;
         let mut round_into_material = false;
         let mut rolls_over = false;
         let mut wraps = false;
@@ -3067,7 +3092,17 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
                 overflowing.push(edge);
             }
             if access.geometry_blend_adds_material(k, solver)? {
-                concave_overflow = true;
+                // the event's only where its rails leave across the cliff's rim at V and its
+                // end sections stay on their end faces (an end section's overflow is not
+                // located, so it is never taken for the event's)
+                if self.roll_over_pass
+                    && access.geometry_overflows_at_roll_over(k, solver, &judged.left_across)?
+                    && access.geometry_end_sections_fit(k, solver, self)?
+                {
+                    rolled_overflow = true;
+                } else {
+                    concave_overflow = true;
+                }
             }
             if judged.into_material && !access.geometry_generator_is_linear(solver)? {
                 round_into_material = true;
@@ -3075,7 +3110,7 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
         }
         // whether the other blends add material (concave), when one overflows
         let mut index = 0;
-        while overflow && !concave_overflow && !concave {
+        while overflow && !concave_overflow && !rolled_overflow && !concave {
             let Some(solver) = self.solvers.get(index).copied() else {
                 break;
             };
@@ -3090,6 +3125,7 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
                 && overflow
                 && self.solvers.len() > 1
                 && !concave_overflow
+                && !rolled_overflow
                 && !concave
                 && !round_into_material)
         {
@@ -3114,6 +3150,9 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
             return Err(failure());
         }
         if overflow {
+            // the Roll-over's concave chain (#10876) overflows the cliff at V by
+            // construction (`rolled_overflow`, not refused): the material it adds past the
+            // cliff is trimmed at the creases; any other concave overflow is refused
             let why = if wraps {
                 // not the fork's (tangency-labs/solidcore#2175): no cliff cuts the face off;
                 // it is smaller than the blend beyond both ends of the edge
