@@ -8242,6 +8242,13 @@ fn extrude_within_reach(ends: [f64; 2]) -> Result<()> {
 }
 
 /// Construct planar caps locally before placing the completed tool.
+#[derive(Clone, Copy)]
+enum CapRoles {
+    ByHeight,
+    TwoSided,
+    Named([&'static str; 2]),
+}
+
 fn centered_extrude(
     plane: &Plane,
     region: &Region2,
@@ -8249,7 +8256,7 @@ fn centered_extrude(
     end: f64,
     sketch: Option<&SolvedSketch>,
     thin: Option<&crate::lineage::ThinWallRoles>,
-    two_sided: bool,
+    cap_roles: CapRoles,
     one_sided_direction: Option<crate::Direction>,
 ) -> Result<Vec<Traced>> {
     if !plane.origin.is_finite()
@@ -8268,10 +8275,10 @@ fn centered_extrude(
     // they close. Their height cannot tell them apart: both sides may lie on the same side of
     // the sketch plane, and two caps named alike are two pieces of one face, which the
     // history cannot tell apart (a sketch on either of them could not keep its attachment).
-    let caps = if two_sided {
-        [Some("bottom".to_string()), Some("top".to_string())]
-    } else {
-        [Some(crate::lineage::extrude_cap_role(lo)), Some(crate::lineage::extrude_cap_role(hi))]
+    let caps = match cap_roles {
+        CapRoles::TwoSided => [Some("bottom".to_string()), Some("top".to_string())],
+        CapRoles::Named([a, b]) => [Some(a.to_string()), Some(b.to_string())],
+        CapRoles::ByHeight => [Some(crate::lineage::extrude_cap_role(lo)), Some(crate::lineage::extrude_cap_role(hi))],
     };
     // An extrude that spans its sketch plane (symmetric) has no cap on it. One made from a
     // one-sided extrude knows the way that one went ([`crate::Extent::one_sided_direction`]):
@@ -8279,7 +8286,7 @@ fn centered_extrude(
     // `start`, so a reference to `start` picked before still finds that cap and never the
     // other. Without that record no cap answers to `start`. It spans the plane when its caps
     // lie on both sides of it, as their roles already say.
-    let spans = caps[0].as_deref() == Some("bottom") && caps[1].as_deref() == Some("top") && !two_sided;
+    let spans = caps[0].as_deref() == Some("bottom") && caps[1].as_deref() == Some("top") && !matches!(cap_roles, CapRoles::TwoSided);
     let start_name = || Some("start".to_string());
     let cap_synonyms = match one_sided_direction.filter(|_| spans) {
         Some(crate::Direction::Positive) => [start_name(), None],
@@ -8653,12 +8660,29 @@ fn feature_tools_with_constructor(
             let untrimmed = extent.to.is_none() && extent.from.is_none();
             let mut tools = Vec::new();
             if is_symmetric_offset {
-                let gap = off.abs();
-                let half = hi;
-                extrude_within_reach([-gap - half, gap + half])?;
+                let [(pos_lo, pos_hi), (neg_lo, neg_hi)] = kernel::symmetric_offset_intervals(off, hi);
+                extrude_within_reach([neg_lo, pos_hi])?;
                 for r in &regions {
-                    tools.extend(centered_extrude(&ss.plane, r, gap, gap + half, Some(&ss), thin_roles.as_ref(), true, None)?);
-                    tools.extend(centered_extrude(&ss.plane, r, -gap - half, -gap, Some(&ss), thin_roles.as_ref(), true, None)?);
+                    tools.extend(centered_extrude(
+                        &ss.plane,
+                        r,
+                        pos_lo,
+                        pos_hi,
+                        Some(&ss),
+                        thin_roles.as_ref(),
+                        CapRoles::Named(["bottom_pos", "top_pos"]),
+                        None,
+                    )?);
+                    tools.extend(centered_extrude(
+                        &ss.plane,
+                        r,
+                        neg_lo,
+                        neg_hi,
+                        Some(&ss),
+                        thin_roles.as_ref(),
+                        CapRoles::Named(["bottom_neg", "top_neg"]),
+                        None,
+                    )?);
                 }
             } else {
                 // From a slanted face: the prism runs over the face's whole rise across the profiles,
@@ -8684,6 +8708,7 @@ fn feature_tools_with_constructor(
                 };
                 extrude_within_reach([run_lo + off, run_hi + off])?;
                 for r in &regions {
+                    let cap_roles = if extent.distance2.is_some() { CapRoles::TwoSided } else { CapRoles::ByHeight };
                     tools.extend(centered_extrude(
                         &ss.plane,
                         r,
@@ -8691,7 +8716,7 @@ fn feature_tools_with_constructor(
                         run_hi + off,
                         Some(&ss),
                         thin_roles.as_ref(),
-                        extent.distance2.is_some(),
+                        cap_roles,
                         extent.one_sided_direction.filter(|_| direction == crate::Direction::Symmetric && extent.distance2.is_none()),
                     )?);
                 }
@@ -8764,13 +8789,9 @@ fn feature_tools_with_constructor(
                         let nominal = |plane: &solidcore_record::Plane| {
                             let height = (plane.origin - ss.plane.origin).dot(n);
                             if is_symmetric_offset {
-                                let gap = off.abs();
-                                let half = hi;
-                                let tolerance = 1e-9 * (1.0 + height.abs() + (gap + half));
-                                (height - gap).abs() <= tolerance
-                                    || (height - (gap + half)).abs() <= tolerance
-                                    || (height - (-gap)).abs() <= tolerance
-                                    || (height - (-gap - half)).abs() <= tolerance
+                                let [(pos_lo, pos_hi), (neg_lo, neg_hi)] = kernel::symmetric_offset_intervals(off, hi);
+                                let tolerance = 1e-9 * (1.0 + height.abs() + pos_hi.abs() + neg_lo.abs());
+                                [pos_lo, pos_hi, neg_lo, neg_hi].into_iter().any(|h| (height - h).abs() <= tolerance)
                             } else {
                                 let tolerance = 1e-9 * (1.0 + height.abs() + (lo + off).abs() + (hi + off).abs());
                                 (height - (lo + off)).abs() <= tolerance || (height - (hi + off)).abs() <= tolerance
