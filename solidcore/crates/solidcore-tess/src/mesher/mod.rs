@@ -1702,22 +1702,32 @@ fn ring_too_far(cap: &PoleCap, fixed: &[Vec3], reach: f64) -> Vec<SplitSide> {
 }
 
 /// Where the ring of `cap` (straight in (u, v) from the node before the pole to the one after it)
-/// would not lie inside the face: a node of the rest of its loop, across the ring's span, on the
-/// ring or on the pole's side of it (a pole's face of three sides whose third side, straight in
-/// (u, v), has nodes between the two it ends at: the ring runs along that side, and the rest of
-/// the face has no area). The sides from those two nodes to the pole, each to be split at its
-/// middle on its edge, so the next plan's ring passes inside. Empty where the ring lies inside.
+/// would not lie inside the face: a node of any of the face's loops (`ranges`), across the ring's
+/// span, on the ring or on the pole's side of it, or a node of the run itself on the other side
+/// (a pole's face of three sides whose third side, straight in (u, v), has nodes between the two
+/// it ends at: the ring runs along that side, and the rest of the face has no area). The pole's
+/// side is that of the run's node farthest from the ring line. The sides from those two nodes to
+/// the pole, each to be split at its middle on its edge, so the next plan's ring passes inside.
+/// Empty where the ring lies inside, and where the pole's side is not known (the run on the ring
+/// line, or a coordinate not finite): the face then goes on to the fan's own checks.
 fn ring_off_boundary(cap: &PoleCap, uvs: &[[f64; 2]], fixed: &[Vec3], ranges: &[std::ops::Range<usize>]) -> Vec<SplitSide> {
     let (Some(&c0), Some(&cm)) = (cap.copies.first(), cap.copies.last()) else { return Vec::new() };
-    let (Some(&a), Some(&b), Some(&p), Some(r)) = (uvs.get(cap.before), uvs.get(cap.after), uvs.get(c0), ranges.get(cap.lp)) else { return Vec::new() };
+    let (Some(&a), Some(&b)) = (uvs.get(cap.before), uvs.get(cap.after)) else { return Vec::new() };
     let ab = [b[0] - a[0], b[1] - a[1]];
     let across = |q: [f64; 2]| ab[0] * (q[1] - a[1]) - ab[1] * (q[0] - a[0]);
     let along = |q: [f64; 2]| ab[0] * (q[0] - a[0]) + ab[1] * (q[1] - a[1]);
-    let (pole_side, span) = (across(p), along(b));
-    let cuts = r.clone().filter(|k| *k != cap.before && *k != cap.after && !cap.copies.contains(k)).filter_map(|k| uvs.get(k).copied()).any(|q| {
-        let t = along(q);
-        t > 0.0 && t < span && !(across(q) * pole_side < 0.0)
-    });
+    let run: Vec<f64> = cap.copies.iter().filter_map(|&k| uvs.get(k).map(|&q| across(q))).collect();
+    let pole_side = run.iter().copied().fold(0.0, |best: f64, x| if x.abs() > best.abs() { x } else { best });
+    let span = along(b);
+    if !(pole_side.is_finite() && pole_side != 0.0 && span.is_finite() && span > 0.0) || run.iter().any(|x| !x.is_finite()) {
+        return Vec::new();
+    }
+    let crossed = run.iter().any(|&x| x * pole_side < 0.0);
+    let cuts = crossed
+        || ranges.iter().flat_map(|r| r.clone()).filter(|k| *k != cap.before && *k != cap.after && !cap.copies.contains(k)).filter_map(|k| uvs.get(k).copied()).any(|q| {
+            let t = along(q);
+            t > 0.0 && t < span && !(across(q) * pole_side < 0.0)
+        });
     if !cuts {
         return Vec::new();
     }
@@ -1833,9 +1843,10 @@ fn cap_fan(copies: &[usize], ring: &[usize], uv: &[[f64; 2]], pos: &[Vec3]) -> O
     if p > 1 && inner_last < 1 {
         return None;
     }
-    // The ring node where each point's fan ends and the next one's starts: the last inner node
-    // for the last point, and the inner nodes shared evenly before it.
-    let end = |g: usize| if g + 1 >= p { inner_last } else { 1 + g * inner_last.saturating_sub(1) / (p - 1).max(1) };
+    // The ring node where each point's fan ends and the next one's starts: the `inner_last`
+    // segments up to the last inner node shared evenly among the points, each ending on an inner
+    // node (never before the first), the last point's on the last inner node.
+    let end = |g: usize| if g + 1 >= p { inner_last } else { ((g + 1) * inner_last / p).max(1) };
     let mut tris: Vec<[usize; 3]> = Vec::new();
     let mut from = 0;
     for (g, run) in groups.iter().enumerate() {

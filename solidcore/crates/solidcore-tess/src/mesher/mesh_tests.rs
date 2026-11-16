@@ -16,7 +16,7 @@ use solidcore::Vec3;
 
 use crate::vec::VecExt as _;
 
-use super::{PoleCap, SplitSide, cap_ring, edges, on_edges, size};
+use super::{PoleCap, SplitSide, cap_fan, cap_ring, edges, on_edges, ring_off_boundary, size};
 
 fn record(body: &solidcore_ops::Body) -> brep::Brep {
     body.to_record().expect("the body's record").0
@@ -541,3 +541,109 @@ fn a_pole_ring_is_even_round_the_pole_in_3d() {
     }
 }
 
+
+/// The (u, v) points and 3D points of a cap test: ring nodes 0..=5 along v = 0 from (0, 0) to
+/// (1, 0), and the run's nodes from 10 on, at the given (u, v) (their 3D points: the same, at
+/// z = 0).
+fn cap_case(run: &[[f64; 2]]) -> (Vec<[f64; 2]>, Vec<Vec3>) {
+    let mut uv = vec![[f64::NAN; 2]; 10 + run.len()];
+    for (k, q) in uv.iter_mut().enumerate().take(6) {
+        *q = [k as f64 / 5.0, 0.0];
+    }
+    for (k, q) in run.iter().enumerate() {
+        uv[10 + k] = *q;
+    }
+    let pos = uv.iter().map(|q| Vec3::new(q[0], q[1], 0.0)).collect();
+    (uv, pos)
+}
+
+/// Every ring segment of `ring` is in exactly one triangle of `tris`, every triangle is
+/// counter-clockwise in (u, v), and the triangles cover the polygon of the ring and the run.
+fn assert_fan_covers(tris: &[[u32; 3]], ring: &[usize], run: &[usize], uv: &[[f64; 2]]) {
+    let area = |[a, b, c]: [usize; 3]| {
+        let (qa, qb, qc) = (uv[a], uv[b], uv[c]);
+        0.5 * ((qb[0] - qa[0]) * (qc[1] - qa[1]) - (qb[1] - qa[1]) * (qc[0] - qa[0]))
+    };
+    for w in ring.windows(2) {
+        let uses = tris.iter().filter(|t| t.contains(&(w[0] as u32)) && t.contains(&(w[1] as u32))).count();
+        assert_eq!(uses, 1, "ring segment {w:?} in {uses} triangles: {tris:?}");
+    }
+    let mut sum = 0.0;
+    for t in tris {
+        let a = area(t.map(|i| i as usize));
+        assert!(a > 0.0, "triangle {t:?} is not counter-clockwise: {a}");
+        sum += a;
+    }
+    // The polygon: the ring from its start to its end, then the run back.
+    let poly: Vec<usize> = ring.iter().copied().chain(run.iter().rev().copied()).collect();
+    let whole: f64 = (0..poly.len()).map(|k| {
+        let (p, q) = (uv[poly[k]], uv[poly[(k + 1) % poly.len()]]);
+        0.5 * (p[0] * q[1] - q[0] * p[1])
+    }).sum();
+    assert!((sum - whole).abs() <= 1e-12, "the fan covers {sum}, the cap {whole}");
+}
+
+/// A run of poles at two points is fanned from each to an even share of the ring's inner nodes,
+/// with one triangle where they meet; the fan covers the cap once.
+#[test]
+fn a_pole_run_at_two_points_is_fanned_evenly() {
+    let run = [[0.4, 1.0], [0.6, 1.0]];
+    let (uv, pos) = cap_case(&run);
+    let ring = [0, 1, 2, 3, 4, 5];
+    let tris = cap_fan(&[10, 11], &ring, &uv, &pos).expect("fanned");
+    assert_fan_covers(&tris, &ring, &[10, 11], &uv);
+    // Four inner segments, two each, then the ring's last segment from the last point.
+    let from = |c: u32| tris.iter().filter(|t| t.contains(&c) && !t.contains(&(if c == 10 { 11 } else { 10 }))).count();
+    assert_eq!((from(10), from(11)), (2, 3), "{tris:?}");
+}
+
+/// A run at more points than the ring has inner nodes still covers the cap once.
+#[test]
+fn a_pole_run_at_more_points_than_inner_nodes_is_fanned() {
+    let run = [[0.3, 1.0], [0.5, 1.0], [0.7, 1.0]];
+    let (uv, pos) = cap_case(&run);
+    let ring = [0, 2, 4, 5];
+    let tris = cap_fan(&[10, 11, 12], &ring, &uv, &pos).expect("fanned");
+    assert_fan_covers(&tris, &ring, &[10, 11, 12], &uv);
+}
+
+/// A run at two points needs an inner node on its ring; copies of one point do not.
+#[test]
+fn a_pole_run_at_two_points_needs_an_inner_ring_node() {
+    let (uv, pos) = cap_case(&[[0.4, 1.0], [0.6, 1.0]]);
+    assert!(cap_fan(&[10, 11], &[0, 5], &uv, &pos).is_none());
+    let (uv, mut pos) = cap_case(&[[0.4, 1.0], [0.6, 1.0]]);
+    pos[11] = pos[10];
+    let tris = cap_fan(&[10, 11], &[0, 5], &uv, &pos).expect("one point");
+    assert_fan_covers(&tris, &[0, 5], &[10, 11], &uv);
+}
+
+/// The ring line from (0, 0) to (1, 0) with the pole above it at (0.5, 1): the loop's other
+/// nodes, and the sides it asks to split.
+fn ring_hits(rest: &[[f64; 2]], hole: &[[f64; 2]], pole: [f64; 2]) -> Vec<SplitSide> {
+    // Loop: before (0), pole (1), after (2), then the rest; the hole is a loop of its own.
+    let mut uvs = vec![[0.0, 0.0], pole, [1.0, 0.0]];
+    uvs.extend_from_slice(rest);
+    let outer = 0..uvs.len();
+    uvs.extend_from_slice(hole);
+    let ranges = [outer.clone(), outer.end..uvs.len()];
+    let fixed: Vec<Vec3> = uvs.iter().map(|q| Vec3::new(q[0], q[1], 0.0)).collect();
+    let cap = PoleCap { lp: 0, copies: vec![1], before: 0, after: 2 };
+    ring_off_boundary(&cap, &uvs, &fixed, &ranges)
+}
+
+/// The ring is moved only where a node of a loop lies on it or on the pole's side of it within
+/// its span: not for nodes beyond its ends or across it, nor where the pole's side is unknown.
+#[test]
+fn a_pole_ring_is_moved_only_off_a_boundary_it_meets() {
+    let below = [[0.5, -1.0]];
+    assert!(ring_hits(&below, &[], [0.5, 1.0]).is_empty(), "the rest of the loop lies across the ring");
+    assert_eq!(ring_hits(&[[1.5, 0.0], [0.5, -1.0], [-0.5, 0.0]], &[], [0.5, 1.0]).len(), 0, "nodes beyond its ends");
+    assert_eq!(ring_hits(&[[0.0, -1.0], [0.0, 0.0]], &[], [0.5, 1.0]).len(), 0, "a node at its start (t = 0)");
+    let on = ring_hits(&[[0.5, 0.0], [0.5, -1.0]], &[], [0.5, 1.0]);
+    assert_eq!(on.len(), 2, "a node on the ring");
+    assert!(on.iter().all(|s| s.at == [0.5]));
+    assert_eq!(ring_hits(&below, &[[0.5, 0.3], [0.6, 0.4], [0.4, 0.4]], [0.5, 1.0]).len(), 2, "a hole on the pole's side");
+    assert!(ring_hits(&[[0.5, 0.0]], &[], [0.5, f64::NAN]).is_empty(), "no pole side: no split");
+    assert!(ring_hits(&[[0.5, 0.0]], &[], [0.5, 0.0]).is_empty(), "the pole on the ring line: no split");
+}
