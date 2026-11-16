@@ -37,9 +37,12 @@ pub const SHADER: &str = include_str!("../shaders/tess.wgsl");
 /// with it whenever its adapter offers it ([`depth_features`]).
 pub const FLOAT_DEPTH_STENCIL: wgpu::Features = wgpu::Features::DEPTH32FLOAT_STENCIL8;
 
-/// The depth features to open a device on `adapter` with: [`FLOAT_DEPTH_STENCIL`] if it has it.
+/// The features to open a device on `adapter` with: [`FLOAT_DEPTH_STENCIL`] and indirect draws
+/// with a first instance, each if it has it.
 pub fn depth_features(adapter: &wgpu::Adapter) -> wgpu::Features {
-    adapter.features() & FLOAT_DEPTH_STENCIL
+    // Indirect draws that start at an instance: a scene's instanced meshes drawn a call per
+    // pipeline (`view::indirect`).
+    adapter.features() & (FLOAT_DEPTH_STENCIL | wgpu::Features::INDIRECT_FIRST_INSTANCE)
 }
 
 /// The depth format to draw with on `device`: 32-bit float (reversed depth) where it can, with a
