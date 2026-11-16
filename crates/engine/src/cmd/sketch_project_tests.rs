@@ -1083,8 +1083,9 @@ fn faces_split_by_hidden_seams_project_whole() {
     let round = run(&mut s, "sketch.inspect", json!({}));
     let mut radii: Vec<f64> = round["curves"].as_array().unwrap().iter().map(|c| c["radius"].as_f64().unwrap()).collect();
     radii.sort_by(f64::total_cmp);
-    assert_eq!(radii.len(), 4, "{round}");
-    assert!(radii[..2].iter().all(|r| (r - 17.).abs() < 1e-6) && radii[2..].iter().all(|r| (r - 20.).abs() < 1e-6), "{round}");
+    // Its two rims, each one closed circular edge: one circle each.
+    assert_eq!(radii.len(), 2, "{round}");
+    assert!((radii[0] - 17.).abs() < 1e-6 && (radii[1] - 20.).abs() < 1e-6, "{round}");
 }
 
 /// #635: a rectangle whose corner is made coincident with a projected edge of the solid under
@@ -2658,7 +2659,7 @@ fn a_sketch_failing_for_lost_projections_is_shown_where_it_is_and_never_used() {
 fn assert_rim(s: &mut Session, radius: f64, center: [f64; 2]) {
     let si = inspect(s);
     let arcs: Vec<Value> = linked_curves(&si).into_iter().filter(|c| c["type"] == "arc" || c["type"] == "circle").collect();
-    assert!(arcs.len() >= 2, "the opening is a full circle, got {si}");
+    assert_eq!(arcs.len(), 1, "the opening is one full circle, got {si}");
     for c in &arcs {
         let r = c["radius"].as_f64().unwrap_or(f64::NAN);
         assert!((r - radius).abs() < 1e-4, "{c}");

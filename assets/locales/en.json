@@ -3342,7 +3342,7 @@
   "prefs.view_confirm_corner_note": "While a dialog or a sketch is open, a check and a cross at the top right of the view do what the dialog's OK and Cancel do, or finish and cancel the sketch. The view navigator moves down below them.",
   "prefs.viewport": "Viewport",
   "prefs.viewport_analysis_status": "Show viewport analysis status",
-  "prefs.viewport_analysis_status_help": "Show active analyses above the viewport, open their legends from each item, and use Esc to turn off the newest analysis. Turn off to restore corner legends and the previous Esc behaviour.",
+  "prefs.viewport_analysis_status_help": "Show active analyses above the viewport and open their legends from each item. Turn off to restore corner legends.",
   "prefs.viewport_background": "Background",
   "prefs.viewport_background_colour": "Color",
   "prefs.viewport_background_theme": "Theme's gradient",
