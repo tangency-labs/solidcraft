@@ -375,6 +375,18 @@ fn base_err() -> SolidError {
 
 // ---- the surface object ---------------------------------------------------------------
 
+/// Not upstream (#16982 review): runs a kind's reversal `edit` on `s`, putting `s` back as
+/// it was when the edit fails, so a reversal either completes (the NURB reversed and the
+/// analytic data rebuilt from it) or changes nothing.
+fn reverse_or_restore<T: Clone>(s: &mut T, edit: impl FnOnce(&mut T) -> Result<()>) -> Result<()> {
+    let before = s.clone();
+    let result = edit(s);
+    if result.is_err() {
+        *s = before;
+    }
+    result
+}
+
 /// The concrete kind of a [`Surface`] (the derived classes of `SmSurface`).
 #[derive(Debug, Clone)]
 pub enum SurfaceKind {
@@ -3304,11 +3316,14 @@ impl Surface {
 
     /// Reverses the parameterisation in `param`'s direction (`Reverse`; a surface of
     /// revolution runs the B-spline reversal, whose virtual
-    /// `RebuildSTEPFromNURBParameters` rebuilds its analytic data, status ignored).
+    /// `RebuildSTEPFromNURBParameters` rebuilds its analytic data, status ignored). Not
+    /// upstream (#16982 review): for a cone, a refused rebuild leaves the surface
+    /// unchanged and is returned.
     ///
     /// # Errors
     ///
-    /// Those of the kind's override (the base default is `SM_ERR`).
+    /// Those of the kind's override (the base default is `SM_ERR`); for a cone, those
+    /// of the reversal and the rebuild.
     pub fn reverse(&mut self, k: &Kernel, param: SurfParamType) -> Result<()> {
         // (#2485, #2572) an exact round's leader map and a sweep's map follow the net's
         // reversal, w = lo + hi - w'
@@ -3352,12 +3367,18 @@ impl Surface {
             SurfaceKind::Cone(s) => {
                 // SmBSplineSurface::Reverse: GetOrCreateGwNurbPointer (the cone's
                 // MakeNurb when missing, status ignored), the NURB reversal, then the
-                // cone's RebuildSTEPFromNURBParameters (status ignored)
-                if s.rev().base().gw_nurb().is_none() {
-                    ignore_status(s.make_nurb(k))?;
-                }
-                s.base_mut().reverse(param)?;
-                ignore_status(s.rebuild_step_from_nurb_parameters(k))
+                // cone's RebuildSTEPFromNURBParameters, whose status upstream ignores.
+                // Not upstream (#16982 review): a refused rebuild (a net that is not the
+                // analytic surface, e.g. the net certificate or the top-normal check)
+                // left the reversed NURB under the old analytic data and returned
+                // success; the reversal now restores the cone and returns the refusal
+                reverse_or_restore(s, |s| {
+                    if s.rev().base().gw_nurb().is_none() {
+                        ignore_status(s.make_nurb(k))?;
+                    }
+                    s.base_mut().reverse(param)?;
+                    s.rebuild_step_from_nurb_parameters(k)
+                })
             }
             SurfaceKind::Sphere(s) => {
                 // SmBSplineSurface::Reverse: GetOrCreateGwNurbPointer (the sphere's
