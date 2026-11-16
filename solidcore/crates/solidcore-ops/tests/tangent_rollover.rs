@@ -742,16 +742,17 @@ fn a_rim_round_partly_on_the_top_rolls_onto_the_foot_round_partway() {
 /// rolled onto the foot round; in the slot the foot round is cut away, and the rail rolled onto
 /// it crosses the slot's edges. The rail on the top crosses the slot's rims, cliffs: the cliff
 /// overflow (the only path since tangency-labs/solidcraft#13841, as it was with the corpus's
-/// fixes) judges it first. It is refused as its rail leaving its face
-/// ([`RoomReason::RailLeavesFace`], typed since solidcore-ops' untyped "refused without the
-/// cliff overflow fix" refusal was removed), as main refused it. (With this branch's earlier
-/// base the overflow-first pass failed internally instead, code 4, read as status 1001,
-/// tangency-labs/solidcraft#16686.) MEASURED: the refusal names the fit 3.247 at
-/// (-36, -74.841, 5), above the asked 2, which no closed form here supports; the size is not
-/// asserted. Without the rail's proof on the foot round the blend failed later, in the
-/// trace's rollover, with status 1001.
+/// fixes) takes it before the trim. The overflowing rim edge beside the slot, from (-36, -74)
+/// to (-36, w), goes first with its neighbour toward the boss; its end at w is an End there,
+/// and the trace past it runs on to where the rails meet at (-36, -90, 10). Its rail on the
+/// foot round leaves the face at the slot, between the edge's ends: the blend is refused as
+/// its rail leaving its face ([`RoomReason::RailLeavesFace`]), found for that edge (`at` is
+/// the edge's middle). Before tangency-labs/solidcraft#16686 the trace's last section
+/// there, 1.66e-5 wide, did not skin (the rails' ends were not made to meet), and the pass
+/// failed internally with status 1001. The fit size is not pinned: it is named above the
+/// size asked (3.25 for 2), tangency-labs/solidcraft#16782.
 #[test]
-fn a_rim_round_whose_top_reaches_the_contact_between_sections_is_refused() {
+fn a_rim_round_whose_top_reaches_the_contact_between_sections_is_not_built() {
     let r4 = 9.0;
     let d = 2.0;
     let (v, w) = (-65.0 - r4, top_end_on_side());
@@ -768,11 +769,25 @@ fn a_rim_round_whose_top_reaches_the_contact_between_sections_is_refused() {
     session::set_thread_fixes(std::iter::empty::<&str>()).unwrap();
     let result = blend(&b, Blend::Round, &rim, &[d], &[], Corners::Filled);
     fixes();
+    // the middle of the rim edge beside the slot, (-36, -74, 5) to (-36, w, 5)
+    let mid = [-36.0, 0.5 * (v + w), 5.0];
     match result {
+        // the size waits on tangency-labs/solidcraft#16782
         Err(Error::TooLarge {
+            at: Some(at),
             why: Some(RoomReason::RailLeavesFace),
             ..
-        }) => {}
+        }) => {
+            let off = at
+                .iter()
+                .zip(mid)
+                .map(|(a, m)| (a - m).abs())
+                .fold(0.0, f64::max);
+            assert!(
+                off < 1e-9,
+                "found for {at:?}, not the edge beside the slot {mid:?}"
+            );
+        }
         other => panic!("the slot between the sections: {other:?}"),
     }
 }
