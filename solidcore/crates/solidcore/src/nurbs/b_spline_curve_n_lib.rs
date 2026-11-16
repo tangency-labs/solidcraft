@@ -108,9 +108,8 @@
 //!   span holding it, an interior knot, collapses to a pole (its control points within
 //!   check test #15's tolerance `SM_ZONE_TOL_3D / 10`, #2090) is that knot, whichever
 //!   side of the end is kept, so both pieces of a split meet at one parameter (#2424).
-//!   An end inside a knot span whose control points lie within the zone tolerance (a
-//!   circle of radius 1e-6) stays where it was asked, so pieces of such a curve do not
-//!   overlap. A UV curve's pole end span is
+//!   On a curve degenerate at the zone tolerance (a circle of radius 1e-6) ends stay
+//!   where they were asked, so its pieces do not overlap. A UV curve's pole end span is
 //!   cleaned as upstream, as its ends are its edge's.
 //! - **Back-edges.** `SetIntersectionCurveThroughPoint` starts with
 //!   `IsIntersectorApprox` ([`BSplineCurve::is_intersector_approx`]) and uses
@@ -163,7 +162,7 @@ use crate::nurbs::crv_tool::p2::{make_compatible_adj_knots, make_compatible_knot
 use crate::nurbs::geom::{normalize, PI};
 use crate::nurbs::knots::{Side, MAX_DEGREE};
 use crate::nurbs::math::{translate_sum2_pts, CPoint, NOW, NOZ};
-use crate::nurbs::nurbs_crv::{copy_nurb_curve, crv_trim, to_euclid};
+use crate::nurbs::nurbs_crv::{copy_nurb_curve, crv_trim, is_ncrv_degenerate, to_euclid};
 use crate::nurbs::spiral::{approx_spiral, Hand, SpiralSpec};
 use crate::surface::surface::p2::{drop_vectors, SurfaceEvaluate};
 
@@ -2409,8 +2408,8 @@ impl BSplineCurve {
     /// that removal applies only to dimension-3 model curves, preserving UV spans
     /// exactly, except a short UV end span that collapses to a pole (#2129). A
     /// rational curve keeps its short end spans, and a model curve's end within a pole
-    /// of an interior knot of the knot span holding it snaps to that knot, unless that
-    /// span lies within the zone tolerance (WR-575, #2424). With
+    /// of an interior knot of the knot span holding it snaps to that knot, unless the
+    /// curve is degenerate at the zone tolerance (WR-575, #2424). With
     /// [`TrimMode::IntervalOnly`] only the interval is computed.
     ///
     /// # Errors
@@ -2648,16 +2647,16 @@ impl BSplineCurve {
 /// of `t` the trim keeps, so the pieces of a split meet at one parameter. Only `lo` and
 /// `hi` can bound the end span a trim at `t` makes, so no other knot is a candidate.
 ///
-/// `t` also stays when every control point of the whole knot span `[lo, hi]` lies
-/// within `zone_tol_3d` of its first (so the span lies in a ball of that radius): the
-/// span is then no larger than the zone tolerance, the scale at which this trim already
-/// calls an end span short, so cutting it makes no new short span, and moving `t` to an
-/// end would move it by a large part of the span. On a curve no larger than the zone
-/// tolerance (a circle of radius 1e-6) every span is such a span, and split pieces keep
-/// their requested ends instead of overlapping where two ends would move to one knot.
-/// A piece whose two ends both lie within a pole of one knot (shorter than twice the
-/// pole tolerance) still keeps its requested ends in the caller while its neighbours
-/// move to the knot.
+/// `t` also stays on a curve that is degenerate at the zone tolerance `zone_tol_3d`
+/// (`is_ncrv_degenerate`, the measure of `SmBSplineCurve::IsDegenerate`: its control
+/// points' box is point-sized). Such a curve (a circle of radius 1e-6) is a point to the
+/// kernel, check test #15 does not look for poles in it, and every split of it is at
+/// the pole scale: moving ends to knots would move them by large parts of the curve, and
+/// two ends of one piece would move to one knot, so the pieces would overlap. A curve
+/// larger than that snaps as described, short knot spans included. A piece of such a
+/// curve whose two ends both lie within a pole of one knot (shorter than twice the pole
+/// tolerance) still keeps its requested ends in the caller while its neighbours move to
+/// the knot.
 fn knot_within_pole(
     cur: &Curve,
     knots: &[f64],
@@ -2695,9 +2694,8 @@ fn knot_within_pole(
             let span = crv_trim(cur, knot.min(t), knot.max(t))
                 .map_err(SolidError::nurbs_routine(OP_TRIM))?;
             if end_span_is_pole(span.cpts(), 0, degree, pole_tol) {
-                // (the whole span's test does not depend on the knot: once is enough)
-                let whole = crv_trim(cur, lo, hi).map_err(SolidError::nurbs_routine(OP_TRIM))?;
-                if end_span_is_pole(whole.cpts(), 0, degree, zone_tol_3d) {
+                // (the curve's test does not depend on the knot: once is enough)
+                if is_ncrv_degenerate(cur, zone_tol_3d)? {
                     return Ok(t);
                 }
                 return Ok(knot);
@@ -3243,30 +3241,80 @@ mod tests {
     #[test]
     fn wr_575_trim_end_moves_to_the_nearer_end_of_its_own_knot_span() {
         // a radius 16 half circle with a second knot 2e-9 past its middle knot: both ends
-        // of the knot span [0.5, 0.5 + 2e-9] are within a pole of any end inside it.
-        // With a zone tolerance below the span's size (an edge tolerance smaller than the
-        // default) the end moves to the nearer end of that span, the same answer for both
-        // sides of a split; with the default zone tolerance the span lies within it and
-        // the end stays as asked
-        let mut c = half_circle(16.0);
+        // of the knot span [0.5, 0.5 + 2e-9] are within a pole of any end inside it. The
+        // end moves to the nearer end of that span, the same answer for both sides of a
+        // split; an end just past the second knot moves to it, never to 0.5 outside its
+        // own span (whose piece to it is a pole too)
         let second = 0.5 + 2e-9;
-        c.insert_one_knot(second, 1).unwrap();
+        let with_second = |r: f64| {
+            let mut c = half_circle(r);
+            c.insert_one_knot(second, 1).unwrap();
+            c
+        };
+        let c = with_second(16.0);
         let knots = c.knots(None).unwrap().0;
         assert_eq!(knots, vec![0.0, 0.5, second, 1.0]);
         let cur = c.nurb.as_ref().unwrap();
-        for (t, nearer) in [(0.5 + 1.5e-9, second), (0.5 + 0.5e-9, 0.5)] {
-            let small = knot_within_pole(cur, &knots, t, 1.0, 1e-12, 2).unwrap();
-            assert_eq!(small, nearer, "t {t}");
-            let default = knot_within_pole(cur, &knots, t, 1.0, ZONE_TOL_3D, 2).unwrap();
-            assert_eq!(default, t, "t {t}");
+        for (t, nearer) in [
+            (0.5 + 1.5e-9, second),
+            (0.5 + 0.5e-9, 0.5),
+            (second + 1e-9, second),
+        ] {
+            let got = knot_within_pole(cur, &knots, t, 1.0, ZONE_TOL_3D, 2).unwrap();
+            assert_eq!(got, nearer, "t {t}");
         }
         // on a knot, outside the curve and NaN: the end stays
         for t in [0.5, second, -1.0, 2.0] {
-            assert_eq!(knot_within_pole(cur, &knots, t, 1.0, 1e-12, 2).unwrap(), t);
+            assert_eq!(
+                knot_within_pole(cur, &knots, t, 1.0, ZONE_TOL_3D, 2).unwrap(),
+                t
+            );
         }
-        assert!(knot_within_pole(cur, &knots, f64::NAN, 1.0, 1e-12, 2)
+        assert!(knot_within_pole(cur, &knots, f64::NAN, 1.0, ZONE_TOL_3D, 2)
             .unwrap()
             .is_nan());
+        // the same curve with radius 1e-6 is degenerate at the zone tolerance (its box is
+        // 2e-6 across): every end stays as asked
+        let tiny = with_second(1e-6);
+        let tiny_cur = tiny.nurb.as_ref().unwrap();
+        for t in [0.5 + 1.5e-9, 0.5 + 0.5e-9, second + 1e-9, 0.45] {
+            let got = knot_within_pole(tiny_cur, &knots, t, 1.0, ZONE_TOL_3D, 2).unwrap();
+            assert_eq!(got, t, "t {t}");
+        }
+    }
+
+    #[test]
+    fn wr_575_split_inside_a_short_knot_span_meets_at_the_knot_on_the_circle() {
+        // a radius 16 half circle with a second knot 1e-7 past its middle knot (a knot
+        // span about 4.5e-6 long, under the 1e-5 zone tolerance), split 1e-8 before the
+        // second knot: the piece from the split to that knot (about 4.5e-7) is a pole, so
+        // both pieces end at the knot and stay exactly on the circle, and neither has a
+        // pole span for check test #15
+        let r = 16.0;
+        let k = Kernel::default();
+        let second = 0.5 + 1e-7;
+        let split = second - 1e-8;
+        let with_second = || {
+            let mut c = half_circle(r);
+            c.insert_one_knot(second, 1).unwrap();
+            c
+        };
+        let mut before = with_second();
+        let mut before_ivl = Extent1d::from_min_max(0.1, split);
+        before.trim(&k, &mut before_ivl, TrimMode::Notify).unwrap();
+        let mut after = with_second();
+        let mut after_ivl = Extent1d::from_min_max(split, 0.9);
+        after.trim(&k, &mut after_ivl, TrimMode::Notify).unwrap();
+        assert_eq!(before_ivl, Extent1d::from_min_max(0.1, second));
+        assert_eq!(after_ivl, Extent1d::from_min_max(second, 0.9));
+        assert_eq!(before.natural_interval(), before_ivl);
+        assert_eq!(after.natural_interval(), after_ivl);
+        for c in [&before, &after] {
+            let off = off_circle(c, r);
+            assert!(off < 1e-12 * r, "{off} off the circle");
+            let (ok, idx) = failed_checks(&k, c);
+            assert!(ok && !idx.contains(&15), "{idx:?}");
+        }
     }
 
     #[test]

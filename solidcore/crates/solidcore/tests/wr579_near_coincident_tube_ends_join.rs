@@ -391,11 +391,17 @@ fn report(gaps: usize, ellipses: usize, seams: usize) -> Vec<String> {
 /// Joins #1529's tubes at `gap` with every fix on when `all`. Every test the check
 /// reports must also be in `off`, upstream's pinned report (WR-575's span removal,
 /// measured with the retired flag off), and at 1e-5 the circle's `SmEllipse` #1/#2 must
-/// be gone (WR-575's own case). Returns what went wrong.
-fn flag_row(gap: f64, all: bool, off: &[String]) -> Vec<String> {
+/// be gone (WR-575's own case). The report must also be exactly `expected` (pinned from
+/// the run that retired the flag). Returns what went wrong.
+fn flag_row(gap: f64, all: bool, off: &[String], expected: &[String]) -> Vec<String> {
     let mut failures = Vec::new();
     let now = join_with_gap(gap, all);
     println!("gap {gap} all {all}: upstream {off:?}, now {now:?}");
+    if now != expected {
+        failures.push(format!(
+            "gap {gap} all {all}: now {now:?}, expected {expected:?}"
+        ));
+    }
     if !is_sub_multiset(&now, off) {
         failures.push(format!(
             "gap {gap} all {all}: now {now:?} adds to upstream's {off:?}"
@@ -428,16 +434,18 @@ fn wr575_tube_ends_join_adds_no_check_failure_at_any_gap() {
     // Face test 36 is gone from every row since #13295: it named the joined tube's seam
     // edge ending at a vertex a few micrometres across the seam, inside the vertex's own
     // tolerance, with no edge beside the seam there: a corner, not a sliver.
+    // (gap, every fix on, upstream's report, the report now: only the two gap pairs of
+    // the default kernel at 1e-5 stay, which WR-575 does not address)
     let rows = [
-        (1e-5, false, report(2, 2, 0)),
-        (1e-6, false, report(0, 1, 0)),
-        (1e-7, false, report(0, 0, 0)),
-        (1e-5, true, report(0, 2, 0)),
-        (1e-7, true, report(0, 0, 0)),
+        (1e-5, false, report(2, 2, 0), report(2, 0, 0)),
+        (1e-6, false, report(0, 1, 0), report(0, 0, 0)),
+        (1e-7, false, report(0, 0, 0), report(0, 0, 0)),
+        (1e-5, true, report(0, 2, 0), report(0, 0, 0)),
+        (1e-7, true, report(0, 0, 0), report(0, 0, 0)),
     ];
     let failures: Vec<String> = rows
         .iter()
-        .flat_map(|(gap, all, off)| flag_row(*gap, *all, off))
+        .flat_map(|(gap, all, off, now)| flag_row(*gap, *all, off, now))
         .collect();
     assert!(failures.is_empty(), "{failures:#?}");
 }
@@ -450,7 +458,7 @@ fn wr575_tube_ends_join_adds_no_check_failure_at_any_gap() {
 #[test]
 fn wr575_every_fix_at_1e_6_adds_no_check_failure() {
     // (face test 36 gone since #13295, as in the rows above)
-    let failures = flag_row(1e-6, true, &report(0, 1, 0));
+    let failures = flag_row(1e-6, true, &report(0, 1, 0), &report(0, 0, 0));
     assert!(failures.is_empty(), "{failures:#?}");
 }
 
