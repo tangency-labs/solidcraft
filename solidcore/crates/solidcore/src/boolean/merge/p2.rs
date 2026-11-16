@@ -56,21 +56,11 @@
 //!   `bDoGluing` before the four flags but the definition takes it after them;
 //!   [`MergeAddedOptions::default`] is what the declared defaults pass to the
 //!   definition (`plan/upstream-issues.md`).
-//! - **Ignored statuses.** `MergeAddedTopology` ignores the statuses of the bounding
+//! - **Passed-on statuses.** `MergeAddedTopology` ignores the statuses of the bounding
 //!   boxes, the stitch and intersection calls, `RemoveRelationship` / `Relate`, and
-//!   the region and orientation fix-ups, as upstream, except
-//!   [`SolidError::Unported`] and [`SolidError::InvalidInput`], which propagate. A
-//!   failed box query leaves the previous box, as upstream's reused local. In/out
-//!   lists keep the edits made before a failure.
-//! - **Partial outputs of a failed callee.** The ported stitch and intersector calls
-//!   return no out-lists or gaps with an error, so after an ignored failure the merge
-//!   continues with the values upstream sets on entry (empty, `0`, `SM_BIG_DOUBLE`).
-//!   Upstream keeps what the callee appended before it failed: `VertexFaceIntersect`,
-//!   `SplitEdgesWithVertices` and the edge/face intersectors `SER` mid-loop when
-//!   `bIgnoreProblems` is `FALSE` (reachable through `SmFeatureExecutive`'s
-//!   `m_bIgnoreProblems`), after appending processed vertices and raising the gaps.
-//!   Those cases can differ until the callees hand back their partial outputs
-//!   (`plan/findings.md`).
+//!   the region and orientation fix-ups upstream; they are returned here, as the
+//!   SolidCraft fork of SMLib does (tangency-labs/smlib e7ebc8d, WR-658). In/out lists
+//!   keep the edits made before a failure.
 //! - **`SmStitch`.** The merge's one `SmStitch` (with a default, stateless
 //!   `SmStitchCallback`) is [`StitchSettings`]; an implementation builds a stitch from
 //!   them for each of the three calls, which is equivalent because the stitch carries
@@ -1114,19 +1104,6 @@ pub struct StitchedVertices<O> {
     pub min_unstitched_vert_gap: f64,
 }
 
-impl<O> StitchedVertices<O> {
-    /// The outputs as initialised on entry (what an ignored failure leaves).
-    #[must_use]
-    pub const fn initial() -> Self {
-        Self {
-            processed: Vec::new(),
-            deleted: Vec::new(),
-            max_vertex_gap: 0.0,
-            min_unstitched_vert_gap: BIG_DOUBLE,
-        }
-    }
-}
-
 /// What [`MergeBrep::split_edges_with_vertices`] returns
 /// (`SmStitch::SplitEdgesWithVertices`).
 #[derive(Debug, Clone, PartialEq)]
@@ -1143,20 +1120,6 @@ pub struct SplitEdges<O> {
     pub min_unstitched_vert_gap: f64,
 }
 
-impl<O> SplitEdges<O> {
-    /// The outputs as initialised on entry (what an ignored failure leaves).
-    #[must_use]
-    pub const fn initial() -> Self {
-        Self {
-            processed_verts: Vec::new(),
-            split_edges: Vec::new(),
-            new_edges: Vec::new(),
-            max_vertex_gap: 0.0,
-            min_unstitched_vert_gap: BIG_DOUBLE,
-        }
-    }
-}
-
 /// What [`MergeBrep::stitch_edges_of_vertices`] returns
 /// (`SmStitch::StitchEdgesOfVertices`).
 #[derive(Debug, Clone, PartialEq)]
@@ -1169,20 +1132,6 @@ pub struct StitchedEdges<O> {
     pub max_edge_gap: f64,
     /// `rdMinUnstitchedEdgeGap`.
     pub min_unstitched_edge_gap: f64,
-}
-
-impl<O> StitchedEdges<O> {
-    /// The outputs as initialised on entry (what an ignored failure leaves; the
-    /// caller's glued and deleted lists start empty).
-    #[must_use]
-    pub const fn initial() -> Self {
-        Self {
-            glued: Vec::new(),
-            deleted: Vec::new(),
-            max_edge_gap: 0.0,
-            min_unstitched_edge_gap: BIG_DOUBLE,
-        }
-    }
 }
 
 /// The `SmStitch` [`MergeState::merge_added_topology`] builds (`SmStitch

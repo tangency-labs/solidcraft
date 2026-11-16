@@ -824,7 +824,7 @@ pub(crate) fn delete_topological_vertex_joining(
         let survivor_range = survive_curve.natural_interval();
         // The native overload defaults bSnapToEnds to TRUE. Its additional-work
         // output is unused by this caller.
-        let coincidence = Some(delete_curve.global_coincidence_checker::<JoinCurve>(
+        let coincidence = delete_curve.global_coincidence_checker::<JoinCurve>(
             k,
             &deleted_range,
             &survive_curve,
@@ -835,58 +835,54 @@ pub(crate) fn delete_topological_vertex_joining(
                 Some(JoinCurve::Deleted(deleted_range)),
                 Some(JoinCurve::Survivor(survivor_range)),
             ],
-        )?);
-        if let Some(coincidence) = coincidence {
-            if let [solution] = coincidence.solutions.as_slice() {
-                if solution.solution_type
-                    == crate::geom::solution_array::SolutionType::RangeOfValues
-                {
-                    let ds0 = *solution.start.parameters.first().ok_or_else(|| {
-                        SolidError::topology_failed(
-                            OP,
-                            "the overlap has no start parameter on the deleted edge",
-                        )
-                    })?;
-                    let ds1 = *solution.end.parameters.first().ok_or_else(|| {
-                        SolidError::topology_failed(
-                            OP,
-                            "the overlap has no end parameter on the deleted edge",
-                        )
-                    })?;
-                    let ss0 = *solution.start.parameters.get(1).ok_or_else(|| {
-                        SolidError::topology_failed(
-                            OP,
-                            "the overlap has no start parameter on the surviving edge",
-                        )
-                    })?;
-                    let ss1 = *solution.end.parameters.get(1).ok_or_else(|| {
-                        SolidError::topology_failed(
-                            OP,
-                            "the overlap has no end parameter on the surviving edge",
-                        )
-                    })?;
-                    if (ds1 - ds0) * (ss1 - ss0) > 0.0 {
-                        let far = if join_deleted {
-                            deleted_interval.min()
-                        } else {
-                            deleted_interval.max()
-                        };
-                        if survivor_range.contains_value(far, crate::math::EFF_ZERO) {
-                            let far_vertex =
-                                crate::topology::edge::other_vertex(b, deleted, Some(vertex))?
-                                    .ok_or_else(|| {
-                                        SolidError::topology_missing(
-                                            OP,
-                                            "the deleted edge's far vertex",
-                                        )
-                                    })?;
-                            let point = b.vertex(far_vertex)?.point;
-                            // Native ignores EvaluatePoint's status (SM_UNDEF_DOUBLE on
-                            // failure); it is passed on here (WR-658).
-                            let evaluated = survive_curve.evaluate_point(k, far)?;
-                            if evaluated.closer_than(max_gap, point) {
-                                same_geometry = true;
-                            }
+        )?;
+        if let [solution] = coincidence.solutions.as_slice() {
+            if solution.solution_type == crate::geom::solution_array::SolutionType::RangeOfValues {
+                let ds0 = *solution.start.parameters.first().ok_or_else(|| {
+                    SolidError::topology_failed(
+                        OP,
+                        "the overlap has no start parameter on the deleted edge",
+                    )
+                })?;
+                let ds1 = *solution.end.parameters.first().ok_or_else(|| {
+                    SolidError::topology_failed(
+                        OP,
+                        "the overlap has no end parameter on the deleted edge",
+                    )
+                })?;
+                let ss0 = *solution.start.parameters.get(1).ok_or_else(|| {
+                    SolidError::topology_failed(
+                        OP,
+                        "the overlap has no start parameter on the surviving edge",
+                    )
+                })?;
+                let ss1 = *solution.end.parameters.get(1).ok_or_else(|| {
+                    SolidError::topology_failed(
+                        OP,
+                        "the overlap has no end parameter on the surviving edge",
+                    )
+                })?;
+                if (ds1 - ds0) * (ss1 - ss0) > 0.0 {
+                    let far = if join_deleted {
+                        deleted_interval.min()
+                    } else {
+                        deleted_interval.max()
+                    };
+                    if survivor_range.contains_value(far, crate::math::EFF_ZERO) {
+                        let far_vertex =
+                            crate::topology::edge::other_vertex(b, deleted, Some(vertex))?
+                                .ok_or_else(|| {
+                                    SolidError::topology_missing(
+                                        OP,
+                                        "the deleted edge's far vertex",
+                                    )
+                                })?;
+                        let point = b.vertex(far_vertex)?.point;
+                        // Native ignores EvaluatePoint's status (SM_UNDEF_DOUBLE on
+                        // failure); it is passed on here (WR-658).
+                        let evaluated = survive_curve.evaluate_point(k, far)?;
+                        if evaluated.closer_than(max_gap, point) {
+                            same_geometry = true;
                         }
                     }
                 }
@@ -2779,8 +2775,9 @@ pub fn initial_stitch_tolerance(brep_tolerance: f64, requested: f64) -> f64 {
     }
 }
 
-/// Stitches twice if needed, then orients surfaces. No success is manufactured
-/// from the statuses ignored upstream when a required callee is missing.
+/// Stitches twice if needed, then orients surfaces. Upstream ignores the stitch and
+/// orientation statuses; they are passed on here, as the fork does (60a8a51, WR-658), so
+/// a failed first stitch pass returns before the second pass and the orientation.
 ///
 /// The stitch passes run outside an edit of their own: the stitch's glue and squeeze
 /// helpers notify through their own kernel-context edits

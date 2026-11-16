@@ -3400,20 +3400,12 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
         // We have intersecting 3dcurves. Imprint the point as a vertex on each face.
         // Glue the vertices, then keep going
         if pc1.point_class() == PointClassType::Face {
-            let v1 = Some(brep.make_vertex_loop(this_brep, f1, pt)?.1);
+            let v1 = brep.make_vertex_loop(this_brep, f1, pt)?.1;
 
             pt = pc2.find_obj_point_3d(k, brep)?;
-            let v2 = Some(brep.make_vertex_loop(this_brep, f2, pt)?.1);
+            let v2 = brep.make_vertex_loop(this_brep, f2, pt)?.1;
 
-            // (two null vertices are equal: GlueVertices returns SM_SUCCESS at once; one
-            // null vertex is dereferenced by GlueVertices)
-            match (v1, v2) {
-                (Some(v1), Some(v2)) => {
-                    brep.glue_vertices(k, this_brep, v1, v2, None)?;
-                }
-                (None, None) => {}
-                _ => return Err(dangling("GlueVertices of one null vertex")),
-            }
+            brep.glue_vertices(k, this_brep, v1, v2, None)?;
 
             // Update classifications
             uv1 = pc1.uv_param();
@@ -3455,7 +3447,7 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
         // (the face and vertices are passed as they are, null or not: MakeEdgeInFace
         // checks them itself. Upstream ignores the status: a failed MakeEdgeInFace leaves
         // the edge and face null and leaks the curve copy; passed on here, WR-658)
-        let made = Some(brep_make_edge_in_face(
+        let (new_edge, _new_loop, new_face) = brep_make_edge_in_face(
             k,
             brep,
             this_brep,
@@ -3467,11 +3459,8 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
             ivl,
             OrientType::Same,
             self.this_approx_tol_3d,
-        )?);
-        Ok(match made {
-            Some((new_edge, _new_loop, new_face)) => (new_edge, new_face),
-            None => (None, None),
-        })
+        )?;
+        Ok((new_edge, new_face))
     }
 
     /// The "Classification update" loops of `FaceFaceIntersect`: after a face split,

@@ -2343,16 +2343,17 @@ fn redistribute_inner_loops(
         let need_move = if missing_new && missing_original {
             // Both statuses and the drop's success flag are ignored natively; the
             // statuses are passed on here (WR-658).
-            let _old_domain = computed_uv_domain(k, b, face)?;
+            computed_uv_domain(k, b, face)?;
             let new_domain = computed_uv_domain(k, b, new_face)?;
             let surface = required(b.face(face)?.surface.as_ref(), "split face without surface")?;
-            let uv = Some(surface.drop_point::<crate::topology::ObjectHandle>(
-                k,
-                point,
-                &surface.natural_uv_domain_with_nurb(k)?,
-                &crate::surface::surface::p5::DropPointOptions::default(),
-            )?)
-            .map_or(crate::geom::vector2d::Vec2::UNDEF, |drop| drop.result_uv);
+            let uv = surface
+                .drop_point::<crate::topology::ObjectHandle>(
+                    k,
+                    point,
+                    &surface.natural_uv_domain_with_nurb(k)?,
+                    &crate::surface::surface::p5::DropPointOptions::default(),
+                )?
+                .result_uv;
             new_domain.contains_point(uv, 0.0)
         } else {
             classify_with_retries(
@@ -2519,13 +2520,12 @@ fn computed_uv_domain(
     b: &mut Brep,
     face: FaceId,
 ) -> Result<crate::geom::extent2d::Extent2d> {
-    let initial = b.face(face)?.uv_domain;
-    Ok(Some(
+    Ok(
         crate::topology::face::p1::calculate_uv_domain_from_uv_trim_curves(
             k, b, face, true, false, false,
-        )?,
+        )?
+        .domain,
     )
-    .map_or(initial, |out| out.domain))
 }
 
 #[derive(Clone, Copy)]

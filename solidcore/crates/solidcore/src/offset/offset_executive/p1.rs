@@ -4841,7 +4841,11 @@ mod tests {
             ),
             "{r:?}"
         );
-        assert!(matches!(curve.kind(), CurveKind::BSpline(_)));
+        // the conversion's side effects before its failure stay
+        let CurveKind::BSpline(curve) = curve.kind() else {
+            panic!("expected the original B-spline kind");
+        };
+        assert_eq!(curve.dim(), 3);
     }
 
     #[test]

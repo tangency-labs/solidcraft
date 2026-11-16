@@ -1729,12 +1729,10 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
                 // If the Faces are coincident, and there is some overlap - create a
                 // ProtoFace. (status unchecked upstream; passed on here, WR-658)
                 if are_coincident && !coinc_pes.is_empty() {
-                    {
-                        let pf = mgr.create_proto_face(Some(f1), Some(f2), &coinc_pes)?;
-                        // Relate New ProtoFace to every pNewPF->CoincPE
-                        for &pe in &coinc_pes {
-                            ignore_soft(mgr.relate_coincident_pf(pe, pf))?;
-                        }
+                    let pf = mgr.create_proto_face(Some(f1), Some(f2), &coinc_pes)?;
+                    // Relate New ProtoFace to every pNewPF->CoincPE
+                    for &pe in &coinc_pes {
+                        ignore_soft(mgr.relate_coincident_pf(pe, pf))?;
                     }
                 }
             }
@@ -1761,10 +1759,8 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
                     .get(jj)
                     .ok_or(invalid(OP_INTERSECT_TOPOLOGY, "proto edge list"))?;
                 // (status unchecked upstream; passed on here, WR-658)
-                {
-                    let d = mgr.split_intersecting_proto_edges(k, brep, pe1, pe2)?;
-                    deleted.extend(d);
-                }
+                let d = mgr.split_intersecting_proto_edges(k, brep, pe1, pe2)?;
+                deleted.extend(d);
                 jj += 1;
             }
             ii += 1;
@@ -1798,10 +1794,10 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
     /// the final edges of every edge definition of the manager (a definition without
     /// both is skipped with a warning; `Relate`'s status, unchecked upstream, is passed
     /// on here, WR-658). Coincident faces are not related (`sbRelateFaces` is `FALSE`).
-    /// Always `SM_SUCCESS` upstream. Not upstream (#16937): an edge pair is not related where either edge's mate stands
-    /// beside the other edge in its own operand ([`TopologyIntersector::mate_stands_beside`]),
-    /// so a refusal `Relate` passes on is a conflict between edges
-    /// at different places only.
+    /// Always `SM_SUCCESS` upstream. Not upstream (#16937): an edge pair is not related
+    /// where either edge's mate stands beside the other edge in its own operand
+    /// ([`TopologyIntersector::mate_stands_beside`]), so a refusal `Relate` passes on is a
+    /// conflict between edges at different places only.
     ///
     /// # Errors
     ///
@@ -2107,7 +2103,7 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
             }
             let point = geometry.vertex_point(v)?;
             let guess = pc.t_param();
-            let d = Some(curve.drop_point(
+            let d = curve.drop_point(
                 k,
                 &ivl,
                 point,
@@ -2115,8 +2111,8 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
                 10.0 * pc.deviation(),
                 Some(guess),
                 SolverOperation::Minimize,
-            )?);
-            Ok(d.map_or((false, 0.0, 0.0), |d| (d.success, d.parameter, d.distance)))
+            )?;
+            Ok((d.success, d.parameter, d.distance))
         };
         let (success_b, drop_param_b, dist_to_curve_b) = drop(&pc_b)?;
         let (success_o, drop_param_o, dist_to_curve_o) = drop(&pc_o)?;
@@ -2412,6 +2408,7 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
                     let edge_dom = brep
                         .edge_interval(e)
                         .ok_or(invalid(OP_EDGE_FACE_COIN, "edge handle is unknown"))?;
+                    // (GetUVDomain's value is replaced below; only the handle is checked)
                     brep.face_uv_domain(f)
                         .ok_or(invalid(OP_EDGE_FACE_COIN, "face handle is unknown"))?;
                     let edge_zone_tol = tol_of(brep, e)?;
@@ -2432,7 +2429,7 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
                     let curve = curve_of(brep, Some(curve_h))?.clone_for_evaluation()?;
                     // (status unchecked upstream: not coincident on failure; passed on
                     // here, WR-658)
-                    let sol = Some(surface_solve_with_face_caches(k, brep, |context| {
+                    let sol = surface_solve_with_face_caches(k, brep, |context| {
                         surface.simple_coincidence_checker_with_context(
                             k,
                             &face_dom,
@@ -2444,8 +2441,7 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
                             None,
                             context,
                         )
-                    })?)
-                    .flatten();
+                    })?;
                     let Some(sol) = sol else {
                         continue;
                     };

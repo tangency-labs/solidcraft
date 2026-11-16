@@ -1475,15 +1475,9 @@ fn make_face_with_curves_transfer_impl(
                         }
                     } else {
                         let ivl = uv_curve.natural_interval();
-                        Some(surface.lift_curve(
-                            k,
-                            uv_domain,
-                            &uv_curve,
-                            &ivl,
-                            zone_tol / 4.0,
-                            false,
-                        )?)
-                        .map(|l| l.curve)
+                        surface
+                            .lift_curve(k, uv_domain, &uv_curve, &ivl, zone_tol / 4.0, false)?
+                            .curve
                     };
                     if new3d.is_some() {
                         to_check.push(s3d.len());
@@ -1535,7 +1529,7 @@ fn make_face_with_curves_transfer_impl(
                     let Some(Some(curve)) = s3d.get_mut(ci) else {
                         return Err(null("missing curve"));
                     };
-                    let deformed = Some(curve.deform_to_end_point_targets_on_surface(
+                    let deformed = curve.deform_to_end_point_targets_on_surface(
                         k,
                         new_start,
                         new_end,
@@ -1545,8 +1539,7 @@ fn make_face_with_curves_transfer_impl(
                         None,
                         InValueType::Unconstrained,
                         Some((surface, None)),
-                    )?)
-                    .flatten();
+                    )?;
                     if let Some(d) = deformed {
                         if let Some(slot) = s3d.get_mut(ci) {
                             *slot = Some(d);
@@ -2181,17 +2174,22 @@ pub fn glue_edges_general(
     }
 
     if do_region_nesting {
+        // Both region-nesting statuses stay ignored, as upstream does (the fork's 60a8a51
+        // `SER`s them). By now the edges are merged and their shells joined: a returned
+        // status would report this committed glue as failed, and a stitch that goes on past
+        // failed glues (`ignore_problems`) would then skip the glue's bookkeeping (the glued edge's
+        // tolerance raised to the gap it now spans). A region left unsplit here is what
+        // upstream leaves too.
         let mut marks = Marks::default();
         let mut new_region = None;
         for fu in test_split {
-            // status ignored upstream; each call first resets rpNewRegion to NULL
+            // each call first resets rpNewRegion to NULL
             let attempt = p6::test_closure_split_region_attempt(k, b, &mut marks, env, true, fu)?;
-            // (fork 60a8a51 passes the status on: `SER`)
-            attempt.status?;
+            ignore_status(attempt.status)?;
             new_region = attempt.region;
         }
         if ed::is_spine(b, surv)? && new_region.is_none() {
-            test_closure_split_region_edge(k, b, env, surv)?;
+            ignore_status(test_closure_split_region_edge(k, b, env, surv))?;
         }
     }
     Ok(())

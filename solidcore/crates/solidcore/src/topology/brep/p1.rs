@@ -2200,7 +2200,8 @@ pub fn redistribute_seam_uv_trim_curves(
     // without its trim curve swaps nothing (fork 60a8a51).
     for eu in [prev_this, prev_other] {
         let fetched = eu3::get_or_create_uv_trim_curve(k, b, eu, false, false, true)?;
-        if fetched.status.is_err() || eu1::uv_trim_curve(b, eu)?.0.is_none() {
+        // (a missing dependency or a cancellation still propagates)
+        if ignored(fetched.status)?.is_none() || eu1::uv_trim_curve(b, eu)?.0.is_none() {
             return Ok(false);
         }
     }

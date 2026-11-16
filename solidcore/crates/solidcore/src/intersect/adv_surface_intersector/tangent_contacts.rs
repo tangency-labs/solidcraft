@@ -28,8 +28,8 @@
 //! | `tp_newton` (private)             | `tp_Newton`                                      |
 //!
 //! Deviations: out-params become return values; `std::min`/`std::max` keep their
-//! operand order (`cpp_min`/`cpp_max`); the `SetMinMax` status the fork once ignored
-//! is passed on (WR-658, fork e7ebc8d).
+//! operand order (`cpp_min`/`cpp_max`); the `SetMinMax` status SMLib ignores is passed
+//! on (WR-658, fork e7ebc8d).
 //! Not reached for higher-order contacts (equal curvature at the point), where the
 //! system is singular.
 
