@@ -93,6 +93,7 @@ const DIGESTS: &[(&str, &str)] = &[
     ("tests/step-conformance/tiny_pin.step", "e86130e9cc19deff"),
     ("tests/step-conformance/torus_ring_nurbs.step", "fb58a511c48a933c"),
     ("tests/step-conformance/washer.step", "490ba83889e1002f"),
+    ("tests/step-regressions/block_edge_off_its_face.step", "8e25cc9a701de87d"),
     ("tests/step-regressions/cylinder_rim_off_its_wall.step", "e07c2fdbef7cc0c6"),
     ("tests/step-regressions/cylinder_spline_rims.step", "609aa9a609b95308"),
     ("tests/step-regressions/rod_doubled_edge.step", "8432fa140e74c146"),
