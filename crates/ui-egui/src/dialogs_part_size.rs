@@ -65,7 +65,7 @@ pub fn component_for_bodies(app: &SolveApp, bodies: &[String]) -> Option<u64> {
     component_for_bodies_where(app, bodies, |doc, c| doc.parts.contains_key(&c))
 }
 
-fn component_for_bodies_where(app: &SolveApp, bodies: &[String], wanted: impl Fn(&Document, u64) -> bool) -> Option<u64> {
+pub(crate) fn component_for_bodies_where(app: &SolveApp, bodies: &[String], wanted: impl Fn(&Document, u64) -> bool) -> Option<u64> {
     let state = crate::open_meshing::session_world(&app.session);
     let mut component = None;
     for name in bodies {

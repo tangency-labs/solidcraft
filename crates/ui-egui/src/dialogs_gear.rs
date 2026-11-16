@@ -72,11 +72,28 @@ pub fn start(app: &SolveApp, id: &str) -> Option<(Kind, Vec<SelInput>)> {
     match id {
         "gear.insert" => Some((Kind::Gear(Gear::new()), vec![])),
         "gear.edit" => {
-            let component = crate::dialogs_part_size::selected_component_where(app, |doc, c| doc.gears.contains_key(&c))?;
+            let component = selected(app)?;
             Some((Kind::Gear(Gear::saved(component, app.session.doc.gears.get(&component)?)), vec![]))
         }
         _ => None,
     }
+}
+
+/// The component a selection stands for, if it is a gear.
+pub fn selected(app: &SolveApp) -> Option<u64> {
+    crate::dialogs_part_size::selected_component_where(app, |doc, c| doc.gears.contains_key(&c))
+}
+
+/// The component the picked bodies belong to, if it is a gear.
+pub fn of_bodies(app: &SolveApp, bodies: &[String]) -> Option<u64> {
+    crate::dialogs_part_size::component_for_bodies_where(app, bodies, |doc, c| doc.gears.contains_key(&c))
+}
+
+/// Edit Gear for a component picked in a menu: the form opens on exactly that gear.
+pub fn open(app: &mut SolveApp, component: u64) {
+    app.session.selection.clear();
+    app.tree.picked_components = vec![component];
+    app.start("gear.edit");
 }
 
 pub fn command_id(g: &Gear) -> &'static str {
@@ -224,6 +241,21 @@ mod tests {
         assert!(h.app.dialog.is_none(), "{:?}", h.app.dialog.as_ref().and_then(|d| d.error.clone()));
         let (c, saved) = gear(&h).expect("still a gear");
         assert_eq!((c, saved.teeth, saved.rim_thickness, saved.internal), (component, 36, 5.0, true));
+    }
+
+    /// A menu opens Edit Gear on exactly the gear it was opened for, and the ribbon offers both commands.
+    #[test]
+    fn a_menu_opens_the_form_on_the_gear_it_was_opened_for() {
+        assert!(crate::workspace::SECTIONS.iter().any(|s| s.ids.contains(&"gear.insert") && s.ids.contains(&"gear.edit")));
+        let mut h = Harness::new();
+        h.app.run("gear.insert", json!({"module": 2, "teeth": 20, "name": "First"})).unwrap();
+        h.app.run("gear.insert", json!({"module": 3, "teeth": 30, "name": "Second"})).unwrap();
+        h.settle();
+        let second = h.app.session.doc.gears.iter().find(|(_, g)| g.teeth == 30).map(|(c, _)| *c).expect("the second gear");
+        open(&mut h.app, second);
+        h.frames(3);
+        let Some(Kind::Gear(g)) = h.app.dialog.as_ref().map(|d| d.kind.clone()) else { panic!("no gear form: {:?}", h.app.status) };
+        assert_eq!((g.component, g.module, g.teeth), (Some(second), 3.0, 30.0));
     }
 
     /// A value the form cannot hold is refused, and Cancel adds nothing.

@@ -759,6 +759,9 @@ fn viewport_items(app: &SolveApp) -> Vec<Item> {
         {
             v.push(cmd(app, "parts.resize", "Change Part Size").with(json!({"component":component})));
         }
+        if let Some(component) = crate::dialogs_gear::selected(app) {
+            v.push(cmd(app, "gear.edit", "Edit Gear").with(json!({"component":component})));
+        }
         v.push(Item::sep());
         v.push(act("ui.clear", "Clear Selection", "close").key("Esc"));
     }
@@ -808,6 +811,9 @@ fn body_items(app: &SolveApp, bodies: &[String], browser: bool) -> Vec<Item> {
         let b = bodies.first().cloned().unwrap_or_default();
         if let Some(component) = crate::dialogs_part_size::component_for_bodies(app, bodies) {
             v.push(cmd(app, "parts.resize", "Change Part Size").with(json!({"component":component})));
+        }
+        if let Some(component) = crate::dialogs_gear::of_bodies(app, bodies) {
+            v.push(cmd(app, "gear.edit", "Edit Gear").with(json!({"component":component})));
         }
         v.push(Item::sep());
         if !browser {
@@ -1109,6 +1115,9 @@ fn component_items(app: &SolveApp, id: u64) -> Vec<Item> {
     let mut v = Vec::new();
     if doc.parts.contains_key(&id) {
         v.push(cmd(app, "parts.resize", "Edit").with(json!({"component":id})));
+    }
+    if doc.gears.contains_key(&id) {
+        v.push(cmd(app, "gear.edit", "Edit Gear").with(json!({"component":id})));
     }
     // What a double-click on the row does comes first.
     let activate = act("ui.activate", "Activate", "component").with(json!({ "component": id })).on(!active);
@@ -1568,6 +1577,13 @@ pub fn run_item(app: &mut SolveApp, item: &Item, at: Pos2) {
                 crate::dialogs_part_size::open(app, component);
             } else {
                 app.start("parts.resize");
+            }
+        }
+        "gear.edit" => {
+            if let Some(component) = id_of(&p, "component") {
+                crate::dialogs_gear::open(app, component);
+            } else {
+                app.start("gear.edit");
             }
         }
         "ui.repeat" => {
