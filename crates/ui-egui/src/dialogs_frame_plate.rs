@@ -55,10 +55,12 @@ impl Default for Plate {
     }
 }
 
+/// A new Mounting Plate dialog for `frame.plate`, asking for one planar support face.
 pub fn start(_app: &SolveApp, id: &str) -> Option<(Kind, Vec<SelInput>)> {
     (id == "frame.plate").then(|| (Kind::FramePlate(Plate::default()), vec![SelInput::new("Face", PLANAR_FACES, false)]))
 }
 
+/// The dialog's shape, size, placement and bolt pattern rows; true when Enter was pressed.
 pub fn rows(app: &SolveApp, ui: &mut egui::Ui, p: &mut Plate) -> bool {
     let mut enter = false;
     choice_row(ui, app.tr("ui.plate_shape"), "plate_shape", &mut p.shape, &[app.tr("ui.rectangle"), app.tr("ui.plate_round")]);
@@ -95,6 +97,7 @@ pub fn rows(app: &SolveApp, ui: &mut egui::Ui, p: &mut Plate) -> bool {
     enter
 }
 
+/// The `frame.plate` call the dialog's face and values make, or the message saying what is missing.
 pub fn commands(app: &SolveApp, p: &Plate, inputs: &[SelInput], extra: &Map<String, Value>) -> Result<Vec<(String, Value)>, String> {
     let [Sel::Face { body, index, point }] = crate::selection::items(inputs, 0) else { return Err(app.tr("error.plate_support").into()) };
     let mut args = json!({"face":point,"body":body,"index":index,"thickness":p.thickness,"offset":p.offset,"x_offset":p.x_offset,"y_offset":p.y_offset,"angle":p.angle});
@@ -125,6 +128,7 @@ pub fn commands(app: &SolveApp, p: &Plate, inputs: &[SelInput], extra: &Map<Stri
     Ok(vec![("frame.plate".into(), args)])
 }
 
+/// Edit Feature: a dialog holding a saved plate's face and values.
 pub fn for_feature(
     app: &SolveApp,
     kind: &FeatureKind,

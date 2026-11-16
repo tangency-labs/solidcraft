@@ -18,6 +18,8 @@ pub struct PlateMember {
     pub line: String,
 }
 
+/// The frame member line whose face supports a plate, so frame edits move it with that member;
+/// `None` when the face does not come from a Frame Member.
 pub fn plate_member(doc: &Document, state: &ModelState, plane: &crate::PlaneRef) -> Result<Option<PlateMember>> {
     let anchor = crate::face_anchor::plane_face_anchor(plane).ok_or_else(|| invalid("plate support needs a persistent face"))?;
     let source = doc.feature(anchor.target.origin_feature).ok_or_else(|| invalid("plate support producer no longer exists"))?;
@@ -70,6 +72,7 @@ pub enum PlateHoles {
     },
 }
 
+/// A refused mounting plate input or support.
 fn invalid(message: impl Into<String>) -> DocError {
     DocError::Invalid(message.into())
 }
@@ -168,6 +171,8 @@ fn support_plane(doc: &Document, f: &Feature, st: &ModelState, plane: &crate::Pl
     Plane::new(origin, resolved.x, resolved.y).ok_or_else(|| invalid("plate support plane is degenerate"))
 }
 
+/// Adds the plate body: its outline and holes, extruded by `thickness` along the support face's
+/// outward normal, centred on that face's area centroid and moved by the offsets and angle.
 pub(crate) fn evaluate(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, st: &mut ModelState) -> Result<()> {
     let FeatureKind::FramePlate { plane, member, shape, holes, thickness, offset, x_offset, y_offset, angle } = &f.kind else {
         return Err(invalid("not a mounting plate feature"));

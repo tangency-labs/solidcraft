@@ -113,6 +113,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .params("feature: the Frame Member (id or name); members: [2 to 1000 line or pair ids, or {feature?: the frame's own name, line}] (a corner, crossing or overlap of the frame, the members in order: the first runs through a butt, or stays whole at a crossing or overlap, and of three or more the first two make the corner); kind?: auto|none|mitre|butt (default auto: the frame's own type, with this order); flip?: bool (the first two in the order today's rules give them, swapped; without it the members are saved as given); gap?: length expr (this corner's weld gap, 0…1000 mm; default the frame's; an overlap takes none); remove?: bool (take the override of these members away, back to the frame's own rules; no kind, flip or gap with it). Replaces the override of the same members (any order) or adds one, as one undo step; the frame stays one timeline entry. Returns the edited feature as frame.member does"),
 ];
 
+/// `frame.plate`: a separate plate body on a planar face, attached to the member that made the face.
 fn plate(s: &mut Session, p: &Value) -> Result<Value> {
     use solidcraft_doc::frame::{PlateHoles, PlateShape};
     let cmd = "frame.plate";
