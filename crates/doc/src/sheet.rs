@@ -2410,6 +2410,10 @@ impl SheetBody {
         let mut out = Vec::new();
         let mut points = 0usize;
         for (piece, region) in pieces {
+            let region = onto_seams(region, &seams);
+            if !encloses_area(&region) {
+                continue;
+            }
             let panel = fitted_region(&planar_region(&region)?)?;
             // Each piece meets only the cut-outs near it: arranging every cut-out of the sheet (a
             // label's letters on its base) against each flange and bend zone too would charge the
@@ -8097,6 +8101,32 @@ mod tests {
                 let body = cut.solid().unwrap_or_else(|e| panic!("{what}: {e}"));
                 assert!(body.validity().is_empty(), "{what}: {:?}", body.validity());
                 assert!(vol(&body) < v0 - 1.0, "{what}: {} vs {v0}", vol(&body));
+            }
+        }
+    }
+
+    /// A 30 × 32.216 mm sheet, T 1.5, R 2.52, K 0.33, folded at 2.368 mm from its edge.
+    /// Half the allowance is 2.36797546 mm: the remaining panel is only 0.025 µm wide.
+    /// Removing its short edges turned it into a triangle with overlapping walls at the bend.
+    #[test]
+    fn a_fold_leaving_a_hair_of_panel_at_the_outline_sews() {
+        let rule = RuleValues { thickness: 1.5, k_factor: 0.33, bend_radius: 2.52, ..alu() };
+        let angle = std::f64::consts::FRAC_PI_2;
+        let ba = angle * (rule.bend_radius + rule.k_factor * rule.thickness);
+        for line in [2.368, ba / 2.0 + 1e-8, ba / 2.0 + 1e-5, ba / 2.0 + 0.01] {
+            for flip in [false, true] {
+                let outline = [Vec2::new(0.0, 0.0), Vec2::new(30.0, 0.0), Vec2::new(30.0, 32.216), Vec2::new(0.0, 32.216)];
+                let mut s = base_flange("Body1", "R", &rule, Plane::XY, Region2 { outer: Loop2::polygon(&outline).ccw(), holes: vec![] });
+                let mut warning = None;
+                s.add_fold(Vec3::new(0.0, line, s.t), Vec3::new(30.0, line, s.t), angle, rule.bend_radius, "centerline", flip, None, &mut warning)
+                    .unwrap();
+                let body = s.solid().unwrap_or_else(|e| panic!("line {line}, flip {flip}: {e}"));
+                assert!(body.validity().is_empty() && body.shell_count() == 1, "{:?}", body.validity());
+                let lip = line - ba / 2.0;
+                let panels = 32.216 - line - ba / 2.0 + if lip < HAIR { 0.0 } else { lip };
+                let expected = 30.0 * rule.thickness * (panels + angle * (rule.bend_radius + rule.thickness / 2.0));
+                let volume = body.volume_at(1e-6).unwrap();
+                assert!((volume - expected).abs() < 1e-3, "line {line}, flip {flip}: {volume} vs {expected}");
             }
         }
     }
