@@ -1152,6 +1152,14 @@ pub fn sweep_sheet_points_with(plane: &Plane, chains: &[Vec<Seg2>], path: &[Vec3
     sweep_sheet_with(plane, chains, &segs, ctl)
 }
 
+/// A surface swept from chains of sketch segments on `plane` along a path through 3D sketch curves
+/// ([`crate::PointPath`]): each drawn 3D spline exactly, as its spans, and each polyline as the
+/// lines between its points, as the solid sweep follows them ([`crate::sweep_point_path_with`]).
+/// A smooth spline is one smooth run, so each chain sweeps to one wall along it (#17828).
+pub fn sweep_sheet_point_path_with(plane: &Plane, chains: &[Vec<Seg2>], path: &crate::PointPath, ctl: &crate::SweepControl) -> Result<Body> {
+    sweep_sheet_with(plane, chains, &path.segs()?, ctl)
+}
+
 /// A surface lofted through two or more sections, each a chain of sketch segments on its plane,
 /// all open or all closed: ruled between two sections, smooth through three or more. Closed
 /// sections are matched as the solid loft matches them; open ones are split to the same number of
@@ -1765,6 +1773,43 @@ mod tests {
         let two = sweep_sheet_points(&Plane::XY, &[bent], &arc).unwrap();
         assert_eq!(two.face_count(), 2 * 40);
         assert_eq!(two.edge_count(), 2 * 41 + 3 * 40, "the walls share their seams");
+    }
+
+    /// A line swept along a closed 3D sketch spline (eight fit points round a circle of radius 20)
+    /// follows the spline exactly: one wall, closed round the path, not a wall along each line of
+    /// the spline's samples (#17828). In a plane, the line square to it, the wall is a band of the
+    /// line's length times the spline's: its length from its exact spans, not its samples.
+    #[test]
+    fn sweep_sheet_along_a_closed_spline_is_one_closed_wall() {
+        use crate::{PathPiece, PointPath, SpaceBezier, SweepControl};
+        let ring = |z: &dyn Fn(usize) -> f64| -> Vec<Vec3> {
+            (0..=8)
+                .map(|i| {
+                    let t = std::f64::consts::TAU * (i % 8) as f64 / 8.0;
+                    Vec3::new(20.0 * t.cos(), 20.0 * t.sin(), z(i % 8))
+                })
+                .collect()
+        };
+        let line = vec![Seg2::Line { a: Vec2::new(0.0, 0.0), b: Vec2::new(0.0, 5.0) }];
+        let flat = ring(&|_| 0.0);
+        let path = PointPath { pieces: vec![PathPiece::Spline { fit: flat.clone(), reversed: false }] };
+        // The profile stands on the path's start, square to it: x out from the centre, y up.
+        let plane = Plane { origin: Vec3::new(20.0, 0.0, 0.0), x: Vec3::X, y: Vec3::Z };
+        let band = sweep_sheet_point_path_with(&plane, std::slice::from_ref(&line), &path, &SweepControl::default()).unwrap();
+        let length: f64 =
+            solidcraft_geom::catmull_rom::beziers(&flat).unwrap().into_iter().map(|p| SpaceBezier::cubic(p).unwrap().length().unwrap()).sum();
+        // One wall, its two ends one seam: the seam and the line's two ends round the path.
+        assert!(band.is_surface() && band.face_count() == 1 && band.edge_count() == 3, "{} faces, {} edges", band.face_count(), band.edge_count());
+        let area = measure(&band).unwrap().area;
+        assert!(rel(area, 5.0 * length) < 1e-6, "{area} vs {}", 5.0 * length);
+        // As the reported path: the fit points up and down by 5 in turn, a line out from it in
+        // the plane of the path's start. Its frame closes round the path, so the wall does too.
+        let wavy = ring(&|i| if i % 2 == 0 { 9.0 } else { 4.0 });
+        let path = PointPath { pieces: vec![PathPiece::Spline { fit: wavy, reversed: false }] };
+        let flat_at = Plane { origin: Vec3::new(0.0, 0.0, 9.0), x: Vec3::X, y: Vec3::Y };
+        let radial = vec![Seg2::Line { a: Vec2::new(20.0, 0.0), b: Vec2::new(28.0, 0.0) }];
+        let wall = sweep_sheet_point_path_with(&flat_at, &[radial], &path, &SweepControl::default()).unwrap();
+        assert!(wall.is_surface() && wall.face_count() == 1 && wall.edge_count() == 3, "{} faces, {} edges", wall.face_count(), wall.edge_count());
     }
 
     #[test]

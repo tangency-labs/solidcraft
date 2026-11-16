@@ -434,7 +434,7 @@ pub(super) fn eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, 
                     let pts = path.points();
                     let rails = crate::eval::rail_polylines(doc, st, rails, f.component, pts.first().copied().unwrap_or(start))?;
                     let ctl = crate::eval::sweep_control(vals, orientation, twist, scale, rails, *rail_fit)?;
-                    kernel::sweep_sheet_points_with(&ss.plane, &chains, &pts, &ctl)?
+                    kernel::sweep_sheet_point_path_with(&ss.plane, &chains, &path, &ctl)?
                 }
                 None => {
                     let segs = path_segments_at(ps, path, start, Some(&ss.plane))?;
