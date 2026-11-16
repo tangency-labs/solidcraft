@@ -2,12 +2,14 @@
 
 use egui::{Rect, Sense, Stroke, pos2, vec2};
 use serde_json::{Value, json};
+use solidcraft_engine::geom::drawing_sheet::{Orientation, PaperSize};
 use solidcraft_theme::Tokens;
 
 use crate::SolveApp;
 use crate::ui_kit::{self, BackingTooltipExt as _, Button, Container, Surface};
 
-const SIZES: &[&str] = &["A4", "A3", "A2", "A1", "A0"];
+const SIZES: &[(&str, PaperSize)] =
+    &[("a4", PaperSize::A4), ("a3", PaperSize::A3), ("a2", PaperSize::A2), ("a1", PaperSize::A1), ("a0", PaperSize::A0)];
 
 pub(super) struct BlankSheet {
     size: usize,
@@ -40,23 +42,23 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui, bounds: Rect) {
     if !room.is_positive() {
         return;
     }
-    let width = room.width().min(750.0);
+    let width = room.width().min(830.0);
     let columns = width >= 590.0;
-    let top = room.top() + if columns { (room.height() - 300.0).max(0.0) * 0.5 } else { 0.0 };
+    let top = room.top() + if columns { (room.height() - 345.0).max(0.0) * 0.5 } else { 0.0 };
     let bounds = Rect::from_min_max(pos2(room.center().x - width * 0.5, top), pos2(room.center().x + width * 0.5, room.bottom()));
     ui.scope_builder(egui::UiBuilder::new().max_rect(bounds), |ui| {
         ui.set_clip_rect(ui.clip_rect().intersect(bounds));
         let container = Container::new(ui.ctx(), Surface::Panel);
-        let frame = container.edge_frame(t.panel).inner_margin(t.space_16);
+        let frame = container.edge_frame(t.panel).corner_radius(t.radius_lg).stroke(Stroke::new(1.0, t.border)).inner_margin(t.space_24);
         container.show_frame(ui, frame, bounds, |ui| {
             egui::ScrollArea::vertical().id_salt("drawing_first_sheet").min_scrolled_height(0.0).show(ui, |ui| {
-                ui.set_width((width - t.space_16 * 2.0).max(0.0));
+                ui.set_width((width - t.space_24 * 2.0).max(0.0));
                 let title = solidcraft_ui_text::format("ui.drawing_first.title", &[("name", &app.session.doc.name)]);
-                ui.vertical_centered(|ui| ui.heading(title));
-                if app.session.doc.features.is_empty() {
-                    ui.vertical_centered(|ui| ui.label(tr("ui.drawing_first.empty_model")));
-                }
-                ui.add_space(t.space_12);
+                ui.vertical_centered(|ui| {
+                    ui.heading(title);
+                    ui.label(tr(if app.session.doc.features.is_empty() { "ui.drawing_first.empty_model" } else { "ui.drawing_first.subtitle" }));
+                });
+                ui.add_space(t.space_16);
                 let enabled = can_create(app);
                 let picker = app.services.pick_open.is_some();
                 let options = [Choice::Standard, Choice::Blank, Choice::Template];
@@ -65,8 +67,15 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui, bounds: Rect) {
                 } else {
                     options.into_iter().fold(None, |chosen, option| card(ui, option, enabled, picker).or(chosen))
                 };
+                let blank = BlankSheet::new(app);
+                if enabled && let Some((_, size)) = SIZES.get(blank.size).copied() {
+                    ui.add_space(t.space_12);
+                    let paper = super::panels::size_caption(size);
+                    let defaults = solidcraft_ui_text::format("ui.drawing_first.defaults", &[("paper", &paper)]);
+                    ui.vertical_centered(|ui| ui_kit::text(ui, &defaults, ui_kit::Text::Note("drawing_first_defaults")));
+                }
                 match chosen {
-                    Some(Choice::Blank) => app.drawing_workspace.first_sheet = Some(BlankSheet::new(app)),
+                    Some(Choice::Blank) => app.drawing_workspace.first_sheet = Some(blank),
                     Some(Choice::Template) => choose_template(app),
                     _ => {}
                 }
@@ -85,14 +94,17 @@ fn card(ui: &mut egui::Ui, choice: Choice, enabled: bool, picker: bool) -> Optio
         }
     };
     let container = Container::new(ui.ctx(), Surface::Panel);
-    let frame = container.edge_frame(t.field).inner_margin(t.space_8);
+    let frame = container.edge_frame(t.panel).corner_radius(t.radius_md).stroke(Stroke::new(1.0, t.border)).inner_margin(t.space_12);
     let bounds = ui.available_rect_before_wrap();
     container
         .show_frame(ui, frame, bounds, |ui| {
             thumbnail(ui, &choice);
+            ui.add_space(t.space_8);
             ui.heading(tr(title));
             ui.label(tr(description));
-            let button = ui_kit::button(ui, tr(action), Button::Enabled(enabled));
+            ui.add_space(t.space_8);
+            let style = if enabled && matches!(choice, Choice::Blank) { Button::Primary } else { Button::Enabled(enabled) };
+            let button = ui_kit::button(ui, tr(action), style);
             crate::scenario::publish_target(&format!("drawing:first:{target}"), button.rect);
             button.backing_on_disabled_hover_text(tr("ui.drawing_first.unavailable")).clicked().then_some(choice)
         })
@@ -101,8 +113,9 @@ fn card(ui: &mut egui::Ui, choice: Choice, enabled: bool, picker: bool) -> Optio
 
 fn thumbnail(ui: &mut egui::Ui, choice: &Choice) {
     let t = Tokens::get();
-    let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), t.space_24 * 3.0), Sense::hover());
-    let width = (rect.width() - t.space_16).clamp(0.0, t.space_24 * 4.0);
+    let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), t.space_24 * 4.0), Sense::hover());
+    ui.painter().rect_filled(rect, t.radius_sm, t.field);
+    let width = (rect.width() - t.space_16).clamp(0.0, t.space_24 * 5.0);
     if width <= 0.0 {
         return;
     }
@@ -149,20 +162,26 @@ pub(super) fn show_picker(app: &mut SolveApp, ctx: &egui::Context) {
         .fields()
         .actions(tr("cmd.drawing_create"), tr("ui.cancel"), None)
         .show(ctx, can_create(app), |ui| {
-            ui_kit::choice_row(ui, tr("ui.drawing_panel.size"), "drawing_first_size", &mut form.size, SIZES);
+            let labels = SIZES.iter().map(|(_, size)| super::panels::size_caption(*size)).collect::<Vec<_>>();
+            let choices = labels.iter().map(String::as_str).collect::<Vec<_>>();
+            ui_kit::choice_row(ui, tr("ui.drawing_panel.size"), "drawing_first_size", &mut form.size, &choices);
             ui_kit::row(ui, tr("ui.drawing_panel.title_block"), |ui| {
                 ui_kit::checkbox(ui, tr("ui.drawing_panel.built_in"), &mut form.title_block);
             });
+            if let Some((_, size)) = SIZES.get(form.size).copied() {
+                let orientation = if size == PaperSize::A4 { Orientation::Portrait } else { Orientation::Landscape };
+                super::panels::paper_preview(ui, size, orientation, form.title_block);
+            }
         });
     if closed || action == ui_kit::Action::Cancel {
         return;
     }
     if action == ui_kit::Action::Ok
         && can_create(app)
-        && let Some(size) = SIZES.get(form.size)
+        && let Some((size, _)) = SIZES.get(form.size)
     {
         let kind = if solidcraft_engine::doc::drawing::template::is_assembly(&app.session.doc) { "assembly" } else { "part" };
-        let template = format!("iso-{}-{kind}", size.to_ascii_lowercase());
+        let template = format!("iso-{size}-{kind}");
         if create(app, json!({"template":template,"omit_first_sheet_title_block":!form.title_block})) {
             return;
         }
