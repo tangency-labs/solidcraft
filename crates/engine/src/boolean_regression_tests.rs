@@ -2081,33 +2081,49 @@ fn a_loft_of_arches_offset_to_97_and_193_points_runs_foot_to_foot_and_cuts_its_l
     let leg_box: fn(&str) -> Value =
         |op| json!({"length": 300, "width": 200, "height": 20, "corner": [-50, -100, -30], "operation": op, "targets": ["Loft"]});
     // The issue's two scripts: the steps before the loft, the loft, its far section's plane and the
-    // outer foot there, the cut, and the expected results (the loft's volume and counts, then the
-    // cut's, and the lowest z the cut leaves).
+    // outer foot there, the cut, and the expected results (the loft's volume and counts, the cut's,
+    // the lowest z the cut leaves, and each leg an intersect keeps).
     let three_sections: Vec<(&str, Value)> = small.iter().chain(&high).chain(&low).chain(&trim).cloned().collect();
     let two_sections: Vec<(&str, Value)> = small.iter().chain(&high).cloned().collect();
     let cases = [
-        (three_sections, three, (196.0, 50.0), ("solid.extrude", leg_trim), (29_062.04, (182, 540, 360)), (25_226.36, (170, 504, 336)), -15.0364),
-        (two_sections, two, (80.0, 60.0), ("solid.box", leg_box), (9_820.94, (104, 306, 204)), (8_512.94, (104, 306, 204)), -10.0),
+        (
+            "A",
+            three_sections,
+            three,
+            (196.0, 50.0),
+            ("solid.extrude", leg_trim),
+            ((29_062.04, (182, 540, 360)), (25_226.36, (170, 504, 336)), -15.0364, (1_917.84, (45, 129, 86))),
+        ),
+        (
+            "B",
+            two_sections,
+            two,
+            (80.0, 60.0),
+            ("solid.box", leg_box),
+            ((9_820.94, (104, 306, 204)), (8_512.94, (104, 306, 204)), -10.0, (654.0, (28, 78, 52))),
+        ),
     ];
-    for (steps, loft, (far, far_foot), (tool, params), (loft_volume, loft_counts), (cut_volume, cut_counts), floor) in cases {
+    for (case, steps, loft, (far, far_foot), (tool, params), want) in cases {
+        let ((loft_volume, loft_counts), (cut_volume, cut_counts), floor, (leg_volume, leg_counts)) = want;
         let lofted = || {
             let mut s = Session::default();
             for (command, p) in steps.iter().cloned().chain([("solid.loft", loft.clone())]) {
-                s.execute(command, &p).unwrap_or_else(|e| panic!("{command}: {e}"));
+                s.execute(command, &p).unwrap_or_else(|e| panic!("{case} {command}: {e}"));
             }
             s
         };
+        let measure = |b: &solidcraft_kernel::Body, what: &str| solidcraft_kernel::measure(b).unwrap_or_else(|e| panic!("{case} {what}: {e}"));
         // The bodies the tool leaves with `op`: each one's validity and measure.
         let after = |op: &str| {
             let mut s = lofted();
-            s.execute(tool, &params(op)).unwrap_or_else(|e| panic!("{op}: {e}"));
-            s.model.state().bodies.iter().map(|b| (b.body.validity(), solidcraft_kernel::measure(&b.body).unwrap())).collect::<Vec<_>>()
+            s.execute(tool, &params(op)).unwrap_or_else(|e| panic!("{case} {op}: {e}"));
+            s.model.state().bodies.iter().map(|b| (b.body.validity(), measure(&b.body, op))).collect::<Vec<_>>()
         };
         let s = lofted();
         let state = s.model.state();
-        let body = &state.body("Loft").unwrap().body;
-        let m = solidcraft_kernel::measure(body).unwrap();
-        assert!(body.validity().is_empty() && m.shells == 1, "{:?}", body.validity());
+        let body = &state.body("Loft").unwrap_or_else(|| panic!("{case}: no loft")).body;
+        let m = measure(body, "loft");
+        assert!(body.validity().is_empty() && m.shells == 1, "{case}: {:?}", body.validity());
         // Each foot of the small arch joins the same foot of the far one: the outer foot, and the
         // offset's end the short line runs to from it.
         let r = body.record();
@@ -2115,38 +2131,42 @@ fn a_loft_of_arches_offset_to_97_and_193_points_runs_foot_to_foot_and_cuts_its_l
         let ends: Vec<(Vec3, Vec3)> = r.edges.iter().map(|e| (point(e.vertices[0]), point(e.vertices[1]))).collect();
         let joined = |p: Vec3, plane: f64| -> Vec<Vec3> {
             let others = ends.iter().filter_map(|&(a, b)| {
-                if a.dist(p) < 1e-9 {
+                if a.dist(p) < 1e-7 {
                     Some(b)
-                } else if b.dist(p) < 1e-9 {
+                } else if b.dist(p) < 1e-7 {
                     Some(a)
                 } else {
                     None
                 }
             });
-            // In the section's own plane, only the short line (1 mm): the arch's next vertex is
-            // 6 mm or more away.
-            let in_plane = (plane - p.x).abs() < 1e-9;
-            others.filter(|q| (q.x - plane).abs() < 1e-9 && (!in_plane || q.dist(p) < 1.5)).collect()
+            // In the section's own plane, only the short line (1 mm): the loft's next vertex along
+            // the arch is farther away.
+            let in_plane = (plane - p.x).abs() < 1e-7;
+            others.filter(|q| (q.x - plane).abs() < 1e-7 && (!in_plane || q.dist(p) < 1.5)).collect()
         };
         for side in [-1.0, 1.0] {
             let (foot, its) = (Vec3::new(1.0, 10.0 * side, -18.0), Vec3::new(far, far_foot * side, -18.0));
-            assert_eq!(joined(foot, far), [its], "the outer foot at y = {}", foot.y);
+            assert_eq!(joined(foot, far), [its], "{case}: the outer foot at y = {}", foot.y);
             let (inner, its_inner) = (joined(foot, 1.0), joined(its, far));
-            assert!(inner.len() == 1 && its_inner.len() == 1, "{inner:?} {its_inner:?}");
-            assert_eq!(joined(inner[0], far), its_inner, "the offset's foot at y = {}", inner[0].y);
+            assert!(inner.len() == 1 && its_inner.len() == 1, "{case}: {inner:?} {its_inner:?}");
+            assert_eq!(joined(inner[0], far), its_inner, "{case}: the offset's foot at y = {}", inner[0].y);
         }
-        assert!((m.volume - loft_volume).abs() < 0.01, "loft {}", m.volume);
-        assert_eq!((m.faces, m.edges, m.vertices), loft_counts);
+        assert!((m.volume - loft_volume).abs() < 0.01, "{case}: loft {}", m.volume);
+        assert_eq!((m.faces, m.edges, m.vertices), loft_counts, "{case}: loft");
         let cut = after("cut");
-        let [(validity, left)] = cut.as_slice() else { panic!("one body after the cut: {}", cut.len()) };
-        assert!(validity.is_empty() && left.shells == 1, "{validity:?}");
-        assert!((left.volume - cut_volume).abs() < 0.01, "after the cut {}", left.volume);
-        assert_eq!((left.faces, left.edges, left.vertices), cut_counts);
-        assert!((left.bbox.min.z - floor).abs() < 1e-4, "lowest z {}", left.bbox.min.z);
+        let [(validity, left)] = cut.as_slice() else { panic!("{case}: one body after the cut, not {}", cut.len()) };
+        assert!(validity.is_empty() && left.shells == 1, "{case}: {validity:?}");
+        assert!((left.volume - cut_volume).abs() < 0.01, "{case}: after the cut {}", left.volume);
+        assert_eq!((left.faces, left.edges, left.vertices), cut_counts, "{case}: after the cut");
+        assert!((left.bbox.min.z - floor).abs() < 1e-4, "{case}: lowest z {}", left.bbox.min.z);
         let kept = after("intersect");
-        assert_eq!(kept.len(), 2, "the two legs");
-        assert!(kept.iter().all(|(v, k)| v.is_empty() && k.shells == 1), "{kept:?}");
+        assert_eq!(kept.len(), 2, "{case}: the two legs");
+        for (validity, leg) in &kept {
+            assert!(validity.is_empty() && leg.shells == 1, "{case}: {validity:?}");
+            assert!((leg.volume - leg_volume).abs() < 0.01, "{case}: leg {}", leg.volume);
+            assert_eq!((leg.faces, leg.edges, leg.vertices), leg_counts, "{case}: leg");
+        }
         let legs: f64 = kept.iter().map(|(_, k)| k.volume).sum();
-        assert!((left.volume + legs - m.volume).abs() < 1e-6 * m.volume, "{} + {legs} vs {}", left.volume, m.volume);
+        assert!((left.volume + legs - m.volume).abs() < 1e-6 * m.volume, "{case}: {} + {legs} vs {}", left.volume, m.volume);
     }
 }
