@@ -1610,7 +1610,8 @@ fn continues_through_tangent_point(
 /// arithmetic), whichever is larger: a proved bound, with nothing estimated. Each joined
 /// curve then loses the copies of its joint knot whose removal is exact to rounding
 /// ([`remove_exact_joint_knot`]); the 3D curve's deviation grows by that removal's
-/// certified bound.
+/// certified bound. The deviation is the 3D curve's only: the UV curves' move (their
+/// joint knot's removal, like their end points set above) is not recorded.
 ///
 /// # Errors
 ///
@@ -1777,7 +1778,10 @@ fn join_through_tangent_points(
 /// Returns the bound on how far the curve moved: the copies removed times the
 /// tolerance, rounded up. [`BSplineCurve::remove_knot_certified`] keeps a removal only
 /// when a certified bound (the knot reinserted in interval arithmetic, control points
-/// compared) is within that; `0` when no copy is removed.
+/// compared) is within that; `0` when no copy is removed. Rational curves are left
+/// alone (no copy removed): a control-point bound in homogeneous space does not bound
+/// the Euclidean move without a bound on the weights, and the traced intersection
+/// curves joined here are non-rational fits.
 ///
 /// # Errors
 ///

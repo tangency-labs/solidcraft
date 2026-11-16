@@ -372,58 +372,78 @@ fn nurb_of<'a>(curve: &'a BSplineCurve, operation: &'static str) -> Result<&'a C
 fn removal_moves_at_most(before: &Curve, after: &Curve, knot: f64, removed: usize) -> Option<f64> {
     let p = before.degree();
     let planar = before.cpts().first()?.z == NOZ;
-    let same_form = |c: &CPoint| c.w == NOW && (c.z == NOZ) == planar;
-    if after.degree() != p
-        || !before.cpts().iter().all(same_form)
-        || !after.cpts().iter().all(same_form)
-    {
+    if after.degree() != p {
         return None;
     }
-    let z = |c: &CPoint| if planar { 0.0 } else { c.z };
+    let target = ivl_points(before, planar)?;
     let mut u: Vec<f64> = after.knots().to_vec();
-    let mut q: Vec<[Ivl; 3]> = after
-        .cpts()
-        .iter()
-        .map(|c| [Ivl::from(c.x), Ivl::from(c.y), Ivl::from(z(c))])
-        .collect();
+    let mut q = ivl_points(after, planar)?;
     for _ in 0..removed {
-        // the span k with U[k] <= knot < U[k+1], inside the curve's knots
-        let k = u.iter().rposition(|&x| x <= knot)?;
-        if k < p || k + 1 >= u.len().checked_sub(p)? {
-            return None;
-        }
-        let mut next: Vec<[Ivl; 3]> = Vec::new();
-        for i in 0..=q.len() {
-            let point = if i + p <= k {
-                *q.get(i)?
-            } else if i > k {
-                *q.get(i.checked_sub(1)?)?
-            } else {
-                let ui = Ivl::from(*u.get(i)?);
-                let a = (Ivl::from(knot) - ui) / (Ivl::from(*u.get(i + p)?) - ui);
-                let b = Ivl::from(1.0) - a;
-                let [x1, y1, z1] = *q.get(i)?;
-                let [x0, y0, z0] = *q.get(i.checked_sub(1)?)?;
-                [a * x1 + b * x0, a * y1 + b * y0, a * z1 + b * z0]
-            };
-            next.push(point);
-        }
-        q = next;
-        let mut grown: Vec<f64> = u.iter().take(k + 1).copied().collect();
-        grown.push(knot);
-        grown.extend(u.iter().skip(k + 1));
-        u = grown;
+        insert_ivl(&mut u, &mut q, p, knot)?;
     }
-    if u.as_slice() != before.knots() || q.len() != before.cpts().len() {
+    if u.as_slice() != before.knots() {
+        return None;
+    }
+    farthest_pair(&target, &q)
+}
+
+/// The control points of the non-rational `c` as exact intervals (`z = 0` when
+/// `planar`); `None` when a point is rational or not of that planar form.
+fn ivl_points(c: &Curve, planar: bool) -> Option<Vec<[Ivl; 3]>> {
+    c.cpts()
+        .iter()
+        .map(|pt| {
+            if pt.w != NOW || (pt.z == NOZ) != planar {
+                return None;
+            }
+            let z = if planar { 0.0 } else { pt.z };
+            Some([Ivl::from(pt.x), Ivl::from(pt.y), Ivl::from(z)])
+        })
+        .collect()
+}
+
+/// Boehm's insertion of `knot` once into the degree-`p` curve `(u, q)`, in rounded
+/// interval arithmetic: each new control point `a Q[i] + (1 - a) Q[i-1]`,
+/// `a = (knot - U[i]) / (U[i+p] - U[i])`, is enclosed. `None` when `knot` is not inside
+/// the curve's knots (the span `k`, `U[k] <= knot < U[k+1]`, must have `p <= k < n + 1`).
+fn insert_ivl(u: &mut Vec<f64>, q: &mut Vec<[Ivl; 3]>, p: usize, knot: f64) -> Option<()> {
+    let k = u.iter().rposition(|&x| x <= knot)?;
+    if k < p || k + 1 >= u.len().checked_sub(p)? {
+        return None;
+    }
+    let mut next: Vec<[Ivl; 3]> = Vec::new();
+    for i in 0..=q.len() {
+        let point = if i + p <= k {
+            *q.get(i)?
+        } else if i > k {
+            *q.get(i.checked_sub(1)?)?
+        } else {
+            let ui = Ivl::from(*u.get(i)?);
+            let a = (Ivl::from(knot) - ui) / (Ivl::from(*u.get(i + p)?) - ui);
+            let b = Ivl::from(1.0) - a;
+            let [x1, y1, z1] = *q.get(i)?;
+            let [x0, y0, z0] = *q.get(i.checked_sub(1)?)?;
+            [a * x1 + b * x0, a * y1 + b * y0, a * z1 + b * z0]
+        };
+        next.push(point);
+    }
+    *q = next;
+    let mut grown: Vec<f64> = u.iter().take(k + 1).copied().collect();
+    grown.push(knot);
+    grown.extend(u.iter().skip(k + 1));
+    *u = grown;
+    Some(())
+}
+
+/// The largest distance between paired enclosed points, the upper end of its enclosure;
+/// `None` when the counts differ or the bound is not finite.
+fn farthest_pair(a: &[[Ivl; 3]], b: &[[Ivl; 3]]) -> Option<f64> {
+    if a.len() != b.len() {
         return None;
     }
     let mut worst = 0.0_f64;
-    for (c, [x, y, w]) in before.cpts().iter().zip(&q) {
-        let (dx, dy, dz) = (
-            Ivl::from(c.x) - *x,
-            Ivl::from(c.y) - *y,
-            Ivl::from(z(c)) - *w,
-        );
+    for ([x0, y0, z0], [x1, y1, z1]) in a.iter().zip(b) {
+        let (dx, dy, dz) = (*x0 - *x1, *y0 - *y1, *z0 - *z1);
         let d = (dx * dx + dy * dy + dz * dz).sqrt().hi;
         if !d.is_finite() {
             return None;
@@ -431,6 +451,88 @@ fn removal_moves_at_most(before: &Curve, after: &Curve, knot: f64, removed: usiz
         worst = worst.max(d);
     }
     Some(worst)
+}
+
+/// Inserts every knot of `target` (sorted) that `(u, q)` holds fewer times, by
+/// [`insert_ivl`]; `None` when an insertion fails.
+fn refine_ivl(u: &mut Vec<f64>, q: &mut Vec<[Ivl; 3]>, p: usize, target: &[f64]) -> Option<()> {
+    let mut i = 0;
+    while let Some(&t) = target.get(i) {
+        let want = target.iter().skip(i).take_while(|&&x| x == t).count();
+        let have = u.iter().filter(|&&x| x == t).count();
+        for _ in have..want {
+            insert_ivl(u, q, p, t)?;
+        }
+        i += want;
+    }
+    Some(())
+}
+
+/// The knot values of `a` and `b` merged, each as many times as the one holding it more
+/// often.
+fn knot_union(a: &[f64], b: &[f64]) -> Vec<f64> {
+    let mut all: Vec<f64> = a.iter().chain(b).copied().collect();
+    all.sort_by(f64::total_cmp);
+    all.dedup();
+    let mut out = Vec::new();
+    for t in all {
+        let n = a
+            .iter()
+            .filter(|&&x| x == t)
+            .count()
+            .max(b.iter().filter(|&&x| x == t).count());
+        out.extend(core::iter::repeat_n(t, n));
+    }
+    out
+}
+
+/// Not upstream: an upper bound on the distance, at every parameter of `piece`, between
+/// the non-rational curve `piece` and `parent` over the piece's parameter interval
+/// `[a, b]` (a piece cut from `parent`, e.g. by [`BSplineCurve::create_by_split_curve`],
+/// which [`BSplineCurve::trim`]'s end-span cleanup may reshape). In rounded interval
+/// arithmetic ([`insert_ivl`]), `a` and `b` are inserted into `parent` to multiplicity
+/// `p`, and its control points over `[a, b]` taken; both nets are then refined to the
+/// union of their knots. With one knot vector, one basis (non-negative, summing to one)
+/// holds for both, so the curves differ by at most the largest distance between paired
+/// control points, rounded up. `None` when a curve is rational or has no NURB form, the
+/// degrees, dimensions or refined knot vectors differ, or a bound is not finite. The
+/// loops are bounded by the knot and point counts.
+pub(crate) fn piece_moves_at_most(parent: &BSplineCurve, piece: &BSplineCurve) -> Option<f64> {
+    let (whole, part) = (parent.nurb.as_ref()?, piece.nurb.as_ref()?);
+    let p = whole.degree();
+    let planar = whole.cpts().first()?.z == NOZ;
+    if part.degree() != p {
+        return None;
+    }
+    let (a, b) = (*part.knots().first()?, *part.knots().last()?);
+    let mut u: Vec<f64> = whole.knots().to_vec();
+    let mut q = ivl_points(whole, planar)?;
+    for t in [a, b] {
+        let have = u.iter().filter(|&&x| x == t).count();
+        for _ in have..p {
+            insert_ivl(&mut u, &mut q, p, t)?;
+        }
+    }
+    // the net over [a, b]: s the last a, f the first b
+    let s = u.iter().rposition(|&x| x == a)?;
+    let f = u.iter().position(|&x| x == b)?;
+    let first = s.checked_sub(p)?;
+    let mut sub_u = vec![a];
+    sub_u.extend(u.get(first + 1..f.checked_add(p)?)?);
+    sub_u.push(b);
+    let mut sub_q: Vec<[Ivl; 3]> = q.get(first..f)?.to_vec();
+    if sub_u.len() != sub_q.len() + p + 1 {
+        return None;
+    }
+    let mut piece_u: Vec<f64> = part.knots().to_vec();
+    let mut piece_q = ivl_points(part, planar)?;
+    let target = knot_union(&sub_u, &piece_u);
+    refine_ivl(&mut sub_u, &mut sub_q, p, &target)?;
+    refine_ivl(&mut piece_u, &mut piece_q, p, &target)?;
+    if sub_u != piece_u {
+        return None;
+    }
+    farthest_pair(&sub_q, &piece_q)
 }
 
 /// A copy of the NURB of `curve` (`sm_CreateNlibCurve`: `N_AllocCrvAndArrays` +

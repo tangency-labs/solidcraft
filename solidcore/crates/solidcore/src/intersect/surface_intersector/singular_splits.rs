@@ -9,6 +9,7 @@
 //! |------------------------------------|------------------------------------|
 //! | [`split_curves_at_singular_points`] | `sm_SplitCurvesAtSingularPoints`  |
 //! | `singular_sine` (private)          | `sm_SingularSine`                  |
+//! | `piece_deviation` (private)        | (solidcore's: certified piece deviation) |
 //!
 //! Deviations: the curve arrays are `Vec`s whose UV curves are never `NULL` (the fork's
 //! `NULL` skip is the arrays' length check). A failed evaluation in `sm_SingularSine`
@@ -16,14 +17,19 @@
 //! whose other failures skip that split as the fork's do. The tails of one curve are
 //! collected and appended after its splits, in the fork's order (nothing reads the
 //! arrays in between). No recursion; the golden-section loop is bounded at 80 steps as
-//! the fork's is.
+//! the fork's is. Each piece's deviation is certified against its parent
+//! (`piece_deviation`) instead of copied: it grows by the bound on the move of `Trim`'s
+//! end-span cleanup, and stays the parent's when the piece is the parent's restriction to
+//! rounding; a curve whose reshaped piece cannot be bounded is left unsplit.
 
+use crate::blend::fillet_section::interval::Ivl;
 use crate::curve::curve::{Curve, CurveKind};
 use crate::error::{ignored, Result, SolidError};
 use crate::geom::vector2d::Point2;
 use crate::geom::vector3d::sqrt;
 use crate::kernel::Kernel;
 use crate::math::EFF_ZERO;
+use crate::nurbs::b_spline_curve_n_lib::piece_moves_at_most;
 use crate::nurbs::knots::Side;
 use crate::surface::surface::p2::TsectCurveType;
 use crate::surface::surface::Surface;
@@ -64,6 +70,48 @@ fn singular_sine(
     Ok(n1.cross(n2).length() / (l1 * l2))
 }
 
+/// Not in the fork: the deviation of `piece`, a piece split from the 3D curve `parent`
+/// of deviation `deviation`. The split ([`Curve::create_by_split_curve`], `Trim`) may drop
+/// an end span shorter than the zone tolerance (`N_CrvRemoveDegenSegs`), which reshapes
+/// the piece; [`piece_moves_at_most`] bounds, at every parameter, how far the piece lies
+/// from the parent, and the deviation grows by that bound, rounded up. A bound within
+/// `EFF_ZERO (1 + max |coordinate|)` is the split's rounding, and the deviation stays the
+/// parent's (bit for bit, as the fork copies it). `None` when the piece cannot be bounded
+/// (it is rational or not a B-spline) and it lacks a knot of the parent inside its
+/// interval: it may be reshaped by an unknown amount. Without a dropped knot the piece is
+/// the parent's restriction, and keeps the parent's deviation.
+///
+/// The deviation is the 3D curve's only: the UV curves' move under the same cleanup is
+/// not recorded (as for the joins of `join_through_tangent_points`, #17210).
+fn piece_deviation(parent: &Curve, piece: &Curve, deviation: f64) -> Option<f64> {
+    let (CurveKind::BSpline(whole), CurveKind::BSpline(part)) = (parent.kind(), piece.kind())
+    else {
+        return None;
+    };
+    let whole_nurb = whole.nurb.as_ref()?;
+    let scale = whole_nurb.cpts().iter().fold(0.0_f64, |m, c| {
+        m.max(c.x.abs()).max(c.y.abs()).max(c.z.abs())
+    });
+    match piece_moves_at_most(whole, part) {
+        Some(moved) if moved <= EFF_ZERO * (1.0 + scale) => Some(deviation),
+        Some(moved) => {
+            let grown = (Ivl::from(deviation) + Ivl::from(moved)).hi;
+            grown.is_finite().then_some(grown)
+        }
+        None => {
+            let part_nurb = part.nurb.as_ref()?;
+            let (a, b) = (*part_nurb.knots().first()?, *part_nurb.knots().last()?);
+            let count = |u: &[f64], t: f64| u.iter().filter(|&&x| x == t).count();
+            let keeps_all = whole_nurb
+                .knots()
+                .iter()
+                .filter(|&&t| a < t && t < b)
+                .all(|&t| count(part_nurb.knots(), t) >= count(whole_nurb.knots(), t));
+            keeps_all.then_some(deviation)
+        }
+    }
+}
+
 fn at(v: &[f64], i: usize) -> Result<f64> {
     v.get(i)
         .copied()
@@ -76,8 +124,9 @@ fn at(v: &[f64], i: usize) -> Result<f64> {
 /// refined by golden section, and the curve is split where `s < 1e-6`, the angle rises
 /// above `1e-3` again both between the previous split (or the start) and the point and
 /// after it, and the point lies more than `10 * tol_3d` from both ends. The leading part
-/// stays in place; each tail is appended to the arrays with the curve's type and
-/// deviation.
+/// stays in place; each tail is appended to the arrays with the curve's type. Every
+/// piece's deviation is `piece_deviation`'s: the parent's, grown by the certified move of
+/// any end-span cleanup (3D only; the UV curves' move is not recorded).
 ///
 /// # Errors
 ///
@@ -200,6 +249,16 @@ pub(crate) fn split_curves_at_singular_points(
 
         // split from the last parameter down: the curve keeps the leading part, each new
         // curve is a tail
+        if splits.is_empty() {
+            continue;
+        }
+        let (Some(parent_3), Some(parent_uv1), Some(parent_uv2)) = (
+            curves_3d.get(ii).cloned(),
+            uv1_curves.get(ii).cloned(),
+            uv2_curves.get(ii).cloned(),
+        ) else {
+            continue;
+        };
         let mut tails = Vec::new();
         for &split in splits.iter().rev() {
             let (Some(c3), Some(uv1), Some(uv2)) = (
@@ -223,13 +282,137 @@ pub(crate) fn split_curves_at_singular_points(
             .get(ii)
             .copied()
             .ok_or_else(|| SolidError::invalid_input(OP, "deviations shorter than curves"))?;
-        for (tail_3, tail_uv1, tail_uv2) in tails {
+        // each piece's deviation, certified against its parent (solidcore's, not the
+        // fork's copy): `None` undoes this curve's splits
+        let lead_dev = curves_3d
+            .get(ii)
+            .and_then(|lead| piece_deviation(&parent_3, lead, deviation));
+        let tail_devs: Option<Vec<f64>> = tails
+            .iter()
+            .map(|(tail_3, _, _)| piece_deviation(&parent_3, tail_3, deviation))
+            .collect();
+        let (Some(lead_dev), Some(tail_devs)) = (lead_dev, tail_devs) else {
+            if let (Some(c3), Some(uv1), Some(uv2)) = (
+                curves_3d.get_mut(ii),
+                uv1_curves.get_mut(ii),
+                uv2_curves.get_mut(ii),
+            ) {
+                *c3 = parent_3;
+                *uv1 = parent_uv1;
+                *uv2 = parent_uv2;
+            }
+            continue;
+        };
+        if let Some(d) = deviations.get_mut(ii) {
+            *d = lead_dev;
+        }
+        for ((tail_3, tail_uv1, tail_uv2), tail_dev) in tails.into_iter().zip(tail_devs) {
             curves_3d.push(tail_3);
             uv1_curves.push(tail_uv1);
             uv2_curves.push(tail_uv2);
             curve_types.push(curve_type);
-            deviations.push(deviation);
+            deviations.push(tail_dev);
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::nurbs::b_spline_curve::BSplineCurve;
+    use crate::nurbs::crv_basic::Curve as Nurb;
+    use crate::nurbs::math::{CPoint, NOW};
+
+    /// A cubic with one interior knot, at 1; rational (one weight 2) when asked.
+    fn parent(rational: bool) -> Curve {
+        let w = if rational { 1.0 } else { NOW };
+        let pw = vec![
+            CPoint::new(0.0, 0.0, 0.0, w),
+            CPoint::new(1.0, 2.0, 0.5, w),
+            if rational {
+                // homogeneous: (3, 3, -1) at weight 2
+                CPoint::new(6.0, 6.0, -2.0, 2.0)
+            } else {
+                CPoint::new(3.0, 3.0, -1.0, w)
+            },
+            CPoint::new(4.0, 1.0, 2.0, w),
+            CPoint::new(6.0, 0.0, 1.0, w),
+        ];
+        let u = vec![0.0, 0.0, 0.0, 0.0, 1.0, 2.5, 2.5, 2.5, 2.5];
+        Curve::from(BSplineCurve::from_gw_nurb(3, &Nurb::new(pw, 3, u).unwrap()))
+    }
+
+    fn knots_of(c: &Curve) -> Vec<f64> {
+        let CurveKind::BSpline(b) = c.kind() else {
+            panic!("not a B-spline")
+        };
+        b.nurb.as_ref().unwrap().knots().to_vec()
+    }
+
+    /// The largest distance, at 2001 parameters of the piece, between it and its parent.
+    fn sampled(k: &Kernel, whole: &Curve, piece: &Curve) -> f64 {
+        let u = knots_of(piece);
+        let (a, b) = (u[0], u[u.len() - 1]);
+        (0..=2000)
+            .map(|j| {
+                let t = a + (b - a) * f64::from(j) / 2000.0;
+                let p = whole.evaluate_point(k, t).unwrap();
+                p.distance(piece.evaluate_point(k, t).unwrap())
+            })
+            .fold(0.0_f64, f64::max)
+    }
+
+    /// Pieces cut away from a knot are the parent's restriction to rounding and keep its
+    /// deviation bit for bit; a piece whose end span (shorter than the zone tolerance)
+    /// the split's `Trim` removes is reshaped, and its deviation grows by at least the
+    /// move.
+    #[test]
+    fn a_split_piece_s_deviation_covers_its_move_from_the_parent() {
+        let k = Kernel::default();
+        let dev = 0.25;
+        let mut lead = parent(false);
+        let tail = lead.create_by_split_curve(&k, 1.7).unwrap();
+        let whole = parent(false);
+        assert_eq!(piece_deviation(&whole, &lead, dev), Some(dev));
+        assert_eq!(piece_deviation(&whole, &tail, dev), Some(dev));
+
+        let mut lead = parent(false);
+        let tail = lead.create_by_split_curve(&k, 1.0 - 1e-7).unwrap();
+        // the cleanup ran: the tail lost the knot at 1
+        assert!(!knots_of(&tail).contains(&1.0), "{:?}", knots_of(&tail));
+        let moved = sampled(&k, &whole, &tail);
+        assert!(moved > 0.0, "the tail did not move");
+        let got = piece_deviation(&whole, &tail, dev).unwrap();
+        assert!(
+            got >= dev + moved && got <= dev + 1e-4,
+            "{got} vs {dev} + {moved}"
+        );
+    }
+
+    /// A rational piece is not bounded: it keeps the parent's deviation when it holds every
+    /// parent knot inside its interval, and has none (its curve stays unsplit) when the
+    /// split's cleanup could have dropped one (it does not run on this rational tail, so the
+    /// dropped-knot piece is built directly).
+    #[test]
+    fn a_rational_piece_is_kept_only_as_the_parent_s_restriction() {
+        let k = Kernel::default();
+        let whole = parent(true);
+        let mut lead = parent(true);
+        let tail = lead.create_by_split_curve(&k, 1.7).unwrap();
+        assert_eq!(piece_deviation(&whole, &lead, 0.25), Some(0.25));
+        assert_eq!(piece_deviation(&whole, &tail, 0.25), Some(0.25));
+        // a rational piece over [1 - 1e-7, 2.5] without the parent's knot at 1, as a
+        // cleanup would leave it
+        let a = 1.0 - 1e-7;
+        let pw = vec![
+            CPoint::new(2.0, 2.0, 0.0, 1.0),
+            CPoint::new(6.0, 6.0, -2.0, 2.0),
+            CPoint::new(4.0, 1.0, 2.0, 1.0),
+            CPoint::new(6.0, 0.0, 1.0, 1.0),
+        ];
+        let u = vec![a, a, a, a, 2.5, 2.5, 2.5, 2.5];
+        let cleaned = Curve::from(BSplineCurve::from_gw_nurb(3, &Nurb::new(pw, 3, u).unwrap()));
+        assert_eq!(piece_deviation(&whole, &cleaned, 0.25), None);
+    }
 }
