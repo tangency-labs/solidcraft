@@ -876,7 +876,7 @@ fn full_span_line(
     // where the line meets the plane square to `d` through `m`, along its own direction (within
     // DIR_TOL of `d`, so the divisor is within 1e-18 of +-1)
     let across = fd.dot(d);
-    if !(across.abs() > 0.5) {
+    if across.is_nan() || across.abs() <= 0.5 {
         return Ok(None);
     }
     Ok(Some(point + fd * ((m - point).dot(d) / across)))
