@@ -3918,7 +3918,35 @@ fn a_round_overflowing_a_split_flange_s_tab_top_leaves_the_bends_on_their_surfac
             }
         }
     };
+    // each bend's surface by its radius, its axis line (the foot of the perpendicular from the
+    // origin and the direction up to sign) and its natural domain's two ranges (in either
+    // order: the round's stitch may swap a face's u and v), sorted
+    let bend_surfaces = |b: &Body| {
+        let mut keys: Vec<[f64; 11]> = issue_17616_cylinders(b)
+            .into_iter()
+            .filter(|c| c.0 < 6.0)
+            .map(|(r, [o, d], _, n)| {
+                let foot = o - d * o.dot(d);
+                let d = if d.x + d.y + d.z < 0.0 { d * -1.0 } else { d };
+                let (mut s, mut t) = ([n[0], n[1]], [n[2], n[3]]);
+                if s[0] > t[0] {
+                    std::mem::swap(&mut s, &mut t);
+                }
+                [
+                    r, foot.x, foot.y, foot.z, d.x, d.y, d.z, s[0], s[1], t[0], t[1],
+                ]
+            })
+            .collect();
+        keys.sort_by(|a, c| {
+            a.iter()
+                .zip(c)
+                .map(|(x, y)| x.total_cmp(y))
+                .fold(std::cmp::Ordering::Equal, std::cmp::Ordering::then)
+        });
+        keys
+    };
     bends_on_their_surfaces(&b);
+    let surfaces = bend_surfaces(&b);
     assert_eq!(issue_17616_cylinders(&b).len(), 10);
     let e = edge_at(&b, [90.0, 52.5, 50.0]);
     blend(&b, Blend::Round, &[e], &[10.0], &[], Corners::Filled)
@@ -3948,6 +3976,14 @@ fn a_round_overflowing_a_split_flange_s_tab_top_leaves_the_bends_on_their_surfac
         (origin.x - 80.0).abs() <= 1e-9 && (origin.z - 40.0).abs() <= 1e-9,
         "{origin:?}"
     );
-    // the bends the round does not reach as they were
+    // the bends the round does not reach as they were: each on its own surface, unexpanded
     bends_on_their_surfaces(&b);
+    for (was, now) in surfaces.iter().zip(&bend_surfaces(&b)) {
+        for (x, y) in was.iter().zip(now) {
+            assert!(
+                (x - y).abs() <= 1e-9,
+                "a bend's surface {was:?} is now {now:?}"
+            );
+        }
+    }
 }
