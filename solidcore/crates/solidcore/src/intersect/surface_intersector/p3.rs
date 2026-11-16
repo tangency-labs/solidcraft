@@ -721,7 +721,9 @@ impl SurfaceIntersector<'_> {
     /// Adds the touching points [`SurfaceIntersector::find_boundary_start_points`]
     /// left out for a start point on them (in the order it found them) whose two
     /// surface points are closer than `this_approx_tol_3d` and which are on none of
-    /// the curves found (boundary, traced and interior); the list is emptied.
+    /// the curves `out` holds; the list is emptied. `DoIntersection` calls it last,
+    /// on the curves left once it has removed degenerate curves that lie on others, so
+    /// a removed curve covers nothing.
     ///
     /// Upstream drops a touching point on a start point for good, as the curve traced
     /// from that start point is to cover it ("due to seams"). A start point that traces

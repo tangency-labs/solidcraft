@@ -51,11 +51,12 @@
 //!   adds start points (`TraceCurve` adds none), so it ends after at most as many
 //!   passes as `FindBoundaryStartPoints` made points.
 //! - **Touching points left for a start point** (not upstream). After the interior
-//!   curves, a touching point `FindBoundaryStartPoints` dropped because a start point
-//!   lies on it is added when its surface points are within the tolerance and it is
-//!   on no curve found ([`SurfaceIntersector::add_deferred_touching_points`]); such
-//!   points come after the traced curves, where upstream's boundary pass would have
-//!   put them first.
+//!   curves and the removal of degenerate curves that lie on other curves, a touching
+//!   point `FindBoundaryStartPoints` dropped because a start point lies on it is
+//!   added when its surface points are within the tolerance and it is on none of the
+//!   curves left ([`SurfaceIntersector::add_deferred_touching_points`]); such points
+//!   come after the traced curves, where upstream's boundary pass would have put them
+//!   first.
 //! - **Opt-in fix (WR-76, #392).** With
 //!   [`UpstreamFixes::ssi_trace_tangent_curves_once`](crate::kernel::UpstreamFixes::ssi_trace_tangent_curves_once)
 //!   a traced curve removes, before it is flushed, the start points left in a tangent
@@ -834,30 +835,6 @@ impl<'t, O: SolutionObject + Copy + PartialEq + 't> AdvSurfaceIntersector<'_, 't
             mut deviations,
         } = interior;
 
-        // not upstream: a touching point left out because a start point lies on it is
-        // added, last, when no curve found covers it
-        let mut found = TsectCurves {
-            curves_3d: core::mem::take(&mut curves_3d),
-            uv_curves: [
-                core::mem::take(&mut surface1_uv_curves),
-                core::mem::take(&mut surface2_uv_curves),
-            ],
-            curve_types: core::mem::take(&mut curve_types),
-            deviations: core::mem::take(&mut deviations),
-        };
-        self.base.add_deferred_touching_points(k, &mut found)?;
-        let TsectCurves {
-            curves_3d: found_3d,
-            uv_curves: [found_uv1, found_uv2],
-            curve_types: found_types,
-            deviations: found_deviations,
-        } = found;
-        curves_3d = found_3d;
-        surface1_uv_curves = found_uv1;
-        surface2_uv_curves = found_uv2;
-        curve_types = found_types;
-        deviations = found_deviations;
-
         // remove degenerate Curves whose points lie on nonDegenerate intersections
         let mut ii = 0;
         while let Some(curve) = curves_3d.get(ii) {
@@ -893,6 +870,31 @@ impl<'t, O: SolutionObject + Copy + PartialEq + 't> AdvSurfaceIntersector<'_, 't
             }
             ii += 1;
         }
+
+        // not upstream: a touching point left out because a start point lies on it is
+        // added, last, when no curve left after the cleanup above covers it (a
+        // degenerate curve the cleanup removed covers nothing)
+        let mut found = TsectCurves {
+            curves_3d: core::mem::take(&mut curves_3d),
+            uv_curves: [
+                core::mem::take(&mut surface1_uv_curves),
+                core::mem::take(&mut surface2_uv_curves),
+            ],
+            curve_types: core::mem::take(&mut curve_types),
+            deviations: core::mem::take(&mut deviations),
+        };
+        self.base.add_deferred_touching_points(k, &mut found)?;
+        let TsectCurves {
+            curves_3d: found_3d,
+            uv_curves: [found_uv1, found_uv2],
+            curve_types: found_types,
+            deviations: found_deviations,
+        } = found;
+        curves_3d = found_3d;
+        surface1_uv_curves = found_uv1;
+        surface2_uv_curves = found_uv2;
+        curve_types = found_types;
+        deviations = found_deviations;
 
         // not upstream (WR-75, opt-in; the fork's AddTangentNodes): report the singular
         // points where crossing branches meet
