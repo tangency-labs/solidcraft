@@ -47,18 +47,13 @@ fn sc_fixes(k: &mut Kernel) {
     k.fixes.keep_operand_uv_trims = true;
     k.fixes.geometric_g2_continuity = true;
     k.fixes.proto_vertex_miss_is_false = true;
-    k.fixes.check_loop_vertex_tolerance = true;
-    k.fixes.check_loop_projected_seam_ends = true;
     k.fixes.edge_check_orders_tangent_faces = true;
     k.fixes.ellipse_step_interval_checks = true;
     k.fixes.good_drop_result_distances_in_order = true;
-    k.fixes.torus_check_spindle_apex = true;
     k.fixes.cylinder_rebuild_mean_radius = true;
     k.fixes.nurb_cylinder_inside_out_frame = true;
     k.fixes.revolve_analytic_profile_faces = true;
-    k.fixes.taper_tangent_corner_planes = true;
     k.fixes.revolve_holed_profile_void = true;
-    k.fixes.loops_go_on_round_the_vertex = true;
     k.fixes.linear_sweep_arc_is_cylinder = true;
     k.fixes.join_touching_loops = true;
     k.fixes.offset_resolve_crossing_loops = true;
@@ -80,12 +75,7 @@ fn sc_fixes(k: &mut Kernel) {
     k.fixes.new_edge_vertex_tolerance_covers_gap = true;
     k.fixes.transform_scales_each_tolerance = true;
     k.fixes.transform_model_size_from_body_box = true;
-    k.fixes.torus_signed_gen_curve_interval = true;
-    k.fixes.torus_major_radius_from_origin = true;
-    k.fixes.torus_iso_circle_axis_from_midpoint = true;
     k.fixes.found_torus_sphere_keep_tested_nurb = true;
-    k.fixes.internal_pole_row_through_knot = true;
-    k.fixes.extrusion_origin_scaled_zero = true;
     k.fixes.point_solve_keeps_triangle_guess = true;
     k.fixes.imprint_extends_edge_to_proto_vertex = true;
     k.fixes.imprint_reuses_coincident_face_edge = true;
@@ -104,7 +94,6 @@ fn sc_fixes(k: &mut Kernel) {
     k.fixes.ssi_pole_point_keeps_its_tangent = true;
     k.fixes.ssi_tangent_curve_tracer = true;
     k.fixes.delete_vertex_joins_seam_iso_curve = true;
-    k.fixes.boolean_new_face_closure_both_sides = true;
     k.fixes.box_face_failures_propagate = true;
     k.fixes.fillet_removal_takes_ring_fillets = true;
 }

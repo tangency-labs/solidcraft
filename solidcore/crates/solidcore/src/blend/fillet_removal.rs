@@ -64,6 +64,10 @@
 //!   continued) instead of a fitted intersection of its faces. A curved side edge, a
 //!   corner of more than three edges, or a face other than a plane whose new corner lies
 //!   outside its surface's natural domain fails the removal before the B-rep changes.
+//!   The intersection that finds the new edge takes each tangent plane continued over
+//!   the domain it searches (its analytic domain grown), since the intersector keeps
+//!   to a surface's natural domain and a plane made at its face's size would stop the
+//!   trace at the old corner (#17414).
 //!   The fork installs the run-on curve with `SetCurve` and then sets its owner; the
 //!   port names it by the edit's identity first, which `SetCurve` then records (the same
 //!   owner).
@@ -984,14 +988,20 @@ impl FilletRemoval {
             sv
         };
 
-        let tan0 = out_of_bounds_copy(b, self.tan_face(0)?)?;
-        let tan1 = out_of_bounds_copy(b, self.tan_face(1)?)?;
+        let mut tan0 = out_of_bounds_copy(b, self.tan_face(0)?)?;
+        let mut tan1 = out_of_bounds_copy(b, self.tan_face(1)?)?;
         let mut uv_domain1 = tan0.natural_uv_domain_with_nurb(k)?;
         let mut uv_domain2 = tan1.natural_uv_domain_with_nurb(k)?;
 
         // Also expand the domains, for srf/srf/srf intersect.
         uv_domain1.expand_relative(2.0);
         uv_domain2.expand_relative(2.0);
+        // Not upstream (WR-606, exact only): planes continued over them, so the trace
+        // reaches the new corners past the faces' edges.
+        if self.exact_only {
+            continue_plane(&mut tan0, &uv_domain1);
+            continue_plane(&mut tan1, &uv_domain2);
+        }
 
         let int = or_sm_err(tan0.point_based_surface_intersect(
             k,
@@ -1564,6 +1574,20 @@ fn out_of_bounds_copy(b: &Brep, f: FaceId) -> Result<Surface> {
     let mut s = ner(crate::topology::face::p2::surface(b, f)?)?.clone_for_evaluation()?;
     set_out_of_bounds_enabled(&mut s, true);
     Ok(s)
+}
+
+/// Not upstream (WR-606, exact only): the evaluation copy `s` of a face's surface, when it
+/// is a plane, continued over `domain` (its analytic domain grown to it). The surface
+/// intersector works within each surface's natural domain, and a plane's is the face's
+/// own extent where the face was made at that size (an extruded profile's side): a new
+/// corner past the face's edge, where the removed fillet stood, lies outside it, and the
+/// trace from it stops there, a curve of no length. A plane continued is the same plane
+/// with the same parameters, as the exact-only check of [`FilletRemoval::remove_face`]
+/// already takes it; any other surface keeps its domain.
+fn continue_plane(s: &mut Surface, domain: &Extent2d) {
+    if let SurfaceKind::Plane(p) = s.kind_mut() {
+        p.update_analytical_domain(domain);
+    }
 }
 
 /// `pVertex->SetPoint(p)` through the kernel's callbacks.
