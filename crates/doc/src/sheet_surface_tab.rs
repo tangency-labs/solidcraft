@@ -4,6 +4,7 @@
 //! follow, and no joint changes.
 
 use solidcore_record::{Loop2, Plane, Region2, Vec2, Vec3};
+use solidcraft_develop::prelude::*;
 use solidcraft_develop::{JointKind, Surface};
 use solidcraft_geom::prelude::*;
 use solidcraft_kernel::BoolOp;
