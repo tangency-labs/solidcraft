@@ -1124,7 +1124,12 @@ fn extent_in(
                 } else {
                     t1 * (1.0 - f) + t0 * f
                 };
-                let q = at(t, prev)?;
+                // Past a pole the point before it says nothing of where the loop goes on (it is
+                // across the axis), and a nearest-point search started there settles on the
+                // pole itself, the nearest point on that side: a meridian back out of the pole,
+                // and the edge after it, would read as all pole and bound nothing. The point is
+                // found over the whole surface until the loop is off the pole again.
+                let q = at(t, if on_pole { None } else { prev })?;
                 // At a pole the collapsed parameter is anything: it bounds nothing.
                 let pole = match eval.pole_within(q, reach) {
                     Ok(p) => p,

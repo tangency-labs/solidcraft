@@ -1274,6 +1274,57 @@ fn a_loop_through_a_pole_closes_its_turn_from_the_seam() {
     );
 }
 
+/// Half a dome of revolution, its profile a spline from the axis, bounded by a meridian into
+/// the pole, the meridian half a turn round back out of it and half the rim: the loop out of the
+/// pole is placed from the whole surface, not from the last point before the pole (across the
+/// axis, where the nearest-point search settled on the pole and the meridian and the rim's first
+/// point bounded nothing, leaving the box a sample short of half a turn).
+#[test]
+fn a_loop_out_of_a_revolutions_pole_reaches_the_meridian_it_leaves_on() {
+    let identity = [
+        [1., 0., 0., 0.],
+        [0., 1., 0., 0.],
+        [0., 0., 1., 0.],
+        [0., 0., 0., 1.],
+    ];
+    let profile = |side: f64| Curve::Spline {
+        knots: vec![0., 0., 0., 1., 1., 1.],
+        points: vec![[0., 0., 0.], [0., 2. * side, 0.], [1.5, 3. * side, 0.]],
+    };
+    let dome = Surface::PlacedRevolution {
+        profile: Box::new(profile(1.0)),
+        origin: [0.; 3],
+        axis: [1., 0., 0.],
+        matrix: identity,
+        forward: false,
+    };
+    let (east, west) = (profile(1.0), profile(-1.0));
+    let rim = Curve::Circle {
+        frame: Frame {
+            origin: [1.5, 0., 0.],
+            x_axis: [0., 1., 0.],
+            y_axis: [0., 0., 1.],
+        },
+        radius: 3.,
+    };
+    // The half below z = 0: in on the −y meridian, out on the +y one, back round the rim.
+    let lune = vec![
+        (&west, [0., 1.], false),
+        (&east, [0., 1.], true),
+        (&rim, [std::f64::consts::PI, TAU], false),
+    ];
+    let [u, v] = form::extent(&dome, &[lune], 1e-6)
+        .unwrap()
+        .expect("an extent");
+    assert!(
+        (u[1] - u[0] - std::f64::consts::PI).abs() < 1e-9,
+        "half a turn: {u:?}"
+    );
+    let to = u[1].rem_euclid(TAU);
+    assert!(to.min(TAU - to) < 1e-9, "to the +y meridian: {u:?}");
+    assert!(v[0].abs() < 1e-9 && (v[1] - 1.).abs() < 1e-9, "{v:?}");
+}
+
 /// A face's box reaches its boundary's extremes, not its samples' nearest ones.
 #[test]
 fn a_face_box_reaches_its_boundary_extremes() {
