@@ -66,13 +66,18 @@
 //!   `BrepFaceServices` (handle `CacheObject::Surface(face)`), so its surface cache is
 //!   the face's trimmed cache, made on the B-rep as upstream's `smsurf_GetSurfaceCache`
 //!   makes it through `GetFace()`.
-//! - **The piece inside a rail (not upstream, WR-611, the fork's de4dae6).**
+//! - **The piece inside a rail (not upstream, WR-611, the fork's de4dae6; #15129).**
 //!   `TrimOriginalSurfaces` deletes the one piece of the original face whose binormal
-//!   at the fillet edge's dropped midpoint makes the largest dot with the fillet's,
-//!   above `SM_EFF_ZERO_SQRT`, not every piece above a fixed 0.2. This is a choice
-//!   between the two opposite sides of the rail, not an acceptance test. A fillet
-//!   square to its face (no dot above the floor) deletes no piece, as upstream's test
-//!   did there too.
+//!   at the fillet edge's dropped midpoint makes the largest dot with the fillet's side
+//!   at the rail, above `SM_EFF_ZERO_SQRT`, not every piece above a fixed 0.2. This is a
+//!   choice between the two opposite sides of the rail, not an acceptance test. The
+//!   fillet's side is the chord from the rail to the other rail, square to the rail
+//!   ([`fillet_side_at_rail`]), not the fillet face's binormal there as upstream: the
+//!   face's binormal turns past the face's own plane for a section that leaves its rail
+//!   steeper than 90 degrees, and then pointed at the wrong piece. Where no piece has a
+//!   dot above the floor the trim fails as a defect, `BlendFailure::StageFailed` (upstream
+//!   deleted no piece and went on).
+//!   [`inside_piece`] holds the choice.
 //! - **Statuses.** `SER`/`NER` failures are errors (`SM_ERR`, `SM_ERR_NULL_POINTER`);
 //!   ignored upstream statuses (curve and surface copies, `SetMinMax`, `Unitize`,
 //!   `EvaluatePoint` in `ShouldSwapFaces`) are ignored here too, except that
@@ -95,6 +100,7 @@ use crate::blend::fillet_solver::p1::{FilletSolver, FilletSolverOps, RolloverGue
 use crate::curve::curve::p2::BSPLINE_CURVE_TYPE;
 use crate::curve::curve::Curve;
 use crate::curve::hermite_curve::HermiteCurve;
+use crate::error::blend::BlendFailure;
 use crate::error::{ignored, EntityRef, Result, SolidError};
 use crate::geom::context::{MarkLock, MarkType};
 use crate::geom::extent1d::Extent1d;
@@ -2447,10 +2453,11 @@ impl FilletBrep {
     /// rMarkLocks)`: for each rail (and other rail) of geometry `g` of type
     /// `SM_FE_RAIL` whose fillet B-rep edge is mated to a target edge with two faces:
     /// collects the fillet B-rep faces connected to that edge's face (marked with the
-    /// first lock's mark) into `kept`; then for every second edge use of the target
-    /// edge on the rail's original face (or one split from it) whose binormal points
-    /// along the fillet edge's binormal (reversed for a reverse-trim solver), collects
-    /// the target faces reachable from its face without crossing marked edges (marked
+    /// first lock's mark) into `kept`; then of the edge uses of the target edge on the
+    /// rail's original face (or one split from it), every second one, takes the one whose
+    /// binormal (reversed for a reverse-trim solver) points most the way of the fillet's
+    /// side at the rail ([`fillet_side_at_rail`], [`inside_piece`]) and collects the
+    /// target faces reachable from its face without crossing marked edges (marked
     /// with the target context's mark). Unless one of those faces is the use's
     /// radial face (the trim leaked), they are added to `deleted`. Faces are added
     /// once each. The geometry's solver is the retained `solver`, whose id is
@@ -2462,6 +2469,8 @@ impl FilletBrep {
     /// # Errors
     ///
     /// `SM_ERR` when the fillet edge's midpoint does not drop onto the target edge;
+    /// [`BlendFailure::StageFailed`] (a defect) where the fillet's side at a rail cannot be
+    /// taken (no point on the other rail) or no piece of the original face lies on it;
     /// `SM_ERR_NULL_POINTER` without the target edge's curve;
     /// [`SolidError::InvalidInput`] without solver, rails, mark locks, the target
     /// context's mark lock, or a fillet edge without primary edge use or curve
@@ -2503,6 +2512,59 @@ impl FilletBrep {
                 }
             },
         )
+    }
+
+    /// The point nearest to `at` on the other side's rails of `geom` (the rail `1 - ii` and
+    /// that side's other rails, as the pseudo B-rep holds their curves), for
+    /// [`fillet_side_at_rail`], each searched over its curve's own range. The pseudo B-rep's
+    /// rails run the whole fillet, also where the fillet B-rep has no edge of the other rail
+    /// (a fillet ending against an earlier round). `None` where that side has no rail with a
+    /// curve, or `at` drops onto none.
+    ///
+    /// # Errors
+    ///
+    /// Those of the edge lookups, the drops and the evaluations.
+    fn other_rail_point(
+        &self,
+        k: &Kernel,
+        geom: &super::p1::FilletGeom,
+        ii: usize,
+        at: Point3,
+    ) -> Result<Option<Point3>> {
+        let other = 1 - ii;
+        let mut rails: Vec<EdgeId> = geom.rail(other).into_iter().collect();
+        rails.extend_from_slice(if other == 0 {
+            &geom.other_rails1
+        } else {
+            &geom.other_rails2
+        });
+        let pseudo = self.brep();
+        let mut nearest: Option<Point3> = None;
+        for rail in rails {
+            let Some(curve) = pseudo.edge(rail)?.curve.as_ref() else {
+                continue;
+            };
+            // the rail curve's own range: a pseudo B-rep rail edge's interval is not set
+            // when the trim runs
+            let interval = curve.natural_interval();
+            let dropped = curve.drop_point(
+                k,
+                &interval,
+                at,
+                None,
+                edge::tolerance(pseudo, rail)?,
+                None,
+                SolverOperation::Minimize,
+            )?;
+            if !dropped.success {
+                continue;
+            }
+            let (p, _) = evaluate_tangent(k, curve, dropped.parameter, OP_TRIM)?;
+            if nearest.is_none_or(|q| p.distance(at) < q.distance(at)) {
+                nearest = Some(p);
+            }
+        }
+        Ok(nearest)
     }
 
     #[allow(clippy::too_many_arguments, clippy::too_many_lines)]
@@ -2667,7 +2729,14 @@ impl FilletBrep {
                     &BinormalOptions::default(),
                 )?;
                 let mid_pnt = fillet_eval.point;
-                let fillet_bin = fillet_eval.binormal;
+                // the fillet's side at the rail: the chord to the other rail, square to
+                // this one ([`fillet_side_at_rail`]), not the fillet face's binormal
+                let other = self.other_rail_point(k, geom, ii, mid_pnt)?;
+                let side = other
+                    .and_then(|o| fillet_side_at_rail(mid_pnt, fillet_eval.tangent, o))
+                    // no point on the other rail: the pseudo B-rep's rails run the whole
+                    // fillet, so a defect, never a size that would build
+                    .ok_or_else(|| SolidError::blend(OP_TRIM, BlendFailure::StageFailed))?;
 
                 // Drop the m_pFilletBrep->Edge->MidPoint onto the Orig
                 // m_pTargetBrep->Edge->Curve
@@ -2697,17 +2766,14 @@ impl FilletBrep {
                 // for every Orig m_pTargetBrep->pBrepEdge->Edgeuse - find the Face
                 // connected to the edgeuse no longer needed
                 let edgeuses = edge::edgeuses(target, brep_edge, None, None)?;
-                // Not upstream (WR-611, the fork's de4dae6): of the original face's pieces
-                // along the rail (the edge uses on the original face or its split faces),
-                // the one 'inside' the closed loop of common edges is the one whose
-                // binormal points most the way the fillet's does, above `SM_EFF_ZERO_SQRT`.
-                // The pieces' binormals are opposite, so its dot is the positive one,
-                // however steeply the fillet meets the face; only a fillet square to the
-                // face (no side) is ambiguous, and then no piece is deleted. Upstream took
-                // any piece whose dot passed a fixed 0.2, which refused every fillet
-                // meeting its face at more than 78 degrees.
-                let mut inside = None;
-                let mut best_dot = EFF_ZERO_SQRT;
+                // Not upstream (WR-611, the fork's de4dae6; #15129): of the original face's
+                // pieces along the rail (the edge uses on the original face or its split
+                // faces), the one 'inside' the closed loop of common edges is the one whose
+                // binormal points most the way of the fillet's side, above
+                // `SM_EFF_ZERO_SQRT` ([`inside_piece`]). Upstream took any piece whose dot
+                // with the fillet face's binormal passed a fixed 0.2, which refused every
+                // fillet meeting its face at more than 78 degrees.
+                let mut pieces = Vec::new();
                 for (index, &eu) in edgeuses.iter().enumerate().step_by(2) {
                     let eu_face = eu1::face(target, eu)?;
                     if !(eu_face == orig_face || eu_face.is_some_and(|f| splt_faces.contains(&f))) {
@@ -2727,11 +2793,14 @@ impl FilletBrep {
                     if fs.reverse_trim {
                         bin2 = -bin2;
                     }
-                    if fillet_bin.dot(bin2) > best_dot {
-                        best_dot = fillet_bin.dot(bin2);
-                        inside = Some(index);
-                    }
+                    pieces.push((index, bin2));
                 }
+                // no piece on the chord's side: the chord runs square to the face, so the
+                // faces are tangent along the edge, which is not blended this way (a defect)
+                let Some(inside) = inside_piece(side, &pieces) else {
+                    return Err(SolidError::blend(OP_TRIM, BlendFailure::StageFailed));
+                };
+                let inside = Some(inside);
                 // (a loop, not a lookup, so the marking below keeps upstream's shape)
                 for (index, &eu) in edgeuses.iter().enumerate().step_by(2) {
                     // The inside piece (and all Faces connected to it) get marked for
@@ -2987,11 +3056,58 @@ fn roll_over_chain_start(
     Ok(None)
 }
 
+/// The side of a rail a fillet lies on (#15129): the unit chord from `at` on the rail to
+/// `other` on the other rail, less its part along the rail's `tangent`. `None` where the
+/// tangent vanishes or the chord runs along the rail.
+///
+/// Why the chord and not the fillet face's binormal: at a station the rails are
+/// `rho_i = m - r_i n_i`, the centre `m` less each offset `r_i` along its face's unit normal
+/// `n_i` (towards the fillet). The chord from rail i is `c = rho_j - rho_i = r_i n_i - r_j n_j`,
+/// and with `t_i` the unit direction square to the edge in face i at its rail, pointing into
+/// face i's piece under the fillet, `n_i . t_i = 0` gives `c . t_i = -r_j (n_j . t_i)`.
+/// Between planes meeting at the wedge angle `w` that is `r_j sin(w)`: positive for every
+/// positive offset and every wedge between 0 and 180 degrees, so the chord always points
+/// into the piece to delete. The fillet face's binormal instead leaves the rail at the
+/// section's own angle to the face: 0 for a round (tangent to its face), the toe angle for
+/// a chamfer (under 90 degrees), but past 90 degrees for a convex section that leans back
+/// over its toe (a weld bead past its overhang bound), and its binormal then points into
+/// the other piece, which was deleted with the whole body behind it. Where
+/// `c . t_i` is not positive (faces tangent along the edge) the rule has no side, and the
+/// trim fails as a defect ([`inside_piece`]).
+#[must_use]
+pub(crate) fn fillet_side_at_rail(at: Point3, tangent: Vec3, other: Point3) -> Option<Vec3> {
+    let chord = other - at;
+    let t2 = tangent.dot(tangent);
+    if t2 <= EFF_ZERO_SQ {
+        return None;
+    }
+    let square = chord - tangent * (chord.dot(tangent) / t2);
+    let length = square.dot(square).sqrt();
+    (length > EFF_ZERO).then(|| square * (1.0 / length))
+}
+
+/// Of the original face's pieces along a rail (each an index and its binormal at the rail,
+/// unit and pointing into the piece), the one the fillet lies over: the piece whose binormal
+/// makes the largest dot with the fillet's `side` ([`fillet_side_at_rail`]), above
+/// `SM_EFF_ZERO_SQRT`. `None` where no piece passes (the chord square to the face: no side).
+#[must_use]
+pub(crate) fn inside_piece(side: Vec3, pieces: &[(usize, Vec3)]) -> Option<usize> {
+    let mut inside = None;
+    let mut best = EFF_ZERO_SQRT;
+    for &(index, binormal) in pieces {
+        let dot = side.dot(binormal);
+        if dot > best {
+            best = dot;
+            inside = Some(index);
+        }
+    }
+    inside
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::blend::fillet_solver::p1::FilletExecutiveRef;
-    use crate::error::blend::BlendFailure;
     use crate::error::{SM_ERR, SM_ERR_NULL_POINTER};
     use crate::geom::attribute::ObjectKey;
     use crate::geom::context::ALL_MARKS;
@@ -3882,6 +3998,94 @@ mod tests {
                 }
             ),
             "{err:?}"
+        );
+    }
+
+    // ---- the fillet's side at a rail (#15129) ----
+
+    /// Two planes meeting along the z axis at the wedge angle `w`: face 1 is the plane y = 0
+    /// running from the edge along +x, face 2 the plane through the edge along
+    /// `(cos w, sin w, 0)`; the fillet lies between them. With offsets `r1`, `r2` along the
+    /// unit normals towards the fillet, the centre `m` and the rails `rho_i = m - r_i n_i`.
+    fn wedge(w: f64, r1: f64, r2: f64) -> (Point3, Point3) {
+        let (s, c) = w.sin_cos();
+        let n1 = Vec3::new(0.0, 1.0, 0.0);
+        let n2 = Vec3::new(s, -c, 0.0);
+        // m . n1 = r1 and m . n2 = r2
+        let m = Point3::new((r2 + c * r1) / s, r1, 0.0);
+        (m - n1 * r1, m - n2 * r2)
+    }
+
+    /// Face 1's direction square to the edge from its rail towards the edge: into its piece
+    /// under the fillet, between the rail and the edge.
+    const INTO: Vec3 = Vec3::new(-1.0, 0.0, 0.0);
+
+    /// Between planes the chord from rail 1 points into face 1's piece under the fillet by
+    /// `r2 sin(w)` (its unit part by that over the chord's length) for wedges from 10 to 170
+    /// degrees and equal and unequal offsets, so that piece is always the one chosen.
+    #[test]
+    fn the_chord_points_into_the_piece_under_the_fillet_at_every_wedge() {
+        for deg in [10.0_f64, 45.0, 60.0, 90.0, 120.0, 150.0, 170.0] {
+            for (r1, r2) in [(5.0, 5.0), (4.0, 8.0), (8.0, 4.0)] {
+                let w = deg.to_radians();
+                let (rho1, rho2) = wedge(w, r1, r2);
+                let side = fillet_side_at_rail(rho1, Vec3::new(0.0, 0.0, 1.0), rho2).unwrap();
+                let want = r2 * w.sin() / (rho2 - rho1).length();
+                assert!(want > 0.0);
+                assert!(
+                    (side.dot(INTO) - want).abs() < 1e-12,
+                    "{deg} {r1} {r2}: {}",
+                    side.dot(INTO)
+                );
+                assert_eq!(
+                    inside_piece(side, &[(0, INTO), (2, -INTO)]),
+                    Some(0),
+                    "{deg} {r1} {r2}"
+                );
+            }
+        }
+    }
+
+    /// A section that leaves its rail at more than 90 degrees from its face (a convex weld
+    /// bead past its overhang bound: at 90 degrees with 5 mm offsets, a sagitta past
+    /// 1.4645 mm) has a face binormal at the rail that points into the outer piece: the old
+    /// rule took that piece, the chord takes the piece under the fillet.
+    #[test]
+    fn a_section_steeper_than_its_rail_keeps_the_chord_side() {
+        let (rho1, rho2) = wedge(std::f64::consts::FRAC_PI_2, 5.0, 5.0);
+        let tangent = Vec3::new(0.0, 0.0, 1.0);
+        let into = INTO;
+        let normal = Vec3::new(0.0, 1.0, 0.0);
+        let pieces = [(0, into), (2, -into)];
+        // the face's binormal at the rail, the section leaving at 95 degrees from `into`
+        let a = 95.0_f64.to_radians();
+        let face_binormal = into * a.cos() + normal * a.sin();
+        assert_eq!(
+            inside_piece(face_binormal, &pieces),
+            Some(2),
+            "the old rule's wrong piece"
+        );
+        let side = fillet_side_at_rail(rho1, tangent, rho2).unwrap();
+        assert_eq!(inside_piece(side, &pieces), Some(0));
+    }
+
+    /// Faces tangent along the edge (the chord square to the face) and a chord along the rail
+    /// give no side: no piece is chosen, and the trim fails as a defect.
+    #[test]
+    fn a_chord_square_to_the_face_or_along_the_rail_has_no_side() {
+        let tangent = Vec3::new(0.0, 0.0, 1.0);
+        let at = Point3::new(0.0, 0.0, 0.0);
+        let into = Vec3::new(1.0, 0.0, 0.0);
+        let pieces = [(0, into), (2, -into)];
+        let side = fillet_side_at_rail(at, tangent, Point3::new(0.0, 3.0, 0.0)).unwrap();
+        assert_eq!(inside_piece(side, &pieces), None);
+        assert_eq!(
+            fillet_side_at_rail(at, tangent, Point3::new(0.0, 0.0, 2.0)),
+            None
+        );
+        assert_eq!(
+            fillet_side_at_rail(at, Vec3::new(0.0, 0.0, 0.0), Point3::new(1.0, 0.0, 0.0)),
+            None
         );
     }
 }
