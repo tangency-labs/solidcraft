@@ -107,6 +107,28 @@ impl Walk for Box<crate::document::Attract> {
     }
 }
 
+/// What a face pattern avoids, boxed as its attractors are: walked as the value inside.
+impl Walk for Box<crate::document::Avoid> {
+    fn walk_exprs<'a>(&'a self, f: &mut dyn FnMut(ExprItem<'a>)) {
+        (**self).walk_exprs(f)
+    }
+    fn walk_exprs_mut<'a>(&'a mut self, f: &mut dyn FnMut(ExprItemMut<'a>)) {
+        (**self).walk_exprs_mut(f)
+    }
+    fn walk_refs<'a>(&'a self, f: &mut dyn FnMut(RefItem<'a>)) {
+        (**self).walk_refs(f)
+    }
+    fn walk_refs_mut<'a>(&'a mut self, f: &mut dyn FnMut(RefItemMut<'a>)) {
+        (**self).walk_refs_mut(f)
+    }
+    fn walk_geometry<'a>(&'a self, f: &mut dyn FnMut(GeoItem<'a>)) {
+        (**self).walk_geometry(f)
+    }
+    fn walk_geometry_mut<'a>(&'a mut self, f: &mut dyn FnMut(GeoItemMut<'a>)) {
+        (**self).walk_geometry_mut(f)
+    }
+}
+
 /// A reference walks itself: a sketch, a feature or a body.
 macro_rules! reference {
     ($t:ty, $role:ident) => {

@@ -3180,10 +3180,14 @@ pub enum PatternKind {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         #[walk(angle = "Grid angle")]
         angle: Option<Expr>,
-        /// No copy nearer than this to the face's edges.
+        /// The edge margin: no copy nearer than this to the face's edges, round its holes too,
+        /// measured from the copy itself to the edges' exact curves.
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        #[walk(length = "Margin")]
+        #[walk(length = "Edge margin")]
         margin: Option<Expr>,
+        /// Geometry no copy may come near.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        avoid: Option<Box<Avoid>>,
         /// The copies stand on the other side of the face.
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         flip: bool,
@@ -3196,6 +3200,22 @@ pub enum PatternKind {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         attract: Option<Box<Attract>>,
     },
+}
+
+/// What a face pattern keeps its copies away from: points, faces and whole bodies, found again on
+/// each evaluation. A copy is left out when it comes within `margin` of one, measured from the
+/// copy itself on the exact geometry; with no margin, when it touches or overlaps one, or one
+/// holds the other.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, solidcraft_derive::Walk)]
+pub struct Avoid {
+    /// Fixed points, vertices, sketch points, construction points and faces.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub geometry: Vec<GeoRef>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub bodies: Vec<BodyName>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[walk(length = "Avoid margin")]
+    pub margin: Option<Expr>,
 }
 
 /// How a pattern's copies change with their distance to attractors: points, edges, faces or

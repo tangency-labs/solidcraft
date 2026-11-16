@@ -1112,9 +1112,13 @@ pub struct PatternFaceParams {
     /// The grid's turn on the face. Default: 0.
     #[serde(default)]
     pub angle: Option<AngleExpr>,
-    /// No copy nearer than this to the face's edges. Default: 0.
+    /// The edge margin: no copy nearer than this to the face's edges, round its holes too,
+    /// measured from the copy itself. Default: 0.
     #[serde(default)]
     pub margin: Option<LengthExpr>,
+    /// Geometry no copy may come near.
+    #[serde(default)]
+    pub avoid: Option<AvoidParams>,
     /// The copies stand on the other side of the face.
     #[serde(default)]
     pub flip: Option<bool>,
@@ -1131,6 +1135,23 @@ pub struct PatternFaceParams {
     pub attract: Option<AttractParams>,
     #[serde(flatten, deserialize_with = "feature_common")]
     pub common: FeatureCommon,
+}
+
+/// What a face pattern keeps its copies away from. A copy is left out when it comes within
+/// `margin` of one, measured from the copy itself; with no margin, when it touches or overlaps one.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct AvoidParams {
+    /// Fixed points ({"point": [x, y, z]}), vertices, sketch points, construction points and faces
+    /// ({"face": [x, y, z]}), followed as they move. Not edges: give the faces along one.
+    #[serde(default)]
+    pub geometry: Option<Vec<GeoRefParam>>,
+    /// Whole bodies, by name.
+    #[serde(default)]
+    pub bodies: Option<NameList>,
+    /// How near a copy may come. Default: 0.
+    #[serde(default)]
+    pub margin: Option<LengthExpr>,
 }
 
 /// How a face pattern's copies change with their distance to the nearest attractor: each value

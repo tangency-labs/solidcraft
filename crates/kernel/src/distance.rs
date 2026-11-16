@@ -196,6 +196,22 @@ fn settle(a: &DistanceShape, fa: Feature, b: &DistanceShape, fb: Feature, pb: Ve
     d.is_finite().then_some((d, p, q))
 }
 
+/// The distance between the boundaries of B-rep bodies `a` and `b`, on their exact faces and edges
+/// with no mesh: a bracket `[lower, upper]` that holds it, refined until it is at most `width`
+/// wide (relative to its upper end, absolute below 1) or the kernel's work runs out, when it can
+/// be wider. A body wholly inside the other is not told apart here (its boundary is apart from
+/// the other's): classify a point of it.
+pub fn boundary_gap(a: &Body, b: &Body, width: f64) -> Result<[f64; 2]> {
+    let unavailable = || crate::KernelError::Invalid("a boundary distance needs two B-rep bodies".into());
+    let (ka, _) = a.ops_body().ok_or_else(unavailable)?;
+    let (kb, _) = b.ops_body().ok_or_else(unavailable)?;
+    guard("boundary distance", || match ka.boundary_distance(kb, width) {
+        Ok(g) => Ok([g.lower, g.upper]),
+        Err(solidcore_ops::Error::ContactUndecided { lower, upper, .. }) => Ok([lower, upper]),
+        Err(e) => Err(crate::KernelError::Failed(format!("boundary distance: {e}"))),
+    })
+}
+
 /// The minimum distance between the bodies of `a` and `b`, when it may be within `limit` (mm;
 /// `f64::INFINITY` for any): `None` when the meshes show it is not. Overlapping bodies are not
 /// told apart from touching ones here (both give 0 or the distance between their surfaces):

@@ -1,11 +1,12 @@
 //! The Face type of the pattern dialog (`solid.pattern.face`): copies of bodies standing on a
-//! face, on a grid across it. Its attractors, which change each copy with its distance to
+//! face, on a grid across it, kept clear of the face's edges and of what the Avoid pick holds. Its
+//! attractors, which change each copy with its distance to
 //! points, sit behind the Advanced section: switching them on adds the Attractors pick and
 //! their near and far values.
 
 use serde_json::{Value, json};
 use solidcraft_engine::Sel;
-use solidcraft_engine::doc::{Attract, Falloff, Noise, PatternKind};
+use solidcraft_engine::doc::{Attract, Avoid, Falloff, Noise, PatternKind};
 
 use crate::SolveApp;
 use crate::dialogs::{Dialog, Kind, form_row, set_object_accepting};
@@ -16,6 +17,13 @@ use crate::ui_kit::{self, choice_row, expr_row, hint_row};
 /// the optional far set the values blend towards.
 pub(crate) const ATTRACTORS: &str = "Attractors";
 pub(crate) const FAR_ATTRACTORS: &str = "Far attractors";
+
+/// The pick for what no copy may come near.
+pub(crate) const AVOID: &str = "Avoid";
+
+/// What the copies may avoid: a vertex, a sketch or construction point, a face or a body. Not an
+/// edge: no exact distance from a body to an edge is measured yet.
+pub(crate) const AVOID_PICKS: selection::Accept = selection::VERTICES | selection::POINTS | selection::CONSTRUCTION_POINTS | FACES | BODIES;
 
 /// What an attractor may be: a vertex, a sketch or construction point, an edge, a face or a body.
 pub(crate) const ATTRACTOR_PICKS: selection::Accept =
@@ -48,6 +56,7 @@ pub struct Form {
     pub noise: usize,
     pub angle: String,
     pub margin: String,
+    pub avoid_margin: String,
     pub flip: bool,
     /// The instances go into a browser group (on by default).
     pub group: bool,
@@ -71,6 +80,8 @@ pub struct Form {
     pub saved_bodies: Vec<String>,
     pub saved_far_geometry: Vec<Value>,
     pub saved_far_bodies: Vec<String>,
+    pub saved_avoid_geometry: Vec<Value>,
+    pub saved_avoid_bodies: Vec<String>,
 }
 
 impl Default for Form {
@@ -84,6 +95,7 @@ impl Default for Form {
             noise: 1,
             angle: String::new(),
             margin: String::new(),
+            avoid_margin: String::new(),
             flip: false,
             group: true,
             attract: false,
@@ -102,12 +114,14 @@ impl Default for Form {
             saved_bodies: Vec::new(),
             saved_far_geometry: Vec::new(),
             saved_far_bodies: Vec::new(),
+            saved_avoid_geometry: Vec::new(),
+            saved_avoid_bodies: Vec::new(),
         }
     }
 }
 
 pub(crate) fn inputs() -> Vec<SelInput> {
-    vec![SelInput::new("Objects", BODIES, true), SelInput::new("Face", FACES, false)]
+    vec![SelInput::new("Objects", BODIES, true), SelInput::new("Face", FACES, false), SelInput::new(AVOID, AVOID_PICKS, true)]
 }
 
 /// The dialog for a new face pattern.
@@ -119,8 +133,10 @@ pub(crate) fn kind() -> Kind {
 pub(crate) fn draw(app: &SolveApp, d: &mut Dialog, ui: &mut egui::Ui) -> bool {
     // With far attractors, the near and far distances are hold zones round each set.
     let between = d.inputs.iter().any(|i| i.label == FAR_ATTRACTORS && !i.items.is_empty());
+    let avoiding = d.inputs.iter().any(|i| i.label == AVOID && !i.items.is_empty());
     let Kind::FacePattern(f) = &mut d.kind else { return false };
     let between = between || !f.saved_far_geometry.is_empty() || !f.saved_far_bodies.is_empty();
+    let avoiding = avoiding || !f.saved_avoid_geometry.is_empty() || !f.saved_avoid_bodies.is_empty();
     let doc = &app.session.doc;
     let mut enter = false;
     choice_row(ui, "Layout", "fp_layout", &mut f.layout, &["Grid", "Staggered", "Random"]);
@@ -133,7 +149,10 @@ pub(crate) fn draw(app: &SolveApp, d: &mut Dialog, ui: &mut egui::Ui) -> bool {
         enter |= crate::dialogs::quantity_row(ui, doc, "Quantity V", &mut f.count2);
         enter |= hint_row(ui, "Grid angle", &mut f.angle, "none");
     }
-    enter |= hint_row(ui, "Margin", &mut f.margin, "none");
+    enter |= hint_row(ui, "Edge margin", &mut f.margin, "none");
+    if avoiding {
+        enter |= hint_row(ui, "Avoid margin", &mut f.avoid_margin, "none");
+    }
     form_row(ui, "", |ui| {
         ui_kit::checkbox(ui, "Flip", &mut f.flip);
     });
@@ -211,24 +230,38 @@ pub(crate) fn params(app: &SolveApp, d: &Dialog) -> Result<Value, String> {
     if !f.group {
         p["group"] = json!(false);
     }
+    // One set of picks: geometry references and whole bodies; while nothing is picked, the set as
+    // saved.
+    let set = |label: &str, saved_geometry: &[Value], saved_bodies: &[String]| -> Result<(Vec<Value>, Vec<String>), String> {
+        let items = picks(label);
+        if items.is_empty() {
+            return Ok((saved_geometry.to_vec(), saved_bodies.to_vec()));
+        }
+        let mut geometry = Vec::new();
+        let mut bodies = Vec::new();
+        for sel in items {
+            match sel {
+                Sel::Body { name } => bodies.push(name.clone()),
+                other => geometry.push(crate::dialogs::construct_ref(app, other)?),
+            }
+        }
+        Ok((geometry, bodies))
+    };
+    let (avoid_geometry, avoid_bodies) = set(AVOID, &f.saved_avoid_geometry, &f.saved_avoid_bodies)?;
+    if !avoid_geometry.is_empty() || !avoid_bodies.is_empty() {
+        let mut a = json!({});
+        if !avoid_geometry.is_empty() {
+            a["geometry"] = json!(avoid_geometry);
+        }
+        if !avoid_bodies.is_empty() {
+            a["bodies"] = json!(avoid_bodies);
+        }
+        if !f.avoid_margin.trim().is_empty() {
+            a["margin"] = json!(f.avoid_margin.trim());
+        }
+        p["avoid"] = a;
+    }
     if f.attract {
-        // One set: the picks split into geometry references and whole bodies; while nothing is
-        // picked, the set as saved.
-        let set = |label: &str, saved_geometry: &[Value], saved_bodies: &[String]| -> Result<(Vec<Value>, Vec<String>), String> {
-            let items = picks(label);
-            if items.is_empty() {
-                return Ok((saved_geometry.to_vec(), saved_bodies.to_vec()));
-            }
-            let mut geometry = Vec::new();
-            let mut bodies = Vec::new();
-            for sel in items {
-                match sel {
-                    Sel::Body { name } => bodies.push(name.clone()),
-                    other => geometry.push(crate::dialogs::construct_ref(app, other)?),
-                }
-            }
-            Ok((geometry, bodies))
-        };
         let (geometry, bodies) = set(ATTRACTORS, &f.saved_geometry, &f.saved_bodies)?;
         if geometry.is_empty() && bodies.is_empty() {
             return Err("select the attractors, or switch Attractors off".into());
@@ -267,7 +300,7 @@ pub(crate) fn params(app: &SolveApp, d: &Dialog) -> Result<Value, String> {
 
 /// The dialog's values for a saved face pattern.
 pub(crate) fn form_of(pattern: &PatternKind) -> Option<Form> {
-    let PatternKind::Face { face, count1, count2, staggered, random, angle, margin, flip, anchor: _, attract } = pattern else { return None };
+    let PatternKind::Face { face, count1, count2, staggered, random, angle, margin, avoid, flip, anchor: _, attract } = pattern else { return None };
     let s = |e: &Option<solidcraft_engine::doc::Expr>| e.as_deref().map(str::to_string).unwrap_or_default();
     let mut f = Form {
         count1: count1.to_string(),
@@ -289,6 +322,11 @@ pub(crate) fn form_of(pattern: &PatternKind) -> Option<Form> {
             Noise::Pink => 2,
             Noise::Brown => 3,
         };
+    }
+    if let Some(Avoid { geometry, bodies, margin }) = avoid.as_deref() {
+        f.saved_avoid_geometry = geometry.iter().filter_map(|g| serde_json::to_value(g).ok()).collect();
+        f.saved_avoid_bodies = bodies.iter().map(|b| b.0.clone()).collect();
+        f.avoid_margin = s(margin);
     }
     if let Some(a) = attract.as_deref() {
         let Attract {
