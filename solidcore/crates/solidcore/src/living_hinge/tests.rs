@@ -514,3 +514,39 @@ fn the_box_of_a_half_disc_holds_its_top() {
     assert!(close(b.u_min, -2.0) && close(b.u_max, 2.0));
     assert!(close(b.v_min, 0.0) && close(b.v_max, 2.0));
 }
+
+#[test]
+fn a_slot_over_a_narrow_hole_runs_out_through_one_side_only() {
+    use SlotKind::*;
+    // One row (v 1.5, anchored so slot 0 is centred at u 31.5), a 3 mm hole at u 30..33: slot 0
+    // holds both of the hole's crossings at delta 1.5 each. Two run-outs would end 0.2 apart in the
+    // hole (critique B1); the lower one runs out and the other piece keeps rho = 1.4 from u 33.
+    let s = spec(HingeClip::RunOut, 3.0);
+    let b = FrameBox {
+        u_min: 0.0,
+        u_max: 60.0,
+        v_min: 0.0,
+        v_max: 3.0,
+    };
+    let lattice = Lattice::anchored(&s, &b, (31.5, 1.5)).unwrap();
+    assert_eq!(lattice.rows, (0, 0));
+    let open = |lo: f64, hi: f64| RowSpan {
+        lo,
+        hi,
+        lo_open: true,
+        hi_open: true,
+        lo_chain: None,
+        hi_chain: None,
+    };
+    let got = plan_rows(&s, &lattice, |_, _| vec![open(0.0, 30.0), open(33.0, 60.0)]);
+    assert_ends(
+        &row_ends(&got, 0),
+        &[
+            (-1.4, 18.4, RunOut),
+            (21.6, 31.4, RunOut),
+            (34.4, 41.4, Shortened),
+            (44.6, 61.4, RunOut),
+        ],
+    );
+    assert_eq!(got.left_out, 0);
+}

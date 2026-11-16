@@ -68,10 +68,12 @@ pub fn plan_rows_zoned(
     for k in first..=last {
         let mut pieces = Vec::new();
         let keep_out = zone(k, lattice.row_v(k));
-        for span in row_spans(k) {
+        let claims = one_claim_per_slot(spec, lattice, k, &row_spans);
+        for (i, span) in row_spans(k).iter().enumerate() {
             let (j0, j1) = lattice.slots_meeting(k, span.lo, span.hi);
             for j in j0..=j1 {
-                match plan_slot(spec, lattice, k, j, span, &row_spans) {
+                let run = |side: Side| claims.contains(&(j, i, side));
+                match plan_slot(spec, lattice, k, j, span, (run(Side::Lo), run(Side::Hi))) {
                     Some(slot) => {
                         let cut = cut_by_zone(&slot, &keep_out);
                         if cut.is_empty() {
@@ -158,17 +160,17 @@ fn runs_out<'a>(
     })
 }
 
-fn plan_slot<'a>(
+/// The open ends of `span` that lattice slot `(k, j)` claims to run out through (design 6.6
+/// rule 2). A slot that would run out at both ends of one span would cut the span's material loose
+/// (critique B1): it claims neither and keeps material at both.
+fn run_claims<'a>(
     spec: &LivingHingeSpec,
     lattice: &Lattice,
     k: i64,
     j: i64,
     span: &RowSpan,
     row_spans: &impl Fn(i64) -> &'a [RowSpan],
-) -> Option<HingeSlot> {
-    let r = spec.radius();
-    let reach_open = spec.edge_reach();
-    let reach_closed = r + spec.margin;
+) -> (bool, bool) {
     let (a0, a1) = lattice.line(k, j);
     let holds = |x: f64| a0 <= x && x <= a1;
     let may_run = spec.clip == HingeClip::RunOut;
@@ -180,13 +182,64 @@ fn plan_slot<'a>(
         && span.hi_open
         && holds(span.hi)
         && runs_out(lattice, k, Side::Hi, span.hi, span.hi_chain, row_spans);
-    // A slot that would run out at both ends of one span would cut the span's material loose
-    // (critique B1): it runs out at neither and keeps material at both.
-    let (run_lo, run_hi) = if run_lo && run_hi {
+    if run_lo && run_hi {
         (false, false)
     } else {
         (run_lo, run_hi)
-    };
+    }
+}
+
+/// The run-outs of row `k` as `(j, span index, side)`, at most one per lattice slot (critique B1
+/// across spans): a slot that claims open ends of two spans, across a hole or a neck, runs out
+/// only through the one nearest its centre (the lower on a tie) and keeps out of `Z_o` at the
+/// others, so it cuts no piece loose and leaves no two tools of one slot meeting in a narrow hole.
+fn one_claim_per_slot<'a>(
+    spec: &LivingHingeSpec,
+    lattice: &Lattice,
+    k: i64,
+    row_spans: &impl Fn(i64) -> &'a [RowSpan],
+) -> Vec<(i64, usize, Side)> {
+    // (j, span index, side, |c - x|) in order of j, then of u.
+    let mut all: Vec<(i64, usize, Side, f64)> = Vec::new();
+    for (i, span) in row_spans(k).iter().enumerate() {
+        let (j0, j1) = lattice.slots_meeting(k, span.lo, span.hi);
+        for j in j0..=j1 {
+            let (lo, hi) = run_claims(spec, lattice, k, j, span, row_spans);
+            let c = lattice.centre(k, j);
+            if lo {
+                all.push((j, i, Side::Lo, (c - span.lo).abs()));
+            }
+            if hi {
+                all.push((j, i, Side::Hi, (c - span.hi).abs()));
+            }
+        }
+    }
+    all.sort_by_key(|claim| claim.0);
+    let mut out: Vec<(i64, usize, Side)> = Vec::new();
+    for group in all.chunk_by(|a, b| a.0 == b.0) {
+        let best = group
+            .iter()
+            .fold(None::<&(i64, usize, Side, f64)>, |best, claim| match best {
+                Some(b) if b.3 <= claim.3 => Some(b),
+                _ => Some(claim),
+            });
+        out.extend(best.map(|claim| (claim.0, claim.1, claim.2)));
+    }
+    out
+}
+
+fn plan_slot(
+    spec: &LivingHingeSpec,
+    lattice: &Lattice,
+    k: i64,
+    j: i64,
+    span: &RowSpan,
+    (run_lo, run_hi): (bool, bool),
+) -> Option<HingeSlot> {
+    let r = spec.radius();
+    let reach_open = spec.edge_reach();
+    let reach_closed = r + spec.margin;
+    let (a0, a1) = lattice.line(k, j);
     let lo_limit = span.lo
         + if span.lo_open {
             reach_open
