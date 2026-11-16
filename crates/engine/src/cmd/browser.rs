@@ -1647,7 +1647,7 @@ fn redefine_sketch(s: &mut Session, p: &Value) -> Result<Value> {
             _ => None,
         })
         .cloned();
-    let plane = super::sketch::plane_ref(&trial, p, cmd)?;
+    let plane = super::sketch::plane_ref_numbers(&trial, p, cmd)?;
     if super::sketch::face::is_face(p) {
         super::sketch::face::capture_positions(&mut trial, &plane)?;
     }

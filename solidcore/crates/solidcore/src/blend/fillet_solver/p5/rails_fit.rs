@@ -45,7 +45,7 @@ use crate::topology::{edge, edgeuse::p1 as eu, Brep, EdgeId, FaceId};
 
 /// What [`FilletSolver::rails_fit_their_faces_judged_with_ops`] finds of a solver's rails
 /// (the fork's `RailsFitTheirFaces(rbFit, rbRollsOver, rbIntoMaterial)`).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 #[allow(clippy::struct_excessive_bools)] // the fork's three out-flags and one judgement of the same run
 pub struct RailsFit {
     /// `rbFit`: every rail stays on its face (`false` = a rail leaves its face between
@@ -56,6 +56,11 @@ pub struct RailsFit {
     /// `rbIntoMaterial`: a rail that leaves its face runs on inside the body (judged only
     /// when asked; `false` otherwise).
     pub into_material: bool,
+    /// Not upstream (#10876): for each run of a rail off its face that makes `fit` false,
+    /// the edge it leaves the face across (`None` where it leaves at no classified edge, or
+    /// a rail nowhere on its face), in the order found: where the blend overflows, for the
+    /// blend corner's Roll-over's second pass to tell an overflow across the cliff at V.
+    pub left_across: Vec<Option<EdgeId>>,
     /// Not the fork's (tangency-labs/solidcore#2175): a closed rail leaves its face past
     /// one end of the filleted edge and comes back onto it past the other, round the far
     /// side of the rail. The face is smaller than the blend beyond both ends, not cut off
@@ -417,6 +422,7 @@ impl FilletSolver {
         let mut fit = true;
         let mut rolls_over = false;
         let mut into_material = false;
+        let mut left_across = Vec::new();
         let mut wraps_past_both_ends = false;
         // the filleted edge (a rail that leaves its face across it is not leaving past a cliff)
         let filleted = match solver.solver().edgeuse(0)? {
@@ -432,6 +438,7 @@ impl FilletSolver {
                     fit: true,
                     rolls_over: false,
                     into_material: false,
+                    left_across: Vec::new(),
                     wraps_past_both_ends: false,
                 });
             }
@@ -577,6 +584,7 @@ impl FilletSolver {
                         }
                     }
                     fit = false;
+                    left_across.push(side);
                     // only a run that is itself judged off its face (not one passed over
                     // above as trimmed, tangent at the filleted edge or rolled over)
                     if wraps {
@@ -597,6 +605,7 @@ impl FilletSolver {
                 }
                 if !on_face {
                     fit = false;
+                    left_across.push(None);
                     if judge_material {
                         // the rail's point nearest the middle of the filleted edge
                         let fil_eu = solver.solver().edgeuse(0)?.ok_or_else(|| {
@@ -637,6 +646,7 @@ impl FilletSolver {
             fit,
             rolls_over,
             into_material,
+            left_across,
             wraps_past_both_ends,
         })
     }

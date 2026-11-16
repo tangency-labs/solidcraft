@@ -22,8 +22,10 @@
 //!   other edge's curve over the same interval (the fork's
 //!   `sm_CopyUVTrimCurvesOfOtherFace`). Curves have no mates here, so "a copy of its
 //!   curve" is checked as the same points and first derivatives at the interval's ends
-//!   and middle (a full circle run the other way can have the same three points). Upstream
-//!   (and the default) builds the face without them.
+//!   and middle: the points alone cannot tell a closed curve from the same curve run
+//!   the other way round (a circle's ends and middle are the same points either way),
+//!   and a trim copied onto the reversed curve runs backwards along its edge use
+//!   (#17285). Upstream (and the default) builds the face without them.
 //! - Operands, mates and notification storage are borrowed explicitly, as in
 //!   [`p1`] and [`p5`](super::p5); arena ids replace pointers.
 //!   `MergeEdge` and `MakeFaceuse` work on concrete [`Brep`] operands and the
@@ -1009,8 +1011,9 @@ pub fn make_faceuse_attempt_with(
 /// `other_fu`, the UV trim curves of the other edge uses they stand for. A trim is
 /// parameterised by its edge's curve on its face's surface, so it stays exact where
 /// the new edge is the primary mate of the other edge, runs on a copy of its curve
-/// (the same points and first derivatives at its interval's ends and middle: a full
-/// circle run the other way can have the same three points) over the same interval, and the
+/// (the same points and first derivatives at its interval's ends and middle: a closed
+/// curve run the other way round has the same points there, its derivatives reversed)
+/// over the same interval, and the
 /// new face lies on the copy `MakeFaceuse` made of the other face's surface (always,
 /// here). The new face's face use of the other face use's orientation lists its edge
 /// uses in the other's order (as `MakeFace` assigns `cpOptUVCurves`). Elsewhere the
@@ -1073,15 +1076,18 @@ fn copy_uv_trim_curves_of_other_face(
         else {
             continue;
         };
-        // (MergeEdge's copy of the other edge's curve: the same points and first derivatives)
+        // (MergeEdge's copy of the other edge's curve: the same points and first
+        // derivatives; the points alone take a closed curve run the other way round, whose
+        // ends and middle are the same points, for a copy)
         let mut same = other_curve.dim() == new_curve.dim()
             && other_curve.natural_interval() == new_curve.natural_interval();
         for t in [interval.min(), interval.mid(), interval.max()] {
             if !same {
                 break;
             }
-            same = other_curve.evaluate(k, t, 1, false, false)?
-                == new_curve.evaluate(k, t, 1, false, false)?;
+            let from_left = interval.t_left_eval(t);
+            same = other_curve.evaluate(k, t, 1, from_left, false)?
+                == new_curve.evaluate(k, t, 1, from_left, false)?;
         }
         if !same {
             continue;
