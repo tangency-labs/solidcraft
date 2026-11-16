@@ -85,8 +85,11 @@ engine.describe                   the command registry itself
 explode.delete                    exploded views: display offsets
 explode.list                      exploded views: display offsets
 expr.evaluate                     expression evaluation
+file.gerber_files                 a listing of a board's files: crates/engine/src/cmd/board_import_tests.rs
 file.gpg_keys                     GnuPG key listing: tested in crates/engine/src/gpg.rs tests
+file.import                       opens a file through an importer plugin: tested in crates/engine/src/plugin/tests.rs
 file.import_cache_clear           clears a cache of imported files
+file.insert_gerber                board import, tested in crates/engine/src/cmd/board_import_tests.rs
 file.open_in_easyprint            hands the file to another program
 file.save                         saving the design
 file.save_as                      saving the design
@@ -282,6 +285,7 @@ sketch.constraint.concentric      2D sketch only (the sketch solver and engine t
 sketch.constraint.curvature       2D sketch only (the sketch solver and engine tests); no kernel operation
 sketch.constraint.equal           2D sketch only (the sketch solver and engine tests); no kernel operation
 sketch.constraint.midpoint        2D sketch only (the sketch solver and engine tests); no kernel operation
+sketch.constraint.on_plane        3D sketch solve only (the 3D solver and engine tests, sketch_3d_frame_tests.rs); no kernel operation
 sketch.constraint.parallel        2D sketch only (the sketch solver and engine tests); no kernel operation
 sketch.constraint.perpendicular   2D sketch only (the sketch solver and engine tests); no kernel operation
 sketch.constraint.polygon         2D sketch only (the sketch solver and engine tests); no kernel operation
@@ -367,6 +371,7 @@ timeline.play                     plays the history back in the view: no new geo
 timeline.rename                   a feature name
 timeline.rename_group             a group name
 ui.assistant                      the view: camera, layout, display
+ui.dialog_ok                      the view: runs OK of the open feature dialog; tested in crates/engine/src/cmd/edit_tests.rs and crates/ui-egui/src/dialogs.rs
 ui.palette                        the view: the command search; tested in crates/ui-egui/src/keymap.rs
 ui.toggle_visibility              the view: hides what the app has selected; tested in crates/ui-egui/src/keymap.rs
 view.ambient_occlusion            the view: camera, layout, display
@@ -393,6 +398,7 @@ view.next_tab                     the view: camera, layout, display
 view.normal_to                    the view: camera, layout, display
 view.origin_axes_across_view       display-only preference: crates/engine/src/cmd/view_navigation.rs and crates/ui-egui/src/view_home_tests.rs
 view.perspective                  the view: camera, layout, display
+view.pick                         read-only ray pick, no geometry made: tested in crates/engine/src/cmd/view_pick.rs and solidcore/crates/solidcore-ops/tests/measure.rs
 view.previous_tab                 the view: camera, layout, display
 view.rename                       the view: camera, layout, display
 view.render_browser               the view: camera, layout, display

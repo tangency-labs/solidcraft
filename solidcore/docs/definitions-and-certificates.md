@@ -309,7 +309,11 @@ definition, rebuilds the span's Hermite rows H, bounds |B − H| on the net's pi
 and |H − S| by `gn_certify_span`, and refuses the net where the sum with one floor passes ε, where
 a piece runs across a station, or where a foot crosses a support's knot line between two stations.
 `recertify_faces` does this for every blend face of a body, as a body rebuilt from a record must be
-before its faces are operands.
+before its faces are operands. A kernel remembers each re-certification it finished
+(`Kernel::recertify_memo`, on with `memoize_curve_caches`), keyed on every bit of the blend's
+record and on the kernel's tolerances and fixes: a record read again on that kernel, its blend
+unchanged, gets the answer the proof gave, which is the answer running it again gives. Only a
+finished proof is kept, never a refusal or a cancel.
 
 ### 4.6 Worked example: a patch on a sphere
 
@@ -520,7 +524,8 @@ A reviewer checks each of these on a change that touches a definition, a net or 
    `CornerRecord`), every number as stored; an `ExactRoundRecord`'s chamfer sizes carry the
    section's sagitta (`ChamferRecord::sagitta`, written only when it is not 0, so a chamfer's
    record is as before). `convert::rebuild`, `exact_rebuild` and
-   `corner_rebuild` make the definition exactly and certify the net again before it is an operand.
+   `corner_rebuild` make the definition exactly and certify the net again before it is an operand
+   (or take the proof the kernel already finished for the same record, §4.5).
    A weld bead's foot blend is a record of its own kind (`FootBlendRecord`: supports, sides,
    leader and piece, legs, sagitta, spans, ends, tolerance, motions, net); `foot_blend_rebuild`
    makes it and compares the net with its rebuild, to rounding (invariant 9 does not hold for it

@@ -681,6 +681,313 @@ fn sphere_box_edge_cutting_a_shallow_cap() {
     assert!(failures.is_empty(), "{failures:#?}");
 }
 
+// ---- a box edge crossing a small sphere twice, farther apart than the tolerance ---------
+
+/// An r = 0.3 mm sphere and a box whose top face y = r - cap cuts a cap 1.6e-5 to 2.2e-5
+/// high off it and whose face z = -delta passes near the centre: the box edge along x
+/// where the two faces meet crosses the sphere twice, the crossings 1.4e-4 to 1.7e-4
+/// apart, each fixed to the intersection tolerance (5e-6). The proto-vertex capture
+/// distance (half the nearest vertex pair of either operand, here above the crossings'
+/// distance) took the two for one point: the arc between them became a loop on one vertex
+/// and the boolean gave the sphere alone, or "no radial sector of the edge takes the new
+/// edge use". Two points farther apart than their tolerances are two vertices
+/// (docs/booleans.md, "One point or two"): union, intersection and difference integrate
+/// to the exact volume (measured: within 1.1e-8 relative), have the faces, edges and
+/// vertices of the exact result, and check clean at Level2.
+#[test]
+fn sphere_box_edge_crossings_farther_apart_than_tolerance_are_two_vertices() {
+    let r: f64 = 3e-4;
+    let sphere = 4.0 / 3.0 * PI * r.powi(3);
+    let mut failures = Vec::new();
+    for (delta, cap) in [
+        (6e-5, 1.6e-5),
+        (6e-5, 1.8e-5),
+        (7e-5, 1.8e-5),
+        (7e-5, 2e-5),
+        (8e-5, 2e-5),
+        (8e-5, 2.2e-5),
+    ] {
+        // the box [-4e-4, 4e-4] x [-4e-4, r - cap] x [-4e-4, -delta]; its part of the
+        // sphere is `{z <= -delta} and {y <= r - cap}`, the corner volume with y and z
+        // exchanged
+        let size = [8e-4, r - cap + 4e-4, 4e-4 - delta];
+        let block = size[0] * size[1] * size[2];
+        let common = sphere_box_corner_volume(r, delta, -(r - cap));
+        // the half chord of the box edge in the sphere: the crossings are twice it apart
+        let apart = 2.0 * (r * r - (r - cap).powi(2) - delta * delta).sqrt();
+        assert!(
+            apart > 1.3e-4 && apart < 1.8e-4,
+            "crossings {apart:e} apart"
+        );
+        // Union: the box's six faces and the sphere; intersection and difference: the
+        // sphere's piece and the two box face pieces.
+        for (op, name, want, want_counts) in [
+            (Op::Union, "union", sphere + block - common, [7, 17, 12]),
+            (Op::Intersection, "intersection", common, [3, 5, 4]),
+            (Op::Difference, "difference", sphere - common, [3, 5, 4]),
+        ] {
+            let mut k = Kernel::default();
+            let a = api::create_sphere(&mut k, Point3::new(0.0, 0.0, 0.0), r).unwrap();
+            let b = api::create_box(
+                &mut k,
+                Point3::new(-4e-4, -4e-4, -4e-4),
+                size[0],
+                size[1],
+                size[2],
+            )
+            .unwrap();
+            let result = match op {
+                Op::Union => boolean_union(&mut k, a, b),
+                Op::Intersection => boolean_intersection(&mut k, a, b),
+                Op::Difference => boolean_difference(&mut k, a, b),
+            };
+            let mut brep = match result {
+                Ok(b) => b,
+                Err(e) => {
+                    failures.push(format!("delta {delta:e} cap {cap:e} {name}: {e}"));
+                    continue;
+                }
+            };
+            let store = AttributeStore::new();
+            let key_of = |_| ObjectKey(0);
+            let attrs = PropertyAttributes {
+                store: &store,
+                key_of: &key_of,
+            };
+            let v = brep_volume(&k, &mut brep, 1e-9, &attrs).unwrap();
+            let rel = (v - want).abs() / want;
+            // Written to accept: a NaN volume fails.
+            if rel.is_nan() || rel > VOLUME_REL_TOL {
+                failures.push(format!(
+                    "delta {delta:e} cap {cap:e} {name}: volume {v:e} vs {want:e} (rel {rel:.2e})"
+                ));
+            }
+            let counts = [
+                solidcore::topology::brep::p1::faces(&brep, None)
+                    .unwrap()
+                    .len(),
+                solidcore::topology::brep::p1::edges(&brep, None)
+                    .unwrap()
+                    .len(),
+                solidcore::topology::brep::p1::vertices(&brep, None)
+                    .unwrap()
+                    .len(),
+            ];
+            if counts != want_counts {
+                failures.push(format!(
+                    "delta {delta:e} cap {cap:e} {name}: faces/edges/vertices {counts:?} vs {want_counts:?}"
+                ));
+            }
+            let check = check_brep(&mut k, &mut brep, CheckLevel::Level2).unwrap();
+            if !check.is_valid() {
+                failures.push(format!(
+                    "delta {delta:e} cap {cap:e} {name}: Level2 {:?}",
+                    check.lines()
+                ));
+            }
+        }
+    }
+    assert!(failures.is_empty(), "{failures:#?}");
+}
+
+/// The area of the disc of radius `rho` about `(cx, cy)` inside the rectangle
+/// `[x0, x1] x [y0, y1]`: the chord `min(cy + s, y1) - max(cy - s, y0)` at each x,
+/// `s = sqrt(rho^2 - (x - cx)^2)`, integrated in closed form between the abscissae where
+/// the circle meets a side of the rectangle.
+fn disc_rect_area(rho: f64, c: [f64; 2], x: [f64; 2], y: [f64; 2]) -> f64 {
+    let (a, b) = (x[0].max(c[0] - rho), x[1].min(c[0] + rho));
+    if rho <= 0.0 || b <= a {
+        return 0.0;
+    }
+    // the integral of s from the centre to x
+    let half_disc = |x: f64| {
+        let t = ((x - c[0]) / rho).clamp(-1.0, 1.0);
+        0.5 * rho * rho * (t.asin() + t * (1.0 - t * t).sqrt())
+    };
+    let mut cuts = vec![a, b];
+    for h in [y[1] - c[1], c[1] - y[0]] {
+        if h > 0.0 && h < rho {
+            let w = (rho * rho - h * h).sqrt();
+            cuts.extend([c[0] - w, c[0] + w].into_iter().filter(|&v| v > a && v < b));
+        }
+    }
+    cuts.sort_by(f64::total_cmp);
+    let mut area = 0.0;
+    for w in cuts.windows(2) {
+        let &[u, v] = w else {
+            continue;
+        };
+        let m = 0.5 * (u + v);
+        let s = (rho * rho - (m - c[0]).powi(2)).max(0.0).sqrt();
+        if (c[1] + s).min(y[1]) - (c[1] - s).max(y[0]) <= 0.0 {
+            continue;
+        }
+        let arc = half_disc(v) - half_disc(u);
+        let top = if c[1] + s <= y[1] {
+            c[1] * (v - u) + arc
+        } else {
+            y[1] * (v - u)
+        };
+        let bottom = if c[1] - s >= y[0] {
+            c[1] * (v - u) - arc
+        } else {
+            y[0] * (v - u)
+        };
+        area += top - bottom;
+    }
+    area
+}
+
+/// `|sphere(c, r) ∩ box(o, o + d)|`, by the midpoint rule over slices in z of
+/// [`disc_rect_area`]; its error is far below the test's (5.424275463e-11 for the case
+/// below, as an adaptive quadrature to 1e-12 gives).
+fn sphere_box_volume(c: [f64; 3], r: f64, o: [f64; 3], d: [f64; 3]) -> f64 {
+    let (z0, z1) = ((c[2] - r).max(o[2]), (c[2] + r).min(o[2] + d[2]));
+    if z1 <= z0 {
+        return 0.0;
+    }
+    let n = 200_000;
+    let h = (z1 - z0) / f64::from(n);
+    (0..n)
+        .map(|i| {
+            let z = z0 + (f64::from(i) + 0.5) * h;
+            let rho = (r * r - (z - c[2]).powi(2)).max(0.0).sqrt();
+            disc_rect_area(rho, [c[0], c[1]], [o[0], o[0] + d[0]], [o[1], o[1] + d[1]])
+        })
+        .sum::<f64>()
+        * h
+}
+
+/// `gen0150` of the golden unit `boolean.api_brep` turned a quarter turn about x, so that
+/// the sphere's seam is away from the box's side face: a sphere of radius 3.06e-4 (inside
+/// out as given) and a 7.5e-4 x 1.44e-3 x 3.9e-4 box whose edge crosses it twice, the two
+/// crossings 1.7e-4 apart. Taken for one point by the capture distance, the union came
+/// out empty and the intersection and the difference were refused ("no radial sector of
+/// the edge takes the new edge use"). As two vertices the three results integrate to the
+/// exact volumes (measured: within 1.3e-7 relative), with the faces, edges and vertices of
+/// the exact result, every vertex on the sphere or the box within its tolerance, and the
+/// box edge's two crossings, each on the sphere and on the edge's two faces, 1.7e-4 apart.
+/// The Level2 check is not asserted: it reports the circles' own STEP-to-NURB test at this
+/// size (`SmEllipse` test 1, 5e-10 against 1e-10), on the operands' circles as on the
+/// results'.
+#[test]
+fn a_tiny_sphere_and_a_box_whose_edge_crosses_it_twice_give_exact_volumes() {
+    use solidcore::topology::vertex;
+    let c = [
+        0.000_540_068_099_454_042_4,
+        -0.000_116_855_468_417_464_12,
+        0.001_078_936_931_531_837_3,
+    ];
+    let r = -0.000_306_149_591_313_848_4_f64;
+    let o = [
+        0.000_213_119_293_820_846_02,
+        -0.001_265_085_547_303_017_4,
+        0.000_664_385_071_073_306_7,
+    ];
+    let d = [
+        0.000_751_644_731_134_943_5,
+        0.001_441_225_834_284_898_7,
+        0.000_394_815_843_801_023_2,
+    ];
+    let sphere = 4.0 / 3.0 * PI * r.abs().powi(3);
+    let block = d[0] * d[1] * d[2];
+    let common = sphere_box_volume(c, r.abs(), o, d);
+    assert!((common - 5.424_275_463e-11).abs() < 1e-19, "{common:e}");
+    let mut failures = Vec::new();
+    // how far `p` is from the sphere, and on how many of the box's six planes it lies within
+    // `tol` (inside the box's slab on the others)
+    let from_sphere = |p: Point3| (p - Point3::new(c[0], c[1], c[2])).length() - r.abs();
+    let box_planes = |p: Point3, tol: f64| {
+        let q = [p.x, p.y, p.z];
+        let mut on = 0;
+        for i in 0..3 {
+            let (lo, hi) = (o[i], o[i] + d[i]);
+            if q[i] < lo - tol || q[i] > hi + tol {
+                return None;
+            }
+            on += usize::from((q[i] - lo).abs() <= tol) + usize::from((q[i] - hi).abs() <= tol);
+        }
+        Some(on)
+    };
+    for (op, name, want, want_counts) in [
+        // the exact result's: union the box's six faces and the sphere; intersection and
+        // difference the sphere's piece and the two box face pieces about the crossed edge
+        (Op::Union, "union", sphere + block - common, [7, 17, 12]),
+        (Op::Intersection, "intersection", common, [3, 5, 4]),
+        (Op::Difference, "difference", sphere - common, [3, 5, 4]),
+    ] {
+        let mut k = Kernel::default();
+        let a = api::create_sphere(&mut k, Point3::new(c[0], c[1], c[2]), r).unwrap();
+        let b = api::create_box(&mut k, Point3::new(o[0], o[1], o[2]), d[0], d[1], d[2]).unwrap();
+        let result = match op {
+            Op::Union => boolean_union(&mut k, a, b),
+            Op::Intersection => boolean_intersection(&mut k, a, b),
+            Op::Difference => boolean_difference(&mut k, a, b),
+        };
+        let mut brep = match result {
+            Ok(b) => b,
+            Err(e) => {
+                failures.push(format!("{name}: {e}"));
+                continue;
+            }
+        };
+        let store = AttributeStore::new();
+        let key_of = |_| ObjectKey(0);
+        let attrs = PropertyAttributes {
+            store: &store,
+            key_of: &key_of,
+        };
+        let v = brep_volume(&k, &mut brep, 1e-9, &attrs).unwrap();
+        let rel = (v - want).abs() / want;
+        // Written to accept: a NaN volume fails.
+        if rel.is_nan() || rel > VOLUME_REL_TOL {
+            failures.push(format!("{name}: volume {v:e} vs {want:e} (rel {rel:.2e})"));
+        }
+        let counts = [
+            solidcore::topology::brep::p1::faces(&brep, None)
+                .unwrap()
+                .len(),
+            solidcore::topology::brep::p1::edges(&brep, None)
+                .unwrap()
+                .len(),
+            solidcore::topology::brep::p1::vertices(&brep, None)
+                .unwrap()
+                .len(),
+        ];
+        if counts != want_counts {
+            failures.push(format!(
+                "{name}: faces/edges/vertices {counts:?} vs {want_counts:?}"
+            ));
+        }
+        // every vertex on the sphere or the box; the crossings on both, on two box faces
+        let mut crossings = Vec::new();
+        for v in solidcore::topology::brep::p1::vertices(&brep, None).unwrap() {
+            let (p, tol) = (
+                vertex::point(&brep, v).unwrap(),
+                vertex::tolerance(&brep, v).unwrap(),
+            );
+            let on_sphere = from_sphere(p).abs() <= tol;
+            let planes = box_planes(p, tol);
+            if !on_sphere && planes.is_none_or(|n| n == 0) {
+                failures.push(format!(
+                    "{name}: vertex {p:?} (tol {tol:e}) on neither body"
+                ));
+            }
+            if on_sphere && planes == Some(2) {
+                crossings.push(p);
+            }
+        }
+        let apart = match crossings.as_slice() {
+            [p, q] => (*p - *q).length(),
+            _ => f64::NAN,
+        };
+        if !(1.6e-4..1.8e-4).contains(&apart) {
+            failures.push(format!("{name}: crossings {crossings:?}"));
+        }
+    }
+    assert!(failures.is_empty(), "{failures:#?}");
+}
+
 /// A closed ellipse of semi-axes `b` (along x) and `a` (along y) about `(0, a)`, as the one
 /// rational B-spline of its four quarters (nine control points, knots 0..4), starting at the
 /// end of the major axis on +y and running counter-clockwise.

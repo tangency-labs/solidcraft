@@ -388,6 +388,7 @@ impl FilletSession<'_> {
                 vertex_point,
                 edge_mid,
                 solver_tol,
+                solver_tol,
                 &mut note,
             );
             for (slot, f) in entry.iter_mut().zip(faces) {

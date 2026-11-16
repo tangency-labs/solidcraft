@@ -4,6 +4,52 @@ use serde_json::json;
 use solidcraft_engine::Sel;
 use solidcraft_engine::geom::MeshGeom;
 
+/// A completed unground command shows both lost-origin and conflicting-joint reports, even
+/// when the part stays where it was. The saved language applies outside a rendered frame too.
+#[test]
+fn unground_joint_issues_reach_status_and_messages_in_the_saved_language() {
+    let mut h = Harness::new();
+    let occurrence = h.app.run("component.create", json!({"name":"Part"})).unwrap()["occurrence"].as_u64().unwrap();
+    for language in ["en", "ja"] {
+        h.app.preferences.language = language.into();
+        h.app.session.log.clear();
+        h.app.messages.clear();
+        h.app.status = None;
+        let reply = json!({
+            "occurrence": occurrence, "grounded": false, "moved": [],
+            "errors": [{"joint": 10, "name": "Foot joint", "why": "the face no longer exists"}],
+            "conflicts": [{"joint": 11, "name": "Brace joint", "why": "the other joints give a different placement"}]
+        });
+        assert_eq!(h.app.command_completed("occurrence.ground", Ok(reply.clone())).unwrap(), reply);
+        let locale = solidcraft_ui_text::Locale::for_language(language);
+        let expected: Vec<String> = [("Foot joint", "the face no longer exists"), ("Brace joint", "the other joints give a different placement")]
+            .iter()
+            .map(|(joint, reason)| locale.format("joint.unground_issue", &[("occurrence", "Part:1"), ("joint", joint), ("reason", reason)]))
+            .collect();
+        assert_eq!(h.app.session.log.iter().skip(1).collect::<Vec<_>>(), expected.iter().collect::<Vec<_>>());
+        assert_eq!(h.app.messages.iter().map(|m| (&m.text, m.error)).collect::<Vec<_>>(), expected.iter().map(|m| (m, false)).collect::<Vec<_>>());
+        assert_eq!(h.app.status.as_ref().map(|(text, _, error)| (text, *error)), expected.last().map(|text| (text, false)));
+        assert!(!expected[0].contains("joint.unground_issue"), "the pending message must be embedded");
+    }
+}
+
+/// An unchanged part is normal when no joint needs to move it. Grounding does not show the
+/// unground notice, even when the assembly already has an unrelated joint issue.
+#[test]
+fn unchanged_or_grounded_occurrences_do_not_show_an_unground_issue() {
+    let mut h = Harness::new();
+    for reply in [
+        json!({"occurrence": 1, "grounded": false, "moved": [], "errors": [], "conflicts": []}),
+        json!({"occurrence": 1, "grounded": true, "errors": [{"joint": 2, "name": "Other", "why": "lost origin"}], "conflicts": []}),
+    ] {
+        h.app.messages.clear();
+        h.app.status = None;
+        h.app.command_completed("occurrence.ground", Ok(reply)).unwrap();
+        assert!(h.app.messages.iter().next().is_none());
+        assert!(h.app.status.is_none());
+    }
+}
+
 /// A new component lists its own expandable Origin in the Browser: the design's Origin stays
 /// closed when the component's opens, and all seven items carry their rows and handles (#7313).
 #[test]
@@ -21,6 +67,56 @@ fn new_component_has_its_own_origin_folder() {
         assert!(crate::scenario::rect_of(&format!("row_label:o:{occurrence}/origin/{item}")).is_some(), "missing component origin label {item}");
     }
     assert!(!h.app.tree.expanded.contains("origin"), "opening the component origin must not open the design origin");
+}
+
+/// #15658: a part's Origin is off by default, yet hovering its rows in the Browser shows each
+/// item where the part is placed, and only while hovered: the folder's eye, the saved visibility
+/// and the pick lists stay as they were. With the preference off, an axis or point row sets no
+/// hover.
+#[test]
+fn hovering_a_parts_hidden_origin_rows_shows_them_where_the_part_is() {
+    use crate::viewport::HoveredOrigin;
+    use solidcore_record::Vec3;
+    let mut h = Harness::new();
+    let created = h.app.run("component.create", json!({"name":"Part","grounded":false})).unwrap();
+    let occurrence = created["occurrence"].as_u64().unwrap();
+    h.app.run("occurrence.move", json!({"occurrence":occurrence,"translate":[60,40,0]})).unwrap();
+    h.frames(3);
+    h.step(&json!({"click":{"handle":format!("fold:occurrence:{occurrence}")}})).unwrap();
+    h.step(&json!({"click":{"handle":format!("fold:o:{occurrence}/origin")}})).unwrap();
+    let shown = h.app.session.visibility.shown_component_origins.clone();
+    assert!(crate::viewport::construction_points(&h.app).is_empty(), "the part's Origin is off");
+    let at = Vec3::new(60., 40., 0.);
+    for item in ["O", "X", "XY"] {
+        let key = solidcraft_engine::origins::key(&[occurrence], item);
+        let row = crate::scenario::handle_at(&format!("row:{key}")).expect("the origin row");
+        h.call("ui.move", json!({"x": row.x, "y": row.y}));
+        assert_eq!(h.app.viewport.hover_origin.as_deref(), Some(key.as_str()), "{item}: its row is hovered");
+        let (name, shown_item) = crate::viewport::hovered_hidden_origin(&h.app).expect("drawn for the hover");
+        assert_eq!(name, key);
+        // The placement only moves the part, so its Origin's items are the design's, moved.
+        match (item, shown_item) {
+            ("O", HoveredOrigin::Point(p)) => assert_eq!(p, at),
+            ("X", HoveredOrigin::Axis { origin, dir, .. }) => assert_eq!((origin, dir), (at, Vec3::X)),
+            ("XY", HoveredOrigin::Plane(q)) => {
+                assert_eq!(q[0], at, "{q:?}");
+                assert!(q.iter().all(|c| c.z == 0.0), "in the XY plane: {q:?}");
+            }
+            (item, other) => panic!("{item}: {other:?}"),
+        }
+        assert_eq!(h.app.session.visibility.shown_component_origins, shown, "{item}: the folder stays off");
+        assert!(crate::viewport::construction_quads(&h.app).iter().all(|(n, _, _)| !n.contains("/origin/")), "{item}: not pickable");
+    }
+    // The pointer off the Browser: nothing is drawn for the part's Origin.
+    h.call("ui.move", json!({"x": 900.0, "y": 400.0}));
+    assert_eq!(crate::viewport::hovered_hidden_origin(&h.app), None);
+    // Preference off: an axis row under the pointer sets no hover, as before.
+    h.app.preferences.browser_hover_shows_origin = false;
+    let key = solidcraft_engine::origins::key(&[occurrence], "X");
+    let row = crate::scenario::handle_at(&format!("row:{key}")).expect("the X row");
+    h.call("ui.move", json!({"x": row.x, "y": row.y}));
+    assert_eq!(h.app.viewport.hover_origin, None);
+    assert_eq!(h.app.viewport.hover_plane, None, "an axis row lights no plane");
 }
 
 /// A sketch started on a shown component origin plane follows the component: after an

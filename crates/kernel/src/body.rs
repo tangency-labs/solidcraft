@@ -148,7 +148,7 @@ impl DisplayShare {
 /// transforms take it): positions, normals and edge polylines move, everything indexed stays.
 /// `None` for anything but a rotation and translation (a reflection would turn the triangles
 /// inside out).
-fn placed_mesh(m: &Mesh, t: &[[f64; 4]; 4]) -> Option<Mesh> {
+pub fn placed_mesh(m: &Mesh, t: &[[f64; 4]; 4]) -> Option<Mesh> {
     let r = |v: Vec3, w: f64| {
         Vec3::new(
             t[0][0] * v.x + t[1][0] * v.y + t[2][0] * v.z + w * t[3][0],
@@ -292,6 +292,8 @@ pub struct FaceInfo {
 /// How closely [`Body::mesh`] follows the exact surfaces, and the facet angle a viewport draws
 /// at: the mesher's own (solidcore-tess).
 pub use solidcore_tess::{DISPLAY_ANGLE, MeshTolerance};
+/// How [`Body::export_mesh`] meshes (the mesh path's spec and its default smallest angle), and what it reports.
+pub use solidcore_tess::{MESH_MIN_ANGLE, MeshSpec, PlanStats};
 
 pub(crate) fn v3(p: [f64; 3]) -> Vec3 {
     Vec3::new(p[0], p[1], p[2])
@@ -387,6 +389,23 @@ pub struct Refusal {
     pub why: String,
     /// The reason is a panic the wrapper caught, not a refusal ([`KernelError::Internal`]).
     pub internal: bool,
+}
+
+/// Where a ray first meets a body ([`Body::fire_ray`]).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct RayPick {
+    /// The face it meets, by its index in the record (0 for a mesh body).
+    pub face: usize,
+    /// The edge it meets, when it passes through one.
+    pub edge: Option<usize>,
+    /// The vertex it meets, when it passes through one.
+    pub vertex: Option<usize>,
+    /// The point on the ray.
+    pub point: Vec3,
+    /// The face's outward unit normal there.
+    pub normal: Vec3,
+    /// The distance from the ray's origin to the point.
+    pub depth: f64,
 }
 
 /// Where a point lies against a body ([`Body::classify_point`]).
@@ -1200,6 +1219,23 @@ impl Body {
         self.flagged(solidcraft_geom::tess::EvaluateMesh::evaluate_mesh(plan))
     }
 
+    /// The body meshed on the mesh path (solidcore-tess's `mesh`) to `spec`, with what it reported
+    /// about the faces: for export, never the viewport ([`Body::mesh`]). Strict: a face it cannot
+    /// mesh or evaluate is an error naming it. A mesh body gives its own triangles.
+    pub fn export_mesh(&self, spec: &MeshSpec) -> Result<(Mesh, PlanStats)> {
+        crate::profile::timed(crate::profile::Kind::Tessellate, "export_mesh", || {
+            if let Some(m) = &self.mesh {
+                return Ok((m.to_mesh(), PlanStats::default()));
+            }
+            let (plan, stats) = guard("export mesh", || solidcore_tess::mesh(&self.record, spec, self.size(), None).map_err(KernelError::from))?;
+            let (mesh, refused) = plan.evaluate();
+            match refused.first() {
+                Some(f) => Err(KernelError::Failed(format!("mesh: face {}: {}", f.face, f.reason))),
+                None => Ok((mesh, stats)),
+            }
+        })
+    }
+
     /// A copy of this body that keeps the meshes made of it for reuse, for as long as the copy
     /// (or a clone of it) lives: for many operations on one large body at the same tolerance,
     /// such as cutting it down to the region of each of many contacts.
@@ -1565,6 +1601,55 @@ impl Body {
         let at: Vec<[f64; 3]> = points.iter().map(|p| [p.x, p.y, p.z]).collect();
         let classes = self.smlib()?.classify_points(&at).map_err(|e| KernelError::smlib("SMLib point classification", e))?;
         classes.into_iter().map(|c| c.map(point_class).map_err(|e| KernelError::smlib("SMLib point classification", e))).collect()
+    }
+
+    /// Where the ray from `origin` along `dir` first meets the body, decided exactly on its faces'
+    /// surfaces, edges' curves and vertices (solidcore's ray fire at the body's own tolerance, no
+    /// mesh). `None` where the ray meets nothing in front of its origin. A mesh body's triangles
+    /// are its exact shape.
+    ///
+    /// The point is on the ray at the hit's distance, the normal the outward unit normal of the
+    /// face there. A ray through an edge or a vertex names it, and the face is the one of its
+    /// faces that turns most toward the ray.
+    pub fn fire_ray(&self, origin: Vec3, dir: Vec3) -> Result<Option<RayPick>> {
+        let finite = |v: Vec3| v.x.is_finite() && v.y.is_finite() && v.z.is_finite();
+        let d = dir.normalized().filter(|d| finite(origin) && finite(*d)).ok_or_else(|| {
+            KernelError::Invalid(format!("ray: the origin {origin:?} and direction {dir:?} must be finite, the direction not zero"))
+        })?;
+        if let Some(m) = &self.mesh {
+            return Ok(crate::meshbody::mesh_ray(m, origin, d).map(|(t, normal)| RayPick {
+                face: 0,
+                edge: None,
+                vertex: None,
+                point: origin + d * t,
+                normal,
+                depth: t,
+            }));
+        }
+        let (ops, order) = self.ops_body().ok_or_else(|| KernelError::Failed("ray: the body has no solidcore form".into()))?;
+        let hit = ops.fire_ray(order, [origin.x, origin.y, origin.z], [d.x, d.y, d.z]).map_err(|e| KernelError::Failed(format!("ray: {e}")))?;
+        let Some(hit) = hit else { return Ok(None) };
+        let faces = crate::blend::Faces::of(self)?;
+        let point = origin + d * hit.distance;
+        let (edge, vertex, candidates): (_, _, Vec<usize>) = match hit.entity {
+            solidcore_ops::RayEntity::Face(f) => (None, None, vec![f]),
+            solidcore_ops::RayEntity::Edge(e) => (Some(e), None, faces.faces_of(e).into_iter().map(|f| f as usize).collect()),
+            solidcore_ops::RayEntity::Vertex(v) => {
+                let on: std::collections::BTreeSet<u32> = (0..faces.rec.edges.len())
+                    .filter(|e| faces.rec.edges.get(*e).is_some_and(|x| x.vertices.contains(&(v as u32))))
+                    .flat_map(|e| faces.faces_of(e))
+                    .collect();
+                (None, Some(v), on.into_iter().map(|f| f as usize).collect())
+            }
+        };
+        // How far the hit may lie off a face's surface: the body's own tolerance and its edges'.
+        let accept = faces.rec.edges.iter().map(|e| e.tolerance).fold(self.record.tolerance, f64::max).max(self.size() * 1e-9) * 10.0;
+        let best = candidates
+            .iter()
+            .filter_map(|&f| faces.normal_at(f, point, accept).map(|n| (f, n)))
+            .min_by(|(_, a), (_, b)| a.dot(d).total_cmp(&b.dot(d)));
+        let (face, normal) = best.ok_or_else(|| KernelError::Failed("ray: no outward normal of the face it meets".into()))?;
+        Ok(Some(RayPick { face, edge, vertex, point, normal, depth: hit.distance }))
     }
 
     /// B-rep faces (a mesh body is one face; [`crate::measure`] counts its triangles).

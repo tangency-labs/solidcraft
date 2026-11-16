@@ -13,12 +13,6 @@ workspace = true
 name = "solidcraft-cli"
 path = "src/main.rs"
 
-# Compatibility alias for the CLI's former name: forwards to solidcraft-cli with a deprecation
-# note on stderr. Shipped in every package for at least one release.
-[[bin]]
-name = "solvecraft-cli"
-path = "src/alias.rs"
-
 [features]
 default = ["raytrace-cpu", "profile"]
 bundled-render-library = ["solidcraft-engine/bundled-render-library"]

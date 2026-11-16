@@ -480,9 +480,8 @@ pub(super) fn build(
     // Constraint dimensions own independent generated parameters; public user parameters stay shared.
     for f in &feats {
         if let FeatureKind::Sketch { sketch, .. } = &f.kind {
-            for c in &sketch.constraints {
-                if let Some(name) = &c.param
-                    && !parameters.contains_key(name)
+            for name in sketch.dimension_params() {
+                if !parameters.contains_key(name)
                     && let Some(p) = source_parameters.get(name.as_str())
                     && p.model
                 {
@@ -911,12 +910,22 @@ fn outside_references(notices: &[String], feats: &[Feature], bodies: &BTreeMap<S
     out
 }
 
-/// The user parameters copied features use (their expressions and their dimensions'), and the
-/// ones those use, copied from `source` into `scratch`: named as they were where that name is
-/// free, else `w_2`, `w_3`…; `parameters` maps each to its copy.
+/// The user parameters copied features use (their expressions, their dimensions' and those placing
+/// 3D sketch points), and the ones those use, copied from `source` into `scratch`: named as they
+/// were where that name is free, else `w_2`, `w_3`…; `parameters` maps each to its copy.
 fn copy_user_parameters(scratch: &mut Session, source: &Document, feats: &[Feature], parameters: &mut BTreeMap<String, String>) -> Result<()> {
     let user: BTreeMap<&str, &solidcraft_doc::Param> = source.params.iter().filter(|p| !p.model).map(|p| (p.name.as_str(), p)).collect();
     let mut pending: Vec<String> = feats.iter().flat_map(|f| f.kind.expressions()).map(str::to_string).collect();
+    // The expressions placing 3D sketch points (#10608), which `remap_clone` renames with the rest.
+    pending.extend(
+        feats
+            .iter()
+            .filter_map(|f| match &f.kind {
+                FeatureKind::Sketch { sketch, .. } => Some(sketch.wire_point_exprs().into_iter().map(|(_, e)| e.clone()).collect::<Vec<_>>()),
+                _ => None,
+            })
+            .flatten(),
+    );
     pending.extend(parameters.keys().filter_map(|old| source.params.iter().find(|p| p.model && p.name == *old)).map(|p| p.expr.clone()));
     let mut used: BTreeSet<&str> = BTreeSet::new();
     let mut work = 0usize;

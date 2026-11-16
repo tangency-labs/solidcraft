@@ -410,10 +410,8 @@ impl crate::Feature {
         match &mut self.kind {
             K::Sketch { plane, sketch } => {
                 remap_plane(plane, ids, bodies, 0, occurrences, doc)?;
-                for c in &mut sketch.constraints {
-                    if let Some(n) = &mut c.param {
-                        mapped_name(n, parameters);
-                    }
+                for n in sketch.dimension_params_mut().into_iter().flatten() {
+                    mapped_name(n, parameters);
                 }
                 for e in sketch.text_exprs_mut() {
                     *e = clone_expression(e, parameters);
@@ -426,6 +424,11 @@ impl crate::Feature {
                 }
                 for link in &mut sketch.links {
                     remap_link(&mut link.source, ids, names, bodies, 0);
+                    for pin in &mut link.sketch_placements {
+                        if let Some(id) = ids.get(&pin.sketch) {
+                            pin.sketch = *id;
+                        }
+                    }
                     for n in link.face_name.iter_mut().chain(&mut link.edge_name).chain(&mut link.vertex_name) {
                         *n = remap_topology(n, ids, bodies);
                     }
