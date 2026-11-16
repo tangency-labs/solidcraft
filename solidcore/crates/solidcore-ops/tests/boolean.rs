@@ -2334,7 +2334,7 @@ fn a_join_past_an_imported_edge_that_lies_off_its_face_keeps_the_tool() {
 }
 
 /// `b` written to a record and read back, as the app hands its operands to the kernel.
-fn through_record(b: Body) -> Body {
+fn through_record(b: &Body) -> Body {
     Body::from_record(&b.to_record().unwrap().0, true)
         .unwrap()
         .0
@@ -2369,8 +2369,8 @@ fn a_cylinder_cut_flush_with_a_rounded_bore_ceiling_is_one_valid_solid() {
     assert!(block.check(CheckLevel::All).unwrap().is_valid());
     let tool = solidcore_ops::make_cylinder([0.0, 0.0, -11.0], 155.0, 111.0).unwrap();
     let r = boolean(
-        through_record(block),
-        through_record(tool),
+        through_record(&block),
+        through_record(&tool),
         BooleanOp::Subtract,
     )
     .unwrap()
@@ -2412,8 +2412,8 @@ fn a_drum_cut_on_its_void_ceiling_with_a_hole_through_both_is_two_valid_solids()
         (above, [4, 6, 4], PI * (105.5 * 105.5 - 9.0 * 9.0) * 3.0),
     ] {
         let r = boolean(
-            through_record(drum_with_a_hole()),
-            through_record(tool),
+            through_record(&drum_with_a_hole()),
+            through_record(&tool),
             BooleanOp::Intersect,
         )
         .unwrap()
