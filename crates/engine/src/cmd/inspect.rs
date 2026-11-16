@@ -490,7 +490,8 @@ fn sketch_json(s: &Session, world: &solidcraft_doc::ModelState, id: u64) -> Opti
     Some(SketchInspected {
         id,
         name: ss.name.clone(),
-        plane: serde_json::to_value(ss.plane).unwrap_or_default(),
+        plane: ss.plane.into(),
+        world_plane: plane.into(),
         status: ss.report.status.into(),
         dof: ss.report.shown_dof(),
         fully_constrained: ss.report.shown_dof() == 0,
