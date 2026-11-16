@@ -3720,8 +3720,10 @@ pub const FACE_STEPS: i32 = 8;
 pub const FACE_SLOPE: f32 = 1.0;
 /// The model's edges' depth, written before its see-through faces are drawn (`line_depth`): pushed
 /// back as [`FACE_BIAS`] pushes an opaque face, so a see-through body's own faces at its edges
-/// still pass and tint them as before, while a face further behind (faded context, another
-/// see-through body) fails and leaves the edge alone.
+/// still pass and tint them, while a face further behind (faded context, another see-through body)
+/// fails and leaves the edge alone. The slope term is the line's own (flat across its width), so
+/// where a body's face recedes steeply from its edge, the part of it under the line's far half is
+/// behind the line and does not tint it, as an opaque face does not cover its edge.
 const EDGE_DEPTH_BIAS: wgpu::DepthBiasState = FACE_BIAS;
 /// A blend that leaves the target's colour as it is.
 const KEEP: wgpu::BlendComponent =
@@ -6761,13 +6763,14 @@ mod glass_tests {
     /// lay behind it: neither those faces nor the edges write depth, and the faces were drawn
     /// after the edges, so they blended over them as if the edge were behind. An edge now hides
     /// the see-through faces behind it, sorted or not, and one behind a see-through face is still
-    /// seen through it.
+    /// seen through it. A line thinner than a pixel covers only part of it, so the faces behind
+    /// still show in the rest.
     #[test]
     fn see_through_faces_behind_an_edge_do_not_wash_it_out() {
         let (blue, red, black) = ([40, 80, 220, 128], [220, 40, 40, 128], [0, 0, 0, 255]);
         // A see-through square at z = 5 with an edge across it at `edge_z`, and `behind` (a faded
         // or see-through square at z = -5, or nothing).
-        let scene = |edge_z: f32, behind: Option<bool>| {
+        let scene = |edge_z: f32, behind: Option<bool>, width: f32| {
             let mut sc = GpuScene::default();
             let front = sc.color(blue);
             let back = sc.color(red);
@@ -6783,22 +6786,29 @@ mod glass_tests {
                 }
             }
             let edge = sc.color(black);
-            sc.line([-5.0, 0.0, edge_z], [5.0, 0.0, edge_z], edge, 4.0, false);
+            // Through the middle pixel's centre (64 pixels over 20 units), which a line thinner
+            // than a pixel, drawn a pixel wide, must cover to be seen there.
+            let y = -10.0 / 64.0;
+            sc.line([-5.0, y, edge_z], [5.0, y, edge_z], edge, width, false);
             sc
         };
         let near = |a: [u8; 4], b: [u8; 4]| a.iter().zip(b).all(|(x, y)| x.abs_diff(y) <= 3);
         for oit in [true, false] {
-            let Some(alone) = middle_pixel(scene(5.0, None), oit) else {
+            let Some(alone) = middle_pixel(scene(5.0, None, 4.0), oit) else {
                 eprintln!("skipping: no GPU adapter");
                 return;
             };
             for faded in [true, false] {
-                let shown = middle_pixel(scene(5.0, Some(faded)), oit).unwrap();
+                let shown = middle_pixel(scene(5.0, Some(faded), 4.0), oit).unwrap();
                 assert!(near(shown, alone), "oit {oit}, faded {faded}: the front edge looks as it does with nothing behind: {shown:?} vs {alone:?}");
             }
             // An edge behind the front square is still seen through it.
-            let behind = middle_pixel(scene(-5.0, Some(true)), oit).unwrap();
+            let behind = middle_pixel(scene(-5.0, Some(true), 4.0), oit).unwrap();
             assert!(behind[2] > 60, "oit {oit}: an edge behind a see-through face is tinted by it: {behind:?}");
+            // A line narrower than a pixel leaves part of it to the face behind.
+            let thin_alone = middle_pixel(scene(5.0, None, 0.75), oit).unwrap();
+            let thin = middle_pixel(scene(5.0, Some(true), 0.75), oit).unwrap();
+            assert!(!near(thin, thin_alone), "oit {oit}: the faded face behind still shows past a thin line: {thin:?} vs {thin_alone:?}");
         }
     }
 
