@@ -199,7 +199,7 @@ fn main() -> ExitCode {
         return ExitCode::FAILURE;
     }
     if let Err(e) = plugin_limits(&mut args) {
-        eprintln!("error: {e}");
+        solidcraft_engine::note!("error: {e}");
         return ExitCode::FAILURE;
     }
     if let Err(e) = plugins_dir(&mut args) {
@@ -524,9 +524,11 @@ fn read_session(
 fn warn_if_open_elsewhere(path: &str) {
     use solidcraft_engine::io::design_lock;
     if let Some(lock) = design_lock::held_elsewhere(std::path::Path::new(path), design_lock::now_secs()) {
-        eprintln!(
+        solidcraft_engine::note!(
             "{path}: warning: open in SolidCraft {} by {} on {}; saved all the same, and that window still shows the design it opened",
-            lock.app, lock.user, lock.host
+            lock.app,
+            lock.user,
+            lock.host
         );
     }
 }
@@ -1295,7 +1297,7 @@ fn cmd_mcp(args: &[String]) -> Result<(), String> {
         // agent with nothing it asked for stops the start rather than serving a scope it didn't mean.
         let ignored: Vec<&solidcraft_engine::io::vfs::RejectedRoot> = s.rejected().iter().filter(|r| allowed.contains(&r.path)).collect();
         for r in &ignored {
-            eprintln!("solidcraft mcp: allow-path {} ignored: {}", r.path.display(), r.reason);
+            solidcraft_engine::note!("solidcraft mcp: allow-path {} ignored: {}", r.path.display(), r.reason);
         }
         if !allowed.is_empty()
             && args.iter().any(|a| a == "--require-allow-path")
