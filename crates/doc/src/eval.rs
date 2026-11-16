@@ -9755,7 +9755,9 @@ fn trim_to_curved_face(
 /// far: the outer loop alone, drafted when the taper grows it (only the holes narrow) and
 /// straight when the taper narrows it. Run right through the target (past the far side of its
 /// exact box by the margin the straight path takes) and cut back to the face, its far end is the
-/// farthest the tool meets the face; the tool runs a hair past that, and at least `len`.
+/// farthest the tool meets the face; the tool runs a hair past that, and at least `len`. A
+/// straight envelope wider than the target can pass it where the narrowing tool meets it: the
+/// tool then runs right through, and its own cut says whether it ends on the face.
 #[allow(clippy::too_many_arguments)]
 fn tapered_reach(
     ss: &SolvedSketch,
@@ -9790,7 +9792,10 @@ fn tapered_reach(
             envelopes.extend(centered_extrude(&ss.plane, &outer, lo, hi, None, None, false)?);
         }
     }
-    let cut = trim_to_curved_face(envelopes, target, face, to, to_offset, &ss.plane, base, base + sign * through)?;
+    let cut = match trim_to_curved_face(envelopes, target, face, to, to_offset, &ss.plane, base, base + sign * through) {
+        Err(_) if taper < 0.0 => return Ok(through),
+        cut => cut?,
+    };
     let reach = cut.iter().map(|t| far_side(&t.body)).collect::<Result<Vec<_>>>()?.into_iter().fold(len, f64::max);
     Ok(reach + target.body.size() * 1e-3)
 }
