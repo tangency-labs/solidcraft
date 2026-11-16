@@ -2159,6 +2159,16 @@ impl Dialog {
 /// the edges the feature rounds: it ends where a concave edge runs on as a convex one, which
 /// the display mesh cannot tell.
 fn fillet_edges(s: &Session, sel: &Sel, chain: bool) -> Vec<Sel> {
+    // A viewport click can land exactly at a shared vertex. Keep the selected edge's
+    // identity, but give the command a point on its interior so the engine does not
+    // interpret that point as an ambiguous request for every incident edge (#7661, #13155).
+    let interior_pick = match sel {
+        Sel::Edge { body, index, .. } => crate::open_meshing::session_world(s)
+            .body(body)
+            .and_then(|b| b.mesh().edges.get(*index).map(|edge| Sel::Edge { body: body.clone(), index: *index, point: polyline_mid(edge) })),
+        _ => None,
+    };
+    let sel = interior_pick.as_ref().unwrap_or(sel);
     let mut picked = crate::viewport::picked_selection(s, sel);
     if chain
         && let Sel::Edge { body, index, point } = sel
@@ -9577,6 +9587,22 @@ mod preselected_sketch_line_tests {
     //! Fillet and Chamfer, which take edges and no sketch curves, take it as that edge.
     use super::*;
     use crate::scenario::Harness;
+
+    #[test]
+    fn fillet_preselection_moves_a_vertex_click_onto_the_selected_edge() {
+        let mut h = Harness::new();
+        assert!(h.app.run("solid.box", json!({"length": 40, "width": 30, "height": 25, "body_name": "B"})).is_ok());
+        let Ok(state) = h.app.session.world_state() else { panic!("missing state") };
+        let Some(body) = state.body("B") else { panic!("missing body B") };
+        let Some(edge) = body.mesh().edges.iter().position(|points| {
+            points.iter().any(|p| p.dist(Vec3::new(40.0, 0.0, 25.0)) < 1e-6) && points.iter().any(|p| p.dist(Vec3::new(40.0, 30.0, 25.0)) < 1e-6)
+        }) else {
+            panic!("top rear edge missing");
+        };
+        let picked = Sel::Edge { body: "B".into(), index: edge, point: Vec3::new(40.0, 0.0, 25.0) };
+        let result = fillet_edges(&h.app.session, &picked, false);
+        assert!(matches!(result.as_slice(), [Sel::Edge { point, .. }] if point.dist(Vec3::new(40.0, 15.0, 25.0)) < 1e-6), "{result:?}");
+    }
 
     /// A 40 × 30 × 10 box made from a sketch on its top face, with that sketch shown.
     fn box_under_its_sketch(h: &mut Harness) {
