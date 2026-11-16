@@ -5642,6 +5642,68 @@ fn tapered_extrude_of_a_profile_mixing_lines_and_an_arc() {
     assert!(rel(volume(&mut s), expect) < 1e-3, "{} vs {expect}", volume(&mut s));
 }
 
+/// A tapered extrude To a curved face ends on that face, as an untapered one does (#15820),
+/// not on a flat cap where the profile's middle meets it. A circle r 4 on XY, with or without a
+/// hole r 1.5, up to a ball R 10 at z 20. A wall r(z) = r₀ + s·z (s = tan of the taper for the
+/// outside, its negative for the hole, which the taper narrows as it grows the outside) meets
+/// the ball at z_c, the smaller root of r(z)² + (z − 20)² = R², so the column inside it is the
+/// frustum to z_c less the ball's cap below z_c, and the post is the outside's column less the
+/// hole's. Joined to the ball it adds just that. At −15° the outside would close at z 14.9 and
+/// at +5° the hole at z 17.1, both inside the ball: the tools only run as far as they must.
+#[test]
+fn tapered_extrude_to_a_curved_face_ends_on_it() {
+    let (a, b, c, big_r) = (4.0, 1.5, 20.0, 10.0);
+    let setup = |hole: bool| {
+        let mut s = Session::default();
+        run(&mut s, "solid.sphere", json!({"radius": big_r, "center": [0, 0, c], "body_name": "Ball"}));
+        run(&mut s, "sketch.create", json!({"plane": "XY", "name": "P"}));
+        run(&mut s, "sketch.circle.center", json!({"center": [0, 0], "radius": a}));
+        if hole {
+            run(&mut s, "sketch.circle.center", json!({"center": [0, 0], "radius": b}));
+        }
+        run(&mut s, "sketch.finish", json!({}));
+        s
+    };
+    let column = |r0: f64, slope: f64| {
+        let (qa, qb, qc) = (slope * slope + 1.0, 2.0 * (r0 * slope - c), r0 * r0 + c * c - big_r * big_r);
+        let z_c = (-qb - (qb * qb - 4.0 * qa * qc).sqrt()) / (2.0 * qa);
+        let (r_c, h) = (r0 + slope * z_c, z_c - (c - big_r));
+        PI * z_c / 3.0 * (r0 * r0 + r0 * r_c + r_c * r_c) - PI * h * h * (3.0 * big_r - h) / 3.0
+    };
+    let ball = 4.0 / 3.0 * PI * big_r.powi(3);
+    let measure = |s: &mut Session, body: &str| run(s, "inspect.measure", json!({"bodies": [body]}))["bodies"][0].clone();
+    let topology = |m: &Value| (m["faces"].as_u64(), m["edges"].as_u64(), m["vertices"].as_u64());
+    for hole in [false, true] {
+        // Untapered, the straight path: the post's faces are its base, its sides and the ball's cap.
+        let mut s = setup(hole);
+        run(&mut s, "solid.extrude", json!({"sketch": "P", "to": [0, 0, c - big_r], "operation": "new", "body_name": "Post"}));
+        let straight = topology(&measure(&mut s, "Post"));
+        assert_eq!(straight.0, Some(if hole { 4 } else { 3 }), "{straight:?}");
+        let cones = if hole { 2 } else { 1 };
+        // At −15° the hole would grow into the outside before the ball: no hole there.
+        let degs: &[f64] = if hole { &[5.0, -5.0] } else { &[5.0, -5.0, -15.0] };
+        for &deg in degs {
+            let t = deg.to_radians().tan();
+            let post = column(a, t) - if hole { column(b, -t) } else { 0.0 };
+            let taper = format!("{deg} deg");
+            let mut s = setup(hole);
+            run(&mut s, "solid.extrude", json!({"sketch": "P", "to": [0, 0, c - big_r], "taper": taper, "operation": "new", "body_name": "Post"}));
+            let m = measure(&mut s, "Post");
+            let got = m["volume_mm3"].as_f64().unwrap();
+            assert!(rel(got, post) < 1e-4, "{deg} deg, hole {hole}: {got} vs {post}");
+            assert_eq!(topology(&m), straight, "{deg} deg, hole {hole}: {m}");
+            assert_eq!(m["face_types"], json!({"cone": cones, "plane": 1, "sphere": 1}), "{deg} deg, hole {hole}: only the base is flat: {m}");
+            let mut s = setup(hole);
+            run(&mut s, "solid.extrude", json!({"sketch": "P", "to": [0, 0, c - big_r], "taper": taper, "operation": "join", "targets": ["Ball"]}));
+            assert_eq!(s.model.state().bodies.len(), 1, "{deg} deg, hole {hole}");
+            assert!(rel(volume(&mut s), ball + post) < 1e-4, "{deg} deg, hole {hole}: {} vs {}", volume(&mut s), ball + post);
+            // The ball's face, less the post's foot; with a hole also the ball's face in the hole.
+            let m = measure(&mut s, "Ball");
+            assert_eq!(m["face_types"], json!({"cone": cones, "plane": 1, "sphere": cones}), "{deg} deg, hole {hole}: {m}");
+        }
+    }
+}
+
 /// A feature that joins into a body creates none, and its reply says so; a primitive's reply
 /// names the body it made (#374).
 #[test]
