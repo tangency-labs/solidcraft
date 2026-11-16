@@ -166,6 +166,32 @@ pub fn determined_vars(j: &Mat, tol: f64) -> (Vec<bool>, usize) {
     determined_from(&a, pivots, tol)
 }
 
+/// One vector of `j`'s null space that mixes all of it: the sum of the null-space basis vectors
+/// of the free columns (one per free column, the pivot columns following from it), each scaled
+/// to a largest entry of `weight(k)` for the k-th free column in column order, so that no
+/// freedom is drowned by another's larger entries. Also the rank. All zero when `j` has full
+/// column rank.
+pub fn null_mix(j: &Mat, tol: f64, weight: impl Fn(usize) -> f64) -> (Vec<f64>, usize) {
+    let mut a = j.clone();
+    let pivots = rref(&mut a, tol);
+    let mut n = vec![0.0; a.cols];
+    let free = (0..a.cols).filter(|c| !pivots.contains(c));
+    for (k, f) in free.enumerate() {
+        // A pivot row reads x_pivot + a[r][f]·x_f = 0 for this basis vector.
+        let peak = (0..pivots.len()).map(|r| a.get(r, f).abs()).fold(1.0_f64, f64::max);
+        let w = weight(k) / peak;
+        if let Some(x) = n.get_mut(f) {
+            *x += w;
+        }
+        for (r, pc) in pivots.iter().enumerate() {
+            if let Some(x) = n.get_mut(*pc) {
+                *x -= a.get(r, f) * w;
+            }
+        }
+    }
+    (n, pivots.len())
+}
+
 /// The rank of `j`, its row reduction's multiply-adds added to `ops`; `None` once they pass
 /// `budget`.
 pub fn rank_counted(j: &Mat, tol: f64, ops: &mut f64, budget: f64) -> Option<usize> {
