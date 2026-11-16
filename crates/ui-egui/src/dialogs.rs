@@ -1938,6 +1938,13 @@ impl Dialog {
             retain_profile_sketch(&self.kind, inp, &sel);
         }
         let is_fillet = matches!(self.kind, Kind::Fillet { .. }) && self.active == 0;
+        // A body picked into Target Bodies is a choice by hand: Extrude stops choosing its
+        // operation now, before a check (at once on the web) can turn Join and the pick away.
+        if self.inputs.get(self.active).is_some_and(|i| i.label == JOIN_TARGETS)
+            && let Kind::Extrude { auto_op, .. } = &mut self.kind
+        {
+            *auto_op = false;
+        }
         let Some(inp) = self.inputs.get_mut(self.active) else { return };
         if is_fillet {
             self.chain_applied = chain;
@@ -1999,6 +2006,12 @@ impl Dialog {
         let chain = matches!(self.kind, Kind::Fillet { chain: true, .. });
         if is_fillet && !add {
             self.picked_edges.clear();
+        }
+        // As a click there: bodies boxed into Target Bodies stop Extrude choosing its operation.
+        if self.inputs.get(self.active).is_some_and(|i| i.label == JOIN_TARGETS)
+            && let Kind::Extrude { auto_op, .. } = &mut self.kind
+        {
+            *auto_op = false;
         }
         let Some(inp) = self.inputs.get_mut(self.active) else { return };
         // Only an explicit add opts into grouped Thread selection; a replacement keeps one face.
@@ -4915,11 +4928,46 @@ fn set_object(inputs: &mut Vec<SelInput>, active: &mut usize, label: &'static st
 /// is added.
 pub(crate) fn set_object_accepting(inputs: &mut Vec<SelInput>, active: &mut usize, label: &'static str, accept: selection::Accept, on: bool) {
     if on && !object_on(inputs, label) {
-        inputs.push(SelInput::new(label, accept, false));
-        *active = inputs.len() - 1;
-    } else if !on && object_on(inputs, label) {
-        inputs.retain(|i| i.label != label);
+        // Before Extrude's Target Bodies, which stays last.
+        let at = inputs.iter().position(|i| i.label == JOIN_TARGETS).unwrap_or(inputs.len());
+        inputs.insert(at, SelInput::new(label, accept, false));
+        *active = at;
+    } else if let Some(at) = inputs.iter().position(|i| i.label == label)
+        && !on
+    {
+        inputs.remove(at);
+        // The active input stays the same one when an earlier input goes; the removed one's
+        // place goes to the input after it (or the last).
+        if *active > at {
+            *active -= 1;
+        }
         *active = (*active).min(inputs.len().saturating_sub(1));
+    }
+}
+
+/// Extrude's pick input for the bodies a Join joins (#17657).
+const JOIN_TARGETS: &str = "Target Bodies";
+
+/// The Target Bodies input while an extrude's operation is Join; `None` otherwise.
+fn join_targets(d: &Dialog) -> Option<&SelInput> {
+    matches!(d.kind, Kind::Extrude { operation: 1, .. }).then(|| d.inputs.iter().find(|i| i.label == JOIN_TARGETS)).flatten()
+}
+
+/// Show Extrude's Target Bodies input while the operation is Join, and remove it (with its picks)
+/// otherwise. Showing it leaves the active input where it is, so the profiles stay the next pick.
+fn set_join_targets(inputs: &mut Vec<SelInput>, active: &mut usize, on: bool) {
+    let at = inputs.iter().position(|i| i.label == JOIN_TARGETS);
+    match at {
+        None if on => inputs.push(SelInput::new(JOIN_TARGETS, BODIES, true).tip("ui.extrude_join_targets_tip")),
+        Some(at) if !on => {
+            inputs.remove(at);
+            if *active > at {
+                *active -= 1;
+            } else if *active == at {
+                *active = 0;
+            }
+        }
+        _ => {}
     }
 }
 
@@ -5738,11 +5786,23 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
             if object_on(&d.inputs, FROM_OBJECT) {
                 common["from"] = object_point(&d.inputs, FROM_OBJECT).ok_or("select the object to extrude from")?;
             }
+            // A Join joins the bodies picked in Target Bodies. None picked: the command's own
+            // choice, the body the sketch or face is on (#17657).
+            let join_targets = join_targets(d);
+            if let Some(input) = join_targets
+                && !input.items.is_empty()
+            {
+                common["targets"] = json!(input.items.body_names());
+            }
             let with = |extra: Value| -> Value {
                 let mut p = common.clone();
                 if let (Value::Object(m), Value::Object(e)) = (&mut p, extra) {
                     m.extend(e);
                     for (k, v) in &d.extra {
+                        // An edited Join's stored targets are in Target Bodies, emptied or not.
+                        if k == "targets" && join_targets.is_some() {
+                            continue;
+                        }
                         m.entry(k.clone()).or_insert_with(|| v.clone());
                     }
                 }
@@ -7569,6 +7629,13 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
             }
             if !targets.is_empty() {
                 d.extra.insert("targets".into(), json!(targets));
+            }
+            // A Join shows the bodies it joins in Target Bodies, to change there (#17657).
+            if *operation == Operation::Join {
+                set_join_targets(&mut d.inputs, &mut d.active, true);
+                if let Some(input) = d.inputs.iter_mut().find(|i| i.label == JOIN_TARGETS) {
+                    input.items = targets.iter().map(|name| Sel::Body { name: name.0.clone() }).collect();
+                }
             }
             d
         }
