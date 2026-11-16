@@ -862,15 +862,20 @@ fn obj_export(sel: &[&solidcraft_doc::ModelBody], mtl_name: &str, quality: MeshQ
 
 /// A body's export mesh as [`shared_placements`] gives it: its part's mesh placed
 /// ([`PartMesh::placed`]) for a placement of a part, else its own ([`export_mesh_sized`]), its
-/// chord from `size`, with its notes, each led by the body's name.
+/// chord from `size`, with its notes, each led by the body's name. A mesh it cannot make is an
+/// error led by the body's name too, so an export of several bodies says whose face it is.
 fn body_mesh(b: &solidcraft_doc::ModelBody, (body, size, part): &Placed, quality: MeshQuality) -> Result<(Mesh, Vec<String>)> {
+    let named = |e: IoError| match e {
+        IoError::Kernel(k) => IoError::Invalid(format!("{}: {k}", b.name)),
+        other => other,
+    };
     let placed = match part {
-        Some((part, rel)) => part.placed(&quality.spec(*size), rel)?,
+        Some((part, rel)) => part.placed(&quality.spec(*size), rel).map_err(named)?,
         None => None,
     };
     let (mesh, notes) = match placed {
         Some(placed) => placed,
-        None => export_mesh_sized(body, *size, quality)?,
+        None => export_mesh_sized(body, *size, quality).map_err(named)?,
     };
     Ok((mesh, notes.into_iter().map(|n| format!("{}: {n}", b.name)).collect()))
 }

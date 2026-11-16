@@ -134,10 +134,10 @@ pub fn fit_loop(points: &[Point2], tolerance: f64, epsilon: f64) -> Result<Fitte
 
 /// The corners of the closed polygon through `points`: each straight run of nodes (a mesher that
 /// samples a straight edge with nodes along it, as a quality mesh does) becomes one side. A run
-/// is grown from its first node while every node it spans lies within the rounding allowance
-/// (three times `epsilon`, as an STL's f32 coordinates are allowed for) of the side from its
-/// first node to its last; the first node of all is dropped too where it lies on the side
-/// through it. Every node is measured against the side that replaces it, never against a side
+/// is grown from its first node while every node it spans lies within the allowance (three
+/// times the caller's `epsilon`) of the side from its first node to its last; the first node of
+/// all is dropped too where it lies on the side through it. A node farther off keeps its corner:
+/// that leaves a side in two pieces, never a side off a node. Every node is measured against the side that replaces it, never against a side
 /// already simplified, so joining never drifts.
 ///
 /// # Errors

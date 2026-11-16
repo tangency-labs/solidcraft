@@ -271,13 +271,13 @@ fn extrusion(mesh: &crate::meshbody::TriMesh, axis: Vec3, tolerance: f64) -> Res
     {
         return Ok(None);
     }
-    // Every side triangle lies on the straight extrusion of the section: its corners and its
-    // centroid, projected along the axis, on the fitted loops within the tolerance. A mesh with
-    // nodes inside its walls (a mesher's lattice, as on a quality mesh) passes; a twisted,
-    // tapered or stepped one does not.
+    // Every side triangle lies on the straight extrusion of the section: projected along the
+    // axis, the whole triangle, not only its corners, lies within the tolerance of one fitted
+    // segment ([`wall_on`]). A mesh with nodes inside its walls (a mesher's lattice, as on a
+    // quality mesh) passes; a twisted, tapered, stepped or dented one does not.
     for [a, b, c] in &walls {
-        let centroid = (*a + *b + *c) / 3.;
-        if ![*a, *b, *c, centroid].iter().all(|p| on(&loops, plane.to_local(*p))) {
+        let t = [plane.to_local(*a), plane.to_local(*b), plane.to_local(*c)];
+        if !loops.iter().flat_map(|l| &l.segs).any(|s| wall_on(s, t, tolerance)) {
             return Ok(None);
         }
     }
@@ -317,6 +317,44 @@ fn extrusion(mesh: &crate::meshbody::TriMesh, axis: Vec3, tolerance: f64) -> Res
         return Err(invalid("reconstructed volume is inconsistent with the source mesh"));
     }
     Ok(Some(body))
+}
+
+/// Whether the triangle `t` (a side triangle projected into the section plane) lies within `tol`
+/// of the fitted segment `s` over its whole area. For a line, the points within `tol` of it form
+/// a convex set, so the triangle's corners decide. For a circle (the only arc a fitted loop has:
+/// a whole turn), the distance from the centre is convex: the corners bound it from above, and
+/// the triangle's nearest point to the centre (its distance from the centre, 0 where it holds
+/// the centre) bounds it from below. Any other segment is not certified, and the mesh is no
+/// prism.
+fn wall_on(s: &solidcore_record::Seg2, t: [Vec2; 3], tol: f64) -> bool {
+    match *s {
+        solidcore_record::Seg2::Line { .. } => t.iter().all(|p| s.point_at(s.closest_param(*p)).dist(*p) <= tol),
+        solidcore_record::Seg2::Arc { center, radius, sweep, .. } => {
+            if !((sweep.abs() - std::f64::consts::TAU).abs() <= 1e-7) {
+                return false;
+            }
+            let nearest = triangle_distance(t, center);
+            t.iter().all(|p| p.dist(center) <= radius + tol) && nearest >= radius - tol
+        }
+        _ => false,
+    }
+}
+
+/// The distance from `p` to the triangle `t` (0 where `p` lies in it, on its sides included).
+fn triangle_distance(t: [Vec2; 3], p: Vec2) -> f64 {
+    let [a, b, c] = t;
+    let side = |u: Vec2, v: Vec2| (v.x - u.x) * (p.y - u.y) - (v.y - u.y) * (p.x - u.x);
+    let (s0, s1, s2) = (side(a, b), side(b, c), side(c, a));
+    if (s0 >= 0. && s1 >= 0. && s2 >= 0.) || (s0 <= 0. && s1 <= 0. && s2 <= 0.) {
+        return 0.;
+    }
+    let to_side = |u: Vec2, v: Vec2| {
+        let (dx, dy) = (v.x - u.x, v.y - u.y);
+        let len2 = dx * dx + dy * dy;
+        let f = if len2 > 0. { (((p.x - u.x) * dx + (p.y - u.y) * dy) / len2).clamp(0., 1.) } else { 0. };
+        Vec2::new(u.x + dx * f, u.y + dy * f).dist(p)
+    };
+    to_side(a, b).min(to_side(b, c)).min(to_side(c, a))
 }
 
 /// A cap's boundary (`adjacency`: each boundary node's two neighbours, by its key in the section
@@ -737,7 +775,114 @@ mod tests {
         let prism = extrusion(welded.mesh.as_ref().unwrap(), Vec3::Z, 0.05).unwrap().expect("one prism");
         assert!(prism.validity().is_empty());
         assert_eq!(prism.faces(0.01).unwrap().len(), 6);
+        assert_eq!(prism.edges(0.01).unwrap().len(), 12);
         assert!((crate::measure(&prism).unwrap().volume - 500.).abs() < 1e-9);
+    }
+
+    /// The triangles `triangles` of `positions`, each turned so its normal points away from
+    /// `centre` (meshes star-shaped about it).
+    fn outward(positions: &[Vec3], triangles: &[[u32; 3]], centre: Vec3) -> Vec<[u32; 3]> {
+        triangles
+            .iter()
+            .map(|&[a, b, c]| {
+                let (pa, pb, pc) = (positions[a as usize], positions[b as usize], positions[c as usize]);
+                let n = (pb - pa).cross(pc - pa);
+                if n.dot((pa + pb + pc) / 3. - centre) >= 0. { [a, b, c] } else { [a, c, b] }
+            })
+            .collect()
+    }
+
+    /// The extrusion along z of the mesh, welded as conversion welds it, at the tolerance 0.05.
+    fn extruded(positions: &[Vec3], triangles: &[[u32; 3]]) -> Option<Body> {
+        let welded = weld(crate::mesh_body(positions, triangles).unwrap().mesh.as_ref().unwrap(), 0.05).unwrap();
+        extrusion(welded.mesh.as_ref().unwrap(), Vec3::Z, 0.05).unwrap()
+    }
+
+    /// A 10 x 10 x 5 box whose vertical edge at (10, 0) is dented at half its height: the corner
+    /// is cut there by a chord from (9.86, 0) to (10, 0.14), 0.07 inside the square at its middle,
+    /// while every corner of every side triangle and every centroid lies within the tolerance
+    /// (0.05) of the square. Each side triangle is certified over its whole area, so this is no
+    /// prism (the true corner lies 0.099 from the mesh).
+    #[test]
+    fn a_box_dented_at_a_corner_between_its_side_nodes_is_no_prism() {
+        let at = |x: f64, y: f64, z: f64| Vec3::new(x, y, z);
+        let mut positions = Vec::new();
+        for z in [0., 5.] {
+            positions.extend([at(0., 0., z), at(10., 0., z), at(10., 10., z), at(0., 10., z)]);
+        }
+        // 8: on the y = 0 wall; 9: on the x = 10 wall.
+        positions.extend([at(9.86, 0., 2.5), at(10., 0.14, 2.5)]);
+        let triangles = [
+            [0, 1, 2],
+            [0, 2, 3],
+            [4, 5, 6],
+            [4, 6, 7], // caps
+            [0, 1, 8],
+            [0, 8, 4],
+            [8, 5, 4], // y = 0
+            [1, 2, 9],
+            [9, 2, 6],
+            [9, 6, 5], // x = 10
+            [1, 8, 9],
+            [5, 9, 8], // the dented corner
+            [2, 3, 7],
+            [2, 7, 6],
+            [3, 0, 4],
+            [3, 4, 7], // y = 10, x = 0
+        ];
+        let triangles = outward(&positions, &triangles, at(5., 5., 2.5));
+        assert!(extruded(&positions, &triangles).is_none());
+    }
+
+    /// A cylinder r 10, h 5 whose caps have 52 nodes (each cap fits as the circle) and whose wall
+    /// has a ring of nodes at half its height: with a node at every cap angle the wall is the
+    /// cylinder's; with one at every other cap angle the ring's sides sag 0.073 inside the
+    /// circle, though each side triangle's corners lie on it and its centroid within 0.049 of
+    /// it. That one is no prism.
+    #[test]
+    fn a_cylinder_whose_wall_sags_between_its_nodes_is_no_prism() {
+        let mesh = |every: usize| {
+            let n = 52usize;
+            let ring = |z: f64, k: usize, step: usize| {
+                let a = (k * step) as f64 * std::f64::consts::TAU / n as f64;
+                Vec3::new(10. * a.cos(), 10. * a.sin(), z)
+            };
+            let mid = n / every;
+            let mut positions: Vec<Vec3> = Vec::new();
+            positions.extend((0..n).map(|k| ring(0., k, 1)));
+            positions.extend((0..n).map(|k| ring(5., k, 1)));
+            positions.extend((0..mid).map(|k| ring(2.5, k, every)));
+            positions.extend([Vec3::new(0., 0., 0.), Vec3::new(0., 0., 5.)]);
+            let (bottom, top, m, cb, ct) = (0u32, n as u32, 2 * n as u32, (2 * n + mid) as u32, (2 * n + mid + 1) as u32);
+            let (n32, mid32) = (n as u32, mid as u32);
+            let mut triangles = Vec::new();
+            for k in 0..n32 {
+                triangles.push([cb, bottom + k, bottom + (k + 1) % n32]);
+                triangles.push([ct, top + k, top + (k + 1) % n32]);
+            }
+            let e = every as u32;
+            for j in 0..mid32 {
+                let (m0, m1) = (m + j, m + (j + 1) % mid32);
+                for cap in [bottom, top] {
+                    let b = |i: u32| cap + (e * j + i) % n32;
+                    for i in 0..e {
+                        triangles.push([b(i), b(i + 1), if i + 1 == e { m1 } else { m0 }]);
+                    }
+                    if e > 1 {
+                        triangles.push([b(e - 1), m1, m0]);
+                    }
+                    if e == 1 {
+                        triangles.push([b(0), m1, m0]);
+                    }
+                }
+            }
+            let triangles = outward(&positions, &triangles, Vec3::new(0., 0., 2.5));
+            (positions, triangles)
+        };
+        let (p, t) = mesh(1);
+        assert!(extruded(&p, &t).is_some(), "a node at every cap angle: the cylinder");
+        let (p, t) = mesh(2);
+        assert!(extruded(&p, &t).is_none(), "a node at every other cap angle: no prism");
     }
 
     #[test]
