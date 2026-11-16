@@ -121,6 +121,36 @@ fn side_edge_flanges_across_a_bend_keep_their_relief_through_rebuild_and_reopen(
 }
 
 #[test]
+fn two_arc_sheet_cut_does_not_depend_on_the_sketch_plane_origin() {
+    for offset in [0.0, 300.0, 1000.0, 10000.0, -10000.0] {
+        let mut s = Session::default();
+        run(&mut s, "sheet.manage_rules", json!({"name":"R1","thickness":"1.5 mm","bend_radius":"2 mm","k_factor":0.5,"active":true}));
+        base(&mut s, 200.0, 100.0);
+        run(&mut s, "sketch.create", json!({"plane":{"origin":[offset,offset,0],"x_dir":[1,0,0],"y_dir":[0,1,0]},"name":"Hole"}));
+        for y in [55.0, 45.0] {
+            let (start, end) = if y > 50.0 { (55.0, 45.0) } else { (45.0, 55.0) };
+            run(
+                &mut s,
+                "sketch.arc.three_point",
+                json!({"start":[start-offset,50.0-offset],"through":[50.0-offset,y-offset],"end":[end-offset,50.0-offset]}),
+            );
+        }
+        run(&mut s, "sketch.finish", json!({}));
+        run(&mut s, "solid.extrude", json!({"sketch":"Hole","profiles":"all","distance":"6 mm","direction":"symmetric","operation":"cut"}));
+        let expected = (200.0 * 100.0 - PI * 25.0) * 1.5;
+        assert!((volume(&mut s) - expected).abs() < 1e-5, "origin {offset}");
+        let pattern = flat(&mut s);
+        assert_eq!(pattern["cutouts"].as_array().map(Vec::len), Some(1));
+        let body = &s.model.state().bodies[0].body;
+        assert_eq!(body.classify_point(solidcore_record::Vec3::new(50.0, 50.0, 0.75)).unwrap(), solidcraft_kernel::PointClass::Outside);
+        assert_eq!(body.classify_point(solidcore_record::Vec3::new(60.0, 50.0, 0.75)).unwrap(), solidcraft_kernel::PointClass::Inside);
+        let mut reopened = Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap());
+        assert!((volume(&mut reopened) - expected).abs() < 1e-5);
+        assert_eq!(flat(&mut reopened), pattern);
+    }
+}
+
+#[test]
 fn shallow_sheet_pocket_preserves_material_depth_export_undo_and_reopen() {
     let mut s = Session::default();
     base(&mut s, 100.0, 60.0);
