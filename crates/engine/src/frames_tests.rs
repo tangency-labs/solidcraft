@@ -692,6 +692,31 @@ fn a_root_hole_at_sketch_points_drills_only_the_part_it_reaches() {
     assert!(body_volume(&s, "Base block") < BLOCK - 1.0 && (body_volume(&s, "Cap block") - BLOCK).abs() < 1e-6);
 }
 
+/// #17655: a root rib sketched across one part, with every body taking part, joins that part
+/// only: another part, turned and moved away, is met where it is shown, not at the same place in
+/// its own frame. Redefined with one body taking part, it is the same.
+#[test]
+fn a_root_rib_joins_only_the_part_its_sketch_is_across() {
+    let mut s = two_parts(0.0, [0.0; 3]);
+    run(&mut s, "component.activate", json!({"component": "root"}));
+    run(&mut s, "occurrence.move", json!({"occurrence": "Cap:1", "axis": [0, 0, 1], "angle": "180 deg", "translate": [-10, 0, 0]}));
+    run(&mut s, "sketch.create", json!({"plane": {"origin": [0, 15, 0], "x_dir": [1, 0, 0], "y_dir": [0, 0, 1]}, "name": "RibSketch"}));
+    run(&mut s, "sketch.line", json!({"points": [[10, 15], [30, 15]], "ids": ["l1"]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.rib", json!({"sketch": "RibSketch", "curves": ["l1"], "thickness": 4, "participants": ["*"], "name": "R"}));
+    // The wall is 20 long, 4 thick and 5 tall, from the line down to the top of Base.
+    assert!((body_volume(&s, "Base block") - 12400.0).abs() < 1e-6, "{}", body_volume(&s, "Base block"));
+    assert!((body_volume(&s, "Cap block") - BLOCK).abs() < 1e-6, "{}", body_volume(&s, "Cap block"));
+
+    run(
+        &mut s,
+        "timeline.redefine",
+        json!({"feature": "R", "command": "solid.rib", "params": {"sketch": "RibSketch", "curves": ["l1"], "thickness": 4, "participants": ["Base block"]}}),
+    );
+    assert_eq!(s.doc.find_feature("R").unwrap().participants, vec!["Base block".to_string()]);
+    assert!((body_volume(&s, "Base block") - 12400.0).abs() < 1e-6 && (body_volume(&s, "Cap block") - BLOCK).abs() < 1e-6);
+}
+
 /// #6000: in a turned component, a named plane ("XY") is the component's own; an explicit
 /// `{origin, x_dir, y_dir}` is world unless `frame: "component"` says otherwise. The reply says
 /// which, with a note when the two differ.
