@@ -503,10 +503,12 @@ pub(crate) fn toggle_mode_key(app: &mut SolveApp, ctx: &egui::Context, key: egui
         let _ = app.run(id, json!({"on": false}));
         return true;
     }
+    // Over the view, or over the navigation bar at its foot, whose own drags and gestures move
+    // the view too; not over the other toolbars, panels or windows.
     let at = ctx.pointer_hover_pos().filter(|p| {
         app.viewport.rect.is_some_and(|rect| rect.contains(*p))
-            && !app.viewport.layout.as_ref().is_some_and(|l| l.navigation.contains(*p))
-            && ctx.layer_id_at(*p).is_none_or(|layer| layer.order == egui::Order::Background)
+            && (app.viewport.layout.as_ref().is_some_and(|l| l.navigation.contains(*p))
+                || ctx.layer_id_at(*p).is_none_or(|layer| layer.order == egui::Order::Background))
     });
     if at.is_some() && !view_keys_blocked(app, ctx, None) {
         app.viewport.nav_toggle_at = at;
@@ -537,7 +539,9 @@ pub(crate) fn modifier_motion(
         && !(picking
             && !crate::render_workspace::active(app)
             && hover.is_some_and(|p| app.viewport.rect.is_some_and(|rect| crate::canvas::owns_pointer(app, &projection(app, rect), p))))
-        && !hover.is_some_and(|p| app.viewport.layout.as_ref().is_some_and(|l| l.navigation.contains(p)));
+        // Pan, Orbit and Zoom Mode go on over the navigation bar, as its own tools' drags do.
+        && (app.viewport.nav_toggle.is_some()
+            || !hover.is_some_and(|p| app.viewport.layout.as_ref().is_some_and(|l| l.navigation.contains(p))));
     let wanted = app.viewport.nav_toggle.or_else(|| crate::prefs::nav_preset(&app.preferences.nav).motion_mode(mods));
     let next = wanted.zip(hover.filter(|p| owns && p.is_finite()));
     let previous = app.viewport.modifier_nav;

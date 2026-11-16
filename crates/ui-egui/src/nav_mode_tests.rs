@@ -70,6 +70,11 @@ fn a_mode_starts_only_with_the_pointer_over_the_view() {
     h.frame_with(vec![Event::PointerGone]);
     press(&mut h, Key::P);
     assert_eq!(h.app.viewport.nav_toggle, None);
+    // The navigation bar at the foot of the view counts as the view.
+    let bar = h.app.viewport.layout.as_ref().expect("laid out").navigation.center();
+    h.frame_with(vec![Event::PointerMoved(bar)]);
+    press(&mut h, Key::P);
+    assert_eq!(h.app.viewport.nav_toggle, Some(NavMode::Pan), "the key over the navigation bar starts the mode");
 }
 
 #[test]
@@ -86,6 +91,12 @@ fn a_mode_keeps_moving_the_view_over_the_toolbars_and_panels() {
         let before = h.app.cam;
         h.frame_with(vec![Event::PointerMoved(top + vec2(40.0, 30.0))]);
         assert_ne!(h.app.cam, before, "{k:?}: the view goes on moving over the toolbar");
+        // And over the navigation bar at the bottom of the view.
+        let bar = h.app.viewport.layout.as_ref().expect("laid out").navigation.center();
+        h.frame_with(vec![Event::PointerMoved(bar)]);
+        let before = h.app.cam;
+        h.frame_with(vec![Event::PointerMoved(bar + vec2(4.0, -3.0))]);
+        assert_ne!(h.app.cam, before, "{k:?}: and over the navigation bar");
         press(&mut h, k);
         assert_eq!(h.app.viewport.nav_toggle, None, "{k:?}: its key ends it there");
         let after = h.app.cam;
