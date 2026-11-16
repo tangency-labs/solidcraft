@@ -238,19 +238,30 @@ fn top_rim(k: &Kernel, b: &Brep) -> EdgeId {
         .unwrap()
 }
 
-/// Blends as wide as the face they roll on: the chamfer's cone would end in a point at the
-/// top's centre, where SMLib goes on (the fork's `FacesOutlastTheirBlends`, WR-320). With
-/// `fillet_refuse_face_consuming_blends` a chamfer of 10 on the top rim of a cylinder of
-/// radius 10 is refused (`NoRoom`). A round of 10 closes the top as a hemisphere
-/// tangent to it, as the fork's amendment (tangency-labs/smlib `8bffb23`) lets it, and
-/// builds either way, as does everything below the full width.
+/// Blends as wide as the face they roll on: the chamfer's cone ends in a point at the
+/// top's centre (the fork's `FacesOutlastTheirBlends`, WR-320, refuses a blend meeting the
+/// face it takes whole at an angle). A chamfer of 10 on the top rim of a cylinder of
+/// radius 10 is a cone with its apex there, the top's one closed edge closing to a point
+/// (#17198), and builds with `fillet_refuse_face_consuming_blends`. A round of
+/// 10 closes the top as a hemisphere tangent to it, as the fork's amendment
+/// (tangency-labs/smlib `8bffb23`) lets it, and builds either way, as does everything
+/// below the full width.
 #[test]
-fn chamfer_as_wide_as_its_face_is_refused() {
-    let mut k = kernel(|f| f.fillet_refuse_face_consuming_blends = true);
-    assert_eq!(
-        cylinder_rim(&mut k, 10.0, 0),
-        Outcome::Refused { code: NO_ROOM }
-    );
+fn chamfer_as_wide_as_its_face_is_a_cone() {
+    // the chamfer of 10: the cylinder (pi 100 20) less the ring between the r 10, h 10
+    // cylinder and the cone in it (2/3 pi 1000)
+    let cone = std::f64::consts::PI * (2000.0 - 2000.0 / 3.0);
+    // with the fixes SolidCraft runs (the cone's rail of no length needs more of them than
+    // the refusal's flag: upstream's own build fails to find the cone's edge)
+    let mut k = kernel(|f| {
+        *f = UpstreamFixes::all();
+        f.fillet_refuse_face_consuming_blends = true;
+    });
+    let got = cylinder_rim(&mut k, 10.0, 0);
+    let Outcome::Built { volume, manifold } = got else {
+        panic!("the chamfer of 10: {got:?}");
+    };
+    assert!(manifold && near(volume, cone, 5e-3), "{volume}");
     let mut k = Kernel::default();
     assert!(!matches!(
         cylinder_rim(&mut k, 10.0, 0),
@@ -353,28 +364,25 @@ fn no_room_reason(
     session.error_info().no_room_reason()
 }
 
-/// The `NoRoom` refusals name themselves (#960): a blend taking a whole face (the
-/// cylinder's chamfer of 10), where the comment was the only difference; a refusal under
-/// another code names none. The holed cube's chamfer of 5, once refused under another code
-/// (WR-301's rollover), builds. (The holed cube's blend of 6, once named as a rail leaving
-/// its face, and its chamfer of 25, once refused under another code, are now cliff
-/// overflows: `blends_across_the_openings_are_cliff_overflows` and below.)
+/// The `NoRoom` refusals name themselves (#960): a blend taking a whole face (a 10 cube's top
+/// chamfered 5 all round; a cylinder's top chamfered 10 builds a cone since #17198), where the
+/// comment was the only difference; a refusal under another code names none. The holed cube's
+/// chamfer of 5, once refused under another code (WR-301's rollover), builds. (The holed cube's
+/// blend of 6, once named as a rail leaving its face, and its chamfer of 25, once refused under
+/// another code, are now cliff overflows: `blends_across_the_openings_are_cliff_overflows` and
+/// below.)
 #[test]
 fn no_room_refusals_are_named() {
     let mut k = kernel(|f| f.fillet_refuse_face_consuming_blends = true);
-    let mut b = create_cylinder(&mut k, Point3::new(0.0, 0.0, 0.0), 10.0, 20.0).unwrap();
-    let rim = *b
-        .edge_list()
-        .iter()
-        .find(|&&e| {
-            let c = edge::curve(&b, e).unwrap().unwrap();
-            let ivl = edge::interval(&b, e).unwrap();
-            let p = c.evaluate_point(&k, ivl.min()).unwrap();
-            (p.z - 20.0).abs() < 1e-6 && (p.x.hypot(p.y) - 10.0).abs() < 1e-6
-        })
-        .unwrap();
+    let mut b = create_box(&mut k, Point3::new(0.0, 0.0, 0.0), 10.0, 10.0, 10.0).unwrap();
+    let top = [
+        edge_between(&k, &b, [0.0, 0.0, 10.0], [10.0, 0.0, 10.0]),
+        edge_between(&k, &b, [10.0, 0.0, 10.0], [10.0, 10.0, 10.0]),
+        edge_between(&k, &b, [10.0, 10.0, 10.0], [0.0, 10.0, 10.0]),
+        edge_between(&k, &b, [0.0, 10.0, 10.0], [0.0, 0.0, 10.0]),
+    ];
     assert_eq!(
-        no_room_reason(&mut k, &mut b, &[rim], 10.0),
+        no_room_reason(&mut k, &mut b, &top, 5.0),
         Some(NoRoomReason::FaceConsumed)
     );
 

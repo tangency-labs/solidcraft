@@ -692,6 +692,54 @@ fn a_root_hole_at_sketch_points_drills_only_the_part_it_reaches() {
     assert!(body_volume(&s, "Base block") < BLOCK - 1.0 && (body_volume(&s, "Cap block") - BLOCK).abs() < 1e-6);
 }
 
+/// #17655: a root rib sketched across one part, with every body taking part, joins that part
+/// only: another part, turned and moved away, is met where it is shown, not at the same place in
+/// its own frame. Redefined with one body taking part, it is the same.
+#[test]
+fn a_root_rib_joins_only_the_part_its_sketch_is_across() {
+    let mut s = two_parts(0.0, [0.0; 3]);
+    run(&mut s, "component.activate", json!({"component": "root"}));
+    run(&mut s, "occurrence.move", json!({"occurrence": "Cap:1", "axis": [0, 0, 1], "angle": "180 deg", "translate": [-10, 0, 0]}));
+    run(&mut s, "sketch.create", json!({"plane": {"origin": [0, 15, 0], "x_dir": [1, 0, 0], "y_dir": [0, 0, 1]}, "name": "RibSketch"}));
+    run(&mut s, "sketch.line", json!({"points": [[10, 15], [30, 15]], "ids": ["l1"]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.rib", json!({"sketch": "RibSketch", "curves": ["l1"], "thickness": 4, "participants": ["*"], "name": "R"}));
+    // The wall is 20 long, 4 thick and 5 tall, from the line down to the top of Base.
+    assert!((body_volume(&s, "Base block") - 12400.0).abs() < 1e-6, "{}", body_volume(&s, "Base block"));
+    assert!((body_volume(&s, "Cap block") - BLOCK).abs() < 1e-6, "{}", body_volume(&s, "Cap block"));
+
+    run(
+        &mut s,
+        "timeline.redefine",
+        json!({"feature": "R", "command": "solid.rib", "params": {"sketch": "RibSketch", "curves": ["l1"], "thickness": 4, "participants": ["Base block"]}}),
+    );
+    assert_eq!(s.doc.find_feature("R").unwrap().participants, vec!["Base block".to_string()]);
+    assert!((body_volume(&s, "Base block") - 12400.0).abs() < 1e-6 && (body_volume(&s, "Cap block") - BLOCK).abs() < 1e-6);
+}
+
+/// #17655: an open-ended rib stops at the face of a moved body that does not take part, where that
+/// body is shown: Cap, shown beside Base and 2 mm up, is the floor under the part of the wall
+/// that runs past Base's end, not Cap's unmoved place.
+#[test]
+fn a_root_rib_stops_at_a_moved_part_that_does_not_take_part() {
+    let mut s = two_parts(0.0, [0.0; 3]);
+    run(&mut s, "component.activate", json!({"component": "root"}));
+    run(&mut s, "occurrence.move", json!({"occurrence": "Cap:1", "translate": [40, 0, 2]}));
+    run(&mut s, "sketch.create", json!({"plane": {"origin": [0, 15, 0], "x_dir": [1, 0, 0], "y_dir": [0, 0, 1]}, "name": "RibSketch"}));
+    run(&mut s, "sketch.line", json!({"points": [[30, 17], [60, 17]], "ids": ["l1"]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.rib", json!({"sketch": "RibSketch", "curves": ["l1"], "thickness": 4, "participants": ["Base block"]}));
+    // The wall is 4 thick and runs from the line at 17 down to a face, 2 mm into the body there (the
+    // overlap, as the samples are 1 mm apart): above Base's top (10) it is 7 tall over x 30..40
+    // (area 70), and above Cap's shown top (12) it reaches down to 10, 7 tall over x 40..60 (area
+    // 140), where Cap found unmoved would leave it 12 tall. The sample on the seam at x = 40
+    // meets Cap's top with the shared face 2 mm below it, so its overlap is 1, not 2: the wall's
+    // underside runs (39, 8), (40, 11), (41, 10), which leaves out 1/6 + 1/2 of area above 10.
+    // Volume 12000 + 4 * (70 + 140 - 2/3) = 12000 + 2512/3.
+    assert!((body_volume(&s, "Base block") - (12000.0 + 2512.0 / 3.0)).abs() < 1e-6, "{}", body_volume(&s, "Base block"));
+    assert!((body_volume(&s, "Cap block") - BLOCK).abs() < 1e-6, "{}", body_volume(&s, "Cap block"));
+}
+
 /// #6000: in a turned component, a named plane ("XY") is the component's own; an explicit
 /// `{origin, x_dir, y_dir}` is world unless `frame: "component"` says otherwise. The reply says
 /// which, with a note when the two differ.
