@@ -4920,10 +4920,33 @@ fn apply_traced_with(
         }
         return Ok(());
     }
-    // #9867: a named surface body is no solid to cut or intersect; say how to get one.
-    if matches!(op, Operation::Cut | Operation::Intersect) && named {
+    // A surface body is no solid to cut or intersect, including automatic targets (#17587).
+    // Keep Thicken's source surfaces intact. Other automatic cuts leave a surface alone only
+    // when exact bounds prove every tool is clear of it in its own frame. An intersect would
+    // delete even a distant surface.
+    if matches!(op, Operation::Cut | Operation::Intersect) {
+        let mut untouched = std::collections::BTreeSet::new();
         for &i in &target_idx {
-            if let Some(b) = state.bodies.get(i).filter(|b| b.body.is_surface()) {
+            if let Some(b) = state.bodies.get(i).filter(|b| b.is_surface()) {
+                // Thicken's source surfaces supply the tools and stay intact (#17587).
+                if !named && matches!(&f.kind, FeatureKind::Thicken { bodies, .. } if bodies.iter().any(|n| *n == b.name)) {
+                    untouched.insert(i);
+                    continue;
+                }
+                if op == Operation::Cut && !named && !tools.is_empty() {
+                    let into = tool_frame(&b.name);
+                    let mut apart = true;
+                    for tool in &tools {
+                        if !kernel::apart(&b.body, &tool_in(tool, into)?.body)? {
+                            apart = false;
+                            break;
+                        }
+                    }
+                    if apart {
+                        untouched.insert(i);
+                        continue;
+                    }
+                }
                 let verb = if op == Operation::Cut { "a cut" } else { "an intersect" };
                 return Err(DocError::Invalid(format!(
                     "{} is a surface body, and {verb} needs a solid: cut it with Surface › Trim, or Thicken it first",
@@ -4931,6 +4954,7 @@ fn apply_traced_with(
                 )));
             }
         }
+        target_idx.retain(|i| !untouched.contains(i));
     }
     // An intersect's tools act as one body. Unioned after the refusals above, so a union that
     // fails or runs out of time never hides them and is not paid for a refused feature.
