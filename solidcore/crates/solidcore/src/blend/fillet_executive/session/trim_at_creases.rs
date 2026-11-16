@@ -580,6 +580,67 @@ fn move_edge_onto_crease(
     Ok(true)
 }
 
+/// #17633: whether the trim kept geometry that an edge's move onto its crease left off
+/// (checked once the faces past the creases are deleted; a `true` is refused). Checked on
+/// the geometry, not on ids, so an edge or face the imprint split is still found: an edge
+/// still at a moved vertex that does not run through it (within `tol * 1e-6`), or an edge
+/// along a crease piece (picked by its midpoint) that does not lie, by the enclosed bound
+/// of its control points, on the plane of every face it bounds (a face that is not planar
+/// fails).
+fn move_leftovers_kept(k: &Kernel, target: &Brep, moves: &MovedEdges, tol: f64) -> Result<bool> {
+    let on = tol * 1e-6;
+    for &v in &moves.vertices {
+        if target.vertex(v).is_err() {
+            continue;
+        }
+        let p = vertex::point(target, v)?;
+        for e in vertex::edges(target, v, None)? {
+            let curve = edge_curve(k, target, e)?;
+            let through = matches!(
+                drop_on(k, &curve, &curve.natural_interval(), p)?,
+                Some((_, dist)) if dist <= on
+            );
+            if !through {
+                return Ok(true);
+            }
+        }
+    }
+    if moves.pieces.is_empty() {
+        return Ok(false);
+    }
+    for e in crate::topology::brep::p1::edges(target, None)? {
+        let curve = edge_curve(k, target, e)?;
+        let mid = curve.evaluate_point(k, curve.natural_interval().evaluate(0.5))?;
+        // picks the edges along a piece (the acceptance below is a bound)
+        let mut along = false;
+        for piece in &moves.pieces {
+            along = matches!(
+                drop_on(k, piece, &piece.natural_interval(), mid)?,
+                Some((_, dist)) if dist <= on
+            );
+            if along {
+                break;
+            }
+        }
+        if !along {
+            continue;
+        }
+        for g in edge::faces(target, e, None)? {
+            let plane = match face::p2::surface(target, g)? {
+                Some(surface) => crate::blend::fillet_overflow::plane_of(k, surface)?,
+                None => None,
+            };
+            let on_plane = plane.is_some_and(|(at, normal)| {
+                matches!(distance_to_plane_bound(&curve, at, normal), Some(d) if d <= on)
+            });
+            if !on_plane {
+                return Ok(true);
+            }
+        }
+    }
+    Ok(false)
+}
+
 /// A refusal with its fillet error and typed reason.
 const fn refusal(
     code: FilletErrorType,
@@ -1783,65 +1844,9 @@ impl FilletSession<'_> {
         })?;
         // #17633: what an edge's move onto its crease left off its old geometry is taken off
         // with the faces past the creases; anything left of it is refused, not kept
-        // within a larger tolerance. Checked on the geometry, so that an edge or face the
-        // imprint split is still found: every edge still at a moved vertex runs through
-        // it, and every edge along a crease piece (the moved edges and their pieces) lies,
-        // by the enclosed bound of its control points, on the plane of every face it
-        // bounds.
+        // within a larger tolerance ([`move_leftovers_kept`])
         {
-            let target = &*self.objects.target;
-            let on = tol * 1e-6;
-            let mut kept_off = false;
-            'vertices: for &v in &moves.vertices {
-                if target.vertex(v).is_err() {
-                    continue;
-                }
-                let p = vertex::point(target, v)?;
-                for e in vertex::edges(target, v, None)? {
-                    let curve = edge_curve(k, target, e)?;
-                    let through = matches!(
-                        drop_on(k, &curve, &curve.natural_interval(), p)?,
-                        Some((_, dist)) if dist <= on
-                    );
-                    if !through {
-                        kept_off = true;
-                        break 'vertices;
-                    }
-                }
-            }
-            if !kept_off && !moves.pieces.is_empty() {
-                'edges: for e in crate::topology::brep::p1::edges(target, None)? {
-                    let curve = edge_curve(k, target, e)?;
-                    let mid = curve.evaluate_point(k, curve.natural_interval().evaluate(0.5))?;
-                    // picks the edges along a piece (the acceptance below is a bound)
-                    let mut along = false;
-                    for piece in &moves.pieces {
-                        along = matches!(
-                            drop_on(k, piece, &piece.natural_interval(), mid)?,
-                            Some((_, dist)) if dist <= on
-                        );
-                        if along {
-                            break;
-                        }
-                    }
-                    if !along {
-                        continue;
-                    }
-                    for g in edge::faces(target, e, None)? {
-                        let plane = match face::p2::surface(target, g)? {
-                            Some(surface) => crate::blend::fillet_overflow::plane_of(k, surface)?,
-                            None => None,
-                        };
-                        let on_plane = plane.is_some_and(|(at, normal)| {
-                            matches!(distance_to_plane_bound(&curve, at, normal), Some(d) if d <= on)
-                        });
-                        if !on_plane {
-                            kept_off = true;
-                            break 'edges;
-                        }
-                    }
-                }
-            }
+            let kept_off = move_leftovers_kept(k, self.objects.target, &moves, tol)?;
             if kept_off {
                 return refuse(
                     note,
@@ -2136,5 +2141,61 @@ mod tests {
         assert!(bound > tol, "the gate refuses: bound {bound} > tol {tol}");
         // and the S is not taken as a straight edge
         assert!(straight_ends(&k, &c).unwrap().is_none());
+    }
+
+    /// The leftover check refuses what a move left off and passes a body that holds
+    /// together: the trim's `BadMerge` refusal (#17704) is this `true`.
+    #[test]
+    fn a_move_s_leftovers_are_found_on_the_geometry() {
+        use crate::primitive::api_primitives::{create_box, create_cylinder};
+        let mut k = Kernel::default();
+        let tol = 4e-5;
+
+        // a box's vertex: every edge at it runs through it
+        let mut b = create_box(&mut k, Point3::ZERO, 40.0, 20.0, 10.0).unwrap();
+        let v = b.vertices().ids().next().unwrap();
+        let mut moves = MovedEdges {
+            vertices: vec![v],
+            ..MovedEdges::default()
+        };
+        assert!(!move_leftovers_kept(&k, &b, &moves, tol).unwrap());
+        // the vertex moved 1e-6 off its edges (far past `tol * 1e-6`): refused
+        b.vertex_mut(v).unwrap().point.x += 1e-6;
+        assert!(move_leftovers_kept(&k, &b, &moves, tol).unwrap());
+
+        // a box's edge taken as a crease piece: it lies on both its planes
+        let b = create_box(&mut k, Point3::ZERO, 40.0, 20.0, 10.0).unwrap();
+        let e = b.edges().ids().next().unwrap();
+        moves = MovedEdges {
+            pieces: vec![edge_curve(&k, &b, e).unwrap()],
+            ..MovedEdges::default()
+        };
+        assert!(!move_leftovers_kept(&k, &b, &moves, tol).unwrap());
+
+        // a cylinder's rim taken as a crease piece: the rim bounds the curved side, whose
+        // distance no plane bound encloses: refused
+        let c = create_cylinder(&mut k, Point3::ZERO, 5.0, 10.0).unwrap();
+        let rim = c
+            .edges()
+            .ids()
+            .find(|&e| {
+                edge::faces(&c, e, None).unwrap().iter().any(|&g| {
+                    let surface = face::p2::surface(&c, g).unwrap().unwrap();
+                    crate::blend::fillet_overflow::plane_of(&k, surface)
+                        .unwrap()
+                        .is_none()
+                }) && edge::faces(&c, e, None).unwrap().iter().any(|&g| {
+                    let surface = face::p2::surface(&c, g).unwrap().unwrap();
+                    crate::blend::fillet_overflow::plane_of(&k, surface)
+                        .unwrap()
+                        .is_some()
+                })
+            })
+            .expect("a rim between a cap and the side");
+        let moves = MovedEdges {
+            pieces: vec![edge_curve(&k, &c, rim).unwrap()],
+            ..MovedEdges::default()
+        };
+        assert!(move_leftovers_kept(&k, &c, &moves, tol).unwrap());
     }
 }
