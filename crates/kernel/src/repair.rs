@@ -129,6 +129,9 @@ pub struct RepairReport {
     /// The tolerance-scale defects SMLib's check fails that were healed first
     /// ([`crate::heal_tolerance_defects`]); face indices after it are the healed part's.
     pub healed: Option<crate::ToleranceHeal>,
+    /// The heal of those defects failed inside the kernel (a panic it caught), and this is
+    /// why: the repair went on without it, from the part as it was.
+    pub heal_failed: Option<String>,
 }
 
 impl RepairReport {
@@ -162,13 +165,20 @@ pub fn repair(body: &Body, opts: &RepairOptions) -> Result<(Body, RepairReport)>
     };
 
     // 0. A part SMLib takes whose check fails: its tolerance-scale defects healed first (on a
-    // copy, kept only when the check fails fewer tests and no new kind).
+    // copy, kept only when SMLib takes the healed body and its check fails fewer tests and no
+    // kind more often: [`crate::heal_tolerance_defects`] checks the body it gives back).
     // The heal runs the check itself and gives the part back when it passes.
     let healed = if body.smlib().is_ok() {
         match crate::tolerance_heal::heal_tolerance_defects(body) {
             Ok(healed) => healed,
             // a stopped heal stops the repair: the steps below would stop too
             Err(e @ KernelError::Heal(crate::HealFailure::Stopped)) => return Err(e),
+            // a panic in the heal is reported, and the repair goes on from the part as it was
+            Err(KernelError::Internal(e)) => {
+                log::warn!(target: "repair", "the tolerance heal failed: kernel internal error: {e}");
+                report.heal_failed = Some(format!("kernel internal error: {e}"));
+                None
+            }
             // a heal that cannot run leaves the repair to the steps below
             Err(e) => {
                 log::debug!(target: "repair", "the tolerance heal could not run: {e}");
@@ -247,11 +257,13 @@ pub fn repair(body: &Body, opts: &RepairOptions) -> Result<(Body, RepairReport)>
         if holes.is_empty() {
             // SMLib takes the part, and it is whole: its check says whether the operations on it
             // will take their results, so "nothing to repair" is said only when it passes.
-            return Err(match crate::validation::failing_check(&current)? {
-                None => RepairRefusal::NothingToRepair,
-                Some(check) => RepairRefusal::CheckFails(check),
-            }
-            .into());
+            // A heal that failed inside the kernel might have fixed what the check fails: the
+            // repair says that, not that it has nothing for the part.
+            return Err(match (crate::validation::failing_check(&current)?, report.heal_failed.take()) {
+                (None, _) => RepairRefusal::NothingToRepair.into(),
+                (Some(_), Some(e)) => KernelError::Internal(format!("the tolerance heal failed: {e}")),
+                (Some(check), None) => RepairRefusal::CheckFails(check).into(),
+            });
         }
         return Err(invalid(format!("nothing sewn: the free edges bound holes ({}); patch them to close the part", holes.join("; "))));
     }

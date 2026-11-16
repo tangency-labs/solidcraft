@@ -97,6 +97,9 @@ pub struct RepairDone {
     /// in a line; face indices in the rest of the report are the healed part's.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub healed: Option<String>,
+    /// That heal failed inside the kernel, and why: the repair went on from the part as it was.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub heal_failed: Option<String>,
 }
 
 /// What `body.repair` returns.

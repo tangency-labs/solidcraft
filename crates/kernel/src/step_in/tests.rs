@@ -4298,7 +4298,8 @@ fn an_imported_part_whose_check_fails_is_healed_where_it_is_read() {
         let off = (o1[0] - o0[0]) * n0[0] + (o1[1] - o0[1]) * n0[1] + (o1[2] - o0[2]) * n0[2];
         assert!(dot.abs() >= 1.0 - 1e-12 && off.abs() <= 1e-9, "face {i} from file face {o}: {dot} {off}");
     }
-    let Healed::Kept(Note::Repaired(note)) = &read else { panic!("one Repaired note") };
+    let Healed::Kept(Note::Repaired(note), check) = &read else { panic!("one Repaired note") };
+    assert_eq!(check, &None, "the kept body passes SMLib's check as kept");
     assert!(note.contains("2 edges shorter than their tolerance collapsed") && note.contains("1 sliver faces"), "{note}");
 
     // a part whose check passes is left as it is, with no note
@@ -4381,7 +4382,13 @@ fn a_scaled_instance_that_fails_as_placed_heals_nothing() {
 
     // A part whose own check fails is healed even when it is read at a stretched placement:
     // the part's check decides, and the instance is placed and checked again afterwards.
+    // This section shows the heal kept at a stretched read; it does not by itself tell the
+    // part's check from the placed one: a placement scales the tolerances by its largest
+    // factor, so the hair step fails as placed too (at every scale, shear and mirror tried).
+    // `the_instance_a_part_is_read_at_never_decides_its_heal` is the case where the two differ.
     let hair = hair_step_body(3e-4, 1e-3);
+    let stretched = crate::ops::transform_matrix(&hair, stretch).unwrap().without_history();
+    assert!(crate::validation::failing_check(&stretched).unwrap().is_some(), "stretched, the hair step fails as placed too");
     let mut part = parallel::Part { closed: true, file_faces: 8, face_origin: (0..8).collect(), refused: None, body: hair };
     let mut notes = Vec::new();
     let done = parallel::decide_heal(&mut part, &mut notes, &stretch, 7).ok().expect("placed");
@@ -4418,6 +4425,93 @@ fn a_stopped_heal_changes_nothing() {
     let repaired = stop.within(|| crate::repair(&hair, &crate::RepairOptions { gap: 0.01, patch_holes: false }));
     assert_eq!(repaired.err(), Some(KernelError::Heal(crate::HealFailure::Stopped)));
     // Not stopped, the same heal is kept.
-    assert!(matches!(heal(&mut part, 7), Healed::Kept(_)));
+    assert!(matches!(heal(&mut part, 7), Healed::Kept(..)));
     assert_eq!(part.body.face_count(), 7);
+}
+
+/// #17689: a part read at a rigid placement away from the identity is decided by its own check
+/// and healed like any other; the instance is then placed and checked again (`None`), and that
+/// check passes. At the identity the heal's own check of the body it kept is the job's check:
+/// it is not run twice.
+#[test]
+fn a_translated_part_is_healed_on_its_own_check_and_checked_again() {
+    use super::parallel::{Note, Part, PlacedCheck, decide_heal};
+    let to = translation([10.0, -20.0, 30.0]);
+    let hair = hair_step_body(3e-4, 1e-3);
+    let placed = |b: &Body| crate::ops::transform_matrix(b, to).unwrap().without_history();
+    assert!(crate::validation::failing_check(&placed(&hair)).unwrap().is_some(), "translated, it fails too");
+    let mut part = Part { closed: true, file_faces: 8, face_origin: (0..8).collect(), refused: None, body: hair.clone() };
+    let mut notes = Vec::new();
+    let done = decide_heal(&mut part, &mut notes, &to, 7).ok().expect("placed");
+    assert!(done.is_none(), "healed at a translation: placed and checked again by the job");
+    assert_eq!(part.body.face_count(), 7);
+    assert!(matches!(&notes[..], [Note::Repaired(n)] if n.contains("healed SMLib's check failures")));
+    assert_eq!(crate::validation::failing_check(&placed(&part.body)).unwrap(), None, "the re-check of the healed part as placed passes");
+
+    // At the identity the job's check is the heal's check of the body it kept.
+    let mut part = Part { closed: true, file_faces: 8, face_origin: (0..8).collect(), refused: None, body: hair };
+    let mut notes = Vec::new();
+    let done = decide_heal(&mut part, &mut notes, &IDENTITY, 7).ok().expect("placed");
+    let Some((body, PlacedCheck::Passes)) = done else { panic!("healed at the identity: the heal's check passes and is the job's") };
+    assert_eq!(body.record(), part.body.record());
+    assert_eq!(part.body.face_count(), 7);
+    assert_eq!(notes.len(), 1);
+}
+
+/// #17689: whichever instance the import reads a part at, the heal is decided on the part's own
+/// check, never on a placed one: at the knife edge where a far translation changes the check's
+/// verdict (the riser at half its edges' tolerance), a rigid and a stretched first instance both
+/// leave the verdict to the job's own check of the body as placed (`None`), and leave the part
+/// as it was. A rigid placement's check never stands in for the part's.
+#[test]
+fn the_instance_a_part_is_read_at_never_decides_its_heal() {
+    use super::parallel::{Part, decide_heal};
+    let stretch: M4 = [[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 100.0, 0.0], [100.0, 0.0, 0.0, 1.0]];
+    let verdict = |b: &Body| crate::validation::failing_check(b).unwrap().map(|f| f.failures);
+    let placed = |b: &Body, m: M4| crate::ops::transform_matrix(b, m).unwrap().without_history();
+    // (riser, far translation): the part passes and fails placed, then fails and passes placed.
+    for (step, far) in [(5e-4, [0.0, 0.0, 1000.0]), (4.999999999e-4, [0.0, 1e4, 1e4])] {
+        let hair = hair_step_body(step, 1e-3);
+        let far = translation(far);
+        assert_ne!(verdict(&hair).is_some(), verdict(&placed(&hair, far)).is_some(), "{step}: the far translation changes the verdict");
+        let mut decided = Vec::new();
+        for m in [far, stretch] {
+            let mut part = Part { closed: true, file_faces: 8, face_origin: (0..8).collect(), refused: None, body: hair.clone() };
+            let mut notes = Vec::new();
+            let done = decide_heal(&mut part, &mut notes, &m, 7).ok().expect("placed");
+            assert!(done.is_none(), "{step}: the job checks its own placed body; no placed check decides");
+            assert!(notes.is_empty(), "{step}: {:?}", notes.len());
+            decided.push(part.body.record().clone());
+        }
+        assert_eq!(decided[0], decided[1], "{step}: both orders decide the same");
+        assert_eq!(&decided[0], hair.record(), "{step}: nothing the heal keeps");
+    }
+}
+
+/// #17689: a stop met while deciding the heal is the import's stop at every placement: the body
+/// is placed under no token, so a placement that goes through SMLib's transform (a torus
+/// stretched along its axis) is not turned into a refused part. The hair step's placement is
+/// exact (planes map as records) and stops nowhere; the torus's is SMLib's, which the token stops.
+#[test]
+fn a_stopped_heal_at_a_stretched_placement_stops_the_import() {
+    use super::parallel::{Part, PlacedCheck, decide_heal};
+    let stretch: M4 = [[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 3.0, 0.0], [100.0, 0.0, 0.0, 1.0]];
+    let ring = torus(Vec3::new(0.0, 0.0, 0.0), 10.0, 2.0).unwrap();
+    let faces = ring.face_count();
+    let stop = solidcraft_smlib::stop::Stop::new();
+    stop.stop();
+    let z = |b: &Body| {
+        let m = measure(b).unwrap();
+        m.bbox.max.z - m.bbox.min.z
+    };
+    for part in [ring, hair_step_body(3e-4, 1e-3)] {
+        let source = part.record().clone();
+        let mut part = Part { closed: true, file_faces: faces, face_origin: (0..part.face_count() as u64).collect(), refused: None, body: part };
+        let mut notes = Vec::new();
+        let done = stop.within(|| decide_heal(&mut part, &mut notes, &stretch, 7));
+        let Ok(Some((body, PlacedCheck::Stopped))) = done else { panic!("stopped, not refused") };
+        assert!((z(&body) - 3.0 * z(&part.body)).abs() < 1e-6, "placed: {} {}", z(&body), z(&part.body));
+        assert_eq!(part.body.record(), &source);
+        assert!(notes.is_empty());
+    }
 }

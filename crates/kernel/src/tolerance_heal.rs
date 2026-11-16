@@ -4,8 +4,17 @@
 //! decides every edit on a certified bound, grows no tolerance, and keeps its result only
 //! when the check of it fails fewer tests and no new kind ([`solidcore_ops::heal`]). Run when
 //! a STEP part is read and by Repair.
+//!
+//! solidcore-ops decides on its check of the healed body it holds; what the part becomes is
+//! that body's record brought into SMLib ([`Body::from_record`]), which is not the same body
+//! bit for bit. So the body kept is checked again as it is kept, by SMLib
+//! ([`crate::validation::failing_check`]), and stands only when SMLib takes it, and its check
+//! fails fewer tests than the check that decided the heal and no kind of test more often.
+
+use std::collections::BTreeMap;
 
 use crate::body::Body;
+use crate::validation::CheckFailure;
 use crate::{KernelError, Result};
 
 /// What [`heal_tolerance_defects`] did.
@@ -21,10 +30,15 @@ pub struct ToleranceHeal {
     pub cut_pieces: usize,
     /// The largest certified distance any of those edits moved the part's boundary, mm.
     pub largest_bound: f64,
-    /// Failed tests of the check before and after.
+    /// Failed tests of the check before (the one that decided the heal) and after (SMLib's
+    /// check of the healed body as kept).
     pub failed: [usize; 2],
     /// For each face of the healed part, the face of the part it was.
     pub face_source: Vec<usize>,
+    /// SMLib's check of the healed body as kept ([`crate::validation::failing_check`]): what
+    /// it fails, `None` when it passes. A caller that checks the same body reads it here
+    /// rather than checking again.
+    pub check: Option<CheckFailure>,
 }
 
 impl ToleranceHeal {
@@ -64,7 +78,9 @@ pub enum HealFailure {
 
 /// `body` healed of its tolerance-scale defects (module docs) and what was done, or `None`
 /// when there is nothing the heal can prove or its result would not be better (the body as it
-/// is then stands). A mesh body, or one solidcore cannot convert, is `None`.
+/// is then stands). A mesh body, or one solidcore cannot convert, is `None`. So is a healed
+/// body SMLib refuses, or whose SMLib check (module docs) fails as many tests as the check
+/// that decided the heal, or some kind of test more often.
 ///
 /// The heal runs under the token over this thread's work ([`solidcraft_smlib::stop::token`]),
 /// which solidcore-ops polls in its kernel's long loops, as SMLib's own calls do: work stopped
@@ -72,8 +88,10 @@ pub enum HealFailure {
 ///
 /// # Errors
 /// [`KernelError::Heal`]: [`HealFailure::Stopped`] when the token stops it,
-/// [`HealFailure::CouldNotRun`] for the heal's other failures; [`KernelError::Internal`] for a
-/// panic in it; and the healed record's.
+/// [`HealFailure::CouldNotRun`] for the heal's other failures, and for SMLib's check of the
+/// healed body that cannot run; [`KernelError::Internal`] for a panic in it; and the healed
+/// record's. A failure met while the token is stopped is [`HealFailure::Stopped`], whatever
+/// failed: as the import's check takes it.
 pub fn heal_tolerance_defects(body: &Body) -> Result<Option<(Body, ToleranceHeal)>> {
     let Some((ops, order)) = body.ops_body() else {
         return Ok(None);
@@ -87,6 +105,7 @@ pub fn heal_tolerance_defects(body: &Body) -> Result<Option<(Body, ToleranceHeal
         solidcore_ops::Error::Cancelled => KernelError::Heal(HealFailure::Stopped),
         // a panic the session caught stays the kernel's internal error, as SMLib's do
         solidcore_ops::Error::Internal(m) => KernelError::Internal(format!("heal: {m}")),
+        _ if stopped() => KernelError::Heal(HealFailure::Stopped),
         e => KernelError::Heal(HealFailure::CouldNotRun(e.to_string())),
     })?;
     let Some(healed) = healed else {
@@ -94,14 +113,101 @@ pub fn heal_tolerance_defects(body: &Body) -> Result<Option<(Body, ToleranceHeal
         return Ok(None);
     };
     let out = Body::from_record(healed.record)?.with_color(body.color());
+    // The body kept is SMLib's of the healed record, not the body solidcore-ops checked: it
+    // stands only on its own check.
+    if let Some(refused) = out.smlib_refusal() {
+        log::debug!(target: "repair", "tolerance heal not kept: SMLib refuses the healed body: {}", refused.why);
+        return Ok(None);
+    }
+    let check = crate::validation::failing_check(&out).map_err(|e| match e {
+        e @ KernelError::Internal(_) => e,
+        _ if stopped() => KernelError::Heal(HealFailure::Stopped),
+        e => KernelError::Heal(HealFailure::CouldNotRun(format!("SMLib's check of the healed body: {e}"))),
+    })?;
+    if let Some(why) = worse(&report.before, check.as_ref()) {
+        log::debug!(target: "repair", "tolerance heal not kept: {why}");
+        return Ok(None);
+    }
     let heal = ToleranceHeal {
         squeezed_edges: report.squeezed_edges,
         re_ended_edges: report.re_ended_edges,
         collapsed_faces: report.collapsed_faces,
         cut_pieces: report.cut_pieces,
         largest_bound: report.largest_bound,
-        failed: [report.before.failures, report.after.map_or(0, |a| a.failures)],
+        failed: [report.before.failures, check.as_ref().map_or(0, |c| c.failures)],
         face_source: healed.face_source,
+        check,
     };
     Ok(Some((out, heal)))
+}
+
+/// Whether the token over this thread's work is stopped.
+fn stopped() -> bool {
+    solidcraft_smlib::stop::current().is_some_and(|s| s.is_stopped())
+}
+
+/// Why the check of the body kept (`after`, `None` when it passes) is not better than the
+/// check that decided the heal (`before`), or `None` when it is: it fails fewer tests, and no
+/// kind of test (its owner's class and number, `SmEdge::Test #7`) more often.
+fn worse(before: &solidcore_ops::check::CheckReport, after: Option<&CheckFailure>) -> Option<String> {
+    let after = after?;
+    let mut was: BTreeMap<String, usize> = BTreeMap::new();
+    for line in before.text.lines() {
+        if let Some(k) = kind(line) {
+            *was.entry(k).or_insert(0) += 1;
+        }
+    }
+    let mut now: BTreeMap<String, usize> = BTreeMap::new();
+    for t in &after.tests {
+        if let Some(k) = kind(&t.name) {
+            *now.entry(k).or_insert(0) += t.times;
+        }
+    }
+    let more: Vec<String> = now.into_iter().filter(|(k, n)| *n > was.get(k).copied().unwrap_or(0)).map(|(k, _)| k).collect();
+    if !more.is_empty() {
+        return Some(format!("SMLib's check of the healed body fails more tests of a kind than the body's: {}", more.join(", ")));
+    }
+    (after.failures >= before.failures)
+        .then(|| format!("SMLib's check of the healed body fails {} tests, the body's {}", after.failures, before.failures))
+}
+
+/// A failed test's kind, `SmEdge::Test #7`, from its line or its name.
+fn kind(line: &str) -> Option<String> {
+    let (owner, rest) = line.trim().split_once("::Test #")?;
+    let digits: String = rest.chars().take_while(char::is_ascii_digit).collect();
+    (!digits.is_empty()).then(|| format!("{owner}::Test #{digits}"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::validation::FailedTest;
+
+    fn failed(tests: &[(&str, usize)]) -> CheckFailure {
+        CheckFailure {
+            failures: tests.iter().map(|t| t.1).sum(),
+            tests: tests.iter().map(|&(name, times)| FailedTest { name: name.into(), number: None, owners: Vec::new(), times }).collect(),
+        }
+    }
+
+    /// #17689: the body kept stands only when SMLib's check of it fails fewer tests than the
+    /// check that decided the heal and no kind of test more often.
+    #[test]
+    fn a_healed_body_is_kept_only_when_its_check_is_better_at_every_kind() {
+        let before = solidcore_ops::check::CheckReport {
+            failures: 3,
+            text: "SmEdge::Test #7 Bad Edge Length: less than edge tolerance (len=1e-4) [owner SmEdge]\n\
+                   SmEdge::Test #7 Bad Edge Length: less than edge tolerance (len=2e-4) [owner SmEdge]\n\
+                   SmFace::Test #34 Face has partially Coincident Edges [owner SmFace]\n"
+                .into(),
+        };
+        assert_eq!(worse(&before, None), None, "a check that passes is better");
+        assert_eq!(worse(&before, Some(&failed(&[("SmEdge::Test #7 Bad Edge Length: less than edge tolerance", 2)]))), None);
+        let new_kind = worse(&before, Some(&failed(&[("SmLoop::Test #2 Bad Loop Orient", 1)])));
+        assert!(new_kind.is_some_and(|w| w.contains("SmLoop::Test #2")), "a kind the body did not fail");
+        let more = worse(&before, Some(&failed(&[("SmFace::Test #34 Face has partially Coincident Edges", 2)])));
+        assert!(more.is_some_and(|w| w.contains("SmFace::Test #34")), "a kind failed more often");
+        let as_many = worse(&before, Some(&failed(&[("SmEdge::Test #7 Bad Edge Length", 2), ("SmFace::Test #34 Face has", 1)])));
+        assert!(as_many.is_some_and(|w| w.contains("fails 3 tests, the body's 3")), "as many failed tests");
+    }
 }

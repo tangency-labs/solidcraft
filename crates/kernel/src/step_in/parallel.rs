@@ -67,6 +67,9 @@ pub(super) enum Note {
     Repaired(String),
     /// A face left out, with the reason.
     LeftOut(String),
+    /// The heal of the part's check failures failed inside the kernel, with why: the part
+    /// stands as read, and still needs repair.
+    HealFailed(String),
 }
 
 /// Why a job made no body: the item could not be read (`read`), or its body not made.
@@ -141,43 +144,57 @@ fn check_placed(body: &Body) -> PlacedCheck {
 /// Whether the part just read is healed ([`heal`]), decided by its own check, and this job's
 /// body placed with its check when that check is already the one the job needs.
 ///
-/// The heal changes the part every instance shares, so only a check that speaks for the part
-/// decides it: the part's under a rigid placement, which keeps every tolerance and is one check
-/// class with the part as the file defines it ([`super::check_class`]). A placement that scales,
-/// shears or mirrors maps the geometry without its tolerances, so its verdict is the instance's
-/// alone: with one, the part is checked where the file defines it to decide. Only a check that
-/// ran and failed is healed: one that passes needs nothing, and one that could not run or was
-/// stopped says nothing about the part. A healed part's instances are each placed and checked
-/// again (`None` here), in every class: the heal decided on one class is checked in all of them.
+/// The heal changes the part every instance shares, so only the part's own check decides it:
+/// the part checked where the file defines it, whatever this job's placement, so the instance
+/// the import happens to read the part at never changes the decision. A placement maps the
+/// geometry and, when it scales, shears or mirrors, not its tolerances, so an instance's
+/// verdict is its own: each is placed and checked again by the caller (`None` here), except at
+/// the identity, where the part's check is the job's. Only a check that ran and failed is
+/// healed: one that passes needs nothing, and one that could not run or was stopped says
+/// nothing about the part. A healed part is checked as kept by the heal itself
+/// ([`crate::ToleranceHeal::check`]), which is the job's check at the identity.
+///
+/// A stop is the job's [`PlacedCheck::Stopped`], with the body placed under no token
+/// ([`solidcraft_smlib::stop::unstoppable`]): a placement stopped part way would turn the
+/// import's stop into a part refused.
 pub(super) fn decide_heal(part: &mut Part, read: &mut Vec<Note>, m: &M4, item: u64) -> std::result::Result<Option<(Body, PlacedCheck)>, Failure> {
-    let rigid = super::check_class(m).is_none();
-    let body = if rigid { place(&part.body, m)? } else { part.body.clone() };
-    let check = check_placed(&body);
-    if !matches!(check, PlacedCheck::Fails(_)) {
-        // The part's own check, deciding nothing: this job's when its placement is rigid.
-        return Ok(match check {
-            PlacedCheck::Stopped => Some((if rigid { body } else { place(&part.body, m)? }, PlacedCheck::Stopped)),
-            check => rigid.then_some((body, check)),
-        });
+    let at_identity = *m == IDENTITY;
+    let stopped = |part: &Part| -> std::result::Result<Option<(Body, PlacedCheck)>, Failure> {
+        Ok(Some((solidcraft_smlib::stop::unstoppable(|| place(&part.body, m))?, PlacedCheck::Stopped)))
+    };
+    let check = check_placed(&part.body);
+    match check {
+        PlacedCheck::Fails(_) => {}
+        PlacedCheck::Stopped => return stopped(part),
+        // The part's own check, deciding nothing: this job's at the identity.
+        check => return Ok(at_identity.then(|| (part.body.clone(), check))),
     }
     match solidcraft_profile::scope("import", "step.heal", || heal(part, item)) {
-        Healed::Kept(note) => {
+        Healed::Kept(note, kept) => {
             read.push(note);
-            Ok(None)
+            Ok(at_identity.then(|| (part.body.clone(), kept.map_or(PlacedCheck::Passes, PlacedCheck::Fails))))
         }
-        Healed::Stopped => Ok(Some((if rigid { body } else { place(&part.body, m)? }, PlacedCheck::Stopped))),
-        Healed::NotKept => Ok(rigid.then_some((body, check))),
+        Healed::Stopped => stopped(part),
+        Healed::NotKept => Ok(at_identity.then(|| (part.body.clone(), check))),
         Healed::CouldNotRun(e) => {
-            log::debug!(target: "step", "the heal of item #{item} could not run: {e}");
-            Ok(rigid.then_some((body, check)))
+            // A panic in the heal is the kernel's internal error: reported, as the import
+            // reports a check that cannot run. Any other failure leaves the check's verdict.
+            if let KernelError::Internal(why) = &e {
+                log::warn!(target: "step", "the heal of item #{item} failed: {e}");
+                read.push(Note::HealFailed(format!("the tolerance heal failed: kernel internal error: {why}")));
+            } else {
+                log::debug!(target: "step", "the heal of item #{item} could not run: {e}");
+            }
+            Ok(at_identity.then(|| (part.body.clone(), check)))
         }
     }
 }
 
 /// What [`heal`] did with a part.
 pub(super) enum Healed {
-    /// Healed: the part's body and file faces replaced, and the note the import shows.
-    Kept(Note),
+    /// Healed: the part's body and file faces replaced, the note the import shows, and SMLib's
+    /// check of the body kept ([`crate::ToleranceHeal::check`]: `None` when it passes).
+    Kept(Note, Option<crate::CheckFailure>),
     /// Nothing the heal could prove, or a result whose check is not better: the part as it was.
     NotKept,
     /// The heal could not run (the part as it was): never a reason to change it.
@@ -204,7 +221,8 @@ pub(super) fn heal(part: &mut Part, item: u64) -> Healed {
     };
     part.body = body;
     part.face_origin = face_origin;
-    Healed::Kept(Note::Repaired(format!("healed SMLib's check failures: {}", heal.summary())))
+    let note = Note::Repaired(format!("healed SMLib's check failures: {}", heal.summary()));
+    Healed::Kept(note, heal.check)
 }
 
 /// The part's body where its instance goes: the very same body at the identity (it keeps the

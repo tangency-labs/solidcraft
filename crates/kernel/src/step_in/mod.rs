@@ -959,6 +959,7 @@ impl Reader {
                             let (kind, faces, f) = match f {
                                 parallel::Note::LeftOut(f) => (IssueKind::FaceLeftOut, 1, f),
                                 parallel::Note::Repaired(f) => (IssueKind::Repaired, 0, f),
+                                parallel::Note::HealFailed(f) => (IssueKind::NeedsRepair, 0, f),
                             };
                             self.note(kind, Some(item), faces, format!("{label}: {f}"));
                         }
