@@ -135,11 +135,14 @@ fn wr_407_walls_join_to_the_closed_form_with_the_fix() {
 /// point `(x w / w, y w / w)` inside the widened domain; with positive weights a B-spline
 /// lies in the convex hull of its control points, and the widened domain is convex). A
 /// trim with no B-spline form, a weight that is not positive or a NaN fails. `margin`
-/// covers the one division's rounding. `Err` names the first trim that fails.
-fn trims_inside_domain(k: &Kernel, b: &Brep, margin: f64) -> Result<(), String> {
+/// covers the one division's rounding. `Err` names the first trim that fails. An edge use
+/// with no UV trim gets one first, built as the volume's gap closure builds it
+/// (`get_or_create_uv_trim_curve`), so the trims checked are the ones the closure joins.
+fn trims_inside_domain(k: &Kernel, b: &mut Brep, margin: f64) -> Result<(), String> {
     use solidcore::blend::fillet_section::certificate::NurbsCurve;
     use solidcore::topology::brep::p1::faces;
     use solidcore::topology::edgeuse::p1::{faceuse_loopuses, loopuse_edgeuses, uv_trim_curve};
+    use solidcore::topology::edgeuse::p3::get_or_create_uv_trim_curve;
     for f in faces(b, None).unwrap() {
         let face = b.face(f).unwrap();
         let dom = face
@@ -153,6 +156,12 @@ fn trims_inside_domain(k: &Kernel, b: &Brep, margin: f64) -> Result<(), String> 
         let up = face.faceuse.unwrap();
         for lu in faceuse_loopuses(b, up, false, None).unwrap() {
             for eu in loopuse_edgeuses(b, lu).unwrap() {
+                if uv_trim_curve(b, eu).unwrap().0.is_none() {
+                    get_or_create_uv_trim_curve(k, b, eu, false, false, true)
+                        .unwrap()
+                        .status
+                        .unwrap();
+                }
                 let t = uv_trim_curve(b, eu)
                     .unwrap()
                     .0
@@ -187,8 +196,8 @@ fn trims_inside_domain(k: &Kernel, b: &Brep, margin: f64) -> Result<(), String> 
 /// their control points), so the gap closure's uv lines between them stay in the domain.
 #[test]
 fn wr_407_default_join_keeps_its_trims_in_their_domains() {
-    let (k, b) = joined();
-    if let Err(e) = trims_inside_domain(&k, &b, 1e-9) {
+    let (k, mut b) = joined();
+    if let Err(e) = trims_inside_domain(&k, &mut b, 1e-9) {
         panic!("a trim leaves its domain: {e}");
     }
 }
