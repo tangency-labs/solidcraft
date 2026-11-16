@@ -73,9 +73,7 @@ fn sc_fixes(k: &mut Kernel) {
     k.fixes.shell_edges_on_analytics_exact = true;
     k.fixes.curve_contacts_at_curve_ends = true;
     k.fixes.fillet_trace_reaches_rails = true;
-    k.fixes.ssi_tangent_contact_points = true;
     k.fixes.ssi_trace_tangent_curves_once = true;
-    k.fixes.ssi_pole_point_keeps_its_tangent = true;
     k.fixes.ssi_tangent_curve_tracer = true;
     k.fixes.box_face_failures_propagate = true;
     k.fixes.fillet_removal_takes_ring_fillets = true;
