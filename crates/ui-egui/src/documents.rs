@@ -2625,6 +2625,18 @@ mod tests {
         assert_eq!(h.app.session.doc.name, "x".repeat(MAX_DESIGN_NAME), "the command takes it, cut to 128 characters");
     }
 
+    /// The field and the command both count characters: a hundred `ł` (200 bytes) is taken.
+    #[test]
+    fn a_long_name_with_accented_letters_is_taken() {
+        let mut h = design_open();
+        double_click_tab(&mut h, 0);
+        h.step(&json!({"text": "ł".repeat(100)})).unwrap();
+        h.step(&json!({"key": "Enter"})).unwrap();
+        h.frames(2);
+        assert_eq!(h.app.session.doc.name, "ł".repeat(100));
+        assert!(!renaming_tab(&h.app), "the field closed");
+    }
+
     #[test]
     fn with_the_preference_off_a_double_click_does_not_rename() {
         let mut h = design_open();
