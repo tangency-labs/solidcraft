@@ -1209,6 +1209,25 @@ pub struct CycleColorParams {
     pub component: Option<ComponentRef>,
 }
 
+/// Give a component a colour of its own, or put it back to the automatic one
+/// (`component.set_color`). The colour is shared by every instance of the component and is
+/// separate from its appearances. Unlike `component.cycle_color` this leaves the Component Colors
+/// switch as the user set it: the Browser marks a component that has a colour of its own whether
+/// or not the 3D view tints its bodies (#16677).
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields, transform = component_required)]
+pub struct SetColorParams {
+    // Optional in the type and required in the schema (`component_required`).
+    /// The component, by id or name.
+    #[serde(default, deserialize_with = "component", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "ComponentRef")]
+    pub component: Option<ComponentRef>,
+    /// The colour of its own, `"#rrggbb"` or `[r, g, b]` (0–255). `null`, or left out, puts the
+    /// component back to the automatic colour of its place in the palette.
+    #[serde(default)]
+    pub color: Option<crate::schema::appearance::ColorParam>,
+}
+
 /// What both commands return: the component they changed and how its history sits now.
 #[derive(Debug, Serialize, JsonSchema)]
 pub struct HistoryVisibilityResult {
@@ -1228,6 +1247,22 @@ pub struct CycleColorResult {
     pub component: u64,
     /// Its identification colour now, as red, green and blue.
     pub color: [u8; 3],
+    /// In the warn parameter-check mode: what the call's parameters got wrong.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub param_warnings: Vec<String>,
+}
+
+/// What `component.set_color` returns: the component it changed, the identification colour it
+/// shows now, and whether that colour is its own.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct SetColorResult {
+    /// The component, by id.
+    pub component: u64,
+    /// Its identification colour now, as red, green and blue.
+    pub color: [u8; 3],
+    /// Whether the colour is the component's own. False: the automatic colour of its place in
+    /// the palette.
+    pub own: bool,
     /// In the warn parameter-check mode: what the call's parameters got wrong.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub param_warnings: Vec<String>,

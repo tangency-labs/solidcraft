@@ -1486,6 +1486,13 @@ fn component_items(app: &SolveApp, id: u64) -> Vec<Item> {
     own.push(act("ui.material", "Physical Material", "material").with(json!({ "bodies": names })).on(!bodies.is_empty()));
     if id != 0 {
         own.push(cmd(app, "component.cycle_color", "Cycle Component Color").with(json!({"component": id})));
+        // The way back from a colour of its own, which the Browser marks the component with
+        // (#16677): the automatic colour, which only Component Colors shows.
+        own.push(
+            cmd(app, "component.set_color", "Automatic Component Color")
+                .with(json!({"component": id}))
+                .on(doc.components.iter().any(|c| c.id == id && c.identification_color.is_some())),
+        );
     }
     own.push(Item::sep());
     own.push(act("ui.rename", "Rename", "rename").key("F2").with(json!({ "component": id })));

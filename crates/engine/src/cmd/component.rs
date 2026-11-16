@@ -22,7 +22,7 @@ use crate::schema::component::{
     MoveFeaturesResult, MoveParams, MoveResult, MoveSketchesParams, MoveSketchesResult, MoveSketchesToPartsParams, MoveSketchesToPartsResult,
     NamesOrCount, OccurrenceAlignParams, OccurrenceAlignResult, OccurrencePropertiesParams, OccurrencePropertiesResult, PasteNewParams,
     PasteNewResult, PlacementEntry, PlacementInfo, PropertiesParams, PropertiesResult, RenameParams, RenameResult, ReparentItemsParams,
-    ReparentItemsResult, RevertPositionParams, RevertPositionResult, UnlockParams, UnlockResult,
+    ReparentItemsResult, RevertPositionParams, RevertPositionResult, SetColorParams, SetColorResult, UnlockParams, UnlockResult,
 };
 use crate::schema::{TypedContract, output_schema_for};
 use crate::{EngineError, Result, Session};
@@ -37,6 +37,7 @@ const RENAME_CONTRACT: TypedContract<RenameParams> = TypedContract::new();
 const UNLOCK_CONTRACT: TypedContract<UnlockParams> = TypedContract::new();
 const HISTORY_VISIBILITY_CONTRACT: TypedContract<HistoryVisibilityParams> = TypedContract::new();
 const CYCLE_COLOR_CONTRACT: TypedContract<CycleColorParams> = TypedContract::new();
+const SET_COLOR_CONTRACT: TypedContract<SetColorParams> = TypedContract::new();
 const EDIT_IN_PLACE_CONTRACT: TypedContract<EditInPlaceParams> = TypedContract::new();
 const FINISH_EDIT_CONTRACT: TypedContract<FinishEditParams> = TypedContract::new();
 const MOVE_FEATURES_CONTRACT: TypedContract<MoveFeaturesParams> = TypedContract::new();
@@ -89,6 +90,12 @@ pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("component.cycle_color", "Cycle Component Color", crate::checked!("component.cycle_color", cycle_color))
         .icon("colored_components").doc_only().contract(&CYCLE_COLOR_CONTRACT).output(output_schema_for::<CycleColorResult>)
         .params("component: id or name; saves the next identification colour and turns Component Colors on; shared by every instance, separate from appearances"),
+    CommandSpec::new("component.set_color", "Component Color", crate::checked!("component.set_color", set_color))
+        .icon("colored_components").doc_only().contract(&SET_COLOR_CONTRACT).output(output_schema_for::<SetColorResult>)
+        .params(
+            "component: id or name; color: \"#rrggbb\" or [r, g, b] for a colour of its own, left out for the automatic one; \
+             marks the component in the Browser and leaves the Component Colors switch alone",
+        ),
     CommandSpec::new("component.hide_history", "Hide Component History", crate::checked!("component.hide_history", hide_history))
         .icon("eye").doc_only().contract(&HISTORY_VISIBILITY_CONTRACT).output(output_schema_for::<HistoryVisibilityResult>)
         .params("component: id or name; keeps the component's features in the design but leaves them out of the History bar (#10393)"),
@@ -1398,6 +1405,23 @@ fn cycle_color(s: &mut Session, p: &Value) -> Result<Value> {
     c.identification_color = Some(next);
     s.colored_components = Some(());
     reply(CycleColorResult { component: id, color: next, param_warnings: Vec::new() })
+}
+
+/// Give a component a colour of its own, or put it back to the automatic one (#16677). Unlike
+/// Cycle Component Color this leaves the Component Colors switch as the user set it: the Browser
+/// marks a component that has a colour of its own whether or not the 3D view tints its bodies.
+fn set_color(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "component.set_color";
+    let id = component(s, p, "component", cmd)?;
+    let color = match p.get("color") {
+        None | Some(Value::Null) => None,
+        Some(v) => {
+            Some(crate::cmd::inspect::color_param(v).ok_or_else(|| bad(cmd, "color must be \"#rrggbb\" or [r, g, b] with values from 0 to 255"))?)
+        }
+    };
+    let c = s.doc_mut().components.iter_mut().find(|c| c.id == id).ok_or_else(|| bad(cmd, "choose a component below the design root"))?;
+    c.identification_color = color;
+    reply(SetColorResult { component: id, color: s.doc.component_identification_color(id), own: color.is_some(), param_warnings: Vec::new() })
 }
 
 /// Mark a component's features out of the History bar, or back in (#10393). The features still

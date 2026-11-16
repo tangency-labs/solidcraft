@@ -1,0 +1,38 @@
+{
+  "en": {
+    "cmd.component.set_color": "Component Color",
+    "ui.component_automatic_color": "Automatic Component Color"
+  },
+  "en-GB": {
+    "cmd.component.set_color": "Component Colour",
+    "ui.component_automatic_color": "Automatic Component Colour"
+  },
+  "ar": {
+    "cmd.component.set_color": "لون المكوّن",
+    "ui.component_automatic_color": "لون المكوّن التلقائي"
+  },
+  "de": {
+    "cmd.component.set_color": "Komponentenfarbe",
+    "ui.component_automatic_color": "Automatische Komponentenfarbe"
+  },
+  "he": {
+    "cmd.component.set_color": "צבע הרכיב",
+    "ui.component_automatic_color": "צבע רכיב אוטומטי"
+  },
+  "ja": {
+    "cmd.component.set_color": "コンポーネントの色",
+    "ui.component_automatic_color": "コンポーネントの色を自動に戻す"
+  },
+  "ko": {
+    "cmd.component.set_color": "구성 요소 색상",
+    "ui.component_automatic_color": "구성 요소 색상 자동"
+  },
+  "vi": {
+    "cmd.component.set_color": "Màu thành phần",
+    "ui.component_automatic_color": "Màu thành phần tự động"
+  },
+  "zh": {
+    "cmd.component.set_color": "部件颜色",
+    "ui.component_automatic_color": "部件颜色自动"
+  }
+}

@@ -2232,6 +2232,42 @@ fn a_double_click_after_a_slow_click_edits_instead_of_renaming() {
     assert!(h.app.dialog.as_ref().is_some_and(|d| d.editing.is_some_and(|(id, _)| id == feature)), "the second double-click edits too");
 }
 
+/// #16677: a component's row carries the colour the component was given, and with Component
+/// Colors on every component's row carries the colour the 3D view tints its bodies with.
+#[test]
+fn component_rows_carry_the_identification_colour() {
+    let (mut h, component, _) = crate::test_support::component_box();
+    h.settle();
+    let swatch = |h: &Harness| component_swatch(&h.app, component);
+    // Automatic Component Color, the way back from a colour of its own, waits until there is one.
+    let automatic_offered = |h: &Harness| {
+        crate::context_menu::items(&h.app, &Target::Component { id: component })
+            .iter()
+            .flat_map(|item| item.children.iter())
+            .find(|item| item.id == "component.set_color")
+            .map(|item| item.enabled)
+    };
+    assert_eq!(automatic_offered(&h), Some(false), "nothing to put back yet");
+    assert_eq!(swatch(&h), None, "a component left on its automatic colour keeps the tree plain");
+    assert_eq!(component_swatch(&h.app, 0), None, "the design row is no component");
+    h.app.run("component.set_color", json!({"component": component, "color": [12, 34, 56]})).unwrap();
+    assert_eq!(swatch(&h), Some(Color32::from_rgb(12, 34, 56)), "its own colour marks the row");
+    assert_eq!(automatic_offered(&h), Some(true), "and now it can be put back");
+    h.app.run("component.set_color", json!({"component": component})).unwrap();
+    assert_eq!(swatch(&h), None, "the automatic colour again, so the row is plain again");
+    h.app.run("inspect.colored_components", json!({"enabled": true})).unwrap();
+    let [r, g, b] = h.app.session.doc.component_identification_color(component);
+    assert_eq!(swatch(&h), Some(Color32::from_rgb(r, g, b)), "Component Colors marks every component");
+    assert_eq!(component_swatch(&h.app, 0), None, "still not the design row");
+    h.app.run("inspect.colored_components", json!({"enabled": false})).unwrap();
+    assert_eq!(swatch(&h), None);
+    // The tree draws with the colour in place: the component's row is still there.
+    h.app.run("component.set_color", json!({"component": component, "color": [12, 34, 56]})).unwrap();
+    h.settle();
+    let rows = drawn_rows();
+    assert!(rows.iter().any(|(label, ..)| label.contains("Block")), "the component's row is drawn: {rows:?}");
+}
+
 /// A component's body placed twice appears as two Browser rows.
 #[test]
 fn the_browser_lists_one_body_per_placement() {
