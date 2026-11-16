@@ -2197,6 +2197,11 @@ pub struct ProtoTopologyManager<O> {
     /// coincident interval, so a point where the two cross is no event and gets no vertex
     /// definition ([`ProtoTopologyManager::set_coincident_edges`]).
     coincident_edges: Vec<(O, O)>,
+    /// Not upstream (WR-214): the first refusal of a proto edge from a proto vertex back
+    /// to itself whose curve leaves its ends' reach of a definition on a vertex; the
+    /// Boolean returns it once every proto edge is resolved
+    /// ([`ProtoTopologyManager::take_self_loop_refusal`]).
+    self_loop_refusal: Option<crate::error::SolidError>,
 }
 
 fn push_store<T>(store: &mut Vec<Option<T>>, item: T) -> Result<u32> {
@@ -2256,6 +2261,7 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
             pf_store: Vec::new(),
             skipped_speck_vertices: Vec::new(),
             coincident_edges: Vec::new(),
+            self_loop_refusal: None,
         })
     }
 
@@ -2285,6 +2291,20 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
     #[must_use]
     pub fn skipped_speck_vertices(&self) -> &[(O, f64, Point3, Point3)] {
         &self.skipped_speck_vertices
+    }
+
+    /// Takes the refusal a proto edge from a proto vertex back to itself left
+    /// (WR-214): its curve leaves its ends' reach of a definition on a vertex, so it can be
+    /// neither split nor dropped. Not upstream.
+    pub fn take_self_loop_refusal(&mut self) -> Option<crate::error::SolidError> {
+        self.self_loop_refusal.take()
+    }
+
+    /// Records the first such refusal (WR-214).
+    pub(crate) fn note_self_loop_refusal(&mut self, refusal: crate::error::SolidError) {
+        if self.self_loop_refusal.is_none() {
+            self.self_loop_refusal = Some(refusal);
+        }
     }
 
     /// Records a final vertex whose collapsed speck definition was skipped at imprint.

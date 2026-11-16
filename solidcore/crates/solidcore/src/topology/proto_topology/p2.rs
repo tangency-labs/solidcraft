@@ -2167,19 +2167,38 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
                         let vd0 = vd0.ok_or(dangling("proto vertex has no vertex definition"))?;
                         let v0 = self.vd_ref(vd0)?;
                         let centre = v0.position();
-                        let reach = max2(centre.distance(pt0), centre.distance(pt1))
-                            + v0.tolerance(k)
-                            + pe_tol;
-                        let first = *eds.first().ok_or(dangling("no edge definition"))?;
-                        let curve = curve_of(brep, self.ed_ref(first)?.xsect_curve_3d())?;
-                        if !curve_piece_within(curve, &pe_ivl, centre, reach) {
-                            return Err(SolidError::boolean_stage_failed(
+                        let vd_tol = v0.tolerance(k);
+                        // Every definition's curve, over its own interval, from its own
+                        // ends: the proto edge may hold different curves.
+                        let mut within = true;
+                        for &ed in &eds {
+                            let d = self.ed_ref(ed)?;
+                            let ivl = d.xsect_interval();
+                            let curve = curve_of(brep, d.xsect_curve_3d())?;
+                            let ends = [
+                                curve.evaluate_point(k, ivl.min())?,
+                                curve.evaluate_point(k, ivl.max())?,
+                            ];
+                            let reach = max2(centre.distance(ends[0]), centre.distance(ends[1]))
+                                + vd_tol
+                                + pe_tol;
+                            if !curve_piece_within(curve, &ivl, centre, reach) {
+                                within = false;
+                                break;
+                            }
+                        }
+                        if !within {
+                            let refusal = SolidError::boolean_stage_failed(
                                 OP_RESOLVE_PE,
                                 BooleanStage::Relate,
                                 "an intersection curve from a vertex back to it leaves the \
                                  reach of its ends, so it can be neither split onto the vertex \
                                  nor dropped",
-                            ));
+                            );
+                            // The Boolean's resolution only warns on a proto edge's error:
+                            // the manager keeps the refusal for the Boolean to return.
+                            self.note_self_loop_refusal(refusal.clone());
+                            return Err(refusal);
                         }
                         for &ed in &eds {
                             deleted.extend(self.destruct_and_delete(ed));
@@ -3391,7 +3410,8 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
 /// Not upstream (WR-214): whether `curve` over `interval` lies within `reach` of `centre`,
 /// decided on points whose convex hull holds that piece of the curve
 /// ([`Curve::piece_hull_points`], each with the error bound of its coordinates): every
-/// point's distance plus its error bound, grown by the distance's own rounding, must be
+/// point's distance grown by its own rounding, plus twice its coordinates' error bound
+/// (the bound is per coordinate, so the Euclidean error is at most `sqrt(3)` of it), must be
 /// at most `reach`. `false` when the curve has no such certain hull, or for non-finite
 /// data, so an unbounded curve is never taken as near.
 fn curve_piece_within(curve: &Curve, interval: &Extent1d, centre: Point3, reach: f64) -> bool {
@@ -3400,7 +3420,7 @@ fn curve_piece_within(curve: &Curve, interval: &Extent1d, centre: Point3, reach:
     };
     !points.is_empty()
         && points.iter().all(|&(p, err)| {
-            let d = p.distance(centre) * (1.0 + gamma(8)) + err;
+            let d = p.distance(centre) * (1.0 + gamma(8)) + 2.0 * err;
             d.is_finite() && d <= reach
         })
 }
@@ -3997,10 +4017,13 @@ mod tests {
             ))
         };
         for (pc1, pc2) in [(vertex_pc(), region_pc(R1)), (region_pc(R0), vertex_pc())] {
-            let (m, pv, pe, result) = resolve_self_loop_along(bulge(), &pc1, &pc2);
+            let (mut m, pv, pe, result) = resolve_self_loop_along(bulge(), &pc1, &pc2);
             let err = result.unwrap_err();
             assert_eq!(err.operation(), OP_RESOLVE_PE, "{err}");
             assert_eq!(err.sm_status(), Some(1001), "{err}");
+            // kept for the Boolean, whose resolution only warns on a proto edge's error
+            assert_eq!(m.take_self_loop_refusal(), Some(err));
+            assert_eq!(m.take_self_loop_refusal(), None);
             assert_eq!(m.proto_edge(pe).unwrap().num_edge_definitions(), 1);
             assert_eq!(m.proto_vertex(pv).unwrap().vertex_definitions().len(), 1);
         }
