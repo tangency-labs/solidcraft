@@ -284,6 +284,11 @@ fn extrude_start(app: &mut SolveApp, ui: &mut egui::Ui) {
     let help = app.tr("prefs.extrude_start_note");
     ui.horizontal_wrapped(|ui| {
         ui_kit::text(ui, app.tr("prefs.extrude_start"), ui_kit::Text::Inline);
+        if !crate::ui_kit::settings_search::suppress_chrome(ui) {
+            ui_kit::help_icon(ui, help);
+        }
+    });
+    ui.horizontal(|ui| {
         ui_kit::settings_control_width(ui, t.space_24 * 6.0, |ui| {
             let mut selected = ExtrudeStart::ALL.iter().position(|v| *v == app.preferences.extrude_start).unwrap_or(0);
             let options = ExtrudeStart::ALL.map(|choice| app.tr(choice.label_id()));
@@ -294,13 +299,10 @@ fn extrude_start(app: &mut SolveApp, ui: &mut egui::Ui) {
             }
         });
         ui.add_enabled_ui(app.preferences.extrude_start == ExtrudeStart::Custom, |ui| {
-            ui_kit::settings_control_width(ui, t.space_24 * 4.0, |ui| {
+            ui_kit::settings_control_width(ui, t.space_24 * 5.0, |ui| {
                 let (_, response) = ui_kit::text_field_reserving(ui, &mut app.preferences.extrude_custom_distance, "10 mm", 0.0);
                 crate::scenario::publish_target("prefs:extrude_custom_distance", response.rect);
             });
         });
-        if !crate::ui_kit::settings_search::suppress_chrome(ui) {
-            ui_kit::help_icon(ui, help);
-        }
     });
 }

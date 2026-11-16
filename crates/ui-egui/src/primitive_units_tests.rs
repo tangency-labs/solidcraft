@@ -547,7 +547,10 @@ fn new_extrude_starts_at_ten_unless_the_preference_asks_for_the_last_or_a_typed_
     let mut other = design("in");
     other.app.load_prefs(&h.app.prefs());
     assert_eq!(opened(&other), "7 mm", "kept with the preferences");
-    assert_eq!(serde_json::from_value::<crate::prefs::Prefs>(json!({"extrude_start": "later"})).unwrap().extrude_start, crate::prefs::ExtrudeStart::Fixed);
+    assert_eq!(
+        serde_json::from_value::<crate::prefs::Prefs>(json!({"extrude_start": "later"})).unwrap().extrude_start,
+        crate::prefs::ExtrudeStart::Fixed
+    );
     assert!(crate::prefs::set(&mut h.app, &json!({"extrude_start": "later"})).is_err(), "asked for by name, an unknown choice is refused");
 }
 
