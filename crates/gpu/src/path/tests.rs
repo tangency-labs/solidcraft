@@ -6694,6 +6694,37 @@ fn gpu_ui_box_coat_and_color_map_keep_every_raw_sample_finite() {
     }
 }
 
+// #15265: a box with a slot cut across its top, lit by a constant-colour environment, failed on
+// Metal at 128 samples with "nonfinite or negative pilot/production path radiance". Paths bounce
+// between the slot's parallel walls and its floor; every raw sample must stay finite.
+#[test]
+fn gpu_box_with_a_slot_keeps_every_raw_sample_finite() {
+    use serde_json::json;
+    let Some(executor) = executor() else { return };
+    let mut session = solidcraft_engine::Session::default();
+    session.execute("solid.box", &json!({"body_name":"Cube","length":40,"width":40,"height":40,"center":[0,0,20]})).unwrap();
+    session.execute("solid.box", &json!({"length":42,"width":10,"height":22,"center":[0,0,31],"operation":"cut"})).unwrap();
+    let scene = solidcraft_engine::product_scene::extract(&session).unwrap();
+    assert_eq!(scene.meshes.len(), 1);
+    let mut camera = Camera::default();
+    camera.set_view(StandardView::Iso);
+    camera.fit(&solidcraft_render::view_bounds(&scene.bounds));
+    let options: JobOptions = serde_json::from_value(json!({
+        "samples":128,"max_depth":3,"seed":1,"exposure_ev":0.0,
+        "lighting":{"environment":[0.8,0.8,0.85],"sun":null,"area_lights":[]}
+    }))
+    .unwrap();
+    let input = ImageRequest { camera, width: 48, height: 32, ..request(1) };
+    let mut task = Task::new(executor.context.clone(), scene, input, options, CancelToken::default()).unwrap();
+    for _ in 0..options.samples {
+        task.complete_sample().unwrap();
+    }
+    let pixels = task.read_linear().unwrap();
+    assert_eq!(pixels.len(), 48 * 32);
+    assert!(pixels.iter().flatten().all(|value| value.is_finite() && *value >= 0.0));
+    assert!(pixels.iter().any(|pixel| pixel[3] > 0.0), "the camera must see the box");
+}
+
 fn directional_receiver() -> ProductScene {
     let mesh = Mesh {
         positions: vec![Vec3::new(-10.0, -10.0, 0.0), Vec3::new(10.0, -10.0, 0.0), Vec3::new(10.0, 10.0, 0.0), Vec3::new(-10.0, 10.0, 0.0)],
