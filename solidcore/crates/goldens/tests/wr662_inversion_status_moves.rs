@@ -34,6 +34,7 @@
     clippy::unwrap_used,
     clippy::expect_used,
     clippy::panic,
+    clippy::indexing_slicing,
     clippy::print_stdout
 )] // test
 
@@ -114,10 +115,10 @@ fn moved_rows_are_the_same_failures_told_apart() {
                 .values
                 .iter()
                 .flat_map(|(k, v)| {
-                    v.iter().enumerate().filter_map(move |(i, x)| {
-                        (*x == OUTSIDE_OF_DOMAIN || *x == NOT_WITHIN_TOLERANCE)
-                            .then(|| (k.clone(), i))
-                    })
+                    v.iter()
+                        .enumerate()
+                        .filter(|(_, x)| **x == OUTSIDE_OF_DOMAIN || **x == NOT_WITHIN_TOLERANCE)
+                        .map(move |(i, _)| (k.clone(), i))
                 })
                 .collect();
             let back =
