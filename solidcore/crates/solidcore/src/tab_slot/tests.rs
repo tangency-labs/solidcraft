@@ -1,0 +1,213 @@
+//! Design 16.1's layout and laser outline cases; every number is from the design's rules
+//! (`v2-numbers.py`, or the `python3 -I` sums named beside them).
+
+use super::*;
+
+const LASER: f64 = 0.7; // laser_g_min(0.1, 0.5)
+
+fn tabs(stretch: (f64, f64), layout: Layout, w: f64, e: f64) -> Vec<f64> {
+    match place(stretch, layout, w, e, LASER).unwrap() {
+        Ok(v) => v,
+        Err(skip) => panic!("skipped: {skip:?}"),
+    }
+}
+
+fn skip(stretch: (f64, f64), layout: Layout, w: f64, e: f64) -> StretchSkip {
+    match place(stretch, layout, w, e, LASER).unwrap() {
+        Ok(v) => panic!("made {v:?}"),
+        Err(skip) => skip,
+    }
+}
+
+fn close(a: &[f64], b: &[f64]) {
+    assert_eq!(a.len(), b.len(), "{a:?} vs {b:?}");
+    for (x, y) in a.iter().zip(b) {
+        assert!((x - y).abs() <= 1e-9 * y.abs().max(1.0), "{a:?} vs {b:?}");
+    }
+}
+
+#[test]
+fn the_laser_least_space_is_the_web_between_two_slots() {
+    assert_eq!(laser_g_min(0.1, 0.5).unwrap(), LASER);
+    assert!(laser_g_min(-0.1, 0.5).is_err());
+    assert!(laser_g_min(0.1, f64::NAN).is_err());
+}
+
+#[test]
+fn count_lays_three_tabs_on_fixture_f() {
+    // F: one stretch x ∈ [20, 140]; count 3, W 20, e 10 -> [30, 50], [70, 90], [110, 130].
+    close(
+        &tabs((20.0, 140.0), Layout::Count(3), 20.0, 10.0),
+        &[30.0, 70.0, 110.0],
+    );
+    // One tab is centred.
+    close(&tabs((20.0, 140.0), Layout::Count(1), 20.0, 10.0), &[70.0]);
+}
+
+#[test]
+fn auto_follows_the_thickness() {
+    // W = e = 3t. L 120, t 6: N 2, g 48: [38, 56], [104, 122] on F.
+    close(
+        &tabs((20.0, 140.0), Layout::Auto, 18.0, 18.0),
+        &[38.0, 104.0],
+    );
+    // L 200, t 3: N 6, g 25.6.
+    let v = tabs((0.0, 200.0), Layout::Auto, 9.0, 9.0);
+    assert_eq!(v.len(), 6);
+    assert!((v[1] - v[0] - 9.0 - 25.6).abs() < 1e-9);
+    // L 50, t 3: N 2, g 14.
+    let v = tabs((0.0, 50.0), Layout::Auto, 9.0, 9.0);
+    close(&v, &[9.0, 32.0]);
+    // L 152, t 6: N 2, g 80.
+    close(
+        &tabs((0.0, 152.0), Layout::Auto, 18.0, 18.0),
+        &[18.0, 116.0],
+    );
+    // L 68, 60, 54 (U = W just fits), t 6: one centred tab.
+    for l in [68.0, 60.0, 54.0] {
+        close(
+            &tabs((0.0, l), Layout::Auto, 18.0, 18.0),
+            &[(l - 18.0) / 2.0],
+        );
+    }
+    // L 53.999: too_short.
+    assert!(matches!(
+        skip((0.0, 53.999), Layout::Auto, 18.0, 18.0),
+        StretchSkip::TooShort { most: 0, .. }
+    ));
+}
+
+#[test]
+fn spacing_centres_the_group() {
+    close(
+        &tabs((20.0, 140.0), Layout::Spacing(40.0), 20.0, 10.0),
+        &[30.0, 70.0, 110.0],
+    );
+    close(
+        &tabs((20.0, 140.0), Layout::Spacing(35.0), 20.0, 10.0),
+        &[35.0, 70.0, 105.0],
+    );
+}
+
+#[test]
+fn the_last_tab_does_not_drift() {
+    // 3 000 mm, 250 tabs: the last tab's end is b − e within 1e-9 relative.
+    let v = tabs((0.0, 3000.0), Layout::Count(250), 10.0, 5.0);
+    assert_eq!(v.len(), 250);
+    let end = v[249] + 10.0;
+    assert!((end - 2995.0).abs() <= 1e-9 * 2995.0, "{end}");
+}
+
+#[test]
+fn count_names_the_most_that_fit() {
+    // Laser g_min 0.7, W 20, e 10 on F: 3·0.7 + 4·20 = 82.1 ≤ 100; five need 102.8.
+    match skip((20.0, 140.0), Layout::Count(6), 20.0, 10.0) {
+        StretchSkip::TooShort { length, most, .. } => {
+            assert_eq!(most, 4);
+            assert_eq!(length, 120.0);
+        }
+        other => panic!("{other:?}"),
+    }
+    assert_eq!(tabs((20.0, 140.0), Layout::Count(4), 20.0, 10.0).len(), 4);
+    // Auto with a tiny W is capped by g_min too.
+    let v = tabs((0.0, 10.0), Layout::Auto, 1.0, 0.0);
+    for p in v.windows(2) {
+        assert!(p[1] - p[0] - 1.0 >= LASER - 1e-12);
+    }
+}
+
+#[test]
+fn a_hole_splits_the_strip_into_two_stretches() {
+    // Ø20 hole at (80, 33): stretches [20, 70] and [90, 140]; count 2, W 10, e 5.
+    close(
+        &tabs((20.0, 70.0), Layout::Count(2), 10.0, 5.0),
+        &[25.0, 55.0],
+    );
+    close(
+        &tabs((90.0, 140.0), Layout::Count(2), 10.0, 5.0),
+        &[95.0, 125.0],
+    );
+}
+
+#[test]
+fn the_spacing_rule_at_its_boundary() {
+    // Laser, W 20, c 0.1: 20.7001 fits, 20.6999 skips spacing_too_small (20.7 itself is not
+    // asserted: 20.7 − 20 is 0.6999999999999993 in f64).
+    assert!(!tabs((20.0, 140.0), Layout::Spacing(20.7001), 20.0, 10.0).is_empty());
+    match skip((20.0, 140.0), Layout::Spacing(20.6999), 20.0, 10.0) {
+        StretchSkip::SpacingTooSmall { space, least } => {
+            assert!((space - 0.6999).abs() < 1e-9);
+            assert_eq!(least, LASER);
+        }
+        other => panic!("{other:?}"),
+    }
+}
+
+#[test]
+fn a_spacing_fitting_a_whole_number_of_times_keeps_its_last_tab() {
+    // U − W = 3 q exactly up to rounding: 0.1 spacing over 0.3 + W.
+    let v = tabs((0.0, 0.3 + 0.05), Layout::Spacing(0.1), 0.05, 0.0);
+    assert_eq!(v.len(), 4, "{v:?}");
+}
+
+#[test]
+fn laser_outlines() {
+    // Tab [30, 50] of F, h = 6 + 0, δ = 0: 20 × 6.
+    let tab = tab_outline(30.0, 20.0, 6.0, 0.0).unwrap().unwrap();
+    assert_eq!(tab.outer.segs.len(), 4);
+    assert!((tab.signed_area().unwrap().value - 120.0).abs() < 1e-9);
+    // Its slot, faces w ∈ [30, 36], c 0.1: 20.2 × 6.2 = 125.24.
+    let slot = slot_outline(30.0, 20.0, (30.0, 36.0), 0.1).unwrap();
+    assert!((slot.signed_area().unwrap().value - 125.24).abs() < 1e-9);
+    let (lo, hi) = slot.extent_along(Point2::new(1.0, 0.0), 1e-9).unwrap();
+    assert!((lo - 29.9).abs() < 1e-12 && (hi - 50.1).abs() < 1e-12);
+    // Protrusion −7 in a 6 plate: no tab.
+    assert_eq!(
+        tab_outline(30.0, 20.0, 6.0 - 7.0, 0.0).unwrap(),
+        Err(TabSkip::TooShort { length: -1.0 })
+    );
+    // A negative clearance is refused.
+    assert!(slot_outline(30.0, 20.0, (30.0, 36.0), -0.1).is_err());
+}
+
+#[test]
+fn refusals() {
+    let s = (0.0, 100.0);
+    assert!(place((f64::NAN, 1.0), Layout::Auto, 1.0, 0.0, LASER).is_err());
+    assert!(place((2.0, 1.0), Layout::Auto, 1.0, 0.0, LASER).is_err());
+    assert!(place(s, Layout::Auto, 0.0, 0.0, LASER).is_err());
+    assert!(place(s, Layout::Auto, f64::INFINITY, 0.0, LASER).is_err());
+    assert!(place(s, Layout::Auto, 1.0, -1.0, LASER).is_err());
+    assert!(place(s, Layout::Auto, 1.0, 0.0, f64::NAN).is_err());
+    assert!(place(s, Layout::Count(0), 1.0, 0.0, LASER).is_err());
+    assert!(place(s, Layout::Spacing(0.0), 1.0, 0.0, LASER).is_err());
+    assert!(place(s, Layout::Spacing(f64::NAN), 1.0, 0.0, LASER).is_err());
+    assert!(tab_outline(f64::NAN, 1.0, 1.0, 0.0).is_err());
+    assert!(slot_outline(0.0, 1.0, (1.0, 1.0), 0.1).is_err());
+    // Too many tabs is refused, not allocated.
+    assert!(place((0.0, 1e12), Layout::Auto, 1.0, 0.0, 0.0).is_err());
+}
+
+#[test]
+fn random_finite_inputs_never_panic() {
+    let mut state = 0x2545_f491_4f6c_dd1d_u64;
+    let mut next = || {
+        state ^= state << 13;
+        state ^= state >> 7;
+        state ^= state << 17;
+        let x = f64::from_bits(state);
+        if x.is_finite() {
+            x
+        } else {
+            1.0
+        }
+    };
+    for _ in 0..20_000 {
+        let (a, b, w, e, g, q) = (next(), next(), next(), next(), next(), next());
+        for layout in [Layout::Auto, Layout::Count(3), Layout::Spacing(q)] {
+            let _ = place((a, b), layout, w, e, g);
+        }
+        let _ = tab_outline(a, w, e, g);
+        let _ = slot_outline(a, w, (b, e), g);
+    }
+}
