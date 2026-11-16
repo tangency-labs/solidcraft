@@ -400,12 +400,12 @@ fn occurrence_second_row_selects_exact_path_and_menu_actions() {
     assert!((h.app.menu.props.as_ref().unwrap().1["total"]["center_of_mass"][0].as_f64().unwrap() - 55.0).abs() < 1e-8);
     let movement = items.iter().find(|i| i.id == "ui.moveOccurrence").unwrap();
     context_menu::run_item(&mut h.app, movement, egui::Pos2::ZERO);
-    assert_eq!(h.app.tree.occurrence_move.as_ref().unwrap().path, vec![second]);
+    assert_eq!(crate::dialogs_move::moving(&h.app), Some(vec![second]), "Move/Copy opens on this placement");
     let ground = items.iter().find(|i| i.id == "occurrence.ground").unwrap();
     context_menu::run_item(&mut h.app, ground, egui::Pos2::ZERO);
     assert!(h.app.session.doc.occurrences.iter().find(|o| o.id == second).unwrap().grounded);
     assert!(!h.app.session.doc.occurrences.iter().find(|o| o.id == first).unwrap().grounded);
-    h.app.tree.occurrence_move = None;
+    crate::dialogs::cancel(&mut h.app);
     click(&mut h, &[second], "activate");
     assert_eq!(h.app.session.active_component, component);
     assert_eq!(h.app.session.active_occurrence_path, Some(vec![second]));
@@ -447,39 +447,51 @@ fn occurrence_eye_and_fold_are_independent_and_survive_rename() {
     assert!(h.app.session.occurrence_visible(&[second]));
 }
 
+/// Sets the open Move/Copy dialog's X distance as typed, and whether OK captures.
+fn set_move(h: &mut Harness, x: &str, capture: bool) {
+    let d = h.app.dialog.as_mut().unwrap();
+    if let crate::dialogs::Kind::Move { x: value, .. } = &mut d.kind {
+        *value = x.into();
+    }
+    d.extra.insert("capture".into(), json!(capture));
+    h.frames(2);
+}
+
+fn press_ok(h: &mut Harness) {
+    h.step(&json!({"click": {"handle": "dialog:ok"}})).unwrap();
+    h.settle();
+    assert!(h.app.dialog.is_none(), "{:?}", h.app.dialog.as_ref().and_then(|d| d.error.clone()));
+}
+
 #[test]
-fn occurrence_move_dialog_keeps_other_pending_moves_and_reuses_initial_baseline() {
+fn move_copy_on_a_component_moves_on_from_its_pending_move_and_keeps_the_others() {
     let (mut h, _, first, second) = fixture();
     h.app.run("occurrence.move", json!({"occurrence":first,"translate":[0,10,0],"capture":false})).unwrap();
     h.app.run("occurrence.move", json!({"occurrence":second,"translate":[5,0,0],"capture":false})).unwrap();
     let first_pending = h.app.session.pending_moves[&first];
+    let x = |h: &Harness| {
+        solidcraft_engine::doc::apply_point(&h.app.session.occurrence_placement(&[second]).unwrap().world, solidcore_record::Vec3::ZERO).x
+    };
     let items = context_menu::items(&h.app, &Target::Occurrence { path: vec![second] });
     let movement = items.iter().find(|i| i.id == "ui.moveOccurrence").unwrap();
     context_menu::run_item(&mut h.app, movement, egui::Pos2::ZERO);
-    let mut m = h.app.tree.occurrence_move.clone().unwrap();
-    m.pivot = Some(solidcraft_engine::doc::apply_point(&h.app.session.occurrence_placement(&[second]).unwrap().world, solidcore_record::Vec3::ZERO));
-    m.translate = [10.0, 0.0, 0.0];
-    crate::browser::apply_occurrence_move(&mut h.app, &m);
-    let at = h.app.session.occurrence_placement(&[second]).unwrap();
-    assert!((solidcraft_engine::doc::apply_point(&at.world, solidcore_record::Vec3::ZERO).x - 65.0).abs() < 1e-8);
-    m.translate = [3.0, 0.0, 0.0];
-    crate::browser::apply_occurrence_move(&mut h.app, &m);
-    let at = h.app.session.occurrence_placement(&[second]).unwrap();
-    assert!((solidcraft_engine::doc::apply_point(&at.world, solidcore_record::Vec3::ZERO).x - 58.0).abs() < 1e-8);
+    assert!(h.app.tree.capture_prompt.is_none(), "moving a component on asks nothing first");
+    set_move(&mut h, "10 mm", false);
+    press_ok(&mut h);
+    assert!((x(&h) - 65.0).abs() < 1e-8, "on from its pending move: {}", x(&h));
     assert_eq!(h.app.session.pending_moves[&first], first_pending);
-    crate::browser::revert_occurrence_dialog(&mut h.app, &m);
-    let restored = h.app.session.occurrence_placement(&[second]).unwrap();
-    assert!((solidcraft_engine::doc::apply_point(&restored.world, solidcore_record::Vec3::ZERO).x - 55.0).abs() < 1e-8);
-    assert_eq!(h.app.session.pending_moves[&first], first_pending);
-    h.app.run("component.revert_position", json!({"occurrences":[second]})).unwrap();
+
     context_menu::run_item(&mut h.app, movement, egui::Pos2::ZERO);
-    let mut fresh = h.app.tree.occurrence_move.clone().unwrap();
-    assert!(!fresh.had_pending);
-    fresh.translate = [2.0, 0.0, 0.0];
-    crate::browser::apply_occurrence_move(&mut h.app, &fresh);
-    crate::browser::revert_occurrence_dialog(&mut h.app, &fresh);
-    assert!(!h.app.session.pending_moves.contains_key(&second));
+    set_move(&mut h, "3 mm", false);
+    crate::dialogs::cancel(&mut h.app);
+    assert!((x(&h) - 65.0).abs() < 1e-8, "Cancel leaves it where it was: {}", x(&h));
     assert_eq!(h.app.session.pending_moves[&first], first_pending);
+
+    context_menu::run_item(&mut h.app, movement, egui::Pos2::ZERO);
+    set_move(&mut h, "0 mm", true);
+    press_ok(&mut h);
+    assert!(h.app.session.pending_moves.is_empty(), "Capture All Positions captures the other component's move too");
+    assert!((x(&h) - 65.0).abs() < 1e-8);
 }
 
 #[test]
@@ -568,21 +580,15 @@ fn occurrence_distance_editor_reads_inches_and_keeps_four_digits_in_model_space(
     context_menu::run_item(&mut h.app, movement, egui::Pos2::ZERO);
     h.settle();
     let original = h.app.session.doc.to_json();
-    let point = h.call("ui.at", json!({"handle":"occurrence-move:distance:0"}));
-    let at = &point["result"];
-    h.call("ui.click", json!({"x":at[0],"y":at[1],"double":true}));
-    h.settle();
-    h.step(&json!({"key":"A","cmd":true})).unwrap();
-    h.step(&json!({"text":"1.2345"})).unwrap();
-    h.step(&json!({"key":"Enter"})).unwrap();
-    let m = h.app.tree.occurrence_move.as_ref().unwrap();
-    assert!((m.translate[0] - 31.3563).abs() < 1e-8, "{:?}", m.translate);
-    assert_eq!(h.app.session.doc.to_json(), original, "pending movement does not alter the stored design");
+    set_move(&mut h, "1.2345", false);
+    press_ok(&mut h);
+    let moved = h.app.session.pending_moves[&first];
+    assert!((moved[3][0] - 31.3563).abs() < 1e-8, "{moved:?}");
+    assert_eq!(h.app.session.doc.to_json(), original, "a pending move does not alter the stored design");
     h.app.session.selection = vec![Sel::Occurrence { path: vec![first] }];
     let bounds = crate::viewport::selection_bounds(&h.app).unwrap();
     assert!((bounds.min.x - 31.3563).abs() < 1e-6);
-    let movement = h.app.tree.occurrence_move.clone().unwrap();
-    crate::browser::revert_occurrence_dialog(&mut h.app, &movement);
+    h.app.run("component.revert_position", json!({"occurrences":[first]})).unwrap();
     assert!(h.app.session.pending_moves.is_empty());
 }
 

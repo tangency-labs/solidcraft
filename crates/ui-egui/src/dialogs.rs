@@ -1248,8 +1248,8 @@ impl Dialog {
                     continue;
                 }
             }
-            // Move/Copy keeps a selected component as the component, so Create Copy can still be
-            // ticked after it (the bodies are what a move without a copy moves).
+            // Move/Copy keeps a selected component as the component: without Create Copy its
+            // placement moves, with it the component is copied.
             if matches!(d.kind, Kind::Move { .. })
                 && let Sel::Occurrence { path } = sel
                 && !path.is_empty()
@@ -1381,6 +1381,10 @@ impl Dialog {
         d.sync_thread(s);
         d.sync_material(s);
         d.advance();
+        // Move/Copy opens on Selection, picked or not: more objects are picked first.
+        if matches!(d.kind, Kind::Move { .. }) {
+            d.active = 0;
+        }
         // Preselected items are already the dialog's inputs: the control reply and the first
         // viewport paint must see the same measurement, without waiting for the panel to draw.
         update_measure(app, &mut d);
@@ -1915,6 +1919,8 @@ impl Dialog {
         if self.active_input().is_some_and(|i| i.rejects(&sel)) {
             return;
         }
+        // Move/Copy moves one kind at a time (`dialogs_move::admit`).
+        let Some(sel) = crate::dialogs_move::admit(s, &mut *self, sel) else { return };
         // Plane, Axis and Point: the pick is the tool's, which chooses the method again.
         if let Some(a) = &mut self.auto {
             a.toggle(sel);
@@ -3123,7 +3129,7 @@ fn placement_row(d: &mut Dialog, ui: &mut egui::Ui, app: &SolveApp) {
         return;
     }
     if matches!(d.kind, Kind::Move { .. }) {
-        crate::dialogs_move::type_row(app, d, ui);
+        crate::dialogs_move::object_row(app, d, ui);
         return;
     }
     let current = match d.kind {
@@ -4492,10 +4498,13 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     let ok = crate::op_auto::hold_ok(&mut d, ok, &mut apply_again, cancel);
     if ok && !cancel && app.applying.is_none() {
         d.repeat_after_apply = apply_again;
+        // Only components picked, not moved, and Capture All Positions unticked: nothing to do.
+        let nothing_to_run = crate::dialogs_move::nothing_to_run(app, &d);
         // Edit Text applies its own way: its live changes and OK are one undo step.
         let run = match &mut d.kind {
             Kind::Text(k) => Some(crate::sketch_text::apply(app, k)),
             Kind::ChatContext => Some(crate::agent_chat::pick_done(app, &d)),
+            Kind::Move { .. } if nothing_to_run => Some(Ok(())),
             _ => match begin_applying(app, &d) {
                 // Computing: the dialog stays, saying so, until it is in.
                 Some(job) => {
@@ -5730,11 +5739,15 @@ fn exact_regions(d: &Dialog, cmds: &mut [(String, Value)]) {
     }
 }
 
-/// The commands the live preview runs: OK's, with a joint's motion while it animates.
+/// The commands the live preview runs: OK's, with a joint's motion while it animates, and a
+/// component Move/Copy moves by its placement drawn as its bodies moved.
 pub fn preview_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, String> {
     let mut cmds = apply_commands(app, d)?;
     if let Kind::Assembly(k) = &d.kind {
         crate::dialogs_assembly::animate(app, k, &mut cmds);
+    }
+    if matches!(d.kind, Kind::Move { .. }) {
+        crate::dialogs_move::preview(app, d, &mut cmds);
     }
     Ok(cmds)
 }
@@ -6504,7 +6517,7 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
             };
             ("inspect.section", json!({"plane": plane, "offset": offset, "flip": flip, "hatch": hatch}))
         }
-        Kind::Move { .. } => return Ok(vec![("solid.move".into(), crate::dialogs_move::params(app, d)?)]),
+        Kind::Move { .. } => return crate::dialogs_move::commands(app, d),
         Kind::Hole { diameter, depth, kind, cb_diameter, cb_depth, cs_diameter, cs_angle, opts } => {
             let folder = crate::hole_folder::active(d);
             if !folder {

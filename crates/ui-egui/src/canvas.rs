@@ -342,9 +342,6 @@ pub(crate) fn owns_pointer(app: &SolveApp, proj: &Proj, p: Pos2) -> bool {
             .and_then(|d| move_rotation(app, d, proj))
             .and_then(|r| proj.to_screen(r.point(r.angle)))
             .is_some_and(|end| egui::Rect::from_center_size(end, vec2(20.0, 20.0)).contains(p))
-        || (app.dialog.is_none()
-            && app.tool.is_none()
-            && crate::browser::occurrence_triad_model(app).is_some_and(|t| crate::gizmo::contains_pointer(proj, &t, p)))
         || crate::place_gizmo::contains_pointer(app, p)
         || app.dialog.as_ref().is_some_and(|d| matches!(&d.kind, Kind::Measure { labels, .. } if labels.contains(p)))
 }
@@ -355,9 +352,6 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj
     // While OK computes, the inputs hold what it computes: no arrow to drag, no box to type in.
     if app.applying.is_some() {
         return;
-    }
-    if app.dialog.is_none() && app.tool.is_none() {
-        crate::browser::occurrence_triad(app, ui, painter, proj);
     }
     let Some(mut d) = app.dialog.take() else { return };
     if matches!(d.kind, Kind::Assembly(_)) {
