@@ -5382,17 +5382,32 @@ mod command_start_tab_tests {
         }
     }
 
-    /// The issue's exact repro through the control channel: Ground from MODEL says `occurrence`
-    /// must be an id or name; the status line keeps the refusal, the ribbon does not move to
-    /// ASSEMBLE.
+    /// The issue's exact repro through the control channel: Ground from MODEL with nothing
+    /// selected says to pick a component (#14911; it used to say `occurrence` must be an id or
+    /// name); the status line shows it, the ribbon does not move to ASSEMBLE.
     #[test]
-    fn ground_from_command_search_names_the_missing_occurrence_and_stays_on_model() {
+    fn ground_from_command_search_asks_for_a_component_and_stays_on_model() {
         let mut h = on_model_with_a_box();
         h.call("ui.start", json!({"command": "occurrence.ground"}));
         assert_eq!(h.app.ui.tab, "MODEL", "Ground started nothing: the ribbon stays on MODEL");
-        let (status, _, error) = h.app.status.clone().expect("the refusal reaches the status line");
-        assert!(error, "{status}");
-        assert!(status.contains("occurrence"), "{status}");
+        let (status, _, _) = h.app.status.clone().expect("the refusal reaches the status line");
+        assert_eq!(status, h.app.tr("ui.ground_select_first"));
+    }
+
+    /// #14911: a placement selected in the Browser plus the ribbon's Ground grounds it, as the
+    /// Browser's Placement > Ground does; a second press ungrounds it again.
+    #[test]
+    fn ribbon_ground_grounds_the_selected_placement() {
+        let mut h = on_model_with_a_box();
+        let occurrence = h.app.run("component.create", json!({"name": "Part"})).unwrap()["occurrence"].as_u64().unwrap();
+        h.app.run("occurrence.ground", json!({"occurrence": occurrence, "grounded": false})).unwrap();
+        h.app.run("select.set", json!({"items": [{"type": "occurrence", "path": [occurrence]}]})).unwrap();
+        let grounded = |h: &Harness| h.app.session.occurrence_placement(&[occurrence]).is_ok_and(|p| p.grounded);
+        assert!(!grounded(&h));
+        h.app.start("occurrence.ground");
+        assert!(grounded(&h), "the selected placement is grounded: {:?}", h.app.status);
+        h.app.start("occurrence.ground");
+        assert!(!grounded(&h), "a second press ungrounds it: {:?}", h.app.status);
     }
 
     /// #10540: View Fit, Home and the other view display commands act on the view the same way

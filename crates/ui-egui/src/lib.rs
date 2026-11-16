@@ -1955,6 +1955,38 @@ impl SolveApp {
         }
     }
 
+    /// Ground (or, when every one is already grounded, unground) the selected placements and the
+    /// components picked in the Browser, the way the Browser's Ground row toggles one. With
+    /// nothing to act on it says what to pick.
+    fn ground_selected_occurrences(&mut self) {
+        let mut targets: Vec<(u64, bool)> = Vec::new();
+        for sel in &self.session.selection {
+            if let solidcraft_engine::Sel::Occurrence { path } = sel
+                && let Ok(placement) = self.session.occurrence_placement(path)
+            {
+                targets.push((placement.occurrence, placement.grounded));
+            }
+        }
+        for &component in &self.tree.picked_components {
+            if let Some(occurrence) = self.session.doc.occurrence_of(component).filter(|_| component != 0) {
+                targets.push((occurrence.id, occurrence.grounded));
+            }
+        }
+        let mut seen = std::collections::BTreeSet::new();
+        targets.retain(|(occurrence, _)| seen.insert(*occurrence));
+        if targets.is_empty() {
+            self.set_status(self.tr("ui.ground_select_first"), false);
+            return;
+        }
+        let grounded = !targets.iter().all(|(_, grounded)| *grounded);
+        for (occurrence, _) in targets {
+            if let Err(why) = self.run("occurrence.ground", json!({ "occurrence": occurrence, "grounded": grounded })) {
+                self.set_status(why, true);
+                return;
+            }
+        }
+    }
+
     /// Start an interactive command with its menu anchored below the invoking button.
     pub(crate) fn start_at(&mut self, id: &str, opener: Option<egui::Rect>) {
         self.start_with_variant_memory(id, true, opener, false);
@@ -2140,6 +2172,13 @@ impl SolveApp {
             let label = self.tr_label(info.label).to_string();
             let why = self.tr_label(&why).to_string();
             self.set_status(format!("{label}: {why}"), true);
+            return;
+        }
+        // The ribbon's Ground acts on the selected placements, or the components picked in the
+        // Browser, as the Browser's Placement ▸ Ground does (#14911). It used to run with no
+        // occurrence and the engine answered "`occurrence` must be an id or name".
+        if id == "occurrence.ground" {
+            self.ground_selected_occurrences();
             return;
         }
         if render_workspace::start_interactive(self, id) {
