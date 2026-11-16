@@ -218,7 +218,9 @@ rules. Its compass is 110 pt; the 48 pt Shots strip clears the docks by 8 pt.
 - `expr_row`, `hint_row`, `text_row` and `choice_row` compose `row` with the existing
   expression, hinted expression, plain text and dropdown controls. They preserve row order,
   labels, focus IDs and completion; callers keep Enter/change ownership and explicit dropdown IDs.
-  `count_row` composes `row` with `count_field` for pattern quantities. `checked_row` is
+  `count_row` composes `row` with `count_field` for pattern quantities. `action_row` composes `row`
+  (empty label column) with `button_at` across the control column, for a one-shot action in a
+  card (its text from the catalog); it returns clicked and publishes `dialog:action:{key}`. `checked_row` is
   `hint_row` for a value the form checks before it runs: with a warning, the field is outlined in
   the warning colour and the message sits under it (`warning_caption`), so colour is never the
   only cue.
@@ -233,8 +235,11 @@ rules. Its compass is 110 pt; the 48 pt Shots strip clears the docks by 8 pt.
   compose the shared `tree_header` (title, compact lens and quiet search action). Its tree policy
   caps the card at ten 28 pt rows and lets rows own their 8 pt side insets; header navigation
   retains a separate title grip. Optional header actions share the same title band.
-  `stack_first_bounds` reserves a bounded Browser above its companion;
-  `stack_next_bounds` places that companion with the shared gap. `Panel::bottom_strip`
+  `Panel::stack_bounds` places several cards down one column: a card whose content fits gets
+  exactly that height, every card keeps the minimum the host measures for it, the space left
+  goes to the cards that would scroll, and when not even the minimums fit the lowest cards fold
+  to their header without overlapping. `stack_first_bounds` reserves a bounded Browser above its
+  companion; `stack_next_bounds` places that companion with the shared gap. `Panel::bottom_strip`
   uses `Container::bottom_strip_rect`, the same placement as Design History.
   `Container::navigation_card` supplies the shared Navigation surface for anchored HUDs.
   Register measured card rectangles and reserved edges with `shell::register_panel` so
@@ -352,7 +357,7 @@ table. Panel/Window/Confirm compositions also have dedicated geometry and intera
 | confirm: `Confirm`, `Tone` | Modal warning/danger/info, title/message, mono detail and ghost/cancel/primary actions | `warning`, `form_error/fill`, `accent_soft`, `form_primary`, `on_accent`, `tab_on_fill_dark`, `font_subtitle`, spacing |
 | status: `completion_text` | Compact strip readout with an optional green completion tick and caller-supplied result identity | `font_small`, `control_height`, `form_ink/success/dim`, `space_4/14` |
 | metrics: `row_height`, `table_row_height`, `header_height` | Shared control/header heights | `control_height`, `space_8`, `form_header_height` |
-| layout: `scope`, `row` | Form styling and aligned label/control columns | `form_label_width`, `form_gap_y`, `control_*`, `font_label`, `dialog_label`, `space_4/8` |
+| layout: `scope`, `row`, `value_row` | Form styling and aligned label/control columns; `value_row` shows read-only text that wraps in the control column and grows its row to hold every line (one line keeps the 28 pt row) | `form_label_width`, `form_gap_y`, `control_*`, `font_label`, `dialog_label`, `space_4/8` |
 | `caption`, `warning_caption` | Dim caption aligned beneath a control; the warning one says what is wrong with its value | `font_small`, `text_dim`, `warning`, label-column tokens |
 | `status_line`, `StatusTone` | Full-width, wrapping status or refusal text in dim, warning or error ink. Translates source labels; already translated messages also work. Place directly in the form, outside `row`, so its height grows with the whole message. Rect: `dialog:status:TEXT`. | `font_label`, `text_dim`, `warning`, `error` |
 | `figure_rows`, `FigureSlot` | A caller-painted figure in the label column beside a stack of captioned expression fields (the Hole dialog's section); the caller gets each field's rect and hover/focus state to draw leaders and light the part it sizes. Fields keep their `dialog:<label>` handles; the block publishes `dialog:figure:<id>` and its picture `dialog:figure_picture:<id>` | `control_height`, `form_label_width`, `font_small`, `form_dim`, `space_2/4`, label gap |
@@ -410,9 +415,9 @@ table. Panel/Window/Confirm compositions also have dedicated geometry and intera
 | `footer`, `Footer`, `Action`, `HeaderActions` | OK/Cancel with optional Apply, compute status or selected action; `HeaderActions` puts the same buttons in a header row | `form_footer/button_height`, `dialog_footer/rule`, `control_*`, `accent`, spacing |
 | `keyboard` | Esc cancels, unowned Enter submits when valid | none |
 | `action_menu`, `command_menu_button` | Nested dense action menu or ribbon overflow action retaining its icon, shortcut and enabled state | form control/font tokens, `space_16`, icon palette |
-| table: `table_custom`, `Column`, `Table::headers`, `Table::row`, `TableRow::cell`, `Table::add_prompt` | Left-aligned headers/cells, horizontal overflow, selected/hover rows and empty state. `table_custom` supplies header actions through `headers`. `Column::flex` shares remaining width by weight, freezing columns at their control minimums before redistributing the remaining space; `Column::icon_only` hides the heading while retaining its automation identity. `add_prompt` is the final slim dashed line and requests a regular draft row from its owner; `Column::new(label, width)` uses label-column multiples, `min_content_width(points)` reserves measured control content; `ContentWidth::name` measures strong configuration names | label-column tokens, `control_height`, `dialog_rule/footer`, `selected_bg`, spacing |
+| table: `table_custom`, `Column`, `Table::headers`, `Table::row`, `TableRow::cell`, `Table::add_prompt` | Left-aligned headers/cells, horizontal overflow, selected/hover rows and empty state. `table_custom` supplies header actions through `headers`. `Column::flex` shares remaining width by weight, freezing columns at their control minimums before redistributing the remaining space; `Column::icon_only` hides the heading while retaining its automation identity. `add_prompt` is the final slim button line (normal fill, solid control border, body ink, plus icon, hover highlight) and requests a regular draft row from its owner; `Column::new(label, width)` uses label-column multiples, `min_content_width(points)` reserves measured control content; `ContentWidth::name` measures strong configuration names | label-column tokens, `control_height`, `dialog_rule/footer`, `selected_bg`, spacing |
 | `name_list`, `NameList::row`, `NameRow::name`, `NameRow::cell` | A list of named rows on the table grid (the web app's stored files): the name column takes the width the other columns leave; the other columns are as wide as their widest cell, measured as drawn (a changed measurement discards the frame). A name is cut with an ellipsis, and given its full text on hover, only when it does not fit; `dialog:name:NAME:cut` reports it | `form_label_width`, `font_label`, `form_ink`, `space_8`, `table_row_height` |
-| `removable_header`, `plus_header`, `bin_button`, `active_pill` | Hover-only column removal, anchored Add Column menu with insertion brackets, icon-only immediate deletion and active-row status. Bins preserve `dialog:button:Actions:Delete` and `:×`; header removal preserves `dialog:button:LABEL:×`. | `control_*`, `form_*`, `selected_bg`, spacing |
+| `removable_header`, `add_column_button`, `bin_button`, `active_pill` | Hover-only column removal, labelled "+ Add column" button above the table that opens the Add Column menu, icon-only immediate deletion and active-row status. Bins preserve `dialog:button:Actions:Delete` and `:×`; header removal preserves `dialog:button:LABEL:×`. | `control_*`, `form_*`, `selected_bg`, spacing |
 | `compact_button`, `summary_row` | Borderless stars and chevrons with enabled/selected states; named two-line rule summary beside an enable checkbox and compact actions. | `form_close_size`, `control_*`, `form_*`, typography and spacing |
 | `label_actions` | Clipped row name beside compact actions | `control_height`, form font/spacing tokens |
 | status: `status_header`, `StatusHeader` | Supplied icon/name/status and constraint meter | `font_label`, `text/dim`, `accent`, sketch/header tokens |
@@ -607,7 +612,7 @@ continuous keyboard entry; leaving that empty row drops it.
 Parameter draft fields retain `param:new:name/unit/expression/comment`, and the draft's
 bin button publishes `param:new:delete`.
 Configuration drafts publish `config:new:name`; existing `config:cell:ROW:COLUMN`,
-activation, rule and preview handles remain. The header plus retains
+activation, rule and preview handles remain. The "+ Add column" button above the table retains
 `dialog:menu:Add Column`, including the existing menu nesting. The old separate
 Add forms and column-removal band have been removed.
 
@@ -656,8 +661,8 @@ including frames without a regular feature dialog. The shared Panel bound reserv
 header and footer space at the bottom edge. Import and both export actions use
 `icon_label_button` with the existing `import`/`export` arrow icons and unchanged
 command routing and scenario identities. The gallery includes all three actions.
-The Add Column target is `form_close_size - space_4` (22 pt) square: idle paint is
-only `form_dim` ink; hover adds the selected accent fill and insertion guides.
+The Add column button is `control_height` tall with a plus and its label, painted
+as a normal button (fill, border, ink, hover highlight).
 HSV gradients use a rounded mesh silhouette sampled along `control_radius` arcs;
 the current-colour strip uses the same rounded radius. Render tests sample all
 four corner pixels and opaque interiors of all three surfaces at 1× and 2× in
@@ -1026,7 +1031,7 @@ these shared pieces; the pages themselves arrive in later steps. Sizes follow
 | `toggle_tile(ui, &Card, width)` | The same picture with a 15 pt checkbox in the top-right corner (`Card::selected` is "on"). Reports `Checkbox`. | as above, `control_border` |
 | `settings_picture_choices`, `settings_picture_choices_sized`, `PictureChoice`, `PictureChoiceSize` | A labelled, wrapping radio group with stable option handles and one search result for the row or matching choice. Returns the picked index. The sized variant accepts the card width, figure aspect and caption visibility used by independent Preferences pages. | card tokens, `space_10/12/16/24` |
 | `preset_card(ui, name, word, selected, enabled, &icon, width)` | A 70 pt card with a 38 pt icon box (`icon` paints into it in the ink it is given), a name, one word and an accent check. Used for Performance, Quality and Custom. | as above, `pref_well` |
-| `help_icon(ui, text)` | The (i) after a label. Shows `text` as a tooltip and exposes it as the widget's label. | `form_dim`, `form_ink` |
+| `help_icon(ui, text)` | The (i) after a label. Shows `text` as a tooltip on hover and in a popover after a click, Enter or Space; a click outside or Escape closes it. Exposes `text` as the button's label. | `form_dim`, `form_ink` |
 | `shortcut_binding(ui, chord, editable)` | Complete mono keycaps using the command-search painter; one focusable recorder target per binding, or a read-only label. Empty chords show dim Not assigned. `shortcut_binding_width` measures the same font and padding, including literal plus keys. Gallery: `shortcut_binding`. | `font_small/label`, `control_height`, `form_dim`, `form_primary`, `space_4/8/10`, `radius_sm` |
 | `theme_browser(ui, id, count, grid, reveal, item)` | The Appearance theme list: a carousel (one clipped row, an edge fade in the container fill, round arrows on a side with more cards, an arrow moves by the cards that fit, drag and horizontal wheel scroll while vertical wheel input goes to the page) or a 5-across grid with its own vertical scroll. `reveal` scrolls an index into view. The box and fades use the `settings_card_frame` fill and stroke. | `dialog_border`, `dialog_border`, `control_fill`, `hover`, `form_ink`, `radius_lg` |
 

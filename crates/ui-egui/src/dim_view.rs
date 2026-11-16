@@ -24,7 +24,7 @@ use serde_json::json;
 use solidcore_record::Vec2;
 use solidcraft_engine::Sel;
 use solidcraft_engine::sketch::{
-    ConstraintKind, DimFrame, chain_centres, default_text, default_text_offset, dim_frame, dim_layout_reaching, dim_reach,
+    ConstraintKind, DimFrame, chain_centres, default_text, default_text_offset, dim_frame_at, dim_layout_reaching, dim_reach,
 };
 
 use crate::SolveApp;
@@ -173,9 +173,18 @@ impl DimensionDraft {
         }
         if let Some(kind) = solved.sketch.constraints.iter().find(|c| c.param.as_deref() == Some(param)).map(|c| &c.kind)
             && !kind.is_angle()
-            && kind.value().is_some_and(|value| !value.is_finite() || value <= 0.0)
+            && let Some(value) = kind.value()
         {
-            return Err("Enter a dimension greater than zero".into());
+            let allows_zero = matches!(
+                kind,
+                ConstraintKind::Distance { .. }
+                    | ConstraintKind::DistanceX { .. }
+                    | ConstraintKind::DistanceY { .. }
+                    | ConstraintKind::PointLineDistance { .. }
+            );
+            if !value.is_finite() || value < 0.0 || (!allows_zero && value <= 0.0) {
+                return Err(if allows_zero { "Enter a non-negative dimension" } else { "Enter a dimension greater than zero" }.into());
+            }
         }
         Ok(scratch)
     }
@@ -205,9 +214,10 @@ pub(crate) fn ellipse_as_before(half_axes: bool, params: &mut serde_json::Value)
 }
 
 /// How a dimension is drawn: with Draw ellipses with their axes off, a radius on an ellipse
-/// is drawn as a radius, as before, instead of to its minor axis end.
-pub(crate) fn shown_frame(half_axes: bool, sk: &solidcraft_engine::sketch::Sketch, k: &ConstraintKind) -> Option<DimFrame> {
-    match dim_frame(sk, k)? {
+/// is drawn as a radius, as before, instead of to its minor axis end. `text` is the stored text
+/// position: an angle's arc goes in the sector of its value that the text sits in.
+pub(crate) fn shown_frame(half_axes: bool, sk: &solidcraft_engine::sketch::Sketch, k: &ConstraintKind, text: Option<Vec2>) -> Option<DimFrame> {
+    match dim_frame_at(sk, k, text)? {
         DimFrame::HalfAxis { center, len, .. } if !half_axes => Some(DimFrame::Radial { center, radius: len, diameter: false, arc: None }),
         frame => Some(frame),
     }
@@ -900,7 +910,7 @@ pub fn show(app: &mut SolveApp, ui: &egui::Ui, painter: &egui::Painter, proj: &P
         // A draft is drawn as it will be added: with the preference it was made with.
         let half_axes =
             if is_draft { draft.as_ref().map_or(app.preferences.ellipse_axes, |(_, d)| d.half_axes) } else { app.preferences.ellipse_axes };
-        let Some(frame) = shown_frame(half_axes, sk, &c.kind) else { continue };
+        let Some(frame) = shown_frame(half_axes, sk, &c.kind, c.text) else { continue };
         let anchor = match frame {
             DimFrame::Linear { p0, p1, .. } => (p0 + p1) * 0.5,
             DimFrame::Radial { center, .. } | DimFrame::ArcLength { center, .. } | DimFrame::HalfAxis { center, .. } => center,
@@ -2087,7 +2097,9 @@ mod tests {
         // The placed offset (15 above the measured line) is kept with the dimension.
         assert_eq!(c.text, Some(Vec2::new(0.0, 15.0)), "{c:?}");
         // And the text draws at that offset from the edited geometry, not at the default place.
-        let DimFrame::Linear { p0, p1, dir } = dim_frame(&solved.sketch, &c.kind).unwrap() else { panic!("a length dimension is linear") };
+        let DimFrame::Linear { p0, p1, dir } = solidcraft_engine::sketch::dim_frame(&solved.sketch, &c.kind).unwrap() else {
+            panic!("a length dimension is linear")
+        };
         let t = c.text.unwrap();
         let want = h
             .at(&json!({"world":[(p0 + p1).x * 0.5 + dir.x * t.x + dir.perp().x * t.y, (p0 + p1).y * 0.5 + dir.y * t.y + dir.perp().y * t.y, 0.]}))
@@ -2131,5 +2143,37 @@ mod tests {
         assert_eq!(label(&ConstraintKind::Diameter { c: 0, value: 10.0 }, Some("10"), false, "mm", 2), "Ø10.00 mm");
         let a = ConstraintKind::Angle { a: 0, b: 1, value: std::f64::consts::FRAC_PI_4, flip: false };
         assert_eq!(label(&a, Some("45 deg"), false, "mm", 2), "45.0°");
+    }
+
+    #[test]
+    fn negative_and_zero_distance_dimensions_are_accepted_in_editor() {
+        cancel();
+        let mut h = crate::scenario::Harness::new();
+        h.app.run("sketch.create", json!({"plane": "XY"})).unwrap();
+        h.app.run("sketch.point", json!({"point": [15, 0]})).unwrap();
+        h.call("ui.view", json!({"view": "top"}));
+        h.step(&json!({"start": "sketch.dimension"})).unwrap();
+        h.step(&json!({"click": {"sketch": [0, 0]}})).unwrap();
+        h.step(&json!({"click": {"sketch": [15, 0]}})).unwrap();
+        assert!(editing(), "{:?}", h.app.status);
+        h.step(&json!({"text": "-10"})).unwrap();
+        h.frames(2);
+        assert_eq!(EDIT.with(|e| e.borrow().as_ref().and_then(|e| e.draft.as_ref()?.error.clone())), None);
+        h.step(&json!({"key": "Enter"})).unwrap();
+        assert!(!editing(), "{:?}", h.app.status);
+        let sk = h.app.session.doc.sketch(h.app.session.active_sketch.unwrap()).unwrap();
+        assert!((sk.points[1].pos.x + 10.0).abs() < 1e-6, "p1 should flip to -10: {:?}", sk.points[1].pos);
+
+        // Zero distance is also allowed for point-to-point / offset dimensions.
+        h.app.run("sketch.point", json!({"point": [0, 12]})).unwrap();
+        h.step(&json!({"click": {"sketch": [0, 0]}})).unwrap();
+        h.step(&json!({"click": {"sketch": [0, 12]}})).unwrap();
+        assert!(editing(), "{:?}", h.app.status);
+        h.step(&json!({"text": "0"})).unwrap();
+        h.frames(2);
+        assert_eq!(EDIT.with(|e| e.borrow().as_ref().and_then(|e| e.draft.as_ref()?.error.clone())), None);
+        h.step(&json!({"key": "Enter"})).unwrap();
+        assert!(!editing(), "{:?}", h.app.status);
+        cancel();
     }
 }

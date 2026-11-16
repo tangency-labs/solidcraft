@@ -574,7 +574,129 @@ fn triad_drag_ends_where_the_button_was_released() {
     assert_eq!(value(&h), "20 mm", "the drag ends where the button was released");
 }
 
+/// On a GPU a Move's bodies are a layer: a step of the triad's drag changes its motion alone, and
+/// the scenes go to the renderer once. Building and uploading every moved triangle again at each
+/// step, with the ghost of where the bodies were, took a large assembly to ten frames a second.
+/// A view that draws no layer (isocurves shown) builds them where they land again.
+#[test]
+fn a_triad_drag_on_a_gpu_moves_its_layer_and_uploads_nothing() {
+    let mut h = crate::scenario::Harness::new();
+    h.app.viewport.gpu =
+        Some(crate::gpu::GpuTarget { format: egui_wgpu::wgpu::TextureFormat::Rgba8Unorm, depth: None, samples: 1, tess: false, oit: false });
+    h.app.run("solid.box", json!({"length": 20, "width": 30, "height": 10})).unwrap();
+    h.app.start("solid.move");
+    {
+        let d = h.app.dialog.as_mut().unwrap();
+        d.inputs[0].items = vec![Sel::Body { name: "Body1".into() }];
+    }
+    h.frames(3);
+    let pos = |p: [f64; 2]| egui::pos2(p[0] as f32, p[1] as f32);
+    let grip = h.at(&json!({"gizmo": "x"})).unwrap();
+    let first = h.at(&json!({"gizmo": "x", "by": [10.0, 0.0, 0.0]})).unwrap();
+    let second = h.at(&json!({"gizmo": "x", "by": [20.0, 0.0, 0.0]})).unwrap();
+    h.frame_with(vec![egui::Event::PointerMoved(pos(grip))]);
+    h.frame_with(vec![egui::Event::PointerButton {
+        pos: pos(grip),
+        button: egui::PointerButton::Primary,
+        pressed: true,
+        modifiers: Default::default(),
+    }]);
+    h.frame_with(vec![egui::Event::PointerMoved(pos(first))]);
+    h.frames(1);
+    let layer = h.app.preview.moving_layer().expect("the moved body is a layer");
+    let still = h.app.preview.key;
+    assert!((layer.transform[3][0] - 10.0).abs() < 1e-4, "{:?}", layer.transform);
+    assert_eq!(h.app.preview.replaced, ["Body1"]);
+    assert!((h.app.preview.bounds.min.x - 10.0).abs() < 1e-6 && (h.app.preview.bounds.max.x - 30.0).abs() < 1e-6, "{:?}", h.app.preview.bounds);
+    h.frame_with(vec![egui::Event::PointerMoved(pos(second))]);
+    h.frames(1);
+    let moved = h.app.preview.moving_layer().expect("still a layer");
+    assert!((moved.transform[3][0] - 20.0).abs() < 1e-4, "{:?}", moved.transform);
+    assert_eq!((h.app.preview.key, moved.key), (still, layer.key), "a step of the drag hands the renderer no scene");
+    assert!((h.app.preview.bounds.min.x - 20.0).abs() < 1e-6, "{:?}", h.app.preview.bounds);
+    // Isocurves follow the bodies' places, which a layer moves on the GPU alone: built whole.
+    h.app.session.isocurves.push(solidcraft_engine::IsoPick { body: "Body1".into(), at: solidcore_record::Vec3::new(10.0, 15.0, 10.0), count: 3 });
+    h.frames(2);
+    assert!(h.app.preview.moving_layer().is_none() && h.app.preview.active, "drawn where it lands, in the preview's own scene");
+    assert_ne!(h.app.preview.key, still);
+    h.app.session.isocurves.clear();
+    h.frames(2);
+    assert!(h.app.preview.moving_layer().is_some(), "a layer again");
+}
+
+/// A frame that draws no layer makes the renderer let the moved bodies' scene go: Primary held
+/// to pick through the preview hides it. The preview is then computed again and hands its scenes
+/// over under a new key. Left with the old key and no scene, the renderer drew nothing, and the
+/// body stayed away until something else rebuilt the scenes. A scene the renderer has not taken
+/// yet is kept instead.
+#[test]
+fn a_move_layer_hidden_for_a_pick_is_handed_over_again() {
+    let mut h = translated_box();
+    h.app.viewport.gpu =
+        Some(crate::gpu::GpuTarget { format: egui_wgpu::wgpu::TextureFormat::Rgba8Unorm, depth: None, samples: 1, tess: false, oit: false });
+    h.frames(3);
+    let layer = h.app.preview.moving_layer().expect("the moved body is a layer");
+    let still = h.app.preview.key;
+    // What a frame with Primary held asks of the preview, before the renderer took the scene.
+    let hidden_frame = |h: &mut crate::scenario::Harness| {
+        h.app.preview.rolled_back = true;
+        assert!(h.app.preview.moving_layer().is_none(), "hidden for the pick");
+        h.app.preview.rolled_back = false;
+    };
+    hidden_frame(&mut h);
+    h.frames(2);
+    let kept = h.app.preview.moving_layer().expect("still a layer");
+    assert_eq!((kept.key, h.app.preview.key), (layer.key, still), "nothing was taken, so nothing is built again");
+    // The renderer draws a frame of it, then one without it.
+    assert!(h.app.preview.renderer_takes_layer_for_tests());
+    h.frames(2);
+    assert_eq!(h.app.preview.moving_layer().expect("drawn at every frame").key, layer.key, "handed over once while it is drawn");
+    hidden_frame(&mut h);
+    h.frames(2);
+    let again = h.app.preview.moving_layer().expect("a layer again");
+    assert_ne!(again.key, layer.key, "under a new key, which the renderer takes a scene for");
+    assert!((again.transform[3][0] - 10.0).abs() < 1e-4, "{:?}", again.transform);
+    assert_eq!(h.app.preview.replaced, ["Body1"]);
+    assert!(h.app.preview.renderer_takes_layer_for_tests(), "the moved body's scene waits for the renderer");
+}
+
 /// A Move dialog on the 20 × 30 × 10 box, translated 10 mm along X.
+/// #17804: a change of a Move drawn as a layer builds no triangles. The layer draws the moved
+/// bodies lit in the selection colour, so the highlight does not copy and light their every
+/// triangle again at each keystroke, which froze the browser for seconds a change on a large
+/// assembly. Without a layer the highlight lights them where the move puts them, as before.
+#[test]
+fn a_typed_move_drawn_as_a_layer_lights_no_moved_triangles() {
+    let mut h = translated_box();
+    let lit = |h: &crate::scenario::Harness| crate::viewport::build_highlight(&h.app).merged().tris.len();
+    h.frames(3);
+    let unlayered = lit(&h);
+    assert!(unlayered > 0, "without a layer the moved body is lit where it lands");
+    h.app.viewport.gpu =
+        Some(crate::gpu::GpuTarget { format: egui_wgpu::wgpu::TextureFormat::Rgba8Unorm, depth: None, samples: 1, tess: false, oit: false });
+    h.frames(3);
+    let layer = h.app.preview.moving_layer().expect("the moved body is a layer").key;
+    assert!(drawn_as_layer(&h.app));
+    assert_eq!(lit(&h), 0, "the layer lights the moved body");
+    let moving = h.app.preview.waiting_layer_for_tests().expect("the layer's moving scene");
+    let selected = solidcraft_theme::Tokens::get().body_selected.to_srgba_unmultiplied();
+    let fills: Vec<[u8; 4]> = moving
+        .tris
+        .chunks(crate::gpu::TRI_SIZE)
+        .filter_map(|v| moving.palette.entries().get(u32::from_le_bytes(v.get(24..28)?.try_into().ok()?) as usize).copied())
+        .collect();
+    assert!(!fills.is_empty() && fills.iter().all(|c| *c == selected), "lit in the selection colour: {:?}", fills.first());
+    for x in ["25 mm", "40 mm"] {
+        if let Some(Kind::Move { x: field, .. }) = h.app.dialog.as_mut().map(|d| &mut d.kind) {
+            *field = x.into();
+        }
+        h.frames(2);
+        let moved = h.app.preview.moving_layer().expect("still a layer");
+        assert_eq!(moved.key, layer, "{x}: the motion alone changes");
+        assert_eq!(lit(&h), 0, "{x}: nothing is lit whole");
+    }
+}
+
 fn translated_box() -> crate::scenario::Harness {
     let mut h = crate::scenario::Harness::new();
     h.app.run("solid.box", json!({"length": 20, "width": 30, "height": 10})).unwrap();
@@ -1446,6 +1568,34 @@ fn editing_a_placed_body_move_preserves_its_world_transform() {
     assert!(before.min.dist(after.min) < 1e-6 && before.max.dist(after.max) < 1e-6, "{before:?} -> {after:?}");
 }
 
+#[test]
+fn editing_a_copy_of_a_turned_instance_keeps_its_captured_frame() {
+    let mut s = Session::default();
+    s.execute("component.create", &json!({"name": "Part", "grounded": false})).unwrap();
+    s.execute("solid.box", &json!({"length": 20, "width": 10, "height": 8, "body_name": "B"})).unwrap();
+    s.execute("component.activate", &json!({"component": "root"})).unwrap();
+    let occurrence = s.execute("occurrence.copy", &json!({"component": "Part", "translate": [100, 0, 0]})).unwrap()["occurrence"].as_u64().unwrap();
+    s.execute("occurrence.move", &json!({"occurrence": occurrence, "axis": [0, 0, 1], "angle": "90 deg"})).unwrap();
+    let name = s.occurrence_bodies(&[occurrence], true).unwrap().remove(0);
+    let reply = s.execute("solid.move", &json!({"bodies": [name], "copy": true, "translate": [5, 0, 0]})).unwrap();
+    let id = reply["feature"].as_u64().unwrap();
+    let copy = reply["created_bodies"][0].as_str().unwrap();
+    let before = s.world_state().unwrap().body(copy).unwrap().body.exact_bounds().unwrap();
+    let mut app = SolveApp::new(s, Services::default());
+    let d = crate::dialogs::for_feature(&app, id, None).unwrap();
+    let Kind::Move { x, y, z, .. } = &d.kind else { panic!("not a move") };
+    let shown = Vec3::new(len(&app, x).unwrap(), len(&app, y).unwrap(), len(&app, z).unwrap());
+    assert!(shown.dist(Vec3::new(5.0, 0.0, 0.0)) < 1e-7, "{shown:?}");
+    let commands = crate::dialogs::preview_commands(&app, &d).unwrap();
+    let colors = crate::preview::Colors::from_tokens(&solidcraft_theme::Tokens::get());
+    assert!(crate::move_preview::MovePreview::default().compute(&app, &commands, colors).is_none(), "captured copies use the evaluated preview");
+    for (command, params) in crate::dialogs::apply_commands(&app, &d).unwrap() {
+        app.run(&command, params).unwrap();
+    }
+    let after = app.session.world_state().unwrap().body(copy).unwrap().body.exact_bounds().unwrap();
+    assert!(before.min.dist(after.min) < 1e-7 && before.max.dist(after.max) < 1e-7, "{before:?} -> {after:?}");
+}
+
 /// The rings stay on the world axes, so a turn dragged on one goes about the axis it shows, on
 /// top of the turns already made. It went about that axis as the earlier turn had left it, when
 /// the angles always applied about X, then Y, then Z. The body's centre stays where it is.
@@ -1808,4 +1958,22 @@ fn a_turned_copy_of_a_placed_component_turns_on_its_centre() {
         landed = landed.union(&h.app.session.world_state().unwrap().body(&name).unwrap().mesh().bounds());
     }
     assert!(landed.center().dist(Vec3::new(110.0, 10.0, 10.0)) < 1e-6, "{landed:?}");
+}
+
+/// A woken face keeps its points while the pointer crosses its own edges and hole rims, which
+/// offer nothing it lacks, on the way to its corners (#11476).
+#[test]
+fn a_faces_own_edges_and_rims_keep_its_points() {
+    let mut h = holed_plate_picking_from();
+    h.step(&json!({ "move": { "world": [20, 10, 10] } })).unwrap();
+    assert!(matches!(h.app.viewport.woken.item, Some(Sel::Face { .. })), "{:?}", h.app.viewport.woken.item);
+    let (corner, centre) = (Vec3::new(60.0, 40.0, 10.0), Vec3::new(45.0, 20.0, 10.0));
+    assert!(woken_has(&h, corner) && woken_has(&h, centre), "{:?}", h.app.viewport.woken.points);
+    // Points on its edges and on the hole's rim, away from the points they offer (a pointer
+    // right on a woken point hovers that point, not the edge).
+    for edge in [[15, 0, 10], [49, 20, 10], [60, 30, 10]] {
+        h.step(&json!({ "move": { "world": edge } })).unwrap();
+        assert!(matches!(h.app.viewport.hover, Some(crate::viewport::Hit::Edge { .. })), "{edge:?}: {:?}", h.app.viewport.hover);
+        assert!(matches!(h.app.viewport.woken.item, Some(Sel::Face { .. })) && woken_has(&h, corner), "{edge:?}: {:?}", h.app.viewport.woken);
+    }
 }

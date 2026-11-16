@@ -428,6 +428,31 @@ fn row_height_and_label_column_are_fixed_for_long_labels_and_expressions() {
     assert_eq!(value, "width / 2 + 10 mm");
 }
 
+/// A read-only value too long for one line wraps and its row grows to hold every line, instead
+/// of the fixed 28 pt row clipping the lines below the first (Redefine Sketch Plane's "Current
+/// plane"); a short value keeps the ordinary row height.
+#[test]
+fn value_row_wraps_a_long_value_and_grows_to_hold_it() {
+    let ctx = crate::test_support::context();
+    let long = "A construction plane with a long name, offset from the XY plane and seen from its other side";
+    for _ in 0..3 {
+        frame(&ctx, vec![], |ui| {
+            value_row(ui, "Current plane", long);
+            value_row(ui, "Short", "XY");
+        });
+    }
+    let t = Tokens::get();
+    let grown = registry::rect_of("dialog:row:Current plane").unwrap();
+    let control = registry::rect_of("dialog:control:Current plane").unwrap();
+    let short = registry::rect_of("dialog:row:Short").unwrap();
+    assert_eq!(short.height(), t.control_height);
+    assert!(grown.height() > t.control_height, "the long value's row grows: {grown:?}");
+    let lines = ctx.fonts_mut(|f| f.layout(long.to_owned(), egui::FontId::proportional(t.font_label), t.form_ink, control.width())).size().y;
+    assert!(lines > t.font_label * 1.5, "the value takes several lines: {lines}");
+    assert!(control.height() >= lines, "every line fits the control column: {control:?}, {lines}");
+    assert!(short.top() >= grown.bottom(), "the next row starts below the grown one: {grown:?}, {short:?}");
+}
+
 #[test]
 fn section_toggles_persist_per_dialog() {
     let ctx = crate::test_support::context();
@@ -491,4 +516,31 @@ fn short_labels_keep_the_designs_label_column_and_long_ones_widen_it_for_every_r
     let (a, b) = widths(["Edges", "Counterbore depth"]);
     assert_eq!(a, b, "one column per form");
     assert!(a > t.form_label_width && a <= t.form_label_width * 1.6, "{a}");
+}
+
+/// An action row is a button across the control column, lined up with the field rows above it,
+/// and says when it is clicked; only then.
+#[test]
+fn an_action_row_is_a_button_in_the_control_column_that_says_when_it_is_clicked() {
+    let ctx = crate::test_support::context();
+    let mut width = "20 mm".to_string();
+    let mut clicks = Vec::new();
+    let mut draw = |ui: &mut Ui| {
+        scope(ui, |ui| {
+            expr_row(ui, "Width", &mut width);
+            clicks.push(action_row(ui, "fit", "Fit to box"));
+        });
+    };
+    frame(&ctx, vec![], &mut draw);
+    let field = registry::rect_of("dialog:control:Width").unwrap();
+    let action = registry::rect_of("dialog:action:fit").unwrap();
+    assert!((action.left() - field.left()).abs() < 0.5, "{action:?} under {field:?}");
+    assert!((action.right() - field.right()).abs() < 0.5, "{action:?} under {field:?}");
+    assert!((action.height() - row_height()).abs() < 0.5, "{action:?}");
+    assert!(action.top() >= field.bottom(), "{action:?} below {field:?}");
+    let at = registry::handle_at("dialog:action:fit").unwrap();
+    frame(&ctx, pointer(at, true), &mut draw);
+    frame(&ctx, pointer(at, false), &mut draw);
+    frame(&ctx, vec![], &mut draw);
+    assert_eq!(clicks, [false, false, true, false]);
 }

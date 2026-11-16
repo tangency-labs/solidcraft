@@ -109,7 +109,7 @@ pub(crate) fn plane_description(doc: &solidcraft_engine::doc::Document, plane: &
         let base = |b: &PlaneRef| if depth < 8 { describe(doc, b, depth + 1) } else { solidcraft_ui_text::tr("sketch_panel.plane_fixed").to_owned() };
         match plane {
             PlaneRef::Origin { name } => solidcraft_ui_text::format("sketch_panel.plane_origin", &[("plane", name)]),
-            PlaneRef::Construction { feature } => {
+            PlaneRef::Construction { feature, .. } => {
                 doc.feature(feature.0).map(|f| f.name.clone()).unwrap_or_else(|| solidcraft_ui_text::tr("sketch_panel.plane_fixed").to_owned())
             }
             PlaneRef::Offset { base: b, distance } => {
@@ -203,12 +203,9 @@ pub fn panel(app: &mut SolveApp, ctx: &egui::Context) {
                 );
                 let saved_plane = match &status {
                     FaceAttachmentStatus::Healthy { plane, target, path } => {
-                        ui_kit::row(ui, "Attachment", |ui| {
-                            ui.label(solidcraft_ui_text::format(
-                                "sketch_panel.attached",
-                                &[("body", &target.body), ("path", &path_label(app, path))],
-                            ));
-                        });
+                        let attached =
+                            solidcraft_ui_text::format("sketch_panel.attached", &[("body", &target.body), ("path", &path_label(app, path))]);
+                        ui_kit::value_row(ui, "Attachment", &attached);
                         Some(*plane)
                     }
                     FaceAttachmentStatus::Lost { message, repair_plane } => {
@@ -237,9 +234,7 @@ pub fn panel(app: &mut SolveApp, ctx: &egui::Context) {
                         // Name the plane it's on now: an origin or construction plane (#5103).
                         if let Some(FeatureKind::Sketch { plane: on, .. }) = app.session.doc.feature(sketch).map(|f| &f.kind) {
                             let now = plane_description(&app.session.doc, on);
-                            ui_kit::row(ui, "Current plane", |ui| {
-                                ui.label(now);
-                            });
+                            ui_kit::value_row(ui, "Current plane", &now);
                         }
                         ui.label(solidcraft_ui_text::tr_label("Sketch plane has no body-face attachment."));
                         *plane

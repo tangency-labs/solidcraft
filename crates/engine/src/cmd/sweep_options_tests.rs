@@ -274,3 +274,29 @@ fn a_path_turns_a_spline_of_several_pieces_round_whole() {
         assert!((got - want).abs() < 0.04, "{:?}", m.bbox);
     }
 }
+
+/// #17386: renaming the body a sweep's path runs along renames it in the sweep too, so the
+/// sweep and what follows it keep working.
+#[test]
+fn renaming_the_path_body_keeps_a_sweep_along_its_edges() {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Base"}));
+    run(&mut s, "sketch.rectangle.center", json!({"center": [0, 0], "corner": [30, 20]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"sketch": "Base", "distance": 10, "operation": "new", "body_name": "Slab"}));
+    run(&mut s, "sketch.create", json!({"plane": {"origin": [-30, -20, 10], "x_dir": [0, 1, 0], "y_dir": [0, 0, 1]}, "name": "Prof"}));
+    run(&mut s, "sketch.rectangle.center", json!({"center": [0, 0], "corner": [2, 1.5]}));
+    run(&mut s, "sketch.finish", json!({}));
+    let swept = run(
+        &mut s,
+        "solid.sweep",
+        json!({"sketch": "Prof", "path_body": "Slab", "path_edges": [[0, -20, 10]], "operation": "new", "body_name": "Rib"}),
+    );
+    let id = swept["feature"].as_u64().unwrap();
+    let before = measure(&s, "Rib").volume;
+    run(&mut s, "body.rename", json!({"body": "Slab", "name": "Plate"}));
+    let feature = run(&mut s, "timeline.inspect", json!({"feature": id}));
+    assert_eq!(feature["definition"]["path_body"], "Plate");
+    assert!(feature["error"].is_null(), "{}", feature["error"]);
+    assert!((measure(&s, "Rib").volume - before).abs() < 1e-6 * before);
+}
