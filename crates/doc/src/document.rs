@@ -249,6 +249,8 @@ pub const CELL_GRID_MIN_SIZE: f64 = solidcore_ops::cell_grid::MIN_SIZE;
 
 /// The most sides of a polygon cell.
 pub const CELL_GRID_MAX_SIDES: u32 = solidcore_ops::cell_grid::MAX_SIDES;
+/// The most lattice lines a snapped field edge may be moved in.
+pub const CELL_GRID_MAX_SNAP_INSET: u32 = solidcore_ops::cell_grid::MAX_SNAP_INSET;
 
 fn default_cell_shape() -> solidcore_record::cell_grid::CellShape {
     solidcore_record::cell_grid::CellShape::Hexagon
@@ -1138,6 +1140,10 @@ pub enum FeatureKind {
         /// The definition body for each selected face, primary first. Empty keeps legacy selection.
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         target_bodies: Vec<BodyName>,
+        /// Keep single-face replacement in the dialog while retaining the target body's identity.
+        /// Missing on older body-qualified groups, which keep their multiple-face selection mode.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        single_face_selection: bool,
     },
     /// Ruled loft through profiles of several sketches, in order.
     Loft {
@@ -1485,6 +1491,14 @@ pub enum FeatureKind {
         /// What happens to a cell the field's edge crosses.
         #[serde(default = "default_cell_clip")]
         clip: solidcore_record::cell_grid::Clip,
+        /// What happens to a cell a keep-out's edge crosses (default: the same as `clip`).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        keepout_clip: Option<solidcore_record::cell_grid::Clip>,
+        /// With `clip: snap`, how many lattice lines further in each straight field edge moves
+        /// after it snaps (default 0).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[walk(unitless = "SnapInset")]
+        snap_inset: Option<Expr>,
         /// The least clearance from a cell to every edge of the field and its keep-outs, with
         /// `clip: whole` (default 0: a cell may touch an edge).
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -2181,6 +2195,10 @@ pub enum FeatureKind {
         /// of each instead of moving them in place.
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         copy: bool,
+        /// For each copied body, its captured source frame in the copy's component. Applied
+        /// after the source-local move. Empty in older designs, which copy local geometry.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        copy_frames: Vec<crate::Mat>,
     },
     /// A non-parametric base feature: bodies imported from a STEP file. The STEP text is kept
     /// in the design (it is the B-rep), so the design reopens without the original file.

@@ -1697,6 +1697,140 @@ fn a_rounded_slot_rim_projects_as_an_arc_of_its_circle() {
     assert!(profiles.iter().any(|p| (p.area - area).abs() < 1e-3), "{:?} vs {area}", profiles.iter().map(|p| p.area).collect::<Vec<_>>());
 }
 
+/// #12920: a hole of radius 1.7 drilled along X through a round bar, its rim on the bar's wall an
+/// intersection curve SMLib holds only approximately. Projected along the hole's axis the rim
+/// comes in as the hole's circle exactly; fitted to the rim's points it came in 1.3e-6 small and
+/// off centre, and an annulus cut round the hole from it left a wall 1.3e-6 off the hole's,
+/// which SMLib's check refused ("Face Near missing Seam").
+#[test]
+fn a_hole_rim_on_a_round_wall_projects_along_the_hole_as_its_circle() {
+    use solidcraft_sketch::CurveKind;
+    let mut s = Session::default();
+    run(&mut s, "solid.cylinder", json!({"radius": 11, "height": 20, "body_name": "Bar"}));
+    run(&mut s, "solid.cylinder", json!({"radius": 1.7, "height": 30, "base": [-15, 0, 10], "axis": "X", "operation": "cut", "targets": ["Bar"]}));
+    let id = run(&mut s, "sketch.create", json!({"plane": "YZ", "offset": -20, "project_edges": false}))["sketch"].as_u64().unwrap();
+    let rim_x = -(121f64 - 1.7 * 1.7).sqrt();
+    run(&mut s, "sketch.project", json!({"refs": [{"body": "Bar", "edge": [rim_x, 1.7, 10]}]}));
+    run(&mut s, "sketch.circle.center", json!({"center": [0, 10], "radius": 2.15}));
+    run(&mut s, "sketch.finish", json!({}));
+    {
+        let state = s.model.state();
+        let sk = &state.sketch(id).unwrap().sketch;
+        let center = solidcore_record::Vec2::new(0., 10.);
+        // One circle, as the rim fitted came in, so the sketch's curves and profiles keep their order.
+        let rims: Vec<(solidcore_record::Vec2, f64)> = sk
+            .curves
+            .iter()
+            .filter_map(|c| match c.kind {
+                CurveKind::Circle { c, r } if r < 2.0 => Some((sk.points[c].pos, r)),
+                _ => None,
+            })
+            .collect();
+        assert_eq!((rims.len(), sk.curves.len()), (1, 2), "the rim projects as {:?}", sk.curves);
+        for (c, r) in rims {
+            assert!(c.dist(center) < 1e-9 && (r - 1.7).abs() < 1e-9, "the rim projects as centre {c:?}, radius {r}");
+        }
+    }
+    // The annulus between the rim and a circle of radius 2.15, cut 10 into the bar from x = -20.
+    run(
+        &mut s,
+        "solid.extrude",
+        json!({"sketch": id, "distance": 10, "operation": "cut", "exact_regions": true, "profiles": [{"point": [0, 11.9]}]}),
+    );
+    let state = s.model.state();
+    let bar = state.body("Bar").unwrap();
+    assert_eq!(bar.body.validity(), Vec::<String>::new());
+}
+
+/// #12920, the open rim: the hole of radius 1.7 drilled along X at z = 19 breaks through the
+/// bar's top (z = 20), so its rim on the bar's round wall is open: no edge of it closes on itself.
+/// Projected along the hole's axis, an edge of that rim is one arc of the hole's circle, centre
+/// (0, 19), from the edge's first vertex to its last, the way it runs, through as much of the
+/// circle as the edge covers.
+#[test]
+fn an_open_hole_rim_on_a_round_wall_projects_along_the_hole_as_an_arc_of_its_circle() {
+    use solidcore_record::{Seg2, Vec2, Vec3};
+    let mut s = Session::default();
+    run(&mut s, "solid.cylinder", json!({"radius": 11, "height": 20, "body_name": "Bar"}));
+    run(&mut s, "solid.cylinder", json!({"radius": 1.7, "height": 30, "base": [-15, 0, 19], "axis": "X", "operation": "cut", "targets": ["Bar"]}));
+    let state = s.model.state();
+    let body = &state.body("Bar").unwrap().body;
+    let at = Vec3::new(-11., 0., 19. - 1.7);
+    let edges = body.edges(1e-3).unwrap();
+    let rim = edges
+        .iter()
+        .min_by(|a, b| {
+            let d = |e: &solidcraft_kernel::EdgeInfo| e.points.iter().map(|p| p.dist(at)).fold(f64::INFINITY, f64::min);
+            d(a).total_cmp(&d(b))
+        })
+        .unwrap();
+    let record = body.record();
+    let vertex = |v: u32| Vec3::from(record.vertices[v as usize].point);
+    let [v0, v1] = record.edges[rim.index].vertices;
+    assert!(v0 != v1, "the rim edge closes on itself");
+    let plane = solidcore_record::Plane { origin: Vec3::new(-20., 0., 0.), x: Vec3::Y, y: Vec3::Z };
+    let pieces = body.planar_edges(&plane, &[rim.index]).remove(0);
+    let Some([solidcraft_kernel::PlanarPiece::Seg(Seg2::Arc { center, radius, start, sweep })]) = pieces.as_deref() else {
+        panic!("the open rim projects as {pieces:?}")
+    };
+    let (center, radius, start, sweep) = (*center, *radius, *start, *sweep);
+    assert!(center.dist(Vec2::new(0., 19.)) < 1e-9 && (radius - 1.7).abs() < 1e-9, "centre {center:?}, radius {radius}");
+    let on_arc = |angle: f64| center + Vec2::new(angle.cos(), angle.sin()) * radius;
+    // The arc's ends are the edge's vertices, in the order the edge runs.
+    for (angle, v) in [(start, v0), (start + sweep, v1)] {
+        let want = plane.to_local(vertex(v));
+        assert!(on_arc(angle).dist(want) < 1e-9, "the arc ends at {:?}, the edge at {want:?}", on_arc(angle));
+    }
+    // And it goes the edge's way round: as long as the edge (its polyline a chord's sag shorter).
+    assert!((sweep.abs() * radius - rim.length).abs() < 1e-2 * rim.length, "sweep {sweep}, edge length {}", rim.length);
+    assert!(sweep.abs() < std::f64::consts::TAU - 1e-6, "sweep {sweep}");
+}
+
+/// #12920, a full turn: a modelled thread's helical edges each wind once round the shaft's axis
+/// (the kernel splits them at the cylinder's seam), from a vertex to one a pitch along the axis
+/// at the same angle. An edge that comes in as one arc must be as long as that arc and wind no
+/// more than once: an arc of the remainder between the end vertices (none, or a sliver) would
+/// be short of the edge by a whole turn.
+#[test]
+fn an_edge_winding_a_full_turn_projects_as_no_arc_of_its_remainder() {
+    use solidcore_record::{Seg2, Vec3};
+    let mut s = Session::default();
+    run(&mut s, "solid.cylinder", json!({"radius": 4, "height": 20, "body_name": "Shaft"}));
+    run(&mut s, "solid.thread", json!({"face": [4, 0, 10], "designation": "M8", "modeled": true}));
+    let state = s.model.state();
+    let body = &state.body("Shaft").unwrap().body;
+    let plane = solidcore_record::Plane { origin: Vec3::new(0., 0., -5.), x: Vec3::X, y: Vec3::Y };
+    // how far round the z axis an edge's polyline winds
+    let winding = |e: &solidcraft_kernel::EdgeInfo| {
+        e.points
+            .windows(2)
+            .map(|w| {
+                let (a, b) = (w[0].y.atan2(w[0].x), w[1].y.atan2(w[1].x));
+                (b - a + std::f64::consts::PI).rem_euclid(std::f64::consts::TAU) - std::f64::consts::PI
+            })
+            .sum::<f64>()
+    };
+    let edges = body.edges(1e-3).unwrap();
+    let mut helices = 0;
+    for e in &edges {
+        let pieces = body.planar_edges(&plane, &[e.index]).remove(0);
+        let turns = winding(e).abs() / std::f64::consts::TAU;
+        if let Some([solidcraft_kernel::PlanarPiece::Seg(Seg2::Arc { radius, sweep, .. })]) = pieces.as_deref() {
+            assert!(turns < 1.01, "edge {} winds {turns} turns and projects as an arc of sweep {sweep}", e.index);
+            assert!(
+                (sweep.abs() * radius - e.length).abs() < 0.05 * e.length.max(1.0),
+                "edge {} of length {} projects as an arc of sweep {sweep}, radius {radius}",
+                e.index,
+                e.length
+            );
+        }
+        if turns > 0.99 {
+            helices += 1;
+        }
+    }
+    assert!(helices > 0, "no edge of the thread winds a full turn");
+}
+
 /// A hook: a J of lines and two arcs about (-15, 0), of radii 7.5 and 15, extruded 20 with its
 /// top edges chamfered. Seen along the extrusion its outline is the J again. The walls are seen
 /// edge-on, but the triangles of a round wall join its two rims at slightly different angles

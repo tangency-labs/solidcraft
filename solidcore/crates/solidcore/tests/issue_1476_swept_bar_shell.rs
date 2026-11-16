@@ -40,8 +40,7 @@ mod offset_fixture;
 
 use offset_fixture::{planar_faces_at, volume, Notifications};
 use solidcore::curve::curve::p2::{Curve, CurveKind};
-use solidcore::geom::attribute::{AttributeStore, ObjectKey};
-use solidcore::geom::object::ObjectRef;
+use solidcore::geom::attribute::AttributeStore;
 use solidcore::kernel::UpstreamFixes;
 use solidcore::offset::offset_executive::p1::OffsetExecutive;
 use solidcore::offset::offset_executive::p2::{OffsetOptions, ShellOptions};
@@ -50,7 +49,7 @@ use solidcore::topology::brep::p10::TopologyEnv;
 use solidcore::topology::brep::p7::read_from_file;
 use solidcore::topology::database_io::FileType;
 use solidcore::topology::topology::NotifyRecords;
-use solidcore::{Brep, EntityRef, Kernel};
+use solidcore::{Brep, Kernel};
 
 /// `SmBrep::ReadFromFile` of the rig's operand.
 fn operand(k: &mut Kernel) -> Brep {
@@ -58,10 +57,7 @@ fn operand(k: &mut Kernel) -> Brep {
     let mut b = Brep::new_with_infinite_region().unwrap();
     let mut records = NotifyRecords::new();
     let mut attributes = AttributeStore::default();
-    let key = |_: EntityRef| ObjectRef {
-        key: ObjectKey(0),
-        type_code: 0,
-    };
+    let key = solidcore::topology::loopuse::notify_ref;
     let mut env = TopologyEnv {
         all_attributes: &[],
         attributes: &mut attributes,
@@ -84,11 +80,8 @@ fn solidcraft_fixes() -> UpstreamFixes {
     f.keep_operand_uv_trims = true;
     f.geometric_g2_continuity = true;
     f.proto_vertex_miss_is_false = true;
-    f.check_loop_vertex_tolerance = true;
-    f.check_loop_projected_seam_ends = true;
     f.cylinder_rebuild_mean_radius = true;
     f.revolve_analytic_profile_faces = true;
-    f.revolve_nested_shells_as_cavities = true;
     f.join_touching_loops = true;
     f.offset_resolve_crossing_loops = true;
     f.offset_analytic_mate_edges = true;
@@ -103,7 +96,6 @@ fn solidcraft_fixes() -> UpstreamFixes {
     f.ellipse_trim_seam_lines_span_cone_height = true;
     f.degenerate_proto_edge_in_one_vertex = true;
     f.new_edge_vertex_tolerance_covers_gap = true;
-    f.torus_signed_gen_curve_interval = true;
     f.point_solve_keeps_triangle_guess = true;
     f.imprint_extends_edge_to_proto_vertex = true;
     f.fillet_point_step_per_point = true;

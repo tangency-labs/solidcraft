@@ -101,8 +101,6 @@ use crate::offset::offset_geometry_creation::{OffsetGeometryCreation, SsiData};
 
 use super::edgeuse::{CapNotifications, MarkSource};
 use super::p2::OffsetNotifications;
-use crate::surface::extend::Continuity;
-use crate::surface::side::BoxSide;
 use crate::surface::surface::p4::NoObject;
 use crate::surface::surface::{Surface, SurfaceKind};
 use crate::topology::brep::p1::{self as bp1, SetRegionVoidType};
@@ -832,7 +830,9 @@ impl OffsetExecutive {
 
     /// Returns a cached extension, creating it `margin` past every side of `base`'s box
     /// (none for a margin of zero: the base itself), every side exactly ruled
-    /// ([`Surface::extended_sides_keeping_parameters`], [`Continuity::Ruled`]): a plane,
+    /// ([`Surface::extended_sides_keeping_parameters`],
+    /// [`Continuity::Ruled`](crate::surface::extend::Continuity::Ruled); the construction is
+    /// [`super::reach::extended_by_margin`], which the local reach's ball check builds too): a plane,
     /// cone, sphere or torus as itself, a ball patch with its pole (a side collapsed to a
     /// point) as a ball patch on the same sphere (one without a pole takes the generic ruled
     /// extension), a procedural blend by its definition, an offset surface as the offset of
@@ -871,35 +871,7 @@ impl OffsetExecutive {
             std::collections::btree_map::Entry::Vacant(entry) => {
                 // The obsolete offset-specific `else` at cpp:2158 is unreachable:
                 // NER(pBase) already established pOrigSurf == pBase != NULL.
-                let extension = if margin == 0.0 {
-                    base.clone()
-                } else {
-                    let extend = |asked: f64| {
-                        base.extended_sides_keeping_parameters(
-                            kernel,
-                            &BoxSide::ALL,
-                            Continuity::Ruled,
-                            asked,
-                        )
-                    };
-                    // An extension meets its distance at the middle of each side; a margin is
-                    // needed at every station of it (#2908): where the rows narrow along a side
-                    // it is asked again, scaled by the shortest length across (Ruled: the
-                    // lengths at a station grow together).
-                    let mut made = extend(margin)?;
-                    if let Some(shortest) = super::reach::shortest_across(kernel, base, &made)? {
-                        if shortest < margin * (1.0 - 1.0e-9) {
-                            // a surface that cannot go that far keeps what it has: the extension
-                            // above is what its faces have always had
-                            match extend(margin * margin / shortest) {
-                                Ok(grown) => made = grown,
-                                Err(SolidError::ExtendRefused { .. }) => {}
-                                Err(e) => return Err(e),
-                            }
-                        }
-                    }
-                    made.surface
-                };
+                let extension = super::reach::extended_by_margin(kernel, base, margin)?;
                 Ok(entry.insert(extension))
             }
         }
@@ -3403,7 +3375,9 @@ mod tests {
     use crate::geom::vector2d::Vec2;
     use crate::nurbs::b_spline_curve::{BSplineCurve, NurbCircleParam};
     use crate::nurbs::b_spline_surface::BSplineSurface;
+    use crate::surface::extend::Continuity;
     use crate::surface::plane::Plane;
+    use crate::surface::side::BoxSide;
     use crate::topology::{Edge, Edgeuse, Face, Faceuse, ShellId, Vertex, Vertexuse};
 
     /// The fork's tangency-labs/smlib@9d8ace9 (tangency-labs/solidcore#1795, WR-344):

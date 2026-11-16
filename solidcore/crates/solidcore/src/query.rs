@@ -23,5 +23,6 @@ pub mod poly;
 pub mod poly_properties;
 pub mod tangent_edge;
 pub mod tess;
+pub mod vertex_meet;
 
 pub use face_surface::face_surface_intersect;
