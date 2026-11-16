@@ -25,4 +25,4 @@ pub mod tangent_edge;
 pub mod tess;
 pub mod vertex_meet;
 
-pub use face_surface::face_surface_intersect;
+pub use face_surface::{face_surface_feet, face_surface_intersect, SurfaceFoot};

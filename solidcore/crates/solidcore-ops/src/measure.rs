@@ -772,6 +772,33 @@ impl Body {
         })
     }
 
+    /// The distance from each of `points` to record face `face`'s surface untrimmed, where the
+    /// point lies over it: the kernel's global solve for the surface's nearest point over its
+    /// whole domain, a periodic seam wrapped (`query::face_surface_feet`). `None` for a point
+    /// beside the surface, whose nearest point is held on a side of the domain. Where
+    /// [`Body::face_distances`] reads a point past the face's edge as its distance to that edge,
+    /// this reads its distance to the surface the face lies on.
+    ///
+    /// # Errors
+    /// [`Error::Argument`] for an index past the faces or a coordinate that is not finite; any
+    /// other kernel error.
+    pub fn face_surface_gaps(
+        &self,
+        order: &Order,
+        face: usize,
+        points: &[[f64; 3]],
+    ) -> Result<Vec<Option<f64>>> {
+        let f = order::face(order, face)?;
+        let points = points
+            .iter()
+            .map(|p| point(*p))
+            .collect::<Result<Vec<_>>>()?;
+        read_body("face_surface_gaps", self, |k, b| {
+            let feet = solidcore::query::face_surface_feet(k, b, f, &points)?;
+            Ok(feet.into_iter().map(|f| f.map(|f| f.distance)).collect())
+        })
+    }
+
     /// The distance from each of `points` to every record face as it is trimmed, face by face in
     /// record order: row `f` holds one entry per point, `None` where the kernel's solve answers
     /// with a status, and `None` where no point of face `f` comes within `reach` of that point.
