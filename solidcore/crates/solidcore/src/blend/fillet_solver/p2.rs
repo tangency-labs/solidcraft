@@ -760,12 +760,12 @@ fn trim_runs_on_in(
         }
     };
     let (a, d) = at(from)?;
-    let out = d * sign;
-    let speed = (out.x * out.x + out.y * out.y).sqrt();
-    if !(speed > 0.0) {
+    let out = [d.x * sign, d.y * sign];
+    let speed = out[0].hypot(out[1]);
+    if speed.is_nan() || speed <= 0.0 {
         return Ok(0.0);
     }
-    let dir = [out.x / speed, out.y / speed];
+    let dir = [out[0] / speed, out[1] / speed];
     let (lo, hi) = ([domain.min.x, domain.min.y], [domain.max.x, domain.max.y]);
     // the largest length along the line from `a` that stays in the box
     let mut reach = f64::INFINITY;
@@ -779,7 +779,7 @@ fn trim_runs_on_in(
             reach = reach.min((l - p) / v);
         }
     }
-    if !(reach.is_finite() && reach > 0.0) {
+    if !reach.is_finite() || reach <= 0.0 {
         return Ok(0.0);
     }
     // Newton on g(t) = (trim(t) - a) . dir - reach, g'(t) = trim'(t) . dir; the trim must run
@@ -789,12 +789,13 @@ fn trim_runs_on_in(
     for _ in 0..64 {
         let (p, d) = at(t)?;
         let rate = d.x * dir[0] + d.y * dir[1];
-        if !(sign * rate > 0.0) {
+        let outward = sign * rate;
+        if outward.is_nan() || outward <= 0.0 {
             return Ok(0.0);
         }
         let g = (p.x - a.x) * dir[0] + (p.y - a.y) * dir[1] - reach;
         let step = g / rate;
-        if !step.is_finite() || !(step.abs() < last_step) {
+        if !step.is_finite() || step.abs() >= last_step {
             break;
         }
         last_step = step.abs();
@@ -4365,7 +4366,7 @@ mod tests {
             Point3::new(1.0, 0.5, 0.0),
         ];
         let trim = Curve::from(
-            crate::nurbs::b_spline_curve::BSplineCurve::create_canonical(&CanonicalData {
+            BSplineCurve::create_canonical(&CanonicalData {
                 dim: 2,
                 degree: 2,
                 control_points: &control,
@@ -4382,7 +4383,9 @@ mod tests {
         let past = trim_runs_on_in(&k, &trim, 1.0, 1.0, &domain).unwrap();
         let exact = (13.0_f64.sqrt() - 1.0) / 2.0;
         assert!((1.0 + past - exact).abs() < 1e-12, "{past}");
-        let at = trim.evaluate_point(&k, 1.0 + past).unwrap();
+        let mut run_on = trim.clone();
+        continue_bspline_trim_past_its_ends(&mut run_on);
+        let at = run_on.evaluate_point(&k, 1.0 + past).unwrap();
         assert!((at.x - 1.5).abs() < 1e-12, "{at:?}");
         assert_eq!(trim_runs_on_in(&k, &trim, 0.0, -1.0, &domain).unwrap(), 0.0);
     }
