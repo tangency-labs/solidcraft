@@ -59,8 +59,8 @@ use crate::blend::fillet_corner::p3::FilletCorner;
 use crate::blend::fillet_executive::p3::NoRoomReason;
 use crate::blend::fillet_geom::p1::{FilletEdgeType, FilletErrorType, FilletGeomId};
 use crate::blend::fillet_overflow::{
-    creases, edge_curve, edge_on_surface, extend, in_material, make_extension_face,
-    pieces_along_edges, ExtendOutcome, Extension, Rail,
+    creases, edge_curve, edge_on_surface, extend, in_material, make_extension_face, ExtendOutcome,
+    Extension, Rail,
 };
 use crate::blend::fillet_solver::p5::is_concave_edge;
 use crate::curve::curve::{Curve, CurveKind};
@@ -773,15 +773,27 @@ fn move_end_to(k: &Kernel, curve: &mut Curve, at_end: bool, q: Point3, tol: f64)
     Ok(true)
 }
 
-/// #17673: [`crate::blend::fillet_overflow::pieces_in_face`] for a crease on target face `f`, each piece run on to the
-/// crease's own end where the classification puts the rest of the crease on the face's
-/// boundary (runs along an edge, within `tol`, that reach the crease's end). A crease of a
-/// sheet tangent to the face beside `f` (a round rolling on it) meets `f`'s edge there at
-/// a shallow angle: it comes within `tol` of that edge a run before its end, which lies on
-/// the edge (the sheet's rail end). Clipped where it comes within `tol`, the piece stops
-/// short of the corner by that run, and the sheet's boundary no longer closes there. A
-/// crease that runs along an edge and goes on inside the face, or ends off the face's
-/// boundary, is classified and clipped as before.
+/// #17673: [`crate::blend::fillet_overflow::pieces_in_face`] for a crease on target face
+/// `f`, each piece run on to the crease's own end (start or end) when every run between
+/// the piece and that end is classified along an edge of the face (within `tol` of it).
+/// A crease of a sheet tangent to the face beside `f` (a round rolling on it) meets `f`'s
+/// edge there at a shallow angle: it comes within `tol` of that edge a run before its
+/// end, which lies on the edge (the sheet's rail end). Clipped where it comes within
+/// `tol`, the piece stops short of the corner by that run, and the sheet's boundary no
+/// longer closes there.
+///
+/// The run-on is not limited to that approach: any stretch from a piece to the crease's
+/// end that lies along the face's edges is taken into the piece, whether it is a shallow
+/// approach or a crease that runs along an edge to its end. Either way the sheet is split
+/// along the same stretch as the piece and its along-edge runs together
+/// (`fixes.fillet_overflow_crease_along_edge`), now as one curve. A stretch along an edge
+/// followed by another run inside the face, or a crease that ends off the face's
+/// boundary, is not run on: those pieces are clipped as before.
+///
+/// With `along` (`fixes.fillet_overflow_crease_along_edge`), the crease's along-edge runs
+/// ([`crate::blend::fillet_overflow::pieces_along_edges`], from the same classification)
+/// are appended to it, each marked whether a piece was run on over it, so that the caller
+/// splits the sheet along each stretch once.
 fn pieces_in_face_to_ends(
     k: &Kernel,
     crease: &Curve,
@@ -789,14 +801,18 @@ fn pieces_in_face_to_ends(
     f: FaceId,
     tol: f64,
     pieces: &mut Vec<Curve>,
+    along: Option<&mut Vec<(Curve, bool)>>,
 ) -> Result<()> {
     let natural = crease.natural_interval();
     let runs = face::p2::classify_free_curve_on_face(k, b, f, crease, natural, tol, true)?;
+    // which runs a piece was run on over
+    let mut taken = vec![false; runs.len()];
     for (i, run) in runs.iter().enumerate() {
         if run.mid != PointClassType::Face {
             continue;
         }
         let (mut lo, mut hi) = (run.interval.min(), run.interval.max());
+        let (mut on_before, mut on_after) = (false, false);
         // the runs before it, all along an edge, reaching the crease's start
         let before = runs.get(..i).unwrap_or_default();
         if !before.is_empty()
@@ -806,6 +822,7 @@ fn pieces_in_face_to_ends(
                 .is_some_and(|r| r.interval.min() <= natural.min())
         {
             lo = natural.min();
+            on_before = true;
         }
         let after = runs.get(i + 1..).unwrap_or_default();
         if !after.is_empty()
@@ -815,6 +832,7 @@ fn pieces_in_face_to_ends(
                 .is_some_and(|r| r.interval.max() >= natural.max())
         {
             hi = natural.max();
+            on_after = true;
         }
         let a = crease.evaluate_point(k, lo)?;
         let z = crease.evaluate_point(k, hi)?;
@@ -832,6 +850,37 @@ fn pieces_in_face_to_ends(
             )?;
         }
         pieces.push(piece);
+        if on_before {
+            taken.iter_mut().take(i).for_each(|t| *t = true);
+        }
+        if on_after {
+            taken.iter_mut().skip(i + 1).for_each(|t| *t = true);
+        }
+    }
+    let Some(along) = along else {
+        return Ok(());
+    };
+    // `pieces_along_edges`, step for step, on the same runs
+    for (run, &taken) in runs.iter().zip(&taken) {
+        if run.mid != PointClassType::Edge {
+            continue;
+        }
+        let ivl = run.interval;
+        let a = crease.evaluate_point(k, ivl.min())?;
+        let z = crease.evaluate_point(k, ivl.max())?;
+        if a.distance(z) <= tol && !crease.is_closed(k, &natural, tol)? {
+            continue;
+        }
+        let mut piece = crease.copy(k)?;
+        if ivl != piece.natural_interval() {
+            let mut trim = ivl;
+            piece.trim(
+                k,
+                &mut trim,
+                crate::nurbs::b_spline_curve_n_lib::TrimMode::Notify,
+            )?;
+        }
+        along.push((piece, taken));
     }
     Ok(())
 }
@@ -851,7 +900,8 @@ fn pieces_in_face_to_ends(
 /// ends the piece where the crease comes within `tol` of the edge, short of their meet by
 /// up to the length of that run. The piece is trimmed to the meet's parameter and its end
 /// moved onto the meet ([`move_end_to`]). An end with no such meet is left as classified.
-#[allow(clippy::too_many_arguments)]
+/// Where the two meets come out of order, or an end cannot be moved onto its meet, the
+/// piece keeps both its classified ends (as before #17673).
 fn pieces_ending_at_meets(
     k: &Kernel,
     crease: &Curve,
@@ -931,30 +981,61 @@ fn pieces_ending_at_meets(
                 *slot = (tq, Some(q));
             }
         }
-        let [(t0, q0), (t1, q1)] = ends;
-        let ordered = t0 < t1;
-        if !ordered {
-            continue;
-        }
-        let mut piece = crease.copy(k)?;
-        let trim_to = crate::geom::extent1d::Extent1d::from_min_max(t0, t1);
-        if trim_to != piece.natural_interval() {
-            let mut trim = trim_to;
-            piece.trim(
-                k,
-                &mut trim,
-                crate::nurbs::b_spline_curve_n_lib::TrimMode::Notify,
-            )?;
-        }
-        if let Some(q) = q0 {
-            move_end_to(k, &mut piece, false, q, tol)?;
-        }
-        if let Some(q) = q1 {
-            move_end_to(k, &mut piece, true, q, tol)?;
-        }
+        let [start, end] = ends;
+        let classified = ((ivl.min(), None), (ivl.max(), None));
+        // two meets out of order (each end's meet past the other's): the ends as
+        // classified
+        let (start, end) = if start.0 < end.0 {
+            (start, end)
+        } else {
+            classified
+        };
+        let piece = if let Some(piece) = piece_ending_at(k, crease, start, end, tol)? {
+            piece
+        } else {
+            // an end that cannot be moved onto its meet (a piece that is no B-spline, or
+            // an end that is not its control point): the ends as classified, as before
+            let (start, end) = classified;
+            piece_ending_at(k, crease, start, end, tol)?.ok_or_else(|| {
+                SolidError::blend_failed(OP, "a crease piece with no meet to move onto")
+            })?
+        };
         pieces.push(piece);
     }
     Ok(())
+}
+
+/// `crease` trimmed to `start.0 .. end.0` with each end that has a meet moved onto it
+/// ([`move_end_to`]); `None` when an end cannot be moved (the piece is then not built,
+/// never left ending short of its meet). With no meets it is always built.
+fn piece_ending_at(
+    k: &Kernel,
+    crease: &Curve,
+    start: (f64, Option<Point3>),
+    end: (f64, Option<Point3>),
+    tol: f64,
+) -> Result<Option<Curve>> {
+    let mut piece = crease.copy(k)?;
+    let trim_to = crate::geom::extent1d::Extent1d::from_min_max(start.0, end.0);
+    if trim_to != piece.natural_interval() {
+        let mut trim = trim_to;
+        piece.trim(
+            k,
+            &mut trim,
+            crate::nurbs::b_spline_curve_n_lib::TrimMode::Notify,
+        )?;
+    }
+    if let Some(q) = start.1 {
+        if !move_end_to(k, &mut piece, false, q, tol)? {
+            return Ok(None);
+        }
+    }
+    if let Some(q) = end.1 {
+        if !move_end_to(k, &mut piece, true, q, tol)? {
+            return Ok(None);
+        }
+    }
+    Ok(Some(piece))
 }
 
 /// A refusal with its fillet error and typed reason.
@@ -1705,20 +1786,29 @@ impl FilletSession<'_> {
                 };
                 // each crease where it lies inside both faces
                 let mut in_face = Vec::new();
+                let along_edges = k.fixes.fillet_overflow_crease_along_edge;
+                let mut along = Vec::new();
                 for c in &found {
-                    pieces_in_face_to_ends(k, c, self.objects.target, f, tol, &mut in_face)?;
+                    pieces_in_face_to_ends(
+                        k,
+                        c,
+                        self.objects.target,
+                        f,
+                        tol,
+                        &mut in_face,
+                        along_edges.then_some(&mut along),
+                    )?;
                 }
                 // Not the fork's (WR-717, #2385): a crease that runs along an edge of the
                 // face, within tolerance, is that edge. The sheet is split along it as along
-                // any crease, and the edge stands as its imprint (below).
-                if k.fixes.fillet_overflow_crease_along_edge {
-                    let first = in_face.len();
-                    for c in &found {
-                        pieces_along_edges(k, c, self.objects.target, f, tol, &mut in_face)?;
-                    }
-                    for c in in_face.get(first..).unwrap_or_default() {
-                        edge_creases.push(c.copy(k)?);
-                        face_creases.push((f, c.copy(k)?));
+                // any crease, and the edge stands as its imprint (below). #17673: a run a
+                // piece was run on over is split along once, in that piece; it still stands
+                // for its edge.
+                for (c, taken) in along {
+                    edge_creases.push(c.copy(k)?);
+                    face_creases.push((f, c.copy(k)?));
+                    if !taken {
+                        in_face.push(c);
                     }
                 }
                 let before = pieces.len();

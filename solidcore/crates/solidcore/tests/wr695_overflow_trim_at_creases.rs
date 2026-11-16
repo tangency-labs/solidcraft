@@ -348,9 +348,15 @@ fn cube_round_past_both_faces() {
 
 /// The variable round, linear `r0` to `r1`, on the 10 x 20 x 30 box's top edge at x = 0, its
 /// volume, face, edge and vertex counts and the largest gap between an edge's curve and
-/// its vertices.
-fn variable_round(trim: bool, r0: f64, r1: f64) -> (f64, (usize, usize, usize), f64) {
+/// its vertices. `along_edge`: `fillet_overflow_crease_along_edge` on too.
+fn variable_round(
+    trim: bool,
+    along_edge: bool,
+    r0: f64,
+    r1: f64,
+) -> (f64, (usize, usize, usize), f64) {
     let mut k = kernel(trim);
+    k.fixes.fillet_overflow_crease_along_edge = along_edge;
     let mut b = box_10_20_30(&mut k);
     let e = edge_between(&k, &b, p(0.0, 0.0, 30.0), p(0.0, 20.0, 30.0));
     let mut session = FilletSession::new(&mut k, &mut b).unwrap();
@@ -412,8 +418,41 @@ fn a_variable_round_past_a_box_top_trimmed_at_its_creases_keeps_its_closed_form(
         (50.0, 4_693.608_889_860),
     ] {
         for (r0, r1) in [(2.0, r1), (r1, 2.0)] {
-            let (_, faces, _) = variable_round(false, r0, r1);
-            let (v, n, gap) = variable_round(true, r0, r1);
+            let (_, faces, _) = variable_round(false, false, r0, r1);
+            let (v, n, gap) = variable_round(true, false, r0, r1);
+            assert!(
+                (v - closed).abs() <= 1e-7 * closed,
+                "{r0} -> {r1}: volume {v} against {closed} (rel {})",
+                (v - closed).abs() / closed
+            );
+            assert_eq!(
+                n, faces,
+                "{r0} -> {r1}: the subtraction's faces, edges, vertices"
+            );
+            assert!(
+                gap <= 1e-12,
+                "{r0} -> {r1}: an edge's curve {gap} off its vertices"
+            );
+        }
+    }
+}
+
+/// #17673 review: the same rounds and checks with `fillet_overflow_crease_along_edge` on
+/// as well. A crease piece run on to its end along an edge of the face takes in the runs
+/// that fix also splits the sheet along; each such run is split along once (in the piece),
+/// so the merge is given no overlapping curves.
+#[test]
+fn a_variable_round_past_a_box_top_trimmed_at_its_creases_with_creases_along_edges_keeps_its_closed_form(
+) {
+    for (r1, closed) in [
+        (11.0, 5_802.443_145_423),
+        (20.0, 5_503.887_121_531),
+        (30.0, 5_184.057_273_581),
+        (50.0, 4_693.608_889_860),
+    ] {
+        for (r0, r1) in [(2.0, r1), (r1, 2.0)] {
+            let (_, faces, _) = variable_round(false, true, r0, r1);
+            let (v, n, gap) = variable_round(true, true, r0, r1);
             assert!(
                 (v - closed).abs() <= 1e-7 * closed,
                 "{r0} -> {r1}: volume {v} against {closed} (rel {})",
