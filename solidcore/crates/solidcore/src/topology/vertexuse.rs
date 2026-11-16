@@ -71,9 +71,10 @@
 //!   cache, so `m_bProcessBoundaryCurves` has nothing to act on. A cache already in use
 //!   by an enclosing caller is not fetched again and no point is tested (upstream
 //!   reaches it mostly while its tree is built, with point testing off).
-//! - **Not upstream: [`is_on_seam_of_face`].** Whether the vertex lies on a seam of its
-//!   face's surface, read as [`is_on_pole`] reads a pole (the cached vertex/face gap's UV).
-//!   `SmVertex::IsTopologicalVertex` keeps such a vertex with it (`vertex.rs`).
+//! - **Not upstream: [`is_on_seam_of_face`].** Whether the vertex's two edges on a face
+//!   touch a seam of the face's surface there from one side: the vertex is dropped onto the
+//!   surface, not read from the cached vertex/face gap, so the query leaves the B-rep as it
+//!   was. `SmVertex::IsTopologicalVertex` keeps such a vertex with it (`vertex.rs`).
 //! - `GetTurningAngDeg`, `ComputeTPoint`, `GetBrep`, the fresh-gap checks,
 //!   `GetVertexFaceTrimCurveGap`, `RefreshGaps`, `IsOnSeam`,
 //!   `IsSectorGapFreeAndOriented`, `AssertValid`, `Draw*` and the `Dump`s are not
@@ -1928,18 +1929,18 @@ pub fn is_on_pole(k: &Kernel, b: &mut Brep, vu: VertexuseId) -> Result<bool> {
 }
 
 /// Not upstream: whether the vertex is where its two edges on this face touch a seam of the
-/// face's surface: the vertex lies on the seam (through the cached vertex/face gap's UV,
-/// [`vertex_face_gap`], as [`is_on_pole`] reads a pole), and both edges leave the seam there
-/// to the same side of it. Joined into one edge, they would meet the seam at a point inside
+/// face's surface: the vertex, dropped onto the surface, lies on the seam, and both edges
+/// leave the seam there to the same side of it. The cached vertex/face gap is not read
+/// (computing it would change the B-rep). Joined into one edge, they would meet the seam at a point inside
 /// the edge, which the seam test of the face's check (`SmFace` test 29,
 /// `CurveClassification::is_crossed_by_edge`) counts as a crossing. Edges that run along the
 /// seam, or cross it (their sides differ, and a crossing needs a seam edge rather than a
-/// vertex), are not a touch. A surface closed in neither direction has no seam, and its gaps
-/// are not computed.
+/// vertex), are not a touch. A surface closed in neither direction has no seam, and nothing
+/// is dropped onto it.
 ///
 /// # Errors
 ///
-/// [`SolidError::NotFound`] for a dangling id; those of [`vertex_face_gap`], the surface's
+/// [`SolidError::NotFound`] for a dangling id; those of the surface's
 /// `IsClosed`, `IsOnSeam` and `DropPoint`, and the edges' curve evaluation;
 /// [`SolidError::Unported`].
 pub fn is_on_seam_of_face(k: &Kernel, b: &mut Brep, vu: VertexuseId) -> Result<bool> {
@@ -1966,17 +1967,22 @@ pub fn is_on_seam_of_face(k: &Kernel, b: &mut Brep, vu: VertexuseId) -> Result<b
             return Ok(false);
         }
     }
-    if !has_vertex_face_gap(b, vu)? {
-        return Ok(false);
-    }
-    let Some(gap) = vertex_face_gap(k, b, vu, false)? else {
+    // The vertex dropped onto the surface. The vertex use's cached gap is not read: computing
+    // it would leave the gap on the B-rep, which a query must not change.
+    let Some(v) = vertex(b, vu)? else {
         return Ok(false);
     };
-    if !gap.face_uv.is_initialized() {
-        return Ok(false);
-    }
     let surface = face_surface(b, f)?;
-    let seam = surface.is_on_seam(k, gap.face_uv, None)?;
+    let domain = surface.natural_uv_domain_with_nurb(k)?;
+    let at = surface
+        .drop_point::<crate::surface::surface::p4::NoObject>(
+            k,
+            vertex::point(b, v)?,
+            &domain,
+            &crate::surface::surface::p5::DropPointOptions::default(),
+        )?
+        .result_uv;
+    let seam = surface.is_on_seam(k, at, None)?;
     if !seam.on_seam {
         return Ok(false);
     }
@@ -1985,13 +1991,9 @@ pub fn is_on_seam_of_face(k: &Kernel, b: &mut Brep, vu: VertexuseId) -> Result<b
     // from its end at the vertex, dropped onto the surface, is on the side of the seam the
     // edge leaves on. The edge uses' UV trim curves are not read: a boolean asks before it
     // makes them.
-    let Some(v) = vertex(b, vu)? else {
-        return Ok(false);
-    };
     let Some(prev) = eu1::cw_edgeuse(b, eu)? else {
         return Ok(false);
     };
-    let domain = surface.natural_uv_domain_with_nurb(k)?;
     let mut leaves = Vec::new();
     for use_ in [eu, prev] {
         let Some(e) = b.edgeuse(use_)?.edge else {

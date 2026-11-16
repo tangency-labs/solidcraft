@@ -51,9 +51,9 @@
 //!   entries (the edge vertex uses of a wire edge have no face use).
 //! - **Seam vertices.** Upstream's `IsTopologicalVertex` keeps a vertex where a closed edge
 //!   meets itself (it marks the seam) and one on a pole. The port also keeps a vertex that
-//!   lies on a seam of a face it bounds ([`is_on_face_seam`]): an edge that only touches a
-//!   seam needs a vertex there as an edge that crosses it does, since the face check's seam
-//!   test counts a seam point inside an edge as a crossing. Upstream joins the two edges and
+//!   where its two edges on a face touch a seam of the face's surface from one side
+//!   ([`is_on_face_seam`]): joined, they would meet the seam inside one edge, which the face
+//!   check's seam test counts as a crossing. Upstream joins the two edges and
 //!   leaves a face its own check refuses ("Face crosses Seam").
 //! - **Unset tangents and cusps.** `AreEdgesTangent` and `IsTopologicalVertex` ignore a
 //!   failed `GetEndTangent` (`SE`) and then read the tangent it did not write. That is
