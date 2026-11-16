@@ -998,7 +998,7 @@ fn a_section_views_rules_are_kept_on_reading() {
 }
 
 fn pictorial(parent: u64, diagonal: Diagonal) -> ViewKind {
-    ViewKind::Pictorial { parent, diagonal }
+    ViewKind::Pictorial { parent, diagonal, axonometry: Axonometry::Isometric }
 }
 
 /// The three views and a pictorial view above right of the front view, placed apart.
@@ -1031,7 +1031,7 @@ fn a_pictorial_view_saves_its_parent_and_diagonal_and_resolves_isometric() {
     assert_eq!((resolved.scale.value.to_string(), resolved.scale.set_by), ("1:2".to_string(), SetBy::Parent(front)));
     d.projection = Projection::First;
     let first = d.resolve_view(iso).unwrap().basis;
-    assert_eq!(first, pictorial_basis(&NamedView::Front.basis(), (1.0, 1.0), Projection::First).unwrap());
+    assert_eq!(first, pictorial_basis(&NamedView::Front.basis(), (1.0, 1.0), Projection::First, Axonometry::Isometric).unwrap());
     assert_ne!(first, NamedView::IsoFrontRight.basis());
     d.projection = Projection::Third;
 
@@ -1041,6 +1041,46 @@ fn a_pictorial_view_saves_its_parent_and_diagonal_and_resolves_isometric() {
     assert_eq!(d.view_centre(iso).unwrap(), Vec2::new(60.0, 250.0));
     view_mut(&mut d, front).place = ViewPlace::At([100.0, 100.0]);
     assert_eq!(d.view_centre(iso).unwrap(), Vec2::new(60.0, 250.0));
+}
+
+/// A pictorial view saves its axonometry only when it isn't isometric (an older drawing's pictorial
+/// view is isometric): `"dimetric"` and `{"scales": [x, y, depth]}` read back as saved, the same
+/// bytes, and resolve to `pictorial_basis` in that axonometry. An unknown axonometry, scales that
+/// aren't three, or scales no view shows are refused, the last with the size that fits.
+#[test]
+fn a_pictorial_views_axonometry_is_saved_when_not_isometric() {
+    let (mut d, _, [front, _, _, iso]) = four();
+    let [front_id, iso_id] = [front, iso].map(ids::encode);
+    let saved = |d: &Drawing| file(d)["views"].as_array().unwrap().iter().find(|v| v["id"] == json!(iso_id)).cloned().unwrap()["kind"].clone();
+    assert_eq!(saved(&d), json!({"pictorial": {"parent": front_id, "diagonal": "above_right"}}));
+    for (axonometry, written) in
+        [(Axonometry::Dimetric, json!("dimetric")), (Axonometry::Scales([1.0, 0.9, 0.6]), json!({"scales": [1.0, 0.9, 0.6]}))]
+    {
+        view_mut(&mut d, iso).kind = ViewKind::Pictorial { parent: front, diagonal: Diagonal::AboveRight, axonometry };
+        d.validate().unwrap();
+        assert_eq!(saved(&d), json!({"pictorial": {"parent": front_id, "diagonal": "above_right", "axonometry": written}}));
+        let reopened = Drawing::from_json(&d.to_json().unwrap()).unwrap();
+        assert_eq!(reopened, d);
+        assert_eq!(reopened.to_json().unwrap(), d.to_json().unwrap());
+        let want = pictorial_basis(&NamedView::Front.basis(), (1.0, 1.0), Projection::Third, axonometry).unwrap();
+        assert_eq!(d.resolve_view(iso).unwrap().basis, want, "{axonometry:?}");
+    }
+    let at = d.views.iter().position(|v| v.id == iso).unwrap();
+    for bad in [
+        json!("trimetric"),
+        json!("Dimetric"),
+        json!({"scales": [1.0, 1.0]}),
+        json!({"scales": [1.0, 1.0, 1.0, 1.0]}),
+        json!({"corner": [1.0, 1.0, 1.0]}),
+    ] {
+        assert_ne!(refused(&d, |v| v["views"][at]["kind"]["pictorial"]["axonometry"] = bad.clone()), "read", "{bad}");
+    }
+    let impossible = refused(&d, |v| v["views"][at]["kind"]["pictorial"]["axonometry"] = json!({"scales": [1.0, 1.0, 1.5]}));
+    assert!(
+        impossible.contains(&format!("view {iso_id}: no axonometry of scales 1 : 1 : 1.5")) && impossible.contains("at most 1.414"),
+        "{impossible}"
+    );
+    assert_eq!(refused(&d, |v| v["views"][at]["kind"]["pictorial"]["axonometry"] = json!("isometric")), "read");
 }
 
 /// The record's rules for a pictorial view: it is placed at a point, its parent is one of the
