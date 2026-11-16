@@ -83,16 +83,17 @@ fn ruled_skin(k: &mut Kernel, secs: &[Vec<Point3>]) -> Brep {
         .brep
 }
 
-/// The difference of the two skins, on both query paths (`query_statuses_pass_on` off and on).
-/// The pinned C++ fails here with `SM_ERR` in `SmBrep::MakeFaceTopology`. Since each closed
-/// section's seam is aligned with the previous section's (the loft fix for #15263, WR-778), the
-/// skins' side faces no longer twist between sections, and the difference is one closed
-/// manifold solid smaller than the outer skin.
-fn difference_volume(query_statuses_pass_on: bool) -> f64 {
+/// The difference of the two skins. The pinned C++ fails here with `SM_ERR` in
+/// `SmBrep::MakeFaceTopology`. Since each closed section's seam is aligned with the previous
+/// section's (the loft fix for #15263, WR-778), the skins' side faces no longer twist between
+/// sections, and the difference is one closed manifold solid smaller than the outer skin.
+/// The queries pass on the statuses SMLib drops (WR-663): with the fork's
+/// tangency-labs/smlib@8ea6a20 a refined end past a curve/curve range does not abort the
+/// intersection.
+fn difference_volume() -> f64 {
     use solidcore::mass::integrator::properties::brep_volume_default;
     let data = sections(MIN7);
     let mut k = Kernel::default();
-    k.fixes.query_statuses_pass_on = query_statuses_pass_on;
     let mut outer = ruled_skin(&mut k, &data[0].1);
     let inner = ruled_skin(&mut k, &data[1].1);
     assert!(is_manifold_solid(&outer).unwrap());
@@ -118,18 +119,6 @@ fn issue_948_difference_of_two_ruled_skins_is_a_solid() {
     assert_eq!((data[0].0.as_str(), data[0].1.len()), ("outer", 7));
     assert_eq!((data[1].0.as_str(), data[1].1.len()), ("inner", 7));
     assert!(data.iter().all(|(_, s)| s.iter().all(|p| p.len() == 86)));
-    let volume = difference_volume(false);
+    let volume = difference_volume();
     assert!((volume - 74_838.2).abs() < 1.0, "{volume}");
-}
-
-/// WR-663 with the fork's tangency-labs/smlib@8ea6a20: a refined end past a curve/curve range
-/// does not abort the intersection, and the query path gives the same solid as the default one.
-#[test]
-fn a_refined_parameter_outside_the_range_does_not_abort_the_intersection() {
-    let default_path = difference_volume(false);
-    let query_path = difference_volume(true);
-    assert!(
-        (default_path - query_path).abs() < 1e-3,
-        "{default_path} vs {query_path}"
-    );
 }

@@ -33,7 +33,8 @@ impl Brep {
     /// part behind the surface (its normal points away) and the part in front, each closed by
     /// the tool's piece inside the body and each possibly several solids. A tool that misses
     /// leaves both parts the whole body, with no face from the tool (tag `self` to tell); `None`
-    /// when a side is left empty.
+    /// when a side is left empty, or when the tool ends inside the body (it only nicks it, and
+    /// neither part would be a closed solid).
     pub fn split_body(&self, tool: &Surface) -> Result<Option<(Brep, Brep)>> {
         let r = core::split::split_body(self.core(), tool.spec()).map(|r| r.map(|(b, f)| (Brep::made_core(b), Brep::made_core(f))));
         trace::call(

@@ -22,7 +22,7 @@ shortcut key caps. Those are HTML on the boards; `pages/*.md` and `measurements.
   exit panels 30x30 nested inside a 120x64 canvas, colour vision samples 84x44, agent pointer 230x84,
   style icon 64x64.
 * **Ground**: a full-canvas rectangle (light `#F7F8FA`, dark `#1C1F26`) under every card figure.
-* **Cubes** are isometric (30 degree axes) in three fixed tones: top face lightest, left face mid,
+* **Boxes** are isometric (30 degree axes) in three fixed tones: top face lightest, left face mid,
   right face darkest. Light: `#FFFFFF`, `#E4E9F0`, `#C9D2DE`. Dark: `#6B7790`, `#515B72`, `#394256`.
   Outline 0.9, round joins, `#6F7C8F` light and `#A3AEC2` dark.
 * **Accent blue** (`#236EAD` light, `#8CBEF5` dark) marks what the setting acts on.
@@ -92,7 +92,6 @@ token each literal maps to.
 | `orbit-centre` | 120x64 | Prefs2_Navigation | Orbit around card "View centre" |
 | `orbit-cursor` | 120x64 | Prefs2_Navigation | Orbit around card "Under the cursor" |
 | `navigator-axes` | 120x64 | Prefs2_Navigation | View navigator card "Axes, signed" |
-| `navigator-cube` | 120x64 | Prefs2_Navigation | View navigator card "Cube, compact" |
 | `sketch-guides` | 120x64 | Prefs2_Sketch | Sketch > Snapping and guides figure |
 | `sketch-exit-previous` | 120x64 | Prefs2_Sketch | "When a sketch ends" card "Return to the view before" (before / sketch / after trio) |
 | `sketch-exit-keep` | 120x64 | Prefs2_Sketch | "When a sketch ends" card "Keep" (default) |

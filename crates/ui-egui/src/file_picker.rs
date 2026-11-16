@@ -47,6 +47,8 @@ impl SolveApp {
         if self.file_picker_busy() {
             return;
         }
+        // The dialog offers the files installed importer plugins read too.
+        solidcraft_engine::io::formats::set_plugin_open_filters(solidcraft_engine::plugin::open_filters(&self.session));
         let future = self.services.pick_open.as_ref().map(|pick| pick(extensions));
         self.begin_picker(future, Box::new(complete));
     }
@@ -160,7 +162,9 @@ pub(crate) fn tick(app: &mut SolveApp, ctx: &egui::Context) {
         return;
     };
     if let Some(pending) = app.file_picker.take() {
-        (pending.complete)(app, paths);
+        // The dialog may have kept a button or modifier release for itself (#16460).
+        crate::window_chrome::mark_input_stale(ctx);
+        (pending.complete)(app, path);
         // Hosts can flush writes or restore native input on the following frame.
         ctx.request_repaint();
     }
@@ -517,7 +521,7 @@ mod tests {
         let doc = &h.app.session.doc;
         let canvas = doc.canvases.first().expect("the canvas is placed");
         let (vals, _) = doc.param_values();
-        let n = doc.canvas_plane(&vals, canvas).unwrap().normal();
+        let n = doc.canvas_plane(&vals, canvas, &h.app.session.model.state()).unwrap().normal();
         assert!(n.z.abs() > 0.99, "the canvas lies on {n:?}, not on XY");
     }
 
@@ -555,7 +559,7 @@ mod tests {
         let doc = &h.app.session.doc;
         assert_eq!(doc.canvases.len(), 1, "{:?}", h.app.status);
         let (vals, _) = doc.param_values();
-        let n = doc.canvas_plane(&vals, &doc.canvases[0]).unwrap().normal();
+        let n = doc.canvas_plane(&vals, &doc.canvases[0], &h.app.session.model.state()).unwrap().normal();
         assert!(n.z.abs() > 0.99, "the canvas lies on the sketch's plane, not on {n:?}");
         assert!(h.app.tool.is_none(), "placing it ends the tool");
     }
@@ -587,7 +591,7 @@ mod tests {
         let doc = &h.app.session.doc;
         let (vals, _) = doc.param_values();
         for canvas in &doc.canvases {
-            let plane = doc.canvas_plane(&vals, canvas).unwrap();
+            let plane = doc.canvas_plane(&vals, canvas, &h.app.session.model.state()).unwrap();
             assert!(plane.normal().z.abs() > 0.99 && (plane.origin.z - 40.0).abs() < 1e-6, "{} lies on {plane:?}", canvas.name);
         }
     }

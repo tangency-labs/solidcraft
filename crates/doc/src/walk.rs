@@ -65,6 +65,7 @@ impl Walk for crate::document::RevolveConvention {}
 impl Walk for crate::document::RailFit {}
 impl Walk for crate::document::CoilSection {}
 impl Walk for crate::document::ThinSide {}
+impl Walk for crate::document::PickedPlacement {}
 impl Walk for crate::document::ExtendMode {}
 impl Walk for crate::document::RuledMode {}
 impl Walk for crate::document::RuledCorners {}
@@ -409,7 +410,7 @@ impl PlaneRef {
             return;
         }
         match self {
-            Self::Construction { feature } => f(Ref::Feature(feature)),
+            Self::Construction { feature, .. } => f(Ref::Feature(feature)),
             Self::Offset { base, .. } | Self::Flipped { base, .. } => base.walk_feature_refs(f, depth + 1),
             Self::ThroughPoint { base, point } => {
                 base.walk_feature_refs(f, depth + 1);
@@ -449,7 +450,7 @@ impl PlaneRef {
             return;
         }
         match self {
-            Self::Construction { feature } => f(Ref::Feature(feature)),
+            Self::Construction { feature, .. } => f(Ref::Feature(feature)),
             Self::Offset { base, .. } | Self::Flipped { base, .. } => base.walk_feature_refs_mut(f, depth + 1),
             Self::ThroughPoint { base, point } => {
                 base.walk_feature_refs_mut(f, depth + 1);

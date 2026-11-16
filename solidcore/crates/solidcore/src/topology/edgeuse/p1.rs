@@ -919,6 +919,20 @@ pub fn max_edge_face_gap(
     Ok(Some(b.edgeuse(eu)?.max_edge_face_gap))
 }
 
+/// [`max_edge_face_gap`] without `force_calc` of an edge use whose gap is already cached
+/// ([`is_max_edge_face_gap_init`]): the cached gap, read without calculating anything, so
+/// it needs only the B-rep to read. `None` for edge uses without an edge/face gap.
+///
+/// # Errors
+///
+/// [`SolidError::NotFound`] for a dangling id.
+pub fn cached_max_edge_face_gap(b: &Brep, eu: EdgeuseId) -> Result<Option<EdgeFaceGap>> {
+    if !has_edge_face_gap(b, eu)? {
+        return Ok(None);
+    }
+    Ok(Some(b.edgeuse(eu)?.max_edge_face_gap))
+}
+
 /// `GetEdgeCCWEdgeGap`: the cached gap between a loop edge use's end and its
 /// counter-clockwise neighbour's start (calculated first when `force_calc` or not
 /// cached); `None` for other edge uses.

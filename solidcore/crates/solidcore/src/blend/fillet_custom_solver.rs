@@ -2053,7 +2053,10 @@ macro_rules! fillet_intersector_ops {
                 points: &[TsectPnt],
                 uv1: &mut BSplineCurve,
                 uv2: &mut BSplineCurve,
-            ) -> Result<Option<Surface>> {
+            ) -> Result<(
+                Option<Surface>,
+                Option<crate::blend::law_corners::LawCornerPieces>,
+            )> {
                 IntersectorOps::create_fillet_surface(
                     &mut self.base,
                     k,
@@ -2064,6 +2067,17 @@ macro_rules! fillet_intersector_ops {
                     uv1,
                     uv2,
                 )
+            }
+
+            fn keep_law_corner_pieces(
+                &mut self,
+                pieces: crate::blend::law_corners::LawCornerPieces,
+            ) -> Result<()> {
+                IntersectorOps::keep_law_corner_pieces(&mut self.base, pieces)
+            }
+
+            fn skins_varying_balls(&self) -> Result<bool> {
+                IntersectorOps::skins_varying_balls(&self.base)
             }
 
             fn set_fillet_surface(
@@ -2130,6 +2144,10 @@ fn constant_radius_setup_offset_values(
 /// are `blend.fillet_standard_solver_p1`'s, `IsKindOf` and `LoadInitialValues`
 /// `_p2`'s, so none falls through to the base.
 impl FilletSolverOps for ConstantRadiusAssistedFs {
+    fn uses_constant_offset_equations(&self) -> bool {
+        true
+    }
+
     fn solver(&self) -> &FilletSolver {
         &self.solver
     }
@@ -2365,6 +2383,7 @@ mod tests {
         let mut fs = assisted_parallel_planes();
         let mut distance = -17.0;
         let ops: &mut dyn FilletSolverOps = &mut fs;
+        assert!(ops.uses_constant_offset_equations());
         assert_eq!(ops.jacobian_size().expect("size"), 4);
         assert!(!ops.offset_radii_can_change().expect("fixed radii"));
         assert_eq!(
@@ -2382,6 +2401,14 @@ mod tests {
             .expect("assisted type"));
         assert_eq!(fs.surface(0).expect("first rail").offset_distance(), 1.0);
         assert_eq!(fs.surface(1).expect("second rail").offset_distance(), -2.0);
+    }
+
+    #[test]
+    fn custom_constraints_do_not_inherit_affine_offset_equations() {
+        let tower = EiffelTowerFs::new(assisted_parallel_planes(), 0.5);
+        let secant = SecantConstantRadiusFs::new(assisted_parallel_planes(), 0.5);
+        assert!(!tower.uses_constant_offset_equations());
+        assert!(!secant.uses_constant_offset_equations());
     }
 
     #[test]

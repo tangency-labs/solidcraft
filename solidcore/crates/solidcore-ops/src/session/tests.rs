@@ -75,7 +75,13 @@ fn a_panicking_hook_keeps_the_calls_result() {
         Err(SolidError::invalid_input("test", "refused"))
     });
     set_failure_hook(None);
-    assert_eq!(r, Err(Error::Status(crate::error::INVALID_INPUT)));
+    assert_eq!(
+        r,
+        Err(Error::Refused {
+            operation: "test",
+            reason: "refused"
+        })
+    );
     assert_eq!(b.counts().unwrap(), [6, 12, 8]);
 }
 
@@ -147,7 +153,13 @@ fn a_failed_call_reaches_the_hook_with_its_consistent_inputs() {
             let r: Result<()> = with_body("on purpose: refused", &b, |_, _| {
                 Err(SolidError::invalid_input("test", "refused"))
             });
-            assert_eq!(r, Err(Error::Status(crate::error::INVALID_INPUT)));
+            assert_eq!(
+                r,
+                Err(Error::Refused {
+                    operation: "test",
+                    reason: "refused"
+                })
+            );
             let edited = make_box([0.0; 3], [1.0; 3]).unwrap();
             let r: Result<()> = with_body("on purpose: panics editing", &edited, |_, br| {
                 let v = br.vertex_list()[0];
@@ -161,7 +173,7 @@ fn a_failed_call_reaches_the_hook_with_its_consistent_inputs() {
             assert_eq!(seen.len(), 2);
             let (call, why, inputs) = &seen[0];
             assert_eq!(call, "on purpose: refused");
-            assert!(why.contains("1007") || why.contains("rejected"), "{why}");
+            assert!(why.contains("test: refused"), "{why}");
             assert_eq!(inputs[0].0, "brep");
             let back = Body::from_smb(inputs[0].1.clone().unwrap(), false).unwrap();
             assert_eq!(back.counts().unwrap(), [6, 12, 8]);
@@ -204,6 +216,47 @@ fn a_consuming_call_reports_its_operands_as_they_came() {
 /// A configuration-sensitive test gets its own process, so corpus tests cannot replace its
 /// process-wide fixes between session calls. Child completion, rather than elapsed time,
 /// determines the result. The child runs the same test body exactly once.
+/// The kernel a call panicked on never goes back to the idle kernels, so no later call is handed
+/// it; the kernel a call finished on does go back, mark and all, and the next call on the thread
+/// takes it (which shows the check below looks where a kernel would be).
+#[test]
+fn a_kernel_that_panicked_is_never_handed_to_another_call() {
+    in_own_process(
+        "session::tests::a_kernel_that_panicked_is_never_handed_to_another_call",
+        || {
+            const MARK: &str = "pool marker";
+            all_fixes();
+            let marked = |k: &Kernel| k.upstream_ub_passed.contains(&MARK);
+            let idle_marked = || IDLE.lock().unwrap().iter().filter(|k| marked(k)).count();
+
+            run("marks and finishes", |k| {
+                k.upstream_ub_passed.push(MARK);
+                Ok(())
+            })
+            .unwrap();
+            assert_eq!(idle_marked(), 1, "a finished call's kernel is idle again");
+            assert!(run("takes it", |k| Ok(marked(k))).unwrap());
+            run("clears the mark", |k| {
+                k.upstream_ub_passed.retain(|m| *m != MARK);
+                Ok(())
+            })
+            .unwrap();
+            assert_eq!(idle_marked(), 0);
+
+            let r: Result<()> = run("marks and panics", |k| {
+                k.upstream_ub_passed.push(MARK);
+                panic!("part way")
+            });
+            assert!(matches!(r, Err(Error::Internal(_))), "{r:?}");
+            assert_eq!(idle_marked(), 0, "the kernel that panicked is not idle");
+            for _ in 0..4 {
+                assert!(!run("after", |k| Ok(marked(k))).unwrap());
+            }
+            assert_eq!(idle_marked(), 0);
+        },
+    );
+}
+
 fn in_own_process(test: &str, f: impl FnOnce()) {
     const CHILD: &str = "SOLIDCORE_SESSION_TEST_CHILD";
     if std::env::var(CHILD).as_deref() == Ok(test) {
@@ -347,7 +400,13 @@ fn a_held_input_is_reported_not_waited_for() {
     let seen = seen.lock().unwrap().clone();
     drop(held);
     set_failure_hook(None);
-    assert_eq!(r, Err(Error::Status(crate::error::INVALID_INPUT)));
+    assert_eq!(
+        r,
+        Err(Error::Refused {
+            operation: "test",
+            reason: "refused"
+        })
+    );
     assert!(
         matches!(&seen[..], [Err(why)] if why.contains("held")),
         "{seen:?}"
@@ -381,6 +440,22 @@ fn a_status_error_with_a_port_failure_or_cancellation_as_cause_fails_the_call() 
     assert!(answer::<()>(Err(cancelled)).is_err());
 
     assert!(answer::<()>(Err(SolidError::invalid_input("test::input", "bad"))).is_err());
+
+    // a blend certificate that spent its work budget is work given up, like a cancellation: it
+    // fails the call, on top or as a cause, although its status alone is a status answer
+    let given_up = || {
+        Failure::new(
+            "test::certificate",
+            solidcore::error::blend::BlendFailure::NotCertified {
+                halvings: 1,
+                stations: 2,
+            },
+        )
+        .into_error()
+    };
+    assert!(given_up().is_status_answer() && given_up().is_not_certified());
+    assert!(matches!(answer::<()>(Err(given_up())), Err(e) if e.is_not_certified()));
+    assert!(answer::<()>(Err(wrap(given_up()))).is_err());
 }
 
 /// The body's vertex points, in its order.
@@ -479,4 +554,107 @@ fn a_result_finished_after_the_cancel_is_not_returned() {
     );
     let r: Result<bool> = run("reads", |k| Ok(k.cancel.is_none()));
     assert_eq!(r, Ok(true), "the token is off the kernel after the call");
+}
+
+/// Runs `f` on another thread and gives its answer: a failure here rather than a test that hangs
+/// when `f` waits for a call that does not end. The limit is no measure of speed: `f` is free to
+/// take all of it, and only a wait with no end fails.
+fn answered<T: Send + 'static>(f: impl FnOnce() -> T + Send + 'static) -> T {
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let _ = tx.send(f());
+    });
+    rx.recv_timeout(std::time::Duration::from_secs(120))
+        .expect("this call waited for a call on another thread that has not ended")
+}
+
+/// A kernel call named `call` running on a thread of its own (a long fillet, say), once it has
+/// started, until it is released.
+fn call_held_open(
+    call: &'static str,
+) -> (
+    std::sync::mpsc::Sender<()>,
+    std::thread::JoinHandle<Result<()>>,
+) {
+    let (started, is_started) = std::sync::mpsc::channel();
+    let (release, released) = std::sync::mpsc::channel::<()>();
+    let held = std::thread::spawn(move || {
+        run(call, |_| {
+            let _ = started.send(());
+            let _ = released.recv();
+            Ok(())
+        })
+    });
+    is_started.recv().unwrap();
+    (release, held)
+}
+
+/// A long call on one body holds up no call on another: while one thread's kernel call runs,
+/// another thread makes a body from its record and reads its box. Each thread's
+/// [`current_call`] is its own.
+#[test]
+fn a_long_call_holds_up_no_call_on_another_body() {
+    all_fixes();
+    let (record, _) = make_box([1.0, 2.0, 3.0], [2.0, 3.0, 4.0])
+        .unwrap()
+        .to_record()
+        .unwrap();
+    let (release, held) = call_held_open("held open");
+    let (bounds, beside) = answered(move || {
+        let (b, _) = Body::from_record(&record, true).unwrap();
+        (b.bounds().unwrap(), current_call())
+    });
+    let here = current_call();
+    release.send(()).unwrap();
+    held.join().unwrap().unwrap();
+    assert_eq!(bounds, ([1.0, 2.0, 3.0], [3.0, 5.0, 7.0]));
+    assert_eq!(beside, None, "the held call is not the other thread's");
+    assert_eq!(here, None, "nor this one's");
+}
+
+/// Two threads compare the same two bodies in opposite orders, each call locking both: the
+/// bodies are locked in one order whichever is named first, so neither call waits for good.
+#[test]
+fn calls_locking_two_bodies_in_opposite_orders_both_finish() {
+    all_fixes();
+    let a = Arc::new(make_box([0.0; 3], [1.0, 2.0, 3.0]).unwrap());
+    let b = Arc::new(make_box([5.0, 0.0, 0.0], [1.0, 2.0, 3.0]).unwrap());
+    let compare = |first: &Arc<Body>, second: &Arc<Body>| {
+        let (first, second) = (Arc::clone(first), Arc::clone(second));
+        std::thread::spawn(move || {
+            (0..200)
+                .map(|_| crate::prism::prism_equivalent(&first, &second).unwrap())
+                .collect::<Vec<_>>()
+        })
+    };
+    let (forward, backward) = answered(move || {
+        let forward = compare(&a, &b);
+        let backward = compare(&b, &a);
+        (forward.join().unwrap(), backward.join().unwrap())
+    });
+    assert_eq!(
+        forward, backward,
+        "the comparison does not depend on the order"
+    );
+    assert!(forward.iter().all(|v| v.is_some() && *v == forward[0]));
+}
+
+/// The fillet solver's latched step is the process's, as upstream keeps it: latched in a call
+/// on one kernel, it is the step of a call on another kernel (made while the first is held).
+#[test]
+fn a_latched_step_reaches_every_kernel() {
+    in_own_process(
+        "session::tests::a_latched_step_reaches_every_kernel",
+        || {
+            all_fixes();
+            let latched = run("latch", |k| Ok(k.latch_fillet_point_step(0.25))).unwrap();
+            // the latching call's kernel, held; the next call gets another
+            let (release, held) = call_held_open("holds the latching kernel");
+            let elsewhere =
+                answered(|| run("reads the step", |k| Ok(k.fillet_point_step.get())).unwrap());
+            release.send(()).unwrap();
+            held.join().unwrap().unwrap();
+            assert_eq!(elsewhere, Some(latched));
+        },
+    );
 }
