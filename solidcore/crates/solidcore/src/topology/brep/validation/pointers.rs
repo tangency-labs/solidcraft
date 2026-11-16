@@ -2846,21 +2846,29 @@ mod issue_891_tests {
                 assert!(has_trim(&b, *eu), "edge use {eu:?} has no trim");
             }
             let raw_before = trimmed_edgeuses(&b);
+            let geometry_before: Vec<_> = raw_before
+                .iter()
+                .map(|&eu| (eu, trim_samples(&k, &b, eu)))
+                .collect();
             let mut reports = AssertArray::new();
             let status = validate_pointers(&k, &mut b, Some(&mut reports), 2, true, &key).unwrap();
             assert!(reports.is_empty(), "{:?}", reports.reports());
             let after_ids = trimmed_edgeuses(&b);
             assert_eq!(after_ids, raw_before, "the check changed the stored trims");
-            let after = after_ids
+            let after: Vec<_> = after_ids
                 .iter()
                 .map(|&eu| (eu, trim_samples(&k, &b, eu)))
                 .collect();
+            assert_eq!(
+                after, geometry_before,
+                "the check changed the trim geometry"
+            );
             (status, after_ids, after)
         }
 
         /// With every edge use already trimmed the check has no missing neighbour trim
-        /// to make: it succeeds and keeps the stored trims (asserted in the run). Two
-        /// runs give the same status, topology and trim geometry.
+        /// to make: it succeeds and keeps the stored trims and their geometry (asserted
+        /// in the run). Two runs give the same status, topology and trim geometry.
         #[test]
         fn wr446_all_trims_present_is_inert() {
             let (s0, t0, g0) = all_present_run();
