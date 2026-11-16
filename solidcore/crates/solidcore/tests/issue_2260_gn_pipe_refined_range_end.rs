@@ -95,7 +95,6 @@ const SOLIDCRAFT_C494A18: &[&str] = &[
     "offset_open_edge_second_trim_point",
     "point_class_gap_3d_propagates_no_drop_error",
     "point_solve_keeps_triangle_guess",
-    "proto_edge_self_loop_on_vertex_degenerate",
     "proto_edge_splits_at_captured_vertices",
     "proto_edge_split_upper_keeps_the_old_max",
     "proto_vertex_miss_is_false",
