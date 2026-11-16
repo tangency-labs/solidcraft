@@ -132,9 +132,26 @@ fn nurb_cone(k: &mut Kernel) -> Brep {
     let mut b = Brep::new_with_infinite_region().unwrap();
     let mut records = NotifyRecords::new();
     let mut attributes = AttributeStore::default();
-    let key = |_: EntityRef| ObjectRef {
-        key: ObjectKey(0),
-        type_code: 0,
+    // the goldens reader's identities (`own_reader::read_key_of`): typed, one per object
+    let key = |e: EntityRef| {
+        use EntityRef as E;
+        let (type_code, kind, i) = match e {
+            E::Brep(x) => (16011, 0u64, x.index()),
+            E::Region(x) => (16012, 1, x.index()),
+            E::Shell(x) => (16013, 2, x.index()),
+            E::Faceuse(x) => (16022, 3, x.index()),
+            E::Face(x) => (16002, 4, x.index()),
+            E::Loopuse(x) => (16004, 5, x.index()),
+            E::Loop(x) => (16003, 6, x.index()),
+            E::Edgeuse(x) => (16005, 7, x.index()),
+            E::Edge(x) => (16016, 8, x.index()),
+            E::Vertexuse(x) => (16006, 9, x.index()),
+            E::Vertex(x) => (16021, 10, x.index()),
+        };
+        ObjectRef {
+            type_code,
+            key: ObjectKey(((kind + 1) << 40) | u64::from(i)),
+        }
     };
     let mut env = TopologyEnv {
         all_attributes: &[],
