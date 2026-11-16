@@ -23,6 +23,7 @@
 //! | [`is_connected_to`]                         | `SmVertex::IsConnectedTo`                        |
 //! | [`are_edges_tangent`]                       | `SmVertex::AreEdgesTangent`                      |
 //! | [`is_topological_vertex`], [`is_on_pole`]   | `SmVertex::IsTopologicalVertex`, `IsOnPole`      |
+//! | [`is_on_face_seam`]                         | none (not upstream, below)                       |
 //! | [`is_wire_vertex`], [`is_lamina_vertex`]    | `SmVertex::IsWireVertex`, `IsLaminaVertex`       |
 //! | [`is_shell_vertex`], [`is_loop_vertex`]     | `SmVertex::IsShellVertex`, `IsLoopVertex`        |
 //! | [`max_up_dim_gap_3d`], [`max_gap_3d`], [`VertexGap`], [`HeldGap`] | `SmVertex::GetMaxUpDimGap3d`, `GetMaxGap3d` (the `SmGap*` results) |
@@ -48,6 +49,12 @@
 //!   use without edge, a face use without face, a shell without region: a malformed
 //!   B-rep) the port returns [`SolidError::InvalidInput`]; [`faceuses`] keeps its null
 //!   entries (the edge vertex uses of a wire edge have no face use).
+//! - **Seam vertices.** Upstream's `IsTopologicalVertex` keeps a vertex where a closed edge
+//!   meets itself (it marks the seam) and one on a pole. The port also keeps a vertex that
+//!   where its two edges on a face touch a seam of the face's surface from one side
+//!   ([`is_on_face_seam`]): joined, they would meet the seam inside one edge, which the face
+//!   check's seam test counts as a crossing. Upstream joins the two edges and
+//!   leaves a face its own check refuses ("Face crosses Seam").
 //! - **Unset tangents and cusps.** `AreEdgesTangent` and `IsTopologicalVertex` ignore a
 //!   failed `GetEndTangent` (`SE`) and then read the tangent it did not write. That is
 //!   the `SmVector3d` default, `SM_UNDEF_DOUBLE` in every component ([`Vec3::UNDEF`]),
@@ -847,6 +854,21 @@ pub fn is_on_pole(k: &Kernel, b: &mut Brep, v: VertexId) -> Result<bool> {
     Ok(on_pole)
 }
 
+/// Not upstream: whether the vertex lies on a seam of one of the faces it bounds
+/// ([`vertexuse::is_on_seam_of_face`]).
+///
+/// # Errors
+///
+/// Those of [`vertexuse::is_on_seam_of_face`].
+pub fn is_on_face_seam(k: &Kernel, b: &mut Brep, v: VertexId) -> Result<bool> {
+    for vu in vertexuses(b, v)? {
+        if vertexuse::is_on_seam_of_face(k, b, vu)? {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
 /// `IsTopologicalVertex`: whether the vertex could be removed without changing the
 /// B-rep's shape: it joins exactly two different edges, is not on a pole, the edges'
 /// curves meet at the same parameter (unless both are lines) and leave the vertex
@@ -888,6 +910,13 @@ pub fn is_topological_vertex(k: &Kernel, b: &mut Brep, v: VertexId) -> Result<bo
 
     // skip verices marking poles
     if is_on_pole(k, b, v)? {
+        return Ok(false);
+    }
+
+    // Not upstream: skip vertices on a face's seam. An edge that touches a seam needs a
+    // vertex there as one that crosses it does (the face check's seam test counts a seam
+    // point inside an edge as a crossing); joining the two edges would remove it.
+    if is_on_face_seam(k, b, v)? {
         return Ok(false);
     }
 
