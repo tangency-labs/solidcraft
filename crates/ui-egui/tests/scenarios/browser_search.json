@@ -246,16 +246,11 @@
    "hidden_handles": [
     "browser:search:select-all"
    ],
-   "shown": "No matches"
+   "shown": "Nothing named “sha”"
   }
  },
  {
-  "click": {
-   "handle": "browser:search:kinds"
-  }
- },
- {
-  "frames": 2
+  "note": "The list stays open while kinds are ticked; All kinds clears them, and the filter closes it."
  },
  {
   "click": {
@@ -264,6 +259,14 @@
  },
  {
   "frames": 3
+ },
+ {
+  "click": {
+   "handle": "browser:search:kinds"
+  }
+ },
+ {
+  "frames": 2
  },
  {
   "expect": {

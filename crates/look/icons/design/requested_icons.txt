@@ -164,6 +164,7 @@ fastener	false
 feature_group	false
 fillet	false
 filter	false
+find_kinds	false
 finish	false
 finish_edit	false
 fit	false

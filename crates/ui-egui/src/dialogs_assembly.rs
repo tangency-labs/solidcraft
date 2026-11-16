@@ -2681,6 +2681,7 @@ pub fn browser_joints(app: &mut SolveApp, rows: &mut crate::ui_kit::browser::Row
         let visible = app.session.joint_visible(id);
         let selected = app.tree.picked_joints.contains(&id);
         let joint_key = format!("joint:{id}");
+        let emphasis = app.tree.search.hits().and_then(|h| h.span(&name));
         let r = node_row(
             rows,
             Spec { key: &joint_key, ..Default::default() },
@@ -2693,6 +2694,7 @@ pub fn browser_joints(app: &mut SolveApp, rows: &mut crate::ui_kit::browser::Row
                 rename: true,
                 selected,
                 dim: suppressed || !visible || !folder_shown,
+                emphasis,
                 ..Default::default()
             },
         );

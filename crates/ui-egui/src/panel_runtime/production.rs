@@ -331,13 +331,16 @@ impl Product {
                     })
                     .collect()
             }
-            Self::Browser => vec![RuntimeAction {
-                id: ControlId("magnifier".into()),
-                label: solidcraft_ui_text::tr("ui.browser_search_hint").into(),
-                enabled: true,
-                disabled_reason: None,
-                pressed: Some(crate::browser_search::bar_shown(app)),
-            }],
+            Self::Browser => {
+                presentation.status = Some(crate::browser_search::body_count(&app.session));
+                vec![RuntimeAction {
+                    id: ControlId("magnifier".into()),
+                    label: solidcraft_ui_text::tr("ui.browser_search_hint").into(),
+                    enabled: true,
+                    disabled_reason: None,
+                    pressed: Some(crate::browser_search::bar_shown(app)),
+                }]
+            }
             Self::RenderShots | Self::SketchOptions | Self::Bom | Self::DrawingInspector => Vec::new(),
         };
         presentation
@@ -1437,6 +1440,13 @@ impl FramePanelContent for ProductionFrame<'_> {
         _content: &mut dyn PanelController,
         services: &mut ContentServices<'_>,
     ) -> PanelResult<()> {
+        if slot == ContentSlot::Title {
+            // Only the Browser asks for the title's place (`set_header_content`): its search field.
+            if Product::from_instance(&context.instance)? == Product::Browser && crate::browser_search::bar_shown(self.app) {
+                crate::browser_search::header_field(self.app, ui);
+            }
+            return Ok(());
+        }
         if !matches!(slot, ContentSlot::Body | ContentSlot::Inline) {
             return Ok(());
         }

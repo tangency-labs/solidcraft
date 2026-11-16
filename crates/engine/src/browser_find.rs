@@ -22,8 +22,8 @@ const MAX_NAME_CHARS: usize = 4096;
 /// Placement paths are at most this deep (as in [`Session::occurrence_placement`]).
 const MAX_DEPTH: usize = 64;
 
-/// What a match is.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, JsonSchema)]
+/// What a match is; ordered as the browser lists them ([`Kind::ALL`]).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum Kind {
     /// A placement of a component.
@@ -49,6 +49,11 @@ impl Kind {
 
     pub fn from_id(id: &str) -> Option<Kind> {
         Kind::ALL.into_iter().find(|k| k.id() == id)
+    }
+
+    /// Its place in [`Kind::ALL`].
+    fn index(self) -> usize {
+        self as usize
     }
 }
 
@@ -90,6 +95,30 @@ impl Pattern {
             None => name.contains(self.text.as_str()),
             Some(glob) => whole(glob, &name.chars().collect::<Vec<char>>()),
         }
+    }
+
+    /// Where in `name` plain text first matches, in bytes of `name` and on whole characters, for the
+    /// browser to emphasise; `None` for no match, or for a wildcard pattern, which matches the whole
+    /// name. Each character is lower-cased on its own, as [`Pattern::matches`] lower-cases the name.
+    pub fn span(&self, name: &str) -> Option<std::ops::Range<usize>> {
+        if self.glob.is_some() {
+            return None;
+        }
+        let chars: Vec<(usize, char)> = name.char_indices().take(MAX_NAME_CHARS).collect();
+        (0..chars.len()).find_map(|first| {
+            let mut lowered = String::new();
+            for (at, &(_, c)) in chars.iter().enumerate().skip(first) {
+                lowered.extend(c.to_lowercase());
+                if !self.text.starts_with(lowered.as_str()) {
+                    return None;
+                }
+                if lowered.len() == self.text.len() {
+                    let end = chars.get(at + 1).map_or(name.len(), |&(byte, _)| byte);
+                    return Some(chars.get(first)?.0..end);
+                }
+            }
+            None
+        })
     }
 }
 
@@ -149,9 +178,19 @@ pub struct Search {
     pub total: usize,
     /// The search stopped at 100000 placements (`MAX_PLACEMENTS`): there may be more.
     pub incomplete: bool,
+    /// The matches of each kind, in [`Kind::ALL`]'s order, whichever kinds were asked for: the
+    /// browser's kind list shows them. Not part of `browser.find`'s reply.
+    #[serde(skip)]
+    #[schemars(skip)]
+    by_kind: [usize; 5],
 }
 
 impl Search {
+    /// How many things of `kind` match, whether the search lists that kind or not.
+    pub fn count(&self, kind: Kind) -> usize {
+        self.by_kind.get(kind.index()).copied().unwrap_or_default()
+    }
+
     /// Does `found` hold every match? Not when it stopped at `MAX_LISTED` matches or
     /// `MAX_PLACEMENTS` placements.
     pub fn complete(&self) -> bool {
@@ -201,9 +240,16 @@ impl Walk<'_> {
         self.kinds.is_empty() || self.kinds.contains(&kind)
     }
 
-    /// Counts and lists `name` if it matches; `rest` gives its key and item.
+    /// Counts `name` for its kind if it matches, and lists it if its kind is asked for; `rest` gives
+    /// its key and item.
     fn hit(&mut self, kind: Kind, name: &str, rest: impl FnOnce() -> (String, Option<Sel>), path: &[u64]) {
-        if !self.wants(kind) || !self.pattern.is_none_or(|p| p.matches(name)) {
+        if !self.pattern.is_none_or(|p| p.matches(name)) {
+            return;
+        }
+        if let Some(n) = self.out.by_kind.get_mut(kind.index()) {
+            *n += 1;
+        }
+        if !self.wants(kind) {
             return;
         }
         self.out.total += 1;
@@ -217,17 +263,15 @@ impl Walk<'_> {
     /// placement of it (whose bodies have their own names in the world).
     fn folders(&mut self, component: u64, path: &[u64], placed: Option<&OccurrencePlacement>) {
         let s = self.s;
-        if self.wants(Kind::Body) {
-            let world: HashMap<&str, &str> =
-                placed.map(|p| p.bodies.iter().map(|b| (b.source.as_str(), b.world.as_str())).collect()).unwrap_or_default();
-            let state = s.model.state();
-            for b in state.bodies.iter().filter(|b| s.doc.model_body_component(b) == component && !s.body_removed_later(&b.name)) {
-                let item = || {
-                    let name = world.get(b.name.as_str()).map_or_else(|| b.name.clone(), |w| (*w).to_string());
-                    (b.name.clone(), Some(Sel::Body { name }))
-                };
-                self.hit(Kind::Body, &b.name, item, path);
-            }
+        // Bodies are walked whether they are asked for or not: every kind is counted (`Search::count`).
+        let world: HashMap<&str, &str> = placed.map(|p| p.bodies.iter().map(|b| (b.source.as_str(), b.world.as_str())).collect()).unwrap_or_default();
+        let state = s.model.state();
+        for b in state.bodies.iter().filter(|b| s.doc.model_body_component(b) == component && !s.body_removed_later(&b.name)) {
+            let item = || {
+                let name = world.get(b.name.as_str()).map_or_else(|| b.name.clone(), |w| (*w).to_string());
+                (b.name.clone(), Some(Sel::Body { name }))
+            };
+            self.hit(Kind::Body, &b.name, item, path);
         }
         // Features after the history marker are not in the browser's folders, so not found either.
         let before_marker = s.doc.marker.unwrap_or(s.doc.features.len());

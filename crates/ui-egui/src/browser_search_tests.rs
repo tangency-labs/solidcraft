@@ -71,7 +71,7 @@ fn open(h: &mut Harness) {
     if handle_at("browser:search").is_none() {
         click(h, "browser:magnifier");
     }
-    assert!(handle_at("browser:search").is_some(), "the field is the first row under the header");
+    assert!(handle_at("browser:search").is_some(), "the field is in the panel's header");
 }
 
 fn click(h: &mut Harness, handle: &str) {
@@ -165,35 +165,53 @@ fn no_match_says_so_and_lists_nothing() {
     assert!(handle_at("browser:search:select-all").is_none());
 }
 
-/// Picks a kind from the list beside the field.
+/// Ticks or clears one kind in the field's filter list, then closes the list.
 fn pick_kind(h: &mut Harness, kind: &str) {
     click(h, "browser:search:kinds");
     click(h, &format!("browser:search:kind:{kind}"));
+    click(h, "browser:search:kinds");
 }
 
+fn kinds(h: &Harness) -> Vec<Kind> {
+    h.app.tree.search.kinds.iter().copied().collect()
+}
+
+/// The filter list in the field ticks any number of kinds (#1634, @Nathan-Dane's design): it stays
+/// open while they are ticked, each kind says how many match, the field's filter shows how many are
+/// ticked, and All kinds clears them.
 #[test]
-fn the_kind_list_narrows_a_search_and_alone_lists_a_kind() {
+fn the_kind_list_narrows_a_search_to_the_kinds_ticked() {
     let mut h = assembly();
     open(&mut h);
-    // The list holds every kind the design has, and All, and closes when one is picked.
     click(&mut h, "browser:search:kinds");
     for kind in ["all", "component", "body", "sketch", "construction", "joint"] {
         assert!(handle_at(&format!("browser:search:kind:{kind}")).is_some(), "{kind}");
     }
+    assert!(handle_at("browser:search:kinds:badge").is_none(), "no kind ticked yet");
     click(&mut h, "browser:search:kind:body");
-    assert!(handle_at("browser:search:kind:all").is_none());
-    assert_eq!(h.app.tree.search.kind, Some(Kind::Body));
+    assert!(handle_at("browser:search:kind:sketch").is_some(), "the list stays open");
+    assert_eq!(kinds(&h), [Kind::Body]);
     assert_eq!(total(&h), 10);
     assert_eq!((count("Base plate"), count("Column web"), count("Bolt shank"), count("Washer")), (1, 2, 6, 1));
     assert_eq!(count("Thread profile") + count("Bolt holes"), 0);
+    // A second kind adds to the first: the sketch in each bolt placement, and the plate's.
+    click(&mut h, "browser:search:kind:sketch");
+    assert_eq!(kinds(&h), [Kind::Body, Kind::Sketch]);
+    assert_eq!((total(&h), count("Bolt holes"), count("Thread profile")), (10 + 1 + 6, 1, 6));
+    assert!(handle_at("browser:search:kinds:badge").is_some(), "the filter shows kinds are ticked");
+    // Every kind is counted, ticked or not: the list's numbers.
+    let counts = h.app.tree.search.hits().map(|hits| Kind::ALL.map(|k| hits.search.count(k)));
+    assert_eq!(counts, Some([9, 10, 7, 1, 1]));
+    click(&mut h, "browser:search:kind:body");
+    assert_eq!(kinds(&h), [Kind::Sketch]);
     search(&mut h, "bolt");
-    assert_eq!((total(&h), count("Bolt shank"), count("Bolt holes")), (6, 6, 0));
-    pick_kind(&mut h, "sketch");
     assert_eq!((total(&h), count("Bolt holes"), count("Bolt shank")), (1, 1, 0));
-    // All, with nothing typed, is no search: the tree is back.
+    // All kinds, with nothing typed, is no search: the tree is back.
     search(&mut h, "");
-    pick_kind(&mut h, "all");
+    click(&mut h, "browser:search:kind:all");
+    assert!(kinds(&h).is_empty());
     assert!(!h.app.tree.search.on());
+    assert!(handle_at("browser:search:kinds:badge").is_none());
     assert!(rows().iter().any(|r| r == "Document Settings"));
 }
 
@@ -301,19 +319,19 @@ fn esc_closes_a_bar_that_was_asked_for() {
 fn the_clear_button_ends_a_search() {
     let mut h = assembly();
     search(&mut h, "bolt");
-    h.app.tree.search.kind = Some(Kind::Body);
+    h.app.tree.search.kinds = [Kind::Body].into();
     h.frames(2);
     click(&mut h, "browser:search:clear");
     assert!(!h.app.tree.search.on());
-    assert_eq!((h.app.tree.search.text.as_str(), h.app.tree.search.kind), ("", None));
+    assert_eq!((h.app.tree.search.text.as_str(), kinds(&h)), ("", vec![]));
     assert!(handle_at("browser:search").is_none(), "the field closes");
     // A kind alone is a search to clear too.
     h.app.tree.search.show();
-    h.app.tree.search.kind = Some(Kind::Body);
+    h.app.tree.search.kinds = [Kind::Body].into();
     h.frames(2);
     assert!(h.app.tree.search.on());
     click(&mut h, "browser:search:clear");
-    assert_eq!(h.app.tree.search.kind, None);
+    assert!(kinds(&h).is_empty());
 }
 
 /// The × of a bar that was asked for is there from the start, and closes it.
@@ -443,7 +461,7 @@ fn starting_to_edit_a_sketch_updates_the_search() {
     h.app.run("solid.remove", json!({"bodies": ["Gone block"]})).unwrap();
     h.app.run("timeline.roll_to", json!({"feature": "Edited"})).unwrap();
     search(&mut h, "block");
-    h.app.tree.search.kind = Some(Kind::Body);
+    h.app.tree.search.kinds = [Kind::Body].into();
     h.frames(2);
     assert_eq!(total(&h), 2);
     h.app.run("sketch.edit", json!({"sketch": "Edited"})).unwrap();
@@ -810,7 +828,7 @@ fn find_in_browser_on_a_face_ends_the_search_and_a_search_leaves_out_the_feature
 fn the_design_changing_updates_the_search() {
     let mut h = assembly();
     search(&mut h, "washer");
-    h.app.tree.search.kind = Some(Kind::Body);
+    h.app.tree.search.kinds = [Kind::Body].into();
     h.frames(2);
     assert_eq!((total(&h), count("Washer")), (1, 1));
     h.app.run("body.rename", json!({"body": "Washer", "name": "Spacer"})).unwrap();
@@ -832,7 +850,7 @@ fn the_design_changing_updates_the_search() {
     h.frames(2);
     assert_eq!(total(&h), 0);
     // A sketch's name, which the document holds.
-    h.app.tree.search.kind = None;
+    h.app.tree.search.kinds.clear();
     search(&mut h, "bolt holes");
     assert_eq!(total(&h), 1);
     h.app.run("timeline.rename", json!({"feature": "Bolt holes", "name": "Slots"})).unwrap();
@@ -953,12 +971,105 @@ fn the_search_bar_fits_the_browser_in_every_language() {
     for catalog in crate::i18n::LOCALES {
         h.app.preferences.language = catalog.id.to_string();
         h.frames(2);
-        let bar = crate::scenario::rect_of("browser:search:bar").unwrap();
-        for name in ["browser:search:kinds", "browser:search:select-all", "browser:search:hide-others"] {
+        // The filter is in the header's field; Select all and Hide others are on the line under it.
+        for (inside, name) in [
+            ("browser:search:bar", "browser:search:kinds"),
+            ("browser:search:results", "browser:search:select-all"),
+            ("browser:search:results", "browser:search:hide-others"),
+        ] {
+            let within = crate::scenario::rect_of(inside).unwrap_or_else(|| panic!("{}: no {inside}", catalog.id));
             let r = crate::scenario::rect_of(name).unwrap_or_else(|| panic!("{}: no {name}", catalog.id));
-            assert!(r.max.x <= bar.max.x + 0.5, "{}: {name} ends at {} past the browser's {}", catalog.id, r.max.x, bar.max.x);
+            assert!(r.max.x <= within.max.x + 0.5, "{}: {name} ends at {} past the browser's {}", catalog.id, r.max.x, within.max.x);
         }
         let height = |name| crate::scenario::rect_of(name).map(|r| r.height());
         assert_eq!(height("browser:search:select-all"), height("browser:search:hide-others"), "{}", catalog.id);
     }
+}
+
+/// @Nathan-Dane's compact design (#1634), state 1: the closed header says how many bodies the design
+/// has, one or many.
+#[test]
+fn the_header_says_how_many_bodies_there_are() {
+    let h = assembly();
+    let status = |h: &Harness| {
+        let id = solidcraft_engine::panels::InstanceId::new("browser").unwrap();
+        h.app.panel_runtime().unwrap().instance_presentation(&id).unwrap().status
+    };
+    assert_eq!(status(&h).as_deref(), Some("10 bodies"));
+    let mut one = Harness::new();
+    one.app.home.open = false;
+    one.app.run("solid.box", json!({"length": 10, "width": 10, "height": 10, "body_name": "Cube"})).unwrap();
+    one.frames(3);
+    assert_eq!(status(&one).as_deref(), Some("1 body"));
+}
+
+/// State 2: the field takes the title's place in the panel's header, level with the magnifier, so a
+/// search costs no row of the tree; the first row under the header is the tree's own.
+#[test]
+fn the_field_takes_the_titles_place_in_the_header() {
+    let mut h = assembly();
+    let magnifier = handle_at("browser:magnifier").unwrap();
+    let first_row = handle_at("row:Document Settings").unwrap();
+    open(&mut h);
+    let field = crate::scenario::rect_of("browser:search").unwrap();
+    assert!((field.center().y - magnifier.y).abs() <= 1.0, "the field {field:?} is on the header's line at {}", magnifier.y);
+    assert!(field.max.x < magnifier.x, "the field stays before the header's actions");
+    assert!((handle_at("row:Document Settings").unwrap().y - first_row.y).abs() <= 0.5, "the tree doesn't move down");
+}
+
+/// State 5: a search that finds nothing says so, names the text, and offers to end the search.
+#[test]
+fn no_match_offers_to_end_the_search() {
+    let mut h = assembly();
+    open(&mut h);
+    search(&mut h, "zzz");
+    assert!(h.widget("Nothing named “zzz”").is_some(), "it names the text");
+    assert!(handle_at("browser:search:end").is_some(), "End search is offered");
+    click(&mut h, "browser:search:end");
+    assert!(!h.app.tree.search.on() && h.app.tree.search.text.is_empty());
+    assert!(handle_at("browser:search").is_none(), "the field closes");
+    assert!(rows().iter().any(|r| r == "Document Settings"));
+    // With kinds ticked, nothing found means none of those kinds: the washer still has the name,
+    // so the note doesn't say nothing does.
+    open(&mut h);
+    search(&mut h, "washer");
+    pick_kind(&mut h, "sketch");
+    assert_eq!(total(&h), 0);
+    assert!(h.widget(solidcraft_ui_text::tr("ui.browser_search_none")).is_some(), "it says no matches");
+    assert!(h.widget("Nothing named “washer”").is_none());
+}
+
+/// State 6: after Hide others the line under the field says how many it hid, and its Undo brings them
+/// back in one step; the search stays.
+#[test]
+fn hide_others_says_how_many_it_hid_and_undoes() {
+    let mut h = assembly();
+    search(&mut h, "washer m20");
+    assert!(handle_at("browser:search:undo").is_none());
+    click(&mut h, "browser:search:hide-others");
+    assert_eq!(h.app.tree.search.hid(&h.app.session), Some(9));
+    assert!(handle_at("browser:search:undo").is_some());
+    click(&mut h, "browser:search:undo");
+    assert!(hidden_world(&h).is_empty(), "Undo shows them again");
+    assert_eq!(h.app.tree.search.hid(&h.app.session), None);
+    assert!(handle_at("browser:search:undo").is_none());
+    assert!(h.app.tree.search.on() && h.app.tree.search.text == "washer m20");
+    // Any other step ends the line too: it said what Hide others did, and that is no longer the last.
+    click(&mut h, "browser:search:hide-others");
+    h.app.run("browser.visibility", json!({"items": ["Base plate"], "visible": true})).unwrap();
+    h.frames(2);
+    assert_eq!(h.app.tree.search.hid(&h.app.session), None);
+}
+
+/// State 7: a folded Browser keeps its search, field and all, in its header.
+#[test]
+fn a_folded_browser_keeps_its_search_in_the_header() {
+    let mut h = assembly();
+    open(&mut h);
+    search(&mut h, "washer");
+    fold_browser(&mut h, true);
+    h.frames(2);
+    assert!(browser_folded(&h));
+    assert!(handle_at("browser:search").is_some(), "the field stays in the folded header");
+    assert!(h.app.tree.search.on() && h.app.tree.search.text == "washer");
 }

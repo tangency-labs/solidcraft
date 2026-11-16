@@ -73,6 +73,20 @@ fn plain_text_is_found_anywhere_in_a_name_ignoring_case() {
     assert!(pattern("болт").matches("БОЛТ М20"));
 }
 
+/// The part of a name the text matched, which the browser emphasises (#1634): wherever it is and
+/// whatever its case. A wildcard pattern matches the whole name, so it marks no part.
+#[test]
+fn the_matched_part_of_a_name_is_marked() {
+    let span = |text: &str, name: &str| Pattern::new(text).and_then(|p| p.span(name));
+    assert_eq!(span("m20", "Bolt M20:1"), Some(5..8));
+    assert_eq!(span("BOLT", "Bolt M20:1"), Some(0..4));
+    assert_eq!(span("é", "Café É"), Some(3..5), "the first match, in bytes of the name");
+    // A character whose lower case is longer (İ is i and a combining dot) still marks whole characters.
+    assert_eq!(span("x", "İx"), Some(2..3));
+    assert_eq!(span("bolt", "Washer"), None);
+    assert_eq!(span("*:1", "Bolt M20:1"), None);
+}
+
 #[test]
 fn wildcards_match_the_whole_name() {
     let p = pattern("*:1");
@@ -219,6 +233,22 @@ fn kinds_narrow_a_search_and_alone_list_everything_of_a_kind() {
     assert!(bodies.found.iter().all(|f| f.kind == Kind::Body));
     assert_eq!(find(&s, None, &[Kind::Component]).total, 2 + 4 + 3);
     assert_eq!(find(&s, None, &Kind::ALL).total, find(&s, Some(&pattern("*")), &[]).total);
+}
+
+/// The browser's kind list shows how many of each kind match, whichever kinds are listed and however
+/// many the list holds: every kind is counted on the one walk.
+#[test]
+fn every_kind_is_counted_whatever_is_listed() {
+    let s = assembly();
+    // `bolt`: six placements, six shanks, the Bolt holes sketch, the Bolt line plane, no joint.
+    let counts = |search: &crate::browser_find::Search| Kind::ALL.map(|k| search.count(k));
+    let all = find(&s, Some(&pattern("bolt")), &[]);
+    assert_eq!(counts(&all), [6, 6, 1, 1, 0]);
+    let bodies = find(&s, Some(&pattern("bolt")), &[Kind::Body]);
+    assert_eq!((bodies.total, counts(&bodies)), (6, [6, 6, 1, 1, 0]));
+    assert_eq!(counts(&find_within(&s, Some(&pattern("bolt")), &[Kind::Sketch], 0, usize::MAX)), [6, 6, 1, 1, 0]);
+    // No text: every kind the design has.
+    assert_eq!(counts(&find(&s, None, &[Kind::Joint])), [9, 10, 1, 1, 1]);
 }
 
 #[test]

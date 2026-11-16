@@ -1516,8 +1516,9 @@ fn rows_scrolling(app: &mut SolveApp, ui: &mut egui::Ui, acts: &mut Actions, shr
         return;
     }
     prepare_model(app);
-    if crate::browser_search::bar_shown(app) {
-        // The panel host draws the title row (#15184), so the field is the first row under it.
+    if crate::browser_search::bar_shown(app) && !crate::browser_search::in_header(ui.ctx()) {
+        // The field is in the panel's header, in the title's place (#1634); a Browser grouped with
+        // other panels has tabs there, so the field is the first row under them.
         let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), crate::ui_kit::row_height() + Tokens::get().space_8), Sense::hover());
         crate::browser_search::field_row(app, ui, rect);
     }
@@ -1885,6 +1886,7 @@ fn occurrence_rows_inner(
     // A cut component has a dashed outline until Paste moves it.
     let cut = app.cut.placements.iter().any(|p| p.as_slice() == path);
     let badges: &[&str] = if placement.grounded { &["pin"] } else { &[] };
+    let emphasis = app.tree.search.hits().filter(|_| matches).and_then(|h| h.span(&placement.label));
     app.tree.remember(key);
     let appearance = if crate::render_workspace::active(app) {
         let bodies = placement.hover_bodies.get_or_insert_with(|| app.session.occurrence_bodies(path, true).unwrap_or_default());
@@ -1908,6 +1910,7 @@ fn occurrence_rows_inner(
         cut,
         radio: Some(active),
         badges,
+        emphasis,
         mark: acts.lit.placement(&app.session.doc, path, placement.component),
         ..Default::default()
     };
@@ -3363,6 +3366,8 @@ fn entry_row(
             && same_document(app, d)
             && item_drag(d).is_some_and(|d| d.comp == comp && d.folder == folder && !d.keys.contains(&e.key) && fits(d))
     };
+    // A row listed in a search is a match: the matched part of its name is drawn strong.
+    let emphasis = app.tree.search.hits().and_then(|h| h.span(&e.label));
     let r = node_row(
         rows,
         // Items don't drag during a search, as groups don't (`folder_level`).
@@ -3393,6 +3398,7 @@ fn entry_row(
             tip: state_tip.as_deref(),
             badges,
             mark,
+            emphasis,
             ..Default::default()
         },
     );
