@@ -1061,7 +1061,13 @@ mod tests {
     #[test]
     fn blend_success_can_return_a_face_or_no_face() {
         let mut k = Kernel::default();
-        for (edge2_index, face2_index, has_face) in [(3, 2, false), (2, 2, true), (1, 1, true)] {
+        // (1, 1): edges 0 and 1 of face 1 meet at a corner, where the reference curve
+        // point lies on the boundary curve, so the blend surface's `GetSampleValues`
+        // fails. Upstream drops that status and skins samples the failure left unset; the
+        // fork passes it on (`SER( pDSDef->GetSampleValues(..) )`, tangency-labs/smlib
+        // 21dcf69, WR-663), so no blend surface is made, and the edge-use overload's
+        // status is ignored here as upstream: success with no face.
+        for (edge2_index, face2_index, has_face) in [(3, 2, false), (2, 2, true), (1, 1, false)] {
             let mut brep = create_box(&mut k, Vec3::ZERO, 1.0, 1.0, 1.0).unwrap();
             let edges = crate::topology::brep::p1::edges(&brep, None).unwrap();
             let faces = crate::topology::brep::p1::faces(&brep, None).unwrap();

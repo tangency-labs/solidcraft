@@ -95,8 +95,8 @@
 //!   (`labels::CURVE_BOUNDED_SURFACE`, UB-273). With no report list,
 //!   failed boundary checks return false normally, as upstream. At levels 0..2,
 //!   the inherited base continuity test reads an unwritten output: this class uses
-//!   the generic failing `GetKnots`. The existing continuity guard returns
-//!   `InvalidInput`; `LEVEL_GIVEN` skips that base call and is defined.
+//!   the generic failing `GetKnots`. Continuities that cannot be computed fail test 4
+//!   (WR-663, as the fork); `LEVEL_GIVEN` skips that base call.
 //! - **Wrapping surfaces.** `SmOffsetSurface` and `SmSrfInVolume` are in the `wrapped`
 //!   submodule (its own deviations); the latter calls `Volume::assert_valid`.
 //! - **Face context.** Upstream's solves reach a face-owned surface's face through the
@@ -598,20 +598,15 @@ fn assert_test_surface1(k: &Kernel, s: &Surface) -> Result<(bool, f64, f64)> {
 
 /// `sm_AssertTestSurface4`: at least G1 across every knot in both directions.
 fn assert_test_surface4(k: &Kernel, s: &Surface) -> Result<bool> {
-    // Surface continuities across U and V knots (statuses ignored: a failed call
-    // leaves the minimum it had reached)
-    // (with the opt-in fix continuities that cannot be computed fail the test, WR-663,
+    // Surface continuities across U and V knots
+    // (continuities that cannot be computed fail the test, as the fork does, WR-663,
     // tangency-labs/smlib 21dcf69: `None`)
-    let fails = k.fixes.query_statuses_pass_on;
     let cont = |dir| -> Result<Option<ContinuityType>> {
         let mut reached = None;
         match s.calculate_continuities_reached(k, dir, &mut reached) {
             Ok((c, _)) => Ok(Some(c)),
             Err(e) if e.is_unported_or_cancelled() => Err(e),
-            Err(_) if fails => Ok(None),
-            Err(_) => reached.map(Some).ok_or_else(|| {
-                invalid("continuity output never written (upstream reads it uninitialised)")
-            }),
+            Err(_) => Ok(None),
         }
     };
     let Some(cont_u) = cont(SurfParamType::U)? else {
@@ -666,14 +661,13 @@ fn assert_test_surface6(k: &Kernel, s: &Surface) -> Result<bool> {
         }
 
         // Get iso parameter boundaries
-        // (a failed CreateIsoBoundaries leaves the curves uninitialised upstream)
-        // (with the opt-in fix boundaries that cannot be built or compared fail the
-        // test, WR-663, tangency-labs/smlib 21dcf69)
-        let fails = k.fixes.query_statuses_pass_on;
+        // (a failed CreateIsoBoundaries leaves the curves uninitialised upstream;
+        // boundaries that cannot be built or compared fail the test, as the fork does,
+        // WR-663, tangency-labs/smlib 21dcf69)
         let (crv1, crv2) = match s.create_iso_boundaries(k, dir, a_tol) {
             Ok(Some(c)) => c,
             Err(e) if e.is_unported_or_cancelled() => return Err(e),
-            Err(_) if fails => return Ok(false),
+            Err(_) => return Ok(false),
             _ => {
                 return Err(invalid(
                     "no iso boundaries (upstream reads uninitialised curves)",
@@ -706,7 +700,7 @@ fn assert_test_surface6(k: &Kernel, s: &Surface) -> Result<bool> {
             ],
         ) {
             Ok(f) => f,
-            Err(e) if fails && !e.is_unported_or_cancelled() => return Ok(false),
+            Err(e) if !e.is_unported_or_cancelled() => return Ok(false),
             Err(e) => return Err(e),
         };
 
@@ -897,10 +891,15 @@ fn index(v: i64) -> Result<usize> {
 
 /// `SmBSplineSurface::HasInternalPole`: some interior knot line has a patch boundary
 /// span whose control points all lie within `tol` (`<= 0`: `SM_ZONE_TOL_3D`) of one
-/// another (for the u lines, also a singularity, `IsSingularity` of `s`).
-/// `false` without NURB. At each interior knot it tests the row through the knot, where
-/// upstream moves one row further for each repeated copy of the knot (WR-505;
-/// tangency-labs/smlib#41).
+/// another (for the u lines, also a singularity, `IsSingularity` of `s` at a Greville
+/// point; the v lines have no such check, as upstream). `false` without NURB.
+///
+/// At each interior knot it tests the rows whose basis functions are nonzero at the
+/// knot, starting at the row through the knot, where upstream moves one row further for
+/// each repeated copy of the knot (WR-505; tangency-labs/smlib#41). A knot repeated more
+/// than degree + 1 times is skipped. At a full break (multiplicity degree + 1) it tests
+/// both rows there, the left piece's end row and the right piece's start row: a span of
+/// either whose points coincide is a pole, with no singularity check (#17028, WR-788).
 ///
 /// # Errors
 ///
@@ -952,6 +951,33 @@ pub fn has_internal_pole(k: &Kernel, s: &Surface, b: &BSplineSurface, tol: f64) 
         // upstream's `kntCntU - rowCntU - 1` moves one row further for each repeated copy
         let cp_index_u = knt_cnt_u - 1 - degree_u;
 
+        // Not upstream (#17028): at a full break (multiplicity degree + 1) the patch loop
+        // below would compare nothing. The knot has two rows, the left piece's end row
+        // `cp_index_u - 1` and the right piece's start row `cp_index_u`; a pole is a span
+        // of either row whose degree_v + 1 points coincide (that piece's iso line at the
+        // knot is then one point over the span)
+        if row_cnt_u == 0 {
+            for row in [cp_index_u - 1, cp_index_u] {
+                let mut knt_cnt_v = 0;
+                let mut jj = 0;
+                while jj + 1 < unique_v.len() && !rtn {
+                    knt_cnt_v += mult(&mults_v, jj)?;
+                    let cp_index_v = (knt_cnt_v - 1) - degree_v;
+                    let p = pt(row, cp_index_v)?;
+                    let mut collapsed = true;
+                    let mut ll = degree_v;
+                    while ll > 0 && collapsed {
+                        collapsed &= p.closer_than(tolerance, pt(row, cp_index_v + ll)?);
+                        ll -= 1;
+                    }
+                    rtn |= collapsed;
+                    jj += 1;
+                }
+            }
+            ii += 1;
+            continue;
+        }
+
         // for every V direction knot span - seek patch arrays of coincident control points
         let mut knt_cnt_v = 0;
         let mut jj = 0;
@@ -965,10 +991,14 @@ pub fn has_internal_pole(k: &Kernel, s: &Surface, b: &BSplineSurface, tol: f64) 
             let mut test = true;
 
             // for every UDir neighbor ControlPoint - check for coincidence
+            // Not upstream (#17056 review): every row's first point (ll == 0) is compared
+            // too, except the reference point itself; upstream stops at ll == 1 in each row,
+            // so a row whose first point differs still passed
             let mut kk = row_cnt_u - 1;
             while kk >= 0 && test {
                 let mut ll = degree_v;
-                while ll > 0 && test {
+                let last = i64::from(kk == 0);
+                while ll >= last && test {
                     // check neighbor ControlPoint for Coincidence
                     let next = pt(cp_index_u + kk, cp_index_v + ll)?;
                     test &= p.closer_than(tolerance, next);
@@ -1011,6 +1041,30 @@ pub fn has_internal_pole(k: &Kernel, s: &Surface, b: &BSplineSurface, tol: f64) 
         // as the U walk: the row through the knot (WR-505)
         let cp_index_v = knt_cnt_v - 1 - degree_v;
 
+        // as the U walk (#17028): at a full break, a span of the left piece's end column or
+        // the right piece's start column whose degree_u + 1 points coincide
+        if row_cnt_v == 0 {
+            for col in [cp_index_v - 1, cp_index_v] {
+                let mut knt_cnt_u = 0;
+                let mut jj = 0;
+                while jj + 1 < unique_u.len() && !rtn {
+                    knt_cnt_u += mult(&mults_u, jj)?;
+                    let cp_index_u = (knt_cnt_u - 1) - degree_u;
+                    let p = pt(cp_index_u, col)?;
+                    let mut collapsed = true;
+                    let mut ll = degree_u;
+                    while ll > 0 && collapsed {
+                        collapsed &= p.closer_than(tolerance, pt(cp_index_u + ll, col)?);
+                        ll -= 1;
+                    }
+                    rtn |= collapsed;
+                    jj += 1;
+                }
+            }
+            ii += 1;
+            continue;
+        }
+
         // for every U direction knot span - seek patch arrays of coincident control points
         let mut knt_cnt_u = 0;
         let mut jj = 0;
@@ -1024,10 +1078,12 @@ pub fn has_internal_pole(k: &Kernel, s: &Surface, b: &BSplineSurface, tol: f64) 
             let mut test = true;
 
             // for every VDir neighbor ControlPoint - check for coincidence
+            // Not upstream (#17056 review): as the U walk, every column's first point too
             let mut kk = row_cnt_v - 1;
             while kk >= 0 && test {
                 let mut ll = degree_u;
-                while ll > 0 && test {
+                let last = i64::from(kk == 0);
+                while ll >= last && test {
                     // check neighbor ControlPoint for Coincidence
                     let next = pt(cp_index_u + ll, cp_index_v + kk)?;
                     test &= p.closer_than(tolerance, next);
@@ -1035,6 +1091,10 @@ pub fn has_internal_pole(k: &Kernel, s: &Surface, b: &BSplineSurface, tol: f64) 
                 }
                 kk -= 1;
             }
+
+            // As upstream, no singularity check here (the U walk's [B597] check evaluates
+            // at a Greville point off the knot line when row_cnt > 1, so it misses real
+            // poles; see WR-788)
 
             // remember when patch is degenerate
             rtn |= test;
@@ -2974,6 +3034,192 @@ mod tests {
         );
     }
 
+    /// The knots of a degree-2 direction with a full break at 0.5 (6 rows: the left piece's
+    /// rows 0 to 2, the right piece's rows 3 to 5), and of a single degree-2 span (3 rows).
+    const FULL_BREAK: [f64; 9] = [0.0, 0.0, 0.0, 0.5, 0.5, 0.5, 1.0, 1.0, 1.0];
+
+    /// A degree 2 x 2 surface with a full break at u = 0.5 (`u_break`) or v = 0.5, on the
+    /// grid `(i, j, 0)` of its 6 x 3 (or 3 x 6) net, after `edit` changes the net (indexed
+    /// along the break's direction first).
+    fn full_break(u_break: bool, edit: impl Fn(&mut [[f64; 3]], usize)) -> bool {
+        let mut along: Vec<[f64; 3]> = Vec::new();
+        for i in 0..6 {
+            for j in 0..3 {
+                along.push([f64::from(i), f64::from(j), 0.0]);
+            }
+        }
+        edit(&mut along, 3);
+        let s = if u_break {
+            bspline(2, 2, &FULL_BREAK, &BEZ2, &along)
+        } else {
+            // transposed: net point (j, i) is along[i][j], with x and y swapped
+            let mut pts = vec![[0.0; 3]; 18];
+            for i in 0..6 {
+                for j in 0..3 {
+                    let p = along[i * 3 + j];
+                    pts[j * 6 + i] = [p[1], p[0], p[2]];
+                }
+            }
+            bspline(2, 2, &BEZ2, &FULL_BREAK, &pts)
+        };
+        let k = Kernel::default();
+        let part = make_nurb(&k, &s).unwrap().unwrap();
+        has_internal_pole(&k, &s, &part, ZONE_TOL_3D / 10.0).unwrap()
+    }
+
+    const BEZ2: [f64; 6] = [0.0, 0.0, 0.0, 1.0, 1.0, 1.0];
+
+    /// #17028: a full break (multiplicity degree + 1) on a plain grid has no pole, along U
+    /// or V. Each row is three distinct points, so no piece's iso line at the knot is a
+    /// point. Before, the V walk compared no points there and reported one.
+    #[test]
+    fn a_full_break_on_a_plain_grid_is_not_a_pole() {
+        assert!(!full_break(true, |_, _| {}));
+        assert!(!full_break(false, |_, _| {}));
+    }
+
+    /// #17028: the right piece's rows 3 and 4 equal (each still three distinct points) is
+    /// no pole: no row collapses.
+    #[test]
+    fn equal_rows_at_a_full_break_are_not_a_pole() {
+        let copy_row = |pts: &mut [[f64; 3]], n: usize| {
+            for j in 0..n {
+                pts[4 * n + j] = pts[3 * n + j];
+            }
+        };
+        assert!(!full_break(true, copy_row));
+        assert!(!full_break(false, copy_row));
+    }
+
+    /// #17028: the left piece's end row (row 2) collapsed to one point makes that piece's
+    /// iso line at u = 0.5 the point `sum N_j(v) P = P`, a pole inside the surface.
+    /// Before, the walk never looked at that row.
+    #[test]
+    fn a_collapsed_left_end_row_at_a_full_break_is_a_pole() {
+        let collapse = |pts: &mut [[f64; 3]], n: usize| {
+            for j in 0..n {
+                pts[2 * n + j] = [2.0, 1.0, 0.0];
+            }
+        };
+        assert!(full_break(true, collapse));
+        assert!(full_break(false, collapse));
+    }
+
+    /// #17028: the right piece's start row (row 3) collapsed to one point is a pole the
+    /// same way.
+    #[test]
+    fn a_collapsed_right_start_row_at_a_full_break_is_a_pole() {
+        let collapse = |pts: &mut [[f64; 3]], n: usize| {
+            for j in 0..n {
+                pts[3 * n + j] = [3.0, 1.0, 0.0];
+            }
+        };
+        assert!(full_break(true, collapse));
+        assert!(full_break(false, collapse));
+    }
+
+    /// The knots of a degree-2 direction with one simple interior knot at 0.5 (4 rows; at
+    /// 0.5 only rows 1 and 2 have nonzero basis functions).
+    const SIMPLE_KNOT: [f64; 7] = [0.0, 0.0, 0.0, 0.5, 1.0, 1.0, 1.0];
+
+    /// As [`full_break`] with a simple knot at 0.5 instead (a 4 x 3 or 3 x 4 net).
+    fn simple_knot(u_break: bool, edit: impl Fn(&mut [[f64; 3]], usize)) -> bool {
+        let mut along: Vec<[f64; 3]> = Vec::new();
+        for i in 0..4 {
+            for j in 0..3 {
+                along.push([f64::from(i), f64::from(j), 0.0]);
+            }
+        }
+        edit(&mut along, 3);
+        let s = if u_break {
+            bspline(2, 2, &SIMPLE_KNOT, &BEZ2, &along)
+        } else {
+            let mut pts = vec![[0.0; 3]; 12];
+            for i in 0..4 {
+                for j in 0..3 {
+                    let p = along[i * 3 + j];
+                    pts[j * 4 + i] = [p[1], p[0], p[2]];
+                }
+            }
+            bspline(2, 2, &BEZ2, &SIMPLE_KNOT, &pts)
+        };
+        let k = Kernel::default();
+        let part = make_nurb(&k, &s).unwrap().unwrap();
+        has_internal_pole(&k, &s, &part, ZONE_TOL_3D / 10.0).unwrap()
+    }
+
+    /// Rows 1 and 2 (the two rows nonzero at the simple knot 0.5) collapsed to one point.
+    fn collapse_simple_knot_rows(pts: &mut [[f64; 3]], n: usize) {
+        for i in 1..3 {
+            for j in 0..n {
+                pts[i * n + j] = [1.5, 1.0, 0.0];
+            }
+        }
+    }
+
+    /// A simple knot on a plain grid is no pole, along U or V.
+    #[test]
+    fn a_simple_knot_on_a_plain_grid_is_not_a_pole() {
+        assert!(!simple_knot(true, |_, _| {}));
+        assert!(!simple_knot(false, |_, _| {}));
+    }
+
+    /// #17056 review: rows 1 and 2 collapsed to one point `P` make the iso line at the
+    /// simple v knot 0.5 the point `(N_1 + N_2)(0.5) P = P`, a pole, and the V walk finds
+    /// it. A singularity check at the U walk's Greville point (v = greville(2) = 0.75, off
+    /// the knot line) would reject it, so the V walk keeps upstream's (none).
+    #[test]
+    fn a_collapsed_span_at_a_simple_v_knot_is_a_pole() {
+        assert!(simple_knot(false, collapse_simple_knot_rows));
+    }
+
+    /// The #17056 review case: degree 2 by 4, one clamped span by the double knot 0.5
+    /// (3 x 7 net). The columns nonzero at 0.5 are 2 to 4; all are `P` except row 0's
+    /// columns 3 and 4, `Q` and `R`, not collinear with `P`. Row 0's point on the iso line
+    /// at the knot is `N_2 P + N_3 Q + N_4 R != P`, so the iso line
+    /// `N_0(u) C + (N_1 + N_2)(u) P` is no point and there is no pole. The patch loop used
+    /// to skip each column's first point, `(0, 3)` and `(0, 4)`, and reported one.
+    /// `u_break` transposes the net, so the knot is in U.
+    fn first_points_differ(u_break: bool) -> bool {
+        const DOUBLE4: [f64; 12] = [0.0, 0.0, 0.0, 0.0, 0.0, 0.5, 0.5, 1.0, 1.0, 1.0, 1.0, 1.0];
+        let mut across: Vec<[f64; 3]> = Vec::new();
+        for i in 0..3 {
+            for j in 0..7 {
+                across.push([f64::from(i), f64::from(j), 0.0]);
+            }
+        }
+        for i in 0..3 {
+            for j in 2..5 {
+                across[i * 7 + j] = [1.0, 3.0, 0.0];
+            }
+        }
+        across[3] = [0.0, 3.0, 1.0];
+        across[4] = [0.0, 4.0, 2.0];
+        let s = if u_break {
+            let mut pts = vec![[0.0; 3]; 21];
+            for i in 0..3 {
+                for j in 0..7 {
+                    let p = across[i * 7 + j];
+                    pts[j * 3 + i] = [p[1], p[0], p[2]];
+                }
+            }
+            bspline(4, 2, &DOUBLE4, &BEZ2, &pts)
+        } else {
+            bspline(2, 4, &BEZ2, &DOUBLE4, &across)
+        };
+        let k = Kernel::default();
+        let part = make_nurb(&k, &s).unwrap().unwrap();
+        has_internal_pole(&k, &s, &part, ZONE_TOL_3D / 10.0).unwrap()
+    }
+
+    /// #17056 review: a span whose rows agree except at their first points
+    /// is no pole, along V or U.
+    #[test]
+    fn a_patch_whose_first_points_differ_is_not_a_pole() {
+        assert!(!first_points_differ(false));
+        assert!(!first_points_differ(true));
+    }
+
     #[test]
     fn b_spline_net_doubles_back() {
         let mut pts = bicubic_points();
@@ -3551,7 +3797,7 @@ mod curve_bounded_tests {
     }
 
     #[test]
-    fn curve_bounded_given_is_defined_and_base_continuity_is_guarded() {
+    fn curve_bounded_given_is_defined_and_base_continuity_fails_test_4() {
         let k = Kernel::default();
         let surface = wrap(wrap(plane(1.0), vec![], vec![]), vec![], vec![]);
         let mut list = AssertArray::new();
@@ -3560,14 +3806,13 @@ mod curve_bounded_tests {
             .unwrap());
         assert!(list.is_empty());
         assert!(!list.last_add());
+        // The inherited base check reaches `sm_AssertTestSurface4`, whose
+        // `CalculateContinuities` fails here (a curve-bounded surface's generic `GetKnots`
+        // fails) without writing its output. Upstream reads that output uninitialised;
+        // the fork fails test 4 instead (tangency-labs/smlib 21dcf69, WR-663), so the
+        // surface is reported invalid.
         for level in [0, 1, 2] {
-            assert!(matches!(
-                surface.assert_valid(&k, None, level, ObjectKey(1)),
-                Err(SolidError::InvalidInput {
-                    reason: "continuity output never written (upstream reads it uninitialised)",
-                    ..
-                })
-            ));
+            assert!(!surface.assert_valid(&k, None, level, ObjectKey(1)).unwrap());
         }
     }
 

@@ -78,13 +78,12 @@
 //! - **Recursion.** None: `EvaluateBinormal` calls `CreateUVTrimCurve` and
 //!   `CreateUVTrimCurve` calls `EvaluateBinormal` only with `bUse3DOnly = TRUE`, so
 //!   the depth is bounded by one level (as upstream comments).
-//! - **Passed-on statuses (WR-663).** With the opt-in
-//!   `Kernel::fixes.query_statuses_pass_on`, the statuses the fork passes on
+//! - **Passed-on statuses (WR-663).** The statuses the fork passes on
 //!   (tangency-labs/smlib 666242b: `CreateUVTrimCurve`'s box, seam transforms, 2D
 //!   conversions, trims, end evaluations and drops, `NormalizedEvaluate`;
 //!   `EvaluateBinormal`'s `GetOrCreateUVTrimCurve`, derivatives, normal and
 //!   `ComputeParamDirection`; `NormalizedEvaluate`'s derivatives) are returned instead of
-//!   ignored. `GetEnds` stays ignored, as in the fork.
+//!   ignored, as upstream does. `GetEnds` stays ignored, as in the fork.
 
 use crate::curve::crv_on_surf::CrvOnSurf;
 use crate::curve::curve::{Curve, CurveKind};
@@ -130,13 +129,6 @@ use crate::error::SM_UNSURE as UNSURE;
 
 fn null(reason: &'static str) -> SolidError {
     SolidError::invalid_input(OP, reason)
-}
-
-/// A status SMLib drops and the fork passes on (`SER`, tangency-labs/smlib 666242b):
-/// returned with the opt-in [`crate::kernel::UpstreamFixes::query_statuses_pass_on`],
-/// handed on to the site's own ignore otherwise.
-fn pass<T>(k: &Kernel, r: Result<T>) -> Result<Result<T>> {
-    crate::error::passed_on(r, k.fixes.query_statuses_pass_on)
 }
 
 /// The status of `SmVector3d::AngleBetween` of a zero-length vector, which upstream
@@ -352,15 +344,12 @@ fn crv_on_surf_length(k: &Kernel, surface: &Surface, uv_curve: &Curve) -> Result
 fn seam_curves(k: &Kernel, uv_curve: &Curve, delta: Vec3) -> Result<Vec<Curve>> {
     let mut other = uv_curve.clone();
     let mut axis = Axis2Placement::default();
-    let _ = ignored(pass(
-        k,
-        axis.set_canonical(delta, Vec3::new(1.0, 0.0, 0.0), Vec3::new(0.0, 1.0, 0.0)),
-    )?)?;
-    let _ = ignored(pass(k, other.transform(k, &axis, None))?)?;
-    let _ = ignored(pass(k, other.convert_to_2d(k))?)?;
+    axis.set_canonical(delta, Vec3::new(1.0, 0.0, 0.0), Vec3::new(0.0, 1.0, 0.0))?;
+    other.transform(k, &axis, None)?;
+    other.convert_to_2d(k)?;
 
     let mut copy = uv_curve.clone();
-    let _ = ignored(pass(k, copy.convert_to_2d(k))?)?;
+    copy.convert_to_2d(k)?;
     Ok(vec![other, copy])
 }
 
@@ -457,9 +446,8 @@ pub fn create_uv_trim_curve(
                 None => (Vec3::new(0.0, 0.0, 0.0), Vec3::new(0.0, 0.0, 0.0)),
             };
 
-            let uv_box = ignored(pass(
-                k,
-                uv_curve.calculate_bounding_box(
+            let uv_box = uv_curve
+                .calculate_bounding_box(
                     k,
                     &uv_curve.natural_interval(),
                     BoundingBoxRequest {
@@ -468,10 +456,9 @@ pub fn create_uv_trim_curve(
                         polar: false,
                     },
                     true,
-                ),
-            )?)?
-            .and_then(|r| r.normal)
-            .unwrap_or_default();
+                )?
+                .normal
+                .unwrap_or_default();
 
             // Checking here to ensure that if this is a seam, we make sure to pick the
             // correct UV line. If this is not a line, then we're good. Then check to
@@ -519,7 +506,7 @@ pub fn create_uv_trim_curve(
             } else {
                 // Not a seam, so just copy the curve
                 let mut copy = uv_curve.clone();
-                let _ = ignored(pass(k, copy.convert_to_2d(k))?)?;
+                copy.convert_to_2d(k)?;
                 // SM_SET_CREATE_UVTRIMCURVE_FAIL(SM_SUCCESS, SM_CTC_FROM_CRVONSURF)
                 set_create_fail(
                     k,
@@ -643,11 +630,9 @@ pub fn create_uv_trim_curve(
                     let mut rev_curve = curve.clone();
 
                     // Have to trim this, otherwise the reversals mess things up. [081031]
-                    // (may snap sIvl by tol to existing knots; status ignored)
-                    let _ = ignored(pass(
-                        k,
-                        rev_curve.trim(k, &mut edge_domain, TrimMode::Notify),
-                    )?)?;
+                    // (may snap sIvl by tol to existing knots; status ignored upstream,
+                    // passed on by the fork)
+                    rev_curve.trim(k, &mut edge_domain, TrimMode::Notify)?;
                     let new_ivl = rev_curve.reverse_parameterization(k, &edge_domain)?;
 
                     // drop reverse curve to surface (DropCurve's default keep-all TRUE)
@@ -856,10 +841,8 @@ pub fn create_uv_trim_curve(
             let uv_end_2d = Point2::new(uv_end.x, uv_end.y);
 
             // Get the 3D end points of the Drop Curve
-            let drop_curve_start_3d =
-                ignored(pass(k, surface.evaluate_point(k, uv_start_2d))?)?.unwrap_or(Vec3::UNDEF);
-            let drop_curve_end_3d =
-                ignored(pass(k, surface.evaluate_point(k, uv_end_2d))?)?.unwrap_or(Vec3::UNDEF);
+            let drop_curve_start_3d = surface.evaluate_point(k, uv_start_2d)?;
+            let drop_curve_end_3d = surface.evaluate_point(k, uv_end_2d)?;
 
             // Get the local XSect Tolerances
             // (`SmTol::GetXSectTol3d(pEdge, pVertex)` takes the system zone tolerance for a
@@ -913,7 +896,7 @@ pub fn create_uv_trim_curve(
                     let mut new_ivl = Extent1d::from_min_max(edge_domain.min(), uv_ivl.max());
                     if let Some(c) = uv_curves.first_mut() {
                         // may snap sIvl by tol to existing knots
-                        let _ = ignored(pass(k, c.trim(k, &mut new_ivl, TrimMode::Notify))?)?;
+                        c.trim(k, &mut new_ivl, TrimMode::Notify)?;
                     }
                     fail.create_path_type =
                         CreateUvTrimCurvePathType::OnePercentUvTrimCurveTrimRecovery1;
@@ -937,7 +920,7 @@ pub fn create_uv_trim_curve(
                     let mut new_ivl = Extent1d::from_min_max(uv_ivl.min(), edge_domain.max());
                     if let Some(c) = uv_curves.first_mut() {
                         // may snap sIvl by tol to existing knots
-                        let _ = ignored(pass(k, c.trim(k, &mut new_ivl, TrimMode::Notify))?)?;
+                        c.trim(k, &mut new_ivl, TrimMode::Notify)?;
                     }
                     fail.create_path_type =
                         CreateUvTrimCurvePathType::OnePercentUvTrimCurveTrimRecovery2;
@@ -1110,7 +1093,6 @@ fn trim_other_uv_curves(
     tk.rng = k.rng.clone();
     tk.cancel.clone_from(&k.cancel);
     tk.fixes.bspline_trim_preserves_uv_spans = k.fixes.bspline_trim_preserves_uv_spans;
-    tk.fixes.bspline_trim_keeps_rational_end_spans = k.fixes.bspline_trim_keeps_rational_end_spans;
     for x in crate::topology::edge::edgeuses(b, e, None, None)? {
         if x == this {
             continue;
@@ -1120,7 +1102,7 @@ fn trim_other_uv_curves(
         }
         if let Some(c) = b.edgeuse_mut(x)?.uv_trim_curve.as_mut() {
             // may snap sIvl by tol to existing knots
-            let _ = ignored(pass(k, c.trim(&tk, new_ivl, TrimMode::Notify))?)?;
+            c.trim(&tk, new_ivl, TrimMode::Notify)?;
         }
     }
     Ok(())
@@ -1150,25 +1132,17 @@ fn two_singular_end_points(
     let surface_uv_domain = surface.natural_uv_domain_with_nurb(k)?;
 
     // Curve EndPoints
-    let start_point =
-        ignored(pass(k, curve.evaluate_point(k, edge_domain.min()))?)?.unwrap_or(Vec3::UNDEF);
-    let end_point =
-        ignored(pass(k, curve.evaluate_point(k, edge_domain.max()))?)?.unwrap_or(Vec3::UNDEF);
+    let start_point = curve.evaluate_point(k, edge_domain.min())?;
+    let end_point = curve.evaluate_point(k, edge_domain.max())?;
 
     // drop curve endpoints onto surface
-    let start_drop = ignored(pass(
-        k,
-        surface_drop_point(k, surface, start_point, &surface_uv_domain),
-    )?)?;
-    if let Some(d) = start_drop.filter(|d| d.found) {
-        start_singularity = surface_is_singularity(k, surface, d.uv)?.0;
+    let start_drop = surface_drop_point(k, surface, start_point, &surface_uv_domain)?;
+    if start_drop.found {
+        start_singularity = surface_is_singularity(k, surface, start_drop.uv)?.0;
         if start_singularity {
-            let end_drop = ignored(pass(
-                k,
-                surface_drop_point(k, surface, end_point, &surface_uv_domain),
-            )?)?;
-            if let Some(d) = end_drop.filter(|d| d.found) {
-                end_singularity = surface_is_singularity(k, surface, d.uv)?.0;
+            let end_drop = surface_drop_point(k, surface, end_point, &surface_uv_domain)?;
+            if end_drop.found {
+                end_singularity = surface_is_singularity(k, surface, end_drop.uv)?.0;
             }
         }
     }
@@ -1188,14 +1162,8 @@ fn two_singular_end_points(
 
     // trim curves to their half of the original curve (may snap sIvl by tol to
     // existing knots)
-    let _ = ignored(pass(
-        k,
-        first_curve.trim(k, &mut first_half, TrimMode::Notify),
-    )?)?;
-    let _ = ignored(pass(
-        k,
-        second_curve.trim(k, &mut second_half, TrimMode::Notify),
-    )?)?;
+    first_curve.trim(k, &mut first_half, TrimMode::Notify)?;
+    second_curve.trim(k, &mut second_half, TrimMode::Notify)?;
 
     // reverse the parameterization of the 1st half
     let new_interval = first_curve.reverse_parameterization(k, &first_half)?;
@@ -1282,16 +1250,14 @@ fn pick_seam_curve(
     uv_curves: &mut Vec<Curve>,
     fail: &mut DropCurveFail<ObjectHandle>,
 ) -> Result<()> {
-    // Get this edgeuse's Position (3d) near edge's midPoint (status ignored).
+    // Get this edgeuse's Position (3d) near edge's midPoint (status ignored upstream,
+    // passed on by the fork).
     let mid_param = if orientation(b, eu)? == OrientType::Same {
         0.48765
     } else {
         1.0 - 0.48765
     };
-    let _ = ignored(pass(
-        k,
-        normalized_evaluate(k, b, eu, mid_param, false, false, true),
-    )?)?;
+    normalized_evaluate(k, b, eu, mid_param, false, false, true)?;
 
     // evaluate NearMid 1st UVCurve Point clamped to face domain (for seams: coincident
     // to sMidPoint, for crossing curves: not). Use the uv curve's domain, not the
@@ -1538,7 +1504,7 @@ fn brute_force(
         false,
         ParamMethod::ChordLength,
     )?;
-    let _ = ignored(pass(k, new_curve.convert_to_2d())?)?;
+    new_curve.convert_to_2d()?;
 
     // clean up Surface Cache side-effect of attaching 2nd UVTrimCurve
     if !uv_trim_at_start && uv_trim_curve(b, eu)?.0.is_some() {
@@ -1933,9 +1899,9 @@ pub fn evaluate_binormal_uv(
         // hack. (Besides the non-const cast.) CreateUVTrimCurve() can call this method
         // (EvaluateBinormal), which would seem to invite infinite recursion. However,
         // that method calls this one only with bUse3DOnly set to TRUE, so this will
-        // never happen. (status ignored)
+        // never happen. (status ignored upstream, passed on by the fork)
         let fetch = get_or_create_uv_trim_curve(k, b, eu, false, false, true)?;
-        let _ = ignored(pass(k, fetch.status)?)?;
+        fetch.status?;
     }
     let uv_trim: Option<Curve> = uv_trim_curve(b, eu)?.0.cloned();
 
@@ -1963,12 +1929,9 @@ pub fn evaluate_binormal_uv(
         if tol > 0.0 {
             // Allow for the 3d curve point being off the surface. (It happens.) Check
             // the dist from the 3d curve point to the surface normal.
-            // (status ignored)
-            let (this_srf_pt, this_su, this_sv) = ignored(pass(
-                k,
-                surface.evaluate_1st_derivatives(k, uv, false, false),
-            )?)?
-            .unwrap_or((Vec3::UNDEF, Vec3::UNDEF, Vec3::UNDEF));
+            // (status ignored upstream, passed on by the fork)
+            let (this_srf_pt, this_su, this_sv) =
+                surface.evaluate_1st_derivatives(k, uv, false, false)?;
 
             // try a cheap eval for surface normal
             let mut this_norm = this_su.cross(this_sv);
@@ -1976,19 +1939,14 @@ pub fn evaluate_binormal_uv(
             if len > crate::surface::surface::p2::normal_limit() {
                 this_norm /= len;
             } else {
-                // when cheap is degenerate - try expensive normal eval (status ignored;
-                // sThisNorm is returned unitized)
-                if let Some(n) = ignored(pass(
+                // when cheap is degenerate - try expensive normal eval (status ignored
+                // upstream, passed on by the fork; sThisNorm is returned unitized)
+                this_norm = surface.evaluate_normal(
                     k,
-                    surface.evaluate_normal(
-                        k,
-                        uv,
-                        crate::nurbs::knots::Side::Right,
-                        crate::nurbs::knots::Side::Right,
-                    ),
-                )?)? {
-                    this_norm = n;
-                }
+                    uv,
+                    crate::nurbs::knots::Side::Right,
+                    crate::nurbs::knots::Side::Right,
+                )?;
             }
 
             // When minDist(surfacePt/surfaceNorm line, EdgePoint) < dTol - use the UV
@@ -2219,9 +2177,10 @@ pub fn evaluate_binormal_uv(
     // normalize the return vector
     binormal = binormal.unitize_or_z();
 
-    // store optional output values (ComputeParamDirection: status ignored)
+    // store optional output values (ComputeParamDirection: status ignored upstream,
+    // passed on by the fork)
     let uv_vector = if options.want_uv_vector {
-        ignored(pass(k, surface.compute_param_direction(k, uv, binormal))?)?
+        Some(surface.compute_param_direction(k, uv, binormal)?)
     } else {
         None
     };
@@ -2467,10 +2426,8 @@ fn evaluate_fetched<'s, S: Fn(FaceId) -> Option<Option<&'s Surface>>>(
 
                 let mut first_deriv = None;
                 if let Some(d3) = three_d.first_deriv {
-                    // (status ignored)
-                    let (s_su, s_sv) =
-                        ignored(pass(k, surf.evaluate_1st_derivatives(k, uv, false, false))?)?
-                            .map_or((Vec3::UNDEF, Vec3::UNDEF), |(_, su, sv)| (su, sv));
+                    // (status ignored upstream, passed on by the fork)
+                    let (_, s_su, s_sv) = surf.evaluate_1st_derivatives(k, uv, false, false)?;
                     first_deriv = Some(match vec_lin_comb_two_vectors(s_su, s_sv, d3) {
                         Ok(d) => Vec3::new(d.x, d.y, 0.0),
                         Err(e) if e.is_unported_or_cancelled() => return Err(e),
@@ -2748,7 +2705,71 @@ mod tests {
             if enabled {
                 assert!(gap < 1e-12, "enabled fix was lost: gap {gap}");
             } else {
-                assert!(gap > k.tolerances.zone_tol_3d, "default gap {gap}");
+                // the circle segment is rational: WR-575 keeps its short end span, so the
+                // trimmed curve is the original's sub-arc with or without the UV fix
+                assert!(gap < 1e-12, "rational end span was lost: gap {gap}");
+            }
+        }
+    }
+
+    /// As [`uv_trim_fix_survives_edge_zone_kernel`] on a polynomial UV curve (weights
+    /// 1), whose short end span upstream's cleanup still removes by default: the UV fix
+    /// must reach the edge-zone kernel the trim runs in, or the span goes and the curve
+    /// moves.
+    #[test]
+    fn uv_trim_fix_survives_edge_zone_kernel_on_a_polynomial_curve() {
+        use crate::nurbs::b_spline_curve::BSplineCurve;
+        use crate::nurbs::math::{CPoint, NOW};
+        use crate::nurbs::nurbs_crv::allocate_nurb_curve;
+
+        for enabled in [false, true] {
+            let mut k = Kernel::default();
+            k.fixes.bspline_trim_preserves_uv_spans = enabled;
+            let r = 0.14;
+            let mut nurb = allocate_nurb_curve(4, 2, 7).unwrap();
+            nurb.cpts_mut().copy_from_slice(&[
+                CPoint::new(r, 0.0, 0.0, NOW),
+                CPoint::new(r, r, 0.0, NOW),
+                CPoint::new(0.0, r, 0.0, NOW),
+                CPoint::new(-r, r, 0.0, NOW),
+                CPoint::new(-r, 0.0, 0.0, NOW),
+            ]);
+            nurb.knots_mut()
+                .copy_from_slice(&[0.0, 0.0, 0.0, 0.5, 0.5, 1.0, 1.0, 1.0]);
+            let original = Curve::from(BSplineCurve::from_nurb(nurb, 2, false));
+            let mut b = Brep::new();
+            let v0 = b.add_vertex(Vec3::ZERO).unwrap();
+            let v1 = b.add_vertex(Vec3::X).unwrap();
+            let edge = b.add_edge(v0, v1).unwrap();
+            let this = b
+                .add_edgeuse_record(Edgeuse {
+                    edge: Some(edge),
+                    ..Edgeuse::default()
+                })
+                .unwrap();
+            let other = b
+                .add_edgeuse_record(Edgeuse {
+                    edge: Some(edge),
+                    uv_trim_curve: Some(original.clone()),
+                    ..Edgeuse::default()
+                })
+                .unwrap();
+            b.edge_mut(edge).unwrap().edgeuses = vec![this, other];
+            let mut ivl = Extent1d::from_min_max(0.5 - 3.5e-6, 0.9);
+            trim_other_uv_curves(&k, &mut b, edge, this, &mut ivl).unwrap();
+            let trimmed = b.edgeuse(other).unwrap().uv_trim_curve.as_ref().unwrap();
+            let gap = (0..=64)
+                .map(|i| {
+                    let t = ivl.evaluate(f64::from(i) / 64.0);
+                    (trimmed.evaluate_point(&k, t).unwrap()
+                        - original.evaluate_point(&k, t).unwrap())
+                    .length()
+                })
+                .fold(0.0, f64::max);
+            if enabled {
+                assert!(gap < 1e-12, "enabled fix was lost: gap {gap}");
+            } else {
+                assert!(gap > 1e-9, "default gap {gap}");
             }
         }
     }

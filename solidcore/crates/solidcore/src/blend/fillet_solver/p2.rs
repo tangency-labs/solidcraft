@@ -93,7 +93,7 @@
 //!   The later rail classification and trimming still use the faces' boundaries.
 
 use crate::blend::fillet_custom_solver::OffsetSurface;
-use crate::blend::fillet_exact::{BlendQuadric, ExactBlend, QuadricKind};
+use crate::blend::fillet_exact::{circle_spine_station, BlendQuadric, ExactBlend, QuadricKind};
 use crate::blend::fillet_executive::p3::ErrorInfo;
 use crate::blend::fillet_geom::p1::{
     FilletBrep, FilletCornerId, FilletEdgeType, FilletErrorType, FilletGeom, FilletGeomId,
@@ -103,9 +103,10 @@ use crate::blend::fillet_geom::p2::{srf_srf_intersection, SrfSrfOptions};
 use crate::blend::fillet_geom::p3::SplitCorners;
 use crate::blend::fillet_geom::p4::{set_edge_curve, set_vertex_point};
 use crate::blend::fillet_solver::p1::{
-    check_edge_curve_domains, test_manifold_tangent_rollover, test_side_edge_convexity, FilStatus,
-    FilletSolver, FilletSolverOps, FilletSphereSolveEnfo, FilletSurfaceGenerator,
-    FilletSurfaceGeneratorType, RailRailIntersectEnfo, RailUvCurveIntersectEnfo,
+    check_edge_curve_domains, test_manifold_tangent_rollover, test_side_edge_convexity,
+    wrap_closed_directions, FilStatus, FilletSolver, FilletSolverOps, FilletSphereSolveEnfo,
+    FilletSurfaceGenerator, FilletSurfaceGeneratorType, RailRailIntersectEnfo,
+    RailUvCurveIntersectEnfo, SeamDomain,
 };
 use crate::curve::curve::p1::GlobalPointSolveOptions;
 use crate::curve::curve::Curve;
@@ -416,6 +417,42 @@ fn turn_into_half_plane(origin: Point3, axis: Vec3, target: Point3, tol: f64, po
         return;
     }
     *point = origin + axis * along + t_rad * (p_len / t_len);
+}
+
+/// Not upstream (#17263): the section of a round whose spine `class` classifies as a circle,
+/// in the half-plane through the axis and `centre`: the ball's centre on the class's centre
+/// circle there ([`circle_spine_station`]) and its feet on the two faces' quadrics, as
+/// `(centre, rail 0 point, rail 1 point)`.
+///
+/// # Errors
+///
+/// `SM_ERR` for a centre on the axis, offsets whose meridians do not cross there, and a face
+/// with no foot.
+fn class_section(class: &ExactBlend, centre: Point3) -> Result<(Point3, Point3, Point3)> {
+    let c = circle_spine_station(class, centre).ok_or_else(sm_err)?;
+    let [face0, face1] = &class.faces;
+    let foot = |q: &BlendQuadric| q.foot(c).ok_or_else(sm_err);
+    Ok((c, foot(face0)?, foot(face1)?))
+}
+
+/// Not upstream (#17263): whether a section, at `uv` on each rail's offset surface, lies past
+/// either face, on its extension: a `uv` outside its offset surface's base domain, the
+/// predicate the offset surface evaluates its extension by.
+///
+/// # Errors
+///
+/// [`SolidError::InvalidInput`] for a rail without an offset surface; those of the domain.
+fn section_on_extension(k: &Kernel, s: &FilletSolver, uv: [Point2; 2]) -> Result<bool> {
+    for (rail, uv) in uv.into_iter().enumerate() {
+        let slot = s
+            .surface(rail)?
+            .ok_or_else(|| invalid("no offset surface"))?;
+        let base = slot.surface.surface.base_surface();
+        if !base.natural_uv_domain_with_nurb(k)?.contains_point(uv, 0.0) {
+            return Ok(true);
+        }
+    }
+    Ok(false)
 }
 
 /// `rTsectPnts[0]` and `rTsectPnts[GetSize() - 1]`.
@@ -1322,7 +1359,7 @@ impl FilletSolver {
         let start_uv1 = t_first.uv_pos(SrfIndex::Second);
 
         // get centerPoint = offsetSurface0(uvPnt0)
-        let arc_center = eval_offset(k, ops.solver_mut(), 0, start_uv0)?;
+        let mut arc_center = eval_offset(k, ops.solver_mut(), 0, start_uv0)?;
 
         // get cross-section radius size at begin and end fillet points
         let radius = offset_radius(ops, t_first)?;
@@ -1349,12 +1386,24 @@ impl FilletSolver {
             let off = arc_center - axis_pnt;
             (off - unit_axis * off.dot(unit_axis)).length() < center_tol
         };
+        let start_on_extension =
+            class.is_some() && section_on_extension(k, ops.solver(), [start_uv0, start_uv1])?;
         let edge_ends = if center_on_axis {
             let (start, _) = curve_pv(k, &curve, ivl.min())?;
             let (end, _) = curve_pv(k, &curve, ivl.max())?;
             turn_into_half_plane(axis_pnt, unit_axis, start, center_tol, &mut p0);
             turn_into_half_plane(axis_pnt, unit_axis, start, center_tol, &mut p1);
             Some((start, end))
+        } else if let Some(class) = class.filter(|_| start_on_extension) {
+            // Not upstream (#17263): a start section past a face, on its extension (G1,
+            // ruled), which leaves a face of revolution there, stood off the half-plane
+            // through the axis (5.5e-6 for a 0.2 round 330 from the axis), and the arc
+            // through it, revolved, was no longer the revolution its generator names. As the
+            // line class's (#2405), that section is the class's: the station on its exact
+            // centre circle in the half-plane through the solver's centre, its rail points
+            // that centre's feet on the faces' quadrics.
+            (arc_center, p0, p1) = class_section(class, arc_center)?;
+            None
         } else {
             None
         };
@@ -1424,9 +1473,14 @@ impl FilletSolver {
         let mut end_p0 = eval_offset(k, s, 0, end_uv0)?; // sEndP0 = rail1 point
         let mut end_p1 = eval_offset(k, s, 1, end_uv1)?; // sEndP1 = rail2 point
         s.reload_surface_offsets()?;
+        let end_on_extension = class.is_some() && section_on_extension(k, s, [end_uv0, end_uv1])?;
         if let Some((_, end)) = edge_ends {
             turn_into_half_plane(axis_pnt, unit_axis, end, center_tol, &mut end_p0);
             turn_into_half_plane(axis_pnt, unit_axis, end, center_tol, &mut end_p1);
+        } else if let Some(class) = class.filter(|_| end_on_extension) {
+            // Not upstream (#17263): an end section past a face as the start one, by the class
+            let end_centre = eval_offset(k, s, 0, end_uv0)?;
+            (_, end_p0, end_p1) = class_section(class, end_centre)?;
         }
 
         let mut end_vec = end_p0 - origin;
@@ -1996,6 +2050,19 @@ impl FilletSolver {
         );
 
         let mut periodicities = vec![false, false, false, false];
+        // Not upstream (#15767): the ball's section solve wraps a closed base across its seam
+        if ops.solver().seam_domain == SeamDomain::Wrapped {
+            for rail in 0..2 {
+                let Some(base) = ops
+                    .solver()
+                    .surface(rail)?
+                    .map(|s| s.surface.base_surface().clone())
+                else {
+                    continue;
+                };
+                wrap_closed_directions(k, &base, &mut intervals, &mut periodicities, 2 * rail)?;
+            }
+        }
         let mut guess_t = vec![uv1.x, uv1.y, uv2.x, uv2.y];
 
         let do_surf2_calcs = false; // Don't do surface2 calculations
@@ -2953,7 +3020,6 @@ fn edge_zone_kernel(k: &Kernel, tol: f64) -> Kernel {
     tk.rng = k.rng.clone();
     tk.cancel.clone_from(&k.cancel);
     tk.fixes.bspline_trim_preserves_uv_spans = k.fixes.bspline_trim_preserves_uv_spans;
-    tk.fixes.bspline_trim_keeps_rational_end_spans = k.fixes.bspline_trim_keeps_rational_end_spans;
     tk
 }
 
