@@ -1051,6 +1051,59 @@ mod tests {
         assert!(nodes <= 2, "{nodes}");
     }
 
+    /// The greatest z among the points `add_turning_points` adds for the quadratic with
+    /// control points `pts`, all of weight `w`, over the clamped knots `t0, t0, t0, t1,
+    /// t1, t1`. The knots are used as given (a borrowed NURB, whose knots are not fixed
+    /// up), so a span narrower than the fix-up's tolerance stays.
+    fn turning_top_z(pts: [[f64; 3]; 3], w: f64, t0: f64, t1: f64) -> f64 {
+        use crate::nurbs::b_spline_curve::BSplineCurve;
+        let pw = pts
+            .iter()
+            .map(|p| CPoint::new(p[0] * w, p[1] * w, p[2] * w, w))
+            .collect();
+        let nl = NlCurve::new(pw, 2, vec![t0, t0, t0, t1, t1, t1]).unwrap();
+        let c = Curve::from(BSplineCurve::from_nurb(nl, 3, true));
+        let mut top = f64::NEG_INFINITY;
+        let mut pt = crate::geom::vector3d::Vec3::UNDEF;
+        c.add_turning_points(
+            &Kernel::default(),
+            &Extent1d::from_raw(t0, t1),
+            &mut pt,
+            &mut |p| top = top.max(p.z),
+        )
+        .unwrap();
+        top
+    }
+
+    /// (#17961 review) Equal weights past `1e154` keep the change bound finite:
+    /// `w_min^2` overflowed to infinity, `change` came out 0 and the whole span was kept
+    /// as one range, whose ends (z = 0) miss the peak z = 5e-5 at t = 1/2. With weights 1
+    /// and 1e155 the same curve's peak is found, to 4 ulp. (Coordinates stay under
+    /// `1e-4`, so the numerator, about `|x| w^2`, stays finite.)
+    #[test]
+    fn huge_equal_weights_keep_the_peak() {
+        let pts = [[0.0, 0.0, 0.0], [5e-5, 0.0, 1e-4], [1e-4, 0.0, 0.0]];
+        for w in [1.0, 1e155] {
+            let top = turning_top_z(pts, w, 0.0, 1.0);
+            assert!(
+                (top - 5e-5).abs() <= 4.0 * f64::EPSILON * 5e-5,
+                "w {w}: {top}"
+            );
+        }
+    }
+
+    /// (#17961 review) Knots `2^52` and `2^52 + 2`: the span is two ulps of `t`
+    /// wide, with the double `2^52 + 1` inside, where z peaks at 1/2. A two-ulp width test
+    /// kept the whole span and added only its ends (z = 0); the range is now split until
+    /// no double lies inside it, so the peak is added exactly.
+    #[test]
+    fn a_span_a_few_ulps_wide_keeps_its_interior_peak() {
+        let pts = [[0.0, 0.0, 0.0], [0.5, 0.0, 1.0], [1.0, 0.0, 0.0]];
+        let t0 = 2f64.powi(52);
+        assert_eq!(turning_top_z(pts, 1.0, 0.0, 2.0), 0.5);
+        assert_eq!(turning_top_z(pts, 1.0, t0, t0 + 2.0), 0.5);
+    }
+
     /// Extraction of a span with full-multiplicity knots copies the stored values with no
     /// rounding; a span with simple knots carries a bound of its own values' size.
     #[test]
