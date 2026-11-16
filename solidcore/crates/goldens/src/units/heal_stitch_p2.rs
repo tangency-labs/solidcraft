@@ -567,7 +567,11 @@ fn run_rust(i: &Inputs) -> Result<Output, HarnessError> {
         Err(o) => return Ok(o),
     };
     match run_rust_op(&mut k, &mut b, &op) {
-        Ok(o) => Ok(guarded_output(o)),
+        Ok(o) => {
+            #[cfg(test)]
+            crate::certify::keep(&b);
+            Ok(guarded_output(o))
+        }
         Err(e) => match Output::unported(&e) {
             Some(o) => Ok(o),
             None => Err(harness(format!("rust: {e}"))),

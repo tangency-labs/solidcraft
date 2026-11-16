@@ -320,21 +320,15 @@ fn a_read_refuses_identities_that_name_no_object() {
         ),
         (&shared, "two objects share one identity"),
     ];
-    for pass_on in [false, true] {
-        for (key_of, expected) in cases {
-            let mut k = Kernel::default();
-            k.fixes.brep_edit_statuses_pass_on = pass_on;
-            let (r, _) = read_box(&mut k, key_of);
-            match r {
-                Err(SolidError::InvalidInput { operation, reason }) => {
-                    assert_eq!(
-                        operation, "topology::brep::p10::make_topology_from_data",
-                        "pass_on {pass_on}"
-                    );
-                    assert_eq!(reason, expected, "pass_on {pass_on}");
-                }
-                r => panic!("pass_on {pass_on}: expected {expected:?}, got {r:?}"),
+    for (key_of, expected) in cases {
+        let mut k = Kernel::default();
+        let (r, _) = read_box(&mut k, key_of);
+        match r {
+            Err(SolidError::InvalidInput { operation, reason }) => {
+                assert_eq!(operation, "topology::brep::p10::make_topology_from_data");
+                assert_eq!(reason, expected);
             }
+            r => panic!("expected {expected:?}, got {r:?}"),
         }
     }
 }
@@ -345,7 +339,6 @@ fn a_read_refuses_identities_that_name_no_object() {
 #[test]
 fn a_box_read_heals_and_its_rays_find_the_infinite_region() {
     let mut k = Kernel::default();
-    k.fixes.brep_edit_statuses_pass_on = true;
     let (r, mut b) = read_box(&mut k, &notify_ref);
     r.unwrap();
     assert_eq!(b.naming(), solidcore::topology::NamingScheme::Caller);

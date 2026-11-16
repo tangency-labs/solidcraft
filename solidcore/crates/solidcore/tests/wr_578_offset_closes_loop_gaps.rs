@@ -26,6 +26,8 @@
 #[path = "support/offset_fixture.rs"]
 mod offset_fixture;
 
+#[path = "support/volume_leak.rs"]
+mod volume_leak;
 use offset_fixture::{planar_faces_at, report, shell};
 use solidcore::boolean::api_brep::{boolean_difference, boolean_union};
 use solidcore::curve::curve::Curve;
@@ -273,8 +275,10 @@ fn shell_1528() -> (Kernel, solidcore::Result<Brep>) {
 #[test]
 fn wr_578_issue_1528_plate_shells_on_a_clean_operand() {
     let (k, fixed) = shell_1528();
-    let fixed = fixed.unwrap();
+    let mut fixed = fixed.unwrap();
     assert_eq!(fixed.face_list().len(), 16, "the default shell's faces");
+    let (old, new) = (10400.212852557255, 10400.212432293585);
+    volume_leak::assert_moved_by_the_old_leak(&k, &mut fixed, old, new, 1e-6);
     assert_eq!(fixed.edge_list().len(), 36, "the default shell's edges");
     assert!(report(
         &k,
@@ -282,8 +286,9 @@ fn wr_578_issue_1528_plate_shells_on_a_clean_operand() {
         Ok(fixed),
         // since #2890 (precise properties integrate from the trims' base): +4.8e-4 from the
         // closed form 10400.212373846494 (issue_1950's), within the volume's accuracy
-        // (1e-6); it was 10400.21299138017, +6.2e-4
-        Some(10400.212852557255),
+        // (1e-6); it was 10400.21299138017, +6.2e-4. Since `brep_volume` closes tolerant
+        // edges' gaps (#16735), +5.6e-9 from it (MEASURED); it was 10400.212852557255
+        Some(new),
         1e-9
     ));
 }

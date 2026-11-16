@@ -80,6 +80,9 @@
 //! - **Interval knots.** `CalculateTightBoundingBox` adds only the tangent
 //!   discontinuous knots strictly inside the interval (WR-474, #1054); upstream adds
 //!   them all, and the last knot.
+//! - **Stopping points (#17685).** `CalculateTightBoundingBox` also adds the points at
+//!   the curve's speed minima: a coordinate can peak where the curve stops and turns
+//!   back (`C' = 0`), which the perpendicular analyses refuse to evaluate.
 //! - **Coordinate bound.** `GlobalCurveSolve` of a curve whose natural box reaches past
 //!   [`crate::limits::MAX_COORDINATE_MAGNITUDE`] (`1e150`, below `sqrt(f64::MAX)`)
 //!   fails with `InvalidInput` before any cache is built (the curve cache is built over
@@ -1700,7 +1703,64 @@ impl Curve {
             })?;
         }
 
+        // Not upstream (#17685): the points where the curve stops.
+        self.add_stopping_points(k, interval, &mut pt, &mut |p| {
+            tight_box.add_point(p);
+        })?;
+
         Ok(tight_box)
+    }
+
+    /// (Not upstream, #17685) The points of this curve over `interval` where it may stop,
+    /// for [`Curve::calculate_tight_bounding_box`]: the local minima of its speed
+    /// (`GlobalPropertyAnalysis(SM_CP_MINIMIZE_FIRST_DERIVATIVE)`, tolerance
+    /// `SM_EFF_ZERO_SQRT`), each added to `add`.
+    ///
+    /// A coordinate of the curve is greatest or least at an end, at a tangent
+    /// discontinuous knot, where `C' . e = 0` with the curve moving, or where `C' = 0`.
+    /// The perpendicular analyses find the third kind only: their objective refuses a
+    /// parameter with `|C'|^2 < SM_EFF_ZERO`, so they never reach the fourth. On a curve
+    /// that runs along z, rises and turns back down (the u = 0 side of a B-spline patch
+    /// whose first row of control points all lie on the z axis), `C' . z` is never zero
+    /// where the curve moves: the box ended 1.4e-3 below the curve's peak. Every point
+    /// with `C' = 0` is a minimum of the speed, so the speed's minima hold the points the
+    /// perpendicular analyses refuse. All of them are added, with no threshold on the
+    /// speed: each is a point of the curve, so the box only grows to points the curve
+    /// has, and a minimum where the curve still moves adds no point beyond the curve.
+    fn add_stopping_points(
+        &self,
+        k: &Kernel,
+        interval: &Extent1d,
+        pt: &mut Point3,
+        add: &mut dyn FnMut(Point3),
+    ) -> Result<()> {
+        let opts = PropertyAnalysisOptions {
+            property_value: None,
+            opt_vectors: &[],
+            want_comb: false,
+            handle: Some(CurveHandle(self.natural_interval())),
+        };
+        let sols = self
+            .global_property_analysis(
+                k,
+                interval,
+                CurvePropertyType::MinimizeFirstDerivative,
+                EFF_ZERO_SQRT,
+                &opts,
+            )?
+            .solutions;
+        for s in sols.as_slice() {
+            let ends = if s.solution_type == SolutionType::RangeOfValues {
+                [Some(s.start.parameters[0]), Some(s.end.parameters[0])]
+            } else {
+                [Some(s.start.parameters[0]), None]
+            };
+            for t in ends.into_iter().flatten() {
+                eval_keep(k, self, t, pt)?;
+                add(*pt);
+            }
+        }
+        Ok(())
     }
 
     /// `CalculateTightPseudoBox` into `pseudo_box`: its intervals reset, its basis set
@@ -1999,6 +2059,66 @@ mod tests {
             Some(CurveHandle(c1.natural_interval())),
             Some(CurveHandle(c2.natural_interval())),
         ]
+    }
+
+    /// The u = 0 side of `query.brep` gen0128's patch: a quadratic B-spline whose control
+    /// points all lie on the z axis, so it runs up the axis, stops and runs back down.
+    const TURNING_Z: [f64; 5] = [
+        0.336_409_316_230_782_1,
+        0.448_428_932_357_200_6,
+        0.412_240_069_159_368_5,
+        -0.128_554_999_916_893,
+        -0.388_250_346_477_554_63,
+    ];
+    /// Its knots.
+    const TURNING_KNOTS: [f64; 8] = [
+        0.0,
+        0.0,
+        0.0,
+        0.324_471_410_413_183_8,
+        0.897_412_383_425_158_5,
+        1.0,
+        1.0,
+        1.0,
+    ];
+    /// Its peak, from exact rational arithmetic on these control points and knots (Bezier
+    /// subdivision and convex hulls in `Fraction`s, to a width of 6e-22), rounded outward.
+    const TURNING_PEAK: (f64, f64) = (0.436_712_872_774_132_9, 0.436_712_872_774_132_95);
+
+    /// (#17685) A coordinate's extreme where the curve stops is in its tight box. The
+    /// curve's tangent is +z or -z wherever it moves, never perpendicular to z, and the
+    /// perpendicular analyses refuse the parameters where it has stopped: the box ended
+    /// at 0.43534, 1.4e-3 below the peak. With the stopping points it reaches the peak, to
+    /// the speed minimisation's accuracy, and stays on the curve (no higher than the peak
+    /// but for the evaluation's rounding).
+    #[test]
+    fn tight_box_reaches_the_peak_where_a_curve_turns_back() {
+        use crate::nurbs::crv_basic::Curve as NlCurve;
+        use crate::nurbs::math::{CPoint, NOW};
+        let pw = TURNING_Z
+            .iter()
+            .map(|&z| CPoint::new(0.0, 0.0, z, NOW))
+            .collect();
+        let nl = NlCurve::new(pw, 2, TURNING_KNOTS.to_vec()).unwrap();
+        let curve = Curve::from(BSplineCurve::from_nurb(nl, 3, false));
+        let k = Kernel::default();
+        let bx = curve
+            .calculate_tight_bounding_box(&k, &curve.natural_interval())
+            .unwrap();
+        let (lo, hi) = (bx.min(), bx.max());
+        let (peak_lo, peak_hi) = TURNING_PEAK;
+        assert!(
+            hi.z >= peak_lo - 1e-12,
+            "box top {} below the peak {peak_lo}",
+            hi.z
+        );
+        assert!(
+            hi.z <= peak_hi + 4.0 * f64::EPSILON,
+            "box top {} above the peak",
+            hi.z
+        );
+        assert_eq!(lo.z, TURNING_Z[4], "the least is the end");
+        assert_eq!((lo.x, lo.y, hi.x, hi.y), (0.0, 0.0, 0.0, 0.0));
     }
 
     #[test]

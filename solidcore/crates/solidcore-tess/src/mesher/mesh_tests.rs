@@ -85,7 +85,7 @@ fn shaped_in_3d(b: &brep::Brep, size: f64, what: &str) -> PlanStats {
     eprintln!("{what} on the mesh path: smallest angle {worst} degrees (face {face}, corners {at:?}) over {} triangles", m.triangles.len());
     assert!(worst >= 20.0, "{what}: smallest angle {worst} degrees, on face {face}, corners {at:?}; unshaped: {:?}", stats.unshaped);
     assert_nothing_folds(&m, what);
-    let (w, refused) = plan.welded();
+    let (w, refused) = plan.welded().unwrap();
     assert!(refused.is_empty(), "{what}: {refused:?}");
     assert_closed(&w, what);
     stats
@@ -307,7 +307,7 @@ fn a_plate_a_ball_sinks_into_has_no_needles_on_the_mesh_path() {
     let ball: Vec<usize> = (0..plan.surfaces.len()).filter(|&f| !matches!(plan.surfaces[f], EvalSurface::Plane { .. })).collect();
     assert!(stats.unshaped.iter().all(|u| !ball.contains(&u.face)), "the ball's faces {ball:?}; unshaped: {:?}", stats.unshaped);
     assert_nothing_folds(&m, "sunk ball");
-    let (w, refused) = plan.welded();
+    let (w, refused) = plan.welded().unwrap();
     assert!(refused.is_empty(), "{refused:?}");
     assert_closed(&w, "sunk ball");
 }
@@ -352,7 +352,7 @@ fn chords_moved_by_the_shaping_rounds_are_untangled_on_the_mesh_path() {
     let (m, refused) = plan.evaluate();
     assert!(refused.is_empty(), "{refused:?}");
     assert_nothing_folds(&m, "rivet sheet");
-    let (w, refused) = plan.welded();
+    let (w, refused) = plan.welded().unwrap();
     assert!(refused.is_empty(), "{refused:?}");
     assert_closed(&w, "rivet sheet");
 }
@@ -381,7 +381,7 @@ fn a_box_on_the_mesh_path_keeps_its_angle_and_its_side() {
         }
     }
     assert_nothing_folds(&m, "box");
-    let (w, _) = plan.welded();
+    let (w, _) = plan.welded().unwrap();
     assert_closed(&w, "box");
 }
 
@@ -428,7 +428,7 @@ fn a_sliver_narrower_than_its_pole_reach_meshes_on_the_mesh_path() {
     faces.dedup();
     assert_eq!(faces.len(), b.faces.len(), "every face has triangles");
     assert_nothing_folds(&m, "sliver body");
-    let (w, refused) = plan.welded();
+    let (w, refused) = plan.welded().unwrap();
     assert!(refused.is_empty(), "{refused:?}");
     assert_closed(&w, "sliver body");
 }
@@ -450,7 +450,7 @@ fn a_cylinder_wall_on_the_mesh_path_is_shaped() {
     eprintln!("cylinder wall on the mesh path: smallest angle {worst} degrees over {count} triangles");
     assert!(worst >= 20.0, "the wall's smallest angle is {worst} degrees over {count} triangles; unshaped: {:?}", stats.unshaped);
     assert_nothing_folds(&m, "cylinder");
-    let (w, _) = plan.welded();
+    let (w, _) = plan.welded().unwrap();
     assert_closed(&w, "cylinder");
 }
 
@@ -496,7 +496,7 @@ fn a_sliver_narrower_than_the_chord_is_not_split_without_end_on_the_mesh_path() 
     let (m, refused) = plan.evaluate();
     assert!(refused.is_empty(), "{refused:?}");
     assert_nothing_folds(&m, "lips on a base");
-    let (w, refused) = plan.welded();
+    let (w, refused) = plan.welded().unwrap();
     assert!(refused.is_empty(), "{refused:?}");
     assert_closed(&w, "lips on a base");
     // Faces 11 and 17, the lips' end walls (1 x 18 mm), each have a side 0.0001 mm long at a
@@ -546,7 +546,7 @@ fn a_size_function_gives_shorter_sides_where_it_asks() {
             }
         }
     }
-    let (w, _) = sized_plan.welded();
+    let (w, _) = sized_plan.welded().unwrap();
     assert_closed(&w, "box with a size function");
 }
 

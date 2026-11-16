@@ -15,10 +15,13 @@ use crate::schema::{ParamCheck, input_schema_for, output_schema_for};
 
 #[test]
 fn schemas_and_the_key_check_agree() {
-    assert_keys(input_schema_for::<EditJointParams>(), &["a", "angle", "b", "flip", "joint", "name", "offset", "quiet", "suppressed", "type"]);
+    assert_keys(
+        input_schema_for::<EditJointParams>(),
+        &["a", "angle", "b", "flip", "joint", "name", "offset", "offset_x", "offset_y", "quiet", "suppressed", "type"],
+    );
     assert_keys(
         input_schema_for::<CreateJointParams>(),
-        &["a", "angle", "b", "flip", "limits", "name", "offset", "quiet", "type", "value", "values"],
+        &["a", "angle", "b", "flip", "limits", "name", "offset", "offset_x", "offset_y", "quiet", "type", "value", "values"],
     );
     assert_keys(input_schema_for::<EditConstraintParams>(), &["angle", "constraint", "flip", "name", "offset", "quiet", "suppressed", "type"]);
     assert_keys(input_schema_for::<CreateConstraintParams>(), &["a", "angle", "b", "flip", "name", "offset", "quiet", "type"]);
