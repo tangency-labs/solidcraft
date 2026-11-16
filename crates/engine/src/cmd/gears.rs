@@ -130,7 +130,7 @@ fn sketch_profile(s: &mut Session, g: &GearSpec, teeth: bool, circle: Option<f64
 }
 
 /// The gear's teeth as sketch and extrusion in the active component. An external gear is its tooth
-/// outline, with an axle hole as a circle in the same sketch. An internal gear is the ring's disc
+/// outline, with an axle hole cut through it. An internal gear is the ring's disc
 /// with the tooth outline cut through it.
 fn build(s: &mut Session, g: &GearSpec, e: &Extent, cmd: &str) -> Result<()> {
     let distance = format!("{} mm", e.width);
@@ -140,8 +140,12 @@ fn build(s: &mut Session, g: &GearSpec, e: &Extent, cmd: &str) -> Result<()> {
         sketch_profile(s, g, true, None, cmd)?;
         s.execute("solid.extrude", &json!({"distance": distance, "direction": "positive", "operation": "cut"}))?;
     } else {
-        sketch_profile(s, g, true, (e.bore > 0.0).then_some(e.bore / 2.0), cmd)?;
+        sketch_profile(s, g, true, None, cmd)?;
         s.execute("solid.extrude", &json!({"distance": distance, "direction": "positive", "operation": "new"}))?;
+        if e.bore > 0.0 {
+            sketch_profile(s, g, false, Some(e.bore / 2.0), cmd)?;
+            s.execute("solid.extrude", &json!({"distance": distance, "direction": "positive", "operation": "cut"}))?;
+        }
     }
     Ok(())
 }

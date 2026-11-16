@@ -138,11 +138,13 @@ fn an_internal_gear_is_a_ring_with_its_teeth_inside() {
 #[test]
 fn an_external_gear_takes_an_axle_hole_and_edit_can_turn_it_into_a_ring() {
     let mut s = Session::default();
-    run(&mut s, "gear.insert", json!({"module": 2, "teeth": 20, "face_width": 10, "bore_diameter": 10}));
-    let v = volume(&mut s);
-    assert!((v / 10.0 - PI * (20.0 * 20.0 - 5.0 * 5.0)).abs() < 0.06 * PI * 400.0, "{v}");
+    run(&mut s, "gear.insert", json!({"module": 2, "teeth": 20, "face_width": 10}));
+    let solid = volume(&mut s);
+    run(&mut s, "gear.edit", json!({"component": "Spur Gear M2 Z20", "bore_diameter": 10}));
+    // The axle hole takes a cylinder 10 mm across and 10 mm long out of the gear.
+    assert!((solid - volume(&mut s) - PI * 5.0 * 5.0 * 10.0).abs() < 1.0, "{solid}");
     run(&mut s, "gear.edit", json!({"component": "Spur Gear M2 Z20", "bore_diameter": 0}));
-    assert!((volume(&mut s) / 10.0 - PI * 400.0).abs() < 0.06 * PI * 400.0);
+    assert!((volume(&mut s) - solid).abs() < 1e-6);
     // Inside out: the saved axle hole is dropped and the name follows.
     let r = run(&mut s, "gear.edit", json!({"component": "Spur Gear M2 Z20", "internal": true, "teeth": 40}));
     assert_eq!(r["name"], "Internal Gear M2 Z40");
