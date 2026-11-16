@@ -605,6 +605,23 @@ fn removed_note(gone: &[Vec3]) -> String {
     }
 }
 
+/// `picks` without those that take a smooth edge (its faces meet tangentially: a seam or split
+/// edge, easy to take with a window pick), each left out named in `notes`, when another pick
+/// remains; else all of them, for the blend to refuse (#17919).
+fn without_smooth(body: &kernel::Body, picks: Vec<Vec3>, notes: &mut Vec<String>) -> Result<Vec<Vec3>> {
+    let smooth = kernel::smooth_picks(body, &picks)?;
+    if smooth.iter().all(|s| *s) || !smooth.iter().any(|s| *s) {
+        return Ok(picks);
+    }
+    let (skipped, kept): (Vec<_>, Vec<_>) = picks.into_iter().zip(smooth).partition(|(_, s)| *s);
+    let at: Vec<String> = skipped.iter().map(|(p, _)| format!("({}, {}, {})", show_mm(p.x), show_mm(p.y), show_mm(p.z))).collect();
+    notes.push(match at.as_slice() {
+        [one] => format!("1 edge skipped: its faces meet tangentially, so there is nothing to blend (the edge at {one})"),
+        _ => format!("{} edges skipped: their faces meet tangentially, so there is nothing to blend (the edges at {})", at.len(), at.join(", ")),
+    });
+    Ok(kept.into_iter().map(|(p, _)| p).collect())
+}
+
 thread_local! {
     /// Current feature evaluation validation mode (`EachStep`, `EachFeature`, or `Off`).
     static EVAL_VALIDATION: std::cell::Cell<kernel::Validation> = const { std::cell::Cell::new(kernel::Validation::EachFeature) };
@@ -10858,6 +10875,7 @@ fn eval_feature_kind(
                 let Some(mb) = st.bodies.get(*ti) else { return Err(DocError::Invalid("body".into())) };
                 let mut w = None;
                 let edges = blend_edges_on(mb, f, edges, idx, &mut w)?;
+                let edges = if edges.len() > 1 { without_smooth(&mb.body, edges, &mut notes)? } else { edges };
                 let picked = edges.len();
                 let edges = if chain { kernel::tangent_chain(&mb.body, &edges)? } else { edges };
                 if let Some(w) = w {
@@ -12576,6 +12594,55 @@ mod chain_tests {
         let (off, faces) = build(false);
         assert_eq!(off, None);
         assert_eq!(faces, Some(8));
+    }
+
+    /// A 40 × 16 × 10 plate ending in a half cylinder of radius 8: its sides run into the
+    /// cylinder's wall tangentially, along smooth edges such as the one at x 40, y 0. A fillet of
+    /// the back top edge and that smooth edge rounds the back edge and says it skipped the
+    /// smooth one (#17919): 6400 + 320π − (1 − π/4)·16 mm³. The smooth edge alone is refused.
+    #[test]
+    fn a_smooth_edge_among_the_picks_is_skipped_with_a_note() {
+        let build = |edges: &[Vec3]| {
+            let mut doc = Document::new("T");
+            let plate = FeatureKind::Box {
+                corner: crate::point_expr(Vec3::ZERO),
+                length: "40".into(),
+                width: "16".into(),
+                height: "10".into(),
+                operation: Operation::NewBody,
+                centred: false,
+            };
+            doc.add_feature(plate, None).unwrap();
+            let end = FeatureKind::Cylinder {
+                base: crate::point_expr(Vec3::new(40.0, 8.0, 0.0)),
+                axis: crate::Dir(Vec3::Z),
+                radius: "8".into(),
+                height: "10".into(),
+                operation: Operation::Join,
+                references: Vec::new(),
+            };
+            doc.add_feature(end, None).unwrap();
+            let mut round = fillet(Vec3::ZERO, "1", true);
+            if let FeatureKind::Fillet { edges: e, .. } = &mut round {
+                *e = edges.iter().map(|p| crate::Position(*p)).collect();
+            }
+            let last = doc.add_feature(round, None).unwrap();
+            let mut m = Model::new();
+            m.evaluate(&doc);
+            let r = m.result(last).cloned();
+            (r, m.state().bodies.first().map(|b| kernel::measure(&b.body).map(|v| v.volume)))
+        };
+        let (r, volume) = build(&[Vec3::new(0.0, 8.0, 10.0), Vec3::new(40.0, 0.0, 5.0)]);
+        let r = r.expect("a result");
+        assert_eq!(r.error, None);
+        let warning = r.warning.unwrap_or_default();
+        assert!(warning.contains("1 edge skipped: its faces meet tangentially") && warning.contains("(40, 0, 5)"), "{warning}");
+        let expected = 6400.0 + 320.0 * std::f64::consts::PI - (1.0 - std::f64::consts::FRAC_PI_4) * 16.0;
+        let volume = volume.expect("a body").expect("a volume");
+        assert!((volume - expected).abs() < 1e-3 * expected, "{volume} vs {expected}");
+        let (alone, _) = build(&[Vec3::new(40.0, 0.0, 5.0)]);
+        let error = alone.and_then(|r| r.error).unwrap_or_default();
+        assert!(error.contains("is smooth"), "{error}");
     }
 }
 
