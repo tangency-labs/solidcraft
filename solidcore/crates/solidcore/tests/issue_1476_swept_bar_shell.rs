@@ -35,6 +35,8 @@
 
 #[path = "support/offset_fixture.rs"]
 mod offset_fixture;
+#[path = "support/solidcraft_fixes.rs"]
+mod solidcraft_fixes;
 
 use offset_fixture::{planar_faces_at, volume, Notifications};
 use solidcore::curve::curve::p2::{Curve, CurveKind};
@@ -48,6 +50,7 @@ use solidcore::topology::brep::p7::read_from_file;
 use solidcore::topology::database_io::FileType;
 use solidcore::topology::topology::NotifyRecords;
 use solidcore::{Brep, Kernel};
+use solidcraft_fixes::solidcraft_fixes;
 
 /// `SmBrep::ReadFromFile` of the rig's operand.
 fn operand(k: &mut Kernel) -> Brep {
@@ -66,46 +69,6 @@ fn operand(k: &mut Kernel) -> Brep {
     read_from_file(k, &mut b, bytes, FileType::Ascii, false, &mut env).unwrap();
     b.refresh_cached_topology();
     b
-}
-
-/// SolidCraft's `core::fixes()`: every opt-in `UpstreamFixes` flag it runs with (the
-/// issue's configuration).
-fn solidcraft_fixes() -> UpstreamFixes {
-    let mut f = UpstreamFixes::default();
-    f.fillet_refuse_face_consuming_blends = true;
-    f.fillet_chamfer_cone_on_arc = true;
-    f.offset_extended_edges_mated = true;
-    f.keep_operand_uv_trims = true;
-    f.geometric_g2_continuity = true;
-    f.proto_vertex_miss_is_false = true;
-    f.cylinder_rebuild_mean_radius = true;
-    f.revolve_analytic_profile_faces = true;
-    f.join_touching_loops = true;
-    f.offset_resolve_crossing_loops = true;
-    f.offset_analytic_mate_edges = true;
-    f.nurb_cylinder_inside_out_frame = true;
-    f.offset_collapsed_rounds_mated = true;
-    f.uv_trim_corner_end_points_only = true;
-    f.bspline_trim_preserves_uv_spans = true;
-    f.proto_edge_self_loop_on_vertex_degenerate = true;
-    f.cover_refuses_folded_continuation = true;
-    f.boolean_vertex_by_best_crossing = true;
-    f.classify_edge_interval = true;
-    f.ellipse_trim_seam_lines_span_cone_height = true;
-    f.degenerate_proto_edge_in_one_vertex = true;
-    f.new_edge_vertex_tolerance_covers_gap = true;
-    f.point_solve_keeps_triangle_guess = true;
-    f.imprint_extends_edge_to_proto_vertex = true;
-    f.fillet_point_step_per_point = true;
-    f.analytic_copy_keeps_parameterization = true;
-    f.offset_extension_from_base = true;
-    f.fillet_cleanup_keeps_target_faces = true;
-    f.offset_stitch_at_body_tolerance = true;
-    f.curve_contacts_at_curve_ends = true;
-    f.ssi_tangent_contact_points = true;
-    f.ssi_trace_tangent_curves_once = true;
-    f.found_torus_sphere_keep_tested_nurb = true;
-    f
 }
 
 /// The shell of the operand (`SmApiShellBrepFull(b, -0.5, TRUE, TRUE, TRUE, [start
@@ -186,7 +149,11 @@ fn issue_1476_swept_bar_shells() {
 #[test]
 #[ignore = "slow in debug builds (two 38 000-sample curve offsets)"]
 fn issue_1476_swept_bar_shells_with_solidcraft_fixes() {
-    assert_eq!(check(&solidcraft_fixes(), Some(1299.482314966473)), 16);
+    let mut fixes = solidcraft_fixes();
+    // The preset has it on; this test is SolidCraft's configuration without it (the last
+    // test in this file turns it on).
+    fixes.shell_edges_on_analytics_exact = false;
+    assert_eq!(check(&fixes, Some(1299.482314966473)), 16);
 }
 
 /// `shell_edges_on_analytics_exact` (WR-545) alone: `make_edges_on_analytics_exact`

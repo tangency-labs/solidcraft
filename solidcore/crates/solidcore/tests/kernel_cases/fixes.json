@@ -95,5 +95,9 @@
   "fillet_round_as_definition",
   "fillet_overflow_trim_at_creases",
   "fillet_overflow_crease_along_edge",
-  "keep_exact_pcurves"
+  "keep_exact_pcurves",
+  "face_swap_uv_transposes_trims",
+  "closed_smooth_pole_tangent_limit",
+  "fillet_chamfer_corner",
+  "brep_ray_classifies_current_trims"
 ]

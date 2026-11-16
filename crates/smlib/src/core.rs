@@ -522,6 +522,18 @@ mod tests {
         }
     }
 
+    /// solidcore's tests and kernel rig read this preset from `kernel_cases/fixes.json`: the file
+    /// names exactly the flags `fixes()` turns on.
+    #[test]
+    fn the_kernel_corpus_fix_list_is_this_preset() {
+        let listed: Vec<String> = serde_json::from_str(include_str!("../../../solidcore/crates/solidcore/tests/kernel_cases/fixes.json")).unwrap();
+        let mut listed: Vec<&str> = listed.iter().map(String::as_str).collect();
+        listed.sort_unstable();
+        let mut on: Vec<&str> = fixes().flags().filter(|(_, on)| *on).map(|(name, _)| name).collect();
+        on.sort_unstable();
+        assert_eq!(listed, on, "kernel_cases/fixes.json must list exactly the flags fixes() turns on");
+    }
+
     #[test]
     fn a_box_measures_exactly() {
         let b = make_box([1.0, -2.0, 3.0], [10.0, 20.0, 30.0]).unwrap();
