@@ -71,7 +71,7 @@ use solidcraft_doc::bom::{Tree, Unlisted};
 use solidcraft_doc::drawing::balloon::{Balloon, RowRead, balloon_rows};
 use solidcraft_doc::drawing::dimension::{self, Dimension};
 use solidcraft_doc::drawing::note::{Anchor, Note};
-use solidcraft_doc::drawing::view::{ResolvedView, View};
+use solidcraft_doc::drawing::view::{FlatOf, ResolvedView, View};
 use solidcraft_doc::drawing::{Drawing, Sheet, Updates};
 use solidcraft_doc::drawing_view::TangentEdges;
 use solidcraft_doc::{DocError, Document, ModelState, ids};
@@ -629,6 +629,9 @@ impl Lettering {
 /// [`MIN_MODEL_CHORD_MM`]; centred on the view ([`assemble`] moves them to its centre). Lines past
 /// the paper scene's [`MAX_RECORDS`] are refused here, so no view holds more than a scene takes.
 fn draw(s: &Session, failing: &[String], shown: &std::result::Result<ShownSet, Unmeasured>, id: u64, view: &ResolvedView) -> Drawn {
+    if let Some(of) = &view.flat {
+        return draw_flat(s, id, view, of);
+    }
     // What the view chooses to show ([`crate::drawing_view::measured`]), and its reference parts' reach.
     let measured = crate::drawing_view::measured(shown, view).map(|(set, extents)| {
         let around = crate::drawing_view::shows(&set, &view.basis, &extents, view.reference_shown_percent);
@@ -682,6 +685,31 @@ fn draw(s: &Session, failing: &[String], shown: &std::result::Result<ShownSet, U
     }
 }
 
+/// Flat pattern view `id`, drawing as `view` does, of its body's flat `of` ([`crate::drawing_view::flat`]):
+/// centred on the view as [`draw`]'s lines are. Its lines name no body, so nothing is picked on them.
+fn draw_flat(s: &Session, id: u64, view: &ResolvedView, of: &FlatOf) -> Drawn {
+    let flat = crate::drawing_view::flat(s, of, CMD);
+    let placing = crate::drawing_view::flat_measured(&flat);
+    let boundary = crate::drawing_view::placed(view, placing, Vec2::ZERO, CMD).ok().map(|placed| placed.boundary);
+    let none = |status| Drawn { group: None, status, stats: None, boundary, frame: None, owners: None, why: None };
+    if let Some(why) = crate::drawing_view::not_drawable_flat(view) {
+        return none(Status::Failed(why.into()));
+    }
+    let flat = match flat {
+        Ok(flat) => flat,
+        Err(e) => return none(Status::Failed(reason(e))),
+    };
+    let frame = match crate::drawing_view::frame(view.basis, view.scale.value, &flat.model, Vec2::ZERO, CMD) {
+        Ok(frame) => frame,
+        Err(e) => return none(Status::Failed(reason(e))),
+    };
+    let group = crate::drawing_view::flat_group(&flat, &frame, id, view.line_group.value);
+    if group.records() > MAX_RECORDS {
+        return none(Status::Failed(format!("its lines are more than a paper scene's {MAX_RECORDS} records: choose a smaller scale")));
+    }
+    Drawn { group: Some(Arc::new(group)), status: Status::Drawn, stats: None, boundary, frame: Some(frame), owners: None, why: None }
+}
+
 /// Why a sheet leaves out a dimension or a note whose view it doesn't draw.
 pub(crate) const NOT_DRAWN: &str = "its view isn't drawn";
 /// Why a sheet leaves out a dimension that measures something its view has no place to draw.
@@ -724,7 +752,10 @@ fn draw_dimensions(
     let mut ballooned = drawn_balloons(s, sessions, d, &balloons, &frame, &lettering).into_iter();
     let one = |at: usize, record: &Arc<Dimension>| match read.as_ref().map(|all| all.get(at)) {
         Ok(Some(resolved)) => {
+            // On a view that draws none of the model's edges, it has no place to draw.
+            let placed = !d.view(record.view).is_some_and(|view| crate::drawing_view::no_model_edges(view).is_some());
             let paper = frame(record.view)
+                .filter(|_| placed)
                 .and_then(|(frame, lines)| crate::drawing_dimension_paper::paper_group(record, resolved, &frame, lines, &lettering));
             let drawn = |group, fonts, why, pending| DrawnDimension {
                 dimension: record.id,
@@ -740,7 +771,7 @@ fn draw_dimensions(
             match paper {
                 Some(paper) => drawn(Some(Arc::new(paper.group)), paper.fonts, paper.why, paper.pending),
                 None => {
-                    let nothing = !resolved.points.is_empty() && frame(record.view).is_some();
+                    let nothing = !placed || (!resolved.points.is_empty() && frame(record.view).is_some());
                     drawn(None, Vec::new(), nothing.then(|| NO_PLACE.to_string()), false)
                 }
             }
@@ -820,6 +851,10 @@ fn drawn_notes(
             why: None,
             pending: false,
         };
+        // A leader on a view that draws none of the model's edges has no place to end.
+        if note.paths().next().is_some() && d.view(view).and_then(crate::drawing_view::no_model_edges).is_some() {
+            return DrawnDimension { why: Some(NO_PLACE.to_string()), ..base };
+        }
         let (Some(resolved), Some((frame, group))) = (resolved, frame(view)) else { return base };
         let text =
             d.sheet_of(&note.anchor).and_then(|at| title_block_text::read(s, tree, d, at, std::iter::once(&note.content)).pop()).unwrap_or_default();
@@ -859,6 +894,10 @@ fn drawn_balloons(
         let (view, why) = (balloon.view, row_why(&row));
         let kind = ObjectKind::Balloon;
         let base = DrawnDimension { dimension: balloon.id, view, kind, row: None, status, group: None, fonts: Vec::new(), why, pending: false };
+        // Its leader ends on the model, which a view that draws none of its edges has no place for.
+        if d.view(view).and_then(crate::drawing_view::no_model_edges).is_some() {
+            return DrawnDimension { row: Some(row), why: Some(NO_PLACE.to_string()), ..base };
+        }
         let (Some(resolved), Some((frame, group))) = (resolved, frame(view)) else { return DrawnDimension { row: Some(row), ..base } };
         let tip = resolved.point.map(|p| frame.to_paper(p));
         // Centred on the view, as its frame is: the scene moves it to the view's centre.

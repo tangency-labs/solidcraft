@@ -229,7 +229,7 @@ pub fn paper_lines(lines: &Lines, object: u64, group: LineGroup) -> (Group, Vec<
 
 /// `seg`, or nothing where it has no length to draw: a line whose ends are one point. An arc too
 /// short to sweep is drawn as its chord.
-fn drawable(seg: Seg2) -> Option<Seg2> {
+pub(super) fn drawable(seg: Seg2) -> Option<Seg2> {
     match seg {
         Seg2::Arc { sweep, .. } if sweep.abs() < 1e-9 => drawable(Seg2::Line { a: seg.start(), b: seg.end() }),
         Seg2::Line { a, b } if a == b => None,

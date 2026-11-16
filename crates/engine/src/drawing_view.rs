@@ -15,7 +15,7 @@ use std::sync::Arc;
 
 use solidcore_record::{Plane, Vec2};
 use solidcraft_doc::config::RowKey;
-use solidcraft_doc::drawing::view::{ResolvedView, SetBy};
+use solidcraft_doc::drawing::view::{ResolvedView, SetBy, View, ViewKind};
 use solidcraft_doc::drawing::{Drawing, Sheet};
 use solidcraft_doc::drawing_view::{Exploded, Pose, StudyStep, ViewConfiguration};
 use solidcraft_doc::{MAX_PLACEMENT_DEPTH, MAX_PLACEMENTS, ModelBody, ModelState, ids};
@@ -30,6 +30,11 @@ use crate::{Result, Session};
 mod lines;
 
 pub use lines::{CHORD_MM, CHORD_RANGE, LineRequest, Lines, MIN_MODEL_CHORD_MM, Piece, Stats, ViewLine, lines, paper_group, paper_lines};
+
+#[path = "drawing_view_flat.rs"]
+mod flat;
+
+pub use flat::{Flat, bend_dashes_mm, flat, flat_from, flat_group};
 
 /// The paper millimetres each way of a view's boundary when there's nothing to measure, round its
 /// centre, so it can still be picked, moved and deleted.
@@ -64,6 +69,8 @@ pub enum Unmeasured {
     /// The row of the configuration table it draws can't be put on the design: its values don't
     /// apply (a hostile file), or a sketch would collapse with them.
     NotConfigured,
+    /// A flat pattern view's body has no flat pattern ([`flat`] says why).
+    NoFlat,
 }
 
 /// Why a choice of occurrences that draws nothing is refused.
@@ -81,6 +88,7 @@ impl Unmeasured {
             Unmeasured::NotPosed => "not_posed",
             Unmeasured::NoConfiguration => "no_configuration",
             Unmeasured::NotConfigured => "not_configured",
+            Unmeasured::NoFlat => "no_flat",
         }
     }
 }
@@ -99,6 +107,7 @@ impl fmt::Display for Unmeasured {
             Unmeasured::NotPosed => f.write_str("its position can't be placed"),
             Unmeasured::NoConfiguration => f.write_str("the configuration it draws is no longer in the design"),
             Unmeasured::NotConfigured => f.write_str("its configuration can't be applied to the design"),
+            Unmeasured::NoFlat => f.write_str("the view's body has no flat pattern"),
         }
     }
 }
@@ -524,6 +533,31 @@ pub fn not_drawable_apart(view: &ResolvedView) -> Option<&'static str> {
     }
 }
 
+/// Why flat pattern view `view` can't be drawn, if it can't: it draws one body's flat, so it is never
+/// exploded or posed, and a configuration of its own needs that configuration's flat, not read yet.
+/// Nothing for a view of the model.
+pub fn not_drawable_flat(view: &ResolvedView) -> Option<&'static str> {
+    if view.flat.is_none() {
+        None
+    } else if view.exploded.value != Exploded::Assembled {
+        Some("a flat pattern view is never exploded: it draws one body's flat")
+    } else if view.pose.value != Pose::Designed {
+        Some("a flat pattern view has no position: it draws one body's flat")
+    } else if view.configuration.value != ViewConfiguration::Active {
+        Some("not supported yet: a flat pattern view of a configuration of its own")
+    } else {
+        None
+    }
+}
+
+/// Why nothing on saved view `view` can point at the model, if nothing can (#13030): a flat pattern
+/// view draws its body's flat, whose edges aren't the model's, so no dimension, balloon or note
+/// leader has a place on it. A note on it that points at nothing is drawn.
+pub fn no_model_edges(view: &View) -> Option<&'static str> {
+    let why = "a flat pattern view draws its body's flat, not the model's edges: nothing on it points at the model";
+    matches!(view.kind, ViewKind::Flat { .. }).then_some(why)
+}
+
 /// What saved view `view` shows of `shown`, with its extents on its plane, or why there's nothing to
 /// measure: the one rule its boundary, its fitted scale and its lines are worked out by.
 pub fn measured<'a>(
@@ -590,10 +624,27 @@ pub fn on_sheet(s: &Session, drawing: &Drawing, id: u64, cmd: &str) -> Result<On
 /// [`on_sheet`], drawn from `sessions`: one read of several views makes each copy once.
 pub fn on_sheet_from(sessions: &mut ViewSessions, drawing: &Drawing, id: u64, cmd: &str) -> Result<OnSheet> {
     let view = drawing.resolve_view(id).map_err(|e| bad(cmd, e.to_string()))?;
+    if let Some(of) = &view.flat {
+        return flat_on_sheet(drawing, id, &flat(sessions.placed, of, cmd), cmd);
+    }
     let centre = drawing.view_centre(id).map_err(|e| bad(cmd, e.to_string()))?;
     let shown = shown_by(sessions, &view);
     let measured = measured(&shown, &view).map(|(set, e)| (e, shows(&set, &view.basis, &e, view.reference_shown_percent)));
     placed(&view, measured, centre, cmd)
+}
+
+/// Flat pattern view `id` of `drawing` on its sheet, from its `flat` as already read: [`on_sheet`] for
+/// a flat view, so a command that has read the flat doesn't read it again.
+pub fn flat_on_sheet(drawing: &Drawing, id: u64, flat: &Result<Flat>, cmd: &str) -> Result<OnSheet> {
+    let view = drawing.resolve_view(id).map_err(|e| bad(cmd, e.to_string()))?;
+    let centre = drawing.view_centre(id).map_err(|e| bad(cmd, e.to_string()))?;
+    placed(&view, flat_measured(flat), centre, cmd)
+}
+
+/// A flat pattern view's extents and what it shows, from its [`flat`]: [`placed`]'s input.
+pub fn flat_measured(flat: &Result<Flat>) -> std::result::Result<(Extents, Aabb2), Unmeasured> {
+    let flat = flat.as_ref().map_err(|_| Unmeasured::NoFlat)?;
+    Ok((Extents { model: flat.model, error_mm: 0.0, bodies: 1 }, flat.model))
 }
 
 /// A view drawing as `view` does on its sheet, from what [`measure`] and [`shows`] said of it, with the
