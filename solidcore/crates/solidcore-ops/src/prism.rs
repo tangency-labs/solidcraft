@@ -299,7 +299,7 @@ pub fn prism_equivalent(a: &Body, b: &Body) -> Result<Option<bool>> {
         });
     }
     run_on("prism_equivalent", &[("a", a), ("b", b)], |k| {
-        let (ga, gb) = (a.lock(), b.lock());
+        let (ga, gb) = Body::lock_pair(a, b);
         Ok(measure::equivalent(k, &ga, &gb))
     })
 }

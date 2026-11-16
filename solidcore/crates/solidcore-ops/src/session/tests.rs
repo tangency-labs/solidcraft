@@ -514,3 +514,106 @@ fn a_result_finished_after_the_cancel_is_not_returned() {
     let r: Result<bool> = run("reads", |k| Ok(k.cancel.is_none()));
     assert_eq!(r, Ok(true), "the token is off the kernel after the call");
 }
+
+/// Runs `f` on another thread and gives its answer: a failure here rather than a test that hangs
+/// when `f` waits for a call that does not end. The limit is no measure of speed: `f` is free to
+/// take all of it, and only a wait with no end fails.
+fn answered<T: Send + 'static>(f: impl FnOnce() -> T + Send + 'static) -> T {
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let _ = tx.send(f());
+    });
+    rx.recv_timeout(std::time::Duration::from_secs(120))
+        .expect("this call waited for a call on another thread that has not ended")
+}
+
+/// A kernel call named `call` running on a thread of its own (a long fillet, say), once it has
+/// started, until it is released.
+fn call_held_open(
+    call: &'static str,
+) -> (
+    std::sync::mpsc::Sender<()>,
+    std::thread::JoinHandle<Result<()>>,
+) {
+    let (started, is_started) = std::sync::mpsc::channel();
+    let (release, released) = std::sync::mpsc::channel::<()>();
+    let held = std::thread::spawn(move || {
+        run(call, |_| {
+            let _ = started.send(());
+            let _ = released.recv();
+            Ok(())
+        })
+    });
+    is_started.recv().unwrap();
+    (release, held)
+}
+
+/// A long call on one body holds up no call on another: while one thread's kernel call runs,
+/// another thread makes a body from its record and reads its box. Each thread's
+/// [`current_call`] is its own.
+#[test]
+fn a_long_call_holds_up_no_call_on_another_body() {
+    all_fixes();
+    let (record, _) = make_box([1.0, 2.0, 3.0], [2.0, 3.0, 4.0])
+        .unwrap()
+        .to_record()
+        .unwrap();
+    let (release, held) = call_held_open("held open");
+    let (bounds, beside) = answered(move || {
+        let (b, _) = Body::from_record(&record, true).unwrap();
+        (b.bounds().unwrap(), current_call())
+    });
+    let here = current_call();
+    release.send(()).unwrap();
+    held.join().unwrap().unwrap();
+    assert_eq!(bounds, ([1.0, 2.0, 3.0], [3.0, 5.0, 7.0]));
+    assert_eq!(beside, None, "the held call is not the other thread's");
+    assert_eq!(here, None, "nor this one's");
+}
+
+/// Two threads compare the same two bodies in opposite orders, each call locking both: the
+/// bodies are locked in one order whichever is named first, so neither call waits for good.
+#[test]
+fn calls_locking_two_bodies_in_opposite_orders_both_finish() {
+    all_fixes();
+    let a = Arc::new(make_box([0.0; 3], [1.0, 2.0, 3.0]).unwrap());
+    let b = Arc::new(make_box([5.0, 0.0, 0.0], [1.0, 2.0, 3.0]).unwrap());
+    let compare = |first: &Arc<Body>, second: &Arc<Body>| {
+        let (first, second) = (Arc::clone(first), Arc::clone(second));
+        std::thread::spawn(move || {
+            (0..200)
+                .map(|_| crate::prism::prism_equivalent(&first, &second).unwrap())
+                .collect::<Vec<_>>()
+        })
+    };
+    let (forward, backward) = answered(move || {
+        let forward = compare(&a, &b);
+        let backward = compare(&b, &a);
+        (forward.join().unwrap(), backward.join().unwrap())
+    });
+    assert_eq!(
+        forward, backward,
+        "the comparison does not depend on the order"
+    );
+    assert!(forward.iter().all(|v| v.is_some() && *v == forward[0]));
+}
+
+/// The fillet solver's latched step is the process's, as upstream keeps it: latched in a call
+/// on one kernel, it is the step of a call on another kernel (made while the first is held).
+#[test]
+fn a_latched_step_reaches_every_kernel() {
+    in_own_process(
+        "session::tests::a_latched_step_reaches_every_kernel",
+        || {
+            all_fixes();
+            let latched = run("latch", |k| Ok(k.latch_fillet_point_step(0.25))).unwrap();
+            // the latching call's kernel, held; the next call gets another
+            let (release, held) = call_held_open("holds the latching kernel");
+            let elsewhere =
+                answered(|| run("reads the step", |k| Ok(k.fillet_point_step.get())).unwrap());
+            release.send(()).unwrap();
+            held.join().unwrap().unwrap();
+            assert_eq!(elsewhere, Some(latched));
+        },
+    );
+}
