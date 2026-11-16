@@ -158,6 +158,57 @@ fn a_sections_sketch_facing_does_not_change_a_railed_loft() {
     assert!(up.bbox.min.dist(down.bbox.min) < 1e-6 && up.bbox.max.dist(down.bbox.max) < 1e-6, "{:?} vs {:?}", down.bbox, up.bbox);
 }
 
+/// A quarter turn about the Z axis (#17580): a quadrilateral beside the axis and the same one
+/// turned a quarter turn round it, its sketch facing back against the turn. The second section
+/// used to be wound the other way round from the first, so the stations twisted through
+/// themselves (two rails "came together", one left the loft without volume); and a rail of
+/// curves that close into a ring was followed the long way round from one section to the next.
+/// Two rails, round the axis through the quadrilateral's two nearest corners, the outer one three
+/// arcs listed out of order, now stretch the stations into the solid of revolution: π/2 · the
+/// quadrilateral's first moment about the axis (Pappus), to the skin's accuracy through its
+/// stations. The closed outline of the face its bottom edge sweeps (the arcs and the two edges)
+/// is followed from where it leaves the first section, along the inner arc.
+#[test]
+fn a_loft_through_a_quarter_turn_follows_rails_of_several_curves() {
+    let mut s = Session::default();
+    let quad = [[2.0, 0.0], [5.0, 0.0], [25.0, 8.0], [25.0, 10.0]];
+    for (name, x_dir, sign) in [("Start", [-1, 0, 0], 1.0), ("End", [0, -1, 0], -1.0)] {
+        run(&mut s, "sketch.create", json!({"name": name, "plane": {"origin": [0, 0, 0], "x_dir": x_dir, "y_dir": [0, 0, 1]}}));
+        let points: Vec<[f64; 2]> = quad.iter().map(|[x, y]| [sign * x, *y]).collect();
+        run(&mut s, "sketch.line", json!({"points": points, "infer": false, "closed": true}));
+        run(&mut s, "sketch.finish", json!({}));
+    }
+    run(&mut s, "sketch.create", json!({"name": "Rail", "plane": {"origin": [0, 0, 0], "x_dir": [1, 0, 0], "y_dir": [0, 1, 0]}}));
+    let on = |r: f64, degrees: f64| [r * degrees.to_radians().cos(), r * degrees.to_radians().sin()];
+    for (id, r, from, to) in [("o1", 5.0, 90.0, 120.0), ("o2", 5.0, 120.0, 150.0), ("o3", 5.0, 150.0, 180.0), ("i", 2.0, 90.0, 180.0)] {
+        run(&mut s, "sketch.arc.center_point", json!({"center": [0, 0], "start": on(r, from), "end": on(r, to), "id": id}));
+    }
+    run(&mut s, "sketch.line", json!({"points": [[-5, 0], [-2, 0]], "infer": false, "ids": ["s"]}));
+    run(&mut s, "sketch.line", json!({"points": [[0, 2], [0, 5]], "infer": false, "ids": ["e"]}));
+    run(&mut s, "sketch.finish", json!({}));
+    let rail = |curves: &[&str]| json!({"sketch": "Rail", "curves": curves});
+    let mut loft = |body: &str, rails: Value, fit: &str| {
+        let p = json!({"sections": [{"sketch": "Start"}, {"sketch": "End"}], "rails": rails, "rail_fit": fit, "operation": "new", "body_name": body});
+        s.execute("solid.loft", &p).unwrap_or_else(|e| panic!("{body}: {e}"));
+    };
+    loft("Turned", json!([rail(&["o2", "o1", "o3"]), rail(&["i"])]), "stretch");
+    loft("Inner", json!([rail(&["i"])]), "scale");
+    loft("Outline", json!([rail(&["o1", "o2", "o3", "s", "i", "e"])]), "scale");
+    // The quadrilateral's first moment about the axis: ∫ x dA.
+    let moment: f64 = (0..quad.len())
+        .map(|i| {
+            let ([x0, y0], [x1, y1]) = (quad[i], quad[(i + 1) % quad.len()]);
+            (x0 + x1) * (x0 * y1 - x1 * y0) / 6.0
+        })
+        .sum();
+    let revolved = PI / 2.0 * moment;
+    let turned = measure(&s, "Turned");
+    assert!((turned.volume - revolved).abs() < 2e-3 * revolved, "volume {} vs {revolved}", turned.volume);
+    assert!((turned.bbox.max.y - 25.0).abs() < 1e-6 && (turned.bbox.min.x + 25.0).abs() < 1e-6, "{:?}", turned.bbox);
+    let (inner, outline) = (measure(&s, "Inner").volume, measure(&s, "Outline").volume);
+    assert!(inner > 0.0 && (outline - inner).abs() < 1e-9 * inner, "the outline's loft {outline} vs the inner arc's {inner}");
+}
+
 /// Hostile rails are refused with an error and leave the design as it was.
 #[test]
 fn hostile_rails_are_refused() {
