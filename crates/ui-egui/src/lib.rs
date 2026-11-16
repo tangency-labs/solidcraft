@@ -2573,6 +2573,9 @@ impl SolveApp {
                     .collect();
                 let _ = self.session.execute("select.clear", &json!({}));
             }
+            if !self.session.selection.is_empty() && (matches!(t.kind, tools::Kind::Draw(_)) || crate::sketch_tools::is_drawing_tool(id)) {
+                let _ = self.session.execute("select.clear", &json!({}));
+            }
             self.tool = Some(t);
             self.set_status(tools::hint(id), false);
             return;

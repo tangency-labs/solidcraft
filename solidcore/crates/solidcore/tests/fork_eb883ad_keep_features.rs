@@ -7,6 +7,9 @@
 //! footprint lies inside the band, at r 1.9 the band stops short of it.
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)] // test helpers
 
+#[path = "support/volume_leak.rs"]
+mod volume_leak;
+
 use solidcore::blend::fillet_executive::api::fillet_edges;
 use solidcore::boolean::api_brep::{boolean_difference, boolean_union};
 use solidcore::geom::attribute::{AttributeStore, ObjectKey};
@@ -183,8 +186,8 @@ fn fork_kernel() -> Kernel {
 
 type Feature = fn(&mut Kernel, Brep) -> Result<Brep>;
 
-/// The block with a feature, its top front edge rounded `r`: the volume and the faces.
-fn rounded_with(feature: Feature, r: f64) -> Result<(f64, usize)> {
+/// The block with a feature, its top front edge rounded `r`, checked valid.
+fn rounded_body(feature: Feature, r: f64) -> Result<(Kernel, Brep)> {
     let mut k = fork_kernel();
     let block = create_box(&mut k, Point3::new(0.0, 0.0, 0.0), 40.0, 30.0, 20.0)?;
     let mut b = feature(&mut k, block)?;
@@ -195,6 +198,12 @@ fn rounded_with(feature: Feature, r: f64) -> Result<(f64, usize)> {
         .unwrap()
         .lines();
     assert!(lines.is_empty(), "{lines:?}");
+    Ok((k, b))
+}
+
+/// The block with a feature, its top front edge rounded `r`: the volume and the faces.
+fn rounded_with(feature: Feature, r: f64) -> Result<(f64, usize)> {
+    let (k, mut b) = rounded_body(feature, r)?;
     Ok((volume_of(&k, &mut b), b.face_list().len()))
 }
 
@@ -207,19 +216,26 @@ fn rounded_with(feature: Feature, r: f64) -> Result<(f64, usize)> {
 /// most, 1e-11 of it), since solidcore's precise properties integrate each iso-u line from the
 /// trims' lowest v (WR-563, #1556) where the fork starts at the face UV domain's, and its steps
 /// read a fifth-order error estimate (#1556, 5.0e-13 at most). Against the closed forms: the
-/// r 1.9 boss and hole were off by +2.0e-7 and -3.6e-7 (the fork's +4.4e-7 and -1.9e-7), and the
+/// r 1.9 boss and hole are off by +2.0e-7 and -3.6e-7 (the fork's +4.4e-7 and -1.9e-7), and the
 /// r 8 kept cylinder boss and hole, cone boss and 19 degree lean stay 3.4e-5 to 4.8e-5 above
-/// theirs, the crease's fit, as the fork's do; the cone pit has none.
+/// theirs, the crease's fit, as the fork's do; the cone pit has none. (Those figures were
+/// before #16735: `brep_volume` now closes the tolerant edges' gaps, and the r 8 cylinder boss
+/// and hole, cone boss and pit and 19 degree lean moved down by 3.4e-5 to 6.1e-5, the old
+/// integrator's leak through their marched creases; the prisms and the r 1.9 hole by a last
+/// bit. Each pin carries its figure from before, and the move is checked to be that leak.
+/// Integrating the faces on their surfaces continued where their trims leave the domain
+/// moved the r 8 cylinder boss and hole, cone boss and pit, 19 degree lean, prism boss and
+/// pocket and r 1.9 hole by one more last bit; the prisms and the r 1.9 hole are back on
+/// their figures from before.)
 ///
-/// Since the trim pieces integrate by Gauss-Kronrod (#14460) every figure is within 7.6e-15
-/// of the same volume forced to accuracy 1e-11 by Gauss-Kronrod; the earlier Runge-Kutta
-/// pieces forced to 1e-12 agree with that to 7.8e-16. The earlier figures were 8.4e-12 to
-/// 4.5e-11 off. The r 1.9
-/// boss and hole moved by -2.02e-7 and +3.54e-7, onto their closed forms to the digits given
-/// above, and the prism boss and pocket now differ by exactly their two prisms' 160 (by
-/// 159.99999981681 before).
-fn assert_pinned(feature: Feature, r: f64, volume: f64, faces: usize) {
-    let (v, n) = rounded_with(feature, r).unwrap();
+/// `was` is the figure before `brep_volume` closed the tolerant edges' gaps (#16735); where it
+/// differs, the move is checked to be that integrator's leak (`support/volume_leak.rs`).
+fn assert_pinned(feature: Feature, r: f64, was: f64, volume: f64, faces: usize) {
+    let (k, mut b) = rounded_body(feature, r).unwrap();
+    let (v, n) = (volume_of(&k, &mut b), b.face_list().len());
+    if was != volume {
+        volume_leak::assert_moved_by_the_old_leak(&k, &mut b, was, volume, 1e-7);
+    }
     // Bit for bit where the figures were taken (Linux). Elsewhere the platform's libm can move
     // the last bit (one on Windows, the kept hole).
     if cfg!(target_os = "linux") {
@@ -272,24 +288,36 @@ fn cone_pit(k: &mut Kernel, block: Brep) -> Result<Brep> {
 
 #[test]
 fn cylinders_keep_their_pinned_volumes() {
-    assert_pinned(cylinder_boss, 8.0, 23528.165527389272, 9);
-    assert_pinned(cylinder_hole, 8.0, 23402.501834781691, 9);
-    assert_pinned(cylinder_boss, 1.9, 24031.843347866376, 9);
-    assert_pinned(cylinder_hole, 1.9, 23906.179641722782, 9);
+    assert_pinned(cylinder_boss, 8.0, 23528.165527753492, 23528.16549376938, 9);
+    assert_pinned(cylinder_hole, 8.0, 23402.501835298488, 23402.50178777836, 9);
+    assert_pinned(cylinder_boss, 1.9, 24031.84334806833, 24031.84334806833, 9);
+    assert_pinned(
+        cylinder_hole,
+        1.9,
+        23906.179641369188,
+        23906.179641369188,
+        9,
+    );
 }
 
 /// Planar walls: each crease is an exact section.
 #[test]
 fn prisms_keep_their_pinned_volumes() {
-    assert_pinned(prism_boss, 8.0, 23549.896260150133, 12);
-    assert_pinned(prism_pocket, 8.0, 23389.896260150133, 12);
+    assert_pinned(prism_boss, 8.0, 23549.896259768986, 23549.896259768986, 12);
+    assert_pinned(
+        prism_pocket,
+        8.0,
+        23389.896259952173,
+        23389.896259952173,
+        12,
+    );
 }
 
 /// Walls that lean: kept as the fork keeps them, the boss's with no refusal.
 #[test]
 fn cones_keep_their_pinned_volumes() {
-    assert_pinned(cone_boss, 8.0, 23501.985588609361, 11);
-    assert_pinned(cone_pit, 8.0, 23427.54088905338, 9);
+    assert_pinned(cone_boss, 8.0, 23501.985588856085, 23501.98555487197, 11);
+    assert_pinned(cone_pit, 8.0, 23427.54088939281, 23427.54082824641, 9);
 }
 
 /// A boss's walls count as upright within the fillet's angular tolerance: at 19 degrees off they
@@ -308,7 +336,7 @@ fn a_boss_leaning_past_the_angular_tolerance_is_refused_as_the_fork() {
         let c = create_cone(k, Point3::new(20.0, 4.0, 20.0), 2.0, 1.0, 1.0)?;
         boolean_union(k, block, c)
     }
-    assert_pinned(lean_19, 8.0, 23486.591790262424, 11);
+    assert_pinned(lean_19, 8.0, 23486.59179069601, 23486.59175105623, 11);
     for steep in [lean_30 as Feature, lean_45] {
         assert!(rounded_with(steep, 8.0).is_err());
     }
@@ -413,7 +441,7 @@ fn a_pocket_astride_the_contact_line_matches_the_fork() {
         let c = create_box(k, Point3::new(18.0, 6.0, 15.0), 4.0, 4.0, 6.0)?;
         boolean_difference(k, block, c)
     }
-    assert_pinned(astride, 8.0, 23371.292358869621, 12);
+    assert_pinned(astride, 8.0, 23371.292359915951, 23371.292359915951, 12);
 }
 
 // ---- Work ----
@@ -443,7 +471,7 @@ fn walls_are_read_from_one_copy_per_body() {
         .lines();
     assert!(lines.is_empty(), "{lines:?}");
     let v = volume_of(&k, &mut b);
-    let want = 23549.896260150133 + 23389.896260150133 - TAKEN;
+    let want = 23549.896259768986 + 23389.896259952176 - TAKEN;
     println!(
         "volume {v:.17}, want {want:.17}; {} faces; {copies} copies",
         b.face_list().len()

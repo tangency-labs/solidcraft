@@ -28,6 +28,8 @@
     clippy::indexing_slicing
 )] // test helpers
 
+#[path = "support/volume_leak.rs"]
+mod volume_leak;
 use solidcore::blend::fillet_executive::api::fillet_edges;
 use solidcore::blend::fillet_executive::session::FilletSession;
 use solidcore::blend::fillet_solver::p1::FilletSurfaceGeneratorType;
@@ -193,10 +195,7 @@ fn do_filleting_builds_the_closed_body() {
 /// tab's side and twice for its top. The tab side's other end and the rim's ends are
 /// mixed-convexity Ends (the fork's 3e26f76). The fork's figures are at 18e96f1 on the same
 /// plate (this test's fixes add WR-682's plane curve, among others: solidcore's are within 0
-/// and 4.5e-11 of them for the tab's top and the rim), except the tab side's. The rim's is
-/// checked against its volumes forced to accuracy 1e-11 instead: since the trim pieces
-/// integrate by Gauss-Kronrod (#14460) it lies 2.6e-10 below the fork's, as both forced
-/// references do. The fork's tab
+/// and 4.5e-11 of them for the tab's top and the rim), except the tab side's. The fork's tab
 /// side round removes 0.344196265039045 and leaves its End rib's UV curve off its 3D curve
 /// (`check_brep` `Bad Gap`). Here `FlushCurve` keeps the short last span (WR-697 addendum,
 /// end-rib flush merge, solidcore's own), the body is sound and the capped round removes
@@ -214,23 +213,30 @@ fn the_neighbours_keep_their_rounds() {
             0.214_601_836_334_623 + 2.0 * RUN_ON,
             2e-6,
         ),
-        // (the rim: the volume forced to accuracy 1e-11, by Gauss-Kronrod; the earlier
-        // Runge-Kutta trim pieces forced to 1e-12 give 7.958672926567942, the fork
-        // 7.958672926831696, 2.6e-10 above both)
-        ([0.0, -25.0, 2.0], 7.958_672_926_572_945, 1e-10),
+        // the fork's 7.958672926831696 (pinned here, to 1e-10, until #16735) leaks through
+        // the round's tolerant edges as this integrator did; checked below
+        ([0.0, -25.0, 2.0], 7.958_672_912_139_264, 1e-10),
     ] {
         let mut k = kernel();
         let mut b = plate(&mut k);
         let before = fine_volume(&k, &mut b);
+        let mut part = b.clone_standing_for_self().unwrap();
         let e = pick(&k, &b, at);
         fillet_edges(&mut k, &mut b, &[e], RADIUS, 1, 1, 1.0).unwrap();
         b.refresh_cached_topology();
         let check = check_brep(&mut k, &mut b, CheckLevel::Level2).unwrap();
         assert!(check.is_valid(), "{at:?}: {:?}", check.lines());
-        let removed = before - fine_volume(&k, &mut b);
+        let after = fine_volume(&k, &mut b);
+        let removed = before - after;
         assert!(
             (removed - removed_by_fork).abs() <= tol,
             "{at:?}: {removed}"
         );
+        if at[1] == -25.0 {
+            let was = 7.958_672_926_831_696;
+            volume_leak::assert_difference_moved_by_the_old_leak(
+                &k, &mut part, &mut b, was, removed, 1e-10,
+            );
+        }
     }
 }

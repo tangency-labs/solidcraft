@@ -179,7 +179,6 @@ fn round() -> (f64, Result<(bool, f64), i32>) {
     k.fixes.found_torus_sphere_keep_tested_nurb = true;
     k.fixes.good_drop_result_distances_in_order = true;
     k.fixes.imprint_extends_edge_to_proto_vertex = true;
-    k.fixes.imprint_reuses_coincident_face_edge = true;
     k.fixes.join_touching_loops = true;
     k.fixes.keep_operand_uv_trims = true;
     k.fixes.linear_sweep_arc_is_cylinder = true;
@@ -200,8 +199,6 @@ fn round() -> (f64, Result<(bool, f64), i32>) {
     k.fixes.shell_edges_on_analytics_exact = true;
     k.fixes.simple_coincidence_crossing_is_point = true;
     k.fixes.ssi_low_angle_start_on_probation = true;
-    k.fixes.ssi_pole_point_keeps_its_tangent = true;
-    k.fixes.ssi_tangent_contact_points = true;
     k.fixes.ssi_tangent_curve_tracer = true;
     k.fixes.ssi_trace_tangent_curves_once = true;
     k.fixes.transform_model_size_from_body_box = true;

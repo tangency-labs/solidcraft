@@ -21,6 +21,8 @@
     clippy::indexing_slicing
 )]
 
+#[path = "support/volume_leak.rs"]
+mod volume_leak;
 use solidcore::blend::fillet_executive::session::FilletSession;
 use solidcore::blend::fillet_executive::NoRoomReason;
 use solidcore::blend::fillet_standard_solver::p1::FilletLaw;
@@ -219,7 +221,16 @@ fn a_progressive_spline_round_builds() {
 /// x = 0, z = 30: the rail on the 10 wide top runs past its far edge, a cliff overflow
 /// (WR-631) whose round must hold its law
 /// (`sm_HoldsItsLaw`).
-fn cliff_round(mut k: Kernel, r0: f64, r1: f64) -> Result<f64, (String, Option<NoRoomReason>)> {
+fn cliff_round(k: Kernel, r0: f64, r1: f64) -> Result<f64, (String, Option<NoRoomReason>)> {
+    cliff_rounded(k, r0, r1).map(|(k, mut b)| volume(&k, &mut b))
+}
+
+/// [`cliff_round`]'s kernel and body.
+fn cliff_rounded(
+    mut k: Kernel,
+    r0: f64,
+    r1: f64,
+) -> Result<(Kernel, Brep), (String, Option<NoRoomReason>)> {
     let mut b = create_box(&mut k, Vec3::ZERO, 10.0, 20.0, 30.0).unwrap();
     let (e, reversed) = edge_between(
         &k,
@@ -238,30 +249,28 @@ fn cliff_round(mut k: Kernel, r0: f64, r1: f64) -> Result<f64, (String, Option<N
             (format!("{err:?}: {}", info.comment), info.no_room_reason())
         })
     };
-    done.map(|()| volume(&k, &mut b))
+    done.map(|()| (k, b))
 }
 
 #[test]
 fn a_cliff_overflows_variable_round_holds_its_law_on_its_touch_circles() {
-    // The fork's 5e8c9c1 build (SmFilletExecutive as SmApiVariableRadiusFillet runs it),
-    // the exact circles, printed 5802.4435349841779, 5802.4435208241775, 5503.8871700927575,
-    // 5184.0573578203966 and 4693.6093103438334, as solidcore measured them with Runge-Kutta
-    // trim pieces at accuracy 1e-8 (to 6e-14). The bodies' volumes are below these by 1.5e-10
-    // to 1.6e-9 of them: by Gauss-Kronrod forced to accuracy 1e-11, the figures here, and by
-    // the earlier Runge-Kutta trim pieces, whose error falls tenfold a decade of accuracy onto
-    // them (within 1.4e-13 at 1e-12). Since the trim pieces integrate by Gauss-Kronrod (#14460)
-    // the volumes are measured within 1e-12 of those.
-    for (r0, r1, want) in [
-        (2.0, 11.0, 5802.443534124264),
-        (11.0, 2.0, 5802.443519965387),
-        (2.0, 20.0, 5503.887168715325),
-        (2.0, 30.0, 5184.057355491021),
-        (2.0, 50.0, 4693.609302907393),
+    // the fork's 5e8c9c1 build (SmFilletExecutive as SmApiVariableRadiusFillet runs it),
+    // the exact circles: here to the last digit printed until `brep_volume` closed tolerant
+    // edges' gaps (#16735). The fork's figures leak through the round's tolerant edges as
+    // this integrator did; each body is now pinned at its closed-gap volume, the fork's
+    // figure checked within the old leak's bound of it.
+    for (r0, r1, fork, want) in [
+        (2.0, 11.0, 5802.4435349841779, 5802.443146052507),
+        (11.0, 2.0, 5802.4435208241775, 5802.4431461379545),
+        (2.0, 20.0, 5503.8871700927575, 5503.887122636036),
+        (2.0, 30.0, 5184.0573578203966, 5184.057276011837),
+        (2.0, 50.0, 4693.6093103438334, 4693.608894404652),
     ] {
-        let v = cliff_round(kernel(true), r0, r1);
-        eprintln!("{r0} -> {r1}: {v:?} want {want}");
-        let v = v.expect("builds");
+        let (k, mut b) = cliff_rounded(kernel(true), r0, r1).expect("builds");
+        let v = volume(&k, &mut b);
+        eprintln!("{r0} -> {r1}: {v:?} fork {fork}");
         assert!(rel(v, want) < 1e-12, "{r0} -> {r1}: {v} vs {want}");
+        volume_leak::assert_moved_by_the_old_leak(&k, &mut b, fork, v, 1e-8);
     }
 }
 
