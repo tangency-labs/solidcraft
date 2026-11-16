@@ -9,9 +9,11 @@ use solidcraft_engine::Session;
 pub fn refresh(session: &mut Session, controller: &mut DrawingStatusController) -> Result<(), String> {
     let generation = controller.invalidate();
     let status = session.execute("drawing.status", &json!({})).map_err(|error| error.to_string())?;
-    if !controller.accept_status(generation, status) {
-        return Err("Drawing status generation changed during refresh".to_owned());
-    }
+    // Refresh is synchronous: no other status request can invalidate this
+    // generation between the engine call and accepting its result.
+    // The controller retains generation checks for callers that may receive
+    // delayed inspection results, but this path needs no unreachable error.
+    controller.accept_status(generation, status);
     let request = controller.pending_inspections();
     for dimension in request.inspect_ids {
         let result = session.execute("drawing.dimension.inspect", &json!({"dimension": dimension})).map_err(|error| error.to_string());
