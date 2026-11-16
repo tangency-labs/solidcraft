@@ -85,6 +85,9 @@ struct State {
     extras: HashMap<String, String>,
     open_blocks: HashSet<String>,
     seen_blocks: HashSet<String>,
+    /// The uis a control lives in, innermost first, when the last control this pass gated was
+    /// hidden. A control drawn since clears it.
+    hidden_in: Option<Vec<Id>>,
 }
 
 /// Held until the preferences body finishes. A dropdown value learned while a row was hidden
@@ -132,6 +135,7 @@ pub fn begin(ui: &Ui, filter: &str, prefix: &str) -> SearchFrame {
         state.nav.clear();
         state.dirty = false;
         state.child_matched = false;
+        state.hidden_in = None;
     });
     SearchFrame { ctx: ui.ctx().clone() }
 }
@@ -277,6 +281,7 @@ pub fn begin_page(ui: &Ui, index: usize, label: &str) {
         state.section_matches = false;
         state.section_shown.clear();
         state.heading_open = false;
+        state.hidden_in = None;
     });
 }
 
@@ -290,6 +295,7 @@ pub fn begin_section(ui: &Ui, title: &str) {
         // A dropdown with no row of its own must not store its value under the last row's key.
         state.key.clear();
         state.heading_open = false;
+        state.hidden_in = None;
     });
 }
 
@@ -410,14 +416,35 @@ pub fn note_unlabelled(ui: &Ui, texts: &[&str]) {
 /// off-screen when it needs the widget's current value.
 pub fn visible(ui: &mut Ui, texts: &[&str]) -> bool {
     let show = wanted(ui, texts);
+    let hiding = with(ui, |state| state.hiding > 0).unwrap_or(false);
     if show && querying(ui) {
-        if with(ui, |state| state.hiding > 0).unwrap_or(false) {
+        if hiding {
             with(ui, |state| state.child_matched = true);
         } else {
             reveal(ui);
+            with(ui, |state| state.hidden_in = None);
         }
+    } else if !show && !hiding {
+        let chain: Vec<Id> = ui.stack().iter().map(|node| node.unique_id).collect();
+        with(ui, |state| state.hidden_in = Some(chain));
     }
     show
+}
+
+/// Whether the last control the search gated was hidden and lives in `ui` or a ui inside it, so
+/// a help icon drawn in `ui` after it is hidden too. A control shown since clears this, so an
+/// icon after a shown control stays. The control may sit in a child layout of the row the icon
+/// is drawn in.
+pub fn follows_hidden(ui: &Ui) -> bool {
+    let me = ui.unique_id();
+    with(ui, |state| state.hidden_in.as_ref().is_some_and(|chain| chain.contains(&me))).unwrap_or(false)
+}
+
+/// The rectangle a search outline draws around a setting: the setting's own, with room on every
+/// side so the outline does not touch the checkbox or the end of the label (#16115).
+fn outline(rect: Rect) -> Rect {
+    let t = Tokens::get();
+    rect.expand2(vec2(t.space_4, t.space_2))
 }
 
 fn wanted(ui: &Ui, texts: &[&str]) -> bool {
@@ -817,7 +844,7 @@ pub fn remember_matched(ui: &mut Ui, label: &str, hint: Option<&str>, rect: Rect
     .flatten();
     let Some(prefix) = selected else { return };
     let t = Tokens::get();
-    ui.painter().rect_stroke(rect, t.radius_sm, egui::Stroke::new(t.space_2, t.form_primary), egui::StrokeKind::Outside);
+    ui.painter().rect_stroke(outline(rect), t.radius_sm, egui::Stroke::new(t.space_2, t.form_primary), egui::StrokeKind::Outside);
     // Only when Up/Down moved the cursor: following it every frame pins the list to the match.
     if scroll {
         ui.scroll_to_rect(rect, Some(egui::Align::Center));
@@ -858,7 +885,7 @@ pub fn follow(ui: &Ui, label: &str, rect: Rect) {
     }
     ui.scroll_to_rect(rect, Some(egui::Align::Center));
     let t = Tokens::get();
-    ui.painter().rect_stroke(rect, t.radius_sm, egui::Stroke::new(t.space_2, t.form_primary), egui::StrokeKind::Outside);
+    ui.painter().rect_stroke(outline(rect), t.radius_sm, egui::Stroke::new(t.space_2, t.form_primary), egui::StrokeKind::Outside);
     solidcraft_ui_registry::publish_handle(&format!("{}:revealed", reveal.prefix), rect.center());
 }
 
@@ -939,6 +966,56 @@ mod tests {
                 assert_eq!(solidcraft_ui_registry::handle_at("prefs:revealed"), Some(response.rect.center()));
             });
         }
+    }
+
+    /// A help icon belongs to the control before it: when the search hides the setting, its icon
+    /// goes too, and with no search both stay (#16115). The checkbox is drawn straight in the row
+    /// (layout 0) or inside a child layout of the row, as the General page does (layout 1), and
+    /// the matching row comes first or last, so an icon after a shown control stays.
+    #[test]
+    fn a_help_icon_goes_with_the_setting_the_search_hides() {
+        for layout in 0..2 {
+            for order in [["Quality", "Performance"], ["Performance", "Quality"]] {
+                for filter in ["Quality", ""] {
+                    let ctx = crate::test_support::context();
+                    let mut icons = Vec::new();
+                    for _ in 0..3 {
+                        icons.clear();
+                        crate::test_support::raw_frame(&ctx, Default::default(), |ui| {
+                            let _search = begin(ui, filter, "prefs");
+                            begin_page(ui, PAGE_LAYOUT, "Layout");
+                            for label in order {
+                                ui.horizontal(|ui| {
+                                    let mut on = false;
+                                    if layout == 0 {
+                                        crate::checkbox(ui, label, &mut on);
+                                    } else {
+                                        let size = vec2(200.0, 20.0);
+                                        ui.allocate_ui_with_layout(size, egui::Layout::left_to_right(egui::Align::Center), |ui| {
+                                            crate::checkbox(ui, label, &mut on);
+                                        });
+                                    }
+                                    icons.push(crate::help_icon(ui, "Help").rect);
+                                });
+                            }
+                            store_nav(ui);
+                        });
+                    }
+                    let shown: Vec<bool> = order.iter().map(|label| filter.is_empty() || *label == "Quality").collect();
+                    let drawn: Vec<bool> = icons.iter().map(|rect| rect.is_positive()).collect();
+                    assert_eq!(drawn, shown, "layout {layout}, order {order:?}, filter {filter:?}");
+                }
+            }
+        }
+    }
+
+    /// The outline around a result leaves room on every side of the setting (#16115).
+    #[test]
+    fn a_result_outline_leaves_room_around_the_whole_setting() {
+        let rect = Rect::from_min_size(egui::pos2(10.0, 10.0), vec2(100.0, 20.0));
+        let around = outline(rect);
+        assert!(around.left() < rect.left() && around.right() > rect.right(), "{around:?} around {rect:?}");
+        assert!(around.top() < rect.top() && around.bottom() > rect.bottom(), "{around:?} around {rect:?}");
     }
 
     #[test]
