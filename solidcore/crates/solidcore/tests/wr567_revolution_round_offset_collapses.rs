@@ -37,7 +37,7 @@ use solidcore::primitive::api_primitives::create_cylinder;
 use solidcore::surface::surf_of_revolution::SurfOfRevolution;
 use solidcore::surface::surface::{Surface, SurfaceKind};
 use solidcore::topology::brep::validation::{check_brep, CheckLevel};
-use solidcore::{Brep, Kernel};
+use solidcore::{Brep, Kernel, SolidError};
 
 const RD: f64 = 15.0;
 const H: f64 = 5.0;
@@ -121,6 +121,12 @@ fn wr567_round_thinner_than_the_wall_collapses() {
 /// Arc 5 lies between the arc test's samples at `1/8` and `1/4`, and the circle's three
 /// nominating points (`0`, `0.45`, `0.9`) lie on other arcs.
 fn round_generatrix(bulge: f64) -> Curve {
+    round_generatrix_at(&[5], bulge)
+}
+
+/// [`round_generatrix`] with the middle control points of the arcs `arcs` moved out by
+/// `bulge` (in by a negative one).
+fn round_generatrix_at(arcs: &[usize], bulge: f64) -> Curve {
     const N: usize = 32;
     let half = PI / 2.0 / N as f64 / 2.0;
     let on = |a: f64, s: f64| Point3::new(10.0 + R * s * a.cos(), 0.0, R * s * a.sin());
@@ -128,7 +134,7 @@ fn round_generatrix(bulge: f64) -> Curve {
     let mut weights = vec![1.0];
     for j in 0..N {
         let a = (2 * j + 1) as f64 * half;
-        let out = if j == 5 { 1.0 + bulge } else { 1.0 };
+        let out = if arcs.contains(&j) { 1.0 + bulge } else { 1.0 };
         control.push(on(a, out / half.cos()));
         weights.push(half.cos());
         control.push(on(a + half, 1.0));
@@ -156,10 +162,15 @@ fn round_generatrix(bulge: f64) -> Curve {
 
 /// The round's surface: the generatrix turned about the Z axis.
 fn round_surface(k: &Kernel, bulge: f64) -> Surface {
+    revolved(k, round_generatrix(bulge))
+}
+
+/// `gen` turned about the Z axis.
+fn revolved(k: &Kernel, gen: Curve) -> Surface {
     Surface::from(
         SurfOfRevolution::create_canonical(
             k,
-            round_generatrix(bulge),
+            gen,
             Point3::new(0.0, 0.0, 0.0),
             Vec3::new(0.0, 0.0, 1.0),
             false,
@@ -257,6 +268,85 @@ fn wr567_a_generatrix_bulging_between_the_samples_is_no_arc() {
         assert!(
             !matches!(s.create_offset_surface(&k, dd, 1e-7), Ok(None)),
             "{dd}"
+        );
+    }
+}
+
+/// The side `d` of the exact round that collapses at twice its radius: `R` or `-R`.
+fn collapsing_side(k: &Kernel) -> f64 {
+    if round_surface(k, 0.0)
+        .offset_collapses(k, 2.0 * R, 1e-7)
+        .unwrap()
+    {
+        R
+    } else {
+        -R
+    }
+}
+
+/// solidcraft#17907's review: arcs 15 and 16 (the two either side of the middle of the
+/// generatrix, where the side is read) bulged by 5e-8 of the radius stay within 1e-7 of the
+/// circle, so the generatrix is proved on it, but their curvature there is off by about
+/// 1e-4 of the circle's. An offset of `r (1 -+ 4e-5)` towards the centre leaves the circle a
+/// radius of `+-6e-5`, far from the tolerance: the curvature read at one point decided it
+/// the other way (a face dropped, or a real collapse missed). The answer now follows the
+/// circle, or is refused where the curvature read there disagrees; never the other way.
+#[test]
+fn wr567_a_near_arc_at_its_radius_follows_the_circle() {
+    let k = Kernel::default();
+    let side = collapsing_side(&k);
+    for bulge in [5e-8, -5e-8] {
+        let s = revolved(&k, round_generatrix_at(&[15, 16], bulge));
+        for (scale, collapses) in [(1.0 - 4e-5, false), (1.0 + 4e-5, true)] {
+            let d = side * scale;
+            match s.offset_collapses(&k, d, 1e-7) {
+                Ok(c) => assert_eq!(c, collapses, "bulge {bulge}, d {d}"),
+                Err(e) => assert!(
+                    matches!(e, SolidError::Unsupported { .. }),
+                    "bulge {bulge}, d {d}: {e:?}"
+                ),
+            }
+            if !collapses {
+                assert!(
+                    !matches!(s.create_offset_surface(&k, d, 1e-7), Ok(None)),
+                    "bulge {bulge}, d {d}"
+                );
+            }
+        }
+    }
+}
+
+/// A generatrix whose bulge comes exactly to the tolerance (its peak deviation from the
+/// circle its samples nominate) is neither proved on the circle nor off it: the collapse
+/// test and the offset are refused with `Unsupported`, the face is never dropped.
+#[test]
+fn wr567_a_generatrix_at_the_tolerance_edge_is_refused() {
+    let k = Kernel::default();
+    let s = round_surface(&k, 1e-6);
+    let SurfaceKind::SurfOfRevolution(rev) = s.kind() else {
+        panic!("a surface of revolution");
+    };
+    let gen = rev.gen_curve().unwrap();
+    let (frame, radius, _, _) = gen.is_arc(&k, 9, 1e-7).unwrap().unwrap();
+    // the peak, at the bulged arc's middle by symmetry
+    let p = gen.evaluate_point(&k, 5.5 / 32.0).unwrap();
+    let tol = (frame.origin().distance(p) - radius).abs();
+    assert!(tol > 1e-7 && tol < 1e-5, "{tol}");
+    for d in [2.0 * R, -2.0 * R] {
+        assert!(
+            matches!(
+                s.offset_collapses(&k, d, tol),
+                Err(SolidError::Unsupported { .. })
+            ),
+            "{d}: {:?}",
+            s.offset_collapses(&k, d, tol)
+        );
+        assert!(
+            matches!(
+                s.create_offset_surface(&k, d, tol),
+                Err(SolidError::Unsupported { .. })
+            ),
+            "{d}"
         );
     }
 }
