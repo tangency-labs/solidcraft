@@ -189,12 +189,14 @@ fn every_way_in_checks_what_an_image_request_must_be() {
     let budget = crate::job::CpuBudget::Compact;
     let limits = budget.limits();
     let refused = |r: &ImageRequest| {
-        let mut ways = vec![
+        let ways = vec![
             admit_geometry(&scene, r, MAX_TRIANGLES).err().map(|e| e.code),
             admit_geometry_with_limits(&scene, r, MAX_TRIANGLES, limits.max_bodies, limits.max_geometry_bytes, budget.image_limits(false))
                 .err()
                 .map(|e| e.code),
         ];
+        #[cfg(feature = "raytrace-cpu")]
+        let mut ways = ways;
         #[cfg(feature = "raytrace-cpu")]
         ways.push(admit_raytrace_source(&scene, r, budget, (r.width, r.height)).err().map(|e| e.code));
         ways
