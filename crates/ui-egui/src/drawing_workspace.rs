@@ -714,6 +714,21 @@ mod tests {
     }
 
     #[test]
+    fn standard_view_layout_starts_a_drawing_with_four_views() {
+        let mut h = Harness::new();
+        h.app.home.open = false;
+        h.app.run("solid.box", serde_json::json!({"length":100,"width":60,"height":12})).unwrap();
+        enter(&mut h.app, true).unwrap();
+        h.frames(4);
+        h.step(&serde_json::json!({"click":{"handle":"drawing:first:standard"}})).unwrap();
+        h.frames(4);
+        let drawing = h.app.session.drawing("drawing.inspect").unwrap();
+        assert_eq!(drawing.sheets.len(), 1);
+        assert_eq!(drawing.views.len(), 4);
+        assert_eq!(active_sheet(&h.app), Some(drawing.sheets[0].id));
+    }
+
+    #[test]
     fn sheets_panel_lists_sheets_of_the_open_drawing() {
         let mut h = Harness::new();
         h.app.home.open = false;

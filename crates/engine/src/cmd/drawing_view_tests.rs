@@ -202,6 +202,56 @@ fn an_edit_is_one_undo_step_and_names_its_followers() {
     assert_eq!(s.evaluations, evaluations, "no model is evaluated");
 }
 
+/// An edit that moves a view or changes its size lists it, and the views lined up with it, when
+/// they now leave the sheet's drawing space, as the commands that place a view do; none is moved
+/// back in. An edit that changes no size or place lists nothing.
+/// Standard views: the main view, its top view above and its right view to the right of it in third
+/// angle (below and to the left in first), lined up with it, and an isometric view in the corner
+/// between, at the largest preset at which all of them fit, a gap apart; one undo step. A scale too
+/// large lists the views that leave the sheet; a bad gap is refused.
+#[test]
+fn standard_views_are_laid_out_together_in_the_drawings_projection() {
+    let mut s = block();
+    run(&mut s, "drawing.create", json!({}));
+    let steps = s.undo.len();
+    let reply = run(&mut s, STANDARD, json!({"sheet": "Sheet 1"}));
+    let schema = output_schema_for::<StandardResult>();
+    assert!(conforms(schema.as_value(), schema.as_value(), &reply), "{reply}");
+    assert_eq!(s.undo.len(), steps + 1, "one undo step");
+    assert_eq!(reply["scale"]["fitted"], true);
+    assert!(reply.get("outside").is_none(), "{reply}");
+    let view = |s: &mut Session, key: &str| inspect_view(s, ids::decode(reply[key].as_str().unwrap()).unwrap());
+    let (main, top, right, iso) = (view(&mut s, "view"), view(&mut s, "top"), view(&mut s, "right"), view(&mut s, "iso"));
+    let min = |v: &Value| point(&v["boundary_mm"]["min"]);
+    let max = |v: &Value| point(&v["boundary_mm"]["max"]);
+    assert!((min(&top).y - max(&main).y - 20.0).abs() < 1e-6, "top view 20 mm above: {top}");
+    assert!((min(&right).x - max(&main).x - 20.0).abs() < 1e-6, "right view 20 mm to the right: {right}");
+    assert!((boundary(&top).1.x - boundary(&main).1.x).abs() < 1e-6 && (boundary(&right).1.y - boundary(&main).1.y).abs() < 1e-6, "lined up");
+    assert!(min(&iso).x > max(&main).x && min(&iso).y > max(&main).y, "the iso view in the corner between: {iso}");
+    assert_eq!((top["kind"].clone(), top["side"].clone(), right["side"].clone()), (json!("projected"), json!("above"), json!("right")));
+    assert_eq!(iso["direction"]["named"], "iso_front_right");
+    // The next larger preset doesn't fit: the scale is the largest that does.
+    let at = PRESETS.iter().position(|p| p.to_string() == reply["scale"]["text"].as_str().unwrap()).unwrap();
+    assert!(at > 0, "a 100 mm block fits A3 below 50:1");
+    // First angle: the top view below, the right view to the left, and no iso view when asked.
+    let mut first = block();
+    run(&mut first, "drawing.create", json!({"projection": "first"}));
+    let reply = run(&mut first, STANDARD, json!({"sheet": "Sheet 1", "iso": false, "gap_mm": 10}));
+    assert!(reply.get("iso").is_none(), "{reply}");
+    let view = |s: &mut Session, key: &str| inspect_view(s, ids::decode(reply[key].as_str().unwrap()).unwrap());
+    let (main, top, right) = (view(&mut first, "view"), view(&mut first, "top"), view(&mut first, "right"));
+    assert!((min(&main).y - max(&top).y - 10.0).abs() < 1e-6, "top view 10 mm below: {top}");
+    assert!((min(&main).x - max(&right).x - 10.0).abs() < 1e-6, "right view 10 mm to the left: {right}");
+    // A scale too large leaves the sheet, and says so; a gap out of range is refused.
+    let huge = run(&mut first, STANDARD, json!({"sheet": "Sheet 1", "scale": "10:1"}));
+    assert_eq!(huge["scale"]["fitted"], false);
+    assert!(!huge["outside"].as_array().unwrap().is_empty(), "{huge}");
+    for gap in [-1.0, 1000.5, 1e308] {
+        let e = first.execute(STANDARD, &json!({"sheet": "Sheet 1", "gap_mm": gap})).unwrap_err().to_string();
+        assert!(e.contains("gap_mm"), "{gap}: {e}");
+    }
+}
+
 /// A second sheet in the drawing, A3 landscape as the first: its id.
 fn second_sheet(s: &mut Session) -> u64 {
     let added = run(s, "drawing.sheet.add", json!({}));

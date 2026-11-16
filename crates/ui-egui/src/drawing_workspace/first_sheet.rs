@@ -84,9 +84,12 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui, bounds: Rect) {
                     ui.vertical_centered(|ui| ui.label(RichText::new(defaults).size(t.font_caption).color(t.form_dim)));
                 }
                 match chosen {
+                    Some(Choice::Standard) => {
+                        create(app, json!({"standard_views": true}));
+                    }
                     Some(Choice::Blank) => app.drawing_workspace.first_sheet = Some(blank),
                     Some(Choice::Template) => choose_template(app),
-                    _ => {}
+                    None => {}
                 }
             });
         });
@@ -96,7 +99,7 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui, bounds: Rect) {
 fn card(ui: &mut egui::Ui, choice: Choice, enabled: bool, picker: bool) -> Option<Choice> {
     let t = Tokens::get();
     let (title, description, action, enabled, target) = match choice {
-        Choice::Standard => ("ui.drawing_first.standard", "ui.drawing_first.standard_description", "ui.drawing_first.make", false, "standard"),
+        Choice::Standard => ("ui.drawing_first.standard", "ui.drawing_first.standard_description", "ui.drawing_first.make", enabled, "standard"),
         Choice::Blank => ("ui.drawing_first.blank", "ui.drawing_first.blank_description", "ui.drawing_first.choose_sheet", enabled, "blank"),
         Choice::Template => {
             ("ui.drawing_first.template", "ui.drawing_first.template_description", "ui.drawing_first.choose_template", enabled && picker, "template")
@@ -113,7 +116,7 @@ fn card(ui: &mut egui::Ui, choice: Choice, enabled: bool, picker: bool) -> Optio
             ui.label(RichText::new(tr(description)).size(t.font_label).color(t.form_dim));
             ui.add_space(t.space_8);
             let id = format!("drawing:first:{target}");
-            let button = ui_kit::wide_form_button(ui, tr(action), matches!(choice, Choice::Blank), enabled);
+            let button = ui_kit::wide_form_button(ui, tr(action), matches!(choice, Choice::Standard), enabled);
             crate::scenario::publish_target(&id, button.rect);
             button.backing_on_disabled_hover_text(tr("ui.drawing_first.unavailable")).clicked().then_some(choice)
         })

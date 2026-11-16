@@ -79,6 +79,18 @@ fn a_drawing_starts_from_a_template() {
 }
 
 #[test]
+fn a_drawing_with_standard_views_is_one_model_undo_step() {
+    let mut s = design();
+    let undo_steps = s.undo.len();
+    let made = run(&mut s, "drawing.create", json!({"standard_views": true}));
+    assert_eq!(made["sheets"][0]["views"].as_array().unwrap().len(), 4);
+    assert_eq!(s.undo.len(), undo_steps + 1);
+    run(&mut s, "drawing.close", json!({}));
+    run(&mut s, "edit.undo", json!({}));
+    assert!(s.doc.drawings.is_empty());
+}
+
+#[test]
 fn first_sheet_overrides_apply_in_one_undo_step() {
     let mut s = design();
     let undo_steps = s.undo.len();
