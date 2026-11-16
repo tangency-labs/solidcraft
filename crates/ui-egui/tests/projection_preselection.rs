@@ -216,7 +216,8 @@ fn clicking_a_hole_opening_projects_its_rim_and_a_miss_is_an_error() {
     let si = h.app.run("sketch.inspect", json!({})).unwrap();
     let arcs: Vec<_> =
         si["curves"].as_array().unwrap().iter().filter(|c| c.get("link").is_some() && (c["type"] == "arc" || c["type"] == "circle")).collect();
-    assert!(arcs.len() >= 2, "{si}");
+    // The rim is one closed circular edge: one circle.
+    assert_eq!(arcs.len(), 1, "{si}");
     for c in &arcs {
         let r = c["radius"].as_f64().unwrap();
         assert!((r - 5.0).abs() < 1e-3, "{c}");

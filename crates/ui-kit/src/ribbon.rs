@@ -1116,6 +1116,8 @@ pub fn tabs(ui: &mut egui::Ui, row_data: &Tabs, row: Rect) -> TabsOut {
     let span = Rect::from_min_max(row.left_top() + vec2(inset, 0.0), pos2(end.max(row.left() + inset), row.bottom()));
     ui.scope_builder(egui::UiBuilder::new().max_rect(span), |ui| {
         ui.set_clip_rect(span);
+        // A plain mouse wheel scrolls the tabs sideways, as it does the History bar's strip (#3356).
+        ui.style_mut().always_scroll_the_only_direction = true;
         egui::ScrollArea::horizontal()
             .id_salt("ribbon_tabs")
             .animated(false)

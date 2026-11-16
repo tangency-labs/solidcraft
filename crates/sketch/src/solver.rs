@@ -102,6 +102,11 @@ pub struct SolveReport {
     /// the solve fails without a conflicting constraint to name (#5280).
     #[serde(default)]
     pub oversized: Option<usize>,
+    /// The solve of the 3D constraints among drawn 3D curves (#10608), for a sketch that has
+    /// drawn 3D curves. Its freedoms are not in `dof` nor its failures in `status`: those are
+    /// the planar sketch's, which planar edits measure themselves by.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub wires: Option<crate::WireReport>,
 }
 
 impl SolveReport {
@@ -110,6 +115,18 @@ impl SolveReport {
     }
     pub fn fully_constrained(&self) -> bool {
         self.dof == 0
+    }
+    /// The freedoms left to show: the planar sketch's and its 3D curves'.
+    pub fn shown_dof(&self) -> usize {
+        self.dof.saturating_add(self.wires.as_ref().map_or(0, |w| w.dof))
+    }
+    /// The 3D constraints hold (or there are none).
+    pub fn wires_ok(&self) -> bool {
+        self.wires.as_ref().is_none_or(|w| w.ok)
+    }
+    /// What to show: solved, planar and 3D, and no freedom left in either.
+    pub fn shown_ok(&self) -> bool {
+        self.ok() && self.wires_ok()
     }
     /// Solved, and no orientation of the stored state flipped: what a value edit accepts.
     pub fn keeps_orientation(&self) -> bool {
@@ -1871,17 +1888,58 @@ pub fn solve_after_edit(sk: &mut Sketch, old: &DrivingValues, stored: Option<&[V
 /// geometry restoration are identical at every analysis level.
 pub fn solve_after_edit_with_analysis(sk: &mut Sketch, old: &DrivingValues, stored: Option<&[Vec2]>, analysis: Analysis) -> SolveReport {
     let old_values: Vec<Option<f64>> = sk.constraints.iter().map(|c| old.get(&c.id).copied()).collect();
+    let drawn: Vec<Vec2> = stored.map_or_else(|| sk.points.iter().map(|p| p.pos).collect(), <[Vec2]>::to_vec);
     let before = stored.is_none().then(|| sk.clone());
     let report = solve_from(sk, &Hold::default(), stored, analysis, Some(&old_values), &mut Budget::full());
-    if report.keeps_orientation() {
-        return report;
-    }
-    match before.and_then(|before| solve_in_steps(&before, old, analysis)) {
-        Some((stepped, stepped_report)) => {
-            *sk = stepped;
-            stepped_report
+    let report = if report.keeps_orientation() {
+        report
+    } else {
+        match before.and_then(|before| solve_in_steps(&before, old, analysis)) {
+            Some((stepped, stepped_report)) => {
+                *sk = stepped;
+                stepped_report
+            }
+            None => report,
         }
-        None => report,
+    };
+    keep_sides_at_zero(sk, &drawn);
+    report
+}
+
+/// A horizontal or vertical distance at zero has its two points level, so the solved geometry
+/// no longer says which side of `p` the point `q` was on, and a later edit away from zero opens
+/// towards `q` past `p` ([`distance_opening_slope`]): a point drawn on the negative side would
+/// come back mirrored, reported solved (#15766). The distance is unsigned, so where `sk` has
+/// such a distance at zero whose `q` was behind its `p` in `before` (the positions it was
+/// solved from), its points are swapped: the side lives on in their order. Call it wherever a
+/// solved state replaces the positions a sketch is stored with.
+pub fn keep_sides_at_zero(sk: &mut Sketch, before: &[Vec2]) {
+    let (points, constraints) = (&sk.points, &mut sk.constraints);
+    let now = |p: usize| points.get(p).map(|x| x.pos);
+    let was = |p: usize| before.get(p).copied();
+    for c in constraints.iter_mut() {
+        let behind = match c.kind {
+            ConstraintKind::DistanceX { p, q, value } if value.abs() <= TOL => {
+                now(p).zip(now(q)).is_some_and(|(a, b)| (b.x - a.x).abs() <= TOL) && was(p).zip(was(q)).is_some_and(|(a, b)| b.x < a.x - TOL)
+            }
+            ConstraintKind::DistanceY { p, q, value } if value.abs() <= TOL => {
+                now(p).zip(now(q)).is_some_and(|(a, b)| (b.y - a.y).abs() <= TOL) && was(p).zip(was(q)).is_some_and(|(a, b)| b.y < a.y - TOL)
+            }
+            _ => false,
+        };
+        if let (true, ConstraintKind::DistanceX { p, q, .. } | ConstraintKind::DistanceY { p, q, .. }) = (behind, &mut c.kind) {
+            std::mem::swap(p, q);
+        }
+    }
+}
+
+/// A horizontal or vertical distance takes the order of its points from `solved`, the same
+/// constraint solved: where [`keep_sides_at_zero`] swapped them, the stored sketch keeps that
+/// order with the solved positions.
+pub fn keep_point_order(stored: &mut ConstraintKind, solved: &ConstraintKind) {
+    use ConstraintKind::{DistanceX, DistanceY};
+    if let (DistanceX { p, q, .. }, DistanceX { p: sp, q: sq, .. }) | (DistanceY { p, q, .. }, DistanceY { p: sp, q: sq, .. }) = (stored, solved) {
+        (*p, *q) = (*sp, *sq);
     }
 }
 
@@ -3464,6 +3522,7 @@ fn solve_inner(
         curve_determined,
         redundant,
         oversized: too_large,
+        wires: None,
     }
 }
 

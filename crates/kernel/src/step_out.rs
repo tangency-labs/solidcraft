@@ -35,6 +35,16 @@ pub struct StepHeader {
     pub description: String,
 }
 
+/// STEP text and the exact written identity of each input body's faces.
+#[derive(Clone, Debug)]
+pub struct StepExport {
+    /// The complete STEP payload.
+    pub text: String,
+    /// `ADVANCED_FACE` ids indexed by input body, then source record face.
+    /// A face used by no shell has id 0.
+    pub face_ids: Vec<Vec<u64>>,
+}
+
 /// The header solidcore-step writes: SolidCraft as the program and system that wrote the file.
 fn product_header(h: &StepHeader) -> product::Header {
     product::Header {
@@ -91,11 +101,18 @@ pub fn step_export_products(products: &[ExportProduct], root: usize, header: &St
 
 /// STEP text for bodies of one part, named after the file.
 pub fn step_export_bodies(bodies: &[ExportBody], header: &StepHeader) -> Result<String> {
+    step_export_bodies_with_face_ids(bodies, header).map(|written| written.text)
+}
+
+/// [`step_export_bodies`] with each source record face's written STEP entity id.
+pub fn step_export_bodies_with_face_ids(bodies: &[ExportBody], header: &StepHeader) -> Result<StepExport> {
     let _span = solidcraft_profile::span("kernel", "step_export_bodies");
     for b in bodies {
         b.body.require_brep("STEP export")?;
     }
-    product::bodies(bodies.iter().map(export_body).collect(), &product_header(header)).map_err(kernel_error)
+    let written = product::bodies_with_face_ids(bodies.iter().map(export_body).collect(), &product_header(header)).map_err(kernel_error)?;
+    let face_ids = written.face_ids.into_iter().next().ok_or_else(|| KernelError::Failed("STEP export omitted its product face map".into()))?;
+    Ok(StepExport { text: written.text, face_ids })
 }
 
 #[cfg(test)]
@@ -104,6 +121,27 @@ mod tests {
     use solidcore_record::Vec3;
     use solidcore_step::p21;
     use solidcraft_geom::prelude::*;
+
+    #[test]
+    fn exported_face_ids_find_the_same_faces_after_import() {
+        let body = crate::box_solid(Vec3::ZERO, Vec3::new(10.0, 20.0, 30.0)).unwrap();
+        let written = crate::step_export_with_face_ids(&[&body], "face correspondence").unwrap();
+        assert_eq!(written.text, crate::step_export(&[&body], "face correspondence").unwrap());
+        let imported = crate::step_import(&written.text).unwrap();
+        assert_eq!(imported.bodies.len(), 1);
+        let read = &imported.bodies[0];
+        let ids = &written.face_ids[0];
+        assert_eq!(ids.len(), 6);
+        for (index, source) in body.face_sources().unwrap().iter().enumerate() {
+            let crate::FaceSource::Box { axis, high, .. } = source.as_ref().unwrap() else { panic!("box face") };
+            let mut center = [5.0, 10.0, 15.0];
+            center[usize::from(*axis)] = if *high { [10.0, 20.0, 30.0][usize::from(*axis)] } else { 0.0 };
+            let center = Vec3::new(center[0], center[1], center[2]);
+            let matches: Vec<_> = read.face_origin.iter().enumerate().filter(|(_, id)| **id == ids[index]).collect();
+            assert_eq!(matches.len(), 1, "one imported face for each box face");
+            assert!(read.body.point_lies_on_face(matches[0].0, center, 1e-8).unwrap().is_some(), "{source:?} at {center:?}");
+        }
+    }
 
     #[test]
     fn islands_are_solids_of_their_own_not_voids() {

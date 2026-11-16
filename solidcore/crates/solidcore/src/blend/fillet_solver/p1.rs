@@ -217,6 +217,17 @@ pub enum FilletSolverType {
     ConstRadiusAssisted = 6,
 }
 
+impl FilletSolverType {
+    /// Whether the solver's ball changes its radius along the round (a radius law, or a
+    /// constant chord between faces whose angle changes), so a circular section is the
+    /// circle along which the balls' envelope touches the ball rather than its great
+    /// circle (the fork's `SmGnSectionFSG::CircleSurface`, WR-685, f2ec002).
+    #[must_use]
+    pub const fn ball_radius_varies(self) -> bool {
+        matches!(self, Self::VariableRadius | Self::ConstDist)
+    }
+}
+
 /// `SmFilletSurfaceGeneratorType`; discriminants are the upstream values.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum FilletSurfaceGeneratorType {
@@ -693,6 +704,11 @@ pub struct FilletSolver {
     /// surface before the trace ([`crate::blend::fillet_tangent_rollover`]); the rails are made
     /// on it.
     pub rolled_faces: [Option<FaceId>; 2],
+    /// Not upstream (solidcore-native, #15767): how a base surface that closes on itself bounds
+    /// the plane solves ([`SeamDomain`]): wrapped across its seam while the ball's section
+    /// (`ball_section_at`) is solved, extended past it (as upstream) for every other solve, the
+    /// trace's included.
+    pub seam_domain: SeamDomain,
 }
 
 impl FilletSolver {
@@ -739,6 +755,7 @@ impl FilletSolver {
             g1_knots: Vec::new(),
             detached: Vec::new(),
             rolled_faces: [None, None],
+            seam_domain: SeamDomain::Extended,
             chamfer: None,
             law_corner_pieces: Vec::new(),
         }
@@ -1921,6 +1938,83 @@ impl FilletSolver {
         }
         Ok(())
     }
+}
+
+/// Not upstream (solidcore-native, #15767): how a base surface that closes on itself in a
+/// direction bounds a plane solve ([`FilletSolver::seam_domain`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum SeamDomain {
+    /// Over its natural domain extended past its ends (`SetupOffsetExtension`), as upstream.
+    #[default]
+    Extended,
+    /// Over its natural interval in each direction in which it closes ([`seam_periods`]),
+    /// wrapping across its seam: a root just past the seam is found on the same surface, where
+    /// the extension past the seam is no longer the closed surface.
+    Wrapped,
+}
+
+/// Not upstream (solidcore-native, #15767): each parameter direction, `(u, v)`, in which
+/// `surface` closes on itself over its natural domain, with its natural interval there: the
+/// directions `IsPeriodic` finds periodic, the test [`FilletSolver::setup_offset_extension`]
+/// extends a periodic direction by. `None` in a direction that does not close, and where the
+/// test fails (the solve is then bounded there as before). Wrapping a direction only widens
+/// where a solve looks for its root: the root it returns is a point of the surface wherever it
+/// is found, and is judged as such by its caller.
+///
+/// # Errors
+///
+/// [`SolidError::Unported`], a cancellation and a not-certified result from the evaluations.
+pub(crate) fn seam_periods(k: &Kernel, surface: &Surface) -> Result<[Option<Extent1d>; 2]> {
+    let natural = surface.natural_uv_domain_with_nurb(k)?;
+    let mut out = [None, None];
+    for (slot, (dir, interval)) in out.iter_mut().zip([
+        (SurfParamType::U, natural.u_interval()),
+        (SurfParamType::V, natural.v_interval()),
+    ]) {
+        let periodic = match surface.is_periodic(k, &natural, dir) {
+            Ok(periodic) => periodic,
+            Err(e)
+                if matches!(
+                    e,
+                    SolidError::Unported { .. } | SolidError::Cancelled { .. }
+                ) || e.is_not_certified() =>
+            {
+                return Err(e);
+            }
+            Err(_) => false,
+        };
+        if periodic && interval.max() > interval.min() {
+            *slot = Some(interval);
+        }
+    }
+    Ok(out)
+}
+
+/// Not upstream (solidcore-native, #15767): the solve parameters `index` and `index + 1`,
+/// `surface`'s `u` and `v`, over its natural interval and wrapping there, in each direction in
+/// which it closes on itself ([`seam_periods`]); the others as they were. A parameter the solve
+/// does not have is left alone.
+///
+/// # Errors
+///
+/// Those of [`seam_periods`].
+pub(crate) fn wrap_closed_directions(
+    k: &Kernel,
+    surface: &Surface,
+    intervals: &mut ExtentNd,
+    periodicities: &mut [bool],
+    index: usize,
+) -> Result<()> {
+    for (i, period) in (index..).zip(seam_periods(k, surface)?) {
+        let Some(interval) = period else {
+            continue;
+        };
+        if let (Some(slot), Some(periodic)) = (intervals.get_mut(i), periodicities.get_mut(i)) {
+            *slot = interval;
+            *periodic = true;
+        }
+    }
+    Ok(())
 }
 
 /// An `SmBoolean` query whose failed evaluation upstream returns the status, read as
@@ -3518,7 +3612,6 @@ pub fn trim_rail(k: &Kernel, b: &mut Brep, rail: EdgeId, trim_interval: &Extent1
     tk.rng = k.rng.clone();
     tk.cancel.clone_from(&k.cancel);
     tk.fixes.bspline_trim_preserves_uv_spans = k.fixes.bspline_trim_preserves_uv_spans;
-    tk.fixes.bspline_trim_keeps_rational_end_spans = k.fixes.bspline_trim_keeps_rational_end_spans;
     b.edge_mut(rail)?
         .curve
         .as_mut()
@@ -3544,6 +3637,26 @@ pub use rails::{compute_support_edge, split_rail, RailOwnership, RetainedRailOwn
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The solvers whose ball changes its radius along the round, so that
+    /// `skins_varying_balls` holds their exact-circle skin to its balls (#15256): a
+    /// variable radius and a constant distance (its radius follows the faces' angle),
+    /// not a constant radius or the constant-radius-assisted solver.
+    #[test]
+    fn variable_radius_and_constant_distance_balls_vary() {
+        use FilletSolverType as T;
+        assert!(T::VariableRadius.ball_radius_varies());
+        assert!(T::ConstDist.ball_radius_varies());
+        for t in [
+            T::Unknown,
+            T::SurfSurf,
+            T::ConstRadius,
+            T::CurveBased,
+            T::ConstRadiusAssisted,
+        ] {
+            assert!(!t.ball_radius_varies(), "{t:?}");
+        }
+    }
 
     /// A G^n section certificate that spent its work budget is not flattened to `SM_ERR`
     /// ([`as_sm_err`]) nor read as `TRUE` ([`bool_status`], [`singularity_status`]).
