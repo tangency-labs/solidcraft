@@ -162,6 +162,8 @@ pub enum ObjectKind {
     Balloon,
     /// A sheet-owned sketch's printable curves.
     Sketch,
+    /// A drawing-owned sketch fill, solid or expanded hatch marks.
+    Fill,
 }
 
 impl ObjectKind {
@@ -181,6 +183,7 @@ impl ObjectKind {
             ObjectKind::ViewLabel => "VIEW_LABEL",
             ObjectKind::Balloon => "BALLOON",
             ObjectKind::Sketch => "SKETCH",
+            ObjectKind::Fill => "FILL",
         }
     }
 
@@ -200,6 +203,7 @@ impl ObjectKind {
                 DrawnFor::Sheet => 5,
             },
             ObjectKind::PartsList | ObjectKind::RevisionTable => 4,
+            ObjectKind::Fill => 4,
             ObjectKind::Sketch => 5,
             ObjectKind::TitleBlock => 6,
         }

@@ -258,16 +258,20 @@ fn reply(cmd: &str, r: impl serde::Serialize) -> Result<Value> {
 }
 
 fn undo(s: &mut Session, _p: &Value) -> Result<Value> {
-    let prev = latest(&mut s.undo, s.open_drawing).ok_or_else(|| nothing(s, "undo"))?;
-    let now = go_to(s, prev);
+    let at = latest(&s.undo, s.open_drawing).ok_or_else(|| nothing(s, "undo"))?;
+    let prev = s.undo.get(at).cloned().ok_or_else(|| nothing(s, "undo"))?;
+    let now = go_to(s, prev, "edit.undo")?;
+    s.undo.remove(at);
     let label = now.label.clone();
     s.redo.push(now);
     reply("edit.undo", crate::schema::edit::UndoResult { undone: label, param_warnings: Vec::new() })
 }
 
 fn redo(s: &mut Session, _p: &Value) -> Result<Value> {
-    let next = latest(&mut s.redo, s.open_drawing).ok_or_else(|| nothing(s, "redo"))?;
-    let now = go_to(s, next);
+    let at = latest(&s.redo, s.open_drawing).ok_or_else(|| nothing(s, "redo"))?;
+    let next = s.redo.get(at).cloned().ok_or_else(|| nothing(s, "redo"))?;
+    let now = go_to(s, next, "edit.redo")?;
+    s.redo.remove(at);
     let label = now.label.clone();
     s.undo.push(now);
     reply("edit.redo", crate::schema::edit::RedoResult { redone: label, param_warnings: Vec::new() })
@@ -307,9 +311,8 @@ fn repeat(_s: &mut Session, _p: &Value) -> Result<Value> {
 
 /// Takes the latest of `steps` on `part` (the open drawing, else the model): undo and redo go
 /// through one part's steps, and leave the others' where they are.
-fn latest(steps: &mut Vec<Snapshot>, part: Option<u64>) -> Option<Snapshot> {
-    let at = steps.iter().rposition(|step| step.part == part)?;
-    Some(steps.remove(at))
+fn latest(steps: &[Snapshot], part: Option<u64>) -> Option<usize> {
+    steps.iter().rposition(|step| step.part == part)
 }
 
 fn nothing(s: &Session, what: &str) -> EngineError {
@@ -324,12 +327,13 @@ fn nothing(s: &Session, what: &str) -> EngineError {
 /// drawing the design had as it is now: each part's steps are undone in that part only. Neither
 /// opens or closes a drawing: a drawing's steps are taken while it is open, and the model's while
 /// none is.
-fn go_to(s: &mut Session, snap: Snapshot) -> Snapshot {
+fn go_to(s: &mut Session, snap: Snapshot, cmd: &str) -> Result<Snapshot> {
     let was = Snapshot { part: snap.part, ..Snapshot::of(s, &snap.label) };
-    let snap = match snap.part {
+    let mut snap = match snap.part {
         Some(id) => Snapshot { doc: drawing_from(&s.doc, &snap.doc, id), active_sheet_sketch: snap.active_sheet_sketch.clone(), ..was.clone() },
         None => Snapshot { doc: drawings_from(snap.doc, &s.doc), ..snap },
     };
+    snap.doc = Session::refreshed_sheet_fill_history_document(&s.doc, &snap.doc, snap.part, cmd)?;
     let same = Arc::ptr_eq(&s.doc, &snap.doc);
     let moved = s.active_sketch != snap.active_sketch || s.pending_moves != snap.pending_moves;
     // Undoing a hide (or a show) leaves the document alone: the model needs no evaluating.
@@ -347,7 +351,7 @@ fn go_to(s: &mut Session, snap: Snapshot) -> Snapshot {
     } else if same && moved {
         s.refresh();
     }
-    was
+    Ok(was)
 }
 
 /// `doc` with its drawing `id` as `step` has it.

@@ -73,6 +73,7 @@ pub mod coverage;
 pub mod cutting_line;
 pub mod dimension;
 pub mod fields;
+mod fill;
 pub mod fold;
 pub mod image;
 pub mod note;
@@ -83,6 +84,10 @@ pub mod template;
 pub mod thread_lines;
 pub mod view;
 
+pub use fill::{
+    FillPaint, FillRegionStatus, MAX_FILL_REGION_PIECES, MAX_FILLED_SKETCHES, MAX_PATTERN_SNAPSHOTS, MAX_SKETCH_FILLS, PatternSnapshot,
+    ResolvedSketchFill, SheetFillProfile, SheetFillProfiles, SketchFill,
+};
 pub use sketch::{MAX_SHEET_SKETCHES, SheetSketch, SolvedSheetSketch};
 
 use balloon::Balloon;
@@ -197,6 +202,12 @@ pub struct Drawing {
     /// Authored sheet sketches, ordered by id on disk, with their original paper-mm payload.
     #[serde(default, skip_serializing_if = "Vec::is_empty", serialize_with = "sketch::serialize_sorted")]
     pub sketches: Vec<Arc<SheetSketch>>,
+    /// Exact whole-profile fills, with last admitted regions retained on loss.
+    #[serde(default, skip_serializing_if = "Vec::is_empty", serialize_with = "fill::serialize_fills")]
+    pub fills: Vec<Arc<SketchFill>>,
+    /// Imported or original pattern snapshots; names need not be unique.
+    #[serde(default, skip_serializing_if = "Vec::is_empty", serialize_with = "fill::serialize_patterns")]
+    pub patterns: Vec<Arc<PatternSnapshot>>,
     /// Set when a newer SolidCraft saved the file this came from.
     #[serde(skip)]
     pub newer_file: Option<Arc<NewerDrawing>>,
@@ -224,6 +235,8 @@ const RECORD_FIELDS: &[&str] = &[
     "images",
     "sheet_images",
     "sketches",
+    "fills",
+    "patterns",
     "tables",
     "notes",
     "revisions",
@@ -421,6 +434,7 @@ pub struct OnSheet {
     pub notes: Vec<u64>,
     /// Authored sketches whose coordinates are in this sheet's paper frame.
     pub sketches: Vec<u64>,
+    pub fills: Vec<u64>,
 }
 
 impl OnSheet {
@@ -434,6 +448,7 @@ impl OnSheet {
             && self.tables.is_empty()
             && self.notes.is_empty()
             && self.sketches.is_empty()
+            && self.fills.is_empty()
     }
 }
 
@@ -494,6 +509,8 @@ impl Drawing {
             revisions: Arc::default(),
             newer_file: None,
             sketches: Vec::new(),
+            fills: Vec::new(),
+            patterns: Vec::new(),
         };
         drawing.validate()?;
         Ok(drawing)
@@ -524,6 +541,7 @@ impl Drawing {
         DRAWING.check_numbers(&v, "properties")?;
         DRAWING.upgrade(&mut v, version, applied)?;
         sketch::check_raw(&v).map_err(damaged)?;
+        fill::check_raw(&v).map_err(damaged)?;
         let mut d: Drawing = serde_json::from_value(v).map_err(damaged)?;
         d.sources.sort_by_key(|s| s.id);
         let (views, dimensions) = (std::mem::take(&mut d.views), std::mem::take(&mut d.dimensions));
@@ -535,6 +553,8 @@ impl Drawing {
         d.tables.put_in_order();
         d.notes.put_in_order();
         d.sketches.sort_by_key(|record| record.id);
+        d.fills.sort_by_key(|record| record.id);
+        d.patterns.sort_by_key(|record| record.id);
         d.symbols.put_in_order();
         d.validate().map_err(damaged)?;
         d.check_image_files().map_err(damaged)?;
@@ -643,6 +663,8 @@ impl Drawing {
         on.notes = self.notes.iter().filter(|n| n.anchor == Anchor::Sheet(id) || in_views(n)).map(|n| n.id).collect();
         on.sketches = self.sketches.iter().filter(|record| record.sheet == id).map(|record| record.id).collect();
         on.sketches.sort_unstable();
+        on.fills = self.fills.iter().filter(|fill| on.sketches.binary_search(&fill.sketch).is_ok()).map(|fill| fill.id).collect();
+        on.fills.sort_unstable();
         on
     }
 
@@ -652,7 +674,17 @@ impl Drawing {
         let dimensions = self.dimensions.iter().filter(|d| views.binary_search(&d.view).is_ok()).map(|d| d.id).collect();
         let balloons = self.balloons.iter().filter(|b| views.binary_search(&b.view).is_ok()).map(|b| b.id).collect();
         let notes = self.notes.iter().filter(|n| n.anchor.view().is_some_and(|v| views.binary_search(&v).is_ok())).map(|n| n.id).collect();
-        OnSheet { views, dimensions, balloons, images: Vec::new(), tags: Vec::new(), tables: Vec::new(), notes, sketches: Vec::new() }
+        OnSheet {
+            views,
+            dimensions,
+            balloons,
+            images: Vec::new(),
+            tags: Vec::new(),
+            tables: Vec::new(),
+            notes,
+            sketches: Vec::new(),
+            fills: Vec::new(),
+        }
     }
 
     /// Takes sheet `id` out with everything on it ([`Drawing::on_sheet`]), and answers what that
@@ -686,6 +718,7 @@ impl Drawing {
             Arc::make_mut(&mut self.revisions).delete_tags(&objects.tags);
         }
         self.sketches.retain(|s| objects.sketches.binary_search(&s.id).is_err());
+        self.fills.retain(|fill| objects.fills.binary_search(&fill.id).is_err());
     }
 
     /// Read only this drawing's sketch. Identical local sketch ids in another drawing are unrelated.
@@ -714,6 +747,8 @@ impl Drawing {
             .chain(self.symbols.iter().map(|s| s.id))
             .chain(self.revisions.ids())
             .chain(self.sketches.iter().map(|s| s.id))
+            .chain(self.fills.iter().map(|fill| fill.id))
+            .chain(self.patterns.iter().map(|pattern| pattern.id))
     }
 
     /// The record's rules (the module's notes): what reading a drawing checks, and what every edit
@@ -763,7 +798,8 @@ impl Drawing {
         self.check_balloons()?;
         self.check_images()?;
         self.check_notes()?;
-        self.check_symbols()
+        self.check_symbols()?;
+        fill::check_drawing(self)
     }
 
     /// The sources' rules: at most [`MAX_SOURCES`], by id, the design the drawing is in at most once,

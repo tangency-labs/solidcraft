@@ -67,6 +67,7 @@ impl FindingKind {
 pub enum CheckedKind {
     View,
     Sketch,
+    Fill,
     Dimension,
     Balloon,
     Note,

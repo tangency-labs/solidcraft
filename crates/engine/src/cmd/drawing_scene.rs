@@ -207,6 +207,7 @@ fn scene(s: &mut Session, p: &Value) -> Result<Value> {
     let balloons = balloon_results(built.balloons);
     let tables = table_results(built.tables);
     let sketches = built.sketches.into_iter().map(Into::into).collect();
+    let fills = built.fills.into_iter().map(Into::into).collect();
     let reply = SheetSceneResult {
         sheet: ids::encode(sheet),
         scene: SheetPaperScene(built.scene),
@@ -218,6 +219,7 @@ fn scene(s: &mut Session, p: &Value) -> Result<Value> {
         tables,
         out_of_date,
         sketches,
+        fills,
         param_warnings: Vec::new(),
     };
     serde_json::to_value(reply).map_err(|e| EngineError::Other(e.to_string()))

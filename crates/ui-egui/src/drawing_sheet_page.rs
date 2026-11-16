@@ -540,6 +540,7 @@ fn kind_name(kind: ObjectKind) -> &'static str {
     match kind {
         ObjectKind::View => "view",
         ObjectKind::Sketch => "sketch",
+        ObjectKind::Fill => "fill",
         ObjectKind::Dimension => "dimension",
         ObjectKind::Note => "note",
         ObjectKind::ViewLabel => "view_label",

@@ -1,10 +1,10 @@
 use serde_json::json;
-use solidcraft_geom::Vec2Geom;
 use solidcraft_geom::drawing_measure::{LinearDirection, Reading};
 use solidcraft_geom::drawing_sheet::{Margins, Orientation, PaperSize, SheetSize};
 use solidcraft_geom::drawing_view::{NamedView, ProjectedSide};
 use solidcraft_geom::paper::line::LineGroup;
 use solidcraft_geom::title_block::{Cell, CellKind, TextCell};
+use solidcraft_geom::{Region2Geom, Vec2Geom};
 
 use solidcraft_render::VisualStyle;
 
@@ -1596,6 +1596,284 @@ fn staged_sheet_sketch_edit_refuses_an_invalid_original_before_running_the_callb
     );
     assert!(!called, "unsafe original data must be refused before a callback sees it");
     assert_eq!(d, before);
+}
+
+fn w38d_record_fixture(hole: bool) -> (crate::Document, u64, crate::WholeProfileBoundary) {
+    let (mut doc, id) = sheet_edit_design();
+    let mut drawing = (**doc.drawing(id).unwrap()).clone();
+    if hole {
+        Arc::make_mut(&mut drawing.sketches[0]).sketch.add_circle(Vec2::new(35.0, 20.0), 3.0, None, Some("hole")).unwrap();
+    }
+    let boundary = drawing
+        .sheet_fill_profiles(&doc, 41)
+        .unwrap()
+        .profiles
+        .into_iter()
+        .find(|profile| profile.boundary.holes.len() == usize::from(hole))
+        .unwrap()
+        .boundary;
+    let region = drawing.sheet_fill_region(&doc, 41, &boundary).unwrap();
+    drawing.patterns.push(Arc::new(PatternSnapshot { id: 71, pattern: solidcore_record::hatch::Pattern::lines_45() }));
+    drawing.fills.push(Arc::new(SketchFill { id: 70, sketch: 41, boundary: boundary.clone(), paint: FillPaint::Solid, last_region: region }));
+    drawing.validate().unwrap();
+    doc.put_drawing(Arc::new(drawing));
+    (doc, id, boundary)
+}
+
+#[test]
+fn sheet_fill_records_keep_sorted_snapshots_global_ids_and_sheet_ownership() {
+    let (doc, id, _) = w38d_record_fixture(true);
+    let mut drawing = (**doc.drawing(id).unwrap()).clone();
+    let mut second = (*drawing.fills[0]).clone();
+    second.id = 73;
+    second.paint = FillPaint::Hatch { pattern: 71, pen_width_mm: 0.25 };
+    drawing.fills.insert(0, Arc::new(second));
+    drawing.patterns.insert(0, Arc::new(PatternSnapshot { id: 72, pattern: drawing.patterns[0].pattern.clone() }));
+    let value = file(&drawing);
+    assert_eq!(value["fills"][0]["id"], ids::encode(70));
+    assert_eq!(value["patterns"][0]["id"], ids::encode(71));
+    assert_eq!(value["fills"][1]["paint"]["pattern"], ids::encode(71));
+    let reopened = read(&value).unwrap();
+    assert_eq!(reopened.fills.iter().map(|fill| fill.id).collect::<Vec<_>>(), [70, 73]);
+    assert_eq!(reopened.patterns[0].pattern.name, reopened.patterns[1].pattern.name, "duplicate imported names have independent ids");
+    assert!(reopened.object_ids().any(|id| id == 70) && reopened.object_ids().any(|id| id == 72));
+    let mut collision = reopened.clone();
+    Arc::make_mut(&mut collision.patterns[0]).id = 70;
+    assert!(collision.validate().unwrap_err().to_string().contains("two objects have the id"));
+    let sheet = reopened.sketches[0].sheet;
+    let mut removed = reopened.clone();
+    let on = removed.remove_sheet(sheet);
+    assert_eq!(on.fills, [70, 73]);
+    assert!(removed.fills.is_empty() && removed.sketches.is_empty());
+    assert_eq!(removed.patterns, reopened.patterns, "patterns belong to the drawing, not a removed sheet");
+    removed.validate().unwrap();
+    assert_eq!(file(&reopened), value);
+}
+
+#[test]
+fn sheet_fill_deleted_hole_keeps_the_complete_old_region_instead_of_outer_only() {
+    let (doc, id, boundary) = w38d_record_fixture(true);
+    let mut drawing = (**doc.drawing(id).unwrap()).clone();
+    let region = drawing.fills[0].last_region.clone();
+    assert!((region.area() - (800.0 - std::f64::consts::PI * 9.0)).abs() < 1e-7);
+    Arc::make_mut(&mut drawing.sketches[0]).sketch.remove_curves(&[4]);
+    drawing.refresh_fill_regions(&doc, &std::collections::BTreeSet::from([41])).unwrap();
+    let resolved = drawing.resolve_sheet_fill(&doc, 70).unwrap();
+    assert!(matches!(resolved.status, FillRegionStatus::LostBoundary(_)));
+    assert_eq!(resolved.region, region);
+    assert_eq!(drawing.fills[0].last_region, region);
+    let outer_only = crate::WholeProfileBoundary { outer: boundary.outer, holes: vec![] };
+    assert!((drawing.sheet_fill_region(&doc, 41, &outer_only).unwrap().area() - 800.0).abs() < 1e-7);
+    let reopened = Drawing::from_json(&drawing.to_json().unwrap()).unwrap();
+    assert_eq!(reopened.resolve_sheet_fill(&doc, 70).unwrap().region, region);
+    assert!(matches!(reopened.resolve_sheet_fill(&doc, 70).unwrap().status, FillRegionStatus::LostBoundary(_)));
+}
+
+#[test]
+fn sheet_fill_source_refresh_uses_prospective_source_and_preserves_latest_region_on_loss() {
+    let (before, id, _) = w38d_record_fixture(false);
+    let original = before.drawing(id).unwrap();
+    let mut after = before.clone();
+    after.set_param("Width", "60", Some("mm"), None).unwrap();
+    let mut prospective = (**original).clone();
+    prospective.refresh_fill_regions_after_source_change(original, &before, &after).unwrap();
+    assert!((prospective.fills[0].last_region.area() - 1200.0).abs() < 1e-7);
+    assert!(
+        (after.drawing(id).unwrap().fills[0].last_region.area() - 800.0).abs() < 1e-7,
+        "the prospective Drawing must not be looked up through the old published record"
+    );
+    let newest = prospective.fills[0].last_region.clone();
+    Arc::make_mut(&mut prospective.sketches[0]).sketch.remove_curves(&[0]);
+    prospective.refresh_fill_regions(&after, &std::collections::BTreeSet::from([41])).unwrap();
+    let reopened = Drawing::from_json(&prospective.to_json().unwrap()).unwrap();
+    let retained = reopened.resolve_sheet_fill(&after, 70).unwrap();
+    assert!(matches!(retained.status, FillRegionStatus::LostBoundary(_)));
+    assert_eq!(retained.region, newest);
+    assert_eq!(retained.region, reopened.fills[0].last_region);
+}
+
+#[test]
+fn sheet_fill_source_failure_is_an_error_while_storage_keeps_the_retention_snapshot() {
+    let (mut doc, id, _) = w38d_record_fixture(false);
+    // A valid source exists before it disappears. set_param correctly refuses
+    // unknown expressions; removing a parameter used only by a read-only
+    // Drawing is the actual source-loss transition this consumer must handle.
+    doc.set_param("missing_source_value", "Width", Some("mm"), None).unwrap();
+    let mut record = (**doc.drawing(id).unwrap()).clone();
+    let constraint = Arc::make_mut(&mut record.sketches[0]).sketch.constraints.iter_mut().find(|c| c.param.as_deref() == Some("Width")).unwrap();
+    constraint.param = Some("missing_source_value".into());
+    record.validate().unwrap();
+    doc.put_drawing(Arc::new(record));
+    let drawing = doc.drawing(id).unwrap().clone();
+    let retained = drawing.fills[0].last_region.clone();
+    let current = drawing.resolve_sheet_fill(&doc, 70).unwrap();
+    assert!(matches!(current.status, FillRegionStatus::Current));
+    assert_eq!(current.region, retained);
+    doc.remove_param("missing_source_value").unwrap();
+    assert!(doc.param("missing_source_value").is_none());
+    assert!(drawing.resolve_sheet_fill(&doc, 70).unwrap_err().to_string().contains("missing_source_value"));
+    let mut candidate = (*drawing).clone();
+    candidate.refresh_fill_regions(&doc, &std::collections::BTreeSet::from([41])).unwrap();
+    assert_eq!(candidate.fills[0].last_region, retained);
+    assert!(Drawing::from_json(&candidate.to_json().unwrap()).unwrap().resolve_sheet_fill(&doc, 70).is_err());
+}
+
+#[test]
+fn sheet_fill_raw_nested_caps_refuse_before_typed_pattern_and_identity_admission() {
+    let (doc, id, _) = w38d_record_fixture(false);
+    let base = file(doc.drawing(id).unwrap());
+    let cases = [
+        ("`fills`", {
+            let mut value = base.clone();
+            value["fills"] = json!(vec![base["fills"][0].clone(); 1001]);
+            value
+        }),
+        ("`patterns`", {
+            let mut value = base.clone();
+            value["patterns"] = json!(vec![base["patterns"][0].clone(); 1001]);
+            value
+        }),
+        ("families", {
+            let mut value = base.clone();
+            value["patterns"][0]["pattern"]["families"] = json!(vec![base["patterns"][0]["pattern"]["families"][0].clone(); 65]);
+            value
+        }),
+        ("dashes", {
+            let mut value = base.clone();
+            value["patterns"][0]["pattern"]["families"][0]["dashes"] = json!([1, 1, 1, 1, 1, 1, 1]);
+            value
+        }),
+        ("name", {
+            let mut value = base.clone();
+            value["patterns"][0]["pattern"]["name"] = json!("A".repeat(32));
+            value
+        }),
+        ("description", {
+            let mut value = base.clone();
+            value["patterns"][0]["pattern"]["description"] = json!("🦀".repeat(81));
+            value
+        }),
+        ("512 curve ids", {
+            let mut value = base.clone();
+            value["fills"][0]["boundary"]["outer"] = json!(vec!["l0"; 513]);
+            value
+        }),
+        ("128 holes", {
+            let mut value = base.clone();
+            value["fills"][0]["boundary"]["holes"] = json!(vec![vec!["hole"]; 129]);
+            value
+        }),
+        ("invalid curve id", {
+            let mut value = base.clone();
+            value["fills"][0]["boundary"]["outer"][0] = json!("x".repeat(513));
+            value
+        }),
+        ("retained region", {
+            let mut value = base.clone();
+            value["fills"][0]["last_region"]["holes"] = json!(vec![json!({"segs":[]}); 129]);
+            value
+        }),
+        ("8192", {
+            let mut value = base.clone();
+            value["fills"][0]["last_region"]["outer"]["segs"] = json!(vec![base["fills"][0]["last_region"]["outer"]["segs"][0].clone(); 8193]);
+            value
+        }),
+    ];
+    for (key, value) in cases {
+        let error = read(&value).unwrap_err().to_string();
+        assert!(error.contains("raw") && error.contains(key), "{key}: {error}");
+    }
+    let mut value = base.clone();
+    let ids: Vec<_> = (0..512).map(|index| format!("curve{index:04}")).collect();
+    value["fills"][0]["boundary"]["outer"] = json!(ids);
+    value["fills"] = json!(vec![value["fills"][0].clone(); 40]);
+    assert!(read(&value).unwrap_err().to_string().contains("raw boundaries exceed 20000"));
+}
+
+#[test]
+fn sheet_fill_typed_caps_cover_zero_piece_holes_and_cumulative_identity_storage() {
+    let (doc, id, _) = w38d_record_fixture(false);
+    let original = doc.drawing(id).unwrap();
+    let mut holes = (**original).clone();
+    Arc::make_mut(&mut holes.fills[0]).last_region.holes = vec![solidcore_record::Loop2 { segs: vec![] }; 129];
+    assert!(holes.validate().unwrap_err().to_string().contains("128 holes"));
+    let mut families = (**original).clone();
+    let family = families.patterns[0].pattern.families[0].clone();
+    Arc::make_mut(&mut families.patterns[0]).pattern.families = vec![family; 65];
+    assert!(families.validate().unwrap_err().to_string().contains("64 families"));
+    let mut fills = (**original).clone();
+    let template = (*fills.fills[0]).clone();
+    fills.fills.clear();
+    let mut fill_ids = IdSource::seeded(7062);
+    for _ in 0..1000 {
+        let id = fills.allocate_id(&mut fill_ids).unwrap();
+        fills.fills.push(Arc::new(SketchFill { id, ..template.clone() }));
+    }
+    fills.validate().unwrap();
+    let fill_id = fills.allocate_id(&mut fill_ids).unwrap();
+    fills.fills.push(Arc::new(SketchFill { id: fill_id, ..template }));
+    assert_eq!(fills.fills.len(), 1001);
+    assert!(fills.validate().unwrap_err().to_string().contains("1000 fills"));
+    let mut too_many = (**original).clone();
+    let mut fill = (*too_many.fills[0]).clone();
+    fill.boundary.outer = (0..512).map(|index| format!("curve{index:04}")).collect();
+    too_many.fills = (1000..1040).map(|id| Arc::new(SketchFill { id, ..fill.clone() })).collect();
+    assert!(too_many.validate().unwrap_err().to_string().contains("20000 total curve ids"));
+    let mut pieces = (**original).clone();
+    let first = pieces.fills[0].last_region.outer.segs[0];
+    Arc::make_mut(&mut pieces.fills[0]).last_region.outer.segs = vec![first; 8193];
+    assert!(pieces.validate().unwrap_err().to_string().contains("8192"));
+    assert_eq!(doc.drawing(id).unwrap(), original);
+}
+
+#[test]
+fn sheet_fill_profile_search_refuses_shared_conic_clamping_and_tiny_arc_widening() {
+    use solidcraft_sketch::{CurveKind, Sketch};
+    let (doc, id, _) = w38d_record_fixture(false);
+    let original = doc.drawing(id).unwrap();
+    for conic in [false, true] {
+        let mut drawing = (**original).clone();
+        let mut sketch = Sketch::new();
+        let a = sketch.add_point(Vec2::new(1000.0, 0.0), Some("start")).unwrap();
+        let b = sketch.add_point(Vec2::new(1000.0, 5e-10), Some("end")).unwrap();
+        let apex = sketch.add_point(Vec2::new(1010.0, 10.0), Some("apex")).unwrap();
+        let kind = if conic { CurveKind::Conic { a, b, apex, rho: 0.5 } } else { CurveKind::Arc { c: 0, a, b } };
+        sketch.add_curve(kind, Some("unsafe_exact_curve")).unwrap();
+        for point in &mut sketch.points {
+            point.fixed = true;
+        }
+        sketch.curves[0].fixed = true;
+        Arc::make_mut(&mut drawing.sketches[0]).sketch = sketch;
+        drawing.validate().unwrap();
+        let mut raw = file(&drawing);
+        if conic {
+            // The editing constructor deliberately admits a narrower rho
+            // range. Persisted SheetSketch records admit 0<rho<1; exercise that
+            // real file boundary before exact profile conversion refuses it.
+            raw["sketches"][0]["sketch"]["curves"][0]["rho"] = json!(1.0 - 1e-10);
+        }
+        let reopened = read(&raw).unwrap();
+        let source = &reopened.sketches[0].sketch;
+        if conic {
+            let CurveKind::Conic { rho, .. } = source.curves[0].kind else { panic!("missing authored conic") };
+            assert!(rho > 0.0 && rho < 1.0 && 1.0 - rho < 1e-9);
+            let pieces = source.exact_segs(0).unwrap();
+            let solidcore_record::Seg2::Conic { w, .. } = pieces[0] else { panic!("missing shared conic") };
+            assert!(w < rho / (1.0 - rho), "precondition: shared conversion clamps the actual authored weight");
+        } else {
+            let CurveKind::Arc { c, a, b } = source.curves[0].kind else { panic!("missing authored arc") };
+            let (center, start, end) = (source.point(c).unwrap(), source.point(a).unwrap(), source.point(b).unwrap());
+            assert_ne!(start, end);
+            let authored = ((end - center).angle() - (start - center).angle()).rem_euclid(std::f64::consts::TAU);
+            assert!(authored > 0.0 && authored <= 1e-12);
+            let pieces = source.segs(0);
+            let solidcore_record::Seg2::Arc { sweep, .. } = pieces[0] else { panic!("missing shared arc") };
+            assert!(sweep >= std::f64::consts::TAU, "precondition: shared conversion widens the actual noncoincident tiny arc");
+        }
+        let why = reopened.sheet_fill_profiles(&doc, 41).unwrap_err().to_string();
+        assert!(why.contains("unsafe_exact_curve") && why.contains(if conic { "conic rho" } else { "arc sweep" }), "{why}");
+        assert!(reopened.resolve_sheet_fill(&doc, 70).is_err(), "normalization refusal must be Failed, never LostBoundary");
+    }
 }
 
 #[test]

@@ -12,7 +12,7 @@ use solidcraft_geom::paper::ObjectKind;
 use super::Point2;
 use super::drawing_sheet::sheet_ref;
 use super::drawing_view::{BoxResult, LineSourceResult, LinesStatsResult, PathSegResult, paper_scene_schema};
-use crate::drawing_scene::{SheetObject, SketchState, SketchStatus, ViewState};
+use crate::drawing_scene::{FillState, FillStatus, SheetObject, SketchState, SketchStatus, ViewState};
 
 /// Draw one sheet of the open drawing. Read-only.
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -29,7 +29,7 @@ pub struct SheetSceneParams {
 /// dimension's lines and arrowheads (object: the dimension), each note of a view (object: the
 /// note), each view's label (object: the view) and each balloon's circle, number and leader (object:
 /// the balloon), then each parts list's and revision table's (object: the table), then each note on
-/// the sheet and each sheet sketch, then the title block's (object: the sheet).
+/// the sheet and each fill and each sheet sketch, then the title block's (object: the sheet).
 #[derive(Debug, Serialize)]
 #[serde(transparent)]
 pub struct SheetPaperScene(pub solidcraft_geom::paper::Scene);
@@ -51,6 +51,7 @@ impl JsonSchema for SheetPaperScene {
                 ObjectKind::Balloon,
                 ObjectKind::PartsList,
                 ObjectKind::RevisionTable,
+                ObjectKind::Fill,
                 ObjectKind::Sketch,
                 ObjectKind::TitleBlock,
             ],
@@ -361,6 +362,34 @@ impl From<SketchState> for SheetSceneSketch {
     }
 }
 
+/// A fill retains its saved last region when its exact boundary is lost.
+/// Failed expansion draws nothing. Both conditions prevent export.
+#[derive(Debug, Serialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct SheetSceneFill {
+    pub fill: String,
+    pub sketch: String,
+    #[schemars(schema_with = "fill_status_schema")]
+    pub status: &'static str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
+}
+
+fn fill_status_schema(_: &mut SchemaGenerator) -> Schema {
+    json_schema!({"type": "string", "enum": ["drawn", "lost_boundary", "failed"]})
+}
+
+impl From<FillState> for SheetSceneFill {
+    fn from(fill: FillState) -> Self {
+        let status = fill.status.name();
+        let reason = match fill.status {
+            FillStatus::Drawn => None,
+            FillStatus::LostBoundary(reason) | FillStatus::Failed(reason) => Some(reason),
+        };
+        Self { fill: ids::encode(fill.fill), sketch: ids::encode(fill.sketch), status, reason }
+    }
+}
+
 /// What `drawing.scene` returns.
 #[derive(Debug, Serialize, JsonSchema)]
 pub struct SheetSceneResult {
@@ -386,6 +415,8 @@ pub struct SheetSceneResult {
     pub out_of_date: Vec<String>,
     /// Each sheet sketch on the sheet, in id order.
     pub sketches: Vec<SheetSceneSketch>,
+    /// Each authored fill, separately from the owning sketches and views.
+    pub fills: Vec<SheetSceneFill>,
     /// In the warn parameter-check mode: what the call's parameters got wrong.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub param_warnings: Vec<String>,
