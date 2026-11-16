@@ -628,6 +628,39 @@ fn the_title_bar_offers_the_new_version_and_opens_the_update_window() {
     assert!(h.widget(&label).is_none(), "Remind me later hides it");
 }
 
+/// The Update pill and the link pills are laid out in the same frame: the Donate pill keeps
+/// clear of the pill the frame it appears and the frame its width changes, not the frame after.
+/// The bar used to read the pill's width from the previous frame's widget registry, which the
+/// frame loop clears before the bar draws, so the pill was drawn over the Donate pill every
+/// frame (#18031, seen on a 21:9 bar).
+#[test]
+fn the_update_pill_keeps_the_link_pills_clear() {
+    let dir = scratch();
+    let (feed, version) = next_release_feed(&dir.0);
+    let mut h = crate::scenario::Harness::new();
+    h.call("ui.resize", json!({ "width": 3440.0, "height": 1440.0 }));
+    h.app.updater.feed = Some(feed);
+    h.frame();
+    wait_for_check(&mut h);
+    h.frame();
+    let clear = |h: &crate::scenario::Harness| {
+        let update = crate::scenario::rect_of("titlebar:update").expect("the Update pill");
+        for pill in ["titlebar:kofi", "titlebar:discord"] {
+            if let Some(r) = crate::scenario::rect_of(pill) {
+                assert!(r.right() < update.left(), "{pill} {r:?} overlaps the Update pill {update:?}");
+            }
+        }
+        update
+    };
+    let wide = clear(&h);
+    assert!(h.widget(&format!("Update to {version}")).is_some(), "the full label fits a 21:9 bar");
+    // The frame its width changes (the short label on a narrower bar) keeps them clear too.
+    h.call("ui.resize", json!({ "width": 1100.0, "height": 700.0 }));
+    h.frame();
+    let narrow = clear(&h);
+    assert!(narrow.width() < wide.width(), "the label gives way on the narrower bar");
+}
+
 #[test]
 fn the_pill_shortens_in_a_narrow_title_bar() {
     let dir = scratch();

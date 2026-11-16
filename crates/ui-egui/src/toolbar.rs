@@ -91,21 +91,10 @@ pub(crate) fn offer_pill(
 ) -> Option<(Rect, egui::Response)> {
     let t = Tokens::get();
     let font = FontId::proportional(t.font_label);
-    let (icon_x, text_x, right_pad) = (16.0, 29.0, 11.0);
-    let last = labels.len().saturating_sub(1);
-    let label = labels.iter().enumerate().filter(|_| labeled).find_map(|(i, text)| {
-        let galley = ui.fonts_mut(|f| f.layout_no_wrap(text.to_string(), font.clone(), t.app_bar_text));
-        let width = text_x + galley.size().x + right_pad;
-        let room = if i < last { span.width() - keep } else { span.width() };
-        (width <= room).then_some((*text, width))
-    });
-    let width = label.map_or(PILL_HEIGHT + 4.0, |(_, w)| w);
-    if width > span.width() {
-        return None;
-    }
+    let (label, width) = offer_pill_choice(ui.ctx(), span.width(), labeled, labels, keep)?;
     let rect = Rect::from_min_size(pos2(span.right() - width, span.center().y - PILL_HEIGHT / 2.0), vec2(width, PILL_HEIGHT));
     let response = ui.interact(rect, ui.scope_id().with(("sc_offer_pill", handle)), Sense::click());
-    let name = label.map(|(text, _)| text).or(labels.first().copied()).unwrap_or_default().to_string();
+    let name = label.clone().or_else(|| labels.first().map(|l| (*l).to_string())).unwrap_or_default();
     response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, ui.is_enabled(), &name));
     crate::scenario::publish_target(handle, rect);
     let hot = response.hovered() || response.has_focus();
@@ -120,13 +109,32 @@ pub(crate) fn offer_pill(
     if response.has_focus() {
         ui.painter().rect_stroke(rect.expand(2.0), Tokens::outset_radius(radius, 2.0), Stroke::new(1.0, t.app_bar_text), egui::StrokeKind::Outside);
     }
-    let glyph_x = if label.is_some() { rect.left() + icon_x } else { rect.center().x };
+    let glyph_x = if label.is_some() { rect.left() + 16.0 } else { rect.center().x };
     let glyph = Rect::from_center_size(pos2(glyph_x, rect.center().y), vec2(16.0, 16.0));
     icons::paint_on(ui.painter(), glyph, icon, Some(true), 1.0);
-    if let Some((text, _)) = label {
-        ui.painter().text(pos2(rect.left() + text_x, rect.center().y), Align2::LEFT_CENTER, text, font, t.app_bar_text);
+    if let Some(text) = &label {
+        ui.painter().text(pos2(rect.left() + 29.0, rect.center().y), Align2::LEFT_CENTER, text, font, t.app_bar_text);
     }
     Some((rect, response))
+}
+
+/// The label [`offer_pill`] shows in a span `span_wide` points wide (`labeled`: it may carry a
+/// label) and the pill's width: the first of `labels` that fits (the icon alone when none does,
+/// `None`), and the width it makes. `None` when even the icon does not fit. The bar also calls
+/// this while it lays itself out, so the link pills keep clear of the pill in the frame it
+/// appears or changes width, not the frame after (#18031).
+pub(crate) fn offer_pill_choice(ctx: &egui::Context, span_wide: f32, labeled: bool, labels: &[&str], keep: f32) -> Option<(Option<String>, f32)> {
+    let t = Tokens::get();
+    let font = FontId::proportional(t.font_label);
+    let last = labels.len().saturating_sub(1);
+    let label = labels.iter().enumerate().filter(|_| labeled).find_map(|(i, text)| {
+        let galley = ctx.fonts_mut(|f| f.layout_no_wrap(text.to_string(), font.clone(), t.app_bar_text));
+        let width = 29.0 + galley.size().x + 11.0;
+        let room = if i < last { span_wide - keep } else { span_wide };
+        (width <= room).then_some(((*text).to_string(), width))
+    });
+    let width = label.as_ref().map_or(PILL_HEIGHT + 4.0, |(_, w)| *w);
+    (width <= span_wide).then_some((label.map(|(text, _)| text), width))
 }
 
 /// The application bar's height: the window's title bar on desktop builds.
@@ -240,39 +248,61 @@ pub fn app_bar(app: &mut SolveApp, ui: &mut egui::Ui) {
             let quick = app.toolbar_custom.quick_access.iter().filter(|id| solidcraft_engine::find_command(id).is_some()).count();
             let action = |id, icon, tip, enabled, wide_only| app_bar::BarButton { id, icon, tip, enabled, narrow: true, wide_only };
             let palette_shortcut = crate::keymap::display_for(app, "ui.palette");
+            // The Update pill's width for this frame, measured while the bar lays itself out: the
+            // link pills keep clear of the pill the frame it appears or changes width (#18031),
+            // rather than learning its width a frame late from the widget registry.
+            let ctx = ui.ctx().clone();
+            let offer_width = |span: f32, labeled: bool| crate::update::pill_width(app, &ctx, span, labeled);
             // Narrow windows retain Save; Undo and Redo remain available from their shortcuts and menus.
-            let bar = app_bar::AppBar {
-                mark: &|painter, at| solidcraft_look::glyphs::brand_mark(painter, at),
-                name: "SolidCraft",
-                leading: (crate::library::available(app) && !app.home.open).then_some(vec2(26.0, 26.0)),
-                home: app_bar::BarButton { id: "home", icon: "home", tip: app.tr("ui.start_page"), enabled: idle, narrow: false, wide_only: false },
-                file: app.tr("ui.file"),
-                file_open,
-                actions: vec![
-                    action("save", "save", &save_tip, shown, false),
-                    action("undo", "undo", &undo_tip, shown, true),
-                    action("redo", "redo", &redo_tip, shown, true),
-                ],
-                quick,
-                help: app_bar::BarButton { id: "help", icon: "help", tip: app.tr("ui.help"), enabled: true, narrow: false, wide_only: false },
-                settings: app_bar::BarButton { id: "settings", icon: "settings", tip: &prefs_tip, enabled: true, narrow: false, wide_only: false },
-                report: app_bar::Report {
-                    label: solidcraft_ui_text::tr("ui.report_a_bug"),
-                    tip: if crate::issue_report::ticket::enabled(app) {
-                        solidcraft_ui_text::tr("report.pill_tip")
-                    } else {
-                        solidcraft_ui_text::tr_label("Report a bug — review a screenshot and open a GitHub draft")
+            let out = {
+                let bar = app_bar::AppBar {
+                    mark: &|painter, at| solidcraft_look::glyphs::brand_mark(painter, at),
+                    name: "SolidCraft",
+                    leading: (crate::library::available(app) && !app.home.open).then_some(vec2(26.0, 26.0)),
+                    home: app_bar::BarButton {
+                        id: "home",
+                        icon: "home",
+                        tip: app.tr("ui.start_page"),
+                        enabled: idle,
+                        narrow: false,
+                        wide_only: false,
                     },
-                    icon_only: app.header.report == ReportButton::Icon,
-                },
-                pills: crate::links::pills(app, r.width() >= app_bar::PILL_LABEL_MIN),
-                search: search_in_header(app) && design_shown(app),
-                search_shortcut: palette_shortcut.as_deref(),
-                assistant: crate::agent_chat::app_bar_button_shown(app),
-                version: (app.header.version == VersionPlace::Header).then_some(app_bar::Version { text: &version, url: &url }),
-                handles: APP_BAR_HANDLES,
+                    file: app.tr("ui.file"),
+                    file_open,
+                    actions: vec![
+                        action("save", "save", &save_tip, shown, false),
+                        action("undo", "undo", &undo_tip, shown, true),
+                        action("redo", "redo", &redo_tip, shown, true),
+                    ],
+                    quick,
+                    help: app_bar::BarButton { id: "help", icon: "help", tip: app.tr("ui.help"), enabled: true, narrow: false, wide_only: false },
+                    settings: app_bar::BarButton {
+                        id: "settings",
+                        icon: "settings",
+                        tip: &prefs_tip,
+                        enabled: true,
+                        narrow: false,
+                        wide_only: false,
+                    },
+                    report: app_bar::Report {
+                        label: solidcraft_ui_text::tr("ui.report_a_bug"),
+                        tip: if crate::issue_report::ticket::enabled(app) {
+                            solidcraft_ui_text::tr("report.pill_tip")
+                        } else {
+                            solidcraft_ui_text::tr_label("Report a bug — review a screenshot and open a GitHub draft")
+                        },
+                        icon_only: app.header.report == ReportButton::Icon,
+                    },
+                    pills: crate::links::pills(app, r.width() >= app_bar::PILL_LABEL_MIN),
+                    search: search_in_header(app) && design_shown(app),
+                    search_shortcut: palette_shortcut.as_deref(),
+                    assistant: crate::agent_chat::app_bar_button_shown(app),
+                    offer_width: Some(&offer_width),
+                    version: (app.header.version == VersionPlace::Header).then_some(app_bar::Version { text: &version, url: &url }),
+                    handles: APP_BAR_HANDLES,
+                };
+                app_bar::show(ui, &bar, r, content)
             };
-            let out = app_bar::show(ui, &bar, r, content);
             if let Some(rect) = out.leading {
                 crate::library::app_bar_toggle(app, ui, rect);
             }

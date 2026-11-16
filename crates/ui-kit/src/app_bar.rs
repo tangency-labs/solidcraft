@@ -167,6 +167,11 @@ pub struct AppBar<'a> {
     pub search_shortcut: Option<&'a str>,
     /// The bar keeps a place for the app's assistant button.
     pub assistant: bool,
+    /// The offer pill's width for a span this many points wide (`labeled`: it may carry its
+    /// label), or `None` with nothing offered: measured while the bar lays itself out, so the
+    /// link pills keep clear of the pill in the frame it appears or changes width, not the
+    /// frame after (#18031). The app draws the pill itself in [`BarOut::offer`].
+    pub offer_width: Option<&'a dyn Fn(f32, bool) -> Option<f32>>,
     pub version: Option<Version<'a>>,
     pub handles: Handles<'a>,
 }
@@ -495,17 +500,18 @@ pub fn show(ui: &mut egui::Ui, data: &AppBar, bar: Rect, content: Rect) -> BarOu
     let mut controls_left = anchor - CLUSTER_BUTTONS - search_shift;
     let offer = Rect::from_min_max(pos2(x, report.top()), pos2(controls_left - 2.0, report.bottom()));
     // The link pills sit left of the offer pill (which stays beside the assistant: the app draws it
-    // in `offer`, and its width is last frame's) or, with none, of the assistant. They are left out
-    // where the tabs would keep less than one tab's room (216) beside them, so a narrow bar looks as
-    // it did without them.
-    let offered = solidcraft_ui_registry::rect_of("titlebar:update").map_or(0.0, |u| u.width() + 4.0);
+    // in `offer`) or, with none, of the assistant. Its width is measured for this frame, so the
+    // pills keep clear of it the frame it appears or changes width (#18031). They are left out
+    // where the tabs would keep less than one tab's room (216) beside them, so a narrow bar looks
+    // as it did without them.
+    let offer_labeled = report_label || (data.report.icon_only && r.width() >= COMPACT);
+    let offered = data.offer_width.and_then(|width| width(offer.width(), offer_labeled)).map_or(0.0, |w| w + 4.0);
     let pills_w = pills_width(ui, &data.pills);
     let pills_shown = !data.pills.is_empty() && controls_left - offered - pills_w - tabs_start >= 216.0;
     let pills_right = controls_left - 4.0 - offered;
     if pills_shown {
         controls_left -= pills_w + offered;
     }
-    let offer_labeled = report_label || (data.report.icon_only && r.width() >= COMPACT);
     // Report a bug.
     let response = ui.interact(report, ui.scope_id().with("sc_report_button"), Sense::click());
     response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, ui.is_enabled(), data.report.label));

@@ -71,6 +71,7 @@ impl BarRig {
             search: false,
             search_shortcut: Some("S"),
             assistant: true,
+            offer_width: None,
             version: Some(Version { text: "v1.0", url: "https://example.invalid/notes" }),
             handles: HANDLES,
         };

@@ -981,14 +981,31 @@ pub fn take_launch(app: &mut SolveApp) -> Option<(PathBuf, Vec<String>)> {
 
 // ---- user interface ---------------------------------------------------------------------------
 
+/// Closes [`button`]'s label choices into one place: "Update to <version>" while the document
+/// tabs keep room, a short "Update" when they would be squeezed. `None`: nothing offered.
+fn pill_labels(app: &SolveApp) -> Option<(String, &'static str)> {
+    let version = offered(app)?.version().to_string();
+    Some((solidcraft_ui_text::format("update.button_version", &[("version", &version)]), solidcraft_ui_text::tr("update.button")))
+}
+
+/// The Update pill's width in a span `span_wide` points wide (`labeled`: it may carry its
+/// label): the size [`button`] draws it at, or `None` with nothing offered or when even its icon
+/// does not fit. The bar measures this while it lays itself out, so the link pills keep clear of
+/// the pill in the same frame it appears or changes width, not the frame after (#18031).
+pub(crate) fn pill_width(app: &SolveApp, ctx: &egui::Context, span_wide: f32, labeled: bool) -> Option<f32> {
+    let (full, short) = pill_labels(app)?;
+    let labels = [full.as_str(), short];
+    crate::toolbar::offer_pill_choice(ctx, span_wide, labeled, &labels, TAB_ROOM).map(|(_, width)| width)
+}
+
 /// The application bar's Update pill ("Update to 0.14.0"), at the right of `span`: it opens and
 /// closes the Update window. Returns its rect (None: not shown).
 pub fn button(app: &mut SolveApp, ui: &mut egui::Ui, span: egui::Rect, labeled: bool) -> Option<egui::Rect> {
     let version = offered(app)?.version().to_string();
     // "Update to 0.14.0" while the document tabs keep room; a short "Update" when they would be
     // squeezed; the icon alone in a narrow bar.
-    let full = solidcraft_ui_text::format("update.button_version", &[("version", &version)]);
-    let labels = [full.as_str(), solidcraft_ui_text::tr("update.button")];
+    let (full, short) = pill_labels(app)?;
+    let labels = [full.as_str(), short];
     let (rect, response) = crate::toolbar::offer_pill(ui, span, labeled, &labels, TAB_ROOM, "update", "titlebar:update", false)?;
     if response.backing_on_hover_text(solidcraft_ui_text::format("update.available", &[("version", &version)])).clicked() {
         app.updater.open = !app.updater.open;
