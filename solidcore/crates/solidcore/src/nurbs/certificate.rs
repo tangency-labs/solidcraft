@@ -8,6 +8,7 @@
 //! |--------------------|----------|
 //! | [`span_bound`]     | (none)   |
 //! | [`turn_about_axis`] | (none)  |
+//! | [`on_circle`]      | (none)   |
 //!
 //! **What is bounded.** Between two stations the rail runs from parameter `t_a` to `t_b`
 //! and the surface holds a point near each end, at `(u_a, v_a)` and `(u_b, v_b)`. With
@@ -70,7 +71,8 @@
 //! tolerance, and its bound stands. The largest bound over the pieces is returned: the
 //! caller decides (a station there, or a refusal).
 //!
-//! Deviations: not upstream. No recursion: the intervals wait on a work list.
+//! Deviations: not upstream. No recursion: the intervals wait on a work list ([`on_circle`]'s
+//! pieces too, at most [`MAX_CIRCLE_HALVINGS`] deep and [`MAX_CIRCLE_PIECES`] in all).
 
 use crate::error::{Result, SolidError};
 use crate::geom::vector2d::Point2;
@@ -637,6 +639,207 @@ pub fn turn_about_axis(
     Ok(sign)
 }
 
+/// Most pieces [`on_circle`] bounds in all (a resource bound; past it: [`OnCircle::Unproved`]).
+pub const MAX_CIRCLE_PIECES: usize = 1 << 12;
+/// Most halvings of one Bézier span in [`on_circle`].
+pub const MAX_CIRCLE_HALVINGS: usize = 40;
+
+/// One piece of [`on_circle`]'s work list: its span, its range in the span's `[0, 1]`, its
+/// homogeneous coefficients about the centre, their error and its halving depth.
+type CirclePiece = (usize, [f64; 2], [Bernstein2; 4], f64, usize);
+
+/// What [`on_circle`] proves of a curve and a circle.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum OnCircle {
+    /// Every point of the curve is proved within the tolerance of the circle's radius about
+    /// its centre and within it of its plane.
+    Within,
+    /// The curve's point at this parameter is farther than the tolerance from the circle's
+    /// radius or plane, past its evaluation's rounding (a witness).
+    Outside(f64),
+    /// Neither, within [`MAX_CIRCLE_HALVINGS`] and [`MAX_CIRCLE_PIECES`]: the curve comes to
+    /// the tolerance's edge, or its bound does not tighten.
+    Unproved,
+}
+
+/// Whether every point `X` of the curve `nurb` lies within `tol` of the circle about `center`
+/// of radius `radius` in the plane through `center` normal to `normal`: `| |X - center| -
+/// radius | <= tol` and `|normal . (X - center)| / |normal| <= tol`, the two tests
+/// [`crate::curve::curve::p5::is_arc_base`] makes at its samples, here over the whole curve.
+/// Not upstream (solidcraft#17790's review: a sampled arc test decided that a surface of
+/// revolution's offset collapses).
+///
+/// **How.** On each Bézier span, in homogeneous form about `center` ([`RailSpans::about`]),
+/// `X - center = H / W`. Then `|X - center|^2 - radius^2 = F / W^2` with
+/// `F = H . H - radius^2 W^2` (degree `2r`), and `normal . (X - center) = G / W` with
+/// `G = normal . H` (degree `r`). By the convex hull property `|F|` and `|G|` are at most their
+/// largest coefficient magnitude and `W` at least its least coefficient, so
+/// `| |X - center|^2 - radius^2 | <= f` and, as `|X - center| - radius` is that divided by
+/// `|X - center| + radius >= radius + sqrt(max(radius^2 - f, 0))`, the radial deviation is
+/// at most `f / (radius + sqrt(max(radius^2 - f, 0)))`. For a rational arc of the circle
+/// `F` and `G` vanish identically, so their coefficients are rounding and the bound is
+/// rounding: an exact arc is proved at once, with no subdivision.
+///
+/// A span whose bound exceeds `tol` is read at its ends and middle: a point past `tol` by
+/// more than its evaluation's rounding is a witness ([`OnCircle::Outside`]). Otherwise the
+/// span is halved at its middle (de Casteljau at `1/2`, so the pieces' ends are exact
+/// dyadic parameters and cover the span with no sliver) and each half bounded again, at
+/// most [`MAX_CIRCLE_HALVINGS`] deep and [`MAX_CIRCLE_PIECES`] pieces in all; past them
+/// the curve is [`OnCircle::Unproved`]. No recursion: the pieces wait on a work list, left
+/// half first.
+///
+/// **The coefficients' error**, from the spans' own ([`RailSpans::about`]): each halving
+/// `gamma_(2r + 4)` of the largest coefficient and its error (a de Casteljau split at `1/2`
+/// rounds once per level, a convex combination passes the input error through); each
+/// square as [`product`]; `F` a sum of four terms, one scaled by `radius^2`, within
+/// `gamma_6` of the terms' sizes on top of their errors; `G` three scaled terms, `gamma_4`
+/// of their size on top of `|normal|_1` times the error. The least weight is reduced by
+/// its error and must stay positive. The final divisions and the square root are rounded
+/// up by `1 + gamma_8`.
+///
+/// # Errors
+///
+/// `Unsupported` for a centre, normal, radius or tolerance that is not finite, a radius
+/// that is not positive, a zero normal or a negative tolerance; those of
+/// [`RailSpans::about`] and of the products.
+pub fn on_circle(
+    nurb: &NurbCurve,
+    center: Point3,
+    normal: Vec3,
+    radius: f64,
+    tol: f64,
+) -> Result<OnCircle> {
+    let finite = |v: Vec3| v.x.is_finite() && v.y.is_finite() && v.z.is_finite();
+    #[allow(clippy::neg_cmp_op_on_partial_ord)] // refuses NaN too
+    if !finite(center) || !finite(normal) || !(radius > 0.0) || !radius.is_finite() {
+        return Err(failed("a circle that is not finite and positive"));
+    }
+    #[allow(clippy::neg_cmp_op_on_partial_ord)] // refuses NaN too
+    if !(tol >= 0.0) || !tol.is_finite() {
+        return Err(failed("a tolerance that is not finite and non-negative"));
+    }
+    let normal_len = normal.length();
+    #[allow(clippy::neg_cmp_op_on_partial_ord)] // refuses NaN too
+    if !(normal_len > 0.0) {
+        return Err(failed("a circle's zero normal"));
+    }
+    let spans = RailSpans::about(nurb, center)?;
+    let bi = Binomials::new();
+    let mut work: Vec<CirclePiece> = spans
+        .spans
+        .iter()
+        .enumerate()
+        .rev()
+        .map(|(i, (_, h))| (i, [0.0, 1.0], h.clone(), spans.err, 0))
+        .collect();
+    let mut pieces = 0_usize;
+    while let Some((i, [u0, u1], h, e, depth)) = work.pop() {
+        pieces += 1;
+        if pieces > MAX_CIRCLE_PIECES {
+            return Ok(OnCircle::Unproved);
+        }
+        if circle_piece_within(&h, e, normal, normal_len, radius, tol, &bi)? {
+            continue;
+        }
+        let Some(([a, b], _)) = spans.spans.get(i) else {
+            return Err(failed("a span of the curve"));
+        };
+        for s in [0.0, 0.5, 1.0] {
+            if circle_point_outside(&h, e, s, normal, normal_len, radius, tol) {
+                return Ok(OnCircle::Outside(a + (u0 + s * (u1 - u0)) * (b - a)));
+            }
+        }
+        if depth >= MAX_CIRCLE_HALVINGS {
+            return Ok(OnCircle::Unproved);
+        }
+        let d = h[3].degrees().0;
+        let e = e + gamma(2 * d + 4) * (largest(&h) + e);
+        let halves = h.clone().map(|c| c.split_u(0.5));
+        let left = halves.clone().map(|(l, _)| l);
+        let right = halves.map(|(_, r)| r);
+        let m = 0.5 * (u0 + u1);
+        work.push((i, [m, u1], right, e, depth + 1));
+        work.push((i, [u0, m], left, e, depth + 1));
+    }
+    Ok(OnCircle::Within)
+}
+
+/// Whether the piece `h` (homogeneous about the centre, within `e`) is proved within `tol`
+/// of the circle's radius and plane ([`on_circle`]).
+fn circle_piece_within(
+    h: &[Bernstein2; 4],
+    e: f64,
+    normal: Vec3,
+    normal_len: f64,
+    radius: f64,
+    tol: f64,
+    bi: &Binomials,
+) -> Result<bool> {
+    let [hx, hy, hz, hw] = h;
+    let w_lo = hw.min_coefficient() - e;
+    #[allow(clippy::neg_cmp_op_on_partial_ord)] // refuses NaN too
+    if !(w_lo > 0.0) {
+        return Ok(false);
+    }
+    let (xx, exx) = product(hx, e, hx, e, bi)?;
+    let (yy, eyy) = product(hy, e, hy, e, bi)?;
+    let (zz, ezz) = product(hz, e, hz, e, bi)?;
+    let (ww, eww) = product(hw, e, hw, e, bi)?;
+    let r2 = radius * radius;
+    let f = xx.add(&yy, bi)?.add(&zz, bi)?.sub(&ww.scale(r2), bi)?;
+    let size = xx.max_abs_coefficient()
+        + yy.max_abs_coefficient()
+        + zz.max_abs_coefficient()
+        + r2 * ww.max_abs_coefficient();
+    let ef = exx + eyy + ezz + r2 * eww + gamma(6) * size;
+    let g = hx
+        .scale(normal.x)
+        .add(&hy.scale(normal.y), bi)?
+        .add(&hz.scale(normal.z), bi)?;
+    let n1 = normal.x.abs() + normal.y.abs() + normal.z.abs();
+    let eg = n1 * e
+        + gamma(4)
+            * (normal.x.abs() * hx.max_abs_coefficient()
+                + normal.y.abs() * hy.max_abs_coefficient()
+                + normal.z.abs() * hz.max_abs_coefficient());
+    let up = 1.0 + gamma(8);
+    let f_max = (f.max_abs_coefficient() + ef) / (w_lo * w_lo) * up;
+    let radial = f_max / (radius + (r2 - f_max).max(0.0).sqrt()) * up;
+    let plane = (g.max_abs_coefficient() + eg) / w_lo / normal_len * up;
+    Ok(radial <= tol && plane <= tol)
+}
+
+/// Whether the point of the piece `h` (homogeneous about the centre, within `e`) at `s` of
+/// it lies farther than `tol` from the circle's radius or plane by more than its
+/// evaluation's rounding ([`on_circle`]'s witness).
+fn circle_point_outside(
+    h: &[Bernstein2; 4],
+    e: f64,
+    s: f64,
+    normal: Vec3,
+    normal_len: f64,
+    radius: f64,
+    tol: f64,
+) -> bool {
+    let [hx, hy, hz, hw] = h;
+    let d = hw.degrees().0;
+    // de Casteljau rounds once per level: within gamma_(2d) of the largest coefficient
+    let eh = e + gamma(2 * d + 4) * (largest(h) + e);
+    let w = hw.eval(s, 0.0);
+    #[allow(clippy::neg_cmp_op_on_partial_ord)] // a NaN is no witness
+    if !(w - eh > 0.0) {
+        return false;
+    }
+    let x = Vec3::new(hx.eval(s, 0.0), hy.eval(s, 0.0), hz.eval(s, 0.0)) / w;
+    let dist = x.length();
+    // |x| moves by at most (sqrt(3) eh + |x| eh) / (w - eh) for the numerators' and the
+    // weight's errors, doubled with the norms' and the products' own rounding
+    let slack = 2.0 * (2.0 * eh + dist * eh) / (w - eh) + gamma(8) * (dist + radius);
+    let radial = (dist - radius).abs() - slack;
+    let plane = normal.dot(x).abs() / normal_len - slack;
+    radial > tol || plane > tol
+}
+
 #[cfg(test)]
 mod turn_tests {
     #![allow(clippy::unwrap_used)] // test helpers
@@ -701,5 +904,82 @@ mod turn_tests {
         );
         assert_eq!(turn_about_axis(&radial, o, z, [0.0, 1.0]).unwrap(), None);
         assert!(turn_about_axis(&radial, o, z, [1.0, 0.0]).is_err());
+    }
+}
+
+#[cfg(test)]
+mod circle_tests {
+    #![allow(clippy::unwrap_used)] // test helpers
+    use super::*;
+
+    /// The quarter circle r 2 about (5, 0, 1) in the plane z = 1, one rational quadratic
+    /// arc, its middle control point moved out by `bulge` of its distance from the centre.
+    fn quarter(bulge: f64) -> NurbCurve {
+        let h = core::f64::consts::FRAC_1_SQRT_2;
+        let m = 2.0 * (1.0 + bulge);
+        let pts = [
+            [7.0, 0.0, 1.0, 1.0],
+            [5.0 + m, m, 1.0, h],
+            [5.0, 2.0, 1.0, 1.0],
+        ];
+        let pw = pts
+            .iter()
+            .map(|&[x, y, z, w]| CPoint::new(x * w, y * w, z * w, w))
+            .collect();
+        NurbCurve::new(pw, 2, vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0]).unwrap()
+    }
+
+    const C: Point3 = Point3::new(5.0, 0.0, 1.0);
+    const Z: Vec3 = Vec3::new(0.0, 0.0, 1.0);
+
+    /// An exact arc is proved on its circle at once; at a tolerance of zero (its rounding
+    /// is never below it, and no point is off by more) it is neither proved nor refuted.
+    #[test]
+    fn an_exact_arc_is_proved_on_its_circle() {
+        let c = quarter(0.0);
+        assert_eq!(on_circle(&c, C, Z, 2.0, 1e-9).unwrap(), OnCircle::Within);
+        assert_eq!(
+            on_circle(&c, C, Z * 3.0, 2.0, 1e-12).unwrap(),
+            OnCircle::Within
+        );
+        assert_eq!(on_circle(&c, C, Z, 2.0, 0.0).unwrap(), OnCircle::Unproved);
+    }
+
+    /// A bulge of 1e-4 of the radius is found past a tolerance of 1e-7 with its point as a
+    /// witness, and proved within a tolerance above the bulge's height; another radius,
+    /// centre or plane is refuted.
+    #[test]
+    fn a_bulge_or_another_circle_is_refuted() {
+        let c = quarter(1e-4);
+        let OnCircle::Outside(t) = on_circle(&c, C, Z, 2.0, 1e-7).unwrap() else {
+            panic!("the bulge is a witness");
+        };
+        assert!((0.0..=1.0).contains(&t), "{t}");
+        assert_eq!(on_circle(&c, C, Z, 2.0, 1e-3).unwrap(), OnCircle::Within);
+        let exact = quarter(0.0);
+        for (center, normal, radius) in [
+            (C, Z, 2.001),
+            (Point3::new(5.0, 0.0, 1.01), Z, 2.0),
+            (C, Vec3::new(0.0, 0.1, 1.0), 2.0),
+        ] {
+            assert!(
+                matches!(
+                    on_circle(&exact, center, normal, radius, 1e-7).unwrap(),
+                    OnCircle::Outside(_)
+                ),
+                "{center:?} {normal:?} {radius}"
+            );
+        }
+    }
+
+    /// Non-finite or degenerate circles and tolerances are refused, not answered.
+    #[test]
+    fn a_circle_that_is_not_finite_is_refused() {
+        let c = quarter(0.0);
+        assert!(on_circle(&c, C, Z, f64::NAN, 1e-7).is_err());
+        assert!(on_circle(&c, C, Z, 0.0, 1e-7).is_err());
+        assert!(on_circle(&c, C, Vec3::new(0.0, 0.0, 0.0), 2.0, 1e-7).is_err());
+        assert!(on_circle(&c, C, Z, 2.0, f64::NAN).is_err());
+        assert!(on_circle(&c, C, Z, 2.0, -1.0).is_err());
     }
 }

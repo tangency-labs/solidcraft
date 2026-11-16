@@ -162,6 +162,7 @@ use crate::math::{max2, min2, BIG_DOUBLE, EFF_ZERO, EFF_ZERO_SQ, EFF_ZERO_SQRT, 
 use crate::nurbs::b_spline_curve_n_lib::TrimMode;
 use crate::nurbs::b_spline_surface::{BSplineSurface, SurfParamType};
 use crate::nurbs::b_spline_surface_n_lib::p2::EvaluateFlags;
+use crate::nurbs::certificate::{on_circle, OnCircle};
 use crate::nurbs::knots::Side;
 use crate::surface::offset_surface::{OffsetSurface, SS_UNKNOWN};
 use crate::surface::plane::Plane;
@@ -184,6 +185,7 @@ const OP_STEP: &str = "surface::surface::p1::StepSurface";
 const OP_CACHE: &str = "surface::surface::p1::validate_surface_cache";
 const OP_IVL: &str = "surface::surface::p1::find_uv_curve_ivl_in_domain";
 const OP_BOX: &str = "surface::surface::p1::Surface::calculate_bounding_box";
+const OP_REV_COLLAPSE: &str = "surface::surface::p1::Surface::revolution_offset_collapses";
 
 /// Why a polar box of a curve-bounded or STEP surface is refused.
 pub(crate) const POLAR_RECURSION: &str = "SmSurface::CalculateBoundingBox of a polar box on a curve-bounded or STEP surface recurses without bound upstream (plan/upstream-issues.md UB-84)";
@@ -2702,17 +2704,20 @@ impl Surface {
     /// Not upstream (the fork's `SmSurfOfRevolution::OffsetCollapses`, WR-567): whether
     /// the offset by `signed_offset_distance` shrinks this surface of revolution `s`
     /// onto its spine or past it. Its generatrix is one circular arc of radius `r`
-    /// (`IsArc(9, tol)`, `r > tol`; a fillet's round along a circular edge), and the
+    /// (`IsArc(9, tol)` nominates the circle, `r > tol`; a fillet's round along a
+    /// circular edge), proved over the whole generatrix ([`generatrix_on_circle`]), and the
     /// offset leaves a radius `r - d (N . k) r` below `tol`, with `k` the curvature
     /// vector of the generatrix-direction iso-curve (the arc revolved: `|k| = 1/r`,
     /// pointing at the arc's centre) and `N` the surface normal, both at the middle of
-    /// the natural UV domain. A failed arc test or evaluation, or a pole there, is
-    /// `false`.
+    /// the natural UV domain. A failed arc test or evaluation, a generatrix point proved
+    /// off the circle, or a pole there, is `false`.
     ///
     /// # Errors
     ///
     /// [`SolidError::Unported`] from the arc test or the evaluations; those of the
-    /// natural UV domain.
+    /// natural UV domain; `Unsupported` for a generatrix that is neither proved on the
+    /// circle its samples nominate nor off it (it comes to the tolerance's edge, or has no
+    /// exact NURB form to bound): the offset is refused, not dropped.
     fn revolution_offset_collapses(
         &self,
         k: &Kernel,
@@ -2724,11 +2729,25 @@ impl Surface {
         let Some(gen) = s.gen_curve() else {
             return Ok(false);
         };
-        let Some(Some((_, radius, _, _))) = ignored_surface_result(gen.is_arc(k, 9, tol))? else {
+        let Some(Some((frame, radius, _, _))) = ignored_surface_result(gen.is_arc(k, 9, tol))?
+        else {
             return Ok(false);
         };
         if radius <= tol {
             return Ok(false);
+        }
+        // the samples only nominate the circle: the whole generatrix is proved on it, a
+        // point off it is a witness that it is no arc, and neither is a refusal (no face
+        // is dropped on a sampled arc, solidcraft#17790's review)
+        match generatrix_on_circle(gen, &frame, radius, tol)? {
+            OnCircle::Within => {}
+            OnCircle::Outside(_) => return Ok(false),
+            OnCircle::Unproved => {
+                return Err(SolidError::Unsupported {
+                    operation: OP_REV_COLLAPSE,
+                    reason: "the generatrix is neither proved on its circle nor off it",
+                })
+            }
         }
 
         // the curvature of the generatrix direction's iso-curve, at the middle of the domain
@@ -4760,6 +4779,28 @@ fn ignored_trim_cache_result<T>(result: Result<T>) -> Result<Option<T>> {
 /// Control errors must leave the caller before it reads a fallback value.
 pub(super) fn ignored_surface_result<T>(r: Result<T>) -> Result<Option<T>> {
     ignored(r)
+}
+
+/// Whether the generatrix `gen` lies within `tol` of the circle its arc test nominated
+/// (`frame`'s origin and Z axis, `radius`), over its whole NURB ([`on_circle`]); a circle
+/// with no NURB is its own arc ([`crate::curve::ellipse::Ellipse::is_arc`]); any other curve
+/// without an exact NURB form is [`OnCircle::Unproved`].
+///
+/// # Errors
+///
+/// Those of [`on_circle`].
+fn generatrix_on_circle(
+    gen: &Curve,
+    frame: &crate::geom::axis2_placement::Axis2Placement,
+    radius: f64,
+    tol: f64,
+) -> Result<OnCircle> {
+    let nurb = gen.b_spline_base().and_then(|b| b.gw_nurb());
+    match (nurb, gen.kind()) {
+        (Some(nurb), _) => on_circle(nurb, frame.origin(), frame.z_axis(), radius, tol),
+        (None, CurveKind::Ellipse(e)) if e.is_circle_class() => Ok(OnCircle::Within),
+        (None, _) => Ok(OnCircle::Unproved),
+    }
 }
 
 #[cfg(test)]
