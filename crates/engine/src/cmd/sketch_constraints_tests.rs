@@ -1960,6 +1960,19 @@ fn negative_distance_dimension_flips_to_the_opposite_side() {
     assert_eq!(d["expression"], "-(-w)");
     assert!((sketch(&s).points[1].pos.x + 10.0).abs() < 1e-6);
 
+    // Editing an existing sided distance dimension to a negative value also flips and normalizes.
+    let mut s = new_sketch();
+    run(&mut s, "parameters.add", json!({"name": "w", "expression": "10 mm"}));
+    run(&mut s, "sketch.point", json!({"point": [15, 0]}));
+    let d = run(&mut s, "sketch.dimension", json!({"entities": ["origin", "p1"], "type": "horizontal", "value": 15}));
+    let param = d["param"].as_str().unwrap().to_string();
+    let changed = run(&mut s, "parameters.change", json!({"name": param, "expression": "-10"}));
+    assert_eq!(changed["expression"], "10 mm");
+    assert!((sketch(&s).points[1].pos.x + 10.0).abs() < 1e-6, "p1 should flip to -10: {:?}", sketch(&s).points[1].pos);
+    let changed = run(&mut s, "parameters.change", json!({"name": param, "expression": "-w"}));
+    assert_eq!(changed["expression"], "-(-w)");
+    assert!((sketch(&s).points[1].pos.x - 10.0).abs() < 1e-6, "p1 should flip back to +10: {:?}", sketch(&s).points[1].pos);
+
     // Intrinsic sizes (line length, circle radius) still refuse negative values.
     let mut s = sketch_with_len();
     assert!(s.execute("sketch.dimension", &json!({"entities": ["la"], "value": -10})).is_err());
