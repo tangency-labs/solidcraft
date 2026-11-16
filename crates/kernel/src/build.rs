@@ -229,15 +229,21 @@ fn revolved(plane: &Plane, regions: &[Region2], axis_origin: Vec2, axis_dir: Vec
         let given = numbered_region(r)?.map_loops(|l| snap_loop(l).merged_lines(axis_run));
         // The profile must lie on one side of the axis, once its corners are on it.
         let (mut neg, mut pos) = (false, false);
+        let mut far = (0.0, r.centroid());
         for p in given.outer.lp.polyline(1e-3) {
             let s = d.cross(p - axis_origin);
             neg |= s < -1e-7;
             pos |= s > 1e-7;
+            if s.abs() > far.0 {
+                far = (s.abs(), p);
+            }
         }
         if neg && pos {
             return Err(KernelError::Invalid("the profile crosses the revolve axis".into()));
         }
-        let c = plane.to_world(r.centroid());
+        // The side of the axis the profile is on: its point farthest from the axis, once its
+        // corners are on it (the centroid of a sliver can lie on the other side).
+        let c = plane.to_world(far.1);
         let radial = (c - o) - axis * (c - o).dot(axis);
         let angle = if axis.cross(radial).dot(plane.normal()) < 0.0 { -angle } else { angle };
         out.push(crate::smlib_sweeps::revolve(plane, &crate::smlib_sweeps::pieces(given.oriented().loops()), o, axis, angle)?);
