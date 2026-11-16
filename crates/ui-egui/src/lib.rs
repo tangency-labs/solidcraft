@@ -268,6 +268,7 @@ mod rule_editor;
 #[cfg(test)]
 mod rule_editor_tests;
 pub mod save_job;
+mod scale_bar;
 pub mod scenario;
 pub(crate) mod scene_palette;
 pub mod select_other;

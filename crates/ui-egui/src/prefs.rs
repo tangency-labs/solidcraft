@@ -1459,6 +1459,9 @@ preference_settings! {
     /// The selection's length, area or distance in the view's bottom right corner (#7000). Off by
     /// default.
     quick_measure: bool = false, PAGE_GRAPHICS;
+    /// A scale bar in the view's bottom left corner: a round length in the design's units, at the
+    /// centre of the view in perspective (#375). Off by default.
+    scale_bar: bool = false, PAGE_GRAPHICS;
     /// Compact history: the browser lists each component's features in history order with the
     /// marker, and neither timeline is shown.
     history_in_browser: bool = false, PAGE_LAYOUT;

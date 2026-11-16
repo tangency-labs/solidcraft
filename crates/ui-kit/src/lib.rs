@@ -134,8 +134,9 @@ pub use preferences_assistant::*;
 #[allow(unused_imports, reason = "composed by the Preferences pages of #9875 to #9883")]
 pub use preferences_cards::*;
 pub use preferences_figure_data::{
-    paint_aa_2x, paint_aa_4x, paint_aa_8x, paint_aa_off, paint_ao_on, paint_frame_rate, paint_quick_measure, paint_tess_coarse, paint_tess_fine,
-    paint_tess_normal, paint_tess_ultra, paint_vertex_markers, paint_view_angles, paint_view_grid, paint_view_perspective, paint_view_shadow,
+    paint_aa_2x, paint_aa_4x, paint_aa_8x, paint_aa_off, paint_ao_on, paint_frame_rate, paint_quick_measure, paint_scale_bar, paint_tess_coarse,
+    paint_tess_fine, paint_tess_normal, paint_tess_ultra, paint_vertex_markers, paint_view_angles, paint_view_grid, paint_view_perspective,
+    paint_view_shadow,
 };
 pub use preferences_figures::{ThemeSample, paint_theme_thumbnail_rounded};
 pub use preferences_navigation::*;
