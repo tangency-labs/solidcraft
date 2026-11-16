@@ -15,7 +15,9 @@
 //! a line edge's is its NURB, where the fork's copy of an `SmLine` evaluates by the
 //! line's own `Evaluate` (a rounding-level difference, not compared). `std::sort` of
 //! the solver's stations by t is the stable `sort_by` with `<`'s order (they differ only
-//! for equal t).
+//! for equal t). A certificate halves at most [`GN_HALVINGS_PER_SPAN`] spans per first
+//! span plus [`GN_HALVING_BUDGET`] and is refused past it (the fork stops only past 4096
+//! stations).
 
 use super::certificate::{
     arc_rows, gn_certify_span_reusing, law_series, CertifiedLevel, GnLaw, GnVarying, NurbsCurve,
@@ -32,6 +34,7 @@ use super::tay::{
     acos_clamped, gn_area_sum, gn_half_angle, gn_invert, gn_target, gn_wedge_cos, GnAreaCells,
     Ring, Tay,
 };
+use crate::error::blend::BlendFailure;
 use crate::error::{Result, SolidError};
 use crate::geom::extent1d::Extent1d;
 use crate::intersect::surface_intersector::p1::TsectPnt;
@@ -41,16 +44,79 @@ use crate::nurbs::b_spline_curve::{BSplineCurve, BSplineCurveForm, CanonicalData
 use crate::nurbs::b_spline_surface::p1::CanonicalSurfaceData;
 use crate::nurbs::b_spline_surface::{BSplineSurface, BSplineSurfaceForm};
 use crate::nurbs::knots::Side;
+use crate::surface::offset_surface::OffsetSurface;
 use crate::surface::procedural_blend::chamfer::ChamferDefinition;
 use crate::surface::procedural_blend::{count_area_root, BlendDefinitionInput, ProceduralBlend};
 use crate::surface::surface::{Surface, SurfaceKind};
 use core::sync::atomic::{AtomicU32, Ordering};
+use std::borrow::Cow;
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
+/// How many halvings in a row of a span may leave its proved bound no better than half its
+/// parent's proved bound before the certificate stops (#16768). Only halvings between two
+/// finite bounds count; a span still unproved (its feet's enclosure failing on every piece)
+/// is left to the cap of 4096 stations, since how many halvings Krawczyk's proof needs
+/// depends on how far its contraction starts from one, which no order bounds. Derived from
+/// the order of the bound on a smooth span of length h: it is the Hermite remainder
+/// `h^4 / 384` times the jets' fourth s-derivative bounded over the span's pieces
+/// (`gn_certify_span`), order 4 in h. A halving divides `h^4` by 2^4 = 16, and the half
+/// starts from its parent's pieces, whose bounds hold over it, so its fourth-derivative
+/// bound is no larger: a proved smooth span's bound falls about 16-fold with each halving.
+/// The test asks only 2-fold (order 1), the slack being the row terms taken again about the
+/// half's own first station. Four halvings in a row that each fall short of order 1 have
+/// together gained less than 2^4 = 16, what one halving of the order-4 bound gains: the
+/// bound is then not following its order, so the section is degenerate there (an offset
+/// nearly collapsing to a curve, as where a ball's radius is close to a face's own radius
+/// of curvature), and halving further only multiplies the work, the stations doubling
+/// each round to the cap.
+const MAX_STALLED_HALVINGS: u32 = 4;
 const OP: &str = "blend::fillet_section::GnSectionFsg";
 const OP_BUILD: &str = "blend::fillet_section::GnSectionFsg::build";
 const OP_CERTIFY: &str = "blend::fillet_section::GnSectionFsg::certify";
+
+/// The work one G^n section certificate may do past its first spans: at most
+/// [`GN_HALVINGS_PER_SPAN`] halvings per first span plus this many (a halving: a span over its
+/// target split at its middle, a station solved there and its two halves certified again).
+/// The first spans (one per pair of the solver's stations and knot-line crossings) cost one
+/// certification each and are never refused, so the budget grows with the rails. A round
+/// whose halvings would take the certificate past the budget is refused before it starts, as
+/// not certified within its tolerance ([`crate::error::blend::BlendFailure::NotCertified`]);
+/// no size is named. Not upstream (the fork stops only past 4096 stations, which stays, typed
+/// the same).
+///
+/// Measured basis (2026-11-13, every solidcore workspace test and kernel rig case: 579
+/// certificates, 576 certified; the goldens reach no G^n certificate): halvings at most 152
+/// on at most 113 first spans, and at most 20 past three per first span. The tightest
+/// certificates against the budget take 98 halvings on 28 first spans (a budget of 212, 2.16
+/// times), a hole's top rim 139 on 61 (311, 2.24 times) and the boss-root section 152 on 75
+/// (353, 2.32 times). Scaled with the tolerance held, the solver places more first spans,
+/// and the last two take 96 to 211 halvings against budgets of 503 to 857 (4.1 to 5.2 times).
+/// The round that motivated it, a 2.99 round whose ball's offset tube is 0.01 across (fuzz
+/// body `b27`), needed 1,271 halvings without a budget (about 450 s, measured 2026-11-11), and
+/// the budget refused it (123 halvings at 165 stations, end to end). That was before the
+/// certificate kept the offset's cancellation near a focal distance (#16652): its enclosures
+/// are now tight enough that the round certifies within its budget and builds, and no real
+/// round is known to be refused. The boss plate's 0.99 round along a 1 mm arc round (a ball
+/// just under the round's tube, the case the stall stop above was added for; measured
+/// 2026-11-15, release build) is not refused either: its two certificates take 23 halvings
+/// of 209 and 19 of 188, and it builds the same body, to every printed digit, with the budget
+/// lifted. A budget predicted from each span's own bound (a halving
+/// divides a proved span's bound by 16, the Hermite remainder's `h^4`) was tried before #16652
+/// and did not refuse that round: once proved, its spans converge at that rate, so the
+/// prediction allowed its whole cost. Counted, not timed: the kernel has no clock, and a count
+/// is deterministic.
+pub const GN_HALVING_BUDGET: usize = 128;
+
+/// The halvings a G^n section certificate may make per first span, beyond
+/// [`GN_HALVING_BUDGET`]: three, two full levels of halving (a span halved, then both its
+/// halves), so a long round that needs two levels on every first span builds on the per-span
+/// part alone, however many first spans it has.
+pub const GN_HALVINGS_PER_SPAN: usize = 3;
+
+/// The fork's stop: a certificate past this many stations is refused
+/// ([`crate::error::blend::BlendFailure::NotCertified`]), whatever its halvings.
+const GN_MAX_STATIONS: usize = 4096;
 
 /// `SM_GN_MAX_ORDER`: the highest order of a G^n section.
 pub const GN_MAX_ORDER: usize = 4;
@@ -79,6 +145,15 @@ pub struct GnSectionFsg {
     pub certified_bound: f64,
     /// `m_lCertifiedSpans`: and its number of spans along the rails.
     pub certified_spans: usize,
+    /// The span certifications its certificate made (`sm_GnCertifySpan` calls, the
+    /// halves' included). Not upstream.
+    pub certifications: usize,
+    /// The spans its certificate halved: the work counted against its budget
+    /// ([`GN_HALVING_BUDGET`]). Not upstream.
+    pub halvings: usize,
+    /// The certificate's budget of halvings beyond [`GN_HALVINGS_PER_SPAN`] per first span:
+    /// [`GN_HALVING_BUDGET`] (lowered only by this module's tests).
+    halving_budget: usize,
     /// `m_sArcs` (3aae1c4): order 1, how the ball's circles are built.
     pub arcs: ArcSection,
 }
@@ -151,11 +226,43 @@ pub struct GnLawRound<'a> {
 /// sets (the balls' centres at the stations, over t; 0d43b4c).
 type Built = (Surface, Option<BSplineCurve>);
 
-/// The surface under an offset surface (`GetBaseSurface`), else the surface itself.
-fn base_of(s: &Surface) -> &Surface {
+/// Not the fork's: the face a ball rolls on, for a section by its definition (the round's
+/// circle, [`crate::blend::fillet_standard_solver::p2`], and a section of any order, the
+/// curvature-continuous round's): the surface the trace rolled the ball on. Past its domain
+/// the offset of a B-spline, surface of revolution or surface of extrusion is evaluated on
+/// its extended base (`m_pExtendedSurface`: the base's tangent extension, or a surface of
+/// revolution of a circle's arc carried on as its circle), while the base itself continues
+/// otherwise (a B-spline's end spans carried on, a revolved generator's extrapolation). A
+/// section whose rails run on past the face (an edge's round run on past the edge's ends,
+/// or out to an End round a tube) had no foot on the plain base there: its first station
+/// missed the rails (by more than 1 on a twisted wall; by 93 at the open end of a long
+/// shoulder between two lofted sheets, where the curvature-continuous round was refused).
+/// So where the offset holds an extension (the one it holds now, pending or stored, which
+/// contains every point the trace evaluated), the section rolls on it. A plane, cylinder,
+/// cone, sphere or torus continues as itself and keeps its analytic kind, and a blend by its
+/// definition keeps its definition.
+pub(crate) fn rolled_on(offset: &OffsetSurface) -> Cow<'_, Surface> {
+    let base = offset.base_surface();
+    let extends = matches!(
+        base.kind(),
+        SurfaceKind::BSpline(_)
+            | SurfaceKind::SurfOfRevolution(_)
+            | SurfaceKind::SurfOfExtrusion(_)
+    );
+    let extended = if extends {
+        offset.with_extended_base_surface(|e| e.map(Surface::clone_keeping_owner))
+    } else {
+        None
+    };
+    extended.map_or(Cow::Borrowed(base), Cow::Owned)
+}
+
+/// The face `s` stands for: under an offset surface, the surface its ball rolls on
+/// ([`rolled_on`]); any other surface, itself.
+fn face_of(s: &Surface) -> Cow<'_, Surface> {
     match s.kind() {
-        SurfaceKind::OffsetSurface(o) => o.base_surface(),
-        _ => s,
+        SurfaceKind::OffsetSurface(o) => rolled_on(o),
+        _ => Cow::Borrowed(s),
     }
 }
 
@@ -943,6 +1050,9 @@ impl GnSectionFsg {
             thumbweight,
             certified_bound: -1.0,
             certified_spans: 0,
+            certifications: 0,
+            halvings: 0,
+            halving_budget: GN_HALVING_BUDGET,
             arcs: ArcSection {
                 approximate_arcs: true,
                 tol_percent_radius: 0.05,
@@ -961,6 +1071,9 @@ impl GnSectionFsg {
             thumbweight: 0.0,
             certified_bound: -1.0,
             certified_spans: 0,
+            certifications: 0,
+            halvings: 0,
+            halving_budget: GN_HALVING_BUDGET,
             arcs: ArcSection {
                 approximate_arcs: true,
                 tol_percent_radius: 0.05,
@@ -979,6 +1092,9 @@ impl GnSectionFsg {
             thumbweight: 0.0,
             certified_bound: -1.0,
             certified_spans: 0,
+            certifications: 0,
+            halvings: 0,
+            halving_budget: GN_HALVING_BUDGET,
             arcs,
         }
     }
@@ -1061,7 +1177,8 @@ impl GnSectionFsg {
         uvs: [&mut BSplineCurve; 2],
     ) -> Result<Surface> {
         let [s1, s2] = surfaces;
-        let faces = [base_of(s1), base_of(s2)];
+        let (f1, f2) = (face_of(s1), face_of(s2));
+        let faces = [f1.as_ref(), f2.as_ref()];
         self.build(
             k,
             center_line,
@@ -1564,11 +1681,13 @@ impl GnSectionFsg {
         }
 
         // the certificate
-        let (mut stations, bound, spans) = self.certify(
+        let (mut stations, bound, spans, [certifications, halvings]) = self.certify(
             k, faces, leader, stations, r, side, tr, tol, equal_area, gn_law,
         )?;
         self.certified_bound = bound;
         self.certified_spans = spans;
+        self.certifications = certifications;
+        self.halvings = halvings;
         let ss: Vec<f64> = stations.iter().map(|st| st.s).collect();
 
         // each station's series on the pieces before it, for the span ending there: a
@@ -1587,6 +1706,32 @@ impl GnSectionFsg {
         for st in stations.iter_mut().skip(1) {
             k.check_cancelled(OP_BUILD)?;
             system.solve_before(k, st)?;
+        }
+        // a blend that closes on itself has one station at its seam, solved at the leader's
+        // start on the pieces after it and at its end on the pieces before it. A span
+        // ending at a station takes the station's values, so the end takes the start's:
+        // where a support's normal differs across a knot line at the seam, the two solves
+        // differ by that jump, and the net's end rows would stand apart by it
+        if let [first, .., last] = stations.as_mut_slice() {
+            let at = |st: &GnStation, q: usize| st.v.a.get(q).map_or(f64::NAN, |c| c.at(0, 0));
+            let m0 = Vec3::new(at(first, 0), at(first, 1), at(first, 2));
+            let m1 = Vec3::new(at(last, 0), at(last, 1), at(last, 2));
+            // (the station solve's tolerance: within it two stations are one point)
+            let same = 1.0e-9 * smax(1.0, m0.length());
+            let closes = m0.distance(m1) <= same
+                && (0..2).all(|f| foot(first, f, 0, 0).distance(foot(last, f, 0, 0)) <= same);
+            if closes {
+                for (lf, ff) in last.f.iter_mut().zip(&first.f) {
+                    for (lq, fq) in lf.a.iter_mut().zip(&ff.a) {
+                        for kk in 0..=n {
+                            lq.set(0, kk, fq.at(0, kk));
+                        }
+                    }
+                }
+                for (lq, fq) in last.v.a.iter_mut().zip(&first.v.a) {
+                    lq.set(0, 0, fq.at(0, 0));
+                }
+            }
         }
 
         let ld = section_width(n); // the section's control points across
@@ -1636,6 +1781,29 @@ impl GnSectionFsg {
             spans.push(net_form.span(a, ra, b, rb));
         }
         let surface = net_of_spans(&ss, &spans, ld)?;
+        // each span's own Hermite rows, which its certificate bounds against the
+        // definition: at the station ending it, the values of the pieces before the
+        // station, where the net's row there holds the values of the pieces after it. The
+        // two differ where a support's normal differs across a knot line under a foot (by
+        // about the ball's radius times that angle), and at the seam of a blend that
+        // closes on itself; they are the same rows everywhere else
+        let mut own_spans: Vec<(Vec<Vec3>, Vec<f64>)> = Vec::new();
+        let ending = stations.iter().zip(&rows).skip(1);
+        for ((a, ra), (b, rb)) in stations.iter().zip(&rows).zip(ending) {
+            k.check_cancelled(OP_BUILD)?;
+            let mut before = *b;
+            if b.sided {
+                before.x = b.xl;
+                before.f = b.fl;
+                before.v = b.vl;
+                before.wds = b.wdsl;
+            }
+            let own = net_form.station_rows(&before)?;
+            let mut rb_own = rb.clone();
+            rb_own.v = own.v;
+            rb_own.w = own.w;
+            own_spans.push(net_form.span(a, ra, b, &rb_own));
+        }
 
         // the feet's uv curves: the Hermite interpolants of the stations' feet, the
         // definition's seeds (4a10ed8); the rails and uv curves become them with
@@ -1741,7 +1909,8 @@ impl GnSectionFsg {
         // its bound: the certificate's, of the Hermite rows; how far the net stored (its
         // control points divided out of the rows and its weights scaled, each rounded) is
         // from them; and three floors, how far rows computed again may be (#2388)
-        let rounding = super::recertify::stored_net_distance(&surface, &spans, ld)?
+        // (measured to each span's own rows: the certificate's bound is from those)
+        let rounding = super::recertify::stored_net_distance(&surface, &own_spans, ld)?
             + 3.0 * super::recertify::precision_floor(k, faces, n as u32, &surface)?;
         let input = BlendDefinitionInput {
             supports: faces,
@@ -1765,7 +1934,11 @@ impl GnSectionFsg {
     /// The certificate block of `Build`: a station wherever a foot crosses a knot line of
     /// its face, then each span's bound (`sm_GnCertifySpan`) at most a tenth of the
     /// tolerance, a span over it halved (a station solved at its middle) until none is.
-    /// Returns the stations, the largest bound and the number of spans.
+    /// Returns the stations, the largest bound, the number of spans, and the span
+    /// certifications made and spans halved. A round of halvings that would pass the budget
+    /// ([`GN_HALVINGS_PER_SPAN`] per first span plus `self.halving_budget`,
+    /// [`GN_HALVING_BUDGET`]), or a certificate past
+    /// [`GN_MAX_STATIONS`], is refused: [`BlendFailure::NotCertified`].
     #[allow(clippy::too_many_arguments)]
     fn certify(
         &self,
@@ -1779,7 +1952,7 @@ impl GnSectionFsg {
         tol: f64,
         equal_area: bool,
         law: Option<&GnLaw<'_>>,
-    ) -> Result<(Vec<GnStation>, f64, usize)> {
+    ) -> Result<(Vec<GnStation>, f64, usize, [usize; 2])> {
         let ([n0, n1], mut defs) = certificate_faces(k, faces, self.order, law.is_some())?;
         let any_defs = defs.faces.iter().any(Option::is_some);
         let face_n = [&n0, &n1];
@@ -1807,7 +1980,20 @@ impl GnSectionFsg {
                             continue;
                         }
                         // the parameter where that foot is on the knot line: the secant,
-                        // kept in its bracket
+                        // kept in its bracket. Every trial station is solved on the piece
+                        // the foot comes from (xa's side of the line), carried on past the
+                        // line: the face is only as smooth across the line as its knot
+                        // allows, so a solve that takes the piece each iterate's value is
+                        // in has no fixed point once the trial is within the jump of the
+                        // face's normal of the line (each piece's foot lies on the other's
+                        // side), while the one piece's foot is smooth in s through it
+                        let after = if xb > xa { 1 } else { -1 };
+                        let mut ai_after = [0_i32; 4];
+                        let mut ai_before = [0_i32; 4];
+                        if let (Some(x), Some(y)) = (ai_after.get_mut(q), ai_before.get_mut(q)) {
+                            *x = after;
+                            *y = -after;
+                        }
                         let (mut s0, mut s1, mut x0, mut x1) = (a.s, b.s, xa - dk, xb - dk);
                         let mut at: Option<GnStation> = None;
                         for _ in 0..60 {
@@ -1822,6 +2008,14 @@ impl GnSectionFsg {
                             for (q2, sq) in seed.iter_mut().enumerate() {
                                 *sq = (1.0 - t) * param(a, q2, 0, 0) + t * param(b, q2, 0, 0);
                             }
+                            // (the seed names the piece: kept on xa's side of the line)
+                            if let Some(sq) = seed.get_mut(q) {
+                                *sq = if after > 0 {
+                                    smin(*sq, dk)
+                                } else {
+                                    smax(*sq, dk)
+                                };
+                            }
                             let tol_ds = solve_tol(ds)?;
                             let law_r = law_series(law, ds, tr.s(), false)?;
                             let st = solve_top(
@@ -1835,7 +2029,7 @@ impl GnSectionFsg {
                                 tr,
                                 tol_ds,
                                 self.order,
-                                None,
+                                Some(ai_before),
                                 false,
                                 law_r.as_ref(),
                             )?;
@@ -1858,14 +2052,6 @@ impl GnSectionFsg {
                             // s-derivatives: the station is solved on the piece after it
                             // (the foot moves on to xb's side) and on the piece before,
                             // for the span ending there (3bc54a4)
-                            let after = if xb > xa { 1 } else { -1 };
-                            let mut ai_after = [0_i32; 4];
-                            let mut ai_before = [0_i32; 4];
-                            if let (Some(x), Some(y)) = (ai_after.get_mut(q), ai_before.get_mut(q))
-                            {
-                                *x = after;
-                                *y = -after;
-                            }
                             let on = [0, 1, 2, 3].map(|q2| param(&st, q2, 0, 0));
                             let tol_on = solve_tol(st.s)?;
                             let law_r = law_series(law, st.s, tr.s(), false)?;
@@ -1953,6 +2139,19 @@ impl GnSectionFsg {
         // a span's finest proved level, kept while it is over the target: its halves start
         // from its pieces (not the fork's, which certifies each half afresh)
         let mut levels: Vec<Option<Arc<CertifiedLevel>>> = vec![None; bounds.len()];
+        // the span certifications made, and the spans halved (against the budget)
+        let (mut certifications, mut halvings) = (0_usize, 0_usize);
+        let budget = bounds
+            .len()
+            .saturating_mul(GN_HALVINGS_PER_SPAN)
+            .saturating_add(self.halving_budget);
+        // for each span: its parent's bound (none for a span not halved from another) and how
+        // many halvings in a row, itself included once certified, left a bound no better than
+        // half the parent's
+        let mut parents: Vec<Option<f64>> = vec![None; bounds.len()];
+        let mut stalled: Vec<u32> = vec![0; bounds.len()];
+        // the halving rounds taken so far
+        let mut rounds = 0_u32;
         loop {
             let mut all = true;
             // a span's first level tried, where it inherits none (not the fork's, which
@@ -1961,6 +2160,7 @@ impl GnSectionFsg {
             for (j, (bj, lj)) in bounds.iter_mut().zip(levels.iter_mut()).enumerate() {
                 k.check_cancelled(OP_CERTIFY)?;
                 if *bj < 0.0 {
+                    certifications += 1;
                     let (Some(a), Some(b)) = (stations.get(j), stations.get(j + 1)) else {
                         return Err(SolidError::blend_failed(
                             OP,
@@ -1991,6 +2191,23 @@ impl GnSectionFsg {
                     )?;
                     // the next span's first level: one coarser than this one's first proved
                     hint = reuse.first.map_or(0, |f| f.saturating_sub(1));
+                    if let (Some(&parent), Some(count)) = (parents.get(j), stalled.get_mut(j)) {
+                        // only a halving between proved (finite) bounds counts: an unproved span
+                        // is left to the cap on the stations, since how many halvings its proof
+                        // takes is not bounded by the bound's order
+                        let stalled_here = match parent {
+                            Some(p) if p.is_finite() && bj.is_finite() => *bj > 0.5 * p,
+                            _ => false,
+                        };
+                        *count = if stalled_here { *count + 1 } else { 0 };
+                        if *bj > target && *count >= MAX_STALLED_HALVINGS {
+                            // the halving did not converge: a typed failure, the rounds it took
+                            return Err(SolidError::NotConverged {
+                                operation: OP_CERTIFY,
+                                iterations: rounds,
+                            });
+                        }
+                    }
                     let within = *bj <= target;
                     *lj = if within {
                         None
@@ -2006,23 +2223,44 @@ impl GnSectionFsg {
             if all {
                 break;
             }
-            if stations.len() > 4096 {
-                // "the blend could not be certified within its tolerance"
-                return Err(SolidError::blend_failed(
-                    OP,
-                    "the blend could not be certified within its tolerance",
+            // the spans this round halves (a bound that is no number is over the target)
+            let over = bounds
+                .iter()
+                .filter(|&&bj| {
+                    !matches!(
+                        bj.partial_cmp(&target),
+                        Some(core::cmp::Ordering::Less | core::cmp::Ordering::Equal)
+                    )
+                })
+                .count();
+            // the certificate's work budget, or the fork's stop: refused, not certified
+            // ("the blend could not be certified within its tolerance")
+            if halvings + over > budget || stations.len() > GN_MAX_STATIONS {
+                return Err(SolidError::blend(
+                    OP_CERTIFY,
+                    BlendFailure::NotCertified {
+                        halvings,
+                        stations: stations.len(),
+                    },
                 ));
             }
+            halvings += over;
             let mut next: Vec<GnStation> = Vec::new();
             let mut next_bounds: Vec<f64> = Vec::new();
             let mut next_levels: Vec<Option<Arc<CertifiedLevel>>> = Vec::new();
-            for ((pair, &bj), lj) in stations.windows(2).zip(&bounds).zip(&levels) {
+            let mut next_parents: Vec<Option<f64>> = Vec::new();
+            let mut next_stalled: Vec<u32> = Vec::new();
+            for (((pair, &bj), lj), &uj) in
+                stations.windows(2).zip(&bounds).zip(&levels).zip(&stalled)
+            {
                 k.check_cancelled(OP_CERTIFY)?;
                 let [a, b] = pair else { continue };
                 next.push(*a);
                 if bj <= target {
                     next_bounds.push(bj);
                     next_levels.push(None);
+                    next_parents.push(None);
+                    next_stalled.push(0);
                     continue;
                 }
                 let mid = 0.5 * (a.s + b.s);
@@ -2062,6 +2300,10 @@ impl GnSectionFsg {
                 next_bounds.push(-1.0);
                 next_levels.push(lj.clone());
                 next_levels.push(lj.clone());
+                next_parents.push(Some(bj));
+                next_parents.push(Some(bj));
+                next_stalled.push(uj);
+                next_stalled.push(uj);
             }
             if let Some(last) = stations.last() {
                 next.push(*last);
@@ -2069,6 +2311,9 @@ impl GnSectionFsg {
             stations = next;
             bounds = next_bounds;
             levels = next_levels;
+            parents = next_parents;
+            stalled = next_stalled;
+            rounds = rounds.saturating_add(1);
         }
         let mut bound = 0.0_f64;
         for &b in &bounds {
@@ -2076,7 +2321,7 @@ impl GnSectionFsg {
         }
         // (the fork's SM_ERR_MESSAGE report of the spans and the bound is not logged)
         let spans = bounds.len();
-        Ok((stations, bound, spans))
+        Ok((stations, bound, spans, [certifications, halvings]))
     }
 
     /// `ContactOrderAt`: the order of contact k of this section with face `rail` (0 or 1)
@@ -2189,6 +2434,58 @@ mod tests {
     use crate::geom::extent2d::Extent2d;
     use crate::math::Vec2;
     use crate::surface::plane::Plane;
+
+    /// A curved patch: one bicubic span over [0, 1] x [0, 1].
+    fn dome() -> Surface {
+        use crate::nurbs::math::{CPoint, NOW};
+        let net: Vec<Vec<CPoint>> = (0..4_u32)
+            .map(|i| {
+                (0..4_u32)
+                    .map(|j| {
+                        let (x, y) = (f64::from(i) / 3.0, f64::from(j) / 3.0);
+                        let z = 0.5 * ((x - 0.5).powi(2) + (y - 0.5).powi(2)) + 0.3 * x * y;
+                        CPoint::new(x, y, z, NOW)
+                    })
+                    .collect()
+            })
+            .collect();
+        let knots = [0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0];
+        Surface::from(BSplineSurface::from_data(3, 3, 3, 3, 7, 7, &net, &knots, &knots).unwrap())
+    }
+
+    /// Past its face's domain a section's station is solved on the surface the trace rolled
+    /// the ball on: the offset's extension of its base. There the face's point with the
+    /// offset distance along its normal is the ball's centre the offset gives; the base's
+    /// own end span carried on is another surface, whose foot misses that centre (a
+    /// curvature-continuous round run on past the open ends of two lofted sheets was refused
+    /// for it).
+    #[test]
+    fn past_its_face_a_section_rolls_on_the_offset_s_extension() {
+        let k = Kernel::default();
+        let d = 0.25;
+        let mut offset =
+            OffsetSurface::new(&k, d, dome(), true, crate::geom::extent2d::SS_NONE).unwrap();
+        offset.set_allow_extension(true);
+        let past = Point2::new(1.6, 0.4);
+        // the trace's ball centre there, on the offset, which extends its base to reach it
+        let centre = offset.evaluate_point(&k, past).unwrap();
+        let miss = |s: &Surface| -> f64 {
+            let p = surface_partials(&k, s, past, 1).unwrap();
+            let foot = vec3(p.at(0, 0));
+            let n = vec3(p.at(1, 0)).cross(vec3(p.at(0, 1))).unitize().unwrap();
+            (foot + n * d)
+                .distance(centre)
+                .min((foot - n * d).distance(centre))
+        };
+        let faced = Surface::from(offset.clone());
+        let face = face_of(&faced);
+        assert!(miss(&face) < 1e-9, "the extension's foot: {}", miss(&face));
+        assert!(
+            miss(&dome()) > 1e-2,
+            "the base carried on: {}",
+            miss(&dome())
+        );
+    }
 
     fn plane(x_axis: Vec3, y_axis: Vec3) -> Surface {
         Surface::from(Plane::new(
@@ -2445,5 +2742,224 @@ mod tests {
             SolidError::blend_failed(OP, "the spans are not the stations'")
         );
         assert_eq!(error.upstream_status(), Some(crate::error::SM_ERR));
+    }
+
+    /// The certificate's work budget ([`GN_HALVING_BUDGET`], [`GN_HALVINGS_PER_SPAN`]): the
+    /// ball of radius 2 at the root of a cylinder of radius 8 standing on a plane (as in
+    /// `tests/issue_2690_uv_bound_stretched_face.rs`), certified at 1e-3 after halving `h` = 15
+    /// spans of its one first span (measured). With a budget of exactly `h` (`h - 3` beyond the
+    /// per-span allowance) it builds the same certificate; with one less the round that would
+    /// pass it is refused as not certified ([`BlendFailure::NotCertified`], status `SM_ERR`),
+    /// and no fallback may swallow the refusal. On its own thread with a larger stack: the
+    /// build's frames are deep for the 2 MiB of a plain `cargo test` thread.
+    #[test]
+    fn a_certificate_past_its_work_budget_is_refused_not_certified() {
+        std::thread::Builder::new()
+            .stack_size(64 << 20)
+            .spawn(|| work_budget_case(1, 1e-3))
+            .unwrap()
+            .join()
+            .unwrap();
+    }
+
+    /// A round that halves every first span through two full levels builds on the per-span
+    /// part of the budget alone ([`GN_HALVINGS_PER_SPAN`], three halvings per first span): the
+    /// same ball with 15 knots inserted in its centre line (16 first spans, the same geometry)
+    /// at 1e-6 halves each first span and then both its halves, 48 halvings, and builds with
+    /// the fixed part [`GN_HALVING_BUDGET`] set to 0. That is the budget a round on many first
+    /// spans gets past its fixed 128, so a long round needing two levels everywhere is not
+    /// refused however many first spans it has (two halvings per first span would refuse it
+    /// once it has more than 128).
+    #[test]
+    fn a_round_halving_every_first_span_twice_builds_on_the_per_span_part_alone() {
+        std::thread::Builder::new()
+            .stack_size(64 << 20)
+            .spawn(|| {
+                let (built, g) = budget_round(16, 1e-6, 1.0, 0);
+                built.unwrap();
+                let first = g.certified_spans - g.halvings;
+                assert_eq!((first, g.halvings), (16, 3 * 16));
+                assert_eq!(GN_HALVINGS_PER_SPAN, 3);
+            })
+            .unwrap()
+            .join()
+            .unwrap();
+    }
+
+    /// The same round with the model and its tolerance scaled by 8 (exact in binary): the
+    /// same first spans and halvings, so the budget, which counts them, does not depend on
+    /// the model's size.
+    #[test]
+    fn a_certificate_s_work_is_the_same_for_a_model_scaled_with_its_tolerance() {
+        std::thread::Builder::new()
+            .stack_size(64 << 20)
+            .spawn(|| {
+                let (a, ga) = budget_round(1, 1e-3, 1.0, GN_HALVING_BUDGET);
+                let (b, gb) = budget_round(1, 1e-3, 8.0, GN_HALVING_BUDGET);
+                a.unwrap();
+                b.unwrap();
+                assert!(ga.halvings > 0);
+                assert_eq!(
+                    (ga.halvings, ga.certifications, ga.certified_spans),
+                    (gb.halvings, gb.certifications, gb.certified_spans)
+                );
+            })
+            .unwrap()
+            .join()
+            .unwrap();
+    }
+
+    /// The ball of radius 2 on the plane z = 0 and outside a cylinder of radius 8 about the z
+    /// axis, over a quarter turn, its centre line with `knots - 1` knots inserted, the model
+    /// and its tolerance scaled by `scale`, certified with a fixed part `budget`.
+    fn budget_round(
+        knots: usize,
+        tol: f64,
+        scale: f64,
+        budget: usize,
+    ) -> (Result<Surface>, GnSectionFsg) {
+        use crate::geom::vector3d::Point3;
+        use crate::nurbs::b_spline_curve::{BSplineCurveForm, CanonicalData, KnotType};
+        use crate::nurbs::b_spline_surface::{
+            BSplineSurface, BSplineSurfaceForm, CanonicalSurfaceData,
+        };
+        let quarter = |dim: u64, r: f64, z: f64, [ax, bx]: [f64; 2], [ay, by]: [f64; 2]| {
+            let p = |x: f64, y: f64| Point3::new(ax * x + bx, ay * y + by, z);
+            let w = 0.5_f64.sqrt();
+            BSplineCurve::create_canonical(&CanonicalData {
+                dim,
+                degree: 2,
+                control_points: &[p(r, 0.0), p(r, r), p(0.0, r)],
+                form: BSplineCurveForm::Unspecified,
+                knot_multiplicities: &[3, 3],
+                knots: &[0.0, 1.0],
+                knot_type: KnotType::Unspecified,
+                weights: Some(&[1.0, w, 1.0]),
+                trim: None,
+            })
+            .unwrap()
+        };
+        let surface = |du: usize, dv: usize, cps: &[Point3], weights: Option<&[f64]>| {
+            Surface::from(
+                BSplineSurface::create_canonical(&CanonicalSurfaceData {
+                    u_degree: du,
+                    v_degree: dv,
+                    control_points: cps,
+                    form: BSplineSurfaceForm::Unspecified,
+                    u_multiplicities: &[du + 1, du + 1],
+                    v_multiplicities: &[dv + 1, dv + 1],
+                    u_knots: &[0.0, 1.0],
+                    v_knots: &[0.0, 1.0],
+                    knot_type: KnotType::Unspecified,
+                    weights,
+                    uv_domain: None,
+                })
+                .unwrap(),
+            )
+        };
+        let c = scale;
+        let (wall, rc) = (8.0, 10.0);
+        let w = 20.0 * c;
+        let plate = surface(
+            1,
+            1,
+            &[
+                Point3::new(-w, -w, 0.0),
+                Point3::new(-w, w, 0.0),
+                Point3::new(w, -w, 0.0),
+                Point3::new(w, w, 0.0),
+            ],
+            None,
+        );
+        let (mut cps, mut ws) = (Vec::new(), Vec::new());
+        let h = 0.5_f64.sqrt();
+        for (p, wi) in [(wall, 0.0), (wall, wall), (0.0, wall)]
+            .into_iter()
+            .zip([1.0, h, 1.0])
+        {
+            for z in [0.0, 10.0] {
+                cps.push(Point3::new(c * p.0, c * p.1, c * z));
+                ws.push(wi);
+            }
+        }
+        let cylinder = surface(2, 1, &cps, Some(&ws));
+        let mut k = Kernel::default();
+        k.fixes.fillet_round_as_definition = true;
+        let id = [1.0, 0.0];
+        let mut center = quarter(3, rc * c, 2.0 * c, id, id);
+        let inner: Vec<f64> = (1..knots).map(|i| i as f64 / knots as f64).collect();
+        center.insert_knots(&inner).unwrap();
+        let mut rail1 = quarter(3, rc * c, 0.0, id, id);
+        let mut rail2 = quarter(3, wall * c, 2.0 * c, id, id);
+        let mut uv1 = quarter(2, rc * c, 0.0, [0.5 / w, 0.5], [0.5 / w, 0.5]);
+        let mut uv2 = BSplineCurve::create_line_segment(
+            2,
+            Point3::new(0.0, 0.2, 0.0),
+            Point3::new(1.0, 0.2, 0.0),
+        )
+        .unwrap();
+        let mut g = GnSectionFsg::circle(ArcSection {
+            approximate_arcs: false,
+            ..ArcSection::default()
+        });
+        assert_eq!(g.halving_budget, GN_HALVING_BUDGET);
+        g.halving_budget = budget;
+        let built = g.build_with_radius(
+            &k,
+            &center,
+            [&mut rail1, &mut rail2],
+            tol * c,
+            [&plate, &cylinder],
+            [&mut uv1, &mut uv2],
+            false,
+            2.0 * c,
+        );
+        (built, g)
+    }
+
+    fn work_budget_case(knots: usize, tol: f64) {
+        let (built, g) = budget_round(knots, tol, 1.0, GN_HALVING_BUDGET);
+        built.unwrap();
+        let h = g.halvings;
+        // some spans were halved, every final span certified once at least
+        assert!(
+            h > 0 && g.certifications > g.certified_spans,
+            "{h} {}",
+            g.certifications
+        );
+        // its first spans (each halving made one span more), and the fixed part of a budget
+        // of exactly `h`: more halvings than the per-span allowance, so it decides
+        let first = g.certified_spans - h;
+        assert!(first >= knots, "{first} first spans for {knots}");
+        assert!(h > GN_HALVINGS_PER_SPAN * first, "{h} on {first}");
+        let exact = h - GN_HALVINGS_PER_SPAN * first;
+        // the budget met exactly: the same certificate
+        let (again, g2) = budget_round(knots, tol, 1.0, exact);
+        again.unwrap();
+        assert_eq!(
+            (
+                g2.halvings,
+                g2.certifications,
+                g2.certified_spans,
+                g2.certified_bound.to_bits()
+            ),
+            (
+                h,
+                g.certifications,
+                g.certified_spans,
+                g.certified_bound.to_bits()
+            )
+        );
+        // one short: the last round is refused before it starts, not certified
+        let (refused, _) = budget_round(knots, tol, 1.0, exact - 1);
+        let e = refused.unwrap_err();
+        match e.blend_failure() {
+            Some(&BlendFailure::NotCertified { halvings, stations }) => {
+                assert!(halvings < h && stations > 1, "{halvings} {stations}");
+            }
+            other => panic!("{other:?}"),
+        }
+        assert_eq!(e.upstream_status(), Some(crate::error::SM_ERR));
+        assert!(e.is_unported_or_cancelled());
     }
 }

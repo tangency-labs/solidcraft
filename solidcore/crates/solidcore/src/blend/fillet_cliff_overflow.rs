@@ -4,8 +4,7 @@
 //!
 //! Not upstream: the SolidCraft fork's `source/SMLib/src/SmFilletCliffOverflow.cpp`
 //! (tangency-labs/smlib `8ba4667` and `ae2a6de`, rev `68fb9162`; `eddf0ed` and `bba9914`,
-//! branch `replay/1.0.1`), behind `fixes.fillet_cliff_overflow` (WR-631, WR-638, WR-635,
-//! WR-636). The executive computes the fillet on the
+//! branch `replay/1.0.1`; WR-631, WR-638, WR-635, WR-636). The executive computes the fillet on the
 //! support faces' surfaces (`m_bCliffOverflow`): its fillet B-rep is the sheet of fillet and
 //! corner faces, its boundary on the surfaces of the faces the blends roll on and end on.
 //! The session's `SubtractRemovalRegion`
@@ -561,6 +560,8 @@ fn same(a: Point3, b: Point3, tol: f64) -> bool {
 /// nearest `edge_mid`, the middle of the filleted edge. A kept new piece becomes the
 /// geometry's face in `faces`. Refused (`NoRoom`, in `note`) for an end face that is not
 /// planar and for a rib that does not split a face in two or part it from its middle.
+/// The section is fitted to `fit_tol` and merged at `tol` (the fork uses `tol` for both;
+/// the crease trim fits it tighter, #17673).
 ///
 /// # Errors
 /// The refusals as `SM_ERR`; `SM_ERR` for a failed drop of the edge's middle; those of the
@@ -574,6 +575,7 @@ pub fn cut_fillet_at_open_end(
     vertex_point: Point3,
     edge_mid: Point3,
     tol: f64,
+    fit_tol: f64,
     note: &mut Option<Refusal>,
 ) -> Result<()> {
     let planar = end_surface.is_planar(k, EFF_ZERO)?;
@@ -620,7 +622,7 @@ pub fn cut_fillet_at_open_end(
             &uv_domain,
             at,
             normal,
-            Some(tol),
+            Some(fit_tol),
             None,
         )?;
         if section.curves_3d.is_empty() {
@@ -1899,8 +1901,7 @@ fn on_section_plane(p: Point3, at: Point3, normal: Vec3, tol: f64) -> bool {
     (p - at).dot(normal).abs() <= tol
 }
 
-/// Not the fork's (WR-674, `fixes.fillet_round_ends_at_tangent_continuation`,
-/// tangency-labs/solidcore#2176): close the sheet `region` of one round, cut off at both
+/// Not the fork's (WR-674, tangency-labs/solidcore#2176): close the sheet `region` of one round, cut off at both
 /// ends by its sections (`ends`, the two vertices of the filleted edge `fil_edge`), into the
 /// region the round removes. The sheet's boundary is a rail on each face of the filleted
 /// edge and a section at each end. Each face gets a closing face on its surface (continued:
@@ -2064,7 +2065,7 @@ pub fn close_section_ended_round(
 }
 
 /// The section's flat face of a round cut off at `end` (WR-674, [`close_section_ended_round`];
-/// with `fixes.fillet_section_end_trim_at_creases`, WR-706, the trim's): on the section's
+/// WR-706, the trim's): on the section's
 /// plane, bounded by the lamina edge `section` of `region` (the round's section) and the lines
 /// from its ends to the end's vertex (a line shorter than `on_tol` left out), added to
 /// `region`.

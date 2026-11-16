@@ -204,6 +204,9 @@ fn joint_and_drive_preview_on_the_placed_model() {
         added: [2, 2, 2, 255],
         new_body: [2, 2, 2, 255],
         removed: [3, 3, 3, 100],
+        lost: [5, 5, 5, 100],
+        selected: [7, 7, 7, 255],
+        mirrored: [6, 6, 6, 100],
         edge: [0, 0, 0, 255],
         ghost: true,
         tint_new: true,
@@ -1037,6 +1040,51 @@ fn edit_feature_on_a_moved_component_refills_in_the_world() {
     assert!(point.dist(Vec3::new(40.0, 0.0, 25.0)) < 1e-6, "{point:?}");
 }
 
+/// Edit Feature of a face feature in a moved component shows its faces on the feature's own
+/// body and rebuilds unchanged (#15903). Its points are stored in the component's frame: placed
+/// through the frame of a root body that stands at the component's own origin, they lie on that
+/// body too, and OK then sent a point on no face of the feature's body ("no face at …") or moved
+/// the feature onto the root body.
+#[test]
+fn edit_face_features_in_a_moved_component_refill_on_their_own_body() {
+    let cases = [
+        ("solid.offset_face", json!({"faces": [[3, 43, 10]], "distance": 1, "body": "Inner"}), Vec3::new(3.0, 43.0, 10.0)),
+        ("solid.replace_face", json!({"faces": [[3, 43, 10]], "target": "Lid", "body": "Inner"}), Vec3::new(3.0, 43.0, 10.0)),
+    ];
+    for (command, params, picked) in cases {
+        // The same holed box in the root and in component Part, which then moves 40 mm along Y.
+        let mut h = crate::scenario::Harness::new();
+        for (component, body) in [("root", "Outer"), ("Part", "Inner")] {
+            if component != "root" {
+                h.app.run("component.create", json!({"name": component})).unwrap();
+            }
+            h.app.run("solid.box", json!({"length": 20, "width": 20, "height": 10, "body_name": body})).unwrap();
+            h.app.run("solid.cylinder", json!({"base": [10, 10, -1], "radius": 3, "height": 12, "body_name": "Drill"})).unwrap();
+            h.app.run("solid.combine", json!({"target": body, "tools": ["Drill"], "operation": "cut"})).unwrap();
+        }
+        h.app.run("component.activate", json!({"component": "root"})).unwrap();
+        let part = occ(&h.app, "Part");
+        h.app.run("occurrence.ground", json!({"occurrence": part, "grounded": false})).unwrap();
+        h.app.run("occurrence.move", json!({"occurrence": part, "translate": [0, 40, 0]})).unwrap();
+        h.app.run("component.activate", json!({"component": "Part"})).unwrap();
+        // Replace Face's target: a plane that Edit Feature shows again as it was.
+        h.app.run("construct.plane.offset", json!({"base": "XY", "offset": 12, "name": "Lid"})).unwrap();
+        let id = h.app.run(command, params).unwrap()["feature"].as_u64().unwrap();
+        h.app.edit_feature(id);
+        h.frames(1);
+        let items: Vec<Sel> = h.app.dialog.as_ref().unwrap().inputs.first().unwrap().items.clone();
+        let [Sel::Face { body, point, .. }] = items.as_slice() else { panic!("{command}: {items:?}") };
+        assert_eq!(body, "Inner", "{command}: {point:?}");
+        assert!(point.dist(picked) < 1e-6, "{command}: {point:?}");
+        h.step(&json!({"key": "Enter"})).unwrap();
+        h.frames(2);
+        assert!(h.app.dialog.is_none(), "{command}: OK rebuilds the unchanged feature");
+        let feature = h.app.session.execute("timeline.inspect", &json!({"feature": id})).unwrap();
+        assert!(feature["error"].is_null(), "{command}: {feature}");
+        assert_eq!(feature["definition"]["body"], "Inner", "{command}: the feature stays on its body");
+    }
+}
+
 /// A crank-rocker four-bar (crank 20, coupler 50, rocker 40, ground pivots 45 apart), built as
 /// it stands with the crank at 90°: joints Crank, Crank pin, Rocker pin, Rocker.
 fn four_bar() -> SolveApp {
@@ -1077,6 +1125,9 @@ fn drive_says_where_a_loop_stopped_it() {
         added: [2, 2, 2, 255],
         new_body: [2, 2, 2, 255],
         removed: [3, 3, 3, 100],
+        lost: [5, 5, 5, 100],
+        selected: [7, 7, 7, 255],
+        mirrored: [6, 6, 6, 100],
         edge: [0, 0, 0, 255],
         ghost: true,
         tint_new: true,
@@ -1139,6 +1190,9 @@ fn drive_says_when_its_joint_is_joined_to_nothing_grounded() {
         added: [2, 2, 2, 255],
         new_body: [2, 2, 2, 255],
         removed: [3, 3, 3, 100],
+        lost: [5, 5, 5, 100],
+        selected: [7, 7, 7, 255],
+        mirrored: [6, 6, 6, 100],
         edge: [0, 0, 0, 255],
         ghost: true,
         tint_new: true,

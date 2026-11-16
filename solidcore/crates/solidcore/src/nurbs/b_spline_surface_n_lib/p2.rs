@@ -67,8 +67,7 @@
 //!   `MakeCurvesCompatible`, the curve evaluations of the n-sided blend, `Scale`,
 //!   `GetKnots`, `N_CrvElevateDegree`, `SetMinMax`).
 //! - **Not upstream: a Coons corner patch tangent to its sides** (WR-547, the fork's
-//!   tangency-labs/smlib@cae8618), only with
-//!   `Kernel::fixes.corner_blend_coons_patch_tangent_to_sides`: the four-sided
+//!   tangency-labs/smlib@cae8618): the four-sided
 //!   `CreateCornerBlend` (not bilinear) replaces its Coons patch by
 //!   `make_coons_patch_tangent_to_sides` (`sm_MakeCoonsPatchTangentToSides` and its
 //!   helpers `sm_CoonsSideNormal`, `sm_CoonsSideAngle`, `sm_RefineToSpans` and
@@ -86,7 +85,7 @@ use crate::curve::curve::p4::is_degenerate_base;
 use crate::curve::hermite_curve::HermiteCurve;
 use crate::curve::tangent_field::{CurveEnd as TangentFieldEnd, TangentDirType, TangentField};
 use crate::error::nurbs::BSplineFailure;
-use crate::error::{ignore_or_pass_on, ignored, Result, SolidError};
+use crate::error::{ignored, Result, SolidError};
 use crate::geom::extent1d::Extent1d;
 use crate::geom::extent2d::{Extent2d, SS_UMAX, SS_UMIN, SS_VMIN};
 use crate::geom::extent3d::Extent3d;
@@ -446,12 +445,9 @@ fn approximate_tangent_field(
         let degenerate = BSplineCurve::create_degenerate_curve(curve.dim(), pnt)?;
         let mut c = SmCurve::from(degenerate);
         let ivl = Extent1d::from_min_max(first, last);
-        // (status ignored; passed on with the opt-in fix, as SmCurve::ApproximateCurve
-        // in tangency-labs/smlib 8311f8e)
-        ignore_or_pass_on(
-            c.edit_parameterization(k, &ivl),
-            k.fixes.query_statuses_pass_on,
-        )?;
+        // (status ignored upstream; passed on as SmCurve::ApproximateCurve in the fork,
+        // tangency-labs/smlib 8311f8e)
+        c.edit_parameterization(k, &ivl)?;
         let CurveKind::BSpline(bs) = c.into_kind() else {
             return Err(SolidError::invalid_input(
                 OP_APPROX_FIELD,
@@ -577,17 +573,9 @@ fn approximate_tangent_field(
     }
 
     // create pBSC curve from control polygon
-    let bsc = flush_crv(
-        approx_tol_3d,
-        &mut ctrl_poly,
-        &mut knots,
-        create_analytics,
-        k.fixes.query_statuses_pass_on,
-    )?
-    .ok_or(SolidError::invalid_input(
-        OP_APPROX_FIELD,
-        "no approximating curve built",
-    ))?;
+    let bsc = flush_crv(approx_tol_3d, &mut ctrl_poly, &mut knots, create_analytics)?.ok_or(
+        SolidError::invalid_input(OP_APPROX_FIELD, "no approximating curve built"),
+    )?;
 
     // pBSCurve->Copy(crContext, rpNewBSplineCurve)
     Ok(bsc.copy())
@@ -2223,7 +2211,7 @@ fn corner_blend_4(
 
     // Not upstream (WR-547; tangency-labs/smlib@cae8618): the patch tangent to its sides'
     // surfaces
-    if k.fixes.corner_blend_coons_patch_tangent_to_sides && !create_bilinear_patch {
+    if !create_bilinear_patch {
         if let Some(tangent) =
             make_coons_patch_tangent_to_sides(k, &coons, &uv_crvs, surfaces, tangency_tol_radians)?
         {
@@ -2740,13 +2728,7 @@ fn corner_blend_n(
 
     // pass the call along to create the NSidedPatch
     let mut ders: Vec<Option<BSplineCurve>> = tan_curves.into_iter().map(Some).collect();
-    BSplineSurface::create_n_sided_patch_with(
-        &mut boundaries,
-        &mut ders,
-        tangency_tol_radians,
-        None,
-        k.fixes.corner_blend_stays_inside_neighbours,
-    )
+    BSplineSurface::create_n_sided_patch(&mut boundaries, &mut ders, tangency_tol_radians, None)
 }
 
 #[cfg(test)]

@@ -1,0 +1,9 @@
+Updates: WR-304
+
+#### WR-304 (update, 2026-11-14). `boolean_cleanup_removes_slits` is removed
+
+After each edge removal, `boolean_post_process` (`boolean/merge/p1.rs`) also checks the merged face's edges that have it on both sides (slits) by the same `IsTopological` test, skipping any a later removal deleted. That is the only path now, and the flag is gone. SolidCraft already ran with it on. Removed: the field `UpstreamFixes::boolean_cleanup_removes_slits`, SolidCraft's preset line, its entry in `fixes.json`, its name in the SolidCraft profile list of `issue_2260_gn_pipe_refined_range_end.rs` and every test setting of it.
+
+- **Which path went:** the upstream one, which checks only the intersection edges (and every edge with `bCheckAllEdges`), so an operand edge between two faces that a merge makes one stays as a slit.
+- **Results:** no golden row moves (measured with only this flag's read site turned on, and in the combined run of the batch).
+- **Tests:** `issue_1120_boolean_slits.rs` now pins the merged wall's one-face edges at exactly its one seam (it compared the two paths before); `issue_575_split_rim_join.rs` loses its flag-off half. Its case with Body1 built without the strut clean-up now builds Body1 with no clean-up at all (`boolean_with_options`, post-process off), and the join must still give a valid manifold solid of the right volume. `fork_cac11ea_fillet_cleanup_removes_input_slits.rs`, `issue_2273_slit_edge_is_topological.rs` and `issue_423_fillet_cleanup_keeps_faces.rs` need a body with a slit, which the union no longer leaves: they now build it as SMLib's union does (the union without its clean-up, then each rim removed by hand as the clean-up removes it). That hand-built clean-up skips the clean-up's deletion of the rims' end vertices. `issue_423` still compares `fillet_cleanup_keeps_target_faces` off and on, both on that one body, and also checks that the target has the slit and that the round removes it.

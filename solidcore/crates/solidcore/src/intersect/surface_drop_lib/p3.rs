@@ -3,7 +3,7 @@
 //! (one start per seam side and pole direction), then every span of the curve cache is
 //! walked with [`DropPt::get_next_point`], tested with [`DropPt::test_span_accuracy`]
 //! and subdivided until it passes, and the passing spans are collected into UV
-//! B-spline curves ([`add_to_curve`], [`flush_curve`]).
+//! B-spline curves ([`super::p2::add_to_curve`], [`super::p2::flush_curve`]).
 //!
 //! Upstream: `source/SMLib/src/SmSurfaceDropLib.cpp`.
 //!
@@ -43,9 +43,8 @@
 //!   `NULL`), and two curve `EvaluatePoint`s (the curve's scaled zero and the end gap
 //!   check) are read after an ignored failure (uninitialised points): here those
 //!   errors propagate (plan/upstream-issues.md UB-129).
-//! - **`bDegenSurfV`** tests the domain's `XLength`, as upstream (WR-100); with
-//!   `Kernel::fixes.drop_curve_v_domain_degeneracy` it tests `YLength` instead (WR-100
-//!   addendum 2026-10-31).
+//! - **`bDegenSurfV`** tests the domain's `YLength`; upstream tests its `XLength`
+//!   again, so a domain degenerate only in V is not caught (WR-100).
 //! - **Exact UV curve on a cylinder.** A curve lying on a cylinder (a plane section)
 //!   gets its exact rational UV curve in its own parameter
 //!   (`surface_drop_lib::cylinder_section`, WR-680) once the domain checks pass, before
@@ -68,6 +67,16 @@
 //! - **Curve on surface.** The final distance check builds an `SmCrvOnSurf` of each UV
 //!   curve on an evaluation copy of the surface (`clone_for_evaluation`, which keeps
 //!   the owner and so the face tolerance).
+//! - **Subdivision endpoint state.** A pending endpoint keeps its complete drop
+//!   point, but, as upstream, only its parameter and UV point and tangent are taken
+//!   back when it becomes the span end. Once a split point changes the start and the
+//!   new span jumps more than half a closed parameter domain, the endpoint is dropped
+//!   again from that start, so its seam branch is resolved from the actual start,
+//!   under the initial endpoint's pole, exit and approximation checks. A failed
+//!   redrop falls back, once, to the saved endpoint and does not end the trace: a
+//!   rejected point is never retried, so subdivision cannot loop on it.
+//!   An unresolved closed-direction seam jump cannot use
+//!   the inaccurate-short-span escape: subdivision must resolve its branch.
 //! - **Bounded subdivision.** The span stack of the subdivision loop is at most
 //!   [`MAX_SPAN_DEPTH`] drop points deep (upstream fixtures reach about 15: a span
 //!   passes once shorter than `1/8000` of the interval; upstream is unbounded,
@@ -104,13 +113,14 @@ use crate::surface::surface::p7::approx_derivative_lengths;
 use crate::surface::surface::Surface;
 use crate::surface::surface_point_solve::p2::with_out_of_bounds_enabled;
 
+use super::boundary_moves::MoveBound;
 use super::p1::{
-    pop_stack, push_point, remove_duplicate_drop_point_solutions, stack_look, DropFailRecord,
-    DropPt, SM_ERR_OUTSIDE_OF_DOMAIN, SM_SUCCESS,
+    remove_duplicate_drop_point_solutions, DropFailRecord, DropPt, SM_ERR_OUTSIDE_OF_DOMAIN,
+    SM_SUCCESS,
 };
 use super::p2::{
-    add_to_curve, flush_curve, DropOffset, SM_ERR_INVALID_INPUT, SM_ERR_NOT_WITHIN_TOLERANCE,
-    SS_NONE,
+    add_to_curve_bounded, flush_curve_bounded, DropOffset, SM_ERR_INVALID_INPUT,
+    SM_ERR_NOT_WITHIN_TOLERANCE, SS_NONE,
 };
 
 /// `SM_ERR_NOT_CONVERGING` (`SmMessages.h`).
@@ -127,6 +137,8 @@ pub use crate::error::SM_ERR_BAD_FIND_DEGEN_PARAM;
 /// (upstream: unbounded).
 pub const MAX_SPAN_DEPTH: usize = 64;
 
+/// The operation of a drop the boundary fix-up refused (`boundary_moves`).
+const OP_REFUSED: &str = "intersect::surface_drop_lib::fix_boundary_curves_bounded";
 const OP: &str = "intersect::surface_drop_lib::Surface::drop_curve_base";
 
 /// The caller's face-aware solving service for a drop: the context that builds the
@@ -166,6 +178,61 @@ fn status_of(e: &SolidError) -> i32 {
 /// An `SmBoolean` member read as a truth value (`UNSURE` is true).
 const fn truthy(b: Option<bool>) -> bool {
     !matches!(b, Some(false))
+}
+
+/// A successful drop may still leave the surface or hit a pole in the
+/// curve's interior. Initial and restored endpoints obey the same rule.
+fn checked_endpoint_status(status: i32, end: &DropPt, interval: &Extent1d) -> i32 {
+    if (truthy(end.on_pole) || truthy(end.leaving_domain))
+        && !interval.is_value_on_boundary(end.t, EFF_ZERO).0
+    {
+        SM_ERR_OUTSIDE_OF_DOMAIN
+    } else {
+        status
+    }
+}
+
+/// Apply the same geometric rejection and approximation recovery to both an
+/// initial endpoint and one restored after subdivision. A numerical normal-line
+/// solve failure may be kept only under the caller's existing approximation
+/// policy; an interior pole or domain exit is never recovered this way.
+fn accepted_endpoint_status(
+    status: i32,
+    end: &mut DropPt,
+    interval: &Extent1d,
+    keep_all_drop_curves: bool,
+    approx_tol_3d: f64,
+) -> i32 {
+    let status = checked_endpoint_status(status, end, interval);
+    if (status == SM_ERR_NOT_CONVERGING || status == SM_ERR_NOT_WITHIN_TOLERANCE)
+        && keep_all_drop_curves
+        && end.approx_dev < approx_tol_3d
+    {
+        end.good_drop = Some(true);
+        SM_SUCCESS
+    } else {
+        status
+    }
+}
+
+/// The endpoint a redrop from the actual start gives, when the redrop is accepted: the same
+/// rule as the initial endpoint's, so a redrop that lands on an interior pole or leaves the
+/// domain is a failed redrop (the caller keeps the saved point), however its solve ended.
+fn accepted_redrop(
+    status: i32,
+    mut redrop: DropPt,
+    interval: &Extent1d,
+    keep_all_drop_curves: bool,
+    approx_tol_3d: f64,
+) -> Option<DropPt> {
+    let status = accepted_endpoint_status(
+        status,
+        &mut redrop,
+        interval,
+        keep_all_drop_curves,
+        approx_tol_3d,
+    );
+    (status == SM_SUCCESS).then_some(redrop)
 }
 
 /// An `SmBoolean` argument of `SmDropCurveFail::Set`.
@@ -643,11 +710,8 @@ impl Surface {
             self.natural_uv_domain_with_nurb(k)?
         };
         let degen_surf_u = s_uv_domain.x_length() < EFF_ZERO;
-        let degen_surf_v = if k.fixes.drop_curve_v_domain_degeneracy {
-            s_uv_domain.y_length() < EFF_ZERO
-        } else {
-            s_uv_domain.x_length() < EFF_ZERO // (sic) WR-100, pinned C++ behaviour
-        };
+        // Not upstream (WR-100): upstream tests `XLength` again here.
+        let degen_surf_v = s_uv_domain.y_length() < EFF_ZERO;
         let contained =
             s_uv_domain.is_contained_by(&self.natural_uv_domain_with_nurb(k)?, EFF_ZERO);
 
@@ -719,6 +783,9 @@ impl Surface {
         // temporarily enable slight out-of-bounds convergence (on an evaluation copy)
         let oob = with_out_of_bounds_enabled(self)?;
         let this = oob.as_ref().unwrap_or(self);
+        // not upstream: a B-spline surface's net bounds the boundary fix-up's moves
+        // (`boundary_moves`); its budget is set before each use
+        let mut move_bound = MoveBound::of(k, this, approx_tol_3d);
 
         // surface singularities and their pole points
         let sings = this.get_singularities(k, true, true)?;
@@ -1248,11 +1315,13 @@ impl Surface {
                 }
 
                 // leaving the domain or hitting a pole in the middle of the curve
-                if (truthy(end.on_pole) || truthy(end.leaving_domain))
-                    && !interval.is_value_on_boundary(end.t, EFF_ZERO).0
-                {
-                    ret_status = SM_ERR_OUTSIDE_OF_DOMAIN;
-                }
+                ret_status = accepted_endpoint_status(
+                    ret_status,
+                    &mut end,
+                    interval,
+                    keep_all_drop_curves,
+                    approx_tol_3d,
+                );
 
                 if ret_status != SM_SUCCESS {
                     // walked off the edge of the surface close to the curve end
@@ -1279,26 +1348,21 @@ impl Surface {
                     if ret_status == SM_ERR_NOT_CONVERGING
                         || ret_status == SM_ERR_NOT_WITHIN_TOLERANCE
                     {
-                        if keep_all_drop_curves && end.approx_dev < approx_tol_3d {
-                            ret_status = SM_SUCCESS;
-                            end.good_drop = Some(true);
-                        } else {
-                            fs.set(
-                                &mut record,
-                                3,
-                                SM_ERR_NOT_WITHIN_TOLERANCE,
-                                CreateUvTrimCurvePathType::KeptBeyondTolDrop,
-                                &FailOut {
-                                    rd_max_drop: out.max_drop_to_surf,
-                                    rd_max_dev: out.max_approx_dev,
-                                    max_drop: max_drop_to_surf,
-                                    solutions: Some(&solutions),
-                                    ctrl_poly: Some(&ctrl_poly),
-                                    knots: Some(&knots),
-                                    uv_curves: Some(&out.uv_curves),
-                                },
-                            );
-                        }
+                        fs.set(
+                            &mut record,
+                            3,
+                            SM_ERR_NOT_WITHIN_TOLERANCE,
+                            CreateUvTrimCurvePathType::KeptBeyondTolDrop,
+                            &FailOut {
+                                rd_max_drop: out.max_drop_to_surf,
+                                rd_max_dev: out.max_approx_dev,
+                                max_drop: max_drop_to_surf,
+                                solutions: Some(&solutions),
+                                ctrl_poly: Some(&ctrl_poly),
+                                knots: Some(&knots),
+                                uv_curves: Some(&out.uv_curves),
+                            },
+                        );
                     }
 
                     // still failing: give up on this start point
@@ -1329,12 +1393,58 @@ impl Surface {
                 }
 
                 // subdivide the span until every piece passes the accuracy test
-                let mut stack: Vec<f64> = Vec::new();
-                push_point(end.t, end.uv_pd, &mut stack);
+                let mut stack = vec![(start.t, end)];
                 let mut stop_spans = false;
+                let mut span_failure_path = CreateUvTrimCurvePathType::DropStartPointFail;
                 while !stack.is_empty() {
-                    // set SpanEnd values from the top of the stack
-                    (end.t, end.uv_pd) = stack_look(&stack)?;
+                    // A pending endpoint was dropped relative to an earlier start. Its
+                    // parameter and UV point and tangent are taken from the stack, as
+                    // upstream. Only when the new span makes a closed-surface seam
+                    // branch ambiguous is the endpoint dropped again from the actual
+                    // start; a failed redrop falls back, once, to the saved point
+                    // (the path of the initial endpoint), and never ends the trace.
+                    let (queued_start_t, saved_end) = *stack.last().ok_or_else(|| {
+                        SolidError::intersect_missing(OP, "the pending span endpoint")
+                    })?;
+                    end.t = saved_end.t;
+                    end.uv_pd = saved_end.uv_pd;
+                    let ambiguous_seam = ((srf_closure == SurfParamType::U
+                        || srf_closure == SurfParamType::Both)
+                        && (end.uv_pd[0].x - start.uv_pd[0].x).abs()
+                            > srf_nat_domain.u_interval().length() / 2.0)
+                        || ((srf_closure == SurfParamType::V
+                            || srf_closure == SurfParamType::Both)
+                            && (end.uv_pd[0].y - start.uv_pd[0].y).abs()
+                                > srf_nat_domain.v_interval().length() / 2.0);
+                    if queued_start_t != start.t && ambiguous_seam {
+                        let mut redrop = saved_end;
+                        let status = match start.get_next_point(
+                            k,
+                            this,
+                            &mut offset,
+                            singularities,
+                            Some(&pole_points),
+                            &s_uv_domain,
+                            srf_closure,
+                            curve,
+                            approx_tol_3d,
+                            saved_end.t,
+                            &mut redrop,
+                        ) {
+                            Ok(code) => code,
+                            Err(e) if e.is_unported_or_cancelled() => return Err(e),
+                            Err(e) => status_of(&e),
+                        };
+                        if let Some(accepted) = accepted_redrop(
+                            status,
+                            redrop,
+                            interval,
+                            keep_all_drop_curves,
+                            approx_tol_3d,
+                        ) {
+                            end = accepted;
+                        }
+                    }
                     ignore_status(ivl.set_min_max(start.t, end.t))?;
 
                     // fix boundary tangents
@@ -1363,7 +1473,18 @@ impl Surface {
                     let approx_dev = acc.max_approx_dev;
 
                     // accept very short spans
-                    if !span_passes && (end.t - start.t).abs() < s_interval.length() / 8000.0 {
+                    let crosses_closed_seam = ((srf_closure == SurfParamType::U
+                        || srf_closure == SurfParamType::Both)
+                        && (end.uv_pd[0].x - start.uv_pd[0].x).abs()
+                            > srf_nat_domain.u_interval().length() / 2.0)
+                        || ((srf_closure == SurfParamType::V
+                            || srf_closure == SurfParamType::Both)
+                            && (end.uv_pd[0].y - start.uv_pd[0].y).abs()
+                                > srf_nat_domain.v_interval().length() / 2.0);
+                    if !span_passes
+                        && !crosses_closed_seam
+                        && (end.t - start.t).abs() < s_interval.length() / 8000.0
+                    {
                         span_passes = true;
                     }
 
@@ -1376,7 +1497,15 @@ impl Surface {
                         }
 
                         // add the span to the curve (status ignored, SE)
-                        ignore_status(add_to_curve(
+                        // (not upstream: on a B-spline surface or an offset of one, the
+                        // boundary fix-up of a curve it flushes keeps the curve in the
+                        // domain and moves each span by a proved bound within the
+                        // tolerance the trace left, or refuses the curve; the bound is
+                        // added to the deviation, see `boundary_moves`)
+                        if let Some(b) = move_bound.as_mut() {
+                            b.budget = approx_tol_3d - max_approx_dev;
+                        }
+                        ignore_status(add_to_curve_bounded(
                             k,
                             this,
                             &s_uv_domain,
@@ -1389,14 +1518,24 @@ impl Surface {
                             uv_tol_y,
                             &mut out.uv_curves,
                             &mut fix_bc_change,
+                            move_bound.as_ref(),
                         ))?;
+                        if let Some(b) = move_bound.as_ref() {
+                            if b.refused() {
+                                return Err(SolidError::intersect_failed(
+                                    OP_REFUSED,
+                                    "the boundary fix-up refused the dropped curve",
+                                ));
+                            }
+                            max_approx_dev += b.spent();
+                        }
 
                         // next span starts at this end
                         start = end;
                         start.from_left_u = Some(!truthy(end.from_left_u));
                         start.from_left_v = Some(!truthy(end.from_left_v));
                         have_start_uv_tan = true;
-                        (end.t, end.uv_pd) = pop_stack(&mut stack)?;
+                        let _ = stack.pop();
                         continue;
                     }
 
@@ -1429,25 +1568,7 @@ impl Surface {
 
                     // no split point drops: give up on this start point
                     if !found_good_one {
-                        fs.set(
-                            &mut record,
-                            3,
-                            ret_status,
-                            CreateUvTrimCurvePathType::SplitDropStepFail,
-                            &FailOut {
-                                rd_max_drop: out.max_drop_to_surf,
-                                rd_max_dev: out.max_approx_dev,
-                                max_drop: max_drop_to_surf,
-                                solutions: Some(&solutions),
-                                ctrl_poly: Some(&ctrl_poly),
-                                knots: Some(&knots),
-                                uv_curves: Some(&out.uv_curves),
-                            },
-                        );
-                        ctrl_poly.clear();
-                        knots.clear();
-                        max_drop_to_surf = max_drop_to_surf_before_trace;
-                        max_approx_dev = max_approx_dev_before_trace;
+                        span_failure_path = CreateUvTrimCurvePathType::SplitDropStepFail;
                         stop_spans = true;
                         break;
                     }
@@ -1460,21 +1581,44 @@ impl Surface {
                     }
 
                     // the split point becomes the new span end
-                    if stack.len() / 5 >= MAX_SPAN_DEPTH {
+                    if stack.len() >= MAX_SPAN_DEPTH {
                         return Err(SolidError::NotConverged {
                             operation: OP,
                             iterations: MAX_SPAN_DEPTH as u32,
                         });
                     }
-                    push_point(end.t, end.uv_pd, &mut stack);
+                    stack.push((start.t, end));
                 }
                 if stop_spans {
+                    fs.set(
+                        &mut record,
+                        3,
+                        ret_status,
+                        span_failure_path,
+                        &FailOut {
+                            rd_max_drop: out.max_drop_to_surf,
+                            rd_max_dev: out.max_approx_dev,
+                            max_drop: max_drop_to_surf,
+                            solutions: Some(&solutions),
+                            ctrl_poly: Some(&ctrl_poly),
+                            knots: Some(&knots),
+                            uv_curves: Some(&out.uv_curves),
+                        },
+                    );
+                    ctrl_poly.clear();
+                    knots.clear();
+                    max_drop_to_surf = max_drop_to_surf_before_trace;
+                    max_approx_dev = max_approx_dev_before_trace;
                     break;
                 }
             }
 
-            // output the curve built for this start point
-            flush_curve(
+            // output the curve built for this start point (not upstream: the bounded
+            // boundary fix-up, as above; a refusal fails the drop)
+            if let Some(b) = move_bound.as_mut() {
+                b.budget = approx_tol_3d - max_approx_dev;
+            }
+            flush_curve_bounded(
                 &s_uv_domain,
                 &mut ctrl_poly,
                 &mut knots,
@@ -1482,7 +1626,11 @@ impl Surface {
                 uv_tol_y,
                 &mut out.uv_curves,
                 &mut fix_bc_change,
+                move_bound.as_ref().map(|b| (k, b)),
             )?;
+            if let Some(b) = move_bound.as_ref() {
+                max_approx_dev += b.spent();
+            }
         }
 
         // no curves (no record, as upstream)
@@ -1678,6 +1826,173 @@ mod tests {
         );
     }
 
+    #[test]
+    fn restored_endpoints_keep_the_initial_approximation_recovery_policy() {
+        let interval = Extent1d::from_min_max(0.0, 1.0);
+        for code in [SM_ERR_NOT_CONVERGING, SM_ERR_NOT_WITHIN_TOLERANCE] {
+            for keep_all in [false, true] {
+                let mut endpoint = DropPt::new(0.5, Some(false));
+                endpoint.on_pole = Some(false);
+                endpoint.leaving_domain = Some(false);
+                endpoint.approx_dev = 0.5e-4;
+                assert_eq!(
+                    accepted_endpoint_status(code, &mut endpoint, &interval, keep_all, 1e-4,),
+                    if keep_all { SM_SUCCESS } else { code }
+                );
+                assert_eq!(endpoint.good_drop == Some(true), keep_all);
+                endpoint.good_drop = Some(false);
+                endpoint.approx_dev = 1e-4;
+                assert_eq!(
+                    accepted_endpoint_status(code, &mut endpoint, &interval, keep_all, 1e-4,),
+                    code,
+                    "the existing strict approximation bound is retained"
+                );
+            }
+            for (pole, leaving) in [(true, false), (false, true)] {
+                let mut endpoint = DropPt::new(0.5, Some(false));
+                endpoint.on_pole = Some(pole);
+                endpoint.leaving_domain = Some(leaving);
+                endpoint.approx_dev = 0.0;
+                assert_eq!(
+                    accepted_endpoint_status(code, &mut endpoint, &interval, true, 1e-4,),
+                    SM_ERR_OUTSIDE_OF_DOMAIN,
+                    "approximation recovery cannot accept an interior pole or exit"
+                );
+                assert_ne!(endpoint.good_drop, Some(true));
+            }
+        }
+    }
+
+    #[test]
+    fn successful_redrops_reject_interior_poles_and_domain_exits() {
+        let interval = Extent1d::from_min_max(0.0, 1.0);
+        for (pole, leaving, expected) in [
+            (Some(false), Some(false), SM_SUCCESS),
+            (Some(true), Some(false), SM_ERR_OUTSIDE_OF_DOMAIN),
+            (Some(false), Some(true), SM_ERR_OUTSIDE_OF_DOMAIN),
+            (Some(true), Some(true), SM_ERR_OUTSIDE_OF_DOMAIN),
+            (None, Some(false), SM_ERR_OUTSIDE_OF_DOMAIN),
+            (Some(false), None, SM_ERR_OUTSIDE_OF_DOMAIN),
+            (None, None, SM_ERR_OUTSIDE_OF_DOMAIN),
+        ] {
+            let mut end = DropPt::new(0.5, Some(false));
+            end.on_pole = pole;
+            end.leaving_domain = leaving;
+            assert_eq!(
+                checked_endpoint_status(SM_SUCCESS, &end, &interval),
+                expected
+            );
+            // Reaching a pole or leaving at a curve endpoint remains allowed,
+            // including the initial path's existing boundary roundoff allowance.
+            for t in [0.0, EFF_ZERO / 2.0, 1.0] {
+                end.t = t;
+                assert_eq!(
+                    checked_endpoint_status(SM_SUCCESS, &end, &interval),
+                    SM_SUCCESS
+                );
+            }
+        }
+        // Checking an ordinary endpoint must not turn a failed solve into success.
+        let mut end = DropPt::new(0.5, Some(false));
+        end.on_pole = Some(false);
+        end.leaving_domain = Some(false);
+        assert_eq!(
+            checked_endpoint_status(SM_ERR_NOT_CONVERGING, &end, &interval),
+            SM_ERR_NOT_CONVERGING
+        );
+    }
+
+    /// The redrop's own decision: a redrop that succeeded in its solve but landed on an
+    /// interior pole or left the domain is refused (the caller then keeps the saved
+    /// endpoint), and one at the curve's end or off both is taken.
+    #[test]
+    fn a_redrop_at_an_interior_pole_or_domain_exit_is_not_taken() {
+        let interval = Extent1d::from_min_max(0.0, 1.0);
+        let redrop = |t: f64, pole: bool, leaving: bool| {
+            let mut end = DropPt::new(t, Some(false));
+            end.on_pole = Some(pole);
+            end.leaving_domain = Some(leaving);
+            end
+        };
+        let take = |end: DropPt| accepted_redrop(SM_SUCCESS, end, &interval, false, 1e-4);
+        let ordinary = take(redrop(0.5, false, false)).expect("an ordinary redrop is taken");
+        assert_eq!(ordinary.t, 0.5);
+        assert!(take(redrop(0.5, true, false)).is_none());
+        assert!(take(redrop(0.5, false, true)).is_none());
+        assert!(take(redrop(1.0, true, true)).is_some());
+        // the approximation recovery never takes an interior pole either
+        assert!(accepted_redrop(
+            SM_ERR_NOT_CONVERGING,
+            redrop(0.5, true, false),
+            &interval,
+            true,
+            1e-4
+        )
+        .is_none());
+    }
+
+    #[test]
+    fn subdivided_tolerant_seam_traces_keep_their_parameter_side() {
+        // A closed, nonperiodic triangular tube. The source crosses its seam
+        // tangentially within the drop tolerance, but its initial three-degree
+        // departure defeats the one-degree iso-curve shortcut.
+        let k = Kernel::default();
+        let ring = [(1.0, 0.0), (-0.5, 1.0), (-0.5, -1.0), (1.0, 0.0)];
+        let net = [0.0, 1.0]
+            .into_iter()
+            .map(|z| {
+                ring.iter()
+                    .map(|&(x, y)| CPoint::new(x, y, z, NOW))
+                    .collect()
+            })
+            .collect();
+        let nurb = crate::nurbs::srf_basic::Surface::new(
+            net,
+            1,
+            1,
+            vec![0.0, 0.0, 1.0, 1.0],
+            vec![0.0, 0.0, 1.0, 2.0, 3.0, 3.0],
+        )
+        .unwrap();
+        let surface = Surface::from(BSplineSurface::from_nurb(nurb, false));
+        let source = Curve::from(BSplineCurve::from_nurb(
+            NurbCurve::new(
+                vec![
+                    CPoint::new(1.0, 0.0, 0.0, NOW),
+                    CPoint::new(1.0, 0.02, 1.0 / 3.0, NOW),
+                    CPoint::new(1.0, -0.02, 2.0 / 3.0, NOW),
+                    CPoint::new(1.0, 0.0, 1.0, NOW),
+                ],
+                3,
+                vec![0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0],
+            )
+            .unwrap(),
+            3,
+            false,
+        ));
+        let out = surface
+            .drop_curve_base::<NoObject>(
+                &k,
+                &Extent2d::from_bounds(0.0, 0.0, 1.0, 3.0),
+                &source,
+                &Extent1d::from_min_max(0.0, 1.0),
+                0.01,
+                true,
+                None,
+            )
+            .unwrap();
+        assert_eq!(out.uv_curves.len(), 2, "both seam sides remain available");
+        for curve in &out.uv_curves {
+            let (points, _) = curve.control_polygon().unwrap();
+            assert!(
+                points.windows(2).all(|p| (p[1].y - p[0].y).abs() < 1.5),
+                "an arbitrarily short span must not carry a full seam jump: {points:?}"
+            );
+        }
+        assert!(out.max_drop_to_surf <= 0.01, "{out:?}");
+        assert!(out.max_approx_dev <= 0.01, "{out:?}");
+    }
+
     // ---- WR-100: the V degeneracy test ------------------------------------------------
 
     const WR100_NORMAL_KNOTS: [f64; 6] = [0.0, 0.0, 0.0, 1.0, 1.0, 1.0];
@@ -1738,8 +2053,7 @@ mod tests {
     /// natural lengths classify the degeneracy independently of the record's flags.
     #[test]
     fn wr100_v_domain_degeneracy_flag_reports_a_degenerate_v_surface() {
-        let mut k = Kernel::default();
-        k.fixes.drop_curve_v_domain_degeneracy = true;
+        let k = Kernel::default();
         let srf = wr100_surface(WR100_NORMAL_KNOTS, WR100_TINY_KNOTS);
         let nat = srf.natural_uv_domain_with_nurb(&k).expect("natural domain");
         assert_eq!((nat.x_length(), nat.y_length()), (1.0, 0.0));
@@ -1763,8 +2077,7 @@ mod tests {
     /// the U flag alone triggered the early exit; the wrong V flag only coincided.
     #[test]
     fn wr100_u_domain_degeneracy_keeps_its_status_and_clears_the_v_flag() {
-        let mut k = Kernel::default();
-        k.fixes.drop_curve_v_domain_degeneracy = true;
+        let k = Kernel::default();
         let srf = wr100_surface(WR100_TINY_KNOTS, WR100_NORMAL_KNOTS);
         let nat = srf.natural_uv_domain_with_nurb(&k).expect("natural domain");
         assert_eq!((nat.x_length(), nat.y_length()), (0.0, 1.0));
@@ -1784,32 +2097,26 @@ mod tests {
     }
 
     /// The positive control: both natural lengths are 1, so neither degeneracy applies
-    /// and the fix changes nothing (same `1020 / 19` first-drop failure and zero flags
-    /// with it off and on).
+    /// (`1020 / 19` first-drop failure, both flags 0).
     #[test]
     fn wr100_normal_domain_is_unaffected_by_the_v_domain_fix() {
         let srf = wr100_surface(WR100_NORMAL_KNOTS, WR100_NORMAL_KNOTS);
-        let run = |fix: bool| {
-            let mut k = Kernel::default();
-            k.fixes.drop_curve_v_domain_degeneracy = fix;
-            let nat = srf.natural_uv_domain_with_nurb(&k).expect("natural domain");
-            assert_eq!((nat.x_length(), nat.y_length()), (1.0, 1.0));
-            let (r, fail) = wr100_drop(&k, &srf, [0.0, 0.0, 1.0, 1.0]);
-            // `FirstDropUncontainedFail` returns the (empty) output, not an error.
-            assert!(r
-                .expect("first drop failure returns the output")
-                .uv_curves
-                .is_empty());
+        let k = Kernel::default();
+        let nat = srf.natural_uv_domain_with_nurb(&k).expect("natural domain");
+        assert_eq!((nat.x_length(), nat.y_length()), (1.0, 1.0));
+        let (r, fail) = wr100_drop(&k, &srf, [0.0, 0.0, 1.0, 1.0]);
+        // `FirstDropUncontainedFail` returns the (empty) output, not an error.
+        assert!(r
+            .expect("first drop failure returns the output")
+            .uv_curves
+            .is_empty());
+        assert_eq!(
             (
                 fail.fail_status,
                 fail.create_path_type,
                 fail.degen_surf_u,
                 fail.degen_surf_v,
-            )
-        };
-        assert_eq!(run(false), run(true));
-        assert_eq!(
-            run(true),
+            ),
             (
                 SM_ERR_OUTSIDE_OF_DOMAIN,
                 CreateUvTrimCurvePathType::FirstDropUncontainedFail,
@@ -1817,26 +2124,5 @@ mod tests {
                 0
             )
         );
-    }
-
-    /// Off by default the V-degenerate witness keeps the pinned C++ result (`1020 / 19`,
-    /// both flags 0): the V flag copies the U test, which passes.
-    #[test]
-    fn wr100_v_domain_degeneracy_is_off_by_default() {
-        let k = Kernel::default();
-        assert!(!k.fixes.drop_curve_v_domain_degeneracy);
-        let srf = wr100_surface(WR100_NORMAL_KNOTS, WR100_TINY_KNOTS);
-        let (r, fail) = wr100_drop(&k, &srf, [0.0, 1.0, 1.0, 1.0]);
-        // `FirstDropUncontainedFail` returns the (empty) output, not an error.
-        assert!(r
-            .expect("first drop failure returns the output")
-            .uv_curves
-            .is_empty());
-        assert_eq!(fail.fail_status, SM_ERR_OUTSIDE_OF_DOMAIN);
-        assert_eq!(
-            fail.create_path_type,
-            CreateUvTrimCurvePathType::FirstDropUncontainedFail
-        );
-        assert_eq!((fail.degen_surf_u, fail.degen_surf_v), (0, 0));
     }
 }

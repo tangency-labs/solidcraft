@@ -204,7 +204,15 @@ fn a_round_ending_on_a_cylinder_meets_it_along_a_certified_rib() {
     assert!((removed - want).abs() <= 1e-6 * want, "{removed} vs {want}");
     assert_eq!(off.len(), 1, "{off:?}");
     assert!(off[0] <= tol, "{off:?} vs {tol}");
-    // the fork's printed values, to their last digit
-    assert!((removed - 16.714056916).abs() <= 5e-10, "{removed}");
+    // The fork printed 16.714056916, which this pinned to its last digit until
+    // `brep_volume` closed the tolerant edges' gaps (#16735): the fork's integrator, as the
+    // old one here, leaked through them, 1.8e-6 over the closed form. The removed volume is
+    // now the closed form to 1.85e-7 (MEASURED; the rib's 4.2e-6 fit), held to 2.5e-7, and
+    // pinned to the last digits as the fork's figure was (5e-10).
+    assert!((removed - want).abs() <= 2.5e-7, "{removed} vs {want}");
+    assert!(
+        (removed - 16.714_055_291_924_98).abs() <= 5e-10,
+        "{removed}"
+    );
     assert!((off[0] - 4.22e-6).abs() <= 5e-9, "{off:?}");
 }

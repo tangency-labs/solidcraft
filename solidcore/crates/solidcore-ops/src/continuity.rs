@@ -8,15 +8,18 @@
 //! that holds along the whole edge is [`SeamReport::g1_all_along`], the kernel's proved
 //! tangency test (`solidcore::query::tangent_edge::tangent_all_along`) at the caller's angle.
 
+use solidcore::geom::object::Shape;
+use solidcore::query::api_queries::face_closest_point_in_shape;
+use solidcore::query::brep::{BrepQuery, LiveBrepObjects};
 use solidcore::query::continuity::{continuity_along, edge_comb, iso_comb, CurvatureAt};
 use solidcore::query::tangent_edge::{tangent_all_along, Tangency};
-use solidcore::topology::{edge, Brep, EdgeId, FaceId};
+use solidcore::topology::{edge, Brep, BrepId, EdgeId, FaceId};
 use solidcore::Vec3;
 
 use crate::body::Body;
 use crate::measure::outer_faceuse;
 use crate::order::{self, Order};
-use crate::session::with_body;
+use crate::session::{answer, with_body};
 use crate::{Error, Result};
 
 /// Fewest and most stations along one edge: three are its two ends and its middle.
@@ -358,4 +361,88 @@ impl Body {
             }
         })?
     }
+}
+
+/// The most points [`principal_curvatures`] takes.
+pub const MAX_CURVATURE_POINTS: usize = 1 << 20;
+
+/// A sheet's principal curvatures at a point ([`principal_curvatures`]).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Principal {
+    /// The larger principal curvature, 1/mm, convex positive against the face's normal (a
+    /// sphere's outside reads `1 / r`).
+    pub k1: f64,
+    /// The smaller.
+    pub k2: f64,
+    /// Gaussian curvature, 1/mm²: `k1 * k2`, independent of the face's orientation.
+    pub gaussian: f64,
+    /// Mean curvature, 1/mm: `(k1 + k2) / 2`, convex positive against the face's normal.
+    pub mean: f64,
+    /// The unit direction of `k1`.
+    pub d1: [f64; 3],
+    /// The unit direction of `k2`.
+    pub d2: [f64; 3],
+}
+
+/// The principal curvatures of `sheet` at each of `points`: the nearest point within each
+/// face's boundaries is found by the kernel, and the nearest face answers with the kernel's
+/// [`solidcore::query::continuity::principal_curvatures`] at that point (`k1 >= k2`, convex positive
+/// against the face's normal in its shell, with their directions, Gaussian and mean curvature).
+/// `None` if no face has a nearest point, or that point is singular, such as a pole.
+///
+/// # Errors
+/// [`Error::Argument`] for more than [`MAX_CURVATURE_POINTS`] points or a coordinate not finite
+/// or past the bound; those of [`Body::from_record`]; the kernel's status.
+pub fn principal_curvatures(
+    sheet: &solidcore_record::brep::Brep,
+    points: &[[f64; 3]],
+) -> Result<Vec<Option<Principal>>> {
+    if points.len() > MAX_CURVATURE_POINTS || !points.iter().all(|p| crate::sweep::coord_ok(p)) {
+        return Err(Error::Argument);
+    }
+    let (body, _) = Body::from_record(sheet, true)?;
+    if points.is_empty() {
+        return Ok(Vec::new());
+    }
+    with_body("continuity::principal_curvatures", &body, |k, b| {
+        let faces = b.face_list().to_vec();
+        let id = BrepId::from_index(0);
+        let mut nearest: Vec<Option<(f64, FaceId, Vec3)>> = vec![None; points.len()];
+        for f in faces {
+            let Some(shape) = answer(Shape::new(k, &(id, &*b), &[], &[(id, f)], &[], &[]))? else {
+                continue;
+            };
+            let query = BrepQuery::of_brep(b);
+            let identity = query.effective_identity();
+            let objects = LiveBrepObjects::new(b, &identity, None)?;
+            for (p, best) in points.iter().zip(&mut nearest) {
+                let p = Vec3::new(p[0], p[1], p[2]);
+                let Some(closest) =
+                    answer(face_closest_point_in_shape(k, &shape, &objects, (id, f), p))?
+                else {
+                    continue;
+                };
+                if best.is_none_or(|(distance, _, _)| closest.distance < distance) {
+                    *best = Some((closest.distance, f, closest.point));
+                }
+            }
+        }
+        let mut out = Vec::with_capacity(points.len());
+        for closest in nearest {
+            let Some((_, f, p)) = closest else {
+                out.push(None);
+                continue;
+            };
+            let principal = solidcore::query::continuity::principal_curvatures(k, b, f, p)?;
+            out.push(principal.map(|pr| Principal {
+                k1: pr.k1,
+                k2: pr.k2,
+                gaussian: pr.gaussian,
+                mean: pr.mean,
+                d1: array(pr.d1),
+                d2: array(pr.d2),
+            }));
+        }
+        Ok(Ok(out))
+    })?
 }

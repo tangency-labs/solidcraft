@@ -17,6 +17,10 @@
 //! (a cubic B-spline profile revolved a whole turn), its lower half cut away on one side by a
 //! boolean difference, then the body's tight box. The face's surface peaks at the cut-away
 //! bulge, outside the face; the face's own extreme is the upper bulge, inside it.
+//!
+//! #13753: a cell is set aside only on a bound that holds it, not on its solve's top. The
+//! chamfered peg's Mixed corner face dips beside its seam where the solve over its whole
+//! domain finds no point.
 #![allow(
     clippy::unwrap_used,
     clippy::expect_used,
@@ -48,6 +52,7 @@ use solidcore::surface::surface::Surface;
 use solidcore::sweep::api_brep::create_rotational_sweep;
 use solidcore::topology::brep::p1::faces;
 use solidcore::topology::brep::p10::TrimType;
+use solidcore::topology::brep::sheet::sheet_on;
 use solidcore::Kernel;
 
 /// The arc's knots: three quarter spans, double interior knots at 1/3 and 2/3.
@@ -532,4 +537,154 @@ fn a_wall_one_span_across_is_divided_only_along_its_spans() {
         read_many * few as u64 <= read_few * many as u64,
         "control points read grow faster than the spans: {read_few} at {few}, {read_many} at {many}"
     );
+}
+
+/// The Mixed corner's chamfer face of the peg case
+/// `fillets/report-peg-front-and-concave-chamfers-together-d2` (degrees 9 and 5, 91 x 6
+/// control points), as the case built it on 2026-11-05: its record's homogeneous net in
+/// `data/issue_13753_mixed_chamfer_face.json`. In the case it is a B-spline face open both
+/// ways too, so its search takes the same path.
+fn mixed_chamfer_face() -> Surface {
+    let text = std::fs::read_to_string(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/tests/data/issue_13753_mixed_chamfer_face.json"
+    ))
+    .unwrap();
+    let data: serde_json::Value = serde_json::from_str(&text).unwrap();
+    let floats = |v: &serde_json::Value| -> Vec<f64> {
+        v.as_array()
+            .unwrap()
+            .iter()
+            .map(|x| x.as_f64().unwrap())
+            .collect()
+    };
+    let net: Vec<Vec<CPoint>> = data["homogeneous"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|row| {
+            row.as_array()
+                .unwrap()
+                .iter()
+                .map(|p| {
+                    let h = floats(p);
+                    CPoint::new(h[0], h[1], h[2], h[3])
+                })
+                .collect()
+        })
+        .collect();
+    let (u, v) = (floats(&data["u_knots"]), floats(&data["v_knots"]));
+    let (p, q) = (u.len() - net.len() - 1, v.len() - net[0].len() - 1);
+    assert_eq!((p, q), (9, 5));
+    let nurb = NurbSurface::new(net, p, q, u, v).unwrap();
+    Surface::from(BSplineSurface::from_nurb(nurb, false))
+}
+
+/// #13753: the face on its own (a sheet over its whole domain) dips beside its side v = 1,
+/// which lies in y = 0, to y = -7.2151e-4 at (0.6979, 0.9655). The solve over the whole
+/// domain in -y gives (0, 1) at y = 0, the edges' value; a search that set the domain aside
+/// on it boxed the face to y min 0. Its box holds the dip to the search's resolution, 1e-6;
+/// its other sides are its edges' (x 32 to 40, y max 2, z 8 to 10).
+#[test]
+fn a_dip_the_whole_domain_solve_misses_is_inside_the_box() {
+    let mut k = Kernel::default();
+    k.fixes.face_tight_box_searches_trim = true;
+    let face = mixed_chamfer_face();
+    let dip = face
+        .evaluate_point(
+            &k,
+            Point2::new(0.697_941_702_278_245_9, 0.965_501_350_901_047_9),
+        )
+        .unwrap();
+    assert!(dip.y < -7.2e-4, "the dip: {dip:?}");
+    let (b, f) = sheet_on(&mut k, face, 1e-6).unwrap();
+    assert_eq!(
+        (
+            b.faces().len(),
+            b.edges().len(),
+            b.vertices().len(),
+            b.shells().len()
+        ),
+        (1, 4, 4, 1)
+    );
+    let bx = calculate_tight_bounding_box(&k, &b, f).unwrap();
+    assert!(
+        (bx.min().y - dip.y).abs() <= 1e-6,
+        "y min {}, the dip {}",
+        bx.min().y,
+        dip.y
+    );
+    assert_close("x min", bx.min().x, 32.0);
+    assert_close("x max", bx.max().x, 40.0);
+    assert_close("y max", bx.max().y, 2.0);
+    assert_close("z min", bx.min().z, 8.0);
+    assert_close("z max", bx.max().z, 10.0);
+}
+
+/// A quarter of a cylinder of radius 10 about z, from -30 to 60 degrees (one rational
+/// quadratic span along u), z = 10 v over [0, 1]: its greatest x, 10, runs along the whole
+/// line of angle 0 inside it, which no halving of u reaches.
+fn quarter_cylinder() -> Surface {
+    let (r, s) = (10.0, FRAC_1_SQRT_2);
+    let at = |deg: f64, scale: f64| {
+        let a = deg.to_radians();
+        (scale * a.cos(), scale * a.sin())
+    };
+    let ((x0, y0), (x1, y1), (x2, y2)) = (at(-30.0, r), at(15.0, r / s), at(60.0, r));
+    let arc = [(x0, y0, 1.0), (x1, y1, s), (x2, y2, 1.0)];
+    let net: Vec<Vec<CPoint>> = arc
+        .iter()
+        .map(|&(x, y, w)| {
+            [0.0, 10.0]
+                .iter()
+                .map(|&z| CPoint::new(x * w, y * w, z * w, w))
+                .collect()
+        })
+        .collect();
+    let nurb = NurbSurface::new(
+        net,
+        2,
+        1,
+        vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0],
+        vec![0.0, 0.0, 1.0, 1.0],
+    )
+    .unwrap();
+    Surface::from(BSplineSurface::from_nurb(nurb, false))
+}
+
+/// #13753: a face whose greatest value runs along a line inside it (a cylinder's, in x).
+/// Set aside only on their control points, the cells along that line are divided until
+/// their hull comes within 1e-6 of it; halved along the line too, they doubled at every
+/// depth, the search reached its cell limit, and the cells left on the stack counted with
+/// hulls far above the face. Divided only across the line, the box is the face's (x max 10
+/// to 1e-6) and the solves read few control points.
+#[test]
+fn a_ridge_along_a_face_is_divided_only_across_it() {
+    let mut k = Kernel::default();
+    k.fixes.face_tight_box_searches_trim = true;
+    let (b, f) = sheet_on(&mut k, quarter_cylinder(), 1e-6).unwrap();
+    assert_eq!(
+        (
+            b.faces().len(),
+            b.edges().len(),
+            b.vertices().len(),
+            b.shells().len()
+        ),
+        (1, 4, 4, 1)
+    );
+    k.work_counters.reset();
+    let bx = calculate_tight_bounding_box(&k, &b, f).unwrap();
+    let read = k.work_counters.face_extreme_control_points();
+    assert!((bx.max().x - 10.0).abs() <= 1e-6, "x max {}", bx.max().x);
+    assert!((bx.min().x - 5.0).abs() <= 1e-6, "x min {}", bx.min().x);
+    assert!((bx.min().y + 5.0).abs() <= 1e-6, "y min {}", bx.min().y);
+    assert!(
+        (bx.max().y - 10.0 * 60f64.to_radians().sin()).abs() <= 1e-6,
+        "y max {}",
+        bx.max().y
+    );
+    assert_close("z min", bx.min().z, 0.0);
+    assert_close("z max", bx.max().z, 10.0);
+    eprintln!("control points read {read}");
+    assert!(read <= 2000, "control points read {read}");
 }

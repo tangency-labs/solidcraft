@@ -53,15 +53,18 @@
 //!   only looked up by id.
 //! - **Kept attributes** are owned copies ([`Attribute::make_copy`]) instead of heap
 //!   pointers freed by a scope guard.
+//! - **A removal that fails part way** (it deleted the blend face, then failed) is
+//!   refused [`OffsetFacesRefusal::Unsupported`] at once; the fork goes on with the
+//!   blend's dead face.
 //! - **Refusals** return [`SolidError::Upstream`] `SM_ERR` with the refusal and its reason
 //!   on the executive, as the fork's `Refuse` returns `SM_ERR`. A put-back the fillet
 //!   executive fails for a reason other than room also records
 //!   [`OffsetFacesRefusal::NotPutBack`] (the fork returns the status untyped), keeping
-//!   the fillet's status.
-//! - **Closed walls (opt-in).** 9504880's removal of the edges between a moved face and
-//!   one that stayed on one surface runs only with
-//!   `Kernel::fixes.local_operation_closes_walls_to_nothing` (WR-566 addendum); a face is
-//!   on a new surface there when it is a moved face ([`MARK_MOVED`]) lying on one.
+//!   the fillet's status; so does a put-back whose stitched result leaves a closed solid
+//!   open (WR-212, as the public edge-fillet wrappers refuse it).
+//! - **Closed walls.** 9504880's removal of the edges between a moved face and one that
+//!   stayed on one surface (WR-566 addendum): a face is on a new surface there when it is
+//!   a moved face ([`MARK_MOVED`]) lying on one.
 //! - No recursion.
 
 use crate::blend::feature_executive::{is_open_base_refusal, FeatureExecutive, RebuildBrepType};
@@ -151,7 +154,7 @@ pub enum OffsetFacesRefusal {
     /// blends were taken off and the faces moved, but putting the blends back failed in
     /// the fillet executive for a reason other than room (a corner or a rollover it
     /// cannot build, #2020). The reason carries the fillet's error comment; the status is
-    /// the fillet's.
+    /// the fillet's. Also a put-back that left a closed solid open (`SM_ERR`, WR-212).
     NotPutBack,
 }
 
@@ -903,30 +906,10 @@ impl OffsetFacesExecutive {
         // The local operation takes the surfaces over, also when it fails.
         local_operation_simple(k, b, &faces, surfaces)?;
 
-        if k.fixes.local_operation_closes_walls_to_nothing {
-            return self.join_across_closed_walls(k, b, &targets, tol);
-        }
-
-        // Some face must lie on one of the surfaces, or the operation moved none.
-        let mut moved_any = false;
-        for f in crate::topology::brep::p1::faces(b, None)? {
-            if on_target(k, b, f, &targets, tol)? {
-                moved_any = true;
-                break;
-            }
-        }
-        if !moved_any {
-            return Err(self.refuse(
-                OffsetFacesRefusal::NoEffect,
-                "the local operation reported success but moved no face onto its new surface",
-                None,
-            ));
-        }
-        Ok(())
+        self.join_across_closed_walls(k, b, &targets, tol)
     }
 
-    /// The end of step 4 with `Kernel::fixes.local_operation_closes_walls_to_nothing`
-    /// (fork 9504880, WR-566 addendum): the faces on the new surfaces collected, and the
+    /// The end of step 4 (fork 9504880, WR-566 addendum): the faces on the new surfaces collected, and the
     /// edges between such a face and one that stayed, which `SmEdge::IsTopological`
     /// finds removable, removed (`RemoveTopologicalEdgesAndVertices`), with the vertices
     /// at their ends where those join two edges on one curve. A face the move closed to
@@ -999,14 +982,18 @@ impl OffsetFacesExecutive {
     /// `OffsetFaces` step 5: the sharp edges each followed blend became ([`MARK_SHARP`]),
     /// where they still lie between its two faces, blended again in one fillet executive
     /// call at each blend's size and of its kind (circular sections), then
-    /// `StitchAndOrient`. Every face is marked [`MARK_BEFORE`] first, for step 6.
+    /// `StitchAndOrient`. Every face is marked [`MARK_BEFORE`] first, for step 6. A closed
+    /// and manifold body whose stitched result is not is refused (not in the fork, WR-212,
+    /// as the public edge-fillet wrappers refuse it).
     ///
     /// # Errors
     ///
     /// `SM_ERR` with [`OffsetFacesRefusal::NoRoom`] when a blend's edge is gone or the
-    /// executive reports no room (its comment as the reason's detail); the executive's
-    /// and the stitch's own errors.
+    /// executive reports no room (its comment as the reason's detail); `SM_ERR` with
+    /// [`OffsetFacesRefusal::NotPutBack`] when the blends put back leave a solid open; the
+    /// executive's and the stitch's own errors.
     pub fn reblend(&mut self, k: &mut Kernel, b: &mut Brep, blends: &[Followed]) -> Result<()> {
+        let closed = crate::topology::brep::p2::is_closed_manifold(b)?;
         let mut edges = Vec::new();
         let mut sections = Vec::new();
         let mut solvers = Vec::new();
@@ -1080,7 +1067,15 @@ impl OffsetFacesExecutive {
             };
             return Err(e);
         }
-        stitch_and_orient(k, b, &StitchAndOrientOptions::default())
+        stitch_and_orient(k, b, &StitchAndOrientOptions::default())?;
+        if closed && !crate::topology::brep::p2::is_closed_manifold(b)? {
+            return Err(self.refuse(
+                OffsetFacesRefusal::NotPutBack,
+                "putting back the blends that follow the moved faces left no closed solid",
+                None,
+            ));
+        }
+        Ok(())
     }
 }
 
@@ -1149,6 +1144,17 @@ impl OffsetFacesExecutive {
                     }
                 };
                 let Some(sharp) = removed else {
+                    // (not in the fork) A removal that failed after it began editing
+                    // has deleted the blend face: the B-rep is half edited and the
+                    // blend's face id names nothing, so no later round or group can
+                    // take it off.
+                    if !crate::topology::brep::p1::faces(b, None)?.contains(&blend) {
+                        return Err(self.refuse(
+                            OffsetFacesRefusal::Unsupported,
+                            "a blend on a moved face failed to come off part way through",
+                            None,
+                        ));
+                    }
                     continue;
                 };
                 let sharp = ner(sharp)?;
@@ -1776,6 +1782,50 @@ mod tests {
         assert!(ex.reason().contains("no longer fits"), "{}", ex.reason());
     }
 
+    /// WR-212: blends put back whose stitched result leaves the solid open are refused as
+    /// not put back. The four vertical edges of a 14 x 6 x 10 post, blended again at r 3.5,
+    /// cross on each 6 mm face (tangency-labs/solidcore#1073), where the default kernel
+    /// builds an open body.
+    #[test]
+    fn a_put_back_that_leaves_the_solid_open_is_refused() {
+        let mut k = Kernel::default();
+        let mut b = create_box(&mut k, Point3::new(0.0, 0.0, 0.0), 14.0, 6.0, 10.0).unwrap();
+        // each vertical edge between an end face (support 0) and a side face (support 1)
+        let ends = [0.0, 14.0].map(|x| face_where(&b, |p| (p.x - x).abs() < 1e-6));
+        let sides = [0.0, 6.0].map(|y| face_where(&b, |p| (p.y - y).abs() < 1e-6));
+        for (faces, code) in [(ends, MARK_SUPPORT), (sides, MARK_SUPPORT + 1)] {
+            for f in faces {
+                FollowedBlendMark::add(&mut b, Some(EntityRef::Face(f)), code).unwrap();
+            }
+        }
+        for (x, y) in [(0.0, 0.0), (14.0, 0.0), (14.0, 6.0), (0.0, 6.0)] {
+            let e = edge_where(&b, |p| (p.x - x).abs() < 1e-6 && (p.y - y).abs() < 1e-6);
+            FollowedBlendMark::add(&mut b, Some(EntityRef::Edge(e)), MARK_SHARP).unwrap();
+        }
+        let blends = [Followed {
+            blend: None,
+            rails: [None, None],
+            solver: FilletSolverType::ConstRadius,
+            size: 3.5,
+            face_attrs: Vec::new(),
+            rail_attrs: [Vec::new(), Vec::new()],
+            seam_attrs: Vec::new(),
+            end_attrs: Vec::new(),
+            end_across: Vec::new(),
+            taken_off: true,
+        }];
+        let mut ex = OffsetFacesExecutive::new();
+        let result = ex.reblend(&mut k, &mut b, &blends);
+        assert!(
+            result.is_err(),
+            "put back: {} faces, closed {:?}",
+            b.face_list().len(),
+            crate::topology::brep::p2::is_closed_manifold(&b)
+        );
+        assert_eq!(ex.refusal(), OffsetFacesRefusal::NotPutBack);
+        assert!(ex.reason().contains("no closed solid"), "{}", ex.reason());
+    }
+
     #[test]
     fn a_move_onto_the_offset_surface_lies_on_it() {
         let mut k = Kernel::default();
@@ -1802,6 +1852,46 @@ mod tests {
         ex.offset_faces(&mut k, &mut b, &[x, y], 1.0).unwrap();
         let got = volume(&k, &mut b);
         assert!((got - 1210.0).abs() <= 1e-9 * 1210.0, "volume {got}");
+    }
+
+    /// Offset Face rebuilds every edge of the body, each new vertex taking the tolerance of
+    /// the original vertex it stands for, not the larger of its edge's two ends: a corner
+    /// of a 10 mm box given 1e-3 leaves the corners along its edges under 1e-3 when the
+    /// bottom is moved down 1, twice (tangency-labs/solidcraft#17624: each offset spread a
+    /// loose tolerance one edge further, until it reached past a short edge and the merge
+    /// joined that edge's ends).
+    #[test]
+    fn a_rebuilt_vertex_keeps_its_own_tolerance() {
+        let mut k = Kernel::default();
+        k.fixes.offset_edges_keep_source_tolerance = true;
+        let mut b = create_box(&mut k, Point3::new(0.0, 0.0, 0.0), 10.0, 10.0, 10.0).unwrap();
+        let at = |b: &Brep, x: f64, y: f64, z: f64| {
+            b.vertices()
+                .ids()
+                .find(|&v| {
+                    let p = vertex::point(b, v).unwrap();
+                    (p.x - x).abs() < 1e-6 && (p.y - y).abs() < 1e-6 && (p.z - z).abs() < 1e-6
+                })
+                .unwrap()
+        };
+        let loose = at(&b, 10.0, 10.0, 10.0);
+        vertex::set_tolerance(&mut b, loose, 1e-3, true, true).unwrap();
+        assert!(vertex::tolerance(&b, at(&b, 0.0, 10.0, 10.0)).unwrap() < 1e-3);
+        for step in 1..=2 {
+            let level = -f64::from(step - 1);
+            let bottom = face_where(&b, |p| (p.z - level).abs() < 1e-6);
+            let mut ex = OffsetFacesExecutive::new();
+            ex.offset_faces(&mut k, &mut b, &[bottom], 1.0).unwrap();
+            let want = 1000.0 + 100.0 * f64::from(step);
+            let got = volume(&k, &mut b);
+            assert!((got - want).abs() <= 1e-9 * want, "volume {got}");
+            for (x, y) in [(0.0, 10.0), (10.0, 0.0)] {
+                let v = at(&b, x, y, 10.0);
+                let t = vertex::tolerance(&b, v).unwrap();
+                assert!(t < 1e-3, "after {step}: {t:e}");
+            }
+            assert!(vertex::tolerance(&b, at(&b, 10.0, 10.0, 10.0)).unwrap() >= 1e-3);
+        }
     }
 
     /// A face lies on a plane however far it reaches past the extent the plane was made

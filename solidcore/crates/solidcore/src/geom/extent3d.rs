@@ -57,6 +57,7 @@
 //! | [`Extent3d::approximate_unbounded`], [`Extent3d::approximate_unbounded_expanded`] | `ApproximateUnbounded` |
 //! | [`Extent3d::from_pseudo_box`]          | `SmExtent3d(const SmPseudoBox&)`               |
 //! | [`Extent3d::circumscribe`]             | `Circumscribe`                                 |
+//! | [`Extent3d::max_distance_to_point`]    | (not upstream) the farthest of the corners from a point |
 //! | [`BoundaryType`]                       | `SmBoundaryType` (`SmTypes.h`)                 |
 //!
 //! Deviations:
@@ -729,6 +730,25 @@ impl Extent3d {
         sqrt(self.max_distance_squared(other))
     }
 
+    /// (not upstream) The largest distance from `p` to a point of the box: the distance to
+    /// the farthest of its eight corners, which on each axis is the bound farther from `p`.
+    #[must_use]
+    pub fn max_distance_to_point(&self, p: Point3) -> f64 {
+        let far = |lo: f64, hi: f64, x: f64| {
+            if (x - lo).abs() >= (hi - x).abs() {
+                x - lo
+            } else {
+                hi - x
+            }
+        };
+        Vec3::new(
+            far(self.min.x, self.max.x, p.x),
+            far(self.min.y, self.max.y, p.y),
+            far(self.min.z, self.max.z, p.z),
+        )
+        .length()
+    }
+
     /// Square root of [`Extent3d::min_distance_squared`] (`MinimumDistance`).
     #[must_use]
     pub fn min_distance(&self, other: &Self) -> f64 {
@@ -1182,6 +1202,27 @@ mod tests {
 
     fn p(x: f64, y: f64, z: f64) -> Point3 {
         Vec3::new(x, y, z)
+    }
+
+    /// The farthest point of a box from a point is its farthest corner, from inside, from
+    /// outside and from a corner itself.
+    #[test]
+    fn the_largest_distance_to_a_point_is_to_the_farthest_corner() {
+        let e = Extent3d::from_points(p(-1.0, 0.0, 2.0), p(3.0, 5.0, 4.0));
+        for at in [
+            p(0.0, 1.0, 3.0),
+            p(10.0, -2.0, 0.0),
+            p(-1.0, 0.0, 2.0),
+            p(1.0, 2.5, 3.0),
+        ] {
+            let want = e
+                .corners()
+                .iter()
+                .map(|c| (*c - at).length())
+                .fold(0.0, f64::max);
+            assert!((e.max_distance_to_point(at) - want).abs() < 1e-12, "{at:?}");
+        }
+        assert!((e.max_distance_to_point(p(-1.0, 0.0, 2.0)) - e.max_distance(&e)).abs() < 1e-12);
     }
 
     /// upstream `my_test_extent3d` (`tests/prog_test/src/smCurveTest.cpp`).
