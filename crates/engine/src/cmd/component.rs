@@ -629,10 +629,21 @@ fn unlock(s: &mut Session, p: &Value) -> Result<Value> {
     }
     let gone = s.contents_joints(id);
     let group = s.doc.rigid_group_of(id).map(|g| g.id);
+    // Another group (the import this component came in with) holding a part inside it would
+    // still hold it after this one went.
+    let outer = s
+        .doc
+        .occurrences
+        .iter()
+        .filter(|o| o.parent != 0 && s.doc.component_within(o.parent, id))
+        .find_map(|o| s.doc.rigid_group_holding(o.id).filter(|g| Some(g.id) != group));
+    if let Some(outer) = outer {
+        return Err(bad(cmd, format!("the rigid group of `{}` holds this component's contents: unlock that one", outer.name)));
+    }
     if gone.is_empty() && group.is_none() {
-        // Inside an import, its rigid group is what holds it.
-        if let Some(outer) = s.doc.occurrence_of(id).and_then(|o| s.doc.rigid_group_holding(o.id)) {
-            return Err(bad(cmd, format!("the rigid group `{}` holds this component with the rest of its component: unlock that one", outer.name)));
+        // A part of an import: its group holds it with the rest.
+        if let Some(holder) = s.doc.occurrences.iter().filter(|o| o.component == id).find_map(|o| s.doc.rigid_group_holding(o.id)) {
+            return Err(bad(cmd, format!("the rigid group of `{}` holds this component with the rest of it: unlock that one", holder.name)));
         }
         return Err(bad(cmd, "nothing holds this component's contents together"));
     }

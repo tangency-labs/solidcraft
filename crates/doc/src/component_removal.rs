@@ -98,6 +98,9 @@ impl Document {
         for view in &mut assembly.exploded {
             view.moves.retain(|(o, _)| !occurrences.contains(o));
         }
+        for group in &mut assembly.rigid_groups {
+            group.members.retain(|o| !occurrences.contains(o));
+        }
         self.occurrences.retain(|o| !occurrences.contains(&o.id));
         joints
     }

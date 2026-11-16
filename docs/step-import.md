@@ -30,7 +30,7 @@ highlight generation scans each mesh once rather than scanning it again for ever
 face. Sketch profile feedback still updates its projected curves and lift toward
 the eye as the view changes.
 
-The contents of an imported assembly are **rigid by default**: one rigid group (`joint.list`'s `rigid_groups`, one row per import however many parts it has) holds each part where the file put it in its parent, so moving the import's component moves everything, and an inner part doesn't move on its own; joint degrees of freedom count the whole import as one body. To joint the parts one by one, release them with **Unlock Contents** on the component's browser menu (`component.unlock {component}`), one undo step. Undo takes a whole import away in one step.
+The contents of an imported assembly are **rigid by default**: one rigid group (`joint.list`'s `rigid_groups`, one row per import however many parts it has) holds each part where the file put it in its parent, so moving the import's component moves everything, and an inner part doesn't move on its own; joint degrees of freedom count the whole import as one body. A part you place inside the import's component later is not in its group and moves on its own. To joint the parts one by one, release them with **Unlock Contents** on the component's browser menu (`component.unlock {component}`), one undo step. Undo takes a whole import away in one step.
 
 Designs saved before imports made components keep their Import where it is (no component is made for it) and rebuild as they did.
 

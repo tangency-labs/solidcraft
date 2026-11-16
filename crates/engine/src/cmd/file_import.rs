@@ -366,10 +366,12 @@ pub(crate) fn add_in_component(
     };
     // The components, each made at its first placement; the others are further occurrences.
     let mut comps: Vec<u64> = Vec::with_capacity(plan.slots.len());
+    // The occurrences made: what the import's rigid group holds.
+    let mut made: Vec<u64> = Vec::with_capacity(plan.places.len());
     for place in &plan.places {
         let parent_comp = place.parent.and_then(|p| comps.get(p).copied()).unwrap_or(top);
         if let Some(&comp) = comps.get(place.slot) {
-            s.doc_mut().add_occurrence(comp, parent_comp, place.transform)?;
+            made.push(s.doc_mut().add_occurrence(comp, parent_comp, place.transform)?);
         } else {
             let slot = plan.slots.get(place.slot).ok_or_else(|| EngineError::Other("import: component plan".into()))?;
             let label = if slot.name.is_empty() { None } else { Some(slot.name.as_str()) };
@@ -379,6 +381,7 @@ pub(crate) fn add_in_component(
             if let Some(o) = s.doc_mut().occurrences.iter_mut().find(|o| o.id == occ) {
                 o.transform = place.transform;
             }
+            made.push(occ);
         }
     }
     if let FeatureKind::Import { skip, .. } = &mut kind {
@@ -407,7 +410,7 @@ pub(crate) fn add_in_component(
     }
     let moves: Vec<(usize, u64, Mat)> = plan.bodies.iter().filter_map(|(b, slot, offset)| comps.get(*slot).map(|c| (*b, *c, *offset))).collect();
     put_bodies(s, &names, &moves);
-    let rigid_group = if plan.places.is_empty() { None } else { Some(add_rigid_group(s, top)?) };
+    let rigid_group = if plan.places.is_empty() { None } else { Some(add_rigid_group(s, top, made)?) };
     s.active_sketch = None;
     s.refresh();
     if let Some(e) = s.model.result(id).and_then(|r| r.error.clone()) {
@@ -591,10 +594,10 @@ fn put_bodies(s: &mut Session, names: &[Option<String>], moves: &[(usize, u64, M
 
 /// One rigid group holding the contents of `component` (an imported assembly's parts) where
 /// they are. Returns its id and how many occurrences it holds.
-fn add_rigid_group(s: &mut Session, component: u64) -> Result<(u64, usize)> {
+fn add_rigid_group(s: &mut Session, component: u64, members: Vec<u64>) -> Result<(u64, usize)> {
     let id = s.doc_mut().allocate_id()?;
     let name = s.doc.components.iter().find(|c| c.id == component).map(|c| c.name.clone()).unwrap_or_default();
-    let group = RigidGroup { id, name, component };
+    let group = RigidGroup { id, name, component, members };
     let members = s.doc.rigid_group_members(&group).len();
     s.doc_mut().assembly.rigid_groups.push(group);
     Ok((id, members))

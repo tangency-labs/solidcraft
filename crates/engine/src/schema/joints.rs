@@ -1185,7 +1185,7 @@ pub struct ListJointsResult {
     pub origins: Vec<ListedOrigin>,
     /// Joint chains joined to nothing grounded.
     pub floating: Vec<FloatingChain>,
-    /// Every rigid group: a component whose contents move as one (an imported assembly's), one
+    /// Every rigid group: the parts an import placed, held where they are in their parents, one
     /// row however many parts it holds. Absent when there are none.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub rigid_groups: Vec<ListedRigidGroup>,
@@ -1202,9 +1202,9 @@ pub struct ListedRigidGroup {
     pub id: u64,
     /// Its name: the component's when it was made.
     pub name: String,
-    /// The component whose contents it holds; `component.unlock` releases them.
+    /// The import's component; `component.unlock` on it releases the parts.
     pub component: u64,
-    /// How many occurrences it holds (every one inside the component, at any depth).
+    /// How many occurrences it holds.
     pub members: usize,
 }
 

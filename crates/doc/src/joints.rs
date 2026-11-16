@@ -916,8 +916,8 @@ pub struct Assembly {
     pub traces: Vec<crate::motion::MotionTrace>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub exploded: Vec<crate::motion::ExplodedView>,
-    /// Components whose contents move as one (an imported assembly's), each held by one record
-    /// rather than a rigid joint per placement (`rigid-groups`).
+    /// The parts an import placed, each group held where they are by one record rather than a
+    /// rigid joint per placement (`rigid-groups`).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub rigid_groups: Vec<RigidGroup>,
 }
@@ -994,6 +994,7 @@ impl Assembly {
             && self.studies.is_empty()
             && self.traces.is_empty()
             && self.exploded.is_empty()
+            && self.rigid_groups.is_empty()
     }
 }
 

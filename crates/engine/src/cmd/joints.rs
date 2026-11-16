@@ -438,28 +438,41 @@ pub(crate) fn cannot_move(s: &Session, sol: &joints::Solution, id: u64) -> Optio
 fn floating_chains(s: &Session, sol: &joints::Solution) -> Vec<FloatingChain> {
     let placed = |o: u64| o == 0 || sol.world.contains_key(&o);
     let errors: BTreeSet<u64> = sol.errors.iter().map(|e| e.0).collect();
+    // A rigid group's parts join the chains through them, as its joints do in the solve; only
+    // the design's own joints and the parts at their ends are listed.
+    let held = s.doc.rigid_group_joints();
+    let held_ids: BTreeSet<u64> = held.iter().map(|h| h.id).collect();
+    let own = |j: &Joint| !held_ids.contains(&j.id);
     let mut next: BTreeMap<u64, Vec<(u64, &Joint)>> = BTreeMap::new();
-    for j in s.doc.assembly.joints.iter().filter(|j| !j.suppressed && !errors.contains(&j.id)) {
+    for j in s.doc.assembly.joints.iter().chain(&held).filter(|j| !j.suppressed && !errors.contains(&j.id)) {
         if !placed(j.a.occurrence) && !placed(j.b.occurrence) {
             next.entry(j.a.occurrence).or_default().push((j.b.occurrence, j));
             next.entry(j.b.occurrence).or_default().push((j.a.occurrence, j));
         }
     }
+    let ends: BTreeSet<u64> = s.doc.assembly.joints.iter().flat_map(|j| [j.a.occurrence, j.b.occurrence]).collect();
     let mut seen = BTreeSet::new();
     let mut out = Vec::new();
     for &start in next.keys() {
-        if !seen.insert(start) {
+        if !ends.contains(&start) || !seen.insert(start) {
             continue;
         }
         let (mut occs, mut js, mut todo) = (vec![start], BTreeSet::new(), vec![start]);
         while let Some(o) = todo.pop() {
             for (other, j) in next.get(&o).into_iter().flatten() {
-                js.insert((j.id, j.name.as_str()));
+                if own(j) {
+                    js.insert((j.id, j.name.as_str()));
+                }
                 if seen.insert(*other) {
-                    occs.push(*other);
+                    if ends.contains(other) {
+                        occs.push(*other);
+                    }
                     todo.push(*other);
                 }
             }
+        }
+        if js.is_empty() {
+            continue;
         }
         out.push(FloatingChain {
             occurrences: occs.iter().map(|o| occurrence_name(s, *o)).collect(),

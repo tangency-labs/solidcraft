@@ -1,8 +1,7 @@
-//! Rigid groups: a component whose contents move as one (an imported assembly's). One record
-//! holds every occurrence inside the component where it is in its parent, however many there
-//! are, where a rigid joint per placement used to. The joint solver, mass properties and URDF
-//! export see the record as those rigid joints ([`Document::rigid_group_joints`]); the joint
-//! list shows it as one row.
+//! Rigid groups: the parts an import placed (an imported assembly's), held where they are in
+//! their parents by one record however many there are, where a rigid joint per placement used to.
+//! The joint solver, mass properties and URDF export see the record as those rigid joints
+//! ([`Document::rigid_group_joints`]); the joint list shows it as one row.
 
 use std::collections::BTreeSet;
 
@@ -12,18 +11,22 @@ use solidcore_record::Vec3;
 use super::{Joint, JointKind, JointOrigin, Snap};
 use crate::{Document, apply_point, apply_vector};
 
-/// A component whose contents stay where they are in it: every occurrence inside it, at any
-/// depth, keeps its placement in its parent, as a rigid joint to that parent would keep it.
+/// Occurrences that each keep their placement in their parent, as a rigid joint to the parent
+/// would keep them: the parts an import made inside `component`. A part placed inside the
+/// component later is not a member, so it moves on its own.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct RigidGroup {
     pub id: u64,
     pub name: String,
-    /// The component whose contents it holds.
+    /// The component whose parts it holds (`component.unlock` on it releases them).
     pub component: u64,
+    /// The occurrences it holds, by id.
+    #[serde(default)]
+    pub members: Vec<u64>,
 }
 
 impl Document {
-    /// The rigid group holding `component`'s own contents, if any.
+    /// The rigid group of `component` (the one `component.unlock` on it releases), if any.
     pub fn rigid_group_of(&self, component: u64) -> Option<&RigidGroup> {
         if component == 0 {
             return None;
@@ -31,22 +34,15 @@ impl Document {
         self.assembly.rigid_groups.iter().find(|g| g.component == component)
     }
 
-    /// The rigid group whose contents include occurrence `occ` (it sits in the group's component
-    /// or in a component inside it), if any.
+    /// The rigid group holding occurrence `occ` where it is in its parent, if any.
     pub fn rigid_group_holding(&self, occ: u64) -> Option<&RigidGroup> {
-        let parent = self.occurrences.iter().find(|o| o.id == occ)?.parent;
-        if parent == 0 {
-            return None;
-        }
-        self.assembly.rigid_groups.iter().find(|g| g.component != 0 && self.component_within(parent, g.component))
+        self.assembly.rigid_groups.iter().find(|g| g.members.contains(&occ))
     }
 
-    /// The occurrences a rigid group holds: every occurrence inside its component, at any depth.
+    /// The occurrences a rigid group holds that are still in the design.
     pub fn rigid_group_members(&self, group: &RigidGroup) -> Vec<u64> {
-        if group.component == 0 {
-            return Vec::new();
-        }
-        self.occurrences.iter().filter(|o| o.parent != 0 && self.component_within(o.parent, group.component)).map(|o| o.id).collect()
+        let live: BTreeSet<u64> = self.occurrences.iter().filter(|o| o.parent != 0).map(|o| o.id).collect();
+        group.members.iter().copied().filter(|m| live.contains(m)).collect()
     }
 
     /// The rigid groups as the rigid joints they stand for: one per occurrence they hold, from
@@ -60,29 +56,28 @@ impl Document {
         let taken: BTreeSet<u64> = self.assembly.joints.iter().map(|j| j.id).collect();
         let mut next = u64::MAX;
         let mut out = Vec::new();
+        let mut held = BTreeSet::new();
+        let by_id: std::collections::BTreeMap<u64, &crate::Occurrence> = self.occurrences.iter().map(|o| (o.id, o)).collect();
+        let mut first_of: std::collections::BTreeMap<u64, u64> = std::collections::BTreeMap::new();
+        for o in &self.occurrences {
+            first_of.entry(o.component).or_insert(o.id);
+        }
         for group in &self.assembly.rigid_groups {
-            if group.component == 0 {
-                continue;
-            }
-            for o in self.occurrences.iter().filter(|o| o.parent != 0 && self.component_within(o.parent, group.component)) {
-                // An occurrence held by an earlier group is held once.
-                if self
-                    .assembly
-                    .rigid_groups
-                    .iter()
-                    .take_while(|g| g.id != group.id)
-                    .any(|g| g.component != 0 && self.component_within(o.parent, g.component))
-                {
+            for o in group.members.iter().filter_map(|m| by_id.get(m).copied()) {
+                // An occurrence held by two groups is held once.
+                if o.parent == 0 || !held.insert(o.id) {
                     continue;
                 }
-                let Some(a) = self.occurrence_of(o.parent).map(|p| p.id) else { continue };
+                // The first placement of the component it sits in, as `occurrence_of` finds it.
+                let Some(&a) = first_of.get(&o.parent) else { continue };
                 while taken.contains(&next) {
                     next = next.saturating_sub(1);
                 }
                 let m = &o.transform;
                 out.push(Joint {
                     id: next,
-                    name: group.name.clone(),
+                    // Distinct names: an exporter that makes names unique does so in one step.
+                    name: format!("{}: {}", group.name, o.name),
                     kind: JointKind::Rigid,
                     a: JointOrigin::new(
                         a,

@@ -287,6 +287,43 @@ fn an_imported_assembly_moves_as_one_until_it_is_unlocked() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// An import's rigid group holds the parts the import placed, and only those: it survives save
+/// and reopen when it is the design's only assembly record, a part placed inside the import later
+/// moves on its own, and an assembly imported inside another is released by its own unlock.
+#[test]
+fn an_imports_rigid_group_holds_the_parts_it_placed() {
+    let dir = temp_dir("rigid-members");
+    let path = rig_file(&dir);
+    let mut s = Session::default();
+    run(&mut s, "file.insert_step", json!({"path": path}));
+    let [group] = s.doc.assembly.rigid_groups.as_slice() else { panic!("{:?}", s.doc.assembly.rigid_groups) };
+    assert_eq!(group.members.len(), 6);
+    assert!(s.doc.assembly.joints.is_empty(), "the group is the only assembly record");
+
+    // Saved and opened again, the group is there.
+    let reopened = solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap();
+    assert_eq!(reopened.assembly.rigid_groups, s.doc.assembly.rigid_groups);
+
+    // A part placed inside the import afterwards is not held.
+    run(&mut s, "component.activate", json!({"component": "rig"}));
+    run(&mut s, "component.create", json!({"name": "Mine"}));
+    run(&mut s, "solid.box", json!({"length": 5, "width": 5, "height": 5, "corner": [-50, 0, 0]}));
+    let mine = occurrence_named(&s, "Mine:1");
+    assert!(s.held_by_rigid_group(mine).is_none(), "my own part moves on its own");
+    assert!(s.held_by_rigid_group(occurrence_named(&s, "Pin:2")).is_some(), "the import's parts are still held");
+
+    // A second assembly imported inside the first: unlocking it releases its parts, not the first's.
+    run(&mut s, "component.activate", json!({"component": "rig"}));
+    let inner = run(&mut s, "file.insert_step", json!({"path": path, "name": "Inner"}))["component"].as_u64().unwrap();
+    assert_eq!(s.doc.assembly.rigid_groups.len(), 2);
+    run(&mut s, "component.unlock", json!({"component": inner}));
+    let [left] = s.doc.assembly.rigid_groups.as_slice() else { panic!("{:?}", s.doc.assembly.rigid_groups) };
+    assert_eq!(left.name, "rig");
+    let inner_part = s.doc.occurrences.iter().find(|o| o.parent != 0 && s.doc.component_within(o.parent, inner)).unwrap().id;
+    assert!(s.held_by_rigid_group(inner_part).is_none(), "the inner import's parts are free");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 #[test]
 fn a_mesh_file_comes_in_as_one_component() {
     let dir = temp_dir("stl");
