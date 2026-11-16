@@ -1219,9 +1219,7 @@ fn a_region_reaches_along_a_direction_as_far_as_its_outer_loop() {
         .push(polygon(&[p(0.0, 2.0), p(0.0, 3.0), p(1.0, 3.0)]));
     assert_eq!(r.extent_along(x, 1e-9), Some((-2.0, 4.0)));
     let (lo, hi) = r.extent_along(diag, 1e-9).unwrap();
-    assert!(
-        (lo + FRAC_1_SQRT_2).abs() < 1e-12 && (hi - 11.0 * FRAC_1_SQRT_2).abs() < 1e-12
-    );
+    assert!((lo + FRAC_1_SQRT_2).abs() < 1e-12 && (hi - 11.0 * FRAC_1_SQRT_2).abs() < 1e-12);
     // A half disc of radius 2 about the origin, the arc on top: up to 2, across to +-2; the arc
     // runs past +-x only at its ends, so along x it is exact too.
     let half = Region2 {
