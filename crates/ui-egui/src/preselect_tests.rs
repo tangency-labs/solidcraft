@@ -505,6 +505,61 @@ fn feature_pattern_controls_preview_without_committing_and_cancel_cleanly() {
     }
 }
 
+#[test]
+fn circular_body_pattern_direction_controls_preview_and_survive_reopening() {
+    let mut h = crate::scenario::Harness::new();
+    h.app.run("parameters.add", json!({"name":"arc_angle","expression":"90 deg"})).unwrap();
+    h.app.run("solid.box", json!({"corner":[40,0,0],"length":2,"width":2,"height":2,"body_name":"Peg"})).unwrap();
+    h.app.session.selection = vec![Sel::Body { name: "Peg".into() }, Sel::Axis { name: "Z".into() }];
+    h.step(&json!({"start":"solid.pattern.circular"})).unwrap();
+    let d = h.app.dialog.as_mut().unwrap();
+    let Kind::PatternCirc { count, angle } = &mut d.kind else { panic!("circular pattern dialog") };
+    *count = "3".into();
+    *angle = "arc_angle".into();
+    let before = h.app.session.doc.to_json();
+    let undo = h.app.session.undo.len();
+    h.frames(3);
+    for handle in ["dialog:Alignment:Flip direction", "dialog:Alignment:Center"] {
+        h.step(&json!({"click":{"handle":handle}})).unwrap();
+    }
+    let (command, params) = apply_commands(&h.app, h.app.dialog.as_ref().unwrap()).unwrap().remove(0);
+    assert_eq!(params["bodies"], json!(["Peg"]));
+    assert!(params.get("features").is_none());
+    assert_eq!(params["angle"], "arc_angle");
+    assert_eq!(params["count"], "3");
+    assert_eq!(params["reversed"], true);
+    assert_eq!(params["alignment"], "center");
+    wait_feature_preview(&mut h);
+    assert_eq!(h.app.session.doc.to_json(), before, "the controls only change the preview until OK");
+    assert_eq!(h.app.session.undo.len(), undo);
+    h.step(&json!({"key":"Escape"})).unwrap();
+    h.frames(3);
+    assert!(h.app.dialog.is_none());
+    assert!(!h.app.preview.active);
+    assert_eq!(h.app.session.doc.to_json(), before, "Cancel keeps the source design");
+
+    h.app.run(&command, params).unwrap();
+    let feature = h.app.session.doc.features.last().unwrap().clone();
+    h.app.session = Session::new(solidcraft_engine::doc::Document::from_json(&h.app.session.doc.to_json()).unwrap());
+    h.app.session.selection = vec![Sel::Feature { id: feature.id }];
+    let d = crate::dialogs::for_feature(&h.app, feature.id, None).unwrap();
+    assert_eq!(d.inputs[0].accept, crate::selection::BODIES);
+    assert_eq!(d.inputs[0].items, vec![Sel::Body { name: "Peg".into() }]);
+    let (edit, params) = apply_commands(&h.app, &d).unwrap().remove(0);
+    assert_eq!(edit, "timeline.redefine");
+    assert_eq!(params["params"]["reversed"], true);
+    assert_eq!(params["params"]["alignment"], "center");
+    assert_eq!(params["params"]["angle"], "arc_angle");
+    h.app.run(&edit, params).unwrap();
+    assert_eq!(h.app.session.doc.feature(feature.id).unwrap().kind, feature.kind);
+
+    h.app.dialog = crate::dialogs::for_feature(&h.app, feature.id, None);
+    h.frames(3);
+    h.step(&json!({"click":{"handle":"dialog:Alignment:Flip direction"}})).unwrap();
+    let (_, params) = apply_commands(&h.app, h.app.dialog.as_ref().unwrap()).unwrap().remove(0);
+    assert_eq!(params["params"]["reversed"], false, "the reopened body pattern can change direction again");
+}
+
 #[track_caller]
 fn wait_feature_preview(h: &mut crate::scenario::Harness) {
     // A large faceted thread can outlive 300 UI frames on a busy CI host. This checks

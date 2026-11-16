@@ -3590,8 +3590,8 @@ pub(crate) fn input_rows_range(d: &mut Dialog, ui: &mut egui::Ui, s: &Session, n
     d.sync_thread(s);
 }
 
-/// Feature patterns use the same source-fixed slot ordering and controls as sketch patterns.
-fn feature_pattern_alignment_row(ui: &mut egui::Ui, extra: &mut serde_json::Map<String, Value>, index: usize) {
+/// Solid patterns use the same source-fixed slot ordering and controls as sketch patterns.
+fn solid_pattern_alignment_row(ui: &mut egui::Ui, extra: &mut serde_json::Map<String, Value>, index: usize) {
     use solidcraft_engine::sketch::PatternAlignment;
     let (label, alignment_key, reversed_key) =
         if index == 0 { ("Alignment", "alignment", "reversed") } else { ("Alignment 2", "alignment2", "reversed2") };
