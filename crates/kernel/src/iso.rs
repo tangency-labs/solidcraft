@@ -471,6 +471,47 @@ fn boundary_polylines(body: &Body, face: usize, trims: &FaceTrims) -> Result<Vec
     Ok(out)
 }
 
+/// Most points [`face_edge_points`] puts along one edge.
+pub const MAX_EDGE_POINTS: usize = 1 << 16;
+
+/// Points along each of face `face`'s edges (not its seams), one list for each edge from its
+/// start to its end, on the edge's exact curve, the parameter halved until no two neighbours are
+/// more than `spacing` apart (or [`MAX_EDGE_POINTS`] is reached).
+pub fn face_edge_points(body: &Body, face: usize, spacing: f64) -> Result<Vec<Vec<Vec3>>> {
+    if !(spacing.is_finite() && spacing > 0.0) {
+        return Err(KernelError::Invalid("edge points: the spacing must be above zero".into()));
+    }
+    let r = body.record();
+    let f = r.faces.get(face).ok_or_else(|| KernelError::Invalid(format!("the body has no face {face}")))?;
+    let mut uses: std::collections::BTreeMap<u32, usize> = std::collections::BTreeMap::new();
+    for l in &f.loops {
+        if let brep::Loop::Edges { edges } = l {
+            for e in edges {
+                *uses.entry(e.edge).or_insert(0) += 1;
+            }
+        }
+    }
+    let mut out = Vec::new();
+    for e in uses.into_iter().filter(|(_, n)| *n == 1).map(|(e, _)| e) {
+        let edge = r.edges.get(e as usize).ok_or_else(|| KernelError::Invalid(format!("the body has no edge {e}")))?;
+        let curve = solidcraft_geom::brep::eval::CurveEval::new(edge.parameters())
+            .map_err(|_| KernelError::Failed(format!("edge points: edge {e} can't be evaluated")))?;
+        let [t0, t1] = edge.interval;
+        let mut n = 16usize;
+        loop {
+            let pts = (0..=n).map(|i| curve.point(t0 + (t1 - t0) * i as f64 / n as f64)).collect::<Option<Vec<Vec3>>>();
+            let pts = pts.ok_or_else(|| KernelError::Failed(format!("edge points: edge {e} can't be evaluated")))?;
+            let widest = pts.windows(2).map(|w| w[0].dist(w[1])).fold(0.0, f64::max);
+            if widest <= spacing || n >= MAX_EDGE_POINTS {
+                out.push(pts);
+                break;
+            }
+            n = (n * 2).min(MAX_EDGE_POINTS);
+        }
+    }
+    Ok(out)
+}
+
 fn polyline_distance(pts: &[Vec3], p: Vec3) -> f64 {
     pts.windows(2)
         .map(|w| {
@@ -678,10 +719,20 @@ const RANDOM_TRIES: usize = 400;
 const BLUE_CANDIDATES: usize = 12;
 
 /// `count` points placed at random on face `face` of `body`, the same for the same `seed`, spread
-/// as `noise` says, none nearer than `margin` to the face's boundary. Places are uniform over the
-/// face's area (not its parameters), inside its trims. Fewer come back when the face has no room
-/// for more within the tries allowed.
-pub fn face_random_stations(body: &Body, face: usize, count: usize, seed: u64, noise: Noise, margin: f64) -> Result<Vec<FaceStation>> {
+/// as `noise` says, none nearer than `margin` to the face's boundary and each one `keep` takes
+/// (it sees the station with its normal already out of the body's material, and may say no to
+/// one a copy there would not fit). Places are uniform over the face's area (not its
+/// parameters), inside its trims. Fewer come back when the face has no room for more within the
+/// tries allowed.
+pub fn face_random_stations(
+    body: &Body,
+    face: usize,
+    count: usize,
+    seed: u64,
+    noise: Noise,
+    margin: f64,
+    keep: &mut dyn FnMut(&FaceStation) -> bool,
+) -> Result<Vec<FaceStation>> {
     if count > MAX_STATION_COUNT {
         return Err(KernelError::Invalid(format!("pattern on a face: at most {MAX_STATION_COUNT} random instances")));
     }
@@ -753,8 +804,11 @@ pub fn face_random_stations(body: &Body, face: usize, count: usize, seed: u64, n
             t * t
         }
     };
+    // Whether the face's surface normal points into the body's material (and its stations are
+    // turned over), as the first station tells.
+    let mut inward: Option<bool> = None;
     // One random place on the face, or none after the tries allowed.
-    let candidate = |rng: &mut Seeded| -> Option<FaceStation> {
+    let mut candidate = |rng: &mut Seeded| -> Result<Option<FaceStation>> {
         for _ in 0..RANDOM_TRIES {
             let (x, y) = (rng.next(), rng.next());
             let q = at(x, y);
@@ -768,31 +822,46 @@ pub fn face_random_stations(body: &Body, face: usize, count: usize, seed: u64, n
             if to_edge < margin {
                 continue;
             }
-            return Some(FaceStation { point, normal, along, margin: to_edge });
+            let mut station = [FaceStation { point, normal, along, margin: to_edge }];
+            if inward.is_none() {
+                orient_outward(body, &mut station)?;
+                inward = Some(station[0].normal.dot(normal) < 0.0);
+            } else if inward == Some(true) {
+                station[0].normal = -normal;
+            }
+            return Ok(Some(station[0]));
         }
-        None
+        Ok(None)
     };
     let mut out: Vec<FaceStation> = Vec::with_capacity(count);
-    while out.len() < count {
+    // Rounds of drawing in which `keep` took nothing, in a row.
+    let mut refused = 0;
+    while out.len() < count && refused < RANDOM_TRIES {
         let picked = if noise == Noise::Blue && !out.is_empty() {
-            // The candidate farthest from the points already placed.
-            let mut best: Option<(f64, FaceStation)> = None;
+            // The candidate farthest from the points already placed that `keep` takes: asked
+            // farthest first, so it is asked about as few as it can be.
+            let mut drawn = Vec::with_capacity(BLUE_CANDIDATES);
             for _ in 0..BLUE_CANDIDATES {
-                let Some(c) = candidate(&mut rng) else { break };
+                let Some(c) = candidate(&mut rng)? else { break };
                 let gap = out.iter().map(|s| s.point.dist(c.point)).fold(f64::INFINITY, f64::min);
-                if best.as_ref().is_none_or(|(g, _)| gap > *g) {
-                    best = Some((gap, c));
-                }
+                drawn.push((gap, c));
             }
-            best.map(|(_, c)| c)
+            if drawn.is_empty() {
+                break;
+            }
+            drawn.sort_by(|a, b| b.0.total_cmp(&a.0));
+            drawn.into_iter().map(|(_, c)| c).find(|c| keep(c))
         } else {
-            candidate(&mut rng)
+            let Some(c) = candidate(&mut rng)? else { break };
+            keep(&c).then_some(c)
         };
         match picked {
-            Some(s) => out.push(s),
-            None => break,
+            Some(s) => {
+                out.push(s);
+                refused = 0;
+            }
+            None => refused += 1,
         }
     }
-    orient_outward(body, &mut out)?;
     Ok(out)
 }

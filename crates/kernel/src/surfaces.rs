@@ -579,6 +579,26 @@ pub fn copy_faces(body: &Body, at: &[Vec3]) -> Result<Body> {
     taken(body, r, &chosen.into_iter().map(|f| (f, false)).collect::<Vec<_>>())
 }
 
+/// The faces at positions `faces` of a body copied out as one surface body, each once. Its history
+/// is over `[body]`: the faces and their edges are the body's.
+pub fn faces_of(body: &Body, faces: &[usize]) -> Result<Body> {
+    body.require_brep("copy faces")?;
+    let r = body.record();
+    let mut chosen: Vec<usize> = Vec::new();
+    for &f in faces {
+        if f >= r.faces.len() {
+            return Err(invalid(format!("the body has no face {f}")));
+        }
+        if !chosen.contains(&f) {
+            chosen.push(f);
+        }
+    }
+    if chosen.is_empty() {
+        return Err(invalid("pick the faces to copy"));
+    }
+    taken(body, r, &chosen.into_iter().map(|f| (f, false)).collect::<Vec<_>>())
+}
+
 /// A body's faces taken apart: each picked face (by points on it; every face when none are given)
 /// its own surface body, and the faces left, if any, one surface body. A solid comes apart into
 /// surfaces. Histories are over `[body]`: each face is the body's.

@@ -144,7 +144,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .icon("pattern_rect")
         .contract(&PATTERN_FACE_CONTRACT)
         .output(output_schema_for::<FeatureResult>)
-        .params("bodies: [names]; face: {face: [x,y,z]} (any face; followed as the model changes); count1, count2 (grid cells across and along the face: round and along a cylinder) | random: {count, seed?: whole number, noise?: white|blue|pink|brown} (instances at random places, even over the face's area: white independent, blue evenly spread, pink loose clusters, brown large clusters); staggered?: bool (every other column half a cell along); angle?: expr (turns the grid); margin?: expr (no copy nearer the face's edges); flip?: bool (the other side of the face); anchor?: [x,y,z] (the point of the bodies that lands on the face, default the centre of the bottom of their bounding box; their +Z stands along the face's normal, their X along the grid); group?: bool (default true: the copies go into a group in the browser's Bodies folder, named after the feature); attract?: {geometry?: [refs: points, vertices, edges, faces], bodies?: [names], far_geometry?, far_bodies?, near?, far?, scale_near?, scale_far?, offset_near?, offset_far?, turn_near?, turn_far?, cutoff?, falloff?: linear|smooth} (advanced: each copy changes with its exact distance to the nearest attractor, from the near values at the near distance to the far values at the far one, default distances the nearest and farthest copies'; with far attractors, by its place between the two sets instead: near values on the near set, far values on the far set, near and far then hold zones round each set, default 0)"),
+        .params("bodies: [names]; face: {face: [x,y,z]} (any face; followed as the model changes); count1, count2 (grid cells across and along the face: round and along a cylinder) | random: {count, seed?: whole number, noise?: white|blue|pink|brown} (instances at random places, even over the face's area: white independent, blue evenly spread, pink loose clusters, brown large clusters); staggered?: bool (every other column half a cell along); angle?: expr (turns the grid); margin?: expr (the edge margin: no copy nearer the face's edges, round its holes too, measured from the copy itself); avoid?: {geometry?: [refs: points, vertices, faces], bodies?: [names], margin?: expr} (no copy within the margin of these, measured from the copy itself; with no margin, none touching or overlapping them); flip?: bool (the other side of the face); anchor?: [x,y,z] (the point of the bodies that lands on the face, default the centre of the bottom of their bounding box; their +Z stands along the face's normal, their X along the grid); group?: bool (default true: the copies go into a group in the browser's Bodies folder, named after the feature); attract?: {geometry?: [refs: points, vertices, edges, faces], bodies?: [names], far_geometry?, far_bodies?, near?, far?, scale_near?, scale_far?, offset_near?, offset_far?, turn_near?, turn_far?, cutoff?, falloff?: linear|smooth} (advanced: each copy changes with its exact distance to the nearest attractor, from the near values at the near distance to the far values at the far one, default distances the nearest and farthest copies'; with far attractors, by its place between the two sets instead: near values on the near set, far values on the far set, near and far then hold zones round each set, default 0)"),
     CommandSpec::new("solid.pattern.path", "Pattern on Path", crate::checked!("solid.pattern.path", pattern_path))
         .at("SOLID", "CREATE")
         .icon("pattern_path")
@@ -3125,6 +3125,10 @@ fn pattern_face(s: &mut Session, p: &Value) -> Result<Value> {
     if let Some(m) = &margin {
         check_expr(s, m, Kind::Length, cmd, "margin")?;
     }
+    let avoid = match p.get("avoid") {
+        None | Some(Value::Null) => None,
+        Some(a) => Some(Box::new(avoid_param(s, a, cmd)?)),
+    };
     let anchor = point_param(s, p, "anchor", cmd)?;
     let attract = match p.get("attract") {
         None | Some(Value::Null) => None,
@@ -3138,6 +3142,7 @@ fn pattern_face(s: &mut Session, p: &Value) -> Result<Value> {
         random,
         angle,
         margin,
+        avoid,
         flip: bool_(p, "flip").unwrap_or(false),
         anchor,
         attract,
@@ -3168,6 +3173,38 @@ fn pattern_face(s: &mut Session, p: &Value) -> Result<Value> {
         }
     }
     Ok(reply)
+}
+
+/// What a face pattern keeps its copies away from (`avoid`): points, vertices, sketch and
+/// construction points, faces and bodies, and the margin round them.
+fn avoid_param(s: &Session, a: &Value, cmd: &str) -> Result<solidcraft_doc::Avoid> {
+    let list = match a.get("geometry") {
+        None | Some(Value::Null) => Vec::new(),
+        Some(Value::Array(l)) if l.len() <= 64 => l.clone(),
+        Some(_) => return Err(bad(cmd, "`avoid.geometry` must list at most 64 points or faces")),
+    };
+    let geometry = list.iter().map(|v| super::construct::geo(s, Some(v), cmd, "avoid.geometry")).collect::<Result<Vec<_>>>()?;
+    if geometry.iter().any(|g| matches!(g, solidcraft_doc::construct::GeoRef::Edge { .. })) {
+        return Err(bad(cmd, "`avoid.geometry`: an edge can't be avoided; give the faces along it"));
+    }
+    let names = string_list(cmd, a, "bodies")?;
+    if names.len() > 64 {
+        return Err(bad(cmd, "`avoid.bodies` must list at most 64 bodies"));
+    }
+    if let Some(n) = names.iter().find(|n| s.model.state().body(n).is_none()) {
+        return Err(bad(cmd, format!("`avoid.bodies`: no body `{n}`")));
+    }
+    if geometry.is_empty() && names.is_empty() {
+        return Err(bad(cmd, "`avoid` needs `geometry` (points or faces) or `bodies`"));
+    }
+    let margin = expr(a, "margin");
+    if let Some(m) = &margin {
+        check_expr(s, m, Kind::Length, cmd, "avoid.margin")?;
+        if s.doc.eval(m, Kind::Length).is_ok_and(|v| v < 0.0) {
+            return Err(bad(cmd, "`avoid.margin` must not be negative"));
+        }
+    }
+    Ok(solidcraft_doc::Avoid { geometry, bodies: names.into_iter().map(BodyName).collect(), margin })
 }
 
 /// A face pattern's attractors (`attract`): the points and the values at the near and far

@@ -366,6 +366,23 @@ now and is never saved: if the thing is lost, the note stays and has no leader.
 - **Elsewhere:** leader, leader line.
 - **For translators:** a drawn line; not a person who leads.
 
+### margin (pattern)
+
+How near a copy of Pattern on Face may come to something before it is left out, measured from the
+copy itself, not its centre.
+
+The *edge margin* keeps copies away from the face's edges, round its holes and the foot of a boss
+too, and from hanging over them. The *avoid margin* keeps
+them away from what the Avoid pick holds: points, faces and bodies. With no avoid margin, a copy is
+left out only when it touches or overlaps one of those, or one holds the other. Distances are
+measured on the exact geometry.
+
+- **In SolidCraft:** `solid.pattern.face`'s `margin` and `avoid` (`geometry`, `bodies`, `margin`);
+  the Edge margin and Avoid margin fields and the Avoid pick of Pattern on Face.
+- **Don't use:** clearance (Inspect's Clearance measures the gaps between bodies), offset, gap.
+- **Elsewhere:** keep-out distance, border, edge distance.
+- **For translators:** a distance kept free round something, not a page margin.
+
 ### material
 
 The physical substance of a body, which sets its density and mechanical properties.

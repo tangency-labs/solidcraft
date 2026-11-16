@@ -456,7 +456,7 @@ fn representative(h: &Harness, command: &str) -> Dialog {
         if command == "solid.cylinder" {
             continue; // its face and reference edges place it (cylinder reference tests); this form checks its fields
         }
-        if matches!(input.label, "Rail" | "Second Rail" | "Pass through" | "Direction" | "Roller (optional)" | "Tip (optional)") {
+        if matches!(input.label, "Rail" | "Second Rail" | "Pass through" | "Direction" | "Roller (optional)" | "Tip (optional)" | "Avoid") {
             continue;
         }
         let name = if index == 1 && command != "surface.ruled" { "Body2" } else { "Body1" };
@@ -918,7 +918,7 @@ fn align_components_mode_switches_and_aligns_only_selected_instance() {
 }
 form_case!(remove, "solid.remove", []);
 form_case!(path_pattern, "solid.pattern.path", ["Type", "Object Type", "Quantity", "Spacing"]);
-form_case!(face_pattern, "solid.pattern.face", ["Type", "Layout", "Quantity U", "Quantity V", "Grid angle", "Margin"]);
+form_case!(face_pattern, "solid.pattern.face", ["Type", "Layout", "Quantity U", "Quantity V", "Grid angle", "Edge margin"]);
 
 /// Pattern on Face's attractors sit behind Advanced: off, the dialog sends a plain pattern and has
 /// no attractor picks; on, it has Attractors and Far attractors, which take points, edges, faces
@@ -974,6 +974,36 @@ fn face_pattern_attractors_come_from_the_advanced_option() {
     assert_eq!(a["bodies"], json!(["Body2"]), "{again}");
     assert!(a["geometry"][0]["edge"].is_array() && a["far_geometry"][0]["edge"].is_array(), "{again}");
     h.app.run(&redefine, again).unwrap();
+}
+
+/// Pattern on Face's Avoid pick takes bodies and points but not edges; with picks, the dialog sends
+/// them with the avoid margin, and an edit brings them back as picks.
+#[test]
+fn face_pattern_avoid_sends_its_picks_and_margin_and_restores_them() {
+    use crate::dialogs_face_pattern::AVOID;
+    let mut h = fixture();
+    let mut d = representative(&h, "solid.pattern.face");
+    let avoid = d.inputs.iter().find(|i| i.label == AVOID).expect("an Avoid pick");
+    assert!(avoid.multi && avoid.accept & BODIES != 0 && avoid.accept & EDGES == 0, "{:?}", avoid.accept);
+    let (_, plain) = apply_commands(&h.app, &d).unwrap().remove(0);
+    assert!(plain.get("avoid").is_none(), "nothing avoided until picked: {plain}");
+    d.inputs.iter_mut().find(|i| i.label == AVOID).unwrap().items = vec![Sel::Body { name: "Body2".into() }];
+    if let Kind::FacePattern(f) = &mut d.kind {
+        f.margin = "1 mm".into();
+        f.avoid_margin = "2 mm".into();
+    }
+    let (command, params) = apply_commands(&h.app, &d).unwrap().remove(0);
+    assert_eq!(params["avoid"], json!({"bodies": ["Body2"], "margin": "2 mm"}), "{params}");
+    assert_eq!(params["margin"], json!("1 mm"), "{params}");
+    let reply = h.app.run(&command, params).unwrap();
+    let feature = reply["feature"].as_u64().unwrap();
+    let edit = super::for_feature(&h.app, feature, None).expect("the pattern opens for editing");
+    let picks = edit.inputs.iter().find(|i| i.label == AVOID).map(|i| i.items.clone()).unwrap_or_default();
+    assert_eq!(picks, vec![Sel::Body { name: "Body2".into() }]);
+    let Kind::FacePattern(f) = &edit.kind else { panic!("{:?}", edit.kind) };
+    assert_eq!((f.margin.as_str(), f.avoid_margin.as_str()), ("1 mm", "2 mm"));
+    let (_, again) = apply_commands(&h.app, &edit).unwrap().remove(0);
+    assert_eq!(again["params"]["avoid"], json!({"bodies": ["Body2"], "margin": "2 mm"}), "{again}");
 }
 
 /// Pattern on Face's Random layout sends a count, a seed and a noise colour in place of the grid,

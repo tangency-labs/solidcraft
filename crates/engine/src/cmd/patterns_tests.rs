@@ -2124,6 +2124,84 @@ fn a_face_pattern_margin_and_stagger() {
     assert!(ys.len() > 3 || xs.len() > 4, "staggered columns sit between the plain ones: {xs:?} {ys:?}");
 }
 
+/// A square plate 80 × 80 × 10 mm, optionally with a hole of `hole` radius through its middle, and
+/// a pin of radius 2, 6 mm tall. A 4 × 4 grid on its top face puts pins at 10, 30, 50 and 70 mm
+/// each way, whichever way the face's parameters run.
+fn square_plate_and_pin(s: &mut Session, hole: Option<f64>) {
+    run(s, "solid.box", json!({"length": 80, "width": 80, "height": 10, "corner": [0, 0, 0], "body_name": "Plate"}));
+    if let Some(r) = hole {
+        run(s, "sketch.create", json!({"plane": "XY", "name": "Hole"}));
+        run(s, "sketch.circle.center", json!({"center": [40, 40], "radius": r, "id": "c1"}));
+        run(s, "sketch.finish", json!({}));
+        run(s, "solid.extrude", json!({"sketch": "Hole", "through_all": true, "operation": "cut"}));
+    }
+    run(s, "solid.cylinder", json!({"radius": 2, "height": 6, "body_name": "Pin"}));
+}
+
+fn square_grid(s: &mut Session, extra: Value) -> usize {
+    let mut p = json!({"bodies": ["Pin"], "face": {"face": [20, 20, 10]}, "count1": 4, "count2": 4, "group": false});
+    if let (Some(p), Some(extra)) = (p.as_object_mut(), extra.as_object()) {
+        p.extend(extra.clone());
+    }
+    let r = run(s, "solid.pattern.face", p);
+    copies_of(s, &r).len()
+}
+
+/// The edge margin is measured from each copy, not its centre, and round the face's holes too:
+/// the outer pins' sides are 8 mm from the plate's edges (their centres 10), and the inner pins'
+/// sides are 10√2 − 2 − 6 ≈ 6.14 mm from a hole of radius 6 (their centres ≈ 8.14 from its edge).
+#[test]
+fn a_face_pattern_edge_margin_is_measured_from_the_copy_and_round_holes() {
+    let mut s = Session::default();
+    square_plate_and_pin(&mut s, Some(6.0));
+    assert_eq!(square_grid(&mut s, json!({})), 16, "no margin");
+    assert_eq!(square_grid(&mut s, json!({"margin": 5})), 16, "every pin is more than 5 mm clear");
+    assert_eq!(square_grid(&mut s, json!({"margin": 7})), 12, "the inner pins come within 6.14 mm of the hole");
+    let mut s = Session::default();
+    square_plate_and_pin(&mut s, None);
+    assert_eq!(square_grid(&mut s, json!({"margin": 7.5})), 16, "the outer pins are 8 mm clear");
+    assert_eq!(square_grid(&mut s, json!({"margin": 9})), 4, "the outer pins' centres are 10 mm in, their sides 8");
+}
+
+/// Avoid leaves out the copies that come within its margin of a body, a face or a point, measured
+/// from each copy: a wall 4 mm thick across the plate at x = 38…42 is 6 mm from the pins' sides
+/// at x = 30 and x = 50. With no margin, a copy that touches or holds a point goes, and so does
+/// one wholly inside an avoided body, though their boundaries are 3 mm apart.
+#[test]
+fn a_face_pattern_avoids_bodies_faces_and_points_measured_from_the_copy() {
+    let mut s = Session::default();
+    square_plate_and_pin(&mut s, None);
+    run(&mut s, "solid.box", json!({"length": 4, "width": 80, "height": 5, "corner": [38, 0, 10], "operation": "new", "body_name": "Wall"}));
+    assert_eq!(square_grid(&mut s, json!({"avoid": {"bodies": ["Wall"]}})), 16, "nothing touches the wall");
+    assert_eq!(square_grid(&mut s, json!({"avoid": {"bodies": ["Wall"], "margin": 5}})), 16, "6 mm clear");
+    assert_eq!(square_grid(&mut s, json!({"avoid": {"bodies": ["Wall"], "margin": 7}})), 8, "the columns either side go");
+    // The wall's face at x = 38: the column at x = 50 is 10 mm from it.
+    assert_eq!(square_grid(&mut s, json!({"avoid": {"geometry": [{"face": [38, 40, 12]}], "margin": 7}})), 12, "one column goes");
+    // A point under a pin's base, and one inside another pin.
+    let points = json!({"avoid": {"geometry": [{"point": [10, 10, 10]}, {"point": [70, 70, 13]}]}});
+    assert_eq!(square_grid(&mut s, points), 14, "the pins at a point go");
+    // A cover round the pin at (10, 70): x 4…16, y 64…76, z 7…19.
+    run(&mut s, "solid.box", json!({"length": 12, "width": 12, "height": 12, "corner": [4, 64, 7], "operation": "new", "body_name": "Cover"}));
+    assert_eq!(square_grid(&mut s, json!({"avoid": {"bodies": ["Cover"]}})), 15, "the pin inside the cover goes");
+}
+
+/// A random placement with an edge margin and Avoid still makes the quantity asked for: each place
+/// is tried against them as it is drawn.
+#[test]
+fn a_random_face_pattern_keeps_its_quantity_clear_of_what_it_avoids() {
+    let mut s = Session::default();
+    square_plate_and_pin(&mut s, None);
+    run(&mut s, "solid.box", json!({"length": 4, "width": 80, "height": 5, "corner": [38, 0, 10], "operation": "new", "body_name": "Wall"}));
+    let p = json!({"bodies": ["Pin"], "face": {"face": [20, 20, 10]}, "random": {"count": 20, "seed": 5, "noise": "blue"}, "margin": 2, "avoid": {"bodies": ["Wall"], "margin": 3}, "group": false});
+    let r = run(&mut s, "solid.pattern.face", p);
+    let places = pin_heights(&s, &r);
+    assert_eq!(places.len(), 20);
+    for (c, _) in &places {
+        assert!(c.x >= 4.0 - 1e-6 && c.x <= 76.0 + 1e-6 && c.y >= 4.0 - 1e-6 && c.y <= 76.0 + 1e-6, "2 mm clear of the edges: {c:?}");
+        assert!(c.x <= 33.0 + 1e-6 || c.x >= 47.0 - 1e-6, "3 mm clear of the wall: {c:?}");
+    }
+}
+
 /// On a cylinder the copies stand out from its axis, all the way round.
 #[test]
 fn a_face_pattern_on_a_cylinder_stands_copies_out_from_its_axis() {
@@ -2208,6 +2286,11 @@ fn a_face_pattern_refuses_bad_input() {
         json!({"bodies": ["Pin"], "face": {"face": [50, 30, 10]}, "count1": 2, "count2": 2, "attract": {"geometry": []}}),
         json!({"bodies": ["Pin"], "face": {"face": [50, 30, 10]}, "count1": 2, "count2": 2, "attract": {"geometry": [{"point": [0, 0, 0]}], "falloff": "wavy"}}),
         json!({"bodies": ["Pin"], "face": {"face": [50, 30, 10]}, "count1": 2, "count2": 2, "attract": {"geometry": [{"point": [0, 0, 0]}], "scale_near": -1}}),
+        json!({"bodies": ["Pin"], "face": {"face": [50, 30, 10]}, "count1": 2, "count2": 2, "avoid": {"geometry": []}}),
+        json!({"bodies": ["Pin"], "face": {"face": [50, 30, 10]}, "count1": 2, "count2": 2, "avoid": {"geometry": [{"edge": [50, 0, 10]}]}}),
+        json!({"bodies": ["Pin"], "face": {"face": [50, 30, 10]}, "count1": 2, "count2": 2, "avoid": {"bodies": ["Nope"]}}),
+        json!({"bodies": ["Pin"], "face": {"face": [50, 30, 10]}, "count1": 2, "count2": 2, "avoid": {"bodies": ["Plate"], "margin": -1}}),
+        json!({"bodies": ["Pin"], "face": {"face": [50, 30, 10]}, "count1": 2, "count2": 2, "avoid": {"bodies": ["Plate"], "margin": "5 deg"}}),
     ] {
         let before = s.doc.features.len();
         assert!(s.execute("solid.pattern.face", &p).is_err(), "{p}");
@@ -2445,8 +2528,8 @@ fn nearest_gaps(p: &[solidcore_record::Vec3]) -> Vec<f64> {
     p.iter().enumerate().map(|(i, a)| p.iter().enumerate().filter(|(j, _)| *j != i).map(|(_, b)| a.dist(*b)).fold(f64::INFINITY, f64::min)).collect()
 }
 
-/// A random placement makes the quantity asked for, on the face and clear of its edges by the
-/// margin, the same for the same seed and different for another.
+/// A random placement makes the quantity asked for, on the face and each copy clear of its edges
+/// by the margin, the same for the same seed and different for another.
 #[test]
 fn a_random_face_pattern_is_seeded_and_stays_on_the_face() {
     let mut s = Session::default();
@@ -2456,7 +2539,8 @@ fn a_random_face_pattern_is_seeded_and_stays_on_the_face() {
         assert_eq!(a.len(), 40, "{noise}");
         for c in &a {
             assert!((c.z - 10.0).abs() < 1e-6, "{noise}: stands on the top face {c:?}");
-            assert!(c.x >= 3.0 - 1e-9 && c.x <= 97.0 + 1e-9 && c.y >= 3.0 - 1e-9 && c.y <= 57.0 + 1e-9, "{noise}: 3 mm clear of the edges {c:?}");
+            // The pin (radius 2) is 3 mm clear: its centre is 5 mm in.
+            assert!(c.x >= 5.0 - 1e-6 && c.x <= 95.0 + 1e-6 && c.y >= 5.0 - 1e-6 && c.y <= 55.0 + 1e-6, "{noise}: 3 mm clear of the edges {c:?}");
         }
         let b = random_places(&mut s, json!({"count": 40, "seed": 7, "noise": noise}), 3.0);
         assert_eq!(a, b, "{noise}: the same seed, the same places");
