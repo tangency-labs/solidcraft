@@ -257,20 +257,105 @@ fn a_cliff_overflows_variable_round_holds_its_law_on_its_touch_circles() {
     // the fork's 5e8c9c1 build (SmFilletExecutive as SmApiVariableRadiusFillet runs it),
     // the exact circles: here to the last digit printed until `brep_volume` closed tolerant
     // edges' gaps (#16735). The fork's figures leak through the round's tolerant edges as
-    // this integrator did; each body is now pinned at its closed-gap volume, the fork's
-    // figure checked within the old leak's bound of it.
-    for (r0, r1, fork, want) in [
-        (2.0, 11.0, 5802.4435349841779, 5802.443146052507),
-        (11.0, 2.0, 5802.4435208241775, 5802.4431461379545),
-        (2.0, 20.0, 5503.8871700927575, 5503.887122636036),
-        (2.0, 30.0, 5184.0573578203966, 5184.057276011837),
-        (2.0, 50.0, 4693.6093103438334, 4693.608894404652),
+    // this integrator did; each body is pinned at its closed-gap volume (`want`, #16737's
+    // body), the fork's figure checked within the old leak's bound of it.
+    //
+    // #17673's crease trim joins each crease to the sheet's end edge at their true meet, so
+    // the round's tolerant edges close up: the widest strip over its tolerance falls from
+    // 0.492 (2 -> 11 on #16737's body) to 0.019 (0.061, 0.087, 0.078 for 2 -> 20, 30, 50),
+    // and the old leak bound from 8.2e-3 to 3.1e-5. The fork's figure therefore no longer
+    // leaks by this body's gaps; it is checked against the gaps of #16737's body, which it
+    // was measured on (`main_old`, `main_quad`: #16737's `leak` of that body, MEASURED), and
+    // this body is checked to have moved from `want` within its own old leak bound.
+    //
+    // `want`'s 1e-12 pin holds for 2 -> 11 and 11 -> 2 (moved 9.0e-14, 2.2e-13). For
+    // 2 -> 20, 30, 50 the volume moves 1.15e-8, 2.71e-8, 1.41e-7 (rel 2.1e-12, 5.2e-12,
+    // 3.0e-11), proven within: each body's closed region differs from the solid it bounds
+    // only inside its edges' tubes and vertices' balls, `sum pi tol^2 L + sum 4/3 pi tol^3`
+    // (#16735's derivation), which holds when every strip and fan lies within its stored
+    // tolerance (asserted below: widest strip / tol at most 0.087 here, 0.542 on #16737's
+    // body). So |V - want| <= tube(this body) + tube(#16737's body, `main_tube`) + both
+    // volumes' quadrature shares at 1e-8 (twice their differences from 1e-10; this body's
+    // live, #16737's `main_quad`).
+    for (r0, r1, fork, want, pinned, main_old, main_quad, main_tube) in [
+        (
+            2.0,
+            11.0,
+            5802.4435349841779,
+            5802.443146052507,
+            true,
+            8.213e-3,
+            1.700e-6,
+            5.858e-7,
+        ),
+        (
+            11.0,
+            2.0,
+            5802.4435208241775,
+            5802.4431461379545,
+            true,
+            8.192e-3,
+            1.696e-6,
+            5.858e-7,
+        ),
+        (
+            2.0,
+            20.0,
+            5503.8871700927575,
+            5503.887122636036,
+            false,
+            1.194e-2,
+            2.726e-6,
+            8.016e-7,
+        ),
+        (
+            2.0,
+            30.0,
+            5184.0573578203966,
+            5184.057276011837,
+            false,
+            2.110e-2,
+            4.613e-6,
+            9.487e-7,
+        ),
+        (
+            2.0,
+            50.0,
+            4693.6093103438334,
+            4693.608894404652,
+            false,
+            3.222e-2,
+            1.473e-5,
+            8.999e-7,
+        ),
     ] {
         let (k, mut b) = cliff_rounded(kernel(true), r0, r1).expect("builds");
         let v = volume(&k, &mut b);
         eprintln!("{r0} -> {r1}: {v:?} fork {fork}");
-        assert!(rel(v, want) < 1e-12, "{r0} -> {r1}: {v} vs {want}");
-        volume_leak::assert_moved_by_the_old_leak(&k, &mut b, fork, v, 1e-8);
+        let l = volume_leak::leak(&k, &mut b, 1e-10, 8);
+        assert!(
+            l.worst_gap_over_tolerance < 1.0 && l.worst_fan_over_tolerance < 1.0,
+            "{r0} -> {r1}: strip / tol {}, fan / tol {}",
+            l.worst_gap_over_tolerance,
+            l.worst_fan_over_tolerance
+        );
+        if pinned {
+            assert!(rel(v, want) < 1e-12, "{r0} -> {r1}: {v} vs {want}");
+        } else {
+            let bound = l.new_bound + main_tube + 2.0 * (v - l.volume).abs() + main_quad;
+            assert!(
+                (v - want).abs() <= bound,
+                "{r0} -> {r1}: {v} vs {want}, moved {:e} past {bound:e}",
+                (v - want).abs()
+            );
+        }
+        // the fork's figure leaks by the gaps of the body it was measured on
+        assert!(
+            (fork - want).abs() <= main_old + main_quad,
+            "{r0} -> {r1}: fork {fork} vs {want}"
+        );
+        // and this body moved from that body's closed volume within its own old leak
+        volume_leak::assert_moved_by_the_old_leak(&k, &mut b, want, v, 1e-8);
     }
 }
 
