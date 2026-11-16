@@ -89,7 +89,7 @@ pub(crate) fn dead_zone_pads(ui: &mut egui::Ui, calibration: &Calibration, raw: 
                 let (rect, response) = ui.allocate_exact_size(egui::vec2(SIZE, SIZE), egui::Sense::hover());
                 let painter = ui.painter_at(rect);
                 let (centre, radius) = (rect.center(), SIZE / 2.0 - 2.0);
-                let faint = crate::theme::Tokens::get().text_dim;
+                let faint = solidcraft_theme::Tokens::get().text_dim;
                 // Which side of an axis's dead zone lies along a way on screen.
                 let side = |axis: usize, way: f32, screen: f32| shares[axis][usize::from(way * screen > 0.0)];
                 let zone: Vec<egui::Pos2> = (0..64)
@@ -129,7 +129,7 @@ pub(crate) fn dead_zone_pads(ui: &mut egui::Ui, calibration: &Calibration, raw: 
 fn reading_grid(ui: &mut egui::Ui, raw: [i16; 6]) {
     const NAMES: [&str; 6] = ["X", "Y", "Z", "Rx", "Ry", "Rz"];
     const CELL: f32 = 48.0;
-    let t = crate::theme::Tokens::get();
+    let t = solidcraft_theme::Tokens::get();
     let (name_font, number_font) = (egui::FontId::proportional(t.font_small), egui::FontId::monospace(t.font_small));
     let painter = ui.painter().clone();
     let line = |font: &egui::FontId| painter.layout_no_wrap("0".into(), font.clone(), t.text_dim).size().y;

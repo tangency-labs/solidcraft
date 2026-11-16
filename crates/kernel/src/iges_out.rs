@@ -3,15 +3,15 @@
 //! with their faces, loops, edge and vertex lists, on analytic surfaces (planes, cylinders,
 //! cones, spheres, tori), surfaces of revolution and rational B-splines, with body names (406
 //! name properties) and colours (314). Geometry is the record's, exact, in the same STEP form
-//! the STEP export writes ([`solidcraft_step::write::topology`]); IGES loops run
+//! the STEP export writes ([`solidcore_step::write::topology`]); IGES loops run
 //! counter-clockwise about their surface's normal.
 
 use std::collections::HashMap;
 use std::fmt::Write as _;
 
 use solidcore_record::brep::{Brep, Loop, Shell};
-use solidcraft_step::geom::{Curve, Placement, Surface};
-use solidcraft_step::write::topology;
+use solidcore_step::geom::{Curve, Placement, Surface};
+use solidcore_step::write::topology;
 
 use crate::{ExportBody, KernelError, Result, StepHeader};
 

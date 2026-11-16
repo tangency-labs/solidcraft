@@ -1,0 +1,128 @@
+{
+ "issue": "https://github.com/tangency-labs/solidcraft/issues/232",
+ "pr": "https://github.com/tangency-labs/solidcraft/pull/838",
+ "test": "crates/kernel/src/tests.rs: similar_spheres_meet (PR #838, the fix); crates/engine/src/tests.rs: join_of_two_overlapping_equal_spheres_is_not_refused (PR #836, on top of it)",
+ "summary": "Union of two spheres of radius 10, which SolidCraft refused with 'contact work exceeds the limit' (centres 12 and 4 mm apart, per the issue). The overlap is a lens of volume pi (4r + d)(2r - d)^2 / 12. d 12 is the engine test's join; d 4 and d 20.5 are positions from the kernel test, which checks only whether the spheres meet, so their volumes and lump counts here are closed form. The tangent position d 20 is left out (point contact). Tolerance 0.01 mm^3.",
+ "cases": [
+  {
+   "name": "overlapping_equal_spheres_d12",
+   "note": "Two spheres of radius 10 with centres 12 mm apart.",
+   "steps": [
+    {
+     "op": "sphere",
+     "id": "a",
+     "center": [
+      0,
+      0,
+      0
+     ],
+     "radius": 10
+    },
+    {
+     "op": "sphere",
+     "id": "b",
+     "center": [
+      12,
+      0,
+      0
+     ],
+     "radius": 10
+    },
+    {
+     "op": "union",
+     "id": "result",
+     "a": "a",
+     "b": "b"
+    }
+   ],
+   "expect": {
+    "lumps": 1,
+    "volume": {
+     "value": 7506.312046977212,
+     "tol": 0.01,
+     "formula": "2*(4/3)*pi*10^3 - pi*(4*10+12)*(2*10-12)^2/12"
+    }
+   }
+  },
+  {
+   "name": "overlapping_equal_spheres_d4",
+   "note": "Two spheres of radius 10 with centres 4 mm apart.",
+   "steps": [
+    {
+     "op": "sphere",
+     "id": "a",
+     "center": [
+      0,
+      0,
+      0
+     ],
+     "radius": 10
+    },
+    {
+     "op": "sphere",
+     "id": "b",
+     "center": [
+      4,
+      0,
+      0
+     ],
+     "radius": 10
+    },
+    {
+     "op": "union",
+     "id": "result",
+     "a": "a",
+     "b": "b"
+    }
+   ],
+   "expect": {
+    "lumps": 1,
+    "volume": {
+     "value": 5428.672105403162,
+     "tol": 0.01,
+     "formula": "2*(4/3)*pi*10^3 - pi*(4*10+4)*(2*10-4)^2/12"
+    }
+   }
+  },
+  {
+   "name": "separate_equal_spheres_d20_5",
+   "note": "Control: centres 20.5 mm apart do not touch (the kernel test's `meets` = false); the union keeps two lumps.",
+   "steps": [
+    {
+     "op": "sphere",
+     "id": "a",
+     "center": [
+      0,
+      0,
+      0
+     ],
+     "radius": 10
+    },
+    {
+     "op": "sphere",
+     "id": "b",
+     "center": [
+      20.5,
+      0,
+      0
+     ],
+     "radius": 10
+    },
+    {
+     "op": "union",
+     "id": "result",
+     "a": "a",
+     "b": "b"
+    }
+   ],
+   "expect": {
+    "lumps": 2,
+    "volume": {
+     "value": 8377.580409572782,
+     "tol": 0.01,
+     "formula": "2*(4/3)*pi*10^3"
+    }
+   }
+  }
+ ]
+}

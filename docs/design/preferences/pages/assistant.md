@@ -42,9 +42,8 @@ One card per agent, with an "Add agent..." and a "Refresh" button at the end.
 
 | Label | Control | Edits | Default | Hover | Figure | Notes |
 |---|---|---|---|---|---|---|
-| Let AI agents connect | Checkbox | `Prefs.agent_control` | `true` | "A local channel (MCP). Nothing leaves this computer." | none | |
 | Add SolidCraft to AI apps | Checkbox | `Prefs.connect_ai_apps` | `true` | "Off takes the entries out again." | none | |
-| Run slow commands in the background | Checkbox | `Prefs.agent_off_thread` | `false` | none | none | |
+| Run slow commands in the background | Checkbox | `Prefs.agent_off_thread` | `true` | none | none | |
 | Connect the last agent at start | Checkbox | `Prefs.agent_connect_at_start` | `false` | none | none | |
 | Open the chat at start | Checkbox | `Prefs.agent_chat_open_at_start` | `false` | none | none | |
 
@@ -55,6 +54,13 @@ One card per agent, with an "Add agent..." and a "Refresh" button at the end.
 | Show the agent's pointer | Checkbox | `app.ui.agent_cursor.show` (`agent_cursor::Settings`) | per session | none | none | Session value; in the Snapshot. |
 | Speed | Slider, "1.00x" readout, with the path preview (230x84) at the right | `app.ui.agent_cursor.speed` (`Speed`) | 1.0 | none | `agent-pointer-speed` | aria-label "Pointer speed". |
 | Follow the camera | Checkbox | `app.ui.agent_cursor.follow_camera` | per session | "Look At sketches move the view with the pointer." | none | |
+
+## Agents through MCP
+
+| Label | Control | Edits | Default | Hover | Figure | Notes |
+|---|---|---|---|---|---|---|
+| Let AI agents connect | Checkbox, with a Listening / Not listening badge | `Prefs.agent_control` | `true` | "A local channel (MCP). Nothing leaves this computer." | none | Takes effect at once (`control_switch`); a `--control` launch keeps its port for the run. |
+| Port | Number field, 1024–65535 | `Prefs.agent_control_port` | 27878 | "The port AI agents connect to on this computer (127.0.0.1)." | none | A taken port shows a hint under the field. |
 
 ## Mismatches
 

@@ -1,0 +1,162 @@
+{
+  "area": "fillets",
+  "bodies": {
+    "b22": {
+      "keeping_splines": false,
+      "trusted": true
+    }
+  },
+  "calls": [
+    {
+      "inputs": [
+        "b22"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b23"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b23"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b24"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b24"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b25"
+      ],
+      "params": {
+        "operand": 0
+      }
+    },
+    {
+      "inputs": [
+        "b25"
+      ],
+      "op": "blend_dropping",
+      "outputs": [
+        "b26"
+      ],
+      "params": {
+        "edges": {
+          "kind": "edge",
+          "picked": [
+            {
+              "at": [
+                [
+                  62.166666666666664,
+                  0.0,
+                  0.0
+                ],
+                [
+                  62.166666666666664,
+                  0.0,
+                  10.0
+                ]
+              ],
+              "index": 4
+            }
+          ],
+          "points": [
+            [
+              62.166666666666664,
+              0.0,
+              5.0
+            ]
+          ],
+          "tolerance": 3.3197702709152845
+        },
+        "kind": "round",
+        "sizes": [
+          2.0
+        ]
+      }
+    }
+  ],
+  "case": "851-fillet-knife-edge-tip-r2",
+  "expected": {
+    "body_count": 1,
+    "continuity": {
+      "order": "g1"
+    },
+    "method": "plate x 0..41.1667, y -21..0 and the corner x 41.1667..62.1667 less the cylinder r 21 about (62.1667, -21), 10 high (tessellation/1263): V0 = 10 (62.1667 x 21 - pi 21^2/4) = 9591.394099. The ball r 2 touches the back face (centre y = -2) and the wall from outside (centre 23 from its axis): centre x = 62.1667 - sqrt(4 x 21 x 2). It takes the cusp beyond it: the quadrilateral plane contact, tip, wall centre, ball centre less the wall's sector (angle acos(19/23)) and the ball's (pi - that), 11.964881 mm^2 (a 0.002 grid of the region no ball inside the part reaches gives the same to 1e-3), times 10: V = 9471.745287",
+    "source": "analytic",
+    "sources": [
+      "tangency-labs/solidcraft#851"
+    ],
+    "volume_mm3": 9471.745287300899,
+    "what": "the knife edge where #851's concave R21 wall runs out tangent into the back face, rounded R2: the ball that fits 2 from both faces, 13 back from the tip"
+  },
+  "expressible": false,
+  "operation_expressible": true,
+  "outcome": {
+    "ran": true,
+    "raw_counts": {
+      "edges": 15,
+      "faces": 7,
+      "vertices": 10
+    }
+  },
+  "records": "851-fillet-knife-edge-tip-r2.bodies.json.gz",
+  "result": [
+    {
+      "body": "Plate",
+      "made": "b26"
+    }
+  ],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": {
+      "area_mm2": 3263.073006373522,
+      "body_count": 1,
+      "edges": 15,
+      "faces": 7,
+      "vertices": 10,
+      "volume_mm3": 9471.745287317128
+    },
+    "refused_with": null,
+    "status": "pass"
+  },
+  "sources": [
+    "tangency-labs/solidcraft#851"
+  ],
+  "traced_ops": [
+    "extrude",
+    "extrude",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "copy",
+    "copy",
+    "tagged",
+    "blend_dropping"
+  ],
+  "ungraded": [
+    "continuity: SolidCraft computes it"
+  ],
+  "what": "the knife edge where #851's concave R21 wall runs out tangent into the back face, rounded R2: the ball that fits 2 from both faces, 13 back from the tip",
+  "why_not": []
+}

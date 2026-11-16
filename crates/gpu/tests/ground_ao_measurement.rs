@@ -4,9 +4,11 @@
 #![cfg(not(target_arch = "wasm32"))]
 use serde_json::json;
 use solidcore_record::Vec3;
-use solidcraft_engine::{geom::Aabb3, render::Camera};
+use solidcraft_engine::geom::Aabb3;
+use solidcraft_geom::MeshGeom;
 use solidcraft_gpu as gpu;
-use solidcraft_gpu::view::{Frame, GpuScene, GpuTarget, Renderer};
+use solidcraft_viewport::Camera;
+use solidcraft_viewport_gpu::view::{Frame, GpuScene, GpuTarget, Renderer};
 use std::{
     sync::Arc,
     time::{Duration, Instant},
@@ -19,7 +21,7 @@ fn measure_ground_ao_renderer_cost() -> Result<(), Box<dyn std::error::Error>> {
     ao_comparison(1)
 }
 fn ao_comparison(ground: u32) -> Result<(), Box<dyn std::error::Error>> {
-    let (adapter, _) = gpu::select::pick(gpu::select::Policy::from_env().map_err(std::io::Error::other)?).ok_or("no matching adapter")?;
+    let (adapter, _) = solidcraft_viewport_gpu::select::pick(gpu::env::policy().map_err(std::io::Error::other)?).ok_or("no matching adapter")?;
     let info = adapter.get_info();
     let features = wgpu::Features::TIMESTAMP_QUERY | wgpu::Features::TIMESTAMP_QUERY_INSIDE_ENCODERS;
     if !adapter.features().contains(features) {
@@ -214,6 +216,7 @@ fn comparison_frame(scene: GpuScene, cam: &Camera, width: u32, height: u32, key:
         pv_hide: false,
         preview_bounds: None,
         view_proj: cam.view_proj(f64::from(width) / f64::from(height), 200.0).to_f32(),
+        turned_depth: None,
         back: cam.back().to_f32(),
         size_px: [width as f32, height as f32],
         clip: [0.0; 4],
@@ -226,7 +229,7 @@ fn comparison_frame(scene: GpuScene, cam: &Camera, width: u32, height: u32, key:
         outline: false,
         eye: [0.0; 4],
         ao_radius: 0.0,
-        ao_samples: gpu::view::AO_SAMPLES,
+        ao_samples: solidcraft_viewport_gpu::view::AO_SAMPLES,
         hover_tint: [0.0; 3],
         selection_tint: [0.0; 3],
         hatch: Default::default(),
@@ -237,5 +240,10 @@ fn comparison_frame(scene: GpuScene, cam: &Camera, width: u32, height: u32, key:
 }
 
 fn receiver(sc: &mut GpuScene, b: Aabb3, cam: &Camera, radius: f64) {
-    sc.ground_ao = solidcraft_gpu::view::GroundAo::new(b, b.min.z - 0.001 * (1.0 + b.diagonal()), cam.up, radius as f32);
+    sc.ground_ao = solidcraft_viewport_gpu::view::GroundAo::new(
+        solidcraft_render::view_bounds(&b),
+        b.min.z - 0.001 * (1.0 + b.diagonal()),
+        cam.up,
+        radius as f32,
+    );
 }

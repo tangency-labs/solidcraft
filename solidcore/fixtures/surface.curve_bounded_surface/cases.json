@@ -1,0 +1,4657 @@
+{
+ "cases": [
+  {
+   "name": "surface_sms_state",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117",
+   "inputs": {
+    "op": "state",
+    "this": {
+     "srf": {
+      "sms": {
+       "$upstream_file": "Surface.sms"
+      }
+     },
+     "implicit": true,
+     "c3d": [
+      {
+       "smc": {
+        "$upstream_file": "crvTrim1.smc"
+       }
+      },
+      {
+       "smc": {
+        "$upstream_file": "crvTrim2.smc"
+       }
+      }
+     ],
+     "cuv": [
+      {
+       "smc": {
+        "$upstream_file": "closedCurve.smc"
+       }
+      },
+      {
+       "smc": {
+        "$upstream_file": "closedCurve.smc"
+       }
+      }
+     ]
+    }
+   }
+  },
+  {
+   "name": "surface_sms_queries",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117",
+   "inputs": {
+    "op": "queries",
+    "types": [
+     15045,
+     15001,
+     15002,
+     14033,
+     0,
+     1
+    ],
+    "this": {
+     "srf": {
+      "sms": {
+       "$upstream_file": "Surface.sms"
+      }
+     },
+     "implicit": true,
+     "c3d": [
+      {
+       "smc": {
+        "$upstream_file": "crvTrim1.smc"
+       }
+      },
+      {
+       "smc": {
+        "$upstream_file": "crvTrim2.smc"
+       }
+      }
+     ],
+     "cuv": [
+      {
+       "smc": {
+        "$upstream_file": "closedCurve.smc"
+       }
+      },
+      {
+       "smc": {
+        "$upstream_file": "closedCurve.smc"
+       }
+      }
+     ]
+    }
+   }
+  },
+  {
+   "name": "surface_sms_defaults",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117",
+   "inputs": {
+    "op": "defaults",
+    "v": [
+     0.0,
+     0.0,
+     1.0
+    ],
+    "this": {
+     "srf": {
+      "sms": {
+       "$upstream_file": "Surface.sms"
+      }
+     },
+     "implicit": true,
+     "c3d": [
+      {
+       "smc": {
+        "$upstream_file": "crvTrim1.smc"
+       }
+      },
+      {
+       "smc": {
+        "$upstream_file": "crvTrim2.smc"
+       }
+      }
+     ],
+     "cuv": [
+      {
+       "smc": {
+        "$upstream_file": "closedCurve.smc"
+       }
+      },
+      {
+       "smc": {
+        "$upstream_file": "closedCurve.smc"
+       }
+      }
+     ]
+    }
+   }
+  },
+  {
+   "name": "surface_sms_eq_self",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117",
+   "inputs": {
+    "op": "eq_self",
+    "this": {
+     "srf": {
+      "sms": {
+       "$upstream_file": "Surface.sms"
+      }
+     },
+     "implicit": true,
+     "c3d": [
+      {
+       "smc": {
+        "$upstream_file": "crvTrim1.smc"
+       }
+      },
+      {
+       "smc": {
+        "$upstream_file": "crvTrim2.smc"
+       }
+      }
+     ],
+     "cuv": [
+      {
+       "smc": {
+        "$upstream_file": "closedCurve.smc"
+       }
+      },
+      {
+       "smc": {
+        "$upstream_file": "closedCurve.smc"
+       }
+      }
+     ]
+    }
+   }
+  },
+  {
+   "name": "surface_sms_eq_other_same",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117",
+   "inputs": {
+    "op": "eq_other",
+    "other": {
+     "srf": {
+      "sms": {
+       "$upstream_file": "Surface.sms"
+      }
+     },
+     "implicit": true,
+     "c3d": [
+      {
+       "smc": {
+        "$upstream_file": "crvTrim1.smc"
+       }
+      },
+      {
+       "smc": {
+        "$upstream_file": "crvTrim2.smc"
+       }
+      }
+     ],
+     "cuv": [
+      {
+       "smc": {
+        "$upstream_file": "closedCurve.smc"
+       }
+      },
+      {
+       "smc": {
+        "$upstream_file": "closedCurve.smc"
+       }
+      }
+     ]
+    },
+    "this": {
+     "srf": {
+      "sms": {
+       "$upstream_file": "Surface.sms"
+      }
+     },
+     "implicit": true,
+     "c3d": [
+      {
+       "smc": {
+        "$upstream_file": "crvTrim1.smc"
+       }
+      },
+      {
+       "smc": {
+        "$upstream_file": "crvTrim2.smc"
+       }
+      }
+     ],
+     "cuv": [
+      {
+       "smc": {
+        "$upstream_file": "closedCurve.smc"
+       }
+      },
+      {
+       "smc": {
+        "$upstream_file": "closedCurve.smc"
+       }
+      }
+     ]
+    }
+   }
+  },
+  {
+   "name": "surface_sms_set_context",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117",
+   "inputs": {
+    "op": "set_context",
+    "this": {
+     "srf": {
+      "sms": {
+       "$upstream_file": "Surface.sms"
+      }
+     },
+     "implicit": true,
+     "c3d": [
+      {
+       "smc": {
+        "$upstream_file": "crvTrim1.smc"
+       }
+      },
+      {
+       "smc": {
+        "$upstream_file": "crvTrim2.smc"
+       }
+      }
+     ],
+     "cuv": [
+      {
+       "smc": {
+        "$upstream_file": "closedCurve.smc"
+       }
+      },
+      {
+       "smc": {
+        "$upstream_file": "closedCurve.smc"
+       }
+      }
+     ]
+    }
+   }
+  },
+  {
+   "name": "surface_sms_eval_pt_0",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117",
+   "inputs": {
+    "op": "eval_pt",
+    "uv": [
+     0.0,
+     0.0634210842965636
+    ],
+    "this": {
+     "srf": {
+      "sms": {
+       "$upstream_file": "Surface.sms"
+      }
+     },
+     "implicit": true,
+     "c3d": [
+      {
+       "smc": {
+        "$upstream_file": "crvTrim1.smc"
+       }
+      },
+      {
+       "smc": {
+        "$upstream_file": "crvTrim2.smc"
+       }
+      }
+     ],
+     "cuv": [
+      {
+       "smc": {
+        "$upstream_file": "closedCurve.smc"
+       }
+      },
+      {
+       "smc": {
+        "$upstream_file": "closedCurve.smc"
+       }
+      }
+     ]
+    }
+   }
+  },
+  {
+   "name": "surface_sms_eval_0",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117",
+   "inputs": {
+    "op": "eval",
+    "uv": [
+     0.0,
+     0.0634210842965636
+    ],
+    "hu": 2,
+    "hv": 2,
+    "u_left": true,
+    "v_left": true,
+    "upper": true,
+    "nzt": true,
+    "this": {
+     "srf": {
+      "sms": {
+       "$upstream_file": "Surface.sms"
+      }
+     },
+     "implicit": true,
+     "c3d": [
+      {
+       "smc": {
+        "$upstream_file": "crvTrim1.smc"
+       }
+      },
+      {
+       "smc": {
+        "$upstream_file": "crvTrim2.smc"
+       }
+      }
+     ],
+     "cuv": [
+      {
+       "smc": {
+        "$upstream_file": "closedCurve.smc"
+       }
+      },
+      {
+       "smc": {
+        "$upstream_file": "closedCurve.smc"
+       }
+      }
+     ]
+    }
+   }
+  },
+  {
+   "name": "surface_sms_eval_full_0",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117",
+   "inputs": {
+    "op": "eval",
+    "uv": [
+     0.0,
+     0.0634210842965636
+    ],
+    "hu": 3,
+    "hv": 1,
+    "nzt": false,
+    "this": {
+     "srf": {
+      "sms": {
+       "$upstream_file": "Surface.sms"
+      }
+     },
+     "implicit": true,
+     "c3d": [
+      {
+       "smc": {
+        "$upstream_file": "crvTrim1.smc"
+       }
+      },
+      {
+       "smc": {
+        "$upstream_file": "crvTrim2.smc"
+       }
+      }
+     ],
+     "cuv": [
+      {
+       "smc": {
+        "$upstream_file": "closedCurve.smc"
+       }
+      },
+      {
+       "smc": {
+        "$upstream_file": "closedCurve.smc"
+       }
+      }
+     ]
+    }
+   }
+  },
+  {
+   "name": "surface_sms_normal_0",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117",
+   "inputs": {
+    "op": "normal",
+    "uv": [
+     0.0,
+     0.0634210842965636
+    ],
+    "this": {
+     "srf": {
+      "sms": {
+       "$upstream_file": "Surface.sms"
+      }
+     },
+     "implicit": true,
+     "c3d": [
+      {
+       "smc": {
+        "$upstream_file": "crvTrim1.smc"
+       }
+      },
+      {
+       "smc": {
+        "$upstream_file": "crvTrim2.smc"
+       }
+      }
+     ],
+     "cuv": [
+      {
+       "smc": {
+        "$upstream_file": "closedCurve.smc"
+       }
+      },
+      {
+       "smc": {
+        "$upstream_file": "closedCurve.smc"
+       }
+      }
+     ]
+    }
+   }
+  },
+  {
+   "name": "surface_sms_simple_0",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117",
+   "inputs": {
+    "op": "simple",
+    "uv": [
+     0.0,
+     0.0634210842965636
+    ],
+    "hu": 1,
+    "hv": 1,
+    "this": {
+     "srf": {
+      "sms": {
+       "$upstream_file": "Surface.sms"
+      }
+     },
+     "implicit": true,
+     "c3d": [
+      {
+       "smc": {
+        "$upstream_file": "crvTrim1.smc"
+       }
+      },
+      {
+       "smc": {
+        "$upstream_file": "crvTrim2.smc"
+       }
+      }
+     ],
+     "cuv": [
+      {
+       "smc": {
+        "$upstream_file": "closedCurve.smc"
+       }
+      },
+      {
+       "smc": {
+        "$upstream_file": "closedCurve.smc"
+       }
+      }
+     ]
+    }
+   }
+  },
+  {
+   "name": "surface_sms_step_0",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117",
+   "inputs": {
+    "op": "step",
+    "uv": [
+     0.0,
+     0.0634210842965636
+    ],
+    "hu": 1,
+    "hv": 1,
+    "this": {
+     "srf": {
+      "sms": {
+       "$upstream_file": "Surface.sms"
+      }
+     },
+     "implicit": true,
+     "c3d": [
+      {
+       "smc": {
+        "$upstream_file": "crvTrim1.smc"
+       }
+      },
+      {
+       "smc": {
+        "$upstream_file": "crvTrim2.smc"
+       }
+      }
+     ],
+     "cuv": [
+      {
+       "smc": {
+        "$upstream_file": "closedCurve.smc"
+       }
+      },
+      {
+       "smc": {
+        "$upstream_file": "closedCurve.smc"
+       }
+      }
+     ]
+    }
+   }
+  },
+  {
+   "name": "surface_sms_step_pt_0",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117",
+   "inputs": {
+    "op": "step_pt",
+    "uv": [
+     0.0,
+     0.0634210842965636
+    ],
+    "this": {
+     "srf": {
+      "sms": {
+       "$upstream_file": "Surface.sms"
+      }
+     },
+     "implicit": true,
+     "c3d": [
+      {
+       "smc": {
+        "$upstream_file": "crvTrim1.smc"
+       }
+      },
+      {
+       "smc": {
+        "$upstream_file": "crvTrim2.smc"
+       }
+      }
+     ],
+     "cuv": [
+      {
+       "smc": {
+        "$upstream_file": "closedCurve.smc"
+       }
+      },
+      {
+       "smc": {
+        "$upstream_file": "closedCurve.smc"
+       }
+      }
+     ]
+    }
+   }
+  },
+  {
+   "name": "surface_sms_singular_0",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117",
+   "inputs": {
+    "op": "singular",
+    "uv": [
+     0.0,
+     0.0634210842965636
+    ],
+    "tol": 1e-10,
+    "this": {
+     "srf": {
+      "sms": {
+       "$upstream_file": "Surface.sms"
+      }
+     },
+     "implicit": true,
+     "c3d": [
+      {
+       "smc": {
+        "$upstream_file": "crvTrim1.smc"
+       }
+      },
+      {
+       "smc": {
+        "$upstream_file": "crvTrim2.smc"
+       }
+      }
+     ],
+     "cuv": [
+      {
+       "smc": {
+        "$upstream_file": "closedCurve.smc"
+       }
+      },
+      {
+       "smc": {
+        "$upstream_file": "closedCurve.smc"
+       }
+      }
+     ]
+    }
+   }
+  },
+  {
+   "name": "surface_sms_geometric_0",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117",
+   "inputs": {
+    "op": "geometric",
+    "uv": [
+     0.0,
+     0.0634210842965636
+    ],
+    "this": {
+     "srf": {
+      "sms": {
+       "$upstream_file": "Surface.sms"
+      }
+     },
+     "implicit": true,
+     "c3d": [
+      {
+       "smc": {
+        "$upstream_file": "crvTrim1.smc"
+       }
+      },
+      {
+       "smc": {
+        "$upstream_file": "crvTrim2.smc"
+       }
+      }
+     ],
+     "cuv": [
+      {
+       "smc": {
+        "$upstream_file": "closedCurve.smc"
+       }
+      },
+      {
+       "smc": {
+        "$upstream_file": "closedCurve.smc"
+       }
+      }
+     ]
+    }
+   }
+  },
+  {
+   "name": "surface_sms_normal_section_0",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117",
+   "inputs": {
+    "op": "normal_section",
+    "uv": [
+     0.0,
+     0.0634210842965636
+    ],
+    "dir": [
+     1.0,
+     0.5,
+     0.0
+    ],
+    "this": {
+     "srf": {
+      "sms": {
+       "$upstream_file": "Surface.sms"
+      }
+     },
+     "implicit": true,
+     "c3d": [
+      {
+       "smc": {
+        "$upstream_file": "crvTrim1.smc"
+       }
+      },
+      {
+       "smc": {
+        "$upstream_file": "crvTrim2.smc"
+       }
+      }
+     ],
+     "cuv": [
+      {
+       "smc": {
+        "$upstream_file": "closedCurve.smc"
+       }
+      },
+      {
+       "smc": {
+        "$upstream_file": "closedCurve.smc"
+       }
+      }
+     ]
+    }
+   }
+  },
+  {
+   "name": "surface_sms_eval_pt_1",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117",
+   "inputs": {
+    "op": "eval_pt",
+    "uv": [
+     0.5,
+     0.3
+    ],
+    "this": {
+     "srf": {
+      "sms": {
+       "$upstream_file": "Surface.sms"
+      }
+     },
+     "implicit": true,
+     "c3d": [
+      {
+       "smc": {
+        "$upstream_file": "crvTrim1.smc"
+       }
+      },
+      {
+       "smc": {
+        "$upstream_file": "crvTrim2.smc"
+       }
+      }
+     ],
+     "cuv": [
+      {
+       "smc": {
+        "$upstream_file": "closedCurve.smc"
+       }
+      },
+      {
+       "smc": {
+        "$upstream_file": "closedCurve.smc"
+       }
+      }
+     ]
+    }
+   }
+  },
+  {
+   "name": "surface_sms_eval_1",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117",
+   "inputs": {
+    "op": "eval",
+    "uv": [
+     0.5,
+     0.3
+    ],
+    "hu": 2,
+    "hv": 2,
+    "u_left": false,
+    "v_left": true,
+    "upper": true,
+    "nzt": true,
+    "this": {
+     "srf": {
+      "sms": {
+       "$upstream_file": "Surface.sms"
+      }
+     },
+     "implicit": true,
+     "c3d": [
+      {
+       "smc": {
+        "$upstream_file": "crvTrim1.smc"
+       }
+      },
+      {
+       "smc": {
+        "$upstream_file": "crvTrim2.smc"
+       }
+      }
+     ],
+     "cuv": [
+      {
+       "smc": {
+        "$upstream_file": "closedCurve.smc"
+       }
+      },
+      {
+       "smc": {
+        "$upstream_file": "closedCurve.smc"
+       }
+      }
+     ]
+    }
+   }
+  },
+  {
+   "name": "surface_sms_eval_full_1",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117",
+   "inputs": {
+    "op": "eval",
+    "uv": [
+     0.5,
+     0.3
+    ],
+    "hu": 3,
+    "hv": 1,
+    "nzt": false,
+    "this": {
+     "srf": {
+      "sms": {
+       "$upstream_file": "Surface.sms"
+      }
+     },
+     "implicit": true,
+     "c3d": [
+      {
+       "smc": {
+        "$upstream_file": "crvTrim1.smc"
+       }
+      },
+      {
+       "smc": {
+        "$upstream_file": "crvTrim2.smc"
+       }
+      }
+     ],
+     "cuv": [
+      {
+       "smc": {
+        "$upstream_file": "closedCurve.smc"
+       }
+      },
+      {
+       "smc": {
+        "$upstream_file": "closedCurve.smc"
+       }
+      }
+     ]
+    }
+   }
+  },
+  {
+   "name": "surface_sms_normal_1",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117",
+   "inputs": {
+    "op": "normal",
+    "uv": [
+     0.5,
+     0.3
+    ],
+    "this": {
+     "srf": {
+      "sms": {
+       "$upstream_file": "Surface.sms"
+      }
+     },
+     "implicit": true,
+     "c3d": [
+      {
+       "smc": {
+        "$upstream_file": "crvTrim1.smc"
+       }
+      },
+      {
+       "smc": {
+        "$upstream_file": "crvTrim2.smc"
+       }
+      }
+     ],
+     "cuv": [
+      {
+       "smc": {
+        "$upstream_file": "closedCurve.smc"
+       }
+      },
+      {
+       "smc": {
+        "$upstream_file": "closedCurve.smc"
+       }
+      }
+     ]
+    }
+   }
+  },
+  {
+   "name": "surface_sms_simple_1",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117",
+   "inputs": {
+    "op": "simple",
+    "uv": [
+     0.5,
+     0.3
+    ],
+    "hu": 1,
+    "hv": 1,
+    "this": {
+     "srf": {
+      "sms": {
+       "$upstream_file": "Surface.sms"
+      }
+     },
+     "implicit": true,
+     "c3d": [
+      {
+       "smc": {
+        "$upstream_file": "crvTrim1.smc"
+       }
+      },
+      {
+       "smc": {
+        "$upstream_file": "crvTrim2.smc"
+       }
+      }
+     ],
+     "cuv": [
+      {
+       "smc": {
+        "$upstream_file": "closedCurve.smc"
+       }
+      },
+      {
+       "smc": {
+        "$upstream_file": "closedCurve.smc"
+       }
+      }
+     ]
+    }
+   }
+  },
+  {
+   "name": "surface_sms_step_1",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117",
+   "inputs": {
+    "op": "step",
+    "uv": [
+     0.5,
+     0.3
+    ],
+    "hu": 1,
+    "hv": 1,
+    "this": {
+     "srf": {
+      "sms": {
+       "$upstream_file": "Surface.sms"
+      }
+     },
+     "implicit": true,
+     "c3d": [
+      {
+       "smc": {
+        "$upstream_file": "crvTrim1.smc"
+       }
+      },
+      {
+       "smc": {
+        "$upstream_file": "crvTrim2.smc"
+       }
+      }
+     ],
+     "cuv": [
+      {
+       "smc": {
+        "$upstream_file": "closedCurve.smc"
+       }
+      },
+      {
+       "smc": {
+        "$upstream_file": "closedCurve.smc"
+       }
+      }
+     ]
+    }
+   }
+  },
+  {
+   "name": "surface_sms_step_pt_1",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117",
+   "inputs": {
+    "op": "step_pt",
+    "uv": [
+     0.5,
+     0.3
+    ],
+    "this": {
+     "srf": {
+      "sms": {
+       "$upstream_file": "Surface.sms"
+      }
+     },
+     "implicit": true,
+     "c3d": [
+      {
+       "smc": {
+        "$upstream_file": "crvTrim1.smc"
+       }
+      },
+      {
+       "smc": {
+        "$upstream_file": "crvTrim2.smc"
+       }
+      }
+     ],
+     "cuv": [
+      {
+       "smc": {
+        "$upstream_file": "closedCurve.smc"
+       }
+      },
+      {
+       "smc": {
+        "$upstream_file": "closedCurve.smc"
+       }
+      }
+     ]
+    }
+   }
+  },
+  {
+   "name": "surface_sms_singular_1",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117",
+   "inputs": {
+    "op": "singular",
+    "uv": [
+     0.5,
+     0.3
+    ],
+    "tol": 1e-10,
+    "this": {
+     "srf": {
+      "sms": {
+       "$upstream_file": "Surface.sms"
+      }
+     },
+     "implicit": true,
+     "c3d": [
+      {
+       "smc": {
+        "$upstream_file": "crvTrim1.smc"
+       }
+      },
+      {
+       "smc": {
+        "$upstream_file": "crvTrim2.smc"
+       }
+      }
+     ],
+     "cuv": [
+      {
+       "smc": {
+        "$upstream_file": "closedCurve.smc"
+       }
+      },
+      {
+       "smc": {
+        "$upstream_file": "closedCurve.smc"
+       }
+      }
+     ]
+    }
+   }
+  },
+  {
+   "name": "surface_sms_geometric_1",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117",
+   "inputs": {
+    "op": "geometric",
+    "uv": [
+     0.5,
+     0.3
+    ],
+    "this": {
+     "srf": {
+      "sms": {
+       "$upstream_file": "Surface.sms"
+      }
+     },
+     "implicit": true,
+     "c3d": [
+      {
+       "smc": {
+        "$upstream_file": "crvTrim1.smc"
+       }
+      },
+      {
+       "smc": {
+        "$upstream_file": "crvTrim2.smc"
+       }
+      }
+     ],
+     "cuv": [
+      {
+       "smc": {
+        "$upstream_file": "closedCurve.smc"
+       }
+      },
+      {
+       "smc": {
+        "$upstream_file": "closedCurve.smc"
+       }
+      }
+     ]
+    }
+   }
+  },
+  {
+   "name": "surface_sms_normal_section_1",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117",
+   "inputs": {
+    "op": "normal_section",
+    "uv": [
+     0.5,
+     0.3
+    ],
+    "dir": [
+     1.0,
+     0.5,
+     0.0
+    ],
+    "this": {
+     "srf": {
+      "sms": {
+       "$upstream_file": "Surface.sms"
+      }
+     },
+     "implicit": true,
+     "c3d": [
+      {
+       "smc": {
+        "$upstream_file": "crvTrim1.smc"
+       }
+      },
+      {
+       "smc": {
+        "$upstream_file": "crvTrim2.smc"
+       }
+      }
+     ],
+     "cuv": [
+      {
+       "smc": {
+        "$upstream_file": "closedCurve.smc"
+       }
+      },
+      {
+       "smc": {
+        "$upstream_file": "closedCurve.smc"
+       }
+      }
+     ]
+    }
+   }
+  },
+  {
+   "name": "surface_sms_eval_pt_2",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117",
+   "inputs": {
+    "op": "eval_pt",
+    "uv": [
+     1.0,
+     0.6377485983139218
+    ],
+    "this": {
+     "srf": {
+      "sms": {
+       "$upstream_file": "Surface.sms"
+      }
+     },
+     "implicit": true,
+     "c3d": [
+      {
+       "smc": {
+        "$upstream_file": "crvTrim1.smc"
+       }
+      },
+      {
+       "smc": {
+        "$upstream_file": "crvTrim2.smc"
+       }
+      }
+     ],
+     "cuv": [
+      {
+       "smc": {
+        "$upstream_file": "closedCurve.smc"
+       }
+      },
+      {
+       "smc": {
+        "$upstream_file": "closedCurve.smc"
+       }
+      }
+     ]
+    }
+   }
+  },
+  {
+   "name": "surface_sms_eval_2",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117",
+   "inputs": {
+    "op": "eval",
+    "uv": [
+     1.0,
+     0.6377485983139218
+    ],
+    "hu": 2,
+    "hv": 2,
+    "u_left": true,
+    "v_left": true,
+    "upper": true,
+    "nzt": true,
+    "this": {
+     "srf": {
+      "sms": {
+       "$upstream_file": "Surface.sms"
+      }
+     },
+     "implicit": true,
+     "c3d": [
+      {
+       "smc": {
+        "$upstream_file": "crvTrim1.smc"
+       }
+      },
+      {
+       "smc": {
+        "$upstream_file": "crvTrim2.smc"
+       }
+      }
+     ],
+     "cuv": [
+      {
+       "smc": {
+        "$upstream_file": "closedCurve.smc"
+       }
+      },
+      {
+       "smc": {
+        "$upstream_file": "closedCurve.smc"
+       }
+      }
+     ]
+    }
+   }
+  },
+  {
+   "name": "surface_sms_eval_full_2",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117",
+   "inputs": {
+    "op": "eval",
+    "uv": [
+     1.0,
+     0.6377485983139218
+    ],
+    "hu": 3,
+    "hv": 1,
+    "nzt": false,
+    "this": {
+     "srf": {
+      "sms": {
+       "$upstream_file": "Surface.sms"
+      }
+     },
+     "implicit": true,
+     "c3d": [
+      {
+       "smc": {
+        "$upstream_file": "crvTrim1.smc"
+       }
+      },
+      {
+       "smc": {
+        "$upstream_file": "crvTrim2.smc"
+       }
+      }
+     ],
+     "cuv": [
+      {
+       "smc": {
+        "$upstream_file": "closedCurve.smc"
+       }
+      },
+      {
+       "smc": {
+        "$upstream_file": "closedCurve.smc"
+       }
+      }
+     ]
+    }
+   }
+  },
+  {
+   "name": "surface_sms_normal_2",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117",
+   "inputs": {
+    "op": "normal",
+    "uv": [
+     1.0,
+     0.6377485983139218
+    ],
+    "this": {
+     "srf": {
+      "sms": {
+       "$upstream_file": "Surface.sms"
+      }
+     },
+     "implicit": true,
+     "c3d": [
+      {
+       "smc": {
+        "$upstream_file": "crvTrim1.smc"
+       }
+      },
+      {
+       "smc": {
+        "$upstream_file": "crvTrim2.smc"
+       }
+      }
+     ],
+     "cuv": [
+      {
+       "smc": {
+        "$upstream_file": "closedCurve.smc"
+       }
+      },
+      {
+       "smc": {
+        "$upstream_file": "closedCurve.smc"
+       }
+      }
+     ]
+    }
+   }
+  },
+  {
+   "name": "surface_sms_simple_2",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117",
+   "inputs": {
+    "op": "simple",
+    "uv": [
+     1.0,
+     0.6377485983139218
+    ],
+    "hu": 1,
+    "hv": 1,
+    "this": {
+     "srf": {
+      "sms": {
+       "$upstream_file": "Surface.sms"
+      }
+     },
+     "implicit": true,
+     "c3d": [
+      {
+       "smc": {
+        "$upstream_file": "crvTrim1.smc"
+       }
+      },
+      {
+       "smc": {
+        "$upstream_file": "crvTrim2.smc"
+       }
+      }
+     ],
+     "cuv": [
+      {
+       "smc": {
+        "$upstream_file": "closedCurve.smc"
+       }
+      },
+      {
+       "smc": {
+        "$upstream_file": "closedCurve.smc"
+       }
+      }
+     ]
+    }
+   }
+  },
+  {
+   "name": "surface_sms_step_2",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117",
+   "inputs": {
+    "op": "step",
+    "uv": [
+     1.0,
+     0.6377485983139218
+    ],
+    "hu": 1,
+    "hv": 1,
+    "this": {
+     "srf": {
+      "sms": {
+       "$upstream_file": "Surface.sms"
+      }
+     },
+     "implicit": true,
+     "c3d": [
+      {
+       "smc": {
+        "$upstream_file": "crvTrim1.smc"
+       }
+      },
+      {
+       "smc": {
+        "$upstream_file": "crvTrim2.smc"
+       }
+      }
+     ],
+     "cuv": [
+      {
+       "smc": {
+        "$upstream_file": "closedCurve.smc"
+       }
+      },
+      {
+       "smc": {
+        "$upstream_file": "closedCurve.smc"
+       }
+      }
+     ]
+    }
+   }
+  },
+  {
+   "name": "surface_sms_step_pt_2",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117",
+   "inputs": {
+    "op": "step_pt",
+    "uv": [
+     1.0,
+     0.6377485983139218
+    ],
+    "this": {
+     "srf": {
+      "sms": {
+       "$upstream_file": "Surface.sms"
+      }
+     },
+     "implicit": true,
+     "c3d": [
+      {
+       "smc": {
+        "$upstream_file": "crvTrim1.smc"
+       }
+      },
+      {
+       "smc": {
+        "$upstream_file": "crvTrim2.smc"
+       }
+      }
+     ],
+     "cuv": [
+      {
+       "smc": {
+        "$upstream_file": "closedCurve.smc"
+       }
+      },
+      {
+       "smc": {
+        "$upstream_file": "closedCurve.smc"
+       }
+      }
+     ]
+    }
+   }
+  },
+  {
+   "name": "surface_sms_singular_2",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117",
+   "inputs": {
+    "op": "singular",
+    "uv": [
+     1.0,
+     0.6377485983139218
+    ],
+    "tol": 1e-10,
+    "this": {
+     "srf": {
+      "sms": {
+       "$upstream_file": "Surface.sms"
+      }
+     },
+     "implicit": true,
+     "c3d": [
+      {
+       "smc": {
+        "$upstream_file": "crvTrim1.smc"
+       }
+      },
+      {
+       "smc": {
+        "$upstream_file": "crvTrim2.smc"
+       }
+      }
+     ],
+     "cuv": [
+      {
+       "smc": {
+        "$upstream_file": "closedCurve.smc"
+       }
+      },
+      {
+       "smc": {
+        "$upstream_file": "closedCurve.smc"
+       }
+      }
+     ]
+    }
+   }
+  },
+  {
+   "name": "surface_sms_geometric_2",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117",
+   "inputs": {
+    "op": "geometric",
+    "uv": [
+     1.0,
+     0.6377485983139218
+    ],
+    "this": {
+     "srf": {
+      "sms": {
+       "$upstream_file": "Surface.sms"
+      }
+     },
+     "implicit": true,
+     "c3d": [
+      {
+       "smc": {
+        "$upstream_file": "crvTrim1.smc"
+       }
+      },
+      {
+       "smc": {
+        "$upstream_file": "crvTrim2.smc"
+       }
+      }
+     ],
+     "cuv": [
+      {
+       "smc": {
+        "$upstream_file": "closedCurve.smc"
+       }
+      },
+      {
+       "smc": {
+        "$upstream_file": "closedCurve.smc"
+       }
+      }
+     ]
+    }
+   }
+  },
+  {
+   "name": "surface_sms_normal_section_2",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117",
+   "inputs": {
+    "op": "normal_section",
+    "uv": [
+     1.0,
+     0.6377485983139218
+    ],
+    "dir": [
+     1.0,
+     0.5,
+     0.0
+    ],
+    "this": {
+     "srf": {
+      "sms": {
+       "$upstream_file": "Surface.sms"
+      }
+     },
+     "implicit": true,
+     "c3d": [
+      {
+       "smc": {
+        "$upstream_file": "crvTrim1.smc"
+       }
+      },
+      {
+       "smc": {
+        "$upstream_file": "crvTrim2.smc"
+       }
+      }
+     ],
+     "cuv": [
+      {
+       "smc": {
+        "$upstream_file": "closedCurve.smc"
+       }
+      },
+      {
+       "smc": {
+        "$upstream_file": "closedCurve.smc"
+       }
+      }
+     ]
+    }
+   }
+  },
+  {
+   "name": "surface_sms_eval_pt_3",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117",
+   "inputs": {
+    "op": "eval_pt",
+    "uv": [
+     0.25,
+     0.1
+    ],
+    "this": {
+     "srf": {
+      "sms": {
+       "$upstream_file": "Surface.sms"
+      }
+     },
+     "implicit": true,
+     "c3d": [
+      {
+       "smc": {
+        "$upstream_file": "crvTrim1.smc"
+       }
+      },
+      {
+       "smc": {
+        "$upstream_file": "crvTrim2.smc"
+       }
+      }
+     ],
+     "cuv": [
+      {
+       "smc": {
+        "$upstream_file": "closedCurve.smc"
+       }
+      },
+      {
+       "smc": {
+        "$upstream_file": "closedCurve.smc"
+       }
+      }
+     ]
+    }
+   }
+  },
+  {
+   "name": "surface_sms_eval_3",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117",
+   "inputs": {
+    "op": "eval",
+    "uv": [
+     0.25,
+     0.1
+    ],
+    "hu": 2,
+    "hv": 2,
+    "u_left": false,
+    "v_left": true,
+    "upper": true,
+    "nzt": true,
+    "this": {
+     "srf": {
+      "sms": {
+       "$upstream_file": "Surface.sms"
+      }
+     },
+     "implicit": true,
+     "c3d": [
+      {
+       "smc": {
+        "$upstream_file": "crvTrim1.smc"
+       }
+      },
+      {
+       "smc": {
+        "$upstream_file": "crvTrim2.smc"
+       }
+      }
+     ],
+     "cuv": [
+      {
+       "smc": {
+        "$upstream_file": "closedCurve.smc"
+       }
+      },
+      {
+       "smc": {
+        "$upstream_file": "closedCurve.smc"
+       }
+      }
+     ]
+    }
+   }
+  },
+  {
+   "name": "surface_sms_eval_full_3",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117",
+   "inputs": {
+    "op": "eval",
+    "uv": [
+     0.25,
+     0.1
+    ],
+    "hu": 3,
+    "hv": 1,
+    "nzt": false,
+    "this": {
+     "srf": {
+      "sms": {
+       "$upstream_file": "Surface.sms"
+      }
+     },
+     "implicit": true,
+     "c3d": [
+      {
+       "smc": {
+        "$upstream_file": "crvTrim1.smc"
+       }
+      },
+      {
+       "smc": {
+        "$upstream_file": "crvTrim2.smc"
+       }
+      }
+     ],
+     "cuv": [
+      {
+       "smc": {
+        "$upstream_file": "closedCurve.smc"
+       }
+      },
+      {
+       "smc": {
+        "$upstream_file": "closedCurve.smc"
+       }
+      }
+     ]
+    }
+   }
+  },
+  {
+   "name": "surface_sms_normal_3",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117",
+   "inputs": {
+    "op": "normal",
+    "uv": [
+     0.25,
+     0.1
+    ],
+    "this": {
+     "srf": {
+      "sms": {
+       "$upstream_file": "Surface.sms"
+      }
+     },
+     "implicit": true,
+     "c3d": [
+      {
+       "smc": {
+        "$upstream_file": "crvTrim1.smc"
+       }
+      },
+      {
+       "smc": {
+        "$upstream_file": "crvTrim2.smc"
+       }
+      }
+     ],
+     "cuv": [
+      {
+       "smc": {
+        "$upstream_file": "closedCurve.smc"
+       }
+      },
+      {
+       "smc": {
+        "$upstream_file": "closedCurve.smc"
+       }
+      }
+     ]
+    }
+   }
+  },
+  {
+   "name": "surface_sms_simple_3",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117",
+   "inputs": {
+    "op": "simple",
+    "uv": [
+     0.25,
+     0.1
+    ],
+    "hu": 1,
+    "hv": 1,
+    "this": {
+     "srf": {
+      "sms": {
+       "$upstream_file": "Surface.sms"
+      }
+     },
+     "implicit": true,
+     "c3d": [
+      {
+       "smc": {
+        "$upstream_file": "crvTrim1.smc"
+       }
+      },
+      {
+       "smc": {
+        "$upstream_file": "crvTrim2.smc"
+       }
+      }
+     ],
+     "cuv": [
+      {
+       "smc": {
+        "$upstream_file": "closedCurve.smc"
+       }
+      },
+      {
+       "smc": {
+        "$upstream_file": "closedCurve.smc"
+       }
+      }
+     ]
+    }
+   }
+  },
+  {
+   "name": "surface_sms_step_3",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117",
+   "inputs": {
+    "op": "step",
+    "uv": [
+     0.25,
+     0.1
+    ],
+    "hu": 1,
+    "hv": 1,
+    "this": {
+     "srf": {
+      "sms": {
+       "$upstream_file": "Surface.sms"
+      }
+     },
+     "implicit": true,
+     "c3d": [
+      {
+       "smc": {
+        "$upstream_file": "crvTrim1.smc"
+       }
+      },
+      {
+       "smc": {
+        "$upstream_file": "crvTrim2.smc"
+       }
+      }
+     ],
+     "cuv": [
+      {
+       "smc": {
+        "$upstream_file": "closedCurve.smc"
+       }
+      },
+      {
+       "smc": {
+        "$upstream_file": "closedCurve.smc"
+       }
+      }
+     ]
+    }
+   }
+  },
+  {
+   "name": "surface_sms_step_pt_3",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117",
+   "inputs": {
+    "op": "step_pt",
+    "uv": [
+     0.25,
+     0.1
+    ],
+    "this": {
+     "srf": {
+      "sms": {
+       "$upstream_file": "Surface.sms"
+      }
+     },
+     "implicit": true,
+     "c3d": [
+      {
+       "smc": {
+        "$upstream_file": "crvTrim1.smc"
+       }
+      },
+      {
+       "smc": {
+        "$upstream_file": "crvTrim2.smc"
+       }
+      }
+     ],
+     "cuv": [
+      {
+       "smc": {
+        "$upstream_file": "closedCurve.smc"
+       }
+      },
+      {
+       "smc": {
+        "$upstream_file": "closedCurve.smc"
+       }
+      }
+     ]
+    }
+   }
+  },
+  {
+   "name": "surface_sms_singular_3",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117",
+   "inputs": {
+    "op": "singular",
+    "uv": [
+     0.25,
+     0.1
+    ],
+    "tol": 1e-10,
+    "this": {
+     "srf": {
+      "sms": {
+       "$upstream_file": "Surface.sms"
+      }
+     },
+     "implicit": true,
+     "c3d": [
+      {
+       "smc": {
+        "$upstream_file": "crvTrim1.smc"
+       }
+      },
+      {
+       "smc": {
+        "$upstream_file": "crvTrim2.smc"
+       }
+      }
+     ],
+     "cuv": [
+      {
+       "smc": {
+        "$upstream_file": "closedCurve.smc"
+       }
+      },
+      {
+       "smc": {
+        "$upstream_file": "closedCurve.smc"
+       }
+      }
+     ]
+    }
+   }
+  },
+  {
+   "name": "surface_sms_geometric_3",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117",
+   "inputs": {
+    "op": "geometric",
+    "uv": [
+     0.25,
+     0.1
+    ],
+    "this": {
+     "srf": {
+      "sms": {
+       "$upstream_file": "Surface.sms"
+      }
+     },
+     "implicit": true,
+     "c3d": [
+      {
+       "smc": {
+        "$upstream_file": "crvTrim1.smc"
+       }
+      },
+      {
+       "smc": {
+        "$upstream_file": "crvTrim2.smc"
+       }
+      }
+     ],
+     "cuv": [
+      {
+       "smc": {
+        "$upstream_file": "closedCurve.smc"
+       }
+      },
+      {
+       "smc": {
+        "$upstream_file": "closedCurve.smc"
+       }
+      }
+     ]
+    }
+   }
+  },
+  {
+   "name": "surface_sms_normal_section_3",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117",
+   "inputs": {
+    "op": "normal_section",
+    "uv": [
+     0.25,
+     0.1
+    ],
+    "dir": [
+     1.0,
+     0.5,
+     0.0
+    ],
+    "this": {
+     "srf": {
+      "sms": {
+       "$upstream_file": "Surface.sms"
+      }
+     },
+     "implicit": true,
+     "c3d": [
+      {
+       "smc": {
+        "$upstream_file": "crvTrim1.smc"
+       }
+      },
+      {
+       "smc": {
+        "$upstream_file": "crvTrim2.smc"
+       }
+      }
+     ],
+     "cuv": [
+      {
+       "smc": {
+        "$upstream_file": "closedCurve.smc"
+       }
+      },
+      {
+       "smc": {
+        "$upstream_file": "closedCurve.smc"
+       }
+      }
+     ]
+    }
+   }
+  },
+  {
+   "name": "drop_curve_state",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:318",
+   "inputs": {
+    "op": "state",
+    "this": {
+     "srf": {
+      "sms": {
+       "$upstream_file": "DropCurveSurface.sms"
+      }
+     },
+     "c3d": [
+      {
+       "smc": {
+        "$upstream_file": "DropCurveCurve.smc"
+       }
+      }
+     ],
+     "cuv": [
+      {
+       "smc": {
+        "$upstream_file": "DropCurveCurve.smc"
+       }
+      }
+     ]
+    }
+   }
+  },
+  {
+   "name": "drop_curve_queries",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:318",
+   "inputs": {
+    "op": "queries",
+    "types": [
+     15045,
+     15001,
+     15002,
+     14033,
+     0,
+     1
+    ],
+    "this": {
+     "srf": {
+      "sms": {
+       "$upstream_file": "DropCurveSurface.sms"
+      }
+     },
+     "c3d": [
+      {
+       "smc": {
+        "$upstream_file": "DropCurveCurve.smc"
+       }
+      }
+     ],
+     "cuv": [
+      {
+       "smc": {
+        "$upstream_file": "DropCurveCurve.smc"
+       }
+      }
+     ]
+    }
+   }
+  },
+  {
+   "name": "drop_curve_defaults",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:318",
+   "inputs": {
+    "op": "defaults",
+    "v": [
+     0.0,
+     0.0,
+     1.0
+    ],
+    "this": {
+     "srf": {
+      "sms": {
+       "$upstream_file": "DropCurveSurface.sms"
+      }
+     },
+     "c3d": [
+      {
+       "smc": {
+        "$upstream_file": "DropCurveCurve.smc"
+       }
+      }
+     ],
+     "cuv": [
+      {
+       "smc": {
+        "$upstream_file": "DropCurveCurve.smc"
+       }
+      }
+     ]
+    }
+   }
+  },
+  {
+   "name": "drop_curve_eq_self",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:318",
+   "inputs": {
+    "op": "eq_self",
+    "this": {
+     "srf": {
+      "sms": {
+       "$upstream_file": "DropCurveSurface.sms"
+      }
+     },
+     "c3d": [
+      {
+       "smc": {
+        "$upstream_file": "DropCurveCurve.smc"
+       }
+      }
+     ],
+     "cuv": [
+      {
+       "smc": {
+        "$upstream_file": "DropCurveCurve.smc"
+       }
+      }
+     ]
+    }
+   }
+  },
+  {
+   "name": "drop_curve_eq_other_same",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:318",
+   "inputs": {
+    "op": "eq_other",
+    "other": {
+     "srf": {
+      "sms": {
+       "$upstream_file": "DropCurveSurface.sms"
+      }
+     },
+     "c3d": [
+      {
+       "smc": {
+        "$upstream_file": "DropCurveCurve.smc"
+       }
+      }
+     ],
+     "cuv": [
+      {
+       "smc": {
+        "$upstream_file": "DropCurveCurve.smc"
+       }
+      }
+     ]
+    },
+    "this": {
+     "srf": {
+      "sms": {
+       "$upstream_file": "DropCurveSurface.sms"
+      }
+     },
+     "c3d": [
+      {
+       "smc": {
+        "$upstream_file": "DropCurveCurve.smc"
+       }
+      }
+     ],
+     "cuv": [
+      {
+       "smc": {
+        "$upstream_file": "DropCurveCurve.smc"
+       }
+      }
+     ]
+    }
+   }
+  },
+  {
+   "name": "drop_curve_set_context",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:318",
+   "inputs": {
+    "op": "set_context",
+    "this": {
+     "srf": {
+      "sms": {
+       "$upstream_file": "DropCurveSurface.sms"
+      }
+     },
+     "c3d": [
+      {
+       "smc": {
+        "$upstream_file": "DropCurveCurve.smc"
+       }
+      }
+     ],
+     "cuv": [
+      {
+       "smc": {
+        "$upstream_file": "DropCurveCurve.smc"
+       }
+      }
+     ]
+    }
+   }
+  },
+  {
+   "name": "drop_curve_eval_pt_0",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:318",
+   "inputs": {
+    "op": "eval_pt",
+    "uv": [
+     0.0,
+     0.0
+    ],
+    "this": {
+     "srf": {
+      "sms": {
+       "$upstream_file": "DropCurveSurface.sms"
+      }
+     },
+     "c3d": [
+      {
+       "smc": {
+        "$upstream_file": "DropCurveCurve.smc"
+       }
+      }
+     ],
+     "cuv": [
+      {
+       "smc": {
+        "$upstream_file": "DropCurveCurve.smc"
+       }
+      }
+     ]
+    }
+   }
+  },
+  {
+   "name": "drop_curve_eval_0",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:318",
+   "inputs": {
+    "op": "eval",
+    "uv": [
+     0.0,
+     0.0
+    ],
+    "hu": 2,
+    "hv": 2,
+    "u_left": true,
+    "v_left": true,
+    "upper": true,
+    "nzt": true,
+    "this": {
+     "srf": {
+      "sms": {
+       "$upstream_file": "DropCurveSurface.sms"
+      }
+     },
+     "c3d": [
+      {
+       "smc": {
+        "$upstream_file": "DropCurveCurve.smc"
+       }
+      }
+     ],
+     "cuv": [
+      {
+       "smc": {
+        "$upstream_file": "DropCurveCurve.smc"
+       }
+      }
+     ]
+    }
+   }
+  },
+  {
+   "name": "drop_curve_eval_full_0",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:318",
+   "inputs": {
+    "op": "eval",
+    "uv": [
+     0.0,
+     0.0
+    ],
+    "hu": 3,
+    "hv": 1,
+    "nzt": false,
+    "this": {
+     "srf": {
+      "sms": {
+       "$upstream_file": "DropCurveSurface.sms"
+      }
+     },
+     "c3d": [
+      {
+       "smc": {
+        "$upstream_file": "DropCurveCurve.smc"
+       }
+      }
+     ],
+     "cuv": [
+      {
+       "smc": {
+        "$upstream_file": "DropCurveCurve.smc"
+       }
+      }
+     ]
+    }
+   }
+  },
+  {
+   "name": "drop_curve_normal_0",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:318",
+   "inputs": {
+    "op": "normal",
+    "uv": [
+     0.0,
+     0.0
+    ],
+    "this": {
+     "srf": {
+      "sms": {
+       "$upstream_file": "DropCurveSurface.sms"
+      }
+     },
+     "c3d": [
+      {
+       "smc": {
+        "$upstream_file": "DropCurveCurve.smc"
+       }
+      }
+     ],
+     "cuv": [
+      {
+       "smc": {
+        "$upstream_file": "DropCurveCurve.smc"
+       }
+      }
+     ]
+    }
+   }
+  },
+  {
+   "name": "drop_curve_simple_0",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:318",
+   "inputs": {
+    "op": "simple",
+    "uv": [
+     0.0,
+     0.0
+    ],
+    "hu": 1,
+    "hv": 1,
+    "this": {
+     "srf": {
+      "sms": {
+       "$upstream_file": "DropCurveSurface.sms"
+      }
+     },
+     "c3d": [
+      {
+       "smc": {
+        "$upstream_file": "DropCurveCurve.smc"
+       }
+      }
+     ],
+     "cuv": [
+      {
+       "smc": {
+        "$upstream_file": "DropCurveCurve.smc"
+       }
+      }
+     ]
+    }
+   }
+  },
+  {
+   "name": "drop_curve_step_0",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:318",
+   "inputs": {
+    "op": "step",
+    "uv": [
+     0.0,
+     0.0
+    ],
+    "hu": 1,
+    "hv": 1,
+    "this": {
+     "srf": {
+      "sms": {
+       "$upstream_file": "DropCurveSurface.sms"
+      }
+     },
+     "c3d": [
+      {
+       "smc": {
+        "$upstream_file": "DropCurveCurve.smc"
+       }
+      }
+     ],
+     "cuv": [
+      {
+       "smc": {
+        "$upstream_file": "DropCurveCurve.smc"
+       }
+      }
+     ]
+    }
+   }
+  },
+  {
+   "name": "drop_curve_step_pt_0",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:318",
+   "inputs": {
+    "op": "step_pt",
+    "uv": [
+     0.0,
+     0.0
+    ],
+    "this": {
+     "srf": {
+      "sms": {
+       "$upstream_file": "DropCurveSurface.sms"
+      }
+     },
+     "c3d": [
+      {
+       "smc": {
+        "$upstream_file": "DropCurveCurve.smc"
+       }
+      }
+     ],
+     "cuv": [
+      {
+       "smc": {
+        "$upstream_file": "DropCurveCurve.smc"
+       }
+      }
+     ]
+    }
+   }
+  },
+  {
+   "name": "drop_curve_singular_0",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:318",
+   "inputs": {
+    "op": "singular",
+    "uv": [
+     0.0,
+     0.0
+    ],
+    "tol": 1e-10,
+    "this": {
+     "srf": {
+      "sms": {
+       "$upstream_file": "DropCurveSurface.sms"
+      }
+     },
+     "c3d": [
+      {
+       "smc": {
+        "$upstream_file": "DropCurveCurve.smc"
+       }
+      }
+     ],
+     "cuv": [
+      {
+       "smc": {
+        "$upstream_file": "DropCurveCurve.smc"
+       }
+      }
+     ]
+    }
+   }
+  },
+  {
+   "name": "drop_curve_geometric_0",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:318",
+   "inputs": {
+    "op": "geometric",
+    "uv": [
+     0.0,
+     0.0
+    ],
+    "this": {
+     "srf": {
+      "sms": {
+       "$upstream_file": "DropCurveSurface.sms"
+      }
+     },
+     "c3d": [
+      {
+       "smc": {
+        "$upstream_file": "DropCurveCurve.smc"
+       }
+      }
+     ],
+     "cuv": [
+      {
+       "smc": {
+        "$upstream_file": "DropCurveCurve.smc"
+       }
+      }
+     ]
+    }
+   }
+  },
+  {
+   "name": "drop_curve_normal_section_0",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:318",
+   "inputs": {
+    "op": "normal_section",
+    "uv": [
+     0.0,
+     0.0
+    ],
+    "dir": [
+     1.0,
+     0.5,
+     0.0
+    ],
+    "this": {
+     "srf": {
+      "sms": {
+       "$upstream_file": "DropCurveSurface.sms"
+      }
+     },
+     "c3d": [
+      {
+       "smc": {
+        "$upstream_file": "DropCurveCurve.smc"
+       }
+      }
+     ],
+     "cuv": [
+      {
+       "smc": {
+        "$upstream_file": "DropCurveCurve.smc"
+       }
+      }
+     ]
+    }
+   }
+  },
+  {
+   "name": "drop_curve_eval_pt_1",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:318",
+   "inputs": {
+    "op": "eval_pt",
+    "uv": [
+     0.3,
+     0.7
+    ],
+    "this": {
+     "srf": {
+      "sms": {
+       "$upstream_file": "DropCurveSurface.sms"
+      }
+     },
+     "c3d": [
+      {
+       "smc": {
+        "$upstream_file": "DropCurveCurve.smc"
+       }
+      }
+     ],
+     "cuv": [
+      {
+       "smc": {
+        "$upstream_file": "DropCurveCurve.smc"
+       }
+      }
+     ]
+    }
+   }
+  },
+  {
+   "name": "drop_curve_eval_1",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:318",
+   "inputs": {
+    "op": "eval",
+    "uv": [
+     0.3,
+     0.7
+    ],
+    "hu": 2,
+    "hv": 2,
+    "u_left": false,
+    "v_left": true,
+    "upper": true,
+    "nzt": true,
+    "this": {
+     "srf": {
+      "sms": {
+       "$upstream_file": "DropCurveSurface.sms"
+      }
+     },
+     "c3d": [
+      {
+       "smc": {
+        "$upstream_file": "DropCurveCurve.smc"
+       }
+      }
+     ],
+     "cuv": [
+      {
+       "smc": {
+        "$upstream_file": "DropCurveCurve.smc"
+       }
+      }
+     ]
+    }
+   }
+  },
+  {
+   "name": "drop_curve_eval_full_1",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:318",
+   "inputs": {
+    "op": "eval",
+    "uv": [
+     0.3,
+     0.7
+    ],
+    "hu": 3,
+    "hv": 1,
+    "nzt": false,
+    "this": {
+     "srf": {
+      "sms": {
+       "$upstream_file": "DropCurveSurface.sms"
+      }
+     },
+     "c3d": [
+      {
+       "smc": {
+        "$upstream_file": "DropCurveCurve.smc"
+       }
+      }
+     ],
+     "cuv": [
+      {
+       "smc": {
+        "$upstream_file": "DropCurveCurve.smc"
+       }
+      }
+     ]
+    }
+   }
+  },
+  {
+   "name": "drop_curve_normal_1",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:318",
+   "inputs": {
+    "op": "normal",
+    "uv": [
+     0.3,
+     0.7
+    ],
+    "this": {
+     "srf": {
+      "sms": {
+       "$upstream_file": "DropCurveSurface.sms"
+      }
+     },
+     "c3d": [
+      {
+       "smc": {
+        "$upstream_file": "DropCurveCurve.smc"
+       }
+      }
+     ],
+     "cuv": [
+      {
+       "smc": {
+        "$upstream_file": "DropCurveCurve.smc"
+       }
+      }
+     ]
+    }
+   }
+  },
+  {
+   "name": "drop_curve_simple_1",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:318",
+   "inputs": {
+    "op": "simple",
+    "uv": [
+     0.3,
+     0.7
+    ],
+    "hu": 1,
+    "hv": 1,
+    "this": {
+     "srf": {
+      "sms": {
+       "$upstream_file": "DropCurveSurface.sms"
+      }
+     },
+     "c3d": [
+      {
+       "smc": {
+        "$upstream_file": "DropCurveCurve.smc"
+       }
+      }
+     ],
+     "cuv": [
+      {
+       "smc": {
+        "$upstream_file": "DropCurveCurve.smc"
+       }
+      }
+     ]
+    }
+   }
+  },
+  {
+   "name": "drop_curve_step_1",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:318",
+   "inputs": {
+    "op": "step",
+    "uv": [
+     0.3,
+     0.7
+    ],
+    "hu": 1,
+    "hv": 1,
+    "this": {
+     "srf": {
+      "sms": {
+       "$upstream_file": "DropCurveSurface.sms"
+      }
+     },
+     "c3d": [
+      {
+       "smc": {
+        "$upstream_file": "DropCurveCurve.smc"
+       }
+      }
+     ],
+     "cuv": [
+      {
+       "smc": {
+        "$upstream_file": "DropCurveCurve.smc"
+       }
+      }
+     ]
+    }
+   }
+  },
+  {
+   "name": "drop_curve_step_pt_1",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:318",
+   "inputs": {
+    "op": "step_pt",
+    "uv": [
+     0.3,
+     0.7
+    ],
+    "this": {
+     "srf": {
+      "sms": {
+       "$upstream_file": "DropCurveSurface.sms"
+      }
+     },
+     "c3d": [
+      {
+       "smc": {
+        "$upstream_file": "DropCurveCurve.smc"
+       }
+      }
+     ],
+     "cuv": [
+      {
+       "smc": {
+        "$upstream_file": "DropCurveCurve.smc"
+       }
+      }
+     ]
+    }
+   }
+  },
+  {
+   "name": "drop_curve_singular_1",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:318",
+   "inputs": {
+    "op": "singular",
+    "uv": [
+     0.3,
+     0.7
+    ],
+    "tol": 1e-10,
+    "this": {
+     "srf": {
+      "sms": {
+       "$upstream_file": "DropCurveSurface.sms"
+      }
+     },
+     "c3d": [
+      {
+       "smc": {
+        "$upstream_file": "DropCurveCurve.smc"
+       }
+      }
+     ],
+     "cuv": [
+      {
+       "smc": {
+        "$upstream_file": "DropCurveCurve.smc"
+       }
+      }
+     ]
+    }
+   }
+  },
+  {
+   "name": "drop_curve_geometric_1",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:318",
+   "inputs": {
+    "op": "geometric",
+    "uv": [
+     0.3,
+     0.7
+    ],
+    "this": {
+     "srf": {
+      "sms": {
+       "$upstream_file": "DropCurveSurface.sms"
+      }
+     },
+     "c3d": [
+      {
+       "smc": {
+        "$upstream_file": "DropCurveCurve.smc"
+       }
+      }
+     ],
+     "cuv": [
+      {
+       "smc": {
+        "$upstream_file": "DropCurveCurve.smc"
+       }
+      }
+     ]
+    }
+   }
+  },
+  {
+   "name": "drop_curve_normal_section_1",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:318",
+   "inputs": {
+    "op": "normal_section",
+    "uv": [
+     0.3,
+     0.7
+    ],
+    "dir": [
+     1.0,
+     0.5,
+     0.0
+    ],
+    "this": {
+     "srf": {
+      "sms": {
+       "$upstream_file": "DropCurveSurface.sms"
+      }
+     },
+     "c3d": [
+      {
+       "smc": {
+        "$upstream_file": "DropCurveCurve.smc"
+       }
+      }
+     ],
+     "cuv": [
+      {
+       "smc": {
+        "$upstream_file": "DropCurveCurve.smc"
+       }
+      }
+     ]
+    }
+   }
+  },
+  {
+   "name": "drop_curve_eval_pt_2",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:318",
+   "inputs": {
+    "op": "eval_pt",
+    "uv": [
+     1.0,
+     1.0
+    ],
+    "this": {
+     "srf": {
+      "sms": {
+       "$upstream_file": "DropCurveSurface.sms"
+      }
+     },
+     "c3d": [
+      {
+       "smc": {
+        "$upstream_file": "DropCurveCurve.smc"
+       }
+      }
+     ],
+     "cuv": [
+      {
+       "smc": {
+        "$upstream_file": "DropCurveCurve.smc"
+       }
+      }
+     ]
+    }
+   }
+  },
+  {
+   "name": "drop_curve_eval_2",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:318",
+   "inputs": {
+    "op": "eval",
+    "uv": [
+     1.0,
+     1.0
+    ],
+    "hu": 2,
+    "hv": 2,
+    "u_left": true,
+    "v_left": true,
+    "upper": true,
+    "nzt": true,
+    "this": {
+     "srf": {
+      "sms": {
+       "$upstream_file": "DropCurveSurface.sms"
+      }
+     },
+     "c3d": [
+      {
+       "smc": {
+        "$upstream_file": "DropCurveCurve.smc"
+       }
+      }
+     ],
+     "cuv": [
+      {
+       "smc": {
+        "$upstream_file": "DropCurveCurve.smc"
+       }
+      }
+     ]
+    }
+   }
+  },
+  {
+   "name": "drop_curve_eval_full_2",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:318",
+   "inputs": {
+    "op": "eval",
+    "uv": [
+     1.0,
+     1.0
+    ],
+    "hu": 3,
+    "hv": 1,
+    "nzt": false,
+    "this": {
+     "srf": {
+      "sms": {
+       "$upstream_file": "DropCurveSurface.sms"
+      }
+     },
+     "c3d": [
+      {
+       "smc": {
+        "$upstream_file": "DropCurveCurve.smc"
+       }
+      }
+     ],
+     "cuv": [
+      {
+       "smc": {
+        "$upstream_file": "DropCurveCurve.smc"
+       }
+      }
+     ]
+    }
+   }
+  },
+  {
+   "name": "drop_curve_normal_2",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:318",
+   "inputs": {
+    "op": "normal",
+    "uv": [
+     1.0,
+     1.0
+    ],
+    "this": {
+     "srf": {
+      "sms": {
+       "$upstream_file": "DropCurveSurface.sms"
+      }
+     },
+     "c3d": [
+      {
+       "smc": {
+        "$upstream_file": "DropCurveCurve.smc"
+       }
+      }
+     ],
+     "cuv": [
+      {
+       "smc": {
+        "$upstream_file": "DropCurveCurve.smc"
+       }
+      }
+     ]
+    }
+   }
+  },
+  {
+   "name": "drop_curve_simple_2",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:318",
+   "inputs": {
+    "op": "simple",
+    "uv": [
+     1.0,
+     1.0
+    ],
+    "hu": 1,
+    "hv": 1,
+    "this": {
+     "srf": {
+      "sms": {
+       "$upstream_file": "DropCurveSurface.sms"
+      }
+     },
+     "c3d": [
+      {
+       "smc": {
+        "$upstream_file": "DropCurveCurve.smc"
+       }
+      }
+     ],
+     "cuv": [
+      {
+       "smc": {
+        "$upstream_file": "DropCurveCurve.smc"
+       }
+      }
+     ]
+    }
+   }
+  },
+  {
+   "name": "drop_curve_step_2",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:318",
+   "inputs": {
+    "op": "step",
+    "uv": [
+     1.0,
+     1.0
+    ],
+    "hu": 1,
+    "hv": 1,
+    "this": {
+     "srf": {
+      "sms": {
+       "$upstream_file": "DropCurveSurface.sms"
+      }
+     },
+     "c3d": [
+      {
+       "smc": {
+        "$upstream_file": "DropCurveCurve.smc"
+       }
+      }
+     ],
+     "cuv": [
+      {
+       "smc": {
+        "$upstream_file": "DropCurveCurve.smc"
+       }
+      }
+     ]
+    }
+   }
+  },
+  {
+   "name": "drop_curve_step_pt_2",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:318",
+   "inputs": {
+    "op": "step_pt",
+    "uv": [
+     1.0,
+     1.0
+    ],
+    "this": {
+     "srf": {
+      "sms": {
+       "$upstream_file": "DropCurveSurface.sms"
+      }
+     },
+     "c3d": [
+      {
+       "smc": {
+        "$upstream_file": "DropCurveCurve.smc"
+       }
+      }
+     ],
+     "cuv": [
+      {
+       "smc": {
+        "$upstream_file": "DropCurveCurve.smc"
+       }
+      }
+     ]
+    }
+   }
+  },
+  {
+   "name": "drop_curve_singular_2",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:318",
+   "inputs": {
+    "op": "singular",
+    "uv": [
+     1.0,
+     1.0
+    ],
+    "tol": 1e-10,
+    "this": {
+     "srf": {
+      "sms": {
+       "$upstream_file": "DropCurveSurface.sms"
+      }
+     },
+     "c3d": [
+      {
+       "smc": {
+        "$upstream_file": "DropCurveCurve.smc"
+       }
+      }
+     ],
+     "cuv": [
+      {
+       "smc": {
+        "$upstream_file": "DropCurveCurve.smc"
+       }
+      }
+     ]
+    }
+   }
+  },
+  {
+   "name": "drop_curve_geometric_2",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:318",
+   "inputs": {
+    "op": "geometric",
+    "uv": [
+     1.0,
+     1.0
+    ],
+    "this": {
+     "srf": {
+      "sms": {
+       "$upstream_file": "DropCurveSurface.sms"
+      }
+     },
+     "c3d": [
+      {
+       "smc": {
+        "$upstream_file": "DropCurveCurve.smc"
+       }
+      }
+     ],
+     "cuv": [
+      {
+       "smc": {
+        "$upstream_file": "DropCurveCurve.smc"
+       }
+      }
+     ]
+    }
+   }
+  },
+  {
+   "name": "drop_curve_normal_section_2",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:318",
+   "inputs": {
+    "op": "normal_section",
+    "uv": [
+     1.0,
+     1.0
+    ],
+    "dir": [
+     1.0,
+     0.5,
+     0.0
+    ],
+    "this": {
+     "srf": {
+      "sms": {
+       "$upstream_file": "DropCurveSurface.sms"
+      }
+     },
+     "c3d": [
+      {
+       "smc": {
+        "$upstream_file": "DropCurveCurve.smc"
+       }
+      }
+     ],
+     "cuv": [
+      {
+       "smc": {
+        "$upstream_file": "DropCurveCurve.smc"
+       }
+      }
+     ]
+    }
+   }
+  },
+  {
+   "name": "offset_nurb_state",
+   "upstream_ref": "tests/prog_test/src/smFilletTest.cpp:3769",
+   "inputs": {
+    "op": "state",
+    "this": {
+     "oob": true,
+     "form": 11,
+     "srf": {
+      "sms": {
+       "$upstream_file": "offset_nurb.sms"
+      }
+     }
+    }
+   }
+  },
+  {
+   "name": "offset_nurb_queries",
+   "upstream_ref": "tests/prog_test/src/smFilletTest.cpp:3769",
+   "inputs": {
+    "op": "queries",
+    "types": [
+     15045,
+     15001,
+     15002,
+     14033,
+     0,
+     1
+    ],
+    "this": {
+     "oob": true,
+     "form": 11,
+     "srf": {
+      "sms": {
+       "$upstream_file": "offset_nurb.sms"
+      }
+     }
+    }
+   }
+  },
+  {
+   "name": "offset_nurb_defaults",
+   "upstream_ref": "tests/prog_test/src/smFilletTest.cpp:3769",
+   "inputs": {
+    "op": "defaults",
+    "v": [
+     0.0,
+     0.0,
+     1.0
+    ],
+    "this": {
+     "oob": true,
+     "form": 11,
+     "srf": {
+      "sms": {
+       "$upstream_file": "offset_nurb.sms"
+      }
+     }
+    }
+   }
+  },
+  {
+   "name": "offset_nurb_eq_self",
+   "upstream_ref": "tests/prog_test/src/smFilletTest.cpp:3769",
+   "inputs": {
+    "op": "eq_self",
+    "this": {
+     "oob": true,
+     "form": 11,
+     "srf": {
+      "sms": {
+       "$upstream_file": "offset_nurb.sms"
+      }
+     }
+    }
+   }
+  },
+  {
+   "name": "offset_nurb_eq_other_same",
+   "upstream_ref": "tests/prog_test/src/smFilletTest.cpp:3769",
+   "inputs": {
+    "op": "eq_other",
+    "other": {
+     "oob": true,
+     "form": 11,
+     "srf": {
+      "sms": {
+       "$upstream_file": "offset_nurb.sms"
+      }
+     }
+    },
+    "this": {
+     "oob": true,
+     "form": 11,
+     "srf": {
+      "sms": {
+       "$upstream_file": "offset_nurb.sms"
+      }
+     }
+    }
+   }
+  },
+  {
+   "name": "offset_nurb_set_context",
+   "upstream_ref": "tests/prog_test/src/smFilletTest.cpp:3769",
+   "inputs": {
+    "op": "set_context",
+    "this": {
+     "oob": true,
+     "form": 11,
+     "srf": {
+      "sms": {
+       "$upstream_file": "offset_nurb.sms"
+      }
+     }
+    }
+   }
+  },
+  {
+   "name": "offset_nurb_eval_pt_0",
+   "upstream_ref": "tests/prog_test/src/smFilletTest.cpp:3769",
+   "inputs": {
+    "op": "eval_pt",
+    "uv": [
+     -5.475299932110956,
+     0.0
+    ],
+    "this": {
+     "oob": true,
+     "form": 11,
+     "srf": {
+      "sms": {
+       "$upstream_file": "offset_nurb.sms"
+      }
+     }
+    }
+   }
+  },
+  {
+   "name": "offset_nurb_eval_0",
+   "upstream_ref": "tests/prog_test/src/smFilletTest.cpp:3769",
+   "inputs": {
+    "op": "eval",
+    "uv": [
+     -5.475299932110956,
+     0.0
+    ],
+    "hu": 2,
+    "hv": 2,
+    "u_left": true,
+    "v_left": true,
+    "upper": true,
+    "nzt": true,
+    "this": {
+     "oob": true,
+     "form": 11,
+     "srf": {
+      "sms": {
+       "$upstream_file": "offset_nurb.sms"
+      }
+     }
+    }
+   }
+  },
+  {
+   "name": "offset_nurb_eval_full_0",
+   "upstream_ref": "tests/prog_test/src/smFilletTest.cpp:3769",
+   "inputs": {
+    "op": "eval",
+    "uv": [
+     -5.475299932110956,
+     0.0
+    ],
+    "hu": 3,
+    "hv": 1,
+    "nzt": false,
+    "this": {
+     "oob": true,
+     "form": 11,
+     "srf": {
+      "sms": {
+       "$upstream_file": "offset_nurb.sms"
+      }
+     }
+    }
+   }
+  },
+  {
+   "name": "offset_nurb_normal_0",
+   "upstream_ref": "tests/prog_test/src/smFilletTest.cpp:3769",
+   "inputs": {
+    "op": "normal",
+    "uv": [
+     -5.475299932110956,
+     0.0
+    ],
+    "this": {
+     "oob": true,
+     "form": 11,
+     "srf": {
+      "sms": {
+       "$upstream_file": "offset_nurb.sms"
+      }
+     }
+    }
+   }
+  },
+  {
+   "name": "offset_nurb_simple_0",
+   "upstream_ref": "tests/prog_test/src/smFilletTest.cpp:3769",
+   "inputs": {
+    "op": "simple",
+    "uv": [
+     -5.475299932110956,
+     0.0
+    ],
+    "hu": 1,
+    "hv": 1,
+    "this": {
+     "oob": true,
+     "form": 11,
+     "srf": {
+      "sms": {
+       "$upstream_file": "offset_nurb.sms"
+      }
+     }
+    }
+   }
+  },
+  {
+   "name": "offset_nurb_step_0",
+   "upstream_ref": "tests/prog_test/src/smFilletTest.cpp:3769",
+   "inputs": {
+    "op": "step",
+    "uv": [
+     -5.475299932110956,
+     0.0
+    ],
+    "hu": 1,
+    "hv": 1,
+    "this": {
+     "oob": true,
+     "form": 11,
+     "srf": {
+      "sms": {
+       "$upstream_file": "offset_nurb.sms"
+      }
+     }
+    }
+   }
+  },
+  {
+   "name": "offset_nurb_step_pt_0",
+   "upstream_ref": "tests/prog_test/src/smFilletTest.cpp:3769",
+   "inputs": {
+    "op": "step_pt",
+    "uv": [
+     -5.475299932110956,
+     0.0
+    ],
+    "this": {
+     "oob": true,
+     "form": 11,
+     "srf": {
+      "sms": {
+       "$upstream_file": "offset_nurb.sms"
+      }
+     }
+    }
+   }
+  },
+  {
+   "name": "offset_nurb_singular_0",
+   "upstream_ref": "tests/prog_test/src/smFilletTest.cpp:3769",
+   "inputs": {
+    "op": "singular",
+    "uv": [
+     -5.475299932110956,
+     0.0
+    ],
+    "tol": 1e-10,
+    "this": {
+     "oob": true,
+     "form": 11,
+     "srf": {
+      "sms": {
+       "$upstream_file": "offset_nurb.sms"
+      }
+     }
+    }
+   }
+  },
+  {
+   "name": "offset_nurb_geometric_0",
+   "upstream_ref": "tests/prog_test/src/smFilletTest.cpp:3769",
+   "inputs": {
+    "op": "geometric",
+    "uv": [
+     -5.475299932110956,
+     0.0
+    ],
+    "this": {
+     "oob": true,
+     "form": 11,
+     "srf": {
+      "sms": {
+       "$upstream_file": "offset_nurb.sms"
+      }
+     }
+    }
+   }
+  },
+  {
+   "name": "offset_nurb_normal_section_0",
+   "upstream_ref": "tests/prog_test/src/smFilletTest.cpp:3769",
+   "inputs": {
+    "op": "normal_section",
+    "uv": [
+     -5.475299932110956,
+     0.0
+    ],
+    "dir": [
+     1.0,
+     0.5,
+     0.0
+    ],
+    "this": {
+     "oob": true,
+     "form": 11,
+     "srf": {
+      "sms": {
+       "$upstream_file": "offset_nurb.sms"
+      }
+     }
+    }
+   }
+  },
+  {
+   "name": "offset_nurb_eval_pt_1",
+   "upstream_ref": "tests/prog_test/src/smFilletTest.cpp:3769",
+   "inputs": {
+    "op": "eval_pt",
+    "uv": [
+     -2.0,
+     5.0
+    ],
+    "this": {
+     "oob": true,
+     "form": 11,
+     "srf": {
+      "sms": {
+       "$upstream_file": "offset_nurb.sms"
+      }
+     }
+    }
+   }
+  },
+  {
+   "name": "offset_nurb_eval_1",
+   "upstream_ref": "tests/prog_test/src/smFilletTest.cpp:3769",
+   "inputs": {
+    "op": "eval",
+    "uv": [
+     -2.0,
+     5.0
+    ],
+    "hu": 2,
+    "hv": 2,
+    "u_left": false,
+    "v_left": true,
+    "upper": true,
+    "nzt": true,
+    "this": {
+     "oob": true,
+     "form": 11,
+     "srf": {
+      "sms": {
+       "$upstream_file": "offset_nurb.sms"
+      }
+     }
+    }
+   }
+  },
+  {
+   "name": "offset_nurb_eval_full_1",
+   "upstream_ref": "tests/prog_test/src/smFilletTest.cpp:3769",
+   "inputs": {
+    "op": "eval",
+    "uv": [
+     -2.0,
+     5.0
+    ],
+    "hu": 3,
+    "hv": 1,
+    "nzt": false,
+    "this": {
+     "oob": true,
+     "form": 11,
+     "srf": {
+      "sms": {
+       "$upstream_file": "offset_nurb.sms"
+      }
+     }
+    }
+   }
+  },
+  {
+   "name": "offset_nurb_normal_1",
+   "upstream_ref": "tests/prog_test/src/smFilletTest.cpp:3769",
+   "inputs": {
+    "op": "normal",
+    "uv": [
+     -2.0,
+     5.0
+    ],
+    "this": {
+     "oob": true,
+     "form": 11,
+     "srf": {
+      "sms": {
+       "$upstream_file": "offset_nurb.sms"
+      }
+     }
+    }
+   }
+  },
+  {
+   "name": "offset_nurb_simple_1",
+   "upstream_ref": "tests/prog_test/src/smFilletTest.cpp:3769",
+   "inputs": {
+    "op": "simple",
+    "uv": [
+     -2.0,
+     5.0
+    ],
+    "hu": 1,
+    "hv": 1,
+    "this": {
+     "oob": true,
+     "form": 11,
+     "srf": {
+      "sms": {
+       "$upstream_file": "offset_nurb.sms"
+      }
+     }
+    }
+   }
+  },
+  {
+   "name": "offset_nurb_step_1",
+   "upstream_ref": "tests/prog_test/src/smFilletTest.cpp:3769",
+   "inputs": {
+    "op": "step",
+    "uv": [
+     -2.0,
+     5.0
+    ],
+    "hu": 1,
+    "hv": 1,
+    "this": {
+     "oob": true,
+     "form": 11,
+     "srf": {
+      "sms": {
+       "$upstream_file": "offset_nurb.sms"
+      }
+     }
+    }
+   }
+  },
+  {
+   "name": "offset_nurb_step_pt_1",
+   "upstream_ref": "tests/prog_test/src/smFilletTest.cpp:3769",
+   "inputs": {
+    "op": "step_pt",
+    "uv": [
+     -2.0,
+     5.0
+    ],
+    "this": {
+     "oob": true,
+     "form": 11,
+     "srf": {
+      "sms": {
+       "$upstream_file": "offset_nurb.sms"
+      }
+     }
+    }
+   }
+  },
+  {
+   "name": "offset_nurb_singular_1",
+   "upstream_ref": "tests/prog_test/src/smFilletTest.cpp:3769",
+   "inputs": {
+    "op": "singular",
+    "uv": [
+     -2.0,
+     5.0
+    ],
+    "tol": 1e-10,
+    "this": {
+     "oob": true,
+     "form": 11,
+     "srf": {
+      "sms": {
+       "$upstream_file": "offset_nurb.sms"
+      }
+     }
+    }
+   }
+  },
+  {
+   "name": "offset_nurb_geometric_1",
+   "upstream_ref": "tests/prog_test/src/smFilletTest.cpp:3769",
+   "inputs": {
+    "op": "geometric",
+    "uv": [
+     -2.0,
+     5.0
+    ],
+    "this": {
+     "oob": true,
+     "form": 11,
+     "srf": {
+      "sms": {
+       "$upstream_file": "offset_nurb.sms"
+      }
+     }
+    }
+   }
+  },
+  {
+   "name": "offset_nurb_normal_section_1",
+   "upstream_ref": "tests/prog_test/src/smFilletTest.cpp:3769",
+   "inputs": {
+    "op": "normal_section",
+    "uv": [
+     -2.0,
+     5.0
+    ],
+    "dir": [
+     1.0,
+     0.5,
+     0.0
+    ],
+    "this": {
+     "oob": true,
+     "form": 11,
+     "srf": {
+      "sms": {
+       "$upstream_file": "offset_nurb.sms"
+      }
+     }
+    }
+   }
+  },
+  {
+   "name": "offset_nurb_eval_pt_2",
+   "upstream_ref": "tests/prog_test/src/smFilletTest.cpp:3769",
+   "inputs": {
+    "op": "eval_pt",
+    "uv": [
+     0.0,
+     10.0
+    ],
+    "this": {
+     "oob": true,
+     "form": 11,
+     "srf": {
+      "sms": {
+       "$upstream_file": "offset_nurb.sms"
+      }
+     }
+    }
+   }
+  },
+  {
+   "name": "offset_nurb_eval_2",
+   "upstream_ref": "tests/prog_test/src/smFilletTest.cpp:3769",
+   "inputs": {
+    "op": "eval",
+    "uv": [
+     0.0,
+     10.0
+    ],
+    "hu": 2,
+    "hv": 2,
+    "u_left": true,
+    "v_left": true,
+    "upper": true,
+    "nzt": true,
+    "this": {
+     "oob": true,
+     "form": 11,
+     "srf": {
+      "sms": {
+       "$upstream_file": "offset_nurb.sms"
+      }
+     }
+    }
+   }
+  },
+  {
+   "name": "offset_nurb_eval_full_2",
+   "upstream_ref": "tests/prog_test/src/smFilletTest.cpp:3769",
+   "inputs": {
+    "op": "eval",
+    "uv": [
+     0.0,
+     10.0
+    ],
+    "hu": 3,
+    "hv": 1,
+    "nzt": false,
+    "this": {
+     "oob": true,
+     "form": 11,
+     "srf": {
+      "sms": {
+       "$upstream_file": "offset_nurb.sms"
+      }
+     }
+    }
+   }
+  },
+  {
+   "name": "offset_nurb_normal_2",
+   "upstream_ref": "tests/prog_test/src/smFilletTest.cpp:3769",
+   "inputs": {
+    "op": "normal",
+    "uv": [
+     0.0,
+     10.0
+    ],
+    "this": {
+     "oob": true,
+     "form": 11,
+     "srf": {
+      "sms": {
+       "$upstream_file": "offset_nurb.sms"
+      }
+     }
+    }
+   }
+  },
+  {
+   "name": "offset_nurb_simple_2",
+   "upstream_ref": "tests/prog_test/src/smFilletTest.cpp:3769",
+   "inputs": {
+    "op": "simple",
+    "uv": [
+     0.0,
+     10.0
+    ],
+    "hu": 1,
+    "hv": 1,
+    "this": {
+     "oob": true,
+     "form": 11,
+     "srf": {
+      "sms": {
+       "$upstream_file": "offset_nurb.sms"
+      }
+     }
+    }
+   }
+  },
+  {
+   "name": "offset_nurb_step_2",
+   "upstream_ref": "tests/prog_test/src/smFilletTest.cpp:3769",
+   "inputs": {
+    "op": "step",
+    "uv": [
+     0.0,
+     10.0
+    ],
+    "hu": 1,
+    "hv": 1,
+    "this": {
+     "oob": true,
+     "form": 11,
+     "srf": {
+      "sms": {
+       "$upstream_file": "offset_nurb.sms"
+      }
+     }
+    }
+   }
+  },
+  {
+   "name": "offset_nurb_step_pt_2",
+   "upstream_ref": "tests/prog_test/src/smFilletTest.cpp:3769",
+   "inputs": {
+    "op": "step_pt",
+    "uv": [
+     0.0,
+     10.0
+    ],
+    "this": {
+     "oob": true,
+     "form": 11,
+     "srf": {
+      "sms": {
+       "$upstream_file": "offset_nurb.sms"
+      }
+     }
+    }
+   }
+  },
+  {
+   "name": "offset_nurb_singular_2",
+   "upstream_ref": "tests/prog_test/src/smFilletTest.cpp:3769",
+   "inputs": {
+    "op": "singular",
+    "uv": [
+     0.0,
+     10.0
+    ],
+    "tol": 1e-10,
+    "this": {
+     "oob": true,
+     "form": 11,
+     "srf": {
+      "sms": {
+       "$upstream_file": "offset_nurb.sms"
+      }
+     }
+    }
+   }
+  },
+  {
+   "name": "offset_nurb_geometric_2",
+   "upstream_ref": "tests/prog_test/src/smFilletTest.cpp:3769",
+   "inputs": {
+    "op": "geometric",
+    "uv": [
+     0.0,
+     10.0
+    ],
+    "this": {
+     "oob": true,
+     "form": 11,
+     "srf": {
+      "sms": {
+       "$upstream_file": "offset_nurb.sms"
+      }
+     }
+    }
+   }
+  },
+  {
+   "name": "offset_nurb_normal_section_2",
+   "upstream_ref": "tests/prog_test/src/smFilletTest.cpp:3769",
+   "inputs": {
+    "op": "normal_section",
+    "uv": [
+     0.0,
+     10.0
+    ],
+    "dir": [
+     1.0,
+     0.5,
+     0.0
+    ],
+    "this": {
+     "oob": true,
+     "form": 11,
+     "srf": {
+      "sms": {
+       "$upstream_file": "offset_nurb.sms"
+      }
+     }
+    }
+   }
+  },
+  {
+   "name": "surface_sms_eq_other_implicit_differs",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117",
+   "inputs": {
+    "op": "eq_other",
+    "other": {
+     "srf": {
+      "sms": {
+       "$upstream_file": "Surface.sms"
+      }
+     },
+     "implicit": false,
+     "c3d": [
+      {
+       "smc": {
+        "$upstream_file": "crvTrim1.smc"
+       }
+      },
+      {
+       "smc": {
+        "$upstream_file": "crvTrim2.smc"
+       }
+      }
+     ],
+     "cuv": [
+      {
+       "smc": {
+        "$upstream_file": "closedCurve.smc"
+       }
+      },
+      {
+       "smc": {
+        "$upstream_file": "closedCurve.smc"
+       }
+      }
+     ]
+    },
+    "this": {
+     "srf": {
+      "sms": {
+       "$upstream_file": "Surface.sms"
+      }
+     },
+     "implicit": true,
+     "c3d": [
+      {
+       "smc": {
+        "$upstream_file": "crvTrim1.smc"
+       }
+      },
+      {
+       "smc": {
+        "$upstream_file": "crvTrim2.smc"
+       }
+      }
+     ],
+     "cuv": [
+      {
+       "smc": {
+        "$upstream_file": "closedCurve.smc"
+       }
+      },
+      {
+       "smc": {
+        "$upstream_file": "closedCurve.smc"
+       }
+      }
+     ]
+    }
+   }
+  },
+  {
+   "name": "surface_sms_eq_other_fewer_boundaries",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117",
+   "inputs": {
+    "op": "eq_other",
+    "other": {
+     "srf": {
+      "sms": {
+       "$upstream_file": "Surface.sms"
+      }
+     },
+     "implicit": true,
+     "c3d": [
+      {
+       "smc": {
+        "$upstream_file": "crvTrim1.smc"
+       }
+      }
+     ],
+     "cuv": [
+      {
+       "smc": {
+        "$upstream_file": "closedCurve.smc"
+       }
+      }
+     ]
+    },
+    "this": {
+     "srf": {
+      "sms": {
+       "$upstream_file": "Surface.sms"
+      }
+     },
+     "implicit": true,
+     "c3d": [
+      {
+       "smc": {
+        "$upstream_file": "crvTrim1.smc"
+       }
+      },
+      {
+       "smc": {
+        "$upstream_file": "crvTrim2.smc"
+       }
+      }
+     ],
+     "cuv": [
+      {
+       "smc": {
+        "$upstream_file": "closedCurve.smc"
+       }
+      },
+      {
+       "smc": {
+        "$upstream_file": "closedCurve.smc"
+       }
+      }
+     ]
+    }
+   }
+  },
+  {
+   "name": "eq_other_different_basis",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117",
+   "inputs": {
+    "op": "eq_other",
+    "other": {
+     "srf": {
+      "sms": {
+       "$upstream_file": "DropCurveSurface.sms"
+      }
+     },
+     "c3d": [
+      {
+       "smc": {
+        "$upstream_file": "DropCurveCurve.smc"
+       }
+      }
+     ],
+     "cuv": [
+      {
+       "smc": {
+        "$upstream_file": "DropCurveCurve.smc"
+       }
+      }
+     ]
+    },
+    "this": {
+     "srf": {
+      "sms": {
+       "$upstream_file": "Surface.sms"
+      }
+     },
+     "implicit": true,
+     "c3d": [
+      {
+       "smc": {
+        "$upstream_file": "crvTrim1.smc"
+       }
+      },
+      {
+       "smc": {
+        "$upstream_file": "crvTrim2.smc"
+       }
+      }
+     ],
+     "cuv": [
+      {
+       "smc": {
+        "$upstream_file": "closedCurve.smc"
+       }
+      },
+      {
+       "smc": {
+        "$upstream_file": "closedCurve.smc"
+       }
+      }
+     ]
+    }
+   }
+  },
+  {
+   "name": "no_boundaries_state",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:318",
+   "inputs": {
+    "op": "state",
+    "this": {
+     "srf": {
+      "sms": {
+       "$upstream_file": "DropCurveSurface.sms"
+      }
+     }
+    }
+   }
+  },
+  {
+   "name": "no_boundaries_queries",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:318",
+   "inputs": {
+    "op": "queries",
+    "types": [
+     15045,
+     15001,
+     15002,
+     14033,
+     0,
+     1
+    ],
+    "this": {
+     "srf": {
+      "sms": {
+       "$upstream_file": "DropCurveSurface.sms"
+      }
+     }
+    }
+   }
+  },
+  {
+   "name": "uv_only_state",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:318",
+   "inputs": {
+    "op": "state",
+    "this": {
+     "srf": {
+      "sms": {
+       "$upstream_file": "DropCurveSurface.sms"
+      }
+     },
+     "cuv": [
+      {
+       "smc": {
+        "$upstream_file": "crvTrim1.smc"
+       }
+      },
+      {
+       "smc": {
+        "$upstream_file": "crvTrim2.smc"
+       }
+      },
+      {
+       "smc": {
+        "$upstream_file": "closedCurve.smc"
+       }
+      }
+     ]
+    }
+   }
+  },
+  {
+   "name": "uv_only_eq_self",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:318",
+   "inputs": {
+    "op": "eq_self",
+    "this": {
+     "srf": {
+      "sms": {
+       "$upstream_file": "DropCurveSurface.sms"
+      }
+     },
+     "cuv": [
+      {
+       "smc": {
+        "$upstream_file": "crvTrim1.smc"
+       }
+      },
+      {
+       "smc": {
+        "$upstream_file": "crvTrim2.smc"
+       }
+      },
+      {
+       "smc": {
+        "$upstream_file": "closedCurve.smc"
+       }
+      }
+     ]
+    }
+   }
+  },
+  {
+   "name": "six_boundaries_state",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117",
+   "inputs": {
+    "op": "state",
+    "this": {
+     "srf": {
+      "sms": {
+       "$upstream_file": "Surface.sms"
+      }
+     },
+     "c3d": [
+      {
+       "smc": {
+        "$upstream_file": "crvTrim1.smc"
+       }
+      },
+      {
+       "smc": {
+        "$upstream_file": "crvTrim2.smc"
+       }
+      },
+      {
+       "smc": {
+        "$upstream_file": "closedCurve.smc"
+       }
+      },
+      {
+       "smc": {
+        "$upstream_file": "crvTrim1.smc"
+       }
+      },
+      {
+       "smc": {
+        "$upstream_file": "crvTrim2.smc"
+       }
+      }
+     ],
+     "cuv": [
+      {
+       "smc": {
+        "$upstream_file": "closedCurve.smc"
+       }
+      },
+      {
+       "smc": {
+        "$upstream_file": "crvTrim1.smc"
+       }
+      },
+      {
+       "smc": {
+        "$upstream_file": "crvTrim2.smc"
+       }
+      },
+      {
+       "smc": {
+        "$upstream_file": "closedCurve.smc"
+       }
+      }
+     ]
+    }
+   }
+  },
+  {
+   "name": "read_db_surface_sms",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117",
+   "inputs": {
+    "op": "read_db",
+    "srf": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "c3d": [
+     {
+      "smc": {
+       "$upstream_file": "crvTrim1.smc"
+      }
+     },
+     {
+      "smc": {
+       "$upstream_file": "crvTrim2.smc"
+      }
+     }
+    ],
+    "cuv": [
+     {
+      "smc": {
+       "$upstream_file": "closedCurve.smc"
+      }
+     }
+    ]
+   }
+  },
+  {
+   "name": "read_db_implicit_flag_dropped",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117",
+   "inputs": {
+    "op": "read_db",
+    "implicit": true,
+    "srf": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "c3d": [
+     {
+      "smc": {
+       "$upstream_file": "crvTrim1.smc"
+      }
+     },
+     {
+      "smc": {
+       "$upstream_file": "crvTrim2.smc"
+      }
+     }
+    ],
+    "cuv": [
+     {
+      "smc": {
+       "$upstream_file": "crvTrim1.smc"
+      }
+     },
+     {
+      "smc": {
+       "$upstream_file": "crvTrim2.smc"
+      }
+     }
+    ]
+   }
+  },
+  {
+   "name": "read_db_drop_curve",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:318",
+   "inputs": {
+    "op": "read_db",
+    "srf": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    },
+    "c3d": [
+     {
+      "smc": {
+       "$upstream_file": "DropCurveCurve.smc"
+      }
+     }
+    ],
+    "cuv": [
+     {
+      "smc": {
+       "$upstream_file": "DropCurveCurve.smc"
+      }
+     }
+    ]
+   }
+  },
+  {
+   "name": "read_db_no_boundaries",
+   "upstream_ref": "tests/prog_test/src/smFilletTest.cpp:3769",
+   "inputs": {
+    "op": "read_db",
+    "srf": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    }
+   }
+  },
+  {
+   "name": "read_db_uv_without_3d_type_zero",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:318",
+   "inputs": {
+    "op": "read_db",
+    "srf": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    },
+    "cuv": [
+     {
+      "smc": {
+       "$upstream_file": "closedCurve.smc"
+      }
+     }
+    ]
+   }
+  },
+  {
+   "name": "read_db_uv_header_type_ignored",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117",
+   "inputs": {
+    "op": "read_db",
+    "srf": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "c3d": [
+     {
+      "smc": {
+       "$upstream_file": "crvTrim1.smc"
+      }
+     },
+     {
+      "smc": {
+       "$upstream_file": "crvTrim2.smc"
+      }
+     }
+    ],
+    "uv_header_type": 14010,
+    "cuv": [
+     {
+      "smc": {
+       "$upstream_file": "closedCurve.smc"
+      }
+     }
+    ]
+   }
+  },
+  {
+   "name": "read_db_basis_not_a_surface",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117",
+   "inputs": {
+    "op": "read_db",
+    "basis_type": 14033,
+    "srf": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "c3d": [
+     {
+      "smc": {
+       "$upstream_file": "crvTrim1.smc"
+      }
+     },
+     {
+      "smc": {
+       "$upstream_file": "crvTrim2.smc"
+      }
+     }
+    ]
+   }
+  },
+  {
+   "name": "read_db_basis_not_a_type",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117",
+   "inputs": {
+    "op": "read_db",
+    "basis_type": 1,
+    "srf": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    }
+   }
+  },
+  {
+   "name": "read_db_more_3d_than_uv",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117",
+   "inputs": {
+    "op": "read_db",
+    "srf": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "c3d": [
+     {
+      "smc": {
+       "$upstream_file": "crvTrim1.smc"
+      }
+     },
+     {
+      "smc": {
+       "$upstream_file": "crvTrim2.smc"
+      }
+     },
+     {
+      "smc": {
+       "$upstream_file": "closedCurve.smc"
+      }
+     }
+    ],
+    "cuv": [
+     {
+      "smc": {
+       "$upstream_file": "closedCurve.smc"
+      }
+     }
+    ]
+   }
+  }
+ ]
+}

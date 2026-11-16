@@ -16,7 +16,9 @@ mod server;
 mod skill_reference;
 mod tools;
 
-pub use backend::{Auto, Backend, Headless, Remote};
+#[cfg(not(target_arch = "wasm32"))]
+pub use backend::{Auto, Remote};
+pub use backend::{Backend, Headless};
 pub use options::{COMPACT_ENV, COMPACT_FLAG, Options};
 pub use server::Server;
 pub use solidcraft_mcp_server::{PROTOCOL_VERSION, SUPPORTED_VERSIONS};

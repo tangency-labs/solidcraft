@@ -1,0 +1,35 @@
+{
+  "area": "sheet-metal",
+  "bodies": {},
+  "calls": [],
+  "case": "cov-hem-shorter-than-its-bend-refused",
+  "expected": {
+    "method": "the hem's length runs to its outer face, so it must be at least the bend's g + T = 2.01; a leg of 2 - 2.01 < 0 is no hem: a clean refusal",
+    "outcome": "refused",
+    "refusal": "the hem is shorter than its bend",
+    "source": "invariants",
+    "sources": [],
+    "what": "sheet.hem 2 long on a 2 mm sheet: shorter than its own 180 degree bend (gap + T = 2.01)"
+  },
+  "expressible": false,
+  "operation_expressible": false,
+  "outcome": {
+    "engine_error": "step 6 (sheet.hem): the hem is shorter than its bend",
+    "ran": false
+  },
+  "result": [],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": null,
+    "refused_with": "step 6 (sheet.hem): the hem is shorter than its bend",
+    "status": "pass"
+  },
+  "sources": [],
+  "traced_ops": [],
+  "ungraded": [],
+  "what": "sheet.hem 2 long on a 2 mm sheet: shorter than its own 180 degree bend (gap + T = 2.01)",
+  "why_not": [
+    "no kernel operation ran before the failure: step 6 (sheet.hem): the hem is shorter than its bend"
+  ]
+}

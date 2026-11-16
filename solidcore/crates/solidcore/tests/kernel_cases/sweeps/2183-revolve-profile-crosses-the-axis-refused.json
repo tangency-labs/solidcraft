@@ -1,0 +1,41 @@
+{
+  "area": "sweeps",
+  "bodies": {},
+  "calls": [],
+  "case": "2183-revolve-profile-crosses-the-axis-refused",
+  "expected": {
+    "method": "a profile on both sides of the axis would sweep over itself, so no solid exists: the right behaviour is a clean refusal (invalid input), with no body made.",
+    "outcome": "refused",
+    "refusal": "the profile crosses the revolve axis",
+    "source": "invariants",
+    "sources": [
+      "tangency-labs/solidcraft#2453",
+      "tangency-labs/solidcraft#2183"
+    ],
+    "what": "a rectangle that straddles the revolve axis (x from -5 to 15 about the sketch y axis)"
+  },
+  "expressible": false,
+  "operation_expressible": false,
+  "outcome": {
+    "engine_error": "step 4 (solid.revolve): invalid input: the profile crosses the revolve axis",
+    "ran": false
+  },
+  "result": [],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": null,
+    "refused_with": "step 4 (solid.revolve): invalid input: the profile crosses the revolve axis",
+    "status": "pass"
+  },
+  "sources": [
+    "tangency-labs/solidcraft#2453",
+    "tangency-labs/solidcraft#2183"
+  ],
+  "traced_ops": [],
+  "ungraded": [],
+  "what": "a rectangle that straddles the revolve axis (x from -5 to 15 about the sketch y axis)",
+  "why_not": [
+    "no kernel operation ran before the failure: step 4 (solid.revolve): invalid input: the profile crosses the revolve axis"
+  ]
+}

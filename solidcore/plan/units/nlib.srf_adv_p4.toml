@@ -1,0 +1,12 @@
+id = "nlib.srf_adv_p4"
+upstream = ["source/SMLib/src/NL_SrfAdv.cpp"]
+rust_module = "nurbs::srf_adv::p4"
+depends_on = ["nlib.crv_adv_p2", "nlib.crv_basic", "nlib.crv_nurb", "nlib.geom", "nlib.math", "nlib.srf_basic", "nlib.srf_common"]
+soft_depends_on = ["nlib.bezier", "nlib.crv_fit_p1", "nlib.crv_tool_p1", "nlib.crv_tool_p2", "nlib.funcs_adv", "nlib.funcs_basic", "nlib.knots", "nlib.srf_nurb", "nlib.srf_tool_p4"]
+est_lines = 2228
+layer = 14
+tests = ["SM_API_test:TestSmCreateSurfaceFromRandomPoints", "SM_API_test:TestSmCreateSkinSurface", "SM_API_test:TestSmCreateExtrude", "SM_API_test:TestSmCreateSkinFromFaces", "SM_API_test:TestSmCreateSkinPrimitive", "prog_test:my_test_parallel_projection"]
+status = "green"
+claimed_by = "swarm-nlib.srf_adv_p4-a1"
+claimed_at = "2026-10-12T23:26:05Z"
+notes = "11 fns; largest: N_CreateCoonsBoundaryCrvs, N_AdjustDerivSrf, N_ApproxCrossBoundaryDerivs, N_CreateCoonsSrf; unit-SCC #22 (220 units); 160 upstream test entry points reach this unit; difftest 3155 cases (155 fixture + 3000 generated), 0 deferred, max_rel_err 0"

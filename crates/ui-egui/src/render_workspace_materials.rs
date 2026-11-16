@@ -11,16 +11,15 @@ use solidcraft_engine::{
         appearance_pack::{self, GlassBoundary, Recipe},
     },
     render::{
-        clear_coat::ClearCoat,
         job::textures::{BaseColorMode, PlanarFrame},
-        surface::OpaqueSurface,
         transmission::Transmission,
     },
 };
 
-#[cfg(test)]
-use crate::theme::Tokens;
 use crate::{SolveApp, ui_kit};
+#[cfg(test)]
+use solidcraft_theme::Tokens;
+use solidcraft_viewport::{clear_coat::ClearCoat, surface::OpaqueSurface};
 
 const MAX_BINDINGS: usize = 128;
 

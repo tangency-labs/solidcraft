@@ -1,0 +1,157 @@
+{
+  "area": "sweeps",
+  "bodies": {
+    "b12": {
+      "keeping_splines": false,
+      "trusted": true
+    },
+    "b9": {
+      "keeping_splines": false,
+      "trusted": true
+    }
+  },
+  "calls": [
+    {
+      "inputs": [
+        "b9"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b10"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b10"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b11"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b12"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b13"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b13"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b14"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b11"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b15"
+      ],
+      "params": {
+        "operand": 0
+      }
+    },
+    {
+      "inputs": [
+        "b14"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b16"
+      ],
+      "params": {
+        "operand": 1
+      }
+    },
+    {
+      "inputs": [
+        "b15",
+        "b16"
+      ],
+      "op": "boolean",
+      "outputs": [
+        "b17"
+      ],
+      "params": {
+        "op": "union"
+      }
+    }
+  ],
+  "case": "3505-extrude-the-flat-wall-of-a-sweep-with-a-corner",
+  "expected": {
+    "body_count": 1,
+    "method": "bar: 8 x 5 section, path 30 up then 40 across (mitred): V = 40 * 70 = 2800. The inner wall of the vertical leg is the plane x = 4, 5 wide and 26 high (it ends where the mitre meets the horizontal leg underside at z = 26): extruding it 3 mm outward adds 5 * 26 * 3 = 390, a block touching the horizontal leg along z = 26: V = 3190.",
+    "source": "analytic",
+    "sources": [
+      "tangency-labs/solidcraft#3505"
+    ],
+    "volume_mm3": 3190,
+    "what": "the inner side wall of the vertical leg of a mitred swept bar extruded outward by 3 mm (the wall is a B-spline net in a plane, \"the selected planar face no longer exists\")"
+  },
+  "expressible": true,
+  "operation_expressible": true,
+  "outcome": {
+    "ran": true,
+    "raw_counts": {
+      "edges": 18,
+      "faces": 8,
+      "vertices": 12
+    }
+  },
+  "records": "3505-extrude-the-flat-wall-of-a-sweep-with-a-corner.bodies.json.gz",
+  "result": [
+    {
+      "body": "Bar",
+      "made": "b17"
+    }
+  ],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": {
+      "area_mm2": 2055.999999999999,
+      "body_count": 1,
+      "edges": 18,
+      "faces": 8,
+      "vertices": 12,
+      "volume_mm3": 3189.9999999999986
+    },
+    "refused_with": null,
+    "status": "pass"
+  },
+  "sources": [
+    "tangency-labs/solidcraft#3505"
+  ],
+  "traced_ops": [
+    "sweep",
+    "extrude",
+    "boolean",
+    "sweep",
+    "extrude",
+    "boolean",
+    "boolean",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean"
+  ],
+  "ungraded": [],
+  "what": "the inner side wall of the vertical leg of a mitred swept bar extruded outward by 3 mm (the wall is a B-spline net in a plane, \"the selected planar face no longer exists\")",
+  "why_not": []
+}

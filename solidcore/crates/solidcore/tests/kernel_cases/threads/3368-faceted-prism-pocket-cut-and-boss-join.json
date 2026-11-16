@@ -1,0 +1,172 @@
+{
+  "area": "threads",
+  "bodies": {
+    "b13": {
+      "keeping_splines": false,
+      "trusted": true
+    },
+    "b16": {
+      "keeping_splines": false,
+      "trusted": true
+    }
+  },
+  "calls": [
+    {
+      "inputs": [
+        "b13"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b14"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b14"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b15"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b16"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b17"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b17"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b18"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b15"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b19"
+      ],
+      "params": {
+        "operand": 0
+      }
+    },
+    {
+      "inputs": [
+        "b18"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b20"
+      ],
+      "params": {
+        "operand": 1
+      }
+    },
+    {
+      "inputs": [
+        "b19",
+        "b20"
+      ],
+      "op": "boolean",
+      "outputs": [
+        "b21"
+      ],
+      "params": {
+        "op": "union"
+      }
+    }
+  ],
+  "case": "3368-faceted-prism-pocket-cut-and-boss-join",
+  "expected": {
+    "bbox": {
+      "max": [
+        30,
+        30,
+        15
+      ],
+      "min": [
+        -30,
+        -30,
+        0
+      ]
+    },
+    "body_count": 1,
+    "method": "A regular N-gon of circumradius R (one vertex on +x) has area N/2 R^2 sin(2 pi/N). Plate: 1200-gon R=30, h=10: V0 = 600 * 900 * sin(0.3 deg) * 10 = 28274.2047. Cut: a 10x10 square pocket through the full thickness, entirely inside the plate: -10*10*10 = -1000. Join: a 12x12x5 box standing on the top face (z 10 to 15, x and y 8 to 20, inside the outline, touching the top face only in its base): +720. V = 27994.2047 mm3.",
+    "outcome": "solid",
+    "source": "analytic",
+    "sources": [
+      "tangency-labs/solidcraft#3368"
+    ],
+    "volume_mm3": 27994.2047,
+    "what": "booleans of a finely faceted body (a 1200-sided prism, 1202 flat faces, the kind of body a modelled thread leaves) with box tools: they must finish in bounded time with the exact result, not run for minutes"
+  },
+  "expressible": true,
+  "operation_expressible": true,
+  "outcome": {
+    "ran": true,
+    "raw_counts": {
+      "edges": 3624,
+      "faces": 1211,
+      "vertices": 2416
+    }
+  },
+  "records": "3368-faceted-prism-pocket-cut-and-boss-join.bodies.json.gz",
+  "result": [
+    {
+      "body": "Plate",
+      "made": "b21"
+    }
+  ],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": {
+      "area_mm2": 7979.794376880631,
+      "body_count": 1,
+      "edges": 3624,
+      "faces": 1211,
+      "vertices": 2416,
+      "volume_mm3": 27994.20468969371
+    },
+    "refused_with": null,
+    "status": "pass"
+  },
+  "sources": [
+    "tangency-labs/solidcraft#3368"
+  ],
+  "traced_ops": [
+    "extrude",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean"
+  ],
+  "ungraded": [],
+  "what": "booleans of a finely faceted body (a 1200-sided prism, 1202 flat faces, the kind of body a modelled thread leaves) with box tools: they must finish in bounded time with the exact result, not run for minutes",
+  "why_not": []
+}

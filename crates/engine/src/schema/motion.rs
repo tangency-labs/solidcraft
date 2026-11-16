@@ -38,6 +38,10 @@ pub struct FindLimitsParams {
     /// Check the pairs of the design's contact sets instead (not with `occurrences`).
     #[serde(default)]
     pub contact_sets: Option<bool>,
+    /// Pairs left out: `[a, b]`, each an occurrence's id or name; a pair of bodies is left out
+    /// when one is under `a` and the other under `b`. Default: none.
+    #[serde(default)]
+    pub exclude_pairs: Option<Vec<[PartRef; 2]>>,
 }
 
 /// A joint by its id (a number) or its name.
@@ -94,10 +98,15 @@ pub enum Stop {
         b: String,
         /// Where they touch (world, mm).
         at: [f64; 3],
+        /// Where `a`'s touching body sits in the assembly.
+        a_part: Box<PartPlace>,
+        /// Where `b`'s touching body sits in the assembly.
+        b_part: Box<PartPlace>,
     },
     /// `loop`: a closed loop can no longer close; `limit`: the limit of another of the joint's
     /// values, or of another joint through a motion link; `turn`: no contact within one turn, so the side is a turn from the other;
-    /// `range`: no contact within the parts' reach (a distance), so the side has no limit.
+    /// `range`: no contact within the parts' reach (a distance), so the side has no limit;
+    /// `budget`: a time or work budget ran out first, so the side is the last value checked clear.
     Other(Why),
 }
 
@@ -109,6 +118,18 @@ pub enum Why {
     Limit,
     Turn,
     Range,
+    Budget,
+}
+
+/// Where a body of a reported pair sits in the assembly: in an assembly of copies, which copy.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, JsonSchema)]
+pub struct PartPlace {
+    /// The component the body is in ("" at the top level).
+    pub component: String,
+    /// The occurrences it is placed through, from the top: their names.
+    pub path: Vec<String>,
+    /// The same occurrences' ids.
+    pub path_ids: Vec<u64>,
 }
 
 /// One value's limits.
@@ -236,12 +257,7 @@ pub struct OccurrenceKeys(pub Vec<Value>);
 
 impl<'de> Deserialize<'de> for OccurrenceKeys {
     fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
-        match Value::deserialize(d)? {
-            Value::Array(list) if list.len() > MAX_OCCURRENCES => Err(D::Error::custom(whole("too many occurrences"))),
-            Value::Array(list) if list.iter().all(|v| v.is_number() || v.is_string()) => Ok(OccurrenceKeys(list)),
-            Value::Array(_) => Err(D::Error::custom(whole("an occurrence must be an id or a name"))),
-            _ => Err(D::Error::custom(whole("`occurrences` must list occurrences"))),
-        }
+        occurrence_list(Value::deserialize(d)?).map(OccurrenceKeys)
     }
 }
 
@@ -255,6 +271,45 @@ impl JsonSchema for OccurrenceKeys {
             "type": "array",
             "items": {"type": ["number", "string"]},
             "minItems": 2,
+            "maxItems": MAX_OCCURRENCES
+        })
+    }
+}
+
+/// A list of occurrences as `cmd/motion.rs`'s `occurrences` reads it, with its messages: at most
+/// 10000, each an id or a name. Anything else, `null` included, isn't a list. Whether each
+/// occurrence exists, and that none is the root, stay the handler's to check.
+fn occurrence_list<E: serde::de::Error>(v: Value) -> Result<Vec<Value>, E> {
+    match v {
+        Value::Array(list) if list.len() > MAX_OCCURRENCES => Err(E::custom(whole("too many occurrences"))),
+        Value::Array(list) if list.iter().all(|v| v.is_number() || v.is_string()) => Ok(list),
+        Value::Array(_) => Err(E::custom(whole("an occurrence must be an id or a name"))),
+        _ => Err(E::custom(whole("`occurrences` must list occurrences"))),
+    }
+}
+
+/// The parts a collision check takes, `occurrences` or `against`, as `checked_pairs` in
+/// `cmd/motion_analysis.rs` reads each: through `cmd/motion.rs`'s `occurrences`, so `against`'s
+/// messages name `occurrences` too. Unlike [`OccurrenceKeys`], one part is enough: the handler
+/// counts the two lists together.
+#[derive(Clone, Debug, PartialEq)]
+pub struct PartList(pub Vec<Value>);
+
+impl<'de> Deserialize<'de> for PartList {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        occurrence_list(Value::deserialize(d)?).map(PartList)
+    }
+}
+
+impl JsonSchema for PartList {
+    fn schema_name() -> Cow<'static, str> {
+        "PartList".into()
+    }
+    fn json_schema(_: &mut SchemaGenerator) -> Schema {
+        json_schema!({
+            "description": "Occurrences, each by id (a number) or name; not the root.",
+            "type": "array",
+            "items": {"type": ["number", "string"]},
             "maxItems": MAX_OCCURRENCES
         })
     }

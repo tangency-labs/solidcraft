@@ -8,16 +8,17 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
-use serde_json::{Value, json};
+use serde_json::Value;
 use solidcore_record::Vec3;
 use solidcraft_doc::Document;
 use solidcraft_doc::joints::JointKind;
 
-use super::analysis::checked_pairs;
-use super::contact_sweep::{ContactGeometry, Gap};
+use super::analysis::{MAX_BUDGET_S, checked_pairs, part_place};
+use super::contact_sweep::{ContactGeometry, Gap, ran_out};
 use super::{drive_with_contact, joint_id, value};
-use crate::params::{bad, bool_};
-use crate::schema::motion::{FindLimitsResult, FoundLimits, Overlap, Stop, Why};
+use crate::params::{bad, bool_, num};
+use crate::schema::joint_sweep::{NearestGap, SampleGap, SweepResult, SweepSample};
+use crate::schema::motion::{FindLimitsResult, FoundLimits, Overlap, PartPlace, Stop, Why};
 use crate::{EngineError, Result, Session};
 
 pub const SWEEP_DOC: &str = "joint: id|name; from, to: its value the sweep runs between (degrees for angles, mm for distances, \
@@ -25,21 +26,27 @@ pub const SWEEP_DOC: &str = "joint: id|name; from, to: its value the sweep runs 
      no part passes through another between two); refine?: mm (the first contact is bisected until no part moves more than \
      this between the last clear value and the touching one; default 0.01); occurrences?: [ids or names] (checked against \
      each other; default every occurrence), with against?: [ids or names] (the parts that stay: each of `occurrences` only \
-     against these), or contact_sets?: true (the pairs of the design's contact sets); report_gaps?: bool (the nearest gap at \
+     against these), or contact_sets?: true (the pairs of the design's contact sets); exclude_pairs?: [[a, b]] (occurrences by id or name: \
+     pairs of bodies under a and b are not checked, such as a pin in its hole); budget_s?: seconds (at most 86400; past them \
+     the sweep stops with what it found; its work is then not capped. Without it the work caps, 4096 samples, 64 bisection \
+     steps and 500 million triangle tests, stop it the same way); report_gaps?: bool (the nearest gap at \
      every sample, default false); apply?: bool (leave the design where the sweep stopped; default false: the design is not \
      changed) → stopped_at (the last value clear of contact, or where a loop or limit stopped it; null: it reached `to`), \
-     stopped_by: {a, b, at: [x,y,z] (where they touch, world)} | \"loop\" | \"limit\" | null, samples: [{value, min_gap_mm?, \
-     pair?}], min_gap? (report_gaps: {part: {mm, at_value, to}}, the nearest each part came to another), unit, gap_method \
+     stopped_by: {a, b, at: [x,y,z] (where they touch, world), a_part, b_part: {component, path: [occurrence names], path_ids} \
+     (where each touching body sits)} | \"loop\" | \"limit\" | \"budget\" (stopped_at: the last value checked clear) | null, \
+     samples: [{value, min_gap_mm?, pair?, parts?}], min_gap? (report_gaps: {part: {mm, at_value, to}}, the nearest each part came to another), unit, gap_method \
      (\"mesh\": distances between the tessellations), gap_tolerance_mm (how far those can be off: 0 when every face is flat), \
      pairs (checked), touching_at_start: [[a, b]] (pairs already touching at `from`, such as parts joined face to face or a door \
-     on its frame: these stop it only once they pass into each other deeper than they start), applied. The parts are tested at the samples and through the bisection; the motion is on a copy (closed loops \
+     on its frame: these stop it only once they pass into each other deeper than they start), touching_parts (where their \
+     bodies sit), budget_s, budget_exceeded, budget_ran_out: \"time\" | \"samples\" | \"bisections\" (a contact reported \
+     less refined than `refine`) | \"intersections\" | \"work\" | null, applied. The parts are tested at the samples and through the bisection; the motion is on a copy (closed loops \
      follow, contact sets do not stop it)";
 
 pub const FIND_LIMITS_DOC: &str = "joint: id|name; index? (one value; default every value); refine?, step?, occurrences?, \
-     against?, contact_sets? (as joint.sweep) → values: [{index, dof, unit, value (now), min, max, min_by, max_by, range}], \
+     against?, contact_sets?, exclude_pairs? (as joint.sweep) → values: [{index, dof, unit, value (now), min, max, min_by, max_by, range}], \
      each value swept both ways from where it is, its own limits ignored, closed loops following; each side stops at the \
      first contact (bisected to `refine`), where a loop cannot close, or at another limit (another value's, or another joint's through a motion link): min_by/max_by {a, b, at} | \
-     \"loop\" | \"limit\" | \"turn\" (an angle with no contact within a turn: a turn from the other side, or ±180° from \
+     \"loop\" | \"limit\" | \"budget\" (its work ran out: the last value checked clear) | \"turn\" (an angle with no contact within a turn: a turn from the other side, or ±180° from \
      now when nothing is met at all) | \"range\" (a distance with no contact within the parts' reach: min/max null); \
      touching_at_start, overlapping_at_start: [{a, b, depth_mm}] (already passing into each other: they stop it only going \
      deeper), refine_mm, gap_method, gap_tolerance_mm, pairs (0: no two parts to check, so nothing is swept). The design is \
@@ -78,6 +85,8 @@ struct Sweep {
     report_gaps: bool,
     /// The gap work it may take.
     budget: usize,
+    /// When it stops, done or not (`budget_s`).
+    deadline: Option<web_time::Instant>,
     /// The value's own limit left out (the copy only).
     free: bool,
 }
@@ -87,9 +96,12 @@ struct Swept {
     /// The last value clear of contact (or where a loop or limit stopped it), and what stopped
     /// it; `None`: it reached `to`.
     stop: Option<(f64, Stop)>,
-    samples: Vec<Value>,
+    samples: Vec<SweepSample>,
     nearest: BTreeMap<String, Nearest>,
     touching: Vec<[String; 2]>,
+    touching_parts: Vec<[PartPlace; 2]>,
+    /// The budget that ran out (`time`, `samples`, `bisections`, `intersections`, `work`).
+    ran_out: Option<&'static str>,
     /// Pairs of parts passing into each other at the start deeper than a touch: (a, b, mm).
     overlapping: Vec<(String, String, f64)>,
     pairs: usize,
@@ -158,8 +170,19 @@ pub(super) fn sweep(s: &mut Session, p: &Value) -> Result<Value> {
     let step = positive(p, "step", 1e9, cmd)?.map(|x| if angle { x.to_radians() } else { x });
     let report_gaps = bool_(p, "report_gaps").unwrap_or(false);
     let apply = bool_(p, "apply").unwrap_or(false);
+    let budget_s = match p.get("budget_s") {
+        None | Some(Value::Null) => None,
+        Some(_) => match num(p, "budget_s") {
+            Some(v) if v > 0.0 && v <= MAX_BUDGET_S => Some(v),
+            _ => return Err(bad(cmd, format!("`budget_s` must be a number of seconds above 0, at most {MAX_BUDGET_S}"))),
+        },
+    };
+    // Given a time, the work is not capped: the time is looked at before each sample and each
+    // bisection step, as `motion.interference` does (#7855).
+    let deadline = budget_s.and_then(|v| std::time::Duration::try_from_secs_f64(v).ok()).and_then(|d| web_time::Instant::now().checked_add(d));
+    let budget = if deadline.is_some() { usize::MAX } else { MAX_WORK };
     let geometry = pairs_to_check(s, p, cmd)?;
-    let sweep = Sweep { id, index, from, to, step, refine, report_gaps, budget: MAX_WORK, free: false };
+    let sweep = Sweep { id, index, from, to, step, refine, report_gaps, budget, deadline, free: false };
     let r = run(s, geometry, sweep, cmd)?;
 
     let applied = apply && !Arc::ptr_eq(&r.doc, &s.doc);
@@ -168,24 +191,32 @@ pub(super) fn sweep(s: &mut Session, p: &Value) -> Result<Value> {
         doc.assembly.contact_enabled = s.doc.assembly.contact_enabled;
         *s.doc_mut() = doc;
     }
-    let by = |stop: &Stop| serde_json::to_value(stop).map_err(|e| EngineError::Other(e.to_string()));
-    let mut out = json!({
-        "joint": id, "name": name, "index": index, "unit": if angle { "deg" } else { "mm" },
-        "from": shown(from), "to": shown(to),
-        "stopped_at": r.stop.as_ref().map(|(v, _)| shown(*v)),
-        "stopped_by": r.stop.as_ref().map(|(_, stop)| by(stop)).transpose()?,
-        "samples": r.samples,
-        "refine_mm": refine,
-        "gap_method": "mesh", "gap_tolerance_mm": r.chord,
-        "pairs": r.pairs,
-        "touching_at_start": r.touching,
-        "applied": applied,
-    });
-    if report_gaps {
-        out["min_gap"] =
-            r.nearest.into_iter().map(|(k, g)| (k, json!({"mm": g.mm, "at_value": g.at, "to": g.to}))).collect::<serde_json::Map<_, _>>().into();
-    }
-    Ok(out)
+    let (stopped_at, stopped_by) = r.stop.map(|(v, stop)| (shown(v), stop)).unzip();
+    let min_gap = report_gaps.then(|| r.nearest.into_iter().map(|(part, g)| (part, NearestGap { mm: g.mm, at_value: g.at, to: g.to })).collect());
+    let reply = SweepResult {
+        joint: id,
+        name,
+        index,
+        unit: if angle { "deg" } else { "mm" },
+        from: shown(from),
+        to: shown(to),
+        stopped_at,
+        stopped_by,
+        samples: r.samples,
+        refine_mm: refine,
+        gap_method: "mesh",
+        gap_tolerance_mm: r.chord,
+        pairs: r.pairs,
+        touching_at_start: r.touching,
+        touching_parts: r.touching_parts,
+        budget_s,
+        budget_exceeded: r.ran_out.is_some(),
+        budget_ran_out: r.ran_out,
+        applied,
+        min_gap,
+        param_warnings: Vec::new(),
+    };
+    serde_json::to_value(reply).map_err(|e| EngineError::Other(e.to_string()))
 }
 
 pub(super) fn find_limits(s: &mut Session, p: &Value) -> Result<Value> {
@@ -232,7 +263,7 @@ pub(super) fn find_limits(s: &mut Session, p: &Value) -> Result<Value> {
             if !angle && !paired {
                 return Ok(None);
             }
-            let sweep = Sweep { id, index, from: c, to, step, refine, report_gaps: false, budget: FIND_WORK, free: true };
+            let sweep = Sweep { id, index, from: c, to, step, refine, report_gaps: false, budget: FIND_WORK, deadline: None, free: true };
             Ok::<_, EngineError>(Some(run(s, geometry.clone(), sweep, cmd)?))
         };
         // (value, what stopped it) for each side; `None` value: no limit that side. An angle is
@@ -289,7 +320,7 @@ pub(super) fn find_limits(s: &mut Session, p: &Value) -> Result<Value> {
 /// Drive the value `sw` names from `sw.from` toward `sw.to` on a copy of `s`, checking the pairs
 /// of `geometry` at each sample, and bisect the first contact.
 fn run(s: &Session, mut geometry: ContactGeometry, sw: Sweep, cmd: &str) -> Result<Swept> {
-    let Sweep { id, index, from, to, step, refine, report_gaps, budget, free } = sw;
+    let Sweep { id, index, from, to, step, refine, report_gaps, budget, deadline, free } = sw;
     let (dofs, angle) =
         s.doc.assembly.joints.iter().find(|j| j.id == id).map(|j| (j.kind.dofs().len(), j.kind.is_angle(index))).ok_or_else(|| bad(cmd, "joint"))?;
     let shown = |v: f64| if angle { v.to_degrees() } else { v };
@@ -328,11 +359,24 @@ fn run(s: &Session, mut geometry: ContactGeometry, sw: Sweep, cmd: &str) -> Resu
     // meshes can be off): a door resting on its frame cannot sweep through it. Each pair of their
     // bodies is held to its own depth: pins already in each other don't hide arms of the same
     // parts meeting later, and plates that only come flush (parts end to end) never stop it.
-    let start: Vec<Gap> = geometry.gaps(&t, touch, &mut work, budget)?;
+    // A work cap stops the sweep with what it found (#5963): `ran` names the one that ran out.
+    let mut ran: Option<&'static str> = None;
+    let place = |g: &ContactGeometry, i: usize| part_place(&s.doc, g.body_path(i));
+    let Some(start) = within(geometry.gaps(&t, touch, &mut work, budget), &mut ran)? else {
+        return Ok(unchecked(from, ran, &geometry, t.doc.clone()));
+    };
     let touching: BTreeSet<(u64, u64)> = start.iter().map(|g| key(g.a.0, g.b.0)).collect();
     let touching_names: Vec<[String; 2]> = start.iter().map(|g| [g.a.1.clone(), g.b.1.clone()]).collect();
+    let touching_parts: Vec<[PartPlace; 2]> = start.iter().map(|g| [place(&geometry, g.bodies.0), place(&geometry, g.bodies.1)]).collect();
     let resting = geometry.take_pairs(|x, y| touching.contains(&key(x, y)));
-    let rest_depth: Vec<f64> = if resting.has_pairs() { resting.depths(&t, &mut work, budget)? } else { Vec::new() };
+    let rest_depth: Vec<f64> = if resting.has_pairs() {
+        match within(resting.depths(&t, &mut work, budget), &mut ran)? {
+            Some(d) => d,
+            None => return Ok(unchecked(from, ran, &geometry, t.doc.clone())),
+        }
+    } else {
+        Vec::new()
+    };
     // A pair of bodies' own margin: flat faces against flat faces are exact.
     let margin = |i: usize| touch.max(2.0 * resting.pair_chord(i));
     // Parts already passing into each other, deeper than a touch: the deepest of their bodies.
@@ -349,41 +393,51 @@ fn run(s: &Session, mut geometry: ContactGeometry, sw: Sweep, cmd: &str) -> Resu
     // The samples run to where the joint gets: a limit or a loop can stop it short of `to`, and
     // the default count is for the motion up to there. One more drive toward `to` then finds
     // what stops it.
-    let (n, sample_to) = match step {
+    // Past the sample cap (or, without a `step`, the transform budget) the sweep stops at the
+    // last sample it took (#5963).
+    let (n, sample_to, cap, cut_by) = match step {
         Some(h) => {
             let n = ((to - from).abs() / h).ceil();
-            if !n.is_finite() || n > MAX_SAMPLES as f64 {
+            if !n.is_finite() {
                 return Err(bad(cmd, format!("`step` makes more than {MAX_SAMPLES} samples: take a larger step")));
             }
-            (n as usize, to)
+            (n.min(usize::MAX as f64) as usize, to, MAX_SAMPLES, "samples")
         }
         None => {
             let mut end = t.scratch();
             drive_to(&mut end, to)?;
-            let n = geometry.samples(&t, &end).map_err(|e| match e {
+            let (n, allowed) = geometry.samples_within(&t, &end).map_err(|e| match e {
                 EngineError::BadParams { msg, .. } => bad(cmd, format!("{msg} (or give a `step`)")),
                 e => e,
             })?;
             let got = reached(&end);
-            (n, if (got - to).abs() > 1e-9 && got.is_finite() { got } else { to })
+            (n, if (got - to).abs() > 1e-9 && got.is_finite() { got } else { to }, allowed, if n > MAX_SAMPLES { "samples" } else { "work" })
         }
     };
     let n = n.max(1);
-    let targets: Vec<f64> =
-        (1..=n).map(|k| from + (sample_to - from) * k as f64 / n as f64).chain(((sample_to - to).abs() > 1e-9).then_some(to)).collect();
+    let cut = n > cap;
+    let targets: Vec<f64> = (1..=n.min(cap))
+        .map(|k| from + (sample_to - from) * k as f64 / n as f64)
+        .chain((!cut && (sample_to - to).abs() > 1e-9).then_some(to))
+        .collect();
 
-    let mut samples: Vec<Value> = Vec::new();
+    let mut samples: Vec<SweepSample> = Vec::new();
     let mut nearest: BTreeMap<String, Nearest> = BTreeMap::new();
     let mut record = |t: &Session, v: f64, work: &mut usize, geometry: &ContactGeometry| -> Result<()> {
         if !report_gaps {
-            samples.push(json!({"value": shown(v)}));
+            samples.push(SweepSample { value: shown(v), gap: None });
             return Ok(());
         }
         let gaps = geometry.gaps(t, f64::INFINITY, work, budget)?;
-        match gaps.first() {
-            Some(g) => samples.push(json!({"value": shown(v), "min_gap_mm": g.mm, "pair": [g.a.1, g.b.1]})),
-            None => samples.push(json!({"value": shown(v), "min_gap_mm": null, "pair": null})),
-        }
+        let gap = match gaps.first() {
+            Some(g) => SampleGap {
+                min_gap_mm: Some(g.mm),
+                pair: Some([g.a.1.clone(), g.b.1.clone()]),
+                parts: Some([place(geometry, g.bodies.0), place(geometry, g.bodies.1)]),
+            },
+            None => SampleGap { min_gap_mm: None, pair: None, parts: None },
+        };
+        samples.push(SweepSample { value: shown(v), gap: Some(gap) });
         for g in &gaps {
             for (me, other) in [(&g.a.1, &g.b.1), (&g.b.1, &g.a.1)] {
                 if nearest.get(me).is_none_or(|x| g.mm < x.mm) {
@@ -405,49 +459,84 @@ fn run(s: &Session, mut geometry: ContactGeometry, sw: Sweep, cmd: &str) -> Resu
         let Some((i, (a, b))) = deeper.and_then(|i| resting.members(i).map(|m| (i, m))) else { return Ok(None) };
         // Where: the nearest points of those bodies (passing into each other, at no gap).
         let at = resting.only(i).gaps(t, touch, work, budget)?.into_iter().next().map_or((Vec3::ZERO, Vec3::ZERO), |g| g.at);
-        Ok(Some(Gap { a, b, mm: 0.0, at }))
+        Ok(Some(Gap { a, b, mm: 0.0, at, bodies: resting.pair_bodies(i).unwrap_or_default() }))
     };
 
-    record(&t, from, &mut work, &geometry)?;
     let (mut lo_doc, mut lo_v): (Arc<Document>, f64) = (t.doc.clone(), from);
     let mut stop: Option<(f64, Stop)> = None;
-    for target in targets {
-        let r = drive_to(&mut t, target)?;
-        let v = reached(&t);
-        if let Some(mut hit) = contact(&t, &mut work, &geometry)? {
-            // Halve the bracket from the last clear value until no part moves more than
-            // `refine` across it; each try is driven from the clear side, so loops keep their branch.
-            let (mut hi_doc, mut hi_v) = (t.doc.clone(), v);
-            for _ in 0..MAX_BISECTIONS {
-                if geometry.travel(&lo_doc, &hi_doc)? <= refine {
-                    break;
-                }
-                let mid = (lo_v + hi_v) / 2.0;
+    let budget_stop = |v: f64| Some((v, Stop::Other(Why::Budget)));
+    let out_of_time = || deadline.is_some_and(|d| web_time::Instant::now() >= d);
+    'sweep: {
+        if within(record(&t, from, &mut work, &geometry), &mut ran)?.is_none() {
+            stop = budget_stop(from);
+            break 'sweep;
+        }
+        for target in targets {
+            if out_of_time() {
+                (ran, stop) = (Some("time"), budget_stop(lo_v));
                 t.doc = lo_doc.clone();
-                drive_to(&mut t, mid)?;
-                match contact(&t, &mut work, &geometry)? {
-                    Some(h) => (hi_doc, hi_v, hit) = (t.doc.clone(), mid, h),
-                    None => (lo_doc, lo_v) = (t.doc.clone(), mid),
-                }
+                break 'sweep;
             }
-            t.doc = lo_doc.clone();
-            let at = (hit.at.0 + hit.at.1) * 0.5;
-            stop = Some((lo_v, Stop::Contact { a: hit.a.1, b: hit.b.1, at: [at.x, at.y, at.z] }));
-            break;
+            let r = drive_to(&mut t, target)?;
+            let v = reached(&t);
+            let Some(found) = within(contact(&t, &mut work, &geometry), &mut ran)? else {
+                stop = budget_stop(lo_v);
+                t.doc = lo_doc.clone();
+                break 'sweep;
+            };
+            if let Some(mut hit) = found {
+                // Halve the bracket from the last clear value until no part moves more than
+                // `refine` across it; each try is driven from the clear side, so loops keep their
+                // branch. A budget running out here leaves the contact found, less refined.
+                let (mut hi_doc, mut hi_v) = (t.doc.clone(), v);
+                for _ in 0..MAX_BISECTIONS {
+                    if geometry.travel(&lo_doc, &hi_doc)? <= refine {
+                        break;
+                    }
+                    if out_of_time() {
+                        ran = Some("time");
+                        break;
+                    }
+                    let mid = (lo_v + hi_v) / 2.0;
+                    t.doc = lo_doc.clone();
+                    drive_to(&mut t, mid)?;
+                    match within(contact(&t, &mut work, &geometry), &mut ran)? {
+                        Some(Some(h)) => (hi_doc, hi_v, hit) = (t.doc.clone(), mid, h),
+                        Some(None) => (lo_doc, lo_v) = (t.doc.clone(), mid),
+                        None => break,
+                    }
+                }
+                if ran.is_none() && geometry.travel(&lo_doc, &hi_doc)? > refine {
+                    ran = Some("bisections");
+                }
+                t.doc = lo_doc.clone();
+                let at = (hit.at.0 + hit.at.1) * 0.5;
+                let (a_part, b_part) = (place(&geometry, hit.bodies.0), place(&geometry, hit.bodies.1));
+                stop = Some((
+                    lo_v,
+                    Stop::Contact { a: hit.a.1, b: hit.b.1, at: [at.x, at.y, at.z], a_part: Box::new(a_part), b_part: Box::new(b_part) },
+                ));
+                break 'sweep;
+            }
+            // (The drive on toward `to` past a limit stays where the last sample was.) Clear
+            // here, so a budget running out measuring its gaps stops the sweep here.
+            if (v - lo_v).abs() > 1e-12 && within(record(&t, v, &mut work, &geometry), &mut ran)?.is_none() {
+                stop = budget_stop(v);
+                break 'sweep;
+            }
+            if r["stopped_by_loop"].is_object() {
+                stop = Some((v, Stop::Other(Why::Loop)));
+                break 'sweep;
+            }
+            if (v - target).abs() > 1e-9 {
+                stop = Some((v, Stop::Other(Why::Limit)));
+                break 'sweep;
+            }
+            (lo_doc, lo_v) = (t.doc.clone(), v);
         }
-        // (The drive on toward `to` past a limit stays where the last sample was.)
-        if (v - lo_v).abs() > 1e-12 {
-            record(&t, v, &mut work, &geometry)?;
+        if cut {
+            (ran, stop) = (Some(cut_by), budget_stop(lo_v));
         }
-        if r["stopped_by_loop"].is_object() {
-            stop = Some((v, Stop::Other(Why::Loop)));
-            break;
-        }
-        if (v - target).abs() > 1e-9 {
-            stop = Some((v, Stop::Other(Why::Limit)));
-            break;
-        }
-        (lo_doc, lo_v) = (t.doc.clone(), v);
     }
     let pairs = geometry.pair_count() + resting.pair_count();
     Ok(Swept {
@@ -455,9 +544,41 @@ fn run(s: &Session, mut geometry: ContactGeometry, sw: Sweep, cmd: &str) -> Resu
         samples,
         nearest,
         touching: touching_names,
+        touching_parts,
+        ran_out: ran,
         overlapping: overlapping.into_values().collect(),
         pairs,
         chord: geometry.chord(),
         doc: t.doc,
     })
+}
+
+/// `Ok(Some(x))`, or `Ok(None)` where a work cap ran out: `ran` then names it.
+fn within<T>(r: Result<T>, ran: &mut Option<&'static str>) -> Result<Option<T>> {
+    match r {
+        Ok(x) => Ok(Some(x)),
+        Err(e) => match ran_out(&e) {
+            Some(budget) => {
+                *ran = Some(budget);
+                Ok(None)
+            }
+            None => Err(e),
+        },
+    }
+}
+
+/// A sweep a work cap stopped before it checked anything: at `from`.
+fn unchecked(from: f64, ran: Option<&'static str>, geometry: &ContactGeometry, doc: Arc<Document>) -> Swept {
+    Swept {
+        stop: Some((from, Stop::Other(Why::Budget))),
+        samples: Vec::new(),
+        nearest: BTreeMap::new(),
+        touching: Vec::new(),
+        touching_parts: Vec::new(),
+        ran_out: ran,
+        overlapping: Vec::new(),
+        pairs: geometry.pair_count(),
+        chord: geometry.chord(),
+        doc,
+    }
 }

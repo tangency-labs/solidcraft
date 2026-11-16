@@ -1,0 +1,122 @@
+{
+ "issue": "https://github.com/tangency-labs/solidcraft/issues/3526",
+ "pr": "https://github.com/tangency-labs/solidcraft/pull/3888",
+ "test": "crates/engine/src/boolean_regression_tests.rs: intersect_keeps_every_lump_of_a_target",
+ "summary": "Two r 4 spheres joined into one body while apart (two lumps), intersected with a box holding the bottom half of each, came out empty. Geometry, expected values and the 1e-3 relative tolerance are the PR test's.",
+ "cases": [
+  {
+   "name": "two_spheres_one_box",
+   "steps": [
+    {
+     "op": "sphere",
+     "id": "a",
+     "center": [
+      0,
+      0,
+      0
+     ],
+     "radius": 4
+    },
+    {
+     "op": "sphere",
+     "id": "b",
+     "center": [
+      30,
+      0,
+      0
+     ],
+     "radius": 4
+    },
+    {
+     "op": "union",
+     "id": "balls",
+     "a": "a",
+     "b": "b"
+    },
+    {
+     "op": "box",
+     "id": "box",
+     "origin": [
+      -10,
+      -10,
+      -10
+     ],
+     "size": [
+      50,
+      20,
+      10
+     ]
+    },
+    {
+     "op": "intersection",
+     "id": "result",
+     "a": "balls",
+     "b": "box"
+    }
+   ],
+   "expect": {
+    "lumps": 2,
+    "volume": {
+     "value": 268.082573106329,
+     "tol": 0.268082573106329,
+     "formula": "2 * (2/3)*pi*4^3"
+    }
+   }
+  },
+  {
+   "name": "box_clear_of_both",
+   "note": "control: a box clear of both spheres still leaves nothing (the PR test intersects the half spheres; this intersects the whole spheres, same result)",
+   "steps": [
+    {
+     "op": "sphere",
+     "id": "a",
+     "center": [
+      0,
+      0,
+      0
+     ],
+     "radius": 4
+    },
+    {
+     "op": "sphere",
+     "id": "b",
+     "center": [
+      30,
+      0,
+      0
+     ],
+     "radius": 4
+    },
+    {
+     "op": "union",
+     "id": "balls",
+     "a": "a",
+     "b": "b"
+    },
+    {
+     "op": "box",
+     "id": "box",
+     "origin": [
+      10,
+      20,
+      0
+     ],
+     "size": [
+      10,
+      10,
+      10
+     ]
+    },
+    {
+     "op": "intersection",
+     "id": "result",
+     "a": "balls",
+     "b": "box"
+    }
+   ],
+   "expect": {
+    "lumps": 0
+   }
+  }
+ ]
+}

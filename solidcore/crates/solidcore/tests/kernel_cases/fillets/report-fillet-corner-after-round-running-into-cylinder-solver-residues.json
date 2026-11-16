@@ -1,0 +1,190 @@
+{
+  "area": "fillets",
+  "bodies": {
+    "b17": {
+      "keeping_splines": false,
+      "trusted": true
+    }
+  },
+  "calls": [
+    {
+      "inputs": [
+        "b17"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b18"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b18"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b19"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b19"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b20"
+      ],
+      "params": {
+        "operand": 0
+      }
+    },
+    {
+      "inputs": [
+        "b20"
+      ],
+      "op": "blend_dropping",
+      "outputs": [
+        "b21"
+      ],
+      "params": {
+        "edges": {
+          "kind": "edge",
+          "picked": [
+            {
+              "at": [
+                [
+                  0.4892940775280783,
+                  0.05792545052986142,
+                  0.0
+                ],
+                [
+                  0.48929407754280874,
+                  0.057925450529862976,
+                  7.999999999999998
+                ]
+              ],
+              "index": 16
+            },
+            {
+              "at": [
+                [
+                  0.4892940775280792,
+                  16.057925450606035,
+                  10.0
+                ],
+                [
+                  0.4892940775280792,
+                  2.0579254505298628,
+                  9.999999999999996
+                ]
+              ],
+              "index": 10
+            },
+            {
+              "at": [
+                [
+                  0.4892940775280792,
+                  2.0579254505298628,
+                  9.999999999999996
+                ],
+                [
+                  0.48929407754280874,
+                  0.057925450529862976,
+                  7.999999999999998
+                ]
+              ],
+              "index": 17
+            }
+          ],
+          "points": [
+            [
+              0.4892940775354435,
+              0.0579254505298622,
+              3.999999999999999
+            ],
+            [
+              0.4892940775280792,
+              9.05792545056795,
+              9.999999999999998
+            ],
+            [
+              0.48929407753849335,
+              0.6437118881567676,
+              9.414213562373094
+            ]
+          ],
+          "tolerance": 2.772618062487677
+        },
+        "kind": "round",
+        "sizes": [
+          2.0,
+          2.0,
+          2.0
+        ]
+      }
+    }
+  ],
+  "case": "report-fillet-corner-after-round-running-into-cylinder-solver-residues",
+  "expected": {
+    "body_count": 1,
+    "method": "the same bar with the sketch solver's residues of the reported design (~1e-10 mm: the front side's ends differ by 3.0e-10 in y, the arc's centre 5.7e-11 off the disc's), corner (0.489294, 0.057925), length L = 41.160417754, V0 = L * 16.0000000000762 * 10 + 960 pi; the three r2 rounds at the bar's other top corner (0, 0, 10): the front round's spandrel from x = 2 to the wall (30.5896671706), the vertical edge's and the left top edge's (1 - pi/4) r^2 over 8 and 14, the corner cube of side 2 less the rolling ball's eighth, 8 - 4 pi/3: removed 53.2858385868; the bar being L long, the front round runs (L - 40) further: removed + (L - 40)(1 - pi/4) r^2",
+    "source": "analytic",
+    "volume_mm3": 9547.313838420392,
+    "what": "as report-fillet-corner-after-round-running-into-cylinder, with the sketch solver's residues of the reported design; reported from the app (2026-10-30, test-peg part)"
+  },
+  "expressible": true,
+  "operation_expressible": true,
+  "outcome": {
+    "ran": true,
+    "raw_counts": {
+      "edges": 24,
+      "faces": 11,
+      "vertices": 15
+    }
+  },
+  "records": "report-fillet-corner-after-round-running-into-cylinder-solver-residues.bodies.json.gz",
+  "result": [
+    {
+      "body": "Peg",
+      "made": "b21"
+    }
+  ],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": {
+      "area_mm2": 3198.1003569531736,
+      "body_count": 1,
+      "edges": 24,
+      "faces": 11,
+      "vertices": 15,
+      "volume_mm3": 9547.313845067596
+    },
+    "refused_with": null,
+    "status": "pass"
+  },
+  "sources": null,
+  "traced_ops": [
+    "extrude",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "copy",
+    "copy",
+    "tagged",
+    "blend_dropping",
+    "copy",
+    "copy",
+    "tagged",
+    "blend_dropping"
+  ],
+  "ungraded": [],
+  "what": "as report-fillet-corner-after-round-running-into-cylinder, with the sketch solver's residues of the reported design; reported from the app (2026-10-30, test-peg part)",
+  "why_not": []
+}

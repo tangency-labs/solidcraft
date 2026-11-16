@@ -2,7 +2,185 @@ use crate::context_menu::{self, Target};
 use crate::scenario::Harness;
 use serde_json::json;
 use solidcraft_engine::Sel;
+use solidcraft_engine::geom::MeshGeom;
 
+/// A new component lists its own expandable Origin in the Browser: the design's Origin stays
+/// closed when the component's opens, and all seven items carry their rows and handles (#7313).
+#[test]
+fn new_component_has_its_own_origin_folder() {
+    let mut h = Harness::new();
+    let created = h.app.run("component.create", json!({"name":"Part"})).unwrap();
+    let occurrence = created["occurrence"].as_u64().unwrap();
+    h.frames(3);
+    h.step(&json!({"click":{"handle":format!("fold:occurrence:{occurrence}")}})).unwrap();
+    assert_eq!(super::drawn_rows().iter().filter(|row| row.0 == "Origin").count(), 2, "the design and the component each have an Origin");
+    h.step(&json!({"click":{"handle":format!("fold:o:{occurrence}/origin")}})).unwrap();
+    for item in ["O", "X", "Y", "Z", "XY", "XZ", "YZ"] {
+        assert!(crate::scenario::handle_at(&format!("row:o:{occurrence}/origin/{item}")).is_some(), "missing component origin item {item}");
+        assert!(crate::scenario::handle_at(&format!("indent:o:{occurrence}/origin/{item}")).is_some(), "missing component origin indent {item}");
+        assert!(crate::scenario::rect_of(&format!("row_label:o:{occurrence}/origin/{item}")).is_some(), "missing component origin label {item}");
+    }
+    assert!(!h.app.tree.expanded.contains("origin"), "opening the component origin must not open the design origin");
+}
+
+/// A sketch started on a shown component origin plane follows the component: after an
+/// occurrence.move the sketch's plane sits where the placement moved, with the axes it was
+/// drawn with (#7313).
+#[test]
+fn component_origin_plane_can_start_a_sketch_after_the_component_moves() {
+    use solidcore_record::Vec3;
+    use solidcraft_engine::geom::prelude::*;
+    let mut h = Harness::new();
+    let created = h.app.run("component.create", json!({"name":"Part","grounded":false})).unwrap();
+    let occurrence = created["occurrence"].as_u64().unwrap();
+    h.app.run("occurrence.move", json!({"occurrence":occurrence,"translate":[20,30,40],"axis":[1,0,0],"angle":"90 deg"})).unwrap();
+    h.frames(3);
+    h.step(&json!({"click":{"handle":format!("fold:occurrence:{occurrence}")}})).unwrap();
+    h.step(&json!({"click":{"handle":format!("fold:o:{occurrence}/origin")}})).unwrap();
+    h.step(&json!({"click":{"handle":format!("eye:o:{occurrence}/origin")}})).unwrap();
+    assert!(h.app.origin_shown(), "the component eye must not toggle the design origin");
+    assert_eq!(crate::viewport::construction_points(&h.app).len(), 1);
+    assert_eq!(crate::viewport::construction_axis_segments(&h.app).len(), 3);
+    assert_eq!(crate::viewport::construction_quads(&h.app).len(), 3);
+    h.app.start("sketch.create");
+    h.frames(2);
+    h.step(&json!({"click":{"handle":format!("row:o:{occurrence}/origin/XY")}})).unwrap();
+    let sketch = h.app.session.active_sketch.expect("the component plane starts the sketch");
+    let state = h.app.session.world_state().unwrap();
+    let plane = state.sketch(sketch).unwrap().plane;
+    assert!(plane.origin.dist(Vec3::new(20., 30., 40.)) < 1e-8);
+    assert!(plane.normal().dot(Vec3::Y).abs() > 1. - 1e-8);
+}
+
+/// Opening a sketch must not bring a disabled component's origin back: the pick lists follow the
+/// browser's eyes (the design Origin's #2581 pick-time reveal never extends to component
+/// origins), and the sketch-plane preview refuses a disabled folder's plane while taking a
+/// shown one's. Starting the sketch on the hidden plane leaves the folder's eye alone.
+#[test]
+fn opening_a_sketch_keeps_a_disabled_component_origin_hidden() {
+    let mut h = Harness::new();
+    let first = h.app.run("component.create", json!({"name":"Leaf A","grounded":false})).unwrap()["occurrence"].as_u64().unwrap();
+    // Two sibling leaves: `component.create` places under the active component and activates
+    // what it made, so back to the root first. A Leaf B inside Leaf A would make its origin key
+    // name a placement no root-first walk finds (`Document::placement_frame`).
+    h.app.run("component.activate", json!({"component": 0})).unwrap();
+    let second = h.app.run("component.create", json!({"name":"Leaf B","grounded":false})).unwrap()["occurrence"].as_u64().unwrap();
+    h.app.run("occurrence.move", json!({"occurrence":second,"translate":[40,0,0]})).unwrap();
+    h.frames(2);
+    let shown_plane = solidcraft_engine::origins::key(&[first], "XY");
+    let hidden_plane = solidcraft_engine::origins::key(&[second], "XY");
+    // Leaf A's origin folder shown, Leaf B's left disabled.
+    h.app.run("browser.visibility", json!({"tree_folders":[solidcraft_engine::origins::folder(&[first])],"visible":true})).unwrap();
+    let shown_prefix = format!("o:{first}/origin/");
+    let datum_quads = |app: &crate::SolveApp| -> Vec<String> {
+        crate::viewport::construction_quads(app).into_iter().map(|(n, _, _)| n).filter(|n| n.contains("/origin/")).collect()
+    };
+    let quads = datum_quads(&h.app);
+    assert_eq!(quads.len(), 3, "{quads:?}");
+    assert!(quads.iter().all(|n| n.starts_with(&shown_prefix)), "{quads:?}");
+    // Create Sketch open: the disabled folder's datums stay out of the pick lists.
+    h.app.start("sketch.create");
+    h.frames(1);
+    let quads = datum_quads(&h.app);
+    assert_eq!(quads.len(), 3, "{quads:?}");
+    assert!(quads.iter().all(|n| n.starts_with(&shown_prefix)), "{quads:?}");
+    let hidden_prefix = format!("o:{second}/origin/");
+    assert!(
+        !crate::viewport::construction_axis_segments(&h.app).iter().any(|(n, _, _)| n.starts_with(&hidden_prefix)),
+        "the disabled folder's axes stay out"
+    );
+    assert!(!crate::viewport::construction_points(&h.app).iter().any(|(n, _)| n.starts_with(&hidden_prefix)));
+    // The preview lights the shown plane, and refuses the disabled one (selected, or hovered as
+    // its browser row).
+    h.app.session.selection = vec![Sel::Plane { name: hidden_plane.clone() }];
+    assert!(crate::viewport::previewed_sketch_plane(&h.app).is_none(), "a disabled origin plane does not preview");
+    h.app.session.selection = vec![Sel::Plane { name: shown_plane.clone() }];
+    assert!(crate::viewport::previewed_sketch_plane(&h.app).is_some(), "the shown origin plane previews");
+    h.app.session.selection.clear();
+    // Starting the sketch on the hidden plane (its browser row stays a way in) does not turn the
+    // folder on: visibility is design state, and the sketch flow does not write it.
+    let before = h.app.session.visibility.shown_component_origins.clone();
+    h.app.run("sketch.create", json!({"plane": hidden_plane})).unwrap();
+    assert_eq!(h.app.session.visibility.shown_component_origins, before, "the sketch flow leaves the folder's eye alone");
+}
+
+/// A component's origin datums read like the design Origin's, not like construction geometry:
+/// its planes are quarter squares that start at the placement's origin and span one origin size
+/// along its own axes, its axes are one origin-axis arm long from the placement's origin, and
+/// its point stays pickable while the scene draws it as the design's dot.
+#[test]
+fn component_origin_datums_are_drawn_like_the_design_origin() {
+    use solidcore_record::Vec3;
+    use solidcraft_engine::geom::prelude::*;
+    let mut h = Harness::new();
+    let created = h.app.run("component.create", json!({"name":"Part","grounded":false})).unwrap();
+    let occurrence = created["occurrence"].as_u64().unwrap();
+    h.app.run("occurrence.move", json!({"occurrence":occurrence,"translate":[20,30,40],"axis":[1,0,0],"angle":"90 deg"})).unwrap();
+    h.frames(3);
+    h.step(&json!({"click":{"handle":format!("fold:occurrence:{occurrence}")}})).unwrap();
+    h.step(&json!({"click":{"handle":format!("fold:o:{occurrence}/origin")}})).unwrap();
+    h.step(&json!({"click":{"handle":format!("eye:o:{occurrence}/origin")}})).unwrap();
+    let size = crate::selection::origin_size(h.app.cam.half_height());
+    let at = Vec3::new(20., 30., 40.);
+    for (name, _, q) in crate::viewport::construction_quads(&h.app) {
+        assert!(q[0].dist(at) < 1e-8, "{name} starts at the placement's origin, not a square around it");
+        assert!((q[1].dist(at) - size).abs() < 1e-8, "{name} spans one origin size along its own axis");
+    }
+    for (name, a, b) in crate::viewport::construction_axis_segments(&h.app) {
+        assert!(a.dist(at) < 1e-8, "{name} starts at the placement's origin");
+        assert!((b.dist(a) - size * crate::viewport::AXIS_LEN).abs() < 1e-8, "{name} is one origin-axis arm long");
+    }
+    assert_eq!(crate::viewport::construction_points(&h.app).len(), 1, "the origin point stays pickable");
+}
+
+/// A pick's chip names the placement it came from ("<placement> · <item>"), in the interface's
+/// language, while the design's own origin keeps its bare name; a name that is not a datum key
+/// labels itself, as before.
+#[test]
+fn component_origin_picks_label_the_placement() {
+    let mut h = Harness::new();
+    h.app.run("component.create", json!({"name":"Bracket","grounded":false})).unwrap();
+    let names = h.app.preferences.origin_plane_names;
+    let (occurrence, placement) = {
+        let o = h.app.session.doc.occurrences.iter().find(|o| o.component != 0).expect("the placed component");
+        (o.id, o.name.clone())
+    };
+    let label = |name: &str| crate::dialogs::component_origin_label(&h.app.session, names, name);
+    assert_eq!(label(&solidcraft_engine::origins::key(&[occurrence], "XY")).unwrap(), format!("{placement} · {}", names.label("XY")));
+    assert_eq!(label(&solidcraft_engine::origins::key(&[occurrence], "O")).unwrap(), format!("{placement} · O"));
+    // The design's own origin items are not datums: they keep their own labels.
+    assert_eq!(label("XY"), None);
+    assert_eq!(label("X"), None);
+    // Anything else labels itself (`select_other::label` falls back to the name).
+    assert_eq!(label("no/such/key"), None);
+    assert_eq!(
+        crate::select_other::label(&h.app, &Sel::Axis { name: solidcraft_engine::origins::key(&[occurrence], "Y") }),
+        format!("{placement} · {}", names.label("Y"))
+    );
+}
+
+/// A shown placement's XZ square spans the placement's own +Z, the way the design Origin's XZ
+/// square does at the design origin: the sketch plane `XZ` spans -Z (normal +Y), and the draw
+/// kept that side, so the plane read flipped next to the design's (#7313).
+#[test]
+fn component_origin_xz_square_spans_the_placements_own_z() {
+    use solidcore_record::Vec3;
+    use solidcraft_engine::geom::Vec3Geom;
+    let mut h = Harness::new();
+    let occurrence = h.app.run("component.create", json!({"name": "Part", "grounded": false})).unwrap()["occurrence"].as_u64().unwrap();
+    h.app.run("browser.visibility", json!({"tree_folders": [solidcraft_engine::origins::folder(&[occurrence])], "visible": true})).unwrap();
+    h.frames(2);
+    let key = solidcraft_engine::origins::key(&[occurrence], "XZ");
+    let (_, n, q) = crate::viewport::construction_quads(&h.app).into_iter().find(|(name, _, _)| *name == key).expect("the shown XZ plane draws");
+    // The placement sits at the world origin unrotated, so its own +Z is the world's.
+    assert!(q.iter().all(|c| c.z > -1e-9), "the square must span +Z like the design's, got {q:?}");
+    assert!(q.iter().any(|c| c.z > 1e-6), "the square must reach +Z, got {q:?}");
+    assert!(n.dist(Vec3::new(0.0, -1.0, 0.0)) < 1e-9, "the normal reads the design's, got {n:?}");
+}
+
+/// A body a feature makes carries its evaluated owner's name in the Browser rows and the
+/// component actions: the rename and the move-sketches targets name the component the
+/// body belongs to now, not the one the feature was authored in (#7313).
 #[test]
 fn replaced_body_name_uses_evaluated_owner_in_browser_and_component_actions() {
     let mut h = Harness::new();
@@ -669,11 +847,158 @@ fn sketches_folder_moves_its_sketches_to_the_part_they_are_on() {
     let target = Target::Folder { component: 0, folder: "sketches".into(), scope: "c0".into() };
     let items = context_menu::items(&h.app, &target);
     let item = items.iter().find(|i| i.id == "component.move_sketches.to_parts").expect("on the Sketches folder's menu");
-    assert_eq!(item.params.as_ref().unwrap()["sketches"], json!([on_face.to_string(), on_xy.to_string()]));
+    // Ids, as numbers: a string would be a sketch's name first.
+    assert_eq!(item.params.as_ref().unwrap()["sketches"], json!([on_face, on_xy]));
     context_menu::run_item(&mut h.app, item, egui::Pos2::ZERO);
     assert_eq!(h.app.session.doc.feature(on_face).unwrap().component, component);
     assert_eq!(h.app.session.doc.feature(on_xy).unwrap().component, 0);
     let (status, _, error) = h.app.status.clone().unwrap();
     assert!(!error && status.contains("Moved 1") && status.contains("1 stayed") && status.contains("not on a part's face"), "{status}");
     assert!(context_menu::items(&h.app, &Target::Sketch { id: on_xy }).iter().any(|i| i.id == "component.move_sketches.to_parts"));
+}
+
+/// Dragging a sketch onto a part moves that sketch when another one is named like its id: the
+/// drag sends ids as numbers, and a string would be a sketch's name first (#9748).
+#[test]
+fn dragging_a_sketch_onto_a_part_moves_it_when_another_is_named_like_its_id() {
+    let (mut h, component, _) = crate::test_support::component_box();
+    let dragged = h.app.run("sketch.create", json!({"name":"Dragged","plane":"XY"})).unwrap()["sketch"].as_u64().unwrap();
+    h.app.finish_sketch();
+    let other = h.app.run("sketch.create", json!({"name":"Other","plane":"XY"})).unwrap()["sketch"].as_u64().unwrap();
+    h.app.finish_sketch();
+    h.app.run("timeline.rename", json!({"feature": other, "name": dragged.to_string()})).unwrap();
+    super::apply_drop(&mut h.app, super::DropAction::Component { to: component, folder: "sketches", keys: vec![dragged.to_string()] });
+    assert_eq!(h.app.session.doc.feature(dragged).unwrap().component, component);
+    assert_eq!(h.app.session.doc.feature(other).unwrap().component, 0);
+}
+
+/// The one resolution order at the dialog resolver sites: a construction feature by name first,
+/// then a component origin item key (`plane_by_name`, `axis_of`; the viewport's `named_plane`
+/// reads planes through `plane_by_name`). A feature named like a datum key stays reachable, and
+/// without the feature the same key is the datum at the placement.
+#[test]
+fn resolver_order_is_feature_first_at_every_site() {
+    use solidcore_record::Vec3;
+    use solidcraft_engine::geom::prelude::*;
+    let mut h = Harness::new();
+    h.app.run("component.create", json!({"name":"Part","grounded":false})).unwrap();
+    let occurrence = h.app.session.doc.occurrences.iter().find(|o| o.component != 0).unwrap().id;
+    h.app.run("occurrence.move", json!({"occurrence":occurrence,"translate":[100,0,0]})).unwrap();
+    // The features are created in the active component, and `component.create` made Part active:
+    // back to the root, so the features sit at the root origin while the same keys as datum items
+    // sit at the placement - that separation is what proves the resolver order below.
+    h.app.run("component.activate", json!({"component": 0})).unwrap();
+    // The datum half of the fixture reads the Browser's eyes (`plane_by_name`, `axis_of` offer a
+    // component origin only when its Origin folder is shown), so the folder is shown for it.
+    h.app.run("browser.visibility", json!({"tree_folders":[solidcraft_engine::origins::folder(&[occurrence])],"visible":true})).unwrap();
+    let axis_key = solidcraft_engine::origins::key(&[occurrence], "X");
+    // Through two points, so the fixture pins the order, not the two-planes direction convention.
+    h.app.run("construct.axis.two_points", json!({"a":{"point":[0,0,0]},"b":{"point":[5,0,0]},"name":axis_key})).unwrap();
+    let plane_key = solidcraft_engine::origins::key(&[occurrence], "XY");
+    h.app.run("construct.plane.offset", json!({"base":"XY","offset":"2 mm","name":plane_key})).unwrap();
+    // A feature first: the axis where the feature is now (the root origin), the plane the feature
+    // makes - not the placement's datum of the same key.
+    assert_eq!(crate::dialogs::axis_of(&h.app, &Sel::Axis { name: axis_key }), Some((Vec3::ZERO, Vec3::X)));
+    let pl = crate::dialogs::plane_by_name(&h.app.session, &plane_key).unwrap();
+    assert!(pl.origin.dist(Vec3::new(0., 0., 2.)) < 1e-8, "{pl:?}");
+    // Without the feature, the same key is the component origin's, at the placement.
+    let pl = crate::dialogs::plane_by_name(&h.app.session, &solidcraft_engine::origins::key(&[occurrence], "XZ")).unwrap();
+    assert!(pl.origin.dist(Vec3::new(100., 0., 0.)) < 1e-8, "{pl:?}");
+    assert_eq!(
+        crate::dialogs::axis_of(&h.app, &Sel::Axis { name: solidcraft_engine::origins::key(&[occurrence], "Y") }),
+        Some((Vec3::new(100., 0., 0.), Vec3::Y))
+    );
+}
+
+/// Case-only name collisions (#7313 review, the defaults check): a construction feature named
+/// like a datum key but spelled in another case still answers first — the lookup is the
+/// case-insensitive one `find_feature` does — for the chip, the viewport styling and the
+/// sketch-flow resolvers (`plane_by_name`, `axis_of`), with the placement's Origin folder shown
+/// and with it hidden. A key no feature's name collides with is still the datum while the
+/// folder is shown, and dark once it is hidden, under either spelling.
+#[test]
+fn case_only_name_collisions_keep_the_feature_first() {
+    use solidcore_record::Vec3;
+    use solidcraft_engine::geom::prelude::*;
+    let mut h = Harness::new();
+    h.app.run("component.create", json!({"name":"Part","grounded":false})).unwrap();
+    let occurrence = h.app.session.doc.occurrences.iter().find(|o| o.component != 0).unwrap().id;
+    h.app.run("occurrence.move", json!({"occurrence":occurrence,"translate":[100,0,0]})).unwrap();
+    // The features are created in the active component, and `component.create` made Part active:
+    // back to the root, so the features sit at the root origin while the same keys as datum items
+    // sit at the placement.
+    h.app.run("component.activate", json!({"component": 0})).unwrap();
+    let plane_key = solidcraft_engine::origins::key(&[occurrence], "XZ");
+    let axis_key = solidcraft_engine::origins::key(&[occurrence], "X");
+    let free_key = solidcraft_engine::origins::key(&[occurrence], "YZ");
+    // Two features whose names are the keys' letters in another case; none is named like
+    // `free_key`.
+    h.app.run("construct.plane.offset", json!({"base":"XY","offset":"2 mm","name":plane_key.to_ascii_lowercase()})).unwrap();
+    h.app.run("construct.axis.two_points", json!({"a":{"point":[0,0,0]},"b":{"point":[5,0,0]},"name":axis_key.to_ascii_lowercase()})).unwrap();
+    // Shown: a colliding key stays the feature's under either spelling. The datum branch may
+    // not answer a case-variant spelling of a feature's name; the feature itself is reached by
+    // its own stored spelling, as feature names always were.
+    h.app.run("browser.visibility", json!({"tree_folders":[solidcraft_engine::origins::folder(&[occurrence])],"visible":true})).unwrap();
+    let names = h.app.preferences.origin_plane_names;
+    assert_eq!(crate::viewport::component_origin_item(&h.app, &axis_key), None, "{axis_key}: the case-variant feature keeps construction styling");
+    assert_eq!(crate::dialogs::component_origin_label(&h.app.session, names, &plane_key), None, "{plane_key}: the chip keeps the feature's name");
+    assert!(crate::dialogs::plane_by_name(&h.app.session, &plane_key).is_none(), "{plane_key}: the datum does not shadow the feature");
+    assert_eq!(crate::dialogs::axis_of(&h.app, &Sel::Axis { name: axis_key.clone() }), None, "{axis_key}: the datum does not shadow the feature");
+    let pl = crate::dialogs::plane_by_name(&h.app.session, &plane_key.to_ascii_lowercase()).unwrap();
+    assert!(pl.origin.dist(Vec3::new(0., 0., 2.)) < 1e-8, "{pl:?}");
+    assert_eq!(crate::dialogs::axis_of(&h.app, &Sel::Axis { name: axis_key.to_ascii_lowercase() }), Some((Vec3::ZERO, Vec3::X)));
+    // A key no feature collides with is the datum at the placement, under either spelling.
+    let pl = crate::dialogs::plane_by_name(&h.app.session, &free_key).unwrap();
+    assert!(pl.origin.dist(Vec3::new(100., 0., 0.)) < 1e-8, "{pl:?}");
+    let pl = crate::dialogs::plane_by_name(&h.app.session, &free_key.to_ascii_lowercase()).unwrap();
+    assert!(pl.origin.dist(Vec3::new(100., 0., 0.)) < 1e-8, "{pl:?}");
+    // Hidden: the same colliding keys stay the feature's, and the free key's datum goes dark
+    // under both spellings — hiding the folder never changes what the features answer to.
+    h.app.run("browser.visibility", json!({"tree_folders":[solidcraft_engine::origins::folder(&[occurrence])],"visible":false})).unwrap();
+    assert_eq!(crate::viewport::component_origin_item(&h.app, &axis_key), None, "{axis_key}: the feature keeps its styling with the folder hidden");
+    assert!(crate::dialogs::plane_by_name(&h.app.session, &plane_key).is_none(), "{plane_key}");
+    assert!(crate::dialogs::plane_by_name(&h.app.session, &free_key).is_none(), "{free_key}: the hidden folder's plane is not offered");
+    assert!(
+        crate::dialogs::plane_by_name(&h.app.session, &free_key.to_ascii_lowercase()).is_none(),
+        "{free_key}: neither is a case-variant spelling of it"
+    );
+    let pl = crate::dialogs::plane_by_name(&h.app.session, &plane_key.to_ascii_lowercase()).unwrap();
+    assert!(pl.origin.dist(Vec3::new(0., 0., 2.)) < 1e-8, "{pl:?}");
+    assert_eq!(crate::dialogs::axis_of(&h.app, &Sel::Axis { name: axis_key.to_ascii_lowercase() }), Some((Vec3::ZERO, Vec3::X)));
+}
+
+/// A construction feature keeps its own label and styling when its name shares a datum key's
+/// shape (#7313 review): the chip says the feature's name and the viewport styles it as
+/// construction geometry, so a construction point by such a name stays drawn. Without the
+/// feature, the same key is the datum: the chip names the placement, and the item reads like
+/// the design Origin's.
+#[test]
+fn construction_features_keep_their_labels_and_styling() {
+    use solidcraft_engine::origins;
+    let mut h = Harness::new();
+    h.app.run("component.create", json!({"name":"Part","grounded":false})).unwrap();
+    let occurrence = h.app.session.doc.occurrences.iter().find(|o| o.component != 0).unwrap().id;
+    h.app.run("occurrence.move", json!({"occurrence":occurrence,"translate":[100,0,0]})).unwrap();
+    h.app.run("component.activate", json!({"component": 0})).unwrap();
+    let plane_key = origins::key(&[occurrence], "XY");
+    h.app.run("construct.plane.offset", json!({"base":"XY","offset":"2 mm","name":plane_key.clone()})).unwrap();
+    h.app
+        .run("construct.point.vertex", json!({"point":{"construct_point":origins::key(&[occurrence],"O")},"name":origins::key(&[occurrence],"X")}))
+        .unwrap();
+    // The feature answers to its own name first, as the resolvers do: the chip keeps the
+    // feature's name, and the viewport styles the plane and the point as construction geometry.
+    let names = h.app.preferences.origin_plane_names;
+    assert_eq!(crate::dialogs::component_origin_label(&h.app.session, names, &plane_key), None, "the feature's chip keeps its name");
+    assert_eq!(
+        crate::viewport::component_origin_item(&h.app, &origins::key(&[occurrence], "X")),
+        None,
+        "the feature keeps construction styling and stays drawn"
+    );
+    // Without a feature of the same key, the key is the datum: the chip names the placement,
+    // and the item reads like the design Origin's.
+    let xz = origins::key(&[occurrence], "XZ");
+    assert!(crate::dialogs::component_origin_label(&h.app.session, names, &xz).is_some(), "{xz}");
+    assert_eq!(crate::viewport::component_origin_item(&h.app, &xz), Some("XZ"));
+    // The design's own origin keeps its bare name: not a placement's item, feature or not.
+    assert_eq!(crate::viewport::component_origin_item(&h.app, "XY"), None);
 }

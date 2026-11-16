@@ -1,0 +1,9058 @@
+{
+ "cases": [
+  {
+   "name": "point_Points_t0_tol0.001",
+   "upstream_ref": "TestFiles/pt_TestFiles/Points.pts",
+   "inputs": {
+    "op": "point",
+    "pts": {
+     "$pts": "Points.pts"
+    },
+    "target": 0,
+    "tol": 0.001
+   }
+  },
+  {
+   "name": "point_Points_t0_tol0.1",
+   "upstream_ref": "TestFiles/pt_TestFiles/Points.pts",
+   "inputs": {
+    "op": "point",
+    "pts": {
+     "$pts": "Points.pts"
+    },
+    "target": 0,
+    "tol": 0.1
+   }
+  },
+  {
+   "name": "point_Points_t0_tol0.5",
+   "upstream_ref": "TestFiles/pt_TestFiles/Points.pts",
+   "inputs": {
+    "op": "point",
+    "pts": {
+     "$pts": "Points.pts"
+    },
+    "target": 0,
+    "tol": 0.5
+   }
+  },
+  {
+   "name": "point_Points_t1_tol0.001",
+   "upstream_ref": "TestFiles/pt_TestFiles/Points.pts",
+   "inputs": {
+    "op": "point",
+    "pts": {
+     "$pts": "Points.pts"
+    },
+    "target": 1,
+    "tol": 0.001
+   }
+  },
+  {
+   "name": "point_Points_t1_tol0.1",
+   "upstream_ref": "TestFiles/pt_TestFiles/Points.pts",
+   "inputs": {
+    "op": "point",
+    "pts": {
+     "$pts": "Points.pts"
+    },
+    "target": 1,
+    "tol": 0.1
+   }
+  },
+  {
+   "name": "point_Points_t1_tol0.5",
+   "upstream_ref": "TestFiles/pt_TestFiles/Points.pts",
+   "inputs": {
+    "op": "point",
+    "pts": {
+     "$pts": "Points.pts"
+    },
+    "target": 1,
+    "tol": 0.5
+   }
+  },
+  {
+   "name": "point_Points_t2_tol0.001",
+   "upstream_ref": "TestFiles/pt_TestFiles/Points.pts",
+   "inputs": {
+    "op": "point",
+    "pts": {
+     "$pts": "Points.pts"
+    },
+    "target": 2,
+    "tol": 0.001
+   }
+  },
+  {
+   "name": "point_Points_t2_tol0.1",
+   "upstream_ref": "TestFiles/pt_TestFiles/Points.pts",
+   "inputs": {
+    "op": "point",
+    "pts": {
+     "$pts": "Points.pts"
+    },
+    "target": 2,
+    "tol": 0.1
+   }
+  },
+  {
+   "name": "point_Points_t2_tol0.5",
+   "upstream_ref": "TestFiles/pt_TestFiles/Points.pts",
+   "inputs": {
+    "op": "point",
+    "pts": {
+     "$pts": "Points.pts"
+    },
+    "target": 2,
+    "tol": 0.5
+   }
+  },
+  {
+   "name": "point_Points_t3_tol0.001",
+   "upstream_ref": "TestFiles/pt_TestFiles/Points.pts",
+   "inputs": {
+    "op": "point",
+    "pts": {
+     "$pts": "Points.pts"
+    },
+    "target": 3,
+    "tol": 0.001
+   }
+  },
+  {
+   "name": "point_Points_t3_tol0.1",
+   "upstream_ref": "TestFiles/pt_TestFiles/Points.pts",
+   "inputs": {
+    "op": "point",
+    "pts": {
+     "$pts": "Points.pts"
+    },
+    "target": 3,
+    "tol": 0.1
+   }
+  },
+  {
+   "name": "point_Points_t3_tol0.5",
+   "upstream_ref": "TestFiles/pt_TestFiles/Points.pts",
+   "inputs": {
+    "op": "point",
+    "pts": {
+     "$pts": "Points.pts"
+    },
+    "target": 3,
+    "tol": 0.5
+   }
+  },
+  {
+   "name": "point_Points_t4_tol0.001",
+   "upstream_ref": "TestFiles/pt_TestFiles/Points.pts",
+   "inputs": {
+    "op": "point",
+    "pts": {
+     "$pts": "Points.pts"
+    },
+    "target": 4,
+    "tol": 0.001
+   }
+  },
+  {
+   "name": "point_Points_t4_tol0.1",
+   "upstream_ref": "TestFiles/pt_TestFiles/Points.pts",
+   "inputs": {
+    "op": "point",
+    "pts": {
+     "$pts": "Points.pts"
+    },
+    "target": 4,
+    "tol": 0.1
+   }
+  },
+  {
+   "name": "point_Points_t4_tol0.5",
+   "upstream_ref": "TestFiles/pt_TestFiles/Points.pts",
+   "inputs": {
+    "op": "point",
+    "pts": {
+     "$pts": "Points.pts"
+    },
+    "target": 4,
+    "tol": 0.5
+   }
+  },
+  {
+   "name": "point_Points_t5_tol0.001",
+   "upstream_ref": "TestFiles/pt_TestFiles/Points.pts",
+   "inputs": {
+    "op": "point",
+    "pts": {
+     "$pts": "Points.pts"
+    },
+    "target": 5,
+    "tol": 0.001
+   }
+  },
+  {
+   "name": "point_Points_t5_tol0.1",
+   "upstream_ref": "TestFiles/pt_TestFiles/Points.pts",
+   "inputs": {
+    "op": "point",
+    "pts": {
+     "$pts": "Points.pts"
+    },
+    "target": 5,
+    "tol": 0.1
+   }
+  },
+  {
+   "name": "point_Points_t5_tol0.5",
+   "upstream_ref": "TestFiles/pt_TestFiles/Points.pts",
+   "inputs": {
+    "op": "point",
+    "pts": {
+     "$pts": "Points.pts"
+    },
+    "target": 5,
+    "tol": 0.5
+   }
+  },
+  {
+   "name": "point_Points_t6_tol0.001",
+   "upstream_ref": "TestFiles/pt_TestFiles/Points.pts",
+   "inputs": {
+    "op": "point",
+    "pts": {
+     "$pts": "Points.pts"
+    },
+    "target": 6,
+    "tol": 0.001
+   }
+  },
+  {
+   "name": "point_Points_t6_tol0.1",
+   "upstream_ref": "TestFiles/pt_TestFiles/Points.pts",
+   "inputs": {
+    "op": "point",
+    "pts": {
+     "$pts": "Points.pts"
+    },
+    "target": 6,
+    "tol": 0.1
+   }
+  },
+  {
+   "name": "point_Points_t6_tol0.5",
+   "upstream_ref": "TestFiles/pt_TestFiles/Points.pts",
+   "inputs": {
+    "op": "point",
+    "pts": {
+     "$pts": "Points.pts"
+    },
+    "target": 6,
+    "tol": 0.5
+   }
+  },
+  {
+   "name": "point_Points_t7_tol0.001",
+   "upstream_ref": "TestFiles/pt_TestFiles/Points.pts",
+   "inputs": {
+    "op": "point",
+    "pts": {
+     "$pts": "Points.pts"
+    },
+    "target": 7,
+    "tol": 0.001
+   }
+  },
+  {
+   "name": "point_Points_t7_tol0.1",
+   "upstream_ref": "TestFiles/pt_TestFiles/Points.pts",
+   "inputs": {
+    "op": "point",
+    "pts": {
+     "$pts": "Points.pts"
+    },
+    "target": 7,
+    "tol": 0.1
+   }
+  },
+  {
+   "name": "point_Points_t7_tol0.5",
+   "upstream_ref": "TestFiles/pt_TestFiles/Points.pts",
+   "inputs": {
+    "op": "point",
+    "pts": {
+     "$pts": "Points.pts"
+    },
+    "target": 7,
+    "tol": 0.5
+   }
+  },
+  {
+   "name": "point_Points_t8_tol0.001",
+   "upstream_ref": "TestFiles/pt_TestFiles/Points.pts",
+   "inputs": {
+    "op": "point",
+    "pts": {
+     "$pts": "Points.pts"
+    },
+    "target": 8,
+    "tol": 0.001
+   }
+  },
+  {
+   "name": "point_Points_t8_tol0.1",
+   "upstream_ref": "TestFiles/pt_TestFiles/Points.pts",
+   "inputs": {
+    "op": "point",
+    "pts": {
+     "$pts": "Points.pts"
+    },
+    "target": 8,
+    "tol": 0.1
+   }
+  },
+  {
+   "name": "point_Points_t8_tol0.5",
+   "upstream_ref": "TestFiles/pt_TestFiles/Points.pts",
+   "inputs": {
+    "op": "point",
+    "pts": {
+     "$pts": "Points.pts"
+    },
+    "target": 8,
+    "tol": 0.5
+   }
+  },
+  {
+   "name": "point_Points_t9_tol0.001",
+   "upstream_ref": "TestFiles/pt_TestFiles/Points.pts",
+   "inputs": {
+    "op": "point",
+    "pts": {
+     "$pts": "Points.pts"
+    },
+    "target": 9,
+    "tol": 0.001
+   }
+  },
+  {
+   "name": "point_Points_t9_tol0.1",
+   "upstream_ref": "TestFiles/pt_TestFiles/Points.pts",
+   "inputs": {
+    "op": "point",
+    "pts": {
+     "$pts": "Points.pts"
+    },
+    "target": 9,
+    "tol": 0.1
+   }
+  },
+  {
+   "name": "point_Points_t9_tol0.5",
+   "upstream_ref": "TestFiles/pt_TestFiles/Points.pts",
+   "inputs": {
+    "op": "point",
+    "pts": {
+     "$pts": "Points.pts"
+    },
+    "target": 9,
+    "tol": 0.5
+   }
+  },
+  {
+   "name": "point_Points_t10_tol0.001",
+   "upstream_ref": "TestFiles/pt_TestFiles/Points.pts",
+   "inputs": {
+    "op": "point",
+    "pts": {
+     "$pts": "Points.pts"
+    },
+    "target": 10,
+    "tol": 0.001
+   }
+  },
+  {
+   "name": "point_Points_t10_tol0.1",
+   "upstream_ref": "TestFiles/pt_TestFiles/Points.pts",
+   "inputs": {
+    "op": "point",
+    "pts": {
+     "$pts": "Points.pts"
+    },
+    "target": 10,
+    "tol": 0.1
+   }
+  },
+  {
+   "name": "point_Points_t10_tol0.5",
+   "upstream_ref": "TestFiles/pt_TestFiles/Points.pts",
+   "inputs": {
+    "op": "point",
+    "pts": {
+     "$pts": "Points.pts"
+    },
+    "target": 10,
+    "tol": 0.5
+   }
+  },
+  {
+   "name": "point_Points_t11_tol0.001",
+   "upstream_ref": "TestFiles/pt_TestFiles/Points.pts",
+   "inputs": {
+    "op": "point",
+    "pts": {
+     "$pts": "Points.pts"
+    },
+    "target": 11,
+    "tol": 0.001
+   }
+  },
+  {
+   "name": "point_Points_t11_tol0.1",
+   "upstream_ref": "TestFiles/pt_TestFiles/Points.pts",
+   "inputs": {
+    "op": "point",
+    "pts": {
+     "$pts": "Points.pts"
+    },
+    "target": 11,
+    "tol": 0.1
+   }
+  },
+  {
+   "name": "point_Points_t11_tol0.5",
+   "upstream_ref": "TestFiles/pt_TestFiles/Points.pts",
+   "inputs": {
+    "op": "point",
+    "pts": {
+     "$pts": "Points.pts"
+    },
+    "target": 11,
+    "tol": 0.5
+   }
+  },
+  {
+   "name": "point_Points_t12_tol0.001",
+   "upstream_ref": "TestFiles/pt_TestFiles/Points.pts",
+   "inputs": {
+    "op": "point",
+    "pts": {
+     "$pts": "Points.pts"
+    },
+    "target": 12,
+    "tol": 0.001
+   }
+  },
+  {
+   "name": "point_Points_t12_tol0.1",
+   "upstream_ref": "TestFiles/pt_TestFiles/Points.pts",
+   "inputs": {
+    "op": "point",
+    "pts": {
+     "$pts": "Points.pts"
+    },
+    "target": 12,
+    "tol": 0.1
+   }
+  },
+  {
+   "name": "point_Points_t12_tol0.5",
+   "upstream_ref": "TestFiles/pt_TestFiles/Points.pts",
+   "inputs": {
+    "op": "point",
+    "pts": {
+     "$pts": "Points.pts"
+    },
+    "target": 12,
+    "tol": 0.5
+   }
+  },
+  {
+   "name": "point_Points_t13_tol0.001",
+   "upstream_ref": "TestFiles/pt_TestFiles/Points.pts",
+   "inputs": {
+    "op": "point",
+    "pts": {
+     "$pts": "Points.pts"
+    },
+    "target": 13,
+    "tol": 0.001
+   }
+  },
+  {
+   "name": "point_Points_t13_tol0.1",
+   "upstream_ref": "TestFiles/pt_TestFiles/Points.pts",
+   "inputs": {
+    "op": "point",
+    "pts": {
+     "$pts": "Points.pts"
+    },
+    "target": 13,
+    "tol": 0.1
+   }
+  },
+  {
+   "name": "point_Points_t13_tol0.5",
+   "upstream_ref": "TestFiles/pt_TestFiles/Points.pts",
+   "inputs": {
+    "op": "point",
+    "pts": {
+     "$pts": "Points.pts"
+    },
+    "target": 13,
+    "tol": 0.5
+   }
+  },
+  {
+   "name": "point_Points_t14_tol0.001",
+   "upstream_ref": "TestFiles/pt_TestFiles/Points.pts",
+   "inputs": {
+    "op": "point",
+    "pts": {
+     "$pts": "Points.pts"
+    },
+    "target": 14,
+    "tol": 0.001
+   }
+  },
+  {
+   "name": "point_Points_t14_tol0.1",
+   "upstream_ref": "TestFiles/pt_TestFiles/Points.pts",
+   "inputs": {
+    "op": "point",
+    "pts": {
+     "$pts": "Points.pts"
+    },
+    "target": 14,
+    "tol": 0.1
+   }
+  },
+  {
+   "name": "point_Points_t14_tol0.5",
+   "upstream_ref": "TestFiles/pt_TestFiles/Points.pts",
+   "inputs": {
+    "op": "point",
+    "pts": {
+     "$pts": "Points.pts"
+    },
+    "target": 14,
+    "tol": 0.5
+   }
+  },
+  {
+   "name": "point_Points_t15_tol0.001",
+   "upstream_ref": "TestFiles/pt_TestFiles/Points.pts",
+   "inputs": {
+    "op": "point",
+    "pts": {
+     "$pts": "Points.pts"
+    },
+    "target": 15,
+    "tol": 0.001
+   }
+  },
+  {
+   "name": "point_Points_t15_tol0.1",
+   "upstream_ref": "TestFiles/pt_TestFiles/Points.pts",
+   "inputs": {
+    "op": "point",
+    "pts": {
+     "$pts": "Points.pts"
+    },
+    "target": 15,
+    "tol": 0.1
+   }
+  },
+  {
+   "name": "point_Points_t15_tol0.5",
+   "upstream_ref": "TestFiles/pt_TestFiles/Points.pts",
+   "inputs": {
+    "op": "point",
+    "pts": {
+     "$pts": "Points.pts"
+    },
+    "target": 15,
+    "tol": 0.5
+   }
+  },
+  {
+   "name": "point_Points_t16_tol0.001",
+   "upstream_ref": "TestFiles/pt_TestFiles/Points.pts",
+   "inputs": {
+    "op": "point",
+    "pts": {
+     "$pts": "Points.pts"
+    },
+    "target": 16,
+    "tol": 0.001
+   }
+  },
+  {
+   "name": "point_Points_t16_tol0.1",
+   "upstream_ref": "TestFiles/pt_TestFiles/Points.pts",
+   "inputs": {
+    "op": "point",
+    "pts": {
+     "$pts": "Points.pts"
+    },
+    "target": 16,
+    "tol": 0.1
+   }
+  },
+  {
+   "name": "point_Points_t16_tol0.5",
+   "upstream_ref": "TestFiles/pt_TestFiles/Points.pts",
+   "inputs": {
+    "op": "point",
+    "pts": {
+     "$pts": "Points.pts"
+    },
+    "target": 16,
+    "tol": 0.5
+   }
+  },
+  {
+   "name": "point_Points_t17_tol0.001",
+   "upstream_ref": "TestFiles/pt_TestFiles/Points.pts",
+   "inputs": {
+    "op": "point",
+    "pts": {
+     "$pts": "Points.pts"
+    },
+    "target": 17,
+    "tol": 0.001
+   }
+  },
+  {
+   "name": "point_Points_t17_tol0.1",
+   "upstream_ref": "TestFiles/pt_TestFiles/Points.pts",
+   "inputs": {
+    "op": "point",
+    "pts": {
+     "$pts": "Points.pts"
+    },
+    "target": 17,
+    "tol": 0.1
+   }
+  },
+  {
+   "name": "point_Points_t17_tol0.5",
+   "upstream_ref": "TestFiles/pt_TestFiles/Points.pts",
+   "inputs": {
+    "op": "point",
+    "pts": {
+     "$pts": "Points.pts"
+    },
+    "target": 17,
+    "tol": 0.5
+   }
+  },
+  {
+   "name": "point_Points_t18_tol0.001",
+   "upstream_ref": "TestFiles/pt_TestFiles/Points.pts",
+   "inputs": {
+    "op": "point",
+    "pts": {
+     "$pts": "Points.pts"
+    },
+    "target": 18,
+    "tol": 0.001
+   }
+  },
+  {
+   "name": "point_Points_t18_tol0.1",
+   "upstream_ref": "TestFiles/pt_TestFiles/Points.pts",
+   "inputs": {
+    "op": "point",
+    "pts": {
+     "$pts": "Points.pts"
+    },
+    "target": 18,
+    "tol": 0.1
+   }
+  },
+  {
+   "name": "point_Points_t18_tol0.5",
+   "upstream_ref": "TestFiles/pt_TestFiles/Points.pts",
+   "inputs": {
+    "op": "point",
+    "pts": {
+     "$pts": "Points.pts"
+    },
+    "target": 18,
+    "tol": 0.5
+   }
+  },
+  {
+   "name": "point_Points_t19_tol0.001",
+   "upstream_ref": "TestFiles/pt_TestFiles/Points.pts",
+   "inputs": {
+    "op": "point",
+    "pts": {
+     "$pts": "Points.pts"
+    },
+    "target": 19,
+    "tol": 0.001
+   }
+  },
+  {
+   "name": "point_Points_t19_tol0.1",
+   "upstream_ref": "TestFiles/pt_TestFiles/Points.pts",
+   "inputs": {
+    "op": "point",
+    "pts": {
+     "$pts": "Points.pts"
+    },
+    "target": 19,
+    "tol": 0.1
+   }
+  },
+  {
+   "name": "point_Points_t19_tol0.5",
+   "upstream_ref": "TestFiles/pt_TestFiles/Points.pts",
+   "inputs": {
+    "op": "point",
+    "pts": {
+     "$pts": "Points.pts"
+    },
+    "target": 19,
+    "tol": 0.5
+   }
+  },
+  {
+   "name": "point_Points_t20_tol0.001",
+   "upstream_ref": "TestFiles/pt_TestFiles/Points.pts",
+   "inputs": {
+    "op": "point",
+    "pts": {
+     "$pts": "Points.pts"
+    },
+    "target": 20,
+    "tol": 0.001
+   }
+  },
+  {
+   "name": "point_Points_t20_tol0.1",
+   "upstream_ref": "TestFiles/pt_TestFiles/Points.pts",
+   "inputs": {
+    "op": "point",
+    "pts": {
+     "$pts": "Points.pts"
+    },
+    "target": 20,
+    "tol": 0.1
+   }
+  },
+  {
+   "name": "point_Points_t20_tol0.5",
+   "upstream_ref": "TestFiles/pt_TestFiles/Points.pts",
+   "inputs": {
+    "op": "point",
+    "pts": {
+     "$pts": "Points.pts"
+    },
+    "target": 20,
+    "tol": 0.5
+   }
+  },
+  {
+   "name": "point_Points_t21_tol0.001",
+   "upstream_ref": "TestFiles/pt_TestFiles/Points.pts",
+   "inputs": {
+    "op": "point",
+    "pts": {
+     "$pts": "Points.pts"
+    },
+    "target": 21,
+    "tol": 0.001
+   }
+  },
+  {
+   "name": "point_Points_t21_tol0.1",
+   "upstream_ref": "TestFiles/pt_TestFiles/Points.pts",
+   "inputs": {
+    "op": "point",
+    "pts": {
+     "$pts": "Points.pts"
+    },
+    "target": 21,
+    "tol": 0.1
+   }
+  },
+  {
+   "name": "point_Points_t21_tol0.5",
+   "upstream_ref": "TestFiles/pt_TestFiles/Points.pts",
+   "inputs": {
+    "op": "point",
+    "pts": {
+     "$pts": "Points.pts"
+    },
+    "target": 21,
+    "tol": 0.5
+   }
+  },
+  {
+   "name": "point_Points_t22_tol0.001",
+   "upstream_ref": "TestFiles/pt_TestFiles/Points.pts",
+   "inputs": {
+    "op": "point",
+    "pts": {
+     "$pts": "Points.pts"
+    },
+    "target": 22,
+    "tol": 0.001
+   }
+  },
+  {
+   "name": "point_Points_t22_tol0.1",
+   "upstream_ref": "TestFiles/pt_TestFiles/Points.pts",
+   "inputs": {
+    "op": "point",
+    "pts": {
+     "$pts": "Points.pts"
+    },
+    "target": 22,
+    "tol": 0.1
+   }
+  },
+  {
+   "name": "point_Points_t22_tol0.5",
+   "upstream_ref": "TestFiles/pt_TestFiles/Points.pts",
+   "inputs": {
+    "op": "point",
+    "pts": {
+     "$pts": "Points.pts"
+    },
+    "target": 22,
+    "tol": 0.5
+   }
+  },
+  {
+   "name": "point_Points_t23_tol0.001",
+   "upstream_ref": "TestFiles/pt_TestFiles/Points.pts",
+   "inputs": {
+    "op": "point",
+    "pts": {
+     "$pts": "Points.pts"
+    },
+    "target": 23,
+    "tol": 0.001
+   }
+  },
+  {
+   "name": "point_Points_t23_tol0.1",
+   "upstream_ref": "TestFiles/pt_TestFiles/Points.pts",
+   "inputs": {
+    "op": "point",
+    "pts": {
+     "$pts": "Points.pts"
+    },
+    "target": 23,
+    "tol": 0.1
+   }
+  },
+  {
+   "name": "point_Points_t23_tol0.5",
+   "upstream_ref": "TestFiles/pt_TestFiles/Points.pts",
+   "inputs": {
+    "op": "point",
+    "pts": {
+     "$pts": "Points.pts"
+    },
+    "target": 23,
+    "tol": 0.5
+   }
+  },
+  {
+   "name": "point_Points_t24_tol0.001",
+   "upstream_ref": "TestFiles/pt_TestFiles/Points.pts",
+   "inputs": {
+    "op": "point",
+    "pts": {
+     "$pts": "Points.pts"
+    },
+    "target": 24,
+    "tol": 0.001
+   }
+  },
+  {
+   "name": "point_Points_t24_tol0.1",
+   "upstream_ref": "TestFiles/pt_TestFiles/Points.pts",
+   "inputs": {
+    "op": "point",
+    "pts": {
+     "$pts": "Points.pts"
+    },
+    "target": 24,
+    "tol": 0.1
+   }
+  },
+  {
+   "name": "point_Points_t24_tol0.5",
+   "upstream_ref": "TestFiles/pt_TestFiles/Points.pts",
+   "inputs": {
+    "op": "point",
+    "pts": {
+     "$pts": "Points.pts"
+    },
+    "target": 24,
+    "tol": 0.5
+   }
+  },
+  {
+   "name": "point_Points_t25_tol0.001",
+   "upstream_ref": "TestFiles/pt_TestFiles/Points.pts",
+   "inputs": {
+    "op": "point",
+    "pts": {
+     "$pts": "Points.pts"
+    },
+    "target": 25,
+    "tol": 0.001
+   }
+  },
+  {
+   "name": "point_Points_t25_tol0.1",
+   "upstream_ref": "TestFiles/pt_TestFiles/Points.pts",
+   "inputs": {
+    "op": "point",
+    "pts": {
+     "$pts": "Points.pts"
+    },
+    "target": 25,
+    "tol": 0.1
+   }
+  },
+  {
+   "name": "point_Points_t25_tol0.5",
+   "upstream_ref": "TestFiles/pt_TestFiles/Points.pts",
+   "inputs": {
+    "op": "point",
+    "pts": {
+     "$pts": "Points.pts"
+    },
+    "target": 25,
+    "tol": 0.5
+   }
+  },
+  {
+   "name": "point_Points_t26_tol0.001",
+   "upstream_ref": "TestFiles/pt_TestFiles/Points.pts",
+   "inputs": {
+    "op": "point",
+    "pts": {
+     "$pts": "Points.pts"
+    },
+    "target": 26,
+    "tol": 0.001
+   }
+  },
+  {
+   "name": "point_Points_t26_tol0.1",
+   "upstream_ref": "TestFiles/pt_TestFiles/Points.pts",
+   "inputs": {
+    "op": "point",
+    "pts": {
+     "$pts": "Points.pts"
+    },
+    "target": 26,
+    "tol": 0.1
+   }
+  },
+  {
+   "name": "point_Points_t26_tol0.5",
+   "upstream_ref": "TestFiles/pt_TestFiles/Points.pts",
+   "inputs": {
+    "op": "point",
+    "pts": {
+     "$pts": "Points.pts"
+    },
+    "target": 26,
+    "tol": 0.5
+   }
+  },
+  {
+   "name": "point_Points_t27_tol0.001",
+   "upstream_ref": "TestFiles/pt_TestFiles/Points.pts",
+   "inputs": {
+    "op": "point",
+    "pts": {
+     "$pts": "Points.pts"
+    },
+    "target": 27,
+    "tol": 0.001
+   }
+  },
+  {
+   "name": "point_Points_t27_tol0.1",
+   "upstream_ref": "TestFiles/pt_TestFiles/Points.pts",
+   "inputs": {
+    "op": "point",
+    "pts": {
+     "$pts": "Points.pts"
+    },
+    "target": 27,
+    "tol": 0.1
+   }
+  },
+  {
+   "name": "point_Points_t27_tol0.5",
+   "upstream_ref": "TestFiles/pt_TestFiles/Points.pts",
+   "inputs": {
+    "op": "point",
+    "pts": {
+     "$pts": "Points.pts"
+    },
+    "target": 27,
+    "tol": 0.5
+   }
+  },
+  {
+   "name": "point_Points_t28_tol0.001",
+   "upstream_ref": "TestFiles/pt_TestFiles/Points.pts",
+   "inputs": {
+    "op": "point",
+    "pts": {
+     "$pts": "Points.pts"
+    },
+    "target": 28,
+    "tol": 0.001
+   }
+  },
+  {
+   "name": "point_Points_t28_tol0.1",
+   "upstream_ref": "TestFiles/pt_TestFiles/Points.pts",
+   "inputs": {
+    "op": "point",
+    "pts": {
+     "$pts": "Points.pts"
+    },
+    "target": 28,
+    "tol": 0.1
+   }
+  },
+  {
+   "name": "point_Points_t28_tol0.5",
+   "upstream_ref": "TestFiles/pt_TestFiles/Points.pts",
+   "inputs": {
+    "op": "point",
+    "pts": {
+     "$pts": "Points.pts"
+    },
+    "target": 28,
+    "tol": 0.5
+   }
+  },
+  {
+   "name": "point_Points_t29_tol0.001",
+   "upstream_ref": "TestFiles/pt_TestFiles/Points.pts",
+   "inputs": {
+    "op": "point",
+    "pts": {
+     "$pts": "Points.pts"
+    },
+    "target": 29,
+    "tol": 0.001
+   }
+  },
+  {
+   "name": "point_Points_t29_tol0.1",
+   "upstream_ref": "TestFiles/pt_TestFiles/Points.pts",
+   "inputs": {
+    "op": "point",
+    "pts": {
+     "$pts": "Points.pts"
+    },
+    "target": 29,
+    "tol": 0.1
+   }
+  },
+  {
+   "name": "point_Points_t29_tol0.5",
+   "upstream_ref": "TestFiles/pt_TestFiles/Points.pts",
+   "inputs": {
+    "op": "point",
+    "pts": {
+     "$pts": "Points.pts"
+    },
+    "target": 29,
+    "tol": 0.5
+   }
+  },
+  {
+   "name": "point_FitCrvPoints_t0_tol0.001",
+   "upstream_ref": "TestFiles/pt_TestFiles/FitCrvPoints.pts",
+   "inputs": {
+    "op": "point",
+    "pts": {
+     "$pts": "FitCrvPoints.pts"
+    },
+    "target": 0,
+    "tol": 0.001
+   }
+  },
+  {
+   "name": "point_FitCrvPoints_t0_tol0.1",
+   "upstream_ref": "TestFiles/pt_TestFiles/FitCrvPoints.pts",
+   "inputs": {
+    "op": "point",
+    "pts": {
+     "$pts": "FitCrvPoints.pts"
+    },
+    "target": 0,
+    "tol": 0.1
+   }
+  },
+  {
+   "name": "point_FitCrvPoints_t0_tol0.5",
+   "upstream_ref": "TestFiles/pt_TestFiles/FitCrvPoints.pts",
+   "inputs": {
+    "op": "point",
+    "pts": {
+     "$pts": "FitCrvPoints.pts"
+    },
+    "target": 0,
+    "tol": 0.5
+   }
+  },
+  {
+   "name": "point_FitCrvPoints_t1_tol0.001",
+   "upstream_ref": "TestFiles/pt_TestFiles/FitCrvPoints.pts",
+   "inputs": {
+    "op": "point",
+    "pts": {
+     "$pts": "FitCrvPoints.pts"
+    },
+    "target": 1,
+    "tol": 0.001
+   }
+  },
+  {
+   "name": "point_FitCrvPoints_t1_tol0.1",
+   "upstream_ref": "TestFiles/pt_TestFiles/FitCrvPoints.pts",
+   "inputs": {
+    "op": "point",
+    "pts": {
+     "$pts": "FitCrvPoints.pts"
+    },
+    "target": 1,
+    "tol": 0.1
+   }
+  },
+  {
+   "name": "point_FitCrvPoints_t1_tol0.5",
+   "upstream_ref": "TestFiles/pt_TestFiles/FitCrvPoints.pts",
+   "inputs": {
+    "op": "point",
+    "pts": {
+     "$pts": "FitCrvPoints.pts"
+    },
+    "target": 1,
+    "tol": 0.5
+   }
+  },
+  {
+   "name": "point_FitCrvPoints_t2_tol0.001",
+   "upstream_ref": "TestFiles/pt_TestFiles/FitCrvPoints.pts",
+   "inputs": {
+    "op": "point",
+    "pts": {
+     "$pts": "FitCrvPoints.pts"
+    },
+    "target": 2,
+    "tol": 0.001
+   }
+  },
+  {
+   "name": "point_FitCrvPoints_t2_tol0.1",
+   "upstream_ref": "TestFiles/pt_TestFiles/FitCrvPoints.pts",
+   "inputs": {
+    "op": "point",
+    "pts": {
+     "$pts": "FitCrvPoints.pts"
+    },
+    "target": 2,
+    "tol": 0.1
+   }
+  },
+  {
+   "name": "point_FitCrvPoints_t2_tol0.5",
+   "upstream_ref": "TestFiles/pt_TestFiles/FitCrvPoints.pts",
+   "inputs": {
+    "op": "point",
+    "pts": {
+     "$pts": "FitCrvPoints.pts"
+    },
+    "target": 2,
+    "tol": 0.5
+   }
+  },
+  {
+   "name": "point_FitCrvPoints_t3_tol0.001",
+   "upstream_ref": "TestFiles/pt_TestFiles/FitCrvPoints.pts",
+   "inputs": {
+    "op": "point",
+    "pts": {
+     "$pts": "FitCrvPoints.pts"
+    },
+    "target": 3,
+    "tol": 0.001
+   }
+  },
+  {
+   "name": "point_FitCrvPoints_t3_tol0.1",
+   "upstream_ref": "TestFiles/pt_TestFiles/FitCrvPoints.pts",
+   "inputs": {
+    "op": "point",
+    "pts": {
+     "$pts": "FitCrvPoints.pts"
+    },
+    "target": 3,
+    "tol": 0.1
+   }
+  },
+  {
+   "name": "point_FitCrvPoints_t3_tol0.5",
+   "upstream_ref": "TestFiles/pt_TestFiles/FitCrvPoints.pts",
+   "inputs": {
+    "op": "point",
+    "pts": {
+     "$pts": "FitCrvPoints.pts"
+    },
+    "target": 3,
+    "tol": 0.5
+   }
+  },
+  {
+   "name": "point_FitCrvPoints_t4_tol0.001",
+   "upstream_ref": "TestFiles/pt_TestFiles/FitCrvPoints.pts",
+   "inputs": {
+    "op": "point",
+    "pts": {
+     "$pts": "FitCrvPoints.pts"
+    },
+    "target": 4,
+    "tol": 0.001
+   }
+  },
+  {
+   "name": "point_FitCrvPoints_t4_tol0.1",
+   "upstream_ref": "TestFiles/pt_TestFiles/FitCrvPoints.pts",
+   "inputs": {
+    "op": "point",
+    "pts": {
+     "$pts": "FitCrvPoints.pts"
+    },
+    "target": 4,
+    "tol": 0.1
+   }
+  },
+  {
+   "name": "point_FitCrvPoints_t4_tol0.5",
+   "upstream_ref": "TestFiles/pt_TestFiles/FitCrvPoints.pts",
+   "inputs": {
+    "op": "point",
+    "pts": {
+     "$pts": "FitCrvPoints.pts"
+    },
+    "target": 4,
+    "tol": 0.5
+   }
+  },
+  {
+   "name": "point_FitCrvPoints_t5_tol0.001",
+   "upstream_ref": "TestFiles/pt_TestFiles/FitCrvPoints.pts",
+   "inputs": {
+    "op": "point",
+    "pts": {
+     "$pts": "FitCrvPoints.pts"
+    },
+    "target": 5,
+    "tol": 0.001
+   }
+  },
+  {
+   "name": "point_FitCrvPoints_t5_tol0.1",
+   "upstream_ref": "TestFiles/pt_TestFiles/FitCrvPoints.pts",
+   "inputs": {
+    "op": "point",
+    "pts": {
+     "$pts": "FitCrvPoints.pts"
+    },
+    "target": 5,
+    "tol": 0.1
+   }
+  },
+  {
+   "name": "point_FitCrvPoints_t5_tol0.5",
+   "upstream_ref": "TestFiles/pt_TestFiles/FitCrvPoints.pts",
+   "inputs": {
+    "op": "point",
+    "pts": {
+     "$pts": "FitCrvPoints.pts"
+    },
+    "target": 5,
+    "tol": 0.5
+   }
+  },
+  {
+   "name": "point_FitCrvPoints_t6_tol0.001",
+   "upstream_ref": "TestFiles/pt_TestFiles/FitCrvPoints.pts",
+   "inputs": {
+    "op": "point",
+    "pts": {
+     "$pts": "FitCrvPoints.pts"
+    },
+    "target": 6,
+    "tol": 0.001
+   }
+  },
+  {
+   "name": "point_FitCrvPoints_t6_tol0.1",
+   "upstream_ref": "TestFiles/pt_TestFiles/FitCrvPoints.pts",
+   "inputs": {
+    "op": "point",
+    "pts": {
+     "$pts": "FitCrvPoints.pts"
+    },
+    "target": 6,
+    "tol": 0.1
+   }
+  },
+  {
+   "name": "point_FitCrvPoints_t6_tol0.5",
+   "upstream_ref": "TestFiles/pt_TestFiles/FitCrvPoints.pts",
+   "inputs": {
+    "op": "point",
+    "pts": {
+     "$pts": "FitCrvPoints.pts"
+    },
+    "target": 6,
+    "tol": 0.5
+   }
+  },
+  {
+   "name": "point_FitCrvPoints_t7_tol0.001",
+   "upstream_ref": "TestFiles/pt_TestFiles/FitCrvPoints.pts",
+   "inputs": {
+    "op": "point",
+    "pts": {
+     "$pts": "FitCrvPoints.pts"
+    },
+    "target": 7,
+    "tol": 0.001
+   }
+  },
+  {
+   "name": "point_FitCrvPoints_t7_tol0.1",
+   "upstream_ref": "TestFiles/pt_TestFiles/FitCrvPoints.pts",
+   "inputs": {
+    "op": "point",
+    "pts": {
+     "$pts": "FitCrvPoints.pts"
+    },
+    "target": 7,
+    "tol": 0.1
+   }
+  },
+  {
+   "name": "point_FitCrvPoints_t7_tol0.5",
+   "upstream_ref": "TestFiles/pt_TestFiles/FitCrvPoints.pts",
+   "inputs": {
+    "op": "point",
+    "pts": {
+     "$pts": "FitCrvPoints.pts"
+    },
+    "target": 7,
+    "tol": 0.5
+   }
+  },
+  {
+   "name": "point_FitCrvPoints_t8_tol0.001",
+   "upstream_ref": "TestFiles/pt_TestFiles/FitCrvPoints.pts",
+   "inputs": {
+    "op": "point",
+    "pts": {
+     "$pts": "FitCrvPoints.pts"
+    },
+    "target": 8,
+    "tol": 0.001
+   }
+  },
+  {
+   "name": "point_FitCrvPoints_t8_tol0.1",
+   "upstream_ref": "TestFiles/pt_TestFiles/FitCrvPoints.pts",
+   "inputs": {
+    "op": "point",
+    "pts": {
+     "$pts": "FitCrvPoints.pts"
+    },
+    "target": 8,
+    "tol": 0.1
+   }
+  },
+  {
+   "name": "point_FitCrvPoints_t8_tol0.5",
+   "upstream_ref": "TestFiles/pt_TestFiles/FitCrvPoints.pts",
+   "inputs": {
+    "op": "point",
+    "pts": {
+     "$pts": "FitCrvPoints.pts"
+    },
+    "target": 8,
+    "tol": 0.5
+   }
+  },
+  {
+   "name": "point_FitCrvPoints_t9_tol0.001",
+   "upstream_ref": "TestFiles/pt_TestFiles/FitCrvPoints.pts",
+   "inputs": {
+    "op": "point",
+    "pts": {
+     "$pts": "FitCrvPoints.pts"
+    },
+    "target": 9,
+    "tol": 0.001
+   }
+  },
+  {
+   "name": "point_FitCrvPoints_t9_tol0.1",
+   "upstream_ref": "TestFiles/pt_TestFiles/FitCrvPoints.pts",
+   "inputs": {
+    "op": "point",
+    "pts": {
+     "$pts": "FitCrvPoints.pts"
+    },
+    "target": 9,
+    "tol": 0.1
+   }
+  },
+  {
+   "name": "point_FitCrvPoints_t9_tol0.5",
+   "upstream_ref": "TestFiles/pt_TestFiles/FitCrvPoints.pts",
+   "inputs": {
+    "op": "point",
+    "pts": {
+     "$pts": "FitCrvPoints.pts"
+    },
+    "target": 9,
+    "tol": 0.5
+   }
+  },
+  {
+   "name": "point_FitCrvPoints_t10_tol0.001",
+   "upstream_ref": "TestFiles/pt_TestFiles/FitCrvPoints.pts",
+   "inputs": {
+    "op": "point",
+    "pts": {
+     "$pts": "FitCrvPoints.pts"
+    },
+    "target": 10,
+    "tol": 0.001
+   }
+  },
+  {
+   "name": "point_FitCrvPoints_t10_tol0.1",
+   "upstream_ref": "TestFiles/pt_TestFiles/FitCrvPoints.pts",
+   "inputs": {
+    "op": "point",
+    "pts": {
+     "$pts": "FitCrvPoints.pts"
+    },
+    "target": 10,
+    "tol": 0.1
+   }
+  },
+  {
+   "name": "point_FitCrvPoints_t10_tol0.5",
+   "upstream_ref": "TestFiles/pt_TestFiles/FitCrvPoints.pts",
+   "inputs": {
+    "op": "point",
+    "pts": {
+     "$pts": "FitCrvPoints.pts"
+    },
+    "target": 10,
+    "tol": 0.5
+   }
+  },
+  {
+   "name": "point_FitCrvPoints_t11_tol0.001",
+   "upstream_ref": "TestFiles/pt_TestFiles/FitCrvPoints.pts",
+   "inputs": {
+    "op": "point",
+    "pts": {
+     "$pts": "FitCrvPoints.pts"
+    },
+    "target": 11,
+    "tol": 0.001
+   }
+  },
+  {
+   "name": "point_FitCrvPoints_t11_tol0.1",
+   "upstream_ref": "TestFiles/pt_TestFiles/FitCrvPoints.pts",
+   "inputs": {
+    "op": "point",
+    "pts": {
+     "$pts": "FitCrvPoints.pts"
+    },
+    "target": 11,
+    "tol": 0.1
+   }
+  },
+  {
+   "name": "point_FitCrvPoints_t11_tol0.5",
+   "upstream_ref": "TestFiles/pt_TestFiles/FitCrvPoints.pts",
+   "inputs": {
+    "op": "point",
+    "pts": {
+     "$pts": "FitCrvPoints.pts"
+    },
+    "target": 11,
+    "tol": 0.5
+   }
+  },
+  {
+   "name": "point_section00_t0",
+   "upstream_ref": "TestFiles/pt_TestFiles/PointSet/Section00.pts",
+   "inputs": {
+    "op": "point",
+    "pts": {
+     "$pts": "PointSet/Section00.pts"
+    },
+    "target": 0,
+    "tol": 1.0
+   }
+  },
+  {
+   "name": "point_section00_t34",
+   "upstream_ref": "TestFiles/pt_TestFiles/PointSet/Section00.pts",
+   "inputs": {
+    "op": "point",
+    "pts": {
+     "$pts": "PointSet/Section00.pts"
+    },
+    "target": 34,
+    "tol": 1.0
+   }
+  },
+  {
+   "name": "point_section00_t67",
+   "upstream_ref": "TestFiles/pt_TestFiles/PointSet/Section00.pts",
+   "inputs": {
+    "op": "point",
+    "pts": {
+     "$pts": "PointSet/Section00.pts"
+    },
+    "target": 67,
+    "tol": 1.0
+   }
+  },
+  {
+   "name": "point_section03_t0",
+   "upstream_ref": "TestFiles/pt_TestFiles/PointSet/Section03.pts",
+   "inputs": {
+    "op": "point",
+    "pts": {
+     "$pts": "PointSet/Section03.pts"
+    },
+    "target": 0,
+    "tol": 1.0
+   }
+  },
+  {
+   "name": "point_section03_t34",
+   "upstream_ref": "TestFiles/pt_TestFiles/PointSet/Section03.pts",
+   "inputs": {
+    "op": "point",
+    "pts": {
+     "$pts": "PointSet/Section03.pts"
+    },
+    "target": 34,
+    "tol": 1.0
+   }
+  },
+  {
+   "name": "point_section03_t67",
+   "upstream_ref": "TestFiles/pt_TestFiles/PointSet/Section03.pts",
+   "inputs": {
+    "op": "point",
+    "pts": {
+     "$pts": "PointSet/Section03.pts"
+    },
+    "target": 67,
+    "tol": 1.0
+   }
+  },
+  {
+   "name": "point_section06_t0",
+   "upstream_ref": "TestFiles/pt_TestFiles/PointSet/Section06.pts",
+   "inputs": {
+    "op": "point",
+    "pts": {
+     "$pts": "PointSet/Section06.pts"
+    },
+    "target": 0,
+    "tol": 1.0
+   }
+  },
+  {
+   "name": "point_section06_t34",
+   "upstream_ref": "TestFiles/pt_TestFiles/PointSet/Section06.pts",
+   "inputs": {
+    "op": "point",
+    "pts": {
+     "$pts": "PointSet/Section06.pts"
+    },
+    "target": 34,
+    "tol": 1.0
+   }
+  },
+  {
+   "name": "point_section06_t67",
+   "upstream_ref": "TestFiles/pt_TestFiles/PointSet/Section06.pts",
+   "inputs": {
+    "op": "point",
+    "pts": {
+     "$pts": "PointSet/Section06.pts"
+    },
+    "target": 67,
+    "tol": 1.0
+   }
+  },
+  {
+   "name": "point_section09_t0",
+   "upstream_ref": "TestFiles/pt_TestFiles/PointSet/Section09.pts",
+   "inputs": {
+    "op": "point",
+    "pts": {
+     "$pts": "PointSet/Section09.pts"
+    },
+    "target": 0,
+    "tol": 1.0
+   }
+  },
+  {
+   "name": "point_section09_t34",
+   "upstream_ref": "TestFiles/pt_TestFiles/PointSet/Section09.pts",
+   "inputs": {
+    "op": "point",
+    "pts": {
+     "$pts": "PointSet/Section09.pts"
+    },
+    "target": 34,
+    "tol": 1.0
+   }
+  },
+  {
+   "name": "point_section09_t67",
+   "upstream_ref": "TestFiles/pt_TestFiles/PointSet/Section09.pts",
+   "inputs": {
+    "op": "point",
+    "pts": {
+     "$pts": "PointSet/Section09.pts"
+    },
+    "target": 67,
+    "tol": 1.0
+   }
+  },
+  {
+   "name": "point_chain_ends_gap0.0_t0",
+   "upstream_ref": "source/SMLib/src/SmTrimmingTools.cpp:1960 (via SM_API_test:TestSmOrderCurves)",
+   "inputs": {
+    "op": "point",
+    "pts": [
+     [
+      3.34954,
+      -0.678646,
+      -20.9003
+     ],
+     [
+      3.38884,
+      -0.811028,
+      -20.7739
+     ],
+     [
+      3.39177,
+      -1.01992,
+      -20.6278
+     ],
+     [
+      3.38884,
+      -0.811028,
+      -20.7739
+     ],
+     [
+      3.39177,
+      -1.01992,
+      -20.6278
+     ],
+     [
+      3.371,
+      -1.31869,
+      -20.4881
+     ],
+     [
+      3.34018,
+      -1.70315,
+      -20.3696
+     ],
+     [
+      3.371,
+      -1.31869,
+      -20.4881
+     ],
+     [
+      3.34018,
+      -1.70315,
+      -20.3696
+     ],
+     [
+      3.29591,
+      -2.1106,
+      -20.2721
+     ],
+     [
+      3.23121,
+      -2.47077,
+      -20.1938
+     ],
+     [
+      3.29591,
+      -2.1106,
+      -20.2721
+     ],
+     [
+      3.23121,
+      -2.47077,
+      -20.1938
+     ],
+     [
+      3.14327,
+      -2.81264,
+      -20.1402
+     ],
+     [
+      3.06387,
+      -3.13614,
+      -20.1785
+     ],
+     [
+      3.14327,
+      -2.81264,
+      -20.1402
+     ],
+     [
+      3.06387,
+      -3.13614,
+      -20.1785
+     ],
+     [
+      3.03452,
+      -3.29822,
+      -20.2599
+     ],
+     [
+      3.01397,
+      -3.44561,
+      -20.3697
+     ],
+     [
+      3.03452,
+      -3.29822,
+      -20.2599
+     ],
+     [
+      3.01397,
+      -3.44561,
+      -20.3697
+     ],
+     [
+      2.99668,
+      -3.56889,
+      -20.4734
+     ],
+     [
+      2.97895,
+      -3.66573,
+      -20.5582
+     ],
+     [
+      2.99668,
+      -3.56889,
+      -20.4734
+     ],
+     [
+      2.97895,
+      -3.66573,
+      -20.5582
+     ],
+     [
+      2.93354,
+      -3.77812,
+      -20.6603
+     ],
+     [
+      2.86544,
+      -3.77966,
+      -20.627
+     ],
+     [
+      2.93354,
+      -3.77812,
+      -20.6603
+     ],
+     [
+      2.86544,
+      -3.77966,
+      -20.627
+     ],
+     [
+      2.81477,
+      -3.72679,
+      -21.2131
+     ],
+     [
+      2.75929,
+      -3.59348,
+      -21.2734
+     ],
+     [
+      2.81477,
+      -3.72679,
+      -21.2131
+     ],
+     [
+      2.75929,
+      -3.59348,
+      -21.2734
+     ],
+     [
+      2.70082,
+      -3.35899,
+      -21.3725
+     ],
+     [
+      2.68254,
+      -3.05245,
+      -21.5094
+     ],
+     [
+      2.70082,
+      -3.35899,
+      -21.3725
+     ],
+     [
+      2.68254,
+      -3.05245,
+      -21.5094
+     ],
+     [
+      2.70151,
+      -2.73589,
+      -21.6367
+     ],
+     [
+      2.72787,
+      -2.36984,
+      -21.7258
+     ],
+     [
+      2.70151,
+      -2.73589,
+      -21.6367
+     ],
+     [
+      2.72787,
+      -2.36984,
+      -21.7258
+     ],
+     [
+      2.76946,
+      -1.98286,
+      -21.7737
+     ],
+     [
+      2.82397,
+      -1.72525,
+      -21.7982
+     ],
+     [
+      2.76946,
+      -1.98286,
+      -21.7737
+     ],
+     [
+      2.82397,
+      -1.72525,
+      -21.7982
+     ],
+     [
+      2.88104,
+      -1.49704,
+      -21.8006
+     ],
+     [
+      2.92908,
+      -1.27263,
+      -21.7581
+     ],
+     [
+      2.88104,
+      -1.49704,
+      -21.8006
+     ],
+     [
+      2.92908,
+      -1.27263,
+      -21.7581
+     ],
+     [
+      2.95774,
+      -1.11315,
+      -21.6924
+     ],
+     [
+      2.98476,
+      -0.988928,
+      -21.624
+     ],
+     [
+      2.95774,
+      -1.11315,
+      -21.6924
+     ],
+     [
+      2.98476,
+      -0.988928,
+      -21.624
+     ],
+     [
+      3.04783,
+      -0.816405,
+      -21.5147
+     ],
+     [
+      3.13618,
+      -0.682444,
+      -21.4194
+     ],
+     [
+      3.04783,
+      -0.816405,
+      -21.5147
+     ],
+     [
+      3.13618,
+      -0.682444,
+      -21.4194
+     ],
+     [
+      3.27798,
+      -0.610273,
+      -20.9805
+     ]
+    ],
+    "target": 0,
+    "tol": 1e-05
+   }
+  },
+  {
+   "name": "point_chain_ends_gap0.0_t1",
+   "upstream_ref": "source/SMLib/src/SmTrimmingTools.cpp:1960 (via SM_API_test:TestSmOrderCurves)",
+   "inputs": {
+    "op": "point",
+    "pts": [
+     [
+      3.34954,
+      -0.678646,
+      -20.9003
+     ],
+     [
+      3.38884,
+      -0.811028,
+      -20.7739
+     ],
+     [
+      3.39177,
+      -1.01992,
+      -20.6278
+     ],
+     [
+      3.38884,
+      -0.811028,
+      -20.7739
+     ],
+     [
+      3.39177,
+      -1.01992,
+      -20.6278
+     ],
+     [
+      3.371,
+      -1.31869,
+      -20.4881
+     ],
+     [
+      3.34018,
+      -1.70315,
+      -20.3696
+     ],
+     [
+      3.371,
+      -1.31869,
+      -20.4881
+     ],
+     [
+      3.34018,
+      -1.70315,
+      -20.3696
+     ],
+     [
+      3.29591,
+      -2.1106,
+      -20.2721
+     ],
+     [
+      3.23121,
+      -2.47077,
+      -20.1938
+     ],
+     [
+      3.29591,
+      -2.1106,
+      -20.2721
+     ],
+     [
+      3.23121,
+      -2.47077,
+      -20.1938
+     ],
+     [
+      3.14327,
+      -2.81264,
+      -20.1402
+     ],
+     [
+      3.06387,
+      -3.13614,
+      -20.1785
+     ],
+     [
+      3.14327,
+      -2.81264,
+      -20.1402
+     ],
+     [
+      3.06387,
+      -3.13614,
+      -20.1785
+     ],
+     [
+      3.03452,
+      -3.29822,
+      -20.2599
+     ],
+     [
+      3.01397,
+      -3.44561,
+      -20.3697
+     ],
+     [
+      3.03452,
+      -3.29822,
+      -20.2599
+     ],
+     [
+      3.01397,
+      -3.44561,
+      -20.3697
+     ],
+     [
+      2.99668,
+      -3.56889,
+      -20.4734
+     ],
+     [
+      2.97895,
+      -3.66573,
+      -20.5582
+     ],
+     [
+      2.99668,
+      -3.56889,
+      -20.4734
+     ],
+     [
+      2.97895,
+      -3.66573,
+      -20.5582
+     ],
+     [
+      2.93354,
+      -3.77812,
+      -20.6603
+     ],
+     [
+      2.86544,
+      -3.77966,
+      -20.627
+     ],
+     [
+      2.93354,
+      -3.77812,
+      -20.6603
+     ],
+     [
+      2.86544,
+      -3.77966,
+      -20.627
+     ],
+     [
+      2.81477,
+      -3.72679,
+      -21.2131
+     ],
+     [
+      2.75929,
+      -3.59348,
+      -21.2734
+     ],
+     [
+      2.81477,
+      -3.72679,
+      -21.2131
+     ],
+     [
+      2.75929,
+      -3.59348,
+      -21.2734
+     ],
+     [
+      2.70082,
+      -3.35899,
+      -21.3725
+     ],
+     [
+      2.68254,
+      -3.05245,
+      -21.5094
+     ],
+     [
+      2.70082,
+      -3.35899,
+      -21.3725
+     ],
+     [
+      2.68254,
+      -3.05245,
+      -21.5094
+     ],
+     [
+      2.70151,
+      -2.73589,
+      -21.6367
+     ],
+     [
+      2.72787,
+      -2.36984,
+      -21.7258
+     ],
+     [
+      2.70151,
+      -2.73589,
+      -21.6367
+     ],
+     [
+      2.72787,
+      -2.36984,
+      -21.7258
+     ],
+     [
+      2.76946,
+      -1.98286,
+      -21.7737
+     ],
+     [
+      2.82397,
+      -1.72525,
+      -21.7982
+     ],
+     [
+      2.76946,
+      -1.98286,
+      -21.7737
+     ],
+     [
+      2.82397,
+      -1.72525,
+      -21.7982
+     ],
+     [
+      2.88104,
+      -1.49704,
+      -21.8006
+     ],
+     [
+      2.92908,
+      -1.27263,
+      -21.7581
+     ],
+     [
+      2.88104,
+      -1.49704,
+      -21.8006
+     ],
+     [
+      2.92908,
+      -1.27263,
+      -21.7581
+     ],
+     [
+      2.95774,
+      -1.11315,
+      -21.6924
+     ],
+     [
+      2.98476,
+      -0.988928,
+      -21.624
+     ],
+     [
+      2.95774,
+      -1.11315,
+      -21.6924
+     ],
+     [
+      2.98476,
+      -0.988928,
+      -21.624
+     ],
+     [
+      3.04783,
+      -0.816405,
+      -21.5147
+     ],
+     [
+      3.13618,
+      -0.682444,
+      -21.4194
+     ],
+     [
+      3.04783,
+      -0.816405,
+      -21.5147
+     ],
+     [
+      3.13618,
+      -0.682444,
+      -21.4194
+     ],
+     [
+      3.27798,
+      -0.610273,
+      -20.9805
+     ]
+    ],
+    "target": 1,
+    "tol": 1e-05
+   }
+  },
+  {
+   "name": "point_chain_ends_gap0.0_t7",
+   "upstream_ref": "source/SMLib/src/SmTrimmingTools.cpp:1960 (via SM_API_test:TestSmOrderCurves)",
+   "inputs": {
+    "op": "point",
+    "pts": [
+     [
+      3.34954,
+      -0.678646,
+      -20.9003
+     ],
+     [
+      3.38884,
+      -0.811028,
+      -20.7739
+     ],
+     [
+      3.39177,
+      -1.01992,
+      -20.6278
+     ],
+     [
+      3.38884,
+      -0.811028,
+      -20.7739
+     ],
+     [
+      3.39177,
+      -1.01992,
+      -20.6278
+     ],
+     [
+      3.371,
+      -1.31869,
+      -20.4881
+     ],
+     [
+      3.34018,
+      -1.70315,
+      -20.3696
+     ],
+     [
+      3.371,
+      -1.31869,
+      -20.4881
+     ],
+     [
+      3.34018,
+      -1.70315,
+      -20.3696
+     ],
+     [
+      3.29591,
+      -2.1106,
+      -20.2721
+     ],
+     [
+      3.23121,
+      -2.47077,
+      -20.1938
+     ],
+     [
+      3.29591,
+      -2.1106,
+      -20.2721
+     ],
+     [
+      3.23121,
+      -2.47077,
+      -20.1938
+     ],
+     [
+      3.14327,
+      -2.81264,
+      -20.1402
+     ],
+     [
+      3.06387,
+      -3.13614,
+      -20.1785
+     ],
+     [
+      3.14327,
+      -2.81264,
+      -20.1402
+     ],
+     [
+      3.06387,
+      -3.13614,
+      -20.1785
+     ],
+     [
+      3.03452,
+      -3.29822,
+      -20.2599
+     ],
+     [
+      3.01397,
+      -3.44561,
+      -20.3697
+     ],
+     [
+      3.03452,
+      -3.29822,
+      -20.2599
+     ],
+     [
+      3.01397,
+      -3.44561,
+      -20.3697
+     ],
+     [
+      2.99668,
+      -3.56889,
+      -20.4734
+     ],
+     [
+      2.97895,
+      -3.66573,
+      -20.5582
+     ],
+     [
+      2.99668,
+      -3.56889,
+      -20.4734
+     ],
+     [
+      2.97895,
+      -3.66573,
+      -20.5582
+     ],
+     [
+      2.93354,
+      -3.77812,
+      -20.6603
+     ],
+     [
+      2.86544,
+      -3.77966,
+      -20.627
+     ],
+     [
+      2.93354,
+      -3.77812,
+      -20.6603
+     ],
+     [
+      2.86544,
+      -3.77966,
+      -20.627
+     ],
+     [
+      2.81477,
+      -3.72679,
+      -21.2131
+     ],
+     [
+      2.75929,
+      -3.59348,
+      -21.2734
+     ],
+     [
+      2.81477,
+      -3.72679,
+      -21.2131
+     ],
+     [
+      2.75929,
+      -3.59348,
+      -21.2734
+     ],
+     [
+      2.70082,
+      -3.35899,
+      -21.3725
+     ],
+     [
+      2.68254,
+      -3.05245,
+      -21.5094
+     ],
+     [
+      2.70082,
+      -3.35899,
+      -21.3725
+     ],
+     [
+      2.68254,
+      -3.05245,
+      -21.5094
+     ],
+     [
+      2.70151,
+      -2.73589,
+      -21.6367
+     ],
+     [
+      2.72787,
+      -2.36984,
+      -21.7258
+     ],
+     [
+      2.70151,
+      -2.73589,
+      -21.6367
+     ],
+     [
+      2.72787,
+      -2.36984,
+      -21.7258
+     ],
+     [
+      2.76946,
+      -1.98286,
+      -21.7737
+     ],
+     [
+      2.82397,
+      -1.72525,
+      -21.7982
+     ],
+     [
+      2.76946,
+      -1.98286,
+      -21.7737
+     ],
+     [
+      2.82397,
+      -1.72525,
+      -21.7982
+     ],
+     [
+      2.88104,
+      -1.49704,
+      -21.8006
+     ],
+     [
+      2.92908,
+      -1.27263,
+      -21.7581
+     ],
+     [
+      2.88104,
+      -1.49704,
+      -21.8006
+     ],
+     [
+      2.92908,
+      -1.27263,
+      -21.7581
+     ],
+     [
+      2.95774,
+      -1.11315,
+      -21.6924
+     ],
+     [
+      2.98476,
+      -0.988928,
+      -21.624
+     ],
+     [
+      2.95774,
+      -1.11315,
+      -21.6924
+     ],
+     [
+      2.98476,
+      -0.988928,
+      -21.624
+     ],
+     [
+      3.04783,
+      -0.816405,
+      -21.5147
+     ],
+     [
+      3.13618,
+      -0.682444,
+      -21.4194
+     ],
+     [
+      3.04783,
+      -0.816405,
+      -21.5147
+     ],
+     [
+      3.13618,
+      -0.682444,
+      -21.4194
+     ],
+     [
+      3.27798,
+      -0.610273,
+      -20.9805
+     ]
+    ],
+    "target": 7,
+    "tol": 1e-05
+   }
+  },
+  {
+   "name": "point_chain_ends_gap0.0_t57",
+   "upstream_ref": "source/SMLib/src/SmTrimmingTools.cpp:1960 (via SM_API_test:TestSmOrderCurves)",
+   "inputs": {
+    "op": "point",
+    "pts": [
+     [
+      3.34954,
+      -0.678646,
+      -20.9003
+     ],
+     [
+      3.38884,
+      -0.811028,
+      -20.7739
+     ],
+     [
+      3.39177,
+      -1.01992,
+      -20.6278
+     ],
+     [
+      3.38884,
+      -0.811028,
+      -20.7739
+     ],
+     [
+      3.39177,
+      -1.01992,
+      -20.6278
+     ],
+     [
+      3.371,
+      -1.31869,
+      -20.4881
+     ],
+     [
+      3.34018,
+      -1.70315,
+      -20.3696
+     ],
+     [
+      3.371,
+      -1.31869,
+      -20.4881
+     ],
+     [
+      3.34018,
+      -1.70315,
+      -20.3696
+     ],
+     [
+      3.29591,
+      -2.1106,
+      -20.2721
+     ],
+     [
+      3.23121,
+      -2.47077,
+      -20.1938
+     ],
+     [
+      3.29591,
+      -2.1106,
+      -20.2721
+     ],
+     [
+      3.23121,
+      -2.47077,
+      -20.1938
+     ],
+     [
+      3.14327,
+      -2.81264,
+      -20.1402
+     ],
+     [
+      3.06387,
+      -3.13614,
+      -20.1785
+     ],
+     [
+      3.14327,
+      -2.81264,
+      -20.1402
+     ],
+     [
+      3.06387,
+      -3.13614,
+      -20.1785
+     ],
+     [
+      3.03452,
+      -3.29822,
+      -20.2599
+     ],
+     [
+      3.01397,
+      -3.44561,
+      -20.3697
+     ],
+     [
+      3.03452,
+      -3.29822,
+      -20.2599
+     ],
+     [
+      3.01397,
+      -3.44561,
+      -20.3697
+     ],
+     [
+      2.99668,
+      -3.56889,
+      -20.4734
+     ],
+     [
+      2.97895,
+      -3.66573,
+      -20.5582
+     ],
+     [
+      2.99668,
+      -3.56889,
+      -20.4734
+     ],
+     [
+      2.97895,
+      -3.66573,
+      -20.5582
+     ],
+     [
+      2.93354,
+      -3.77812,
+      -20.6603
+     ],
+     [
+      2.86544,
+      -3.77966,
+      -20.627
+     ],
+     [
+      2.93354,
+      -3.77812,
+      -20.6603
+     ],
+     [
+      2.86544,
+      -3.77966,
+      -20.627
+     ],
+     [
+      2.81477,
+      -3.72679,
+      -21.2131
+     ],
+     [
+      2.75929,
+      -3.59348,
+      -21.2734
+     ],
+     [
+      2.81477,
+      -3.72679,
+      -21.2131
+     ],
+     [
+      2.75929,
+      -3.59348,
+      -21.2734
+     ],
+     [
+      2.70082,
+      -3.35899,
+      -21.3725
+     ],
+     [
+      2.68254,
+      -3.05245,
+      -21.5094
+     ],
+     [
+      2.70082,
+      -3.35899,
+      -21.3725
+     ],
+     [
+      2.68254,
+      -3.05245,
+      -21.5094
+     ],
+     [
+      2.70151,
+      -2.73589,
+      -21.6367
+     ],
+     [
+      2.72787,
+      -2.36984,
+      -21.7258
+     ],
+     [
+      2.70151,
+      -2.73589,
+      -21.6367
+     ],
+     [
+      2.72787,
+      -2.36984,
+      -21.7258
+     ],
+     [
+      2.76946,
+      -1.98286,
+      -21.7737
+     ],
+     [
+      2.82397,
+      -1.72525,
+      -21.7982
+     ],
+     [
+      2.76946,
+      -1.98286,
+      -21.7737
+     ],
+     [
+      2.82397,
+      -1.72525,
+      -21.7982
+     ],
+     [
+      2.88104,
+      -1.49704,
+      -21.8006
+     ],
+     [
+      2.92908,
+      -1.27263,
+      -21.7581
+     ],
+     [
+      2.88104,
+      -1.49704,
+      -21.8006
+     ],
+     [
+      2.92908,
+      -1.27263,
+      -21.7581
+     ],
+     [
+      2.95774,
+      -1.11315,
+      -21.6924
+     ],
+     [
+      2.98476,
+      -0.988928,
+      -21.624
+     ],
+     [
+      2.95774,
+      -1.11315,
+      -21.6924
+     ],
+     [
+      2.98476,
+      -0.988928,
+      -21.624
+     ],
+     [
+      3.04783,
+      -0.816405,
+      -21.5147
+     ],
+     [
+      3.13618,
+      -0.682444,
+      -21.4194
+     ],
+     [
+      3.04783,
+      -0.816405,
+      -21.5147
+     ],
+     [
+      3.13618,
+      -0.682444,
+      -21.4194
+     ],
+     [
+      3.27798,
+      -0.610273,
+      -20.9805
+     ]
+    ],
+    "target": 57,
+    "tol": 1e-05
+   }
+  },
+  {
+   "name": "point_chain_ends_gap1e-09_t0",
+   "upstream_ref": "source/SMLib/src/SmTrimmingTools.cpp:1960 (via SM_API_test:TestSmOrderCurves)",
+   "inputs": {
+    "op": "point",
+    "pts": [
+     [
+      3.34954,
+      -0.678646,
+      -20.9003
+     ],
+     [
+      3.3888400006375785,
+      -0.8110279999499154,
+      -20.773900000494887
+     ],
+     [
+      3.3917700007701,
+      -1.0199200001026454,
+      -20.627799999044495
+     ],
+     [
+      3.38884,
+      -0.811028,
+      -20.7739
+     ],
+     [
+      3.39177,
+      -1.01992,
+      -20.6278
+     ],
+     [
+      3.3709999996874775,
+      -1.3186900008056286,
+      -20.48809999941629
+     ],
+     [
+      3.340180000156668,
+      -1.7031499994028032,
+      -20.36959999963454
+     ],
+     [
+      3.371,
+      -1.31869,
+      -20.4881
+     ],
+     [
+      3.34018,
+      -1.70315,
+      -20.3696
+     ],
+     [
+      3.295910000541915,
+      -2.110599999374621,
+      -20.272100000350914
+     ],
+     [
+      3.2312100004960085,
+      -2.4707699991916763,
+      -20.19379999920168
+     ],
+     [
+      3.29591,
+      -2.1106,
+      -20.2721
+     ],
+     [
+      3.23121,
+      -2.47077,
+      -20.1938
+     ],
+     [
+      3.143270000344771,
+      -2.8126399992839892,
+      -20.140200000201084
+     ],
+     [
+      3.0638699990736855,
+      -3.1361399992806938,
+      -20.178499999644057
+     ],
+     [
+      3.14327,
+      -2.81264,
+      -20.1402
+     ],
+     [
+      3.06387,
+      -3.13614,
+      -20.1785
+     ],
+     [
+      3.0345200008093776,
+      -3.2982200006594944,
+      -20.259900000535364
+     ],
+     [
+      3.0139699999360645,
+      -3.44560999951218,
+      -20.369700000767192
+     ],
+     [
+      3.03452,
+      -3.29822,
+      -20.2599
+     ],
+     [
+      3.01397,
+      -3.44561,
+      -20.3697
+     ],
+     [
+      2.9966799998014473,
+      -3.568889999488462,
+      -20.47340000061078
+     ],
+     [
+      2.978949999185066,
+      -3.665729999796583,
+      -20.55820000066001
+     ],
+     [
+      2.99668,
+      -3.56889,
+      -20.4734
+     ],
+     [
+      2.97895,
+      -3.66573,
+      -20.5582
+     ],
+     [
+      2.9335399991347875,
+      -3.778120000741495,
+      -20.66029999979202
+     ],
+     [
+      2.8654399996957993,
+      -3.7796600000145135,
+      -20.62700000093173
+     ],
+     [
+      2.93354,
+      -3.77812,
+      -20.6603
+     ],
+     [
+      2.86544,
+      -3.77966,
+      -20.627
+     ],
+     [
+      2.814770000128755,
+      -3.726790000277081,
+      -21.21310000057554
+     ],
+     [
+      2.7592900003804974,
+      -3.593480000256674,
+      -21.27339999988184
+     ],
+     [
+      2.81477,
+      -3.72679,
+      -21.2131
+     ],
+     [
+      2.75929,
+      -3.59348,
+      -21.2734
+     ],
+     [
+      2.7008199995559563,
+      -3.35898999997514,
+      -21.372499999600254
+     ],
+     [
+      2.6825400009517857,
+      -3.052450000325273,
+      -21.50940000067281
+     ],
+     [
+      2.70082,
+      -3.35899,
+      -21.3725
+     ],
+     [
+      2.68254,
+      -3.05245,
+      -21.5094
+     ],
+     [
+      2.7015099996719645,
+      -2.735889999030834,
+      -21.636699999318186
+     ],
+     [
+      2.7278700007648573,
+      -2.369839999354791,
+      -21.725800000752375
+     ],
+     [
+      2.70151,
+      -2.73589,
+      -21.6367
+     ],
+     [
+      2.72787,
+      -2.36984,
+      -21.7258
+     ],
+     [
+      2.769460000350196,
+      -1.9828599990344684,
+      -21.773699999707947
+     ],
+     [
+      2.8239699993125176,
+      -1.7252500001445257,
+      -21.798199999364623
+     ],
+     [
+      2.76946,
+      -1.98286,
+      -21.7737
+     ],
+     [
+      2.82397,
+      -1.72525,
+      -21.7982
+     ],
+     [
+      2.881039999160154,
+      -1.497039999790127,
+      -21.800599999787323
+     ],
+     [
+      2.9290799996132715,
+      -1.2726300003238185,
+      -21.758100000753814
+     ],
+     [
+      2.88104,
+      -1.49704,
+      -21.8006
+     ],
+     [
+      2.92908,
+      -1.27263,
+      -21.7581
+     ],
+     [
+      2.957740000669767,
+      -1.11315000046577,
+      -21.69239999953665
+     ],
+     [
+      2.984759999137764,
+      -0.9889280007525804,
+      -21.624000000100157
+     ],
+     [
+      2.95774,
+      -1.11315,
+      -21.6924
+     ],
+     [
+      2.98476,
+      -0.988928,
+      -21.624
+     ],
+     [
+      3.0478300004203582,
+      -0.8164050007157816,
+      -21.514699999924098
+     ],
+     [
+      3.13617999982776,
+      -0.682443999999558,
+      -21.419399999991423
+     ],
+     [
+      3.04783,
+      -0.816405,
+      -21.5147
+     ],
+     [
+      3.13618,
+      -0.682444,
+      -21.4194
+     ],
+     [
+      3.2779800004858695,
+      -0.6102730004669147,
+      -20.98050000085132
+     ]
+    ],
+    "target": 0,
+    "tol": 1e-05
+   }
+  },
+  {
+   "name": "point_chain_ends_gap1e-09_t1",
+   "upstream_ref": "source/SMLib/src/SmTrimmingTools.cpp:1960 (via SM_API_test:TestSmOrderCurves)",
+   "inputs": {
+    "op": "point",
+    "pts": [
+     [
+      3.34954,
+      -0.678646,
+      -20.9003
+     ],
+     [
+      3.3888400006375785,
+      -0.8110279999499154,
+      -20.773900000494887
+     ],
+     [
+      3.3917700007701,
+      -1.0199200001026454,
+      -20.627799999044495
+     ],
+     [
+      3.38884,
+      -0.811028,
+      -20.7739
+     ],
+     [
+      3.39177,
+      -1.01992,
+      -20.6278
+     ],
+     [
+      3.3709999996874775,
+      -1.3186900008056286,
+      -20.48809999941629
+     ],
+     [
+      3.340180000156668,
+      -1.7031499994028032,
+      -20.36959999963454
+     ],
+     [
+      3.371,
+      -1.31869,
+      -20.4881
+     ],
+     [
+      3.34018,
+      -1.70315,
+      -20.3696
+     ],
+     [
+      3.295910000541915,
+      -2.110599999374621,
+      -20.272100000350914
+     ],
+     [
+      3.2312100004960085,
+      -2.4707699991916763,
+      -20.19379999920168
+     ],
+     [
+      3.29591,
+      -2.1106,
+      -20.2721
+     ],
+     [
+      3.23121,
+      -2.47077,
+      -20.1938
+     ],
+     [
+      3.143270000344771,
+      -2.8126399992839892,
+      -20.140200000201084
+     ],
+     [
+      3.0638699990736855,
+      -3.1361399992806938,
+      -20.178499999644057
+     ],
+     [
+      3.14327,
+      -2.81264,
+      -20.1402
+     ],
+     [
+      3.06387,
+      -3.13614,
+      -20.1785
+     ],
+     [
+      3.0345200008093776,
+      -3.2982200006594944,
+      -20.259900000535364
+     ],
+     [
+      3.0139699999360645,
+      -3.44560999951218,
+      -20.369700000767192
+     ],
+     [
+      3.03452,
+      -3.29822,
+      -20.2599
+     ],
+     [
+      3.01397,
+      -3.44561,
+      -20.3697
+     ],
+     [
+      2.9966799998014473,
+      -3.568889999488462,
+      -20.47340000061078
+     ],
+     [
+      2.978949999185066,
+      -3.665729999796583,
+      -20.55820000066001
+     ],
+     [
+      2.99668,
+      -3.56889,
+      -20.4734
+     ],
+     [
+      2.97895,
+      -3.66573,
+      -20.5582
+     ],
+     [
+      2.9335399991347875,
+      -3.778120000741495,
+      -20.66029999979202
+     ],
+     [
+      2.8654399996957993,
+      -3.7796600000145135,
+      -20.62700000093173
+     ],
+     [
+      2.93354,
+      -3.77812,
+      -20.6603
+     ],
+     [
+      2.86544,
+      -3.77966,
+      -20.627
+     ],
+     [
+      2.814770000128755,
+      -3.726790000277081,
+      -21.21310000057554
+     ],
+     [
+      2.7592900003804974,
+      -3.593480000256674,
+      -21.27339999988184
+     ],
+     [
+      2.81477,
+      -3.72679,
+      -21.2131
+     ],
+     [
+      2.75929,
+      -3.59348,
+      -21.2734
+     ],
+     [
+      2.7008199995559563,
+      -3.35898999997514,
+      -21.372499999600254
+     ],
+     [
+      2.6825400009517857,
+      -3.052450000325273,
+      -21.50940000067281
+     ],
+     [
+      2.70082,
+      -3.35899,
+      -21.3725
+     ],
+     [
+      2.68254,
+      -3.05245,
+      -21.5094
+     ],
+     [
+      2.7015099996719645,
+      -2.735889999030834,
+      -21.636699999318186
+     ],
+     [
+      2.7278700007648573,
+      -2.369839999354791,
+      -21.725800000752375
+     ],
+     [
+      2.70151,
+      -2.73589,
+      -21.6367
+     ],
+     [
+      2.72787,
+      -2.36984,
+      -21.7258
+     ],
+     [
+      2.769460000350196,
+      -1.9828599990344684,
+      -21.773699999707947
+     ],
+     [
+      2.8239699993125176,
+      -1.7252500001445257,
+      -21.798199999364623
+     ],
+     [
+      2.76946,
+      -1.98286,
+      -21.7737
+     ],
+     [
+      2.82397,
+      -1.72525,
+      -21.7982
+     ],
+     [
+      2.881039999160154,
+      -1.497039999790127,
+      -21.800599999787323
+     ],
+     [
+      2.9290799996132715,
+      -1.2726300003238185,
+      -21.758100000753814
+     ],
+     [
+      2.88104,
+      -1.49704,
+      -21.8006
+     ],
+     [
+      2.92908,
+      -1.27263,
+      -21.7581
+     ],
+     [
+      2.957740000669767,
+      -1.11315000046577,
+      -21.69239999953665
+     ],
+     [
+      2.984759999137764,
+      -0.9889280007525804,
+      -21.624000000100157
+     ],
+     [
+      2.95774,
+      -1.11315,
+      -21.6924
+     ],
+     [
+      2.98476,
+      -0.988928,
+      -21.624
+     ],
+     [
+      3.0478300004203582,
+      -0.8164050007157816,
+      -21.514699999924098
+     ],
+     [
+      3.13617999982776,
+      -0.682443999999558,
+      -21.419399999991423
+     ],
+     [
+      3.04783,
+      -0.816405,
+      -21.5147
+     ],
+     [
+      3.13618,
+      -0.682444,
+      -21.4194
+     ],
+     [
+      3.2779800004858695,
+      -0.6102730004669147,
+      -20.98050000085132
+     ]
+    ],
+    "target": 1,
+    "tol": 1e-05
+   }
+  },
+  {
+   "name": "point_chain_ends_gap1e-09_t7",
+   "upstream_ref": "source/SMLib/src/SmTrimmingTools.cpp:1960 (via SM_API_test:TestSmOrderCurves)",
+   "inputs": {
+    "op": "point",
+    "pts": [
+     [
+      3.34954,
+      -0.678646,
+      -20.9003
+     ],
+     [
+      3.3888400006375785,
+      -0.8110279999499154,
+      -20.773900000494887
+     ],
+     [
+      3.3917700007701,
+      -1.0199200001026454,
+      -20.627799999044495
+     ],
+     [
+      3.38884,
+      -0.811028,
+      -20.7739
+     ],
+     [
+      3.39177,
+      -1.01992,
+      -20.6278
+     ],
+     [
+      3.3709999996874775,
+      -1.3186900008056286,
+      -20.48809999941629
+     ],
+     [
+      3.340180000156668,
+      -1.7031499994028032,
+      -20.36959999963454
+     ],
+     [
+      3.371,
+      -1.31869,
+      -20.4881
+     ],
+     [
+      3.34018,
+      -1.70315,
+      -20.3696
+     ],
+     [
+      3.295910000541915,
+      -2.110599999374621,
+      -20.272100000350914
+     ],
+     [
+      3.2312100004960085,
+      -2.4707699991916763,
+      -20.19379999920168
+     ],
+     [
+      3.29591,
+      -2.1106,
+      -20.2721
+     ],
+     [
+      3.23121,
+      -2.47077,
+      -20.1938
+     ],
+     [
+      3.143270000344771,
+      -2.8126399992839892,
+      -20.140200000201084
+     ],
+     [
+      3.0638699990736855,
+      -3.1361399992806938,
+      -20.178499999644057
+     ],
+     [
+      3.14327,
+      -2.81264,
+      -20.1402
+     ],
+     [
+      3.06387,
+      -3.13614,
+      -20.1785
+     ],
+     [
+      3.0345200008093776,
+      -3.2982200006594944,
+      -20.259900000535364
+     ],
+     [
+      3.0139699999360645,
+      -3.44560999951218,
+      -20.369700000767192
+     ],
+     [
+      3.03452,
+      -3.29822,
+      -20.2599
+     ],
+     [
+      3.01397,
+      -3.44561,
+      -20.3697
+     ],
+     [
+      2.9966799998014473,
+      -3.568889999488462,
+      -20.47340000061078
+     ],
+     [
+      2.978949999185066,
+      -3.665729999796583,
+      -20.55820000066001
+     ],
+     [
+      2.99668,
+      -3.56889,
+      -20.4734
+     ],
+     [
+      2.97895,
+      -3.66573,
+      -20.5582
+     ],
+     [
+      2.9335399991347875,
+      -3.778120000741495,
+      -20.66029999979202
+     ],
+     [
+      2.8654399996957993,
+      -3.7796600000145135,
+      -20.62700000093173
+     ],
+     [
+      2.93354,
+      -3.77812,
+      -20.6603
+     ],
+     [
+      2.86544,
+      -3.77966,
+      -20.627
+     ],
+     [
+      2.814770000128755,
+      -3.726790000277081,
+      -21.21310000057554
+     ],
+     [
+      2.7592900003804974,
+      -3.593480000256674,
+      -21.27339999988184
+     ],
+     [
+      2.81477,
+      -3.72679,
+      -21.2131
+     ],
+     [
+      2.75929,
+      -3.59348,
+      -21.2734
+     ],
+     [
+      2.7008199995559563,
+      -3.35898999997514,
+      -21.372499999600254
+     ],
+     [
+      2.6825400009517857,
+      -3.052450000325273,
+      -21.50940000067281
+     ],
+     [
+      2.70082,
+      -3.35899,
+      -21.3725
+     ],
+     [
+      2.68254,
+      -3.05245,
+      -21.5094
+     ],
+     [
+      2.7015099996719645,
+      -2.735889999030834,
+      -21.636699999318186
+     ],
+     [
+      2.7278700007648573,
+      -2.369839999354791,
+      -21.725800000752375
+     ],
+     [
+      2.70151,
+      -2.73589,
+      -21.6367
+     ],
+     [
+      2.72787,
+      -2.36984,
+      -21.7258
+     ],
+     [
+      2.769460000350196,
+      -1.9828599990344684,
+      -21.773699999707947
+     ],
+     [
+      2.8239699993125176,
+      -1.7252500001445257,
+      -21.798199999364623
+     ],
+     [
+      2.76946,
+      -1.98286,
+      -21.7737
+     ],
+     [
+      2.82397,
+      -1.72525,
+      -21.7982
+     ],
+     [
+      2.881039999160154,
+      -1.497039999790127,
+      -21.800599999787323
+     ],
+     [
+      2.9290799996132715,
+      -1.2726300003238185,
+      -21.758100000753814
+     ],
+     [
+      2.88104,
+      -1.49704,
+      -21.8006
+     ],
+     [
+      2.92908,
+      -1.27263,
+      -21.7581
+     ],
+     [
+      2.957740000669767,
+      -1.11315000046577,
+      -21.69239999953665
+     ],
+     [
+      2.984759999137764,
+      -0.9889280007525804,
+      -21.624000000100157
+     ],
+     [
+      2.95774,
+      -1.11315,
+      -21.6924
+     ],
+     [
+      2.98476,
+      -0.988928,
+      -21.624
+     ],
+     [
+      3.0478300004203582,
+      -0.8164050007157816,
+      -21.514699999924098
+     ],
+     [
+      3.13617999982776,
+      -0.682443999999558,
+      -21.419399999991423
+     ],
+     [
+      3.04783,
+      -0.816405,
+      -21.5147
+     ],
+     [
+      3.13618,
+      -0.682444,
+      -21.4194
+     ],
+     [
+      3.2779800004858695,
+      -0.6102730004669147,
+      -20.98050000085132
+     ]
+    ],
+    "target": 7,
+    "tol": 1e-05
+   }
+  },
+  {
+   "name": "point_chain_ends_gap1e-09_t57",
+   "upstream_ref": "source/SMLib/src/SmTrimmingTools.cpp:1960 (via SM_API_test:TestSmOrderCurves)",
+   "inputs": {
+    "op": "point",
+    "pts": [
+     [
+      3.34954,
+      -0.678646,
+      -20.9003
+     ],
+     [
+      3.3888400006375785,
+      -0.8110279999499154,
+      -20.773900000494887
+     ],
+     [
+      3.3917700007701,
+      -1.0199200001026454,
+      -20.627799999044495
+     ],
+     [
+      3.38884,
+      -0.811028,
+      -20.7739
+     ],
+     [
+      3.39177,
+      -1.01992,
+      -20.6278
+     ],
+     [
+      3.3709999996874775,
+      -1.3186900008056286,
+      -20.48809999941629
+     ],
+     [
+      3.340180000156668,
+      -1.7031499994028032,
+      -20.36959999963454
+     ],
+     [
+      3.371,
+      -1.31869,
+      -20.4881
+     ],
+     [
+      3.34018,
+      -1.70315,
+      -20.3696
+     ],
+     [
+      3.295910000541915,
+      -2.110599999374621,
+      -20.272100000350914
+     ],
+     [
+      3.2312100004960085,
+      -2.4707699991916763,
+      -20.19379999920168
+     ],
+     [
+      3.29591,
+      -2.1106,
+      -20.2721
+     ],
+     [
+      3.23121,
+      -2.47077,
+      -20.1938
+     ],
+     [
+      3.143270000344771,
+      -2.8126399992839892,
+      -20.140200000201084
+     ],
+     [
+      3.0638699990736855,
+      -3.1361399992806938,
+      -20.178499999644057
+     ],
+     [
+      3.14327,
+      -2.81264,
+      -20.1402
+     ],
+     [
+      3.06387,
+      -3.13614,
+      -20.1785
+     ],
+     [
+      3.0345200008093776,
+      -3.2982200006594944,
+      -20.259900000535364
+     ],
+     [
+      3.0139699999360645,
+      -3.44560999951218,
+      -20.369700000767192
+     ],
+     [
+      3.03452,
+      -3.29822,
+      -20.2599
+     ],
+     [
+      3.01397,
+      -3.44561,
+      -20.3697
+     ],
+     [
+      2.9966799998014473,
+      -3.568889999488462,
+      -20.47340000061078
+     ],
+     [
+      2.978949999185066,
+      -3.665729999796583,
+      -20.55820000066001
+     ],
+     [
+      2.99668,
+      -3.56889,
+      -20.4734
+     ],
+     [
+      2.97895,
+      -3.66573,
+      -20.5582
+     ],
+     [
+      2.9335399991347875,
+      -3.778120000741495,
+      -20.66029999979202
+     ],
+     [
+      2.8654399996957993,
+      -3.7796600000145135,
+      -20.62700000093173
+     ],
+     [
+      2.93354,
+      -3.77812,
+      -20.6603
+     ],
+     [
+      2.86544,
+      -3.77966,
+      -20.627
+     ],
+     [
+      2.814770000128755,
+      -3.726790000277081,
+      -21.21310000057554
+     ],
+     [
+      2.7592900003804974,
+      -3.593480000256674,
+      -21.27339999988184
+     ],
+     [
+      2.81477,
+      -3.72679,
+      -21.2131
+     ],
+     [
+      2.75929,
+      -3.59348,
+      -21.2734
+     ],
+     [
+      2.7008199995559563,
+      -3.35898999997514,
+      -21.372499999600254
+     ],
+     [
+      2.6825400009517857,
+      -3.052450000325273,
+      -21.50940000067281
+     ],
+     [
+      2.70082,
+      -3.35899,
+      -21.3725
+     ],
+     [
+      2.68254,
+      -3.05245,
+      -21.5094
+     ],
+     [
+      2.7015099996719645,
+      -2.735889999030834,
+      -21.636699999318186
+     ],
+     [
+      2.7278700007648573,
+      -2.369839999354791,
+      -21.725800000752375
+     ],
+     [
+      2.70151,
+      -2.73589,
+      -21.6367
+     ],
+     [
+      2.72787,
+      -2.36984,
+      -21.7258
+     ],
+     [
+      2.769460000350196,
+      -1.9828599990344684,
+      -21.773699999707947
+     ],
+     [
+      2.8239699993125176,
+      -1.7252500001445257,
+      -21.798199999364623
+     ],
+     [
+      2.76946,
+      -1.98286,
+      -21.7737
+     ],
+     [
+      2.82397,
+      -1.72525,
+      -21.7982
+     ],
+     [
+      2.881039999160154,
+      -1.497039999790127,
+      -21.800599999787323
+     ],
+     [
+      2.9290799996132715,
+      -1.2726300003238185,
+      -21.758100000753814
+     ],
+     [
+      2.88104,
+      -1.49704,
+      -21.8006
+     ],
+     [
+      2.92908,
+      -1.27263,
+      -21.7581
+     ],
+     [
+      2.957740000669767,
+      -1.11315000046577,
+      -21.69239999953665
+     ],
+     [
+      2.984759999137764,
+      -0.9889280007525804,
+      -21.624000000100157
+     ],
+     [
+      2.95774,
+      -1.11315,
+      -21.6924
+     ],
+     [
+      2.98476,
+      -0.988928,
+      -21.624
+     ],
+     [
+      3.0478300004203582,
+      -0.8164050007157816,
+      -21.514699999924098
+     ],
+     [
+      3.13617999982776,
+      -0.682443999999558,
+      -21.419399999991423
+     ],
+     [
+      3.04783,
+      -0.816405,
+      -21.5147
+     ],
+     [
+      3.13618,
+      -0.682444,
+      -21.4194
+     ],
+     [
+      3.2779800004858695,
+      -0.6102730004669147,
+      -20.98050000085132
+     ]
+    ],
+    "target": 57,
+    "tol": 1e-05
+   }
+  },
+  {
+   "name": "point_chain_ends_gap1e-06_t0",
+   "upstream_ref": "source/SMLib/src/SmTrimmingTools.cpp:1960 (via SM_API_test:TestSmOrderCurves)",
+   "inputs": {
+    "op": "point",
+    "pts": [
+     [
+      3.34954,
+      -0.678646,
+      -20.9003
+     ],
+     [
+      3.3888406347538305,
+      -0.8110283460709462,
+      -20.773899372674162
+     ],
+     [
+      3.3917698055822982,
+      -1.019920022910747,
+      -20.62779984193613
+     ],
+     [
+      3.38884,
+      -0.811028,
+      -20.7739
+     ],
+     [
+      3.39177,
+      -1.01992,
+      -20.6278
+     ],
+     [
+      3.3709992667634774,
+      -1.3186903848656926,
+      -20.48809971778614
+     ],
+     [
+      3.3401796303999345,
+      -1.7031500802484425,
+      -20.369599283721698
+     ],
+     [
+      3.371,
+      -1.31869,
+      -20.4881
+     ],
+     [
+      3.34018,
+      -1.70315,
+      -20.3696
+     ],
+     [
+      3.2959107286891003,
+      -2.1106000420621247,
+      -20.272099876895197
+     ],
+     [
+      3.2312108893256695,
+      -2.470769412335913,
+      -20.193799844610716
+     ],
+     [
+      3.29591,
+      -2.1106,
+      -20.2721
+     ],
+     [
+      3.23121,
+      -2.47077,
+      -20.1938
+     ],
+     [
+      3.1432692955398487,
+      -2.812639900966403,
+      -20.14020005896036
+     ],
+     [
+      3.063869241288631,
+      -3.1361393373063193,
+      -20.17850026100791
+     ],
+     [
+      3.14327,
+      -2.81264,
+      -20.1402
+     ],
+     [
+      3.06387,
+      -3.13614,
+      -20.1785
+     ],
+     [
+      3.03451947771222,
+      -3.2982190885360585,
+      -20.25989912275168
+     ],
+     [
+      3.0139702876244048,
+      -3.4456098058967926,
+      -20.369700339601117
+     ],
+     [
+      3.03452,
+      -3.29822,
+      -20.2599
+     ],
+     [
+      3.01397,
+      -3.44561,
+      -20.3697
+     ],
+     [
+      2.9966796587648266,
+      -3.568890273880097,
+      -20.473400828208586
+     ],
+     [
+      2.9789500536796734,
+      -3.665729324429754,
+      -20.558200745031982
+     ],
+     [
+      2.99668,
+      -3.56889,
+      -20.4734
+     ],
+     [
+      2.97895,
+      -3.66573,
+      -20.5582
+     ],
+     [
+      2.933540912973771,
+      -3.7781190775565614,
+      -20.660299787031942
+     ],
+     [
+      2.8654403379452624,
+      -3.779659172328238,
+      -20.627000575968967
+     ],
+     [
+      2.93354,
+      -3.77812,
+      -20.6603
+     ],
+     [
+      2.86544,
+      -3.77966,
+      -20.627
+     ],
+     [
+      2.8147702162799253,
+      -3.726790427940256,
+      -21.213099278707897
+     ],
+     [
+      2.75929021836426,
+      -3.59347957000964,
+      -21.273399488781802
+     ],
+     [
+      2.81477,
+      -3.72679,
+      -21.2131
+     ],
+     [
+      2.75929,
+      -3.59348,
+      -21.2734
+     ],
+     [
+      2.7008209087829376,
+      -3.3589908266251407,
+      -21.372500674748935
+     ],
+     [
+      2.682539267371552,
+      -3.0524497839725946,
+      -21.50939979856155
+     ],
+     [
+      2.70082,
+      -3.35899,
+      -21.3725
+     ],
+     [
+      2.68254,
+      -3.05245,
+      -21.5094
+     ],
+     [
+      2.701510756137099,
+      -2.7358894866751933,
+      -21.636699654128243
+     ],
+     [
+      2.72786976905647,
+      -2.3698396548333216,
+      -21.725799084464153
+     ],
+     [
+      2.70151,
+      -2.73589,
+      -21.6367
+     ],
+     [
+      2.72787,
+      -2.36984,
+      -21.7258
+     ],
+     [
+      2.7694604047169618,
+      -1.9828609324754674,
+      -21.773700514598843
+     ],
+     [
+      2.823970968062006,
+      -1.7252496944470683,
+      -21.798200563209267
+     ],
+     [
+      2.76946,
+      -1.98286,
+      -21.7737
+     ],
+     [
+      2.82397,
+      -1.72525,
+      -21.7982
+     ],
+     [
+      2.8810409562106516,
+      -1.4970399560943901,
+      -21.800600998416822
+     ],
+     [
+      2.9290798730758123,
+      -1.2726290182136066,
+      -21.75809966167183
+     ],
+     [
+      2.88104,
+      -1.49704,
+      -21.8006
+     ],
+     [
+      2.92908,
+      -1.27263,
+      -21.7581
+     ],
+     [
+      2.957739341250717,
+      -1.1131501206678078,
+      -21.692399895308238
+     ],
+     [
+      2.984759602380304,
+      -0.9889271568845633,
+      -21.624000564249105
+     ],
+     [
+      2.95774,
+      -1.11315,
+      -21.6924
+     ],
+     [
+      2.98476,
+      -0.988928,
+      -21.624
+     ],
+     [
+      3.047829202846915,
+      -0.8164055824026528,
+      -21.51469943791464
+     ],
+     [
+      3.1361790374101797,
+      -0.6824430773819263,
+      -21.41939969055305
+     ],
+     [
+      3.04783,
+      -0.816405,
+      -21.5147
+     ],
+     [
+      3.13618,
+      -0.682444,
+      -21.4194
+     ],
+     [
+      3.277980016005439,
+      -0.610272711173865,
+      -20.980499181366575
+     ]
+    ],
+    "target": 0,
+    "tol": 1e-05
+   }
+  },
+  {
+   "name": "point_chain_ends_gap1e-06_t1",
+   "upstream_ref": "source/SMLib/src/SmTrimmingTools.cpp:1960 (via SM_API_test:TestSmOrderCurves)",
+   "inputs": {
+    "op": "point",
+    "pts": [
+     [
+      3.34954,
+      -0.678646,
+      -20.9003
+     ],
+     [
+      3.3888406347538305,
+      -0.8110283460709462,
+      -20.773899372674162
+     ],
+     [
+      3.3917698055822982,
+      -1.019920022910747,
+      -20.62779984193613
+     ],
+     [
+      3.38884,
+      -0.811028,
+      -20.7739
+     ],
+     [
+      3.39177,
+      -1.01992,
+      -20.6278
+     ],
+     [
+      3.3709992667634774,
+      -1.3186903848656926,
+      -20.48809971778614
+     ],
+     [
+      3.3401796303999345,
+      -1.7031500802484425,
+      -20.369599283721698
+     ],
+     [
+      3.371,
+      -1.31869,
+      -20.4881
+     ],
+     [
+      3.34018,
+      -1.70315,
+      -20.3696
+     ],
+     [
+      3.2959107286891003,
+      -2.1106000420621247,
+      -20.272099876895197
+     ],
+     [
+      3.2312108893256695,
+      -2.470769412335913,
+      -20.193799844610716
+     ],
+     [
+      3.29591,
+      -2.1106,
+      -20.2721
+     ],
+     [
+      3.23121,
+      -2.47077,
+      -20.1938
+     ],
+     [
+      3.1432692955398487,
+      -2.812639900966403,
+      -20.14020005896036
+     ],
+     [
+      3.063869241288631,
+      -3.1361393373063193,
+      -20.17850026100791
+     ],
+     [
+      3.14327,
+      -2.81264,
+      -20.1402
+     ],
+     [
+      3.06387,
+      -3.13614,
+      -20.1785
+     ],
+     [
+      3.03451947771222,
+      -3.2982190885360585,
+      -20.25989912275168
+     ],
+     [
+      3.0139702876244048,
+      -3.4456098058967926,
+      -20.369700339601117
+     ],
+     [
+      3.03452,
+      -3.29822,
+      -20.2599
+     ],
+     [
+      3.01397,
+      -3.44561,
+      -20.3697
+     ],
+     [
+      2.9966796587648266,
+      -3.568890273880097,
+      -20.473400828208586
+     ],
+     [
+      2.9789500536796734,
+      -3.665729324429754,
+      -20.558200745031982
+     ],
+     [
+      2.99668,
+      -3.56889,
+      -20.4734
+     ],
+     [
+      2.97895,
+      -3.66573,
+      -20.5582
+     ],
+     [
+      2.933540912973771,
+      -3.7781190775565614,
+      -20.660299787031942
+     ],
+     [
+      2.8654403379452624,
+      -3.779659172328238,
+      -20.627000575968967
+     ],
+     [
+      2.93354,
+      -3.77812,
+      -20.6603
+     ],
+     [
+      2.86544,
+      -3.77966,
+      -20.627
+     ],
+     [
+      2.8147702162799253,
+      -3.726790427940256,
+      -21.213099278707897
+     ],
+     [
+      2.75929021836426,
+      -3.59347957000964,
+      -21.273399488781802
+     ],
+     [
+      2.81477,
+      -3.72679,
+      -21.2131
+     ],
+     [
+      2.75929,
+      -3.59348,
+      -21.2734
+     ],
+     [
+      2.7008209087829376,
+      -3.3589908266251407,
+      -21.372500674748935
+     ],
+     [
+      2.682539267371552,
+      -3.0524497839725946,
+      -21.50939979856155
+     ],
+     [
+      2.70082,
+      -3.35899,
+      -21.3725
+     ],
+     [
+      2.68254,
+      -3.05245,
+      -21.5094
+     ],
+     [
+      2.701510756137099,
+      -2.7358894866751933,
+      -21.636699654128243
+     ],
+     [
+      2.72786976905647,
+      -2.3698396548333216,
+      -21.725799084464153
+     ],
+     [
+      2.70151,
+      -2.73589,
+      -21.6367
+     ],
+     [
+      2.72787,
+      -2.36984,
+      -21.7258
+     ],
+     [
+      2.7694604047169618,
+      -1.9828609324754674,
+      -21.773700514598843
+     ],
+     [
+      2.823970968062006,
+      -1.7252496944470683,
+      -21.798200563209267
+     ],
+     [
+      2.76946,
+      -1.98286,
+      -21.7737
+     ],
+     [
+      2.82397,
+      -1.72525,
+      -21.7982
+     ],
+     [
+      2.8810409562106516,
+      -1.4970399560943901,
+      -21.800600998416822
+     ],
+     [
+      2.9290798730758123,
+      -1.2726290182136066,
+      -21.75809966167183
+     ],
+     [
+      2.88104,
+      -1.49704,
+      -21.8006
+     ],
+     [
+      2.92908,
+      -1.27263,
+      -21.7581
+     ],
+     [
+      2.957739341250717,
+      -1.1131501206678078,
+      -21.692399895308238
+     ],
+     [
+      2.984759602380304,
+      -0.9889271568845633,
+      -21.624000564249105
+     ],
+     [
+      2.95774,
+      -1.11315,
+      -21.6924
+     ],
+     [
+      2.98476,
+      -0.988928,
+      -21.624
+     ],
+     [
+      3.047829202846915,
+      -0.8164055824026528,
+      -21.51469943791464
+     ],
+     [
+      3.1361790374101797,
+      -0.6824430773819263,
+      -21.41939969055305
+     ],
+     [
+      3.04783,
+      -0.816405,
+      -21.5147
+     ],
+     [
+      3.13618,
+      -0.682444,
+      -21.4194
+     ],
+     [
+      3.277980016005439,
+      -0.610272711173865,
+      -20.980499181366575
+     ]
+    ],
+    "target": 1,
+    "tol": 1e-05
+   }
+  },
+  {
+   "name": "point_chain_ends_gap1e-06_t7",
+   "upstream_ref": "source/SMLib/src/SmTrimmingTools.cpp:1960 (via SM_API_test:TestSmOrderCurves)",
+   "inputs": {
+    "op": "point",
+    "pts": [
+     [
+      3.34954,
+      -0.678646,
+      -20.9003
+     ],
+     [
+      3.3888406347538305,
+      -0.8110283460709462,
+      -20.773899372674162
+     ],
+     [
+      3.3917698055822982,
+      -1.019920022910747,
+      -20.62779984193613
+     ],
+     [
+      3.38884,
+      -0.811028,
+      -20.7739
+     ],
+     [
+      3.39177,
+      -1.01992,
+      -20.6278
+     ],
+     [
+      3.3709992667634774,
+      -1.3186903848656926,
+      -20.48809971778614
+     ],
+     [
+      3.3401796303999345,
+      -1.7031500802484425,
+      -20.369599283721698
+     ],
+     [
+      3.371,
+      -1.31869,
+      -20.4881
+     ],
+     [
+      3.34018,
+      -1.70315,
+      -20.3696
+     ],
+     [
+      3.2959107286891003,
+      -2.1106000420621247,
+      -20.272099876895197
+     ],
+     [
+      3.2312108893256695,
+      -2.470769412335913,
+      -20.193799844610716
+     ],
+     [
+      3.29591,
+      -2.1106,
+      -20.2721
+     ],
+     [
+      3.23121,
+      -2.47077,
+      -20.1938
+     ],
+     [
+      3.1432692955398487,
+      -2.812639900966403,
+      -20.14020005896036
+     ],
+     [
+      3.063869241288631,
+      -3.1361393373063193,
+      -20.17850026100791
+     ],
+     [
+      3.14327,
+      -2.81264,
+      -20.1402
+     ],
+     [
+      3.06387,
+      -3.13614,
+      -20.1785
+     ],
+     [
+      3.03451947771222,
+      -3.2982190885360585,
+      -20.25989912275168
+     ],
+     [
+      3.0139702876244048,
+      -3.4456098058967926,
+      -20.369700339601117
+     ],
+     [
+      3.03452,
+      -3.29822,
+      -20.2599
+     ],
+     [
+      3.01397,
+      -3.44561,
+      -20.3697
+     ],
+     [
+      2.9966796587648266,
+      -3.568890273880097,
+      -20.473400828208586
+     ],
+     [
+      2.9789500536796734,
+      -3.665729324429754,
+      -20.558200745031982
+     ],
+     [
+      2.99668,
+      -3.56889,
+      -20.4734
+     ],
+     [
+      2.97895,
+      -3.66573,
+      -20.5582
+     ],
+     [
+      2.933540912973771,
+      -3.7781190775565614,
+      -20.660299787031942
+     ],
+     [
+      2.8654403379452624,
+      -3.779659172328238,
+      -20.627000575968967
+     ],
+     [
+      2.93354,
+      -3.77812,
+      -20.6603
+     ],
+     [
+      2.86544,
+      -3.77966,
+      -20.627
+     ],
+     [
+      2.8147702162799253,
+      -3.726790427940256,
+      -21.213099278707897
+     ],
+     [
+      2.75929021836426,
+      -3.59347957000964,
+      -21.273399488781802
+     ],
+     [
+      2.81477,
+      -3.72679,
+      -21.2131
+     ],
+     [
+      2.75929,
+      -3.59348,
+      -21.2734
+     ],
+     [
+      2.7008209087829376,
+      -3.3589908266251407,
+      -21.372500674748935
+     ],
+     [
+      2.682539267371552,
+      -3.0524497839725946,
+      -21.50939979856155
+     ],
+     [
+      2.70082,
+      -3.35899,
+      -21.3725
+     ],
+     [
+      2.68254,
+      -3.05245,
+      -21.5094
+     ],
+     [
+      2.701510756137099,
+      -2.7358894866751933,
+      -21.636699654128243
+     ],
+     [
+      2.72786976905647,
+      -2.3698396548333216,
+      -21.725799084464153
+     ],
+     [
+      2.70151,
+      -2.73589,
+      -21.6367
+     ],
+     [
+      2.72787,
+      -2.36984,
+      -21.7258
+     ],
+     [
+      2.7694604047169618,
+      -1.9828609324754674,
+      -21.773700514598843
+     ],
+     [
+      2.823970968062006,
+      -1.7252496944470683,
+      -21.798200563209267
+     ],
+     [
+      2.76946,
+      -1.98286,
+      -21.7737
+     ],
+     [
+      2.82397,
+      -1.72525,
+      -21.7982
+     ],
+     [
+      2.8810409562106516,
+      -1.4970399560943901,
+      -21.800600998416822
+     ],
+     [
+      2.9290798730758123,
+      -1.2726290182136066,
+      -21.75809966167183
+     ],
+     [
+      2.88104,
+      -1.49704,
+      -21.8006
+     ],
+     [
+      2.92908,
+      -1.27263,
+      -21.7581
+     ],
+     [
+      2.957739341250717,
+      -1.1131501206678078,
+      -21.692399895308238
+     ],
+     [
+      2.984759602380304,
+      -0.9889271568845633,
+      -21.624000564249105
+     ],
+     [
+      2.95774,
+      -1.11315,
+      -21.6924
+     ],
+     [
+      2.98476,
+      -0.988928,
+      -21.624
+     ],
+     [
+      3.047829202846915,
+      -0.8164055824026528,
+      -21.51469943791464
+     ],
+     [
+      3.1361790374101797,
+      -0.6824430773819263,
+      -21.41939969055305
+     ],
+     [
+      3.04783,
+      -0.816405,
+      -21.5147
+     ],
+     [
+      3.13618,
+      -0.682444,
+      -21.4194
+     ],
+     [
+      3.277980016005439,
+      -0.610272711173865,
+      -20.980499181366575
+     ]
+    ],
+    "target": 7,
+    "tol": 1e-05
+   }
+  },
+  {
+   "name": "point_chain_ends_gap1e-06_t57",
+   "upstream_ref": "source/SMLib/src/SmTrimmingTools.cpp:1960 (via SM_API_test:TestSmOrderCurves)",
+   "inputs": {
+    "op": "point",
+    "pts": [
+     [
+      3.34954,
+      -0.678646,
+      -20.9003
+     ],
+     [
+      3.3888406347538305,
+      -0.8110283460709462,
+      -20.773899372674162
+     ],
+     [
+      3.3917698055822982,
+      -1.019920022910747,
+      -20.62779984193613
+     ],
+     [
+      3.38884,
+      -0.811028,
+      -20.7739
+     ],
+     [
+      3.39177,
+      -1.01992,
+      -20.6278
+     ],
+     [
+      3.3709992667634774,
+      -1.3186903848656926,
+      -20.48809971778614
+     ],
+     [
+      3.3401796303999345,
+      -1.7031500802484425,
+      -20.369599283721698
+     ],
+     [
+      3.371,
+      -1.31869,
+      -20.4881
+     ],
+     [
+      3.34018,
+      -1.70315,
+      -20.3696
+     ],
+     [
+      3.2959107286891003,
+      -2.1106000420621247,
+      -20.272099876895197
+     ],
+     [
+      3.2312108893256695,
+      -2.470769412335913,
+      -20.193799844610716
+     ],
+     [
+      3.29591,
+      -2.1106,
+      -20.2721
+     ],
+     [
+      3.23121,
+      -2.47077,
+      -20.1938
+     ],
+     [
+      3.1432692955398487,
+      -2.812639900966403,
+      -20.14020005896036
+     ],
+     [
+      3.063869241288631,
+      -3.1361393373063193,
+      -20.17850026100791
+     ],
+     [
+      3.14327,
+      -2.81264,
+      -20.1402
+     ],
+     [
+      3.06387,
+      -3.13614,
+      -20.1785
+     ],
+     [
+      3.03451947771222,
+      -3.2982190885360585,
+      -20.25989912275168
+     ],
+     [
+      3.0139702876244048,
+      -3.4456098058967926,
+      -20.369700339601117
+     ],
+     [
+      3.03452,
+      -3.29822,
+      -20.2599
+     ],
+     [
+      3.01397,
+      -3.44561,
+      -20.3697
+     ],
+     [
+      2.9966796587648266,
+      -3.568890273880097,
+      -20.473400828208586
+     ],
+     [
+      2.9789500536796734,
+      -3.665729324429754,
+      -20.558200745031982
+     ],
+     [
+      2.99668,
+      -3.56889,
+      -20.4734
+     ],
+     [
+      2.97895,
+      -3.66573,
+      -20.5582
+     ],
+     [
+      2.933540912973771,
+      -3.7781190775565614,
+      -20.660299787031942
+     ],
+     [
+      2.8654403379452624,
+      -3.779659172328238,
+      -20.627000575968967
+     ],
+     [
+      2.93354,
+      -3.77812,
+      -20.6603
+     ],
+     [
+      2.86544,
+      -3.77966,
+      -20.627
+     ],
+     [
+      2.8147702162799253,
+      -3.726790427940256,
+      -21.213099278707897
+     ],
+     [
+      2.75929021836426,
+      -3.59347957000964,
+      -21.273399488781802
+     ],
+     [
+      2.81477,
+      -3.72679,
+      -21.2131
+     ],
+     [
+      2.75929,
+      -3.59348,
+      -21.2734
+     ],
+     [
+      2.7008209087829376,
+      -3.3589908266251407,
+      -21.372500674748935
+     ],
+     [
+      2.682539267371552,
+      -3.0524497839725946,
+      -21.50939979856155
+     ],
+     [
+      2.70082,
+      -3.35899,
+      -21.3725
+     ],
+     [
+      2.68254,
+      -3.05245,
+      -21.5094
+     ],
+     [
+      2.701510756137099,
+      -2.7358894866751933,
+      -21.636699654128243
+     ],
+     [
+      2.72786976905647,
+      -2.3698396548333216,
+      -21.725799084464153
+     ],
+     [
+      2.70151,
+      -2.73589,
+      -21.6367
+     ],
+     [
+      2.72787,
+      -2.36984,
+      -21.7258
+     ],
+     [
+      2.7694604047169618,
+      -1.9828609324754674,
+      -21.773700514598843
+     ],
+     [
+      2.823970968062006,
+      -1.7252496944470683,
+      -21.798200563209267
+     ],
+     [
+      2.76946,
+      -1.98286,
+      -21.7737
+     ],
+     [
+      2.82397,
+      -1.72525,
+      -21.7982
+     ],
+     [
+      2.8810409562106516,
+      -1.4970399560943901,
+      -21.800600998416822
+     ],
+     [
+      2.9290798730758123,
+      -1.2726290182136066,
+      -21.75809966167183
+     ],
+     [
+      2.88104,
+      -1.49704,
+      -21.8006
+     ],
+     [
+      2.92908,
+      -1.27263,
+      -21.7581
+     ],
+     [
+      2.957739341250717,
+      -1.1131501206678078,
+      -21.692399895308238
+     ],
+     [
+      2.984759602380304,
+      -0.9889271568845633,
+      -21.624000564249105
+     ],
+     [
+      2.95774,
+      -1.11315,
+      -21.6924
+     ],
+     [
+      2.98476,
+      -0.988928,
+      -21.624
+     ],
+     [
+      3.047829202846915,
+      -0.8164055824026528,
+      -21.51469943791464
+     ],
+     [
+      3.1361790374101797,
+      -0.6824430773819263,
+      -21.41939969055305
+     ],
+     [
+      3.04783,
+      -0.816405,
+      -21.5147
+     ],
+     [
+      3.13618,
+      -0.682444,
+      -21.4194
+     ],
+     [
+      3.277980016005439,
+      -0.610272711173865,
+      -20.980499181366575
+     ]
+    ],
+    "target": 57,
+    "tol": 1e-05
+   }
+  },
+  {
+   "name": "point_chain_ends_gap0.0001_t0",
+   "upstream_ref": "source/SMLib/src/SmTrimmingTools.cpp:1960 (via SM_API_test:TestSmOrderCurves)",
+   "inputs": {
+    "op": "point",
+    "pts": [
+     [
+      3.34954,
+      -0.678646,
+      -20.9003
+     ],
+     [
+      3.3887593351761396,
+      -0.8109787081762133,
+      -20.773844251231978
+     ],
+     [
+      3.391850561903901,
+      -1.0199877213834032,
+      -20.627744669691133
+     ],
+     [
+      3.38884,
+      -0.811028,
+      -20.7739
+     ],
+     [
+      3.39177,
+      -1.01992,
+      -20.6278
+     ],
+     [
+      3.371048464280873,
+      -1.3187455241292796,
+      -20.488006703126082
+     ],
+     [
+      3.340086300984311,
+      -1.703065056547422,
+      -20.369559162418245
+     ],
+     [
+      3.371,
+      -1.31869,
+      -20.4881
+     ],
+     [
+      3.34018,
+      -1.70315,
+      -20.3696
+     ],
+     [
+      3.2959012515405615,
+      -2.1105730790482564,
+      -20.27215440893364
+     ],
+     [
+      3.2311265218205403,
+      -2.4708306840882996,
+      -20.193769734870408
+     ],
+     [
+      3.29591,
+      -2.1106,
+      -20.2721
+     ],
+     [
+      3.23121,
+      -2.47077,
+      -20.1938
+     ],
+     [
+      3.1432495452572957,
+      -2.8126443455405337,
+      -20.140217427286544
+     ],
+     [
+      3.063771966268884,
+      -3.136129079702942,
+      -20.178496018778432
+     ],
+     [
+      3.14327,
+      -2.81264,
+      -20.1402
+     ],
+     [
+      3.06387,
+      -3.13614,
+      -20.1785
+     ],
+     [
+      3.034428789296823,
+      -3.298201439565299,
+      -20.259927550147395
+     ],
+     [
+      3.013904127634356,
+      -3.4455483497671504,
+      -20.369680082195874
+     ],
+     [
+      3.03452,
+      -3.29822,
+      -20.2599
+     ],
+     [
+      3.01397,
+      -3.44561,
+      -20.3697
+     ],
+     [
+      2.9967230388530486,
+      -3.5689683454630092,
+      -20.47348651774924
+     ],
+     [
+      2.9789839247779066,
+      -3.6657567920705687,
+      -20.558277235991678
+     ],
+     [
+      2.99668,
+      -3.56889,
+      -20.4734
+     ],
+     [
+      2.97895,
+      -3.66573,
+      -20.5582
+     ],
+     [
+      2.9334524590998248,
+      -3.7780395897905996,
+      -20.66038771560423
+     ],
+     [
+      2.8655324021852397,
+      -3.779591696118382,
+      -20.62692542684118
+     ],
+     [
+      2.93354,
+      -3.77812,
+      -20.6603
+     ],
+     [
+      2.86544,
+      -3.77966,
+      -20.627
+     ],
+     [
+      2.8148524683888656,
+      -3.726877800100113,
+      -21.21316828628907
+     ],
+     [
+      2.7593674266540247,
+      -3.5934911213213234,
+      -21.273313807987748
+     ],
+     [
+      2.81477,
+      -3.72679,
+      -21.2131
+     ],
+     [
+      2.75929,
+      -3.59348,
+      -21.2734
+     ],
+     [
+      2.700839063662483,
+      -3.3590227337581684,
+      -21.372490823174637
+     ],
+     [
+      2.682593116943898,
+      -3.052431258067583,
+      -21.50947142617276
+     ],
+     [
+      2.70082,
+      -3.35899,
+      -21.3725
+     ],
+     [
+      2.68254,
+      -3.05245,
+      -21.5094
+     ],
+     [
+      2.7014124013233882,
+      -2.735846438190495,
+      -21.636691056333124
+     ],
+     [
+      2.7279359444483964,
+      -2.3698225226228424,
+      -21.725859329653467
+     ],
+     [
+      2.70151,
+      -2.73589,
+      -21.6367
+     ],
+     [
+      2.72787,
+      -2.36984,
+      -21.7258
+     ],
+     [
+      2.769477498011834,
+      -1.9828068789576443,
+      -21.773609918120155
+     ],
+     [
+      2.8239626731799126,
+      -1.72515475429885,
+      -21.798187029199337
+     ],
+     [
+      2.76946,
+      -1.98286,
+      -21.7737
+     ],
+     [
+      2.82397,
+      -1.72525,
+      -21.7982
+     ],
+     [
+      2.881081631363021,
+      -1.497112075520407,
+      -21.800530278391715
+     ],
+     [
+      2.9291327347181135,
+      -1.272623730820319,
+      -21.75809260596142
+     ],
+     [
+      2.88104,
+      -1.49704,
+      -21.8006
+     ],
+     [
+      2.92908,
+      -1.27263,
+      -21.7581
+     ],
+     [
+      2.9578268823074727,
+      -1.1132229461442862,
+      -21.692417182465146
+     ],
+     [
+      2.984784803957751,
+      -0.988958891909869,
+      -21.62400967317142
+     ],
+     [
+      2.95774,
+      -1.11315,
+      -21.6924
+     ],
+     [
+      2.98476,
+      -0.988928,
+      -21.624
+     ],
+     [
+      3.0479296517362564,
+      -0.8164253222572986,
+      -21.514758040888577
+     ],
+     [
+      3.1362569133280562,
+      -0.6824356352462603,
+      -21.41947706957402
+     ],
+     [
+      3.04783,
+      -0.816405,
+      -21.5147
+     ],
+     [
+      3.13618,
+      -0.682444,
+      -21.4194
+     ],
+     [
+      3.2779475968814333,
+      -0.6102782848791971,
+      -20.98041388140041
+     ]
+    ],
+    "target": 0,
+    "tol": 1e-05
+   }
+  },
+  {
+   "name": "point_chain_ends_gap0.0001_t1",
+   "upstream_ref": "source/SMLib/src/SmTrimmingTools.cpp:1960 (via SM_API_test:TestSmOrderCurves)",
+   "inputs": {
+    "op": "point",
+    "pts": [
+     [
+      3.34954,
+      -0.678646,
+      -20.9003
+     ],
+     [
+      3.3887593351761396,
+      -0.8109787081762133,
+      -20.773844251231978
+     ],
+     [
+      3.391850561903901,
+      -1.0199877213834032,
+      -20.627744669691133
+     ],
+     [
+      3.38884,
+      -0.811028,
+      -20.7739
+     ],
+     [
+      3.39177,
+      -1.01992,
+      -20.6278
+     ],
+     [
+      3.371048464280873,
+      -1.3187455241292796,
+      -20.488006703126082
+     ],
+     [
+      3.340086300984311,
+      -1.703065056547422,
+      -20.369559162418245
+     ],
+     [
+      3.371,
+      -1.31869,
+      -20.4881
+     ],
+     [
+      3.34018,
+      -1.70315,
+      -20.3696
+     ],
+     [
+      3.2959012515405615,
+      -2.1105730790482564,
+      -20.27215440893364
+     ],
+     [
+      3.2311265218205403,
+      -2.4708306840882996,
+      -20.193769734870408
+     ],
+     [
+      3.29591,
+      -2.1106,
+      -20.2721
+     ],
+     [
+      3.23121,
+      -2.47077,
+      -20.1938
+     ],
+     [
+      3.1432495452572957,
+      -2.8126443455405337,
+      -20.140217427286544
+     ],
+     [
+      3.063771966268884,
+      -3.136129079702942,
+      -20.178496018778432
+     ],
+     [
+      3.14327,
+      -2.81264,
+      -20.1402
+     ],
+     [
+      3.06387,
+      -3.13614,
+      -20.1785
+     ],
+     [
+      3.034428789296823,
+      -3.298201439565299,
+      -20.259927550147395
+     ],
+     [
+      3.013904127634356,
+      -3.4455483497671504,
+      -20.369680082195874
+     ],
+     [
+      3.03452,
+      -3.29822,
+      -20.2599
+     ],
+     [
+      3.01397,
+      -3.44561,
+      -20.3697
+     ],
+     [
+      2.9967230388530486,
+      -3.5689683454630092,
+      -20.47348651774924
+     ],
+     [
+      2.9789839247779066,
+      -3.6657567920705687,
+      -20.558277235991678
+     ],
+     [
+      2.99668,
+      -3.56889,
+      -20.4734
+     ],
+     [
+      2.97895,
+      -3.66573,
+      -20.5582
+     ],
+     [
+      2.9334524590998248,
+      -3.7780395897905996,
+      -20.66038771560423
+     ],
+     [
+      2.8655324021852397,
+      -3.779591696118382,
+      -20.62692542684118
+     ],
+     [
+      2.93354,
+      -3.77812,
+      -20.6603
+     ],
+     [
+      2.86544,
+      -3.77966,
+      -20.627
+     ],
+     [
+      2.8148524683888656,
+      -3.726877800100113,
+      -21.21316828628907
+     ],
+     [
+      2.7593674266540247,
+      -3.5934911213213234,
+      -21.273313807987748
+     ],
+     [
+      2.81477,
+      -3.72679,
+      -21.2131
+     ],
+     [
+      2.75929,
+      -3.59348,
+      -21.2734
+     ],
+     [
+      2.700839063662483,
+      -3.3590227337581684,
+      -21.372490823174637
+     ],
+     [
+      2.682593116943898,
+      -3.052431258067583,
+      -21.50947142617276
+     ],
+     [
+      2.70082,
+      -3.35899,
+      -21.3725
+     ],
+     [
+      2.68254,
+      -3.05245,
+      -21.5094
+     ],
+     [
+      2.7014124013233882,
+      -2.735846438190495,
+      -21.636691056333124
+     ],
+     [
+      2.7279359444483964,
+      -2.3698225226228424,
+      -21.725859329653467
+     ],
+     [
+      2.70151,
+      -2.73589,
+      -21.6367
+     ],
+     [
+      2.72787,
+      -2.36984,
+      -21.7258
+     ],
+     [
+      2.769477498011834,
+      -1.9828068789576443,
+      -21.773609918120155
+     ],
+     [
+      2.8239626731799126,
+      -1.72515475429885,
+      -21.798187029199337
+     ],
+     [
+      2.76946,
+      -1.98286,
+      -21.7737
+     ],
+     [
+      2.82397,
+      -1.72525,
+      -21.7982
+     ],
+     [
+      2.881081631363021,
+      -1.497112075520407,
+      -21.800530278391715
+     ],
+     [
+      2.9291327347181135,
+      -1.272623730820319,
+      -21.75809260596142
+     ],
+     [
+      2.88104,
+      -1.49704,
+      -21.8006
+     ],
+     [
+      2.92908,
+      -1.27263,
+      -21.7581
+     ],
+     [
+      2.9578268823074727,
+      -1.1132229461442862,
+      -21.692417182465146
+     ],
+     [
+      2.984784803957751,
+      -0.988958891909869,
+      -21.62400967317142
+     ],
+     [
+      2.95774,
+      -1.11315,
+      -21.6924
+     ],
+     [
+      2.98476,
+      -0.988928,
+      -21.624
+     ],
+     [
+      3.0479296517362564,
+      -0.8164253222572986,
+      -21.514758040888577
+     ],
+     [
+      3.1362569133280562,
+      -0.6824356352462603,
+      -21.41947706957402
+     ],
+     [
+      3.04783,
+      -0.816405,
+      -21.5147
+     ],
+     [
+      3.13618,
+      -0.682444,
+      -21.4194
+     ],
+     [
+      3.2779475968814333,
+      -0.6102782848791971,
+      -20.98041388140041
+     ]
+    ],
+    "target": 1,
+    "tol": 1e-05
+   }
+  },
+  {
+   "name": "point_chain_ends_gap0.0001_t7",
+   "upstream_ref": "source/SMLib/src/SmTrimmingTools.cpp:1960 (via SM_API_test:TestSmOrderCurves)",
+   "inputs": {
+    "op": "point",
+    "pts": [
+     [
+      3.34954,
+      -0.678646,
+      -20.9003
+     ],
+     [
+      3.3887593351761396,
+      -0.8109787081762133,
+      -20.773844251231978
+     ],
+     [
+      3.391850561903901,
+      -1.0199877213834032,
+      -20.627744669691133
+     ],
+     [
+      3.38884,
+      -0.811028,
+      -20.7739
+     ],
+     [
+      3.39177,
+      -1.01992,
+      -20.6278
+     ],
+     [
+      3.371048464280873,
+      -1.3187455241292796,
+      -20.488006703126082
+     ],
+     [
+      3.340086300984311,
+      -1.703065056547422,
+      -20.369559162418245
+     ],
+     [
+      3.371,
+      -1.31869,
+      -20.4881
+     ],
+     [
+      3.34018,
+      -1.70315,
+      -20.3696
+     ],
+     [
+      3.2959012515405615,
+      -2.1105730790482564,
+      -20.27215440893364
+     ],
+     [
+      3.2311265218205403,
+      -2.4708306840882996,
+      -20.193769734870408
+     ],
+     [
+      3.29591,
+      -2.1106,
+      -20.2721
+     ],
+     [
+      3.23121,
+      -2.47077,
+      -20.1938
+     ],
+     [
+      3.1432495452572957,
+      -2.8126443455405337,
+      -20.140217427286544
+     ],
+     [
+      3.063771966268884,
+      -3.136129079702942,
+      -20.178496018778432
+     ],
+     [
+      3.14327,
+      -2.81264,
+      -20.1402
+     ],
+     [
+      3.06387,
+      -3.13614,
+      -20.1785
+     ],
+     [
+      3.034428789296823,
+      -3.298201439565299,
+      -20.259927550147395
+     ],
+     [
+      3.013904127634356,
+      -3.4455483497671504,
+      -20.369680082195874
+     ],
+     [
+      3.03452,
+      -3.29822,
+      -20.2599
+     ],
+     [
+      3.01397,
+      -3.44561,
+      -20.3697
+     ],
+     [
+      2.9967230388530486,
+      -3.5689683454630092,
+      -20.47348651774924
+     ],
+     [
+      2.9789839247779066,
+      -3.6657567920705687,
+      -20.558277235991678
+     ],
+     [
+      2.99668,
+      -3.56889,
+      -20.4734
+     ],
+     [
+      2.97895,
+      -3.66573,
+      -20.5582
+     ],
+     [
+      2.9334524590998248,
+      -3.7780395897905996,
+      -20.66038771560423
+     ],
+     [
+      2.8655324021852397,
+      -3.779591696118382,
+      -20.62692542684118
+     ],
+     [
+      2.93354,
+      -3.77812,
+      -20.6603
+     ],
+     [
+      2.86544,
+      -3.77966,
+      -20.627
+     ],
+     [
+      2.8148524683888656,
+      -3.726877800100113,
+      -21.21316828628907
+     ],
+     [
+      2.7593674266540247,
+      -3.5934911213213234,
+      -21.273313807987748
+     ],
+     [
+      2.81477,
+      -3.72679,
+      -21.2131
+     ],
+     [
+      2.75929,
+      -3.59348,
+      -21.2734
+     ],
+     [
+      2.700839063662483,
+      -3.3590227337581684,
+      -21.372490823174637
+     ],
+     [
+      2.682593116943898,
+      -3.052431258067583,
+      -21.50947142617276
+     ],
+     [
+      2.70082,
+      -3.35899,
+      -21.3725
+     ],
+     [
+      2.68254,
+      -3.05245,
+      -21.5094
+     ],
+     [
+      2.7014124013233882,
+      -2.735846438190495,
+      -21.636691056333124
+     ],
+     [
+      2.7279359444483964,
+      -2.3698225226228424,
+      -21.725859329653467
+     ],
+     [
+      2.70151,
+      -2.73589,
+      -21.6367
+     ],
+     [
+      2.72787,
+      -2.36984,
+      -21.7258
+     ],
+     [
+      2.769477498011834,
+      -1.9828068789576443,
+      -21.773609918120155
+     ],
+     [
+      2.8239626731799126,
+      -1.72515475429885,
+      -21.798187029199337
+     ],
+     [
+      2.76946,
+      -1.98286,
+      -21.7737
+     ],
+     [
+      2.82397,
+      -1.72525,
+      -21.7982
+     ],
+     [
+      2.881081631363021,
+      -1.497112075520407,
+      -21.800530278391715
+     ],
+     [
+      2.9291327347181135,
+      -1.272623730820319,
+      -21.75809260596142
+     ],
+     [
+      2.88104,
+      -1.49704,
+      -21.8006
+     ],
+     [
+      2.92908,
+      -1.27263,
+      -21.7581
+     ],
+     [
+      2.9578268823074727,
+      -1.1132229461442862,
+      -21.692417182465146
+     ],
+     [
+      2.984784803957751,
+      -0.988958891909869,
+      -21.62400967317142
+     ],
+     [
+      2.95774,
+      -1.11315,
+      -21.6924
+     ],
+     [
+      2.98476,
+      -0.988928,
+      -21.624
+     ],
+     [
+      3.0479296517362564,
+      -0.8164253222572986,
+      -21.514758040888577
+     ],
+     [
+      3.1362569133280562,
+      -0.6824356352462603,
+      -21.41947706957402
+     ],
+     [
+      3.04783,
+      -0.816405,
+      -21.5147
+     ],
+     [
+      3.13618,
+      -0.682444,
+      -21.4194
+     ],
+     [
+      3.2779475968814333,
+      -0.6102782848791971,
+      -20.98041388140041
+     ]
+    ],
+    "target": 7,
+    "tol": 1e-05
+   }
+  },
+  {
+   "name": "point_chain_ends_gap0.0001_t57",
+   "upstream_ref": "source/SMLib/src/SmTrimmingTools.cpp:1960 (via SM_API_test:TestSmOrderCurves)",
+   "inputs": {
+    "op": "point",
+    "pts": [
+     [
+      3.34954,
+      -0.678646,
+      -20.9003
+     ],
+     [
+      3.3887593351761396,
+      -0.8109787081762133,
+      -20.773844251231978
+     ],
+     [
+      3.391850561903901,
+      -1.0199877213834032,
+      -20.627744669691133
+     ],
+     [
+      3.38884,
+      -0.811028,
+      -20.7739
+     ],
+     [
+      3.39177,
+      -1.01992,
+      -20.6278
+     ],
+     [
+      3.371048464280873,
+      -1.3187455241292796,
+      -20.488006703126082
+     ],
+     [
+      3.340086300984311,
+      -1.703065056547422,
+      -20.369559162418245
+     ],
+     [
+      3.371,
+      -1.31869,
+      -20.4881
+     ],
+     [
+      3.34018,
+      -1.70315,
+      -20.3696
+     ],
+     [
+      3.2959012515405615,
+      -2.1105730790482564,
+      -20.27215440893364
+     ],
+     [
+      3.2311265218205403,
+      -2.4708306840882996,
+      -20.193769734870408
+     ],
+     [
+      3.29591,
+      -2.1106,
+      -20.2721
+     ],
+     [
+      3.23121,
+      -2.47077,
+      -20.1938
+     ],
+     [
+      3.1432495452572957,
+      -2.8126443455405337,
+      -20.140217427286544
+     ],
+     [
+      3.063771966268884,
+      -3.136129079702942,
+      -20.178496018778432
+     ],
+     [
+      3.14327,
+      -2.81264,
+      -20.1402
+     ],
+     [
+      3.06387,
+      -3.13614,
+      -20.1785
+     ],
+     [
+      3.034428789296823,
+      -3.298201439565299,
+      -20.259927550147395
+     ],
+     [
+      3.013904127634356,
+      -3.4455483497671504,
+      -20.369680082195874
+     ],
+     [
+      3.03452,
+      -3.29822,
+      -20.2599
+     ],
+     [
+      3.01397,
+      -3.44561,
+      -20.3697
+     ],
+     [
+      2.9967230388530486,
+      -3.5689683454630092,
+      -20.47348651774924
+     ],
+     [
+      2.9789839247779066,
+      -3.6657567920705687,
+      -20.558277235991678
+     ],
+     [
+      2.99668,
+      -3.56889,
+      -20.4734
+     ],
+     [
+      2.97895,
+      -3.66573,
+      -20.5582
+     ],
+     [
+      2.9334524590998248,
+      -3.7780395897905996,
+      -20.66038771560423
+     ],
+     [
+      2.8655324021852397,
+      -3.779591696118382,
+      -20.62692542684118
+     ],
+     [
+      2.93354,
+      -3.77812,
+      -20.6603
+     ],
+     [
+      2.86544,
+      -3.77966,
+      -20.627
+     ],
+     [
+      2.8148524683888656,
+      -3.726877800100113,
+      -21.21316828628907
+     ],
+     [
+      2.7593674266540247,
+      -3.5934911213213234,
+      -21.273313807987748
+     ],
+     [
+      2.81477,
+      -3.72679,
+      -21.2131
+     ],
+     [
+      2.75929,
+      -3.59348,
+      -21.2734
+     ],
+     [
+      2.700839063662483,
+      -3.3590227337581684,
+      -21.372490823174637
+     ],
+     [
+      2.682593116943898,
+      -3.052431258067583,
+      -21.50947142617276
+     ],
+     [
+      2.70082,
+      -3.35899,
+      -21.3725
+     ],
+     [
+      2.68254,
+      -3.05245,
+      -21.5094
+     ],
+     [
+      2.7014124013233882,
+      -2.735846438190495,
+      -21.636691056333124
+     ],
+     [
+      2.7279359444483964,
+      -2.3698225226228424,
+      -21.725859329653467
+     ],
+     [
+      2.70151,
+      -2.73589,
+      -21.6367
+     ],
+     [
+      2.72787,
+      -2.36984,
+      -21.7258
+     ],
+     [
+      2.769477498011834,
+      -1.9828068789576443,
+      -21.773609918120155
+     ],
+     [
+      2.8239626731799126,
+      -1.72515475429885,
+      -21.798187029199337
+     ],
+     [
+      2.76946,
+      -1.98286,
+      -21.7737
+     ],
+     [
+      2.82397,
+      -1.72525,
+      -21.7982
+     ],
+     [
+      2.881081631363021,
+      -1.497112075520407,
+      -21.800530278391715
+     ],
+     [
+      2.9291327347181135,
+      -1.272623730820319,
+      -21.75809260596142
+     ],
+     [
+      2.88104,
+      -1.49704,
+      -21.8006
+     ],
+     [
+      2.92908,
+      -1.27263,
+      -21.7581
+     ],
+     [
+      2.9578268823074727,
+      -1.1132229461442862,
+      -21.692417182465146
+     ],
+     [
+      2.984784803957751,
+      -0.988958891909869,
+      -21.62400967317142
+     ],
+     [
+      2.95774,
+      -1.11315,
+      -21.6924
+     ],
+     [
+      2.98476,
+      -0.988928,
+      -21.624
+     ],
+     [
+      3.0479296517362564,
+      -0.8164253222572986,
+      -21.514758040888577
+     ],
+     [
+      3.1362569133280562,
+      -0.6824356352462603,
+      -21.41947706957402
+     ],
+     [
+      3.04783,
+      -0.816405,
+      -21.5147
+     ],
+     [
+      3.13618,
+      -0.682444,
+      -21.4194
+     ],
+     [
+      3.2779475968814333,
+      -0.6102782848791971,
+      -20.98041388140041
+     ]
+    ],
+    "target": 57,
+    "tol": 1e-05
+   }
+  },
+  {
+   "name": "point_single",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "point",
+    "pts": [
+     [
+      1,
+      2,
+      3
+     ]
+    ],
+    "target": 0,
+    "tol": 1.0
+   }
+  },
+  {
+   "name": "point_all_same",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "point",
+    "pts": [
+     [
+      1,
+      2,
+      3
+     ],
+     [
+      1,
+      2,
+      3
+     ],
+     [
+      1,
+      2,
+      3
+     ],
+     [
+      1,
+      2,
+      3
+     ]
+    ],
+    "target": 2,
+    "tol": 1e-12
+   }
+  },
+  {
+   "name": "point_zero_tol_dup",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "point",
+    "pts": [
+     [
+      0,
+      0,
+      0
+     ],
+     [
+      0,
+      0,
+      0
+     ]
+    ],
+    "target": 1,
+    "tol": 0.0
+   }
+  },
+  {
+   "name": "point_tol_boundary",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "point",
+    "pts": [
+     [
+      0,
+      0,
+      0
+     ],
+     [
+      0.5,
+      0,
+      0
+     ],
+     [
+      3,
+      0,
+      0
+     ]
+    ],
+    "target": 0,
+    "tol": 0.5
+   }
+  },
+  {
+   "name": "point_tied_neighbours",
+   "upstream_ref": "edge case (two loops touch at a vertex)",
+   "inputs": {
+    "op": "point",
+    "pts": [
+     [
+      0,
+      0,
+      0
+     ],
+     [
+      0,
+      0.0001,
+      0
+     ],
+     [
+      0,
+      -0.0001,
+      0
+     ],
+     [
+      5,
+      5,
+      5
+     ]
+    ],
+    "target": 0,
+    "tol": 0.001
+   }
+  },
+  {
+   "name": "point_huge_coords",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "point",
+    "pts": [
+     [
+      1000000000000000.0,
+      0,
+      0
+     ],
+     [
+      1000000000000000.0,
+      1,
+      0
+     ],
+     [
+      -1000000000000000.0,
+      0,
+      0
+     ]
+    ],
+    "target": 0,
+    "tol": 2.0
+   }
+  },
+  {
+   "name": "point_far_beyond_big",
+   "upstream_ref": "edge case (distance^2 above SM_BIG_DOUBLE)",
+   "inputs": {
+    "op": "point",
+    "pts": [
+     [
+      0,
+      0,
+      0
+     ],
+     [
+      100000000000.0,
+      0,
+      0
+     ],
+     [
+      200000000000.0,
+      0,
+      0
+     ]
+    ],
+    "target": 0,
+    "tol": 1000000000000.0
+   }
+  },
+  {
+   "name": "vertex_empty",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "vertex",
+    "vertices": [],
+    "pnt": [
+     1,
+     2,
+     3
+    ],
+    "tol": 1.0
+   }
+  },
+  {
+   "name": "vertex_exact_hit",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:16184",
+   "inputs": {
+    "op": "vertex",
+    "vertices": [
+     [
+      5,
+      5,
+      5,
+      0.0001
+     ],
+     [
+      1,
+      2,
+      3,
+      0.0001
+     ]
+    ],
+    "pnt": [
+     1,
+     2,
+     3
+    ],
+    "tol": 1e-06
+   }
+  },
+  {
+   "name": "vertex_within_vertex_tol",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:16184",
+   "inputs": {
+    "op": "vertex",
+    "vertices": [
+     [
+      0,
+      0,
+      0,
+      0.001
+     ],
+     [
+      0.0001,
+      0,
+      0,
+      0.001
+     ],
+     [
+      0.0002,
+      0,
+      0,
+      0.001
+     ]
+    ],
+    "pnt": [
+     0.00025,
+     0,
+     0
+    ],
+    "tol": 0.0
+   }
+  },
+  {
+   "name": "vertex_none",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:16253",
+   "inputs": {
+    "op": "vertex",
+    "vertices": [
+     [
+      0,
+      0,
+      0,
+      1e-06
+     ],
+     [
+      1,
+      0,
+      0,
+      1e-06
+     ]
+    ],
+    "pnt": [
+     0.5,
+     0.5,
+     0
+    ],
+    "tol": 1e-06
+   }
+  },
+  {
+   "name": "coincident_box_with_large_fillet_start15",
+   "upstream_ref": "TestFiles/pt_TestFiles/box_with_large_fillet.smb (SmBrep.cpp:16324 / SmBrep.cpp:30234 call pattern)",
+   "inputs": {
+    "op": "coincident",
+    "file": {
+     "$upstream_file": "box_with_large_fillet.smb"
+    },
+    "n_edges": 15,
+    "edge": 0,
+    "copy_curve": false,
+    "swap": false,
+    "tol": 1e-06,
+    "start": 15
+   }
+  },
+  {
+   "name": "coincident_box_with_large_fillet_start17",
+   "upstream_ref": "TestFiles/pt_TestFiles/box_with_large_fillet.smb (SmBrep.cpp:16324 / SmBrep.cpp:30234 call pattern)",
+   "inputs": {
+    "op": "coincident",
+    "file": {
+     "$upstream_file": "box_with_large_fillet.smb"
+    },
+    "n_edges": 15,
+    "edge": 0,
+    "copy_curve": false,
+    "swap": false,
+    "tol": 1e-06,
+    "start": 17
+   }
+  },
+  {
+   "name": "coincident_box_with_large_fillet_e0_copy0_swap0",
+   "upstream_ref": "TestFiles/pt_TestFiles/box_with_large_fillet.smb (SmBrep.cpp:16324 / SmBrep.cpp:30234 call pattern)",
+   "inputs": {
+    "op": "coincident",
+    "file": {
+     "$upstream_file": "box_with_large_fillet.smb"
+    },
+    "n_edges": 15,
+    "edge": 0,
+    "copy_curve": false,
+    "swap": false,
+    "tol": 1e-06,
+    "start": 0
+   }
+  },
+  {
+   "name": "coincident_box_with_large_fillet_e0_copy0_swap1",
+   "upstream_ref": "TestFiles/pt_TestFiles/box_with_large_fillet.smb (SmBrep.cpp:16324 / SmBrep.cpp:30234 call pattern)",
+   "inputs": {
+    "op": "coincident",
+    "file": {
+     "$upstream_file": "box_with_large_fillet.smb"
+    },
+    "n_edges": 15,
+    "edge": 0,
+    "copy_curve": false,
+    "swap": true,
+    "tol": 1e-06,
+    "start": 0
+   }
+  },
+  {
+   "name": "coincident_box_with_large_fillet_e0_copy1_swap0",
+   "upstream_ref": "TestFiles/pt_TestFiles/box_with_large_fillet.smb (SmBrep.cpp:16324 / SmBrep.cpp:30234 call pattern)",
+   "inputs": {
+    "op": "coincident",
+    "file": {
+     "$upstream_file": "box_with_large_fillet.smb"
+    },
+    "n_edges": 15,
+    "edge": 0,
+    "copy_curve": true,
+    "swap": false,
+    "tol": 1e-06,
+    "start": 0
+   }
+  },
+  {
+   "name": "coincident_box_with_large_fillet_e0_copy1_swap1",
+   "upstream_ref": "TestFiles/pt_TestFiles/box_with_large_fillet.smb (SmBrep.cpp:16324 / SmBrep.cpp:30234 call pattern)",
+   "inputs": {
+    "op": "coincident",
+    "file": {
+     "$upstream_file": "box_with_large_fillet.smb"
+    },
+    "n_edges": 15,
+    "edge": 0,
+    "copy_curve": true,
+    "swap": true,
+    "tol": 1e-06,
+    "start": 0
+   }
+  },
+  {
+   "name": "coincident_box_with_large_fillet_e7_copy0_swap0",
+   "upstream_ref": "TestFiles/pt_TestFiles/box_with_large_fillet.smb (SmBrep.cpp:16324 / SmBrep.cpp:30234 call pattern)",
+   "inputs": {
+    "op": "coincident",
+    "file": {
+     "$upstream_file": "box_with_large_fillet.smb"
+    },
+    "n_edges": 15,
+    "edge": 7,
+    "copy_curve": false,
+    "swap": false,
+    "tol": 1e-06,
+    "start": 0
+   }
+  },
+  {
+   "name": "coincident_box_with_large_fillet_e7_copy0_swap1",
+   "upstream_ref": "TestFiles/pt_TestFiles/box_with_large_fillet.smb (SmBrep.cpp:16324 / SmBrep.cpp:30234 call pattern)",
+   "inputs": {
+    "op": "coincident",
+    "file": {
+     "$upstream_file": "box_with_large_fillet.smb"
+    },
+    "n_edges": 15,
+    "edge": 7,
+    "copy_curve": false,
+    "swap": true,
+    "tol": 1e-06,
+    "start": 0
+   }
+  },
+  {
+   "name": "coincident_box_with_large_fillet_e7_copy1_swap0",
+   "upstream_ref": "TestFiles/pt_TestFiles/box_with_large_fillet.smb (SmBrep.cpp:16324 / SmBrep.cpp:30234 call pattern)",
+   "inputs": {
+    "op": "coincident",
+    "file": {
+     "$upstream_file": "box_with_large_fillet.smb"
+    },
+    "n_edges": 15,
+    "edge": 7,
+    "copy_curve": true,
+    "swap": false,
+    "tol": 1e-06,
+    "start": 0
+   }
+  },
+  {
+   "name": "coincident_box_with_large_fillet_e7_copy1_swap1",
+   "upstream_ref": "TestFiles/pt_TestFiles/box_with_large_fillet.smb (SmBrep.cpp:16324 / SmBrep.cpp:30234 call pattern)",
+   "inputs": {
+    "op": "coincident",
+    "file": {
+     "$upstream_file": "box_with_large_fillet.smb"
+    },
+    "n_edges": 15,
+    "edge": 7,
+    "copy_curve": true,
+    "swap": true,
+    "tol": 1e-06,
+    "start": 0
+   }
+  },
+  {
+   "name": "coincident_box_with_large_fillet_e14_copy0_swap0",
+   "upstream_ref": "TestFiles/pt_TestFiles/box_with_large_fillet.smb (SmBrep.cpp:16324 / SmBrep.cpp:30234 call pattern)",
+   "inputs": {
+    "op": "coincident",
+    "file": {
+     "$upstream_file": "box_with_large_fillet.smb"
+    },
+    "n_edges": 15,
+    "edge": 14,
+    "copy_curve": false,
+    "swap": false,
+    "tol": 1e-06,
+    "start": 0
+   }
+  },
+  {
+   "name": "coincident_box_with_large_fillet_e14_copy0_swap1",
+   "upstream_ref": "TestFiles/pt_TestFiles/box_with_large_fillet.smb (SmBrep.cpp:16324 / SmBrep.cpp:30234 call pattern)",
+   "inputs": {
+    "op": "coincident",
+    "file": {
+     "$upstream_file": "box_with_large_fillet.smb"
+    },
+    "n_edges": 15,
+    "edge": 14,
+    "copy_curve": false,
+    "swap": true,
+    "tol": 1e-06,
+    "start": 0
+   }
+  },
+  {
+   "name": "coincident_box_with_large_fillet_e14_copy1_swap0",
+   "upstream_ref": "TestFiles/pt_TestFiles/box_with_large_fillet.smb (SmBrep.cpp:16324 / SmBrep.cpp:30234 call pattern)",
+   "inputs": {
+    "op": "coincident",
+    "file": {
+     "$upstream_file": "box_with_large_fillet.smb"
+    },
+    "n_edges": 15,
+    "edge": 14,
+    "copy_curve": true,
+    "swap": false,
+    "tol": 1e-06,
+    "start": 0
+   }
+  },
+  {
+   "name": "coincident_box_with_large_fillet_e14_copy1_swap1",
+   "upstream_ref": "TestFiles/pt_TestFiles/box_with_large_fillet.smb (SmBrep.cpp:16324 / SmBrep.cpp:30234 call pattern)",
+   "inputs": {
+    "op": "coincident",
+    "file": {
+     "$upstream_file": "box_with_large_fillet.smb"
+    },
+    "n_edges": 15,
+    "edge": 14,
+    "copy_curve": true,
+    "swap": true,
+    "tol": 1e-06,
+    "start": 0
+   }
+  },
+  {
+   "name": "edge_box_with_large_fillet_p0",
+   "upstream_ref": "source/SM_API/src/SmApiQueries.cpp:380 on box_with_large_fillet.smb",
+   "inputs": {
+    "op": "edge",
+    "file": {
+     "$upstream_file": "box_with_large_fillet.smb"
+    },
+    "pnt": [
+     0,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "face_box_with_large_fillet_p0",
+   "upstream_ref": "source/SM_API/src/SmApiQueries.cpp:406 on box_with_large_fillet.smb",
+   "inputs": {
+    "op": "face",
+    "file": {
+     "$upstream_file": "box_with_large_fillet.smb"
+    },
+    "pnt": [
+     0,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "edge_box_with_large_fillet_p1",
+   "upstream_ref": "source/SM_API/src/SmApiQueries.cpp:380 on box_with_large_fillet.smb",
+   "inputs": {
+    "op": "edge",
+    "file": {
+     "$upstream_file": "box_with_large_fillet.smb"
+    },
+    "pnt": [
+     1,
+     1,
+     1
+    ]
+   }
+  },
+  {
+   "name": "face_box_with_large_fillet_p1",
+   "upstream_ref": "source/SM_API/src/SmApiQueries.cpp:406 on box_with_large_fillet.smb",
+   "inputs": {
+    "op": "face",
+    "file": {
+     "$upstream_file": "box_with_large_fillet.smb"
+    },
+    "pnt": [
+     1,
+     1,
+     1
+    ]
+   }
+  },
+  {
+   "name": "edge_box_with_large_fillet_p2",
+   "upstream_ref": "source/SM_API/src/SmApiQueries.cpp:380 on box_with_large_fillet.smb",
+   "inputs": {
+    "op": "edge",
+    "file": {
+     "$upstream_file": "box_with_large_fillet.smb"
+    },
+    "pnt": [
+     10,
+     -3,
+     2
+    ]
+   }
+  },
+  {
+   "name": "face_box_with_large_fillet_p2",
+   "upstream_ref": "source/SM_API/src/SmApiQueries.cpp:406 on box_with_large_fillet.smb",
+   "inputs": {
+    "op": "face",
+    "file": {
+     "$upstream_file": "box_with_large_fillet.smb"
+    },
+    "pnt": [
+     10,
+     -3,
+     2
+    ]
+   }
+  },
+  {
+   "name": "edge_box_with_large_fillet_p3",
+   "upstream_ref": "source/SM_API/src/SmApiQueries.cpp:380 on box_with_large_fillet.smb",
+   "inputs": {
+    "op": "edge",
+    "file": {
+     "$upstream_file": "box_with_large_fillet.smb"
+    },
+    "pnt": [
+     0.5,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "face_box_with_large_fillet_p3",
+   "upstream_ref": "source/SM_API/src/SmApiQueries.cpp:406 on box_with_large_fillet.smb",
+   "inputs": {
+    "op": "face",
+    "file": {
+     "$upstream_file": "box_with_large_fillet.smb"
+    },
+    "pnt": [
+     0.5,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "coincident_plane_circ_start1",
+   "upstream_ref": "TestFiles/pt_TestFiles/plane_circ.smb (SmBrep.cpp:16324 / SmBrep.cpp:30234 call pattern)",
+   "inputs": {
+    "op": "coincident",
+    "file": {
+     "$upstream_file": "plane_circ.smb"
+    },
+    "n_edges": 1,
+    "edge": 0,
+    "copy_curve": false,
+    "swap": false,
+    "tol": 1e-06,
+    "start": 1
+   }
+  },
+  {
+   "name": "coincident_plane_circ_start3",
+   "upstream_ref": "TestFiles/pt_TestFiles/plane_circ.smb (SmBrep.cpp:16324 / SmBrep.cpp:30234 call pattern)",
+   "inputs": {
+    "op": "coincident",
+    "file": {
+     "$upstream_file": "plane_circ.smb"
+    },
+    "n_edges": 1,
+    "edge": 0,
+    "copy_curve": false,
+    "swap": false,
+    "tol": 1e-06,
+    "start": 3
+   }
+  },
+  {
+   "name": "coincident_plane_circ_e0_copy0_swap0",
+   "upstream_ref": "TestFiles/pt_TestFiles/plane_circ.smb (SmBrep.cpp:16324 / SmBrep.cpp:30234 call pattern)",
+   "inputs": {
+    "op": "coincident",
+    "file": {
+     "$upstream_file": "plane_circ.smb"
+    },
+    "n_edges": 1,
+    "edge": 0,
+    "copy_curve": false,
+    "swap": false,
+    "tol": 1e-06,
+    "start": 0
+   }
+  },
+  {
+   "name": "coincident_plane_circ_e0_copy0_swap1",
+   "upstream_ref": "TestFiles/pt_TestFiles/plane_circ.smb (SmBrep.cpp:16324 / SmBrep.cpp:30234 call pattern)",
+   "inputs": {
+    "op": "coincident",
+    "file": {
+     "$upstream_file": "plane_circ.smb"
+    },
+    "n_edges": 1,
+    "edge": 0,
+    "copy_curve": false,
+    "swap": true,
+    "tol": 1e-06,
+    "start": 0
+   }
+  },
+  {
+   "name": "coincident_plane_circ_e0_copy1_swap0",
+   "upstream_ref": "TestFiles/pt_TestFiles/plane_circ.smb (SmBrep.cpp:16324 / SmBrep.cpp:30234 call pattern)",
+   "inputs": {
+    "op": "coincident",
+    "file": {
+     "$upstream_file": "plane_circ.smb"
+    },
+    "n_edges": 1,
+    "edge": 0,
+    "copy_curve": true,
+    "swap": false,
+    "tol": 1e-06,
+    "start": 0
+   }
+  },
+  {
+   "name": "coincident_plane_circ_e0_copy1_swap1",
+   "upstream_ref": "TestFiles/pt_TestFiles/plane_circ.smb (SmBrep.cpp:16324 / SmBrep.cpp:30234 call pattern)",
+   "inputs": {
+    "op": "coincident",
+    "file": {
+     "$upstream_file": "plane_circ.smb"
+    },
+    "n_edges": 1,
+    "edge": 0,
+    "copy_curve": true,
+    "swap": true,
+    "tol": 1e-06,
+    "start": 0
+   }
+  },
+  {
+   "name": "edge_plane_circ_p0",
+   "upstream_ref": "source/SM_API/src/SmApiQueries.cpp:380 on plane_circ.smb",
+   "inputs": {
+    "op": "edge",
+    "file": {
+     "$upstream_file": "plane_circ.smb"
+    },
+    "pnt": [
+     0,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "face_plane_circ_p0",
+   "upstream_ref": "source/SM_API/src/SmApiQueries.cpp:406 on plane_circ.smb",
+   "inputs": {
+    "op": "face",
+    "file": {
+     "$upstream_file": "plane_circ.smb"
+    },
+    "pnt": [
+     0,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "edge_plane_circ_p1",
+   "upstream_ref": "source/SM_API/src/SmApiQueries.cpp:380 on plane_circ.smb",
+   "inputs": {
+    "op": "edge",
+    "file": {
+     "$upstream_file": "plane_circ.smb"
+    },
+    "pnt": [
+     1,
+     1,
+     1
+    ]
+   }
+  },
+  {
+   "name": "face_plane_circ_p1",
+   "upstream_ref": "source/SM_API/src/SmApiQueries.cpp:406 on plane_circ.smb",
+   "inputs": {
+    "op": "face",
+    "file": {
+     "$upstream_file": "plane_circ.smb"
+    },
+    "pnt": [
+     1,
+     1,
+     1
+    ]
+   }
+  },
+  {
+   "name": "edge_plane_circ_p2",
+   "upstream_ref": "source/SM_API/src/SmApiQueries.cpp:380 on plane_circ.smb",
+   "inputs": {
+    "op": "edge",
+    "file": {
+     "$upstream_file": "plane_circ.smb"
+    },
+    "pnt": [
+     10,
+     -3,
+     2
+    ]
+   }
+  },
+  {
+   "name": "face_plane_circ_p2",
+   "upstream_ref": "source/SM_API/src/SmApiQueries.cpp:406 on plane_circ.smb",
+   "inputs": {
+    "op": "face",
+    "file": {
+     "$upstream_file": "plane_circ.smb"
+    },
+    "pnt": [
+     10,
+     -3,
+     2
+    ]
+   }
+  },
+  {
+   "name": "edge_plane_circ_p3",
+   "upstream_ref": "source/SM_API/src/SmApiQueries.cpp:380 on plane_circ.smb",
+   "inputs": {
+    "op": "edge",
+    "file": {
+     "$upstream_file": "plane_circ.smb"
+    },
+    "pnt": [
+     0.5,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "face_plane_circ_p3",
+   "upstream_ref": "source/SM_API/src/SmApiQueries.cpp:406 on plane_circ.smb",
+   "inputs": {
+    "op": "face",
+    "file": {
+     "$upstream_file": "plane_circ.smb"
+    },
+    "pnt": [
+     0.5,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "coincident_Mouse_start6",
+   "upstream_ref": "TestFiles/pt_TestFiles/Mouse.smb (SmBrep.cpp:16324 / SmBrep.cpp:30234 call pattern)",
+   "inputs": {
+    "op": "coincident",
+    "file": {
+     "$upstream_file": "Mouse.smb"
+    },
+    "n_edges": 6,
+    "edge": 0,
+    "copy_curve": false,
+    "swap": false,
+    "tol": 1e-06,
+    "start": 6
+   }
+  },
+  {
+   "name": "coincident_Mouse_start8",
+   "upstream_ref": "TestFiles/pt_TestFiles/Mouse.smb (SmBrep.cpp:16324 / SmBrep.cpp:30234 call pattern)",
+   "inputs": {
+    "op": "coincident",
+    "file": {
+     "$upstream_file": "Mouse.smb"
+    },
+    "n_edges": 6,
+    "edge": 0,
+    "copy_curve": false,
+    "swap": false,
+    "tol": 1e-06,
+    "start": 8
+   }
+  },
+  {
+   "name": "coincident_Mouse_e0_copy0_swap0",
+   "upstream_ref": "TestFiles/pt_TestFiles/Mouse.smb (SmBrep.cpp:16324 / SmBrep.cpp:30234 call pattern)",
+   "inputs": {
+    "op": "coincident",
+    "file": {
+     "$upstream_file": "Mouse.smb"
+    },
+    "n_edges": 6,
+    "edge": 0,
+    "copy_curve": false,
+    "swap": false,
+    "tol": 1e-06,
+    "start": 0
+   }
+  },
+  {
+   "name": "coincident_Mouse_e0_copy0_swap1",
+   "upstream_ref": "TestFiles/pt_TestFiles/Mouse.smb (SmBrep.cpp:16324 / SmBrep.cpp:30234 call pattern)",
+   "inputs": {
+    "op": "coincident",
+    "file": {
+     "$upstream_file": "Mouse.smb"
+    },
+    "n_edges": 6,
+    "edge": 0,
+    "copy_curve": false,
+    "swap": true,
+    "tol": 1e-06,
+    "start": 0
+   }
+  },
+  {
+   "name": "coincident_Mouse_e0_copy1_swap0",
+   "upstream_ref": "TestFiles/pt_TestFiles/Mouse.smb (SmBrep.cpp:16324 / SmBrep.cpp:30234 call pattern)",
+   "inputs": {
+    "op": "coincident",
+    "file": {
+     "$upstream_file": "Mouse.smb"
+    },
+    "n_edges": 6,
+    "edge": 0,
+    "copy_curve": true,
+    "swap": false,
+    "tol": 1e-06,
+    "start": 0
+   }
+  },
+  {
+   "name": "coincident_Mouse_e0_copy1_swap1",
+   "upstream_ref": "TestFiles/pt_TestFiles/Mouse.smb (SmBrep.cpp:16324 / SmBrep.cpp:30234 call pattern)",
+   "inputs": {
+    "op": "coincident",
+    "file": {
+     "$upstream_file": "Mouse.smb"
+    },
+    "n_edges": 6,
+    "edge": 0,
+    "copy_curve": true,
+    "swap": true,
+    "tol": 1e-06,
+    "start": 0
+   }
+  },
+  {
+   "name": "coincident_Mouse_e3_copy0_swap0",
+   "upstream_ref": "TestFiles/pt_TestFiles/Mouse.smb (SmBrep.cpp:16324 / SmBrep.cpp:30234 call pattern)",
+   "inputs": {
+    "op": "coincident",
+    "file": {
+     "$upstream_file": "Mouse.smb"
+    },
+    "n_edges": 6,
+    "edge": 3,
+    "copy_curve": false,
+    "swap": false,
+    "tol": 1e-06,
+    "start": 0
+   }
+  },
+  {
+   "name": "coincident_Mouse_e3_copy0_swap1",
+   "upstream_ref": "TestFiles/pt_TestFiles/Mouse.smb (SmBrep.cpp:16324 / SmBrep.cpp:30234 call pattern)",
+   "inputs": {
+    "op": "coincident",
+    "file": {
+     "$upstream_file": "Mouse.smb"
+    },
+    "n_edges": 6,
+    "edge": 3,
+    "copy_curve": false,
+    "swap": true,
+    "tol": 1e-06,
+    "start": 0
+   }
+  },
+  {
+   "name": "coincident_Mouse_e3_copy1_swap0",
+   "upstream_ref": "TestFiles/pt_TestFiles/Mouse.smb (SmBrep.cpp:16324 / SmBrep.cpp:30234 call pattern)",
+   "inputs": {
+    "op": "coincident",
+    "file": {
+     "$upstream_file": "Mouse.smb"
+    },
+    "n_edges": 6,
+    "edge": 3,
+    "copy_curve": true,
+    "swap": false,
+    "tol": 1e-06,
+    "start": 0
+   }
+  },
+  {
+   "name": "coincident_Mouse_e3_copy1_swap1",
+   "upstream_ref": "TestFiles/pt_TestFiles/Mouse.smb (SmBrep.cpp:16324 / SmBrep.cpp:30234 call pattern)",
+   "inputs": {
+    "op": "coincident",
+    "file": {
+     "$upstream_file": "Mouse.smb"
+    },
+    "n_edges": 6,
+    "edge": 3,
+    "copy_curve": true,
+    "swap": true,
+    "tol": 1e-06,
+    "start": 0
+   }
+  },
+  {
+   "name": "coincident_Mouse_e5_copy0_swap0",
+   "upstream_ref": "TestFiles/pt_TestFiles/Mouse.smb (SmBrep.cpp:16324 / SmBrep.cpp:30234 call pattern)",
+   "inputs": {
+    "op": "coincident",
+    "file": {
+     "$upstream_file": "Mouse.smb"
+    },
+    "n_edges": 6,
+    "edge": 5,
+    "copy_curve": false,
+    "swap": false,
+    "tol": 1e-06,
+    "start": 0
+   }
+  },
+  {
+   "name": "coincident_Mouse_e5_copy0_swap1",
+   "upstream_ref": "TestFiles/pt_TestFiles/Mouse.smb (SmBrep.cpp:16324 / SmBrep.cpp:30234 call pattern)",
+   "inputs": {
+    "op": "coincident",
+    "file": {
+     "$upstream_file": "Mouse.smb"
+    },
+    "n_edges": 6,
+    "edge": 5,
+    "copy_curve": false,
+    "swap": true,
+    "tol": 1e-06,
+    "start": 0
+   }
+  },
+  {
+   "name": "coincident_Mouse_e5_copy1_swap0",
+   "upstream_ref": "TestFiles/pt_TestFiles/Mouse.smb (SmBrep.cpp:16324 / SmBrep.cpp:30234 call pattern)",
+   "inputs": {
+    "op": "coincident",
+    "file": {
+     "$upstream_file": "Mouse.smb"
+    },
+    "n_edges": 6,
+    "edge": 5,
+    "copy_curve": true,
+    "swap": false,
+    "tol": 1e-06,
+    "start": 0
+   }
+  },
+  {
+   "name": "coincident_Mouse_e5_copy1_swap1",
+   "upstream_ref": "TestFiles/pt_TestFiles/Mouse.smb (SmBrep.cpp:16324 / SmBrep.cpp:30234 call pattern)",
+   "inputs": {
+    "op": "coincident",
+    "file": {
+     "$upstream_file": "Mouse.smb"
+    },
+    "n_edges": 6,
+    "edge": 5,
+    "copy_curve": true,
+    "swap": true,
+    "tol": 1e-06,
+    "start": 0
+   }
+  },
+  {
+   "name": "edge_Mouse_p0",
+   "upstream_ref": "source/SM_API/src/SmApiQueries.cpp:380 on Mouse.smb",
+   "inputs": {
+    "op": "edge",
+    "file": {
+     "$upstream_file": "Mouse.smb"
+    },
+    "pnt": [
+     0,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "face_Mouse_p0",
+   "upstream_ref": "source/SM_API/src/SmApiQueries.cpp:406 on Mouse.smb",
+   "inputs": {
+    "op": "face",
+    "file": {
+     "$upstream_file": "Mouse.smb"
+    },
+    "pnt": [
+     0,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "edge_Mouse_p1",
+   "upstream_ref": "source/SM_API/src/SmApiQueries.cpp:380 on Mouse.smb",
+   "inputs": {
+    "op": "edge",
+    "file": {
+     "$upstream_file": "Mouse.smb"
+    },
+    "pnt": [
+     1,
+     1,
+     1
+    ]
+   }
+  },
+  {
+   "name": "face_Mouse_p1",
+   "upstream_ref": "source/SM_API/src/SmApiQueries.cpp:406 on Mouse.smb",
+   "inputs": {
+    "op": "face",
+    "file": {
+     "$upstream_file": "Mouse.smb"
+    },
+    "pnt": [
+     1,
+     1,
+     1
+    ]
+   }
+  },
+  {
+   "name": "edge_Mouse_p2",
+   "upstream_ref": "source/SM_API/src/SmApiQueries.cpp:380 on Mouse.smb",
+   "inputs": {
+    "op": "edge",
+    "file": {
+     "$upstream_file": "Mouse.smb"
+    },
+    "pnt": [
+     10,
+     -3,
+     2
+    ]
+   }
+  },
+  {
+   "name": "face_Mouse_p2",
+   "upstream_ref": "source/SM_API/src/SmApiQueries.cpp:406 on Mouse.smb",
+   "inputs": {
+    "op": "face",
+    "file": {
+     "$upstream_file": "Mouse.smb"
+    },
+    "pnt": [
+     10,
+     -3,
+     2
+    ]
+   }
+  },
+  {
+   "name": "edge_Mouse_p3",
+   "upstream_ref": "source/SM_API/src/SmApiQueries.cpp:380 on Mouse.smb",
+   "inputs": {
+    "op": "edge",
+    "file": {
+     "$upstream_file": "Mouse.smb"
+    },
+    "pnt": [
+     0.5,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "face_Mouse_p3",
+   "upstream_ref": "source/SM_API/src/SmApiQueries.cpp:406 on Mouse.smb",
+   "inputs": {
+    "op": "face",
+    "file": {
+     "$upstream_file": "Mouse.smb"
+    },
+    "pnt": [
+     0.5,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "coincident_cone_start2",
+   "upstream_ref": "TestFiles/pt_TestFiles/cone.smb (SmBrep.cpp:16324 / SmBrep.cpp:30234 call pattern)",
+   "inputs": {
+    "op": "coincident",
+    "file": {
+     "$upstream_file": "cone.smb"
+    },
+    "n_edges": 2,
+    "edge": 0,
+    "copy_curve": false,
+    "swap": false,
+    "tol": 1e-06,
+    "start": 2
+   }
+  },
+  {
+   "name": "coincident_cone_start4",
+   "upstream_ref": "TestFiles/pt_TestFiles/cone.smb (SmBrep.cpp:16324 / SmBrep.cpp:30234 call pattern)",
+   "inputs": {
+    "op": "coincident",
+    "file": {
+     "$upstream_file": "cone.smb"
+    },
+    "n_edges": 2,
+    "edge": 0,
+    "copy_curve": false,
+    "swap": false,
+    "tol": 1e-06,
+    "start": 4
+   }
+  },
+  {
+   "name": "coincident_cone_e0_copy0_swap0",
+   "upstream_ref": "TestFiles/pt_TestFiles/cone.smb (SmBrep.cpp:16324 / SmBrep.cpp:30234 call pattern)",
+   "inputs": {
+    "op": "coincident",
+    "file": {
+     "$upstream_file": "cone.smb"
+    },
+    "n_edges": 2,
+    "edge": 0,
+    "copy_curve": false,
+    "swap": false,
+    "tol": 1e-06,
+    "start": 0
+   }
+  },
+  {
+   "name": "coincident_cone_e0_copy0_swap1",
+   "upstream_ref": "TestFiles/pt_TestFiles/cone.smb (SmBrep.cpp:16324 / SmBrep.cpp:30234 call pattern)",
+   "inputs": {
+    "op": "coincident",
+    "file": {
+     "$upstream_file": "cone.smb"
+    },
+    "n_edges": 2,
+    "edge": 0,
+    "copy_curve": false,
+    "swap": true,
+    "tol": 1e-06,
+    "start": 0
+   }
+  },
+  {
+   "name": "coincident_cone_e0_copy1_swap0",
+   "upstream_ref": "TestFiles/pt_TestFiles/cone.smb (SmBrep.cpp:16324 / SmBrep.cpp:30234 call pattern)",
+   "inputs": {
+    "op": "coincident",
+    "file": {
+     "$upstream_file": "cone.smb"
+    },
+    "n_edges": 2,
+    "edge": 0,
+    "copy_curve": true,
+    "swap": false,
+    "tol": 1e-06,
+    "start": 0
+   }
+  },
+  {
+   "name": "coincident_cone_e0_copy1_swap1",
+   "upstream_ref": "TestFiles/pt_TestFiles/cone.smb (SmBrep.cpp:16324 / SmBrep.cpp:30234 call pattern)",
+   "inputs": {
+    "op": "coincident",
+    "file": {
+     "$upstream_file": "cone.smb"
+    },
+    "n_edges": 2,
+    "edge": 0,
+    "copy_curve": true,
+    "swap": true,
+    "tol": 1e-06,
+    "start": 0
+   }
+  },
+  {
+   "name": "coincident_cone_e1_copy0_swap0",
+   "upstream_ref": "TestFiles/pt_TestFiles/cone.smb (SmBrep.cpp:16324 / SmBrep.cpp:30234 call pattern)",
+   "inputs": {
+    "op": "coincident",
+    "file": {
+     "$upstream_file": "cone.smb"
+    },
+    "n_edges": 2,
+    "edge": 1,
+    "copy_curve": false,
+    "swap": false,
+    "tol": 1e-06,
+    "start": 0
+   }
+  },
+  {
+   "name": "coincident_cone_e1_copy0_swap1",
+   "upstream_ref": "TestFiles/pt_TestFiles/cone.smb (SmBrep.cpp:16324 / SmBrep.cpp:30234 call pattern)",
+   "inputs": {
+    "op": "coincident",
+    "file": {
+     "$upstream_file": "cone.smb"
+    },
+    "n_edges": 2,
+    "edge": 1,
+    "copy_curve": false,
+    "swap": true,
+    "tol": 1e-06,
+    "start": 0
+   }
+  },
+  {
+   "name": "coincident_cone_e1_copy1_swap0",
+   "upstream_ref": "TestFiles/pt_TestFiles/cone.smb (SmBrep.cpp:16324 / SmBrep.cpp:30234 call pattern)",
+   "inputs": {
+    "op": "coincident",
+    "file": {
+     "$upstream_file": "cone.smb"
+    },
+    "n_edges": 2,
+    "edge": 1,
+    "copy_curve": true,
+    "swap": false,
+    "tol": 1e-06,
+    "start": 0
+   }
+  },
+  {
+   "name": "coincident_cone_e1_copy1_swap1",
+   "upstream_ref": "TestFiles/pt_TestFiles/cone.smb (SmBrep.cpp:16324 / SmBrep.cpp:30234 call pattern)",
+   "inputs": {
+    "op": "coincident",
+    "file": {
+     "$upstream_file": "cone.smb"
+    },
+    "n_edges": 2,
+    "edge": 1,
+    "copy_curve": true,
+    "swap": true,
+    "tol": 1e-06,
+    "start": 0
+   }
+  },
+  {
+   "name": "edge_cone_p0",
+   "upstream_ref": "source/SM_API/src/SmApiQueries.cpp:380 on cone.smb",
+   "inputs": {
+    "op": "edge",
+    "file": {
+     "$upstream_file": "cone.smb"
+    },
+    "pnt": [
+     0,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "face_cone_p0",
+   "upstream_ref": "source/SM_API/src/SmApiQueries.cpp:406 on cone.smb",
+   "inputs": {
+    "op": "face",
+    "file": {
+     "$upstream_file": "cone.smb"
+    },
+    "pnt": [
+     0,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "edge_cone_p1",
+   "upstream_ref": "source/SM_API/src/SmApiQueries.cpp:380 on cone.smb",
+   "inputs": {
+    "op": "edge",
+    "file": {
+     "$upstream_file": "cone.smb"
+    },
+    "pnt": [
+     1,
+     1,
+     1
+    ]
+   }
+  },
+  {
+   "name": "face_cone_p1",
+   "upstream_ref": "source/SM_API/src/SmApiQueries.cpp:406 on cone.smb",
+   "inputs": {
+    "op": "face",
+    "file": {
+     "$upstream_file": "cone.smb"
+    },
+    "pnt": [
+     1,
+     1,
+     1
+    ]
+   }
+  },
+  {
+   "name": "edge_cone_p2",
+   "upstream_ref": "source/SM_API/src/SmApiQueries.cpp:380 on cone.smb",
+   "inputs": {
+    "op": "edge",
+    "file": {
+     "$upstream_file": "cone.smb"
+    },
+    "pnt": [
+     10,
+     -3,
+     2
+    ]
+   }
+  },
+  {
+   "name": "face_cone_p2",
+   "upstream_ref": "source/SM_API/src/SmApiQueries.cpp:406 on cone.smb",
+   "inputs": {
+    "op": "face",
+    "file": {
+     "$upstream_file": "cone.smb"
+    },
+    "pnt": [
+     10,
+     -3,
+     2
+    ]
+   }
+  },
+  {
+   "name": "edge_cone_p3",
+   "upstream_ref": "source/SM_API/src/SmApiQueries.cpp:380 on cone.smb",
+   "inputs": {
+    "op": "edge",
+    "file": {
+     "$upstream_file": "cone.smb"
+    },
+    "pnt": [
+     0.5,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "face_cone_p3",
+   "upstream_ref": "source/SM_API/src/SmApiQueries.cpp:406 on cone.smb",
+   "inputs": {
+    "op": "face",
+    "file": {
+     "$upstream_file": "cone.smb"
+    },
+    "pnt": [
+     0.5,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "coincident_sphere_start1",
+   "upstream_ref": "TestFiles/pt_TestFiles/sphere.smb (SmBrep.cpp:16324 / SmBrep.cpp:30234 call pattern)",
+   "inputs": {
+    "op": "coincident",
+    "file": {
+     "$upstream_file": "sphere.smb"
+    },
+    "n_edges": 1,
+    "edge": 0,
+    "copy_curve": false,
+    "swap": false,
+    "tol": 1e-06,
+    "start": 1
+   }
+  },
+  {
+   "name": "coincident_sphere_start3",
+   "upstream_ref": "TestFiles/pt_TestFiles/sphere.smb (SmBrep.cpp:16324 / SmBrep.cpp:30234 call pattern)",
+   "inputs": {
+    "op": "coincident",
+    "file": {
+     "$upstream_file": "sphere.smb"
+    },
+    "n_edges": 1,
+    "edge": 0,
+    "copy_curve": false,
+    "swap": false,
+    "tol": 1e-06,
+    "start": 3
+   }
+  },
+  {
+   "name": "coincident_sphere_e0_copy0_swap0",
+   "upstream_ref": "TestFiles/pt_TestFiles/sphere.smb (SmBrep.cpp:16324 / SmBrep.cpp:30234 call pattern)",
+   "inputs": {
+    "op": "coincident",
+    "file": {
+     "$upstream_file": "sphere.smb"
+    },
+    "n_edges": 1,
+    "edge": 0,
+    "copy_curve": false,
+    "swap": false,
+    "tol": 1e-06,
+    "start": 0
+   }
+  },
+  {
+   "name": "coincident_sphere_e0_copy0_swap1",
+   "upstream_ref": "TestFiles/pt_TestFiles/sphere.smb (SmBrep.cpp:16324 / SmBrep.cpp:30234 call pattern)",
+   "inputs": {
+    "op": "coincident",
+    "file": {
+     "$upstream_file": "sphere.smb"
+    },
+    "n_edges": 1,
+    "edge": 0,
+    "copy_curve": false,
+    "swap": true,
+    "tol": 1e-06,
+    "start": 0
+   }
+  },
+  {
+   "name": "coincident_sphere_e0_copy1_swap0",
+   "upstream_ref": "TestFiles/pt_TestFiles/sphere.smb (SmBrep.cpp:16324 / SmBrep.cpp:30234 call pattern)",
+   "inputs": {
+    "op": "coincident",
+    "file": {
+     "$upstream_file": "sphere.smb"
+    },
+    "n_edges": 1,
+    "edge": 0,
+    "copy_curve": true,
+    "swap": false,
+    "tol": 1e-06,
+    "start": 0
+   }
+  },
+  {
+   "name": "coincident_sphere_e0_copy1_swap1",
+   "upstream_ref": "TestFiles/pt_TestFiles/sphere.smb (SmBrep.cpp:16324 / SmBrep.cpp:30234 call pattern)",
+   "inputs": {
+    "op": "coincident",
+    "file": {
+     "$upstream_file": "sphere.smb"
+    },
+    "n_edges": 1,
+    "edge": 0,
+    "copy_curve": true,
+    "swap": true,
+    "tol": 1e-06,
+    "start": 0
+   }
+  },
+  {
+   "name": "edge_sphere_p0",
+   "upstream_ref": "source/SM_API/src/SmApiQueries.cpp:380 on sphere.smb",
+   "inputs": {
+    "op": "edge",
+    "file": {
+     "$upstream_file": "sphere.smb"
+    },
+    "pnt": [
+     0,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "face_sphere_p0",
+   "upstream_ref": "source/SM_API/src/SmApiQueries.cpp:406 on sphere.smb",
+   "inputs": {
+    "op": "face",
+    "file": {
+     "$upstream_file": "sphere.smb"
+    },
+    "pnt": [
+     0,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "edge_sphere_p1",
+   "upstream_ref": "source/SM_API/src/SmApiQueries.cpp:380 on sphere.smb",
+   "inputs": {
+    "op": "edge",
+    "file": {
+     "$upstream_file": "sphere.smb"
+    },
+    "pnt": [
+     1,
+     1,
+     1
+    ]
+   }
+  },
+  {
+   "name": "face_sphere_p1",
+   "upstream_ref": "source/SM_API/src/SmApiQueries.cpp:406 on sphere.smb",
+   "inputs": {
+    "op": "face",
+    "file": {
+     "$upstream_file": "sphere.smb"
+    },
+    "pnt": [
+     1,
+     1,
+     1
+    ]
+   }
+  },
+  {
+   "name": "edge_sphere_p2",
+   "upstream_ref": "source/SM_API/src/SmApiQueries.cpp:380 on sphere.smb",
+   "inputs": {
+    "op": "edge",
+    "file": {
+     "$upstream_file": "sphere.smb"
+    },
+    "pnt": [
+     10,
+     -3,
+     2
+    ]
+   }
+  },
+  {
+   "name": "face_sphere_p2",
+   "upstream_ref": "source/SM_API/src/SmApiQueries.cpp:406 on sphere.smb",
+   "inputs": {
+    "op": "face",
+    "file": {
+     "$upstream_file": "sphere.smb"
+    },
+    "pnt": [
+     10,
+     -3,
+     2
+    ]
+   }
+  },
+  {
+   "name": "edge_sphere_p3",
+   "upstream_ref": "source/SM_API/src/SmApiQueries.cpp:380 on sphere.smb",
+   "inputs": {
+    "op": "edge",
+    "file": {
+     "$upstream_file": "sphere.smb"
+    },
+    "pnt": [
+     0.5,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "face_sphere_p3",
+   "upstream_ref": "source/SM_API/src/SmApiQueries.cpp:406 on sphere.smb",
+   "inputs": {
+    "op": "face",
+    "file": {
+     "$upstream_file": "sphere.smb"
+    },
+    "pnt": [
+     0.5,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "coincident_disk_start2",
+   "upstream_ref": "TestFiles/pt_TestFiles/disk.smb (SmBrep.cpp:16324 / SmBrep.cpp:30234 call pattern)",
+   "inputs": {
+    "op": "coincident",
+    "file": {
+     "$upstream_file": "disk.smb"
+    },
+    "n_edges": 2,
+    "edge": 0,
+    "copy_curve": false,
+    "swap": false,
+    "tol": 1e-06,
+    "start": 2
+   }
+  },
+  {
+   "name": "coincident_disk_start4",
+   "upstream_ref": "TestFiles/pt_TestFiles/disk.smb (SmBrep.cpp:16324 / SmBrep.cpp:30234 call pattern)",
+   "inputs": {
+    "op": "coincident",
+    "file": {
+     "$upstream_file": "disk.smb"
+    },
+    "n_edges": 2,
+    "edge": 0,
+    "copy_curve": false,
+    "swap": false,
+    "tol": 1e-06,
+    "start": 4
+   }
+  },
+  {
+   "name": "coincident_disk_e0_copy0_swap0",
+   "upstream_ref": "TestFiles/pt_TestFiles/disk.smb (SmBrep.cpp:16324 / SmBrep.cpp:30234 call pattern)",
+   "inputs": {
+    "op": "coincident",
+    "file": {
+     "$upstream_file": "disk.smb"
+    },
+    "n_edges": 2,
+    "edge": 0,
+    "copy_curve": false,
+    "swap": false,
+    "tol": 1e-06,
+    "start": 0
+   }
+  },
+  {
+   "name": "coincident_disk_e0_copy0_swap1",
+   "upstream_ref": "TestFiles/pt_TestFiles/disk.smb (SmBrep.cpp:16324 / SmBrep.cpp:30234 call pattern)",
+   "inputs": {
+    "op": "coincident",
+    "file": {
+     "$upstream_file": "disk.smb"
+    },
+    "n_edges": 2,
+    "edge": 0,
+    "copy_curve": false,
+    "swap": true,
+    "tol": 1e-06,
+    "start": 0
+   }
+  },
+  {
+   "name": "coincident_disk_e0_copy1_swap0",
+   "upstream_ref": "TestFiles/pt_TestFiles/disk.smb (SmBrep.cpp:16324 / SmBrep.cpp:30234 call pattern)",
+   "inputs": {
+    "op": "coincident",
+    "file": {
+     "$upstream_file": "disk.smb"
+    },
+    "n_edges": 2,
+    "edge": 0,
+    "copy_curve": true,
+    "swap": false,
+    "tol": 1e-06,
+    "start": 0
+   }
+  },
+  {
+   "name": "coincident_disk_e0_copy1_swap1",
+   "upstream_ref": "TestFiles/pt_TestFiles/disk.smb (SmBrep.cpp:16324 / SmBrep.cpp:30234 call pattern)",
+   "inputs": {
+    "op": "coincident",
+    "file": {
+     "$upstream_file": "disk.smb"
+    },
+    "n_edges": 2,
+    "edge": 0,
+    "copy_curve": true,
+    "swap": true,
+    "tol": 1e-06,
+    "start": 0
+   }
+  },
+  {
+   "name": "coincident_disk_e1_copy0_swap0",
+   "upstream_ref": "TestFiles/pt_TestFiles/disk.smb (SmBrep.cpp:16324 / SmBrep.cpp:30234 call pattern)",
+   "inputs": {
+    "op": "coincident",
+    "file": {
+     "$upstream_file": "disk.smb"
+    },
+    "n_edges": 2,
+    "edge": 1,
+    "copy_curve": false,
+    "swap": false,
+    "tol": 1e-06,
+    "start": 0
+   }
+  },
+  {
+   "name": "coincident_disk_e1_copy0_swap1",
+   "upstream_ref": "TestFiles/pt_TestFiles/disk.smb (SmBrep.cpp:16324 / SmBrep.cpp:30234 call pattern)",
+   "inputs": {
+    "op": "coincident",
+    "file": {
+     "$upstream_file": "disk.smb"
+    },
+    "n_edges": 2,
+    "edge": 1,
+    "copy_curve": false,
+    "swap": true,
+    "tol": 1e-06,
+    "start": 0
+   }
+  },
+  {
+   "name": "coincident_disk_e1_copy1_swap0",
+   "upstream_ref": "TestFiles/pt_TestFiles/disk.smb (SmBrep.cpp:16324 / SmBrep.cpp:30234 call pattern)",
+   "inputs": {
+    "op": "coincident",
+    "file": {
+     "$upstream_file": "disk.smb"
+    },
+    "n_edges": 2,
+    "edge": 1,
+    "copy_curve": true,
+    "swap": false,
+    "tol": 1e-06,
+    "start": 0
+   }
+  },
+  {
+   "name": "coincident_disk_e1_copy1_swap1",
+   "upstream_ref": "TestFiles/pt_TestFiles/disk.smb (SmBrep.cpp:16324 / SmBrep.cpp:30234 call pattern)",
+   "inputs": {
+    "op": "coincident",
+    "file": {
+     "$upstream_file": "disk.smb"
+    },
+    "n_edges": 2,
+    "edge": 1,
+    "copy_curve": true,
+    "swap": true,
+    "tol": 1e-06,
+    "start": 0
+   }
+  },
+  {
+   "name": "edge_disk_p0",
+   "upstream_ref": "source/SM_API/src/SmApiQueries.cpp:380 on disk.smb",
+   "inputs": {
+    "op": "edge",
+    "file": {
+     "$upstream_file": "disk.smb"
+    },
+    "pnt": [
+     0,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "face_disk_p0",
+   "upstream_ref": "source/SM_API/src/SmApiQueries.cpp:406 on disk.smb",
+   "inputs": {
+    "op": "face",
+    "file": {
+     "$upstream_file": "disk.smb"
+    },
+    "pnt": [
+     0,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "edge_disk_p1",
+   "upstream_ref": "source/SM_API/src/SmApiQueries.cpp:380 on disk.smb",
+   "inputs": {
+    "op": "edge",
+    "file": {
+     "$upstream_file": "disk.smb"
+    },
+    "pnt": [
+     1,
+     1,
+     1
+    ]
+   }
+  },
+  {
+   "name": "face_disk_p1",
+   "upstream_ref": "source/SM_API/src/SmApiQueries.cpp:406 on disk.smb",
+   "inputs": {
+    "op": "face",
+    "file": {
+     "$upstream_file": "disk.smb"
+    },
+    "pnt": [
+     1,
+     1,
+     1
+    ]
+   }
+  },
+  {
+   "name": "edge_disk_p2",
+   "upstream_ref": "source/SM_API/src/SmApiQueries.cpp:380 on disk.smb",
+   "inputs": {
+    "op": "edge",
+    "file": {
+     "$upstream_file": "disk.smb"
+    },
+    "pnt": [
+     10,
+     -3,
+     2
+    ]
+   }
+  },
+  {
+   "name": "face_disk_p2",
+   "upstream_ref": "source/SM_API/src/SmApiQueries.cpp:406 on disk.smb",
+   "inputs": {
+    "op": "face",
+    "file": {
+     "$upstream_file": "disk.smb"
+    },
+    "pnt": [
+     10,
+     -3,
+     2
+    ]
+   }
+  },
+  {
+   "name": "edge_disk_p3",
+   "upstream_ref": "source/SM_API/src/SmApiQueries.cpp:380 on disk.smb",
+   "inputs": {
+    "op": "edge",
+    "file": {
+     "$upstream_file": "disk.smb"
+    },
+    "pnt": [
+     0.5,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "face_disk_p3",
+   "upstream_ref": "source/SM_API/src/SmApiQueries.cpp:406 on disk.smb",
+   "inputs": {
+    "op": "face",
+    "file": {
+     "$upstream_file": "disk.smb"
+    },
+    "pnt": [
+     0.5,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "coincident_plane_square_start4",
+   "upstream_ref": "TestFiles/pt_TestFiles/plane_square.smb (SmBrep.cpp:16324 / SmBrep.cpp:30234 call pattern)",
+   "inputs": {
+    "op": "coincident",
+    "file": {
+     "$upstream_file": "plane_square.smb"
+    },
+    "n_edges": 4,
+    "edge": 0,
+    "copy_curve": false,
+    "swap": false,
+    "tol": 1e-06,
+    "start": 4
+   }
+  },
+  {
+   "name": "coincident_plane_square_start6",
+   "upstream_ref": "TestFiles/pt_TestFiles/plane_square.smb (SmBrep.cpp:16324 / SmBrep.cpp:30234 call pattern)",
+   "inputs": {
+    "op": "coincident",
+    "file": {
+     "$upstream_file": "plane_square.smb"
+    },
+    "n_edges": 4,
+    "edge": 0,
+    "copy_curve": false,
+    "swap": false,
+    "tol": 1e-06,
+    "start": 6
+   }
+  },
+  {
+   "name": "coincident_plane_square_e0_copy0_swap0",
+   "upstream_ref": "TestFiles/pt_TestFiles/plane_square.smb (SmBrep.cpp:16324 / SmBrep.cpp:30234 call pattern)",
+   "inputs": {
+    "op": "coincident",
+    "file": {
+     "$upstream_file": "plane_square.smb"
+    },
+    "n_edges": 4,
+    "edge": 0,
+    "copy_curve": false,
+    "swap": false,
+    "tol": 1e-06,
+    "start": 0
+   }
+  },
+  {
+   "name": "coincident_plane_square_e0_copy0_swap1",
+   "upstream_ref": "TestFiles/pt_TestFiles/plane_square.smb (SmBrep.cpp:16324 / SmBrep.cpp:30234 call pattern)",
+   "inputs": {
+    "op": "coincident",
+    "file": {
+     "$upstream_file": "plane_square.smb"
+    },
+    "n_edges": 4,
+    "edge": 0,
+    "copy_curve": false,
+    "swap": true,
+    "tol": 1e-06,
+    "start": 0
+   }
+  },
+  {
+   "name": "coincident_plane_square_e0_copy1_swap0",
+   "upstream_ref": "TestFiles/pt_TestFiles/plane_square.smb (SmBrep.cpp:16324 / SmBrep.cpp:30234 call pattern)",
+   "inputs": {
+    "op": "coincident",
+    "file": {
+     "$upstream_file": "plane_square.smb"
+    },
+    "n_edges": 4,
+    "edge": 0,
+    "copy_curve": true,
+    "swap": false,
+    "tol": 1e-06,
+    "start": 0
+   }
+  },
+  {
+   "name": "coincident_plane_square_e0_copy1_swap1",
+   "upstream_ref": "TestFiles/pt_TestFiles/plane_square.smb (SmBrep.cpp:16324 / SmBrep.cpp:30234 call pattern)",
+   "inputs": {
+    "op": "coincident",
+    "file": {
+     "$upstream_file": "plane_square.smb"
+    },
+    "n_edges": 4,
+    "edge": 0,
+    "copy_curve": true,
+    "swap": true,
+    "tol": 1e-06,
+    "start": 0
+   }
+  },
+  {
+   "name": "coincident_plane_square_e2_copy0_swap0",
+   "upstream_ref": "TestFiles/pt_TestFiles/plane_square.smb (SmBrep.cpp:16324 / SmBrep.cpp:30234 call pattern)",
+   "inputs": {
+    "op": "coincident",
+    "file": {
+     "$upstream_file": "plane_square.smb"
+    },
+    "n_edges": 4,
+    "edge": 2,
+    "copy_curve": false,
+    "swap": false,
+    "tol": 1e-06,
+    "start": 0
+   }
+  },
+  {
+   "name": "coincident_plane_square_e2_copy0_swap1",
+   "upstream_ref": "TestFiles/pt_TestFiles/plane_square.smb (SmBrep.cpp:16324 / SmBrep.cpp:30234 call pattern)",
+   "inputs": {
+    "op": "coincident",
+    "file": {
+     "$upstream_file": "plane_square.smb"
+    },
+    "n_edges": 4,
+    "edge": 2,
+    "copy_curve": false,
+    "swap": true,
+    "tol": 1e-06,
+    "start": 0
+   }
+  },
+  {
+   "name": "coincident_plane_square_e2_copy1_swap0",
+   "upstream_ref": "TestFiles/pt_TestFiles/plane_square.smb (SmBrep.cpp:16324 / SmBrep.cpp:30234 call pattern)",
+   "inputs": {
+    "op": "coincident",
+    "file": {
+     "$upstream_file": "plane_square.smb"
+    },
+    "n_edges": 4,
+    "edge": 2,
+    "copy_curve": true,
+    "swap": false,
+    "tol": 1e-06,
+    "start": 0
+   }
+  },
+  {
+   "name": "coincident_plane_square_e2_copy1_swap1",
+   "upstream_ref": "TestFiles/pt_TestFiles/plane_square.smb (SmBrep.cpp:16324 / SmBrep.cpp:30234 call pattern)",
+   "inputs": {
+    "op": "coincident",
+    "file": {
+     "$upstream_file": "plane_square.smb"
+    },
+    "n_edges": 4,
+    "edge": 2,
+    "copy_curve": true,
+    "swap": true,
+    "tol": 1e-06,
+    "start": 0
+   }
+  },
+  {
+   "name": "coincident_plane_square_e3_copy0_swap0",
+   "upstream_ref": "TestFiles/pt_TestFiles/plane_square.smb (SmBrep.cpp:16324 / SmBrep.cpp:30234 call pattern)",
+   "inputs": {
+    "op": "coincident",
+    "file": {
+     "$upstream_file": "plane_square.smb"
+    },
+    "n_edges": 4,
+    "edge": 3,
+    "copy_curve": false,
+    "swap": false,
+    "tol": 1e-06,
+    "start": 0
+   }
+  },
+  {
+   "name": "coincident_plane_square_e3_copy0_swap1",
+   "upstream_ref": "TestFiles/pt_TestFiles/plane_square.smb (SmBrep.cpp:16324 / SmBrep.cpp:30234 call pattern)",
+   "inputs": {
+    "op": "coincident",
+    "file": {
+     "$upstream_file": "plane_square.smb"
+    },
+    "n_edges": 4,
+    "edge": 3,
+    "copy_curve": false,
+    "swap": true,
+    "tol": 1e-06,
+    "start": 0
+   }
+  },
+  {
+   "name": "coincident_plane_square_e3_copy1_swap0",
+   "upstream_ref": "TestFiles/pt_TestFiles/plane_square.smb (SmBrep.cpp:16324 / SmBrep.cpp:30234 call pattern)",
+   "inputs": {
+    "op": "coincident",
+    "file": {
+     "$upstream_file": "plane_square.smb"
+    },
+    "n_edges": 4,
+    "edge": 3,
+    "copy_curve": true,
+    "swap": false,
+    "tol": 1e-06,
+    "start": 0
+   }
+  },
+  {
+   "name": "coincident_plane_square_e3_copy1_swap1",
+   "upstream_ref": "TestFiles/pt_TestFiles/plane_square.smb (SmBrep.cpp:16324 / SmBrep.cpp:30234 call pattern)",
+   "inputs": {
+    "op": "coincident",
+    "file": {
+     "$upstream_file": "plane_square.smb"
+    },
+    "n_edges": 4,
+    "edge": 3,
+    "copy_curve": true,
+    "swap": true,
+    "tol": 1e-06,
+    "start": 0
+   }
+  },
+  {
+   "name": "edge_plane_square_p0",
+   "upstream_ref": "source/SM_API/src/SmApiQueries.cpp:380 on plane_square.smb",
+   "inputs": {
+    "op": "edge",
+    "file": {
+     "$upstream_file": "plane_square.smb"
+    },
+    "pnt": [
+     0,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "face_plane_square_p0",
+   "upstream_ref": "source/SM_API/src/SmApiQueries.cpp:406 on plane_square.smb",
+   "inputs": {
+    "op": "face",
+    "file": {
+     "$upstream_file": "plane_square.smb"
+    },
+    "pnt": [
+     0,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "edge_plane_square_p1",
+   "upstream_ref": "source/SM_API/src/SmApiQueries.cpp:380 on plane_square.smb",
+   "inputs": {
+    "op": "edge",
+    "file": {
+     "$upstream_file": "plane_square.smb"
+    },
+    "pnt": [
+     1,
+     1,
+     1
+    ]
+   }
+  },
+  {
+   "name": "face_plane_square_p1",
+   "upstream_ref": "source/SM_API/src/SmApiQueries.cpp:406 on plane_square.smb",
+   "inputs": {
+    "op": "face",
+    "file": {
+     "$upstream_file": "plane_square.smb"
+    },
+    "pnt": [
+     1,
+     1,
+     1
+    ]
+   }
+  },
+  {
+   "name": "edge_plane_square_p2",
+   "upstream_ref": "source/SM_API/src/SmApiQueries.cpp:380 on plane_square.smb",
+   "inputs": {
+    "op": "edge",
+    "file": {
+     "$upstream_file": "plane_square.smb"
+    },
+    "pnt": [
+     10,
+     -3,
+     2
+    ]
+   }
+  },
+  {
+   "name": "face_plane_square_p2",
+   "upstream_ref": "source/SM_API/src/SmApiQueries.cpp:406 on plane_square.smb",
+   "inputs": {
+    "op": "face",
+    "file": {
+     "$upstream_file": "plane_square.smb"
+    },
+    "pnt": [
+     10,
+     -3,
+     2
+    ]
+   }
+  },
+  {
+   "name": "edge_plane_square_p3",
+   "upstream_ref": "source/SM_API/src/SmApiQueries.cpp:380 on plane_square.smb",
+   "inputs": {
+    "op": "edge",
+    "file": {
+     "$upstream_file": "plane_square.smb"
+    },
+    "pnt": [
+     0.5,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "face_plane_square_p3",
+   "upstream_ref": "source/SM_API/src/SmApiQueries.cpp:406 on plane_square.smb",
+   "inputs": {
+    "op": "face",
+    "file": {
+     "$upstream_file": "plane_square.smb"
+    },
+    "pnt": [
+     0.5,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "coincident_torus_start2",
+   "upstream_ref": "TestFiles/pt_TestFiles/torus.smb (SmBrep.cpp:16324 / SmBrep.cpp:30234 call pattern)",
+   "inputs": {
+    "op": "coincident",
+    "file": {
+     "$upstream_file": "torus.smb"
+    },
+    "n_edges": 2,
+    "edge": 0,
+    "copy_curve": false,
+    "swap": false,
+    "tol": 1e-06,
+    "start": 2
+   }
+  },
+  {
+   "name": "coincident_torus_start4",
+   "upstream_ref": "TestFiles/pt_TestFiles/torus.smb (SmBrep.cpp:16324 / SmBrep.cpp:30234 call pattern)",
+   "inputs": {
+    "op": "coincident",
+    "file": {
+     "$upstream_file": "torus.smb"
+    },
+    "n_edges": 2,
+    "edge": 0,
+    "copy_curve": false,
+    "swap": false,
+    "tol": 1e-06,
+    "start": 4
+   }
+  },
+  {
+   "name": "coincident_torus_e0_copy0_swap0",
+   "upstream_ref": "TestFiles/pt_TestFiles/torus.smb (SmBrep.cpp:16324 / SmBrep.cpp:30234 call pattern)",
+   "inputs": {
+    "op": "coincident",
+    "file": {
+     "$upstream_file": "torus.smb"
+    },
+    "n_edges": 2,
+    "edge": 0,
+    "copy_curve": false,
+    "swap": false,
+    "tol": 1e-06,
+    "start": 0
+   }
+  },
+  {
+   "name": "coincident_torus_e0_copy0_swap1",
+   "upstream_ref": "TestFiles/pt_TestFiles/torus.smb (SmBrep.cpp:16324 / SmBrep.cpp:30234 call pattern)",
+   "inputs": {
+    "op": "coincident",
+    "file": {
+     "$upstream_file": "torus.smb"
+    },
+    "n_edges": 2,
+    "edge": 0,
+    "copy_curve": false,
+    "swap": true,
+    "tol": 1e-06,
+    "start": 0
+   }
+  },
+  {
+   "name": "coincident_torus_e0_copy1_swap0",
+   "upstream_ref": "TestFiles/pt_TestFiles/torus.smb (SmBrep.cpp:16324 / SmBrep.cpp:30234 call pattern)",
+   "inputs": {
+    "op": "coincident",
+    "file": {
+     "$upstream_file": "torus.smb"
+    },
+    "n_edges": 2,
+    "edge": 0,
+    "copy_curve": true,
+    "swap": false,
+    "tol": 1e-06,
+    "start": 0
+   }
+  },
+  {
+   "name": "coincident_torus_e0_copy1_swap1",
+   "upstream_ref": "TestFiles/pt_TestFiles/torus.smb (SmBrep.cpp:16324 / SmBrep.cpp:30234 call pattern)",
+   "inputs": {
+    "op": "coincident",
+    "file": {
+     "$upstream_file": "torus.smb"
+    },
+    "n_edges": 2,
+    "edge": 0,
+    "copy_curve": true,
+    "swap": true,
+    "tol": 1e-06,
+    "start": 0
+   }
+  },
+  {
+   "name": "coincident_torus_e1_copy0_swap0",
+   "upstream_ref": "TestFiles/pt_TestFiles/torus.smb (SmBrep.cpp:16324 / SmBrep.cpp:30234 call pattern)",
+   "inputs": {
+    "op": "coincident",
+    "file": {
+     "$upstream_file": "torus.smb"
+    },
+    "n_edges": 2,
+    "edge": 1,
+    "copy_curve": false,
+    "swap": false,
+    "tol": 1e-06,
+    "start": 0
+   }
+  },
+  {
+   "name": "coincident_torus_e1_copy0_swap1",
+   "upstream_ref": "TestFiles/pt_TestFiles/torus.smb (SmBrep.cpp:16324 / SmBrep.cpp:30234 call pattern)",
+   "inputs": {
+    "op": "coincident",
+    "file": {
+     "$upstream_file": "torus.smb"
+    },
+    "n_edges": 2,
+    "edge": 1,
+    "copy_curve": false,
+    "swap": true,
+    "tol": 1e-06,
+    "start": 0
+   }
+  },
+  {
+   "name": "coincident_torus_e1_copy1_swap0",
+   "upstream_ref": "TestFiles/pt_TestFiles/torus.smb (SmBrep.cpp:16324 / SmBrep.cpp:30234 call pattern)",
+   "inputs": {
+    "op": "coincident",
+    "file": {
+     "$upstream_file": "torus.smb"
+    },
+    "n_edges": 2,
+    "edge": 1,
+    "copy_curve": true,
+    "swap": false,
+    "tol": 1e-06,
+    "start": 0
+   }
+  },
+  {
+   "name": "coincident_torus_e1_copy1_swap1",
+   "upstream_ref": "TestFiles/pt_TestFiles/torus.smb (SmBrep.cpp:16324 / SmBrep.cpp:30234 call pattern)",
+   "inputs": {
+    "op": "coincident",
+    "file": {
+     "$upstream_file": "torus.smb"
+    },
+    "n_edges": 2,
+    "edge": 1,
+    "copy_curve": true,
+    "swap": true,
+    "tol": 1e-06,
+    "start": 0
+   }
+  },
+  {
+   "name": "edge_torus_p0",
+   "upstream_ref": "source/SM_API/src/SmApiQueries.cpp:380 on torus.smb",
+   "inputs": {
+    "op": "edge",
+    "file": {
+     "$upstream_file": "torus.smb"
+    },
+    "pnt": [
+     0,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "face_torus_p0",
+   "upstream_ref": "source/SM_API/src/SmApiQueries.cpp:406 on torus.smb",
+   "inputs": {
+    "op": "face",
+    "file": {
+     "$upstream_file": "torus.smb"
+    },
+    "pnt": [
+     0,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "edge_torus_p1",
+   "upstream_ref": "source/SM_API/src/SmApiQueries.cpp:380 on torus.smb",
+   "inputs": {
+    "op": "edge",
+    "file": {
+     "$upstream_file": "torus.smb"
+    },
+    "pnt": [
+     1,
+     1,
+     1
+    ]
+   }
+  },
+  {
+   "name": "face_torus_p1",
+   "upstream_ref": "source/SM_API/src/SmApiQueries.cpp:406 on torus.smb",
+   "inputs": {
+    "op": "face",
+    "file": {
+     "$upstream_file": "torus.smb"
+    },
+    "pnt": [
+     1,
+     1,
+     1
+    ]
+   }
+  },
+  {
+   "name": "edge_torus_p2",
+   "upstream_ref": "source/SM_API/src/SmApiQueries.cpp:380 on torus.smb",
+   "inputs": {
+    "op": "edge",
+    "file": {
+     "$upstream_file": "torus.smb"
+    },
+    "pnt": [
+     10,
+     -3,
+     2
+    ]
+   }
+  },
+  {
+   "name": "face_torus_p2",
+   "upstream_ref": "source/SM_API/src/SmApiQueries.cpp:406 on torus.smb",
+   "inputs": {
+    "op": "face",
+    "file": {
+     "$upstream_file": "torus.smb"
+    },
+    "pnt": [
+     10,
+     -3,
+     2
+    ]
+   }
+  },
+  {
+   "name": "edge_torus_p3",
+   "upstream_ref": "source/SM_API/src/SmApiQueries.cpp:380 on torus.smb",
+   "inputs": {
+    "op": "edge",
+    "file": {
+     "$upstream_file": "torus.smb"
+    },
+    "pnt": [
+     0.5,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "face_torus_p3",
+   "upstream_ref": "source/SM_API/src/SmApiQueries.cpp:406 on torus.smb",
+   "inputs": {
+    "op": "face",
+    "file": {
+     "$upstream_file": "torus.smb"
+    },
+    "pnt": [
+     0.5,
+     0,
+     0
+    ]
+   }
+  }
+ ]
+}

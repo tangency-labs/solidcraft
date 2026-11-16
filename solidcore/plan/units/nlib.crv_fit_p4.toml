@@ -1,0 +1,12 @@
+id = "nlib.crv_fit_p4"
+upstream = ["source/SMLib/src/NL_CrvFit.cpp", "source/SMLib/src/SmBSplineCurveNLib.cpp", "source/SM_API/src/SmApiCurves.cpp"]
+rust_module = "nurbs::crv_fit::p4"
+depends_on = ["nlib.crv_fit_p1", "nlib.crv_fit_p2", "nlib.basis_basic", "nlib.knots", "nlib.math", "nurbs.b_spline_curve_n_lib", "primitive.api_curves"]
+soft_depends_on = []
+est_lines = 520
+layer = 21
+tests = []
+status = "green"
+claimed_by = ""
+claimed_at = ""
+notes = "SM_API gap M3 (SmApiCreateCurveApproxPoints). NOT IN callgraph/units.json: N_FitCrvApproxDerivs and N_FitCalcKnotsEndDerivs are in harness/callgraph/unused_functions.txt; SmBSplineCurve::CreateApproximatingCurve and SmApiCreateCurveApproxPoints are owned by no unit (N_InitNurbs / N_EndNurbs / N_Alloc* / N_Free are NLib memory management with no counterpart). Rust: nurbs::crv_fit::p4::approx_end_derivs / knots_end_derivs (this module), BSplineCurve::create_approximating_curve (completion in nurbs/b_spline_curve_n_lib.rs) and primitive::api_curves::create_curve_approx_points (completion in primitive/api_curves.rs). No upstream test calls these; fixtures cover the API's control-point-count thresholds (4, 8/9, 16/17 points), every CreateApproximatingCurve vector branch (including the one-vector branch's third derivative from more_vectors[2], the documented [start2, end2, start3, end3] layout, read only when more than 2 are given; a 2-entry list skips it), and each N_FitCrvApproxDerivs input check and early exit. Status pending the gate run."

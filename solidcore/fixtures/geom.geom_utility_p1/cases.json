@@ -1,0 +1,3743 @@
+{
+ "cases": [
+  {
+   "name": "rect_area",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:429",
+   "inputs": {
+    "op": "polygon_area",
+    "x": [
+     0,
+     0,
+     1
+    ],
+    "pts": [
+     [
+      -5,
+      -3,
+      0
+     ],
+     [
+      5,
+      -3,
+      0
+     ],
+     [
+      5,
+      3,
+      0
+     ],
+     [
+      -5,
+      3,
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "rect_area_closed",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:429",
+   "inputs": {
+    "op": "polygon_area",
+    "x": [
+     0,
+     0,
+     1
+    ],
+    "pts": [
+     [
+      -5,
+      -3,
+      0
+     ],
+     [
+      5,
+      -3,
+      0
+     ],
+     [
+      5,
+      3,
+      0
+     ],
+     [
+      -5,
+      3,
+      0
+     ],
+     [
+      -5,
+      -3,
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "rect_far_area",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:440",
+   "inputs": {
+    "op": "polygon_area",
+    "x": [
+     0,
+     0,
+     1
+    ],
+    "pts": [
+     [
+      -5,
+      10000000000.0,
+      0
+     ],
+     [
+      5,
+      10000000000.0,
+      0
+     ],
+     [
+      5,
+      10000000000.0,
+      0
+     ],
+     [
+      -5,
+      10000000000.0,
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "hexagon_area",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:467",
+   "inputs": {
+    "op": "polygon_area",
+    "x": [
+     0,
+     0,
+     1
+    ],
+    "pts": [
+     [
+      5.0,
+      0.0,
+      0
+     ],
+     [
+      2.5000000000000004,
+      4.330127018922193,
+      0
+     ],
+     [
+      -2.499999999999999,
+      4.330127018922194,
+      0
+     ],
+     [
+      -5.0,
+      6.123233995736766e-16,
+      0
+     ],
+     [
+      -2.500000000000002,
+      -4.330127018922192,
+      0
+     ],
+     [
+      2.5000000000000004,
+      -4.330127018922193,
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "hexagon_area_flipped",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:467",
+   "inputs": {
+    "op": "polygon_area",
+    "x": [
+     0,
+     0,
+     -1
+    ],
+    "pts": [
+     [
+      5.0,
+      0.0,
+      0
+     ],
+     [
+      2.5000000000000004,
+      4.330127018922193,
+      0
+     ],
+     [
+      -2.499999999999999,
+      4.330127018922194,
+      0
+     ],
+     [
+      -5.0,
+      6.123233995736766e-16,
+      0
+     ],
+     [
+      -2.500000000000002,
+      -4.330127018922192,
+      0
+     ],
+     [
+      2.5000000000000004,
+      -4.330127018922193,
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "pentagon_far_area",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:478",
+   "inputs": {
+    "op": "polygon_area",
+    "x": [
+     0,
+     0,
+     1
+    ],
+    "pts": [
+     [
+      10000000000.000002,
+      10000000000.0,
+      0
+     ],
+     [
+      10000000000.0,
+      10000000000.000002,
+      0
+     ],
+     [
+      9999999999.999998,
+      10000000000.0,
+      0
+     ],
+     [
+      9999999999.999998,
+      10000000000.0,
+      0
+     ],
+     [
+      10000000000.0,
+      9999999999.999998,
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "single_point_area",
+   "inputs": {
+    "op": "polygon_area",
+    "x": [
+     0,
+     0,
+     1
+    ],
+    "pts": [
+     [
+      1,
+      2,
+      3
+     ]
+    ]
+   }
+  },
+  {
+   "name": "fitcrv_area",
+   "upstream_ref": "TestFiles/pt_TestFiles/FitCrvPoints.pts",
+   "inputs": {
+    "op": "polygon_area",
+    "x": [
+     0,
+     0,
+     1
+    ],
+    "pts": {
+     "$pts": "FitCrvPoints.pts"
+    }
+   }
+  },
+  {
+   "name": "best_fit_point_FitCrvPoints_1e-06",
+   "upstream_ref": "TestFiles/pt_TestFiles/FitCrvPoints.pts",
+   "inputs": {
+    "op": "best_fit_point",
+    "x": [
+     1e-06
+    ],
+    "pts": {
+     "$pts": "FitCrvPoints.pts"
+    }
+   }
+  },
+  {
+   "name": "best_fit_line_FitCrvPoints_1e-06",
+   "upstream_ref": "TestFiles/pt_TestFiles/FitCrvPoints.pts",
+   "inputs": {
+    "op": "best_fit_line",
+    "x": [
+     1e-06
+    ],
+    "pts": {
+     "$pts": "FitCrvPoints.pts"
+    }
+   }
+  },
+  {
+   "name": "best_fit_point_FitCrvPoints_0.001",
+   "upstream_ref": "TestFiles/pt_TestFiles/FitCrvPoints.pts",
+   "inputs": {
+    "op": "best_fit_point",
+    "x": [
+     0.001
+    ],
+    "pts": {
+     "$pts": "FitCrvPoints.pts"
+    }
+   }
+  },
+  {
+   "name": "best_fit_line_FitCrvPoints_0.001",
+   "upstream_ref": "TestFiles/pt_TestFiles/FitCrvPoints.pts",
+   "inputs": {
+    "op": "best_fit_line",
+    "x": [
+     0.001
+    ],
+    "pts": {
+     "$pts": "FitCrvPoints.pts"
+    }
+   }
+  },
+  {
+   "name": "best_fit_point_FitCrvPoints_10",
+   "upstream_ref": "TestFiles/pt_TestFiles/FitCrvPoints.pts",
+   "inputs": {
+    "op": "best_fit_point",
+    "x": [
+     10.0
+    ],
+    "pts": {
+     "$pts": "FitCrvPoints.pts"
+    }
+   }
+  },
+  {
+   "name": "best_fit_line_FitCrvPoints_10",
+   "upstream_ref": "TestFiles/pt_TestFiles/FitCrvPoints.pts",
+   "inputs": {
+    "op": "best_fit_line",
+    "x": [
+     10.0
+    ],
+    "pts": {
+     "$pts": "FitCrvPoints.pts"
+    }
+   }
+  },
+  {
+   "name": "best_fit_point_Points_1e-06",
+   "upstream_ref": "TestFiles/pt_TestFiles/Points.pts",
+   "inputs": {
+    "op": "best_fit_point",
+    "x": [
+     1e-06
+    ],
+    "pts": {
+     "$pts": "Points.pts"
+    }
+   }
+  },
+  {
+   "name": "best_fit_line_Points_1e-06",
+   "upstream_ref": "TestFiles/pt_TestFiles/Points.pts",
+   "inputs": {
+    "op": "best_fit_line",
+    "x": [
+     1e-06
+    ],
+    "pts": {
+     "$pts": "Points.pts"
+    }
+   }
+  },
+  {
+   "name": "best_fit_point_Points_0.001",
+   "upstream_ref": "TestFiles/pt_TestFiles/Points.pts",
+   "inputs": {
+    "op": "best_fit_point",
+    "x": [
+     0.001
+    ],
+    "pts": {
+     "$pts": "Points.pts"
+    }
+   }
+  },
+  {
+   "name": "best_fit_line_Points_0.001",
+   "upstream_ref": "TestFiles/pt_TestFiles/Points.pts",
+   "inputs": {
+    "op": "best_fit_line",
+    "x": [
+     0.001
+    ],
+    "pts": {
+     "$pts": "Points.pts"
+    }
+   }
+  },
+  {
+   "name": "best_fit_point_Points_10",
+   "upstream_ref": "TestFiles/pt_TestFiles/Points.pts",
+   "inputs": {
+    "op": "best_fit_point",
+    "x": [
+     10.0
+    ],
+    "pts": {
+     "$pts": "Points.pts"
+    }
+   }
+  },
+  {
+   "name": "best_fit_line_Points_10",
+   "upstream_ref": "TestFiles/pt_TestFiles/Points.pts",
+   "inputs": {
+    "op": "best_fit_line",
+    "x": [
+     10.0
+    ],
+    "pts": {
+     "$pts": "Points.pts"
+    }
+   }
+  },
+  {
+   "name": "best_fit_point_PointSet_Section00_1e-06",
+   "upstream_ref": "TestFiles/pt_TestFiles/PointSet/Section00.pts",
+   "inputs": {
+    "op": "best_fit_point",
+    "x": [
+     1e-06
+    ],
+    "pts": {
+     "$pts": "PointSet/Section00.pts"
+    }
+   }
+  },
+  {
+   "name": "best_fit_line_PointSet_Section00_1e-06",
+   "upstream_ref": "TestFiles/pt_TestFiles/PointSet/Section00.pts",
+   "inputs": {
+    "op": "best_fit_line",
+    "x": [
+     1e-06
+    ],
+    "pts": {
+     "$pts": "PointSet/Section00.pts"
+    }
+   }
+  },
+  {
+   "name": "best_fit_point_PointSet_Section00_0.001",
+   "upstream_ref": "TestFiles/pt_TestFiles/PointSet/Section00.pts",
+   "inputs": {
+    "op": "best_fit_point",
+    "x": [
+     0.001
+    ],
+    "pts": {
+     "$pts": "PointSet/Section00.pts"
+    }
+   }
+  },
+  {
+   "name": "best_fit_line_PointSet_Section00_0.001",
+   "upstream_ref": "TestFiles/pt_TestFiles/PointSet/Section00.pts",
+   "inputs": {
+    "op": "best_fit_line",
+    "x": [
+     0.001
+    ],
+    "pts": {
+     "$pts": "PointSet/Section00.pts"
+    }
+   }
+  },
+  {
+   "name": "best_fit_point_PointSet_Section00_10",
+   "upstream_ref": "TestFiles/pt_TestFiles/PointSet/Section00.pts",
+   "inputs": {
+    "op": "best_fit_point",
+    "x": [
+     10.0
+    ],
+    "pts": {
+     "$pts": "PointSet/Section00.pts"
+    }
+   }
+  },
+  {
+   "name": "best_fit_line_PointSet_Section00_10",
+   "upstream_ref": "TestFiles/pt_TestFiles/PointSet/Section00.pts",
+   "inputs": {
+    "op": "best_fit_line",
+    "x": [
+     10.0
+    ],
+    "pts": {
+     "$pts": "PointSet/Section00.pts"
+    }
+   }
+  },
+  {
+   "name": "best_fit_point_PointSet_Section05_1e-06",
+   "upstream_ref": "TestFiles/pt_TestFiles/PointSet/Section05.pts",
+   "inputs": {
+    "op": "best_fit_point",
+    "x": [
+     1e-06
+    ],
+    "pts": {
+     "$pts": "PointSet/Section05.pts"
+    }
+   }
+  },
+  {
+   "name": "best_fit_line_PointSet_Section05_1e-06",
+   "upstream_ref": "TestFiles/pt_TestFiles/PointSet/Section05.pts",
+   "inputs": {
+    "op": "best_fit_line",
+    "x": [
+     1e-06
+    ],
+    "pts": {
+     "$pts": "PointSet/Section05.pts"
+    }
+   }
+  },
+  {
+   "name": "best_fit_point_PointSet_Section05_0.001",
+   "upstream_ref": "TestFiles/pt_TestFiles/PointSet/Section05.pts",
+   "inputs": {
+    "op": "best_fit_point",
+    "x": [
+     0.001
+    ],
+    "pts": {
+     "$pts": "PointSet/Section05.pts"
+    }
+   }
+  },
+  {
+   "name": "best_fit_line_PointSet_Section05_0.001",
+   "upstream_ref": "TestFiles/pt_TestFiles/PointSet/Section05.pts",
+   "inputs": {
+    "op": "best_fit_line",
+    "x": [
+     0.001
+    ],
+    "pts": {
+     "$pts": "PointSet/Section05.pts"
+    }
+   }
+  },
+  {
+   "name": "best_fit_point_PointSet_Section05_10",
+   "upstream_ref": "TestFiles/pt_TestFiles/PointSet/Section05.pts",
+   "inputs": {
+    "op": "best_fit_point",
+    "x": [
+     10.0
+    ],
+    "pts": {
+     "$pts": "PointSet/Section05.pts"
+    }
+   }
+  },
+  {
+   "name": "best_fit_line_PointSet_Section05_10",
+   "upstream_ref": "TestFiles/pt_TestFiles/PointSet/Section05.pts",
+   "inputs": {
+    "op": "best_fit_line",
+    "x": [
+     10.0
+    ],
+    "pts": {
+     "$pts": "PointSet/Section05.pts"
+    }
+   }
+  },
+  {
+   "name": "best_fit_line_rect",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:429",
+   "inputs": {
+    "op": "best_fit_line",
+    "x": [
+     1e-06
+    ],
+    "pts": [
+     [
+      -5,
+      -3,
+      0
+     ],
+     [
+      5,
+      -3,
+      0
+     ],
+     [
+      5,
+      3,
+      0
+     ],
+     [
+      -5,
+      3,
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "best_fit_line_hex",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:467",
+   "inputs": {
+    "op": "best_fit_line",
+    "x": [
+     1e-06
+    ],
+    "pts": [
+     [
+      5.0,
+      0.0,
+      0
+     ],
+     [
+      2.5000000000000004,
+      4.330127018922193,
+      0
+     ],
+     [
+      -2.499999999999999,
+      4.330127018922194,
+      0
+     ],
+     [
+      -5.0,
+      6.123233995736766e-16,
+      0
+     ],
+     [
+      -2.500000000000002,
+      -4.330127018922192,
+      0
+     ],
+     [
+      2.5000000000000004,
+      -4.330127018922193,
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "best_fit_line_pent_far",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:478",
+   "inputs": {
+    "op": "best_fit_line",
+    "x": [
+     1e-06
+    ],
+    "pts": [
+     [
+      10000000000.000002,
+      10000000000.0,
+      0
+     ],
+     [
+      10000000000.0,
+      10000000000.000002,
+      0
+     ],
+     [
+      9999999999.999998,
+      10000000000.0,
+      0
+     ],
+     [
+      9999999999.999998,
+      10000000000.0,
+      0
+     ],
+     [
+      10000000000.0,
+      9999999999.999998,
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "best_fit_line_pent_far_tol",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:478",
+   "inputs": {
+    "op": "best_fit_line",
+    "x": [
+     1e-05
+    ],
+    "pts": [
+     [
+      10000000000.000002,
+      10000000000.0,
+      0
+     ],
+     [
+      10000000000.0,
+      10000000000.000002,
+      0
+     ],
+     [
+      9999999999.999998,
+      10000000000.0,
+      0
+     ],
+     [
+      9999999999.999998,
+      10000000000.0,
+      0
+     ],
+     [
+      10000000000.0,
+      9999999999.999998,
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "best_fit_line_empty",
+   "inputs": {
+    "op": "best_fit_line",
+    "x": [
+     1e-06
+    ],
+    "pts": []
+   }
+  },
+  {
+   "name": "best_fit_line_one",
+   "inputs": {
+    "op": "best_fit_line",
+    "x": [
+     1e-06
+    ],
+    "pts": [
+     [
+      1,
+      2,
+      3
+     ]
+    ]
+   }
+  },
+  {
+   "name": "best_fit_line_two_same",
+   "inputs": {
+    "op": "best_fit_line",
+    "x": [
+     1e-06
+    ],
+    "pts": [
+     [
+      1,
+      2,
+      3
+     ],
+     [
+      1,
+      2,
+      3
+     ]
+    ]
+   }
+  },
+  {
+   "name": "best_fit_line_collinear",
+   "inputs": {
+    "op": "best_fit_line",
+    "x": [
+     1e-06
+    ],
+    "pts": [
+     [
+      0,
+      0,
+      0
+     ],
+     [
+      1,
+      1,
+      1
+     ],
+     [
+      2,
+      2,
+      2
+     ],
+     [
+      5,
+      5,
+      5
+     ]
+    ]
+   }
+  },
+  {
+   "name": "best_fit_point_huge_center",
+   "inputs": {
+    "op": "best_fit_point",
+    "x": [
+     1e-06
+    ],
+    "pts": [
+     [
+      3000000000000.0,
+      3000000000000.0,
+      3000000000000.0
+     ],
+     [
+      3000000000001.0,
+      3000000000000.0,
+      3000000000000.0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "shell_sort_fitcrv",
+   "upstream_ref": "TestFiles/pt_TestFiles/FitCrvPoints.pts",
+   "inputs": {
+    "op": "shell_sort",
+    "x": [],
+    "pts": {
+     "$pts": "FitCrvPoints.pts"
+    }
+   }
+  },
+  {
+   "name": "shell_sort_points",
+   "upstream_ref": "TestFiles/pt_TestFiles/Points.pts",
+   "inputs": {
+    "op": "shell_sort",
+    "x": [],
+    "pts": {
+     "$pts": "Points.pts"
+    }
+   }
+  },
+  {
+   "name": "shell_sort_empty",
+   "inputs": {
+    "op": "shell_sort",
+    "x": []
+   }
+  },
+  {
+   "name": "shell_sort_one",
+   "inputs": {
+    "op": "shell_sort",
+    "x": [
+     3.0
+    ]
+   }
+  },
+  {
+   "name": "shell_sort_dups",
+   "inputs": {
+    "op": "shell_sort",
+    "x": [
+     2,
+     1,
+     2,
+     1,
+     0,
+     0,
+     -1,
+     2
+    ]
+   }
+  },
+  {
+   "name": "rect_edge0_seg_dist",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:429",
+   "inputs": {
+    "op": "segment_point_distance",
+    "x": [
+     -5,
+     -3,
+     0,
+     5,
+     -3,
+     0,
+     7,
+     1,
+     0
+    ]
+   }
+  },
+  {
+   "name": "rect_edge0_seg_angle",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:429",
+   "inputs": {
+    "op": "segment_angle",
+    "x": [
+     -5,
+     -3,
+     0,
+     5,
+     -3,
+     0,
+     7,
+     1,
+     0
+    ]
+   }
+  },
+  {
+   "name": "rect_edge0_line_dist",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:429",
+   "inputs": {
+    "op": "line_point_distance",
+    "x": [
+     -5,
+     -3,
+     0,
+     10,
+     0,
+     0,
+     7,
+     1,
+     0
+    ]
+   }
+  },
+  {
+   "name": "rect_edge1_seg_dist",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:429",
+   "inputs": {
+    "op": "segment_point_distance",
+    "x": [
+     5,
+     -3,
+     0,
+     5,
+     3,
+     0,
+     7,
+     1,
+     0
+    ]
+   }
+  },
+  {
+   "name": "rect_edge1_seg_angle",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:429",
+   "inputs": {
+    "op": "segment_angle",
+    "x": [
+     5,
+     -3,
+     0,
+     5,
+     3,
+     0,
+     7,
+     1,
+     0
+    ]
+   }
+  },
+  {
+   "name": "rect_edge1_line_dist",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:429",
+   "inputs": {
+    "op": "line_point_distance",
+    "x": [
+     5,
+     -3,
+     0,
+     0,
+     6,
+     0,
+     7,
+     1,
+     0
+    ]
+   }
+  },
+  {
+   "name": "rect_edge2_seg_dist",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:429",
+   "inputs": {
+    "op": "segment_point_distance",
+    "x": [
+     5,
+     3,
+     0,
+     -5,
+     3,
+     0,
+     7,
+     1,
+     0
+    ]
+   }
+  },
+  {
+   "name": "rect_edge2_seg_angle",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:429",
+   "inputs": {
+    "op": "segment_angle",
+    "x": [
+     5,
+     3,
+     0,
+     -5,
+     3,
+     0,
+     7,
+     1,
+     0
+    ]
+   }
+  },
+  {
+   "name": "rect_edge2_line_dist",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:429",
+   "inputs": {
+    "op": "line_point_distance",
+    "x": [
+     5,
+     3,
+     0,
+     -10,
+     0,
+     0,
+     7,
+     1,
+     0
+    ]
+   }
+  },
+  {
+   "name": "rect_edge3_seg_dist",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:429",
+   "inputs": {
+    "op": "segment_point_distance",
+    "x": [
+     -5,
+     3,
+     0,
+     -5,
+     -3,
+     0,
+     7,
+     1,
+     0
+    ]
+   }
+  },
+  {
+   "name": "rect_edge3_seg_angle",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:429",
+   "inputs": {
+    "op": "segment_angle",
+    "x": [
+     -5,
+     3,
+     0,
+     -5,
+     -3,
+     0,
+     7,
+     1,
+     0
+    ]
+   }
+  },
+  {
+   "name": "rect_edge3_line_dist",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:429",
+   "inputs": {
+    "op": "line_point_distance",
+    "x": [
+     -5,
+     3,
+     0,
+     0,
+     -6,
+     0,
+     7,
+     1,
+     0
+    ]
+   }
+  },
+  {
+   "name": "rectfar_width_line_dist",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:440",
+   "inputs": {
+    "op": "line_point_distance",
+    "x": [
+     5,
+     10000000000.0,
+     0,
+     0,
+     1e-09,
+     0,
+     5,
+     10000000000.0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "rectfar_width_seg_dist",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:440",
+   "inputs": {
+    "op": "segment_point_distance",
+    "x": [
+     5,
+     10000000000.0,
+     0,
+     5,
+     10000000000.0,
+     0,
+     6,
+     10000000000.0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "degenerate_line",
+   "inputs": {
+    "op": "line_point_distance",
+    "x": [
+     1,
+     1,
+     1,
+     0,
+     0,
+     0,
+     4,
+     5,
+     1
+    ]
+   }
+  },
+  {
+   "name": "seg_angle_on_segment",
+   "inputs": {
+    "op": "segment_angle",
+    "x": [
+     0,
+     0,
+     0,
+     1,
+     0,
+     0,
+     2,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "seg_angle_at_end",
+   "inputs": {
+    "op": "segment_angle",
+    "x": [
+     0,
+     0,
+     0,
+     1,
+     0,
+     0,
+     1,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "seg_angle_degenerate",
+   "inputs": {
+    "op": "segment_angle",
+    "x": [
+     1,
+     1,
+     1,
+     1,
+     1,
+     1,
+     2,
+     3,
+     4
+    ]
+   }
+  },
+  {
+   "name": "llcp_circle_centres",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:7951",
+   "inputs": {
+    "op": "line_line_closest_point",
+    "x": [
+     0,
+     0,
+     0,
+     0,
+     1,
+     0,
+     3,
+     1,
+     0,
+     -1,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "llcp_skew",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:7951",
+   "inputs": {
+    "op": "line_line_closest_point",
+    "x": [
+     0,
+     0,
+     0,
+     1,
+     0,
+     0,
+     0,
+     0,
+     1,
+     0,
+     1,
+     0
+    ]
+   }
+  },
+  {
+   "name": "llcp_parallel",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:7951",
+   "inputs": {
+    "op": "line_line_closest_point",
+    "x": [
+     0,
+     0,
+     0,
+     1,
+     0,
+     0,
+     0,
+     1,
+     0,
+     2,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "llcp_zero",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:7951",
+   "inputs": {
+    "op": "line_line_closest_point",
+    "x": [
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     1,
+     0,
+     2,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "line_plane_parallel",
+   "inputs": {
+    "op": "line_plane",
+    "x": [
+     0,
+     0,
+     0,
+     1,
+     0,
+     0,
+     0,
+     0,
+     1,
+     0,
+     0,
+     1
+    ]
+   }
+  },
+  {
+   "name": "line_plane_nan_like_zero",
+   "inputs": {
+    "op": "line_plane",
+    "x": [
+     0,
+     0,
+     0,
+     1e-13,
+     0,
+     0,
+     0,
+     0,
+     1,
+     0,
+     0,
+     1
+    ]
+   }
+  },
+  {
+   "name": "line_plane_uv_basic",
+   "inputs": {
+    "op": "line_plane_uv",
+    "x": [
+     1,
+     2,
+     5,
+     0,
+     0,
+     -1,
+     0,
+     0,
+     0,
+     1,
+     0,
+     0,
+     0,
+     1,
+     0
+    ]
+   }
+  },
+  {
+   "name": "line_plane_uv_parallel_tangents",
+   "inputs": {
+    "op": "line_plane_uv",
+    "x": [
+     1,
+     2,
+     5,
+     0,
+     0,
+     -1,
+     0,
+     0,
+     0,
+     1,
+     0,
+     0,
+     2,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "line_circle_far",
+   "inputs": {
+    "op": "line_circle",
+    "x": [
+     -5,
+     1.5,
+     0.3,
+     1,
+     0,
+     0.2,
+     0,
+     0,
+     0,
+     0,
+     0,
+     1,
+     1.0,
+     0.001
+    ]
+   }
+  },
+  {
+   "name": "line_circle_near_miss",
+   "inputs": {
+    "op": "line_circle",
+    "x": [
+     -5,
+     1.0005,
+     0.3,
+     1,
+     0,
+     0.2,
+     0,
+     0,
+     0,
+     0,
+     0,
+     1,
+     1.0,
+     0.001
+    ]
+   }
+  },
+  {
+   "name": "line_circle_tangent",
+   "inputs": {
+    "op": "line_circle",
+    "x": [
+     -5,
+     1.0,
+     0.3,
+     1,
+     0,
+     0.2,
+     0,
+     0,
+     0,
+     0,
+     0,
+     1,
+     1.0,
+     0.001
+    ]
+   }
+  },
+  {
+   "name": "line_circle_two",
+   "inputs": {
+    "op": "line_circle",
+    "x": [
+     -5,
+     0.5,
+     0.3,
+     1,
+     0,
+     0.2,
+     0,
+     0,
+     0,
+     0,
+     0,
+     1,
+     1.0,
+     0.001
+    ]
+   }
+  },
+  {
+   "name": "line_circle_fuzzy",
+   "inputs": {
+    "op": "line_circle",
+    "x": [
+     -5,
+     0.9999,
+     0.3,
+     1,
+     0,
+     0.2,
+     0,
+     0,
+     0,
+     0,
+     0,
+     1,
+     1.0,
+     0.001
+    ]
+   }
+  },
+  {
+   "name": "line_circle_fuzzy_one",
+   "inputs": {
+    "op": "line_circle",
+    "x": [
+     -5,
+     0.99999999,
+     0.3,
+     1,
+     0,
+     0.2,
+     0,
+     0,
+     0,
+     0,
+     0,
+     1,
+     1.0,
+     0.001
+    ]
+   }
+  },
+  {
+   "name": "line_circle_zero_tol_inside",
+   "inputs": {
+    "op": "line_circle",
+    "x": [
+     -5,
+     0.999999999999,
+     0.3,
+     1,
+     0,
+     0.2,
+     0,
+     0,
+     0,
+     0,
+     0,
+     1,
+     1.0,
+     0.0
+    ]
+   }
+  },
+  {
+   "name": "line_circle_perp_line",
+   "inputs": {
+    "op": "line_circle",
+    "x": [
+     0,
+     0,
+     1,
+     0,
+     0,
+     1,
+     0,
+     0,
+     0,
+     0,
+     0,
+     1,
+     1.0,
+     0.001
+    ]
+   }
+  },
+  {
+   "name": "circle_circle_outside_tangent",
+   "inputs": {
+    "op": "circle_circle",
+    "x": [
+     0,
+     0,
+     1,
+     0,
+     0,
+     0,
+     1,
+     2,
+     0,
+     0,
+     1,
+     1e-06
+    ]
+   }
+  },
+  {
+   "name": "circle_circle_inside_tangent",
+   "inputs": {
+    "op": "circle_circle",
+    "x": [
+     0,
+     0,
+     1,
+     0,
+     0,
+     0,
+     1,
+     0.5,
+     0,
+     0,
+     0.5,
+     1e-06
+    ]
+   }
+  },
+  {
+   "name": "circle_circle_inside_tangent_big2",
+   "inputs": {
+    "op": "circle_circle",
+    "x": [
+     0,
+     0,
+     1,
+     0,
+     0,
+     0,
+     0.5,
+     0.5,
+     0,
+     0,
+     1,
+     1e-06
+    ]
+   }
+  },
+  {
+   "name": "circle_circle_coincident",
+   "inputs": {
+    "op": "circle_circle",
+    "x": [
+     0,
+     0,
+     1,
+     0,
+     0,
+     0,
+     1,
+     0,
+     0,
+     0,
+     1,
+     1e-06
+    ]
+   }
+  },
+  {
+   "name": "circle_circle_concentric",
+   "inputs": {
+    "op": "circle_circle",
+    "x": [
+     0,
+     0,
+     1,
+     0,
+     0,
+     0,
+     1,
+     0,
+     0,
+     0,
+     2,
+     1e-06
+    ]
+   }
+  },
+  {
+   "name": "circle_circle_crossing",
+   "inputs": {
+    "op": "circle_circle",
+    "x": [
+     0,
+     0,
+     1,
+     0,
+     0,
+     0,
+     1,
+     1,
+     0,
+     0,
+     1,
+     1e-06
+    ]
+   }
+  },
+  {
+   "name": "circle_circle_apart",
+   "inputs": {
+    "op": "circle_circle",
+    "x": [
+     0,
+     0,
+     1,
+     0,
+     0,
+     0,
+     1,
+     5,
+     0,
+     0,
+     1,
+     1e-06
+    ]
+   }
+  },
+  {
+   "name": "circle_circle_nested",
+   "inputs": {
+    "op": "circle_circle",
+    "x": [
+     0,
+     0,
+     1,
+     0,
+     0,
+     0,
+     3,
+     0.1,
+     0,
+     0,
+     1,
+     1e-06
+    ]
+   }
+  },
+  {
+   "name": "circle_circle_offplane_tangent",
+   "inputs": {
+    "op": "circle_circle",
+    "x": [
+     0,
+     0,
+     1,
+     0,
+     0,
+     0,
+     1,
+     2,
+     0,
+     0.7,
+     1,
+     1e-06
+    ]
+   }
+  },
+  {
+   "name": "line_sphere_miss",
+   "inputs": {
+    "op": "line_sphere",
+    "x": [
+     -5,
+     2.0,
+     0,
+     2,
+     0,
+     0,
+     0,
+     0,
+     0,
+     1.0,
+     0.001
+    ]
+   }
+  },
+  {
+   "name": "line_sphere_touch",
+   "inputs": {
+    "op": "line_sphere",
+    "x": [
+     -5,
+     1.0,
+     0,
+     2,
+     0,
+     0,
+     0,
+     0,
+     0,
+     1.0,
+     0.001
+    ]
+   }
+  },
+  {
+   "name": "line_sphere_touch_tol",
+   "inputs": {
+    "op": "line_sphere",
+    "x": [
+     -5,
+     1.0005,
+     0,
+     2,
+     0,
+     0,
+     0,
+     0,
+     0,
+     1.0,
+     0.001
+    ]
+   }
+  },
+  {
+   "name": "line_sphere_graze",
+   "inputs": {
+    "op": "line_sphere",
+    "x": [
+     -5,
+     0.9999,
+     0,
+     2,
+     0,
+     0,
+     0,
+     0,
+     0,
+     1.0,
+     0.001
+    ]
+   }
+  },
+  {
+   "name": "line_sphere_through",
+   "inputs": {
+    "op": "line_sphere",
+    "x": [
+     -5,
+     0.3,
+     0,
+     2,
+     0,
+     0,
+     0,
+     0,
+     0,
+     1.0,
+     0.001
+    ]
+   }
+  },
+  {
+   "name": "line_sphere_center",
+   "inputs": {
+    "op": "line_sphere",
+    "x": [
+     -5,
+     0.0,
+     0,
+     2,
+     0,
+     0,
+     0,
+     0,
+     0,
+     1.0,
+     0.0
+    ]
+   }
+  },
+  {
+   "name": "line_sphere_zero_vec",
+   "inputs": {
+    "op": "line_sphere",
+    "x": [
+     -5,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     1.0,
+     0.001
+    ]
+   }
+  },
+  {
+   "name": "tri_decomp_345",
+   "inputs": {
+    "op": "triangle_decomposition",
+    "x": [
+     5,
+     4,
+     3
+    ]
+   }
+  },
+  {
+   "name": "tri_decomp_flat",
+   "inputs": {
+    "op": "triangle_decomposition",
+    "x": [
+     5,
+     2,
+     3
+    ]
+   }
+  },
+  {
+   "name": "tri_decomp_zero_base",
+   "inputs": {
+    "op": "triangle_decomposition",
+    "x": [
+     0,
+     2,
+     3
+    ]
+   }
+  },
+  {
+   "name": "tri_decomp_far_foot",
+   "inputs": {
+    "op": "triangle_decomposition",
+    "x": [
+     1,
+     5,
+     3.9
+    ]
+   }
+  },
+  {
+   "name": "circle3_quarter",
+   "inputs": {
+    "op": "circle_3_points",
+    "x": [
+     1,
+     0,
+     0,
+     0.7071067811865476,
+     0.7071067811865476,
+     0,
+     0,
+     1,
+     0,
+     3,
+     0
+    ]
+   }
+  },
+  {
+   "name": "circle3_closed",
+   "inputs": {
+    "op": "circle_3_points",
+    "x": [
+     1,
+     0,
+     0,
+     0,
+     1,
+     0,
+     -1,
+     0,
+     0,
+     3,
+     1
+    ]
+   }
+  },
+  {
+   "name": "circle3_2d_ignores_z",
+   "inputs": {
+    "op": "circle_3_points",
+    "x": [
+     1,
+     0,
+     5,
+     0,
+     1,
+     -2,
+     -1,
+     0,
+     7,
+     2,
+     0
+    ]
+   }
+  },
+  {
+   "name": "circle3_collinear",
+   "inputs": {
+    "op": "circle_3_points",
+    "x": [
+     0,
+     0,
+     0,
+     1,
+     0,
+     0,
+     2,
+     0,
+     0,
+     3,
+     0
+    ]
+   }
+  },
+  {
+   "name": "circle3_near_collinear",
+   "inputs": {
+    "op": "circle_3_points",
+    "x": [
+     0,
+     0,
+     0,
+     1,
+     1e-13,
+     0,
+     2,
+     0,
+     0,
+     3,
+     0
+    ]
+   }
+  },
+  {
+   "name": "circle3_bad_dim",
+   "inputs": {
+    "op": "circle_3_points",
+    "x": [
+     1,
+     0,
+     0,
+     0,
+     1,
+     0,
+     -1,
+     0,
+     0,
+     4,
+     0
+    ]
+   }
+  },
+  {
+   "name": "circle3_reflex",
+   "inputs": {
+    "op": "circle_3_points",
+    "x": [
+     1,
+     0,
+     0,
+     -1,
+     0,
+     0,
+     0,
+     -1,
+     0,
+     3,
+     0
+    ]
+   }
+  },
+  {
+   "name": "circle_center_unit",
+   "inputs": {
+    "op": "circle_center_3_points",
+    "x": [
+     1,
+     0,
+     0,
+     1,
+     -1,
+     0
+    ]
+   }
+  },
+  {
+   "name": "circle_center_coincident",
+   "inputs": {
+    "op": "circle_center_3_points",
+    "x": [
+     1,
+     0,
+     1,
+     0,
+     -1,
+     0
+    ]
+   }
+  },
+  {
+   "name": "circle_center_collinear",
+   "inputs": {
+    "op": "circle_center_3_points",
+    "x": [
+     0,
+     0,
+     1,
+     1,
+     2,
+     2
+    ]
+   }
+  },
+  {
+   "name": "circle_center_hex",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:467",
+   "inputs": {
+    "op": "circle_center_3_points",
+    "x": [
+     5.0,
+     0.0,
+     2.5000000000000004,
+     4.330127018922193,
+     -2.499999999999999,
+     4.330127018922194
+    ]
+   }
+  },
+  {
+   "name": "silhouette_parallel",
+   "inputs": {
+    "op": "silhouette",
+    "x": [
+     0,
+     0,
+     0,
+     0,
+     0,
+     1,
+     2,
+     0,
+     1,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "silhouette_parallel_along_normal",
+   "inputs": {
+    "op": "silhouette",
+    "x": [
+     0,
+     0,
+     0,
+     0,
+     0,
+     1,
+     2,
+     0,
+     0,
+     0,
+     3
+    ]
+   }
+  },
+  {
+   "name": "silhouette_persp",
+   "inputs": {
+    "op": "silhouette",
+    "x": [
+     1,
+     2,
+     3,
+     0,
+     0,
+     1,
+     1,
+     1,
+     5,
+     2,
+     7
+    ]
+   }
+  },
+  {
+   "name": "silhouette_persp_inside",
+   "inputs": {
+    "op": "silhouette",
+    "x": [
+     1,
+     2,
+     3,
+     0,
+     0,
+     1,
+     1,
+     1,
+     1.5,
+     2,
+     7
+    ]
+   }
+  },
+  {
+   "name": "three_planes_axes",
+   "inputs": {
+    "op": "three_planes",
+    "x": [
+     1,
+     0,
+     0,
+     1,
+     0,
+     0,
+     0,
+     2,
+     0,
+     0,
+     1,
+     0,
+     0,
+     0,
+     3,
+     0,
+     0,
+     1
+    ]
+   }
+  },
+  {
+   "name": "three_planes_nonunit",
+   "inputs": {
+    "op": "three_planes",
+    "x": [
+     1,
+     0,
+     0,
+     2,
+     0,
+     0,
+     0,
+     2,
+     0,
+     0,
+     1,
+     0,
+     0,
+     0,
+     3,
+     0,
+     0,
+     1
+    ]
+   }
+  },
+  {
+   "name": "three_planes_dependent",
+   "inputs": {
+    "op": "three_planes",
+    "x": [
+     1,
+     0,
+     0,
+     1,
+     0,
+     0,
+     0,
+     2,
+     0,
+     0,
+     1,
+     0,
+     0,
+     0,
+     3,
+     0.7071067811865476,
+     0.7071067811865476,
+     0
+    ]
+   }
+  },
+  {
+   "name": "plane_point_dist_unit",
+   "inputs": {
+    "op": "plane_point_distance",
+    "x": [
+     0,
+     0,
+     0,
+     0,
+     0,
+     1,
+     3,
+     4,
+     -5
+    ]
+   }
+  },
+  {
+   "name": "plane_point_dist_short_normal",
+   "inputs": {
+    "op": "plane_point_distance",
+    "x": [
+     0,
+     0,
+     0,
+     0,
+     0,
+     0.5,
+     3,
+     4,
+     -5
+    ]
+   }
+  },
+  {
+   "name": "plane_point_dist_long_normal",
+   "inputs": {
+    "op": "plane_point_distance",
+    "x": [
+     0,
+     0,
+     0,
+     0,
+     0,
+     2,
+     3,
+     4,
+     -5
+    ]
+   }
+  },
+  {
+   "name": "plane_eval_rect",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:429",
+   "inputs": {
+    "op": "plane_eval",
+    "x": [
+     0,
+     0,
+     0,
+     1,
+     0,
+     0,
+     0,
+     1,
+     0,
+     5,
+     3
+    ]
+   }
+  },
+  {
+   "name": "plane_drop_rect",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:429",
+   "inputs": {
+    "op": "plane_drop",
+    "x": [
+     0,
+     0,
+     0,
+     1,
+     0,
+     0,
+     0,
+     1,
+     0,
+     5,
+     3,
+     1
+    ]
+   }
+  },
+  {
+   "name": "plane_eval_skew_axes",
+   "inputs": {
+    "op": "plane_eval",
+    "x": [
+     1,
+     2,
+     3,
+     2,
+     0,
+     0,
+     1,
+     1,
+     0,
+     0.5,
+     -2
+    ]
+   }
+  },
+  {
+   "name": "start_plane_plain",
+   "inputs": {
+    "op": "start_plane",
+    "x": [
+     0,
+     2,
+     1,
+     0,
+     0,
+     0,
+     1,
+     0,
+     0,
+     0,
+     1,
+     0,
+     0,
+     360,
+     1e-06,
+     1
+    ]
+   }
+  },
+  {
+   "name": "start_plane_seam",
+   "inputs": {
+    "op": "start_plane",
+    "x": [
+     2,
+     1e-09,
+     1,
+     0,
+     0,
+     0,
+     1,
+     0,
+     0,
+     0,
+     1,
+     0,
+     0,
+     360,
+     1e-06,
+     1
+    ]
+   }
+  },
+  {
+   "name": "start_plane_seam_nosnap",
+   "inputs": {
+    "op": "start_plane",
+    "x": [
+     2,
+     1e-09,
+     1,
+     0,
+     0,
+     0,
+     1,
+     0,
+     0,
+     0,
+     1,
+     0,
+     0,
+     360,
+     1e-06,
+     0
+    ]
+   }
+  },
+  {
+   "name": "start_plane_seam_below",
+   "inputs": {
+    "op": "start_plane",
+    "x": [
+     2,
+     -1e-09,
+     1,
+     0,
+     0,
+     0,
+     1,
+     0,
+     0,
+     0,
+     1,
+     0,
+     0,
+     360,
+     1e-06,
+     0
+    ]
+   }
+  },
+  {
+   "name": "start_plane_axis",
+   "inputs": {
+    "op": "start_plane",
+    "x": [
+     0,
+     0,
+     4,
+     0,
+     0,
+     0,
+     1,
+     0,
+     0,
+     0,
+     1,
+     0,
+     0,
+     360,
+     1e-06,
+     1
+    ]
+   }
+  },
+  {
+   "name": "start_plane_half",
+   "inputs": {
+    "op": "start_plane",
+    "x": [
+     -1,
+     -1,
+     0,
+     0,
+     0,
+     0,
+     1,
+     0,
+     0,
+     0,
+     1,
+     0,
+     -180,
+     180,
+     1e-06,
+     1
+    ]
+   }
+  },
+  {
+   "name": "start_plane_outside",
+   "inputs": {
+    "op": "start_plane",
+    "x": [
+     -1,
+     -1,
+     0,
+     0,
+     0,
+     0,
+     1,
+     0,
+     0,
+     0,
+     1,
+     0,
+     0,
+     90,
+     1e-06,
+     1
+    ]
+   }
+  },
+  {
+   "name": "start_plane_negative_ivl",
+   "inputs": {
+    "op": "start_plane",
+    "x": [
+     1,
+     -1,
+     0,
+     0,
+     0,
+     0,
+     1,
+     0,
+     0,
+     0,
+     1,
+     0,
+     -90,
+     0,
+     1e-06,
+     1
+    ]
+   }
+  },
+  {
+   "name": "perspective_basic",
+   "inputs": {
+    "op": "perspective",
+    "x": [
+     1,
+     1,
+     5,
+     0,
+     0,
+     0,
+     0,
+     0,
+     1,
+     0,
+     0,
+     10
+    ]
+   }
+  },
+  {
+   "name": "perspective_parallel",
+   "inputs": {
+    "op": "perspective",
+    "x": [
+     1,
+     1,
+     10,
+     0,
+     0,
+     0,
+     0,
+     0,
+     1,
+     0,
+     0,
+     10
+    ]
+   }
+  },
+  {
+   "name": "point_project_nonunit",
+   "inputs": {
+    "op": "point_project",
+    "x": [
+     1,
+     2,
+     3,
+     0,
+     0,
+     1,
+     0,
+     0,
+     4
+    ]
+   }
+  },
+  {
+   "name": "vector_project_basic",
+   "inputs": {
+    "op": "vector_project",
+    "x": [
+     1,
+     2,
+     3,
+     0,
+     0,
+     1
+    ]
+   }
+  },
+  {
+   "name": "vec_lin_comb_basic",
+   "inputs": {
+    "op": "vec_lin_comb",
+    "x": [
+     1,
+     0,
+     0,
+     1,
+     1,
+     0,
+     3,
+     5,
+     7
+    ]
+   }
+  },
+  {
+   "name": "vec_lin_comb_parallel",
+   "inputs": {
+    "op": "vec_lin_comb",
+    "x": [
+     1,
+     0,
+     0,
+     2,
+     0,
+     0,
+     3,
+     5,
+     7
+    ]
+   }
+  },
+  {
+   "name": "vec_lin_comb_zero",
+   "inputs": {
+    "op": "vec_lin_comb",
+    "x": [
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     3,
+     5,
+     7
+    ]
+   }
+  },
+  {
+   "name": "inverse_identity",
+   "inputs": {
+    "op": "inverse_3x3",
+    "x": [
+     1,
+     0,
+     0,
+     0,
+     1,
+     0,
+     0,
+     0,
+     1
+    ]
+   }
+  },
+  {
+   "name": "inverse_singular",
+   "inputs": {
+    "op": "inverse_3x3",
+    "x": [
+     1,
+     2,
+     3,
+     2,
+     4,
+     6,
+     1,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "inverse_tiny_det",
+   "inputs": {
+    "op": "inverse_3x3",
+    "x": [
+     0.0001,
+     0,
+     0,
+     0,
+     0.0001,
+     0,
+     0,
+     0,
+     0.0001
+    ]
+   }
+  },
+  {
+   "name": "inverse_tiny_det_ok",
+   "inputs": {
+    "op": "inverse_3x3",
+    "x": [
+     0.0001,
+     0,
+     0,
+     0,
+     0.0001,
+     0,
+     0,
+     0,
+     0.001
+    ]
+   }
+  },
+  {
+   "name": "det3x3_basic",
+   "inputs": {
+    "op": "det_3x3",
+    "x": [
+     2,
+     0,
+     1,
+     1,
+     3,
+     2,
+     1,
+     1,
+     1
+    ]
+   }
+  },
+  {
+   "name": "det3vec_basic",
+   "inputs": {
+    "op": "det_3_vectors",
+    "x": [
+     2,
+     0,
+     1,
+     1,
+     3,
+     2,
+     1,
+     1,
+     1
+    ]
+   }
+  },
+  {
+   "name": "triple_basic",
+   "inputs": {
+    "op": "triple_product",
+    "x": [
+     2,
+     0,
+     1,
+     1,
+     3,
+     2,
+     1,
+     1,
+     1
+    ]
+   }
+  },
+  {
+   "name": "det4x4_identity",
+   "inputs": {
+    "op": "det_4x4",
+    "x": [
+     1,
+     0,
+     0,
+     0,
+     0,
+     1,
+     0,
+     0,
+     0,
+     0,
+     1,
+     0,
+     0,
+     0,
+     0,
+     1
+    ]
+   }
+  },
+  {
+   "name": "det4x4_basic",
+   "inputs": {
+    "op": "det_4x4",
+    "x": [
+     1,
+     2,
+     3,
+     4,
+     5,
+     6,
+     7,
+     8,
+     2,
+     6,
+     4,
+     8,
+     3,
+     1,
+     1,
+     2
+    ]
+   }
+  },
+  {
+   "name": "copy4x4_basic",
+   "inputs": {
+    "op": "copy_4x4",
+    "x": [
+     0,
+     1,
+     2,
+     3,
+     4,
+     5,
+     6,
+     7,
+     8,
+     9,
+     10,
+     11,
+     12,
+     13,
+     14,
+     15
+    ]
+   }
+  },
+  {
+   "name": "copy3x3_basic",
+   "inputs": {
+    "op": "copy_3x3",
+    "x": [
+     0,
+     1,
+     2,
+     3,
+     4,
+     5,
+     6,
+     7,
+     8
+    ]
+   }
+  },
+  {
+   "name": "quadratic_double",
+   "inputs": {
+    "op": "quadratic",
+    "x": [
+     1,
+     -2,
+     1,
+     1e-12
+    ]
+   }
+  },
+  {
+   "name": "quadratic_imaginary",
+   "inputs": {
+    "op": "quadratic",
+    "x": [
+     1,
+     0,
+     1,
+     1e-12
+    ]
+   }
+  },
+  {
+   "name": "quadratic_linear",
+   "inputs": {
+    "op": "quadratic",
+    "x": [
+     2,
+     4,
+     0,
+     1e-12
+    ]
+   }
+  },
+  {
+   "name": "quadratic_constant",
+   "inputs": {
+    "op": "quadratic",
+    "x": [
+     2,
+     0,
+     0,
+     1e-12
+    ]
+   }
+  },
+  {
+   "name": "quadratic_zero_root",
+   "inputs": {
+    "op": "quadratic",
+    "x": [
+     0,
+     3,
+     1,
+     1e-12
+    ]
+   }
+  },
+  {
+   "name": "dir_derivs_zero_dir",
+   "inputs": {
+    "op": "dir_derivs",
+    "x": [
+     0,
+     0,
+     1,
+     1,
+     0,
+     1,
+     2,
+     3,
+     4,
+     5,
+     6,
+     7,
+     8,
+     9,
+     10,
+     11
+    ]
+   }
+  },
+  {
+   "name": "dir_derivs_u2v1",
+   "inputs": {
+    "op": "dir_derivs",
+    "x": [
+     0.6,
+     0.8,
+     2,
+     1,
+     0.0,
+     1.0,
+     2.0,
+     3.0,
+     4.0,
+     5.0,
+     6.0,
+     7.0,
+     8.0,
+     9.0,
+     10.0,
+     11.0,
+     12.0,
+     13.0,
+     14.0,
+     15.0,
+     16.0,
+     17.0
+    ]
+   }
+  },
+  {
+   "name": "dir_derivs_u3v3",
+   "inputs": {
+    "op": "dir_derivs",
+    "x": [
+     1,
+     2,
+     3,
+     3,
+     0.0,
+     7.0,
+     3.0,
+     10.0,
+     6.0,
+     2.0,
+     9.0,
+     5.0,
+     1.0,
+     8.0,
+     4.0,
+     0.0,
+     7.0,
+     3.0,
+     10.0,
+     6.0,
+     2.0,
+     9.0,
+     5.0,
+     1.0,
+     8.0,
+     4.0,
+     0.0,
+     7.0,
+     3.0,
+     10.0,
+     6.0,
+     2.0,
+     9.0,
+     5.0,
+     1.0,
+     8.0,
+     4.0,
+     0.0,
+     7.0,
+     3.0,
+     10.0,
+     6.0,
+     2.0,
+     9.0,
+     5.0,
+     1.0,
+     8.0,
+     4.0,
+     0.0,
+     7.0,
+     3.0,
+     10.0
+    ]
+   }
+  },
+  {
+   "name": "vol_dir_derivs_zero_dir",
+   "inputs": {
+    "op": "vol_dir_derivs",
+    "x": [
+     0,
+     0,
+     0,
+     1,
+     0.0,
+     1.0,
+     2.0,
+     3.0,
+     4.0,
+     5.0,
+     6.0,
+     7.0,
+     8.0,
+     9.0,
+     10.0,
+     11.0,
+     12.0,
+     13.0,
+     14.0,
+     15.0,
+     16.0,
+     17.0,
+     18.0,
+     19.0,
+     20.0,
+     21.0,
+     22.0,
+     23.0
+    ]
+   }
+  },
+  {
+   "name": "vol_dir_derivs_n3",
+   "inputs": {
+    "op": "vol_dir_derivs",
+    "x": [
+     1,
+     2,
+     3,
+     3,
+     0.0,
+     5.0,
+     10.0,
+     2.0,
+     7.0,
+     12.0,
+     4.0,
+     9.0,
+     1.0,
+     6.0,
+     11.0,
+     3.0,
+     8.0,
+     0.0,
+     5.0,
+     10.0,
+     2.0,
+     7.0,
+     12.0,
+     4.0,
+     9.0,
+     1.0,
+     6.0,
+     11.0,
+     3.0,
+     8.0,
+     0.0,
+     5.0,
+     10.0,
+     2.0,
+     7.0,
+     12.0,
+     4.0,
+     9.0,
+     1.0,
+     6.0,
+     11.0,
+     3.0,
+     8.0,
+     0.0,
+     5.0,
+     10.0,
+     2.0,
+     7.0,
+     12.0,
+     4.0,
+     9.0,
+     1.0,
+     6.0,
+     11.0,
+     3.0,
+     8.0,
+     0.0,
+     5.0,
+     10.0,
+     2.0,
+     7.0,
+     12.0,
+     4.0,
+     9.0,
+     1.0,
+     6.0,
+     11.0,
+     3.0,
+     8.0,
+     0.0,
+     5.0,
+     10.0,
+     2.0,
+     7.0,
+     12.0,
+     4.0,
+     9.0,
+     1.0,
+     6.0,
+     11.0,
+     3.0,
+     8.0,
+     0.0,
+     5.0,
+     10.0,
+     2.0,
+     7.0,
+     12.0,
+     4.0,
+     9.0,
+     1.0,
+     6.0,
+     11.0,
+     3.0,
+     8.0,
+     0.0,
+     5.0,
+     10.0,
+     2.0,
+     7.0,
+     12.0,
+     4.0,
+     9.0,
+     1.0,
+     6.0,
+     11.0,
+     3.0,
+     8.0,
+     0.0,
+     5.0,
+     10.0,
+     2.0,
+     7.0,
+     12.0,
+     4.0,
+     9.0,
+     1.0,
+     6.0,
+     11.0,
+     3.0,
+     8.0,
+     0.0,
+     5.0,
+     10.0,
+     2.0,
+     7.0,
+     12.0,
+     4.0,
+     9.0,
+     1.0,
+     6.0,
+     11.0,
+     3.0,
+     8.0,
+     0.0,
+     5.0,
+     10.0,
+     2.0,
+     7.0,
+     12.0,
+     4.0,
+     9.0,
+     1.0,
+     6.0,
+     11.0,
+     3.0,
+     8.0,
+     0.0,
+     5.0,
+     10.0,
+     2.0,
+     7.0,
+     12.0,
+     4.0,
+     9.0,
+     1.0,
+     6.0,
+     11.0,
+     3.0,
+     8.0,
+     0.0,
+     5.0,
+     10.0,
+     2.0,
+     7.0,
+     12.0,
+     4.0,
+     9.0,
+     1.0,
+     6.0,
+     11.0,
+     3.0,
+     8.0,
+     0.0,
+     5.0,
+     10.0,
+     2.0,
+     7.0,
+     12.0,
+     4.0,
+     9.0,
+     1.0,
+     6.0,
+     11.0,
+     3.0,
+     8.0,
+     0.0,
+     5.0,
+     10.0,
+     2.0,
+     7.0,
+     12.0,
+     4.0,
+     9.0,
+     1.0,
+     6.0
+    ]
+   }
+  },
+  {
+   "name": "dog_leg_z",
+   "inputs": {
+    "op": "dog_leg",
+    "x": [
+     0,
+     0,
+     0,
+     1,
+     3,
+     1,
+     3,
+     2,
+     35,
+     45
+    ]
+   }
+  },
+  {
+   "name": "dog_leg_u_turn",
+   "inputs": {
+    "op": "dog_leg",
+    "x": [
+     0,
+     0,
+     0,
+     1,
+     3,
+     1,
+     3,
+     0,
+     35,
+     45
+    ]
+   }
+  },
+  {
+   "name": "dog_leg_degenerate",
+   "inputs": {
+    "op": "dog_leg",
+    "x": [
+     0,
+     0,
+     0,
+     0,
+     3,
+     1,
+     3,
+     2,
+     35,
+     45
+    ]
+   }
+  },
+  {
+   "name": "add_sorted_equal_incr",
+   "inputs": {
+    "op": "add_sorted",
+    "x": [
+     2,
+     9,
+     1,
+     1,
+     4,
+     1,
+     2,
+     2,
+     3,
+     0,
+     1,
+     2,
+     3
+    ]
+   }
+  },
+  {
+   "name": "add_sorted_equal_decr",
+   "inputs": {
+    "op": "add_sorted",
+    "x": [
+     2,
+     9,
+     0,
+     1,
+     4,
+     3,
+     2,
+     2,
+     1,
+     0,
+     1,
+     2,
+     3
+    ]
+   }
+  },
+  {
+   "name": "add_sorted_end",
+   "inputs": {
+    "op": "add_sorted",
+    "x": [
+     5,
+     9,
+     1,
+     0,
+     3,
+     1,
+     2,
+     3,
+     0,
+     1,
+     2
+    ]
+   }
+  },
+  {
+   "name": "add_sorted_empty",
+   "inputs": {
+    "op": "add_sorted",
+    "x": [
+     5,
+     9,
+     1,
+     1,
+     0
+    ]
+   }
+  },
+  {
+   "name": "double_less_equal",
+   "inputs": {
+    "op": "double_less",
+    "x": [
+     1,
+     1
+    ]
+   }
+  },
+  {
+   "name": "cones_perp",
+   "inputs": {
+    "op": "cones_disjoint",
+    "x": [
+     1,
+     0,
+     0,
+     0.1,
+     0,
+     1,
+     0,
+     0.1
+    ]
+   }
+  },
+  {
+   "name": "cones_zero_vec",
+   "inputs": {
+    "op": "cones_disjoint",
+    "x": [
+     0,
+     0,
+     0,
+     0.1,
+     0,
+     1,
+     0,
+     0.1
+    ]
+   }
+  },
+  {
+   "name": "parallelogram_basic",
+   "inputs": {
+    "op": "parallelogram",
+    "x": [
+     1,
+     0,
+     0,
+     1,
+     1,
+     0,
+     2,
+     3
+    ]
+   }
+  },
+  {
+   "name": "parallelogram_parallel",
+   "inputs": {
+    "op": "parallelogram",
+    "x": [
+     1,
+     0,
+     0,
+     2,
+     0,
+     0,
+     2,
+     3
+    ]
+   }
+  },
+  {
+   "name": "parallelogram_zero",
+   "inputs": {
+    "op": "parallelogram",
+    "x": [
+     0,
+     0,
+     0,
+     2,
+     0,
+     0,
+     2,
+     3
+    ]
+   }
+  },
+  {
+   "name": "tri_area_sq_rect",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:429",
+   "inputs": {
+    "op": "triangle_area_squared",
+    "x": [
+     -5,
+     -3,
+     0,
+     5,
+     -3,
+     0,
+     5,
+     3,
+     0
+    ]
+   }
+  },
+  {
+   "name": "add_point_first",
+   "inputs": {
+    "op": "add_point",
+    "x": [
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     1e-06,
+     1,
+     2,
+     3
+    ]
+   }
+  },
+  {
+   "name": "add_point_dup",
+   "inputs": {
+    "op": "add_point",
+    "x": [
+     1,
+     1,
+     2,
+     3,
+     0,
+     0,
+     0,
+     1e-06,
+     1,
+     2,
+     3.0000005
+    ]
+   }
+  },
+  {
+   "name": "add_point_third",
+   "inputs": {
+    "op": "add_point",
+    "x": [
+     2,
+     1,
+     2,
+     3,
+     4,
+     5,
+     6,
+     1e-06,
+     7,
+     8,
+     9
+    ]
+   }
+  },
+  {
+   "name": "add_point_dup_second",
+   "inputs": {
+    "op": "add_point",
+    "x": [
+     2,
+     1,
+     2,
+     3,
+     4,
+     5,
+     6,
+     1e-06,
+     4,
+     5,
+     6
+    ]
+   }
+  },
+  {
+   "name": "add_closest_first",
+   "inputs": {
+    "op": "add_closest_point",
+    "x": [
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     1.0,
+     0.1,
+     0.2,
+     0.001
+    ]
+   }
+  },
+  {
+   "name": "add_closest_skip",
+   "inputs": {
+    "op": "add_closest_point",
+    "x": [
+     1,
+     0.5,
+     0,
+     0.5,
+     0,
+     1.0,
+     0,
+     1.01,
+     0.1,
+     0.2,
+     0.001
+    ]
+   }
+  },
+  {
+   "name": "add_closest_second",
+   "inputs": {
+    "op": "add_closest_point",
+    "x": [
+     1,
+     0.5,
+     0,
+     0.5,
+     0,
+     1.0,
+     0,
+     1.0005,
+     0.1,
+     0.2,
+     0.001
+    ]
+   }
+  },
+  {
+   "name": "add_closest_replace",
+   "inputs": {
+    "op": "add_closest_point",
+    "x": [
+     2,
+     0.5,
+     0.6,
+     0.5,
+     0.6,
+     1.0,
+     1.0005,
+     0.5,
+     0.1,
+     0.2,
+     0.001
+    ]
+   }
+  },
+  {
+   "name": "add_closest_between",
+   "inputs": {
+    "op": "add_closest_point",
+    "x": [
+     2,
+     0.5,
+     0.6,
+     0.5,
+     0.6,
+     1.0,
+     1.0008,
+     1.0004,
+     0.1,
+     0.2,
+     0.001
+    ]
+   }
+  },
+  {
+   "name": "add_closest_shift",
+   "inputs": {
+    "op": "add_closest_point",
+    "x": [
+     2,
+     0.5,
+     0.6,
+     0.5,
+     0.6,
+     1.0,
+     1.0008,
+     0.9995,
+     0.1,
+     0.2,
+     0.001
+    ]
+   }
+  },
+  {
+   "name": "add_closest_full_beyond",
+   "inputs": {
+    "op": "add_closest_point",
+    "x": [
+     2,
+     0.5,
+     0.6,
+     0.5,
+     0.6,
+     1.0,
+     1.0008,
+     1.0009,
+     0.1,
+     0.2,
+     0.001
+    ]
+   }
+  }
+ ]
+}

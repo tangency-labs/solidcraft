@@ -1,0 +1,9 @@
+{
+  "unit": "nlib.crv_fit_p3",
+  "cases": [
+    {"name": "fuzz00212_ffi_rejected_degree_9223372036854775807", "origin": "fuzz-out/n2000/nlib.crv_fit_p3/fuzz00212.json (panic: rust: attempt to add with overflow at crates/solidcore/src/nurbs/crv_fit/p3.rs:663)", "cpp": "harness: ffi rejected: degree 9223372036854775807", "rust": "ok", "inputs": {"der": 1, "op": "knots_and_tangents", "p": 9223372036854775807, "per": 0.6, "pts": [[13.0, 2.0, 0.0]], "tan": 0, "te": [1.0, -1.0, 0.0], "ts": [1.0, 2.0, 0.0]}},
+    {"name": "fuzz00804_ffi_rejected_existing_curve_sizes", "origin": "fuzz-out/n2000/nlib.crv_fit_p3/fuzz00804.json (crash: rust: killed by signal 6 (memory allocation of 137438953504 bytes failed))", "cpp": "harness: ffi rejected: existing curve: sizes", "rust": "harness: existing curve: sizes", "inputs": {"cur": {"knots": [1.0], "n": 4294967296, "p": 5}, "de": [-9.52, 9.0, 8.0], "ds": [9.54, -1.73, 5.87], "op": "end_derivs", "p": 5, "par": 4, "pts": [[14.7, 2.46, -2.11]]}},
+    {"name": "fuzz01074_ffi_rejected_points_repeated_consecutive_point", "origin": "fuzz-out/n2000/nlib.crv_fit_p3/fuzz01074.json (crash: rust: killed by signal 6 (memory allocation of 34359738424 bytes failed))", "cpp": "harness: ffi rejected: points: repeated consecutive point", "rust": "ok", "inputs": {"der": 1, "op": "knots_and_tangents", "p": 4294967296, "per": 1.0, "pts": [[-5.54, -3.27, -8.37], [-5.54, -3.27, -8.37]], "tan": 3, "te": [0.408, -2.08, -6.88], "ts": [3.0, -1.74, -3.57]}},
+    {"name": "fuzz01906_ffi_rejected_degree_or_derivative_count", "origin": "fuzz-out/n2000/nlib.crv_fit_p3/fuzz01906.json (panic: rust: capacity overflow)", "cpp": "harness: ffi rejected: degree or derivative count", "rust": "ok", "inputs": {"k": 9223372036854775807, "op": "closed_conditions", "p": 1, "par": 2, "pts": [[4.46, -6.85, 0.0], [2.79, -5.78, 0.0]]}}
+  ]
+}

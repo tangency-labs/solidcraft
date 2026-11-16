@@ -1,0 +1,1 @@
+#2572: a translational sweep's wall is the exact surface S(u) + T(v) that `create_trans_sweep_srf` builds, its net its own definition; it keeps no sweep definition yet (`Surface::procedural_sweep` is a path sweep's, slice 2).

@@ -1,0 +1,180 @@
+{
+  "area": "fillets",
+  "bodies": {
+    "b12": {
+      "keeping_splines": false,
+      "trusted": true
+    }
+  },
+  "calls": [
+    {
+      "inputs": [
+        "b12"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b13"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b13"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b14"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b14"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b15"
+      ],
+      "params": {
+        "operand": 0
+      }
+    },
+    {
+      "inputs": [
+        "b15"
+      ],
+      "op": "blend_dropping",
+      "outputs": [
+        "b16"
+      ],
+      "params": {
+        "edges": {
+          "kind": "edge",
+          "picked": [
+            {
+              "at": [
+                [
+                  41.649711830726524,
+                  16.057925450947426,
+                  10.0
+                ],
+                [
+                  41.64971183161969,
+                  0.05792545083296555,
+                  10.0
+                ]
+              ],
+              "index": 12
+            },
+            {
+              "at": [
+                [
+                  0.4892940775280783,
+                  0.05792545052986142,
+                  10.0
+                ],
+                [
+                  41.64971183161969,
+                  0.05792545083296555,
+                  10.0
+                ]
+              ],
+              "index": 9
+            }
+          ],
+          "points": [
+            [
+              33.64971183102729,
+              8.05792545044361,
+              10.0
+            ],
+            [
+              21.069502954573885,
+              0.057925450681413485,
+              10.0
+            ]
+          ],
+          "tolerance": 2.772618062487677
+        },
+        "kind": "round",
+        "sizes": [
+          2.0,
+          2.0
+        ]
+      }
+    }
+  ],
+  "case": "report-fillet-concave-arc-and-front-top-edge-together-solver-residues",
+  "expected": {
+    "bbox": {
+      "max": [
+        49.64971183108453,
+        16.05792545083297,
+        20
+      ],
+      "min": [
+        0.4892940775280783,
+        0.05792545052986289,
+        0
+      ]
+    },
+    "body_count": 1,
+    "method": "the plane of the bar's front face, y = 0.0579254505, bounds the whole body (the cylinder's wall runs tangent into it), as do the planes of its back face, bottom, left end and the cylinder's top and far side: every blend lies within them, so the body's exact box (SMLib's tight box) is the unblended body's, x 0.4892940775 .. 41.6497118311 + 8, y 0.0579254505 .. 16.0579254508, z 0 .. 20; graded to 4e-5, the corner patch's own tolerance (the fillet's approximation tolerance)",
+    "source": "invariants",
+    "tolerance": {
+      "abs_mm": 0.00004
+    },
+    "what": "as report-fillet-concave-arc-bar-top-into-cylinder-solver-residues, the concave arc and the bar's front top edge rounded r2 together (Constant, Tangent chain on): the corner patch where the two rounds meet stood up to 0.037 out of the bar's front face, a lip beside the line where the front face runs tangent into the cylinder; reported from the app (2026-10-30, test-peg part)"
+  },
+  "expressible": true,
+  "gallery_note": "the peg as the app's sketch solver left it: its front face lies at y = 0.0579, not 0, and runs tangent into the cylinder at x = 41.65, where the two R2 rounds turn into each other; the front one touches the front at z = 8.",
+  "operation_expressible": true,
+  "outcome": {
+    "ran": true,
+    "raw_counts": {
+      "edges": 26,
+      "faces": 11,
+      "vertices": 17
+    }
+  },
+  "records": "report-fillet-concave-arc-and-front-top-edge-together-solver-residues.bodies.json.gz",
+  "result": [
+    {
+      "body": "Peg",
+      "made": "b16"
+    }
+  ],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": {
+      "area_mm2": 3207.983381739995,
+      "body_count": 1,
+      "edges": 25,
+      "faces": 11,
+      "vertices": 16,
+      "volume_mm3": 9586.67821692037
+    },
+    "refused_with": null,
+    "status": "pass"
+  },
+  "sources": null,
+  "traced_ops": [
+    "extrude",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "copy",
+    "copy",
+    "tagged",
+    "blend_dropping"
+  ],
+  "ungraded": [],
+  "what": "as report-fillet-concave-arc-bar-top-into-cylinder-solver-residues, the concave arc and the bar's front top edge rounded r2 together (Constant, Tangent chain on): the corner patch where the two rounds meet stood up to 0.037 out of the bar's front face, a lip beside the line where the front face runs tangent into the cylinder; reported from the app (2026-10-30, test-peg part)",
+  "why_not": []
+}

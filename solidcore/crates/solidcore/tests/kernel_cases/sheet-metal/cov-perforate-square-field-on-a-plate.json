@@ -1,0 +1,66 @@
+{
+  "area": "sheet-metal",
+  "bodies": {},
+  "calls": [],
+  "case": "cov-perforate-square-field-on-a-plate",
+  "expected": {
+    "body_count": 1,
+    "faces": 6,
+    "method": "holes start at margin + radius = 2 from the flat's lower-left corner and step 5: x 2, 7, ..., 27 (6, each <= 30 - 2), y 2, 7, 12, 17 (4): 24 holes, open area 24*pi*1^2. The field is stored, not cut into the B-rep: the body stays the 30 x 20 x 1 plate, V = 600, 6 faces",
+    "results": [
+      {
+        "json": {
+          "perforations": [
+            {
+              "count": 24,
+              "diameter": 2.0,
+              "margin": 1.0,
+              "open_area_mm2": 75.39822368615503,
+              "pattern": "square",
+              "pitch": 5.0
+            }
+          ]
+        },
+        "step": 7
+      }
+    ],
+    "source": "analytic",
+    "sources": [],
+    "volume_mm3": 600.0,
+    "what": "sheet.perforate, a square field of 2 mm holes at 5 mm pitch, 1 mm margin, over a 30 x 20 x 1 plate"
+  },
+  "expressible": false,
+  "operation_expressible": false,
+  "outcome": {
+    "ran": true,
+    "raw_counts": {
+      "edges": 12,
+      "faces": 6,
+      "vertices": 8
+    }
+  },
+  "result": [],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": {
+      "area_mm2": 1300.0,
+      "body_count": 1,
+      "edges": 12,
+      "faces": 6,
+      "vertices": 8,
+      "volume_mm3": 600.0
+    },
+    "refused_with": null,
+    "status": "pass"
+  },
+  "sources": [],
+  "traced_ops": [],
+  "ungraded": [
+    "results: SolidCraft computes it"
+  ],
+  "what": "sheet.perforate, a square field of 2 mm holes at 5 mm pitch, 1 mm margin, over a 30 x 20 x 1 plate",
+  "why_not": [
+    "body \"Body1\" is no kernel operation's output nor an operand: SolidCraft built it or changed the kernel's record"
+  ]
+}

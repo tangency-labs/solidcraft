@@ -1,0 +1,7758 @@
+{
+ "cases": [
+  {
+   "name": "endcap_vertex0_bnd",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:24687",
+   "inputs": {
+    "op": "classify",
+    "brep": {
+     "kind": "file",
+     "file": "Endcap.smb",
+     "rebuild": true
+    },
+    "offset": [
+     0,
+     0,
+     0
+    ],
+    "tol": 1e-06,
+    "do_bnd": true,
+    "at": "vertex",
+    "index": 0
+   }
+  },
+  {
+   "name": "endcap_vertex0_region",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:24687",
+   "inputs": {
+    "op": "classify",
+    "brep": {
+     "kind": "file",
+     "file": "Endcap.smb",
+     "rebuild": true
+    },
+    "offset": [
+     0,
+     0,
+     0
+    ],
+    "tol": 1e-06,
+    "do_bnd": false,
+    "at": "vertex",
+    "index": 0
+   }
+  },
+  {
+   "name": "endcap_vertex3_off_bnd",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:24687",
+   "inputs": {
+    "op": "classify",
+    "brep": {
+     "kind": "file",
+     "file": "Endcap.smb",
+     "rebuild": true
+    },
+    "offset": [
+     1e-07,
+     -1e-07,
+     1e-07
+    ],
+    "tol": 1e-06,
+    "do_bnd": true,
+    "at": "vertex",
+    "index": 3
+   }
+  },
+  {
+   "name": "endcap_vertex3_off_region",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:24687",
+   "inputs": {
+    "op": "classify",
+    "brep": {
+     "kind": "file",
+     "file": "Endcap.smb",
+     "rebuild": true
+    },
+    "offset": [
+     1e-07,
+     -1e-07,
+     1e-07
+    ],
+    "tol": 1e-06,
+    "do_bnd": false,
+    "at": "vertex",
+    "index": 3
+   }
+  },
+  {
+   "name": "endcap_face_mid_bnd",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:24687",
+   "inputs": {
+    "op": "classify",
+    "brep": {
+     "kind": "file",
+     "file": "Endcap.smb",
+     "rebuild": true
+    },
+    "offset": [
+     0,
+     0,
+     0
+    ],
+    "tol": 1e-06,
+    "do_bnd": true,
+    "at": "face",
+    "index": 0,
+    "u": 0.5,
+    "v": 0.5
+   }
+  },
+  {
+   "name": "endcap_face_mid_region",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:24687",
+   "inputs": {
+    "op": "classify",
+    "brep": {
+     "kind": "file",
+     "file": "Endcap.smb",
+     "rebuild": true
+    },
+    "offset": [
+     0,
+     0,
+     0
+    ],
+    "tol": 1e-06,
+    "do_bnd": false,
+    "at": "face",
+    "index": 0,
+    "u": 0.5,
+    "v": 0.5
+   }
+  },
+  {
+   "name": "endcap_face_mid_off_bnd",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:24687",
+   "inputs": {
+    "op": "classify",
+    "brep": {
+     "kind": "file",
+     "file": "Endcap.smb",
+     "rebuild": true
+    },
+    "offset": [
+     0,
+     0,
+     0.001
+    ],
+    "tol": 1e-06,
+    "do_bnd": true,
+    "at": "face",
+    "index": 1,
+    "u": 0.37,
+    "v": 0.61
+   }
+  },
+  {
+   "name": "endcap_face_mid_off_region",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:24687",
+   "inputs": {
+    "op": "classify",
+    "brep": {
+     "kind": "file",
+     "file": "Endcap.smb",
+     "rebuild": true
+    },
+    "offset": [
+     0,
+     0,
+     0.001
+    ],
+    "tol": 1e-06,
+    "do_bnd": false,
+    "at": "face",
+    "index": 1,
+    "u": 0.37,
+    "v": 0.61
+   }
+  },
+  {
+   "name": "endcap_face_corner_bnd",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:24687",
+   "inputs": {
+    "op": "classify",
+    "brep": {
+     "kind": "file",
+     "file": "Endcap.smb",
+     "rebuild": true
+    },
+    "offset": [
+     0,
+     0,
+     0
+    ],
+    "tol": 1e-06,
+    "do_bnd": true,
+    "at": "face",
+    "index": 2,
+    "u": 0.0,
+    "v": 1.0
+   }
+  },
+  {
+   "name": "endcap_face_corner_region",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:24687",
+   "inputs": {
+    "op": "classify",
+    "brep": {
+     "kind": "file",
+     "file": "Endcap.smb",
+     "rebuild": true
+    },
+    "offset": [
+     0,
+     0,
+     0
+    ],
+    "tol": 1e-06,
+    "do_bnd": false,
+    "at": "face",
+    "index": 2,
+    "u": 0.0,
+    "v": 1.0
+   }
+  },
+  {
+   "name": "endcap_far_bnd",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:24687",
+   "inputs": {
+    "op": "classify",
+    "brep": {
+     "kind": "file",
+     "file": "Endcap.smb",
+     "rebuild": true
+    },
+    "offset": [
+     0,
+     0,
+     0
+    ],
+    "tol": 1e-06,
+    "do_bnd": true,
+    "at": "point",
+    "p": [
+     10000.0,
+     -10000.0,
+     10000.0
+    ]
+   }
+  },
+  {
+   "name": "endcap_far_region",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:24687",
+   "inputs": {
+    "op": "classify",
+    "brep": {
+     "kind": "file",
+     "file": "Endcap.smb",
+     "rebuild": true
+    },
+    "offset": [
+     0,
+     0,
+     0
+    ],
+    "tol": 1e-06,
+    "do_bnd": false,
+    "at": "point",
+    "p": [
+     10000.0,
+     -10000.0,
+     10000.0
+    ]
+   }
+  },
+  {
+   "name": "endcap_origin_bnd",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:24687",
+   "inputs": {
+    "op": "classify",
+    "brep": {
+     "kind": "file",
+     "file": "Endcap.smb",
+     "rebuild": true
+    },
+    "offset": [
+     0,
+     0,
+     0
+    ],
+    "tol": 1e-06,
+    "do_bnd": true,
+    "at": "point",
+    "p": [
+     0,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "endcap_origin_region",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:24687",
+   "inputs": {
+    "op": "classify",
+    "brep": {
+     "kind": "file",
+     "file": "Endcap.smb",
+     "rebuild": true
+    },
+    "offset": [
+     0,
+     0,
+     0
+    ],
+    "tol": 1e-06,
+    "do_bnd": false,
+    "at": "point",
+    "p": [
+     0,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "mouse_vertex0_bnd",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:24687",
+   "inputs": {
+    "op": "classify",
+    "brep": {
+     "kind": "file",
+     "file": "Mouse.smb",
+     "rebuild": true
+    },
+    "offset": [
+     0,
+     0,
+     0
+    ],
+    "tol": 1e-06,
+    "do_bnd": true,
+    "at": "vertex",
+    "index": 0
+   }
+  },
+  {
+   "name": "mouse_vertex0_region",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:24687",
+   "inputs": {
+    "op": "classify",
+    "brep": {
+     "kind": "file",
+     "file": "Mouse.smb",
+     "rebuild": true
+    },
+    "offset": [
+     0,
+     0,
+     0
+    ],
+    "tol": 1e-06,
+    "do_bnd": false,
+    "at": "vertex",
+    "index": 0
+   }
+  },
+  {
+   "name": "mouse_vertex3_off_bnd",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:24687",
+   "inputs": {
+    "op": "classify",
+    "brep": {
+     "kind": "file",
+     "file": "Mouse.smb",
+     "rebuild": true
+    },
+    "offset": [
+     1e-07,
+     -1e-07,
+     1e-07
+    ],
+    "tol": 1e-06,
+    "do_bnd": true,
+    "at": "vertex",
+    "index": 3
+   }
+  },
+  {
+   "name": "mouse_vertex3_off_region",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:24687",
+   "inputs": {
+    "op": "classify",
+    "brep": {
+     "kind": "file",
+     "file": "Mouse.smb",
+     "rebuild": true
+    },
+    "offset": [
+     1e-07,
+     -1e-07,
+     1e-07
+    ],
+    "tol": 1e-06,
+    "do_bnd": false,
+    "at": "vertex",
+    "index": 3
+   }
+  },
+  {
+   "name": "mouse_face_mid_bnd",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:24687",
+   "inputs": {
+    "op": "classify",
+    "brep": {
+     "kind": "file",
+     "file": "Mouse.smb",
+     "rebuild": true
+    },
+    "offset": [
+     0,
+     0,
+     0
+    ],
+    "tol": 1e-06,
+    "do_bnd": true,
+    "at": "face",
+    "index": 0,
+    "u": 0.5,
+    "v": 0.5
+   }
+  },
+  {
+   "name": "mouse_face_mid_region",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:24687",
+   "inputs": {
+    "op": "classify",
+    "brep": {
+     "kind": "file",
+     "file": "Mouse.smb",
+     "rebuild": true
+    },
+    "offset": [
+     0,
+     0,
+     0
+    ],
+    "tol": 1e-06,
+    "do_bnd": false,
+    "at": "face",
+    "index": 0,
+    "u": 0.5,
+    "v": 0.5
+   }
+  },
+  {
+   "name": "mouse_face_mid_off_bnd",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:24687",
+   "inputs": {
+    "op": "classify",
+    "brep": {
+     "kind": "file",
+     "file": "Mouse.smb",
+     "rebuild": true
+    },
+    "offset": [
+     0,
+     0,
+     0.001
+    ],
+    "tol": 1e-06,
+    "do_bnd": true,
+    "at": "face",
+    "index": 1,
+    "u": 0.37,
+    "v": 0.61
+   }
+  },
+  {
+   "name": "mouse_face_mid_off_region",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:24687",
+   "inputs": {
+    "op": "classify",
+    "brep": {
+     "kind": "file",
+     "file": "Mouse.smb",
+     "rebuild": true
+    },
+    "offset": [
+     0,
+     0,
+     0.001
+    ],
+    "tol": 1e-06,
+    "do_bnd": false,
+    "at": "face",
+    "index": 1,
+    "u": 0.37,
+    "v": 0.61
+   }
+  },
+  {
+   "name": "mouse_face_corner_bnd",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:24687",
+   "inputs": {
+    "op": "classify",
+    "brep": {
+     "kind": "file",
+     "file": "Mouse.smb",
+     "rebuild": true
+    },
+    "offset": [
+     0,
+     0,
+     0
+    ],
+    "tol": 1e-06,
+    "do_bnd": true,
+    "at": "face",
+    "index": 2,
+    "u": 0.0,
+    "v": 1.0
+   }
+  },
+  {
+   "name": "mouse_face_corner_region",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:24687",
+   "inputs": {
+    "op": "classify",
+    "brep": {
+     "kind": "file",
+     "file": "Mouse.smb",
+     "rebuild": true
+    },
+    "offset": [
+     0,
+     0,
+     0
+    ],
+    "tol": 1e-06,
+    "do_bnd": false,
+    "at": "face",
+    "index": 2,
+    "u": 0.0,
+    "v": 1.0
+   }
+  },
+  {
+   "name": "mouse_far_bnd",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:24687",
+   "inputs": {
+    "op": "classify",
+    "brep": {
+     "kind": "file",
+     "file": "Mouse.smb",
+     "rebuild": true
+    },
+    "offset": [
+     0,
+     0,
+     0
+    ],
+    "tol": 1e-06,
+    "do_bnd": true,
+    "at": "point",
+    "p": [
+     10000.0,
+     -10000.0,
+     10000.0
+    ]
+   }
+  },
+  {
+   "name": "mouse_far_region",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:24687",
+   "inputs": {
+    "op": "classify",
+    "brep": {
+     "kind": "file",
+     "file": "Mouse.smb",
+     "rebuild": true
+    },
+    "offset": [
+     0,
+     0,
+     0
+    ],
+    "tol": 1e-06,
+    "do_bnd": false,
+    "at": "point",
+    "p": [
+     10000.0,
+     -10000.0,
+     10000.0
+    ]
+   }
+  },
+  {
+   "name": "mouse_origin_bnd",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:24687",
+   "inputs": {
+    "op": "classify",
+    "brep": {
+     "kind": "file",
+     "file": "Mouse.smb",
+     "rebuild": true
+    },
+    "offset": [
+     0,
+     0,
+     0
+    ],
+    "tol": 1e-06,
+    "do_bnd": true,
+    "at": "point",
+    "p": [
+     0,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "mouse_origin_region",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:24687",
+   "inputs": {
+    "op": "classify",
+    "brep": {
+     "kind": "file",
+     "file": "Mouse.smb",
+     "rebuild": true
+    },
+    "offset": [
+     0,
+     0,
+     0
+    ],
+    "tol": 1e-06,
+    "do_bnd": false,
+    "at": "point",
+    "p": [
+     0,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "box_with_large_fillet_vertex0_bnd",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:24687",
+   "inputs": {
+    "op": "classify",
+    "brep": {
+     "kind": "file",
+     "file": "box_with_large_fillet.smb",
+     "rebuild": true
+    },
+    "offset": [
+     0,
+     0,
+     0
+    ],
+    "tol": 1e-06,
+    "do_bnd": true,
+    "at": "vertex",
+    "index": 0
+   }
+  },
+  {
+   "name": "box_with_large_fillet_vertex0_region",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:24687",
+   "inputs": {
+    "op": "classify",
+    "brep": {
+     "kind": "file",
+     "file": "box_with_large_fillet.smb",
+     "rebuild": true
+    },
+    "offset": [
+     0,
+     0,
+     0
+    ],
+    "tol": 1e-06,
+    "do_bnd": false,
+    "at": "vertex",
+    "index": 0
+   }
+  },
+  {
+   "name": "box_with_large_fillet_vertex3_off_bnd",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:24687",
+   "inputs": {
+    "op": "classify",
+    "brep": {
+     "kind": "file",
+     "file": "box_with_large_fillet.smb",
+     "rebuild": true
+    },
+    "offset": [
+     1e-07,
+     -1e-07,
+     1e-07
+    ],
+    "tol": 1e-06,
+    "do_bnd": true,
+    "at": "vertex",
+    "index": 3
+   }
+  },
+  {
+   "name": "box_with_large_fillet_vertex3_off_region",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:24687",
+   "inputs": {
+    "op": "classify",
+    "brep": {
+     "kind": "file",
+     "file": "box_with_large_fillet.smb",
+     "rebuild": true
+    },
+    "offset": [
+     1e-07,
+     -1e-07,
+     1e-07
+    ],
+    "tol": 1e-06,
+    "do_bnd": false,
+    "at": "vertex",
+    "index": 3
+   }
+  },
+  {
+   "name": "box_with_large_fillet_face_mid_bnd",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:24687",
+   "inputs": {
+    "op": "classify",
+    "brep": {
+     "kind": "file",
+     "file": "box_with_large_fillet.smb",
+     "rebuild": true
+    },
+    "offset": [
+     0,
+     0,
+     0
+    ],
+    "tol": 1e-06,
+    "do_bnd": true,
+    "at": "face",
+    "index": 0,
+    "u": 0.5,
+    "v": 0.5
+   }
+  },
+  {
+   "name": "box_with_large_fillet_face_mid_region",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:24687",
+   "inputs": {
+    "op": "classify",
+    "brep": {
+     "kind": "file",
+     "file": "box_with_large_fillet.smb",
+     "rebuild": true
+    },
+    "offset": [
+     0,
+     0,
+     0
+    ],
+    "tol": 1e-06,
+    "do_bnd": false,
+    "at": "face",
+    "index": 0,
+    "u": 0.5,
+    "v": 0.5
+   }
+  },
+  {
+   "name": "box_with_large_fillet_face_mid_off_bnd",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:24687",
+   "inputs": {
+    "op": "classify",
+    "brep": {
+     "kind": "file",
+     "file": "box_with_large_fillet.smb",
+     "rebuild": true
+    },
+    "offset": [
+     0,
+     0,
+     0.001
+    ],
+    "tol": 1e-06,
+    "do_bnd": true,
+    "at": "face",
+    "index": 1,
+    "u": 0.37,
+    "v": 0.61
+   }
+  },
+  {
+   "name": "box_with_large_fillet_face_mid_off_region",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:24687",
+   "inputs": {
+    "op": "classify",
+    "brep": {
+     "kind": "file",
+     "file": "box_with_large_fillet.smb",
+     "rebuild": true
+    },
+    "offset": [
+     0,
+     0,
+     0.001
+    ],
+    "tol": 1e-06,
+    "do_bnd": false,
+    "at": "face",
+    "index": 1,
+    "u": 0.37,
+    "v": 0.61
+   }
+  },
+  {
+   "name": "box_with_large_fillet_face_corner_bnd",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:24687",
+   "inputs": {
+    "op": "classify",
+    "brep": {
+     "kind": "file",
+     "file": "box_with_large_fillet.smb",
+     "rebuild": true
+    },
+    "offset": [
+     0,
+     0,
+     0
+    ],
+    "tol": 1e-06,
+    "do_bnd": true,
+    "at": "face",
+    "index": 2,
+    "u": 0.0,
+    "v": 1.0
+   }
+  },
+  {
+   "name": "box_with_large_fillet_face_corner_region",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:24687",
+   "inputs": {
+    "op": "classify",
+    "brep": {
+     "kind": "file",
+     "file": "box_with_large_fillet.smb",
+     "rebuild": true
+    },
+    "offset": [
+     0,
+     0,
+     0
+    ],
+    "tol": 1e-06,
+    "do_bnd": false,
+    "at": "face",
+    "index": 2,
+    "u": 0.0,
+    "v": 1.0
+   }
+  },
+  {
+   "name": "box_with_large_fillet_far_bnd",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:24687",
+   "inputs": {
+    "op": "classify",
+    "brep": {
+     "kind": "file",
+     "file": "box_with_large_fillet.smb",
+     "rebuild": true
+    },
+    "offset": [
+     0,
+     0,
+     0
+    ],
+    "tol": 1e-06,
+    "do_bnd": true,
+    "at": "point",
+    "p": [
+     10000.0,
+     -10000.0,
+     10000.0
+    ]
+   }
+  },
+  {
+   "name": "box_with_large_fillet_far_region",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:24687",
+   "inputs": {
+    "op": "classify",
+    "brep": {
+     "kind": "file",
+     "file": "box_with_large_fillet.smb",
+     "rebuild": true
+    },
+    "offset": [
+     0,
+     0,
+     0
+    ],
+    "tol": 1e-06,
+    "do_bnd": false,
+    "at": "point",
+    "p": [
+     10000.0,
+     -10000.0,
+     10000.0
+    ]
+   }
+  },
+  {
+   "name": "box_with_large_fillet_origin_bnd",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:24687",
+   "inputs": {
+    "op": "classify",
+    "brep": {
+     "kind": "file",
+     "file": "box_with_large_fillet.smb",
+     "rebuild": true
+    },
+    "offset": [
+     0,
+     0,
+     0
+    ],
+    "tol": 1e-06,
+    "do_bnd": true,
+    "at": "point",
+    "p": [
+     0,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "box_with_large_fillet_origin_region",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:24687",
+   "inputs": {
+    "op": "classify",
+    "brep": {
+     "kind": "file",
+     "file": "box_with_large_fillet.smb",
+     "rebuild": true
+    },
+    "offset": [
+     0,
+     0,
+     0
+    ],
+    "tol": 1e-06,
+    "do_bnd": false,
+    "at": "point",
+    "p": [
+     0,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "disk_vertex0_bnd",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:24687",
+   "inputs": {
+    "op": "classify",
+    "brep": {
+     "kind": "file",
+     "file": "disk.smb",
+     "rebuild": true
+    },
+    "offset": [
+     0,
+     0,
+     0
+    ],
+    "tol": 1e-06,
+    "do_bnd": true,
+    "at": "vertex",
+    "index": 0
+   }
+  },
+  {
+   "name": "disk_vertex0_region",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:24687",
+   "inputs": {
+    "op": "classify",
+    "brep": {
+     "kind": "file",
+     "file": "disk.smb",
+     "rebuild": true
+    },
+    "offset": [
+     0,
+     0,
+     0
+    ],
+    "tol": 1e-06,
+    "do_bnd": false,
+    "at": "vertex",
+    "index": 0
+   }
+  },
+  {
+   "name": "disk_vertex3_off_bnd",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:24687",
+   "inputs": {
+    "op": "classify",
+    "brep": {
+     "kind": "file",
+     "file": "disk.smb",
+     "rebuild": true
+    },
+    "offset": [
+     1e-07,
+     -1e-07,
+     1e-07
+    ],
+    "tol": 1e-06,
+    "do_bnd": true,
+    "at": "vertex",
+    "index": 3
+   }
+  },
+  {
+   "name": "disk_vertex3_off_region",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:24687",
+   "inputs": {
+    "op": "classify",
+    "brep": {
+     "kind": "file",
+     "file": "disk.smb",
+     "rebuild": true
+    },
+    "offset": [
+     1e-07,
+     -1e-07,
+     1e-07
+    ],
+    "tol": 1e-06,
+    "do_bnd": false,
+    "at": "vertex",
+    "index": 3
+   }
+  },
+  {
+   "name": "disk_face_mid_bnd",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:24687",
+   "inputs": {
+    "op": "classify",
+    "brep": {
+     "kind": "file",
+     "file": "disk.smb",
+     "rebuild": true
+    },
+    "offset": [
+     0,
+     0,
+     0
+    ],
+    "tol": 1e-06,
+    "do_bnd": true,
+    "at": "face",
+    "index": 0,
+    "u": 0.5,
+    "v": 0.5
+   }
+  },
+  {
+   "name": "disk_face_mid_region",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:24687",
+   "inputs": {
+    "op": "classify",
+    "brep": {
+     "kind": "file",
+     "file": "disk.smb",
+     "rebuild": true
+    },
+    "offset": [
+     0,
+     0,
+     0
+    ],
+    "tol": 1e-06,
+    "do_bnd": false,
+    "at": "face",
+    "index": 0,
+    "u": 0.5,
+    "v": 0.5
+   }
+  },
+  {
+   "name": "disk_face_mid_off_bnd",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:24687",
+   "inputs": {
+    "op": "classify",
+    "brep": {
+     "kind": "file",
+     "file": "disk.smb",
+     "rebuild": true
+    },
+    "offset": [
+     0,
+     0,
+     0.001
+    ],
+    "tol": 1e-06,
+    "do_bnd": true,
+    "at": "face",
+    "index": 1,
+    "u": 0.37,
+    "v": 0.61
+   }
+  },
+  {
+   "name": "disk_face_mid_off_region",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:24687",
+   "inputs": {
+    "op": "classify",
+    "brep": {
+     "kind": "file",
+     "file": "disk.smb",
+     "rebuild": true
+    },
+    "offset": [
+     0,
+     0,
+     0.001
+    ],
+    "tol": 1e-06,
+    "do_bnd": false,
+    "at": "face",
+    "index": 1,
+    "u": 0.37,
+    "v": 0.61
+   }
+  },
+  {
+   "name": "disk_face_corner_bnd",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:24687",
+   "inputs": {
+    "op": "classify",
+    "brep": {
+     "kind": "file",
+     "file": "disk.smb",
+     "rebuild": true
+    },
+    "offset": [
+     0,
+     0,
+     0
+    ],
+    "tol": 1e-06,
+    "do_bnd": true,
+    "at": "face",
+    "index": 2,
+    "u": 0.0,
+    "v": 1.0
+   }
+  },
+  {
+   "name": "disk_face_corner_region",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:24687",
+   "inputs": {
+    "op": "classify",
+    "brep": {
+     "kind": "file",
+     "file": "disk.smb",
+     "rebuild": true
+    },
+    "offset": [
+     0,
+     0,
+     0
+    ],
+    "tol": 1e-06,
+    "do_bnd": false,
+    "at": "face",
+    "index": 2,
+    "u": 0.0,
+    "v": 1.0
+   }
+  },
+  {
+   "name": "disk_far_bnd",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:24687",
+   "inputs": {
+    "op": "classify",
+    "brep": {
+     "kind": "file",
+     "file": "disk.smb",
+     "rebuild": true
+    },
+    "offset": [
+     0,
+     0,
+     0
+    ],
+    "tol": 1e-06,
+    "do_bnd": true,
+    "at": "point",
+    "p": [
+     10000.0,
+     -10000.0,
+     10000.0
+    ]
+   }
+  },
+  {
+   "name": "disk_far_region",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:24687",
+   "inputs": {
+    "op": "classify",
+    "brep": {
+     "kind": "file",
+     "file": "disk.smb",
+     "rebuild": true
+    },
+    "offset": [
+     0,
+     0,
+     0
+    ],
+    "tol": 1e-06,
+    "do_bnd": false,
+    "at": "point",
+    "p": [
+     10000.0,
+     -10000.0,
+     10000.0
+    ]
+   }
+  },
+  {
+   "name": "disk_origin_bnd",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:24687",
+   "inputs": {
+    "op": "classify",
+    "brep": {
+     "kind": "file",
+     "file": "disk.smb",
+     "rebuild": true
+    },
+    "offset": [
+     0,
+     0,
+     0
+    ],
+    "tol": 1e-06,
+    "do_bnd": true,
+    "at": "point",
+    "p": [
+     0,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "disk_origin_region",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:24687",
+   "inputs": {
+    "op": "classify",
+    "brep": {
+     "kind": "file",
+     "file": "disk.smb",
+     "rebuild": true
+    },
+    "offset": [
+     0,
+     0,
+     0
+    ],
+    "tol": 1e-06,
+    "do_bnd": false,
+    "at": "point",
+    "p": [
+     0,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "ellips_ts2_vertex0_bnd",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:24687",
+   "inputs": {
+    "op": "classify",
+    "brep": {
+     "kind": "file",
+     "file": "ellips_ts2.smb",
+     "rebuild": true
+    },
+    "offset": [
+     0,
+     0,
+     0
+    ],
+    "tol": 1e-06,
+    "do_bnd": true,
+    "at": "vertex",
+    "index": 0
+   }
+  },
+  {
+   "name": "ellips_ts2_vertex0_region",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:24687",
+   "inputs": {
+    "op": "classify",
+    "brep": {
+     "kind": "file",
+     "file": "ellips_ts2.smb",
+     "rebuild": true
+    },
+    "offset": [
+     0,
+     0,
+     0
+    ],
+    "tol": 1e-06,
+    "do_bnd": false,
+    "at": "vertex",
+    "index": 0
+   }
+  },
+  {
+   "name": "ellips_ts2_vertex3_off_bnd",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:24687",
+   "inputs": {
+    "op": "classify",
+    "brep": {
+     "kind": "file",
+     "file": "ellips_ts2.smb",
+     "rebuild": true
+    },
+    "offset": [
+     1e-07,
+     -1e-07,
+     1e-07
+    ],
+    "tol": 1e-06,
+    "do_bnd": true,
+    "at": "vertex",
+    "index": 3
+   }
+  },
+  {
+   "name": "ellips_ts2_vertex3_off_region",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:24687",
+   "inputs": {
+    "op": "classify",
+    "brep": {
+     "kind": "file",
+     "file": "ellips_ts2.smb",
+     "rebuild": true
+    },
+    "offset": [
+     1e-07,
+     -1e-07,
+     1e-07
+    ],
+    "tol": 1e-06,
+    "do_bnd": false,
+    "at": "vertex",
+    "index": 3
+   }
+  },
+  {
+   "name": "ellips_ts2_face_mid_bnd",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:24687",
+   "inputs": {
+    "op": "classify",
+    "brep": {
+     "kind": "file",
+     "file": "ellips_ts2.smb",
+     "rebuild": true
+    },
+    "offset": [
+     0,
+     0,
+     0
+    ],
+    "tol": 1e-06,
+    "do_bnd": true,
+    "at": "face",
+    "index": 0,
+    "u": 0.5,
+    "v": 0.5
+   }
+  },
+  {
+   "name": "ellips_ts2_face_mid_region",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:24687",
+   "inputs": {
+    "op": "classify",
+    "brep": {
+     "kind": "file",
+     "file": "ellips_ts2.smb",
+     "rebuild": true
+    },
+    "offset": [
+     0,
+     0,
+     0
+    ],
+    "tol": 1e-06,
+    "do_bnd": false,
+    "at": "face",
+    "index": 0,
+    "u": 0.5,
+    "v": 0.5
+   }
+  },
+  {
+   "name": "ellips_ts2_face_mid_off_bnd",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:24687",
+   "inputs": {
+    "op": "classify",
+    "brep": {
+     "kind": "file",
+     "file": "ellips_ts2.smb",
+     "rebuild": true
+    },
+    "offset": [
+     0,
+     0,
+     0.001
+    ],
+    "tol": 1e-06,
+    "do_bnd": true,
+    "at": "face",
+    "index": 1,
+    "u": 0.37,
+    "v": 0.61
+   }
+  },
+  {
+   "name": "ellips_ts2_face_mid_off_region",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:24687",
+   "inputs": {
+    "op": "classify",
+    "brep": {
+     "kind": "file",
+     "file": "ellips_ts2.smb",
+     "rebuild": true
+    },
+    "offset": [
+     0,
+     0,
+     0.001
+    ],
+    "tol": 1e-06,
+    "do_bnd": false,
+    "at": "face",
+    "index": 1,
+    "u": 0.37,
+    "v": 0.61
+   }
+  },
+  {
+   "name": "ellips_ts2_face_corner_bnd",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:24687",
+   "inputs": {
+    "op": "classify",
+    "brep": {
+     "kind": "file",
+     "file": "ellips_ts2.smb",
+     "rebuild": true
+    },
+    "offset": [
+     0,
+     0,
+     0
+    ],
+    "tol": 1e-06,
+    "do_bnd": true,
+    "at": "face",
+    "index": 2,
+    "u": 0.0,
+    "v": 1.0
+   }
+  },
+  {
+   "name": "ellips_ts2_face_corner_region",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:24687",
+   "inputs": {
+    "op": "classify",
+    "brep": {
+     "kind": "file",
+     "file": "ellips_ts2.smb",
+     "rebuild": true
+    },
+    "offset": [
+     0,
+     0,
+     0
+    ],
+    "tol": 1e-06,
+    "do_bnd": false,
+    "at": "face",
+    "index": 2,
+    "u": 0.0,
+    "v": 1.0
+   }
+  },
+  {
+   "name": "ellips_ts2_far_bnd",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:24687",
+   "inputs": {
+    "op": "classify",
+    "brep": {
+     "kind": "file",
+     "file": "ellips_ts2.smb",
+     "rebuild": true
+    },
+    "offset": [
+     0,
+     0,
+     0
+    ],
+    "tol": 1e-06,
+    "do_bnd": true,
+    "at": "point",
+    "p": [
+     10000.0,
+     -10000.0,
+     10000.0
+    ]
+   }
+  },
+  {
+   "name": "ellips_ts2_far_region",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:24687",
+   "inputs": {
+    "op": "classify",
+    "brep": {
+     "kind": "file",
+     "file": "ellips_ts2.smb",
+     "rebuild": true
+    },
+    "offset": [
+     0,
+     0,
+     0
+    ],
+    "tol": 1e-06,
+    "do_bnd": false,
+    "at": "point",
+    "p": [
+     10000.0,
+     -10000.0,
+     10000.0
+    ]
+   }
+  },
+  {
+   "name": "ellips_ts2_origin_bnd",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:24687",
+   "inputs": {
+    "op": "classify",
+    "brep": {
+     "kind": "file",
+     "file": "ellips_ts2.smb",
+     "rebuild": true
+    },
+    "offset": [
+     0,
+     0,
+     0
+    ],
+    "tol": 1e-06,
+    "do_bnd": true,
+    "at": "point",
+    "p": [
+     0,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "ellips_ts2_origin_region",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:24687",
+   "inputs": {
+    "op": "classify",
+    "brep": {
+     "kind": "file",
+     "file": "ellips_ts2.smb",
+     "rebuild": true
+    },
+    "offset": [
+     0,
+     0,
+     0
+    ],
+    "tol": 1e-06,
+    "do_bnd": false,
+    "at": "point",
+    "p": [
+     0,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "plane_circ_vertex0_bnd",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:24687",
+   "inputs": {
+    "op": "classify",
+    "brep": {
+     "kind": "file",
+     "file": "plane_circ.smb",
+     "rebuild": true
+    },
+    "offset": [
+     0,
+     0,
+     0
+    ],
+    "tol": 1e-06,
+    "do_bnd": true,
+    "at": "vertex",
+    "index": 0
+   }
+  },
+  {
+   "name": "plane_circ_vertex0_region",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:24687",
+   "inputs": {
+    "op": "classify",
+    "brep": {
+     "kind": "file",
+     "file": "plane_circ.smb",
+     "rebuild": true
+    },
+    "offset": [
+     0,
+     0,
+     0
+    ],
+    "tol": 1e-06,
+    "do_bnd": false,
+    "at": "vertex",
+    "index": 0
+   }
+  },
+  {
+   "name": "plane_circ_vertex3_off_bnd",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:24687",
+   "inputs": {
+    "op": "classify",
+    "brep": {
+     "kind": "file",
+     "file": "plane_circ.smb",
+     "rebuild": true
+    },
+    "offset": [
+     1e-07,
+     -1e-07,
+     1e-07
+    ],
+    "tol": 1e-06,
+    "do_bnd": true,
+    "at": "vertex",
+    "index": 3
+   }
+  },
+  {
+   "name": "plane_circ_vertex3_off_region",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:24687",
+   "inputs": {
+    "op": "classify",
+    "brep": {
+     "kind": "file",
+     "file": "plane_circ.smb",
+     "rebuild": true
+    },
+    "offset": [
+     1e-07,
+     -1e-07,
+     1e-07
+    ],
+    "tol": 1e-06,
+    "do_bnd": false,
+    "at": "vertex",
+    "index": 3
+   }
+  },
+  {
+   "name": "plane_circ_face_mid_bnd",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:24687",
+   "inputs": {
+    "op": "classify",
+    "brep": {
+     "kind": "file",
+     "file": "plane_circ.smb",
+     "rebuild": true
+    },
+    "offset": [
+     0,
+     0,
+     0
+    ],
+    "tol": 1e-06,
+    "do_bnd": true,
+    "at": "face",
+    "index": 0,
+    "u": 0.5,
+    "v": 0.5
+   }
+  },
+  {
+   "name": "plane_circ_face_mid_region",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:24687",
+   "inputs": {
+    "op": "classify",
+    "brep": {
+     "kind": "file",
+     "file": "plane_circ.smb",
+     "rebuild": true
+    },
+    "offset": [
+     0,
+     0,
+     0
+    ],
+    "tol": 1e-06,
+    "do_bnd": false,
+    "at": "face",
+    "index": 0,
+    "u": 0.5,
+    "v": 0.5
+   }
+  },
+  {
+   "name": "plane_circ_face_mid_off_bnd",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:24687",
+   "inputs": {
+    "op": "classify",
+    "brep": {
+     "kind": "file",
+     "file": "plane_circ.smb",
+     "rebuild": true
+    },
+    "offset": [
+     0,
+     0,
+     0.001
+    ],
+    "tol": 1e-06,
+    "do_bnd": true,
+    "at": "face",
+    "index": 1,
+    "u": 0.37,
+    "v": 0.61
+   }
+  },
+  {
+   "name": "plane_circ_face_mid_off_region",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:24687",
+   "inputs": {
+    "op": "classify",
+    "brep": {
+     "kind": "file",
+     "file": "plane_circ.smb",
+     "rebuild": true
+    },
+    "offset": [
+     0,
+     0,
+     0.001
+    ],
+    "tol": 1e-06,
+    "do_bnd": false,
+    "at": "face",
+    "index": 1,
+    "u": 0.37,
+    "v": 0.61
+   }
+  },
+  {
+   "name": "plane_circ_face_corner_bnd",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:24687",
+   "inputs": {
+    "op": "classify",
+    "brep": {
+     "kind": "file",
+     "file": "plane_circ.smb",
+     "rebuild": true
+    },
+    "offset": [
+     0,
+     0,
+     0
+    ],
+    "tol": 1e-06,
+    "do_bnd": true,
+    "at": "face",
+    "index": 2,
+    "u": 0.0,
+    "v": 1.0
+   }
+  },
+  {
+   "name": "plane_circ_face_corner_region",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:24687",
+   "inputs": {
+    "op": "classify",
+    "brep": {
+     "kind": "file",
+     "file": "plane_circ.smb",
+     "rebuild": true
+    },
+    "offset": [
+     0,
+     0,
+     0
+    ],
+    "tol": 1e-06,
+    "do_bnd": false,
+    "at": "face",
+    "index": 2,
+    "u": 0.0,
+    "v": 1.0
+   }
+  },
+  {
+   "name": "plane_circ_far_bnd",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:24687",
+   "inputs": {
+    "op": "classify",
+    "brep": {
+     "kind": "file",
+     "file": "plane_circ.smb",
+     "rebuild": true
+    },
+    "offset": [
+     0,
+     0,
+     0
+    ],
+    "tol": 1e-06,
+    "do_bnd": true,
+    "at": "point",
+    "p": [
+     10000.0,
+     -10000.0,
+     10000.0
+    ]
+   }
+  },
+  {
+   "name": "plane_circ_far_region",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:24687",
+   "inputs": {
+    "op": "classify",
+    "brep": {
+     "kind": "file",
+     "file": "plane_circ.smb",
+     "rebuild": true
+    },
+    "offset": [
+     0,
+     0,
+     0
+    ],
+    "tol": 1e-06,
+    "do_bnd": false,
+    "at": "point",
+    "p": [
+     10000.0,
+     -10000.0,
+     10000.0
+    ]
+   }
+  },
+  {
+   "name": "plane_circ_origin_bnd",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:24687",
+   "inputs": {
+    "op": "classify",
+    "brep": {
+     "kind": "file",
+     "file": "plane_circ.smb",
+     "rebuild": true
+    },
+    "offset": [
+     0,
+     0,
+     0
+    ],
+    "tol": 1e-06,
+    "do_bnd": true,
+    "at": "point",
+    "p": [
+     0,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "plane_circ_origin_region",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:24687",
+   "inputs": {
+    "op": "classify",
+    "brep": {
+     "kind": "file",
+     "file": "plane_circ.smb",
+     "rebuild": true
+    },
+    "offset": [
+     0,
+     0,
+     0
+    ],
+    "tol": 1e-06,
+    "do_bnd": false,
+    "at": "point",
+    "p": [
+     0,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "plane_square_vertex0_bnd",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:24687",
+   "inputs": {
+    "op": "classify",
+    "brep": {
+     "kind": "file",
+     "file": "plane_square.smb",
+     "rebuild": true
+    },
+    "offset": [
+     0,
+     0,
+     0
+    ],
+    "tol": 1e-06,
+    "do_bnd": true,
+    "at": "vertex",
+    "index": 0
+   }
+  },
+  {
+   "name": "plane_square_vertex0_region",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:24687",
+   "inputs": {
+    "op": "classify",
+    "brep": {
+     "kind": "file",
+     "file": "plane_square.smb",
+     "rebuild": true
+    },
+    "offset": [
+     0,
+     0,
+     0
+    ],
+    "tol": 1e-06,
+    "do_bnd": false,
+    "at": "vertex",
+    "index": 0
+   }
+  },
+  {
+   "name": "plane_square_vertex3_off_bnd",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:24687",
+   "inputs": {
+    "op": "classify",
+    "brep": {
+     "kind": "file",
+     "file": "plane_square.smb",
+     "rebuild": true
+    },
+    "offset": [
+     1e-07,
+     -1e-07,
+     1e-07
+    ],
+    "tol": 1e-06,
+    "do_bnd": true,
+    "at": "vertex",
+    "index": 3
+   }
+  },
+  {
+   "name": "plane_square_vertex3_off_region",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:24687",
+   "inputs": {
+    "op": "classify",
+    "brep": {
+     "kind": "file",
+     "file": "plane_square.smb",
+     "rebuild": true
+    },
+    "offset": [
+     1e-07,
+     -1e-07,
+     1e-07
+    ],
+    "tol": 1e-06,
+    "do_bnd": false,
+    "at": "vertex",
+    "index": 3
+   }
+  },
+  {
+   "name": "plane_square_face_mid_bnd",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:24687",
+   "inputs": {
+    "op": "classify",
+    "brep": {
+     "kind": "file",
+     "file": "plane_square.smb",
+     "rebuild": true
+    },
+    "offset": [
+     0,
+     0,
+     0
+    ],
+    "tol": 1e-06,
+    "do_bnd": true,
+    "at": "face",
+    "index": 0,
+    "u": 0.5,
+    "v": 0.5
+   }
+  },
+  {
+   "name": "plane_square_face_mid_region",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:24687",
+   "inputs": {
+    "op": "classify",
+    "brep": {
+     "kind": "file",
+     "file": "plane_square.smb",
+     "rebuild": true
+    },
+    "offset": [
+     0,
+     0,
+     0
+    ],
+    "tol": 1e-06,
+    "do_bnd": false,
+    "at": "face",
+    "index": 0,
+    "u": 0.5,
+    "v": 0.5
+   }
+  },
+  {
+   "name": "plane_square_face_mid_off_bnd",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:24687",
+   "inputs": {
+    "op": "classify",
+    "brep": {
+     "kind": "file",
+     "file": "plane_square.smb",
+     "rebuild": true
+    },
+    "offset": [
+     0,
+     0,
+     0.001
+    ],
+    "tol": 1e-06,
+    "do_bnd": true,
+    "at": "face",
+    "index": 1,
+    "u": 0.37,
+    "v": 0.61
+   }
+  },
+  {
+   "name": "plane_square_face_mid_off_region",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:24687",
+   "inputs": {
+    "op": "classify",
+    "brep": {
+     "kind": "file",
+     "file": "plane_square.smb",
+     "rebuild": true
+    },
+    "offset": [
+     0,
+     0,
+     0.001
+    ],
+    "tol": 1e-06,
+    "do_bnd": false,
+    "at": "face",
+    "index": 1,
+    "u": 0.37,
+    "v": 0.61
+   }
+  },
+  {
+   "name": "plane_square_face_corner_bnd",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:24687",
+   "inputs": {
+    "op": "classify",
+    "brep": {
+     "kind": "file",
+     "file": "plane_square.smb",
+     "rebuild": true
+    },
+    "offset": [
+     0,
+     0,
+     0
+    ],
+    "tol": 1e-06,
+    "do_bnd": true,
+    "at": "face",
+    "index": 2,
+    "u": 0.0,
+    "v": 1.0
+   }
+  },
+  {
+   "name": "plane_square_face_corner_region",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:24687",
+   "inputs": {
+    "op": "classify",
+    "brep": {
+     "kind": "file",
+     "file": "plane_square.smb",
+     "rebuild": true
+    },
+    "offset": [
+     0,
+     0,
+     0
+    ],
+    "tol": 1e-06,
+    "do_bnd": false,
+    "at": "face",
+    "index": 2,
+    "u": 0.0,
+    "v": 1.0
+   }
+  },
+  {
+   "name": "plane_square_far_bnd",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:24687",
+   "inputs": {
+    "op": "classify",
+    "brep": {
+     "kind": "file",
+     "file": "plane_square.smb",
+     "rebuild": true
+    },
+    "offset": [
+     0,
+     0,
+     0
+    ],
+    "tol": 1e-06,
+    "do_bnd": true,
+    "at": "point",
+    "p": [
+     10000.0,
+     -10000.0,
+     10000.0
+    ]
+   }
+  },
+  {
+   "name": "plane_square_far_region",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:24687",
+   "inputs": {
+    "op": "classify",
+    "brep": {
+     "kind": "file",
+     "file": "plane_square.smb",
+     "rebuild": true
+    },
+    "offset": [
+     0,
+     0,
+     0
+    ],
+    "tol": 1e-06,
+    "do_bnd": false,
+    "at": "point",
+    "p": [
+     10000.0,
+     -10000.0,
+     10000.0
+    ]
+   }
+  },
+  {
+   "name": "plane_square_origin_bnd",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:24687",
+   "inputs": {
+    "op": "classify",
+    "brep": {
+     "kind": "file",
+     "file": "plane_square.smb",
+     "rebuild": true
+    },
+    "offset": [
+     0,
+     0,
+     0
+    ],
+    "tol": 1e-06,
+    "do_bnd": true,
+    "at": "point",
+    "p": [
+     0,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "plane_square_origin_region",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:24687",
+   "inputs": {
+    "op": "classify",
+    "brep": {
+     "kind": "file",
+     "file": "plane_square.smb",
+     "rebuild": true
+    },
+    "offset": [
+     0,
+     0,
+     0
+    ],
+    "tol": 1e-06,
+    "do_bnd": false,
+    "at": "point",
+    "p": [
+     0,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "cone_vertex0_bnd",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:24687",
+   "inputs": {
+    "op": "classify",
+    "brep": {
+     "kind": "file",
+     "file": "cone.smb",
+     "rebuild": true
+    },
+    "offset": [
+     0,
+     0,
+     0
+    ],
+    "tol": 1e-06,
+    "do_bnd": true,
+    "at": "vertex",
+    "index": 0
+   }
+  },
+  {
+   "name": "cone_vertex0_region",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:24687",
+   "inputs": {
+    "op": "classify",
+    "brep": {
+     "kind": "file",
+     "file": "cone.smb",
+     "rebuild": true
+    },
+    "offset": [
+     0,
+     0,
+     0
+    ],
+    "tol": 1e-06,
+    "do_bnd": false,
+    "at": "vertex",
+    "index": 0
+   }
+  },
+  {
+   "name": "cone_vertex3_off_bnd",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:24687",
+   "inputs": {
+    "op": "classify",
+    "brep": {
+     "kind": "file",
+     "file": "cone.smb",
+     "rebuild": true
+    },
+    "offset": [
+     1e-07,
+     -1e-07,
+     1e-07
+    ],
+    "tol": 1e-06,
+    "do_bnd": true,
+    "at": "vertex",
+    "index": 3
+   }
+  },
+  {
+   "name": "cone_vertex3_off_region",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:24687",
+   "inputs": {
+    "op": "classify",
+    "brep": {
+     "kind": "file",
+     "file": "cone.smb",
+     "rebuild": true
+    },
+    "offset": [
+     1e-07,
+     -1e-07,
+     1e-07
+    ],
+    "tol": 1e-06,
+    "do_bnd": false,
+    "at": "vertex",
+    "index": 3
+   }
+  },
+  {
+   "name": "cone_face_mid_bnd",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:24687",
+   "inputs": {
+    "op": "classify",
+    "brep": {
+     "kind": "file",
+     "file": "cone.smb",
+     "rebuild": true
+    },
+    "offset": [
+     0,
+     0,
+     0
+    ],
+    "tol": 1e-06,
+    "do_bnd": true,
+    "at": "face",
+    "index": 0,
+    "u": 0.5,
+    "v": 0.5
+   }
+  },
+  {
+   "name": "cone_face_mid_region",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:24687",
+   "inputs": {
+    "op": "classify",
+    "brep": {
+     "kind": "file",
+     "file": "cone.smb",
+     "rebuild": true
+    },
+    "offset": [
+     0,
+     0,
+     0
+    ],
+    "tol": 1e-06,
+    "do_bnd": false,
+    "at": "face",
+    "index": 0,
+    "u": 0.5,
+    "v": 0.5
+   }
+  },
+  {
+   "name": "cone_face_mid_off_bnd",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:24687",
+   "inputs": {
+    "op": "classify",
+    "brep": {
+     "kind": "file",
+     "file": "cone.smb",
+     "rebuild": true
+    },
+    "offset": [
+     0,
+     0,
+     0.001
+    ],
+    "tol": 1e-06,
+    "do_bnd": true,
+    "at": "face",
+    "index": 1,
+    "u": 0.37,
+    "v": 0.61
+   }
+  },
+  {
+   "name": "cone_face_mid_off_region",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:24687",
+   "inputs": {
+    "op": "classify",
+    "brep": {
+     "kind": "file",
+     "file": "cone.smb",
+     "rebuild": true
+    },
+    "offset": [
+     0,
+     0,
+     0.001
+    ],
+    "tol": 1e-06,
+    "do_bnd": false,
+    "at": "face",
+    "index": 1,
+    "u": 0.37,
+    "v": 0.61
+   }
+  },
+  {
+   "name": "cone_face_corner_bnd",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:24687",
+   "inputs": {
+    "op": "classify",
+    "brep": {
+     "kind": "file",
+     "file": "cone.smb",
+     "rebuild": true
+    },
+    "offset": [
+     0,
+     0,
+     0
+    ],
+    "tol": 1e-06,
+    "do_bnd": true,
+    "at": "face",
+    "index": 2,
+    "u": 0.0,
+    "v": 1.0
+   }
+  },
+  {
+   "name": "cone_face_corner_region",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:24687",
+   "inputs": {
+    "op": "classify",
+    "brep": {
+     "kind": "file",
+     "file": "cone.smb",
+     "rebuild": true
+    },
+    "offset": [
+     0,
+     0,
+     0
+    ],
+    "tol": 1e-06,
+    "do_bnd": false,
+    "at": "face",
+    "index": 2,
+    "u": 0.0,
+    "v": 1.0
+   }
+  },
+  {
+   "name": "cone_far_bnd",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:24687",
+   "inputs": {
+    "op": "classify",
+    "brep": {
+     "kind": "file",
+     "file": "cone.smb",
+     "rebuild": true
+    },
+    "offset": [
+     0,
+     0,
+     0
+    ],
+    "tol": 1e-06,
+    "do_bnd": true,
+    "at": "point",
+    "p": [
+     10000.0,
+     -10000.0,
+     10000.0
+    ]
+   }
+  },
+  {
+   "name": "cone_far_region",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:24687",
+   "inputs": {
+    "op": "classify",
+    "brep": {
+     "kind": "file",
+     "file": "cone.smb",
+     "rebuild": true
+    },
+    "offset": [
+     0,
+     0,
+     0
+    ],
+    "tol": 1e-06,
+    "do_bnd": false,
+    "at": "point",
+    "p": [
+     10000.0,
+     -10000.0,
+     10000.0
+    ]
+   }
+  },
+  {
+   "name": "cone_origin_bnd",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:24687",
+   "inputs": {
+    "op": "classify",
+    "brep": {
+     "kind": "file",
+     "file": "cone.smb",
+     "rebuild": true
+    },
+    "offset": [
+     0,
+     0,
+     0
+    ],
+    "tol": 1e-06,
+    "do_bnd": true,
+    "at": "point",
+    "p": [
+     0,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "cone_origin_region",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:24687",
+   "inputs": {
+    "op": "classify",
+    "brep": {
+     "kind": "file",
+     "file": "cone.smb",
+     "rebuild": true
+    },
+    "offset": [
+     0,
+     0,
+     0
+    ],
+    "tol": 1e-06,
+    "do_bnd": false,
+    "at": "point",
+    "p": [
+     0,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "sphere_vertex0_bnd",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:24687",
+   "inputs": {
+    "op": "classify",
+    "brep": {
+     "kind": "file",
+     "file": "sphere.smb",
+     "rebuild": true
+    },
+    "offset": [
+     0,
+     0,
+     0
+    ],
+    "tol": 1e-06,
+    "do_bnd": true,
+    "at": "vertex",
+    "index": 0
+   }
+  },
+  {
+   "name": "sphere_vertex0_region",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:24687",
+   "inputs": {
+    "op": "classify",
+    "brep": {
+     "kind": "file",
+     "file": "sphere.smb",
+     "rebuild": true
+    },
+    "offset": [
+     0,
+     0,
+     0
+    ],
+    "tol": 1e-06,
+    "do_bnd": false,
+    "at": "vertex",
+    "index": 0
+   }
+  },
+  {
+   "name": "sphere_vertex3_off_bnd",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:24687",
+   "inputs": {
+    "op": "classify",
+    "brep": {
+     "kind": "file",
+     "file": "sphere.smb",
+     "rebuild": true
+    },
+    "offset": [
+     1e-07,
+     -1e-07,
+     1e-07
+    ],
+    "tol": 1e-06,
+    "do_bnd": true,
+    "at": "vertex",
+    "index": 3
+   }
+  },
+  {
+   "name": "sphere_vertex3_off_region",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:24687",
+   "inputs": {
+    "op": "classify",
+    "brep": {
+     "kind": "file",
+     "file": "sphere.smb",
+     "rebuild": true
+    },
+    "offset": [
+     1e-07,
+     -1e-07,
+     1e-07
+    ],
+    "tol": 1e-06,
+    "do_bnd": false,
+    "at": "vertex",
+    "index": 3
+   }
+  },
+  {
+   "name": "sphere_face_mid_bnd",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:24687",
+   "inputs": {
+    "op": "classify",
+    "brep": {
+     "kind": "file",
+     "file": "sphere.smb",
+     "rebuild": true
+    },
+    "offset": [
+     0,
+     0,
+     0
+    ],
+    "tol": 1e-06,
+    "do_bnd": true,
+    "at": "face",
+    "index": 0,
+    "u": 0.5,
+    "v": 0.5
+   }
+  },
+  {
+   "name": "sphere_face_mid_region",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:24687",
+   "inputs": {
+    "op": "classify",
+    "brep": {
+     "kind": "file",
+     "file": "sphere.smb",
+     "rebuild": true
+    },
+    "offset": [
+     0,
+     0,
+     0
+    ],
+    "tol": 1e-06,
+    "do_bnd": false,
+    "at": "face",
+    "index": 0,
+    "u": 0.5,
+    "v": 0.5
+   }
+  },
+  {
+   "name": "sphere_face_mid_off_bnd",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:24687",
+   "inputs": {
+    "op": "classify",
+    "brep": {
+     "kind": "file",
+     "file": "sphere.smb",
+     "rebuild": true
+    },
+    "offset": [
+     0,
+     0,
+     0.001
+    ],
+    "tol": 1e-06,
+    "do_bnd": true,
+    "at": "face",
+    "index": 1,
+    "u": 0.37,
+    "v": 0.61
+   }
+  },
+  {
+   "name": "sphere_face_mid_off_region",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:24687",
+   "inputs": {
+    "op": "classify",
+    "brep": {
+     "kind": "file",
+     "file": "sphere.smb",
+     "rebuild": true
+    },
+    "offset": [
+     0,
+     0,
+     0.001
+    ],
+    "tol": 1e-06,
+    "do_bnd": false,
+    "at": "face",
+    "index": 1,
+    "u": 0.37,
+    "v": 0.61
+   }
+  },
+  {
+   "name": "sphere_face_corner_bnd",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:24687",
+   "inputs": {
+    "op": "classify",
+    "brep": {
+     "kind": "file",
+     "file": "sphere.smb",
+     "rebuild": true
+    },
+    "offset": [
+     0,
+     0,
+     0
+    ],
+    "tol": 1e-06,
+    "do_bnd": true,
+    "at": "face",
+    "index": 2,
+    "u": 0.0,
+    "v": 1.0
+   }
+  },
+  {
+   "name": "sphere_face_corner_region",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:24687",
+   "inputs": {
+    "op": "classify",
+    "brep": {
+     "kind": "file",
+     "file": "sphere.smb",
+     "rebuild": true
+    },
+    "offset": [
+     0,
+     0,
+     0
+    ],
+    "tol": 1e-06,
+    "do_bnd": false,
+    "at": "face",
+    "index": 2,
+    "u": 0.0,
+    "v": 1.0
+   }
+  },
+  {
+   "name": "sphere_far_bnd",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:24687",
+   "inputs": {
+    "op": "classify",
+    "brep": {
+     "kind": "file",
+     "file": "sphere.smb",
+     "rebuild": true
+    },
+    "offset": [
+     0,
+     0,
+     0
+    ],
+    "tol": 1e-06,
+    "do_bnd": true,
+    "at": "point",
+    "p": [
+     10000.0,
+     -10000.0,
+     10000.0
+    ]
+   }
+  },
+  {
+   "name": "sphere_far_region",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:24687",
+   "inputs": {
+    "op": "classify",
+    "brep": {
+     "kind": "file",
+     "file": "sphere.smb",
+     "rebuild": true
+    },
+    "offset": [
+     0,
+     0,
+     0
+    ],
+    "tol": 1e-06,
+    "do_bnd": false,
+    "at": "point",
+    "p": [
+     10000.0,
+     -10000.0,
+     10000.0
+    ]
+   }
+  },
+  {
+   "name": "sphere_origin_bnd",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:24687",
+   "inputs": {
+    "op": "classify",
+    "brep": {
+     "kind": "file",
+     "file": "sphere.smb",
+     "rebuild": true
+    },
+    "offset": [
+     0,
+     0,
+     0
+    ],
+    "tol": 1e-06,
+    "do_bnd": true,
+    "at": "point",
+    "p": [
+     0,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "sphere_origin_region",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:24687",
+   "inputs": {
+    "op": "classify",
+    "brep": {
+     "kind": "file",
+     "file": "sphere.smb",
+     "rebuild": true
+    },
+    "offset": [
+     0,
+     0,
+     0
+    ],
+    "tol": 1e-06,
+    "do_bnd": false,
+    "at": "point",
+    "p": [
+     0,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "torus_vertex0_bnd",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:24687",
+   "inputs": {
+    "op": "classify",
+    "brep": {
+     "kind": "file",
+     "file": "torus.smb",
+     "rebuild": true
+    },
+    "offset": [
+     0,
+     0,
+     0
+    ],
+    "tol": 1e-06,
+    "do_bnd": true,
+    "at": "vertex",
+    "index": 0
+   }
+  },
+  {
+   "name": "torus_vertex0_region",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:24687",
+   "inputs": {
+    "op": "classify",
+    "brep": {
+     "kind": "file",
+     "file": "torus.smb",
+     "rebuild": true
+    },
+    "offset": [
+     0,
+     0,
+     0
+    ],
+    "tol": 1e-06,
+    "do_bnd": false,
+    "at": "vertex",
+    "index": 0
+   }
+  },
+  {
+   "name": "torus_vertex3_off_bnd",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:24687",
+   "inputs": {
+    "op": "classify",
+    "brep": {
+     "kind": "file",
+     "file": "torus.smb",
+     "rebuild": true
+    },
+    "offset": [
+     1e-07,
+     -1e-07,
+     1e-07
+    ],
+    "tol": 1e-06,
+    "do_bnd": true,
+    "at": "vertex",
+    "index": 3
+   }
+  },
+  {
+   "name": "torus_vertex3_off_region",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:24687",
+   "inputs": {
+    "op": "classify",
+    "brep": {
+     "kind": "file",
+     "file": "torus.smb",
+     "rebuild": true
+    },
+    "offset": [
+     1e-07,
+     -1e-07,
+     1e-07
+    ],
+    "tol": 1e-06,
+    "do_bnd": false,
+    "at": "vertex",
+    "index": 3
+   }
+  },
+  {
+   "name": "torus_face_mid_bnd",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:24687",
+   "inputs": {
+    "op": "classify",
+    "brep": {
+     "kind": "file",
+     "file": "torus.smb",
+     "rebuild": true
+    },
+    "offset": [
+     0,
+     0,
+     0
+    ],
+    "tol": 1e-06,
+    "do_bnd": true,
+    "at": "face",
+    "index": 0,
+    "u": 0.5,
+    "v": 0.5
+   }
+  },
+  {
+   "name": "torus_face_mid_region",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:24687",
+   "inputs": {
+    "op": "classify",
+    "brep": {
+     "kind": "file",
+     "file": "torus.smb",
+     "rebuild": true
+    },
+    "offset": [
+     0,
+     0,
+     0
+    ],
+    "tol": 1e-06,
+    "do_bnd": false,
+    "at": "face",
+    "index": 0,
+    "u": 0.5,
+    "v": 0.5
+   }
+  },
+  {
+   "name": "torus_face_mid_off_bnd",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:24687",
+   "inputs": {
+    "op": "classify",
+    "brep": {
+     "kind": "file",
+     "file": "torus.smb",
+     "rebuild": true
+    },
+    "offset": [
+     0,
+     0,
+     0.001
+    ],
+    "tol": 1e-06,
+    "do_bnd": true,
+    "at": "face",
+    "index": 1,
+    "u": 0.37,
+    "v": 0.61
+   }
+  },
+  {
+   "name": "torus_face_mid_off_region",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:24687",
+   "inputs": {
+    "op": "classify",
+    "brep": {
+     "kind": "file",
+     "file": "torus.smb",
+     "rebuild": true
+    },
+    "offset": [
+     0,
+     0,
+     0.001
+    ],
+    "tol": 1e-06,
+    "do_bnd": false,
+    "at": "face",
+    "index": 1,
+    "u": 0.37,
+    "v": 0.61
+   }
+  },
+  {
+   "name": "torus_face_corner_bnd",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:24687",
+   "inputs": {
+    "op": "classify",
+    "brep": {
+     "kind": "file",
+     "file": "torus.smb",
+     "rebuild": true
+    },
+    "offset": [
+     0,
+     0,
+     0
+    ],
+    "tol": 1e-06,
+    "do_bnd": true,
+    "at": "face",
+    "index": 2,
+    "u": 0.0,
+    "v": 1.0
+   }
+  },
+  {
+   "name": "torus_face_corner_region",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:24687",
+   "inputs": {
+    "op": "classify",
+    "brep": {
+     "kind": "file",
+     "file": "torus.smb",
+     "rebuild": true
+    },
+    "offset": [
+     0,
+     0,
+     0
+    ],
+    "tol": 1e-06,
+    "do_bnd": false,
+    "at": "face",
+    "index": 2,
+    "u": 0.0,
+    "v": 1.0
+   }
+  },
+  {
+   "name": "torus_far_bnd",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:24687",
+   "inputs": {
+    "op": "classify",
+    "brep": {
+     "kind": "file",
+     "file": "torus.smb",
+     "rebuild": true
+    },
+    "offset": [
+     0,
+     0,
+     0
+    ],
+    "tol": 1e-06,
+    "do_bnd": true,
+    "at": "point",
+    "p": [
+     10000.0,
+     -10000.0,
+     10000.0
+    ]
+   }
+  },
+  {
+   "name": "torus_far_region",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:24687",
+   "inputs": {
+    "op": "classify",
+    "brep": {
+     "kind": "file",
+     "file": "torus.smb",
+     "rebuild": true
+    },
+    "offset": [
+     0,
+     0,
+     0
+    ],
+    "tol": 1e-06,
+    "do_bnd": false,
+    "at": "point",
+    "p": [
+     10000.0,
+     -10000.0,
+     10000.0
+    ]
+   }
+  },
+  {
+   "name": "torus_origin_bnd",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:24687",
+   "inputs": {
+    "op": "classify",
+    "brep": {
+     "kind": "file",
+     "file": "torus.smb",
+     "rebuild": true
+    },
+    "offset": [
+     0,
+     0,
+     0
+    ],
+    "tol": 1e-06,
+    "do_bnd": true,
+    "at": "point",
+    "p": [
+     0,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "torus_origin_region",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:24687",
+   "inputs": {
+    "op": "classify",
+    "brep": {
+     "kind": "file",
+     "file": "torus.smb",
+     "rebuild": true
+    },
+    "offset": [
+     0,
+     0,
+     0
+    ],
+    "tol": 1e-06,
+    "do_bnd": false,
+    "at": "point",
+    "p": [
+     0,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "network_vertex0_bnd",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:24687",
+   "inputs": {
+    "op": "classify",
+    "brep": {
+     "kind": "network"
+    },
+    "offset": [
+     0,
+     0,
+     0
+    ],
+    "tol": 1e-06,
+    "do_bnd": true,
+    "at": "vertex",
+    "index": 0
+   }
+  },
+  {
+   "name": "network_vertex0_region",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:24687",
+   "inputs": {
+    "op": "classify",
+    "brep": {
+     "kind": "network"
+    },
+    "offset": [
+     0,
+     0,
+     0
+    ],
+    "tol": 1e-06,
+    "do_bnd": false,
+    "at": "vertex",
+    "index": 0
+   }
+  },
+  {
+   "name": "network_vertex3_off_bnd",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:24687",
+   "inputs": {
+    "op": "classify",
+    "brep": {
+     "kind": "network"
+    },
+    "offset": [
+     1e-07,
+     -1e-07,
+     1e-07
+    ],
+    "tol": 1e-06,
+    "do_bnd": true,
+    "at": "vertex",
+    "index": 3
+   }
+  },
+  {
+   "name": "network_vertex3_off_region",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:24687",
+   "inputs": {
+    "op": "classify",
+    "brep": {
+     "kind": "network"
+    },
+    "offset": [
+     1e-07,
+     -1e-07,
+     1e-07
+    ],
+    "tol": 1e-06,
+    "do_bnd": false,
+    "at": "vertex",
+    "index": 3
+   }
+  },
+  {
+   "name": "network_face_mid_bnd",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:24687",
+   "inputs": {
+    "op": "classify",
+    "brep": {
+     "kind": "network"
+    },
+    "offset": [
+     0,
+     0,
+     0
+    ],
+    "tol": 1e-06,
+    "do_bnd": true,
+    "at": "face",
+    "index": 0,
+    "u": 0.5,
+    "v": 0.5
+   }
+  },
+  {
+   "name": "network_face_mid_region",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:24687",
+   "inputs": {
+    "op": "classify",
+    "brep": {
+     "kind": "network"
+    },
+    "offset": [
+     0,
+     0,
+     0
+    ],
+    "tol": 1e-06,
+    "do_bnd": false,
+    "at": "face",
+    "index": 0,
+    "u": 0.5,
+    "v": 0.5
+   }
+  },
+  {
+   "name": "network_face_mid_off_bnd",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:24687",
+   "inputs": {
+    "op": "classify",
+    "brep": {
+     "kind": "network"
+    },
+    "offset": [
+     0,
+     0,
+     0.001
+    ],
+    "tol": 1e-06,
+    "do_bnd": true,
+    "at": "face",
+    "index": 1,
+    "u": 0.37,
+    "v": 0.61
+   }
+  },
+  {
+   "name": "network_face_mid_off_region",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:24687",
+   "inputs": {
+    "op": "classify",
+    "brep": {
+     "kind": "network"
+    },
+    "offset": [
+     0,
+     0,
+     0.001
+    ],
+    "tol": 1e-06,
+    "do_bnd": false,
+    "at": "face",
+    "index": 1,
+    "u": 0.37,
+    "v": 0.61
+   }
+  },
+  {
+   "name": "network_face_corner_bnd",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:24687",
+   "inputs": {
+    "op": "classify",
+    "brep": {
+     "kind": "network"
+    },
+    "offset": [
+     0,
+     0,
+     0
+    ],
+    "tol": 1e-06,
+    "do_bnd": true,
+    "at": "face",
+    "index": 2,
+    "u": 0.0,
+    "v": 1.0
+   }
+  },
+  {
+   "name": "network_face_corner_region",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:24687",
+   "inputs": {
+    "op": "classify",
+    "brep": {
+     "kind": "network"
+    },
+    "offset": [
+     0,
+     0,
+     0
+    ],
+    "tol": 1e-06,
+    "do_bnd": false,
+    "at": "face",
+    "index": 2,
+    "u": 0.0,
+    "v": 1.0
+   }
+  },
+  {
+   "name": "network_far_bnd",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:24687",
+   "inputs": {
+    "op": "classify",
+    "brep": {
+     "kind": "network"
+    },
+    "offset": [
+     0,
+     0,
+     0
+    ],
+    "tol": 1e-06,
+    "do_bnd": true,
+    "at": "point",
+    "p": [
+     10000.0,
+     -10000.0,
+     10000.0
+    ]
+   }
+  },
+  {
+   "name": "network_far_region",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:24687",
+   "inputs": {
+    "op": "classify",
+    "brep": {
+     "kind": "network"
+    },
+    "offset": [
+     0,
+     0,
+     0
+    ],
+    "tol": 1e-06,
+    "do_bnd": false,
+    "at": "point",
+    "p": [
+     10000.0,
+     -10000.0,
+     10000.0
+    ]
+   }
+  },
+  {
+   "name": "network_origin_bnd",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:24687",
+   "inputs": {
+    "op": "classify",
+    "brep": {
+     "kind": "network"
+    },
+    "offset": [
+     0,
+     0,
+     0
+    ],
+    "tol": 1e-06,
+    "do_bnd": true,
+    "at": "point",
+    "p": [
+     0,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "network_origin_region",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:24687",
+   "inputs": {
+    "op": "classify",
+    "brep": {
+     "kind": "network"
+    },
+    "offset": [
+     0,
+     0,
+     0
+    ],
+    "tol": 1e-06,
+    "do_bnd": false,
+    "at": "point",
+    "p": [
+     0,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "vertices_vertex0_bnd",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:24687",
+   "inputs": {
+    "op": "classify",
+    "brep": {
+     "kind": "vertices",
+     "points": [
+      [
+       0,
+       0,
+       0
+      ],
+      [
+       1,
+       2,
+       3
+      ],
+      [
+       -4,
+       5,
+       -6
+      ]
+     ]
+    },
+    "offset": [
+     0,
+     0,
+     0
+    ],
+    "tol": 1e-06,
+    "do_bnd": true,
+    "at": "vertex",
+    "index": 0
+   }
+  },
+  {
+   "name": "vertices_vertex0_region",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:24687",
+   "inputs": {
+    "op": "classify",
+    "brep": {
+     "kind": "vertices",
+     "points": [
+      [
+       0,
+       0,
+       0
+      ],
+      [
+       1,
+       2,
+       3
+      ],
+      [
+       -4,
+       5,
+       -6
+      ]
+     ]
+    },
+    "offset": [
+     0,
+     0,
+     0
+    ],
+    "tol": 1e-06,
+    "do_bnd": false,
+    "at": "vertex",
+    "index": 0
+   }
+  },
+  {
+   "name": "vertices_vertex3_off_bnd",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:24687",
+   "inputs": {
+    "op": "classify",
+    "brep": {
+     "kind": "vertices",
+     "points": [
+      [
+       0,
+       0,
+       0
+      ],
+      [
+       1,
+       2,
+       3
+      ],
+      [
+       -4,
+       5,
+       -6
+      ]
+     ]
+    },
+    "offset": [
+     1e-07,
+     -1e-07,
+     1e-07
+    ],
+    "tol": 1e-06,
+    "do_bnd": true,
+    "at": "vertex",
+    "index": 3
+   }
+  },
+  {
+   "name": "vertices_vertex3_off_region",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:24687",
+   "inputs": {
+    "op": "classify",
+    "brep": {
+     "kind": "vertices",
+     "points": [
+      [
+       0,
+       0,
+       0
+      ],
+      [
+       1,
+       2,
+       3
+      ],
+      [
+       -4,
+       5,
+       -6
+      ]
+     ]
+    },
+    "offset": [
+     1e-07,
+     -1e-07,
+     1e-07
+    ],
+    "tol": 1e-06,
+    "do_bnd": false,
+    "at": "vertex",
+    "index": 3
+   }
+  },
+  {
+   "name": "vertices_face_mid_bnd",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:24687",
+   "inputs": {
+    "op": "classify",
+    "brep": {
+     "kind": "vertices",
+     "points": [
+      [
+       0,
+       0,
+       0
+      ],
+      [
+       1,
+       2,
+       3
+      ],
+      [
+       -4,
+       5,
+       -6
+      ]
+     ]
+    },
+    "offset": [
+     0,
+     0,
+     0
+    ],
+    "tol": 1e-06,
+    "do_bnd": true,
+    "at": "face",
+    "index": 0,
+    "u": 0.5,
+    "v": 0.5
+   }
+  },
+  {
+   "name": "vertices_face_mid_region",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:24687",
+   "inputs": {
+    "op": "classify",
+    "brep": {
+     "kind": "vertices",
+     "points": [
+      [
+       0,
+       0,
+       0
+      ],
+      [
+       1,
+       2,
+       3
+      ],
+      [
+       -4,
+       5,
+       -6
+      ]
+     ]
+    },
+    "offset": [
+     0,
+     0,
+     0
+    ],
+    "tol": 1e-06,
+    "do_bnd": false,
+    "at": "face",
+    "index": 0,
+    "u": 0.5,
+    "v": 0.5
+   }
+  },
+  {
+   "name": "vertices_face_mid_off_bnd",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:24687",
+   "inputs": {
+    "op": "classify",
+    "brep": {
+     "kind": "vertices",
+     "points": [
+      [
+       0,
+       0,
+       0
+      ],
+      [
+       1,
+       2,
+       3
+      ],
+      [
+       -4,
+       5,
+       -6
+      ]
+     ]
+    },
+    "offset": [
+     0,
+     0,
+     0.001
+    ],
+    "tol": 1e-06,
+    "do_bnd": true,
+    "at": "face",
+    "index": 1,
+    "u": 0.37,
+    "v": 0.61
+   }
+  },
+  {
+   "name": "vertices_face_mid_off_region",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:24687",
+   "inputs": {
+    "op": "classify",
+    "brep": {
+     "kind": "vertices",
+     "points": [
+      [
+       0,
+       0,
+       0
+      ],
+      [
+       1,
+       2,
+       3
+      ],
+      [
+       -4,
+       5,
+       -6
+      ]
+     ]
+    },
+    "offset": [
+     0,
+     0,
+     0.001
+    ],
+    "tol": 1e-06,
+    "do_bnd": false,
+    "at": "face",
+    "index": 1,
+    "u": 0.37,
+    "v": 0.61
+   }
+  },
+  {
+   "name": "vertices_face_corner_bnd",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:24687",
+   "inputs": {
+    "op": "classify",
+    "brep": {
+     "kind": "vertices",
+     "points": [
+      [
+       0,
+       0,
+       0
+      ],
+      [
+       1,
+       2,
+       3
+      ],
+      [
+       -4,
+       5,
+       -6
+      ]
+     ]
+    },
+    "offset": [
+     0,
+     0,
+     0
+    ],
+    "tol": 1e-06,
+    "do_bnd": true,
+    "at": "face",
+    "index": 2,
+    "u": 0.0,
+    "v": 1.0
+   }
+  },
+  {
+   "name": "vertices_face_corner_region",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:24687",
+   "inputs": {
+    "op": "classify",
+    "brep": {
+     "kind": "vertices",
+     "points": [
+      [
+       0,
+       0,
+       0
+      ],
+      [
+       1,
+       2,
+       3
+      ],
+      [
+       -4,
+       5,
+       -6
+      ]
+     ]
+    },
+    "offset": [
+     0,
+     0,
+     0
+    ],
+    "tol": 1e-06,
+    "do_bnd": false,
+    "at": "face",
+    "index": 2,
+    "u": 0.0,
+    "v": 1.0
+   }
+  },
+  {
+   "name": "vertices_far_bnd",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:24687",
+   "inputs": {
+    "op": "classify",
+    "brep": {
+     "kind": "vertices",
+     "points": [
+      [
+       0,
+       0,
+       0
+      ],
+      [
+       1,
+       2,
+       3
+      ],
+      [
+       -4,
+       5,
+       -6
+      ]
+     ]
+    },
+    "offset": [
+     0,
+     0,
+     0
+    ],
+    "tol": 1e-06,
+    "do_bnd": true,
+    "at": "point",
+    "p": [
+     10000.0,
+     -10000.0,
+     10000.0
+    ]
+   }
+  },
+  {
+   "name": "vertices_far_region",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:24687",
+   "inputs": {
+    "op": "classify",
+    "brep": {
+     "kind": "vertices",
+     "points": [
+      [
+       0,
+       0,
+       0
+      ],
+      [
+       1,
+       2,
+       3
+      ],
+      [
+       -4,
+       5,
+       -6
+      ]
+     ]
+    },
+    "offset": [
+     0,
+     0,
+     0
+    ],
+    "tol": 1e-06,
+    "do_bnd": false,
+    "at": "point",
+    "p": [
+     10000.0,
+     -10000.0,
+     10000.0
+    ]
+   }
+  },
+  {
+   "name": "vertices_origin_bnd",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:24687",
+   "inputs": {
+    "op": "classify",
+    "brep": {
+     "kind": "vertices",
+     "points": [
+      [
+       0,
+       0,
+       0
+      ],
+      [
+       1,
+       2,
+       3
+      ],
+      [
+       -4,
+       5,
+       -6
+      ]
+     ]
+    },
+    "offset": [
+     0,
+     0,
+     0
+    ],
+    "tol": 1e-06,
+    "do_bnd": true,
+    "at": "point",
+    "p": [
+     0,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "vertices_origin_region",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:24687",
+   "inputs": {
+    "op": "classify",
+    "brep": {
+     "kind": "vertices",
+     "points": [
+      [
+       0,
+       0,
+       0
+      ],
+      [
+       1,
+       2,
+       3
+      ],
+      [
+       -4,
+       5,
+       -6
+      ]
+     ]
+    },
+    "offset": [
+     0,
+     0,
+     0
+    ],
+    "tol": 1e-06,
+    "do_bnd": false,
+    "at": "point",
+    "p": [
+     0,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "no_vertices_vertex0_bnd",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:24687",
+   "inputs": {
+    "op": "classify",
+    "brep": {
+     "kind": "vertices",
+     "points": []
+    },
+    "offset": [
+     0,
+     0,
+     0
+    ],
+    "tol": 1e-06,
+    "do_bnd": true,
+    "at": "vertex",
+    "index": 0
+   }
+  },
+  {
+   "name": "no_vertices_vertex0_region",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:24687",
+   "inputs": {
+    "op": "classify",
+    "brep": {
+     "kind": "vertices",
+     "points": []
+    },
+    "offset": [
+     0,
+     0,
+     0
+    ],
+    "tol": 1e-06,
+    "do_bnd": false,
+    "at": "vertex",
+    "index": 0
+   }
+  },
+  {
+   "name": "no_vertices_vertex3_off_bnd",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:24687",
+   "inputs": {
+    "op": "classify",
+    "brep": {
+     "kind": "vertices",
+     "points": []
+    },
+    "offset": [
+     1e-07,
+     -1e-07,
+     1e-07
+    ],
+    "tol": 1e-06,
+    "do_bnd": true,
+    "at": "vertex",
+    "index": 3
+   }
+  },
+  {
+   "name": "no_vertices_vertex3_off_region",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:24687",
+   "inputs": {
+    "op": "classify",
+    "brep": {
+     "kind": "vertices",
+     "points": []
+    },
+    "offset": [
+     1e-07,
+     -1e-07,
+     1e-07
+    ],
+    "tol": 1e-06,
+    "do_bnd": false,
+    "at": "vertex",
+    "index": 3
+   }
+  },
+  {
+   "name": "no_vertices_face_mid_bnd",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:24687",
+   "inputs": {
+    "op": "classify",
+    "brep": {
+     "kind": "vertices",
+     "points": []
+    },
+    "offset": [
+     0,
+     0,
+     0
+    ],
+    "tol": 1e-06,
+    "do_bnd": true,
+    "at": "face",
+    "index": 0,
+    "u": 0.5,
+    "v": 0.5
+   }
+  },
+  {
+   "name": "no_vertices_face_mid_region",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:24687",
+   "inputs": {
+    "op": "classify",
+    "brep": {
+     "kind": "vertices",
+     "points": []
+    },
+    "offset": [
+     0,
+     0,
+     0
+    ],
+    "tol": 1e-06,
+    "do_bnd": false,
+    "at": "face",
+    "index": 0,
+    "u": 0.5,
+    "v": 0.5
+   }
+  },
+  {
+   "name": "no_vertices_face_mid_off_bnd",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:24687",
+   "inputs": {
+    "op": "classify",
+    "brep": {
+     "kind": "vertices",
+     "points": []
+    },
+    "offset": [
+     0,
+     0,
+     0.001
+    ],
+    "tol": 1e-06,
+    "do_bnd": true,
+    "at": "face",
+    "index": 1,
+    "u": 0.37,
+    "v": 0.61
+   }
+  },
+  {
+   "name": "no_vertices_face_mid_off_region",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:24687",
+   "inputs": {
+    "op": "classify",
+    "brep": {
+     "kind": "vertices",
+     "points": []
+    },
+    "offset": [
+     0,
+     0,
+     0.001
+    ],
+    "tol": 1e-06,
+    "do_bnd": false,
+    "at": "face",
+    "index": 1,
+    "u": 0.37,
+    "v": 0.61
+   }
+  },
+  {
+   "name": "no_vertices_face_corner_bnd",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:24687",
+   "inputs": {
+    "op": "classify",
+    "brep": {
+     "kind": "vertices",
+     "points": []
+    },
+    "offset": [
+     0,
+     0,
+     0
+    ],
+    "tol": 1e-06,
+    "do_bnd": true,
+    "at": "face",
+    "index": 2,
+    "u": 0.0,
+    "v": 1.0
+   }
+  },
+  {
+   "name": "no_vertices_face_corner_region",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:24687",
+   "inputs": {
+    "op": "classify",
+    "brep": {
+     "kind": "vertices",
+     "points": []
+    },
+    "offset": [
+     0,
+     0,
+     0
+    ],
+    "tol": 1e-06,
+    "do_bnd": false,
+    "at": "face",
+    "index": 2,
+    "u": 0.0,
+    "v": 1.0
+   }
+  },
+  {
+   "name": "no_vertices_far_bnd",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:24687",
+   "inputs": {
+    "op": "classify",
+    "brep": {
+     "kind": "vertices",
+     "points": []
+    },
+    "offset": [
+     0,
+     0,
+     0
+    ],
+    "tol": 1e-06,
+    "do_bnd": true,
+    "at": "point",
+    "p": [
+     10000.0,
+     -10000.0,
+     10000.0
+    ]
+   }
+  },
+  {
+   "name": "no_vertices_far_region",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:24687",
+   "inputs": {
+    "op": "classify",
+    "brep": {
+     "kind": "vertices",
+     "points": []
+    },
+    "offset": [
+     0,
+     0,
+     0
+    ],
+    "tol": 1e-06,
+    "do_bnd": false,
+    "at": "point",
+    "p": [
+     10000.0,
+     -10000.0,
+     10000.0
+    ]
+   }
+  },
+  {
+   "name": "no_vertices_origin_bnd",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:24687",
+   "inputs": {
+    "op": "classify",
+    "brep": {
+     "kind": "vertices",
+     "points": []
+    },
+    "offset": [
+     0,
+     0,
+     0
+    ],
+    "tol": 1e-06,
+    "do_bnd": true,
+    "at": "point",
+    "p": [
+     0,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "no_vertices_origin_region",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:24687",
+   "inputs": {
+    "op": "classify",
+    "brep": {
+     "kind": "vertices",
+     "points": []
+    },
+    "offset": [
+     0,
+     0,
+     0
+    ],
+    "tol": 1e-06,
+    "do_bnd": false,
+    "at": "point",
+    "p": [
+     0,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "plane_square_vertex_off_tol0.0",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:24687",
+   "inputs": {
+    "op": "classify",
+    "brep": {
+     "kind": "file",
+     "file": "plane_square.smb",
+     "rebuild": true
+    },
+    "offset": [
+     1e-05,
+     1e-05,
+     1e-05
+    ],
+    "tol": 0.0,
+    "do_bnd": true,
+    "at": "vertex",
+    "index": 1
+   }
+  },
+  {
+   "name": "plane_square_vertex_off_tol1e-10",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:24687",
+   "inputs": {
+    "op": "classify",
+    "brep": {
+     "kind": "file",
+     "file": "plane_square.smb",
+     "rebuild": true
+    },
+    "offset": [
+     1e-05,
+     1e-05,
+     1e-05
+    ],
+    "tol": 1e-10,
+    "do_bnd": true,
+    "at": "vertex",
+    "index": 1
+   }
+  },
+  {
+   "name": "plane_square_vertex_off_tol0.01",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:24687",
+   "inputs": {
+    "op": "classify",
+    "brep": {
+     "kind": "file",
+     "file": "plane_square.smb",
+     "rebuild": true
+    },
+    "offset": [
+     1e-05,
+     1e-05,
+     1e-05
+    ],
+    "tol": 0.01,
+    "do_bnd": true,
+    "at": "vertex",
+    "index": 1
+   }
+  },
+  {
+   "name": "plane_square_vertex_off_tol1.0",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:24687",
+   "inputs": {
+    "op": "classify",
+    "brep": {
+     "kind": "file",
+     "file": "plane_square.smb",
+     "rebuild": true
+    },
+    "offset": [
+     1e-05,
+     1e-05,
+     1e-05
+    ],
+    "tol": 1.0,
+    "do_bnd": true,
+    "at": "vertex",
+    "index": 1
+   }
+  },
+  {
+   "name": "box_unit_inside_bnd",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:24687",
+   "inputs": {
+    "op": "classify",
+    "brep": {
+     "kind": "box",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "size": [
+      2,
+      3,
+      4
+     ]
+    },
+    "offset": [
+     0,
+     0,
+     0
+    ],
+    "tol": 1e-06,
+    "do_bnd": true,
+    "at": "point",
+    "p": [
+     1.0,
+     1.5,
+     2.0
+    ]
+   }
+  },
+  {
+   "name": "box_unit_inside_region",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:24687",
+   "inputs": {
+    "op": "classify",
+    "brep": {
+     "kind": "box",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "size": [
+      2,
+      3,
+      4
+     ]
+    },
+    "offset": [
+     0,
+     0,
+     0
+    ],
+    "tol": 1e-06,
+    "do_bnd": false,
+    "at": "point",
+    "p": [
+     1.0,
+     1.5,
+     2.0
+    ]
+   }
+  },
+  {
+   "name": "box_unit_inside_offcentre_bnd",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:24687",
+   "inputs": {
+    "op": "classify",
+    "brep": {
+     "kind": "box",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "size": [
+      2,
+      3,
+      4
+     ]
+    },
+    "offset": [
+     0,
+     0,
+     0
+    ],
+    "tol": 1e-06,
+    "do_bnd": true,
+    "at": "point",
+    "p": [
+     0.6,
+     2.13,
+     0.52
+    ]
+   }
+  },
+  {
+   "name": "box_unit_inside_offcentre_region",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:24687",
+   "inputs": {
+    "op": "classify",
+    "brep": {
+     "kind": "box",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "size": [
+      2,
+      3,
+      4
+     ]
+    },
+    "offset": [
+     0,
+     0,
+     0
+    ],
+    "tol": 1e-06,
+    "do_bnd": false,
+    "at": "point",
+    "p": [
+     0.6,
+     2.13,
+     0.52
+    ]
+   }
+  },
+  {
+   "name": "box_unit_outside_bnd",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:24687",
+   "inputs": {
+    "op": "classify",
+    "brep": {
+     "kind": "box",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "size": [
+      2,
+      3,
+      4
+     ]
+    },
+    "offset": [
+     0,
+     0,
+     0
+    ],
+    "tol": 1e-06,
+    "do_bnd": true,
+    "at": "point",
+    "p": [
+     -2,
+     1.5,
+     2.0
+    ]
+   }
+  },
+  {
+   "name": "box_unit_outside_region",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:24687",
+   "inputs": {
+    "op": "classify",
+    "brep": {
+     "kind": "box",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "size": [
+      2,
+      3,
+      4
+     ]
+    },
+    "offset": [
+     0,
+     0,
+     0
+    ],
+    "tol": 1e-06,
+    "do_bnd": false,
+    "at": "point",
+    "p": [
+     -2,
+     1.5,
+     2.0
+    ]
+   }
+  },
+  {
+   "name": "box_unit_outside_diag_bnd",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:24687",
+   "inputs": {
+    "op": "classify",
+    "brep": {
+     "kind": "box",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "size": [
+      2,
+      3,
+      4
+     ]
+    },
+    "offset": [
+     0,
+     0,
+     0
+    ],
+    "tol": 1e-06,
+    "do_bnd": true,
+    "at": "point",
+    "p": [
+     4,
+     6,
+     8
+    ]
+   }
+  },
+  {
+   "name": "box_unit_outside_diag_region",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:24687",
+   "inputs": {
+    "op": "classify",
+    "brep": {
+     "kind": "box",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "size": [
+      2,
+      3,
+      4
+     ]
+    },
+    "offset": [
+     0,
+     0,
+     0
+    ],
+    "tol": 1e-06,
+    "do_bnd": false,
+    "at": "point",
+    "p": [
+     4,
+     6,
+     8
+    ]
+   }
+  },
+  {
+   "name": "box_unit_on_face_bnd",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:24687",
+   "inputs": {
+    "op": "classify",
+    "brep": {
+     "kind": "box",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "size": [
+      2,
+      3,
+      4
+     ]
+    },
+    "offset": [
+     0,
+     0,
+     0
+    ],
+    "tol": 1e-06,
+    "do_bnd": true,
+    "at": "point",
+    "p": [
+     0,
+     1.5,
+     2.0
+    ]
+   }
+  },
+  {
+   "name": "box_unit_on_face_region",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:24687",
+   "inputs": {
+    "op": "classify",
+    "brep": {
+     "kind": "box",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "size": [
+      2,
+      3,
+      4
+     ]
+    },
+    "offset": [
+     0,
+     0,
+     0
+    ],
+    "tol": 1e-06,
+    "do_bnd": false,
+    "at": "point",
+    "p": [
+     0,
+     1.5,
+     2.0
+    ]
+   }
+  },
+  {
+   "name": "box_unit_near_face_in_bnd",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:24687",
+   "inputs": {
+    "op": "classify",
+    "brep": {
+     "kind": "box",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "size": [
+      2,
+      3,
+      4
+     ]
+    },
+    "offset": [
+     0.0002,
+     0,
+     0
+    ],
+    "tol": 1e-06,
+    "do_bnd": true,
+    "at": "point",
+    "p": [
+     0,
+     1.5,
+     2.0
+    ]
+   }
+  },
+  {
+   "name": "box_unit_near_face_in_region",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:24687",
+   "inputs": {
+    "op": "classify",
+    "brep": {
+     "kind": "box",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "size": [
+      2,
+      3,
+      4
+     ]
+    },
+    "offset": [
+     0.0002,
+     0,
+     0
+    ],
+    "tol": 1e-06,
+    "do_bnd": false,
+    "at": "point",
+    "p": [
+     0,
+     1.5,
+     2.0
+    ]
+   }
+  },
+  {
+   "name": "box_unit_on_edge_bnd",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:24687",
+   "inputs": {
+    "op": "classify",
+    "brep": {
+     "kind": "box",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "size": [
+      2,
+      3,
+      4
+     ]
+    },
+    "offset": [
+     0,
+     0,
+     0
+    ],
+    "tol": 1e-06,
+    "do_bnd": true,
+    "at": "point",
+    "p": [
+     0,
+     0,
+     2.0
+    ]
+   }
+  },
+  {
+   "name": "box_unit_on_edge_region",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:24687",
+   "inputs": {
+    "op": "classify",
+    "brep": {
+     "kind": "box",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "size": [
+      2,
+      3,
+      4
+     ]
+    },
+    "offset": [
+     0,
+     0,
+     0
+    ],
+    "tol": 1e-06,
+    "do_bnd": false,
+    "at": "point",
+    "p": [
+     0,
+     0,
+     2.0
+    ]
+   }
+  },
+  {
+   "name": "box_unit_vertex0_bnd",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:24687",
+   "inputs": {
+    "op": "classify",
+    "brep": {
+     "kind": "box",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "size": [
+      2,
+      3,
+      4
+     ]
+    },
+    "offset": [
+     0,
+     0,
+     0
+    ],
+    "tol": 1e-06,
+    "do_bnd": true,
+    "at": "vertex",
+    "index": 0
+   }
+  },
+  {
+   "name": "box_unit_vertex0_region",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:24687",
+   "inputs": {
+    "op": "classify",
+    "brep": {
+     "kind": "box",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "size": [
+      2,
+      3,
+      4
+     ]
+    },
+    "offset": [
+     0,
+     0,
+     0
+    ],
+    "tol": 1e-06,
+    "do_bnd": false,
+    "at": "vertex",
+    "index": 0
+   }
+  },
+  {
+   "name": "box_unit_face_point_bnd",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:24687",
+   "inputs": {
+    "op": "classify",
+    "brep": {
+     "kind": "box",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "size": [
+      2,
+      3,
+      4
+     ]
+    },
+    "offset": [
+     0,
+     0,
+     0
+    ],
+    "tol": 1e-06,
+    "do_bnd": true,
+    "at": "face",
+    "index": 3,
+    "u": 0.25,
+    "v": 0.75
+   }
+  },
+  {
+   "name": "box_unit_face_point_region",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:24687",
+   "inputs": {
+    "op": "classify",
+    "brep": {
+     "kind": "box",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "size": [
+      2,
+      3,
+      4
+     ]
+    },
+    "offset": [
+     0,
+     0,
+     0
+    ],
+    "tol": 1e-06,
+    "do_bnd": false,
+    "at": "face",
+    "index": 3,
+    "u": 0.25,
+    "v": 0.75
+   }
+  },
+  {
+   "name": "box_moved_inside_bnd",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:24687",
+   "inputs": {
+    "op": "classify",
+    "brep": {
+     "kind": "box",
+     "origin": [
+      -5,
+      7,
+      1.5
+     ],
+     "size": [
+      0.5,
+      10,
+      2
+     ]
+    },
+    "offset": [
+     0,
+     0,
+     0
+    ],
+    "tol": 1e-06,
+    "do_bnd": true,
+    "at": "point",
+    "p": [
+     -4.75,
+     12.0,
+     2.5
+    ]
+   }
+  },
+  {
+   "name": "box_moved_inside_region",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:24687",
+   "inputs": {
+    "op": "classify",
+    "brep": {
+     "kind": "box",
+     "origin": [
+      -5,
+      7,
+      1.5
+     ],
+     "size": [
+      0.5,
+      10,
+      2
+     ]
+    },
+    "offset": [
+     0,
+     0,
+     0
+    ],
+    "tol": 1e-06,
+    "do_bnd": false,
+    "at": "point",
+    "p": [
+     -4.75,
+     12.0,
+     2.5
+    ]
+   }
+  },
+  {
+   "name": "box_moved_inside_offcentre_bnd",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:24687",
+   "inputs": {
+    "op": "classify",
+    "brep": {
+     "kind": "box",
+     "origin": [
+      -5,
+      7,
+      1.5
+     ],
+     "size": [
+      0.5,
+      10,
+      2
+     ]
+    },
+    "offset": [
+     0,
+     0,
+     0
+    ],
+    "tol": 1e-06,
+    "do_bnd": true,
+    "at": "point",
+    "p": [
+     -4.85,
+     14.1,
+     1.76
+    ]
+   }
+  },
+  {
+   "name": "box_moved_inside_offcentre_region",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:24687",
+   "inputs": {
+    "op": "classify",
+    "brep": {
+     "kind": "box",
+     "origin": [
+      -5,
+      7,
+      1.5
+     ],
+     "size": [
+      0.5,
+      10,
+      2
+     ]
+    },
+    "offset": [
+     0,
+     0,
+     0
+    ],
+    "tol": 1e-06,
+    "do_bnd": false,
+    "at": "point",
+    "p": [
+     -4.85,
+     14.1,
+     1.76
+    ]
+   }
+  },
+  {
+   "name": "box_moved_outside_bnd",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:24687",
+   "inputs": {
+    "op": "classify",
+    "brep": {
+     "kind": "box",
+     "origin": [
+      -5,
+      7,
+      1.5
+     ],
+     "size": [
+      0.5,
+      10,
+      2
+     ]
+    },
+    "offset": [
+     0,
+     0,
+     0
+    ],
+    "tol": 1e-06,
+    "do_bnd": true,
+    "at": "point",
+    "p": [
+     -5.5,
+     12.0,
+     2.5
+    ]
+   }
+  },
+  {
+   "name": "box_moved_outside_region",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:24687",
+   "inputs": {
+    "op": "classify",
+    "brep": {
+     "kind": "box",
+     "origin": [
+      -5,
+      7,
+      1.5
+     ],
+     "size": [
+      0.5,
+      10,
+      2
+     ]
+    },
+    "offset": [
+     0,
+     0,
+     0
+    ],
+    "tol": 1e-06,
+    "do_bnd": false,
+    "at": "point",
+    "p": [
+     -5.5,
+     12.0,
+     2.5
+    ]
+   }
+  },
+  {
+   "name": "box_moved_outside_diag_bnd",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:24687",
+   "inputs": {
+    "op": "classify",
+    "brep": {
+     "kind": "box",
+     "origin": [
+      -5,
+      7,
+      1.5
+     ],
+     "size": [
+      0.5,
+      10,
+      2
+     ]
+    },
+    "offset": [
+     0,
+     0,
+     0
+    ],
+    "tol": 1e-06,
+    "do_bnd": true,
+    "at": "point",
+    "p": [
+     -4.0,
+     27,
+     5.5
+    ]
+   }
+  },
+  {
+   "name": "box_moved_outside_diag_region",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:24687",
+   "inputs": {
+    "op": "classify",
+    "brep": {
+     "kind": "box",
+     "origin": [
+      -5,
+      7,
+      1.5
+     ],
+     "size": [
+      0.5,
+      10,
+      2
+     ]
+    },
+    "offset": [
+     0,
+     0,
+     0
+    ],
+    "tol": 1e-06,
+    "do_bnd": false,
+    "at": "point",
+    "p": [
+     -4.0,
+     27,
+     5.5
+    ]
+   }
+  },
+  {
+   "name": "box_moved_on_face_bnd",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:24687",
+   "inputs": {
+    "op": "classify",
+    "brep": {
+     "kind": "box",
+     "origin": [
+      -5,
+      7,
+      1.5
+     ],
+     "size": [
+      0.5,
+      10,
+      2
+     ]
+    },
+    "offset": [
+     0,
+     0,
+     0
+    ],
+    "tol": 1e-06,
+    "do_bnd": true,
+    "at": "point",
+    "p": [
+     -5,
+     12.0,
+     2.5
+    ]
+   }
+  },
+  {
+   "name": "box_moved_on_face_region",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:24687",
+   "inputs": {
+    "op": "classify",
+    "brep": {
+     "kind": "box",
+     "origin": [
+      -5,
+      7,
+      1.5
+     ],
+     "size": [
+      0.5,
+      10,
+      2
+     ]
+    },
+    "offset": [
+     0,
+     0,
+     0
+    ],
+    "tol": 1e-06,
+    "do_bnd": false,
+    "at": "point",
+    "p": [
+     -5,
+     12.0,
+     2.5
+    ]
+   }
+  },
+  {
+   "name": "box_moved_near_face_in_bnd",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:24687",
+   "inputs": {
+    "op": "classify",
+    "brep": {
+     "kind": "box",
+     "origin": [
+      -5,
+      7,
+      1.5
+     ],
+     "size": [
+      0.5,
+      10,
+      2
+     ]
+    },
+    "offset": [
+     5e-05,
+     0,
+     0
+    ],
+    "tol": 1e-06,
+    "do_bnd": true,
+    "at": "point",
+    "p": [
+     -5,
+     12.0,
+     2.5
+    ]
+   }
+  },
+  {
+   "name": "box_moved_near_face_in_region",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:24687",
+   "inputs": {
+    "op": "classify",
+    "brep": {
+     "kind": "box",
+     "origin": [
+      -5,
+      7,
+      1.5
+     ],
+     "size": [
+      0.5,
+      10,
+      2
+     ]
+    },
+    "offset": [
+     5e-05,
+     0,
+     0
+    ],
+    "tol": 1e-06,
+    "do_bnd": false,
+    "at": "point",
+    "p": [
+     -5,
+     12.0,
+     2.5
+    ]
+   }
+  },
+  {
+   "name": "box_moved_on_edge_bnd",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:24687",
+   "inputs": {
+    "op": "classify",
+    "brep": {
+     "kind": "box",
+     "origin": [
+      -5,
+      7,
+      1.5
+     ],
+     "size": [
+      0.5,
+      10,
+      2
+     ]
+    },
+    "offset": [
+     0,
+     0,
+     0
+    ],
+    "tol": 1e-06,
+    "do_bnd": true,
+    "at": "point",
+    "p": [
+     -5,
+     7,
+     2.5
+    ]
+   }
+  },
+  {
+   "name": "box_moved_on_edge_region",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:24687",
+   "inputs": {
+    "op": "classify",
+    "brep": {
+     "kind": "box",
+     "origin": [
+      -5,
+      7,
+      1.5
+     ],
+     "size": [
+      0.5,
+      10,
+      2
+     ]
+    },
+    "offset": [
+     0,
+     0,
+     0
+    ],
+    "tol": 1e-06,
+    "do_bnd": false,
+    "at": "point",
+    "p": [
+     -5,
+     7,
+     2.5
+    ]
+   }
+  },
+  {
+   "name": "box_moved_vertex0_bnd",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:24687",
+   "inputs": {
+    "op": "classify",
+    "brep": {
+     "kind": "box",
+     "origin": [
+      -5,
+      7,
+      1.5
+     ],
+     "size": [
+      0.5,
+      10,
+      2
+     ]
+    },
+    "offset": [
+     0,
+     0,
+     0
+    ],
+    "tol": 1e-06,
+    "do_bnd": true,
+    "at": "vertex",
+    "index": 0
+   }
+  },
+  {
+   "name": "box_moved_vertex0_region",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:24687",
+   "inputs": {
+    "op": "classify",
+    "brep": {
+     "kind": "box",
+     "origin": [
+      -5,
+      7,
+      1.5
+     ],
+     "size": [
+      0.5,
+      10,
+      2
+     ]
+    },
+    "offset": [
+     0,
+     0,
+     0
+    ],
+    "tol": 1e-06,
+    "do_bnd": false,
+    "at": "vertex",
+    "index": 0
+   }
+  },
+  {
+   "name": "box_moved_face_point_bnd",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:24687",
+   "inputs": {
+    "op": "classify",
+    "brep": {
+     "kind": "box",
+     "origin": [
+      -5,
+      7,
+      1.5
+     ],
+     "size": [
+      0.5,
+      10,
+      2
+     ]
+    },
+    "offset": [
+     0,
+     0,
+     0
+    ],
+    "tol": 1e-06,
+    "do_bnd": true,
+    "at": "face",
+    "index": 3,
+    "u": 0.25,
+    "v": 0.75
+   }
+  },
+  {
+   "name": "box_moved_face_point_region",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:24687",
+   "inputs": {
+    "op": "classify",
+    "brep": {
+     "kind": "box",
+     "origin": [
+      -5,
+      7,
+      1.5
+     ],
+     "size": [
+      0.5,
+      10,
+      2
+     ]
+    },
+    "offset": [
+     0,
+     0,
+     0
+    ],
+    "tol": 1e-06,
+    "do_bnd": false,
+    "at": "face",
+    "index": 3,
+    "u": 0.25,
+    "v": 0.75
+   }
+  },
+  {
+   "name": "box_tiny_inside_bnd",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:24687",
+   "inputs": {
+    "op": "classify",
+    "brep": {
+     "kind": "box",
+     "origin": [
+      1,
+      1,
+      1
+     ],
+     "size": [
+      0.001,
+      0.002,
+      0.003
+     ]
+    },
+    "offset": [
+     0,
+     0,
+     0
+    ],
+    "tol": 1e-06,
+    "do_bnd": true,
+    "at": "point",
+    "p": [
+     1.0005,
+     1.001,
+     1.0015
+    ]
+   }
+  },
+  {
+   "name": "box_tiny_inside_region",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:24687",
+   "inputs": {
+    "op": "classify",
+    "brep": {
+     "kind": "box",
+     "origin": [
+      1,
+      1,
+      1
+     ],
+     "size": [
+      0.001,
+      0.002,
+      0.003
+     ]
+    },
+    "offset": [
+     0,
+     0,
+     0
+    ],
+    "tol": 1e-06,
+    "do_bnd": false,
+    "at": "point",
+    "p": [
+     1.0005,
+     1.001,
+     1.0015
+    ]
+   }
+  },
+  {
+   "name": "box_tiny_inside_offcentre_bnd",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:24687",
+   "inputs": {
+    "op": "classify",
+    "brep": {
+     "kind": "box",
+     "origin": [
+      1,
+      1,
+      1
+     ],
+     "size": [
+      0.001,
+      0.002,
+      0.003
+     ]
+    },
+    "offset": [
+     0,
+     0,
+     0
+    ],
+    "tol": 1e-06,
+    "do_bnd": true,
+    "at": "point",
+    "p": [
+     1.0003,
+     1.00142,
+     1.00039
+    ]
+   }
+  },
+  {
+   "name": "box_tiny_inside_offcentre_region",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:24687",
+   "inputs": {
+    "op": "classify",
+    "brep": {
+     "kind": "box",
+     "origin": [
+      1,
+      1,
+      1
+     ],
+     "size": [
+      0.001,
+      0.002,
+      0.003
+     ]
+    },
+    "offset": [
+     0,
+     0,
+     0
+    ],
+    "tol": 1e-06,
+    "do_bnd": false,
+    "at": "point",
+    "p": [
+     1.0003,
+     1.00142,
+     1.00039
+    ]
+   }
+  },
+  {
+   "name": "box_tiny_outside_bnd",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:24687",
+   "inputs": {
+    "op": "classify",
+    "brep": {
+     "kind": "box",
+     "origin": [
+      1,
+      1,
+      1
+     ],
+     "size": [
+      0.001,
+      0.002,
+      0.003
+     ]
+    },
+    "offset": [
+     0,
+     0,
+     0
+    ],
+    "tol": 1e-06,
+    "do_bnd": true,
+    "at": "point",
+    "p": [
+     0.999,
+     1.001,
+     1.0015
+    ]
+   }
+  },
+  {
+   "name": "box_tiny_outside_region",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:24687",
+   "inputs": {
+    "op": "classify",
+    "brep": {
+     "kind": "box",
+     "origin": [
+      1,
+      1,
+      1
+     ],
+     "size": [
+      0.001,
+      0.002,
+      0.003
+     ]
+    },
+    "offset": [
+     0,
+     0,
+     0
+    ],
+    "tol": 1e-06,
+    "do_bnd": false,
+    "at": "point",
+    "p": [
+     0.999,
+     1.001,
+     1.0015
+    ]
+   }
+  },
+  {
+   "name": "box_tiny_outside_diag_bnd",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:24687",
+   "inputs": {
+    "op": "classify",
+    "brep": {
+     "kind": "box",
+     "origin": [
+      1,
+      1,
+      1
+     ],
+     "size": [
+      0.001,
+      0.002,
+      0.003
+     ]
+    },
+    "offset": [
+     0,
+     0,
+     0
+    ],
+    "tol": 1e-06,
+    "do_bnd": true,
+    "at": "point",
+    "p": [
+     1.002,
+     1.004,
+     1.006
+    ]
+   }
+  },
+  {
+   "name": "box_tiny_outside_diag_region",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:24687",
+   "inputs": {
+    "op": "classify",
+    "brep": {
+     "kind": "box",
+     "origin": [
+      1,
+      1,
+      1
+     ],
+     "size": [
+      0.001,
+      0.002,
+      0.003
+     ]
+    },
+    "offset": [
+     0,
+     0,
+     0
+    ],
+    "tol": 1e-06,
+    "do_bnd": false,
+    "at": "point",
+    "p": [
+     1.002,
+     1.004,
+     1.006
+    ]
+   }
+  },
+  {
+   "name": "box_tiny_on_face_bnd",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:24687",
+   "inputs": {
+    "op": "classify",
+    "brep": {
+     "kind": "box",
+     "origin": [
+      1,
+      1,
+      1
+     ],
+     "size": [
+      0.001,
+      0.002,
+      0.003
+     ]
+    },
+    "offset": [
+     0,
+     0,
+     0
+    ],
+    "tol": 1e-06,
+    "do_bnd": true,
+    "at": "point",
+    "p": [
+     1,
+     1.001,
+     1.0015
+    ]
+   }
+  },
+  {
+   "name": "box_tiny_on_face_region",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:24687",
+   "inputs": {
+    "op": "classify",
+    "brep": {
+     "kind": "box",
+     "origin": [
+      1,
+      1,
+      1
+     ],
+     "size": [
+      0.001,
+      0.002,
+      0.003
+     ]
+    },
+    "offset": [
+     0,
+     0,
+     0
+    ],
+    "tol": 1e-06,
+    "do_bnd": false,
+    "at": "point",
+    "p": [
+     1,
+     1.001,
+     1.0015
+    ]
+   }
+  },
+  {
+   "name": "box_tiny_near_face_in_bnd",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:24687",
+   "inputs": {
+    "op": "classify",
+    "brep": {
+     "kind": "box",
+     "origin": [
+      1,
+      1,
+      1
+     ],
+     "size": [
+      0.001,
+      0.002,
+      0.003
+     ]
+    },
+    "offset": [
+     1.0000000000000001e-07,
+     0,
+     0
+    ],
+    "tol": 1e-06,
+    "do_bnd": true,
+    "at": "point",
+    "p": [
+     1,
+     1.001,
+     1.0015
+    ]
+   }
+  },
+  {
+   "name": "box_tiny_near_face_in_region",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:24687",
+   "inputs": {
+    "op": "classify",
+    "brep": {
+     "kind": "box",
+     "origin": [
+      1,
+      1,
+      1
+     ],
+     "size": [
+      0.001,
+      0.002,
+      0.003
+     ]
+    },
+    "offset": [
+     1.0000000000000001e-07,
+     0,
+     0
+    ],
+    "tol": 1e-06,
+    "do_bnd": false,
+    "at": "point",
+    "p": [
+     1,
+     1.001,
+     1.0015
+    ]
+   }
+  },
+  {
+   "name": "box_tiny_on_edge_bnd",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:24687",
+   "inputs": {
+    "op": "classify",
+    "brep": {
+     "kind": "box",
+     "origin": [
+      1,
+      1,
+      1
+     ],
+     "size": [
+      0.001,
+      0.002,
+      0.003
+     ]
+    },
+    "offset": [
+     0,
+     0,
+     0
+    ],
+    "tol": 1e-06,
+    "do_bnd": true,
+    "at": "point",
+    "p": [
+     1,
+     1,
+     1.0015
+    ]
+   }
+  },
+  {
+   "name": "box_tiny_on_edge_region",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:24687",
+   "inputs": {
+    "op": "classify",
+    "brep": {
+     "kind": "box",
+     "origin": [
+      1,
+      1,
+      1
+     ],
+     "size": [
+      0.001,
+      0.002,
+      0.003
+     ]
+    },
+    "offset": [
+     0,
+     0,
+     0
+    ],
+    "tol": 1e-06,
+    "do_bnd": false,
+    "at": "point",
+    "p": [
+     1,
+     1,
+     1.0015
+    ]
+   }
+  },
+  {
+   "name": "box_tiny_vertex0_bnd",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:24687",
+   "inputs": {
+    "op": "classify",
+    "brep": {
+     "kind": "box",
+     "origin": [
+      1,
+      1,
+      1
+     ],
+     "size": [
+      0.001,
+      0.002,
+      0.003
+     ]
+    },
+    "offset": [
+     0,
+     0,
+     0
+    ],
+    "tol": 1e-06,
+    "do_bnd": true,
+    "at": "vertex",
+    "index": 0
+   }
+  },
+  {
+   "name": "box_tiny_vertex0_region",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:24687",
+   "inputs": {
+    "op": "classify",
+    "brep": {
+     "kind": "box",
+     "origin": [
+      1,
+      1,
+      1
+     ],
+     "size": [
+      0.001,
+      0.002,
+      0.003
+     ]
+    },
+    "offset": [
+     0,
+     0,
+     0
+    ],
+    "tol": 1e-06,
+    "do_bnd": false,
+    "at": "vertex",
+    "index": 0
+   }
+  },
+  {
+   "name": "box_tiny_face_point_bnd",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:24687",
+   "inputs": {
+    "op": "classify",
+    "brep": {
+     "kind": "box",
+     "origin": [
+      1,
+      1,
+      1
+     ],
+     "size": [
+      0.001,
+      0.002,
+      0.003
+     ]
+    },
+    "offset": [
+     0,
+     0,
+     0
+    ],
+    "tol": 1e-06,
+    "do_bnd": true,
+    "at": "face",
+    "index": 3,
+    "u": 0.25,
+    "v": 0.75
+   }
+  },
+  {
+   "name": "box_tiny_face_point_region",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:24687",
+   "inputs": {
+    "op": "classify",
+    "brep": {
+     "kind": "box",
+     "origin": [
+      1,
+      1,
+      1
+     ],
+     "size": [
+      0.001,
+      0.002,
+      0.003
+     ]
+    },
+    "offset": [
+     0,
+     0,
+     0
+    ],
+    "tol": 1e-06,
+    "do_bnd": false,
+    "at": "face",
+    "index": 3,
+    "u": 0.25,
+    "v": 0.75
+   }
+  },
+  {
+   "name": "box_large_inside_bnd",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:24687",
+   "inputs": {
+    "op": "classify",
+    "brep": {
+     "kind": "box",
+     "origin": [
+      -1000.0,
+      -1000.0,
+      -1000.0
+     ],
+     "size": [
+      5000.0,
+      4000.0,
+      3000.0
+     ]
+    },
+    "offset": [
+     0,
+     0,
+     0
+    ],
+    "tol": 1e-06,
+    "do_bnd": true,
+    "at": "point",
+    "p": [
+     1500.0,
+     1000.0,
+     500.0
+    ]
+   }
+  },
+  {
+   "name": "box_large_inside_region",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:24687",
+   "inputs": {
+    "op": "classify",
+    "brep": {
+     "kind": "box",
+     "origin": [
+      -1000.0,
+      -1000.0,
+      -1000.0
+     ],
+     "size": [
+      5000.0,
+      4000.0,
+      3000.0
+     ]
+    },
+    "offset": [
+     0,
+     0,
+     0
+    ],
+    "tol": 1e-06,
+    "do_bnd": false,
+    "at": "point",
+    "p": [
+     1500.0,
+     1000.0,
+     500.0
+    ]
+   }
+  },
+  {
+   "name": "box_large_inside_offcentre_bnd",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:24687",
+   "inputs": {
+    "op": "classify",
+    "brep": {
+     "kind": "box",
+     "origin": [
+      -1000.0,
+      -1000.0,
+      -1000.0
+     ],
+     "size": [
+      5000.0,
+      4000.0,
+      3000.0
+     ]
+    },
+    "offset": [
+     0,
+     0,
+     0
+    ],
+    "tol": 1e-06,
+    "do_bnd": true,
+    "at": "point",
+    "p": [
+     500.0,
+     1840.0,
+     -610.0
+    ]
+   }
+  },
+  {
+   "name": "box_large_inside_offcentre_region",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:24687",
+   "inputs": {
+    "op": "classify",
+    "brep": {
+     "kind": "box",
+     "origin": [
+      -1000.0,
+      -1000.0,
+      -1000.0
+     ],
+     "size": [
+      5000.0,
+      4000.0,
+      3000.0
+     ]
+    },
+    "offset": [
+     0,
+     0,
+     0
+    ],
+    "tol": 1e-06,
+    "do_bnd": false,
+    "at": "point",
+    "p": [
+     500.0,
+     1840.0,
+     -610.0
+    ]
+   }
+  },
+  {
+   "name": "box_large_outside_bnd",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:24687",
+   "inputs": {
+    "op": "classify",
+    "brep": {
+     "kind": "box",
+     "origin": [
+      -1000.0,
+      -1000.0,
+      -1000.0
+     ],
+     "size": [
+      5000.0,
+      4000.0,
+      3000.0
+     ]
+    },
+    "offset": [
+     0,
+     0,
+     0
+    ],
+    "tol": 1e-06,
+    "do_bnd": true,
+    "at": "point",
+    "p": [
+     -6000.0,
+     1000.0,
+     500.0
+    ]
+   }
+  },
+  {
+   "name": "box_large_outside_region",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:24687",
+   "inputs": {
+    "op": "classify",
+    "brep": {
+     "kind": "box",
+     "origin": [
+      -1000.0,
+      -1000.0,
+      -1000.0
+     ],
+     "size": [
+      5000.0,
+      4000.0,
+      3000.0
+     ]
+    },
+    "offset": [
+     0,
+     0,
+     0
+    ],
+    "tol": 1e-06,
+    "do_bnd": false,
+    "at": "point",
+    "p": [
+     -6000.0,
+     1000.0,
+     500.0
+    ]
+   }
+  },
+  {
+   "name": "box_large_outside_diag_bnd",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:24687",
+   "inputs": {
+    "op": "classify",
+    "brep": {
+     "kind": "box",
+     "origin": [
+      -1000.0,
+      -1000.0,
+      -1000.0
+     ],
+     "size": [
+      5000.0,
+      4000.0,
+      3000.0
+     ]
+    },
+    "offset": [
+     0,
+     0,
+     0
+    ],
+    "tol": 1e-06,
+    "do_bnd": true,
+    "at": "point",
+    "p": [
+     9000.0,
+     7000.0,
+     5000.0
+    ]
+   }
+  },
+  {
+   "name": "box_large_outside_diag_region",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:24687",
+   "inputs": {
+    "op": "classify",
+    "brep": {
+     "kind": "box",
+     "origin": [
+      -1000.0,
+      -1000.0,
+      -1000.0
+     ],
+     "size": [
+      5000.0,
+      4000.0,
+      3000.0
+     ]
+    },
+    "offset": [
+     0,
+     0,
+     0
+    ],
+    "tol": 1e-06,
+    "do_bnd": false,
+    "at": "point",
+    "p": [
+     9000.0,
+     7000.0,
+     5000.0
+    ]
+   }
+  },
+  {
+   "name": "box_large_on_face_bnd",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:24687",
+   "inputs": {
+    "op": "classify",
+    "brep": {
+     "kind": "box",
+     "origin": [
+      -1000.0,
+      -1000.0,
+      -1000.0
+     ],
+     "size": [
+      5000.0,
+      4000.0,
+      3000.0
+     ]
+    },
+    "offset": [
+     0,
+     0,
+     0
+    ],
+    "tol": 1e-06,
+    "do_bnd": true,
+    "at": "point",
+    "p": [
+     -1000.0,
+     1000.0,
+     500.0
+    ]
+   }
+  },
+  {
+   "name": "box_large_on_face_region",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:24687",
+   "inputs": {
+    "op": "classify",
+    "brep": {
+     "kind": "box",
+     "origin": [
+      -1000.0,
+      -1000.0,
+      -1000.0
+     ],
+     "size": [
+      5000.0,
+      4000.0,
+      3000.0
+     ]
+    },
+    "offset": [
+     0,
+     0,
+     0
+    ],
+    "tol": 1e-06,
+    "do_bnd": false,
+    "at": "point",
+    "p": [
+     -1000.0,
+     1000.0,
+     500.0
+    ]
+   }
+  },
+  {
+   "name": "box_large_near_face_in_bnd",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:24687",
+   "inputs": {
+    "op": "classify",
+    "brep": {
+     "kind": "box",
+     "origin": [
+      -1000.0,
+      -1000.0,
+      -1000.0
+     ],
+     "size": [
+      5000.0,
+      4000.0,
+      3000.0
+     ]
+    },
+    "offset": [
+     0.5,
+     0,
+     0
+    ],
+    "tol": 1e-06,
+    "do_bnd": true,
+    "at": "point",
+    "p": [
+     -1000.0,
+     1000.0,
+     500.0
+    ]
+   }
+  },
+  {
+   "name": "box_large_near_face_in_region",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:24687",
+   "inputs": {
+    "op": "classify",
+    "brep": {
+     "kind": "box",
+     "origin": [
+      -1000.0,
+      -1000.0,
+      -1000.0
+     ],
+     "size": [
+      5000.0,
+      4000.0,
+      3000.0
+     ]
+    },
+    "offset": [
+     0.5,
+     0,
+     0
+    ],
+    "tol": 1e-06,
+    "do_bnd": false,
+    "at": "point",
+    "p": [
+     -1000.0,
+     1000.0,
+     500.0
+    ]
+   }
+  },
+  {
+   "name": "box_large_on_edge_bnd",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:24687",
+   "inputs": {
+    "op": "classify",
+    "brep": {
+     "kind": "box",
+     "origin": [
+      -1000.0,
+      -1000.0,
+      -1000.0
+     ],
+     "size": [
+      5000.0,
+      4000.0,
+      3000.0
+     ]
+    },
+    "offset": [
+     0,
+     0,
+     0
+    ],
+    "tol": 1e-06,
+    "do_bnd": true,
+    "at": "point",
+    "p": [
+     -1000.0,
+     -1000.0,
+     500.0
+    ]
+   }
+  },
+  {
+   "name": "box_large_on_edge_region",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:24687",
+   "inputs": {
+    "op": "classify",
+    "brep": {
+     "kind": "box",
+     "origin": [
+      -1000.0,
+      -1000.0,
+      -1000.0
+     ],
+     "size": [
+      5000.0,
+      4000.0,
+      3000.0
+     ]
+    },
+    "offset": [
+     0,
+     0,
+     0
+    ],
+    "tol": 1e-06,
+    "do_bnd": false,
+    "at": "point",
+    "p": [
+     -1000.0,
+     -1000.0,
+     500.0
+    ]
+   }
+  },
+  {
+   "name": "box_large_vertex0_bnd",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:24687",
+   "inputs": {
+    "op": "classify",
+    "brep": {
+     "kind": "box",
+     "origin": [
+      -1000.0,
+      -1000.0,
+      -1000.0
+     ],
+     "size": [
+      5000.0,
+      4000.0,
+      3000.0
+     ]
+    },
+    "offset": [
+     0,
+     0,
+     0
+    ],
+    "tol": 1e-06,
+    "do_bnd": true,
+    "at": "vertex",
+    "index": 0
+   }
+  },
+  {
+   "name": "box_large_vertex0_region",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:24687",
+   "inputs": {
+    "op": "classify",
+    "brep": {
+     "kind": "box",
+     "origin": [
+      -1000.0,
+      -1000.0,
+      -1000.0
+     ],
+     "size": [
+      5000.0,
+      4000.0,
+      3000.0
+     ]
+    },
+    "offset": [
+     0,
+     0,
+     0
+    ],
+    "tol": 1e-06,
+    "do_bnd": false,
+    "at": "vertex",
+    "index": 0
+   }
+  },
+  {
+   "name": "box_large_face_point_bnd",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:24687",
+   "inputs": {
+    "op": "classify",
+    "brep": {
+     "kind": "box",
+     "origin": [
+      -1000.0,
+      -1000.0,
+      -1000.0
+     ],
+     "size": [
+      5000.0,
+      4000.0,
+      3000.0
+     ]
+    },
+    "offset": [
+     0,
+     0,
+     0
+    ],
+    "tol": 1e-06,
+    "do_bnd": true,
+    "at": "face",
+    "index": 3,
+    "u": 0.25,
+    "v": 0.75
+   }
+  },
+  {
+   "name": "box_large_face_point_region",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:24687",
+   "inputs": {
+    "op": "classify",
+    "brep": {
+     "kind": "box",
+     "origin": [
+      -1000.0,
+      -1000.0,
+      -1000.0
+     ],
+     "size": [
+      5000.0,
+      4000.0,
+      3000.0
+     ]
+    },
+    "offset": [
+     0,
+     0,
+     0
+    ],
+    "tol": 1e-06,
+    "do_bnd": false,
+    "at": "face",
+    "index": 3,
+    "u": 0.25,
+    "v": 0.75
+   }
+  },
+  {
+   "name": "box_unit_tol_neg_bnd",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:24687",
+   "inputs": {
+    "op": "classify",
+    "brep": {
+     "kind": "box",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "size": [
+      2,
+      3,
+      4
+     ]
+    },
+    "offset": [
+     0,
+     0,
+     0
+    ],
+    "tol": -1.0,
+    "do_bnd": true,
+    "at": "vertex",
+    "index": 0
+   }
+  },
+  {
+   "name": "box_unit_tol_neg_region",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:24687",
+   "inputs": {
+    "op": "classify",
+    "brep": {
+     "kind": "box",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "size": [
+      2,
+      3,
+      4
+     ]
+    },
+    "offset": [
+     0,
+     0,
+     0
+    ],
+    "tol": -1.0,
+    "do_bnd": false,
+    "at": "vertex",
+    "index": 0
+   }
+  },
+  {
+   "name": "box_unit_tol_negtiny_bnd",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:24687",
+   "inputs": {
+    "op": "classify",
+    "brep": {
+     "kind": "box",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "size": [
+      2,
+      3,
+      4
+     ]
+    },
+    "offset": [
+     0,
+     0,
+     0
+    ],
+    "tol": -1e-12,
+    "do_bnd": true,
+    "at": "vertex",
+    "index": 0
+   }
+  },
+  {
+   "name": "box_unit_tol_negtiny_region",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:24687",
+   "inputs": {
+    "op": "classify",
+    "brep": {
+     "kind": "box",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "size": [
+      2,
+      3,
+      4
+     ]
+    },
+    "offset": [
+     0,
+     0,
+     0
+    ],
+    "tol": -1e-12,
+    "do_bnd": false,
+    "at": "vertex",
+    "index": 0
+   }
+  },
+  {
+   "name": "box_unit_tol_huge_bnd",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:24687",
+   "inputs": {
+    "op": "classify",
+    "brep": {
+     "kind": "box",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "size": [
+      2,
+      3,
+      4
+     ]
+    },
+    "offset": [
+     0,
+     0,
+     0
+    ],
+    "tol": 100.0,
+    "do_bnd": true,
+    "at": "vertex",
+    "index": 0
+   }
+  },
+  {
+   "name": "box_unit_tol_huge_region",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:24687",
+   "inputs": {
+    "op": "classify",
+    "brep": {
+     "kind": "box",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "size": [
+      2,
+      3,
+      4
+     ]
+    },
+    "offset": [
+     0,
+     0,
+     0
+    ],
+    "tol": 100.0,
+    "do_bnd": false,
+    "at": "vertex",
+    "index": 0
+   }
+  },
+  {
+   "name": "box_unit_point_far_bnd",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:24687",
+   "inputs": {
+    "op": "classify",
+    "brep": {
+     "kind": "box",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "size": [
+      2,
+      3,
+      4
+     ]
+    },
+    "offset": [
+     0,
+     0,
+     0
+    ],
+    "tol": 1e-06,
+    "do_bnd": true,
+    "at": "point",
+    "p": [
+     1e+100,
+     -1e+100,
+     3e+100
+    ]
+   }
+  },
+  {
+   "name": "box_unit_point_far_region",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:24687",
+   "inputs": {
+    "op": "classify",
+    "brep": {
+     "kind": "box",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "size": [
+      2,
+      3,
+      4
+     ]
+    },
+    "offset": [
+     0,
+     0,
+     0
+    ],
+    "tol": 1e-06,
+    "do_bnd": false,
+    "at": "point",
+    "p": [
+     1e+100,
+     -1e+100,
+     3e+100
+    ]
+   }
+  },
+  {
+   "name": "box_unit_point_tiny_bnd",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:24687",
+   "inputs": {
+    "op": "classify",
+    "brep": {
+     "kind": "box",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "size": [
+      2,
+      3,
+      4
+     ]
+    },
+    "offset": [
+     0,
+     0,
+     0
+    ],
+    "tol": 1e-06,
+    "do_bnd": true,
+    "at": "point",
+    "p": [
+     1e-200,
+     -1e-200,
+     3e-200
+    ]
+   }
+  },
+  {
+   "name": "box_unit_point_tiny_region",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:24687",
+   "inputs": {
+    "op": "classify",
+    "brep": {
+     "kind": "box",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "size": [
+      2,
+      3,
+      4
+     ]
+    },
+    "offset": [
+     0,
+     0,
+     0
+    ],
+    "tol": 1e-06,
+    "do_bnd": false,
+    "at": "point",
+    "p": [
+     1e-200,
+     -1e-200,
+     3e-200
+    ]
+   }
+  },
+  {
+   "name": "plane_square_tol_neg_bnd",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:24687",
+   "inputs": {
+    "op": "classify",
+    "brep": {
+     "kind": "file",
+     "file": "plane_square.smb",
+     "rebuild": true
+    },
+    "offset": [
+     0,
+     0,
+     0
+    ],
+    "tol": -1.0,
+    "do_bnd": true,
+    "at": "vertex",
+    "index": 0
+   }
+  },
+  {
+   "name": "plane_square_tol_neg_region",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:24687",
+   "inputs": {
+    "op": "classify",
+    "brep": {
+     "kind": "file",
+     "file": "plane_square.smb",
+     "rebuild": true
+    },
+    "offset": [
+     0,
+     0,
+     0
+    ],
+    "tol": -1.0,
+    "do_bnd": false,
+    "at": "vertex",
+    "index": 0
+   }
+  },
+  {
+   "name": "plane_square_tol_negtiny_bnd",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:24687",
+   "inputs": {
+    "op": "classify",
+    "brep": {
+     "kind": "file",
+     "file": "plane_square.smb",
+     "rebuild": true
+    },
+    "offset": [
+     0,
+     0,
+     0
+    ],
+    "tol": -1e-12,
+    "do_bnd": true,
+    "at": "vertex",
+    "index": 0
+   }
+  },
+  {
+   "name": "plane_square_tol_negtiny_region",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:24687",
+   "inputs": {
+    "op": "classify",
+    "brep": {
+     "kind": "file",
+     "file": "plane_square.smb",
+     "rebuild": true
+    },
+    "offset": [
+     0,
+     0,
+     0
+    ],
+    "tol": -1e-12,
+    "do_bnd": false,
+    "at": "vertex",
+    "index": 0
+   }
+  },
+  {
+   "name": "plane_square_tol_huge_bnd",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:24687",
+   "inputs": {
+    "op": "classify",
+    "brep": {
+     "kind": "file",
+     "file": "plane_square.smb",
+     "rebuild": true
+    },
+    "offset": [
+     0,
+     0,
+     0
+    ],
+    "tol": 100.0,
+    "do_bnd": true,
+    "at": "vertex",
+    "index": 0
+   }
+  },
+  {
+   "name": "plane_square_tol_huge_region",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:24687",
+   "inputs": {
+    "op": "classify",
+    "brep": {
+     "kind": "file",
+     "file": "plane_square.smb",
+     "rebuild": true
+    },
+    "offset": [
+     0,
+     0,
+     0
+    ],
+    "tol": 100.0,
+    "do_bnd": false,
+    "at": "vertex",
+    "index": 0
+   }
+  },
+  {
+   "name": "plane_square_point_far_bnd",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:24687",
+   "inputs": {
+    "op": "classify",
+    "brep": {
+     "kind": "file",
+     "file": "plane_square.smb",
+     "rebuild": true
+    },
+    "offset": [
+     0,
+     0,
+     0
+    ],
+    "tol": 1e-06,
+    "do_bnd": true,
+    "at": "point",
+    "p": [
+     1e+100,
+     -1e+100,
+     3e+100
+    ]
+   }
+  },
+  {
+   "name": "plane_square_point_far_region",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:24687",
+   "inputs": {
+    "op": "classify",
+    "brep": {
+     "kind": "file",
+     "file": "plane_square.smb",
+     "rebuild": true
+    },
+    "offset": [
+     0,
+     0,
+     0
+    ],
+    "tol": 1e-06,
+    "do_bnd": false,
+    "at": "point",
+    "p": [
+     1e+100,
+     -1e+100,
+     3e+100
+    ]
+   }
+  },
+  {
+   "name": "plane_square_point_tiny_bnd",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:24687",
+   "inputs": {
+    "op": "classify",
+    "brep": {
+     "kind": "file",
+     "file": "plane_square.smb",
+     "rebuild": true
+    },
+    "offset": [
+     0,
+     0,
+     0
+    ],
+    "tol": 1e-06,
+    "do_bnd": true,
+    "at": "point",
+    "p": [
+     1e-200,
+     -1e-200,
+     3e-200
+    ]
+   }
+  },
+  {
+   "name": "plane_square_point_tiny_region",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:24687",
+   "inputs": {
+    "op": "classify",
+    "brep": {
+     "kind": "file",
+     "file": "plane_square.smb",
+     "rebuild": true
+    },
+    "offset": [
+     0,
+     0,
+     0
+    ],
+    "tol": 1e-06,
+    "do_bnd": false,
+    "at": "point",
+    "p": [
+     1e-200,
+     -1e-200,
+     3e-200
+    ]
+   }
+  },
+  {
+   "name": "points_tol_neg_bnd",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:24687",
+   "inputs": {
+    "op": "classify",
+    "brep": {
+     "kind": "points",
+     "vertices": [
+      [
+       0,
+       0,
+       0,
+       0.001
+      ],
+      [
+       1,
+       2,
+       3,
+       0.0
+      ]
+     ],
+     "lines": [
+      [
+       0,
+       0,
+       0,
+       1,
+       1,
+       1,
+       0.0001
+      ]
+     ]
+    },
+    "offset": [
+     0,
+     0,
+     0
+    ],
+    "tol": -1.0,
+    "do_bnd": true,
+    "at": "vertex",
+    "index": 0
+   }
+  },
+  {
+   "name": "points_tol_neg_region",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:24687",
+   "inputs": {
+    "op": "classify",
+    "brep": {
+     "kind": "points",
+     "vertices": [
+      [
+       0,
+       0,
+       0,
+       0.001
+      ],
+      [
+       1,
+       2,
+       3,
+       0.0
+      ]
+     ],
+     "lines": [
+      [
+       0,
+       0,
+       0,
+       1,
+       1,
+       1,
+       0.0001
+      ]
+     ]
+    },
+    "offset": [
+     0,
+     0,
+     0
+    ],
+    "tol": -1.0,
+    "do_bnd": false,
+    "at": "vertex",
+    "index": 0
+   }
+  },
+  {
+   "name": "points_tol_negtiny_bnd",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:24687",
+   "inputs": {
+    "op": "classify",
+    "brep": {
+     "kind": "points",
+     "vertices": [
+      [
+       0,
+       0,
+       0,
+       0.001
+      ],
+      [
+       1,
+       2,
+       3,
+       0.0
+      ]
+     ],
+     "lines": [
+      [
+       0,
+       0,
+       0,
+       1,
+       1,
+       1,
+       0.0001
+      ]
+     ]
+    },
+    "offset": [
+     0,
+     0,
+     0
+    ],
+    "tol": -1e-12,
+    "do_bnd": true,
+    "at": "vertex",
+    "index": 0
+   }
+  },
+  {
+   "name": "points_tol_negtiny_region",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:24687",
+   "inputs": {
+    "op": "classify",
+    "brep": {
+     "kind": "points",
+     "vertices": [
+      [
+       0,
+       0,
+       0,
+       0.001
+      ],
+      [
+       1,
+       2,
+       3,
+       0.0
+      ]
+     ],
+     "lines": [
+      [
+       0,
+       0,
+       0,
+       1,
+       1,
+       1,
+       0.0001
+      ]
+     ]
+    },
+    "offset": [
+     0,
+     0,
+     0
+    ],
+    "tol": -1e-12,
+    "do_bnd": false,
+    "at": "vertex",
+    "index": 0
+   }
+  },
+  {
+   "name": "points_tol_huge_bnd",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:24687",
+   "inputs": {
+    "op": "classify",
+    "brep": {
+     "kind": "points",
+     "vertices": [
+      [
+       0,
+       0,
+       0,
+       0.001
+      ],
+      [
+       1,
+       2,
+       3,
+       0.0
+      ]
+     ],
+     "lines": [
+      [
+       0,
+       0,
+       0,
+       1,
+       1,
+       1,
+       0.0001
+      ]
+     ]
+    },
+    "offset": [
+     0,
+     0,
+     0
+    ],
+    "tol": 100.0,
+    "do_bnd": true,
+    "at": "vertex",
+    "index": 0
+   }
+  },
+  {
+   "name": "points_tol_huge_region",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:24687",
+   "inputs": {
+    "op": "classify",
+    "brep": {
+     "kind": "points",
+     "vertices": [
+      [
+       0,
+       0,
+       0,
+       0.001
+      ],
+      [
+       1,
+       2,
+       3,
+       0.0
+      ]
+     ],
+     "lines": [
+      [
+       0,
+       0,
+       0,
+       1,
+       1,
+       1,
+       0.0001
+      ]
+     ]
+    },
+    "offset": [
+     0,
+     0,
+     0
+    ],
+    "tol": 100.0,
+    "do_bnd": false,
+    "at": "vertex",
+    "index": 0
+   }
+  },
+  {
+   "name": "points_point_far_bnd",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:24687",
+   "inputs": {
+    "op": "classify",
+    "brep": {
+     "kind": "points",
+     "vertices": [
+      [
+       0,
+       0,
+       0,
+       0.001
+      ],
+      [
+       1,
+       2,
+       3,
+       0.0
+      ]
+     ],
+     "lines": [
+      [
+       0,
+       0,
+       0,
+       1,
+       1,
+       1,
+       0.0001
+      ]
+     ]
+    },
+    "offset": [
+     0,
+     0,
+     0
+    ],
+    "tol": 1e-06,
+    "do_bnd": true,
+    "at": "point",
+    "p": [
+     1e+100,
+     -1e+100,
+     3e+100
+    ]
+   }
+  },
+  {
+   "name": "points_point_far_region",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:24687",
+   "inputs": {
+    "op": "classify",
+    "brep": {
+     "kind": "points",
+     "vertices": [
+      [
+       0,
+       0,
+       0,
+       0.001
+      ],
+      [
+       1,
+       2,
+       3,
+       0.0
+      ]
+     ],
+     "lines": [
+      [
+       0,
+       0,
+       0,
+       1,
+       1,
+       1,
+       0.0001
+      ]
+     ]
+    },
+    "offset": [
+     0,
+     0,
+     0
+    ],
+    "tol": 1e-06,
+    "do_bnd": false,
+    "at": "point",
+    "p": [
+     1e+100,
+     -1e+100,
+     3e+100
+    ]
+   }
+  },
+  {
+   "name": "points_point_tiny_bnd",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:24687",
+   "inputs": {
+    "op": "classify",
+    "brep": {
+     "kind": "points",
+     "vertices": [
+      [
+       0,
+       0,
+       0,
+       0.001
+      ],
+      [
+       1,
+       2,
+       3,
+       0.0
+      ]
+     ],
+     "lines": [
+      [
+       0,
+       0,
+       0,
+       1,
+       1,
+       1,
+       0.0001
+      ]
+     ]
+    },
+    "offset": [
+     0,
+     0,
+     0
+    ],
+    "tol": 1e-06,
+    "do_bnd": true,
+    "at": "point",
+    "p": [
+     1e-200,
+     -1e-200,
+     3e-200
+    ]
+   }
+  },
+  {
+   "name": "points_point_tiny_region",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:24687",
+   "inputs": {
+    "op": "classify",
+    "brep": {
+     "kind": "points",
+     "vertices": [
+      [
+       0,
+       0,
+       0,
+       0.001
+      ],
+      [
+       1,
+       2,
+       3,
+       0.0
+      ]
+     ],
+     "lines": [
+      [
+       0,
+       0,
+       0,
+       1,
+       1,
+       1,
+       0.0001
+      ]
+     ]
+    },
+    "offset": [
+     0,
+     0,
+     0
+    ],
+    "tol": 1e-06,
+    "do_bnd": false,
+    "at": "point",
+    "p": [
+     1e-200,
+     -1e-200,
+     3e-200
+    ]
+   }
+  }
+ ]
+}

@@ -1,0 +1,13 @@
+#### WR-562. `SmBSplineSurface::CreateIsoParametricCurve` over a domain of no length along the curve returns the whole untrimmed iso curve
+- **Severity:** Wrong result
+- **Area:** Surfaces and volumes
+- **Location:** `source/SMLib/src/SmBSplineSurface.cpp:1570`, `SmBSplineSurface::CreateIsoParametricCurve` (def. `:1456`): `rpNewIsoCurve->Trim(sTrimIvl)`, status ignored.
+- **What happens:** with an optional domain the iso curve is trimmed to that domain's interval along it. When that interval has no length (a sliver cell at a double knot, as the surface cache's iso boundary curves meet), `SmBSplineCurve::Trim` refuses it (`SM_ERR_INVALID_INPUT`, the ends are closer than `SM_EFF_ZERO`). The status is ignored, and the caller gets the iso curve over the whole surface instead of the point it is over that interval.
+- **Trigger:** `CreateIsoParametricCurve(SM_SP_U, u, ..., &domain)` with `domain`'s v-interval of zero length (or the same for V).
+- **How found:** the SolidCraft fork (tangency-labs/smlib 8088f5e). With the fork's status hygiene the refused `Trim` dropped the curve, and `SmSphere`'s override dereferenced the missing curve.
+- **Confirmed:** by the port's test below (the pinned behaviour: the whole curve).
+- **Fix:** tangency-labs/smlib@8088f5e: a trim interval shorter than `SM_EFF_ZERO` makes the iso curve a degenerate curve (`CreateDegenerateCurve`, dimension 3) at the curve's point at the interval's start. That is what the iso curve is over that interval, and what `SmSurfaceCache::GetIsoBoundaryCurves` expects of degenerate domains.
+- **Rust port:** behaves as upstream by default. `Kernel::fixes.iso_curve_sliver_domain_is_degenerate` ports the fork's change in `nurbs::b_spline_surface::p2::BSplineSurface::create_iso_parametric_curve`.
+- **Not ported:** the rest of 8088f5e is status hygiene (team-lead ruling of 2026-10-29). That covers the disjoint-interval `Intersect` sites in the curve solvers, `SER_DELETE` and `GetEnds`' uninitialised ends. One of those sites already fails upstream with `SER` (`SmCurve.cpp:8591`) and may deserve its own look if a case turns up.
+- **Tests:** `wr562_iso_curve_over_a_sliver_domain_is_degenerate_with_the_opt_in` in `crates/solidcore/src/nurbs/b_spline_surface/p2.rs`. On a bilinear surface, the iso curve at u = 0.25 over v in [0.5, 0.5] runs the whole of v by default, and is a degenerate curve at the surface point with the opt-in.
+- **Difftest:** no change on the default path.
