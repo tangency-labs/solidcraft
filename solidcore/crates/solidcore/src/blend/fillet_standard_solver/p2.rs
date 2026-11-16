@@ -3518,10 +3518,14 @@ impl super::p1::LinearCrossSectionFsg {
         // not built yet, and never built as the chord it is not
         if let Some(bead) = ball.bead {
             if !planes {
-                return Err(SolidError::invalid_input(
-                    OP_LINEAR_DEF,
-                    "a weld bead is built between planes only so far",
-                ));
+                return bead_on_curved_faces(
+                    k,
+                    approx_tol_3d,
+                    center_line,
+                    [&*rail1, &*rail2],
+                    bead.sagitta,
+                )
+                .map(Some);
             }
             return bead_between_planes(
                 k,
@@ -3842,6 +3846,169 @@ fn bead_between_planes(
     round.recertify(k, &surface)?;
     surface.set_exact_round(Some(round));
     Ok(Some(surface))
+}
+
+/// A weld bead on faces that are not both planes (#15129): at each station of the centre line
+/// the circular arc from rail 1's foot to rail 2's at the bead's sagitta, in the plane of the
+/// two feet and the centre (bulging towards the centre, away from the edge, for a positive
+/// sagitta), and through those arcs a rational net: u the centre line's parameter, v from
+/// rail 1 (0) to rail 2 (1) in the two rational quadratic halves of [`BeadArc::rows`]. The
+/// chord's length varies along the edge, so the arcs' weights do too: the rows are
+/// interpolated in homogeneous form (cubic in u) at the centre line's knots and three
+/// stations between each pair, doubled until the net holds the rails and the arcs' apexes
+/// between its stations within `tol`. The net is exact at its stations and fitted between
+/// them: a plain B-spline surface, not yet a definition with a certificate.
+///
+/// [`BeadArc::rows`]: crate::surface::procedural_blend::bead::BeadArc::rows
+///
+/// # Errors
+///
+/// Native invalid input where the arc would cut into a face at a station (a concave bead
+/// whose sagitta is past the bound at that station's wedge and chord); those of the
+/// evaluations, the arcs (feet that coincide, a centre on the chord) and the interpolation; a failure where the net does not hold the rails and apexes within `tol`
+/// after its refinements, or its rows do not share their knots.
+fn bead_on_curved_faces(
+    k: &Kernel,
+    tol: f64,
+    center_line: &BSplineCurve,
+    rails: [&BSplineCurve; 2],
+    sagitta: f64,
+) -> Result<Surface> {
+    use crate::nurbs::b_spline_curve::KnotType;
+    use crate::nurbs::b_spline_surface::p1::{BSplineSurfaceForm, CanonicalSurfaceData};
+    use crate::nurbs::crv_fit::p1::ParamMethod;
+    use crate::surface::procedural_blend::bead::BeadArc;
+    const OP: &str = "blend::fillet_standard_solver::p2::bead_on_curved_faces";
+    let [rail1, rail2] = rails;
+    // one station's arc
+    let arc_at = |u: f64| -> Result<BeadArc> {
+        let (a, b) = (rail1.evaluate_point(u)?, rail2.evaluate_point(u)?);
+        let convex = center_line.evaluate_point(u)? - (a + (b - a) * 0.5);
+        let arc = BeadArc::new(a, b, (b - a).cross(convex), convex, sagitta)?;
+        // the arc leaves each foot outside its face (the face's normal there runs from the
+        // foot to the centre): a concave bead past its bound at this station would cut in
+        let m = center_line.evaluate_point(u)?;
+        if arc.tangent(0.0).dot(m - a) < 0.0 || arc.tangent(arc.turn).dot(m - b) > 0.0 {
+            return Err(SolidError::invalid_input(
+                OP,
+                "a concave weld bead cuts into a face along the edge (its sagitta is past the bound there)",
+            ));
+        }
+        Ok(arc)
+    };
+    let (knots, _) = center_line.knots(None)?;
+    let mut between = 3_usize;
+    for _ in 0..5 {
+        // the stations: the knots and `between` stations in each span
+        let mut stations = Vec::new();
+        for pair in knots.windows(2) {
+            let &[lo, hi] = pair else { continue };
+            for i in 0..=between {
+                stations.push(lo + (hi - lo) * i as f64 / (between + 1) as f64);
+            }
+        }
+        if let Some(&last) = knots.last() {
+            stations.push(last);
+        }
+        // the five rows in homogeneous form, and the corners' weight
+        let mut rows: [Vec<Point3>; 5] = Default::default();
+        let mut weight = Vec::new();
+        for &u in &stations {
+            let (points, w) = arc_at(u)?.rows();
+            for ((row, p), w) in rows.iter_mut().zip(points).zip(w) {
+                row.push(Point3::new(p.x * w, p.y * w, p.z * w));
+            }
+            weight.push(Point3::new(w[1], 0.0, 0.0));
+        }
+        let through = |points: &[Point3]| {
+            BSplineCurve::create_interpolating_curve_with_params(
+                ParamMethod::ChordLength,
+                3,
+                3,
+                points,
+                &[],
+                None,
+                false,
+                Some(&stations),
+            )
+        };
+        let curves = [
+            through(&rows[0])?,
+            through(&rows[1])?,
+            through(&rows[2])?,
+            through(&rows[3])?,
+            through(&rows[4])?,
+        ];
+        let weights = through(&weight)?;
+        let (u_knots, u_mults) = curves[0].knots(None)?;
+        for c in curves.iter().chain([&weights]) {
+            if c.knots(None)? != (u_knots.clone(), u_mults.clone()) {
+                return Err(SolidError::blend_failed(
+                    OP,
+                    "the bead's rows do not share their knots",
+                ));
+            }
+        }
+        let count = curves[0].control_points()?.len();
+        let w_row = weights.control_points()?;
+        let mut points = Vec::with_capacity(count * 5);
+        let mut net_weights = Vec::with_capacity(count * 5);
+        for i in 0..count {
+            let w = w_row
+                .get(i)
+                .map(|c| c.x)
+                .filter(|w| *w > 0.0)
+                .ok_or_else(|| SolidError::blend_failed(OP, "a bead's weight is not positive"))?;
+            for (j, c) in curves.iter().enumerate() {
+                let p = c
+                    .control_points()?
+                    .get(i)
+                    .copied()
+                    .ok_or_else(|| SolidError::blend_missing(OP, "a row's control point"))?;
+                let corner = j == 1 || j == 3;
+                let by = if corner { w } else { 1.0 };
+                points.push(Point3::new(p.x / by, p.y / by, p.z / by));
+                net_weights.push(by);
+            }
+        }
+        let net = BSplineSurface::create_canonical(&CanonicalSurfaceData {
+            u_degree: 3,
+            v_degree: 2,
+            control_points: &points,
+            form: BSplineSurfaceForm::Unspecified,
+            u_multiplicities: &u_mults,
+            v_multiplicities: &[3, 2, 3],
+            u_knots: &u_knots,
+            v_knots: &[0.0, 0.5, 1.0],
+            knot_type: KnotType::Unspecified,
+            weights: Some(&net_weights),
+            uv_domain: None,
+        })?;
+        let surface = Surface::from(net);
+        // between the stations: the rails and the arcs' apexes
+        let mut worst = 0.0_f64;
+        for pair in stations.windows(2) {
+            let &[lo, hi] = pair else { continue };
+            let u = 0.5 * (lo + hi);
+            let arc = arc_at(u)?;
+            for (v, want) in [
+                (0.0, arc.point(0.0)),
+                (0.5, arc.point(0.5 * arc.turn)),
+                (1.0, arc.point(arc.turn)),
+            ] {
+                let got = surface.evaluate_point(k, Point2::new(u, v))?;
+                worst = worst.max(got.distance(want));
+            }
+        }
+        if worst <= tol {
+            return Ok(surface);
+        }
+        between = 2 * between + 1;
+    }
+    Err(SolidError::blend_failed(
+        OP,
+        "the bead's net does not hold its rails and arcs within the tolerance",
+    ))
 }
 
 const OP_LINEAR_DEF: &str =

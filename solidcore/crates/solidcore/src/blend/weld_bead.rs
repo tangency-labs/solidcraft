@@ -467,32 +467,29 @@ pub fn beads_apart_in_spans(
 /// The refusal of weld beads that meet at a vertex.
 const BEADS_MEET: &str = "weld beads that meet at a vertex are not built yet";
 
-/// The weld bead along `edges` of `target` as one body of its own, built by the generic
-/// blend's trace (#15129): the blend traces the edges and builds the bead's faces as it
-/// builds a chamfer's or a round's, on flat and curved faces alike, and instead of trimming
-/// `target`'s faces and merging the blend into it, closes those faces on `target`'s faces
-/// into a body apart ([`FilletSession::set_bodies_apart`]). Edges picked together make one
+/// The weld bead along `edges` of `target` as one body of its own, built on the foot blend
+/// (#15129, [`crate::blend::foot_blend`]): along each edge, at every station, each toe lies on
+/// its face at its leg's distance from the root, measured straight in the plane square to the
+/// edge (what a leg gauge measures), on flat and curved faces alike, with the bead's section
+/// (the chord, or the arc at the sagitta) between the toes. Edges picked together make one
 /// body (a lump per bead where they do not touch).
 ///
-/// `sizes` are one per edge (the chamfer's setbacks, the bead's toes), `sagitta` is the
-/// arc's height over the chord (`> 0` convex, `< 0` concave, `0` flat, the chamfer's own
-/// section), and the first distance of a size runs along the face in `along` where one of
-/// the edge's faces is. A convex bead overhanging its toe is built: nothing is trimmed.
+/// `sizes` are one per edge, as the two legs ([`ChamferSize::Distances`]: support 1's,
+/// support 2's), `sagitta` is the arc's height over the chord (`> 0` convex, `< 0` concave,
+/// `0` flat), and the first leg runs along the face in `along` where one of the edge's faces
+/// is. A convex bead overhanging its toe is built: nothing is trimmed.
 ///
 /// A weld never changes the part it lies on: `target`'s geometry and topology are left as
-/// they were whether the bead is built or refused (it is mutable for the blend's session,
-/// which here only reads it). Beads that meet at a vertex are refused before the blend
-/// starts, since its corners there are not built as bodies apart yet.
+/// they were whether the bead is built or refused (it is mutable for the edges' binormals,
+/// asked in 3D only, which builds nothing on it). Beads that meet at a vertex are refused,
+/// naming it, since their corners are not built yet.
 ///
 /// # Errors
 ///
-/// Native invalid input for no edge or sizes not one per edge; a failure naming the vertex
-/// ([`crate::error::Site::vertex`]) for two of `edges` that meet at one; those of the
-/// blend's preparation ([`FilletSession::prepare_chamfers_along`], a sagitta past its
-/// bound), of its trace and of the closing.
-///
-/// [`FilletSession::set_bodies_apart`]: crate::blend::fillet_executive::session::FilletSession::set_bodies_apart
-/// [`FilletSession::prepare_chamfers_along`]: crate::blend::fillet_executive::session::FilletSession::prepare_chamfers_along
+/// Native invalid input for no edge, sizes not one per edge, or a size that is not two legs;
+/// a failure naming the vertex ([`crate::error::Site::vertex`]) for two of `edges` that meet
+/// at one; those of the foot blend (a concave sagitta that would cut into a face at a
+/// station; a foot not found on its face's side) and of the closing.
 pub fn bead_body(
     k: &mut Kernel,
     target: &mut Brep,
@@ -501,7 +498,7 @@ pub fn bead_body(
     sagitta: f64,
     along: &[FaceId],
 ) -> Result<Brep> {
-    use crate::blend::fillet_executive::session::FilletSession;
+    use crate::blend::foot_blend::{close_bead_body, FootBlend, WELD_FIT_TOLERANCE};
     use crate::error::{Site, TargetVertex};
     if edges.is_empty() || sizes.len() != edges.len() {
         return Err(SolidError::invalid_input(
@@ -521,18 +518,40 @@ pub fn bead_body(
             }
         }
     }
-    let mut session = FilletSession::new(k, target)?;
-    session.set_bodies_apart(true);
-    if sagitta == 0.0 {
-        session.prepare_chamfers_along(k, edges, sizes, along)?;
-    } else {
-        session.prepare_beads_along(k, edges, sizes, sagitta, along)?;
+    let mut body = Brep::new_with_infinite_region()?;
+    body.set_editing_enabled(true);
+    for (&e, size) in edges.iter().zip(sizes) {
+        let ChamferSize::Distances(legs) = *size else {
+            return Err(SolidError::invalid_input(
+                OP,
+                "a weld bead's size is its two legs",
+            ));
+        };
+        let first = edge_faces(target, e)?
+            .into_iter()
+            .find(|f| along.contains(f));
+        let blend = FootBlend::of_edge(target, e, first)?;
+        blend.add_faces(k, target, &mut body, legs, sagitta, WELD_FIT_TOLERANCE)?;
     }
-    session.create_corners(k, None)?;
-    session.do_filleting(k, None)?;
-    session
-        .take_body_apart()
-        .ok_or_else(|| SolidError::blend_missing(OP, "the bead's body"))
+    close_bead_body(k, &mut body, WELD_FIT_TOLERANCE)?;
+    Ok(body)
+}
+
+/// The faces on `edge_id` of `target`, through its edge uses.
+///
+/// # Errors
+///
+/// Those of the edge uses.
+fn edge_faces(target: &Brep, edge_id: EdgeId) -> Result<Vec<FaceId>> {
+    let mut faces = Vec::new();
+    for eu in edge::edgeuses(target, edge_id, None, None)? {
+        if let Some(f) = crate::topology::edgeuse::p1::face(target, eu)? {
+            if !faces.contains(&f) {
+                faces.push(f);
+            }
+        }
+    }
+    Ok(faces)
 }
 
 /// Two unit vectors square to the unit `dir` and to each other, `u x v = dir`.

@@ -145,13 +145,19 @@ fn pick(k: &Kernel, b: &Brep, p: [f64; 3]) -> EdgeId {
 }
 
 fn volume(k: &Kernel, b: &mut Brep) -> f64 {
+    volume_to(k, b, 1e-9)
+}
+
+/// The volume of `b` to the relative accuracy `accuracy`: coarser for the fitted beads round
+/// tubes, whose integration at 1e-9 takes seconds each.
+fn volume_to(k: &Kernel, b: &mut Brep, accuracy: f64) -> f64 {
     let store = AttributeStore::new();
     let key_of = |_| ObjectKey(0);
     let attrs = PropertyAttributes {
         store: &store,
         key_of: &key_of,
     };
-    brep_volume(k, b, 1e-9, &attrs).unwrap()
+    brep_volume(k, b, accuracy, &attrs).unwrap()
 }
 
 /// The corner with an equal chamfer of `SETBACK` along its edge, and the volume it gained.
@@ -1359,10 +1365,10 @@ fn branch_on_main(r: f64, d: Vec3) -> [Tube; 2] {
     ]
 }
 
-/// Round a branch tube where it meets a main tube (a T-joint, diameter 20 on 40) the trace's
-/// bead body with the chamfer's section is a sound body of 3 faces (the bead face, a strip on
-/// each tube), of the volume the same chamfer adds to the tubes when it is blended into them
-/// (947.880 mm3), and the tubes' file is unchanged.
+/// Round a branch tube where it meets a main tube (a T-joint, diameter 20 on 40) the weld's
+/// flat bead with 4 mm legs is a sound body of 12 faces (4 segments: the bead face and a strip
+/// on each tube), of 526.83 mm3 (against 526.847 mm3 by independent slices of its true
+/// section times the step of its centroid along the joint), and the tubes' file is unchanged.
 #[test]
 fn a_bead_body_runs_round_a_tube_joint() {
     let mut k = kernel();
@@ -1372,20 +1378,10 @@ fn a_bead_body_runs_round_a_tube_joint() {
     let size = ChamferSize::Distances([4.0; 2]);
     let mut body = trace_bead_body(&mut k, &mut part, &joints, &[size], 0.0, &[]).unwrap();
     assert!(smb(&k, &part) == before, "the tubes changed");
-    assert_eq!(body.face_list().len(), 3);
+    assert_eq!(body.face_list().len(), 12);
     assert_sound(&mut k, &mut body, "the bead round the joint");
-    let got = volume(&k, &mut body);
-    // the chamfer blended into a copy of the tubes
-    let (mut blended, joints) = tubes(&mut k, &branch_on_main(10.0, Vec3::new(1.0, 0.0, 0.0)));
-    let plain = volume(&k, &mut blended);
-    {
-        let mut s = FilletSession::new(&mut k, &mut blended).unwrap();
-        s.prepare_chamfers_along(&k, &joints, &[size], &[]).unwrap();
-        s.create_corners(&k, None).unwrap();
-        s.do_filleting(&mut k, None).unwrap();
-    }
-    let want = volume(&k, &mut blended) - plain;
-    assert!(((got - want) / want).abs() <= 1e-6, "{got} against {want}");
+    let got = volume_to(&k, &mut body, 1e-5);
+    assert!((got - 526.83).abs() <= 0.05, "{got}");
 }
 
 /// Two branches whose joint lines cross: their beads meet at vertices, so they are refused,
@@ -1402,4 +1398,270 @@ fn beads_on_crossing_joint_lines_are_refused_and_leave_the_tubes() {
     let err = trace_bead_body(&mut k, &mut part, &joints, &sizes, 0.0, &[]).err().unwrap();
     assert!(err.site().is_some_and(|s| s.vertex.is_some()), "{err:?}");
     assert!(smb(&k, &part) == before, "the tubes changed");
+}
+
+/// Round the same T-joint a convex and a concave bead are sound bodies of 12 faces, the
+/// convex one larger and the concave one smaller than the chord's, and the tubes' file is
+/// unchanged. Each of the 4 bead faces' sections is the arc: along the joint, also between the
+/// net's stations, its middle stands the sagitta off the middle of the chord between its toes.
+#[test]
+fn a_convex_and_a_concave_bead_run_round_a_tube_joint() {
+    let size = ChamferSize::Distances([4.0; 2]);
+    let build = |k: &mut Kernel, h: f64| {
+        let (mut part, joints) = tubes(k, &branch_on_main(10.0, Vec3::new(1.0, 0.0, 0.0)));
+        let before = smb(k, &part);
+        let body = trace_bead_body(k, &mut part, &joints, &[size], h, &[]).unwrap();
+        assert!(smb(k, &part) == before, "h {h}: the tubes changed");
+        body
+    };
+    let mut k = kernel();
+    let mut flat = build(&mut k, 0.0);
+    let chord = volume_to(&k, &mut flat, 1e-5);
+    for h in [1.0_f64, -0.2] {
+        let mut body = build(&mut k, h);
+        assert_eq!(body.face_list().len(), 12, "h {h}");
+        assert_sound(&mut k, &mut body, "the bead round the joint");
+        let got = volume_to(&k, &mut body, 1e-5);
+        assert!((got - chord) * h > 0.0, "h {h}: {got} against the chord's {chord}");
+        // the bead face: the one on neither tube
+        let on_tube = |p: Point3| {
+            branch_on_main(10.0, Vec3::new(1.0, 0.0, 0.0))
+                .iter()
+                .any(|t| t.off(p) < 1e-3)
+        };
+        let mut checked = 0;
+        for &f in body.face_list() {
+            let surface = solidcore::topology::face::p2::surface(&body, f)
+                .unwrap()
+                .unwrap();
+            let dom = solidcore::topology::face::p2::uv_domain(&body, f).unwrap();
+            let raw = |x: f64, y: f64| {
+                let uv = solidcore::math::Point2::new(
+                    dom.min().x + x * (dom.max().x - dom.min().x),
+                    dom.min().y + y * (dom.max().y - dom.min().y),
+                );
+                surface.evaluate_point(&k, uv).unwrap()
+            };
+            if on_tube(raw(0.37, 0.5)) {
+                continue;
+            }
+            // across the bead: the parameter whose ends lie on the tubes (orienting the solid
+            // may have swapped the face's parameters)
+            let swapped = !(on_tube(raw(0.37, 0.0)) && on_tube(raw(0.37, 1.0)));
+            let at = |u: f64, v: f64| if swapped { raw(v, u) } else { raw(u, v) };
+            for i in 0..40 {
+                let u = (f64::from(i) + 0.37) / 40.0;
+                let (a, m, b) = (at(u, 0.0), at(u, 0.5), at(u, 1.0));
+                let rise = m.distance(a + (b - a) * 0.5);
+                let tol = solidcore::blend::foot_blend::WELD_FIT_TOLERANCE;
+                assert!((rise - h.abs()).abs() <= tol, "h {h} u {u}: rise {rise}");
+            }
+            checked += 1;
+        }
+        assert_eq!(checked, 4, "h {h}: four bead faces");
+    }
+}
+
+/// A concave bead whose arc would cut into a tube somewhere along the joint is refused, and
+/// the tubes' file is unchanged.
+#[test]
+fn a_concave_bead_that_cuts_into_a_tube_is_refused() {
+    let mut k = kernel();
+    let (mut part, joints) = tubes(&mut k, &branch_on_main(10.0, Vec3::new(1.0, 0.0, 0.0)));
+    let before = smb(&k, &part);
+    let size = ChamferSize::Distances([4.0; 2]);
+    let r = trace_bead_body(&mut k, &mut part, &joints, &[size], -1.3, &[]);
+    assert!(r.is_err());
+    assert!(smb(&k, &part) == before, "the tubes changed");
+}
+
+// ---- the foot blend: feet at the legs' distances (jyviko's definition) ----
+//
+// At each station of the joint edge each foot lies on its face, in the plane square to the
+// edge through the root, at its leg's distance from the root: what a leg gauge measures.
+
+/// Between planes at 60, 90 and 120 degrees, equal and unequal legs: at each station each
+/// foot is at its leg from the root, square to the edge, and the two legs open at the planes'
+/// angle (each foot on its own face's side). The corner's file is unchanged.
+#[test]
+fn a_foot_blend_puts_each_foot_at_its_leg_between_planes() {
+    use solidcore::blend::foot_blend::FootBlend;
+    for adeg in [60.0_f64, 90.0, 120.0] {
+        for legs in [[5.0, 5.0], [4.0, 8.0]] {
+            let alpha = adeg.to_radians();
+            let mut k = kernel();
+            let (mut b, at) = corner(&mut k, alpha);
+            let edge = pick(&k, &b, at);
+            let before = smb(&k, &b);
+            let blend = FootBlend::of_edge(&b, edge, None).unwrap();
+            let (lo, hi) = (blend.interval.min(), blend.interval.max());
+            for f in [0.0, 0.3, 1.0] {
+                let s = blend.station(&k, &mut b, lo + f * (hi - lo), legs).unwrap();
+                let w = [s.feet[0] - s.root, s.feet[1] - s.root];
+                for (i, w) in w.iter().enumerate() {
+                    assert!((w.length() - legs[i]).abs() <= 1e-9, "{adeg} {legs:?}: leg {i} {}", w.length());
+                    assert!(w.dot(s.tangent).abs() <= 1e-9, "{adeg}: not square to the edge");
+                }
+                let opening = w[0].cross(w[1]).length().atan2(w[0].dot(w[1]));
+                assert!((opening - alpha).abs() <= 1e-9, "{adeg}: legs open at {}", opening.to_degrees());
+            }
+            assert!(smb(&k, &b) == before, "{adeg}: the corner changed");
+        }
+    }
+}
+
+/// Round a branch tube on a main tube (T, diameter 20 on 40) the legs hold at every station:
+/// each foot at 4 mm from the root to rounding, square to the joint, on its own tube (the two
+/// feet on different tubes). A chamfer's constant offsets give legs from 3.1 to 6.9 mm here.
+#[test]
+fn a_foot_blend_keeps_its_legs_round_a_tube_joint() {
+    use solidcore::blend::foot_blend::FootBlend;
+    let joint = branch_on_main(10.0, Vec3::new(1.0, 0.0, 0.0));
+    let mut k = kernel();
+    let (mut part, joints) = tubes(&mut k, &joint);
+    let before = smb(&k, &part);
+    let blend = FootBlend::of_edge(&part, joints[0], None).unwrap();
+    let (lo, hi) = (blend.interval.min(), blend.interval.max());
+    let mut worst = 0.0_f64;
+    for i in 0..200 {
+        let t = lo + (hi - lo) * (f64::from(i) + 0.5) / 200.0;
+        let s = blend.station(&k, &mut part, t, [4.0, 4.0]).unwrap();
+        let mut on = Vec::new();
+        for foot in s.feet {
+            let w = foot - s.root;
+            worst = worst.max((w.length() - 4.0).abs());
+            assert!(w.dot(s.tangent).abs() <= 1e-9, "t {t}: not square to the joint");
+            let tube = joint.iter().position(|tb| tb.off(foot) <= 1e-9);
+            assert!(tube.is_some(), "t {t}: a foot off both tubes");
+            on.push(tube);
+        }
+        assert_ne!(on[0], on[1], "t {t}: both feet on one tube");
+    }
+    assert!(worst <= 1e-9, "a leg off by {worst}");
+    assert!(smb(&k, &part) == before, "the tubes changed");
+}
+
+/// The foot blend's section face between planes (equal and unequal legs, chord, convex and
+/// concave): along the edge its sides are the feet and its middle stands the sagitta off the
+/// chord's middle, to the weld's fit tolerance (0.01 mm); between planes at 90 degrees with 5 mm legs a
+/// concave bead past 1.4645 mm is refused.
+#[test]
+fn a_foot_blend_section_face_runs_from_foot_to_foot_between_planes() {
+    use solidcore::blend::foot_blend::{FootBlend, WELD_FIT_TOLERANCE};
+    let tol = WELD_FIT_TOLERANCE;
+    for (legs, h) in [([5.0, 5.0], 0.0), ([5.0, 5.0], 1.0), ([4.0, 8.0], 1.5), ([5.0, 5.0], -1.0)] {
+        let mut k = kernel();
+        let (mut b, at) = corner(&mut k, FRAC_PI_2);
+        let edge = pick(&k, &b, at);
+        let blend = FootBlend::of_edge(&b, edge, None).unwrap();
+        let face = blend.section_face(&k, &mut b, legs, h, tol).unwrap();
+        let (lo, hi) = (blend.interval.min(), blend.interval.max());
+        for i in 0..23 {
+            let t = lo + (hi - lo) * (f64::from(i) + 0.37) / 23.0;
+            let s = blend.station(&k, &mut b, t, legs).unwrap();
+            let p = |v: f64| face.evaluate_point(&k, solidcore::math::Point2::new(t, v)).unwrap();
+            assert!(p(0.0).distance(s.feet[0]) <= tol && p(1.0).distance(s.feet[1]) <= tol, "{legs:?} {h}: feet");
+            let rise = p(0.5).distance(s.feet[0] + (s.feet[1] - s.feet[0]) * 0.5);
+            assert!((rise - h.abs()).abs() <= tol, "{legs:?} {h}: rise {rise}");
+        }
+    }
+    let mut k = kernel();
+    let (mut b, at) = corner(&mut k, FRAC_PI_2);
+    let edge = pick(&k, &b, at);
+    let blend = FootBlend::of_edge(&b, edge, None).unwrap();
+    assert!(blend.section_face(&k, &mut b, [5.0, 5.0], -1.46, tol).is_ok());
+    assert!(blend.section_face(&k, &mut b, [5.0, 5.0], -1.47, tol).is_err());
+}
+
+/// Round the tube T-joint the foot blend's section face holds its legs: along the joint its
+/// sides are the feet at 4 mm from the root and its middle stands the sagitta off the chord,
+/// convex and concave, to the weld's fit tolerance (0.01 mm).
+#[test]
+fn a_foot_blend_section_face_runs_round_a_tube_joint() {
+    use solidcore::blend::foot_blend::{FootBlend, WELD_FIT_TOLERANCE};
+    let tol = WELD_FIT_TOLERANCE;
+    let mut k = kernel();
+    let (mut part, joints) = tubes(&mut k, &branch_on_main(10.0, Vec3::new(1.0, 0.0, 0.0)));
+    let before = smb(&k, &part);
+    let blend = FootBlend::of_edge(&part, joints[0], None).unwrap();
+    for h in [0.0, 1.0, -0.2] {
+        let face = blend.section_face(&k, &mut part, [4.0, 4.0], h, tol).unwrap();
+        let (lo, hi) = (blend.interval.min(), blend.interval.max());
+        for i in 0..61 {
+            let t = lo + (hi - lo) * (f64::from(i) + 0.37) / 61.0;
+            let s = blend.station(&k, &mut part, t, [4.0, 4.0]).unwrap();
+            let p = |v: f64| face.evaluate_point(&k, solidcore::math::Point2::new(t, v)).unwrap();
+            for (v, foot) in [(0.0, s.feet[0]), (1.0, s.feet[1])] {
+                assert!(p(v).distance(foot) <= tol, "h {h} t {t}: foot off by {}", p(v).distance(foot));
+                assert!(((p(v) - s.root).length() - 4.0).abs() <= tol, "h {h} t {t}: leg");
+            }
+            let rise = p(0.5).distance(s.feet[0] + (s.feet[1] - s.feet[0]) * 0.5);
+            assert!((rise - h.abs()).abs() <= tol, "h {h} t {t}: rise {rise}");
+        }
+    }
+    assert!(smb(&k, &part) == before, "the tubes changed");
+}
+
+/// The foot blend's bead body between planes: the bead's section along the edge (chord,
+/// convex, concave; equal and unequal legs; 60, 90 and 120 degrees), a sound solid of 5 faces
+/// that saves, and the corner's file unchanged.
+#[test]
+fn a_foot_blend_body_is_its_section_along_the_edge() {
+    use solidcore::blend::foot_blend::{FootBlend, WELD_FIT_TOLERANCE};
+    for (adeg, legs, h) in [
+        (90.0_f64, [5.0, 5.0], 0.0),
+        (90.0, [5.0, 5.0], 1.0),
+        (90.0, [5.0, 5.0], -1.0),
+        (90.0, [4.0, 8.0], 0.0),
+        (60.0, [5.0, 5.0], 1.0),
+        (120.0, [5.0, 5.0], -1.0),
+    ] {
+        let alpha = adeg.to_radians();
+        let mut k = kernel();
+        let (mut b, at) = corner(&mut k, alpha);
+        let edge = pick(&k, &b, at);
+        let before = smb(&k, &b);
+        let blend = FootBlend::of_edge(&b, edge, None).unwrap();
+        let mut body = blend.body(&mut k, &mut b, legs, h, WELD_FIT_TOLERANCE).unwrap();
+        assert!(smb(&k, &b) == before, "{adeg} {legs:?} {h}: the corner changed");
+        // the chord's triangle, plus or minus the circular segment over the chord
+        let triangle = 0.5 * legs[0] * legs[1] * alpha.sin();
+        let chord = (legs[0] * legs[0] + legs[1] * legs[1] - 2.0 * legs[0] * legs[1] * alpha.cos()).sqrt();
+        let segment = if h == 0.0 {
+            0.0
+        } else {
+            let r = (chord * chord / 4.0 + h * h) / (2.0 * h.abs());
+            let half = (chord / (2.0 * r)).asin();
+            r * r * (half - half.sin() * half.cos())
+        };
+        let want = (triangle + h.signum() * segment) * LENGTH;
+        let got = volume(&k, &mut body);
+        assert!(((got - want) / want).abs() <= 1e-6, "{adeg} {legs:?} {h}: {got} against {want}");
+        assert_eq!(body.face_list().len(), 5, "{adeg} {legs:?} {h}");
+        assert_sound(&mut k, &mut body, "the foot blend's bead");
+        assert!(!smb(&k, &body).is_empty());
+    }
+}
+
+/// Round the tube T-joint the foot blend's bead body (chord, convex, concave) is a sound
+/// solid with its legs at 4 mm, the convex one larger and the concave one smaller than the
+/// chord's, and the tubes' file is unchanged.
+#[test]
+fn a_foot_blend_body_runs_round_a_tube_joint() {
+    use solidcore::blend::foot_blend::{FootBlend, WELD_FIT_TOLERANCE};
+    let mut k = kernel();
+    let (mut part, joints) = tubes(&mut k, &branch_on_main(10.0, Vec3::new(1.0, 0.0, 0.0)));
+    let before = smb(&k, &part);
+    let blend = FootBlend::of_edge(&part, joints[0], None).unwrap();
+    let mut volumes = Vec::new();
+    for h in [0.0, 1.0, -0.2] {
+        let mut body = blend.body(&mut k, &mut part, [4.0, 4.0], h, WELD_FIT_TOLERANCE).unwrap();
+        assert_sound(&mut k, &mut body, "the bead round the joint");
+        volumes.push(volume_to(&k, &mut body, 1e-5));
+    }
+    assert!(smb(&k, &part) == before, "the tubes changed");
+    assert!(volumes[1] > volumes[0] && volumes[2] < volumes[0], "{volumes:?}");
+    // the chord's body, against slices of its true section (root, along each tube to its
+    // foot, the chord) times the step of their centroid along the joint: 526.83 mm3
+    assert!((volumes[0] - 526.83).abs() <= 0.05, "{volumes:?}");
 }

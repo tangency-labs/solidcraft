@@ -33,4 +33,5 @@ pub mod hcr;
 pub mod identify_fillet;
 pub mod law_corners;
 pub mod round_room;
+pub mod foot_blend;
 pub mod weld_bead;
