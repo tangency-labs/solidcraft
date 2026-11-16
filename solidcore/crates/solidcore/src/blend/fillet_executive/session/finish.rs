@@ -53,6 +53,7 @@ use crate::kernel::Kernel;
 use crate::surface::procedural_blend::NetScope;
 use crate::topology::brep::{p1, p3};
 use crate::topology::{BrepId, EdgeId};
+use std::collections::BTreeSet;
 
 const OP: &str = "blend::fillet_executive::session::finish";
 
@@ -165,6 +166,7 @@ impl FinishAccess<'_, '_> {
             attributes,
             ..
         } = &mut *self.0;
+        k.work_counters.add_target_record_seeding();
         p3::seed_records(notification_records, target, &key_of);
         crate::geom::context::Context::with_notification_context(k, |k, context| {
             let mut env = crate::topology::edge::NotifyEnv {
@@ -265,6 +267,7 @@ impl FilletFinishAccess<FilletObject> for FinishAccess<'_, '_> {
             ));
         }
         let result = crate::geom::context::Context::with_notification_context(k, |k, context| {
+            k.work_counters.add_target_record_seeding();
             p3::seed_records(notification_records, target, &key_of);
             let mut env = crate::topology::edge::NotifyEnv {
                 records: notification_records,
@@ -405,7 +408,18 @@ impl FilletFinishAccess<FilletObject> for FinishAccess<'_, '_> {
             }
         }
         if let Some((edges, faces)) = &self.0.cleanup_kept {
-            relations.kept_edges.clone_from(edges);
+            // An input edge is kept by its id while it is still the whole input edge, with
+            // the ends it had. A split one is not: which of its pieces keeps the id follows
+            // the edge's direction, so a part and its mirror image would keep different
+            // pieces (#15768). Its pieces stay where they lie between two input faces.
+            let live: BTreeSet<EdgeId> = p1::edges(self.0.target, None)?.into_iter().collect();
+            for (&edge, ends) in edges {
+                if live.contains(&edge)
+                    && crate::topology::edge::vertices(self.0.target, edge, None)? == *ends
+                {
+                    relations.kept_edges.insert(edge);
+                }
+            }
             relations.kept_faces.clone_from(faces);
         }
         let before = p1::edges(self.0.target, None)?;
@@ -461,6 +475,7 @@ impl FilletFinishAccess<FilletObject> for FinishAccess<'_, '_> {
             attributes,
             ..
         } = &mut *self.0;
+        k.work_counters.add_target_record_seeding();
         p3::seed_records(notification_records, target, &key_of);
         crate::geom::context::Context::with_notification_context(k, |_, context| {
             let mut env = crate::topology::edge::NotifyEnv {
@@ -471,6 +486,49 @@ impl FilletFinishAccess<FilletObject> for FinishAccess<'_, '_> {
             };
             crate::topology::face::p3::notify(target, id, &mut env, None, operation, data)
         })?
+    }
+    /// (not upstream) The records are seeded once for all the faces, not once a face as
+    /// [`Self::finish_notify_face`] does: a `PreEdit` notification makes and removes no
+    /// entity, so the records are the same, but each seeding walks the whole target, and
+    /// a walk a face made a large part's fillet spend most of its time here. Each face
+    /// still gets its own notification context, as before.
+    fn finish_pre_edit_faces(&mut self, k: &mut Kernel, brep: FilletObject) -> Result<()> {
+        Self::require_target(brep)?;
+        let serial = self.0.target_serial;
+        let key_of = |entity| p3::topology_ref(serial, entity);
+        let SessionObjects {
+            target,
+            notification_records,
+            attributes,
+            ..
+        } = &mut *self.0;
+        let faces = p1::faces(target, None)?;
+        k.work_counters.add_target_record_seeding();
+        p3::seed_records(notification_records, target, &key_of);
+        for id in faces {
+            let this = key_of(EntityRef::Face(id));
+            // SmTypes.h:659: SM_NO_GET_BREP(face) expands to a null object.
+            ignore(
+                crate::geom::context::Context::with_notification_context(k, |_, context| {
+                    let mut env = crate::topology::edge::NotifyEnv {
+                        records: &mut *notification_records,
+                        attributes: &mut *attributes,
+                        context: Some(context),
+                        key_of: &key_of,
+                    };
+                    crate::topology::face::p3::notify(
+                        target,
+                        id,
+                        &mut env,
+                        None,
+                        NotifyOperation::PreEdit,
+                        [Some(this), None, None],
+                    )
+                })
+                .and_then(|notified| notified),
+            )?;
+        }
+        Ok(())
     }
     fn finish_orient_trimmed_surfaces(
         &mut self,
@@ -489,6 +547,7 @@ impl FilletFinishAccess<FilletObject> for FinishAccess<'_, '_> {
             attributes,
             ..
         } = &mut *self.0;
+        k.work_counters.add_target_record_seeding();
         p3::seed_records(notification_records, target, &key_of);
         let oriented =
             crate::geom::context::Context::with_notification_context(k, |k, context| {
@@ -760,8 +819,13 @@ impl FilletSession<'_> {
         }
         // WR-459: the clean-up after filleting leaves the target's own edges and faces.
         self.objects.cleanup_kept = if k.fixes.fillet_cleanup_keeps_target_faces {
+            let mut edges = std::collections::BTreeMap::new();
+            for edge in p1::edges(self.objects.target, None)? {
+                let ends = crate::topology::edge::vertices(self.objects.target, edge, None)?;
+                edges.insert(edge, ends);
+            }
             Some((
-                p1::edges(self.objects.target, None)?.into_iter().collect(),
+                edges,
                 p1::faces(self.objects.target, None)?.into_iter().collect(),
             ))
         } else {
@@ -1010,6 +1074,47 @@ mod stitch_identity_tests {
                 .issued_brep_serial(session.objects.target.notify_identity_slot()),
             Some(session.objects.target_serial)
         );
+    }
+}
+
+#[cfg(test)]
+mod pre_edit_tests {
+    use super::*;
+    use crate::math::Point3;
+
+    /// The tail of a fillet notifies every face of the target `PreEdit`, which resets its
+    /// rectangular-trim flag to unsure. It seeded the session's records before each face, a
+    /// walk over every entity of the target each time, so the tail cost faces × entities: on
+    /// a part of a few thousand faces most of a fillet's time. The records are seeded once,
+    /// and every face is still notified.
+    #[test]
+    fn the_pre_edit_tail_seeds_the_records_once_and_notifies_every_face() {
+        let mut k = Kernel::default();
+        let mut target =
+            crate::primitive::api_primitives::create_box(&mut k, Point3::ZERO, 10.0, 20.0, 30.0)
+                .unwrap();
+        let faces = p1::faces(&target, None).unwrap();
+        assert_eq!(faces.len(), 6);
+        for &f in &faces {
+            target.face_mut(f).unwrap().rectangular_trim = 1;
+        }
+        let mut session = FilletSession::new(&mut k, &mut target).unwrap();
+        k.work_counters.reset();
+        FinishAccess(&mut session.objects)
+            .finish_pre_edit_faces(&mut k, FilletObject::Body(FilletBody::Target))
+            .unwrap();
+        assert_eq!(k.work_counters.target_record_seedings(), 1);
+        for &f in &faces {
+            assert_eq!(
+                session.objects.target.face(f).unwrap().rectangular_trim,
+                crate::topology::brep_data::UNSURE,
+                "{f:?}"
+            );
+        }
+        // Not the target: refused, as each face's notification refused it.
+        assert!(FinishAccess(&mut session.objects)
+            .finish_pre_edit_faces(&mut k, FilletObject::IntermediateBrep)
+            .is_err());
     }
 }
 

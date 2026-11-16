@@ -2,7 +2,7 @@
 use super::*;
 use crate::dialogs_surface::continuity_row_explained;
 use crate::ui_kit;
-use crate::ui_kit::{choice_row, expr_row, hint_row};
+use crate::ui_kit::{choice_row, expr_row, expr_row_positive, hint_row, hint_row_positive};
 use solidcraft_engine::kernel::Continuity;
 
 /// The command whose icon and label head a dialog of `kind`, when it has one.
@@ -100,6 +100,7 @@ pub(super) fn command(kind: &Kind) -> Option<&'static str> {
             crate::dialogs_assembly::Asm::MotionLink { .. } => Some("joint.motion_link"),
             crate::dialogs_assembly::Asm::Coupling(f) => Some(f.command),
             crate::dialogs_assembly::Asm::Cam(_) => Some("joint.cam"),
+            crate::dialogs_assembly::Asm::Constrain(_) => Some("assembly.constraint.create"),
             crate::dialogs_assembly::Asm::Trace(_) => Some("motion.trace"),
             crate::dialogs_assembly::Asm::Drive { .. } => Some("joint.drive"),
             crate::dialogs_assembly::Asm::Interference { .. } => Some("inspect.interference"),
@@ -431,7 +432,7 @@ pub(super) fn rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: 
         Kind::Part(k) => enter |= crate::dialogs_parts::rows(app, ui, k, &d.inputs),
         Kind::PartSize(k) => enter |= crate::dialogs_part_size::rows(app, ui, k),
         Kind::SaveMesh(k) => enter |= crate::dialogs_save_mesh::rows(app, ui, k, &mut d.inputs),
-        Kind::ViewDxf { dashed, tolerance } => crate::dialogs_view_dxf::rows(app, ui, dashed, tolerance),
+        Kind::ViewDxf { dashed, tolerance, zero_origin } => crate::dialogs_view_dxf::rows(app, ui, dashed, tolerance, zero_origin),
         Kind::ViewNavigator(form) => crate::view_gizmo::rows(app, ui, form, &d.inputs),
         Kind::InsertDrawing(p) => crate::dialogs_insert_drawing::rows(ui, p),
         Kind::Sketch => {
@@ -487,6 +488,7 @@ pub(super) fn rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: 
             taper_present,
             to_offset,
             start,
+            offset_start,
             all,
             thin,
             wall,
@@ -561,19 +563,20 @@ pub(super) fn rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: 
                 }
                 if *thin {
                     choice_row(ui, "Wall Location", "ex_wall", wall_side, &WALL_LABELS);
-                    enter |= expr_row(ui, "Wall Thickness", wall);
+                    enter |= expr_row_positive(ui, "Wall Thickness", wall);
                     if *wall_side == 3 {
-                        enter |= expr_row(ui, "Thickness Outside", wall2);
+                        enter |= expr_row_positive(ui, "Thickness Outside", wall2);
                     }
                 }
             });
-            let advanced = !start.is_empty() || object_on(&d.inputs, FROM_OBJECT) || *taper_present;
+            let advanced = *offset_start || object_on(&d.inputs, FROM_OBJECT) || *taper_present;
             ui_kit::section(ui, "extrude_advanced", "Advanced", advanced, |ui| {
-                let old = if object_on(&d.inputs, FROM_OBJECT) { 2 } else { usize::from(!start.is_empty()) };
+                let old = if object_on(&d.inputs, FROM_OBJECT) { 2 } else { usize::from(*offset_start) };
                 let mut st = old;
                 form_row(ui, "Start", |ui| {
                     combo(ui, "ex_start", &["Profile Plane", "Offset", "From Object"], &mut st);
                     if st != old {
+                        *offset_start = st == 1;
                         set_object(&mut d.inputs, &mut d.active, FROM_OBJECT, st == 2);
                         if st == 1 && start.is_empty() {
                             *start = length_default(&app.session, "5");
@@ -601,7 +604,7 @@ pub(super) fn rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: 
             if *chamfer {
                 choice_row(ui, "Chamfer Type", "ch_type", ctype, &CHAMFER_TYPES);
             }
-            enter |= expr_row(ui, if *chamfer { if *ctype == 0 { "Distance" } else { "Distance 1" } } else { "Radius" }, radius);
+            enter |= expr_row_positive(ui, if *chamfer { if *ctype == 0 { "Distance" } else { "Distance 1" } } else { "Radius" }, radius);
             let mut rtype = fillet_type(&d.extra);
             if !*chamfer {
                 form_row(ui, "Type", |ui| {
@@ -620,7 +623,7 @@ pub(super) fn rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: 
                 }
             }
             if *chamfer && *ctype == 1 {
-                enter |= expr_row(ui, "Distance 2", distance2);
+                enter |= expr_row_positive(ui, "Distance 2", distance2);
             }
             if *chamfer && *ctype == 2 {
                 enter |= expr_row(ui, "Angle", angle);
@@ -690,7 +693,7 @@ pub(super) fn rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: 
                         let mut radii = spline_radii(&mut d.extra, radius);
                         let n = radii.len();
                         for (k, r) in radii.iter_mut().enumerate() {
-                            enter |= expr_row(ui, if k + 1 == n { "End Radius" } else { "Control Radius" }, r);
+                            enter |= expr_row_positive(ui, if k + 1 == n { "End Radius" } else { "Control Radius" }, r);
                         }
                         d.extra.insert("radii".into(), json!(radii));
                     }
@@ -708,7 +711,7 @@ pub(super) fn rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: 
                 feature_pattern_alignment_row(ui, &mut d.extra, 0);
             }
         }
-        Kind::Hole { kind, opts, .. } => {
+        Kind::Hole { kind, opts, cb_diameter, cb_depth, .. } => {
             let doc = &app.session.doc;
             let eval = |e: &str, k| doc.eval(e, k).ok();
             // Each option shows the hole it makes while hovered (dialogs_hole::preview).
@@ -741,10 +744,19 @@ pub(super) fn rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: 
                 ui_kit::dropdown_previews(ui, "hole_kind", kind, &HOLE_LABELS, |ui, i| preview(ui, Choice::Type(i)));
             });
             form_row(ui, "Hole Tap Type", |ui| {
-                let mut tap = usize::from(opts.tapped);
-                ui_kit::dropdown_previews(ui, "hole_tap", &mut tap, &["Simple", "Tapped"], |ui, i| preview(ui, Choice::Tapped(i == 1)));
-                opts.tapped = tap == 1;
+                let mut tap = if opts.tapped { 2 } else { usize::from(opts.clearance) };
+                ui_kit::dropdown_previews(ui, "hole_tap", &mut tap, &["Simple", "ui.hole_clearance", "Tapped"], |ui, i| preview(ui, Choice::Tap(i)));
+                opts.clearance = tap == 1;
+                opts.tapped = tap == 2;
             });
+            // A clearance hole for a bolt: its size and fit set the diameter (ISO 273).
+            if opts.clearance {
+                enter |= crate::dialogs_hole::clearance_rows(ui, opts);
+                // A counterbore for a cap screw: its head sets the counterbore (#12321).
+                if *kind == 1 {
+                    crate::dialogs_hole::head_row(ui, opts, cb_diameter, cb_depth);
+                }
+            }
             if opts.tapped {
                 enter |= crate::dialogs_thread::hole_rows(ui, &app.session.doc, &mut opts.thread, &mut opts.custom_thread, &mut opts.drill);
                 crate::dialogs_thread::hole_hand_row(ui, &mut opts.hand);
@@ -920,7 +932,7 @@ fn additional_rows(app: &mut SolveApp, d: &mut Dialog, ui: &mut egui::Ui) -> boo
         Kind::Shell { thickness } => {
             // The direction below says which side the wall grows to; the label stays short enough
             // for the label column.
-            enter |= expr_row(ui, "Thickness", thickness);
+            enter |= expr_row_positive(ui, "Thickness", thickness);
             form_row(ui, "Direction", |ui| {
                 extra_segments(ui, &mut d.extra, "direction", &[("Inside", "inside"), ("Outside", "outside"), ("Both", "both")]);
             });
@@ -972,8 +984,8 @@ fn additional_rows(app: &mut SolveApp, d: &mut Dialog, ui: &mut egui::Ui) -> boo
                 ui_kit::segmented(ui, &mut i, &["In plane", "Normal"], Default::default());
                 *normal = i == 1;
             });
-            enter |= expr_row(ui, "Thickness", thickness);
-            enter |= hint_row(ui, "Depth", depth, tr("to the next face"));
+            enter |= expr_row_positive(ui, "Thickness", thickness);
+            enter |= hint_row_positive(ui, "Depth", depth, tr("to the next face"));
             ui_kit::options(ui, "feature_options", &mut [("Flip", flip)]);
         }
         Kind::Emboss { depth, deboss } => {
@@ -1059,11 +1071,11 @@ fn additional_rows(app: &mut SolveApp, d: &mut Dialog, ui: &mut egui::Ui) -> boo
                 }
             });
             if *per_axis {
-                enter |= expr_row(ui, "X", factor);
-                enter |= expr_row(ui, "Y", factor_y);
-                enter |= expr_row(ui, "Z", factor_z);
+                enter |= expr_row_positive(ui, "X", factor);
+                enter |= expr_row_positive(ui, "Y", factor_y);
+                enter |= expr_row_positive(ui, "Z", factor_z);
             } else {
-                enter |= expr_row(ui, "Scale factor", factor);
+                enter |= expr_row_positive(ui, "Scale factor", factor);
             }
         }
         Kind::OffsetFaces { distance } => {
@@ -1378,10 +1390,76 @@ mod tests {
         h.app.session.selection = vec![a, b];
         h.step(&json!({"start":"solid.chamfer"})).unwrap();
         h.frames(4);
+        // Picks on two bodies run one command per body, each with its own body and edge (#12453).
+        let bodies: Vec<String> = h.app.session.world_state().unwrap().bodies.iter().map(|b| b.name.clone()).collect();
         let commands = apply_commands(&h.app, h.app.dialog.as_ref().unwrap()).unwrap();
-        let (cmd, p) = commands.first().unwrap();
-        assert_eq!(*cmd, "solid.chamfer");
-        assert!(p.get("body").is_none(), "{p}");
+        assert_eq!(commands.len(), 2, "{commands:?}");
+        for ((cmd, p), body) in commands.iter().zip(&bodies) {
+            assert_eq!(*cmd, "solid.chamfer");
+            assert_eq!(p["body"], json!(body), "{p}");
+            assert_eq!(p["edges"].as_array().unwrap().len(), 1, "{p}");
+        }
+    }
+
+    #[test]
+    fn fillet_picks_on_a_split_body_round_both_halves() {
+        // (#12453) The two halves of a split body share their section edges, so a pick on each
+        // half names no single body: each half's edge goes in its own command, and both halves round.
+        let mut h = Harness::new();
+        sample(&mut h);
+        h.app.run("solid.box", json!({"length":20,"width":10,"height":10,"corner":[0,0,0],"operation":"new","body_name":"Block"})).unwrap();
+        h.app.run("solid.split_body", json!({"body":"Block","plane":{"origin":[10,0,0],"normal":[1,0,0]}})).unwrap();
+        let halves: Vec<String> = h.app.session.world_state().unwrap().bodies.iter().skip(1).map(|b| b.name.clone()).collect();
+        assert_eq!(halves.len(), 2, "{halves:?}");
+        let left = edge_sel(&h.app.session, Vec3::new(5.0, 0.0, 10.0)).unwrap();
+        let right = edge_sel(&h.app.session, Vec3::new(15.0, 0.0, 10.0)).unwrap();
+        // The section edge both halves share: on main the engine refuses its point ("lies on edges of 2 bodies").
+        let section = edge_sel(&h.app.session, Vec3::new(10.0, 5.0, 10.0)).unwrap();
+        let section_body = match &section {
+            Sel::Edge { body, .. } => body.clone(),
+            other => panic!("{other:?}"),
+        };
+        h.app.session.selection = vec![left, right, section];
+        h.step(&json!({"start":"solid.fillet"})).unwrap();
+        h.frames(4);
+        let before: Vec<f64> = {
+            let st = h.app.session.world_state().unwrap();
+            halves.iter().map(|name| st.body(name).unwrap().measure().unwrap().volume).collect()
+        };
+        let commands = apply_commands(&h.app, h.app.dialog.as_ref().unwrap()).unwrap();
+        assert_eq!(commands.len(), 2, "{commands:?}");
+        // The section edge goes in the command of the body edge_sel gave it, and no other.
+        let on_section = |p: &Value| p["edges"].as_array().unwrap().iter().any(|e| e[0] == json!(10.0) && e[2] == json!(10.0));
+        for (_, p) in &commands {
+            assert_eq!(on_section(p), p["body"] == json!(section_body), "{p}");
+        }
+        for (cmd, mut p) in commands {
+            assert_eq!(cmd, "solid.fillet");
+            p["radius"] = json!(1);
+            h.app.run(&cmd, p).unwrap();
+        }
+        let st = h.app.session.world_state().unwrap();
+        for (name, volume) in halves.iter().zip(before) {
+            let after = st.body(name).unwrap().measure().unwrap().volume;
+            assert!(after < volume, "{name} should lose volume from its rounded edge: {volume} -> {after}");
+        }
+    }
+
+    #[test]
+    fn fillet_picks_on_two_bodies_cannot_edit_a_feature() {
+        // Editing keeps only one command (apply_commands), so picks on two bodies are refused, not dropped (#12453).
+        let mut h = Harness::new();
+        sample(&mut h);
+        h.app.run("solid.box", json!({"length":20,"width":10,"height":10,"corner":[0,0,0],"operation":"new","body_name":"Block"})).unwrap();
+        h.app.run("solid.split_body", json!({"body":"Block","plane":{"origin":[10,0,0],"normal":[1,0,0]}})).unwrap();
+        let left = edge_sel(&h.app.session, Vec3::new(5.0, 0.0, 10.0)).unwrap();
+        let right = edge_sel(&h.app.session, Vec3::new(15.0, 0.0, 10.0)).unwrap();
+        h.app.session.selection = vec![left, right];
+        h.step(&json!({"start":"solid.fillet"})).unwrap();
+        h.frames(4);
+        h.app.dialog.as_mut().unwrap().editing = Some((1, None));
+        let err = apply_commands(&h.app, h.app.dialog.as_ref().unwrap()).unwrap_err();
+        assert!(err.contains("one body"), "{err}");
     }
 
     #[test]

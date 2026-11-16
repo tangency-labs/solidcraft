@@ -264,6 +264,97 @@ fn a_drawing_is_made_only_of_a_design_with_something_in_it() {
     assert!(Arc::ptr_eq(&s.doc, &full));
 }
 
+/// A drawing of another design's file (`source`) may be made in an empty design. Refused with
+/// nothing changed: a path the record can't take or longer than 4,096 bytes, a network location
+/// not allowed (judged from the text first, whatever the file's name, with nothing asked of the
+/// disk), a file that isn't a design, the design's own file, and a missing file. Its views wait for
+/// views of a linked design.
+#[test]
+fn a_drawing_of_another_designs_file_is_made_only_of_a_design_there() {
+    let folder = Folder::new("drawing-source-create");
+    run(&mut design(), "file.save", json!({"path": folder.path("plate.sc")}));
+    std::fs::write(folder.path("part.step"), b"ISO-10303-21;").unwrap();
+    std::fs::create_dir_all(folder.path("sub")).unwrap();
+    let mut s = Session::default();
+    run(&mut s, "file.save", json!({"path": folder.path("case.sc")}));
+    let before = s.doc.clone();
+    let fits = "x".repeat(4093) + ".sc";
+    let calls = solidcraft_io::vfs::file_calls();
+    for (source, says) in [(r"\\fileserver\share\p.sc".to_string(), "fileserver"), (r"\\fileserver\share\p.step".to_string(), "fileserver")] {
+        let e = refused(&mut s, "drawing.create", json!({"source": source}));
+        assert!(e.contains(says), "{source}: {e}");
+        assert!(Arc::ptr_eq(&s.doc, &before) && s.open_drawing.is_none(), "{source}: nothing changed");
+    }
+    assert_eq!(solidcraft_io::vfs::file_calls(), calls, "a network location asked the file system");
+    let path_rule = "not empty, not only spaces, without control characters";
+    for (source, says) in [
+        (String::new(), path_rule),
+        ("  ".into(), path_rule),
+        ("a\0b.sc".into(), path_rule),
+        ("x".repeat(4094) + ".sc", "at most 4096 bytes"),
+        (folder.path("part.step"), "not a .sc design"),
+        (folder.path("case.sc"), "the design it is in"),
+        (folder.path("sub/../case.sc"), "the design it is in"),
+        (folder.path("gone.sc"), "not found"),
+    ] {
+        let e = refused(&mut s, "drawing.create", json!({"source": source}));
+        assert!(e.contains(says), "{source:?}: {e}");
+        assert!(Arc::ptr_eq(&s.doc, &before) && s.open_drawing.is_none(), "{source:?}: nothing changed");
+    }
+    // 4,096 bytes is still a path to look for.
+    let e = refused(&mut s, "drawing.create", json!({"source": fits}));
+    assert!(!e.contains("at most 4096 bytes"), "{e}");
+    let made = run(&mut s, "drawing.create", json!({"source": folder.path("plate.sc")}));
+    assert_eq!(made["sources"], json!([{"id": made["sources"][0]["id"], "path": "plate.sc"}]), "kept beside the design");
+    assert_eq!(open_one(&s).own_source(), None);
+    let drawn = s.doc.clone();
+    let e = refused(&mut s, "drawing.view.base", json!({"sheet": made["sheets"][0]["id"]}));
+    assert!(e.contains("not supported yet") && e.contains("linked design"), "{e}");
+    assert!(Arc::ptr_eq(&s.doc, &drawn));
+}
+
+/// Which design a source means has one answer (`Session::drawn`): the design the drawing is in for
+/// its own source; for another design's file, until it can be read, a refusal that changes nothing.
+/// So a sheet never documents a linked source (its title block would show this design's name and
+/// mass as the other's), a parts list never lists one, and a sheet a file made that documents one
+/// shows its component's fields as it shows none, never this design's.
+#[test]
+fn a_linked_source_is_never_read_as_the_design_the_drawing_is_in() {
+    use solidcraft_doc::drawing::SheetComponent;
+    let folder = Folder::new("drawing-source-drawn");
+    run(&mut design(), "file.save", json!({"path": folder.path("plate.sc")}));
+    let mut s = design();
+    run(&mut s, "file.save", json!({"path": folder.path("case.sc")}));
+    let made = run(&mut s, "drawing.create", json!({"name": "Of the plate", "source": folder.path("plate.sc")}));
+    let (sheet, linked) = (made["sheets"][0]["id"].clone(), made["sources"][0]["id"].clone());
+    let before = s.doc.clone();
+    for (id, p) in [
+        ("drawing.sheet.set", json!({"sheet": sheet, "documents": {"source": linked}})),
+        ("drawing.sheet.add", json!({"documents": {"source": linked, "component": 0}})),
+        ("drawing.table.add", json!({"sheet": sheet, "kind": "parts_list"})),
+        ("drawing.view.base", json!({"sheet": sheet})),
+    ] {
+        let e = refused(&mut s, id, p);
+        assert!(e.contains("not supported yet") && e.contains("linked design"), "{id}: {e}");
+        assert!(Arc::ptr_eq(&s.doc, &before), "{id}: nothing changed");
+    }
+    // A sheet a file made that documents the linked design shows what a sheet that documents nothing shows.
+    let cells = |s: &mut Session| run(s, "drawing.inspect", json!({}))["sheets"][0]["title_block_cells"].clone();
+    let nothing = cells(&mut s);
+    let mut d = (*open_one(&s)).clone();
+    let source = ids::decode(linked.as_str().unwrap()).unwrap();
+    Arc::make_mut(&mut d.sheets[0]).documents = Some(SheetComponent { source, component: 0 });
+    d.validate().unwrap();
+    s.doc_mut().put_drawing(Arc::new(d));
+    assert_eq!(cells(&mut s), nothing);
+    // Its own source reads the design it is in.
+    run(&mut s, "drawing.close", json!({}));
+    let made = run(&mut s, "drawing.create", json!({}));
+    let own = json!({"source": made["sources"][0]["id"]});
+    run(&mut s, "drawing.sheet.set", json!({"sheet": made["sheets"][0]["id"], "documents": own}));
+    assert_ne!(cells(&mut s), nothing, "the design's own fields");
+}
+
 /// `drawing.create` and `drawing.set` refuse a key they don't take, as every other drawing command
 /// does, naming it, with nothing changed: a typo is never taken for a setting left as it was. Every
 /// key they take still takes, in one call.
@@ -672,6 +763,86 @@ fn a_designs_drawings_are_saved_with_it_and_come_back() {
     }
 }
 
+/// A drawing's source of another design's file follows Save As as a component link does (#6860):
+/// in memory the path is whole, so Save As into other folders, undo, redo, a checkpoint and a
+/// recovered autosave all still name the same file, and saving never rewrites the design in memory
+/// or its history; the file keeps the path relative to the design's folder, in both forms.
+#[test]
+fn save_as_keeps_drawing_sources_through_undo_redo_and_checkpoints() {
+    use crate::cmd::design_link::{absolute, resolve};
+    for on_copy in [false, true] {
+        let folder = Folder::new(&format!("drawing-source-save-as-{on_copy}"));
+        let dir = folder.0.clone();
+        std::fs::create_dir_all(dir.join("parts")).unwrap();
+        std::fs::create_dir_all(dir.join("asm/sub/deeper")).unwrap();
+        let part = dir.join("parts/plate.sc");
+        run(&mut design(), "file.save", json!({"path": part}));
+        let case = dir.join("asm/case.sc");
+        let mut s = Session::default();
+        run(&mut s, "drawing.create", json!({"source": part}));
+        run(&mut s, "drawing.close", json!({}));
+        let on_disk = |path: &std::path::Path| {
+            let disk = solidcraft_io::read_design(&std::fs::read(path).unwrap()).unwrap();
+            disk.drawings[0].sources[0].path.clone().unwrap()
+        };
+        // As `drawing.inspect` lists it (as the file keeps it), and the file it names.
+        let source = |s: &mut Session| {
+            let id = s.doc.drawings[0].id;
+            let listed = run(s, "drawing.open", the(id))["sources"][0]["path"].as_str().unwrap().to_string();
+            run(s, "drawing.close", json!({}));
+            let file = absolute(&resolve(s.path.as_deref(), &listed));
+            (listed, file)
+        };
+        run(&mut s, "file.save", json!({"path": case}));
+        assert_eq!(on_disk(&case), "../parts/plate.sc");
+        // Opening starts from the relative path written to disk.
+        run(&mut s, "doc.open", json!({"path": case}));
+        assert_eq!(source(&mut s), ("../parts/plate.sc".to_string(), absolute(&part)));
+        run(&mut s, "solid.box", json!({"length": 5, "width": 5, "height": 5}));
+        let checkpoint = s.checkpoint();
+        run(&mut s, "solid.box", json!({"length": 5, "width": 5, "height": 5, "corner": [20, 0, 0]}));
+        run(&mut s, "edit.undo", json!({}));
+        let before = s.doc.clone();
+        let undo_before = s.undo.last().unwrap().doc.clone();
+        for (sub, kept) in [("asm/sub", "../../parts/plate.sc"), ("asm/sub/deeper", "../../../parts/plate.sc")] {
+            let path = dir.join(sub).join("case.sc");
+            if on_copy {
+                let mut copy = s.scratch();
+                run(&mut copy, "file.save_as", json!({"path": path}));
+                s.adopt_save(&copy);
+            } else {
+                run(&mut s, "file.save_as", json!({"path": path}));
+            }
+            assert_eq!(on_disk(&path), kept, "{on_copy}, {sub}");
+            for command in ["edit.redo", "edit.undo", "edit.undo", "edit.redo"] {
+                run(&mut s, command, json!({}));
+                assert_eq!(source(&mut s), (kept.to_string(), absolute(&part)), "{on_copy}, {sub}, {command}");
+            }
+        }
+        assert!(Arc::ptr_eq(&s.doc, &before), "saving does not rewrite the live document");
+        assert!(Arc::ptr_eq(&s.undo.last().unwrap().doc, &undo_before), "saving does not copy the edit history");
+        s.restore_checkpoint(checkpoint).unwrap();
+        assert_eq!(source(&mut s).1, absolute(&part));
+        let path = s.path.clone().unwrap();
+        for format in ["json", "container"] {
+            run(&mut s, "file.save", json!({"format": format}));
+            assert_eq!(on_disk(Path::new(&path)), "../../../parts/plate.sc", "{format}");
+            run(&mut s, "doc.open", json!({"path": path}));
+            assert_eq!(source(&mut s).1, absolute(&part), "{format}");
+        }
+        // A recovered autosave holds the whole path and still names the file.
+        let recovery = dir.join("recovery");
+        let mut autosaver = crate::recovery::Autosaver::new(&recovery, std::time::Duration::ZERO).unwrap();
+        run(&mut s, "solid.box", json!({"length": 5, "width": 5, "height": 5, "corner": [40, 0, 0]}));
+        assert!(autosaver.save(&s).unwrap());
+        drop(autosaver);
+        let entry = crate::recovery::orphans(&recovery).pop().unwrap();
+        let mut recovered = Session::default();
+        run(&mut recovered, "doc.recover", json!({"dir": recovery, "id": entry.id}));
+        assert_eq!(source(&mut recovered).1, absolute(&part));
+    }
+}
+
 /// A drawing's properties follow the design properties' rules: set, read and removed, each change
 /// one undo step, other tools' keys kept, and what the design's would refuse refused.
 #[test]
@@ -719,7 +890,7 @@ fn hostile_drawing_params_never_panic() {
     assert_eq!(s.scratch().open_drawing, s.open_drawing, "each copy has the drawing open");
     let keys = ["name", "language", "units", "drawing", "key", "value", "values", "keys", "checkpoint", "id"];
     // `drawing.create`'s and `drawing.set`'s other keys.
-    let keys = [&keys[..], &["template", "projection", "updates", "line_group", "font", "revision_numbering"]].concat();
+    let keys = [&keys[..], &["template", "projection", "updates", "line_group", "font", "revision_numbering", "source"]].concat();
     let skipped = |id: &str| matches!(id, "doc.open" | "file.save" | "file.save_as") || id.starts_with("doc.recover");
     let mut internal = Vec::new();
     for spec in command_specs().iter().filter(|spec| spec.part != Part::Model && !skipped(spec.id)) {
@@ -806,6 +977,7 @@ fn inspect_lists_each_sheets_views_in_order() {
         place: ViewPlace::Aligned(50.0),
         settings: Default::default(),
         reference_shown_percent: 0.0,
+        label: None,
     })]);
     // Inspect only lists it, so the part it numbers needn't be in the design.
     let edge = ModelEdge { body: "Block".into(), origin_feature: s.doc.features[0].id, name: "edge".into(), path: vec![1] };
@@ -816,13 +988,13 @@ fn inspect_lists_each_sheets_views_in_order() {
     let dimension = run(&mut s, "drawing.dimension.add", json!({"view": front_id, "kind": {"length": {"edge": [50, 0, 20]}}}));
     let (features, evaluations) = (s.doc.features.clone(), s.evaluations);
     let reply = run(&mut s, "drawing.inspect", json!({}));
-    let mut expected = vec![json!({"id": front_id, "kind": "base", "label": "Front", "dimensions": [dimension["record"]["id"]], "balloons": []})];
+    let mut expected =
+        vec![json!({"id": front_id, "kind": "base", "label": "Front", "dimensions": [dimension["record"]["id"]], "balloons": [], "notes": []})];
     let right_and_top = [
-        json!({"id": right_id, "kind": "projected", "parent": front_id, "side": "right", "label": "Right of Front", "dimensions": [], "balloons": [ids::encode(balloon)]}),
-        json!({"id": top_id, "kind": "projected", "parent": right_id, "side": "above", "label": "Above Right of Front", "dimensions": [], "balloons": []}),
+        json!({"id": right_id, "kind": "projected", "parent": front_id, "side": "right", "label": "Right of Front", "dimensions": [], "balloons": [ids::encode(balloon)], "notes": []}),
+        json!({"id": top_id, "kind": "projected", "parent": right_id, "side": "above", "label": "Above Right of Front", "dimensions": [], "balloons": [], "notes": []}),
     ];
-    let left_entry =
-        json!({"id": left_id, "kind": "projected", "parent": front_id, "side": "left", "label": "Left of Front", "dimensions": [], "balloons": []});
+    let left_entry = json!({"id": left_id, "kind": "projected", "parent": front_id, "side": "left", "label": "Left of Front", "dimensions": [], "balloons": [], "notes": []});
     // The front's two views in id order, each followed by what is projected from it.
     if right < left {
         expected.extend(right_and_top);
@@ -848,6 +1020,80 @@ fn inspect_lists_each_sheets_views_in_order() {
     assert_eq!((&moved["parent"], &moved["label"]), (&json!(right_id), &json!("Above Right of Front")), "{moved}");
 }
 
+/// Inspect lists everything on each sheet, from the one rule the Browser and a sheet's delete use
+/// ([`Drawing::on_sheet`]): its views, a note in a view under its view, a note on the sheet with the
+/// sheet, and the sheet's tables, images and revision tags, each on its own sheet only. An empty sheet
+/// lists nothing, a deleted object is gone, and nothing is evaluated.
+#[test]
+fn inspect_lists_everything_on_each_sheet() {
+    let (mut s, [front, ..]) = crate::cmd::drawing_view::tests::three_views();
+    let folder = Folder::new("drawing-inspect-sheets");
+    let picture = folder.path("logo.png");
+    std::fs::write(&picture, crate::drawing_pictures::tests::png(4, 2)).unwrap();
+    let row = run(&mut s, "drawing.revision.add", json!({"set": {}}))["row"].clone();
+    let first = ids::encode(s.drawing("test").unwrap().sheets[0].id);
+    let other = run(&mut s, "drawing.sheet.add", json!({"name": "Other"}))["sheet"].as_str().unwrap().to_string();
+    run(&mut s, "drawing.sheet.add", json!({"name": "Empty"}));
+    // One of each on a sheet: its id by kind.
+    let on = |s: &mut Session, sheet: &str| {
+        let note = |content: &str| json!({"anchor": {"sheet": sheet}, "at": [20, 20], "content": content});
+        [
+            run(s, "drawing.note.add", note("General"))["note"].clone(),
+            run(s, "drawing.table.add", json!({"sheet": sheet, "kind": "parts_list"}))["table"].clone(),
+            run(s, "drawing.image.add", json!({"sheet": sheet, "file": picture, "rect_mm": [10, 10, 30, 20]}))["image"].clone(),
+            run(s, "drawing.revision.tag.add", json!({"row": row, "sheet": sheet, "at": [40.0, 40.0]}))["tag"].clone(),
+        ]
+    };
+    let here = on(&mut s, &first);
+    let there = on(&mut s, &other);
+    let in_view = json!({"anchor": {"view": ids::encode(front)}, "at": [60, 40], "content": "Break"});
+    let in_view = run(&mut s, "drawing.note.add", in_view)["note"].clone();
+
+    let (evaluations, features) = (s.evaluations, s.doc.features.clone());
+    let reply = run(&mut s, "drawing.inspect", json!({}));
+    assert_eq!((s.evaluations, &s.doc.features), (evaluations, &features), "nothing evaluated");
+    let lists = |sheet: &Value| ["notes", "tables", "images", "revision_tags"].map(|list| sheet[list].clone());
+    let one = |objects: &[Value; 4]| objects.clone().map(|object| json!([object]));
+    assert_eq!(lists(&reply["sheets"][0]), one(&here), "{reply}");
+    assert_eq!(lists(&reply["sheets"][1]), one(&there), "{reply}");
+    assert_eq!(lists(&reply["sheets"][2]), [json!([]), json!([]), json!([]), json!([])], "{reply}");
+    let views = reply["sheets"][0]["views"].as_array().unwrap();
+    let notes: Vec<&Value> = views.iter().map(|view| &view["notes"]).collect();
+    assert_eq!(notes, [&json!([in_view]), &json!([]), &json!([])], "the note in the front view, under it only");
+
+    // The same lists as the rule itself gives.
+    let d = s.drawing("test").unwrap().clone();
+    for (at, sheet) in d.sheets.iter().enumerate() {
+        let on = d.on_sheet(sheet.id);
+        let encoded = |list: &[u64]| json!(list.iter().map(|id| ids::encode(*id)).collect::<Vec<_>>());
+        let listed = &reply["sheets"][at];
+        assert_eq!(
+            [&listed["tables"], &listed["images"], &listed["revision_tags"]],
+            [&encoded(&on.tables), &encoded(&on.images), &encoded(&on.tags)]
+        );
+        let mut notes: Vec<Value> = listed["notes"].as_array().unwrap().clone();
+        notes.extend(listed["views"].as_array().unwrap().iter().flat_map(|view| view["notes"].as_array().unwrap().clone()));
+        notes.sort_by_key(|id| ids::decode(id.as_str().unwrap()));
+        assert_eq!(json!(notes), encoded(&on.notes), "sheet {at}");
+        let mut views: Vec<Value> = listed["views"].as_array().unwrap().iter().map(|view| view["id"].clone()).collect();
+        views.sort_by_key(|id| ids::decode(id.as_str().unwrap()));
+        assert_eq!(json!(views), encoded(&on.views), "sheet {at}: its views are the rule's");
+    }
+
+    // Deleted, each by its own command, is gone from its list. Selection delete takes notes; a table and a
+    // revision tag have their own deletes; a placed image has no delete yet, so it stays listed.
+    let [note, table, image, tag] = here;
+    let drawing = ids::encode(d.id);
+    let items: Vec<Value> = [&note, &in_view].map(|object| json!({"type": "drawing", "drawing": drawing, "object": object})).to_vec();
+    run(&mut s, "selection.delete", json!({"items": items}));
+    run(&mut s, "drawing.table.delete", json!({"table": table}));
+    run(&mut s, "drawing.revision.tag.delete", json!({"tag": tag}));
+    let reply = run(&mut s, "drawing.inspect", json!({}));
+    assert_eq!(lists(&reply["sheets"][0]), [json!([]), json!([]), json!([image]), json!([])], "{reply}");
+    assert_eq!(reply["sheets"][0]["views"][0]["notes"], json!([]));
+    assert_eq!(lists(&reply["sheets"][1]), one(&there), "the other sheet's are kept");
+}
+
 /// Base views come in id order whatever order they were added in, and a view looking any other way
 /// than a named one is `Custom`. A chain as deep as a chain goes is listed whole, top to bottom, and
 /// the many-view drawing a record allows answers.
@@ -864,7 +1110,15 @@ fn inspect_lists_every_view_of_a_deep_or_large_drawing() {
     let looking = ViewDirection::Looking(Looking { direction: [1.0, 1.0, -1.0], up: [0.0, 0.0, 1.0], origin: [0.0; 3] });
     let mut made = vec![d.allocate_id(&mut source).unwrap()];
     let kind = ViewKind::Base { source: drawn, view: looking };
-    d.add_views([Arc::new(View { id: made[0], sheet, kind, place: ViewPlace::At([100.0, 100.0]), settings: scale(), reference_shown_percent: 0.0 })]);
+    d.add_views([Arc::new(View {
+        id: made[0],
+        sheet,
+        kind,
+        place: ViewPlace::At([100.0, 100.0]),
+        settings: scale(),
+        reference_shown_percent: 0.0,
+        label: None,
+    })]);
     for _ in 1..MAX_VIEW_DEPTH {
         let id = d.allocate_id(&mut source).unwrap();
         let parent = *made.last().unwrap();
@@ -876,6 +1130,7 @@ fn inspect_lists_every_view_of_a_deep_or_large_drawing() {
             place: ViewPlace::At([100.0, 100.0]),
             settings: ViewOverrides::default(),
             reference_shown_percent: 0.0,
+            label: None,
         })]);
         made.push(id);
     }
@@ -894,6 +1149,7 @@ fn inspect_lists_every_view_of_a_deep_or_large_drawing() {
         place: ViewPlace::At([100.0, 100.0]),
         settings: scale(),
         reference_shown_percent: 0.0,
+        label: None,
     };
     let more: Vec<Arc<View>> = (d.views.len()..MAX_VIEWS).map(|_| Arc::new(base(d.allocate_id(&mut source).unwrap()))).collect();
     let mut many = d.clone();

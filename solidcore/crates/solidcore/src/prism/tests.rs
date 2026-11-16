@@ -14,7 +14,9 @@ use std::f64::consts::{FRAC_1_SQRT_2, FRAC_PI_2, PI, TAU};
 use super::extrude::extrude_region;
 use super::measure::{equivalent, section};
 use super::profile::rational_curve;
-use super::profile::{check_regions, curve_on_frame, Loop2, ProfileRefusal, Region2, Seg2};
+use super::profile::{
+    check_regions, curve_on_frame, tapered_flange_ends, Loop2, ProfileRefusal, Region2, Seg2,
+};
 use super::read::{planar_curves, planar_pieces, PlanarPiece, Run};
 use super::sheet::{region_loops, sheet_regions};
 use crate::boolean::api_brep::{boolean_2d, Boolean2dOutcome};
@@ -722,4 +724,24 @@ fn discontinuous_splines_are_not_read() {
         assert!(read(&k, &c, c.natural_interval(), true, &xy(), 1e-5).is_none());
     }
     assert_eq!(refused, 2, "both jumps refused where they are made");
+}
+
+#[test]
+fn a_tapered_flange_changes_by_half_its_length_times_the_slope_tangent() {
+    // No slope: the given thickness at both ends.
+    assert_eq!(tapered_flange_ends(80.0, 14.0, 0.0), (14.0, 14.0));
+    // 45 degrees over an 80 mm inside length: 40 mm thinner at the toe, 40 mm thicker at the root.
+    let (toe, root) = tapered_flange_ends(80.0, 50.0, 45.0);
+    assert!(
+        (toe - 10.0).abs() < 1e-12 && (root - 90.0).abs() < 1e-12,
+        "{toe} {root}"
+    );
+    // A 5 degree taper flange channel (203 x 89, web 8.9, flange 14.2): the ends are the mean
+    // thickness less and plus 40.05 tan 5°, and they average back to it.
+    let (toe, root) = tapered_flange_ends(89.0 - 8.9, 14.2, 5.0);
+    let change = 40.05 * 5.0_f64.to_radians().tan();
+    assert!((toe - (14.2 - change)).abs() < 1e-12 && (root - (14.2 + change)).abs() < 1e-12);
+    assert!(((toe + root) / 2.0 - 14.2).abs() < 1e-12);
+    // A non-finite input gives a non-finite answer, never a panic.
+    assert!(tapered_flange_ends(f64::NAN, 1.0, 5.0).0.is_nan());
 }

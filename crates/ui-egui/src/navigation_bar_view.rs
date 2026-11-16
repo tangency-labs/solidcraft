@@ -416,6 +416,15 @@ fn display_menu(app: &SolveApp) -> Menu {
             selected(app, slot.id),
         )));
     }
+    let mut axes = row(
+        "origin_axes_across_view",
+        app.tr("prefs.origin_axes_across_view"),
+        "origin",
+        "view:origin_axes_across_view",
+        app.preferences.origin_axes_across_view,
+    );
+    axes.tip = Some(app.tr("prefs.origin_axes_across_view_help").to_owned());
+    entries.push(MenuEntry::Row(axes));
     entries.extend([MenuEntry::Separator, MenuEntry::Heading(app.tr("navbar.projection_heading").to_owned())]);
     for (perspective, key) in [(false, "navbar.orthographic"), (true, "navbar.perspective")] {
         let mut item = row(
@@ -463,10 +472,12 @@ fn display_pick(app: &mut SolveApp, item: &str) {
         "view_angles" => {
             let _ = app.run("view.angle_readout", json!({"enabled": !app.preferences.show_view_angles}));
         }
+        "origin_axes_across_view" => {
+            let _ = app.run("view.origin_axes_across_view", json!({"enabled": !app.preferences.origin_axes_across_view}));
+        }
         "agent_cursor" => app.ui.agent_cursor.show = !app.ui.agent_cursor.show,
         "agent_chat" => {
             app.agent_chat.open = !app.agent_chat.open;
-            app.preferences.agent_chat_minimized &= !app.agent_chat.open;
         }
         id => {
             if let Some(slot) = navigation_bar::find(id) {

@@ -955,6 +955,7 @@ mod tests {
             transform: IDENTITY,
             grounded,
             bom_type: None,
+            expressed_moves: Vec::new(),
         };
         // 1 frame (grounded), 2 cam, 3-6 a rigid chain to the guide 7, 8 the piston, 9 crank, 10 rod.
         let mut doc = Document { occurrences: (1..=10).map(|id| occ(id, id == 1)).collect(), ..Document::default() };

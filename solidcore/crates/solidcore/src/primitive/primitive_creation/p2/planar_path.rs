@@ -21,7 +21,9 @@
 //! as the SolidCraft fork does (tangency-labs/smlib c8f6a31, #2009; earlier the
 //! search fell back to the independently built cutting line). Off by default, failed B-reps stay with the access, as upstream.
 //! Not upstream
-//! (WR-400, tangency-labs/solidcore#837): `SweepProfilesAlongPath` asks for caps only for a profile that closes. No recursion.
+//! (WR-400, tangency-labs/solidcore#837): `SweepProfilesAlongPath` asks for caps only for a profile that closes.
+//! Not upstream (WR-780, #13687): the reference points of a mitre trim stay within the
+//! reach of the cutting line. No recursion.
 
 use super::{as_bspline, PrimitiveCreationAccess};
 use crate::curve::curve::p9::CurveSolveOptions;
@@ -155,6 +157,7 @@ fn sweep_profiles_along_path(
         orient_profile_perpendicular_to_path: false,
         move_to_profile: false,
         profile_at_path_start: false,
+        up: None,
     };
     let region = a.infinite_region(brep)?;
     let mut primitive = PrimitiveCreation::new(Some(region), 0, false);
@@ -304,7 +307,7 @@ impl PrimitiveCreation {
         let mut bspline_paths = Vec::with_capacity(paths.len());
         for path in paths {
             bspline_paths
-                .push(as_bspline(path).ok_or_else(|| {
+                .push(as_bspline(a.kernel(context_of)?, path)?.ok_or_else(|| {
                     SolidError::invalid_input(OP, "path curve is not a B-spline")
                 })?);
         }
@@ -589,9 +592,15 @@ impl PrimitiveCreation {
                     cutting.clone_from(&temp_cutting);
                 }
                 if let Some(curve) = cutting.as_ref() {
-                    // determine reference points on either side of the cutting line
-                    let reference1 = before[0] + (-before[1] * 0.1);
-                    let reference2 = after[0] + (after[1] * 0.1);
+                    // determine reference points on either side of the cutting line.
+                    // Upstream steps 0.1 along each leg. The cutting line reaches only
+                    // `extend` from the corner, so for a small profile the foot of that
+                    // point lies past the end of the line, where the trim finds it on
+                    // neither side. The step stays within the reach of the line (not
+                    // upstream, #13687, WR-780).
+                    let step = 0.1_f64.min(extend * 0.5);
+                    let reference1 = before[0] + (-before[1] * step);
+                    let reference2 = after[0] + (after[1] * step);
                     let before_id = before_brep.ok_or_else(|| {
                         SolidError::primitive_missing(OP, "the previous piece's B-rep")
                     })?;

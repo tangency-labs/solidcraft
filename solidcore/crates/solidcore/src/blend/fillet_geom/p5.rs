@@ -1777,23 +1777,37 @@ impl FilletBrep {
                 }
             }
         }
+        let mut tol = edge::tolerance(target, orig_edge)?;
+        tol = smax(tol, the_corner.this_approx_tol_3d());
+        // The edge runs past the original edge's end: a face the corner did not extend whose
+        // surface does not reach an end of the edge (bounded to its face, as a record or STEP
+        // body's back face where a round's cliff overflow runs its rail past the rim, the case
+        // `fillets/12342-round-wall-edge-r5-past-the-wall-refused`) is continued as itself
+        // (its definition, a plane as a plane) past each side of its box by twice the edge's
+        // chord, so its surface holds the whole edge.
+        let ends = [self.vertex_point(start_fv)?, self.vertex_point(end_fv)?];
+        let chord = ends[1].distance(ends[0]);
         let mut surfaces: Vec<Option<Surface>> = Vec::with_capacity(2);
         for &f in faces.iter().take(2) {
             let surf = match extended_surface(the_corner, f)? {
                 Some(s) => Some(s),
-                None => target
-                    .face(f)?
-                    .surface
-                    .as_ref()
-                    .map(exact_surface)
-                    .transpose()?,
+                None => match target.face(f)?.surface.as_ref() {
+                    Some(own) if !holds(k, own, &ends, tol)? => Some(exact_surface(
+                        &own.extended_sides(
+                            k,
+                            &crate::surface::side::BoxSide::ALL,
+                            crate::surface::extend::Continuity::Natural,
+                            2.0 * chord,
+                        )?
+                        .surface,
+                    )?),
+                    own => own.map(exact_surface).transpose()?,
+                },
             };
             // SM_CAST_PTR(SmBSplineSurface, pSurf)
             surfaces.push(surf.filter(is_b_spline_surface));
         }
 
-        let mut tol = edge::tolerance(target, orig_edge)?;
-        tol = smax(tol, the_corner.this_approx_tol_3d());
         let mut dir = self.vertex_point(end_fv)? - self.vertex_point(start_fv)?;
         let angle_tol = 2.0 * PI / 180.0;
         let surface1 = surfaces.first().cloned().flatten().ok_or_else(|| {
@@ -3217,6 +3231,30 @@ impl CrossSectionTarget<'_> {
             Self::Live(b) => b,
         }
     }
+}
+
+/// Whether `surface`, within its natural domain, holds each of `points` within `tol`.
+///
+/// # Errors
+/// Those of the drops but a drop that finds no foot (which does not hold).
+fn holds(k: &Kernel, surface: &Surface, points: &[Point3], tol: f64) -> Result<bool> {
+    let domain = surface.natural_uv_domain_with_nurb(k)?;
+    for &p in points {
+        let dropped = match surface.drop_point::<crate::surface::surface::p4::NoObject>(
+            k,
+            p,
+            &domain,
+            &crate::surface::surface::p5::DropPointOptions::default(),
+        ) {
+            Ok(d) => d,
+            Err(e) if e.is_unported_or_cancelled() => return Err(e),
+            Err(_) => return Ok(false),
+        };
+        if !dropped.success || dropped.gap > tol {
+            return Ok(false);
+        }
+    }
+    Ok(true)
 }
 
 /// The surface upstream's pointer (`GetFilletSurface()`, `pFace->GetSurface()`, an

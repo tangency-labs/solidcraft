@@ -2,9 +2,10 @@ use serde::de::DeserializeOwned;
 use serde_json::{Value, json};
 
 use super::{
-    BendTableFormatParam, BendTableParams, BendTableResult, ConvertParams, FixedPoint, FlangeEdges, FlangeParams, FlangePosition, FlangeTypeParam,
-    FlatPatternParams, FlatPatternResult, FoldParams, FoldPoints, FoldPosition, HeightFromParam, HemParams, PathFlangeParams, PerforateParams,
-    PerforationPattern, ReliefShapeParam, SheetEdgePoint, SheetPoints, ThenSteps, UnfoldParams,
+    BendTableFormatParam, BendTableParams, BendTableResult, ConvertParams, DxfCurvesParam, DxfLayersParam, DxfNoteHeight, DxfTextParam,
+    ExportDxfParams, ExportDxfResult, FixedPoint, FlangeEdges, FlangeParams, FlangePosition, FlangeTypeParam, FlatPatternParams, FlatPatternResult,
+    FoldParams, FoldPoints, FoldPosition, HeightFromParam, HemParams, PathFlangeParams, PerforateParams, PerforationPattern, ReliefShapeParam,
+    SheetEdgePoint, SheetPoints, ThenSteps, UnfoldParams,
 };
 use crate::Session;
 use crate::schema::features::FeatureResult;
@@ -74,6 +75,10 @@ fn schemas_and_the_key_check_agree() {
     assert_keys(input_schema_for::<PathFlangeParams>(), &keys(&["body", "curves", "edge", "radius", "sketch"]));
     assert_keys(input_schema_for::<FlatPatternParams>(), &["body"]);
     assert_keys(input_schema_for::<BendTableParams>(), &["body", "format", "path"]);
+    assert_keys(
+        input_schema_for::<ExportDxfParams>(),
+        &["bend_lines", "bend_notes", "body", "curves", "layers", "note_height", "path", "per_body", "text"],
+    );
 }
 
 fn parse<T: DeserializeOwned>(v: Value) -> Option<T> {
@@ -202,6 +207,48 @@ fn the_value_types_match_the_readers() {
     }
     let format = input_schema_for::<BendTableFormatParam>();
     assert_eq!(format.as_value()["pattern"], "^([Cc][Ss][Vv]|[Jj][Ss][Oo][Nn])$");
+    // A DXF export's words and its note height: what the handler's own readers take.
+    words(&["exact", "EXACT", "arcs", "Arcs"], &[json!("arc"), json!(" exact"), json!("exact "), json!(""), json!(5), json!(null)], &|v| {
+        parse::<DxfCurvesParam>(v).is_some()
+    });
+    words(&["cut", "CUT", "etch", "Etch"], &[json!("engrave"), json!("cut "), json!(""), json!(true), json!(null)], &|v| {
+        parse::<DxfTextParam>(v).is_some()
+    });
+    words(&["roles", "ROLES", "single", "Single"], &[json!("one"), json!("0"), json!(""), json!(5), json!(null)], &|v| {
+        parse::<DxfLayersParam>(v).is_some()
+    });
+    for w in ["exact", "EXACT", "arcs", "Arcs"] {
+        assert_eq!(parse::<DxfCurvesParam>(json!(w)).map(|c| c.0), crate::cmd::dxf_curves(w), "{w}");
+    }
+    for w in ["cut", "CUT", "etch", "Etch"] {
+        assert_eq!(parse::<DxfTextParam>(json!(w)).map(|t| t.0), crate::cmd::dxf_text(w), "{w}");
+    }
+    for w in ["roles", "ROLES", "single", "Single"] {
+        assert_eq!(parse::<DxfLayersParam>(json!(w)).map(|l| l.0), crate::cmd::dxf_layers(w), "{w}");
+    }
+    for (v, ok) in [
+        (json!(3), true),
+        (json!(0.1), true),
+        (json!(100), true),
+        (json!(0.09), false),
+        (json!(100.5), false),
+        (json!(-1), false),
+        (json!("3"), false),
+        (json!(true), false),
+        (json!(null), false),
+    ] {
+        assert_eq!(takes::<DxfNoteHeight>(&v), ok, "{v}");
+    }
+    for mm in [0.1, 3.0, 100.0] {
+        assert_eq!(parse::<DxfNoteHeight>(json!(mm)).map(|h| h.0), crate::cmd::dxf_note_height(mm), "{mm}");
+    }
+    for (ty, want) in [
+        (input_schema_for::<DxfCurvesParam>(), "^([Ee][Xx][Aa][Cc][Tt]|[Aa][Rr][Cc][Ss])$"),
+        (input_schema_for::<DxfTextParam>(), "^([Cc][Uu][Tt]|[Ee][Tt][Cc][Hh])$"),
+        (input_schema_for::<DxfLayersParam>(), "^([Rr][Oo][Ll][Ee][Ss]|[Ss][Ii][Nn][Gg][Ll][Ee])$"),
+    ] {
+        assert_eq!(ty.as_value()["pattern"], want);
+    }
 }
 
 #[test]
@@ -244,6 +291,21 @@ fn strict_keeps_todays_errors() {
         ("sheet.export_bend_table", json!({"format": "xml"})),
         ("sheet.export_bend_table", json!({"format": " csv", "body": "Nothing"})),
         ("sheet.export_bend_table", json!({"format": "JSON", "body": "Nothing"})),
+        // A DXF export reads its words and its note height before it looks for a sheet.
+        ("sheet.export_dxf", json!({"curves": "arc"})),
+        ("sheet.export_dxf", json!({"curves": " exact"})),
+        ("sheet.export_dxf", json!({"text": "engrave"})),
+        ("sheet.export_dxf", json!({"text": true})),
+        ("sheet.export_dxf", json!({"layers": "one"})),
+        ("sheet.export_dxf", json!({"layers": 0})),
+        ("sheet.export_dxf", json!({"note_height": 0.09})),
+        ("sheet.export_dxf", json!({"note_height": 101})),
+        ("sheet.export_dxf", json!({"note_height": "3"})),
+        ("sheet.export_dxf", json!({"bend_notes": 5})),
+        ("sheet.export_dxf", json!({"bend_lines": "no"})),
+        ("sheet.export_dxf", json!({"per_body": 5})),
+        ("sheet.export_dxf", json!({"per_body": true, "body": "Base"})),
+        ("sheet.export_dxf", json!({"body": "Nothing"})),
     ]);
     // Calls that get past the handler's first checks only on a sheet.
     for (id, p) in [
@@ -686,6 +748,63 @@ fn bend_table_replies_match_the_output_schema() {
     let _ = std::fs::remove_file(&path);
     // A misspelt key: the call runs, and the reply carrying its warning still matches.
     let r = s.execute("sheet.export_bend_table", &json!({"formatt": "json"})).unwrap_or_else(|e| panic!("{e}"));
+    assert!(r.get("param_warnings").is_some(), "{r}");
+    assert!(conforms(schema, schema, &r), "{r}");
+}
+
+#[test]
+fn export_dxf_replies_match_the_output_schema() {
+    let schema = output_schema_for::<ExportDxfResult>();
+    let schema = schema.as_value();
+    let mut s = worked_sheet();
+    let body = s.model.state().sheets.first().map(|sh| sh.body.clone()).unwrap_or_default();
+    let rows = quiet(&mut s, "sheet.flat_pattern", json!({}))["bends"].as_array().map_or(0, Vec::len);
+    let dxf = |s: &mut Session, p: Value| {
+        let r = quiet(s, "sheet.export_dxf", p);
+        assert!(conforms(schema, schema, &r), "{r} doesn't match {schema}");
+        assert_eq!(r["bends"], json!(rows), "{r}");
+        r["dxf"].as_str().unwrap_or_default().to_string()
+    };
+    // No path: the DXF text, with a layer for each role and the bend lines.
+    let text = dxf(&mut s, json!({}));
+    assert!(text.contains("SECTION") && text.contains("ENDSEC"), "{text}");
+    assert_eq!(dxf(&mut s, json!({"body": body, "path": "  ", "curves": null, "text": null})), text);
+    assert_eq!(dxf(&mut s, json!({"curves": "EXACT", "text": "Cut", "layers": "Roles", "note_height": 3})), text);
+    // Bend notes add entities, leaving the bend lines out takes away the ones they draw.
+    let notes = dxf(&mut s, json!({"bend_notes": true, "note_height": 5}));
+    assert!(notes.len() > text.len(), "{notes}");
+    let bare = dxf(&mut s, json!({"bend_lines": false}));
+    assert!(bare.len() < text.len(), "{bare}");
+    // Every curve and text form, and one layer for the whole drawing: still a drawing.
+    for p in [json!({"curves": "arcs", "text": "etch"}), json!({"curves": "arcs", "bend_notes": true, "bend_lines": false, "layers": "single"})] {
+        let drawing = dxf(&mut s, p.clone());
+        assert!(drawing.contains("SECTION") && drawing.contains("ENDSEC"), "{p}: {drawing}");
+    }
+    // To a file: the reply names it, and the file holds the drawing.
+    let path = solidcraft_io::vfs::temp_dir().join(format!("solidcraft-export-dxf-{}.dxf", std::process::id()));
+    let path = path.to_string_lossy().to_string();
+    let r = quiet(&mut s, "sheet.export_dxf", json!({"path": path}));
+    assert!(conforms(schema, schema, &r), "{r} doesn't match {schema}");
+    assert_eq!((r.get("dxf"), &r["path"], &r["bends"]), (None, &json!(path), &json!(rows)), "{r}");
+    assert_eq!(std::fs::read_to_string(&path).ok(), Some(text.clone()));
+    let _ = std::fs::remove_file(&path);
+    // `per_body`: one entry per sheet body, its text without a path and its own file with one.
+    let r = quiet(&mut s, "sheet.export_dxf", json!({"per_body": true}));
+    assert!(conforms(schema, schema, &r), "{r} doesn't match {schema}");
+    let files = r["files"].as_array().cloned().unwrap_or_default();
+    assert_eq!(files.as_slice(), &[json!({"body": body, "dxf": text.clone(), "bends": rows})], "{r}");
+    let stem = solidcraft_io::vfs::temp_dir().join(format!("solidcraft-export-dxf-{}-all", std::process::id()));
+    let stem = stem.to_string_lossy().to_string();
+    let r = quiet(&mut s, "sheet.export_dxf", json!({"per_body": true, "path": stem}));
+    assert!(conforms(schema, schema, &r), "{r} doesn't match {schema}");
+    let files = r["files"].as_array().cloned().unwrap_or_default();
+    let file = files.first().and_then(|f| f["path"].as_str()).unwrap_or_default().to_string();
+    assert_eq!((files.len(), files.first().and_then(|f| f.get("dxf"))), (1, None), "{r}");
+    assert!(file.ends_with(&format!("-{body}.dxf")), "{file}");
+    assert_eq!(std::fs::read_to_string(&file).ok(), Some(text));
+    let _ = std::fs::remove_file(&file);
+    // A misspelt key: the call runs, and the reply carrying its warning still matches.
+    let r = s.execute("sheet.export_dxf", &json!({"cures": "arcs"})).unwrap_or_else(|e| panic!("{e}"));
     assert!(r.get("param_warnings").is_some(), "{r}");
     assert!(conforms(schema, schema, &r), "{r}");
 }

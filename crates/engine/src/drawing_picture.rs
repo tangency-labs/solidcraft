@@ -132,8 +132,9 @@ impl<'a> ViewPictures<'a> {
         let shown = crate::drawing_view::shown(s);
         if shown.is_ok() {
             for (id, view, centre) in crate::drawing_scene::views_on(d, sheet)? {
-                // Its lines say why it isn't drawn ([`crate::drawing_view::not_drawable_apart`]).
-                if crate::drawing_view::not_drawable_apart(&view).is_some() {
+                // Its lines say why it isn't drawn ([`crate::drawing_view::not_drawable_apart`],
+                // [`crate::drawing_view::not_cut_yet`]). A flat pattern view and a section view draw only lines.
+                if view.flat.is_some() || view.cut.is_some() || crate::drawing_view::not_drawable_apart(&view).is_some() {
                     continue;
                 }
                 // What the view chooses to show, as its lines do ([`crate::drawing_view::measured`]).

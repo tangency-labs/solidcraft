@@ -1041,6 +1041,53 @@ fn merging_adjacent_regions() {
     assert!(sides.contains(&4) && sides.contains(&3), "{sides:?}");
 }
 
+/// Two regions on either side of an arc whose end is a tangent touch: the sketch splits the
+/// touch into two corners a few hundredths of a micron apart, so each region's copy of the arc
+/// ends at its own corner (#12612, 3e-5 to 6e-5 mm apart). Ends that close are one corner of a
+/// profile ([`ENDPOINT_JOIN_TOL`]), so the arc is a shared boundary and the merged region is the
+/// square without it. Before, the copies were not matched (within 1e-5 mm only) and stayed in the
+/// outline as a slit, out along the arc and back, which SMLib's extrusion refused (status 1005).
+#[test]
+fn regions_sharing_an_arc_whose_tangent_end_is_split_merge_without_a_slit() {
+    let delta: f64 = 5e-6; // radians on r 10: 5e-5 mm
+    let q = v(10.0 * delta.cos(), 10.0 * delta.sin());
+    let quarter = solidcore_record::Region2 {
+        outer: solidcore_record::Loop2 {
+            segs: vec![
+                Seg2::Line { a: v(0.0, 0.0), b: v(10.0, 0.0) },
+                Seg2::Arc { center: v(0.0, 0.0), radius: 10.0, start: 0.0, sweep: FRAC_PI_2 },
+                Seg2::Line { a: v(0.0, 10.0), b: v(0.0, 0.0) },
+            ],
+        },
+        holes: vec![],
+    };
+    let rest = solidcore_record::Region2 {
+        outer: solidcore_record::Loop2 {
+            segs: vec![
+                Seg2::Line { a: q, b: v(20.0, 0.0) },
+                Seg2::Line { a: v(20.0, 0.0), b: v(20.0, 20.0) },
+                Seg2::Line { a: v(20.0, 20.0), b: v(0.0, 20.0) },
+                Seg2::Line { a: v(0.0, 20.0), b: v(0.0, 10.0) },
+                Seg2::Arc { center: v(0.0, 0.0), radius: 10.0, start: FRAC_PI_2, sweep: -(FRAC_PI_2 - delta) },
+            ],
+        },
+        holes: vec![],
+    };
+    let m = merge_regions(&[quarter, rest]);
+    assert_eq!(m.len(), 1, "{m:?}");
+    let r = &m[0];
+    assert!(r.holes.is_empty(), "{r:?}");
+    assert!((r.area() - 400.0).abs() < 1e-3, "{}", r.area());
+    assert!(r.outer.segs.iter().all(|s| matches!(s, Seg2::Line { .. })), "the arc is left in the outline: {r:?}");
+    assert_eq!(r.outer.segs.len(), 4, "{r:?}");
+    // Every corner closes exactly: each side starts where the one before it ends.
+    let n = r.outer.segs.len();
+    for i in 0..n {
+        let (s, t) = (r.outer.segs[i], r.outer.segs[(i + 1) % n]);
+        assert_eq!(s.end(), t.start(), "corner {i}: {r:?}");
+    }
+}
+
 /// A sketch holding `text` the way `sketch.text` makes it: one text link of the built-in font's
 /// outlines.
 fn text_sketch(text: &str, at: Vec2, height: f64) -> Sketch {
@@ -2301,4 +2348,41 @@ fn spline_handle_preview_matches_the_stored_handles() {
         .add_curve(CurveKind::Spline { pts: control_pts, control: true, degree: 3, periodic: false, nurbs: None, handles: Vec::new() }, None)
         .unwrap();
     assert!(sk.spline_handle_preview(control).is_none(), "a control point spline has no tangent handles");
+}
+
+/// A band of rounded caps over the top of a ring (two arcs of radius 15 tangent to the ring's
+/// sides, joined by a line). On the left the cap's arc and the ring's corner arc leave the ring's
+/// side along one tangent, apart only by the solver's round-off; on the right the cap's arc ends
+/// a hair short of the top line's end. Both corners must still close the band.
+#[test]
+fn a_cap_whose_arcs_leave_a_ring_along_its_sides_closes_a_profile() {
+    for lift in [1e-6, -1e-6] {
+        let mut sk = Sketch::new();
+        let p = |sk: &mut Sketch, x: f64, y: f64| sk.add_point(v(x, y), None).unwrap();
+        // The ring: sides from y = -100 to 0, corners of radius 6, top at y = 6.
+        let (bl, left, left_top) = (p(&mut sk, 0.0, -100.0), p(&mut sk, 0.0, 0.0), p(&mut sk, 6.0, 6.0));
+        let (right_top, right, br) = (p(&mut sk, 94.0, 6.0), p(&mut sk, 100.0, 0.0), p(&mut sk, 100.0, -100.0));
+        sk.add_line_pts(bl, left, None).unwrap();
+        sk.add_arc(v(6.0, 0.0), v(6.0, 6.0), v(0.0, 0.0), [None, Some(left_top), Some(left)], None).unwrap();
+        sk.add_line_pts(left_top, right_top, None).unwrap();
+        sk.add_arc(v(94.0, 0.0), v(100.0, 0.0), v(94.0, 6.0), [None, Some(right), Some(right_top)], None).unwrap();
+        sk.add_line_pts(right, br, None).unwrap();
+        sk.add_line_pts(br, bl, None).unwrap();
+        // The cap: its left arc's centre a round-off off the ring's side, its right arc ending
+        // 2e-5 along the top line from the line's end.
+        let (cap_left, cap_right) = (p(&mut sk, 15.0, 15.0), p(&mut sk, 85.0, 15.0));
+        sk.add_arc(v(15.0, lift), v(15.0, 15.0), v(0.0, 0.0), [None, Some(cap_left), Some(left)], None).unwrap();
+        sk.add_line_pts(cap_right, cap_left, None).unwrap();
+        let short = v(85.0 + 2e-5, (225.0 - 4e-10_f64).sqrt());
+        sk.add_arc(v(85.0, 0.0), v(100.0, 0.0), short, [None, Some(right), None], None).unwrap();
+        let ps = find_profiles(&sk);
+        let band = ps.iter().find(|p| p.outer_curves.contains(&sk.curves[6].id));
+        let Some(band) = band else { panic!("lift {lift}: no profile through the cap: {ps:?}") };
+        // The cap less the ring's rounded top: 70 x 15 + two quarter discs of 15 - (88 x 6 + two of 6).
+        let want = 70.0 * 15.0 + PI * 225.0 / 2.0 - (88.0 * 6.0 + PI * 36.0 / 2.0);
+        assert!((band.area - want).abs() < 1e-3, "lift {lift}: {} vs {want}", band.area);
+        for p in &ps {
+            assert!(p.region.outer.is_closed(1e-6), "lift {lift}: {:?}", p.outer_curves);
+        }
+    }
 }

@@ -1,5 +1,5 @@
 //! `SmFace`, part 1: construction and destruction, loop insertion and removal, inner
-//! loop deletion, the surface swap and replacement, orientation flip, UV trim curve
+//! loop deletion, the surface swap and replacement, orientation flip and turn-over, UV trim curve
 //! removal, the trim boundary and UV domain built from the UV trim curves, the
 //! rectangular-trim test,
 //! geometry shrinking, and the seam repair of faces on periodic surfaces (`MoveSeam`,
@@ -14,7 +14,9 @@
 //! | [`calculate_uv_domain_from_uv_trim_curves`], [`calculate_uv_domain_from_uv_trim_curves_into`], [`UvDomainFromTrim`] | `SmFace::CalculateUVDomainFromUVTrimCurves` |
 //! | [`create_oriented_trim_boundary`], [`OrientedTrimBoundary`] | `SmFace::CreateOrientedTrimBoundary` |
 //! | [`find_if_rectangular_trim`], [`RectangularTrim`] | `SmFace::FindIfRectangularTrim`          |
+//! | [`trim_boundary_rectangle`]                  | (none: `FindIfRectangularTrim` without its edge count) |
 //! | [`flip_face_orientation`]                    | `SmFace::FlipFaceOrientation`                |
+//! | [`turn_over`]                                | (none: [`swap_uv`] on a face of one shell)   |
 //! | [`set_surface`], [`set_surface_notified`]    | `SmFace::SetSurface`                         |
 //! | [`insert_loop`]                              | `SmFace::InsertLoop`                         |
 //! | [`remove_loop`]                              | `SmFace::RemoveLoop`                         |
@@ -1056,6 +1058,15 @@ pub struct RectangularTrim {
     pub natural: bool,
 }
 
+impl RectangularTrim {
+    /// Not rectangular: the "inside out" domain, neither flag.
+    pub const NONE: Self = Self {
+        uv_domain: Extent2d::new(),
+        rectangular: false,
+        natural: false,
+    };
+}
+
 /// `FindIfRectangularTrim`: whether the face is bounded by one loop of four iso UV
 /// trim curves (after filling pole gaps), and that rectangle.
 ///
@@ -1071,22 +1082,43 @@ pub fn find_if_rectangular_trim(
     f: FaceId,
     key_of: &dyn Fn(EntityRef) -> ObjectRef,
 ) -> Result<RectangularTrim> {
-    // init return value
-    let mut out = RectangularTrim {
-        uv_domain: Extent2d::new(),
-        rectangular: false,
-        natural: false,
-    };
-
     // naturally trimmed faces may only have 1 loop
     let face_loops = fp2::loops(b, f, false, None)?;
     let [l] = face_loops.as_slice() else {
-        return Ok(out);
+        return Ok(RectangularTrim::NONE);
     };
 
     // naturally trimmed face outer loops with no poles have 4 edges, with poles 3 or 2.
     let n_edges = lu1::loop_edges(b, *l)?.len();
     if !(2..=4).contains(&n_edges) {
+        return Ok(RectangularTrim::NONE);
+    }
+
+    trim_boundary_rectangle(k, b, f, key_of)
+}
+
+/// (Not upstream) [`find_if_rectangular_trim`] without its count of the loop's edges: the
+/// face's trim boundary alone decides, one loop that is four iso UV curves once its gaps
+/// at the surface's singularities are filled ([`create_oriented_trim_boundary`]), and
+/// whether their rectangle is the surface's natural domain. The count, which expects a
+/// pole to be an edge, refuses a face whose pole is a point: the face
+/// `CreateFaceFromSurface` makes on a sphere's whole box has one edge, its seam used twice
+/// (the degenerate pole sides are dropped), and its boundary is the natural rectangle.
+///
+/// # Errors
+///
+/// As [`find_if_rectangular_trim`].
+pub fn trim_boundary_rectangle(
+    k: &Kernel,
+    b: &mut Brep,
+    f: FaceId,
+    key_of: &dyn Fn(EntityRef) -> ObjectRef,
+) -> Result<RectangularTrim> {
+    // init return value
+    let mut out = RectangularTrim::NONE;
+
+    // naturally trimmed faces may only have 1 loop
+    if fp2::loops(b, f, false, None)?.len() != 1 {
         return Ok(out);
     }
 
@@ -1173,6 +1205,36 @@ pub fn flip_face_orientation(b: &mut Brep, f: FaceId) -> Result<()> {
 
     face_notify(b, f, NotifyOperation::PostEdit)?;
     Ok(())
+}
+
+/// (Not upstream) Turns face `f` over: [`swap_uv`] (`SmFace::SwapUV`), which swaps the
+/// surface's `u` and `v` (its natural normal the other way), mirrors the UV trims and makes
+/// the other face use and loop uses primary with the orientations to match, so the face's
+/// side is the other one and a valid face stays valid (its upward use the Same one, its loops
+/// counter-clockwise about the new normal). The surface is swapped exactly, for every kind
+/// [`swap_uv`] takes; the trims are mirrored about `u = v`. Turning a face over twice gives its
+/// uses, loops and surface back.
+///
+/// Only a face both of whose uses lie in one shell (a face of a sheet) is turned: a face
+/// between two shells has the side its material gives it.
+///
+/// # Errors
+///
+/// [`SolidError::InvalidInput`] for a face whose uses lie in two shells, or without face use
+/// or mate; those of [`swap_uv`].
+pub fn turn_over(k: &Kernel, b: &mut Brep, f: FaceId) -> Result<()> {
+    let top = fp2::upward_faceuse(b, f)?
+        .ok_or_else(|| SolidError::topology_missing(OP, "the face's upward face use"))?;
+    let bot = eu1::faceuse_mate(b, top)?.ok_or_else(|| {
+        SolidError::topology_missing(OP, "the mate of the face's upward face use")
+    })?;
+    if b.faceuse(top)?.shell != b.faceuse(bot)?.shell {
+        return Err(SolidError::invalid_input(
+            OP,
+            "turning over a face between two shells, whose side its material gives",
+        ));
+    }
+    swap_uv(k, b, f)
 }
 
 /// `SetSurface`: gives the face `surface` (owned by the face, `this`) and its natural

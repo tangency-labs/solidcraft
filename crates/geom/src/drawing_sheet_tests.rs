@@ -318,6 +318,17 @@ fn rows_skip_i_and_o_and_letters_go_on_past_z() {
     assert_eq!(rows, "ABCDEFGHIJ");
 }
 
+/// A view's letters (#13044) skip I, O and Q, then go on past Z as a grid's rows do.
+#[test]
+fn view_letters_skip_i_o_and_q() {
+    assert_eq!((0..23).filter_map(view_letter).collect::<String>(), "ABCDEFGHJKLMNPRSTUVWXYZ");
+    assert_eq!(view_letter(23).as_deref(), Some("AA"));
+    assert_eq!(view_letter(23 + 23 * 23).as_deref(), Some("AAA"));
+    for i in 0..2000 {
+        assert!(view_letter(i).is_some_and(|l| !l.contains(['I', 'O', 'Q'])), "{i}");
+    }
+}
+
 #[test]
 fn hostile_sizes_and_profiles_are_refused() {
     let custom = |a: f64, b: f64| Sheet { size: SheetSize::Custom { sides_mm: [a, b] }, orientation: Orientation::Landscape };
@@ -712,4 +723,15 @@ fn a_border_on_paper_draws_only_what_its_profile_has() {
     assert_eq!(paper(DrawingBorderProfile { centring_mark_mm: None, ..iso() }, &a3), [1, 1 + 2 * 7 + 2 * 5]);
     assert_eq!(paper(DrawingBorderProfile { grid: GridRule::Equal { columns: 1, rows: 1 }, ..iso() }, &a3), [1, 1, 4]);
     assert_eq!(paper(iso(), &Sheet::standard(PaperSize::A4, Orientation::Portrait)), [1, 1 + 2 * 3 + 2 * 5, 4]);
+}
+
+#[test]
+fn alternate_letter_alphabets_share_the_bijective_sequence_and_reject_unbounded_work() {
+    assert_eq!(letters_from_alphabet(0, b"AB").as_deref(), Some("A"));
+    assert_eq!(letters_from_alphabet(2, b"AB").as_deref(), Some("AA"));
+    assert_eq!(letters_from_alphabet(5, b"AB").as_deref(), Some("BB"));
+    assert_eq!(letters_from_alphabet(6, b"AB").as_deref(), Some("AAA"));
+    assert_eq!(letters_from_alphabet(23, b"ABCDEFGHJKLMNPRSTUVWXYZ").as_deref(), Some("AA"));
+    assert_eq!(letters_from_alphabet(usize::MAX, b""), None);
+    assert_eq!(letters_from_alphabet(usize::MAX, b"A"), None);
 }
