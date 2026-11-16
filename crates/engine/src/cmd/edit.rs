@@ -2193,7 +2193,20 @@ fn redefine(s: &mut Session, p: &Value) -> Result<Value> {
     {
         parameters.entry("names").or_insert_with(|| json!(names));
     }
+    // A hole's and a primitive's `targets` are the bodies it takes part in: an edit that names
+    // them changes them (#17623), rather than the old participants overriding them.
+    let targets_are_participants = matches!(
+        old.kind,
+        FeatureKind::Hole { .. }
+            | FeatureKind::Box { .. }
+            | FeatureKind::Cylinder { .. }
+            | FeatureKind::Sphere { .. }
+            | FeatureKind::Torus { .. }
+            | FeatureKind::Cone { .. }
+    ) && params.get("participants").is_none()
+        && params.get("targets").and_then(Value::as_array).is_some_and(|t| !t.is_empty());
     if !old.participants.is_empty()
+        && !targets_are_participants
         && let Some(parameters) = params.as_object_mut()
     {
         parameters.entry("participants").or_insert_with(|| json!(old.participants));
@@ -2441,7 +2454,7 @@ fn redefine(s: &mut Session, p: &Value) -> Result<Value> {
         slot.edge_names = new.edge_names;
         slot.face_names = new.face_names;
         slot.param_names = param_names;
-        if params.get("participants").is_some() {
+        if params.get("participants").is_some() || targets_are_participants {
             slot.participants = new.participants;
         }
     }
