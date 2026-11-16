@@ -543,8 +543,9 @@ fn new_lines(split: &Body, h: &History) -> Result<Vec<Vec<Vec3>>> {
 /// is, and where that does not cut the body into closed solids, the whole sheet as it is), or
 /// one sketch line swept along its direction. Every part is closed with the piece of the
 /// tool's surface inside the body; parts on the tool's back come first, each side's in
-/// face order. A body the tool misses comes back whole. Each part's history is over `[body]`:
-/// its faces the body's (or pieces of them), the section new.
+/// face order. A body the tool misses comes back whole, and so does one it only nicks: a face
+/// that ends inside the body leaves no part that is a closed solid. Each part's history is over
+/// `[body]`: its faces the body's (or pieces of them), the section new.
 pub fn split_body(body: &Body, tool: &SplitTool) -> Result<Vec<Body>> {
     let _span = solidcraft_profile::span("kernel", "split_body");
     body.require_brep(SPLIT_BODY)?;
@@ -964,6 +965,21 @@ mod tests {
         let nicked = split_body(&cube, &SplitTool::Face { body: &short, face: first }).unwrap();
         let info: Vec<_> = nicked.iter().map(|b| (measure(b).unwrap().volume, b.face_count(), b.lumps().unwrap().len())).collect();
         assert_eq!(nicked.len(), 1, "{info:?}");
+    }
+
+    /// A face that ends inside the body only nicks it: Split Body leaves the body whole, never a
+    /// lamina and a body with a slit, neither of them closed (#17192). One span alone runs over
+    /// x -3…3 and ends inside the cube 0…10.
+    #[test]
+    fn a_face_that_ends_inside_the_body_leaves_it_whole() {
+        let sheet = spans(&[[5.0, 5.0, 4.0, 4.0]]);
+        assert_eq!(sheet.face_count(), 1);
+        let cube = crate::box_solid(Vec3::ZERO, Vec3::new(10.0, 10.0, 10.0)).unwrap();
+        let parts = split_body(&cube, &SplitTool::Face { body: &sheet, face: 0 }).unwrap();
+        let info: Vec<_> = parts.iter().map(|b| (measure(b).unwrap().volume, b.face_count())).collect();
+        assert_eq!(parts.len(), 1, "{info:?}");
+        assert!(rel(measure(&parts[0]).unwrap().volume, 1000.0) < 1e-9, "{info:?}");
+        assert_eq!(parts[0].face_count(), 6, "{info:?}");
     }
 
     /// A face of a creased sheet that cuts the body through on its own keeps cutting alone: a flat

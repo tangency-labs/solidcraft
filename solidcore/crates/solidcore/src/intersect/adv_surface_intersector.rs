@@ -68,9 +68,8 @@
 //!   [`SolidError::Unported`], which always propagates (also where
 //!   `FindInteriorCurves` skips a node pair whose `ComputePointValues` fails).
 //!   As the fork does (#483; fork e7ebc8d, since #2009), a failed alignment angle
-//!   aligns nothing; with `brep_edit_statuses_pass_on` the node boxes' intersection
-//!   and `tp_Newton`'s grown patches pass their statuses on. The intersector captures
-//!   that policy on construction. Public point computation
+//!   aligns nothing, and the node boxes' intersection and `tp_Newton`'s grown patches
+//!   pass their statuses on. Public point computation
 //!   retains its documented `SM_ERR` normalization of singularity failures.
 //! - **Base virtuals.** `FindInteriorCurves` calls the base `ComputePointValues` and
 //!   `TraceCurve` ([`SurfaceIntersector`] parts 2 and 4); the only virtual they reach
@@ -1118,12 +1117,8 @@ impl<'t, O: SolutionObject + 't> GlobalSolve<'t, O> for AdvSurfaceIntersector<'_
                 // Update the bounding box information in the solution.
                 let mut bbox = surface_node1.bbox;
                 bbox.expand_absolute(self.solver.tolerance_3d);
-                let mut result = match bbox.intersect(&surface_node2.bbox) {
-                    Ok(r) => r,
-                    // (fork e7ebc8d passes this status on: `SER`)
-                    Err(e) if self.base.edit_statuses => return Err(e),
-                    Err(_) => Extent3d::new(),
-                };
+                // (fork e7ebc8d passes this status on: `SER`)
+                let mut result = bbox.intersect(&surface_node2.bbox)?;
 
                 let solutions = &mut self.solver.solutions;
                 if solutions.is_empty() {

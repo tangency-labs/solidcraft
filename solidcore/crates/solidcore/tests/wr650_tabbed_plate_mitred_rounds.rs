@@ -160,7 +160,6 @@ fn round() -> (f64, Result<(bool, f64), i32>) {
     k.fixes.box_face_failures_propagate = true;
     k.fixes.bspline_trim_preserves_uv_spans = true;
     k.fixes.classify_edge_interval = true;
-    k.fixes.cover_refuses_folded_continuation = true;
     k.fixes.curve_contacts_at_curve_ends = true;
     k.fixes.curve_loop_normal_from_area = true;
     k.fixes.degenerate_proto_edge_in_one_vertex = true;
@@ -179,7 +178,6 @@ fn round() -> (f64, Result<(bool, f64), i32>) {
     k.fixes.found_torus_sphere_keep_tested_nurb = true;
     k.fixes.good_drop_result_distances_in_order = true;
     k.fixes.imprint_extends_edge_to_proto_vertex = true;
-    k.fixes.imprint_reuses_coincident_face_edge = true;
     k.fixes.join_touching_loops = true;
     k.fixes.keep_operand_uv_trims = true;
     k.fixes.linear_sweep_arc_is_cylinder = true;
@@ -188,12 +186,8 @@ fn round() -> (f64, Result<(bool, f64), i32>) {
     k.fixes.local_operation_step_walls = true;
     k.fixes.new_edge_vertex_tolerance_covers_gap = true;
     k.fixes.offset_analytic_mate_edges = true;
-    k.fixes.offset_collapsed_rounds_mated = true;
-    k.fixes.offset_extended_edges_mated = true;
     k.fixes.offset_extension_as_itself = true;
     k.fixes.offset_extension_from_base = true;
-    k.fixes.offset_resolve_crossing_loops = true;
-    k.fixes.offset_stitch_at_body_tolerance = true;
     k.fixes.point_solve_keeps_triangle_guess = true;
     k.fixes.proto_edge_self_loop_on_vertex_degenerate = true;
     k.fixes.proto_edge_splits_at_captured_vertices = true;
@@ -208,7 +202,6 @@ fn round() -> (f64, Result<(bool, f64), i32>) {
     k.fixes.ssi_tangent_contact_points = true;
     k.fixes.ssi_tangent_curve_tracer = true;
     k.fixes.ssi_trace_tangent_curves_once = true;
-    k.fixes.thicken_planar_side_walls = true;
     k.fixes.transform_model_size_from_body_box = true;
     k.fixes.transform_scales_each_tolerance = true;
     k.fixes.uv_trim_corner_end_points_only = true;

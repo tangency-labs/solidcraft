@@ -1301,6 +1301,11 @@ pub enum FeatureKind {
         #[serde(default = "zero_expr")]
         #[walk(length = "Margin")]
         margin: Expr,
+        /// A margin for each side instead of `margin`: -X, +X, -Y, +Y, -Z, +Z. A negative one sets
+        /// that side into the bodies.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[walk(length = ["-X margin", "+X margin", "-Y margin", "+Y margin", "-Z margin", "+Z margin"])]
+        margins: Option<[Expr; 6]>,
     },
     /// A tube along a chain of sketch curves (solid, or hollow with a wall thickness).
     Pipe {
@@ -5112,6 +5117,21 @@ impl Document {
         self.solve_sketch_with_analysis(vals, sk, stored, moved_from, solidcraft_sketch::Analysis::Full)
     }
 
+    /// Take out of sketch `id`'s 3D report the freedoms of its motion traces' curves (#10608):
+    /// the motion places them and they take no 3D constraints, so they are no freedoms to show.
+    pub fn discount_traces(&self, id: u64, sk: &Sketch, report: &mut solidcraft_sketch::SolveReport) {
+        let Some(w) = report.wires.as_mut() else { return };
+        let fits: usize = self
+            .assembly
+            .traces
+            .iter()
+            .filter(|t| t.sketch == id)
+            .filter_map(|t| sk.wires.iter().find(|w| w.id == t.wire && w.link.is_none()))
+            .map(|w| w.fit.len())
+            .sum();
+        w.dof = w.dof.saturating_sub(fits.saturating_mul(3));
+    }
+
     /// [`Self::solve_sketch`] with the diagnostics needed by an internal edit. Parameter
     /// application, continuation and offset refreshes run regardless of the requested level.
     /// Model evaluation uses `solve_sketch` so its published report always has full diagnostics.
@@ -5175,6 +5195,11 @@ impl Document {
             {
                 report = retried;
             }
+        }
+        // The 3D constraints (#10608), reported apart: the planar report is the planar sketch's,
+        // which planar edits compare their freedoms and conflicts with.
+        if sk.wires.iter().any(|w| w.link.is_none() && !w.fit.is_empty()) {
+            report.wires = Some(sk.solve_wires_with(None, analysis != solidcraft_sketch::Analysis::StatusOnly));
         }
         Ok(report)
     }
