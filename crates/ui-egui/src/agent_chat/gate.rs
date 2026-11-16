@@ -164,7 +164,7 @@ pub fn command(id: &str, params: &Value, undo_left: usize) -> Verdict {
 
 /// One request from the agent's tools: `method` and its `params` as the control channel has them.
 pub fn request(method: &str, params: &Value, undo_left: usize) -> Verdict {
-    if !METHODS.contains(&method) {
+    if !METHODS.contains(&method) && !(method == "ui.help" && params.get("item").is_none_or(Value::is_null)) {
         return Verdict::Refuse(format!("`{method}` is not available in the agent chat"));
     }
     match method {
@@ -386,6 +386,19 @@ mod tests {
     #[test]
     fn the_mcp_server_may_read_its_output_options() {
         assert_eq!(request("mcp.options", &json!({}), 0), Verdict::Run { change: false });
+    }
+
+    #[test]
+    fn the_mcp_server_may_read_build_information_without_running_help_actions() {
+        for params in [json!({}), json!({"item": null})] {
+            assert_eq!(request("ui.help", &params, 0), Verdict::Run { change: false }, "{params}");
+        }
+        for item in ["about", "updates", "shortcuts", "report", "crashes", "docs", "messages", "install_cli", ""] {
+            assert!(matches!(request("ui.help", &json!({"item": item}), 0), Verdict::Refuse(_)), "{item}");
+        }
+        for item in [json!(false), json!(0), json!([]), json!({})] {
+            assert!(matches!(request("ui.help", &json!({"item": item}), 0), Verdict::Refuse(_)), "{item}");
+        }
     }
 
     #[test]

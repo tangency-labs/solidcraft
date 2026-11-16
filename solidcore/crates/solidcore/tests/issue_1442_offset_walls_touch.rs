@@ -19,6 +19,8 @@
 #[path = "support/offset_fixture.rs"]
 mod offset_fixture;
 
+#[path = "support/volume_leak.rs"]
+mod volume_leak;
 use offset_fixture::{planar_faces_at, volume, Notifications};
 use solidcore::boolean::api_brep::boolean_difference;
 use solidcore::error::offset::{OffsetFailure, WallContact};
@@ -143,10 +145,13 @@ fn issue_1442_plate_hole_crossing_side_still_resolved() {
     let want = 40.0 * 40.0 * 10.0 - pi * 2.0 * 2.0 * 10.0 - cavity;
     let v = volume(&k, &mut b).unwrap();
     // to the integrator's 1e-6, and main's value (bit-identical with the flag on and off
-    // there) to 1e-12
+    // there) to 1e-12. Main's value was 4554.583387224843 (7.1e-9 short of the closed form)
+    // until `brep_volume` closed the tolerant edges' gaps (#16735); now 2.1e-9 short
+    // (MEASURED), the move within the old leak bound.
     assert!((v - want).abs() <= 1e-6 * want, "{v} vs {want}");
-    let pinned = 4_554.583_387_224_843_f64;
+    let pinned = 4_554.583_409_746_097_f64;
     assert!((v - pinned).abs() <= 1e-12 * pinned, "{v} vs {pinned}");
+    volume_leak::assert_moved_by_the_old_leak(&k, &mut b, 4_554.583_387_224_843, pinned, 1e-6);
 }
 
 #[test]
