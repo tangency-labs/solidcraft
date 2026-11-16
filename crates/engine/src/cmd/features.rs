@@ -892,7 +892,7 @@ pub(super) fn add_feature_in(s: &mut Session, p: &Value, kind: FeatureKind, worl
 
 /// The reply of a command that made or changed the feature `id`, evaluated now: the feature's
 /// error if it fails, else the bodies it made and the ones it changed or removed since `before`.
-pub(super) fn feature_reply(s: &Session, id: u64, before: &solidcraft_doc::ModelState) -> Result<Value> {
+pub(super) fn feature_reply(s: &mut Session, id: u64, before: &solidcraft_doc::ModelState) -> Result<Value> {
     let r = s.model.result(id).cloned();
     if let Some(r) = &r
         && let Some(e) = r.error.clone()
