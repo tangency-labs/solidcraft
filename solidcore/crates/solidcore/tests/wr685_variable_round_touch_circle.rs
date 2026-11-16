@@ -350,8 +350,9 @@ fn a_cliff_overflows_variable_round_holds_its_law_on_its_touch_circles() {
         if pinned {
             assert!(rel(v, want) < 1e-12, "{r0} -> {r1}: {v} vs {want}");
         }
-        // `closed` is the cone's own volume to its print's half ulp (PROVEN: the section's
-        // closed form, `cliff_closed_form`, to 1e-11)
+        // `closed` is the cone's own volume to its print's half ulp (the section's closed form,
+        // `cliff_closed_form`; ARGUED to 1.3e-10 by its quadrature's panel agreement, and a
+        // 50-digit evaluation agrees)
         let exact = cliff_closed_form(r0, r1);
         assert!(
             (closed - exact).abs() <= 5e-10,
@@ -360,11 +361,17 @@ fn a_cliff_overflows_variable_round_holds_its_law_on_its_touch_circles() {
         let bound = l.new_bound + 2.0 * (v - l.volume).abs() + CLOSED_FORM_SPREAD;
         // the round's skin is a B-spline through the balls' circles, not their cone: the body
         // differs from the closed form by the volume between the two, which the bound does not
-        // hold (2 -> 50: -2.890e-6, the skin 1.1e-8 deep at most). MEASURED: a midpoint sum,
-        // whose grid halved moves it by under 1% of the bound
-        let skin = skin_off_its_cone(&k, &b, r0, r1, 800);
-        let skin_half = skin_off_its_cone(&k, &b, r0, r1, 400);
-        eprintln!("{r0} -> {r1}: skin off its cone {skin:e} (grid halved {skin_half:e})");
+        // hold (2 -> 50: -2.890e-6). MEASURED: a midpoint sum, whose grid halved moves it by
+        // under 1% of the bound; the skin itself must stay on the cone ([`SKIN_DEPTH`])
+        let (skin, deepest) = skin_off_its_cone(&k, &b, r0, r1, 800);
+        let (skin_half, _) = skin_off_its_cone(&k, &b, r0, r1, 400);
+        eprintln!(
+            "{r0} -> {r1}: skin off its cone {skin:e} (grid halved {skin_half:e}), {deepest:e} deep"
+        );
+        assert!(
+            deepest <= SKIN_DEPTH,
+            "{r0} -> {r1}: the skin is {deepest:e} off its balls' cone"
+        );
         assert!(
             (skin - skin_half).abs() < 1e-2 * bound,
             "{r0} -> {r1}: {skin} vs {skin_half}"
@@ -395,8 +402,9 @@ fn off_the_cone(p: Point3, r0: f64, r1: f64) -> f64 {
 
 /// The volume between the cliff round's skin (its one face on no plane) and the balls' cone,
 /// inside the box: `sum off_the_cone |S_u x S_v| du dv` over the midpoints of an `n x n` grid
-/// of the skin's domain (positive where the skin keeps more than the balls).
-fn skin_off_its_cone(k: &Kernel, b: &Brep, r0: f64, r1: f64, n: usize) -> f64 {
+/// of the skin's domain (positive where the skin keeps more than the balls), and the
+/// farthest of those grid points from the cone.
+fn skin_off_its_cone(k: &Kernel, b: &Brep, r0: f64, r1: f64, n: usize) -> (f64, f64) {
     let mut skins = faces(b, None).unwrap().into_iter().filter(|&f| {
         !face::surface(b, f)
             .unwrap()
@@ -412,6 +420,7 @@ fn skin_off_its_cone(k: &Kernel, b: &Brep, r0: f64, r1: f64, n: usize) -> f64 {
     let (du, dv) = ((hi.x - lo.x) / n as f64, (hi.y - lo.y) / n as f64);
     let at = |u: f64, v: f64| s.evaluate_point(k, Point2::new(u, v)).unwrap();
     let mut sum = 0.0;
+    let mut deepest = 0.0f64;
     for i in 0..n {
         for j in 0..n {
             let (u, v) = (lo.x + (i as f64 + 0.5) * du, lo.y + (j as f64 + 0.5) * dv);
@@ -425,10 +434,12 @@ fn skin_off_its_cone(k: &Kernel, b: &Brep, r0: f64, r1: f64, n: usize) -> f64 {
             let (hu, hv) = (1e-6 * (hi.x - lo.x), 1e-6 * (hi.y - lo.y));
             let su = (at(u + hu, v) - at(u - hu, v)) * (0.5 / hu);
             let sv = (at(u, v + hv) - at(u, v - hv)) * (0.5 / hv);
-            sum += off_the_cone(p, r0, r1) * su.cross(sv).length() * du * dv;
+            let off = off_the_cone(p, r0, r1);
+            deepest = deepest.max(off.abs());
+            sum += off * su.cross(sv).length() * du * dv;
         }
     }
-    sum
+    (sum, deepest)
 }
 
 /// The cliff round's volume in closed form: the box 10 x 20 x 30 less, in each plane y across
@@ -442,13 +453,13 @@ fn skin_off_its_cone(k: &Kernel, b: &Brep, r0: f64, r1: f64, n: usize) -> f64 {
 /// at v = r(y), falling between them. So the corner's area is `int_0^min(10, r) min(30, h)`,
 /// and h = 30 at u = h(30) when r > 30 (on these laws the arc leaves the bottom before the far
 /// face: asserted). Gauss-Legendre on the pieces between the kinks r = 10 and r = 30, with
-/// `u = s^2` taking out h's square root at u = 0; 4 and 8 panels of 20 points agree to 1e-11
-/// (asserted). A 50-digit evaluation of the same integrals gives 5802.443145422674,
+/// `u = s^2` taking out h's square root at u = 0; 4 and 8 panels of 20 points agree to 1e-13
+/// of the corner (asserted; ARGUED, the agreement is observed, not bounded). A 50-digit evaluation of the same integrals gives 5802.443145422674,
 /// 5503.887121530622, 5184.057273580749 and 4693.608889859801 for 2 -> 11, 20, 30, 50, and
 /// the cone's 11956.222426735870 (as [`CONE_VOLUME`]).
 fn cliff_closed_form(r0: f64, r1: f64) -> f64 {
     let (a, b) = (cliff_corner(r0, r1, 4), cliff_corner(r0, r1, 8));
-    assert!((a - b).abs() < 1e-11, "{a} vs {b}");
+    assert!((a - b).abs() < 1e-13 * b, "{a} vs {b}");
     6000.0 - b
 }
 
@@ -524,6 +535,11 @@ fn gauss_legendre(n: usize) -> (Vec<f64>, Vec<f64>) {
     }
     (x, w)
 }
+
+/// How far the cliff rounds' skins may lie from their balls' cone, inside the box (MEASURED:
+/// 2.4e-9 for 2 -> 11, 1.1e-8 for 2 -> 50, the deepest; their construction's approximation
+/// tolerance is far looser, so this pins the skins as built, with twice the room).
+const SKIN_DEPTH: f64 = 2.2e-8;
 
 /// The closed forms' own spread: `wr631_cliff_overflow_construction`'s Gauss-Legendre
 /// quadrature at 5 and 10 panels along the edge agree to 1e-9, printed to 1e-9 (half an
