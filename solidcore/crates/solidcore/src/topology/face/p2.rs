@@ -44,27 +44,25 @@
 //!   dereferences a null pointer (a face without surface or face use, an edge use
 //!   without edge, vertex use or UV trim curve, an empty array's `GetLast`) the port
 //!   returns [`SolidError::InvalidInput`]. `SER` / `NER` returns are
-//!   [`SolidError::Upstream`] (`SM_ERR`) or the callee's error.
+//!   topology failures ([`crate::error::topology::TopologyFailure`], status `SM_ERR` or
+//!   `SM_ERR_NULL_POINTER`) or the callee's error.
 //! - **`sm_CheckSeamCrossing`** returns `SM_SUCCESS` (`1000`, true as an
 //!   `SmBoolean`) for a surface closed in neither direction; [`check_seam_crossing`]
-//!   returns `true` there by default (`plan/upstream-issues.md`), and `false` with
-//!   the opt-in fix [`UpstreamFixes::check_seam_crossing_unclosed`](crate::kernel::UpstreamFixes::check_seam_crossing_unclosed).
-//!   The unused surface argument is dropped.
+//!   returns `false` there: no seam was crossed (WR-87). The unused surface argument
+//!   and the kernel are dropped.
 //! - **`SmPrecisePropertyLayout`** indices are `usize`; `0` still means "not selected".
 //!   The evaluators take the derivative array as a slice and return
 //!   [`SolidError::InvalidInput`] for an index outside it (upstream writes out of
 //!   bounds).
 //! - **Statuses ignored upstream** (`ComputeUVPoint` in `sm_AreConnected` and
-//!   `sm_FixUVTrimCurves`, the vertex/edge evaluations of `sm_FixUVTrimCurves`,
-//!   `GetEnds`, the surface evaluations and the
-//!   `CalculateUVDomainFromUVTrimCurves` of `GetPointsInFace`) are
-//!   ignored; [`SolidError::Unported`] still propagates. A failed `ComputeUVPoint`
-//!   leaves the caller's default point ([`Point2::UNDEF`]); a failed `DropPoint` is
-//!   no drop point; a failed evaluation keeps the previous value (initially
-//!   [`Vec3::UNDEF`]).
-//!   With the opt-in `Kernel::fixes.query_statuses_pass_on` (WR-663) `sm_AreConnected`
-//!   shows ends whose UV points cannot be computed not connected, as the fork
-//!   (tangency-labs/smlib 6997962).
+//!   `sm_FixUVTrimCurves`, the vertex/edge evaluations and drops of
+//!   `sm_FixUVTrimCurves`, `GetEnds`, the surface evaluations and the
+//!   `CalculateUVDomainFromUVTrimCurves` of `GetPointsInFace`). The port returns the
+//!   statuses the fork passes on (`SER`) and `sm_AreConnected` shows ends whose UV
+//!   points cannot be computed not connected, as the fork (WR-663, tangency-labs/smlib
+//!   6997962); the others stay ignored ([`SolidError::Unported`] still propagates): a
+//!   failed `DropPoint` is no drop point, a failed evaluation keeps the previous value
+//!   (initially [`Vec3::UNDEF`]).
 //! - **`sm_FixUVTrimCurves` opt-in fix** (WR-255, tangency-labs/solidcore#959/#570, the
 //!   fork's tangency-labs/smlib@5af7070). Upstream drops the vertex's UV point onto
 //!   each of the two curves, `Trim`s the curve there and `EditParameterization`s it back
@@ -106,22 +104,20 @@
 //!   `RAND_MAX`), so results asked for more than one point are not reproducible
 //!   against upstream (`plan/findings.md`). Point counts above
 //!   [`MAX_POINTS_IN_FACE`] are [`SolidError::InvalidInput`] (upstream allocates
-//!   them). The rectangular branch samples from `dUInc` / `dVInc`, not from the
-//!   domain minimum, as upstream does by default
-//!   (`plan/upstream-issues/WR-86--smface-getpointsinface-samples-a-rectangular-face-from-0-not.md`).
-//!   With [`UpstreamFixes::face_points_span_domain`](crate::kernel::UpstreamFixes::face_points_span_domain)
-//!   it starts each column and row at the domain's minimum and sizes the columns by
-//!   the domain's u length over the column count plus one (WR-86 addendum,
-//!   `2026-10-31-domain-relative-grid`). That corrects the origin and the column
-//!   spacing, not uniform coverage for every count: counts above 30 still plan only
-//!   `min(count, 30)` columns and stop once the requested count is reached, so when
-//!   those rows do not divide the requested count the last sampled column is truncated
-//!   and later columns are not sampled (31 points fill 16 of 30 columns), and the V
-//!   dither is still drawn once per point from
-//!   `kernel.rng` in both modes. It takes the B-rep mutably: its UV-domain and
-//!   iso-line classifications run on it (the classification's snapshot hands back the
-//!   UV trim curves, the tolerance growth that fits them and the gap caches), so what
-//!   upstream's `const` queries leave on the B-rep stays there.
+//!   them). The rectangular branch starts each column and row at the domain's minimum
+//!   and sizes the columns by the domain's u length over the column count plus one,
+//!   where upstream samples from `dUInc` / `dVInc` as fractions of the domain's lengths
+//!   from zero, with a column increment left from the search count
+//!   (`plan/upstream-issues/WR-86--smface-getpointsinface-samples-a-rectangular-face-from-0-not.md`
+//!   and its `2026-10-31-domain-relative-grid` addendum). That corrects the origin and
+//!   the column spacing, not uniform coverage for every count: counts above 30 still
+//!   plan only `min(count, 30)` columns and stop once the requested count is reached, so
+//!   when those rows do not divide the requested count the last sampled column is
+//!   truncated and later columns are not sampled (31 points fill 16 of 30 columns), and
+//!   the V dither is still drawn once per point from `kernel.rng`. It takes the B-rep
+//!   mutably: its UV-domain and iso-line classifications run on it (the classification's
+//!   snapshot hands back the UV trim curves, the tolerance growth that fits them and the
+//!   gap caches), so what upstream's `const` queries leave on the B-rep stays there.
 //! - **`CreateCurvesByTrimming`** drops its unused `bForceUVClassify` argument; the
 //!   output arrays are asked for with `want_3d` / `want_uv`.
 //! - **`CalculateAnInternalPoint` / `CreateCurvesByTrimming`** take the B-rep mutably:
@@ -141,7 +137,7 @@
 use crate::curve::crv_on_surf::CrvOnSurf;
 use crate::curve::curve::p2::CurveKind;
 use crate::curve::curve::Curve;
-use crate::error::{ignore_status, EntityRef, Result, SolidError};
+use crate::error::{EntityRef, Result, SolidError};
 use crate::geom::a_object;
 use crate::geom::extent1d::Extent1d;
 use crate::geom::extent2d::Extent2d;
@@ -213,13 +209,6 @@ pub const fn is_kind_of(t: i64) -> bool {
     } else {
         topo::is_kind_of(t)
     }
-}
-
-/// A status SMLib drops and the fork passes on (`SER`, tangency-labs/smlib 6997962):
-/// returned with the opt-in [`crate::kernel::UpstreamFixes::query_statuses_pass_on`],
-/// handed on to the site's own ignore otherwise.
-fn pass<T>(k: &Kernel, r: Result<T>) -> Result<Result<T>> {
-    crate::error::passed_on(r, k.fixes.query_statuses_pass_on)
 }
 
 fn null(reason: &'static str) -> SolidError {
@@ -1053,11 +1042,11 @@ fn normalized_evaluate_uv(k: &Kernel, b: &mut Brep, eu: EdgeuseId, t: f64) -> Re
     Ok(eu3::normalized_evaluate(k, b, eu, t, true, false, true)?.point)
 }
 
-/// `pEU->GetOrCreateUVTrimCurve(rpUVCurve)` (its status is ignored; the curve is then
-/// dereferenced).
+/// `pEU->GetOrCreateUVTrimCurve(rpUVCurve)` (its status is ignored upstream and passed
+/// on by the fork; the curve is then dereferenced).
 fn get_or_create_uv_trim_curve(k: &Kernel, b: &mut Brep, eu: EdgeuseId) -> Result<Curve> {
     let fetch = eu3::get_or_create_uv_trim_curve(k, b, eu, false, false, true)?;
-    let _ = pass(k, fetch.status)?;
+    fetch.status?;
     eu1::uv_trim_curve(b, eu)?
         .0
         .cloned()
@@ -1183,12 +1172,9 @@ fn runge_kutta_ode_integrate(
 /// `sm_CheckSeamCrossing`: when the step from `uv1` to `uv2` jumps more than 90% of a
 /// closed direction's period of `domain`, moves `uv1` into `uv2`'s period and adds the
 /// period (with the sign of the jump's opposite) to `param_shift`. Returns whether a
-/// seam was crossed; `true` for a surface closed in neither direction by default
-/// (upstream returns `SM_SUCCESS` there; WR-87). With the opt-in fix
-/// [`UpstreamFixes::check_seam_crossing_unclosed`](crate::kernel::UpstreamFixes::check_seam_crossing_unclosed),
-/// returns `false` when closed in neither direction.
+/// seam was crossed: `false` for a surface closed in neither direction (upstream
+/// returns `SM_SUCCESS` there, `true` as an `SmBoolean`; WR-87).
 pub fn check_seam_crossing(
-    k: &Kernel,
     uv1: &mut Point2,
     uv2: Point2,
     domain: &Extent2d,
@@ -1199,9 +1185,8 @@ pub fn check_seam_crossing(
     let mut ret = false;
 
     if !closed_u && !closed_v {
-        // SM_SUCCESS as an SmBoolean upstream (WR-87).
-        // With the opt-in fix `k.fixes.check_seam_crossing_unclosed`, returns `false`.
-        return !k.fixes.check_seam_crossing_unclosed;
+        // nothing can be crossed (upstream returns SM_SUCCESS as an SmBoolean, WR-87)
+        return false;
     }
 
     if closed_u {
@@ -1288,19 +1273,15 @@ pub fn are_connected(
     let vu2 =
         eu1::vertexuse(b, eu2)?.ok_or_else(|| null("AreConnected: edge use without vertex use"))?;
 
-    // FALSE = don't make UVTrimCurve, if missing use GlobalSolve (statuses ignored; with
-    // the opt-in fix ends whose UV points cannot be computed are not shown connected,
-    // tangency-labs/smlib 6997962)
-    let uv1 = ignored(vu1::compute_uv_point(k, b, vu1, false))?;
-    if uv1.is_none() && k.fixes.query_statuses_pass_on {
+    // FALSE = don't make UVTrimCurve, if missing use GlobalSolve (statuses ignored
+    // upstream; ends whose UV points cannot be computed are not shown connected, as the
+    // fork, tangency-labs/smlib 6997962)
+    let Some(uv1) = ignored(vu1::compute_uv_point(k, b, vu1, false))? else {
         return Ok(out);
-    }
-    let uv2 = ignored(vu1::compute_uv_point(k, b, vu2, false))?;
-    if uv2.is_none() && k.fixes.query_statuses_pass_on {
+    };
+    let Some(uv2) = ignored(vu1::compute_uv_point(k, b, vu2, false))? else {
         return Ok(out);
-    }
-    let uv1 = uv1.unwrap_or(Point2::UNDEF);
-    let uv2 = uv2.unwrap_or(Point2::UNDEF);
+    };
     let gap_u = (uv2.x - uv1.x).abs();
     let gap_v = (uv2.y - uv1.y).abs();
 
@@ -1565,12 +1546,15 @@ fn internal_point<B: QueryBrep>(k: &Kernel, b: B, f: FaceId) -> Result<Point3> {
 
     // no work - no surface
     let Some(surf) = face.surface.as_ref() else {
-        return Err(SolidError::sm_err(OP));
+        return Err(SolidError::topology_failed(OP, "the face has no surface"));
     };
 
     // no work - Bspline surface with no owner
     if surf.owner().is_none() {
-        return Err(SolidError::sm_err(OP));
+        return Err(SolidError::topology_failed(
+            OP,
+            "the face's surface has no owner",
+        ));
     }
 
     let mut classification: CurveClassification<UvLineHandle> = CurveClassification::new(k);
@@ -1590,20 +1574,17 @@ fn internal_point<B: QueryBrep>(k: &Kernel, b: B, f: FaceId) -> Result<Point3> {
                 (Point2::new(u, v_min), Point2::new(u, v_max))
             };
 
-            // classify the target UVLine (status ignored; passed on with the opt-in fix,
+            // classify the target UVLine (status ignored upstream; passed on as the fork,
             // tangency-labs/smlib 6997962)
-            ignore_status(pass(
+            B::classify_uv_line(
                 k,
-                B::classify_uv_line(
-                    k,
-                    f,
-                    &mut uv_objects,
-                    start,
-                    end,
-                    src_zone_tol_3d,
-                    &mut classification,
-                ),
-            )?)?;
+                f,
+                &mut uv_objects,
+                start,
+                end,
+                src_zone_tol_3d,
+                &mut classification,
+            )?;
 
             // when intervals were found in the face
             for ivl in classification.intervals() {
@@ -1622,7 +1603,7 @@ fn internal_point<B: QueryBrep>(k: &Kernel, b: B, f: FaceId) -> Result<Point3> {
                     // pSurface: the face's surface, read after the classification's
                     // edits (it stays the same surface)
                     let Some(surf) = uv_objects.brep().face(f)?.surface.as_ref() else {
-                        return Err(SolidError::sm_err(OP));
+                        return Err(SolidError::topology_failed(OP, "the face has no surface"));
                     };
                     let Ok(p) = surf.evaluate_point(k, Point2::new(uv3.x, uv3.y)) else {
                         continue;
@@ -1634,7 +1615,10 @@ fn internal_point<B: QueryBrep>(k: &Kernel, b: B, f: FaceId) -> Result<Point3> {
     }
 
     // arrive here when no curve classify to face
-    Err(SolidError::sm_err(OP))
+    Err(SolidError::topology_failed(
+        OP,
+        "no line interval classifies into the face",
+    ))
 }
 
 /// The result of [`points_in_face`].
@@ -1661,11 +1645,9 @@ fn rand_dither(k: &mut Kernel) -> f64 {
 /// constant-U UV lines. With more than one point the V values are dithered by a
 /// random draw (`kernel.rng`).
 ///
-/// The default keeps the pinned C++ grid: fractions of the UV domain's lengths from
-/// zero. With [`UpstreamFixes::face_points_span_domain`](crate::kernel::UpstreamFixes::face_points_span_domain)
-/// the rectangular branch starts at the domain's minimum and sizes its columns by the
-/// domain's u length over the column count plus one (WR-86 addendum,
-/// `2026-10-31-domain-relative-grid`). Counts above 30 still plan only
+/// The rectangular branch starts at the domain's minimum and sizes its columns by the
+/// domain's u length over the column count plus one (upstream samples fractions of the
+/// UV domain's lengths from zero; WR-86). Counts above 30 still plan only
 /// `min(count, 30)` columns and stop at the requested count, so when those rows do not
 /// divide the requested count the last sampled column is truncated and later columns
 /// are not sampled; this is not uniform coverage of the domain for every count.
@@ -1690,10 +1672,13 @@ pub fn points_in_face(
     let dom = face.uv_domain;
     let mut u_interval = dom.u_interval();
     let v_interval = dom.v_interval();
-    let mut u_inc = u_interval.length();
+    let u_len = u_interval.length();
     let mut v_inc = v_interval.length();
-    if u_inc <= EFF_ZERO || v_inc <= EFF_ZERO {
-        return Err(SolidError::sm_err(OP));
+    if u_len <= EFF_ZERO || v_inc <= EFF_ZERO {
+        return Err(SolidError::topology_failed(
+            OP,
+            "the face's UV domain is degenerate",
+        ));
     }
     if point_count == 0 {
         return Ok(out);
@@ -1707,19 +1692,18 @@ pub fn points_in_face(
     let surf = surface_deref(b, f)?.clone();
     let count = point_count as usize;
     let mut trim_curve_cnt = (2 * point_count).min(30);
-    u_inc /= (trim_curve_cnt + 1) as f64;
-    let mut u = u_inc;
 
     if rectangular_trim == 1 {
         // when faced is rectangularly trimmed
         trim_curve_cnt = point_count.min(30);
-        // WR-86 opt-in: the columns start at the domain's minimum u, with an
-        // increment of the domain's u length over the column count plus one
-        let span_domain = k.fixes.face_points_span_domain;
-        if span_domain {
-            u_inc = u_interval.length() / (trim_curve_cnt + 1) as f64;
-            u = u_interval.min() + u_inc;
-        }
+        // column i at the domain's minimum u plus i + 1 increments of the domain's u
+        // length over the column count plus one, row j likewise in v (WR-86; upstream
+        // starts from zero with the search count's increment). Each is one product and
+        // one sum from the minimum, not a running sum: added up from a large minimum,
+        // the increments' roundings carry later columns past the domain's maximum.
+        let u_min = u_interval.min();
+        let v_min = v_interval.min();
+        let u_inc = u_len / (trim_curve_cnt + 1) as f64;
         let j_cnt = if (point_count / trim_curve_cnt) * trim_curve_cnt < point_count {
             (point_count / trim_curve_cnt) + 1
         } else {
@@ -1728,43 +1712,34 @@ pub fn points_in_face(
         v_inc /= (j_cnt + 1) as f64;
 
         // generate an array of sample points
-        for _ in 0..trim_curve_cnt {
-            let mut v = v_inc;
-            if span_domain {
-                v = v_interval.min() + v_inc;
-            }
-            for _ in 0..j_cnt {
+        for i in 0..trim_curve_cnt {
+            let u = u_min + (i + 1) as f64 * u_inc;
+            for j in 0..j_cnt {
                 if out.uv.len() == count {
                     break;
                 }
+                let v = v_min + (j + 1) as f64 * v_inc;
                 let v_dither = if point_count > 1 {
                     rand_dither(k) * v_inc
                 } else {
                     0.0
                 };
                 out.uv.push(Point2::new(u, v + v_dither));
-                v += v_inc;
             }
-            u += u_inc;
         }
     } else {
         // face is trimmed - classify UV isoParameterUVTrimCurves
         let u_inc = 1.0 / ((trim_curve_cnt + 1) as f64);
 
         // set search range to face boundary domain
-        // (status ignored upstream: on a failure the output is still the face's UV
-        // domain, which CalculateUVDomainFromUVTrimCurves sets first)
-        let trim_uv_domain = match pass(k, calculate_uv_domain_from_uv_trim_curves(k, b, f))? {
-            Ok(d) => d,
-            Err(e) if e.is_unported_or_cancelled() => return Err(e),
-            Err(_) => b.face(f)?.uv_domain,
-        };
+        // (status ignored upstream, where a failure still outputs the face's UV domain;
+        // passed on as the fork, tangency-labs/smlib 6997962)
+        let trim_uv_domain = calculate_uv_domain_from_uv_trim_curves(k, b, f)?;
         let srf_dom = surf.natural_uv_domain_with_nurb(k)?;
-        // (SmExtent2d::Intersect leaves the output unchanged when disjoint)
-        let uv_dom =
-            pass(k, srf_dom.intersect(&trim_uv_domain))?.unwrap_or_else(|_| Extent2d::new());
-        // SetMinMax status ignored
-        let _ = pass(k, u_interval.set_min_max(uv_dom.min().x, uv_dom.max().x))?;
+        // (SmExtent2d::Intersect fails when disjoint; status passed on as the fork)
+        let uv_dom = srf_dom.intersect(&trim_uv_domain)?;
+        // SetMinMax status passed on as the fork
+        u_interval.set_min_max(uv_dom.min().x, uv_dom.max().x)?;
 
         // create isoParameter UVTrimCurve - we'll keep reusing it until done
         let uv_start = dom.evaluate(u_inc, 0.0);
@@ -1774,7 +1749,9 @@ pub fn points_in_face(
             Point3::new(uv_start.x, uv_start.y, 0.0),
             Point3::new(uv_end.x, uv_end.y, 0.0),
         )
-        .map_err(|_| SolidError::sm_err(OP))?;
+        .map_err(|_| {
+            SolidError::topology_failed(OP, "the iso-parameter UV line could not be made")
+        })?;
 
         // for all u values of interest - see if any map to inside the face
         let mut classes: Vec<(f64, Vec<CurveInterval<ClassHandle>>, Curve)> = Vec::new();
@@ -1813,7 +1790,10 @@ pub fn points_in_face(
 
         // if we failed to find any U Params inside the face quit
         if classes.is_empty() {
-            return Err(SolidError::sm_err(OP));
+            return Err(SolidError::topology_failed(
+                OP,
+                "no iso-parameter line crosses the face",
+            ));
         }
 
         // number of points to sample from each iso curve
@@ -1834,28 +1814,20 @@ pub fn points_in_face(
                 for kk in 0..smp_cnt {
                     let v_dither = if point_count > 1 { rand_dither(k) } else { 0.0 };
                     let v_norm = ((kk + 1) as f64 + v_dither) / ((smp_cnt + 1) as f64);
-                    // status ignored: the point keeps its default value
-                    let uv_point = pass(k, crv.evaluate_point(k, ivl.interval.evaluate(v_norm)))?
-                        .unwrap_or(Vec3::UNDEF);
+                    // status ignored upstream (the point keeps its default value);
+                    // passed on as the fork
+                    let uv_point = crv.evaluate_point(k, ivl.interval.evaluate(v_norm))?;
                     out.uv.push(Point2::new(*u_param, uv_point.y));
                 }
             }
         }
     }
 
-    // arrive here after picking a sUV Pnts to evaluate - set outputs (statuses ignored)
-    let mut pnt = Vec3::UNDEF;
-    let mut nrm = Vec3::UNDEF;
+    // arrive here after picking a sUV Pnts to evaluate - set outputs (statuses ignored
+    // upstream, passed on as the fork)
     for &uv in &out.uv {
-        if let Some(p) = ignored(pass(k, surf.evaluate_point(k, uv))?)? {
-            pnt = p;
-        }
-        if let Some(n) = ignored(pass(
-            k,
-            surf.evaluate_normal(k, uv, Side::Left, Side::Left),
-        )?)? {
-            nrm = n;
-        }
+        let pnt = surf.evaluate_point(k, uv)?;
+        let nrm = surf.evaluate_normal(k, uv, Side::Left, Side::Left)?;
         out.pv.push(pnt);
         out.pv.push(nrm);
     }
@@ -2019,6 +1991,7 @@ impl<'a> OdeIsoCurveLength<'a> {
     /// index outside `dydx`.
     #[allow(clippy::too_many_lines)] // one upstream function
     pub fn evaluate(&self, t: f64, dydx: &mut [f64]) -> Result<()> {
+        self.kernel.work_counters.add_mass_iso_evaluation();
         let lay = self.layout;
         let mut pv = [[Vec3::ZERO; 2]; 2];
         let mut pv2 = [[Vec3::ZERO; 2]; 2];
@@ -2323,10 +2296,34 @@ impl OdeArea<'_> {
             dydx.resize(num_components + 1, 0.0);
             return Ok(());
         }
+        let dy = self.iso_integral(k, p0.x, self.min_v, p0.y)?;
+        dydx.clear();
+        dydx.push(0.0);
+        dydx.extend_from_slice(&dy);
+        for v in dydx.iter_mut().skip(1) {
+            // (* -1.0: an exact negation)
+            *v = -(*v * p1.x);
+        }
+
+        Ok(())
+    }
+
+    /// The iso-curve integral at `u` from `v = from` to `v = to` (either way), each
+    /// component of the layout: the inner integral of `Evaluate`, run piece by piece
+    /// between the surface's v knots strictly between the two.
+    ///
+    /// Not upstream: upstream steps across the knots (WR-494, #1435), and runs only
+    /// from its `m_dMinV` up to the curve point.
+    ///
+    /// # Errors
+    ///
+    /// Those of [`surface_knots_inside`] and of the inner integration.
+    pub fn iso_integral(&self, k: &Kernel, u: f64, from: f64, to: f64) -> Result<Vec<f64>> {
+        let num_components = self.y_scale.len();
         let eval = OdeIsoCurveLength::new(
             self.kernel,
             self.surface,
-            p0.x,
+            u,
             self.origin,
             self.face_thickness,
             self.layout,
@@ -2340,26 +2337,32 @@ impl OdeArea<'_> {
         // knot, and a step across any knot has an error its estimate does not measure.
         // Integrated span by span, as the trim curve is (WR-494; the SolidCraft fork's
         // tangency-labs/smlib@08d9a14).
-        let knots = surface_knots_inside(k, self.surface, SurfParamType::V, self.min_v, p0.y)?;
+        let knots = if to >= from {
+            surface_knots_inside(k, self.surface, SurfParamType::V, from, to)?
+        } else {
+            let mut down = surface_knots_inside(k, self.surface, SurfParamType::V, to, from)?;
+            down.reverse();
+            down
+        };
         let mut piece_y = Vec::new();
         piece_y.resize(num_components, 0.0);
-        // (the pieces `[a, b]` between `min_v`, the knots and `p0.y`, in that order)
-        let mut a = self.min_v;
-        for b in knots.into_iter().chain(core::iter::once(p0.y)) {
+        // (the pieces `[a, b]` between `from`, the knots and `to`, in that order)
+        let mut a = from;
+        for b in knots.into_iter().chain(core::iter::once(to)) {
             piece_y.fill(0.0);
-            // Each piece's end (a v knot, or the trim point) is evaluated in the
+            // Each piece's ends (v knots, or the trim point) are evaluated in the
             // piece's own span: the integral over [a, b] is of the integrand's
-            // restriction to that span, whose value at b is the limit from below.
-            // Upstream's `TRUE` takes the span above, so where the derivatives jump
-            // at the knot (C0 at a rational circle's double knot, #1435; a G2 not C2
-            // loft, #2091) the piece's last sample was the next span's value: the
+            // restriction to that span, whose value at its upper end is the limit from
+            // below. Upstream's `TRUE` takes the span above, so where the derivatives
+            // jump at the knot (C0 at a rational circle's double knot, #1435; a G2 not
+            // C2 loft, #2091) the piece's last sample was the next span's value: the
             // steps shrank toward every knot, and underflowed at tight accuracies
-            // (WR-670). A piece descending to b (the curve point below `min_v`, one
-            // piece) lies in the span above b, upstream's side.
+            // (WR-670). An ascending piece's upper end is b, a descending one's a; its
+            // lower end lies in the span above it, upstream's side.
             let piece_eval = if b > a {
                 eval.with_v_end_from_below(b)
             } else {
-                eval
+                eval.with_v_end_from_below(a)
             };
             // A failed inner integration is not a zero-area contribution.
             runge_kutta_ode_integrate(
@@ -2376,15 +2379,7 @@ impl OdeArea<'_> {
             }
             a = b;
         }
-        dydx.clear();
-        dydx.push(0.0);
-        dydx.extend_from_slice(&dy);
-        for v in dydx.iter_mut().skip(1) {
-            // (* -1.0: an exact negation)
-            *v = -(*v * p1.x);
-        }
-
-        Ok(())
+        Ok(dy)
     }
 }
 
@@ -2425,16 +2420,28 @@ pub fn surface_knots_inside(
 /// bisections). Ascending, the curve's ends included; breaks the integrator cannot step
 /// between are merged into one, a curve knot kept over a crossing.
 ///
+/// Not the fork's: the crossings of the lines `v = l` of `v_lines` (ascending), found the
+/// same way, are breaks too: banded integration changes its iso-curve base there. The
+/// span's points are evaluated once for all the lines.
+///
 /// # Errors
 ///
 /// `SM_ERR` for fewer than two curve knots; those of the curve's knots, bounding box,
 /// degree and evaluation and of [`surface_knots_inside`].
-pub fn trim_curve_breaks(k: &Kernel, uv_curve: &Curve, surface: &Surface) -> Result<Vec<f64>> {
+pub fn trim_curve_breaks(
+    k: &Kernel,
+    uv_curve: &Curve,
+    surface: &Surface,
+    v_lines: &[f64],
+) -> Result<Vec<f64>> {
     let mut breaks = Vec::new();
     let ivl = uv_curve.natural_interval();
     let (knots, _) = uv_curve.knots(k, Some(&ivl))?;
     if knots.len() < 2 {
-        return Err(SolidError::sm_err("topology::face::trim_curve_breaks"));
+        return Err(SolidError::topology_failed(
+            "topology::face::trim_curve_breaks",
+            "the trim curve has fewer than two knots",
+        ));
     }
     let req = crate::nurbs::b_spline_curve::p2::BoundingBoxRequest {
         normal: true,
@@ -2446,21 +2453,51 @@ pub fn trim_curve_breaks(k: &Kernel, uv_curve: &Curve, surface: &Surface) -> Res
         .normal
         .ok_or_else(|| null("trim_curve_breaks: bounding box not computed"))?;
     let u_lines = surface_knots_inside(k, surface, SurfParamType::U, bbox.min().x, bbox.max().x)?;
+    let (v_lo, v_hi) = (bbox.min().y, bbox.max().y);
+    // (the lines in either direction: `(true, l)` for `u = l`, `(false, l)` for `v = l`)
+    let lines: Vec<(bool, f64)> = u_lines
+        .iter()
+        .map(|&l| (true, l))
+        .chain(
+            v_lines
+                .iter()
+                .filter(|&&l| l > v_lo && l < v_hi)
+                .map(|&l| (false, l)),
+        )
+        .collect();
 
     let samples = 4 * (uv_curve.degree()? + 1);
-    let u = |t: f64| -> Result<f64> { Ok(uv_curve.evaluate_point(k, t)?.x) };
+    let coordinate = |t: f64, along_u: bool| -> Result<f64> {
+        let p = uv_curve.evaluate_point(k, t)?;
+        Ok(if along_u { p.x } else { p.y })
+    };
+    let mut points: Vec<(f64, Point2)> = Vec::new();
     for pair in knots.windows(2) {
         let &[a, b] = pair else {
             continue;
         };
         breaks.push(a);
-        for &line in &u_lines {
-            let mut t0 = a;
-            let mut u0 = u(t0)?;
-            for i in 1..=samples {
-                // (`(dB - dA) * iS / lSamples`: an unsigned count converted to double)
-                let t1 = a + (b - a) * (i as f64) / (samples as f64);
-                let u1 = u(t1)?;
+        if lines.is_empty() {
+            continue;
+        }
+        points.clear();
+        for i in 0..=samples {
+            // (`(dB - dA) * iS / lSamples`: an unsigned count converted to double)
+            let t = if i == 0 {
+                a
+            } else {
+                a + (b - a) * (i as f64) / (samples as f64)
+            };
+            let p = uv_curve.evaluate_point(k, t)?;
+            points.push((t, Point2::new(p.x, p.y)));
+        }
+        for &(along_u, line) in &lines {
+            let at = |p: &Point2| if along_u { p.x } else { p.y };
+            for (i, pair) in points.windows(2).enumerate() {
+                let &[(t0, p0), (t1, p1)] = pair else {
+                    continue;
+                };
+                let (u0, u1) = (at(&p0), at(&p1));
                 if (u0 - line) * (u1 - line) < 0.0 {
                     let mut lo = t0;
                     let mut hi = t1;
@@ -2468,7 +2505,7 @@ pub fn trim_curve_breaks(k: &Kernel, uv_curve: &Curve, surface: &Surface) -> Res
                     let mut bisections = 0;
                     while bisections < 64 && hi - lo > EFF_ZERO * (1.0 + hi.abs()) {
                         let mid = 0.5 * (lo + hi);
-                        let u_mid = u(mid)?;
+                        let u_mid = coordinate(mid, along_u)?;
                         if (u_lo - line) * (u_mid - line) <= 0.0 {
                             hi = mid;
                         } else {
@@ -2478,11 +2515,11 @@ pub fn trim_curve_breaks(k: &Kernel, uv_curve: &Curve, surface: &Surface) -> Res
                         bisections += 1;
                     }
                     breaks.push(0.5 * (lo + hi));
-                } else if u1 == line && i < samples {
+                } else if u1 == line && i + 1 < samples && (along_u || u0 != line) {
+                    // (a trim lying along a v line breaks where it reaches it, not at
+                    // every point it has on it)
                     breaks.push(t1);
                 }
-                t0 = t1;
-                u0 = u1;
             }
         }
     }
@@ -2760,6 +2797,9 @@ pub struct FaceCurves {
     /// consecutive edge uses of a loop end at one vertex at two parameters (a pole), so
     /// they stand for no edge of the face.
     pub filled_gaps: Vec<usize>,
+    /// (not upstream) The edge of each curve of `curves_3d`, in the same order (filled
+    /// only when 3D curves are asked for).
+    pub edges: Vec<EdgeId>,
 }
 
 /// `CreateCurvesFromFace`: copies of the face's loop curves (3D and/or UV) of the face
@@ -2782,7 +2822,11 @@ pub fn create_curves_from_face(
 ) -> Result<FaceCurves> {
     // check state
     if !want_3d && !want_uv {
-        return Err(SolidError::sm_err(OP)); // Need one or the other
+        // Need one or the other
+        return Err(SolidError::topology_failed(
+            OP,
+            "neither 3D nor UV curves are asked for",
+        ));
     }
 
     // init outputs
@@ -2863,7 +2907,10 @@ pub fn create_curves_from_face(
                 let copy = uv_curve.copy(k)?;
                 // NER(SM_CAST_PTR(SmBSplineCurve, pNewUV))
                 if bspline_slice(&copy).is_none() {
-                    return Err(SolidError::null_pointer(OP));
+                    return Err(SolidError::topology_missing(
+                        OP,
+                        "the B-spline form of the UV trim curve's copy",
+                    ));
                 }
                 if let Some(list) = out.uv_curves.as_mut() {
                     list.push(copy);
@@ -2878,6 +2925,7 @@ pub fn create_curves_from_face(
                 copy.trim(k, &mut ivl, TrimMode::Notify)?;
                 if let Some(list) = out.curves_3d.as_mut() {
                     list.push(copy);
+                    out.edges.push(e);
                 }
             }
         }
@@ -3138,33 +3186,24 @@ pub fn fix_uv_trim_curves_notified(
         .ok_or_else(|| null("FixUVTrimCurves: edge use without vertex use"))?;
     let uv_vertex = match vu1::vertex_face_gap(k, b, vu, false)? {
         Some(gap) => gap.face_uv,
-        None => ignored(pass(k, vu1::compute_uv_point(k, b, vu, true))?)?.unwrap_or(Point2::UNDEF),
+        // (status ignored upstream, passed on as the fork, tangency-labs/smlib 6997962)
+        None => vu1::compute_uv_point(k, b, vu, true)?,
     };
     let uv_vertex_3d = Point3::new(uv_vertex.x, uv_vertex.y, 0.0);
 
-    // project Vertex drop point to 3d through surface (statuses ignored)
+    // project Vertex drop point to 3d through surface (statuses ignored upstream, passed
+    // on as the fork)
     let surf = surface_deref(b, curr_face)?;
-    let surf_vertex = ignored(pass(k, surf.evaluate_point(k, uv_vertex))?)?.unwrap_or(Vec3::UNDEF);
-    let _ = ignored(pass(
-        k,
-        surf.evaluate_normal(k, uv_vertex, Side::Left, Side::Left),
-    )?)?;
+    let surf_vertex = surf.evaluate_point(k, uv_vertex)?;
+    surf.evaluate_normal(k, uv_vertex, Side::Left, Side::Left)?;
 
     // UVGap sizes
     let uv_curr_edge_gap = uv_vertex_3d.distance(uv_curr);
     let uv_prev_edge_gap = uv_vertex_3d.distance(uv_prev);
 
-    // edge end points (statuses ignored)
-    let curr_edge_point = ignored(pass(
-        k,
-        edge_curve(b, curr_edge)?.evaluate_point(k, t_curr),
-    )?)?
-    .unwrap_or(Vec3::UNDEF);
-    let prev_edge_point = ignored(pass(
-        k,
-        edge_curve(b, prev_edge)?.evaluate_point(k, t_prev),
-    )?)?
-    .unwrap_or(Vec3::UNDEF);
+    // edge end points (statuses ignored upstream, passed on as the fork)
+    let curr_edge_point = edge_curve(b, curr_edge)?.evaluate_point(k, t_curr)?;
+    let prev_edge_point = edge_curve(b, prev_edge)?.evaluate_point(k, t_prev)?;
 
     // Vertex/SurfVertex and EdgeEnd/SurfVertex gaps (the out-of-tolerance branch only
     // warns upstream)
@@ -3176,38 +3215,33 @@ pub fn fix_uv_trim_curves_notified(
     // drop sUVVertex to each UVTrimCurve, trim there and stretch back (upstream). The
     // opt-in WR-255 fix (#959/#570) skips this and only moves the end points below.
     if !k.fixes.uv_trim_corner_end_points_only {
-        let curr_drop = ignored(pass(
+        // (drop statuses ignored upstream, passed on as the fork)
+        let curr_drop = held_curve(b, curr_holder)?.drop_point(
             k,
-            held_curve(b, curr_holder)?.drop_point(
-                k,
-                &curr_ivl,
-                uv_vertex_3d,
-                None,
-                1.1 * (EFF_ZERO + uv_curr_edge_gap),
-                Some(t_curr),
-                SolverOperation::Intersect,
-            ),
-        )?)?;
-        let prev_drop = ignored(pass(
+            &curr_ivl,
+            uv_vertex_3d,
+            None,
+            1.1 * (EFF_ZERO + uv_curr_edge_gap),
+            Some(t_curr),
+            SolverOperation::Intersect,
+        )?;
+        let prev_drop = held_curve(b, prev_holder)?.drop_point(
             k,
-            held_curve(b, prev_holder)?.drop_point(
-                k,
-                &prev_ivl,
-                uv_vertex_3d,
-                None,
-                1.1 * (EFF_ZERO + uv_prev_edge_gap),
-                Some(t_prev),
-                SolverOperation::Intersect,
-            ),
-        )?)?;
-        if let Some(d) = curr_drop.filter(|d| d.success) {
-            let t_curr_new = d.parameter;
+            &prev_ivl,
+            uv_vertex_3d,
+            None,
+            1.1 * (EFF_ZERO + uv_prev_edge_gap),
+            Some(t_prev),
+            SolverOperation::Intersect,
+        )?;
+        if curr_drop.success {
+            let t_curr_new = curr_drop.parameter;
             if !are_same(t_curr, t_curr_new) {
                 let mut trim_ivl = Extent1d::new();
                 if eu1::orientation(b, eu_current)? == OrientType::Same {
-                    let _ = pass(k, trim_ivl.set_min_max(t_curr_new, curr_ivl.max()))?;
+                    trim_ivl.set_min_max(t_curr_new, curr_ivl.max())?;
                 } else {
-                    let _ = pass(k, trim_ivl.set_min_max(curr_ivl.min(), t_curr_new))?;
+                    trim_ivl.set_min_max(curr_ivl.min(), t_curr_new)?;
                 }
                 if !are_same(trim_ivl.min(), trim_ivl.max()) {
                     // SmTol::GetZoneTol3d(curve) follows its actual holder's edge.
@@ -3228,14 +3262,14 @@ pub fn fix_uv_trim_curves_notified(
                 }
             }
         }
-        if let Some(d) = prev_drop.filter(|d| d.success) {
-            let t_prev_new = d.parameter;
+        if prev_drop.success {
+            let t_prev_new = prev_drop.parameter;
             if !are_same(t_prev, t_prev_new) {
                 let mut trim_ivl = Extent1d::new();
                 if eu1::orientation(b, eu_previous)? == OrientType::Same {
-                    let _ = pass(k, trim_ivl.set_min_max(prev_ivl.min(), t_prev_new))?;
+                    trim_ivl.set_min_max(prev_ivl.min(), t_prev_new)?;
                 } else {
-                    let _ = pass(k, trim_ivl.set_min_max(t_prev_new, prev_ivl.max()))?;
+                    trim_ivl.set_min_max(t_prev_new, prev_ivl.max())?;
                 }
                 if !are_same(trim_ivl.min(), trim_ivl.max()) {
                     // The previous curve can likewise be held by another edge use.
@@ -3617,12 +3651,10 @@ mod tests {
 
     #[test]
     fn seam_crossing() {
-        let k = Kernel::default();
         let dom = Extent2d::from_bounds(0.0, 0.0, 2.0, 4.0);
         let mut uv1 = Point2::new(1.95, 1.0);
         let mut shift = Vec2::new(0.0, 0.0);
         assert!(check_seam_crossing(
-            &k,
             &mut uv1,
             Point2::new(0.05, 1.0),
             &dom,
@@ -3634,7 +3666,6 @@ mod tests {
         assert!((uv1.x - -0.05).abs() < 1e-15);
         let mut uv1 = Point2::new(1.0, 0.1);
         assert!(check_seam_crossing(
-            &k,
             &mut uv1,
             Point2::new(1.0, 3.9),
             &dom,
@@ -3644,7 +3675,6 @@ mod tests {
         ));
         assert_eq!(shift, Vec2::new(2.0, -4.0));
         assert!(!check_seam_crossing(
-            &k,
             &mut uv1,
             Point2::new(1.0, 4.0),
             &dom,
@@ -3652,9 +3682,9 @@ mod tests {
             true,
             &mut shift
         ));
-        // closed in neither direction: default returns SM_SUCCESS (true) for C++ parity
-        assert!(check_seam_crossing(
-            &k,
+        // closed in neither direction: no seam is crossed (upstream's SM_SUCCESS reads
+        // as true, WR-87)
+        assert!(!check_seam_crossing(
             &mut uv1,
             Point2::new(9.0, 9.0),
             &dom,
@@ -3665,16 +3695,13 @@ mod tests {
     }
 
     #[test]
-    fn seam_crossing_opt_in_unclosed_returns_false() {
-        let mut k = Kernel::default();
-        k.fixes.check_seam_crossing_unclosed = true;
+    fn seam_crossing_unclosed_returns_false() {
         let dom = Extent2d::from_bounds(0.0, 0.0, 2.0, 4.0);
         let mut uv1 = Point2::new(1.0, 1.0);
         let mut shift = Vec2::new(0.0, 0.0);
 
         // When closed in neither direction, returns false and applies no shift
         assert!(!check_seam_crossing(
-            &k,
             &mut uv1,
             Point2::new(9.0, 9.0),
             &dom,
@@ -3685,11 +3712,10 @@ mod tests {
         assert_eq!(shift, Vec2::new(0.0, 0.0));
         assert_eq!(uv1, Point2::new(1.0, 1.0));
 
-        // When closed in U, seam crossing detection is unaffected by the flag
+        // When closed in U, a seam crossing is still found
         let mut uv1_u = Point2::new(1.95, 1.0);
         let mut shift_u = Vec2::new(0.0, 0.0);
         assert!(check_seam_crossing(
-            &k,
             &mut uv1_u,
             Point2::new(0.05, 1.0),
             &dom,
@@ -3769,7 +3795,9 @@ mod tests {
         let _ = s;
         let mut k = Kernel::default();
         let r = points_in_face(&mut k, &mut b, f, 1).unwrap();
-        assert_eq!(r.uv, vec![Point2::new(1.0 / 3.0, 1.0)]);
+        // one point: the centre of [0, 1] x [0, 2] (WR-86; upstream's 1/3 in u comes from
+        // the search count's column increment)
+        assert_eq!(r.uv, vec![Point2::new(0.5, 1.0)]);
         assert_eq!(r.pv.len(), 2);
         assert_eq!(r.pv[1], Vec3::Z);
         let r = points_in_face(&mut k, &mut b, f, 7).unwrap();
@@ -3802,18 +3830,13 @@ mod tests {
     }
 
     #[test]
-    fn points_in_face_span_domain_samples_from_the_domain() {
+    fn points_in_face_samples_from_the_domain() {
         let bounds = (3.0, -7.0, 4.0, -6.5);
         let (mut b, f) = rectangular_face(bounds);
 
-        // the default stays pinned: fractions of the domain's lengths from zero
+        // count 1 is the centre of the domain, in u and v (upstream's fractions from
+        // zero gave (1/3, 0.25), outside it; WR-86)
         let mut k = Kernel::default();
-        let r = points_in_face(&mut k, &mut b, f, 1).unwrap();
-        assert_eq!(r.uv, vec![Point2::new(1.0 / 3.0, 0.25)]);
-
-        // opt-in: count 1 is the centre of the domain, in u and v
-        let mut k = Kernel::default();
-        k.fixes.face_points_span_domain = true;
         let r = points_in_face(&mut k, &mut b, f, 1).unwrap();
         assert_eq!(r.uv, vec![Point2::new(3.5, -6.75)]);
         // The plane's frame gives the world point (-v, u, 0).
@@ -3822,7 +3845,6 @@ mod tests {
         // a negative-u, positive-v domain samples its centre too
         let (mut b, f) = rectangular_face((-4.0, 3.0, -3.0, 4.0));
         let mut k = Kernel::default();
-        k.fixes.face_points_span_domain = true;
         let r = points_in_face(&mut k, &mut b, f, 1).unwrap();
         assert_eq!(r.uv, vec![Point2::new(-3.5, 3.5)]);
         assert_eq!(r.pv, vec![Point3::new(-3.5, -3.5, 0.0), Vec3::Z]);
@@ -3830,7 +3852,6 @@ mod tests {
         // zero origin: the centre of [0, 1] x [0, 2]
         let (mut b, f) = rectangular_face((0.0, 0.0, 1.0, 2.0));
         let mut k = Kernel::default();
-        k.fixes.face_points_span_domain = true;
         let r = points_in_face(&mut k, &mut b, f, 1).unwrap();
         assert_eq!(r.uv, vec![Point2::new(0.5, 1.0)]);
         assert_eq!(r.pv, vec![Point3::new(-1.0, 0.5, 0.0), Vec3::Z]);
@@ -3839,7 +3860,6 @@ mod tests {
         // row at min v + v length / 2 plus its dither
         let (mut b, f) = rectangular_face(bounds);
         let mut k = Kernel::default();
-        k.fixes.face_points_span_domain = true;
         let r = points_in_face(&mut k, &mut b, f, 7).unwrap();
         assert_eq!(r.uv.len(), 7);
         for (i, uv) in r.uv.iter().enumerate() {
@@ -3849,23 +3869,23 @@ mod tests {
             assert_eq!(r.pv[2 * i + 1], Vec3::Z);
         }
 
-        // the flag changes the grid, not the number or order of the RNG draws
+        // one RNG draw per point, as upstream's rand() per point
         let opts = KernelOptions {
             seed: 12_345,
             ..KernelOptions::default()
         };
-        let mut off = Kernel::new(&opts);
-        let mut on = Kernel::new(&opts);
-        on.fixes.face_points_span_domain = true;
-        let r_off = points_in_face(&mut off, &mut b, f, 7).unwrap();
-        let r_on = points_in_face(&mut on, &mut b, f, 7).unwrap();
-        assert_eq!(r_off.uv.len(), 7);
-        assert_eq!(r_on.uv.len(), 7);
-        assert_eq!(off.rng.next_f64(), on.rng.next_f64());
+        let mut sampled = Kernel::new(&opts);
+        let mut drawn = Kernel::new(&opts);
+        let r = points_in_face(&mut sampled, &mut b, f, 7).unwrap();
+        assert_eq!(r.uv.len(), 7);
+        for _ in 0..7 {
+            drawn.rng.next_f64();
+        }
+        assert_eq!(sampled.rng.next_f64(), drawn.rng.next_f64());
     }
 
     #[test]
-    fn points_in_face_span_domain_boundary_counts() {
+    fn points_in_face_boundary_counts() {
         let bounds = (3.0, -7.0, 4.0, -6.5);
         let (mut b, f) = rectangular_face(bounds);
         let opts = KernelOptions {
@@ -3873,22 +3893,34 @@ mod tests {
             ..KernelOptions::default()
         };
         for count in [30, 31] {
-            let mut off = Kernel::new(&opts);
-            let mut on = Kernel::new(&opts);
-            on.fixes.face_points_span_domain = true;
-            let r_off = points_in_face(&mut off, &mut b, f, count).unwrap();
-            let r_on = points_in_face(&mut on, &mut b, f, count).unwrap();
-            assert_eq!(r_off.uv.len(), count as usize);
-            assert_eq!(r_on.uv.len(), count as usize);
-            for uv in &r_on.uv {
+            let mut sampled = Kernel::new(&opts);
+            let mut drawn = Kernel::new(&opts);
+            let r = points_in_face(&mut sampled, &mut b, f, count).unwrap();
+            assert_eq!(r.uv.len(), count as usize);
+            for uv in &r.uv {
                 assert_inside(bounds, *uv);
             }
-            assert_eq!(off.rng.next_f64(), on.rng.next_f64());
+            for _ in 0..count {
+                drawn.rng.next_f64();
+            }
+            assert_eq!(sampled.rng.next_f64(), drawn.rng.next_f64());
+        }
+
+        // a domain far from the origin: each column is one product and one sum from the
+        // minimum, so none is carried past the maximum (a running sum from 2^53 in steps
+        // of 32/31 rounds to multiples of 2 and leaves the domain from column 15)
+        let far = (9_007_199_254_740_992.0, 0.0, 9_007_199_254_741_024.0, 1.0);
+        let (mut b_far, f_far) = rectangular_face(far);
+        let mut k = Kernel::new(&opts);
+        let r = points_in_face(&mut k, &mut b_far, f_far, 30).unwrap();
+        assert_eq!(r.uv.len(), 30);
+        for uv in &r.uv {
+            assert_inside(far, *uv);
+            assert!(uv.x < far.2, "{uv:?} on the domain's maximum");
         }
 
         // 31 points still fill only 16 of the 30 columns: the row planner is unchanged
         let mut k = Kernel::default();
-        k.fixes.face_points_span_domain = true;
         let r = points_in_face(&mut k, &mut b, f, 31).unwrap();
         let xs: Vec<f64> = r.uv.iter().map(|p| p.x).collect();
         let columns = 1 + xs.windows(2).filter(|w| w[0] != w[1]).count();
@@ -3901,15 +3933,19 @@ mod tests {
         let s = b.add_shell().unwrap();
         let f = b.add_face(s).unwrap();
         let k = Kernel::default();
-        assert!(matches!(
-            calculate_an_internal_point(&k, &mut b, f),
-            Err(SolidError::Upstream { .. })
-        ));
+        assert_eq!(
+            calculate_an_internal_point(&k, &mut b, f)
+                .err()
+                .and_then(|e| e.upstream_status()),
+            Some(crate::error::SM_ERR)
+        );
         b.face_mut(f).unwrap().surface = Some(plane());
-        assert!(matches!(
-            calculate_an_internal_point(&k, &mut b, f),
-            Err(SolidError::Upstream { .. })
-        ));
+        assert_eq!(
+            calculate_an_internal_point(&k, &mut b, f)
+                .err()
+                .and_then(|e| e.upstream_status()),
+            Some(crate::error::SM_ERR)
+        );
         b.face_mut(f)
             .unwrap()
             .surface
@@ -3926,10 +3962,12 @@ mod tests {
         // ignored; the trimmed cache of a face domain no edge use grew cannot be built,
         // and the classification falls back to the plain cache, as upstream's
         // smsurf_GetSurfaceCache does), so the final SM_ERR
-        assert!(matches!(
-            calculate_an_internal_point(&k, &mut b, f),
-            Err(SolidError::Upstream { .. })
-        ));
+        assert_eq!(
+            calculate_an_internal_point(&k, &mut b, f)
+                .err()
+                .and_then(|e| e.upstream_status()),
+            Some(crate::error::SM_ERR)
+        );
     }
 
     #[test]
@@ -3963,10 +4001,11 @@ mod tests {
         );
         let uv = [Some(line)];
         // a face without loops: CurveOnClassify's status
-        assert!(matches!(
-            create_curves_by_trimming(&k, &mut b, f, Some(1.0), None, Some(&uv), false, true),
-            Err(SolidError::Upstream { .. })
-        ));
+        let r = create_curves_by_trimming(&k, &mut b, f, Some(1.0), None, Some(&uv), false, true);
+        assert!(
+            matches!(&r, Err(e) if e.upstream_status().is_some()),
+            "{r:?}"
+        );
         assert!(create_curves_by_trimming(&k, &mut b, f, None, None, None, true, false).is_err());
     }
 

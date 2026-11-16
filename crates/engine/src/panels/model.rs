@@ -227,6 +227,7 @@ impl PanelSpec {
 #[derive(Clone, Debug, Default)]
 pub struct PanelRegistry {
     specs: BTreeMap<PanelKind, PanelSpec>,
+    side_widths: BTreeMap<PanelKind, Vec<(f32, f32)>>,
 }
 
 impl PanelRegistry {
@@ -275,6 +276,25 @@ impl PanelRegistry {
     pub fn get(&self, kind: &PanelKind) -> PanelResult<&PanelSpec> {
         self.specs.get(kind).ok_or_else(|| error(Rule::MissingTarget, "unregistered panel kind"))
     }
+    /// Declare sorted, disjoint closed width intervals for side docks.
+    pub fn set_side_widths(&mut self, kind: &PanelKind, ranges: Vec<(f32, f32)>) -> PanelResult<()> {
+        let spec = self.get(kind)?;
+        if ranges.is_empty()
+            || ranges.len() > 16
+            || ranges.iter().any(|&(lo, hi)| !lo.is_finite() || !hi.is_finite() || lo < spec.min_size.width || hi > spec.max_size.width || lo > hi)
+            || ranges.windows(2).any(|pair| pair[0].1 >= pair[1].0)
+        {
+            return Err(error(Rule::Bounds, "invalid side width intervals"));
+        }
+        self.side_widths.insert(kind.clone(), ranges);
+        Ok(())
+    }
+
+    /// An isolated smallest width can opt into the host's narrow strip layout.
+    pub fn is_side_strip(&self, kind: &PanelKind, width: f32) -> bool {
+        self.side_widths.get(kind).is_some_and(|ranges| ranges.len() > 1 && ranges.first() == Some(&(width, width)))
+    }
+
     pub fn specs(&self) -> impl Iterator<Item = &PanelSpec> {
         self.specs.values()
     }
@@ -923,18 +943,79 @@ pub fn section_collapsible(layout: &Layout, registry: &PanelRegistry, section: &
 }
 
 pub fn column_bounds(layout: &Layout, registry: &PanelRegistry, column: &ColumnId) -> PanelResult<(f32, f32)> {
+    let ranges = column_widths(layout, registry, column)?;
+    Ok((*ranges.first().map(|(lo, _)| lo).ok_or_else(no_shared_width)?, *ranges.last().map(|(_, hi)| hi).ok_or_else(no_shared_width)?))
+}
+
+fn no_shared_width() -> PanelError {
+    error(Rule::IncompatibleTabs, "stacked section width constraints have no intersection")
+}
+
+pub fn column_widths(layout: &Layout, registry: &PanelRegistry, column: &ColumnId) -> PanelResult<Vec<(f32, f32)>> {
     layout.column(column)?;
-    let mut min: f32 = 0.0;
-    let mut max = MAX_LOGICAL;
+    let mut ranges = vec![(0.0_f32, MAX_LOGICAL)];
     for section in layout.sections.iter().filter(|s| s.column.as_ref() == Some(column)) {
-        let (lower, upper) = tab_bounds(layout, registry, section)?;
-        min = min.max(lower.width);
-        max = max.min(upper.width);
+        for id in &section.tabs {
+            let kind = &layout.instance(id)?.kind;
+            let spec = registry.get(kind)?;
+            let continuous = [(spec.min_size.width, spec.max_size.width)];
+            let allowed = registry.side_widths.get(kind).map_or(continuous.as_slice(), Vec::as_slice);
+            ranges = ranges
+                .iter()
+                .flat_map(|&(lo, hi)| {
+                    allowed.iter().filter_map(move |&(a, b)| {
+                        let lower = lo.max(a);
+                        let upper = hi.min(b);
+                        (lower <= upper).then_some((lower, upper))
+                    })
+                })
+                .collect();
+            if ranges.is_empty() {
+                return Err(no_shared_width());
+            }
+        }
     }
-    if min > max {
-        return Err(error(Rule::IncompatibleTabs, "stacked section width constraints have no intersection"));
+    Ok(ranges)
+}
+
+/// Project onto the side column's admitted widths in logical units.
+/// Equal distances select the narrower width.
+pub fn resolve_column_width(layout: &Layout, registry: &PanelRegistry, column: &ColumnId, width: f32) -> PanelResult<f32> {
+    if !width.is_finite() || width <= 0.0 {
+        return Err(error(Rule::Bounds, "invalid column width"));
     }
-    Ok((min, max))
+    column_widths(layout, registry, column)?
+        .into_iter()
+        .map(|(lo, hi)| width.clamp(lo, hi))
+        .min_by(|a, b| (a - width).abs().total_cmp(&(b - width).abs()))
+        .ok_or_else(no_shared_width)
+}
+
+/// Repair widths in gaps while retaining the existing validation of out-of-bounds widths.
+pub fn normalize_column_widths(layout: &mut Layout, registry: &PanelRegistry) -> PanelResult<()> {
+    if registry.side_widths.is_empty() {
+        return Ok(());
+    }
+    for index in 0..layout.columns.len() {
+        let column = &layout.columns[index];
+        let (min, max) = column_bounds(layout, registry, &column.id)?;
+        if !(min..=max).contains(&column.width) {
+            continue;
+        }
+        let width = resolve_column_width(layout, registry, &column.id, column.width)?;
+        if width != column.width {
+            let id = column.id.clone();
+            layout.columns[index].width = width;
+            for section in layout.sections.iter_mut().filter(|section| section.column.as_ref() == Some(&id)) {
+                section.size.width = width;
+                for instance in layout.instances.iter_mut().filter(|instance| section.tabs.contains(&instance.id)) {
+                    instance.memory.size.width = width;
+                    instance.memory.column_width = Some(width);
+                }
+            }
+        }
+    }
+    Ok(())
 }
 
 /// One row thickness must satisfy all Bottom cards, including inactive tabs.
@@ -1102,7 +1183,7 @@ pub fn validate(layout: &Layout, registry: &PanelRegistry) -> PanelResult<()> {
     }
     for column in &layout.columns {
         let (min, max) = column_bounds(layout, registry, &column.id)?;
-        if column.width < min || column.width > max {
+        if column.width < min || column.width > max || resolve_column_width(layout, registry, &column.id, column.width)? != column.width {
             return Err(error(Rule::Bounds, "column outside stacked tab bounds"));
         }
     }

@@ -1759,8 +1759,8 @@ fn low_apex(eps: f64) -> (Kernel, Brep, Vec<EdgeId>) {
     (k, b, edges)
 }
 
-// The kernel blends no edge whose faces turn by less than half a degree (`GetBlendEdgeuse`,
-// with `fillet_half_degree_crease`; 2 degrees without), and here the faces turn by about
+// The kernel blends no edge whose faces turn by less than half a degree (`GetBlendEdgeuse`;
+// upstream 2 degrees, WR-621), and here the faces turn by about
 // sqrt 3 eps, so the flattest apex that can be chamfered is at eps = 5.0e-3. At
 // eps = 1/100 (0.99 degrees), r = 400: s = 2 sqrt 3 / N = 3.46, rho = 4 / sqrt(1 + eps^2),
 // |z_M| = 0.03. M's bound is 8 EPSILON (3.46 + 0.03)(400) = 2.5e-12 and X's

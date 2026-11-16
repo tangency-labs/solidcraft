@@ -907,7 +907,7 @@ fn fail(e: &SolidError) -> Fail {
 fn status<T>(r: &Result<T, SolidError>) -> Result<f64, Fail> {
     match r {
         Ok(_) => Ok(0.0),
-        Err(SolidError::Upstream { code, .. }) => Ok(f64::from(*code)),
+        Err(up_err) if solidcore::error::upstream_status(up_err).is_some() => Ok(f64::from(solidcore::error::upstream_status(up_err).unwrap_or(-1))),
         Err(e) => Err(fail(e)),
     }
 }
@@ -1066,7 +1066,7 @@ fn put_samples(k: &Kernel, o: &mut Vec<f64>, c: &Curve) {
             }
             Err(e) => {
                 o.push(match e {
-                    SolidError::Upstream { code, .. } => f64::from(code),
+                    up_err if solidcore::error::upstream_status(&up_err).is_some() => f64::from(solidcore::error::upstream_status(&up_err).unwrap_or(-1)),
                     _ => -1.0,
                 });
                 o.extend([0.0, 0.0, 0.0]);
@@ -1319,14 +1319,14 @@ fn run_rust_geom(k: &mut Kernel, op: &OpIn) -> Result<Vec<f64>, Fail> {
 }
 
 /// The shim's `tt_sample_safe`.
-fn sample_safe(k: &Kernel, l: &CurveLoops, store: &[Curve], key: CurveKey, t: f64) -> Result<bool, Fail> {
+fn sample_safe(l: &CurveLoops, store: &[Curve], key: CurveKey, t: f64) -> Result<bool, Fail> {
     let c = store.get(key.0).ok_or_else(|| harness("key"))?;
     let d = c.natural_interval();
     let tol = d.length() / 1000.0;
     if d.contains_value(t, -tol) {
         return Ok(true);
     }
-    let adj = match l.find_adjacent_loop_curve(k, store, key, t) {
+    let adj = match l.find_adjacent_loop_curve(store, key, t) {
         Ok(a) => a,
         Err(e) if e.is_unported() => return Err(fail(&e)),
         Err(_) => 0,
@@ -1368,7 +1368,7 @@ fn run_rust_loops(
             }
             LoopOp::StartEnd { i } => {
                 o.push(2.0);
-                let r = l.loop_start_end(k, u(*i));
+                let r = l.loop_start_end(u(*i));
                 o.push(status(&r)?);
                 if let Ok((s, e)) = r {
                     o.extend([s as f64, e as f64]);
@@ -1376,7 +1376,7 @@ fn run_rust_loops(
             }
             LoopOp::Adjacent { key, t } => {
                 o.push(3.0);
-                let r = l.find_adjacent_loop_curve(k, &store, CurveKey(*key), *t);
+                let r = l.find_adjacent_loop_curve(&store, CurveKey(*key), *t);
                 o.push(status(&r)?);
                 if let Ok(a) = r {
                     o.push(a as f64);
@@ -1392,7 +1392,7 @@ fn run_rust_loops(
             }
             LoopOp::Sample { key, t } => {
                 o.push(5.0);
-                if !sample_safe(k, &l, &store, CurveKey(*key), *t)? {
+                if !sample_safe(&l, &store, CurveKey(*key), *t)? {
                     o.push(NULL_DEREF);
                     continue;
                 }
@@ -1416,7 +1416,7 @@ fn run_rust_loops(
                     o.push(NULL_DEREF);
                     continue;
                 };
-                if !sample_safe(k, &l, &store, CurveKey(*key), *t)? {
+                if !sample_safe(&l, &store, CurveKey(*key), *t)? {
                     o.push(NULL_DEREF);
                     continue;
                 }

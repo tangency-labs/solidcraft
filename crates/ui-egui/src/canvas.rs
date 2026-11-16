@@ -24,7 +24,7 @@ use solidcraft_theme::Tokens;
 pub fn anchor(app: &SolveApp, d: &Dialog) -> Option<(Vec3, Option<Vec3>)> {
     let st = crate::open_meshing::session_world(&app.session);
     let item = anchor_item(app, d);
-    let Some(first) = &item else { return section_plane(d) };
+    let Some(first) = &item else { return stored_plane(d) };
     let (at, normal) = match first {
         Sel::Profile { sketch, index } => {
             let ss = st.sketch(*sketch)?;
@@ -68,7 +68,7 @@ pub fn anchor(app: &SolveApp, d: &Dialog) -> Option<(Vec3, Option<Vec3>)> {
                     Some(ss.plane.to_world(mid + n) - ss.plane.to_world(mid))
                 }
                 // A thin extrude's curves extrude along their sketch's normal.
-                Kind::Extrude { .. } => Some(ss.plane.normal()),
+                Kind::Extrude { .. } | Kind::Surface(crate::dialogs_surface::Surf::Extrude { .. }) => Some(ss.plane.normal()),
                 _ => None,
             };
             (ss.plane.to_world(mid), dir)
@@ -81,9 +81,16 @@ pub fn anchor(app: &SolveApp, d: &Dialog) -> Option<(Vec3, Option<Vec3>)> {
         // made, as a body sits at the middle of its box.
         Sel::Feature { id } => (crate::viewport::feature_bounds(app, *id)?.center(), None),
         Sel::Plane { name } => {
-            let pl = solidcore_record::Plane::named(name).or_else(|| {
-                solidcraft_engine::view::construction_planes(&app.session).into_iter().find(|(_, n, _)| n == name).map(|(_, _, pl)| pl)
-            })?;
+            let pl = solidcore_record::Plane::named(name)
+                .or_else(|| solidcraft_engine::view::construction_planes(&app.session).into_iter().find(|(_, n, _)| n == name).map(|(_, _, pl)| pl))
+                .or_else(|| {
+                    // A component origin remains a valid Offset Plane input when its folder is hidden.
+                    if matches!(d.kind, Kind::OffsetPlane { .. }) && app.session.doc.find_feature(name).is_none() {
+                        app.session.origin_plane(name)
+                    } else {
+                        None
+                    }
+                })?;
             (pl.origin, Some(pl.normal()))
         }
         _ => return None,
@@ -139,6 +146,8 @@ pub fn anchor(app: &SolveApp, d: &Dialog) -> Option<(Vec3, Option<Vec3>)> {
         },
         Kind::Sheet(_) => (at, crate::dialogs_sheet::arrow(app, d).or(normal)),
         Kind::Plastic(_) => (at, normal),
+        // A surface extrude's profiles stand square to their sketch, as a solid extrude's do.
+        Kind::Surface(crate::dialogs_surface::Surf::Extrude { .. }) => (at, normal),
         Kind::PatternRect { .. } => (at, d.inputs.get(1).and_then(|i| i.items.first()).and_then(|x| crate::dialogs::axis_of(app, x)).map(|a| a.1)),
         // A sketch move's X Distance grows along the sketch's own x axis, so its drag arrow
         // lies in the sketch plane. Scale has no arrow: a factor is not a length, and the
@@ -254,16 +263,18 @@ pub(crate) fn blend_grow_dir(m: &Mesh, index: usize, p: Vec3) -> Option<Vec3> {
     Some(if edge_concave(m, index, p).unwrap_or(false) { n } else { -n })
 }
 
-/// A Section Analysis dialog reopened from its section's own geometry (Show viewport section
-/// status): the plane it keeps as numbers when nothing is picked, so its arrow stands there as on
-/// a picked plane (#11423).
-fn section_plane(d: &Dialog) -> Option<(Vec3, Option<Vec3>)> {
-    if !matches!(d.kind, Kind::Section { .. }) {
-        return None;
-    }
-    let plane = d.extra.get("plane")?;
+/// A reopened section or Offset Plane can keep a fixed plane without a selection item. Its
+/// arrow uses that saved world plane, just as it would a picked plane.
+fn stored_plane(d: &Dialog) -> Option<(Vec3, Option<Vec3>)> {
+    let key = match d.kind {
+        Kind::Section { .. } => "plane",
+        Kind::OffsetPlane { .. } => "base",
+        _ => return None,
+    };
+    let plane = d.extra.get(key)?;
     let point = |key: &str| serde_json::from_value::<[f64; 3]>(plane.get(key)?.clone()).ok().map(|[x, y, z]| Vec3::new(x, y, z));
-    Some((point("origin")?, Some(point("normal")?.normalized()?)))
+    let normal = point("normal").or_else(|| Some(point("x_dir")?.cross(point("y_dir")?)))?.normalized()?;
+    Some((point("origin")?, Some(normal)))
 }
 
 /// The pick the dialog's arrow sits on: the first, or for a fillet or chamfer reopened from a
@@ -567,7 +578,7 @@ fn draw(app: &SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj: &Proj,
                 .and_then(serde_json::Value::as_array)
                 .map(|a| a.iter().filter_map(|v| v.as_str().map(str::to_owned)).collect())
                 .unwrap_or_default();
-            solidcraft_engine::doc::through_all_distance(&state, &plane, &targets).ok()
+            solidcraft_engine::doc::through_all_distance(&state, &plane, 0.0, &targets).ok()
         })
     } else {
         None
@@ -581,9 +592,12 @@ fn draw(app: &SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj: &Proj,
             }
         }
         (_, Kind::Extrude { direction: 1 | crate::dialogs::TWO_SIDES_REVERSED, .. }) => -1.0,
+        // Surface Extrude's sides are One Side, Symmetric, Flipped (`EXTRUDE_SIDES`).
+        (_, Kind::Surface(crate::dialogs_surface::Surf::Extrude { direction: 2, .. })) => -1.0,
         _ => 1.0,
     };
-    let symmetric = to_span.is_none() && matches!(d.kind, Kind::Extrude { direction: 2, .. });
+    let symmetric = to_span.is_none()
+        && matches!(d.kind, Kind::Extrude { direction: 2, .. } | Kind::Surface(crate::dialogs_surface::Surf::Extrude { direction: 1, .. }));
     let symmetric_scale = if symmetric {
         d.extra
             .get("convention")
@@ -599,6 +613,7 @@ fn draw(app: &SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj: &Proj,
     // distance's size only, so a drag past its curve would just turn the arrow round.
     let signed = match &d.kind {
         Kind::Extrude { .. }
+        | Kind::Surface(crate::dialogs_surface::Surf::Extrude { .. })
         | Kind::Move { .. }
         | Kind::Section { .. }
         | Kind::OffsetPlane { .. }
@@ -850,6 +865,7 @@ fn draw(app: &SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj: &Proj,
     let mut box_at = bs + vec2(16.0, -30.0);
     // Where the box hangs from: the arrow's tip, or the base when there is no arrow.
     let mut anchor = bs;
+    let mut reverse = false;
     if let (Some(n), Some(l)) = (dir, len.filter(|_| kind == ValueKind::Length)) {
         let n = n * sign;
         let baseline = to_span.map(f64::abs).unwrap_or(0.0);
@@ -870,11 +886,12 @@ fn draw(app: &SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj: &Proj,
             decimals,
             dragged,
         );
-        if let Some((_, Some(stop))) = &drawn {
+        if let Some((_, Some(stop), _)) = &drawn {
             crate::extrude_face_snap::outline(app, painter, proj, stop);
         }
-        crate::extrude_face_snap::set(drawn.as_ref().and_then(|(_, stop)| stop.clone()));
-        if let Some((ts, _)) = drawn {
+        crate::extrude_face_snap::set(drawn.as_ref().and_then(|(_, stop, _)| stop.clone()));
+        reverse = matches!(drawn, Some((_, _, true)));
+        if let Some((ts, _, _)) = drawn {
             if (to_span.is_some() || symmetric_scale != 1.0)
                 && shown_value != original_shown
                 && let Ok(v) = crate::length_input::eval(&app.session.doc, &shown_value, ValueKind::Length)
@@ -905,6 +922,16 @@ fn draw(app: &SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj: &Proj,
         && let Kind::Extrude { all, .. } = &mut d.kind
     {
         *all = false;
+    }
+    // Double-clicking the arrow reverses the direction, as the window's Reverse Direction does
+    // (#17402). Symmetric has no direction to reverse.
+    if reverse
+        && let Kind::Extrude { direction, smart, auto_op, .. } = &mut d.kind
+        && let Some(reversed) = reversed_direction(*direction)
+    {
+        *direction = reversed;
+        smart.manual_dir = true;
+        *auto_op = false;
     }
 }
 
@@ -1142,6 +1169,18 @@ fn box_size(ui: &egui::Ui, area: egui::Id, label: &str, note: Option<&str>) -> e
 /// How far (logical points) from an arrow's stem a press still takes the arrow.
 const ARROW_STEM_REACH: f32 = 6.0;
 
+/// An extrude direction turned the other way: One Side and Two Sides swap with their reversed
+/// forms; Symmetric has none.
+fn reversed_direction(direction: usize) -> Option<usize> {
+    match direction {
+        0 => Some(1),
+        1 => Some(0),
+        crate::dialogs::TWO_SIDES => Some(crate::dialogs::TWO_SIDES_REVERSED),
+        crate::dialogs::TWO_SIDES_REVERSED => Some(crate::dialogs::TWO_SIDES),
+        _ => None,
+    }
+}
+
 /// The distance from `p` to the segment from `a` to `b` on screen.
 fn to_segment(p: Pos2, a: Pos2, b: Pos2) -> f32 {
     let v = b - a;
@@ -1173,7 +1212,7 @@ fn drag_arrow(
     value: &mut String,
 ) -> Option<Pos2> {
     let line = ArrowLine { base, bs, n, l, signed, clear_px };
-    drag_arrow_to(doc, ui, painter, proj, line, id, half_height, &[], decimals, value).map(|(ts, _)| ts)
+    drag_arrow_to(doc, ui, painter, proj, line, id, half_height, &[], decimals, value).map(|(ts, _, _)| ts)
 }
 
 /// Where a drag arrow stands: from `base` (on screen `bs`) along `n`, showing `l`; `signed` lets
@@ -1189,8 +1228,8 @@ struct ArrowLine {
 }
 
 /// [`drag_arrow`] that also stops at `stops` (#2398): a drag whose tip comes near a stop's
-/// plane takes its distance exactly instead of a round step. Returns the tip's screen position
-/// and the stop it took this frame.
+/// plane takes its distance exactly instead of a round step. Returns the tip's screen position,
+/// the stop it took this frame and whether the arrow was double-clicked.
 #[allow(clippy::too_many_arguments)]
 fn drag_arrow_to(
     doc: &solidcraft_engine::doc::Document,
@@ -1203,7 +1242,7 @@ fn drag_arrow_to(
     stops: &[crate::extrude_face_snap::Stop],
     decimals: u8,
     value: &mut String,
-) -> Option<(Pos2, Option<crate::extrude_face_snap::Stop>)> {
+) -> Option<(Pos2, Option<crate::extrude_face_snap::Stop>, bool)> {
     let ArrowLine { base, bs, n, l, signed, clear_px } = line;
     let mut stopped = None;
     let t = Tokens::get();
@@ -1227,6 +1266,7 @@ fn drag_arrow_to(
         on_stem.map_or(at_tip, |p| egui::Rect::from_center_size(p, vec2(2.0 * ARROW_STEM_REACH, 2.0 * ARROW_STEM_REACH)))
     };
     let r = ui.interact(area, id, egui::Sense::drag());
+    let double = r.contains_pointer() && ui.input(|i| i.pointer.button_double_clicked(egui::PointerButton::Primary));
     // How far along the arrow the press was short of its end: the drag keeps that gap.
     let grab = id.with("stem grab");
     if r.drag_started() {
@@ -1270,7 +1310,7 @@ fn drag_arrow_to(
         painter.circle_stroke(ts, 8.0, Stroke::new(1.5, col));
         ui.ctx().set_cursor_icon(egui::CursorIcon::Grab);
     }
-    Some((ts, stopped))
+    Some((ts, stopped, double))
 }
 
 /// A fillet's radius spline on each of its edges (a spline fillet, or the splines a taper gave
@@ -2221,7 +2261,7 @@ mod tests {
         for n in [Vec3::X, Vec3::Y, Vec3::Z] {
             for dir in crate::viewport::orbit_directions() {
                 let cam = solidcraft_viewport::Camera::default().looking_from(dir);
-                let proj = Proj { cam, vp: cam.view_proj(4.0 / 3.0, 100.0), rect };
+                let proj = Proj { cam, vp: cam.view_proj(4.0 / 3.0, 100.0), rect, bounds: None };
                 let h = cam.half_height() * 0.25;
                 let (Some(q), Some(c), Some(side)) =
                     (offset_plane_quad(&proj, Vec3::ZERO, n, h), proj.to_screen(Vec3::ZERO), proj.to_screen(cam.basis().0 * h))

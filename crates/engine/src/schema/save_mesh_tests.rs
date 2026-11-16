@@ -23,7 +23,10 @@ fn with_box(level: ParamCheck) -> Session {
 
 #[test]
 fn schemas_and_the_key_check_agree() {
-    assert_keys(input_schema_for::<SaveMeshParams>(), &["ascii", "bodies", "format", "objects", "path", "quality", "single_instance", "slicer"]);
+    assert_keys(
+        input_schema_for::<SaveMeshParams>(),
+        &["ascii", "bodies", "format", "lay_on_print_faces", "objects", "path", "quality", "single_instance", "slicer"],
+    );
     // `path` is the key the handler refuses when it is left out: required in the schema, optional in the type.
     let schema = input_schema_for::<SaveMeshParams>();
     assert_eq!(schema.as_value()["required"], json!(["path"]));
@@ -74,6 +77,9 @@ fn strict_keeps_todays_errors() {
         json!({"bodies": {"a": 1}}),
         json!({"bodies": true}),
         json!({"format": "stl", "bodies": ["a", null]}),
+        json!({"lay_on_print_faces": "yes"}),
+        json!({"lay_on_print_faces": 1}),
+        json!({"format": "3mf", "lay_on_print_faces": {}}),
     ] {
         cases.push(("file.save_mesh", p(extra)));
     }
@@ -224,6 +230,16 @@ fn replies_match_the_output_schema() {
     }
     assert!(std::fs::read_to_string(at("e.stl")).unwrap().starts_with("solid"));
     assert!(std::fs::read(at("a.stl")).unwrap().len() > 84);
+    // Laid on their print faces: the bodies laid are named, and the reply still matches.
+    s.execute("body.print_face", &json!({"body": "Block", "point": [10, 5, 5]})).unwrap();
+    for p in [json!({"path": at("r.stl"), "lay_on_print_faces": true}), json!({"path": at("s.3mf"), "lay_on_print_faces": true})] {
+        let r = s.execute("file.save_mesh", &p).unwrap_or_else(|e| panic!("{p}: {e}"));
+        assert!(r.get("param_warnings").is_none(), "{p}: {r}");
+        matches(&r);
+        assert_eq!(keys(&r), ["bytes", "format", "path", "print_faces"].map(String::from).into(), "{p}: {r}");
+        assert_eq!(r["print_faces"], json!(["Block"]), "{p}");
+    }
+    s.execute("body.print_face", &json!({"body": "Block"})).unwrap();
 
     // A misspelt key runs in warn and says so; the reply still matches. Strict refuses it.
     let p = json!({"path": at("p.stl"), "qualty": "fine"});

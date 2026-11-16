@@ -1,9 +1,8 @@
 //! Regression test for WR-527 (#1526, #1527; the fork's tangency-labs/smlib@60b1c6a):
-//! with `Kernel::fixes.boolean_skips_faces_apart` a 2D boolean skips the face pairs
-//! whose boxes lie apart and the inner loops outside a new face's outer loop box. The
-//! fork's case: a plate with r 2 holes, the disks united in balanced rounds and cut
-//! from the plate in 2D, keeps its exact area, and gives the same faces as without
-//! the fix.
+//! a 2D boolean skips the face pairs whose boxes lie apart and the inner loops outside a
+//! new face's outer loop box. The fork's case: a plate with r 2 holes, the disks united
+//! in balanced rounds and cut from the plate in 2D, keeps its exact area.
+//! (`fork_edf7414_perforated_plate_work.rs` counts the work the skips save.)
 
 #![allow(
     clippy::unwrap_used,
@@ -27,9 +26,8 @@ fn result(outcome: Boolean2dOutcome) -> Brep {
 
 /// An `n` x `n` grid of r 2 holes, 10 apart, cut from a `10 n` square plate; the face
 /// areas of the result, ascending.
-fn holed_plate_areas(fixed: bool, n: u32) -> Vec<f64> {
+fn holed_plate_areas(n: u32) -> Vec<f64> {
     let mut k = Kernel::default();
-    k.fixes.boolean_skips_faces_apart = fixed;
     let mut disks = Vec::new();
     for i in 0..n {
         for j in 0..n {
@@ -63,17 +61,9 @@ fn holed_plate_areas(fixed: bool, n: u32) -> Vec<f64> {
 }
 
 #[test]
-fn holed_plate_keeps_its_area_and_faces_with_the_fix() {
+fn holed_plate_keeps_its_area() {
     let n = 4;
-    let default = holed_plate_areas(false, n);
-    let fixed = holed_plate_areas(true, n);
-    assert_eq!(default.len(), fixed.len());
-    for (a, b) in default.iter().zip(&fixed) {
-        assert!(
-            (a - b).abs() <= 1e-9 * a.abs().max(b.abs()),
-            "{default:?} vs {fixed:?}"
-        );
-    }
+    let fixed = holed_plate_areas(n);
     let side = 10.0 * f64::from(n);
     let exact = side * side - f64::from(n * n) * std::f64::consts::PI * 4.0;
     let total: f64 = fixed.iter().sum();

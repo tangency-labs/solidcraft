@@ -108,6 +108,7 @@ fn prune_params(doc: &mut Document) {
             }
         }
         used.extend(doc.assembly.exprs().into_iter().flat_map(|(_, _, e)| references(e)));
+        used.extend(doc.occurrences.iter().flat_map(|o| &o.expressed_moves).flat_map(|m| m.exprs()).flat_map(|(_, e)| references(e)));
         used.extend(doc.params.iter().flat_map(|p| references(&p.expr)));
         let before = doc.params.len();
         doc.params.retain(|p| used.contains(&p.name));
@@ -771,7 +772,8 @@ pub(super) fn replace_with_link(s: &mut Session, p: &Value) -> Result<Value> {
     } else {
         let given = str_(p, "path").filter(|x| !x.trim().is_empty() && x.len() < 4096).ok_or_else(|| bad(cmd, "`with` or `path` is required"))?;
         let file = absolute(Path::new(given));
-        let existing = s.doc.links.iter().find(|(_, l)| absolute(&resolve(s.path.as_deref(), &l.path)) == file).map(|(c, _)| *c);
+        let existing =
+            s.doc.links.iter().find(|(_, l)| l.configuration.is_none() && absolute(&resolve(s.path.as_deref(), &l.path)) == file).map(|(c, _)| *c);
         match existing {
             Some(c) => c,
             None => {

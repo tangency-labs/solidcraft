@@ -12,6 +12,22 @@ pub(crate) fn shell_plane_family(planes: impl IntoIterator<Item = Option<solidco
     first.origin.is_finite() && first.x.is_finite() && first.y.is_finite() && planes.all(|plane| plane == Some(first))
 }
 
+/// Whether `value` is a literal 0 of `kind` (`0`, `0 mm`, `0 deg`). No parameter values are at
+/// hand here, so an expression that works out to 0 does not count.
+fn literal_zero(value: &str, kind: crate::expr::Kind) -> bool {
+    crate::expr::is_literal(value)
+        && crate::expr::eval_with(value, &|name| Err(DocError::Unknown(name.into())))
+            .ok()
+            .and_then(|value| value.to_kind(kind).ok())
+            .is_some_and(|value| value.abs() < 1e-12)
+}
+
+/// A taper of 0 builds a straight extrude, whose caps and sides are certified as with no taper
+/// (the Extrude dialog saves a taper of 0, #15413).
+pub(crate) fn untapered(extent: &crate::Extent) -> bool {
+    extent.taper.as_deref().is_none_or(|value| literal_zero(value, crate::expr::Kind::Angle))
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ConfigFaceTarget {
@@ -111,9 +127,9 @@ impl Document {
         match (certificate, &feature.kind) {
             (FaceCertificate::Box { .. }, FeatureKind::Box { operation: crate::Operation::NewBody | crate::Operation::Join, .. }) => true,
             (FaceCertificate::CylinderCap { .. }, FeatureKind::Cylinder { operation: crate::Operation::NewBody | crate::Operation::Join, .. }) => true,
-            (FaceCertificate::ExtrudeCap { sketch, .. }, FeatureKind::Extrude { sketch: current, extent, operation: crate::Operation::NewBody | crate::Operation::Join, .. }) => sketch == current && extent.taper.is_none(),
+            (FaceCertificate::ExtrudeCap { sketch, .. }, FeatureKind::Extrude { sketch: current, extent, operation: crate::Operation::NewBody | crate::Operation::Join, .. }) => sketch == current && untapered(extent),
             (FaceCertificate::ExtrudeSide { sketch, curve }, FeatureKind::Extrude { sketch: current, extent, operation: crate::Operation::NewBody | crate::Operation::Join, .. }) => {
-                sketch == current && extent.taper.is_none()
+                sketch == current && untapered(extent)
                     && self.feature(*sketch).is_some_and(|feature| matches!(&feature.kind, FeatureKind::Sketch { sketch, .. } if sketch.curves.iter().any(|candidate| candidate.id == *curve && !candidate.construction && matches!(candidate.kind, solidcraft_sketch::CurveKind::Line { .. } | solidcraft_sketch::CurveKind::Circle { .. } | solidcraft_sketch::CurveKind::Arc { .. }))))
             }
             (FaceCertificate::Imported { .. }, FeatureKind::Import { .. }) => true,
@@ -144,11 +160,11 @@ impl Document {
                     role == super::cylinder_cap_role(*high)
                 }
                 (super::FaceCertificate::ExtrudeCap { sketch, high, outer, holes }, FeatureKind::Extrude { sketch: producer_sketch, extent, operation: crate::Operation::NewBody | crate::Operation::Join, .. }) => {
-                    sketch == producer_sketch && extent.taper.is_none()
+                    sketch == producer_sketch && untapered(extent)
                         && role == format!("cap:{}:{}", if *high { "high" } else { "low" }, super::cap_key(outer, holes))
                 }
                 (super::FaceCertificate::ExtrudeSide { sketch, curve }, FeatureKind::Extrude { sketch: producer_sketch, extent, operation: crate::Operation::NewBody | crate::Operation::Join, .. }) => {
-                    sketch == producer_sketch && extent.taper.is_none() && role == format!("side:{curve}")
+                    sketch == producer_sketch && untapered(extent) && role == format!("side:{curve}")
                         && self.feature(*sketch).is_some_and(|feature| matches!(&feature.kind, FeatureKind::Sketch { sketch, .. } if sketch.curves.iter().any(|candidate| candidate.id == *curve && !candidate.construction && matches!(candidate.kind, solidcraft_sketch::CurveKind::Line { .. } | solidcraft_sketch::CurveKind::Circle { .. } | solidcraft_sketch::CurveKind::Arc { .. }))))
                 }
                 // A linked design's face is named after its name there (`link:…`, see lineage::link_role).
@@ -172,13 +188,7 @@ impl Document {
             // certify caps only until the naming layer supplies proven curve provenance.
             FeatureKind::Extrude { extent, .. } => {
                 extent.from.is_none()
-                    && extent.start_offset.as_deref().is_none_or(|value| {
-                        crate::expr::is_literal(value)
-                            && crate::expr::eval_with(value, &|name| Err(DocError::Unknown(name.into())))
-                                .ok()
-                                .and_then(|value| value.to_kind(crate::expr::Kind::Length).ok())
-                                .is_some_and(|value| value.abs() < 1e-12)
-                    })
+                    && extent.start_offset.as_deref().is_none_or(|value| literal_zero(value, crate::expr::Kind::Length))
                     && extent.distance2.is_none()
                     && ["start", "top", "bottom"].contains(&role)
             }
@@ -353,24 +363,25 @@ impl Document {
         }
         // Caps and box faces must share an oriented plane. This rejects generic cap-role
         // collisions while permitting the coplanar pieces of a split supported face.
-        let mesh = body.mesh();
         let mut plane: Option<(Vec3, Vec3)> = None;
-        for (triangle, face) in mesh.triangles.iter().zip(&mesh.tri_face) {
-            if indices.binary_search(&(*face as usize)).is_err() {
-                continue;
-            }
-            let Some([a, b, c]) = mesh.tri(triangle) else { continue };
-            let Some(normal) = (b - a).cross(c - a).normalized() else { continue };
-            if let Some((point, base)) = plane {
-                let magnitude = [point.x, point.y, point.z, a.x, a.y, a.z, b.x, b.y, b.z, c.x, c.y, c.z]
+        for &index in &indices {
+            let Some(pf) = body.body.planar_face(index).or_else(|| body.body.face_plane(index)) else {
+                return Err(DocError::Invalid("configured face has no valid surface".into()));
+            };
+            let Some(normal) = pf.normal().normalized() else {
+                return Err(DocError::Invalid("configured face has no valid surface".into()));
+            };
+            let point = pf.origin;
+            if let Some((first_point, base)) = plane {
+                let magnitude = [first_point.x, first_point.y, first_point.z, point.x, point.y, point.z]
                     .iter()
                     .fold(body.body.size(), |scale, value| scale.max(value.abs()));
                 let tolerance = (magnitude * f64::EPSILON * 128.0).max(1e-7);
-                if normal.dot(base) < 1.0 - 1e-6 || [a, b, c].iter().any(|vertex| (*vertex - point).dot(base).abs() > tolerance) {
+                if normal.dot(base) < 1.0 - 1e-6 || (point - first_point).dot(base).abs() > tolerance {
                     return Err(DocError::Invalid("face lineage names more than one oriented surface".into()));
                 }
             } else {
-                plane = Some((a, normal));
+                plane = Some((point, normal));
             }
         }
         if plane.is_none() {

@@ -793,7 +793,7 @@ fn ix<I: Copy>(o: Option<I>, f: impl Fn(I) -> u32) -> f64 {
 fn status_of(r: &Result<(), SolidError>) -> Result<Option<f64>, SolidError> {
     match r {
         Ok(()) => Ok(Some(0.0)),
-        Err(SolidError::Upstream { code, .. }) => Ok(Some(f64::from(*code))),
+        Err(up_err) if solidcore::error::upstream_status(up_err).is_some() => Ok(Some(f64::from(solidcore::error::upstream_status(up_err).unwrap_or(-1)))),
         Err(SolidError::InvalidInput { .. }) => Ok(None),
         Err(e) => Err(e.clone()),
     }
@@ -1429,7 +1429,7 @@ fn run_rust_op(b: &mut Brep, op: &OpIn) -> Result<Output, Fail> {
                     ix(r.radial_edgeuse, EdgeuseId::index),
                     ix(r.coincident_faceuse, FaceuseId::index),
                 ]),
-                Err(SolidError::Upstream { code, .. }) => out.extend([f64::from(code), -1.0, -1.0]),
+                Err(up_err) if solidcore::error::upstream_status(&up_err).is_some() => out.extend([f64::from(solidcore::error::upstream_status(&up_err).unwrap_or(-1)), -1.0, -1.0]),
                 Err(SolidError::InvalidInput { .. }) => out.push(NULL_DEREF),
                 Err(err) => return Err(err.into()),
             }

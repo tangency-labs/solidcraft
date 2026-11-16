@@ -589,6 +589,7 @@ fn rust(k: &Kernel, i: &Inputs) -> Result<Output, HarnessError> {
                 intersections_with_rails: params.as_deref(),
                 deriv_surfs: ds.as_ref().map(|[a, b]| [a.as_ref(), b.as_ref()]),
                 degree: *degree,
+                section_params: None,
             };
             BSplineSurface::create_skinned_surface(k, &secs, opts).map(|s| {
                 o.push(1.0);

@@ -80,6 +80,11 @@ pub struct TrimFace<'a> {
     pub edges: Vec<TrimEdge<'a>>,
     /// The edges' vertices.
     pub vertices: Vec<[f64; 3]>,
+    /// Each vertex's tolerance, as `vertices`: how far along its curve a kernel may move an
+    /// edge's end at that vertex (its edges end within it there) when the caller measures the
+    /// gap that makes and covers it with the edge's tolerance. Empty where the caller covers
+    /// none: an end then moves within the edge's own tolerance only.
+    pub vertex_tolerances: Vec<f64>,
     /// The face's loops.
     pub loops: Vec<Vec<TrimUse>>,
     /// The face's tolerance.

@@ -90,10 +90,9 @@
 //!   regression tests retain pre-fix bits at four samples.
 //! - **Other upstream bugs kept.** `WR-162` (the upper-half, unequal-order second-
 //!   derivative slot write) is still unfixed. `SplitAt` with an extended
-//!   surface splits the base surface a second time for the extended halves; `SwapUV`
-//!   with an extended surface negates the offset distance twice (kept unless
-//!   `fixes.offset_swap_uv_extended_distance`, WR-164); `STEPInversion`
-//!   retries on the extended surface with the tolerance not widened by the offset.
+//!   surface splits the base surface a second time for the extended halves;
+//!   `STEPInversion` retries on the extended surface with the tolerance not widened by
+//!   the offset.
 //! - **Recursion.** The pole step-off of `EvaluatePlainOrSimple` evaluates itself at
 //!   the step-off points; its depth is bounded by [`MAX_STEPOFF_DEPTH`] (upstream
 //!   fixtures reach depth 1). Construction and restoration bound nested surface
@@ -807,7 +806,10 @@ impl OffsetSurface {
         hi: Point2,
     ) -> Result<Surface> {
         if !Self::continues_as_itself(surface) {
-            return Err(SolidError::sm_err(OP_EXTEND));
+            return Err(SolidError::surface_failed(
+                OP_EXTEND,
+                "the surface does not continue as itself",
+            ));
         }
         let domain = surface.natural_uv_domain_with_nurb(k)?;
         if domain.contains_point(lo, 0.0) && domain.contains_point(hi, 0.0) {
@@ -1278,7 +1280,10 @@ impl OffsetSurface {
             surface = &off.surface;
             if matches!(surface.kind(), SurfaceKind::OffsetSurface(_)) {
                 // Should not be nesting offset surfaces
-                return Err(SolidError::sm_err(operation));
+                return Err(SolidError::surface_failed(
+                    operation,
+                    "the base of the offset surface is itself an offset surface",
+                ));
             }
             offset_distance += off.offset_distance.get();
         }
@@ -1323,7 +1328,9 @@ impl OffsetSurface {
                 } else {
                     Some(base)
                 };
-                let original = original.ok_or_else(|| SolidError::null_pointer(OP_EXTEND))?;
+                let original = original.ok_or_else(|| {
+                    SolidError::surface_missing(OP_EXTEND, "the extended base surface")
+                })?;
                 // (kernel-free: an extension is a B-spline made from its NURB, never lazy)
                 let current = ext.current().map(Surface::natural_uv_domain_if_built);
                 let extended = extend_surface(
@@ -1356,7 +1363,7 @@ impl OffsetSurface {
         let (use_ext, uv, _domain) = self.select_surface(k, ext, base, uv)?;
         let surface = if use_ext {
             ext.current()
-                .ok_or_else(|| SolidError::null_pointer(OP_POINT))?
+                .ok_or_else(|| SolidError::surface_missing(OP_POINT, "the extended base surface"))?
         } else {
             base
         };
@@ -1393,7 +1400,12 @@ impl OffsetSurface {
         // (checked before the array is sized)
         match highest_offset_deriv(hu, hv, flags.only_upper_half) {
             Some(d) if d <= MAX_DERIVS => {}
-            _ => return Err(SolidError::sm_err(OP_EVAL)),
+            _ => {
+                return Err(SolidError::surface_failed(
+                    OP_EVAL,
+                    "the derivative order is past the most the offset surface evaluates",
+                ))
+            }
         }
         let mut out = vec![Vec3::UNDEF; (hu + 1) * (hv + 1)];
         self.plain_or_simple(
@@ -1427,7 +1439,12 @@ impl OffsetSurface {
         // locals
         let hod = match highest_offset_deriv(hu, hv, only_upper_half) {
             Some(d) if d <= MAX_DERIVS => d,
-            _ => return Err(SolidError::sm_err(OP_EVAL)),
+            _ => {
+                return Err(SolidError::surface_failed(
+                    OP_EVAL,
+                    "the derivative order is past the most the offset surface evaluates",
+                ))
+            }
         };
         let hb = hod + 1;
 
@@ -1436,7 +1453,7 @@ impl OffsetSurface {
         let (use_ext, uv, domain) = self.select_surface(k, ext, base, cr_uv)?;
         let surface = if use_ext {
             ext.current()
-                .ok_or_else(|| SolidError::null_pointer(OP_EVAL))?
+                .ok_or_else(|| SolidError::surface_missing(OP_EVAL, "the extended base surface"))?
         } else {
             base
         };
@@ -1479,7 +1496,10 @@ impl OffsetSurface {
         // the base derivative `i` times in u and `j` times in v (NULL upstream above hb)
         let d = |i: usize, j: usize| -> Result<Vec3> {
             if i + j > hb {
-                return Err(SolidError::null_pointer(OP_EVAL));
+                return Err(SolidError::surface_missing(
+                    OP_EVAL,
+                    "the base derivative past the order evaluated",
+                ));
             }
             at(&m, i, j)
         };
@@ -1633,7 +1653,10 @@ impl OffsetSurface {
 
         // Leave this tol at SM_EFF_ZERO: that's where output becomes invalid.
         if l < EFF_ZERO {
-            return Err(SolidError::sm_err(OP_EVAL));
+            return Err(SolidError::surface_failed(
+                OP_EVAL,
+                "the base surface's normal is degenerate",
+            ));
         }
 
         // never-assigned upstream locals are default SmVector3d values (UNDEF)
@@ -1837,7 +1860,10 @@ impl OffsetSurface {
         let (uv, location) = result?;
         let pt = self.point_with(k, ext, uv)?;
         if pt.distance(point_on_surf) > tol_3d {
-            return Err(SolidError::sm_err(OP_INV));
+            return Err(SolidError::surface_failed(
+                OP_INV,
+                "the inverted point is farther from the offset surface than the tolerance",
+            ));
         }
         Ok((uv, location))
     }
@@ -1858,10 +1884,9 @@ impl OffsetSurface {
     }
 
     /// Swaps `u` and `v` of the extended and the owned base surface, negating the
-    /// distance for each (`SwapUV`). With
-    /// [`UpstreamFixes::offset_swap_uv_extended_distance`](crate::kernel::UpstreamFixes::offset_swap_uv_extended_distance)
-    /// set and an extension present, the base's swap keeps the extension's one
-    /// negation instead of negating again (WR-164).
+    /// distance once (`SwapUV`). With an extension present, the base's swap keeps the
+    /// extension's one negation, where upstream negates again and leaves the offset on
+    /// the wrong side of its base (WR-164).
     ///
     /// # Errors
     ///
@@ -1894,12 +1919,15 @@ impl OffsetSurface {
             self.surface.swap_uv_notifying(k, notify)?;
             // WR-164: the extension's swap already negated the distance (the normal
             // flipped); negating again for the base leaves it on the wrong side.
-            if !(swapped_extension && k.fixes.offset_swap_uv_extended_distance) {
+            if !swapped_extension {
                 self.offset_distance.set(-self.offset_distance.get());
             }
         } else {
             // Can not swap UV if I do not own the surface
-            return Err(SolidError::sm_err(OP_EDIT));
+            return Err(SolidError::surface_failed(
+                OP_EDIT,
+                "the offset surface does not own its base, so cannot swap its UV",
+            ));
         }
         Ok(())
     }
@@ -1941,7 +1969,10 @@ impl OffsetSurface {
                 self.offset_distance.set(self.offset_distance.get() * s.x);
             } else {
                 // OffsetSurface NonUniform scaling not supported
-                return Err(SolidError::sm_err(OP_EDIT));
+                return Err(SolidError::surface_failed(
+                    OP_EDIT,
+                    "an offset surface cannot be scaled non-uniformly",
+                ));
             }
         }
         if let Some(e) = self.extended_surface.as_deref_mut() {
@@ -1952,7 +1983,10 @@ impl OffsetSurface {
                 .transform_at_depth(k, rotate_n_move, scale, depth + 1)?;
         } else {
             // Can not transform if I do not own the surface
-            return Err(SolidError::sm_err(OP_EDIT));
+            return Err(SolidError::surface_failed(
+                OP_EDIT,
+                "the offset surface does not own its base, so cannot transform it",
+            ));
         }
         Ok(())
     }
@@ -1985,7 +2019,10 @@ impl OffsetSurface {
             self.surface.trim_with_domain(k, trim_domain)?;
         }
         if !self.owns_surface {
-            return Err(SolidError::sm_err(OP_EDIT));
+            return Err(SolidError::surface_failed(
+                OP_EDIT,
+                "the offset surface does not own its base, so cannot trim it",
+            ));
         }
         Ok(())
     }
@@ -2182,7 +2219,7 @@ fn read_body(k: &Kernel, db: &mut DatabaseReader, version: u64) -> Result<Offset
 /// ([`Surface::kind_with_nurb`], as its evaluations make it); a make that leaves none
 /// (a failing `MakeNurb`, whose status upstream ignores) is `SM_ERR_NULL_POINTER`.
 fn nurb_of(k: &Kernel, surface: &Surface) -> Result<crate::nurbs::srf_basic::Surface> {
-    let missing = || SolidError::null_pointer(OP_EXTEND);
+    let missing = || SolidError::surface_missing(OP_EXTEND, "the surface's NURB");
     match surface.kind_with_nurb(k)? {
         SurfaceKind::BSpline(b) => b.gw_nurb().cloned().ok_or_else(missing),
         SurfaceKind::Plane(p) => p.base_with_nurb()?.gw_nurb().cloned().ok_or_else(missing),
@@ -2205,7 +2242,12 @@ fn extend_toward(k: &Kernel, surface: &Surface, uv: Point2) -> Result<Surface> {
     let mut esur: Option<UnboundedExtension> = None;
     match eval_pt_derivs_unbounded(&sur, uv.x, uv.y, 0, ExtendContinuity::G1R, &mut esur) {
         Err(e) if e.is_unported_or_cancelled() => return Err(e),
-        Err(_) => return Err(SolidError::sm_err(OP_EXTEND)),
+        Err(_) => {
+            return Err(SolidError::surface_failed(
+                OP_EXTEND,
+                "the G1R extension toward the point failed",
+            ))
+        }
         Ok(_) => {}
     }
     let ext = esur.ok_or_else(|| {
@@ -2350,9 +2392,15 @@ fn revolution_of<'a>(
         )),
         SurfaceKind::SurfOfRevolution(r) => match generator_is_circle(r) {
             Some((centre, angle)) => Ok((r, Generator::Circle { centre, angle })),
-            None => Err(SolidError::sm_err(OP_EXTEND)),
+            None => Err(SolidError::surface_failed(
+                OP_EXTEND,
+                "the generator of the surface of revolution is not a circle",
+            )),
         },
-        _ => Err(SolidError::sm_err(OP_EXTEND)),
+        _ => Err(SolidError::surface_failed(
+            OP_EXTEND,
+            "the surface is not a kind of surface of revolution",
+        )),
     }
 }
 
@@ -2559,7 +2607,10 @@ fn rot_turn(rev: &SurfOfRevolution) -> Result<RotTurn> {
     let arc = (rev.end_angle_deg() - rev.start_angle_deg()) * (PI / 180.0);
     let length = ivl.max() - ivl.min();
     if !gt(arc, 0.0) || !le(arc, 2.0 * PI) || !gt(length, 0.0) {
-        return Err(SolidError::sm_err(OP_EXTEND));
+        return Err(SolidError::surface_failed(
+            OP_EXTEND,
+            "the arc or the parameter length of the revolution is out of range",
+        ));
     }
     let half_gap = PI - 0.5 * arc;
     let close = (half_gap / (0.5 * PI)).ceil() as usize;
@@ -2644,12 +2695,18 @@ const AS_ITSELF_MAX_SPANS: usize = 4096;
 /// (the fork's `Spans`).
 fn as_itself_spans(span: f64, from: f64, goal: f64, sign: f64, knots: &mut Vec<f64>) -> Result<()> {
     if !gt(span, 0.0) {
-        return Err(SolidError::sm_err(OP_EXTEND));
+        return Err(SolidError::surface_failed(
+            OP_EXTEND,
+            "the span length is not positive",
+        ));
     }
     // (ULONG)ceil(...): saturating, so a reach past the bound fails below
     let n = ((goal - from) * sign / span).ceil() as usize;
     if n > AS_ITSELF_MAX_SPANS {
-        return Err(SolidError::sm_err(OP_EXTEND));
+        return Err(SolidError::surface_failed(
+            OP_EXTEND,
+            "the extension needs more spans than its bound",
+        ));
     }
     for k in 1..=n {
         knots.push(from + sign * (k as f64 * span));
@@ -2659,10 +2716,9 @@ fn as_itself_spans(span: f64, from: f64, goal: f64, sign: f64, knots: &mut Vec<f
 
 /// The point `i` of row `r` of the net `g` (`SM_ERR` past its end; never reached).
 fn net_at(g: &[Vec<WeightedPoint>], r: usize, i: usize) -> Result<WeightedPoint> {
-    g.get(r)
-        .and_then(|row| row.get(i))
-        .copied()
-        .ok_or_else(|| SolidError::sm_err(OP_EXTEND))
+    g.get(r).and_then(|row| row.get(i)).copied().ok_or_else(|| {
+        SolidError::surface_failed(OP_EXTEND, "the net point is past the end of the net")
+    })
 }
 
 /// The fork's `sm_ExtendAsItself` (`fixes.offset_extension_as_itself`, WR-633 and WR-650;
@@ -2695,7 +2751,12 @@ fn extend_as_itself(
     hi: Point2,
     close_turn: bool,
 ) -> Result<Surface> {
-    let err = || SolidError::sm_err(OP_EXTEND);
+    let err = || {
+        SolidError::surface_failed(
+            OP_EXTEND,
+            "the surface of revolution cannot extend as itself",
+        )
+    };
     let (rev, generator) = revolution_of(k, surface)?;
     let gen_circle = !matches!(generator, Generator::Line);
     let turn = rot_turn(rev)?;
@@ -3147,7 +3208,10 @@ fn extend_surface(
 ) -> Result<Option<Surface>> {
     // SM_CAST_PTR(SmBSplineSurface, pSurface); NER(pOriginal) (in the caller)
     if !is_b_spline_kind(surface) {
-        return Err(SolidError::null_pointer(OP_EXTEND));
+        return Err(SolidError::surface_missing(
+            OP_EXTEND,
+            "the B-spline kind surface",
+        ));
     }
 
     // locals
@@ -3183,7 +3247,10 @@ fn extend_surface(
         return Ok(None);
     }
     if !surface.is_kind_of(B_SPLINE_SURFACE_TYPE)? {
-        return Err(SolidError::sm_err(OP_EXTEND));
+        return Err(SolidError::surface_failed(
+            OP_EXTEND,
+            "the surface is not a B-spline surface",
+        ));
     }
 
     // `fixes.offset_extension_from_base`: `fixed` holds the current extension's domain
@@ -3217,7 +3284,12 @@ fn extend_surface(
             eval_pt_derivs_unbounded(&sur, uv.x, uv.y, 0, ExtendContinuity::G1R, &mut esur);
         match second {
             Err(e) if e.is_unported_or_cancelled() => return Err(e),
-            Err(_) => return Err(SolidError::sm_err(OP_EXTEND)),
+            Err(_) => {
+                return Err(SolidError::surface_failed(
+                    OP_EXTEND,
+                    "the G1R extension toward the point failed",
+                ))
+            }
             Ok(_) => {}
         }
     }
@@ -3297,7 +3369,10 @@ fn find_nonsingular_stepoff(
     }
 
     // Neither direction worked.  We can't get an offset direction.
-    Err(SolidError::sm_err(OP_STEPOFF))
+    Err(SolidError::surface_failed(
+        OP_STEPOFF,
+        "neither direction gives a nonsingular stepoff",
+    ))
 }
 
 // ---- the offset seen through the generic surface interface ------------------------------
@@ -4204,13 +4279,13 @@ mod tests {
         assert!(same_point(a, b), "{ctx}: {a:?} vs {b:?}");
     }
 
-    /// WR-164: with a stored extension, `SwapUV` negates the distance for the extension
-    /// and again for the base. The pinned behaviour leaves the distance and puts the
-    /// offset on the other side; with the fix the base's swap keeps the extension's one
-    /// negation, so `Offset(uv)` after the swap is the pre-swap `Offset(vu)`, and a
-    /// second swap restores the distance and the evaluations. Measured here: the
-    /// distance, the stored extension's presence and public point evaluations at
-    /// asymmetric inside-domain parameters, for both signs of the distance.
+    /// WR-164: with a stored extension, upstream's `SwapUV` negates the distance for the
+    /// extension and again for the base, leaving the distance and putting the offset on
+    /// the other side. The base's swap keeps the extension's one negation, so
+    /// `Offset(uv)` after the swap is the pre-swap `Offset(vu)`, and a second swap
+    /// restores the distance and the evaluations. Measured here: the distance, the
+    /// stored extension's presence and public point evaluations at asymmetric
+    /// inside-domain parameters, for both signs of the distance.
     #[test]
     fn wr_164_swap_uv_with_an_extension_negates_once() {
         const POINTS: [Point2; 3] = [
@@ -4231,35 +4306,20 @@ mod tests {
         };
 
         for d in [0.4, -0.3] {
-            // Pinned C++: the extension and the base each negate, so the distance comes
-            // back and the swapped offset does not evaluate as `Offset(vu)`.
+            // One negation: the swapped offset is the pre-swap one with its parameters
+            // exchanged, and a second swap restores both.
             let k = Kernel::default();
-            let mut off = wr_164_offset(&k, d);
-            wr_164_extend(&off, &k);
-            let (_, before_swapped) = before_and_swapped(&off, &k);
-            off.swap_uv(&k).unwrap();
-            assert_eq!(off.offset_distance(), d, "pinned d {d} comes back");
-            assert!(off.extended_base_surface().is_some());
-            let differs = POINTS.iter().enumerate().any(|(i, &uv)| {
-                !same_point(off.evaluate_point(&k, uv).unwrap(), before_swapped[i])
-            });
-            assert!(differs, "pinned swap maps uv to vu for d {d}");
-
-            // WR-164 fix: one negation, the swapped offset is the pre-swap one with
-            // its parameters exchanged, and a second swap restores both.
-            let mut k = Kernel::default();
-            k.fixes.offset_swap_uv_extended_distance = true;
             let mut off = wr_164_offset(&k, d);
             wr_164_extend(&off, &k);
             let (before, before_swapped) = before_and_swapped(&off, &k);
             off.swap_uv(&k).unwrap();
-            assert_eq!(off.offset_distance(), -d, "fixed d {d} is negated once");
+            assert_eq!(off.offset_distance(), -d, "d {d} is negated once");
             assert!(off.extended_base_surface().is_some());
             for (i, &uv) in POINTS.iter().enumerate() {
                 assert_same_point(
                     off.evaluate_point(&k, uv).unwrap(),
                     before_swapped[i],
-                    "fixed swap maps uv to vu",
+                    "the swap maps uv to vu",
                 );
             }
             off.swap_uv(&k).unwrap();
@@ -4274,19 +4334,15 @@ mod tests {
         }
     }
 
-    /// WR-164 control: an owned offset with no extension negates once with the fix on
-    /// or off, as upstream (the second negation is not gated on the flag alone).
+    /// WR-164 control: an owned offset with no extension negates once, as upstream.
     #[test]
-    fn wr_164_swap_uv_without_an_extension_negates_once_either_way() {
-        for fixed in [false, true] {
-            let mut k = Kernel::default();
-            k.fixes.offset_swap_uv_extended_distance = fixed;
-            let mut off = wr_164_offset(&k, 0.4);
-            assert!(off.extended_base_surface().is_none());
-            off.swap_uv(&k).unwrap();
-            assert_eq!(off.offset_distance(), -0.4, "fixed {fixed}");
-            assert!(off.extended_base_surface().is_none());
-        }
+    fn wr_164_swap_uv_without_an_extension_negates_once() {
+        let k = Kernel::default();
+        let mut off = wr_164_offset(&k, 0.4);
+        assert!(off.extended_base_surface().is_none());
+        off.swap_uv(&k).unwrap();
+        assert_eq!(off.offset_distance(), -0.4);
+        assert!(off.extended_base_surface().is_none());
     }
 
     /// WR-164 partial state: a non-owned offset still swaps (and negates for) its
@@ -4295,18 +4351,21 @@ mod tests {
     /// distance and the stored extension, not the whole edit.
     #[test]
     fn wr_164_swap_uv_non_owned_keeps_the_extension_negation_and_error() {
-        for fixed in [false, true] {
-            let mut k = Kernel::default();
-            k.fixes.offset_swap_uv_extended_distance = fixed;
-            let mut off = OffsetSurface::new(&k, 0.4, wr_164_base(), false, SS_UNKNOWN).unwrap();
-            off.set_allow_extension(true);
-            wr_164_extend(&off, &k);
-            let err = off.swap_uv(&k).unwrap_err();
-            assert_eq!(err.operation(), OP_EDIT);
-            assert_eq!(err, SolidError::sm_err(OP_EDIT), "fixed {fixed}");
-            assert_eq!(off.offset_distance(), -0.4, "fixed {fixed}");
-            assert!(off.extended_base_surface().is_some(), "fixed {fixed}");
-        }
+        let k = Kernel::default();
+        let mut off = OffsetSurface::new(&k, 0.4, wr_164_base(), false, SS_UNKNOWN).unwrap();
+        off.set_allow_extension(true);
+        wr_164_extend(&off, &k);
+        let err = off.swap_uv(&k).unwrap_err();
+        assert_eq!(err.operation(), OP_EDIT);
+        assert_eq!(err.upstream_status(), Some(crate::error::SM_ERR));
+        assert_eq!(
+            err.surface_failure(),
+            Some(&crate::error::surface::SurfaceFailure::Failed(
+                "the offset surface does not own its base, so cannot swap its UV"
+            ))
+        );
+        assert_eq!(off.offset_distance(), -0.4);
+        assert!(off.extended_base_surface().is_some());
     }
 
     /// WR-164 failure precedence: the extension is swapped and negated, then the base's
@@ -4316,48 +4375,40 @@ mod tests {
     #[test]
     fn wr_164_swap_uv_failed_base_edit_keeps_the_extension_negation() {
         use crate::geom::object::NotifyOperation;
-        for fixed in [false, true] {
-            let mut k = Kernel::default();
-            k.fixes.offset_swap_uv_extended_distance = fixed;
-            let mut off = wr_164_offset(&k, 0.4);
-            wr_164_extend(&off, &k);
-            let base_point = off
-                .base_surface()
-                .evaluate_point(&k, Point2::new(0.3, 0.7))
-                .unwrap();
-            let mut events = Vec::new();
-            let err = off
-                .swap_uv_notifying(&k, &mut |_, _, op| {
-                    events.push(op);
-                    if events.len() == 3 {
-                        return Err(SolidError::sm_err("test::wr164::notify"));
-                    }
-                    Ok(())
-                })
-                .unwrap_err();
-            assert_eq!(err.operation(), "test::wr164::notify");
-            assert_eq!(
-                err,
-                SolidError::sm_err("test::wr164::notify"),
-                "fixed {fixed}"
-            );
-            assert_eq!(
-                events,
-                [
-                    NotifyOperation::PreEdit,
-                    NotifyOperation::PostEdit,
-                    NotifyOperation::PreEdit
-                ],
-                "fixed {fixed}"
-            );
-            assert_eq!(off.offset_distance(), -0.4, "fixed {fixed}");
-            assert!(off.extended_base_surface().is_some(), "fixed {fixed}");
-            let base_after = off
-                .base_surface()
-                .evaluate_point(&k, Point2::new(0.3, 0.7))
-                .unwrap();
-            assert_same_point(base_after, base_point, "the base was not swapped");
-        }
+        let k = Kernel::default();
+        let mut off = wr_164_offset(&k, 0.4);
+        wr_164_extend(&off, &k);
+        let base_point = off
+            .base_surface()
+            .evaluate_point(&k, Point2::new(0.3, 0.7))
+            .unwrap();
+        let mut events = Vec::new();
+        let err = off
+            .swap_uv_notifying(&k, &mut |_, _, op| {
+                events.push(op);
+                if events.len() == 3 {
+                    return Err(SolidError::sm_err("test::wr164::notify"));
+                }
+                Ok(())
+            })
+            .unwrap_err();
+        assert_eq!(err.operation(), "test::wr164::notify");
+        assert_eq!(err, SolidError::sm_err("test::wr164::notify"));
+        assert_eq!(
+            events,
+            [
+                NotifyOperation::PreEdit,
+                NotifyOperation::PostEdit,
+                NotifyOperation::PreEdit
+            ]
+        );
+        assert_eq!(off.offset_distance(), -0.4);
+        assert!(off.extended_base_surface().is_some());
+        let base_after = off
+            .base_surface()
+            .evaluate_point(&k, Point2::new(0.3, 0.7))
+            .unwrap();
+        assert_same_point(base_after, base_point, "the base was not swapped");
     }
 
     /// The farthest an offset (4) of a half cylinder (r 5, its axis the z axis) evaluated
@@ -4696,5 +4747,45 @@ mod tests {
             upstream > 1e-3,
             "the tangent extension stays on the tube: {upstream}"
         );
+    }
+
+    /// The offset surface's failures keep the operation, status, kind and entity of the bare
+    /// `Upstream` statuses they replace (a sample).
+    #[test]
+    fn typed_surface_failures_keep_their_upstream_answers() {
+        use crate::error::surface::SurfaceFailure;
+        let samples: [(&'static str, SurfaceFailure, i32); 3] = [
+            (
+                OP_EXTEND,
+                SurfaceFailure::Failed("the surface does not continue as itself"),
+                crate::error::SM_ERR,
+            ),
+            (
+                OP_EVAL,
+                SurfaceFailure::Missing("the extended base surface"),
+                crate::error::SM_ERR_NULL_POINTER,
+            ),
+            (
+                OP_STEPOFF,
+                SurfaceFailure::Failed("neither direction gives a nonsingular stepoff"),
+                crate::error::SM_ERR,
+            ),
+        ];
+        for (operation, failure, code) in samples {
+            let typed = SolidError::surface(operation, failure);
+            let before = SolidError::Upstream {
+                operation,
+                code,
+                entity: None,
+            };
+            assert_eq!(typed.sm_status(), before.sm_status(), "{typed:?}");
+            assert_eq!(typed.upstream_status(), Some(code), "{typed:?}");
+            assert_eq!(typed.kind(), before.kind(), "{typed:?}");
+            assert_eq!(typed.operation(), before.operation(), "{typed:?}");
+            assert_eq!(typed.entity(), None, "{typed:?}");
+            assert_eq!(typed.is_port_failure(), before.is_port_failure());
+            assert_eq!(typed.is_status_answer(), before.is_status_answer());
+            assert_eq!(typed.surface_failure(), Some(&failure));
+        }
     }
 }

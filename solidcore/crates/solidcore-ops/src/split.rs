@@ -33,7 +33,7 @@ use solidcore::topology::brep::p1 as brep_p1;
 use solidcore::topology::brep::p10::merge_curves_on_surface_through_surface;
 use solidcore::topology::brep::p2::{is_manifold_solid, is_sheet};
 use solidcore::topology::brep::p3::{brep_copy, brep_copy_mapped, with_kernel_callbacks};
-use solidcore::topology::brep::p9::orient_sheet_surfaces;
+use solidcore::topology::brep::p9::{orient_sheet_surfaces, OrientSheetNote};
 use solidcore::topology::brep::planar_section::face_plane_section_curves;
 use solidcore::topology::brep::sheet::sheet_on;
 use solidcore::topology::brep_cache::CacheObject;
@@ -117,7 +117,7 @@ pub(crate) fn copies_of<T: Copy>(
 }
 
 /// The name of each edge curve a merge makes.
-fn curve_ref(e: EdgeId, _type_code: i64) -> ObjectRef {
+pub(crate) fn curve_ref(e: EdgeId, _type_code: i64) -> ObjectRef {
     solidcore::topology::loopuse::notify_ref(EntityRef::Edge(e))
 }
 
@@ -384,7 +384,8 @@ fn both_sides(
 /// The manifold solid `body` cut in two by `tool`: the part behind the surface (its normal
 /// points away) and the part in front, each closed by the tool's piece inside the body and
 /// each possibly several solids. A tool that misses leaves both parts the whole body. `None`
-/// when a side is left empty. `body` is unchanged.
+/// when a side is left empty, or when the tool ends inside the body: it only nicks it, and a
+/// part that is no manifold solid is no cut. `body` is unchanged.
 ///
 /// # Errors
 /// [`Error::NotSolid`] for a body that is no manifold solid; the kernel's errors (a tool it
@@ -399,7 +400,7 @@ pub fn split_body(body: &Body, tool: &Tool) -> Result<Option<(Body, Body)>> {
             },
             Err(e) => return Ok(Err(e)),
         };
-        both_sides(k, body, false, |k, flip| {
+        both_sides(k, body, true, |k, flip| {
             let mut surface = t.surface.copy(k)?;
             if flip {
                 if let Err(e) = surface.swap_uv(k) {
@@ -457,7 +458,8 @@ pub fn split_body_by_sheet(
                     orient_sheet_surfaces(k, b, Some(picked), !flip, env)
                 });
                 copy.refresh_cached_topology();
-                Ok(match turned {
+                // the orientation's note fails the side as its status 1 did
+                Ok(match OrientSheetNote::stop_on_note(turned) {
                     Ok(()) => Ok(copy),
                     Err(e) => Err(status(e)),
                 })

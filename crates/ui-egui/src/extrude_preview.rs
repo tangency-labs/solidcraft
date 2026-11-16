@@ -161,10 +161,15 @@ impl StraightPreview {
             applied: None,
             stopped: None,
             reply: None,
+            mirror_meets: None,
+            points: Vec::new(),
+            placed: None,
             tapered: Vec::new(),
             replaced: Vec::new(),
+            outlines: Vec::new(),
             error: crate::preview::extrusion_target_error(&app.session, commands, &app.session.model.state()),
             bounds,
+            layer: None,
         }))
     }
 }

@@ -115,9 +115,8 @@
 //!   dereferences the null `pOptPolyPoints` (it builds `sPolyPoints` and then reads the
 //!   caller's pointer); Rust returns [`SolidError::InvalidInput`] (see
 //!   `plan/upstream-issues.md`).
-//! - `SmCPolyFace::RemovePolyFace` of a face that is not a member removes the first
-//!   member (`FindElement` leaves the index at 0); kept by default for parity (WR-81;
-//!   opt-in fix [`UpstreamFixes::cpoly_remove_poly_face_check_member`]).
+//! - `SmCPolyFace::RemovePolyFace` of a face that is not a member does nothing;
+//!   upstream removes the first member (`FindElement` leaves the index at 0, WR-81).
 //! - A composite face cannot be a member of a composite face, nor the source of
 //!   [`PolyBrep::add_cpoly_face`] ([`SolidError::InvalidInput`]). Upstream only ever
 //!   adds shell faces (`SmLineSegClass.cpp`), but `AddPolyFace` would accept a composite
@@ -177,7 +176,7 @@ use crate::geom::point_set::PointSet3d;
 use crate::geom::pseudo_box::PseudoBox;
 use crate::geom::tol;
 use crate::geom::vector2d::Vec2;
-use crate::kernel::{Kernel, UpstreamFixes};
+use crate::kernel::Kernel;
 use crate::math::{Point3, Vec3, BIG_DOUBLE, EFF_ZERO, EFF_ZERO_PARAM, EFF_ZERO_SQ, UNDEF_DOUBLE};
 use crate::topology::topology::TopologyRecords;
 use crate::topology::{vertex, Brep, FaceId, VertexId};
@@ -188,7 +187,6 @@ pub mod copy;
 pub const UNDEF_ULONG: u64 = u64::MAX - 1;
 
 // `SM_ERR_INVALID_INPUT`.
-use crate::error::SM_ERR_INVALID_INPUT;
 
 macro_rules! poly_id {
     ($(#[$doc:meta])* $name:ident) => {
@@ -751,8 +749,6 @@ fn transform_poly_normal(
 pub struct PolyBrep {
     /// `m_sZoneTol3d`.
     tolerance: f64,
-    /// Opt-in upstream defect fixes.
-    pub fixes: UpstreamFixes,
     /// `m_bOKBackPtrs`.
     ok_back_ptrs: bool,
     /// `m_bOwnsContext`.
@@ -787,7 +783,6 @@ impl PolyBrep {
     pub fn new(k: &Kernel, zone_tol: f64) -> Self {
         Self {
             tolerance: tol::zone_tol3d(k, zone_tol),
-            fixes: k.fixes,
             ok_back_ptrs: false,
             owns_context: false,
             aobject: AObject::new(),
@@ -1070,7 +1065,10 @@ impl PolyBrep {
         } else {
             let l = slot(&self.loop_slots, lp.0, OP)?;
             if l.last_end_point.distance(start) > zt * 100.0 {
-                return Err(SolidError::sm_err(OP));
+                return Err(SolidError::query_failed(
+                    OP,
+                    "the poly edge does not start where the loop's last edge ends",
+                ));
             }
             let v = l.last_end_vertex.unwrap_or(start_vertex);
             if !slot(&self.vertex_slots, v.0, OP)?.listed {
@@ -1113,12 +1111,17 @@ impl PolyBrep {
     pub fn finish_poly_edge_loop(&mut self, lp: PolyLoopId) -> Result<()> {
         const OP: &str = "query::poly::PolyBrep::finish_poly_edge_loop";
         let l = slot(&self.loop_slots, lp.0, OP)?;
-        let first = l.head.ok_or(SolidError::sm_err(OP))?;
+        let first = l
+            .head
+            .ok_or_else(|| SolidError::query_failed(OP, "the loop has no first edge"))?;
         let last_end = l.last_end_point;
         let v = self.edge_vertex(first, OP)?;
         let vx = slot(&self.vertex_slots, v.0, OP)?;
         if vx.point.distance(last_end) > vx.tolerance {
-            return Err(SolidError::sm_err(OP));
+            return Err(SolidError::query_failed(
+                OP,
+                "the loop's last edge does not end at its first vertex",
+            ));
         }
         let l = slot_mut(&mut self.loop_slots, lp.0, OP)?;
         l.closed = true;
@@ -1342,7 +1345,7 @@ impl PolyBrep {
     fn edge_vertex(&self, e: PolyEdgeId, op: &'static str) -> Result<PolyVertexId> {
         self.edge(e)?
             .vertex
-            .ok_or_else(|| SolidError::null_pointer(op))
+            .ok_or_else(|| SolidError::query_missing(op, "the poly edge's vertex"))
     }
 
     /// The poly vertex record `v`.
@@ -1643,7 +1646,10 @@ impl PolyBrep {
         };
         // error - bad back pointers
         if start != v {
-            return Err(SolidError::sm_err(OP));
+            return Err(SolidError::query_failed(
+                OP,
+                "the poly edge does not start at the vertex",
+            ));
         }
         let (prev, next) = (e.prev_at_v, e.next_at_v);
         {
@@ -1658,7 +1664,10 @@ impl PolyBrep {
         }
         if prev == Some(edge) {
             if next != prev {
-                return Err(SolidError::sm_err(OP));
+                return Err(SolidError::query_failed(
+                    OP,
+                    "the vertex's edge ring is broken",
+                ));
             }
             // Only one element in the list - just remove it.
             x.edge_list = None;
@@ -1684,7 +1693,10 @@ impl PolyBrep {
         loop {
             out.push(e);
             if out.len() > self.edge_slots.len() {
-                return Err(SolidError::sm_err(op));
+                return Err(SolidError::query_failed(
+                    op,
+                    "the vertex's edge ring does not close",
+                ));
             }
             e = self.edge(e)?.next_at_v.ok_or_else(|| dead(op))?;
             if e == h {
@@ -1830,7 +1842,10 @@ impl PolyBrep {
         loop {
             out.push(cur);
             if out.len() > self.edge_slots.len() {
-                return Err(SolidError::sm_err(OP));
+                return Err(SolidError::query_failed(
+                    OP,
+                    "the radial ring does not close",
+                ));
             }
             match self.edge_radial(cur)? {
                 None => break,
@@ -1891,7 +1906,9 @@ impl PolyBrep {
     pub fn edge_end_poly_vertex(&self, e: PolyEdgeId) -> Result<Option<PolyVertexId>> {
         const OP: &str = "query::poly::PolyBrep::edge_end_poly_vertex";
         let x = self.edge(e)?;
-        let next = x.next.ok_or(SolidError::null_pointer(OP))?;
+        let next = x
+            .next
+            .ok_or_else(|| SolidError::query_missing(OP, "the poly edge's next edge"))?;
         let last_edge = match x.owner {
             Some(l) => self.lp(l)?.head == Some(next),
             None => false,
@@ -1916,11 +1933,12 @@ impl PolyBrep {
     /// `SM_ERR_NULL_POINTER` without an end vertex; those of
     /// [`PolyBrep::edge_end_poly_vertex`].
     pub fn edge_end_point(&self, e: PolyEdgeId) -> Result<Point3> {
-        let v = self
-            .edge_end_poly_vertex(e)?
-            .ok_or(SolidError::null_pointer(
+        let v = self.edge_end_poly_vertex(e)?.ok_or_else(|| {
+            SolidError::query_missing(
                 "query::poly::PolyBrep::edge_end_point",
-            ))?;
+                "the poly edge's end vertex",
+            )
+        })?;
         Ok(self.vertex(v)?.point)
     }
 
@@ -1975,7 +1993,7 @@ impl PolyBrep {
         let s = self.edge_vertex(e, OP)?;
         let end = self
             .edge_end_poly_vertex(e)?
-            .ok_or(SolidError::null_pointer(OP))?;
+            .ok_or_else(|| SolidError::query_missing(OP, "the poly edge's end vertex"))?;
         let b = self.vertex_bounding_box(s)?;
         let bv = self.vertex_bounding_box(end)?;
         Ok(b.union(&bv))
@@ -2191,7 +2209,10 @@ impl PolyBrep {
         loop {
             out.push(e);
             if out.len() > x.size {
-                return Err(SolidError::sm_err(OP));
+                return Err(SolidError::query_failed(
+                    OP,
+                    "the loop's edge ring is longer than its size",
+                ));
             }
             match self.edge(e)?.next {
                 Some(n) if n != h => e = n,
@@ -2566,10 +2587,8 @@ impl PolyBrep {
     /// `SmCPolyFace::RemovePolyFace`: removes the first occurrence of `face` from the
     /// members.
     ///
-    /// By default (upstream behaviour, WR-81), a face that is not a member removes
-    /// the first member (upstream's `FindElement` status is ignored and found index
-    /// stays 0). With [`Kernel::fixes.cpoly_remove_poly_face_check_member`](crate::kernel::UpstreamFixes::cpoly_remove_poly_face_check_member)
-    /// (or [`PolyBrep::fixes`]), removing a non-member does nothing.
+    /// Removing a face that is not a member does nothing (upstream ignores
+    /// `FindElement`'s status and removes the first member, WR-81).
     ///
     /// # Errors
     ///
@@ -2583,16 +2602,8 @@ impl PolyBrep {
         .composite
         .as_mut()
         .ok_or(dead("query::poly::PolyBrep::cpoly_remove_poly_face"))?;
-        let pos = members.iter().position(|&m| m == face);
-        if self.fixes.cpoly_remove_poly_face_check_member {
-            if let Some(i) = pos {
-                members.remove(i);
-            }
-        } else {
-            let found = pos.unwrap_or(0);
-            if found < members.len() {
-                members.remove(found);
-            }
+        if let Some(i) = members.iter().position(|&m| m == face) {
+            members.remove(i);
         }
         Ok(())
     }
@@ -3318,11 +3329,10 @@ impl PolyBrep {
         }
 
         if scale.is_some_and(Vec3::is_undef) {
-            return Err(SolidError::Upstream {
-                operation: OP,
-                code: SM_ERR_INVALID_INPUT,
-                entity: None,
-            });
+            return Err(SolidError::query_invalid_value(
+                OP,
+                "the scale is undefined",
+            ));
         }
 
         // we're starting - inform the public
@@ -3888,7 +3898,10 @@ mod tests {
         assert_eq!(b.face_stored_normal(f).unwrap(), Vec3::new(0.0, 0.0, -1.0));
         assert!((b.tolerance() - 4.0e-5).abs() < 1e-18);
         let r = b.transform(&k, &mut env, &id, Some(Vec3::new(1.0e19, 1.0, 1.0)));
-        assert!(matches!(r, Err(SolidError::Upstream { code: 1007, .. })));
+        assert!(
+            matches!(&r, Err(e) if e.upstream_status() == Some(1007)),
+            "{r:?}"
+        );
     }
 
     #[test]
@@ -3900,10 +3913,10 @@ mod tests {
         assert!(b.poly_edges(Some(ObjectKey(3))).is_err());
         let mut b = b;
         let c = b.add_cpoly_face(f).unwrap();
-        // removing a non-member removes the first member
+        // removing a non-member removes nothing (WR-81)
         b.cpoly_remove_poly_face(c, PolyFaceId::from_index(99))
             .unwrap();
-        assert!(b.cpoly_faces_of_composite(c).unwrap().is_empty());
+        assert_eq!(b.cpoly_faces_of_composite(c).unwrap(), vec![f]);
     }
 
     #[test]
@@ -3996,7 +4009,7 @@ mod tests {
 
     #[test]
     fn wr81_remove_poly_face_non_member() {
-        let mut k = Kernel::default();
+        let k = Kernel::default();
         let (mut b, f1, _, _) = square(&k);
         let shell = b.face_poly_shell(f1).unwrap().unwrap();
         let f2 = b.add_face(&k, shell, 1.0e-5, None).unwrap();
@@ -4004,40 +4017,22 @@ mod tests {
         b.cpoly_add_poly_face(c, f2, false).unwrap();
         assert_eq!(b.cpoly_faces_of_composite(c).unwrap(), vec![f1, f2]);
 
-        // Default behavior (WR-81 bug preserved): removing non-member removes element 0 (f1)
+        // Removing a non-member does not remove anything (WR-81)
         let non_member = PolyFaceId::from_index(999);
         b.cpoly_remove_poly_face(c, non_member).unwrap();
-        assert_eq!(b.cpoly_faces_of_composite(c).unwrap(), vec![f2]);
-
-        // Opt-in fix enabled: removing non-member does not remove anything
-        k.fixes.cpoly_remove_poly_face_check_member = true;
-        let (mut b_fixed, f3, _, _) = square(&k);
-        let shell_fixed = b_fixed.face_poly_shell(f3).unwrap().unwrap();
-        let f4 = b_fixed.add_face(&k, shell_fixed, 1.0e-5, None).unwrap();
-        let c_fixed = b_fixed.add_cpoly_face(f3).unwrap();
-        b_fixed.cpoly_add_poly_face(c_fixed, f4, false).unwrap();
-        assert_eq!(
-            b_fixed.cpoly_faces_of_composite(c_fixed).unwrap(),
-            vec![f3, f4]
-        );
-
-        b_fixed.cpoly_remove_poly_face(c_fixed, non_member).unwrap();
-        assert_eq!(
-            b_fixed.cpoly_faces_of_composite(c_fixed).unwrap(),
-            vec![f3, f4]
-        );
+        assert_eq!(b.cpoly_faces_of_composite(c).unwrap(), vec![f1, f2]);
 
         // Valid member removal works
-        b_fixed.cpoly_remove_poly_face(c_fixed, f3).unwrap();
-        assert_eq!(b_fixed.cpoly_faces_of_composite(c_fixed).unwrap(), vec![f4]);
+        b.cpoly_remove_poly_face(c, f1).unwrap();
+        assert_eq!(b.cpoly_faces_of_composite(c).unwrap(), vec![f2]);
 
         // Trigger 1: removing a removed member a second time does not remove the remaining member
-        b_fixed.cpoly_remove_poly_face(c_fixed, f3).unwrap();
-        assert_eq!(b_fixed.cpoly_faces_of_composite(c_fixed).unwrap(), vec![f4]);
+        b.cpoly_remove_poly_face(c, f1).unwrap();
+        assert_eq!(b.cpoly_faces_of_composite(c).unwrap(), vec![f2]);
 
         // Trigger 2: deleting a face after removing it from composite does not remove remaining members
-        b_fixed.delete_face(f3).unwrap();
-        assert_eq!(b_fixed.cpoly_faces_of_composite(c_fixed).unwrap(), vec![f4]);
+        b.delete_face(f1).unwrap();
+        assert_eq!(b.cpoly_faces_of_composite(c).unwrap(), vec![f2]);
     }
 
     fn add_wr82_triangle_face(

@@ -24,6 +24,7 @@
 
 use solidcore::blend::blend_refusal::{
     round_too_small, tangent_chain, BlendRefusal, NotBlendable, SetbackTooLongWhy,
+    SetbackTooShortWhy,
 };
 use solidcore::blend::fillet_executive::api::fillet_edges;
 use solidcore::blend::fillet_executive::session::FilletSession;
@@ -413,7 +414,11 @@ fn a_setback_asked_that_does_not_fit_or_stops_short_is_refused() {
         matches!(
             err,
             SolidError::BlendRefused {
-                refusal: BlendRefusal::SetbackTooShort { vertex, least },
+                refusal: BlendRefusal::SetbackTooShort {
+                    vertex,
+                    least,
+                    why: SetbackTooShortWhy::RailsCross,
+                },
                 ..
             } if vertex == v && (least - 5.0).abs() <= 1e-9
         ),

@@ -32,6 +32,9 @@
 //! | [`Torus::inside_out`], [`Torus::major_radius`], [`Torus::minor_radius`] | `GetInsideOut`, `GetMajorRadius`, `GetMinorRadius` (inline) |
 //!
 //! Deviations:
+//! - **Offset orientation.** UV swapping and an inside-out generator each reverse
+//!   the NURB normal. Both reversals apply to the offset radius and its collapse
+//!   test; upstream's offset sign omits the inside-out reversal (#17091).
 //! - **Horn torus rebuild.** (WR-697, the fork's tangency-labs/smlib af7a4d9)
 //!   [`Torus::rebuild_step_from_nurb_parameters`] takes radii
 //!   within its scaled zero as one (a horn torus) and the generator angles' start
@@ -48,21 +51,20 @@
 //!   the torus's `ConvertUVFromNURBSToSTEP`, and returns a failed corner conversion
 //!   (upstream ignores it and reads the corner it may not have written).
 //!   [`Torus::intersect_with_plane`] runs the inherited `IntersectWithPlane` with the
-//!   torus's iso circles. Opt-in fork fix: a minor iso circle whose start lies on the
-//!   axis takes its direction from its midpoint, not the start point again
-//!   (`Kernel::fixes.torus_iso_circle_axis_from_midpoint`, WR-504, #1514; off by
-//!   default, upstream gives it no direction).
+//!   torus's iso circles. A minor iso circle whose start lies on the axis takes its
+//!   direction from its midpoint, not the start point again, and a failed midpoint
+//!   evaluation is returned (WR-504, #1514, the fork's tangency-labs/smlib@672a437ee;
+//!   upstream reuses the zero start vector and gives the circle no direction).
 //! - **Iso endpoint angles.** Correct upstream's explicit-domain endpoint vectors
 //!   to be relative to the iso circle's center, not the torus origin (#774).
 //!   Extraction, periodic wrapping and interval-length policy remain unchanged.
-//! - **Copies.** As upstream's copy constructor, which leaves `m_bInsideOut` at its
-//!   default, `Clone` (and [`Torus::copy`]) resets [`Torus::inside_out`] to `false`.
-//!   The constructor also leaves it `false` (its `bInsideOut` only orients the minor
-//!   circle); only [`Torus::rebuild_step_from_nurb_parameters`] and
-//!   [`Torus::read_from_db`] set it. With the opt-in
-//!   `Kernel::fixes.torus_keeps_inside_out` (WR-500, #1490) the constructor sets it
-//!   from `bInsideOut` and a torus made, rebuilt or read that way keeps it in its
-//!   copies (`SmSurfOfRevolution` Test #11 compares it with the generator's).
+//! - **Inside out (WR-500, #1490).** The constructor sets [`Torus::inside_out`] from
+//!   its generator's bit (`bInsideOut` for the circle it makes, the given curve's own
+//!   for `pOptCircleNurb`), and `Clone` (and [`Torus::copy`]) copies it, so the surface and
+//!   its generating circle always agree (`SmSurfOfRevolution` Test #11 compares them).
+//!   Upstream's constructor only orients the minor circle with `bInsideOut`, leaving
+//!   `m_bInsideOut` `FALSE`, and its copy constructor resets it; a torus that forgot it
+//!   was written to STEP with the wrong `same_sense`.
 //! - **Arguments.** Out-params become return values; `SmContext` arguments and the
 //!   arguments upstream marks `NotUsed` (`EvaluateSTEP`'s side flags,
 //!   `CreateIsoParametricCurve`'s approximation tolerance, `ReadFromDB`'s type) are
@@ -80,15 +82,17 @@
 //! - **Recognition.** [`Torus::is_nurb_surface_torus`] returns `Some` where upstream
 //!   returns `TRUE` with a torus and an error where a `SER` call returns its status
 //!   (a truthy result without torus). `Notify(SM_NO_COPY)` (attribute copying) has no
-//!   equivalent. Two opt-in fork fixes: the torus keeps the tested NURB
-//!   (`Kernel::fixes.found_torus_sphere_keep_tested_nurb`, WR-493; upstream keeps the
-//!   NURB made from the fitted circles, ~1e-11 off the tested one), the generator
-//!   interval is measured signed (`Kernel::fixes.torus_signed_gen_curve_interval`,
-//!   WR-408; upstream's unsigned `AngleBetween` mirrors an interval below the equator;
-//!   the zero tolerance is `SM_EFF_ZERO_DEG`, #1471), and the major radius is measured
-//!   from the torus origin (`Kernel::fixes.torus_major_radius_from_origin`, WR-501; upstream
-//!   measures it from the first sweep circle's centre, off the equator when the tube does
-//!   not start there, #1470). All are off by default.
+//!   equivalent. An opt-in fork fix: the torus keeps the tested NURB
+//!   (`Kernel::fixes.found_torus_sphere_keep_tested_nurb`, WR-493, off by default;
+//!   upstream keeps the NURB made from the fitted circles, ~1e-11 off the tested one).
+//!   Always: the generator interval is measured signed in it and in
+//!   [`Torus::rebuild_step_from_nurb_parameters`] (WR-408; upstream's unsigned
+//!   `AngleBetween` mirrors an interval below the equator; the zero tolerance is
+//!   `SM_EFF_ZERO_DEG`, #1471; a failed angle is not a torus in the recogniser and an
+//!   error in the rebuild, where upstream reads it as 0); and the major
+//!   radius is measured from the torus origin (WR-501; upstream measures it from the
+//!   first sweep circle's centre, off the equator when the tube does not start there,
+//!   #1470).
 //! - **Parent calls.** `Transform` finishes in `SmSurfOfRevolution::Transform`
 //!   (status ignored), its polar-converter rebuild given the torus's iso circles as
 //!   upstream's virtual call does; `ReadFromDB` reads the parent record with
@@ -173,23 +177,17 @@ pub struct Torus {
     pub(crate) minor_radius: f64,
     /// `m_bInsideOut`.
     pub(crate) inside_out: bool,
-    /// Not upstream (WR-500, #1490): made, rebuilt or read with
-    /// `Kernel::fixes.torus_keeps_inside_out`, so the copy keeps
-    /// [`Self::inside_out`].
-    pub(crate) keeps_inside_out: bool,
 }
 
-/// The copy constructor: copies the surface of revolution and the radii; the
-/// inside-out flag keeps its default (`false`), as upstream, unless the torus keeps it
-/// (`Kernel::fixes.torus_keeps_inside_out`, WR-500).
+/// The copy constructor: copies the surface of revolution, the radii and the inside-out
+/// flag (WR-500: upstream's resets the flag).
 impl Clone for Torus {
     fn clone(&self) -> Self {
         Self {
             base: self.base.clone(),
             major_radius: self.major_radius,
             minor_radius: self.minor_radius,
-            inside_out: self.keeps_inside_out && self.inside_out,
-            keeps_inside_out: self.keeps_inside_out,
+            inside_out: self.inside_out,
         }
     }
 }
@@ -207,7 +205,10 @@ fn gen_circle<'a>(gen: Option<&'a Curve>, op: &'static str) -> Result<&'a Ellips
     match gen.map(Curve::kind) {
         Some(CurveKind::Ellipse(e)) => Ok(e),
         Some(_) => Err(SolidError::invalid_input(op, "generator is not a circle")),
-        None => Err(SolidError::null_pointer(op)),
+        None => Err(SolidError::surface_missing(
+            op,
+            "the torus's generator circle",
+        )),
     }
 }
 
@@ -226,7 +227,6 @@ impl Torus {
             major_radius: UNDEF_DOUBLE,
             minor_radius: UNDEF_DOUBLE,
             inside_out: false,
-            keeps_inside_out: false,
         }
     }
 
@@ -236,8 +236,9 @@ impl Torus {
     /// minor circle at `origin + major_radius x_axis` in the plane of `x_axis` and
     /// `x_axis x y_axis` over the domain's V interval, inside out with
     /// `opts.inside_out` (`SmCircle::CreateCanonical`); the generator is then not
-    /// tested for planarity (it is marked planar). The surface's own inside-out flag
-    /// stays `false`, as upstream.
+    /// tested for planarity (it is marked planar). The surface's own inside-out flag is
+    /// its generator's (WR-500; upstream leaves it `false`): `opts.inside_out` for the
+    /// circle made here, the given curve's own for `opts.circle_nurb`.
     ///
     /// # Errors
     ///
@@ -282,7 +283,7 @@ impl Torus {
                 if e.is_unported_or_cancelled() {
                     e
                 } else {
-                    SolidError::null_pointer(OP_NEW)
+                    SolidError::surface_missing(OP_NEW, "the torus's generator circle")
                 }
             })?;
             base.gen_curve = Some(Curve::from(circle));
@@ -290,15 +291,14 @@ impl Torus {
         };
 
         // (the self-intersection test of a major radius below the minor radius only
-        // warns upstream); not upstream (WR-500, opt-in): the surface is inside out
-        // with its generator
-        let keeps_inside_out = k.fixes.torus_keeps_inside_out;
+        // warns upstream); not upstream (WR-500): the surface is inside out with its
+        // generator, the circle made inside out with `opts.inside_out` or the one given
+        let inside_out = base.gen_curve.as_ref().is_some_and(Curve::inside_out_bit);
         Ok(Self {
             base,
             major_radius,
             minor_radius,
-            inside_out: keeps_inside_out && opts.inside_out,
-            keeps_inside_out,
+            inside_out,
         })
     }
 
@@ -324,7 +324,10 @@ impl Torus {
             || major_radius.is_nan()
             || major_radius <= EFF_ZERO
         {
-            return Err(SolidError::sm_err(OP_CANONICAL));
+            return Err(SolidError::surface_failed(
+                OP_CANONICAL,
+                "a radius of the torus is not above zero",
+            ));
         }
 
         // In the future, allow user to specify angles
@@ -346,11 +349,19 @@ impl Torus {
         // Build NURB; fail cleanly rather than leak a null-NURB object.
         match torus.make_nurb(k) {
             Err(e) if e.is_unported_or_cancelled() => return Err(e),
-            Err(_) => return Err(SolidError::sm_err(OP_CANONICAL)),
+            Err(_) => {
+                return Err(SolidError::surface_failed(
+                    OP_CANONICAL,
+                    "the torus's NURB could not be made",
+                ))
+            }
             Ok(()) => {}
         }
         if torus.base.base.gw_nurb().is_none() {
-            return Err(SolidError::sm_err(OP_CANONICAL));
+            return Err(SolidError::surface_failed(
+                OP_CANONICAL,
+                "the torus has no NURB",
+            ));
         }
         Ok(torus)
     }
@@ -506,6 +517,77 @@ impl Torus {
         )
     }
 
+    /// Carry a stored support on this recognised parametrisation. Both converters must
+    /// use the support's circle, not the independently fitted circle recognition found.
+    pub(crate) fn on_support(
+        &mut self,
+        k: &Kernel,
+        placement: Axis2Placement,
+        major: f64,
+        minor: f64,
+        form: BSplineSurface,
+    ) -> Result<()> {
+        let domain = form.natural_uv_domain();
+        let generator = form
+            .create_iso_parametric_curve(
+                k,
+                if self.base.swap_uv {
+                    SurfParamType::V
+                } else {
+                    SurfParamType::U
+                },
+                if self.base.swap_uv {
+                    domain.v_min()
+                } else {
+                    domain.u_min()
+                },
+                IsoCurveOptions::default(),
+            )?
+            .curve;
+        let interval = generator.natural_interval();
+        let x = placement.x_axis();
+        let z = placement.z_axis();
+        let centre = placement.origin() + x * major;
+        let (v0, v1) = torus_gen_curve_interval(
+            [x, generator.evaluate_point(interval.min())? - centre],
+            [x, generator.evaluate_point(interval.max())? - centre],
+            z,
+            self.inside_out,
+            EFF_ZERO_DEG,
+        )?;
+        // The fitted sweep interval carries the fitted axis's error too. Its ends
+        // must come from the form's meridians about the installed support's axis.
+        let d = self.base.anal_uv_domain;
+        let (_, _, sweep) = sweep_frame(
+            placement.origin(),
+            z,
+            fitted_sides(&self.base.position, d.u_interval()),
+            meridians(&form, self.base.swap_uv)?,
+        )
+        .ok_or_else(|| {
+            SolidError::surface_failed(OP_REBUILD, "a meridian has no radial direction")
+        })?;
+        self.base.anal_uv_domain = Extent2d::from_bounds(sweep.min(), v0, sweep.max(), v1);
+        self.base.gen_curve = Some(Curve::from(Ellipse::new_circle(
+            k,
+            centre,
+            x,
+            z,
+            Extent1d::from_min_max(v0, v1),
+            minor,
+            &EllipseOptions {
+                dim: 3,
+                nurb: Some(&generator),
+                inside_out: self.inside_out,
+            },
+        )?));
+        self.base.position = placement;
+        self.major_radius = major;
+        self.minor_radius = minor;
+        self.base.base = form;
+        self.rebuild_polar_converter(k)
+    }
+
     /// `RebuildPolarConverter` with the torus's iso circles.
     pub(crate) fn rebuild_polar_converter(&mut self, k: &Kernel) -> Result<()> {
         let shape = self.shape();
@@ -618,15 +700,24 @@ impl Torus {
     /// radius is below `tol`, where [`Self::create_offset_surface`] gives no surface.
     #[must_use]
     pub fn offset_collapses(&self, signed_offset_distance: f64, tol: f64) -> bool {
-        let sign = if self.base.swap_uv { -1.0 } else { 1.0 };
-        self.minor_radius + sign * signed_offset_distance < tol
+        self.minor_radius + self.offset_sign() * signed_offset_distance < tol
+    }
+
+    /// Each reversal changes the sign of Su × Sv relative to the tube's outward normal.
+    fn offset_sign(&self) -> f64 {
+        if self.base.swap_uv == self.inside_out {
+            1.0
+        } else {
+            -1.0
+        }
     }
 
     /// The torus offset by `signed_offset_distance` along the NURB normal
     /// (`CreateOffsetSurface`): a copy with the minor radius changed by the distance
-    /// (negated with [`SurfOfRevolution::swap_uv`]), the generator scaled about its
-    /// centre and every NURB control point scaled from the torus origin and moved back
-    /// towards the axis to keep the major radius. `None` when the new minor radius is
+    /// (negated by each of [`SurfOfRevolution::swap_uv`] and [`Self::inside_out`]),
+    /// the generator scaled about its centre and every NURB control point scaled from
+    /// the torus origin and moved back towards the axis to keep the major radius.
+    /// `None` when the new minor radius is
     /// below `approx_tol_3d`.
     ///
     /// # Errors
@@ -639,12 +730,9 @@ impl Torus {
         signed_offset_distance: f64,
         approx_tol_3d: f64,
     ) -> Result<Option<Self>> {
-        // When UVs are swapped - reverse orientation of offset
-        let offset_sign = 1.0 * (if self.base.swap_uv { -1.0 } else { 1.0 });
-
         // get new radius
         let old_min_radius = self.minor_radius;
-        let new_min_radius = self.minor_radius + offset_sign * signed_offset_distance;
+        let new_min_radius = self.minor_radius + self.offset_sign() * signed_offset_distance;
 
         // skip building degenerate or negative radius minor circles
         if new_min_radius < approx_tol_3d {
@@ -687,7 +775,7 @@ impl Torus {
             .base
             .nurb
             .as_mut()
-            .ok_or(SolidError::null_pointer(OP_OFFSET))?;
+            .ok_or_else(|| SolidError::surface_missing(OP_OFFSET, "the offset torus's NURB"))?;
         let ix = off_nurb.indices();
 
         // For every m_pNurb ControlPoint - make inner iteration the Sweep direction
@@ -771,6 +859,19 @@ impl Torus {
         convert_uv_from_nurbs_to_step(&self.base, k, nurbs_uv)
     }
 
+    /// [`Self::convert_uv_from_nurbs_to_step`] with the polar converters' exactness.
+    ///
+    /// # Errors
+    ///
+    /// Those of [`Self::convert_uv_from_nurbs_to_step`].
+    pub(crate) fn convert_uv_from_nurbs_to_step_exact(
+        &self,
+        k: &Kernel,
+        nurbs_uv: Point2,
+    ) -> Result<(Point2, bool)> {
+        convert_uv_from_nurbs_to_step_exact(&self.base, k, nurbs_uv)
+    }
+
     // ---- STEP evaluation ------------------------------------------------------------
 
     /// The point and triangular derivatives at the STEP parameters `uv` (degrees),
@@ -811,7 +912,10 @@ impl Torus {
     ) -> Result<()> {
         // check input
         if hu > 3 || hv > 3 {
-            return Err(SolidError::sm_err(OP_EVAL_STEP));
+            return Err(SolidError::surface_failed(
+                OP_EVAL_STEP,
+                "the STEP form evaluates derivatives up to order 3 only",
+            ));
         }
         if hu != hv {
             return Err(SolidError::invalid_input(
@@ -941,10 +1045,8 @@ impl Torus {
     /// interval or, with `domain`, the angles of the curve's ends. A degenerate
     /// extraction is returned as the B-spline.
     ///
-    /// With the opt-in
-    /// [`UpstreamFixes::torus_iso_circle_axis_from_midpoint`](crate::kernel::UpstreamFixes::torus_iso_circle_axis_from_midpoint)
-    /// (WR-504) a minor circle whose start lies on the axis takes its direction from its
-    /// midpoint, as upstream's fallback intends; by default it reuses the start vector.
+    /// A minor circle whose start lies on the axis takes its direction from its midpoint,
+    /// as upstream's fallback intends (WR-504; upstream reuses the start vector).
     ///
     /// # Errors
     ///
@@ -985,11 +1087,9 @@ impl Torus {
     /// [`UpstreamFixes::found_torus_sphere_keep_tested_nurb`](crate::kernel::UpstreamFixes::found_torus_sphere_keep_tested_nurb)
     /// (WR-493) the torus then keeps a copy of `test`'s NURB and rebuilds its analytic
     /// data from it (`SetFromGwNurb`); by default it keeps the NURB made from the
-    /// fitted circles, as upstream. With
-    /// [`UpstreamFixes::torus_signed_gen_curve_interval`](crate::kernel::UpstreamFixes::torus_signed_gen_curve_interval)
-    /// (WR-408) the generator's interval is measured signed, and with
-    /// [`UpstreamFixes::torus_major_radius_from_origin`](crate::kernel::UpstreamFixes::torus_major_radius_from_origin)
-    /// (WR-501) the major radius is measured from the torus origin.
+    /// fitted circles, as upstream. The generator's interval is measured signed (WR-408;
+    /// a failed angle is not a torus), and the major radius is measured from the torus
+    /// origin (WR-501).
     ///
     /// # Errors
     ///
@@ -1080,14 +1180,10 @@ impl Torus {
         };
 
         // get torus orientation and size
-        // not upstream (WR-501, #1470, opt-in; tangency-labs/smlib@6136a04): the major
-        // radius runs from the torus origin, not from the first sweep circle's centre,
-        // which lies off the equator when the tube does not start there
-        let major_vec = if k.fixes.torus_major_radius_from_origin {
-            other_frame.origin() - torus_origin
-        } else {
-            other_frame.origin() - ref_frame.origin()
-        };
+        // not upstream (WR-501, #1470; tangency-labs/smlib@6136a04): the major radius runs
+        // from the torus origin, not from the first sweep circle's centre, which lies off
+        // the equator when the tube does not start there
+        let major_vec = other_frame.origin() - torus_origin;
         let maj_rad = major_vec.length();
         let torus_z_axis = ref_frame.z_axis(); // the frame where all circles are parallel
 
@@ -1116,42 +1212,20 @@ impl Torus {
 
         // get GenCurve min and max angles measured from each GenCurve's origin and start
         // vector
-        let (gen_angle_min, gen_angle_max) = if k.fixes.torus_signed_gen_curve_interval {
-            // not upstream (WR-408, tangency-labs/solidcore#1112, opt-in): signed
-            // angles; a failed angle is not a torus, as the fork. Zero is SM_EFF_ZERO_DEG
-            // (tangency-labs/smlib@40344bf, #1471): the ends carry the rounding of their
-            // coordinates, so a closed tube's ends differ by ~1e-12 degrees
-            match torus_gen_curve_interval(
-                [start_for_min_angle, vec_min],
-                [start_for_max_angle, vec_max],
-                torus_z_axis,
-                inside_out,
-                EFF_ZERO_DEG,
-            ) {
-                Ok(ivl) => ivl,
-                Err(e) if e.is_unported_or_cancelled() => return Err(e),
-                Err(_) => return Ok(None),
-            }
-        } else {
-            // (statuses ignored upstream: 0 on failure)
-            let mut gen_angle_min =
-                ignored(start_for_min_angle.angle_between(vec_min))?.unwrap_or(0.0);
-            let mut gen_angle_max =
-                ignored(start_for_max_angle.angle_between(vec_max))?.unwrap_or(0.0);
-            gen_angle_min = 180.0 * gen_angle_min / PI;
-            gen_angle_max = 180.0 * gen_angle_max / PI;
-
-            // snap to ends for small tolerances
-            if gen_angle_min.abs() < EFF_ZERO {
-                gen_angle_min = 0.0;
-            }
-            if gen_angle_max.abs() < EFF_ZERO || (gen_angle_max - 360.0).abs() < EFF_ZERO {
-                gen_angle_max = 360.0;
-            }
-            if gen_angle_max < gen_angle_min {
-                gen_angle_max += 360.0;
-            }
-            (gen_angle_min, gen_angle_max)
+        // not upstream (WR-408, tangency-labs/solidcore#1112): signed angles; a failed
+        // angle is not a torus, as the fork. Zero is SM_EFF_ZERO_DEG
+        // (tangency-labs/smlib@40344bf, #1471): the ends carry the rounding of their
+        // coordinates, so a closed tube's ends differ by ~1e-12 degrees
+        let (gen_angle_min, gen_angle_max) = match torus_gen_curve_interval(
+            [start_for_min_angle, vec_min],
+            [start_for_max_angle, vec_max],
+            torus_z_axis,
+            inside_out,
+            EFF_ZERO_DEG,
+        ) {
+            Ok(ivl) => ivl,
+            Err(e) if e.is_unported_or_cancelled() => return Err(e),
+            Err(_) => return Ok(None),
         };
 
         // define Torus domain
@@ -1217,7 +1291,7 @@ impl Torus {
         if k.fixes.found_torus_sphere_keep_tested_nurb {
             let nurb = test
                 .gw_nurb()
-                .ok_or_else(|| SolidError::null_pointer(OP_NURB_TORUS))?;
+                .ok_or_else(|| SolidError::surface_missing(OP_NURB_TORUS, "the tested NURB"))?;
             torus.base.base.nurb = Some(copy_nurb_surface(nurb)).into();
             torus.base.base.nurb_is_borrowed = false;
             ignore_status(torus.rebuild_step_from_nurb_parameters(k))?;
@@ -1250,7 +1324,10 @@ impl Torus {
             || srf.degree(SurfParamType::V) != 2
             || !srf.is_rational()
         {
-            return Err(SolidError::sm_err(OP_REBUILD));
+            return Err(SolidError::surface_failed(
+                OP_REBUILD,
+                "the NURB is not a rational surface of degree 2",
+            ));
         }
 
         // evaluate min/max domain points
@@ -1284,7 +1361,10 @@ impl Torus {
 
         // quit when not a properly oriented torus
         if !is_torus_with_swap_uv && !is_torus_no_swap_uv {
-            return Err(SolidError::sm_err(OP_REBUILD));
+            return Err(SolidError::surface_failed(
+                OP_REBUILD,
+                "the NURB is not a properly oriented torus",
+            ));
         }
 
         // locals
@@ -1317,7 +1397,12 @@ impl Torus {
             fitted_sides(&ref_frame, ref_iso.angles.ok_or_else(missing)?),
             meridians(srf, swap_uv)?,
         )
-        .ok_or_else(|| SolidError::sm_err(OP_REBUILD))?;
+        .ok_or_else(|| {
+            SolidError::surface_failed(
+                OP_REBUILD,
+                "a meridian has no control point off the axis on its side",
+            )
+        })?;
 
         // Install the origin into pRefFrame.  // [B328]
         let _ = ref_frame.set_canonical(torus_origin, x_axis, y_axis);
@@ -1383,37 +1468,14 @@ impl Torus {
         let vec_min = nurb_min_point - min_origin;
         let vec_max = nurb_max_point - max_origin;
 
-        // not upstream (WR-408, tangency-labs/solidcore#1112, opt-in): signed angles
-        let (gen_angle_min, gen_angle_max) = if k.fixes.torus_signed_gen_curve_interval {
-            torus_gen_curve_interval(
-                [start_for_min_angle, vec_min],
-                [start_for_max_angle, vec_max],
-                torus_z_axis,
-                inside_out,
-                EFF_ZERO_DEG,
-            )?
-        } else {
-            // get GenCurve min and max angles (statuses ignored upstream: 0 on failure)
-            let mut gen_angle_min =
-                ignored(start_for_min_angle.angle_between(vec_min))?.unwrap_or(0.0);
-            let mut gen_angle_max =
-                ignored(start_for_max_angle.angle_between(vec_max))?.unwrap_or(0.0);
-            gen_angle_min = 180.0 * gen_angle_min / PI;
-            gen_angle_max = 180.0 * gen_angle_max / PI;
-
-            // snap to ends for small tolerances
-            if gen_angle_min.abs() < EFF_ZERO_DEG {
-                gen_angle_min = 0.0;
-            }
-            if gen_angle_max.abs() < EFF_ZERO_DEG || (gen_angle_max - 360.0).abs() < EFF_ZERO_DEG {
-                gen_angle_max = 360.0;
-            }
-            if gen_angle_max < gen_angle_min + EFF_ZERO_DEG {
-                gen_angle_max += 360.0;
-            }
-
-            (gen_angle_min, gen_angle_max)
-        };
+        // not upstream (WR-408, tangency-labs/solidcore#1112): signed angles
+        let (gen_angle_min, gen_angle_max) = torus_gen_curve_interval(
+            [start_for_min_angle, vec_min],
+            [start_for_max_angle, vec_max],
+            torus_z_axis,
+            inside_out,
+            EFF_ZERO_DEG,
+        )?;
 
         // define Torus domain
         let anal_uv_domain = Extent2d::from_bounds(
@@ -1450,7 +1512,10 @@ impl Torus {
 
         // no work - GenCurve is degenerate
         if circle.is_degenerate(scaled_zero) {
-            return Err(SolidError::sm_err(OP_REBUILD));
+            return Err(SolidError::surface_failed(
+                OP_REBUILD,
+                "the generator circle is degenerate",
+            ));
         }
 
         // set m_pGenCurve
@@ -1460,8 +1525,6 @@ impl Torus {
         self.major_radius = maj_rad;
         self.minor_radius = min_rad;
         self.inside_out = inside_out;
-        // not upstream (WR-500, opt-in): its copies keep the flag
-        self.keeps_inside_out |= k.fixes.torus_keeps_inside_out;
         self.base.planar_generator = true;
         self.base.position = ref_frame;
         self.base.swap_uv = swap_uv;
@@ -1517,7 +1580,10 @@ impl Torus {
         let mut d_scale = 1.0;
         if let Some(s) = scale {
             if !are_same(s.x, s.y) || !are_same(s.x, s.z) || s.x < EFF_ZERO {
-                return Err(SolidError::sm_err(OP_TRANSFORM));
+                return Err(SolidError::surface_failed(
+                    OP_TRANSFORM,
+                    "an analytic surface cannot be scaled non-uniformly",
+                ));
             }
             d_scale = s.x;
         }
@@ -1554,8 +1620,6 @@ impl Torus {
     pub fn read_from_db(k: &Kernel, db: &mut DatabaseReader, version: u64) -> Result<Self> {
         // init output object
         let mut torus = Self::empty();
-        // not upstream (WR-500, opt-in): its copies keep the flag read
-        torus.keeps_inside_out = k.fixes.torus_keeps_inside_out;
 
         if db.file_type() == FileType::Ascii {
             if let Some(s) = db.in_stream_mut() {
@@ -1612,7 +1676,7 @@ impl Revolved for Torus {
 fn meridians(srf: &BSplineSurface, swap_uv: bool) -> Result<[Vec<Point3>; 2]> {
     let nurb = srf
         .gw_nurb()
-        .ok_or_else(|| SolidError::null_pointer(OP_NURB_TORUS))?;
+        .ok_or_else(|| SolidError::surface_missing(OP_NURB_TORUS, "the form's NURB"))?;
     let (n, m) = (nurb.n(), nurb.m());
     let column = |end: bool| -> Result<Vec<Point3>> {
         if swap_uv {
@@ -1737,21 +1801,36 @@ fn iso_curve(
         // return minor isoCurve circle
         let mut x_axis = torus_z_axis.cross(nurb_min_vec.cross(torus_z_axis));
         let mut length = x_axis.length();
+        // the tube point that fixes the meridian plane: the start, or the mid point when
+        // the start is on the axis
+        let mut probe = nurb_min_point;
         if length < EFF_ZERO_SQRT {
-            if k.fixes.torus_iso_circle_axis_from_midpoint {
-                // WR-504 (#1514, opt-in): the direction comes from the mid point, as the
-                // fallback intends; it is read now, so a failed evaluation propagates (the
-                // fork's SER, smlib@672a437ee; v1.0.1 ignores it)
-                let mid_point = iso.curve.evaluate_point(nurb_ivl.evaluate(0.5))?;
-                let mid_vec = mid_point - torus_origin;
-                x_axis = torus_z_axis.cross(mid_vec.cross(torus_z_axis));
-            } else {
-                // (the mid point is evaluated but not used upstream; the start vector is
-                // used again, which is zero on the axis)
-                let _ = ignored(iso.curve.evaluate_point(nurb_ivl.evaluate(0.5)))?;
-                x_axis = torus_z_axis.cross(nurb_min_vec).cross(torus_z_axis);
-            }
+            // not upstream (WR-504, #1514): the direction comes from the mid point, as the
+            // fallback intends (upstream uses the start vector again, which is zero on the
+            // axis); it is read now, so a failed evaluation propagates (the fork's SER,
+            // smlib@672a437ee; v1.0.1 ignores it)
+            let mid_point = iso.curve.evaluate_point(nurb_ivl.evaluate(0.5))?;
+            let mid_vec = mid_point - torus_origin;
+            x_axis = torus_z_axis.cross(mid_vec.cross(torus_z_axis));
             length = x_axis.length();
+            probe = mid_point;
+        }
+        // not upstream: the probe point fixes the meridian plane but not the side. On a
+        // spindle torus the tube can lie past the axis, where a point's radial direction
+        // points away from the minor circle's centre (R 1, r 2: v 120..240 starts on the
+        // axis with its mid at -X; v 150..210 starts at -X), while the centre is at +X R.
+        // Upstream takes the radial direction as is and centres the circle on the wrong
+        // side. Take the side whose centre puts the probe on the minor circle. A
+        // three-point circle would fail for a full tube, whose start and end coincide.
+        // Off the folded part the probe's own side is the nearer one, as upstream.
+        if length >= EFF_ZERO_SQRT {
+            let off_circle = |side: f64| {
+                let centre = torus_origin + (side * shape.major_radius / length) * x_axis;
+                ((probe - centre).length() - shape.minor_radius).abs()
+            };
+            if off_circle(-1.0) < off_circle(1.0) {
+                x_axis = -x_axis;
+            }
         }
         x_axis = Div::div(x_axis, length);
         (
@@ -1849,6 +1928,16 @@ fn convert_uv_from_nurbs_to_step(
     k: &Kernel,
     nurbs_uv: Point2,
 ) -> Result<Point2> {
+    Ok(convert_uv_from_nurbs_to_step_exact(base, k, nurbs_uv)?.0)
+}
+
+/// [`convert_uv_from_nurbs_to_step`] with the polar converters' exactness: `false` where
+/// the sweep or generator angle is not a closed form's.
+fn convert_uv_from_nurbs_to_step_exact(
+    base: &SurfOfRevolution,
+    k: &Kernel,
+    nurbs_uv: Point2,
+) -> Result<(Point2, bool)> {
     // m_bSwapUV - Nurb and STEP parameters are swapped
     let nurb_uv = if base.swap_uv {
         Point2::new(nurbs_uv.y, nurbs_uv.x)
@@ -1861,14 +1950,14 @@ fn convert_uv_from_nurbs_to_step(
         OP_CONVERT,
         "polar converter has no curve",
     ))?;
-    let (step_x, _exact) = base
+    let (step_x, exact_x) = base
         .polar
         .convert_to_polar_parameter(k, polar_curve, nurb_uv.x)?;
 
     // convert genCurve NurbParam to PolarParam
     let circle = gen_circle(base.gen_curve.as_ref(), OP_CONVERT)?;
-    let polar_param = circle.convert_t_from_nurbs_to_step(k, nurb_uv.y)?;
-    Ok(Point2::new(step_x, polar_param))
+    let (polar_param, exact_y) = circle.convert_t_from_nurbs_to_step_exact(k, nurb_uv.y)?;
+    Ok((Point2::new(step_x, polar_param), exact_x && exact_y))
 }
 
 /// Not upstream (WR-408, tangency-labs/solidcore#1112; the SolidCraft fork's
@@ -1923,6 +2012,7 @@ fn torus_gen_curve_interval(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::error::surface::SurfaceFailure;
 
     fn canonical(k: &Kernel, swap: bool, inside_out: bool) -> Torus {
         let frame = Axis2Placement::new(
@@ -2092,9 +2182,58 @@ mod tests {
         let k = Kernel::default();
         let frame = Axis2Placement::IDENTITY;
         for (a, b) in [(0.0, 1.0), (1.0, 0.0), (f64::NAN, 1.0), (-1.0, 0.5)] {
-            let r = Torus::create_canonical(&k, &frame, a, b, TorusOptions::default(), None);
-            assert!(matches!(r, Err(SolidError::Upstream { .. })));
+            let e = Torus::create_canonical(&k, &frame, a, b, TorusOptions::default(), None)
+                .unwrap_err();
+            assert_eq!(e.upstream_status(), Some(crate::error::SM_ERR));
+            assert_eq!(e.operation(), OP_CANONICAL);
+            assert_eq!(
+                e.surface_failure(),
+                Some(&SurfaceFailure::Failed(
+                    "a radius of the torus is not above zero"
+                ))
+            );
         }
+    }
+
+    /// The torus's failures carry a typed reason and keep the status, kind and operation
+    /// of the bare status each replaced.
+    #[test]
+    fn torus_failures_keep_their_upstream_answers() {
+        let k = Kernel::default();
+        let mut t = canonical(&k, false, false);
+        let e = t.evaluate_step(Point2::new(0.0, 0.0), 4, 4).unwrap_err();
+        assert_eq!(e.upstream_status(), Some(crate::error::SM_ERR));
+        assert_eq!(e.operation(), OP_EVAL_STEP);
+        assert_eq!(e.kind(), crate::error::ErrorKind::Failed);
+        assert_eq!(
+            e.surface_failure(),
+            Some(&SurfaceFailure::Failed(
+                "the STEP form evaluates derivatives up to order 3 only"
+            ))
+        );
+        let e = t
+            .transform(
+                &k,
+                &Axis2Placement::IDENTITY,
+                Some(Vec3::new(1.0, 2.0, 1.0)),
+            )
+            .unwrap_err();
+        assert_eq!(e.upstream_status(), Some(crate::error::SM_ERR));
+        assert_eq!(e.operation(), OP_TRANSFORM);
+        assert_eq!(
+            e.surface_failure(),
+            Some(&SurfaceFailure::Failed(
+                "an analytic surface cannot be scaled non-uniformly"
+            ))
+        );
+        let e = gen_circle(None, OP_NEW).unwrap_err();
+        assert_eq!(e.upstream_status(), Some(crate::error::SM_ERR_NULL_POINTER));
+        assert_eq!(e.operation(), OP_NEW);
+        assert_eq!(e.kind(), crate::error::ErrorKind::Missing);
+        assert_eq!(
+            e.to_string(),
+            format!("{OP_NEW}: the torus's generator circle is missing")
+        );
     }
 
     #[test]
@@ -2121,6 +2260,79 @@ mod tests {
     }
 
     #[test]
+    fn offset_follows_the_nurb_normal_in_every_orientation() {
+        let k = Kernel::default();
+        for swap in [false, true] {
+            for inside_out in [false, true] {
+                let t = canonical(&k, swap, inside_out);
+                let source = t.base.base();
+                let domain = source.natural_uv_domain();
+                for distance in [-0.25, 0.0, 0.25] {
+                    let offset = t
+                        .create_offset_surface(&k, distance, 1e-6)
+                        .unwrap()
+                        .unwrap();
+                    assert_eq!(offset.major_radius(), t.major_radius());
+                    for u in [0.1, 0.3, 0.5, 0.7, 0.9] {
+                        for v in [0.1, 0.3, 0.5, 0.7, 0.9] {
+                            let uv = domain.evaluate(u, v);
+                            let derivatives = source
+                                .evaluate_simple(uv, 1, 1, false, false, false)
+                                .unwrap();
+                            let normal = derivatives[1][0].cross(derivatives[0][1]);
+                            let expected =
+                                derivatives[0][0] + distance * (normal / normal.length());
+                            let actual = offset.base.base().evaluate_point(uv).unwrap();
+                            assert!(
+                                (actual - expected).length() < 1e-9,
+                                "swap={swap}, inside_out={inside_out}, distance={distance}, uv={uv:?}: {actual:?} vs {expected:?}"
+                            );
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn offset_collapse_follows_the_nurb_normal_in_every_orientation() {
+        let k = Kernel::default();
+        // A binary fraction makes the radius exactly equal to the tolerance at the boundary.
+        let tolerance = 1.0 / 1048576.0;
+        for (swap, inside_out, outward) in [
+            (false, false, 1.0),
+            (false, true, -1.0),
+            (true, false, -1.0),
+            (true, true, 1.0),
+        ] {
+            let t = canonical(&k, swap, inside_out);
+            for (radial_change, collapses) in [
+                (-1.5, true),
+                (-1.0, true),
+                (-1.0 + tolerance * 0.5, true),
+                (-1.0 + tolerance, false),
+                (-1.0 + tolerance * 2.0, false),
+                (0.0, false),
+                (0.25, false),
+            ] {
+                let distance = outward * radial_change;
+                assert_eq!(
+                    t.offset_collapses(distance, tolerance),
+                    collapses,
+                    "swap={swap}, inside_out={inside_out}, distance={distance}"
+                );
+                assert_eq!(
+                    t.create_offset_surface(&k, distance, tolerance)
+                        .unwrap()
+                        .is_none(),
+                    collapses,
+                    "swap={swap}, inside_out={inside_out}, distance={distance}"
+                );
+            }
+        }
+    }
+
+    #[test]
     fn rebuild_recovers_the_torus() {
         let k = Kernel::default();
         let t = canonical(&k, false, false);
@@ -2140,13 +2352,11 @@ mod tests {
 
     /// A quarter turn of a torus whose generating interval runs below its equator
     /// (-90 to 90 degrees, the outer half of the tube), rebuilt from its NURB as
-    /// `SmFace::SwapUV` does: with the opt-in the interval is the outer half again (270 to
-    /// 450, the same arc); upstream's unsigned angles give 90 to 450, the inner half
-    /// (WR-408).
+    /// `SmFace::SwapUV` does: the interval is the outer half again (270 to 450, the same
+    /// arc); upstream's unsigned angles give 90 to 450, the inner half (WR-408).
     #[test]
     fn issue_1112_rebuilt_torus_keeps_an_interval_below_its_equator() {
-        let mut k = Kernel::default();
-        k.fixes.torus_signed_gen_curve_interval = true;
+        let k = Kernel::default();
         let frame = Axis2Placement::new(
             Vec3::new(0.0, 0.0, 0.0),
             Vec3::new(1.0, 0.0, 0.0),
@@ -2275,7 +2485,6 @@ mod tests {
     fn torus_recognition_partial_scaled_and_non_matching() {
         let mut k = Kernel::default();
         k.fixes.found_torus_sphere_keep_tested_nurb = true;
-        k.fixes.torus_signed_gen_curve_interval = true;
         let frame = Axis2Placement::new(
             Vec3::new(1.0, 2.0, 0.5),
             Vec3::new(0.0, 1.0, 0.0),
@@ -2375,9 +2584,9 @@ mod tests {
     /// tangency-labs/solidcore#1470 and #1471 (WR-501, WR-408): a torus R 13.1934, r 1.25,
     /// 80 mm out, whose NURB runs once round its tube from the bottom (-90 to 270
     /// degrees). Its first sweep circle sits at the bottom, off the equator, so upstream
-    /// measures R as sqrt(R^2 + r^2) (13.2525); with `torus_major_radius_from_origin` R is
-    /// measured from the torus origin. The two tube ends differ by rounding only, which
-    /// `torus_signed_gen_curve_interval` must take for a full turn, not a sliver.
+    /// measures R as sqrt(R^2 + r^2) (13.2525); here R is measured from the torus origin.
+    /// The two tube ends differ by rounding only, which the signed generator interval
+    /// must take for a full turn, not a sliver.
     #[test]
     fn issue_1470_1471_tube_turn_from_bottom_is_found_with_its_radii() {
         let (big, small) = (13.1934, 1.25);
@@ -2403,9 +2612,7 @@ mod tests {
             .unwrap();
             let nurbs = plain(&t);
 
-            let mut k = Kernel::default();
-            k.fixes.torus_major_radius_from_origin = true;
-            k.fixes.torus_signed_gen_curve_interval = true;
+            let k = Kernel::default();
             let found = Torus::is_nurb_surface_torus(&k, &nurbs, 1.0)
                 .unwrap()
                 .expect("a torus");
@@ -2424,26 +2631,14 @@ mod tests {
                 (v.min() + 90.0).abs() < 1e-9 && (v.length() - 360.0).abs() < 1e-9,
                 "swap {swap}: tube interval {v:?}"
             );
-
-            // flags off: upstream's R from the first sweep circle, sqrt(R^2 + (r sin -90)^2)
-            let off = Torus::is_nurb_surface_torus(&Kernel::default(), &nurbs, 1.0)
-                .unwrap()
-                .expect("a torus");
-            let upstream_major = (big * big + small * small).sqrt();
-            assert!(
-                (off.major_radius() - upstream_major).abs() < 1e-9 * upstream_major,
-                "swap {swap}: upstream major {}",
-                off.major_radius()
-            );
         }
     }
 
     /// tangency-labs/solidcore#1514 (WR-504; tangency-labs/smlib#40): a horn torus (R 5,
     /// r 5) whose tube starts at 180 degrees touches the axis at the torus origin, so each
     /// minor iso circle starts there. `CreateIsoParametricCurve` finds no direction from
-    /// the start point and falls back to the midpoint; with
-    /// `torus_iso_circle_axis_from_midpoint` the circle gets that direction and its
-    /// analytic domain, and it starts at the origin.
+    /// the start point and falls back to the midpoint; the circle gets that direction and
+    /// its analytic domain, and it starts at the origin.
     #[test]
     fn issue_1514_horn_torus_minor_iso_circle_takes_direction_from_midpoint() {
         let frame = Axis2Placement::IDENTITY;
@@ -2464,8 +2659,7 @@ mod tests {
         let domain = t.base.base.natural_uv_domain();
         let fixed = domain.u_interval().evaluate(0.25);
 
-        let mut k = Kernel::default();
-        k.fixes.torus_iso_circle_axis_from_midpoint = true;
+        let k = Kernel::default();
         let iso = t
             .create_iso_parametric_curve(&k, SurfParamType::U, fixed, None, false)
             .expect("minor iso circle");
@@ -2490,19 +2684,88 @@ mod tests {
             (start - frame.origin()).length() < 1e-9,
             "start {start:?} is not the torus origin"
         );
+    }
 
-        // flag off (upstream): the start vector is zero on the axis, so the circle has
-        // no direction
-        let off = t
-            .create_iso_parametric_curve(&Kernel::default(), SurfParamType::U, fixed, None, false)
+    /// A spindle torus (R 1, r 2) with its tube on `v0..v1`, its minor iso circle at u 0
+    /// checked against closed form: centre `+X R`, the analytic circle through the torus
+    /// points at `v0`, the mid angle and `v1`, and the circle's NURB at its mid parameter
+    /// on the torus point at the mid angle.
+    fn assert_spindle_minor_iso_circle(v0: f64, v1: f64) {
+        let frame = Axis2Placement::IDENTITY;
+        let dom = Extent2d::from_bounds(0.0, v0, 90.0, v1);
+        let (big, small) = (1.0_f64, 2.0_f64);
+        let t = Torus::create_canonical(
+            &Kernel::default(),
+            &frame,
+            big,
+            small,
+            TorusOptions {
+                swap_uv: false,
+                inside_out: false,
+                circle_nurb: None,
+            },
+            Some(&dom),
+        )
+        .expect("spindle torus");
+        let domain = t.base.base.natural_uv_domain();
+        let k = Kernel::default();
+        let fixed = domain.u_interval().min();
+        // the domain starts at u 0 (STEP conversion is ambiguous on the folded part, where
+        // u 0 and u 180 meet)
+        let radial = Vec3::new(1.0, 0.0, 0.0);
+        let torus_point = |v_deg: f64| {
+            let v = v_deg.to_radians();
+            (big + small * v.cos()) * radial + small * v.sin() * Vec3::new(0.0, 0.0, 1.0)
+        };
+        let iso = t
+            .create_iso_parametric_curve(&k, SurfParamType::U, fixed, None, false)
             .expect("minor iso circle");
-        let CurveKind::Ellipse(off_circle) = off.curve.kind() else {
-            panic!("expected a circle");
+        let CurveKind::Ellipse(circle) = iso.curve.kind() else {
+            panic!("v {v0}..{v1}: expected a circle");
         };
         assert!(
-            !off_circle.position().x_axis().x.is_finite(),
-            "upstream direction {:?}",
-            off_circle.position().x_axis()
+            (circle.position().origin() - big * radial).length() < 1e-12,
+            "v {v0}..{v1}: centre {:?}, want {:?}",
+            circle.position().origin(),
+            big * radial
         );
+        let ivl = circle.step_interval();
+        let v_mid = 0.5 * (v0 + v1);
+        for v_deg in [v0, v_mid, v1] {
+            let want = torus_point(v_deg);
+            let got = circle
+                .evaluate_step_point(ivl.min() + (v_deg - v0))
+                .expect("analytic point");
+            assert!(
+                (got - want).length() < 1e-12,
+                "v {v0}..{v1} at {v_deg}: {got:?}, want {want:?}"
+            );
+        }
+        let mid = iso
+            .curve
+            .evaluate_point(&k, iso.curve.natural_interval().evaluate(0.5))
+            .expect("nurb mid");
+        let want = torus_point(v_mid);
+        assert!(
+            (mid - want).length() < 1e-12,
+            "v {v0}..{v1}: nurb mid {mid:?}, want {want:?}"
+        );
+    }
+
+    /// From the #17008 review: a spindle torus (R 1, r 2) whose tube runs 120..240 degrees
+    /// starts on the axis (`R + r cos 120 = 0`), and its whole tube lies on the far
+    /// side of the axis: the mid point (v 180) is at `-X` while the minor circle's centre is
+    /// at `+X R`. The midpoint fallback must still put the centre at `+X R`.
+    #[test]
+    fn spindle_minor_iso_circle_from_axis_start_keeps_the_tube_centre() {
+        assert_spindle_minor_iso_circle(120.0, 240.0);
+    }
+
+    /// A spindle tube that starts on the folded part (`R + r cos v0 < 0`, start point at
+    /// `-X` side, off the axis), not on the axis: the start vector gives the direction.
+    #[test]
+    fn spindle_minor_iso_circle_from_folded_start_keeps_the_tube_centre() {
+        assert_spindle_minor_iso_circle(150.0, 210.0);
+        assert_spindle_minor_iso_circle(140.0, 200.0);
     }
 }

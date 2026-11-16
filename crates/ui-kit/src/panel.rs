@@ -350,7 +350,115 @@ pub enum Part {
     Footer,
 }
 
+/// A card height that can be drawn: finite and never negative (an unmeasured card reports nothing).
+fn sane(height: f32) -> f32 {
+    if height.is_finite() { height.max(0.0) } else { 0.0 }
+}
+
+/// One card of a [`Panel::stack_bounds`] column: the height its content needs, and the least height
+/// it can be given and still be usable (its header plus at least one row).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct StackCard {
+    pub content: f32,
+    pub minimum: f32,
+}
+
+/// Where [`Panel::stack_bounds`] put one card of the column.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct StackSlot {
+    pub rect: egui::Rect,
+    /// The card got less than its content needs, so the host scrolls it.
+    pub scrolls: bool,
+    /// The column had no room even for every card's minimum, so this card folds to its header.
+    pub folded: bool,
+}
+
 impl<'a> Panel<'a> {
+    /// Places N cards down one column of `column`, with the standard gap between them.
+    ///
+    /// A host stacks several cards on one side of the viewport: a command form, the selected item's
+    /// properties, a results panel, a command reply. Placing them one after the other with their
+    /// content height runs off the column as soon as there are more than two, so the space is
+    /// shared instead:
+    /// - a card whose content fits is given exactly its content height, and the rest of the column
+    ///   goes to the cards that would otherwise scroll, in proportion to what each one lacks;
+    /// - every card keeps `minimum`, and cards are `space_8` apart;
+    /// - when not even the minimums fit, the lowest cards fold to their header (`folded`), they
+    ///   never overlap, and the rest keep their minimum.
+    ///
+    /// The result always fits inside `column` and never overlaps, so a host can paint each rect as
+    /// it is. `scrolls` on a card means its content is taller than its rect: scroll it.
+    pub fn stack_bounds(column: egui::Rect, cards: &[StackCard]) -> Vec<StackSlot> {
+        let t = Tokens::get();
+        let gap = sane(t.space_8);
+        let header = sane(t.form_header_height);
+        let n = cards.len();
+        if n == 0 {
+            return Vec::new();
+        }
+        // A degenerate column (inverted, or a measurement that is not a number) is treated as
+        // empty rather than drawn outside itself.
+        let column = egui::Rect::from_min_max(
+            egui::pos2(sane(column.min.x), sane(column.min.y)),
+            egui::pos2(column.max.x.max(column.min.x), column.max.y.max(column.min.y)),
+        );
+        let room = (sane(column.height()) - gap * (n - 1) as f32).max(0.0);
+        let want: Vec<f32> = cards.iter().map(|c| sane(c.content).max(sane(c.minimum))).collect();
+        let floor: Vec<f32> = cards.iter().map(|c| sane(c.minimum)).collect();
+        let sum = |heights: &[f32]| heights.iter().sum::<f32>();
+        let mut heights = want.clone();
+        let mut folded = vec![false; n];
+        if sum(&heights) > room {
+            if sum(&floor) <= room {
+                // Every card keeps its floor; what is left over is shared by what each one lacks.
+                let spare = room - sum(&floor);
+                let lacks: f32 = (0..n).map(|i| (want[i] - floor[i]).max(0.0)).sum();
+                heights = (0..n).map(|i| if lacks > 0.0 { floor[i] + spare * (want[i] - floor[i]).max(0.0) / lacks } else { floor[i] }).collect();
+            } else {
+                // Not even the floors fit: fold the lowest cards to their header until they do.
+                heights = floor.clone();
+                let mut folded_sum = sum(&heights);
+                for i in (0..n).rev() {
+                    if folded_sum <= room {
+                        break;
+                    }
+                    let to = header.min(heights[i]);
+                    folded_sum -= heights[i] - to;
+                    heights[i] = to;
+                    folded[i] = true;
+                }
+                // A column too short even for every header: share what there is, still without
+                // overlapping, so a host never gets a rect outside the column.
+                if folded_sum > room && folded_sum > 0.0 {
+                    let scale = room / folded_sum;
+                    for height in &mut heights {
+                        *height *= scale;
+                    }
+                }
+            }
+        }
+        // A column too short even for the gaps and the headers gets everything scaled down, so the
+        // rects still fit inside it and never overlap: a host paints what it is given.
+        let mut gap = gap;
+        let total: f32 = heights.iter().sum::<f32>() + gap * (n - 1) as f32;
+        if total > sane(column.height()) && total > 0.0 {
+            let scale = sane(column.height()) / total;
+            for height in &mut heights {
+                *height *= scale;
+            }
+            gap *= scale;
+        }
+        let mut y = column.top();
+        (0..n)
+            .map(|i| {
+                let height = heights[i].max(0.0);
+                let rect = egui::Rect::from_min_size(egui::pos2(column.left(), y), egui::vec2(column.width(), height));
+                y += height + gap;
+                StackSlot { rect, scrolls: sane(cards[i].content) > height + 0.5, folded: folded[i] }
+            })
+            .collect()
+    }
+
     /// Shared vertical dock policy: reserve room for a second card, then place it
     /// below the measured first card with the standard container gap.
     pub fn stack_first_bounds(mut bounds: egui::Rect) -> egui::Rect {

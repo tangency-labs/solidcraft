@@ -59,6 +59,8 @@ mod issue_1038_tests;
 #[cfg(test)]
 mod issue_1080_tests;
 #[cfg(test)]
+mod issue_12126_tests;
+#[cfg(test)]
 mod issue_1510_tests;
 #[cfg(test)]
 mod issue_2005_tests;
@@ -97,6 +99,8 @@ mod ops;
 #[cfg(test)]
 mod outline_tests;
 mod par;
+#[cfg(test)]
+mod split_cone_tests;
 pub use par::{KERNEL_STACK, for_each_on_threads, kernel_thread, map_on_threads, map_with_local_pools};
 #[cfg(test)]
 mod display_plan_tests;
@@ -157,15 +161,16 @@ mod validity;
 pub mod watch;
 
 pub use blend::{
-    ChamferSide, FilletTurn, FitSearch, SETBACK_AT_LEAST, blend_edges, chamfer, chamfer_max, chamfer_max_why, chamfer_sides, fillet, fillet_each,
-    fillet_g2, fillet_g2_corners, fillet_g2_with_g2_corners, fillet_least_setback, fillet_max, fillet_max_each, fillet_max_why, fillet_removing,
-    fillet_setback, largest_fit_note, names_largest_fit, tangent_chain, with_fit_note, without_fit_note,
+    ChamferSide, FilletTurn, FitSearch, SETBACK_AT_LEAST, blend_edge_middles, blend_edges, chamfer, chamfer_carrying_face, chamfer_max,
+    chamfer_max_why, chamfer_sides, chamfer_sides_carrying_face, fillet, fillet_each, fillet_g2, fillet_g2_corners, fillet_g2_with_g2_corners,
+    fillet_least_setback, fillet_max, fillet_max_each, fillet_max_why, fillet_removing, fillet_setback, largest_fit_note, named_fit,
+    names_largest_fit, tangent_chain, tangent_chain_edges, with_fit_note, without_fit_note,
 };
 pub use blend_corner::fillet_radii;
 pub use blend_variable::{RadiusSpline, Taper, fillet_chord, fillet_tapered, fillet_variable, fillet_variable_points, fillet_variable_spline, taper};
 pub use body::{
-    Body, CapSignature, DISPLAY_ANGLE, DisplayShare, EdgeInfo, FaceInfo, FacePaint, FaceSource, MeshTolerance, Paint, PointClass, Refusal,
-    SurfaceKind,
+    Body, COLOUR_NAME_MAX, CapSignature, DISPLAY_ANGLE, DisplayShare, EdgeInfo, FaceInfo, FacePaint, FaceSource, MeshTolerance, Paint, PointClass,
+    Refusal, SurfaceKind, colour_name,
 };
 pub use boundary::{Boundary, boundary_patch};
 pub use boundary_network::{BoundaryCurve, CurveSource, MAX_CHAIN_CURVES, MAX_EDGE_PICKS, boundary_join, boundary_surface};
@@ -180,7 +185,7 @@ pub use continuity::{
 };
 pub use continuity_order::{Construction, Continuity};
 pub use corner_g2::{CURVATURE_SHARE, DEFAULT_SETBACK_FACTOR};
-pub use curvature_comb::{CombTooth, MAX_COMB_TEETH, MIN_COMB_TEETH, comb_edge_near, edge_comb, iso_comb};
+pub use curvature_comb::{CombTooth, MAX_COMB_TEETH, MIN_COMB_TEETH, comb_edge_near, edge_comb, edge_distance, iso_comb};
 pub use delete_face::delete_faces;
 pub use distance::{BodyDistance, DistanceShape, body_distance};
 pub use draft_corners::{CornerFill, CornerOption, CornerRefusal, CornerReport, DraftCorner, draft_corners};
@@ -195,7 +200,7 @@ pub use iges_in::{MAX_IGES_BYTES, iges_import, iges_to_step};
 pub use iges_out::iges_export_bodies;
 pub use intersection::{MeetingEdge, meeting_edges};
 pub use iso::{IsoLine, MAX_ISO_COUNT, iso_curves, iso_grid};
-pub use lip::{raise_band, rim_band};
+pub use lip::{LipRefusal, raise_band, rim_band};
 pub use loft_blend::loft_blend;
 pub use matchsurf::{match_surface, seam_continuity};
 pub use measure::{BodyMeasure, MassMeasure, measure, measure_mass};
@@ -219,15 +224,17 @@ pub use sew::{EdgeSpec, FaceSpec, SurfSpec, sew, sew_touching};
 pub use solidcraft_smlib::hold_a_kernel;
 pub use solidcraft_smlib::stop::Stop;
 pub use solidcraft_smlib::trace as smlib_trace;
-pub use splitface::{SplitTool, split_body, split_faces, split_faces_with_map};
-pub use step::step_export;
+pub use splitface::{SplitTool, face_split_if_on_face, has_cap_at, split_body, split_faces, split_faces_with_map};
+pub use step::{step_export, step_export_with_face_ids};
+/// The largest STEP text the importer parses; `solidcraft_io::limits` keeps it at the limit in force (#13329).
+pub use step_in::p21::{max_bytes as step_max_bytes, set_max_bytes as set_step_max_bytes};
 pub use step_in::{
     ImportIssue, ImportReport, ImportedBody, IssueKind, StepImport, StepNode, StepReading, step_cache_alive, step_import, step_import_shared,
     step_orientation_errors, step_validate,
 };
-pub use step_out::{ExportBody, ExportProduct, StepHeader, step_export_bodies, step_export_products};
+pub use step_out::{ExportBody, ExportProduct, StepExport, StepHeader, step_export_bodies, step_export_bodies_with_face_ids, step_export_products};
 pub use surface_extend::{ExtendLimit, ExtendMode, ExtendOptions, extend_surface};
-pub use surface_kind::{EdgeCircle, FaceSurface, edge_circle, face_surface};
+pub use surface_kind::{AxialPiece, EdgeCircle, FaceSurface, axial_face_section, edge_circle, face_edge_indices, face_surface};
 pub use surface_offset::offset_surface;
 pub use surface_ruled::{Ruled, RuledCorners, RuledMode, ruled_far_handles, ruled_surface, ruled_surface_with};
 pub use surface_trim::{TrimKeep, mutual_trim, trim, trim_keep};
@@ -238,7 +245,7 @@ pub use surfaces::{
 };
 pub use sweep_path::{RailFit, SweepControl, SweepOrientation, sweep_path, sweep_path_with};
 pub use topo::{CylinderFace, cylinder_end_at, cylinder_face, cylinder_face_at, material_in_ring};
-pub use topo::{TopoCounts, merged_topology, seam_flags};
+pub use topo::{TopoCounts, merged_topology, seam_flags, whole_edge};
 pub use tspline::tspline_sheet;
 pub use validation::{KeptCheck, Validation, check_kept, detach_kept, validating};
 pub use validity::{SmlibCheck, Validity, smlib_dump_dir, validity};
@@ -256,6 +263,9 @@ pub enum KernelError {
     /// The vendored kernel panicked; the model is unchanged.
     #[error("kernel internal error: {0}")]
     Internal(String),
+    /// A lip's band that leaves no sound face beside it.
+    #[error("the operation failed: raising a band: {0}")]
+    Lip(#[from] LipRefusal),
 }
 
 pub type Result<T> = std::result::Result<T, KernelError>;

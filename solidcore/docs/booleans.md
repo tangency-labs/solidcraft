@@ -96,13 +96,20 @@ temporary origin shift (`merge/p1.rs`, `temporary_brep_transform`) that it undoe
 
 Between steps 2 and 3, `mark_common` (`merge/p4.rs`) closes intersection loops that end at a common
 vertex used by one common edge (`close_intersection_loop`) and, with more than one such vertex,
-closes the gaps (`fix_gaps`); it repeats at most ten times. The classify and select steps also repeat
+closes the gaps (`fix_gaps`); it repeats at most ten times. A pass goes on past each closure that
+deleted no topology and gave the vertex a second common edge, so ten passes are not a limit of ten
+gaps; a closure that leaves the vertex a loop end still ends the pass. A loop end is closed first along
+an edge to another loop end, which closes the gap between them rather than branching the loop at a
+vertex it already passes through. The classify and select steps also repeat
 (at most ten times) when a coincidence repair changes the topology (§5).
 
 After the cleanup of step 5, `place_vertices_on_face_corners` (`merge/p1.rs`) moves a vertex that lies
 more than the intersection tolerance off one of its faces to the corner its faces define, only within
-half its tolerance and only when the corner leaves every face gap under the intersection tolerance
-(measured at the corner before the move); otherwise the vertex stays. It runs after the cleanup because
+half its tolerance and only when the point leaves every face gap under the intersection tolerance and
+every gap to an edge end within half its tolerance (measured at the point before the move). The point is
+the corner when every face holds it, and otherwise the one that minimises the largest gap to the faces
+(the midpoint of the corner and the nearest point of a face it lies beside, such as a round's patch ending at
+its tangent line); otherwise the vertex stays. It runs after the cleanup because
 the faces and edges the vertex keeps are final there.
 
 Ops never computes a geometric quantity here: `boolean` takes the operands, calls
@@ -183,7 +190,10 @@ with exact predicates [11, 12] or with interval enclosures of the sector test is
 A coincident pair on opposite sides of a union, or the same side of a difference, is deleted: those
 are the faces a regularized operation removes. The result's regions take their solid or void flag
 from the source regions they came from (`result_solid`): union solid if either was, intersection if
-both were, difference if A's was and B's was not.
+both were, difference if A's was and B's was not. A region with no record of its sources (no face of
+B was copied into it, because B's faces all lie on its boundary, as when a union fills a void
+exactly) that a deleted face joins to another such region takes the class a deleted face has on both
+sides: solid for a union, void for an intersection or a difference (`deleted_face_sides`).
 
 ## 5. Coincident and near-coincident faces
 
@@ -204,17 +214,52 @@ sampled: a 6 × 6 grid of points dropped onto the other for whole surfaces, and 
 boundary curve of one meeting one of the other where the surfaces agree to second order, or the
 middle of one dropping onto the other. A sampled check is not a proof; deciding coincidence from the
 definitions (two quadrics by their coefficients, a definition against its own copy by identity, a
-B-spline pair from the composed implicit field as `ssi/src/coincide.rs` does) is open work. Only the merge gate decides from definitions: `faces_coincide` (`merge/p1.rs`) decides cone (a cylinder is a cone of semi-angle 0), sphere and torus pairs by `Surface::same_analytic_surface`. Two planes, two different kinds (tangent, they can stay within the tolerance over a patch) and any pair with an offset, B-spline, extrusion or revolution keep the sector's answer.
+B-spline pair from the composed implicit field as `ssi/src/coincide.rs` does) is open work. Only the merge gate decides from definitions: `faces_coincide` (`merge/p1.rs`) decides cone (a cylinder is a cone of semi-angle 0), sphere and torus pairs by `Surface::same_analytic_surface`. Two cones or two spheres that are not one surface (axes or centres apart) still count as one over the two faces' boxes when an enclosed bound keeps them within the tolerance there: the box is halved across the axes until a Lipschitz bound on their separation decides each part that can hold either surface (`revolved_within`, `surface/surface/p8.rs`; two arcs through the same corners about centres 8.4e-5 apart stay within 1e-10 over the sliver they share). The intersector's coincidence check is still the sampled one. The sector test also tells two planes apart from their faces (`faces_on_other_surfaces`, `query/face/p1.rs`): two planes closer than 0.001° at a common edge are not coincident when a point of either face is proved to lie farther than the two faces' tolerance band from the other's plane (walls through a common edge at a tiny angle, within tolerance near it and apart beyond). The gap is read on each edge curve dropped onto its face's own plane, since the exact edge lies on the plane within the edge's tolerance τ_e of the curve while the curve may stand τ_e + τ_f off it; the band grows by τ_e times the sine of the planes' angle for that. The proof is an enclosure, never samples: a line's ends, and on a B-spline or conic edge the ends of its Bézier pieces, halved by de Casteljau while their hull leaves the band. Two planes, two different kinds (tangent, they can stay within the tolerance over a patch) and any pair with an offset, B-spline, extrusion or revolution keep the sector's answer.
 
 **Near-coincident strips.** Two planar faces crossing at a small angle θ meet in a line fixed only
-to tol / sin θ. Where one face has an edge lying on the other, parallel to and covering the crossing,
-and the other face ends at a similar edge on the far side, the two planes stay within tolerance of
-each other across the whole strip between those edges. The port still makes the crossing an edge,
-whose ends are picked per body and never related, and `make_faceuse` then fails (`SM_ERR`). With
-`boolean_coincident_strip_drops_crossing` the crossing's edge definition is removed before
-`resolve_intersections`, so the strip is bounded by the existing edges
-(`topology_intersector/coincident_strip.rs`, `drop_crossings_in_coincident_strips`; test
-`solidcore/tests/wr_614_coincident_strip_crossing.rs`). The rule is for planes only, and it is opt-in.
+to tol / sin θ. The crossing is no event when, on each side of it, one of the two faces lies over its
+whole boundary within the intersection tolerance of the other face's plane. Then the two faces lie
+within that tolerance of each other wherever both exist beside the crossing (the distance to a plane
+is affine, and its maximum over a compact face is reached on the boundary): one coincident pair. The
+certificate takes every edge of the face, inner loops included, through its hull points (a line's
+ends, a B-spline's control points, with their coordinate errors). Each hull point's slack adds its
+offset from the face's own plane and the edge's tolerance times the planes' sine (`boundary_slack`),
+since the face is the region its trims bound in its own plane. A boundary that bows outside the band,
+a hole or notch edge past it, or an edge with no certain hull, so no face bounds that side, keeps the
+crossing as an exit. The rule needs each face to cross the line: an edge end strictly on either side
+of the other plane, beyond the same slack. Two faces meeting only along their boundaries, as at a
+shared edge, are intersected as upstream does. Upstream still makes
+the crossing an edge, whose ends are picked per body and never related, and `make_faceuse` then fails
+(`SM_ERR`). The port decides the rule from the planes and the faces' boundaries before the face pair is
+intersected, and makes no curve, edge definition or vertex definition for such a crossing
+(`topology_intersector/coincident_strip.rs`, `crossing_inside_coincident_pair`; test
+`solidcore/tests/wr_614_coincident_strip_crossing.rs`). The rule is for planes only and the default.
+
+Two decisions it relies on are made once, before intersecting, for line edges. A vertex of one
+operand within the intersection tolerance of a line edge of the other, off its ends and off its line
+by more than rounding (a near miss), is an event there: the edge is split at the vertex's drop and
+the two are one proto vertex (`split_edges_at_vertices`, `topology_intersector/p2.rs`). A vertex on
+the line to rounding is its own drop and stays with upstream's vertex/edge classification. Two line edges whose ends then lie within
+their intersection tolerance of each other, end for end, are one coincident interval (points at the
+same fraction along both are an affine distance apart, so the ends bound it), and a point where the
+two cross gets no vertex definition (`coincident_line_edges`;
+`ProtoTopologyManager::set_coincident_edges`). An interval of a straight intersection curve whose
+ends lie on one straight face edge is classified on that edge when both ends lie within the
+intersection tolerance of its line (`CurveClassification::classify_edge_interval`). Such a certified
+run is coincident, not "maybe": upstream's `AreCoincidentMaybe` would remove it as mislabelled when
+it is short beside its edge, and the two edges were then never made one.
+
+**One point per proto vertex.** Each body classifies a curve end within its own band, so a point
+1.4e-5 from a vertex of each body classifies onto both even when the two vertices are 2.8e-5 apart,
+beyond the 2e-5 they may differ by. `find_or_create_proto_vertex_pcs` (`proto_topology/p3.rs`)
+makes no proto vertex for two classifications onto vertices farther apart than the two vertices'
+intersection tolerance; upstream made one with that distance as its tolerance and merged the two
+vertices. The rule is for vertices only: an edge's or a face's classified point follows parameters
+that may not be settled yet (`ResolveOverlappingProtoEdges` re-parametrises overlapping edges, whose
+first points can lie 18 mm apart in an outset of `Boolean/extrudeHoles1.smb`), so their distance
+proves no separation.
+
+**A curve that runs along an edge without crossing it.** With `classify_edge_interval` (WR-305) an interval between two points on a face's boundary edge whose middle lies within the band of that edge is on the edge, not inside the face. An end the edge intersections find no crossing for (an arc 1.4e-11 from another arc, ending 2.8e-5 short of that arc's corner) used to stay unclassified, so the interval was imprinted as a second edge beside the first; now such an end counts as on the edge when it lies within the band of it and clear of its vertices, the curve is tangent to the edge (within the angle tolerance) at both ends of the interval, and the whole curve over the interval is proved within the band of the edge on control points: the curve piece's control points against the chord of its ends, those ends against the edge piece's ends, and the edge piece's control points against its own chord, rounding counted (`piece_within_band`); the end is then classified to the edge with its parameter on it (`CurveClassification::classify_edge_interval`, `intersect/curve_class/p3.rs`). Without the tangency (a curve that crosses the edge at the interval's classified end and stops a hair past it, whose short piece lies within the band whatever its angle) or the proof (another curve kind, or a curve that bows out of the band between its ends) the end stays unclassified. An interval whose ends both classify onto the edge is still decided by WR-305 alone (a straight piece along a straight edge by its ends, a curved one by its midpoint).
 
 This is the problem Segal's tolerant modeller and Jackson's local tolerances address [9, 10]: two
 entities within tolerance are one, and a decision across that band has to be made once and kept by
@@ -232,14 +277,66 @@ What the port does today:
 - **Touch points.** A degenerate SSI curve is classified at its point on both faces and kept as a
   point when it is on or inside both (`face_intersect`); `intersect_topology` imprints it only where
   it classifies to imprintable topology in both faces (`topology_intersector/p2.rs`).
-- **Contact curves inside a face.** With `remove_slit_loops_where_solids_touch`, a union,
-  intersection or difference removes the zero-area inner loops a contact curve leaves and splits
-  shells joined only through them (`merge/p4.rs`; `topology/brep/p3.rs`,
-  `remove_slit_loops_where_solids_touch`).
+- **Contact curves inside a face.** A union, intersection or difference removes the zero-area
+  inner loops a contact curve leaves and splits shells joined only through them (`merge/p4.rs`;
+  `topology/brep/p3.rs`, `remove_slit_loops_where_solids_touch`). The parts of a split shell
+  are regrouped by nesting: parts apart from each other bound solids of their own (a cylinder
+  resting on a box, united), and a void part lying inside an outer part bounds the same solid
+  (a cavity cut that touches the body's outside along a line: one solid with a void).
 - **Solids touching along an edge or at a vertex** are a valid result: ops checks the result with
   `is_outward_touching_solids` (§3).
 - **The sector test near tangency** steps off the edge and compares binormals until they separate
   (§4.2); where they never do within the face, it returns the coincident or zero-sector class.
+  Tangent faces part as the square of the step over their relative radius, so fixed steps and
+  angle thresholds read the faces of a large enough part as parallel. Two readings therefore step
+  on, three times further each round, until the faces are more than the tolerance apart: a sector
+  whose own two faces look parallel (a zero sector), and a classified face that looks coincident
+  with a face the definitions show to lie on another surface (`query/face/p1.rs`,
+  `faces_on_other_surfaces`: two different analytic kinds, or two quadrics of one kind that
+  `Surface::same_analytic_surface` tells apart). A tangent pair with no definitions to compare (a
+  B-spline on a plane) is still read as coincident once its relative radius passes about 1.7e7
+  times the sum of the two edges' tolerances, 330 mm at 1e-5 each (`query/edge.rs`, the 0.01°
+  rule over eight rounds).
+- **Circles a hair less than tangent.** Two coplanar circles that overlap past touching by δ
+  cross at two points `2√(2δ r1 r2 / (r1 ± r2))` apart (`2√(rδ)` for equal radii from
+  outside), far beyond δ, while the circles stay within δ of each other between them; each
+  crossing is fixed along the wall only to the tolerance over the crossing angle, so the two
+  cannot be told apart. `circle_coplanar_circle_intersect_in_contact`
+  (`geom/geom_utility/p1.rs`) takes an overlap below a contact tolerance of its own as one
+  touching point midway between their nearest points, apart from the near-miss band in which
+  circles that far apart touch. On the boolean's path every site that decides the contact
+  passes the same contact tolerance, `contact_tol_3d` (`geom/tol.rs`: the system zone
+  tolerance, 1e-5 by default, not the edges' and faces' grown tolerances, so the same holes
+  give the same topology whatever came before; the touching point lies δ/2 from each operand,
+  within the approximation tolerance the intersection curves through it are held to): the wall
+  intersection of parallel cylinders that both bound faces (`surface/cone/p3.rs`), the
+  circles of an edge and a face's intersection curve (`curve/ellipse/p2.rs` through
+  `intersect/curve_class/p9.rs`) and the curve/surface classifier's osculating circles where
+  an edge meets a face (`surface/surface/p4.rs`). Two holes a hair less than tangent then
+  touch along one line and at one point on each rim. Bare curves and surfaces keep upstream's
+  zero: their radius-relative bands are a search heuristic, not a modelling tolerance. Holes
+  overlapping by more than the zone tolerance and less than the intersection tolerance (twice
+  it) cross in two lines at every site and are still refused as not a solid, as before; with
+  the intersection tolerance as the contact tolerance they came out a valid solid that kept the
+  second tool whole, as a void.
+  Parallel cones (drill points) are met by the marching intersection and are not decided this
+  way, nor are coplanar faces bounded by such circles.
+- **A line a hair inside a circle.** A line in a circle's plane, δ inside the circle, crosses
+  it at two points `2√(2rδ)` apart and stays within δ of it between them, as two circles do.
+  `line_coplanar_circle_intersect_distinct` (`geom/geom_utility/p1.rs`) takes an overlap below
+  its contact tolerance as one touching point at the chord's midpoint, unless the whole circle
+  lies within that tolerance of the line. `Ellipse::intersect_with_line` (`curve/ellipse/p2.rs`)
+  moves that point to an end of the arc or the line that lies on the stretch between the two
+  crossings, so an arc that starts on the line there touches it at its start. The two sites
+  above that pass `contact_tol_3d` for circles pass it when one of the two is a line: an edge
+  against a face's intersection curve
+  (`curve/ellipse/p2.rs` through `intersect/curve_class/p9.rs`), and the curve/surface
+  classifier's line against an osculating circle where an edge meets a face
+  (`surface/surface/p4.rs`). A flat side a hair inside a round tangent to it then touches the
+  round's end circle at one point. A line tilted out of the circle's plane keeps its crossings:
+  it meets the circle where it pierces the plane, and the chord's midpoint lies off the line.
+  The other line/circle callers keep upstream's zero. The touching point is found only where
+  it lies on both curves' intervals.
 
 **The refusal that names a tangent contact.** The kernel's boolean has none today. The `ssi` crate
 refuses a contact it cannot prove with `Error::Tangent`, code `BOOLEAN_TANGENT`, carrying where it
@@ -272,8 +369,8 @@ bare net and there is no definition to keep.
   trims are made by dropping the 3D curve onto each surface (`Surface::drop_curve`,
   `intersect/surface_drop_lib`), which traces and fits a cubic within the drop tolerance. So an exact
   edge can carry fitted trims. The exact pcurve of a plane section on a cylinder
-  (`cylinder_plane_section_trims_exact`) replaces one class of them; sphere, cone and torus sections
-  are open.
+  (`surface_drop_lib/cylinder_section.rs`) replaces one class of them; sphere, cone and torus
+  sections are open.
 - A traced SSI curve's UV curves are cubic Hermite interpolants, checked at samples and not certified
   ([ssi.md](ssi.md) §6.1); the imprint passes a copy of them to `MakeEdgeInFace`
   (`topology_intersector/p1.rs`, "Intersection trims").
@@ -295,7 +392,7 @@ small error.
 | ray grazes a face or hits an edge | the parity of the crossing is ambiguous | lowest-dimension hit and its local sector; a hit at the start fails that ray, and the next axis is tried; no ray finds a region: `SM_ERR` | a certified classification (§4.3) |
 | faces within 10° at a common edge | the binormals do not separate the sector | stepped off the edge at growing distances; 0.5° is taken as coincident | an enclosure of the sector test |
 | coincident faces not recognised | the coincidence check is sampled off the plane | the pair goes to SSI with parallel normals | coincidence from the definitions (§5) |
-| near-coincident planar strip | a crossing fixed only to tol / sin θ, its ends unrelated | `make_faceuse` `SM_ERR`; fixed with `boolean_coincident_strip_drops_crossing` | curved strips |
+| near-coincident planar strip | a crossing fixed only to tol / sin θ, its ends unrelated | upstream's `make_faceuse` `SM_ERR`; the crossing is no event, decided before the face pair is intersected | curved strips; offsets where the crossing's distance to an event equals the tolerance |
 | an imprint fails half way | both bodies are partly imprinted | the imprint's error is returned, not overwritten (`topology_intersector/p2.rs`) | |
 | union deletes a face between the outside and a solid | the solid merges into the infinite region | with `boolean_union_refuses_solid_leak`, refused with `SM_ERR` naming the face (`merge/p4.rs`) | on by default |
 | result not a solid | an open or inward body from solid operands | ops refuses with `Error::NotSolid` | |
@@ -320,7 +417,7 @@ A reviewer can check each of these on a change to the boolean.
    pair; nothing is kept or dropped for any other reason.
 4. Faces connected without crossing a common edge have one class.
 5. The keep rules are the regularized operations of §4.4, and a region's solid flag follows
-   `result_solid`.
+   `result_solid`, or `deleted_face_sides` for a region joined with no record of its sources.
 6. A trimmed or copied face keeps its surface's definition (§7); a change that drops one is a bug.
 7. Two bodies' imprinted edges are mated pairwise; unpaired common objects are `InvalidInput`
    (`pairs`, `merge/p4.rs`).
@@ -342,13 +439,15 @@ A reviewer can check each of these on a change to the boolean.
 - Point solves on S with ε-grown cache boxes (§4.3).
 - Definitions carried through face splits and copies (§7), tested on a round.
 - The ops entry points with the result contract (`solidcore-ops/src/boolean.rs`).
-- The rig: 124 boolean cases in `solidcore/tests/kernel_cases/booleans/`, none listed in
-  `known_failing.json`.
-- Opt-in fixes for the cases in §5, §6 and §8: `boolean_coincident_strip_drops_crossing`,
-  `remove_slit_loops_where_solids_touch`, `boolean_union_refuses_solid_leak`,
-  `boolean_outer_shell_first`, `boolean_cleanup_removes_slits`, `keep_operand_uv_trims`,
-  `boolean_vertex_by_best_crossing`, `boolean_splits_definition_across_split`,
-  `boolean_skips_faces_apart` (`solidcore/src/kernel.rs`).
+- The rig: 130 boolean cases in `solidcore/tests/kernel_cases/booleans/`, two listed in
+  `known_failing.json` (the two 3012 sliver cases: the kernel absorbs the 1e-4 wide faces, so it
+  returns 8 faces, 18 edges and 12 vertices instead of 10, 24 and 16; #15669).
+- Opt-in fixes for the cases in §5, §6 and §8: `boolean_union_refuses_solid_leak`,
+  `keep_operand_uv_trims`, `boolean_vertex_by_best_crossing` (`solidcore/src/kernel.rs`).
+  Always on: the outer shell first, the clean-up of slits and the split of a coincident
+  definition across a split point (WR-533). Every boolean, 3D included, skips the face pairs
+  whose boxes lie apart, and a new planar face leaves in place the inner loops whose boxes lie
+  outside its outer loop's box (WR-527), always.
 
 **Open.**
 - Retiring those flags: each fix on by default with its old path deleted (AGENTS.md §4b).

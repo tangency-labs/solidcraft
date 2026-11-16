@@ -14,7 +14,7 @@ use solidcraft_kernel::Body;
 
 use super::CommandSpec;
 use super::joints::{cannot_move, effective_values, joint_id, occurrence_id, place_holding, value};
-use crate::params::{bad, bool_, str_, vec3};
+use crate::params::{bad, bool_, str_, unique_reference, vec3};
 use crate::schema::motion::{
     ContactCheck, ContactCollision, ContactCreateParams, ContactEditParams, ContactEnableParams, ContactNoParams, ContactSetChange,
     ContactSetCreated, ContactSetEdited, ContactSetInfo, ContactSets, ContactSwitch, ExplodeCreateParams, ExplodeCreated, ExplodeDeleteParams,
@@ -22,6 +22,7 @@ use crate::schema::motion::{
     FindLimitsResult, MotionListParams, MotionStudies, MotionStudyDeleteParams, MotionStudyDeleted, MotionStudyInfo, MotionStudyKeyInfo,
     MotionStudyParams, MotionStudySaved,
 };
+use crate::schema::motion_animation::{AnimationExported, ExportAnimationParams};
 use crate::schema::motion_play::{
     DriveReport, ExportParams, PartPose, PlayParams, Pose, StudyExport, StudyExported, StudyPlayed, StudySample, UnmovedJoint,
 };
@@ -67,6 +68,7 @@ const EXPLODE_LIST_CONTRACT: TypedContract<ExplodeListParams> = TypedContract::n
 const EXPLODE_DELETE_CONTRACT: TypedContract<ExplodeDeleteParams> = TypedContract::new();
 const PLAY_CONTRACT: TypedContract<PlayParams> = TypedContract::new();
 const EXPORT_CONTRACT: TypedContract<ExportParams> = TypedContract::new();
+const EXPORT_ANIMATION_CONTRACT: TypedContract<ExportAnimationParams> = TypedContract::new();
 
 pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("contact.enable_sets", "Enable Contact Sets", crate::checked!("contact.enable_sets", enable_sets))
@@ -138,8 +140,13 @@ pub static COMMANDS: &[CommandSpec] = &[
         .contract(&EXPORT_CONTRACT)
         .output(output_schema_for::<StudyExported>)
         .params("study; samples? (default steps + 1); path? (.json or .csv) → occurrence positions per step (the design is not changed)"),
-    CommandSpec::new("motion.export_animation", "Export Motion Animation", animation::export).icon("export").noundo().params(
-        "study: id|name, or joint: id|name with from and to (degrees for angles, mm for distances, or expressions) and index?, or \
+    CommandSpec::new("motion.export_animation", "Export Motion Animation", crate::checked!("motion.export_animation", animation::export))
+        .icon("export")
+        .noundo()
+        .contract(&EXPORT_ANIMATION_CONTRACT)
+        .output(output_schema_for::<AnimationExported>)
+        .params(
+            "study: id|name, or joint: id|name with from and to (degrees for angles, mm for distances, or expressions) and index?, or \
          view: id|name (an exploded view, coming apart from the assembled placement) with back? (default false; true: back together \
          too, exploded at the middle frame of an odd count); path: a .gif file, or a folder for PNG frames (frame-0001.png, \
          frame-0002.png, …); samples? (frames, 2…1000; default the study's steps + 1, 100 for a joint, 41 for a view or 81 with \
@@ -149,7 +156,7 @@ pub static COMMANDS: &[CommandSpec] = &[
          axes) - draws the study as it plays, the joint as it is driven or the view as it explodes, with the headless renderer → \
          path, format, frames, width, height, fps (GIF), bytes, renderer, stopped_at, stopped_by_loop, stopped_by_contact (the \
          design is not changed, nor its placements)",
-    ),
+        ),
     CommandSpec::new("motion.trace", "Motion Trace", crate::checked!("motion.trace", trace))
         .at("SOLID", "ASSEMBLE")
         .icon("trace")
@@ -640,7 +647,7 @@ fn closest(p: Vec3, a: Vec3, b: Vec3, c: Vec3) -> Vec3 {
 /// longer close: the values are moved from where they are toward `want` as far as they go. The
 /// `given` values (joint, index) are driven; in a closed loop the others follow. Returns the
 /// answer and the last solve.
-fn drive_with_contact(s: &mut Session, want: &[(u64, Vec<f64>)], given: &BTreeSet<(u64, usize)>) -> Result<(Value, joints::Solution)> {
+pub(super) fn drive_with_contact(s: &mut Session, want: &[(u64, Vec<f64>)], given: &BTreeSet<(u64, usize)>) -> Result<(Value, joints::Solution)> {
     drive_with_contact_within(s, want, given, false)
 }
 
@@ -876,12 +883,20 @@ fn set_index(s: &Session, p: &Value, cmd: &str) -> Result<usize> {
         Some(Value::String(x)) => x.clone(),
         _ => return Err(bad(cmd, "`set` must be an id or a name")),
     };
-    s.doc
-        .assembly
-        .contact_sets
-        .iter()
-        .position(|c| c.id.to_string() == key || c.name == key)
-        .ok_or_else(|| bad(cmd, format!("no contact set `{key}`")))
+    let numeric = p.get("set").is_some_and(Value::is_number);
+    unique_reference(
+        cmd,
+        "contact set",
+        &key,
+        s.doc
+            .assembly
+            .contact_sets
+            .iter()
+            .enumerate()
+            .filter(|(_, c)| c.id.to_string() == key || (!numeric && c.name == key))
+            .map(|(i, c)| (c.id, i)),
+    )?
+    .ok_or_else(|| bad(cmd, format!("no contact set `{key}`")))
 }
 
 fn edit_set(s: &mut Session, p: &Value) -> Result<Value> {
@@ -930,8 +945,12 @@ fn study_index(s: &Session, p: &Value, cmd: &str) -> Result<usize> {
         _ => return Err(bad(cmd, "`study` must be an id or a name")),
     };
     let studies = &s.doc.assembly.studies;
-    let (by_id, by_name) = (studies.iter().position(|m| m.id.to_string() == key), studies.iter().position(|m| m.name == key));
-    if id_first { by_id.or(by_name) } else { by_name.or(by_id) }.ok_or_else(|| bad(cmd, format!("no motion study `{key}`")))
+    let by_id = studies.iter().position(|m| m.id.to_string() == key);
+    if id_first && let Some(i) = by_id {
+        return Ok(i);
+    }
+    let by_name = unique_reference(cmd, "motion study", &key, studies.iter().enumerate().filter(|(_, m)| m.name == key).map(|(i, m)| (m.id, i)))?;
+    by_name.or(by_id).ok_or_else(|| bad(cmd, format!("no motion study `{key}`")))
 }
 
 fn study(s: &mut Session, p: &Value) -> Result<Value> {
@@ -1408,7 +1427,14 @@ fn view_index(s: &Session, p: &Value, cmd: &str) -> Result<usize> {
         Some(Value::String(x)) => x.clone(),
         _ => return Err(bad(cmd, "`view` must be an id or a name")),
     };
-    s.doc.assembly.exploded.iter().position(|e| e.id.to_string() == key || e.name == key).ok_or_else(|| bad(cmd, format!("no exploded view `{key}`")))
+    let numeric = p.get("view").is_some_and(Value::is_number);
+    unique_reference(
+        cmd,
+        "exploded view",
+        &key,
+        s.doc.assembly.exploded.iter().enumerate().filter(|(_, e)| e.id.to_string() == key || (!numeric && e.name == key)).map(|(i, e)| (e.id, i)),
+    )?
+    .ok_or_else(|| bad(cmd, format!("no exploded view `{key}`")))
 }
 
 /// World centre of each top-level occurrence's bodies.
@@ -1418,8 +1444,8 @@ fn centres(s: &Session) -> Vec<(u64, Vec3)> {
     for o in s.doc.occurrences.iter().filter(|o| o.parent == 0) {
         let mut bounds = Aabb3::EMPTY;
         for (_, b) in bodies.iter().filter(|(path, _)| path.first() == Some(&o.id)) {
-            if let Ok(m) = b.mesh(&solidcraft_kernel::MeshTolerance::chord((b.size() * 1e-2).max(1e-2))) {
-                bounds = bounds.union(&m.bounds());
+            if let Ok(bb) = b.exact_bounds() {
+                bounds = bounds.union(&bb);
             }
         }
         if !bounds.is_empty() {
