@@ -123,19 +123,14 @@ fn card(ui: &mut egui::Ui, choice: Choice, enabled: bool, picker: bool) -> Optio
 fn thumbnail(ui: &mut egui::Ui, choice: &Choice) {
     let t = Tokens::get();
     let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), t.space_24 * 4.0), Sense::hover());
-    let (background, ink) = match choice {
-        Choice::Standard => (t.form_soft, t.form_tab_ink),
-        Choice::Blank => (t.sheet_soft, t.sheet_ink),
-        Choice::Template => (t.render_soft, t.render_ink),
-    };
-    ui.painter().rect_filled(rect, t.radius_sm, background);
+    ui.painter().rect_filled(rect, t.radius_sm, t.pref_well);
     let width = (rect.width() - t.space_16).clamp(0.0, t.space_24 * 5.0);
     if width <= 0.0 {
         return;
     }
     let paper = Rect::from_center_size(rect.center(), vec2(width, width * 0.7));
-    let line = Stroke::new(1.0, ink);
-    ui.painter().rect(paper, t.radius_sm, t.paper_white, Stroke::new(1.0, t.figure_line), egui::StrokeKind::Inside);
+    let line = Stroke::new(1.0, t.figure_line);
+    ui.painter().rect(paper, t.radius_sm, t.paper_white, line, egui::StrokeKind::Inside);
     let content = paper.shrink(width * 0.10);
     match choice {
         Choice::Standard => {
