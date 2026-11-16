@@ -1523,24 +1523,38 @@ fn boss_edge_round_removed(r: f64) -> f64 {
 /// bottom circle, square to E. The round ends on the wall continued below the boss's bottom,
 /// with a cap edge from R to W on the side. Before, the end corner's patch on the wall failed:
 /// "Fillet Corner Error: Corner Geometry Computation Failure" (status 1001), with the corpus's
-/// fix set and with none. Now, with either: valid at the full check, the round one face on its
+/// fix set and with none. Now, with either, from r = 2.05 (a cap edge 0.05 long) to r = 6 (the
+/// round's top rail, y = -14, still on the boss, which reaches y = -13.5): valid at the full
+/// check, the round one face on its
 /// exact cylinder with its rails the lines along x through (x, -20 + r, 30) and (x, -20, 30 - r),
 /// the cap edge through R and W, and the volume the input's less [`boss_edge_round_removed`].
 /// 10 faces, 24 edges and 16 vertices: the input's 9, 21 and 14 with the round's face; its two
 /// rails, its two end curves and the cap edge in place of the rounded edge and E (the cap lies
 /// on the boss's wall, one face with it); the rails' four ends, R one of them, in place of the
-/// rounded edge's two.
+/// rounded edge's two. The shells are the input's.
+///
+/// Control: at r = 2 the rail ends at W itself (R not past W), the corner is main's, and the
+/// round builds with one edge and one vertex fewer, 10, 23 and 15.
+///
+/// Only the edge left of the boss: its mirror, right of it, still fails (status 1001) on this
+/// boss, on main as here.
 #[test]
 fn a_round_ending_at_a_boss_across_its_edge_ends_on_the_boss_s_wall_below_its_bottom() {
-    for r in [3.0, 4.0, 5.0] {
+    for (r, topology) in [
+        (2.0, (10, 23, 15)),
+        (2.05, BOSS_EDGE_ROUND_TOPOLOGY),
+        (3.0, BOSS_EDGE_ROUND_TOPOLOGY),
+        (4.0, BOSS_EDGE_ROUND_TOPOLOGY),
+        (5.0, BOSS_EDGE_ROUND_TOPOLOGY),
+        (6.0, BOSS_EDGE_ROUND_TOPOLOGY),
+    ] {
         for corpus in [true, false] {
             assert_round_into_boss_builds(
                 box_and_boss,
                 boss_side_x(),
                 boss_edge_round_removed(r),
-                BOSS_EDGE_ROUND_TOPOLOGY,
-                r,
-                corpus,
+                topology,
+                (r, corpus, -1.0),
             );
         }
     }
@@ -1559,22 +1573,24 @@ fn box_and_block() -> Body {
     boolean(b, block, BooleanOp::Union).unwrap().unwrap()
 }
 
-/// The same with a block for the boss ([`box_and_block`]): its side x = -5 ends the round, and
-/// the round takes its section r^2 (1 - pi / 4) along the 35 from x = -40. Before, as with the
-/// boss (status 1001), with the corpus's fix set and with none; now built the same way, the
+/// The same with a block for the boss ([`box_and_block`]), up to r = 3.5 (the round's top rail
+/// on the block's side, which ends at y = -16): its side x = -5 ends the round, and the round
+/// takes its section r^2 (1 - pi / 4) along the 35 from x = -40 (or to x = 40). Before, as with
+/// the boss (status 1001), with the corpus's fix set and with none; now built the same way, the
 /// input's 12 faces, 30 edges and 20 vertices with the same changes.
 #[test]
 fn a_round_ending_at_a_block_across_its_edge_ends_on_the_block_s_side_below_its_bottom() {
-    for r in [3.0, 5.0] {
+    for r in [2.5, 3.0, 3.5] {
         for corpus in [true, false] {
-            assert_round_into_boss_builds(
-                box_and_block,
-                5.0,
-                35.0 * r * r * (1.0 - PI / 4.0),
-                BLOCK_EDGE_ROUND_TOPOLOGY,
-                r,
-                corpus,
-            );
+            for side in [-1.0, 1.0] {
+                assert_round_into_boss_builds(
+                    box_and_block,
+                    5.0,
+                    35.0 * r * r * (1.0 - PI / 4.0),
+                    BLOCK_EDGE_ROUND_TOPOLOGY,
+                    (r, corpus, side),
+                );
+            }
         }
     }
 }
@@ -1582,43 +1598,42 @@ fn a_round_ending_at_a_block_across_its_edge_ends_on_the_block_s_side_below_its_
 /// The topology of [`box_and_block`] with its edge rounded past r = 2: faces, edges, vertices.
 const BLOCK_EDGE_ROUND_TOPOLOGY: (usize, usize, usize) = (13, 33, 22);
 
-/// The box's edge y = -20, z = 30 of `input` rounded `r`, with the corpus's fix set (`corpus`)
-/// or none: built, valid at the full check, `topology` (faces, edges, vertices), the round one
-/// face on its exact class, the cylinder of radius r along x about (-20 + r, 30 - r), its rails
-/// the lines along x through (x, -20 + r, 30) and (x, -20, 30 - r), the
-/// cap edge on the side through x = -`side_x`, z = (30 - r + 28) / 2, and the volume the
-/// input's less `removed`.
+/// The box's edge y = -20, z = 30 of `input` rounded `r` on the side `side` of the boss (-1 its
+/// left, x < 0; 1 its mirror), with the corpus's fix set (`corpus`) or none: built, valid at the
+/// full check, `topology` (faces, edges, vertices) and the input's shells, the round one face on
+/// its exact class, the cylinder of radius r along x about (-20 + r, 30 - r), its rails the
+/// lines along x through (x, -20 + r, 30) and (x, -20, 30 - r), the cap edge on the side through
+/// x = `side` `side_x`, z = (30 - r + 28) / 2, and the volume the input's less `removed`.
 fn assert_round_into_boss_builds(
     input: fn() -> Body,
     side_x: f64,
     removed: f64,
     topology: (usize, usize, usize),
-    r: f64,
-    corpus: bool,
+    (r, corpus, side): (f64, bool, f64),
 ) {
     use solidcore::query::api_queries::edge_closest_point;
     use solidcore::surface::surface::SurfaceKind;
+    let what = format!("r {r} corpus {corpus} side {side}");
     let b = input();
     let before = b.volume(1e-9).unwrap();
-    let e = edge_at(&b, [-30.0, -20.0, 30.0]);
+    let shells = common::kernel_copy(&b).1.shells().len();
+    let e = edge_at(&b, [30.0 * side, -20.0, 30.0]);
     if !corpus {
         session::set_thread_fixes(std::iter::empty::<&str>()).unwrap();
     }
     let result = blend(&b, Blend::Round, &[e], &[r], &[], Corners::Filled);
     fixes();
-    result.unwrap_or_else(|err| panic!("r {r} corpus {corpus}: {err:?}"));
+    result.unwrap_or_else(|err| panic!("{what}: {err:?}"));
     let report = b.check(CheckLevel::All).unwrap();
-    assert!(report.is_valid(), "r {r} corpus {corpus}: {report}");
+    assert!(report.is_valid(), "{what}: {report}");
     let (k, brep) = common::kernel_copy(&b);
     let counts = (
         brep.face_list().len(),
         brep.edge_list().len(),
         brep.vertex_list().len(),
     );
-    assert_eq!(
-        counts, topology,
-        "r {r} corpus {corpus}: faces, edges, vertices"
-    );
+    assert_eq!(counts, topology, "{what}: faces, edges, vertices");
+    assert_eq!(brep.shells().len(), shells, "{what}: shells");
     // the round's face is its exact class: the cylinder of radius r along x about
     // (-20 + r, 30 - r)
     let rounds = brep
@@ -1637,7 +1652,7 @@ fn assert_round_into_boss_builds(
             }
         })
         .count();
-    assert_eq!(rounds, 1, "r {r} corpus {corpus}: the round's cylinder");
+    assert_eq!(rounds, 1, "{what}: the round's cylinder");
     let on_edge = |p: [f64; 3]| {
         let q = solidcore::Vec3::new(p[0], p[1], p[2]);
         brep.edge_list().iter().any(|&e| {
@@ -1648,21 +1663,22 @@ fn assert_round_into_boss_builds(
                 < 1e-7
         })
     };
-    for along in [-35.0, -20.0, -10.0] {
-        for p in [[along, -20.0 + r, 30.0], [along, -20.0, 30.0 - r]] {
-            assert!(on_edge(p), "r {r} corpus {corpus}: no rail through {p:?}");
+    for along in [35.0, 20.0, 10.0] {
+        let x = along * side;
+        for p in [[x, -20.0 + r, 30.0], [x, -20.0, 30.0 - r]] {
+            assert!(on_edge(p), "{what}: no rail through {p:?}");
         }
     }
     let z = (30.0 - r + 28.0) / 2.0;
     assert!(
-        on_edge([-side_x, -20.0, z]),
-        "r {r} corpus {corpus}: no cap edge through z {z}"
+        on_edge([side_x * side, -20.0, z]),
+        "{what}: no cap edge through z {z}"
     );
     let after = b.volume(1e-9).unwrap();
     let expected = before - removed;
     assert!(
         (after - expected).abs() < 1e-6,
-        "r {r} corpus {corpus}: volume {after}, expected {expected}"
+        "{what}: volume {after}, expected {expected}"
     );
 }
 

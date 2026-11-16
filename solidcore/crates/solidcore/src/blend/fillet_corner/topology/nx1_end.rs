@@ -349,16 +349,18 @@ pub(crate) fn rolled_rail_turns_back(
 ///   straight edge, and E is a line: the rail is then the line along the edge through the
 ///   ball's contact on S, in closed form ([`planar_section`]), and it crosses E's line at R;
 /// - R lies past W along E, by more than the body's tolerance;
-/// - at W, an edge N between P and a face other than S leaves W, and every such N leaves it
-///   off E's line, turned back along E's arriving tangent or square to it ([`leaves_off_e`]):
-///   P's boundary stops at W, so P does not reach R (a boss's foot circle, or one that turns
-///   back round the boss);
+/// - at W, an open edge N with a tangent there, between P and a face other than S, leaves W,
+///   and every such N leaves it more than 45 degrees from running on along E's arriving
+///   tangent (turned back, square to it or between, [`leaves_off_e`]): P's boundary stops at
+///   W, so P does not reach R (a foot round's contact circle turning back on P, or a boss's
+///   bottom edge square to E);
 /// - R lies inside S (classified in S's interior, not on its boundary, within the body's
 ///   tolerance), and no boundary edge of S crosses the open segment from W to R, the cap
 ///   edge's place on S's plane ([`edge_clear_of_segment`]).
-/// - P is a plane, or a cylinder that holds E's line from W to R (E one of its rulings: R and
-///   the segment's midpoint lie on it within the body's tolerance, as W does), so R, on E's
-///   line, is where the rail meets P's surface.
+/// - P is a plane, or a cylinder that holds E's line from W to R (R and the segment's midpoint
+///   lie on it within the body's tolerance, as W does, so the segment is one of its rulings
+///   to that tolerance), so R, on E's line, lies on P's surface: of the rail's crossings with
+///   P's surface (two on a cylinder), the one on E's line.
 ///
 /// The cap's edge then runs from the rail's end along E's continuation on S to W, then along
 /// E: [`TurnedBack`] with E as its edge (whose continuation past W leaves W against E's own
@@ -773,10 +775,10 @@ const TURNED_BACK_COS: f64 = std::f64::consts::FRAC_1_SQRT_2;
 /// Not upstream (solidcore-native, [`rail_passes_side_edge_end`]): whether N's tangent `tn`
 /// leaving W does not run on along E's tangent `te` arriving there: more than 45 degrees from
 /// parallel ([`TURNED_BACK_COS`]), `te·tn < cos(45°) |te| |tn|`, so turned back, square to E
-/// or between. The counterpart of [`turns_back`], the classes divided at the same 45 degrees
-/// and for the same reason (a continuing N lies near parallel to E as a turned-back one lies
-/// near antiparallel); a foot circle square to E, the case between, is far from both. A zero
-/// vector, and NaN, do not leave off E: the comparison fails.
+/// or between. The counterpart of [`turns_back`], divided at the same 45 degrees: here only a
+/// margin between an N that runs on along E (P continuing past W) and one that does not; a
+/// boss's bottom edge square to E lies 45 degrees from either side of it. A zero vector, and
+/// NaN, do not leave off E: the comparison fails.
 fn leaves_off_e(te: Vec3, tn: Vec3) -> bool {
     te.dot(tn) < TURNED_BACK_COS * te.length() * tn.length()
 }
