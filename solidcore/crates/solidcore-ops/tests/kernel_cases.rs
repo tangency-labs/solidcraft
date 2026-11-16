@@ -1487,7 +1487,7 @@ fn run_case_with_records(
 /// integrator leaked through the gaps as this one did); each case is graded on its volume
 /// now, and the move from the rig's is checked within the old leak's bound on the result
 /// ([`moved_from_the_rig`]).
-const CLOSED_GAP_VOLUMES: [(&str, f64); 4] = [
+const CLOSED_GAP_VOLUMES: [(&str, f64); 5] = [
     // rig 9440.034329164451
     (
         "report-peg-concave-round-r3-then-front-round-r1-5",
@@ -1507,6 +1507,11 @@ const CLOSED_GAP_VOLUMES: [(&str, f64); 4] = [
     (
         "report-peg-front-round-then-concave-round-r2",
         9_399.383_029_676_488,
+    ),
+    // rig 112506.83949124035
+    (
+        "16654-fillet-tube-joint-across-a-chamfer-crease-r1",
+        112_506.838_974_893_08,
     ),
 ];
 
