@@ -16,10 +16,10 @@ use crate::params::{UNKNOWN_COMMAND, bad, bool_, expr, expr_problem, req_expr, s
 use crate::schema::features::SweepParams;
 use crate::schema::features::{
     AppliedRadius, BoundingSolidParams, BoxParams, ChamferParams, CombineParams, CombineResult, ConeParams, CylinderParams, ExtrudeParams,
-    FeatureNotice, FeatureResult, FilletParams, FilletResult, MoveParams, MoveResult, NoticeAction, OffsetPlaneParams, PipeParams,
+    FeatureNotice, FeatureResult, FilletParams, FilletResult, MirrorParams, MoveParams, MoveResult, NoticeAction, OffsetPlaneParams, PipeParams,
     PlaneAtAngleParams, PressPullParams, PressPullResult, RevolveParams, ScaleParams, SphereParams, TorusParams,
 };
-use crate::schema::features::{PatternCircularParams, PatternCircularResult};
+use crate::schema::features::{PatternCircularParams, PatternPathParams, PatternRectangularParams, PatternResult};
 use crate::schema::split::{SplitBodyParams, SplitFaceParams};
 use crate::schema::{TypedContract, output_schema_for};
 use crate::{EngineError, Result, Session};
@@ -43,8 +43,11 @@ const CHAMFER_CONTRACT: TypedContract<ChamferParams> = TypedContract::new();
 const SPLIT_FACE_CONTRACT: TypedContract<SplitFaceParams> = TypedContract::new();
 const SPLIT_BODY_CONTRACT: TypedContract<SplitBodyParams> = TypedContract::new();
 const PATTERN_CIRCULAR_CONTRACT: TypedContract<PatternCircularParams> = TypedContract::new();
+const PATTERN_RECTANGULAR_CONTRACT: TypedContract<PatternRectangularParams> = TypedContract::new();
+const PATTERN_PATH_CONTRACT: TypedContract<PatternPathParams> = TypedContract::new();
 const PRESS_PULL_CONTRACT: TypedContract<PressPullParams> = TypedContract::new();
 const MOVE_CONTRACT: TypedContract<MoveParams> = TypedContract::new();
+const MIRROR_CONTRACT: TypedContract<MirrorParams> = TypedContract::new();
 
 pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("solid.extrude", "Extrude", crate::checked!("solid.extrude", extrude))
@@ -116,21 +119,30 @@ pub static COMMANDS: &[CommandSpec] = &[
         .contract(&COMBINE_CONTRACT)
         .output(output_schema_for::<CombineResult>)
         .params("target: body; tools: [body]; operation?: join|cut|intersect; touching?: separate|one_body (what a join makes of pieces that share no face: separate, the default, makes each piece that touches another only along an edge or at a point a body of its own and keeps pieces that touch nothing in one body; one_body keeps every piece in one body); keep_tools?: bool; new_component?: bool (the result goes into a new component; component_name?)"),
-    CommandSpec::new("solid.pattern.rectangular", "Rectangular Pattern", pattern_rect)
+    CommandSpec::new("solid.pattern.rectangular", "Rectangular Pattern", crate::checked!("solid.pattern.rectangular", pattern_rect))
         .at("SOLID", "CREATE")
         .icon("pattern_rect")
+        .contract(&PATTERN_RECTANGULAR_CONTRACT)
+        .output(output_schema_for::<PatternResult>)
         .params("features: [names] | bodies: [names] | components: [names]; dir1: [x,y,z]; count1; spacing1; dir2?, count2?, spacing2?; alignment?, alignment2?: left|center|right (default right; counts include the original); reversed?, reversed2?: bool (Flip)"),
     CommandSpec::new("solid.pattern.circular", "Circular Pattern", crate::checked!("solid.pattern.circular", pattern_circ))
         .at("SOLID", "CREATE")
         .icon("pattern_circ")
         .contract(&PATTERN_CIRCULAR_CONTRACT)
-        .output(output_schema_for::<PatternCircularResult>)
+        .output(output_schema_for::<PatternResult>)
         .params("features: [names] | bodies: [names] | components: [names]; axis: X|Y|Z | construction axis name (followed when edited) | {origin, dir} (origin coordinates may be length expressions; the pattern follows them) | {edge|face: [x,y,z]} (a straight or circular edge, or a cylinder, cone or torus face: about its axis, followed as the model changes); count; angle? (default 360 deg; partial arcs include both ends); alignment?: left|center|right (default right; original stays fixed); reversed?: bool (Flip; selects the extra side for even centered counts)"),
-    CommandSpec::new("solid.pattern.path", "Pattern on Path", pattern_path)
+    CommandSpec::new("solid.pattern.path", "Pattern on Path", crate::checked!("solid.pattern.path", pattern_path))
         .at("SOLID", "CREATE")
         .icon("pattern_path")
+        .contract(&PATTERN_PATH_CONTRACT)
+        .output(output_schema_for::<PatternResult>)
         .params("features: [names] | bodies: [names]; path_sketch: sketch; path: [curve ids in order]; count; spacing (between instances) | distance (first to last); orientation?: identical|path; flip?: bool"),
-    CommandSpec::new("solid.mirror", "Mirror", mirror).at("SOLID", "CREATE").icon("mirror").params("features: [names] | bodies: [names] (combine?: join with the original); plane: XY|XZ|YZ|construction plane name or id|{origin, normal}|{origin, x_dir, y_dir} (origin coordinates may be length expressions; the mirror follows them, or a construction plane)"),
+    CommandSpec::new("solid.mirror", "Mirror", crate::checked!("solid.mirror", mirror))
+        .at("SOLID", "CREATE")
+        .icon("mirror")
+        .contract(&MIRROR_CONTRACT)
+        .output(output_schema_for::<FeatureResult>)
+        .params("features: [names] | bodies: [names] (combine?: join with the original); plane: XY|XZ|YZ|construction plane name or id|{origin, normal}|{origin, x_dir, y_dir} (origin coordinates may be length expressions; the mirror follows them, or a construction plane)"),
     CommandSpec::new("solid.hole", "Hole", hole)
         .at("SOLID", "CREATE")
         .icon("hole")
@@ -210,7 +222,7 @@ pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("solid.move", "Move/Copy", crate::checked!("solid.move", move_bodies))
         .at("SOLID", "MODIFY").icon("move").key("M").enabled(not_in_sketch)
         .contract(&MOVE_CONTRACT).output(output_schema_for::<MoveResult>)
-        .params("bodies: [names]; translate?: [x,y,z] (length exprs or numbers, applied after rotation); axis?: [x,y,z] (default: world Z with origin, else the body's component's Z, world Z at the root); angle?: angle expr; origin?: [x,y,z] (length exprs or numbers in world coordinates; default: the body's component's origin, the world origin at the root); matrix?: rigid row-major 3x4 or 4x4, flat or rows (instead of translate/axis/angle/origin); tolerance?: matrix rotation tolerance (default 1e-9, at most 1e-3); copy?: bool (default false; true keeps originals and transforms copies); occurrences?: [occurrence paths, root first] (only with copy: copies each component independently and transforms the copies in world space; reply lists them in occurrences); name?, body_name?, body_names?"),
+        .params("bodies: [names]; translate?: [x,y,z] (length exprs or numbers, applied after rotation); axis?: [x,y,z] (default: world Z with origin, else the body's component's Z, world Z at the root); about?: {edge|face: [x,y,z], body?} (the edge or round face the turn is about, kept as a reference so the turn follows it when an earlier step moves the body; axis and origin give the turn's sense and where it is now); angle?: angle expr; origin?: [x,y,z] (length exprs or numbers in world coordinates; default: the body's component's origin, the world origin at the root); matrix?: rigid row-major 3x4 or 4x4, flat or rows (instead of translate/axis/angle/origin); tolerance?: matrix rotation tolerance (default 1e-9, at most 1e-3); copy?: bool (default false; true keeps originals and transforms copies); occurrences?: [occurrence paths, root first] (only with copy: copies each component independently and transforms the copies in world space; reply lists them in occurrences); name?, body_name?, body_names?"),
 ];
 
 /// Where an extrude starts and which way is positive: a point inside the (first) profile or
@@ -2360,8 +2372,8 @@ fn combine(s: &mut Session, p: &Value) -> Result<Value> {
 pub(crate) fn move_matrix_params(p: &Value) -> Result<Option<Value>> {
     let Some(matrix) = p.get("matrix") else { return Ok(None) };
     let cmd = "solid.move";
-    if ["translate", "axis", "angle", "origin"].iter().any(|k| p.get(k).is_some()) {
-        return Err(bad(cmd, "matrix cannot be combined with translate, axis, angle or origin"));
+    if ["translate", "axis", "angle", "origin", "about"].iter().any(|k| p.get(k).is_some()) {
+        return Err(bad(cmd, "matrix cannot be combined with translate, axis, angle, origin or about"));
     }
     let m = super::component::matrix::rigid(matrix, super::component::matrix::tolerance(p, cmd)?, cmd)?;
     let (axis, angle) = super::component::matrix::axis_angle(&m);
@@ -2569,6 +2581,23 @@ fn move_placements(s: &mut Session, p: &Value, plan: crate::frames::PlacementMov
     Ok(out)
 }
 
+/// The edge or round face of the model a move's turn is about (`about`, #17974), kept so the turn
+/// follows it. It needs `axis`, along it, and `angle`; `axis` gives the turn's sense, and with
+/// `origin` the line the move turns about when the edge is no longer found.
+fn move_turn_about(s: &Session, p: &Value, cmd: &str) -> Result<Option<solidcraft_doc::construct::GeoRef>> {
+    let Some(v) = p.get("about") else { return Ok(None) };
+    let Some((geo, _, d)) = super::construct::model_axis_param(s, Some(v), cmd)? else {
+        return Err(bad(cmd, "`about` must be {edge: [x,y,z], body?} or {face: [x,y,z], body?}"));
+    };
+    let (Some(axis), Some(_)) = (p.get("axis").and_then(vec3).and_then(|a| a.normalized()), p.get("angle")) else {
+        return Err(bad(cmd, "`about` needs `axis` and `angle`"));
+    };
+    if axis.cross(d).len() > 1e-6 {
+        return Err(bad(cmd, "`about` does not lie along `axis`"));
+    }
+    Ok(Some(geo))
+}
+
 fn move_body_feature(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "solid.move";
     let bodies = string_list(cmd, p, "bodies")?;
@@ -2577,6 +2606,7 @@ fn move_body_feature(s: &mut Session, p: &Value) -> Result<Value> {
     }
     let translate = point_param(s, p, "translate", cmd)?.unwrap_or_else(|| point_expr(Vec3::ZERO));
     let origin = point_param(s, p, "origin", cmd)?;
+    let rotate_about = move_turn_about(s, p, cmd)?;
     let copy = bool_(p, "copy").unwrap_or(false);
     // The command boundary captures these before instance names become definition names.
     let copy_frames: Vec<solidcraft_doc::Mat> = if copy {
@@ -2600,6 +2630,7 @@ fn move_body_feature(s: &mut Session, p: &Value) -> Result<Value> {
             translate,
             origin,
             rotate_axis: p.get("axis").and_then(vec3).map(Dir),
+            rotate_about,
             angle: expr(p, "angle"),
             copy,
             copy_frames,
@@ -2858,33 +2889,74 @@ fn mirror(s: &mut Session, p: &Value) -> Result<Value> {
         add_feature(s, p, FeatureKind::Mirror { features, plane, bodies: bodies.iter().cloned().map(BodyName).collect(), combine, placements })?;
     if !combine {
         super::print_face::copies_keep_print_faces(s, &reply, &bodies);
-        copies_keep_looks(s, &reply, &bodies);
+        copies_keep_looks(s, &reply, &bodies)?;
     }
     Ok(reply)
 }
 
 /// Copies are made of what the bodies they were made from are: each takes its source's physical
-/// material and appearance, unless it has its own (kept under its name from before). The copies
+/// material and body/face appearances, unless it has its own (kept under its name from before). The copies
 /// are the bodies feature `reply` made, in the order of `sources`, as
 /// [`super::print_face::copies_keep_print_faces`] takes them.
-fn copies_keep_looks(s: &mut Session, reply: &Value, sources: &[String]) {
-    let Some(id) = reply.get("feature").and_then(Value::as_u64) else { return };
+fn copies_keep_looks(s: &mut Session, reply: &Value, sources: &[String]) -> Result<()> {
+    let Some(id) = reply.get("feature").and_then(Value::as_u64) else { return Ok(()) };
     let state = s.model.state();
     let copies: Vec<_> = state.bodies.iter().filter(|b| b.feature == id).collect();
     if copies.len() != sources.len() {
-        return;
+        return Ok(());
     }
-    let pairs: Vec<(String, String)> = sources
-        .iter()
-        .zip(copies)
-        .filter_map(|(source, copy)| state.body(source).map(|b| (copy.definition_name().to_string(), b.definition_name().to_string())))
-        .collect();
+    let mut pairs = Vec::new();
+    let mut faces = Vec::new();
+    for (source, copy) in sources.iter().zip(copies) {
+        let Some(source) = state.body(source) else { continue };
+        pairs.push((copy.definition_name().to_string(), source.definition_name().to_string()));
+        let looks = s.doc.authored_face_colors(source);
+        if looks.is_empty() {
+            continue;
+        }
+        let source_names = solidcraft_doc::naming::face_names(source);
+        let copy_names = solidcraft_doc::naming::face_names(copy);
+        let mut indices = std::collections::BTreeMap::<&str, Option<usize>>::new();
+        for (index, name) in copy_names.iter().enumerate() {
+            if solidcraft_doc::naming::face_name_exact(copy, index) {
+                indices.entry(name.as_str()).and_modify(|found| *found = None).or_insert(Some(index));
+            }
+        }
+        let assigned: std::collections::BTreeSet<_> = s.doc.authored_face_colors(copy).into_iter().map(|(index, _)| index).collect();
+        for (source_index, look) in looks {
+            if !solidcraft_doc::naming::face_name_exact(source, source_index) {
+                continue;
+            }
+            let Some(source_name) = source_names.get(source_index) else { continue };
+            // Mirror's exact history appends one instance to each source face, including
+            // the complete identity of a split face or a face from an earlier copy.
+            let name = format!("{source_name}@F{id}.1");
+            let Some(index) = indices.get(name.as_str()).copied().flatten().filter(|index| !assigned.contains(index)) else { continue };
+            if s.doc.appearances.faces.len().saturating_add(faces.len()) >= 100_000 {
+                return Err(bad("solid.mirror", "too many face appearances"));
+            }
+            // The name chooses the face; the exact trimmed face supplies its saved point.
+            let point = solidcraft_kernel::guard("mirror face appearance", || {
+                solidcraft_kernel::point_closest(Vec3::ZERO, &copy.body, solidcraft_kernel::Members::Faces(&[index]))
+            })?
+            .ok_or_else(|| bad("solid.mirror", "the copied face has no exact geometry for its appearance"))?
+            .to;
+            faces.push(solidcraft_doc::appearance::FaceLook {
+                body: copy.definition_name().to_string(),
+                point,
+                look,
+                name: Some(name),
+                strict_name: false,
+                certificate: None,
+            });
+        }
+    }
     let needs = |copy: &str, from: &str| {
         (!s.doc.materials.contains_key(copy) && s.doc.materials.contains_key(from))
             || (!s.doc.appearances.bodies.contains_key(copy) && s.doc.appearances.bodies.contains_key(from))
     };
-    if !pairs.iter().any(|(copy, from)| needs(copy, from)) {
-        return;
+    if faces.is_empty() && !pairs.iter().any(|(copy, from)| needs(copy, from)) {
+        return Ok(());
     }
     let doc = s.doc_mut();
     for (copy, from) in pairs {
@@ -2899,6 +2971,8 @@ fn copies_keep_looks(s: &mut Session, reply: &Value, sources: &[String]) {
             doc.appearances.bodies.insert(copy, look);
         }
     }
+    doc.appearances.faces.extend(faces);
+    Ok(())
 }
 
 impl Session {
@@ -3039,7 +3113,7 @@ pub(super) fn plane_param(s: &Session, v: Option<&Value>, cmd: &str) -> Result<s
     use solidcraft_doc::PlaneRef;
     const WANT: &str = PLANE_FORMS;
     let construction = |r: &str| match s.doc.find_feature(r) {
-        Some(f) if matches!(f.kind, FeatureKind::ConstructionPlane { .. }) => Ok(PlaneRef::Construction { feature: f.id.into() }),
+        Some(f) if matches!(f.kind, FeatureKind::ConstructionPlane { .. }) => Ok(PlaneRef::Construction { feature: f.id.into(), placement: None }),
         Some(f) => Err(bad(cmd, format!("`{}` is not a construction plane (a plane is {WANT})", f.name))),
         None => Err(bad(cmd, format!("no plane `{r}` (a plane is {WANT})"))),
     };
@@ -3372,10 +3446,26 @@ fn fine_only_hint(t: &str) -> Option<String> {
 /// Largest nominal diameter automatic thread sizing knows (the last ISO coarse size).
 const LARGEST_COARSE: f64 = 56.0;
 
+/// The size the Thread dialog fills in for a cylinder past the coarse table (`M150x4` for a Ø150
+/// shaft), where automatic sizing has none to give. `None` for any other face.
+pub fn large_thread_size(st: &solidcraft_doc::ModelState, face: Vec3) -> Option<String> {
+    beyond_coarse_sizes(st, face)?.2.into_iter().next()
+}
+
 /// The refusal for automatic sizing on a cylinder too big for the coarse table (a Ø75 shaft):
 /// `None` when sizing finds a thread, or the cylinder is not past the table's end (the feature's
 /// own error then explains). It suggests sizes with a pitch to type, scaled to the diameter.
 fn beyond_coarse_range(st: &solidcraft_doc::ModelState, face: Vec3) -> Option<String> {
+    let (dia, kind, sizes) = beyond_coarse_sizes(st, face)?;
+    Some(format!(
+        "a {dia:.2} mm {kind} is beyond the coarse thread range (up to M{LARGEST_COARSE}): type a size with its pitch, e.g. {}",
+        sizes.join(" or ")
+    ))
+}
+
+/// The diameter, kind (`cylinder` or `hole`) and sizes with a pitch for a cylinder past the coarse
+/// table, `None` when sizing finds a thread or the cylinder is not past the table's end.
+fn beyond_coarse_sizes(st: &solidcraft_doc::ModelState, face: Vec3) -> Option<(f64, &'static str, Vec<String>)> {
     if solidcraft_doc::suggested_thread(st, face).is_ok() {
         return None;
     }
@@ -3394,11 +3484,7 @@ fn beyond_coarse_range(st: &solidcraft_doc::ModelState, face: Vec3) -> Option<St
     let first = PITCHES.iter().position(|p| *p <= dia / 25.0 + 1e-6).unwrap_or(PITCHES.len() - 1);
     let sizes: Vec<String> =
         PITCHES.iter().skip(first).take(2).map(|p| format!("M{}x{p}", if cyl.internal { dia + p } else { dia }.round())).collect();
-    let kind = if cyl.internal { "hole" } else { "cylinder" };
-    Some(format!(
-        "a {dia:.2} mm {kind} is beyond the coarse thread range (up to M{LARGEST_COARSE}): type a size with its pitch, e.g. {}",
-        sizes.join(" or ")
-    ))
+    Some((dia, if cyl.internal { "hole" } else { "cylinder" }, sizes))
 }
 
 fn hole(s: &mut Session, p: &Value) -> Result<Value> {

@@ -79,18 +79,13 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.keep_operand_uv_trims = true;
     f.proto_vertex_miss_is_false = true;
     f.revolve_analytic_profile_faces = true;
-    f.revolve_holed_profile_void = true;
     f.join_touching_loops = true;
     f.offset_analytic_mate_edges = true;
-    f.local_operation_refuses_loose_tangent_edges = true;
     f.uv_trim_corner_end_points_only = true;
     f.bspline_trim_preserves_uv_spans = true;
     f.boolean_vertex_by_best_crossing = true;
     f.classify_edge_interval = true;
-    f.degenerate_proto_edge_in_one_vertex = true;
     f.new_edge_vertex_tolerance_covers_gap = true;
-    f.point_solve_keeps_triangle_guess = true;
-    f.imprint_extends_edge_to_proto_vertex = true;
     f.fillet_point_step_per_point = true;
     f.analytic_copy_keeps_parameterization = true;
     f.offset_extension_from_base = true;
@@ -98,14 +93,11 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.curve_contacts_at_curve_ends = true;
     f.ssi_trace_tangent_curves_once = true;
     f.found_torus_sphere_keep_tested_nurb = true;
-    f.local_operation_box_holds_new_surfaces = true;
     f.shell_edges_on_analytics_exact = true;
     f.fillet_patch_keeps_fillet_edges = true;
     f.fillet_refuse_overlapping_bands = true;
     f.ssi_tangent_curve_tracer = true;
-    f.local_operation_step_walls = true;
     f.fillet_knife_edge_rounds = true;
-    f.revolution_round_offset_collapses = true;
     f.proto_edge_splits_at_captured_vertices = true;
     f.linear_sweep_arc_is_cylinder = true;
     f.fillet_trace_reaches_rails = true;
@@ -116,7 +108,6 @@ pub(crate) fn fixes() -> UpstreamFixes {
     // The fork's commits in `SMLIB_REV` 2fc375f, ported to solidcore since.
     f.offset_extension_as_itself = true;
     f.fillet_mitre_concave_face_corners = true;
-    f.face_tight_box_searches_trim = true;
     f.ssi_low_angle_start_on_probation = true;
     f.fillet_variable_span_follows_fillet = true;
     f.simple_coincidence_crossing_is_point = true;
@@ -129,11 +120,8 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.corner_patch_face_side_twist = true;
     f.boolean_union_refuses_solid_leak = true;
     f.fillet_exact_round_classes = true;
-    f.offset_edges_keep_source_tolerance = true;
     f.surface_continuity_checks_last_v_knot = true;
-    f.offset_open_edge_second_trim_point = true;
     f.ssi_split_curves_at_singular_points = true;
-    f.surface_parallel_to_vector_checks = true;
     f.geometric_g2_continuity = true;
     f.degen_param_tiebreak_uses_actual_param = true;
     f.local_surface_intersect_guards_max_boundary_retry = true;
@@ -141,12 +129,10 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.cone_create_canonical_preserves_inside_out_and_checks_height = true;
     f.point_class_gap_3d_propagates_no_drop_error = true;
     f.cone_iso_circle_at_axial_height = true;
-    f.fillet_overflow_trim_at_creases = true;
     // Held back: see `HELD_BACK`.
     f.fillet_refuse_rounds_breaking_through = false;
     f.cone_unbounded_parameterized_as_nurb = true;
     f.fillet_round_as_definition = true;
-    f.fillet_overflow_crease_along_edge = true;
     f.keep_exact_pcurves = true;
     f.face_swap_uv_transposes_trims = true;
     f.closed_smooth_pole_tangent_limit = true;
@@ -246,7 +232,9 @@ fn put_kernel(k: Option<Kernel>) {
 /// What a call must not find from the calls before it: the same operation on the same bodies
 /// answers the same on any kernel, however much that kernel did first. (Its draws of random rays,
 /// the stations it remembers; marks, identities and what is only kept to reuse memory change no
-/// answer. Tolerances and fixes are the same on every kernel.)
+/// answer. The certificates it finished, kept by the exact content of their inputs
+/// (`recertify_memo`, the curve analyses), are the answers running them again gives, so they
+/// stay. Tolerances and fixes are the same on every kernel.)
 fn start_clean(k: &mut Kernel) {
     k.rng = Rng::new(KernelOptions::default().seed);
     *k.blend_station_memo.borrow_mut() = Default::default();

@@ -280,6 +280,12 @@ impl PreviewState {
         self.layer = Some((key, solidcraft_engine::doc::IDENTITY));
     }
 
+    /// The moving scene waiting in the layer's slot for the renderer, if one is.
+    #[cfg(test)]
+    pub(crate) fn waiting_layer_for_tests(&self) -> Option<GpuScene> {
+        self.layer_slot.lock().ok().and_then(|slot| slot.clone())
+    }
+
     /// The renderer takes the scene waiting in the layer's slot, as a frame that draws the layer
     /// does; whether one was waiting.
     #[cfg(test)]

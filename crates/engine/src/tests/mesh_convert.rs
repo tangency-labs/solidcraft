@@ -193,9 +193,9 @@ fn stl_export_is_closed_where_faces_meet() {
 #[test]
 fn save_mesh_rejects_unknown_format_and_slicer_without_writing() {
     let mut s = imported_box();
-    // Its own file name: `save_mesh_writes_stl_and_3mf` writes `solvecraft-save-mesh-<pid>.stl`, and
+    // Its own file name: `save_mesh_writes_stl_and_3mf` writes `solidcraft-save-mesh-<pid>.stl`, and
     // sharing it made this one fail when the two ran together.
-    let path = std::env::temp_dir().join(format!("solvecraft-save-mesh-rejected-{}.stl", std::process::id()));
+    let path = std::env::temp_dir().join(format!("solidcraft-save-mesh-rejected-{}.stl", std::process::id()));
     let _ = std::fs::remove_file(&path);
     for params in
         [json!({"path":path,"format":"nope"}), json!({"path":path,"slicer":"no such slicer anywhere"}), json!({"path":path,"slicer":"/bin/sh"})]
@@ -210,7 +210,7 @@ fn save_mesh_writes_stl_and_3mf() {
     let mut s = imported_box();
     let dir = std::env::temp_dir();
     for (ext, format) in [("stl", None), ("3mf", None), ("dat", Some("3mf"))] {
-        let path = dir.join(format!("solvecraft-save-mesh-{}.{ext}", std::process::id()));
+        let path = dir.join(format!("solidcraft-save-mesh-{}.{ext}", std::process::id()));
         let mut params = json!({"path": path});
         if let Some(f) = format {
             params["format"] = json!(f);

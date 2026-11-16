@@ -42,6 +42,7 @@ mod native_menu;
 mod nav_bridge;
 #[cfg(target_os = "macos")]
 mod open_documents;
+mod single_instance;
 #[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos"))]
 mod space_mouse;
 mod startup;
@@ -89,19 +90,23 @@ struct App {
     solve: SolveApp,
     /// The setup still to run, a step a frame, behind the starting page (#1210).
     setup: solidcraft_ui_egui::starting::Starting<App>,
-    /// The viewport's shader compile, running beside the window while the starting page shows; the
-    /// app waits for it when it closes (#1210).
+    /// The viewport's shader compile, running beside the window while the start page shows (it no
+    /// longer waits for it); the app waits for it when it closes (#1210).
     gpu_job: Option<solidcraft_ui_egui::starting::Worker<solidcraft_ui_egui::WgpuBuilt>>,
-    /// The settings folder whose start marker clears after the first app frame is presented.
+    /// The settings folder whose start marker clears once startup is over (`startup::started`):
+    /// the first app frame presented and the 3D view's shader compile done.
     starting: Option<std::path::PathBuf>,
     /// A newly selected API is confirmed only once the first frame has been presented.
     backend_attempt: Option<(std::path::PathBuf, startup::BackendAttempt)>,
     /// Frames the window has begun, the starting page's included: the first is fitted to the work
     /// area before the window shows, the second asks for the foreground.
     window_frames: u32,
-    /// Painted frames begun once setup is done; the second means the first was presented.
-    /// Logic-only updates and repeated layout passes do not advance startup.
+    /// Painted frames begun once the setup was done; the second one means the first was presented
+    /// (the start page is up). Logic-only updates and repeated layout passes do not advance startup.
     frames: u32,
+    /// Startup is over: the start page was drawn and the 3D view's pipelines are compiled (or
+    /// failed). Until then a crash still counts as a failed start.
+    up: bool,
     /// Started over the control channel: the window doesn't ask for the foreground.
     take_focus_unwanted: bool,
     /// Coming forward after a close that asks about unsaved designs.
@@ -245,6 +250,12 @@ impl eframe::App for App {
         for f in if self.solve.file_picker_busy() { Vec::new() } else { open_documents::take() } {
             self.solve.open_chosen_file(&f);
         }
+        // Files other launches handed over (single_instance.rs).
+        if !self.solve.file_picker_busy() {
+            for f in single_instance::take() {
+                self.solve.open_chosen_file(&f);
+            }
+        }
         #[cfg(target_os = "macos")]
         if let Some(menu) = &mut self.native_menu {
             menu.tick(&mut self.solve, ctx);
@@ -286,7 +297,7 @@ impl eframe::App for App {
             menu.raw_input_hook(&mut self.solve, ctx, raw);
         }
         #[cfg(target_os = "macos")]
-        macos_fullscreen_content(ctx, raw);
+        macos_fullscreen_title_bar();
         // Before the app's own hook, which adds the control channel's events.
         #[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos"))]
         if let Some(space_mouse) = &mut self.space_mouse {
@@ -345,13 +356,13 @@ impl eframe::App for App {
                     .collect()
             });
         }
+        // Only painted passes count: a logic-only control update presents nothing (#743).
         if self.frames < 2 && ctx.current_pass_index() == 0 {
             self.frames += 1;
-            // A second frame right away, which means the first was presented: the app is up.
+            // A second frame right away, which means the first was presented: the start page is up.
             ctx.request_repaint();
             if self.frames == 2 {
-                mark("app up");
-                solidcraft_engine::crash::phase(solidcraft_engine::crash::RUNNING);
+                mark("start page up (first app frame presented)");
                 // A DMG install has no installer step: put solidcraft-cli on PATH, quietly.
                 #[cfg(target_os = "macos")]
                 std::thread::spawn(solidcraft_ui_egui::cli_link::install_on_launch);
@@ -360,15 +371,26 @@ impl eframe::App for App {
                     solidcraft_ui_egui::ai_connect::begin(&mut self.solve);
                     solidcraft_ui_egui::agent_chat::begin(&mut self.solve);
                 }
-                if let Some((path, attempt)) = self.backend_attempt.take()
-                    && let Err(reason) = startup::confirm_backend_start(&path, &attempt)
-                {
-                    log::warn!("graphics: could not confirm the startup choice: {reason}");
-                    self.solve.set_status(reason, true);
+                if !self.setup.settled() {
+                    solidcraft_engine::crash::phase("viewport pipelines (shader compile)");
                 }
-                if let Some(dir) = self.starting.take() {
-                    startup::started(&dir);
-                }
+            }
+        }
+        // Startup is over once the 3D view's shader compile, running beside the start page, is
+        // done too: a driver that crashes in it still counts as a failed start (safe mode, the
+        // backend retry), and a new graphics API is confirmed only once it drew the view.
+        if !self.up && self.frames >= 2 && self.setup.settled() {
+            self.up = true;
+            mark("app up (3D view ready)");
+            solidcraft_engine::crash::phase(solidcraft_engine::crash::RUNNING);
+            if let Some((path, attempt)) = self.backend_attempt.take()
+                && let Err(reason) = startup::confirm_backend_start(&path, &attempt)
+            {
+                log::warn!("graphics: could not confirm the startup choice: {reason}");
+                self.solve.set_status(reason, true);
+            }
+            if let Some(dir) = self.starting.take() {
+                startup::started(&dir);
             }
         }
         content_ui(&mut self.solve, ui);
@@ -395,6 +417,11 @@ impl eframe::App for App {
     }
     /// The app is closing: work still running beside the window ends first, then the session.
     fn on_exit(&mut self) {
+        // Closed from the start page before the 3D view was ready: as a close from the starting
+        // page, a close the user asked for is no failed start (#1210).
+        if let Some(dir) = self.starting.take() {
+            startup::closed_while_starting(&dir, self.gpu.as_ref().is_none_or(|g| g.lost_at.is_none()));
+        }
         // A shader compile from the start still running ends before the GPU is torn down: a
         // driver call cut off as the process exits can crash it (#1210).
         if let Some(job) = self.gpu_job.take()
@@ -637,26 +664,37 @@ fn content_ui(app: &mut SolveApp, ui: &mut egui::Ui) {
     ui.scope_builder(egui::UiBuilder::new().max_rect(content), |ui| app.ui(ui));
 }
 
-/// A transparent macOS title bar still intercepts clicks at the top in fullscreen (#3643).
-/// `contentLayoutRect` reports the whole content view once that bar auto-hides, so reserve
-/// the native titled-window height even then. AppKit supplies the height in logical points;
-/// egui's UI zoom is separate from the display's Retina scale.
+/// macOS full screen: AppKit moves the title bar (the traffic lights) into a window of its own
+/// over the top of the app's window, invisible (alpha 0) until the pointer reaches the top of the
+/// screen, when it slides down over the application bar like any full-screen app's. The bar keeps
+/// its place under it: no strip is reserved, so the bar starts right below the menu bar or the
+/// notch. That invisible window must not take the clicks meant for File, Undo and Redo under it
+/// (#3643): while it is fully transparent it ignores the mouse, and it takes clicks again as soon
+/// as it shows. The pointer moving over it reaches the app then, so the next frame restores it.
 #[cfg(target_os = "macos")]
-fn macos_fullscreen_content(ctx: &egui::Context, raw: &mut egui::RawInput) {
+fn macos_fullscreen_title_bar() {
+    use objc2_app_kit::{NSApplication, NSWindowButton, NSWindowStyleMask};
     let Some(mtm) = objc2::MainThreadMarker::new() else { return };
-    let frame = objc2_app_kit::NSWindow::frameRectForContentRect_styleMask(Default::default(), objc2_app_kit::NSWindowStyleMask::Titled, mtm);
-    fullscreen_content_insets(raw, frame.size.height as f32, ctx.zoom_factor());
+    for window in NSApplication::sharedApplication(mtm).windows().iter() {
+        if !window.styleMask().contains(NSWindowStyleMask::FullScreen) {
+            continue;
+        }
+        // In full screen the close button lives in the title bar's own window.
+        let Some(bar) = window.standardWindowButton(NSWindowButton::CloseButton).and_then(|b| b.window()) else { continue };
+        if bar == window {
+            continue;
+        }
+        let ignore = hidden_title_bar_ignores_clicks(bar.alphaValue());
+        if bar.ignoresMouseEvents() != ignore {
+            bar.setIgnoresMouseEvents(ignore);
+        }
+    }
 }
 
+/// The full-screen title bar's window lets clicks through while it can't be seen.
 #[cfg(any(target_os = "macos", test))]
-fn fullscreen_content_insets(raw: &mut egui::RawInput, title_height: f32, zoom: f32) {
-    let fullscreen = raw.viewports.get(&raw.viewport_id).and_then(|v| v.fullscreen).unwrap_or(false);
-    let mut insets = raw.safe_area_insets.unwrap_or_default();
-    if fullscreen && title_height.is_finite() && title_height > 0.0 && zoom.is_finite() && zoom > 0.0 {
-        insets.0.top = insets.0.top.max(title_height / zoom);
-    }
-    // Explicitly reset on leaving fullscreen: None would retain the preceding frame's inset.
-    raw.safe_area_insets = Some(insets);
+fn hidden_title_bar_ignores_clicks(alpha: f64) -> bool {
+    alpha.is_nan() || alpha <= 0.0
 }
 
 fn services(cc: &eframe::CreationContext<'_>, folder: &DialogFolder) -> Services {
@@ -681,11 +719,21 @@ fn services(cc: &eframe::CreationContext<'_>, folder: &DialogFolder) -> Services
                 dialog = dialog.add_filter(label, &case_variants(first));
             }
             // The groups come from the format registry, so a new format joins this dialog by itself.
-            let mut everything = io::formats::open_extensions(true);
+            // Installed importer plugins read more kinds of file: they join "everything" and add
+            // a group of their own, named after the plugin.
+            let plugins = io::formats::plugin_open_filters();
+            let mut everything: Vec<&str> = io::formats::open_extensions(true);
             everything.extend(["dxf", "svg"]);
+            for (_, exts) in &plugins {
+                everything.extend(exts.iter().map(String::as_str).filter(|e| !io::formats::open_extensions(true).contains(e)));
+            }
             dialog = dialog.add_filter(solidcraft_ui_text::tr("file.open.drawing_filter"), &case_variants(&everything));
             for (label, exts) in io::formats::import_filters(true) {
                 dialog = dialog.add_filter(label, &case_variants(&exts));
+            }
+            for (label, exts) in &plugins {
+                let exts: Vec<&str> = exts.iter().map(String::as_str).collect();
+                dialog = dialog.add_filter(label.as_str(), &case_variants(&exts));
             }
             let future = dialog.add_filter("All files", &["*"]).pick_file();
             let folder = open_folder.clone();
@@ -917,7 +965,11 @@ fn tickets_call(r: &solidcraft_ui_egui::agent_chat::backend::HttpRequest) -> Res
     let body = r.body.as_deref().unwrap_or_default();
     macro_rules! with_headers {
         ($req:expr) => {{
-            let mut req = $req;
+            // Each call has its own agent, so a kept-alive connection is never used again. Asked
+            // to close, the server ends a reply that has no length by closing; otherwise the
+            // reply is read until the server gives up and the call ends on `timeout: global`
+            // (#17932).
+            let mut req = $req.header("Connection", "close");
             for (k, v) in &r.headers {
                 req = req.header(k, v);
             }
@@ -1006,38 +1058,20 @@ fn graphics_path() -> Option<std::path::PathBuf> {
     settings_dir().ok().flatten().map(|d| d.join("graphics.json"))
 }
 
-/// Compatibility shim (docs/compatibility.md): on the first launch after the rename, copy the
-/// settings of earlier releases into the new folder. They kept `graphics.json` (and, on Linux
-/// and macOS, the recovery folder) under the old product name, and eframe's `app.ron` under the
-/// window's old app id. In the Flatpak sandbox, earlier releases kept everything under an
-/// old app id's `~/.var/app` folder; those copies come first, newest first. The old folders
-/// are never changed.
+/// Compatibility shim (docs/compatibility.md): on the first launch after the app id changed, copy
+/// the settings of earlier releases into the new folder. In the Flatpak sandbox, earlier releases
+/// kept everything under an old app id's `~/.var/app` folder; those copies come first, newest
+/// first. The old folders are never changed.
 fn adopt_legacy_settings() {
-    let (Some(current), Some(legacy)) = (settings_dir().ok().flatten(), eframe::storage_dir("SolveCraft")) else { return };
-    let legacy_eframe = eframe::storage_dir(solidcraft_engine::io::LEGACY_APP_ID);
-    let old_flatpak = solidcraft_engine::io::legacy_flatpak_paths(&current);
-    if let Err(e) = adopt_settings(&current, &old_flatpak, &legacy, legacy_eframe.as_deref()) {
+    let Some(current) = settings_dir().ok().flatten() else { return };
+    if let Err(e) = adopt_settings(&current, &solidcraft_engine::io::legacy_flatpak_paths(&current)) {
         log::warn!("settings: could not copy the previous release's settings into {}: {e}", current.display());
     }
 }
 
-fn adopt_settings(
-    current: &std::path::Path,
-    old_flatpak: &[std::path::PathBuf],
-    legacy: &std::path::Path,
-    legacy_eframe: Option<&std::path::Path>,
-) -> std::io::Result<()> {
-    let fresh = !current.exists();
+fn adopt_settings(current: &std::path::Path, old_flatpak: &[std::path::PathBuf]) -> std::io::Result<()> {
     for old in old_flatpak {
         solidcraft_engine::io::adopt_legacy_dir(current, old)?;
-    }
-    solidcraft_engine::io::adopt_legacy_dir(current, legacy)?;
-    if let Some(old) = legacy_eframe.map(|d| d.join("app.ron")).filter(|p| fresh && p.is_file()) {
-        std::fs::create_dir_all(current)?;
-        let new = current.join("app.ron");
-        if !new.exists() {
-            std::fs::copy(old, new)?;
-        }
     }
     Ok(())
 }
@@ -1188,11 +1222,14 @@ fn main() -> eframe::Result {
     // `--theme-file PATH`: follow that theme file for this run without saving it (#7573).
     let mut theme_file: Option<String> = None;
     let mut max_file_size = None;
+    // `--new-instance`: open this launch as its own app even when SolidCraft already runs.
+    let mut new_instance = false;
     let mut args = std::env::args().skip(1);
     while let Some(a) = args.next() {
         match a.as_str() {
             "--control" => control_port = args.next().and_then(|p| p.parse().ok()),
             "--sample" => sample = true,
+            "--new-instance" => new_instance = true,
             "--theme-file" => theme_file = args.next(),
             "--max-file-size" => max_file_size = Some(args.next()),
             s if s.starts_with("--max-file-size=") => max_file_size = Some(s.strip_prefix("--max-file-size=").map(str::to_string)),
@@ -1217,11 +1254,26 @@ fn main() -> eframe::Result {
             }
             "--help" | "-h" => {
                 println!(
-                    "usage: solidcraft [--control PORT] [--sample] [--theme-file THEME.json] [--crash-log] [--safe-mode] [--max-file-size SIZE] [--view model|sketch|sheet|render|animation] [design.sc | part.step]"
+                    "usage: solidcraft [--control PORT] [--sample] [--theme-file THEME.json] [--crash-log] [--safe-mode] [--new-instance] [--max-file-size SIZE] [--view model|sketch|sheet|render|animation] [design.sc | part.step]"
                 );
                 return Ok(());
             }
             _ => files.push(a),
+        }
+    }
+    // Files given while SolidCraft already runs open in that window, and this launch ends (#18055).
+    // Not with a control port, the sample or safe mode, which want a window of their own; no answer
+    // within a moment starts normally.
+    if !files.is_empty()
+        && !new_instance
+        && !safe_mode
+        && !sample
+        && control_port.is_none()
+        && let Some(endpoint) = settings.as_deref().and_then(single_instance::Endpoint::in_settings)
+    {
+        let absolute: Vec<String> = files.iter().map(|f| single_instance::absolute(f)).collect();
+        if single_instance::forward(&endpoint, &absolute) {
+            return Ok(());
         }
     }
     // `--max-file-size 2GB`: the largest files this run reads, over Preferences, never saved (#4086).
@@ -1237,7 +1289,7 @@ fn main() -> eframe::Result {
     let mut notes: Vec<String> = Vec::new();
     let mut failed_starts = 0;
     if let Some(dir) = &settings {
-        notes.extend(startup::check_settings(dir, &[solidcraft_ui_egui::prefs::STORAGE_KEY, solidcraft_ui_egui::prefs::LEGACY_STORAGE_KEY]));
+        notes.extend(startup::check_settings(dir, &[solidcraft_ui_egui::prefs::STORAGE_KEY]));
         failed_starts = startup::begin(dir);
     }
     if failed_starts >= startup::FAILED_STARTS_FOR_SAFE_MODE && !safe_mode {
@@ -1371,6 +1423,7 @@ fn main() -> eframe::Result {
     let created = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
     let created_in_app = created.clone();
     let starting = settings.clone();
+    let instance_dir = settings.clone();
     let attempt_in_app = backend_attempt.clone();
     // A panic on the window's thread ends the app without `on_exit`; this disconnects from the
     // 3D mouse driver then too.
@@ -1414,6 +1467,8 @@ fn main() -> eframe::Result {
             app.graphics_fallback = fallback_note.clone();
             let stored_ui = cc.storage.and_then(|s| solidcraft_ui_egui::prefs::stored(|k| s.get_string(k)));
             restore_preferences(&mut app, stored_ui.as_deref(), graphics().as_ref(), safe_mode);
+            // The administrator's policy holds in safe mode too.
+            app.policy = solidcraft_ui_egui::policy::load();
             if let Some(path) = &theme_file
                 && let Err(e) = solidcraft_ui_egui::prefs::follow_theme_file_for_run(&mut app, path)
             {
@@ -1479,6 +1534,11 @@ fn main() -> eframe::Result {
             let ctx = cc.egui_ctx.clone();
             let wake = wake.clone();
             app.agent_chat.control_starter = Some(Box::new(move |tx| control_server::listen_agent(tx, ctx.clone(), &wake)));
+            // Later launches with a file hand it to this window instead of opening another app. Not
+            // when driven over the control channel or by `--new-instance`.
+            if !new_instance && !sample && control_port.is_none() {
+                single_instance::start(instance_dir.as_deref(), &cc.egui_ctx);
+            }
             // A launch from Finder: its files arrived before the window.
             #[cfg(target_os = "macos")]
             let files = {
@@ -1509,12 +1569,20 @@ fn main() -> eframe::Result {
             let nav_bridge = nav_bridge::NavBridge::start(&cc.egui_ctx);
             // The rest is slow on some computers: it runs after the window shows, a step a frame,
             // behind the starting page (#1210).
+            // The 3D view's shader compile starts with the first step and runs beside the app: the
+            // start page does not wait for it (#1210).
             let opening = sample || !files.is_empty();
-            // A software renderer draws the page on the CPU the shader compile needs: rarely.
-            let software = gpu_setup.as_ref().is_some_and(|g| g.rs.adapter.get_info().device_type == eframe::wgpu::DeviceType::Cpu);
-            let setup = solidcraft_ui_egui::starting::Starting::default()
-                .wait_frame(std::time::Duration::from_millis(if software { 1000 } else { 100 }))
-                .until("starting.view", move |a: &mut App, ctx| view_step(a, ctx, gpu_setup.as_ref()))
+            // Driven over the control channel, the app still waits for it before it takes commands:
+            // clients take pictures of the view as soon as they are connected.
+            let mut setup = solidcraft_ui_egui::starting::Starting::default();
+            if let Some(gpu_setup) = gpu_setup {
+                if control_port.is_some() {
+                    setup = setup.until("", move |a: &mut App, ctx| view_step(a, ctx, &gpu_setup));
+                } else {
+                    setup = setup.beside(move |a: &mut App, ctx| view_step(a, ctx, &gpu_setup));
+                }
+            }
+            let setup = setup
                 .then(if opening { "starting.design" } else { "" }, move |a: &mut App, _ctx| {
                     solidcraft_engine::crash::phase("design");
                     let app = &mut a.solve;
@@ -1595,6 +1663,7 @@ fn main() -> eframe::Result {
                 backend_attempt: attempt_in_app,
                 window_frames: 0,
                 frames: 0,
+                up: false,
                 take_focus_unwanted: control_port.is_some(),
                 come_forward: come_forward::ComeForward::default(),
                 gpu,
@@ -1610,6 +1679,7 @@ fn main() -> eframe::Result {
         }),
     );
     control_server::remove_token_file();
+    single_instance::stop();
     match result {
         Err(e) if !created.load(std::sync::atomic::Ordering::SeqCst) => {
             no_window(e, cpu_renderer, started, settings.as_deref(), backend_attempt.as_ref())
@@ -1631,15 +1701,14 @@ struct GpuSetup {
     scene_samples: u32,
 }
 
-/// The 3D view's setup step (#1210): the shader compile runs on a [`Worker`] beside the window,
-/// whose page keeps drawing; the pipelines go in use the frame after it is done. `true` once the
-/// step is over: the view has its pipelines, or says it can't draw (the compile failed), or there
-/// is no GPU device at all.
+/// The 3D view's setup (#1210): the shader compile runs on a [`Worker`] beside the window, whose
+/// start page is usable meanwhile; a design opened before it is done says in its view that the
+/// view is being prepared. The pipelines go in use the frame after it is done. `true` once it is
+/// over: the view has its pipelines, or says it can't draw (the compile failed).
 ///
 /// [`Worker`]: solidcraft_ui_egui::starting::Worker
-fn view_step(a: &mut App, ctx: &egui::Context, gpu: Option<&GpuSetup>) -> bool {
+fn view_step(a: &mut App, ctx: &egui::Context, gpu: &GpuSetup) -> bool {
     use solidcraft_ui_egui::starting::{Poll, Worker};
-    let Some(gpu) = gpu else { return true };
     let gpu_meshing = !a.solve.cpu_meshing;
     let (scene_samples, depth_bits) = (gpu.scene_samples, gpu.depth_bits);
     let build = move |rs: &eframe::egui_wgpu::RenderState| {
@@ -1650,6 +1719,9 @@ fn view_step(a: &mut App, ctx: &egui::Context, gpu: Option<&GpuSetup>) -> bool {
     let Some(job) = &a.gpu_job else {
         solidcraft_engine::note!("SolidCraft graphics: {:?}, MSAA {scene_samples}x (requested {}x)", gpu.rs.adapter.get_info().backend, gpu.samples);
         solidcraft_engine::crash::phase("viewport pipelines (shader compile)");
+        // Home's pictures, drawn off the window thread, wait for the renderer the compile installs.
+        solidcraft_engine::capture::coming(true);
+        a.solve.viewport.gpu_preparing = true;
         let rs = gpu.rs.clone();
         match Worker::spawn("viewport pipelines", ctx.clone(), move || build(&rs)) {
             Ok(job) => a.gpu_job = Some(job),
@@ -1666,7 +1738,10 @@ fn view_step(a: &mut App, ctx: &egui::Context, gpu: Option<&GpuSetup>) -> bool {
         Poll::Done(built) => gpu_ready(a, gpu, built),
         // The compile panicked (its crash report is written): the view says it can't draw, rather
         // than staying empty.
-        Poll::Failed => a.solve.gpu_unavailable(),
+        Poll::Failed => {
+            a.solve.gpu_unavailable();
+            solidcraft_engine::capture::coming(false);
+        }
     }
     a.gpu_job = None;
     mark("viewport pipelines");
@@ -1700,7 +1775,7 @@ fn startup_step(step: &'static str, detail: &str) {
 }
 
 /// The renderer settings: with `cpu`, the software adapter (WARP, lavapipe, llvmpipe). The
-/// backends come from `startup::choose_backends` (on Windows D3D12 first, and only the backend
+/// backends come from `startup::choose_backends` (on Windows Vulkan first, and only the backend
 /// in use is started); `preference` is `graphics.json`'s `backend`.
 fn wgpu_options(cpu: bool, preference: Option<&str>) -> eframe::egui_wgpu::WgpuConfiguration {
     // One frame in flight, as eframe's own default (`NativeOptions::default`): egui-wgpu's
@@ -1986,6 +2061,49 @@ mod backend_tests {
 }
 
 #[cfg(test)]
+mod tickets_http_tests {
+    use super::tickets_call;
+    use solidcraft_ui_egui::agent_chat::backend::HttpRequest;
+    use std::io::{Read, Write};
+
+    /// A server that answers without a length and keeps the connection open unless the request
+    /// asked to close it: the reply ends only when the connection does (#17932).
+    #[test]
+    fn a_ticket_reply_without_a_length_ends_without_waiting_for_the_timeout() {
+        let Ok(listener) = std::net::TcpListener::bind("127.0.0.1:0") else { return };
+        let port = listener.local_addr().unwrap().port();
+        let server = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut request = Vec::new();
+            let mut buf = [0u8; 4096];
+            while !request.windows(4).any(|w| w == b"\r\n\r\n") {
+                let n = stream.read(&mut buf).unwrap();
+                assert!(n > 0, "the request ended early");
+                request.extend_from_slice(&buf[..n]);
+            }
+            let reply = b"HTTP/1.1 201 Created\r\nContent-Type: application/json\r\n\r\n{\"id\":\"up1\"}";
+            stream.write_all(reply).unwrap();
+            let close = String::from_utf8_lossy(&request).to_ascii_lowercase().contains("connection: close");
+            if !close {
+                std::thread::sleep(std::time::Duration::from_secs(5));
+            }
+        });
+        let request = HttpRequest {
+            method: "POST",
+            url: format!("http://127.0.0.1:{port}/api/uploads"),
+            headers: vec![("Content-Type".into(), "application/json".into())],
+            body: Some(b"{}".to_vec()),
+            timeout_s: 3,
+        };
+        let started = std::time::Instant::now();
+        let reply = tickets_call(&request);
+        assert_eq!(reply, Ok((201, br#"{"id":"up1"}"#.to_vec())), "after {:?}", started.elapsed());
+        assert!(started.elapsed() < std::time::Duration::from_secs(2), "the reply ended with the connection, not the timeout");
+        server.join().unwrap();
+    }
+}
+
+#[cfg(test)]
 mod prefs_writer_tests {
     use super::PrefsWriter;
     use solidcraft_ui_egui::prefs::{NavigatorStyle, STORAGE_KEY};
@@ -2165,13 +2283,14 @@ mod viewport_tests {
         assert_eq!(viewport.app_id.as_deref(), Some(super::APP_ID));
     }
 
+    /// Full screen keeps the application bar at the top of the window, with no strip reserved
+    /// above it, and Undo and Redo in the bar keep working (#3643).
     #[test]
-    fn fullscreen_bar_clears_native_chrome_and_undo_redo_keep_working() {
+    fn fullscreen_bar_starts_at_the_top_and_undo_redo_keep_working() {
         use egui::{Event, PointerButton, Pos2, RawInput, Rect, ViewportId, vec2};
         use serde_json::json;
         use solidcraft_ui_egui::scenario::handle_at;
 
-        // AppKit points are independent of Retina scale and of the user's UI zoom.
         for (zoom, retina) in [(1.0, 1.0), (1.0, 2.0), (1.5, 2.0), (2.0, 2.0)] {
             let ctx = egui::Context::default();
             solidcraft_ui_egui::fonts::setup_bundled_fonts(&ctx);
@@ -2199,17 +2318,15 @@ mod viewport_tests {
                 let viewport = raw.viewports.get_mut(&ViewportId::ROOT).unwrap();
                 viewport.fullscreen = Some(fullscreen);
                 viewport.native_pixels_per_point = Some(retina);
-                super::fullscreen_content_insets(&mut raw, 32.0, zoom);
                 ctx.run_ui(raw, |ui| super::content_ui(app, ui)).textures_delta.clear();
             };
-            // Enter, leave, and enter again: no stale inset when returning to a normal window.
+            // Enter, leave, and enter again: nothing stale when returning to a normal window.
             for fullscreen in [false, true, false, true] {
                 frame(&mut app, fullscreen, vec![]);
                 frame(&mut app, fullscreen, vec![]);
-                let top = if fullscreen { 32.0 / zoom } else { 0.0 };
                 for name in ["appbar:file", "appbar:undo", "appbar:redo", "appbar:help"] {
                     let at = handle_at(name).unwrap();
-                    assert!((at.y - top - 17.0).abs() < 0.1, "{name}: {at:?}, fullscreen={fullscreen}, zoom={zoom}");
+                    assert!((at.y - 17.0).abs() < 0.1, "{name}: {at:?}, fullscreen={fullscreen}, zoom={zoom}");
                 }
                 for (handle, bodies) in [("appbar:undo", 0), ("appbar:redo", 1)] {
                     let at = handle_at(handle).unwrap();
@@ -2228,19 +2345,11 @@ mod viewport_tests {
     }
 
     #[test]
-    fn fullscreen_inset_preserves_existing_safe_areas_and_resets_on_exit() {
-        use egui::epaint::MarginF32;
-        use egui::{RawInput, SafeAreaInsets, ViewportId};
-        let mut raw = RawInput::default();
-        raw.viewports.get_mut(&ViewportId::ROOT).unwrap().fullscreen = Some(true);
-        raw.safe_area_insets = Some(SafeAreaInsets(MarginF32 { top: 40.0, left: 5.0, right: 6.0, bottom: 7.0 }));
-        super::fullscreen_content_insets(&mut raw, 32.0, 2.0);
-        assert_eq!(raw.safe_area_insets.unwrap().0, MarginF32 { top: 40.0, left: 5.0, right: 6.0, bottom: 7.0 });
-
-        raw.viewports.get_mut(&ViewportId::ROOT).unwrap().fullscreen = Some(false);
-        raw.safe_area_insets = None;
-        super::fullscreen_content_insets(&mut raw, 32.0, 1.0);
-        assert_eq!(raw.safe_area_insets, Some(SafeAreaInsets::default()));
+    fn hidden_fullscreen_title_bar_lets_clicks_through_only_while_unseen() {
+        assert!(super::hidden_title_bar_ignores_clicks(0.0));
+        assert!(super::hidden_title_bar_ignores_clicks(f64::NAN));
+        assert!(!super::hidden_title_bar_ignores_clicks(0.01));
+        assert!(!super::hidden_title_bar_ignores_clicks(1.0));
     }
 }
 
@@ -2332,21 +2441,16 @@ mod msaa_tests {
     fn first_launch_adopts_the_previous_release_settings() {
         let d = std::env::temp_dir().join(format!("solidcraft-adopt-settings-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&d);
-        let (current, legacy, legacy_eframe) = (d.join("solidcraft"), d.join("solvecraft"), d.join("ai.storyteller.solvecraft"));
-        std::fs::create_dir_all(&legacy).unwrap();
-        std::fs::create_dir_all(&legacy_eframe).unwrap();
-        std::fs::write(legacy.join("graphics.json"), r#"{"msaa":8}"#).unwrap();
-        std::fs::write(legacy_eframe.join("app.ron"), "(prefs)").unwrap();
-        super::adopt_settings(&current, &[], &legacy, Some(&legacy_eframe)).unwrap();
+        let (current, old) = (d.join("solidcraft"), d.join("ai.storyteller.solidcraft"));
+        std::fs::create_dir_all(&old).unwrap();
+        std::fs::write(old.join("graphics.json"), r#"{"msaa":8}"#).unwrap();
+        super::adopt_settings(&current, std::slice::from_ref(&old)).unwrap();
         assert_eq!(std::fs::read_to_string(current.join("graphics.json")).unwrap(), r#"{"msaa":8}"#);
-        assert_eq!(std::fs::read_to_string(current.join("app.ron")).unwrap(), "(prefs)");
-        assert!(legacy.join("graphics.json").is_file() && legacy_eframe.join("app.ron").is_file());
+        assert!(old.join("graphics.json").is_file());
         // Later launches leave the current settings alone.
-        std::fs::write(current.join("app.ron"), "(mine)").unwrap();
-        std::fs::remove_file(current.join("graphics.json")).unwrap();
-        super::adopt_settings(&current, &[], &legacy, Some(&legacy_eframe)).unwrap();
-        assert_eq!(std::fs::read_to_string(current.join("app.ron")).unwrap(), "(mine)");
-        assert!(!current.join("graphics.json").exists());
+        std::fs::write(current.join("graphics.json"), r#"{"msaa":2}"#).unwrap();
+        super::adopt_settings(&current, &[old]).unwrap();
+        assert_eq!(std::fs::read_to_string(current.join("graphics.json")).unwrap(), r#"{"msaa":2}"#);
         let _ = std::fs::remove_dir_all(&d);
     }
 

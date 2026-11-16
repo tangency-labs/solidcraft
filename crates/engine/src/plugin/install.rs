@@ -2,16 +2,18 @@
 //! the installed plugins and renamed into `plugins/<id>/`. A plugin already installed under that
 //! id is replaced only when the caller says so.
 
-use super::{MAX_COMPONENT_BYTES, Manifest, parse_manifest};
+use super::{Manifest, parse_manifest};
 use craft_plugin::HostError;
 use solidcraft_io::safe_zip;
 #[cfg(not(target_arch = "wasm32"))]
 use std::path::{Path, PathBuf};
 
-/// The largest `.zip` read, and the most it may unpack to.
-pub const MAX_ZIP_BYTES: usize = 64 << 20;
+/// The largest `.zip` read, and the most it may unpack to: room for an importer's component (up
+/// to 64 MiB) beside its manifest. A command plugin's component stays within 16 MiB (checked
+/// once the manifest says which it is).
+pub const MAX_ZIP_BYTES: usize = 80 << 20;
 pub const LIMITS: safe_zip::Limits =
-    safe_zip::Limits { max_entries: 256, max_entry_bytes: MAX_COMPONENT_BYTES as u64, max_total_bytes: MAX_ZIP_BYTES as u64 };
+    safe_zip::Limits { max_entries: 256, max_entry_bytes: craft_plugin::MAX_IMPORTER_COMPONENT_BYTES as u64, max_total_bytes: MAX_ZIP_BYTES as u64 };
 
 /// Why a `.zip` was not installed.
 #[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
@@ -96,12 +98,30 @@ pub fn unpack(zip: &[u8]) -> Result<Unpacked, InstallError> {
         let module = runtime.module.clone();
         return Err(if source { InstallError::SourceOnly(module) } else { InstallError::MissingModule(module) });
     }
+    // Removal walks every file and folder up to a fixed count, so an install must not create more.
+    let mut folders = std::collections::BTreeSet::new();
+    for file in &files {
+        let mut path = file.path.as_str();
+        while let Some((parent, _)) = path.rsplit_once('/') {
+            folders.insert(parent);
+            path = parent;
+        }
+    }
+    if files.len() + folders.len() > super::MAX_FILES {
+        return Err(InstallError::Manifest(HostError::LimitExceeded { limit: "a plugin folder holds at most 1024 files and folders".into() }));
+    }
+    // Every file but the plugin's component stays within a command component's budget.
+    let component_path = manifest.runtime.as_ref().map(|r| r.module.as_str());
+    if files.iter().any(|f| Some(f.path.as_str()) != component_path && f.bytes.len() > craft_plugin::MAX_COMPONENT_BYTES) {
+        return Err(InstallError::Manifest(HostError::LimitExceeded { limit: "a plugin file other than its component is over 16 MiB".into() }));
+    }
     let component = if let Some(runtime) = &manifest.runtime {
-        files
-            .iter()
-            .find(|f| f.path == runtime.module)
-            .map(|f| f.bytes.as_slice())
-            .ok_or_else(|| InstallError::MissingModule(runtime.module.clone()))?
+        let module = files.iter().find(|f| f.path == runtime.module).ok_or_else(|| InstallError::MissingModule(runtime.module.clone()))?;
+        if module.bytes.len() > runtime.max_component_bytes() {
+            let mib = runtime.max_component_bytes() >> 20;
+            return Err(InstallError::Manifest(HostError::LimitExceeded { limit: format!("component size: {} is over {mib} MiB", runtime.module) }));
+        }
+        module.bytes.as_slice()
     } else {
         &[]
     };

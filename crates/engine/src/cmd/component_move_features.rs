@@ -91,7 +91,17 @@ pub(super) fn move_features(s: &mut Session, p: &Value) -> Result<Value> {
             }
         };
         match &mut f.kind {
-            FeatureKind::Sketch { plane, .. } => {
+            FeatureKind::Sketch { plane, sketch } => {
+                let delta = |id| {
+                    s.doc
+                        .feature(id)
+                        .filter(|_| moving.contains(&id))
+                        .map(|old| mat_mul(&to_dest, &s.doc.component_transform(old.component)))
+                        .unwrap_or(solidcraft_doc::IDENTITY)
+                };
+                let author_delta = delta(f.id);
+                solidcraft_doc::project::reframe_link_sketch_placements(sketch, &author_delta, delta)?;
+                solidcraft_doc::reframe_plane_placements(plane, &author_delta, delta)?;
                 if let Some(anchor) = crate::cmd::sketch::face::anchor_mut(plane) {
                     let moved_body = moved_bodies.contains(&anchor.target.body);
                     let author_delta = if authored_here {
@@ -115,6 +125,10 @@ pub(super) fn move_features(s: &mut Session, p: &Value) -> Result<Value> {
             }
             _ => {}
         }
+    }
+    let sketches: Vec<_> = doc.features.iter().filter(|f| matches!(f.kind, FeatureKind::Sketch { .. })).map(|f| f.id).collect();
+    for sketch in sketches {
+        solidcraft_doc::project::capture_missing_sketch_references(doc, sketch, None)?;
     }
     scratch.refresh();
     // Any feature that gains an error, moved or left behind, stops the move.

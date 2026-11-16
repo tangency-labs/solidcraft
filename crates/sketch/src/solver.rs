@@ -1816,6 +1816,94 @@ fn full_rank(gram: [f64; 3], width: usize) -> bool {
     min.is_finite() && max.is_finite() && min >= PIN_RANK && min >= PIN_CONDITION * max
 }
 
+/// How far [`Nearby`] steps off the pose, as a fraction of the largest coordinate it moves
+/// (at least 1 mm).
+const NEARBY_STEP: f64 = 1e-4;
+/// Gauss-Newton steps [`Nearby`] takes to solve the stepped pose.
+const NEARBY_ITERS: usize = 8;
+
+/// The rank analysis of the unpinned unknowns at a solved pose a short step away along their
+/// freedoms (see [`Nearby::determined`]).
+struct Nearby<'s, 'a> {
+    /// The blocks that read `rest`.
+    blocks: &'s [(Block<'a>, Vec<usize>)],
+    /// The unpinned unknowns (sorted).
+    rest: &'s [usize],
+    /// The column of each variable of `rest` (see [`columns`]).
+    col: &'s [usize],
+}
+
+impl Nearby<'_, '_> {
+    /// Which of `rest` are still determined a short step along their freedoms, back on the
+    /// constraints. The rank analysis reads the Jacobian at one pose. Where a constraint is at
+    /// a turning point along a freedom, that freedom leaves it unchanged to first order, and
+    /// what it does move looks fixed. A point on a line held at a distance from a point off the
+    /// line is the case: square across, at its longest, the point slides along the line while
+    /// the line stays put to first order, but the line moves in as the point slides. The count
+    /// of freedoms is the same, only which unknowns they move differs; a step along them
+    /// leaves the turning point and shows it. `j`, `det` and `rank`: the analysis at `x`.
+    /// `None` when there is nothing to check (no freedom, or nothing determined), the
+    /// component is too large, or the step does not solve back to the same rank.
+    fn determined(&self, sk: &Sketch, lay: &Layout, x: &[f64], j: &Mat, det: &[bool], rank: usize) -> Option<Vec<bool>> {
+        let m = self.rest.len();
+        if m > redundancy::MAX_REDUNDANCY_VARS || rank >= m || !det.iter().any(|d| *d) {
+            return None;
+        }
+        // Weights no simple relation ties together, so the step mixes every freedom.
+        let (dir, _) = crate::linalg::null_mix(j, 1e-7, |k| 1.0 + 0.5 * ((k as f64 + 1.0) * 0.618_033_988_749_895).fract());
+        let peak = max_abs(&dir);
+        if !(peak > 0.0) {
+            return None;
+        }
+        let size = self.rest.iter().filter_map(|v| x.get(*v)).fold(1.0_f64, |s, v| s.max(v.abs()));
+        let step = NEARBY_STEP * size / peak;
+        let mut y = x.to_vec();
+        for (v, d) in self.rest.iter().zip(&dir) {
+            if let Some(yv) = y.get_mut(*v) {
+                *yv += step * d;
+            }
+        }
+        for _ in 0..NEARBY_ITERS {
+            let (r, jy, _) = local_system(sk, lay, self.blocks, &mut y, self.col, m);
+            if !r.iter().all(|v| v.is_finite()) {
+                return None;
+            }
+            if max_abs(&r) < TOL {
+                let (near, near_rank) = determined_vars(&jy, 1e-7);
+                return (near_rank == rank).then_some(near);
+            }
+            // A least-squares step, damped only enough to keep the normal equations regular.
+            let mut a = Mat::zeros(m, m);
+            let mut g = vec![0.0; m];
+            for (row, rv) in r.iter().enumerate() {
+                for c1 in 0..m {
+                    let v1 = jy.get(row, c1);
+                    if v1 == 0.0 {
+                        continue;
+                    }
+                    if let Some(gc) = g.get_mut(c1) {
+                        *gc -= v1 * rv;
+                    }
+                    for c2 in 0..m {
+                        a.add(c1, c2, v1 * jy.get(row, c2));
+                    }
+                }
+            }
+            let diag = (0..m).map(|c| a.get(c, c)).fold(0.0_f64, f64::max);
+            for c in 0..m {
+                a.add(c, c, 1e-12 * diag.max(1e-12));
+            }
+            let d = lin_solve(a, g)?;
+            for (v, dv) in self.rest.iter().zip(&d) {
+                if let Some(yv) = y.get_mut(*v) {
+                    *yv += dv;
+                }
+            }
+        }
+        None
+    }
+}
+
 /// Solve the sketch in place. On failure the geometry is restored and the report lists the
 /// violated constraints.
 pub fn solve(sk: &mut Sketch) -> SolveReport {
@@ -1917,7 +2005,32 @@ pub fn keep_sides_at_zero(sk: &mut Sketch, before: &[Vec2]) {
     let (points, constraints) = (&sk.points, &mut sk.constraints);
     let now = |p: usize| points.get(p).map(|x| x.pos);
     let was = |p: usize| before.get(p).copied();
+    // Pairs of points held level (`HorizontalPoints`) or plumb (`VerticalPoints`): a plain
+    // distance between two of them is a distance along that axis, and has a side all the same.
+    let aligned: Vec<(usize, usize, bool)> = constraints
+        .iter()
+        .filter(|c| !c.driven)
+        .filter_map(|c| match c.kind {
+            ConstraintKind::HorizontalPoints { p, q } => Some((p, q, true)),
+            ConstraintKind::VerticalPoints { p, q } => Some((p, q, false)),
+            _ => None,
+        })
+        .collect();
     for c in constraints.iter_mut() {
+        if let ConstraintKind::Distance { p, q, value } = c.kind
+            && value.abs() <= TOL
+            && !c.driven
+            && now(p).zip(now(q)).is_some_and(|(a, b)| a.dist(b) <= TOL)
+        {
+            let behind = aligned
+                .iter()
+                .filter(|&&(a, b, _)| (a, b) == (p, q) || (a, b) == (q, p))
+                .any(|&(_, _, level)| was(p).zip(was(q)).is_some_and(|(a, b)| if level { b.x < a.x - TOL } else { b.y < a.y - TOL }));
+            if behind && let ConstraintKind::Distance { p, q, .. } = &mut c.kind {
+                std::mem::swap(p, q);
+            }
+            continue;
+        }
         let behind = match c.kind {
             ConstraintKind::DistanceX { p, q, value } if value.abs() <= TOL => {
                 now(p).zip(now(q)).is_some_and(|(a, b)| (b.x - a.x).abs() <= TOL) && was(p).zip(was(q)).is_some_and(|(a, b)| b.x < a.x - TOL)
@@ -1937,8 +2050,11 @@ pub fn keep_sides_at_zero(sk: &mut Sketch, before: &[Vec2]) {
 /// constraint solved: where [`keep_sides_at_zero`] swapped them, the stored sketch keeps that
 /// order with the solved positions.
 pub fn keep_point_order(stored: &mut ConstraintKind, solved: &ConstraintKind) {
-    use ConstraintKind::{DistanceX, DistanceY};
-    if let (DistanceX { p, q, .. }, DistanceX { p: sp, q: sq, .. }) | (DistanceY { p, q, .. }, DistanceY { p: sp, q: sq, .. }) = (stored, solved) {
+    use ConstraintKind::{Distance, DistanceX, DistanceY};
+    if let (DistanceX { p, q, .. }, DistanceX { p: sp, q: sq, .. })
+    | (DistanceY { p, q, .. }, DistanceY { p: sp, q: sq, .. })
+    | (Distance { p, q, .. }, Distance { p: sp, q: sq, .. }) = (stored, solved)
+    {
         (*p, *q) = (*sp, *sq);
     }
 }
@@ -3357,8 +3473,10 @@ fn solve_inner(
         let pin_flags = pinned(sk, &lay, &sub, vars, &mut x, &|_| true, pin);
         let rest = unpinned(vars, &pin_flags, pin.anchor());
         columns(&mut col, &rest, vars);
-        let (_, j, _) = local_system(sk, &lay, &blocks_reading(&sub, &rest), &mut x, &col, rest.len());
+        let reading = blocks_reading(&sub, &rest);
+        let (_, j, _) = local_system(sk, &lay, &reading, &mut x, &col, rest.len());
         let (rest_det, rest_rank) = if j.rows > 0 { determined_vars(&j, 1e-7) } else { (vec![false; rest.len()], 0) };
+        let nearby = Nearby { blocks: &reading, rest: &rest, col: &col }.determined(sk, &lay, &x, &j, &rest_det, rest_rank);
         let comp_rank = pin_flags.iter().filter(|p| **p).count() + rest_rank;
         rank += comp_rank;
         // More rows than rank: some constraint may be implied by the others.
@@ -3389,6 +3507,12 @@ fn solve_inner(
             let (_, j, _) = local_system(sk, &lay, &sub, &mut x, &col, vars.len());
             let reduced: Vec<bool> = vars.iter().map(|v| det.get(*v).copied().unwrap_or(false)).collect();
             assert_dense_agrees(&j, comp_rank, &reduced);
+        }
+        // What the freedoms move a short way off this pose is not determined either.
+        for (v, near) in rest.iter().zip(nearby.iter().flatten()) {
+            if !near && let Some(slot) = det.get_mut(*v) {
+                *slot = false;
+            }
         }
     }
     let consts = blocks_of(&mut constant_blocks.iter().copied());
