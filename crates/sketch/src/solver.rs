@@ -2022,9 +2022,10 @@ pub fn keep_sides_at_zero(sk: &mut Sketch, before: &[Vec2]) {
             && !c.driven
             && now(p).zip(now(q)).is_some_and(|(a, b)| a.dist(b) <= TOL)
         {
-            let behind = aligned.iter().filter(|&&(a, b, _)| (a, b) == (p, q) || (a, b) == (q, p)).any(|&(_, _, level)| {
-                was(p).zip(was(q)).is_some_and(|(a, b)| if level { b.x < a.x - TOL } else { b.y < a.y - TOL })
-            });
+            let behind = aligned
+                .iter()
+                .filter(|&&(a, b, _)| (a, b) == (p, q) || (a, b) == (q, p))
+                .any(|&(_, _, level)| was(p).zip(was(q)).is_some_and(|(a, b)| if level { b.x < a.x - TOL } else { b.y < a.y - TOL }));
             if behind && let ConstraintKind::Distance { p, q, .. } = &mut c.kind {
                 std::mem::swap(p, q);
             }
