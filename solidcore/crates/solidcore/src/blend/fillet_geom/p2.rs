@@ -1939,6 +1939,33 @@ fn as_edgeuse(obj: Option<EntityRef>, op: &'static str) -> Result<Option<Edgeuse
 }
 
 /// The surface of a target face (`pFace->GetSurface()`, dereferenced).
+/// Where the two lines in a face that run at distances `d[i]` from a vertex `vertex` along
+/// the unit in-face normals `n[i]` of its two edges cross: the point `vertex + a n[0] + b n[1]`
+/// with `(p - vertex) . n[i] = d[i]`. Written as `s (n0 + n1) / (1 + c) + t (n0 - n1) / (1 - c)`
+/// with `c = n0 . n1`, `s` the mean and `t` half the difference of the distances, so equal
+/// distances (a constant-radius corner) divide by `1 + c` alone and stay exact as the edges
+/// approach a straight run. `None` where the lines are parallel: normals opposite (`c = -1`), or
+/// equal with different distances (`c = 1`, `t != 0`).
+fn offset_lines_crossing(vertex: Point3, n: [Vec3; 2], d: [f64; 2]) -> Option<Point3> {
+    let [n0, n1] = n;
+    let c = n0.dot(n1);
+    let s = 0.5 * (d[0] + d[1]);
+    let t = 0.5 * (d[0] - d[1]);
+    let plus = 1.0 + c;
+    if plus == 0.0 {
+        return None;
+    }
+    let mut p = vertex + (n0 + n1) * (s / plus);
+    if t != 0.0 {
+        let minus = 1.0 - c;
+        if minus == 0.0 {
+            return None;
+        }
+        p = p + (n0 - n1) * (t / minus);
+    }
+    (p.x.is_finite() && p.y.is_finite() && p.z.is_finite()).then_some(p)
+}
+
 fn face_surface<'b>(
     target: &'b Brep,
     face: Option<FaceId>,
@@ -2078,60 +2105,68 @@ impl FilletBrep {
         let rail_index1 = fs1.find_index_of_rail_on_face(target, face)?;
         let rail_index2 = fs2.find_index_of_rail_on_face(target, face)?;
 
-        // Figure a guess uv for the intersection of the rail curves in the face: twice
-        // the fillet radius along each filleted edge from the common vertex.
-        let mut uv = [Point3::new(0.0, 0.0, 0.0); 2];
+        // The guess for the rails' crossing in the face. Upstream's is the midpoint of the
+        // points twice the fillet radius along each filleted edge from the common vertex;
+        // where an edge turns within that length (a round of 8 on a quarter circle of
+        // radius 10, #17511), both points lie far from the vertex and the solve converges to
+        // the rails' other crossing, a ball that touches one edge's face past its end. Here
+        // the guess is where the rails' first-order lines at the vertex cross: each rail
+        // runs along its edge's tangent, its fillet radius into the face along the edge
+        // use's binormal ([`offset_lines_crossing`]), exact for straight edges on a plane
+        // and the crossing nearest the vertex otherwise.
+        let mut feet = [(Point3::new(0.0, 0.0, 0.0), Vec3::new(0.0, 0.0, 0.0), 0.0); 2];
         let pairs = [(fs1, rail_index1), (fs2, rail_index2)];
-        for (slot, (fs, index)) in uv.iter_mut().zip(pairs) {
+        for (slot, (fs, index)) in feet.iter_mut().zip(pairs) {
             let offset_distance = solver_surface(fs, index, OP)?.offset_distance().abs();
             let eu = solver_edgeuse(fs, index, OP)?;
             let e = eu1::edge(target, eu)?
                 .ok_or_else(|| SolidError::blend_missing(OP, "the edge use's edge"))?;
             let ivl = edge::interval(target, e)?;
-            let curve = edge::curve(target, e)?
-                .ok_or_else(|| SolidError::blend_missing(OP, "the edge's curve"))?;
-            let owner_zone_tol_3d = Some(edge::tolerance(target, e)?);
 
             let vu = eu1::vertexuse(target, eu)?
                 .ok_or_else(|| SolidError::blend_missing(OP, "the edge use's vertex use"))?;
             let pv = vertexuse_unit::vertex(target, vu)?;
             let orient = eu1::orientation(target, eu)?;
-            let offset_param = if (pv == cp_vertex && orient == OrientType::Same)
+            // the edge's end at the common vertex
+            let vertex_param = if (pv == cp_vertex && orient == OrientType::Same)
                 || (pv != cp_vertex && orient == OrientType::Opposite)
             {
-                arc_length_param(
-                    k,
-                    curve,
-                    ivl.min(),
-                    2.0 * offset_distance,
-                    owner_zone_tol_3d,
-                    OP,
-                )?
+                ivl.min()
             } else {
-                arc_length_param(
-                    k,
-                    curve,
-                    ivl.max(),
-                    -2.0 * offset_distance,
-                    owner_zone_tol_3d,
-                    OP,
-                )?
+                ivl.max()
             };
             let fetch = get_or_create_uv_trim_curve(k, target, eu, false, false, true)?;
             fetch.status?;
-            let trim_curve = eu1::uv_trim_curve(target, eu)?
-                .0
-                .filter(|c| is_b_spline_kind(c))
-                .ok_or_else(|| {
-                    SolidError::blend_missing(OP, "the edge use's B-spline UV trim curve")
-                })?;
-            *slot = trim_curve.evaluate_point(k, offset_param)?;
+            let at_vertex = evaluate_binormal(
+                k,
+                target,
+                eu,
+                vertex_param,
+                false,
+                &BinormalOptions::default(),
+            )?;
+            *slot = (at_vertex.point, at_vertex.binormal, offset_distance);
         }
-
-        // Their midpoint is the guess.
-        let [uv0, uv1] = uv;
-        let mid_uv = (uv0 + uv1) * 0.5;
-        let uv_guess = Point2::new(mid_uv.x, mid_uv.y);
+        let [(vertex_pnt, binormal1, d1), (_, binormal2, d2)] = feet;
+        let crossing = offset_lines_crossing(vertex_pnt, [binormal1, binormal2], [d1, d2])
+            .ok_or_else(|| {
+                SolidError::blend_failed(OP, "the filleted edges are parallel at the vertex")
+            })?;
+        let face_srf = face_surface(target, face, OP)?;
+        let face_domain = face_srf.natural_uv_domain_with_nurb(k)?;
+        let dropped = face_srf.drop_point::<NoObject>(
+            k,
+            crossing,
+            &face_domain,
+            &DropPointOptions::default(),
+        )?;
+        if !dropped.success {
+            return Err(SolidError::blend_failed(
+                OP,
+                "the rails' first-order crossing drops onto the face nowhere",
+            ));
+        }
+        let uv_guess = dropped.result_uv;
 
         // Get the TsectPnts and call the solver.
         let (vu1, mut tsect1) = self.rail_end_tsect(v, Some(fillet_geom1), None, OP)?;
