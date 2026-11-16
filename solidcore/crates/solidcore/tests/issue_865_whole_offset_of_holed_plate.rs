@@ -24,15 +24,21 @@ use core::f64::consts::PI;
 
 use offset_fixture::{offset_full, report, volume};
 use solidcore::boolean::api_brep::boolean_difference;
+use solidcore::curve::curve::Curve;
 use solidcore::error::offset::{LoopCrossing, OffsetFailure};
 use solidcore::error::Reason;
 use solidcore::geom::attribute::AttributeStore;
-use solidcore::math::Point3;
+use solidcore::mass::integrator::properties::brep_area;
+use solidcore::math::{Point3, Vec3};
 use solidcore::offset::offset_executive::p1::{OffsetExecutive, OffsetOperation};
 use solidcore::offset::offset_executive::p2::SolidOffsetOptions;
-use solidcore::offset::offset_executive::p2::{api_offset_brep_full, OffsetOptions};
+use solidcore::offset::offset_executive::p2::{
+    api_offset_brep_full, shell_brep_simple, OffsetOptions, ShellOptions,
+};
+use solidcore::primitive::api_curves::create_line_segment;
 use solidcore::primitive::api_primitives::{create_box, create_cylinder};
 use solidcore::query::api_queries::brep_is_manifold_solid;
+use solidcore::sweep::api_brep::create_linear_sweep;
 use solidcore::topology::brep::p10::TopologyEnv;
 use solidcore::topology::brep::p7::read_from_file;
 use solidcore::topology::brep::validation::{check_brep, CheckLevel};
@@ -347,4 +353,116 @@ fn upstream_holes_clear_of_the_sides_still_offset_unmerged() {
             "{label}: volume {v}, main {main_volume}"
         );
     }
+}
+
+/// An open sheet bent in an L: the floor z = 0 (x 0..20) and the wall x = 20 (z 0..10),
+/// both 10 deep in y, the floor with an r 1 through hole about (`hole_x`, 5).
+fn l_sheet(k: &mut Kernel, hole_x: f64) -> Brep {
+    let floor = Curve::from(
+        create_line_segment(Point3::new(0.0, 0.0, 0.0), Point3::new(20.0, 0.0, 0.0)).unwrap(),
+    );
+    let wall = Curve::from(
+        create_line_segment(Point3::new(20.0, 0.0, 0.0), Point3::new(20.0, 0.0, 10.0)).unwrap(),
+    );
+    let sheet = create_linear_sweep(
+        k,
+        &[Some(&floor), Some(&wall)],
+        Vec3::new(0.0, 1.0, 0.0),
+        10.0,
+        false,
+    )
+    .unwrap();
+    let hole = create_cylinder(k, Point3::new(hole_x, 5.0, -3.0), 1.0, 6.0).unwrap();
+    boolean_difference(k, sheet, hole).unwrap()
+}
+
+/// The L sheet's hole 0.5 from the bend (about (18.5, 5)), offset 2 into the L, results
+/// not merged. The floor's offset (z = 2) ends where it meets the wall's (x = 18), so the
+/// hole's loop crosses the floor offset's outer loop. An open sheet's plain offset builds
+/// no walls: the floor's offset is rebuilt from its loops' stretches, notched where the
+/// hole reaches past x = 18, and stitched to the wall's along the edge they share. It is
+/// `check_brep` Level 2 clean, of the closed-form area: the floor 18 x 10 less the hole's
+/// segment beyond x = 18 (chord 0.5 from the centre), plus the wall 8 x 10. Merged, it is
+/// the same.
+#[test]
+fn an_open_sheet_with_crossing_loops_offsets_unmerged() {
+    let segment = (0.5_f64).acos() - 0.5 * (1.0_f64 - 0.25).sqrt();
+    let want = 18.0 * 10.0 - segment + 8.0 * 10.0;
+    for merge_results in [false, true] {
+        let mut k = Kernel::default();
+        let mut sheet = l_sheet(&mut k, 18.5);
+        let mut notifications = offset_fixture::Notifications::new(&mut sheet);
+        let mut result = api_offset_brep_full(
+            &mut k,
+            Some(&mut sheet),
+            OffsetOptions {
+                distance: 2.0,
+                extend_convex_edges: true,
+                merge_results,
+            },
+            &mut notifications.context(),
+        )
+        .unwrap_or_else(|e| panic!("merge {merge_results}: {e:?}"));
+        result.refresh_cached_topology();
+        result.use_arena_naming().unwrap();
+        let lines = check_brep(&mut k, &mut result, CheckLevel::Level2)
+            .unwrap()
+            .lines();
+        assert!(lines.is_empty(), "merge {merge_results}: {lines:?}");
+        let got = brep_area(&k, &mut result, 1e-9).unwrap();
+        assert!(
+            (got - want).abs() <= 1e-6 * want,
+            "merge {merge_results}: area {got}, closed form {want}"
+        );
+    }
+}
+
+/// The same sheet thickened by 2 into the L (`create_offset_solid`), results not merged:
+/// thickening builds side walls along the sheet's open edges, and the hole's wall and the
+/// floor's offset end pass through each other uncut, so it is refused as
+/// [`LoopCrossing::Unmerged`]. The hole moved to (10, 5), well clear of the bend, it
+/// thickens unmerged into a valid manifold solid of the closed-form volume: the L's two
+/// slabs (20 x 10 x 2 and 2 x 10 x 8) less the hole's r 1 x 2 cylinder.
+#[test]
+fn a_thickened_sheet_with_crossing_loops_unmerged_is_refused() {
+    let thicken = |k: &mut Kernel, hole_x: f64| {
+        let sheet = l_sheet(k, hole_x);
+        let options = ShellOptions {
+            offset: OffsetOptions {
+                distance: 2.0,
+                extend_convex_edges: true,
+                merge_results: false,
+            },
+            create_offset_solid: true,
+            merge_sheet_side_walls: false,
+        };
+        shell_brep_simple(k, &sheet, options, &[])
+    };
+    let mut k = Kernel::default();
+    let e = thicken(&mut k, 18.5).unwrap_err();
+    let cause = e.root_cause();
+    let Some(Reason::Offset(OffsetFailure::LoopsCross {
+        face: Some(_),
+        crossing: LoopCrossing::Unmerged,
+    })) = cause.failure().map(|f| &f.reason)
+    else {
+        panic!("{e:?}");
+    };
+    assert_eq!(cause.sm_status(), Some(1027));
+
+    let mut k = Kernel::default();
+    let mut solid = thicken(&mut k, 10.0).unwrap();
+    solid.refresh_cached_topology();
+    solid.use_arena_naming().unwrap();
+    let lines = check_brep(&mut k, &mut solid, CheckLevel::Level2)
+        .unwrap()
+        .lines();
+    assert!(lines.is_empty(), "{lines:?}");
+    assert!(brep_is_manifold_solid(&solid).unwrap());
+    let want = 20.0 * 10.0 * 2.0 + 2.0 * 10.0 * 8.0 - PI * 2.0;
+    let got = volume(&k, &mut solid).unwrap();
+    assert!(
+        (got - want).abs() <= 1e-6 * want,
+        "volume {got}, closed form {want}"
+    );
 }

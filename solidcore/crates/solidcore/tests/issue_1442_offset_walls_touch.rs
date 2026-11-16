@@ -7,7 +7,8 @@
 //! (r 5) is tangent to the front wall's offset (y = 2) at (22.5, 2): the offset face on
 //! z = 0 has loops that touch without crossing, the walls meet along a line and the
 //! offset bounds no solid there. The shell fails with `SM_ERR_OFFSET_WALLS_TOUCH` (1042),
-//! not `SM_ERR_BAD_INTERSECTIONS` (1027) as the fork did before a759622. Thicknesses 1.5 and 2.5 (loops apart or crossing) build.
+//! not `SM_ERR_BAD_INTERSECTIONS` (1027) as the fork did before a759622. Thicknesses 1.5
+//! and 2.5 (loops apart or crossing) build.
 #![allow(
     clippy::unwrap_used,
     clippy::expect_used,

@@ -35,11 +35,11 @@
 //!
 //! Not in the fork: a loop of one edge use that no crossing cuts is not taken for a stretch
 //! too short to build, though its closed curve's two ends meet (the fork refuses an uncut
-//! hole circle beside a crossing as three loops at one point). Where
-//! the offset's results are not merged and it builds walls (a solid's offset, the local
-//! operation's included, or a sheet thickened), a face whose loops
-//! cross is refused ([`crate::error::offset::LoopCrossing::Unmerged`]): only the merge cuts
-//! the walls the crossing loops come from where they pass through each other.
+//! hole circle beside a crossing as three loops at one point). Where the offset's results
+//! are not merged and it builds walls (any body but an open sheet, the local operation's
+//! included, or a sheet thickened), a face whose loops cross is refused
+//! ([`crate::error::offset::LoopCrossing::Unmerged`]): only the merge cuts the walls the
+//! crossing loops come from where they pass through each other.
 //!
 //! Not in the fork (solidcraft#16983): a face of one loop is resolved as well. Where the
 //! offsets of the faces either side of a face cross over each other (a wall thicker than
@@ -69,7 +69,6 @@ use crate::math::{Point3, Vec3};
 use crate::nurbs::b_spline_curve_n_lib::TrimMode;
 use crate::nurbs::b_spline_surface_n_lib::p2::OrientType;
 use crate::nurbs::knots::Side;
-use crate::query::api_queries::brep_is_manifold_solid;
 use crate::query::brep::BrepQuery;
 use crate::query::r#loop::contains_uv_point;
 use crate::surface::surface::p1::{map_to_2d, zone_tol_3d};
@@ -547,17 +546,33 @@ fn stretch_too_short(from: i64, to: i64, distance: f64, tol_3d: f64) -> bool {
 
 /// (not in the fork) Whether an offset whose face's loops cross is refused as
 /// `LoopCrossing::Unmerged`: its results are not merged, and it builds walls: a sheet
-/// thickened (`create_offset_solid`) or a body that is a manifold solid (`is_solid`, asked
-/// only then).
+/// thickened (`create_offset_solid`) or any body that is not an open sheet (`open_sheet`,
+/// asked only then).
 fn refuses_unmerged(
     merge_results: bool,
     create_offset_solid: bool,
-    is_solid: impl FnOnce() -> Result<bool>,
+    open_sheet: impl FnOnce() -> Result<bool>,
 ) -> Result<bool> {
     if merge_results {
         return Ok(false);
     }
-    Ok(create_offset_solid || is_solid()?)
+    Ok(create_offset_solid || !open_sheet()?)
+}
+
+/// (not in the fork) Whether `b` is an open sheet, the only body whose plain offset builds
+/// no walls: one shell (`SmBrep::IsSheet`: every edge lamina or manifold) with at least one
+/// lamina edge, so that shell is not closed. A closed body (its regions labelled or not), a
+/// non-manifold one, one with a face hanging off it and one of several lumps are not.
+fn is_open_sheet(k: &mut Kernel, b: &Brep) -> Result<bool> {
+    if !crate::topology::brep::p2::is_sheet(k, b)? {
+        return Ok(false);
+    }
+    for e in bp1::edges(b, None)? {
+        if eu::edge_is_lamina(b, e)? {
+            return Ok(true);
+        }
+    }
+    Ok(false)
 }
 
 impl OffsetExecutive {
@@ -744,12 +759,15 @@ impl OffsetExecutive {
         // loops that cross (`SmFace` test #38, the face left as it is). No unmerged offset
         // with walls is valid here, and it is refused as such. Walls there are where the
         // body offset is a solid (its faces' offsets meet along its edges) or a sheet is
-        // thickened (side walls along its open edges); a sheet's plain offset has none, and
-        // the rebuilt face stands as a sheet of its own. The local operation (always
+        // thickened (side walls along its open edges). An open sheet's plain offset has
+        // none: the rebuilt face is stitched to its neighbours' offsets along the edges
+        // they share, and its other edges stay open. Any other body is refused: a closed
+        // one (whatever its regions say), a non-manifold one or one with a face hanging
+        // off it has faces whose offsets meet as walls. The local operation (always
         // unmerged) is no exception: its offset faces are stitched alike before they are
         // moved into the body.
         if refuses_unmerged(self.merge_results(), self.create_offset_solid(), || {
-            brep_is_manifold_solid(original)
+            is_open_sheet(kernel, original)
         })? {
             return Err(unresolved(LoopCrossing::Unmerged));
         }
@@ -1503,8 +1521,8 @@ mod tests {
     /// The refusal applies to unmerged offsets that build walls and to nothing else.
     #[test]
     fn unmerged_refusal_needs_walls_and_no_merge() {
-        let solid = || Ok(true);
-        let sheet = || Ok(false);
+        let solid = || Ok(false);
+        let sheet = || Ok(true);
         assert!(refuses_unmerged(false, false, solid).unwrap());
         assert!(refuses_unmerged(false, true, sheet).unwrap());
         assert!(!refuses_unmerged(false, false, sheet).unwrap());
