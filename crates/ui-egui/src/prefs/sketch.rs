@@ -697,5 +697,6 @@ fn dimension_appearance(app: &mut SolveApp, ui: &mut egui::Ui, label_width: f32)
             });
             ui.data_mut(|data| data.insert_temp(key, (app.preferences.dimension_colour, hex)));
         });
+        setting::dimension_rim(app, ui);
     });
 }

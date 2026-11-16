@@ -1828,6 +1828,10 @@ preference_settings! {
     /// theme's dimension colours (Preferences › Sketch › Dimension color, #14121). Selection, hover
     /// and conflicts keep their own colours.
     dimension_colour: Option<[u8; 3]> = None, PAGE_SKETCH;
+    /// Draw the theme's halo colour as a rim under dimension lines, their arrows and fully
+    /// constrained sketch lines, so they read on a lit face in the Dark theme (#17575). Off draws
+    /// them bare, as before.
+    dimension_rim: bool = true, PAGE_SKETCH => check_tr("prefs.dimension_rim");
     /// The first length dimension of a sketch with nothing sized yet scales the whole drawing to
     /// its value (#1365). Off: it sizes only what it measures (#4109).
     first_dimension_scales: bool = true, PAGE_SKETCH;

@@ -102,6 +102,13 @@ pub(crate) fn glyph_letter(name: &str) -> &'static str {
         _ => "?",
     }
 }
+/// A dimension arrow with a rim of `rim` around it, so it reads on a bright face (#17575).
+pub(crate) fn dimension_arrow_rimmed(painter: &egui::Painter, t: Pos2, back: Pos2, col: Color32, rim: Color32) {
+    let d = (t - back).normalized();
+    let n = vec2(-d.y, d.x);
+    painter.add(egui::Shape::convex_polygon(vec![t, t - d * 9.0 + n * 3.0, t - d * 9.0 - n * 3.0], rim, Stroke::new(2.5, rim)));
+    dimension_arrow(painter, t, back, col);
+}
 pub(crate) fn dimension_arrow(painter: &egui::Painter, t: Pos2, back: Pos2, col: Color32) {
     let d = (t - back).normalized();
     let n = vec2(-d.y, d.x);
