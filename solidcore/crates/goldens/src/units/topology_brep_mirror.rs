@@ -203,6 +203,8 @@ impl UnitDiff for Runner {
     }
 
     fn run_rust(&self, case: &Case) -> Result<Output, HarnessError> {
+        #[cfg(test)]
+        super::topology_brep_p5::transform_certificate::begin_case(&case.name);
         let i: Inputs = case.parse()?;
         let mut k = Kernel::default();
         // the Rust reader's B-rep of the same file, its geometry owners named by the
@@ -218,7 +220,7 @@ impl UnitDiff for Runner {
         let mut run = || -> SolidResult<Vec<f64>> {
             // (the input, for the certificate's step-by-step replay)
             #[cfg(test)]
-            let input = b.clone_standing_for_self()?;
+            let input = b.clone_standing_for_self().expect("certificate input copy");
             let r = match &i.matrix {
                 Some(m) => transform_matrix(&mut k, &mut b, m, i.scale_tol),
                 None => mirror(&mut k, &mut b, &plane),
@@ -227,7 +229,7 @@ impl UnitDiff for Runner {
             // 4x4 transforms are checked, one `Transform` step at a time)
             #[cfg(test)]
             if let (Ok(()), Some(m)) = (&r, &i.matrix) {
-                replay_certified(&mut k, input, &b, m, i.scale_tol)?;
+                replay_certified(&mut k, input, &b, m, i.scale_tol).expect("certificate replay");
             }
             let st = status(r)?;
             let mut record = vec![st];
@@ -536,20 +538,55 @@ mod tests {
     use super::*;
     use solidcore::topology::brep::validation::{check_brep, CheckLevel};
 
+    /// The rows WR-507 / WR-508 moved whose decomposition has a scaled `Transform` step.
+    const SCALED: [&str; 22] = [
+        "mat0009",
+        "mat0010",
+        "mat0014",
+        "mat0017",
+        "mat0019",
+        "mat0026",
+        "mat0027",
+        "mat0032",
+        "mat0033",
+        "mat0042",
+        "mat0043",
+        "mat0044",
+        "mat0048",
+        "mat0058",
+        "mat0068",
+        "mat0069",
+        "mat0074",
+        "mat0077",
+        "mat0078",
+        "mat0080",
+        "mat0083",
+        "mat0090",
+    ];
+    /// The rows WR-507 / WR-508 moved whose steps all have a scale of 1: no tolerance
+    /// changes and the model size estimate stays unset (upstream set it from the vertex box).
+    const UNIT_SCALE: [&str; 3] = [
+        "mat0041",
+        "mat0059",
+        "mat0091",
+    ];
+
     /// Every case replays, and each 4x4 transform goes through the WR-507 / WR-508
     /// tolerance certificate (`topology_brep_p5::transform_certificate`): these are all
     /// of this unit's rows that moved when those flags were retired (the mirrors move
     /// none).
     #[test]
     fn every_transform_meets_the_wr507_wr508_certificate() {
-        let ctx = CaseContext {
-            root: crate::case::repo_root(),
-            seeds: 16,
-        };
-        let cases = Runner.cases(&ctx).unwrap();
-        assert!(cases.iter().any(|c| c.name == "Solids_box_smb_issue_1570_shear"));
-        for case in &cases {
-            Runner.run_rust(case).unwrap();
+        let fired = super::super::topology_brep_p5::transform_certificate::replay_matches_golden(
+            &Runner,
+        );
+        for c in SCALED {
+            let f = fired.get(c).unwrap_or_else(|| panic!("moved row {c} is not a case"));
+            assert!(f.scaled > 0, "{c}: {f:?}");
+        }
+        for c in UNIT_SCALE {
+            let f = fired.get(c).unwrap_or_else(|| panic!("moved row {c} is not a case"));
+            assert!(f.unscaled > 0 && f.scaled == 0, "{c}: {f:?}");
         }
     }
 

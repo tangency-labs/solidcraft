@@ -277,7 +277,8 @@ fn rust_record(k: &mut Kernel, b: &mut Brep, i: &Inputs) -> SolidResult<Vec<f64>
         }
         12 => {
             #[cfg(test)]
-            let before = transform_certificate::Snapshot::before_transform(k, b, i.scale.map(v))?;
+            let before = transform_certificate::Snapshot::before_transform(k, b, i.scale.map(v))
+                .expect("certificate snapshot");
             let r = p5::transform(
                 k,
                 b,
@@ -288,7 +289,9 @@ fn rust_record(k: &mut Kernel, b: &mut Brep, i: &Inputs) -> SolidResult<Vec<f64>
             #[cfg(test)]
             if r.is_ok() {
                 let s = i.scale.map(v);
-                before.check(k, b, s, i.scale_tolerances, "brep_p5 op 12")?;
+                before
+                    .check(k, b, s, i.scale_tolerances, "brep_p5 op 12")
+                    .expect("certificate check");
             }
             vec![status(r)?]
         }
@@ -571,6 +574,8 @@ impl UnitDiff for Runner {
         "topology.brep_p5"
     }
     fn run_rust(&self, case: &Case) -> Result<Output, HarnessError> {
+        #[cfg(test)]
+        transform_certificate::begin_case(&case.name);
         let i: Inputs = case.parse()?;
         let mut b = match own_fixture(&i.fixture)? {
             Ok(b) => b,
@@ -662,28 +667,14 @@ impl UnitDiff for Runner {
 mod transform_certificate_tests {
     use super::*;
 
-    /// Every `Transform` case (op 12) replays through [`transform_certificate`], including
-    /// the three whose golden rows moved when the WR-507 / WR-508 flags were retired.
+    /// Every case replays against its blessed golden line, and each `Transform` (op 12)
+    /// goes through [`transform_certificate`], `identity_scale_delta_1e-11` (the one row
+    /// that moved when the WR-507 / WR-508 flags were retired) among them.
     #[test]
     fn every_transform_meets_the_wr507_wr508_certificate() {
-        let ctx = CaseContext {
-            root: crate::case::repo_root(),
-            seeds: 16,
-        };
-        let mut replayed = Vec::new();
-        for case in Runner.cases(&ctx).unwrap() {
-            let i: Inputs = case.parse().unwrap();
-            if i.op == 12 {
-                Runner.run_rust(&case).unwrap();
-                replayed.push(case.name.clone());
-            }
-        }
-        for moved in ["identity_scale_delta_1e-11", "gen0162", "gen0427"] {
-            assert!(
-                replayed.iter().any(|n| n == moved),
-                "{moved} is not a transform case"
-            );
-        }
+        let fired = transform_certificate::replay_matches_golden(&Runner);
+        let f = fired["identity_scale_delta_1e-11"];
+        assert!(f.scaled > 0, "{f:?}");
     }
 }
 
@@ -721,6 +712,88 @@ pub(super) mod transform_certificate {
         edges: Vec<f64>,
         faces: Vec<f64>,
         size: f64,
+        /// Each vertex's point, bit for bit.
+        points: Vec<[u64; 3]>,
+    }
+
+    /// The certified checks one case went through (see [`begin_case`]).
+    #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+    pub(crate) struct Fired {
+        /// WR-73: removes that answered `true` and removed a listed proto vertex.
+        pub(crate) wr73_removed: usize,
+        /// WR-73: removes that answered `false` and left the proto vertex as it was.
+        pub(crate) wr73_kept: usize,
+        /// WR-507 / WR-508: transforms that scaled the tolerances (closed form checked).
+        pub(crate) scaled: usize,
+        /// Transforms with a scale of 1 or no tolerance scaling (nothing changed).
+        pub(crate) unscaled: usize,
+        /// Transforms that took `SmBrep::Transform`'s identity exit.
+        pub(crate) identity: usize,
+    }
+
+    thread_local! {
+        static FIRED: std::cell::RefCell<(String, std::collections::BTreeMap<String, Fired>)> =
+            std::cell::RefCell::default();
+    }
+
+    /// Starts recording the checks of the case `name` (each runner's `run_rust`).
+    pub(crate) fn begin_case(name: &str) {
+        FIRED.with(|f| {
+            let mut f = f.borrow_mut();
+            f.0 = name.to_string();
+            f.1.entry(name.to_string()).or_default();
+        });
+    }
+
+    /// Counts a check for the current case.
+    pub(crate) fn fired(count: impl FnOnce(&mut Fired)) {
+        FIRED.with(|f| {
+            let mut f = f.borrow_mut();
+            let name = f.0.clone();
+            count(f.1.entry(name).or_default());
+        });
+    }
+
+    /// The checks recorded on this thread so far, by case, and clears them.
+    pub(crate) fn take_fired() -> std::collections::BTreeMap<String, Fired> {
+        FIRED.with(|f| std::mem::take(&mut f.borrow_mut().1))
+    }
+
+    /// Runs every case of `unit` through the goldens check, in this test build (so every
+    /// certificate assertion runs), and panics unless each case's output agrees with its
+    /// blessed golden line: the certificates then checked the very computation the
+    /// blessed rows record, and their side work (copies, a kernel shared with the run)
+    /// changed none of them. Returns the checks each case went through.
+    pub(crate) fn replay_matches_golden(
+        unit: &dyn crate::UnitDiff,
+    ) -> std::collections::BTreeMap<String, Fired> {
+        let ctx = crate::CaseContext {
+            root: crate::case::repo_root(),
+            seeds: 16,
+        };
+        let dir = crate::golden::default_dir();
+        let golden = crate::golden::read(&dir, unit.id()).unwrap();
+        let known = crate::golden::known_failing(&dir, unit.id()).unwrap();
+        let _ = take_fired();
+        let res = crate::golden::check_unit(
+            unit,
+            &ctx,
+            &crate::runner::RunOptions::default(),
+            &golden,
+            &known,
+            false,
+        );
+        assert!(res.harness_error.is_none(), "{}: {:?}", unit.id(), res.harness_error);
+        assert!(res.broken.is_empty(), "{}: broken {:?}", unit.id(), res.broken);
+        assert!(
+            res.changed.is_empty() && res.added.is_empty() && res.removed.is_empty(),
+            "{}: changed {:?} added {:?} removed {:?}",
+            unit.id(),
+            res.changed.iter().map(|c| &c.0).collect::<Vec<_>>(),
+            res.added,
+            res.removed
+        );
+        take_fired()
     }
 
     impl Snapshot {
@@ -740,6 +813,13 @@ pub(super) mod transform_certificate {
                     .map(|f| face::p2::tolerance(b, f))
                     .collect::<Result<_>>()?,
                 size: b.this_model_size_estimate(k, false),
+                points: p1::vertices(b, None)?
+                    .into_iter()
+                    .map(|v| {
+                        b.vertex(v)
+                            .map(|x| [x.point.x.to_bits(), x.point.y.to_bits(), x.point.z.to_bits()])
+                    })
+                    .collect::<Result<_>>()?,
             })
         }
 
@@ -772,6 +852,7 @@ pub(super) mod transform_certificate {
                 && after.edges == self.edges
                 && after.faces == self.faces
                 && after.size.to_bits() == self.size.to_bits()
+                && after.points == self.points
         }
 
         /// Panics unless the body's tolerances after a successful transform whose
@@ -803,11 +884,16 @@ pub(super) mod transform_certificate {
                     self.size.to_bits(),
                     "{what}: model size estimate"
                 );
+                fired(|f| f.unscaled += 1);
                 return Ok(());
             };
+            // `SmBrep::Transform`'s identity exit (an identity placement and a scale
+            // `approx_eq` to 1) changes nothing at all: no vertex point moved either, which
+            // a non-identity placement or a scale past `SM_EFF_ZERO` would do.
             if scale.is_some_and(|v| v.approx_eq(Vec3::new(1.0, 1.0, 1.0)))
                 && self.unchanged(&after)
             {
+                fired(|f| f.identity += 1);
                 return Ok(());
             }
             // The size is taken from the transformed body before its tolerances are
@@ -854,6 +940,7 @@ pub(super) mod transform_certificate {
                     );
                 }
             }
+            fired(|f| f.scaled += 1);
             Ok(())
         }
     }

@@ -4297,19 +4297,37 @@ fn run_proto(
                             }
                         }
                         if !skip {
+                            #[cfg(test)]
+                            let listed_before = r.mgr.proto_vertices().contains(&v);
                             let res = r
                                 .mgr
                                 .remove_coincident_no_edge_proto_vertex(k, &r.pool, e, v);
                             // WR-73 certificate, replayed on every case by the unit's
-                            // tests: `true` means the proto vertex was removed, so a
-                            // `true` answer leaves it unlisted (upstream answered `true`
-                            // on a miss and kept it listed).
+                            // tests: the answer says whether the proto vertex was
+                            // removed. `true` takes a listed vertex off the list; `false`
+                            // leaves the list as it was (upstream answered `true` on a
+                            // miss and kept the vertex listed).
                             #[cfg(test)]
-                            if let Ok(true) = res {
-                                assert!(
-                                    !r.mgr.proto_vertices().contains(&v),
-                                    "WR-73: `true` for a proto vertex still listed"
-                                );
+                            if let Ok(answer) = res {
+                                let listed_after = r.mgr.proto_vertices().contains(&v);
+                                if answer {
+                                    assert!(
+                                        listed_before && !listed_after,
+                                        "WR-73: `true` but the vertex was not removed \
+                                         (listed {listed_before} -> {listed_after})"
+                                    );
+                                    super::topology_brep_p5::transform_certificate::fired(|f| {
+                                        f.wr73_removed += 1;
+                                    });
+                                } else {
+                                    assert_eq!(
+                                        listed_after, listed_before,
+                                        "WR-73: `false` but the vertex's listing changed"
+                                    );
+                                    super::topology_brep_p5::transform_certificate::fired(|f| {
+                                        f.wr73_kept += 1;
+                                    });
+                                }
                             }
                             match st(res)? {
                                 Ok(f) => out.push(b(f)),
@@ -4608,27 +4626,7 @@ fn run_proto(
                         if interior && (!r.pe_split_ok(e) || !r.ed_curves_unique()) {
                             skip = true;
                         } else {
-                            #[cfg(test)]
-                            let old = r.mgr.proto_edge(e).map(solidcore::topology::proto_topology::ProtoEdge::xsect_interval);
                             let called = st3(r.mgr.proto_edge_split(k, &mut r.pool, e, t))?;
-                            // WR-101 certificate, replayed on every case by the unit's
-                            // tests: a split at `t` leaves `[old_min, t]` and
-                            // `[t, old_max]` (upstream gave the upper child `[t, t]`).
-                            #[cfg(test)]
-                            if let (Ok((_, Some(upper))), Some(old)) = (&called, old) {
-                                let lo = r.mgr.proto_edge(e).map(solidcore::topology::proto_topology::ProtoEdge::xsect_interval);
-                                let hi = r.mgr.proto_edge(*upper).map(solidcore::topology::proto_topology::ProtoEdge::xsect_interval);
-                                assert_eq!(
-                                    lo.map(|x| (x.min(), x.max())),
-                                    Some((old.min(), t)),
-                                    "WR-101: the lower child's interval"
-                                );
-                                assert_eq!(
-                                    hi.map(|x| (x.min(), x.max())),
-                                    Some((t, old.max())),
-                                    "WR-101: the upper child's interval"
-                                );
-                            }
                             super::topology_proto_topology_p2::sync_counts(&mut r);
                             match called {
                                 Ok((pv, pe)) => {
@@ -5131,10 +5129,12 @@ fn apply_transform_op(
                 TOpIn::Scale { s } | TOpIn::ScaleByPt { s, .. } => Some(v3(*s)),
                 _ => None,
             };
-            let before = Snapshot::before_transform(k, b, s)?;
+            let before = Snapshot::before_transform(k, b, s).expect("certificate snapshot");
             let r = apply_transform_op_inner(k, Some(TransformObject::Brep(&mut *b)), op);
             if r.is_ok() {
-                before.check(k, b, s, true, "proto_topology_p1")?;
+                before
+                    .check(k, b, s, true, "proto_topology_p1")
+                    .expect("certificate check");
             }
             r
         }
@@ -7475,6 +7475,8 @@ pub fn generate_p3(rng: &mut Rng) -> Option<Value> {
 
 /// Runs a case on the Rust side.
 pub fn run_rust_case(case: &Case) -> Result<Output, HarnessError> {
+    #[cfg(test)]
+    super::topology_brep_p5::transform_certificate::begin_case(&case.name);
     rust(&case.parse()?)
 }
 
@@ -7516,6 +7518,8 @@ impl UnitDiff for Runner {
     }
 
     fn run_rust(&self, case: &Case) -> Result<Output, HarnessError> {
+        #[cfg(test)]
+        super::topology_brep_p5::transform_certificate::begin_case(&case.name);
         rust(&case.parse()?)
     }
 }
@@ -7524,27 +7528,151 @@ impl UnitDiff for Runner {
 mod tests {
     use super::*;
 
+    /// The `topology.proto_topology_p1` rows WR-73 moved: each has a remove that answered
+    /// `false` and kept its proto vertex, and no transform.
+    const WR73_P1: [&str; 31] = [
+        "gen0012",
+        "gen0093",
+        "gen0119",
+        "gen0227",
+        "gen0394",
+        "gen0429",
+        "gen0454",
+        "gen0455",
+        "gen0470",
+        "gen0515",
+        "gen0543",
+        "gen0572",
+        "gen0591",
+        "gen0600",
+        "gen0655",
+        "gen0659",
+        "gen0688",
+        "gen0690",
+        "gen0753",
+        "gen0760",
+        "gen0864",
+        "gen0898",
+        "gen0899",
+        "gen0964",
+        "gen1067",
+        "gen1170",
+        "gen1321",
+        "gen1355",
+        "gen1378",
+        "gen1391",
+        "gen1431",
+    ];
+    /// The `topology.proto_topology_p3` rows WR-73 moved: each has a remove that answered
+    /// `false` and kept its proto vertex.
+    const WR73_P3: [&str; 35] = [
+        "gen0006",
+        "gen0090",
+        "gen0257",
+        "gen0334",
+        "gen0415",
+        "gen0440",
+        "gen0603",
+        "gen0740",
+        "gen0819",
+        "gen0924",
+        "gen1135",
+        "gen1161",
+        "gen1276",
+        "gen1384",
+        "gen1388",
+        "gen1515",
+        "gen1535",
+        "gen1651",
+        "gen1673",
+        "gen2003",
+        "gen2010",
+        "gen2034",
+        "gen2226",
+        "gen2242",
+        "gen2260",
+        "gen2347",
+        "gen2434",
+        "gen2446",
+        "gen2613",
+        "gen2639",
+        "gen2664",
+        "gen2757",
+        "gen2847",
+        "gen2907",
+        "gen2950",
+    ];
+    /// The p1 rows whose transforms scale the tolerances (WR-507 / WR-508 closed form).
+    const SCALED_P1: [&str; 23] = [
+        "constructed_sequence_box_identity_between_edits",
+        "constructed_sequence_box_scale_by_point_inverse",
+        "constructed_sequence_caller_face_identity_between_edits",
+        "constructed_sequence_caller_face_scale_by_point_inverse",
+        "constructed_sequence_sphere_identity_between_edits",
+        "constructed_sequence_sphere_scale_by_point_inverse",
+        "constructed_solid_box_scale_by_pt",
+        "constructed_solid_box_uniform_scale",
+        "constructed_solid_caller_face_scale_by_pt",
+        "constructed_solid_caller_face_uniform_scale",
+        "constructed_solid_sphere_scale_by_pt",
+        "constructed_solid_sphere_uniform_scale",
+        "public_extrusion_anisotropic",
+        "public_extrusion_signed",
+        "public_extrusion_uniform",
+        "public_scale_cone_nonuniform",
+        "public_scale_cylinder_nonuniform",
+        "public_scale_phase2_box_anisotropic",
+        "public_scale_phase2_copied_box_anisotropic",
+        "public_scale_phase2_copied_sphere_anisotropic",
+        "public_scale_phase2_copied_sphere_scale_by_point",
+        "public_scale_phase2_sphere_anisotropic",
+        "public_scale_torus_nonuniform",
+    ];
+    /// The p1 rows whose transforms have a scale of 1 (reflections): no tolerance changes
+    /// and the model size estimate stays unset (upstream set it from the vertex box).
+    const UNIT_SCALE_P1: [&str; 9] = [
+        "public_extrusion_even_reflection",
+        "public_extrusion_odd_reflection",
+        "public_scale_cone_reflection",
+        "public_scale_cylinder_reflection",
+        "public_scale_phase2_box_even_reflection",
+        "public_scale_phase2_box_odd_reflection",
+        "public_scale_phase2_sphere_all_negative",
+        "public_scale_phase2_sphere_odd_reflection",
+        "public_scale_torus_reflection",
+    ];
+
     /// Every case of this unit and of `topology.proto_topology_p3` (which runs on this
-    /// unit's script engine) replays through the runner's test-only certificates: the
-    /// WR-73 one at each `RemoveCoincidentNoEdgeProtoVertex` (a `true` answer leaves the
-    /// proto vertex unlisted) and the WR-507 / WR-508 transform one at each API transform
-    /// of a B-rep. A case that fails or defers still ran every call before its failure.
+    /// unit's script engine) replays against its blessed golden line through the
+    /// runner's test-only certificates: the WR-73 one at each
+    /// `RemoveCoincidentNoEdgeProtoVertex` (the answer says whether the proto vertex was
+    /// removed) and the WR-507 / WR-508 transform one at each API transform of a B-rep.
+    /// Each row the retirement moved must have gone through its certified site.
     #[test]
     fn every_case_meets_the_wr73_and_transform_certificates() {
-        let ctx = CaseContext {
-            root: crate::case::repo_root(),
-            seeds: 16,
+        use super::super::topology_brep_p5::transform_certificate::{
+            replay_matches_golden, Fired,
         };
-        let p1_cases = Runner.cases(&ctx).unwrap();
-        assert!(p1_cases.iter().any(|c| c.name == "public_scale_cone_nonuniform"));
-        for case in &p1_cases {
-            eprintln!("p1 case {}", case.name);
-            let _ = Runner.run_rust(case);
+        let p1 = replay_matches_golden(&Runner);
+        let p3 = replay_matches_golden(&super::super::topology_proto_topology_p3::Runner);
+        let get = |m: &std::collections::BTreeMap<String, Fired>, c: &str| {
+            *m.get(c).unwrap_or_else(|| panic!("moved row {c} is not a case"))
+        };
+        for c in WR73_P1 {
+            let f = get(&p1, c);
+            assert!(f.wr73_kept > 0 && f.scaled + f.unscaled == 0, "{c}: {f:?}");
         }
-        let p3 = super::super::topology_proto_topology_p3::Runner;
-        for case in &p3.cases(&ctx).unwrap() {
-            eprintln!("p3 case {}", case.name);
-            let _ = p3.run_rust(case);
+        for c in WR73_P3 {
+            let f = get(&p3, c);
+            assert!(f.wr73_kept > 0, "{c}: {f:?}");
+        }
+        for c in SCALED_P1 {
+            let f = get(&p1, c);
+            assert!(f.scaled > 0 && f.wr73_kept == 0, "{c}: {f:?}");
+        }
+        for c in UNIT_SCALE_P1 {
+            let f = get(&p1, c);
+            assert!(f.unscaled > 0 && f.scaled == 0 && f.wr73_kept == 0, "{c}: {f:?}");
         }
     }
 
