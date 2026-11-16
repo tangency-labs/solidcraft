@@ -3,7 +3,7 @@
   <defs>
     <mask id="briefcase1-seam" maskUnits="userSpaceOnUse" x="-32" y="-32" width="128" height="128">
       <path d="M-32 -32L96 -32L96 96L-32 96Z" fill="white"/>
-      <path d="M4 35.5L60 35.5" fill="none" stroke="black" stroke-width="4" stroke-linecap="round"/>
+      <path d="M4 35.5L60 35.5" fill="none" stroke="black" stroke-width="4" stroke-linejoin="round" stroke-linecap="round"/>
       <path d="M29.5 30.5L34.5 30.5A2 2 0 0 1 36.5 32.5L36.5 38.5A2 2 0 0 1 34.5 40.5L29.5 40.5A2 2 0 0 1 27.5 38.5L27.5 32.5A2 2 0 0 1 29.5 30.5Z" fill="white"/>
     </mask>
   </defs>
