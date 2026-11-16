@@ -86,9 +86,9 @@ fn case_a_runs_out_on_alternate_rows() {
     let (_, plan) = plan_band(&s);
     assert_eq!(plan.rows, 27);
     assert_eq!(plan.slots.len(), 95);
-    assert_eq!(plan.count(SlotKind::Whole), 41);
-    assert_eq!(plan.count(SlotKind::Shortened), 26);
-    assert_eq!(plan.count(SlotKind::RunOut), 28);
+    assert_eq!(plan.count(Whole), 41);
+    assert_eq!(plan.count(Shortened), 26);
+    assert_eq!(plan.count(RunOut), 28);
     assert_eq!(plan.left_out, 0);
     assert!(close(plan.cut_length(), 1366.0), "{}", plan.cut_length());
     assert!(
@@ -165,7 +165,7 @@ fn closed_ends_keep_the_margin() {
             hi_open: false,
         }]
     });
-    assert_eq!(plan.count(SlotKind::RunOut), 0);
+    assert_eq!(plan.count(RunOut), 0);
     use SlotKind::*;
     let even = [
         (0.1, 16.9, Shortened),
