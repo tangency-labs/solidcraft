@@ -115,6 +115,39 @@ fn a_union_that_fills_a_void_is_the_whole_box() {
     assert!(near(volume(&u), 7900.0), "{}", volume(&u));
 }
 
+/// A cylinder cavity cut into a box whose side touches the box's y = 5 wall along a line (and
+/// the x = 25 wall too, in the second cut), inside the box from z = 22.5 to 32.5. The contact
+/// line leaves a slit loop in the wall, whose removal splits the box's shell from the cavity's.
+/// The cavity's shell lies inside the box's, so both bound the one solid: its outer shell and
+/// a void, as when the cavity is clear of the wall. The record has the exterior, the material
+/// and the cavity, and two shells.
+#[test]
+fn a_cavity_touching_the_outside_along_a_line_is_one_solid_with_a_void() {
+    for fixes in [false, true] {
+        if fixes {
+            all_fixes();
+        }
+        for base in [[30.0, 7.5, 22.5], [27.5, 7.5, 22.5]] {
+            let b = make_box([25.0, 5.0, 12.5], [20.0, 30.0, 22.5]).unwrap();
+            let cavity = solidcore_ops::make_cylinder(base, 2.5, 10.0).unwrap();
+            let d = boolean(b, cavity, BooleanOp::Subtract).unwrap().unwrap();
+            let expected = 20.0 * 30.0 * 22.5 - PI * 2.5 * 2.5 * 10.0;
+            assert!(
+                near(volume(&d), expected),
+                "{base:?} fixes {fixes}: {}",
+                volume(&d)
+            );
+            assert_eq!(d.solid_count().unwrap(), 1, "{base:?} fixes {fixes}");
+            let (record, _) = d.to_record().unwrap();
+            assert_eq!(
+                (record.regions.len(), record.shells.len()),
+                (3, 2),
+                "{base:?} fixes {fixes}"
+            );
+        }
+    }
+}
+
 #[test]
 fn a_cube_on_a_void_is_kept_out_by_a_difference_and_shares_nothing_with_it() {
     all_fixes();

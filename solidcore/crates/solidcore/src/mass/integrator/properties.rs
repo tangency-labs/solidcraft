@@ -40,6 +40,12 @@
 //! one-sided limit from inside the piece (WR-670, #2091): upstream takes the span above.
 //! An edge's tube area, volume and moments each have an error scale of their own size
 //! (#2887): upstream's are `BIG_DOUBLE`, so only the edge's length was under error control.
+//! [`brep_mass_properties`] and [`brep_mass_properties_estimated`] (through
+//! [`brep_properties_in_box`]) integrate about the middle of the body's exact box and
+//! scale their errors by that box's size (#17361): the loose box upstream takes holds the
+//! control points of every span of an edge's curve that the edge touches, so a short arc
+//! of a circle of large radius puts it a quarter of that circle away, and the body's
+//! first moments became large terms that cancel, under an error scale as large.
 use super::{OdeIntegrator, OdeOptions};
 use crate::curve::curve::Curve;
 use crate::error::mass::MassFailure;
@@ -945,6 +951,20 @@ pub fn brep_properties(
     attributes: &PropertyAttributes<'_>,
 ) -> Result<PreciseProperties> {
     let bbox = qbrep::calculate_bounding_box(k, &mut *b, BoundingBoxOptions::default())?;
+    brep_properties_in_box(k, b, accuracy, origin, behavior, attributes, &bbox)
+}
+/// [`brep_properties`] with the body's box given: its largest side sets every face's
+/// error scale (not upstream: [`brep_properties`] takes the loose box, whose arc of a large
+/// circle reaches a quarter of that circle away, #17361).
+pub fn brep_properties_in_box(
+    k: &Kernel,
+    b: &mut Brep,
+    accuracy: f64,
+    origin: Point3,
+    behavior: MassPropertyBehavior,
+    attributes: &PropertyAttributes<'_>,
+    bbox: &Extent3d,
+) -> Result<PreciseProperties> {
     let size = bbox.size();
     let estimated = size.z.max(size.x.max(size.y));
     let estimated = estimated * estimated / 100.0;
@@ -1300,8 +1320,8 @@ fn valid_api_number(value: f64) -> Result<()> {
     }
 }
 /// `SmApiBrepComputeMassProperties`, with upstream validation: integrated once about the
-/// bounding-box midpoint, the moments then shifted to `origin` (which avoids
-/// cancellation for a distant origin).
+/// exact bounding box's midpoint (#17361), the moments then shifted to `origin` (which
+/// avoids cancellation for a distant origin).
 ///
 /// The accuracy is the integrator's requested accuracy: its error ESTIMATE is held under
 /// it, which is not a proved bound (see [`EstimatedMassProperties`]).
@@ -1433,10 +1453,10 @@ impl EstimatedMassProperties {
 
 /// Mass properties as `request` asks (one implementation:
 /// [`brep_mass_properties`] is its `SmApiBrepComputeMassProperties` request). Integrated
-/// once about the bounding box's middle: volume and moments over the material regions
-/// (`SmBrep::ComputePreciseProperties`), the area of the faces between a solid and a
-/// void, then the moments moved to the point asked, or to the centroid. **The accuracy is
-/// requested and estimated, not proved** ([`EstimatedMassProperties`]).
+/// once about the exact bounding box's middle (#17361): volume and moments over the
+/// material regions (`SmBrep::ComputePreciseProperties`), the area of the faces between a
+/// solid and a void, then the moments moved to the point asked, or to the centroid. **The
+/// accuracy is requested and estimated, not proved** ([`EstimatedMassProperties`]).
 ///
 /// `accuracy` must be finite and positive; it is clamped to
 /// [[`ESTIMATE_ACCURACY_FINEST`], [`ESTIMATE_ACCURACY_COARSEST`]] ([`estimate_accuracy`]),
@@ -1528,11 +1548,12 @@ fn estimate(
     if request.manifold_solid_only && !manifold_solid(b)? {
         return Err(SolidError::invalid_input(OP, "not a manifold solid"));
     }
-    let mid = qbrep::calculate_bounding_box(k, &mut *b, BoundingBoxOptions::default())?.mid();
+    let bbox = qbrep::calculate_tight_bounding_box(k, &mut *b)?;
+    let mid = bbox.mid();
     if request.area_centroid_without_material && !has_material(b)? {
         return area_centroid(k, b, accuracy, mid);
     }
-    let properties = brep_properties(
+    let properties = brep_properties_in_box(
         k,
         b,
         accuracy,
@@ -1542,6 +1563,7 @@ fn estimate(
             ..MassPropertyBehavior::default()
         },
         attributes,
+        &bbox,
     )?;
     valid_api_number(properties.mass)?;
     valid_api_number(properties.volume)?;

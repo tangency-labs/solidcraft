@@ -605,8 +605,6 @@ pub struct UpstreamFixes {
     /// Off by default for pinned C++ parity. This is not the WR-406 trim-reversal check:
     /// validation still repairs existing trims as before.
     pub validation_does_not_make_uv_trims: bool,
-    /// Before the piecewise merge, `do_extended_offset` rebuilds every offset face whose loops cross from the stretches of its loops that bound it (WR-345, #854).
-    pub offset_resolve_crossing_loops: bool,
     /// [`crate::topology::edgeuse::p2::is_convex_radial_sector`]
     /// (`SmEdgeuse::IsConvexRadialSector`) propagates a failing
     /// [`crate::topology::edgeuse::p2::evaluate_binormal_step_off`] status on either this

@@ -3886,12 +3886,10 @@ impl OffsetGeometryCreation {
         // its vertex or taken from a mated neighbour's vertex says nothing of a crossing.
         // Only in an inward shell with faces opened (a rib thinner than two walls), at an
         // edge between two faces, where the faces that turn inside out with it are
-        // resolved before the merge (`offset_resolve_crossing_loops`, which drops their
-        // inverted regions); elsewhere (a solid offset, a sheet's thickening, a lamina
-        // edge, the fix off) an edge whose vertex moves past its other end is refused as
-        // vanishing, as before.
-        let inverted = k.fixes.offset_resolve_crossing_loops
-            && executive.inset()
+        // resolved before the merge (`resolve_crossing_loops`, which drops their inverted
+        // regions); elsewhere (a solid offset, a sheet's thickening, a lamina edge) an edge
+        // whose vertex moves past its other end is refused as vanishing, as before.
+        let inverted = executive.inset()
             && !executive.shell_faces().is_empty()
             && other_base_edgeuse.is_some()
             && cuts == [true, true]
