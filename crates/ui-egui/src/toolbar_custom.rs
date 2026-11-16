@@ -518,44 +518,48 @@ pub fn window(app: &mut SolveApp, ctx: &egui::Context) {
             .placed(egui::Align2::LEFT_TOP, origin)
             .cards(2.0)
             .actions("", "Close", None)
-            .show(ctx, true, |ui| {
-                ui_kit::text(
-                    ui,
-                    &solidcraft_ui_text::format("toolbar.customize_note", &[("tab", app.tr_label(&tab))]),
-                    ui_kit::Text::Note("customize"),
-                );
-                egui::ScrollArea::vertical()
-                    .max_height(
-                        (ctx.content_rect().height() - solidcraft_theme::Tokens::get().control_height * 8.0)
-                            .min(solidcraft_theme::Tokens::get().control_height * 20.0),
-                    )
-                    .show(ui, |ui| {
-                        for (panel, cmds, n) in panel_lists(&tab) {
-                            if cmds.is_empty() {
-                                continue;
-                            }
-                            ui_kit::section(ui, panel, app.tr_label(panel), true, |ui| {
-                                let shown = buttons(app, &tab, panel, &cmds, n);
-                                for c in &cmds {
-                                    let mut on = shown.iter().any(|b| b.id == c.id) || pinned_on(app, &tab, c.id).is_some();
-                                    let r = ui_kit::checkbox_icon(ui, app.tr_label(c.label), row_icon(app, c), &mut on);
-                                    crate::scenario::publish_handle(&format!("customize:{}", c.id), r.rect.center());
-                                    if r.changed() {
-                                        changes.push((c.id, on));
-                                    }
+            .show_with_left(
+                ctx,
+                true,
+                |ui| {
+                    ui_kit::text(
+                        ui,
+                        &solidcraft_ui_text::format("toolbar.customize_note", &[("tab", app.tr_label(&tab))]),
+                        ui_kit::Text::Note("customize"),
+                    );
+                    egui::ScrollArea::vertical()
+                        .max_height(
+                            (ctx.content_rect().height() - solidcraft_theme::Tokens::get().control_height * 8.0)
+                                .min(solidcraft_theme::Tokens::get().control_height * 20.0),
+                        )
+                        .show(ui, |ui| {
+                            for (panel, cmds, n) in panel_lists(&tab) {
+                                if cmds.is_empty() {
+                                    continue;
                                 }
-                            });
-                        }
-                    });
-                ui.horizontal(|ui| {
+                                ui_kit::section(ui, panel, app.tr_label(panel), true, |ui| {
+                                    let shown = buttons(app, &tab, panel, &cmds, n);
+                                    for c in &cmds {
+                                        let mut on = shown.iter().any(|b| b.id == c.id) || pinned_on(app, &tab, c.id).is_some();
+                                        let r = ui_kit::checkbox_icon(ui, app.tr_label(c.label), row_icon(app, c), &mut on);
+                                        crate::scenario::publish_handle(&format!("customize:{}", c.id), r.rect.center());
+                                        if r.changed() {
+                                            changes.push((c.id, on));
+                                        }
+                                    }
+                                });
+                            }
+                        });
+                },
+                |ui| {
                     let reset = ui_kit::button(ui, solidcraft_ui_text::tr_label("Reset Toolbar"), ui_kit::Button::Normal);
                     crate::scenario::publish_target("customize:reset", reset.rect);
                     reset_tab |= reset.clicked();
                     let reset_all = ui_kit::button(ui, app.tr("toolbar.reset_all_tabs"), ui_kit::Button::Normal);
                     crate::scenario::publish_target("customize:reset_all", reset_all.rect);
                     ask_all |= reset_all.clicked();
-                });
-            });
+                },
+            );
     for (id, on) in changes {
         if on {
             if let Err(e) = pin(app, &tab, id) {
@@ -704,6 +708,31 @@ mod reset_tests {
         h.app.toolbar_custom.panels.insert(format!("{WORKSPACE}/INSPECT/MEASURE"), vec![]);
         assert!(design_keys(&h).iter().any(|k| k.starts_with("DESIGN/MODEL/")), "{:?}", design_keys(&h));
         h
+    }
+
+    #[test]
+    fn reset_buttons_share_the_footer_with_close_at_both_window_sizes() {
+        for (width, height) in [(1280, 720), (1920, 1080)] {
+            let mut h = Harness::new();
+            h.call("ui.resize", json!({"width": width, "height": height}));
+            h.app.toolbar_custom.customizing = true;
+            h.frames(3);
+
+            let reset = rect_of("customize:reset").unwrap();
+            let reset_all = rect_of("customize:reset_all").unwrap();
+            let close = rect_of("dialog:cancel").unwrap();
+            let footer = rect_of("dialog:footer").unwrap();
+            let viewport = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(width as f32, height as f32));
+
+            assert!(viewport.contains_rect(footer), "{width}×{height}: {footer:?}");
+            assert!([reset, reset_all, close].into_iter().all(|button| footer.contains_rect(button)));
+            assert!(reset.right() < reset_all.left() && reset_all.right() < close.left());
+            assert!((reset.center().y - close.center().y).abs() <= 1.0);
+            assert!((reset_all.center().y - close.center().y).abs() <= 1.0);
+
+            click(&mut h, close.center());
+            assert!(!h.app.toolbar_custom.customizing);
+        }
     }
 
     /// Reset Toolbar still resets this tab at once (#11471 keeps it); Reset All Tabs asks first,
