@@ -480,6 +480,7 @@ fn swap_in(app: &mut SolveApp, mut slot: DocSlot) -> DocSlot {
     // Preferences the session holds go with the user, not the tab (#680).
     app.session.auto_project = out.session.auto_project;
     app.session.project_construction = out.session.project_construction;
+    app.session.project_body_silhouette = out.session.project_body_silhouette;
     app.session.set_validation(out.session.validation());
     // So does the host's pre-command check: every tab is held to it.
     app.session.set_command_check(out.session.command_check());
@@ -3695,18 +3696,24 @@ mod tests {
         let mut a = app();
         a.run("solid.box", json!({"length": 10, "width": 10, "height": 10})).unwrap();
         a.session.project_construction = true;
+        a.session.project_body_silhouette = true;
         new_design(&mut a);
         assert!(a.session.project_construction, "a new tab");
+        assert!(a.session.project_body_silhouette, "a new tab");
         a.run("solid.box", json!({"length": 5, "width": 5, "height": 5})).unwrap();
         switch(&mut a, 0);
         assert!(a.session.project_construction, "the tab switched to");
+        assert!(a.session.project_body_silhouette, "the tab switched to");
         let prefs: Value = serde_json::from_str(&a.prefs()).unwrap();
         assert_eq!(prefs["project_construction"], true);
+        assert_eq!(prefs["project_body_silhouette"], true);
         close(&mut a, 1, true);
         close(&mut a, 0, true);
         assert!(active_is_blank(&a) && a.session.project_construction, "after the last tab closes");
+        assert!(active_is_blank(&a) && a.session.project_body_silhouette, "after the last tab closes");
         adopt(&mut a, Session::default());
         assert!(a.session.project_construction, "a design adopted over a blank one");
+        assert!(a.session.project_body_silhouette, "a design adopted over a blank one");
     }
 
     /// The host's pre-command check holds in every tab: new ones, the one switched to, a design

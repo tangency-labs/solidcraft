@@ -318,6 +318,7 @@ fn project_dialog_keeps_geometry_targets_and_can_project_whole_bodies_unlinked()
     h.app.run("solid.box", json!({"length":40,"width":30,"height":20,"body_name":"Plate"})).unwrap();
     h.app.run("sketch.create", json!({"plane":"XY","offset":10})).unwrap();
     h.app.session.selection = vec![Sel::Body { name: "Plate".into() }];
+    h.app.session.project_body_silhouette = true;
     h.app.start("sketch.project");
     h.frames(4);
 
