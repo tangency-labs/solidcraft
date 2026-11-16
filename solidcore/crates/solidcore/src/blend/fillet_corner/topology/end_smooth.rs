@@ -68,6 +68,8 @@ struct EndAt {
     onto: Vec3,
     radius: f64,
     crease_rad: f64,
+    /// The corner's 3D tolerance.
+    tol_3d: f64,
     /// The cosine of the corner's tangency tolerance: an edge leaving the vertex within it of
     /// the blended edge's line is tangent to it there.
     tangent_cos: f64,
@@ -138,13 +140,14 @@ fn end_cap(k: &Kernel, target: &mut Brep, at: &EndAt) -> Result<Vec3> {
                 // face's end closing to a cusp, which no rail reaches
                 continue;
             }
-            if lean <= at.crease_rad.sin() {
+            if lean <= 0.0 || reach * lean <= at.tol_3d * (1.0 - lean * lean).sqrt() {
                 // the square plane's trace stays on the face: this end does not bound the cap.
                 // Not the fork's (tangency-labs/solidcraft#17715): nor does an end that leans
-                // over the round by less than `crease_rad`, the corner's 3D tolerance over the
-                // radius, where the plane holding it would end the rails within that tolerance
-                // of the square plane's ends (a ring's rim circle where the blended edge, its
-                // meridian arc, ends: square to it, and leaning only by its tangent's rounding)
+                // over the round so little that the plane holding it meets the end at the
+                // rail's distance within the corner's 3D tolerance of the square plane
+                // (`reach lean / sqrt(1 - lean^2)`, the rail `reach` from the edge): a ring's
+                // rim circle where the blended edge, its meridian arc, ends, square to it and
+                // leaning only by its tangent's rounding
                 continue;
             }
             // where the rail meets the face's end: the end at the rail's distance from the edge
@@ -305,6 +308,7 @@ impl FilletCorner {
             onto: if at_start { tangent } else { -tangent },
             radius,
             crease_rad,
+            tol_3d: self.approx_tol_3d,
             tangent_cos: self.tangency_tol_radians.cos(),
         };
         let normal = end_cap(k, target, &at)?;

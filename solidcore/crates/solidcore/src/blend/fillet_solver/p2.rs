@@ -709,8 +709,14 @@ fn run_tangent_seam_on_in_its_surface(
         .get(0)
         .ok_or_else(|| invalid("no edge-use parameter interval"))?;
     let own = base.natural_uv_domain_with_nurb(k)?;
-    let (in_lo, in_hi) = line_in_domain(k, uv_trim, &edge_ivl, &own)?;
-    let (before, after) = if at_start { (in_lo, 0.0) } else { (0.0, in_hi) };
+    let (before, after) = if at_start {
+        (
+            trim_runs_on_in(k, uv_trim, edge_ivl.min(), -1.0, &own)?,
+            0.0,
+        )
+    } else {
+        (0.0, trim_runs_on_in(k, uv_trim, edge_ivl.max(), 1.0, &own)?)
+    };
     if !(before > 0.0 || after > 0.0) {
         return Ok(false);
     }
@@ -720,6 +726,82 @@ fn run_tangent_seam_on_in_its_surface(
         Extent1d::from_min_max(edge_ivl.min() - before, edge_ivl.max() + after),
     );
     Ok(true)
+}
+
+/// How far in its own parameter the straight UV trim `uv_trim` runs on from `from` (one end
+/// of its interval) in the direction `sign` (+1 past the end, -1 before the start) before it
+/// reaches the boundary of `domain`, its points evaluated past its interval as the rail solve
+/// evaluates them ([`continue_bspline_trim_past_its_ends`]): 0 where it is outside `domain`
+/// already, does not move there, or turns back before the boundary.
+///
+/// The point where the trim's line leaves the box is fixed by the line alone; the parameter
+/// that reaches it is the root of the trim's position along the line, found by Newton's
+/// method from the first-order estimate, so a straight trim whose parameter runs at an uneven
+/// rate stops at the boundary as an even one does (tangency-labs/solidcraft#17715). The chord
+/// between the interval's ends would not: on a quadratic with control points 0, 0.25 and 1
+/// over [0, 1] it carries the trim to t = 1.5 for a boundary at u = 1.5, where u = 1.875.
+///
+/// # Errors
+/// Those of the trim's evaluation.
+fn trim_runs_on_in(
+    k: &Kernel,
+    uv_trim: &Curve,
+    from: f64,
+    sign: f64,
+    domain: &Extent2d,
+) -> Result<f64> {
+    let mut trim = uv_trim.clone();
+    continue_bspline_trim_past_its_ends(&mut trim);
+    let at = |t: f64| -> Result<(Point3, Vec3)> {
+        let pv = trim.evaluate(k, t, 1, sign > 0.0, true)?;
+        match (pv.first(), pv.get(1)) {
+            (Some(&p), Some(&d)) => Ok((p, d)),
+            _ => Err(invalid("the trim's evaluation has no derivative")),
+        }
+    };
+    let (a, d) = at(from)?;
+    let out = d * sign;
+    let speed = (out.x * out.x + out.y * out.y).sqrt();
+    if !(speed > 0.0) {
+        return Ok(0.0);
+    }
+    let dir = [out.x / speed, out.y / speed];
+    let (lo, hi) = ([domain.min.x, domain.min.y], [domain.max.x, domain.max.y]);
+    // the largest length along the line from `a` that stays in the box
+    let mut reach = f64::INFINITY;
+    for ((&p, &v), (&l, &h)) in [a.x, a.y].iter().zip(&dir).zip(lo.iter().zip(&hi)) {
+        if p.is_nan() || p < l || p > h {
+            return Ok(0.0);
+        }
+        if v > 0.0 {
+            reach = reach.min((h - p) / v);
+        } else if v < 0.0 {
+            reach = reach.min((l - p) / v);
+        }
+    }
+    if !(reach.is_finite() && reach > 0.0) {
+        return Ok(0.0);
+    }
+    // Newton on g(t) = (trim(t) - a) . dir - reach, g'(t) = trim'(t) . dir; the trim must run
+    // outward (sign g' > 0) at every step, or it turns back
+    let mut t = from + sign * reach / speed;
+    let mut last_step = f64::INFINITY;
+    for _ in 0..64 {
+        let (p, d) = at(t)?;
+        let rate = d.x * dir[0] + d.y * dir[1];
+        if !(sign * rate > 0.0) {
+            return Ok(0.0);
+        }
+        let g = (p.x - a.x) * dir[0] + (p.y - a.y) * dir[1] - reach;
+        let step = g / rate;
+        if !step.is_finite() || !(step.abs() < last_step) {
+            break;
+        }
+        last_step = step.abs();
+        t -= step;
+    }
+    let past = sign * (t - from);
+    Ok(if past > 0.0 { past } else { 0.0 })
 }
 
 /// How far (in its parameters) the linear UV trim `uv_trim` runs on past the start and
@@ -4266,5 +4348,42 @@ mod tests {
             1e-6
         )
         .is_none());
+    }
+
+    /// A straight trim whose parameter runs at an uneven rate (the quadratic with u control
+    /// points 0, 0.25 and 1 over [0, 1], u(t) = (t + t^2) / 2) runs on to the domain's
+    /// boundary u = 1.5 at t = (sqrt(13) - 1) / 2, the root of t^2 + t - 3, not to the chord's
+    /// t = 1.5 (where u = 1.875, past the boundary); from its start on the boundary u = 0 it
+    /// does not run on.
+    #[test]
+    fn a_tangent_seam_s_trim_runs_on_to_the_boundary_at_its_own_rate() {
+        use crate::nurbs::b_spline_curve::p1::{BSplineCurveForm, CanonicalData, KnotType};
+        let k = Kernel::default();
+        let control = [
+            Point3::new(0.0, 0.5, 0.0),
+            Point3::new(0.25, 0.5, 0.0),
+            Point3::new(1.0, 0.5, 0.0),
+        ];
+        let trim = Curve::from(
+            crate::nurbs::b_spline_curve::BSplineCurve::create_canonical(&CanonicalData {
+                dim: 2,
+                degree: 2,
+                control_points: &control,
+                form: BSplineCurveForm::Unspecified,
+                knot_multiplicities: &[3, 3],
+                knots: &[0.0, 1.0],
+                knot_type: KnotType::Unspecified,
+                weights: None,
+                trim: None,
+            })
+            .unwrap(),
+        );
+        let domain = Extent2d::from_bounds(0.0, 0.0, 1.5, 1.0);
+        let past = trim_runs_on_in(&k, &trim, 1.0, 1.0, &domain).unwrap();
+        let exact = (13.0_f64.sqrt() - 1.0) / 2.0;
+        assert!((1.0 + past - exact).abs() < 1e-12, "{past}");
+        let at = trim.evaluate_point(&k, 1.0 + past).unwrap();
+        assert!((at.x - 1.5).abs() < 1e-12, "{at:?}");
+        assert_eq!(trim_runs_on_in(&k, &trim, 0.0, -1.0, &domain).unwrap(), 0.0);
     }
 }
