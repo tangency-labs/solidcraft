@@ -40,7 +40,6 @@ fn sc_fixes(k: &mut Kernel) {
     k.fixes.corner_patch_face_side_twist = true;
     k.fixes.fillet_patch_keeps_fillet_edges = true;
     k.fixes.fillet_knife_edge_rounds = true;
-    k.fixes.keep_operand_uv_trims = true;
     k.fixes.geometric_g2_continuity = true;
     k.fixes.proto_vertex_miss_is_false = true;
     k.fixes.good_drop_result_distances_in_order = true;

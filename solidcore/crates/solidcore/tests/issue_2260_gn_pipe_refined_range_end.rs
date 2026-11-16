@@ -6,8 +6,8 @@
 //! `sm_RefineCCSolutions` passed on `Inversion`'s `SM_ERR` for a curve/curve range solution's end refined
 //! 2e-15 past the range (12.149466823226815 against the range's max 12.149466823226813,
 //! while the round's insertion classifies a curve on a face), so the fillet failed with
-//! 1001. The body the boolean builds with `keep_operand_uv_trims` and the offset extension
-//! flags is what puts an end there. The fork's later 8ea6a20 takes such a parameter as
+//! 1001. The body the boolean builds with the operand's exact trims (WR-361, always on
+//! now) and the offset extension flags is what puts an end there. The fork's later 8ea6a20 takes such a parameter as
 //! the answer it is and leaves an end alone only for a range with no fraction; solidcore
 //! now does that too (#2264).
 //!
@@ -80,7 +80,6 @@ const SOLIDCRAFT_C494A18: &[&str] = &[
     "good_drop_result_distances_in_order",
     "imprint_extends_edge_to_proto_vertex",
     "join_touching_loops",
-    "keep_operand_uv_trims",
     "linear_sweep_arc_is_cylinder",
     "local_operation_box_holds_new_surfaces",
     "local_operation_refuses_loose_tangent_edges",
@@ -181,11 +180,11 @@ fn solidcraft_profile_pipe_gn_round_completes() {
 }
 
 /// The flags the failure needed together with the passed-on query statuses
-/// (`keep_operand_uv_trims`, `offset_extension_from_base`, `offset_extension_as_itself`).
+/// (`offset_extension_from_base`, `offset_extension_as_itself`; it also needed
+/// `keep_operand_uv_trims`, always on since that flag was retired).
 #[test]
 fn reduced_profile_pipe_gn_round_completes() {
     check_round(&[
-        "keep_operand_uv_trims",
         "offset_extension_from_base",
         "offset_extension_as_itself",
     ]);

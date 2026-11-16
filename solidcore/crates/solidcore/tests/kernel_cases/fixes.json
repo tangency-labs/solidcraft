@@ -9,7 +9,6 @@
   "fillet_patch_keeps_fillet_edges",
   "fillet_knife_edge_rounds",
   "offset_edges_keep_source_tolerance",
-  "keep_operand_uv_trims",
   "geometric_g2_continuity",
   "degen_param_tiebreak_uses_actual_param",
   "proto_vertex_miss_is_false",
