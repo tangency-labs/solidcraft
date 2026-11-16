@@ -4,7 +4,7 @@
 //! `SmBSplineSurface::CopyAndAddAnalytics`; upstream's copy is the recognised analytic
 //! cylinder in its own parameterization, so the kept UV trims point off their edges and
 //! the edges grow their tolerances to cover them (up to 0.78), and `check_brep`'s
-//! ValidatePointers fails (#16737). The copy stays exact where the analytic form
+//! `ValidatePointers` fails (#16737). The copy stays exact where the analytic form
 //! differs, and the result is valid.
 
 #![allow(

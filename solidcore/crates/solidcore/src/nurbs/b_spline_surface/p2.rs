@@ -2372,8 +2372,10 @@ mod tests {
                 crate::surface::surface::SurfaceKind::SurfOfExtrusion(_)
             ));
             if let crate::surface::surface::SurfaceKind::SurfOfExtrusion(extrusion) = copy.kind() {
-                // Only swapped, unequal domains make Reparameterize build the NURB.
-                assert_eq!(extrusion.base().gw_nurb().is_some(), swap_uv);
+                // The WR-450 same-parameterization check evaluates the extrusion at 7x7
+                // points, which builds the NURB (before, only swapped, unequal domains
+                // made Reparameterize build it).
+                assert!(extrusion.base().gw_nurb().is_some());
             }
             assert_eq!(copy.natural_uv_domain_if_built(), domain);
             for ((u, v), expected) in samples.into_iter().zip(before) {
