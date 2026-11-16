@@ -13,7 +13,10 @@
 //! a non-manifold body (volume -627.4 out, 0 in).
 //!
 //! WR-673 (the fork's tangency-labs/smlib@7ee0876; always on since its flag
-//! `offset_open_edge_second_trim_point` was removed) refuses that twin by point. The
+//! `offset_open_edge_second_trim_point` was removed) passes over that twin: a candidate
+//! that is the first trim point again reached round a closed 3D curve (the curve closed,
+//! and the span from the first point to the candidate closed too; `is_first_point_again`
+//! in `offset_geometry_creation.rs`), not every point near the first. The
 //! second trim point is then not found, the half's offset edge is left to the merge, and
 //! the cap thickens to the sector between radii 10 and 11 (out) or 9 and 10 (in) over
 //! the cap's solid angle pi:

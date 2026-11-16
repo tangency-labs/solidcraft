@@ -3127,6 +3127,13 @@ mod tests {
         let (v, manifold) = volume_and_manifold(&k, &mut b);
         let want = 8000.0 - 20.0 * (25.0 - 25.0 * crate::math::PI / 4.0) + 0.1 * 15.0 * 20.0;
         assert!(manifold && (v - want).abs() <= 1e-9 * want, "{v} vs {want}");
+        // and the body built is clean at check level 2
+        use crate::topology::brep::validation::{check_brep, CheckLevel};
+        b.use_arena_naming().unwrap();
+        let lines = check_brep(&mut k, &mut b, CheckLevel::Level2)
+            .unwrap()
+            .lines();
+        assert!(lines.is_empty(), "{lines:?}");
     }
 
     /// A 60 x 40 x 20 block whose top is imprinted along x = 30, and its top piece x < 30.

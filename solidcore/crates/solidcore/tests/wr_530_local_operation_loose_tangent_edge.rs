@@ -186,11 +186,24 @@ fn wr_530_turned_and_raised_piece_beside_its_coplanar_twin_is_refused_as_loose()
     )
     .unwrap_err();
     drop(notifications);
-    let Some(Reason::Offset(OffsetFailure::LooseTangentEdge { edge: Some(edge) })) =
-        e.failure().map(|f| &f.reason)
+    let Some(Reason::Offset(OffsetFailure::LooseTangentEdge {
+        edge: Some(edge),
+        max_drop_to_surf,
+        meet_tol,
+    })) = e.failure().map(|f| &f.reason)
     else {
         panic!("not the loose tangent edge, by name: {e}");
     };
+    // the refusal carries the size it measured and the limit it was held to: the
+    // piece turned 0.02 rad and raised 1 lands well off its twin's plane
+    assert!(*meet_tol > 0.0 && *meet_tol < 1e-2, "{meet_tol}");
+    assert!(
+        *max_drop_to_surf > *meet_tol,
+        "{max_drop_to_surf} {meet_tol}"
+    );
+    let says = e.to_string();
+    assert!(says.contains(&format!("{max_drop_to_surf:e}")), "{says}");
+    assert!(says.contains(&format!("{meet_tol:e}")), "{says}");
     // the refusal names the input's tangent edge between the piece and its twin, along
     // the split line
     let mut faces = solidcore::topology::edge::faces(&b, *edge, None).unwrap();

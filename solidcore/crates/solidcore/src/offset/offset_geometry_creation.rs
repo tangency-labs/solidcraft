@@ -1341,12 +1341,30 @@ fn seam_twin(k: &Kernel, curve: &Curve, t: f64, tol: f64) -> Result<Option<f64>>
 /// # Errors
 ///
 /// Those of [`Curve::is_closed`] and [`is_closed_base`].
-fn is_first_point_again(k: &Kernel, curve: &Curve, t_first: f64, t: f64, tol: f64) -> Result<bool> {
+pub fn is_first_point_again(
+    k: &Kernel,
+    curve: &Curve,
+    t_first: f64,
+    t: f64,
+    tol: f64,
+) -> Result<bool> {
     if !curve.is_closed(k, &curve.natural_interval(), tol)? {
         return Ok(false);
     }
     let span = Extent1d::from_min_max(smos_min(t_first, t), smos_max(t_first, t));
     is_closed_base(k, curve, &span, tol)
+}
+
+/// Not upstream (WR-530): whether a tangent edge's new curve, dropped onto the other
+/// face's new surface, lands `max_drop_to_surf` from it, past `meet_tol`: the faces no
+/// longer meet along the edge. A drop (or limit) that is not a number is no evidence that
+/// they meet, so it is loose too: only a drop within the limit passes.
+fn drop_is_loose(max_drop_to_surf: f64, meet_tol: f64) -> bool {
+    // `!(max_drop_to_surf <= meet_tol)`, spelled without a negated partial comparison
+    !matches!(
+        max_drop_to_surf.partial_cmp(&meet_tol),
+        Some(std::cmp::Ordering::Less | std::cmp::Ordering::Equal)
+    )
 }
 
 /// The surface behind `h` (a dereference upstream).
@@ -4015,7 +4033,8 @@ impl OffsetGeometryCreation {
     /// one concave; a lamina, tangent or shell-less edge counts as neither) and each of
     /// the two adjacent faces (`face_solutions`, ranges of `solutions`) has a cut nearest
     /// the vertex (not the start already chosen, nor, on an open edge's second end, the
-    /// first trim point again), and the two cuts are apart, the one nearer along the
+    /// first trim point again round a closed curve, [`is_first_point_again`]), and the two
+    /// cuts are apart, the one nearer along the
     /// curve to where the base edge's middle drops onto it. `None` keeps the nearest.
     #[allow(clippy::too_many_arguments)]
     fn first_cut_from_far_end<O: ClassObject + SolutionObject>(
@@ -4032,15 +4051,10 @@ impl OffsetGeometryCreation {
         face_solutions: &[(usize, usize)],
         tan_tol_deg: f64,
     ) -> Result<Option<f64>> {
-        // an open edge's second trim point is never the first one again
+        // an open edge's second trim point is never the first one again reached round a
+        // closed 3D curve (WR-673, [`is_first_point_again`], as in `trim_extended_edge_ends`)
         let open_second = i == 1 && !brep.edge_is_closed(base_edge)?;
-        let first = if open_second {
-            Some(curve_of(brep, curve_3d)?.evaluate_point(k, trim_ivl.min())?)
-        } else {
-            None
-        };
         let same_tol = 10.0 * self.this_approx_tol_3d;
-        let first_again = |pnt: Point3| first.is_some_and(|f| distance(pnt, f) <= same_tol);
 
         let mut convex = true;
         let mut concave = true;
@@ -4100,7 +4114,17 @@ impl OffsetGeometryCreation {
                 let t = sol.start.param(0)?;
                 let pnt = curve_of(brep, curve_3d)?.evaluate_point(k, t)?;
                 let dist = distance(pnt, base_point);
-                if dist < best && !are_same(t, trim_ivl.min()) && !first_again(pnt) {
+                if dist < best
+                    && !are_same(t, trim_ivl.min())
+                    && !(open_second
+                        && is_first_point_again(
+                            k,
+                            curve_of(brep, curve_3d)?,
+                            trim_ivl.min(),
+                            t,
+                            same_tol,
+                        )?)
+                {
                     best = dist;
                     if let (Some(p), Some(f)) = (face_param.get_mut(ff), face_found.get_mut(ff)) {
                         *p = t;
@@ -4639,17 +4663,20 @@ impl OffsetGeometryCreation {
             // meet there
             if executive.is_local_operation() {
                 let meet_tol = 10.0 * smos_max(off_tol, self.this_approx_tol_3d());
-                if dropped.max_drop_to_surf > meet_tol {
+                let max_drop_to_surf = dropped.max_drop_to_surf;
+                if drop_is_loose(max_drop_to_surf, meet_tol) {
                     // the edge of the input, named for the refusal where the handle names
                     // one (error context only)
                     let edge = match brep.topology_entity(edge) {
                         Some((_, EntityRef::Edge(e))) => Some(e),
                         _ => None,
                     };
-                    return Err(
-                        Failure::new(OP_EXTEND, OffsetFailure::LooseTangentEdge { edge })
-                            .into_error(),
-                    );
+                    let reason = OffsetFailure::LooseTangentEdge {
+                        edge,
+                        max_drop_to_surf,
+                        meet_tol,
+                    };
+                    return Err(Failure::new(OP_EXTEND, reason).into_error());
                 }
             }
             let uv_curves = dropped.uv_curves;
@@ -7119,6 +7146,18 @@ mod tests {
         );
         let ivl = arc.natural_interval();
         assert!(!is_first_point_again(&k, &arc, ivl.min(), ivl.min() + step / 2.0, tol).unwrap());
+    }
+
+    /// WR-530: a tangent edge's drop passes only within its limit; a drop or limit that
+    /// is not a number refuses the edge as loose rather than passing it.
+    #[test]
+    fn a_drop_that_is_not_a_number_is_loose() {
+        assert!(!drop_is_loose(0.0, 1e-4));
+        assert!(!drop_is_loose(1e-4, 1e-4));
+        assert!(drop_is_loose(1.000_000_1e-4, 1e-4));
+        assert!(drop_is_loose(f64::NAN, 1e-4));
+        assert!(drop_is_loose(0.0, f64::NAN));
+        assert!(drop_is_loose(f64::INFINITY, 1e-4));
     }
 
     /// #17210: a saddle `z = x y` and the plane `z = 0` are tangent at the origin, where the

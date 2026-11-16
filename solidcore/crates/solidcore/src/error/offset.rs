@@ -170,6 +170,12 @@ pub enum OffsetFailure {
     LooseTangentEdge {
         /// The tangent edge, of the operation's input, where the handle names one.
         edge: Option<EdgeId>,
+        /// How far the new curve, dropped onto the other face's new surface, lands from
+        /// it at most (`max_drop_to_surf`; NaN where the drop gave no finite distance).
+        max_drop_to_surf: f64,
+        /// The limit it was held to: ten times the larger of the edge tolerance and the
+        /// approximation tolerance.
+        meet_tol: f64,
     },
     /// Two curved faces tangent at the old edge now cross, but the intersection
     /// branch on their retained sides has not been certified.
@@ -356,7 +362,7 @@ impl OffsetFailure {
                 .map(EntityRef::Edge)
                 .or_else(|| face.map(EntityRef::Face)),
             Self::LoopGapUncertified { face } => face.map(EntityRef::Face),
-            Self::LooseTangentEdge { edge } => edge.map(EntityRef::Edge),
+            Self::LooseTangentEdge { edge, .. } => edge.map(EntityRef::Edge),
             Self::Unsound { what } => what.entity(),
             Self::ExactCurveUncut
             | Self::TangentEndOffCurve
@@ -735,10 +741,15 @@ impl core::fmt::Display for OffsetFailure {
                 "two curved faces tangent at the old edge now cross, but the intersection \
                  branch on their retained sides has no certificate",
             ),
-            Self::LooseTangentEdge { edge } => write!(
+            Self::LooseTangentEdge {
+                edge,
+                max_drop_to_surf,
+                meet_tol,
+            } => write!(
                 f,
                 "in a local operation, the new faces beside {} that was tangent no longer \
-                 meet along it: one moved off the other, and nothing closes the gap",
+                 meet along it: one moved off the other ({max_drop_to_surf:e} apart, limit {meet_tol:e}), and \
+                 nothing closes the gap",
                 edge.map_or_else(|| "an edge".to_owned(), |e| format!("edge {}", e.index()))
             ),
             Self::TangentEndOffCurve => f.write_str(
@@ -1012,7 +1023,11 @@ mod tests {
             // a stage that failed with no reason the kernel names: its fault, in its class
             (O::StageFailed, ErrorKind::StageFailed, false, true),
             (
-                O::LooseTangentEdge { edge: None },
+                O::LooseTangentEdge {
+                    edge: None,
+                    max_drop_to_surf: 0.5,
+                    meet_tol: 1e-4,
+                },
                 ErrorKind::Unsupported,
                 false,
                 false,
