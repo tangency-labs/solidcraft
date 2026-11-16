@@ -40,10 +40,14 @@ pub const FLOAT_DEPTH_STENCIL: wgpu::Features = wgpu::Features::DEPTH32FLOAT_STE
 /// The features to open a device on `adapter` with: [`FLOAT_DEPTH_STENCIL`] and indirect draws
 /// with a first instance, each if it has it.
 pub fn depth_features(adapter: &wgpu::Adapter) -> wgpu::Features {
-    // Indirect draws that start at an instance: a scene's instanced meshes drawn a call per
-    // pipeline (`view::indirect`).
-    adapter.features() & (FLOAT_DEPTH_STENCIL | wgpu::Features::INDIRECT_FIRST_INSTANCE)
+    adapter.features() & (FLOAT_DEPTH_STENCIL | INDIRECT_DRAWS)
 }
+
+/// The device feature for indirect draws that start at an instance: a scene's instanced meshes
+/// are drawn a call per pipeline where the device has it (`view::indirect`). Every device the
+/// viewport draws on is opened with it when its adapter offers it: the window's (desktop and
+/// web) and the offscreen ones ([`depth_features`]).
+pub const INDIRECT_DRAWS: wgpu::Features = wgpu::Features::INDIRECT_FIRST_INSTANCE;
 
 /// The depth format to draw with on `device`: 32-bit float (reversed depth) where it can, with a
 /// stencil when `stencil` (the section cap needs one), else 24 bits with a stencil.
