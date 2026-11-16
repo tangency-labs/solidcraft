@@ -3779,7 +3779,17 @@ fn dimension_result(s: &mut Session, p: &Value) -> Result<DimensionResult> {
         }
         // How far the value is from what the geometry measures now: zero for a dimension that
         // only restates what the sketch already has.
-        let want = vals.get(&pname).and_then(|v| v.to_kind(if is_angle { Kind::Angle } else { Kind::Length }).ok());
+        let mut want = vals.get(&pname).and_then(|v| v.to_kind(if is_angle { Kind::Angle } else { Kind::Length }).ok());
+        // A negative linear offset flips to the opposite side of the reference and keeps its magnitude.
+        if !is_angle
+            && let Some(w) = want
+            && w < 0.0
+            && sk.flip_for_negative_dimension(&k, -w)
+        {
+            let flipped_expr = if solidcraft_doc::expr::references(&e).is_empty() { doc.design_length(-w).1 } else { format!("-({e})") };
+            doc.change_param(&pname, &flipped_expr, None, None)?;
+            want = Some(-w);
+        }
         residual = want.map(|w| (w - cur).abs()).filter(|r| r.is_finite());
         // The first length dimension of a sketch with nothing sized yet scales it (#1365).
         // A sketch axis can also be measured by its fixed endpoints. In that case, only use
