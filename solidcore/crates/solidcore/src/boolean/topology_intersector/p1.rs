@@ -58,6 +58,9 @@
 //! | [`FaceCacheTarget`], `solve_with_face_caches` (crate) | `smsurf_GetSurfaceCache` of a face's surface inside the solves |
 //!
 //! Deviations:
+//! - **Passed-on statuses (WR-658).** The statuses SMLib drops are returned, as the
+//!   fork returns them, except a tolerance update refused as too small, which is a
+//!   no-op (`tolerance_updated`).
 //! - **Opt-in fix (WR-306, #1058).** With `Kernel::fixes.degenerate_proto_edge_in_one_vertex`,
 //!   `ImprintIntersections` fits each final vertex of a proto vertex that absorbed a
 //!   degenerate proto edge to its edges (`IntersectorBrep::vertex_update_edge_intervals`)
@@ -215,6 +218,32 @@ use crate::topology::{edge, vertex, Brep, EdgeId, FaceId, VertexId};
 use crate::EntityRef;
 
 const OP: &str = "boolean::topology_intersector::p1";
+
+/// Not upstream (WR-658, #16956): the result of a tolerance update whose status SMLib
+/// drops, with the refusal of a gap and tolerance both below `SM_EFF_ZERO`
+/// ([`GeomFailure::ToleranceTooSmall`](crate::error::geom::GeomFailure::ToleranceTooSmall))
+/// read as done. `UpdateObjectTolerance` refuses them before touching the object
+/// ("If both input gap and tol are zero, there's nothing to do"), and the raise it was
+/// asked for (only if larger, to less than `SM_EFF_ZERO`) changes no tolerance by a
+/// distance the kernel tells apart from zero, so the vertex, edge or face is as a
+/// successful update leaves it. With `check_gaps` the update would also raise the
+/// tolerances of the object's neighbours to its measured gaps; that is skipped, as
+/// upstream skips it. Every other error is returned, as the fork returns it, and so is
+/// this one for a non-finite `gap` (`max2` reads a NaN gap as the tolerance `0`).
+fn tolerance_updated(gap: f64, r: Result<()>) -> Result<()> {
+    match r {
+        Err(e)
+            if gap.is_finite()
+                && matches!(
+                    e.geom_failure(),
+                    Some(crate::error::geom::GeomFailure::ToleranceTooSmall { .. })
+                ) =>
+        {
+            Ok(())
+        }
+        r => r,
+    }
+}
 const OP_CHECK_SSI: &str = "boolean::topology_intersector::p1::check_if_have_existing_ssi";
 const OP_RELATE: &str = "boolean::topology_intersector::p1::relate";
 const OP_LOWEST: &str = "boolean::topology_intersector::p1::find_first_lowest_dimension_sol";
@@ -2539,8 +2568,14 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
                     // Set max distance.
                     out.max_vertex_gap = max2(out.max_vertex_gap, dist_to_face);
 
-                    brep.update_object_tolerance(k, v, dist_to_face, 0.0, false)?;
-                    brep.update_object_tolerance(k, face, dist_to_face, 0.0, false)?;
+                    tolerance_updated(
+                        dist_to_face,
+                        brep.update_object_tolerance(k, v, dist_to_face, 0.0, false),
+                    )?;
+                    tolerance_updated(
+                        dist_to_face,
+                        brep.update_object_tolerance(k, face, dist_to_face, 0.0, false),
+                    )?;
                 } else {
                     // Set min distance, if it didn't split due to being
                     // too far away (as opposed to being at a vertex).
@@ -2850,9 +2885,15 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
             let check_gaps = this_deviation > this_tol / 4.0;
             // (UpdateObjectTolerance of a null topology returns SM_SUCCESS)
             if let Some(fv) = new_face_vtx {
-                brep.update_object_tolerance(k, fv, this_deviation, 0.0, check_gaps)?;
+                tolerance_updated(
+                    this_deviation,
+                    brep.update_object_tolerance(k, fv, this_deviation, 0.0, check_gaps),
+                )?;
             }
-            brep.update_object_tolerance(k, face, this_deviation, 0.0, false)?;
+            tolerance_updated(
+                this_deviation,
+                brep.update_object_tolerance(k, face, this_deviation, 0.0, false),
+            )?;
 
             // Check interior of Edge -- all edges in sEdgesSplitFromThis.
             let mut interior = false;
@@ -2916,16 +2957,25 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
                     .topology_tolerance(this_split_edge)
                     .ok_or(dangling("edge handle is unknown"))?;
                 if let Some(e1) = e1 {
-                    brep.update_object_tolerance(k, e1, this_deviation, split_tol, false)?;
+                    tolerance_updated(
+                        this_deviation,
+                        brep.update_object_tolerance(k, e1, this_deviation, split_tol, false),
+                    )?;
                 }
                 let split_tol = brep
                     .topology_tolerance(this_split_edge)
                     .ok_or(dangling("edge handle is unknown"))?;
                 if let Some(e2) = e2 {
-                    brep.update_object_tolerance(k, e2, this_deviation, split_tol, false)?;
+                    tolerance_updated(
+                        this_deviation,
+                        brep.update_object_tolerance(k, e2, this_deviation, split_tol, false),
+                    )?;
                 }
                 if let Some(v) = v {
-                    brep.update_object_tolerance(k, v, this_deviation, 0.0, check_gaps)?;
+                    tolerance_updated(
+                        this_deviation,
+                        brep.update_object_tolerance(k, v, this_deviation, 0.0, check_gaps),
+                    )?;
                 }
                 v
             } else {
@@ -2980,7 +3030,10 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
                 // Set max distance.
                 out.max_vertex_gap = max2(out.max_vertex_gap, this_deviation);
 
-                brep.update_object_tolerance(k, ev, this_deviation, 0.0, check_gaps)?;
+                tolerance_updated(
+                    this_deviation,
+                    brep.update_object_tolerance(k, ev, this_deviation, 0.0, check_gaps),
+                )?;
             } else {
                 // Set min distance, if it didn't split due to being
                 // too far away (as opposed to being at a vertex).
@@ -5919,5 +5972,78 @@ mod tests {
         assert_eq!(m.primary(8), Some(1));
         assert_eq!(m.other(2), None);
         assert_eq!(m.primary(9), None);
+    }
+
+    #[test]
+    fn a_tolerance_update_below_zero_is_a_no_op_and_other_errors_stay() {
+        use super::*;
+        use crate::geom::tol::{update_object_tolerance, TopologyToUpdate};
+        let mut k = Kernel::default();
+        let mut b =
+            crate::primitive::api_primitives::create_box(&mut k, Point3::ZERO, 1.0, 1.0, 1.0)
+                .unwrap();
+        let v = b.vertices().ids().next().unwrap();
+        let e = b.edges().ids().next().unwrap();
+        let f = b.faces().ids().next().unwrap();
+        let before = (
+            vertex::tolerance(&b, v).unwrap(),
+            edge::tolerance(&b, e).unwrap(),
+            crate::topology::face::p2::tolerance(&b, f).unwrap(),
+        );
+        // the gaps the four moved rows record (1e-15 and below) and exact zero, with and
+        // without the gap pass
+        for (gap, check_gaps) in [
+            (0.0, false),
+            (1.0e-15, true),
+            (4.9e-15, false),
+            (9.9e-13, true),
+        ] {
+            for topo in [
+                TopologyToUpdate::Vertex(v),
+                TopologyToUpdate::Edge(e),
+                TopologyToUpdate::Face(f),
+            ] {
+                let r = update_object_tolerance(&k, &mut b, Some(topo), gap, 0.0, check_gaps);
+                assert!(r.is_err(), "{gap} is refused as too small");
+                assert_eq!(tolerance_updated(gap, r), Ok(()));
+            }
+        }
+        let after = (
+            vertex::tolerance(&b, v).unwrap(),
+            edge::tolerance(&b, e).unwrap(),
+            crate::topology::face::p2::tolerance(&b, f).unwrap(),
+        );
+        assert_eq!(after, before);
+        assert_eq!(
+            (
+                b.faces().ids().count(),
+                b.edges().ids().count(),
+                b.vertices().ids().count()
+            ),
+            (6, 12, 8)
+        );
+        // the boundary: 1.001 * gap at SM_EFF_ZERO is a real update
+        let r = update_object_tolerance(
+            &k,
+            &mut b,
+            Some(TopologyToUpdate::Vertex(v)),
+            1.0e-12,
+            0.0,
+            false,
+        );
+        assert!(r.is_ok(), "{r:?}");
+        assert!(vertex::tolerance(&b, v).unwrap() >= 1.001e-12);
+        // a NaN gap reads as the tolerance 0 and is refused; that refusal stays
+        let r = update_object_tolerance(
+            &k,
+            &mut b,
+            Some(TopologyToUpdate::Vertex(v)),
+            f64::NAN,
+            0.0,
+            false,
+        );
+        assert!(tolerance_updated(f64::NAN, r).is_err());
+        let other = SolidError::invalid_input("test", "another failure");
+        assert_eq!(tolerance_updated(0.0, Err(other.clone())), Err(other));
     }
 }
