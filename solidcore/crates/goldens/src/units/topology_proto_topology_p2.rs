@@ -44,7 +44,7 @@ use super::topology_proto_topology_p1::script::{
     keeps_contract, pool as pk, proto_op as p, proto_op_p2 as q,
 };
 use super::topology_proto_topology_p1::{
-    b, build_curve, cat, dir, gen_curve, gen_scale, gen_tol, line, opv, pcv, rp, rust,
+    b, build_curve, cat, dir, gen_curve, gen_scale, gen_tol, opv, pcv, rp, rust,
     script_input, status, CurveIn, Fail, ObjIn, ProtoRun, Rd, Script, H,
 };
 use crate::case::{CaseContext, CaseSource};
@@ -1536,14 +1536,25 @@ fn edge_cases() -> Vec<(String, Value)> {
         .collect()
 }
 
-/// The pool of the edge cases at `scale` (see [`edge_cases`]).
+/// The pool of the edge cases at `scale` (see [`edge_cases`]): the unit pool scaled by `s`.
+/// The lines carry `s` as their scale over the unit domain (`Line::bounded` unitises the
+/// direction), so parameter `t` on curves 3 and 4 is at `pt(t)` at every scale (#18001).
 fn edge_objects(s: f64) -> Vec<ObjIn> {
+    let line_x = |p: [f64; 3]| {
+        ObjIn::Curve(CurveIn::Line(super::topology_proto_topology_p1::LineIn {
+            p,
+            v: [1.0, 0.0, 0.0],
+            domain: [0.0, 2.0],
+            scale: s,
+            inside_out: false,
+        }))
+    };
     vec![
         ObjIn::Region,
         ObjIn::Region,
         ObjIn::Loop,
-        ObjIn::Curve(line([0.0, 0.0, 0.0], [s, 0.0, 0.0], [0.0, 2.0])),
-        ObjIn::Curve(line([0.0, 1e-9 * s, 0.0], [s, 0.0, 0.0], [0.0, 2.0])),
+        line_x([0.0, 0.0, 0.0]),
+        line_x([0.0, 1e-9 * s, 0.0]),
         ObjIn::Curve(CurveIn::Conic(super::topology_proto_topology_p1::ConicIn {
             center: [0.0, 0.0, 0.0],
             x: [1.0, 0.0, 0.0],
