@@ -35,6 +35,9 @@ pub mod crash_ui;
 pub mod deferred;
 pub mod delete;
 pub mod design_properties;
+pub mod design_tab_prefs;
+pub mod design_view_ui;
+pub mod design_views;
 mod dialog_descriptor;
 pub mod dialogs;
 pub mod dialogs_appearance;
@@ -44,6 +47,7 @@ pub mod dialogs_coupling;
 pub mod dialogs_end_cap;
 pub mod dialogs_frame;
 mod dialogs_hole;
+pub mod dialogs_insert_airfoil;
 pub mod dialogs_insert_drawing;
 pub mod dialogs_library;
 pub mod dialogs_motion;
@@ -215,6 +219,7 @@ pub use solidcraft_ui_kit::navigation_bar;
 mod navigation_bar_tests;
 mod navigation_bar_view;
 pub mod navigation_slots;
+pub mod new_window;
 pub use navigation::WebWheelGestures;
 pub mod network_prompt;
 pub mod op_auto;
@@ -228,6 +233,7 @@ pub(crate) mod pick_index;
 pub(crate) mod place_gizmo;
 pub mod plugin_install;
 pub(crate) mod plugin_menu;
+mod plugin_slots;
 pub(crate) mod plugins;
 pub mod point_clouds;
 pub mod prefs;
@@ -333,6 +339,7 @@ mod theme_files_tests;
 use solidcraft_ui_kit::theme_options;
 #[cfg(test)]
 mod thin_extrude_tests;
+pub mod tickets;
 pub mod timeline;
 mod timeline_fold;
 mod timeline_folders;
@@ -353,6 +360,7 @@ pub(crate) mod view_angles;
 pub use solidcraft_ui_kit::view_compass;
 mod view_confirm;
 pub mod view_gizmo;
+mod view_memory;
 pub mod view_pick;
 pub mod viewport;
 mod viewport_details;
@@ -414,10 +422,14 @@ pub struct UiState {
     pub dark: bool,
     /// Selection filter: kinds a click doesn't pick (`vertices`, `edges`, `faces`, `sketch`).
     pub pick_off: Vec<String>,
-    /// A click on a face picks its whole body.
+    /// A click on a face picks its whole body (Modelling; Preferences › Sketch › Click selects).
     pub pick_bodies: bool,
-    /// A face picks its exact component occurrence in Design and Render.
+    /// A face picks its exact component occurrence (Modelling).
     pub pick_components: bool,
+    /// The Render workspace's own Body / Face / Component choice: `"body"`, `"face"` or
+    /// `"component"`. It is kept apart from Modelling's so a Body chosen in Render does not
+    /// leave Modelling picking whole bodies, nor reach the preferences file.
+    pub render_pick: String,
     /// The selection shape (#4376): a drag in the view draws a freehand lasso that takes what is
     /// wholly inside it, instead of the window/crossing rectangle. Off by default.
     pub lasso_select: bool,
@@ -470,6 +482,7 @@ impl Default for UiState {
             pick_off: Vec::new(),
             pick_bodies: false,
             pick_components: false,
+            render_pick: "face".into(),
             lasso_select: false,
             visual_style: 0,
             ground_shadow: true,
@@ -538,6 +551,12 @@ pub struct Services {
     /// Upload a model to EasyPrint (Printables' slicer in the browser) and answer with the address
     /// to open (`easyprint_ui`); None: this host can't, and the menu doesn't offer it.
     pub easyprint_upload: Option<easyprint_ui::Upload>,
+    /// HTTP to the ticket server, for problem reports and My tickets (`tickets`); None: reports
+    /// open a GitHub draft instead.
+    pub tickets_http: Option<tickets::Http>,
+    /// Where the ticket server's sign-in is kept: the system keyring (the browser's storage on
+    /// the web). Never a plain file.
+    pub ticket_secrets: Option<std::sync::Arc<dyn agent_chat::backend::Secrets>>,
 }
 
 /// The view before a sketch opened and the view that faced the sketch then (#7038).
@@ -678,6 +697,8 @@ pub struct SolveApp {
     pub messages: messages::Messages,
     /// An editable local issue draft and optional captured app frame.
     pub issue_report: issue_report::ReportState,
+    /// Problem reports on the ticket server: sign-in, sending, the offline queue.
+    pub tickets: tickets::Tickets,
     /// The Crash Reports window.
     pub crashes: crash_ui::CrashUi,
     /// The update check and its window (`update`).
@@ -856,6 +877,7 @@ pub struct SolveApp {
     control_answering: Vec<control_job::ControlJob>,
     /// Most recent completed inspection per session and package, ordered by request.
     plugin_inspection_versions: std::collections::BTreeMap<(u64, String), usize>,
+    plugin_slots: plugin_slots::State,
     /// The agent cursor acting out control requests.
     pub agent: agent_cursor::AgentCursor,
     /// The agent chat panel (docs/design/in-app-agent-chat.md).
@@ -907,6 +929,27 @@ impl Drop for SolveApp {
 }
 
 impl SolveApp {
+    /// What a click on a face picks now: `"face"`, `"body"` or `"component"`. In the Render
+    /// workspace that is Render's own choice; elsewhere Modelling's.
+    pub(crate) fn pick_mode(&self) -> &'static str {
+        if !render_workspace::active(self) {
+            return self.ui.pick_mode();
+        }
+        match self.ui.render_pick.as_str() {
+            "body" => "body",
+            "component" => "component",
+            _ => "face",
+        }
+    }
+    /// A click on a face picks its whole body ([`SolveApp::pick_mode`]).
+    pub(crate) fn picks_bodies(&self) -> bool {
+        self.pick_mode() == "body"
+    }
+    /// A click on a face picks its component occurrence ([`SolveApp::pick_mode`]).
+    pub(crate) fn picks_components(&self) -> bool {
+        self.pick_mode() == "component"
+    }
+
     /// Publish this frame's tab accent from the open tab, the sketch being edited and the active
     /// tool or dialog, the three values [`theme::publish_tab`] takes.
     pub(crate) fn publish_tab_accent(&self, ctx: &egui::Context) {
@@ -984,6 +1027,7 @@ impl SolveApp {
             help: help::HelpState::default(),
             messages: messages::Messages::default(),
             issue_report: issue_report::ReportState::default(),
+            tickets: tickets::Tickets::new(),
             crashes: crash_ui::CrashUi::default(),
             updater: update::Updater::default(),
             install_steps: None,
@@ -1071,6 +1115,7 @@ impl SolveApp {
             agent_replies: Vec::new(),
             control_answering: Vec::new(),
             plugin_inspection_versions: Default::default(),
+            plugin_slots: Default::default(),
             agent: Default::default(),
             shots: solidcraft_control_egui::screenshot::Shots::new("no frame was presented (window hidden?); use ui.render"),
             styled: false,
@@ -1416,6 +1461,9 @@ impl SolveApp {
     /// Run a command programmatically (JSON parameters, no dialogs).
     pub fn run(&mut self, id: &str, mut params: Value) -> Result<Value, String> {
         crate::plugins::sync_policy(self);
+        if plugins::busy(self) && matches!(id.to_ascii_lowercase().as_str(), "plugin.install" | "plugin.remove") {
+            return Err(self.tr("prefs.plugin_busy").into());
+        }
         if id.eq_ignore_ascii_case("plugin.run")
             || solidcraft_engine::plugin::resolve_call(&self.session, id, &params).map_err(|e| e.to_string())?.is_some()
         {
@@ -1531,9 +1579,14 @@ impl SolveApp {
             // `queued`: it waits for the end of the agent's turn.
             Some("component.edit_in_place") => r.and_then(|v| edit_in_place::command_ran(self, &v).map(|queued| with_queued(v, queued))),
             Some("component.finish_edit") => r.and_then(|v| edit_in_place::finish_command(self).map(|queued| with_queued(v, queued))),
+            Some(view) if view.starts_with("tab.view.") => r.and_then(|v| documents::view_command(self, view, v)),
             _ => r,
         };
         if let Ok(v) = &r {
+            if matches!(id.to_ascii_lowercase().as_str(), "plugin.install" | "plugin.remove") {
+                plugins::persist_grants(self);
+                plugin_slots::invalidate(self);
+            }
             if id.eq_ignore_ascii_case("plugin.inspect")
                 && let Some(id) = v.pointer("/manifest/id").and_then(Value::as_str)
             {
@@ -1674,8 +1727,14 @@ impl SolveApp {
             }
             if id == "select.filter" {
                 let mode = v.get("mode").and_then(Value::as_str);
-                self.ui.pick_bodies = mode == Some("body");
-                self.ui.pick_components = mode == Some("component");
+                // In Render the choice is Render's own: it must not leave Modelling picking whole
+                // bodies once Render is left, nor reach the preferences file.
+                if render_workspace::active(self) {
+                    self.ui.render_pick = mode.unwrap_or("face").to_string();
+                } else {
+                    self.ui.pick_bodies = mode == Some("body");
+                    self.ui.pick_components = mode == Some("component");
+                }
                 self.ui.pick_off.retain(|kind| kind != "faces");
             }
             if id == "view.shots_strip"
@@ -1995,7 +2054,32 @@ impl SolveApp {
             }
             return;
         }
-        // Front … Isometric (Ctrl+1…7 by default) turn the view as the view cube's faces do. The
+        // Toggle Driven Dimension and Toggle Radius / Diameter take the dimension to act on as
+        // `constraint`: from a shortcut or the command search that is the selected one, as in the
+        // context menu (#17189). With none selected they say what to pick, where they used to
+        // answer "`constraint` must be a dimension id".
+        if matches!(id, "sketch.toggle_driven" | "sketch.toggle_diameter") {
+            let dimensions: Vec<String> = self
+                .session
+                .selection
+                .iter()
+                .filter_map(|s| match s {
+                    solidcraft_engine::Sel::SketchConstraint { id } => Some(id.clone()),
+                    _ => None,
+                })
+                .collect();
+            if dimensions.is_empty() {
+                self.set_status(self.tr("ui.toggle_dimension_select_first"), false);
+                return;
+            }
+            for constraint in dimensions {
+                if let Err(why) = self.run(id, json!({ "constraint": constraint })) {
+                    self.set_status(why, true);
+                }
+            }
+            return;
+        }
+        // Front … Isometric (Ctrl+1…7 by default) turn the view as the navigator's faces do. The
         // flat pattern is a 2D page: it has no other side to turn to.
         if solidcraft_engine::standard_view(id).is_some() {
             if !dialogs_sheet::flat_active(self) {
@@ -2062,7 +2146,7 @@ impl SolveApp {
             return;
         }
         // A display toggle leaves the current modelling tool and camera in place, and the ribbon
-        // where it is: F6, the navigation bar and the view cube never went through `start`, so
+        // where it is: F6, the navigation bar and the navigator never went through `start`, so
         // command search and the VIEW tab's menus must not move the tab either (#10540).
         if matches!(
             id,
@@ -2075,6 +2159,8 @@ impl SolveApp {
                 | "view.navigation_bar"
                 | "view.next_tab"
                 | "view.previous_tab"
+                | "tab.view.open"
+                | "tab.view.reopen"
         ) {
             let _ = self.run(id, json!({}));
             return;
@@ -2198,6 +2284,15 @@ impl SolveApp {
         }
         if id == "component.finish_edit" {
             edit_in_place::finish(self);
+            return;
+        }
+        // The picked section is placed (chord, pivot, position, angle, previewed) before OK adds it.
+        if id == "sketch.insert_airfoil" {
+            self.pick_file(solidcraft_ui_text::tr("insert_airfoil.filter"), &["dat"], |app, path| {
+                if let Some(path) = path {
+                    dialogs_insert_airfoil::open(app, path);
+                }
+            });
             return;
         }
         // The picked drawing is placed (position and scale, previewed) before OK adds it.
@@ -3386,7 +3481,7 @@ impl SolveApp {
         self.pending_fit = Some((to, bounds, true, shared));
     }
 
-    /// A view chosen on a navigator (a cube face, corner or arrow, an axis tip): the view turns
+    /// A view chosen on a navigator (a face, corner or arrow, an axis tip): the view turns
     /// in place, or frames the whole model from the new direction when Preferences › Navigation
     /// asks for it (`navigator_fit`, #10091).
     pub fn animate_turn(&mut self, to: Camera) {
@@ -3584,6 +3679,7 @@ impl SolveApp {
             ctx.request_repaint();
         }
         issue_report::tick(self, ctx);
+        tickets::tick(self, ctx);
         self.collect_screenshots(ctx);
         self.issue_screenshots(ctx);
         if self.issue_report.draft.is_none() && self.file_picker.is_none() {
@@ -3736,6 +3832,7 @@ impl SolveApp {
 
     /// Lay out the whole window.
     pub fn ui(&mut self, ui: &mut egui::Ui) {
+        plugins::tick(self, ui.ctx(), false);
         params_dialog::install_expressions(ui.ctx());
         ui_kit::set_viewport_half_height(ui.ctx(), self.cam.half_height());
         prefs::prepare_blur(self, ui.ctx());
@@ -3776,6 +3873,7 @@ impl SolveApp {
         self.frame_ms = now_ms() - t0;
         frame_watch::end(self);
         render_workspace::displayed::finish(self, ui.ctx());
+        documents::sync_views(self);
         documents::sync_window_title(self, ui.ctx());
     }
 
@@ -3835,6 +3933,8 @@ impl SolveApp {
                 browser::editors(self, ui);
                 // File › Install plugin… is offered on Home too: its question must show there.
                 plugin_install::show(self, ui.ctx());
+                // Entry dialogs from every plugin slot are available on Home too.
+                plugin_menu::show(self, ui.ctx());
                 // The unit of an imported mesh is asked on the screen the import starts: the
                 // start page asks it too, or the file would wait for an answer nobody sees (#15598).
                 mesh_units::show(self, ui.ctx());
@@ -3890,6 +3990,8 @@ impl SolveApp {
 
     fn show_workspace(&mut self, ui: &mut egui::Ui) {
         if render_workspace::active(self) {
+            // The model view is not drawn, so no shown dimension can be double-clicked.
+            dim_view::set_model_drawn(Vec::new());
             render_workspace::show(self, ui);
         } else {
             viewport::show(self, ui);
@@ -3993,6 +4095,10 @@ impl SolveApp {
         let reply = req.reply.clone();
         match control::handle(self, ctx, &req) {
             control::Outcome::Done(v) => {
+                if self.preferences.plugin_grants != self.session.plugin_state.grants {
+                    plugins::persist_grants(self);
+                    plugin_slots::invalidate(self);
+                }
                 let _ = reply.send(v);
             }
             control::Outcome::Screenshot { path } => self.shots.request(ctx, path, reply, req.chat_turn, now_ms()),

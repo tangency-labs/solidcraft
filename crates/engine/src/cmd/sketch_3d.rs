@@ -3,20 +3,22 @@
 //! fit points, exact arcs keeping their analytic form): drawn and snapped to, movable point by
 //! point, and usable as sweep and pipe paths.
 
-use serde_json::{Value, json};
-use solidcore_record::Vec3;
-use solidcraft_sketch::WireSpace;
+use serde_json::Value;
+use solidcore_record::{Vec2, Vec3};
+use solidcraft_geom::prelude::*;
+use solidcraft_sketch::{CurveKind, WireSpace};
 
 use super::sketch::edit;
 use super::sketch_store;
 use super::{CommandSpec, in_sketch};
 use crate::params::{bad, req_vec3, vec3};
-use crate::schema::sketch_3d::{Curves3dResult, Line3dParams, Move3dParams, Move3dResult, Point3dParams, Point3dResult, Spline3dParams};
+use crate::schema::sketch_3d::{Arc3dParams, Curves3dResult, Line3dParams, Move3dParams, Move3dResult, Point3dParams, Point3dResult, Spline3dParams};
 use crate::schema::{TypedContract, output_schema_for};
 use crate::{Result, Session};
 
 const LINE3D_CONTRACT: TypedContract<Line3dParams> = TypedContract::new();
 const SPLINE3D_CONTRACT: TypedContract<Spline3dParams> = TypedContract::new();
+const ARC3D_CONTRACT: TypedContract<Arc3dParams> = TypedContract::new();
 const POINT3D_CONTRACT: TypedContract<Point3dParams> = TypedContract::new();
 const MOVE3D_CONTRACT: TypedContract<Move3dParams> = TypedContract::new();
 
@@ -36,9 +38,11 @@ pub static COMMANDS: &[CommandSpec] = &[
         .contract(&SPLINE3D_CONTRACT)
         .output(output_schema_for::<Curves3dResult>)
         .params(concat!("points: [[x,y,z]…] world fit points (2 or more): a smooth 3D curve through them (needs 3D Sketch on)", created_doc!())),
-    CommandSpec::new("sketch.arc3d", "3D Arc", arc3d)
+    CommandSpec::new("sketch.arc3d", "3D Arc", crate::checked!("sketch.arc3d", arc3d))
         .icon("arc3")
         .enabled(in_sketch_3d)
+        .contract(&ARC3D_CONTRACT)
+        .output(output_schema_for::<Curves3dResult>)
         .params(concat!(
             "start, through, end: [x,y,z] world points: an exact circular arc through them, from start through through to end (needs 3D Sketch on). Stored exactly (centre, radius, angles), so path consumers can treat it as a true arc",
             created_doc!()
@@ -54,7 +58,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .enabled(in_sketch)
         .contract(&MOVE3D_CONTRACT)
         .output(output_schema_for::<Move3dResult>)
-        .params("wire: drawn 3D curve or point id, index?: fit point (default 0), to: [x,y,z] | by: [dx,dy,dz]; points joined to it move too"),
+        .params("wire: drawn 3D curve or point id, index?: fit point (default 0) | point: a point on the sketch plane (`l1.end`, `p3`: a line's end, a fit point of a spline, a lone point; needs 3D Sketch on); to: [x,y,z] | by: [dx,dy,dz] (world); points joined to it move too. A `point` on the plane first turns the lines and fit-point splines through it (or the lone point) into drawn 3D curves through the same places, which `curves` lists (`wire` and `index` say where the point is now); their constraints and dimensions go. Arcs, circles, ellipses, conics and control-point or closed splines through it are refused"),
 ];
 
 /// A command's reply as JSON: built from the type its output schema describes, so the two can't
@@ -158,7 +162,7 @@ fn arc3d(s: &mut Session, p: &Value) -> Result<Value> {
         needs_3d(sk, cmd)?;
         Ok(sk.add_drawn_arc_in(&pts, WireSpace::Component)?)
     })?;
-    Ok(json!({"curves": [id], "sketch": info}))
+    reply(cmd, Curves3dResult { curves: vec![id], sketch: info, created: None, param_warnings: Vec::new() })
 }
 
 fn point3d(s: &mut Session, p: &Value) -> Result<Value> {
@@ -174,6 +178,16 @@ fn point3d(s: &mut Session, p: &Value) -> Result<Value> {
 
 fn move3d(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "sketch.move3d";
+    if let Some(point) = p.get("point") {
+        if p.get("wire").is_some() {
+            return Err(bad(cmd, "give `wire` or `point`, not both"));
+        }
+        if p.get("index").is_some() {
+            return Err(bad(cmd, "`index` goes with `wire`"));
+        }
+        let point = point.as_str().ok_or_else(|| bad(cmd, "`point` must be a sketch point id"))?.to_string();
+        return lift_point(s, p, cmd, &point);
+    }
     let wire = p.get("wire").and_then(Value::as_str).ok_or_else(|| bad(cmd, "`wire` must be a 3D curve or point id"))?.to_string();
     let index = match p.get("index") {
         None => 0,
@@ -207,7 +221,103 @@ fn move3d(s: &mut Session, p: &Value) -> Result<Value> {
         };
         Ok(sk.move_drawn_point(&wire, index, to)?)
     })?;
-    reply(cmd, Move3dResult { moved: n, sketch: info, param_warnings: Vec::new() })
+    reply(cmd, Move3dResult { moved: n, curves: Vec::new(), wire: None, index: None, sketch: info, param_warnings: Vec::new() })
+}
+
+/// What a plane curve through a lifted point is as a drawn 3D curve: its point indices, in the
+/// order the drawn curve takes them as fit points. Lines and open fit-point splines only.
+fn liftable(c: &solidcraft_sketch::Curve, cmd: &str) -> Result<Vec<usize>> {
+    if c.link.is_some() {
+        return Err(bad(cmd, format!("`{}` is projected geometry; it stays where it was projected", c.id)));
+    }
+    let what = match &c.kind {
+        CurveKind::Line { a, b } => return Ok(vec![*a, *b]),
+        CurveKind::Spline { pts, control: false, periodic: false, .. } => return Ok(pts.clone()),
+        CurveKind::Spline { .. } => "a control-point or closed spline",
+        CurveKind::Circle { .. } => "a circle",
+        CurveKind::Arc { .. } => "an arc",
+        CurveKind::Ellipse { .. } => "an ellipse",
+        CurveKind::Conic { .. } => "a conic",
+    };
+    Err(bad(cmd, format!("`{}` is {what}: only lines, fit-point splines and lone points can leave the sketch plane", c.id)))
+}
+
+/// `sketch.move3d` with `point`: the lines and fit-point splines through a point on the sketch
+/// plane (or the lone point) become drawn 3D curves through the same places, then the point
+/// moves to `to` or by `by` (world), the curves through it staying joined there.
+fn lift_point(s: &mut Session, p: &Value, cmd: &str, point: &str) -> Result<Value> {
+    let parse = |name| p.get(name).map(|v| vec3(v).ok_or_else(|| bad(cmd, format!("`{name}` must be [x,y,z]")))).transpose();
+    let (to, by) = (parse("to")?, parse("by")?);
+    if to.is_none() && by.is_none() {
+        return Err(bad(cmd, "give `to` or `by`"));
+    }
+    let id = sketch_store::target(s, p, cmd)?;
+    // The plane in the owner component's coordinates, which drawn curves in `Component`
+    // space use.
+    let plane = s.model.state().sketch(id).map(|ss| ss.plane).ok_or_else(|| bad(cmd, "the sketch has not been solved"))?;
+    let inverse = inverse_owner_frame(s, p, cmd)?;
+    let place = |q: Vec2| plane.to_world(q);
+    let ((n, curves, k), info) = edit(s, p, cmd, false, |sk, _| {
+        needs_3d(sk, cmd)?;
+        let missing = || bad(cmd, format!("no point `{point}` in the sketch"));
+        let pi = sk.resolve_point(point).filter(|i| *i != 0).ok_or_else(missing)?;
+        let at = sk.points.get(pi).ok_or_else(missing)?;
+        if at.link.is_some() {
+            return Err(bad(cmd, format!("`{point}` is projected geometry; it stays where it was projected")));
+        }
+        let from = place(at.pos);
+        let goal = match (to, by) {
+            (Some(t), _) => solidcraft_doc::apply_point(&inverse, t),
+            (None, Some(d)) => from + solidcraft_doc::apply_vector(&inverse, d),
+            (None, None) => return Err(bad(cmd, "give `to` or `by`")),
+        };
+        // The points joined to `pi` by coincident constraints are one place: the curves through any
+        // of them lift together.
+        let roots = super::sketch::coincident_points(sk);
+        let group: Vec<usize> = (0..sk.points.len()).filter(|i| roots.get(*i) == roots.get(pi)).collect();
+        let through: Vec<usize> = sk.curves.iter().enumerate().filter(|(_, c)| group.iter().any(|g| c.kind.uses(*g))).map(|(i, _)| i).collect();
+        let mut fits = Vec::new();
+        let mut k = 0;
+        for (n, &ci) in through.iter().enumerate() {
+            let ids = liftable(&sk.curves[ci], cmd)?;
+            if n == 0 {
+                k = ids
+                    .iter()
+                    .position(|i| *i == pi)
+                    .or_else(|| ids.iter().position(|i| group.contains(i)))
+                    .ok_or_else(|| bad(cmd, format!("`{point}` is not a point of `{}`", sk.curves[ci].id)))?;
+            }
+            let fit = ids
+                .iter()
+                .map(|i| sk.points.get(*i).map(|q| place(q.pos)).ok_or_else(|| bad(cmd, "a curve's point is missing")))
+                .collect::<Result<Vec<Vec3>>>()?;
+            fits.push(fit);
+        }
+        // A joined point at the origin is not lifted: the origin stays put.
+        if group.contains(&0) {
+            return Err(bad(cmd, format!("`{point}` is joined to the origin; it stays")));
+        }
+        // Joined points that no curve uses at all, by id: the removal below may shift indices.
+        let lone: Vec<String> =
+            group.iter().copied().filter(|g| *g != pi && !sk.curves.iter().any(|c| c.kind.uses(*g))).map(|g| sk.points[g].id.clone()).collect();
+        let mut doomed = Vec::new();
+        if through.is_empty() {
+            fits.push(vec![from]);
+            doomed.push(pi);
+        } else {
+            sk.remove_curves(&through);
+        }
+        doomed.extend(lone.iter().filter_map(|id| sk.resolve_point(id)));
+        sk.remove_points(&doomed);
+        let mut made = Vec::new();
+        for fit in &fits {
+            made.push(sk.add_drawn_wire_in(fit, WireSpace::Component)?);
+        }
+        let n = sk.move_drawn_point(&made[0], k, goal)?;
+        Ok((n, made, k))
+    })?;
+    let wire = curves.first().cloned();
+    reply(cmd, Move3dResult { moved: n, curves, wire, index: Some(k), sketch: info, param_warnings: Vec::new() })
 }
 
 #[cfg(test)]

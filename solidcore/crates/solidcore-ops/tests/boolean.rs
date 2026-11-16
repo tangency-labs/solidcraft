@@ -1,14 +1,18 @@
 //! The boolean family on bodies whose answers are known.
 #![allow(clippy::unwrap_used, clippy::indexing_slicing)] // test
 
+mod common;
+
 use std::f64::consts::{PI, TAU};
 use std::io::Read as _;
 
 use serde_json::Value;
+use solidcore::topology::vertex::corner;
 use solidcore_ops::boolean::{boolean, imprint, union_all};
-use solidcore_ops::sweep::{extrude, revolve, Curve, DraftCorner};
+use solidcore_ops::sweep::{extrude, join_arcs, revolve, zone_tolerance, Curve, DraftCorner, Join};
 use solidcore_ops::{
-    make_box, make_cone, make_sphere, session, Body, BooleanOp, CheckLevel, Error,
+    blend, make_box, make_cone, make_sphere, session, Blend, Body, BooleanOp, CheckLevel, Corners,
+    Error,
 };
 use solidcore_record::brep::Brep as Record;
 
@@ -186,6 +190,146 @@ fn two_large_cylinders_touching_along_a_line_union() {
                 .is_none(),
             "{k}"
         );
+    }
+}
+
+/// The area two circles of radius `r` whose centres are `d` apart have in common.
+#[allow(clippy::disallowed_methods)] // the test's closed form, not ops computing geometry
+fn lens_area(r: f64, d: f64) -> f64 {
+    2.0 * r * r * (d / (2.0 * r)).acos() - 0.5 * d * (4.0 * r * r - d * d).sqrt()
+}
+
+/// A drill of radius 2.5 into the box face y = 0 along +y, centred at (x, z): its wall `depth`
+/// deep, then a 118° point; it starts 1 outside the face.
+#[allow(clippy::disallowed_methods)] // the test's operand geometry, not ops computing it
+fn drill(x: f64, z: f64, depth: f64) -> Body {
+    let (r, top) = (2.5, -1.0);
+    let tip = r / 59f64.to_radians().tan();
+    let p = |u: f64, y: f64| [x, y, z + u];
+    let profile = [
+        Curve::Line {
+            start: p(0.0, top),
+            end: p(r, top),
+        },
+        Curve::Line {
+            start: p(r, top),
+            end: p(r, depth),
+        },
+        Curve::Line {
+            start: p(r, depth),
+            end: p(0.0, depth + tip),
+        },
+        Curve::Line {
+            start: p(0.0, depth + tip),
+            end: p(0.0, top),
+        },
+    ];
+    revolve(&profile, [x, 0.0, z], [0.0, 1.0, 0.0], TAU, true).unwrap()
+}
+
+/// Two parallel holes of radius 2.5 whose axes are 5 − ε apart, a hair less than tangent: their
+/// walls cross in two lines 2√(2.5 ε) apart and lie within ε of each other between them, and
+/// so do their rims on a face square to the axes. The sketch solver of
+/// tangency-labs/solidcraft#15429 left two drill centres 2.3e-9 closer than their diameter, the
+/// upper one with its wall on the plate's top face, and the second cut failed in the merge;
+/// through holes, and the two cylinders' union, failed as not a solid from ε = 1e-9. The walls
+/// and the rims touch within the contact tolerance, as for holes a hair apart (ε = −1e-9):
+/// each cut is one valid solid of the counts of the holes a hair apart and the volume less the
+/// overlap (the lens of the two circles; the points' overlap is below 1e-12), in either order,
+/// also for ε up to the contact tolerance (the zone tolerance, 1e-5), past the wall
+/// intersection's search band (5e-6), where the walls and the rims must still agree; past the
+/// intersection tolerance (2e-5) the walls cross in two lines, as the circles do, and the cut is
+/// one valid solid of the volume. Between the two (ε = 1.5e-5) the cut may be refused, but never
+/// a valid solid of another volume (a contact tolerance of 2e-5 kept the second tool whole, as a
+/// void, 39.27 short). The two cylinders unite to two solids touching along the
+/// line (to ε = 1e-7: beyond it their coplanar caps are not decided here). The drills keep the
+/// counts of drills a hair apart to the issue's ε; from 1e-8 their points, which only the
+/// marching intersection meets, add edges, and they are one valid solid of the volume.
+#[test]
+#[allow(clippy::disallowed_methods)] // the test's closed form, not ops computing geometry
+fn parallel_holes_a_hair_less_than_tangent_cut_as_touching() {
+    all_fixes();
+    let plate = || make_box([0.0, 0.0, 0.0], [20.0, 20.0, 10.0]).unwrap();
+    let cylinder = |y: f64| solidcore_ops::make_cylinder([10.0, y, -1.0], 2.5, 12.0).unwrap();
+    let cut_twice = |one: Body, two: Body| {
+        let first = boolean(plate(), one, BooleanOp::Subtract).unwrap().unwrap();
+        boolean(first, two, BooleanOp::Subtract).unwrap().unwrap()
+    };
+    let (r, depth) = (2.5, 5.0);
+    let tip = r / 59f64.to_radians().tan();
+    let lens = |eps: f64| {
+        if eps > 0.0 {
+            lens_area(r, 5.0 - eps)
+        } else {
+            0.0
+        }
+    };
+    // either order: the holes at a and b, or at b and a
+    let orders = |a: f64, b: f64| [(a, b), (b, a)];
+    for eps in [-1e-9, 1e-9, 2.3e-9, 1e-8, 1e-7, 3e-6, 9.9e-6, 2.5e-5] {
+        let through = 4000.0 - (2.0 * PI * r * r - lens(eps)) * 10.0;
+        // touching along one line, or past the intersection tolerance crossing in two
+        let counts = if eps < 1e-5 {
+            [8, 22, 14]
+        } else {
+            [10, 24, 16]
+        };
+        for (y1, y2) in orders(10.0, 5.0 + eps) {
+            let c = cut_twice(cylinder(y1), cylinder(y2));
+            one_valid_solid(&c, counts, through);
+        }
+    }
+    let eps = 1.5e-5;
+    let through = 4000.0 - (2.0 * PI * r * r - lens(eps)) * 10.0;
+    for (y1, y2) in orders(10.0, 5.0 + eps) {
+        let first = boolean(plate(), cylinder(y1), BooleanOp::Subtract)
+            .unwrap()
+            .unwrap();
+        // a refusal is allowed here; an empty result is not
+        if let Ok(c) = boolean(first, cylinder(y2), BooleanOp::Subtract) {
+            let c = c.unwrap();
+            let report = c.check(CheckLevel::All).unwrap();
+            assert!(report.is_valid(), "{eps}: {}", report.text);
+            assert!(
+                near(volume(&c), through),
+                "{eps}: {}, closed form {through}",
+                volume(&c)
+            );
+        }
+    }
+    for eps in [-1e-9, 1e-9, 2.3e-9, 1e-8, 1e-7] {
+        let u = boolean(cylinder(10.0), cylinder(5.0 + eps), BooleanOp::Union)
+            .unwrap()
+            .unwrap();
+        let report = u.check(CheckLevel::All).unwrap();
+        assert!(report.is_valid(), "{eps}: {}", report.text);
+        assert_eq!(u.solid_count().unwrap(), 2, "{eps}");
+        assert_eq!(u.counts().unwrap(), [6, 10, 6], "{eps}");
+        let want = (2.0 * PI * r * r - lens(eps)) * 12.0;
+        assert!(
+            near(volume(&u), want),
+            "{eps}: {}, closed form {want}",
+            volume(&u)
+        );
+    }
+    for eps in [-1e-9, 1e-9, 2.3e-9, 1e-8, 1e-7] {
+        let drilled = 4000.0 - 2.0 * PI * r * r * (depth + tip / 3.0) + lens(eps) * depth;
+        for (z1, z2) in orders(7.5, 2.5 + eps) {
+            let c = cut_twice(drill(5.0, z1, depth), drill(5.0, z2, depth));
+            if eps < 1e-8 {
+                one_valid_solid(&c, [12, 27, 16], drilled);
+            } else {
+                // the points' extra edges are not decided here: one valid solid, its volume
+                let report = c.check(CheckLevel::All).unwrap();
+                assert!(report.is_valid(), "{eps}: {}", report.text);
+                assert_eq!(c.solid_count().unwrap(), 1, "{eps}");
+                assert!(
+                    near(volume(&c), drilled),
+                    "{eps}: {}, closed form {drilled}",
+                    volume(&c)
+                );
+            }
+        }
     }
 }
 
@@ -1330,5 +1474,446 @@ fn two_solids_touching_along_an_edge_survive_a_round_trip_and_booleans() {
                 volume(&r)
             );
         }
+    }
+}
+
+/// An 80 x 75 x 48 block (x from 0, y from -75, z from 0) less a stadium through it along y:
+/// two half circles of radius 16 centred at x = 21 and 59, joined by flat sides 32 apart, its
+/// bottom side at z = `bottom`. The stadium's flat bottom meets each half circle at a vertex
+/// where the two are tangent.
+fn block_less_stadium(bottom: f64) -> Body {
+    let (low, high, centre) = (bottom, bottom + 32.0, bottom + 16.0);
+    let arc = |x: f64, start: f64| Curve::Arc {
+        center: [x, 5.0, centre],
+        axis: [0.0, -1.0, 0.0],
+        reference: [1.0, 0.0, 0.0],
+        radius: 16.0,
+        start,
+        end: start + PI,
+    };
+    let profile = [
+        arc(21.0, PI / 2.0),
+        Curve::Line {
+            start: [21.0, 5.0, low],
+            end: [59.0, 5.0, low],
+        },
+        arc(59.0, -PI / 2.0),
+        Curve::Line {
+            start: [59.0, 5.0, high],
+            end: [21.0, 5.0, high],
+        },
+    ];
+    let stadium = extrude(
+        &profile,
+        [0.0, -1.0, 0.0],
+        85.0,
+        0.0,
+        DraftCorner::Curvature,
+        true,
+    )
+    .unwrap();
+    let block = make_box([0.0, -75.0, 0.0], [80.0, 75.0, 48.0]).unwrap();
+    boolean(block, stadium, BooleanOp::Subtract)
+        .unwrap()
+        .unwrap()
+}
+
+/// The stadium's area, 38 x 32 + pi 16^2.
+fn stadium_area() -> f64 {
+    38.0 * 32.0 + PI * 16.0 * 16.0
+}
+
+/// The block less the stadium whose bottom lies `h` below z = 12, less the rest of the block
+/// from z = 12 up over y from -65 to 0: the stadium's part above z = 12 is its area less the
+/// strip 38 h of its flat side and the two half segments of depth h of its circles, one whole
+/// segment r^2 acos((r - h) / r) - (r - h) sqrt(2 r h - h^2).
+#[allow(clippy::disallowed_methods)] // closed-form oracle, not ops geometry
+fn block_less_stadium_and_cut(h: f64) -> f64 {
+    let r = 16.0;
+    let segment = r * r * ((r - h) / r).acos() - (r - h) * (2.0 * r * h - h * h).sqrt();
+    let above = stadium_area() - 38.0 * h - segment;
+    80.0 * 75.0 * 48.0 - 75.0 * stadium_area() - 65.0 * (80.0 * 36.0 - above)
+}
+
+fn one_valid_solid_of_volume(r: &Body, counts: [usize; 3], want: f64, rel: f64) {
+    let report = r.check(CheckLevel::All).unwrap();
+    assert!(report.is_valid(), "{}", report.text);
+    assert_eq!(r.solid_count().unwrap(), 1);
+    assert_eq!(r.counts().unwrap(), counts);
+    let v = r.volume(1e-11).unwrap();
+    assert!(
+        (v - want).abs() <= rel * want,
+        "volume {v}, closed form {want}"
+    );
+}
+
+/// A box cut from z = 12 up, its bottom face on the stadium's flat bottom, which lies 3.756e-11
+/// below it (as a sketch solve leaves it, #16237), and its back face flush with the block's. The
+/// line where the box's bottom meets the block's back face runs along the stadium's bottom edge
+/// and leaves it at the vertices where the edge and the half circles are tangent, into the back
+/// face. The classification of that line against the back face stepped along it to settle the
+/// tangency and read the stepped point against the stadium's loop, a hole: a point outside a
+/// hole was taken for outside the face, the line was not imprinted there, and the merge failed
+/// ("no radial edge use classifies the face's edge use"). A box past every side of the block
+/// cut nothing instead, a valid body of the wrong volume. Both leave the closed form.
+#[test]
+fn a_cut_whose_bottom_is_a_hair_above_a_stadium_holes_flat_side_removes_the_rest() {
+    all_fixes();
+    let h = 3.756e-11;
+    let want = block_less_stadium_and_cut(h);
+    let flush = make_box([0.0, -65.0, 12.0], [80.0, 65.0, 36.0]).unwrap();
+    let r = boolean(block_less_stadium(12.0 - h), flush, BooleanOp::Subtract)
+        .unwrap()
+        .unwrap();
+    one_valid_solid_of_volume(&r, [11, 30, 20], want, 1e-9);
+    let past = make_box([-5.0, -65.0, 12.0], [90.0, 70.0, 40.0]).unwrap();
+    let r = boolean(block_less_stadium(12.0 - h), past, BooleanOp::Subtract)
+        .unwrap()
+        .unwrap();
+    one_valid_solid_of_volume(&r, [11, 30, 20], want, 1e-9);
+}
+
+/// The real defect beside it: a cylinder through the stadium whose circle is tangent to the
+/// stadium's flat bottom and its half circle at their common vertex, of a smaller radius, so it
+/// bends into the hole there. It lies in the hole and cuts nothing: the classification still
+/// takes the curves leaving that vertex into the hole for outside the back face.
+#[test]
+fn a_cylinder_in_a_stadium_hole_tangent_at_its_vertex_cuts_nothing() {
+    all_fixes();
+    let h = 3.756e-11;
+    let want = 80.0 * 75.0 * 48.0 - 75.0 * stadium_area();
+    for r in [15.0, 15.9, 15.99] {
+        let circle = [Curve::Arc {
+            center: [59.0, 0.0, 12.0 - h + r],
+            axis: [0.0, -1.0, 0.0],
+            reference: [1.0, 0.0, 0.0],
+            radius: r,
+            start: 0.0,
+            end: TAU,
+        }];
+        let cylinder = extrude(
+            &circle,
+            [0.0, -1.0, 0.0],
+            65.0,
+            0.0,
+            DraftCorner::Curvature,
+            true,
+        )
+        .unwrap();
+        let cut = boolean(block_less_stadium(12.0 - h), cylinder, BooleanOp::Subtract)
+            .unwrap()
+            .unwrap();
+        one_valid_solid_of_volume(&cut, [10, 24, 16], want, 1e-9);
+    }
+}
+
+/// The operand records of one of SolidCraft's failing cuts (`data/<name>.bodies.json.gz`), by
+/// name.
+fn traced_operands(name: &str) -> impl Fn(&str) -> Body {
+    let path = format!(
+        "{}/tests/data/{name}.bodies.json.gz",
+        env!("CARGO_MANIFEST_DIR")
+    );
+    let mut text = String::new();
+    flate2::read::GzDecoder::new(std::fs::File::open(path).unwrap())
+        .read_to_string(&mut text)
+        .unwrap();
+    let records: Value = serde_json::from_str(&text).unwrap();
+    move |key: &str| {
+        let record: Record = serde_json::from_value(records[key].clone()).unwrap();
+        Body::from_record(&record, true).unwrap().0
+    }
+}
+
+/// #16237's cut as SolidCraft passed it: the block less a stadium sketched with its bottom
+/// 3.756e-11 below z = 12, less the rectangle cut from z = 12 up, flush with the block's top and
+/// back. It failed in the merge; it is the closed form of the block, the stadium and the cut.
+#[test]
+fn a_traced_cut_flush_with_an_earlier_stadium_cut_is_its_closed_form() {
+    all_fixes();
+    let body = traced_operands("issue_16237_cut_flush_with_earlier_cut");
+    let r = boolean(body("target"), body("tool"), BooleanOp::Subtract)
+        .unwrap()
+        .unwrap();
+    one_valid_solid_of_volume(
+        &r,
+        [11, 30, 20],
+        block_less_stadium_and_cut(3.756e-11),
+        1e-9,
+    );
+}
+
+/// #15247's second cut as SolidCraft passed it: a plate already cut by one half of a 0.8 mm
+/// outline wall around an arrow, less the other half, which meets the faces the first cut left.
+/// It failed in the merge. The tool lies inside the plate, so the cut removes exactly its volume.
+#[test]
+fn a_traced_cut_meeting_an_earlier_cut_removes_its_tool() {
+    all_fixes();
+    let body = traced_operands("issue_15247_cut_arrow_outline");
+    let want = body("target").volume(1e-11).unwrap() - body("tool").volume(1e-11).unwrap();
+    let r = boolean(body("target"), body("tool"), BooleanOp::Subtract)
+        .unwrap()
+        .unwrap();
+    one_valid_solid_of_volume(&r, [46, 132, 88], want, 1e-9);
+}
+
+/// #14599's cut as SolidCraft passed it: a 0.3 x 6 x 5 rib less a tool as long as the rib, whose
+/// profile is the rib's top, its side x = -19.1 down to z = 2.5 and a round of radius 10.5667
+/// tangent to that side at z = 2.5. The rib's side runs along the round's tangent line at the
+/// front and lies 5.8e-10 inside the round at the back, where the two crossed 2.2e-4 apart; the
+/// cut was not a solid. The tool lies inside the rib, so the cut removes exactly its volume and
+/// leaves the rib's six faces with the round in place of its top.
+#[test]
+fn a_traced_cut_whose_round_is_tangent_to_a_thin_ribs_side_removes_its_tool() {
+    all_fixes();
+    let body = traced_operands("issue_14599_cut_flush_with_a_thin_rib");
+    let want = body("target").volume(1e-11).unwrap() - body("tool").volume(1e-11).unwrap();
+    let r = boolean(body("target"), body("tool"), BooleanOp::Subtract)
+        .unwrap()
+        .unwrap();
+    one_valid_solid_of_volume(&r, [6, 12, 8], want, 1e-9);
+    // the vertices are the rib's bottom corners, its top corners on the far side and the
+    // round's tangent points at z = 2.5, none at the second crossing 1.1e-4 above them
+    let (_, brep) = common::kernel_copy(&r);
+    for &v in brep.vertex_list() {
+        let z = solidcore::query::api_queries::vertex_get_point(&brep, v)
+            .unwrap()
+            .z;
+        assert!(
+            [0.0, 2.5, 5.0].iter().any(|h| (z - h).abs() < 1e-6),
+            "a vertex at z = {z}"
+        );
+    }
+}
+
+/// #16935's intersect as SolidCraft passed it. Both bodies are a decagon of side 10, 10 tall, with
+/// a 6 tall top tapered at 45°. The target has a 6 mm groove down the middle of each slope, its
+/// edges rounded at 1 mm; the tool has the ten edges between the slopes rounded at 5 mm. Near the
+/// top each 5 mm round's cylinder runs within the tolerance of a 1 mm round and the corner patch
+/// beside it, so each of the twenty gaps it leaves in the intersection loop is closed along the
+/// target's edge between them. Ten passes of one closure each left ten of them open, and the
+/// first closure taken at a corner ran up the round's tangent line: the faces were classified
+/// across the gaps, the intersect lost eight of the ten 5 mm rounds and said nothing.
+///
+/// The intersection is the target less the ten wedges between the tool's sharp edges and its
+/// rounds, `V(sharp tool) - V(tool)`, plus what the target's 1 mm rounds and their corner
+/// patches already took out of those wedges near the top: under 1e-3 (the wedges classified
+/// against the target, column by column along the slopes' normals). Before, the intersect gave
+/// 6.38 more: eight wedges kept.
+#[test]
+#[allow(clippy::disallowed_methods)] // the test's closed form, not ops computing geometry
+fn a_traced_intersect_keeps_every_5_mm_round_beside_the_grooves_1_mm_rounds() {
+    all_fixes();
+    let body = traced_operands("issue_16935_hip_rounds_over_groove_rounds");
+    // the decagon's apothem and area, the top's apothem 6 less (45°), the frustum on the prism
+    let apothem = 10.0 / (2.0 * 18_f64.to_radians().tan());
+    let base = 10.0 * apothem * apothem * 18_f64.to_radians().tan();
+    let top = base * ((apothem - 6.0) / apothem).powi(2);
+    let sharp_tool = 10.0 * base + 6.0 / 3.0 * (base + top + (base * top).sqrt());
+    let wedges = sharp_tool - body("tool").volume(1e-11).unwrap();
+    let want = body("target").volume(1e-11).unwrap() - wedges;
+    let r = boolean(body("target"), body("tool"), BooleanOp::Intersect)
+        .unwrap()
+        .unwrap();
+    let report = r.check(CheckLevel::All).unwrap();
+    assert!(report.is_valid(), "{}", report.text);
+    assert_eq!(r.solid_count().unwrap(), 1);
+    // the target's 92 faces and the ten rounds
+    assert_eq!(r.counts().unwrap(), [102, 320, 220]);
+    let v = r.volume(1e-11).unwrap();
+    assert!(
+        v >= want && v <= want + 1e-3,
+        "volume {v}, target less the wedges {want}"
+    );
+}
+
+/// #14477's join as SolidCraft passed it: a 14 x 20 x 35 block with a 3.2 mm hole whose rim on
+/// the y = -20 face is chamfered 0.5 mm, joined with that face extruded 10 mm (a slab with a
+/// 4.2 mm hole, the chamfer's outer rim). The two touch on the face; the join is their sum.
+#[test]
+fn a_traced_join_onto_a_chamfered_holes_face_is_their_sum() {
+    all_fixes();
+    let body = traced_operands("issue_14477_join_over_chamfered_hole");
+    // the block less the 1.6 hole and the chamfer's ring (Pappus), the slab less its 2.1 hole
+    let block = 14.0 * 20.0 * 35.0 - PI * 1.6 * 1.6 * 20.0 - TAU * (1.6 + 0.5 / 3.0) * 0.125;
+    let slab = 14.0 * 10.0 * 35.0 - PI * 2.1 * 2.1 * 10.0;
+    let r = boolean(body("target"), body("tool"), BooleanOp::Union)
+        .unwrap()
+        .unwrap();
+    one_valid_solid_of_volume(&r, [9, 19, 12], block + slab, 1e-9);
+}
+
+/// A 10 mm cube with the vertical edge at x = 0, y = 0 rounded to radius 2.
+fn filleted_cube() -> Body {
+    let block = make_box([0.0; 3], [10.0, 10.0, 10.0]).unwrap();
+    let edge = common::edge_at(&block, [0.0, 0.0, 5.0]);
+    blend(&block, Blend::Round, &[edge], &[2.0], &[], Corners::Filled).unwrap();
+    block
+}
+
+/// A 6 x 10 x 5 slab through the cube's front, its near face `dx` past the fillet spring at x = 2.
+fn slab_past_spring(dx: f64) -> Body {
+    make_box([2.0 + dx, -5.0, 0.0], [6.0, 10.0, 5.0]).unwrap()
+}
+
+/// Every vertex under the intersection tolerance of each of its faces, none wider than `max_tol`.
+fn vertex_gaps_within_xsect(body: &Body, max_tol: f64) {
+    let (k, mut brep) = common::kernel_copy(body);
+    let xsect = corner::xsect_tol_3d_of_brep(&k, &brep);
+    for v in brep.vertices().ids().collect::<Vec<_>>() {
+        let (_, gap, _) = corner::is_within_xsect_tol_3d_of_faces(&k, &mut brep, v, true).unwrap();
+        assert!(gap < xsect, "vertex gap {gap} vs {xsect}");
+        let tol = brep.vertex(v).unwrap().tolerance;
+        assert!(tol <= max_tol, "vertex tolerance {tol}");
+    }
+}
+
+/// #16532: a slab whose near face is `dx` past a fillet spring. The cube less one rounded edge is
+/// `960 + 10 PI`; the overlap is the slab's 6 by 5 section over the 5 mm both bodies share, 150
+/// (the offset keeps both of the slab's x faces inside the cube). The result must check valid and
+/// no vertex may grow past 5e-5.
+///
+/// The volume bound is derived from the move. The join places the vertex between the round and
+/// the slab face within `dx` of the slab face (the round meets the flat face at x = 2, the slab
+/// face stands at x = 2 + dx), so the notch's near face is displaced by at most `dx`, and
+/// displacing a face by `d` changes the volume by at most `d` times its area. That face is the
+/// slab's x face inside the cube: `width` (the slab's y extent -5..5 cut to the cube's 0..10,
+/// so 5) by `height` (z 0..5, so 5). The bound is that, plus the file's `near` tolerance for the
+/// volume integral itself.
+fn slab_past_spring_case(dx: f64, op: BooleanOp) {
+    all_fixes();
+    let block = filleted_cube();
+    let report = block.check(CheckLevel::All).unwrap();
+    assert!(report.is_valid(), "{}", report.text);
+    let fillet = 960.0 + 10.0 * PI;
+    let expected = match op {
+        BooleanOp::Union => fillet + 300.0 - 150.0,
+        BooleanOp::Subtract => fillet - 150.0,
+        BooleanOp::Intersect => 150.0,
+    };
+    let built = boolean(filleted_cube(), slab_past_spring(dx), op);
+    assert!(built.is_ok(), "{op:?} dx {dx}: {:?}", built.as_ref().err());
+    let result = built.ok().flatten();
+    assert!(result.is_some(), "{op:?} dx {dx}: the boolean left no body");
+    let result = result.unwrap();
+    let report = result.check(CheckLevel::All).unwrap();
+    assert!(report.is_valid(), "{op:?} dx {dx}: {}", report.text);
+    let got = volume(&result);
+    let (width, height) = (5.0, 5.0);
+    let moved_volume = dx * width * height;
+    assert!(
+        near(got, expected) || (got - expected).abs() <= moved_volume + 1e-7 * expected.abs(),
+        "{op:?} dx {dx}: {got} vs {expected}, bound {moved_volume}"
+    );
+    vertex_gaps_within_xsect(&result, 5e-5 + 1e-12);
+}
+
+macro_rules! slab_past_spring_cases {
+    ($($name:ident: $dx:expr, $op:ident;)*) => {$(
+        #[test]
+        fn $name() {
+            slab_past_spring_case($dx, BooleanOp::$op);
+        }
+    )*};
+}
+
+slab_past_spring_cases! {
+    issue_16532_union_slab_on_the_spring: 0.0, Union;
+    issue_16532_union_slab_2e5_past_the_spring: 2e-5, Union;
+    issue_16532_union_slab_2_5e5_past_the_spring: 2.5e-5, Union;
+    issue_16532_subtract_slab_on_the_spring: 0.0, Subtract;
+    issue_16532_subtract_slab_2e5_past_the_spring: 2e-5, Subtract;
+    issue_16532_subtract_slab_2_5e5_past_the_spring: 2.5e-5, Subtract;
+    issue_16532_intersect_slab_on_the_spring: 0.0, Intersect;
+    issue_16532_intersect_slab_2e5_past_the_spring: 2e-5, Intersect;
+    issue_16532_intersect_slab_2_5e5_past_the_spring: 2.5e-5, Intersect;
+}
+
+/// A rectangle `size` from the origin at height `z`, as four lines.
+fn rectangle_at(z: f64, size: [f64; 2]) -> Vec<Curve> {
+    let [w, h] = size;
+    let corners = [[0.0, 0.0], [w, 0.0], [w, h], [0.0, h]];
+    (0..4)
+        .map(|i| {
+            let (a, b) = (corners[i], corners[(i + 1) % 4]);
+            Curve::Line {
+                start: [a[0], a[1], z],
+                end: [b[0], b[1], z],
+            }
+        })
+        .collect()
+}
+
+/// #17285: a 40 x 30 x 6 plate with a 4 mm hole at (10, 10) cut through it, joined to a 10 mm
+/// plate on its top whose outline is the same rectangle and the same hole, drawn as two half
+/// arcs split at `split` degrees and joined into one circle clockwise from +X, as SolidCraft
+/// sweeps a circle drawn in pieces. The two bores' rims at z = 6 are one circle run opposite
+/// ways. The join's face of the top bore took the trim of its rim from the top plate's own
+/// rim, which the points at its ends and middle (the same either way round) took for a copy of
+/// the bottom bore's rim: the trim ran backwards along the use, the loop jumped a period on the
+/// cylinder (SMLib's UVEdge/UVEdge gap) and the two bores stayed two faces. The join is the 40 x
+/// 30 x 16 block less the hole, its bores one face: 7 faces, 15 edges, 10 vertices.
+fn join_on_a_holed_plate(split: f64) -> Body {
+    let hole = extrude(
+        &[Curve::Arc {
+            center: [10.0, 10.0, 0.0],
+            axis: [0.0, 0.0, 1.0],
+            reference: [1.0, 0.0, 0.0],
+            radius: 2.0,
+            start: 0.0,
+            end: TAU,
+        }],
+        [0.0, 0.0, 1.0],
+        6.0,
+        0.0,
+        DraftCorner::Curvature,
+        true,
+    )
+    .unwrap();
+    let plate = extrude(
+        &rectangle_at(0.0, [40.0, 30.0]),
+        [0.0, 0.0, 1.0],
+        6.0,
+        0.0,
+        DraftCorner::Curvature,
+        true,
+    )
+    .unwrap();
+    let holed = boolean(plate, hole, BooleanOp::Subtract).unwrap().unwrap();
+    let a = split * PI / 180.0;
+    let half = |start: f64| Curve::Arc {
+        center: [10.0, 10.0, 6.0],
+        axis: [0.0, 0.0, -1.0],
+        reference: [1.0, 0.0, 0.0],
+        radius: 2.0,
+        start,
+        end: start + PI,
+    };
+    let circle = join_arcs(
+        &[half(-a), half(-a - PI)],
+        Join::ClosedAtFrameStart,
+        zone_tolerance().unwrap(),
+    )
+    .unwrap();
+    let mut outline = rectangle_at(6.0, [40.0, 30.0]);
+    outline.push(circle);
+    let top = extrude(
+        &outline,
+        [0.0, 0.0, 1.0],
+        10.0,
+        0.0,
+        DraftCorner::Curvature,
+        true,
+    )
+    .unwrap();
+    boolean(holed, top, BooleanOp::Union).unwrap().unwrap()
+}
+
+#[test]
+fn a_join_whose_hole_lines_up_with_a_bore_run_the_other_way_is_one_bore() {
+    all_fixes();
+    let want = 40.0 * 30.0 * 16.0 - PI * 4.0 * 16.0;
+    for split in [0.0, 60.0, 135.0] {
+        one_valid_solid_of_volume(&join_on_a_holed_plate(split), [7, 15, 10], want, 1e-9);
     }
 }

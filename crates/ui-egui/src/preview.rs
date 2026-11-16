@@ -11,6 +11,8 @@
 //! is all its preview builds: its boolean, which can take seconds (a text joined onto a part),
 //! runs once, on OK, and an error it finds shows then, the dialog staying open.
 //!
+//! A combine, whose tools already exist, shows its result selected: a join as the joined body,
+//! a cut with its tools red, an intersect with the tools' material it drops yellow.
 //! A Mirror of bodies shows its copies as green see-through ghosts, joined or not, and says
 //! whether a copy meets the body it was made from: the dialog sets its operation from that.
 
@@ -41,6 +43,11 @@ pub struct Colors {
     /// A body the preview creates (New Body), so it doesn't look like a join.
     pub new_body: [u8; 4],
     pub removed: [u8; 4],
+    /// The tools' material an intersect drops: the New Body yellow, as see-through as removed
+    /// material.
+    pub lost: [u8; 4],
+    /// A selected body: what a combine makes of its target, which stays picked until OK.
+    pub selected: [u8; 4],
     /// A Mirror's copies: the proposed-geometry green, as see-through as removed material.
     pub mirrored: [u8; 4],
     pub edge: [u8; 4],
@@ -52,7 +59,8 @@ pub struct Colors {
     pub tint_new: bool,
     /// Whether removed material is filled in the cut colour (Graphics' Show removed material in
     /// red): the see-through cut and the ghost of the shape a feature replaces. Off: those fills
-    /// are left out altogether, so they are fully transparent and only outlines are drawn.
+    /// are left out altogether, so they are fully transparent and only outlines are drawn. A
+    /// combine's ghosts always show.
     pub cut_tint: bool,
 }
 
@@ -64,6 +72,11 @@ impl Colors {
             added: c(t.preview_add),
             new_body: c(t.preview_new),
             removed: c(t.preview_cut),
+            lost: {
+                let ([r, g, b, _], [.., a]) = (c(t.preview_new), c(t.preview_cut));
+                [r, g, b, a]
+            },
+            selected: c(t.body_selected),
             mirrored: {
                 let ([r, g, b, _], [.., a]) = (c(t.preview_sketch), c(t.preview_cut));
                 [r, g, b, a]
@@ -98,6 +111,10 @@ pub struct Built {
     pub scene: GpuScene,
     pub sketches: Vec<SketchPreview>,
     pub replaced: Vec<String>,
+    /// What hovering a body of `replaced` outlines, by its name: the shape the preview draws for
+    /// it. A combine's target (and a join's tools) outline its result; a tool it ghosts, its own
+    /// shape. A body with none is not lit, its old faces fighting with the preview.
+    pub outlines: Vec<(String, Arc<Mesh>)>,
     /// Why the feature failed, when the scene only shows its tool body.
     pub error: Option<String>,
     /// Extent of what the preview shows (the view's depth range must cover it).
@@ -113,12 +130,34 @@ pub struct Built {
     /// For a Mirror of bodies: whether a copy meets the body it was made from, with the key of
     /// the bodies and plane it was worked out for ([`mirror_key`]).
     pub mirror_meets: Option<(u64, bool)>,
+    /// Construction points the previewed feature makes or moves: the view marks each one, sized
+    /// to the view like the model's construction points (#17154).
+    pub points: Vec<Vec3>,
     /// The reply of a previewed assembly constraint (`dof`, `conflicts`): the Constrain dialog says
     /// how free the part is with the constraint it shows.
     pub placed: Option<serde_json::Value>,
+    /// Bodies the preview only moves, drawn moved on the GPU instead of built where they land
+    /// (a Move). `scene` is not read then.
+    pub layer: Option<Layer>,
+}
+
+/// What a preview only moves, as a layer of its own ([`crate::gpu::MovingLayer`]): scenes built
+/// once where the bodies stand and one rigid motion, so a change of the motion builds and
+/// uploads nothing.
+pub struct Layer {
+    /// Names the scenes: everything they are built from.
+    pub key: u64,
+    /// What stays where it is (the ghost of where the bodies were), then what moves; `None`
+    /// when the preview already shows the scenes of `key` ([`PreviewState::layer_shown`]).
+    pub scenes: Option<(GpuScene, GpuScene)>,
+    /// From where the moving scene was built to where it is drawn.
+    pub motion: solidcraft_engine::doc::Mat,
 }
 
 type Job = Result<Built, String>;
+
+/// Set in the keys of the scenes a [`Layer`] moves (see [`PreviewState::moving_layer`]).
+const LAYER_KEYS: u64 = 1 << 63;
 
 /// How many obsolete preview jobs may still run, left behind for newer inputs (#7167). Beyond
 /// them, a new job waits for the running one as before, so a quick series of picks keeps at
@@ -149,6 +188,8 @@ pub struct PreviewState {
     running_motion: bool,
     /// Bodies the preview stands in for (hidden in the model scene).
     pub replaced: Vec<String>,
+    /// What hovering one of them outlines (see [`Built::outlines`]).
+    pub outlines: Vec<(String, Arc<Mesh>)>,
     /// The preview scene for the GPU and its key (changes whenever the scene does).
     pub slot: SceneSlot,
     pub key: u64,
@@ -174,6 +215,8 @@ pub struct PreviewState {
     pub tapered: Vec<(Vec3, solidcraft_engine::kernel::Taper)>,
     /// Whether the previewed Mirror's copy meets its body (see [`Built::mirror_meets`]).
     pub mirror_meets: Option<(u64, bool)>,
+    /// The construction points the preview shows (see [`Built::points`]).
+    pub points: Vec<Vec3>,
     /// The bodies and plane ([`mirror_key`]) the Mirror dialog last set its operation for: an
     /// operation picked by hand afterwards stays until they change.
     pub mirror_decided: Option<u64>,
@@ -181,6 +224,16 @@ pub struct PreviewState {
     moving: crate::move_preview::MovePreview,
     /// PreviewReselect: Primary held - hide the preview and restore replaced bodies for picks.
     pub rolled_back: bool,
+    /// The scene a [`Layer`] moves, for the GPU, and its key (changes whenever the scene does).
+    /// The key counts on through [`PreviewState::reset`]: the renderer keeps the scene of the key
+    /// it last took, so another design's first layer must not come under that key.
+    layer_slot: SceneSlot,
+    layer_serial: u64,
+    /// The [`Layer::key`] of the scenes shown and their motion; `None`: no layer is drawn. It
+    /// holds while the scenes do: `key` names what they are built from (the bodies, the colours,
+    /// the ghost), and the renderer keeps the moving one only as long as every frame draws it
+    /// ([`PreviewState::layer_not_drawn`]).
+    layer: Option<(u64, solidcraft_engine::doc::Mat)>,
 }
 
 impl PreviewState {
@@ -189,12 +242,68 @@ impl PreviewState {
         if self.rolled_back { &[] } else { &self.replaced }
     }
 
+    /// The key of the [`Layer`] scenes shown: a result for the same key leaves them out.
+    pub(crate) fn layer_shown(&self) -> Option<u64> {
+        self.layer.map(|(key, _)| key)
+    }
+
+    /// The bodies the preview draws moved on the GPU, for this frame; none while the preview is
+    /// hidden for a pick (`rolled_back`), as its scene is, and the frame then draws no layer
+    /// ([`PreviewState::layer_not_drawn`]).
+    pub(crate) fn moving_layer(&mut self) -> Option<crate::gpu::MovingLayer> {
+        let Some((_, motion)) = self.layer.filter(|_| self.active && !self.rolled_back) else {
+            self.layer_not_drawn();
+            return None;
+        };
+        let transform = std::array::from_fn(|c| std::array::from_fn(|r| motion[c][r] as f32));
+        Some(crate::gpu::MovingLayer { key: self.layer_serial, slot: self.layer_slot.clone(), transform })
+    }
+
+    /// This frame draws without the preview's layer: the preview is hidden for a pick, or a
+    /// component's drag has the renderer's one layer. The renderer lets go of a moving scene it
+    /// is not handed, and a frame that hands it the same key again would find no scene to take,
+    /// so the moved bodies would stay undrawn. When the renderer has taken the scene, the layer is
+    /// therefore forgotten and its preview computed again, which hands the scenes over anew. A
+    /// scene still waiting in its slot was never taken and stays.
+    pub(crate) fn layer_not_drawn(&mut self) {
+        let taken = self.layer.is_some() && self.layer_slot.lock().is_ok_and(|slot| slot.is_none());
+        if taken {
+            self.layer = None;
+            self.shown_key = None;
+        }
+    }
+
+    /// As if a layer of scenes `key` had been applied and were shown.
+    #[cfg(test)]
+    pub(crate) fn show_layer_for_tests(&mut self, key: u64) {
+        self.active = true;
+        self.layer = Some((key, solidcraft_engine::doc::IDENTITY));
+    }
+
+    /// The renderer takes the scene waiting in the layer's slot, as a frame that draws the layer
+    /// does; whether one was waiting.
+    #[cfg(test)]
+    pub(crate) fn renderer_takes_layer_for_tests(&self) -> bool {
+        self.layer_slot.lock().is_ok_and(|mut slot| slot.take().is_some())
+    }
+
+    /// Stop drawing a [`Layer`]: its scene goes with it.
+    fn drop_layer(&mut self) {
+        if self.layer.take().is_some()
+            && let Ok(mut slot) = self.layer_slot.lock()
+        {
+            *slot = None;
+        }
+    }
+
     /// Stop drawing the preview scene and give the bodies it stood in for back to the model.
     fn hide_scene(&mut self) {
+        self.drop_layer();
         if self.active || !self.replaced.is_empty() {
             self.active = false;
             self.bounds = Aabb3::EMPTY;
             self.replaced.clear();
+            self.outlines.clear();
             self.set_scene(GpuScene::default());
         }
     }
@@ -213,6 +322,7 @@ impl PreviewState {
         self.tapered.clear();
         self.mirror_meets = None;
         self.mirror_decided = None;
+        self.points.clear();
         self.sketches.clear();
         self.busy = false;
         self.rolled_back = false;
@@ -225,7 +335,7 @@ impl PreviewState {
     pub fn reset(&mut self) {
         self.detach();
         let (slot, key, detached) = (std::mem::take(&mut self.slot), self.key, std::mem::take(&mut self.detached));
-        *self = PreviewState { slot, key, detached, ..PreviewState::default() };
+        *self = PreviewState { slot, key, detached, layer_serial: self.layer_serial, ..PreviewState::default() };
         self.set_scene(GpuScene::default());
     }
 
@@ -243,6 +353,7 @@ impl PreviewState {
             Ok(b) => {
                 self.sketches = b.sketches;
                 self.replaced = b.replaced;
+                self.outlines = b.outlines;
                 self.bounds = b.bounds;
                 self.active = true;
                 self.error = b.error;
@@ -251,7 +362,30 @@ impl PreviewState {
                 self.placed = b.placed;
                 self.tapered = b.tapered;
                 self.mirror_meets = b.mirror_meets;
-                self.set_scene(b.scene);
+                self.points = b.points;
+                match b.layer {
+                    // The scenes of this key are up: only the motion changes, nothing is uploaded.
+                    Some(Layer { key, scenes: None, motion }) if self.layer_shown() == Some(key) => self.layer = Some((key, motion)),
+                    Some(Layer { key, scenes: Some((still, moving)), motion }) => {
+                        self.set_scene(still);
+                        if let Ok(mut slot) = self.layer_slot.lock() {
+                            *slot = Some(moving);
+                        }
+                        // Apart from a drag's layer keys, which are hashes: the renderer has one layer.
+                        self.layer_serial = self.layer_serial.wrapping_add(1) | LAYER_KEYS;
+                        self.layer = Some((key, motion));
+                    }
+                    // Its scenes left out, but they are not the ones shown: there is nothing to
+                    // move, so nothing is drawn rather than another preview's scene moved.
+                    Some(Layer { scenes: None, .. }) => {
+                        self.drop_layer();
+                        self.set_scene(GpuScene::default());
+                    }
+                    None => {
+                        self.drop_layer();
+                        self.set_scene(b.scene);
+                    }
+                }
             }
             // The current inputs make no feature: the last good geometry would contradict
             // them (a 1 mm extrusion still drawn at 0 mm), so nothing is drawn.
@@ -265,6 +399,7 @@ impl PreviewState {
                 self.tapered.clear();
                 self.mirror_meets = None;
                 self.mirror_decided = None;
+                self.points.clear();
             }
         }
     }
@@ -452,7 +587,14 @@ pub fn update(app: &mut SolveApp, ctx: &egui::Context) {
     }
     colors.tint_new = app.preferences.preview_tint_new_faces;
     colors.cut_tint = app.preferences.cut_preview_tint;
-    let key = job_key(&cmds, app.session.revision, colors);
+    let mut key = job_key(&cmds, app.session.revision, colors);
+    // A Move is drawn as a layer where the view allows it (`move_preview::layered`), and built
+    // where it lands where not: when the view changes between the two, it is computed again.
+    if crate::move_preview::is_move(&cmds) {
+        let mut h = std::collections::hash_map::DefaultHasher::new();
+        (key, crate::move_preview::layered(app)).hash(&mut h);
+        key = h.finish();
+    }
     let stream_key = stream_key(&cmds, app.session.revision, colors);
     let tool = as_new_body(&cmds).is_some();
     let pv = &mut app.preview;
@@ -572,7 +714,8 @@ pub fn compute(s: &Session, cmds: &[(String, Value)], colors: Colors) -> Job {
             let p = s.preview(cmds).map_err(|e| e.to_string())?;
             let guard =
                 |f: &dyn Fn() -> Built| std::panic::catch_unwind(std::panic::AssertUnwindSafe(f)).map_err(|_| "the preview failed".to_string());
-            let mut b = guard(&|| build(&p.before, &p.after, colors))?;
+            let combine = combine_of(cmds);
+            let mut b = guard(&|| build_as(&p.before, &p.after, colors, combine.as_ref()))?;
             b.bounds = state_bounds(&p.after);
             // The radius a previewed fillet used when it reduced the one asked for (a new
             // fillet or an edited one: the feature the replies name).
@@ -726,13 +869,16 @@ fn build_copies(before: &ModelState, after: &ModelState, sources: &[String], c: 
         scene: sc,
         sketches: Vec::new(),
         replaced: Vec::new(),
+        outlines: Vec::new(),
         error: None,
         bounds: Aabb3::EMPTY,
         applied: None,
         tapered: Vec::new(),
         stopped: None,
         mirror_meets: None,
+        points: Vec::new(),
         placed: None,
+        layer: None,
     }
 }
 
@@ -775,13 +921,16 @@ fn build_tool(before: &ModelState, after: &ModelState, c: Colors, op: &str) -> B
         scene: sc,
         sketches: Vec::new(),
         replaced: Vec::new(),
+        outlines: Vec::new(),
         error: None,
         bounds: Aabb3::EMPTY,
         applied: None,
         tapered: Vec::new(),
         stopped: None,
         mirror_meets: None,
+        points: Vec::new(),
         placed: None,
+        layer: None,
     }
 }
 
@@ -808,6 +957,29 @@ fn as_new_body(cmds: &[(String, Value)]) -> Option<(Vec<(String, Value)>, String
     changed.map(|op| (out, op))
 }
 
+/// A combine being previewed: its operation, its target and its tools.
+struct Combine {
+    op: String,
+    target: String,
+    tools: Vec<String>,
+}
+
+/// The combine the commands make or redefine, if they do.
+fn combine_of(cmds: &[(String, Value)]) -> Option<Combine> {
+    cmds.iter().find_map(|(command, p)| {
+        let p = match command.as_str() {
+            "solid.combine" => p,
+            "timeline.redefine" if p.get("command").and_then(Value::as_str) == Some("solid.combine") => p.get("params")?,
+            _ => return None,
+        };
+        Some(Combine {
+            op: p.get("operation").and_then(Value::as_str).unwrap_or("join").to_string(),
+            target: p.get("target").and_then(Value::as_str)?.to_string(),
+            tools: solidcraft_engine::params::string_list_or_default(p, "tools"),
+        })
+    })
+}
+
 fn same(a: &Mesh, b: &Mesh) -> bool {
     a.triangles.len() == b.triangles.len() && a.positions == b.positions
 }
@@ -815,17 +987,35 @@ fn same(a: &Mesh, b: &Mesh) -> bool {
 /// The preview scene: changed and new bodies (new surface tinted) and, as a ghost, the old
 /// version of changed or removed bodies.
 pub fn build(before: &ModelState, after: &ModelState, c: Colors) -> Built {
+    build_as(before, after, c, None)
+}
+
+/// [`build`], or as a combine shows its result: in the selected colour (with any piece a cut or
+/// intersect splits off its target), never tinted, and nothing drawn through the bodies. A join
+/// shows the joined body alone; a cut, its tools whole as red ghosts (a kept tool too, the
+/// preview standing in for it); an intersect, the tools' material it drops as yellow ghosts.
+fn build_as(before: &ModelState, after: &ModelState, c: Colors, combine: Option<&Combine>) -> Built {
     let mut sc = GpuScene::default();
     let added_color = sc.color(c.added);
     let added_plane = sc.color([c.added[0], c.added[1], c.added[2], 64]);
     let body_color = sc.color(c.body);
     let new_body = sc.color(c.new_body);
     let removed = sc.color(c.removed);
+    let selected = sc.color(c.selected);
     let edge = sc.color(c.edge);
+    let tint_new = c.tint_new && combine.is_none();
+    // Graphics' Show removed material in red leaves a combine alone: its tools' ghosts are all
+    // it shows of what it does, so they always show.
+    let cut_tint = c.cut_tint || combine.is_some();
     let mut replaced = Vec::new();
+    let mut outlines = Vec::new();
+    let mut points = Vec::new();
     for construct in &after.construct {
         if before.construct.iter().any(|old| old == construct) {
             continue;
+        }
+        if let solidcraft_engine::doc::construct::ConstructGeom::Point(p) = construct.geom {
+            points.push(p);
         }
         if let solidcraft_engine::doc::construct::ConstructGeom::Plane(plane) = construct.geom {
             let (o, x, y) = (plane.origin, plane.x * 10.0, plane.y * 10.0);
@@ -847,14 +1037,15 @@ pub fn build(before: &ModelState, after: &ModelState, c: Colors) -> Built {
             continue;
         }
         // Material removed from a body (a hole, a pocket): its new faces also show through the
-        // body in the cut colour, so the cut is seen from any side.
-        let cut = c.cut_tint && old.as_ref().is_some_and(|bm| am.measure().volume < bm.measure().volume - 1e-6);
+        // body in the cut colour, so the cut is seen from any side. A combine's cut shows its
+        // tools instead, as ghosts that bodies in front of them hide.
+        let cut = c.cut_tint && combine.is_none() && old.as_ref().is_some_and(|bm| am.measure().volume < bm.measure().volume - 1e-6);
         // Which of the body's faces the feature made, asked only when something is drawn from
         // the answer: the cut above, and the tint the preference offers. A changed body is
         // otherwise drawn as itself, so a preview looks like the model and nothing has to be
         // worked out face by face.
         let new_face: Vec<bool> = match &old {
-            Some(bm) if cut || c.tint_new => {
+            Some(bm) if cut || tint_new => {
                 let mut new = new_faces(&am, am.tri_face.iter().max().map_or(0, |m| *m as usize + 1), bm);
                 // The kernel recorded which faces the operation that made this body generated,
                 // i.e. has no face of an input under it. The two answers are taken together
@@ -873,10 +1064,26 @@ pub fn build(before: &ModelState, after: &ModelState, c: Colors) -> Built {
             }
             _ => Vec::new(),
         };
-        let kept = if old.is_some() { body_color } else { new_body };
+        // A combine's result is still its picked target, shown selected until OK, and so is any
+        // piece a cut or intersect splits off it (a new body: a combine makes no other).
+        // Hovering a cut's or intersect's target outlines what is left of it (a join's bodies are
+        // outlined apart, below).
+        let picked = combine.filter(|k| k.target == a.name || old.is_none());
+        if let Some(k) = picked
+            && k.op != "join"
+        {
+            outlines.push((k.target.clone(), am.clone()));
+        }
+        let kept = if picked.is_some() {
+            selected
+        } else if old.is_some() {
+            body_color
+        } else {
+            new_body
+        };
         for (t, f) in am.triangles.iter().zip(&am.tri_face) {
             let new = new_face.get(*f as usize).copied().unwrap_or(false);
-            let col = if new && c.tint_new { added_color } else { kept };
+            let col = if new && tint_new { added_color } else { kept };
             let through = cut && new;
             for k in t {
                 let i = *k as usize;
@@ -900,32 +1107,78 @@ pub fn build(before: &ModelState, after: &ModelState, c: Colors) -> Built {
             replaced.push(a.name.clone());
         }
     }
+    // The surface of a combine's result (its target and the pieces split off it), which a tool's
+    // ghost is left off: there the tool lies on the result's faces, and where the two are meshed
+    // apart they cross by up to their chord error, past the ghost's depth bias, so the ghost
+    // showed through in slivers. Only a cut or intersect ghosts its tools.
+    let result: Vec<SurfaceIndex> = match combine {
+        Some(k) if k.op != "join" => after
+            .bodies
+            .iter()
+            .filter(|a| a.name == k.target || before.body(&a.name).is_none())
+            .filter_map(|a| SurfaceIndex::new(&a.mesh()))
+            .collect(),
+        _ => Vec::new(),
+    };
     for b in &before.bodies {
         let gone = after.body(&b.name).is_none();
-        if !gone && !replaced.contains(&b.name) {
+        let tool = combine.is_some_and(|k| k.tools.contains(&b.name));
+        // A cut's tool is shown as a ghost even when the cut keeps it, the preview standing in.
+        let kept_cutter = !gone && tool && combine.is_some_and(|k| k.op == "cut");
+        if !gone && !replaced.contains(&b.name) && !kept_cutter {
             continue;
         }
         let m = b.mesh();
-        if c.cut_tint {
+        // A join's target and tools stay apart under the pointer, as they are picked: hovered,
+        // each is outlined by its own shape, not the whole joined body.
+        if combine.is_some_and(|k| k.op == "join" && (tool || k.target == b.name)) {
+            outlines.push((b.name.clone(), m.clone()));
+        }
+        // What a combine takes away: a cut, its tools whole; an intersect, its tools' material
+        // outside what remains; a join, nothing. Its target's old shape is not ghosted.
+        let fill = match combine {
+            None => Some(c.removed),
+            Some(k) => match (k.op.as_str(), tool) {
+                ("cut", true) => Some(c.removed),
+                ("intersect", true) => Some(c.lost),
+                _ => None,
+            },
+        };
+        if cut_tint && let Some(colour) = fill {
+            let fill = sc.color(colour);
             // A changed body's surface it keeps is not removed material: drawn as ghost there it
             // lies on the new body's face, and where that face is curved and meshed anew (its
             // boundary moved) the two triangulations cross by up to their chord error, far past the
             // ghost's depth bias, so the ghost showed through the new face in slivers.
-            let kept = if gone { None } else { after.body(&b.name).and_then(|a| SurfaceIndex::new(&a.mesh())) };
+            let own = if gone || combine.is_some() { None } else { after.body(&b.name).and_then(|a| SurfaceIndex::new(&a.mesh())) };
             for t in &m.triangles {
                 let Some(corners) = m.tri(t) else { continue };
-                if kept.as_ref().is_some_and(|k| on_surface(k, corners)) {
+                if own.iter().chain(&result).any(|k| on_surface(k, corners)) {
                     continue;
                 }
                 for k in t {
                     let i = *k as usize;
                     if let (Some(p), Some(n)) = (m.positions.get(i), m.normals.get(i)) {
-                        sc.ghost_tri(p.to_f32(), n.to_f32(), removed);
+                        sc.ghost_tri(p.to_f32(), n.to_f32(), fill);
                     }
                 }
             }
+            if tool {
+                // A tool's ghost has its outline in its own colour, depth-tested as a body's own
+                // edges (the renderer draws no on-top line of a preview).
+                let edge = sc.color([colour[0], colour[1], colour[2], 255]);
+                for (ei, e) in m.edges.iter().enumerate() {
+                    if m.shaded_edge_visible(ei) {
+                        for w in e.windows(2) {
+                            sc.line(w[0].to_f32(), w[1].to_f32(), edge, 1.3, false);
+                        }
+                    }
+                }
+                // Hovered, a tool drawn as a ghost of itself is outlined by its own edges.
+                outlines.push((b.name.clone(), m.clone()));
+            }
         }
-        if gone {
+        if gone || kept_cutter {
             replaced.push(b.name.clone());
         }
     }
@@ -934,13 +1187,16 @@ pub fn build(before: &ModelState, after: &ModelState, c: Colors) -> Built {
         scene: sc,
         sketches,
         replaced,
+        outlines,
         error: None,
         bounds: Aabb3::EMPTY,
         applied: None,
         tapered: Vec::new(),
         stopped: None,
         mirror_meets: None,
+        points,
         placed: None,
+        layer: None,
     }
 }
 
@@ -1133,11 +1389,10 @@ pub fn paint_sketches(app: &SolveApp, painter: &egui::Painter, proj: &crate::vie
     if app.preview.rolled_back {
         return;
     }
-    if !app
-        .dialog
-        .as_ref()
-        .is_some_and(|d| matches!(d.kind, crate::dialogs::Kind::SketchModify(_) | crate::dialogs::Kind::InsertDrawing(_)) && d.previews())
-    {
+    if !app.dialog.as_ref().is_some_and(|d| {
+        matches!(d.kind, crate::dialogs::Kind::SketchModify(_) | crate::dialogs::Kind::InsertDrawing(_) | crate::dialogs::Kind::InsertAirfoil(_))
+            && d.previews()
+    }) {
         return;
     }
     let mut budget = solidcraft_engine::render::SamplingBudget::new(32_768, 65_536);
@@ -1203,6 +1458,8 @@ mod tests {
             added: [2, 2, 2, 255],
             new_body: [4, 4, 4, 255],
             removed: [3, 3, 3, 100],
+            lost: [5, 5, 5, 100],
+            selected: [7, 7, 7, 255],
             mirrored: [6, 6, 6, 100],
             edge: [0, 0, 0, 255],
             ghost: true,
@@ -1253,13 +1510,136 @@ mod tests {
             scene: GpuScene::default(),
             sketches: Vec::new(),
             replaced: vec!["Lid".into()],
+            outlines: Vec::new(),
             error: None,
             bounds: Aabb3::EMPTY,
             applied: None,
             tapered: Vec::new(),
             stopped: None,
             mirror_meets: None,
+            points: Vec::new(),
             placed: None,
+            layer: None,
+        }
+    }
+
+    /// A result drawn as a layer of scenes `key`, handed over when `scenes`, moved `x` along X.
+    fn layered(key: u64, scenes: bool, x: f64) -> Built {
+        let mut motion = solidcraft_engine::doc::IDENTITY;
+        motion[3][0] = x;
+        Built { layer: Some(Layer { key, scenes: scenes.then(|| (GpuScene::default(), GpuScene::default())), motion }), ..pose() }
+    }
+
+    /// No layer is drawn and none waits for the renderer.
+    fn no_layer(pv: &mut PreviewState) -> bool {
+        pv.moving_layer().is_none() && pv.layer_shown().is_none() && pv.layer_slot.lock().unwrap().is_none()
+    }
+
+    /// A layer's scenes go to the renderer once: a change of its motion keeps both scene keys,
+    /// so nothing is uploaded. The layer goes when its preview does (another preview, a failure,
+    /// the dialog closed, the design gone), is not drawn while the preview is hidden for a pick,
+    /// and a result that left its scenes out for scenes that are not shown draws nothing.
+    #[test]
+    fn a_layer_hands_its_scenes_over_once_and_goes_with_its_preview() {
+        let mut pv = PreviewState::default();
+        assert!(no_layer(&mut pv));
+        pv.apply(1, Ok(layered(7, true, 10.0)));
+        let first = pv.moving_layer().expect("drawn as a layer");
+        let still = pv.key;
+        assert_eq!(pv.layer_shown(), Some(7));
+        assert!(pv.layer_slot.lock().unwrap().is_some(), "the moving scene waits for the renderer");
+        assert_eq!(first.transform[3][0], 10.0);
+        // A step of the drag: the motion alone.
+        pv.apply(2, Ok(layered(7, false, 25.0)));
+        let next = pv.moving_layer().expect("still a layer");
+        assert_eq!((pv.key, next.key), (still, first.key), "a step uploads nothing");
+        assert_eq!(next.transform[3][0], 25.0);
+        // Hidden for a pick, as the preview's scene is.
+        pv.rolled_back = true;
+        assert!(pv.moving_layer().is_none());
+        pv.rolled_back = false;
+        // Other scenes (other bodies or colours): handed over under other keys.
+        pv.apply(3, Ok(layered(8, true, 25.0)));
+        let other = pv.moving_layer().expect("a layer of the new scenes");
+        assert!(other.key != first.key && pv.key != still && pv.layer_shown() == Some(8));
+        // Scenes left out that are not the ones shown: nothing to move, so nothing is drawn.
+        let before = pv.key;
+        pv.apply(4, Ok(layered(9, false, 1.0)));
+        assert!(no_layer(&mut pv) && pv.key != before, "neither the layer nor the old still scene stays");
+        // The layer goes with its preview.
+        for end in 0..4 {
+            pv.apply(5, Ok(layered(7, true, 3.0)));
+            assert!(pv.moving_layer().is_some());
+            match end {
+                0 => pv.apply(6, Ok(pose())),
+                1 => pv.apply(6, Err("the inputs make no feature".into())),
+                2 => pv.clear(),
+                _ => pv.reset(),
+            }
+            assert!(no_layer(&mut pv), "end {end}");
+        }
+    }
+
+    /// A frame that draws no layer makes the renderer let the moving scene go. Left at that, the
+    /// next frame would hand it the same key and no scene, and the moved bodies would stay undrawn
+    /// (hidden in the model, as the preview stands in for them). So a layer whose scene the
+    /// renderer took is forgotten when a frame does not draw it, whether the preview is hidden for
+    /// a pick or a component's drag has the layer, and its preview is computed again: the scenes
+    /// come under a new key. A scene the renderer never took just waits.
+    #[test]
+    fn a_layer_the_renderer_let_go_is_handed_over_again() {
+        for hidden_for_pick in [true, false] {
+            let mut pv = PreviewState::default();
+            pv.apply(1, Ok(layered(7, true, 10.0)));
+            let first = pv.moving_layer().expect("drawn as a layer");
+            let not_drawn = |pv: &mut PreviewState| {
+                if hidden_for_pick {
+                    pv.rolled_back = true;
+                    assert!(pv.moving_layer().is_none());
+                    pv.rolled_back = false;
+                } else {
+                    pv.layer_not_drawn();
+                }
+            };
+            // Not drawn before the renderer took the scene: nothing is lost, it waits.
+            not_drawn(&mut pv);
+            assert_eq!((pv.layer_shown(), pv.shown_key), (Some(7), Some(1)), "kept");
+            assert_eq!(pv.moving_layer().expect("drawn again").key, first.key);
+            // The renderer has it, and a frame draws without it: it lets the scene go.
+            assert!(pv.renderer_takes_layer_for_tests());
+            pv.apply(2, Ok(layered(7, false, 25.0)));
+            assert_eq!(pv.moving_layer().expect("a step of the drag").key, first.key, "drawn at every frame, it is handed over once");
+            not_drawn(&mut pv);
+            assert_eq!((pv.layer_shown(), pv.shown_key), (None, None), "forgotten, and computed again");
+            assert!(pv.moving_layer().is_none(), "not under the key whose scene is gone");
+            // Computed again, the result brings its scenes (`layer_shown` says none are up).
+            pv.apply(2, Ok(layered(7, true, 25.0)));
+            let again = pv.moving_layer().expect("a layer again");
+            assert!(again.key != first.key, "a new key, so the renderer takes the scene");
+            assert_eq!(again.transform[3][0], 25.0);
+            assert!(pv.renderer_takes_layer_for_tests(), "the scene is there to take");
+        }
+    }
+
+    /// The renderer outlives a design: it keeps the moving scene of the key it last took until a
+    /// frame draws without a layer. The first layer of the next design must not come under that
+    /// key, or its scene would never be taken and the last design's bodies drawn in its place.
+    #[test]
+    fn a_reset_keeps_counting_the_layer_keys() {
+        let mut pv = PreviewState::default();
+        pv.apply(1, Ok(layered(7, true, 10.0)));
+        let first = pv.moving_layer().expect("drawn as a layer").key;
+        pv.reset();
+        assert!(no_layer(&mut pv), "the layer goes with its design");
+        pv.apply(1, Ok(layered(7, true, 10.0)));
+        let next = pv.moving_layer().expect("the next design's layer").key;
+        assert!(next != first, "the renderer would keep the scene of key {first:#x}");
+        // And on through any number of designs.
+        let mut seen = std::collections::HashSet::from([first, next]);
+        for _ in 0..50 {
+            pv.reset();
+            pv.apply(1, Ok(layered(7, true, 10.0)));
+            assert!(seen.insert(pv.moving_layer().expect("a layer").key));
         }
     }
 
@@ -1505,6 +1885,82 @@ mod tests {
         assert_eq!(built.replaced, vec!["Plate".to_string()]);
     }
 
+    /// A combine's result is drawn selected (its target stays picked until OK), never tinted,
+    /// nothing drawn through the bodies, and only what it takes away ghosted: nothing for a join
+    /// (before, the joined tools were ghosted red over the faces they became and showed through
+    /// in slivers), the tool whole in red for a cut, also a kept one, and the tools' dropped
+    /// material yellow for an intersect. A piece a cut splits off the target is selected too,
+    /// not drawn as a new body.
+    #[test]
+    fn combine_fills_only_what_it_takes_away() {
+        let mut s = solidcraft_engine::Session::default();
+        s.execute("solid.box", &json!({"length": 20, "width": 20, "height": 20, "center": [10, 10, 10], "body_name": "Cube"})).unwrap();
+        s.execute("solid.cylinder", &json!({"base": [10, 10, -5], "diameter": 6, "height": 30, "body_name": "Pin"})).unwrap();
+        s.execute("solid.box", &json!({"length": 40, "width": 40, "height": 4, "center": [10, 10, 10], "body_name": "Slab"})).unwrap();
+        let c = colors();
+        let combine = |op: &str, tool: &str, keep: bool| {
+            let cmd = ("solid.combine".to_string(), json!({"target": "Cube", "tools": [tool], "operation": op, "keep_tools": keep}));
+            compute(&s, &[cmd], c).unwrap_or_else(|e| panic!("{op}: {e}"))
+        };
+        let preview = |op: &str| combine(op, "Pin", false);
+        // Graphics' Show removed material in red, off, leaves a combine's ghosts alone.
+        for op in ["cut", "intersect"] {
+            let cmd = ("solid.combine".to_string(), json!({"target": "Cube", "tools": ["Pin"], "operation": op}));
+            let b = compute(&s, &[cmd], Colors { cut_tint: false, ..c }).unwrap_or_else(|e| panic!("{op}: {e}"));
+            assert!(!b.scene.ghost.is_empty(), "{op}: shown with the preference off");
+        }
+        let heights = |bytes: &[u8]| -> Vec<f32> {
+            bytes.chunks(crate::gpu::TRI_SIZE).filter_map(|v| v.get(8..12).and_then(|b| b.try_into().ok()).map(f32::from_le_bytes)).collect()
+        };
+        for op in ["join", "cut", "intersect"] {
+            let b = preview(op);
+            assert_eq!(count(&b.scene, &b.scene.tris, crate::gpu::TRI_SIZE, c.added), 0, "{op}: no tint");
+            assert!(count(&b.scene, &b.scene.tris, crate::gpu::TRI_SIZE, c.selected) > 0, "{op}: the result is drawn selected");
+            assert_eq!(count(&b.scene, &b.scene.tris, crate::gpu::TRI_SIZE, c.body), 0, "{op}: not as an unpicked body");
+        }
+        let join = preview("join");
+        assert!(join.scene.ghost.is_empty() && join.scene.xray.is_empty(), "a join takes nothing away");
+        let cut = preview("cut");
+        assert!(count(&cut.scene, &cut.scene.ghost, crate::gpu::TRI_SIZE, c.removed) > 0, "the tool, red");
+        assert!(cut.scene.xray.is_empty(), "nothing drawn through the bodies");
+        assert_eq!(count(&cut.scene, &cut.scene.ghost, crate::gpu::TRI_SIZE, c.lost), 0);
+        let z = heights(&cut.scene.ghost);
+        assert!(z.iter().any(|z| *z < -1.0) && z.iter().any(|z| *z > 21.0), "the whole pin, out of the cube too");
+        let kept = combine("cut", "Pin", true);
+        assert!(count(&kept.scene, &kept.scene.ghost, crate::gpu::TRI_SIZE, c.removed) > 0, "a kept tool is shown red as well");
+        assert!(kept.replaced.contains(&"Pin".to_string()), "the preview stands in for the kept tool");
+        // Hovered, a cut's target outlines what is left of it and a ghosted tool itself; a join's
+        // target and tool are outlined apart, each by its own shape, not the joined body.
+        let names = |b: &Built| b.outlines.iter().map(|(n, _)| n.clone()).collect::<Vec<String>>();
+        assert_eq!(names(&kept), ["Cube", "Pin"]);
+        assert_eq!(names(&cut), ["Cube", "Pin"]);
+        assert_eq!(names(&join), ["Cube", "Pin"]);
+        let own = |name: &str| s.model.state().body(name).map(|b| b.mesh().bounds());
+        for (name, m) in &join.outlines {
+            assert_eq!(Some(m.bounds()), own(name), "{name}: its own shape");
+        }
+        assert!(!Arc::ptr_eq(&cut.outlines[1].1, &cut.outlines[0].1), "a cut's tool outlines itself");
+        let slab = ("solid.combine".to_string(), json!({"target": "Cube", "tools": ["Slab"], "operation": "cut"}));
+        let pieces = s.preview(&[slab]).unwrap().after.bodies.iter().filter(|b| b.name.starts_with("Cube")).count();
+        assert_eq!(pieces, 2, "the slab cuts the cube in two");
+        let split = combine("cut", "Slab", false);
+        assert_eq!(count(&split.scene, &split.scene.tris, crate::gpu::TRI_SIZE, c.new_body), 0, "the piece split off is no new body");
+        assert!(count(&split.scene, &split.scene.tris, crate::gpu::TRI_SIZE, c.selected) > 0);
+        let intersect = preview("intersect");
+        assert!(count(&intersect.scene, &intersect.scene.ghost, crate::gpu::TRI_SIZE, c.lost) > 0, "the pin's dropped material");
+        assert_eq!(count(&intersect.scene, &intersect.scene.ghost, crate::gpu::TRI_SIZE, c.removed), 0);
+        assert_eq!(count(&intersect.scene, &intersect.scene.xray, crate::gpu::TRI_SIZE, c.removed), 0, "what remains is shown as it is");
+        // Each ghosted tool has its outline in its own colour, in the lines the renderer draws for
+        // a preview (it draws no on-top ones); a join's has none.
+        let outline = |colour: [u8; 4]| [colour[0], colour[1], colour[2], 255];
+        let lines = |b: &Built, colour: [u8; 4]| count(&b.scene, &b.scene.lines, crate::gpu::LINE_SIZE, outline(colour));
+        assert!(lines(&cut, c.removed) > 0, "the red tool's outline");
+        assert!(lines(&kept, c.removed) > 0, "a kept tool's outline");
+        assert!(lines(&intersect, c.lost) > 0, "the yellow tool's outline");
+        assert_eq!(lines(&join, c.removed) + lines(&join, c.lost), 0);
+        assert!(cut.scene.overlay.is_empty() && intersect.scene.overlay.is_empty(), "nothing the renderer leaves out");
+    }
+
     /// A plate in its own component, stood up by its placement (an imported part set upright)
     /// and edited with that component active: the extrusion's tool is drawn where the plate is
     /// shown, on its top face, not at right angles to it in the component's own frame.
@@ -1545,12 +2001,12 @@ mod tests {
         };
         for combine in [false, true] {
             let b = compute(&s, &[mirror(30.0, combine)], c).unwrap();
-            assert!(count(&b.scene, &b.scene.ghost, 28, c.mirrored) > 0, "join {combine}: the copy, green and see-through");
+            assert!(count(&b.scene, &b.scene.ghost, crate::gpu::TRI_SIZE, c.mirrored) > 0, "join {combine}: the copy, green and see-through");
             // Its outline in the lines the renderer draws for a preview (it draws no on-top ones).
             let outline = [c.mirrored[0], c.mirrored[1], c.mirrored[2], 255];
             assert!(count(&b.scene, &b.scene.lines, crate::gpu::LINE_SIZE, outline) > 0, "join {combine}: the copy's outline");
             assert!(b.scene.overlay.is_empty(), "join {combine}: nothing the renderer leaves out");
-            assert_eq!(count(&b.scene, &b.scene.tris, 28, c.new_body), 0, "join {combine}: no solid new body");
+            assert_eq!(count(&b.scene, &b.scene.tris, crate::gpu::TRI_SIZE, c.new_body), 0, "join {combine}: no solid new body");
             assert!(b.replaced.is_empty(), "join {combine}: the body is left as it is");
             assert_eq!(b.mirror_meets.map(|(_, meets)| meets), Some(false), "join {combine}: apart");
         }
@@ -1604,6 +2060,20 @@ mod tests {
         assert_eq!(operation(&mut h), Some(true), "about its face again: Join");
     }
 
+    /// #17154: the preview of a point along a path in a moved component marks where the point
+    /// lands in the view, not where it lies in the component's own frame.
+    #[test]
+    fn a_point_along_a_path_in_a_moved_component_previews_where_it_lands() {
+        let mut s = solidcraft_engine::Session::default();
+        s.execute("component.create", &json!({"name": "Part", "grounded": false})).unwrap();
+        s.execute("solid.box", &json!({"length": 10, "width": 10, "height": 10, "body_name": "Block"})).unwrap();
+        s.execute("occurrence.move", &json!({"occurrence": "Part:1", "translate": [50, 0, 0]})).unwrap();
+        let cmds = [("construct.point.along_path".to_string(), json!({"path": {"edge": [55, 0, 10]}, "t": 0.5}))];
+        let built = compute(&s, &cmds, colors()).unwrap();
+        assert_eq!(built.points.len(), 1, "{:?}", built.points);
+        assert!(built.points[0].dist(Vec3::new(55.0, 0.0, 10.0)) < 1e-6, "{:?}", built.points);
+    }
+
     #[test]
     fn a_hole_shows_its_cut_through_the_body() {
         let mut s = solidcraft_engine::Session::default();
@@ -1611,11 +2081,11 @@ mod tests {
         let p = s.preview(&[("solid.hole".to_string(), json!({"position": [20, 15, 20], "diameter": 5, "depth": 10}))]).unwrap();
         let b = build(&p.before, &p.after, colors());
         // The hole's walls are drawn see-through in the cut colour (seen from any side).
-        assert!(count(&b.scene, &b.scene.xray, 28, colors().removed) > 0);
+        assert!(count(&b.scene, &b.scene.xray, crate::gpu::TRI_SIZE, colors().removed) > 0);
         // A feature that only adds material shows no cut.
         let p = s.preview(&[("solid.box".to_string(), json!({"length": 10, "width": 10, "height": 30, "operation": "join"}))]).unwrap();
         let b = build(&p.before, &p.after, colors());
-        assert_eq!(count(&b.scene, &b.scene.xray, 28, colors().removed), 0);
+        assert_eq!(count(&b.scene, &b.scene.xray, crate::gpu::TRI_SIZE, colors().removed), 0);
     }
 
     /// Graphics' Show removed material in red, off: the cut and the ghost of the shape the
@@ -1628,19 +2098,19 @@ mod tests {
         let p = s.preview(&cmds).unwrap();
         let plain = colors();
         let b = build(&p.before, &p.after, plain);
-        assert!(count(&b.scene, &b.scene.ghost, 28, plain.removed) > 0, "the replaced shape is ghosted while the tint is on");
+        assert!(count(&b.scene, &b.scene.ghost, crate::gpu::TRI_SIZE, plain.removed) > 0, "the replaced shape is ghosted while the tint is on");
         let quiet = Colors { cut_tint: false, ..plain };
         let b = build(&p.before, &p.after, quiet);
-        assert_eq!(count(&b.scene, &b.scene.xray, 28, quiet.removed), 0, "no see-through cut");
-        assert_eq!(count(&b.scene, &b.scene.ghost, 28, quiet.removed), 0, "no ghost of the old shape");
-        assert!(count(&b.scene, &b.scene.tris, 28, quiet.body) > 0, "the body is still drawn");
+        assert_eq!(count(&b.scene, &b.scene.xray, crate::gpu::TRI_SIZE, quiet.removed), 0, "no see-through cut");
+        assert_eq!(count(&b.scene, &b.scene.ghost, crate::gpu::TRI_SIZE, quiet.removed), 0, "no ghost of the old shape");
+        assert!(count(&b.scene, &b.scene.tris, crate::gpu::TRI_SIZE, quiet.body) > 0, "the body is still drawn");
         // The tool of a cut is left out too, its outline alone showing where it goes.
         let cmds = [("solid.box".to_string(), json!({"length": 10, "width": 10, "height": 30, "operation": "new"}))];
         let p = s.preview(&cmds).unwrap();
         let shown = build_tool(&p.before, &p.after, plain, "cut");
-        assert!(count(&shown.scene, &shown.scene.xray, 28, plain.removed) > 0, "the tool is see-through red while the tint is on");
+        assert!(count(&shown.scene, &shown.scene.xray, crate::gpu::TRI_SIZE, plain.removed) > 0, "the tool is see-through red while the tint is on");
         let b = build_tool(&p.before, &p.after, quiet, "cut");
-        assert_eq!(count(&b.scene, &b.scene.xray, 28, quiet.removed), 0, "no see-through tool");
+        assert_eq!(count(&b.scene, &b.scene.xray, crate::gpu::TRI_SIZE, quiet.removed), 0, "no see-through tool");
         assert!(!b.scene.overlay.is_empty(), "the tool's outline still shows where the cut goes");
     }
 
@@ -1752,7 +2222,7 @@ mod tests {
         let b = compute(&s, &[("solid.fillet".into(), json!({"edges": [[-16, -20, 30]], "radius": 4}))], colors()).unwrap();
         assert_eq!(b.replaced, vec!["Body1".to_string()]);
         // Ghost triangles on the boss's side, well away from the fillet.
-        let on_boss = b.scene.ghost.as_chunks::<28>().0.as_chunks::<3>().0.iter().filter(|t| {
+        let on_boss = b.scene.ghost.as_chunks::<{ crate::gpu::TRI_SIZE }>().0.as_chunks::<3>().0.iter().filter(|t| {
             t.iter().all(|v| {
                 let f = |k: usize| f32::from_le_bytes([v[4 * k], v[4 * k + 1], v[4 * k + 2], v[4 * k + 3]]) as f64;
                 let (x, y, z) = (f(0), f(1), f(2));

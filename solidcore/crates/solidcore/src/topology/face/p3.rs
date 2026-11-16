@@ -716,7 +716,6 @@ impl LoopOrientationSampler<'_> {
             let mut prev_raw = previous.raw_uv;
             sample.shift = previous.shift;
             face2::check_seam_crossing(
-                self.k,
                 &mut prev_raw,
                 sample.raw_uv,
                 &self.surf_domain,
@@ -825,7 +824,7 @@ impl LoopOrientationSampler<'_> {
 /// holds 0 or a curve has no NURBS form. With `bounds`, it receives the samples of
 /// upstream's `ComputeProjectedLoopOrientation` walk, as before (the box only; its
 /// orientation is not used).
-fn uv_loop_orientation(
+pub(crate) fn uv_loop_orientation(
     k: &Kernel,
     uv_curves: &[Curve],
     senses: &[bool],
@@ -2188,7 +2187,7 @@ impl ClassGeometry<IntersectObject> for IntersectObjects<'_> {
 /// classifications' `ExtractGeometry`: its boundary point drops make the faces'
 /// trimmed surface caches on the B-reps and keep them (`smsurf_GetSurfaceCache`, which
 /// creates the faces' UV trim curves), as upstream does through its face pointers.
-struct IntersectObjectsMut<'a> {
+pub(crate) struct IntersectObjectsMut<'a> {
     /// The B-rep of this face.
     b: &'a mut Brep,
     /// The B-rep of the other face when it is a different one.
@@ -2199,6 +2198,22 @@ struct IntersectObjectsMut<'a> {
     uv2: &'a [Option<Curve>],
     /// Set when an edit lent a B-rep ([`ClassGeometryMut::topology_entity_mut`]).
     edited: bool,
+}
+
+impl<'a> IntersectObjectsMut<'a> {
+    /// The objects of free 3D curves (`IntersectObject::Curve(i)` is `curves_3d[i]`)
+    /// classified on a face of `b`, without UV curves.
+    pub(crate) fn of_curves(b: &'a mut Brep, curves_3d: &'a [Curve]) -> Self {
+        Self {
+            b,
+            other: None,
+            side: false,
+            curves_3d,
+            uv1: &[],
+            uv2: &[],
+            edited: false,
+        }
+    }
 }
 
 impl IntersectObjectsMut<'_> {

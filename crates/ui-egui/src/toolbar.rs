@@ -200,6 +200,10 @@ const APP_BAR_HANDLES: app_bar::Handles<'static> = app_bar::Handles {
 };
 
 pub fn app_bar(app: &mut SolveApp, ui: &mut egui::Ui) {
+    crate::plugin_slots::refresh(app);
+    if app.plugin_slots.discovery_pending() {
+        ui.ctx().request_repaint_after(std::time::Duration::from_millis(50));
+    }
     let t = Tokens::get();
     let app_bar = Container::new(ui.ctx(), Surface::ApplicationBar).edge("sc_appbar", Edge::Top);
     let frame = Container::new(ui.ctx(), Surface::ApplicationBar).edge_frame(t.app_bar);
@@ -249,7 +253,11 @@ pub fn app_bar(app: &mut SolveApp, ui: &mut egui::Ui) {
                 settings: app_bar::BarButton { id: "settings", icon: "settings", tip: &prefs_tip, enabled: true, narrow: false, wide_only: false },
                 report: app_bar::Report {
                     label: solidcraft_ui_text::tr("ui.report_a_bug"),
-                    tip: solidcraft_ui_text::tr_label("Report a bug — review a screenshot and open a GitHub draft"),
+                    tip: if crate::issue_report::ticket::enabled(app) {
+                        solidcraft_ui_text::tr("report.pill_tip")
+                    } else {
+                        solidcraft_ui_text::tr_label("Report a bug — review a screenshot and open a GitHub draft")
+                    },
                     icon_only: app.header.report == ReportButton::Icon,
                 },
                 pills: crate::links::pills(app, r.width() >= app_bar::PILL_LABEL_MIN),
@@ -534,6 +542,13 @@ fn file_rows(app: &SolveApp) -> Vec<app_bar::FileRow> {
     rows.push(row("settings", &format!("{}…", app.tr("ui.preferences")), "", "settings", true));
     rows.push(row("shortcuts", &format!("{}…", app.tr("ui.keyboard_shortcuts")), "", "list", true));
     rows.push(row("quit", app.tr("ui.quit"), "", "close", true));
+    let entries = crate::plugin_slots::items(app, crate::plugin_slots::Slot::Menu("File"));
+    if !entries.is_empty() {
+        rows.push(FileRow::Separator);
+    }
+    for item in entries {
+        rows.push(row(&item.command, &item.label, "", "prefs_plugins", shown));
+    }
     rows
 }
 
@@ -541,6 +556,10 @@ fn file_rows(app: &SolveApp) -> Vec<app_bar::FileRow> {
 fn run_file_row(app: &mut SolveApp, id: &str) {
     if let Some(id) = id.strip_prefix("plugins:") {
         crate::plugin_menu::choose(app, id);
+        return;
+    }
+    if crate::plugin_slots::items(app, crate::plugin_slots::Slot::Menu("File")).iter().any(|item| item.command == id) {
+        crate::plugin_slots::begin(app, id);
         return;
     }
     if let Some(i) = id.strip_prefix("recent:").and_then(|i| i.parse::<usize>().ok()) {
@@ -1151,7 +1170,7 @@ impl RibbonPanels {
                 let panel: &'static str = panel;
                 let sketch_create = tab == "SKETCH" && panel == "CREATE";
                 let finish = (tab == "SKETCH" && panel == "FINISH SKETCH") || (tab == "MODEL" && panel == "FINISH EDITING");
-                let in_gallery = |c: &&'static solidcraft_engine::CommandSpec| app.toolbar_custom.in_gallery(tab, panel, c.id);
+                let in_gallery = |c: &&'static solidcraft_engine::CommandSpec| crate::toolbar_custom::in_gallery(app, tab, panel, c.id);
                 let button = |c: &'static solidcraft_engine::CommandSpec| {
                     // Only the family's default pin follows the part's choice. Explicitly pinned
                     // variants remain exact commands, including in customised toolbars.
@@ -1512,8 +1531,11 @@ fn ribbon_contents(app: &mut SolveApp, ui: &mut egui::Ui, shape: RibbonShape) ->
                 // Gallery cells are painted together after the large buttons, in reading order.
                 if tab == "SKETCH" && panel == "CONSTRAIN" {
                     shown.sort_by_key(|c| {
-                        if app.toolbar_custom.in_gallery(&tab, panel, c.id) {
-                            crate::workspace::CONSTRAINT_GALLERY.iter().position(|id| *id == c.id).map(|i| i + 1).unwrap_or(0)
+                        if crate::toolbar_custom::in_gallery(app, &tab, panel, c.id) {
+                            crate::workspace::CONSTRAINT_GALLERY
+                                .iter()
+                                .position(|id| *id == c.id)
+                                .map_or(crate::workspace::CONSTRAINT_GALLERY.len() + 1, |i| i + 1)
                         } else {
                             0
                         }
@@ -1535,7 +1557,14 @@ fn ribbon_contents(app: &mut SolveApp, ui: &mut egui::Ui, shape: RibbonShape) ->
         let panels = RibbonPanels::new(app, ui, &tab, &lists, &painter, running.clone());
         let more_tip = solidcraft_ui_text::tr_label("More toolbar panels");
         let accent = crate::workspace::tab_accent(&t, &tab);
-        let row = panels.row(accent, labels, reveal.as_ref().map(|r| ribbon::Reveal { id: r.id, preview: r.preview, strength: pulse }), more_tip);
+        let mut row = panels.row(accent, labels, reveal.as_ref().map(|r| ribbon::Reveal { id: r.id, preview: r.preview, strength: pulse }), more_tip);
+        let plugin_groups = crate::plugin_slots::ribbon_groups(app, ui, &tab);
+        let builtin_groups = row.groups.len();
+        row.groups.extend(plugin_groups.iter().map(|group| group.group(ui)));
+        if panels.exit && !plugin_groups.is_empty() && builtin_groups > 0 {
+            let finish = row.groups.remove(builtin_groups - 1);
+            row.groups.push(finish);
+        }
         let mut out = {
             let mut more_rows = |ui: &mut egui::Ui, group: usize| {
                 let Some((panel, cmds, shown)) = lists.get(group) else { return false };
@@ -1551,6 +1580,7 @@ fn ribbon_contents(app: &mut SolveApp, ui: &mut egui::Ui, shape: RibbonShape) ->
             };
             ribbon::show(ui, &row, Rect::from_min_max(pos2(ribbon_left, top), r.max), &mut more_rows)
         };
+        crate::plugin_slots::restore_group_indices(&mut out, builtin_groups, plugin_groups.len(), panels.exit);
         // The app's part of each button: its hover text, drags, the search's preview, deferred
         // persistent paint and a family's variants menu.
         for d in &mut out.buttons {
@@ -1559,7 +1589,14 @@ fn ribbon_contents(app: &mut SolveApp, ui: &mut egui::Ui, shape: RibbonShape) ->
                 let _ = d.response.clone().backing_on_hover_text(&b.name);
                 continue;
             }
-            let Some(b) = panels.panel_button(d) else { continue };
+            let Some(b) = panels.panel_button(d) else {
+                if let Some(plugin) = d.group.checked_sub(builtin_groups).and_then(|i| plugin_groups.get(i))
+                    && let Some(button) = plugin.group(ui).buttons.get(d.index)
+                {
+                    let _ = d.response.clone().backing_on_hover_text(button.name);
+                }
+                continue;
+            };
             let resp = &d.response;
             if let Some(r) = reveal.as_ref().filter(|r| r.preview) {
                 if d.cell {
@@ -1610,6 +1647,10 @@ fn ribbon_contents(app: &mut SolveApp, ui: &mut egui::Ui, shape: RibbonShape) ->
                     if crate::plugin_menu::choose_ribbon(app, &id) {
                         continue;
                     }
+                    if plugin_groups.iter().any(|group| group.group(ui).commands.contains(&id.as_str())) {
+                        crate::plugin_slots::begin(app, &id);
+                        continue;
+                    }
                     let Some(command) = solidcraft_engine::find_command(&id) else { continue };
                     match place {
                         ribbon::Place::Button => {
@@ -1637,6 +1678,10 @@ fn ribbon_contents(app: &mut SolveApp, ui: &mut egui::Ui, shape: RibbonShape) ->
                     }
                 }
                 ribbon::Action::Section { group } => {
+                    if let Some(plugin) = group.checked_sub(builtin_groups).and_then(|i| plugin_groups.get(i)) {
+                        plugin.toggle(ui.ctx(), true);
+                        continue;
+                    }
                     let Some(popup_id) = panels.popup_id(group) else { continue };
                     ui.ctx().data_mut(|d| {
                         let key = egui::Id::unique("sc_panel_open");
@@ -1657,6 +1702,10 @@ fn ribbon_contents(app: &mut SolveApp, ui: &mut egui::Ui, shape: RibbonShape) ->
                     }
                 }
                 ribbon::Action::Open { group } => {
+                    if let Some(plugin) = group.checked_sub(builtin_groups).and_then(|i| plugin_groups.get(i)) {
+                        plugin.toggle(ui.ctx(), false);
+                        continue;
+                    }
                     let Some(popup_id) = panels.popup_id(group) else { continue };
                     ui.ctx().data_mut(|d| d.insert_temp(egui::Id::unique("sc_panel_open"), popup_id));
                     opened.push(group);
@@ -1665,6 +1714,12 @@ fn ribbon_contents(app: &mut SolveApp, ui: &mut egui::Ui, shape: RibbonShape) ->
         }
         // Each panel's drop-down, and a button dropped on its free space.
         for g in &out.groups {
+            if let Some(plugin) = g.group.checked_sub(builtin_groups).and_then(|i| plugin_groups.get(i)) {
+                if let Some(popup) = plugin.popup(app, ui, g) {
+                    open_panel_menu = Some(popup);
+                }
+                continue;
+            }
             let (Some((panel, cmds, shown)), Some(data)) = (lists.get(g.group), panels.panels.get(g.group)) else { continue };
             let panel: &&str = panel;
             let sketch_create = tab == "SKETCH" && *panel == "CREATE";
@@ -2322,7 +2377,7 @@ pub(crate) fn selection_filter(app: &mut SolveApp, ui: &mut egui::Ui) {
     let t = Tokens::get();
     ui.label(egui::RichText::new(solidcraft_ui_text::tr_label("Selection filter")).color(t.text_dim).size(t.font_small));
     for (mode, label) in [("body", app.tr_label("Select bodies (a face picks its body)")), ("component", app.tr("ui.select_components_by_face"))] {
-        let mut on = app.ui.pick_mode() == mode;
+        let mut on = app.pick_mode() == mode;
         if ui_kit::checkbox(ui, label, &mut on).changed() {
             // The Faces checkbox below is independent. The standalone command enables faces.
             let filters = std::mem::take(&mut app.ui.pick_off);
@@ -2520,6 +2575,17 @@ pub fn shortcuts(app: &mut SolveApp, ctx: &egui::Context) {
         if shown && (crate::keymap::drag_zoom_key(app, k, mods) || crate::navigation::view_key(app, ctx, k, mods, repeat)) {
             continue;
         }
+        // Alt+1 to Alt+9 show the shown design's first to ninth view (Ctrl+1 to Ctrl+7 keep
+        // turning the view cube).
+        if shown
+            && mods.alt
+            && !mods.command
+            && !mods.shift
+            && let Some(place) = view_place(k)
+        {
+            drop(app.run("tab.view.activate", json!({"index": place})));
+            continue;
+        }
         if mods.command {
             match k {
                 // An editing embed's host has its own New, Open, Save, Close and settings.
@@ -2534,9 +2600,16 @@ pub fn shortcuts(app: &mut SolveApp, ctx: &egui::Context) {
                     });
                 }
                 _ if !shown => {}
-                // Close the design shown (asking first when it is unsaved); closing the last one
-                // shows the start page (#5366).
-                Key::W if !mods.shift && !mods.alt => crate::documents::close(app, app.docs.active, false),
+                // Ctrl+W closes the view shown, and the design with it when that is its only view;
+                // Ctrl+Shift+W closes the design shown. A design is closed asking first when it is
+                // unsaved; closing the last one shows the start page (#5366).
+                Key::W if !mods.alt => {
+                    if mods.shift || app.docs.views.len() < 2 {
+                        crate::documents::close(app, app.docs.active, false);
+                    } else {
+                        drop(app.run("tab.view.close", json!({})));
+                    }
+                }
                 Key::Z => {
                     if !crate::tools::undo_spline_point(app) {
                         drop(app.run("edit.undo", json!({})));
@@ -2629,6 +2702,15 @@ pub fn shortcuts(app: &mut SolveApp, ctx: &egui::Context) {
             _ => crate::keymap::press(app, &crate::keymap::key_name(k, mods), repeat),
         }
     }
+}
+
+/// The place (0 first) of the view a digit key shows: 1 to 9.
+fn view_place(key: egui::Key) -> Option<u8> {
+    use egui::Key;
+    [Key::Num1, Key::Num2, Key::Num3, Key::Num4, Key::Num5, Key::Num6, Key::Num7, Key::Num8, Key::Num9]
+        .iter()
+        .position(|digit| *digit == key)
+        .and_then(|i| u8::try_from(i).ok())
 }
 
 /// The Report a bug button for this header layout ([`app_bar::report_rect`]).
@@ -4386,6 +4468,205 @@ mod app_bar_tests {
     use super::*;
 
     #[test]
+    fn plugins_host_menu_and_ribbon_slots_show_identity_and_obey_disabled_policy() {
+        let mut h = crate::scenario::Harness::new();
+        let root = h.dir.join("plugins-slots");
+        let package = root.join("workshop-helper");
+        std::fs::create_dir_all(&package).unwrap();
+        std::fs::write(package.join("entry.wasm"), []).unwrap();
+        std::fs::write(package.join("plugin.json"), json!({
+            "id":"workshop-helper", "name":"Workshop helper", "version":"1.0", "capabilities":["commands@0.1"],
+            "runtime":{"module":"entry.wasm","commands":[],"entries":[
+                {"name":"measure","effect":"read","input_schema":{"type":"object","properties":{"length":{"type":"number","default":12}}},
+                 "slots":[{"kind":"menu","name":"File"},{"kind":"ribbon","name":"Inspect"}]},
+                {"name":"report","effect":"read","slots":[{"kind":"menu","name":"Help"},{"kind":"menu","name":"Manufacturing"},{"kind":"ribbon","name":"Inspect"}]}
+            ]}
+        }).to_string()).unwrap();
+        h.app.session.plugin_state.plugins_dir = Some(root);
+        crate::plugin_slots::invalidate(&mut h.app);
+        crate::plugin_slots::refresh(&mut h.app);
+        crate::plugin_slots::wait_for_discovery(&mut h.app);
+        let file = crate::plugin_slots::items(&h.app, crate::plugin_slots::Slot::Menu("File"));
+        assert_eq!(file[0].label, "Workshop helper · measure");
+        assert_eq!(
+            file_rows(&h.app)
+                .iter()
+                .filter_map(|r| match r {
+                    app_bar::FileRow::Item(i) => Some(i),
+                    _ => None,
+                })
+                .find(|i| i.id == "workshop-helper.measure")
+                .unwrap()
+                .icon,
+            "prefs_plugins"
+        );
+        assert_eq!(crate::plugin_slots::items(&h.app, crate::plugin_slots::Slot::Menu("Help"))[0].label, "Workshop helper · report");
+        assert!(crate::plugin_slots::items(&h.app, crate::plugin_slots::Slot::Menu("Manufacturing")).is_empty());
+        assert!(crate::plugin_slots::items(&h.app, crate::plugin_slots::Slot::Menu("Plugins")).is_empty());
+        assert!(!crate::workspace::visible_tabs(&h.app).contains(&"PLUGINS"), "there is no separate Plugins tab");
+        assert_eq!(crate::plugin_slots::ribbon_name("sHeEt MeTaL"), Some("SHEET METAL"));
+        assert_eq!(crate::plugin_slots::ribbon_name("Sketch"), Some("SKETCH"));
+        assert_eq!(crate::plugin_slots::ribbon_name("Model"), None, "Model's Plugins group already lists every command");
+        let mut inspect = false;
+        crate::test_support::frame(&h.ctx, egui::RawInput::default(), |ui| {
+            let groups = crate::plugin_slots::ribbon_groups(&h.app, ui, "INSPECT");
+            let group = groups[0].group(ui);
+            assert_eq!(group.label, "Workshop helper");
+            assert_eq!(group.buttons[0].name, "Workshop helper · measure");
+            assert_eq!(group.buttons[0].icon, "prefs_plugins");
+            inspect = true;
+        });
+        assert!(inspect);
+        h.app.home.open = false;
+        h.app.preferences.ribbon_tabs_only = false;
+        h.app.ui.tab = "INSPECT".into();
+        h.frames(3);
+        for follow_hover in [false, true] {
+            h.app.preferences.ribbon_menus_follow_hover = follow_hover;
+            h.step(&json!({"click":{"handle":"panel:INSPECT:plugin:workshop-helper"}})).unwrap();
+            h.frames(3);
+            let open_key = egui::Id::unique("sc_panel_open");
+            let popup = h.ctx.data(|data| data.get_temp::<egui::Id>(open_key));
+            assert!(popup.is_some(), "plugin panel menu opens (follow hover: {follow_hover})");
+            h.step(&json!({"move":{"handle":"menu:workshop-helper.report"}})).unwrap();
+            h.frames(3);
+            assert_eq!(
+                h.ctx.data(|data| data.get_temp::<egui::Id>(open_key)),
+                popup,
+                "moving into the plugin popup keeps it open (follow hover: {follow_hover})"
+            );
+            let outside = h.app.viewport.rect.unwrap().right_bottom() - vec2(40.0, 60.0);
+            h.step(&json!({"click":[outside.x,outside.y]})).unwrap();
+            h.frames(3);
+            assert!(h.ctx.data(|data| data.get_temp::<egui::Id>(open_key)).is_none(), "an outside click closes the plugin popup");
+            for handle in ["menu:workshop-helper.report", "panel:INSPECT:plugin:workshop-helper"] {
+                h.step(&json!({"click":{"handle":"panel:INSPECT:plugin:workshop-helper"}})).unwrap();
+                h.frames(3);
+                assert!(h.ctx.data(|data| data.get_temp::<egui::Id>(open_key)).is_some());
+                h.step(&json!({"move":{"handle":handle}})).unwrap();
+                h.frames(3);
+                assert!(h.ctx.data(|data| data.get_temp::<egui::Id>(open_key)).is_some(), "hovering {handle} keeps the popup open");
+                h.step(&json!({"key":"Escape"})).unwrap();
+                h.frames(3);
+                assert!(
+                    h.ctx.data(|data| data.get_temp::<egui::Id>(open_key)).is_none(),
+                    "Escape closes the plugin popup over {handle} (follow hover: {follow_hover})"
+                );
+            }
+        }
+        h.app.ui.tab = "MODEL".into();
+        h.frames(3);
+        h.step(&json!({"click":{"handle":"appbar:file"}})).unwrap();
+        h.step(&json!({"widget":"Workshop helper · measure"})).unwrap();
+        h.frames(2);
+        let slot_dialog = h.app.plugin_menu.dialogs.pop().expect("a File slot click opens the Plugins entry dialog");
+        assert_eq!(slot_dialog.entry, "measure");
+        assert_eq!(slot_dialog.ready(&h.app), Ok(json!({"length":12.0})));
+        crate::plugin_menu::open_entry(&mut h.app, 0, 0);
+        let menu_dialog = h.app.plugin_menu.dialogs.pop().unwrap();
+        assert_eq!(slot_dialog.fields, menu_dialog.fields);
+        assert_eq!(slot_dialog.plugin.approval, menu_dialog.plugin.approval);
+        assert_eq!(slot_dialog.plugin.path, menu_dialog.plugin.path);
+        assert_eq!(slot_dialog.label, menu_dialog.label);
+        assert!(h.app.session.plugin_state.packages.is_empty(), "opening a dialog does not inspect or execute an entry");
+        assert!(h.app.control_held.is_empty());
+        h.app.ui.tab = "INSPECT".into();
+        h.frames(3);
+        h.step(&json!({"click":{"handle":"button:workshop-helper.report"}})).unwrap();
+        h.frames(2);
+        assert_eq!(h.app.plugin_menu.dialog().unwrap().entry, "report", "a ribbon slot opens the same entry dialog");
+        h.app.plugin_menu.dialogs.clear();
+        h.app.home.show(h.app.session.revision);
+        h.frames(3);
+        h.step(&json!({"click":{"handle":"appbar:help"}})).unwrap();
+        h.step(&json!({"widget":"Workshop helper · report"})).unwrap();
+        h.frames(3);
+        assert!(h.app.home.open, "the Help slot opens over Home");
+        assert_eq!(h.app.plugin_menu.dialog().unwrap().entry, "report");
+        assert!(crate::scenario::handle_at("plugin_dialog:run").is_some(), "the entry dialog is drawn while Home is open");
+        h.step(&json!({"click":{"handle":"plugin_dialog:cancel"}})).unwrap();
+        h.frames(2);
+        assert!(h.app.plugin_menu.dialogs.is_empty() && h.app.home.open);
+        h.app.home.open = false;
+        if let Ok(dir) = std::env::var("SOLIDCRAFT_PLUGINS_EVIDENCE") {
+            let dir = std::path::PathBuf::from(dir);
+            let dir = if dir.is_absolute() { dir } else { std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..").join(dir) };
+            h.ctx = egui::Context::default();
+            crate::fonts::setup_bundled_fonts(&h.ctx);
+            let mut textures = std::collections::HashMap::new();
+            for (capture, (filename, width, height)) in [
+                ("plugin-host-slots.png", 1280., 720.),
+                ("plugin-named-menu.png", 1280., 1000.),
+                ("plugin-slot-dialog.png", 1280., 720.),
+                ("plugin-slot-dialog-small.png", 800., 600.),
+                ("plugin-ribbon-popup.png", 1280., 720.),
+                ("plugin-ribbon-popup-small.png", 800., 600.),
+            ]
+            .into_iter()
+            .enumerate()
+            {
+                h.ctx.data_mut(|data| data.insert_temp(egui::Id::unique("sc_file_menu"), capture == 1));
+                if (2..4).contains(&capture) {
+                    crate::plugin_slots::begin(&mut h.app, "workshop-helper.measure");
+                } else if capture >= 4 {
+                    h.app.plugin_menu.dialogs.clear();
+                    h.app.ui.tab = "INSPECT".into();
+                    h.ctx.data_mut(|data| data.remove::<egui::Id>(egui::Id::unique("sc_panel_open")));
+                }
+                for frame in 0..8 {
+                    let bounds = Rect::from_min_size(egui::Pos2::ZERO, vec2(width, height));
+                    let events = if capture >= 4 && matches!(frame, 1..=2) {
+                        let pos = crate::scenario::handle_at("panel:INSPECT:plugin:workshop-helper").unwrap();
+                        if frame == 1 {
+                            vec![egui::Event::PointerMoved(pos)]
+                        } else {
+                            [true, false]
+                                .into_iter()
+                                .map(|pressed| egui::Event::PointerButton {
+                                    pos,
+                                    button: egui::PointerButton::Primary,
+                                    pressed,
+                                    modifiers: egui::Modifiers::NONE,
+                                })
+                                .collect()
+                        }
+                    } else if capture >= 4 && frame == 4 {
+                        vec![egui::Event::PointerMoved(crate::scenario::handle_at("menu:workshop-helper.report").unwrap())]
+                    } else {
+                        Vec::new()
+                    };
+                    let mut output = h.ctx.run_ui(
+                        egui::RawInput {
+                            screen_rect: Some(bounds),
+                            time: Some(h.ctx.input(|input| input.time) + 1. / 60.),
+                            focused: true,
+                            events,
+                            ..Default::default()
+                        },
+                        |ui| h.app.ui(ui),
+                    );
+                    crate::ui_kit::test_textures_update(&mut textures, &output.textures_delta);
+                    output.textures_delta.clear();
+                    if frame == 7 {
+                        let image = crate::ui_kit::test_raster(&h.ctx, output.shapes, output.pixels_per_point, bounds, &textures);
+                        std::fs::create_dir_all(&dir).unwrap();
+                        image.save(std::path::Path::new(&dir).join(filename)).unwrap();
+                    }
+                }
+            }
+        }
+        h.app.preferences.disabled_plugins.insert("workshop-helper".into());
+        assert!(crate::plugin_slots::items(&h.app, crate::plugin_slots::Slot::Menu("File")).is_empty());
+        h.app.plugin_menu.dialogs.clear();
+        run_file_row(&mut h.app, "workshop-helper.measure");
+        assert!(h.app.plugin_menu.dialogs.is_empty(), "turned-off plugins cannot open a slot dialog");
+        h.app.plugin_menu.listed = crate::plugin_menu::list(&h.app, h.app.session.plugin_state.plugins_dir().as_deref());
+        assert!(h.app.plugin_menu.listed[0].disabled);
+        assert_eq!(h.app.plugin_menu.listed[0].entries.len(), 2, "the Plugins menu keeps all disabled entries");
+        assert!(crate::plugin_slots::items(&h.app, crate::plugin_slots::Slot::Ribbon("INSPECT")).is_empty());
+    }
+
+    #[test]
     fn bar_hover_inks_and_dividers_remain_readable_in_both_themes() {
         fn luminance(c: Color32) -> f32 {
             let c = egui::Rgba::from(c);
@@ -4772,7 +5053,7 @@ mod ribbon_gallery_tests {
         let mut loaded = crate::toolbar_custom::ToolbarCustom::default();
         loaded.load(&older);
         assert_eq!(loaded.panels, h.app.toolbar_custom.panels);
-        assert!(loaded.in_gallery("SKETCH", "CONSTRAIN", id));
+        assert!(loaded.in_gallery("SKETCH", "CONSTRAIN", id, true));
         crate::toolbar_custom::reset(&mut h.app, "MODEL");
         h.frames(2);
         assert!(rect_of(&cell_handle).is_none());
@@ -4813,6 +5094,42 @@ mod ribbon_gallery_tests {
         crate::toolbar_custom::pin(&mut h.app, "SKETCH", "sketch.constraint.equal").unwrap();
         h.frames(2);
         assert!(rect_of("ribbon:constraint:sketch.constraint.equal").is_some());
+    }
+
+    /// Constraints the user pins join the small-cell grid after the default six, in pin order,
+    /// and the grid grows a column; the preference off keeps them full-size buttons.
+    #[test]
+    fn pinned_constraints_are_small_grid_cells() {
+        let mut h = Harness::new();
+        h.call("ui.resize", json!({"width":1800,"height":900}));
+        h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+        h.frames(3);
+        let first = rect_of(&format!("ribbon:constraint:{}", crate::workspace::CONSTRAINT_GALLERY[0])).unwrap();
+        let last = rect_of(&format!("ribbon:constraint:{}", crate::workspace::CONSTRAINT_GALLERY[5])).unwrap();
+        for id in ["sketch.constraint.midpoint", "sketch.constraint.fix"] {
+            crate::toolbar_custom::pin(&mut h.app, "SKETCH", id).unwrap();
+        }
+        h.frames(3);
+        let midpoint = rect_of("ribbon:constraint:sketch.constraint.midpoint").unwrap();
+        let fix = rect_of("ribbon:constraint:sketch.constraint.fix").unwrap();
+        assert_eq!(midpoint.size(), first.size());
+        // Eight cells in two rows of four: the defaults keep their places, the pins fill column four.
+        assert_eq!(rect_of(&format!("ribbon:constraint:{}", crate::workspace::CONSTRAINT_GALLERY[0])), Some(first));
+        assert_eq!(
+            (midpoint.top(), midpoint.left() - 27.0),
+            (first.top(), rect_of(&format!("ribbon:constraint:{}", crate::workspace::CONSTRAINT_GALLERY[2])).unwrap().left())
+        );
+        assert_eq!((fix.top(), fix.left()), (last.top(), midpoint.left()));
+        h.step(&json!({"click":{"handle":"ribbon:constraint:sketch.constraint.midpoint"}})).unwrap();
+        assert_eq!(h.app.tool.as_ref().map(|t| t.cmd), Some("sketch.constraint.midpoint"));
+        h.step(&json!({"key":"Escape"})).unwrap();
+        // Dimension is not a constraint cell, and the old full-size buttons are a preference away.
+        assert!(rect_of("ribbon:constraint:sketch.dimension").is_none());
+        h.app.preferences.pinned_constraints_in_grid = false;
+        h.frames(3);
+        assert!(rect_of("ribbon:constraint:sketch.constraint.midpoint").is_none());
+        assert!(rect_of("button:sketch.constraint.midpoint").unwrap().height() > first.height());
+        assert_eq!(rect_of(&format!("ribbon:constraint:{}", crate::workspace::CONSTRAINT_GALLERY[5])).map(|r| r.size()), Some(last.size()));
     }
 }
 
@@ -5048,7 +5365,7 @@ mod command_start_tab_tests {
     }
 
     /// #10540: View Fit, Home and the other view display commands act on the view the same way
-    /// however they are started. F6, the navigation bar and the view cube never move the ribbon,
+    /// however they are started. F6, the navigation bar and the navigator never move the ribbon,
     /// so command search and the VIEW tab's menus must not either.
     #[test]
     fn view_display_commands_keep_the_ribbon_on_the_tab_they_were_started_from() {

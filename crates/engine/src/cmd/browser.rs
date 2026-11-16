@@ -1239,7 +1239,7 @@ fn view_list(s: &mut Session, _p: &Value) -> Result<Value> {
 
 /// The keys whose strings name bodies, alone or in a list (`body`, `targets`…), at any depth of a
 /// feature: its own fields and the face, edge and link references inside it.
-const BODY_KEYS: [&str; 5] = ["body", "bodies", "target", "targets", "tools"];
+const BODY_KEYS: [&str; 6] = ["body", "bodies", "target", "target_bodies", "targets", "tools"];
 
 /// Replace the body name `old` with `new` where a string names a body (the value of one of
 /// [`BODY_KEYS`]); other strings equal to it (sketch text, plane and feature names, expressions)
@@ -1546,6 +1546,9 @@ pub(super) fn rename_one(s: &mut Session, cmd: &str, given: &str, name: &str) ->
         for b in f.participants.iter_mut().filter(|b| **b == old) {
             *b = name.to_string();
         }
+        // Every typed body reference, those outside `BODY_KEYS` too: a sweep along a body's
+        // edges (`path_body`) or a mutual surface trim (`with`) (#17386).
+        f.kind.remap_bodies(&BTreeMap::from([(old.clone(), name.to_string())]));
         if let FeatureKind::Sketch { plane, .. } = &mut f.kind {
             solidcraft_doc::sheet::rename_plane_sheet_body(plane, &old, name);
         }
@@ -1590,6 +1593,21 @@ pub(super) fn rename_one(s: &mut Session, cmd: &str, given: &str, name: &str) ->
     Ok(BodyRenamed { body: old, name: name.to_string(), renamed: Vec::new(), param_warnings: Vec::new() })
 }
 
+/// Whether sketch `id` fails on its new plane (`trial`) only for projections it lost, so the
+/// plane is no reason to refuse: a lost projection fails a sketch on any plane, and a name is
+/// looked up on its body, not on the plane, so no plane loses one more. On its old plane (`before`,
+/// the design with the old plane up to the sketch) it failed for the same projections or a subset
+/// of them, or it failed before reaching them (its own plane was lost).
+pub(crate) fn only_lost_before(before: &solidcraft_doc::Model, trial: &Session, id: u64) -> bool {
+    let Some(now) = trial.model.result(id).and_then(|r| r.lost_projections.clone()) else { return false };
+    let earlier = match before.result(id) {
+        Some(r) if r.error.is_some() && r.lost_projections.is_none() => true,
+        Some(r) => r.lost_projections.as_ref().is_some_and(|was| now.iter().all(|l| was.iter().any(|w| w.link == l.link))),
+        None => false,
+    };
+    earlier && trial.model.failed_sketch_shown(&trial.doc, id).is_some()
+}
+
 fn redefine_sketch(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "sketch.redefine";
     let key = match p.get("sketch") {
@@ -1629,7 +1647,7 @@ fn redefine_sketch(s: &mut Session, p: &Value) -> Result<Value> {
             _ => None,
         })
         .cloned();
-    let plane = super::sketch::plane_ref(&trial, p, cmd)?;
+    let plane = super::sketch::plane_ref_numbers(&trial, p, cmd)?;
     if super::sketch::face::is_face(p) {
         super::sketch::face::capture_positions(&mut trial, &plane)?;
     }
@@ -1677,7 +1695,9 @@ fn redefine_sketch(s: &mut Session, p: &Value) -> Result<Value> {
     }
     trial.doc_mut().marker = Some(index + 1);
     trial.refresh();
-    if let Some(error) = trial.model.result(id).and_then(|result| result.error.as_ref()) {
+    if let Some(error) = trial.model.result(id).and_then(|result| result.error.as_ref())
+        && !only_lost_before(&baseline.model, &trial, id)
+    {
         return Err(bad(cmd, error.clone()));
     }
     trial.doc_mut().marker = marker;

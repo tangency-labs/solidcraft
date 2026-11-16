@@ -64,9 +64,10 @@
 //!   `SM_ASSERT`s, `EvaluateNormal`'s static list of bad surfaces) is not ported, nor
 //!   is `FindDegenParamForDirection`'s angle bookkeeping (`dBestRad`,
 //!   `dNearBestRad`: computed in release builds but never read).
-//! - **Upstream quirks kept:** `GetFlatCorners` masks its return value with `&=` while
-//!   filling the corner points (the opt-in `Kernel::fixes.flat_corners_test_bits` tests each
-//!   bit instead, WR-384); `SmSSGlobalSolver::BranchMayContainAnswers` returns
+//! - **Flat corners (WR-384).** `GetFlatCorners` tests each corner bit while filling
+//!   the corner points; upstream masks its return value with `&=` there, so it returns
+//!   at most the first corner's flag and point.
+//! - **Upstream quirks kept:** `SmSSGlobalSolver::BranchMayContainAnswers` returns
 //!   `SM_SUCCESS` (that is, `FALSE`) for a node outside its face and `NER`'s status
 //!   (non-zero: `TRUE`) for a missing patch; `sm_GoodDropResult` compares the guess and
 //!   result distances with swapped names (the opt-in
@@ -1062,18 +1063,11 @@ impl Surface {
             }
         }
 
-        // optional output (upstream masks the return value while testing: `if (lRtn &=
-        // bit)`; the opt-in `Kernel::fixes.flat_corners_test_bits` tests each bit, WR-384)
-        let test_bits = k.fixes.flat_corners_test_bits;
+        // optional output: each bit is tested (WR-384; upstream masks the return value
+        // while testing, `if (lRtn &= bit)`, so it loses every other corner)
         if let Some(pts) = points.as_mut() {
             for ((c, bit), p) in corners.iter().zip(FLAT_CORNER_BITS).zip(pts.iter_mut()) {
-                let flat = if test_bits {
-                    rtn & bit
-                } else {
-                    rtn &= bit;
-                    rtn
-                };
-                if flat != 0 {
+                if rtn & bit != 0 {
                     if let Some(v) = ignored(self.evaluate_point(k, *c))? {
                         *p = v;
                     }
@@ -3278,7 +3272,6 @@ fn cs_normalize_local_solve(
         EFF_ZERO_SQ,
     );
     let mut solver = LocalSolveNd::new(&mut equations, Some(&bounds), Some(&periodicities));
-    solver.set_skips_failed_evaluations(k.fixes.oscillating_skips_failed_guesses);
     solver.set_boundary_handler(BoundaryHandler::TotalBoundaryHits, 5);
     let solution = solver.solve_it(guess, EFF_ZERO_SQRT)?;
     // No: see note in upstream [B234]: not found is not found, whatever the reason.
@@ -3353,10 +3346,10 @@ mod tests {
 
     /// tangency-labs/solidcore#525 (WR-384): with the corner points wanted, upstream's
     /// `if (lRtn &= bit)` clears the other corners' bits (4 flat corners come back as
-    /// none, with only the first point); the opt-in tests each bit.
+    /// none, with only the first point); each bit is tested.
     #[test]
     fn issue_525_flat_corners_keep_their_bits() {
-        let mut k = Kernel::default();
+        let k = Kernel::default();
         // a degenerate bilinear patch: every corner's derivatives are parallel
         let s = Surface::from(
             BSplineSurface::create_bilinear_surface(
@@ -3368,9 +3361,6 @@ mod tests {
             .unwrap(),
         );
         assert_eq!(s.flat_corners(&k, 1.0, false).unwrap().flags, 15);
-        let up = s.flat_corners(&k, 1.0, true).unwrap();
-        assert_eq!(up.flags, 0);
-        k.fixes.flat_corners_test_bits = true;
         let fixed = s.flat_corners(&k, 1.0, true).unwrap();
         assert_eq!(fixed.flags, 15);
         assert!(fixed.points.unwrap().iter().all(|p| *p != Vec3::UNDEF));
@@ -3387,8 +3377,7 @@ mod tests {
     fn flat_corner_points_preserve_each_mask_bit() {
         use crate::nurbs::math::{CPoint, NOW};
 
-        let mut k = Kernel::default();
-        k.fixes.flat_corners_test_bits = true;
+        let k = Kernel::default();
         // Only the lower/lower corner has nonzero parallel tangents. Reverse
         // either control-net direction to exercise each of the four bits.
         for reverse_u in [false, true] {
@@ -3430,8 +3419,7 @@ mod tests {
     #[test]
     fn flat_corner_points_preserve_multiple_bits_and_regular_corners() {
         use crate::nurbs::math::{CPoint, NOW};
-        let mut k = Kernel::default();
-        k.fixes.flat_corners_test_bits = true;
+        let k = Kernel::default();
         let net = vec![
             vec![
                 CPoint::new(0.0, 0.0, 0.0, NOW),

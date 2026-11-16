@@ -135,7 +135,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .at("SOLID", "CREATE")
         .icon("hole")
         .key("H")
-        .params("position: [x,y,z] on a face (numbers, or length expressions the hole follows) | sketch + points: [sketch point ids] (one hole each, perpendicular to the sketch, into the material on whichever side of the sketch plane it is) | sketch alone (every sketch point: standalone points and circle centres); flip?: bool (sketch points: drill to the other side); single?: bool (with one sketch point: a Single hole that follows the point, drilled into the face there); direction?: [x,y,z] (default: into the face, against its outward normal; where faces of several bodies meet there, the face of a body in `targets`; one that leaves the face is mirrored into it; ignored with sketch points unless single); diameter | thread (a tapped hole, drilled with the tap maker's tabulated drill: ISO metric (a custom metric size: major minus pitch), UNC/UNF, G, Rp, Rc 1/16 to 4, NPT 1/16 to 3; a `diameter` given with it chooses another drill, from the thread's minor diameter to 5% over the tap maker's) | clearance: \"M6\" with fit?: close|normal|loose (ISO 273); head?: \"ISO 4762\" (socket head) | \"ISO 7380-1\" (button head) (with clearance: a counterbore the screw's head sits in, so type defaults to counterbore; its diameter is the head's dk plus head_gap each side, its depth the head's k plus head_gap; a cb_diameter or cb_depth given keeps its value); head_gap?: length (default 0.5 mm; an expression with parameters is kept, so the recess follows them); depth? (default through all) | to?: [x,y,z] (To Object: drill to that face or point); references?: [{edge: [x,y,z] on a straight edge of the face, distance: expr}] (at most two; the centre goes that far from each edge's line, in the face's plane, and follows the edges; with a numeric position only); type?: simple|drilled|counterbore|countersink; tip_angle?; cb_diameter?, cb_depth?, bridge?: length (counterbore: two 3D-printing bridge layers this thick below its floor, a slot along X then a square; e.g. 0.2 mm); cs_diameter?, cs_angle?; thread?: \"M6\", \"1/4-20 UNC\", \"G 1/4\", \"Rp 1/4\", \"Rc 1/4\" or \"1/4-18 NPT\" (cosmetic unless modeled); hand?: right|left (the tapped thread's hand; default right; needs thread); thread_depth?: positive length independent of drill depth (default: full useful cylindrical wall; must fit that wall); modeled?: bool (needs thread: the tapped thread cut into the wall, the groove between its teeth, as solid.thread's modelled one; default false: listed only); ease_out?: expr|standard|short (modelled tapped threads: the inner end, towards the bottom, fades out over this length, ISO 3508's runout, standard 2.5 P, short 1.25 P; without it the groove stops square at thread_depth, or clear of a blind hole's bottom); targets?: [body] (the bodies to drill; holes at the points of a sketch on a body's face default to that body, found along the holes' direction on it alone; explicit targets or participants override, [\"*\"] every body); old_surface_start?: bool (sketch points: a point inside a body starts the hole at the body's surface whatever plane the sketch lies on, as designs saved before #11538 drilled; set on those holes, keeps them as they were when edited)"),
+        .params("position: [x,y,z] on a face (numbers, or length expressions the hole follows) | sketch + points: [sketch point ids] (one hole each, perpendicular to the sketch, into the material on whichever side of the sketch plane it is) | sketch alone (every sketch point: standalone points and circle centres); flip?: bool (sketch points: drill to the other side); single?: bool (with one sketch point: a Single hole that follows the point, drilled into the face there); direction?: [x,y,z] (default: into the face, against its outward normal; where faces of several bodies meet there, the face of a body in `targets`; one that leaves the face is mirrored into it; ignored with sketch points unless single); diameter | thread (a tapped hole, drilled with the tap maker's tabulated drill: ISO metric (a custom metric size: major minus pitch), UNC/UNF, G, Rp, Rc 1/16 to 4, NPT 1/16 to 3; a `diameter` given with it chooses another drill, from the thread's minor diameter to 5% over the tap maker's) | clearance: \"M6\" with fit?: close|normal|loose (ISO 273); head?: \"ISO 4762\" (socket head) | \"ISO 7380-1\" (button head) (with clearance: a counterbore the screw's head sits in, so type defaults to counterbore; its diameter is the head's dk plus head_gap each side, its depth the head's k plus head_gap; a cb_diameter or cb_depth given keeps its value); head_gap?: length (default 0.5 mm; an expression with parameters is kept, so the recess follows them); depth? (default through all) | to?: [x,y,z] (To Object: drill to that face or point); references?: [{edge: [x,y,z] on a straight edge of the face, distance: expr}] (at most two; the centre goes that far from each edge's line, in the face's plane, and follows the edges; with a numeric position only); type?: simple|drilled|counterbore|countersink; tip_angle?; cb_diameter?, cb_depth?, bridge?: length (counterbore: two 3D-printing bridge layers this thick below its floor, a slot along X then a square; e.g. 0.2 mm); cs_diameter?, cs_angle?; thread?: \"M6\", \"1/4-20 UNC\", \"G 1/4\", \"Rp 1/4\", \"Rc 1/4\" or \"1/4-18 NPT\" (cosmetic unless modeled); hand?: right|left (the tapped thread's hand; default right; needs thread); thread_class?: the tapped thread's tolerance class, saved for drawings and changing no geometry (ISO metric: 6H, 5H, 7G, or a pitch and minor diameter class such as 5H6H; UNC/UNF: 1B, 2B or 3B; G, Rp, Rc and NPT take none; needs thread);thread_depth?: positive length independent of drill depth (default: full useful cylindrical wall; must fit that wall); modeled?: bool (needs thread: the tapped thread cut into the wall, the groove between its teeth, as solid.thread's modelled one; default false: listed only); ease_out?: expr|standard|short (modelled tapped threads: the inner end, towards the bottom, fades out over this length, ISO 3508's runout, standard 2.5 P, short 1.25 P; without it the groove stops square at thread_depth, or clear of a blind hole's bottom); targets?: [body] (the bodies to drill; holes at the points of a sketch on a body's face default to that body, found along the holes' direction on it alone; explicit targets or participants override, [\"*\"] every body); old_surface_start?: bool (sketch points: a point inside a body starts the hole at the body's surface whatever plane the sketch lies on, as designs saved before #11538 drilled; set on those holes, keeps them as they were when edited)"),
     CommandSpec::new("solid.pipe", "Pipe", crate::checked!("solid.pipe", pipe))
         .at("SOLID", "CREATE")
         .icon("pipe")
@@ -165,7 +165,7 @@ pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("solid.thread", "Thread", thread)
         .at("SOLID", "CREATE")
         .icon("thread")
-        .params("face: [x,y,z] on a cylindrical face; form?: metric|trapezoidal|acme|buttress|buttress_asme|bspp|rp|bspt|npt (default: the one `designation` names, else metric; square is refused: no current standard defines it); designation?: the size, as its standard writes it: metric \"M8\", \"M8x1\", \"M16xPh3P1.5\" (ISO 68-1, ISO 261, ISO 965-1); trapezoidal \"Tr20x4\", \"Tr40x14(P7)\" (ISO 2904, ISO 2903); buttress \"S20x4\", \"S40x14(P7)\" (DIN 513, 3°/30°); acme \"1/2-10 ACME\" (ASME B1.5); buttress_asme \"2.5-8 BUTT\" (ASME B1.9, 7°/45°, basic profile; no size table); bspp \"G 1/2\" (ISO 228-1, 55° parallel); rp \"Rp 1/2\" (ISO 7-1's parallel internal thread, 55°, an R screws into it; internal only); bspt \"R 1/2\" external, \"Rc 1/2\" internal (ISO 7-1, 55°, taper 1 in 16); npt \"1/2-14 NPT\" (ASME B1.20.1, 60°, taper 1 in 16) — a taper thread starts at a free end (the pipe end or the hole mouth) with its standard diameter there, and an external one runs its standard length unless `length` or `up_to` says otherwise (default: the standard size that fits the face, a shaft its major diameter, a hole its nominal diameter (a 12 mm hole is M12) or else the size whose tap drill it is); hand?: right|left|both (default right; both: a right- and a left-handed groove crossing); old_auto_size?: bool (an automatic size keeps the rule of designs saved before a hole was sized by its nominal diameter: a 12 mm hole is M14; set on those threads, keeps them as they were when edited); steep_flank?: start|end (buttress only, default end: the steep flank of the screw's teeth faces the thread's end, the way its axis points); starts?: 1..8 (lead = starts x pitch: that many grooves, each a turn's starts-th further round; a designation that gives the lead gives the starts); ease_out?: expr|standard|short (modelled threads: the inner end, away from where the thread starts, fades out over this length (shorter than a turn too), its section moving out of the material as it turns; standard 2.5 P, short 1.25 P per ISO 3508; it lies past the full-form length, up to a shoulder's clearance; at a free end, inside the face; without it the groove stops square there, ending in its own profile; the start never fades: it runs off its free end, plain or chamfered (`tip`)); tip?: none|start|both (modelled external threads: start chamfers the end the thread starts from, which must be free, both each free end the thread reaches, ISO 4753's chamfered end, the last teeth tapering into the cone; chamfer_angle?: angle expr to the axis, default 45 deg; chamfer_depth?: expr, radial from the major diameter, default for a metric thread down to the external minor diameter d3 = d - 1.226869 P (ISO 724), the largest ISO 4753 allows; other forms give it); extent?: full|length|up_to (default: length when `length` is given, up_to when `up_to` is, else full: the whole face); length?: expr (from the end the thread starts at); up_to?: [x,y,z] (a point, such as on a shoulder face: the thread runs to its place along the axis) | plane name or {origin, normal} (to where the plane crosses the axis); from?: [x,y,z] near the end of the face the thread starts at (default: the face's only free end, the one with no material past it; else the end the `face` point lies within a third of the face of; a pick in the middle of a face whose ends are alike is refused); modeled?: bool (default false); continuous_flanks?: bool (default true; false keeps the historical half-turn faces and groove-before-chamfer construction). Cosmetic: the model is unchanged, model.threads lists it. Modeled: cuts the thread profile into the body: past a free end the groove runs out a pitch into the air (or through a chamfer); at a shoulder, a head or a blind hole's bottom it stops with its section clear of it, never cutting into it; a hole as wide as the thread or wider is narrowed to the thread's minor diameter first, and the reply's warning says so, unless its wall is open along the thread (a cross hole, a cut through the side, a slanted end), which is refused with the drill to use; a shaft thicker than the thread is refused with the size to make it, never turned down"),
+        .params("face: [x,y,z] on a cylindrical face OR faces: [{body, point:[x,y,z]}, ...] (1 to 1024 selected faces of the same component in one Thread feature; every plural face requires its body identity; exact world body names or unambiguous definition names; do not combine with face); single_face_selection?: bool (default false; true requires exactly one entry in faces and keeps single-face replacement when editing); shared options apply to every face, automatic size fits each independently; cosmetic replies include threads for faces and retain thread as the first; form?: metric|trapezoidal|acme|buttress|buttress_asme|bspp|rp|bspt|npt (default: the one `designation` names, else metric; square is refused: no current standard defines it); designation?: the size, as its standard writes it: metric \"M8\", \"M8x1\", \"M16xPh3P1.5\" (ISO 68-1, ISO 261, ISO 965-1); trapezoidal \"Tr20x4\", \"Tr40x14(P7)\" (ISO 2904, ISO 2903); buttress \"S20x4\", \"S40x14(P7)\" (DIN 513, 3°/30°); acme \"1/2-10 ACME\" (ASME B1.5); buttress_asme \"2.5-8 BUTT\" (ASME B1.9, 7°/45°, basic profile; no size table); bspp \"G 1/2\" (ISO 228-1, 55° parallel); rp \"Rp 1/2\" (ISO 7-1's parallel internal thread, 55°, an R screws into it; internal only); bspt \"R 1/2\" external, \"Rc 1/2\" internal (ISO 7-1, 55°, taper 1 in 16); npt \"1/2-14 NPT\" (ASME B1.20.1, 60°, taper 1 in 16) — a taper thread starts at a free end (the pipe end or the hole mouth) with its standard diameter there, and an external one runs its standard length unless `length` or `up_to` says otherwise (default: the standard size that fits the face, a shaft its major diameter, a hole its nominal diameter (a 12 mm hole is M12) or else the size whose tap drill it is); hand?: right|left|both (default right; both: a right- and a left-handed groove crossing); old_auto_size?: bool (an automatic size keeps the rule of designs saved before a hole was sized by its nominal diameter: a 12 mm hole is M14; set on those threads, keeps them as they were when edited); steep_flank?: start|end (buttress only, default end: the steep flank of the screw's teeth faces the thread's end, the way its axis points); starts?: 1..8 (lead = starts x pitch: that many grooves, each a turn's starts-th further round; a designation that gives the lead gives the starts); ease_out?: expr|standard|short (modelled threads: the inner end, away from where the thread starts, fades out over this length (shorter than a turn too), its section moving out of the material as it turns; standard 2.5 P, short 1.25 P per ISO 3508; it lies past the full-form length, up to a shoulder's clearance; at a free end, inside the face; without it the groove stops square there, ending in its own profile; the start never fades: it runs off its free end, plain or chamfered (`tip`)); tip?: none|start|both (modelled external threads: start chamfers the end the thread starts from, which must be free, both each free end the thread reaches, ISO 4753's chamfered end, the last teeth tapering into the cone; chamfer_angle?: angle expr to the axis, default 45 deg; chamfer_depth?: expr, radial from the major diameter, default for a metric thread down to the external minor diameter d3 = d - 1.226869 P (ISO 724), the largest ISO 4753 allows; other forms give it); extent?: full|length|up_to (default: length when `length` is given, up_to when `up_to` is, else full: the whole face); length?: expr (from the end the thread starts at); up_to?: [x,y,z] (a point, such as on a shoulder face: the thread runs to its place along the axis) | plane name or {origin, normal} (to where the plane crosses the axis); from?: [x,y,z] near the end of the face the thread starts at (default: the face's only free end, the one with no material past it; else the end the `face` point lies within a third of the face of; a pick in the middle of a face whose ends are alike is refused); modeled?: bool (default false); continuous_flanks?: bool (default true; false keeps the historical half-turn faces and groove-before-chamfer construction). Cosmetic: the model is unchanged, model.threads lists it. Modeled: cuts the thread profile into the body: past a free end the groove runs out a pitch into the air (or through a chamfer); at a shoulder, a head or a blind hole's bottom it stops with its section clear of it, never cutting into it; a hole as wide as the thread or wider is narrowed to the thread's minor diameter first, and the reply's warning says so, unless its wall is open along the thread (a cross hole, a cut through the side, a slanted end), which is refused with the drill to use; a shaft thicker than the thread is refused with the size to make it, never turned down"),
     CommandSpec::new("solid.shell", "Shell", shell)
         .at("SOLID", "MODIFY")
         .icon("shell")
@@ -185,7 +185,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .icon("plane_angle")
         .contract(&PLANE_AT_ANGLE_CONTRACT)
         .output(output_schema_for::<FeatureResult>)
-        .params("base: XY|XZ|YZ|plane name, or a planar face {face: [x,y,z], body?, index?, path?}; axis: X|Y|Z|construction axis name (where it is now)|{origin, dir} | {edge|face: [x,y,z]} (a straight or circular edge, or a cylinder, cone or torus face: about its axis, followed as the model changes); angle: expr; direction_only?: bool (default false: turn about the axis as a line; true: project the axis direction onto base and turn about the line through pivot, or the base origin); pivot?: point ref (only with direction_only; vertex, sketch point, construction point); name?"),
+        .params("base: XY|XZ|YZ|plane name, or a planar face {face: [x,y,z], body?, index?, path?}; axis: X|Y|Z|construction axis name (followed: the plane moves with the axis)|{origin, dir} (fixed) | {edge|face: [x,y,z]} (a straight or circular edge, or a cylinder, cone or torus face: about its axis, followed as the model changes); angle: expr; direction_only?: bool (default false: turn about the axis as a line; true: project the axis direction onto base and turn about the line through pivot, or the base origin); pivot?: point ref (only with direction_only; vertex, sketch point, construction point); name?"),
     CommandSpec::new("solid.split_face", "Split Face", crate::checked!("solid.split_face", split_face))
         .at("SOLID", "MODIFY")
         .icon("split_face")
@@ -742,6 +742,7 @@ pub(super) fn add_feature_in(s: &mut Session, p: &Value, kind: FeatureKind, worl
     if world {
         super::component::to_active_frame(s, &mut kind);
     }
+    super::component::pin_picked_placements(s, &mut kind);
     // Bare lengths typed in an inch (or cm…) design mean that unit.
     if s.doc.units.trim() != "mm" {
         let doc = s.doc.clone();
@@ -903,6 +904,13 @@ pub(super) fn add_feature_in(s: &mut Session, p: &Value, kind: FeatureKind, worl
     let changed: Vec<&str> =
         st.bodies.iter().filter(|b| b.feature != id && old.get(b.name.as_str()).is_some_and(|o| !o.same(&b.body))).map(|b| b.name.as_str()).collect();
     let removed: Vec<&str> = before.bodies.iter().map(|b| b.name.as_str()).filter(|n| !now.contains(n)).collect();
+    let pieces: Vec<(String, String)> = st
+        .bodies
+        .iter()
+        .filter(|b| !old.contains_key(b.name.as_str()))
+        .filter_map(|b| b.split_from.clone().map(|from| (b.name.clone(), from)))
+        .collect();
+    carry_looks(s, &pieces);
     let fname = s.doc.feature(id).map(|f| f.name.clone()).unwrap_or_default();
     // A warning (a reference found again elsewhere, a reduced radius) is part of
     // the reply: a script or an agent sees it without asking the timeline (#616).
@@ -935,6 +943,32 @@ pub(super) fn add_feature_in(s: &mut Session, p: &Value, kind: FeatureKind, worl
 }
 
 type FaceProfile = (u64, Option<ProfileSel>, Option<String>);
+
+/// Give each new piece a cut or intersect split off a body (`(piece, body)`) that body's
+/// physical material and appearance, so it is still made of what the body was. A piece that
+/// already has its own (kept under its name from before) keeps it.
+fn carry_looks(s: &mut Session, pieces: &[(String, String)]) {
+    let needs = |piece: &str, from: &str| {
+        (!s.doc.materials.contains_key(piece) && s.doc.materials.contains_key(from))
+            || (!s.doc.appearances.bodies.contains_key(piece) && s.doc.appearances.bodies.contains_key(from))
+    };
+    if !pieces.iter().any(|(piece, from)| needs(piece, from)) {
+        return;
+    }
+    let doc = s.doc_mut();
+    for (piece, from) in pieces {
+        if !doc.materials.contains_key(piece)
+            && let Some(material) = doc.materials.get(from).cloned()
+        {
+            doc.materials.insert(piece.clone(), material);
+        }
+        if !doc.appearances.bodies.contains_key(piece)
+            && let Some(look) = doc.appearances.bodies.get(from).cloned()
+        {
+            doc.appearances.bodies.insert(piece.clone(), look);
+        }
+    }
+}
 
 fn extrude(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "solid.extrude";
@@ -1359,6 +1393,7 @@ pub(super) fn extent_param(s: &Session, p: &Value, cmd: &str) -> Result<Extent> 
         to_offset: expr(p, "to_offset"),
         from: p.get("from").and_then(vec3).map(FacePick),
         to_body_apart: false,
+        picked_placements: Vec::new(),
     })
 }
 
@@ -2534,6 +2569,20 @@ fn move_body_feature(s: &mut Session, p: &Value) -> Result<Value> {
     let translate = point_param(s, p, "translate", cmd)?.unwrap_or_else(|| point_expr(Vec3::ZERO));
     let origin = point_param(s, p, "origin", cmd)?;
     let copy = bool_(p, "copy").unwrap_or(false);
+    // The command boundary captures these before instance names become definition names.
+    let copy_frames: Vec<solidcraft_doc::Mat> = if copy {
+        p.get("_copy_frames")
+            .cloned()
+            .or_else(crate::frames::take_copy_frames)
+            .map(|v| serde_json::from_value(v).map_err(|_| bad(cmd, "invalid copy placements")))
+            .transpose()?
+            .unwrap_or_else(|| vec![solidcraft_doc::IDENTITY; bodies.len()])
+    } else {
+        Vec::new()
+    };
+    if !copy_frames.is_empty() && (copy_frames.len() != bodies.len() || copy_frames.iter().any(|m| !solidcraft_doc::valid_transfer_matrix(m))) {
+        return Err(bad(cmd, "invalid copy placements"));
+    }
     let reply = add_feature(
         s,
         p,
@@ -2544,6 +2593,7 @@ fn move_body_feature(s: &mut Session, p: &Value) -> Result<Value> {
             rotate_axis: p.get("axis").and_then(vec3).map(Dir),
             angle: expr(p, "angle"),
             copy,
+            copy_frames,
         },
     )?;
     if copy {
@@ -3061,8 +3111,16 @@ fn plane_offset(s: &mut Session, p: &Value) -> Result<Value> {
     if let Some(face) = p.get("base").filter(|b| b.get("face").is_some()) {
         let base = super::sketch::face::capture(s, face, cmd)?;
         super::sketch::face::capture_positions(s, &base)?;
-        // The capture is already in the authoring frame.
-        return add_feature_in(s, p, FeatureKind::ConstructionPlane { plane: offset(base) }, false);
+        let mut plane = offset(base);
+        if let PlaneRef::ThroughPoint { point, .. } = &mut plane {
+            // The captured face is local already; only the separately picked point is world geometry.
+            let mut kind = FeatureKind::ConstructionPoint { def: solidcraft_doc::construct::PointDef::At { point: (**point).clone() } };
+            super::component::to_active_frame(s, &mut kind);
+            if let FeatureKind::ConstructionPoint { def: solidcraft_doc::construct::PointDef::At { point: local } } = kind {
+                **point = local;
+            }
+        }
+        return add_feature_in(s, p, FeatureKind::ConstructionPlane { plane }, false);
     }
     let base = plane_param(s, p.get("base"), cmd)?;
     add_feature(s, p, FeatureKind::ConstructionPlane { plane: offset(base) })
@@ -3070,8 +3128,9 @@ fn plane_offset(s: &mut Session, p: &Value) -> Result<Value> {
 
 fn plane_angle(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "construct.plane.at_angle";
-    // The plane follows an edge or face it is on; a construction axis is kept as it is now.
-    let (axis_origin, axis_dir, line, _) = axis_line(s, p, cmd)?;
+    // The plane follows the edge, face or construction axis it turns about.
+    let (axis_origin, axis_dir, line, axis_feature) = axis_line(s, p, cmd)?;
+    let line = line.or_else(|| axis_feature.map(|name| solidcraft_doc::construct::GeoRef::Axis { name }));
     let angle = req_expr(cmd, p, "angle")?;
     check_expr(s, &angle, Kind::Angle, cmd, "angle")?;
     let line = line.map(Box::new);
@@ -3385,6 +3444,13 @@ fn hole(s: &mut Session, p: &Value) -> Result<Value> {
                 .unwrap_or_else(|| format!("unknown tapped thread `{t}` (ISO metric or a catalogued UNC/UNF, G, Rp, Rc or NPT size)")),
         ));
     }
+    // The tolerance class the thread's standard gives (#16336): checked here, saved as written.
+    let thread_class = str_(p, "thread_class").map(|c| c.trim().to_string()).filter(|c| !c.is_empty());
+    match (&thread_class, thread.as_deref().and_then(solidcraft_doc::parse_tapped_thread)) {
+        (None, _) => {}
+        (Some(_), None) => return Err(bad(cmd, "`thread_class` needs `thread` (a tapped hole)")),
+        (Some(class), Some(tapped)) => tapped.check_class(class).map_err(|e| bad(cmd, e))?,
+    }
     let thread_depth = match p.get("thread_depth") {
         None | Some(Value::Null) => None,
         Some(_) => Some(req_expr(cmd, p, "thread_depth")?),
@@ -3610,6 +3676,7 @@ fn hole(s: &mut Session, p: &Value) -> Result<Value> {
             thread,
             thread_depth,
             hand,
+            thread_class,
             modeled,
             ease_out,
             to: to.map(FacePick),
@@ -4035,10 +4102,56 @@ fn loft(s: &mut Session, p: &Value) -> Result<Value> {
 
 fn thread(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "solid.thread";
-    let face = p
-        .get("face")
-        .and_then(|v| vec3(v).or_else(|| v.get("point").and_then(vec3)))
-        .ok_or_else(|| bad(cmd, "`face` must be a point [x, y, z] on a cylindrical face"))?;
+    let grouped = p.get("faces").is_some();
+    let single_face_selection = match p.get("single_face_selection") {
+        None => false,
+        Some(Value::Bool(value)) => *value,
+        Some(_) => return Err(bad(cmd, "`single_face_selection` must be a boolean")),
+    };
+    let point = |v: &Value| vec3(v).or_else(|| v.get("point").and_then(vec3));
+    let faces = if let Some(value) = p.get("faces") {
+        if p.get("face").is_some() {
+            return Err(bad(cmd, "give `face` or `faces`, not both"));
+        }
+        let values = value
+            .as_array()
+            .filter(|values| !values.is_empty() && values.len() <= 1024)
+            .ok_or_else(|| bad(cmd, "`faces` must contain between 1 and 1024 points on cylindrical faces"))?;
+        let mut faces = Vec::with_capacity(values.len());
+        for value in values {
+            let face = point(value).ok_or_else(|| bad(cmd, "`faces` must be finite points [x, y, z] on cylindrical faces"))?;
+            faces.push(face);
+        }
+        faces
+    } else {
+        vec![p.get("face").and_then(point).ok_or_else(|| bad(cmd, "`face` must be a point [x, y, z] on a cylindrical face"))?]
+    };
+    let (face, additional_faces) = faces.split_first().ok_or_else(|| bad(cmd, "pick a cylindrical face to thread"))?;
+    if single_face_selection && (!grouped || !additional_faces.is_empty()) {
+        return Err(bad(cmd, "`single_face_selection` requires exactly one body-qualified entry in `faces`"));
+    }
+    let state = s.model.state();
+    let mut target_bodies: Vec<solidcraft_doc::BodyName> = Vec::new();
+    let mut owner = None;
+    if grouped {
+        for value in p.get("faces").and_then(Value::as_array).into_iter().flatten() {
+            let name = value.get("body").and_then(Value::as_str).ok_or_else(|| bad(cmd, "each entry of `faces` must be {body, point}"))?;
+            let mut matches = state.bodies.iter().filter(|body| body.name == name);
+            let body = matches
+                .next()
+                .filter(|_| matches.next().is_none())
+                .ok_or_else(|| bad(cmd, format!("Thread target body `{name}` is missing or ambiguous")))?;
+            let component = s.doc.model_body_component(body);
+            if owner.is_some_and(|owner| owner != component) {
+                return Err(bad(
+                    cmd,
+                    "all faces of one Thread feature must belong to the same component; create a separate Thread feature for each component",
+                ));
+            }
+            owner = Some(component);
+            target_bodies.push(body.name.clone().into());
+        }
+    }
     use solidcraft_doc::thread_forms::{SteepFlank, ThreadForm, ThreadHand, ThreadTip};
     let designation = str_(p, "designation").map(|t| t.trim().to_string()).filter(|t| !t.is_empty());
     let form = match str_(p, "form") {
@@ -4122,11 +4235,24 @@ fn thread(s: &mut Session, p: &Value) -> Result<Value> {
     };
     let modeled = p.get("modeled").and_then(Value::as_bool).unwrap_or(false);
     // The coarse metric range bounds only a metric thread with no designation given.
-    if designation.is_none()
-        && form == ThreadForm::Metric
-        && let Some(msg) = beyond_coarse_range(&s.model.state(), face)
-    {
-        return Err(bad(cmd, msg));
+    if designation.is_none() && form == ThreadForm::Metric {
+        let state = s.model.state();
+        for (index, face) in faces.iter().enumerate() {
+            let scoped;
+            let input = if let Some(body) = target_bodies.get(index) {
+                scoped = {
+                    let mut input = solidcraft_doc::ModelState::default();
+                    input.bodies = state.bodies.iter().filter(|b| b.name == body.as_ref()).cloned().collect();
+                    input
+                };
+                &scoped
+            } else {
+                &*state
+            };
+            if let Some(msg) = beyond_coarse_range(input, *face) {
+                return Err(bad(cmd, msg));
+            }
+        }
     }
     let designation_is_none = designation.is_none();
     let continuous_flanks = match p.get("continuous_flanks") {
@@ -4135,7 +4261,7 @@ fn thread(s: &mut Session, p: &Value) -> Result<Value> {
         Some(_) => return Err(bad(cmd, "`continuous_flanks` must be a boolean")),
     };
     let kind = FeatureKind::Thread {
-        face: FacePick(face),
+        face: FacePick(*face),
         designation,
         length,
         modeled,
@@ -4152,11 +4278,18 @@ fn thread(s: &mut Session, p: &Value) -> Result<Value> {
         steep_flank,
         // Only a thread saved before holes were sized by nominal diameter, edited by `timeline.redefine`.
         old_auto_size: designation_is_none && bool_(p, "old_auto_size").unwrap_or(false),
+        additional_faces: additional_faces.iter().copied().map(FacePick).collect(),
+        target_bodies,
+        single_face_selection,
     };
     let v = add_feature(s, p, kind)?;
     let st = s.model.state();
-    let t = v.get("feature").and_then(Value::as_u64).and_then(|id| st.threads.iter().find(|t| t.feature == id).cloned());
-    let mut reply = json!({"feature": v.get("feature"), "name": v.get("name"), "thread": t});
+    let feature = v.get("feature").and_then(Value::as_u64);
+    let threads: Vec<_> = st.threads.iter().filter(|t| Some(t.feature) == feature).collect();
+    let mut reply = json!({"feature": v.get("feature"), "name": v.get("name"), "thread": threads.first()});
+    if grouped {
+        reply["threads"] = json!(threads);
+    }
     // A hole narrowed to the thread's minor diameter says so.
     if let Some(w) = v.get("warning").filter(|w| !w.is_null()) {
         reply["warning"] = w.clone();

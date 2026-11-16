@@ -53,6 +53,27 @@ pub struct RenderBrowser {
     pub open: bool,
 }
 
+/// Show or hide one of the Render window's two panels: the Inspector (`view.render_inspector`) or
+/// the Shots strip (`view.shots_strip`). Both read the one flag the same way, so one contract
+/// describes both calls. Unlike the viewport toggles below, neither command has a toggle form: the
+/// flag is required, and the schema says so.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct RenderPanelVisibilityParams {
+    /// True shows the panel, false hides it.
+    pub visible: bool,
+}
+
+/// What the two Render window panels answer: the flag they were given. The window applies it; it is
+/// per-document UI state and never saved with the design.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct RenderPanelVisibilityResult {
+    pub visible: bool,
+    /// In the warn parameter-check mode: what the call's parameters got wrong.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub param_warnings: Vec<String>,
+}
+
 /// Latch or release the viewport's Zoom tool. With no flag, the UI toggles it.
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -162,7 +183,7 @@ pub struct OriginAxesAcrossViewResult {
 }
 
 /// Turn the view to the command's standard orientation (front, back, left, right, top, bottom
-/// or isometric), as the view cube does, keeping the camera's target, distance, projection and
+/// or isometric), as the axes navigator does, keeping the camera's target, distance, projection and
 /// up axis. Display only: the design isn't changed and nothing is added to undo.
 #[derive(Debug, Deserialize, JsonSchema)]
 #[schemars(deny_unknown_fields)]
@@ -339,25 +360,25 @@ pub struct RenderFrame {
 #[derive(Debug, Default, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct NavigatorParams {
-    /// The navigator: signed axes, the cube, or a custom body (the cube until a body is
+    /// The navigator: signed axes, or a custom body (the signed axes until a body is
     /// chosen). Default: unchanged.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub style: Option<NavigatorStyle>,
     /// A body of the open design for the custom navigator to draw; the app keeps a snapshot of
-    /// it, so it stays when the design closes. `null`: no body (the cube again). A body over
+    /// it, so it stays when the design closes. `null`: no body (the signed axes again). A body over
     /// 10,000 triangles, or whose thinnest width is under a fifth of its widest, is refused.
     /// Default: unchanged.
     #[serde(default, deserialize_with = "nullable", skip_serializing_if = "Option::is_none")]
     #[schemars(with = "Option<String>")]
     pub body: Option<Option<String>>,
-    /// The custom navigator's colours: the cube's (`themed`) or the body's own appearance and
+    /// The custom navigator's colours: the theme's (`themed`) or the body's own appearance and
     /// edge colour (`modeled`). Default: unchanged.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub texture: Option<NavigatorTexture>,
-    /// The cube's orbit and roll arrows around the custom navigator. Default: unchanged.
+    /// The orbit and roll arrows around the custom navigator. Default: unchanged.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub arrows: Option<bool>,
-    /// The cube's Home button beside the custom navigator. Default: unchanged.
+    /// The Home button beside the custom navigator. Default: unchanged.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub home: Option<bool>,
 }
@@ -367,7 +388,6 @@ pub struct NavigatorParams {
 #[serde(rename_all = "snake_case")]
 pub enum NavigatorStyle {
     Axes,
-    Cube,
     Custom,
 }
 
@@ -578,6 +598,30 @@ pub struct AmbientOcclusionParams {
 #[derive(Debug, Serialize, JsonSchema)]
 pub struct AmbientOcclusionResult {
     /// Whether it is on now.
+    pub enabled: bool,
+    /// In the warn parameter-check mode: what the call's parameters got wrong.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub param_warnings: Vec<String>,
+}
+
+reads!(perspective_enabled -> bool, "enabled must be a boolean");
+
+/// `view.perspective`: draw the view in perspective or orthographic. A display setting the app
+/// keeps, not saved with the design; a sketch being edited is always drawn orthographic.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields, transform = enabled_required)]
+pub struct PerspectiveParams {
+    // Optional in the type and required in the schema (`enabled_required`), as `mode` above.
+    /// True draws the view in perspective, false orthographic.
+    #[serde(default, deserialize_with = "perspective_enabled", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "bool")]
+    pub enabled: Option<bool>,
+}
+
+/// What `view.perspective` returns.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct PerspectiveResult {
+    /// Whether the view is drawn in perspective now.
     pub enabled: bool,
     /// In the warn parameter-check mode: what the call's parameters got wrong.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]

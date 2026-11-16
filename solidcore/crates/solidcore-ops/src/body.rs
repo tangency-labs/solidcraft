@@ -4,6 +4,7 @@
 //! Operations take a body and change it, as the kernel does; an application that keeps its
 //! input calls [`Body::copy`] first.
 
+use std::collections::BTreeSet;
 use std::sync::{Mutex, MutexGuard, PoisonError, TryLockError};
 
 use solidcore::kernel::Kernel;
@@ -259,10 +260,17 @@ impl Body {
     ///
     /// # Errors
     /// [`Error::Unsupported`] for a body with a closed shell (turned over, a solid would be inside
-    /// out), the body as it was; [`Error::Argument`] for an `order` that is not this body's; the
-    /// kernel's status; those of [`Body::to_record`].
+    /// out), the body as it was; [`Error::Argument`], before the body is touched, for an `order`
+    /// that is not this body's (one naming an edge the body does not have); the kernel's status;
+    /// those of [`Body::to_record`].
     pub fn turn_over(&self, order: &Order) -> Result<TurnedOver> {
         with_body("turn_over_sheet", self, |k, b| {
+            // the kernel keeps every edge, so an order whose edges are all the body's maps
+            // through the turned record below; any other is refused before the sheet turns
+            let edges: BTreeSet<_> = b.edge_list().iter().collect();
+            if !order.edges.iter().all(|e| edges.contains(e)) {
+                return Ok(Err(Error::Argument));
+            }
             Ok(turn_over_sheet(k, b).map_err(status))
         })??;
         let (record, new_order) = self.to_record()?;
@@ -380,11 +388,25 @@ impl Body {
     /// [`Error::Unsupported`] for what the record cannot carry (yet); [`Error::Record`] for
     /// kernel data that does not make a valid record; the kernel's error by its type.
     pub fn to_record(&self) -> Result<(Record, Order)> {
+        self.with_record("brep::to_record", |_, record, order| Ok((record, order)))
+    }
+
+    /// `f` on this body's kernel B-rep with its record and [`Order`] ([`Body::to_record`]), in
+    /// one call under the body's lock, so the order is the one of the B-rep `f` reads. The body
+    /// is edited as [`Body::to_record`] edits it.
+    ///
+    /// # Errors
+    /// Those of [`Body::to_record`]; `f`'s, by its type.
+    pub(crate) fn with_record<T>(
+        &self,
+        call: &'static str,
+        f: impl FnOnce(&Brep, Record, Order) -> solidcore::Result<T>,
+    ) -> Result<T> {
         let mut out = None;
         let mut refusal = None;
-        with_body("brep::to_record", self, |k, b| {
+        with_body(call, self, |k, b| {
             match to_record(k, b) {
-                Ok(made) => out = Some(made),
+                Ok((record, order)) => out = Some(f(b, record, order)?),
                 Err(Unsupported::Kernel(e)) => return Err(e),
                 Err(e) => refusal = Some(refused(e)),
             }

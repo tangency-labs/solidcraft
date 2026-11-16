@@ -19,9 +19,15 @@
 //! widened interval, and the put-back was refused as the fork's since 779cb9b. -9 now
 //! builds the fork's 2fc375f body (6 faces), with the closed form's volume to 8e-12: the
 //! shrink keeps the rounds' exact trims (WR-700), where the fork's 1006.320632128887
-//! through SolidCraft's capi is 4.8e-9 over it. With the flags off, the put-back fails at -7.5 (a corner edge) and at -9
-//! (a rollover). Each such failure is now a typed refusal,
-//! `OffsetFacesRefusal::NotPutBack`, where it had none.
+//! through SolidCraft's capi is 4.8e-9 over it.
+//!
+//! On the default kernel the depths below the floor build too (#13841): the rounds' rails
+//! on the walls lie below the floor there, so each round leaves its wall across the floor's
+//! edge (a cliff) and is built as a cliff overflow, which was a flag
+//! (`fillet_cliff_overflow`, with the refusal of rails leaving their faces and the rail end
+//! on the continued surface) and is now the only path. Before, the put-back failed at
+//! -7.5 and -8 (two fillet surfaces that do not meet) and at -9 and -9.5 (a rollover),
+//! refused as `OffsetFacesRefusal::NotPutBack`.
 #![allow(
     clippy::unwrap_used,
     clippy::expect_used,
@@ -37,6 +43,7 @@ use solidcore::offset::offset_faces::{OffsetFacesExecutive, OffsetFacesRefusal};
 use solidcore::primitive::api_primitives::create_box;
 use solidcore::query::api_queries::brep_is_manifold_solid;
 use solidcore::surface::plane::Plane;
+use solidcore::topology::brep::validation::{check_brep, CheckLevel};
 use solidcore::topology::face::p2 as face2;
 use solidcore::topology::{edge, vertex, Brep, EdgeId, FaceId};
 use solidcore::Kernel;
@@ -208,121 +215,93 @@ fn flags_off_build_the_depths_above_the_floor() {
     }
 }
 
+/// #13841: the default kernel builds every depth below the floor as the preset does, one
+/// manifold solid of 6 faces with the closed form's volume.
+#[test]
+fn default_kernel_builds_the_depths_below_the_floor() {
+    for d in [-7.5, -8.0, -9.0, -9.5] {
+        let k = &mut Kernel::default();
+        let (mut b, ex, r) = moved(k, d);
+        assert!(
+            r.is_ok(),
+            "d {d}: {r:?}: {:?} {}",
+            ex.refusal(),
+            ex.reason()
+        );
+        assert_eq!(ex.refusal(), OffsetFacesRefusal::None, "d {d}");
+        assert!(brep_is_manifold_solid(&b).unwrap(), "d {d}");
+        assert_eq!(b.face_list().len(), 6, "d {d}");
+        let lines = check_brep(k, &mut b, CheckLevel::Level2).unwrap().lines();
+        assert!(lines.is_empty(), "d {d}: {lines:?}");
+        let v = volume(k, &mut b);
+        let want = analytic(d);
+        assert!(
+            (v - want).abs() <= 1e-6 * want,
+            "d {d}: V {v} vs analytic {want}"
+        );
+    }
+}
+
 /// SolidCraft's `UpstreamFixes` preset (183 flags).
 fn solidcraft_flags(k: &mut Kernel) {
     k.fixes.analytic_copy_keeps_parameterization = true;
-    k.fixes.boolean2d_plane_covers_far_faces = true;
-    k.fixes.boolean_cleanup_removes_slits = true;
-    k.fixes.boolean_new_face_closure_both_sides = true;
-    k.fixes.boolean_outer_shell_first = true;
-    k.fixes.boolean_skips_faces_apart = true;
-    k.fixes.boolean_splits_definition_across_split = true;
     k.fixes.boolean_vertex_by_best_crossing = true;
     k.fixes.box_face_failures_propagate = true;
     k.fixes.bspline_trim_preserves_uv_spans = true;
-    k.fixes.check_loop_projected_seam_ends = true;
-    k.fixes.check_loop_vertex_tolerance = true;
     k.fixes.classify_edge_interval = true;
     k.fixes.cover_refuses_folded_continuation = true;
-    k.fixes.cover_wraps_across_closed_seam = true;
     k.fixes.curve_contacts_at_curve_ends = true;
     k.fixes.curve_loop_normal_from_area = true;
     k.fixes.cylinder_rebuild_mean_radius = true;
     k.fixes.degenerate_proto_edge_in_one_vertex = true;
-    k.fixes.delete_vertex_joins_seam_iso_curve = true;
-    k.fixes.edge_check_orders_tangent_faces = true;
     k.fixes.ellipse_trim_seam_lines_span_cone_height = true;
-    k.fixes.extrusion_origin_scaled_zero = true;
     k.fixes.face_tight_box_searches_trim = true;
-    k.fixes.fillet_3x2_mixed_concave_side_edge = true;
-    k.fixes.fillet_3x2_tangent_side_edge_roles = true;
     k.fixes.fillet_chamfer_cone_on_arc = true;
-    k.fixes.fillet_chamfer_cone_stored_as_cone = true;
     k.fixes.fillet_cleanup_keeps_target_faces = true;
-    k.fixes.fillet_cliff_overflow = true;
-    k.fixes.fillet_corner_ball_center_from_axes = true;
-    k.fixes.fillet_corner_ball_patch = true;
-    k.fixes.fillet_half_degree_crease = true;
     k.fixes.fillet_knife_edge_rounds = true;
     k.fixes.fillet_mitre_concave_face_corners = true;
-    k.fixes.fillet_mitre_gap_patch = true;
-    k.fixes.fillet_nx1_end_rib_global_merge = true;
-    k.fixes.fillet_nx1_opposite_continuation_side_edge = true;
-    k.fixes.fillet_nx1_tangent_corner_edge = true;
-    k.fixes.fillet_nx1_tangent_side_edge = true;
     k.fixes.fillet_patch_keeps_fillet_edges = true;
     k.fixes.fillet_point_step_per_point = true;
-    k.fixes.fillet_rail_end_on_continued_surface = true;
-    k.fixes.fillet_rails_meet_at_one_end_point = true;
     k.fixes.fillet_refuse_face_consuming_blends = true;
     k.fixes.fillet_refuse_overlapping_bands = true;
-    k.fixes.fillet_refuse_rails_leaving_faces = true;
     k.fixes.fillet_removal_takes_ring_fillets = true;
-    k.fixes.fillet_run_on_past_far_end_only = true;
-    k.fixes.fillet_split_edge_keeps_near_half = true;
     k.fixes.fillet_trace_reaches_rails = true;
-    k.fixes.fillet_trim_inside_by_best_dot = true;
     k.fixes.fillet_trim_status = true;
     k.fixes.fillet_variable_span_follows_fillet = true;
-    k.fixes.fillet_vertex_error_diagnostics = true;
-    k.fixes.flat_corners_test_bits = true;
     k.fixes.found_torus_sphere_keep_tested_nurb = true;
-    k.fixes.glue_vertices_joins_every_region = true;
     k.fixes.good_drop_result_distances_in_order = true;
     k.fixes.imprint_extends_edge_to_proto_vertex = true;
     k.fixes.imprint_reuses_coincident_face_edge = true;
-    k.fixes.internal_pole_row_through_knot = true;
     k.fixes.join_touching_loops = true;
     k.fixes.keep_operand_uv_trims = true;
     k.fixes.linear_sweep_arc_is_cylinder = true;
     k.fixes.local_operation_box_holds_new_surfaces = true;
-    k.fixes.local_operation_closes_walls_to_nothing = true;
     k.fixes.local_operation_refuses_loose_tangent_edges = true;
     k.fixes.local_operation_step_walls = true;
-    k.fixes.loops_go_on_round_the_vertex = true;
     k.fixes.new_edge_vertex_tolerance_covers_gap = true;
     k.fixes.nurb_cylinder_inside_out_frame = true;
     k.fixes.offset_analytic_mate_edges = true;
-    k.fixes.offset_clip_right_side_out = true;
     k.fixes.offset_collapsed_rounds_mated = true;
-    k.fixes.offset_excess_faces_after_merge = true;
     k.fixes.offset_extended_edges_mated = true;
     k.fixes.offset_extension_as_itself = true;
     k.fixes.offset_extension_from_base = true;
-    k.fixes.offset_missing_surface_fails = true;
-    k.fixes.offset_point_vertex_caps = true;
     k.fixes.offset_resolve_crossing_loops = true;
     k.fixes.offset_stitch_at_body_tolerance = true;
-    k.fixes.offset_walls_touch_refused = true;
-    k.fixes.oscillating_skips_failed_guesses = true;
-    k.fixes.planar_path_profile_placement_statuses = true;
-    k.fixes.planar_path_sweep_statuses = true;
     k.fixes.point_solve_keeps_triangle_guess = true;
     k.fixes.proto_edge_self_loop_on_vertex_degenerate = true;
     k.fixes.proto_edge_splits_at_captured_vertices = true;
     k.fixes.proto_vertex_miss_is_false = true;
-    k.fixes.refine_cc_range_ends = true;
     k.fixes.revolution_round_offset_collapses = true;
     k.fixes.revolve_analytic_profile_faces = true;
     k.fixes.revolve_holed_profile_void = true;
-    k.fixes.revolve_nested_shells_as_cavities = true;
-    k.fixes.revolve_splits_curves_on_axis = true;
     k.fixes.shell_edges_on_analytics_exact = true;
-    k.fixes.shell_empty_cavity_fails = true;
     k.fixes.simple_coincidence_crossing_is_point = true;
-    k.fixes.slice_coincident_faces_sheet_side = true;
     k.fixes.ssi_low_angle_start_on_probation = true;
     k.fixes.ssi_pole_point_keeps_its_tangent = true;
-    k.fixes.ssi_singular_start_inside_direction = true;
     k.fixes.ssi_tangent_contact_points = true;
     k.fixes.ssi_tangent_curve_tracer = true;
     k.fixes.ssi_trace_tangent_curves_once = true;
-    k.fixes.taper_tangent_corner_planes = true;
     k.fixes.thicken_planar_side_walls = true;
-    k.fixes.torus_check_spindle_apex = true;
-    k.fixes.torus_iso_circle_axis_from_midpoint = true;
-    k.fixes.torus_major_radius_from_origin = true;
-    k.fixes.torus_signed_gen_curve_interval = true;
     k.fixes.transform_model_size_from_body_box = true;
     k.fixes.transform_scales_each_tolerance = true;
     k.fixes.uv_trim_corner_end_points_only = true;

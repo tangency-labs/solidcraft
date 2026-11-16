@@ -26,6 +26,8 @@
 
 #[path = "support/offset_fixture.rs"]
 mod offset_fixture;
+#[path = "support/solidcraft_fixes.rs"]
+mod solidcraft_fixes;
 
 use offset_fixture::{offset_full, planar_faces_at, volume, Notifications};
 use solidcore::curve::curve::Curve;
@@ -43,6 +45,7 @@ use solidcore::sweep::api_surfaces::create_skin_primitive;
 use solidcore::topology::brep::is_outward_solid;
 use solidcore::topology::brep::validation::{check_brep, CheckLevel};
 use solidcore::{Brep, Kernel};
+use solidcraft_fixes::solidcraft_fixes;
 
 /// The issue's loft: a 40 x 40 square (or, for the control, a circle r 15) at z = 0 to a
 /// circle r 15 at z = 60, each section four curves, the circle's quarter arcs starting at
@@ -199,8 +202,7 @@ fn mated_offsets_alone_shell_the_square_to_circle_loft() {
     );
 }
 
-/// SolidCraft's fixes (`issue_1476_swept_bar_shell.rs`, which include the flag and WR-454's
-/// `shell_empty_cavity_fails`): the same sound body, with loop-gap closure unconditional.
+/// SolidCraft's fixes (`kernel_cases/fixes.json`, which include the flag): the same sound body, with loop-gap closure unconditional.
 #[test]
 fn solidcraft_fixes_shell_the_square_to_circle_loft() {
     let (mut k, result) = shell(&solidcraft_fixes(), true);
@@ -297,62 +299,4 @@ fn write_issue_1818_operand() {
         read.edges().len(),
         volume(&k, &mut read)
     );
-}
-
-/// SolidCraft's `core::fixes()` as `issue_1476_swept_bar_shell.rs` lists them.
-fn solidcraft_fixes() -> UpstreamFixes {
-    let mut f = UpstreamFixes::default();
-    f.fillet_refuse_rails_leaving_faces = true;
-    f.fillet_refuse_face_consuming_blends = true;
-    f.fillet_corner_ball_patch = true;
-    f.fillet_chamfer_cone_on_arc = true;
-    f.offset_excess_faces_after_merge = true;
-    f.offset_clip_right_side_out = true;
-    f.offset_extended_edges_mated = true;
-    f.keep_operand_uv_trims = true;
-    f.geometric_g2_continuity = true;
-    f.proto_vertex_miss_is_false = true;
-    f.check_loop_vertex_tolerance = true;
-    f.check_loop_projected_seam_ends = true;
-    f.oscillating_skips_failed_guesses = true;
-    f.refine_cc_range_ends = true;
-    f.flat_corners_test_bits = true;
-    f.cylinder_rebuild_mean_radius = true;
-    f.revolve_analytic_profile_faces = true;
-    f.revolve_nested_shells_as_cavities = true;
-    f.join_touching_loops = true;
-    f.offset_resolve_crossing_loops = true;
-    f.offset_walls_touch_refused = true;
-    f.offset_analytic_mate_edges = true;
-    f.nurb_cylinder_inside_out_frame = true;
-    f.offset_collapsed_rounds_mated = true;
-    f.offset_missing_surface_fails = true;
-    f.fillet_nx1_end_rib_global_merge = true;
-    f.uv_trim_corner_end_points_only = true;
-    f.bspline_trim_preserves_uv_spans = true;
-    f.proto_edge_self_loop_on_vertex_degenerate = true;
-    f.slice_coincident_faces_sheet_side = true;
-    f.boolean_outer_shell_first = true;
-    f.cover_refuses_folded_continuation = true;
-    f.boolean_vertex_by_best_crossing = true;
-    f.boolean_cleanup_removes_slits = true;
-    f.classify_edge_interval = true;
-    f.ellipse_trim_seam_lines_span_cone_height = true;
-    f.degenerate_proto_edge_in_one_vertex = true;
-    f.new_edge_vertex_tolerance_covers_gap = true;
-    f.torus_signed_gen_curve_interval = true;
-    f.point_solve_keeps_triangle_guess = true;
-    f.imprint_extends_edge_to_proto_vertex = true;
-    f.fillet_point_step_per_point = true;
-    f.analytic_copy_keeps_parameterization = true;
-    f.offset_extension_from_base = true;
-    f.fillet_cleanup_keeps_target_faces = true;
-    f.fillet_nx1_tangent_side_edge = true;
-    f.offset_stitch_at_body_tolerance = true;
-    f.curve_contacts_at_curve_ends = true;
-    f.shell_empty_cavity_fails = true;
-    f.ssi_tangent_contact_points = true;
-    f.ssi_trace_tangent_curves_once = true;
-    f.found_torus_sphere_keep_tested_nurb = true;
-    f
 }
