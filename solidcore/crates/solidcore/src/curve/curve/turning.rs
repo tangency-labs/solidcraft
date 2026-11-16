@@ -185,14 +185,19 @@ fn hull_is_flat(x: &Bern, w: &Bern, scale: f64) -> bool {
 ///   rounding, as where the coordinate is constant), and its hull is flat
 ///   ([`hull_is_flat`]): the coordinate's ends are then within `4 p + EPSILON * scale`
 ///   of its extreme over it, `p` the rounding of its control points, or
-/// - it is no wider than two ulps of its parameter.
+/// - no double lies strictly between its ends `ta` and `tb` (their computed midpoint
+///   rounds to one of them), so the ends are every parameter in it that can be evaluated.
+///   A width test against ulps of `t` alone would accept a range with a double inside,
+///   whose interior extreme the ends miss (knots near `2^52`, spans a few ulps wide).
 ///
 /// Without the second rule a stretch where the numerator is zero to within rounding is
 /// never dropped and the first takes a width under `1 / (C p^2 (w_max / w_min)^2)`, so it
 /// would be tiled into that many ranges.
 ///
 /// The first rule's `change` is four roundings (`s1 - s0` is exact, both being dyadic),
-/// covered by the factor `1 + gamma_6`; `EPSILON * scale` is exact.
+/// covered by the factor `1 + gamma_6`; `EPSILON * scale` is exact. It divides by `w_min`
+/// twice rather than by `w_min^2`, which overflows for weights past about `1e154` and
+/// would make `change` zero.
 ///
 /// Every node's coefficients, points and bounds are checked finite (a halving can
 /// overflow past about `9e307`), so the `max` folds never see a NaN; a node that is not
@@ -248,12 +253,13 @@ fn isolate(
         let big = c.v.iter().fold(0.0_f64, |m, v| m.max(v.abs()));
         let err = c.e.iter().fold(0.0_f64, |m, e| m.max(*e));
         let change =
-            (node.s1 - node.s0) * (big + err) / (piece.w_min * piece.w_min) * (1.0 + gamma(6));
-        let ulp2 = 2.0 * f64::EPSILON * ta.abs().max(tb.abs());
+            (node.s1 - node.s0) * ((big + err) / piece.w_min) / piece.w_min * (1.0 + gamma(6));
+        let mid_t = 0.5 * ta + 0.5 * tb;
         let zero = c.v.iter().zip(&c.e).all(|(&v, &e)| v.abs() <= e);
         if change <= f64::EPSILON * piece.scale
             || (zero && hull_is_flat(&node.x, &node.w, piece.scale))
-            || tb - ta <= ulp2
+            || mid_t <= ta
+            || mid_t >= tb
         {
             out.push((ta.max(lo).min(hi), tb.max(lo).min(hi)));
             continue;
@@ -649,7 +655,7 @@ impl Curve {
     ///   `w >= w_min`), `p <= 2 (14 deg + d) u M rho + u M` to first order, so this bound is at
     ///   most `8 (14 deg + d) u M rho + 3 EPSILON M`, `d <=` [`MAX_DEPTH`]. Both factors
     ///   are the segment's own: weights and values elsewhere on the curve do not enter;
-    /// - `|C'|` times two ulps of `t`, where the range is that narrow.
+    /// - `|C'|` times one ulp of `t`, where no double lies strictly inside the range.
     ///
     /// Kinds: the B-spline kinds ([`Curve::b_spline_base`], a curve with its NURB) and
     /// the cubic Hermite curve, over any `interval` (a Hermite curve's cubic is
