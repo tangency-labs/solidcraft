@@ -1644,6 +1644,15 @@ pub struct GroundResult {
     pub occurrence: u64,
     /// Whether it is grounded now.
     pub grounded: bool,
+    /// The resulting placement within its parent, in the design's column-major matrix form.
+    pub transform: [[f64; 4]; 4],
+    /// Names of occurrences whose world placement changed in the solve (their first path when
+    /// nested in a component placed more than once). Empty also when already correctly placed.
+    pub moved: Vec<String>,
+    /// Joint errors and conflicts from the assembly-wide solve, including unrelated joints.
+    /// Degrees of freedom and the fixed-occurrence list are omitted.
+    #[serde(flatten)]
+    pub solved: super::joints::SolveReport,
     /// In the warn parameter-check mode: what the call's parameters got wrong.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub param_warnings: Vec<String>,
