@@ -400,7 +400,7 @@ fn case_e_runs_out_into_a_hole() {
 /// tried (design 5.1): 26 rows, 31.25 ..= 68.75. The band's sides are closed edges with reach
 /// `r + m` = 2.1; the rows at 31.25 and 68.75 lie 1.25 from a side, so the side's near set covers
 /// the whole row (to 60 + sqrt(2.1^2 - 1.25^2) past each end) and their crossings are not clean
-/// (the caller plays clean_crossing and drops the open tags): their 3 slots each are left out.
+/// (the caller plays `clean_crossing` and drops the open tags): their 3 slots each are left out.
 /// The other 24 rows hold one run-out (its centre 1.25 from the edge it runs out at; its
 /// neighbours hold no slot there) and two whole slots: 72 slots, 48 whole, 24 run-outs, 6 left
 /// out, cut 24 x (2 x 19.8 + 11.15) = 1218 (python3 hand count; design 17.1 table row J).
