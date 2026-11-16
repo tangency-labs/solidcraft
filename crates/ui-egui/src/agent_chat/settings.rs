@@ -607,26 +607,30 @@ fn dictation_section(app: &mut SolveApp, ui: &mut egui::Ui) {
             ui_kit::text(ui, e, ui_kit::Text::Error("dictation_key"));
         }
         ui_kit::text(ui, tr("ui.dictation_note"), ui_kit::Text::Hint("dictation_note"));
-        // How to run a service on this computer, for this system: each step with its command to
-        // copy, then a button that puts the server's address in Base URL.
+        // How to run a server on this computer, for this system: each step with its command to
+        // copy; then the server to start for dictation (the app starts and stops it), or the
+        // command to start it by hand; then a button that puts its address in Base URL.
         ui_kit::section(ui, "sc_dictation_setup", tr("ui.dictation_setup"), app.preferences.dictation_url.trim().is_empty(), |ui| {
             ui_kit::text(ui, tr("ui.dictation_setup_intro"), ui_kit::Text::Note("dictation_setup"));
-            for (n, step) in super::dictation::setup_steps().iter().enumerate() {
-                ui_kit::text(ui, &format!("{}. {}", n + 1, tr(step.text)), ui_kit::Text::Note(step.text));
-                if let Some(command) = step.command {
-                    let copy = ui_kit::button(ui, tr("ui.agent_chat_copy"), ui_kit::Button::Small).backing_on_hover_text(command);
-                    solidcraft_ui_registry::publish_handle(&format!("prefs:dictation_setup:{n}"), copy.rect.center());
-                    if copy.clicked() {
-                        ui.ctx().copy_text(command.to_string());
-                    }
-                    ui_kit::text(ui, command, ui_kit::Text::Report(step.text, false));
-                }
+            let steps = super::dictation::setup_steps();
+            let mut n = 0;
+            for (i, step) in steps.iter().enumerate().filter(|(_, s)| s.text != "ui.dictation_setup_run") {
+                n += 1;
+                ui_kit::text(ui, &format!("{n}. {}", tr(step.text)), ui_kit::Text::Note(step.text));
+                setup_command(ui, i, step);
             }
-            ui_kit::text(
-                ui,
-                &format!("{}. {}", super::dictation::setup_steps().len() + 1, tr("ui.dictation_setup_address")),
-                ui_kit::Text::Note("dictation_setup_address"),
-            );
+            // The browser build starts no programs.
+            #[cfg(not(target_arch = "wasm32"))]
+            {
+                n += 1;
+                ui_kit::text(ui, &format!("{n}. {}", tr("ui.dictation_setup_server")), ui_kit::Text::Note("dictation_setup_server"));
+                server_fields(app, ui);
+            }
+            for (i, step) in steps.iter().enumerate().filter(|(_, s)| s.text == "ui.dictation_setup_run") {
+                ui_kit::text(ui, tr(step.text), ui_kit::Text::Note(step.text));
+                setup_command(ui, i, step);
+            }
+            ui_kit::text(ui, &format!("{}. {}", n + 1, tr("ui.dictation_setup_address")), ui_kit::Text::Note("dictation_setup_address"));
             let use_it = ui_kit::button(ui, trf("ui.dictation_setup_use", &[("url", super::dictation::LOCAL_URL)]), ui_kit::Button::Small);
             solidcraft_ui_registry::publish_handle("prefs:dictation_setup:use", use_it.rect.center());
             if use_it.clicked() {
@@ -634,6 +638,69 @@ fn dictation_section(app: &mut SolveApp, ui: &mut egui::Ui) {
             }
         });
     });
+}
+
+/// A setup step's command, with its Copy button (handle `prefs:dictation_setup:{i}`).
+fn setup_command(ui: &mut egui::Ui, i: usize, step: &super::dictation::SetupStep) {
+    let Some(command) = step.command else { return };
+    let copy = ui_kit::button(ui, tr("ui.agent_chat_copy"), ui_kit::Button::Small).backing_on_hover_text(command);
+    solidcraft_ui_registry::publish_handle(&format!("prefs:dictation_setup:{i}"), copy.rect.center());
+    if copy.clicked() {
+        ui.ctx().copy_text(command.to_string());
+    }
+    // In the terminal's typeface, so it reads as something to paste as it is.
+    ui_kit::text(ui, command, ui_kit::Text::MonoNote(&format!("{}:command", step.text)));
+}
+
+/// The server program the app starts for dictation, and its model, each typed or chosen.
+/// Choosing the server also fills Base URL with its address when that is empty.
+#[cfg(not(target_arch = "wasm32"))]
+fn server_fields(app: &mut SolveApp, ui: &mut egui::Ui) {
+    let t = solidcraft_theme::Tokens::get();
+    let label_width = [tr("ui.dictation_server"), tr("ui.dictation_server_model")]
+        .iter()
+        .map(|label| ui_kit::ContentWidth::label(ui, label) + t.space_4)
+        .fold(0.0, f32::max);
+    let choose = solidcraft_ui_text::tr_label("Choose…");
+    let mut pick_server = false;
+    let mut pick_model = false;
+    // Choose… first, from the right, so the field takes the width left and the row stays inside
+    // the page.
+    let path_row = |ui: &mut egui::Ui, name: &str, value: &mut String, hint: &str| -> bool {
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            let b = ui_kit::button(ui, choose, ui_kit::Button::Small);
+            solidcraft_ui_registry::publish_handle(&format!("prefs:{name}:choose"), b.rect.center());
+            let r = ui_kit::cell_editor(ui, field_id(ui, &format!("sc_{name}")), value, hint, false);
+            solidcraft_ui_registry::publish_target(&format!("prefs:{name}"), r.rect);
+            b.clicked()
+        })
+        .inner
+    };
+    ui_kit::settings_form(ui, label_width, |ui| {
+        ui_kit::row(ui, tr("ui.dictation_server"), |ui| {
+            pick_server = path_row(ui, "dictation_server", &mut app.preferences.dictation_server, tr("ui.dictation_server_hint"));
+        });
+        ui_kit::row(ui, tr("ui.dictation_server_model"), |ui| {
+            pick_model = path_row(ui, "dictation_server_model", &mut app.preferences.dictation_server_model, tr("ui.dictation_server_model_hint"));
+        });
+    });
+    if pick_server {
+        app.pick_program(tr("ui.dictation_server_title"), |app, path| {
+            if let Some(path) = path {
+                app.preferences.dictation_server = path;
+                if app.preferences.dictation_url.trim().is_empty() {
+                    app.preferences.dictation_url = super::dictation::LOCAL_URL.to_string();
+                }
+            }
+        });
+    }
+    if pick_model {
+        app.pick_file(tr("ui.dictation_server_model"), &["bin"], |app, path| {
+            if let Some(path) = path {
+                app.preferences.dictation_server_model = path;
+            }
+        });
+    }
 }
 
 fn connecting_section(app: &mut SolveApp, ui: &mut egui::Ui) {

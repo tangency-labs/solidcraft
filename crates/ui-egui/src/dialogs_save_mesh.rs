@@ -536,7 +536,7 @@ fn slicer_combo(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut SaveMesh) {
     }
     if pick_custom {
         // Closing the file dialog without a program leaves the choice as it was.
-        app.pick_program(|app, path| app.slicer_menu.picked = path);
+        app.pick_program("Choose your slicer", |app, path| app.slicer_menu.picked = path);
     }
 }
 
@@ -682,7 +682,7 @@ mod tests {
         app.start("file.send_to_slicer");
         assert!(app.dialog.is_none(), "no dialog to choose a slicer in");
         assert!(matches!(&app.status, Some((_, _, true))));
-        app.services.pick_program = Some(Box::new(|| Box::pin(async { None })));
+        app.services.pick_program = Some(Box::new(|_: &str| Box::pin(async { None })));
         assert!(available(&app));
     }
 
@@ -719,7 +719,7 @@ mod tests {
     #[test]
     fn the_menu_entries_always_ask_and_a_script_with_a_slicer_does_not() {
         let (mut app, seen, mut params) = app_with_fake_slicer("ask");
-        app.services.pick_program = Some(Box::new(|| Box::pin(async { None })));
+        app.services.pick_program = Some(Box::new(|_: &str| Box::pin(async { None })));
         app.run("select.set", json!({"items": [{"type": "body", "name": "Part"}]})).unwrap();
         // Last time's slicer is remembered and bodies are selected: still the picker, with it pre-selected.
         let key = params["slicer"].as_str().unwrap().to_string();
@@ -1036,7 +1036,7 @@ mod tests {
         for (name, x) in [("One", 0), ("Two", 20)] {
             h.app.run("solid.box", json!({"length":10,"width":10,"height":10,"corner":[x,0,0],"operation":"new_body","body_name":name})).unwrap();
         }
-        h.app.services.pick_program = Some(Box::new(|| Box::pin(async { None })));
+        h.app.services.pick_program = Some(Box::new(|_: &str| Box::pin(async { None })));
         h.app.start("file.send_to_slicer");
         let all = body_picks(&h.app, false);
         h.app.dialog.as_mut().unwrap().inputs[0].items = all;
@@ -1094,7 +1094,7 @@ mod tests {
             h.app.dialog.as_ref().map(|d| d.inputs[0].items.clone()).unwrap_or_default()
         };
         let mut h = crate::scenario::Harness::new();
-        h.app.services.pick_program = Some(Box::new(|| Box::pin(async { None })));
+        h.app.services.pick_program = Some(Box::new(|_: &str| Box::pin(async { None })));
         h.app.run("solid.box", json!({"length":10,"width":10,"height":10,"operation":"new_body","body_name":"One"})).unwrap();
         let one = vec![Sel::Body { name: "One".into() }];
         assert!(h.app.preferences.export_selects_only_body, "on by default");

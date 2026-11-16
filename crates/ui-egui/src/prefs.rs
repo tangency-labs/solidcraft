@@ -1888,10 +1888,16 @@ preference_settings! {
     dictation_url: String = String::new();
     /// The model the endpoint transcribes with (`whisper-1` for OpenAI; local servers ignore it).
     dictation_model: String = "whisper-1".into();
-    /// The spoken language as an ISO-639-1 code (`en`, `it`); empty: the endpoint detects it.
+    /// The spoken language as an ISO-639-1 code (`en`, `it`); empty: the app's own language;
+    /// `auto`: the endpoint detects it.
     dictation_language: String = String::new();
     /// A key for the dictation endpoint is stored in the system keychain.
     dictation_key: bool = false;
+    /// whisper.cpp's `whisper-server` program, which the app starts on this computer when dictation
+    /// needs it and stops when it quits. Empty, the default: the app starts nothing.
+    dictation_server: String = String::new();
+    /// The model file the server loads; empty: `ggml-small.bin` found next to the server.
+    dictation_server_model: String = String::new();
 
     // ---- Sketch / selection modifier bindings (classic defaults; alternate mapping is opt-in) ----
     /// Modifier that suppresses sketch auto-snap while drawing or dragging a sketch point.

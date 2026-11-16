@@ -60,7 +60,7 @@ pub struct Endpoint {
     /// The base URL, normalised (`http://127.0.0.1:8178/v1`).
     pub base_url: String,
     pub model: String,
-    /// ISO-639-1 code; empty: the endpoint detects the language.
+    /// ISO-639-1 code; empty: the endpoint detects the language (`auto` in the preferences).
     pub language: String,
     /// A key is stored in the keychain for this endpoint.
     pub key: bool,
@@ -74,9 +74,28 @@ pub fn endpoint(app: &SolveApp) -> Option<Endpoint> {
     Some(Endpoint {
         base_url,
         model: if model.is_empty() { "whisper-1".into() } else { model.chars().take(200).collect() },
-        language: p.dictation_language.trim().chars().take(16).collect(),
+        language: spoken_language(&p.dictation_language, solidcraft_ui_text::language()),
         key: p.dictation_key,
     })
+}
+
+/// The language sent with a recording: the one set in the preferences, else the app's own
+/// (`ui`, a locale id such as `it` or `pt-BR`), or none for `auto`, which lets the endpoint
+/// detect it. Detecting costs a second pass over the audio in whisper.cpp (about 2 s on a
+/// laptop CPU), so the app's language is the default.
+pub fn spoken_language(set: &str, ui: &str) -> String {
+    let set = set.trim();
+    if set.eq_ignore_ascii_case("auto") {
+        return String::new();
+    }
+    if !set.is_empty() {
+        return set.chars().take(16).collect();
+    }
+    match ui.split('-').next().unwrap_or_default() {
+        // Whisper names Norwegian `no`.
+        "nb" => "no".into(),
+        code => code.to_ascii_lowercase(),
+    }
 }
 
 /// The microphone button is shown: the host can record and send requests, and an endpoint is set.
@@ -102,6 +121,12 @@ fn start(app: &mut SolveApp) {
         app.agent_chat.notice(tr("ui.dictation_not_set_up"), true);
         return;
     }
+    // The server loads its model while you speak.
+    #[cfg(not(target_arch = "wasm32"))]
+    if let Err(e) = ensure_server(app) {
+        app.agent_chat.notice(trf("ui.dictation_server_failed", &[("error", &e)]), true);
+        return;
+    }
     match recorder.start() {
         Ok(recording) => app.agent_chat.dictation = State::Recording(recording),
         Err(e) => app.agent_chat.notice(trf("ui.dictation_record_failed", &[("error", &e)]), true),
@@ -115,12 +140,20 @@ fn transcribe(app: &mut SolveApp, ctx: &egui::Context, recording: Box<dyn Record
         return;
     };
     let secrets = app.services.secrets.clone();
+    #[cfg(not(target_arch = "wasm32"))]
+    let server = app.agent_chat.dictation_server.as_ref().filter(|_| endpoint.base_url == LOCAL_URL).map(|s| s.service.watch());
     let (tx, rx) = mpsc::channel();
     let wake = ctx.clone();
     let language = solidcraft_ui_text::language();
     let spawned = std::thread::Builder::new().name("dictation".into()).spawn(move || {
         let _language = solidcraft_ui_text::scope(language);
-        let result = recording.finish().and_then(|wav| run(&endpoint, secrets.as_deref(), &http, wav));
+        let result = recording.finish().and_then(|wav| {
+            #[cfg(not(target_arch = "wasm32"))]
+            if let Some(server) = &server {
+                wait_until_ready(server)?;
+            }
+            run(&endpoint, secrets.as_deref(), &http, wav)
+        });
         drop(tx.send(result));
         wake.request_repaint();
     });
@@ -136,8 +169,17 @@ fn run(endpoint: &Endpoint, secrets: Option<&dyn Secrets>, http: &HttpFn, wav: V
         (true, Some(store)) => store.get(KEY_ID).map_err(|e| trf("ui.ai_keychain_error", &[("error", &e)]))?,
         _ => None,
     };
+    let seconds = wav.len().saturating_sub(44) as f64 / f64::from(WAV_RATE * 2);
+    let bytes = wav.len();
     let request = request(endpoint, key.as_deref(), wav)?;
-    let (status, body) = http(&request)?;
+    let started = std::time::Instant::now();
+    let answer = http(&request);
+    log::info!(
+        "dictation: {seconds:.1} s of audio ({bytes} bytes, language {:?}) transcribed in {:.2} s",
+        endpoint.language,
+        started.elapsed().as_secs_f64()
+    );
+    let (status, body) = answer?;
     parse(status, &body)
 }
 
@@ -208,6 +250,126 @@ pub fn parse(status: u16, body: &[u8]) -> Result<String, String> {
 /// The address the setup steps' server answers on.
 pub const LOCAL_URL: &str = "http://127.0.0.1:8178/v1";
 
+/// whisper.cpp's server, started by the app for dictation (Preferences: `dictation_server`) and
+/// stopped when the app quits (or the setting changes).
+#[cfg(not(target_arch = "wasm32"))]
+pub struct Server {
+    service: super::process::Service,
+    /// What it was started with, to start it again when the settings change.
+    argv: Vec<String>,
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+impl Drop for Server {
+    fn drop(&mut self) {
+        self.service.handle.stop_service(true);
+    }
+}
+
+/// The port of [`LOCAL_URL`].
+pub const LOCAL_PORT: u16 = 8178;
+/// The model the setup steps download.
+pub const SMALL_MODEL: &str = "ggml-small.bin";
+/// How long the server may take to load its model.
+#[cfg(not(target_arch = "wasm32"))]
+const SERVER_START: std::time::Duration = std::time::Duration::from_secs(120);
+
+/// The model file for `server`: `model` if set, else [`SMALL_MODEL`] where the setup steps put it
+/// (`models/` of the whisper.cpp folder for a build, the server's own folder for a release zip).
+pub fn model_for(server: &std::path::Path, model: &str, exists: impl Fn(&std::path::Path) -> bool) -> Result<std::path::PathBuf, String> {
+    let model = model.trim();
+    if !model.is_empty() {
+        let path = std::path::PathBuf::from(model);
+        return if exists(&path) { Ok(path) } else { Err(trf("ui.dictation_model_missing", &[("path", model)])) };
+    }
+    let dir = server.parent().unwrap_or(std::path::Path::new("."));
+    let candidates = [dir.join("../../models").join(SMALL_MODEL), dir.join("models").join(SMALL_MODEL), dir.join(SMALL_MODEL)];
+    candidates.iter().find(|p| exists(p)).cloned().ok_or_else(|| {
+        let looked = candidates.iter().map(|p| p.display().to_string()).collect::<Vec<_>>().join(", ");
+        trf("ui.dictation_model_not_found", &[("paths", &looked)])
+    })
+}
+
+/// The command that starts `server` with `model` on [`LOCAL_PORT`], as the setup steps' last
+/// command does.
+pub fn server_argv(server: &str, model: &std::path::Path) -> Vec<String> {
+    let mut argv = vec![
+        server.to_string(),
+        "-m".into(),
+        model.display().to_string(),
+        "--port".into(),
+        LOCAL_PORT.to_string(),
+        "-l".into(),
+        "auto".into(),
+        "--inference-path".into(),
+        "/v1/audio/transcriptions".into(),
+    ];
+    if cfg!(all(target_os = "macos", target_arch = "x86_64")) {
+        // See RUN_MAC_INTEL.
+        argv.push("-ng".into());
+    }
+    argv
+}
+
+/// Something answers on [`LOCAL_PORT`] (a server started by the app or by hand).
+#[cfg(not(target_arch = "wasm32"))]
+fn listening() -> bool {
+    let addr = std::net::SocketAddr::from(([127, 0, 0, 1], LOCAL_PORT));
+    std::net::TcpStream::connect_timeout(&addr, std::time::Duration::from_millis(150)).is_ok()
+}
+
+/// Start the server set in the preferences, unless it is running already or dictation goes
+/// elsewhere. A server someone started by hand on the port is used as it is.
+#[cfg(not(target_arch = "wasm32"))]
+fn ensure_server(app: &mut SolveApp) -> Result<(), String> {
+    let program = app.preferences.dictation_server.trim().to_string();
+    if program.is_empty() || endpoint(app).is_none_or(|e| e.base_url != LOCAL_URL) {
+        app.agent_chat.dictation_server = None;
+        return Ok(());
+    }
+    let path = std::path::PathBuf::from(&program);
+    if !path.is_file() {
+        return Err(trf("ui.dictation_server_missing", &[("path", &program)]));
+    }
+    let model = model_for(&path, &app.preferences.dictation_server_model, |p| p.is_file())?;
+    let argv = server_argv(&program, &model);
+    if let Some(server) = &app.agent_chat.dictation_server
+        && server.argv == argv
+        && server.service.handle.running()
+    {
+        return Ok(());
+    }
+    // Stopped first, so the port is free for the new one.
+    app.agent_chat.dictation_server = None;
+    if listening() {
+        return Ok(());
+    }
+    let cwd = path.parent().map(std::path::Path::to_path_buf).unwrap_or_default();
+    log::info!("dictation: starting {argv:?}");
+    let service = super::process::Service::spawn(&argv, &cwd)?;
+    app.agent_chat.dictation_server = Some(Server { service, argv });
+    Ok(())
+}
+
+/// Wait for the server the app started to take requests, or say why it stopped.
+#[cfg(not(target_arch = "wasm32"))]
+fn wait_until_ready(server: &super::process::ServiceWatch) -> Result<(), String> {
+    let started = std::time::Instant::now();
+    loop {
+        if listening() {
+            return Ok(());
+        }
+        if !server.running() {
+            let why = server.last_line().unwrap_or_default();
+            return Err(trf("ui.dictation_server_stopped", &[("error", &why)]));
+        }
+        if started.elapsed() > SERVER_START {
+            return Err(tr("ui.dictation_server_slow").to_string());
+        }
+        std::thread::sleep(std::time::Duration::from_millis(200));
+    }
+}
+
 /// One step of setting up whisper.cpp's server on this computer: what to do (a message id) and
 /// the command to copy, if the step has one.
 pub struct SetupStep {
@@ -216,6 +378,9 @@ pub struct SetupStep {
 }
 
 const RUN_UNIX: &str = "./build/bin/whisper-server -m models/ggml-small.bin --port 8178 -l auto --inference-path /v1/audio/transcriptions";
+/// On an Intel Mac whisper.cpp's Metal backend is 5 to 10 times slower than the CPU (measured on
+/// a 2018 MacBook Pro): `-ng` keeps it off the GPU.
+const RUN_MAC_INTEL: &str = "./build/bin/whisper-server -m models/ggml-small.bin --port 8178 -l auto --inference-path /v1/audio/transcriptions -ng";
 const BUILD_UNIX: &str = "git clone --depth 1 https://github.com/ggml-org/whisper.cpp && cd whisper.cpp && cmake -B build -DCMAKE_BUILD_TYPE=Release && cmake --build build -j 4 --target whisper-server";
 
 /// The steps that set up whisper.cpp's server on this system, for Preferences → AI → Dictation:
@@ -241,7 +406,10 @@ pub fn setup_steps() -> Vec<SetupStep> {
                 command: Some(BUILD_UNIX),
             },
             SetupStep { text: "ui.dictation_setup_model", command: Some("sh ./models/download-ggml-model.sh small") },
-            SetupStep { text: "ui.dictation_setup_run", command: Some(RUN_UNIX) },
+            SetupStep {
+                text: "ui.dictation_setup_run",
+                command: Some(if cfg!(all(target_os = "macos", target_arch = "x86_64")) { RUN_MAC_INTEL } else { RUN_UNIX }),
+            },
         ]
     }
 }
@@ -344,6 +512,49 @@ mod tests {
     }
 
     #[test]
+    fn the_model_is_found_where_the_setup_steps_put_it() {
+        crate::i18n::install();
+        let built = std::path::Path::new("/w/whisper.cpp/build/bin/whisper-server");
+        let in_models = |p: &std::path::Path| p == std::path::Path::new("/w/whisper.cpp/build/bin/../../models/ggml-small.bin");
+        assert_eq!(model_for(built, "", in_models).unwrap(), std::path::Path::new("/w/whisper.cpp/build/bin/../../models/ggml-small.bin"));
+        let zip = std::path::Path::new("C:/whisper/whisper-server.exe");
+        let beside = |p: &std::path::Path| p == std::path::Path::new("C:/whisper/ggml-small.bin");
+        assert_eq!(model_for(zip, "", beside).unwrap(), std::path::Path::new("C:/whisper/ggml-small.bin"));
+        // A model set by hand wins, and must exist.
+        assert_eq!(model_for(built, " /m/base.bin ", |_| true).unwrap(), std::path::Path::new("/m/base.bin"));
+        assert!(model_for(built, "/m/base.bin", |_| false).unwrap_err().contains("/m/base.bin"));
+        // Nothing found: the message says where it looked.
+        assert!(model_for(built, "", |_| false).unwrap_err().contains("ggml-small.bin"));
+    }
+
+    #[test]
+    fn the_server_starts_as_the_setup_steps_start_it() {
+        let argv = server_argv("/w/whisper-server", std::path::Path::new("/w/ggml-small.bin"));
+        let line = argv.join(" ");
+        assert!(line.starts_with("/w/whisper-server -m /w/ggml-small.bin --port 8178 -l auto --inference-path /v1/audio/transcriptions"));
+        assert_eq!(LOCAL_URL, format!("http://127.0.0.1:{LOCAL_PORT}/v1"));
+        // The command shown in the setup steps starts the same server.
+        for step in setup_steps() {
+            if step.text == "ui.dictation_setup_run" {
+                let shown = step.command.unwrap();
+                assert!(shown.contains("--port 8178 -l auto --inference-path /v1/audio/transcriptions"), "{shown}");
+                assert_eq!(shown.ends_with(" -ng"), line.ends_with(" -ng"));
+            }
+        }
+    }
+
+    #[test]
+    fn the_spoken_language_defaults_to_the_apps() {
+        assert_eq!(spoken_language("", "it"), "it");
+        assert_eq!(spoken_language("  ", "pt-BR"), "pt");
+        assert_eq!(spoken_language("", "zh-TW"), "zh");
+        assert_eq!(spoken_language("", "nb"), "no");
+        assert_eq!(spoken_language("de", "it"), "de");
+        assert_eq!(spoken_language(" Auto ", "it"), "");
+        assert_eq!(spoken_language(&"x".repeat(40), "it").len(), 16);
+    }
+
+    #[test]
     fn no_language_lets_the_endpoint_detect_it() {
         let r = request(&Endpoint { language: String::new(), ..local() }, None, b"RIFF".to_vec()).unwrap();
         assert!(!String::from_utf8_lossy(r.body.as_ref().unwrap()).contains("name=\"language\""));
@@ -373,6 +584,8 @@ mod tests {
 
     #[test]
     fn an_endpoint_error_says_what_the_endpoint_said() {
+        // The message comes from the catalogs, which this test may be the first to need.
+        crate::i18n::install();
         let e = parse(401, br#"{"error":{"message":"Invalid API key"}}"#).unwrap_err();
         assert!(e.contains("401") && e.contains("Invalid API key"), "{e}");
         let e = parse(500, b"boom").unwrap_err();

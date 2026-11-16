@@ -149,7 +149,7 @@ mod tests {
         assert!(!h.app.preferences.keep_print_faces, "off by default");
         assert!(!super::shown(&h.app), "no tint with the window closed");
         assert_eq!(drawn(&h), before, "the closed window leaves the view as it was before the face was marked");
-        h.app.services.pick_program = Some(Box::new(|| Box::pin(async { None })));
+        h.app.services.pick_program = Some(Box::new(|_: &str| Box::pin(async { None })));
         h.app.start("file.send_to_slicer");
         h.settle();
         assert!(h.app.dialog.is_some(), "Send to Slicer is open");

@@ -133,7 +133,11 @@ until you send it, so you can read and correct the text first. **Ctrl+Shift+Spac
 While the text is on its way the button shows a spinner. Closing the panel while it records
 stops the recording and sends nothing.
 
-The button shows once a service is set under Preferences → AI → **Dictation**:
+The button shows once a service is set under Preferences → AI → **Dictation**. The simplest
+choice is an online service with an account and an API key, such as OpenAI's: nothing to install,
+but the audio leaves the computer and the service charges for it. A server on this computer is
+free and keeps the audio here, but you install it yourself, with a terminal, so it is meant for
+experienced users.
 
 - **Base URL**: a service that offers the OpenAI-compatible speech-to-text API
   (`/audio/transcriptions`). A server on this computer keeps the audio here, for example
@@ -141,11 +145,12 @@ The button shows once a service is set under Preferences → AI → **Dictation*
   (`--inference-path /v1/audio/transcriptions`, then `http://127.0.0.1:8080/v1`), Speaches or
   LocalAI. A hosted one, such as OpenAI's `https://api.openai.com/v1`, needs a key.
 - **Model**: `whisper-1` by default, which OpenAI takes; local servers use the model they loaded.
-- **Language**: the language you speak, as a two-letter code (`en`, `it`, `de`). Empty lets the
-  service detect it.
+- **Language**: the language you speak, as a two-letter code (`en`, `it`, `de`). Empty sends
+  SolidCraft's own language; `auto` lets the service detect it, which takes longer (whisper.cpp
+  reads the audio twice, about 2 s more on a laptop).
 - **API key**: kept in the system keychain, and sent only over HTTPS or to this computer.
 
-**Set up a service on this computer**, under the fields, lists the steps for your system: build or download whisper.cpp's server, download a model, start it, each with its command to copy, and a button that puts its address in **Base URL**.
+**Set up a server on this computer (experienced users)**, under the fields, lists the steps for your system: build or download whisper.cpp's server and download a model, each with its command to copy. Then choose the server program under **Server** (`build/bin/whisper-server` in the whisper.cpp folder, or `whisper-server.exe` from the release zip): SolidCraft starts it when you press the microphone, so it loads its model while you speak, and stops it when you quit. The model (`ggml-small.bin`) is found where the steps put it, or chosen under **Model file**. A server you start yourself in a terminal (the command shown there) is used as it is, and so is any server already answering on port 8178. On an Intel Mac the command keeps the server off the GPU (`-ng`): there whisper.cpp's Metal backend is several times slower than the CPU.
 
 Leave the address empty to hide the button. Dictation records the system's default microphone;
 it is in the desktop app only. A recording is at most ten minutes long.

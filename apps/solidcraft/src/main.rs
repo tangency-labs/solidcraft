@@ -871,8 +871,8 @@ fn services(cc: &eframe::CreationContext<'_>, folder: &DialogFolder) -> Services
             let folder = file_folder.clone();
             Box::pin(async move { folder.answer(future.await) })
         })),
-        pick_program: Some(Box::new(move || {
-            let dialog = program_parent.clone().set_title("Choose your slicer");
+        pick_program: Some(Box::new(move |title: &str| {
+            let dialog = program_parent.clone().set_title(title);
             let dialog = if cfg!(target_os = "windows") { dialog.add_filter("Programs", &["exe"]) } else { dialog };
             let future = dialog.pick_file();
             Box::pin(async move { future.await.map(|p| p.path().to_string_lossy().into_owned()) })

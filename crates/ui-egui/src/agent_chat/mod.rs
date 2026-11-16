@@ -524,6 +524,9 @@ pub struct AgentChat {
     pub actions: Vec<panel::PanelAction>,
     /// Dictation (#10883): recording, or waiting for the transcription.
     pub dictation: dictation::State,
+    /// The speech-to-text server the app started for dictation; stopped when this is dropped.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub dictation_server: Option<dictation::Server>,
     /// What the panel measured for the shared panel host this frame, handed over after it is drawn.
     pub report: panel::ContentReport,
     /// Where the panel was drawn last (for its shortcuts).
