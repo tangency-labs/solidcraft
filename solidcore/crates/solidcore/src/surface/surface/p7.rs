@@ -69,7 +69,9 @@
 //!   only when its gap's components along the unit tangents sum under the local
 //!   solve's tight tolerance (upstream: under 1e-4), and refuses an interior result
 //!   more than that tight tolerance off along either unit tangent (upstream: 1e-3)
-//!   (the fork's tangency-labs/smlib@0b4de8c / eaa998a).
+//!   (the fork's tangency-labs/smlib@0b4de8c / eaa998a); a result at the guess itself
+//!   is measured with its own point for the guess (upstream evaluates the guess with
+//!   `EvaluatePoint`, which can round one ulp away from the result's evaluation).
 //! - **Flat corners (WR-384).** `GetFlatCorners` tests each corner bit while filling
 //!   the corner points; upstream masks its return value with `&=` there, so it returns
 //!   at most the first corner's flag and point.
@@ -2857,7 +2859,10 @@ pub fn check_seam_drop<S: SurfaceEvaluate + ?Sized>(
 ///   goes to the global solve. Next to a pole a converged result can fail this test
 ///   (the component along the unit short tangent divides the solve's residual by that
 ///   tangent's length); it then goes to the global solve too, which answers the drop
-///   as it does without a guess.
+///   as it does without a guess;
+/// - not upstream or the fork: a result at the guess itself (equal parameters) uses
+///   the result's point as the guess point, where upstream's `EvaluatePoint` can round
+///   one ulp away and so measured the result farther than its own guess.
 ///
 /// # Errors
 ///
@@ -2892,7 +2897,8 @@ pub fn good_drop_result<S: SurfaceEvaluate + ?Sized>(
     // tangency-labs/smlib 21dcf69; the fork keeps the dropped `Unitize` statuses)
     let not_shown = k.fixes.query_statuses_pass_on;
     let mut d = (Vec3::UNDEF, Vec3::UNDEF, Vec3::UNDEF);
-    if !eval_1st_keep(k, surface, result_uv, Side::Left, Side::Left, &mut d)? && not_shown {
+    let result_evaluated = eval_1st_keep(k, surface, result_uv, Side::Left, Side::Left, &mut d)?;
+    if !result_evaluated && not_shown {
         return Ok(false);
     }
     let (srf_point, su, sv) = d;
@@ -2935,15 +2941,20 @@ pub fn good_drop_result<S: SurfaceEvaluate + ?Sized>(
     }
 
     // One more: if the solution 3d point is farther than the guess (WR-56: each
-    // distance to its own point; upstream's names are swapped). The guess point comes
-    // from the evaluation that gave the result point (upstream: `EvaluatePoint`, which
-    // can round differently in the last bit), so a result at the guess itself is not
-    // farther than the guess.
-    let mut g = (Vec3::UNDEF, Vec3::UNDEF, Vec3::UNDEF);
-    if !eval_1st_keep(k, surface, guess_uv, Side::Left, Side::Left, &mut g)? && not_shown {
-        return Ok(false);
+    // distance to its own point; upstream's names are swapped). A result at the guess
+    // itself is its point (not upstream: `EvaluatePoint` there can round one ulp away
+    // from the first-derivative evaluation of the result, which then measured the
+    // result farther than itself).
+    let mut guess_3d = Vec3::UNDEF;
+    if guess_uv == result_uv && result_evaluated {
+        guess_3d = srf_point;
+    } else {
+        match ignored(surface.evaluate_point(k, guess_uv))? {
+            Some(p) => guess_3d = p,
+            None if not_shown => return Ok(false),
+            None => (),
+        }
     }
-    let guess_3d = g.0;
     let dsq_guess = pt_to_drop.distance_squared(guess_3d);
     let dsq_result = pt_to_drop.distance_squared(srf_point);
     if dsq_result > dsq_guess {
@@ -3761,7 +3772,8 @@ mod tests {
     /// decides) is not farther than its guess. `EvaluatePoint` and
     /// `Evaluate1stDerivatives` give points one ulp apart there (distances 1.4e-17
     /// apart), so measuring the guess with the one and the result with the other
-    /// refused it; both are measured with the same evaluation.
+    /// refused it (on the fixed path; upstream's swapped names took it by the same
+    /// ulp); a result at its guess is measured with its own point.
     #[test]
     fn wr56_a_result_at_its_guess_is_not_farther_than_it() {
         use crate::nurbs::math::CPoint;
@@ -3934,6 +3946,7 @@ mod tests {
         use crate::surface::surface::p4::NoObject;
         use crate::surface::surface::p5::DropPointOptions;
         // `SM_XSECT_TOL_3D`, the drop's tolerance for a surface without a face
+        // (`drop_point_from`: `face_zone_tol_3d()` or `XSECT_TOL_3D`, p5.rs)
         let xsect_tol_3d = 2.0 * ZONE_TOL_3D;
         let (s, nl) = wr56_apex_patch();
         let k = Kernel::default();
@@ -4032,6 +4045,17 @@ mod tests {
                     let uv = Point2::new(u_breaks[i + a / 2], v_breaks[j + b]);
                     let corner = s.evaluate_point(&k, uv).unwrap();
                     assert!(corner.distance(net[a][b]) < 1e-14, "{i} {j} {a} {b}");
+                }
+                // and agrees with it at the u-midpoints of both v ends: with the corners
+                // that is six points of a 3 x 2 grid, which determine a degree (2, 1)
+                // patch, so the patch is the span (up to the rounding above)
+                for b in 0..2 {
+                    let mid = (net[0][b] + net[1][b] * 2.0 + net[2][b]) * 0.25;
+                    let u_mid = 0.5 * (u_breaks[i] + u_breaks[i + 1]);
+                    let on_span = s
+                        .evaluate_point(&k, Point2::new(u_mid, v_breaks[j + b]))
+                        .unwrap();
+                    assert!(on_span.distance(mid) < 1e-14, "{i} {j} mid {b}");
                 }
                 assert_eq!(
                     bezier21_distance_at_least(net, p, bound, 1e-12, 1_000_000),
