@@ -20,6 +20,8 @@ macro_rules! planned {
     };
 }
 
+mod board_import;
+mod board_layers;
 mod bom;
 pub(crate) mod browser;
 mod cell_grid;
@@ -90,7 +92,7 @@ pub mod mass_properties;
 mod material_properties;
 mod materials;
 mod measure_exact;
-mod measure_sel;
+pub(crate) mod measure_sel;
 mod measure_shape;
 mod mesh;
 mod metadata;
@@ -104,7 +106,7 @@ mod section;
 mod selection;
 pub mod settings;
 pub(crate) use clipboard::{component_path_form, copy_keys};
-pub(crate) use component::matrix::{rigid as rigid_matrix, tolerance as matrix_tolerance};
+pub(crate) use component::matrix::{rigid as rigid_matrix, tolerance as matrix_tolerance, with_exprs as matrix_with_exprs};
 pub(crate) use component::{base_transform, move_vector};
 pub(crate) use measure_sel::{measure_items, shape_of};
 pub(crate) use measure_shape::Shape;
@@ -402,6 +404,7 @@ pub fn command_specs() -> Vec<&'static CommandSpec> {
     v.extend(parameters::COMMANDS.iter());
     v.extend(parameter_sweep::COMMANDS.iter());
     v.extend(file::COMMANDS.iter());
+    v.extend(board_import::COMMANDS.iter());
     v.extend(print_face::COMMANDS.iter());
     v.extend(metadata::COMMANDS.iter());
     v.extend(inspect::COMMANDS.iter());
@@ -427,7 +430,22 @@ pub fn find_command(id: &str) -> Option<&'static CommandSpec> {
     all.iter().find(|c| c.id == id).or_else(|| all.iter().find(|c| c.id.eq_ignore_ascii_case(id))).copied()
 }
 
-/// The end of an unknown command's error: up to three ids like `id`, nearest first. Ids a few
+/// Whether two ids use common alternative verbs in the same namespace. This only ranks
+/// suggestions; it never makes either id an execution alias for the other.
+pub fn command_verb_alternative(id: &str, candidate: &str) -> bool {
+    let Some((namespace, verb)) = id.rsplit_once('.') else { return false };
+    let Some((other_namespace, other_verb)) = candidate.rsplit_once('.') else { return false };
+    if namespace.is_empty() || !namespace.eq_ignore_ascii_case(other_namespace) {
+        return false;
+    }
+    let groups: &[&[&str]] = &[&["add", "create", "new"], &["delete", "remove"]];
+    groups
+        .iter()
+        .any(|words| words.iter().any(|word| verb.eq_ignore_ascii_case(word)) && words.iter().any(|word| other_verb.eq_ignore_ascii_case(word)))
+}
+
+/// The end of an unknown command's error: up to three ids like `id`. Alternative verbs in
+/// the same namespace (`note.create` → `note.add`) come first. Otherwise, ids a few
 /// letters away (`solid.extrud` → `solid.extrude`) come before ids that end in the same word
 /// (`file.open` → `doc.open`). Empty when nothing is close.
 pub(crate) fn did_you_mean(id: &str) -> String {
@@ -437,15 +455,16 @@ pub(crate) fn did_you_mean(id: &str) -> String {
     }
     let last = |s: &str| s.rsplit('.').next().unwrap_or(s).to_string();
     let near = (id.chars().count() / 4).max(2);
-    let mut found: Vec<(bool, usize, &str)> = command_specs()
+    let mut found: Vec<(bool, bool, usize, &str)> = command_specs()
         .iter()
         .filter_map(|c| {
             let d = edit_distance(&id, c.id);
-            (d <= near || last(&id) == last(c.id)).then_some((d > near, d, c.id))
+            let alternative = command_verb_alternative(&id, c.id);
+            (alternative || d <= near || last(&id) == last(c.id)).then_some((!alternative, d > near, d, c.id))
         })
         .collect();
     found.sort();
-    let ids: Vec<String> = found.iter().take(3).map(|(_, _, c)| format!("`{c}`")).collect();
+    let ids: Vec<String> = found.iter().take(3).map(|(_, _, _, c)| format!("`{c}`")).collect();
     match ids.as_slice() {
         [] => String::new(),
         [one] => format!(" (did you mean {one}?)"),

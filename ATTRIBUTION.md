@@ -890,6 +890,7 @@ Original SolidCraft drawings, Open for owner review; no runtime assignments.
 | `assets/locales/pending/pinned-constraints-in-grid.json` | SolidCraft contributors | Original label and note for the pinned-constraints-in-grid preference | MIT OR Apache-2.0 |
 | `assets/locales/pending/plugins-review-commands.json` | SolidCraft contributors | Original plugin removal command labels and translations | MIT OR Apache-2.0 |
 | `assets/locales/pending/plugins-review-ui.json` | SolidCraft contributors | Original plugin installation approval and manager messages and translations | MIT OR Apache-2.0 |
+| tests/step-regressions/thread_crest_band.step | SolidCraft contributors | written entity by entity from formulas (a cylinder face round a helical groove two turns long); import regression fixture | MIT OR Apache-2.0 |
 
 ## Code adapted from sibling projects
 

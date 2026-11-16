@@ -103,6 +103,10 @@ use crate::case::{CaseContext, CaseSource};
 use crate::runner::default_cases;
 use crate::{Case, HarnessError, Output, Rng, UnitDiff};
 
+// The case's transform certificate log (test builds only).
+#[cfg(test)]
+use super::topology_brep_p5::transform_certificate::Fired as CertificateLog;
+
 /// Generated cases per run, whatever `--seeds` says (it can only raise this).
 pub const MIN_GENERATED: usize = 1500;
 
@@ -2585,6 +2589,7 @@ fn run_proto(
     capture: f64,
     override_tol: f64,
     ops: &[Vec<f64>],
+    stop: Option<(usize, &mut Option<ProtoRun>)>,
 ) -> Result<Vec<f64>, Fail> {
     let mut k = Kernel::default();
     let brep1 = H(100_000, ClassObjectKind::Other);
@@ -2851,8 +2856,15 @@ fn run_proto(
     };
     let mut o = Vec::new();
 
-    for opv in ops {
+    let mut stop = stop;
+    for (index, opv) in ops.iter().enumerate() {
         r.pool.sync_topo();
+        if let Some((at, state)) = stop.as_mut() {
+            if *at == index {
+                **state = Some(r);
+                return Ok(o);
+            }
+        }
         let mut rd = Rd {
             v: opv,
             at: 0,
@@ -4920,6 +4932,13 @@ fn run_proto(
         o.push(out.len() as f64);
         o.extend(out);
     }
+    if let Some((at, state)) = stop {
+        if at == ops.len() {
+            r.pool.sync_topo();
+            *state = Some(r);
+            return Ok(o);
+        }
+    }
     r.put_state(&mut o);
     Ok(o)
 }
@@ -5060,7 +5079,46 @@ fn constructed_transform_body(k: &mut Kernel, obj: &TObjIn) -> Result<Brep, Fail
     })
 }
 
+#[cfg(not(test))]
 fn apply_transform_op(
+    k: &mut Kernel,
+    target: Option<TransformObject<'_>>,
+    op: &TOpIn,
+) -> solidcore::Result<()> {
+    apply_transform_op_inner(k, target, op)
+}
+
+/// [`apply_transform_op`] checked against the WR-507 / WR-508 tolerance certificate
+/// (`topology_brep_p5::transform_certificate`) when the target is a B-rep. The API
+/// transforms scale tolerances (`bScaleTol` `TRUE`); only the scales have a scale.
+#[cfg(test)]
+fn apply_transform_op(
+    k: &mut Kernel,
+    target: Option<TransformObject<'_>>,
+    op: &TOpIn,
+    log: &mut CertificateLog,
+) -> solidcore::Result<()> {
+    use super::topology_brep_p5::transform_certificate::Snapshot;
+    match target {
+        Some(TransformObject::Brep(b)) => {
+            let s = match op {
+                TOpIn::Scale { s } | TOpIn::ScaleByPt { s, .. } => Some(v3(*s)),
+                _ => None,
+            };
+            let before = Snapshot::before_transform(k, b, s).expect("certificate snapshot");
+            let r = apply_transform_op_inner(k, Some(TransformObject::Brep(&mut *b)), op);
+            if r.is_ok() {
+                before
+                    .check(k, b, s, true, "proto_topology_p1", log)
+                    .expect("certificate check");
+            }
+            r
+        }
+        other => apply_transform_op_inner(k, other, op),
+    }
+}
+
+fn apply_transform_op_inner(
     k: &mut Kernel,
     target: Option<TransformObject<'_>>,
     op: &TOpIn,
@@ -5119,7 +5177,11 @@ fn append_constructed_transform_record(
     Ok(())
 }
 
-fn run_transform_sequence(obj: &TObjIn, ops: &[TOpIn]) -> Result<Vec<f64>, Fail> {
+fn run_transform_sequence(
+    obj: &TObjIn,
+    ops: &[TOpIn],
+    #[cfg(test)] log: &mut CertificateLog,
+) -> Result<Vec<f64>, Fail> {
     if !(2..=8).contains(&ops.len()) {
         return Err(harness("transform sequence length").into());
     }
@@ -5137,6 +5199,8 @@ fn run_transform_sequence(obj: &TObjIn, ops: &[TOpIn]) -> Result<Vec<f64>, Fail>
             &mut k,
             Some(TransformObject::Brep(&mut brep)),
             op,
+            #[cfg(test)]
+            log,
         ))?;
         let mut record = Vec::new();
         append_constructed_transform_record(&k, &brep, &mut record)?;
@@ -5146,7 +5210,12 @@ fn run_transform_sequence(obj: &TObjIn, ops: &[TOpIn]) -> Result<Vec<f64>, Fail>
     Ok(out)
 }
 
-fn run_transform(obj: &TObjIn, op: &TOpIn, probe: bool) -> Result<Vec<f64>, Fail> {
+fn run_transform(
+    obj: &TObjIn,
+    op: &TOpIn,
+    probe: bool,
+    #[cfg(test)] log: &mut CertificateLog,
+) -> Result<Vec<f64>, Fail> {
     let mut k = Kernel::default();
     let mut curve = None;
     let mut surface = None;
@@ -5286,7 +5355,7 @@ fn run_transform(obj: &TObjIn, op: &TOpIn, probe: bool) -> Result<Vec<f64>, Fail
         TObjIn::Other => Some(TransformObject::Other),
         TObjIn::Null => None,
     };
-    let s = transform_status(apply_transform_op(&mut k, target, op))?;
+    let s = transform_status(apply_transform_op(&mut k, target, op, #[cfg(test)] log))?;
     let mut o = vec![s];
     if let Some(frame) = &probe_frame {
         o.push(frame.initial_types.len() as f64);
@@ -5328,7 +5397,16 @@ fn run_transform(obj: &TObjIn, op: &TOpIn, probe: bool) -> Result<Vec<f64>, Fail
     Ok(o)
 }
 
+#[cfg(test)]
 pub(super) fn rust_run(s: &Script) -> Result<Vec<f64>, Fail> {
+    rust_run_logged(s, &mut CertificateLog::default())
+}
+
+/// Runs the script (`rust_run` in tests), with the case's certificate log in test builds.
+fn rust_run_logged(
+    s: &Script,
+    #[cfg(test)] log: &mut CertificateLog,
+) -> Result<Vec<f64>, Fail> {
     match s {
         Script::List { slots, ops } => run_list(slots, ops),
         Script::Proto {
@@ -5337,15 +5415,57 @@ pub(super) fn rust_run(s: &Script) -> Result<Vec<f64>, Fail> {
             capture,
             override_tol,
             ops,
-        } => run_proto(objects, *approx_tol, *capture, *override_tol, ops),
-        Script::Transform { obj, op } => run_transform(obj, op, false),
-        Script::ScaleProbe { obj, op } => run_transform(obj, op, true),
-        Script::TransformSequence { obj, ops } => run_transform_sequence(obj, ops),
+        } => run_proto(objects, *approx_tol, *capture, *override_tol, ops, None),
+        Script::Transform { obj, op } => run_transform(obj, op, false, #[cfg(test)] log),
+        Script::ScaleProbe { obj, op } => run_transform(obj, op, true, #[cfg(test)] log),
+        Script::TransformSequence { obj, ops } => {
+            run_transform_sequence(obj, ops, #[cfg(test)] log)
+        }
     }
 }
 
+/// The proto run of the proto script `s` just before its op `index` (the state that op
+/// starts from, after the runner's per-op `sync_topo`), or after its last op for `index`
+/// equal to the op count, for tests that check a record against that state; `None` when
+/// the script is not a proto script or ends before that op.
+///
+/// # Errors
+///
+/// A deferred or harness failure of the ops before `index`.
+#[cfg(test)]
+pub(super) fn proto_state_before(s: &Script, index: usize) -> Result<Option<ProtoRun>, Fail> {
+    let Script::Proto {
+        objects,
+        approx_tol,
+        capture,
+        override_tol,
+        ops,
+    } = s
+    else {
+        return Ok(None);
+    };
+    let mut state = None;
+    run_proto(
+        objects,
+        *approx_tol,
+        *capture,
+        *override_tol,
+        ops,
+        Some((index, &mut state)),
+    )?;
+    Ok(state)
+}
+
 pub(super) fn rust(s: &Script) -> Result<Output, HarnessError> {
-    match rust_run(s) {
+    rust_logged(s, #[cfg(test)] &mut CertificateLog::default())
+}
+
+/// [`rust`], with the case's certificate log in test builds.
+fn rust_logged(
+    s: &Script,
+    #[cfg(test)] log: &mut CertificateLog,
+) -> Result<Output, HarnessError> {
+    match rust_run_logged(s, #[cfg(test)] log) {
         Ok(v) => Ok(Output::new().values("out", v)),
         Err(Fail::Deferred(d)) => Ok(*d),
         Err(Fail::Harness(e)) => Err(e),
@@ -7407,8 +7527,81 @@ impl UnitDiff for Runner {
 }
 
 #[cfg(test)]
+impl super::topology_brep_p5::transform_certificate::Certified for Runner {
+    fn run_certified(
+        &self,
+        case: &Case,
+        log: &mut CertificateLog,
+    ) -> Result<Output, HarnessError> {
+        rust_logged(&case.parse()?, log)
+    }
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The p1 rows whose transforms scale the tolerances (WR-507 / WR-508 closed form).
+    const SCALED_P1: [&str; 23] = [
+        "constructed_sequence_box_identity_between_edits",
+        "constructed_sequence_box_scale_by_point_inverse",
+        "constructed_sequence_caller_face_identity_between_edits",
+        "constructed_sequence_caller_face_scale_by_point_inverse",
+        "constructed_sequence_sphere_identity_between_edits",
+        "constructed_sequence_sphere_scale_by_point_inverse",
+        "constructed_solid_box_scale_by_pt",
+        "constructed_solid_box_uniform_scale",
+        "constructed_solid_caller_face_scale_by_pt",
+        "constructed_solid_caller_face_uniform_scale",
+        "constructed_solid_sphere_scale_by_pt",
+        "constructed_solid_sphere_uniform_scale",
+        "public_extrusion_anisotropic",
+        "public_extrusion_signed",
+        "public_extrusion_uniform",
+        "public_scale_cone_nonuniform",
+        "public_scale_cylinder_nonuniform",
+        "public_scale_phase2_box_anisotropic",
+        "public_scale_phase2_copied_box_anisotropic",
+        "public_scale_phase2_copied_sphere_anisotropic",
+        "public_scale_phase2_copied_sphere_scale_by_point",
+        "public_scale_phase2_sphere_anisotropic",
+        "public_scale_torus_nonuniform",
+    ];
+    /// The p1 rows whose transforms have a scale of 1 (reflections): no tolerance changes
+    /// and the model size estimate stays unset (upstream set it from the vertex box).
+    const UNIT_SCALE_P1: [&str; 9] = [
+        "public_extrusion_even_reflection",
+        "public_extrusion_odd_reflection",
+        "public_scale_cone_reflection",
+        "public_scale_cylinder_reflection",
+        "public_scale_phase2_box_even_reflection",
+        "public_scale_phase2_box_odd_reflection",
+        "public_scale_phase2_sphere_all_negative",
+        "public_scale_phase2_sphere_odd_reflection",
+        "public_scale_torus_reflection",
+    ];
+
+    /// Every case of this unit replays against its blessed golden line through the
+    /// runner's test-only WR-507 / WR-508 certificate at each API transform of a B-rep.
+    /// Each row the retirement moved must have gone through a certified transform.
+    #[test]
+    fn every_case_meets_the_transform_certificate() {
+        use super::super::topology_brep_p5::transform_certificate::{
+            replay_matches_golden, Fired,
+        };
+        let p1 = replay_matches_golden(&Runner);
+        let get = |m: &BTreeMap<String, Fired>, c: &str| {
+            *m.get(c).unwrap_or_else(|| panic!("moved row {c} is not a case"))
+        };
+        for c in SCALED_P1 {
+            let f = get(&p1, c);
+            assert!(f.scaled > 0, "{c}: {f:?}");
+        }
+        for c in UNIT_SCALE_P1 {
+            let f = get(&p1, c);
+            assert!(f.unscaled > 0 && f.scaled == 0, "{c}: {f:?}");
+        }
+    }
 
     #[test]
     fn manager_classifications_keep_the_actual_body_in_region_identity() {

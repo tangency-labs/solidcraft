@@ -1,9 +1,11 @@
 //! WR-492: `SmMerge::MakeFaceuse` returns `SM_ERR` (1001) when the edge `MergeEdge` matches
 //! has no end at the mate of the other edge's vertex. Two r 2.75 cylinders whose axes meet at
-//! a small turn, each cut back to the mitre plane that halves it, meet face to face there; their
-//! union fails for turns up to about 0.3 degrees (C++ SMLib v1.0.1 the same: 0.1, 0.25 and 0.3
+//! a small turn, each cut back to the mitre plane that halves it, meet face to face there; in
+//! C++ SMLib v1.0.1 their union fails for turns up to about 0.3 degrees (0.1, 0.25 and 0.3
 //! fail, 0.4 and up succeed). SolidCraft's tube corners (a52 `lead-out-minus`) are the
-//! repro. No fix yet: the record WR-492 says why.
+//! repro. Since the proto-edge self-loop on a vertex is always degenerate (WR-214 addendum
+//! 2026-11-16) the small turns unite too: a Level 2 clean, manifold solid whose volume is the
+//! closed form `pi r^2 (10 + 12)` (see the WR-492 addendum of the same day).
 #![allow(
     clippy::unwrap_used,
     clippy::expect_used,
@@ -20,6 +22,7 @@ use solidcore::math::{Point3, Vec3};
 use solidcore::primitive::api_curves::{create_analytic_circle, create_line_segment};
 use solidcore::sweep::api_brep::create_linear_sweep;
 use solidcore::topology::brep::p2::is_manifold_solid;
+use solidcore::topology::brep::validation::{check_brep, CheckLevel};
 use solidcore::topology::proto_topology::p1::api_transform::{
     transform_independent_object, TransformObject,
 };
@@ -98,14 +101,36 @@ fn mitred_union(turn: f64) -> (solidcore::Result<Brep>, Kernel, f64) {
     (r, k, pieces)
 }
 
+/// The union's exact volume: each cylinder (radius 2.75) is cut by the mitre plane, which
+/// meets its axis at `at`, 10 behind it for the first and 12 ahead of it for the second.
+/// A plane cut that misses the end cap (here it tilts by `turn / 2` <= 0.15 degrees, so it
+/// moves the wall by at most 2.75 * tan(0.15 deg) = 7.2e-3 against the 10 to the cap) leaves
+/// `pi r^2` times the axial length at the axis, so the union holds `pi r^2 (10 + 12)`.
+fn closed_form_volume() -> f64 {
+    std::f64::consts::PI * RADIUS * RADIUS * (10.0 + 12.0)
+}
+
 #[test]
-fn small_turns_fail_like_cpp() {
+fn small_turns_unite_the_pieces() {
+    // C++ SMLib v1.0.1 returns SM_ERR (1001) from MakeFaceuse here; the port no longer
+    // splits a self-loop proto edge on a vertex, which removed the near-duplicate vertex.
     for turn in [0.1, 0.25, 0.3] {
-        let (r, ..) = mitred_union(turn);
-        let e = r.unwrap_err();
+        let (r, mut k, pieces) = mitred_union(turn);
+        let mut b = r.unwrap();
+        let lines = check_brep(&mut k, &mut b, CheckLevel::Level2)
+            .unwrap()
+            .lines();
+        assert!(lines.is_empty(), "turn {turn}: {lines:?}");
+        assert!(is_manifold_solid(&b).unwrap(), "turn {turn}");
+        let v = volume(&k, &mut b);
+        let exact = closed_form_volume();
         assert!(
-            e.operation().contains("make_faceuse") && e.sm_status() == Some(1001),
-            "turn {turn}: {e}"
+            (v - exact).abs() <= 1e-6 * exact,
+            "turn {turn}: {v} against {exact}"
+        );
+        assert!(
+            (v - pieces).abs() <= 1e-6 * pieces,
+            "turn {turn}: {v} against {pieces}"
         );
     }
 }

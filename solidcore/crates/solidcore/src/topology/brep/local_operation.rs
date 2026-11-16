@@ -20,10 +20,7 @@
 //! and the copy back gives them to the B-rep (SMLib's Copy handler), so each face keeps
 //! its attributes as upstream's do. `SmTemporaryChangeValue` of
 //! `m_bEditingEnabled` is a set and restore of the flag. The debug drawing code is omitted. No
-//! recursion is introduced here. Opt-in (WR-534,
-//! `Kernel::fixes.local_operation_box_holds_new_surfaces`, the fork's
-//! tangency-labs/smlib@a1ee273): the box that sizes the executive's offset distance also
-//! holds the replacement surfaces. (not upstream) The B-rep's cached topology fields are
+//! recursion is introduced here. (not upstream) The B-rep's cached topology fields are
 //! refreshed before the operation returns ([`Brep::refresh_cached_topology`]), as every
 //! public operation leaves them. (not upstream) A plane given to a lone lamina face
 //! that is exactly parallel and the same way round as the face's own plane takes the
@@ -161,8 +158,6 @@ fn local_operation_on(
     let all_faces = bp1::faces(b, None)?;
     let mut given: Vec<Option<Surface>> = surfaces.into_iter().map(Some).collect();
     let mut new_list = Vec::new();
-    // (WR-534) where each given surface went in the new list
-    let mut placed: Vec<Option<usize>> = vec![None; given.len()];
     // (not upstream) the faces whose surfaces move: a face given its own surface again keeps
     // a copy of its own surface, as the faces not given one do, and so keeps its edges
     let mut moved = Vec::new();
@@ -183,17 +178,12 @@ fn local_operation_on(
         let index = faces.iter().position(|&f| f == face);
         let own = face_ops::surface(b, face)?.ok_or_else(|| null("the face's surface"))?;
         let replacement = match index {
-            Some(index) if moving.contains(&face) => {
-                if let Some(slot) = placed.get_mut(index) {
-                    *slot = Some(new_list.len());
-                }
-                Some(
-                    given
-                        .get_mut(index)
-                        .and_then(Option::take)
-                        .ok_or_else(|| null("the face's given surface"))?,
-                )
-            }
+            Some(index) if moving.contains(&face) => Some(
+                given
+                    .get_mut(index)
+                    .and_then(Option::take)
+                    .ok_or_else(|| null("the face's given surface"))?,
+            ),
             _ => continued.remove(&face),
         };
         let surface = if let Some(mut new) = replacement {
@@ -258,29 +248,7 @@ fn local_operation_on(
     }
 
     // the Brep's bounding sphere gives the executive an offset distance it does not use
-    let mut bbox = calculate_bounding_box(k, &mut *b, BoundingBoxOptions::default())?;
-    // Not upstream (WR-534), opt-in `local_operation_box_holds_new_surfaces` (the fork's
-    // tangency-labs/smlib@a1ee273): the box also holds the replacement surfaces. Their
-    // faces' edges are found by extending the neighbouring surfaces to meet them, by a
-    // distance sized from this box: sized from the original body alone, a face moved
-    // further than about its size away left the extended neighbours short of it.
-    if k.fixes.local_operation_box_holds_new_surfaces {
-        for (j, slot) in placed.iter().enumerate() {
-            let surface = match (given.get(j).and_then(Option::as_ref), slot) {
-                (Some(surface), _) => surface,
-                (None, Some(at)) => new_list
-                    .get(*at)
-                    .ok_or_else(|| null("the placed new surface"))?,
-                (None, None) => continue,
-            };
-            let domain = surface.natural_uv_domain_with_nurb(k)?;
-            let surf_box = surface
-                .calculate_bounding_box(k, &domain, [true, false, false], true)?
-                .normal_box
-                .ok_or_else(|| null("the new surface's bounding box"))?;
-            bbox = bbox.union(&surf_box);
-        }
-    }
+    let bbox = calculate_bounding_box(k, &mut *b, BoundingBoxOptions::default())?;
     let radius = bbox.sphere_bound().radius;
     let tolerance = b.tolerance();
     let mut executive = OffsetExecutive::new(
@@ -1701,11 +1669,11 @@ mod tests {
     }
 
     /// WR-534 (the fork's tangency-labs/smlib@a1ee273): a 20 mm cube's top moved up by
-    /// 60, further than the cube's size, is a sound 20 x 20 x 80 box with the opt-in.
+    /// 60, further than the cube's size, is a sound 20 x 20 x 80 box: the neighbours'
+    /// extension is derived from the moved surface (`local_extension_reach`).
     #[test]
     fn moves_the_top_of_a_box_further_than_its_size() {
         let mut k = Kernel::default();
-        k.fixes.local_operation_box_holds_new_surfaces = true;
         let mut b = create_box(&mut k, Point3::new(0.0, 0.0, 0.0), 20.0, 20.0, 20.0).unwrap();
         let top = box_top(&k, &b);
         let raised = Surface::from(Plane::from_normal(Vec3::new(0.0, 0.0, 80.0), Vec3::Z));
@@ -1746,7 +1714,6 @@ mod tests {
     #[test]
     fn a_far_top_on_a_unit_square_plane_is_refused_as_not_sound() {
         let mut k = Kernel::default();
-        k.fixes.local_operation_box_holds_new_surfaces = true;
         let mut b = create_box(&mut k, Point3::new(0.0, 0.0, 0.0), 20.0, 20.0, 20.0).unwrap();
         let top = box_top(&k, &b);
         let raised = Surface::from(Plane::new(
@@ -2329,8 +2296,8 @@ mod tests {
     /// caller's notification records and attributes. Refused while the offset's loop gaps
     /// are closed — the straight bridge that would join a gap is not established on the
     /// face's own surface within the operation's tolerance — a cube's round given a narrower
-    /// coaxial cylinder, and a side moved off its round (the edge between them apart:
-    /// `LocalReach::apart`, adding nothing to the reach); `b` carries an attribute of its
+    /// coaxial cylinder, and a split block's top piece turned and raised off its twin (no
+    /// step: their planes are not parallel); `b` carries an attribute of its
     /// own, lent to the offset, and the caller's store one of the caller's.
     #[test]
     fn a_refusal_leaves_the_input_its_caches_and_the_callers_stores_as_they_were() {
@@ -2344,12 +2311,39 @@ mod tests {
                 let s = ap::create_cylinder_surface(k, Point3::new(8.0, 8.0, -1.0), 1.8, 12.0);
                 (b, round, Surface::from(s.unwrap()), round)
             }),
-            // the moved side is the face whose offset loop's gap the bridge would join
-            ("side", |k| {
-                let b = cube_rounded_r5(k);
-                let side = face_on_x(k, &b, 20.0);
-                let s = Plane::from_normal(Vec3::new(20.1, 0.0, 0.0), Vec3::X);
-                (b, side, Surface::from(s), side)
+            // the split block's piece x < 30 turned 0.02 rad about the split line and raised
+            // 1, on its own plane so moved: the gap the bridge would join is in the loop of
+            // its twin, the top piece x > 30
+            ("turned piece", |k| {
+                use crate::geom::axis2_placement::Axis2Placement;
+                let (b, piece) = split_block_piece(k);
+                let (c, sn) = (0.02_f64.cos(), 0.02_f64.sin());
+                let pivot = Point3::new(30.0, 0.0, 20.0);
+                let turned = Point3::new(
+                    c * pivot.x + sn * pivot.z,
+                    pivot.y,
+                    -sn * pivot.x + c * pivot.z,
+                );
+                let place = Axis2Placement::new(
+                    pivot + Vec3::new(0.0, 0.0, 1.0) - turned,
+                    Vec3::new(c, 0.0, -sn),
+                    Vec3::Y,
+                );
+                let mut s = face_ops::surface(&b, piece).unwrap().unwrap().clone();
+                s.transform(k, &place, None).unwrap();
+                let twin = bp1::faces(&b, None)
+                    .unwrap()
+                    .into_iter()
+                    .find(|&f| {
+                        let face = b.face(f).unwrap();
+                        let surface = face.surface.as_ref().unwrap();
+                        let p = surface
+                            .evaluate_point(k, face.uv_domain.evaluate(0.5, 0.5))
+                            .unwrap();
+                        (p.z - 20.0).abs() < 1e-9 && p.x > 30.0
+                    })
+                    .unwrap();
+                (b, piece, s, twin)
             }),
         ];
         for (name, make) in cases {
@@ -3116,39 +3110,41 @@ mod tests {
 
     /// The same side moved out by 0.1: the plane x = 20.1 passes the round, which bends
     /// away from it, so no extension makes them meet: their edge is apart
-    /// (`LocalReach::apart`, adding nothing to the reach), and the straight bridge that
-    /// would join the offset loop's gap is not established on the side's own surface
-    /// within the operation's tolerance: refused before any body is checked, the cube as
-    /// it came in.
+    /// (`LocalReach::apart`, adding nothing to the reach). The side and the round stay
+    /// parallel along their edge, 0.1 apart, so the step walls (the WR-530 addendum) build
+    /// the 0.1 wall between them: a sound solid that adds the side's 15 x 20 planar part
+    /// times 0.1 to the rounded cube, 8000 - 20 (25 - 25 pi / 4) + 30. (Before the step
+    /// walls were always on, the straight bridge across the offset loop's gap was not
+    /// established and the operation was refused.)
     #[test]
-    fn a_side_moved_off_its_round_is_refused_before_its_gap_bridge_is_established() {
+    fn a_side_moved_off_its_round_gets_a_step_wall() {
+        use crate::topology::brep::validation::{check_brep, CheckLevel};
         let mut k = Kernel::default();
         let mut b = cube_rounded_r5(&mut k);
         let side = face_on_x(&k, &b, 20.0);
-        // the moved side is the face whose offset loop's gap the bridge would join
         let moved = Surface::from(Plane::from_normal(Vec3::new(20.1, 0.0, 0.0), Vec3::X));
         let why = refused_unchanged_or_returned(&mut k, &mut b, &[side], vec![moved]);
-        assert_eq!(
-            why,
-            Some(OffsetFailure::LoopGapUncertified { face: Some(side) })
-        );
+        assert_eq!(why, None);
+        let (v, manifold) = volume_and_manifold(&k, &mut b);
+        let want = 8000.0 - 20.0 * (25.0 - 25.0 * crate::math::PI / 4.0) + 0.1 * 15.0 * 20.0;
+        assert!(manifold && (v - want).abs() <= 1e-9 * want, "{v} vs {want}");
+        // and the body built is clean at check level 2
+        b.use_arena_naming().unwrap();
+        let lines = check_brep(&mut k, &mut b, CheckLevel::Level2)
+            .unwrap()
+            .lines();
+        assert!(lines.is_empty(), "{lines:?}");
     }
 
-    /// A tangent pair of equal curvature: a 60 x 40 x 20 block whose top is imprinted
-    /// along x = 30, the piece x < 30 raised 1. The two pieces' planes stay parallel and
-    /// 1 apart: they meet nowhere, so their edge is apart (`LocalReach::apart`, adding
-    /// nothing to the reach), and without the step walls, which build the wall between
-    /// them (`wr_530_local_operation_step_walls`), the body built is refused as not sound.
-    #[test]
-    fn a_coplanar_neighbour_raised_off_its_twin_is_refused_as_not_sound() {
+    /// A 60 x 40 x 20 block whose top is imprinted along x = 30, and its top piece x < 30.
+    fn split_block_piece(k: &mut Kernel) -> (Brep, FaceId) {
         use crate::boolean::api_brep::boolean_with_options;
         use crate::boolean::merge::MergeOptions;
         use crate::geom::a_object::BooleanOperation;
-        let mut k = Kernel::default();
-        let block = create_box(&mut k, Point3::ZERO, 60.0, 40.0, 20.0).unwrap();
-        let cutter = create_box(&mut k, Point3::new(30.0, -1.0, 10.0), 60.0, 42.0, 20.0).unwrap();
+        let block = create_box(k, Point3::ZERO, 60.0, 40.0, 20.0).unwrap();
+        let cutter = create_box(k, Point3::new(30.0, -1.0, 10.0), 60.0, 42.0, 20.0).unwrap();
         let mut b = boolean_with_options(
-            &mut k,
+            k,
             block,
             cutter,
             BooleanOperation::Imprint,
@@ -3164,11 +3160,25 @@ mod tests {
                 let face = b.face(f).unwrap();
                 let s = face.surface.as_ref().unwrap();
                 let p = s
-                    .evaluate_point(&k, face.uv_domain.evaluate(0.5, 0.5))
+                    .evaluate_point(k, face.uv_domain.evaluate(0.5, 0.5))
                     .unwrap();
                 matches!(s.kind(), SurfaceKind::Plane(_)) && (p.z - 20.0).abs() < 1e-9 && p.x < 30.0
             })
             .unwrap();
+        (b, piece)
+    }
+
+    /// A tangent pair of equal curvature: the split block's piece x < 30 raised 1. The two
+    /// pieces' planes stay parallel and 1 apart: they meet nowhere, so their edge is apart
+    /// (`LocalReach::apart`, adding nothing to the reach). The piece is given a plane
+    /// parametrised otherwise than its own (the local operation lifts its edges by their
+    /// UV), so the step walls, which build the wall from the piece's own plane offset
+    /// (`wr_530_local_operation_step_walls`), do not close the body: it is refused as not
+    /// sound.
+    #[test]
+    fn a_coplanar_neighbour_raised_off_its_twin_is_refused_as_not_sound() {
+        let mut k = Kernel::default();
+        let (mut b, piece) = split_block_piece(&mut k);
         let raised = Surface::from(Plane::from_normal(Vec3::new(0.0, 0.0, 21.0), Vec3::Z));
         let why = refused_unchanged_or_returned(&mut k, &mut b, &[piece], vec![raised]);
         assert!(

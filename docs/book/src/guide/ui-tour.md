@@ -92,6 +92,8 @@ view.
   in the default and Inventor presets. In every preset, Ctrl+left drag (Cmd on macOS) that starts
   on empty space orbits; a Ctrl+click still adds to the selection. Shift+right-drag snaps to the nearest standard or
   diagonal view; Shift does not request snapping when the preset already requires it to orbit.
+  (In the web app in Firefox, Shift+right-click opens Firefox's menu instead; see
+  [Shift+right-click in Firefox](getting-started.md#shiftright-click-in-firefox).)
   An orbit drag that reaches the edge of the view carries on: the cursor reappears at the opposite
   edge, so you can keep turning round the model without letting go (not on Wayland or in the browser).
   **Preferences › Navigation › Wrap the cursor while orbiting** turns this off.

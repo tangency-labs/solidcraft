@@ -2166,4 +2166,4 @@ pub(crate) use sides::round_the_axis;
 pub use sides::{ExtendedSides, SideExtension};
 
 #[cfg(test)]
-mod tests;
+pub(crate) mod tests;

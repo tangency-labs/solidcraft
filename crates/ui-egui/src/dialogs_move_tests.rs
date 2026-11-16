@@ -661,6 +661,42 @@ fn a_move_layer_hidden_for_a_pick_is_handed_over_again() {
 }
 
 /// A Move dialog on the 20 × 30 × 10 box, translated 10 mm along X.
+/// #17804: a change of a Move drawn as a layer builds no triangles. The layer draws the moved
+/// bodies lit in the selection colour, so the highlight does not copy and light their every
+/// triangle again at each keystroke, which froze the browser for seconds a change on a large
+/// assembly. Without a layer the highlight lights them where the move puts them, as before.
+#[test]
+fn a_typed_move_drawn_as_a_layer_lights_no_moved_triangles() {
+    let mut h = translated_box();
+    let lit = |h: &crate::scenario::Harness| crate::viewport::build_highlight(&h.app).merged().tris.len();
+    h.frames(3);
+    let unlayered = lit(&h);
+    assert!(unlayered > 0, "without a layer the moved body is lit where it lands");
+    h.app.viewport.gpu =
+        Some(crate::gpu::GpuTarget { format: egui_wgpu::wgpu::TextureFormat::Rgba8Unorm, depth: None, samples: 1, tess: false, oit: false });
+    h.frames(3);
+    let layer = h.app.preview.moving_layer().expect("the moved body is a layer").key;
+    assert!(drawn_as_layer(&h.app));
+    assert_eq!(lit(&h), 0, "the layer lights the moved body");
+    let moving = h.app.preview.waiting_layer_for_tests().expect("the layer's moving scene");
+    let selected = solidcraft_theme::Tokens::get().body_selected.to_srgba_unmultiplied();
+    let fills: Vec<[u8; 4]> = moving
+        .tris
+        .chunks(crate::gpu::TRI_SIZE)
+        .filter_map(|v| moving.palette.entries().get(u32::from_le_bytes(v.get(24..28)?.try_into().ok()?) as usize).copied())
+        .collect();
+    assert!(!fills.is_empty() && fills.iter().all(|c| *c == selected), "lit in the selection colour: {:?}", fills.first());
+    for x in ["25 mm", "40 mm"] {
+        if let Some(Kind::Move { x: field, .. }) = h.app.dialog.as_mut().map(|d| &mut d.kind) {
+            *field = x.into();
+        }
+        h.frames(2);
+        let moved = h.app.preview.moving_layer().expect("still a layer");
+        assert_eq!(moved.key, layer, "{x}: the motion alone changes");
+        assert_eq!(lit(&h), 0, "{x}: nothing is lit whole");
+    }
+}
+
 fn translated_box() -> crate::scenario::Harness {
     let mut h = crate::scenario::Harness::new();
     h.app.run("solid.box", json!({"length": 20, "width": 30, "height": 10})).unwrap();
@@ -1530,6 +1566,34 @@ fn editing_a_placed_body_move_preserves_its_world_transform() {
     }
     let after = app.session.world_state().unwrap().body("B").unwrap().mesh().bounds();
     assert!(before.min.dist(after.min) < 1e-6 && before.max.dist(after.max) < 1e-6, "{before:?} -> {after:?}");
+}
+
+#[test]
+fn editing_a_copy_of_a_turned_instance_keeps_its_captured_frame() {
+    let mut s = Session::default();
+    s.execute("component.create", &json!({"name": "Part", "grounded": false})).unwrap();
+    s.execute("solid.box", &json!({"length": 20, "width": 10, "height": 8, "body_name": "B"})).unwrap();
+    s.execute("component.activate", &json!({"component": "root"})).unwrap();
+    let occurrence = s.execute("occurrence.copy", &json!({"component": "Part", "translate": [100, 0, 0]})).unwrap()["occurrence"].as_u64().unwrap();
+    s.execute("occurrence.move", &json!({"occurrence": occurrence, "axis": [0, 0, 1], "angle": "90 deg"})).unwrap();
+    let name = s.occurrence_bodies(&[occurrence], true).unwrap().remove(0);
+    let reply = s.execute("solid.move", &json!({"bodies": [name], "copy": true, "translate": [5, 0, 0]})).unwrap();
+    let id = reply["feature"].as_u64().unwrap();
+    let copy = reply["created_bodies"][0].as_str().unwrap();
+    let before = s.world_state().unwrap().body(copy).unwrap().body.exact_bounds().unwrap();
+    let mut app = SolveApp::new(s, Services::default());
+    let d = crate::dialogs::for_feature(&app, id, None).unwrap();
+    let Kind::Move { x, y, z, .. } = &d.kind else { panic!("not a move") };
+    let shown = Vec3::new(len(&app, x).unwrap(), len(&app, y).unwrap(), len(&app, z).unwrap());
+    assert!(shown.dist(Vec3::new(5.0, 0.0, 0.0)) < 1e-7, "{shown:?}");
+    let commands = crate::dialogs::preview_commands(&app, &d).unwrap();
+    let colors = crate::preview::Colors::from_tokens(&solidcraft_theme::Tokens::get());
+    assert!(crate::move_preview::MovePreview::default().compute(&app, &commands, colors).is_none(), "captured copies use the evaluated preview");
+    for (command, params) in crate::dialogs::apply_commands(&app, &d).unwrap() {
+        app.run(&command, params).unwrap();
+    }
+    let after = app.session.world_state().unwrap().body(copy).unwrap().body.exact_bounds().unwrap();
+    assert!(before.min.dist(after.min) < 1e-7 && before.max.dist(after.max) < 1e-7, "{before:?} -> {after:?}");
 }
 
 /// The rings stay on the world axes, so a turn dragged on one goes about the axis it shows, on

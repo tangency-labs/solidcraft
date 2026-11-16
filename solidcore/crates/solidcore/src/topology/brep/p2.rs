@@ -397,7 +397,7 @@ pub fn set_tolerance(
             BoundingBoxOptions::default(),
         ))?;
         // fork 60a8a51: a box that cannot be computed is no size, as an absurd one is not
-        let no_box = bbox.is_none() && k.fixes.brep_edit_statuses_pass_on;
+        let no_box = bbox.is_none();
         let mut size = bbox.unwrap_or_default().size().length();
         if no_box || size >= 1.0e15 || size <= 0.0 {
             size = 1.0;
@@ -3212,10 +3212,7 @@ pub fn mate_lamina_edge_to_surface(
     } else {
         ccw_trim_ivl.set_min_max(ccw_trim_ivl.min(), ccw_trim)
     };
-    ignore_status(crate::error::passed_on(
-        set,
-        k.fixes.brep_edit_statuses_pass_on,
-    )?)?;
+    set?;
     // may snap sIvl by tol to existing knots
     match ccw_ext.trim(k, &mut ccw_trim_ivl, TrimMode::Notify) {
         Ok(()) => {}
@@ -3230,10 +3227,7 @@ pub fn mate_lamina_edge_to_surface(
     } else {
         cw_trim_ivl.set_min_max(cw_trim, cw_trim_ivl.max())
     };
-    ignore_status(crate::error::passed_on(
-        set,
-        k.fixes.brep_edit_statuses_pass_on,
-    )?)?;
+    set?;
     match cw_ext.trim(k, &mut cw_trim_ivl, TrimMode::Notify) {
         Ok(()) => {}
         Err(e) if e.is_unported_or_cancelled() => return Err(e),
@@ -3418,19 +3412,16 @@ fn set_vertex_point(b: &mut Brep, env: &mut NotifyEnv<'_>, v: VertexId, p: Point
     )
 }
 
-/// `pEU->GetOrCreateUVTrimCurve(pUV)` (status ignored; header defaults `NULL`, `NULL`,
-/// `TRUE`), then `SER(pUV->Copy(..))`: a copy of the edge use's UV trim curve. A
-/// missing curve is dereferenced upstream (after its `SM_ASSERT`). UV trim curves are
+/// `pEU->GetOrCreateUVTrimCurve(pUV)` (status ignored upstream, passed on here, WR-658;
+/// header defaults `NULL`, `NULL`, `TRUE`), then `SER(pUV->Copy(..))`: a copy of the edge
+/// use's UV trim curve. A missing curve is dereferenced upstream (after its `SM_ASSERT`). UV trim curves are
 /// made as B-splines (the `SmBSplineCurve*&` overload casts). An `SmLine` is an
 /// `SmBSplineCurve`: its copy serves `CreateExtendedCurve` through its B-spline part,
 /// whose NURB `GetOrCreateGwNurbPointer` makes (`MakeNurb`, the `SmLine` override; status
 /// ignored) when missing. A curve of another kind is [`SolidError::InvalidInput`].
 fn uv_trim_curve_copy(k: &Kernel, b: &mut Brep, eu: EdgeuseId) -> Result<BSplineCurve> {
-    let fetched = eu3::get_or_create_uv_trim_curve(k, b, eu, false, false, true)?;
-    // (fork 60a8a51 passes this status on: `SER`)
-    if k.fixes.brep_edit_statuses_pass_on {
-        fetched.status?;
-    }
+    // (status ignored upstream; fork 60a8a51 passes it on: `SER`)
+    eu3::get_or_create_uv_trim_curve(k, b, eu, false, false, true)?.status?;
     let curve = eu1::uv_trim_curve(b, eu)?
         .0
         .ok_or(null_deref("edge use without UV trim curve"))?;
@@ -3451,7 +3442,7 @@ fn uv_trim_curve_copy(k: &Kernel, b: &mut Brep, eu: EdgeuseId) -> Result<BSpline
 }
 
 /// `SER(pEU->GetOrCreateUVTrimCurve(pUV))` then `pUV->Trim(ivl)` (`bNotify` default
-/// `TRUE`; status ignored, only [`SolidError::Unported`] propagates). The curve is the
+/// `TRUE`; status ignored upstream, passed on as the fork does). The curve is the
 /// one of the edge use or its mate (the owner of the pair's curve); a missing curve is
 /// dereferenced upstream.
 fn trim_uv_trim_curve(k: &Kernel, b: &mut Brep, eu: EdgeuseId, ivl: &Extent1d) -> Result<()> {
@@ -3466,12 +3457,9 @@ fn trim_uv_trim_curve(k: &Kernel, b: &mut Brep, eu: EdgeuseId, ivl: &Extent1d) -
         .ok_or(null_deref("edge use without UV trim curve"))?;
     // may snap sIvl by tol to existing knots
     let mut trim_ivl = *ivl;
-    match curve.trim(k, &mut trim_ivl, TrimMode::Notify) {
-        Err(e) if e.is_unported_or_cancelled() => Err(e),
-        // (fork 60a8a51 passes the trim's status on: `SER`)
-        Err(e) if k.fixes.brep_edit_statuses_pass_on => Err(e),
-        _ => Ok(()),
-    }
+    // (status ignored upstream; fork 60a8a51 passes the trim's status on: `SER`)
+    curve.trim(k, &mut trim_ivl, TrimMode::Notify)?;
+    Ok(())
 }
 
 /// `SER(pEU->NormalizedEvaluate(t, FALSE, pnt))` (3D; header defaults: no derivative,

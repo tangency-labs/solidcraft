@@ -245,6 +245,7 @@ fn wr_614_imported_tolerances_union_and_intersection_at_5e6() {
 /// When A continues well past the crossing ([-2, 10] instead of [-2, 2]) so B emerges
 /// out of A's y = 20 face up to y ~ 20.4, the crossing at x = 1.9999 is a real exit
 /// edge, not a two-sided coincident strip, and must not be dropped.
+/// The intersection, a wedge thinner than the tolerance, is empty.
 #[test]
 fn wr_614_wider_protruding_box_keeps_exit_crossing() {
     let mut k = Kernel::default();
@@ -263,9 +264,15 @@ fn wr_614_wider_protruding_box_keeps_exit_crossing() {
 
     let a = create_box(&mut k, Point3::new(-2.0, 16.0, 0.0), 12.0, SIDE, SIDE).unwrap();
     let (_, b) = strip_cubes(&mut k, D);
+    // The overlap is that wedge: 1e-4 across and 4 long, 5e-6 thick at most. Its two
+    // edges in each end plane (A's along y = 20, B's rising 5e-6 over that 1e-4) run
+    // between the same two vertices within their tolerances (1e-5 each) of each other
+    // over their whole length: one edge (docs/booleans.md, "One edge or two"), so no
+    // solid is left between them. Kept as two edges, the wedge was a body of 3 faces
+    // whose check failed (a loop of zero area, bad orientation) and whose volume
+    // measured 8.9e-20.
     let mut inter = boolean_intersection(&mut k, a, b).unwrap();
-    assert_eq!(shape(&inter).0, 0, "empty intersection");
-    assert_eq!(shape(&inter).3, 0, "no intersection solid");
+    assert_eq!(shape(&inter), (0, 0, 0, 0, false), "empty intersection");
     assert_valid(&mut k, &mut inter, "wider box intersection");
 }
 
@@ -552,18 +559,16 @@ fn wr_614_union_below_the_collapse_offsets_is_two_touching_solids() {
 }
 
 /// The narrow strip at d = 1e-6, on the collapse boundary (B's corner P0 and A's corner C
-/// 20.02 d = 2.002e-5 apart, just past the intersection tolerance 2e-5, so two points): the
-/// vertex the imprint makes at one corner needs a tolerance covering its certified gaps whose
-/// ball reaches the other, which it does not bound. No valid body holds both, so each
-/// Boolean is refused at the imprint, naming the tolerance needed and the one that fits,
-/// computed from the distances (never by building again). Here no tolerance fits (`None`):
-/// an earlier imprint at this offset made an edge 4 mm long with
-/// tolerance 8 (its curve dropped 4 mm off its face), and its vertex is one the ball
-/// would reach. That imprint is a separate defect; the refusal reports it as it finds it.
+/// 20.02 d = 2.002e-5 apart, just past the intersection tolerance 2e-5, so two points). An
+/// earlier imprint at this offset makes an edge 4 mm long with tolerance 8 (its curve dropped
+/// 4 mm off its face), a separate defect. The topology intersector cannot evaluate a point
+/// class of the face intersection on its face (no single nearest point on the face's
+/// surface), and `SetPointClassParameters` fails. C++ SMLib ignores that status and goes on
+/// with the point unevaluated; the fork passes it on (WR-658, tangency-labs/smlib e7ebc8d),
+/// so each Boolean is refused there, before any vertex tolerance is sized from the
+/// unevaluated point. No valid body is returned either way.
 #[test]
-fn wr_614_strip_at_its_collapse_boundary_is_refused_naming_the_size() {
-    use solidcore::error::boolean::BooleanFailure;
-    use solidcore::error::Reason;
+fn wr_614_strip_at_its_collapse_boundary_is_refused() {
     use solidcore::SolidError;
     for op in ["union", "intersection", "difference"] {
         let mut k = Kernel::default();
@@ -573,16 +578,15 @@ fn wr_614_strip_at_its_collapse_boundary_is_refused_naming_the_size() {
             "intersection" => boolean_intersection(&mut k, a, b),
             _ => boolean_difference(&mut k, a, b),
         };
-        let Err(SolidError::Failed(f)) = &r else {
+        let Err(e @ SolidError::Failed(_)) = &r else {
             panic!("{op}: a refusal, got {:?}", r.map(|b| shape(&b)));
         };
-        let Reason::Boolean(BooleanFailure::MergedVertexReaches { needed, fits_below }) = f.reason
-        else {
-            panic!("{op}: a merged vertex that reaches, got {f:?}");
-        };
         assert!(
-            needed > 0.0 && needed < 1e-4 && fits_below.is_none(),
-            "{op}: needed {needed}, fits below {fits_below:?}"
+            e.operation()
+                == "intersect::point_class::PointClassification::compute_point_parameters"
+                && e.sm_status() == Some(1001)
+                && e.to_string().contains("no single nearest point"),
+            "{op}: {e:?}"
         );
     }
 }
