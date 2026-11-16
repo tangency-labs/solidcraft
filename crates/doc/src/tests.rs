@@ -1425,6 +1425,14 @@ fn a_second_sketch_cannot_take_an_existing_sketch_name() {
     let error = doc.add_feature(sketch(), Some("sketch2")).unwrap_err().to_string();
     assert!(error.contains("another feature is called `sketch2`"), "{error}");
     assert_eq!(doc.find_feature("SKETCH2").unwrap().name, "Sketch2");
+    // A free name for a sketch skips the taken ones.
+    assert_eq!(doc.free_sketch_name("Sketch2"), "Sketch2 (2)");
+    assert_eq!(doc.free_sketch_name("Other"), "Other");
+    // Planes keep matching on the exact name, so two planes may differ only in case.
+    let plane = |base: &str| FeatureKind::ConstructionPlane { plane: PlaneRef::Origin { name: base.into() } };
+    doc.add_feature(plane("XY"), Some("Angled x")).unwrap();
+    doc.add_feature(plane("XY"), Some("Angled X")).unwrap();
+    assert!(doc.add_feature(plane("XY"), Some("Angled X")).is_err());
 }
 
 #[test]

@@ -6,7 +6,7 @@ use solidcraft_sketch::Sketch;
 
 use crate::construct::{AxisDef, GeoRef, PointDef};
 use crate::expr::{self, Expr, Kind};
-use crate::names::{BodyName, FeatureId, FeatureName, SketchId};
+use crate::names::{BodyName, FeatureId, FeatureName, SketchId, copy_name};
 use crate::points::{Dir, FacePick, Position};
 use crate::{DocError, Result};
 
@@ -4399,16 +4399,23 @@ impl Document {
     /// Whether a new feature of `kind` called `name` would be ambiguous. Plane references share
     /// the feature namespace, and sketches are also referenced by name (`extrude` by sketch name
     /// takes the first match), so a duplicate would silently select the first feature. Other
-    /// shared names (a sketch and its extrude) remain supported. Names compare as lookup does.
+    /// shared names (a sketch and its extrude) remain supported. Two sketches clash the way
+    /// lookup matches them (ASCII case does not matter); a plane clashes on the exact name, as
+    /// it always has.
     pub fn name_clash(&self, kind: &FeatureKind, name: &str) -> bool {
         let is_plane = matches!(kind, FeatureKind::ConstructionPlane { .. });
         let is_sketch = matches!(kind, FeatureKind::Sketch { .. });
         self.features.iter().any(|f| {
-            same_feature_name(&f.name, name)
-                && (is_plane
-                    || matches!(f.kind, FeatureKind::ConstructionPlane { .. })
-                    || (is_sketch && matches!(f.kind, FeatureKind::Sketch { .. })))
+            let other_sketch = matches!(f.kind, FeatureKind::Sketch { .. });
+            let other_plane = matches!(f.kind, FeatureKind::ConstructionPlane { .. });
+            (is_sketch && other_sketch && same_feature_name(&f.name, name)) || ((is_plane || other_plane) && f.name == name)
         })
+    }
+
+    /// `name` if no other sketch has it, else the first free `name (2)`, `name (3)` ...
+    pub fn free_sketch_name(&self, name: &str) -> String {
+        let taken = |n: &str| self.features.iter().any(|f| matches!(f.kind, FeatureKind::Sketch { .. }) && same_feature_name(&f.name, n));
+        if taken(name) { copy_name(name, taken) } else { name.to_string() }
     }
 
     /// Resolve a textual timeline reference. An exact name wins even when it looks like an id.
