@@ -35,6 +35,7 @@ mod component_clone;
 mod component_clone_assembly;
 mod construct;
 mod construct_auto;
+mod cutlist;
 mod delete;
 pub(crate) mod diagnostics;
 mod edit;
@@ -389,6 +390,7 @@ pub fn command_specs() -> Vec<&'static CommandSpec> {
     v.extend(config::COMMANDS.iter());
     v.extend(parts::COMMANDS.iter());
     v.extend(bom::COMMANDS.iter());
+    v.extend(cutlist::COMMANDS.iter());
     v.extend(mass_properties::COMMANDS.iter());
     v.extend(browser::COMMANDS.iter());
     v.extend(notes::COMMANDS.iter());

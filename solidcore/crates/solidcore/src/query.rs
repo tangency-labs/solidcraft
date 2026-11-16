@@ -21,6 +21,7 @@ pub mod r#loop;
 pub mod normal;
 pub mod poly;
 pub mod poly_properties;
+pub mod stock;
 pub mod tangent_edge;
 pub mod tess;
 pub mod vertex_meet;
