@@ -497,15 +497,16 @@ pub fn footprint_across(
     // join the curves end to end into closed loops
     let mut loops: Vec<Loop2> = Vec::new();
     while let Some(first) = runs.pop() {
-        let begin = start(&first).ok_or_else(|| refused("an empty section curve"))?;
+        let begin = start(first.as_slice()).ok_or_else(|| refused("an empty section curve"))?;
         let mut segs = first;
         loop {
-            let at = end(&segs).ok_or_else(|| refused("an empty section curve"))?;
+            let at = end(segs.as_slice()).ok_or_else(|| refused("an empty section curve"))?;
             if segs.len() > 1 && near(at, begin) {
                 break;
             }
             let next = runs.iter().position(|r| {
-                start(r).is_some_and(|p| near(p, at)) || end(r).is_some_and(|p| near(p, at))
+                start(r.as_slice()).is_some_and(|p| near(p, at))
+                    || end(r.as_slice()).is_some_and(|p| near(p, at))
             });
             let Some(i) = next else {
                 if near(at, begin) {
@@ -514,7 +515,7 @@ pub fn footprint_across(
                 return Err(refused("a section that does not close"));
             };
             let run = runs.swap_remove(i);
-            if start(&run).is_some_and(|p| near(p, at)) {
+            if start(run.as_slice()).is_some_and(|p| near(p, at)) {
                 segs.extend(run);
             } else {
                 segs.extend(run.iter().rev().map(Seg2::reversed));
@@ -551,13 +552,13 @@ pub fn footprint_across(
     }
     let mut regions: Vec<Option<Region2>> = Vec::new();
     for (lp, held_by) in loops.iter().zip(&holders) {
-        regions.push((held_by.len() % 2 == 0).then(|| Region2 {
+        regions.push(held_by.len().is_multiple_of(2).then(|| Region2 {
             outer: lp.clone(),
             holes: Vec::new(),
         }));
     }
     for (lp, held_by) in loops.iter().zip(&holders) {
-        if held_by.len() % 2 == 0 {
+        if held_by.len().is_multiple_of(2) {
             continue;
         }
         let mut best: Option<(f64, usize)> = None;
