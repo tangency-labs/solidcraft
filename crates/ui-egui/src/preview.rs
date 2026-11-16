@@ -1910,24 +1910,24 @@ mod tests {
             assert!(!b.scene.ghost.is_empty(), "{op}: shown with the preference off");
         }
         let heights = |bytes: &[u8]| -> Vec<f32> {
-            bytes.chunks(28).filter_map(|v| v.get(8..12).and_then(|b| b.try_into().ok()).map(f32::from_le_bytes)).collect()
+            bytes.chunks(crate::gpu::TRI_SIZE).filter_map(|v| v.get(8..12).and_then(|b| b.try_into().ok()).map(f32::from_le_bytes)).collect()
         };
         for op in ["join", "cut", "intersect"] {
             let b = preview(op);
-            assert_eq!(count(&b.scene, &b.scene.tris, 28, c.added), 0, "{op}: no tint");
-            assert!(count(&b.scene, &b.scene.tris, 28, c.selected) > 0, "{op}: the result is drawn selected");
-            assert_eq!(count(&b.scene, &b.scene.tris, 28, c.body), 0, "{op}: not as an unpicked body");
+            assert_eq!(count(&b.scene, &b.scene.tris, crate::gpu::TRI_SIZE, c.added), 0, "{op}: no tint");
+            assert!(count(&b.scene, &b.scene.tris, crate::gpu::TRI_SIZE, c.selected) > 0, "{op}: the result is drawn selected");
+            assert_eq!(count(&b.scene, &b.scene.tris, crate::gpu::TRI_SIZE, c.body), 0, "{op}: not as an unpicked body");
         }
         let join = preview("join");
         assert!(join.scene.ghost.is_empty() && join.scene.xray.is_empty(), "a join takes nothing away");
         let cut = preview("cut");
-        assert!(count(&cut.scene, &cut.scene.ghost, 28, c.removed) > 0, "the tool, red");
+        assert!(count(&cut.scene, &cut.scene.ghost, crate::gpu::TRI_SIZE, c.removed) > 0, "the tool, red");
         assert!(cut.scene.xray.is_empty(), "nothing drawn through the bodies");
-        assert_eq!(count(&cut.scene, &cut.scene.ghost, 28, c.lost), 0);
+        assert_eq!(count(&cut.scene, &cut.scene.ghost, crate::gpu::TRI_SIZE, c.lost), 0);
         let z = heights(&cut.scene.ghost);
         assert!(z.iter().any(|z| *z < -1.0) && z.iter().any(|z| *z > 21.0), "the whole pin, out of the cube too");
         let kept = combine("cut", "Pin", true);
-        assert!(count(&kept.scene, &kept.scene.ghost, 28, c.removed) > 0, "a kept tool is shown red as well");
+        assert!(count(&kept.scene, &kept.scene.ghost, crate::gpu::TRI_SIZE, c.removed) > 0, "a kept tool is shown red as well");
         assert!(kept.replaced.contains(&"Pin".to_string()), "the preview stands in for the kept tool");
         // Hovered, a cut's target outlines what is left of it and a ghosted tool itself; a join's
         // target and tool are outlined apart, each by its own shape, not the joined body.
@@ -1944,12 +1944,12 @@ mod tests {
         let pieces = s.preview(&[slab]).unwrap().after.bodies.iter().filter(|b| b.name.starts_with("Cube")).count();
         assert_eq!(pieces, 2, "the slab cuts the cube in two");
         let split = combine("cut", "Slab", false);
-        assert_eq!(count(&split.scene, &split.scene.tris, 28, c.new_body), 0, "the piece split off is no new body");
-        assert!(count(&split.scene, &split.scene.tris, 28, c.selected) > 0);
+        assert_eq!(count(&split.scene, &split.scene.tris, crate::gpu::TRI_SIZE, c.new_body), 0, "the piece split off is no new body");
+        assert!(count(&split.scene, &split.scene.tris, crate::gpu::TRI_SIZE, c.selected) > 0);
         let intersect = preview("intersect");
-        assert!(count(&intersect.scene, &intersect.scene.ghost, 28, c.lost) > 0, "the pin's dropped material");
-        assert_eq!(count(&intersect.scene, &intersect.scene.ghost, 28, c.removed), 0);
-        assert_eq!(count(&intersect.scene, &intersect.scene.xray, 28, c.removed), 0, "what remains is shown as it is");
+        assert!(count(&intersect.scene, &intersect.scene.ghost, crate::gpu::TRI_SIZE, c.lost) > 0, "the pin's dropped material");
+        assert_eq!(count(&intersect.scene, &intersect.scene.ghost, crate::gpu::TRI_SIZE, c.removed), 0);
+        assert_eq!(count(&intersect.scene, &intersect.scene.xray, crate::gpu::TRI_SIZE, c.removed), 0, "what remains is shown as it is");
         // Each ghosted tool has its outline in its own colour, in the lines the renderer draws for
         // a preview (it draws no on-top ones); a join's has none.
         let outline = |colour: [u8; 4]| [colour[0], colour[1], colour[2], 255];
@@ -2001,12 +2001,12 @@ mod tests {
         };
         for combine in [false, true] {
             let b = compute(&s, &[mirror(30.0, combine)], c).unwrap();
-            assert!(count(&b.scene, &b.scene.ghost, 28, c.mirrored) > 0, "join {combine}: the copy, green and see-through");
+            assert!(count(&b.scene, &b.scene.ghost, crate::gpu::TRI_SIZE, c.mirrored) > 0, "join {combine}: the copy, green and see-through");
             // Its outline in the lines the renderer draws for a preview (it draws no on-top ones).
             let outline = [c.mirrored[0], c.mirrored[1], c.mirrored[2], 255];
             assert!(count(&b.scene, &b.scene.lines, crate::gpu::LINE_SIZE, outline) > 0, "join {combine}: the copy's outline");
             assert!(b.scene.overlay.is_empty(), "join {combine}: nothing the renderer leaves out");
-            assert_eq!(count(&b.scene, &b.scene.tris, 28, c.new_body), 0, "join {combine}: no solid new body");
+            assert_eq!(count(&b.scene, &b.scene.tris, crate::gpu::TRI_SIZE, c.new_body), 0, "join {combine}: no solid new body");
             assert!(b.replaced.is_empty(), "join {combine}: the body is left as it is");
             assert_eq!(b.mirror_meets.map(|(_, meets)| meets), Some(false), "join {combine}: apart");
         }
@@ -2081,11 +2081,11 @@ mod tests {
         let p = s.preview(&[("solid.hole".to_string(), json!({"position": [20, 15, 20], "diameter": 5, "depth": 10}))]).unwrap();
         let b = build(&p.before, &p.after, colors());
         // The hole's walls are drawn see-through in the cut colour (seen from any side).
-        assert!(count(&b.scene, &b.scene.xray, 28, colors().removed) > 0);
+        assert!(count(&b.scene, &b.scene.xray, crate::gpu::TRI_SIZE, colors().removed) > 0);
         // A feature that only adds material shows no cut.
         let p = s.preview(&[("solid.box".to_string(), json!({"length": 10, "width": 10, "height": 30, "operation": "join"}))]).unwrap();
         let b = build(&p.before, &p.after, colors());
-        assert_eq!(count(&b.scene, &b.scene.xray, 28, colors().removed), 0);
+        assert_eq!(count(&b.scene, &b.scene.xray, crate::gpu::TRI_SIZE, colors().removed), 0);
     }
 
     /// Graphics' Show removed material in red, off: the cut and the ghost of the shape the
@@ -2098,19 +2098,19 @@ mod tests {
         let p = s.preview(&cmds).unwrap();
         let plain = colors();
         let b = build(&p.before, &p.after, plain);
-        assert!(count(&b.scene, &b.scene.ghost, 28, plain.removed) > 0, "the replaced shape is ghosted while the tint is on");
+        assert!(count(&b.scene, &b.scene.ghost, crate::gpu::TRI_SIZE, plain.removed) > 0, "the replaced shape is ghosted while the tint is on");
         let quiet = Colors { cut_tint: false, ..plain };
         let b = build(&p.before, &p.after, quiet);
-        assert_eq!(count(&b.scene, &b.scene.xray, 28, quiet.removed), 0, "no see-through cut");
-        assert_eq!(count(&b.scene, &b.scene.ghost, 28, quiet.removed), 0, "no ghost of the old shape");
-        assert!(count(&b.scene, &b.scene.tris, 28, quiet.body) > 0, "the body is still drawn");
+        assert_eq!(count(&b.scene, &b.scene.xray, crate::gpu::TRI_SIZE, quiet.removed), 0, "no see-through cut");
+        assert_eq!(count(&b.scene, &b.scene.ghost, crate::gpu::TRI_SIZE, quiet.removed), 0, "no ghost of the old shape");
+        assert!(count(&b.scene, &b.scene.tris, crate::gpu::TRI_SIZE, quiet.body) > 0, "the body is still drawn");
         // The tool of a cut is left out too, its outline alone showing where it goes.
         let cmds = [("solid.box".to_string(), json!({"length": 10, "width": 10, "height": 30, "operation": "new"}))];
         let p = s.preview(&cmds).unwrap();
         let shown = build_tool(&p.before, &p.after, plain, "cut");
-        assert!(count(&shown.scene, &shown.scene.xray, 28, plain.removed) > 0, "the tool is see-through red while the tint is on");
+        assert!(count(&shown.scene, &shown.scene.xray, crate::gpu::TRI_SIZE, plain.removed) > 0, "the tool is see-through red while the tint is on");
         let b = build_tool(&p.before, &p.after, quiet, "cut");
-        assert_eq!(count(&b.scene, &b.scene.xray, 28, quiet.removed), 0, "no see-through tool");
+        assert_eq!(count(&b.scene, &b.scene.xray, crate::gpu::TRI_SIZE, quiet.removed), 0, "no see-through tool");
         assert!(!b.scene.overlay.is_empty(), "the tool's outline still shows where the cut goes");
     }
 
@@ -2222,7 +2222,7 @@ mod tests {
         let b = compute(&s, &[("solid.fillet".into(), json!({"edges": [[-16, -20, 30]], "radius": 4}))], colors()).unwrap();
         assert_eq!(b.replaced, vec!["Body1".to_string()]);
         // Ghost triangles on the boss's side, well away from the fillet.
-        let on_boss = b.scene.ghost.as_chunks::<28>().0.as_chunks::<3>().0.iter().filter(|t| {
+        let on_boss = b.scene.ghost.as_chunks::<{ crate::gpu::TRI_SIZE }>().0.as_chunks::<3>().0.iter().filter(|t| {
             t.iter().all(|v| {
                 let f = |k: usize| f32::from_le_bytes([v[4 * k], v[4 * k + 1], v[4 * k + 2], v[4 * k + 3]]) as f64;
                 let (x, y, z) = (f(0), f(1), f(2));
