@@ -83,12 +83,14 @@ pub fn native_cad_design(bytes: &[u8], file: &str) -> Result<NativeDesign, Strin
     Ok(design)
 }
 
-/// `ir`'s bodies as an import kept as records, one product called `product`, written by
-/// `system`: each body region assembled into a record by `solidcore_cadir`, its pcurves without a
-/// closed form made as a STEP import's are ([`solidcraft_kernel::import_trims`]). Nothing passes
-/// through STEP text. CADIR's bodies come with their own names, visibility and rigid placements,
-/// which the records keep. What could not be read (and what was repaired on the way) is in the
-/// warnings, each naming its body.
+/// `ir`'s bodies as an import kept as records, written by `system`: each body region assembled
+/// into a record by `solidcore_cadir`, its pcurves without a closed form made as a STEP import's
+/// are ([`solidcraft_kernel::import_trims`]). Nothing passes through STEP text. CADIR's bodies
+/// come with their own names, visibility and rigid placements, which the records keep. Where the
+/// file has a product structure (occurrences), the tree is that structure and each body is placed
+/// once for each use of its part ([`assembly`]); otherwise the bodies are one product called
+/// `product`. What could not be read (and what was repaired on the way) is in the warnings, each
+/// naming its body.
 pub(crate) fn cadir_records(ir: &cadmpeg_ir::document::CadIr, product: &str, system: &str) -> solidcraft_kernel::ImportRecords {
     use solidcraft_kernel::{ImportRecords, RecordBody, StepNode};
     let _span = solidcraft_profile::span("import", "cadir.records");
@@ -96,11 +98,11 @@ pub(crate) fn cadir_records(ir: &cadmpeg_ir::document::CadIr, product: &str, sys
     let by_id: std::collections::HashMap<&str, &cadmpeg_ir::topology::Body> = ir.model.bodies.iter().map(|b| (b.id.as_str(), b)).collect();
     let label = |id: &str| by_id.get(id).and_then(|b| b.name.clone()).filter(|n| !n.trim().is_empty()).unwrap_or_else(|| id.to_string());
     let mut warnings = Vec::new();
-    let mut bodies = Vec::with_capacity(read.read.len());
+    let mut unplaced = Vec::with_capacity(read.read.len());
     for r in read.read {
         let body = by_id.get(r.body.as_str());
         warnings.extend(r.solid.notes.iter().map(|n| format!("{}: {n}", label(&r.body))));
-        bodies.push(RecordBody {
+        let record = RecordBody {
             name: body.and_then(|b| b.name.clone()).unwrap_or_default(),
             path: vec![product.to_string()],
             instance: None,
@@ -112,21 +114,29 @@ pub(crate) fn cadir_records(ir: &cadmpeg_ir::document::CadIr, product: &str, sys
             brep: r.solid.brep,
             face_origin: r.solid.face_origin,
             sheet: r.solid.sheet,
-        });
+        };
+        unplaced.push(assembly::Unplaced { body: r.body, record });
     }
     warnings.extend(read.failures.iter().map(|f| format!("{}: not imported: {}", label(&f.body), f.message)));
-    let identity = [[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0], [0.0, 0.0, 0.0, 1.0]];
-    let tree = vec![StepNode {
-        name: product.to_string(),
-        transform: identity,
-        bodies: (0..bodies.len()).collect(),
-        items: Vec::new(),
-        left_out: Vec::new(),
-        children: Vec::new(),
-    }];
+    let (bodies, tree) = if ir.model.occurrences.is_empty() {
+        let bodies: Vec<RecordBody> = unplaced.into_iter().map(|u| u.record).collect();
+        let identity = [[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0], [0.0, 0.0, 0.0, 1.0]];
+        let tree = vec![StepNode {
+            name: product.to_string(),
+            transform: identity,
+            bodies: (0..bodies.len()).collect(),
+            items: Vec::new(),
+            left_out: Vec::new(),
+            children: Vec::new(),
+        }];
+        (bodies, tree)
+    } else {
+        assembly::placed(ir, product, unplaced, &mut warnings)
+    };
     ImportRecords { bodies, tree, warnings, system: system.to_string() }
 }
 
+mod assembly;
 mod design;
 pub use design::NativeDesign;
 

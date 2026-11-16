@@ -447,15 +447,10 @@ fn compared_parts() -> Vec<(String, Vec<u8>)> {
 /// angle that is a plane.
 const KERNEL_CASES: [&str; 2] = ["3208-extruded-ellipse-face-over-parameter-seam", "4006-plane-written-as-cone-of-nearly-right-angle"];
 
-/// The compared parts whose bodies differ between the two routes, with why: the records do not
-/// yet follow CADIR occurrences, so a part placed in an assembly comes in once and unplaced
-/// (`docs/step-import.md`). None of the FreeCAD and Rhino fixtures has occurrences.
-const DIFFER: [(&str, &str); 2] =
-    [("cylinder_placed.step", "not yet at its assembly placement"), ("cylinder_twice.step", "one body, not one per placement")];
-
 /// Reading the neutral model into records builds the bodies the STEP route built (cadmpeg's
 /// STEP writer, then our STEP reader): the same bodies, each as whole, with as many faces, the
-/// same volume and the same box, for every part in [`compared_parts`] but those in [`DIFFER`].
+/// same volume and the same box, for every part in [`compared_parts`], an assembly's parts at
+/// each of their placements.
 #[test]
 fn records_build_the_bodies_the_step_route_built() {
     let mut differ = Vec::new();
@@ -469,7 +464,46 @@ fn records_build_the_bodies_the_step_route_built() {
             differ.push(name.clone());
         }
     }
-    assert_eq!(differ, DIFFER.map(|(n, _)| n.to_string()), "parts whose bodies differ between the two routes");
+    assert!(differ.is_empty(), "parts whose bodies differ between the two routes: {differ:?}");
+}
+
+/// An assembly read through cadmpeg's STEP decoder has the product tree SolidCraft's own STEP
+/// reader gives it: the same products nested the same way, each placed in its parent, with its
+/// bodies, and each body under its products' names and its occurrence's. A part used twice is
+/// two bodies, one at each placement.
+#[test]
+fn an_assembly_read_into_records_has_the_tree_our_step_reader_gives_it() {
+    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/step-conformance");
+    for (name, bodies) in [("cylinder_placed.step", 1), ("cylinder_twice.step", 2)] {
+        let bytes = std::fs::read(dir.join(name)).unwrap();
+        let ours = solidcraft_kernel::step_import(&String::from_utf8_lossy(&bytes)).unwrap();
+        let (theirs, warnings) = by_records(&neutral(&bytes, name));
+        let theirs = theirs.unwrap_or_else(|e| panic!("{name}: {e} {warnings:?}"));
+        assert_eq!(theirs.bodies.len(), bodies, "{name}");
+        assert_eq!(tree_of(&theirs), tree_of(&ours), "{name}");
+        assert!(same_bodies(&built(&theirs), &built(&ours)), "{name}: the bodies differ from our reader's");
+    }
+}
+
+/// An import's product tree, one line a node: its depth and name, its placement in its parent
+/// (rounded to a micrometre), and each of its bodies' product path and occurrence.
+fn tree_of(imp: &solidcraft_kernel::StepImport) -> Vec<String> {
+    fn walk(nodes: &[solidcraft_kernel::StepNode], imp: &solidcraft_kernel::StepImport, depth: usize, out: &mut Vec<String>) {
+        for n in nodes {
+            let m: Vec<String> = n.transform.iter().flatten().map(|v| format!("{:.3}", v + 0.0)).collect();
+            let bodies: Vec<String> = n
+                .bodies
+                .iter()
+                .filter_map(|b| imp.bodies.get(*b))
+                .map(|b| format!("{}|{}", b.path.join("/"), b.instance.clone().unwrap_or_default()))
+                .collect();
+            out.push(format!("{depth} {} [{}] {bodies:?}", n.name, m.join(" ")));
+            walk(&n.children, imp, depth + 1, out);
+        }
+    }
+    let mut out = Vec::new();
+    walk(&imp.tree, imp, 0, &mut out);
+    out
 }
 
 /// The import kernel cases read into records build what each case expects: one whole body, its
@@ -531,4 +565,37 @@ fn what_the_records_leave_out_the_step_route_imported_wrongly() {
     assert!(same_bodies(&built(&old.unwrap()), &round), "the STEP route imported the elliptical cone as the round one");
     let (_, warnings) = by_records(&ir);
     assert!(warnings.iter().any(|w| w.contains("an elliptical cone")), "{warnings:?}");
+}
+
+/// A component whose placement mirrors is left out with the reason, and the part's other
+/// placement still comes in.
+#[test]
+fn a_mirrored_component_is_left_out_with_why() {
+    let bytes = std::fs::read(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/step-conformance/cylinder_twice.step")).unwrap();
+    let mut ir = neutral(&bytes, "cylinder_twice.step");
+    let mirror = cadmpeg_ir::transform::Transform::affine([[-1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0]]).unwrap();
+    let leaf = ir.model.occurrences.iter_mut().find(|o| !matches!(o.parent, cadmpeg_ir::products::OccurrenceParent::Root {})).unwrap();
+    leaf.transform = mirror;
+    let records = cadir_records(&ir, "mirrored", "test");
+    assert_eq!(records.bodies.len(), 1, "{:?}", records.warnings);
+    assert!(records.warnings.iter().any(|w| w.contains("mirrors")), "{:?}", records.warnings);
+}
+
+/// Occurrences that contain each other end the walk with a warning, never a hang or a panic.
+#[test]
+fn occurrences_in_a_cycle_end_with_a_warning() {
+    let bytes = std::fs::read(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/step-conformance/cylinder_twice.step")).unwrap();
+    let mut ir = neutral(&bytes, "cylinder_twice.step");
+    let ids: Vec<_> = ir.model.occurrences.iter().map(|o| o.id.clone()).collect();
+    // Each occurrence's parent the next: a cycle with no root, and one with the root kept.
+    for (k, o) in ir.model.occurrences.iter_mut().enumerate() {
+        o.parent = cadmpeg_ir::products::OccurrenceParent::Occurrence { occurrence: ids[(k + 1) % ids.len()].clone() };
+    }
+    let records = cadir_records(&ir, "cycle", "test");
+    assert!(solidcraft_kernel::records_import(&records).is_ok());
+    if let Some(first) = ir.model.occurrences.first_mut() {
+        first.parent = cadmpeg_ir::products::OccurrenceParent::Root {};
+    }
+    let records = cadir_records(&ir, "cycle", "test");
+    assert!(solidcraft_kernel::records_import(&records).is_ok(), "{:?}", records.warnings);
 }
