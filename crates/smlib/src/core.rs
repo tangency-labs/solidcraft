@@ -76,7 +76,6 @@ pub(crate) fn fixes() -> UpstreamFixes {
     let mut f = UpstreamFixes::default();
     f.fillet_refuse_face_consuming_blends = true;
     f.fillet_chamfer_cone_on_arc = true;
-    f.offset_extended_edges_mated = true;
     f.keep_operand_uv_trims = true;
     f.proto_vertex_miss_is_false = true;
     f.revolve_analytic_profile_faces = true;
@@ -87,7 +86,6 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.local_operation_refuses_loose_tangent_edges = true;
     f.transform_scales_each_tolerance = true;
     f.transform_model_size_from_body_box = true;
-    f.offset_collapsed_rounds_mated = true;
     f.uv_trim_corner_end_points_only = true;
     f.bspline_trim_preserves_uv_spans = true;
     f.proto_edge_self_loop_on_vertex_degenerate = true;
@@ -114,7 +112,6 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.fillet_refuse_overlapping_bands = true;
     f.ssi_tangent_curve_tracer = true;
     f.local_operation_step_walls = true;
-    f.thicken_planar_side_walls = true;
     f.fillet_knife_edge_rounds = true;
     f.revolution_round_offset_collapses = true;
     f.proto_edge_splits_at_captured_vertices = true;
