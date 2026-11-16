@@ -25,8 +25,8 @@
 //! | [`BSplineSurface::adjust_step_uv_domain`]         | `AdjustSTEPUVDomain`             |
 //! | `transpose` (private)                             | `SmTArray<T>::Transpose`         |
 //!
-//! WR-450: `CopyAndAddAnalytics` keeps an exact copy where its analytic surface differs from the
-//! source at the same parameters (the fork's `sm_SameParameterization`).
+//! Opt-in ([`UpstreamFixes::analytic_copy_keeps_parameterization`](crate::kernel::UpstreamFixes::analytic_copy_keeps_parameterization), WR-450):
+//! `CopyAndAddAnalytics` keeps an exact copy where its analytic surface differs from the source at the same parameters.
 //!
 //! WR-103: `CreateSphereFromArcs` refuses an arc whose centre is farther than the 3D tolerance from
 //! the first arc's, instead of reproducing upstream's aliased (dead) centre check.
@@ -409,11 +409,15 @@ impl BSplineSurface {
         Ok(Surface::from(self.copy()))
     }
 
-    /// The recognised analytic `analytic`, or an exact copy when `analytic` does not
+    /// The recognised analytic `analytic`, or an exact copy when
+    /// `Kernel::fixes.analytic_copy_keeps_parameterization` is on and `analytic` does not
     /// give this surface's points at the same parameters (the fork's
     /// `sm_SameParameterization`, WR-450, #387): a face split with
     /// `MakeEdgeInFaceWithVU` keeps its UV domain and trims on the copy.
     fn analytic_or_exact_copy(&self, k: &Kernel, analytic: Surface) -> Surface {
+        if !k.fixes.analytic_copy_keeps_parameterization {
+            return analytic;
+        }
         let domain = self.natural_uv_domain();
         let steps = 6.0;
         let mut pairs = Vec::with_capacity(49);
@@ -2372,10 +2376,8 @@ mod tests {
                 crate::surface::surface::SurfaceKind::SurfOfExtrusion(_)
             ));
             if let crate::surface::surface::SurfaceKind::SurfOfExtrusion(extrusion) = copy.kind() {
-                // The WR-450 same-parameterization check evaluates the extrusion at 7x7
-                // points, which builds the NURB (before, only swapped, unequal domains
-                // made Reparameterize build it).
-                assert!(extrusion.base().gw_nurb().is_some());
+                // Only swapped, unequal domains make Reparameterize build the NURB.
+                assert_eq!(extrusion.base().gw_nurb().is_some(), swap_uv);
             }
             assert_eq!(copy.natural_uv_domain_if_built(), domain);
             for ((u, v), expected) in samples.into_iter().zip(before) {
@@ -2416,15 +2418,15 @@ mod tests {
         BSplineSurface::from_nurb(nurb, false)
     }
 
-    /// WR-450 (#387): the analytic cylinder recognised from the rational half cylinder has
-    /// SMLib's own parameterization, so a face's UV trims would no longer fit it (upstream
-    /// returned it as the copy); the copy keeps the exact surface.
+    /// WR-450 (#387): the analytic copy of the rational half cylinder has SMLib's own
+    /// parameterization, so a face's UV trims no longer fit it. With
+    /// `analytic_copy_keeps_parameterization` the copy keeps the exact surface.
     #[test]
     fn rational_half_cylinder_copy_keeps_parameterization() {
-        let k = Kernel::default();
+        let mut k = Kernel::default();
         let s = rational_half_cylinder();
         let domain = s.natural_uv_domain();
-        let off = recognise_analytic(&k, &s).unwrap().unwrap();
+        let off = s.copy_and_add_analytics(&k).unwrap();
         let worst = |k: &Kernel, c: &crate::surface::surface::Surface| {
             let mut worst = 0.0_f64;
             for i in 0..=6 {
@@ -2441,8 +2443,9 @@ mod tests {
             "recognised as analytic"
         );
         let off_gap = worst(&k, &off);
-        assert!(off_gap > 1e-3, "the analytic surface is off by {off_gap}");
+        assert!(off_gap > 1e-3, "default copy is off by {off_gap}");
 
+        k.fixes.analytic_copy_keeps_parameterization = true;
         let on = s.copy_and_add_analytics(&k).unwrap();
         assert!(matches!(
             on.kind(),

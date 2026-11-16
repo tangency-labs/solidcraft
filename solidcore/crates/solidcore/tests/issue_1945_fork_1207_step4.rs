@@ -63,6 +63,7 @@ fn sc_fixes(k: &mut Kernel) {
     k.fixes.found_torus_sphere_keep_tested_nurb = true;
     k.fixes.imprint_extends_edge_to_proto_vertex = true;
     k.fixes.fillet_point_step_per_point = true;
+    k.fixes.analytic_copy_keeps_parameterization = true;
     k.fixes.offset_extension_from_base = true;
     k.fixes.fillet_cleanup_keeps_target_faces = true;
     k.fixes.offset_analytic_mate_edges = true;
