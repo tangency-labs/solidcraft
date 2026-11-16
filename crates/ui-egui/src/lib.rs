@@ -1234,6 +1234,7 @@ impl SolveApp {
     /// says so where the model would be, and the status line says it too.
     pub fn gpu_unavailable(&mut self) {
         self.viewport.gpu_unavailable = true;
+        self.viewport.gpu_preparing = false;
         let text = self.tr("starting.view_unavailable").to_owned();
         self.set_status(text, true);
     }
@@ -1246,6 +1247,7 @@ impl SolveApp {
         }
         let (installed, stats, tess_ready) = solidcraft_viewport_egui::adopt(rs, built.built);
         self.viewport.gpu = Some(installed);
+        self.viewport.gpu_preparing = false;
         self.viewport.tess_ready = tess_ready;
         self.viewport.draw_stats = Some(stats);
         // The device's own limits (what it was created with), not the adapter's: uploads are split
@@ -2207,9 +2209,10 @@ impl SolveApp {
             joint_handles::start(self);
             return;
         }
-        // One selected placement moves as a component, the same way as its Browser menu,
-        // retaining the exact instance path and the grounding/rigid-group restrictions.
-        // A selected body, or a component picked in the tree, opens Move/Copy on those bodies.
+        // One selected placement opens Move/Copy on it the same way as its Browser menu (it
+        // moves by its placement), retaining the exact instance path and the grounding and
+        // rigid-group restrictions, and asking nothing about its pending move first. Selected
+        // bodies, or a component picked in the tree, open Move/Copy on those.
         if id == "solid.move"
             && let [solidcraft_engine::Sel::Occurrence { path }] = self.session.selection.as_slice()
         {

@@ -308,7 +308,11 @@ definition, rebuilds the span's Hermite rows H, bounds |B − H| on the net's pi
 and |H − S| by `gn_certify_span`, and refuses the net where the sum with one floor passes ε, where
 a piece runs across a station, or where a foot crosses a support's knot line between two stations.
 `recertify_faces` does this for every blend face of a body, as a body rebuilt from a record must be
-before its faces are operands.
+before its faces are operands. A kernel remembers each re-certification it finished
+(`Kernel::recertify_memo`, on with `memoize_curve_caches`), keyed on every bit of the blend's
+record and on the kernel's tolerances and fixes: a record read again on that kernel, its blend
+unchanged, gets the answer the proof gave, which is the answer running it again gives. Only a
+finished proof is kept, never a refusal or a cancel.
 
 ### 4.6 Worked example: a patch on a sphere
 
@@ -511,7 +515,8 @@ A reviewer checks each of these on a change that touches a definition, a net or 
    (`PROCEDURAL_BLEND_TYPE`, `ProceduralBlend::read_from_db`) and the serde records of
    `surface::procedural_blend::record` (`ProceduralBlendRecord`, `ExactRoundRecord`,
    `CornerRecord`), every number as stored. `convert::rebuild`, `exact_rebuild` and
-   `corner_rebuild` make the definition exactly and certify the net again before it is an operand.
+   `corner_rebuild` make the definition exactly and certify the net again before it is an operand
+(or take the proof the kernel already finished for the same record, §4.5).
 9. **A record rebuilds bit for bit.** Written, read back and rebuilt, a definition evaluates as the
    one written; evaluation is a pure function of the definition, and the station memo keys a
    definition by its identity (`DefinitionIdentity`), so two threads agree with one bit for bit.

@@ -120,7 +120,6 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.corner_patch_face_side_twist = true;
     f.boolean_union_refuses_solid_leak = true;
     f.fillet_exact_round_classes = true;
-    f.offset_edges_keep_source_tolerance = true;
     f.surface_continuity_checks_last_v_knot = true;
     f.ssi_split_curves_at_singular_points = true;
     f.geometric_g2_continuity = true;
@@ -130,12 +129,10 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.cone_create_canonical_preserves_inside_out_and_checks_height = true;
     f.point_class_gap_3d_propagates_no_drop_error = true;
     f.cone_iso_circle_at_axial_height = true;
-    f.fillet_overflow_trim_at_creases = true;
     // Held back: see `HELD_BACK`.
     f.fillet_refuse_rounds_breaking_through = false;
     f.cone_unbounded_parameterized_as_nurb = true;
     f.fillet_round_as_definition = true;
-    f.fillet_overflow_crease_along_edge = true;
     f.keep_exact_pcurves = true;
     f.face_swap_uv_transposes_trims = true;
     f.closed_smooth_pole_tangent_limit = true;
@@ -235,7 +232,9 @@ fn put_kernel(k: Option<Kernel>) {
 /// What a call must not find from the calls before it: the same operation on the same bodies
 /// answers the same on any kernel, however much that kernel did first. (Its draws of random rays,
 /// the stations it remembers; marks, identities and what is only kept to reuse memory change no
-/// answer. Tolerances and fixes are the same on every kernel.)
+/// answer. The certificates it finished, kept by the exact content of their inputs
+/// (`recertify_memo`, the curve analyses), are the answers running them again gives, so they
+/// stay. Tolerances and fixes are the same on every kernel.)
 fn start_clean(k: &mut Kernel) {
     k.rng = Rng::new(KernelOptions::default().seed);
     *k.blend_station_memo.borrow_mut() = Default::default();

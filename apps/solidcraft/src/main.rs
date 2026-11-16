@@ -42,6 +42,7 @@ mod native_menu;
 mod nav_bridge;
 #[cfg(target_os = "macos")]
 mod open_documents;
+mod single_instance;
 #[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos"))]
 mod space_mouse;
 mod startup;
@@ -89,8 +90,8 @@ struct App {
     solve: SolveApp,
     /// The setup still to run, a step a frame, behind the starting page (#1210).
     setup: solidcraft_ui_egui::starting::Starting<App>,
-    /// The viewport's shader compile, running beside the window while the starting page shows; the
-    /// app waits for it when it closes (#1210).
+    /// The viewport's shader compile, running beside the window while the start page shows (it no
+    /// longer waits for it); the app waits for it when it closes (#1210).
     gpu_job: Option<solidcraft_ui_egui::starting::Worker<solidcraft_ui_egui::WgpuBuilt>>,
     /// The settings folder whose start marker the first frame clears (`startup::started`).
     starting: Option<std::path::PathBuf>,
@@ -99,9 +100,12 @@ struct App {
     /// Frames the window has begun, the starting page's included: the first is fitted to the work
     /// area before the window shows, the second asks for the foreground.
     window_frames: u32,
-    /// Frames begun once the setup was done; the second one means the first was drawn (startup is
-    /// over).
+    /// Frames begun once the setup was done; the second one means the first was drawn (the start
+    /// page is up).
     frames: u32,
+    /// Startup is over: the start page was drawn and the 3D view's pipelines are compiled (or
+    /// failed). Until then a crash still counts as a failed start.
+    up: bool,
     /// Started over the control channel: the window doesn't ask for the foreground.
     take_focus_unwanted: bool,
     /// Coming forward after a close that asks about unsaved designs.
@@ -246,11 +250,10 @@ impl eframe::App for App {
         }
         if self.frames < 2 {
             self.frames += 1;
-            // A second frame right away, which means the first was presented: the app is up.
+            // A second frame right away, which means the first was presented: the start page is up.
             ctx.request_repaint();
             if self.frames == 2 {
-                mark("app up");
-                solidcraft_engine::crash::phase(solidcraft_engine::crash::RUNNING);
+                mark("start page up (first app frame presented)");
                 // A DMG install has no installer step: put solidcraft-cli on PATH, quietly.
                 #[cfg(target_os = "macos")]
                 std::thread::spawn(solidcraft_ui_egui::cli_link::install_on_launch);
@@ -259,15 +262,26 @@ impl eframe::App for App {
                     solidcraft_ui_egui::ai_connect::begin(&mut self.solve);
                     solidcraft_ui_egui::agent_chat::begin(&mut self.solve);
                 }
-                if let Some((path, attempt)) = self.backend_attempt.take()
-                    && let Err(reason) = startup::confirm_backend_start(&path, &attempt)
-                {
-                    log::warn!("graphics: could not confirm the startup choice: {reason}");
-                    self.solve.set_status(reason, true);
+                if !self.setup.settled() {
+                    solidcraft_engine::crash::phase("viewport pipelines (shader compile)");
                 }
-                if let Some(dir) = self.starting.take() {
-                    startup::started(&dir);
-                }
+            }
+        }
+        // Startup is over once the 3D view's shader compile, running beside the start page, is
+        // done too: a driver that crashes in it still counts as a failed start (safe mode, the
+        // backend retry), and a new graphics API is confirmed only once it drew the view.
+        if !self.up && self.frames >= 2 && self.setup.settled() {
+            self.up = true;
+            mark("app up (3D view ready)");
+            solidcraft_engine::crash::phase(solidcraft_engine::crash::RUNNING);
+            if let Some((path, attempt)) = self.backend_attempt.take()
+                && let Err(reason) = startup::confirm_backend_start(&path, &attempt)
+            {
+                log::warn!("graphics: could not confirm the startup choice: {reason}");
+                self.solve.set_status(reason, true);
+            }
+            if let Some(dir) = self.starting.take() {
+                startup::started(&dir);
             }
         }
         self.watch_device();
@@ -288,6 +302,12 @@ impl eframe::App for App {
         #[cfg(target_os = "macos")]
         for f in if self.solve.file_picker_busy() { Vec::new() } else { open_documents::take() } {
             self.solve.open_chosen_file(&f);
+        }
+        // Files other launches handed over (single_instance.rs).
+        if !self.solve.file_picker_busy() {
+            for f in single_instance::take() {
+                self.solve.open_chosen_file(&f);
+            }
         }
         #[cfg(target_os = "macos")]
         if let Some(menu) = &mut self.native_menu {
@@ -393,6 +413,11 @@ impl eframe::App for App {
     }
     /// The app is closing: work still running beside the window ends first, then the session.
     fn on_exit(&mut self) {
+        // Closed from the start page before the 3D view was ready: as a close from the starting
+        // page, a close the user asked for is no failed start (#1210).
+        if let Some(dir) = self.starting.take() {
+            startup::closed_while_starting(&dir, self.gpu.as_ref().is_none_or(|g| g.lost_at.is_none()));
+        }
         // A shader compile from the start still running ends before the GPU is torn down: a
         // driver call cut off as the process exits can crash it (#1210).
         if let Some(job) = self.gpu_job.take()
@@ -936,7 +961,11 @@ fn tickets_call(r: &solidcraft_ui_egui::agent_chat::backend::HttpRequest) -> Res
     let body = r.body.as_deref().unwrap_or_default();
     macro_rules! with_headers {
         ($req:expr) => {{
-            let mut req = $req;
+            // Each call has its own agent, so a kept-alive connection is never used again. Asked
+            // to close, the server ends a reply that has no length by closing; otherwise the
+            // reply is read until the server gives up and the call ends on `timeout: global`
+            // (#17932).
+            let mut req = $req.header("Connection", "close");
             for (k, v) in &r.headers {
                 req = req.header(k, v);
             }
@@ -1189,11 +1218,14 @@ fn main() -> eframe::Result {
     // `--theme-file PATH`: follow that theme file for this run without saving it (#7573).
     let mut theme_file: Option<String> = None;
     let mut max_file_size = None;
+    // `--new-instance`: open this launch as its own app even when SolidCraft already runs.
+    let mut new_instance = false;
     let mut args = std::env::args().skip(1);
     while let Some(a) = args.next() {
         match a.as_str() {
             "--control" => control_port = args.next().and_then(|p| p.parse().ok()),
             "--sample" => sample = true,
+            "--new-instance" => new_instance = true,
             "--theme-file" => theme_file = args.next(),
             "--max-file-size" => max_file_size = Some(args.next()),
             s if s.starts_with("--max-file-size=") => max_file_size = Some(s.strip_prefix("--max-file-size=").map(str::to_string)),
@@ -1218,11 +1250,26 @@ fn main() -> eframe::Result {
             }
             "--help" | "-h" => {
                 println!(
-                    "usage: solidcraft [--control PORT] [--sample] [--theme-file THEME.json] [--crash-log] [--safe-mode] [--max-file-size SIZE] [--view model|sketch|sheet|render|animation] [design.sc | part.step]"
+                    "usage: solidcraft [--control PORT] [--sample] [--theme-file THEME.json] [--crash-log] [--safe-mode] [--new-instance] [--max-file-size SIZE] [--view model|sketch|sheet|render|animation] [design.sc | part.step]"
                 );
                 return Ok(());
             }
             _ => files.push(a),
+        }
+    }
+    // Files given while SolidCraft already runs open in that window, and this launch ends (#18055).
+    // Not with a control port, the sample or safe mode, which want a window of their own; no answer
+    // within a moment starts normally.
+    if !files.is_empty()
+        && !new_instance
+        && !safe_mode
+        && !sample
+        && control_port.is_none()
+        && let Some(endpoint) = settings.as_deref().and_then(single_instance::Endpoint::in_settings)
+    {
+        let absolute: Vec<String> = files.iter().map(|f| single_instance::absolute(f)).collect();
+        if single_instance::forward(&endpoint, &absolute) {
+            return Ok(());
         }
     }
     // `--max-file-size 2GB`: the largest files this run reads, over Preferences, never saved (#4086).
@@ -1366,6 +1413,7 @@ fn main() -> eframe::Result {
     let created = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
     let created_in_app = created.clone();
     let starting = settings.clone();
+    let instance_dir = settings.clone();
     let attempt_in_app = backend_attempt.clone();
     // A panic on the window's thread ends the app without `on_exit`; this disconnects from the
     // 3D mouse driver then too.
@@ -1470,6 +1518,11 @@ fn main() -> eframe::Result {
             // on a free port the first time the chat connects (docs/agent-chat.md).
             let ctx = cc.egui_ctx.clone();
             app.agent_chat.control_starter = Some(Box::new(move |tx| control_server::listen_agent(tx, ctx.clone())));
+            // Later launches with a file hand it to this window instead of opening another app. Not
+            // when driven over the control channel or by `--new-instance`.
+            if !new_instance && !sample && control_port.is_none() {
+                single_instance::start(instance_dir.as_deref(), &cc.egui_ctx);
+            }
             // A launch from Finder: its files arrived before the window.
             #[cfg(target_os = "macos")]
             let files = {
@@ -1500,12 +1553,20 @@ fn main() -> eframe::Result {
             let nav_bridge = nav_bridge::NavBridge::start(&cc.egui_ctx);
             // The rest is slow on some computers: it runs after the window shows, a step a frame,
             // behind the starting page (#1210).
+            // The 3D view's shader compile starts with the first step and runs beside the app: the
+            // start page does not wait for it (#1210).
             let opening = sample || !files.is_empty();
-            // A software renderer draws the page on the CPU the shader compile needs: rarely.
-            let software = gpu_setup.as_ref().is_some_and(|g| g.rs.adapter.get_info().device_type == eframe::wgpu::DeviceType::Cpu);
-            let setup = solidcraft_ui_egui::starting::Starting::default()
-                .wait_frame(std::time::Duration::from_millis(if software { 1000 } else { 100 }))
-                .until("starting.view", move |a: &mut App, ctx| view_step(a, ctx, gpu_setup.as_ref()))
+            // Driven over the control channel, the app still waits for it before it takes commands:
+            // clients take pictures of the view as soon as they are connected.
+            let mut setup = solidcraft_ui_egui::starting::Starting::default();
+            if let Some(gpu_setup) = gpu_setup {
+                if control_port.is_some() {
+                    setup = setup.until("", move |a: &mut App, ctx| view_step(a, ctx, &gpu_setup));
+                } else {
+                    setup = setup.beside(move |a: &mut App, ctx| view_step(a, ctx, &gpu_setup));
+                }
+            }
+            let setup = setup
                 .then(if opening { "starting.design" } else { "" }, move |a: &mut App, _ctx| {
                     solidcraft_engine::crash::phase("design");
                     let app = &mut a.solve;
@@ -1586,6 +1647,7 @@ fn main() -> eframe::Result {
                 backend_attempt: attempt_in_app,
                 window_frames: 0,
                 frames: 0,
+                up: false,
                 take_focus_unwanted: control_port.is_some(),
                 come_forward: come_forward::ComeForward::default(),
                 gpu,
@@ -1601,6 +1663,7 @@ fn main() -> eframe::Result {
         }),
     );
     control_server::remove_token_file();
+    single_instance::stop();
     match result {
         Err(e) if !created.load(std::sync::atomic::Ordering::SeqCst) => {
             no_window(e, cpu_renderer, started, settings.as_deref(), backend_attempt.as_ref())
@@ -1622,15 +1685,14 @@ struct GpuSetup {
     scene_samples: u32,
 }
 
-/// The 3D view's setup step (#1210): the shader compile runs on a [`Worker`] beside the window,
-/// whose page keeps drawing; the pipelines go in use the frame after it is done. `true` once the
-/// step is over: the view has its pipelines, or says it can't draw (the compile failed), or there
-/// is no GPU device at all.
+/// The 3D view's setup (#1210): the shader compile runs on a [`Worker`] beside the window, whose
+/// start page is usable meanwhile; a design opened before it is done says in its view that the
+/// view is being prepared. The pipelines go in use the frame after it is done. `true` once it is
+/// over: the view has its pipelines, or says it can't draw (the compile failed).
 ///
 /// [`Worker`]: solidcraft_ui_egui::starting::Worker
-fn view_step(a: &mut App, ctx: &egui::Context, gpu: Option<&GpuSetup>) -> bool {
+fn view_step(a: &mut App, ctx: &egui::Context, gpu: &GpuSetup) -> bool {
     use solidcraft_ui_egui::starting::{Poll, Worker};
-    let Some(gpu) = gpu else { return true };
     let gpu_meshing = !a.solve.cpu_meshing;
     let (scene_samples, depth_bits) = (gpu.scene_samples, gpu.depth_bits);
     let build = move |rs: &eframe::egui_wgpu::RenderState| {
@@ -1641,6 +1703,9 @@ fn view_step(a: &mut App, ctx: &egui::Context, gpu: Option<&GpuSetup>) -> bool {
     let Some(job) = &a.gpu_job else {
         solidcraft_engine::note!("SolidCraft graphics: {:?}, MSAA {scene_samples}x (requested {}x)", gpu.rs.adapter.get_info().backend, gpu.samples);
         solidcraft_engine::crash::phase("viewport pipelines (shader compile)");
+        // Home's pictures, drawn off the window thread, wait for the renderer the compile installs.
+        solidcraft_engine::capture::coming(true);
+        a.solve.viewport.gpu_preparing = true;
         let rs = gpu.rs.clone();
         match Worker::spawn("viewport pipelines", ctx.clone(), move || build(&rs)) {
             Ok(job) => a.gpu_job = Some(job),
@@ -1657,7 +1722,10 @@ fn view_step(a: &mut App, ctx: &egui::Context, gpu: Option<&GpuSetup>) -> bool {
         Poll::Done(built) => gpu_ready(a, gpu, built),
         // The compile panicked (its crash report is written): the view says it can't draw, rather
         // than staying empty.
-        Poll::Failed => a.solve.gpu_unavailable(),
+        Poll::Failed => {
+            a.solve.gpu_unavailable();
+            solidcraft_engine::capture::coming(false);
+        }
     }
     a.gpu_job = None;
     mark("viewport pipelines");
@@ -1973,6 +2041,49 @@ mod backend_tests {
         assert!(!titlebar_choice(Some(""), Some("system")));
         // Anything unknown keeps the application bar.
         assert!(titlebar_choice(Some("ssd"), None));
+    }
+}
+
+#[cfg(test)]
+mod tickets_http_tests {
+    use super::tickets_call;
+    use solidcraft_ui_egui::agent_chat::backend::HttpRequest;
+    use std::io::{Read, Write};
+
+    /// A server that answers without a length and keeps the connection open unless the request
+    /// asked to close it: the reply ends only when the connection does (#17932).
+    #[test]
+    fn a_ticket_reply_without_a_length_ends_without_waiting_for_the_timeout() {
+        let Ok(listener) = std::net::TcpListener::bind("127.0.0.1:0") else { return };
+        let port = listener.local_addr().unwrap().port();
+        let server = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut request = Vec::new();
+            let mut buf = [0u8; 4096];
+            while !request.windows(4).any(|w| w == b"\r\n\r\n") {
+                let n = stream.read(&mut buf).unwrap();
+                assert!(n > 0, "the request ended early");
+                request.extend_from_slice(&buf[..n]);
+            }
+            let reply = b"HTTP/1.1 201 Created\r\nContent-Type: application/json\r\n\r\n{\"id\":\"up1\"}";
+            stream.write_all(reply).unwrap();
+            let close = String::from_utf8_lossy(&request).to_ascii_lowercase().contains("connection: close");
+            if !close {
+                std::thread::sleep(std::time::Duration::from_secs(5));
+            }
+        });
+        let request = HttpRequest {
+            method: "POST",
+            url: format!("http://127.0.0.1:{port}/api/uploads"),
+            headers: vec![("Content-Type".into(), "application/json".into())],
+            body: Some(b"{}".to_vec()),
+            timeout_s: 3,
+        };
+        let started = std::time::Instant::now();
+        let reply = tickets_call(&request);
+        assert_eq!(reply, Ok((201, br#"{"id":"up1"}"#.to_vec())), "after {:?}", started.elapsed());
+        assert!(started.elapsed() < std::time::Duration::from_secs(2), "the reply ended with the connection, not the timeout");
+        server.join().unwrap();
     }
 }
 
