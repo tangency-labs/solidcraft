@@ -27,7 +27,7 @@ use solidcore::topology::brep::validation::{
 };
 use solidcore::topology::database_io::FileType;
 use solidcore::topology::topology::NotifyRecords;
-use solidcore::{Brep, Kernel};
+use solidcore::{Brep, Kernel, VertexId};
 
 const SHEET: &str = concat!(
     env!("CARGO_MANIFEST_DIR"),
@@ -125,23 +125,61 @@ fn kept_source_tolerances_check_clean() {
 }
 
 /// WR-679 at d = 0.5: `ValidateAndUpdateTolerances(FALSE)` after the WR-671 offset finds no
-/// gap to cover, with or without the fix, and reports nothing.
+/// gap to cover and reports nothing.
 #[test]
 fn updated_tolerances_at_a_half_have_nothing_to_grow() {
-    for fix in [false, true] {
-        let (mut k, mut r) = offset(0.5, true);
-        k.fixes.validate_tolerances_fixes_reported_gaps = fix;
-        let mut reports = AssertArray::new();
-        let gaps =
-            validate_and_update_tolerances(&mut k, &mut r, false, Some(&mut reports), 0).unwrap();
-        assert!(!gaps.violated_or_updated, "fix {fix}");
-        assert!(
-            gaps.max_vertex_edge_gap <= 1e-12,
-            "{}",
-            gaps.max_vertex_edge_gap
-        );
-        assert!(reports.reports().iter().all(|r| r.ok), "fix {fix}");
-    }
+    let (mut k, mut r) = offset(0.5, true);
+    let mut reports = AssertArray::new();
+    let gaps =
+        validate_and_update_tolerances(&mut k, &mut r, false, Some(&mut reports), 0).unwrap();
+    assert!(!gaps.violated_or_updated);
+    assert!(
+        gaps.max_vertex_edge_gap <= 1e-12,
+        "{}",
+        gaps.max_vertex_edge_gap
+    );
+    assert!(reports.reports().iter().all(|r| r.ok));
+}
+
+/// WR-679 on the sheet itself, as the golden case `update_patch_sheet_m6_i0_v0.0001`
+/// (`topology.assert_valid`) builds it: vertex 0 moved 1e-4 along x, so its gaps straddle
+/// its tolerance 8.3e-5 (one just under 1e-4, one just over). Upstream grows the vertex
+/// past the first gap only, to twice it, and then reports the second (over half the grown
+/// tolerance) as bad. `ValidateAndUpdateTolerances(FALSE)` grows it past half its
+/// tolerance, so the vertex ends at exactly twice its largest gap and nothing is reported.
+#[test]
+fn update_grows_a_moved_vertex_to_twice_its_largest_gap() {
+    let bytes = std::fs::read(SHEET).unwrap();
+    let mut k = Kernel::default();
+    let mut b = Brep::new_with_infinite_region().unwrap();
+    let mut records = NotifyRecords::new();
+    let mut attributes = AttributeStore::default();
+    let key = solidcore::topology::loopuse::notify_ref;
+    let mut env = TopologyEnv {
+        all_attributes: &[],
+        attributes: &mut attributes,
+        key_of: &key,
+        records: &mut records,
+        next_key: 1 << 50,
+    };
+    read_from_file(&mut k, &mut b, bytes, FileType::Ascii, false, &mut env).unwrap();
+    b.use_arena_naming().unwrap();
+    let v = VertexId::from_index(0);
+    b.vertex_mut(v).unwrap().point.x += 1e-4;
+    let mut reports = AssertArray::new();
+    let gaps =
+        validate_and_update_tolerances(&mut k, &mut b, false, Some(&mut reports), 0).unwrap();
+    assert!(gaps.violated_or_updated);
+    let g = gaps.max_vertex_edge_gap;
+    assert!(g > 1e-4 && g < 1.0001e-4, "largest gap {g}");
+    let tol = b.vertex(v).unwrap().tolerance;
+    assert_eq!(
+        tol.to_bits(),
+        (2.0 * g).to_bits(),
+        "tolerance {tol}, 2g {}",
+        2.0 * g
+    );
+    assert!(reports.reports().is_empty(), "{:?}", reports.reports());
 }
 
 /// The sheet read from its file, copied and offset by `d` with the given flags set
@@ -185,10 +223,7 @@ fn offset_with(d: f64, flags: &[&str]) -> (Kernel, Brep) {
 /// checks clean, its gaps at rounding, its area the offset's without the update.
 #[test]
 fn offset_updates_its_result_tolerances() {
-    let flags = [
-        "offset_edges_keep_source_tolerance",
-        "validate_tolerances_fixes_reported_gaps",
-    ];
+    let flags = ["offset_edges_keep_source_tolerance"];
     let (mut k, mut r) = offset_with(0.5, &flags);
     let gap = largest_gap(&mut k, &mut r);
     assert!(gap <= 1e-12, "gap {gap}");
