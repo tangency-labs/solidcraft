@@ -1045,6 +1045,10 @@ mod tests {
         let (mut out, mut nodes) = (Vec::new(), 0);
         let r = isolate(&Kernel::default(), &piece, 0.0, 1.0, &mut nodes, &mut out);
         assert!(matches!(r, Err(SolidError::InvalidInput { .. })), "{r:?}");
+        // The per-node finite check refuses within the first halvings; without it the
+        // search would run on to the MAX_NODES refusal instead.
+        assert!(format!("{r:?}").contains("non-finite coefficient"), "{r:?}");
+        assert!(nodes <= 2, "{nodes}");
     }
 
     /// Extraction of a span with full-multiplicity knots copies the stored values with no
