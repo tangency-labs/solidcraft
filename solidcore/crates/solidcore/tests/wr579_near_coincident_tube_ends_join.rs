@@ -436,10 +436,14 @@ fn wr575_tube_ends_join_adds_no_check_failure_at_any_gap() {
     // Face test 36 is gone from every row since #13295: it named the joined tube's seam
     // edge ending at a vertex a few micrometres across the seam, inside the vertex's own
     // tolerance, with no edge beside the seam there: a corner, not a sliver.
-    // (gap, every fix on, upstream's report, the report now: only the two gap pairs of
-    // the default kernel at 1e-5 stay, which WR-575 does not address)
+    // (gap, every fix on, upstream's report, the report now: only one gap pair of the
+    // default kernel at 1e-5 stays, which WR-575 does not address: an edge use ending
+    // 8.15e-6 from the -y vertex, over half its tolerance 1.5e-5. The other pair, 7.77e-6
+    // at that vertex, went when WR-453's continuation became the only path: the
+    // intersection edge that stopped 2.77e-6 short of its proto vertex is continued onto
+    // it, and its end now lies 5e-6 from the vertex, as the circle edges there do.)
     let rows = [
-        (1e-5, false, report(2, 2, 0), report(2, 0, 0)),
+        (1e-5, false, report(2, 2, 0), report(1, 0, 0)),
         (1e-6, false, report(0, 1, 0), report(0, 0, 0)),
         (1e-7, false, report(0, 0, 0), report(0, 0, 0)),
         (1e-5, true, report(0, 2, 0), report(0, 0, 0)),
