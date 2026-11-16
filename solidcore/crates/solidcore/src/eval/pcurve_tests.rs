@@ -1798,8 +1798,64 @@ fn nonlinear_spline_pcurves_on_a_rational_cylinder_are_certified() {
             knots: vec![0., 0., 0., 0., 0., 1., 1., 1., 1., 1.],
             homogeneous,
         };
-        assert!(pcurves(&surface, &one(&off, [0., 1.]), 1e-6).is_err());
+        let refused = pcurves(&surface, &one(&off, [0., 1.]), 1e-6);
+        assert!(
+            matches!(&refused, Err(Error::Failed(m)) if m.contains("cannot be projected")),
+            "{refused:?}"
+        );
     }
+}
+
+/// The surface of the certified-pcurve refusals below: S(u,v)=(u,v,u²).
+fn parabolic_cylinder() -> Surface {
+    Surface::Spline {
+        u_knots: vec![0., 0., 0., 1., 1., 1.],
+        v_knots: vec![0., 0., 1., 1.],
+        points: vec![
+            vec![[0., 0., 0.], [0., 1., 0.]],
+            vec![[0.5, 0., 0.], [0.5, 1., 0.]],
+            vec![[1., 0., 1.], [1., 1., 1.]],
+        ],
+    }
+}
+
+/// An edge broken at an interior knot of full multiplicity has no continuous pcurve over its
+/// interval: refused as discontinuous, though both pieces lie on the surface.
+#[test]
+fn certified_pcurves_refuse_a_discontinuous_edge() {
+    let curve = Curve::Spline {
+        knots: vec![0., 0., 0.5, 0.5, 1., 1.],
+        points: vec![
+            [0., 0.5, 0.],
+            [0.4, 0.5, 0.16],
+            [0.6, 0.5, 0.36],
+            [1., 0.5, 1.],
+        ],
+    };
+    let refused = pcurves(&parabolic_cylinder(), &one(&curve, [0., 1.]), 1e-6);
+    assert!(
+        matches!(&refused, Err(Error::Failed(m)) if m.contains("discontinuous edge")),
+        "{refused:?}"
+    );
+}
+
+/// An edge with more knot spans than a fitted pcurve may have spans exhausts the span budget
+/// before anything is projected: refused as too large, not as unprojectable.
+#[test]
+fn certified_pcurves_refuse_an_edge_past_the_span_budget() {
+    let n = MAX_SPANS + 1;
+    let mut knots = vec![0., 0.];
+    knots.extend((1..=n).map(|i| i as f64 / (n + 1) as f64));
+    knots.extend([1., 1.]);
+    let points = (0..n + 2)
+        .map(|i| [i as f64 / (n + 1) as f64, 0.5, 5.])
+        .collect();
+    let curve = Curve::Spline { knots, points };
+    let refused = pcurves(&parabolic_cylinder(), &one(&curve, [0., 1.]), 1e-6);
+    assert!(
+        matches!(&refused, Err(Error::TooLarge(m)) if m.contains("too many edge spans")),
+        "{refused:?}"
+    );
 }
 
 /// On the polynomial parabolic cylinder S(u,v)=(u,v,u²), C(t)=(t,t²,t²) has

@@ -27,8 +27,8 @@
 //! range) are the caller's, before it converts the record (`solidcore-ops`' `pcurve`).
 //!
 //! Deviations: the B-spline cut and the knot span search are kept here ([`segment`],
-//! [`find_span`]) as the routine had them. Certified fitting uses an explicit stack, at most
-//! 32 subdivision levels and `MAX_SPANS` accepted or pending spans; no recursion.
+//! [`find_span`]) as the routine had them. Certified fitting uses an explicit stack bounded by
+//! `MAX_SPANS` accepted or pending spans; no recursion.
 use super::spline::EvalSurface;
 use super::uv::{self, Domain};
 use super::vec::{v3, VecExt};
@@ -437,7 +437,11 @@ impl On {
     /// spans break at every knot. This is the Taylor enclosure of definitions-and-certificates
     /// §4.2, applied to a linear interpolant (the NURBS Book §9.2). Projection only proposes
     /// coefficients; it is never the acceptance check. The target is half the edge tolerance,
-    /// just as for the existing exact pcurves. A cap refuses the fit without widening it.
+    /// the zone the exact pcurves are accepted in ([`SURFACE_GAP_MARGIN`]), and the projection
+    /// is held to that same target and no tighter: a span's certified bound encloses the
+    /// distance at its ends, so a point that projects farther than the target can never be
+    /// certified, and one within it is decided by the certificate alone. The span budget
+    /// (`MAX_SPANS`) refuses the fit without widening it.
     fn certified(
         &self,
         surface: &super::spline::Nurbs,
@@ -446,6 +450,7 @@ impl On {
         [t0, t1]: [f64; 2],
         tol: f64,
     ) -> Result<Curve2> {
+        let target = 0.5 * tol;
         let [nu, nv] = surface.count();
         let [p, q] = surface.degree();
         let [u, v] = surface.knots();
@@ -491,7 +496,7 @@ impl On {
             let pt = curve
                 .point(t)
                 .ok_or_else(|| Error::Failed("certified pcurve: edge evaluation".into()))?;
-            let mut uv = self.project_in(pt, tol * 0.125).ok_or_else(|| {
+            let mut uv = self.project_in(pt, target).ok_or_else(|| {
                 Error::Failed("certified pcurve: edge cannot be projected within tolerance".into())
             })?;
             // The certificate evaluates the net on its knots. The surface evaluator wraps
@@ -522,23 +527,22 @@ impl On {
             let (Some(&a), Some(&b), Some(&pa)) = (pair.first(), pair.get(1), points.last()) else {
                 return Err(Error::Invalid("pcurve fitting span".into()));
             };
-            let mut pending = vec![(a, b, pa, project(b)?, 0u32)];
-            while let Some((a, b, pa, pb, depth)) = pending.pop() {
+            let mut pending = vec![(a, b, pa, project(b)?)];
+            while let Some((a, b, pa, pb)) = pending.pop() {
                 if points.len() >= MAX_SPANS {
                     return Err(Error::TooLarge(
                         "certified pcurve: too many fitted spans".into(),
                     ));
                 }
                 let bound = lift_bound(&sn, &cn, [a, b], [pa, pb]);
-                if bound.is_some_and(|e| e.is_finite() && e <= 0.5 * tol) {
+                if bound.is_some_and(|e| e.is_finite() && e <= target) {
                     points.push(pb);
                     knots.push(b);
                     continue;
                 }
-                if depth >= 32 || points.len() + pending.len() + 1 >= MAX_SPANS {
+                if points.len() + pending.len() + 1 >= MAX_SPANS {
                     return Err(Error::TooLarge(format!(
-                        "certified pcurve: lift bound {bound:?} exceeds {} within subdivision budget",
-                        0.5 * tol
+                        "certified pcurve: lift bound {bound:?} exceeds {target} within subdivision budget"
                     )));
                 }
                 let m = 0.5 * (a + b);
@@ -548,8 +552,8 @@ impl On {
                     ));
                 }
                 let pm = project(m)?;
-                pending.push((m, b, pm, pb, depth + 1));
-                pending.push((a, m, pa, pm, depth + 1));
+                pending.push((m, b, pm, pb));
+                pending.push((a, m, pa, pm));
             }
         }
         knots.push(t1);
