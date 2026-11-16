@@ -925,6 +925,103 @@ fn a_label_keeps_the_records_rules_and_a_doubled_letter_opens() {
     assert_eq!((letter(&d, top).as_deref(), letter(&d, twin).as_deref()), (Some("A"), Some("B")), "the copy takes the next");
 }
 
+/// [`three`], with a view lined up to the right of the right view (centre (450, 150)) and one lined up
+/// below the front view (centre (150, 60)): the drawing, its id source, and the front, right, top,
+/// back and below views' ids.
+fn lined() -> (Drawing, IdSource, [u64; 5]) {
+    let (mut d, mut id_source, [front, right, top]) = three();
+    let back = add(&mut d, &mut id_source, projected(right, ProjectedSide::Right), ViewPlace::Aligned(450.0), ViewOverrides::default());
+    let below = add(&mut d, &mut id_source, projected(front, ProjectedSide::Below), ViewPlace::Aligned(60.0), ViewOverrides::default());
+    d.validate().unwrap();
+    (d, id_source, [front, right, top, back, below])
+}
+
+/// `first`, then `rest` in id order: how a move lists the views it moved.
+fn then_by_id<T>(first: (u64, T), mut rest: Vec<(u64, T)>) -> Vec<(u64, T)> {
+    rest.sort_unstable_by_key(|(id, _)| *id);
+    std::iter::once(first).chain(rest).collect()
+}
+
+/// `first`, then `rest` in id order, as ids alone.
+fn ids_then_by_id(first: u64, rest: &[u64]) -> Vec<u64> {
+    then_by_id((first, ()), rest.iter().map(|id| (*id, ())).collect()).into_iter().map(|(id, _)| id).collect()
+}
+
+/// The views lined up with a view are found down its line, through others and in id order; a view
+/// placed apart ends the line, and so does what is lined up with it. All are still projected from it.
+#[test]
+fn the_views_lined_up_with_a_view_are_found_down_its_line() {
+    let (mut d, mut id_source, [front, right, top, back, below]) = lined();
+    let beside_top = add(&mut d, &mut id_source, projected(top, ProjectedSide::Right), ViewPlace::Aligned(450.0), ViewOverrides::default());
+    d.validate().unwrap();
+    let mut in_order = vec![right, back, below];
+    in_order.sort_unstable();
+    assert_eq!(d.lined_up_with(front), in_order);
+    assert_eq!(d.lined_up_with(right), [back]);
+    assert_eq!(d.lined_up_with(top), [beside_top]);
+    assert_eq!(d.lined_up_with(back), Vec::<u64>::new());
+    assert_eq!(d.lined_up_with(99), Vec::<u64>::new());
+    let all = d.with_projected(&BTreeSet::from([front]));
+    assert_eq!(all, BTreeSet::from([front, right, top, back, below, beside_top]), "placed apart or not");
+}
+
+/// A view moved on its sheet goes where it is dragged, and the views lined up with it follow by the
+/// record's rule with their records as they were: the answer is it, then those whose centres changed.
+/// A view placed apart stays.
+#[test]
+fn a_moved_view_takes_its_line_up_and_says_which_views_moved() {
+    let (mut d, _, [front, right, top, back, below]) = lined();
+    let records = |d: &Drawing| [right, top, back, below].map(|id| d.view(id).unwrap().place);
+    let before = records(&d);
+    let moved = d.move_view(front, Vec2::new(170.0, 155.0), false).unwrap();
+    assert_eq!(moved, ids_then_by_id(front, &[right, back, below]));
+    assert_eq!(d.view(front).unwrap().place, ViewPlace::At([170.0, 155.0]));
+    let centres = |d: &Drawing| [front, right, top, back, below].map(|id| d.view_centre(id).unwrap());
+    let at = |x, y| Vec2::new(x, y);
+    assert_eq!(centres(&d), [at(170.0, 155.0), at(320.0, 155.0), at(320.0, 250.0), at(450.0, 155.0), at(170.0, 60.0)]);
+    assert_eq!(records(&d), before, "they follow by the rule, not by a write");
+    // Across only: the views to its right keep their centres, so only the one below it moved.
+    assert_eq!(d.move_view(front, Vec2::new(180.0, 155.0), false).unwrap(), [front, below]);
+    assert_eq!(d.view_centre(below).unwrap(), at(180.0, 60.0));
+}
+
+/// A view lined up with its parent takes only its free axis, and with `break_alignment` is placed apart
+/// where it was dragged, its own line-up following; a view placed at a point takes both axes either
+/// way. A move to where it is changes nothing, and an unknown view is refused and changes nothing.
+#[test]
+fn a_lined_up_view_keeps_to_its_line_unless_broken() {
+    let (mut d, _, [front, right, top, back, below]) = lined();
+    let at = |x, y| Vec2::new(x, y);
+    assert_eq!(d.move_view(right, at(340.0, 999.0), false).unwrap(), [right], "the view beside it keeps its centre");
+    assert_eq!((d.view(right).unwrap().place, d.view_centre(right).unwrap()), (ViewPlace::Aligned(340.0), at(340.0, 150.0)));
+    assert_eq!(letter(&d, right), None, "moved along its line, it needs no letter");
+    assert_eq!(d.move_view(below, at(999.0, 40.0), false).unwrap(), [below]);
+    assert_eq!((d.view(below).unwrap().place, d.view_centre(below).unwrap()), (ViewPlace::Aligned(40.0), at(150.0, 40.0)));
+    assert_eq!(d.move_view(right, at(340.0, 90.0), true).unwrap(), [right, back]);
+    assert_eq!(d.view(right).unwrap().place, ViewPlace::At([340.0, 90.0]));
+    assert!(letter(&d, right).is_some(), "placed apart, it is given its letter by the move itself");
+    assert_eq!((d.view_centre(back).unwrap(), d.view_centre(front).unwrap()), (at(450.0, 90.0), at(150.0, 150.0)), "its parent stays");
+    assert_eq!(d.move_view(top, at(330.0, 260.0), true).unwrap(), [top]);
+    assert_eq!(d.view(top).unwrap().place, ViewPlace::At([330.0, 260.0]));
+    let before = d.clone();
+    assert_eq!(d.move_view(front, at(150.0, 150.0), false).unwrap(), [front]);
+    assert_eq!(d, before, "where it is: nothing changes");
+    assert_eq!(d.move_view(99, at(1.0, 1.0), false).unwrap_err().to_string(), format!("unknown view {}", ids::encode(99)));
+    assert_eq!(d, before);
+}
+
+/// A view placed apart at a point takes the views lined up with it, each moved along its free axis as
+/// it moved, so they keep their places beside it; a view placed apart from it isn't one of them.
+#[test]
+fn a_view_placed_apart_takes_its_line_up_beside_it() {
+    let (d, _, [front, right, _, back, below]) = lined();
+    let aligned = |id, along| (id, ViewPlace::Aligned(along));
+    let moved = vec![aligned(right, 270.0), aligned(back, 400.0), aligned(below, 30.0)];
+    assert_eq!(d.places_beside(front, Vec2::new(100.0, 120.0)).unwrap(), then_by_id((front, ViewPlace::At([100.0, 120.0])), moved));
+    assert_eq!(d.places_beside(right, Vec2::new(200.0, 100.0)).unwrap(), [(right, ViewPlace::At([200.0, 100.0])), aligned(back, 330.0)]);
+    assert!(d.places_beside(99, Vec2::new(1.0, 1.0)).is_err());
+}
+
 /// A full cutting line, horizontal at height 5, its arrows to its right.
 fn cutting() -> CuttingLine {
     CuttingLine::new(SectionKind::Full, vec![Vec2::new(-30.0, 5.0), Vec2::new(30.0, 5.0)], ArrowSide::Right).unwrap()
