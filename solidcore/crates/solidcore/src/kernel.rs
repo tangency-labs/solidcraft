@@ -176,6 +176,7 @@ pub struct WorkCounters {
     classification_snapshots: Cell<u64>,
     orient_boxes: Cell<u64>,
     ball_certified_roots: Cell<u64>,
+    blends_recertified: Cell<u64>,
 }
 
 impl WorkCounters {
@@ -329,6 +330,15 @@ impl WorkCounters {
         self.ball_certified_roots.get()
     }
 
+    /// Procedural blends recertified as a record's faces got their definitions back
+    /// (`surface::procedural_blend::convert::definition_surface`): each certificate that
+    /// ran, not each blend [`Kernel::recertify_memo`] answered. Not the fork's (a test's
+    /// witness that an unchanged blend is certified once, #17640).
+    #[must_use]
+    pub fn blends_recertified(&self) -> u64 {
+        self.blends_recertified.get()
+    }
+
     /// Zeroes every count (`SmWorkCounters::Reset`).
     pub fn reset(&self) {
         self.face_pairs.set(0);
@@ -348,6 +358,7 @@ impl WorkCounters {
         self.classification_snapshots.set(0);
         self.orient_boxes.set(0);
         self.ball_certified_roots.set(0);
+        self.blends_recertified.set(0);
     }
 
     /// Counts one face pair examined for intersection.
@@ -448,6 +459,12 @@ impl WorkCounters {
     pub(crate) fn add_ball_certified_root(&self) {
         self.ball_certified_roots
             .set(self.ball_certified_roots.get().saturating_add(1));
+    }
+
+    /// Counts one procedural blend recertified as its record's face got it back.
+    pub(crate) fn add_blend_recertified(&self) {
+        self.blends_recertified
+            .set(self.blends_recertified.get().saturating_add(1));
     }
 }
 
@@ -1049,6 +1066,12 @@ pub struct Kernel {
     /// A [`RefCell`]: the certificate runs through `&Kernel`; it is never borrowed across a
     /// certificate, and a hit returns what certifying the loop again returns.
     pub loop_area_memo: RefCell<crate::mass::loop_area::LoopAreaMemo>,
+    /// Not upstream: the memo of the procedural blends this kernel recertified as it gave a
+    /// record's faces their definitions back
+    /// ([`crate::surface::procedural_blend::convert::RecertifyMemo`]), on with
+    /// [`Kernel::memoize_curve_caches`]. A [`RefCell`]: it is never borrowed across a
+    /// certificate, and a hit returns what recertifying the same blend again returns.
+    pub recertify_memo: RefCell<crate::surface::procedural_blend::convert::RecertifyMemo>,
     /// Not upstream: the fork's `thread_local` count of open blend operation scopes
     /// (`t_lOperationScopes`; [`crate::blend::fillet_section::section::OperationScope`]).
     /// Shared, so that a scope can outlive a borrow of the kernel (a fillet session holds
@@ -1106,6 +1129,7 @@ impl Kernel {
             ),
             blend_w_memo: RefCell::default(),
             loop_area_memo: RefCell::default(),
+            recertify_memo: RefCell::default(),
             blend_operation_scopes: Arc::default(),
             work_counters: WorkCounters::default(),
             blend_face_log: None,
