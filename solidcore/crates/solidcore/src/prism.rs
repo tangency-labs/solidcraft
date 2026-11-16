@@ -10,7 +10,10 @@
 //! Every query here returns its value with a proved bound, exactly, or not at all (`None` or a
 //! typed refusal): it decides nothing at a tolerance it cannot prove (owner rule 13564).
 
+pub mod export_geometry;
 pub mod extrude;
+pub mod fit;
+pub mod import_geometry;
 pub mod measure;
 pub mod path_export;
 pub mod placement;

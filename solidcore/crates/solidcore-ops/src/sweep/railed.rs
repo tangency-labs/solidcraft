@@ -284,3 +284,54 @@ pub fn section_frames(
         )
     })?
 }
+
+/// The frames of a cross-section given by its points in order (the polyline through them), at
+/// `stations` stations of even arc length, leaving along `leave` with no bend
+/// ([`solidcore::sweep::section_blend::point_frames`]): a section for [`loft_blend`] with no
+/// face behind it, such as a sketch's chain.
+///
+/// # Errors
+/// The kernel's refusals ([`Error::Refused`] in its words: stations out of range, a point or
+/// `leave` not finite, a chain of no length).
+pub fn point_frames(
+    points: &[[f64; 3]],
+    leave: [f64; 3],
+    stations: usize,
+) -> Result<Vec<BlendFrame>> {
+    use solidcore::sweep::section_blend::point_frames as kernel_frames;
+    let v = |a: [f64; 3]| Vec3::new(a[0], a[1], a[2]);
+    let arr = |v: Vec3| [v.x, v.y, v.z];
+    let points: Vec<Vec3> = points.iter().map(|&p| v(p)).collect();
+    match kernel_frames(&points, v(leave), stations) {
+        Ok(frames) => Ok(frames
+            .into_iter()
+            .map(|f| BlendFrame {
+                p: arr(f.p),
+                leave: arr(f.leave),
+                bend: arr(f.bend),
+                bend_change: arr(f.bend_change),
+            })
+            .collect()),
+        Err(e) => Err(status(e)),
+    }
+}
+
+/// Which open cross-sections of a blend to turn round so that each runs the way the one before
+/// it does, given each one's first and last point in the blend's order
+/// ([`solidcore::sweep::section_blend::open_section_turns`]): `true` for a section whose frames
+/// the caller reverses before [`loft_blend`].
+///
+/// # Errors
+/// [`Error::Argument`] for an end not finite; [`Error::Unsupported`] for a closed section (its
+/// ends within the kernel's zone tolerance), whose winding and seam a turn does not match.
+pub fn open_section_turns(ends: &[[[f64; 3]; 2]]) -> Result<Vec<bool>> {
+    use solidcore::sweep::section_blend::open_section_turns as kernel_turns;
+    if !ends.iter().flatten().flatten().all(|x| x.is_finite()) {
+        return Err(Error::Argument);
+    }
+    let v = |a: [f64; 3]| Vec3::new(a[0], a[1], a[2]);
+    let ends: Vec<[Vec3; 2]> = ends.iter().map(|&[s, e]| [v(s), v(e)]).collect();
+    crate::session::run("open_section_turns", |k| {
+        Ok(kernel_turns(k, &ends).map_err(status))
+    })?
+}

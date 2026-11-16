@@ -823,7 +823,13 @@ impl SolveApp {
                         // Move the redo stack instead of cloning the whole history on the window thread.
                         let redo = std::mem::take(&mut self.session.redo);
                         let replies = self.session.accept_commands(prepared);
-                        if replies.is_err() || Arc::ptr_eq(&before, &self.session.doc) {
+                        // A read or a failed run leaves this design's document as it was, so the
+                        // Start page stays up. An edit that landed shows this design, as clicking
+                        // its tab does (`documents::switch`). The dialog only runs on the session
+                        // it was opened on, so the cover that closes is that design's.
+                        if replies.is_ok() && !Arc::ptr_eq(&before, &self.session.doc) {
+                            self.home.open = false;
+                        } else {
                             self.session.redo = redo;
                         }
                         replies.map_err(|_| self.tr("ui.plugin_context_changed").to_string())
