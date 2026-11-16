@@ -1192,6 +1192,38 @@ fn cut_keeps_posts_joined_while_apart_in_one_body() {
 /// "Posts (1)", or "Posts (1)" joined back into "Posts". The cut keeps them in "Posts" now, so
 /// the combine takes "Posts" and says the piece is part of it, instead of failing on
 /// "Posts (1)" and leaving both posts off the case. Any other missing body still fails.
+/// A later feature whose targets name a body an earlier Combine has since joined into its target
+/// (the Combine was edited to take it as a tool) works on that target and says so, as a Combine
+/// tool does, instead of failing with ``unknown body `Boss` `` (#17807). A body a Combine cut
+/// away is not part of anything, and still fails.
+#[test]
+fn a_target_an_earlier_combine_joined_in_is_the_body_it_is_part_of() {
+    let boxes = |tools: Value, operation: &str| {
+        let mut s = Session::default();
+        let cube =
+            |name: &str, corner: [f64; 3]| json!({"length": 10, "width": 10, "height": 10, "corner": corner, "operation": "new", "body_name": name});
+        s.execute("solid.box", &cube("Base", [0.0, 0.0, 0.0])).unwrap();
+        s.execute("solid.box", &cube("Boss", [10.0, 0.0, 0.0])).unwrap();
+        s.execute("solid.box", &cube("Extra", [0.0, 10.0, 0.0])).unwrap();
+        s.execute("solid.combine", &json!({"target": "Base", "tools": ["Extra"], "operation": operation, "name": "Combine1"})).unwrap();
+        // 4 mm cube across the Base/Boss wall: 2 mm in each.
+        s.execute("solid.box", &json!({"length": 4, "width": 4, "height": 4, "corner": [8, 3, 6], "operation": "cut", "targets": ["Base", "Boss"]}))
+            .unwrap();
+        let _ = s.execute("timeline.edit", &json!({"feature": "Combine1", "set": {"tools": tools}}));
+        s
+    };
+    let s = boxes(json!(["Extra", "Boss"]), "join");
+    let cut = s.model.results.last().unwrap();
+    assert_eq!((cut.error.as_deref(), cut.warning.as_deref()), (None, Some("`Boss` is part of `Base` now")));
+    assert_eq!(s.model.state().bodies.iter().map(|b| b.name.as_str()).collect::<Vec<_>>(), ["Base"]);
+    let v = volume(&s, "Base");
+    assert!((v - (3000.0 - 64.0)).abs() < 1e-6, "{v}");
+
+    let s = boxes(json!(["Boss"]), "cut");
+    let cut = s.model.results.last().unwrap();
+    assert!(cut.error.as_deref().is_some_and(|e| e.contains("unknown body `Boss`")), "{:?}", cut.error);
+}
+
 #[test]
 fn combine_of_a_piece_a_cut_used_to_split_off_takes_the_body_it_is_part_of() {
     let posts_cut = || {
