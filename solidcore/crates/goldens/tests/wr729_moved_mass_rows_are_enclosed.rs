@@ -8,14 +8,16 @@
 //! only geometric change) and of the integration centre (main's #17685, which follows the
 //! tight box) move. For each row the test runs the case's Rust side with
 //! `goldens::dump::capture` on, so the measured body is kept as an exact copy, and:
-//! * checks that the run reproduces the row's committed value exactly (the copy is the
-//!   body the golden measures);
+//! * checks that the run reproduces the row's committed value as the goldens check does
+//!   (`values_agree`, `1e-9` relative; a bless keeps a line that agrees, so the committed
+//!   value can be main's within that), so the copy is the body the golden measures;
 //! * encloses that body's area, volume, centroid, axial inertias and products about the
 //!   origin (`enclose_mass_properties`, Taylor-model sweep in rounded interval arithmetic;
 //!   each asked `1e-5` of its scale wide; one that spends its cell budget stays a valid,
 //!   wider band);
 //! * asserts, per value, that the value the integrator converges to (`1e-8`) lies in its
-//!   band, and that main's value and this branch's value each lie within the requested
+//!   band, and that main's value, this branch's committed value and the run's value each
+//!   lie within the requested
 //!   accuracy of it: `1e-4` of the value's scale (the area, the volume, `R` for a centroid,
 //!   `V R^2` for an inertia or product, `R` the bounding box's half diagonal, or the value
 //!   where larger), as #16580's `round_definition_rows` does.
@@ -43,6 +45,7 @@
 )] // test
 
 use goldens::case::repo_root;
+use goldens::compare::values_agree;
 use goldens::{registry, CaseContext};
 use solidcore::geom::attribute::{AttributeStore, ObjectKey};
 use solidcore::mass::enclosure::{enclose_mass_properties, Bounds};
@@ -1137,11 +1140,17 @@ fn check(pick: impl Fn(&str) -> bool) {
         } else {
             ("mass_properties", "mass")
         };
-        assert_eq!(
-            out.values.get(field).map(Vec::as_slice),
-            Some(ours),
-            "{name}: the run does not reproduce this branch's row"
-        );
+        // The goldens check (and so a bless) keeps a committed line whose values agree
+        // with the run under `values_agree` (`1e-9` relative): the run may differ from the
+        // committed row by that much, and both are held to the band below.
+        let run: Vec<f64> = out.values.get(field).unwrap().clone();
+        assert_eq!(run.len(), ours.len(), "{name}");
+        for (i, (&x, &y)) in run.iter().zip(ours).enumerate() {
+            assert!(
+                values_agree(x, y, None),
+                "{name}: the run's {field}[{i}] {x} does not reproduce this branch's row {y}"
+            );
+        }
         let mut bodies = captured.into_iter().filter(|c| c.label == label);
         let body = bodies.next().unwrap().brep.unwrap();
         assert!(
@@ -1232,7 +1241,11 @@ fn check(pick: impl Fn(&str) -> bool) {
                     "{name}: the converged {what} {conv} is off the certified {band:?}"
                 );
             }
-            for (side, x) in [("main's", main[i]), ("this branch's", ours[i])] {
+            for (side, x) in [
+                ("main's", main[i]),
+                ("this branch's", ours[i]),
+                ("the run's", run[i]),
+            ] {
                 let off = (band.lo - x).max(x - band.hi).max(0.0);
                 assert!(
                     off <= accuracy,
