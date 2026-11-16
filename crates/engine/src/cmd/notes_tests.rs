@@ -68,6 +68,27 @@ fn ids_are_never_reused() {
     assert_ne!(a, b);
 }
 
+/// A note can be added without naming an anchor: it lands where the selection points, and at
+/// the origin when nothing is selected (#16015).
+#[test]
+fn note_add_without_an_anchor_lands_the_note_where_the_selection_points() {
+    // Nothing selected: the note lands at the origin.
+    let mut s = Session::default();
+    let added = run(&mut s, "note.add", json!({"text": "Check clearance here."}));
+    let id = added["note"].as_u64().unwrap();
+    let listed = run(&mut s, "note.list", json!({}));
+    assert_eq!(listed["notes"][0]["id"], json!(id));
+    assert_eq!(listed["notes"][0]["anchor"], json!([0.0, 0.0, 0.0]));
+
+    // A picked face: the note lands at the point the face was picked at.
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 10, "width": 20, "height": 30, "body_name": "Box"}));
+    run(&mut s, "select.set", json!({"items": [{"type": "face", "body": "Box", "point": [5.0, 10.0, 30.0]}]}));
+    run(&mut s, "note.add", json!({"text": "On the top face."}));
+    let listed = run(&mut s, "note.list", json!({}));
+    assert_eq!(listed["notes"][0]["anchor"], json!([5.0, 10.0, 30.0]));
+}
+
 #[test]
 fn bad_calls_are_refused() {
     let mut s = Session::default();

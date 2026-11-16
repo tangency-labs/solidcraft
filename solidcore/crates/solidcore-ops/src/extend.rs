@@ -1,10 +1,17 @@
 //! Extend: a sheet continued past the side of its surface's box that one of its edges runs
 //! along, by a distance measured across that side, as the kernel's exact extension
-//! ([`Surface::extended_by_distance`]) makes it: a sheet of one face, or of several faces that
-//! are the pieces of one surface (the kernel's [`one_surface`], extended once and cut again
-//! where the faces were, [`sheet_of`]). Ops chooses the side the edge is, checks each face is
-//! its surface's whole box, sequences the kernel's calls and carries the faces' and sides'
-//! attributes onto the new sheet; it computes nothing.
+//! ([`Surface::extended_by_distance`]) makes it. One entry takes any sheet and routes it to the
+//! one path that fits it:
+//! - a sheet of one face: that face;
+//! - several faces that are the pieces of one surface (the kernel's [`one_surface`]): that
+//!   surface, extended once and cut again where the faces were ([`sheet_of`]);
+//! - plane faces that merge into one plane face (the kernel's [`merged_faces`]): that face;
+//! - otherwise one side across a curved face and the plane faces beside it (the kernel's
+//!   [`extended_side`]), which refuses any other sheet with its reason.
+//!
+//! Ops chooses the route and the side the edge is, checks each face is its surface's whole box,
+//! sequences the kernel's calls and carries the faces' and sides' attributes onto the new sheet;
+//! it computes nothing.
 //!
 //! A face on a surface that goes on past its trims (a plane: [`Surface::reaches_past_trims`])
 //! is extended by growing its trim within it instead, as the kernel's
@@ -20,7 +27,8 @@ use solidcore::surface::extend::{Continuity, ExtendRefusal, Extended};
 use solidcore::surface::side::BoxSide;
 use solidcore::surface::surface::Surface;
 use solidcore::topology::brep::p1 as brep_p1;
-use solidcore::topology::brep::sheet::{one_surface, sheet_of, sheet_on, Pieces};
+use solidcore::topology::brep::sheet::{merged_faces, one_surface, sheet_of, sheet_on, Pieces};
+use solidcore::topology::brep::side_extend::extended_side;
 use solidcore::topology::brep::trim_extend::extend_trim;
 use solidcore::topology::face::{p1 as face_p1, p2 as face_p2, p4 as face_p4};
 use solidcore::topology::{Brep, EdgeId, FaceId};
@@ -251,15 +259,24 @@ fn extension(
 ///   box. The surface is extended once, the distance met at the picked edge's face, and cut
 ///   again where the faces were ([`sheet_of`]): the whole side grows, every face along it with
 ///   it, and the faces stay as they were split, their seams one edge each.
+/// - A sheet of plane faces that merge into one plane face ([`merged_faces`]: a flat sheet the
+///   skin split into faces): that face, the edge the one it is now part of, its trim grown as a
+///   one-face plane's.
+/// - Any other sheet: one side across a curved face and the plane faces beside it
+///   ([`extended_side`]: an arch on straight legs), the edge the curved face's or a plane's
+///   beside it; the seams stay one edge each.
 ///
 /// # Errors
 /// - [`Error::Argument`]: a distance not finite and positive, an edge past the record's list or
 ///   not the sheet's (on a plane, not on its face's outer loop);
-/// - [`Error::Unsupported`] (with what): a sheet of several faces that are not one surface's
-///   pieces, a face with holes or that is not its surface's whole box, the edge not all of one
+/// - [`Error::Unsupported`] (with what): a sheet with no faces, plane faces that do not merge
+///   into one, a face with holes or that is not its surface's whole box, the edge not all of one
 ///   side, or between two faces, a side whose collapse is undecided, a surface with no exact
 ///   extension; on a plane, the trim refused ([`extend_trim`]: a neighbour that never meets the
-///   moved edge, neighbours that cross, a moved edge crossing the others);
+///   moved edge, neighbours that cross, a moved edge crossing the others); across a curved face
+///   and the planes beside it, the sheet not that ([`extended_side`]'s refusals: a plane's edge
+///   that does not run on into a curved face, faces beyond the curved face and the planes beside
+///   it, a curved face that is not a B-spline);
 /// - [`Error::TooFar`]: a weight would vanish, a pole, the apex or a full turn be reached, or
 ///   the length not be measurable to the kernel's stop within the distance (with the longest
 ///   that works, when the kernel names one);
@@ -287,12 +304,22 @@ pub fn extend_sheet(
     // the sheet is only read: the result is a new body, and the record's edge is the sheet's own
     read_body("extend_sheet", sheet, |k, b| {
         let faces = brep_p1::faces(b, None)?;
-        if let [f] = faces.as_slice() {
-            return one_face(k, b, *f, picked, how, distance);
+        match faces.as_slice() {
+            [] => return Ok(Err(Error::Unsupported("a sheet with no faces"))),
+            [f] => return one_face(k, b, *f, picked, how, distance),
+            _ => {}
         }
-        match one_surface(k, b)? {
-            Some(pieces) => pieces_extended(k, b, &pieces, picked, how, distance),
-            None => Ok(Err(Error::Unsupported("a sheet of more than one face"))),
+        if let Some(pieces) = one_surface(k, b)? {
+            return pieces_extended(k, b, &pieces, picked, how, distance);
+        }
+        let mut planes = true;
+        for &f in &faces {
+            planes = planes && face_p2::surface(b, f)?.is_some_and(Surface::reaches_past_trims);
+        }
+        if planes {
+            merged_extended(k, b, picked, how, distance)
+        } else {
+            side_extended(k, b, &faces, picked, how, distance)
         }
     })
     .and_then(|r| r.map(Body::new))
@@ -448,6 +475,76 @@ fn pieces_extended(
                 face_p1::flip_face_orientation(&mut r, new)?;
             }
         }
+    }
+    finish(k, r, Expect::FACES)
+}
+
+/// [`extend_sheet`] on a sheet of plane faces: merged where they are one face
+/// ([`merged_faces`]), and the one plane face they make extended as one face is, the picked edge
+/// the one it is now part of.
+fn merged_extended(
+    k: &mut Kernel,
+    b: &Brep,
+    picked: EdgeId,
+    how: Continuity,
+    distance: f64,
+) -> solidcore::Result<Result<Brep>> {
+    let merged = merged_faces(k, b)?;
+    let faces = brep_p1::faces(&merged.brep, None)?;
+    let [f] = faces.as_slice() else {
+        return Ok(Err(Error::Unsupported(
+            "plane faces that do not merge into one",
+        )));
+    };
+    let edge = match merged.edges.iter().find(|&&(was, _)| was == picked) {
+        None => return Ok(Err(Error::Argument)),
+        // removed between two faces merged into one
+        Some(&(_, None)) => return Ok(Err(Error::Unsupported("an edge between two faces"))),
+        Some(&(_, Some(now))) => now,
+    };
+    one_face(k, &merged.brep, *f, edge, how, distance)
+}
+
+/// [`extend_sheet`] on any other sheet of `faces`: one side across a curved face and the plane
+/// faces beside it ([`extended_side`]), each new face and edge standing for the one it continues.
+fn side_extended(
+    k: &mut Kernel,
+    b: &Brep,
+    faces: &[FaceId],
+    picked: EdgeId,
+    how: Continuity,
+    distance: f64,
+) -> solidcore::Result<Result<Brep>> {
+    // the face the picked edge bounds
+    let mut at = None;
+    for &f in faces {
+        if face_p4::edges(b, f, None, false, None)?.contains(&picked) {
+            at = Some(f);
+            break;
+        }
+    }
+    let Some(f) = at else {
+        return Ok(Err(Error::Argument));
+    };
+    let made = match extended_side(k, b, f, picked, how, distance) {
+        Ok(Some(made)) => made,
+        // a distance below the side's resolution is no extension
+        Ok(None) => return Ok(Err(Error::NoEffect)),
+        Err(e) if e.is_unported() || e.is_cancelled() => return Err(e),
+        Err(e) => return Ok(Err(refused(e))),
+    };
+    let mut r = made.brep;
+    for &(old, new) in &made.faces {
+        copy_attributes(b, EntityRef::Face(old), &mut r, EntityRef::Face(new))?;
+        // each new face faces the way the old one did
+        if let (Some(was), Some(now)) = (upward(b, old)?, upward(&r, new)?) {
+            if was != now {
+                face_p1::flip_face_orientation(&mut r, new)?;
+            }
+        }
+    }
+    for (old, new) in made.edges.iter().filter_map(|&(o, n)| n.map(|n| (o, n))) {
+        copy_attributes(b, EntityRef::Edge(old), &mut r, EntityRef::Edge(new))?;
     }
     finish(k, r, Expect::FACES)
 }

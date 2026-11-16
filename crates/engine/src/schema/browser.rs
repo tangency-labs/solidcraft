@@ -184,8 +184,10 @@ const MAX_LIST: usize = 10_000;
 const MAX_KEY_BYTES: usize = 256;
 /// The deepest placement path, in occurrence ids.
 const MAX_PATH: usize = 64;
-/// The longest group or body name, in bytes.
+/// The longest name `browser.group` and `view.save` take, in bytes.
 const MAX_NAME_BYTES: usize = 128;
+/// The longest new name `browser.rename_group`, `view.rename` and `body.rename` take, in characters.
+const MAX_NAME_CHARS: usize = 128;
 
 /// The folders the browser lists items in, which a group or a move is in.
 const FOLDERS: [&str; 3] = ["bodies", "sketches", "construction"];
@@ -325,15 +327,15 @@ impl JsonSchema for GroupName {
     }
 }
 
-/// A name of 1 to 128 bytes once surrounding spaces are cut, as `browser.rename_group` and
-/// `body.rename` read `name`.
+/// A name of 1 to 128 characters once surrounding spaces are cut, as `browser.rename_group`,
+/// `view.rename` and `body.rename` read `name`.
 #[derive(Clone, Debug, PartialEq)]
 pub struct NewName(pub String);
 
 impl<'de> Deserialize<'de> for NewName {
     fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
         match Value::deserialize(d)? {
-            Value::String(n) if !n.trim().is_empty() && n.trim().len() <= MAX_NAME_BYTES => Ok(NewName(n)),
+            Value::String(n) if !n.trim().is_empty() && n.trim().chars().count() <= MAX_NAME_CHARS => Ok(NewName(n)),
             _ => Err(D::Error::custom(whole("`name` must be 1…128 characters"))),
         }
     }
@@ -344,7 +346,7 @@ impl JsonSchema for NewName {
         "NewName".into()
     }
     fn json_schema(_: &mut SchemaGenerator) -> Schema {
-        json_schema!({"description": "Text of 1 to 128 bytes once surrounding spaces are cut.", "type": "string"})
+        json_schema!({"description": "Text of 1 to 128 characters once surrounding spaces are cut.", "type": "string"})
     }
 }
 

@@ -84,6 +84,16 @@ impl Launch {
     }
 }
 
+/// A design just opened from a link is a clean copy under the link's name: its saved state is
+/// the loaded state, so the tab shows no unsaved mark and the autosave (kept only while the
+/// design is dirty) records nothing until the first edit (#17519).
+#[cfg(any(target_arch = "wasm32", test))]
+fn adopt_linked_design(session: &mut solidcraft_engine::Session, name: String) {
+    session.path = None;
+    session.doc_mut().name = name;
+    session.mark_saved();
+}
+
 #[cfg(any(target_arch = "wasm32", test))]
 fn design_url(value: &str, page_origin: &str) -> Result<url::Url, String> {
     if value.len() > 16_384 {
@@ -1152,6 +1162,7 @@ mod web {
         fn raw_input_hook(&mut self, ctx: &egui::Context, raw: &mut egui::RawInput) {
             // First, so everything after sees the buttons the browser holds.
             crate::mouse_buttons::reconcile(&self.mouse_buttons, ctx, raw);
+            solidcraft_ui_egui::window_chrome::release_stale_input(ctx, raw);
             let now = raw.time.unwrap_or_else(|| ctx.input(|i| i.time));
             if let Some(delay) = self.wheel_gestures.update(raw, now) {
                 ctx.request_repaint_after(delay);
@@ -1482,6 +1493,16 @@ mod tests {
         let viewer = Launch::parse("?embed=viewer&open=https://example.org/a.sc");
         assert!(viewer.embed && !viewer.editor, "any other value is the viewer embed, as before");
         assert!(!Launch::parse("?other=editor").editor);
+    }
+
+    #[test]
+    fn a_design_opened_from_a_link_is_clean_until_edited() {
+        let mut session = solidcraft_engine::Session::default();
+        adopt_linked_design(&mut session, "arm".into());
+        assert_eq!(session.doc.name, "arm");
+        assert!(!session.is_dirty(), "a linked design is not unsaved work, so nothing is autosaved for it");
+        session.doc_mut().name = "arm 2".into();
+        assert!(session.is_dirty(), "an edit makes it unsaved");
     }
 
     #[test]

@@ -269,6 +269,17 @@ pub(crate) fn cone_convert_uv_from_nurbs_to_step(
     k: &Kernel,
     nurbs_uv: Point2,
 ) -> Result<Point2> {
+    Ok(cone_convert_uv_from_nurbs_to_step_exact(rev, inside_out, k, nurbs_uv)?.0)
+}
+
+/// [`cone_convert_uv_from_nurbs_to_step`] with the polar converter's exactness: `false`
+/// where the sweep angle is not a closed form's.
+pub(crate) fn cone_convert_uv_from_nurbs_to_step_exact(
+    rev: &SurfOfRevolution,
+    inside_out: bool,
+    k: &Kernel,
+    nurbs_uv: Point2,
+) -> Result<(Point2, bool)> {
     // swap NurbPoint when needed
     let step_ivl = rev.anal_uv_domain.v_interval();
     let nurb_domain = rev.base.natural_uv_domain();
@@ -285,7 +296,7 @@ pub(crate) fn cone_convert_uv_from_nurbs_to_step(
     let circle = rev.polar_curve().ok_or_else(|| {
         SolidError::surface_missing(OP_TO_STEP, "the polar curve of the surface of revolution")
     })?;
-    let (x, _exact) = rev.polar.convert_to_polar_parameter(k, circle, nurb_uv.x)?;
+    let (x, exact) = rev.polar.convert_to_polar_parameter(k, circle, nurb_uv.x)?;
 
     // convert linear coordinate
     // (WR-713: see `unbounded_maps_linearly`)
@@ -300,7 +311,7 @@ pub(crate) fn cone_convert_uv_from_nurbs_to_step(
     } else {
         nurb_uv.y
     };
-    Ok(Point2::new(x, y))
+    Ok((Point2::new(x, y), exact))
 }
 
 /// The cone's `CreateIsoParametricCurve` on its base parts (the virtual the
@@ -1502,6 +1513,19 @@ impl Cone {
     /// `SM_ERR_NULL_POINTER` without polar curve; those of the polar conversion.
     pub fn convert_uv_from_nurbs_to_step(&self, k: &Kernel, nurbs_uv: Point2) -> Result<Point2> {
         cone_convert_uv_from_nurbs_to_step(&self.rev, self.inside_out, k, nurbs_uv)
+    }
+
+    /// [`Self::convert_uv_from_nurbs_to_step`] with the polar converter's exactness.
+    ///
+    /// # Errors
+    ///
+    /// Those of [`Self::convert_uv_from_nurbs_to_step`].
+    pub(crate) fn convert_uv_from_nurbs_to_step_exact(
+        &self,
+        k: &Kernel,
+        nurbs_uv: Point2,
+    ) -> Result<(Point2, bool)> {
+        cone_convert_uv_from_nurbs_to_step_exact(&self.rev, self.inside_out, k, nurbs_uv)
     }
 
     // ---- evaluation -----------------------------------------------------------------

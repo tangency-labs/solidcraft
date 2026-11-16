@@ -257,6 +257,10 @@ fn run_box(input: &BoxInput) -> Result<Output, HarnessError> {
         Vec3::new(SEED_MIN[0], SEED_MIN[1], SEED_MIN[2]),
         Vec3::new(SEED_MAX[0], SEED_MAX[1], SEED_MAX[2]),
     );
+    if tight {
+        // the body boxed, kept when a test captures it (`dump::capture`)
+        crate::dump::body(&k, "tight", b);
+    }
     let r = match input.target {
         0 => p1::calculate_bounding_box(&k, b, FaceId::from_index(id), tight).map(|x| bx = x),
         1 => p1::calculate_shell_bounding_box_into(

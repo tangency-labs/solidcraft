@@ -23,6 +23,34 @@ impl CurveEval {
     pub(crate) fn point(&self, t: f64) -> Option<Vec3> {
         self.0.point(t).map(c::record_vec3)
     }
+    /// The point and first derivative at `t`; `None` for a traced intersection.
+    pub(crate) fn derivs(&self, t: f64) -> Option<(Vec3, Vec3)> {
+        self.0.derivs(t).map(|(p, d)| (c::record_vec3(p), c::record_vec3(d)))
+    }
+}
+
+/// Where a piece `on` of `curve`, its angle about the axis through `origin` (from unit `x`
+/// towards unit `y`) monotone and under half a turn, reaches angle `theta`
+/// ([`k::ruling::angle_crossing`]): `(true, point, parameter)` where it does, else `(false, the
+/// end nearer in angle, its parameter)`. `None` where the curve can't be evaluated.
+pub(crate) fn angle_crossing(curve: &CurveEval, origin: Vec3, x: Vec3, y: Vec3, on: [f64; 2], theta: f64) -> Option<(bool, Vec3, f64)> {
+    use k::ruling::AngleCrossing as A;
+    Some(match k::ruling::angle_crossing(&curve.0, c::vec3(origin), c::vec3(x), c::vec3(y), on, theta)? {
+        A::At { point, t } => (true, c::record_vec3(point), t),
+        A::Nearer { point, t } => (false, c::record_vec3(point), t),
+    })
+}
+
+/// A closed spline or polyline with its seam moved to `start`, exactly.
+pub(crate) fn restart_curve(curve: &Curve, start: f64) -> Result<Curve, Error> {
+    let curve = c::curve(curve).map_err(|e| e.to_string())?;
+    let restarted = k::pcurve::restart_curve(&curve, start).map_err(|e| match e {
+        solidcore::SolidError::InvalidInput { reason, .. }
+        | solidcore::SolidError::Unsupported { reason, .. }
+        | solidcore::SolidError::PortInvariant { reason, .. } => reason.to_string(),
+        other => other.to_string(),
+    })?;
+    c::record_curve(restarted).map_err(|e| e.to_string())
 }
 
 /// A surface record ready to evaluate.
@@ -53,6 +81,13 @@ impl SurfaceEval {
     pub(crate) fn pole_within(&self, uv: [f64; 2], reach: f64) -> Result<[bool; 2], String> {
         self.0.pole_within(uv, reach).map_err(|e| e.to_string())
     }
+    /// `pc` with its control points put on the knot range and a certified bound on how far that
+    /// moves the surface under it; `None` when it is on the range, refused where the move is past
+    /// `tolerance` or not bounded ([`k::SurfaceEval::pcurve_onto_knots`]).
+    pub(crate) fn pcurve_onto_knots(&self, pc: &Curve2, tolerance: f64) -> Result<Option<(Curve2, f64)>, String> {
+        let moved = self.0.pcurve_onto_knots(&c::curve2(pc), tolerance).map_err(|e| e.to_string())?;
+        Ok(moved.map(|m| (c::record_curve2(m.pcurve), m.displacement)))
+    }
 }
 
 /// The flux of `field` through a face of `s` bounded by `loops` ([`k::face_flux`]).
@@ -79,6 +114,13 @@ pub(crate) mod form {
         c::record_curve(cv).ok()
     }
 
+    pub(crate) fn winds(domain: [[f64; 2]; 2]) -> bool {
+        k::form::winds(domain)
+    }
+    pub(crate) fn wound_surface(s: &Surface, domain: [[f64; 2]; 2], tolerance: f64) -> Option<(Surface, [[f64; 2]; 2])> {
+        let (form, d) = k::form::wound_surface(&surface_in(s)?, domain, tolerance)?;
+        Some((surface_out(form)?, d))
+    }
     pub(crate) use solidcore::eval::form::param;
 
     pub(crate) fn frame_of(s: &Surface) -> Option<Frame> {
