@@ -10,35 +10,39 @@
 //! | [`certify_no_fold`]   | none     |
 //! | [`FoldCertificate`]   | none     |
 //!
-//! **What is proved.** The merge domain is cut into the same `20 x 20` cells as the
-//! fold rule's sample grid. For every cell not inside the closed natural domain, take
-//! its window: the cell and its (up to eight) neighbours. A direction `d` is chosen per
-//! window (the normal at the cell's centre; any direction is valid, the choice only
-//! makes the proof succeed or not), and the normal `N = Du x Dv` is shown to satisfy
-//! - `N . d > 0` on every part of the window away from the closed natural domain, and
-//! - `N . d >= -2 E` on the parts that touch it, `E` the bound of the arithmetic below
-//!   (a zero of the normal on the natural domain's boundary, a degenerate edge or corner
-//!   of the surface's own domain, is allowed there).
+//! **What is proved.** A fold of the continuation is where its normal `N = Du x Dv`
+//! vanishes (the map stops being an immersion there), or where `N` reverses across the
+//! natural domain's side (the continuation turns back over the face at its edge, with
+//! `N` zero along that edge). The certificate excludes both:
+//! - every piece of the merge domain outside the closed natural domain has `N . d > E`
+//!   on all of it for one direction `d` (so `N` never vanishes there), `E` the bound of
+//!   the arithmetic below;
+//! - a piece that touches the natural domain, once split down to the last level, has
+//!   `N . d >= -E` on it instead (a zero of `N` on the natural domain's side, a
+//!   degenerate edge or corner of the surface's own domain, is allowed);
+//! - for every piece that touches the natural domain, `N . d >= -E` also holds on its
+//!   mirror across the sides it touches, inside the natural domain, with the same `d`:
+//!   `N` does not reverse across the side.
 //!
-//! So the continuation's normal never vanishes away from the natural domain, and within
-//! one cell of any point of the continuation it stays in the half-space of one
-//! direction: it cannot turn back, across a zero of the normal or otherwise, between a
-//! cell and its neighbours, which is the fold the sampled rule looks for between
-//! neighbouring samples. Windows overlap, so no gap between cells goes unchecked. A
-//! window that cannot be proved refuses ([`FoldCertificate::NotProved`]); so does a
-//! surface kind with no certificate here.
+//! The pieces start as the cells of the fold rule's `20 x 20` sample grid over the merge
+//! domain, cut at knot lines and at the natural domain's sides; `d` is the normal at a
+//! piece's centre (any direction is valid, the choice only makes the proof succeed or
+//! not). A piece not proved is quartered, at most [`MAX_SPLITS`] times, each quarter
+//! with its own `d`; past that the certificate refuses
+//! ([`FoldCertificate::NotProved`]), as it does for a surface kind with no certificate
+//! here. The only zeros of `N` not excluded lie in the last split's pieces along the
+//! natural domain's sides (`1 / 16` of a cell wide), where `N` is still shown not to
+//! turn back.
 //!
 //! **How (B-spline nets).** The evaluated surface is its NURBS form, continued past its
 //! knot range by its end spans' polynomials (NLib's span search clamps to the end span).
-//! The form's Bezier patches ([`decompose_to_bez`]) are restricted to each piece of a
-//! window (a cell cut at the patches' knot lines and at the natural domain's sides) by
+//! The form's Bezier patches ([`decompose_to_bez`]) are restricted to each piece by
 //! blossoming, which extrapolates exactly past a patch's own interval. On a piece, with
 //! homogeneous coordinates `H` and weight `w`, the normal's direction is that of
 //! `H_u x H_v` (polynomial form) or `(w H_u - w_u H) x (w H_v - w_v H)` (rational form,
 //! `w^4 N`; the weight must be shown positive on the piece), written in Bernstein form
 //! ([`crate::offset::construction::bernstein`]); `N . d` lies within its coefficients'
-//! hull (Farouki and Rajan 1987). A piece that the coefficients do not decide is
-//! quartered, at most [`MAX_SPLITS`] times.
+//! hull (Farouki and Rajan 1987).
 //!
 //! **The arithmetic's bound.** Every coefficient is computed twice more, on absolute
 //! values: with the net's magnitudes `|c|` (twin `T`) and with `|c| + e0` (twin `Te`),
@@ -56,21 +60,22 @@
 //! **Other kinds.** A plane's STEP evaluation is affine, so its normal is constant:
 //! proved. Spheres, cones and tori: the normal is a scalar closed form times a unit
 //! normal field that never vanishes, so the continuation folds exactly where the scalar
-//! changes sign (see [`analytic`]). Extrusions and revolutions: proved when the merge
-//! domain continues only along the sweep ([`along_sweep`]). Every other kind, and a
-//! continuation of an extrusion's or revolution's generator, is not proved.
+//! changes sign (see [`analytic`]). Extrusions and revolutions: proved along the sweep,
+//! and along a line generator's continuation by a closed form ([`swept`]). Every other
+//! kind, and a continuation of any other generator, is not proved.
 //!
 //! Deviations: none (no upstream counterpart). No recursion: pieces wait on a stack, at
 //! most [`MAX_PIECES`] of them per call.
 
+use crate::curve::curve::{Curve, CurveKind};
 use crate::error::Result;
-use crate::geom::certified::{above, gamma};
+use crate::geom::certified::above;
 use crate::geom::extent2d::Extent2d;
 use crate::geom::vector2d::Point2;
 use crate::kernel::Kernel;
 use crate::math::Vec3;
 use crate::nurbs::b_spline_surface::p1::{BSplineSurface, BSplineSurfaceForm};
-use crate::nurbs::math::{NOW, NOZ};
+use crate::nurbs::math::{gamma, NOW, NOZ};
 use crate::nurbs::srf_tool::p1::decompose_to_bez;
 use crate::offset::construction::bernstein::{Bernstein2, Binomials, MAX_DEGREE};
 use crate::surface::surface::{Surface, SurfaceKind};
@@ -89,7 +94,7 @@ pub const MAX_PIECES: usize = 1 << 16;
 pub enum FoldCertificate {
     /// The continuation is proved free of folds over the merge domain.
     Proved,
-    /// Nothing is proved near `uv` (the centre of the cell whose window failed, or of
+    /// Nothing is proved near `uv` (the centre of the piece that failed, or of
     /// the merge domain): `reason` says why.
     NotProved {
         /// Where.
@@ -114,8 +119,12 @@ pub fn certify_no_fold(
     let centre = domain.evaluate(0.5, 0.5);
     let not = |reason| FoldCertificate::NotProved { uv: centre, reason };
     let (lo, hi) = (domain.min(), domain.max());
-    if !(lo.x.is_finite() && lo.y.is_finite() && hi.x.is_finite() && hi.y.is_finite())
-        || !(above(hi.x, lo.x) && above(hi.y, lo.y))
+    if !(lo.x.is_finite()
+        && lo.y.is_finite()
+        && hi.x.is_finite()
+        && hi.y.is_finite()
+        && above(hi.x, lo.x)
+        && above(hi.y, lo.y))
     {
         return Ok(not("the merge domain is not a finite rectangle"));
     }
@@ -127,11 +136,10 @@ pub fn certify_no_fold(
         SurfaceKind::Sphere(_) | SurfaceKind::Cone(_) | SurfaceKind::Torus(_) => {
             analytic::certify(k, s, natural, domain)
         }
-        // `C(u) + v E`: `N = C'(u) x E`, the same at every `v`
-        SurfaceKind::SurfOfExtrusion(_) => Ok(along_sweep(natural, domain, true)),
-        // the generator `C(v)` turned by `u` about the axis: `N(u, v)` is `N(0, v)`
-        // turned by `u`
-        SurfaceKind::SurfOfRevolution(_) => Ok(along_sweep(natural, domain, false)),
+        // the normal depends on the generator parameter alone
+        SurfaceKind::SurfOfExtrusion(_) | SurfaceKind::SurfOfRevolution(_) => {
+            Ok(swept(s, natural, domain))
+        }
         SurfaceKind::ProceduralBlend(_)
         | SurfaceKind::OffsetSurface(_)
         | SurfaceKind::CurveBounded(_)
@@ -140,26 +148,81 @@ pub fn certify_no_fold(
     }
 }
 
-/// The certificate of a swept surface (an extrusion, whose generator parameter is `u`,
-/// or a revolution, whose is `v`): its normal at a point of the continuation is a rigid
-/// copy (translated along the extrusion, or turned about the axis) of its normal at the
-/// same generator parameter on the natural domain, so a continuation along the sweep
-/// only adds no normal, and no zero of one, the face does not have. A continuation of the
-/// generator itself is not proved.
-fn along_sweep(natural: &Extent2d, domain: &Extent2d, generator_is_u: bool) -> FoldCertificate {
+/// The certificate of a swept surface: an extrusion `C(u) + v E` (generator parameter
+/// `u`) or a revolution of `C(v)` about an axis (generator parameter `v`). Its normal is
+/// a rigid copy of one that depends on the generator parameter alone: `C'(u) x E` for the
+/// extrusion, and `M(v) = (a x (C(v) - A)) x C'(v)` turned by `u` about the axis (`A` a
+/// point of it, `a` its unit direction; times `pi / 180` for degrees) for the revolution.
+/// So a continuation along the sweep adds no normal, and no zero of one, the face does
+/// not have: proved. A continuation of the generator is proved only for a line
+/// generator, whose continuation is the line itself: the extrusion's normal is then
+/// constant, and the revolution's `M` is linear in `v`, so `M . d` (`d = M` at the natural
+/// domain's middle generator parameter) is positive over the merge domain's generator
+/// interval when it is at that interval's ends and at the natural interval's ends inside
+/// it (an undecided value is allowed only on the natural interval's closed ends: a pole
+/// the face itself has). Other generators' continuations are not proved.
+fn swept(s: &Surface, natural: &Extent2d, domain: &Extent2d) -> FoldCertificate {
+    let not = |reason| FoldCertificate::NotProved {
+        uv: domain.evaluate(0.5, 0.5),
+        reason,
+    };
+    let (generator, generator_is_u, revolution) = match s.kind() {
+        SurfaceKind::SurfOfExtrusion(e) => (e.gen_curve(), true, None),
+        SurfaceKind::SurfOfRevolution(r) => (
+            r.gen_curve(),
+            false,
+            Some((r.position().origin(), r.position().z_axis())),
+        ),
+        _ => return not("not a swept surface"),
+    };
     let (d, n) = if generator_is_u {
         (domain.u_interval(), natural.u_interval())
     } else {
         (domain.v_interval(), natural.v_interval())
     };
     if d.min() >= n.min() && d.max() <= n.max() {
-        FoldCertificate::Proved
-    } else {
-        FoldCertificate::NotProved {
-            uv: domain.evaluate(0.5, 0.5),
-            reason: "the generator's continuation is not proved",
+        return FoldCertificate::Proved;
+    }
+    let Some(CurveKind::Line(line)) = generator.map(Curve::kind) else {
+        return not("the generator's continuation is not proved");
+    };
+    let Some((origin, axis)) = revolution else {
+        // `C' x E`, the same everywhere
+        return FoldCertificate::Proved;
+    };
+    // `M(t)` and the rounding bound of `M(t) . d`: the line's point and the difference
+    // with `A` (each within `gamma_4` of its terms' sizes), then two cross products and
+    // a dot (generously `gamma_32` of the product of the sizes)
+    let m = |t: f64| -> (Vec3, f64) {
+        let pv = line.evaluate_step(t, 1);
+        let (Some(&c), Some(&tangent)) = (pv.first(), pv.get(1)) else {
+            return (Vec3::new(f64::NAN, f64::NAN, f64::NAN), f64::NAN);
+        };
+        let size = (c.length() + origin.length()) * axis.length() * tangent.length();
+        (axis.cross(c - origin).cross(tangent), size)
+    };
+    let (middle, _) = m(0.5 * (n.min() + n.max()));
+    let dlen = middle.length();
+    let mut ts = vec![d.min(), d.max()];
+    ts.extend(
+        [n.min(), n.max()]
+            .into_iter()
+            .filter(|&t| t > d.min() && t < d.max()),
+    );
+    for t in ts {
+        let (mt, size) = m(t);
+        let x = mt.dot(middle);
+        let e = gamma(32) * size * dlen;
+        if !(x.is_finite() && e.is_finite()) {
+            return not("the generator's closed form is not finite");
+        }
+        // positive, or undecided on the natural interval's closed ends
+        let on_natural = t >= n.min() && t <= n.max();
+        if !(above(x, e) || (on_natural && !above(-x, e))) {
+            return not("the normal turns back or vanishes along the generator's continuation");
         }
     }
+    FoldCertificate::Proved
 }
 
 /// A polynomial with its two magnitude twins (see the module header).
@@ -371,8 +434,11 @@ fn polynomial(
                 rational = true;
                 c.w
             };
-            if !(c.x.is_finite() && c.y.is_finite() && c.z.is_finite() && above(w, 0.0))
-                || !w.is_finite()
+            if !(c.x.is_finite()
+                && c.y.is_finite()
+                && c.z.is_finite()
+                && above(w, 0.0)
+                && w.is_finite())
             {
                 return Ok(not("a coefficient not finite or a weight not positive"));
             }
@@ -473,7 +539,7 @@ fn polynomial(
         e0,
         levels,
     };
-    certify_windows(&form, natural, domain)
+    certify_pieces(&form, natural, domain)
 }
 
 /// A rectangle `[x0, x1] x [y0, y1]` of STEP parameters.
@@ -544,7 +610,7 @@ fn span_of(spans: &[[f64; 2]], x: f64) -> usize {
     spans
         .iter()
         .position(|s| x < s[1])
-        .unwrap_or(spans.len().saturating_sub(1))
+        .unwrap_or_else(|| spans.len().saturating_sub(1))
 }
 
 /// The normal's homogeneous direction (`H_u x H_v`, or `A x B` for a rational form) on
@@ -573,9 +639,8 @@ fn normal_on(form: &Form, patch: &Patch, r: &Rect, b: &Binomials) -> Result<Opti
             te,
         });
     }
-    let [x, y, z, w] = match <[Net; 4]>::try_from(h) {
-        Ok(a) => a,
-        Err(_) => return Ok(None),
+    let Ok([x, y, z, w]) = <[Net; 4]>::try_from(h) else {
+        return Ok(None);
     };
     let (hu, hv);
     if form.rational {
@@ -616,46 +681,18 @@ fn normal_on(form: &Form, patch: &Patch, r: &Rect, b: &Binomials) -> Result<Opti
     ]))
 }
 
-/// What a piece's coefficients decide for `N . d`.
-enum Decision {
-    Holds,
-    Fails,
-    Split,
-}
-
-fn decide(f: &Net, levels: usize, strict: bool) -> Decision {
+/// Whether `N . d >= ` the bound (`strict`: `> E`; else `>= -E`) on every coefficient of
+/// the piece's `N . d`, so on the whole piece.
+fn holds(f: &Net, levels: usize, strict: bool) -> bool {
     let bound = f.bounds(levels);
-    let c = f.v.coefficients();
-    let holds = c
+    f.v.coefficients()
         .iter()
         .zip(&bound)
-        .all(|(&x, &e)| if strict { above(x, e) } else { !above(-x, e) });
-    if holds {
-        return Decision::Holds;
-    }
-    // a corner coefficient is the value there: a value certainly not positive (strict)
-    // or certainly negative decides; no subdivision changes a corner's value
-    let (du, dv) = f.v.degrees();
-    let corners = [0, dv, du * (dv + 1), du * (dv + 1) + dv];
-    let fails = corners.iter().any(|&i| match (c.get(i), bound.get(i)) {
-        (Some(&x), Some(&e)) => {
-            if strict {
-                !above(x + e, 0.0)
-            } else {
-                above(-x, e)
-            }
-        }
-        _ => true,
-    });
-    if fails {
-        Decision::Fails
-    } else {
-        Decision::Split
-    }
+        .all(|(&x, &e)| if strict { above(x, e) } else { !above(-x, e) })
 }
 
-/// The windows of the continuation's cells (see the module header).
-fn certify_windows(form: &Form, natural: &Extent2d, domain: &Extent2d) -> Result<FoldCertificate> {
+/// The pieces of the continuation (see the module header).
+fn certify_pieces(form: &Form, natural: &Extent2d, domain: &Extent2d) -> Result<FoldCertificate> {
     let b = Binomials::new();
     let uspans: Vec<[f64; 2]> = form
         .patches
@@ -674,100 +711,132 @@ fn certify_windows(form: &Form, natural: &Extent2d, domain: &Extent2d) -> Result
     vbreaks.extend([nlo.y, nhi.y]);
     let (lo, hi) = (domain.min(), domain.max());
     let g = GRID as f64;
-    let cell = |i: usize, j: usize| Rect {
-        x: [
-            lo.x + (hi.x - lo.x) * (i as f64 / g),
-            if i + 1 == GRID {
-                hi.x
-            } else {
-                lo.x + (hi.x - lo.x) * ((i + 1) as f64 / g)
-            },
-        ],
-        y: [
-            lo.y + (hi.y - lo.y) * (j as f64 / g),
-            if j + 1 == GRID {
-                hi.y
-            } else {
-                lo.y + (hi.y - lo.y) * ((j + 1) as f64 / g)
-            },
-        ],
+    let at = |a: f64, b: f64, i: usize| {
+        if i == GRID {
+            b
+        } else {
+            a + (b - a) * (i as f64 / g)
+        }
     };
     let inside =
         |r: &Rect| r.x[0] >= nlo.x && r.x[1] <= nhi.x && r.y[0] >= nlo.y && r.y[1] <= nhi.y;
-    let mut work = 0_usize;
+    // a piece cut at knot lines and the natural domain's sides lies in one patch's
+    // span (or past an end span, which continues the surface)
+    let patch_of = |r: &Rect| {
+        let m = r.centre();
+        form.patches
+            .get(span_of(&uspans, m.x))
+            .and_then(|col| col.get(span_of(&vspans, m.y)))
+    };
+    // `N . d` on the piece `r` holds the bound
+    let check = |r: &Rect, d: Vec3, strict: bool| -> Result<Option<bool>> {
+        let Some(patch) = patch_of(r) else {
+            return Ok(None);
+        };
+        let Some(n) = normal_on(form, patch, r, &b)? else {
+            return Ok(None);
+        };
+        Ok(Some(holds(&Net::combine(&n, d, &b)?, form.levels, strict)))
+    };
+    // the mirror of `r` across the natural domain's sides it touches, inside it
+    let mirror = |r: &Rect| -> Option<Rect> {
+        let side = |x: [f64; 2], n0: f64, n1: f64| -> Option<[f64; 2]> {
+            let w = x[1] - x[0];
+            let m = if x[1] <= n0 {
+                [n0, (n0 + w).min(n1)]
+            } else if x[0] >= n1 {
+                [(n1 - w).max(n0), n1]
+            } else {
+                x
+            };
+            above(m[1], m[0]).then_some(m)
+        };
+        Some(Rect {
+            x: side(r.x, nlo.x, nhi.x)?,
+            y: side(r.y, nlo.y, nhi.y)?,
+        })
+    };
+    let mut stack: Vec<(Rect, usize)> = Vec::new();
     for i in 0..GRID {
         for j in 0..GRID {
-            let c = cell(i, j);
-            if inside(&c) {
-                continue;
-            }
-            let not = |reason| FoldCertificate::NotProved {
-                uv: c.centre(),
-                reason,
-            };
-            // the direction: the normal at the cell's centre
-            let centre = c.centre();
-            let (iu, iv) = (span_of(&uspans, centre.x), span_of(&vspans, centre.y));
-            let Some(patch) = form.patches.get(iu).and_then(|col| col.get(iv)) else {
-                return Ok(not("no patch"));
-            };
-            let probe = Rect {
-                x: [centre.x, centre.x],
-                y: [centre.y, centre.y],
-            };
-            let Some(n) = normal_on(form, patch, &probe, &b)? else {
-                return Ok(not("a weight not proved positive"));
-            };
-            let d = Vec3::new(
-                n[0].v.eval(0.5, 0.5),
-                n[1].v.eval(0.5, 0.5),
-                n[2].v.eval(0.5, 0.5),
-            );
-            if !(d.x.is_finite() && d.y.is_finite() && d.z.is_finite()) || d == Vec3::ZERO {
-                return Ok(not("no direction at the cell's centre"));
-            }
-            // the window's pieces: its cells cut at knot lines and the natural domain's sides
-            let mut stack: Vec<(Rect, usize)> = Vec::new();
-            for wi in i.saturating_sub(1)..=(i + 1).min(GRID - 1) {
-                for wj in j.saturating_sub(1)..=(j + 1).min(GRID - 1) {
-                    let w = cell(wi, wj);
-                    for x in cuts(w.x[0], w.x[1], &ubreaks) {
-                        for y in cuts(w.y[0], w.y[1], &vbreaks) {
-                            stack.push((Rect { x, y }, 0));
-                        }
+            for x in cuts(at(lo.x, hi.x, i), at(lo.x, hi.x, i + 1), &ubreaks) {
+                for y in cuts(at(lo.y, hi.y, j), at(lo.y, hi.y, j + 1), &vbreaks) {
+                    let r = Rect { x, y };
+                    if !inside(&r) {
+                        stack.push((r, 0));
                     }
                 }
             }
-            while let Some((r, depth)) = stack.pop() {
-                work += 1;
-                if work > MAX_PIECES {
-                    return Ok(not("the certificate's work bound"));
-                }
-                let m = r.centre();
-                let Some(patch) = form
-                    .patches
-                    .get(span_of(&uspans, m.x))
-                    .and_then(|col| col.get(span_of(&vspans, m.y)))
-                else {
-                    return Ok(not("no patch"));
-                };
-                let Some(n) = normal_on(form, patch, &r, &b)? else {
-                    return Ok(not("a weight not proved positive"));
-                };
-                let f = Net::combine(&n, d, &b)?;
-                match decide(&f, form.levels, !r.touches(natural)) {
-                    Decision::Holds => {}
-                    Decision::Fails => return Ok(not("the normal turns back or vanishes")),
-                    Decision::Split => {
-                        if depth >= MAX_SPLITS {
-                            return Ok(not("the normal's sign is not decided"));
-                        }
-                        for q in r.quarters() {
-                            stack.push((q, depth + 1));
+        }
+    }
+    let mut work = 0_usize;
+    while let Some((r, depth)) = stack.pop() {
+        work += 1;
+        if work > MAX_PIECES {
+            return Ok(FoldCertificate::NotProved {
+                uv: r.centre(),
+                reason: "the certificate's work bound",
+            });
+        }
+        let touching = r.touches(natural);
+        let last = depth >= MAX_SPLITS;
+        // the direction: the normal at the piece's centre (restricted to the whole piece:
+        // the restriction's derivatives are the patch's scaled by the piece's positive
+        // widths, so the direction at its centre (0.5, 0.5) is kept)
+        let direction = match patch_of(&r) {
+            Some(patch) => normal_on(form, patch, &r, &b)?.map(|n| {
+                Vec3::new(
+                    n[0].v.eval(0.5, 0.5),
+                    n[1].v.eval(0.5, 0.5),
+                    n[2].v.eval(0.5, 0.5),
+                )
+            }),
+            None => None,
+        }
+        .filter(|d| d.x.is_finite() && d.y.is_finite() && d.z.is_finite() && *d != Vec3::ZERO);
+        let proved = match direction {
+            None => false,
+            Some(d) => {
+                // away from the natural domain: a normal that never vanishes; touching
+                // it, the same unless the piece is down to the last split, and then a
+                // normal that does not turn back against `d`. A touching piece's mirror
+                // inside the natural domain must not turn back against `d` either: no
+                // reversal across the natural domain's side.
+                let own = check(&r, d, !touching || !last)?;
+                let across = if touching && own == Some(true) {
+                    let mut ok = Some(true);
+                    if let Some(m) = mirror(&r) {
+                        'pieces: for x in cuts(m.x[0], m.x[1], &ubreaks) {
+                            for y in cuts(m.y[0], m.y[1], &vbreaks) {
+                                ok = check(&Rect { x, y }, d, false)?;
+                                if ok != Some(true) {
+                                    break 'pieces;
+                                }
+                            }
                         }
                     }
-                }
+                    ok
+                } else {
+                    own
+                };
+                own == Some(true) && across == Some(true)
             }
+        };
+        if proved {
+            continue;
+        }
+        if last {
+            return Ok(FoldCertificate::NotProved {
+                uv: r.centre(),
+                reason: if touching {
+                    "a turn back across the natural domain's side is not excluded"
+                } else {
+                    "a zero of the normal is not excluded"
+                },
+            });
+        }
+        for q in r.quarters() {
+            stack.push((q, depth + 1));
         }
     }
     Ok(FoldCertificate::Proved)
@@ -788,9 +857,10 @@ fn certify_windows(form: &Form, natural: &Extent2d, domain: &Extent2d) -> Result
 pub mod analytic {
     use super::FoldCertificate;
     use crate::error::Result;
-    use crate::geom::certified::{above, gamma};
+    use crate::geom::certified::above;
     use crate::geom::extent2d::Extent2d;
     use crate::kernel::Kernel;
+    use crate::nurbs::math::gamma;
     use crate::surface::surface::{Surface, SurfaceKind};
 
     /// The certificate of a sphere, cone or torus; nothing is proved for other kinds.

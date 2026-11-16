@@ -395,7 +395,7 @@ pub enum ContinuationFold {
     /// what was not proved. Sampling alone cannot accept a cover: a fold can lie between
     /// samples.
     NotCertified {
-        /// The centre of the grid cell whose window failed (or of the merge domain).
+        /// The centre of the piece that failed (or of the merge domain).
         uv: Point2,
         /// What was not proved.
         reason: &'static str,
@@ -2524,7 +2524,9 @@ mod tests {
         assert!(normal.z < 0.0, "{normal:?}");
         let fold = s.continuation_fold(&k, &domain)?;
         assert!(
-            matches!(fold, Some(ContinuationFold::NotCertified { uv, .. }) if uv.y < 0.0),
+            matches!(fold, Some(ContinuationFold::NotCertified { uv, reason })
+                if uv.y < 0.0 && matches!(reason, "a zero of the normal is not excluded"
+                    | "a turn back across the natural domain's side is not excluded")),
             "{fold:?}"
         );
         Ok(())
@@ -2566,10 +2568,64 @@ mod tests {
             FoldCertificate::Proved
         );
         let past = Extent2d::from_bounds(0.0, 0.0, 2.5, 1.0);
-        assert!(matches!(
-            certify_no_fold(&k, &sheet, &natural, &past)?,
-            FoldCertificate::NotProved { .. }
-        ));
+        // refused at the zero of the normal (u = 2), not for want of a direction
+        let refused = certify_no_fold(&k, &sheet, &natural, &past)?;
+        assert!(
+            matches!(refused, FoldCertificate::NotProved { uv, reason }
+                if uv.x < 2.0 + 0.25
+                    && matches!(reason, "a zero of the normal is not excluded"
+                    | "a turn back across the natural domain's side is not excluded")),
+            "{refused:?}"
+        );
+        Ok(())
+    }
+
+    /// A revolution of a line continues past its rim but not through its pole: the cone
+    /// swept by `C(v) = v (1, 0, 1)` about the z axis has `M(v) = v (1, 0, -1)` (module
+    /// `fold_certificate`, `swept`), zero at the apex v = 0 (the face's own pole, on its
+    /// natural domain's side) and reversed past it, on the cone's other nappe.
+    #[test]
+    fn wr_407_revolved_line_continues_past_its_rim_not_its_pole() -> Result<()> {
+        use super::super::fold_certificate::{certify_no_fold, FoldCertificate};
+        use crate::curve::curve::Curve;
+        use crate::curve::line::Line;
+        use crate::surface::surf_of_revolution::p1::SurfOfRevolution;
+        let k = Kernel::default();
+        let mut line = Line::from_points(Vec3::ZERO, Vec3::new(1.0, 0.0, 1.0), 3);
+        line.make_nurb()?;
+        let mut r = SurfOfRevolution::create_canonical(
+            &k,
+            Curve::from(line),
+            Vec3::ZERO,
+            Vec3::new(0.0, 0.0, 1.0),
+            false,
+        )?;
+        r.set_out_of_bounds_enabled(true);
+        let s = Surface::from(r);
+        let natural = s.step_uv_domain();
+        let (v0, v1) = (natural.v_min(), natural.v_max());
+        // the pole is the generator's start
+        let pole = s.evaluate_step(
+            &k,
+            Point2::new(natural.u_min(), v0),
+            0,
+            0,
+            EvaluateFlags::default(),
+        )?;
+        assert!(pole[0][0].length() < 1e-12, "{pole:?}");
+        let h = 0.02 * (v1 - v0);
+        let rim = Extent2d::from_bounds(natural.u_min(), v0, natural.u_max(), v1 + h);
+        assert_eq!(
+            certify_no_fold(&k, &s, &natural, &rim)?,
+            FoldCertificate::Proved
+        );
+        let apex = Extent2d::from_bounds(natural.u_min(), v0 - h, natural.u_max(), v1);
+        let refused = certify_no_fold(&k, &s, &natural, &apex)?;
+        assert!(
+            matches!(refused, FoldCertificate::NotProved { reason, .. }
+                if reason == "the normal turns back or vanishes along the generator's continuation"),
+            "{refused:?}"
+        );
         Ok(())
     }
 
