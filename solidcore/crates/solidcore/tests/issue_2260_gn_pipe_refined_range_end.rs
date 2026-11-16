@@ -95,7 +95,6 @@ const SOLIDCRAFT_C494A18: &[&str] = &[
     "offset_extension_as_itself",
     "offset_extension_from_base",
     "offset_open_edge_second_trim_point",
-    "offset_stitch_at_body_tolerance",
     "point_class_gap_3d_propagates_no_drop_error",
     "point_on_start_point_squared_tolerance",
     "point_solve_keeps_triangle_guess",
