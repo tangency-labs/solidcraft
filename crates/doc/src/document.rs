@@ -2000,6 +2000,12 @@ pub enum FeatureKind {
         /// How the rails reshape the curves.
         #[serde(default, skip_serializing_if = "RailFit::is_scale")]
         rail_fit: RailFit,
+        /// A 3D sketch spline in the path is followed as the lines between its samples, a wall
+        /// along each, as designs saved before #17828 swept it, so their faces and what refers to
+        /// them stay as they were (`format/pending/surface-sweep-exact-spline-path.rs`). Off for a
+        /// new or redefined sweep, which follows the spline itself.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        spline_as_samples: bool,
     },
     /// A surface body lofted through sections in order, each one open or closed chain of
     /// sketch curves: walls only, no caps.
@@ -2195,6 +2201,12 @@ pub enum FeatureKind {
         translate: [Expr; 3],
         #[serde(default, skip_serializing_if = "Option::is_none")]
         rotate_axis: Option<Dir>,
+        /// The edge or round face of the model the turn was picked on (#17974), found again on
+        /// each evaluation ([`crate::construct::model_axis`]), so the turn follows it when an
+        /// earlier step moves the body; `rotate_axis` and `origin` are where it was when picked,
+        /// and are used when it is not found. Older moves have none and turn about those.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        rotate_about: Option<GeoRef>,
         /// Rotation pivot in the body's authoring frame. Older moves turn about the origin.
         #[serde(default, skip_serializing_if = "Option::is_none", with = "opt_point_expr")]
         #[walk(placement)]
@@ -3379,10 +3391,13 @@ impl Feature {
 
     /// Keep `made`, the names the feature's bodies have now (in the order it builds them), as
     /// its stored names, so they stay as they are whatever comes and goes before it. An Import's
-    /// skipped file bodies keep the names stored for them.
+    /// skipped file bodies keep the names stored for them, and so do the solids its reader left
+    /// out, whose names it keeps after its bodies (#16857).
     pub fn pin_body_names(&mut self, made: &[String]) {
         let slots = self.body_name_slots(made.len());
-        self.body_names.resize(slots.last().map_or(0, |s| s + 1), String::new());
+        let len = slots.last().map_or(0, |s| s + 1);
+        let len = if matches!(self.kind, FeatureKind::Import { .. }) { len.max(self.body_names.len()) } else { len };
+        self.body_names.resize(len, String::new());
         for (slot, name) in slots.iter().zip(made) {
             if let Some(stored) = self.body_names.get_mut(*slot) {
                 stored.clone_from(name);

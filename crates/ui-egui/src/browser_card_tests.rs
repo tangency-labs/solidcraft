@@ -1493,16 +1493,12 @@ fn browser_editors_have_one_app_owned_host_when_both_presentations_are_hidden() 
     let (mut h, _, occurrence) = crate::test_support::component_box();
     h.app.ui.show_browser = false;
     h.app.ui.show_timeline = false;
-    h.app.tree.occurrence_move = Some(OccMove::new(occurrence));
+    h.app.run("occurrence.move", json!({"occurrence": occurrence, "translate": [10, 0, 0], "capture": false})).unwrap();
+    h.app.start("sketch.create");
     h.frames(4);
     assert!(drawn_rows().is_empty());
-    let fields = crate::scenario::handles("occurrence-move:distance:0");
-    assert_eq!(
-        fields.iter().filter(|(name, _)| name == "occurrence-move:distance:0").count(),
-        1,
-        "the editor is hosted once despite both panels being hidden"
-    );
-    assert!(h.app.tree.occurrence_move.as_ref().unwrap().baseline.is_some());
+    assert_eq!(h.app.tree.capture_prompt.as_deref(), Some("sketch.create"));
+    assert!(h.widget("Capture Position").is_some(), "the Capture Position question is hosted despite both panels being hidden");
 }
 
 #[test]

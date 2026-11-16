@@ -9,7 +9,7 @@
 //! | [`calculate_bounding_box`]            | `SmEdge::CalculateBoundingBox`             |
 //! | [`calculate_tight_bounding_box`]      | `SmEdge::CalculateTightBoundingBox`        |
 //! | [`closest_point`], [`ClosestPoint`]   | `SmEdge::ClosestPoint`                     |
-//! | [`closest_point_to_ray`], [`RayClosestPoint`] | (none: the edge point nearest a ray)  |
+//! | [`closest_point_to_ray`], [`RayClosestPoint`] | (none: the edge point nearest a ray, [`super::curve::closest_point_to_ray`] on the edge's curve) |
 //! | [`radial_sector_classify`], [`radial_sector_classify_between`], [`RadialSectorClass`] | `SmEdge::RadialSectorClassify` |
 //! | [`radial_sector_of_curve_classify`], [`CurveSectorClass`] | `SmEdge::RadialSectorOfCurveClassify` |
 //! | [`edge_vertices`]                     | `SmEdge::GetVertices(SmTArray&, ULONG*)` (CO-PORTED, `topology.edge`) |
@@ -61,9 +61,7 @@
 
 use crate::curve::curve::p1::GlobalPointSolveOptions;
 use crate::curve::curve::p2::euclidian_step_off;
-use crate::curve::curve::p9::CurveSolveOptions;
 use crate::curve::curve::Curve;
-use crate::curve::line::Line;
 use crate::error::{ignored, Result, SolidError};
 use crate::geom::extent1d::Extent1d;
 use crate::geom::extent3d::Extent3d;
@@ -107,9 +105,9 @@ fn curve_of<'b>(brep: &'b Brep, edge: EdgeId, operation: &'static str) -> Result
 /// The handle naming an edge's curve (`id` 0) or its cache's analytic replacement
 /// (`id` 1) in point solutions.
 #[derive(Debug, Clone, Copy, PartialEq)]
-struct CurveHandle {
-    id: u8,
-    ivl: Extent1d,
+pub(super) struct CurveHandle {
+    pub(super) id: u8,
+    pub(super) ivl: Extent1d,
 }
 
 impl SolutionObject for CurveHandle {
@@ -378,34 +376,18 @@ pub fn closest_point(
     }))
 }
 
-/// (Not upstream) The result of [`closest_point_to_ray`].
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub struct RayClosestPoint {
-    /// The edge curve's parameter of the edge point nearest the ray.
-    pub parameter: f64,
-    /// That edge point.
-    pub point: Point3,
-    /// The ray's point nearest it.
-    pub on_ray: Point3,
-    /// The distance between the two.
-    pub distance: f64,
-}
+pub use super::curve::RayClosestPoint;
 
 /// (Not upstream) The point of the edge nearest the ray from `origin` along `direction` (a
 /// pick through the view, which [`closest_point`] to a point on the ray answers only where the
-/// point happens to be the nearest one): the first solution of the global minimising
-/// curve/curve solve ([`Curve::global_curve_solve`]) of the edge's curve over the edge's
-/// interval against the ray as a line segment from `origin`, the edge tolerance as the
-/// distance tolerance; `None` when there is none. The segment runs past the edge: as long as
-/// the farthest point of the edge's box from `origin` is away, plus a millimetre, and an edge
-/// point's foot on the ray is never farther from `origin` than the point itself, so the
-/// segment's nearest point is the ray's. A ray pointing away from the edge is nearest it at
-/// `origin`.
+/// point happens to be the nearest one): the edge's curve over the edge's interval, the edge
+/// tolerance as the distance tolerance, by [`super::curve::closest_point_to_ray`]; `None` when
+/// its solve finds no point.
 ///
 /// # Errors
 ///
-/// [`SolidError::InvalidInput`] for an edge without curve, a `direction` of no length or a
-/// coordinate that is not finite; those of the edge's box, the line and the solve.
+/// [`SolidError::InvalidInput`] for an edge without curve; those of
+/// [`super::curve::closest_point_to_ray`].
 pub fn closest_point_to_ray(
     k: &Kernel,
     brep: &Brep,
@@ -413,67 +395,9 @@ pub fn closest_point_to_ray(
     origin: Point3,
     direction: Vec3,
 ) -> Result<Option<RayClosestPoint>> {
-    let finite = |v: Vec3| v.x.is_finite() && v.y.is_finite() && v.z.is_finite();
-    if !(finite(origin) && finite(direction)) {
-        return Err(SolidError::invalid_input(
-            OP_CLOSEST_RAY,
-            "a coordinate that is not finite",
-        ));
-    }
-    let direction = direction
-        .unitize()
-        .map_err(|_| SolidError::invalid_input(OP_CLOSEST_RAY, "a direction of no length"))?;
     let curve = curve_of(brep, edge, OP_CLOSEST_RAY)?;
     let e = brep.edge(edge)?;
-    let req = BoundingBoxRequest {
-        normal: true,
-        pseudo: false,
-        polar: false,
-    };
-    let edge_box = calculate_bounding_box(k, brep, edge, req, false)?
-        .normal
-        .ok_or_else(|| SolidError::query_failed(OP_CLOSEST_RAY, "the edge has no box"))?;
-    let reach = edge_box.max_distance(&Extent3d::from_points(origin, origin)) + 1.0;
-    let ray = Curve::from(Line::create_line_segment(
-        3,
-        origin,
-        origin + direction * reach,
-        None,
-    )?);
-    let ray_interval = ray.natural_interval();
-    let opts = CurveSolveOptions {
-        handles: [
-            Some(CurveHandle {
-                id: 0,
-                ivl: curve.natural_interval(),
-            }),
-            Some(CurveHandle {
-                id: 1,
-                ivl: ray_interval,
-            }),
-        ],
-        ..CurveSolveOptions::default()
-    };
-    let solutions = curve.global_curve_solve(
-        k,
-        &e.interval,
-        &ray,
-        &ray_interval,
-        SolverOperation::Minimize,
-        e.tolerance,
-        &opts,
-        SolutionRequested::Single,
-    )?;
-    let Some(sol) = solutions.get(0) else {
-        return Ok(None);
-    };
-    let parameter = sol.start.param(0)?;
-    Ok(Some(RayClosestPoint {
-        parameter,
-        point: curve.evaluate_point(k, parameter)?,
-        on_ray: ray.evaluate_point(k, sol.start.param(1)?)?,
-        distance: sol.start.solution_value,
-    }))
+    super::curve::closest_point_to_ray(k, curve, &e.interval, origin, direction, e.tolerance)
 }
 
 // ---- radial sectors ---------------------------------------------------------------------

@@ -285,6 +285,10 @@ crate::dialog_descriptor::dialog_descriptors! {
                 /// The last automatic size; a different value is a manual override. Keep automatic
                 /// features automatic when applying, even though their resolved size is visible.
                 suggested: Option<String>,
+                /// The last size filled in for a cylinder past the coarse table (`M150x4`). It is
+                /// kept out of `suggested`, which tells command construction to leave the size out;
+                /// like `suggested`, a different designation is a manual override.
+                filled: Option<String>,
                 /// The picks used for the suggestion, so an unchanged dialog does no geometry work.
                 of: Vec<Sel>,
                 options: crate::dialogs_thread::Options,
@@ -1043,7 +1047,14 @@ impl Dialog {
                 vec![SelInput::new("Body to split", BODIES, false), SelInput::new("Splitting tool", PLANES | FACES | AXES, false)],
             ),
             "solid.thread" => Dialog::new(
-                Kind::Thread { designation: String::new(), length: String::new(), suggested: None, of: Vec::new(), options: Default::default() },
+                Kind::Thread {
+                    designation: String::new(),
+                    length: String::new(),
+                    suggested: None,
+                    filled: None,
+                    of: Vec::new(),
+                    options: Default::default(),
+                },
                 crate::dialogs_thread::inputs(),
             ),
             "material.assign" => {
@@ -1237,8 +1248,8 @@ impl Dialog {
                     continue;
                 }
             }
-            // Move/Copy keeps a selected component as the component, so Create Copy can still be
-            // ticked after it (the bodies are what a move without a copy moves).
+            // Move/Copy keeps a selected component as the component: without Create Copy its
+            // placement moves, with it the component is copied.
             if matches!(d.kind, Kind::Move { .. })
                 && let Sel::Occurrence { path } = sel
                 && !path.is_empty()
@@ -1370,6 +1381,10 @@ impl Dialog {
         d.sync_thread(s);
         d.sync_material(s);
         d.advance();
+        // Move/Copy opens on Selection, picked or not: more objects are picked first.
+        if matches!(d.kind, Kind::Move { .. }) {
+            d.active = 0;
+        }
         // Preselected items are already the dialog's inputs: the control reply and the first
         // viewport paint must see the same measurement, without waiting for the panel to draw.
         update_measure(app, &mut d);
@@ -1385,8 +1400,9 @@ impl Dialog {
     /// Resolve a newly selected face without replacing an authored size or changing the
     /// document. Clearing the face also clears a suggestion that no longer applies.
     fn sync_thread(&mut self, s: &Session) {
-        let Kind::Thread { designation, suggested, of, options, .. } = &mut self.kind else { return };
-        if !designation.trim().is_empty() && suggested.as_deref() != Some(designation.as_str()) {
+        let Kind::Thread { designation, suggested, filled, of, options, .. } = &mut self.kind else { return };
+        let automatic = suggested.as_deref() == Some(designation.as_str()) || filled.as_deref() == Some(designation.as_str());
+        if !designation.trim().is_empty() && !automatic {
             return;
         }
         let picks = self.inputs.first().map(|i| i.items.as_slice()).unwrap_or_default();
@@ -1395,7 +1411,8 @@ impl Dialog {
         }
         *of = picks.to_vec();
         *suggested = crate::dialogs_thread::suggested(s, picks, options);
-        *designation = suggested.clone().unwrap_or_default();
+        *filled = if suggested.is_some() { None } else { crate::dialogs_thread::large_size(s, picks, options) };
+        *designation = suggested.clone().or_else(|| filled.clone()).unwrap_or_default();
     }
 
     pub fn rename(feature: u64, name: &str) -> Dialog {
@@ -1902,6 +1919,8 @@ impl Dialog {
         if self.active_input().is_some_and(|i| i.rejects(&sel)) {
             return;
         }
+        // Move/Copy moves one kind at a time (`dialogs_move::admit`).
+        let Some(sel) = crate::dialogs_move::admit(s, &mut *self, sel) else { return };
         // Plane, Axis and Point: the pick is the tool's, which chooses the method again.
         if let Some(a) = &mut self.auto {
             a.toggle(sel);
@@ -3110,7 +3129,7 @@ fn placement_row(d: &mut Dialog, ui: &mut egui::Ui, app: &SolveApp) {
         return;
     }
     if matches!(d.kind, Kind::Move { .. }) {
-        crate::dialogs_move::type_row(app, d, ui);
+        crate::dialogs_move::object_row(app, d, ui);
         return;
     }
     let current = match d.kind {
@@ -3188,6 +3207,16 @@ fn placement_row(d: &mut Dialog, ui: &mut egui::Ui, app: &SolveApp) {
 /// active a part inside a subassembly picks the subassembly; with the subassembly (or the part)
 /// active it picks the part. A body outside the active component picks its top-level placement.
 pub(crate) fn occurrence_path_of_body(s: &Session, body: &str) -> Option<Vec<u64>> {
+    let path = body_placement_path(s, body)?;
+    let depth = pick_depth(s, &path);
+    let path: Vec<u64> = path.into_iter().take(depth).collect();
+    (!path.is_empty()).then_some(path)
+}
+
+/// The full placement path of the component a body is in, to its innermost component: `None`
+/// for a body at the design's root. A component pick keeps only part of it
+/// ([`occurrence_path_of_body`]).
+pub(crate) fn body_placement_path(s: &Session, body: &str) -> Option<Vec<u64>> {
     let st = crate::open_meshing::session_world(s);
     let b = st.body(body)?;
     if s.doc.model_body_component(b) == 0 {
@@ -3195,8 +3224,6 @@ pub(crate) fn occurrence_path_of_body(s: &Session, body: &str) -> Option<Vec<u64
     }
     let model = s.model.state();
     let (_, _, _, path, _) = s.placed_document().body_frames_with_source(&model).into_iter().find(|(world, ..)| world == body)?;
-    let depth = pick_depth(s, &path);
-    let path: Vec<u64> = path.into_iter().take(depth).collect();
     (!path.is_empty()).then_some(path)
 }
 
@@ -4479,10 +4506,13 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     let ok = crate::op_auto::hold_ok(&mut d, ok, &mut apply_again, cancel);
     if ok && !cancel && app.applying.is_none() {
         d.repeat_after_apply = apply_again;
+        // Only components picked, not moved, and Capture All Positions unticked: nothing to do.
+        let nothing_to_run = crate::dialogs_move::nothing_to_run(app, &d);
         // Edit Text applies its own way: its live changes and OK are one undo step.
         let run = match &mut d.kind {
             Kind::Text(k) => Some(crate::sketch_text::apply(app, k)),
             Kind::ChatContext => Some(crate::agent_chat::pick_done(app, &d)),
+            Kind::Move { .. } if nothing_to_run => Some(Ok(())),
             _ => match begin_applying(app, &d) {
                 // Computing: the dialog stays, saying so, until it is in.
                 Some(job) => {
@@ -4732,13 +4762,17 @@ fn recall(app: &SolveApp, dialog: &mut Dialog) {
         (Kind::PathPlane { sketch, .. }, Kind::PathPlane { sketch: fresh, .. }) => *sketch = *fresh,
         // The sizes come back; which ends an edit could not find belonged to that edit.
         (Kind::EndCap(c), Kind::EndCap(_)) => c.unresolved.clear(),
-        (Kind::Thread { designation, suggested, of, .. }, Kind::Thread { suggested: fresh_suggested, of: fresh_of, .. }) => {
+        (
+            Kind::Thread { designation, suggested, filled, of, .. },
+            Kind::Thread { suggested: fresh_suggested, filled: fresh_filled, of: fresh_of, .. },
+        ) => {
             // A remembered auto-suggestion belonged to the old face: the new face gets its own.
             // An authored designation stays.
-            if suggested.as_deref() == Some(designation.as_str()) {
-                *designation = fresh_suggested.clone().unwrap_or_default();
+            if suggested.as_deref() == Some(designation.as_str()) || filled.as_deref() == Some(designation.as_str()) {
+                *designation = fresh_suggested.clone().or_else(|| fresh_filled.clone()).unwrap_or_default();
             }
             *suggested = fresh_suggested.clone();
+            *filled = fresh_filled.clone();
             *of = fresh_of.clone();
         }
         (Kind::BoundaryFill { cells, of, .. }, Kind::BoundaryFill { cells: fresh_cells, of: fresh_of, .. }) => {
@@ -5713,11 +5747,15 @@ fn exact_regions(d: &Dialog, cmds: &mut [(String, Value)]) {
     }
 }
 
-/// The commands the live preview runs: OK's, with a joint's motion while it animates.
+/// The commands the live preview runs: OK's, with a joint's motion while it animates, and a
+/// component Move/Copy moves by its placement drawn as its bodies moved.
 pub fn preview_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, String> {
     let mut cmds = apply_commands(app, d)?;
     if let Kind::Assembly(k) = &d.kind {
         crate::dialogs_assembly::animate(app, k, &mut cmds);
+    }
+    if matches!(d.kind, Kind::Move { .. }) {
+        crate::dialogs_move::preview(app, d, &mut cmds);
     }
     Ok(cmds)
 }
@@ -6487,7 +6525,7 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
             };
             ("inspect.section", json!({"plane": plane, "offset": offset, "flip": flip, "hatch": hatch}))
         }
-        Kind::Move { .. } => return Ok(vec![("solid.move".into(), crate::dialogs_move::params(app, d)?)]),
+        Kind::Move { .. } => return crate::dialogs_move::commands(app, d),
         Kind::Hole { diameter, depth, kind, cb_diameter, cb_depth, cs_diameter, cs_angle, opts } => {
             let folder = crate::hole_folder::active(d);
             if !folder {

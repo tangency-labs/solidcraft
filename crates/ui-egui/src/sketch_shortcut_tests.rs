@@ -207,7 +207,6 @@ fn move_key_keeps_sketch_mode_behavior_and_honors_a_sketch_move_binding() {
 
     press(&mut h, "M");
     assert!(h.app.dialog.is_none(), "the default body Move shortcut is disabled in a sketch");
-    assert!(h.app.tree.occurrence_move.is_none());
     assert_eq!(h.app.session.active_sketch, sketch);
     assert_eq!(h.app.session.selection, selection);
 
@@ -217,7 +216,7 @@ fn move_key_keeps_sketch_mode_behavior_and_honors_a_sketch_move_binding() {
     assert!(matches!(dialog.kind, crate::dialogs::Kind::SketchModify(crate::sketch_modify_ui::Mod::Move { .. })));
     assert_eq!(dialog.inputs[0].items, selection);
     assert_eq!(h.app.session.active_sketch, sketch);
-    assert!(h.app.tree.occurrence_move.is_none(), "M must not open component Move while editing its sketch");
+    assert!(crate::dialogs_move::moving(&h.app).is_none(), "M must not open component Move while editing its sketch");
 }
 
 /// With Keep model keys out of sketches on, sketches and the model have their own keys: with M
