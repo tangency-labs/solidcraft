@@ -20,6 +20,12 @@
   "curve.curve_p3": {
     "gen0607": "tangency-labs/solidcraft#14238: LocalCurveSolve promotes OutOfBounds to a false ProjectedMinimize answer; at u=1.3597372198696087, the returned v=0.0332576668152633 gives distance 37.30470092694143, while feasible v=0.03 gives 37.24417446150419; the free derivative is positive"
   },
+  "intersect.api_intersectors": {
+    "ssi-revolution-plane-near-axis-parallel-swapped": "tangency-labs/solidcraft#17720: plane first, the intersection finds one touching point (deviation 0.500001), refused as PointsWhereAPlaneCrosses; the answer is 2 crossing arcs from the bottom rim to the top, found at the revolution's own tolerance 5.15e-3 (deviation 1.75e-4)",
+    "ssi-revolution-plane-oblique-swapped": "tangency-labs/solidcraft#17720: plane first, the intersection finds one touching point (deviation 0.2), refused as PointsWhereAPlaneCrosses; the answer is one closed crossing curve round the axis, found at the revolution's own tolerance 5.15e-3 (deviation 1.37e-3)",
+    "ssi0043": "tangency-labs/solidcraft#17720: plane first, the intersection finds one touching point (deviation 2.44), refused as PointsWhereAPlaneCrosses; the answer is one closed crossing curve round the axis, found at the revolution's own tolerance 2.96e-2 (deviation 4.57e-3)",
+    "ssi0048": "tangency-labs/solidcraft#17720: plane first, the intersection finds one touching point (deviation 0.52), refused as PointsWhereAPlaneCrosses; the answer is one open crossing arc with both ends on the top rim, found at the revolution's own tolerance 3.19e-3 (the revolution-first order finds it with deviation 2.21e-3)"
+  },
   "offset.offset_executive_p1": {
     "extend_bilinear_huge": "tangency-labs/solidcore#3000: a 5e8 extension of a bilinear sheet extends 3 of 4 sides; the opposite side's diameter is rounded on the whole net and reads as collapsed",
     "gen0004": "tangency-labs/solidcore#3079: the first surface is refused naming a size that is itself refused; the second surface is refused naming a size that is itself refused",

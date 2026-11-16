@@ -259,6 +259,43 @@ that may not be settled yet (`ResolveOverlappingProtoEdges` re-parametrises over
 first points can lie 18 mm apart in an outset of `Boolean/extrudeHoles1.smb`), so their distance
 proves no separation.
 
+**One point per crossing of an edge with a face.** A face pair's curve ends where its own face's
+surface meets the other face. At an edge with a loose tolerance τ the two faces' surfaces lie up to
+τ off the edge's curve, so their two curves end at two points of the edge, up to τ / sin φ apart
+along it, φ the angle between the edge and the face it crosses, whatever the angle at which the
+curves meet the edge (an imported edge of tolerance 4.0e-3 crossed at 1.3° to 1.8°: the ends 0.057
+apart). Both are the one crossing of that edge with that face. A proto vertex's ball cannot take
+both in: the capture distance stays below half the smallest distance between two vertices of either
+operand, so that no ball reaches two vertices the body keeps distinct (`intersect_insert_relate`,
+`topology_intersector/p2.rs`), and the two points lie farther apart than such vertices do. So the
+lookup of `find_or_create_proto_vertex_pcs` (`find_proto_vertex_holding`, `proto_topology/p3.rs`)
+holds a point in a proto vertex by its ball or by its crossing: the proto vertex has a definition on
+the same edge and the same face, and the edge between that definition's parameter and the point's
+is proved inside the band of the face (`edge_piece_in_face_band`). The band is the tolerance that
+puts a point of the face on the edge: the zone of what was classified with the edge's zone, or with
+the gap at which either of the two points was taken to be on the edge where that is wider (a point
+the face's trims put there, below), up to the most a local tolerance may be, 1000 times the zone
+([validity-and-tolerances.md](validity-and-tolerances.md) §5.1). Inside the band the edge lies in
+the face, and where on that piece it passes through is not determined. The proof is a bound, not
+samples: a part of the piece is within half the sum of its two ends' distances to the surface and
+its length (an enclosed upper bound, `Curve::length_bound`), parts not proved are halved (ten times
+at most), and a piece not proved stays two points. The edge must also cross the face at both
+points: the sine of its tangent against the face's normal at least 0.017, the angle below which
+the coincidence check takes a curve for running in a surface (`COINCIDENT_TANGENT_SINE`). Two
+points where the edge is tangent to the face are the ends of a stretch the two share, and stay
+two (an edge of tolerance 7.6e-3 running 4.5e-3 off a face: two curve ends 0.019 apart on it,
+their distances from the face 4e-5 apart). With two vertices for one crossing the intersection
+loop stayed open between them.
+
+**A curve end on the face's boundary.** An interval of a curve inside a face used to take an end
+the boundary intersections left unclassified for a point inside the face
+(`ClassifyFaceInterval`). Such an end is now classified by the face's trims first
+(`classify_face_interval_on`, `intersect/curve_class/p7.rs`), and stays on the edge or vertex that
+finds. An intersection curve that ends on its surface's natural boundary ends on the face's edge
+there; where that edge's 3D curve lies farther from the surface than its tolerance (3.3e-3 against
+2.8e-3 on an imported edge) the curve/edge intersection finds no crossing, and the end, taken for
+inside the face, became a vertex short of the edge with the loop open beside it.
+
 **A curve that runs along an edge without crossing it.** With `classify_edge_interval` (WR-305) an interval between two points on a face's boundary edge whose middle lies within the band of that edge is on the edge, not inside the face. An end the edge intersections find no crossing for (an arc 1.4e-11 from another arc, ending 2.8e-5 short of that arc's corner) used to stay unclassified, so the interval was imprinted as a second edge beside the first; now such an end counts as on the edge when it lies within the band of it and clear of its vertices, the curve is tangent to the edge (within the angle tolerance) at both ends of the interval, and the whole curve over the interval is proved within the band of the edge on control points: the curve piece's control points against the chord of its ends, those ends against the edge piece's ends, and the edge piece's control points against its own chord, rounding counted (`piece_within_band`); the end is then classified to the edge with its parameter on it (`CurveClassification::classify_edge_interval`, `intersect/curve_class/p3.rs`). Without the tangency (a curve that crosses the edge at the interval's classified end and stops a hair past it, whose short piece lies within the band whatever its angle) or the proof (another curve kind, or a curve that bows out of the band between its ends) the end stays unclassified. An interval whose ends both classify onto the edge is still decided by WR-305 alone (a straight piece along a straight edge by its ends, a curved one by its midpoint).
 
 This is the problem Segal's tolerant modeller and Jackson's local tolerances address [9, 10]: two
@@ -393,6 +430,7 @@ small error.
 | faces within 10° at a common edge | the binormals do not separate the sector | stepped off the edge at growing distances; 0.5° is taken as coincident | an enclosure of the sector test |
 | coincident faces not recognised | the coincidence check is sampled off the plane | the pair goes to SSI with parallel normals | coincidence from the definitions (§5) |
 | near-coincident planar strip | a crossing fixed only to tol / sin θ, its ends unrelated | upstream's `make_faceuse` `SM_ERR`; the crossing is no event, decided before the face pair is intersected | curved strips; offsets where the crossing's distance to an event equals the tolerance |
+| an intersection loop stays open across a cut | two curve ends on an edge with a loose tolerance lie apart (each face's curve ends where its own surface meets the other face, up to tol / sin φ along the edge), or one ends inside a face; the face is not cut through and the flood crosses the gap | the two causes found are closed before the imprint: one proto vertex per crossing of an edge with a face, and a curve end classified by the face's trims (§5); a loop still open is classified as before, wrong for the set flooded across the gap | a refusal by name for a loop left open across a cut; a crossing whose piece of the edge is not proved inside the band |
 | an imprint fails half way | both bodies are partly imprinted | the imprint's error is returned, not overwritten (`topology_intersector/p2.rs`) | |
 | union deletes a face between the outside and a solid | the solid merges into the infinite region | with `boolean_union_refuses_solid_leak`, refused with `SM_ERR` naming the face (`merge/p4.rs`) | on by default |
 | result not a solid | an open or inward body from solid operands | ops refuses with `Error::NotSolid` | |
