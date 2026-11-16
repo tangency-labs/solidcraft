@@ -132,9 +132,7 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
             if !(gap > EFF_ZERO * (1.0 + end_pt.max_dimension())) {
                 continue;
             }
-            if one_vertex
-                && self.move_end_to_pole(k, brep, ed, at_end, pv_pos, gap, pv_tol)?
-            {
+            if one_vertex && self.move_end_to_pole(k, brep, ed, at_end, pv_pos, gap, pv_tol)? {
                 continue;
             }
             if k.fixes.imprint_extends_edge_to_proto_vertex
@@ -187,7 +185,10 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
         };
         let curve = curve_of(&*brep, d.xsect_curve_3d())?;
         let natural = curve.natural_interval();
-        if !are_same(end_param, if at_end { natural.max() } else { natural.min() }) {
+        if !are_same(
+            end_param,
+            if at_end { natural.max() } else { natural.min() },
+        ) {
             return Ok(false);
         }
         let zero = EFF_ZERO * (1.0 + pv_pos.max_dimension());
@@ -215,8 +216,8 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
             let Some(dom) = ignore_soft(surface.natural_uv_domain_with_nurb(k))? else {
                 return Ok(false);
             };
-            let sides = ignore_soft(surface.get_singularities(k, false, false))?
-                .map_or(0, |r| r.singular);
+            let sides =
+                ignore_soft(surface.get_singularities(k, false, false))?.map_or(0, |r| r.singular);
             // the end on each pole side of this surface
             let mut target = None;
             for (bit, uv) in [
@@ -261,8 +262,7 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
                 }
                 uv
             };
-            let Some(c) = curve_with_end_point(uv_curve, at_end, Vec3::new(uv.x, uv.y, 0.0))
-            else {
+            let Some(c) = curve_with_end_point(uv_curve, at_end, Vec3::new(uv.x, uv.y, 0.0)) else {
                 return Ok(false);
             };
             *slot = Some(c);
@@ -504,16 +504,27 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
                 return Ok(false);
             }
             // Not upstream (#16637): a continued UV curve whose end leaves its surface's
-            // domain is no trim of the face (near a pole the polynomial continuation runs
-            // across the seam); refused, never installed
+            // domain across a side the surface collapses on (a pole) is no trim of the face:
+            // the end span's polynomial runs past the pole, where no parameter of the face
+            // continues it. Refused, never installed. A continuation past any other side
+            // (across a periodic seam, or a hair past an open side) is left to the checks
+            // that follow, as before.
             let Some(dom) = ignore_soft(surface.natural_uv_domain_with_nurb(k))? else {
                 return Ok(false);
             };
             let uv_zero = EFF_ZERO * (1.0 + dom.max_dimension());
-            if !dom.contains_point(Point2::new(p.x, p.y), uv_zero) {
+            let sides =
+                ignore_soft(surface.get_singularities(k, false, false))?.map_or(0, |r| r.singular);
+            let past = [
+                (SS_UMIN, p.x < dom.min().x - uv_zero),
+                (SS_UMAX, p.x > dom.max().x + uv_zero),
+                (SS_VMIN, p.y < dom.min().y - uv_zero),
+                (SS_VMAX, p.y > dom.max().y + uv_zero),
+            ];
+            if past.iter().any(|&(bit, out)| out && sides & bit != 0) {
                 return Err(SolidError::topology_failed(
                     OP_EXTEND,
-                    "the continued UV curve leaves its face's domain",
+                    "the continued UV curve runs past a pole of its face's surface",
                 ));
             }
         }

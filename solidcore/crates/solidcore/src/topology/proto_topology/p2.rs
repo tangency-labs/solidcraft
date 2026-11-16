@@ -1606,11 +1606,7 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
     /// `γ_4`). Upstream leaves the proto vertex at the average of all its definitions,
     /// absorbed ones included: a point no remaining definition is at, which an edge end
     /// was then continued to (out of its face's domain at a pole).
-    fn place_at_survivors(
-        &mut self,
-        pv: ProtoVertexId,
-        absorbed: &[(Point3, f64)],
-    ) -> Result<()> {
+    fn place_at_survivors(&mut self, pv: ProtoVertexId, absorbed: &[(Point3, f64)]) -> Result<()> {
         let live = self
             .proto_vertex(pv)
             .map(|v| v.vertex_definitions().to_vec())
