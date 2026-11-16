@@ -1083,8 +1083,8 @@ fn project_dialog_has_construction_option_to_project_as_construction() {
     assert_eq!(inspect["profiles"].as_array().map(Vec::len), Some(0), "no profile created from construction lines");
 }
 
-/// If project_construction preference or construction drawing mode is on, the Project dialog
-/// defaults Construction to on, and toggling it off projects as normal geometry.
+/// If the project_construction preference is on, the Project dialog defaults Construction to on,
+/// and toggling it off projects as normal geometry.
 #[test]
 fn project_dialog_respects_session_construction_and_allows_toggling_off() {
     let mut h = Harness::new();

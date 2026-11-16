@@ -940,22 +940,14 @@ impl Dialog {
             "sketch.intersect" => {
                 let bodies = s.selection.iter().any(|sel| matches!(sel, Sel::Body { .. }));
                 Dialog::new(
-                    Kind::SketchIntersect {
-                        bodies,
-                        projection_link: true,
-                        construction: s.project_construction || crate::sketch_palette::mode(app) == 1,
-                    },
+                    Kind::SketchIntersect { bodies, projection_link: true, construction: s.project_construction },
                     vec![SelInput::new("ui.sketch_intersect_geometry", if bodies { BODIES } else { INTERSECT_GEOMETRY }, true)],
                 )
             }
             "sketch.project" => {
                 let bodies = s.selection.iter().any(|sel| matches!(sel, Sel::Body { .. }));
                 Dialog::new(
-                    Kind::SketchProject {
-                        bodies,
-                        projection_link: true,
-                        construction: s.project_construction || crate::sketch_palette::mode(app) == 1,
-                    },
+                    Kind::SketchProject { bodies, projection_link: true, construction: s.project_construction },
                     vec![SelInput::new("ui.sketch_project_geometry", if bodies { BODIES } else { PROJECT_GEOMETRY }, true)],
                 )
             }
