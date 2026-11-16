@@ -29,8 +29,9 @@
 //! and nothing past it is enclosed.
 //!
 //! A surface of revolution is the net of its generator turned and weighted, exactly. The
-//! executive leaves its sides round the axis as they are (`SideExtension::AroundAxis`); past
-//! them its end span continued is the surface turned on (a rational quadratic piece
+//! executive leaves its sides round the axis as they are (`SideExtension::AroundAxis`; one
+//! whose generator is an arc of one circle it turns on, and the reach does not count on
+//! that); past them its end span continued is the surface turned on (a rational quadratic piece
 //! continued stays on its conic, the circle each row's point sweeps), which Krawczyk's boxes
 //! may straddle. A meeting is taken only where the box proved to hold it is within the
 //! B-rep's tolerance of the side as built ([`Net::jet_as_built`]): one past the turn's end
@@ -210,7 +211,8 @@ impl Net {
     /// generator's exact form) or a surface of revolution (its net is its generator turned
     /// and weighted, exactly), with no analytic label and no definition (a blend's or sweep's
     /// net is only its approximation); `None` for any other. A revolution's sides round its
-    /// axis are not extended, as the executive leaves them (`SideExtension::AroundAxis`):
+    /// axis are not extended, as the executive leaves them (`SideExtension::AroundAxis`; one
+    /// of a single circle arc it turns on, which only makes this enclosure short of it):
     /// past them the net's end span continued is enclosed only within `tolerance` of the side
     /// ([`Net::continues`]).
     ///
@@ -257,8 +259,8 @@ impl Net {
                 continue;
             }
             // (as the executive's extension decides: a closed direction, a collapsed side
-            // and a revolution's side round its axis are left; the last continues as its
-            // net's end span, round the axis)
+            // and a revolution's side round its axis are left, but for one of a single circle
+            // arc; the last continues as its net's end span, round the axis)
             if crate::surface::extend::round_the_axis(surface, side) == Some(true) {
                 *c = true;
             } else {

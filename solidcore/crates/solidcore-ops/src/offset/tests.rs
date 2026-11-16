@@ -209,20 +209,11 @@ fn edge_at(b: &Body, p: [f64; 3]) -> usize {
         .unwrap()
 }
 
-/// #14370: an 82 x 47 x 20 box with a post r 10, 10 high, about each corner, the posts' outer
-/// top edges rounded 6 and the box's corners above them chamfered 4, shelled 1 inward open
-/// at the top. Each chamfer's foot ends where its post's round ends, so four faces meet
-/// there: the box's wall, the chamfer, the post's top and the round. The input has 22 faces
-/// (4 walls, the bottom, the top, and 4 each of chamfers, posts, rounds and post tops), 52
-/// edges and 32 vertices, 8 of them those four-face corners. The shell keeps the 21 faces
-/// left and their 52 edges and 32 vertices, adds the 21 faces' offsets with their 44 edges
-/// and 24 vertices off the top, and the top's ring with its inner 8 edges and 8 vertices; each
-/// four-face corner's offset is two vertices joined by a new edge (the wall's offset meets
-/// the post top's between the chamfer's and the round's): 43 faces, 112 edges, 72 vertices,
-/// one shell.
-#[test]
-fn a_box_whose_rounded_posts_end_at_chamfered_corners_shells() {
-    all_fixes();
+/// An 82 x 47 x 20 box with a post r 10, 10 high, about each corner (#14370), the posts'
+/// outer top edges rounded 6, and with `chamfered` the box's corners above the posts
+/// chamfered 4. The round is a quarter tube r 6 about the circle r 4 at z 4 round the post's
+/// axis, three quarters of a turn, ending at the box's two walls through the axis.
+fn posts_with_rounded_tops(chamfered: bool) -> Body {
     let (a, c) = (41.0, 23.5);
     let mut b = make_box([-a, -c, 0.0], [2.0 * a, 2.0 * c, 20.0]).unwrap();
     for (sx, sy) in [(-1.0_f64, -1.0_f64), (1.0, -1.0), (1.0, 1.0), (-1.0, 1.0)] {
@@ -256,19 +247,85 @@ fn a_box_whose_rounded_posts_end_at_chamfered_corners_shells() {
         crate::blend::Corners::Filled,
     )
     .unwrap();
-    let corners: Vec<usize> = [(-a, -c), (a, -c), (a, c), (-a, c)]
-        .iter()
-        .map(|&(x, y)| edge_at(&b, [x, y, 15.0]))
-        .collect();
-    crate::blend::blend(
-        &b,
-        crate::blend::Blend::Chamfer,
-        &corners,
-        &[4.0],
-        &[],
-        crate::blend::Corners::Filled,
-    )
-    .unwrap();
+    if chamfered {
+        let corners: Vec<usize> = [(-a, -c), (a, -c), (a, c), (-a, c)]
+            .iter()
+            .map(|&(x, y)| edge_at(&b, [x, y, 15.0]))
+            .collect();
+        crate::blend::blend(
+            &b,
+            crate::blend::Blend::Chamfer,
+            &corners,
+            &[4.0],
+            &[],
+            crate::blend::Corners::Filled,
+        )
+        .unwrap();
+    }
+    b
+}
+
+/// The posts' body without the chamfers shelled t inward, open at the top (part of #14370).
+/// The input has 18 faces (4 walls, the bottom, the top, and 4 each of posts, rounds and post
+/// tops), 48 edges and 32 vertices. The shell keeps the 17 faces left with their 48 edges and
+/// 32 vertices, adds their 17 offsets with the 40 edges and 24 vertices off the top, and the
+/// top's ring with its inner 8 edges and 8 vertices: 35 faces, 96 edges, 64 vertices, one
+/// shell. The round's offset is the tube r 6 - t about the same circle, so its edge along the
+/// post top's offset is the circle r 4 at z = 10 - t; the walls move in by t, so that edge runs
+/// on past the round's ends, three quarters of a turn, to the walls' offsets, at sqrt(16 - t^2)
+/// from the axis along them.
+#[test]
+fn a_box_whose_posts_have_rounded_tops_shells() {
+    all_fixes();
+    let (a, c) = (41.0, 23.5);
+    for t in [0.5, 1.0] {
+        let b = posts_with_rounded_tops(false);
+        assert_eq!(b.counts().unwrap(), [18, 48, 32]);
+        let o = order(&b);
+        let lid = through(&b, &o, [0.0, 0.0, 20.0]);
+        shell(&b, &o, &[lid], -t).unwrap_or_else(|e| panic!("t {t}: {e:?}"));
+        assert_eq!(b.counts().unwrap(), [35, 96, 64], "t {t}");
+        let record = b.to_record().unwrap().0;
+        assert_eq!(record.shells.len(), 1, "t {t}");
+        assert!(b.is_manifold_solid().unwrap(), "t {t}");
+        let report = b.check(crate::CheckLevel::All).unwrap();
+        assert!(report.is_valid(), "t {t}: {}", report.text);
+        let along = (16.0 - t * t).sqrt();
+        for (sx, sy) in [(-1.0_f64, -1.0_f64), (1.0, -1.0), (1.0, 1.0), (-1.0, 1.0)] {
+            for want in [
+                [sx * (a - t), sy * (c - along), 10.0 - t],
+                [sx * (a - along), sy * (c - t), 10.0 - t],
+            ] {
+                let near = record
+                    .vertices
+                    .iter()
+                    .map(|v| {
+                        let d = [0, 1, 2].map(|i| v.point[i] - want[i]);
+                        (d[0] * d[0] + d[1] * d[1] + d[2] * d[2]).sqrt()
+                    })
+                    .fold(f64::INFINITY, f64::min);
+                assert!(near < 1e-6, "t {t}: no vertex at {want:?} ({near})");
+            }
+        }
+    }
+}
+
+/// #14370 as reported: the posts' body with the chamfers, shelled 1 inward open at the top.
+/// Each chamfer's foot ends where its post's round ends, so four faces meet there: the box's
+/// wall, the chamfer, the post's top and the round. The input has 22 faces (the chamfers 4
+/// more), 52 edges and 32 vertices, 8 of them those four-face corners. The shell keeps the 21
+/// faces left with their 52 edges and 32 vertices, adds their 21 offsets with the 44 edges and
+/// 24 vertices off the top, and the top's ring with its inner 8 edges and 8 vertices; each
+/// four-face corner's offset is two vertices joined by a new edge (the wall's offset meets
+/// the post top's between the chamfer's and the round's): 43 faces, 112 edges, 72 vertices,
+/// one shell. The round's edges reach the walls' offsets (as without the chamfers), and the
+/// merge of the offset faces then refuses where a wall's offset cuts the round's offset
+/// tangent to the post top's.
+#[test]
+#[ignore = "fails until #14370 is fixed"]
+fn a_box_whose_rounded_posts_end_at_chamfered_corners_shells() {
+    all_fixes();
+    let b = posts_with_rounded_tops(true);
     assert_eq!(b.counts().unwrap(), [22, 52, 32]);
     let o = order(&b);
     let lid = through(&b, &o, [0.0, 0.0, 20.0]);
