@@ -156,6 +156,9 @@ pub struct ViewportState {
     /// The view's pipelines could not be built (the thread compiling them at start failed): the
     /// view says so where the model would be, instead of staying empty (#1210).
     pub gpu_unavailable: bool,
+    /// The view's pipelines are still being compiled beside the window (the start page shows
+    /// without waiting for them): the view says so, quietly, where the model will be (#1210).
+    pub gpu_preparing: bool,
     /// The GPU plan evaluation still compiling: `gpu.tess` once it is ready (#4860).
     pub(crate) tess_ready: Option<solidcraft_viewport_egui::TessReady>,
     /// What the GPU drew last frame, shared with the renderer (the frame-rate details, #2548).
@@ -5958,6 +5961,12 @@ fn unavailable_note(app: &SolveApp, painter: &egui::Painter, rect: Rect) {
     painter.galley(rect.center() - galley.size() / 2.0, galley, t.text);
 }
 
+/// The view's pipelines are still compiling: a quiet line where the model will be drawn.
+fn preparing_note(app: &SolveApp, painter: &egui::Painter, rect: Rect) {
+    let t = Tokens::get();
+    painter.text(rect.center(), Align2::CENTER_CENTER, app.tr("starting.view"), FontId::proportional(t.font_body), t.text_dim);
+}
+
 pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     crate::joint_handles::sync(app);
     let t = Tokens::get();
@@ -6189,6 +6198,8 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         }
     } else if app.viewport.gpu_unavailable {
         unavailable_note(app, &painter, rect);
+    } else if app.viewport.gpu_preparing {
+        preparing_note(app, &painter, rect);
     }
     let overlay_rect = crate::shell::bottom_readout_rect(app, rect);
     crate::viewport_details::legacy_legends(app, ui, overlay_rect);
