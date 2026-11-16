@@ -686,8 +686,10 @@ fn with_largest_fit(
         Ok(kernel::FitSearch { found: Some((largest, _)), .. }) => {
             kernel::KernelError::TooLarge(format!("{why}; {}", kernel::largest_fit_note(size, largest)))
         }
-        Ok(kernel::FitSearch { found: None, smallest_refused: Some((at, e)), .. }) => kernel::KernelError::TooLarge(format!(
-            "{}; no smaller {size} builds either (down to {} mm: {})",
+        // The search samples sizes and building is not monotone in the size, so it says what it
+        // tried, not that nothing smaller builds.
+        Ok(kernel::FitSearch { found: None, smallest_refused: Some((at, e)), tried, .. }) => kernel::KernelError::TooLarge(format!(
+            "{}; none of the {tried} sizes tried builds (the smallest, {} mm: {})",
             kernel::without_fit_note(&why),
             show_mm(at),
             kernel::without_fit_note(&e.to_string())
@@ -4098,7 +4100,8 @@ mod largest_fit_tests {
         })
         .to_string();
         assert!(!e.contains("that fits is"), "{e}");
-        assert!(e.contains("no smaller radius builds either (down to 0.001 mm: "), "{e}");
+        assert!(!e.contains("no smaller"), "{e}");
+        assert!(e.contains("none of the 14 sizes tried builds (the smallest, 0.001 mm: "), "{e}");
         assert!(e.contains("the trim leaks"), "{e}");
     }
 
