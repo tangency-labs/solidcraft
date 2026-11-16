@@ -648,6 +648,24 @@ fn the_link_pills_make_room_for_the_update_pill() {
             assert!(link.right() <= pill.left(), "at {width}: link pill {link:?} runs under the Update pill {pill:?}");
         }
     }
+    // Many designs: the tab strip stops before the link pills, not at the Update pill.
+    h.call("ui.resize", json!({"width": 1920.0, "height": 800}));
+    for _ in 0..12 {
+        crate::documents::new_tab(&mut h.app);
+    }
+    h.frames(3);
+    let links: Vec<egui::Rect> = ["titlebar:kofi", "titlebar:discord"].into_iter().filter_map(crate::scenario::rect_of).collect();
+    let first_link = links.iter().map(|l| l.left()).fold(f32::INFINITY, f32::min);
+    assert!(first_link.is_finite(), "the link pills show beside many tabs");
+    let tabs: Vec<(String, egui::Rect)> = (0..13)
+        .map(|i| format!("tab:design:{i}"))
+        .chain(["tab:new".to_owned(), "tab:overflow".to_owned()])
+        .filter_map(|name| crate::scenario::rect_of(&name).map(|r| (name, r)))
+        .collect();
+    assert!(!tabs.is_empty(), "the tab strip shows");
+    for (name, tab) in tabs {
+        assert!(tab.right() <= first_link, "{name} {tab:?} runs under the link pills (first at {first_link})");
+    }
 }
 
 #[test]
