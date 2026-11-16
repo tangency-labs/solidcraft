@@ -198,7 +198,7 @@ fn canvases_move_with_their_component() {
     let centre = p.to_world(lid.center);
     assert!(near(centre, Vec3::new(65.0, 10.0, 10.0)), "{centre:?}");
     assert_eq!(world(&s, "Root").0, 0);
-    // Moving the occurrence carries its canvases, not the root's.
+    // Moving the occurrence carries its canvases and the root canvas attached to its face.
     run(&mut s, "occurrence.move", json!({"occurrence": "Part:1", "translate": [0, 40, 0]}));
     let (vals, _) = s.doc.param_values();
     let plan = s.doc.canvases.iter().find(|c| c.name == "Plan").unwrap();
@@ -206,7 +206,7 @@ fn canvases_move_with_their_component() {
     assert!(near(world(&s, "OnPoints").1.origin, Vec3::new(50.0, 40.0, 5.0)));
     let lid = s.doc.canvases.iter().find(|c| c.name == "Lid").unwrap();
     let centre = s.doc.canvas_plane(&vals, lid, &s.model.state()).unwrap().to_world(lid.center);
-    assert!(near(centre, Vec3::new(65.0, 10.0, 10.0)), "{centre:?}");
+    assert!(near(centre, Vec3::new(65.0, 50.0, 10.0)), "{centre:?}");
     let root = s.doc.canvases.iter().find(|c| c.name == "Root").unwrap();
     assert!(near(s.doc.canvas_plane(&vals, root, &s.model.state()).unwrap().origin, Vec3::ZERO));
     // The component survives a save and reopen.
@@ -664,6 +664,80 @@ fn root_picks_on_a_moved_component_build_where_it_is_shown() {
     run(&mut s, "construct.plane.along_path", json!({"path": {"edge": [65, 40, 0]}, "t": 0.5, "name": "Across"}));
     let across = crate::view::construction_planes(&s).into_iter().find(|(_, n, _)| n == "Across").unwrap().2;
     assert!((across.origin.y - 40.0).abs() < 1e-6, "{across:?}");
+}
+
+/// #17623: a root hole at a point of a sketch on one part's face, cutting every body, drills
+/// that part only: another part, turned and moved away, is met where it is shown, not at the
+/// same point in its own frame. Redefined with `targets`, the hole drills just those bodies.
+#[test]
+fn a_root_hole_at_sketch_points_drills_only_the_part_it_reaches() {
+    let mut s = two_parts(0.0, [0.0; 3]);
+    run(&mut s, "component.activate", json!({"component": "root"}));
+    run(&mut s, "occurrence.move", json!({"occurrence": "Cap:1", "axis": [0, 0, 1], "angle": "180 deg", "translate": [-10, 0, 0]}));
+    run(&mut s, "sketch.create", json!({"plane": {"face": [20, 15, 10]}, "name": "Pts", "project_edges": false}));
+    run(&mut s, "sketch.point", json!({"point": [20, 15], "id": "c"}));
+    run(&mut s, "sketch.finish", json!({}));
+    let hole = json!({"sketch": "Pts", "points": ["c"], "single": true, "diameter": 5, "depth": 4});
+    let mut every = hole.clone();
+    every["participants"] = json!(["*"]);
+    every["name"] = json!("H");
+    run(&mut s, "solid.hole", every);
+    assert!(body_volume(&s, "Base block") < BLOCK - 1.0, "the hole drills Base: {}", body_volume(&s, "Base block"));
+    assert!((body_volume(&s, "Cap block") - BLOCK).abs() < 1e-6, "Cap is not drilled: {}", body_volume(&s, "Cap block"));
+
+    let mut only = hole;
+    only["targets"] = json!(["Base block"]);
+    run(&mut s, "timeline.redefine", json!({"feature": "H", "command": "solid.hole", "params": only}));
+    assert_eq!(s.doc.find_feature("H").unwrap().participants, vec!["Base block".to_string()]);
+    assert!(body_volume(&s, "Base block") < BLOCK - 1.0 && (body_volume(&s, "Cap block") - BLOCK).abs() < 1e-6);
+}
+
+/// #17655: a root rib sketched across one part, with every body taking part, joins that part
+/// only: another part, turned and moved away, is met where it is shown, not at the same place in
+/// its own frame. Redefined with one body taking part, it is the same.
+#[test]
+fn a_root_rib_joins_only_the_part_its_sketch_is_across() {
+    let mut s = two_parts(0.0, [0.0; 3]);
+    run(&mut s, "component.activate", json!({"component": "root"}));
+    run(&mut s, "occurrence.move", json!({"occurrence": "Cap:1", "axis": [0, 0, 1], "angle": "180 deg", "translate": [-10, 0, 0]}));
+    run(&mut s, "sketch.create", json!({"plane": {"origin": [0, 15, 0], "x_dir": [1, 0, 0], "y_dir": [0, 0, 1]}, "name": "RibSketch"}));
+    run(&mut s, "sketch.line", json!({"points": [[10, 15], [30, 15]], "ids": ["l1"]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.rib", json!({"sketch": "RibSketch", "curves": ["l1"], "thickness": 4, "participants": ["*"], "name": "R"}));
+    // The wall is 20 long, 4 thick and 5 tall, from the line down to the top of Base.
+    assert!((body_volume(&s, "Base block") - 12400.0).abs() < 1e-6, "{}", body_volume(&s, "Base block"));
+    assert!((body_volume(&s, "Cap block") - BLOCK).abs() < 1e-6, "{}", body_volume(&s, "Cap block"));
+
+    run(
+        &mut s,
+        "timeline.redefine",
+        json!({"feature": "R", "command": "solid.rib", "params": {"sketch": "RibSketch", "curves": ["l1"], "thickness": 4, "participants": ["Base block"]}}),
+    );
+    assert_eq!(s.doc.find_feature("R").unwrap().participants, vec!["Base block".to_string()]);
+    assert!((body_volume(&s, "Base block") - 12400.0).abs() < 1e-6 && (body_volume(&s, "Cap block") - BLOCK).abs() < 1e-6);
+}
+
+/// #17655: an open-ended rib stops at the face of a moved body that does not take part, where that
+/// body is shown: Cap, shown beside Base and 2 mm up, is the floor under the part of the wall
+/// that runs past Base's end, not Cap's unmoved place.
+#[test]
+fn a_root_rib_stops_at_a_moved_part_that_does_not_take_part() {
+    let mut s = two_parts(0.0, [0.0; 3]);
+    run(&mut s, "component.activate", json!({"component": "root"}));
+    run(&mut s, "occurrence.move", json!({"occurrence": "Cap:1", "translate": [40, 0, 2]}));
+    run(&mut s, "sketch.create", json!({"plane": {"origin": [0, 15, 0], "x_dir": [1, 0, 0], "y_dir": [0, 0, 1]}, "name": "RibSketch"}));
+    run(&mut s, "sketch.line", json!({"points": [[30, 17], [60, 17]], "ids": ["l1"]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.rib", json!({"sketch": "RibSketch", "curves": ["l1"], "thickness": 4, "participants": ["Base block"]}));
+    // The wall is 4 thick and runs from the line at 17 down to a face, 2 mm into the body there (the
+    // overlap, as the samples are 1 mm apart): above Base's top (10) it is 7 tall over x 30..40
+    // (area 70), and above Cap's shown top (12) it reaches down to 10, 7 tall over x 40..60 (area
+    // 140), where Cap found unmoved would leave it 12 tall. The sample on the seam at x = 40
+    // meets Cap's top with the shared face 2 mm below it, so its overlap is 1, not 2: the wall's
+    // underside runs (39, 8), (40, 11), (41, 10), which leaves out 1/6 + 1/2 of area above 10.
+    // Volume 12000 + 4 * (70 + 140 - 2/3) = 12000 + 2512/3.
+    assert!((body_volume(&s, "Base block") - (12000.0 + 2512.0 / 3.0)).abs() < 1e-6, "{}", body_volume(&s, "Base block"));
+    assert!((body_volume(&s, "Cap block") - BLOCK).abs() < 1e-6, "{}", body_volume(&s, "Cap block"));
 }
 
 /// #6000: in a turned component, a named plane ("XY") is the component's own; an explicit
@@ -1157,4 +1231,25 @@ fn cross_component_sketch_refs_follow_the_component() {
     // The offset plane, built on the datum, follows the move too - offset and all.
     let (_, _, off) = crate::view::construction_planes(&s).into_iter().find(|(_, n, _)| n == "Off child").unwrap();
     assert!(near(off.origin, Vec3::new(130.0, 0.0, 5.0)), "{off:?}");
+}
+
+/// #8192: a plane whose origin is length expressions, made in an active component that is moved
+/// and turned, is written in that component's frame still as expressions, so the sketch sits at
+/// the world point the expressions give and follows the parameter.
+#[test]
+fn a_plane_origin_given_as_expressions_maps_into_a_moved_and_turned_component() {
+    let mut s = block_in_component();
+    run(&mut s, "occurrence.move", json!({"occurrence": "C:1", "axis": [0, 0, 1], "angle": "90 deg"}));
+    run(&mut s, "occurrence.move", json!({"occurrence": "C:1", "translate": [100, 0, 0], "space": "world"}));
+    run(&mut s, "parameters.add", json!({"name": "station", "expression": "10 mm"}));
+    run(&mut s, "component.activate", json!({"component": "C"}));
+    run(&mut s, "sketch.create", json!({"name": "S", "plane": {"origin": ["station", 0, 0], "x_dir": [1, 0, 0], "y_dir": [0, 1, 0]}}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [1, 1]}));
+    run(&mut s, "sketch.finish", json!({}));
+    // The first sketch point is the plane's origin, in the world.
+    for (station, expected) in [("10 mm", Vec3::new(10.0, 0.0, 0.0)), ("20 mm", Vec3::new(20.0, 0.0, 0.0))] {
+        run(&mut s, "parameters.change", json!({"name": "station", "expression": station}));
+        let world = sketch_world_points(&mut s, "S");
+        assert!(world.iter().any(|p| near(*p, expected)), "station {station}: {world:?}");
+    }
 }

@@ -173,9 +173,18 @@ impl DimensionDraft {
         }
         if let Some(kind) = solved.sketch.constraints.iter().find(|c| c.param.as_deref() == Some(param)).map(|c| &c.kind)
             && !kind.is_angle()
-            && kind.value().is_some_and(|value| !value.is_finite() || value <= 0.0)
+            && let Some(value) = kind.value()
         {
-            return Err("Enter a dimension greater than zero".into());
+            let allows_zero = matches!(
+                kind,
+                ConstraintKind::Distance { .. }
+                    | ConstraintKind::DistanceX { .. }
+                    | ConstraintKind::DistanceY { .. }
+                    | ConstraintKind::PointLineDistance { .. }
+            );
+            if !value.is_finite() || value < 0.0 || (!allows_zero && value <= 0.0) {
+                return Err(if allows_zero { "Enter a non-negative dimension" } else { "Enter a dimension greater than zero" }.into());
+            }
         }
         Ok(scratch)
     }
@@ -2134,5 +2143,37 @@ mod tests {
         assert_eq!(label(&ConstraintKind::Diameter { c: 0, value: 10.0 }, Some("10"), false, "mm", 2), "Ø10.00 mm");
         let a = ConstraintKind::Angle { a: 0, b: 1, value: std::f64::consts::FRAC_PI_4, flip: false };
         assert_eq!(label(&a, Some("45 deg"), false, "mm", 2), "45.0°");
+    }
+
+    #[test]
+    fn negative_and_zero_distance_dimensions_are_accepted_in_editor() {
+        cancel();
+        let mut h = crate::scenario::Harness::new();
+        h.app.run("sketch.create", json!({"plane": "XY"})).unwrap();
+        h.app.run("sketch.point", json!({"point": [15, 0]})).unwrap();
+        h.call("ui.view", json!({"view": "top"}));
+        h.step(&json!({"start": "sketch.dimension"})).unwrap();
+        h.step(&json!({"click": {"sketch": [0, 0]}})).unwrap();
+        h.step(&json!({"click": {"sketch": [15, 0]}})).unwrap();
+        assert!(editing(), "{:?}", h.app.status);
+        h.step(&json!({"text": "-10"})).unwrap();
+        h.frames(2);
+        assert_eq!(EDIT.with(|e| e.borrow().as_ref().and_then(|e| e.draft.as_ref()?.error.clone())), None);
+        h.step(&json!({"key": "Enter"})).unwrap();
+        assert!(!editing(), "{:?}", h.app.status);
+        let sk = h.app.session.doc.sketch(h.app.session.active_sketch.unwrap()).unwrap();
+        assert!((sk.points[1].pos.x + 10.0).abs() < 1e-6, "p1 should flip to -10: {:?}", sk.points[1].pos);
+
+        // Zero distance is also allowed for point-to-point / offset dimensions.
+        h.app.run("sketch.point", json!({"point": [0, 12]})).unwrap();
+        h.step(&json!({"click": {"sketch": [0, 0]}})).unwrap();
+        h.step(&json!({"click": {"sketch": [0, 12]}})).unwrap();
+        assert!(editing(), "{:?}", h.app.status);
+        h.step(&json!({"text": "0"})).unwrap();
+        h.frames(2);
+        assert_eq!(EDIT.with(|e| e.borrow().as_ref().and_then(|e| e.draft.as_ref()?.error.clone())), None);
+        h.step(&json!({"key": "Enter"})).unwrap();
+        assert!(!editing(), "{:?}", h.app.status);
+        cancel();
     }
 }

@@ -2611,3 +2611,129 @@ fn a_joint_wins_over_an_expressed_move_when_a_parameter_changes() {
     run(&mut s, "parameters.change", json!({"name": "dy", "expression": "25 mm"}));
     at(centre(&mut s, block), held);
 }
+
+/// A design with one ungrounded 2 x 1 x 1 box occurrence and the parameter `dy`.
+fn expressed_block() -> (Session, u64) {
+    let mut s = Session::default();
+    run(&mut s, "parameters.add", json!({"name": "dy", "expression": "10 mm"}));
+    let (_, occ) = created(&mut s, "Block");
+    run(&mut s, "solid.box", json!({"length": 2, "width": 1, "height": 1}));
+    run(&mut s, "component.activate", json!({"component": 0}));
+    run(&mut s, "occurrence.ground", json!({"occurrence": occ, "grounded": false}));
+    (s, occ)
+}
+
+/// #8192: the translation column of `occurrence.move`'s `matrix` takes length expressions, in
+/// every layout, and the occurrence follows the parameter. Numbers still work, and a string
+/// outside the translation column or an expression that doesn't work out is refused.
+#[test]
+fn a_matrix_translation_given_as_expressions_follows_its_parameters() {
+    for matrix in [
+        json!([1, 0, 0, 0, 0, 1, 0, "dy", 0, 0, 1, 0]),
+        json!([1, 0, 0, 0, 0, 1, 0, "dy", 0, 0, 1, 0, 0, 0, 0, 1]),
+        json!([[1, 0, 0, 0], [0, 1, 0, "dy + 0 mm"], [0, 0, 1, 0]]),
+    ] {
+        let (mut s, occ) = expressed_block();
+        run(&mut s, "occurrence.move", json!({"occurrence": occ, "matrix": matrix}));
+        at(centre(&mut s, occ), [1.0, 10.5, 0.5]);
+        let o = s.doc.occurrences.iter().find(|o| o.id == occ).unwrap();
+        assert_eq!(o.expressed_moves.len(), 1);
+        assert_eq!(o.expressed_moves[0].translate[0], None);
+        assert!(o.expressed_moves[0].translate[1].is_some());
+        run(&mut s, "parameters.change", json!({"name": "dy", "expression": "25 mm"}));
+        at(centre(&mut s, occ), [1.0, 25.5, 0.5]);
+        let users = run(&mut s, "parameters.users", json!({"name": "dy"})).to_string();
+        assert!(users.contains("translate y"), "{users}");
+    }
+
+    // Numbers keep working and keep nothing.
+    let (mut s, occ) = expressed_block();
+    run(&mut s, "occurrence.move", json!({"occurrence": occ, "matrix": [1, 0, 0, 0, 0, 1, 0, 10, 0, 0, 1, 0]}));
+    assert!(s.doc.occurrences.iter().all(|o| o.expressed_moves.is_empty()));
+    run(&mut s, "parameters.change", json!({"name": "dy", "expression": "25 mm"}));
+    at(centre(&mut s, occ), [1.0, 10.5, 0.5]);
+
+    let doc = s.doc.clone();
+    for (matrix, expected) in [
+        (json!([1, 0, 0, 0, 0, 1, 0, "nope", 0, 0, 1, 0]), "matrix translation `nope`"),
+        (json!([1, 0, 0, 0, 0, 1, 0, "30 deg", 0, 0, 1, 0]), "matrix translation `30 deg`"),
+        (json!(["dy", 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0]), "only its translation column"),
+        (json!([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, "dy"]), "only its translation column"),
+    ] {
+        let e = s.execute("occurrence.move", &json!({"occurrence": occ, "matrix": matrix})).unwrap_err().to_string();
+        assert!(e.contains(expected), "{e}");
+        assert_eq!(s.doc, doc);
+    }
+}
+
+/// #8192: the `origin` a move turns about takes length expressions. The part follows a change of
+/// it as the turn about the new point would take it (`origin - R origin`), the turn staying.
+#[test]
+fn a_turn_about_an_origin_given_as_expressions_follows_its_parameters() {
+    let (mut s, occ) = expressed_block();
+    // A quarter turn about (0, dy, 0): the box (centre (1, 0.5, 0.5)) lands at (-(0.5 - 10), 10 + 1, 0.5).
+    run(&mut s, "occurrence.move", json!({"occurrence": occ, "axis": [0, 0, 1], "angle": "90 deg", "origin": [0, "dy", 0]}));
+    at(centre(&mut s, occ), [9.5, 11.0, 0.5]);
+    let o = s.doc.occurrences.iter().find(|o| o.id == occ).unwrap();
+    assert_eq!(o.expressed_moves[0].origin, [None, Some("dy".to_string()), None]);
+    run(&mut s, "parameters.change", json!({"name": "dy", "expression": "20 mm"}));
+    // The same turn about (0, 20, 0): (1, 0.5) turned a quarter about (0, 20) is (19.5, 21).
+    at(centre(&mut s, occ), [19.5, 21.0, 0.5]);
+    let users = run(&mut s, "parameters.users", json!({"name": "dy"})).to_string();
+    assert!(users.contains("origin y"), "{users}");
+    run(&mut s, "edit.undo", json!({}));
+    at(centre(&mut s, occ), [9.5, 11.0, 0.5]);
+
+    // Without a turn the origin changes nothing, as with numbers.
+    let (mut s, occ) = expressed_block();
+    run(&mut s, "occurrence.move", json!({"occurrence": occ, "translate": [0, 5, 0], "origin": [0, "dy", 0]}));
+    run(&mut s, "parameters.change", json!({"name": "dy", "expression": "20 mm"}));
+    at(centre(&mut s, occ), [1.0, 5.5, 0.5]);
+
+    // Numbers keep working, and bad expressions are refused with the design unchanged.
+    let (mut s, occ) = expressed_block();
+    run(&mut s, "occurrence.move", json!({"occurrence": occ, "axis": [0, 0, 1], "angle": "90 deg", "origin": [0, 10, 0]}));
+    at(centre(&mut s, occ), [9.5, 11.0, 0.5]);
+    assert!(s.doc.occurrences.iter().all(|o| o.expressed_moves.is_empty()));
+    let doc = s.doc.clone();
+    for (origin, expected) in [(json!([0, "nope", 0]), "origin:"), (json!([0, true, "dy"]), "origin entries must be numbers or length expressions")] {
+        let e = s.execute("occurrence.move", &json!({"occurrence": occ, "origin": origin, "angle": 1})).unwrap_err().to_string();
+        assert!(e.contains(expected), "{e}");
+        assert_eq!(s.doc, doc);
+    }
+}
+
+/// #8192 (CaliLuke's report): a grounded part moved by an expression with `move_grounded` keeps
+/// following its parameter, and stays grounded.
+#[test]
+fn a_grounded_part_moved_by_an_expression_with_move_grounded_follows_parameter_changes() {
+    let mut s = Session::default();
+    run(&mut s, "component.create", json!({"name": "Block", "grounded": true}));
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10}));
+    run(&mut s, "component.activate", json!({"component": 0}));
+    let occ = s.doc.occurrences.iter().find(|o| o.grounded).unwrap().id;
+    run(&mut s, "parameters.add", json!({"name": "offset_x", "expression": "0 mm"}));
+    run(&mut s, "occurrence.move", json!({"occurrence": occ, "space": "world", "translate": ["offset_x", 0, 0], "move_grounded": true}));
+    run(&mut s, "parameters.change", json!({"name": "offset_x", "expression": "100 mm"}));
+    at(centre(&mut s, occ), [105.0, 5.0, 5.0]);
+    assert!(s.doc.occurrences.iter().find(|o| o.id == occ).unwrap().grounded);
+}
+
+/// #8192: when the moves of an ungrounded part cancel each other on a parameter change, each still
+/// takes in what it now works out to, so a later change doesn't carry the part by the difference.
+#[test]
+fn moves_that_cancel_each_other_still_keep_up_with_their_parameter() {
+    let (mut s, occ) = expressed_block();
+    run(&mut s, "parameters.add", json!({"name": "p", "expression": "0 mm"}));
+    run(&mut s, "parameters.add", json!({"name": "q", "expression": "0 mm"}));
+    run(&mut s, "occurrence.move", json!({"occurrence": occ, "translate": ["p", 0, 0]}));
+    run(&mut s, "occurrence.ground", json!({"occurrence": occ, "grounded": true}));
+    run(&mut s, "occurrence.move", json!({"occurrence": occ, "translate": ["-p", 0, 0], "move_grounded": true}));
+    run(&mut s, "occurrence.ground", json!({"occurrence": occ, "grounded": false}));
+    run(&mut s, "parameters.change", json!({"name": "p", "expression": "10 mm"}));
+    at(centre(&mut s, occ), [1.0, 0.5, 0.5]);
+    // Grounded again, a change of something else must not carry it by what B worked out to.
+    run(&mut s, "occurrence.ground", json!({"occurrence": occ, "grounded": true}));
+    run(&mut s, "parameters.change", json!({"name": "q", "expression": "5 mm"}));
+    at(centre(&mut s, occ), [1.0, 0.5, 0.5]);
+}

@@ -607,6 +607,9 @@ pub struct GpuScene {
     pub hover_blocks: Vec<BlockTris>,
     /// Whole selected bodies, as `hover_blocks`, in the selection colour.
     pub selected_blocks: Vec<BlockTris>,
+    /// Hovered faces of opaque bodies in their own palette slots (the model's colour and
+    /// finish for each face): lit over the model like a whole hovered body, tinted by the hover.
+    pub hover_faces: Vec<u8>,
     /// Whole highlighted bodies the model builds in its blocks but does not draw opaque (faded
     /// context, see-through): every one of their vertices drawn again, in this scene's palette,
     /// whose entries for their faces hold the highlight colour. No triangle is copied.
@@ -720,16 +723,17 @@ pub struct BlockTris {
 }
 
 /// A body's edge lines in a model scene block ([`BlockBytes::lines`], by line), drawn again in
-/// three styles ([`lit_line_style`]): a halo, the line over it, and where the model hides the
-/// edge, a dimmed line.
+/// up to three styles ([`lit_line_style`]): a halo, the line over it, and where the model hides
+/// the edge, a dimmed line. A style left out (`None`) is not drawn: a hovered body has no dimmed
+/// line, a selected body's hidden edges (a preference) only that one.
 #[derive(Clone, Debug, PartialEq)]
 pub struct LitEdges {
     /// The block's key ([`SceneBlock::key`]).
     pub block: u64,
     pub lines: std::ops::Range<u32>,
-    pub halo: u32,
-    pub core: u32,
-    pub hidden: u32,
+    pub halo: Option<u32>,
+    pub core: Option<u32>,
+    pub hidden: Option<u32>,
 }
 
 /// The largest palette index a lit line can name: its style rides in the draw's first vertex,
@@ -1044,6 +1048,10 @@ impl GpuScene {
         }
         self.open_tris.extend_from_slice(&c.0.to_le_bytes());
         self.open_tris.extend_from_slice(&NO_VALUE.to_le_bytes());
+    }
+    /// A vertex of a hovered face (see [`GpuScene::hover_faces`]).
+    pub fn hover_face_tri(&mut self, p: [f32; 3], n: [f32; 3], c: PaletteIndex) {
+        push_tri(&mut self.hover_faces, p, n, c, NO_VALUE);
     }
     /// A vertex of the ground-plane shadow (see [`GpuScene::shadow`]).
     pub fn shadow_tri(&mut self, p: [f32; 3], c: PaletteIndex) {
@@ -1906,7 +1914,12 @@ fn lit_lines(
     part: LitPart,
     tally: &Tally,
 ) {
-    if edges.is_empty() {
+    let style = |e: &LitEdges| match part {
+        LitPart::Halo => e.halo,
+        LitPart::Core => e.core,
+        LitPart::Hidden => e.hidden,
+    };
+    if edges.iter().all(|e| style(e).is_none()) {
         return;
     }
     let draw_range = |pass: &mut wgpu::RenderPass<'static>, batch: &Batch, range: &std::ops::Range<u32>, first: u32| {
@@ -1924,12 +1937,8 @@ fn lit_lines(
         }
     };
     for e in edges {
-        let first = match part {
-            LitPart::Halo => e.halo,
-            LitPart::Core => e.core,
-            LitPart::Hidden => e.hidden,
-        }
-        .saturating_mul(6);
+        let Some(style) = style(e) else { continue };
+        let first = style.saturating_mul(6);
         let own = layer.and_then(|g| Some((g, g.bodies.get(&(e.block, e.lines.start, e.lines.end))?)));
         match own {
             Some((g, (seen, hidden))) => {
@@ -2176,6 +2185,8 @@ struct Batches {
     tris: Option<Batch>,
     /// [`GpuScene::open_tris`].
     open_tris: Option<Batch>,
+    /// [`GpuScene::hover_faces`].
+    hover_faces: Option<Batch>,
     ground_ao: Option<Batch>,
     ground_input: Option<GroundAo>,
     pbr: Option<Batch>,
@@ -2351,6 +2362,7 @@ impl Batches {
             self.ground_input = sc.ground_ao;
             self.tris = own("sc_tris", &sc.tris, TRI_SIZE);
             self.open_tris = own("sc_open_tris", &sc.open_tris, TRI_SIZE);
+            self.hover_faces = own("sc_hover_faces", &sc.hover_faces, TRI_SIZE);
             self.pbr = own("sc_pbr", &sc.pbr, PBR_SIZE);
             self.trans = own("sc_trans", &sc.trans, TRI_SIZE);
             self.shadow = own("sc_shadow", &sc.shadow, TRI_SIZE);
@@ -4739,6 +4751,9 @@ impl Renderer {
             }
         }
         tris(pass, &res.tri_hl, &h.tris);
+        // Hovered faces of opaque bodies: their own colour and finish, tinted as a whole hovered
+        // body is.
+        tris(pass, &res.tri_hl_hover_built, &h.hover_faces);
         // Hidden edges before the visible ones, so a visible edge is drawn over them. An edge
         // within a pixel of a nearer face's outline (a face seen edge on beside it) is hidden
         // under part of its own width; drawn after, its light hidden copy covered the visible
@@ -6665,7 +6680,7 @@ mod glass_tests {
         // them (the left half), not along its whole block line.
         let mut hl = GpuScene::default();
         let yellow = hl.color([255, 255, 0, 255]);
-        let style = |w: f32| lit_line_style(yellow, w, true).unwrap_or(0);
+        let style = |w: f32| lit_line_style(yellow, w, true);
         hl.lit_edges.push(LitEdges { block: 7, lines: ranges[0].clone(), halo: style(1.0), core: style(3.0), hidden: style(1.0) });
         frame.hl_key = 9;
         frame.hl_slot = Arc::new(Mutex::new(Some(hl)));
