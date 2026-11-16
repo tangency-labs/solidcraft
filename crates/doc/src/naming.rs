@@ -1279,8 +1279,7 @@ pub fn face_names_at(st: &ModelState, pts: &[Vec3]) -> Vec<String> {
             let mut best: Option<(f64, String)> = None;
             for b in st.bodies.iter().filter(|b| !b.body.is_mesh()) {
                 let tol = (b.body.size() * 1e-3).max(1e-3);
-                let idx = FaceIndex::new(&b.mesh(), face_count(b));
-                if let Some((d, f)) = idx.face_and_dist_at(*p, tol)
+                if let Some((d, f)) = b.body.face_and_dist_at(*p, tol)
                     && best.as_ref().is_none_or(|(bd, _)| d < *bd)
                 {
                     let name = face_names(b).get(f).cloned().unwrap_or_default();
@@ -1300,13 +1299,11 @@ pub fn face_name_at_body(body: &ModelBody, point: Vec3) -> Option<String> {
     if body.body.is_mesh() || !point.is_finite() {
         return None;
     }
-    let mesh = body.mesh();
-    let count = face_count(body);
-    if mesh.triangles.len() > 2_000_000 || count > 50_000 {
+    if body.body.face_count() > 50_000 {
         return None;
     }
     let tolerance = (body.body.size() * 1e-3).max(1e-3);
-    let index = FaceIndex::new(&mesh, count).face_at(point, tolerance)?;
+    let index = body.body.face_at(point, tolerance)?;
     face_names(body).get(index).filter(|name| !name.is_empty()).cloned()
 }
 
