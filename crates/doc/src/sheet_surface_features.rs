@@ -1525,6 +1525,16 @@ impl SurfaceSheet {
                 }
             }
         }
+        // Zone material that only one side holds, taken into the zone between or beside chords:
+        // it lies in a bend's zone only within that bend's reach. Between the bends of two pieces
+        // (a short tab's tip between two tabs that fold) it lies in neither and would be lost.
+        let unheld =
+            (0..chords.len()).filter(|c| !is_chord(*c) && into_zone.get(*c).copied().unwrap_or(false) && !taken.get(*c).copied().unwrap_or(false));
+        for s in unheld.filter_map(|c| spans.get(c)) {
+            if !moves.iter().any(|m| m.start <= s.0 + tol && m.start + m.bend.length >= s.1 - tol) {
+                return err("not supported yet: material in the fold's bend zone that only one side of the bend holds");
+            }
+        }
         if let Some(why) = corner_error(&bent_chords, false) {
             return err(why);
         }
@@ -1532,12 +1542,41 @@ impl SurfaceSheet {
         // across it) is cut from the flat: the zone is the panel's own material, the flat as drawn.
         // A sliver of no width, where an end of the reach lies on a straight edge, is none.
         let mut cuts = Vec::new();
+        // The gaps among them: a cut-out across the zone between its ends, not past an end.
+        let mut gaps = Vec::new();
         for m in &moves {
             let (lo, hi) = (m.start, m.start + m.bend.length);
             let reach = [n * s0 + u * lo, n * s0 + u * hi, n * (s0 + ba) + u * hi, n * (s0 + ba) + u * lo];
             let reach = Region2 { outer: Loop2::polygon(&reach).ccw(), holes: Vec::new() };
             let lacks = solidcraft_kernel::planar_regions_boolean(&[reach], std::slice::from_ref(region), BoolOp::Cut, 1e-9)?;
-            cuts.extend(lacks.into_iter().filter(|g| width(g) > SLIVER));
+            for g in lacks.into_iter().filter(|g| width(g) > SLIVER) {
+                let (glo, ghi) = extent(&g, u);
+                if glo > lo + tol && ghi < hi - tol {
+                    gaps.push(g.clone());
+                }
+                cuts.push(g);
+            }
+        }
+        // The flat's cuts are cut from every piece they reach: where another panel or bend lies
+        // flat across a gap in the zone (a tongue folded before, lying in its slot), the gap's cut
+        // would take its material too. Refused for now. Past a zone's end (a slanted outline, a
+        // slit's end) the cut is the corner's, as before chords.
+        if !gaps.is_empty() {
+            let dev = self.develop().map_err(|e| DocError::Invalid(e.to_string()))?;
+            if let Some(Some(at)) = dev.placements.get(i) {
+                let back = at.inverse();
+                let others: Vec<Region2> = (dev.panels.iter().enumerate())
+                    .filter(|(p, _)| *p != i)
+                    .filter_map(|(_, fp)| fp.as_ref().map(|fp| back.region(&fp.region)))
+                    .chain(dev.zones.iter().map(|z| back.region(&z.region)))
+                    .collect();
+                for (c, o) in gaps.iter().flat_map(|c| others.iter().map(move |o| (c, o))) {
+                    let hit = solidcraft_kernel::planar_regions_boolean(std::slice::from_ref(c), std::slice::from_ref(o), BoolOp::Intersect, 1e-9)?;
+                    if hit.iter().any(|g| width(g) > SLIVER) {
+                        return err(FOLD_ZONE_OVER_FLAT_PANEL);
+                    }
+                }
+            }
         }
         // What lay on the moving side goes with it: joints, cut-outs across joints, recesses and
         // loose pieces there; one in the zone itself has no one place, but for a rip, which parts
@@ -2599,6 +2638,10 @@ const FOLD_FIXED_APART: &str = "the fold cuts its panel into more than one piece
 /// doesn't fold with it (the ring round a tongue's slot, the tongue's root between): one bend
 /// along all of them would lie over that material's own zone, and one for each would close a
 /// ring of bends.
+/// A gap in a fold's bend zone where another panel or bend lies in the flat (a tongue folded
+/// before, lying in its slot): the gap's cut would take that material too.
+const FOLD_ZONE_OVER_FLAT_PANEL: &str =
+    "not supported yet: a fold whose bend zone crosses a cut-out where a part folded before lies in the flat pattern";
 const FOLD_ROUND_MATERIAL: &str = "not supported yet: a fold whose folding piece runs round another piece that bends on the same line or stays";
 
 /// The fixed point lies on a piece only its own side's fold frees (a tongue): the fold can't

@@ -4553,6 +4553,48 @@ fn fold_drawn_off_the_panel_is_refused() {
     }
 }
 
+/// Two folds that would lose material are refused, and the sheet left as it was: three tabs on
+/// the top edge, the middle one short so its tip ends inside the zone, the line across all three
+/// (the tip lies between the outer tabs' bends, in neither's zone); and the plate folded across
+/// the slot of a tongue folded before (the gap in the new zone is cut from the flat, where the
+/// tongue lies in its slot).
+#[test]
+fn fold_that_would_lose_material_is_refused() {
+    let tabs = json!([
+        [-60, -40],
+        [60, -40],
+        [60, 40],
+        [50, 40],
+        [50, 60],
+        [30, 60],
+        [30, 40],
+        [10, 40],
+        [10, 50.5],
+        [-10, 50.5],
+        [-10, 40],
+        [-30, 40],
+        [-30, 60],
+        [-50, 60],
+        [-50, 40],
+        [-60, 40]
+    ]);
+    let mut s = Session::default();
+    al2_plate(&mut s, tabs, &[], &[]);
+    let before = s.doc.to_json();
+    let e = s.execute("sheet.fold", &json!({"points": [[-50, 50, 2], [50, 50, 2]], "fixed": [0, 0, 2], "angle": "45 deg"})).unwrap_err().to_string();
+    assert!(e.contains("only one side of the bend holds"), "{e}");
+    assert_eq!(s.doc.to_json(), before);
+
+    let mut s = Session::default();
+    tongue_plate(&mut s, true, false);
+    run(&mut s, "sheet.fold", json!({"points": [[-8, -15, 2], [-8, 15, 2]], "fixed": [-40, 0, 2], "angle": "45 deg"}));
+    let before = s.doc.to_json();
+    let e =
+        s.execute("sheet.fold", &json!({"points": [[10, -40, 2], [10, 40, 2]], "fixed": [-50, 0, 2], "angle": "45 deg"})).unwrap_err().to_string();
+    assert!(e.contains("where a part folded before lies in the flat pattern"), "{e}");
+    assert_eq!(s.doc.to_json(), before);
+}
+
 /// A slit cut slanting in from the top edge to past the fold's line (it crosses the line at
 /// x 10 .. 10.5): drawn from the left edge up to the slit, or short of it, the line takes the
 /// flap left of it alone, by where the slit crosses the line itself; drawn across the plate, the
