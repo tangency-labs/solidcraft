@@ -150,8 +150,8 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
     /// from the end's parameters, within the vertex's tolerance of it).
     ///
     /// It applies when the gap is within the proto vertex's tolerance, which for a vertex
-    /// that absorbed definitions is their certified distance from it (`resolve_proto_vertex`):
-    /// the end is then a point the vertex stands for. Each curve is clamped, so its end is
+    /// that absorbed definitions covers the measured distance to each one's points
+    /// (`resolve_proto_vertex`): the end is then a point the vertex stands for. Each curve is clamped, so its end is
     /// its end control point, and moving that point by `Δ` moves every point of the curve by
     /// at most `|Δ|` (the basis functions, rational ones with positive weights included, are
     /// a partition of unity, each at most 1): the 3d curve stays within the gap of where it

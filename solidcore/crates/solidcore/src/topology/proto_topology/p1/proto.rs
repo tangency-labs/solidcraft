@@ -1099,30 +1099,6 @@ impl<O: ClassObject> VertexDefinition<O> {
         Ok(true)
     }
 
-    /// Not upstream (#16637): a certified bound on how far this definition's position may
-    /// lie from the point it stands for, where one is known: its gap when either source
-    /// object is a vertex (the definition stands for that vertex, and its position is the
-    /// vertex's point or a point within the gap of it); the misplacement bound of the
-    /// crossing that placed it (`crossing_error`: the gap over the crossing's sine) when a
-    /// crossing at a known angle did; `None` otherwise, and for a gap that is not finite.
-    #[must_use]
-    pub fn placement_error(&self) -> Option<f64> {
-        if !self.gap.is_finite() {
-            return None;
-        }
-        if self.pc1.point_class() == PointClassType::Vertex
-            || self.pc2.point_class() == PointClassType::Vertex
-        {
-            return Some(max2(self.gap, 0.0));
-        }
-        if self.crossing_sine < 0.0 {
-            return None;
-        }
-        let error = crossing_error(self.gap, self.crossing_sine);
-        // (written to accept: an unknown angle's BIG_DOUBLE, or a NaN, gives no bound)
-        (error < BIG_DOUBLE).then_some(error)
-    }
-
     /// The tolerance (`GetTolerance`, as an `SmZoneTol3d`).
     #[must_use]
     pub fn tolerance(&self, k: &Kernel) -> f64 {
@@ -1814,6 +1790,10 @@ pub struct ProtoVertex {
     /// The SMLib fork's `m_bAbsorbedProtoEdge`: a degenerate proto edge of ours was dropped,
     /// so our vertices stand for its curve (WR-306, opt-in).
     absorbed_proto_edge: bool,
+    /// Not upstream (#16637): balls (centre, radius) holding the points of the vertex
+    /// definitions combined away at this proto vertex, which its tolerance keeps covering
+    /// wherever it is placed again.
+    absorbed_points: Vec<(Point3, f64)>,
 }
 
 impl ProtoVertex {
@@ -1822,6 +1802,19 @@ impl ProtoVertex {
     #[must_use]
     pub const fn absorbed_proto_edge(&self) -> bool {
         self.absorbed_proto_edge
+    }
+
+    /// Not upstream (#16637): balls (centre, radius) holding the points of the vertex
+    /// definitions combined away at this proto vertex, which its tolerance covers.
+    #[must_use]
+    pub fn absorbed_points(&self) -> &[(Point3, f64)] {
+        &self.absorbed_points
+    }
+
+    /// Not upstream (#16637): records balls holding points of vertex definitions combined
+    /// away at this proto vertex.
+    pub fn extend_absorbed_points(&mut self, balls: &[(Point3, f64)]) {
+        self.absorbed_points.extend_from_slice(balls);
     }
 
     /// Marks a degenerate proto edge of this proto vertex as dropped (the fork's
@@ -2711,6 +2704,7 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
                 vertex_defs: Vec::new(),
                 proto_edges: Vec::new(),
                 absorbed_proto_edge: false,
+                absorbed_points: Vec::new(),
             },
         )
         .map(ProtoVertexId)
@@ -2745,6 +2739,7 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
                 vertex_defs: vec![vd_id],
                 proto_edges: Vec::new(),
                 absorbed_proto_edge: false,
+                absorbed_points: Vec::new(),
             },
         )
         .map(ProtoVertexId)
@@ -3162,7 +3157,8 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
     /// Merges `other` into `pv` (`CombineProtoVertex`): the larger tolerance, all of
     /// `other`'s vertex definitions (re-owned, still listed at `other`), the position
     /// averaged over the definitions (`other` contributing its own position once per
-    /// definition), and `other`'s proto edges re-pointed and listed at `pv`.
+    /// definition), and `other`'s proto edges re-pointed and listed at `pv`. Not upstream
+    /// (#16637): `other`'s absorbed points are listed at `pv` too.
     ///
     /// # Errors
     ///
@@ -3176,6 +3172,8 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
         let this = self.pv_mut(pv)?;
         this.tol = max2(this.tol, o.tol);
         this.absorbed_proto_edge = this.absorbed_proto_edge || o.absorbed_proto_edge;
+        // Not upstream (#16637): the definitions `other` combined away are this one's.
+        this.absorbed_points.extend_from_slice(&o.absorbed_points);
 
         // the average of all VDs, starting with what is here already
         let mut ave_pos = (this.vertex_defs.len() as f64) * this.position;

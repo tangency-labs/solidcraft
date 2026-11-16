@@ -1620,7 +1620,7 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
                     self.can_combine_vertex_definitions_ignored(k, brep, vd1, vd2, factor)?
                 };
                 if delete_which == 1 {
-                    absorbed.push(self.absorbed_bound(k, vd1)?);
+                    absorbed.extend(self.absorbed_points_of(k, brep, vd1)?);
                     self.delete_vertex_definition(vd1);
                     if let Some(s) = vds.get_mut(ii) {
                         *s = None;
@@ -1628,7 +1628,7 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
                     // We're done with PV[ii].
                     jj = num_vds + 1;
                 } else if delete_which == 2 {
-                    absorbed.push(self.absorbed_bound(k, vd2)?);
+                    absorbed.extend(self.absorbed_points_of(k, brep, vd2)?);
                     self.delete_vertex_definition(vd2);
                     if let Some(s) = vds.get_mut(jj) {
                         *s = None;
@@ -1646,23 +1646,53 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
         Ok(())
     }
 
-    /// Not upstream (#16637): the position of an absorbed vertex definition and the
-    /// certified bound on how far the point it stands for lies from that position
-    /// (`VertexDefinition::placement_error`, or its tolerance where no bound is known).
-    fn absorbed_bound(&self, k: &Kernel, vd: VertexDefId) -> Result<(Point3, f64)> {
+    /// Not upstream (#16637): balls (centre, radius) holding the points of a vertex
+    /// definition about to be combined away: its position (radius 0) and, where its
+    /// classifications evaluate, each source object's point (`FindObjPoint3d`) with the
+    /// classification's measured gap as radius (`m_dGap3d`: the distance from the point it
+    /// was classified at, such as an intersection curve's end, to that object point). Each
+    /// is a computed point and a measured distance, no estimate: the proto vertex's
+    /// tolerance is widened to cover exactly these (`place_at_survivors`). A gap that is not
+    /// a finite number gives no ball (the tolerance is not widened for it).
+    fn absorbed_points_of(
+        &self,
+        k: &Kernel,
+        brep: &impl ProtoBrep<O>,
+        vd: VertexDefId,
+    ) -> Result<Vec<(Point3, f64)>> {
         let d = self.vd_ref(vd)?;
-        let bound = d.placement_error().unwrap_or_else(|| d.tolerance(k));
-        Ok((d.position(), bound))
+        let mut balls = vec![(d.position(), 0.0)];
+        for which in [1, 2] {
+            let pc = d.brep_point_classif(which);
+            if !pc.are_parameters_set() {
+                continue;
+            }
+            let Some(gap) = ignore_soft(pc.gap_3d(k, brep, None))? else {
+                continue;
+            };
+            if !gap.is_finite() {
+                continue;
+            }
+            if let Some(p) = ignore_soft(pc.find_obj_point_3d(k, brep))? {
+                balls.push((p, max2(gap, 0.0)));
+            }
+        }
+        Ok(balls)
     }
 
-    /// Not upstream (#16637): after `resolve_proto_vertex` combined definitions, places
-    /// `pv` at the average of the definitions that remain and widens its tolerance to the
-    /// certified largest distance from that position to the point each absorbed one
-    /// stands for (its position's distance plus its placement bound, rounded up by
-    /// `γ_4`). Upstream leaves the proto vertex at the average of all its definitions,
-    /// absorbed ones included: a point no remaining definition is at, which an edge end
-    /// was then continued to (out of its face's domain at a pole).
+    /// Not upstream (#16637): after `resolve_proto_vertex` combined definitions, records
+    /// `absorbed` (balls holding the points of the definitions combined away,
+    /// `absorbed_points_of`) at `pv`, places `pv` at the average of the definitions that
+    /// remain and widens its tolerance to the farthest reach from that position of any ball
+    /// it has absorbed, in this or an earlier resolution (distance plus radius, rounded up
+    /// by `γ_4`): computed points and measured distances, so the tolerance grows by no
+    /// estimate. Upstream leaves the proto vertex at the average of all its definitions,
+    /// absorbed ones included: a point no remaining definition is at, which an edge end was
+    /// then continued to (out of its face's domain at a pole).
     fn place_at_survivors(&mut self, pv: ProtoVertexId, absorbed: &[(Point3, f64)]) -> Result<()> {
+        self.proto_vertex_mut(pv)
+            .ok_or(dangling("proto vertex is deleted"))?
+            .extend_absorbed_points(absorbed);
         let live = self
             .proto_vertex(pv)
             .map(|v| v.vertex_definitions().to_vec())
@@ -1675,13 +1705,13 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
             sum += self.vd_ref(vd)?.position();
         }
         let position = sum / live.len() as f64;
-        let mut reach = 0.0_f64;
-        for &(at, bound) in absorbed {
-            reach = max2(reach, (position.distance(at) + bound) * (1.0 + gamma(4)));
-        }
         let v = self
             .proto_vertex_mut(pv)
             .ok_or(dangling("proto vertex is deleted"))?;
+        let mut reach = 0.0_f64;
+        for &(at, radius) in v.absorbed_points() {
+            reach = max2(reach, (position.distance(at) + radius) * (1.0 + gamma(4)));
+        }
         v.set_position(position);
         // (written to accept: a NaN reach leaves the tolerance)
         if reach > v.raw_tolerance() {
@@ -3999,6 +4029,60 @@ mod tests {
         m.resolve_proto_vertex(&k, &geo, pv).unwrap();
         assert_eq!(m.proto_vertex(pv).unwrap().vertex_definitions(), &[b, c]);
         assert!(m.vertex_def(a).is_none());
+    }
+
+    /// #16637 review: a proto vertex that combines a definition away moves to the average
+    /// of those that remain, and its tolerance grows to the measured distance to the
+    /// absorbed definition's point, by no estimate (no placement bound is known for it, and
+    /// its tolerance is no such bound). Resolved again after another definition is
+    /// absorbed and the position moves, the tolerance still covers the first one.
+    #[test]
+    fn a_resolved_proto_vertex_covers_every_point_it_absorbed() {
+        let k = Kernel::default();
+        let geo = Geo::default();
+        let mut m = manager();
+        let p = Point3::new(1.0, 2.0, 3.0);
+        let mk = |m: &mut ProtoTopologyManager<H>, at: Point3, a: H, b: H, gap: f64| {
+            let vd =
+                VertexDefinition::new(&k, &geo, &region_pc(a), &region_pc(b), at, 1e-5, gap, None)
+                    .unwrap();
+            m.insert_vertex_definition(vd).unwrap()
+        };
+        let far = p + Vec3::new(3e-5, 0.0, 0.0);
+        let a = mk(&mut m, far, R0, R1, 2e-6);
+        let b = mk(&mut m, p, R0, R1, 1e-6);
+        let c = mk(&mut m, p, R0, L0, 1e-6);
+        let pv = m.new_proto_vertex(p, 1e-5).unwrap();
+        m.add_proto_vertex(pv);
+        for vd in [a, b, c] {
+            m.add_vertex_definition(pv, vd).unwrap();
+        }
+        m.resolve_proto_vertex(&k, &geo, pv).unwrap();
+        let v = m.proto_vertex(pv).unwrap();
+        assert_eq!(v.vertex_definitions(), &[b, c]);
+        assert_eq!(v.position(), p);
+        let reach = far.distance(p) * (1.0 + gamma(4));
+        assert_eq!(
+            v.raw_tolerance(),
+            reach,
+            "the measured distance, no estimate added"
+        );
+
+        // `d` takes `b`'s place (the smaller gap), and the survivors' average moves 1e-5.
+        let d = mk(&mut m, p + Vec3::new(0.0, 2e-5, 0.0), R0, R1, 5e-7);
+        m.add_vertex_definition(pv, d).unwrap();
+        m.resolve_proto_vertex(&k, &geo, pv).unwrap();
+        let v = m.proto_vertex(pv).unwrap();
+        assert_eq!(v.vertex_definitions(), &[c, d]);
+        assert!(v.position().distance(p + Vec3::new(0.0, 1e-5, 0.0)) < 1e-15);
+        for at in [far, p] {
+            assert!(
+                v.position().distance(at) <= v.raw_tolerance(),
+                "{at:?} is {:e} from the vertex, its tolerance {:e}",
+                v.position().distance(at),
+                v.raw_tolerance()
+            );
+        }
     }
 
     /// A proto edge from a proto vertex back to itself along an open curve 5e-5 long
