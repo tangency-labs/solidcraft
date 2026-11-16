@@ -1516,6 +1516,43 @@ mod tests {
         assert!(area > 400.0 && area < std::f64::consts::PI * 10.0 * 20.0, "{area}");
     }
 
+    /// The fill of the loop above is that half side itself (#15021): its one face lies on the
+    /// post's cylinder (axis z through the origin, radius 10), and every edge runs on the plane
+    /// x = 0 or on the post's rim circles, on the side x >= 0. A half turn of radius r and
+    /// height h has area π r h, so the fill's area is 200π to rounding: the strict `<` above
+    /// held only by the Runge-Kutta integrator's quadrature error (1.1e-10 short of 200π).
+    #[test]
+    fn the_general_fill_of_half_a_post_side_is_that_half_side() {
+        let post = cylinder(Vec3::ZERO, Vec3::Z, 10.0, 20.0).unwrap();
+        let halves = crate::split_by_plane(&post, &Plane::from_normal(Vec3::ZERO, Vec3::X).unwrap()).unwrap();
+        let half = halves.into_iter().find(|b| measure(b).unwrap().bbox.min.x > -1e-6).unwrap();
+        let at: Vec<Vec3> =
+            (-4..=4).map(|k| Vec2::from_angle(k as f64 * 0.35).extend(10.0) * 1.0).map(|p| Vec3::new(p.x * 10.0, p.y * 10.0, 10.0)).collect();
+        let side = copy_faces(&half, &at).unwrap();
+        let fill = patch_edges(&side, &free_edge_points(&side)).unwrap();
+        let r = record(&fill);
+        assert_eq!(r.faces.len(), 1, "one face");
+        let b::Surface::Cylinder { frame, radius } = &r.faces[0].surface else { panic!("not a cylinder: {:?}", r.faces[0].surface) };
+        let (x, y, o) = (frame.x_axis, frame.y_axis, frame.origin);
+        let axis = [x[1] * y[2] - x[2] * y[1], x[2] * y[0] - x[0] * y[2], x[0] * y[1] - x[1] * y[0]];
+        assert!((radius - 10.0).abs() <= 1e-12 * 10.0, "radius {radius}");
+        assert!(axis[0].abs() <= 1e-12 && axis[1].abs() <= 1e-12 && (axis[2].abs() - 1.0).abs() <= 1e-12, "axis {axis:?}");
+        assert!(o[0].abs() <= 1e-12 && o[1].abs() <= 1e-12, "origin {o:?}");
+        for e in &r.edges {
+            let c = CurveEval::new(e.parameters()).unwrap();
+            let [t0, t1] = e.interval;
+            for k in 0..=24 {
+                let p = c.point(t0 + (t1 - t0) * k as f64 / 24.0).unwrap();
+                let on_cut = p.x.abs() <= 1e-12;
+                let on_rim = (p.z.abs() <= 1e-12 || (p.z - 20.0).abs() <= 1e-12) && ((p.x * p.x + p.y * p.y).sqrt() - 10.0).abs() <= 1e-12;
+                assert!(p.x >= -1e-12 && (on_cut || on_rim), "an edge point {p:?} off the half side's rim");
+            }
+        }
+        let area = measure(&fill).unwrap().area;
+        let half_side = std::f64::consts::PI * 10.0 * 20.0;
+        assert!((area - half_side).abs() <= 1e-12 * half_side, "{area}");
+    }
+
     #[test]
     fn planar_loops_of_intersection_curves_are_one_planar_face() {
         // A round post cut by planes tilted every way, gently to steeply: each rim is an ellipse
