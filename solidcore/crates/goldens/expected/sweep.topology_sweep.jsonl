@@ -693,7 +693,7 @@
 {"case":"whole_rotation_y_90","deferred":null,"error":null,"ints":{"whole":[0,1,12,15,15,52,48,0]},"topology":null,"values":{"points":{"blocks":[[610.0,1250.0,77320.0],[990.0,1270.0,109040.0]],"n":456}}}
 {"case":"whole_rotation_z_45","deferred":null,"error":null,"ints":{"whole":[0,1,11,15,15,50,46,0]},"topology":null,"values":{"points":{"blocks":[[1061.6295090390222,1344.472221513641,137601.72290750258],[1090.6244584051392,1090.6244584051392,111980.59592378045]],"n":438}}}
 {"case":"whole_stitch_linear_large_box","deferred":null,"error":null,"ints":{"whole":[0,1,1,14,14,28,16,0]},"topology":null,"values":{"points":{"blocks":[[1260000.0,1260000.0,156840000.0]],"n":216}}}
-{"case":"whole_stitch_linear_neg_y_flat_box","deferred":null,"error":null,"ints":{"whole":[1001]},"topology":null,"values":{"points":[]}}
+{"case":"whole_stitch_linear_neg_y_flat_box","deferred":null,"error":null,"ints":{"whole":[0,1,1,14,14,28,16,0]},"topology":null,"values":{"points":{"blocks":[[288.0,416.0,40062.0]],"n":216}}}
 {"case":"whole_stitch_linear_oblique","deferred":null,"error":null,"ints":{"whole":[0,2,2,12,12,24,14,0]},"topology":null,"values":{"points":{"blocks":[[1178.0,1178.0,123986.0]],"n":186}}}
 {"case":"whole_stitch_linear_tiny_box","deferred":null,"error":null,"ints":{"whole":[0,3,3,14,14,20,12,0]},"topology":null,"values":{"points":{"blocks":[[0.1300000000000001,0.1300000000000001,11.626]],"n":156}}}
 {"case":"whole_stitch_linear_x_flat_box","deferred":null,"error":null,"ints":{"whole":[0,1,1,14,14,28,16,0]},"topology":null,"values":{"points":{"blocks":[[612.0,612.0,75756.0]],"n":216}}}
