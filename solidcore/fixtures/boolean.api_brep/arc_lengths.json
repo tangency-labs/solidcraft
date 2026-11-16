@@ -1,0 +1,835 @@
+{
+ "cases": [
+  {
+   "name": "arc_lengths_boxes_union",
+   "note": "Curve tolerance gap (curve::curve_cache curve_approx_tol_3d): box (0,0,0)+10^3 and box (5,5,5)+10^3: straight boolean-made edges. Union; per result edge the curve's SmCurve::Length and the point FindParameterAtArcLength finds 0.5 of it along (C++ pEdge->GetCurve(), Rust topology::edge::evaluation_curve).",
+   "inputs": {
+    "api": "arc_lengths",
+    "a": {
+     "kind": "box",
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      10.0,
+      10.0,
+      10.0
+     ]
+    },
+    "b": {
+     "kind": "box",
+     "origin": [
+      5.0,
+      5.0,
+      5.0
+     ],
+     "size": [
+      10.0,
+      10.0,
+      10.0
+     ]
+    },
+    "operation": 1,
+    "fraction": 0.5
+   }
+  },
+  {
+   "name": "arc_lengths_boxes_difference",
+   "note": "Curve tolerance gap (curve::curve_cache curve_approx_tol_3d): box (0,0,0)+10^3 and box (5,5,5)+10^3: straight boolean-made edges. Difference; per result edge the curve's SmCurve::Length and the point FindParameterAtArcLength finds 0.5 of it along (C++ pEdge->GetCurve(), Rust topology::edge::evaluation_curve).",
+   "inputs": {
+    "api": "arc_lengths",
+    "a": {
+     "kind": "box",
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      10.0,
+      10.0,
+      10.0
+     ]
+    },
+    "b": {
+     "kind": "box",
+     "origin": [
+      5.0,
+      5.0,
+      5.0
+     ],
+     "size": [
+      10.0,
+      10.0,
+      10.0
+     ]
+    },
+    "operation": 3,
+    "fraction": 0.5
+   }
+  },
+  {
+   "name": "arc_lengths_boxes_intersection",
+   "note": "Curve tolerance gap (curve::curve_cache curve_approx_tol_3d): box (0,0,0)+10^3 and box (5,5,5)+10^3: straight boolean-made edges. Intersection; per result edge the curve's SmCurve::Length and the point FindParameterAtArcLength finds 0.5 of it along (C++ pEdge->GetCurve(), Rust topology::edge::evaluation_curve).",
+   "inputs": {
+    "api": "arc_lengths",
+    "a": {
+     "kind": "box",
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      10.0,
+      10.0,
+      10.0
+     ]
+    },
+    "b": {
+     "kind": "box",
+     "origin": [
+      5.0,
+      5.0,
+      5.0
+     ],
+     "size": [
+      10.0,
+      10.0,
+      10.0
+     ]
+    },
+    "operation": 2,
+    "fraction": 0.5
+   }
+  },
+  {
+   "name": "arc_lengths_box_cylinder_hole_union",
+   "note": "Curve tolerance gap (curve::curve_cache curve_approx_tol_3d): box 10^3 and a cylinder r 2 through it along z: the hole's circles. Union; per result edge the curve's SmCurve::Length and the point FindParameterAtArcLength finds 0.5 of it along (C++ pEdge->GetCurve(), Rust topology::edge::evaluation_curve).",
+   "inputs": {
+    "api": "arc_lengths",
+    "a": {
+     "kind": "box",
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      10.0,
+      10.0,
+      10.0
+     ]
+    },
+    "b": {
+     "kind": "cylinder",
+     "origin": [
+      5.0,
+      5.0,
+      -1.0
+     ],
+     "radius": 2.0,
+     "height": 12.0
+    },
+    "operation": 1,
+    "fraction": 0.5
+   }
+  },
+  {
+   "name": "arc_lengths_box_cylinder_hole_difference",
+   "note": "Curve tolerance gap (curve::curve_cache curve_approx_tol_3d): box 10^3 and a cylinder r 2 through it along z: the hole's circles. Difference; per result edge the curve's SmCurve::Length and the point FindParameterAtArcLength finds 0.5 of it along (C++ pEdge->GetCurve(), Rust topology::edge::evaluation_curve).",
+   "inputs": {
+    "api": "arc_lengths",
+    "a": {
+     "kind": "box",
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      10.0,
+      10.0,
+      10.0
+     ]
+    },
+    "b": {
+     "kind": "cylinder",
+     "origin": [
+      5.0,
+      5.0,
+      -1.0
+     ],
+     "radius": 2.0,
+     "height": 12.0
+    },
+    "operation": 3,
+    "fraction": 0.5
+   }
+  },
+  {
+   "name": "arc_lengths_box_cylinder_hole_intersection",
+   "note": "Curve tolerance gap (curve::curve_cache curve_approx_tol_3d): box 10^3 and a cylinder r 2 through it along z: the hole's circles. Intersection; per result edge the curve's SmCurve::Length and the point FindParameterAtArcLength finds 0.5 of it along (C++ pEdge->GetCurve(), Rust topology::edge::evaluation_curve).",
+   "inputs": {
+    "api": "arc_lengths",
+    "a": {
+     "kind": "box",
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      10.0,
+      10.0,
+      10.0
+     ]
+    },
+    "b": {
+     "kind": "cylinder",
+     "origin": [
+      5.0,
+      5.0,
+      -1.0
+     ],
+     "radius": 2.0,
+     "height": 12.0
+    },
+    "operation": 2,
+    "fraction": 0.5
+   }
+  },
+  {
+   "name": "arc_lengths_box_cylinder_corner_union",
+   "note": "Curve tolerance gap (curve::curve_cache curve_approx_tol_3d): box 10^3 and a cylinder r 3 on its vertical edge: arcs and cut lines. Union; per result edge the curve's SmCurve::Length and the point FindParameterAtArcLength finds 0.5 of it along (C++ pEdge->GetCurve(), Rust topology::edge::evaluation_curve).",
+   "inputs": {
+    "api": "arc_lengths",
+    "a": {
+     "kind": "box",
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      10.0,
+      10.0,
+      10.0
+     ]
+    },
+    "b": {
+     "kind": "cylinder",
+     "origin": [
+      10.0,
+      10.0,
+      5.0
+     ],
+     "radius": 3.0,
+     "height": 10.0
+    },
+    "operation": 1,
+    "fraction": 0.5
+   }
+  },
+  {
+   "name": "arc_lengths_box_cylinder_corner_difference",
+   "note": "Curve tolerance gap (curve::curve_cache curve_approx_tol_3d): box 10^3 and a cylinder r 3 on its vertical edge: arcs and cut lines. Difference; per result edge the curve's SmCurve::Length and the point FindParameterAtArcLength finds 0.5 of it along (C++ pEdge->GetCurve(), Rust topology::edge::evaluation_curve).",
+   "inputs": {
+    "api": "arc_lengths",
+    "a": {
+     "kind": "box",
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      10.0,
+      10.0,
+      10.0
+     ]
+    },
+    "b": {
+     "kind": "cylinder",
+     "origin": [
+      10.0,
+      10.0,
+      5.0
+     ],
+     "radius": 3.0,
+     "height": 10.0
+    },
+    "operation": 3,
+    "fraction": 0.5
+   }
+  },
+  {
+   "name": "arc_lengths_box_cylinder_corner_intersection",
+   "note": "Curve tolerance gap (curve::curve_cache curve_approx_tol_3d): box 10^3 and a cylinder r 3 on its vertical edge: arcs and cut lines. Intersection; per result edge the curve's SmCurve::Length and the point FindParameterAtArcLength finds 0.5 of it along (C++ pEdge->GetCurve(), Rust topology::edge::evaluation_curve).",
+   "inputs": {
+    "api": "arc_lengths",
+    "a": {
+     "kind": "box",
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      10.0,
+      10.0,
+      10.0
+     ]
+    },
+    "b": {
+     "kind": "cylinder",
+     "origin": [
+      10.0,
+      10.0,
+      5.0
+     ],
+     "radius": 3.0,
+     "height": 10.0
+    },
+    "operation": 2,
+    "fraction": 0.5
+   }
+  },
+  {
+   "name": "arc_lengths_cylinder_cylinder_tee_union_025",
+   "note": "Curve tolerance gap (curve::curve_cache curve_approx_tol_3d): cylinder r 2 along z and a cylinder r 1.5 along -y from the origin: a space curve where they meet. Union; per result edge the curve's SmCurve::Length and the point FindParameterAtArcLength finds 0.25 of it along (C++ pEdge->GetCurve(), Rust topology::edge::evaluation_curve).",
+   "inputs": {
+    "api": "arc_lengths",
+    "a": {
+     "kind": "cylinder",
+     "origin": [
+      0.0,
+      0.0,
+      -10.0
+     ],
+     "radius": 2.0,
+     "height": 20.0
+    },
+    "b": {
+     "kind": "moved",
+     "steps": [
+      {
+       "rotate": {
+        "point": [
+         0.0,
+         0.0,
+         0.0
+        ],
+        "axis": [
+         1.0,
+         0.0,
+         0.0
+        ],
+        "angle_deg": 90.0
+       }
+      }
+     ],
+     "brep": {
+      "kind": "cylinder",
+      "origin": [
+       0.0,
+       0.0,
+       0.0
+      ],
+      "radius": 1.5,
+      "height": 10.0
+     }
+    },
+    "operation": 1,
+    "fraction": 0.25
+   }
+  },
+  {
+   "name": "arc_lengths_cylinder_cylinder_tee_union",
+   "note": "Curve tolerance gap (curve::curve_cache curve_approx_tol_3d): cylinder r 2 along z and a cylinder r 1.5 along -y from the origin: a space curve where they meet. Union; per result edge the curve's SmCurve::Length and the point FindParameterAtArcLength finds 0.5 of it along (C++ pEdge->GetCurve(), Rust topology::edge::evaluation_curve).",
+   "inputs": {
+    "api": "arc_lengths",
+    "a": {
+     "kind": "cylinder",
+     "origin": [
+      0.0,
+      0.0,
+      -10.0
+     ],
+     "radius": 2.0,
+     "height": 20.0
+    },
+    "b": {
+     "kind": "moved",
+     "steps": [
+      {
+       "rotate": {
+        "point": [
+         0.0,
+         0.0,
+         0.0
+        ],
+        "axis": [
+         1.0,
+         0.0,
+         0.0
+        ],
+        "angle_deg": 90.0
+       }
+      }
+     ],
+     "brep": {
+      "kind": "cylinder",
+      "origin": [
+       0.0,
+       0.0,
+       0.0
+      ],
+      "radius": 1.5,
+      "height": 10.0
+     }
+    },
+    "operation": 1,
+    "fraction": 0.5
+   }
+  },
+  {
+   "name": "arc_lengths_cylinder_cylinder_tee_union_09",
+   "note": "Curve tolerance gap (curve::curve_cache curve_approx_tol_3d): cylinder r 2 along z and a cylinder r 1.5 along -y from the origin: a space curve where they meet. Union; per result edge the curve's SmCurve::Length and the point FindParameterAtArcLength finds 0.9 of it along (C++ pEdge->GetCurve(), Rust topology::edge::evaluation_curve).",
+   "inputs": {
+    "api": "arc_lengths",
+    "a": {
+     "kind": "cylinder",
+     "origin": [
+      0.0,
+      0.0,
+      -10.0
+     ],
+     "radius": 2.0,
+     "height": 20.0
+    },
+    "b": {
+     "kind": "moved",
+     "steps": [
+      {
+       "rotate": {
+        "point": [
+         0.0,
+         0.0,
+         0.0
+        ],
+        "axis": [
+         1.0,
+         0.0,
+         0.0
+        ],
+        "angle_deg": 90.0
+       }
+      }
+     ],
+     "brep": {
+      "kind": "cylinder",
+      "origin": [
+       0.0,
+       0.0,
+       0.0
+      ],
+      "radius": 1.5,
+      "height": 10.0
+     }
+    },
+    "operation": 1,
+    "fraction": 0.9
+   }
+  },
+  {
+   "name": "arc_lengths_cylinder_cylinder_tee_difference_025",
+   "note": "Curve tolerance gap (curve::curve_cache curve_approx_tol_3d): cylinder r 2 along z and a cylinder r 1.5 along -y from the origin: a space curve where they meet. Difference; per result edge the curve's SmCurve::Length and the point FindParameterAtArcLength finds 0.25 of it along (C++ pEdge->GetCurve(), Rust topology::edge::evaluation_curve).",
+   "inputs": {
+    "api": "arc_lengths",
+    "a": {
+     "kind": "cylinder",
+     "origin": [
+      0.0,
+      0.0,
+      -10.0
+     ],
+     "radius": 2.0,
+     "height": 20.0
+    },
+    "b": {
+     "kind": "moved",
+     "steps": [
+      {
+       "rotate": {
+        "point": [
+         0.0,
+         0.0,
+         0.0
+        ],
+        "axis": [
+         1.0,
+         0.0,
+         0.0
+        ],
+        "angle_deg": 90.0
+       }
+      }
+     ],
+     "brep": {
+      "kind": "cylinder",
+      "origin": [
+       0.0,
+       0.0,
+       0.0
+      ],
+      "radius": 1.5,
+      "height": 10.0
+     }
+    },
+    "operation": 3,
+    "fraction": 0.25
+   }
+  },
+  {
+   "name": "arc_lengths_cylinder_cylinder_tee_difference",
+   "note": "Curve tolerance gap (curve::curve_cache curve_approx_tol_3d): cylinder r 2 along z and a cylinder r 1.5 along -y from the origin: a space curve where they meet. Difference; per result edge the curve's SmCurve::Length and the point FindParameterAtArcLength finds 0.5 of it along (C++ pEdge->GetCurve(), Rust topology::edge::evaluation_curve).",
+   "inputs": {
+    "api": "arc_lengths",
+    "a": {
+     "kind": "cylinder",
+     "origin": [
+      0.0,
+      0.0,
+      -10.0
+     ],
+     "radius": 2.0,
+     "height": 20.0
+    },
+    "b": {
+     "kind": "moved",
+     "steps": [
+      {
+       "rotate": {
+        "point": [
+         0.0,
+         0.0,
+         0.0
+        ],
+        "axis": [
+         1.0,
+         0.0,
+         0.0
+        ],
+        "angle_deg": 90.0
+       }
+      }
+     ],
+     "brep": {
+      "kind": "cylinder",
+      "origin": [
+       0.0,
+       0.0,
+       0.0
+      ],
+      "radius": 1.5,
+      "height": 10.0
+     }
+    },
+    "operation": 3,
+    "fraction": 0.5
+   }
+  },
+  {
+   "name": "arc_lengths_cylinder_cylinder_tee_difference_09",
+   "note": "Curve tolerance gap (curve::curve_cache curve_approx_tol_3d): cylinder r 2 along z and a cylinder r 1.5 along -y from the origin: a space curve where they meet. Difference; per result edge the curve's SmCurve::Length and the point FindParameterAtArcLength finds 0.9 of it along (C++ pEdge->GetCurve(), Rust topology::edge::evaluation_curve).",
+   "inputs": {
+    "api": "arc_lengths",
+    "a": {
+     "kind": "cylinder",
+     "origin": [
+      0.0,
+      0.0,
+      -10.0
+     ],
+     "radius": 2.0,
+     "height": 20.0
+    },
+    "b": {
+     "kind": "moved",
+     "steps": [
+      {
+       "rotate": {
+        "point": [
+         0.0,
+         0.0,
+         0.0
+        ],
+        "axis": [
+         1.0,
+         0.0,
+         0.0
+        ],
+        "angle_deg": 90.0
+       }
+      }
+     ],
+     "brep": {
+      "kind": "cylinder",
+      "origin": [
+       0.0,
+       0.0,
+       0.0
+      ],
+      "radius": 1.5,
+      "height": 10.0
+     }
+    },
+    "operation": 3,
+    "fraction": 0.9
+   }
+  },
+  {
+   "name": "arc_lengths_cylinder_cylinder_tee_intersection_025",
+   "note": "Curve tolerance gap (curve::curve_cache curve_approx_tol_3d): cylinder r 2 along z and a cylinder r 1.5 along -y from the origin: a space curve where they meet. Intersection; per result edge the curve's SmCurve::Length and the point FindParameterAtArcLength finds 0.25 of it along (C++ pEdge->GetCurve(), Rust topology::edge::evaluation_curve).",
+   "inputs": {
+    "api": "arc_lengths",
+    "a": {
+     "kind": "cylinder",
+     "origin": [
+      0.0,
+      0.0,
+      -10.0
+     ],
+     "radius": 2.0,
+     "height": 20.0
+    },
+    "b": {
+     "kind": "moved",
+     "steps": [
+      {
+       "rotate": {
+        "point": [
+         0.0,
+         0.0,
+         0.0
+        ],
+        "axis": [
+         1.0,
+         0.0,
+         0.0
+        ],
+        "angle_deg": 90.0
+       }
+      }
+     ],
+     "brep": {
+      "kind": "cylinder",
+      "origin": [
+       0.0,
+       0.0,
+       0.0
+      ],
+      "radius": 1.5,
+      "height": 10.0
+     }
+    },
+    "operation": 2,
+    "fraction": 0.25
+   }
+  },
+  {
+   "name": "arc_lengths_cylinder_cylinder_tee_intersection",
+   "note": "Curve tolerance gap (curve::curve_cache curve_approx_tol_3d): cylinder r 2 along z and a cylinder r 1.5 along -y from the origin: a space curve where they meet. Intersection; per result edge the curve's SmCurve::Length and the point FindParameterAtArcLength finds 0.5 of it along (C++ pEdge->GetCurve(), Rust topology::edge::evaluation_curve).",
+   "inputs": {
+    "api": "arc_lengths",
+    "a": {
+     "kind": "cylinder",
+     "origin": [
+      0.0,
+      0.0,
+      -10.0
+     ],
+     "radius": 2.0,
+     "height": 20.0
+    },
+    "b": {
+     "kind": "moved",
+     "steps": [
+      {
+       "rotate": {
+        "point": [
+         0.0,
+         0.0,
+         0.0
+        ],
+        "axis": [
+         1.0,
+         0.0,
+         0.0
+        ],
+        "angle_deg": 90.0
+       }
+      }
+     ],
+     "brep": {
+      "kind": "cylinder",
+      "origin": [
+       0.0,
+       0.0,
+       0.0
+      ],
+      "radius": 1.5,
+      "height": 10.0
+     }
+    },
+    "operation": 2,
+    "fraction": 0.5
+   }
+  },
+  {
+   "name": "arc_lengths_cylinder_cylinder_tee_intersection_09",
+   "note": "Curve tolerance gap (curve::curve_cache curve_approx_tol_3d): cylinder r 2 along z and a cylinder r 1.5 along -y from the origin: a space curve where they meet. Intersection; per result edge the curve's SmCurve::Length and the point FindParameterAtArcLength finds 0.9 of it along (C++ pEdge->GetCurve(), Rust topology::edge::evaluation_curve).",
+   "inputs": {
+    "api": "arc_lengths",
+    "a": {
+     "kind": "cylinder",
+     "origin": [
+      0.0,
+      0.0,
+      -10.0
+     ],
+     "radius": 2.0,
+     "height": 20.0
+    },
+    "b": {
+     "kind": "moved",
+     "steps": [
+      {
+       "rotate": {
+        "point": [
+         0.0,
+         0.0,
+         0.0
+        ],
+        "axis": [
+         1.0,
+         0.0,
+         0.0
+        ],
+        "angle_deg": 90.0
+       }
+      }
+     ],
+     "brep": {
+      "kind": "cylinder",
+      "origin": [
+       0.0,
+       0.0,
+       0.0
+      ],
+      "radius": 1.5,
+      "height": 10.0
+     }
+    },
+    "operation": 2,
+    "fraction": 0.9
+   }
+  },
+  {
+   "name": "arc_lengths_sphere_box_union",
+   "note": "Curve tolerance gap (curve::curve_cache curve_approx_tol_3d): sphere r 5 and a box cutting it at z = 2: a circle on the sphere. Union; per result edge the curve's SmCurve::Length and the point FindParameterAtArcLength finds 0.5 of it along (C++ pEdge->GetCurve(), Rust topology::edge::evaluation_curve).",
+   "inputs": {
+    "api": "arc_lengths",
+    "a": {
+     "kind": "sphere",
+     "center": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "radius": 5.0
+    },
+    "b": {
+     "kind": "box",
+     "origin": [
+      -10.0,
+      -10.0,
+      -10.0
+     ],
+     "size": [
+      20.0,
+      20.0,
+      12.0
+     ]
+    },
+    "operation": 1,
+    "fraction": 0.5
+   }
+  },
+  {
+   "name": "arc_lengths_sphere_box_difference",
+   "note": "Curve tolerance gap (curve::curve_cache curve_approx_tol_3d): sphere r 5 and a box cutting it at z = 2: a circle on the sphere. Difference; per result edge the curve's SmCurve::Length and the point FindParameterAtArcLength finds 0.5 of it along (C++ pEdge->GetCurve(), Rust topology::edge::evaluation_curve).",
+   "inputs": {
+    "api": "arc_lengths",
+    "a": {
+     "kind": "sphere",
+     "center": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "radius": 5.0
+    },
+    "b": {
+     "kind": "box",
+     "origin": [
+      -10.0,
+      -10.0,
+      -10.0
+     ],
+     "size": [
+      20.0,
+      20.0,
+      12.0
+     ]
+    },
+    "operation": 3,
+    "fraction": 0.5
+   }
+  },
+  {
+   "name": "arc_lengths_sphere_box_intersection",
+   "note": "Curve tolerance gap (curve::curve_cache curve_approx_tol_3d): sphere r 5 and a box cutting it at z = 2: a circle on the sphere. Intersection; per result edge the curve's SmCurve::Length and the point FindParameterAtArcLength finds 0.5 of it along (C++ pEdge->GetCurve(), Rust topology::edge::evaluation_curve).",
+   "inputs": {
+    "api": "arc_lengths",
+    "a": {
+     "kind": "sphere",
+     "center": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "radius": 5.0
+    },
+    "b": {
+     "kind": "box",
+     "origin": [
+      -10.0,
+      -10.0,
+      -10.0
+     ],
+     "size": [
+      20.0,
+      20.0,
+      12.0
+     ]
+    },
+    "operation": 2,
+    "fraction": 0.5
+   }
+  }
+ ]
+}

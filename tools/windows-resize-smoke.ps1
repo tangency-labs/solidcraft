@@ -166,15 +166,25 @@ try {
     Start-Sleep -Milliseconds 500
     CheckBorder $h 'restored'
 
-    # A real drag on the bottom edge, if this session takes mouse input.
-    $before = Rect $h
-    [void][Win]::SetForegroundWindow($h)
-    $x = [int](($before.Left + $before.Right) / 2); $y = $before.Bottom - 2
-    [void][Win]::SetCursorPos($x, $y)
-    $pt = New-Object Win+POINT; [void][Win]::GetCursorPos([ref]$pt)
-    if ($pt.X -ne $x -or $pt.Y -ne $y) {
-        Write-Host "skipped: the drag (this session doesn't move the pointer: at $($pt.X),$($pt.Y))"
-    } else {
+    # A real drag on the bottom edge, if this session takes mouse input. On a loaded runner the
+    # window can be slow to take the move and to follow the drag (the first attempt has measured
+    # height +0, and the window then missed the maximize below), so each step waits for the real
+    # condition and the drag is tried once more if it did not take.
+    $pending = $true
+    for ($attempt = 1; $attempt -le 2 -and $pending; $attempt++) {
+        # The window is where it was put (a message the window had not handled yet would move it later).
+        $settled = (Get-Date).AddSeconds(10)
+        while ((Rect $h).Left -ne 20 -and (Get-Date) -lt $settled) { Start-Sleep -Milliseconds 100 }
+        $before = Rect $h
+        [void][Win]::SetForegroundWindow($h)
+        $x = [int](($before.Left + $before.Right) / 2); $y = $before.Bottom - 2
+        [void][Win]::SetCursorPos($x, $y)
+        $pt = New-Object Win+POINT; [void][Win]::GetCursorPos([ref]$pt)
+        if ($pt.X -ne $x -or $pt.Y -ne $y) {
+            Write-Host "skipped: the drag (this session doesn't move the pointer: at $($pt.X),$($pt.Y))"
+            $pending = $false
+            break
+        }
         Start-Sleep -Milliseconds 300
         [Win]::mouse_event(0x0002, 0, 0, 0, [UIntPtr]::Zero) # LEFTDOWN
         $grow = [Math]::Min(80, $sh - $y - 10)
@@ -185,14 +195,28 @@ try {
         }
         Start-Sleep -Milliseconds 100
         [Win]::mouse_event(0x0004, 0, 0, 0, [UIntPtr]::Zero) # LEFTUP
-        Start-Sleep -Milliseconds 500
-        $after = Rect $h
-        $dh = ($after.Bottom - $after.Top) - ($before.Bottom - $before.Top)
-        Check ($dh -ge $grow - 4 -and $after.Top -eq $before.Top) "dragging the bottom edge down $grow px resizes the window (height +$dh, top $($before.Top) -> $($after.Top))"
+        # Wait for the window to follow the drag (up to 10 s), not a fixed half second.
+        $followed = (Get-Date).AddSeconds(10)
+        do {
+            Start-Sleep -Milliseconds 250
+            $after = Rect $h
+            $dh = ($after.Bottom - $after.Top) - ($before.Bottom - $before.Top)
+        } while ($dh -lt $grow - 4 -and (Get-Date) -lt $followed)
+        $worked = ($dh -ge $grow - 4 -and $after.Top -eq $before.Top)
+        if ($worked -or $attempt -eq 2) {
+            Check $worked "dragging the bottom edge down $grow px resizes the window (height +$dh, top $($before.Top) -> $($after.Top), attempt $attempt)"
+            $pending = $false
+        } else {
+            Write-Host "the drag did not take on attempt $attempt (height +$dh); trying once more"
+            # Put the window back where the drag starts from.
+            [void][Win]::SetWindowPos($h, [IntPtr]::Zero, 20, 20, [Math]::Min(1000, $sw - 40), [Math]::Min(620, $sh - 140), 0x0014)
+        }
     }
 
     # Maximized: no resize border, the whole window is client area.
     [void][Win]::ShowWindow($h, 3) # SW_MAXIMIZE
+    $zoomed = (Get-Date).AddSeconds(10)
+    while (-not [Win]::IsZoomed($h) -and (Get-Date) -lt $zoomed) { Start-Sleep -Milliseconds 100 }
     Start-Sleep -Milliseconds 500
     if ([Win]::IsZoomed($h)) {
         # The maximized window's rect overhangs the screen by the hidden frame (Windows' own

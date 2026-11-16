@@ -1,0 +1,6 @@
+{
+  "unit": "topology.trimming_tools",
+  "cases": [
+    {"name": "fuzz00586_ffi_rejected_ellipse_axis_length_overflows", "origin": "nightly fuzz run (--fuzz 600 --seeds 40, #1967's sweep): topology.trimming_tools/fuzz00586 (crash: cpp: killed by signal 11; base gen0322, mutation /curves/0/ellipse/y/0 = -1e+300)", "issue": "UB-46", "cpp": "harness: c++: invalid argument: ellipse: axis length overflows", "rust": "ok", "inputs": {"curves": [{"ellipse": {"c": [-2.536334979251734, -4.252747142387601, 3.597659385292328], "domain": [0.0, 360.0], "inside_out": true, "radii": [10.0, 5.578654943994139], "x": [0.3606026415402881, 0.9327195371140065, 0.0], "y": [-1e+300, 0.17543603758846282, -0.8736761718191891]}}], "op": "order", "outer": true, "tol": 0.0001}}
+  ]
+}

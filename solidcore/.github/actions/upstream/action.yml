@@ -1,0 +1,27 @@
+name: Upstream sources
+description: >
+  Clones upstream usd-brep at the pinned commit into upstream/: the reading reference the
+  port follows and the source of upstream/TestFiles, which tests and unit fixtures read.
+  Nothing in it is built. The pin (UPSTREAM_REPO, UPSTREAM_VERSION, UPSTREAM_COMMIT) comes
+  from scripts/upstream-pin.env unless the job environment already sets it.
+runs:
+  using: composite
+  steps:
+    - name: Load upstream pin
+      shell: bash
+      run: |
+        while IFS='=' read -r k v; do
+          case "$k" in
+            UPSTREAM_REPO|UPSTREAM_VERSION|UPSTREAM_COMMIT)
+              if [ -z "${!k:-}" ]; then echo "$k=$v" >> "$GITHUB_ENV"; fi ;;
+          esac
+        done < scripts/upstream-pin.env
+
+    - name: Clone upstream at pinned commit
+      shell: bash
+      run: |
+        git init upstream
+        git -C upstream remote add origin "$UPSTREAM_REPO"
+        git -C upstream fetch --depth 1 origin "$UPSTREAM_COMMIT" \
+          || git -C upstream fetch origin
+        git -C upstream checkout --detach "$UPSTREAM_COMMIT"

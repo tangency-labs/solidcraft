@@ -1,0 +1,1772 @@
+{
+ "cases": [
+  {
+   "name": "nl_pc1_vertices_higher_shell_edges_same_merge_3reps",
+   "upstream_ref": "source/SMLib/src/SmTopologySweep.cpp (DoSweep with explicit target lists: DoSweepFacesHigher/EdgesHigher/VerticesHigher, DoSweepFacesSame/EdgesSame/VerticesSame); tests/prog_test/src/smSweepTest.cpp my_sweep_demo case 1",
+   "inputs": {
+    "steps": [],
+    "body": [
+     1,
+     1,
+     0,
+     0,
+     10,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     1,
+     3,
+     0,
+     0,
+     2
+    ],
+    "lists": [
+     -1,
+     -1,
+     1,
+     -1,
+     0,
+     -1,
+     0
+    ]
+   }
+  },
+  {
+   "name": "nl_pc2_vertices_same",
+   "upstream_ref": "source/SMLib/src/SmTopologySweep.cpp (DoSweep with explicit target lists: DoSweepFacesHigher/EdgesHigher/VerticesHigher, DoSweepFacesSame/EdgesSame/VerticesSame); tests/prog_test/src/smSweepTest.cpp my_sweep_demo case 2",
+   "inputs": {
+    "steps": [],
+    "body": [
+     1,
+     1,
+     0,
+     0,
+     10,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     1,
+     0,
+     0,
+     2
+    ],
+    "lists": [
+     -1,
+     -1,
+     -1,
+     -1,
+     -1,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "nl_pc3_vertices_higher",
+   "upstream_ref": "source/SMLib/src/SmTopologySweep.cpp (DoSweep with explicit target lists: DoSweepFacesHigher/EdgesHigher/VerticesHigher, DoSweepFacesSame/EdgesSame/VerticesSame); tests/prog_test/src/smSweepTest.cpp my_sweep_demo case 3",
+   "inputs": {
+    "steps": [],
+    "body": [
+     1,
+     1,
+     0,
+     0,
+     10,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     1,
+     0,
+     0,
+     2
+    ],
+    "lists": [
+     -1,
+     -1,
+     0,
+     -1,
+     -1,
+     -1,
+     0
+    ]
+   }
+  },
+  {
+   "name": "nl_pc4_edges_same",
+   "upstream_ref": "source/SMLib/src/SmTopologySweep.cpp (DoSweep with explicit target lists: DoSweepFacesHigher/EdgesHigher/VerticesHigher, DoSweepFacesSame/EdgesSame/VerticesSame); tests/prog_test/src/smSweepTest.cpp my_sweep_demo case 4",
+   "inputs": {
+    "steps": [],
+    "body": [
+     1,
+     1,
+     0,
+     0,
+     10,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     1,
+     0,
+     0,
+     2
+    ],
+    "lists": [
+     -1,
+     -1,
+     -1,
+     -1,
+     0,
+     -1,
+     0
+    ]
+   }
+  },
+  {
+   "name": "nl_pc5_edges_higher",
+   "upstream_ref": "source/SMLib/src/SmTopologySweep.cpp (DoSweep with explicit target lists: DoSweepFacesHigher/EdgesHigher/VerticesHigher, DoSweepFacesSame/EdgesSame/VerticesSame); tests/prog_test/src/smSweepTest.cpp my_sweep_demo case 5",
+   "inputs": {
+    "steps": [],
+    "body": [
+     1,
+     1,
+     0,
+     0,
+     10,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     1,
+     0,
+     0,
+     2
+    ],
+    "lists": [
+     -1,
+     0,
+     -1,
+     -1,
+     -1,
+     -1,
+     0
+    ]
+   }
+  },
+  {
+   "name": "nl_pc6_faces_same",
+   "upstream_ref": "source/SMLib/src/SmTopologySweep.cpp (DoSweep with explicit target lists: DoSweepFacesHigher/EdgesHigher/VerticesHigher, DoSweepFacesSame/EdgesSame/VerticesSame); tests/prog_test/src/smSweepTest.cpp my_sweep_demo case 6",
+   "inputs": {
+    "steps": [],
+    "body": [
+     1,
+     1,
+     0,
+     0,
+     10,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     1,
+     0,
+     0,
+     2
+    ],
+    "lists": [
+     -1,
+     -1,
+     -1,
+     0,
+     -1,
+     -1,
+     0
+    ]
+   }
+  },
+  {
+   "name": "nl_pc7_faces_higher_merge_lists",
+   "upstream_ref": "source/SMLib/src/SmTopologySweep.cpp (DoSweep with explicit target lists: DoSweepFacesHigher/EdgesHigher/VerticesHigher, DoSweepFacesSame/EdgesSame/VerticesSame); tests/prog_test/src/smSweepTest.cpp my_sweep_demo case 7",
+   "inputs": {
+    "steps": [],
+    "body": [
+     1,
+     1,
+     0,
+     0,
+     10,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     1,
+     1,
+     0,
+     0,
+     2
+    ],
+    "lists": [
+     0,
+     -1,
+     -1,
+     -1,
+     -1,
+     -1,
+     0
+    ]
+   }
+  },
+  {
+   "name": "nl_pc9_rotate_vertices_same",
+   "upstream_ref": "source/SMLib/src/SmTopologySweep.cpp (DoSweep with explicit target lists: DoSweepFacesHigher/EdgesHigher/VerticesHigher, DoSweepFacesSame/EdgesSame/VerticesSame); tests/prog_test/src/smSweepTest.cpp my_sweep_demo case 9",
+   "inputs": {
+    "steps": [],
+    "body": [
+     1,
+     2,
+     0,
+     1,
+     0,
+     30,
+     -10,
+     0,
+     0,
+     0.0001,
+     0,
+     0,
+     1,
+     0,
+     0,
+     2
+    ],
+    "lists": [
+     -1,
+     -1,
+     -1,
+     -1,
+     -1,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "nl_pc10_rotate_vertices_higher",
+   "upstream_ref": "source/SMLib/src/SmTopologySweep.cpp (DoSweep with explicit target lists: DoSweepFacesHigher/EdgesHigher/VerticesHigher, DoSweepFacesSame/EdgesSame/VerticesSame); tests/prog_test/src/smSweepTest.cpp my_sweep_demo case 10",
+   "inputs": {
+    "steps": [],
+    "body": [
+     1,
+     2,
+     0,
+     1,
+     0,
+     30,
+     -10,
+     0,
+     0,
+     0.0001,
+     0,
+     0,
+     1,
+     0,
+     0,
+     2
+    ],
+    "lists": [
+     -1,
+     -1,
+     0,
+     -1,
+     -1,
+     -1,
+     0
+    ]
+   }
+  },
+  {
+   "name": "nl_pc11_rotate_vertices_higher_full_circle",
+   "upstream_ref": "source/SMLib/src/SmTopologySweep.cpp (DoSweep with explicit target lists: DoSweepFacesHigher/EdgesHigher/VerticesHigher, DoSweepFacesSame/EdgesSame/VerticesSame); tests/prog_test/src/smSweepTest.cpp my_sweep_demo case 11",
+   "inputs": {
+    "steps": [],
+    "body": [
+     1,
+     2,
+     0,
+     1,
+     0,
+     360,
+     -10,
+     0,
+     0,
+     0.0001,
+     0,
+     0,
+     1,
+     0,
+     0,
+     2
+    ],
+    "lists": [
+     -1,
+     -1,
+     0,
+     -1,
+     -1,
+     -1,
+     0
+    ]
+   }
+  },
+  {
+   "name": "nl_pc12_rotate_edges_same",
+   "upstream_ref": "source/SMLib/src/SmTopologySweep.cpp (DoSweep with explicit target lists: DoSweepFacesHigher/EdgesHigher/VerticesHigher, DoSweepFacesSame/EdgesSame/VerticesSame); tests/prog_test/src/smSweepTest.cpp my_sweep_demo case 12",
+   "inputs": {
+    "steps": [],
+    "body": [
+     1,
+     2,
+     0,
+     -1,
+     0,
+     36,
+     -10,
+     0,
+     0,
+     0.0001,
+     0,
+     0,
+     1,
+     0,
+     0,
+     2
+    ],
+    "lists": [
+     -1,
+     -1,
+     -1,
+     -1,
+     0,
+     -1,
+     0
+    ]
+   }
+  },
+  {
+   "name": "nl_pc13_rotate_faces_same_3reps",
+   "upstream_ref": "source/SMLib/src/SmTopologySweep.cpp (DoSweep with explicit target lists: DoSweepFacesHigher/EdgesHigher/VerticesHigher, DoSweepFacesSame/EdgesSame/VerticesSame); tests/prog_test/src/smSweepTest.cpp my_sweep_demo case 13",
+   "inputs": {
+    "steps": [],
+    "body": [
+     1,
+     2,
+     0,
+     -1,
+     0,
+     36,
+     -10,
+     0,
+     0,
+     0.0001,
+     0,
+     0,
+     3,
+     0,
+     0,
+     2
+    ],
+    "lists": [
+     -1,
+     -1,
+     -1,
+     0,
+     -1,
+     -1,
+     0
+    ]
+   }
+  },
+  {
+   "name": "nl_pc14_rotate_vertices_higher_3reps",
+   "upstream_ref": "source/SMLib/src/SmTopologySweep.cpp (DoSweep with explicit target lists: DoSweepFacesHigher/EdgesHigher/VerticesHigher, DoSweepFacesSame/EdgesSame/VerticesSame); tests/prog_test/src/smSweepTest.cpp my_sweep_demo case 14",
+   "inputs": {
+    "steps": [],
+    "body": [
+     1,
+     2,
+     0,
+     1,
+     0,
+     30,
+     -10,
+     0,
+     0,
+     0.0001,
+     0,
+     0,
+     3,
+     0,
+     0,
+     2
+    ],
+    "lists": [
+     -1,
+     -1,
+     0,
+     -1,
+     -1,
+     -1,
+     0
+    ]
+   }
+  },
+  {
+   "name": "nl_pc16_rotate_faces_same_through_edge_3reps",
+   "upstream_ref": "source/SMLib/src/SmTopologySweep.cpp (DoSweep with explicit target lists: DoSweepFacesHigher/EdgesHigher/VerticesHigher, DoSweepFacesSame/EdgesSame/VerticesSame); tests/prog_test/src/smSweepTest.cpp my_sweep_demo case 16",
+   "inputs": {
+    "steps": [],
+    "body": [
+     1,
+     2,
+     0,
+     -1,
+     0,
+     36,
+     0,
+     0,
+     0,
+     0.0001,
+     0,
+     0,
+     3,
+     0,
+     0,
+     2
+    ],
+    "lists": [
+     -1,
+     -1,
+     -1,
+     0,
+     -1,
+     -1,
+     0
+    ]
+   }
+  },
+  {
+   "name": "nl_pc17_rotate_faces_same_through_inner_edge_3reps",
+   "upstream_ref": "source/SMLib/src/SmTopologySweep.cpp (DoSweep with explicit target lists: DoSweepFacesHigher/EdgesHigher/VerticesHigher, DoSweepFacesSame/EdgesSame/VerticesSame); tests/prog_test/src/smSweepTest.cpp my_sweep_demo case 17",
+   "inputs": {
+    "steps": [],
+    "body": [
+     1,
+     2,
+     3,
+     -3,
+     0,
+     36,
+     1,
+     8,
+     0,
+     0.0001,
+     0,
+     0,
+     3,
+     0,
+     0,
+     2
+    ],
+    "lists": [
+     -1,
+     -1,
+     -1,
+     0,
+     -1,
+     -1,
+     0
+    ]
+   }
+  },
+  {
+   "name": "nl_pc18_rotate_faces_same_through_two_inner_edges",
+   "upstream_ref": "source/SMLib/src/SmTopologySweep.cpp (DoSweep with explicit target lists: DoSweepFacesHigher/EdgesHigher/VerticesHigher, DoSweepFacesSame/EdgesSame/VerticesSame); tests/prog_test/src/smSweepTest.cpp my_sweep_demo case 18",
+   "inputs": {
+    "steps": [],
+    "body": [
+     1,
+     2,
+     1,
+     0,
+     0,
+     36,
+     0,
+     5,
+     0,
+     0.0001,
+     0,
+     0,
+     1,
+     0,
+     0,
+     2
+    ],
+    "lists": [
+     -1,
+     -1,
+     -1,
+     0,
+     -1,
+     -1,
+     0
+    ]
+   }
+  },
+  {
+   "name": "nl_pc21_rotate_one_face_higher_axis_through_edge",
+   "upstream_ref": "source/SMLib/src/SmTopologySweep.cpp (DoSweep with explicit target lists: DoSweepFacesHigher/EdgesHigher/VerticesHigher, DoSweepFacesSame/EdgesSame/VerticesSame); tests/prog_test/src/smSweepTest.cpp my_sweep_demo case 21",
+   "inputs": {
+    "steps": [],
+    "body": [
+     1,
+     2,
+     0,
+     1,
+     0,
+     90,
+     0,
+     0,
+     0,
+     0.0001,
+     0,
+     0,
+     1,
+     0,
+     0,
+     2
+    ],
+    "lists": [
+     10,
+     -1,
+     -1,
+     -1,
+     -1,
+     -1,
+     0
+    ]
+   }
+  },
+  {
+   "name": "nl_test_edges_same_stitch",
+   "upstream_ref": "source/SMLib/src/SmTopologySweep.cpp (DoSweep with explicit target lists: DoSweepFacesHigher/EdgesHigher/VerticesHigher, DoSweepFacesSame/EdgesSame/VerticesSame)",
+   "inputs": {
+    "steps": [],
+    "body": [
+     1,
+     1,
+     0,
+     0,
+     10,
+     0,
+     0,
+     0,
+     0,
+     0,
+     1,
+     0,
+     1,
+     0,
+     0,
+     2
+    ],
+    "lists": [
+     -1,
+     -1,
+     -1,
+     -1,
+     0,
+     -1,
+     0
+    ]
+   }
+  },
+  {
+   "name": "nl_test_edges_same_3reps",
+   "upstream_ref": "source/SMLib/src/SmTopologySweep.cpp (DoSweep with explicit target lists: DoSweepFacesHigher/EdgesHigher/VerticesHigher, DoSweepFacesSame/EdgesSame/VerticesSame)",
+   "inputs": {
+    "steps": [],
+    "body": [
+     1,
+     1,
+     0,
+     0,
+     10,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     3,
+     0,
+     0,
+     2
+    ],
+    "lists": [
+     -1,
+     -1,
+     -1,
+     -1,
+     0,
+     -1,
+     0
+    ]
+   }
+  },
+  {
+   "name": "nl_test_edges_same_tagging",
+   "upstream_ref": "source/SMLib/src/SmTopologySweep.cpp (DoSweep with explicit target lists: DoSweepFacesHigher/EdgesHigher/VerticesHigher, DoSweepFacesSame/EdgesSame/VerticesSame)",
+   "inputs": {
+    "steps": [],
+    "body": [
+     1,
+     1,
+     0,
+     0,
+     10,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     1,
+     1,
+     13,
+     2
+    ],
+    "lists": [
+     -1,
+     -1,
+     -1,
+     -1,
+     0,
+     -1,
+     0
+    ]
+   }
+  },
+  {
+   "name": "nl_test_edges_higher_tagging",
+   "upstream_ref": "source/SMLib/src/SmTopologySweep.cpp (DoSweep with explicit target lists: DoSweepFacesHigher/EdgesHigher/VerticesHigher, DoSweepFacesSame/EdgesSame/VerticesSame)",
+   "inputs": {
+    "steps": [],
+    "body": [
+     1,
+     1,
+     0,
+     0,
+     10,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     1,
+     1,
+     17,
+     2
+    ],
+    "lists": [
+     -1,
+     0,
+     -1,
+     -1,
+     -1,
+     -1,
+     0
+    ]
+   }
+  },
+  {
+   "name": "nl_test_edges_higher_merge",
+   "upstream_ref": "source/SMLib/src/SmTopologySweep.cpp (DoSweep with explicit target lists: DoSweepFacesHigher/EdgesHigher/VerticesHigher, DoSweepFacesSame/EdgesSame/VerticesSame)",
+   "inputs": {
+    "steps": [],
+    "body": [
+     1,
+     1,
+     0,
+     0,
+     10,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     1,
+     1,
+     0,
+     0,
+     2
+    ],
+    "lists": [
+     -1,
+     0,
+     -1,
+     -1,
+     -1,
+     -1,
+     0
+    ]
+   }
+  },
+  {
+   "name": "nl_test_edges_higher_rotation",
+   "upstream_ref": "source/SMLib/src/SmTopologySweep.cpp (DoSweep with explicit target lists: DoSweepFacesHigher/EdgesHigher/VerticesHigher, DoSweepFacesSame/EdgesSame/VerticesSame)",
+   "inputs": {
+    "steps": [],
+    "body": [
+     1,
+     2,
+     0,
+     1,
+     0,
+     30,
+     -10,
+     0,
+     0,
+     0.0001,
+     0,
+     0,
+     1,
+     0,
+     0,
+     2
+    ],
+    "lists": [
+     -1,
+     0,
+     -1,
+     -1,
+     -1,
+     -1,
+     0
+    ]
+   }
+  },
+  {
+   "name": "nl_test_wire_edges_higher",
+   "upstream_ref": "source/SMLib/src/SmTopologySweep.cpp (DoSweep with explicit target lists: DoSweepFacesHigher/EdgesHigher/VerticesHigher, DoSweepFacesSame/EdgesSame/VerticesSame)",
+   "inputs": {
+    "steps": [],
+    "body": [
+     1,
+     1,
+     0,
+     0,
+     10,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     1,
+     0,
+     0,
+     2
+    ],
+    "lists": [
+     -1,
+     1,
+     -1,
+     -1,
+     -1,
+     -1,
+     0
+    ]
+   }
+  },
+  {
+   "name": "nl_test_wire_edges_same_rotation",
+   "upstream_ref": "source/SMLib/src/SmTopologySweep.cpp (DoSweep with explicit target lists: DoSweepFacesHigher/EdgesHigher/VerticesHigher, DoSweepFacesSame/EdgesSame/VerticesSame)",
+   "inputs": {
+    "steps": [],
+    "body": [
+     1,
+     2,
+     0,
+     -1,
+     0,
+     36,
+     -10,
+     0,
+     0,
+     0.0001,
+     0,
+     0,
+     1,
+     0,
+     0,
+     2
+    ],
+    "lists": [
+     -1,
+     -1,
+     -1,
+     -1,
+     1,
+     -1,
+     0
+    ]
+   }
+  },
+  {
+   "name": "nl_test_shell_vertices_same",
+   "upstream_ref": "source/SMLib/src/SmTopologySweep.cpp (DoSweep with explicit target lists: DoSweepFacesHigher/EdgesHigher/VerticesHigher, DoSweepFacesSame/EdgesSame/VerticesSame)",
+   "inputs": {
+    "steps": [],
+    "body": [
+     1,
+     1,
+     0,
+     0,
+     10,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     1,
+     0,
+     0,
+     2
+    ],
+    "lists": [
+     -1,
+     -1,
+     -1,
+     -1,
+     -1,
+     1,
+     0
+    ]
+   }
+  },
+  {
+   "name": "nl_test_one_edge_same",
+   "upstream_ref": "source/SMLib/src/SmTopologySweep.cpp (DoSweep with explicit target lists: DoSweepFacesHigher/EdgesHigher/VerticesHigher, DoSweepFacesSame/EdgesSame/VerticesSame)",
+   "inputs": {
+    "steps": [],
+    "body": [
+     1,
+     1,
+     0,
+     0,
+     10,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     1,
+     0,
+     0,
+     2
+    ],
+    "lists": [
+     -1,
+     -1,
+     -1,
+     -1,
+     10,
+     -1,
+     0
+    ]
+   }
+  },
+  {
+   "name": "nl_test_one_edge_higher",
+   "upstream_ref": "source/SMLib/src/SmTopologySweep.cpp (DoSweep with explicit target lists: DoSweepFacesHigher/EdgesHigher/VerticesHigher, DoSweepFacesSame/EdgesSame/VerticesSame)",
+   "inputs": {
+    "steps": [],
+    "body": [
+     1,
+     1,
+     0,
+     0,
+     10,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     1,
+     0,
+     0,
+     2
+    ],
+    "lists": [
+     -1,
+     11,
+     -1,
+     -1,
+     -1,
+     -1,
+     0
+    ]
+   }
+  },
+  {
+   "name": "nl_test_one_vertex_higher",
+   "upstream_ref": "source/SMLib/src/SmTopologySweep.cpp (DoSweep with explicit target lists: DoSweepFacesHigher/EdgesHigher/VerticesHigher, DoSweepFacesSame/EdgesSame/VerticesSame)",
+   "inputs": {
+    "steps": [],
+    "body": [
+     1,
+     1,
+     0,
+     0,
+     10,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     1,
+     0,
+     0,
+     2
+    ],
+    "lists": [
+     -1,
+     -1,
+     12,
+     -1,
+     -1,
+     -1,
+     0
+    ]
+   }
+  },
+  {
+   "name": "nl_test_one_vertex_same_oblique",
+   "upstream_ref": "source/SMLib/src/SmTopologySweep.cpp (DoSweep with explicit target lists: DoSweepFacesHigher/EdgesHigher/VerticesHigher, DoSweepFacesSame/EdgesSame/VerticesSame)",
+   "inputs": {
+    "steps": [],
+    "body": [
+     1,
+     1,
+     1,
+     2,
+     5,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     1,
+     0,
+     0,
+     2
+    ],
+    "lists": [
+     -1,
+     -1,
+     -1,
+     -1,
+     -1,
+     13,
+     0
+    ]
+   }
+  },
+  {
+   "name": "nl_test_faces_same_tagging",
+   "upstream_ref": "source/SMLib/src/SmTopologySweep.cpp (DoSweep with explicit target lists: DoSweepFacesHigher/EdgesHigher/VerticesHigher, DoSweepFacesSame/EdgesSame/VerticesSame)",
+   "inputs": {
+    "steps": [],
+    "body": [
+     1,
+     1,
+     0,
+     0,
+     10,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     1,
+     1,
+     21,
+     2
+    ],
+    "lists": [
+     -1,
+     -1,
+     -1,
+     0,
+     -1,
+     -1,
+     0
+    ]
+   }
+  },
+  {
+   "name": "nl_test_faces_same_merge",
+   "upstream_ref": "source/SMLib/src/SmTopologySweep.cpp (DoSweep with explicit target lists: DoSweepFacesHigher/EdgesHigher/VerticesHigher, DoSweepFacesSame/EdgesSame/VerticesSame)",
+   "inputs": {
+    "steps": [],
+    "body": [
+     1,
+     1,
+     0,
+     0,
+     10,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     1,
+     1,
+     0,
+     0,
+     2
+    ],
+    "lists": [
+     -1,
+     -1,
+     -1,
+     0,
+     -1,
+     -1,
+     0
+    ]
+   }
+  },
+  {
+   "name": "nl_test_faces_same_and_edges_higher",
+   "upstream_ref": "source/SMLib/src/SmTopologySweep.cpp (DoSweep with explicit target lists: DoSweepFacesHigher/EdgesHigher/VerticesHigher, DoSweepFacesSame/EdgesSame/VerticesSame)",
+   "inputs": {
+    "steps": [],
+    "body": [
+     1,
+     1,
+     0,
+     0,
+     10,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     1,
+     0,
+     0,
+     2
+    ],
+    "lists": [
+     -1,
+     0,
+     -1,
+     0,
+     -1,
+     -1,
+     0
+    ]
+   }
+  },
+  {
+   "name": "nl_test_faces_higher_vertices_same",
+   "upstream_ref": "source/SMLib/src/SmTopologySweep.cpp (DoSweep with explicit target lists: DoSweepFacesHigher/EdgesHigher/VerticesHigher, DoSweepFacesSame/EdgesSame/VerticesSame)",
+   "inputs": {
+    "steps": [],
+    "body": [
+     1,
+     1,
+     0,
+     0,
+     10,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     1,
+     0,
+     0,
+     2
+    ],
+    "lists": [
+     0,
+     -1,
+     -1,
+     -1,
+     -1,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "nl_test_all_but_last_face_higher_merge",
+   "upstream_ref": "source/SMLib/src/SmTopologySweep.cpp (DoSweep with explicit target lists: DoSweepFacesHigher/EdgesHigher/VerticesHigher, DoSweepFacesSame/EdgesSame/VerticesSame)",
+   "inputs": {
+    "steps": [],
+    "body": [
+     1,
+     1,
+     0,
+     0,
+     10,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     1,
+     1,
+     0,
+     0,
+     2
+    ],
+    "lists": [
+     3,
+     -1,
+     -1,
+     -1,
+     -1,
+     -1,
+     0
+    ]
+   }
+  },
+  {
+   "name": "nl_test_all_six_lists",
+   "upstream_ref": "source/SMLib/src/SmTopologySweep.cpp (DoSweep with explicit target lists: DoSweepFacesHigher/EdgesHigher/VerticesHigher, DoSweepFacesSame/EdgesSame/VerticesSame)",
+   "inputs": {
+    "steps": [],
+    "body": [
+     1,
+     1,
+     0,
+     0,
+     10,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     1,
+     0,
+     0,
+     2
+    ],
+    "lists": [
+     0,
+     1,
+     1,
+     0,
+     0,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "nl_test_empty_lists",
+   "upstream_ref": "source/SMLib/src/SmTopologySweep.cpp (DoSweep with explicit target lists: DoSweepFacesHigher/EdgesHigher/VerticesHigher, DoSweepFacesSame/EdgesSame/VerticesSame)",
+   "inputs": {
+    "steps": [],
+    "body": [
+     1,
+     1,
+     0,
+     0,
+     10,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     1,
+     0,
+     0,
+     2
+    ],
+    "lists": [
+     2,
+     2,
+     2,
+     2,
+     2,
+     2,
+     0
+    ]
+   }
+  },
+  {
+   "name": "nl_test_empty_lists_3reps",
+   "upstream_ref": "source/SMLib/src/SmTopologySweep.cpp (DoSweep with explicit target lists: DoSweepFacesHigher/EdgesHigher/VerticesHigher, DoSweepFacesSame/EdgesSame/VerticesSame)",
+   "inputs": {
+    "steps": [],
+    "body": [
+     1,
+     1,
+     0,
+     0,
+     10,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     3,
+     0,
+     0,
+     2
+    ],
+    "lists": [
+     2,
+     2,
+     2,
+     2,
+     2,
+     2,
+     0
+    ]
+   }
+  },
+  {
+   "name": "nl_test_null_region_edges_same",
+   "upstream_ref": "source/SMLib/src/SmTopologySweep.cpp (DoSweep with explicit target lists: DoSweepFacesHigher/EdgesHigher/VerticesHigher, DoSweepFacesSame/EdgesSame/VerticesSame)",
+   "inputs": {
+    "steps": [],
+    "body": [
+     1,
+     1,
+     0,
+     0,
+     10,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     1,
+     0,
+     0,
+     2
+    ],
+    "lists": [
+     -1,
+     -1,
+     -1,
+     -1,
+     0,
+     -1,
+     1
+    ]
+   }
+  },
+  {
+   "name": "nl_test_null_region_faces_higher",
+   "upstream_ref": "source/SMLib/src/SmTopologySweep.cpp (DoSweep with explicit target lists: DoSweepFacesHigher/EdgesHigher/VerticesHigher, DoSweepFacesSame/EdgesSame/VerticesSame)",
+   "inputs": {
+    "steps": [],
+    "body": [
+     1,
+     1,
+     0,
+     0,
+     10,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     1,
+     0,
+     0,
+     2
+    ],
+    "lists": [
+     0,
+     -1,
+     -1,
+     -1,
+     -1,
+     -1,
+     1
+    ]
+   }
+  },
+  {
+   "name": "nl_box_faces_same",
+   "upstream_ref": "source/SMLib/src/SmTopologySweep.cpp (DoSweep with explicit target lists: DoSweepFacesHigher/EdgesHigher/VerticesHigher, DoSweepFacesSame/EdgesSame/VerticesSame)",
+   "inputs": {
+    "steps": [],
+    "body": [
+     5,
+     1,
+     0,
+     0,
+     10,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     1,
+     0,
+     0,
+     2
+    ],
+    "lists": [
+     -1,
+     -1,
+     -1,
+     0,
+     -1,
+     -1,
+     0
+    ]
+   }
+  },
+  {
+   "name": "nl_box_edges_same_rotation",
+   "upstream_ref": "source/SMLib/src/SmTopologySweep.cpp (DoSweep with explicit target lists: DoSweepFacesHigher/EdgesHigher/VerticesHigher, DoSweepFacesSame/EdgesSame/VerticesSame)",
+   "inputs": {
+    "steps": [],
+    "body": [
+     5,
+     2,
+     0,
+     1,
+     0,
+     30,
+     -10,
+     0,
+     0,
+     0.0001,
+     0,
+     0,
+     1,
+     0,
+     0,
+     2
+    ],
+    "lists": [
+     -1,
+     -1,
+     -1,
+     -1,
+     0,
+     -1,
+     0
+    ]
+   }
+  },
+  {
+   "name": "nl_box_one_face_higher_stitch",
+   "upstream_ref": "source/SMLib/src/SmTopologySweep.cpp (DoSweep with explicit target lists: DoSweepFacesHigher/EdgesHigher/VerticesHigher, DoSweepFacesSame/EdgesSame/VerticesSame)",
+   "inputs": {
+    "steps": [],
+    "body": [
+     5,
+     1,
+     0,
+     0,
+     10,
+     0,
+     0,
+     0,
+     0,
+     0,
+     1,
+     0,
+     1,
+     0,
+     0,
+     2
+    ],
+    "lists": [
+     10,
+     -1,
+     -1,
+     -1,
+     -1,
+     -1,
+     0
+    ]
+   }
+  },
+  {
+   "name": "nl_box_edges_higher_one_edge",
+   "upstream_ref": "source/SMLib/src/SmTopologySweep.cpp (DoSweep with explicit target lists: DoSweepFacesHigher/EdgesHigher/VerticesHigher, DoSweepFacesSame/EdgesSame/VerticesSame)",
+   "inputs": {
+    "steps": [],
+    "body": [
+     5,
+     1,
+     0,
+     0,
+     10,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     1,
+     0,
+     0,
+     2
+    ],
+    "lists": [
+     -1,
+     10,
+     -1,
+     -1,
+     -1,
+     -1,
+     0
+    ]
+   }
+  },
+  {
+   "name": "nl_box_vertices_higher",
+   "upstream_ref": "source/SMLib/src/SmTopologySweep.cpp (DoSweep with explicit target lists: DoSweepFacesHigher/EdgesHigher/VerticesHigher, DoSweepFacesSame/EdgesSame/VerticesSame)",
+   "inputs": {
+    "steps": [],
+    "body": [
+     5,
+     1,
+     0,
+     0,
+     10,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     1,
+     0,
+     0,
+     2
+    ],
+    "lists": [
+     -1,
+     -1,
+     0,
+     -1,
+     -1,
+     -1,
+     0
+    ]
+   }
+  },
+  {
+   "name": "nl_box_wire_vertices_same_edges_same",
+   "upstream_ref": "source/SMLib/src/SmTopologySweep.cpp (DoSweep with explicit target lists: DoSweepFacesHigher/EdgesHigher/VerticesHigher, DoSweepFacesSame/EdgesSame/VerticesSame)",
+   "inputs": {
+    "steps": [],
+    "body": [
+     0,
+     1,
+     0,
+     0,
+     10,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     1,
+     0,
+     0,
+     2
+    ],
+    "lists": [
+     -1,
+     -1,
+     -1,
+     -1,
+     0,
+     1,
+     0
+    ]
+   }
+  },
+  {
+   "name": "nl_box_wire_edges_higher_wire_only",
+   "upstream_ref": "source/SMLib/src/SmTopologySweep.cpp (DoSweep with explicit target lists: DoSweepFacesHigher/EdgesHigher/VerticesHigher, DoSweepFacesSame/EdgesSame/VerticesSame)",
+   "inputs": {
+    "steps": [],
+    "body": [
+     0,
+     1,
+     0,
+     0,
+     10,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     1,
+     0,
+     0,
+     2
+    ],
+    "lists": [
+     -1,
+     1,
+     -1,
+     -1,
+     -1,
+     -1,
+     0
+    ]
+   }
+  },
+  {
+   "name": "nl_base_edges_same",
+   "upstream_ref": "source/SMLib/src/SmTopologySweep.cpp (DoSweep with explicit target lists: DoSweepFacesHigher/EdgesHigher/VerticesHigher, DoSweepFacesSame/EdgesSame/VerticesSame)",
+   "inputs": {
+    "steps": [],
+    "body": [
+     1,
+     0,
+     0,
+     0,
+     10,
+     0,
+     0,
+     0,
+     0,
+     0.0001,
+     0,
+     0,
+     1,
+     0,
+     0,
+     2
+    ],
+    "lists": [
+     -1,
+     -1,
+     -1,
+     -1,
+     0,
+     -1,
+     0
+    ]
+   }
+  },
+  {
+   "name": "nl_base_faces_same",
+   "upstream_ref": "source/SMLib/src/SmTopologySweep.cpp (DoSweep with explicit target lists: DoSweepFacesHigher/EdgesHigher/VerticesHigher, DoSweepFacesSame/EdgesSame/VerticesSame)",
+   "inputs": {
+    "steps": [],
+    "body": [
+     1,
+     0,
+     0,
+     0,
+     10,
+     0,
+     0,
+     0,
+     0,
+     0.0001,
+     0,
+     0,
+     1,
+     0,
+     0,
+     2
+    ],
+    "lists": [
+     -1,
+     -1,
+     -1,
+     0,
+     -1,
+     -1,
+     0
+    ]
+   }
+  },
+  {
+   "name": "nl_base_vertices_same",
+   "upstream_ref": "source/SMLib/src/SmTopologySweep.cpp (DoSweep with explicit target lists: DoSweepFacesHigher/EdgesHigher/VerticesHigher, DoSweepFacesSame/EdgesSame/VerticesSame)",
+   "inputs": {
+    "steps": [],
+    "body": [
+     1,
+     0,
+     0,
+     0,
+     10,
+     0,
+     0,
+     0,
+     0,
+     0.0001,
+     0,
+     0,
+     1,
+     0,
+     0,
+     2
+    ],
+    "lists": [
+     -1,
+     -1,
+     -1,
+     -1,
+     -1,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "nl_base_vertices_higher",
+   "upstream_ref": "source/SMLib/src/SmTopologySweep.cpp (DoSweep with explicit target lists: DoSweepFacesHigher/EdgesHigher/VerticesHigher, DoSweepFacesSame/EdgesSame/VerticesSame)",
+   "inputs": {
+    "steps": [],
+    "body": [
+     1,
+     0,
+     0,
+     0,
+     10,
+     0,
+     0,
+     0,
+     0,
+     0.0001,
+     0,
+     0,
+     1,
+     0,
+     0,
+     2
+    ],
+    "lists": [
+     -1,
+     -1,
+     0,
+     -1,
+     -1,
+     -1,
+     0
+    ]
+   }
+  },
+  {
+   "name": "nl_base_empty_lists",
+   "upstream_ref": "source/SMLib/src/SmTopologySweep.cpp (DoSweep with explicit target lists: DoSweepFacesHigher/EdgesHigher/VerticesHigher, DoSweepFacesSame/EdgesSame/VerticesSame)",
+   "inputs": {
+    "steps": [],
+    "body": [
+     1,
+     0,
+     0,
+     0,
+     10,
+     0,
+     0,
+     0,
+     0,
+     0.0001,
+     0,
+     0,
+     1,
+     0,
+     0,
+     2
+    ],
+    "lists": [
+     2,
+     2,
+     2,
+     2,
+     2,
+     2,
+     0
+    ]
+   }
+  }
+ ]
+}

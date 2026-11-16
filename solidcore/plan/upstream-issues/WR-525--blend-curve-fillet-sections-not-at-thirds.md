@@ -1,0 +1,10 @@
+#### WR-525. Blend-curve (G2) fillet sections are a faired Hermite scaled by the thumbweight, not the quintic with control points at thirds of the way to the corner
+- **Severity:** Wrong result (a shape difference, no failure)
+- **Area:** Blends
+- **Location:** `source/SMLib/src/SmFilletStandardSolver.cpp`, `SmBlendCurveCrossSectionFSG::CreateSurfaceFromCurves` (the end derivatives after `FairBlendCurveDerivatives`, scaled by `m_dBlendScale`); the generators are created in `SmFilletExecutive::SetFilletParameters`.
+- **What happens:** a curvature-continuous section (`SM_FSG_BLEND_CURVE`, continuity 2) between two planar faces is the fairest equally spaced Hermite scaled by the thumbweight. A caller that wants the usual G2 round, whose inner control points lie a third and two thirds of the way from each contact to where the contacts' tangent lines meet (zero curvature at both contacts), has no way to ask for it.
+- **Trigger:** a 30 x 20 x 10 box, one top edge rounded G2 with r = 2 and thumbweight 1. The quintic at thirds leaves 6000 - 0.149471 * 4 * 30 = 5982.0635; SMLib's section leaves 5983.7604 (fork commit message: a 6 mm G2 round of a cube edge leaves 7902.56 where the quintic leaves 7892.38).
+- **How found:** SolidCraft's G2 blend (`Blend::Curvature`), tangency-labs/solidcore#1438.
+- **Confirmed:** the Rust port matches the C++ by default (no difftest change); the fork (tangency-labs/smlib `fd3b6a7`) adds `SmFilletExecutive::SetBlendCurveAtThirds`, off by default.
+- **Fix:** none in the C++ at the pin.
+- **Rust port:** behaves as upstream by default. `FilletSession::set_blend_curve_at_thirds(true)` (per session, before preparing the edges; `FilletExecutive::blend_curve_at_thirds`, `BlendCurveCrossSectionFsg::at_thirds`) scales the end derivatives to n/3 of the distance to the tangent lines' meeting point for degree n and the higher derivatives by its square and cube, as the fork does. Regression test: `crates/solidcore/tests/issue_1438_blend_curve_at_thirds.rs` (on: the analytic volume to 1e-9; off and default: the pinned section).

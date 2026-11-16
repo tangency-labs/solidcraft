@@ -17,7 +17,7 @@ use std::collections::HashMap;
 use egui::Color32;
 
 use crate::SolveApp;
-use crate::theme::Tokens;
+use solidcraft_theme::Tokens;
 
 /// A sketch's state as its last solve reports it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -33,14 +33,14 @@ pub(crate) enum SketchState {
 
 impl SketchState {
     pub(crate) fn of(ss: &solidcraft_engine::doc::SolvedSketch) -> SketchState {
-        if !ss.report.ok() {
+        if !ss.report.shown_ok() {
             SketchState::Conflict
         } else if ss.sketch.curves.is_empty() && ss.sketch.wires.is_empty() {
             SketchState::Empty
-        } else if ss.report.dof == 0 {
+        } else if ss.report.shown_dof() == 0 {
             SketchState::Full
         } else {
-            SketchState::Under(ss.report.dof)
+            SketchState::Under(ss.report.shown_dof())
         }
     }
 

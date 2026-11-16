@@ -53,6 +53,14 @@ impl Brep {
         core::classify_point(self.core(), p)
     }
 
+    /// [`Brep::classify_point`] for each of `points`, in order: each point's class, or its own
+    /// error. One classification of many points against the same body: the copy of the body and
+    /// the search structures a classification builds are made once for all of them, so it costs
+    /// far less than a call a point on a large body.
+    pub fn classify_points(&self, points: &[[f64; 3]]) -> Result<Vec<Result<PointClass>>> {
+        core::classify_points(self.core(), points)
+    }
+
     /// Mass properties at `relative_accuracy` (clamped to [1e-8, 1e-1]; [`MEASURE_ACCURACY`] is
     /// the finest): the sum over the body's material regions, so several lumps, or lumps
     /// touching along edges or at points, measure too. A body with no material (a sheet, an open
@@ -75,6 +83,15 @@ impl Brep {
     /// (half the flat arrays' `EDGE_TOLERANCE`) covers this.
     pub fn edge_face_distance(&self, edge: usize, face: usize) -> Result<f64> {
         core::edge_face_distance(self.core(), edge, face)
+    }
+
+    /// A proved upper bound on how far the record curve `curve` (a spline or rational spline)
+    /// over its parameters `interval` lies from the surface of face `face` (the body's face
+    /// order), in mm: no point of the curve there is farther. `floor` is the scale below which a
+    /// tighter bound changes nothing. `None` when SMLib does not enclose the gap (a surface
+    /// with no NURBS net, a piece it cannot bound) or there is no such face.
+    pub fn curve_face_gap_bound(&self, curve: &solidcore_record::brep::Curve, interval: [f64; 2], face: usize, floor: f64) -> Result<Option<f64>> {
+        core::curve_face_gap_bound(self.core(), curve, interval, face, floor)
     }
 
     /// Total area of every face, each counted once, so sheets and open shells too.
@@ -330,6 +347,15 @@ mod tests {
         assert_eq!(c.classify_point(at(5.0 - 1e-8)).unwrap(), PointClass::OnBoundary);
         assert_eq!(c.classify_point(at(5.0 + 1e-4)).unwrap(), PointClass::Outside);
         assert_eq!(c.classify_point(at(5.0 - 1e-4)).unwrap(), PointClass::Inside);
+        // Many points through one classifier: each as it classifies alone, a bad one its own error.
+        let points = [[5.0, 10.0, 15.0], [5.0, 10.0, 30.0 + 1e-4], [5.0, 10.0, f64::NAN], [5.0, 10.0, 30.0], [10.0, 20.0, 30.0], [-1.0, 10.0, 15.0]];
+        let each: Vec<Result<PointClass>> = points.iter().map(|&p| b.classify_point(p)).collect();
+        assert_eq!(b.classify_points(&points).unwrap(), each);
+        assert_eq!(b.classify_points(&[]).unwrap(), vec![]);
+        assert_eq!(b.classify_points(&[[f64::INFINITY; 3]]).unwrap(), vec![Err(Error::Argument)]);
+        let ring: Vec<[f64; 3]> = [5.0 + 1e-8, 5.0 - 1e-8, 5.0 + 1e-4, 5.0 - 1e-4].map(at).to_vec();
+        let classes: Vec<PointClass> = c.classify_points(&ring).unwrap().into_iter().map(Result::unwrap).collect();
+        assert_eq!(classes, [PointClass::OnBoundary, PointClass::OnBoundary, PointClass::Outside, PointClass::Inside]);
     }
 
     #[test]

@@ -1,0 +1,11 @@
+#### UB-192. `SmFilletSolver::PointOnPlaneSolve` writes solution values past `m_adUserDoubles`
+- **Severity:** Wrong result
+- **Area:** Healing
+- **Location:** `source/SMLib/src/SmFilletSolver.cpp:3054`-`3057` (`SmFilletSolver::PointOnPlaneSolve`, the found-solution copy).
+- **What happens:** Every solution value after the four UV values is copied to `rTsectPnt.m_adUserDoubles[i-4]` with no bound; the array holds `SM_MAX_USER_DOUBLES` (4) values. The sibling copies in `RailEdgeuseIntersect` and `RailRailIntersect` check `lCnt == SM_MAX_USER_DOUBLES` and return `SM_ERR`.
+- **Trigger:** a solver whose `GetJacobianSize` / `LoadInitialValues` give a solution vector longer than 8 values (a derived solver of calling code; the shipped solvers stay at or below 8).
+- **How found:** read during porting (unit `blend.fillet_solver_p2`).
+- **Confirmed:** no.
+- **Severity:** crash/UB (out-of-bounds write into the `SmTsectPnt`).
+- **Cause:** missing `SM_MAX_USER_DOUBLES` check.
+- **Rust port:** `blend::fillet_solver::p2::FilletSolver::point_on_plane_solve` returns `InvalidInput` for a fifth extra value.

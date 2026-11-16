@@ -6,9 +6,12 @@ Start with what this is, in plain words someone new to the project would underst
 
 Changes a default: no
 
-<!-- Required line, replace "no" if this changes what a user gets out of the box (a default value, key binding, setting, tool behaviour):
+<!-- Required line, replace "no" if this changes what a user gets out of the box (a default value, key binding, setting, tool behaviour; a UX default only, a kernel result change is 'no'):
 Changes a default: yes — <what>, old behaviour kept behind preference <name>
 Docs-only and bot PRs are exempt. -->
+
+<!-- A kernel change (solidcore/, crates/smlib/) that changes or deletes lines of an existing test or golden expectation needs a line saying why the old test was wrong (adding tests needs nothing):
+Test change: <reason> -->
 
 ## Validation
 
@@ -20,8 +23,10 @@ Put the picture or video here in the description. A file in the diff doesn't cou
 
 For observable CAD, UI or model behavior, include actual descriptive screenshots or a short recording from a small reproduction. This includes kernel, geometry, assembly and backend effects that can be shown in the app. Coding agents should run the app and capture the evidence themselves, rather than asking a human for evidence they can produce. Show the actual failure/result, preferably before and after, with brief steps, expected/actual behavior and annotations where helpful.
 
+A UI addition (a row, option, icon, button or entry in an existing dialog, toolbar, ribbon or menu) needs full-flow screenshots at 1280×720 and a small-window check.
+
 Flowcharts and Mermaid diagrams cannot substitute for evidence of visible behavior. Use diagrams for architectural reasoning when actual screenshots cannot illustrate the point. Changes with no useful observable behavior may omit screenshot/video evidence. Exclude private designs and sensitive details; attach media or link to an accessible recording rather than committing generated review artifacts.
 
 ## Integration status
 
-Record the upstream commit and PR status checked before handoff, any conflicts resolved, and validation after integration. Keep up with upstream merges and monitor this PR while the task is active; rebase before pushing and never force-push.
+Record the upstream commit and PR status checked before handoff, any conflicts resolved, and validation after integration. Keep up with upstream merges and monitor this PR while the task is active; when you push, bring your branch up to date with the latest `main` by rebasing (preferred; push your own branch with `--force-with-lease`) or by merging `main` in. Never force-push `main` or a branch someone else works on.

@@ -2,7 +2,12 @@
 use crate::ui_kit::BackingTooltipExt as _;
 use crate::{SolveApp, ui_kit};
 use serde_json::json;
-use solidcraft_engine::{doc::render_settings::RenderSettings, render::job::Phase};
+use solidcraft_engine::{
+    doc::render_settings::RenderSettings,
+    panels::{Direction, Flow},
+    render::job::Phase,
+};
+use solidcraft_theme::Tokens;
 
 pub(super) const SIZE_PRESETS: [(&str, u32, u32); 3] = [("HD", 1280, 720), ("Full HD", 1920, 1080), ("4K UHD", 3840, 2160)];
 
@@ -10,7 +15,7 @@ pub(super) fn camera_modified(app: &SolveApp, name: &str) -> bool {
     app.session.doc.render.setups.get(name).is_some_and(|setup| setup.camera != app.cam)
 }
 
-pub(crate) fn contents(app: &mut SolveApp, ui: &mut egui::Ui) {
+pub(crate) fn shared_shots(app: &mut SolveApp, ui: &mut egui::Ui, flow: Flow, inline: bool) {
     super::thumbnails::refresh(app, ui.ctx());
     let status = app.render_workspace.view.job.and_then(|job| app.session.render_job_handle(job).ok()).and_then(|handle| handle.status().ok());
     let progress = status
@@ -44,67 +49,85 @@ pub(crate) fn contents(app: &mut SolveApp, ui: &mut egui::Ui) {
         solidcraft_ui_text::format("render.batch_status", &[("running", &queue.running.to_string()), ("waiting", &queue.waiting.to_string())]);
     let (mut hide, mut start, mut save, mut chosen, mut size) = (false, false, false, None, None);
     let mut visible = Vec::new();
-    ui_kit::Panel::strip_contents(
-        ui,
-        |ui| {
+    let controls = |ui: &mut egui::Ui| {
+        if inline {
             let response = ui_kit::strip_toggle(ui, true, solidcraft_ui_text::tr_label("Hide Shots strip"));
             crate::scenario::publish_target("render:shots:hide", response.rect);
             hide = response.clicked();
-            let response = ui_kit::completion_text(ui, &queue_label, false);
-            crate::scenario::publish_rect("render:shots:queue", response.rect);
-            let response = ui_kit::icon_label_action(ui, app.tr("cmd.render_start"), Some("play"), ready.is_ok(), true);
-            let response = if let Err(reason) = &ready { response.backing_on_disabled_hover_text(reason) } else { response };
-            crate::scenario::publish_target("render:shots:render", response.rect);
-            start = response.clicked();
-            let response = ui_kit::compact_dropdown_menu(ui, "render_shots_size", &size_label, |ui| {
-                for (label, width, height) in SIZE_PRESETS {
-                    let text = format!("{label} · {width} × {height}");
-                    let mark = super::inspector::size_mark(app, &text, Some((u64::from(width), u64::from(height))));
-                    let mut response =
-                        ui_kit::list_picker(ui, label, mark.as_deref().unwrap_or(&text), draft.width == width && draft.height == height);
-                    if mark.is_some() {
-                        response = response.backing_on_hover_text(super::inspector::size_limit_reason(app, width, height));
-                    }
-                    if response.clicked() {
-                        size = Some((width, height));
-                        ui.close();
-                    }
-                }
-            });
-            crate::scenario::publish_target("render:shots:size", response.rect);
-            let response = ui_kit::completion_text(ui, &result_label, completed.is_some());
-            crate::scenario::publish_rect("render:shots:status", response.rect);
-        },
-        |ui| {
-            let heading = ui_kit::StripHeading::new(ui.painter(), solidcraft_ui_text::tr_label("Shots"));
-            let response = heading.show(ui);
-            crate::scenario::publish_rect("render:shots:heading", response.rect);
-            let response = ui.add_enabled_ui(super::setups::snapshot(app).is_ok(), |ui| ui_kit::add_choice(ui, app.tr("render.shots_save"))).inner;
-            crate::scenario::publish_target("render:shots:save", response.rect);
-            save = response.clicked();
-            for name in app.session.doc.render.setups.keys() {
-                let active = name == &app.render_workspace.view.name;
-                let response = ui_kit::thumbnail_choice(
-                    ui,
-                    &format!("shot:{name}"),
-                    name,
-                    ui_kit::ThumbnailChoice {
-                        texture: app.render_workspace.thumbnails.texture(name),
-                        selected: active,
-                        modified: active && camera_modified(app, name),
-                        progress: if app.render_workspace.view.job_shot.as_ref() == Some(name) { progress } else { None },
-                    },
-                );
-                crate::scenario::publish_target(&format!("render:shots:setup:{name}"), response.rect);
-                if visible.len() < super::thumbnails::LIMIT && response.rect.intersects(ui.clip_rect()) {
-                    visible.push(name.clone());
+        }
+        let response = ui_kit::completion_text(ui, &queue_label, false);
+        crate::scenario::publish_rect("render:shots:queue", response.rect);
+        let response = ui_kit::icon_label_action(ui, app.tr("cmd.render_start"), Some("play"), ready.is_ok(), true);
+        let response = if let Err(reason) = &ready { response.backing_on_disabled_hover_text(reason) } else { response };
+        crate::panel_runtime::register_content_focus(ui.ctx(), &response);
+        crate::scenario::publish_target("render:shots:render", response.rect);
+        start = response.clicked();
+        let response = ui_kit::compact_dropdown_menu(ui, "render_shots_size", &size_label, |ui| {
+            for (label, width, height) in SIZE_PRESETS {
+                let text = format!("{label} · {width} × {height}");
+                let mark = super::inspector::size_mark(app, &text, Some((u64::from(width), u64::from(height))));
+                let mut response = ui_kit::list_picker(ui, label, mark.as_deref().unwrap_or(&text), draft.width == width && draft.height == height);
+                if mark.is_some() {
+                    response = response.backing_on_hover_text(super::inspector::size_limit_reason(app, width, height));
                 }
                 if response.clicked() {
-                    chosen = Some(name.clone());
+                    size = Some((width, height));
+                    ui.close();
                 }
             }
-        },
-    );
+        });
+        crate::panel_runtime::register_content_focus(ui.ctx(), &response);
+        crate::scenario::publish_target("render:shots:size", response.rect);
+        let response = ui_kit::completion_text(ui, &result_label, completed.is_some());
+        crate::scenario::publish_rect("render:shots:status", response.rect);
+    };
+    let choices = |ui: &mut egui::Ui| {
+        let response = ui.add_enabled_ui(super::setups::snapshot(app).is_ok(), |ui| ui_kit::add_choice(ui, app.tr("render.shots_save"))).inner;
+        crate::panel_runtime::register_content_focus(ui.ctx(), &response);
+        crate::scenario::publish_target("render:shots:save", response.rect);
+        save = response.clicked();
+        for name in app.session.doc.render.setups.keys() {
+            let active = name == &app.render_workspace.view.name;
+            let response = ui_kit::thumbnail_choice(
+                ui,
+                &format!("shot:{name}"),
+                name,
+                ui_kit::ThumbnailChoice {
+                    texture: app.render_workspace.thumbnails.texture(name),
+                    selected: active,
+                    modified: active && camera_modified(app, name),
+                    progress: if app.render_workspace.view.job_shot.as_ref() == Some(name) { progress } else { None },
+                },
+            );
+            crate::panel_runtime::register_content_focus(ui.ctx(), &response);
+            crate::scenario::publish_target(&format!("render:shots:setup:{name}"), response.rect);
+            if visible.len() < super::thumbnails::LIMIT && response.rect.intersects(ui.clip_rect()) {
+                visible.push(name.clone());
+            }
+            if response.clicked() {
+                chosen = Some(name.clone());
+            }
+        }
+    };
+    if !inline {
+        let top = ui.cursor().top();
+        let rtl = crate::i18n::panel_direction(&app.preferences.language) == Direction::Rtl;
+        let horizontal = if rtl { egui::Layout::right_to_left(egui::Align::Center) } else { egui::Layout::left_to_right(egui::Align::Center) };
+        let horizontal = horizontal.with_main_wrap(true);
+        let choices_layout =
+            if flow == Flow::Wide { horizontal } else { egui::Layout::top_down(if rtl { egui::Align::Max } else { egui::Align::Min }) };
+        let tokens = Tokens::get();
+        let output =
+            egui::ScrollArea::vertical().id_salt("render_shots_contents").min_scrolled_height(0.0).auto_shrink([false, true]).show(ui, |ui| {
+                ui.spacing_mut().item_spacing.x = tokens.space_8;
+                let row = egui::vec2(ui.available_width(), tokens.control_height);
+                ui.allocate_ui_with_layout(row, horizontal, controls);
+                ui.allocate_ui_with_layout(row, choices_layout, choices);
+            });
+        crate::panel_runtime::report_content_extent(ui, top, output.content_size.y, false);
+    } else {
+        ui_kit::Panel::strip_contents(ui, controls, choices);
+    }
     app.render_workspace.thumbnails.show(visible, ui.ctx());
     if hide {
         let _ = app.run("view.shots_strip", json!({"visible":false}));

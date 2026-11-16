@@ -9,7 +9,8 @@ working (see the [compatibility notes](https://github.com/tangency-labs/solidcra
 Download the installer for your system from the
 [Download section of the README](https://github.com/tangency-labs/solidcraft#download) or the
 [releases page](https://github.com/tangency-labs/solidcraft/releases), or build it yourself with
-stable Rust (1.95 or newer):
+[rustup](https://rustup.rs/), which installs the Rust version the repository pins
+(`rust-toolchain.toml`, 1.99.1) the first time you run `cargo` in it:
 
 ```sh
 git clone https://github.com/tangency-labs/solidcraft && cd solidcraft
@@ -24,7 +25,8 @@ cargo run --release -p solidcraft -- --sample   # opens with a sample part
 
 SolidCraft opens on the start page; the house at the top left brings it back.
 
-![The start page, numbered 1 to 6](../media/getting-started/start.png)
+<img class="dark-ui" src="../media/getting-started/start.png" alt="The start page, numbered 1 to 6">
+<img class="light-ui" src="../media/getting-started/start.light.png" alt="The start page, numbered 1 to 6">
 
 **1** A new design in millimetres (or inches, beside it) · **2** Open a saved design ·
 **3** Import a STEP, IGES or mesh file as a new design · **4** Designs you opened recently ·
@@ -90,12 +92,11 @@ A SolidCraft remote added before the project moved to `docs.solidcraft.io` (from
 `flatpak remote-modify --user --url=https://docs.solidcraft.io/flatpak/repo/ solidcraft` and
 `flatpak update --user`.
 
-Earlier releases used the application IDs `ai.storyteller.solidcraft` and, up to 0.7,
-`ai.storyteller.solvecraft`. If you installed one of those from the SolidCraft remote,
+Earlier releases used the application ID `ai.storyteller.solidcraft`. If you installed that from the SolidCraft remote,
 `flatpak update --user` reports it as end-of-life and offers to replace it with
 `io.tangencylabs.solidcraft`; accept, and your settings and autosaves move with it. If you
 installed a `.flatpak` bundle, install the new bundle, launch it once (it copies your settings),
-then run `flatpak uninstall --user ai.storyteller.solidcraft` (or `ai.storyteller.solvecraft`; see the
+then run `flatpak uninstall --user ai.storyteller.solidcraft` (see the
 [compatibility notes](https://github.com/tangency-labs/solidcraft/blob/main/docs/compatibility.md#linux-app-id)).
 
 Alternatively, download the release's `.flatpak` file for your architecture and run
@@ -411,11 +412,10 @@ and Z is up.
 
 ## Name and compatibility
 
-SolidCraft was renamed from an earlier working name. Since 0.5.0 everything uses the new
-name: the `solidcraft` and `solidcraft-cli` programs, `.solidcraft` designs (`.sc` since then), `SOLIDCRAFT_*`
-environment variables, settings folders and the `solidcraft` MCP server. Upgrading keeps
-working: designs, settings, recovery files, environment variables and CLI/MCP setups from
-earlier builds carry over. Every compatibility shim is listed in the
+SolidCraft was renamed from an earlier working name, and that name is gone: the `solidcraft`
+and `solidcraft-cli` programs, `.sc` designs, `SOLIDCRAFT_*` environment variables, settings
+folders and the `solidcraft` MCP server all use the current name. Designs saved by earlier
+builds still open, whatever their file extension. Every compatibility shim is listed in the
 [compatibility notes](https://github.com/tangency-labs/solidcraft/blob/main/docs/compatibility.md).
 
 Use the SolidCraft documentation and web-app URLs. GitHub redirects links to the renamed

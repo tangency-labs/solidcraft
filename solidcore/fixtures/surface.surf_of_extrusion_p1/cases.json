@@ -1,0 +1,5735 @@
+{
+ "cases": [
+  {
+   "name": "api_extrude_build",
+   "upstream_ref": "tests/SM_API_test/src/TestSmSurfaces.cpp:246 (TestSmCreateExtrude: the six points as a cubic control polygon, extruded along Z)",
+   "inputs": {
+    "surf": {
+     "gen": {
+      "kind": "b_spline",
+      "cpts": [
+       [
+        0,
+        0,
+        0
+       ],
+       [
+        4,
+        2,
+        0
+       ],
+       [
+        6,
+        -2,
+        0
+       ],
+       [
+        8,
+        2,
+        0
+       ],
+       [
+        10,
+        4,
+        0
+       ],
+       [
+        12,
+        0,
+        0
+       ]
+      ],
+      "p": 3,
+      "u": [
+       0,
+       0,
+       0,
+       0,
+       0.3333333333333333,
+       0.6666666666666666,
+       1,
+       1,
+       1,
+       1
+      ]
+     },
+     "build": {
+      "mode": "canonical",
+      "vec": [
+       0,
+       0,
+       1
+      ]
+     }
+    },
+    "op": "build"
+   }
+  },
+  {
+   "name": "api_extrude_eval",
+   "upstream_ref": "tests/SM_API_test/src/TestSmSurfaces.cpp:246 (TestSmCreateExtrude: the six points as a cubic control polygon, extruded along Z)",
+   "inputs": {
+    "surf": {
+     "gen": {
+      "kind": "b_spline",
+      "cpts": [
+       [
+        0,
+        0,
+        0
+       ],
+       [
+        4,
+        2,
+        0
+       ],
+       [
+        6,
+        -2,
+        0
+       ],
+       [
+        8,
+        2,
+        0
+       ],
+       [
+        10,
+        4,
+        0
+       ],
+       [
+        12,
+        0,
+        0
+       ]
+      ],
+      "p": 3,
+      "u": [
+       0,
+       0,
+       0,
+       0,
+       0.3333333333333333,
+       0.6666666666666666,
+       1,
+       1,
+       1,
+       1
+      ]
+     },
+     "build": {
+      "mode": "canonical",
+      "vec": [
+       0,
+       0,
+       1
+      ]
+     }
+    },
+    "op": "eval_step",
+    "u": 0.4,
+    "v": 2.5,
+    "k": 4
+   }
+  },
+  {
+   "name": "api_extrude_eval_point",
+   "upstream_ref": "tests/SM_API_test/src/TestSmSurfaces.cpp:246 (TestSmCreateExtrude: the six points as a cubic control polygon, extruded along Z)",
+   "inputs": {
+    "surf": {
+     "gen": {
+      "kind": "b_spline",
+      "cpts": [
+       [
+        0,
+        0,
+        0
+       ],
+       [
+        4,
+        2,
+        0
+       ],
+       [
+        6,
+        -2,
+        0
+       ],
+       [
+        8,
+        2,
+        0
+       ],
+       [
+        10,
+        4,
+        0
+       ],
+       [
+        12,
+        0,
+        0
+       ]
+      ],
+      "p": 3,
+      "u": [
+       0,
+       0,
+       0,
+       0,
+       0.3333333333333333,
+       0.6666666666666666,
+       1,
+       1,
+       1,
+       1
+      ]
+     },
+     "build": {
+      "mode": "canonical",
+      "vec": [
+       0,
+       0,
+       1
+      ]
+     }
+    },
+    "op": "eval_step",
+    "u": 0.75,
+    "v": -3.0,
+    "k": 0,
+    "point": true
+   }
+  },
+  {
+   "name": "api_extrude_eval_order6",
+   "upstream_ref": "tests/SM_API_test/src/TestSmSurfaces.cpp:246 (TestSmCreateExtrude: the six points as a cubic control polygon, extruded along Z)",
+   "inputs": {
+    "surf": {
+     "gen": {
+      "kind": "b_spline",
+      "cpts": [
+       [
+        0,
+        0,
+        0
+       ],
+       [
+        4,
+        2,
+        0
+       ],
+       [
+        6,
+        -2,
+        0
+       ],
+       [
+        8,
+        2,
+        0
+       ],
+       [
+        10,
+        4,
+        0
+       ],
+       [
+        12,
+        0,
+        0
+       ]
+      ],
+      "p": 3,
+      "u": [
+       0,
+       0,
+       0,
+       0,
+       0.3333333333333333,
+       0.6666666666666666,
+       1,
+       1,
+       1,
+       1
+      ]
+     },
+     "build": {
+      "mode": "canonical",
+      "vec": [
+       0,
+       0,
+       1
+      ]
+     }
+    },
+    "op": "eval_step",
+    "u": 0.4,
+    "v": 2.5,
+    "k": 6
+   }
+  },
+  {
+   "name": "api_extrude_to_nurbs",
+   "upstream_ref": "tests/SM_API_test/src/TestSmSurfaces.cpp:246 (TestSmCreateExtrude: the six points as a cubic control polygon, extruded along Z)",
+   "inputs": {
+    "surf": {
+     "gen": {
+      "kind": "b_spline",
+      "cpts": [
+       [
+        0,
+        0,
+        0
+       ],
+       [
+        4,
+        2,
+        0
+       ],
+       [
+        6,
+        -2,
+        0
+       ],
+       [
+        8,
+        2,
+        0
+       ],
+       [
+        10,
+        4,
+        0
+       ],
+       [
+        12,
+        0,
+        0
+       ]
+      ],
+      "p": 3,
+      "u": [
+       0,
+       0,
+       0,
+       0,
+       0.3333333333333333,
+       0.6666666666666666,
+       1,
+       1,
+       1,
+       1
+      ]
+     },
+     "build": {
+      "mode": "canonical",
+      "vec": [
+       0,
+       0,
+       1
+      ]
+     }
+    },
+    "op": "to_nurbs",
+    "u": 0.3,
+    "v": 7.0
+   }
+  },
+  {
+   "name": "api_extrude_to_step",
+   "upstream_ref": "tests/SM_API_test/src/TestSmSurfaces.cpp:246 (TestSmCreateExtrude: the six points as a cubic control polygon, extruded along Z)",
+   "inputs": {
+    "surf": {
+     "gen": {
+      "kind": "b_spline",
+      "cpts": [
+       [
+        0,
+        0,
+        0
+       ],
+       [
+        4,
+        2,
+        0
+       ],
+       [
+        6,
+        -2,
+        0
+       ],
+       [
+        8,
+        2,
+        0
+       ],
+       [
+        10,
+        4,
+        0
+       ],
+       [
+        12,
+        0,
+        0
+       ]
+      ],
+      "p": 3,
+      "u": [
+       0,
+       0,
+       0,
+       0,
+       0.3333333333333333,
+       0.6666666666666666,
+       1,
+       1,
+       1,
+       1
+      ]
+     },
+     "build": {
+      "mode": "canonical",
+      "vec": [
+       0,
+       0,
+       1
+      ]
+     }
+    },
+    "op": "to_step",
+    "u": 0.3,
+    "v": 100.0
+   }
+  },
+  {
+   "name": "api_extrude_drop_min",
+   "upstream_ref": "tests/SM_API_test/src/TestSmSurfaces.cpp:246 (TestSmCreateExtrude: the six points as a cubic control polygon, extruded along Z)",
+   "inputs": {
+    "surf": {
+     "gen": {
+      "kind": "b_spline",
+      "cpts": [
+       [
+        0,
+        0,
+        0
+       ],
+       [
+        4,
+        2,
+        0
+       ],
+       [
+        6,
+        -2,
+        0
+       ],
+       [
+        8,
+        2,
+        0
+       ],
+       [
+        10,
+        4,
+        0
+       ],
+       [
+        12,
+        0,
+        0
+       ]
+      ],
+      "p": 3,
+      "u": [
+       0,
+       0,
+       0,
+       0,
+       0.3333333333333333,
+       0.6666666666666666,
+       1,
+       1,
+       1,
+       1
+      ]
+     },
+     "build": {
+      "mode": "canonical",
+      "vec": [
+       0,
+       0,
+       1
+      ]
+     }
+    },
+    "op": "drop_fast",
+    "dom": [
+     0,
+     -1234567,
+     1,
+     1234567
+    ],
+    "sop": 3,
+    "p": [
+     5,
+     3,
+     4
+    ],
+    "tol": 1e-09,
+    "requested": 1
+   }
+  },
+  {
+   "name": "api_extrude_drop_single",
+   "upstream_ref": "tests/SM_API_test/src/TestSmSurfaces.cpp:246 (TestSmCreateExtrude: the six points as a cubic control polygon, extruded along Z)",
+   "inputs": {
+    "surf": {
+     "gen": {
+      "kind": "b_spline",
+      "cpts": [
+       [
+        0,
+        0,
+        0
+       ],
+       [
+        4,
+        2,
+        0
+       ],
+       [
+        6,
+        -2,
+        0
+       ],
+       [
+        8,
+        2,
+        0
+       ],
+       [
+        10,
+        4,
+        0
+       ],
+       [
+        12,
+        0,
+        0
+       ]
+      ],
+      "p": 3,
+      "u": [
+       0,
+       0,
+       0,
+       0,
+       0.3333333333333333,
+       0.6666666666666666,
+       1,
+       1,
+       1,
+       1
+      ]
+     },
+     "build": {
+      "mode": "canonical",
+      "vec": [
+       0,
+       0,
+       1
+      ]
+     }
+    },
+    "op": "drop_fast",
+    "dom": [
+     0,
+     -1234567,
+     1,
+     1234567
+    ],
+    "sop": 3,
+    "p": [
+     5,
+     3,
+     4
+    ],
+    "tol": 1e-09,
+    "requested": 0
+   }
+  },
+  {
+   "name": "api_extrude_drop_max",
+   "upstream_ref": "tests/SM_API_test/src/TestSmSurfaces.cpp:246 (TestSmCreateExtrude: the six points as a cubic control polygon, extruded along Z)",
+   "inputs": {
+    "surf": {
+     "gen": {
+      "kind": "b_spline",
+      "cpts": [
+       [
+        0,
+        0,
+        0
+       ],
+       [
+        4,
+        2,
+        0
+       ],
+       [
+        6,
+        -2,
+        0
+       ],
+       [
+        8,
+        2,
+        0
+       ],
+       [
+        10,
+        4,
+        0
+       ],
+       [
+        12,
+        0,
+        0
+       ]
+      ],
+      "p": 3,
+      "u": [
+       0,
+       0,
+       0,
+       0,
+       0.3333333333333333,
+       0.6666666666666666,
+       1,
+       1,
+       1,
+       1
+      ]
+     },
+     "build": {
+      "mode": "canonical",
+      "vec": [
+       0,
+       0,
+       1
+      ]
+     }
+    },
+    "op": "drop_fast",
+    "dom": [
+     0,
+     -1234567,
+     1,
+     1234567
+    ],
+    "sop": 4,
+    "p": [
+     5,
+     3,
+     4
+    ],
+    "tol": 1e-09,
+    "requested": 1
+   }
+  },
+  {
+   "name": "api_extrude_drop_normalize",
+   "upstream_ref": "tests/SM_API_test/src/TestSmSurfaces.cpp:246 (TestSmCreateExtrude: the six points as a cubic control polygon, extruded along Z)",
+   "inputs": {
+    "surf": {
+     "gen": {
+      "kind": "b_spline",
+      "cpts": [
+       [
+        0,
+        0,
+        0
+       ],
+       [
+        4,
+        2,
+        0
+       ],
+       [
+        6,
+        -2,
+        0
+       ],
+       [
+        8,
+        2,
+        0
+       ],
+       [
+        10,
+        4,
+        0
+       ],
+       [
+        12,
+        0,
+        0
+       ]
+      ],
+      "p": 3,
+      "u": [
+       0,
+       0,
+       0,
+       0,
+       0.3333333333333333,
+       0.6666666666666666,
+       1,
+       1,
+       1,
+       1
+      ]
+     },
+     "build": {
+      "mode": "canonical",
+      "vec": [
+       0,
+       0,
+       1
+      ]
+     }
+    },
+    "op": "drop_fast",
+    "dom": [
+     0,
+     -1234567,
+     1,
+     1234567
+    ],
+    "sop": 5,
+    "p": [
+     6,
+     5,
+     -1
+    ],
+    "tol": 1e-06,
+    "requested": 1
+   }
+  },
+  {
+   "name": "api_extrude_drop_target",
+   "upstream_ref": "tests/SM_API_test/src/TestSmSurfaces.cpp:246 (TestSmCreateExtrude: the six points as a cubic control polygon, extruded along Z)",
+   "inputs": {
+    "surf": {
+     "gen": {
+      "kind": "b_spline",
+      "cpts": [
+       [
+        0,
+        0,
+        0
+       ],
+       [
+        4,
+        2,
+        0
+       ],
+       [
+        6,
+        -2,
+        0
+       ],
+       [
+        8,
+        2,
+        0
+       ],
+       [
+        10,
+        4,
+        0
+       ],
+       [
+        12,
+        0,
+        0
+       ]
+      ],
+      "p": 3,
+      "u": [
+       0,
+       0,
+       0,
+       0,
+       0.3333333333333333,
+       0.6666666666666666,
+       1,
+       1,
+       1,
+       1
+      ]
+     },
+     "build": {
+      "mode": "canonical",
+      "vec": [
+       0,
+       0,
+       1
+      ]
+     }
+    },
+    "op": "drop_fast",
+    "dom": [
+     0.2,
+     -10,
+     0.8,
+     10
+    ],
+    "sop": 3,
+    "p": [
+     5,
+     3,
+     4
+    ],
+    "tol": 1e-09,
+    "target": 0.5,
+    "requested": 1
+   }
+  },
+  {
+   "name": "api_extrude_directrix",
+   "upstream_ref": "tests/SM_API_test/src/TestSmSurfaces.cpp:246 (TestSmCreateExtrude: the six points as a cubic control polygon, extruded along Z)",
+   "inputs": {
+    "surf": {
+     "gen": {
+      "kind": "b_spline",
+      "cpts": [
+       [
+        0,
+        0,
+        0
+       ],
+       [
+        4,
+        2,
+        0
+       ],
+       [
+        6,
+        -2,
+        0
+       ],
+       [
+        8,
+        2,
+        0
+       ],
+       [
+        10,
+        4,
+        0
+       ],
+       [
+        12,
+        0,
+        0
+       ]
+      ],
+      "p": 3,
+      "u": [
+       0,
+       0,
+       0,
+       0,
+       0.3333333333333333,
+       0.6666666666666666,
+       1,
+       1,
+       1,
+       1
+      ]
+     },
+     "build": {
+      "mode": "canonical",
+      "vec": [
+       0,
+       0,
+       1
+      ]
+     }
+    },
+    "op": "directrix",
+    "p": [
+     6,
+     0,
+     1.5
+    ],
+    "tol": 1e-06
+   }
+  },
+  {
+   "name": "api_extrude_step_inv",
+   "upstream_ref": "tests/SM_API_test/src/TestSmSurfaces.cpp:246 (TestSmCreateExtrude: the six points as a cubic control polygon, extruded along Z)",
+   "inputs": {
+    "surf": {
+     "gen": {
+      "kind": "b_spline",
+      "cpts": [
+       [
+        0,
+        0,
+        0
+       ],
+       [
+        4,
+        2,
+        0
+       ],
+       [
+        6,
+        -2,
+        0
+       ],
+       [
+        8,
+        2,
+        0
+       ],
+       [
+        10,
+        4,
+        0
+       ],
+       [
+        12,
+        0,
+        0
+       ]
+      ],
+      "p": 3,
+      "u": [
+       0,
+       0,
+       0,
+       0,
+       0.3333333333333333,
+       0.6666666666666666,
+       1,
+       1,
+       1,
+       1
+      ]
+     },
+     "build": {
+      "mode": "canonical",
+      "vec": [
+       0,
+       0,
+       1
+      ]
+     }
+    },
+    "op": "step_inv",
+    "dom": [
+     0,
+     -1234567,
+     1,
+     1234567
+    ],
+    "p": [
+     6.0,
+     0.0,
+     3.0
+    ],
+    "tol": 0.0001
+   }
+  },
+  {
+   "name": "api_extrude_copy",
+   "upstream_ref": "tests/SM_API_test/src/TestSmSurfaces.cpp:246 (TestSmCreateExtrude: the six points as a cubic control polygon, extruded along Z)",
+   "inputs": {
+    "surf": {
+     "gen": {
+      "kind": "b_spline",
+      "cpts": [
+       [
+        0,
+        0,
+        0
+       ],
+       [
+        4,
+        2,
+        0
+       ],
+       [
+        6,
+        -2,
+        0
+       ],
+       [
+        8,
+        2,
+        0
+       ],
+       [
+        10,
+        4,
+        0
+       ],
+       [
+        12,
+        0,
+        0
+       ]
+      ],
+      "p": 3,
+      "u": [
+       0,
+       0,
+       0,
+       0,
+       0.3333333333333333,
+       0.6666666666666666,
+       1,
+       1,
+       1,
+       1
+      ]
+     },
+     "build": {
+      "mode": "canonical",
+      "vec": [
+       0,
+       0,
+       1
+      ]
+     }
+    },
+    "op": "copy"
+   }
+  },
+  {
+   "name": "api_extrude_adjust",
+   "upstream_ref": "tests/SM_API_test/src/TestSmSurfaces.cpp:246 (TestSmCreateExtrude: the six points as a cubic control polygon, extruded along Z)",
+   "inputs": {
+    "surf": {
+     "gen": {
+      "kind": "b_spline",
+      "cpts": [
+       [
+        0,
+        0,
+        0
+       ],
+       [
+        4,
+        2,
+        0
+       ],
+       [
+        6,
+        -2,
+        0
+       ],
+       [
+        8,
+        2,
+        0
+       ],
+       [
+        10,
+        4,
+        0
+       ],
+       [
+        12,
+        0,
+        0
+       ]
+      ],
+      "p": 3,
+      "u": [
+       0,
+       0,
+       0,
+       0,
+       0.3333333333333333,
+       0.6666666666666666,
+       1,
+       1,
+       1,
+       1
+      ]
+     },
+     "build": {
+      "mode": "canonical",
+      "vec": [
+       0,
+       0,
+       1
+      ]
+     }
+    },
+    "op": "adjust",
+    "dom": [
+     0.1,
+     0,
+     0.9,
+     5
+    ]
+   }
+  },
+  {
+   "name": "api_extrude_zero_vector",
+   "upstream_ref": "tests/SM_API_test/src/TestSmSurfaces.cpp:246 (TestSmCreateExtrude: the six points as a cubic control polygon, extruded along Z); the zero vector SmApiCreateExtrude rejects",
+   "inputs": {
+    "surf": {
+     "gen": {
+      "kind": "b_spline",
+      "cpts": [
+       [
+        0,
+        0,
+        0
+       ],
+       [
+        4,
+        2,
+        0
+       ],
+       [
+        6,
+        -2,
+        0
+       ],
+       [
+        8,
+        2,
+        0
+       ],
+       [
+        10,
+        4,
+        0
+       ],
+       [
+        12,
+        0,
+        0
+       ]
+      ],
+      "p": 3,
+      "u": [
+       0,
+       0,
+       0,
+       0,
+       0.3333333333333333,
+       0.6666666666666666,
+       1,
+       1,
+       1,
+       1
+      ]
+     },
+     "build": {
+      "mode": "canonical",
+      "vec": [
+       0,
+       0,
+       0
+      ]
+     }
+    },
+    "op": "build"
+   }
+  },
+  {
+   "name": "ssi_cylinder_build",
+   "upstream_ref": "tests/prog_test/src/smAdvancedTest.cpp:3099 (my_ssi_analytic_demo case 3: radius 2 cylinder over [0, 200] degrees, height 5, frame at (-2,0,0) turned 0.1 rad about (1,1,1))",
+   "inputs": {
+    "surf": {
+     "gen": {
+      "kind": "circle",
+      "c": [
+       -2,
+       0,
+       0
+      ],
+      "x": [
+       0.9966694435186839,
+       0.05930412821582437,
+       -0.055973571734508246
+      ],
+      "y": [
+       -0.055973571734508246,
+       0.9966694435186839,
+       0.05930412821582437
+      ],
+      "d": [
+       0,
+       200
+      ],
+      "r": 2
+     },
+     "build": {
+      "mode": "ctor",
+      "origin": [
+       -0.006661112962632165,
+       0.11860825643164874,
+       -0.11194714346901649
+      ],
+      "vec": [
+       0.296520641079122,
+       -0.2798678586725411,
+       4.98334721759342
+      ],
+      "domain": [
+       0,
+       0,
+       200,
+       1
+      ]
+     }
+    },
+    "op": "build"
+   }
+  },
+  {
+   "name": "ssi_cylinder_eval",
+   "upstream_ref": "tests/prog_test/src/smAdvancedTest.cpp:3099 (my_ssi_analytic_demo case 3: radius 2 cylinder over [0, 200] degrees, height 5, frame at (-2,0,0) turned 0.1 rad about (1,1,1))",
+   "inputs": {
+    "surf": {
+     "gen": {
+      "kind": "circle",
+      "c": [
+       -2,
+       0,
+       0
+      ],
+      "x": [
+       0.9966694435186839,
+       0.05930412821582437,
+       -0.055973571734508246
+      ],
+      "y": [
+       -0.055973571734508246,
+       0.9966694435186839,
+       0.05930412821582437
+      ],
+      "d": [
+       0,
+       200
+      ],
+      "r": 2
+     },
+     "build": {
+      "mode": "ctor",
+      "origin": [
+       -0.006661112962632165,
+       0.11860825643164874,
+       -0.11194714346901649
+      ],
+      "vec": [
+       0.296520641079122,
+       -0.2798678586725411,
+       4.98334721759342
+      ],
+      "domain": [
+       0,
+       0,
+       200,
+       1
+      ]
+     }
+    },
+    "op": "eval_step",
+    "u": 120,
+    "v": 0.5,
+    "k": 5
+   }
+  },
+  {
+   "name": "ssi_cylinder_drop",
+   "upstream_ref": "tests/prog_test/src/smAdvancedTest.cpp:3099 (my_ssi_analytic_demo case 3: radius 2 cylinder over [0, 200] degrees, height 5, frame at (-2,0,0) turned 0.1 rad about (1,1,1))",
+   "inputs": {
+    "surf": {
+     "gen": {
+      "kind": "circle",
+      "c": [
+       -2,
+       0,
+       0
+      ],
+      "x": [
+       0.9966694435186839,
+       0.05930412821582437,
+       -0.055973571734508246
+      ],
+      "y": [
+       -0.055973571734508246,
+       0.9966694435186839,
+       0.05930412821582437
+      ],
+      "d": [
+       0,
+       200
+      ],
+      "r": 2
+     },
+     "build": {
+      "mode": "ctor",
+      "origin": [
+       -0.006661112962632165,
+       0.11860825643164874,
+       -0.11194714346901649
+      ],
+      "vec": [
+       0.296520641079122,
+       -0.2798678586725411,
+       4.98334721759342
+      ],
+      "domain": [
+       0,
+       0,
+       200,
+       1
+      ]
+     }
+    },
+    "op": "drop_fast",
+    "dom": [
+     0,
+     0,
+     1,
+     1
+    ],
+    "sop": 3,
+    "p": [
+     -2.049312458771876,
+     2.8780611870870354,
+     2.171251271684841
+    ],
+    "tol": 1e-09,
+    "requested": 1
+   }
+  },
+  {
+   "name": "ssi_cylinder_step_inv",
+   "upstream_ref": "tests/prog_test/src/smAdvancedTest.cpp:3099 (my_ssi_analytic_demo case 3: radius 2 cylinder over [0, 200] degrees, height 5, frame at (-2,0,0) turned 0.1 rad about (1,1,1))",
+   "inputs": {
+    "surf": {
+     "gen": {
+      "kind": "circle",
+      "c": [
+       -2,
+       0,
+       0
+      ],
+      "x": [
+       0.9966694435186839,
+       0.05930412821582437,
+       -0.055973571734508246
+      ],
+      "y": [
+       -0.055973571734508246,
+       0.9966694435186839,
+       0.05930412821582437
+      ],
+      "d": [
+       0,
+       200
+      ],
+      "r": 2
+     },
+     "build": {
+      "mode": "ctor",
+      "origin": [
+       -0.006661112962632165,
+       0.11860825643164874,
+       -0.11194714346901649
+      ],
+      "vec": [
+       0.296520641079122,
+       -0.2798678586725411,
+       4.98334721759342
+      ],
+      "domain": [
+       0,
+       0,
+       200,
+       1
+      ]
+     }
+    },
+    "op": "step_inv",
+    "dom": [
+     0,
+     0,
+     200,
+     1
+    ],
+    "p": [
+     -1.2158694040393612,
+     1.7177847546681912,
+     3.561510177594325
+    ],
+    "tol": 1e-06
+   }
+  },
+  {
+   "name": "ssi_cylinder_directrix",
+   "upstream_ref": "tests/prog_test/src/smAdvancedTest.cpp:3099 (my_ssi_analytic_demo case 3: radius 2 cylinder over [0, 200] degrees, height 5, frame at (-2,0,0) turned 0.1 rad about (1,1,1))",
+   "inputs": {
+    "surf": {
+     "gen": {
+      "kind": "circle",
+      "c": [
+       -2,
+       0,
+       0
+      ],
+      "x": [
+       0.9966694435186839,
+       0.05930412821582437,
+       -0.055973571734508246
+      ],
+      "y": [
+       -0.055973571734508246,
+       0.9966694435186839,
+       0.05930412821582437
+      ],
+      "d": [
+       0,
+       200
+      ],
+      "r": 2
+     },
+     "build": {
+      "mode": "ctor",
+      "origin": [
+       -0.006661112962632165,
+       0.11860825643164874,
+       -0.11194714346901649
+      ],
+      "vec": [
+       0.296520641079122,
+       -0.2798678586725411,
+       4.98334721759342
+      ],
+      "domain": [
+       0,
+       0,
+       200,
+       1
+      ]
+     }
+    },
+    "op": "directrix",
+    "p": [
+     -1.2158694040393612,
+     1.7177847546681912,
+     3.561510177594325
+    ],
+    "tol": 1e-06
+   }
+  },
+  {
+   "name": "ssi_cylinder_transform",
+   "upstream_ref": "tests/prog_test/src/smAdvancedTest.cpp:3099 (my_ssi_analytic_demo case 3: radius 2 cylinder over [0, 200] degrees, height 5, frame at (-2,0,0) turned 0.1 rad about (1,1,1))",
+   "inputs": {
+    "surf": {
+     "gen": {
+      "kind": "circle",
+      "c": [
+       -2,
+       0,
+       0
+      ],
+      "x": [
+       0.9966694435186839,
+       0.05930412821582437,
+       -0.055973571734508246
+      ],
+      "y": [
+       -0.055973571734508246,
+       0.9966694435186839,
+       0.05930412821582437
+      ],
+      "d": [
+       0,
+       200
+      ],
+      "r": 2
+     },
+     "build": {
+      "mode": "ctor",
+      "origin": [
+       -0.006661112962632165,
+       0.11860825643164874,
+       -0.11194714346901649
+      ],
+      "vec": [
+       0.296520641079122,
+       -0.2798678586725411,
+       4.98334721759342
+      ],
+      "domain": [
+       0,
+       0,
+       200,
+       1
+      ]
+     }
+    },
+    "op": "transform",
+    "origin": [
+     -3.6878291380782655,
+     -0.8625602462106626,
+     3.1810174725865425
+    ],
+    "x": [
+     -0.9328707613628695,
+     -0.347319765503569,
+     0.09550457101524529
+    ],
+    "y": [
+     0.33444228633758033,
+     -0.9336154847960334,
+     -0.12849312689151707
+    ]
+   }
+  },
+  {
+   "name": "ssi_cylinder_generators",
+   "upstream_ref": "tests/prog_test/src/smAdvancedTest.cpp:3099 (my_ssi_analytic_demo case 3: radius 2 cylinder over [0, 200] degrees, height 5, frame at (-2,0,0) turned 0.1 rad about (1,1,1))",
+   "inputs": {
+    "surf": {
+     "gen": {
+      "kind": "circle",
+      "c": [
+       -2,
+       0,
+       0
+      ],
+      "x": [
+       0.9966694435186839,
+       0.05930412821582437,
+       -0.055973571734508246
+      ],
+      "y": [
+       -0.055973571734508246,
+       0.9966694435186839,
+       0.05930412821582437
+      ],
+      "d": [
+       0,
+       200
+      ],
+      "r": 2
+     },
+     "build": {
+      "mode": "ctor",
+      "origin": [
+       -0.006661112962632165,
+       0.11860825643164874,
+       -0.11194714346901649
+      ],
+      "vec": [
+       0.296520641079122,
+       -0.2798678586725411,
+       4.98334721759342
+      ],
+      "domain": [
+       0,
+       0,
+       200,
+       1
+      ]
+     }
+    },
+    "op": "generators",
+    "other": {
+     "kind": "circle",
+     "c": [
+      -1.8220876153525267,
+      -0.16792071520352464,
+      2.9900083305560523
+     ],
+     "x": [
+      -0.9174188324102189,
+      -0.3966086775871262,
+      0.03231474588576802
+     ],
+     "y": [
+      0.3934789782385228,
+      -0.916279715005125,
+      -0.07487174069363764
+     ],
+     "d": [
+      0,
+      200
+     ],
+     "r": 2
+    },
+    "vec": [
+     0.296520641079122,
+     -0.2798678586725411,
+     4.98334721759342
+    ],
+    "ivl": [
+     0,
+     1
+    ],
+    "tol": 0.0001
+   }
+  },
+  {
+   "name": "ssi_cylinder_generators_skew",
+   "upstream_ref": "tests/prog_test/src/smAdvancedTest.cpp:3099 (my_ssi_analytic_demo case 3: radius 2 cylinder over [0, 200] degrees, height 5, frame at (-2,0,0) turned 0.1 rad about (1,1,1)); other vector not parallel",
+   "inputs": {
+    "surf": {
+     "gen": {
+      "kind": "circle",
+      "c": [
+       -2,
+       0,
+       0
+      ],
+      "x": [
+       0.9966694435186839,
+       0.05930412821582437,
+       -0.055973571734508246
+      ],
+      "y": [
+       -0.055973571734508246,
+       0.9966694435186839,
+       0.05930412821582437
+      ],
+      "d": [
+       0,
+       200
+      ],
+      "r": 2
+     },
+     "build": {
+      "mode": "ctor",
+      "origin": [
+       -0.006661112962632165,
+       0.11860825643164874,
+       -0.11194714346901649
+      ],
+      "vec": [
+       0.296520641079122,
+       -0.2798678586725411,
+       4.98334721759342
+      ],
+      "domain": [
+       0,
+       0,
+       200,
+       1
+      ]
+     }
+    },
+    "op": "generators",
+    "other": {
+     "kind": "circle",
+     "c": [
+      -1.8220876153525267,
+      -0.16792071520352464,
+      2.9900083305560523
+     ],
+     "x": [
+      -0.9174188324102189,
+      -0.3966086775871262,
+      0.03231474588576802
+     ],
+     "y": [
+      0.3934789782385228,
+      -0.916279715005125,
+      -0.07487174069363764
+     ],
+     "d": [
+      0,
+      200
+     ],
+     "r": 2
+    },
+    "vec": [
+     0.9966694435186839,
+     0.05930412821582437,
+     -0.055973571734508246
+    ],
+    "ivl": [
+     0,
+     1
+    ],
+    "tol": 0.0001
+   }
+  },
+  {
+   "name": "ssi_cylinder_swapped",
+   "upstream_ref": "tests/prog_test/src/smAdvancedTest.cpp:3099 (my_ssi_analytic_demo case 3: radius 2 cylinder over [0, 200] degrees, height 5, frame at (-2,0,0) turned 0.1 rad about (1,1,1)); swapped",
+   "inputs": {
+    "surf": {
+     "gen": {
+      "kind": "circle",
+      "c": [
+       -2,
+       0,
+       0
+      ],
+      "x": [
+       0.9966694435186839,
+       0.05930412821582437,
+       -0.055973571734508246
+      ],
+      "y": [
+       -0.055973571734508246,
+       0.9966694435186839,
+       0.05930412821582437
+      ],
+      "d": [
+       0,
+       200
+      ],
+      "r": 2
+     },
+     "build": {
+      "mode": "ctor",
+      "origin": [
+       -0.006661112962632165,
+       0.11860825643164874,
+       -0.11194714346901649
+      ],
+      "vec": [
+       0.296520641079122,
+       -0.2798678586725411,
+       4.98334721759342
+      ],
+      "domain": [
+       0,
+       0,
+       200,
+       1
+      ]
+     },
+     "swap": true
+    },
+    "op": "to_step",
+    "u": 0.3,
+    "v": 0.9
+   }
+  },
+  {
+   "name": "seam_step_inv_no_guess",
+   "upstream_ref": "edge case: full circle generator, the seam",
+   "inputs": {
+    "surf": {
+     "gen": {
+      "kind": "circle",
+      "c": [
+       0,
+       0,
+       0
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "d": [
+       0,
+       360
+      ],
+      "r": 1
+     },
+     "build": {
+      "mode": "canonical",
+      "vec": [
+       0,
+       0,
+       2
+      ]
+     }
+    },
+    "op": "step_inv",
+    "dom": [
+     0,
+     -1234567,
+     360,
+     1234567
+    ],
+    "p": [
+     1,
+     0,
+     0.5
+    ],
+    "tol": 1e-06
+   }
+  },
+  {
+   "name": "seam_step_inv_guess_high",
+   "upstream_ref": "edge case: full circle generator, the seam",
+   "inputs": {
+    "surf": {
+     "gen": {
+      "kind": "circle",
+      "c": [
+       0,
+       0,
+       0
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "d": [
+       0,
+       360
+      ],
+      "r": 1
+     },
+     "build": {
+      "mode": "canonical",
+      "vec": [
+       0,
+       0,
+       2
+      ]
+     }
+    },
+    "op": "step_inv",
+    "dom": [
+     0,
+     -1234567,
+     360,
+     1234567
+    ],
+    "p": [
+     1,
+     0,
+     0.5
+    ],
+    "tol": 1e-06,
+    "guess": [
+     300,
+     0
+    ]
+   }
+  },
+  {
+   "name": "seam_step_inv_guess_low",
+   "upstream_ref": "edge case: full circle generator, the seam",
+   "inputs": {
+    "surf": {
+     "gen": {
+      "kind": "circle",
+      "c": [
+       0,
+       0,
+       0
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "d": [
+       0,
+       360
+      ],
+      "r": 1
+     },
+     "build": {
+      "mode": "canonical",
+      "vec": [
+       0,
+       0,
+       2
+      ]
+     }
+    },
+    "op": "step_inv",
+    "dom": [
+     0,
+     -1234567,
+     360,
+     1234567
+    ],
+    "p": [
+     1,
+     0,
+     0.5
+    ],
+    "tol": 1e-06,
+    "guess": [
+     10,
+     0
+    ]
+   }
+  },
+  {
+   "name": "seam_step_inv_oob",
+   "upstream_ref": "edge case: full circle generator, the seam, out-of-bounds evaluation",
+   "inputs": {
+    "surf": {
+     "gen": {
+      "kind": "circle",
+      "c": [
+       0,
+       0,
+       0
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "d": [
+       0,
+       360
+      ],
+      "r": 1
+     },
+     "build": {
+      "mode": "canonical",
+      "vec": [
+       0,
+       0,
+       2
+      ]
+     },
+     "oob": true
+    },
+    "op": "step_inv",
+    "dom": [
+     0,
+     -1234567,
+     360,
+     1234567
+    ],
+    "p": [
+     1,
+     0,
+     0.5
+    ],
+    "tol": 1e-06,
+    "guess": [
+     300,
+     0
+    ]
+   }
+  },
+  {
+   "name": "seam_step_inv_off_surface",
+   "upstream_ref": "edge case: full circle generator, the seam, point off the surface",
+   "inputs": {
+    "surf": {
+     "gen": {
+      "kind": "circle",
+      "c": [
+       0,
+       0,
+       0
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "d": [
+       0,
+       360
+      ],
+      "r": 1
+     },
+     "build": {
+      "mode": "canonical",
+      "vec": [
+       0,
+       0,
+       2
+      ]
+     }
+    },
+    "op": "step_inv",
+    "dom": [
+     0,
+     -1234567,
+     360,
+     1234567
+    ],
+    "p": [
+     2,
+     0,
+     0.5
+    ],
+    "tol": 1e-06
+   }
+  },
+  {
+   "name": "seam_drop_vec_in",
+   "upstream_ref": "edge case: full circle generator, the seam, in-pointing vector",
+   "inputs": {
+    "surf": {
+     "gen": {
+      "kind": "circle",
+      "c": [
+       0,
+       0,
+       0
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "d": [
+       0,
+       360
+      ],
+      "r": 1
+     },
+     "build": {
+      "mode": "canonical",
+      "vec": [
+       0,
+       0,
+       2
+      ]
+     }
+    },
+    "op": "drop_fast",
+    "dom": [
+     0,
+     0,
+     1,
+     1
+    ],
+    "sop": 3,
+    "p": [
+     3,
+     0,
+     0.2
+    ],
+    "vec": [
+     0,
+     1,
+     0
+    ],
+    "tol": 1e-09,
+    "requested": 1
+   }
+  },
+  {
+   "name": "seam_drop_vec_in_intersect",
+   "upstream_ref": "edge case: full circle generator, the seam, in-pointing vector",
+   "inputs": {
+    "surf": {
+     "gen": {
+      "kind": "circle",
+      "c": [
+       0,
+       0,
+       0
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "d": [
+       0,
+       360
+      ],
+      "r": 1
+     },
+     "build": {
+      "mode": "canonical",
+      "vec": [
+       0,
+       0,
+       2
+      ]
+     }
+    },
+    "op": "drop_fast",
+    "dom": [
+     0,
+     0,
+     1,
+     1
+    ],
+    "sop": 0,
+    "p": [
+     1,
+     0,
+     0.2
+    ],
+    "vec": [
+     0,
+     1,
+     0
+    ],
+    "tol": 1e-06,
+    "requested": 1
+   }
+  },
+  {
+   "name": "seam_drop_vec_out",
+   "upstream_ref": "edge case: full circle generator, the seam, in-pointing vector",
+   "inputs": {
+    "surf": {
+     "gen": {
+      "kind": "circle",
+      "c": [
+       0,
+       0,
+       0
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "d": [
+       0,
+       360
+      ],
+      "r": 1
+     },
+     "build": {
+      "mode": "canonical",
+      "vec": [
+       0,
+       0,
+       2
+      ]
+     }
+    },
+    "op": "drop_fast",
+    "dom": [
+     0,
+     0,
+     1,
+     1
+    ],
+    "sop": 3,
+    "p": [
+     3,
+     0,
+     0.2
+    ],
+    "vec": [
+     0,
+     -1,
+     0
+    ],
+    "tol": 1e-09,
+    "requested": 1
+   }
+  },
+  {
+   "name": "seam_drop_vec_out_intersect",
+   "upstream_ref": "edge case: full circle generator, the seam, in-pointing vector",
+   "inputs": {
+    "surf": {
+     "gen": {
+      "kind": "circle",
+      "c": [
+       0,
+       0,
+       0
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "d": [
+       0,
+       360
+      ],
+      "r": 1
+     },
+     "build": {
+      "mode": "canonical",
+      "vec": [
+       0,
+       0,
+       2
+      ]
+     }
+    },
+    "op": "drop_fast",
+    "dom": [
+     0,
+     0,
+     1,
+     1
+    ],
+    "sop": 0,
+    "p": [
+     1,
+     0,
+     0.2
+    ],
+    "vec": [
+     0,
+     -1,
+     0
+    ],
+    "tol": 1e-06,
+    "requested": 1
+   }
+  },
+  {
+   "name": "seam_drop_no_vec",
+   "upstream_ref": "edge case: full circle generator, the seam",
+   "inputs": {
+    "surf": {
+     "gen": {
+      "kind": "circle",
+      "c": [
+       0,
+       0,
+       0
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "d": [
+       0,
+       360
+      ],
+      "r": 1
+     },
+     "build": {
+      "mode": "canonical",
+      "vec": [
+       0,
+       0,
+       2
+      ]
+     }
+    },
+    "op": "drop_fast",
+    "dom": [
+     0,
+     0,
+     1,
+     1
+    ],
+    "sop": 3,
+    "p": [
+     3,
+     0,
+     0.2
+    ],
+    "tol": 1e-09,
+    "requested": 1
+   }
+  },
+  {
+   "name": "seam_eval_order5",
+   "upstream_ref": "edge case: full circle generator, the seam",
+   "inputs": {
+    "surf": {
+     "gen": {
+      "kind": "circle",
+      "c": [
+       0,
+       0,
+       0
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "d": [
+       0,
+       360
+      ],
+      "r": 1
+     },
+     "build": {
+      "mode": "canonical",
+      "vec": [
+       0,
+       0,
+       2
+      ]
+     }
+    },
+    "op": "eval_step",
+    "u": 360,
+    "v": 0.5,
+    "k": 5
+   }
+  },
+  {
+   "name": "closed_seam_step_inv_no_guess",
+   "upstream_ref": "edge case: closed tangent-continuous cubic generator, the seam",
+   "inputs": {
+    "surf": {
+     "gen": {
+      "kind": "b_spline",
+      "cpts": [
+       [
+        1,
+        0,
+        0
+       ],
+       [
+        1,
+        1,
+        0
+       ],
+       [
+        -1,
+        1,
+        0
+       ],
+       [
+        -1,
+        -1,
+        0
+       ],
+       [
+        1,
+        -1,
+        0
+       ],
+       [
+        1,
+        0,
+        0
+       ]
+      ],
+      "p": 3,
+      "u": [
+       0,
+       0,
+       0,
+       0,
+       0.3333333333333333,
+       0.6666666666666666,
+       1,
+       1,
+       1,
+       1
+      ]
+     },
+     "build": {
+      "mode": "canonical",
+      "vec": [
+       0,
+       0,
+       2
+      ]
+     }
+    },
+    "op": "step_inv",
+    "dom": [
+     0,
+     -1234567,
+     1,
+     1234567
+    ],
+    "p": [
+     1,
+     0,
+     0.5
+    ],
+    "tol": 1e-06
+   }
+  },
+  {
+   "name": "closed_seam_step_inv_guess_high",
+   "upstream_ref": "edge case: closed tangent-continuous cubic generator, the seam",
+   "inputs": {
+    "surf": {
+     "gen": {
+      "kind": "b_spline",
+      "cpts": [
+       [
+        1,
+        0,
+        0
+       ],
+       [
+        1,
+        1,
+        0
+       ],
+       [
+        -1,
+        1,
+        0
+       ],
+       [
+        -1,
+        -1,
+        0
+       ],
+       [
+        1,
+        -1,
+        0
+       ],
+       [
+        1,
+        0,
+        0
+       ]
+      ],
+      "p": 3,
+      "u": [
+       0,
+       0,
+       0,
+       0,
+       0.3333333333333333,
+       0.6666666666666666,
+       1,
+       1,
+       1,
+       1
+      ]
+     },
+     "build": {
+      "mode": "canonical",
+      "vec": [
+       0,
+       0,
+       2
+      ]
+     }
+    },
+    "op": "step_inv",
+    "dom": [
+     0,
+     -1234567,
+     1,
+     1234567
+    ],
+    "p": [
+     1,
+     0,
+     0.5
+    ],
+    "tol": 1e-06,
+    "guess": [
+     0.9,
+     0
+    ]
+   }
+  },
+  {
+   "name": "closed_seam_step_inv_guess_low",
+   "upstream_ref": "edge case: closed tangent-continuous cubic generator, the seam",
+   "inputs": {
+    "surf": {
+     "gen": {
+      "kind": "b_spline",
+      "cpts": [
+       [
+        1,
+        0,
+        0
+       ],
+       [
+        1,
+        1,
+        0
+       ],
+       [
+        -1,
+        1,
+        0
+       ],
+       [
+        -1,
+        -1,
+        0
+       ],
+       [
+        1,
+        -1,
+        0
+       ],
+       [
+        1,
+        0,
+        0
+       ]
+      ],
+      "p": 3,
+      "u": [
+       0,
+       0,
+       0,
+       0,
+       0.3333333333333333,
+       0.6666666666666666,
+       1,
+       1,
+       1,
+       1
+      ]
+     },
+     "build": {
+      "mode": "canonical",
+      "vec": [
+       0,
+       0,
+       2
+      ]
+     }
+    },
+    "op": "step_inv",
+    "dom": [
+     0,
+     -1234567,
+     1,
+     1234567
+    ],
+    "p": [
+     1,
+     0,
+     0.5
+    ],
+    "tol": 1e-06,
+    "guess": [
+     0.1,
+     0
+    ]
+   }
+  },
+  {
+   "name": "closed_seam_step_inv_oob",
+   "upstream_ref": "edge case: closed tangent-continuous cubic generator, the seam, out-of-bounds evaluation",
+   "inputs": {
+    "surf": {
+     "gen": {
+      "kind": "b_spline",
+      "cpts": [
+       [
+        1,
+        0,
+        0
+       ],
+       [
+        1,
+        1,
+        0
+       ],
+       [
+        -1,
+        1,
+        0
+       ],
+       [
+        -1,
+        -1,
+        0
+       ],
+       [
+        1,
+        -1,
+        0
+       ],
+       [
+        1,
+        0,
+        0
+       ]
+      ],
+      "p": 3,
+      "u": [
+       0,
+       0,
+       0,
+       0,
+       0.3333333333333333,
+       0.6666666666666666,
+       1,
+       1,
+       1,
+       1
+      ]
+     },
+     "build": {
+      "mode": "canonical",
+      "vec": [
+       0,
+       0,
+       2
+      ]
+     },
+     "oob": true
+    },
+    "op": "step_inv",
+    "dom": [
+     0,
+     -1234567,
+     1,
+     1234567
+    ],
+    "p": [
+     1,
+     0,
+     0.5
+    ],
+    "tol": 1e-06,
+    "guess": [
+     0.9,
+     0
+    ]
+   }
+  },
+  {
+   "name": "closed_seam_drop_vec_in",
+   "upstream_ref": "edge case: closed tangent-continuous cubic generator, the seam, in-pointing vector",
+   "inputs": {
+    "surf": {
+     "gen": {
+      "kind": "b_spline",
+      "cpts": [
+       [
+        1,
+        0,
+        0
+       ],
+       [
+        1,
+        1,
+        0
+       ],
+       [
+        -1,
+        1,
+        0
+       ],
+       [
+        -1,
+        -1,
+        0
+       ],
+       [
+        1,
+        -1,
+        0
+       ],
+       [
+        1,
+        0,
+        0
+       ]
+      ],
+      "p": 3,
+      "u": [
+       0,
+       0,
+       0,
+       0,
+       0.3333333333333333,
+       0.6666666666666666,
+       1,
+       1,
+       1,
+       1
+      ]
+     },
+     "build": {
+      "mode": "canonical",
+      "vec": [
+       0,
+       0,
+       2
+      ]
+     }
+    },
+    "op": "drop_fast",
+    "dom": [
+     0,
+     0,
+     1,
+     1
+    ],
+    "sop": 3,
+    "p": [
+     3,
+     0,
+     0.2
+    ],
+    "vec": [
+     0,
+     1,
+     0
+    ],
+    "tol": 1e-09,
+    "requested": 1
+   }
+  },
+  {
+   "name": "closed_seam_drop_vec_in_intersect",
+   "upstream_ref": "edge case: closed tangent-continuous cubic generator, the seam, in-pointing vector",
+   "inputs": {
+    "surf": {
+     "gen": {
+      "kind": "b_spline",
+      "cpts": [
+       [
+        1,
+        0,
+        0
+       ],
+       [
+        1,
+        1,
+        0
+       ],
+       [
+        -1,
+        1,
+        0
+       ],
+       [
+        -1,
+        -1,
+        0
+       ],
+       [
+        1,
+        -1,
+        0
+       ],
+       [
+        1,
+        0,
+        0
+       ]
+      ],
+      "p": 3,
+      "u": [
+       0,
+       0,
+       0,
+       0,
+       0.3333333333333333,
+       0.6666666666666666,
+       1,
+       1,
+       1,
+       1
+      ]
+     },
+     "build": {
+      "mode": "canonical",
+      "vec": [
+       0,
+       0,
+       2
+      ]
+     }
+    },
+    "op": "drop_fast",
+    "dom": [
+     0,
+     0,
+     1,
+     1
+    ],
+    "sop": 0,
+    "p": [
+     1,
+     0,
+     0.2
+    ],
+    "vec": [
+     0,
+     1,
+     0
+    ],
+    "tol": 1e-06,
+    "requested": 1
+   }
+  },
+  {
+   "name": "closed_seam_drop_vec_in_swapped",
+   "upstream_ref": "edge case: closed tangent-continuous cubic generator, the seam, in-pointing vector, swapped",
+   "inputs": {
+    "surf": {
+     "gen": {
+      "kind": "b_spline",
+      "cpts": [
+       [
+        1,
+        0,
+        0
+       ],
+       [
+        1,
+        1,
+        0
+       ],
+       [
+        -1,
+        1,
+        0
+       ],
+       [
+        -1,
+        -1,
+        0
+       ],
+       [
+        1,
+        -1,
+        0
+       ],
+       [
+        1,
+        0,
+        0
+       ]
+      ],
+      "p": 3,
+      "u": [
+       0,
+       0,
+       0,
+       0,
+       0.3333333333333333,
+       0.6666666666666666,
+       1,
+       1,
+       1,
+       1
+      ]
+     },
+     "build": {
+      "mode": "ctor",
+      "origin": [
+       1,
+       0,
+       0
+      ],
+      "vec": [
+       0,
+       0,
+       2
+      ],
+      "domain": [
+       0,
+       0,
+       1,
+       1
+      ]
+     },
+     "swap": true
+    },
+    "op": "drop_fast",
+    "dom": [
+     0,
+     0,
+     1,
+     1
+    ],
+    "sop": 0,
+    "p": [
+     1,
+     0,
+     0.2
+    ],
+    "vec": [
+     0,
+     1,
+     0
+    ],
+    "tol": 1e-06,
+    "requested": 1
+   }
+  },
+  {
+   "name": "closed_seam_drop_vec_out",
+   "upstream_ref": "edge case: closed tangent-continuous cubic generator, the seam, in-pointing vector",
+   "inputs": {
+    "surf": {
+     "gen": {
+      "kind": "b_spline",
+      "cpts": [
+       [
+        1,
+        0,
+        0
+       ],
+       [
+        1,
+        1,
+        0
+       ],
+       [
+        -1,
+        1,
+        0
+       ],
+       [
+        -1,
+        -1,
+        0
+       ],
+       [
+        1,
+        -1,
+        0
+       ],
+       [
+        1,
+        0,
+        0
+       ]
+      ],
+      "p": 3,
+      "u": [
+       0,
+       0,
+       0,
+       0,
+       0.3333333333333333,
+       0.6666666666666666,
+       1,
+       1,
+       1,
+       1
+      ]
+     },
+     "build": {
+      "mode": "canonical",
+      "vec": [
+       0,
+       0,
+       2
+      ]
+     }
+    },
+    "op": "drop_fast",
+    "dom": [
+     0,
+     0,
+     1,
+     1
+    ],
+    "sop": 3,
+    "p": [
+     3,
+     0,
+     0.2
+    ],
+    "vec": [
+     0,
+     -1,
+     0
+    ],
+    "tol": 1e-09,
+    "requested": 1
+   }
+  },
+  {
+   "name": "closed_seam_drop_vec_out_intersect",
+   "upstream_ref": "edge case: closed tangent-continuous cubic generator, the seam, in-pointing vector",
+   "inputs": {
+    "surf": {
+     "gen": {
+      "kind": "b_spline",
+      "cpts": [
+       [
+        1,
+        0,
+        0
+       ],
+       [
+        1,
+        1,
+        0
+       ],
+       [
+        -1,
+        1,
+        0
+       ],
+       [
+        -1,
+        -1,
+        0
+       ],
+       [
+        1,
+        -1,
+        0
+       ],
+       [
+        1,
+        0,
+        0
+       ]
+      ],
+      "p": 3,
+      "u": [
+       0,
+       0,
+       0,
+       0,
+       0.3333333333333333,
+       0.6666666666666666,
+       1,
+       1,
+       1,
+       1
+      ]
+     },
+     "build": {
+      "mode": "canonical",
+      "vec": [
+       0,
+       0,
+       2
+      ]
+     }
+    },
+    "op": "drop_fast",
+    "dom": [
+     0,
+     0,
+     1,
+     1
+    ],
+    "sop": 0,
+    "p": [
+     1,
+     0,
+     0.2
+    ],
+    "vec": [
+     0,
+     -1,
+     0
+    ],
+    "tol": 1e-06,
+    "requested": 1
+   }
+  },
+  {
+   "name": "closed_seam_drop_vec_out_swapped",
+   "upstream_ref": "edge case: closed tangent-continuous cubic generator, the seam, in-pointing vector, swapped",
+   "inputs": {
+    "surf": {
+     "gen": {
+      "kind": "b_spline",
+      "cpts": [
+       [
+        1,
+        0,
+        0
+       ],
+       [
+        1,
+        1,
+        0
+       ],
+       [
+        -1,
+        1,
+        0
+       ],
+       [
+        -1,
+        -1,
+        0
+       ],
+       [
+        1,
+        -1,
+        0
+       ],
+       [
+        1,
+        0,
+        0
+       ]
+      ],
+      "p": 3,
+      "u": [
+       0,
+       0,
+       0,
+       0,
+       0.3333333333333333,
+       0.6666666666666666,
+       1,
+       1,
+       1,
+       1
+      ]
+     },
+     "build": {
+      "mode": "ctor",
+      "origin": [
+       1,
+       0,
+       0
+      ],
+      "vec": [
+       0,
+       0,
+       2
+      ],
+      "domain": [
+       0,
+       0,
+       1,
+       1
+      ]
+     },
+     "swap": true
+    },
+    "op": "drop_fast",
+    "dom": [
+     0,
+     0,
+     1,
+     1
+    ],
+    "sop": 0,
+    "p": [
+     1,
+     0,
+     0.2
+    ],
+    "vec": [
+     0,
+     -1,
+     0
+    ],
+    "tol": 1e-06,
+    "requested": 1
+   }
+  },
+  {
+   "name": "closed_seam_drop_no_vec",
+   "upstream_ref": "edge case: closed tangent-continuous cubic generator, the seam",
+   "inputs": {
+    "surf": {
+     "gen": {
+      "kind": "b_spline",
+      "cpts": [
+       [
+        1,
+        0,
+        0
+       ],
+       [
+        1,
+        1,
+        0
+       ],
+       [
+        -1,
+        1,
+        0
+       ],
+       [
+        -1,
+        -1,
+        0
+       ],
+       [
+        1,
+        -1,
+        0
+       ],
+       [
+        1,
+        0,
+        0
+       ]
+      ],
+      "p": 3,
+      "u": [
+       0,
+       0,
+       0,
+       0,
+       0.3333333333333333,
+       0.6666666666666666,
+       1,
+       1,
+       1,
+       1
+      ]
+     },
+     "build": {
+      "mode": "canonical",
+      "vec": [
+       0,
+       0,
+       2
+      ]
+     }
+    },
+    "op": "drop_fast",
+    "dom": [
+     0,
+     0,
+     1,
+     1
+    ],
+    "sop": 0,
+    "p": [
+     1,
+     0,
+     0.2
+    ],
+    "tol": 1e-06,
+    "requested": 1
+   }
+  },
+  {
+   "name": "linear_build",
+   "upstream_ref": "edge case: generator orientation",
+   "inputs": {
+    "surf": {
+     "gen": {
+      "kind": "line",
+      "a": [
+       0,
+       0,
+       0
+      ],
+      "b": [
+       2,
+       1,
+       0
+      ]
+     },
+     "build": {
+      "mode": "canonical",
+      "vec": [
+       0,
+       0,
+       3
+      ]
+     }
+    },
+    "op": "build"
+   }
+  },
+  {
+   "name": "linear_directrix",
+   "upstream_ref": "edge case: generator orientation",
+   "inputs": {
+    "surf": {
+     "gen": {
+      "kind": "line",
+      "a": [
+       0,
+       0,
+       0
+      ],
+      "b": [
+       2,
+       1,
+       0
+      ]
+     },
+     "build": {
+      "mode": "canonical",
+      "vec": [
+       0,
+       0,
+       3
+      ]
+     }
+    },
+    "op": "directrix",
+    "p": [
+     1,
+     0.5,
+     6
+    ],
+    "tol": 1e-06
+   }
+  },
+  {
+   "name": "linear_directrix_boundary",
+   "upstream_ref": "edge case: generator orientation",
+   "inputs": {
+    "surf": {
+     "gen": {
+      "kind": "line",
+      "a": [
+       0,
+       0,
+       0
+      ],
+      "b": [
+       2,
+       1,
+       0
+      ]
+     },
+     "build": {
+      "mode": "ctor",
+      "origin": [
+       0,
+       0,
+       0
+      ],
+      "vec": [
+       0,
+       0,
+       3
+      ],
+      "domain": [
+       0,
+       0,
+       1,
+       1
+      ]
+     }
+    },
+    "op": "directrix",
+    "p": [
+     1,
+     0.5,
+     3.0000001
+    ],
+    "tol": 1e-06
+   }
+  },
+  {
+   "name": "linear_adjust_owner_step",
+   "upstream_ref": "edge case: generator orientation: AdjustSTEPUVDomain of a line generator (SmLine::MakeNurb's owner reparameterisation)",
+   "inputs": {
+    "surf": {
+     "gen": {
+      "kind": "line",
+      "a": [
+       0,
+       0,
+       0
+      ],
+      "b": [
+       2,
+       1,
+       0
+      ]
+     },
+     "build": {
+      "mode": "ctor",
+      "origin": [
+       0,
+       0,
+       0
+      ],
+      "vec": [
+       0,
+       0,
+       3
+      ],
+      "domain": [
+       0,
+       0,
+       1,
+       1
+      ]
+     }
+    },
+    "op": "adjust",
+    "dom": [
+     0.2,
+     0,
+     0.7,
+     2
+    ]
+   }
+  },
+  {
+   "name": "linear_adjust_owner_step_swapped",
+   "upstream_ref": "edge case: generator orientation",
+   "inputs": {
+    "surf": {
+     "gen": {
+      "kind": "line",
+      "a": [
+       0,
+       0,
+       0
+      ],
+      "b": [
+       2,
+       1,
+       0
+      ]
+     },
+     "build": {
+      "mode": "ctor",
+      "origin": [
+       0,
+       0,
+       0
+      ],
+      "vec": [
+       0,
+       0,
+       3
+      ],
+      "domain": [
+       0,
+       0,
+       1,
+       1
+      ]
+     },
+     "swap": true
+    },
+    "op": "adjust",
+    "dom": [
+     0.2,
+     0,
+     0.7,
+     2
+    ]
+   }
+  },
+  {
+   "name": "linear_update",
+   "upstream_ref": "edge case: generator orientation",
+   "inputs": {
+    "surf": {
+     "gen": {
+      "kind": "line",
+      "a": [
+       0,
+       0,
+       0
+      ],
+      "b": [
+       2,
+       1,
+       0
+      ]
+     },
+     "build": {
+      "mode": "ctor",
+      "origin": [
+       0,
+       0,
+       0
+      ],
+      "vec": [
+       0,
+       0,
+       3
+      ],
+      "domain": [
+       0,
+       0,
+       1,
+       1
+      ]
+     }
+    },
+    "op": "update",
+    "dom": [
+     0.1,
+     0.2,
+     0.8,
+     0.9
+    ]
+   }
+  },
+  {
+   "name": "linear_reparam",
+   "upstream_ref": "edge case: generator orientation",
+   "inputs": {
+    "surf": {
+     "gen": {
+      "kind": "line",
+      "a": [
+       0,
+       0,
+       0
+      ],
+      "b": [
+       2,
+       1,
+       0
+      ]
+     },
+     "build": {
+      "mode": "ctor",
+      "origin": [
+       0,
+       0,
+       0
+      ],
+      "vec": [
+       0,
+       0,
+       3
+      ],
+      "domain": [
+       0,
+       0,
+       1,
+       1
+      ]
+     }
+    },
+    "op": "reparam",
+    "dom": [
+     -1,
+     -2,
+     3,
+     4
+    ]
+   }
+  },
+  {
+   "name": "linear_two_point_bspline",
+   "upstream_ref": "edge case: generator orientation: two point B-spline",
+   "inputs": {
+    "surf": {
+     "gen": {
+      "kind": "b_spline",
+      "cpts": [
+       [
+        0,
+        0,
+        0
+       ],
+       [
+        1,
+        2,
+        3
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0,
+       0,
+       1,
+       1
+      ]
+     },
+     "build": {
+      "mode": "canonical",
+      "vec": [
+       1,
+       0,
+       0
+      ]
+     }
+    },
+    "op": "build"
+   }
+  },
+  {
+   "name": "coplanar_build",
+   "upstream_ref": "edge case: generator orientation: XZ generator extruded along X",
+   "inputs": {
+    "surf": {
+     "gen": {
+      "kind": "b_spline",
+      "cpts": [
+       [
+        0,
+        0,
+        0
+       ],
+       [
+        1,
+        0,
+        1
+       ],
+       [
+        2,
+        0,
+        -1
+       ],
+       [
+        3,
+        0,
+        0.5
+       ]
+      ],
+      "p": 2,
+      "u": [
+       0,
+       0,
+       0,
+       0.5,
+       1,
+       1,
+       1
+      ]
+     },
+     "build": {
+      "mode": "canonical",
+      "vec": [
+       1,
+       0,
+       0
+      ]
+     }
+    },
+    "op": "build"
+   }
+  },
+  {
+   "name": "coplanar_directrix",
+   "upstream_ref": "edge case: generator orientation",
+   "inputs": {
+    "surf": {
+     "gen": {
+      "kind": "b_spline",
+      "cpts": [
+       [
+        0,
+        0,
+        0
+       ],
+       [
+        1,
+        0,
+        1
+       ],
+       [
+        2,
+        0,
+        -1
+       ],
+       [
+        3,
+        0,
+        0.5
+       ]
+      ],
+      "p": 2,
+      "u": [
+       0,
+       0,
+       0,
+       0.5,
+       1,
+       1,
+       1
+      ]
+     },
+     "build": {
+      "mode": "canonical",
+      "vec": [
+       1,
+       0,
+       0
+      ]
+     }
+    },
+    "op": "directrix",
+    "p": [
+     1.5,
+     0,
+     0.4
+    ],
+    "tol": 1e-06
+   }
+  },
+  {
+   "name": "coplanar_directrix_miss",
+   "upstream_ref": "edge case: generator orientation",
+   "inputs": {
+    "surf": {
+     "gen": {
+      "kind": "b_spline",
+      "cpts": [
+       [
+        0,
+        0,
+        0
+       ],
+       [
+        1,
+        0,
+        1
+       ],
+       [
+        2,
+        0,
+        -1
+       ],
+       [
+        3,
+        0,
+        0.5
+       ]
+      ],
+      "p": 2,
+      "u": [
+       0,
+       0,
+       0,
+       0.5,
+       1,
+       1,
+       1
+      ]
+     },
+     "build": {
+      "mode": "canonical",
+      "vec": [
+       1,
+       0,
+       0
+      ]
+     }
+    },
+    "op": "directrix",
+    "p": [
+     1.5,
+     0,
+     7
+    ],
+    "tol": 1e-06
+   }
+  },
+  {
+   "name": "independent_build",
+   "upstream_ref": "edge case: generator orientation: XZ generator extruded along (1,1,1)",
+   "inputs": {
+    "surf": {
+     "gen": {
+      "kind": "b_spline",
+      "cpts": [
+       [
+        0,
+        0,
+        0
+       ],
+       [
+        1,
+        0,
+        1
+       ],
+       [
+        2,
+        0,
+        -1
+       ],
+       [
+        3,
+        0,
+        0.5
+       ]
+      ],
+      "p": 2,
+      "u": [
+       0,
+       0,
+       0,
+       0.5,
+       1,
+       1,
+       1
+      ]
+     },
+     "build": {
+      "mode": "canonical",
+      "vec": [
+       1,
+       1,
+       1
+      ]
+     }
+    },
+    "op": "build"
+   }
+  },
+  {
+   "name": "independent_directrix",
+   "upstream_ref": "edge case: generator orientation",
+   "inputs": {
+    "surf": {
+     "gen": {
+      "kind": "b_spline",
+      "cpts": [
+       [
+        0,
+        0,
+        0
+       ],
+       [
+        1,
+        0,
+        1
+       ],
+       [
+        2,
+        0,
+        -1
+       ],
+       [
+        3,
+        0,
+        0.5
+       ]
+      ],
+      "p": 2,
+      "u": [
+       0,
+       0,
+       0,
+       0.5,
+       1,
+       1,
+       1
+      ]
+     },
+     "build": {
+      "mode": "canonical",
+      "vec": [
+       1,
+       1,
+       1
+      ]
+     }
+    },
+    "op": "directrix",
+    "p": [
+     3,
+     2,
+     2.5
+    ],
+    "tol": 1e-06
+   }
+  },
+  {
+   "name": "independent_step_inv",
+   "upstream_ref": "edge case: generator orientation",
+   "inputs": {
+    "surf": {
+     "gen": {
+      "kind": "b_spline",
+      "cpts": [
+       [
+        0,
+        0,
+        0
+       ],
+       [
+        1,
+        0,
+        1
+       ],
+       [
+        2,
+        0,
+        -1
+       ],
+       [
+        3,
+        0,
+        0.5
+       ]
+      ],
+      "p": 2,
+      "u": [
+       0,
+       0,
+       0,
+       0.5,
+       1,
+       1,
+       1
+      ]
+     },
+     "build": {
+      "mode": "canonical",
+      "vec": [
+       1,
+       1,
+       1
+      ]
+     }
+    },
+    "op": "step_inv",
+    "dom": [
+     0,
+     -1234567,
+     1,
+     1234567
+    ],
+    "p": [
+     3,
+     2,
+     2.5
+    ],
+    "tol": 1e-06
+   }
+  },
+  {
+   "name": "independent_drop_fast",
+   "upstream_ref": "edge case: generator orientation: DropPointFast refuses",
+   "inputs": {
+    "surf": {
+     "gen": {
+      "kind": "b_spline",
+      "cpts": [
+       [
+        0,
+        0,
+        0
+       ],
+       [
+        1,
+        0,
+        1
+       ],
+       [
+        2,
+        0,
+        -1
+       ],
+       [
+        3,
+        0,
+        0.5
+       ]
+      ],
+      "p": 2,
+      "u": [
+       0,
+       0,
+       0,
+       0.5,
+       1,
+       1,
+       1
+      ]
+     },
+     "build": {
+      "mode": "canonical",
+      "vec": [
+       1,
+       1,
+       1
+      ]
+     }
+    },
+    "op": "drop_fast",
+    "dom": [
+     0,
+     0,
+     1,
+     1
+    ],
+    "sop": 3,
+    "p": [
+     3,
+     2,
+     2.5
+    ],
+    "tol": 1e-06,
+    "requested": 1
+   }
+  },
+  {
+   "name": "nonplanar_build",
+   "upstream_ref": "edge case: generator orientation",
+   "inputs": {
+    "surf": {
+     "gen": {
+      "kind": "b_spline",
+      "cpts": [
+       [
+        0,
+        0,
+        0
+       ],
+       [
+        1,
+        1,
+        1
+       ],
+       [
+        2,
+        -1,
+        0
+       ],
+       [
+        3,
+        0,
+        2
+       ]
+      ],
+      "p": 3,
+      "u": [
+       0,
+       0,
+       0,
+       0,
+       1,
+       1,
+       1,
+       1
+      ]
+     },
+     "build": {
+      "mode": "canonical",
+      "vec": [
+       0,
+       0.2,
+       1
+      ]
+     }
+    },
+    "op": "build"
+   }
+  },
+  {
+   "name": "nonplanar_directrix",
+   "upstream_ref": "edge case: generator orientation",
+   "inputs": {
+    "surf": {
+     "gen": {
+      "kind": "b_spline",
+      "cpts": [
+       [
+        0,
+        0,
+        0
+       ],
+       [
+        1,
+        1,
+        1
+       ],
+       [
+        2,
+        -1,
+        0
+       ],
+       [
+        3,
+        0,
+        2
+       ]
+      ],
+      "p": 3,
+      "u": [
+       0,
+       0,
+       0,
+       0,
+       1,
+       1,
+       1,
+       1
+      ]
+     },
+     "build": {
+      "mode": "canonical",
+      "vec": [
+       0,
+       0.2,
+       1
+      ]
+     }
+    },
+    "op": "directrix",
+    "p": [
+     1.5,
+     0.1,
+     0.9
+    ],
+    "tol": 0.001
+   }
+  },
+  {
+   "name": "tilt_inside_build",
+   "upstream_ref": "tolerance limit: extrusion tilted from the generator plane normal",
+   "inputs": {
+    "surf": {
+     "gen": {
+      "kind": "b_spline",
+      "cpts": [
+       [
+        0,
+        0,
+        0
+       ],
+       [
+        4,
+        2,
+        0
+       ],
+       [
+        6,
+        -2,
+        0
+       ],
+       [
+        8,
+        2,
+        0
+       ],
+       [
+        10,
+        4,
+        0
+       ],
+       [
+        12,
+        0,
+        0
+       ]
+      ],
+      "p": 3,
+      "u": [
+       0,
+       0,
+       0,
+       0,
+       0.3333333333333333,
+       0.6666666666666666,
+       1,
+       1,
+       1,
+       1
+      ]
+     },
+     "build": {
+      "mode": "canonical",
+      "vec": [
+       0,
+       9.999999999998333e-07,
+       0.9999999999995
+      ]
+     }
+    },
+    "op": "build"
+   }
+  },
+  {
+   "name": "tilt_outside_build",
+   "upstream_ref": "tolerance limit: extrusion tilted from the generator plane normal",
+   "inputs": {
+    "surf": {
+     "gen": {
+      "kind": "b_spline",
+      "cpts": [
+       [
+        0,
+        0,
+        0
+       ],
+       [
+        4,
+        2,
+        0
+       ],
+       [
+        6,
+        -2,
+        0
+       ],
+       [
+        8,
+        2,
+        0
+       ],
+       [
+        10,
+        4,
+        0
+       ],
+       [
+        12,
+        0,
+        0
+       ]
+      ],
+      "p": 3,
+      "u": [
+       0,
+       0,
+       0,
+       0,
+       0.3333333333333333,
+       0.6666666666666666,
+       1,
+       1,
+       1,
+       1
+      ]
+     },
+     "build": {
+      "mode": "canonical",
+      "vec": [
+       0,
+       2.9999999999955002e-06,
+       0.9999999999955
+      ]
+     }
+    },
+    "op": "build"
+   }
+  },
+  {
+   "name": "tilt_anti_inside_build",
+   "upstream_ref": "tolerance limit: extrusion tilted from the generator plane normal",
+   "inputs": {
+    "surf": {
+     "gen": {
+      "kind": "b_spline",
+      "cpts": [
+       [
+        0,
+        0,
+        0
+       ],
+       [
+        4,
+        2,
+        0
+       ],
+       [
+        6,
+        -2,
+        0
+       ],
+       [
+        8,
+        2,
+        0
+       ],
+       [
+        10,
+        4,
+        0
+       ],
+       [
+        12,
+        0,
+        0
+       ]
+      ],
+      "p": 3,
+      "u": [
+       0,
+       0,
+       0,
+       0,
+       0.3333333333333333,
+       0.6666666666666666,
+       1,
+       1,
+       1,
+       1
+      ]
+     },
+     "build": {
+      "mode": "canonical",
+      "vec": [
+       0,
+       9.999999999998333e-07,
+       -0.9999999999995
+      ]
+     }
+    },
+    "op": "build"
+   }
+  },
+  {
+   "name": "ellipse_build",
+   "upstream_ref": "edge case: ellipse generator",
+   "inputs": {
+    "surf": {
+     "gen": {
+      "kind": "ellipse",
+      "c": [
+       1,
+       1,
+       0
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "d": [
+       -30,
+       200
+      ],
+      "rx": 3,
+      "ry": 1
+     },
+     "build": {
+      "mode": "ctor",
+      "origin": [
+       4,
+       1,
+       0
+      ],
+      "vec": [
+       0,
+       0,
+       1.5
+      ],
+      "domain": [
+       -30,
+       -1,
+       200,
+       2
+      ]
+     }
+    },
+    "op": "build"
+   }
+  },
+  {
+   "name": "ellipse_update",
+   "upstream_ref": "edge case: ellipse generator",
+   "inputs": {
+    "surf": {
+     "gen": {
+      "kind": "ellipse",
+      "c": [
+       1,
+       1,
+       0
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "d": [
+       -30,
+       200
+      ],
+      "rx": 3,
+      "ry": 1
+     },
+     "build": {
+      "mode": "ctor",
+      "origin": [
+       4,
+       1,
+       0
+      ],
+      "vec": [
+       0,
+       0,
+       1.5
+      ],
+      "domain": [
+       -30,
+       -1,
+       200,
+       2
+      ]
+     }
+    },
+    "op": "update",
+    "dom": [
+     0.1,
+     0.1,
+     0.9,
+     0.8
+    ]
+   }
+  },
+  {
+   "name": "ellipse_adjust",
+   "upstream_ref": "edge case: ellipse generator",
+   "inputs": {
+    "surf": {
+     "gen": {
+      "kind": "ellipse",
+      "c": [
+       1,
+       1,
+       0
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "d": [
+       -30,
+       200
+      ],
+      "rx": 3,
+      "ry": 1
+     },
+     "build": {
+      "mode": "ctor",
+      "origin": [
+       4,
+       1,
+       0
+      ],
+      "vec": [
+       0,
+       0,
+       1.5
+      ],
+      "domain": [
+       -30,
+       -1,
+       200,
+       2
+      ]
+     }
+    },
+    "op": "adjust",
+    "dom": [
+     0,
+     -0.5,
+     150,
+     1
+    ]
+   }
+  },
+  {
+   "name": "ellipse_to_nurbs",
+   "upstream_ref": "edge case: ellipse generator",
+   "inputs": {
+    "surf": {
+     "gen": {
+      "kind": "ellipse",
+      "c": [
+       1,
+       1,
+       0
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "d": [
+       -30,
+       200
+      ],
+      "rx": 3,
+      "ry": 1
+     },
+     "build": {
+      "mode": "ctor",
+      "origin": [
+       4,
+       1,
+       0
+      ],
+      "vec": [
+       0,
+       0,
+       1.5
+      ],
+      "domain": [
+       -30,
+       -1,
+       200,
+       2
+      ]
+     }
+    },
+    "op": "to_nurbs",
+    "u": 45,
+    "v": 0.5
+   }
+  },
+  {
+   "name": "ellipse_infinite",
+   "upstream_ref": "edge case: ellipse generator, infinite constructor",
+   "inputs": {
+    "surf": {
+     "gen": {
+      "kind": "ellipse",
+      "c": [
+       1,
+       1,
+       0
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "d": [
+       -30,
+       200
+      ],
+      "rx": 3,
+      "ry": 1
+     },
+     "build": {
+      "mode": "infinite",
+      "vec": [
+       0,
+       0,
+       1.5
+      ]
+     },
+     "swap": true
+    },
+    "op": "build"
+   }
+  },
+  {
+   "name": "transform_identity",
+   "upstream_ref": "edge case: Transform",
+   "inputs": {
+    "surf": {
+     "gen": {
+      "kind": "b_spline",
+      "cpts": [
+       [
+        0,
+        0,
+        0
+       ],
+       [
+        4,
+        2,
+        0
+       ],
+       [
+        6,
+        -2,
+        0
+       ],
+       [
+        8,
+        2,
+        0
+       ],
+       [
+        10,
+        4,
+        0
+       ],
+       [
+        12,
+        0,
+        0
+       ]
+      ],
+      "p": 3,
+      "u": [
+       0,
+       0,
+       0,
+       0,
+       0.3333333333333333,
+       0.6666666666666666,
+       1,
+       1,
+       1,
+       1
+      ]
+     },
+     "build": {
+      "mode": "canonical",
+      "vec": [
+       0,
+       0,
+       1
+      ]
+     }
+    },
+    "op": "transform",
+    "origin": [
+     0,
+     0,
+     0
+    ],
+    "x": [
+     1,
+     0,
+     0
+    ],
+    "y": [
+     0,
+     1,
+     0
+    ]
+   }
+  },
+  {
+   "name": "transform_scale2",
+   "upstream_ref": "edge case: Transform",
+   "inputs": {
+    "surf": {
+     "gen": {
+      "kind": "b_spline",
+      "cpts": [
+       [
+        0,
+        0,
+        0
+       ],
+       [
+        4,
+        2,
+        0
+       ],
+       [
+        6,
+        -2,
+        0
+       ],
+       [
+        8,
+        2,
+        0
+       ],
+       [
+        10,
+        4,
+        0
+       ],
+       [
+        12,
+        0,
+        0
+       ]
+      ],
+      "p": 3,
+      "u": [
+       0,
+       0,
+       0,
+       0,
+       0.3333333333333333,
+       0.6666666666666666,
+       1,
+       1,
+       1,
+       1
+      ]
+     },
+     "build": {
+      "mode": "canonical",
+      "vec": [
+       0,
+       0,
+       1
+      ]
+     }
+    },
+    "op": "transform",
+    "origin": [
+     0,
+     0,
+     0
+    ],
+    "x": [
+     1,
+     0,
+     0
+    ],
+    "y": [
+     0,
+     1,
+     0
+    ],
+    "scale": [
+     2,
+     2,
+     2
+    ]
+   }
+  },
+  {
+   "name": "transform_nonisotropic",
+   "upstream_ref": "edge case: Transform",
+   "inputs": {
+    "surf": {
+     "gen": {
+      "kind": "b_spline",
+      "cpts": [
+       [
+        0,
+        0,
+        0
+       ],
+       [
+        4,
+        2,
+        0
+       ],
+       [
+        6,
+        -2,
+        0
+       ],
+       [
+        8,
+        2,
+        0
+       ],
+       [
+        10,
+        4,
+        0
+       ],
+       [
+        12,
+        0,
+        0
+       ]
+      ],
+      "p": 3,
+      "u": [
+       0,
+       0,
+       0,
+       0,
+       0.3333333333333333,
+       0.6666666666666666,
+       1,
+       1,
+       1,
+       1
+      ]
+     },
+     "build": {
+      "mode": "canonical",
+      "vec": [
+       0,
+       0,
+       1
+      ]
+     }
+    },
+    "op": "transform",
+    "origin": [
+     1,
+     2,
+     3
+    ],
+    "x": [
+     0,
+     1,
+     0
+    ],
+    "y": [
+     0,
+     0,
+     1
+    ],
+    "scale": [
+     1,
+     2,
+     1
+    ]
+   }
+  },
+  {
+   "name": "transform_unit_scale_moved",
+   "upstream_ref": "edge case: Transform",
+   "inputs": {
+    "surf": {
+     "gen": {
+      "kind": "line",
+      "a": [
+       0,
+       0,
+       0
+      ],
+      "b": [
+       2,
+       1,
+       0
+      ]
+     },
+     "build": {
+      "mode": "canonical",
+      "vec": [
+       0,
+       0,
+       3
+      ]
+     }
+    },
+    "op": "transform",
+    "origin": [
+     1,
+     2,
+     3
+    ],
+    "x": [
+     0,
+     1,
+     0
+    ],
+    "y": [
+     0,
+     0,
+     1
+    ],
+    "scale": [
+     1,
+     1,
+     1
+    ]
+   }
+  },
+  {
+   "name": "eq_same",
+   "upstream_ref": "tests/SM_API_test/src/TestSmSurfaces.cpp:246 (TestSmCreateExtrude: the six points as a cubic control polygon, extruded along Z)",
+   "inputs": {
+    "surf": {
+     "gen": {
+      "kind": "b_spline",
+      "cpts": [
+       [
+        0,
+        0,
+        0
+       ],
+       [
+        4,
+        2,
+        0
+       ],
+       [
+        6,
+        -2,
+        0
+       ],
+       [
+        8,
+        2,
+        0
+       ],
+       [
+        10,
+        4,
+        0
+       ],
+       [
+        12,
+        0,
+        0
+       ]
+      ],
+      "p": 3,
+      "u": [
+       0,
+       0,
+       0,
+       0,
+       0.3333333333333333,
+       0.6666666666666666,
+       1,
+       1,
+       1,
+       1
+      ]
+     },
+     "build": {
+      "mode": "canonical",
+      "vec": [
+       0,
+       0,
+       1
+      ]
+     }
+    },
+    "op": "eq",
+    "other": {
+     "gen": {
+      "kind": "b_spline",
+      "cpts": [
+       [
+        0,
+        0,
+        0
+       ],
+       [
+        4,
+        2,
+        0
+       ],
+       [
+        6,
+        -2,
+        0
+       ],
+       [
+        8,
+        2,
+        0
+       ],
+       [
+        10,
+        4,
+        0
+       ],
+       [
+        12,
+        0,
+        0
+       ]
+      ],
+      "p": 3,
+      "u": [
+       0,
+       0,
+       0,
+       0,
+       0.3333333333333333,
+       0.6666666666666666,
+       1,
+       1,
+       1,
+       1
+      ]
+     },
+     "build": {
+      "mode": "canonical",
+      "vec": [
+       0,
+       0,
+       1
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "eq_vector",
+   "upstream_ref": "tests/SM_API_test/src/TestSmSurfaces.cpp:246 (TestSmCreateExtrude: the six points as a cubic control polygon, extruded along Z)",
+   "inputs": {
+    "surf": {
+     "gen": {
+      "kind": "b_spline",
+      "cpts": [
+       [
+        0,
+        0,
+        0
+       ],
+       [
+        4,
+        2,
+        0
+       ],
+       [
+        6,
+        -2,
+        0
+       ],
+       [
+        8,
+        2,
+        0
+       ],
+       [
+        10,
+        4,
+        0
+       ],
+       [
+        12,
+        0,
+        0
+       ]
+      ],
+      "p": 3,
+      "u": [
+       0,
+       0,
+       0,
+       0,
+       0.3333333333333333,
+       0.6666666666666666,
+       1,
+       1,
+       1,
+       1
+      ]
+     },
+     "build": {
+      "mode": "canonical",
+      "vec": [
+       0,
+       0,
+       1
+      ]
+     }
+    },
+    "op": "eq",
+    "other": {
+     "gen": {
+      "kind": "b_spline",
+      "cpts": [
+       [
+        0,
+        0,
+        0
+       ],
+       [
+        4,
+        2,
+        0
+       ],
+       [
+        6,
+        -2,
+        0
+       ],
+       [
+        8,
+        2,
+        0
+       ],
+       [
+        10,
+        4,
+        0
+       ],
+       [
+        12,
+        0,
+        0
+       ]
+      ],
+      "p": 3,
+      "u": [
+       0,
+       0,
+       0,
+       0,
+       0.3333333333333333,
+       0.6666666666666666,
+       1,
+       1,
+       1,
+       1
+      ]
+     },
+     "build": {
+      "mode": "canonical",
+      "vec": [
+       0,
+       0,
+       1.0000001
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "eq_swap",
+   "upstream_ref": "tests/prog_test/src/smAdvancedTest.cpp:3099 (my_ssi_analytic_demo case 3: radius 2 cylinder over [0, 200] degrees, height 5, frame at (-2,0,0) turned 0.1 rad about (1,1,1))",
+   "inputs": {
+    "surf": {
+     "gen": {
+      "kind": "circle",
+      "c": [
+       -2,
+       0,
+       0
+      ],
+      "x": [
+       0.9966694435186839,
+       0.05930412821582437,
+       -0.055973571734508246
+      ],
+      "y": [
+       -0.055973571734508246,
+       0.9966694435186839,
+       0.05930412821582437
+      ],
+      "d": [
+       0,
+       200
+      ],
+      "r": 2
+     },
+     "build": {
+      "mode": "ctor",
+      "origin": [
+       -0.006661112962632165,
+       0.11860825643164874,
+       -0.11194714346901649
+      ],
+      "vec": [
+       0.296520641079122,
+       -0.2798678586725411,
+       4.98334721759342
+      ],
+      "domain": [
+       0,
+       0,
+       200,
+       1
+      ]
+     }
+    },
+    "op": "eq",
+    "other": {
+     "gen": {
+      "kind": "circle",
+      "c": [
+       -2,
+       0,
+       0
+      ],
+      "x": [
+       0.9966694435186839,
+       0.05930412821582437,
+       -0.055973571734508246
+      ],
+      "y": [
+       -0.055973571734508246,
+       0.9966694435186839,
+       0.05930412821582437
+      ],
+      "d": [
+       0,
+       200
+      ],
+      "r": 2
+     },
+     "build": {
+      "mode": "ctor",
+      "origin": [
+       -0.006661112962632165,
+       0.11860825643164874,
+       -0.11194714346901649
+      ],
+      "vec": [
+       0.296520641079122,
+       -0.2798678586725411,
+       4.98334721759342
+      ],
+      "domain": [
+       0,
+       0,
+       200,
+       1
+      ]
+     },
+     "swap": true
+    }
+   }
+  },
+  {
+   "name": "scale_tiny_build",
+   "upstream_ref": "huge/tiny scale",
+   "inputs": {
+    "surf": {
+     "gen": {
+      "kind": "b_spline",
+      "cpts": [
+       [
+        0.0,
+        0.0,
+        0.0
+       ],
+       [
+        0.0004,
+        0.0002,
+        0.0
+       ],
+       [
+        0.0006000000000000001,
+        -0.0002,
+        0.0
+       ],
+       [
+        0.0008,
+        0.0002,
+        0.0
+       ],
+       [
+        0.001,
+        0.0004,
+        0.0
+       ],
+       [
+        0.0012000000000000001,
+        0.0,
+        0.0
+       ]
+      ],
+      "p": 3,
+      "u": [
+       0,
+       0,
+       0,
+       0,
+       0.3333333333333333,
+       0.6666666666666666,
+       1,
+       1,
+       1,
+       1
+      ]
+     },
+     "build": {
+      "mode": "ctor",
+      "origin": [
+       0,
+       0,
+       0
+      ],
+      "vec": [
+       0,
+       0,
+       0.0001
+      ],
+      "domain": [
+       0,
+       -1,
+       1,
+       1
+      ]
+     }
+    },
+    "op": "build"
+   }
+  },
+  {
+   "name": "scale_tiny_step_inv",
+   "upstream_ref": "huge/tiny scale",
+   "inputs": {
+    "surf": {
+     "gen": {
+      "kind": "b_spline",
+      "cpts": [
+       [
+        0.0,
+        0.0,
+        0.0
+       ],
+       [
+        0.0004,
+        0.0002,
+        0.0
+       ],
+       [
+        0.0006000000000000001,
+        -0.0002,
+        0.0
+       ],
+       [
+        0.0008,
+        0.0002,
+        0.0
+       ],
+       [
+        0.001,
+        0.0004,
+        0.0
+       ],
+       [
+        0.0012000000000000001,
+        0.0,
+        0.0
+       ]
+      ],
+      "p": 3,
+      "u": [
+       0,
+       0,
+       0,
+       0,
+       0.3333333333333333,
+       0.6666666666666666,
+       1,
+       1,
+       1,
+       1
+      ]
+     },
+     "build": {
+      "mode": "ctor",
+      "origin": [
+       0,
+       0,
+       0
+      ],
+      "vec": [
+       0,
+       0,
+       0.0001
+      ],
+      "domain": [
+       0,
+       -1,
+       1,
+       1
+      ]
+     }
+    },
+    "op": "step_inv",
+    "dom": [
+     0,
+     -1,
+     1,
+     1
+    ],
+    "p": [
+     0.0006000000000000001,
+     0.0,
+     3e-05
+    ],
+    "tol": 1e-10
+   }
+  },
+  {
+   "name": "scale_tiny_drop",
+   "upstream_ref": "huge/tiny scale",
+   "inputs": {
+    "surf": {
+     "gen": {
+      "kind": "b_spline",
+      "cpts": [
+       [
+        0.0,
+        0.0,
+        0.0
+       ],
+       [
+        0.0004,
+        0.0002,
+        0.0
+       ],
+       [
+        0.0006000000000000001,
+        -0.0002,
+        0.0
+       ],
+       [
+        0.0008,
+        0.0002,
+        0.0
+       ],
+       [
+        0.001,
+        0.0004,
+        0.0
+       ],
+       [
+        0.0012000000000000001,
+        0.0,
+        0.0
+       ]
+      ],
+      "p": 3,
+      "u": [
+       0,
+       0,
+       0,
+       0,
+       0.3333333333333333,
+       0.6666666666666666,
+       1,
+       1,
+       1,
+       1
+      ]
+     },
+     "build": {
+      "mode": "ctor",
+      "origin": [
+       0,
+       0,
+       0
+      ],
+      "vec": [
+       0,
+       0,
+       0.0001
+      ],
+      "domain": [
+       0,
+       -1,
+       1,
+       1
+      ]
+     }
+    },
+    "op": "drop_fast",
+    "dom": [
+     0,
+     0,
+     1,
+     1
+    ],
+    "sop": 3,
+    "p": [
+     0.0005,
+     0.00030000000000000003,
+     2e-05
+    ],
+    "tol": 1.0000000000000002e-13,
+    "requested": 1
+   }
+  },
+  {
+   "name": "scale_huge_build",
+   "upstream_ref": "huge/tiny scale",
+   "inputs": {
+    "surf": {
+     "gen": {
+      "kind": "b_spline",
+      "cpts": [
+       [
+        0.0,
+        0.0,
+        0.0
+       ],
+       [
+        40000.0,
+        20000.0,
+        0.0
+       ],
+       [
+        60000.0,
+        -20000.0,
+        0.0
+       ],
+       [
+        80000.0,
+        20000.0,
+        0.0
+       ],
+       [
+        100000.0,
+        40000.0,
+        0.0
+       ],
+       [
+        120000.0,
+        0.0,
+        0.0
+       ]
+      ],
+      "p": 3,
+      "u": [
+       0,
+       0,
+       0,
+       0,
+       0.3333333333333333,
+       0.6666666666666666,
+       1,
+       1,
+       1,
+       1
+      ]
+     },
+     "build": {
+      "mode": "ctor",
+      "origin": [
+       0,
+       0,
+       0
+      ],
+      "vec": [
+       0,
+       0,
+       10000.0
+      ],
+      "domain": [
+       0,
+       -1,
+       1,
+       1
+      ]
+     }
+    },
+    "op": "build"
+   }
+  },
+  {
+   "name": "scale_huge_step_inv",
+   "upstream_ref": "huge/tiny scale",
+   "inputs": {
+    "surf": {
+     "gen": {
+      "kind": "b_spline",
+      "cpts": [
+       [
+        0.0,
+        0.0,
+        0.0
+       ],
+       [
+        40000.0,
+        20000.0,
+        0.0
+       ],
+       [
+        60000.0,
+        -20000.0,
+        0.0
+       ],
+       [
+        80000.0,
+        20000.0,
+        0.0
+       ],
+       [
+        100000.0,
+        40000.0,
+        0.0
+       ],
+       [
+        120000.0,
+        0.0,
+        0.0
+       ]
+      ],
+      "p": 3,
+      "u": [
+       0,
+       0,
+       0,
+       0,
+       0.3333333333333333,
+       0.6666666666666666,
+       1,
+       1,
+       1,
+       1
+      ]
+     },
+     "build": {
+      "mode": "ctor",
+      "origin": [
+       0,
+       0,
+       0
+      ],
+      "vec": [
+       0,
+       0,
+       10000.0
+      ],
+      "domain": [
+       0,
+       -1,
+       1,
+       1
+      ]
+     }
+    },
+    "op": "step_inv",
+    "dom": [
+     0,
+     -1,
+     1,
+     1
+    ],
+    "p": [
+     60000.0,
+     0.0,
+     3000.0
+    ],
+    "tol": 0.01
+   }
+  },
+  {
+   "name": "scale_huge_drop",
+   "upstream_ref": "huge/tiny scale",
+   "inputs": {
+    "surf": {
+     "gen": {
+      "kind": "b_spline",
+      "cpts": [
+       [
+        0.0,
+        0.0,
+        0.0
+       ],
+       [
+        40000.0,
+        20000.0,
+        0.0
+       ],
+       [
+        60000.0,
+        -20000.0,
+        0.0
+       ],
+       [
+        80000.0,
+        20000.0,
+        0.0
+       ],
+       [
+        100000.0,
+        40000.0,
+        0.0
+       ],
+       [
+        120000.0,
+        0.0,
+        0.0
+       ]
+      ],
+      "p": 3,
+      "u": [
+       0,
+       0,
+       0,
+       0,
+       0.3333333333333333,
+       0.6666666666666666,
+       1,
+       1,
+       1,
+       1
+      ]
+     },
+     "build": {
+      "mode": "ctor",
+      "origin": [
+       0,
+       0,
+       0
+      ],
+      "vec": [
+       0,
+       0,
+       10000.0
+      ],
+      "domain": [
+       0,
+       -1,
+       1,
+       1
+      ]
+     }
+    },
+    "op": "drop_fast",
+    "dom": [
+     0,
+     0,
+     1,
+     1
+    ],
+    "sop": 3,
+    "p": [
+     50000.0,
+     30000.0,
+     2000.0
+    ],
+    "tol": 1e-05,
+    "requested": 1
+   }
+  }
+ ]
+}

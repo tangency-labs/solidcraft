@@ -1,0 +1,153 @@
+{
+  "area": "sweeps",
+  "bodies": {
+    "b3": {
+      "keeping_splines": false,
+      "trusted": true
+    },
+    "b4": {
+      "keeping_splines": false,
+      "trusted": true
+    }
+  },
+  "calls": [
+    {
+      "inputs": [
+        "b4"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b5"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b5"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b6"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b3"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b7"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b7"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b8"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b6"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b9"
+      ],
+      "params": {
+        "operand": 0
+      }
+    },
+    {
+      "inputs": [
+        "b8"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b10"
+      ],
+      "params": {
+        "operand": 1
+      }
+    },
+    {
+      "inputs": [
+        "b9",
+        "b10"
+      ],
+      "op": "boolean",
+      "outputs": [
+        "b11"
+      ],
+      "params": {
+        "op": "subtract"
+      }
+    }
+  ],
+  "case": "2891-twisted-sweep-cut-through-a-tube",
+  "expected": {
+    "body_count": 1,
+    "method": "the square (inscribed circle r 10 = the bore, half diagonal 14.14 < 15) turns about the tube axis, so at every height the cut section is the same: the part of the annulus inside the square = square - bore disc. What is left is the OD disc minus the square: area pi 225 - 400 = 306.86, a connected ring, V = 250 (225 pi - 400) = 76714.6.",
+    "source": "analytic",
+    "sources": [
+      "tangency-labs/solidcraft#2891",
+      "tangency-labs/solidcraft#3695"
+    ],
+    "volume_mm3": 76714.58676442585,
+    "what": "a 20 x 20 square swept 250 mm along the axis of a tube (ID 20, OD 30, 250 long) with a 30 degree twist, cut from it (the twisted cut froze the app)"
+  },
+  "expressible": true,
+  "operation_expressible": true,
+  "outcome": {
+    "ran": true,
+    "raw_counts": {
+      "edges": 15,
+      "faces": 7,
+      "vertices": 10
+    }
+  },
+  "records": "2891-twisted-sweep-cut-through-a-tube.bodies.json.gz",
+  "result": [
+    {
+      "body": "Tube",
+      "made": "b11"
+    }
+  ],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": {
+      "area_mm2": 44177.123663196086,
+      "body_count": 1,
+      "edges": 15,
+      "faces": 7,
+      "vertices": 10,
+      "volume_mm3": 76714.58679732462
+    },
+    "refused_with": null,
+    "status": "pass"
+  },
+  "sources": [
+    "tangency-labs/solidcraft#2891",
+    "tangency-labs/solidcraft#3695"
+  ],
+  "traced_ops": [
+    "extrude",
+    "sweep_stations",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean"
+  ],
+  "ungraded": [],
+  "what": "a 20 x 20 square swept 250 mm along the axis of a tube (ID 20, OD 30, 250 long) with a 30 degree twist, cut from it (the twisted cut froze the app)",
+  "why_not": []
+}

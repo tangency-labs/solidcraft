@@ -1,0 +1,37 @@
+{
+  "area": "solids",
+  "bodies": {},
+  "calls": [],
+  "case": "cov-scale-zero-factor-refused",
+  "expected": {
+    "method": "a zero factor maps the cube onto a plane: no solid, a clean refusal",
+    "outcome": "refused",
+    "refusal": "scale factors must be positive",
+    "source": "analytic",
+    "sources": [],
+    "what": "a scale factor of 0 flattens the body to a sheet: refused"
+  },
+  "expressible": false,
+  "operation_expressible": false,
+  "outcome": {
+    "engine_error": "step 2 (solid.scale): scale factors must be positive",
+    "ran": false
+  },
+  "result": [],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": null,
+    "refused_with": "step 2 (solid.scale): scale factors must be positive",
+    "status": "pass"
+  },
+  "sources": [],
+  "traced_ops": [
+    "extrude"
+  ],
+  "ungraded": [],
+  "what": "a scale factor of 0 flattens the body to a sheet: refused",
+  "why_not": [
+    "the failure is SolidCraft's, not a kernel operation's: step 2 (solid.scale): scale factors must be positive"
+  ]
+}

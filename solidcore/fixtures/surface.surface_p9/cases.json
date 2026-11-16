@@ -1,0 +1,2038 @@
+{
+  "cases": [
+    {
+      "name": "plane_splits_0_0",
+      "upstream_ref": "source/SMLib/src/SmSurface.cpp:11644 (analytic boundary regression)",
+      "inputs": {
+        "op": 0,
+        "net": [
+          [
+            0.0,
+            0.0,
+            0
+          ],
+          [
+            0.0,
+            0.5,
+            0
+          ],
+          [
+            0.0,
+            1.0,
+            0
+          ],
+          [
+            0.5,
+            0.0,
+            0
+          ],
+          [
+            0.5,
+            0.5,
+            0
+          ],
+          [
+            0.5,
+            1.0,
+            0
+          ],
+          [
+            1.0,
+            0.0,
+            0
+          ],
+          [
+            1.0,
+            0.5,
+            0
+          ],
+          [
+            1.0,
+            1.0,
+            0
+          ]
+        ],
+        "direction": 0,
+        "controls": [
+          0,
+          0,
+          0
+        ],
+        "diagonals": true,
+        "domain": [
+          0,
+          0,
+          1,
+          1
+        ]
+      }
+    },
+    {
+      "name": "plane_splits_0_1",
+      "upstream_ref": "source/SMLib/src/SmSurface.cpp:11644 (analytic boundary regression)",
+      "inputs": {
+        "op": 0,
+        "net": [
+          [
+            0.0,
+            0.0,
+            0
+          ],
+          [
+            0.0,
+            0.5,
+            0
+          ],
+          [
+            0.0,
+            1.0,
+            0
+          ],
+          [
+            0.5,
+            0.0,
+            0
+          ],
+          [
+            0.5,
+            0.5,
+            0
+          ],
+          [
+            0.5,
+            1.0,
+            0
+          ],
+          [
+            1.0,
+            0.0,
+            0
+          ],
+          [
+            1.0,
+            0.5,
+            0
+          ],
+          [
+            1.0,
+            1.0,
+            0
+          ]
+        ],
+        "direction": 0,
+        "controls": [
+          0.01,
+          0,
+          0
+        ],
+        "diagonals": true,
+        "domain": [
+          0,
+          0,
+          1,
+          1
+        ]
+      }
+    },
+    {
+      "name": "plane_splits_0_2",
+      "upstream_ref": "source/SMLib/src/SmSurface.cpp:11644 (analytic boundary regression)",
+      "inputs": {
+        "op": 0,
+        "net": [
+          [
+            0.0,
+            0.0,
+            0
+          ],
+          [
+            0.0,
+            0.5,
+            0
+          ],
+          [
+            0.0,
+            1.0,
+            0
+          ],
+          [
+            0.5,
+            0.0,
+            0
+          ],
+          [
+            0.5,
+            0.5,
+            0
+          ],
+          [
+            0.5,
+            1.0,
+            0
+          ],
+          [
+            1.0,
+            0.0,
+            0
+          ],
+          [
+            1.0,
+            0.5,
+            0
+          ],
+          [
+            1.0,
+            1.0,
+            0
+          ]
+        ],
+        "direction": 0,
+        "controls": [
+          0,
+          10,
+          0
+        ],
+        "diagonals": true,
+        "domain": [
+          0,
+          0,
+          1,
+          1
+        ]
+      }
+    },
+    {
+      "name": "plane_splits_0_3",
+      "upstream_ref": "source/SMLib/src/SmSurface.cpp:11644 (analytic boundary regression)",
+      "inputs": {
+        "op": 0,
+        "net": [
+          [
+            0.0,
+            0.0,
+            0
+          ],
+          [
+            0.0,
+            0.5,
+            0
+          ],
+          [
+            0.0,
+            1.0,
+            0
+          ],
+          [
+            0.5,
+            0.0,
+            0
+          ],
+          [
+            0.5,
+            0.5,
+            0
+          ],
+          [
+            0.5,
+            1.0,
+            0
+          ],
+          [
+            1.0,
+            0.0,
+            0
+          ],
+          [
+            1.0,
+            0.5,
+            0
+          ],
+          [
+            1.0,
+            1.0,
+            0
+          ]
+        ],
+        "direction": 0,
+        "controls": [
+          0.01,
+          10,
+          0.3
+        ],
+        "diagonals": true,
+        "domain": [
+          0,
+          0,
+          1,
+          1
+        ]
+      }
+    },
+    {
+      "name": "trimmed_domain_0",
+      "upstream_ref": "source/SMLib/src/SmSurface.cpp:11644 (analytic boundary regression)",
+      "inputs": {
+        "op": 0,
+        "net": [
+          [
+            0.0,
+            0.0,
+            0
+          ],
+          [
+            0.0,
+            0.5,
+            0
+          ],
+          [
+            0.0,
+            1.0,
+            0
+          ],
+          [
+            0.5,
+            0.0,
+            0
+          ],
+          [
+            0.5,
+            0.5,
+            0
+          ],
+          [
+            0.5,
+            1.0,
+            0
+          ],
+          [
+            1.0,
+            0.0,
+            0
+          ],
+          [
+            1.0,
+            0.5,
+            0
+          ],
+          [
+            1.0,
+            1.0,
+            0
+          ]
+        ],
+        "direction": 0,
+        "controls": [
+          0.01,
+          10,
+          0
+        ],
+        "diagonals": true,
+        "domain": [
+          0.2,
+          0.3,
+          0.8,
+          0.9
+        ]
+      }
+    },
+    {
+      "name": "plane_iso_boundaries_0",
+      "upstream_ref": "source/SMLib/src/SmSurface.cpp:14877",
+      "inputs": {
+        "op": 1,
+        "net": [
+          [
+            0.0,
+            0.0,
+            0
+          ],
+          [
+            0.0,
+            0.5,
+            0
+          ],
+          [
+            0.0,
+            1.0,
+            0
+          ],
+          [
+            0.5,
+            0.0,
+            0
+          ],
+          [
+            0.5,
+            0.5,
+            0
+          ],
+          [
+            0.5,
+            1.0,
+            0
+          ],
+          [
+            1.0,
+            0.0,
+            0
+          ],
+          [
+            1.0,
+            0.5,
+            0
+          ],
+          [
+            1.0,
+            1.0,
+            0
+          ]
+        ],
+        "direction": 0,
+        "controls": [
+          0.01,
+          0,
+          0
+        ],
+        "diagonals": false,
+        "domain": [
+          0,
+          0,
+          1,
+          1
+        ]
+      }
+    },
+    {
+      "name": "surf1_subnet_0_False",
+      "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:29 (first 3x3 control points of my_load_surf1_pts)",
+      "inputs": {
+        "op": 0,
+        "net": [
+          [
+            0,
+            0,
+            -0.6
+          ],
+          [
+            1,
+            0.1,
+            0.4
+          ],
+          [
+            2,
+            0.2,
+            0.3
+          ],
+          [
+            0,
+            1,
+            0.2
+          ],
+          [
+            1,
+            1,
+            1.5
+          ],
+          [
+            2,
+            1,
+            1.6
+          ],
+          [
+            0,
+            2,
+            0.3
+          ],
+          [
+            1,
+            2,
+            1.6
+          ],
+          [
+            2,
+            2,
+            1.5
+          ]
+        ],
+        "direction": 0,
+        "controls": [
+          0.05,
+          15,
+          0
+        ],
+        "diagonals": false,
+        "domain": [
+          0,
+          0,
+          1,
+          1
+        ]
+      }
+    },
+    {
+      "name": "surf1_subnet_0_True",
+      "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:29 (first 3x3 control points of my_load_surf1_pts)",
+      "inputs": {
+        "op": 0,
+        "net": [
+          [
+            0,
+            0,
+            -0.6
+          ],
+          [
+            1,
+            0.1,
+            0.4
+          ],
+          [
+            2,
+            0.2,
+            0.3
+          ],
+          [
+            0,
+            1,
+            0.2
+          ],
+          [
+            1,
+            1,
+            1.5
+          ],
+          [
+            2,
+            1,
+            1.6
+          ],
+          [
+            0,
+            2,
+            0.3
+          ],
+          [
+            1,
+            2,
+            1.6
+          ],
+          [
+            2,
+            2,
+            1.5
+          ]
+        ],
+        "direction": 0,
+        "controls": [
+          0.05,
+          15,
+          0
+        ],
+        "diagonals": true,
+        "domain": [
+          0,
+          0,
+          1,
+          1
+        ]
+      }
+    },
+    {
+      "name": "surf1_max_length_0",
+      "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:29",
+      "inputs": {
+        "op": 0,
+        "net": [
+          [
+            0,
+            0,
+            -0.6
+          ],
+          [
+            1,
+            0.1,
+            0.4
+          ],
+          [
+            2,
+            0.2,
+            0.3
+          ],
+          [
+            0,
+            1,
+            0.2
+          ],
+          [
+            1,
+            1,
+            1.5
+          ],
+          [
+            2,
+            1,
+            1.6
+          ],
+          [
+            0,
+            2,
+            0.3
+          ],
+          [
+            1,
+            2,
+            1.6
+          ],
+          [
+            2,
+            2,
+            1.5
+          ]
+        ],
+        "direction": 0,
+        "controls": [
+          0.05,
+          15,
+          0.8
+        ],
+        "diagonals": true,
+        "domain": [
+          0,
+          0,
+          1,
+          1
+        ]
+      }
+    },
+    {
+      "name": "surf1_boundaries_0",
+      "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:29",
+      "inputs": {
+        "op": 1,
+        "net": [
+          [
+            0,
+            0,
+            -0.6
+          ],
+          [
+            1,
+            0.1,
+            0.4
+          ],
+          [
+            2,
+            0.2,
+            0.3
+          ],
+          [
+            0,
+            1,
+            0.2
+          ],
+          [
+            1,
+            1,
+            1.5
+          ],
+          [
+            2,
+            1,
+            1.6
+          ],
+          [
+            0,
+            2,
+            0.3
+          ],
+          [
+            1,
+            2,
+            1.6
+          ],
+          [
+            2,
+            2,
+            1.5
+          ]
+        ],
+        "direction": 0,
+        "controls": [
+          0.01,
+          0,
+          0
+        ],
+        "diagonals": false,
+        "domain": [
+          0,
+          0,
+          1,
+          1
+        ]
+      }
+    },
+    {
+      "name": "plane_splits_1_10",
+      "upstream_ref": "source/SMLib/src/SmSurface.cpp:11644 (analytic boundary regression)",
+      "inputs": {
+        "op": 0,
+        "net": [
+          [
+            0.0,
+            0.0,
+            0
+          ],
+          [
+            0.0,
+            0.5,
+            0
+          ],
+          [
+            0.0,
+            1.0,
+            0
+          ],
+          [
+            0.5,
+            0.0,
+            0
+          ],
+          [
+            0.5,
+            0.5,
+            0
+          ],
+          [
+            0.5,
+            1.0,
+            0
+          ],
+          [
+            1.0,
+            0.0,
+            0
+          ],
+          [
+            1.0,
+            0.5,
+            0
+          ],
+          [
+            1.0,
+            1.0,
+            0
+          ]
+        ],
+        "direction": 1,
+        "controls": [
+          0,
+          0,
+          0
+        ],
+        "diagonals": true,
+        "domain": [
+          0,
+          0,
+          1,
+          1
+        ]
+      }
+    },
+    {
+      "name": "plane_splits_1_11",
+      "upstream_ref": "source/SMLib/src/SmSurface.cpp:11644 (analytic boundary regression)",
+      "inputs": {
+        "op": 0,
+        "net": [
+          [
+            0.0,
+            0.0,
+            0
+          ],
+          [
+            0.0,
+            0.5,
+            0
+          ],
+          [
+            0.0,
+            1.0,
+            0
+          ],
+          [
+            0.5,
+            0.0,
+            0
+          ],
+          [
+            0.5,
+            0.5,
+            0
+          ],
+          [
+            0.5,
+            1.0,
+            0
+          ],
+          [
+            1.0,
+            0.0,
+            0
+          ],
+          [
+            1.0,
+            0.5,
+            0
+          ],
+          [
+            1.0,
+            1.0,
+            0
+          ]
+        ],
+        "direction": 1,
+        "controls": [
+          0.01,
+          0,
+          0
+        ],
+        "diagonals": true,
+        "domain": [
+          0,
+          0,
+          1,
+          1
+        ]
+      }
+    },
+    {
+      "name": "plane_splits_1_12",
+      "upstream_ref": "source/SMLib/src/SmSurface.cpp:11644 (analytic boundary regression)",
+      "inputs": {
+        "op": 0,
+        "net": [
+          [
+            0.0,
+            0.0,
+            0
+          ],
+          [
+            0.0,
+            0.5,
+            0
+          ],
+          [
+            0.0,
+            1.0,
+            0
+          ],
+          [
+            0.5,
+            0.0,
+            0
+          ],
+          [
+            0.5,
+            0.5,
+            0
+          ],
+          [
+            0.5,
+            1.0,
+            0
+          ],
+          [
+            1.0,
+            0.0,
+            0
+          ],
+          [
+            1.0,
+            0.5,
+            0
+          ],
+          [
+            1.0,
+            1.0,
+            0
+          ]
+        ],
+        "direction": 1,
+        "controls": [
+          0,
+          10,
+          0
+        ],
+        "diagonals": true,
+        "domain": [
+          0,
+          0,
+          1,
+          1
+        ]
+      }
+    },
+    {
+      "name": "plane_splits_1_13",
+      "upstream_ref": "source/SMLib/src/SmSurface.cpp:11644 (analytic boundary regression)",
+      "inputs": {
+        "op": 0,
+        "net": [
+          [
+            0.0,
+            0.0,
+            0
+          ],
+          [
+            0.0,
+            0.5,
+            0
+          ],
+          [
+            0.0,
+            1.0,
+            0
+          ],
+          [
+            0.5,
+            0.0,
+            0
+          ],
+          [
+            0.5,
+            0.5,
+            0
+          ],
+          [
+            0.5,
+            1.0,
+            0
+          ],
+          [
+            1.0,
+            0.0,
+            0
+          ],
+          [
+            1.0,
+            0.5,
+            0
+          ],
+          [
+            1.0,
+            1.0,
+            0
+          ]
+        ],
+        "direction": 1,
+        "controls": [
+          0.01,
+          10,
+          0.3
+        ],
+        "diagonals": true,
+        "domain": [
+          0,
+          0,
+          1,
+          1
+        ]
+      }
+    },
+    {
+      "name": "trimmed_domain_1",
+      "upstream_ref": "source/SMLib/src/SmSurface.cpp:11644 (analytic boundary regression)",
+      "inputs": {
+        "op": 0,
+        "net": [
+          [
+            0.0,
+            0.0,
+            0
+          ],
+          [
+            0.0,
+            0.5,
+            0
+          ],
+          [
+            0.0,
+            1.0,
+            0
+          ],
+          [
+            0.5,
+            0.0,
+            0
+          ],
+          [
+            0.5,
+            0.5,
+            0
+          ],
+          [
+            0.5,
+            1.0,
+            0
+          ],
+          [
+            1.0,
+            0.0,
+            0
+          ],
+          [
+            1.0,
+            0.5,
+            0
+          ],
+          [
+            1.0,
+            1.0,
+            0
+          ]
+        ],
+        "direction": 1,
+        "controls": [
+          0.01,
+          10,
+          0
+        ],
+        "diagonals": true,
+        "domain": [
+          0.2,
+          0.3,
+          0.8,
+          0.9
+        ]
+      }
+    },
+    {
+      "name": "plane_iso_boundaries_1",
+      "upstream_ref": "source/SMLib/src/SmSurface.cpp:14877",
+      "inputs": {
+        "op": 1,
+        "net": [
+          [
+            0.0,
+            0.0,
+            0
+          ],
+          [
+            0.0,
+            0.5,
+            0
+          ],
+          [
+            0.0,
+            1.0,
+            0
+          ],
+          [
+            0.5,
+            0.0,
+            0
+          ],
+          [
+            0.5,
+            0.5,
+            0
+          ],
+          [
+            0.5,
+            1.0,
+            0
+          ],
+          [
+            1.0,
+            0.0,
+            0
+          ],
+          [
+            1.0,
+            0.5,
+            0
+          ],
+          [
+            1.0,
+            1.0,
+            0
+          ]
+        ],
+        "direction": 1,
+        "controls": [
+          0.01,
+          0,
+          0
+        ],
+        "diagonals": false,
+        "domain": [
+          0,
+          0,
+          1,
+          1
+        ]
+      }
+    },
+    {
+      "name": "surf1_subnet_1_False",
+      "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:29 (first 3x3 control points of my_load_surf1_pts)",
+      "inputs": {
+        "op": 0,
+        "net": [
+          [
+            0,
+            0,
+            -0.6
+          ],
+          [
+            1,
+            0.1,
+            0.4
+          ],
+          [
+            2,
+            0.2,
+            0.3
+          ],
+          [
+            0,
+            1,
+            0.2
+          ],
+          [
+            1,
+            1,
+            1.5
+          ],
+          [
+            2,
+            1,
+            1.6
+          ],
+          [
+            0,
+            2,
+            0.3
+          ],
+          [
+            1,
+            2,
+            1.6
+          ],
+          [
+            2,
+            2,
+            1.5
+          ]
+        ],
+        "direction": 1,
+        "controls": [
+          0.05,
+          15,
+          0
+        ],
+        "diagonals": false,
+        "domain": [
+          0,
+          0,
+          1,
+          1
+        ]
+      }
+    },
+    {
+      "name": "surf1_subnet_1_True",
+      "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:29 (first 3x3 control points of my_load_surf1_pts)",
+      "inputs": {
+        "op": 0,
+        "net": [
+          [
+            0,
+            0,
+            -0.6
+          ],
+          [
+            1,
+            0.1,
+            0.4
+          ],
+          [
+            2,
+            0.2,
+            0.3
+          ],
+          [
+            0,
+            1,
+            0.2
+          ],
+          [
+            1,
+            1,
+            1.5
+          ],
+          [
+            2,
+            1,
+            1.6
+          ],
+          [
+            0,
+            2,
+            0.3
+          ],
+          [
+            1,
+            2,
+            1.6
+          ],
+          [
+            2,
+            2,
+            1.5
+          ]
+        ],
+        "direction": 1,
+        "controls": [
+          0.05,
+          15,
+          0
+        ],
+        "diagonals": true,
+        "domain": [
+          0,
+          0,
+          1,
+          1
+        ]
+      }
+    },
+    {
+      "name": "surf1_max_length_1",
+      "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:29",
+      "inputs": {
+        "op": 0,
+        "net": [
+          [
+            0,
+            0,
+            -0.6
+          ],
+          [
+            1,
+            0.1,
+            0.4
+          ],
+          [
+            2,
+            0.2,
+            0.3
+          ],
+          [
+            0,
+            1,
+            0.2
+          ],
+          [
+            1,
+            1,
+            1.5
+          ],
+          [
+            2,
+            1,
+            1.6
+          ],
+          [
+            0,
+            2,
+            0.3
+          ],
+          [
+            1,
+            2,
+            1.6
+          ],
+          [
+            2,
+            2,
+            1.5
+          ]
+        ],
+        "direction": 1,
+        "controls": [
+          0.05,
+          15,
+          0.8
+        ],
+        "diagonals": true,
+        "domain": [
+          0,
+          0,
+          1,
+          1
+        ]
+      }
+    },
+    {
+      "name": "surf1_boundaries_1",
+      "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:29",
+      "inputs": {
+        "op": 1,
+        "net": [
+          [
+            0,
+            0,
+            -0.6
+          ],
+          [
+            1,
+            0.1,
+            0.4
+          ],
+          [
+            2,
+            0.2,
+            0.3
+          ],
+          [
+            0,
+            1,
+            0.2
+          ],
+          [
+            1,
+            1,
+            1.5
+          ],
+          [
+            2,
+            1,
+            1.6
+          ],
+          [
+            0,
+            2,
+            0.3
+          ],
+          [
+            1,
+            2,
+            1.6
+          ],
+          [
+            2,
+            2,
+            1.5
+          ]
+        ],
+        "direction": 1,
+        "controls": [
+          0.01,
+          0,
+          0
+        ],
+        "diagonals": false,
+        "domain": [
+          0,
+          0,
+          1,
+          1
+        ]
+      }
+    },
+    {
+      "name": "iso_non_direction_2",
+      "upstream_ref": "source/SMLib/src/SmSurface.cpp:14877",
+      "inputs": {
+        "op": 1,
+        "net": [
+          [
+            0.0,
+            0.0,
+            0
+          ],
+          [
+            0.0,
+            0.5,
+            0
+          ],
+          [
+            0.0,
+            1.0,
+            0
+          ],
+          [
+            0.5,
+            0.0,
+            0
+          ],
+          [
+            0.5,
+            0.5,
+            0
+          ],
+          [
+            0.5,
+            1.0,
+            0
+          ],
+          [
+            1.0,
+            0.0,
+            0
+          ],
+          [
+            1.0,
+            0.5,
+            0
+          ],
+          [
+            1.0,
+            1.0,
+            0
+          ]
+        ],
+        "direction": 2,
+        "controls": [
+          0,
+          0,
+          0
+        ],
+        "diagonals": false,
+        "domain": [
+          0,
+          0,
+          1,
+          1
+        ]
+      }
+    },
+    {
+      "name": "iso_non_direction_3",
+      "upstream_ref": "source/SMLib/src/SmSurface.cpp:14877",
+      "inputs": {
+        "op": 1,
+        "net": [
+          [
+            0.0,
+            0.0,
+            0
+          ],
+          [
+            0.0,
+            0.5,
+            0
+          ],
+          [
+            0.0,
+            1.0,
+            0
+          ],
+          [
+            0.5,
+            0.0,
+            0
+          ],
+          [
+            0.5,
+            0.5,
+            0
+          ],
+          [
+            0.5,
+            1.0,
+            0
+          ],
+          [
+            1.0,
+            0.0,
+            0
+          ],
+          [
+            1.0,
+            0.5,
+            0
+          ],
+          [
+            1.0,
+            1.0,
+            0
+          ]
+        ],
+        "direction": 3,
+        "controls": [
+          0,
+          0,
+          0
+        ],
+        "diagonals": false,
+        "domain": [
+          0,
+          0,
+          1,
+          1
+        ]
+      }
+    },
+    {
+      "name": "iso_non_direction_4",
+      "upstream_ref": "source/SMLib/src/SmSurface.cpp:14877",
+      "inputs": {
+        "op": 1,
+        "net": [
+          [
+            0.0,
+            0.0,
+            0
+          ],
+          [
+            0.0,
+            0.5,
+            0
+          ],
+          [
+            0.0,
+            1.0,
+            0
+          ],
+          [
+            0.5,
+            0.0,
+            0
+          ],
+          [
+            0.5,
+            0.5,
+            0
+          ],
+          [
+            0.5,
+            1.0,
+            0
+          ],
+          [
+            1.0,
+            0.0,
+            0
+          ],
+          [
+            1.0,
+            0.5,
+            0
+          ],
+          [
+            1.0,
+            1.0,
+            0
+          ]
+        ],
+        "direction": 4,
+        "controls": [
+          0,
+          0,
+          0
+        ],
+        "diagonals": false,
+        "domain": [
+          0,
+          0,
+          1,
+          1
+        ]
+      }
+    },
+    {
+      "name": "iso_non_direction_5",
+      "upstream_ref": "source/SMLib/src/SmSurface.cpp:14877",
+      "inputs": {
+        "op": 1,
+        "net": [
+          [
+            0.0,
+            0.0,
+            0
+          ],
+          [
+            0.0,
+            0.5,
+            0
+          ],
+          [
+            0.0,
+            1.0,
+            0
+          ],
+          [
+            0.5,
+            0.0,
+            0
+          ],
+          [
+            0.5,
+            0.5,
+            0
+          ],
+          [
+            0.5,
+            1.0,
+            0
+          ],
+          [
+            1.0,
+            0.0,
+            0
+          ],
+          [
+            1.0,
+            0.5,
+            0
+          ],
+          [
+            1.0,
+            1.0,
+            0
+          ]
+        ],
+        "direction": 5,
+        "controls": [
+          0,
+          0,
+          0
+        ],
+        "diagonals": false,
+        "domain": [
+          0,
+          0,
+          1,
+          1
+        ]
+      }
+    },
+    {
+      "name": "iso_non_direction_6",
+      "upstream_ref": "source/SMLib/src/SmSurface.cpp:14877",
+      "inputs": {
+        "op": 1,
+        "net": [
+          [
+            0.0,
+            0.0,
+            0
+          ],
+          [
+            0.0,
+            0.5,
+            0
+          ],
+          [
+            0.0,
+            1.0,
+            0
+          ],
+          [
+            0.5,
+            0.0,
+            0
+          ],
+          [
+            0.5,
+            0.5,
+            0
+          ],
+          [
+            0.5,
+            1.0,
+            0
+          ],
+          [
+            1.0,
+            0.0,
+            0
+          ],
+          [
+            1.0,
+            0.5,
+            0
+          ],
+          [
+            1.0,
+            1.0,
+            0
+          ]
+        ],
+        "direction": 6,
+        "controls": [
+          0,
+          0,
+          0
+        ],
+        "diagonals": false,
+        "domain": [
+          0,
+          0,
+          1,
+          1
+        ]
+      }
+    },
+    {
+      "name": "iso_non_direction_7",
+      "upstream_ref": "source/SMLib/src/SmSurface.cpp:14877",
+      "inputs": {
+        "op": 1,
+        "net": [
+          [
+            0.0,
+            0.0,
+            0
+          ],
+          [
+            0.0,
+            0.5,
+            0
+          ],
+          [
+            0.0,
+            1.0,
+            0
+          ],
+          [
+            0.5,
+            0.0,
+            0
+          ],
+          [
+            0.5,
+            0.5,
+            0
+          ],
+          [
+            0.5,
+            1.0,
+            0
+          ],
+          [
+            1.0,
+            0.0,
+            0
+          ],
+          [
+            1.0,
+            0.5,
+            0
+          ],
+          [
+            1.0,
+            1.0,
+            0
+          ]
+        ],
+        "direction": 7,
+        "controls": [
+          0,
+          0,
+          0
+        ],
+        "diagonals": false,
+        "domain": [
+          0,
+          0,
+          1,
+          1
+        ]
+      }
+    },
+    {
+      "name": "iso_non_direction_8",
+      "upstream_ref": "source/SMLib/src/SmSurface.cpp:14877",
+      "inputs": {
+        "op": 1,
+        "net": [
+          [
+            0.0,
+            0.0,
+            0
+          ],
+          [
+            0.0,
+            0.5,
+            0
+          ],
+          [
+            0.0,
+            1.0,
+            0
+          ],
+          [
+            0.5,
+            0.0,
+            0
+          ],
+          [
+            0.5,
+            0.5,
+            0
+          ],
+          [
+            0.5,
+            1.0,
+            0
+          ],
+          [
+            1.0,
+            0.0,
+            0
+          ],
+          [
+            1.0,
+            0.5,
+            0
+          ],
+          [
+            1.0,
+            1.0,
+            0
+          ]
+        ],
+        "direction": 8,
+        "controls": [
+          0,
+          0,
+          0
+        ],
+        "diagonals": false,
+        "domain": [
+          0,
+          0,
+          1,
+          1
+        ]
+      }
+    },
+    {
+      "name": "iso_non_direction_9",
+      "upstream_ref": "source/SMLib/src/SmSurface.cpp:14877",
+      "inputs": {
+        "op": 1,
+        "net": [
+          [
+            0.0,
+            0.0,
+            0
+          ],
+          [
+            0.0,
+            0.5,
+            0
+          ],
+          [
+            0.0,
+            1.0,
+            0
+          ],
+          [
+            0.5,
+            0.0,
+            0
+          ],
+          [
+            0.5,
+            0.5,
+            0
+          ],
+          [
+            0.5,
+            1.0,
+            0
+          ],
+          [
+            1.0,
+            0.0,
+            0
+          ],
+          [
+            1.0,
+            0.5,
+            0
+          ],
+          [
+            1.0,
+            1.0,
+            0
+          ]
+        ],
+        "direction": 9,
+        "controls": [
+          0,
+          0,
+          0
+        ],
+        "diagonals": false,
+        "domain": [
+          0,
+          0,
+          1,
+          1
+        ]
+      }
+    },
+    {
+      "name": "csi_crossing_plane",
+      "upstream_ref": "source/SMLib/src/SmSurface.cpp:13887 (one patch/one span intersection)",
+      "inputs": {
+        "op": 2,
+        "net": [
+          [
+            0.0,
+            0.0,
+            0
+          ],
+          [
+            0.0,
+            0.5,
+            0
+          ],
+          [
+            0.0,
+            1.0,
+            0
+          ],
+          [
+            0.5,
+            0.0,
+            0
+          ],
+          [
+            0.5,
+            0.5,
+            0
+          ],
+          [
+            0.5,
+            1.0,
+            0
+          ],
+          [
+            1.0,
+            0.0,
+            0
+          ],
+          [
+            1.0,
+            0.5,
+            0
+          ],
+          [
+            1.0,
+            1.0,
+            0
+          ]
+        ],
+        "direction": 0,
+        "controls": [
+          0,
+          0,
+          0
+        ],
+        "diagonals": false,
+        "domain": [
+          0,
+          0,
+          1,
+          1
+        ],
+        "line": [
+          [
+            0.5,
+            0.5,
+            -5
+          ],
+          [
+            0.5,
+            0.5,
+            5
+          ]
+        ]
+      }
+    },
+    {
+      "name": "csi_disjoint_plane",
+      "upstream_ref": "source/SMLib/src/SmSurface.cpp:13887 (disjoint boxes)",
+      "inputs": {
+        "op": 2,
+        "net": [
+          [
+            0.0,
+            0.0,
+            0
+          ],
+          [
+            0.0,
+            0.5,
+            0
+          ],
+          [
+            0.0,
+            1.0,
+            0
+          ],
+          [
+            0.5,
+            0.0,
+            0
+          ],
+          [
+            0.5,
+            0.5,
+            0
+          ],
+          [
+            0.5,
+            1.0,
+            0
+          ],
+          [
+            1.0,
+            0.0,
+            0
+          ],
+          [
+            1.0,
+            0.5,
+            0
+          ],
+          [
+            1.0,
+            1.0,
+            0
+          ]
+        ],
+        "direction": 0,
+        "controls": [
+          0,
+          0,
+          0
+        ],
+        "diagonals": false,
+        "domain": [
+          0,
+          0,
+          1,
+          1
+        ],
+        "line": [
+          [
+            0.5,
+            0.5,
+            5
+          ],
+          [
+            0.5,
+            0.5,
+            10
+          ]
+        ]
+      }
+    }
+  ]
+}

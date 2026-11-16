@@ -1,0 +1,191 @@
+{
+  "area": "history",
+  "bodies": {
+    "b14": {
+      "keeping_splines": false,
+      "trusted": true
+    },
+    "b15": {
+      "keeping_splines": false,
+      "trusted": true
+    }
+  },
+  "calls": [
+    {
+      "inputs": [
+        "b14"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b16"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b16"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b17"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b15"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b18"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b18"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b19"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b17"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b20"
+      ],
+      "params": {
+        "operand": 0
+      }
+    },
+    {
+      "inputs": [
+        "b19"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b21"
+      ],
+      "params": {
+        "operand": 1
+      }
+    },
+    {
+      "inputs": [
+        "b20",
+        "b21"
+      ],
+      "op": "boolean",
+      "outputs": [
+        "b22"
+      ],
+      "params": {
+        "op": "subtract"
+      }
+    }
+  ],
+  "case": "cov-config-column-adds-a-height",
+  "expected": {
+    "bbox": {
+      "max": [
+        40,
+        30,
+        20
+      ],
+      "min": [
+        0,
+        0,
+        0
+      ]
+    },
+    "body_count": 1,
+    "faces": 7,
+    "method": "40x30x20 with the 10 mm hole through: V = 24000 - pi 25 20; faces 7; the column fills Default with H's 10 mm",
+    "results": [
+      {
+        "json": {
+          "columns": [
+            "param:W",
+            "suppress:Hole",
+            "param:H"
+          ],
+          "rows": [
+            {
+              "name": "Default",
+              "values": {
+                "param:H": "10 mm"
+              }
+            }
+          ]
+        },
+        "step": 6
+      }
+    ],
+    "source": "analytic",
+    "sources": [],
+    "volume_mm3": 22429.203673205102,
+    "what": "config.column adds the height H; a row with H = 20 makes the block 20 high"
+  },
+  "expressible": false,
+  "operation_expressible": true,
+  "outcome": {
+    "ran": true,
+    "raw_counts": {
+      "edges": 15,
+      "faces": 7,
+      "vertices": 10
+    }
+  },
+  "records": "cov-config-column-adds-a-height.bodies.json.gz",
+  "result": [
+    {
+      "body": "Block",
+      "made": "b22"
+    }
+  ],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": {
+      "area_mm2": 5671.238898034872,
+      "body_count": 1,
+      "edges": 15,
+      "faces": 7,
+      "vertices": 10,
+      "volume_mm3": 22429.20367317894
+    },
+    "refused_with": null,
+    "status": "pass"
+  },
+  "sources": [],
+  "traced_ops": [
+    "extrude",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "extrude",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean"
+  ],
+  "ungraded": [
+    "results: SolidCraft computes it"
+  ],
+  "what": "config.column adds the height H; a row with H = 20 makes the block 20 high",
+  "why_not": []
+}

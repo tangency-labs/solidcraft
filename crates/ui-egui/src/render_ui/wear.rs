@@ -4,8 +4,9 @@ use super::{
     effects::{failure, layer_actions, note, number},
     materials, studio,
 };
-use crate::{SolveApp, theme::Tokens, ui_kit};
+use crate::{SolveApp, ui_kit};
 use solidcraft_engine::render::job::aging::{AgingKind, AgingLayer, SurfaceClass};
+use solidcraft_theme::Tokens;
 
 pub(super) fn controls(app: &mut SolveApp, ui: &mut egui::Ui) {
     note(app, ui, "render.aging_raytrace_help");

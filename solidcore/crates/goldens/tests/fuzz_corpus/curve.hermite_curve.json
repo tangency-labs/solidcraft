@@ -1,0 +1,6 @@
+{
+  "unit": "curve.hermite_curve",
+  "cases": [
+    {"name": "fuzz00395_derivative_count", "origin": "fuzz-out/n2000/curve.hermite_curve/fuzz00395.json (crash: rust: killed by signal 6 (memory allocation of 51539607576 bytes failed))", "cpp": "harness: invalid argument: derivative count", "rust": "harness: derivative order above MAX_EVAL_DERIVS", "inputs": {"n": 2147483648, "op": "evaluate"}}
+  ]
+}

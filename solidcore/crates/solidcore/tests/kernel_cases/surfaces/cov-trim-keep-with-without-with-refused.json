@@ -1,0 +1,35 @@
+{
+  "area": "surfaces",
+  "bodies": {},
+  "calls": [],
+  "case": "cov-trim-keep-with-without-with-refused",
+  "expected": {
+    "method": "keep_with names what to keep of the other surface of a mutual trim; with no other surface it means nothing",
+    "outcome": "refused",
+    "refusal": "belong to a mutual trim",
+    "source": "invariants",
+    "sources": [],
+    "what": "a plane trim given keep_with, which only a mutual trim takes: refused"
+  },
+  "expressible": false,
+  "operation_expressible": false,
+  "outcome": {
+    "engine_error": "step 5 (surface.trim): invalid parameters for `surface.trim`: `keep_with`, `stitch` and `extend` belong to a mutual trim (`with`)",
+    "ran": false
+  },
+  "result": [],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": null,
+    "refused_with": "step 5 (surface.trim): invalid parameters for `surface.trim`: `keep_with`, `stitch` and `extend` belong to a mutual trim (`with`)",
+    "status": "pass"
+  },
+  "sources": [],
+  "traced_ops": [],
+  "ungraded": [],
+  "what": "a plane trim given keep_with, which only a mutual trim takes: refused",
+  "why_not": [
+    "no kernel operation ran before the failure: step 5 (surface.trim): invalid parameters for `surface.trim`: `keep_with`, `stitch` and `extend` belong to a mutual trim (`with`)"
+  ]
+}

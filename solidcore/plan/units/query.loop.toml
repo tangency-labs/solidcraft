@@ -1,0 +1,12 @@
+id = "query.loop"
+upstream = ["source/SMLib/src/SmLoop.cpp"]
+rust_module = "query::loop"
+depends_on = ["curve.curve_p2", "geom.extent1d", "geom.extent2d", "geom.tol", "geom.vector3d", "topology.loopuse"]
+soft_depends_on = ["curve.curve_p3", "curve.curve_p5", "curve.curve_p6", "geom.geom_utility_p1", "geom.solution_array", "surface.surface_p2", "surface.surface_p3", "topology.edge", "topology.edgeuse_p1", "topology.edgeuse_p3", "topology.face_p2"]
+est_lines = 830
+layer = 42
+tests = ["prog_test:my_test_surface_closest_point", "prog_test:my_test_drop_point", "prog_test:my_test_matrix", "prog_test:my_test_reversed_line_join", "SM_API_test:TestSmCreateRectangle", "SM_API_test:TestSmCreateRegularPolygon"]
+status = "green"
+claimed_by = ""
+claimed_at = ""
+notes = "GREEN (SmSurface::GetSingularities wired to surface.surface_p3 in PR #52): 3040/3040 pass bit-identical, 0 deferred. Earlier PARTIAL (PR #63): difftest 3040 cases (40 fixture re-expressing the TestSmCreateRectangle / TestSmCreateRegularPolygon loops (CCW, CW, mixed edge use orientations, far-centre thin rectangle, tiny and large tolerances) and smTopoTest my_test_single_periodic_vertexuse (a seamless circle loop on a cylinder) + 3000 generated over real SmPlane / SmBSplineSurface / SmSurfOfRevolution (cylinder, cone, sphere, torus-like) faces with SmLine / SmCircle / SmBSplineCurve edges and 2D B-spline UV trims (lines, collinear polylines, rational arcs, wiggly and cusp-like curves, extended trims with sub-interval edges), seam edges used twice, open and star (winding 2) loops, vertex loops, 1e-3/1e3 scales, points on and near edges, vertices and domain sides), 2780 pass bit-identical, 260 deferred (surface.surface_p3 260: SmSurface::GetSingularities for a point and a loop end on a side of the natural domain), max_rel_err 0; 20k-seed run clean; --perturb SENSITIVE. ContainsUVPoint walks the arena topology (a loop id of a &mut Brep, PR #117) and calls SmEdgeuse::GetOrCreateUVTrimCurve in walk order; the FaceLoop view is gone. 1 fns; largest: SmLoop::ContainsUVPoint; unit-SCC #22 (220 units); 317 upstream test entry points reach this unit [topology.edgeuse_p3 (PR #117): 3040 cases, 3040 pass, 0 failed, 0 deferred] The GetOrCreateUVTrimCurve stub is wired (no UNPORTED(topology.edgeuse_p3) left in query.loop; plan/findings.md, topology.edgeuse_p3)."

@@ -13,9 +13,9 @@ use crate::schema::{ParamCheck, input_schema_for, output_schema_for};
 
 #[test]
 fn schemas_and_the_key_check_agree() {
-    assert_keys(input_schema_for::<InsertDesignParams>(), &["name", "parent", "path", "reuse", "translate"]);
+    assert_keys(input_schema_for::<InsertDesignParams>(), &["configuration", "name", "parent", "path", "reuse", "translate"]);
     assert_keys(input_schema_for::<UpdateLinksParams>(), &["component", "components"]);
-    assert_keys(input_schema_for::<RelinkParams>(), &["component", "path"]);
+    assert_keys(input_schema_for::<RelinkParams>(), &["component", "configuration", "occurrence", "path"]);
     assert_keys(input_schema_for::<BreakLinkParams>(), &["component"]);
     assert_keys(input_schema_for::<LinksParams>(), &[]);
     assert_keys(input_schema_for::<ExtractParams>(), &["component", "path"]);
@@ -107,6 +107,8 @@ fn the_schemas_take_what_the_handlers_read() {
         input_schema_for::<RelinkParams>(),
         &[
             (json!({"component": "Plate", "path": "b.solidcraft"}), true),
+            (json!({"component": "Plate", "path": "b.solidcraft", "occurrence": 4}), true),
+            (json!({"component": "Plate", "path": "b.solidcraft", "occurrence": "Plate:2"}), false),
             (json!({"component": "Plate"}), false),
             (json!({"path": "b.solidcraft"}), false),
         ],
@@ -129,6 +131,40 @@ fn the_schemas_take_what_the_handlers_read() {
     );
 }
 
+#[test]
+fn configuration_selectors_accept_names_ids_and_null() {
+    for (command, schema, base) in [
+        ("component.insert_design", input_schema_for::<InsertDesignParams>(), json!({"path": "bolt.sc"})),
+        ("component.relink", input_schema_for::<RelinkParams>(), json!({"component": 1, "path": "bolt.sc"})),
+    ] {
+        for (selection, accepted) in [
+            (json!("M6x20"), true),
+            (json!("17"), true),
+            (json!(17), true),
+            (Value::Null, true),
+            (json!(-1), false),
+            (json!(1.5), false),
+            (json!(true), false),
+            (json!([]), false),
+            (json!({}), false),
+        ] {
+            let mut params = base.clone();
+            params["configuration"] = selection;
+            let schema = schema.as_value();
+            assert_eq!(conforms(schema, schema, &params), accepted, "{command}: {params}");
+            let issues = crate::schema::issues(command, &params);
+            assert_eq!(issues.is_empty(), accepted, "{command}: {params}");
+            if !accepted {
+                assert_eq!(issues[0].message, "`configuration` must be a row name, id, or null");
+            }
+        }
+    }
+    let name: InsertDesignParams = serde_json::from_value(json!({"path": "bolt.sc", "configuration": "17"})).unwrap();
+    let id: RelinkParams = serde_json::from_value(json!({"component": 1, "path": "bolt.sc", "configuration": 17})).unwrap();
+    assert_eq!(name.configuration, Some(super::RowRef::Name("17".into())));
+    assert_eq!(id.configuration, Some(super::RowRef::Id(17)));
+}
+
 /// The warning for what a key gets wrong, and the check that a list of components takes only
 /// what the handlers read.
 #[test]
@@ -141,6 +177,10 @@ fn the_check_names_what_is_wrong_with_a_key() {
     assert_eq!(issues("component.replace_with_link", json!({"component": 1})), Vec::<String>::new());
     assert_eq!(issues("component.replace_with_link", json!({"component": 1, "path": 3})), ["`with` or `path` is required"]);
     assert_eq!(issues("component.relink", json!({"component": 1, "path": "b.solidcraft", "paths": 1})).len(), 1);
+    assert_eq!(
+        issues("component.relink", json!({"component": 1, "path": "b.solidcraft", "occurrence": -1})),
+        ["`occurrence` must be a placement id"]
+    );
 }
 
 fn folder(name: &str) -> PathBuf {
@@ -164,7 +204,7 @@ fn matches(schema: schemars::Schema, id: &str, reply: &Value) {
 }
 
 /// Insert (new, reused, in a parent, placed), list, update (with a design that can't be read
-/// named in `failed`), relink and break, in Warn: each real reply matches its output schema and
+/// named in `failed`), relink (one placement, then all) and break, in Warn: each real reply matches its output schema and
 /// carries no warning. A list the network or a device refuses has the other shapes of an entry.
 #[test]
 fn link_replies_match_the_output_schema() {
@@ -194,6 +234,11 @@ fn link_replies_match_the_output_schema() {
     // The design B links changed, and C's file is gone: B updates, C is named in `failed`.
     save_box(&b, 25);
     std::fs::remove_file(&c).unwrap_or_else(|e| panic!("{e}"));
+    // A file that is gone says why: its state and reason, in a reply that matches.
+    let gone = run("component.links", json!({}));
+    let missing = gone["links"].as_array().and_then(|l| l.iter().find(|e| e["component"] == third["component"])).cloned().unwrap_or_default();
+    assert!(missing["found"] == false && missing["state"] == "missing" && missing["reason"].is_string(), "{gone}");
+    matches(output_schema_for::<LinksResult>(), "component.links", &gone);
     let update = run("component.update_links", json!({"components": ["B", "C", "A"]}));
     assert!(update["updated"] == json!(["B"]) && update["unchanged"] == json!(["A"]), "{update}");
     assert!(update["failed"][0]["name"] == "C" && update["failed"][0]["component"] == third["component"], "{update}");
@@ -207,6 +252,13 @@ fn link_replies_match_the_output_schema() {
     assert_eq!(nothing["unchanged"], json!(["A"]), "{nothing}");
     matches(output_schema_for::<UpdateLinksResult>(), "component.update_links", &nothing);
 
+    // One of A's two placements comes to show B's design, as a placement of B.
+    let one = run("component.relink", json!({"component": "A", "occurrence": reused["occurrence"], "path": b}));
+    assert!(
+        one["component"] == second["component"] && one["previous_component"] == first["component"] && one["occurrence"] == reused["occurrence"],
+        "{one}"
+    );
+    matches(output_schema_for::<RelinkResult>(), "component.relink", &one);
     let moved = run("component.relink", json!({"component": "A", "path": b}));
     assert!(moved["geometry_changed"] == true && moved["joint_errors"] == json!([]), "{moved}");
     matches(output_schema_for::<RelinkResult>(), "component.relink", &moved);

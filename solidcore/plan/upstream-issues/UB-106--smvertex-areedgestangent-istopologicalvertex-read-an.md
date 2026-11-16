@@ -1,0 +1,11 @@
+#### UB-106. `SmVertex::AreEdgesTangent` / `IsTopologicalVertex` read an uninitialised tangent
+- **Severity:** Crash / undefined behaviour
+- **Area:** Topology
+- **Location:** `source/SMLib/src/SmVertex.cpp:70` `AreEdgesTangent` (all four `SE(GetEndTangent(...))`), `:716` `IsTopologicalVertex` (the `SE(GetEndTangent(FALSE, ...))` branches).
+- **What happens:** `SmVector3d()` leaves its members uninitialised; a failed `SmEdge::GetEndTangent` (`SER` on the curve evaluation) leaves the tangent unset, its status is ignored and the tangent is negated and passed to `AngleBetween`. An edge without curve makes `GetEndTangent` dereference `NULL`.
+- **Trigger:** an edge whose curve cannot be evaluated at its interval end, or a curveless edge at the vertex (in `IsTopologicalVertex` when the other edge has a curve).
+- **How found:** read during porting (unit `topology.vertex`).
+- **Confirmed:** no (the difftest shim checks the evaluations first and does not call these).
+- **Severity:** crash/UB.
+- **Rust port:** `SolidError::InvalidInput`.
+- **Correction (#521):** only the curveless edge is UB. At `c9c5979` `SmVector3d`'s members default to `SM_UNDEF_DOUBLE` (`source/SMLib/inc/SmVector3d.h:56-58`), so the tangent a failed `GetEndTangent` leaves is defined, and both functions then answer `TRUE`. See WR-256. The port and the shim now follow that; a null curve is still refused.

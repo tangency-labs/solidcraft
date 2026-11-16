@@ -1,0 +1,2958 @@
+{
+ "cases": [
+  {
+   "name": "empty_info",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "info",
+    "comp": {
+     "dim": 3,
+     "curves": [],
+     "closed": false
+    },
+    "types": [
+     11001,
+     12060,
+     12070,
+     14001,
+     14010,
+     14032,
+     14033,
+     14034,
+     14038,
+     14040,
+     14200,
+     16016
+    ]
+   }
+  },
+  {
+   "name": "empty_knots",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "knots",
+    "comp": {
+     "dim": 3,
+     "curves": [],
+     "closed": false
+    }
+   }
+  },
+  {
+   "name": "empty_bbox",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "b_box",
+    "comp": {
+     "dim": 3,
+     "curves": [],
+     "closed": false
+    },
+    "ivl": [
+     0,
+     1
+    ],
+    "pseudo": true,
+    "polar": true
+   }
+  },
+  {
+   "name": "empty_eq",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "eq",
+    "a": {
+     "dim": 3,
+     "curves": [],
+     "closed": false
+    },
+    "b": {
+     "dim": 3,
+     "curves": [],
+     "closed": false
+    }
+   }
+  },
+  {
+   "name": "empty_copy",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "copy",
+    "comp": {
+     "dim": 3,
+     "curves": [],
+     "closed": false
+    }
+   }
+  },
+  {
+   "name": "empty_transform",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "transform",
+    "comp": {
+     "dim": 3,
+     "curves": [],
+     "closed": false
+    },
+    "origin": [
+     1,
+     0,
+     0
+    ],
+    "x": [
+     1,
+     0,
+     0
+    ],
+    "y": [
+     0,
+     1,
+     0
+    ],
+    "scale": null
+   }
+  },
+  {
+   "name": "empty_closed_info",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "info",
+    "comp": {
+     "dim": 3,
+     "curves": [],
+     "closed": true
+    },
+    "types": [
+     11001,
+     12060,
+     12070,
+     14001,
+     14010,
+     14032,
+     14033,
+     14034,
+     14038,
+     14040,
+     14200,
+     16016
+    ]
+   }
+  },
+  {
+   "name": "empty_closed_knots",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "knots",
+    "comp": {
+     "dim": 3,
+     "curves": [],
+     "closed": true
+    }
+   }
+  },
+  {
+   "name": "empty_closed_bbox",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "b_box",
+    "comp": {
+     "dim": 3,
+     "curves": [],
+     "closed": true
+    },
+    "ivl": [
+     0,
+     1
+    ],
+    "pseudo": true,
+    "polar": true
+   }
+  },
+  {
+   "name": "empty_closed_eq",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "eq",
+    "a": {
+     "dim": 3,
+     "curves": [],
+     "closed": true
+    },
+    "b": {
+     "dim": 3,
+     "curves": [],
+     "closed": false
+    }
+   }
+  },
+  {
+   "name": "empty_closed_copy",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "copy",
+    "comp": {
+     "dim": 3,
+     "curves": [],
+     "closed": true
+    }
+   }
+  },
+  {
+   "name": "empty_closed_transform",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "transform",
+    "comp": {
+     "dim": 3,
+     "curves": [],
+     "closed": true
+    },
+    "origin": [
+     1,
+     0,
+     0
+    ],
+    "x": [
+     1,
+     0,
+     0
+    ],
+    "y": [
+     0,
+     1,
+     0
+    ],
+    "scale": null
+   }
+  },
+  {
+   "name": "gaps_open",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "info",
+    "comp": {
+     "dim": 3,
+     "curves": [
+      {
+       "segment": {
+        "a": [
+         -4.5,
+         -2,
+         0
+        ],
+        "b": [
+         1,
+         -2,
+         0
+        ]
+       }
+      },
+      {
+       "segment": {
+        "a": [
+         1,
+         -2,
+         0
+        ],
+        "b": [
+         1,
+         3,
+         0
+        ]
+       }
+      },
+      {
+       "segment": {
+        "a": [
+         1,
+         3,
+         0
+        ],
+        "b": [
+         -4.5,
+         3,
+         0
+        ]
+       }
+      },
+      {
+       "segment": {
+        "a": [
+         -4.5,
+         3,
+         0
+        ],
+        "b": [
+         -4.5,
+         -2,
+         0
+        ]
+       }
+      }
+     ],
+     "closed": false,
+     "senses": [
+      true,
+      false,
+      true,
+      false
+     ],
+     "gaps": [
+      0.1,
+      0.2,
+      0.3,
+      0.4
+     ]
+    },
+    "types": [
+     11001,
+     12060,
+     12070,
+     14001,
+     14010,
+     14032,
+     14033,
+     14034,
+     14038,
+     14040,
+     14200,
+     16016
+    ]
+   }
+  },
+  {
+   "name": "gaps_closed",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "info",
+    "comp": {
+     "dim": 2,
+     "curves": [
+      {
+       "segment": {
+        "a": [
+         -4.5,
+         -2,
+         0
+        ],
+        "b": [
+         1,
+         -2,
+         0
+        ]
+       }
+      },
+      {
+       "segment": {
+        "a": [
+         1,
+         -2,
+         0
+        ],
+        "b": [
+         1,
+         3,
+         0
+        ]
+       }
+      },
+      {
+       "segment": {
+        "a": [
+         1,
+         3,
+         0
+        ],
+        "b": [
+         -4.5,
+         3,
+         0
+        ]
+       }
+      },
+      {
+       "segment": {
+        "a": [
+         -4.5,
+         3,
+         0
+        ],
+        "b": [
+         -4.5,
+         -2,
+         0
+        ]
+       }
+      }
+     ],
+     "closed": true,
+     "senses": [
+      false,
+      false,
+      false,
+      false
+     ],
+     "gaps": [
+      0.1,
+      0.2,
+      0.3,
+      0.4
+     ]
+    },
+    "types": [
+     11001,
+     12060,
+     12070,
+     14001,
+     14010,
+     14032,
+     14033,
+     14034,
+     14038,
+     14040,
+     14200,
+     16016
+    ]
+   }
+  },
+  {
+   "name": "knots_hermite",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "knots",
+    "comp": {
+     "curves": [
+      {
+       "hermite": {
+        "dim": 3,
+        "p1": [
+         0,
+         0,
+         0
+        ],
+        "d1": [
+         1,
+         0,
+         0
+        ],
+        "p2": [
+         1,
+         1,
+         0
+        ],
+        "d2": [
+         0,
+         1,
+         0
+        ]
+       }
+      }
+     ]
+    }
+   }
+  },
+  {
+   "name": "knots_line",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "knots",
+    "comp": {
+     "curves": [
+      {
+       "line": {
+        "p": [
+         0,
+         0,
+         0
+        ],
+        "v": [
+         1,
+         1,
+         0
+        ],
+        "domain": [
+         -1,
+         2
+        ],
+        "scale": 2.0,
+        "inside_out": true
+       }
+      }
+     ]
+    }
+   }
+  },
+  {
+   "name": "knots_segment",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "knots",
+    "comp": {
+     "curves": [
+      {
+       "segment": {
+        "a": [
+         -4.5,
+         -2,
+         0
+        ],
+        "b": [
+         1,
+         -2,
+         0
+        ]
+       }
+      }
+     ]
+    }
+   }
+  },
+  {
+   "name": "bbox_hermite_line",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "b_box",
+    "comp": {
+     "curves": [
+      {
+       "hermite": {
+        "dim": 3,
+        "p1": [
+         0,
+         0,
+         0
+        ],
+        "d1": [
+         1,
+         0,
+         0
+        ],
+        "p2": [
+         1,
+         1,
+         0
+        ],
+        "d2": [
+         0,
+         1,
+         0
+        ]
+       }
+      },
+      {
+       "hermite": {
+        "dim": 3,
+        "p1": [
+         0,
+         0,
+         0
+        ],
+        "d1": [
+         1,
+         0,
+         0
+        ],
+        "p2": [
+         1,
+         1,
+         0
+        ],
+        "d2": [
+         0,
+         1,
+         0
+        ]
+       }
+      },
+      {
+       "line": {
+        "p": [
+         0,
+         0,
+         0
+        ],
+        "v": [
+         1,
+         1,
+         0
+        ],
+        "domain": [
+         -1,
+         2
+        ],
+        "scale": 2.0,
+        "inside_out": true
+       }
+      }
+     ]
+    },
+    "ivl": [
+     0.5,
+     2.5
+    ],
+    "pseudo": true,
+    "polar": true
+   }
+  },
+  {
+   "name": "bbox_outside",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "b_box",
+    "comp": {
+     "dim": 3,
+     "curves": [
+      {
+       "segment": {
+        "a": [
+         -4.5,
+         -2,
+         0
+        ],
+        "b": [
+         1,
+         -2,
+         0
+        ]
+       }
+      },
+      {
+       "segment": {
+        "a": [
+         1,
+         -2,
+         0
+        ],
+        "b": [
+         1,
+         3,
+         0
+        ]
+       }
+      },
+      {
+       "segment": {
+        "a": [
+         1,
+         3,
+         0
+        ],
+        "b": [
+         -4.5,
+         3,
+         0
+        ]
+       }
+      },
+      {
+       "segment": {
+        "a": [
+         -4.5,
+         3,
+         0
+        ],
+        "b": [
+         -4.5,
+         -2,
+         0
+        ]
+       }
+      }
+     ],
+     "closed": true
+    },
+    "ivl": [
+     10,
+     11
+    ],
+    "pseudo": true,
+    "polar": true
+   }
+  },
+  {
+   "name": "bbox_point",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "b_box",
+    "comp": {
+     "dim": 3,
+     "curves": [
+      {
+       "segment": {
+        "a": [
+         -4.5,
+         -2,
+         0
+        ],
+        "b": [
+         1,
+         -2,
+         0
+        ]
+       }
+      },
+      {
+       "segment": {
+        "a": [
+         1,
+         -2,
+         0
+        ],
+        "b": [
+         1,
+         3,
+         0
+        ]
+       }
+      },
+      {
+       "segment": {
+        "a": [
+         1,
+         3,
+         0
+        ],
+        "b": [
+         -4.5,
+         3,
+         0
+        ]
+       }
+      },
+      {
+       "segment": {
+        "a": [
+         -4.5,
+         3,
+         0
+        ],
+        "b": [
+         -4.5,
+         -2,
+         0
+        ]
+       }
+      }
+     ],
+     "closed": true
+    },
+    "ivl": [
+     1,
+     1
+    ],
+    "pseudo": true,
+    "polar": true,
+    "expand": false
+   }
+  },
+  {
+   "name": "eq_gap_tiny",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "eq",
+    "a": {
+     "curves": [
+      {
+       "segment": {
+        "a": [
+         -4.5,
+         -2,
+         0
+        ],
+        "b": [
+         1,
+         -2,
+         0
+        ]
+       }
+      },
+      {
+       "segment": {
+        "a": [
+         1,
+         -2,
+         0
+        ],
+        "b": [
+         1,
+         3,
+         0
+        ]
+       }
+      },
+      {
+       "segment": {
+        "a": [
+         1,
+         3,
+         0
+        ],
+        "b": [
+         -4.5,
+         3,
+         0
+        ]
+       }
+      },
+      {
+       "segment": {
+        "a": [
+         -4.5,
+         3,
+         0
+        ],
+        "b": [
+         -4.5,
+         -2,
+         0
+        ]
+       }
+      }
+     ],
+     "gaps": [
+      0,
+      0,
+      0,
+      0
+     ]
+    },
+    "b": {
+     "curves": [
+      {
+       "segment": {
+        "a": [
+         -4.5,
+         -2,
+         0
+        ],
+        "b": [
+         1,
+         -2,
+         0
+        ]
+       }
+      },
+      {
+       "segment": {
+        "a": [
+         1,
+         -2,
+         0
+        ],
+        "b": [
+         1,
+         3,
+         0
+        ]
+       }
+      },
+      {
+       "segment": {
+        "a": [
+         1,
+         3,
+         0
+        ],
+        "b": [
+         -4.5,
+         3,
+         0
+        ]
+       }
+      },
+      {
+       "segment": {
+        "a": [
+         -4.5,
+         3,
+         0
+        ],
+        "b": [
+         -4.5,
+         -2,
+         0
+        ]
+       }
+      }
+     ],
+     "gaps": [
+      1e-14,
+      0,
+      0,
+      0
+     ]
+    }
+   }
+  },
+  {
+   "name": "eq_gap_big",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "eq",
+    "a": {
+     "curves": [
+      {
+       "segment": {
+        "a": [
+         -4.5,
+         -2,
+         0
+        ],
+        "b": [
+         1,
+         -2,
+         0
+        ]
+       }
+      },
+      {
+       "segment": {
+        "a": [
+         1,
+         -2,
+         0
+        ],
+        "b": [
+         1,
+         3,
+         0
+        ]
+       }
+      },
+      {
+       "segment": {
+        "a": [
+         1,
+         3,
+         0
+        ],
+        "b": [
+         -4.5,
+         3,
+         0
+        ]
+       }
+      },
+      {
+       "segment": {
+        "a": [
+         -4.5,
+         3,
+         0
+        ],
+        "b": [
+         -4.5,
+         -2,
+         0
+        ]
+       }
+      }
+     ],
+     "gaps": [
+      0,
+      0,
+      0,
+      0
+     ]
+    },
+    "b": {
+     "curves": [
+      {
+       "segment": {
+        "a": [
+         -4.5,
+         -2,
+         0
+        ],
+        "b": [
+         1,
+         -2,
+         0
+        ]
+       }
+      },
+      {
+       "segment": {
+        "a": [
+         1,
+         -2,
+         0
+        ],
+        "b": [
+         1,
+         3,
+         0
+        ]
+       }
+      },
+      {
+       "segment": {
+        "a": [
+         1,
+         3,
+         0
+        ],
+        "b": [
+         -4.5,
+         3,
+         0
+        ]
+       }
+      },
+      {
+       "segment": {
+        "a": [
+         -4.5,
+         3,
+         0
+        ],
+        "b": [
+         -4.5,
+         -2,
+         0
+        ]
+       }
+      }
+     ],
+     "gaps": [
+      0.001,
+      0,
+      0,
+      0
+     ]
+    }
+   }
+  },
+  {
+   "name": "eq_dim",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "eq",
+    "a": {
+     "dim": 2,
+     "curves": [
+      {
+       "segment": {
+        "a": [
+         -4.5,
+         -2,
+         0
+        ],
+        "b": [
+         1,
+         -2,
+         0
+        ]
+       }
+      },
+      {
+       "segment": {
+        "a": [
+         1,
+         -2,
+         0
+        ],
+        "b": [
+         1,
+         3,
+         0
+        ]
+       }
+      },
+      {
+       "segment": {
+        "a": [
+         1,
+         3,
+         0
+        ],
+        "b": [
+         -4.5,
+         3,
+         0
+        ]
+       }
+      },
+      {
+       "segment": {
+        "a": [
+         -4.5,
+         3,
+         0
+        ],
+        "b": [
+         -4.5,
+         -2,
+         0
+        ]
+       }
+      }
+     ]
+    },
+    "b": {
+     "curves": [
+      {
+       "segment": {
+        "a": [
+         -4.5,
+         -2,
+         0
+        ],
+        "b": [
+         1,
+         -2,
+         0
+        ]
+       }
+      },
+      {
+       "segment": {
+        "a": [
+         1,
+         -2,
+         0
+        ],
+        "b": [
+         1,
+         3,
+         0
+        ]
+       }
+      },
+      {
+       "segment": {
+        "a": [
+         1,
+         3,
+         0
+        ],
+        "b": [
+         -4.5,
+         3,
+         0
+        ]
+       }
+      },
+      {
+       "segment": {
+        "a": [
+         -4.5,
+         3,
+         0
+        ],
+        "b": [
+         -4.5,
+         -2,
+         0
+        ]
+       }
+      }
+     ]
+    }
+   }
+  },
+  {
+   "name": "eq_sense",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "eq",
+    "a": {
+     "curves": [
+      {
+       "segment": {
+        "a": [
+         -4.5,
+         -2,
+         0
+        ],
+        "b": [
+         1,
+         -2,
+         0
+        ]
+       }
+      },
+      {
+       "segment": {
+        "a": [
+         1,
+         -2,
+         0
+        ],
+        "b": [
+         1,
+         3,
+         0
+        ]
+       }
+      },
+      {
+       "segment": {
+        "a": [
+         1,
+         3,
+         0
+        ],
+        "b": [
+         -4.5,
+         3,
+         0
+        ]
+       }
+      },
+      {
+       "segment": {
+        "a": [
+         -4.5,
+         3,
+         0
+        ],
+        "b": [
+         -4.5,
+         -2,
+         0
+        ]
+       }
+      }
+     ],
+     "senses": [
+      true,
+      true,
+      true,
+      false
+     ]
+    },
+    "b": {
+     "curves": [
+      {
+       "segment": {
+        "a": [
+         -4.5,
+         -2,
+         0
+        ],
+        "b": [
+         1,
+         -2,
+         0
+        ]
+       }
+      },
+      {
+       "segment": {
+        "a": [
+         1,
+         -2,
+         0
+        ],
+        "b": [
+         1,
+         3,
+         0
+        ]
+       }
+      },
+      {
+       "segment": {
+        "a": [
+         1,
+         3,
+         0
+        ],
+        "b": [
+         -4.5,
+         3,
+         0
+        ]
+       }
+      },
+      {
+       "segment": {
+        "a": [
+         -4.5,
+         3,
+         0
+        ],
+        "b": [
+         -4.5,
+         -2,
+         0
+        ]
+       }
+      }
+     ]
+    }
+   }
+  },
+  {
+   "name": "eq_hermite",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "eq",
+    "a": {
+     "curves": [
+      {
+       "hermite": {
+        "dim": 3,
+        "p1": [
+         0,
+         0,
+         0
+        ],
+        "d1": [
+         1,
+         0,
+         0
+        ],
+        "p2": [
+         1,
+         1,
+         0
+        ],
+        "d2": [
+         0,
+         1,
+         0
+        ]
+       }
+      }
+     ]
+    },
+    "b": {
+     "curves": [
+      {
+       "hermite": {
+        "dim": 3,
+        "p1": [
+         0,
+         0,
+         0
+        ],
+        "d1": [
+         1,
+         0,
+         0
+        ],
+        "p2": [
+         1,
+         1,
+         0
+        ],
+        "d2": [
+         0,
+         1,
+         0
+        ]
+       }
+      }
+     ]
+    }
+   }
+  },
+  {
+   "name": "transform_identity",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "transform",
+    "comp": {
+     "curves": [
+      {
+       "segment": {
+        "a": [
+         -4.5,
+         -2,
+         0
+        ],
+        "b": [
+         1,
+         -2,
+         0
+        ]
+       }
+      },
+      {
+       "hermite": {
+        "dim": 3,
+        "p1": [
+         0,
+         0,
+         0
+        ],
+        "d1": [
+         1,
+         0,
+         0
+        ],
+        "p2": [
+         1,
+         1,
+         0
+        ],
+        "d2": [
+         0,
+         1,
+         0
+        ]
+       }
+      }
+     ]
+    },
+    "origin": [
+     0,
+     0,
+     0
+    ],
+    "x": [
+     1,
+     0,
+     0
+    ],
+    "y": [
+     0,
+     1,
+     0
+    ],
+    "scale": [
+     1,
+     1,
+     1
+    ]
+   }
+  },
+  {
+   "name": "transform_hermite",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "transform",
+    "comp": {
+     "curves": [
+      {
+       "segment": {
+        "a": [
+         -4.5,
+         -2,
+         0
+        ],
+        "b": [
+         1,
+         -2,
+         0
+        ]
+       }
+      },
+      {
+       "hermite": {
+        "dim": 3,
+        "p1": [
+         0,
+         0,
+         0
+        ],
+        "d1": [
+         1,
+         0,
+         0
+        ],
+        "p2": [
+         1,
+         1,
+         0
+        ],
+        "d2": [
+         0,
+         1,
+         0
+        ]
+       }
+      },
+      {
+       "line": {
+        "p": [
+         0,
+         0,
+         0
+        ],
+        "v": [
+         1,
+         1,
+         0
+        ],
+        "domain": [
+         -1,
+         2
+        ],
+        "scale": 2.0,
+        "inside_out": true
+       }
+      }
+     ]
+    },
+    "origin": [
+     0,
+     0,
+     1
+    ],
+    "x": [
+     1,
+     0,
+     0
+    ],
+    "y": [
+     0,
+     1,
+     0
+    ],
+    "scale": [
+     1,
+     2,
+     3
+    ]
+   }
+  },
+  {
+   "name": "approx_two_bsplines",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "approx",
+    "comp": {
+     "curves": [
+      {
+       "bspline": {
+        "dim": 3,
+        "cpts": [
+         [
+          0,
+          0,
+          0,
+          -1.7976931348623157e+308
+         ],
+         [
+          1,
+          1,
+          0,
+          -1.7976931348623157e+308
+         ],
+         [
+          2,
+          0,
+          0,
+          -1.7976931348623157e+308
+         ]
+        ],
+        "p": 2,
+        "u": [
+         0,
+         0,
+         0,
+         1,
+         1,
+         1
+        ]
+       }
+      },
+      {
+       "bspline": {
+        "dim": 3,
+        "cpts": [
+         [
+          2,
+          0,
+          0,
+          -1.7976931348623157e+308
+         ],
+         [
+          3,
+          -1,
+          0,
+          -1.7976931348623157e+308
+         ],
+         [
+          4,
+          0,
+          0,
+          -1.7976931348623157e+308
+         ],
+         [
+          5,
+          2,
+          0,
+          -1.7976931348623157e+308
+         ]
+        ],
+        "p": 3,
+        "u": [
+         0,
+         0,
+         0,
+         0,
+         1,
+         1,
+         1,
+         1
+        ]
+       }
+      }
+     ]
+    },
+    "tol": 0.001
+   }
+  },
+  {
+   "name": "approx_single_segment",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "approx",
+    "comp": {
+     "curves": [
+      {
+       "segment": {
+        "a": [
+         -4.5,
+         -2,
+         0
+        ],
+        "b": [
+         1,
+         -2,
+         0
+        ]
+       }
+      }
+     ]
+    },
+    "tol": 0.001
+   }
+  },
+  {
+   "name": "approx_hermite",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "approx",
+    "comp": {
+     "curves": [
+      {
+       "hermite": {
+        "dim": 3,
+        "p1": [
+         0,
+         0,
+         0
+        ],
+        "d1": [
+         1,
+         0,
+         0
+        ],
+        "p2": [
+         1,
+         1,
+         0
+        ],
+        "d2": [
+         0,
+         1,
+         0
+        ]
+       }
+      }
+     ]
+    },
+    "tol": 0.001
+   }
+  },
+  {
+   "name": "orient_zero_area",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "orient",
+    "curves": [
+     {
+      "segment": {
+       "a": [
+        0,
+        0,
+        0
+       ],
+       "b": [
+        1,
+        0,
+        0
+       ]
+      }
+     },
+     {
+      "segment": {
+       "a": [
+        1,
+        0,
+        0
+       ],
+       "b": [
+        0,
+        0,
+        0
+       ]
+      }
+     }
+    ],
+    "senses": [
+     true,
+     true
+    ],
+    "normal": [
+     0,
+     0,
+     1
+    ],
+    "bounds": true
+   }
+  },
+  {
+   "name": "orient_in_plane_normal",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "orient",
+    "curves": [
+     {
+      "segment": {
+       "a": [
+        -4.5,
+        -2,
+        0
+       ],
+       "b": [
+        1,
+        -2,
+        0
+       ]
+      }
+     },
+     {
+      "segment": {
+       "a": [
+        1,
+        -2,
+        0
+       ],
+       "b": [
+        1,
+        3,
+        0
+       ]
+      }
+     },
+     {
+      "segment": {
+       "a": [
+        1,
+        3,
+        0
+       ],
+       "b": [
+        -4.5,
+        3,
+        0
+       ]
+      }
+     },
+     {
+      "segment": {
+       "a": [
+        -4.5,
+        3,
+        0
+       ],
+       "b": [
+        -4.5,
+        -2,
+        0
+       ]
+      }
+     }
+    ],
+    "senses": [
+     true,
+     true,
+     true,
+     true
+    ],
+    "normal": [
+     1,
+     0,
+     0
+    ],
+    "bounds": false
+   }
+  },
+  {
+   "name": "orient_mixed",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "orient",
+    "curves": [
+     {
+      "bspline": {
+       "dim": 3,
+       "cpts": [
+        [
+         0,
+         0,
+         0,
+         -1.7976931348623157e+308
+        ],
+        [
+         1,
+         1,
+         0,
+         -1.7976931348623157e+308
+        ],
+        [
+         2,
+         0,
+         0,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "p": 2,
+       "u": [
+        0,
+        0,
+        0,
+        1,
+        1,
+        1
+       ]
+      }
+     },
+     {
+      "bspline": {
+       "dim": 3,
+       "cpts": [
+        [
+         2,
+         0,
+         0,
+         -1.7976931348623157e+308
+        ],
+        [
+         3,
+         -1,
+         0,
+         -1.7976931348623157e+308
+        ],
+        [
+         4,
+         0,
+         0,
+         -1.7976931348623157e+308
+        ],
+        [
+         5,
+         2,
+         0,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "p": 3,
+       "u": [
+        0,
+        0,
+        0,
+        0,
+        1,
+        1,
+        1,
+        1
+       ]
+      }
+     },
+     {
+      "segment": {
+       "a": [
+        5,
+        2,
+        0
+       ],
+       "b": [
+        0,
+        0,
+        0
+       ]
+      }
+     }
+    ],
+    "senses": [
+     true,
+     true,
+     true
+    ],
+    "normal": [
+     0,
+     0,
+     1
+    ],
+    "bounds": true
+   }
+  },
+  {
+   "name": "build_empty",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "build",
+    "curves": [],
+    "same": 0.001,
+    "line": 0.0
+   }
+  },
+  {
+   "name": "build_single_tiny",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "build",
+    "curves": [
+     {
+      "segment": {
+       "a": [
+        0,
+        0,
+        0
+       ],
+       "b": [
+        0.0001,
+        0,
+        0
+       ]
+      }
+     }
+    ],
+    "same": 0.001,
+    "line": 0.0
+   }
+  },
+  {
+   "name": "build_single_closed",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "build",
+    "curves": [
+     {
+      "circle": {
+       "center": [
+        0,
+        0,
+        0
+       ],
+       "x": [
+        1,
+        0,
+        0
+       ],
+       "y": [
+        0,
+        1,
+        0
+       ],
+       "radius": 1,
+       "a0": 0,
+       "a1": 360
+      }
+     }
+    ],
+    "same": 0.001,
+    "line": 0.0
+   }
+  },
+  {
+   "name": "build_single_open",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "build",
+    "curves": [
+     {
+      "segment": {
+       "a": [
+        -4.5,
+        -2,
+        0
+       ],
+       "b": [
+        1,
+        -2,
+        0
+       ]
+      }
+     }
+    ],
+    "same": 0.001,
+    "line": 0.01
+   }
+  },
+  {
+   "name": "build_tiny_and_square",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "build",
+    "curves": [
+     {
+      "segment": {
+       "a": [
+        -4.5,
+        -2,
+        0
+       ],
+       "b": [
+        1,
+        -2,
+        0
+       ]
+      }
+     },
+     {
+      "segment": {
+       "a": [
+        1,
+        -2,
+        0
+       ],
+       "b": [
+        1,
+        3,
+        0
+       ]
+      }
+     },
+     {
+      "segment": {
+       "a": [
+        1,
+        3,
+        0
+       ],
+       "b": [
+        -4.5,
+        3,
+        0
+       ]
+      }
+     },
+     {
+      "segment": {
+       "a": [
+        -4.5,
+        3,
+        0
+       ],
+       "b": [
+        -4.5,
+        -2,
+        0
+       ]
+      }
+     },
+     {
+      "segment": {
+       "a": [
+        9,
+        9,
+        9
+       ],
+       "b": [
+        9,
+        9,
+        9.0001
+       ]
+      }
+     }
+    ],
+    "same": 0.001,
+    "line": 0.0
+   }
+  },
+  {
+   "name": "build_closing_line",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "build",
+    "curves": [
+     {
+      "segment": {
+       "a": [
+        0,
+        0,
+        0
+       ],
+       "b": [
+        1,
+        0,
+        0
+       ]
+      }
+     },
+     {
+      "segment": {
+       "a": [
+        1,
+        0,
+        0
+       ],
+       "b": [
+        1,
+        1,
+        0
+       ]
+      }
+     },
+     {
+      "segment": {
+       "a": [
+        1,
+        1,
+        0
+       ],
+       "b": [
+        0.005,
+        0,
+        0
+       ]
+      }
+     }
+    ],
+    "same": 0.001,
+    "line": 0.01
+   }
+  },
+  {
+   "name": "build_reversed_pieces",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "build",
+    "curves": [
+     {
+      "segment": {
+       "a": [
+        1,
+        0,
+        0
+       ],
+       "b": [
+        0,
+        0,
+        0
+       ]
+      }
+     },
+     {
+      "segment": {
+       "a": [
+        1,
+        1,
+        0
+       ],
+       "b": [
+        1,
+        0,
+        0
+       ]
+      }
+     },
+     {
+      "segment": {
+       "a": [
+        0,
+        0,
+        0
+       ],
+       "b": [
+        0,
+        1,
+        0
+       ]
+      }
+     }
+    ],
+    "same": 1e-06,
+    "line": 0.0
+   }
+  },
+  {
+   "name": "corner_ext",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "corner",
+    "vertex": [
+     0,
+     0,
+     0
+    ],
+    "p1": [
+     0,
+     1,
+     0
+    ],
+    "v1": [
+     1,
+     0,
+     0
+    ],
+    "p2": [
+     1,
+     0,
+     0
+    ],
+    "v2": [
+     0,
+     -1,
+     0
+    ],
+    "corner": 0,
+    "dist": 1.0,
+    "tol": 1e-06
+   }
+  },
+  {
+   "name": "corner_ext_zero_v1",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "corner",
+    "vertex": [
+     0,
+     0,
+     0
+    ],
+    "p1": [
+     0,
+     1,
+     0
+    ],
+    "v1": [
+     0,
+     0,
+     0
+    ],
+    "p2": [
+     1,
+     0,
+     0
+    ],
+    "v2": [
+     0,
+     -1,
+     0
+    ],
+    "corner": 0,
+    "dist": 1.0,
+    "tol": 1e-06
+   }
+  },
+  {
+   "name": "corner_ext_parallel",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "corner",
+    "vertex": [
+     0,
+     0,
+     0
+    ],
+    "p1": [
+     0,
+     1,
+     0
+    ],
+    "v1": [
+     1,
+     0,
+     0
+    ],
+    "p2": [
+     0,
+     -1,
+     0
+    ],
+    "v2": [
+     -1,
+     0,
+     0
+    ],
+    "corner": 0,
+    "dist": 1.0,
+    "tol": 1e-06
+   }
+  },
+  {
+   "name": "corner_fillet",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "corner",
+    "vertex": [
+     0,
+     0,
+     0
+    ],
+    "p1": [
+     0,
+     1,
+     0
+    ],
+    "v1": [
+     1,
+     0,
+     0
+    ],
+    "p2": [
+     1,
+     0,
+     0
+    ],
+    "v2": [
+     0,
+     -1,
+     0
+    ],
+    "corner": 1,
+    "dist": 1.0,
+    "tol": 1e-06
+   }
+  },
+  {
+   "name": "corner_fillet_zero_v1",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "corner",
+    "vertex": [
+     0,
+     0,
+     0
+    ],
+    "p1": [
+     0,
+     1,
+     0
+    ],
+    "v1": [
+     0,
+     0,
+     0
+    ],
+    "p2": [
+     1,
+     0,
+     0
+    ],
+    "v2": [
+     0,
+     -1,
+     0
+    ],
+    "corner": 1,
+    "dist": 1.0,
+    "tol": 1e-06
+   }
+  },
+  {
+   "name": "corner_fillet_parallel",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "corner",
+    "vertex": [
+     0,
+     0,
+     0
+    ],
+    "p1": [
+     0,
+     1,
+     0
+    ],
+    "v1": [
+     1,
+     0,
+     0
+    ],
+    "p2": [
+     0,
+     -1,
+     0
+    ],
+    "v2": [
+     -1,
+     0,
+     0
+    ],
+    "corner": 1,
+    "dist": 1.0,
+    "tol": 1e-06
+   }
+  },
+  {
+   "name": "corner_chamfer",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "corner",
+    "vertex": [
+     0,
+     0,
+     0
+    ],
+    "p1": [
+     0,
+     1,
+     0
+    ],
+    "v1": [
+     1,
+     0,
+     0
+    ],
+    "p2": [
+     1,
+     0,
+     0
+    ],
+    "v2": [
+     0,
+     -1,
+     0
+    ],
+    "corner": 2,
+    "dist": 1.0,
+    "tol": 1e-06
+   }
+  },
+  {
+   "name": "corner_chamfer_zero_v1",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "corner",
+    "vertex": [
+     0,
+     0,
+     0
+    ],
+    "p1": [
+     0,
+     1,
+     0
+    ],
+    "v1": [
+     0,
+     0,
+     0
+    ],
+    "p2": [
+     1,
+     0,
+     0
+    ],
+    "v2": [
+     0,
+     -1,
+     0
+    ],
+    "corner": 2,
+    "dist": 1.0,
+    "tol": 1e-06
+   }
+  },
+  {
+   "name": "corner_chamfer_parallel",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "corner",
+    "vertex": [
+     0,
+     0,
+     0
+    ],
+    "p1": [
+     0,
+     1,
+     0
+    ],
+    "v1": [
+     1,
+     0,
+     0
+    ],
+    "p2": [
+     0,
+     -1,
+     0
+    ],
+    "v2": [
+     -1,
+     0,
+     0
+    ],
+    "corner": 2,
+    "dist": 1.0,
+    "tol": 1e-06
+   }
+  },
+  {
+   "name": "classify_bowtie",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "classify",
+    "curve": {
+     "segment": {
+      "a": [
+       0,
+       1,
+       0
+      ],
+      "b": [
+       1,
+       1,
+       0
+      ]
+     }
+    },
+    "dist": 1.0,
+    "tol": 1e-06,
+    "origs": [
+     {
+      "segment": {
+       "a": [
+        0,
+        0,
+        0
+       ],
+       "b": [
+        1,
+        0,
+        0
+       ]
+      }
+     }
+    ],
+    "orig": {
+     "segment": {
+      "a": [
+       1,
+       0,
+       0
+      ],
+      "b": [
+       0,
+       0,
+       0
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "classify_keep",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "classify",
+    "curve": {
+     "segment": {
+      "a": [
+       0,
+       1,
+       0
+      ],
+      "b": [
+       1,
+       1,
+       0
+      ]
+     }
+    },
+    "dist": 1.0,
+    "tol": 1e-06,
+    "origs": [
+     {
+      "segment": {
+       "a": [
+        0,
+        0,
+        0
+       ],
+       "b": [
+        1,
+        0,
+        0
+       ]
+      }
+     }
+    ],
+    "orig": {
+     "segment": {
+      "a": [
+       0,
+       0,
+       0
+      ],
+      "b": [
+       1,
+       0,
+       0
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "classify_discard",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "classify",
+    "curve": {
+     "segment": {
+      "a": [
+       0,
+       0.5,
+       0
+      ],
+      "b": [
+       1,
+       0.5,
+       0
+      ]
+     }
+    },
+    "dist": 1.0,
+    "tol": 1e-06,
+    "origs": [
+     {
+      "segment": {
+       "a": [
+        0,
+        0,
+        0
+       ],
+       "b": [
+        1,
+        0,
+        0
+       ]
+      }
+     }
+    ],
+    "orig": null
+   }
+  },
+  {
+   "name": "classify_no_origs",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "classify",
+    "curve": {
+     "hermite": {
+      "dim": 3,
+      "p1": [
+       0,
+       0,
+       0
+      ],
+      "d1": [
+       1,
+       0,
+       0
+      ],
+      "p2": [
+       1,
+       1,
+       0
+      ],
+      "d2": [
+       0,
+       1,
+       0
+      ]
+     }
+    },
+    "dist": 1.0,
+    "tol": 1e-06,
+    "origs": [],
+    "orig": null
+   }
+  },
+  {
+   "name": "breaks_0_empty",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "breaks",
+    "which": 0,
+    "v": [],
+    "x": 1.0
+   }
+  },
+  {
+   "name": "breaks_0_same",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "breaks",
+    "which": 0,
+    "v": [
+     0,
+     1,
+     2,
+     3
+    ],
+    "x": 2.0
+   }
+  },
+  {
+   "name": "breaks_0_near",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "breaks",
+    "which": 0,
+    "v": [
+     0,
+     1,
+     2,
+     3
+    ],
+    "x": 1.0000000000001
+   }
+  },
+  {
+   "name": "breaks_0_first",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "breaks",
+    "which": 0,
+    "v": [
+     0,
+     1,
+     2,
+     3
+    ],
+    "x": -1.0
+   }
+  },
+  {
+   "name": "breaks_0_last",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "breaks",
+    "which": 0,
+    "v": [
+     0,
+     1,
+     2,
+     3
+    ],
+    "x": 4.0
+   }
+  },
+  {
+   "name": "breaks_0_mid",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "breaks",
+    "which": 0,
+    "v": [
+     0,
+     1,
+     2,
+     3
+    ],
+    "x": 1.5
+   }
+  },
+  {
+   "name": "breaks_1_empty",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "breaks",
+    "which": 1,
+    "v": [],
+    "x": 1.0
+   }
+  },
+  {
+   "name": "breaks_1_same",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "breaks",
+    "which": 1,
+    "v": [
+     0,
+     1,
+     2,
+     3
+    ],
+    "x": 2.0
+   }
+  },
+  {
+   "name": "breaks_1_near",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "breaks",
+    "which": 1,
+    "v": [
+     0,
+     1,
+     2,
+     3
+    ],
+    "x": 1.0000000000001
+   }
+  },
+  {
+   "name": "breaks_1_first",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "breaks",
+    "which": 1,
+    "v": [
+     0,
+     1,
+     2,
+     3
+    ],
+    "x": -1.0
+   }
+  },
+  {
+   "name": "breaks_1_last",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "breaks",
+    "which": 1,
+    "v": [
+     0,
+     1,
+     2,
+     3
+    ],
+    "x": 4.0
+   }
+  },
+  {
+   "name": "breaks_1_mid",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "breaks",
+    "which": 1,
+    "v": [
+     0,
+     1,
+     2,
+     3
+    ],
+    "x": 1.5
+   }
+  },
+  {
+   "name": "breaks_2_empty",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "breaks",
+    "which": 2,
+    "v": [],
+    "x": 1.0
+   }
+  },
+  {
+   "name": "breaks_2_same",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "breaks",
+    "which": 2,
+    "v": [
+     0,
+     1,
+     2,
+     3
+    ],
+    "x": 2.0
+   }
+  },
+  {
+   "name": "breaks_2_near",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "breaks",
+    "which": 2,
+    "v": [
+     0,
+     1,
+     2,
+     3
+    ],
+    "x": 1.0000000000001
+   }
+  },
+  {
+   "name": "breaks_2_first",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "breaks",
+    "which": 2,
+    "v": [
+     0,
+     1,
+     2,
+     3
+    ],
+    "x": -1.0
+   }
+  },
+  {
+   "name": "breaks_2_last",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "breaks",
+    "which": 2,
+    "v": [
+     0,
+     1,
+     2,
+     3
+    ],
+    "x": 4.0
+   }
+  },
+  {
+   "name": "breaks_2_mid",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "breaks",
+    "which": 2,
+    "v": [
+     0,
+     1,
+     2,
+     3
+    ],
+    "x": 1.5
+   }
+  },
+  {
+   "name": "types_offset_map",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "types",
+    "id": 102,
+    "corner": true,
+    "comp_index": 3,
+    "curve": 4,
+    "other": 5,
+    "err": 0.25,
+    "types": [
+     11001,
+     12060,
+     12070,
+     14001,
+     14010,
+     14032,
+     14033,
+     14034,
+     14038,
+     14040,
+     14200,
+     16016
+    ]
+   }
+  }
+ ]
+}

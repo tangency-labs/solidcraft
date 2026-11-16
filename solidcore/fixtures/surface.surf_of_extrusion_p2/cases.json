@@ -1,0 +1,5083 @@
+{
+ "cases": [
+  {
+   "name": "file_eg1_state",
+   "upstream_ref": "TestFiles/pt_TestFiles/Fillet/eg1_srf1.smb:400 (SmSurfOfExtrusion record, read by SmBrep::ReadFromFile in upstream tests)",
+   "inputs": {
+    "src": "file",
+    "path": {
+     "$upstream_file": "Fillet/eg1_srf1.smb"
+    },
+    "line": 401,
+    "version": 38,
+    "op": "state"
+   }
+  },
+  {
+   "name": "file_eg1_is_nurb",
+   "upstream_ref": "TestFiles/pt_TestFiles/Fillet/eg1_srf1.smb:400 (SmSurfOfExtrusion record, read by SmBrep::ReadFromFile in upstream tests)",
+   "inputs": {
+    "is_nurb": {
+     "source": {
+      "test": "src",
+      "of": {
+       "src": "file",
+       "path": {
+        "$upstream_file": "Fillet/eg1_srf1.smb"
+       },
+       "line": 401,
+       "version": 38
+      }
+     }
+    },
+    "scale": 1.0
+   }
+  },
+  {
+   "name": "file_eg1_is_nurb_transposed",
+   "upstream_ref": "TestFiles/pt_TestFiles/Fillet/eg1_srf1.smb:400 (SmSurfOfExtrusion record, read by SmBrep::ReadFromFile in upstream tests)",
+   "inputs": {
+    "is_nurb": {
+     "source": {
+      "test": "src",
+      "of": {
+       "src": "file",
+       "path": {
+        "$upstream_file": "Fillet/eg1_srf1.smb"
+       },
+       "line": 401,
+       "version": 38
+      }
+     },
+     "transpose": true
+    },
+    "scale": 1.0
+   }
+  },
+  {
+   "name": "file_eg1_is_nurb_reparam",
+   "upstream_ref": "TestFiles/pt_TestFiles/Fillet/eg1_srf1.smb:400 (SmSurfOfExtrusion record, read by SmBrep::ReadFromFile in upstream tests)",
+   "inputs": {
+    "is_nurb": {
+     "source": {
+      "test": "src",
+      "of": {
+       "src": "file",
+       "path": {
+        "$upstream_file": "Fillet/eg1_srf1.smb"
+       },
+       "line": 401,
+       "version": 38
+      }
+     },
+     "reparam": [
+      -1.0,
+      2.0,
+      3.0,
+      7.5
+     ]
+    },
+    "scale": 1.0
+   }
+  },
+  {
+   "name": "file_eg1_is_nurb_perturbed",
+   "upstream_ref": "TestFiles/pt_TestFiles/Fillet/eg1_srf1.smb:400 (SmSurfOfExtrusion record, read by SmBrep::ReadFromFile in upstream tests)",
+   "inputs": {
+    "is_nurb": {
+     "source": {
+      "test": "src",
+      "of": {
+       "src": "file",
+       "path": {
+        "$upstream_file": "Fillet/eg1_srf1.smb"
+       },
+       "line": 401,
+       "version": 38
+      }
+     },
+     "perturb": [
+      3,
+      1,
+      [
+       0.0,
+       1e-06,
+       0.0
+      ]
+     ]
+    },
+    "scale": 1.0
+   }
+  },
+  {
+   "name": "file_blade_state",
+   "upstream_ref": "TestFiles/pt_TestFiles/Fillet/blade_fillet_fails.smb:12143 (SmSurfOfExtrusion record, read by SmBrep::ReadFromFile in upstream tests)",
+   "inputs": {
+    "src": "file",
+    "path": {
+     "$upstream_file": "Fillet/blade_fillet_fails.smb"
+    },
+    "line": 12144,
+    "version": 38,
+    "op": "state"
+   }
+  },
+  {
+   "name": "file_blade_is_nurb",
+   "upstream_ref": "TestFiles/pt_TestFiles/Fillet/blade_fillet_fails.smb:12143 (SmSurfOfExtrusion record, read by SmBrep::ReadFromFile in upstream tests)",
+   "inputs": {
+    "is_nurb": {
+     "source": {
+      "test": "src",
+      "of": {
+       "src": "file",
+       "path": {
+        "$upstream_file": "Fillet/blade_fillet_fails.smb"
+       },
+       "line": 12144,
+       "version": 38
+      }
+     }
+    },
+    "scale": 1.0
+   }
+  },
+  {
+   "name": "file_blade_is_nurb_transposed",
+   "upstream_ref": "TestFiles/pt_TestFiles/Fillet/blade_fillet_fails.smb:12143 (SmSurfOfExtrusion record, read by SmBrep::ReadFromFile in upstream tests)",
+   "inputs": {
+    "is_nurb": {
+     "source": {
+      "test": "src",
+      "of": {
+       "src": "file",
+       "path": {
+        "$upstream_file": "Fillet/blade_fillet_fails.smb"
+       },
+       "line": 12144,
+       "version": 38
+      }
+     },
+     "transpose": true
+    },
+    "scale": 1.0
+   }
+  },
+  {
+   "name": "file_blade_is_nurb_reparam",
+   "upstream_ref": "TestFiles/pt_TestFiles/Fillet/blade_fillet_fails.smb:12143 (SmSurfOfExtrusion record, read by SmBrep::ReadFromFile in upstream tests)",
+   "inputs": {
+    "is_nurb": {
+     "source": {
+      "test": "src",
+      "of": {
+       "src": "file",
+       "path": {
+        "$upstream_file": "Fillet/blade_fillet_fails.smb"
+       },
+       "line": 12144,
+       "version": 38
+      }
+     },
+     "reparam": [
+      -1.0,
+      2.0,
+      3.0,
+      7.5
+     ]
+    },
+    "scale": 1.0
+   }
+  },
+  {
+   "name": "file_blade_is_nurb_perturbed",
+   "upstream_ref": "TestFiles/pt_TestFiles/Fillet/blade_fillet_fails.smb:12143 (SmSurfOfExtrusion record, read by SmBrep::ReadFromFile in upstream tests)",
+   "inputs": {
+    "is_nurb": {
+     "source": {
+      "test": "src",
+      "of": {
+       "src": "file",
+       "path": {
+        "$upstream_file": "Fillet/blade_fillet_fails.smb"
+       },
+       "line": 12144,
+       "version": 38
+      }
+     },
+     "perturb": [
+      3,
+      1,
+      [
+       0.0,
+       1e-06,
+       0.0
+      ]
+     ]
+    },
+    "scale": 1.0
+   }
+  },
+  {
+   "name": "file_eg1_plane_x_cut",
+   "upstream_ref": "TestFiles/pt_TestFiles/Fillet/eg1_srf1.smb:400 (SmSurfOfExtrusion record, read by SmBrep::ReadFromFile in upstream tests)",
+   "inputs": {
+    "src": "file",
+    "path": {
+     "$upstream_file": "Fillet/eg1_srf1.smb"
+    },
+    "line": 401,
+    "version": 38,
+    "op": "plane",
+    "plane": {
+     "kind": "bounded",
+     "o": [
+      -30.0,
+      0.0,
+      25.0
+     ],
+     "x": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "y": [
+      0.0,
+      0.0,
+      1.0
+     ],
+     "scale": [
+      1.0,
+      1.0
+     ],
+     "dom": [
+      -40.0,
+      -40.0,
+      40.0,
+      40.0
+     ]
+    }
+   }
+  },
+  {
+   "name": "file_eg1_plane_y_cut_infinite",
+   "upstream_ref": "TestFiles/pt_TestFiles/Fillet/eg1_srf1.smb:400 (SmSurfOfExtrusion record, read by SmBrep::ReadFromFile in upstream tests)",
+   "inputs": {
+    "src": "file",
+    "path": {
+     "$upstream_file": "Fillet/eg1_srf1.smb"
+    },
+    "line": 401,
+    "version": 38,
+    "op": "plane",
+    "plane": {
+     "kind": "normal",
+     "o": [
+      0.0,
+      10.0,
+      0.0
+     ],
+     "n": [
+      0.0,
+      1.0,
+      0.0
+     ]
+    }
+   }
+  },
+  {
+   "name": "file_eg1_plane_x_cut_clipped",
+   "upstream_ref": "TestFiles/pt_TestFiles/Fillet/eg1_srf1.smb:400 (SmSurfOfExtrusion record, read by SmBrep::ReadFromFile in upstream tests)",
+   "inputs": {
+    "src": "file",
+    "path": {
+     "$upstream_file": "Fillet/eg1_srf1.smb"
+    },
+    "line": 401,
+    "version": 38,
+    "op": "plane",
+    "plane": {
+     "kind": "bounded",
+     "o": [
+      20.0,
+      0.0,
+      0.0
+     ],
+     "x": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "y": [
+      0.0,
+      0.0,
+      1.0
+     ],
+     "scale": [
+      1.0,
+      1.0
+     ],
+     "dom": [
+      -40.0,
+      10.0,
+      40.0,
+      20.0
+     ]
+    }
+   }
+  },
+  {
+   "name": "file_eg1_plane_x_miss",
+   "upstream_ref": "TestFiles/pt_TestFiles/Fillet/eg1_srf1.smb:400 (SmSurfOfExtrusion record, read by SmBrep::ReadFromFile in upstream tests)",
+   "inputs": {
+    "src": "file",
+    "path": {
+     "$upstream_file": "Fillet/eg1_srf1.smb"
+    },
+    "line": 401,
+    "version": 38,
+    "op": "plane",
+    "plane": {
+     "kind": "bounded",
+     "o": [
+      100.0,
+      0.0,
+      0.0
+     ],
+     "x": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "y": [
+      0.0,
+      0.0,
+      1.0
+     ],
+     "scale": [
+      1.0,
+      1.0
+     ],
+     "dom": [
+      -40.0,
+      -40.0,
+      40.0,
+      40.0
+     ]
+    }
+   }
+  },
+  {
+   "name": "file_eg1_plane_above",
+   "upstream_ref": "TestFiles/pt_TestFiles/Fillet/eg1_srf1.smb:400 (SmSurfOfExtrusion record, read by SmBrep::ReadFromFile in upstream tests)",
+   "inputs": {
+    "src": "file",
+    "path": {
+     "$upstream_file": "Fillet/eg1_srf1.smb"
+    },
+    "line": 401,
+    "version": 38,
+    "op": "plane",
+    "plane": {
+     "kind": "normal",
+     "o": [
+      0.0,
+      0.0,
+      60.0
+     ],
+     "n": [
+      0.0,
+      0.0,
+      1.0
+     ]
+    }
+   }
+  },
+  {
+   "name": "file_eg1_plane_below",
+   "upstream_ref": "TestFiles/pt_TestFiles/Fillet/eg1_srf1.smb:400 (SmSurfOfExtrusion record, read by SmBrep::ReadFromFile in upstream tests)",
+   "inputs": {
+    "src": "file",
+    "path": {
+     "$upstream_file": "Fillet/eg1_srf1.smb"
+    },
+    "line": 401,
+    "version": 38,
+    "op": "plane",
+    "plane": {
+     "kind": "normal",
+     "o": [
+      0.0,
+      0.0,
+      -0.001
+     ],
+     "n": [
+      0.0,
+      0.0,
+      -1.0
+     ]
+    }
+   }
+  },
+  {
+   "name": "file_eg1_plane_inside",
+   "upstream_ref": "TestFiles/pt_TestFiles/Fillet/eg1_srf1.smb:400 (SmSurfOfExtrusion record, read by SmBrep::ReadFromFile in upstream tests)",
+   "inputs": {
+    "src": "file",
+    "path": {
+     "$upstream_file": "Fillet/eg1_srf1.smb"
+    },
+    "line": 401,
+    "version": 38,
+    "op": "plane",
+    "plane": {
+     "kind": "normal",
+     "o": [
+      0.0,
+      0.0,
+      25.0
+     ],
+     "n": [
+      0.0,
+      0.0,
+      1.0
+     ]
+    }
+   }
+  },
+  {
+   "name": "file_eg1_plane_top_snapped",
+   "upstream_ref": "TestFiles/pt_TestFiles/Fillet/eg1_srf1.smb:400 (SmSurfOfExtrusion record, read by SmBrep::ReadFromFile in upstream tests)",
+   "inputs": {
+    "src": "file",
+    "path": {
+     "$upstream_file": "Fillet/eg1_srf1.smb"
+    },
+    "line": 401,
+    "version": 38,
+    "op": "plane",
+    "plane": {
+     "kind": "normal",
+     "o": [
+      0.0,
+      0.0,
+      50.000000001
+     ],
+     "n": [
+      0.0,
+      0.0,
+      1.0
+     ]
+    }
+   }
+  },
+  {
+   "name": "file_eg1_plane_oblique",
+   "upstream_ref": "TestFiles/pt_TestFiles/Fillet/eg1_srf1.smb:400 (SmSurfOfExtrusion record, read by SmBrep::ReadFromFile in upstream tests)",
+   "inputs": {
+    "src": "file",
+    "path": {
+     "$upstream_file": "Fillet/eg1_srf1.smb"
+    },
+    "line": 401,
+    "version": 38,
+    "op": "plane",
+    "plane": {
+     "kind": "normal",
+     "o": [
+      0.0,
+      0.0,
+      25.0
+     ],
+     "n": [
+      0.0,
+      1.0,
+      1.0
+     ]
+    }
+   }
+  },
+  {
+   "name": "file_eg1_trim",
+   "upstream_ref": "TestFiles/pt_TestFiles/Fillet/eg1_srf1.smb:400 (SmSurfOfExtrusion record, read by SmBrep::ReadFromFile in upstream tests)",
+   "inputs": {
+    "src": "file",
+    "path": {
+     "$upstream_file": "Fillet/eg1_srf1.smb"
+    },
+    "line": 401,
+    "version": 38,
+    "op": "trim",
+    "dom": [
+     10.0,
+     5.0,
+     120.0,
+     30.0
+    ]
+   }
+  },
+  {
+   "name": "file_eg1_trim_same",
+   "upstream_ref": "TestFiles/pt_TestFiles/Fillet/eg1_srf1.smb:400 (SmSurfOfExtrusion record, read by SmBrep::ReadFromFile in upstream tests)",
+   "inputs": {
+    "src": "file",
+    "path": {
+     "$upstream_file": "Fillet/eg1_srf1.smb"
+    },
+    "line": 401,
+    "version": 38,
+    "op": "trim",
+    "dom": [
+     0.0,
+     0.0,
+     150.47392093036677,
+     50.0
+    ]
+   }
+  },
+  {
+   "name": "file_eg1_trim_outside",
+   "upstream_ref": "TestFiles/pt_TestFiles/Fillet/eg1_srf1.smb:400 (SmSurfOfExtrusion record, read by SmBrep::ReadFromFile in upstream tests)",
+   "inputs": {
+    "src": "file",
+    "path": {
+     "$upstream_file": "Fillet/eg1_srf1.smb"
+    },
+    "line": 401,
+    "version": 38,
+    "op": "trim",
+    "dom": [
+     -1.0,
+     0.0,
+     150.0,
+     50.0
+    ]
+   }
+  },
+  {
+   "name": "file_eg1_extrusion_with_blade",
+   "upstream_ref": "TestFiles/pt_TestFiles/Fillet/eg1_srf1.smb:400 (SmSurfOfExtrusion record, read by SmBrep::ReadFromFile in upstream tests)",
+   "inputs": {
+    "src": "file",
+    "path": {
+     "$upstream_file": "Fillet/eg1_srf1.smb"
+    },
+    "line": 401,
+    "version": 38,
+    "op": "extrusion",
+    "other": {
+     "src": "file",
+     "path": {
+      "$upstream_file": "Fillet/blade_fillet_fails.smb"
+     },
+     "line": 12144,
+     "version": 38
+    }
+   }
+  },
+  {
+   "name": "file_eg1_global_plane",
+   "upstream_ref": "TestFiles/pt_TestFiles/Fillet/eg1_srf1.smb:400 (SmSurfOfExtrusion record, read by SmBrep::ReadFromFile in upstream tests)",
+   "inputs": {
+    "src": "file",
+    "path": {
+     "$upstream_file": "Fillet/eg1_srf1.smb"
+    },
+    "line": 401,
+    "version": 38,
+    "op": "global",
+    "target": "plane",
+    "plane": {
+     "kind": "bounded",
+     "o": [
+      -30.0,
+      0.0,
+      25.0
+     ],
+     "x": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "y": [
+      0.0,
+      0.0,
+      1.0
+     ],
+     "scale": [
+      1.0,
+      1.0
+     ],
+     "dom": [
+      -40.0,
+      -40.0,
+      40.0,
+      40.0
+     ]
+    },
+    "as_surface": true
+   }
+  },
+  {
+   "name": "file_blade_plane_inside_param",
+   "upstream_ref": "TestFiles/pt_TestFiles/Fillet/blade_fillet_fails.smb:12143 (SmSurfOfExtrusion record, read by SmBrep::ReadFromFile in upstream tests)",
+   "inputs": {
+    "src": "file",
+    "path": {
+     "$upstream_file": "Fillet/blade_fillet_fails.smb"
+    },
+    "line": 12144,
+    "version": 38,
+    "op": "plane",
+    "plane": {
+     "kind": "normal",
+     "o": [
+      0.0,
+      0.0,
+      60.0
+     ],
+     "n": [
+      0.0,
+      0.0,
+      1.0
+     ]
+    }
+   }
+  },
+  {
+   "name": "file_blade_plane_outside",
+   "upstream_ref": "TestFiles/pt_TestFiles/Fillet/blade_fillet_fails.smb:12143 (SmSurfOfExtrusion record, read by SmBrep::ReadFromFile in upstream tests)",
+   "inputs": {
+    "src": "file",
+    "path": {
+     "$upstream_file": "Fillet/blade_fillet_fails.smb"
+    },
+    "line": 12144,
+    "version": 38,
+    "op": "plane",
+    "plane": {
+     "kind": "normal",
+     "o": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "n": [
+      0.0,
+      0.0,
+      1.0
+     ]
+    }
+   }
+  },
+  {
+   "name": "file_blade_plane_side",
+   "upstream_ref": "TestFiles/pt_TestFiles/Fillet/blade_fillet_fails.smb:12143 (SmSurfOfExtrusion record, read by SmBrep::ReadFromFile in upstream tests)",
+   "inputs": {
+    "src": "file",
+    "path": {
+     "$upstream_file": "Fillet/blade_fillet_fails.smb"
+    },
+    "line": 12144,
+    "version": 38,
+    "op": "plane",
+    "plane": {
+     "kind": "normal",
+     "o": [
+      110.0,
+      0.0,
+      0.0
+     ],
+     "n": [
+      1.0,
+      0.0,
+      0.0
+     ]
+    }
+   }
+  },
+  {
+   "name": "file_blade_trim",
+   "upstream_ref": "TestFiles/pt_TestFiles/Fillet/blade_fillet_fails.smb:12143 (SmSurfOfExtrusion record, read by SmBrep::ReadFromFile in upstream tests)",
+   "inputs": {
+    "src": "file",
+    "path": {
+     "$upstream_file": "Fillet/blade_fillet_fails.smb"
+    },
+    "line": 12144,
+    "version": 38,
+    "op": "trim",
+    "dom": [
+     0.25,
+     0.1,
+     0.75,
+     0.9
+    ]
+   }
+  },
+  {
+   "name": "circle_plane_through_seam",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "src": "built",
+    "surf": {
+     "gen": {
+      "kind": "circle",
+      "c": [
+       0.0,
+       0.0,
+       0.0
+      ],
+      "x": [
+       1.0,
+       0.0,
+       0.0
+      ],
+      "y": [
+       0.0,
+       1.0,
+       0.0
+      ],
+      "d": [
+       0.0,
+       360.0
+      ],
+      "r": 1.0
+     },
+     "build": {
+      "mode": "canonical",
+      "vec": [
+       0.0,
+       0.0,
+       2.0
+      ]
+     },
+     "oob": false,
+     "swap": false
+    },
+    "op": "plane",
+    "plane": {
+     "kind": "bounded",
+     "o": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "x": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "y": [
+      0.0,
+      0.0,
+      1.0
+     ],
+     "scale": [
+      1.0,
+      1.0
+     ],
+     "dom": [
+      -3.0,
+      -3.0,
+      3.0,
+      3.0
+     ]
+    }
+   }
+  },
+  {
+   "name": "circle_plane_through_seam_infinite",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "src": "built",
+    "surf": {
+     "gen": {
+      "kind": "circle",
+      "c": [
+       0.0,
+       0.0,
+       0.0
+      ],
+      "x": [
+       1.0,
+       0.0,
+       0.0
+      ],
+      "y": [
+       0.0,
+       1.0,
+       0.0
+      ],
+      "d": [
+       0.0,
+       360.0
+      ],
+      "r": 1.0
+     },
+     "build": {
+      "mode": "canonical",
+      "vec": [
+       0.0,
+       0.0,
+       2.0
+      ]
+     },
+     "oob": false,
+     "swap": false
+    },
+    "op": "plane",
+    "plane": {
+     "kind": "normal",
+     "o": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "n": [
+      0.0,
+      1.0,
+      0.0
+     ]
+    }
+   }
+  },
+  {
+   "name": "circle_plane_tangent",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "src": "built",
+    "surf": {
+     "gen": {
+      "kind": "circle",
+      "c": [
+       0.0,
+       0.0,
+       0.0
+      ],
+      "x": [
+       1.0,
+       0.0,
+       0.0
+      ],
+      "y": [
+       0.0,
+       1.0,
+       0.0
+      ],
+      "d": [
+       0.0,
+       360.0
+      ],
+      "r": 1.0
+     },
+     "build": {
+      "mode": "canonical",
+      "vec": [
+       0.0,
+       0.0,
+       2.0
+      ]
+     },
+     "oob": false,
+     "swap": false
+    },
+    "op": "plane",
+    "plane": {
+     "kind": "bounded",
+     "o": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "x": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "y": [
+      0.0,
+      0.0,
+      1.0
+     ],
+     "scale": [
+      1.0,
+      1.0
+     ],
+     "dom": [
+      -3.0,
+      -3.0,
+      3.0,
+      3.0
+     ]
+    }
+   }
+  },
+  {
+   "name": "circle_plane_tangent_below",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "src": "built",
+    "surf": {
+     "gen": {
+      "kind": "circle",
+      "c": [
+       0.0,
+       0.0,
+       0.0
+      ],
+      "x": [
+       1.0,
+       0.0,
+       0.0
+      ],
+      "y": [
+       0.0,
+       1.0,
+       0.0
+      ],
+      "d": [
+       0.0,
+       360.0
+      ],
+      "r": 1.0
+     },
+     "build": {
+      "mode": "canonical",
+      "vec": [
+       0.0,
+       0.0,
+       2.0
+      ]
+     },
+     "oob": false,
+     "swap": false
+    },
+    "op": "plane",
+    "plane": {
+     "kind": "normal",
+     "o": [
+      0.0,
+      -1.0,
+      0.0
+     ],
+     "n": [
+      0.0,
+      -1.0,
+      0.0
+     ]
+    }
+   }
+  },
+  {
+   "name": "circle_plane_near_tangent",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "src": "built",
+    "surf": {
+     "gen": {
+      "kind": "circle",
+      "c": [
+       0.0,
+       0.0,
+       0.0
+      ],
+      "x": [
+       1.0,
+       0.0,
+       0.0
+      ],
+      "y": [
+       0.0,
+       1.0,
+       0.0
+      ],
+      "d": [
+       0.0,
+       360.0
+      ],
+      "r": 1.0
+     },
+     "build": {
+      "mode": "canonical",
+      "vec": [
+       0.0,
+       0.0,
+       2.0
+      ]
+     },
+     "oob": false,
+     "swap": false
+    },
+    "op": "plane",
+    "plane": {
+     "kind": "normal",
+     "o": [
+      0.0,
+      0.999999999,
+      0.0
+     ],
+     "n": [
+      0.0,
+      1.0,
+      0.0
+     ]
+    }
+   }
+  },
+  {
+   "name": "circle_plane_miss",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "src": "built",
+    "surf": {
+     "gen": {
+      "kind": "circle",
+      "c": [
+       0.0,
+       0.0,
+       0.0
+      ],
+      "x": [
+       1.0,
+       0.0,
+       0.0
+      ],
+      "y": [
+       0.0,
+       1.0,
+       0.0
+      ],
+      "d": [
+       0.0,
+       360.0
+      ],
+      "r": 1.0
+     },
+     "build": {
+      "mode": "canonical",
+      "vec": [
+       0.0,
+       0.0,
+       2.0
+      ]
+     },
+     "oob": false,
+     "swap": false
+    },
+    "op": "plane",
+    "plane": {
+     "kind": "normal",
+     "o": [
+      0.0,
+      1.5,
+      0.0
+     ],
+     "n": [
+      0.0,
+      1.0,
+      0.0
+     ]
+    }
+   }
+  },
+  {
+   "name": "circle_plane_clipped_part",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "src": "built",
+    "surf": {
+     "gen": {
+      "kind": "circle",
+      "c": [
+       0.0,
+       0.0,
+       0.0
+      ],
+      "x": [
+       1.0,
+       0.0,
+       0.0
+      ],
+      "y": [
+       0.0,
+       1.0,
+       0.0
+      ],
+      "d": [
+       0.0,
+       360.0
+      ],
+      "r": 1.0
+     },
+     "build": {
+      "mode": "canonical",
+      "vec": [
+       0.0,
+       0.0,
+       2.0
+      ]
+     },
+     "oob": false,
+     "swap": false
+    },
+    "op": "plane",
+    "plane": {
+     "kind": "bounded",
+     "o": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "x": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "y": [
+      0.0,
+      0.0,
+      1.0
+     ],
+     "scale": [
+      1.0,
+      1.0
+     ],
+     "dom": [
+      0.0,
+      0.5,
+      3.0,
+      1.5
+     ]
+    }
+   }
+  },
+  {
+   "name": "circle_plane_scaled_domain",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "src": "built",
+    "surf": {
+     "gen": {
+      "kind": "circle",
+      "c": [
+       0.0,
+       0.0,
+       0.0
+      ],
+      "x": [
+       1.0,
+       0.0,
+       0.0
+      ],
+      "y": [
+       0.0,
+       1.0,
+       0.0
+      ],
+      "d": [
+       0.0,
+       360.0
+      ],
+      "r": 1.0
+     },
+     "build": {
+      "mode": "canonical",
+      "vec": [
+       0.0,
+       0.0,
+       2.0
+      ]
+     },
+     "oob": false,
+     "swap": false
+    },
+    "op": "plane",
+    "plane": {
+     "kind": "bounded",
+     "o": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "x": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "y": [
+      0.0,
+      0.0,
+      1.0
+     ],
+     "scale": [
+      2.0,
+      3.0
+     ],
+     "dom": [
+      -3.0,
+      0.1,
+      3.0,
+      0.6
+     ]
+    }
+   }
+  },
+  {
+   "name": "circle_plane_tol_zero",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "src": "built",
+    "surf": {
+     "gen": {
+      "kind": "circle",
+      "c": [
+       0.0,
+       0.0,
+       0.0
+      ],
+      "x": [
+       1.0,
+       0.0,
+       0.0
+      ],
+      "y": [
+       0.0,
+       1.0,
+       0.0
+      ],
+      "d": [
+       0.0,
+       360.0
+      ],
+      "r": 1.0
+     },
+     "build": {
+      "mode": "canonical",
+      "vec": [
+       0.0,
+       0.0,
+       2.0
+      ]
+     },
+     "oob": false,
+     "swap": false
+    },
+    "op": "plane",
+    "plane": {
+     "kind": "normal",
+     "o": [
+      0.0,
+      0.5,
+      0.0
+     ],
+     "n": [
+      0.0,
+      1.0,
+      0.0
+     ]
+    },
+    "tol": 0.0
+   }
+  },
+  {
+   "name": "circle_plane_tol_big",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "src": "built",
+    "surf": {
+     "gen": {
+      "kind": "circle",
+      "c": [
+       0.0,
+       0.0,
+       0.0
+      ],
+      "x": [
+       1.0,
+       0.0,
+       0.0
+      ],
+      "y": [
+       0.0,
+       1.0,
+       0.0
+      ],
+      "d": [
+       0.0,
+       360.0
+      ],
+      "r": 1.0
+     },
+     "build": {
+      "mode": "canonical",
+      "vec": [
+       0.0,
+       0.0,
+       2.0
+      ]
+     },
+     "oob": false,
+     "swap": false
+    },
+    "op": "plane",
+    "plane": {
+     "kind": "normal",
+     "o": [
+      0.0,
+      0.5,
+      0.0
+     ],
+     "n": [
+      0.0,
+      1.0,
+      0.0
+     ]
+    },
+    "tol": 0.25
+   }
+  },
+  {
+   "name": "circle_plane_domain_half",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "src": "built",
+    "surf": {
+     "gen": {
+      "kind": "circle",
+      "c": [
+       0.0,
+       0.0,
+       0.0
+      ],
+      "x": [
+       1.0,
+       0.0,
+       0.0
+      ],
+      "y": [
+       0.0,
+       1.0,
+       0.0
+      ],
+      "d": [
+       0.0,
+       360.0
+      ],
+      "r": 1.0
+     },
+     "build": {
+      "mode": "canonical",
+      "vec": [
+       0.0,
+       0.0,
+       2.0
+      ]
+     },
+     "oob": false,
+     "swap": false
+    },
+    "op": "plane",
+    "plane": {
+     "kind": "normal",
+     "o": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "n": [
+      0.0,
+      1.0,
+      0.0
+     ]
+    },
+    "dom": [
+     0.0,
+     0.0,
+     0.5,
+     1.0
+    ]
+   }
+  },
+  {
+   "name": "circle_plane_oblique",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "src": "built",
+    "surf": {
+     "gen": {
+      "kind": "circle",
+      "c": [
+       0.0,
+       0.0,
+       0.0
+      ],
+      "x": [
+       1.0,
+       0.0,
+       0.0
+      ],
+      "y": [
+       0.0,
+       1.0,
+       0.0
+      ],
+      "d": [
+       0.0,
+       360.0
+      ],
+      "r": 1.0
+     },
+     "build": {
+      "mode": "canonical",
+      "vec": [
+       0.0,
+       0.0,
+       2.0
+      ]
+     },
+     "oob": false,
+     "swap": false
+    },
+    "op": "plane",
+    "plane": {
+     "kind": "normal",
+     "o": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "n": [
+      1.0,
+      0.0,
+      1.0
+     ]
+    }
+   }
+  },
+  {
+   "name": "circle_plane_parallel_inside",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "src": "built",
+    "surf": {
+     "gen": {
+      "kind": "circle",
+      "c": [
+       0.0,
+       0.0,
+       0.0
+      ],
+      "x": [
+       1.0,
+       0.0,
+       0.0
+      ],
+      "y": [
+       0.0,
+       1.0,
+       0.0
+      ],
+      "d": [
+       0.0,
+       360.0
+      ],
+      "r": 1.0
+     },
+     "build": {
+      "mode": "canonical",
+      "vec": [
+       0.0,
+       0.0,
+       2.0
+      ]
+     },
+     "oob": false,
+     "swap": false
+    },
+    "op": "plane",
+    "plane": {
+     "kind": "normal",
+     "o": [
+      0.0,
+      0.0,
+      1.0
+     ],
+     "n": [
+      0.0,
+      0.0,
+      1.0
+     ]
+    }
+   }
+  },
+  {
+   "name": "circle_plane_parallel_outside",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "src": "built",
+    "surf": {
+     "gen": {
+      "kind": "circle",
+      "c": [
+       0.0,
+       0.0,
+       0.0
+      ],
+      "x": [
+       1.0,
+       0.0,
+       0.0
+      ],
+      "y": [
+       0.0,
+       1.0,
+       0.0
+      ],
+      "d": [
+       0.0,
+       360.0
+      ],
+      "r": 1.0
+     },
+     "build": {
+      "mode": "canonical",
+      "vec": [
+       0.0,
+       0.0,
+       2.0
+      ]
+     },
+     "oob": false,
+     "swap": false
+    },
+    "op": "plane",
+    "plane": {
+     "kind": "normal",
+     "o": [
+      0.0,
+      0.0,
+      2.5
+     ],
+     "n": [
+      0.0,
+      0.0,
+      -1.0
+     ]
+    }
+   }
+  },
+  {
+   "name": "circle_plane_parallel_base_tol_zero",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "src": "built",
+    "surf": {
+     "gen": {
+      "kind": "circle",
+      "c": [
+       0.0,
+       0.0,
+       0.0
+      ],
+      "x": [
+       1.0,
+       0.0,
+       0.0
+      ],
+      "y": [
+       0.0,
+       1.0,
+       0.0
+      ],
+      "d": [
+       0.0,
+       360.0
+      ],
+      "r": 1.0
+     },
+     "build": {
+      "mode": "canonical",
+      "vec": [
+       0.0,
+       0.0,
+       2.0
+      ]
+     },
+     "oob": false,
+     "swap": false
+    },
+    "op": "plane",
+    "plane": {
+     "kind": "normal",
+     "o": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "n": [
+      0.0,
+      0.0,
+      1.0
+     ]
+    },
+    "tol": 0.0
+   }
+  },
+  {
+   "name": "arc_plane_two_hits",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "src": "built",
+    "surf": {
+     "gen": {
+      "kind": "circle",
+      "c": [
+       0.0,
+       0.0,
+       0.0
+      ],
+      "x": [
+       1.0,
+       0.0,
+       0.0
+      ],
+      "y": [
+       0.0,
+       1.0,
+       0.0
+      ],
+      "d": [
+       30.0,
+       150.0
+      ],
+      "r": 1.0
+     },
+     "build": {
+      "mode": "canonical",
+      "vec": [
+       0.0,
+       0.0,
+       1.0
+      ]
+     },
+     "oob": false,
+     "swap": false
+    },
+    "op": "plane",
+    "plane": {
+     "kind": "normal",
+     "o": [
+      0.0,
+      0.7,
+      0.0
+     ],
+     "n": [
+      0.0,
+      1.0,
+      0.0
+     ]
+    }
+   }
+  },
+  {
+   "name": "arc_plane_end_hit",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "src": "built",
+    "surf": {
+     "gen": {
+      "kind": "circle",
+      "c": [
+       0.0,
+       0.0,
+       0.0
+      ],
+      "x": [
+       1.0,
+       0.0,
+       0.0
+      ],
+      "y": [
+       0.0,
+       1.0,
+       0.0
+      ],
+      "d": [
+       30.0,
+       150.0
+      ],
+      "r": 1.0
+     },
+     "build": {
+      "mode": "canonical",
+      "vec": [
+       0.0,
+       0.0,
+       1.0
+      ]
+     },
+     "oob": false,
+     "swap": false
+    },
+    "op": "plane",
+    "plane": {
+     "kind": "normal",
+     "o": [
+      0.0,
+      0.5,
+      0.0
+     ],
+     "n": [
+      0.0,
+      1.0,
+      0.0
+     ]
+    }
+   }
+  },
+  {
+   "name": "independent_plane_parallel_outside",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "src": "built",
+    "surf": {
+     "gen": {
+      "kind": "circle",
+      "c": [
+       0.0,
+       0.0,
+       0.0
+      ],
+      "x": [
+       1.0,
+       0.0,
+       0.0
+      ],
+      "y": [
+       0.0,
+       1.0,
+       0.0
+      ],
+      "d": [
+       0.0,
+       360.0
+      ],
+      "r": 1.0
+     },
+     "build": {
+      "mode": "canonical",
+      "vec": [
+       0.0,
+       1.0,
+       1.0
+      ]
+     },
+     "oob": false,
+     "swap": false
+    },
+    "op": "plane",
+    "plane": {
+     "kind": "normal",
+     "o": [
+      0.0,
+      0.0,
+      5.0
+     ],
+     "n": [
+      0.0,
+      0.0,
+      1.0
+     ]
+    }
+   }
+  },
+  {
+   "name": "independent_plane_parallel_inside",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "src": "built",
+    "surf": {
+     "gen": {
+      "kind": "circle",
+      "c": [
+       0.0,
+       0.0,
+       0.0
+      ],
+      "x": [
+       1.0,
+       0.0,
+       0.0
+      ],
+      "y": [
+       0.0,
+       1.0,
+       0.0
+      ],
+      "d": [
+       0.0,
+       360.0
+      ],
+      "r": 1.0
+     },
+     "build": {
+      "mode": "canonical",
+      "vec": [
+       0.0,
+       1.0,
+       1.0
+      ]
+     },
+     "oob": false,
+     "swap": false
+    },
+    "op": "plane",
+    "plane": {
+     "kind": "normal",
+     "o": [
+      0.0,
+      0.0,
+      0.5
+     ],
+     "n": [
+      0.0,
+      0.0,
+      1.0
+     ]
+    }
+   }
+  },
+  {
+   "name": "independent_plane_parallel_extrusion",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "src": "built",
+    "surf": {
+     "gen": {
+      "kind": "circle",
+      "c": [
+       0.0,
+       0.0,
+       0.0
+      ],
+      "x": [
+       1.0,
+       0.0,
+       0.0
+      ],
+      "y": [
+       0.0,
+       1.0,
+       0.0
+      ],
+      "d": [
+       0.0,
+       360.0
+      ],
+      "r": 1.0
+     },
+     "build": {
+      "mode": "canonical",
+      "vec": [
+       0.0,
+       1.0,
+       1.0
+      ]
+     },
+     "oob": false,
+     "swap": false
+    },
+    "op": "plane",
+    "plane": {
+     "kind": "normal",
+     "o": [
+      0.3,
+      0.0,
+      0.0
+     ],
+     "n": [
+      1.0,
+      0.0,
+      0.0
+     ]
+    }
+   }
+  },
+  {
+   "name": "line_plane_containing",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "src": "built",
+    "surf": {
+     "gen": {
+      "kind": "line",
+      "a": [
+       0.0,
+       0.0,
+       0.0
+      ],
+      "b": [
+       1.0,
+       0.0,
+       0.0
+      ]
+     },
+     "build": {
+      "mode": "canonical",
+      "vec": [
+       0.0,
+       0.0,
+       1.0
+      ]
+     },
+     "oob": false,
+     "swap": false
+    },
+    "op": "plane",
+    "plane": {
+     "kind": "normal",
+     "o": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "n": [
+      0.0,
+      1.0,
+      0.0
+     ]
+    }
+   }
+  },
+  {
+   "name": "line_plane_crossing",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "src": "built",
+    "surf": {
+     "gen": {
+      "kind": "line",
+      "a": [
+       0.0,
+       0.0,
+       0.0
+      ],
+      "b": [
+       1.0,
+       0.0,
+       0.0
+      ]
+     },
+     "build": {
+      "mode": "canonical",
+      "vec": [
+       0.0,
+       0.0,
+       1.0
+      ]
+     },
+     "oob": false,
+     "swap": false
+    },
+    "op": "plane",
+    "plane": {
+     "kind": "normal",
+     "o": [
+      0.5,
+      0.0,
+      0.0
+     ],
+     "n": [
+      1.0,
+      0.0,
+      0.0
+     ]
+    }
+   }
+  },
+  {
+   "name": "line_plane_parallel_offset",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "src": "built",
+    "surf": {
+     "gen": {
+      "kind": "line",
+      "a": [
+       0.0,
+       0.0,
+       0.0
+      ],
+      "b": [
+       1.0,
+       0.0,
+       0.0
+      ]
+     },
+     "build": {
+      "mode": "canonical",
+      "vec": [
+       0.0,
+       0.0,
+       1.0
+      ]
+     },
+     "oob": false,
+     "swap": false
+    },
+    "op": "plane",
+    "plane": {
+     "kind": "normal",
+     "o": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "n": [
+      0.0,
+      1.0,
+      0.0
+     ]
+    }
+   }
+  },
+  {
+   "name": "coplanar_plane_crossing",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "src": "built",
+    "surf": {
+     "gen": {
+      "kind": "circle",
+      "c": [
+       0.0,
+       0.0,
+       0.0
+      ],
+      "x": [
+       1.0,
+       0.0,
+       0.0
+      ],
+      "y": [
+       0.0,
+       0.0,
+       1.0
+      ],
+      "d": [
+       0.0,
+       360.0
+      ],
+      "r": 1.0
+     },
+     "build": {
+      "mode": "canonical",
+      "vec": [
+       1.0,
+       0.0,
+       0.0
+      ]
+     },
+     "oob": false,
+     "swap": false
+    },
+    "op": "plane",
+    "plane": {
+     "kind": "normal",
+     "o": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "n": [
+      0.0,
+      0.0,
+      1.0
+     ]
+    }
+   }
+  },
+  {
+   "name": "coplanar_plane_parallel",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "src": "built",
+    "surf": {
+     "gen": {
+      "kind": "circle",
+      "c": [
+       0.0,
+       0.0,
+       0.0
+      ],
+      "x": [
+       1.0,
+       0.0,
+       0.0
+      ],
+      "y": [
+       0.0,
+       0.0,
+       1.0
+      ],
+      "d": [
+       0.0,
+       360.0
+      ],
+      "r": 1.0
+     },
+     "build": {
+      "mode": "canonical",
+      "vec": [
+       1.0,
+       0.0,
+       0.0
+      ]
+     },
+     "oob": false,
+     "swap": false
+    },
+    "op": "plane",
+    "plane": {
+     "kind": "normal",
+     "o": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "n": [
+      0.0,
+      1.0,
+      0.0
+     ]
+    }
+   }
+  },
+  {
+   "name": "cylinder_parallel_axis",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "src": "built",
+    "surf": {
+     "gen": {
+      "kind": "circle",
+      "c": [
+       0.0,
+       0.0,
+       0.0
+      ],
+      "x": [
+       1.0,
+       0.0,
+       0.0
+      ],
+      "y": [
+       0.0,
+       1.0,
+       0.0
+      ],
+      "d": [
+       0.0,
+       360.0
+      ],
+      "r": 1.0
+     },
+     "build": {
+      "mode": "canonical",
+      "vec": [
+       0.0,
+       0.0,
+       2.0
+      ]
+     },
+     "oob": false,
+     "swap": false
+    },
+    "op": "cylinder",
+    "cone": {
+     "cone": {
+      "kind": "canonical",
+      "bot": 0.5,
+      "top": 0.5,
+      "height": 1.0
+     },
+     "o": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "x": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "y": [
+      0.0,
+      1.0,
+      0.0
+     ]
+    }
+   }
+  },
+  {
+   "name": "cylinder_tilted_axis",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "src": "built",
+    "surf": {
+     "gen": {
+      "kind": "circle",
+      "c": [
+       0.0,
+       0.0,
+       0.0
+      ],
+      "x": [
+       1.0,
+       0.0,
+       0.0
+      ],
+      "y": [
+       0.0,
+       1.0,
+       0.0
+      ],
+      "d": [
+       0.0,
+       360.0
+      ],
+      "r": 1.0
+     },
+     "build": {
+      "mode": "canonical",
+      "vec": [
+       0.0,
+       0.0,
+       2.0
+      ]
+     },
+     "oob": false,
+     "swap": false
+    },
+    "op": "cylinder",
+    "cone": {
+     "cone": {
+      "kind": "canonical",
+      "bot": 0.5,
+      "top": 0.5,
+      "height": 1.0
+     },
+     "o": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "x": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "y": [
+      0.0,
+      0.0,
+      1.0
+     ]
+    }
+   }
+  },
+  {
+   "name": "cylinder_true_cone",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "src": "built",
+    "surf": {
+     "gen": {
+      "kind": "circle",
+      "c": [
+       0.0,
+       0.0,
+       0.0
+      ],
+      "x": [
+       1.0,
+       0.0,
+       0.0
+      ],
+      "y": [
+       0.0,
+       1.0,
+       0.0
+      ],
+      "d": [
+       0.0,
+       360.0
+      ],
+      "r": 1.0
+     },
+     "build": {
+      "mode": "canonical",
+      "vec": [
+       0.0,
+       0.0,
+       2.0
+      ]
+     },
+     "oob": false,
+     "swap": false
+    },
+    "op": "cylinder",
+    "cone": {
+     "cone": {
+      "kind": "canonical",
+      "bot": 0.5,
+      "top": 0.7,
+      "height": 1.0
+     },
+     "o": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "x": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "y": [
+      0.0,
+      1.0,
+      0.0
+     ]
+    }
+   }
+  },
+  {
+   "name": "cylinder_radii_within_tol",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "src": "built",
+    "surf": {
+     "gen": {
+      "kind": "circle",
+      "c": [
+       0.0,
+       0.0,
+       0.0
+      ],
+      "x": [
+       1.0,
+       0.0,
+       0.0
+      ],
+      "y": [
+       0.0,
+       1.0,
+       0.0
+      ],
+      "d": [
+       0.0,
+       360.0
+      ],
+      "r": 1.0
+     },
+     "build": {
+      "mode": "canonical",
+      "vec": [
+       0.0,
+       0.0,
+       2.0
+      ]
+     },
+     "oob": false,
+     "swap": false
+    },
+    "op": "cylinder",
+    "cone": {
+     "cone": {
+      "kind": "canonical",
+      "bot": 0.5,
+      "top": 0.5,
+      "height": 1.0
+     },
+     "o": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "x": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "y": [
+      0.0,
+      0.0,
+      1.0
+     ]
+    },
+    "tol": 0.001
+   }
+  },
+  {
+   "name": "cylinder_semi_zero_tilted",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "src": "built",
+    "surf": {
+     "gen": {
+      "kind": "circle",
+      "c": [
+       0.0,
+       0.0,
+       0.0
+      ],
+      "x": [
+       1.0,
+       0.0,
+       0.0
+      ],
+      "y": [
+       0.0,
+       1.0,
+       0.0
+      ],
+      "d": [
+       0.0,
+       360.0
+      ],
+      "r": 1.0
+     },
+     "build": {
+      "mode": "canonical",
+      "vec": [
+       0.0,
+       0.0,
+       2.0
+      ]
+     },
+     "oob": false,
+     "swap": false
+    },
+    "op": "cylinder",
+    "cone": {
+     "cone": {
+      "kind": "semi",
+      "bot": 0.5,
+      "semi": 0.0,
+      "height": 2.0
+     },
+     "o": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "x": [
+      0.0,
+      0.0,
+      1.0
+     ],
+     "y": [
+      0.0,
+      1.0,
+      0.0
+     ]
+    }
+   }
+  },
+  {
+   "name": "global_cone_tilted",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "src": "built",
+    "surf": {
+     "gen": {
+      "kind": "circle",
+      "c": [
+       0.0,
+       0.0,
+       0.0
+      ],
+      "x": [
+       1.0,
+       0.0,
+       0.0
+      ],
+      "y": [
+       0.0,
+       1.0,
+       0.0
+      ],
+      "d": [
+       0.0,
+       360.0
+      ],
+      "r": 1.0
+     },
+     "build": {
+      "mode": "canonical",
+      "vec": [
+       0.0,
+       0.0,
+       2.0
+      ]
+     },
+     "oob": false,
+     "swap": false
+    },
+    "op": "global",
+    "target": "cone",
+    "cone": {
+     "cone": {
+      "kind": "canonical",
+      "bot": 0.5,
+      "top": 0.5,
+      "height": 1.0
+     },
+     "o": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "x": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "y": [
+      0.0,
+      0.0,
+      1.0
+     ]
+    }
+   }
+  },
+  {
+   "name": "global_cylinder_class",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "src": "built",
+    "surf": {
+     "gen": {
+      "kind": "circle",
+      "c": [
+       0.0,
+       0.0,
+       0.0
+      ],
+      "x": [
+       1.0,
+       0.0,
+       0.0
+      ],
+      "y": [
+       0.0,
+       1.0,
+       0.0
+      ],
+      "d": [
+       0.0,
+       360.0
+      ],
+      "r": 1.0
+     },
+     "build": {
+      "mode": "canonical",
+      "vec": [
+       0.0,
+       0.0,
+       2.0
+      ]
+     },
+     "oob": false,
+     "swap": false
+    },
+    "op": "global",
+    "target": "cone",
+    "cone": {
+     "cone": {
+      "kind": "cylinder",
+      "radius": 0.5
+     },
+     "o": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "x": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "y": [
+      0.0,
+      0.0,
+      1.0
+     ]
+    }
+   }
+  },
+  {
+   "name": "extrusion_parallel",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "src": "built",
+    "surf": {
+     "gen": {
+      "kind": "circle",
+      "c": [
+       0.0,
+       0.0,
+       0.0
+      ],
+      "x": [
+       1.0,
+       0.0,
+       0.0
+      ],
+      "y": [
+       0.0,
+       1.0,
+       0.0
+      ],
+      "d": [
+       0.0,
+       360.0
+      ],
+      "r": 1.0
+     },
+     "build": {
+      "mode": "canonical",
+      "vec": [
+       0.0,
+       0.0,
+       2.0
+      ]
+     },
+     "oob": false,
+     "swap": false
+    },
+    "op": "extrusion",
+    "other": {
+     "src": "built",
+     "surf": {
+      "gen": {
+       "kind": "line",
+       "a": [
+        -2.0,
+        0.5,
+        0.0
+       ],
+       "b": [
+        2.0,
+        0.5,
+        0.0
+       ]
+      },
+      "build": {
+       "mode": "canonical",
+       "vec": [
+        0.0,
+        0.0,
+        3.0
+       ]
+      },
+      "oob": false,
+      "swap": false
+     }
+    }
+   }
+  },
+  {
+   "name": "extrusion_skew",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "src": "built",
+    "surf": {
+     "gen": {
+      "kind": "circle",
+      "c": [
+       0.0,
+       0.0,
+       0.0
+      ],
+      "x": [
+       1.0,
+       0.0,
+       0.0
+      ],
+      "y": [
+       0.0,
+       1.0,
+       0.0
+      ],
+      "d": [
+       0.0,
+       360.0
+      ],
+      "r": 1.0
+     },
+     "build": {
+      "mode": "canonical",
+      "vec": [
+       0.0,
+       0.0,
+       2.0
+      ]
+     },
+     "oob": false,
+     "swap": false
+    },
+    "op": "extrusion",
+    "other": {
+     "src": "built",
+     "surf": {
+      "gen": {
+       "kind": "line",
+       "a": [
+        -2.0,
+        0.5,
+        0.0
+       ],
+       "b": [
+        2.0,
+        0.5,
+        0.0
+       ]
+      },
+      "build": {
+       "mode": "canonical",
+       "vec": [
+        0.0,
+        1.0,
+        3.0
+       ]
+      },
+      "oob": false,
+      "swap": false
+     }
+    }
+   }
+  },
+  {
+   "name": "global_extrusion_skew",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "src": "built",
+    "surf": {
+     "gen": {
+      "kind": "circle",
+      "c": [
+       0.0,
+       0.0,
+       0.0
+      ],
+      "x": [
+       1.0,
+       0.0,
+       0.0
+      ],
+      "y": [
+       0.0,
+       1.0,
+       0.0
+      ],
+      "d": [
+       0.0,
+       360.0
+      ],
+      "r": 1.0
+     },
+     "build": {
+      "mode": "canonical",
+      "vec": [
+       0.0,
+       0.0,
+       2.0
+      ]
+     },
+     "oob": false,
+     "swap": false
+    },
+    "op": "global",
+    "target": "extrusion",
+    "other": {
+     "src": "built",
+     "surf": {
+      "gen": {
+       "kind": "line",
+       "a": [
+        -2.0,
+        0.5,
+        0.0
+       ],
+       "b": [
+        2.0,
+        0.5,
+        0.0
+       ]
+      },
+      "build": {
+       "mode": "canonical",
+       "vec": [
+        0.0,
+        1.0,
+        3.0
+       ]
+      },
+      "oob": false,
+      "swap": false
+     }
+    }
+   }
+  },
+  {
+   "name": "global_plane_seam",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "src": "built",
+    "surf": {
+     "gen": {
+      "kind": "circle",
+      "c": [
+       0.0,
+       0.0,
+       0.0
+      ],
+      "x": [
+       1.0,
+       0.0,
+       0.0
+      ],
+      "y": [
+       0.0,
+       1.0,
+       0.0
+      ],
+      "d": [
+       0.0,
+       360.0
+      ],
+      "r": 1.0
+     },
+     "build": {
+      "mode": "canonical",
+      "vec": [
+       0.0,
+       0.0,
+       2.0
+      ]
+     },
+     "oob": false,
+     "swap": false
+    },
+    "op": "global",
+    "target": "plane",
+    "plane": {
+     "kind": "normal",
+     "o": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "n": [
+      0.0,
+      1.0,
+      0.0
+     ]
+    }
+   }
+  },
+  {
+   "name": "global_plane_seam_as_surface",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "src": "built",
+    "surf": {
+     "gen": {
+      "kind": "circle",
+      "c": [
+       0.0,
+       0.0,
+       0.0
+      ],
+      "x": [
+       1.0,
+       0.0,
+       0.0
+      ],
+      "y": [
+       0.0,
+       1.0,
+       0.0
+      ],
+      "d": [
+       0.0,
+       360.0
+      ],
+      "r": 1.0
+     },
+     "build": {
+      "mode": "canonical",
+      "vec": [
+       0.0,
+       0.0,
+       2.0
+      ]
+     },
+     "oob": false,
+     "swap": false
+    },
+    "op": "global",
+    "target": "plane",
+    "plane": {
+     "kind": "normal",
+     "o": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "n": [
+      0.0,
+      1.0,
+      0.0
+     ]
+    },
+    "as_surface": true
+   }
+  },
+  {
+   "name": "global_plane_oblique",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "src": "built",
+    "surf": {
+     "gen": {
+      "kind": "circle",
+      "c": [
+       0.0,
+       0.0,
+       0.0
+      ],
+      "x": [
+       1.0,
+       0.0,
+       0.0
+      ],
+      "y": [
+       0.0,
+       1.0,
+       0.0
+      ],
+      "d": [
+       0.0,
+       360.0
+      ],
+      "r": 1.0
+     },
+     "build": {
+      "mode": "canonical",
+      "vec": [
+       0.0,
+       0.0,
+       2.0
+      ]
+     },
+     "oob": false,
+     "swap": false
+    },
+    "op": "global",
+    "target": "plane",
+    "plane": {
+     "kind": "normal",
+     "o": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "n": [
+      1.0,
+      0.0,
+      1.0
+     ]
+    }
+   }
+  },
+  {
+   "name": "global_bspline",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "src": "built",
+    "surf": {
+     "gen": {
+      "kind": "circle",
+      "c": [
+       0.0,
+       0.0,
+       0.0
+      ],
+      "x": [
+       1.0,
+       0.0,
+       0.0
+      ],
+      "y": [
+       0.0,
+       1.0,
+       0.0
+      ],
+      "d": [
+       0.0,
+       360.0
+      ],
+      "r": 1.0
+     },
+     "build": {
+      "mode": "canonical",
+      "vec": [
+       0.0,
+       0.0,
+       2.0
+      ]
+     },
+     "oob": false,
+     "swap": false
+    },
+    "op": "global",
+    "target": "bspline",
+    "other": {
+     "src": "built",
+     "surf": {
+      "gen": {
+       "kind": "line",
+       "a": [
+        -2.0,
+        0.5,
+        0.0
+       ],
+       "b": [
+        2.0,
+        0.5,
+        0.0
+       ]
+      },
+      "build": {
+       "mode": "canonical",
+       "vec": [
+        0.0,
+        1.0,
+        3.0
+       ]
+      },
+      "oob": false,
+      "swap": false
+     }
+    }
+   }
+  },
+  {
+   "name": "trim_inside",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "src": "built",
+    "surf": {
+     "gen": {
+      "kind": "circle",
+      "c": [
+       0.0,
+       0.0,
+       0.0
+      ],
+      "x": [
+       1.0,
+       0.0,
+       0.0
+      ],
+      "y": [
+       0.0,
+       1.0,
+       0.0
+      ],
+      "d": [
+       0.0,
+       360.0
+      ],
+      "r": 1.0
+     },
+     "build": {
+      "mode": "canonical",
+      "vec": [
+       0.0,
+       0.0,
+       2.0
+      ]
+     },
+     "oob": false,
+     "swap": false
+    },
+    "op": "trim",
+    "dom": [
+     0.1,
+     0.2,
+     0.6,
+     0.9
+    ]
+   }
+  },
+  {
+   "name": "trim_same",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "src": "built",
+    "surf": {
+     "gen": {
+      "kind": "circle",
+      "c": [
+       0.0,
+       0.0,
+       0.0
+      ],
+      "x": [
+       1.0,
+       0.0,
+       0.0
+      ],
+      "y": [
+       0.0,
+       1.0,
+       0.0
+      ],
+      "d": [
+       0.0,
+       360.0
+      ],
+      "r": 1.0
+     },
+     "build": {
+      "mode": "canonical",
+      "vec": [
+       0.0,
+       0.0,
+       2.0
+      ]
+     },
+     "oob": false,
+     "swap": false
+    },
+    "op": "trim",
+    "dom": [
+     0.0,
+     0.0,
+     1.0,
+     1.0
+    ]
+   }
+  },
+  {
+   "name": "trim_within_param_tol",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "src": "built",
+    "surf": {
+     "gen": {
+      "kind": "circle",
+      "c": [
+       0.0,
+       0.0,
+       0.0
+      ],
+      "x": [
+       1.0,
+       0.0,
+       0.0
+      ],
+      "y": [
+       0.0,
+       1.0,
+       0.0
+      ],
+      "d": [
+       0.0,
+       360.0
+      ],
+      "r": 1.0
+     },
+     "build": {
+      "mode": "canonical",
+      "vec": [
+       0.0,
+       0.0,
+       2.0
+      ]
+     },
+     "oob": false,
+     "swap": false
+    },
+    "op": "trim",
+    "dom": [
+     -1e-09,
+     0.0,
+     1.0,
+     1.000000001
+    ]
+   }
+  },
+  {
+   "name": "trim_outside",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "src": "built",
+    "surf": {
+     "gen": {
+      "kind": "circle",
+      "c": [
+       0.0,
+       0.0,
+       0.0
+      ],
+      "x": [
+       1.0,
+       0.0,
+       0.0
+      ],
+      "y": [
+       0.0,
+       1.0,
+       0.0
+      ],
+      "d": [
+       0.0,
+       360.0
+      ],
+      "r": 1.0
+     },
+     "build": {
+      "mode": "canonical",
+      "vec": [
+       0.0,
+       0.0,
+       2.0
+      ]
+     },
+     "oob": false,
+     "swap": false
+    },
+    "op": "trim",
+    "dom": [
+     -0.1,
+     0.0,
+     1.0,
+     1.0
+    ]
+   }
+  },
+  {
+   "name": "is_nurb_bilinear",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "is_nurb": {
+     "source": {
+      "test": "raw",
+      "nurb": {
+       "n": 1,
+       "m": 1,
+       "p": 1,
+       "q": 1,
+       "cpts": [
+        [
+         0,
+         0,
+         0,
+         -1.7976931348623157e+308
+        ],
+        [
+         0,
+         1,
+         0,
+         -1.7976931348623157e+308
+        ],
+        [
+         1,
+         0,
+         0,
+         -1.7976931348623157e+308
+        ],
+        [
+         1,
+         1,
+         1,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "u": [
+        0,
+        0,
+        1,
+        1
+       ],
+       "v": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     }
+    },
+    "scale": 1.0
+   }
+  },
+  {
+   "name": "is_nurb_biquadratic",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "is_nurb": {
+     "source": {
+      "test": "raw",
+      "nurb": {
+       "n": 2,
+       "m": 2,
+       "p": 2,
+       "q": 2,
+       "cpts": [
+        [
+         0,
+         0,
+         0,
+         -1.7976931348623157e+308
+        ],
+        [
+         0,
+         1,
+         0.5,
+         -1.7976931348623157e+308
+        ],
+        [
+         0,
+         2,
+         0,
+         -1.7976931348623157e+308
+        ],
+        [
+         1,
+         0,
+         0.2,
+         -1.7976931348623157e+308
+        ],
+        [
+         1,
+         1,
+         0.9,
+         -1.7976931348623157e+308
+        ],
+        [
+         1,
+         2,
+         0.1,
+         -1.7976931348623157e+308
+        ],
+        [
+         2,
+         0,
+         0,
+         -1.7976931348623157e+308
+        ],
+        [
+         2,
+         1,
+         0.3,
+         -1.7976931348623157e+308
+        ],
+        [
+         2,
+         2,
+         0,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "u": [
+        0,
+        0,
+        0,
+        1,
+        1,
+        1
+       ],
+       "v": [
+        0,
+        0,
+        0,
+        1,
+        1,
+        1
+       ]
+      }
+     }
+    },
+    "scale": 1.0
+   }
+  },
+  {
+   "name": "is_nurb_linear_three_points",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "is_nurb": {
+     "source": {
+      "test": "raw",
+      "nurb": {
+       "n": 2,
+       "m": 2,
+       "p": 1,
+       "q": 2,
+       "cpts": [
+        [
+         0,
+         0,
+         0,
+         -1.7976931348623157e+308
+        ],
+        [
+         0,
+         1,
+         0.5,
+         -1.7976931348623157e+308
+        ],
+        [
+         0,
+         2,
+         0,
+         -1.7976931348623157e+308
+        ],
+        [
+         1,
+         0,
+         0.2,
+         -1.7976931348623157e+308
+        ],
+        [
+         1,
+         1,
+         0.9,
+         -1.7976931348623157e+308
+        ],
+        [
+         1,
+         2,
+         0.1,
+         -1.7976931348623157e+308
+        ],
+        [
+         2,
+         0,
+         0,
+         -1.7976931348623157e+308
+        ],
+        [
+         2,
+         1,
+         0.3,
+         -1.7976931348623157e+308
+        ],
+        [
+         2,
+         2,
+         0,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "u": [
+        0,
+        0,
+        0.5,
+        1,
+        1
+       ],
+       "v": [
+        0,
+        0,
+        0,
+        1,
+        1,
+        1
+       ]
+      }
+     }
+    },
+    "scale": 1.0
+   }
+  },
+  {
+   "name": "is_nurb_extrusion_u_linear",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "is_nurb": {
+     "source": {
+      "test": "raw",
+      "nurb": {
+       "n": 1,
+       "m": 2,
+       "p": 1,
+       "q": 2,
+       "cpts": [
+        [
+         0,
+         0,
+         0,
+         -1.7976931348623157e+308
+        ],
+        [
+         1,
+         1,
+         0,
+         -1.7976931348623157e+308
+        ],
+        [
+         2,
+         0,
+         0,
+         -1.7976931348623157e+308
+        ],
+        [
+         0,
+         0,
+         1.5,
+         -1.7976931348623157e+308
+        ],
+        [
+         1,
+         1,
+         1.5,
+         -1.7976931348623157e+308
+        ],
+        [
+         2,
+         0,
+         1.5,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "u": [
+        0,
+        0,
+        1,
+        1
+       ],
+       "v": [
+        0,
+        0,
+        0,
+        1,
+        1,
+        1
+       ]
+      }
+     }
+    },
+    "scale": 1.0
+   }
+  },
+  {
+   "name": "is_nurb_extrusion_u_linear_shifted_domain",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "is_nurb": {
+     "source": {
+      "test": "raw",
+      "nurb": {
+       "n": 1,
+       "m": 2,
+       "p": 1,
+       "q": 2,
+       "cpts": [
+        [
+         0,
+         0,
+         0,
+         -1.7976931348623157e+308
+        ],
+        [
+         1,
+         1,
+         0,
+         -1.7976931348623157e+308
+        ],
+        [
+         2,
+         0,
+         0,
+         -1.7976931348623157e+308
+        ],
+        [
+         0,
+         0,
+         1.5,
+         -1.7976931348623157e+308
+        ],
+        [
+         1,
+         1,
+         1.5,
+         -1.7976931348623157e+308
+        ],
+        [
+         2,
+         0,
+         1.5,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "u": [
+        2,
+        2,
+        5,
+        5
+       ],
+       "v": [
+        -1,
+        -1,
+        -1,
+        3,
+        3,
+        3
+       ]
+      }
+     }
+    },
+    "scale": 1.0
+   }
+  },
+  {
+   "name": "is_nurb_extrusion_v_linear",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "is_nurb": {
+     "source": {
+      "test": "raw",
+      "nurb": {
+       "n": 2,
+       "m": 1,
+       "p": 2,
+       "q": 1,
+       "cpts": [
+        [
+         0,
+         0,
+         0,
+         -1.7976931348623157e+308
+        ],
+        [
+         0.5,
+         0,
+         1.5,
+         -1.7976931348623157e+308
+        ],
+        [
+         1,
+         1,
+         0,
+         -1.7976931348623157e+308
+        ],
+        [
+         1.5,
+         1,
+         1.5,
+         -1.7976931348623157e+308
+        ],
+        [
+         2,
+         0,
+         0,
+         -1.7976931348623157e+308
+        ],
+        [
+         2.5,
+         0,
+         1.5,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "u": [
+        0,
+        0,
+        0,
+        1,
+        1,
+        1
+       ],
+       "v": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     }
+    },
+    "scale": 1.0
+   }
+  },
+  {
+   "name": "is_nurb_extrusion_v_linear_scale_zero",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "is_nurb": {
+     "source": {
+      "test": "raw",
+      "nurb": {
+       "n": 2,
+       "m": 1,
+       "p": 2,
+       "q": 1,
+       "cpts": [
+        [
+         0,
+         0,
+         0,
+         -1.7976931348623157e+308
+        ],
+        [
+         0.5,
+         0,
+         1.5,
+         -1.7976931348623157e+308
+        ],
+        [
+         1,
+         1,
+         0,
+         -1.7976931348623157e+308
+        ],
+        [
+         1.5,
+         1,
+         1.5,
+         -1.7976931348623157e+308
+        ],
+        [
+         2,
+         0,
+         0,
+         -1.7976931348623157e+308
+        ],
+        [
+         2.5,
+         0,
+         1.5,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "u": [
+        0,
+        0,
+        0,
+        1,
+        1,
+        1
+       ],
+       "v": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     }
+    },
+    "scale": 0.0
+   }
+  },
+  {
+   "name": "is_nurb_extrusion_perturbed_tiny",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "is_nurb": {
+     "source": {
+      "test": "raw",
+      "nurb": {
+       "n": 2,
+       "m": 1,
+       "p": 2,
+       "q": 1,
+       "cpts": [
+        [
+         0,
+         0,
+         0,
+         -1.7976931348623157e+308
+        ],
+        [
+         0.5,
+         0,
+         1.5,
+         -1.7976931348623157e+308
+        ],
+        [
+         1,
+         1,
+         0,
+         -1.7976931348623157e+308
+        ],
+        [
+         1.5,
+         1,
+         1.5,
+         -1.7976931348623157e+308
+        ],
+        [
+         2,
+         0,
+         0,
+         -1.7976931348623157e+308
+        ],
+        [
+         2.5,
+         0,
+         1.5,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "u": [
+        0,
+        0,
+        0,
+        1,
+        1,
+        1
+       ],
+       "v": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     },
+     "perturb": [
+      1,
+      1,
+      [
+       1e-14,
+       0.0,
+       0.0
+      ]
+     ]
+    },
+    "scale": 1.0
+   }
+  },
+  {
+   "name": "is_nurb_extrusion_perturbed",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "is_nurb": {
+     "source": {
+      "test": "raw",
+      "nurb": {
+       "n": 2,
+       "m": 1,
+       "p": 2,
+       "q": 1,
+       "cpts": [
+        [
+         0,
+         0,
+         0,
+         -1.7976931348623157e+308
+        ],
+        [
+         0.5,
+         0,
+         1.5,
+         -1.7976931348623157e+308
+        ],
+        [
+         1,
+         1,
+         0,
+         -1.7976931348623157e+308
+        ],
+        [
+         1.5,
+         1,
+         1.5,
+         -1.7976931348623157e+308
+        ],
+        [
+         2,
+         0,
+         0,
+         -1.7976931348623157e+308
+        ],
+        [
+         2.5,
+         0,
+         1.5,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "u": [
+        0,
+        0,
+        0,
+        1,
+        1,
+        1
+       ],
+       "v": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     },
+     "perturb": [
+      1,
+      1,
+      [
+       1e-06,
+       0.0,
+       0.0
+      ]
+     ]
+    },
+    "scale": 1.0
+   }
+  },
+  {
+   "name": "is_nurb_zero_sweep",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "is_nurb": {
+     "source": {
+      "test": "raw",
+      "nurb": {
+       "n": 2,
+       "m": 1,
+       "p": 2,
+       "q": 1,
+       "cpts": [
+        [
+         0,
+         0,
+         0,
+         -1.7976931348623157e+308
+        ],
+        [
+         0,
+         0,
+         0,
+         -1.7976931348623157e+308
+        ],
+        [
+         1,
+         1,
+         0,
+         -1.7976931348623157e+308
+        ],
+        [
+         1,
+         1,
+         0,
+         -1.7976931348623157e+308
+        ],
+        [
+         2,
+         0,
+         0,
+         -1.7976931348623157e+308
+        ],
+        [
+         2,
+         0,
+         0,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "u": [
+        0,
+        0,
+        0,
+        1,
+        1,
+        1
+       ],
+       "v": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     }
+    },
+    "scale": 1.0
+   }
+  },
+  {
+   "name": "is_nurb_rational_constant_ratio",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "is_nurb": {
+     "source": {
+      "test": "raw",
+      "nurb": {
+       "n": 2,
+       "m": 1,
+       "p": 2,
+       "q": 1,
+       "cpts": [
+        [
+         0.0,
+         0.0,
+         0.0,
+         1.0
+        ],
+        [
+         0.0,
+         0.0,
+         4.0,
+         2.0
+        ],
+        [
+         0.7,
+         0.7,
+         0.0,
+         0.7
+        ],
+        [
+         1.4,
+         1.4,
+         2.8,
+         1.4
+        ],
+        [
+         2.0,
+         0.0,
+         0.0,
+         1.0
+        ],
+        [
+         4.0,
+         0.0,
+         4.0,
+         2.0
+        ]
+       ],
+       "u": [
+        0,
+        0,
+        0,
+        1,
+        1,
+        1
+       ],
+       "v": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     }
+    },
+    "scale": 1.0
+   }
+  },
+  {
+   "name": "is_nurb_rational_varying_ratio",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "is_nurb": {
+     "source": {
+      "test": "raw",
+      "nurb": {
+       "n": 2,
+       "m": 1,
+       "p": 2,
+       "q": 1,
+       "cpts": [
+        [
+         0.0,
+         0.0,
+         0.0,
+         1.0
+        ],
+        [
+         0.0,
+         0.0,
+         4.0,
+         2.0
+        ],
+        [
+         0.7,
+         0.7,
+         0.0,
+         0.7
+        ],
+        [
+         1.0,
+         1.0,
+         2.0,
+         1.0
+        ],
+        [
+         2.0,
+         0.0,
+         0.0,
+         1.0
+        ],
+        [
+         4.0,
+         0.0,
+         4.0,
+         2.0
+        ]
+       ],
+       "u": [
+        0,
+        0,
+        0,
+        1,
+        1,
+        1
+       ],
+       "v": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     }
+    },
+    "scale": 1.0
+   }
+  },
+  {
+   "name": "finite_circle_plane_clipped_degenerate",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "src": "built",
+    "surf": {
+     "gen": {
+      "kind": "circle",
+      "c": [
+       0.0,
+       0.0,
+       0.0
+      ],
+      "x": [
+       1.0,
+       0.0,
+       0.0
+      ],
+      "y": [
+       0.0,
+       1.0,
+       0.0
+      ],
+      "d": [
+       0.0,
+       360.0
+      ],
+      "r": 1.0
+     },
+     "build": {
+      "mode": "ctor",
+      "origin": [
+       1.0,
+       0.0,
+       0.0
+      ],
+      "vec": [
+       0.0,
+       0.0,
+       2.0
+      ],
+      "domain": [
+       0.0,
+       0.0,
+       360.0,
+       1.0
+      ]
+     },
+     "oob": false,
+     "swap": false
+    },
+    "op": "plane",
+    "plane": {
+     "kind": "bounded",
+     "o": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "x": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "y": [
+      0.0,
+      0.0,
+      1.0
+     ],
+     "scale": [
+      1.0,
+      1.0
+     ],
+     "dom": [
+      -3.0,
+      1.999999999,
+      3.0,
+      3.0
+     ]
+    }
+   }
+  },
+  {
+   "name": "finite_circle_plane_clipped_touch_end",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "src": "built",
+    "surf": {
+     "gen": {
+      "kind": "circle",
+      "c": [
+       0.0,
+       0.0,
+       0.0
+      ],
+      "x": [
+       1.0,
+       0.0,
+       0.0
+      ],
+      "y": [
+       0.0,
+       1.0,
+       0.0
+      ],
+      "d": [
+       0.0,
+       360.0
+      ],
+      "r": 1.0
+     },
+     "build": {
+      "mode": "ctor",
+      "origin": [
+       1.0,
+       0.0,
+       0.0
+      ],
+      "vec": [
+       0.0,
+       0.0,
+       2.0
+      ],
+      "domain": [
+       0.0,
+       0.0,
+       360.0,
+       1.0
+      ]
+     },
+     "oob": false,
+     "swap": false
+    },
+    "op": "plane",
+    "plane": {
+     "kind": "bounded",
+     "o": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "x": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "y": [
+      0.0,
+      0.0,
+      1.0
+     ],
+     "scale": [
+      1.0,
+      1.0
+     ],
+     "dom": [
+      -3.0,
+      2.0,
+      3.0,
+      3.0
+     ]
+    }
+   }
+  },
+  {
+   "name": "finite_circle_plane_clipped_miss",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "src": "built",
+    "surf": {
+     "gen": {
+      "kind": "circle",
+      "c": [
+       0.0,
+       0.0,
+       0.0
+      ],
+      "x": [
+       1.0,
+       0.0,
+       0.0
+      ],
+      "y": [
+       0.0,
+       1.0,
+       0.0
+      ],
+      "d": [
+       0.0,
+       360.0
+      ],
+      "r": 1.0
+     },
+     "build": {
+      "mode": "ctor",
+      "origin": [
+       1.0,
+       0.0,
+       0.0
+      ],
+      "vec": [
+       0.0,
+       0.0,
+       2.0
+      ],
+      "domain": [
+       0.0,
+       0.0,
+       360.0,
+       1.0
+      ]
+     },
+     "oob": false,
+     "swap": false
+    },
+    "op": "plane",
+    "plane": {
+     "kind": "bounded",
+     "o": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "x": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "y": [
+      0.0,
+      0.0,
+      1.0
+     ],
+     "scale": [
+      1.0,
+      1.0
+     ],
+     "dom": [
+      -3.0,
+      2.5,
+      3.0,
+      3.0
+     ]
+    }
+   }
+  },
+  {
+   "name": "finite_circle_plane_seam",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "src": "built",
+    "surf": {
+     "gen": {
+      "kind": "circle",
+      "c": [
+       0.0,
+       0.0,
+       0.0
+      ],
+      "x": [
+       1.0,
+       0.0,
+       0.0
+      ],
+      "y": [
+       0.0,
+       1.0,
+       0.0
+      ],
+      "d": [
+       0.0,
+       360.0
+      ],
+      "r": 1.0
+     },
+     "build": {
+      "mode": "ctor",
+      "origin": [
+       1.0,
+       0.0,
+       0.0
+      ],
+      "vec": [
+       0.0,
+       0.0,
+       2.0
+      ],
+      "domain": [
+       0.0,
+       0.0,
+       360.0,
+       1.0
+      ]
+     },
+     "oob": false,
+     "swap": false
+    },
+    "op": "plane",
+    "plane": {
+     "kind": "normal",
+     "o": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "n": [
+      0.0,
+      1.0,
+      0.0
+     ]
+    }
+   }
+  },
+  {
+   "name": "finite_circle_plane_parallel_top_snap",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "src": "built",
+    "surf": {
+     "gen": {
+      "kind": "circle",
+      "c": [
+       0.0,
+       0.0,
+       0.0
+      ],
+      "x": [
+       1.0,
+       0.0,
+       0.0
+      ],
+      "y": [
+       0.0,
+       1.0,
+       0.0
+      ],
+      "d": [
+       0.0,
+       360.0
+      ],
+      "r": 1.0
+     },
+     "build": {
+      "mode": "ctor",
+      "origin": [
+       1.0,
+       0.0,
+       0.0
+      ],
+      "vec": [
+       0.0,
+       0.0,
+       2.0
+      ],
+      "domain": [
+       0.0,
+       0.0,
+       360.0,
+       1.0
+      ]
+     },
+     "oob": false,
+     "swap": false
+    },
+    "op": "plane",
+    "plane": {
+     "kind": "normal",
+     "o": [
+      0.0,
+      0.0,
+      2.000000001
+     ],
+     "n": [
+      0.0,
+      0.0,
+      1.0
+     ]
+    }
+   }
+  },
+  {
+   "name": "finite_circle_plane_parallel_top_outside",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "src": "built",
+    "surf": {
+     "gen": {
+      "kind": "circle",
+      "c": [
+       0.0,
+       0.0,
+       0.0
+      ],
+      "x": [
+       1.0,
+       0.0,
+       0.0
+      ],
+      "y": [
+       0.0,
+       1.0,
+       0.0
+      ],
+      "d": [
+       0.0,
+       360.0
+      ],
+      "r": 1.0
+     },
+     "build": {
+      "mode": "ctor",
+      "origin": [
+       1.0,
+       0.0,
+       0.0
+      ],
+      "vec": [
+       0.0,
+       0.0,
+       2.0
+      ],
+      "domain": [
+       0.0,
+       0.0,
+       360.0,
+       1.0
+      ]
+     },
+     "oob": false,
+     "swap": false
+    },
+    "op": "plane",
+    "plane": {
+     "kind": "normal",
+     "o": [
+      0.0,
+      0.0,
+      2.00001
+     ],
+     "n": [
+      0.0,
+      0.0,
+      1.0
+     ]
+    }
+   }
+  },
+  {
+   "name": "finite_circle_plane_parallel_bottom_outside_tol0",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "src": "built",
+    "surf": {
+     "gen": {
+      "kind": "circle",
+      "c": [
+       0.0,
+       0.0,
+       0.0
+      ],
+      "x": [
+       1.0,
+       0.0,
+       0.0
+      ],
+      "y": [
+       0.0,
+       1.0,
+       0.0
+      ],
+      "d": [
+       0.0,
+       360.0
+      ],
+      "r": 1.0
+     },
+     "build": {
+      "mode": "ctor",
+      "origin": [
+       1.0,
+       0.0,
+       0.0
+      ],
+      "vec": [
+       0.0,
+       0.0,
+       2.0
+      ],
+      "domain": [
+       0.0,
+       0.0,
+       360.0,
+       1.0
+      ]
+     },
+     "oob": false,
+     "swap": false
+    },
+    "op": "plane",
+    "plane": {
+     "kind": "normal",
+     "o": [
+      0.0,
+      0.0,
+      -1e-12
+     ],
+     "n": [
+      0.0,
+      0.0,
+      1.0
+     ]
+    },
+    "tol": 0.0
+   }
+  },
+  {
+   "name": "finite_circle_plane_parallel_bottom_exact_tol0",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "src": "built",
+    "surf": {
+     "gen": {
+      "kind": "circle",
+      "c": [
+       0.0,
+       0.0,
+       0.0
+      ],
+      "x": [
+       1.0,
+       0.0,
+       0.0
+      ],
+      "y": [
+       0.0,
+       1.0,
+       0.0
+      ],
+      "d": [
+       0.0,
+       360.0
+      ],
+      "r": 1.0
+     },
+     "build": {
+      "mode": "ctor",
+      "origin": [
+       1.0,
+       0.0,
+       0.0
+      ],
+      "vec": [
+       0.0,
+       0.0,
+       2.0
+      ],
+      "domain": [
+       0.0,
+       0.0,
+       360.0,
+       1.0
+      ]
+     },
+     "oob": false,
+     "swap": false
+    },
+    "op": "plane",
+    "plane": {
+     "kind": "normal",
+     "o": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "n": [
+      0.0,
+      0.0,
+      1.0
+     ]
+    },
+    "tol": 0.0
+   }
+  },
+  {
+   "name": "finite_circle_trim",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "src": "built",
+    "surf": {
+     "gen": {
+      "kind": "circle",
+      "c": [
+       0.0,
+       0.0,
+       0.0
+      ],
+      "x": [
+       1.0,
+       0.0,
+       0.0
+      ],
+      "y": [
+       0.0,
+       1.0,
+       0.0
+      ],
+      "d": [
+       0.0,
+       360.0
+      ],
+      "r": 1.0
+     },
+     "build": {
+      "mode": "ctor",
+      "origin": [
+       1.0,
+       0.0,
+       0.0
+      ],
+      "vec": [
+       0.0,
+       0.0,
+       2.0
+      ],
+      "domain": [
+       0.0,
+       0.0,
+       360.0,
+       1.0
+      ]
+     },
+     "oob": false,
+     "swap": false
+    },
+    "op": "trim",
+    "dom": [
+     0.0,
+     0.25,
+     0.5,
+     0.75
+    ]
+   }
+  },
+  {
+   "name": "finite_circle_cylinder_tilted",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "src": "built",
+    "surf": {
+     "gen": {
+      "kind": "circle",
+      "c": [
+       0.0,
+       0.0,
+       0.0
+      ],
+      "x": [
+       1.0,
+       0.0,
+       0.0
+      ],
+      "y": [
+       0.0,
+       1.0,
+       0.0
+      ],
+      "d": [
+       0.0,
+       360.0
+      ],
+      "r": 1.0
+     },
+     "build": {
+      "mode": "ctor",
+      "origin": [
+       1.0,
+       0.0,
+       0.0
+      ],
+      "vec": [
+       0.0,
+       0.0,
+       2.0
+      ],
+      "domain": [
+       0.0,
+       0.0,
+       360.0,
+       1.0
+      ]
+     },
+     "oob": false,
+     "swap": false
+    },
+    "op": "cylinder",
+    "cone": {
+     "cone": {
+      "kind": "canonical",
+      "bot": 0.5,
+      "top": 0.5,
+      "height": 1.0
+     },
+     "o": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "x": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "y": [
+      0.0,
+      0.0,
+      1.0
+     ]
+    }
+   }
+  },
+  {
+   "name": "finite_circle_plane_parallel_far",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "src": "built",
+    "surf": {
+     "gen": {
+      "kind": "circle",
+      "c": [
+       0.0,
+       0.0,
+       0.0
+      ],
+      "x": [
+       1.0,
+       0.0,
+       0.0
+      ],
+      "y": [
+       0.0,
+       1.0,
+       0.0
+      ],
+      "d": [
+       0.0,
+       360.0
+      ],
+      "r": 1.0
+     },
+     "build": {
+      "mode": "ctor",
+      "origin": [
+       1.0,
+       0.0,
+       0.0
+      ],
+      "vec": [
+       0.0,
+       0.0,
+       2.0
+      ],
+      "domain": [
+       0.0,
+       0.0,
+       360.0,
+       1.0
+      ]
+     },
+     "oob": false,
+     "swap": false
+    },
+    "op": "plane",
+    "plane": {
+     "kind": "bounded",
+     "o": [
+      10.0,
+      10.0,
+      1.0
+     ],
+     "x": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "y": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "scale": [
+      1.0,
+      1.0
+     ],
+     "dom": [
+      -1.0,
+      -1.0,
+      1.0,
+      1.0
+     ]
+    }
+   }
+  },
+  {
+   "name": "finite_circle_plane_parallel_near_box",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "src": "built",
+    "surf": {
+     "gen": {
+      "kind": "circle",
+      "c": [
+       0.0,
+       0.0,
+       0.0
+      ],
+      "x": [
+       1.0,
+       0.0,
+       0.0
+      ],
+      "y": [
+       0.0,
+       1.0,
+       0.0
+      ],
+      "d": [
+       0.0,
+       360.0
+      ],
+      "r": 1.0
+     },
+     "build": {
+      "mode": "ctor",
+      "origin": [
+       1.0,
+       0.0,
+       0.0
+      ],
+      "vec": [
+       0.0,
+       0.0,
+       2.0
+      ],
+      "domain": [
+       0.0,
+       0.0,
+       360.0,
+       1.0
+      ]
+     },
+     "oob": false,
+     "swap": false
+    },
+    "op": "plane",
+    "plane": {
+     "kind": "bounded",
+     "o": [
+      2.0,
+      0.0,
+      1.0
+     ],
+     "x": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "y": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "scale": [
+      1.0,
+      1.0
+     ],
+     "dom": [
+      -0.5,
+      -0.5,
+      0.5,
+      0.5
+     ]
+    }
+   }
+  },
+  {
+   "name": "file_eg1_plane_inside_far",
+   "upstream_ref": "TestFiles/pt_TestFiles/Fillet/eg1_srf1.smb:400 (SmSurfOfExtrusion record, read by SmBrep::ReadFromFile in upstream tests)",
+   "inputs": {
+    "src": "file",
+    "path": {
+     "$upstream_file": "Fillet/eg1_srf1.smb"
+    },
+    "line": 401,
+    "version": 38,
+    "op": "plane",
+    "plane": {
+     "kind": "bounded",
+     "o": [
+      500.0,
+      0.0,
+      25.0
+     ],
+     "x": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "y": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "scale": [
+      1.0,
+      1.0
+     ],
+     "dom": [
+      -10.0,
+      -10.0,
+      10.0,
+      10.0
+     ]
+    }
+   }
+  }
+ ]
+}

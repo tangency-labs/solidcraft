@@ -1,0 +1,1303 @@
+{
+ "cases": [
+  {
+   "name": "types_basic",
+   "inputs": {
+    "kind": "types",
+    "ts": [
+     11001,
+     12060,
+     16050,
+     16011,
+     16012,
+     12000,
+     0,
+     -1
+    ]
+   }
+  },
+  {
+   "name": "types_empty",
+   "inputs": {
+    "kind": "types",
+    "ts": []
+   }
+  },
+  {
+   "name": "nli_rational_3d",
+   "inputs": {
+    "kind": "nli",
+    "noz": false,
+    "now": false,
+    "pw": [
+     2,
+     4,
+     6,
+     2
+    ],
+    "alpha": 0.5,
+    "aw": [
+     1,
+     2,
+     3,
+     4
+    ],
+    "bw": [
+     1,
+     1,
+     1,
+     1
+    ]
+   }
+  },
+  {
+   "name": "nli_nonrational_planar",
+   "inputs": {
+    "kind": "nli",
+    "noz": true,
+    "now": true,
+    "pw": [
+     2,
+     4,
+     1.7976931348623157e+308,
+     -1.7976931348623157e+308
+    ],
+    "alpha": -1.5,
+    "aw": [
+     1,
+     2,
+     1.7976931348623157e+308,
+     -1.7976931348623157e+308
+    ],
+    "bw": [
+     3,
+     3,
+     1.7976931348623157e+308,
+     -1.7976931348623157e+308
+    ]
+   }
+  },
+  {
+   "name": "nli_planar_rational",
+   "inputs": {
+    "kind": "nli",
+    "noz": true,
+    "now": false,
+    "pw": [
+     3,
+     6,
+     9,
+     3
+    ],
+    "alpha": 2,
+    "aw": [
+     1,
+     2,
+     9,
+     0.5
+    ],
+    "bw": [
+     1,
+     1,
+     1,
+     2
+    ]
+   }
+  },
+  {
+   "name": "nli_zero_weight",
+   "inputs": {
+    "kind": "nli",
+    "noz": false,
+    "now": false,
+    "pw": [
+     1,
+     -2,
+     0,
+     0
+    ],
+    "alpha": 0,
+    "aw": [
+     0,
+     0,
+     0,
+     0
+    ],
+    "bw": [
+     1,
+     2,
+     3,
+     4
+    ]
+   }
+  },
+  {
+   "name": "nli_flags_ignore_values",
+   "inputs": {
+    "kind": "nli",
+    "noz": false,
+    "now": true,
+    "pw": [
+     1,
+     2,
+     1.7976931348623157e+308,
+     7
+    ],
+    "alpha": 1e-300,
+    "aw": [
+     1e+300,
+     1,
+     1,
+     1
+    ],
+    "bw": [
+     1,
+     2,
+     3,
+     -1.7976931348623157e+308
+    ]
+   }
+  },
+  {
+   "name": "notify_unknown_and_noop_events",
+   "inputs": {
+    "kind": "script",
+    "objects": [
+     0,
+     0
+    ],
+    "user_cb": true,
+    "sys_cb": true,
+    "ops": [
+     [
+      "new_long",
+      5,
+      1,
+      0
+     ],
+     [
+      "add",
+      0,
+      0
+     ],
+     [
+      "notify",
+      16,
+      0,
+      1,
+      1,
+      1
+     ],
+     [
+      "notify",
+      0,
+      0,
+      1,
+      0,
+      -1
+     ],
+     [
+      "notify",
+      3,
+      0,
+      1,
+      1,
+      -1
+     ],
+     [
+      "notify",
+      5,
+      0,
+      1,
+      0,
+      -1
+     ],
+     [
+      "notify",
+      7,
+      0,
+      1,
+      0,
+      0
+     ],
+     [
+      "notify",
+      11,
+      0,
+      0,
+      -1,
+      -1
+     ]
+    ]
+   }
+  },
+  {
+   "name": "notify_no_callbacks",
+   "inputs": {
+    "kind": "script",
+    "objects": [
+     0,
+     0
+    ],
+    "user_cb": false,
+    "sys_cb": false,
+    "ops": [
+     [
+      "new_long",
+      5,
+      1,
+      0
+     ],
+     [
+      "add",
+      0,
+      0
+     ],
+     [
+      "notify",
+      9,
+      0,
+      1,
+      -1,
+      -1
+     ]
+    ]
+   }
+  },
+  {
+   "name": "notify_null_targets_skipped",
+   "inputs": {
+    "kind": "script",
+    "objects": [
+     0,
+     0
+    ],
+    "user_cb": true,
+    "sys_cb": false,
+    "ops": [
+     [
+      "new_long",
+      5,
+      1,
+      0
+     ],
+     [
+      "add",
+      0,
+      0
+     ],
+     [
+      "notify",
+      9,
+      0,
+      -1,
+      -1,
+      -1
+     ],
+     [
+      "notify",
+      12,
+      0,
+      1,
+      -1,
+      -1
+     ],
+     [
+      "notify",
+      1,
+      0,
+      0,
+      1,
+      -1
+     ],
+     [
+      "notify",
+      4,
+      0,
+      -1,
+      0,
+      -1
+     ],
+     [
+      "notify",
+      2,
+      0,
+      -1,
+      0,
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "notify_split_child_is_this",
+   "inputs": {
+    "kind": "script",
+    "objects": [
+     0,
+     0,
+     0
+    ],
+    "user_cb": true,
+    "sys_cb": false,
+    "ops": [
+     [
+      "new_long",
+      5,
+      1,
+      0
+     ],
+     [
+      "add",
+      0,
+      0
+     ],
+     [
+      "new_plain",
+      6,
+      1
+     ],
+     [
+      "add",
+      0,
+      1
+     ],
+     [
+      "new_plain",
+      7,
+      4
+     ],
+     [
+      "add",
+      0,
+      2
+     ],
+     [
+      "notify",
+      12,
+      0,
+      0,
+      1,
+      -1
+     ],
+     [
+      "notify",
+      1,
+      0,
+      0,
+      0,
+      2
+     ]
+    ]
+   }
+  },
+  {
+   "name": "notify_merge_duplicate_id_skipped",
+   "inputs": {
+    "kind": "script",
+    "objects": [
+     0,
+     0,
+     0
+    ],
+    "user_cb": true,
+    "sys_cb": false,
+    "ops": [
+     [
+      "new_long",
+      5,
+      1,
+      0
+     ],
+     [
+      "add",
+      0,
+      0
+     ],
+     [
+      "new_long",
+      5,
+      2,
+      0
+     ],
+     [
+      "add",
+      1,
+      1
+     ],
+     [
+      "new_long",
+      6,
+      3,
+      1
+     ],
+     [
+      "add",
+      1,
+      2
+     ],
+     [
+      "notify",
+      13,
+      2,
+      0,
+      1,
+      -1
+     ],
+     [
+      "notify",
+      2,
+      0,
+      0,
+      1,
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "notify_merge_null_first_source",
+   "inputs": {
+    "kind": "script",
+    "objects": [
+     0,
+     0,
+     0
+    ],
+    "user_cb": true,
+    "sys_cb": false,
+    "ops": [
+     [
+      "new_long",
+      5,
+      1,
+      0
+     ],
+     [
+      "add",
+      1,
+      0
+     ],
+     [
+      "notify",
+      13,
+      2,
+      1,
+      1,
+      -1
+     ]
+    ]
+   }
+  },
+  {
+   "name": "notify_change_geometry_without_new",
+   "inputs": {
+    "kind": "script",
+    "objects": [
+     0,
+     0,
+     0
+    ],
+    "user_cb": true,
+    "sys_cb": false,
+    "ops": [
+     [
+      "new_long",
+      5,
+      1,
+      0
+     ],
+     [
+      "add",
+      2,
+      0
+     ],
+     [
+      "notify",
+      6,
+      0,
+      -1,
+      -1,
+      2
+     ],
+     [
+      "notify",
+      6,
+      0,
+      1,
+      -1,
+      2
+     ],
+     [
+      "notify",
+      6,
+      0,
+      1,
+      -1,
+      -1
+     ]
+    ]
+   }
+  },
+  {
+   "name": "notify_construction_without_source",
+   "inputs": {
+    "kind": "script",
+    "objects": [
+     0,
+     0
+    ],
+    "user_cb": true,
+    "sys_cb": false,
+    "ops": [
+     [
+      "new_long",
+      5,
+      1,
+      0
+     ],
+     [
+      "add",
+      1,
+      0
+     ],
+     [
+      "notify",
+      8,
+      0,
+      0,
+      -1,
+      -1
+     ],
+     [
+      "notify",
+      8,
+      0,
+      0,
+      1,
+      -1
+     ]
+    ]
+   }
+  },
+  {
+   "name": "notify_reference_behaviour_shares",
+   "inputs": {
+    "kind": "script",
+    "objects": [
+     0,
+     0,
+     0
+    ],
+    "user_cb": true,
+    "sys_cb": false,
+    "ops": [
+     [
+      "new_plain",
+      5,
+      1
+     ],
+     [
+      "add",
+      0,
+      0
+     ],
+     [
+      "notify",
+      9,
+      0,
+      1,
+      -1,
+      -1
+     ],
+     [
+      "notify",
+      12,
+      0,
+      1,
+      2,
+      -1
+     ],
+     [
+      "clear",
+      0
+     ],
+     [
+      "clear",
+      1
+     ],
+     [
+      "clear",
+      2
+     ]
+    ]
+   }
+  },
+  {
+   "name": "notify_temp_not_propagated",
+   "inputs": {
+    "kind": "script",
+    "objects": [
+     0,
+     0
+    ],
+    "user_cb": true,
+    "sys_cb": false,
+    "ops": [
+     [
+      "new_plain",
+      5,
+      4
+     ],
+     [
+      "add",
+      0,
+      0
+     ],
+     [
+      "notify",
+      9,
+      0,
+      1,
+      -1,
+      -1
+     ],
+     [
+      "notify",
+      12,
+      0,
+      1,
+      1,
+      -1
+     ]
+    ]
+   }
+  },
+  {
+   "name": "notify_merge_region_merge_skipped",
+   "inputs": {
+    "kind": "script",
+    "objects": [
+     0,
+     0,
+     0
+    ],
+    "user_cb": true,
+    "sys_cb": false,
+    "ops": [
+     [
+      "new_merge_region",
+      0,
+      0,
+      1,
+      0
+     ],
+     [
+      "add",
+      0,
+      0
+     ],
+     [
+      "notify",
+      13,
+      2,
+      0,
+      1,
+      -1
+     ]
+    ]
+   }
+  },
+  {
+   "name": "reg_propagation_non_region_caller",
+   "inputs": {
+    "kind": "script",
+    "objects": [
+     1,
+     0
+    ],
+    "user_cb": true,
+    "sys_cb": false,
+    "ops": [
+     [
+      "new_color",
+      100,
+      0,
+      [
+       1,
+       1,
+       1
+      ]
+     ],
+     [
+      "add",
+      0,
+      0
+     ],
+     [
+      "notify",
+      14,
+      0,
+      -1,
+      -1,
+      -1
+     ]
+    ]
+   }
+  },
+  {
+   "name": "reg_propagation_missing_attribute_skipped",
+   "inputs": {
+    "kind": "script",
+    "objects": [
+     0,
+     0
+    ],
+    "user_cb": true,
+    "sys_cb": false,
+    "ops": [
+     [
+      "new_color",
+      100,
+      0,
+      [
+       1,
+       1,
+       1
+      ]
+     ],
+     [
+      "add",
+      0,
+      0
+     ],
+     [
+      "notify",
+      14,
+      0,
+      -1,
+      -1,
+      -1
+     ]
+    ]
+   }
+  },
+  {
+   "name": "reg_propagation_two_others_skipped",
+   "inputs": {
+    "kind": "script",
+    "objects": [
+     0,
+     0,
+     0
+    ],
+    "user_cb": true,
+    "sys_cb": false,
+    "ops": [
+     [
+      "new_merge_region",
+      0,
+      0,
+      1,
+      0
+     ],
+     [
+      "add",
+      0,
+      0
+     ],
+     [
+      "new_merge_region",
+      0,
+      0,
+      2,
+      0
+     ],
+     [
+      "add",
+      0,
+      1
+     ],
+     [
+      "notify",
+      14,
+      0,
+      -1,
+      -1,
+      -1
+     ]
+    ]
+   }
+  },
+  {
+   "name": "reg_propagation_wrong_id_class_skipped",
+   "inputs": {
+    "kind": "script",
+    "objects": [
+     0,
+     0
+    ],
+    "user_cb": true,
+    "sys_cb": false,
+    "ops": [
+     [
+      "new_plain",
+      114,
+      0
+     ],
+     [
+      "add",
+      0,
+      0
+     ],
+     [
+      "notify",
+      14,
+      0,
+      -1,
+      -1,
+      -1
+     ]
+    ]
+   }
+  },
+  {
+   "name": "reg_propagation_other_colour_only",
+   "inputs": {
+    "kind": "script",
+    "objects": [
+     0,
+     0
+    ],
+    "user_cb": true,
+    "sys_cb": false,
+    "ops": [
+     [
+      "new_merge_region",
+      0,
+      1,
+      1,
+      1
+     ],
+     [
+      "mr_set_operation",
+      0,
+      5
+     ],
+     [
+      "add",
+      0,
+      0
+     ],
+     [
+      "new_color",
+      100,
+      1,
+      [
+       0,
+       1,
+       0
+      ]
+     ],
+     [
+      "add",
+      1,
+      1
+     ],
+     [
+      "notify",
+      14,
+      0,
+      -1,
+      -1,
+      -1
+     ]
+    ]
+   }
+  },
+  {
+   "name": "copy_construct_attributes",
+   "inputs": {
+    "kind": "script",
+    "objects": [
+     0,
+     1
+    ],
+    "user_cb": true,
+    "sys_cb": false,
+    "ops": [
+     [
+      "new_long",
+      5,
+      1,
+      0
+     ],
+     [
+      "add",
+      0,
+      0
+     ],
+     [
+      "new_plain",
+      6,
+      1
+     ],
+     [
+      "add",
+      0,
+      1
+     ],
+     [
+      "new_plain",
+      7,
+      2
+     ],
+     [
+      "add",
+      0,
+      2
+     ],
+     [
+      "new_plain",
+      8,
+      4
+     ],
+     [
+      "add",
+      0,
+      3
+     ],
+     [
+      "copy_construct",
+      0
+     ],
+     [
+      "copy_construct",
+      1
+     ],
+     [
+      "assert_valid",
+      2,
+      1
+     ]
+    ]
+   }
+  },
+  {
+   "name": "cache_soft_delete_with_uses",
+   "inputs": {
+    "kind": "script",
+    "objects": [
+     0
+    ],
+    "user_cb": true,
+    "sys_cb": false,
+    "ops": [
+     [
+      "new_cache"
+     ],
+     [
+      "check_out",
+      0
+     ],
+     [
+      "check_out",
+      0
+     ],
+     [
+      "soft_delete",
+      0
+     ],
+     [
+      "check_in",
+      0
+     ],
+     [
+      "check_in",
+      0
+     ],
+     [
+      "check_out",
+      0
+     ],
+     [
+      "new_cache"
+     ],
+     [
+      "soft_delete",
+      1
+     ],
+     [
+      "soft_delete",
+      1
+     ]
+    ]
+   }
+  },
+  {
+   "name": "cache_check_in_wraps",
+   "inputs": {
+    "kind": "script",
+    "objects": [
+     0
+    ],
+    "user_cb": true,
+    "sys_cb": false,
+    "ops": [
+     [
+      "new_cache"
+     ],
+     [
+      "check_in",
+      0
+     ],
+     [
+      "check_out",
+      0
+     ],
+     [
+      "check_out",
+      -1
+     ],
+     [
+      "check_in",
+      -1
+     ],
+     [
+      "guard_open",
+      -1
+     ],
+     [
+      "guard_close"
+     ],
+     [
+      "guard_close"
+     ]
+    ]
+   }
+  },
+  {
+   "name": "cache_delete_objects_cache_overloads",
+   "inputs": {
+    "kind": "script",
+    "objects": [
+     0,
+     1,
+     2
+    ],
+    "user_cb": true,
+    "sys_cb": false,
+    "ops": [
+     [
+      "new_cache"
+     ],
+     [
+      "new_cache"
+     ],
+     [
+      "set_cache",
+      0,
+      0
+     ],
+     [
+      "set_cache",
+      1,
+      0
+     ],
+     [
+      "delete_objects_cache",
+      0,
+      1,
+      2
+     ],
+     [
+      "delete_objects_cache",
+      1,
+      0,
+      0
+     ],
+     [
+      "set_cache",
+      1,
+      1
+     ],
+     [
+      "guard_open",
+      1
+     ],
+     [
+      "delete_objects_cache",
+      1,
+      1,
+      1
+     ],
+     [
+      "get_cache",
+      -1,
+      0
+     ],
+     [
+      "get_cache",
+      1,
+      0
+     ],
+     [
+      "guard_close"
+     ],
+     [
+      "delete_objects_cache",
+      2,
+      0,
+      3
+     ]
+    ]
+   }
+  },
+  {
+   "name": "cache_get_or_create_kinds",
+   "inputs": {
+    "kind": "script",
+    "objects": [
+     0,
+     1,
+     2
+    ],
+    "user_cb": true,
+    "sys_cb": false,
+    "ops": [
+     [
+      "new_cache"
+     ],
+     [
+      "set_cache",
+      0,
+      0
+     ],
+     [
+      "get_or_create",
+      0,
+      0
+     ],
+     [
+      "get_or_create",
+      1,
+      1
+     ],
+     [
+      "set_cache",
+      2,
+      0
+     ],
+     [
+      "get_or_create",
+      2,
+      3
+     ],
+     [
+      "get_or_create",
+      2,
+      2
+     ]
+    ]
+   }
+  },
+  {
+   "name": "sag_make_wrong_target",
+   "inputs": {
+    "kind": "script",
+    "objects": [
+     2,
+     0,
+     1
+    ],
+    "user_cb": true,
+    "sys_cb": false,
+    "ops": [
+     [
+      "new_cache"
+     ],
+     [
+      "sag_make",
+      0,
+      1,
+      0,
+      3
+     ],
+     [
+      "sag_make",
+      0,
+      2,
+      -1,
+      3
+     ],
+     [
+      "sag_make",
+      0,
+      0,
+      0,
+      3
+     ]
+    ]
+   }
+  },
+  {
+   "name": "sag_make_builds_brep_cache",
+   "inputs": {
+    "kind": "script",
+    "objects": [
+     2
+    ],
+    "user_cb": true,
+    "sys_cb": false,
+    "ops": [
+     [
+      "sag_make",
+      0,
+      0,
+      -1,
+      3
+     ]
+    ]
+   }
+  },
+  {
+   "name": "get_or_create_brep_without_cache",
+   "inputs": {
+    "kind": "script",
+    "objects": [
+     2
+    ],
+    "user_cb": true,
+    "sys_cb": false,
+    "ops": [
+     [
+      "get_or_create",
+      0,
+      3
+     ]
+    ]
+   }
+  },
+  {
+   "name": "sag_notify_pre_edit",
+   "inputs": {
+    "kind": "script",
+    "objects": [
+     2
+    ],
+    "user_cb": true,
+    "sys_cb": false,
+    "ops": [
+     [
+      "sag_notify",
+      10,
+      0,
+      -1,
+      -1,
+      -1
+     ]
+    ]
+   }
+  }
+ ]
+}

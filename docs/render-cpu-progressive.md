@@ -247,7 +247,7 @@ passes through the same two-slot checkpoint publication; the UI can coalesce
 physical paints, and externally pinned slots can cause retention skips.
 
 All existing CPU profile limits include **pilot_samples + samples_per_pixel**;
-no cap or profile is raised automatically. At most 256 pilots and 4096 total
+no cap or profile is raised automatically. At most 256 pilots and 65,536 total
 pilot/production passes are possible in the largest selected profile. Compact
 retains its 64-pass and 16,777,216 camera-sample bounds. A 32-pilot/64-production
 request therefore needs an explicit profile that admits 96 total passes. The

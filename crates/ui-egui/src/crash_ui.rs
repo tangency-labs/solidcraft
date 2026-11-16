@@ -80,7 +80,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
         .cards(2.0)
         .actions("", solidcraft_ui_text::tr("ui.close"), None)
         .show(ctx, true, |ui| {
-            ui.spacing_mut().item_spacing.y = crate::theme::Tokens::get().space_10;
+            ui.spacing_mut().item_spacing.y = solidcraft_theme::Tokens::get().space_10;
             let intro = ui_kit::text(ui, solidcraft_ui_text::tr("crash.intro"), ui_kit::Text::Hint("intro"));
             crate::scenario::publish_rect("dialog:note:intro", intro.rect);
             if let Some(d) = app.crashes.dir.clone() {
@@ -103,14 +103,14 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
                 ui_kit::report_list(
                     ui,
                     "reports",
-                    crate::theme::Tokens::get().control_height * 10.0 + crate::theme::Tokens::get().space_10 * 4.0,
+                    solidcraft_theme::Tokens::get().control_height * 10.0 + solidcraft_theme::Tokens::get().space_10 * 4.0,
                     |ui| {
                         let last = app.crashes.reports.len().saturating_sub(1);
                         for (index, r) in app.crashes.reports.iter().enumerate() {
                             let title = report_heading(r);
                             ui.push_id(&r.id, |ui| {
-                                ui.spacing_mut().item_spacing.y = crate::theme::Tokens::get().space_6;
-                                ui.add_space(crate::theme::Tokens::get().space_10);
+                                ui.spacing_mut().item_spacing.y = solidcraft_theme::Tokens::get().space_6;
+                                ui.add_space(solidcraft_theme::Tokens::get().space_10);
                                 ui_kit::report_header(ui, kind_label(&r.kind), r.count, &report_time(r), &title, |ui| {
                                     if ui_kit::bin_button(ui, solidcraft_ui_text::tr("ui.delete")).clicked() {
                                         delete = Some(Some(r.id.clone()));
@@ -138,7 +138,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
                                         ui_kit::Text::Note(&format!("unclean:{}", r.id)),
                                     );
                                 }
-                                ui.add_space(crate::theme::Tokens::get().space_6);
+                                ui.add_space(solidcraft_theme::Tokens::get().space_6);
                                 if index != last {
                                     ui_kit::report_divider(ui, &format!("end:{}", r.id));
                                 }
@@ -327,7 +327,7 @@ mod tests {
                 let badge = crate::scenario::rect_of("prefs:crash_count").unwrap();
                 assert!((badge.height() - 18.0).abs() < 0.5);
                 assert!(crate::scenario::rect_of("prefs:page_body").unwrap().contains_rect(badge));
-                let t = crate::theme::Tokens::get();
+                let t = solidcraft_theme::Tokens::get();
                 let fill = if count == 0 { t.dialog_footer } else { t.pref_note_fill };
                 assert!(
                     h.shapes.iter().any(|shape| matches!(&shape.shape, egui::Shape::Rect(rect) if rect.rect == badge && rect.fill == fill)),

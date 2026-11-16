@@ -1,0 +1,24 @@
+[package]
+name = "solidcore-record"
+description = "Geometry as data: the portable B-rep record, its serde form, structural validation and the native body file. Computes no geometry."
+edition = "2024"
+license.workspace = true
+version.workspace = true
+# Let chains (edition 2024, Rust 1.88).
+rust-version = "1.88"
+repository = "https://github.com/tangency-labs/solidcore"
+keywords = ["cad", "brep", "nurbs", "geometry", "serde"]
+categories = ["data-structures", "encoding", "science"]
+
+# Layers §3: the record depends on no geometry crate, and on no maths crate (§4).
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["float_roundtrip"] }
+thiserror.workspace = true
+
+# The kernel rig corpus's records are gzip files (tests/kernel_cases_corpus.rs).
+[dev-dependencies]
+flate2 = "1.1"
+
+[lints]
+workspace = true

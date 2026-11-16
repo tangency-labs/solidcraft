@@ -1,0 +1,58 @@
+{
+  "cases": [
+    {
+      "name": "constructed_saddle_face_unbuilt_boundary_queries",
+      "upstream_ref": "source/SMLib/src/SmTrimSrfCache.cpp:57,1048 (natural-face inside/outside/edge/vertex regression)",
+      "inputs": {
+        "srf": {
+          "oob": true,
+          "srf": {
+            "net": [
+              [[0, 0, 0, -1.7976931348623157e308], [0, 1, 0, -1.7976931348623157e308]],
+              [[1, 0, 0, -1.7976931348623157e308], [1, 1, 0.25, -1.7976931348623157e308]]
+            ],
+            "p": 1,
+            "q": 1,
+            "u": [0, 0, 1, 1],
+            "v": [0, 0, 1, 1]
+          }
+        },
+        "op": "face",
+        "build": false,
+        "points": [
+          {"uv": [0.5, 0.5], "test_tol": true, "tol": 1e-6},
+          {"uv": [-0.1, 0.5], "test_tol": false, "tol": 1e-6},
+          {"uv": [0, 0.5], "test_tol": true, "tol": 1e-6},
+          {"uv": [0, 0], "test_tol": false, "tol": 1e-6}
+        ]
+      }
+    },
+    {
+      "name": "constructed_saddle_face_built_boundary_queries",
+      "upstream_ref": "source/SMLib/src/SmTrimSrfCache.cpp:132,57,1048 (natural-face tree and inside/outside/edge/vertex regression)",
+      "inputs": {
+        "srf": {
+          "oob": true,
+          "srf": {
+            "net": [
+              [[0, 0, 0, -1.7976931348623157e308], [0, 1, 0, -1.7976931348623157e308]],
+              [[1, 0, 0, -1.7976931348623157e308], [1, 1, 0.25, -1.7976931348623157e308]]
+            ],
+            "p": 1,
+            "q": 1,
+            "u": [0, 0, 1, 1],
+            "v": [0, 0, 1, 1]
+          }
+        },
+        "op": "face",
+        "build": true,
+        "points": [
+          {"uv": [0.5, 0.5], "test_tol": true, "tol": 1e-6},
+          {"uv": [-0.1, 0.5], "test_tol": false, "tol": 1e-6},
+          {"uv": [0, 0.5], "test_tol": true, "tol": 1e-6},
+          {"uv": [0, 0], "test_tol": false, "tol": 1e-6}
+        ]
+      }
+    }
+  ]
+}

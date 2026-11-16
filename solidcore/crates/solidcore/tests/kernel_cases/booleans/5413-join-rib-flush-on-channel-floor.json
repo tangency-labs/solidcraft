@@ -1,0 +1,166 @@
+{
+  "area": "booleans",
+  "bodies": {
+    "b18": {
+      "keeping_splines": false,
+      "trusted": true
+    },
+    "b21": {
+      "keeping_splines": false,
+      "trusted": true
+    }
+  },
+  "calls": [
+    {
+      "inputs": [
+        "b18"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b19"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b19"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b20"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b21"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b22"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b22"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b23"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b20"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b24"
+      ],
+      "params": {
+        "operand": 0
+      }
+    },
+    {
+      "inputs": [
+        "b23"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b25"
+      ],
+      "params": {
+        "operand": 1
+      }
+    },
+    {
+      "inputs": [
+        "b24",
+        "b25"
+      ],
+      "op": "boolean",
+      "outputs": [
+        "b26"
+      ],
+      "params": {
+        "op": "union"
+      }
+    }
+  ],
+  "case": "5413-join-rib-flush-on-channel-floor",
+  "expected": {
+    "area_mm2": 13454.3892,
+    "body_count": 1,
+    "method": "rounded box 55x50x35, r 2.4 (rolling-ball corners): V and A by the usual sums of flat, cylindrical and spherical parts. The cavity x -22.5..22.5, z 5..37, through y, removes 45*(50*30 - 2(1-pi/4)r^2) (the two top x-edge rounds lie in it) and swaps the rounded box's surface inside it (the top, the two top x-edge rounds, the two end faces' flats) for its own floor and side walls (50x30 less the two round corners each). The rib adds its part in the cavity (45x5x10 = 2250); its ends inside the walls add nothing. Area: + rib top 225 + front 450 + end face 450 (its end in the open channel end; the parts in the walls are coplanar with the end face) - the floor under it 225 - the side walls it covers 100 = +800",
+    "source": "analytic",
+    "sources": [
+      "tangency-labs/solidcraft#5413",
+      "tangency-labs/solidcraft#4877"
+    ],
+    "volume_mm3": 30437.5435,
+    "what": "a rib joined flush onto the floor of a channel (a box rounded r2.4 on all edges, its 45 wide cavity cut through its top and both ends), its ends buried in the side walls: truck's tool nudge kept both faces of the flush contact, a 0.077 um slit with 450 mm2 too much area"
+  },
+  "expressible": true,
+  "operation_expressible": true,
+  "outcome": {
+    "ran": true,
+    "raw_counts": {
+      "edges": 72,
+      "faces": 34,
+      "vertices": 40
+    }
+  },
+  "records": "5413-join-rib-flush-on-channel-floor.bodies.json.gz",
+  "result": [
+    {
+      "body": "Channel",
+      "made": "b26"
+    }
+  ],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": {
+      "area_mm2": 13454.389240920134,
+      "body_count": 1,
+      "edges": 72,
+      "faces": 34,
+      "vertices": 40,
+      "volume_mm3": 30437.543484009475
+    },
+    "refused_with": null,
+    "status": "pass"
+  },
+  "sources": [
+    "tangency-labs/solidcraft#5413",
+    "tangency-labs/solidcraft#4877"
+  ],
+  "traced_ops": [
+    "extrude",
+    "copy",
+    "copy",
+    "tagged",
+    "blend_dropping",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean"
+  ],
+  "ungraded": [],
+  "what": "a rib joined flush onto the floor of a channel (a box rounded r2.4 on all edges, its 45 wide cavity cut through its top and both ends), its ends buried in the side walls: truck's tool nudge kept both faces of the flush contact, a 0.077 um slit with 450 mm2 too much area",
+  "why_not": []
+}

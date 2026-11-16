@@ -1,0 +1,8 @@
+#### UB-262. The surface constructors of the constant-radius solvers leave `m_pEdgeuses` uninitialised, and `LoadInitialValues` reads it
+- **Severity:** Crash / undefined behaviour
+- **Area:** Blends and fillets
+- **Location:** `source/SMLib/src/SmFilletSolver.cpp:45-68`, `SmFilletSolver::SmFilletSolver` (the initialiser list sets `m_pSurfaces` but not `m_pEdgeuses`); the surface constructors of `SmConstantRadiusFS` / `SmSurfaceSurfaceFS` (`source/SMLib/src/SmFilletStandardSolver.cpp`) set no edge uses either. Read in `SmConstantRadiusFS::LoadInitialValues` (`SmFilletStandardSolver.cpp:442`, `GetEdgeuse(lOtherRailIndex)`, then `pOtherEdgeuse->GetFace()` at `:542`).
+- **What happens:** a solver built from two surfaces (not from an edge use) keeps whatever `m_pEdgeuses[0..1]` held in the allocation. When `LoadInitialValues` finds no tangent-rollover guess it takes `pOtherEdgeuse = GetEdgeuse(1 - lRailIndex)` and calls `GetFace()` on it. With a garbage pointer this crashes or reads freed memory; it works only when the allocation happens to be zeroed.
+- **Trigger:** `SmSurfaceSurfaceFS(ctx, ..., crSurface1, crSurface2, ...)` constructed on the stack (or in non-zeroed heap memory), then `LoadInitialValues(1, rail, ...)` without a tangent-rollover geometry for the surfaces.
+- **How found:** a new `rollover` difftest op of `blend.fillet_standard_solver_p2` that built the solver on the stack segfaulted in `SmEdgeuse::GetFace` (symbolised backtrace: `SmConstantRadiusFS::LoadInitialValues` -> `SmEdgeuse::GetFace`). The shim now sets both edge uses to `NULL` after construction (the Rust solver's are `None`).
+- **Confirmed:** yes, C++ build at the harness key of PR #1269 (crash before the shim fix).

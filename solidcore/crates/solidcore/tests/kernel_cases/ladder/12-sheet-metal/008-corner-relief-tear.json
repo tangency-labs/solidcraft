@@ -1,0 +1,70 @@
+{
+  "area": "ladder/12-sheet-metal",
+  "bodies": {},
+  "calls": [],
+  "case": "008-corner-relief-tear",
+  "expected": {
+    "bbox": {
+      "max": [
+        100.0,
+        60.0,
+        20.0
+      ],
+      "min": [
+        0,
+        0,
+        0
+      ]
+    },
+    "body_count": 1,
+    "method": "T = 2, R = 1, K = 0.5, the corner gap g = 0.5. A bend zone is BA = theta (R + K T) wide in the flat; folded it is an annular sector holding theta T (R + T/2) a mm of bend, T BA with K = 0.5, and every panel moves rigidly, so V = T x the flat area. An edge flange's outer virtual sharp is on the picked edge: the base is cut back s0 = (R + T) tan(theta/2), the bend starts there, and its panel is H - s0 long (H from the sharp along the outer face). A torn corner (sheet.rs tear_corner) cuts nothing from the base: each bend zone's end runs straight from the corner, on its start line, to the panel's end at its far edge, e = 0.646447 further along (003's closing), so each torn end adds the triangle BA e / 2 to the bend zone; folded, the end is a helix and the column of sheet under each flat point still holds T of material (K = 0.5). V = 2 (003's flat area + 8 pi e / 2)",
+    "source": "analytic",
+    "sources": [],
+    "volume_mm3": 22267.903304036,
+    "what": "003's tray with torn corners: the bends run to the corner and each end is cut straight, in the flat, to where its panel's end starts"
+  },
+  "expressible": false,
+  "golden": {
+    "measured": {
+      "area_mm2": 23193.661881433123,
+      "body_count": 1,
+      "edges": 76,
+      "faces": 38,
+      "vertices": 40,
+      "volume_mm3": 22267.903289987218
+    },
+    "status": "pass",
+    "unstable": null
+  },
+  "operation_expressible": false,
+  "outcome": {
+    "ran": true,
+    "raw_counts": {
+      "edges": 76,
+      "faces": 38,
+      "vertices": 40
+    }
+  },
+  "result": [],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": {
+      "area_mm2": 23193.661881433123,
+      "body_count": 1,
+      "edges": 76,
+      "faces": 38,
+      "vertices": 40,
+      "volume_mm3": 22267.903289987218
+    },
+    "refused_with": null,
+    "status": "pass"
+  },
+  "sources": [],
+  "traced_ops": [],
+  "ungraded": [],
+  "what": "003's tray with torn corners: the bends run to the corner and each end is cut straight, in the flat, to where its panel's end starts",
+  "why_not": [
+    "body \"Body1\" is no kernel operation's output nor an operand: SolidCraft built it or changed the kernel's record"
+  ]
+}

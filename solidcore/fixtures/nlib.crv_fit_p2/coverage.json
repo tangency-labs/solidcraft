@@ -1,0 +1,208 @@
+{
+ "cases": [
+  {
+   "name": "cov_weighted_lst_sq_degree_above_n2_p3",
+   "upstream_ref": "source/SMLib/src/NL_CrvFit.cpp:13320 N_FitCrvWeightedLstSqKnots p > n -> NL_INP_ERR (coverage: nurbs/crv_fit/p2.rs:445)",
+   "inputs": {
+    "op": "weighted",
+    "ptp": 1,
+    "pts": [
+     [
+      0,
+      0,
+      0
+     ],
+     [
+      1,
+      2,
+      0
+     ],
+     [
+      2,
+      3,
+      1
+     ],
+     [
+      3,
+      2,
+      1
+     ],
+     [
+      4,
+      0,
+      2
+     ],
+     [
+      5,
+      1,
+      2
+     ]
+    ],
+    "wp": [
+     1,
+     1,
+     1,
+     1,
+     1,
+     1
+    ],
+    "u": [
+     0,
+     0.2,
+     0.4,
+     0.6,
+     0.8,
+     1.0
+    ],
+    "knots": [
+     0,
+     0,
+     0,
+     0,
+     1,
+     1,
+     1,
+     1
+    ],
+    "n": 2,
+    "p": 3
+   }
+  },
+  {
+   "name": "cov_weighted_lst_sq_degree_above_n1_p2",
+   "upstream_ref": "source/SMLib/src/NL_CrvFit.cpp:13320 N_FitCrvWeightedLstSqKnots p > n -> NL_INP_ERR (coverage: nurbs/crv_fit/p2.rs:445)",
+   "inputs": {
+    "op": "weighted",
+    "ptp": 1,
+    "pts": [
+     [
+      0,
+      0,
+      0
+     ],
+     [
+      1,
+      2,
+      0
+     ],
+     [
+      2,
+      3,
+      1
+     ],
+     [
+      3,
+      2,
+      1
+     ],
+     [
+      4,
+      0,
+      2
+     ],
+     [
+      5,
+      1,
+      2
+     ]
+    ],
+    "wp": [
+     1,
+     1,
+     1,
+     1,
+     1,
+     1
+    ],
+    "u": [
+     0,
+     0.2,
+     0.4,
+     0.6,
+     0.8,
+     1.0
+    ],
+    "knots": [
+     0,
+     0,
+     0,
+     1,
+     1,
+     1
+    ],
+    "n": 1,
+    "p": 2
+   }
+  },
+  {
+   "name": "cov_weighted_lst_sq_degree_above_n3_p4",
+   "upstream_ref": "source/SMLib/src/NL_CrvFit.cpp:13320 N_FitCrvWeightedLstSqKnots p > n -> NL_INP_ERR (coverage: nurbs/crv_fit/p2.rs:445)",
+   "inputs": {
+    "op": "weighted",
+    "ptp": 1,
+    "pts": [
+     [
+      0,
+      0,
+      0
+     ],
+     [
+      1,
+      2,
+      0
+     ],
+     [
+      2,
+      3,
+      1
+     ],
+     [
+      3,
+      2,
+      1
+     ],
+     [
+      4,
+      0,
+      2
+     ],
+     [
+      5,
+      1,
+      2
+     ]
+    ],
+    "wp": [
+     1,
+     1,
+     1,
+     1,
+     1,
+     1
+    ],
+    "u": [
+     0,
+     0.2,
+     0.4,
+     0.6,
+     0.8,
+     1.0
+    ],
+    "knots": [
+     0,
+     0,
+     0,
+     0,
+     0,
+     1,
+     1,
+     1,
+     1,
+     1
+    ],
+    "n": 3,
+    "p": 4
+   }
+  }
+ ]
+}

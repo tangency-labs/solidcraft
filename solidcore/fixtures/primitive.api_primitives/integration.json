@@ -1,0 +1,563 @@
+{
+  "cases": [
+    {
+      "name": "integration_box_s0.1_pose0",
+      "inputs": {
+        "op": "box",
+        "args": [
+          0.0,
+          0.0,
+          0.0,
+          0.5,
+          1.0,
+          2.0
+        ]
+      }
+    },
+    {
+      "name": "integration_pyramid_s0.1_pose0",
+      "inputs": {
+        "op": "pyramid",
+        "args": [
+          0.0,
+          0.0,
+          0.0,
+          0.5,
+          2.0
+        ]
+      }
+    },
+    {
+      "name": "integration_cylinder_s0.1_pose0",
+      "inputs": {
+        "op": "cylinder",
+        "args": [
+          0.0,
+          0.0,
+          0.0,
+          0.5,
+          2.0
+        ]
+      }
+    },
+    {
+      "name": "integration_cone_s0.1_pose0",
+      "inputs": {
+        "op": "cone",
+        "args": [
+          0.0,
+          0.0,
+          0.0,
+          0.5,
+          0.2,
+          2.0
+        ]
+      }
+    },
+    {
+      "name": "integration_sphere_s0.1_pose0",
+      "inputs": {
+        "op": "sphere",
+        "args": [
+          0.0,
+          0.0,
+          0.0,
+          0.30000000000000004
+        ]
+      }
+    },
+    {
+      "name": "integration_sphere_no_pole_s0.1_pose0",
+      "inputs": {
+        "op": "sphere_no_pole",
+        "args": [
+          0.0,
+          0.0,
+          0.0,
+          0.30000000000000004
+        ]
+      }
+    },
+    {
+      "name": "integration_torus_s0.1_pose0",
+      "inputs": {
+        "op": "torus",
+        "args": [
+          0.0,
+          0.0,
+          0.0,
+          0.5,
+          0.15000000000000002
+        ]
+      }
+    },
+    {
+      "name": "integration_box_s0.1_pose1",
+      "inputs": {
+        "op": "box",
+        "args": [
+          1.0,
+          -2.0,
+          0.5,
+          0.5,
+          1.0,
+          2.0
+        ]
+      }
+    },
+    {
+      "name": "integration_pyramid_s0.1_pose1",
+      "inputs": {
+        "op": "pyramid",
+        "args": [
+          1.0,
+          -2.0,
+          0.5,
+          0.5,
+          2.0
+        ]
+      }
+    },
+    {
+      "name": "integration_cylinder_s0.1_pose1",
+      "inputs": {
+        "op": "cylinder",
+        "args": [
+          1.0,
+          -2.0,
+          0.5,
+          0.5,
+          2.0
+        ]
+      }
+    },
+    {
+      "name": "integration_cone_s0.1_pose1",
+      "inputs": {
+        "op": "cone",
+        "args": [
+          1.0,
+          -2.0,
+          0.5,
+          0.5,
+          0.2,
+          2.0
+        ]
+      }
+    },
+    {
+      "name": "integration_sphere_s0.1_pose1",
+      "inputs": {
+        "op": "sphere",
+        "args": [
+          1.0,
+          -2.0,
+          0.5,
+          0.30000000000000004
+        ]
+      }
+    },
+    {
+      "name": "integration_sphere_no_pole_s0.1_pose1",
+      "inputs": {
+        "op": "sphere_no_pole",
+        "args": [
+          1.0,
+          -2.0,
+          0.5,
+          0.30000000000000004
+        ]
+      }
+    },
+    {
+      "name": "integration_torus_s0.1_pose1",
+      "inputs": {
+        "op": "torus",
+        "args": [
+          1.0,
+          -2.0,
+          0.5,
+          0.5,
+          0.15000000000000002
+        ]
+      }
+    },
+    {
+      "name": "integration_box_s1_pose0",
+      "inputs": {
+        "op": "box",
+        "args": [
+          0.0,
+          0.0,
+          0.0,
+          5.0,
+          10.0,
+          20.0
+        ]
+      }
+    },
+    {
+      "name": "integration_pyramid_s1_pose0",
+      "inputs": {
+        "op": "pyramid",
+        "args": [
+          0.0,
+          0.0,
+          0.0,
+          5.0,
+          20.0
+        ]
+      }
+    },
+    {
+      "name": "integration_cylinder_s1_pose0",
+      "inputs": {
+        "op": "cylinder",
+        "args": [
+          0.0,
+          0.0,
+          0.0,
+          5.0,
+          20.0
+        ]
+      }
+    },
+    {
+      "name": "integration_cone_s1_pose0",
+      "inputs": {
+        "op": "cone",
+        "args": [
+          0.0,
+          0.0,
+          0.0,
+          5.0,
+          2.0,
+          20.0
+        ]
+      }
+    },
+    {
+      "name": "integration_sphere_s1_pose0",
+      "inputs": {
+        "op": "sphere",
+        "args": [
+          0.0,
+          0.0,
+          0.0,
+          3.0
+        ]
+      }
+    },
+    {
+      "name": "integration_sphere_no_pole_s1_pose0",
+      "inputs": {
+        "op": "sphere_no_pole",
+        "args": [
+          0.0,
+          0.0,
+          0.0,
+          3.0
+        ]
+      }
+    },
+    {
+      "name": "integration_torus_s1_pose0",
+      "inputs": {
+        "op": "torus",
+        "args": [
+          0.0,
+          0.0,
+          0.0,
+          5.0,
+          1.5
+        ]
+      }
+    },
+    {
+      "name": "integration_box_s1_pose1",
+      "inputs": {
+        "op": "box",
+        "args": [
+          1.0,
+          -2.0,
+          0.5,
+          5.0,
+          10.0,
+          20.0
+        ]
+      }
+    },
+    {
+      "name": "integration_pyramid_s1_pose1",
+      "inputs": {
+        "op": "pyramid",
+        "args": [
+          1.0,
+          -2.0,
+          0.5,
+          5.0,
+          20.0
+        ]
+      }
+    },
+    {
+      "name": "integration_cylinder_s1_pose1",
+      "inputs": {
+        "op": "cylinder",
+        "args": [
+          1.0,
+          -2.0,
+          0.5,
+          5.0,
+          20.0
+        ]
+      }
+    },
+    {
+      "name": "integration_cone_s1_pose1",
+      "inputs": {
+        "op": "cone",
+        "args": [
+          1.0,
+          -2.0,
+          0.5,
+          5.0,
+          2.0,
+          20.0
+        ]
+      }
+    },
+    {
+      "name": "integration_sphere_s1_pose1",
+      "inputs": {
+        "op": "sphere",
+        "args": [
+          1.0,
+          -2.0,
+          0.5,
+          3.0
+        ]
+      }
+    },
+    {
+      "name": "integration_sphere_no_pole_s1_pose1",
+      "inputs": {
+        "op": "sphere_no_pole",
+        "args": [
+          1.0,
+          -2.0,
+          0.5,
+          3.0
+        ]
+      }
+    },
+    {
+      "name": "integration_torus_s1_pose1",
+      "inputs": {
+        "op": "torus",
+        "args": [
+          1.0,
+          -2.0,
+          0.5,
+          5.0,
+          1.5
+        ]
+      }
+    },
+    {
+      "name": "integration_box_s10_pose0",
+      "inputs": {
+        "op": "box",
+        "args": [
+          0.0,
+          0.0,
+          0.0,
+          50.0,
+          100.0,
+          200.0
+        ]
+      }
+    },
+    {
+      "name": "integration_pyramid_s10_pose0",
+      "inputs": {
+        "op": "pyramid",
+        "args": [
+          0.0,
+          0.0,
+          0.0,
+          50.0,
+          200.0
+        ]
+      }
+    },
+    {
+      "name": "integration_cylinder_s10_pose0",
+      "inputs": {
+        "op": "cylinder",
+        "args": [
+          0.0,
+          0.0,
+          0.0,
+          50.0,
+          200.0
+        ]
+      }
+    },
+    {
+      "name": "integration_cone_s10_pose0",
+      "inputs": {
+        "op": "cone",
+        "args": [
+          0.0,
+          0.0,
+          0.0,
+          50.0,
+          20.0,
+          200.0
+        ]
+      }
+    },
+    {
+      "name": "integration_sphere_s10_pose0",
+      "inputs": {
+        "op": "sphere",
+        "args": [
+          0.0,
+          0.0,
+          0.0,
+          30.0
+        ]
+      }
+    },
+    {
+      "name": "integration_sphere_no_pole_s10_pose0",
+      "inputs": {
+        "op": "sphere_no_pole",
+        "args": [
+          0.0,
+          0.0,
+          0.0,
+          30.0
+        ]
+      }
+    },
+    {
+      "name": "integration_torus_s10_pose0",
+      "inputs": {
+        "op": "torus",
+        "args": [
+          0.0,
+          0.0,
+          0.0,
+          50.0,
+          15.0
+        ]
+      }
+    },
+    {
+      "name": "integration_box_s10_pose1",
+      "inputs": {
+        "op": "box",
+        "args": [
+          1.0,
+          -2.0,
+          0.5,
+          50.0,
+          100.0,
+          200.0
+        ]
+      }
+    },
+    {
+      "name": "integration_pyramid_s10_pose1",
+      "inputs": {
+        "op": "pyramid",
+        "args": [
+          1.0,
+          -2.0,
+          0.5,
+          50.0,
+          200.0
+        ]
+      }
+    },
+    {
+      "name": "integration_cylinder_s10_pose1",
+      "inputs": {
+        "op": "cylinder",
+        "args": [
+          1.0,
+          -2.0,
+          0.5,
+          50.0,
+          200.0
+        ]
+      }
+    },
+    {
+      "name": "integration_cone_s10_pose1",
+      "inputs": {
+        "op": "cone",
+        "args": [
+          1.0,
+          -2.0,
+          0.5,
+          50.0,
+          20.0,
+          200.0
+        ]
+      }
+    },
+    {
+      "name": "integration_sphere_s10_pose1",
+      "inputs": {
+        "op": "sphere",
+        "args": [
+          1.0,
+          -2.0,
+          0.5,
+          30.0
+        ]
+      }
+    },
+    {
+      "name": "integration_sphere_no_pole_s10_pose1",
+      "inputs": {
+        "op": "sphere_no_pole",
+        "args": [
+          1.0,
+          -2.0,
+          0.5,
+          30.0
+        ]
+      }
+    },
+    {
+      "name": "integration_torus_s10_pose1",
+      "inputs": {
+        "op": "torus",
+        "args": [
+          1.0,
+          -2.0,
+          0.5,
+          50.0,
+          15.0
+        ]
+      }
+    },
+    {
+      "name": "regression_pyramid_tall_translated",
+      "inputs": {
+        "op": "pyramid",
+        "args": [
+          -36.7972315389958,
+          22.966353710197566,
+          34.750263484649366,
+          1.4911006939929627,
+          40.32956150452995
+        ]
+      }
+    }
+  ]
+}

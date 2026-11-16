@@ -1,0 +1,6137 @@
+{
+ "cases": [
+  {
+   "name": "Surface_bez_block",
+   "upstream_ref": "prog_test smSurfaceTest.cpp:4117 (my_test_surface_closest_point, my_test_drop_point: surface cache of Surface.sms)",
+   "inputs": {
+    "surf": {
+     "bspline": {
+      "oob": false,
+      "form": 11,
+      "srf": {
+       "sms": {
+        "$upstream_file": "Surface.sms"
+       }
+      }
+     }
+    },
+    "op": "bez_block"
+   }
+  },
+  {
+   "name": "Surface_nth_all",
+   "upstream_ref": "prog_test smSurfaceTest.cpp:4117 (my_test_surface_closest_point, my_test_drop_point: surface cache of Surface.sms)",
+   "inputs": {
+    "surf": {
+     "bspline": {
+      "oob": false,
+      "form": 11,
+      "srf": {
+       "sms": {
+        "$upstream_file": "Surface.sms"
+       }
+      }
+     }
+    },
+    "op": "nth",
+    "dom": [
+     0.0,
+     0.0634210842965636,
+     1.0,
+     0.6377485983139218
+    ],
+    "idx": [
+     0,
+     1,
+     2,
+     3,
+     0
+    ]
+   }
+  },
+  {
+   "name": "Surface_nth_sub",
+   "upstream_ref": "prog_test smSurfaceTest.cpp:4117 (my_test_surface_closest_point, my_test_drop_point: surface cache of Surface.sms)",
+   "inputs": {
+    "surf": {
+     "bspline": {
+      "oob": false,
+      "form": 11,
+      "srf": {
+       "sms": {
+        "$upstream_file": "Surface.sms"
+       }
+      }
+     }
+    },
+    "op": "nth",
+    "dom": [
+     0.25,
+     0.12085383569829942,
+     0.75,
+     0.40801759270697857
+    ],
+    "idx": [
+     3,
+     2,
+     1
+    ]
+   }
+  },
+  {
+   "name": "Surface_approx_block",
+   "upstream_ref": "prog_test smSurfaceTest.cpp:4117 (my_test_surface_closest_point, my_test_drop_point: surface cache of Surface.sms)",
+   "inputs": {
+    "surf": {
+     "bspline": {
+      "oob": false,
+      "form": 11,
+      "srf": {
+       "sms": {
+        "$upstream_file": "Surface.sms"
+       }
+      }
+     }
+    },
+    "op": "approx_block"
+   }
+  },
+  {
+   "name": "Surface_test_aux_data_tess",
+   "upstream_ref": "prog_test smSurfaceTest.cpp:4117 (my_test_surface_closest_point, my_test_drop_point: surface cache of Surface.sms)",
+   "inputs": {
+    "surf": {
+     "bspline": {
+      "oob": false,
+      "form": 11,
+      "srf": {
+       "sms": {
+        "$upstream_file": "Surface.sms"
+       }
+      }
+     }
+    },
+    "op": "test",
+    "cache_dom": [
+     0.0,
+     0.0634210842965636,
+     1.0,
+     0.6377485983139218
+    ],
+    "opts": {
+     "chord": 0.5,
+     "ang": 0.2617993877991494,
+     "aspect": 0.0,
+     "max_side": 0.0,
+     "min_side": 0.0,
+     "ratio": 0.001,
+     "start": 30.0
+    },
+    "aux": 6,
+    "chsat": false,
+    "angsat": false,
+    "dom": [
+     0.0,
+     0.0634210842965636,
+     1.0,
+     0.6377485983139218
+    ]
+   }
+  },
+  {
+   "name": "Surface_test_aux_data_both_sat",
+   "upstream_ref": "prog_test smSurfaceTest.cpp:4117 (my_test_surface_closest_point, my_test_drop_point: surface cache of Surface.sms)",
+   "inputs": {
+    "surf": {
+     "bspline": {
+      "oob": false,
+      "form": 11,
+      "srf": {
+       "sms": {
+        "$upstream_file": "Surface.sms"
+       }
+      }
+     }
+    },
+    "op": "test",
+    "cache_dom": [
+     0.0,
+     0.0634210842965636,
+     1.0,
+     0.6377485983139218
+    ],
+    "opts": {
+     "chord": 0.5,
+     "ang": 0.2617993877991494,
+     "aspect": 0.0,
+     "max_side": 0.0,
+     "min_side": 0.0,
+     "ratio": 0.001,
+     "start": 30.0
+    },
+    "aux": 6,
+    "chsat": true,
+    "angsat": true,
+    "dom": [
+     0.0,
+     0.0634210842965636,
+     1.0,
+     0.6377485983139218
+    ]
+   }
+  },
+  {
+   "name": "Surface_test_aux_data_no_tols",
+   "upstream_ref": "prog_test smSurfaceTest.cpp:4117 (my_test_surface_closest_point, my_test_drop_point: surface cache of Surface.sms)",
+   "inputs": {
+    "surf": {
+     "bspline": {
+      "oob": false,
+      "form": 11,
+      "srf": {
+       "sms": {
+        "$upstream_file": "Surface.sms"
+       }
+      }
+     }
+    },
+    "op": "test",
+    "cache_dom": [
+     0.0,
+     0.0634210842965636,
+     1.0,
+     0.6377485983139218
+    ],
+    "opts": {
+     "chord": 0.0,
+     "ang": 0.0,
+     "aspect": 0.0,
+     "max_side": 0.0,
+     "min_side": 0.0,
+     "ratio": 0.001,
+     "start": 30.0
+    },
+    "aux": 6,
+    "chsat": false,
+    "angsat": false,
+    "dom": [
+     0.0,
+     0.0634210842965636,
+     1.0,
+     0.6377485983139218
+    ]
+   }
+  },
+  {
+   "name": "Surface_test_aux_data_max_side",
+   "upstream_ref": "prog_test smSurfaceTest.cpp:4117 (my_test_surface_closest_point, my_test_drop_point: surface cache of Surface.sms)",
+   "inputs": {
+    "surf": {
+     "bspline": {
+      "oob": false,
+      "form": 11,
+      "srf": {
+       "sms": {
+        "$upstream_file": "Surface.sms"
+       }
+      }
+     }
+    },
+    "op": "test",
+    "cache_dom": [
+     0.0,
+     0.0634210842965636,
+     1.0,
+     0.6377485983139218
+    ],
+    "opts": {
+     "chord": 0.0,
+     "ang": 0.0,
+     "aspect": 0.0,
+     "max_side": 2.5,
+     "min_side": 0.0,
+     "ratio": 0.001,
+     "start": 30.0
+    },
+    "aux": 6,
+    "chsat": true,
+    "angsat": true,
+    "dom": [
+     0.0,
+     0.0634210842965636,
+     1.0,
+     0.6377485983139218
+    ]
+   }
+  },
+  {
+   "name": "Surface_test_aux_data_aspect",
+   "upstream_ref": "prog_test smSurfaceTest.cpp:4117 (my_test_surface_closest_point, my_test_drop_point: surface cache of Surface.sms)",
+   "inputs": {
+    "surf": {
+     "bspline": {
+      "oob": false,
+      "form": 11,
+      "srf": {
+       "sms": {
+        "$upstream_file": "Surface.sms"
+       }
+      }
+     }
+    },
+    "op": "test",
+    "cache_dom": [
+     0.0,
+     0.0634210842965636,
+     1.0,
+     0.6377485983139218
+    ],
+    "opts": {
+     "chord": 0.0,
+     "ang": 0.0,
+     "aspect": 1.5,
+     "max_side": 0.0,
+     "min_side": 0.0,
+     "ratio": 0.001,
+     "start": 30.0
+    },
+    "aux": 6,
+    "chsat": true,
+    "angsat": true,
+    "dom": [
+     0.0,
+     0.0634210842965636,
+     1.0,
+     0.6377485983139218
+    ]
+   }
+  },
+  {
+   "name": "Surface_test_aux_data_min_side_stop",
+   "upstream_ref": "prog_test smSurfaceTest.cpp:4117 (my_test_surface_closest_point, my_test_drop_point: surface cache of Surface.sms)",
+   "inputs": {
+    "surf": {
+     "bspline": {
+      "oob": false,
+      "form": 11,
+      "srf": {
+       "sms": {
+        "$upstream_file": "Surface.sms"
+       }
+      }
+     }
+    },
+    "op": "test",
+    "cache_dom": [
+     0.0,
+     0.0634210842965636,
+     1.0,
+     0.6377485983139218
+    ],
+    "opts": {
+     "chord": 1e-06,
+     "ang": 0.0,
+     "aspect": 0.0,
+     "max_side": 0.0,
+     "min_side": 500.0,
+     "ratio": 0.001,
+     "start": 30.0
+    },
+    "aux": 6,
+    "chsat": false,
+    "angsat": false,
+    "dom": [
+     0.0,
+     0.0634210842965636,
+     1.0,
+     0.6377485983139218
+    ]
+   }
+  },
+  {
+   "name": "Surface_test_patch_chord_equal",
+   "upstream_ref": "prog_test smSurfaceTest.cpp:4117 (my_test_surface_closest_point, my_test_drop_point: surface cache of Surface.sms)",
+   "inputs": {
+    "surf": {
+     "bspline": {
+      "oob": false,
+      "form": 11,
+      "srf": {
+       "sms": {
+        "$upstream_file": "Surface.sms"
+       }
+      }
+     }
+    },
+    "op": "test",
+    "cache_dom": [
+     0.0,
+     0.0634210842965636,
+     1.0,
+     0.6377485983139218
+    ],
+    "opts": {
+     "chord": 1.0,
+     "ang": 0.0,
+     "aspect": 0.0,
+     "max_side": 0.0,
+     "min_side": 0.0,
+     "ratio": 0.001,
+     "start": 30.0
+    },
+    "aux": 3,
+    "dom": [
+     0.0,
+     0.0634210842965636,
+     1.0,
+     0.6377485983139218
+    ],
+    "bez": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "ivl": [
+     [
+      0.0,
+      50.0
+     ],
+     [
+      0.0,
+      50.0
+     ],
+     [
+      0.0,
+      1.0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "Surface_test_patch_chord_above",
+   "upstream_ref": "prog_test smSurfaceTest.cpp:4117 (my_test_surface_closest_point, my_test_drop_point: surface cache of Surface.sms)",
+   "inputs": {
+    "surf": {
+     "bspline": {
+      "oob": false,
+      "form": 11,
+      "srf": {
+       "sms": {
+        "$upstream_file": "Surface.sms"
+       }
+      }
+     }
+    },
+    "op": "test",
+    "cache_dom": [
+     0.0,
+     0.0634210842965636,
+     1.0,
+     0.6377485983139218
+    ],
+    "opts": {
+     "chord": 1.0,
+     "ang": 0.0,
+     "aspect": 0.0,
+     "max_side": 0.0,
+     "min_side": 0.0,
+     "ratio": 0.001,
+     "start": 30.0
+    },
+    "aux": 3,
+    "dom": [
+     0.0,
+     0.0634210842965636,
+     1.0,
+     0.6377485983139218
+    ],
+    "bez": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "ivl": [
+     [
+      0.0,
+      50.0
+     ],
+     [
+      0.0,
+      50.0
+     ],
+     [
+      0.0,
+      2.0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "Surface_test_patch_chord_ang",
+   "upstream_ref": "prog_test smSurfaceTest.cpp:4117 (my_test_surface_closest_point, my_test_drop_point: surface cache of Surface.sms)",
+   "inputs": {
+    "surf": {
+     "bspline": {
+      "oob": false,
+      "form": 11,
+      "srf": {
+       "sms": {
+        "$upstream_file": "Surface.sms"
+       }
+      }
+     }
+    },
+    "op": "test",
+    "cache_dom": [
+     0.0,
+     0.0634210842965636,
+     1.0,
+     0.6377485983139218
+    ],
+    "opts": {
+     "chord": 1.0,
+     "ang": 0.08726646259971647,
+     "aspect": 0.0,
+     "max_side": 0.0,
+     "min_side": 0.0,
+     "ratio": 0.001,
+     "start": 30.0
+    },
+    "aux": 3,
+    "dom": [
+     0.0,
+     0.0634210842965636,
+     1.0,
+     0.6377485983139218
+    ],
+    "bez": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "ivl": [
+     [
+      0.0,
+      50.0
+     ],
+     [
+      0.0,
+      50.0
+     ],
+     [
+      0.0,
+      0.5
+     ]
+    ]
+   }
+  },
+  {
+   "name": "Surface_test_patch_ang_only",
+   "upstream_ref": "prog_test smSurfaceTest.cpp:4117 (my_test_surface_closest_point, my_test_drop_point: surface cache of Surface.sms)",
+   "inputs": {
+    "surf": {
+     "bspline": {
+      "oob": false,
+      "form": 11,
+      "srf": {
+       "sms": {
+        "$upstream_file": "Surface.sms"
+       }
+      }
+     }
+    },
+    "op": "test",
+    "cache_dom": [
+     0.0,
+     0.0634210842965636,
+     1.0,
+     0.6377485983139218
+    ],
+    "opts": {
+     "chord": 0.0,
+     "ang": 0.17453292519943295,
+     "aspect": 0.0,
+     "max_side": 0.0,
+     "min_side": 0.0,
+     "ratio": 0.001,
+     "start": 30.0
+    },
+    "aux": 3,
+    "dom": [
+     0.0,
+     0.0634210842965636,
+     1.0,
+     0.6377485983139218
+    ],
+    "bez": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "ivl": [
+     [
+      0.0,
+      50.0
+     ],
+     [
+      0.0,
+      50.0
+     ],
+     [
+      0.0,
+      0.0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "Surface_test_patch_tiny_ang",
+   "upstream_ref": "prog_test smSurfaceTest.cpp:4117 (my_test_surface_closest_point, my_test_drop_point: surface cache of Surface.sms)",
+   "inputs": {
+    "surf": {
+     "bspline": {
+      "oob": false,
+      "form": 11,
+      "srf": {
+       "sms": {
+        "$upstream_file": "Surface.sms"
+       }
+      }
+     }
+    },
+    "op": "test",
+    "cache_dom": [
+     0.0,
+     0.0634210842965636,
+     1.0,
+     0.6377485983139218
+    ],
+    "opts": {
+     "chord": 0.0,
+     "ang": 1e-14,
+     "aspect": 0.0,
+     "max_side": 0.0,
+     "min_side": 0.0,
+     "ratio": 0.001,
+     "start": 30.0
+    },
+    "aux": 3,
+    "dom": [
+     0.0,
+     0.0634210842965636,
+     1.0,
+     0.6377485983139218
+    ],
+    "bez": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "ivl": [
+     [
+      0.0,
+      50.0
+     ],
+     [
+      0.0,
+      50.0
+     ],
+     [
+      0.0,
+      0.0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "Surface_test_patch_sizes",
+   "upstream_ref": "prog_test smSurfaceTest.cpp:4117 (my_test_surface_closest_point, my_test_drop_point: surface cache of Surface.sms)",
+   "inputs": {
+    "surf": {
+     "bspline": {
+      "oob": false,
+      "form": 11,
+      "srf": {
+       "sms": {
+        "$upstream_file": "Surface.sms"
+       }
+      }
+     }
+    },
+    "op": "test",
+    "cache_dom": [
+     0.0,
+     0.0634210842965636,
+     1.0,
+     0.6377485983139218
+    ],
+    "opts": {
+     "chord": 1.0,
+     "ang": 0.0,
+     "aspect": 1.2,
+     "max_side": 5.0,
+     "min_side": 0.5,
+     "ratio": 0.001,
+     "start": 30.0
+    },
+    "aux": 3,
+    "dom": [
+     0.0,
+     0.0634210842965636,
+     1.0,
+     0.6377485983139218
+    ],
+    "bez": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "ivl": [
+     [
+      0.0,
+      50.0
+     ],
+     [
+      0.0,
+      50.0
+     ],
+     [
+      0.0,
+      0.5
+     ]
+    ]
+   }
+  },
+  {
+   "name": "Surface_test_patch_thin_u",
+   "upstream_ref": "prog_test smSurfaceTest.cpp:4117 (my_test_surface_closest_point, my_test_drop_point: surface cache of Surface.sms)",
+   "inputs": {
+    "surf": {
+     "bspline": {
+      "oob": false,
+      "form": 11,
+      "srf": {
+       "sms": {
+        "$upstream_file": "Surface.sms"
+       }
+      }
+     }
+    },
+    "op": "test",
+    "cache_dom": [
+     0.0,
+     0.0634210842965636,
+     1.0,
+     0.6377485983139218
+    ],
+    "opts": {
+     "chord": 1.0,
+     "ang": 0.0,
+     "aspect": 0.0,
+     "max_side": 0.0,
+     "min_side": 0.0,
+     "ratio": 0.0,
+     "start": 30.0
+    },
+    "aux": 3,
+    "dom": [
+     0.5,
+     0.0634210842965636,
+     0.5004,
+     0.6377485983139218
+    ],
+    "bez": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "ivl": [
+     [
+      0.0,
+      50.0
+     ],
+     [
+      0.0,
+      50.0
+     ],
+     [
+      0.0,
+      2.0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "Surface_test_patch_thin_v",
+   "upstream_ref": "prog_test smSurfaceTest.cpp:4117 (my_test_surface_closest_point, my_test_drop_point: surface cache of Surface.sms)",
+   "inputs": {
+    "surf": {
+     "bspline": {
+      "oob": false,
+      "form": 11,
+      "srf": {
+       "sms": {
+        "$upstream_file": "Surface.sms"
+       }
+      }
+     }
+    },
+    "op": "test",
+    "cache_dom": [
+     0.0,
+     0.0634210842965636,
+     1.0,
+     0.6377485983139218
+    ],
+    "opts": {
+     "chord": 1.0,
+     "ang": 0.0,
+     "aspect": 0.0,
+     "max_side": 0.0,
+     "min_side": 0.0,
+     "ratio": 0.0,
+     "start": 30.0
+    },
+    "aux": 3,
+    "dom": [
+     0.0,
+     0.3505848413052427,
+     1.0,
+     0.35081457231084967
+    ],
+    "bez": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "ivl": [
+     [
+      0.0,
+      50.0
+     ],
+     [
+      0.0,
+      50.0
+     ],
+     [
+      0.0,
+      2.0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "Surface_test_patch_thin_both",
+   "upstream_ref": "prog_test smSurfaceTest.cpp:4117 (my_test_surface_closest_point, my_test_drop_point: surface cache of Surface.sms)",
+   "inputs": {
+    "surf": {
+     "bspline": {
+      "oob": false,
+      "form": 11,
+      "srf": {
+       "sms": {
+        "$upstream_file": "Surface.sms"
+       }
+      }
+     }
+    },
+    "op": "test",
+    "cache_dom": [
+     0.0,
+     0.0634210842965636,
+     1.0,
+     0.6377485983139218
+    ],
+    "opts": {
+     "chord": 1.0,
+     "ang": 0.0,
+     "aspect": 0.0,
+     "max_side": 0.0,
+     "min_side": 0.0,
+     "ratio": 0.5,
+     "start": 30.0
+    },
+    "aux": 3,
+    "dom": [
+     0.5,
+     0.3505848413052427,
+     0.5001,
+     0.3506422740566445
+    ],
+    "bez": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "ivl": [
+     [
+      0.0,
+      50.0
+     ],
+     [
+      0.0,
+      50.0
+     ],
+     [
+      0.0,
+      2.0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "Surface_test_with_children",
+   "upstream_ref": "prog_test smSurfaceTest.cpp:4117 (my_test_surface_closest_point, my_test_drop_point: surface cache of Surface.sms)",
+   "inputs": {
+    "surf": {
+     "bspline": {
+      "oob": false,
+      "form": 11,
+      "srf": {
+       "sms": {
+        "$upstream_file": "Surface.sms"
+       }
+      }
+     }
+    },
+    "op": "test",
+    "cache_dom": [
+     0.0,
+     0.0634210842965636,
+     1.0,
+     0.6377485983139218
+    ],
+    "opts": {
+     "chord": 1.0,
+     "ang": 0.0,
+     "aspect": 0.0,
+     "max_side": 0.0,
+     "min_side": 0.0,
+     "ratio": 0.001,
+     "start": 30.0
+    },
+    "aux": 3,
+    "children": true,
+    "dom": [
+     0.0,
+     0.0634210842965636,
+     1.0,
+     0.6377485983139218
+    ],
+    "bez": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "ivl": [
+     [
+      0,
+      1
+     ],
+     [
+      0,
+      1
+     ],
+     [
+      0,
+      1
+     ]
+    ]
+   }
+  },
+  {
+   "name": "Surface_test_head_node",
+   "upstream_ref": "prog_test smSurfaceTest.cpp:4117 (my_test_surface_closest_point, my_test_drop_point: surface cache of Surface.sms)",
+   "inputs": {
+    "surf": {
+     "bspline": {
+      "oob": false,
+      "form": 11,
+      "srf": {
+       "sms": {
+        "$upstream_file": "Surface.sms"
+       }
+      }
+     }
+    },
+    "op": "test",
+    "cache_dom": [
+     0.0,
+     0.0634210842965636,
+     1.0,
+     0.6377485983139218
+    ],
+    "opts": {
+     "chord": 1.0,
+     "ang": 0.0,
+     "aspect": 0.0,
+     "max_side": 0.0,
+     "min_side": 0.0,
+     "ratio": 0.001,
+     "start": 30.0
+    },
+    "aux": 4,
+    "dom": [
+     0.0,
+     0.0634210842965636,
+     1.0,
+     0.6377485983139218
+    ]
+   }
+  },
+  {
+   "name": "Surface_subdiv_block_no_surface",
+   "upstream_ref": "prog_test smSurfaceTest.cpp:4117 (my_test_surface_closest_point, my_test_drop_point: surface cache of Surface.sms)",
+   "inputs": {
+    "surf": {
+     "bspline": {
+      "oob": false,
+      "form": 11,
+      "srf": {
+       "sms": {
+        "$upstream_file": "Surface.sms"
+       }
+      }
+     }
+    },
+    "op": "subdiv_block",
+    "opts": {
+     "chord": 0.5,
+     "ang": 0.2617993877991494,
+     "aspect": 0.0,
+     "max_side": 0.0,
+     "min_side": 0.0,
+     "ratio": 0.001,
+     "start": 30.0
+    },
+    "dom": [
+     0.0,
+     0.0634210842965636,
+     1.0,
+     0.6377485983139218
+    ],
+    "nosurf": true
+   }
+  },
+  {
+   "name": "Surface_subdiv_block",
+   "upstream_ref": "prog_test smSurfaceTest.cpp:4117 (my_test_surface_closest_point, my_test_drop_point: surface cache of Surface.sms)",
+   "inputs": {
+    "surf": {
+     "bspline": {
+      "oob": false,
+      "form": 11,
+      "srf": {
+       "sms": {
+        "$upstream_file": "Surface.sms"
+       }
+      }
+     }
+    },
+    "op": "subdiv_block",
+    "opts": {
+     "chord": 0.5,
+     "ang": 0.2617993877991494,
+     "aspect": 0.0,
+     "max_side": 0.0,
+     "min_side": 0.0,
+     "ratio": 0.001,
+     "start": 30.0
+    },
+    "dom": [
+     0.0,
+     0.0634210842965636,
+     1.0,
+     0.6377485983139218
+    ]
+   }
+  },
+  {
+   "name": "Surface_cbs_nth",
+   "upstream_ref": "prog_test smSurfaceTest.cpp:4117 (my_test_surface_closest_point, my_test_drop_point: surface cache of Surface.sms)",
+   "inputs": {
+    "surf": {
+     "curve_bounded": {
+      "oob": false,
+      "form": 11,
+      "srf": {
+       "sms": {
+        "$upstream_file": "Surface.sms"
+       }
+      }
+     }
+    },
+    "op": "nth",
+    "dom": [
+     0.0,
+     0.0634210842965636,
+     1.0,
+     0.6377485983139218
+    ],
+    "idx": [
+     0,
+     3
+    ]
+   }
+  },
+  {
+   "name": "Surface_cbs_approx_block",
+   "upstream_ref": "prog_test smSurfaceTest.cpp:4117 (my_test_surface_closest_point, my_test_drop_point: surface cache of Surface.sms)",
+   "inputs": {
+    "surf": {
+     "curve_bounded": {
+      "oob": false,
+      "form": 11,
+      "srf": {
+       "sms": {
+        "$upstream_file": "Surface.sms"
+       }
+      }
+     }
+    },
+    "op": "approx_block"
+   }
+  },
+  {
+   "name": "Surface_cbs_test_patch",
+   "upstream_ref": "prog_test smSurfaceTest.cpp:4117 (my_test_surface_closest_point, my_test_drop_point: surface cache of Surface.sms)",
+   "inputs": {
+    "surf": {
+     "curve_bounded": {
+      "oob": false,
+      "form": 11,
+      "srf": {
+       "sms": {
+        "$upstream_file": "Surface.sms"
+       }
+      }
+     }
+    },
+    "op": "test",
+    "cache_dom": [
+     0.0,
+     0.0634210842965636,
+     1.0,
+     0.6377485983139218
+    ],
+    "opts": {
+     "chord": 1.0,
+     "ang": 0.17453292519943295,
+     "aspect": 0.0,
+     "max_side": 0.0,
+     "min_side": 0.0,
+     "ratio": 0.001,
+     "start": 30.0
+    },
+    "aux": 3,
+    "dom": [
+     0.0,
+     0.0634210842965636,
+     1.0,
+     0.6377485983139218
+    ],
+    "bez": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "ivl": [
+     [
+      0,
+      1
+     ],
+     [
+      0,
+      1
+     ],
+     [
+      0,
+      2.0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "Surface_cbs_test_patch_flat",
+   "upstream_ref": "prog_test smSurfaceTest.cpp:4117 (my_test_surface_closest_point, my_test_drop_point: surface cache of Surface.sms)",
+   "inputs": {
+    "surf": {
+     "curve_bounded": {
+      "oob": false,
+      "form": 11,
+      "srf": {
+       "sms": {
+        "$upstream_file": "Surface.sms"
+       }
+      }
+     }
+    },
+    "op": "test",
+    "cache_dom": [
+     0.0,
+     0.0634210842965636,
+     1.0,
+     0.6377485983139218
+    ],
+    "opts": {
+     "chord": 1.0,
+     "ang": 0.0,
+     "aspect": 1.1,
+     "max_side": 0.0,
+     "min_side": 0.0,
+     "ratio": 0.001,
+     "start": 30.0
+    },
+    "aux": 3,
+    "dom": [
+     0.0,
+     0.0634210842965636,
+     1.0,
+     0.6377485983139218
+    ],
+    "bez": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "ivl": [
+     [
+      0,
+      1
+     ],
+     [
+      0,
+      1
+     ],
+     [
+      0,
+      0.5
+     ]
+    ]
+   }
+  },
+  {
+   "name": "offset_nurb_bez_block",
+   "upstream_ref": "prog_test smFilletTest.cpp:3769 (offset_nurb.sms)",
+   "inputs": {
+    "surf": {
+     "bspline": {
+      "oob": false,
+      "form": 11,
+      "srf": {
+       "sms": {
+        "$upstream_file": "offset_nurb.sms"
+       }
+      }
+     }
+    },
+    "op": "bez_block"
+   }
+  },
+  {
+   "name": "offset_nurb_nth_all",
+   "upstream_ref": "prog_test smFilletTest.cpp:3769 (offset_nurb.sms)",
+   "inputs": {
+    "surf": {
+     "bspline": {
+      "oob": false,
+      "form": 11,
+      "srf": {
+       "sms": {
+        "$upstream_file": "offset_nurb.sms"
+       }
+      }
+     }
+    },
+    "op": "nth",
+    "dom": [
+     -5.475299932110956,
+     0.0,
+     0.0,
+     10.0
+    ],
+    "idx": [
+     0,
+     1,
+     2,
+     3,
+     0
+    ]
+   }
+  },
+  {
+   "name": "offset_nurb_nth_sub",
+   "upstream_ref": "prog_test smFilletTest.cpp:3769 (offset_nurb.sms)",
+   "inputs": {
+    "surf": {
+     "bspline": {
+      "oob": false,
+      "form": 11,
+      "srf": {
+       "sms": {
+        "$upstream_file": "offset_nurb.sms"
+       }
+      }
+     }
+    },
+    "op": "nth",
+    "dom": [
+     -4.106474949083217,
+     1.0,
+     -1.3688249830277393,
+     6.0
+    ],
+    "idx": [
+     3,
+     2,
+     1
+    ]
+   }
+  },
+  {
+   "name": "offset_nurb_approx_block",
+   "upstream_ref": "prog_test smFilletTest.cpp:3769 (offset_nurb.sms)",
+   "inputs": {
+    "surf": {
+     "bspline": {
+      "oob": false,
+      "form": 11,
+      "srf": {
+       "sms": {
+        "$upstream_file": "offset_nurb.sms"
+       }
+      }
+     }
+    },
+    "op": "approx_block"
+   }
+  },
+  {
+   "name": "offset_nurb_test_aux_data_tess",
+   "upstream_ref": "prog_test smFilletTest.cpp:3769 (offset_nurb.sms)",
+   "inputs": {
+    "surf": {
+     "bspline": {
+      "oob": false,
+      "form": 11,
+      "srf": {
+       "sms": {
+        "$upstream_file": "offset_nurb.sms"
+       }
+      }
+     }
+    },
+    "op": "test",
+    "cache_dom": [
+     -5.475299932110956,
+     0.0,
+     0.0,
+     10.0
+    ],
+    "opts": {
+     "chord": 0.2,
+     "ang": 0.2617993877991494,
+     "aspect": 0.0,
+     "max_side": 0.0,
+     "min_side": 0.0,
+     "ratio": 0.001,
+     "start": 30.0
+    },
+    "aux": 6,
+    "chsat": false,
+    "angsat": false,
+    "dom": [
+     -5.475299932110956,
+     0.0,
+     0.0,
+     10.0
+    ]
+   }
+  },
+  {
+   "name": "offset_nurb_test_aux_data_both_sat",
+   "upstream_ref": "prog_test smFilletTest.cpp:3769 (offset_nurb.sms)",
+   "inputs": {
+    "surf": {
+     "bspline": {
+      "oob": false,
+      "form": 11,
+      "srf": {
+       "sms": {
+        "$upstream_file": "offset_nurb.sms"
+       }
+      }
+     }
+    },
+    "op": "test",
+    "cache_dom": [
+     -5.475299932110956,
+     0.0,
+     0.0,
+     10.0
+    ],
+    "opts": {
+     "chord": 0.2,
+     "ang": 0.2617993877991494,
+     "aspect": 0.0,
+     "max_side": 0.0,
+     "min_side": 0.0,
+     "ratio": 0.001,
+     "start": 30.0
+    },
+    "aux": 6,
+    "chsat": true,
+    "angsat": true,
+    "dom": [
+     -5.475299932110956,
+     0.0,
+     0.0,
+     10.0
+    ]
+   }
+  },
+  {
+   "name": "offset_nurb_test_aux_data_no_tols",
+   "upstream_ref": "prog_test smFilletTest.cpp:3769 (offset_nurb.sms)",
+   "inputs": {
+    "surf": {
+     "bspline": {
+      "oob": false,
+      "form": 11,
+      "srf": {
+       "sms": {
+        "$upstream_file": "offset_nurb.sms"
+       }
+      }
+     }
+    },
+    "op": "test",
+    "cache_dom": [
+     -5.475299932110956,
+     0.0,
+     0.0,
+     10.0
+    ],
+    "opts": {
+     "chord": 0.0,
+     "ang": 0.0,
+     "aspect": 0.0,
+     "max_side": 0.0,
+     "min_side": 0.0,
+     "ratio": 0.001,
+     "start": 30.0
+    },
+    "aux": 6,
+    "chsat": false,
+    "angsat": false,
+    "dom": [
+     -5.475299932110956,
+     0.0,
+     0.0,
+     10.0
+    ]
+   }
+  },
+  {
+   "name": "offset_nurb_test_aux_data_max_side",
+   "upstream_ref": "prog_test smFilletTest.cpp:3769 (offset_nurb.sms)",
+   "inputs": {
+    "surf": {
+     "bspline": {
+      "oob": false,
+      "form": 11,
+      "srf": {
+       "sms": {
+        "$upstream_file": "offset_nurb.sms"
+       }
+      }
+     }
+    },
+    "op": "test",
+    "cache_dom": [
+     -5.475299932110956,
+     0.0,
+     0.0,
+     10.0
+    ],
+    "opts": {
+     "chord": 0.0,
+     "ang": 0.0,
+     "aspect": 0.0,
+     "max_side": 1.0,
+     "min_side": 0.0,
+     "ratio": 0.001,
+     "start": 30.0
+    },
+    "aux": 6,
+    "chsat": true,
+    "angsat": true,
+    "dom": [
+     -5.475299932110956,
+     0.0,
+     0.0,
+     10.0
+    ]
+   }
+  },
+  {
+   "name": "offset_nurb_test_aux_data_aspect",
+   "upstream_ref": "prog_test smFilletTest.cpp:3769 (offset_nurb.sms)",
+   "inputs": {
+    "surf": {
+     "bspline": {
+      "oob": false,
+      "form": 11,
+      "srf": {
+       "sms": {
+        "$upstream_file": "offset_nurb.sms"
+       }
+      }
+     }
+    },
+    "op": "test",
+    "cache_dom": [
+     -5.475299932110956,
+     0.0,
+     0.0,
+     10.0
+    ],
+    "opts": {
+     "chord": 0.0,
+     "ang": 0.0,
+     "aspect": 1.5,
+     "max_side": 0.0,
+     "min_side": 0.0,
+     "ratio": 0.001,
+     "start": 30.0
+    },
+    "aux": 6,
+    "chsat": true,
+    "angsat": true,
+    "dom": [
+     -5.475299932110956,
+     0.0,
+     0.0,
+     10.0
+    ]
+   }
+  },
+  {
+   "name": "offset_nurb_test_aux_data_min_side_stop",
+   "upstream_ref": "prog_test smFilletTest.cpp:3769 (offset_nurb.sms)",
+   "inputs": {
+    "surf": {
+     "bspline": {
+      "oob": false,
+      "form": 11,
+      "srf": {
+       "sms": {
+        "$upstream_file": "offset_nurb.sms"
+       }
+      }
+     }
+    },
+    "op": "test",
+    "cache_dom": [
+     -5.475299932110956,
+     0.0,
+     0.0,
+     10.0
+    ],
+    "opts": {
+     "chord": 1e-06,
+     "ang": 0.0,
+     "aspect": 0.0,
+     "max_side": 0.0,
+     "min_side": 200.0,
+     "ratio": 0.001,
+     "start": 30.0
+    },
+    "aux": 6,
+    "chsat": false,
+    "angsat": false,
+    "dom": [
+     -5.475299932110956,
+     0.0,
+     0.0,
+     10.0
+    ]
+   }
+  },
+  {
+   "name": "offset_nurb_test_patch_chord_equal",
+   "upstream_ref": "prog_test smFilletTest.cpp:3769 (offset_nurb.sms)",
+   "inputs": {
+    "surf": {
+     "bspline": {
+      "oob": false,
+      "form": 11,
+      "srf": {
+       "sms": {
+        "$upstream_file": "offset_nurb.sms"
+       }
+      }
+     }
+    },
+    "op": "test",
+    "cache_dom": [
+     -5.475299932110956,
+     0.0,
+     0.0,
+     10.0
+    ],
+    "opts": {
+     "chord": 0.4,
+     "ang": 0.0,
+     "aspect": 0.0,
+     "max_side": 0.0,
+     "min_side": 0.0,
+     "ratio": 0.001,
+     "start": 30.0
+    },
+    "aux": 3,
+    "dom": [
+     -5.475299932110956,
+     0.0,
+     0.0,
+     10.0
+    ],
+    "bez": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    },
+    "ivl": [
+     [
+      0.0,
+      20.0
+     ],
+     [
+      0.0,
+      20.0
+     ],
+     [
+      0.0,
+      0.4
+     ]
+    ]
+   }
+  },
+  {
+   "name": "offset_nurb_test_patch_chord_above",
+   "upstream_ref": "prog_test smFilletTest.cpp:3769 (offset_nurb.sms)",
+   "inputs": {
+    "surf": {
+     "bspline": {
+      "oob": false,
+      "form": 11,
+      "srf": {
+       "sms": {
+        "$upstream_file": "offset_nurb.sms"
+       }
+      }
+     }
+    },
+    "op": "test",
+    "cache_dom": [
+     -5.475299932110956,
+     0.0,
+     0.0,
+     10.0
+    ],
+    "opts": {
+     "chord": 0.4,
+     "ang": 0.0,
+     "aspect": 0.0,
+     "max_side": 0.0,
+     "min_side": 0.0,
+     "ratio": 0.001,
+     "start": 30.0
+    },
+    "aux": 3,
+    "dom": [
+     -5.475299932110956,
+     0.0,
+     0.0,
+     10.0
+    ],
+    "bez": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    },
+    "ivl": [
+     [
+      0.0,
+      20.0
+     ],
+     [
+      0.0,
+      20.0
+     ],
+     [
+      0.0,
+      0.8
+     ]
+    ]
+   }
+  },
+  {
+   "name": "offset_nurb_test_patch_chord_ang",
+   "upstream_ref": "prog_test smFilletTest.cpp:3769 (offset_nurb.sms)",
+   "inputs": {
+    "surf": {
+     "bspline": {
+      "oob": false,
+      "form": 11,
+      "srf": {
+       "sms": {
+        "$upstream_file": "offset_nurb.sms"
+       }
+      }
+     }
+    },
+    "op": "test",
+    "cache_dom": [
+     -5.475299932110956,
+     0.0,
+     0.0,
+     10.0
+    ],
+    "opts": {
+     "chord": 0.4,
+     "ang": 0.08726646259971647,
+     "aspect": 0.0,
+     "max_side": 0.0,
+     "min_side": 0.0,
+     "ratio": 0.001,
+     "start": 30.0
+    },
+    "aux": 3,
+    "dom": [
+     -5.475299932110956,
+     0.0,
+     0.0,
+     10.0
+    ],
+    "bez": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    },
+    "ivl": [
+     [
+      0.0,
+      20.0
+     ],
+     [
+      0.0,
+      20.0
+     ],
+     [
+      0.0,
+      0.2
+     ]
+    ]
+   }
+  },
+  {
+   "name": "offset_nurb_test_patch_ang_only",
+   "upstream_ref": "prog_test smFilletTest.cpp:3769 (offset_nurb.sms)",
+   "inputs": {
+    "surf": {
+     "bspline": {
+      "oob": false,
+      "form": 11,
+      "srf": {
+       "sms": {
+        "$upstream_file": "offset_nurb.sms"
+       }
+      }
+     }
+    },
+    "op": "test",
+    "cache_dom": [
+     -5.475299932110956,
+     0.0,
+     0.0,
+     10.0
+    ],
+    "opts": {
+     "chord": 0.0,
+     "ang": 0.17453292519943295,
+     "aspect": 0.0,
+     "max_side": 0.0,
+     "min_side": 0.0,
+     "ratio": 0.001,
+     "start": 30.0
+    },
+    "aux": 3,
+    "dom": [
+     -5.475299932110956,
+     0.0,
+     0.0,
+     10.0
+    ],
+    "bez": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    },
+    "ivl": [
+     [
+      0.0,
+      20.0
+     ],
+     [
+      0.0,
+      20.0
+     ],
+     [
+      0.0,
+      0.0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "offset_nurb_test_patch_tiny_ang",
+   "upstream_ref": "prog_test smFilletTest.cpp:3769 (offset_nurb.sms)",
+   "inputs": {
+    "surf": {
+     "bspline": {
+      "oob": false,
+      "form": 11,
+      "srf": {
+       "sms": {
+        "$upstream_file": "offset_nurb.sms"
+       }
+      }
+     }
+    },
+    "op": "test",
+    "cache_dom": [
+     -5.475299932110956,
+     0.0,
+     0.0,
+     10.0
+    ],
+    "opts": {
+     "chord": 0.0,
+     "ang": 1e-14,
+     "aspect": 0.0,
+     "max_side": 0.0,
+     "min_side": 0.0,
+     "ratio": 0.001,
+     "start": 30.0
+    },
+    "aux": 3,
+    "dom": [
+     -5.475299932110956,
+     0.0,
+     0.0,
+     10.0
+    ],
+    "bez": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    },
+    "ivl": [
+     [
+      0.0,
+      20.0
+     ],
+     [
+      0.0,
+      20.0
+     ],
+     [
+      0.0,
+      0.0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "offset_nurb_test_patch_sizes",
+   "upstream_ref": "prog_test smFilletTest.cpp:3769 (offset_nurb.sms)",
+   "inputs": {
+    "surf": {
+     "bspline": {
+      "oob": false,
+      "form": 11,
+      "srf": {
+       "sms": {
+        "$upstream_file": "offset_nurb.sms"
+       }
+      }
+     }
+    },
+    "op": "test",
+    "cache_dom": [
+     -5.475299932110956,
+     0.0,
+     0.0,
+     10.0
+    ],
+    "opts": {
+     "chord": 0.4,
+     "ang": 0.0,
+     "aspect": 1.2,
+     "max_side": 2.0,
+     "min_side": 0.2,
+     "ratio": 0.001,
+     "start": 30.0
+    },
+    "aux": 3,
+    "dom": [
+     -5.475299932110956,
+     0.0,
+     0.0,
+     10.0
+    ],
+    "bez": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    },
+    "ivl": [
+     [
+      0.0,
+      20.0
+     ],
+     [
+      0.0,
+      20.0
+     ],
+     [
+      0.0,
+      0.2
+     ]
+    ]
+   }
+  },
+  {
+   "name": "offset_nurb_test_patch_thin_u",
+   "upstream_ref": "prog_test smFilletTest.cpp:3769 (offset_nurb.sms)",
+   "inputs": {
+    "surf": {
+     "bspline": {
+      "oob": false,
+      "form": 11,
+      "srf": {
+       "sms": {
+        "$upstream_file": "offset_nurb.sms"
+       }
+      }
+     }
+    },
+    "op": "test",
+    "cache_dom": [
+     -5.475299932110956,
+     0.0,
+     0.0,
+     10.0
+    ],
+    "opts": {
+     "chord": 0.4,
+     "ang": 0.0,
+     "aspect": 0.0,
+     "max_side": 0.0,
+     "min_side": 0.0,
+     "ratio": 0.0,
+     "start": 30.0
+    },
+    "aux": 3,
+    "dom": [
+     -2.737649966055478,
+     0.0,
+     -2.735459846082634,
+     10.0
+    ],
+    "bez": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    },
+    "ivl": [
+     [
+      0.0,
+      20.0
+     ],
+     [
+      0.0,
+      20.0
+     ],
+     [
+      0.0,
+      0.8
+     ]
+    ]
+   }
+  },
+  {
+   "name": "offset_nurb_test_patch_thin_v",
+   "upstream_ref": "prog_test smFilletTest.cpp:3769 (offset_nurb.sms)",
+   "inputs": {
+    "surf": {
+     "bspline": {
+      "oob": false,
+      "form": 11,
+      "srf": {
+       "sms": {
+        "$upstream_file": "offset_nurb.sms"
+       }
+      }
+     }
+    },
+    "op": "test",
+    "cache_dom": [
+     -5.475299932110956,
+     0.0,
+     0.0,
+     10.0
+    ],
+    "opts": {
+     "chord": 0.4,
+     "ang": 0.0,
+     "aspect": 0.0,
+     "max_side": 0.0,
+     "min_side": 0.0,
+     "ratio": 0.0,
+     "start": 30.0
+    },
+    "aux": 3,
+    "dom": [
+     -5.475299932110956,
+     5.0,
+     0.0,
+     5.004
+    ],
+    "bez": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    },
+    "ivl": [
+     [
+      0.0,
+      20.0
+     ],
+     [
+      0.0,
+      20.0
+     ],
+     [
+      0.0,
+      0.8
+     ]
+    ]
+   }
+  },
+  {
+   "name": "offset_nurb_test_patch_thin_both",
+   "upstream_ref": "prog_test smFilletTest.cpp:3769 (offset_nurb.sms)",
+   "inputs": {
+    "surf": {
+     "bspline": {
+      "oob": false,
+      "form": 11,
+      "srf": {
+       "sms": {
+        "$upstream_file": "offset_nurb.sms"
+       }
+      }
+     }
+    },
+    "op": "test",
+    "cache_dom": [
+     -5.475299932110956,
+     0.0,
+     0.0,
+     10.0
+    ],
+    "opts": {
+     "chord": 0.4,
+     "ang": 0.0,
+     "aspect": 0.0,
+     "max_side": 0.0,
+     "min_side": 0.0,
+     "ratio": 0.5,
+     "start": 30.0
+    },
+    "aux": 3,
+    "dom": [
+     -2.737649966055478,
+     5.0,
+     -2.737102436062267,
+     5.0009999999999994
+    ],
+    "bez": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    },
+    "ivl": [
+     [
+      0.0,
+      20.0
+     ],
+     [
+      0.0,
+      20.0
+     ],
+     [
+      0.0,
+      0.8
+     ]
+    ]
+   }
+  },
+  {
+   "name": "offset_nurb_test_with_children",
+   "upstream_ref": "prog_test smFilletTest.cpp:3769 (offset_nurb.sms)",
+   "inputs": {
+    "surf": {
+     "bspline": {
+      "oob": false,
+      "form": 11,
+      "srf": {
+       "sms": {
+        "$upstream_file": "offset_nurb.sms"
+       }
+      }
+     }
+    },
+    "op": "test",
+    "cache_dom": [
+     -5.475299932110956,
+     0.0,
+     0.0,
+     10.0
+    ],
+    "opts": {
+     "chord": 0.4,
+     "ang": 0.0,
+     "aspect": 0.0,
+     "max_side": 0.0,
+     "min_side": 0.0,
+     "ratio": 0.001,
+     "start": 30.0
+    },
+    "aux": 3,
+    "children": true,
+    "dom": [
+     -5.475299932110956,
+     0.0,
+     0.0,
+     10.0
+    ],
+    "bez": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    },
+    "ivl": [
+     [
+      0,
+      1
+     ],
+     [
+      0,
+      1
+     ],
+     [
+      0,
+      1
+     ]
+    ]
+   }
+  },
+  {
+   "name": "offset_nurb_test_head_node",
+   "upstream_ref": "prog_test smFilletTest.cpp:3769 (offset_nurb.sms)",
+   "inputs": {
+    "surf": {
+     "bspline": {
+      "oob": false,
+      "form": 11,
+      "srf": {
+       "sms": {
+        "$upstream_file": "offset_nurb.sms"
+       }
+      }
+     }
+    },
+    "op": "test",
+    "cache_dom": [
+     -5.475299932110956,
+     0.0,
+     0.0,
+     10.0
+    ],
+    "opts": {
+     "chord": 0.4,
+     "ang": 0.0,
+     "aspect": 0.0,
+     "max_side": 0.0,
+     "min_side": 0.0,
+     "ratio": 0.001,
+     "start": 30.0
+    },
+    "aux": 4,
+    "dom": [
+     -5.475299932110956,
+     0.0,
+     0.0,
+     10.0
+    ]
+   }
+  },
+  {
+   "name": "offset_nurb_subdiv_block_no_surface",
+   "upstream_ref": "prog_test smFilletTest.cpp:3769 (offset_nurb.sms)",
+   "inputs": {
+    "surf": {
+     "bspline": {
+      "oob": false,
+      "form": 11,
+      "srf": {
+       "sms": {
+        "$upstream_file": "offset_nurb.sms"
+       }
+      }
+     }
+    },
+    "op": "subdiv_block",
+    "opts": {
+     "chord": 0.2,
+     "ang": 0.2617993877991494,
+     "aspect": 0.0,
+     "max_side": 0.0,
+     "min_side": 0.0,
+     "ratio": 0.001,
+     "start": 30.0
+    },
+    "dom": [
+     -5.475299932110956,
+     0.0,
+     0.0,
+     10.0
+    ],
+    "nosurf": true
+   }
+  },
+  {
+   "name": "offset_nurb_subdiv_block",
+   "upstream_ref": "prog_test smFilletTest.cpp:3769 (offset_nurb.sms)",
+   "inputs": {
+    "surf": {
+     "bspline": {
+      "oob": false,
+      "form": 11,
+      "srf": {
+       "sms": {
+        "$upstream_file": "offset_nurb.sms"
+       }
+      }
+     }
+    },
+    "op": "subdiv_block",
+    "opts": {
+     "chord": 0.2,
+     "ang": 0.2617993877991494,
+     "aspect": 0.0,
+     "max_side": 0.0,
+     "min_side": 0.0,
+     "ratio": 0.001,
+     "start": 30.0
+    },
+    "dom": [
+     -5.475299932110956,
+     0.0,
+     0.0,
+     10.0
+    ]
+   }
+  },
+  {
+   "name": "offset_nurb_cbs_nth",
+   "upstream_ref": "prog_test smFilletTest.cpp:3769 (offset_nurb.sms)",
+   "inputs": {
+    "surf": {
+     "curve_bounded": {
+      "oob": false,
+      "form": 11,
+      "srf": {
+       "sms": {
+        "$upstream_file": "offset_nurb.sms"
+       }
+      }
+     }
+    },
+    "op": "nth",
+    "dom": [
+     -5.475299932110956,
+     0.0,
+     0.0,
+     10.0
+    ],
+    "idx": [
+     0,
+     3
+    ]
+   }
+  },
+  {
+   "name": "offset_nurb_cbs_approx_block",
+   "upstream_ref": "prog_test smFilletTest.cpp:3769 (offset_nurb.sms)",
+   "inputs": {
+    "surf": {
+     "curve_bounded": {
+      "oob": false,
+      "form": 11,
+      "srf": {
+       "sms": {
+        "$upstream_file": "offset_nurb.sms"
+       }
+      }
+     }
+    },
+    "op": "approx_block"
+   }
+  },
+  {
+   "name": "offset_nurb_cbs_test_patch",
+   "upstream_ref": "prog_test smFilletTest.cpp:3769 (offset_nurb.sms)",
+   "inputs": {
+    "surf": {
+     "curve_bounded": {
+      "oob": false,
+      "form": 11,
+      "srf": {
+       "sms": {
+        "$upstream_file": "offset_nurb.sms"
+       }
+      }
+     }
+    },
+    "op": "test",
+    "cache_dom": [
+     -5.475299932110956,
+     0.0,
+     0.0,
+     10.0
+    ],
+    "opts": {
+     "chord": 0.4,
+     "ang": 0.17453292519943295,
+     "aspect": 0.0,
+     "max_side": 0.0,
+     "min_side": 0.0,
+     "ratio": 0.001,
+     "start": 30.0
+    },
+    "aux": 3,
+    "dom": [
+     -5.475299932110956,
+     0.0,
+     0.0,
+     10.0
+    ],
+    "bez": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    },
+    "ivl": [
+     [
+      0,
+      1
+     ],
+     [
+      0,
+      1
+     ],
+     [
+      0,
+      0.8
+     ]
+    ]
+   }
+  },
+  {
+   "name": "offset_nurb_cbs_test_patch_flat",
+   "upstream_ref": "prog_test smFilletTest.cpp:3769 (offset_nurb.sms)",
+   "inputs": {
+    "surf": {
+     "curve_bounded": {
+      "oob": false,
+      "form": 11,
+      "srf": {
+       "sms": {
+        "$upstream_file": "offset_nurb.sms"
+       }
+      }
+     }
+    },
+    "op": "test",
+    "cache_dom": [
+     -5.475299932110956,
+     0.0,
+     0.0,
+     10.0
+    ],
+    "opts": {
+     "chord": 0.4,
+     "ang": 0.0,
+     "aspect": 1.1,
+     "max_side": 0.0,
+     "min_side": 0.0,
+     "ratio": 0.001,
+     "start": 30.0
+    },
+    "aux": 3,
+    "dom": [
+     -5.475299932110956,
+     0.0,
+     0.0,
+     10.0
+    ],
+    "bez": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    },
+    "ivl": [
+     [
+      0,
+      1
+     ],
+     [
+      0,
+      1
+     ],
+     [
+      0,
+      0.2
+     ]
+    ]
+   }
+  },
+  {
+   "name": "DropCurveSurface_bez_block",
+   "upstream_ref": "pt_TestFiles/DropCurveSurface.sms (planar bilinear patch; my_test_drop_point family)",
+   "inputs": {
+    "surf": {
+     "bspline": {
+      "oob": false,
+      "form": 11,
+      "srf": {
+       "sms": {
+        "$upstream_file": "DropCurveSurface.sms"
+       }
+      }
+     }
+    },
+    "op": "bez_block"
+   }
+  },
+  {
+   "name": "DropCurveSurface_nth_all",
+   "upstream_ref": "pt_TestFiles/DropCurveSurface.sms (planar bilinear patch; my_test_drop_point family)",
+   "inputs": {
+    "surf": {
+     "bspline": {
+      "oob": false,
+      "form": 11,
+      "srf": {
+       "sms": {
+        "$upstream_file": "DropCurveSurface.sms"
+       }
+      }
+     }
+    },
+    "op": "nth",
+    "dom": [
+     0.0,
+     0.0,
+     1.0,
+     1.0
+    ],
+    "idx": [
+     0,
+     1,
+     2,
+     3,
+     0
+    ]
+   }
+  },
+  {
+   "name": "DropCurveSurface_nth_sub",
+   "upstream_ref": "pt_TestFiles/DropCurveSurface.sms (planar bilinear patch; my_test_drop_point family)",
+   "inputs": {
+    "surf": {
+     "bspline": {
+      "oob": false,
+      "form": 11,
+      "srf": {
+       "sms": {
+        "$upstream_file": "DropCurveSurface.sms"
+       }
+      }
+     }
+    },
+    "op": "nth",
+    "dom": [
+     0.25,
+     0.1,
+     0.75,
+     0.6
+    ],
+    "idx": [
+     3,
+     2,
+     1
+    ]
+   }
+  },
+  {
+   "name": "DropCurveSurface_approx_block",
+   "upstream_ref": "pt_TestFiles/DropCurveSurface.sms (planar bilinear patch; my_test_drop_point family)",
+   "inputs": {
+    "surf": {
+     "bspline": {
+      "oob": false,
+      "form": 11,
+      "srf": {
+       "sms": {
+        "$upstream_file": "DropCurveSurface.sms"
+       }
+      }
+     }
+    },
+    "op": "approx_block"
+   }
+  },
+  {
+   "name": "DropCurveSurface_test_aux_data_tess",
+   "upstream_ref": "pt_TestFiles/DropCurveSurface.sms (planar bilinear patch; my_test_drop_point family)",
+   "inputs": {
+    "surf": {
+     "bspline": {
+      "oob": false,
+      "form": 11,
+      "srf": {
+       "sms": {
+        "$upstream_file": "DropCurveSurface.sms"
+       }
+      }
+     }
+    },
+    "op": "test",
+    "cache_dom": [
+     0.0,
+     0.0,
+     1.0,
+     1.0
+    ],
+    "opts": {
+     "chord": 1.0,
+     "ang": 0.2617993877991494,
+     "aspect": 0.0,
+     "max_side": 0.0,
+     "min_side": 0.0,
+     "ratio": 0.001,
+     "start": 30.0
+    },
+    "aux": 6,
+    "chsat": false,
+    "angsat": false,
+    "dom": [
+     0.0,
+     0.0,
+     1.0,
+     1.0
+    ]
+   }
+  },
+  {
+   "name": "DropCurveSurface_test_aux_data_both_sat",
+   "upstream_ref": "pt_TestFiles/DropCurveSurface.sms (planar bilinear patch; my_test_drop_point family)",
+   "inputs": {
+    "surf": {
+     "bspline": {
+      "oob": false,
+      "form": 11,
+      "srf": {
+       "sms": {
+        "$upstream_file": "DropCurveSurface.sms"
+       }
+      }
+     }
+    },
+    "op": "test",
+    "cache_dom": [
+     0.0,
+     0.0,
+     1.0,
+     1.0
+    ],
+    "opts": {
+     "chord": 1.0,
+     "ang": 0.2617993877991494,
+     "aspect": 0.0,
+     "max_side": 0.0,
+     "min_side": 0.0,
+     "ratio": 0.001,
+     "start": 30.0
+    },
+    "aux": 6,
+    "chsat": true,
+    "angsat": true,
+    "dom": [
+     0.0,
+     0.0,
+     1.0,
+     1.0
+    ]
+   }
+  },
+  {
+   "name": "DropCurveSurface_test_aux_data_no_tols",
+   "upstream_ref": "pt_TestFiles/DropCurveSurface.sms (planar bilinear patch; my_test_drop_point family)",
+   "inputs": {
+    "surf": {
+     "bspline": {
+      "oob": false,
+      "form": 11,
+      "srf": {
+       "sms": {
+        "$upstream_file": "DropCurveSurface.sms"
+       }
+      }
+     }
+    },
+    "op": "test",
+    "cache_dom": [
+     0.0,
+     0.0,
+     1.0,
+     1.0
+    ],
+    "opts": {
+     "chord": 0.0,
+     "ang": 0.0,
+     "aspect": 0.0,
+     "max_side": 0.0,
+     "min_side": 0.0,
+     "ratio": 0.001,
+     "start": 30.0
+    },
+    "aux": 6,
+    "chsat": false,
+    "angsat": false,
+    "dom": [
+     0.0,
+     0.0,
+     1.0,
+     1.0
+    ]
+   }
+  },
+  {
+   "name": "DropCurveSurface_test_aux_data_max_side",
+   "upstream_ref": "pt_TestFiles/DropCurveSurface.sms (planar bilinear patch; my_test_drop_point family)",
+   "inputs": {
+    "surf": {
+     "bspline": {
+      "oob": false,
+      "form": 11,
+      "srf": {
+       "sms": {
+        "$upstream_file": "DropCurveSurface.sms"
+       }
+      }
+     }
+    },
+    "op": "test",
+    "cache_dom": [
+     0.0,
+     0.0,
+     1.0,
+     1.0
+    ],
+    "opts": {
+     "chord": 0.0,
+     "ang": 0.0,
+     "aspect": 0.0,
+     "max_side": 5.0,
+     "min_side": 0.0,
+     "ratio": 0.001,
+     "start": 30.0
+    },
+    "aux": 6,
+    "chsat": true,
+    "angsat": true,
+    "dom": [
+     0.0,
+     0.0,
+     1.0,
+     1.0
+    ]
+   }
+  },
+  {
+   "name": "DropCurveSurface_test_aux_data_aspect",
+   "upstream_ref": "pt_TestFiles/DropCurveSurface.sms (planar bilinear patch; my_test_drop_point family)",
+   "inputs": {
+    "surf": {
+     "bspline": {
+      "oob": false,
+      "form": 11,
+      "srf": {
+       "sms": {
+        "$upstream_file": "DropCurveSurface.sms"
+       }
+      }
+     }
+    },
+    "op": "test",
+    "cache_dom": [
+     0.0,
+     0.0,
+     1.0,
+     1.0
+    ],
+    "opts": {
+     "chord": 0.0,
+     "ang": 0.0,
+     "aspect": 1.5,
+     "max_side": 0.0,
+     "min_side": 0.0,
+     "ratio": 0.001,
+     "start": 30.0
+    },
+    "aux": 6,
+    "chsat": true,
+    "angsat": true,
+    "dom": [
+     0.0,
+     0.0,
+     1.0,
+     1.0
+    ]
+   }
+  },
+  {
+   "name": "DropCurveSurface_test_aux_data_min_side_stop",
+   "upstream_ref": "pt_TestFiles/DropCurveSurface.sms (planar bilinear patch; my_test_drop_point family)",
+   "inputs": {
+    "surf": {
+     "bspline": {
+      "oob": false,
+      "form": 11,
+      "srf": {
+       "sms": {
+        "$upstream_file": "DropCurveSurface.sms"
+       }
+      }
+     }
+    },
+    "op": "test",
+    "cache_dom": [
+     0.0,
+     0.0,
+     1.0,
+     1.0
+    ],
+    "opts": {
+     "chord": 1e-06,
+     "ang": 0.0,
+     "aspect": 0.0,
+     "max_side": 0.0,
+     "min_side": 1000.0,
+     "ratio": 0.001,
+     "start": 30.0
+    },
+    "aux": 6,
+    "chsat": false,
+    "angsat": false,
+    "dom": [
+     0.0,
+     0.0,
+     1.0,
+     1.0
+    ]
+   }
+  },
+  {
+   "name": "DropCurveSurface_test_patch_chord_equal",
+   "upstream_ref": "pt_TestFiles/DropCurveSurface.sms (planar bilinear patch; my_test_drop_point family)",
+   "inputs": {
+    "surf": {
+     "bspline": {
+      "oob": false,
+      "form": 11,
+      "srf": {
+       "sms": {
+        "$upstream_file": "DropCurveSurface.sms"
+       }
+      }
+     }
+    },
+    "op": "test",
+    "cache_dom": [
+     0.0,
+     0.0,
+     1.0,
+     1.0
+    ],
+    "opts": {
+     "chord": 2.0,
+     "ang": 0.0,
+     "aspect": 0.0,
+     "max_side": 0.0,
+     "min_side": 0.0,
+     "ratio": 0.001,
+     "start": 30.0
+    },
+    "aux": 3,
+    "dom": [
+     0.0,
+     0.0,
+     1.0,
+     1.0
+    ],
+    "bez": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    },
+    "ivl": [
+     [
+      0.0,
+      100.0
+     ],
+     [
+      0.0,
+      100.0
+     ],
+     [
+      0.0,
+      2.0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "DropCurveSurface_test_patch_chord_above",
+   "upstream_ref": "pt_TestFiles/DropCurveSurface.sms (planar bilinear patch; my_test_drop_point family)",
+   "inputs": {
+    "surf": {
+     "bspline": {
+      "oob": false,
+      "form": 11,
+      "srf": {
+       "sms": {
+        "$upstream_file": "DropCurveSurface.sms"
+       }
+      }
+     }
+    },
+    "op": "test",
+    "cache_dom": [
+     0.0,
+     0.0,
+     1.0,
+     1.0
+    ],
+    "opts": {
+     "chord": 2.0,
+     "ang": 0.0,
+     "aspect": 0.0,
+     "max_side": 0.0,
+     "min_side": 0.0,
+     "ratio": 0.001,
+     "start": 30.0
+    },
+    "aux": 3,
+    "dom": [
+     0.0,
+     0.0,
+     1.0,
+     1.0
+    ],
+    "bez": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    },
+    "ivl": [
+     [
+      0.0,
+      100.0
+     ],
+     [
+      0.0,
+      100.0
+     ],
+     [
+      0.0,
+      4.0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "DropCurveSurface_test_patch_chord_ang",
+   "upstream_ref": "pt_TestFiles/DropCurveSurface.sms (planar bilinear patch; my_test_drop_point family)",
+   "inputs": {
+    "surf": {
+     "bspline": {
+      "oob": false,
+      "form": 11,
+      "srf": {
+       "sms": {
+        "$upstream_file": "DropCurveSurface.sms"
+       }
+      }
+     }
+    },
+    "op": "test",
+    "cache_dom": [
+     0.0,
+     0.0,
+     1.0,
+     1.0
+    ],
+    "opts": {
+     "chord": 2.0,
+     "ang": 0.08726646259971647,
+     "aspect": 0.0,
+     "max_side": 0.0,
+     "min_side": 0.0,
+     "ratio": 0.001,
+     "start": 30.0
+    },
+    "aux": 3,
+    "dom": [
+     0.0,
+     0.0,
+     1.0,
+     1.0
+    ],
+    "bez": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    },
+    "ivl": [
+     [
+      0.0,
+      100.0
+     ],
+     [
+      0.0,
+      100.0
+     ],
+     [
+      0.0,
+      1.0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "DropCurveSurface_test_patch_ang_only",
+   "upstream_ref": "pt_TestFiles/DropCurveSurface.sms (planar bilinear patch; my_test_drop_point family)",
+   "inputs": {
+    "surf": {
+     "bspline": {
+      "oob": false,
+      "form": 11,
+      "srf": {
+       "sms": {
+        "$upstream_file": "DropCurveSurface.sms"
+       }
+      }
+     }
+    },
+    "op": "test",
+    "cache_dom": [
+     0.0,
+     0.0,
+     1.0,
+     1.0
+    ],
+    "opts": {
+     "chord": 0.0,
+     "ang": 0.17453292519943295,
+     "aspect": 0.0,
+     "max_side": 0.0,
+     "min_side": 0.0,
+     "ratio": 0.001,
+     "start": 30.0
+    },
+    "aux": 3,
+    "dom": [
+     0.0,
+     0.0,
+     1.0,
+     1.0
+    ],
+    "bez": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    },
+    "ivl": [
+     [
+      0.0,
+      100.0
+     ],
+     [
+      0.0,
+      100.0
+     ],
+     [
+      0.0,
+      0.0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "DropCurveSurface_test_patch_tiny_ang",
+   "upstream_ref": "pt_TestFiles/DropCurveSurface.sms (planar bilinear patch; my_test_drop_point family)",
+   "inputs": {
+    "surf": {
+     "bspline": {
+      "oob": false,
+      "form": 11,
+      "srf": {
+       "sms": {
+        "$upstream_file": "DropCurveSurface.sms"
+       }
+      }
+     }
+    },
+    "op": "test",
+    "cache_dom": [
+     0.0,
+     0.0,
+     1.0,
+     1.0
+    ],
+    "opts": {
+     "chord": 0.0,
+     "ang": 1e-14,
+     "aspect": 0.0,
+     "max_side": 0.0,
+     "min_side": 0.0,
+     "ratio": 0.001,
+     "start": 30.0
+    },
+    "aux": 3,
+    "dom": [
+     0.0,
+     0.0,
+     1.0,
+     1.0
+    ],
+    "bez": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    },
+    "ivl": [
+     [
+      0.0,
+      100.0
+     ],
+     [
+      0.0,
+      100.0
+     ],
+     [
+      0.0,
+      0.0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "DropCurveSurface_test_patch_sizes",
+   "upstream_ref": "pt_TestFiles/DropCurveSurface.sms (planar bilinear patch; my_test_drop_point family)",
+   "inputs": {
+    "surf": {
+     "bspline": {
+      "oob": false,
+      "form": 11,
+      "srf": {
+       "sms": {
+        "$upstream_file": "DropCurveSurface.sms"
+       }
+      }
+     }
+    },
+    "op": "test",
+    "cache_dom": [
+     0.0,
+     0.0,
+     1.0,
+     1.0
+    ],
+    "opts": {
+     "chord": 2.0,
+     "ang": 0.0,
+     "aspect": 1.2,
+     "max_side": 10.0,
+     "min_side": 1.0,
+     "ratio": 0.001,
+     "start": 30.0
+    },
+    "aux": 3,
+    "dom": [
+     0.0,
+     0.0,
+     1.0,
+     1.0
+    ],
+    "bez": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    },
+    "ivl": [
+     [
+      0.0,
+      100.0
+     ],
+     [
+      0.0,
+      100.0
+     ],
+     [
+      0.0,
+      1.0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "DropCurveSurface_test_patch_thin_u",
+   "upstream_ref": "pt_TestFiles/DropCurveSurface.sms (planar bilinear patch; my_test_drop_point family)",
+   "inputs": {
+    "surf": {
+     "bspline": {
+      "oob": false,
+      "form": 11,
+      "srf": {
+       "sms": {
+        "$upstream_file": "DropCurveSurface.sms"
+       }
+      }
+     }
+    },
+    "op": "test",
+    "cache_dom": [
+     0.0,
+     0.0,
+     1.0,
+     1.0
+    ],
+    "opts": {
+     "chord": 2.0,
+     "ang": 0.0,
+     "aspect": 0.0,
+     "max_side": 0.0,
+     "min_side": 0.0,
+     "ratio": 0.0,
+     "start": 30.0
+    },
+    "aux": 3,
+    "dom": [
+     0.5,
+     0.0,
+     0.5004,
+     1.0
+    ],
+    "bez": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    },
+    "ivl": [
+     [
+      0.0,
+      100.0
+     ],
+     [
+      0.0,
+      100.0
+     ],
+     [
+      0.0,
+      4.0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "DropCurveSurface_test_patch_thin_v",
+   "upstream_ref": "pt_TestFiles/DropCurveSurface.sms (planar bilinear patch; my_test_drop_point family)",
+   "inputs": {
+    "surf": {
+     "bspline": {
+      "oob": false,
+      "form": 11,
+      "srf": {
+       "sms": {
+        "$upstream_file": "DropCurveSurface.sms"
+       }
+      }
+     }
+    },
+    "op": "test",
+    "cache_dom": [
+     0.0,
+     0.0,
+     1.0,
+     1.0
+    ],
+    "opts": {
+     "chord": 2.0,
+     "ang": 0.0,
+     "aspect": 0.0,
+     "max_side": 0.0,
+     "min_side": 0.0,
+     "ratio": 0.0,
+     "start": 30.0
+    },
+    "aux": 3,
+    "dom": [
+     0.0,
+     0.5,
+     1.0,
+     0.5004
+    ],
+    "bez": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    },
+    "ivl": [
+     [
+      0.0,
+      100.0
+     ],
+     [
+      0.0,
+      100.0
+     ],
+     [
+      0.0,
+      4.0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "DropCurveSurface_test_patch_thin_both",
+   "upstream_ref": "pt_TestFiles/DropCurveSurface.sms (planar bilinear patch; my_test_drop_point family)",
+   "inputs": {
+    "surf": {
+     "bspline": {
+      "oob": false,
+      "form": 11,
+      "srf": {
+       "sms": {
+        "$upstream_file": "DropCurveSurface.sms"
+       }
+      }
+     }
+    },
+    "op": "test",
+    "cache_dom": [
+     0.0,
+     0.0,
+     1.0,
+     1.0
+    ],
+    "opts": {
+     "chord": 2.0,
+     "ang": 0.0,
+     "aspect": 0.0,
+     "max_side": 0.0,
+     "min_side": 0.0,
+     "ratio": 0.5,
+     "start": 30.0
+    },
+    "aux": 3,
+    "dom": [
+     0.5,
+     0.5,
+     0.5001,
+     0.5001
+    ],
+    "bez": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    },
+    "ivl": [
+     [
+      0.0,
+      100.0
+     ],
+     [
+      0.0,
+      100.0
+     ],
+     [
+      0.0,
+      4.0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "DropCurveSurface_test_with_children",
+   "upstream_ref": "pt_TestFiles/DropCurveSurface.sms (planar bilinear patch; my_test_drop_point family)",
+   "inputs": {
+    "surf": {
+     "bspline": {
+      "oob": false,
+      "form": 11,
+      "srf": {
+       "sms": {
+        "$upstream_file": "DropCurveSurface.sms"
+       }
+      }
+     }
+    },
+    "op": "test",
+    "cache_dom": [
+     0.0,
+     0.0,
+     1.0,
+     1.0
+    ],
+    "opts": {
+     "chord": 2.0,
+     "ang": 0.0,
+     "aspect": 0.0,
+     "max_side": 0.0,
+     "min_side": 0.0,
+     "ratio": 0.001,
+     "start": 30.0
+    },
+    "aux": 3,
+    "children": true,
+    "dom": [
+     0.0,
+     0.0,
+     1.0,
+     1.0
+    ],
+    "bez": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    },
+    "ivl": [
+     [
+      0,
+      1
+     ],
+     [
+      0,
+      1
+     ],
+     [
+      0,
+      1
+     ]
+    ]
+   }
+  },
+  {
+   "name": "DropCurveSurface_test_head_node",
+   "upstream_ref": "pt_TestFiles/DropCurveSurface.sms (planar bilinear patch; my_test_drop_point family)",
+   "inputs": {
+    "surf": {
+     "bspline": {
+      "oob": false,
+      "form": 11,
+      "srf": {
+       "sms": {
+        "$upstream_file": "DropCurveSurface.sms"
+       }
+      }
+     }
+    },
+    "op": "test",
+    "cache_dom": [
+     0.0,
+     0.0,
+     1.0,
+     1.0
+    ],
+    "opts": {
+     "chord": 2.0,
+     "ang": 0.0,
+     "aspect": 0.0,
+     "max_side": 0.0,
+     "min_side": 0.0,
+     "ratio": 0.001,
+     "start": 30.0
+    },
+    "aux": 4,
+    "dom": [
+     0.0,
+     0.0,
+     1.0,
+     1.0
+    ]
+   }
+  },
+  {
+   "name": "DropCurveSurface_subdiv_block_no_surface",
+   "upstream_ref": "pt_TestFiles/DropCurveSurface.sms (planar bilinear patch; my_test_drop_point family)",
+   "inputs": {
+    "surf": {
+     "bspline": {
+      "oob": false,
+      "form": 11,
+      "srf": {
+       "sms": {
+        "$upstream_file": "DropCurveSurface.sms"
+       }
+      }
+     }
+    },
+    "op": "subdiv_block",
+    "opts": {
+     "chord": 1.0,
+     "ang": 0.2617993877991494,
+     "aspect": 0.0,
+     "max_side": 0.0,
+     "min_side": 0.0,
+     "ratio": 0.001,
+     "start": 30.0
+    },
+    "dom": [
+     0.0,
+     0.0,
+     1.0,
+     1.0
+    ],
+    "nosurf": true
+   }
+  },
+  {
+   "name": "DropCurveSurface_subdiv_block",
+   "upstream_ref": "pt_TestFiles/DropCurveSurface.sms (planar bilinear patch; my_test_drop_point family)",
+   "inputs": {
+    "surf": {
+     "bspline": {
+      "oob": false,
+      "form": 11,
+      "srf": {
+       "sms": {
+        "$upstream_file": "DropCurveSurface.sms"
+       }
+      }
+     }
+    },
+    "op": "subdiv_block",
+    "opts": {
+     "chord": 1.0,
+     "ang": 0.2617993877991494,
+     "aspect": 0.0,
+     "max_side": 0.0,
+     "min_side": 0.0,
+     "ratio": 0.001,
+     "start": 30.0
+    },
+    "dom": [
+     0.0,
+     0.0,
+     1.0,
+     1.0
+    ]
+   }
+  },
+  {
+   "name": "DropCurveSurface_cbs_nth",
+   "upstream_ref": "pt_TestFiles/DropCurveSurface.sms (planar bilinear patch; my_test_drop_point family)",
+   "inputs": {
+    "surf": {
+     "curve_bounded": {
+      "oob": false,
+      "form": 11,
+      "srf": {
+       "sms": {
+        "$upstream_file": "DropCurveSurface.sms"
+       }
+      }
+     }
+    },
+    "op": "nth",
+    "dom": [
+     0.0,
+     0.0,
+     1.0,
+     1.0
+    ],
+    "idx": [
+     0,
+     3
+    ]
+   }
+  },
+  {
+   "name": "DropCurveSurface_cbs_approx_block",
+   "upstream_ref": "pt_TestFiles/DropCurveSurface.sms (planar bilinear patch; my_test_drop_point family)",
+   "inputs": {
+    "surf": {
+     "curve_bounded": {
+      "oob": false,
+      "form": 11,
+      "srf": {
+       "sms": {
+        "$upstream_file": "DropCurveSurface.sms"
+       }
+      }
+     }
+    },
+    "op": "approx_block"
+   }
+  },
+  {
+   "name": "DropCurveSurface_cbs_test_patch",
+   "upstream_ref": "pt_TestFiles/DropCurveSurface.sms (planar bilinear patch; my_test_drop_point family)",
+   "inputs": {
+    "surf": {
+     "curve_bounded": {
+      "oob": false,
+      "form": 11,
+      "srf": {
+       "sms": {
+        "$upstream_file": "DropCurveSurface.sms"
+       }
+      }
+     }
+    },
+    "op": "test",
+    "cache_dom": [
+     0.0,
+     0.0,
+     1.0,
+     1.0
+    ],
+    "opts": {
+     "chord": 2.0,
+     "ang": 0.17453292519943295,
+     "aspect": 0.0,
+     "max_side": 0.0,
+     "min_side": 0.0,
+     "ratio": 0.001,
+     "start": 30.0
+    },
+    "aux": 3,
+    "dom": [
+     0.0,
+     0.0,
+     1.0,
+     1.0
+    ],
+    "bez": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    },
+    "ivl": [
+     [
+      0,
+      1
+     ],
+     [
+      0,
+      1
+     ],
+     [
+      0,
+      4.0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "DropCurveSurface_cbs_test_patch_flat",
+   "upstream_ref": "pt_TestFiles/DropCurveSurface.sms (planar bilinear patch; my_test_drop_point family)",
+   "inputs": {
+    "surf": {
+     "curve_bounded": {
+      "oob": false,
+      "form": 11,
+      "srf": {
+       "sms": {
+        "$upstream_file": "DropCurveSurface.sms"
+       }
+      }
+     }
+    },
+    "op": "test",
+    "cache_dom": [
+     0.0,
+     0.0,
+     1.0,
+     1.0
+    ],
+    "opts": {
+     "chord": 2.0,
+     "ang": 0.0,
+     "aspect": 1.1,
+     "max_side": 0.0,
+     "min_side": 0.0,
+     "ratio": 0.001,
+     "start": 30.0
+    },
+    "aux": 3,
+    "dom": [
+     0.0,
+     0.0,
+     1.0,
+     1.0
+    ],
+    "bez": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    },
+    "ivl": [
+     [
+      0,
+      1
+     ],
+     [
+      0,
+      1
+     ],
+     [
+      0,
+      1.0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "plane_rect_approx_block",
+   "upstream_ref": "SM_API_test TestSmCurves.cpp:424 (TestSmCreateRectangle: 10 x 6 rectangle at the origin, as a plane)",
+   "inputs": {
+    "surf": {
+     "plane": {
+      "o": [
+       -5.0,
+       -3.0,
+       0.0
+      ],
+      "x": [
+       1.0,
+       0.0,
+       0.0
+      ],
+      "y": [
+       0.0,
+       1.0,
+       0.0
+      ],
+      "scale": [
+       1.0,
+       1.0
+      ],
+      "dom": [
+       0.0,
+       0.0,
+       10.0,
+       6.0
+      ]
+     }
+    },
+    "op": "approx_block"
+   }
+  },
+  {
+   "name": "plane_rect_nth",
+   "upstream_ref": "SM_API_test TestSmCurves.cpp:424 (TestSmCreateRectangle: 10 x 6 rectangle at the origin, as a plane)",
+   "inputs": {
+    "surf": {
+     "plane": {
+      "o": [
+       -5.0,
+       -3.0,
+       0.0
+      ],
+      "x": [
+       1.0,
+       0.0,
+       0.0
+      ],
+      "y": [
+       0.0,
+       1.0,
+       0.0
+      ],
+      "scale": [
+       1.0,
+       1.0
+      ],
+      "dom": [
+       0.0,
+       0.0,
+       10.0,
+       6.0
+      ]
+     }
+    },
+    "op": "nth",
+    "dom": [
+     0.0,
+     0.0,
+     10.0,
+     6.0
+    ],
+    "idx": [
+     0
+    ]
+   }
+  },
+  {
+   "name": "plane_rect_test_chord",
+   "upstream_ref": "SM_API_test TestSmCurves.cpp:424 (TestSmCreateRectangle: 10 x 6 rectangle at the origin, as a plane)",
+   "inputs": {
+    "surf": {
+     "plane": {
+      "o": [
+       -5.0,
+       -3.0,
+       0.0
+      ],
+      "x": [
+       1.0,
+       0.0,
+       0.0
+      ],
+      "y": [
+       0.0,
+       1.0,
+       0.0
+      ],
+      "scale": [
+       1.0,
+       1.0
+      ],
+      "dom": [
+       0.0,
+       0.0,
+       10.0,
+       6.0
+      ]
+     }
+    },
+    "op": "test",
+    "cache_dom": [
+     0.0,
+     0.0,
+     10.0,
+     6.0
+    ],
+    "opts": {
+     "chord": 0.01,
+     "ang": 0.0,
+     "aspect": 0.0,
+     "max_side": 0.0,
+     "min_side": 0.0,
+     "ratio": 0.001,
+     "start": 30.0
+    },
+    "aux": 3,
+    "dom": [
+     0.0,
+     0.0,
+     10.0,
+     6.0
+    ],
+    "bez": {
+     "net": [
+      [
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        0,
+        6,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      [
+       [
+        10,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        10,
+        6,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ]
+     ],
+     "p": 1,
+     "q": 1,
+     "u": [
+      0,
+      0,
+      10,
+      10
+     ],
+     "v": [
+      0,
+      0,
+      6,
+      6
+     ]
+    },
+    "ivl": [
+     [
+      0,
+      10
+     ],
+     [
+      0,
+      6
+     ],
+     [
+      0,
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "plane_rect_test_aspect",
+   "upstream_ref": "SM_API_test TestSmCurves.cpp:424 (TestSmCreateRectangle: 10 x 6 rectangle at the origin, as a plane)",
+   "inputs": {
+    "surf": {
+     "plane": {
+      "o": [
+       -5.0,
+       -3.0,
+       0.0
+      ],
+      "x": [
+       1.0,
+       0.0,
+       0.0
+      ],
+      "y": [
+       0.0,
+       1.0,
+       0.0
+      ],
+      "scale": [
+       1.0,
+       1.0
+      ],
+      "dom": [
+       0.0,
+       0.0,
+       10.0,
+       6.0
+      ]
+     }
+    },
+    "op": "test",
+    "cache_dom": [
+     0.0,
+     0.0,
+     10.0,
+     6.0
+    ],
+    "opts": {
+     "chord": 0.0,
+     "ang": 0.0,
+     "aspect": 1.2,
+     "max_side": 0.0,
+     "min_side": 0.0,
+     "ratio": 0.001,
+     "start": 30.0
+    },
+    "aux": 3,
+    "dom": [
+     0.0,
+     0.0,
+     10.0,
+     6.0
+    ],
+    "bez": {
+     "net": [
+      [
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        0,
+        6,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      [
+       [
+        10,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        10,
+        6,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ]
+     ],
+     "p": 1,
+     "q": 1,
+     "u": [
+      0,
+      0,
+      10,
+      10
+     ],
+     "v": [
+      0,
+      0,
+      6,
+      6
+     ]
+    },
+    "ivl": [
+     [
+      0,
+      10
+     ],
+     [
+      0,
+      6
+     ],
+     [
+      0,
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "plane_rect_test_max_side",
+   "upstream_ref": "SM_API_test TestSmCurves.cpp:424 (TestSmCreateRectangle: 10 x 6 rectangle at the origin, as a plane)",
+   "inputs": {
+    "surf": {
+     "plane": {
+      "o": [
+       -5.0,
+       -3.0,
+       0.0
+      ],
+      "x": [
+       1.0,
+       0.0,
+       0.0
+      ],
+      "y": [
+       0.0,
+       1.0,
+       0.0
+      ],
+      "scale": [
+       1.0,
+       1.0
+      ],
+      "dom": [
+       0.0,
+       0.0,
+       10.0,
+       6.0
+      ]
+     }
+    },
+    "op": "test",
+    "cache_dom": [
+     0.0,
+     0.0,
+     10.0,
+     6.0
+    ],
+    "opts": {
+     "chord": 0.0,
+     "ang": 0.0,
+     "aspect": 0.0,
+     "max_side": 2.0,
+     "min_side": 0.0,
+     "ratio": 0.001,
+     "start": 30.0
+    },
+    "aux": 3,
+    "dom": [
+     0.0,
+     0.0,
+     10.0,
+     6.0
+    ],
+    "bez": {
+     "net": [
+      [
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        0,
+        6,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      [
+       [
+        10,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        10,
+        6,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ]
+     ],
+     "p": 1,
+     "q": 1,
+     "u": [
+      0,
+      0,
+      10,
+      10
+     ],
+     "v": [
+      0,
+      0,
+      6,
+      6
+     ]
+    },
+    "ivl": [
+     [
+      0,
+      10
+     ],
+     [
+      0,
+      6
+     ],
+     [
+      0,
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "plane_rect_test_min_side",
+   "upstream_ref": "SM_API_test TestSmCurves.cpp:424 (TestSmCreateRectangle: 10 x 6 rectangle at the origin, as a plane)",
+   "inputs": {
+    "surf": {
+     "plane": {
+      "o": [
+       -5.0,
+       -3.0,
+       0.0
+      ],
+      "x": [
+       1.0,
+       0.0,
+       0.0
+      ],
+      "y": [
+       0.0,
+       1.0,
+       0.0
+      ],
+      "scale": [
+       1.0,
+       1.0
+      ],
+      "dom": [
+       0.0,
+       0.0,
+       10.0,
+       6.0
+      ]
+     }
+    },
+    "op": "test",
+    "cache_dom": [
+     0.0,
+     0.0,
+     10.0,
+     6.0
+    ],
+    "opts": {
+     "chord": 0.0,
+     "ang": 0.0,
+     "aspect": 0.0,
+     "max_side": 2.0,
+     "min_side": 20.0,
+     "ratio": 0.001,
+     "start": 30.0
+    },
+    "aux": 3,
+    "dom": [
+     0.0,
+     0.0,
+     10.0,
+     6.0
+    ],
+    "bez": {
+     "net": [
+      [
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        0,
+        6,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      [
+       [
+        10,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        10,
+        6,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ]
+     ],
+     "p": 1,
+     "q": 1,
+     "u": [
+      0,
+      0,
+      10,
+      10
+     ],
+     "v": [
+      0,
+      0,
+      6,
+      6
+     ]
+    },
+    "ivl": [
+     [
+      0,
+      10
+     ],
+     [
+      0,
+      6
+     ],
+     [
+      0,
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "plane_rect_subdiv_block_no_surface",
+   "upstream_ref": "SM_API_test TestSmCurves.cpp:424 (TestSmCreateRectangle: 10 x 6 rectangle at the origin, as a plane)",
+   "inputs": {
+    "surf": {
+     "plane": {
+      "o": [
+       -5.0,
+       -3.0,
+       0.0
+      ],
+      "x": [
+       1.0,
+       0.0,
+       0.0
+      ],
+      "y": [
+       0.0,
+       1.0,
+       0.0
+      ],
+      "scale": [
+       1.0,
+       1.0
+      ],
+      "dom": [
+       0.0,
+       0.0,
+       10.0,
+       6.0
+      ]
+     }
+    },
+    "op": "subdiv_block",
+    "opts": {
+     "chord": 0.01,
+     "ang": 0.0,
+     "aspect": 0.0,
+     "max_side": 0.0,
+     "min_side": 0.0,
+     "ratio": 0.001,
+     "start": 30.0
+    },
+    "dom": [
+     0.0,
+     0.0,
+     10.0,
+     6.0
+    ],
+    "nosurf": true
+   }
+  },
+  {
+   "name": "plane_hexagon_approx_block",
+   "upstream_ref": "SM_API_test TestSmCurves.cpp:462 (TestSmCreateRegularPolygon: radius 5 hexagon plane)",
+   "inputs": {
+    "surf": {
+     "plane": {
+      "o": [
+       0.0,
+       0.0,
+       0.0
+      ],
+      "x": [
+       1.0,
+       0.0,
+       0.0
+      ],
+      "y": [
+       0.5,
+       0.8660254037844386,
+       0.0
+      ],
+      "scale": [
+       5.0,
+       5.0
+      ],
+      "dom": [
+       -1.0,
+       -1.0,
+       1.0,
+       1.0
+      ]
+     }
+    },
+    "op": "approx_block"
+   }
+  },
+  {
+   "name": "plane_hexagon_nth",
+   "upstream_ref": "SM_API_test TestSmCurves.cpp:462 (TestSmCreateRegularPolygon: radius 5 hexagon plane)",
+   "inputs": {
+    "surf": {
+     "plane": {
+      "o": [
+       0.0,
+       0.0,
+       0.0
+      ],
+      "x": [
+       1.0,
+       0.0,
+       0.0
+      ],
+      "y": [
+       0.5,
+       0.8660254037844386,
+       0.0
+      ],
+      "scale": [
+       5.0,
+       5.0
+      ],
+      "dom": [
+       -1.0,
+       -1.0,
+       1.0,
+       1.0
+      ]
+     }
+    },
+    "op": "nth",
+    "dom": [
+     -1.0,
+     -1.0,
+     1.0,
+     1.0
+    ],
+    "idx": [
+     0
+    ]
+   }
+  },
+  {
+   "name": "plane_hexagon_test_chord",
+   "upstream_ref": "SM_API_test TestSmCurves.cpp:462 (TestSmCreateRegularPolygon: radius 5 hexagon plane)",
+   "inputs": {
+    "surf": {
+     "plane": {
+      "o": [
+       0.0,
+       0.0,
+       0.0
+      ],
+      "x": [
+       1.0,
+       0.0,
+       0.0
+      ],
+      "y": [
+       0.5,
+       0.8660254037844386,
+       0.0
+      ],
+      "scale": [
+       5.0,
+       5.0
+      ],
+      "dom": [
+       -1.0,
+       -1.0,
+       1.0,
+       1.0
+      ]
+     }
+    },
+    "op": "test",
+    "cache_dom": [
+     -1.0,
+     -1.0,
+     1.0,
+     1.0
+    ],
+    "opts": {
+     "chord": 0.01,
+     "ang": 0.0,
+     "aspect": 0.0,
+     "max_side": 0.0,
+     "min_side": 0.0,
+     "ratio": 0.001,
+     "start": 30.0
+    },
+    "aux": 3,
+    "dom": [
+     -1.0,
+     -1.0,
+     1.0,
+     1.0
+    ],
+    "bez": {
+     "net": [
+      [
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        0,
+        6,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      [
+       [
+        10,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        10,
+        6,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ]
+     ],
+     "p": 1,
+     "q": 1,
+     "u": [
+      0,
+      0,
+      10,
+      10
+     ],
+     "v": [
+      0,
+      0,
+      6,
+      6
+     ]
+    },
+    "ivl": [
+     [
+      0,
+      10
+     ],
+     [
+      0,
+      6
+     ],
+     [
+      0,
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "plane_hexagon_test_aspect",
+   "upstream_ref": "SM_API_test TestSmCurves.cpp:462 (TestSmCreateRegularPolygon: radius 5 hexagon plane)",
+   "inputs": {
+    "surf": {
+     "plane": {
+      "o": [
+       0.0,
+       0.0,
+       0.0
+      ],
+      "x": [
+       1.0,
+       0.0,
+       0.0
+      ],
+      "y": [
+       0.5,
+       0.8660254037844386,
+       0.0
+      ],
+      "scale": [
+       5.0,
+       5.0
+      ],
+      "dom": [
+       -1.0,
+       -1.0,
+       1.0,
+       1.0
+      ]
+     }
+    },
+    "op": "test",
+    "cache_dom": [
+     -1.0,
+     -1.0,
+     1.0,
+     1.0
+    ],
+    "opts": {
+     "chord": 0.0,
+     "ang": 0.0,
+     "aspect": 1.2,
+     "max_side": 0.0,
+     "min_side": 0.0,
+     "ratio": 0.001,
+     "start": 30.0
+    },
+    "aux": 3,
+    "dom": [
+     -1.0,
+     -1.0,
+     1.0,
+     1.0
+    ],
+    "bez": {
+     "net": [
+      [
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        0,
+        6,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      [
+       [
+        10,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        10,
+        6,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ]
+     ],
+     "p": 1,
+     "q": 1,
+     "u": [
+      0,
+      0,
+      10,
+      10
+     ],
+     "v": [
+      0,
+      0,
+      6,
+      6
+     ]
+    },
+    "ivl": [
+     [
+      0,
+      10
+     ],
+     [
+      0,
+      6
+     ],
+     [
+      0,
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "plane_hexagon_test_max_side",
+   "upstream_ref": "SM_API_test TestSmCurves.cpp:462 (TestSmCreateRegularPolygon: radius 5 hexagon plane)",
+   "inputs": {
+    "surf": {
+     "plane": {
+      "o": [
+       0.0,
+       0.0,
+       0.0
+      ],
+      "x": [
+       1.0,
+       0.0,
+       0.0
+      ],
+      "y": [
+       0.5,
+       0.8660254037844386,
+       0.0
+      ],
+      "scale": [
+       5.0,
+       5.0
+      ],
+      "dom": [
+       -1.0,
+       -1.0,
+       1.0,
+       1.0
+      ]
+     }
+    },
+    "op": "test",
+    "cache_dom": [
+     -1.0,
+     -1.0,
+     1.0,
+     1.0
+    ],
+    "opts": {
+     "chord": 0.0,
+     "ang": 0.0,
+     "aspect": 0.0,
+     "max_side": 2.0,
+     "min_side": 0.0,
+     "ratio": 0.001,
+     "start": 30.0
+    },
+    "aux": 3,
+    "dom": [
+     -1.0,
+     -1.0,
+     1.0,
+     1.0
+    ],
+    "bez": {
+     "net": [
+      [
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        0,
+        6,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      [
+       [
+        10,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        10,
+        6,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ]
+     ],
+     "p": 1,
+     "q": 1,
+     "u": [
+      0,
+      0,
+      10,
+      10
+     ],
+     "v": [
+      0,
+      0,
+      6,
+      6
+     ]
+    },
+    "ivl": [
+     [
+      0,
+      10
+     ],
+     [
+      0,
+      6
+     ],
+     [
+      0,
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "plane_hexagon_test_min_side",
+   "upstream_ref": "SM_API_test TestSmCurves.cpp:462 (TestSmCreateRegularPolygon: radius 5 hexagon plane)",
+   "inputs": {
+    "surf": {
+     "plane": {
+      "o": [
+       0.0,
+       0.0,
+       0.0
+      ],
+      "x": [
+       1.0,
+       0.0,
+       0.0
+      ],
+      "y": [
+       0.5,
+       0.8660254037844386,
+       0.0
+      ],
+      "scale": [
+       5.0,
+       5.0
+      ],
+      "dom": [
+       -1.0,
+       -1.0,
+       1.0,
+       1.0
+      ]
+     }
+    },
+    "op": "test",
+    "cache_dom": [
+     -1.0,
+     -1.0,
+     1.0,
+     1.0
+    ],
+    "opts": {
+     "chord": 0.0,
+     "ang": 0.0,
+     "aspect": 0.0,
+     "max_side": 2.0,
+     "min_side": 20.0,
+     "ratio": 0.001,
+     "start": 30.0
+    },
+    "aux": 3,
+    "dom": [
+     -1.0,
+     -1.0,
+     1.0,
+     1.0
+    ],
+    "bez": {
+     "net": [
+      [
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        0,
+        6,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      [
+       [
+        10,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        10,
+        6,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ]
+     ],
+     "p": 1,
+     "q": 1,
+     "u": [
+      0,
+      0,
+      10,
+      10
+     ],
+     "v": [
+      0,
+      0,
+      6,
+      6
+     ]
+    },
+    "ivl": [
+     [
+      0,
+      10
+     ],
+     [
+      0,
+      6
+     ],
+     [
+      0,
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "plane_hexagon_subdiv_block_no_surface",
+   "upstream_ref": "SM_API_test TestSmCurves.cpp:462 (TestSmCreateRegularPolygon: radius 5 hexagon plane)",
+   "inputs": {
+    "surf": {
+     "plane": {
+      "o": [
+       0.0,
+       0.0,
+       0.0
+      ],
+      "x": [
+       1.0,
+       0.0,
+       0.0
+      ],
+      "y": [
+       0.5,
+       0.8660254037844386,
+       0.0
+      ],
+      "scale": [
+       5.0,
+       5.0
+      ],
+      "dom": [
+       -1.0,
+       -1.0,
+       1.0,
+       1.0
+      ]
+     }
+    },
+    "op": "subdiv_block",
+    "opts": {
+     "chord": 0.01,
+     "ang": 0.0,
+     "aspect": 0.0,
+     "max_side": 0.0,
+     "min_side": 0.0,
+     "ratio": 0.001,
+     "start": 30.0
+    },
+    "dom": [
+     -1.0,
+     -1.0,
+     1.0,
+     1.0
+    ],
+    "nosurf": true
+   }
+  },
+  {
+   "name": "plane_far_thin_approx_block",
+   "upstream_ref": "SM_API_test TestSmCurves.cpp:424 (TestSmCreateRectangle: 10 x 6 rectangle at the origin, as a plane)",
+   "inputs": {
+    "surf": {
+     "plane": {
+      "o": [
+       0.0,
+       100000.0,
+       0.0
+      ],
+      "x": [
+       0.0,
+       0.0,
+       1.0
+      ],
+      "y": [
+       1.0,
+       1.0,
+       0.0
+      ],
+      "scale": [
+       0.001,
+       1000.0
+      ],
+      "dom": [
+       0.0,
+       0.0,
+       10.0,
+       0.001
+      ]
+     }
+    },
+    "op": "approx_block"
+   }
+  },
+  {
+   "name": "plane_far_thin_nth",
+   "upstream_ref": "SM_API_test TestSmCurves.cpp:424 (TestSmCreateRectangle: 10 x 6 rectangle at the origin, as a plane)",
+   "inputs": {
+    "surf": {
+     "plane": {
+      "o": [
+       0.0,
+       100000.0,
+       0.0
+      ],
+      "x": [
+       0.0,
+       0.0,
+       1.0
+      ],
+      "y": [
+       1.0,
+       1.0,
+       0.0
+      ],
+      "scale": [
+       0.001,
+       1000.0
+      ],
+      "dom": [
+       0.0,
+       0.0,
+       10.0,
+       0.001
+      ]
+     }
+    },
+    "op": "nth",
+    "dom": [
+     0.0,
+     0.0,
+     10.0,
+     0.001
+    ],
+    "idx": [
+     0
+    ]
+   }
+  },
+  {
+   "name": "plane_far_thin_test_chord",
+   "upstream_ref": "SM_API_test TestSmCurves.cpp:424 (TestSmCreateRectangle: 10 x 6 rectangle at the origin, as a plane)",
+   "inputs": {
+    "surf": {
+     "plane": {
+      "o": [
+       0.0,
+       100000.0,
+       0.0
+      ],
+      "x": [
+       0.0,
+       0.0,
+       1.0
+      ],
+      "y": [
+       1.0,
+       1.0,
+       0.0
+      ],
+      "scale": [
+       0.001,
+       1000.0
+      ],
+      "dom": [
+       0.0,
+       0.0,
+       10.0,
+       0.001
+      ]
+     }
+    },
+    "op": "test",
+    "cache_dom": [
+     0.0,
+     0.0,
+     10.0,
+     0.001
+    ],
+    "opts": {
+     "chord": 0.01,
+     "ang": 0.0,
+     "aspect": 0.0,
+     "max_side": 0.0,
+     "min_side": 0.0,
+     "ratio": 0.001,
+     "start": 30.0
+    },
+    "aux": 3,
+    "dom": [
+     0.0,
+     0.0,
+     10.0,
+     0.001
+    ],
+    "bez": {
+     "net": [
+      [
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        0,
+        6,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      [
+       [
+        10,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        10,
+        6,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ]
+     ],
+     "p": 1,
+     "q": 1,
+     "u": [
+      0,
+      0,
+      10,
+      10
+     ],
+     "v": [
+      0,
+      0,
+      6,
+      6
+     ]
+    },
+    "ivl": [
+     [
+      0,
+      10
+     ],
+     [
+      0,
+      6
+     ],
+     [
+      0,
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "plane_far_thin_test_aspect",
+   "upstream_ref": "SM_API_test TestSmCurves.cpp:424 (TestSmCreateRectangle: 10 x 6 rectangle at the origin, as a plane)",
+   "inputs": {
+    "surf": {
+     "plane": {
+      "o": [
+       0.0,
+       100000.0,
+       0.0
+      ],
+      "x": [
+       0.0,
+       0.0,
+       1.0
+      ],
+      "y": [
+       1.0,
+       1.0,
+       0.0
+      ],
+      "scale": [
+       0.001,
+       1000.0
+      ],
+      "dom": [
+       0.0,
+       0.0,
+       10.0,
+       0.001
+      ]
+     }
+    },
+    "op": "test",
+    "cache_dom": [
+     0.0,
+     0.0,
+     10.0,
+     0.001
+    ],
+    "opts": {
+     "chord": 0.0,
+     "ang": 0.0,
+     "aspect": 1.2,
+     "max_side": 0.0,
+     "min_side": 0.0,
+     "ratio": 0.001,
+     "start": 30.0
+    },
+    "aux": 3,
+    "dom": [
+     0.0,
+     0.0,
+     10.0,
+     0.001
+    ],
+    "bez": {
+     "net": [
+      [
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        0,
+        6,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      [
+       [
+        10,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        10,
+        6,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ]
+     ],
+     "p": 1,
+     "q": 1,
+     "u": [
+      0,
+      0,
+      10,
+      10
+     ],
+     "v": [
+      0,
+      0,
+      6,
+      6
+     ]
+    },
+    "ivl": [
+     [
+      0,
+      10
+     ],
+     [
+      0,
+      6
+     ],
+     [
+      0,
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "plane_far_thin_test_max_side",
+   "upstream_ref": "SM_API_test TestSmCurves.cpp:424 (TestSmCreateRectangle: 10 x 6 rectangle at the origin, as a plane)",
+   "inputs": {
+    "surf": {
+     "plane": {
+      "o": [
+       0.0,
+       100000.0,
+       0.0
+      ],
+      "x": [
+       0.0,
+       0.0,
+       1.0
+      ],
+      "y": [
+       1.0,
+       1.0,
+       0.0
+      ],
+      "scale": [
+       0.001,
+       1000.0
+      ],
+      "dom": [
+       0.0,
+       0.0,
+       10.0,
+       0.001
+      ]
+     }
+    },
+    "op": "test",
+    "cache_dom": [
+     0.0,
+     0.0,
+     10.0,
+     0.001
+    ],
+    "opts": {
+     "chord": 0.0,
+     "ang": 0.0,
+     "aspect": 0.0,
+     "max_side": 2.0,
+     "min_side": 0.0,
+     "ratio": 0.001,
+     "start": 30.0
+    },
+    "aux": 3,
+    "dom": [
+     0.0,
+     0.0,
+     10.0,
+     0.001
+    ],
+    "bez": {
+     "net": [
+      [
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        0,
+        6,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      [
+       [
+        10,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        10,
+        6,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ]
+     ],
+     "p": 1,
+     "q": 1,
+     "u": [
+      0,
+      0,
+      10,
+      10
+     ],
+     "v": [
+      0,
+      0,
+      6,
+      6
+     ]
+    },
+    "ivl": [
+     [
+      0,
+      10
+     ],
+     [
+      0,
+      6
+     ],
+     [
+      0,
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "plane_far_thin_test_min_side",
+   "upstream_ref": "SM_API_test TestSmCurves.cpp:424 (TestSmCreateRectangle: 10 x 6 rectangle at the origin, as a plane)",
+   "inputs": {
+    "surf": {
+     "plane": {
+      "o": [
+       0.0,
+       100000.0,
+       0.0
+      ],
+      "x": [
+       0.0,
+       0.0,
+       1.0
+      ],
+      "y": [
+       1.0,
+       1.0,
+       0.0
+      ],
+      "scale": [
+       0.001,
+       1000.0
+      ],
+      "dom": [
+       0.0,
+       0.0,
+       10.0,
+       0.001
+      ]
+     }
+    },
+    "op": "test",
+    "cache_dom": [
+     0.0,
+     0.0,
+     10.0,
+     0.001
+    ],
+    "opts": {
+     "chord": 0.0,
+     "ang": 0.0,
+     "aspect": 0.0,
+     "max_side": 2.0,
+     "min_side": 20.0,
+     "ratio": 0.001,
+     "start": 30.0
+    },
+    "aux": 3,
+    "dom": [
+     0.0,
+     0.0,
+     10.0,
+     0.001
+    ],
+    "bez": {
+     "net": [
+      [
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        0,
+        6,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      [
+       [
+        10,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        10,
+        6,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ]
+     ],
+     "p": 1,
+     "q": 1,
+     "u": [
+      0,
+      0,
+      10,
+      10
+     ],
+     "v": [
+      0,
+      0,
+      6,
+      6
+     ]
+    },
+    "ivl": [
+     [
+      0,
+      10
+     ],
+     [
+      0,
+      6
+     ],
+     [
+      0,
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "plane_far_thin_subdiv_block_no_surface",
+   "upstream_ref": "SM_API_test TestSmCurves.cpp:424 (TestSmCreateRectangle: 10 x 6 rectangle at the origin, as a plane)",
+   "inputs": {
+    "surf": {
+     "plane": {
+      "o": [
+       0.0,
+       100000.0,
+       0.0
+      ],
+      "x": [
+       0.0,
+       0.0,
+       1.0
+      ],
+      "y": [
+       1.0,
+       1.0,
+       0.0
+      ],
+      "scale": [
+       0.001,
+       1000.0
+      ],
+      "dom": [
+       0.0,
+       0.0,
+       10.0,
+       0.001
+      ]
+     }
+    },
+    "op": "subdiv_block",
+    "opts": {
+     "chord": 0.01,
+     "ang": 0.0,
+     "aspect": 0.0,
+     "max_side": 0.0,
+     "min_side": 0.0,
+     "ratio": 0.001,
+     "start": 30.0
+    },
+    "dom": [
+     0.0,
+     0.0,
+     10.0,
+     0.001
+    ],
+    "nosurf": true
+   }
+  },
+  {
+   "name": "alt_eviction",
+   "upstream_ref": "SmSurfaceCache::AddCurvesToCache (SmTopologySolver.cpp:81 adds SM_AS_TRIMMED_SILHOUETTE caches)",
+   "inputs": {
+    "surf": {
+     "bspline": {
+      "oob": false,
+      "form": 11,
+      "srf": {
+       "sms": {
+        "$upstream_file": "Surface.sms"
+       }
+      }
+     }
+    },
+    "op": "add",
+    "adds": [
+     {
+      "ty": 0,
+      "approx": 0.0,
+      "angle": 0.1,
+      "key": {
+       "l": 0
+      },
+      "c3": [],
+      "cuv": []
+     },
+     {
+      "ty": 1,
+      "approx": 0.01,
+      "angle": 0.1,
+      "key": {
+       "l": 1
+      },
+      "c3": [
+       {
+        "dim": 3,
+        "cpts": [
+         [
+          0,
+          0,
+          0,
+          -1.7976931348623157e+308
+         ],
+         [
+          1,
+          1,
+          0,
+          -1.7976931348623157e+308
+         ],
+         [
+          2,
+          0,
+          1,
+          -1.7976931348623157e+308
+         ]
+        ],
+        "p": 2,
+        "u": [
+         0,
+         0,
+         0,
+         1,
+         1,
+         1
+        ]
+       }
+      ],
+      "cuv": []
+     },
+     {
+      "ty": 0,
+      "approx": 0.02,
+      "angle": 0.1,
+      "key": {
+       "l": 2
+      },
+      "c3": [
+       {
+        "dim": 3,
+        "cpts": [
+         [
+          0,
+          0,
+          0,
+          -1.7976931348623157e+308
+         ],
+         [
+          1,
+          1,
+          0,
+          -1.7976931348623157e+308
+         ],
+         [
+          2,
+          0,
+          1,
+          -1.7976931348623157e+308
+         ]
+        ],
+        "p": 2,
+        "u": [
+         0,
+         0,
+         0,
+         1,
+         1,
+         1
+        ]
+       },
+       {
+        "dim": 3,
+        "cpts": [
+         [
+          0,
+          0,
+          0,
+          -1.7976931348623157e+308
+         ],
+         [
+          1,
+          1,
+          0,
+          -1.7976931348623157e+308
+         ],
+         [
+          2,
+          0,
+          1,
+          -1.7976931348623157e+308
+         ]
+        ],
+        "p": 2,
+        "u": [
+         0,
+         0,
+         0,
+         1,
+         1,
+         1
+        ]
+       }
+      ]
+     },
+     {
+      "ty": 1,
+      "approx": 0.03,
+      "angle": 0.1,
+      "key": {
+       "l": 3
+      },
+      "c3": [],
+      "cuv": []
+     },
+     {
+      "ty": 0,
+      "approx": 0.04,
+      "angle": 0.1,
+      "key": {
+       "l": 4
+      },
+      "c3": [
+       {
+        "dim": 3,
+        "cpts": [
+         [
+          0,
+          0,
+          0,
+          -1.7976931348623157e+308
+         ],
+         [
+          1,
+          1,
+          0,
+          -1.7976931348623157e+308
+         ],
+         [
+          2,
+          0,
+          1,
+          -1.7976931348623157e+308
+         ]
+        ],
+        "p": 2,
+        "u": [
+         0,
+         0,
+         0,
+         1,
+         1,
+         1
+        ]
+       }
+      ],
+      "cuv": []
+     },
+     {
+      "ty": 1,
+      "approx": 0.05,
+      "angle": 0.1,
+      "key": {
+       "l": 5
+      },
+      "c3": [
+       {
+        "dim": 3,
+        "cpts": [
+         [
+          0,
+          0,
+          0,
+          -1.7976931348623157e+308
+         ],
+         [
+          1,
+          1,
+          0,
+          -1.7976931348623157e+308
+         ],
+         [
+          2,
+          0,
+          1,
+          -1.7976931348623157e+308
+         ]
+        ],
+        "p": 2,
+        "u": [
+         0,
+         0,
+         0,
+         1,
+         1,
+         1
+        ]
+       },
+       {
+        "dim": 3,
+        "cpts": [
+         [
+          0,
+          0,
+          0,
+          -1.7976931348623157e+308
+         ],
+         [
+          1,
+          1,
+          0,
+          -1.7976931348623157e+308
+         ],
+         [
+          2,
+          0,
+          1,
+          -1.7976931348623157e+308
+         ]
+        ],
+        "p": 2,
+        "u": [
+         0,
+         0,
+         0,
+         1,
+         1,
+         1
+        ]
+       }
+      ],
+      "cuv": []
+     },
+     {
+      "ty": 0,
+      "approx": 0.06,
+      "angle": 0.1,
+      "key": {
+       "l": 6
+      },
+      "c3": [],
+      "cuv": []
+     }
+    ],
+    "queries": [
+     {
+      "ty": 0,
+      "approx": 0.0,
+      "angle": 0.1,
+      "key": {
+       "l": 0
+      }
+     },
+     {
+      "ty": 1,
+      "approx": 0.01,
+      "angle": 0.1,
+      "key": {
+       "l": 1
+      }
+     },
+     {
+      "ty": 0,
+      "approx": 0.02,
+      "angle": 0.1,
+      "key": {
+       "l": 2
+      }
+     },
+     {
+      "ty": 1,
+      "approx": 0.03,
+      "angle": 0.1,
+      "key": {
+       "l": 3
+      }
+     },
+     {
+      "ty": 0,
+      "approx": 0.04,
+      "angle": 0.1,
+      "key": {
+       "l": 4
+      }
+     },
+     {
+      "ty": 1,
+      "approx": 0.05,
+      "angle": 0.1,
+      "key": {
+       "l": 5
+      }
+     },
+     {
+      "ty": 0,
+      "approx": 0.06,
+      "angle": 0.1,
+      "key": {
+       "l": 6
+      }
+     },
+     {
+      "ty": 0,
+      "approx": 0.0,
+      "angle": 0.1,
+      "key": {}
+     }
+    ]
+   }
+  },
+  {
+   "name": "alt_one_null_arrays",
+   "upstream_ref": "SmSurfaceCache::AddCurvesToCache (SmTopologySolver.cpp:81 adds SM_AS_TRIMMED_SILHOUETTE caches)",
+   "inputs": {
+    "surf": {
+     "plane": {
+      "o": [
+       -5.0,
+       -3.0,
+       0.0
+      ],
+      "x": [
+       1.0,
+       0.0,
+       0.0
+      ],
+      "y": [
+       0.0,
+       1.0,
+       0.0
+      ],
+      "scale": [
+       1.0,
+       1.0
+      ],
+      "dom": [
+       0.0,
+       0.0,
+       10.0,
+       6.0
+      ]
+     }
+    },
+    "op": "add",
+    "adds": [
+     {
+      "ty": 1,
+      "approx": 0.001,
+      "angle": 0.2,
+      "key": {
+       "vec": [
+        0,
+        0,
+        1
+       ],
+       "b": true,
+       "d": 0.5,
+       "p": 3
+      }
+     }
+    ],
+    "queries": [
+     {
+      "ty": 1,
+      "approx": 0.001,
+      "angle": 0.2,
+      "key": {
+       "vec": [
+        0,
+        0,
+        1.0000000000001
+       ]
+      }
+     },
+     {
+      "ty": 1,
+      "approx": 0.001,
+      "angle": 0.2,
+      "key": {
+       "vec": [
+        0,
+        0,
+        1.1
+       ]
+      }
+     }
+    ]
+   }
+  },
+  {
+   "name": "alt_five_exactly",
+   "upstream_ref": "SmSurfaceCache::AddCurvesToCache (SmTopologySolver.cpp:81 adds SM_AS_TRIMMED_SILHOUETTE caches)",
+   "inputs": {
+    "surf": {
+     "plane": {
+      "o": [
+       -5.0,
+       -3.0,
+       0.0
+      ],
+      "x": [
+       1.0,
+       0.0,
+       0.0
+      ],
+      "y": [
+       0.0,
+       1.0,
+       0.0
+      ],
+      "scale": [
+       1.0,
+       1.0
+      ],
+      "dom": [
+       0.0,
+       0.0,
+       10.0,
+       6.0
+      ]
+     }
+    },
+    "op": "add",
+    "adds": [
+     {
+      "ty": 0,
+      "approx": 0.0,
+      "angle": 0.1,
+      "key": {
+       "l": 0
+      },
+      "c3": [],
+      "cuv": []
+     },
+     {
+      "ty": 1,
+      "approx": 0.01,
+      "angle": 0.1,
+      "key": {
+       "l": 1
+      },
+      "c3": [
+       {
+        "dim": 3,
+        "cpts": [
+         [
+          0,
+          0,
+          0,
+          -1.7976931348623157e+308
+         ],
+         [
+          1,
+          1,
+          0,
+          -1.7976931348623157e+308
+         ],
+         [
+          2,
+          0,
+          1,
+          -1.7976931348623157e+308
+         ]
+        ],
+        "p": 2,
+        "u": [
+         0,
+         0,
+         0,
+         1,
+         1,
+         1
+        ]
+       }
+      ],
+      "cuv": []
+     },
+     {
+      "ty": 0,
+      "approx": 0.02,
+      "angle": 0.1,
+      "key": {
+       "l": 2
+      },
+      "c3": [
+       {
+        "dim": 3,
+        "cpts": [
+         [
+          0,
+          0,
+          0,
+          -1.7976931348623157e+308
+         ],
+         [
+          1,
+          1,
+          0,
+          -1.7976931348623157e+308
+         ],
+         [
+          2,
+          0,
+          1,
+          -1.7976931348623157e+308
+         ]
+        ],
+        "p": 2,
+        "u": [
+         0,
+         0,
+         0,
+         1,
+         1,
+         1
+        ]
+       },
+       {
+        "dim": 3,
+        "cpts": [
+         [
+          0,
+          0,
+          0,
+          -1.7976931348623157e+308
+         ],
+         [
+          1,
+          1,
+          0,
+          -1.7976931348623157e+308
+         ],
+         [
+          2,
+          0,
+          1,
+          -1.7976931348623157e+308
+         ]
+        ],
+        "p": 2,
+        "u": [
+         0,
+         0,
+         0,
+         1,
+         1,
+         1
+        ]
+       }
+      ]
+     },
+     {
+      "ty": 1,
+      "approx": 0.03,
+      "angle": 0.1,
+      "key": {
+       "l": 3
+      },
+      "c3": [],
+      "cuv": []
+     },
+     {
+      "ty": 0,
+      "approx": 0.04,
+      "angle": 0.1,
+      "key": {
+       "l": 4
+      },
+      "c3": [
+       {
+        "dim": 3,
+        "cpts": [
+         [
+          0,
+          0,
+          0,
+          -1.7976931348623157e+308
+         ],
+         [
+          1,
+          1,
+          0,
+          -1.7976931348623157e+308
+         ],
+         [
+          2,
+          0,
+          1,
+          -1.7976931348623157e+308
+         ]
+        ],
+        "p": 2,
+        "u": [
+         0,
+         0,
+         0,
+         1,
+         1,
+         1
+        ]
+       }
+      ],
+      "cuv": []
+     }
+    ],
+    "queries": [
+     {
+      "ty": 0,
+      "approx": 0.0,
+      "angle": 0.1,
+      "key": {
+       "l": 0
+      }
+     },
+     {
+      "ty": 1,
+      "approx": 0.01,
+      "angle": 0.1,
+      "key": {
+       "l": 1
+      }
+     },
+     {
+      "ty": 0,
+      "approx": 0.02,
+      "angle": 0.1,
+      "key": {
+       "l": 2
+      }
+     },
+     {
+      "ty": 1,
+      "approx": 0.03,
+      "angle": 0.1,
+      "key": {
+       "l": 3
+      }
+     },
+     {
+      "ty": 0,
+      "approx": 0.04,
+      "angle": 0.1,
+      "key": {
+       "l": 4
+      }
+     }
+    ]
+   }
+  }
+ ]
+}

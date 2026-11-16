@@ -1,0 +1,3052 @@
+{
+  "cases": [
+    {
+      "name": "copy_ctor_raw_u_gap1e-10_owner0",
+      "upstream_ref": "source/SMLib/src/SmSrfInVolume.cpp (the copy constructor shares a base surface the original does not own (owner flags 0 and 2) and copies an owned one; a copied SmBSplineSurface fixes its knot vectors up, so the raw near-coincident knots the shim writes back survive only through the shared pointer)",
+      "inputs": {
+        "siv": {
+          "surface": {
+            "kind": "bspline",
+            "bss": {
+              "srf": {
+                "net": [
+                  [
+                    [
+                      0.0,
+                      0.0,
+                      0.0,
+                      1.0
+                    ],
+                    [
+                      0.0,
+                      2.0,
+                      0.0,
+                      1.0
+                    ]
+                  ],
+                  [
+                    [
+                      1.0,
+                      0.0,
+                      0.1,
+                      1.0
+                    ],
+                    [
+                      1.0,
+                      2.0,
+                      0.3,
+                      1.0
+                    ]
+                  ],
+                  [
+                    [
+                      2.0,
+                      0.0,
+                      0.4,
+                      1.0
+                    ],
+                    [
+                      2.0,
+                      2.0,
+                      0.6,
+                      1.0
+                    ]
+                  ],
+                  [
+                    [
+                      3.0,
+                      0.0,
+                      0.9000000000000001,
+                      1.0
+                    ],
+                    [
+                      3.0,
+                      2.0,
+                      0.8999999999999999,
+                      1.0
+                    ]
+                  ],
+                  [
+                    [
+                      4.0,
+                      0.0,
+                      1.6,
+                      1.0
+                    ],
+                    [
+                      4.0,
+                      2.0,
+                      1.2,
+                      1.0
+                    ]
+                  ],
+                  [
+                    [
+                      5.0,
+                      0.0,
+                      2.5,
+                      1.0
+                    ],
+                    [
+                      5.0,
+                      2.0,
+                      1.5,
+                      1.0
+                    ]
+                  ]
+                ],
+                "p": 3,
+                "q": 1,
+                "u": [
+                  0,
+                  0,
+                  0,
+                  0,
+                  0.5,
+                  0.5000000001,
+                  1,
+                  1,
+                  1,
+                  1
+                ],
+                "v": [
+                  0,
+                  0,
+                  1,
+                  1
+                ]
+              }
+            },
+            "raw_knots": true
+          },
+          "volume": [
+            {
+              "kind": 1,
+              "t": [
+                [
+                  0,
+                  0,
+                  0
+                ],
+                [
+                  1,
+                  0,
+                  0
+                ],
+                [
+                  0,
+                  1,
+                  0
+                ],
+                [
+                  0,
+                  0,
+                  1
+                ]
+              ]
+            }
+          ],
+          "in_param": false,
+          "copy": 0,
+          "owner": 0
+        },
+        "op": "copy_ctor"
+      }
+    },
+    {
+      "name": "copy_ctor_raw_u_gap1e-10_owner1",
+      "upstream_ref": "source/SMLib/src/SmSrfInVolume.cpp (the copy constructor shares a base surface the original does not own (owner flags 0 and 2) and copies an owned one; a copied SmBSplineSurface fixes its knot vectors up, so the raw near-coincident knots the shim writes back survive only through the shared pointer)",
+      "inputs": {
+        "siv": {
+          "surface": {
+            "kind": "bspline",
+            "bss": {
+              "srf": {
+                "net": [
+                  [
+                    [
+                      0.0,
+                      0.0,
+                      0.0,
+                      1.0
+                    ],
+                    [
+                      0.0,
+                      2.0,
+                      0.0,
+                      1.0
+                    ]
+                  ],
+                  [
+                    [
+                      1.0,
+                      0.0,
+                      0.1,
+                      1.0
+                    ],
+                    [
+                      1.0,
+                      2.0,
+                      0.3,
+                      1.0
+                    ]
+                  ],
+                  [
+                    [
+                      2.0,
+                      0.0,
+                      0.4,
+                      1.0
+                    ],
+                    [
+                      2.0,
+                      2.0,
+                      0.6,
+                      1.0
+                    ]
+                  ],
+                  [
+                    [
+                      3.0,
+                      0.0,
+                      0.9000000000000001,
+                      1.0
+                    ],
+                    [
+                      3.0,
+                      2.0,
+                      0.8999999999999999,
+                      1.0
+                    ]
+                  ],
+                  [
+                    [
+                      4.0,
+                      0.0,
+                      1.6,
+                      1.0
+                    ],
+                    [
+                      4.0,
+                      2.0,
+                      1.2,
+                      1.0
+                    ]
+                  ],
+                  [
+                    [
+                      5.0,
+                      0.0,
+                      2.5,
+                      1.0
+                    ],
+                    [
+                      5.0,
+                      2.0,
+                      1.5,
+                      1.0
+                    ]
+                  ]
+                ],
+                "p": 3,
+                "q": 1,
+                "u": [
+                  0,
+                  0,
+                  0,
+                  0,
+                  0.5,
+                  0.5000000001,
+                  1,
+                  1,
+                  1,
+                  1
+                ],
+                "v": [
+                  0,
+                  0,
+                  1,
+                  1
+                ]
+              }
+            },
+            "raw_knots": true
+          },
+          "volume": [
+            {
+              "kind": 1,
+              "t": [
+                [
+                  0,
+                  0,
+                  0
+                ],
+                [
+                  1,
+                  0,
+                  0
+                ],
+                [
+                  0,
+                  1,
+                  0
+                ],
+                [
+                  0,
+                  0,
+                  1
+                ]
+              ]
+            }
+          ],
+          "in_param": false,
+          "copy": 0,
+          "owner": 1
+        },
+        "op": "copy_ctor"
+      }
+    },
+    {
+      "name": "copy_ctor_raw_u_gap1e-10_owner2",
+      "upstream_ref": "source/SMLib/src/SmSrfInVolume.cpp (the copy constructor shares a base surface the original does not own (owner flags 0 and 2) and copies an owned one; a copied SmBSplineSurface fixes its knot vectors up, so the raw near-coincident knots the shim writes back survive only through the shared pointer)",
+      "inputs": {
+        "siv": {
+          "surface": {
+            "kind": "bspline",
+            "bss": {
+              "srf": {
+                "net": [
+                  [
+                    [
+                      0.0,
+                      0.0,
+                      0.0,
+                      1.0
+                    ],
+                    [
+                      0.0,
+                      2.0,
+                      0.0,
+                      1.0
+                    ]
+                  ],
+                  [
+                    [
+                      1.0,
+                      0.0,
+                      0.1,
+                      1.0
+                    ],
+                    [
+                      1.0,
+                      2.0,
+                      0.3,
+                      1.0
+                    ]
+                  ],
+                  [
+                    [
+                      2.0,
+                      0.0,
+                      0.4,
+                      1.0
+                    ],
+                    [
+                      2.0,
+                      2.0,
+                      0.6,
+                      1.0
+                    ]
+                  ],
+                  [
+                    [
+                      3.0,
+                      0.0,
+                      0.9000000000000001,
+                      1.0
+                    ],
+                    [
+                      3.0,
+                      2.0,
+                      0.8999999999999999,
+                      1.0
+                    ]
+                  ],
+                  [
+                    [
+                      4.0,
+                      0.0,
+                      1.6,
+                      1.0
+                    ],
+                    [
+                      4.0,
+                      2.0,
+                      1.2,
+                      1.0
+                    ]
+                  ],
+                  [
+                    [
+                      5.0,
+                      0.0,
+                      2.5,
+                      1.0
+                    ],
+                    [
+                      5.0,
+                      2.0,
+                      1.5,
+                      1.0
+                    ]
+                  ]
+                ],
+                "p": 3,
+                "q": 1,
+                "u": [
+                  0,
+                  0,
+                  0,
+                  0,
+                  0.5,
+                  0.5000000001,
+                  1,
+                  1,
+                  1,
+                  1
+                ],
+                "v": [
+                  0,
+                  0,
+                  1,
+                  1
+                ]
+              }
+            },
+            "raw_knots": true
+          },
+          "volume": [
+            {
+              "kind": 1,
+              "t": [
+                [
+                  0,
+                  0,
+                  0
+                ],
+                [
+                  1,
+                  0,
+                  0
+                ],
+                [
+                  0,
+                  1,
+                  0
+                ],
+                [
+                  0,
+                  0,
+                  1
+                ]
+              ]
+            }
+          ],
+          "in_param": false,
+          "copy": 0,
+          "owner": 2
+        },
+        "op": "copy_ctor"
+      }
+    },
+    {
+      "name": "copy_ctor_raw_u_gap1e-10_owner3",
+      "upstream_ref": "source/SMLib/src/SmSrfInVolume.cpp (the copy constructor shares a base surface the original does not own (owner flags 0 and 2) and copies an owned one; a copied SmBSplineSurface fixes its knot vectors up, so the raw near-coincident knots the shim writes back survive only through the shared pointer)",
+      "inputs": {
+        "siv": {
+          "surface": {
+            "kind": "bspline",
+            "bss": {
+              "srf": {
+                "net": [
+                  [
+                    [
+                      0.0,
+                      0.0,
+                      0.0,
+                      1.0
+                    ],
+                    [
+                      0.0,
+                      2.0,
+                      0.0,
+                      1.0
+                    ]
+                  ],
+                  [
+                    [
+                      1.0,
+                      0.0,
+                      0.1,
+                      1.0
+                    ],
+                    [
+                      1.0,
+                      2.0,
+                      0.3,
+                      1.0
+                    ]
+                  ],
+                  [
+                    [
+                      2.0,
+                      0.0,
+                      0.4,
+                      1.0
+                    ],
+                    [
+                      2.0,
+                      2.0,
+                      0.6,
+                      1.0
+                    ]
+                  ],
+                  [
+                    [
+                      3.0,
+                      0.0,
+                      0.9000000000000001,
+                      1.0
+                    ],
+                    [
+                      3.0,
+                      2.0,
+                      0.8999999999999999,
+                      1.0
+                    ]
+                  ],
+                  [
+                    [
+                      4.0,
+                      0.0,
+                      1.6,
+                      1.0
+                    ],
+                    [
+                      4.0,
+                      2.0,
+                      1.2,
+                      1.0
+                    ]
+                  ],
+                  [
+                    [
+                      5.0,
+                      0.0,
+                      2.5,
+                      1.0
+                    ],
+                    [
+                      5.0,
+                      2.0,
+                      1.5,
+                      1.0
+                    ]
+                  ]
+                ],
+                "p": 3,
+                "q": 1,
+                "u": [
+                  0,
+                  0,
+                  0,
+                  0,
+                  0.5,
+                  0.5000000001,
+                  1,
+                  1,
+                  1,
+                  1
+                ],
+                "v": [
+                  0,
+                  0,
+                  1,
+                  1
+                ]
+              }
+            },
+            "raw_knots": true
+          },
+          "volume": [
+            {
+              "kind": 1,
+              "t": [
+                [
+                  0,
+                  0,
+                  0
+                ],
+                [
+                  1,
+                  0,
+                  0
+                ],
+                [
+                  0,
+                  1,
+                  0
+                ],
+                [
+                  0,
+                  0,
+                  1
+                ]
+              ]
+            }
+          ],
+          "in_param": false,
+          "copy": 0,
+          "owner": 3
+        },
+        "op": "copy_ctor"
+      }
+    },
+    {
+      "name": "copy_ctor_raw_u_gap3e-9_owner0",
+      "upstream_ref": "source/SMLib/src/SmSrfInVolume.cpp (the copy constructor shares a base surface the original does not own (owner flags 0 and 2) and copies an owned one; a copied SmBSplineSurface fixes its knot vectors up, so the raw near-coincident knots the shim writes back survive only through the shared pointer)",
+      "inputs": {
+        "siv": {
+          "surface": {
+            "kind": "bspline",
+            "bss": {
+              "srf": {
+                "net": [
+                  [
+                    [
+                      0.0,
+                      0.0,
+                      0.0,
+                      1.0
+                    ],
+                    [
+                      0.0,
+                      2.0,
+                      0.0,
+                      1.0
+                    ]
+                  ],
+                  [
+                    [
+                      1.0,
+                      0.0,
+                      0.1,
+                      1.0
+                    ],
+                    [
+                      1.0,
+                      2.0,
+                      0.3,
+                      1.0
+                    ]
+                  ],
+                  [
+                    [
+                      2.0,
+                      0.0,
+                      0.4,
+                      1.0
+                    ],
+                    [
+                      2.0,
+                      2.0,
+                      0.6,
+                      1.0
+                    ]
+                  ],
+                  [
+                    [
+                      3.0,
+                      0.0,
+                      0.9000000000000001,
+                      1.0
+                    ],
+                    [
+                      3.0,
+                      2.0,
+                      0.8999999999999999,
+                      1.0
+                    ]
+                  ],
+                  [
+                    [
+                      4.0,
+                      0.0,
+                      1.6,
+                      1.0
+                    ],
+                    [
+                      4.0,
+                      2.0,
+                      1.2,
+                      1.0
+                    ]
+                  ],
+                  [
+                    [
+                      5.0,
+                      0.0,
+                      2.5,
+                      1.0
+                    ],
+                    [
+                      5.0,
+                      2.0,
+                      1.5,
+                      1.0
+                    ]
+                  ]
+                ],
+                "p": 3,
+                "q": 1,
+                "u": [
+                  0,
+                  0,
+                  0,
+                  0,
+                  0.499999997,
+                  0.5,
+                  1,
+                  1,
+                  1,
+                  1
+                ],
+                "v": [
+                  0,
+                  0,
+                  1,
+                  1
+                ]
+              }
+            },
+            "raw_knots": true
+          },
+          "volume": [
+            {
+              "kind": 1,
+              "t": [
+                [
+                  0,
+                  0,
+                  0
+                ],
+                [
+                  1,
+                  0,
+                  0
+                ],
+                [
+                  0,
+                  1,
+                  0
+                ],
+                [
+                  0,
+                  0,
+                  1
+                ]
+              ]
+            }
+          ],
+          "in_param": false,
+          "copy": 0,
+          "owner": 0
+        },
+        "op": "copy_ctor"
+      }
+    },
+    {
+      "name": "copy_ctor_raw_u_gap3e-9_owner2",
+      "upstream_ref": "source/SMLib/src/SmSrfInVolume.cpp (the copy constructor shares a base surface the original does not own (owner flags 0 and 2) and copies an owned one; a copied SmBSplineSurface fixes its knot vectors up, so the raw near-coincident knots the shim writes back survive only through the shared pointer)",
+      "inputs": {
+        "siv": {
+          "surface": {
+            "kind": "bspline",
+            "bss": {
+              "srf": {
+                "net": [
+                  [
+                    [
+                      0.0,
+                      0.0,
+                      0.0,
+                      1.0
+                    ],
+                    [
+                      0.0,
+                      2.0,
+                      0.0,
+                      1.0
+                    ]
+                  ],
+                  [
+                    [
+                      1.0,
+                      0.0,
+                      0.1,
+                      1.0
+                    ],
+                    [
+                      1.0,
+                      2.0,
+                      0.3,
+                      1.0
+                    ]
+                  ],
+                  [
+                    [
+                      2.0,
+                      0.0,
+                      0.4,
+                      1.0
+                    ],
+                    [
+                      2.0,
+                      2.0,
+                      0.6,
+                      1.0
+                    ]
+                  ],
+                  [
+                    [
+                      3.0,
+                      0.0,
+                      0.9000000000000001,
+                      1.0
+                    ],
+                    [
+                      3.0,
+                      2.0,
+                      0.8999999999999999,
+                      1.0
+                    ]
+                  ],
+                  [
+                    [
+                      4.0,
+                      0.0,
+                      1.6,
+                      1.0
+                    ],
+                    [
+                      4.0,
+                      2.0,
+                      1.2,
+                      1.0
+                    ]
+                  ],
+                  [
+                    [
+                      5.0,
+                      0.0,
+                      2.5,
+                      1.0
+                    ],
+                    [
+                      5.0,
+                      2.0,
+                      1.5,
+                      1.0
+                    ]
+                  ]
+                ],
+                "p": 3,
+                "q": 1,
+                "u": [
+                  0,
+                  0,
+                  0,
+                  0,
+                  0.499999997,
+                  0.5,
+                  1,
+                  1,
+                  1,
+                  1
+                ],
+                "v": [
+                  0,
+                  0,
+                  1,
+                  1
+                ]
+              }
+            },
+            "raw_knots": true
+          },
+          "volume": [
+            {
+              "kind": 1,
+              "t": [
+                [
+                  0,
+                  0,
+                  0
+                ],
+                [
+                  1,
+                  0,
+                  0
+                ],
+                [
+                  0,
+                  1,
+                  0
+                ],
+                [
+                  0,
+                  0,
+                  1
+                ]
+              ]
+            }
+          ],
+          "in_param": false,
+          "copy": 0,
+          "owner": 2
+        },
+        "op": "copy_ctor"
+      }
+    },
+    {
+      "name": "copy_ctor_raw_v_gap1e-10_owner0",
+      "upstream_ref": "source/SMLib/src/SmSrfInVolume.cpp (the copy constructor shares a base surface the original does not own (owner flags 0 and 2) and copies an owned one; a copied SmBSplineSurface fixes its knot vectors up, so the raw near-coincident knots the shim writes back survive only through the shared pointer)",
+      "inputs": {
+        "siv": {
+          "surface": {
+            "kind": "bspline",
+            "bss": {
+              "srf": {
+                "net": [
+                  [
+                    [
+                      0.0,
+                      0.0,
+                      0.0,
+                      1.0
+                    ],
+                    [
+                      0.0,
+                      1.0,
+                      0.05,
+                      1.0
+                    ],
+                    [
+                      0.0,
+                      2.0,
+                      0.1,
+                      1.0
+                    ],
+                    [
+                      0.0,
+                      3.0,
+                      0.15000000000000002,
+                      1.0
+                    ]
+                  ],
+                  [
+                    [
+                      1.0,
+                      0.0,
+                      0.1,
+                      1.0
+                    ],
+                    [
+                      1.0,
+                      1.0,
+                      0.15000000000000002,
+                      1.0
+                    ],
+                    [
+                      1.0,
+                      2.0,
+                      0.2,
+                      1.0
+                    ],
+                    [
+                      1.0,
+                      3.0,
+                      0.25,
+                      1.0
+                    ]
+                  ],
+                  [
+                    [
+                      2.0,
+                      0.0,
+                      0.2,
+                      1.0
+                    ],
+                    [
+                      2.0,
+                      1.0,
+                      0.25,
+                      1.0
+                    ],
+                    [
+                      2.0,
+                      2.0,
+                      0.30000000000000004,
+                      1.0
+                    ],
+                    [
+                      2.0,
+                      3.0,
+                      0.35000000000000003,
+                      1.0
+                    ]
+                  ],
+                  [
+                    [
+                      3.0,
+                      0.0,
+                      0.30000000000000004,
+                      1.0
+                    ],
+                    [
+                      3.0,
+                      1.0,
+                      0.35000000000000003,
+                      1.0
+                    ],
+                    [
+                      3.0,
+                      2.0,
+                      0.4,
+                      1.0
+                    ],
+                    [
+                      3.0,
+                      3.0,
+                      0.45000000000000007,
+                      1.0
+                    ]
+                  ],
+                  [
+                    [
+                      4.0,
+                      0.0,
+                      0.4,
+                      1.0
+                    ],
+                    [
+                      4.0,
+                      1.0,
+                      0.45,
+                      1.0
+                    ],
+                    [
+                      4.0,
+                      2.0,
+                      0.5,
+                      1.0
+                    ],
+                    [
+                      4.0,
+                      3.0,
+                      0.55,
+                      1.0
+                    ]
+                  ],
+                  [
+                    [
+                      5.0,
+                      0.0,
+                      0.5,
+                      1.0
+                    ],
+                    [
+                      5.0,
+                      1.0,
+                      0.55,
+                      1.0
+                    ],
+                    [
+                      5.0,
+                      2.0,
+                      0.6,
+                      1.0
+                    ],
+                    [
+                      5.0,
+                      3.0,
+                      0.65,
+                      1.0
+                    ]
+                  ]
+                ],
+                "p": 3,
+                "q": 1,
+                "u": [
+                  0,
+                  0,
+                  0,
+                  0,
+                  0.3,
+                  0.7,
+                  1,
+                  1,
+                  1,
+                  1
+                ],
+                "v": [
+                  0,
+                  0,
+                  0.5,
+                  0.5000000001,
+                  1,
+                  1
+                ]
+              }
+            },
+            "raw_knots": true
+          },
+          "volume": [
+            {
+              "kind": 1,
+              "t": [
+                [
+                  0,
+                  0,
+                  0
+                ],
+                [
+                  1,
+                  0,
+                  0
+                ],
+                [
+                  0,
+                  1,
+                  0
+                ],
+                [
+                  0,
+                  0,
+                  1
+                ]
+              ]
+            }
+          ],
+          "in_param": false,
+          "copy": 0,
+          "owner": 0
+        },
+        "op": "copy_ctor"
+      }
+    },
+    {
+      "name": "copy_ctor_raw_v_gap1e-10_owner2",
+      "upstream_ref": "source/SMLib/src/SmSrfInVolume.cpp (the copy constructor shares a base surface the original does not own (owner flags 0 and 2) and copies an owned one; a copied SmBSplineSurface fixes its knot vectors up, so the raw near-coincident knots the shim writes back survive only through the shared pointer)",
+      "inputs": {
+        "siv": {
+          "surface": {
+            "kind": "bspline",
+            "bss": {
+              "srf": {
+                "net": [
+                  [
+                    [
+                      0.0,
+                      0.0,
+                      0.0,
+                      1.0
+                    ],
+                    [
+                      0.0,
+                      1.0,
+                      0.05,
+                      1.0
+                    ],
+                    [
+                      0.0,
+                      2.0,
+                      0.1,
+                      1.0
+                    ],
+                    [
+                      0.0,
+                      3.0,
+                      0.15000000000000002,
+                      1.0
+                    ]
+                  ],
+                  [
+                    [
+                      1.0,
+                      0.0,
+                      0.1,
+                      1.0
+                    ],
+                    [
+                      1.0,
+                      1.0,
+                      0.15000000000000002,
+                      1.0
+                    ],
+                    [
+                      1.0,
+                      2.0,
+                      0.2,
+                      1.0
+                    ],
+                    [
+                      1.0,
+                      3.0,
+                      0.25,
+                      1.0
+                    ]
+                  ],
+                  [
+                    [
+                      2.0,
+                      0.0,
+                      0.2,
+                      1.0
+                    ],
+                    [
+                      2.0,
+                      1.0,
+                      0.25,
+                      1.0
+                    ],
+                    [
+                      2.0,
+                      2.0,
+                      0.30000000000000004,
+                      1.0
+                    ],
+                    [
+                      2.0,
+                      3.0,
+                      0.35000000000000003,
+                      1.0
+                    ]
+                  ],
+                  [
+                    [
+                      3.0,
+                      0.0,
+                      0.30000000000000004,
+                      1.0
+                    ],
+                    [
+                      3.0,
+                      1.0,
+                      0.35000000000000003,
+                      1.0
+                    ],
+                    [
+                      3.0,
+                      2.0,
+                      0.4,
+                      1.0
+                    ],
+                    [
+                      3.0,
+                      3.0,
+                      0.45000000000000007,
+                      1.0
+                    ]
+                  ],
+                  [
+                    [
+                      4.0,
+                      0.0,
+                      0.4,
+                      1.0
+                    ],
+                    [
+                      4.0,
+                      1.0,
+                      0.45,
+                      1.0
+                    ],
+                    [
+                      4.0,
+                      2.0,
+                      0.5,
+                      1.0
+                    ],
+                    [
+                      4.0,
+                      3.0,
+                      0.55,
+                      1.0
+                    ]
+                  ],
+                  [
+                    [
+                      5.0,
+                      0.0,
+                      0.5,
+                      1.0
+                    ],
+                    [
+                      5.0,
+                      1.0,
+                      0.55,
+                      1.0
+                    ],
+                    [
+                      5.0,
+                      2.0,
+                      0.6,
+                      1.0
+                    ],
+                    [
+                      5.0,
+                      3.0,
+                      0.65,
+                      1.0
+                    ]
+                  ]
+                ],
+                "p": 3,
+                "q": 1,
+                "u": [
+                  0,
+                  0,
+                  0,
+                  0,
+                  0.3,
+                  0.7,
+                  1,
+                  1,
+                  1,
+                  1
+                ],
+                "v": [
+                  0,
+                  0,
+                  0.5,
+                  0.5000000001,
+                  1,
+                  1
+                ]
+              }
+            },
+            "raw_knots": true
+          },
+          "volume": [
+            {
+              "kind": 1,
+              "t": [
+                [
+                  0,
+                  0,
+                  0
+                ],
+                [
+                  1,
+                  0,
+                  0
+                ],
+                [
+                  0,
+                  1,
+                  0
+                ],
+                [
+                  0,
+                  0,
+                  1
+                ]
+              ]
+            }
+          ],
+          "in_param": false,
+          "copy": 0,
+          "owner": 2
+        },
+        "op": "copy_ctor"
+      }
+    },
+    {
+      "name": "copy_ctor_raw_uv_gap1e-10_owner0",
+      "upstream_ref": "source/SMLib/src/SmSrfInVolume.cpp (the copy constructor shares a base surface the original does not own (owner flags 0 and 2) and copies an owned one; a copied SmBSplineSurface fixes its knot vectors up, so the raw near-coincident knots the shim writes back survive only through the shared pointer)",
+      "inputs": {
+        "siv": {
+          "surface": {
+            "kind": "bspline",
+            "bss": {
+              "srf": {
+                "net": [
+                  [
+                    [
+                      0.0,
+                      0.0,
+                      0.0,
+                      1.0
+                    ],
+                    [
+                      0.0,
+                      1.0,
+                      0.05,
+                      1.0
+                    ],
+                    [
+                      0.0,
+                      2.0,
+                      0.1,
+                      1.0
+                    ],
+                    [
+                      0.0,
+                      3.0,
+                      0.15000000000000002,
+                      1.0
+                    ]
+                  ],
+                  [
+                    [
+                      1.0,
+                      0.0,
+                      0.1,
+                      1.0
+                    ],
+                    [
+                      1.0,
+                      1.0,
+                      0.15000000000000002,
+                      1.0
+                    ],
+                    [
+                      1.0,
+                      2.0,
+                      0.2,
+                      1.0
+                    ],
+                    [
+                      1.0,
+                      3.0,
+                      0.25,
+                      1.0
+                    ]
+                  ],
+                  [
+                    [
+                      2.0,
+                      0.0,
+                      0.2,
+                      1.0
+                    ],
+                    [
+                      2.0,
+                      1.0,
+                      0.25,
+                      1.0
+                    ],
+                    [
+                      2.0,
+                      2.0,
+                      0.30000000000000004,
+                      1.0
+                    ],
+                    [
+                      2.0,
+                      3.0,
+                      0.35000000000000003,
+                      1.0
+                    ]
+                  ],
+                  [
+                    [
+                      3.0,
+                      0.0,
+                      0.30000000000000004,
+                      1.0
+                    ],
+                    [
+                      3.0,
+                      1.0,
+                      0.35000000000000003,
+                      1.0
+                    ],
+                    [
+                      3.0,
+                      2.0,
+                      0.4,
+                      1.0
+                    ],
+                    [
+                      3.0,
+                      3.0,
+                      0.45000000000000007,
+                      1.0
+                    ]
+                  ],
+                  [
+                    [
+                      4.0,
+                      0.0,
+                      0.4,
+                      1.0
+                    ],
+                    [
+                      4.0,
+                      1.0,
+                      0.45,
+                      1.0
+                    ],
+                    [
+                      4.0,
+                      2.0,
+                      0.5,
+                      1.0
+                    ],
+                    [
+                      4.0,
+                      3.0,
+                      0.55,
+                      1.0
+                    ]
+                  ],
+                  [
+                    [
+                      5.0,
+                      0.0,
+                      0.5,
+                      1.0
+                    ],
+                    [
+                      5.0,
+                      1.0,
+                      0.55,
+                      1.0
+                    ],
+                    [
+                      5.0,
+                      2.0,
+                      0.6,
+                      1.0
+                    ],
+                    [
+                      5.0,
+                      3.0,
+                      0.65,
+                      1.0
+                    ]
+                  ]
+                ],
+                "p": 3,
+                "q": 1,
+                "u": [
+                  0,
+                  0,
+                  0,
+                  0,
+                  0.5,
+                  0.5000000001,
+                  1,
+                  1,
+                  1,
+                  1
+                ],
+                "v": [
+                  0,
+                  0,
+                  0.5,
+                  0.5000000001,
+                  1,
+                  1
+                ]
+              }
+            },
+            "raw_knots": true
+          },
+          "volume": [
+            {
+              "kind": 1,
+              "t": [
+                [
+                  0,
+                  0,
+                  0
+                ],
+                [
+                  1,
+                  0,
+                  0
+                ],
+                [
+                  0,
+                  1,
+                  0
+                ],
+                [
+                  0,
+                  0,
+                  1
+                ]
+              ]
+            }
+          ],
+          "in_param": false,
+          "copy": 0,
+          "owner": 0
+        },
+        "op": "copy_ctor"
+      }
+    },
+    {
+      "name": "copy_ctor_raw_uv_gap3e-9_owner3",
+      "upstream_ref": "source/SMLib/src/SmSrfInVolume.cpp (the copy constructor shares a base surface the original does not own (owner flags 0 and 2) and copies an owned one; a copied SmBSplineSurface fixes its knot vectors up, so the raw near-coincident knots the shim writes back survive only through the shared pointer)",
+      "inputs": {
+        "siv": {
+          "surface": {
+            "kind": "bspline",
+            "bss": {
+              "srf": {
+                "net": [
+                  [
+                    [
+                      0.0,
+                      0.0,
+                      0.0,
+                      1.0
+                    ],
+                    [
+                      0.0,
+                      1.0,
+                      0.05,
+                      1.0
+                    ],
+                    [
+                      0.0,
+                      2.0,
+                      0.1,
+                      1.0
+                    ],
+                    [
+                      0.0,
+                      3.0,
+                      0.15000000000000002,
+                      1.0
+                    ]
+                  ],
+                  [
+                    [
+                      1.0,
+                      0.0,
+                      0.1,
+                      1.0
+                    ],
+                    [
+                      1.0,
+                      1.0,
+                      0.15000000000000002,
+                      1.0
+                    ],
+                    [
+                      1.0,
+                      2.0,
+                      0.2,
+                      1.0
+                    ],
+                    [
+                      1.0,
+                      3.0,
+                      0.25,
+                      1.0
+                    ]
+                  ],
+                  [
+                    [
+                      2.0,
+                      0.0,
+                      0.2,
+                      1.0
+                    ],
+                    [
+                      2.0,
+                      1.0,
+                      0.25,
+                      1.0
+                    ],
+                    [
+                      2.0,
+                      2.0,
+                      0.30000000000000004,
+                      1.0
+                    ],
+                    [
+                      2.0,
+                      3.0,
+                      0.35000000000000003,
+                      1.0
+                    ]
+                  ],
+                  [
+                    [
+                      3.0,
+                      0.0,
+                      0.30000000000000004,
+                      1.0
+                    ],
+                    [
+                      3.0,
+                      1.0,
+                      0.35000000000000003,
+                      1.0
+                    ],
+                    [
+                      3.0,
+                      2.0,
+                      0.4,
+                      1.0
+                    ],
+                    [
+                      3.0,
+                      3.0,
+                      0.45000000000000007,
+                      1.0
+                    ]
+                  ],
+                  [
+                    [
+                      4.0,
+                      0.0,
+                      0.4,
+                      1.0
+                    ],
+                    [
+                      4.0,
+                      1.0,
+                      0.45,
+                      1.0
+                    ],
+                    [
+                      4.0,
+                      2.0,
+                      0.5,
+                      1.0
+                    ],
+                    [
+                      4.0,
+                      3.0,
+                      0.55,
+                      1.0
+                    ]
+                  ],
+                  [
+                    [
+                      5.0,
+                      0.0,
+                      0.5,
+                      1.0
+                    ],
+                    [
+                      5.0,
+                      1.0,
+                      0.55,
+                      1.0
+                    ],
+                    [
+                      5.0,
+                      2.0,
+                      0.6,
+                      1.0
+                    ],
+                    [
+                      5.0,
+                      3.0,
+                      0.65,
+                      1.0
+                    ]
+                  ]
+                ],
+                "p": 3,
+                "q": 1,
+                "u": [
+                  0,
+                  0,
+                  0,
+                  0,
+                  0.499999997,
+                  0.5,
+                  1,
+                  1,
+                  1,
+                  1
+                ],
+                "v": [
+                  0,
+                  0,
+                  0.499999997,
+                  0.5,
+                  1,
+                  1
+                ]
+              }
+            },
+            "raw_knots": true
+          },
+          "volume": [
+            {
+              "kind": 1,
+              "t": [
+                [
+                  0,
+                  0,
+                  0
+                ],
+                [
+                  1,
+                  0,
+                  0
+                ],
+                [
+                  0,
+                  1,
+                  0
+                ],
+                [
+                  0,
+                  0,
+                  1
+                ]
+              ]
+            }
+          ],
+          "in_param": false,
+          "copy": 0,
+          "owner": 3
+        },
+        "op": "copy_ctor"
+      }
+    },
+    {
+      "name": "copy_ctor_plain_knots_owner0",
+      "upstream_ref": "source/SMLib/src/SmSrfInVolume.cpp (the copy constructor shares a base surface the original does not own (owner flags 0 and 2) and copies an owned one; a copied SmBSplineSurface fixes its knot vectors up, so the raw near-coincident knots the shim writes back survive only through the shared pointer)",
+      "inputs": {
+        "siv": {
+          "surface": {
+            "kind": "bspline",
+            "bss": {
+              "srf": {
+                "net": [
+                  [
+                    [
+                      0.0,
+                      0.0,
+                      0.0,
+                      1.0
+                    ],
+                    [
+                      0.0,
+                      1.0,
+                      0.05,
+                      1.0
+                    ],
+                    [
+                      0.0,
+                      2.0,
+                      0.1,
+                      1.0
+                    ],
+                    [
+                      0.0,
+                      3.0,
+                      0.15000000000000002,
+                      1.0
+                    ]
+                  ],
+                  [
+                    [
+                      1.0,
+                      0.0,
+                      0.1,
+                      1.0
+                    ],
+                    [
+                      1.0,
+                      1.0,
+                      0.15000000000000002,
+                      1.0
+                    ],
+                    [
+                      1.0,
+                      2.0,
+                      0.2,
+                      1.0
+                    ],
+                    [
+                      1.0,
+                      3.0,
+                      0.25,
+                      1.0
+                    ]
+                  ],
+                  [
+                    [
+                      2.0,
+                      0.0,
+                      0.2,
+                      1.0
+                    ],
+                    [
+                      2.0,
+                      1.0,
+                      0.25,
+                      1.0
+                    ],
+                    [
+                      2.0,
+                      2.0,
+                      0.30000000000000004,
+                      1.0
+                    ],
+                    [
+                      2.0,
+                      3.0,
+                      0.35000000000000003,
+                      1.0
+                    ]
+                  ],
+                  [
+                    [
+                      3.0,
+                      0.0,
+                      0.30000000000000004,
+                      1.0
+                    ],
+                    [
+                      3.0,
+                      1.0,
+                      0.35000000000000003,
+                      1.0
+                    ],
+                    [
+                      3.0,
+                      2.0,
+                      0.4,
+                      1.0
+                    ],
+                    [
+                      3.0,
+                      3.0,
+                      0.45000000000000007,
+                      1.0
+                    ]
+                  ],
+                  [
+                    [
+                      4.0,
+                      0.0,
+                      0.4,
+                      1.0
+                    ],
+                    [
+                      4.0,
+                      1.0,
+                      0.45,
+                      1.0
+                    ],
+                    [
+                      4.0,
+                      2.0,
+                      0.5,
+                      1.0
+                    ],
+                    [
+                      4.0,
+                      3.0,
+                      0.55,
+                      1.0
+                    ]
+                  ],
+                  [
+                    [
+                      5.0,
+                      0.0,
+                      0.5,
+                      1.0
+                    ],
+                    [
+                      5.0,
+                      1.0,
+                      0.55,
+                      1.0
+                    ],
+                    [
+                      5.0,
+                      2.0,
+                      0.6,
+                      1.0
+                    ],
+                    [
+                      5.0,
+                      3.0,
+                      0.65,
+                      1.0
+                    ]
+                  ]
+                ],
+                "p": 3,
+                "q": 1,
+                "u": [
+                  0,
+                  0,
+                  0,
+                  0,
+                  0.3,
+                  0.7,
+                  1,
+                  1,
+                  1,
+                  1
+                ],
+                "v": [
+                  0,
+                  0,
+                  0.3,
+                  0.7,
+                  1,
+                  1
+                ]
+              }
+            },
+            "raw_knots": false
+          },
+          "volume": [
+            {
+              "kind": 1,
+              "t": [
+                [
+                  0,
+                  0,
+                  0
+                ],
+                [
+                  1,
+                  0,
+                  0
+                ],
+                [
+                  0,
+                  1,
+                  0
+                ],
+                [
+                  0,
+                  0,
+                  1
+                ]
+              ]
+            }
+          ],
+          "in_param": false,
+          "copy": 0,
+          "owner": 0
+        },
+        "op": "copy_ctor"
+      }
+    },
+    {
+      "name": "copy_ctor_plain_knots_owner3",
+      "upstream_ref": "source/SMLib/src/SmSrfInVolume.cpp (the copy constructor shares a base surface the original does not own (owner flags 0 and 2) and copies an owned one; a copied SmBSplineSurface fixes its knot vectors up, so the raw near-coincident knots the shim writes back survive only through the shared pointer)",
+      "inputs": {
+        "siv": {
+          "surface": {
+            "kind": "bspline",
+            "bss": {
+              "srf": {
+                "net": [
+                  [
+                    [
+                      0.0,
+                      0.0,
+                      0.0,
+                      1.0
+                    ],
+                    [
+                      0.0,
+                      1.0,
+                      0.05,
+                      1.0
+                    ],
+                    [
+                      0.0,
+                      2.0,
+                      0.1,
+                      1.0
+                    ],
+                    [
+                      0.0,
+                      3.0,
+                      0.15000000000000002,
+                      1.0
+                    ]
+                  ],
+                  [
+                    [
+                      1.0,
+                      0.0,
+                      0.1,
+                      1.0
+                    ],
+                    [
+                      1.0,
+                      1.0,
+                      0.15000000000000002,
+                      1.0
+                    ],
+                    [
+                      1.0,
+                      2.0,
+                      0.2,
+                      1.0
+                    ],
+                    [
+                      1.0,
+                      3.0,
+                      0.25,
+                      1.0
+                    ]
+                  ],
+                  [
+                    [
+                      2.0,
+                      0.0,
+                      0.2,
+                      1.0
+                    ],
+                    [
+                      2.0,
+                      1.0,
+                      0.25,
+                      1.0
+                    ],
+                    [
+                      2.0,
+                      2.0,
+                      0.30000000000000004,
+                      1.0
+                    ],
+                    [
+                      2.0,
+                      3.0,
+                      0.35000000000000003,
+                      1.0
+                    ]
+                  ],
+                  [
+                    [
+                      3.0,
+                      0.0,
+                      0.30000000000000004,
+                      1.0
+                    ],
+                    [
+                      3.0,
+                      1.0,
+                      0.35000000000000003,
+                      1.0
+                    ],
+                    [
+                      3.0,
+                      2.0,
+                      0.4,
+                      1.0
+                    ],
+                    [
+                      3.0,
+                      3.0,
+                      0.45000000000000007,
+                      1.0
+                    ]
+                  ],
+                  [
+                    [
+                      4.0,
+                      0.0,
+                      0.4,
+                      1.0
+                    ],
+                    [
+                      4.0,
+                      1.0,
+                      0.45,
+                      1.0
+                    ],
+                    [
+                      4.0,
+                      2.0,
+                      0.5,
+                      1.0
+                    ],
+                    [
+                      4.0,
+                      3.0,
+                      0.55,
+                      1.0
+                    ]
+                  ],
+                  [
+                    [
+                      5.0,
+                      0.0,
+                      0.5,
+                      1.0
+                    ],
+                    [
+                      5.0,
+                      1.0,
+                      0.55,
+                      1.0
+                    ],
+                    [
+                      5.0,
+                      2.0,
+                      0.6,
+                      1.0
+                    ],
+                    [
+                      5.0,
+                      3.0,
+                      0.65,
+                      1.0
+                    ]
+                  ]
+                ],
+                "p": 3,
+                "q": 1,
+                "u": [
+                  0,
+                  0,
+                  0,
+                  0,
+                  0.3,
+                  0.7,
+                  1,
+                  1,
+                  1,
+                  1
+                ],
+                "v": [
+                  0,
+                  0,
+                  0.3,
+                  0.7,
+                  1,
+                  1
+                ]
+              }
+            },
+            "raw_knots": false
+          },
+          "volume": [
+            {
+              "kind": 1,
+              "t": [
+                [
+                  0,
+                  0,
+                  0
+                ],
+                [
+                  1,
+                  0,
+                  0
+                ],
+                [
+                  0,
+                  1,
+                  0
+                ],
+                [
+                  0,
+                  0,
+                  1
+                ]
+              ]
+            }
+          ],
+          "in_param": false,
+          "copy": 0,
+          "owner": 3
+        },
+        "op": "copy_ctor"
+      }
+    },
+    {
+      "name": "copy_ctor_transform_chain_owner1",
+      "upstream_ref": "source/SMLib/src/SmSrfInVolume.cpp (the copy constructor shares a base surface the original does not own (owner flags 0 and 2) and copies an owned one; a copied SmBSplineSurface fixes its knot vectors up, so the raw near-coincident knots the shim writes back survive only through the shared pointer)",
+      "inputs": {
+        "siv": {
+          "surface": {
+            "kind": "bspline",
+            "bss": {
+              "srf": {
+                "net": [
+                  [
+                    [
+                      0.0,
+                      0.0,
+                      0.0,
+                      1.0
+                    ],
+                    [
+                      0.0,
+                      2.0,
+                      0.0,
+                      1.0
+                    ]
+                  ],
+                  [
+                    [
+                      1.0,
+                      0.0,
+                      0.1,
+                      1.0
+                    ],
+                    [
+                      1.0,
+                      2.0,
+                      0.3,
+                      1.0
+                    ]
+                  ],
+                  [
+                    [
+                      2.0,
+                      0.0,
+                      0.4,
+                      1.0
+                    ],
+                    [
+                      2.0,
+                      2.0,
+                      0.6,
+                      1.0
+                    ]
+                  ],
+                  [
+                    [
+                      3.0,
+                      0.0,
+                      0.9000000000000001,
+                      1.0
+                    ],
+                    [
+                      3.0,
+                      2.0,
+                      0.8999999999999999,
+                      1.0
+                    ]
+                  ],
+                  [
+                    [
+                      4.0,
+                      0.0,
+                      1.6,
+                      1.0
+                    ],
+                    [
+                      4.0,
+                      2.0,
+                      1.2,
+                      1.0
+                    ]
+                  ],
+                  [
+                    [
+                      5.0,
+                      0.0,
+                      2.5,
+                      1.0
+                    ],
+                    [
+                      5.0,
+                      2.0,
+                      1.5,
+                      1.0
+                    ]
+                  ]
+                ],
+                "p": 3,
+                "q": 1,
+                "u": [
+                  0,
+                  0,
+                  0,
+                  0,
+                  0.3,
+                  0.7,
+                  1,
+                  1,
+                  1,
+                  1
+                ],
+                "v": [
+                  0,
+                  0,
+                  1,
+                  1
+                ]
+              }
+            },
+            "raw_knots": false
+          },
+          "volume": [
+            {
+              "kind": 1,
+              "t": [
+                [
+                  0,
+                  0,
+                  0
+                ],
+                [
+                  1,
+                  0,
+                  0
+                ],
+                [
+                  0,
+                  1,
+                  0
+                ],
+                [
+                  0,
+                  0,
+                  1
+                ]
+              ]
+            },
+            {
+              "kind": 2
+            }
+          ],
+          "in_param": false,
+          "copy": 0,
+          "owner": 1
+        },
+        "op": "copy_ctor"
+      }
+    },
+    {
+      "name": "copy_ctor_twist_chain_owner1",
+      "upstream_ref": "source/SMLib/src/SmSrfInVolume.cpp (the copy constructor shares a base surface the original does not own (owner flags 0 and 2) and copies an owned one; a copied SmBSplineSurface fixes its knot vectors up, so the raw near-coincident knots the shim writes back survive only through the shared pointer)",
+      "inputs": {
+        "siv": {
+          "surface": {
+            "kind": "bspline",
+            "bss": {
+              "srf": {
+                "net": [
+                  [
+                    [
+                      0.0,
+                      0.0,
+                      0.0,
+                      1.0
+                    ],
+                    [
+                      0.0,
+                      2.0,
+                      0.0,
+                      1.0
+                    ]
+                  ],
+                  [
+                    [
+                      1.0,
+                      0.0,
+                      0.1,
+                      1.0
+                    ],
+                    [
+                      1.0,
+                      2.0,
+                      0.3,
+                      1.0
+                    ]
+                  ],
+                  [
+                    [
+                      2.0,
+                      0.0,
+                      0.4,
+                      1.0
+                    ],
+                    [
+                      2.0,
+                      2.0,
+                      0.6,
+                      1.0
+                    ]
+                  ],
+                  [
+                    [
+                      3.0,
+                      0.0,
+                      0.9000000000000001,
+                      1.0
+                    ],
+                    [
+                      3.0,
+                      2.0,
+                      0.8999999999999999,
+                      1.0
+                    ]
+                  ],
+                  [
+                    [
+                      4.0,
+                      0.0,
+                      1.6,
+                      1.0
+                    ],
+                    [
+                      4.0,
+                      2.0,
+                      1.2,
+                      1.0
+                    ]
+                  ],
+                  [
+                    [
+                      5.0,
+                      0.0,
+                      2.5,
+                      1.0
+                    ],
+                    [
+                      5.0,
+                      2.0,
+                      1.5,
+                      1.0
+                    ]
+                  ]
+                ],
+                "p": 3,
+                "q": 1,
+                "u": [
+                  0,
+                  0,
+                  0,
+                  0,
+                  0.5,
+                  0.5000000001,
+                  1,
+                  1,
+                  1,
+                  1
+                ],
+                "v": [
+                  0,
+                  0,
+                  1,
+                  1
+                ]
+              }
+            },
+            "raw_knots": true
+          },
+          "volume": [
+            {
+              "kind": 1,
+              "t": [
+                [
+                  0,
+                  0,
+                  0
+                ],
+                [
+                  1,
+                  0,
+                  0
+                ],
+                [
+                  0,
+                  1,
+                  0
+                ],
+                [
+                  0,
+                  0,
+                  1
+                ]
+              ]
+            },
+            {
+              "kind": 5,
+              "comp": {
+                "p": [
+                  0,
+                  0,
+                  0
+                ],
+                "axis": [
+                  0,
+                  0,
+                  1
+                ],
+                "mid": [
+                  1,
+                  0,
+                  0
+                ],
+                "a": 2.0,
+                "b": 0.01
+              }
+            }
+          ],
+          "in_param": false,
+          "copy": 0,
+          "owner": 1
+        },
+        "op": "copy_ctor"
+      }
+    },
+    {
+      "name": "copy_ctor_twist_chain_owner0",
+      "upstream_ref": "source/SMLib/src/SmSrfInVolume.cpp (the copy constructor shares a base surface the original does not own (owner flags 0 and 2) and copies an owned one; a copied SmBSplineSurface fixes its knot vectors up, so the raw near-coincident knots the shim writes back survive only through the shared pointer)",
+      "inputs": {
+        "siv": {
+          "surface": {
+            "kind": "bspline",
+            "bss": {
+              "srf": {
+                "net": [
+                  [
+                    [
+                      0.0,
+                      0.0,
+                      0.0,
+                      1.0
+                    ],
+                    [
+                      0.0,
+                      2.0,
+                      0.0,
+                      1.0
+                    ]
+                  ],
+                  [
+                    [
+                      1.1,
+                      0.0,
+                      0.1,
+                      1.0
+                    ],
+                    [
+                      1.1,
+                      2.0,
+                      0.3,
+                      1.0
+                    ]
+                  ],
+                  [
+                    [
+                      2.2,
+                      0.0,
+                      0.4,
+                      1.0
+                    ],
+                    [
+                      2.2,
+                      2.0,
+                      0.6,
+                      1.0
+                    ]
+                  ],
+                  [
+                    [
+                      3.0,
+                      0.0,
+                      0.9000000000000001,
+                      1.0
+                    ],
+                    [
+                      3.0,
+                      2.0,
+                      0.8999999999999999,
+                      1.0
+                    ]
+                  ],
+                  [
+                    [
+                      4.1,
+                      0.0,
+                      1.6,
+                      1.0
+                    ],
+                    [
+                      4.1,
+                      2.0,
+                      1.2,
+                      1.0
+                    ]
+                  ],
+                  [
+                    [
+                      5.2,
+                      0.0,
+                      2.5,
+                      1.0
+                    ],
+                    [
+                      5.2,
+                      2.0,
+                      1.5,
+                      1.0
+                    ]
+                  ]
+                ],
+                "p": 3,
+                "q": 1,
+                "u": [
+                  0,
+                  0,
+                  0,
+                  0,
+                  0.5,
+                  0.5000000001,
+                  1,
+                  1,
+                  1,
+                  1
+                ],
+                "v": [
+                  0,
+                  0,
+                  1,
+                  1
+                ]
+              }
+            },
+            "raw_knots": true
+          },
+          "volume": [
+            {
+              "kind": 1,
+              "t": [
+                [
+                  0,
+                  0,
+                  0
+                ],
+                [
+                  1,
+                  0,
+                  0
+                ],
+                [
+                  0,
+                  1,
+                  0
+                ],
+                [
+                  0,
+                  0,
+                  1
+                ]
+              ]
+            },
+            {
+              "kind": 5,
+              "comp": {
+                "p": [
+                  0,
+                  0,
+                  0
+                ],
+                "axis": [
+                  0,
+                  0,
+                  1
+                ],
+                "mid": [
+                  1,
+                  0,
+                  0
+                ],
+                "a": 2.0,
+                "b": 0.01
+              }
+            }
+          ],
+          "in_param": false,
+          "copy": 0,
+          "owner": 0
+        },
+        "op": "copy_ctor"
+      }
+    },
+    {
+      "name": "copy_ctor_plain_volume_owner0",
+      "upstream_ref": "source/SMLib/src/SmSrfInVolume.cpp (the copy constructor shares a base surface the original does not own (owner flags 0 and 2) and copies an owned one; a copied SmBSplineSurface fixes its knot vectors up, so the raw near-coincident knots the shim writes back survive only through the shared pointer) and source/SMLib/inc/SmVolume.h:580 (the base SmVolume::Copy returns SM_ERR without setting the output pointer, so an owner-0 or owner-1 copy safely shares a plain volume, while an owning copy would delete it)",
+      "inputs": {
+        "siv": {
+          "surface": {
+            "kind": "bspline",
+            "bss": {
+              "srf": {
+                "net": [
+                  [
+                    [
+                      0.0,
+                      0.0,
+                      0.0,
+                      1.0
+                    ],
+                    [
+                      0.0,
+                      2.0,
+                      0.0,
+                      1.0
+                    ]
+                  ],
+                  [
+                    [
+                      1.0,
+                      0.0,
+                      0.1,
+                      1.0
+                    ],
+                    [
+                      1.0,
+                      2.0,
+                      0.3,
+                      1.0
+                    ]
+                  ],
+                  [
+                    [
+                      2.0,
+                      0.0,
+                      0.4,
+                      1.0
+                    ],
+                    [
+                      2.0,
+                      2.0,
+                      0.6,
+                      1.0
+                    ]
+                  ],
+                  [
+                    [
+                      3.0,
+                      0.0,
+                      0.9000000000000001,
+                      1.0
+                    ],
+                    [
+                      3.0,
+                      2.0,
+                      0.8999999999999999,
+                      1.0
+                    ]
+                  ],
+                  [
+                    [
+                      4.0,
+                      0.0,
+                      1.6,
+                      1.0
+                    ],
+                    [
+                      4.0,
+                      2.0,
+                      1.2,
+                      1.0
+                    ]
+                  ],
+                  [
+                    [
+                      5.0,
+                      0.0,
+                      2.5,
+                      1.0
+                    ],
+                    [
+                      5.0,
+                      2.0,
+                      1.5,
+                      1.0
+                    ]
+                  ]
+                ],
+                "p": 3,
+                "q": 1,
+                "u": [
+                  0,
+                  0,
+                  0,
+                  0,
+                  0.3,
+                  0.7,
+                  1,
+                  1,
+                  1,
+                  1
+                ],
+                "v": [
+                  0,
+                  0,
+                  1,
+                  1
+                ]
+              }
+            },
+            "raw_knots": false
+          },
+          "volume": [
+            {
+              "kind": 0
+            }
+          ],
+          "in_param": false,
+          "copy": 0,
+          "owner": 0
+        },
+        "op": "copy_ctor"
+      }
+    },
+    {
+      "name": "copy_ctor_plain_volume_owner1",
+      "upstream_ref": "source/SMLib/src/SmSrfInVolume.cpp (the copy constructor shares a base surface the original does not own (owner flags 0 and 2) and copies an owned one; a copied SmBSplineSurface fixes its knot vectors up, so the raw near-coincident knots the shim writes back survive only through the shared pointer) and source/SMLib/inc/SmVolume.h:580 (the base SmVolume::Copy returns SM_ERR without setting the output pointer, so an owner-0 or owner-1 copy safely shares a plain volume, while an owning copy would delete it)",
+      "inputs": {
+        "siv": {
+          "surface": {
+            "kind": "bspline",
+            "bss": {
+              "srf": {
+                "net": [
+                  [
+                    [
+                      0.0,
+                      0.0,
+                      0.0,
+                      1.0
+                    ],
+                    [
+                      0.0,
+                      2.0,
+                      0.0,
+                      1.0
+                    ]
+                  ],
+                  [
+                    [
+                      1.0,
+                      0.0,
+                      0.1,
+                      1.0
+                    ],
+                    [
+                      1.0,
+                      2.0,
+                      0.3,
+                      1.0
+                    ]
+                  ],
+                  [
+                    [
+                      2.0,
+                      0.0,
+                      0.4,
+                      1.0
+                    ],
+                    [
+                      2.0,
+                      2.0,
+                      0.6,
+                      1.0
+                    ]
+                  ],
+                  [
+                    [
+                      3.0,
+                      0.0,
+                      0.9000000000000001,
+                      1.0
+                    ],
+                    [
+                      3.0,
+                      2.0,
+                      0.8999999999999999,
+                      1.0
+                    ]
+                  ],
+                  [
+                    [
+                      4.0,
+                      0.0,
+                      1.6,
+                      1.0
+                    ],
+                    [
+                      4.0,
+                      2.0,
+                      1.2,
+                      1.0
+                    ]
+                  ],
+                  [
+                    [
+                      5.0,
+                      0.0,
+                      2.5,
+                      1.0
+                    ],
+                    [
+                      5.0,
+                      2.0,
+                      1.5,
+                      1.0
+                    ]
+                  ]
+                ],
+                "p": 3,
+                "q": 1,
+                "u": [
+                  0,
+                  0,
+                  0,
+                  0,
+                  0.3,
+                  0.7,
+                  1,
+                  1,
+                  1,
+                  1
+                ],
+                "v": [
+                  0,
+                  0,
+                  1,
+                  1
+                ]
+              }
+            },
+            "raw_knots": false
+          },
+          "volume": [
+            {
+              "kind": 0
+            }
+          ],
+          "in_param": false,
+          "copy": 0,
+          "owner": 1
+        },
+        "op": "copy_ctor"
+      }
+    }
+  ]
+}

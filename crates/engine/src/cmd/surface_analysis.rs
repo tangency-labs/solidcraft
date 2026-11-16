@@ -842,7 +842,7 @@ mod tests {
             ("solid.extrude", json!({"distance":5})),
             ("inspect.zebra", json!({"stripes": 10.5})),
             ("inspect.section", json!({"plane":"XY", "at": 2})),
-            ("sketch.edit", json!({"sketch":"Sketch1"})),
+            ("sketch.edit", json!({"sketch":"Sketch1","restore_marker":false})),
         ] {
             s.execute(command, &params).unwrap();
         }
@@ -879,7 +879,7 @@ mod tests {
             ("sketch.finish", json!({})),
             ("solid.extrude", json!({"distance":5})),
             ("inspect.continuity", json!({"samples":5})),
-            ("sketch.edit", json!({"sketch":"Sketch1"})),
+            ("sketch.edit", json!({"sketch":"Sketch1","restore_marker":false})),
         ] {
             s.execute(command, &params).unwrap();
         }

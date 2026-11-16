@@ -130,6 +130,8 @@ pub(crate) fn tick(app: &mut SolveApp, ctx: &egui::Context) {
         return;
     };
     if let Some(pending) = app.file_picker.take() {
+        // The dialog may have kept a button or modifier release for itself (#16460).
+        crate::window_chrome::mark_input_stale(ctx);
         (pending.complete)(app, path);
         // Hosts can flush writes or restore native input on the following frame.
         ctx.request_repaint();
@@ -362,6 +364,9 @@ mod tests {
         h.app.run("solid.box", json!({"length":10,"width":10,"height":10})).unwrap();
         crate::documents::new_design(&mut h.app);
         h.app.run("solid.box", json!({"length":20,"width":20,"height":20})).unwrap();
+        // One dialog per tab is the preference's behaviour; by default several unsaved designs
+        // are asked about once, in one list (#11680).
+        h.app.preferences.save_prompt_one_at_a_time = true;
         crate::documents::request_quit(&mut h.app);
         for i in 0..2 {
             let answer = picker(&mut h.app, true);
@@ -484,8 +489,47 @@ mod tests {
         let doc = &h.app.session.doc;
         let canvas = doc.canvases.first().expect("the canvas is placed");
         let (vals, _) = doc.param_values();
-        let n = doc.canvas_plane(&vals, canvas).unwrap().normal();
+        let n = doc.canvas_plane(&vals, canvas, &h.app.session.model.state()).unwrap().normal();
         assert!(n.z.abs() > 0.99, "the canvas lies on {n:?}, not on XY");
+    }
+
+    /// #13926: a picture dropped on the window starts the Canvas tool with it, as choosing it in
+    /// the tool's file dialog does, and a click on the sketch places it. It was opened as a
+    /// design instead, and failed ("design file is not UTF-8 JSON").
+    /// Dropped on Home, it closes Home so the viewport is there to click.
+    #[test]
+    fn a_picture_dropped_on_the_window_is_placed_as_a_canvas() {
+        #[derive(Debug)]
+        struct Dropped(std::path::PathBuf);
+        impl egui::DroppedFile for Dropped {
+            fn path(&self) -> &std::path::Path {
+                &self.0
+            }
+            fn bytes(&self) -> Result<Vec<u8>, String> {
+                std::fs::read(&self.0).map_err(|e| e.to_string())
+            }
+        }
+        let mut h = crate::scenario::Harness::new();
+        h.app.run("sketch.create", json!({"plane": "XY"})).unwrap();
+        h.step(&json!({"make_image": "Plan.PNG"})).unwrap();
+        h.step(&json!({"call": "ui.view", "params": {"view": "top"}})).unwrap();
+        h.app.home.open = true;
+        let tabs = h.app.docs.count();
+        let file = h.dir.join("Plan.PNG");
+        h.drop_files(egui::pos2(800.0, 500.0), vec![std::sync::Arc::new(Dropped(file)) as egui::DroppedFileHandle]);
+        h.frames(2);
+        assert_eq!(h.app.tool.as_ref().map(|tool| tool.cmd), Some("canvas.insert"), "{:?}", h.app.status);
+        assert_eq!(h.app.docs.count(), tabs, "the drop opened no design");
+        assert!(!h.app.home.open, "Home closes so the viewport can be clicked");
+        assert!(h.app.session.doc.canvases.is_empty(), "the click places it, not the drop");
+        h.step(&json!({"click": {"world": [0, 0, 0]}})).unwrap();
+        h.step(&json!({"shot": "dropped-canvas"})).unwrap();
+        let doc = &h.app.session.doc;
+        assert_eq!(doc.canvases.len(), 1, "{:?}", h.app.status);
+        let (vals, _) = doc.param_values();
+        let n = doc.canvas_plane(&vals, &doc.canvases[0], &h.app.session.model.state()).unwrap().normal();
+        assert!(n.z.abs() > 0.99, "the canvas lies on the sketch's plane, not on {n:?}");
+        assert!(h.app.tool.is_none(), "placing it ends the tool");
     }
 
     /// A canvas and a decal clicked onto a face of a design with many curved faces land on it.
@@ -499,22 +543,23 @@ mod tests {
             let center = [60 + 45 * (i % 4), 50 + 60 * (i / 4), 60];
             h.app.run("solid.torus", json!({"major": 30, "minor": 8, "center": center, "operation": "new_body"})).unwrap();
         }
-        for command in ["canvas.insert", "canvas.decal"] {
+        for (index, command) in ["canvas.insert", "canvas.decal"].into_iter().enumerate() {
             for step in [
                 json!({"make_image": "pic.png"}),
                 json!({"choose_file": "pic.png"}),
                 json!({"call": "ui.view", "params": {"view": "iso"}}),
                 json!({"start": command}),
+                json!({"call": "ui.camera", "params": {"target": [30, 30, 40], "distance": 450}}),
                 json!({"click": {"world": [30, 30, 40]}}),
             ] {
                 h.step(&step).unwrap();
             }
+            assert_eq!(h.app.session.doc.canvases.len(), index + 1, "{command}: the image is placed");
         }
         let doc = &h.app.session.doc;
-        assert_eq!(doc.canvases.len(), 2, "both images are placed");
         let (vals, _) = doc.param_values();
         for canvas in &doc.canvases {
-            let plane = doc.canvas_plane(&vals, canvas).unwrap();
+            let plane = doc.canvas_plane(&vals, canvas, &h.app.session.model.state()).unwrap();
             assert!(plane.normal().z.abs() > 0.99 && (plane.origin.z - 40.0).abs() < 1e-6, "{} lies on {plane:?}", canvas.name);
         }
     }
@@ -545,7 +590,7 @@ mod tests {
             h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
         }
         let path = h.dir.join("image.png");
-        let png = solidcraft_engine::render::png(1, 1, vec![255, 0, 0, 255]).unwrap();
+        let png = solidcraft_viewport::png(1, 1, vec![255, 0, 0, 255]).unwrap();
         std::fs::write(&path, png).unwrap();
         let answer = picker(&mut h.app, false);
         h.app.start(command);

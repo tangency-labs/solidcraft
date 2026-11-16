@@ -16,7 +16,7 @@ fn model_error(error: impl std::fmt::Display) -> JobError {
 fn active(input: &job::DielectricOptions) -> bool {
     input.model.is_some_and(|model| model.roughness > 0.0 || model.spectral())
 }
-pub(super) fn required(task: &ImageTask, state: &State, index: usize) -> job::Result<bool> {
+pub(super) fn required(task: &TransportContext<'_>, state: &State, index: usize) -> job::Result<bool> {
     let input = task.options.dielectrics.get(index).ok_or_else(|| invalid("CPU advanced glass material disappeared"))?;
     let optical = state.optical.as_ref().ok_or_else(|| invalid("CPU advanced glass stack missing"))?;
     let incident_spectral =
@@ -27,7 +27,7 @@ fn wavelength(state: &State) -> job::Result<f64> {
     let index = state.optical.as_ref().and_then(|optical| optical.spectral_channel).unwrap_or(1);
     WAVELENGTHS_NM.get(usize::from(index)).copied().ok_or_else(|| invalid("CPU glass wavelength channel is invalid"))
 }
-fn select_spectrum(task: &ImageTask, state: &mut State, index: usize) -> job::Result<()> {
+fn select_spectrum(task: &TransportContext<'_>, state: &mut State, index: usize) -> job::Result<()> {
     let optical = state.optical.as_ref().ok_or_else(|| invalid("CPU spectral glass stack missing"))?;
     if optical.spectral_channel.is_some() {
         return Ok(());
@@ -48,12 +48,12 @@ fn select_spectrum(task: &ImageTask, state: &mut State, index: usize) -> job::Re
     state.optical.as_mut().ok_or_else(|| invalid("CPU spectral glass stack missing"))?.spectral_channel = Some(channel);
     Ok(())
 }
-fn ior(task: &ImageTask, state: &State, index: Option<usize>) -> job::Result<f64> {
+fn ior(task: &TransportContext<'_>, state: &State, index: Option<usize>) -> job::Result<f64> {
     let Some(index) = index else { return Ok(1.0) };
     let input = task.options.dielectrics.get(index).ok_or_else(|| invalid("CPU spectral medium index is invalid"))?;
     input.model.unwrap_or_default().ior(input.ior, wavelength(state)?).map_err(model_error)
 }
-fn uniforms(task: &ImageTask, state: &State) -> job::Result<[f64; 3]> {
+fn uniforms(task: &TransportContext<'_>, state: &State) -> job::Result<[f64; 3]> {
     let [branch, x] = variates(task, state, 0x4000)?;
     let [y, _] = variates(task, state, 0x4001)?;
     Ok([x, y, branch])
@@ -66,7 +66,7 @@ fn apply_weight(state: &mut State, weight: f64) -> job::Result<()> {
     super::super::super::lighting::validate_radiance(state.throughput).map_err(error)
 }
 fn finish(
-    task: &ImageTask,
+    task: &TransportContext<'_>,
     state: &mut State,
     index: usize,
     direction: Vec3,
@@ -78,7 +78,7 @@ fn finish(
     let optical = state.optical.as_mut().ok_or_else(|| invalid("CPU advanced glass stack missing"))?;
     if let Some(enter) = entering {
         if enter {
-            *optical.media.get_mut(optical.len).ok_or_else(|| invalid("CPU advanced glass stack exceeds eight"))? = index;
+            *optical.media.get_mut(optical.len).ok_or_else(|| invalid("CPU advanced glass stack exceeds 16"))? = index;
             optical.len += 1;
         } else {
             optical.len = optical.len.checked_sub(1).ok_or_else(|| invalid("CPU advanced glass stack underflow"))?;
@@ -108,7 +108,7 @@ fn finish(
     Ok(())
 }
 
-pub(super) fn surface(task: &ImageTask, state: &mut State, index: usize) -> job::Result<()> {
+pub(super) fn surface(task: &TransportContext<'_>, state: &mut State, index: usize) -> job::Result<()> {
     let input = task.options.dielectrics.get(index).ok_or_else(|| invalid("CPU advanced glass material disappeared"))?;
     let thin = input.boundary == job::DielectricBoundary::ThinSheet;
     if thin && input.model.unwrap_or_default().roughness == 0.0 {
@@ -171,7 +171,7 @@ pub(super) fn surface(task: &ImageTask, state: &mut State, index: usize) -> job:
     }
     resume_surface(task, state, event)
 }
-pub(super) fn resume_surface(task: &ImageTask, state: &mut State, event: glass_lighting::Interface) -> job::Result<()> {
+pub(super) fn resume_surface(task: &TransportContext<'_>, state: &mut State, event: glass_lighting::Interface) -> job::Result<()> {
     if !continuing(task, state)? {
         state.stage = Stage::Commit;
         return Ok(());
@@ -204,7 +204,7 @@ pub(super) fn resume_surface(task: &ImageTask, state: &mut State, event: glass_l
     finish(task, state, event.index, sample.direction, sample.pdf, entering, false)
 }
 
-fn smooth_sheet(task: &ImageTask, state: &mut State, index: usize, normal: Vec3) -> job::Result<()> {
+fn smooth_sheet(task: &TransportContext<'_>, state: &mut State, index: usize, normal: Vec3) -> job::Result<()> {
     let input = task.options.dielectrics.get(index).ok_or_else(|| invalid("CPU modeled sheet material disappeared"))?;
     let direction = state.ray.ok_or_else(|| invalid("CPU modeled sheet incident ray missing"))?.direction();
     let (interface, reflected, transmitted) = dielectric::modeled_sheet(direction, normal, input).map_err(error)?;
@@ -228,7 +228,7 @@ fn smooth_sheet(task: &ImageTask, state: &mut State, index: usize, normal: Vec3)
     finish(task, state, index, outgoing, 0.0, None, preserve)
 }
 
-pub(super) fn sheet_step(task: &ImageTask, state: &mut State) -> job::Result<()> {
+pub(super) fn sheet_step(task: &TransportContext<'_>, state: &mut State) -> job::Result<()> {
     let walk = state.optical.as_ref().and_then(|optical| optical.sheet).ok_or_else(|| invalid("CPU rough sheet continuation missing"))?;
     let input = task.options.dielectrics.get(walk.index).ok_or_else(|| invalid("CPU rough sheet material disappeared"))?;
     let cosine = walk.direction.dot(walk.normal).abs();
@@ -265,7 +265,7 @@ pub(super) fn sheet_step(task: &ImageTask, state: &mut State) -> job::Result<()>
     }
     resume_sheet(task, state, event)
 }
-pub(super) fn resume_sheet(task: &ImageTask, state: &mut State, event: glass_lighting::Interface) -> job::Result<()> {
+pub(super) fn resume_sheet(task: &TransportContext<'_>, state: &mut State, event: glass_lighting::Interface) -> job::Result<()> {
     if !continuing(task, state)? {
         state.stage = Stage::Commit;
         return Ok(());

@@ -1,0 +1,332 @@
+{
+  "area": "booleans",
+  "bodies": {
+    "b20": {
+      "keeping_splines": false,
+      "trusted": true
+    },
+    "b21": {
+      "keeping_splines": false,
+      "trusted": true
+    }
+  },
+  "calls": [
+    {
+      "inputs": [],
+      "op": "extrude",
+      "outputs": [
+        "b2"
+      ],
+      "params": {
+        "cap": true,
+        "corner": "curvature",
+        "direction": [
+          0.0,
+          0.0,
+          1.0
+        ],
+        "distance": 10.0,
+        "draft": 0.0,
+        "profile": [
+          {
+            "line": {
+              "end": [
+                100.0,
+                0.0,
+                5.0
+              ],
+              "start": [
+                0.0,
+                0.0,
+                5.0
+              ]
+            }
+          },
+          {
+            "line": {
+              "end": [
+                100.0,
+                60.0,
+                5.0
+              ],
+              "start": [
+                100.0,
+                0.0,
+                5.0
+              ]
+            }
+          },
+          {
+            "line": {
+              "end": [
+                0.0,
+                60.0,
+                5.0
+              ],
+              "start": [
+                100.0,
+                60.0,
+                5.0
+              ]
+            }
+          },
+          {
+            "line": {
+              "end": [
+                0.0,
+                0.0,
+                5.0
+              ],
+              "start": [
+                0.0,
+                60.0,
+                5.0
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "inputs": [],
+      "op": "extrude",
+      "outputs": [
+        "b3"
+      ],
+      "params": {
+        "cap": true,
+        "corner": "curvature",
+        "direction": [
+          0.0,
+          0.0,
+          1.0
+        ],
+        "distance": 10.0,
+        "draft": 0.0,
+        "profile": [
+          {
+            "line": {
+              "end": [
+                210.0,
+                0.0,
+                0.0
+              ],
+              "start": [
+                200.0,
+                0.0,
+                0.0
+              ]
+            }
+          },
+          {
+            "line": {
+              "end": [
+                210.0,
+                10.0,
+                0.0
+              ],
+              "start": [
+                210.0,
+                0.0,
+                0.0
+              ]
+            }
+          },
+          {
+            "line": {
+              "end": [
+                200.0,
+                10.0,
+                0.0
+              ],
+              "start": [
+                210.0,
+                10.0,
+                0.0
+              ]
+            }
+          },
+          {
+            "line": {
+              "end": [
+                200.0,
+                0.0,
+                0.0
+              ],
+              "start": [
+                200.0,
+                10.0,
+                0.0
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "inputs": [
+        "b20"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b29"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b29"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b30"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b21"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b31"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b31"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b32"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b30"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b33"
+      ],
+      "params": {
+        "operand": 0
+      }
+    },
+    {
+      "inputs": [
+        "b32"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b34"
+      ],
+      "params": {
+        "operand": 1
+      }
+    },
+    {
+      "inputs": [
+        "b33",
+        "b34"
+      ],
+      "op": "boolean",
+      "outputs": [
+        "b35"
+      ],
+      "params": {
+        "op": "subtract"
+      }
+    }
+  ],
+  "case": "2755-mirror-copy-keeps-seed-targets",
+  "expected": {
+    "body_count": 3,
+    "method": "Plaque loses two through holes r3 (seed at x=10, its mirror in x=50 at x=90, both inside the plate). Voisin (60000) and Loin (1000) are not targets and stay whole. Total = 121000 - 2*pi*3^2*10",
+    "source": "analytic",
+    "sources": [
+      "tangency-labs/solidcraft#2755"
+    ],
+    "volume_mm3": 120434.51332235384,
+    "what": "the mirror copy of a primitive cut changes only the seed's targets, not a body the seed was told to leave alone"
+  },
+  "expressible": true,
+  "operation_expressible": true,
+  "outcome": {
+    "ran": true,
+    "raw_counts": {
+      "edges": 42,
+      "faces": 20,
+      "vertices": 28
+    }
+  },
+  "records": "2755-mirror-copy-keeps-seed-targets.bodies.json.gz",
+  "result": [
+    {
+      "body": "Plaque",
+      "made": "b35"
+    },
+    {
+      "body": "Voisin",
+      "made": "b2"
+    },
+    {
+      "body": "Loin",
+      "made": "b3"
+    }
+  ],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": {
+      "area_mm2": 31263.8937828364,
+      "body_count": 3,
+      "edges": 42,
+      "faces": 20,
+      "vertices": 28,
+      "volume_mm3": 120434.51332186014
+    },
+    "refused_with": null,
+    "status": "pass"
+  },
+  "sources": [
+    "tangency-labs/solidcraft#2755"
+  ],
+  "traced_ops": [
+    "extrude",
+    "extrude",
+    "extrude",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "extrude",
+    "copy",
+    "copy",
+    "tagged",
+    "transform",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean"
+  ],
+  "ungraded": [],
+  "what": "the mirror copy of a primitive cut changes only the seed's targets, not a body the seed was told to leave alone",
+  "why_not": []
+}

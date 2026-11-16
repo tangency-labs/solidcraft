@@ -1,0 +1,18 @@
+#### WR-468. A fillet's surface spans only the rail ends it knows, so it stops short at a rail end on an extended edge
+- **Severity:** Failure (1001) on valid input
+- **Area:** Fillets
+- **Location:** `source/SMLib/src/SmFilletSolver.cpp`, `SmFilletSolver::CalcFilletGeom`.
+  - The trace's points come from the G1 knots (`:1627-1674`, `m_vG1Knots`) and the rail ends.
+  - The rail-end loop skips a vertex of type `SM_FV_RAIL_X_EXTENDED_EDGEUSE` (`:1731-1733`). That end is found on the fillet surface only after the surface is made.
+- **What happens:** when the other rail ends well inside the filleted edge, the fillet surface stops short of the edge's end. The corner's cap edges meet at that end (`SmFilletNx1Corner::MakeCornerTopology`), and the cap's rib runs off the surface (1001).
+- **Trigger, as reported:** SolidCraft rig fillets/4369, a round along a boss's base that ends at a wall the boss overhangs.
+  - The top rail meets the wall at (0.046, 30.954, 10), 42 degrees before the vertex.
+  - The torus is built from there with a 37.5-degree extension, so its u = 0 end sits at 147.5 degrees while the vertex is at 143.13.
+  - In the fork's gdb run, the rib's intersection ends at (3.373, 37.489, 11.078) instead of reaching the boss rail at (4, 38, 12).
+- **How found:** reported by jyviko (tangency-labs/solidcore#1022). Fixed in the SolidCraft fork ("a round's surface reaches its edge's end at an extended-edge rail end").
+- **Confirmed:** no (read at c9c5979 `source/SMLib/src/SmFilletSolver.cpp:1627-1629`, `:1731-1733`; reported and fixed in the SolidCraft fork, not independently reproduced)
+- **Fix:** for each rail end of geometry 0 of type `SM_FV_RAIL_X_EXTENDED_EDGEUSE` that has a fillet corner, the filleted edge's end parameter at the corner's filleted vertex (`sIvl.GetMin()` or `GetMax()`) becomes a through point of the trace. This applies unless the edge is closed or the parameter is already a through knot.
+- **Rust port:** `crates/solidcore/src/blend/fillet_solver/p4.rs`, `c1_extended_rail_end_knots`, called from `c1_collect_points`. The extra knots are traced after the G1 knots, through the same point construction.
+  - It is opt-in via `Kernel::fixes.fillet_through_extended_rail_end` and off by default, so the fillet difftest units keep matching the C++.
+  - Test: `issue_1022_extended_rail_end_adds_the_edge_end_as_a_through_knot` in the same file. With a corner at the edge's start (end) it gives that end parameter; one already among the G1 knots is not added twice; without the executive's corners it gives none.
+  - Not covered: an end-to-end fillet, since rig fillets/4369's part is not public.

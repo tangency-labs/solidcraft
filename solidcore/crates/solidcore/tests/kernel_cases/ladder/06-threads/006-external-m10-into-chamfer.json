@@ -1,0 +1,177 @@
+{
+  "area": "ladder/06-threads",
+  "bodies": {
+    "b23": {
+      "keeping_splines": false,
+      "trusted": true
+    },
+    "b8": {
+      "keeping_splines": false,
+      "trusted": true
+    }
+  },
+  "calls": [
+    {
+      "inputs": [
+        "b8"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b24"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b24"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b25"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b23"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b26"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b26"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b27"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b25"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b28"
+      ],
+      "params": {
+        "operand": 0
+      }
+    },
+    {
+      "inputs": [
+        "b27"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b29"
+      ],
+      "params": {
+        "operand": 1
+      }
+    },
+    {
+      "inputs": [
+        "b28",
+        "b29"
+      ],
+      "op": "boolean",
+      "outputs": [
+        "b30"
+      ],
+      "params": {
+        "op": "subtract"
+      }
+    }
+  ],
+  "case": "006-external-m10-into-chamfer",
+  "expected": {
+    "body_count": 1,
+    "method": "ISO 68-1 basic profile (60 deg, root flat P/4 at d - 5H/4 ... minor d1 = d - 1.0825 P, crest flat P/8): a helical groove of fixed section is a screw motion, so averaged over the turn every meridian half-plane holds the same section and V = 2 pi int int r m(r) dr dz over the stock's section, m the material fraction per pitch; the groove runs out past free ends. Tolerance 0.5%: solid.thread cuts faceted by design (chords within P/200 on the body, P/100 on the tool); the stock's section is r <= 5 below z=29 and r <= 5 - (z-29) in the chamfer; the groove runs one pitch past z=29, which covers the chamfer down to r=4.2 (above the root r=4.188 only for 0.01 mm)",
+    "source": "analytic",
+    "sources": [],
+    "tolerance": {
+      "rel": 0.005
+    },
+    "volume_mm3": 1948.692985041,
+    "what": "a d10 x 30 cylinder with a 1 mm chamfer on top, then a modelled M10 thread over its cylinder face, running out through the chamfer"
+  },
+  "expressible": true,
+  "golden": {
+    "measured": {
+      "area_mm2": 1508.1088885319687,
+      "body_count": 1,
+      "edges": 252,
+      "faces": 86,
+      "vertices": 168,
+      "volume_mm3": 1948.692674104833
+    },
+    "status": "pass",
+    "unstable": null
+  },
+  "operation_expressible": true,
+  "outcome": {
+    "ran": true,
+    "raw_counts": {
+      "edges": 355,
+      "faces": 147,
+      "vertices": 210
+    }
+  },
+  "records": "006-external-m10-into-chamfer.bodies.json.gz",
+  "result": [
+    {
+      "body": "Part",
+      "made": "b30"
+    }
+  ],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": {
+      "area_mm2": 1508.1088885319687,
+      "body_count": 1,
+      "edges": 252,
+      "faces": 86,
+      "vertices": 168,
+      "volume_mm3": 1948.692674104833
+    },
+    "refused_with": null,
+    "status": "pass"
+  },
+  "sources": [],
+  "traced_ops": [
+    "extrude",
+    "copy",
+    "copy",
+    "tagged",
+    "blend_dropping",
+    "extrude",
+    "extrude",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "extrude",
+    "screw_sweep",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean"
+  ],
+  "ungraded": [],
+  "what": "a d10 x 30 cylinder with a 1 mm chamfer on top, then a modelled M10 thread over its cylinder face, running out through the chamfer",
+  "why_not": []
+}
