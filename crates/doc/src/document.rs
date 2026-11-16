@@ -2000,6 +2000,12 @@ pub enum FeatureKind {
         /// How the rails reshape the curves.
         #[serde(default, skip_serializing_if = "RailFit::is_scale")]
         rail_fit: RailFit,
+        /// A 3D sketch spline in the path is followed as the lines between its samples, a wall
+        /// along each, as designs saved before #17828 swept it, so their faces and what refers to
+        /// them stay as they were (`format/pending/surface-sweep-exact-spline-path.rs`). Off for a
+        /// new or redefined sweep, which follows the spline itself.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        spline_as_samples: bool,
     },
     /// A surface body lofted through sections in order, each one open or closed chain of
     /// sketch curves: walls only, no caps.
