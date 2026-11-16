@@ -21,6 +21,8 @@
     clippy::indexing_slicing
 )]
 
+#[path = "support/volume_leak.rs"]
+mod volume_leak;
 use solidcore::blend::fillet_executive::session::FilletSession;
 use solidcore::blend::fillet_executive::NoRoomReason;
 use solidcore::blend::fillet_standard_solver::p1::FilletLaw;
@@ -217,9 +219,18 @@ fn a_progressive_spline_round_builds() {
 
 /// The box 10 x 20 x 30 after the linear law `r0` to `r1` from y = 0 rounds its top edge
 /// x = 0, z = 30: the rail on the 10 wide top runs past its far edge, a cliff overflow
-/// (`fixes.fillet_cliff_overflow`, WR-631) whose round must hold its law
+/// (WR-631) whose round must hold its law
 /// (`sm_HoldsItsLaw`).
-fn cliff_round(mut k: Kernel, r0: f64, r1: f64) -> Result<f64, (String, Option<NoRoomReason>)> {
+fn cliff_round(k: Kernel, r0: f64, r1: f64) -> Result<f64, (String, Option<NoRoomReason>)> {
+    cliff_rounded(k, r0, r1).map(|(k, mut b)| volume(&k, &mut b))
+}
+
+/// [`cliff_round`]'s kernel and body.
+fn cliff_rounded(
+    mut k: Kernel,
+    r0: f64,
+    r1: f64,
+) -> Result<(Kernel, Brep), (String, Option<NoRoomReason>)> {
     let mut b = create_box(&mut k, Vec3::ZERO, 10.0, 20.0, 30.0).unwrap();
     let (e, reversed) = edge_between(
         &k,
@@ -238,26 +249,112 @@ fn cliff_round(mut k: Kernel, r0: f64, r1: f64) -> Result<f64, (String, Option<N
             (format!("{err:?}: {}", info.comment), info.no_room_reason())
         })
     };
-    done.map(|()| volume(&k, &mut b))
+    done.map(|()| (k, b))
 }
 
 #[test]
 fn a_cliff_overflows_variable_round_holds_its_law_on_its_touch_circles() {
-    // the fork's 5e8c9c1 build (SmFilletExecutive as SmApiVariableRadiusFillet runs it),
-    // the exact circles: here to the last digit printed
-    for (r0, r1, fork) in [
-        (2.0, 11.0, 5802.4435349841779),
-        (11.0, 2.0, 5802.4435208241775),
-        (2.0, 20.0, 5503.8871700927575),
-        (2.0, 30.0, 5184.0573578203966),
-        (2.0, 50.0, 4693.6093103438334),
+    // `fork` and `want` are records. `fork`: the fork's 5e8c9c1 build (SmFilletExecutive as
+    // SmApiVariableRadiusFillet runs it), the exact circles, to the last digit printed; it
+    // leaks through that body's tolerant edges as the old integrator did (#16735). `want`:
+    // #16737's closed-gap volume of its own body, pinned until #17673. Neither body can be
+    // rebuilt here, so neither record bounds anything but this body (`want`, below); the
+    // fork's figure is printed against the closed form only.
+    //
+    // #17673's crease trim joins each crease to the sheet's end edge at their true meet, so
+    // the round's tolerant edges close up: the widest strip over its tolerance falls from
+    // 0.492 (2 -> 11 on #16737's body) to 0.019 (0.061, 0.087, 0.078 for 2 -> 20, 30, 50),
+    // and the old leak bound from 8.2e-3 to 3.1e-5 (MEASURED).
+    //
+    // `want`'s 1e-12 pin holds for 2 -> 11 and 11 -> 2 (moved 9.0e-14, 2.2e-13). For
+    // 2 -> 20, 30, 50 the volume moved 1.15e-8, 2.71e-8, 1.41e-7 from `want` (rel 2.1e-12,
+    // 5.2e-12, 3.0e-11): checked within this body's own old leak bound, live.
+    //
+    // Every row is checked against the closed form (`closed`, as
+    // `wr631_cliff_overflow_construction`), from this body's live figures only: its closed
+    // region differs from the solid it bounds only inside its edges' tubes and vertices'
+    // balls, `sum pi tol^2 L + sum 4/3 pi tol^3` (#16735's derivation), when every strip and
+    // fan lies within its stored tolerance (asserted below); plus the volume's quadrature
+    // share at 1e-8 (twice its difference from the volume at 1e-10); plus the closed form's
+    // own spread ([`CLOSED_FORM_SPREAD`]). ARGUED, not proven: the strips' widths are sampled
+    // (`volume_leak`), the quadrature share is an estimate, and the closed form is
+    // quadrature too.
+    for (r0, r1, fork, want, pinned, closed) in [
+        (
+            2.0,
+            11.0,
+            5802.4435349841779,
+            5802.443146052507,
+            true,
+            5_802.443_145_423,
+        ),
+        (
+            11.0,
+            2.0,
+            5802.4435208241775,
+            5802.4431461379545,
+            true,
+            5_802.443_145_423,
+        ),
+        (
+            2.0,
+            20.0,
+            5503.8871700927575,
+            5503.887122636036,
+            false,
+            5_503.887_121_531,
+        ),
+        (
+            2.0,
+            30.0,
+            5184.0573578203966,
+            5184.057276011837,
+            false,
+            5_184.057_273_581,
+        ),
+        (
+            2.0,
+            50.0,
+            4693.6093103438334,
+            4693.608894404652,
+            false,
+            4_693.608_889_860,
+        ),
     ] {
-        let v = cliff_round(kernel(true), r0, r1);
-        eprintln!("{r0} -> {r1}: {v:?} fork {fork}");
-        let v = v.expect("builds");
-        assert!(rel(v, fork) < 1e-12, "{r0} -> {r1}: {v} vs {fork}");
+        let (k, mut b) = cliff_rounded(kernel(true), r0, r1).expect("builds");
+        let v = volume(&k, &mut b);
+        eprintln!(
+            "{r0} -> {r1}: {v:?}, want {want} (moved {:e}), closed {closed} (off {:e}), \
+             fork {fork} (off the closed form {:e}, a record)",
+            v - want,
+            v - closed,
+            fork - closed
+        );
+        let l = volume_leak::leak(&k, &mut b, 1e-10, 8);
+        assert!(
+            l.worst_gap_over_tolerance < 1.0 && l.worst_fan_over_tolerance < 1.0,
+            "{r0} -> {r1}: strip / tol {}, fan / tol {}",
+            l.worst_gap_over_tolerance,
+            l.worst_fan_over_tolerance
+        );
+        if pinned {
+            assert!(rel(v, want) < 1e-12, "{r0} -> {r1}: {v} vs {want}");
+        }
+        let bound = l.new_bound + 2.0 * (v - l.volume).abs() + CLOSED_FORM_SPREAD;
+        assert!(
+            (v - closed).abs() <= bound,
+            "{r0} -> {r1}: {v} vs the closed form {closed}, off {:e} past {bound:e}",
+            (v - closed).abs()
+        );
+        // this body moved from #16737's closed volume within its own old leak
+        volume_leak::assert_moved_by_the_old_leak(&k, &mut b, want, v, 1e-8);
     }
 }
+
+/// The closed forms' own spread: `wr631_cliff_overflow_construction`'s Gauss-Legendre
+/// quadrature at 5 and 10 panels along the edge agree to 1e-9, printed to 1e-9 (half an
+/// ulp of the print, 5e-10, added). ARGUED: the agreement is observed, not bounded.
+const CLOSED_FORM_SPREAD: f64 = 1.5e-9;
 
 /// A variable round with a curvature-continuous section (`SmApiVariableRadiusFillet` with
 /// cross section 2, continuity 2): its parameters take `SetFilletParameters`' default

@@ -56,8 +56,9 @@ pub struct Step<'a> {
     pub warning: bool,
     /// Draw the icon in this one colour instead of its artwork.
     pub ink: Option<egui::Color32>,
-    /// The hover text, written only while it shows.
-    pub tip: &'a dyn Fn() -> String,
+    /// The hover text, written only while it shows: its name and type, its error and warning,
+    /// then the rest (#8834).
+    pub tip: &'a dyn Fn() -> crate::StatusTip,
     /// Its handle's name ([`Handles::step`] followed by the label) when the app keeps it ready,
     /// so a long bar publishes its steps without building their names every frame; `None` builds it.
     pub handle: Option<&'a std::sync::Arc<str>>,
@@ -372,10 +373,7 @@ impl Strip<'_, '_> {
         if self.bar.reorder && resp.drag_started() {
             self.drag = Some(Drag::Step(step.id));
         }
-        let resp = resp.backing_on_hover_ui(|ui| {
-            ui.set_max_width(ui.spacing().tooltip_width);
-            ui.add(egui::Label::new((step.tip)()));
-        });
+        let resp = resp.backing_on_hover_ui(|ui| (step.tip)().show(ui));
         if resp.clicked() {
             self.actions.push(Action::Select { step: step.id, modifiers: ui.input(|i| i.modifiers) });
         }

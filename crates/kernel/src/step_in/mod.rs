@@ -1444,6 +1444,9 @@ impl StepReading {
         if let Some(first) = ex.duplicates.first() {
             rd.warn(format!("{} entity ids are defined twice (first #{first}); the first definitions were used", ex.duplicates.len()));
         }
+        if let Some(warning) = solidcore_record::step::protocol::declared(&ex.schemas).warning {
+            rd.warn(warning);
+        }
         let warnings: Vec<String> = rd.warnings.iter().map(|(m, n)| if n.times > 1 { format!("{m} (×{})", n.times) } else { m.clone() }).collect();
         let report = rd.report(&warnings);
         if rd.bodies.is_empty() {

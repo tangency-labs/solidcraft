@@ -113,7 +113,7 @@ use crate::curve::curve::p1::GlobalPointSolveOptions;
 use crate::curve::curve::p2::{
     at, Curve, CurveEvaluate, CurveKind, COMPOSITE_CURVE_TYPE, CURV_BASE_TYPE,
 };
-use crate::curve::curve::p3::compute_crvs_normal;
+use crate::curve::curve::p3::compute_crvs_normal_written;
 use crate::curve::curve::p8::CurveIntersectOptions;
 use crate::curve::curve_cache::CurveCache;
 use crate::error::{ignored, Result, SolidError};
@@ -745,6 +745,39 @@ impl CompositeCurve {
             ));
         }
         Ok((knots, mults))
+    }
+
+    /// The union of the segments' [`crate::curve::curve::Curve::certified_bounding_box`]es over the parts of
+    /// `interval` they cover, as [`Self::calculate_bounding_box`] maps them (not upstream);
+    /// `None` when a covered segment has none.
+    ///
+    /// # Errors
+    ///
+    /// Those of the segments' boxes.
+    pub(crate) fn certified_bounding_box(
+        &self,
+        k: &Kernel,
+        interval: &Extent1d,
+    ) -> Result<Option<Extent3d>> {
+        let mut bbox = Extent3d::new();
+        bbox.init();
+        let mut next_comp_start: Option<f64> = None;
+        for s in &self.segments {
+            let tgt_ivl = fixed_segment_target_interval(
+                s.curve.natural_interval(),
+                s.same_sense,
+                *interval,
+                &mut next_comp_start,
+            );
+            if tgt_ivl.has_negative_length() {
+                continue;
+            }
+            let Some(segment) = s.curve.certified_bounding_box(k, &tgt_ivl)? else {
+                return Ok(None);
+            };
+            bbox = bbox.union(&segment);
+        }
+        Ok(Some(bbox))
     }
 
     /// `CalculateBoundingBox`: the union of the segments' boxes over `interval`.
@@ -1838,8 +1871,7 @@ pub fn create_corner(
 
             // the plane normal of the two extensions (status ignored upstream)
             let pair = [c1, c2];
-            let plane_normal =
-                ignored(compute_crvs_normal(k, &pair))?.unwrap_or(Vec3::new(0.0, 0.0, 0.0));
+            let (plane_normal, _) = compute_crvs_normal_written(k, &pair)?;
             [c1, c2] = pair;
 
             let chamfer_vector = vertex_to_x.cross(plane_normal);

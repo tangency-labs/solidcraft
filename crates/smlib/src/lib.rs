@@ -128,7 +128,7 @@ impl std::fmt::Display for Error {
                     write!(f, " at the edge at ({x:.3}, {y:.3}, {z:.3})")?;
                 }
                 if let Some(why) = why {
-                    write!(f, ": {}", why.words())?;
+                    write!(f, ": {}", why.words_for(*kind))?;
                 }
                 write!(f, "; the largest {} that fits is {size}", kind.word())
             }

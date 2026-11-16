@@ -79,7 +79,7 @@ pub enum SideExtension {
 
 /// For a cone, sphere, torus or surface of revolution, whether side `side` runs round its
 /// axis (its NURBS u is the sweep unless swapped); `None` for any other kind.
-pub(super) fn round_the_axis(s: &Surface, side: BoxSide) -> Option<bool> {
+pub(crate) fn round_the_axis(s: &Surface, side: BoxSide) -> Option<bool> {
     let swap = match s.kind() {
         SurfaceKind::Cone(c) => c.rev().swap_uv(),
         SurfaceKind::Sphere(sp) => sp.base.swap_uv,

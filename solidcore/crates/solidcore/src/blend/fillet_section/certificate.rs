@@ -413,7 +413,32 @@ pub fn nurbs_partials_over_piece(
     vb: f64,
     lk: usize,
 ) -> Result<Partials<Ivl>> {
-    partials_over_piece(cn, ku, kv, ua, ub, va, vb, lk, None)
+    partials_over_piece(cn, ku, kv, ua, ub, va, vb, lk, None, None)
+}
+
+/// [`nurbs_partials_over_piece`] of the surface moved by `−about`: the partials of
+/// `S − about`, the homogeneous net's point derivatives taken less `about` times the
+/// weight's, in intervals, before the quotient. The partials of order above 0 are those of
+/// `S`; enclosed about a point near the box they are far narrower where the weights vary
+/// (the quotient's `w_ij S` terms are of the size of `S − about`, not of `S`'s distance
+/// from the origin).
+///
+/// # Errors
+///
+/// As [`nurbs_partials_over_piece`].
+#[allow(clippy::too_many_arguments)]
+pub fn nurbs_partials_over_piece_about(
+    cn: &Nurbs,
+    ku: usize,
+    kv: usize,
+    ua: f64,
+    ub: f64,
+    va: f64,
+    vb: f64,
+    lk: usize,
+    about: [f64; 3],
+) -> Result<Partials<Ivl>> {
+    partials_over_piece(cn, ku, kv, ua, ub, va, vb, lk, None, Some(about))
 }
 
 /// [`nurbs_partials_over_piece`] for a box inside the piece's closed knot span (not the
@@ -452,10 +477,11 @@ pub fn nurbs_partials_within_span(
     } else {
         None
     };
-    partials_over_piece(cn, ku, kv, ua, ub, va, vb, lk, hull)
+    partials_over_piece(cn, ku, kv, ua, ub, va, vb, lk, hull, None)
 }
 
-/// [`nurbs_partials_over_piece`], the weight's enclosure cut to `weights` where given.
+/// [`nurbs_partials_over_piece`], the weight's enclosure cut to `weights` where given, of
+/// the surface moved by `−about` where given ([`nurbs_partials_over_piece_about`]).
 #[allow(clippy::too_many_arguments)]
 fn partials_over_piece(
     cn: &Nurbs,
@@ -467,6 +493,7 @@ fn partials_over_piece(
     vb: f64,
     lk: usize,
     weights: Option<Ivl>,
+    about: Option<[f64; 3]>,
 ) -> Result<Partials<Ivl>> {
     let um = 0.5 * (ua + ub);
     let vm = 0.5 * (va + vb);
@@ -486,6 +513,13 @@ fn partials_over_piece(
                     for (e, he) in h.iter_mut().enumerate() {
                         *he = *he + c * Ivl::from(pw_at(&cn.pw, li + e));
                     }
+                }
+            }
+            if let Some(o) = about {
+                // (A − o w): the homogeneous form of S − o
+                let w = h[3];
+                for (he, &oe) in h.iter_mut().zip(&o) {
+                    *he = *he - Ivl::from(oe) * w;
                 }
             }
             *hab = h;
@@ -604,7 +638,7 @@ pub fn leader_series_over(
     let piece = piece.unwrap_or_else(|| span(&leader.u, leader.p, leader.n, s.mid()));
     let d = curve_derivs_over(leader, s, tr.s() + 1, Some(piece))?;
     let mut l = VSer::constant(VZ);
-    let mut d1 = l;
+    let mut d1 = l.clone();
     let mut fact = 1.0_f64;
     for j in 0..=tr.s() {
         if j > 0 {
@@ -644,7 +678,7 @@ pub fn leader_series_piecewise(
 ) -> Result<(VSer<Ivl>, VSer<Ivl>)> {
     let hull = |a: &mut VSer<Ivl>, b: &VSer<Ivl>| {
         for (sa, sb) in a.a.iter_mut().zip(&b.a) {
-            for (ra, rb) in sa.c.iter_mut().zip(&sb.c) {
+            for (ra, rb) in sa.c.iter_mut().zip(sb.c.iter()) {
                 for (x, y) in ra.iter_mut().zip(rb) {
                     *x = x.hull(*y);
                 }
@@ -790,7 +824,7 @@ pub fn inverse4(a: &[[f64; 4]; 4]) -> Result<[[f64; 4]; 4]> {
 }
 
 /// The proved enclosure of a span (`sm_GnEnclose`'s outputs).
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct Enclosure {
     /// The feet's series over the span (`rF`).
     pub f: [VSer<Ivl>; 2],
@@ -821,8 +855,8 @@ fn system<'a>(
     let [p0, p1] = p;
     GnSystem {
         p: [p0, p1],
-        leader: *leader,
-        tangent: *tangent,
+        leader: leader.clone(),
+        tangent: tangent.clone(),
         r,
         side,
         hold: false,
@@ -1639,7 +1673,7 @@ fn boxes_meet(a: &[Ivl; 4], b: &[Ivl; 4]) -> bool {
 }
 
 fn ser_hull(a: &mut Ser<Ivl>, b: &Ser<Ivl>) {
-    for (ra, rb) in a.c.iter_mut().zip(&b.c) {
+    for (ra, rb) in a.c.iter_mut().zip(b.c.iter()) {
         for (ca, cb) in ra.iter_mut().zip(rb) {
             *ca = ca.hull(*cb);
         }
@@ -2268,7 +2302,7 @@ pub fn gn_fourth_over(
 /// The series `sm_GnFourthOver` hands a varying thumbweight's row terms (its `pF`, `pV`,
 /// `pFm`, `pVm`, `pdMid`, 7102bc5): the feet's and V's over the span to order
 /// `4 + SM_GN_TAYLOR` in s, at its middle to one less, and the middle.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct PieceSeries {
     /// `pF`: the feet over the span.
     pub f: [VSer<Ivl>; 2],
@@ -2433,10 +2467,10 @@ fn fourth_of(
     mid: f64,
 ) -> (Fourth, Option<PieceSeries>) {
     let series = PieceSeries {
-        f: e5.f,
-        v: e5.v,
-        fm: e4.f,
-        vm: e4.v,
+        f: e5.f.clone(),
+        v: e5.v.clone(),
+        fm: e4.f.clone(),
+        vm: e4.v.clone(),
         mid,
     };
     let (mut m4, mut uv4, mut m4_lo, mut uv4_lo, mut uv4_fork, mut uv4_lo_fork) = UNPROVED_FOURTH;
@@ -3251,7 +3285,7 @@ fn meet_fourth(old: &Fourth, tm: &Fourth) -> Fourth {
 /// where one is empty (they do not both hold the same function).
 fn meet_vser(a: &mut VSer<Ivl>, b: &VSer<Ivl>) -> bool {
     for (sa, sb) in a.a.iter_mut().zip(&b.a) {
-        for (ra, rb) in sa.c.iter_mut().zip(&sb.c) {
+        for (ra, rb) in sa.c.iter_mut().zip(sb.c.iter()) {
             for (x, y) in ra.iter_mut().zip(rb) {
                 let (lo, hi) = (cmax(x.lo, y.lo), cmin(x.hi, y.hi));
                 let common = lo <= hi;
@@ -4263,11 +4297,8 @@ pub fn gn_certify_span(
 /// certificate is then [`gn_certify_span`]'s.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct SpanReuse<'a> {
-    /// In: the finest proved level of the span this one is a piece of.
+    /// In: the finest proved level of the span this one is a half of.
     pub inherit: Option<&'a CertifiedLevel>,
-    /// In: how many halvings this span is of the one it inherits from: a piece of it cut into
-    /// `2^split` (0 is taken as 1, a half).
-    pub split: u32,
     /// In: the first level tried where nothing is inherited (the coarser ones are not).
     pub start: u32,
     /// Out: this span's finest proved level, for its own halves.
@@ -4284,11 +4315,10 @@ pub struct SpanReuse<'a> {
 }
 
 /// [`gn_certify_span`] taking from and giving to its neighbours ([`SpanReuse`]), not the
-/// fork's. `reuse.inherit`: the span is one of the `2^split` pieces of one the caller cut,
-/// and that span's finest proved level ([`CertifiedLevel`]) has pieces that meet this span
-/// and cover it. Their bounds hold over every point of them, so over this span; they are its
-/// level `split` coarser than theirs was (the span is `2^split` times shorter; level 0 where
-/// they are longer than the span), taken without an enclosure, and the
+/// fork's. `reuse.inherit`: the span is a half of one the caller halved, and that span's
+/// finest proved level ([`CertifiedLevel`]) has pieces that meet this span and cover it.
+/// Their bounds hold over every point of them, so over this span; they are its level one
+/// coarser than theirs was (the span is half as long), taken without an enclosure, and the
 /// levels go on from the next one as [`gn_certify_span`]'s do. The pieces' row terms are
 /// taken again about this span's first station. Otherwise the levels start at
 /// `reuse.start` (the caller's guess from the span before; a level not tried bounds
@@ -4398,12 +4428,11 @@ pub fn gn_certify_span_reusing(
     // a lower bound on every level's certified bound, from the pieces' middles so far: the
     // feet's Taylor models are taken only while it is at most the target (#14405)
     let mut lb = 0.0_f64;
-    // a cut span's pieces over this piece: its level `split` coarser than theirs
+    // a halved span's pieces over this half: its level one coarser than theirs
     let mut start = reuse.start.min(SPAN_MAX_LEVEL);
     let inherit = reuse.inherit;
     if let Some(pieces) = inherit.and_then(|l| covering(l, a.s, b.s)) {
-        let split = reuse.split.max(1);
-        start = inherit.map_or(1, |l| l.level.saturating_sub(split) + 1);
+        start = inherit.map_or(1, |l| l.level.max(1));
         let mut acc = LevelAcc::new(bar.w.len());
         let mut own_pieces: Vec<CertifiedPiece> = pieces.into_iter().cloned().collect();
         for p in &mut own_pieces {
@@ -5512,7 +5541,9 @@ mod tests {
                 judged += 1;
             }
         }
-        eprintln!("{judged} samples, {unenclosed} pieces not enclosed, {old_unproved} of {wedges} wedges unproved by the interval terms");
+        eprintln!(
+            "{judged} samples, {unenclosed} pieces not enclosed, {old_unproved} of {wedges} wedges unproved by the interval terms"
+        );
         assert_eq!(unenclosed, 0);
         assert_eq!(judged, 48 * 101);
         assert!(2 * old_unproved > wedges, "{old_unproved} of {wedges}");
@@ -5893,6 +5924,18 @@ mod tests {
     /// the Hermite remainder's) are orders of magnitude wider.
     #[test]
     fn feet_taylor_models_hold_every_sampled_station_on_curved_faces() {
+        // The certificate used over half a megabyte in a single frame, before its
+        // station solver and incremental workspace. Exercise the same path with
+        // synthetic curved supports on the stack available to a Windows main thread.
+        std::thread::Builder::new()
+            .stack_size(1 << 20)
+            .spawn(check_feet_taylor_models_on_curved_faces)
+            .unwrap()
+            .join()
+            .unwrap();
+    }
+
+    fn check_feet_taylor_models_on_curved_faces() {
         let k = Kernel::default();
         let mut next = rng(0x5bd1_e995_a3c6_4f2b);
         let order = 4 + TAYLOR;
