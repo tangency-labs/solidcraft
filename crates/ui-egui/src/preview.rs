@@ -1051,10 +1051,8 @@ fn build_as(before: &ModelState, after: &ModelState, c: Colors, combine: Option<
         // tools instead, as ghosts that bodies in front of them hide.
         // Not for a body only resized (Scale): smaller is not cut material, and the tint would
         // colour the whole result.
-        let cut = c.cut_tint
-            && c.replaced_ghost
-            && combine.is_none()
-            && old.as_ref().is_some_and(|bm| am.measure().volume < bm.measure().volume - 1e-6);
+        let cut =
+            c.cut_tint && c.replaced_ghost && combine.is_none() && old.as_ref().is_some_and(|bm| am.measure().volume < bm.measure().volume - 1e-6);
         // Which of the body's faces the feature made, asked only when something is drawn from
         // the answer: the cut above, and the tint the preference offers. A changed body is
         // otherwise drawn as itself, so a preview looks like the model and nothing has to be
@@ -1159,7 +1157,10 @@ fn build_as(before: &ModelState, after: &ModelState, c: Colors, combine: Option<
                 _ => None,
             },
         };
-        if cut_tint && c.replaced_ghost && let Some(colour) = fill {
+        if cut_tint
+            && c.replaced_ghost
+            && let Some(colour) = fill
+        {
             let fill = sc.color(colour);
             // A changed body's surface it keeps is not removed material: drawn as ghost there it
             // lies on the new body's face, and where that face is curved and meshed anew (its
