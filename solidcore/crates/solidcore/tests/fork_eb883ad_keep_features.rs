@@ -234,7 +234,8 @@ fn rounded_with(feature: Feature, r: f64) -> Result<(f64, usize)> {
 ///
 /// `was` is the figure before `brep_volume` closed the tolerant edges' gaps (#16735); where it
 /// differs, the move is checked to be that integrator's leak (`support/volume_leak.rs`).
-fn assert_pinned(feature: Feature, r: f64, was: f64, volume: f64, faces: usize) {
+/// Returns the volume, for [`assert_near_closed_form`].
+fn assert_pinned(feature: Feature, r: f64, was: f64, volume: f64, faces: usize) -> f64 {
     let (k, mut b) = rounded_body(feature, r).unwrap();
     let (v, n) = (volume_of(&k, &mut b), b.face_list().len());
     if was != volume {
@@ -255,6 +256,81 @@ fn assert_pinned(feature: Feature, r: f64, was: f64, volume: f64, faces: usize) 
         );
     }
     assert_eq!(n, faces);
+    v
+}
+
+/// How far a pinned volume may lie from its closed form, relative: the bound this file holds
+/// the r 1.9 rounds to (`a_band_short_of_the_feature_leaves_it`). Each pin with a closed form
+/// lies 8e-12 to 2.3e-11 from it (MEASURED against 70-digit references), so the bits are not
+/// all the test rests on.
+const CLOSED_FORM_REL: f64 = 1e-9;
+
+fn assert_near_closed_form(v: f64, want: f64) {
+    assert!(
+        (v - want).abs() <= CLOSED_FORM_REL * want,
+        "volume {v:.17}, closed form {want:.17}"
+    );
+}
+
+/// `int_2^6 zr(y) dy`, zr(y) = 12 + sqrt(64 - (8 - y)^2) the round r 8's surface over the
+/// prisms' footprint 2 <= y <= 6: with u = 8 - y, `[u sqrt(64 - u^2) / 2 + 32 asin(u / 8)]`
+/// from 2 to 6.
+fn round_over_prism() -> f64 {
+    let f = |u: f64| 0.5 * u * (64.0 - u * u).sqrt() + 32.0 * (u / 8.0).asin();
+    48.0 + f(6.0) - f(2.0)
+}
+
+/// The frustum of radii `r0` and `r1`, `h` tall.
+fn frustum(r0: f64, r1: f64, h: f64) -> f64 {
+    PI * h / 3.0 * (r0 * r0 + r0 * r1 + r1 * r1)
+}
+
+/// The cone pit's void left under the round r 8: its slice at height z (radius
+/// 1 + (z - 15) / 5.5 about y = 4) holds material only for y >= 8 - sqrt(64 - (z - 12)^2), a
+/// circular segment; integrated over z by Simpson's rule, split where that line enters and
+/// leaves the disc (its error there is 1.5e-11, against the 70-digit reference).
+fn cone_pit_void() -> f64 {
+    let radius = |z: f64| 1.0 + (z - 15.0) / 5.5;
+    let front = |z: f64| 8.0 - (64.0 - (z - 12.0) * (z - 12.0)).max(0.0).sqrt();
+    let segment = |z: f64| {
+        let (r, d) = (radius(z), front(z) - 4.0);
+        if d <= -r {
+            PI * r * r
+        } else if d >= r {
+            0.0
+        } else {
+            r * r * (d / r).acos() - d * (r * r - d * d).sqrt()
+        }
+    };
+    let crossing = |g: &dyn Fn(f64) -> f64| {
+        let (mut lo, mut hi) = (15.0, 20.0);
+        for _ in 0..200 {
+            let mid = 0.5 * (lo + hi);
+            if (g(mid) > 0.0) == (g(lo) > 0.0) {
+                lo = mid;
+            } else {
+                hi = mid;
+            }
+        }
+        0.5 * (lo + hi)
+    };
+    let enters = crossing(&|z| front(z) - 4.0 + radius(z));
+    let leaves = crossing(&|z| front(z) - 4.0 - radius(z));
+    let simpson = |a: f64, b: f64| {
+        let spans = 20000;
+        let h = (b - a) / f64::from(spans);
+        let mut sum = segment(a) + segment(b);
+        for i in 1..spans {
+            sum += segment(a + h * f64::from(i)) * if i % 2 == 1 { 4.0 } else { 2.0 };
+        }
+        sum * h / 3.0
+    };
+    simpson(15.0, enters) + simpson(enters, leaves)
+}
+
+/// The block less its round r 8, with no feature.
+fn rounded_r8() -> f64 {
+    24000.0 - 40.0 * spandrel(8.0)
 }
 
 /// The block's round with neither feature; a kept feature's figure is this plus its own part.
@@ -292,30 +368,46 @@ fn cone_pit(k: &mut Kernel, block: Brep) -> Result<Brep> {
 
 #[test]
 fn cylinders_keep_their_pinned_volumes() {
-    assert_pinned(cylinder_boss, 8.0, 23528.165527753492, 23528.16549376938, 9);
-    assert_pinned(cylinder_hole, 8.0, 23402.501835298488, 23402.50178777837, 9);
-    assert_pinned(cylinder_boss, 1.9, 24031.84334806833, 24031.84334806833, 9);
-    assert_pinned(cylinder_hole, 1.9, 23906.179641369188, 23906.17964136919, 9);
+    let column = column_under_footprint();
+    let v = assert_pinned(cylinder_boss, 8.0, 23528.165527753492, 23528.16549376938, 9);
+    assert_near_closed_form(v, featured_rounded(true, 8.0) + column);
+    let v = assert_pinned(cylinder_hole, 8.0, 23402.501835298488, 23402.50178777837, 9);
+    assert_near_closed_form(v, featured_rounded(false, 8.0) + column);
+    let v = assert_pinned(cylinder_boss, 1.9, 24031.84334806833, 24031.84334806833, 9);
+    assert_near_closed_form(v, featured_rounded(true, 1.9));
+    let v = assert_pinned(cylinder_hole, 1.9, 23906.179641369188, 23906.17964136919, 9);
+    assert_near_closed_form(v, featured_rounded(false, 1.9));
 }
 
 /// Planar walls: each crease is an exact section.
 #[test]
 fn prisms_keep_their_pinned_volumes() {
-    assert_pinned(prism_boss, 8.0, 23549.896259768986, 23549.896259768986, 12);
-    assert_pinned(
+    // the boss's walls carried down to the round, the pocket's floor at z 15
+    let under = round_over_prism();
+    let v = assert_pinned(prism_boss, 8.0, 23549.896259768986, 23549.896259768986, 12);
+    assert_near_closed_form(v, rounded_r8() + 4.0 * (25.0 * 4.0 - under));
+    let v = assert_pinned(
         prism_pocket,
         8.0,
         23389.896259952173,
         23389.896259952176,
         12,
     );
+    assert_near_closed_form(v, rounded_r8() - 4.0 * (under - 15.0 * 4.0));
 }
 
 /// Walls that lean: kept as the fork keeps them, the boss's with no refusal.
 #[test]
 fn cones_keep_their_pinned_volumes() {
-    assert_pinned(cone_boss, 8.0, 23501.985588856085, 23501.98555487197, 11);
-    assert_pinned(cone_pit, 8.0, 23427.54088939281, 23427.540828246416, 9);
+    // the boss's footprint (radius 2) swept down to the round, as keep features continues a
+    // boss's walls along the top's normal
+    let v = assert_pinned(cone_boss, 8.0, 23501.985588856085, 23501.98555487197, 11);
+    assert_near_closed_form(
+        v,
+        rounded_r8() + frustum(2.0, 1.0, 5.0) + column_under_footprint(),
+    );
+    let v = assert_pinned(cone_pit, 8.0, 23427.54088939281, 23427.540828246416, 9);
+    assert_near_closed_form(v, rounded_r8() - cone_pit_void());
 }
 
 /// A boss's walls count as upright within the fillet's angular tolerance: at 19 degrees off they
@@ -334,7 +426,12 @@ fn a_boss_leaning_past_the_angular_tolerance_is_refused_as_the_fork() {
         let c = create_cone(k, Point3::new(20.0, 4.0, 20.0), 2.0, 1.0, 1.0)?;
         boolean_union(k, block, c)
     }
-    assert_pinned(lean_19, 8.0, 23486.59179069601, 23486.591751056232, 11);
+    // its footprint swept down to the round, as the cone boss's
+    let v = assert_pinned(lean_19, 8.0, 23486.59179069601, 23486.591751056232, 11);
+    assert_near_closed_form(
+        v,
+        rounded_r8() + frustum(2.0, 1.0, 2.9) + column_under_footprint(),
+    );
     for steep in [lean_30 as Feature, lean_45] {
         assert!(rounded_with(steep, 8.0).is_err());
     }
