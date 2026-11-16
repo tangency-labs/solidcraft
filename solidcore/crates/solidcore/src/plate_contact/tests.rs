@@ -455,3 +455,24 @@ fn a_chamfer_or_a_round_at_the_foot_is_an_eased_edge() {
     assert!(!eased(&[StripBound::Other]));
     assert!(eased_edge(&[face], Vec3::Z, Vec3::X, 0.0, TOL).is_err());
 }
+
+/// `across` at z = 30 (n = +z): Wall's section, 120 × 6 = 720, one region, no hole,
+/// counter-clockwise. Seen from below (x and y swapped, n = −z): 720 again, still
+/// counter-clockwise in that frame. Above Wall (z = 100): nothing. tol 0: refused.
+#[test]
+fn the_footprint_across_p_is_the_section_of_t() {
+    let mut k = crate::kernel::Kernel::default();
+    let wall = wall_solid(&mut k);
+    let up = [1.0, 0.0, 0.0];
+    let side = [0.0, 1.0, 0.0];
+    let across =
+        |origin, x, y| footprint_across(&k, &wall, &frame_at(origin, x, y), TOL).expect("across");
+    let mid = across([0.0, 0.0, 30.0], up, side);
+    let a = areas(&mid);
+    assert!(a.len() == 1 && (a[0] - 720.0).abs() < 1e-9, "{a:?}");
+    assert!(mid.iter().all(|r| r.holes.is_empty()));
+    let a = areas(&across([0.0, 0.0, 30.0], side, up));
+    assert!(a.len() == 1 && (a[0] - 720.0).abs() < 1e-9, "{a:?}");
+    assert!(across([0.0, 0.0, 100.0], up, side).is_empty());
+    assert!(footprint_across(&k, &wall, &frame_at([0.0, 0.0, 30.0], up, side), 0.0).is_err());
+}

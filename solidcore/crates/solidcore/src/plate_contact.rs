@@ -438,6 +438,148 @@ pub fn footprint_on(
     Ok(read.regions)
 }
 
+/// The `across` half of design v2 5.3: T's section by P (the frame's plane), as regions of the
+/// frame. The section is upstream's own ([`intersect_brep_with_plane`], each face's section
+/// trimmed to the face) on a scratch copy of T standing for it (the section takes the B-rep
+/// mutably; T is not changed and no boolean runs). Each section curve is read exactly
+/// ([`planar_pieces`]), the curves are joined end to end (within `tol`) into closed loops, and a
+/// loop inside an odd number of others is a hole of the smallest loop holding it.
+///
+/// [`intersect_brep_with_plane`]: crate::intersect::api_intersectors::intersect_brep_with_plane
+/// [`planar_pieces`]: crate::prism::read::planar_pieces
+///
+/// # Errors
+///
+/// [`SolidError::InvalidInput`] for `tol` not positive and finite; `Unsupported` for a section
+/// curve not read exactly in the frame, a section that does not close, or a loop whose turning or
+/// place is not decided; those of the section.
+pub fn footprint_across(
+    k: &crate::kernel::Kernel,
+    t: &crate::topology::Brep,
+    frame: &crate::eval::Frame,
+    tol: f64,
+) -> Result<Vec<crate::prism::profile::Region2>> {
+    use crate::prism::profile::{Loop2, Region2, Seg2};
+    if !(tol.is_finite() && tol > 0.0) {
+        return Err(invalid("tol must be positive and finite"));
+    }
+    let refused = |reason: &'static str| SolidError::Unsupported {
+        operation: OP,
+        reason,
+    };
+    let (origin, _, _, n) = crate::prism::profile::axes(frame);
+    let mut scratch = t.clone_standing_for_self()?;
+    let curves =
+        crate::intersect::api_intersectors::intersect_brep_with_plane(k, &mut scratch, origin, n)?;
+    let mut work = crate::prism::sheet::READ_WORK;
+    let mut runs: Vec<Vec<Seg2>> = Vec::new();
+    for curve in &curves {
+        let iv = curve.natural_interval();
+        let ends = [
+            curve.evaluate_point(k, iv.min())?,
+            curve.evaluate_point(k, iv.max())?,
+        ];
+        let run = crate::prism::read::Run {
+            curve,
+            interval: iv,
+            forward: true,
+            ends,
+        };
+        let pieces = crate::prism::read::planar_pieces(k, &run, frame, tol, &mut work, true)
+            .ok_or_else(|| refused("a section curve not read exactly in the plane"))?;
+        if !pieces.is_empty() {
+            runs.push(pieces);
+        }
+    }
+    let near = |a: crate::math::Point2, b: crate::math::Point2| (a.x - b.x).hypot(a.y - b.y) <= tol;
+    let start = |r: &[Seg2]| r.first().map(|s| s.point_at(0.0));
+    let end = |r: &[Seg2]| r.last().map(|s| s.point_at(1.0));
+    // join the curves end to end into closed loops
+    let mut loops: Vec<Loop2> = Vec::new();
+    while let Some(first) = runs.pop() {
+        let begin = start(&first).ok_or_else(|| refused("an empty section curve"))?;
+        let mut segs = first;
+        loop {
+            let at = end(&segs).ok_or_else(|| refused("an empty section curve"))?;
+            if segs.len() > 1 && near(at, begin) {
+                break;
+            }
+            let next = runs.iter().position(|r| {
+                start(r).is_some_and(|p| near(p, at)) || end(r).is_some_and(|p| near(p, at))
+            });
+            let Some(i) = next else {
+                if near(at, begin) {
+                    break;
+                }
+                return Err(refused("a section that does not close"));
+            };
+            let run = runs.swap_remove(i);
+            if start(&run).is_some_and(|p| near(p, at)) {
+                segs.extend(run);
+            } else {
+                segs.extend(run.iter().rev().map(Seg2::reversed));
+            }
+        }
+        let lp = Loop2 { segs };
+        // every loop counter-clockwise; holes are turned once their place is known
+        loops.push(match lp.signed_area()?.sign() {
+            Some(true) => lp,
+            Some(false) => lp.reversed(),
+            None => return Err(refused("a section loop whose turning is not decided")),
+        });
+    }
+    let mid = |lp: &Loop2| {
+        lp.segs
+            .first()
+            .map(|s| s.point_at(0.5))
+            .ok_or_else(|| refused("an empty loop"))
+    };
+    let mut holders: Vec<Vec<usize>> = Vec::new();
+    for (i, lp) in loops.iter().enumerate() {
+        let p = mid(lp)?;
+        let mut held_by = Vec::new();
+        for (j, other) in loops.iter().enumerate() {
+            if i != j
+                && other
+                    .holds(p)
+                    .ok_or_else(|| refused("a section loop whose place is not decided"))?
+            {
+                held_by.push(j);
+            }
+        }
+        holders.push(held_by);
+    }
+    let mut regions: Vec<Option<Region2>> = Vec::new();
+    for (lp, held_by) in loops.iter().zip(&holders) {
+        regions.push((held_by.len() % 2 == 0).then(|| Region2 {
+            outer: lp.clone(),
+            holes: Vec::new(),
+        }));
+    }
+    for (lp, held_by) in loops.iter().zip(&holders) {
+        if held_by.len() % 2 == 0 {
+            continue;
+        }
+        let mut best: Option<(f64, usize)> = None;
+        for &j in held_by {
+            if let Some(Some(r)) = regions.get(j) {
+                let area = r.outer.signed_area()?.value;
+                if best.is_none_or(|(a, _)| area < a) {
+                    best = Some((area, j));
+                }
+            }
+        }
+        let hole = best
+            .and_then(|(_, j)| regions.get_mut(j))
+            .and_then(Option::as_mut)
+            .ok_or_else(|| refused("a hole outside the section's material"))?;
+        hole.holes.push(lp.reversed());
+    }
+    let mut out: Vec<Region2> = regions.into_iter().flatten().collect();
+    crate::prism::sheet::canonical(&mut out, tol)?;
+    Ok(out)
+}
+
 /// A face bounding the strip Σ across it (along `w`), as [`eased_edge`] reads it.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum StripBound {

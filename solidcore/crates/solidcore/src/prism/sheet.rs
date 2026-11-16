@@ -247,7 +247,7 @@ pub(crate) fn planar_face_regions(
 /// the larger loop first where two share it. Points compare by
 /// [`point_key`] on the grid of `tol`, so coordinates that differ by rounding only (a vertical
 /// edge whose ends' x differ in the last bits) compare equal and the next coordinate decides.
-fn canonical(regions: &mut Vec<Region2>, tol: f64) -> Result<()> {
+pub(crate) fn canonical(regions: &mut Vec<Region2>, tol: f64) -> Result<()> {
     let mut keyed = Vec::new();
     for mut r in std::mem::take(regions) {
         let key = start_at_smallest(&mut r.outer, tol)?;
