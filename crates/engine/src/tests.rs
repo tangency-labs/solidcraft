@@ -5651,9 +5651,10 @@ fn tapered_extrude_of_a_profile_mixing_lines_and_an_arc() {
 /// hole's: the volumes below, worked out once from that (z_c 11.335 at +5°, 10.487 at −5°,
 /// 10.085 at −15°; the hole's 10.019 at +5°, 10.292 at −5°). Joined to the ball (4188.790)
 /// it adds just that. At −15° the outside would close at z 14.9 and at +5° the hole at z 17.1,
-/// both inside the ball: the tools only run as far as they must. A circle r 12 at −10° is wider
-/// than the ball where it starts and meets it at z_c 16.022, still narrowing; at −20° at z_c
-/// 13.095, closing at z 32.97 above the ball.
+/// both inside the ball: the tools only run as far as they must. A circle r 12 is wider than
+/// the ball where it starts and still meets it narrowing: at −10° at z_c 16.022, at −20° at
+/// 13.095, at −21° at 12.904, closing at z 31.26 just above the ball (its top at z 30); such a
+/// tool runs to the ball's far side. Growing at +5°, it holds the whole ball and is refused.
 #[test]
 fn tapered_extrude_to_a_curved_face_ends_on_it() {
     let (b, c, big_r) = (1.5, 20.0, 10.0);
@@ -5670,7 +5671,7 @@ fn tapered_extrude_to_a_curved_face_ends_on_it() {
     };
     let ball = 4188.790204786391;
     let measure = |s: &mut Session, body: &str| run(s, "inspect.measure", json!({"bodies": [body]}))["bodies"][0].clone();
-    let topology = |m: &Value| (m["faces"].as_u64(), m["edges"].as_u64(), m["vertices"].as_u64());
+    let topology = |m: &Value| (m["faces"].as_u64(), m["edges"].as_u64(), m["vertices"].as_u64(), m["kernel"]["shells"].as_u64());
     for hole in [false, true] {
         // Untapered, the straight path: the post's faces are its base, its sides and the ball's cap.
         let mut s = setup(4.0, hole);
@@ -5688,6 +5689,7 @@ fn tapered_extrude_to_a_curved_face_ends_on_it() {
                 (4.0, -15.0, 241.3566646562573),
                 (12.0, -10.0, 4765.092818474139),
                 (12.0, -20.0, 3612.7398353298513),
+                (12.0, -21.0, 3520.22820600382),
             ]
         };
         for &(a, deg, post) in posts {
@@ -5706,8 +5708,13 @@ fn tapered_extrude_to_a_curved_face_ends_on_it() {
             // The ball's face, less the post's foot; with a hole also the ball's face in the hole.
             let m = measure(&mut s, "Ball");
             assert_eq!(m["face_types"], json!({"cone": cones, "plane": 1, "sphere": cones}), "{deg} deg, hole {hole}: {m}");
+            assert_eq!(m["kernel"]["shells"].as_u64(), Some(1), "{deg} deg, hole {hole}: {m}");
         }
     }
+    let mut s = setup(12.0, false);
+    let p = json!({"sketch": "P", "to": [0, 0, c - big_r], "taper": "5 deg", "operation": "new", "body_name": "Post"});
+    let e = s.execute("solid.extrude", &p).unwrap_err().to_string();
+    assert!(e.contains("reaches past the To face"), "{e}");
 }
 
 /// A feature that joins into a body creates none, and its reply says so; a primitive's reply
