@@ -19,4 +19,4 @@ pub mod view;
 mod session;
 
 #[cfg(any(target_os = "windows", target_os = "linux"))]
-pub use session::{Error, Frame, Gpu, Picture, Runtime, Session, Status, WindowLayer};
+pub use session::{Error, Frame, Gpu, Layers, Picture, Runtime, Session, Status, WindowLayer};

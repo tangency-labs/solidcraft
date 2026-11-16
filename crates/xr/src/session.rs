@@ -4,7 +4,7 @@
 //! A frame goes: [`Session::poll`] (what the runtime wants), [`Session::begin_frame`] (waits for
 //! the headset's next frame and says where the eyes will be), [`Session::eye_picture`] and
 //! [`Session::window_picture`] (the pictures to draw into; the caller draws and submits), then
-//! [`Session::end_frame`] (hands them in). Every step is a `Result`: a session that fails leaves
+//! [`Session::end_frame`] (hands them in as [`Layers`]). Every step is a `Result`: a session that fails leaves
 //! the desktop app as it was.
 
 mod interop;
@@ -129,7 +129,7 @@ impl Runtime {
             .map_err(|e| Error::xr("creating the room's space", e))?;
         let session = Session {
             eyes: None,
-            window: None,
+            windows: None,
             space,
             stream,
             waiter,
@@ -237,7 +237,7 @@ pub struct Frame {
 }
 
 /// The window as a flat layer in the room.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct WindowLayer {
     /// Its middle and orientation.
     pub pose: Pose,
@@ -245,6 +245,18 @@ pub struct WindowLayer {
     pub size: [f64; 2],
     /// The part of the window's picture that is drawn, from its top left corner (pixels).
     pub pixels: [u32; 2],
+}
+
+/// What a frame hands in for the runtime to show, from the back to the front.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct Layers {
+    /// The eyes' pictures as the view of the room: both were drawn this frame.
+    pub eyes: bool,
+    /// The window's two pictures as flat layers at this place, the left one shown to the left
+    /// eye only and the right one to the right, see-through where they were drawn so: both were
+    /// drawn this frame. Each eye has one whole picture of the window, so that no two flat
+    /// layers ever lie in one another's place: a runtime need not keep those in their order.
+    pub window: Option<WindowLayer>,
 }
 
 /// What [`Session::poll`] found.
@@ -263,7 +275,8 @@ pub struct Session {
     // Dropped in this order: the pictures, the room, the frame handles and the session all go
     // before the device they were made on.
     eyes: Option<[Chain; 2]>,
-    window: Option<Chain>,
+    /// The window's picture for the left and the right eye, both of one size.
+    windows: Option<[Chain; 2]>,
     space: xr::Space,
     stream: xr::FrameStream<xr::Vulkan>,
     waiter: xr::FrameWaiter,
@@ -309,6 +322,19 @@ fn eye_layer<'a>(chain: &'a Chain, view: &xr::View) -> xr::CompositionLayerProje
         .pose(view.pose)
         .fov(view.fov)
         .sub_image(xr::SwapchainSubImage::new().swapchain(&chain.swapchain).image_array_index(0).image_rect(pixel_rect(chain.size)))
+}
+
+/// A flat layer in `space`: the first `layer.pixels` of `chain`'s picture at `layer`'s place,
+/// shown to `eyes` and blended by its alpha over what is behind.
+fn quad_layer<'a>(chain: &'a Chain, space: &'a xr::Space, layer: &WindowLayer, eyes: xr::EyeVisibility) -> xr::CompositionLayerQuad<'a, xr::Vulkan> {
+    let pixels = [layer.pixels[0].min(chain.size[0]), layer.pixels[1].min(chain.size[1])];
+    xr::CompositionLayerQuad::new()
+        .layer_flags(xr::CompositionLayerFlags::BLEND_TEXTURE_SOURCE_ALPHA)
+        .space(space)
+        .eye_visibility(eyes)
+        .sub_image(xr::SwapchainSubImage::new().swapchain(&chain.swapchain).image_array_index(0).image_rect(pixel_rect(pixels)))
+        .pose(pose_to(&layer.pose))
+        .size(xr::Extent2Df { width: layer.size[0] as f32, height: layer.size[1] as f32 })
 }
 
 /// A runtime's pose as [`Pose`].
@@ -429,63 +455,62 @@ impl Session {
         chain.acquire()
     }
 
-    /// The picture to draw a window of `window` pixels into this frame: larger than the window
-    /// ([`plan::window_picture_size`]), the window in its top left corner. Draw into it and
-    /// submit before [`Session::end_frame`].
-    pub fn window_picture(&mut self, window: [u32; 2]) -> Result<Picture, Error> {
+    /// The picture to draw the window for `eye` (0 left, 1 right) into this frame, for a window
+    /// of `window` pixels: larger than the window ([`plan::window_picture_size`]), the window in
+    /// its top left corner. Both eyes of a frame ask for the same size. Draw into it and submit
+    /// before [`Session::end_frame`].
+    pub fn window_picture(&mut self, eye: usize, window: [u32; 2]) -> Result<Picture, Error> {
         let size = plan::window_picture_size(window, self.max_side)
             .ok_or_else(|| Error::Unsupported(format!("a window of {} × {} pixels cannot be shown", window[0], window[1])))?;
-        if self.window.as_ref().is_none_or(|chain| chain.size != size) {
-            // The old pictures go before the new ones are asked for.
-            let old = self.window.take();
-            retire(&self.device, old);
-            self.window = Some(Chain::new(&self.session, &self.device, self.format, size)?);
+        if self.windows.as_ref().is_none_or(|chains| chains.iter().any(|chain| chain.size != size)) {
+            // The old pictures go before the new ones are asked for, handed in if one is held.
+            let mut old = self.windows.take();
+            for chain in old.iter_mut().flatten() {
+                if let Err(e) = chain.release() {
+                    log::debug!("VR: a window picture was not handed in before it went: {e}");
+                }
+            }
+            retire(&self.device, old.into_iter().flatten());
+            let make = || Chain::new(&self.session, &self.device, self.format, size);
+            self.windows = Some([make()?, make()?]);
         }
-        match self.window.as_mut() {
-            Some(chain) => chain.acquire(),
-            None => Err(Error::Unsupported("no window picture".into())),
-        }
+        let chain = self
+            .windows
+            .as_mut()
+            .and_then(|windows| windows.get_mut(eye))
+            .ok_or(Error::Xr { what: "acquiring a picture", code: format!("no eye {eye}") })?;
+        chain.acquire()
     }
 
-    /// Hand the frame in: the eyes' pictures as the view of the room when `eyes` (both were drawn
-    /// this frame), and the window's picture as a flat layer when `window`. Everything drawn into
-    /// this frame's pictures must have been submitted.
-    pub fn end_frame(&mut self, frame: &Frame, eyes: bool, window: Option<WindowLayer>) -> Result<(), Error> {
+    /// Hand the frame in with `shown`, what of this frame's pictures the runtime is to show (see
+    /// [`Layers`]). Everything drawn into this frame's pictures must have been submitted.
+    pub fn end_frame(&mut self, frame: &Frame, shown: &Layers) -> Result<(), Error> {
         if !std::mem::take(&mut self.in_frame) {
             return Ok(());
         }
         let mut released = Ok(());
-        for chain in self.eyes.iter_mut().flatten().chain(self.window.iter_mut()) {
+        for chain in self.eyes.iter_mut().flatten().chain(self.windows.iter_mut().flatten()) {
             released = released.and(chain.release());
         }
         let projection_views: Option<[xr::CompositionLayerProjectionView<'_, xr::Vulkan>; 2]> = match (&self.eyes, frame.views.as_slice()) {
-            (Some([left, right]), [left_view, right_view]) if eyes && released.is_ok() && frame.eyes.is_some() => {
+            (Some([left, right]), [left_view, right_view]) if shown.eyes && released.is_ok() && frame.eyes.is_some() => {
                 Some([eye_layer(left, left_view), eye_layer(right, right_view)])
             }
             _ => None,
         };
         let projection = projection_views.as_ref().map(|views| xr::CompositionLayerProjection::new().space(&self.space).views(views));
-        let quad = match (&self.window, window) {
-            (Some(chain), Some(layer)) if released.is_ok() => {
-                let pixels = [layer.pixels[0].min(chain.size[0]), layer.pixels[1].min(chain.size[1])];
-                Some(
-                    xr::CompositionLayerQuad::new()
-                        .layer_flags(xr::CompositionLayerFlags::BLEND_TEXTURE_SOURCE_ALPHA)
-                        .space(&self.space)
-                        .eye_visibility(xr::EyeVisibility::BOTH)
-                        .sub_image(xr::SwapchainSubImage::new().swapchain(&chain.swapchain).image_array_index(0).image_rect(pixel_rect(pixels)))
-                        .pose(pose_to(&layer.pose))
-                        .size(xr::Extent2Df { width: layer.size[0] as f32, height: layer.size[1] as f32 }),
-                )
+        let windows = match (&self.windows, &shown.window) {
+            (Some([left, right]), Some(layer)) if released.is_ok() => {
+                Some([quad_layer(left, &self.space, layer, xr::EyeVisibility::LEFT), quad_layer(right, &self.space, layer, xr::EyeVisibility::RIGHT)])
             }
             _ => None,
         };
-        let mut layers: Vec<&xr::CompositionLayerBase<'_, xr::Vulkan>> = Vec::with_capacity(2);
+        let mut layers: Vec<&xr::CompositionLayerBase<'_, xr::Vulkan>> = Vec::with_capacity(3);
         if let Some(projection) = &projection {
             layers.push(projection);
         }
-        if let Some(quad) = &quad {
-            layers.push(quad);
+        for window in windows.iter().flatten() {
+            layers.push(window);
         }
         let ended = self.stream.end(frame.time, self.blend, &layers).map_err(|e| Error::xr("handing the frame in", e));
         released.and(ended)
@@ -516,7 +541,7 @@ fn retire(device: &wgpu::Device, chains: impl IntoIterator<Item = Chain>) {
 impl Drop for Session {
     /// The pictures go the way [`retire`] lets them go; the fields then drop in their order.
     fn drop(&mut self) {
-        let chains: Vec<Chain> = self.eyes.take().into_iter().flatten().chain(self.window.take()).collect();
+        let chains: Vec<Chain> = self.eyes.take().into_iter().flatten().chain(self.windows.take().into_iter().flatten()).collect();
         retire(&self.device, chains);
     }
 }

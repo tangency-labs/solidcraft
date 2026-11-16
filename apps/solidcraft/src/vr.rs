@@ -3,15 +3,23 @@
 //! desktop, because the window on the desktop is still the one that takes them.
 //!
 //! How a frame is put together:
-//! - The headset's runtime shows two layers. Behind: each eye's picture of the room, which holds
-//!   the model and a backdrop. In front: a flat picture of the window, see-through where the
-//!   design view is, so the model behind it shows there.
-//! - The window's picture is a second copy of the frame's UI ([`UiCopy`], a frame compositor
-//!   around whichever the window already has), drawn with the design view cut out
+//! - The headset's runtime shows layers, from the back: each eye's picture of the room (a
+//!   backdrop), and a flat picture of the window for each eye, at the window's place.
+//! - An eye's picture of the window is the design view's picture for that eye with the frame's UI
+//!   over it ([`Gpu::compose`]). Each eye has one whole picture, so no two flat layers lie in
+//!   one another's place: a runtime need not keep such layers in their order, and what the UI
+//!   draws over the design (a floating ribbon, joints) would flicker.
+//! - The UI is a second copy of the frame's UI ([`UiCopy`], a frame compositor around whichever
+//!   the window already has), drawn with the design view cut out
 //!   (`solidcraft_viewport_egui::Cutout`). The window on the desktop is drawn as ever.
-//! - The model is placed so that the design view is a pane of glass onto it
-//!   (`solidcraft_xr::view::place_model`), and drawn once per eye from the scenes the window
-//!   already uploaded (`Renderer::draw_second_view`), only within the pane as that eye sees it.
+//! - The design view's two pictures are the window camera's own, each moved sideways by depth
+//!   for its eye ([`pane_views`]) and drawn from the scenes the window already uploaded
+//!   (`Renderer::draw_second_view`). They are the monitor's picture in size and place, so what
+//!   the UI draws over the design (joints, handles, the pointer's target) is where it belongs,
+//!   and the runtime moves them with the window, whatever the head does.
+//! - With "model in the room" on, the design is instead placed at the window as a thing in the
+//!   room (`solidcraft_xr::view::place_model`) and drawn into each eye's picture of the room from
+//!   where that eye is; the window's pictures are then see-through where the design view is.
 //!
 //! VR is chosen at start (`--vr`, `SOLIDCRAFT_VR=1` or Preferences › Graphics), because the
 //! runtime creates the Vulkan device the window then draws with. Off, none of this runs.
@@ -23,7 +31,7 @@ use eframe::egui_wgpu::{self, wgpu};
 use solidcraft_ui_egui::SolveApp;
 use solidcraft_ui_egui::stereo::Source;
 use solidcraft_viewport_gpu::view::{Renderer, ViewTarget};
-use solidcraft_xr::view::{self, CameraFrame, Eye, Pane, Screen};
+use solidcraft_xr::view::{self, CameraFrame, Depth, Eye, Pane, Screen};
 
 /// The environment variable that asks for the VR view for one run (`1`, `true`, `on`, `yes`).
 pub const VR_ENV: &str = "SOLIDCRAFT_VR";
@@ -54,7 +62,8 @@ pub struct Layout {
     pub distance: f64,
     /// The window's middle below eye level (metres).
     pub drop: f64,
-    /// The camera's target behind the window's plane (metres; negative: in front of it).
+    /// With the model in the room: the camera's target behind the window's plane (metres;
+    /// negative: in front of it).
     pub depth: f64,
 }
 
@@ -224,6 +233,11 @@ impl Vr {
     /// view in the headset, at the headset's pace. Never fails: a session that does ends, says
     /// so, and leaves the window drawing as it always has.
     pub fn frame(&mut self, app: &mut SolveApp, ctx: &egui::Context, rs: &egui_wgpu::RenderState) {
+        // Preferences' Stop VR: the session ends now, the window draws on.
+        if std::mem::take(&mut app.services.vr_stop) && self.session.is_some() {
+            solidcraft_engine::note!("SolidCraft VR: stopped from Preferences");
+            self.close(app, rs);
+        }
         if self.session.is_some() {
             if let Err(error) = self.step(app, ctx, rs) {
                 log::warn!("VR: {error}");
@@ -246,6 +260,7 @@ impl Vr {
             app.services.vr_status = Some(text);
             self.told = Some(self.status.clone());
         }
+        app.services.vr_running = self.session.is_some();
     }
 
     /// Let go of the session and everything made for it; the window draws on as ever.
@@ -299,7 +314,8 @@ impl Vr {
         gpu.ui.claim(&rs.renderer);
         let source = app.viewport.stereo.take();
         // The pointer: on the model where it points at the model (drawn for each eye at the
-        // model's depth), else on the window, drawn into the UI.
+        // model's depth, so it does not seem to sink into it), else on the window, drawn into
+        // the UI.
         if !source.as_ref().is_some_and(|s| s.pointer.is_some()) {
             paint_pointer(ctx);
         }
@@ -313,10 +329,9 @@ impl Vr {
             in_room: app.preferences.vr_model_in_room,
             layout: &self.layout,
         };
-        let drawn = if frame.should_render { gpu.draw(session, rs, &frame, &scene) } else { Ok(Drawn::default()) };
+        let drawn = if frame.should_render { gpu.draw(session, rs, &frame, &scene) } else { Ok(solidcraft_xr::Layers::default()) };
         // A begun frame is ended whatever happened in it.
-        let (eyes, window) = drawn.as_ref().map_or((false, None), |d| (d.eyes, d.window));
-        let ended = session.end_frame(&frame, eyes, window);
+        let ended = session.end_frame(&frame, drawn.as_ref().unwrap_or(&solidcraft_xr::Layers::default()));
         ctx.request_repaint();
         drawn.and(ended)
     }
@@ -346,18 +361,10 @@ struct Scene<'a> {
     window_points: [f32; 2],
     /// Where the mouse pointer is in the window (points), if it is over it.
     pointer: Option<[f32; 2]>,
-    /// The model fills the room around the window, instead of showing through the design view.
+    /// The model is a thing in the room at the window, seen from where the head is, instead of
+    /// the monitor's picture on the window.
     in_room: bool,
     layout: &'a Layout,
-}
-
-/// What a frame drew for the runtime to show.
-#[derive(Default)]
-struct Drawn {
-    /// Both eyes' pictures.
-    eyes: bool,
-    /// The window's picture, and where it is in the room.
-    window: Option<solidcraft_xr::WindowLayer>,
 }
 
 /// The second copy of the frame's UI, design views cut out, as the frame compositor that draws it
@@ -561,9 +568,10 @@ impl egui_wgpu::FrameCompositor for UiCopy {
     }
 }
 
-/// The two pictures a frame draws for the runtime: an eye's (the model over a backdrop) and the
-/// window's (the UI copy). Both read a picture in the window's format, where colours are stored
-/// as the screen shows them, and write the runtime's sRGB pictures, which take linear light.
+/// The pictures a frame draws for the runtime: an eye's (the room's backdrop, and the model when it
+/// is in the room) and the window's for an eye (the design view, the model over the view's
+/// background, and the UI copy over that). Each reads a picture in the window's format, where colours are
+/// stored as the screen shows them, and writes the runtime's sRGB pictures, which take linear light.
 const SHADER: &str = r#"
 struct U {
     top: vec4<f32>,
@@ -574,16 +582,8 @@ struct U {
     // The tangents of the eye's field of view: left, right, up, down.
     tangents: vec4<f32>,
     // x: the source's colours are stored as the screen shows them (1) or as linear light (0).
-    // y: there is a model picture (1) or only the backdrop (0).
-    // z: the model shows only through the pane (1) or everywhere in the room (0).
+    // y: there is a model picture (1) or only the background (0).
     flags: vec4<f32>,
-    // The eye in the room.
-    eye: vec4<f32>,
-    // The pane the model shows through: its middle, then its unit directions along its width and
-    // height with half that width and height in w.
-    pane: vec4<f32>,
-    pane_right: vec4<f32>,
-    pane_up: vec4<f32>,
 };
 @group(0) @binding(0) var src: texture_2d<f32>;
 @group(0) @binding(1) var smp: sampler;
@@ -607,31 +607,34 @@ fn to_linear(c: vec3<f32>) -> vec3<f32> {
     return select(hi, lo, c <= vec3<f32>(0.04045));
 }
 
-// An eye's picture: the model's (colours times alpha, transparent where it is not) over a
-// backdrop that is fixed in the room, the view's two background colours from below to above.
+// The model's picture at `uv` (colours times alpha, transparent where the model is not) over
+// `background`, a colour as the screen shows it.
+fn over(background: vec3<f32>, uv: vec2<f32>) -> vec4<f32> {
+    var model = vec4<f32>(0.0);
+    if (u.flags.y > 0.5) {
+        model = textureSampleLevel(src, smp, uv, 0.0);
+    }
+    if (u.flags.x > 0.5) {
+        return vec4<f32>(to_linear(model.rgb + background * (1.0 - model.a)), 1.0);
+    }
+    return vec4<f32>(model.rgb + to_linear(background) * (1.0 - model.a), 1.0);
+}
+
+// An eye's picture of the room: a backdrop that is fixed in the room, the view's two background
+// colours from below to above, and the model over it when it is in the room.
 @fragment
 fn fs_eye(i: O) -> @location(0) vec4<f32> {
     let tx = mix(u.tangents.x, u.tangents.y, i.uv.x);
     let ty = mix(u.tangents.z, u.tangents.w, i.uv.y);
     let ray = normalize(u.right.xyz * tx + u.up.xyz * ty - u.back.xyz);
-    let backdrop = mix(u.bottom.rgb, u.top.rgb, smoothstep(-0.6, 0.6, ray.y));
-    // Where this pixel's ray meets the pane's plane, in half-widths and half-heights from the
-    // pane's middle: within 1 both ways is through the pane. The edge is a pixel soft.
-    let normal = cross(u.pane_right.xyz, u.pane_up.xyz);
-    let toward = dot(ray, normal);
-    let along = dot(u.pane.xyz - u.eye.xyz, normal) / select(toward, 1.0, abs(toward) < 1e-6);
-    let hit = u.eye.xyz + ray * along - u.pane.xyz;
-    let edge = max(abs(dot(hit, u.pane_right.xyz)) / u.pane_right.w, abs(dot(hit, u.pane_up.xyz)) / u.pane_up.w);
-    let soft = max(fwidth(edge), 1e-5);
-    let through = select(0.0, 1.0 - smoothstep(1.0 - soft, 1.0, edge), abs(toward) >= 1e-6 && along > 0.0);
-    var model = vec4<f32>(0.0);
-    if (u.flags.y > 0.5) {
-        model = textureSampleLevel(src, smp, i.uv, 0.0) * mix(1.0, through, u.flags.z);
-    }
-    if (u.flags.x > 0.5) {
-        return vec4<f32>(to_linear(model.rgb + backdrop * (1.0 - model.a)), 1.0);
-    }
-    return vec4<f32>(model.rgb + to_linear(backdrop) * (1.0 - model.a), 1.0);
+    return over(mix(u.bottom.rgb, u.top.rgb, smoothstep(-0.6, 0.6, ray.y)), i.uv);
+}
+
+// The design view on the window, for one eye: the model over the view's own background, its two
+// colours from the top of the view to its bottom, as the window shows it.
+@fragment
+fn fs_pane(i: O) -> @location(0) vec4<f32> {
+    return over(mix(u.top.rgb, u.bottom.rgb, i.uv.y), i.uv);
 }
 
 // The mouse pointer on the model: a few flat-coloured triangles, placed by the app for this eye.
@@ -650,8 +653,9 @@ fn fs_pointer(i: P) -> @location(0) vec4<f32> {
     return i.colour;
 }
 
-// The window's picture: the UI as it is, its alpha kept, so the runtime blends it over the eyes'
-// pictures and the design view's cut-out shows the model behind.
+// The window's UI: as it is, its colours times its alpha and its alpha kept. It is blended over
+// the design view's picture, which shows through its cut-out; where there is none, the runtime
+// blends the window over what is behind.
 @fragment
 fn fs_window(i: O) -> @location(0) vec4<f32> {
     let c = textureSampleLevel(src, smp, i.uv, 0.0);
@@ -662,8 +666,8 @@ fn fs_window(i: O) -> @location(0) vec4<f32> {
 }
 "#;
 
-/// The uniform's size in bytes: eleven `vec4<f32>`.
-const UNIFORM_SIZE: u64 = 11 * 16;
+/// The uniform's size in bytes: seven `vec4<f32>`.
+const UNIFORM_SIZE: u64 = 7 * 16;
 
 /// The mouse pointer's outline in points from its tip (x right, y down): the arrow the window
 /// draws ([`paint_pointer`]).
@@ -679,8 +683,11 @@ const POINTER_VERTICES: u64 = 2 * 3 * (POINTER.len() as u64 - 2);
 struct Gpu {
     ui: Arc<UiCopy>,
     eye: wgpu::RenderPipeline,
+    /// The design view on the window, for one eye.
+    pane: wgpu::RenderPipeline,
+    /// The window's UI, blended over what its picture already holds.
     window: wgpu::RenderPipeline,
-    /// The mouse pointer on the model, over an eye's picture.
+    /// The mouse pointer on the model, over an eye's or the design view's picture.
     pointer: wgpu::RenderPipeline,
     pointer_vertices: wgpu::Buffer,
     layout: wgpu::BindGroupLayout,
@@ -689,7 +696,8 @@ struct Gpu {
     /// A stand-in to bind while there is no model picture.
     blank: wgpu::TextureView,
     /// The model as one eye sees it, drawn into for each eye in turn. Made by the renderer for
-    /// the eye's size, and again when that changes.
+    /// the size of the picture it goes into (the design view's, or an eye's when the model is in
+    /// the room), and again when that changes.
     model: Option<ViewTarget>,
     /// The GPU refused the model's picture: it is asked again after this many more tries (the
     /// memory may be there again by then), not for both eyes of every frame.
@@ -745,7 +753,7 @@ impl Gpu {
             bind_group_layouts: &[Some(&layout)],
             immediate_size: 0,
         });
-        let pipeline = |label: &str, fragment: &str| {
+        let pipeline = |label: &str, fragment: &str, blend: Option<wgpu::BlendState>| {
             device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
                 label: Some(label),
                 layout: Some(&pipeline_layout),
@@ -753,7 +761,7 @@ impl Gpu {
                 fragment: Some(wgpu::FragmentState {
                     module: &module,
                     entry_point: Some(fragment),
-                    targets: &[Some(wgpu::ColorTargetState { format, blend: None, write_mask: wgpu::ColorWrites::ALL })],
+                    targets: &[Some(wgpu::ColorTargetState { format, blend, write_mask: wgpu::ColorWrites::ALL })],
                     compilation_options: Default::default(),
                 }),
                 primitive: wgpu::PrimitiveState::default(),
@@ -821,8 +829,9 @@ impl Gpu {
         });
         Gpu {
             ui: UiCopy::new(device.clone(), rs.target_format),
-            eye: pipeline("sc_vr_eye", "fs_eye"),
-            window: pipeline("sc_vr_window", "fs_window"),
+            eye: pipeline("sc_vr_eye", "fs_eye", None),
+            pane: pipeline("sc_vr_pane", "fs_pane", None),
+            window: pipeline("sc_vr_window", "fs_window", Some(wgpu::BlendState::PREMULTIPLIED_ALPHA_BLENDING)),
             pointer,
             pointer_vertices,
             layout,
@@ -835,19 +844,9 @@ impl Gpu {
         }
     }
 
-    /// Draw `source` into `target` with `pipeline` and the uniform as it is, within `size` pixels
-    /// from the target's top left corner, then the pointer from [`Gpu::pointer_vertices`] over it
-    /// when `pointer`, and submit it.
-    fn blit(
-        &self,
-        rs: &egui_wgpu::RenderState,
-        pipeline: &wgpu::RenderPipeline,
-        source: &wgpu::TextureView,
-        target: &wgpu::TextureView,
-        size: [u32; 2],
-        pointer: bool,
-    ) {
-        let bind = rs.device.create_bind_group(&wgpu::BindGroupDescriptor {
+    /// `source` bound for the picture shader, with the uniform.
+    fn bind(&self, rs: &egui_wgpu::RenderState, source: &wgpu::TextureView) -> wgpu::BindGroup {
+        rs.device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("sc_vr"),
             layout: &self.layout,
             entries: &[
@@ -855,64 +854,130 @@ impl Gpu {
                 wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::Sampler(&self.sampler) },
                 wgpu::BindGroupEntry { binding: 2, resource: self.uniform.as_entire_binding() },
             ],
-        });
+        })
+    }
+
+    /// A pass that draws into `target`, cleared to transparent first.
+    fn pass<'a>(encoder: &'a mut wgpu::CommandEncoder, target: &wgpu::TextureView) -> wgpu::RenderPass<'a> {
+        encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+            label: Some("sc_vr"),
+            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                view: target,
+                depth_slice: None,
+                resolve_target: None,
+                ops: wgpu::Operations { load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT), store: wgpu::StoreOp::Store },
+            })],
+            depth_stencil_attachment: None,
+            timestamp_writes: None,
+            occlusion_query_set: None,
+            multiview_mask: None,
+        })
+    }
+
+    /// The pointer from [`Gpu::pointer_vertices`], over what `pass` holds.
+    fn draw_pointer(&self, pass: &mut wgpu::RenderPass<'_>) {
+        pass.set_pipeline(&self.pointer);
+        pass.set_vertex_buffer(0, self.pointer_vertices.slice(..));
+        pass.draw(0..POINTER_VERTICES as u32, 0..1);
+    }
+
+    /// An eye's picture of the room into `target`, `size` pixels: the backdrop, `model` over it,
+    /// with the uniform as it is, then the pointer when `pointer`. Submitted before this returns.
+    fn blit(&self, rs: &egui_wgpu::RenderState, model: &wgpu::TextureView, target: &wgpu::TextureView, size: [u32; 2], pointer: bool) {
+        let bind = self.bind(rs, model);
         let mut encoder = rs.device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("sc_vr") });
         {
-            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                label: Some("sc_vr"),
-                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view: target,
-                    depth_slice: None,
-                    resolve_target: None,
-                    ops: wgpu::Operations { load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT), store: wgpu::StoreOp::Store },
-                })],
-                depth_stencil_attachment: None,
-                timestamp_writes: None,
-                occlusion_query_set: None,
-                multiview_mask: None,
-            });
+            let mut pass = Self::pass(&mut encoder, target);
             pass.set_viewport(0.0, 0.0, size[0] as f32, size[1] as f32, 0.0, 1.0);
-            pass.set_pipeline(pipeline);
+            pass.set_pipeline(&self.eye);
             pass.set_bind_group(0, &bind, &[]);
             pass.draw(0..3, 0..1);
             if pointer {
-                pass.set_pipeline(&self.pointer);
-                pass.set_vertex_buffer(0, self.pointer_vertices.slice(..));
-                pass.draw(0..POINTER_VERTICES as u32, 0..1);
+                self.draw_pointer(&mut pass);
             }
         }
         rs.queue.submit([encoder.finish()]);
     }
 
-    /// Draw what the runtime shows this frame: the window's picture from the last UI copy, and
-    /// each eye's picture of the room with the scene's design view placed at the window. Each
-    /// picture is submitted before this returns.
+    /// One eye's picture of the window into `target`, `size` pixels from its top left corner:
+    /// the design view where `design` says (the model in [`Gpu::model`] over the view's
+    /// background, and the pointer on it), then the UI copy `ui` over all of it. Without a
+    /// design view the picture stays see-through where the UI is. Submitted before this returns.
+    fn compose(&self, rs: &egui_wgpu::RenderState, target: &wgpu::TextureView, size: [u32; 2], ui: &wgpu::TextureView, design: Option<Design>) {
+        let design = design.zip(self.model.as_ref());
+        // One uniform serves both parts: the UI reads only how colours are stored.
+        let background = design.map_or([egui::Color32::BLACK; 2], |(design, _)| design.background);
+        rs.queue.write_buffer(&self.uniform, 0, &uniform_bytes(&Uniform { background, encoded: self.encoded, model: true, ..Uniform::default() }));
+        let model = design.map(|(design, model)| (design, self.bind(rs, model.picture())));
+        let ui = self.bind(rs, ui);
+        let mut encoder = rs.device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("sc_vr") });
+        {
+            let mut pass = Self::pass(&mut encoder, target);
+            if let Some((design, bind)) = &model {
+                let [x, y, w, h] = design.rect.map(|v| v as f32);
+                pass.set_viewport(x, y, w, h, 0.0, 1.0);
+                pass.set_pipeline(&self.pane);
+                pass.set_bind_group(0, bind, &[]);
+                pass.draw(0..3, 0..1);
+                if design.pointer {
+                    self.draw_pointer(&mut pass);
+                }
+            }
+            pass.set_viewport(0.0, 0.0, size[0] as f32, size[1] as f32, 0.0, 1.0);
+            pass.set_pipeline(&self.window);
+            pass.set_bind_group(0, &ui, &[]);
+            pass.draw(0..3, 0..1);
+        }
+        rs.queue.submit([encoder.finish()]);
+    }
+
+    /// Draw what the runtime shows this frame: the window's picture for each eye (the scene's
+    /// design view under the last UI copy, unless the model is in the room) and each eye's
+    /// picture of the room. Each picture is submitted before this returns.
     fn draw(
         &mut self,
         session: &mut solidcraft_xr::Session,
         rs: &egui_wgpu::RenderState,
         frame: &solidcraft_xr::Frame,
         scene: &Scene<'_>,
-    ) -> Result<Drawn, solidcraft_xr::Error> {
+    ) -> Result<solidcraft_xr::Layers, solidcraft_xr::Error> {
         let Scene { source, window_points, pointer, in_room, layout } = *scene;
-        let mut drawn = Drawn::default();
+        let mut drawn = solidcraft_xr::Layers::default();
         let ui = self.ui.picture();
         let aspect = match &ui {
             Some((_, [w, h])) => f64::from(*w) / f64::from((*h).max(1)),
             None => f64::from(window_points[0]) / f64::from(window_points[1].max(1.0)),
         };
         let screen = Screen::in_front(layout.width, aspect, layout.distance, layout.drop);
-        if let Some((view, size)) = &ui {
-            let picture = session.window_picture(*size)?;
-            rs.queue.write_buffer(&self.uniform, 0, &uniform_bytes(&Uniform { encoded: self.encoded, ..Uniform::default() }));
-            self.blit(rs, &self.window, view, &picture.view, *size, false);
+        let pane = source.and_then(|s| Pane::of([s.rect.min.x, s.rect.min.y], [s.rect.max.x, s.rect.max.y], window_points));
+        let colours = {
+            let t = solidcraft_theme::Tokens::get();
+            [t.form_primary, t.app_bar].map(|c| {
+                let linear = egui::Rgba::from(c);
+                [linear.r(), linear.g(), linear.b(), 1.0]
+            })
+        };
+        if let Some((ui, size)) = &ui {
+            // On the window: the monitor's own picture for each eye, wherever the head is.
+            let design = source.zip(pane.as_ref()).filter(|_| !in_room).and_then(|(source, pane)| {
+                let window = source.frame.view_proj.map(|column| column.map(f64::from));
+                let views =
+                    pane_views(&window, &source.camera, source.bounds, pane.on(&screen).1, eye_distance(frame.eyes.as_ref()), layout.distance)?;
+                Some((source, pane_rect(pane, *size)?, views))
+            });
+            for eye in 0..2 {
+                let design = design.as_ref().and_then(|(source, rect, views)| self.draw_design(rs, source, *rect, &views[eye], colours));
+                let picture = session.window_picture(eye, *size)?;
+                self.compose(rs, &picture.view, *size, ui, design);
+            }
             drawn.window = Some(solidcraft_xr::WindowLayer { pose: screen.pose(), size: [screen.width, screen.height], pixels: *size });
         }
         let Some(eyes) = &frame.eyes else { return Ok(drawn) };
-        let pane = source.and_then(|s| Pane::of([s.rect.min.x, s.rect.min.y], [s.rect.max.x, s.rect.max.y], window_points));
-        let placement = source.zip(pane.as_ref()).and_then(|(s, pane)| view::place_model(&camera_frame(&s.camera), pane, &screen, layout.depth));
-        // The model shows through the design view only, unless it is to fill the room.
-        let opening = pane.as_ref().filter(|_| !in_room).map(|pane| Opening::of(pane, &screen));
+        // In the room: the model placed at the window, drawn from where each eye is.
+        let placement = source
+            .zip(pane.as_ref())
+            .filter(|_| in_room)
+            .and_then(|(s, pane)| view::place_model(&camera_frame(&s.camera), pane, &screen, layout.depth));
         // The pointer on the model: where the model point under it is in the room, and where the
         // pointer is on the window, which sets how large it looks.
         let head = [0, 1, 2].map(|k| (eyes[0].pose.position[k] + eyes[1].pose.position[k]) * 0.5);
@@ -922,21 +987,11 @@ impl Gpu {
             ([x, y, z], on_window)
         });
         let metres_per_point = screen.width / f64::from(window_points[0].max(1.0));
-        let colours = {
-            let t = solidcraft_theme::Tokens::get();
-            [t.form_primary, t.app_bar].map(|c| {
-                let linear = egui::Rgba::from(c);
-                [linear.r(), linear.g(), linear.b(), 1.0]
-            })
-        };
         let mut pictures = 0;
         for (index, eye) in eyes.iter().enumerate() {
             let size = session.eye_size(index);
-            // The model, when there is a design view to show and this eye can see its pane.
-            let model = match (source, pane.as_ref(), placement.as_ref()) {
-                (Some(source), Some(pane), Some(placement)) => {
-                    self.draw_model(rs, source, eye, opening.is_some().then_some(pane), placement, &screen, size)
-                }
+            let model = match (source, placement.as_ref()) {
+                (Some(source), Some(placement)) => self.draw_placed(rs, source, eye, placement, size),
                 _ => false,
             };
             let pointer = on_model.and_then(|(at, on_window)| pointer_vertices(eye, head, &screen, at, on_window, metres_per_point, colours));
@@ -954,18 +1009,10 @@ impl Gpu {
                 |s| s.background,
             );
             let Some(axes) = eye.pose.axes() else { continue };
-            let uniform = Uniform {
-                background,
-                axes,
-                fov: [eye.fov.left, eye.fov.right, eye.fov.up, eye.fov.down],
-                encoded: self.encoded,
-                model,
-                eye: eye.pose.position,
-                opening,
-            };
+            let uniform = Uniform { background, axes, fov: [eye.fov.left, eye.fov.right, eye.fov.up, eye.fov.down], encoded: self.encoded, model };
             rs.queue.write_buffer(&self.uniform, 0, &uniform_bytes(&uniform));
             let model_picture = self.model.as_ref().filter(|_| model).map_or(&self.blank, ViewTarget::picture);
-            self.blit(rs, &self.eye, model_picture, &picture.view, picture.size, pointer);
+            self.blit(rs, model_picture, &picture.view, picture.size, pointer);
             pictures += 1;
         }
         // Only a pair is shown: one eye without the other is worse than the window alone.
@@ -973,42 +1020,119 @@ impl Gpu {
         Ok(drawn)
     }
 
-    /// Draw the model as `eye` sees it into [`Gpu::model`]: within `pane` as the eye sees it, or
-    /// all of it when there is none (the model fills the room). `false` when nothing was drawn.
-    fn draw_model(
+    /// The design view for one eye's picture of the window: the window camera's own picture moved
+    /// for that eye (`view_proj`), drawn into [`Gpu::model`] at the size `rect` has (x, y, width
+    /// and height in the window's picture), and the pointer's vertices written where it points at
+    /// the model. `None` when no picture of the model was drawn.
+    fn draw_design(
         &mut self,
         rs: &egui_wgpu::RenderState,
         source: &Source,
-        eye: &Eye,
-        pane: Option<&Pane>,
-        placement: &view::Placement,
-        screen: &Screen,
-        size: [u32; 2],
-    ) -> bool {
-        if self.model_wait > 0 {
-            self.model_wait -= 1;
-            return false;
+        rect: [u32; 4],
+        view_proj: &view::Mat4,
+        colours: [[f32; 4]; 2],
+    ) -> Option<Design> {
+        // The window's frame as it is but for the sideways move: its depth and its light are
+        // the window's.
+        let mut seen = source.frame.clone();
+        seen.view_proj = view::to_f32(view_proj);
+        if !self.draw_model(rs, &seen, [rect[2], rect[3]]) {
+            return None;
         }
+        let points = [source.rect.width(), source.rect.height()].map(f64::from);
+        let pointer = source.pointer.and_then(|at| view::project(view_proj, at)).and_then(|tip| pane_pointer_vertices(tip, points, colours));
+        if let Some(vertices) = &pointer {
+            rs.queue.write_buffer(&self.pointer_vertices, 0, vertices);
+        }
+        Some(Design { rect, background: source.background, pointer: pointer.is_some() })
+    }
+
+    /// Draw the model placed in the room as `eye` sees it into [`Gpu::model`], at the `size` of
+    /// the eye's picture. `false` when nothing was drawn.
+    fn draw_placed(&mut self, rs: &egui_wgpu::RenderState, source: &Source, eye: &Eye, placement: &view::Placement, size: [u32; 2]) -> bool {
         let Some(seen) = view::eye_view(eye, placement) else { return false };
-        // The pane's rectangle saves drawing what the picture's mask would hide anyway.
-        let scissor = match pane {
-            Some(pane) => view::pane_scissor(eye, &pane.corners(screen), size).unwrap_or([0; 4]),
-            None => [0, 0, size[0], size[1]],
-        };
         let mut frame = source.frame.clone();
         frame.view_proj = view::to_f32(&seen.view_proj);
         frame.turned_depth = Some(view::turned_depth_f32(&seen.view_proj));
         frame.eye = [seen.eye[0] as f32, seen.eye[1] as f32, seen.eye[2] as f32, 1.0];
         frame.size_px = [size[0] as f32, size[1] as f32];
+        self.draw_model(rs, &frame, size)
+    }
+
+    /// Draw the scenes the window uploaded as `frame`'s camera sees them into [`Gpu::model`], at
+    /// `size` pixels. `false` when nothing was drawn.
+    fn draw_model(&mut self, rs: &egui_wgpu::RenderState, frame: &solidcraft_viewport_gpu::view::Frame, size: [u32; 2]) -> bool {
+        if self.model_wait > 0 {
+            self.model_wait -= 1;
+            return false;
+        }
         let mut renderer = rs.renderer.write();
         let Some(view) = renderer.callback_resources.get_mut::<Renderer>() else { return false };
-        let drawn = view.draw_second_view(&rs.device, &rs.queue, &frame, size, scissor, &mut self.model);
+        let drawn = view.draw_second_view(&rs.device, &rs.queue, frame, size, [0, 0, size[0], size[1]], &mut self.model);
         // No picture to draw into: the GPU refused it (the renderer has said so in the log).
         if !drawn && self.model.is_none() {
             self.model_wait = RETRY_AFTER;
         }
         drawn
     }
+}
+
+/// The distance between the eyes a design view's depth is worked out for (metres), when the
+/// headset does not say.
+const EYE_DISTANCE: f64 = 0.063;
+
+/// The distance between `eyes` (metres), within what eyes are apart; [`EYE_DISTANCE`] while the
+/// headset is not tracked or reports numbers that are not a distance.
+fn eye_distance(eyes: Option<&[Eye; 2]>) -> f64 {
+    eyes.map(|[left, right]| [0, 1, 2].map(|k| right.pose.position[k] - left.pose.position[k]).iter().map(|d| d * d).sum::<f64>().sqrt())
+        .filter(|distance| distance.is_finite() && *distance > 0.0)
+        .map_or(EYE_DISTANCE, |distance| distance.clamp(0.05, 0.08))
+}
+
+/// The design view in one eye's picture of the window, for [`Gpu::compose`].
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct Design {
+    /// Where it is in the picture: x, y, width and height (pixels).
+    rect: [u32; 4],
+    /// The view's background colours, top and bottom.
+    background: [egui::Color32; 2],
+    /// The pointer is on the model: its vertices are in [`Gpu::pointer_vertices`].
+    pointer: bool,
+}
+
+/// The design view's rectangle in a picture of the window `size` pixels large: x, y, width and
+/// height, whole pixels within the picture. The window's picture is the window's own size, so
+/// this is the view's size on the monitor, and lines are as thick as there. `None` for a view
+/// with no area in the picture.
+fn pane_rect(pane: &Pane, size: [u32; 2]) -> Option<[u32; 4]> {
+    let [w, h] = size.map(f64::from);
+    let (x0, y0) = ((pane.left * w).round().clamp(0.0, w), (pane.top * h).round().clamp(0.0, h));
+    let (x1, y1) = ((pane.right * w).round().clamp(0.0, w), (pane.bottom * h).round().clamp(0.0, h));
+    // A number that is not one fails both comparisons.
+    (x1 > x0 && y1 > y0).then_some([x0 as u32, y0 as u32, (x1 - x0) as u32, (y1 - y0) as u32])
+}
+
+/// The window camera's picture for the left and the right eye: `window` (the view-projection the
+/// window drew with) moved sideways by depth, for a design view `metres` wide and high in the
+/// room, eyes `eye_distance` apart and a viewer `viewing_distance` from the window. What `camera`
+/// turns about is in the window's plane; a parallel camera's scene, in the box `bounds`, is as
+/// deep as it is shown large (`Depth::parallel`). `None` when there is no picture to give.
+fn pane_views(
+    window: &view::Mat4,
+    camera: &solidcraft_viewport::Camera,
+    bounds: Option<[[f64; 3]; 2]>,
+    metres: [f64; 2],
+    eye_distance: f64,
+    viewing_distance: f64,
+) -> Option<[view::Mat4; 2]> {
+    let frame = camera_frame(camera);
+    let depth = if camera.fov > 0.0 {
+        Depth::Perspective { distance: camera.distance }
+    } else {
+        Depth::parallel(&frame, metres[1] / (2.0 * frame.half_height), viewing_distance, bounds)
+    };
+    let strength = eye_distance / metres[0];
+    Some([view::stereo_view_proj(window, -1.0, strength, &depth)?, view::stereo_view_proj(window, 1.0, strength, &depth)?])
 }
 
 /// The desktop camera as the model is placed by it.
@@ -1024,30 +1148,6 @@ fn camera_frame(camera: &solidcraft_viewport::Camera) -> CameraFrame {
     }
 }
 
-/// The part of the window the model shows through, in the room: the design view's rectangle.
-#[derive(Clone, Copy, Debug, PartialEq)]
-struct Opening {
-    /// Its middle (metres).
-    center: [f64; 3],
-    /// Unit directions along its width and height.
-    right: [f64; 3],
-    up: [f64; 3],
-    /// Half its width and half its height (metres).
-    half: [f64; 2],
-}
-
-impl Opening {
-    /// `pane` of `screen`, in the room.
-    fn of(pane: &Pane, screen: &Screen) -> Opening {
-        Opening {
-            center: screen.point((pane.left + pane.right) * 0.5, (pane.top + pane.bottom) * 0.5),
-            right: screen.right,
-            up: screen.up,
-            half: [(pane.right - pane.left) * screen.width * 0.5, (pane.bottom - pane.top) * screen.height * 0.5],
-        }
-    }
-}
-
 /// What the picture shader is told.
 #[derive(Clone, Copy)]
 struct Uniform {
@@ -1059,14 +1159,10 @@ struct Uniform {
     fov: [f64; 4],
     encoded: bool,
     model: bool,
-    /// The eye's place in the room.
-    eye: [f64; 3],
-    /// The model shows only through this opening; `None`: everywhere in the room.
-    opening: Option<Opening>,
 }
 
 impl Default for Uniform {
-    /// What the window's picture is drawn with: no backdrop, no eye, no model.
+    /// What the window's picture is drawn with: no background, no eye, no model.
     fn default() -> Self {
         Uniform {
             background: [egui::Color32::BLACK; 2],
@@ -1074,8 +1170,6 @@ impl Default for Uniform {
             fov: [-0.5, 0.5, 0.5, -0.5],
             encoded: true,
             model: false,
-            eye: [0.0; 3],
-            opening: None,
         }
     }
 }
@@ -1086,31 +1180,24 @@ fn uniform_bytes(u: &Uniform) -> Vec<u8> {
         let [r, g, b, _] = c.to_normalized_gamma_f32();
         [r, g, b, 1.0]
     };
-    let with = |d: [f64; 3], w: f64| [d[0] as f32, d[1] as f32, d[2] as f32, w as f32];
+    let direction = |d: [f64; 3]| [d[0] as f32, d[1] as f32, d[2] as f32, 0.0];
     let flag = |on: bool| if on { 1.0 } else { 0.0 };
-    // Without an opening the shader's own is never read; a unit one keeps its arithmetic finite.
-    let opening = u.opening.unwrap_or(Opening { center: [0.0; 3], right: [1.0, 0.0, 0.0], up: [0.0, 1.0, 0.0], half: [1.0, 1.0] });
-    let values: [[f32; 4]; 11] = [
+    let values: [[f32; 4]; 7] = [
         colour(u.background[0]),
         colour(u.background[1]),
-        with(u.axes[0], 0.0),
-        with(u.axes[1], 0.0),
-        with(u.axes[2], 0.0),
+        direction(u.axes[0]),
+        direction(u.axes[1]),
+        direction(u.axes[2]),
         u.fov.map(|a| a.tan() as f32),
-        [flag(u.encoded), flag(u.model), flag(u.opening.is_some()), 0.0],
-        with(u.eye, 0.0),
-        with(opening.center, 0.0),
-        with(opening.right, opening.half[0].max(1e-6)),
-        with(opening.up, opening.half[1].max(1e-6)),
+        [flag(u.encoded), flag(u.model), 0.0, 0.0],
     ];
     values.iter().flatten().flat_map(|v| v.to_le_bytes()).collect()
 }
 
-/// The mouse pointer on the model, for one eye's picture: the window's arrow laid in the room at
-/// `at` (the model point under the pointer), parallel to `screen`, as large as it looks on the
-/// window at `on_window` to a head at `head`. Vertices for [`Gpu::pointer`]: the edge's fan of
-/// triangles in `colours[1]`, then the fill's in `colours[0]`. `None` when any of it is behind the
-/// eye or has no place in its picture.
+/// The mouse pointer on the model in the room, for one eye's picture: the window's arrow laid in
+/// the room at `at` (the model point under the pointer), parallel to `screen`, as large as it
+/// looks on the window at `on_window` to a head at `head`. Vertices for [`Gpu::pointer`]
+/// ([`pointer_fans`]). `None` when any of it is behind the eye or has no place in its picture.
 fn pointer_vertices(
     eye: &Eye,
     head: [f64; 3],
@@ -1125,14 +1212,33 @@ fn pointer_vertices(
     if !(metres.is_finite() && metres > 0.0) {
         return None;
     }
+    pointer_fans(|outline| view::outline_in_room(at, screen, outline, metres).into_iter().map(|p| view::project(&room, p)).collect(), colours)
+}
+
+/// The mouse pointer on the design view's picture for one eye: the window's arrow with its tip at
+/// `tip` in that picture (x from −1 at its left edge to 1 at its right, y from −1 at its bottom
+/// to 1 at its top), as large as the window draws it in a view of `points` width and height.
+/// Vertices for [`Gpu::pointer`] ([`pointer_fans`]). `None` when a number is not finite or the
+/// view has no size.
+fn pane_pointer_vertices(tip: [f64; 2], points: [f64; 2], colours: [[f32; 4]; 2]) -> Option<Vec<u8>> {
+    if !(tip.iter().all(|v| v.is_finite()) && points.iter().all(|side| side.is_finite() && *side > 0.0)) {
+        return None;
+    }
+    pointer_fans(|outline| Some(outline.iter().map(|[x, y]| [tip[0] + x * 2.0 / points[0], tip[1] - y * 2.0 / points[1]]).collect()), colours)
+}
+
+/// The pointer's vertices: its edge as a fan of triangles from the tip in `colours[1]`, then its
+/// fill as one in `colours[0]`. `place` says where an outline (points from the pointer's tip, x
+/// to the right and y down) is in the picture; `None` from it, or an outline that came back
+/// short, gives none.
+fn pointer_fans(place: impl Fn(&[[f64; 2]]) -> Option<Vec<[f64; 2]>>, colours: [[f32; 4]; 2]) -> Option<Vec<u8>> {
     // The edge: the same outline, a little larger about its middle.
     let count = POINTER.len() as f64;
     let middle = POINTER.iter().fold([0.0, 0.0], |sum, p| [sum[0] + p[0] / count, sum[1] + p[1] / count]);
     let edge = POINTER.map(|p| [middle[0] + (p[0] - middle[0]) * 1.22, middle[1] + (p[1] - middle[1]) * 1.22]);
     let mut bytes = Vec::with_capacity((POINTER_VERTICES * POINTER_VERTEX) as usize);
     for (outline, colour) in [(edge, colours[1]), (POINTER, colours[0])] {
-        let corners: Vec<[f64; 2]> =
-            view::outline_in_room(at, screen, &outline, metres).into_iter().map(|p| view::project(&room, p)).collect::<Option<_>>()?;
+        let corners = place(&outline)?;
         let (tip, rest) = corners.split_first()?;
         for pair in rest.windows(2) {
             let [second, third] = pair else { continue };
@@ -1211,9 +1317,8 @@ mod tests {
         assert_eq!(mixed, Layout { depth: -0.2, ..Layout::default() });
     }
 
-    /// The shader's uniform is eleven vectors: colours as the screen shows them, the eye's
-    /// directions, the tangents of its field of view, the flags, the eye's place and the opening
-    /// the model shows through. Without an opening its flag is off and its sizes stay finite.
+    /// The shader's uniform is seven vectors: colours as the screen shows them, the eye's
+    /// directions, the tangents of its field of view, and the flags.
     #[test]
     fn the_uniform_is_laid_out_as_the_shader_reads_it() {
         let floats = |u: &Uniform| -> Vec<f32> {
@@ -1227,8 +1332,6 @@ mod tests {
             fov: [-std::f64::consts::FRAC_PI_4, std::f64::consts::FRAC_PI_4, 0.0, 0.0],
             encoded: true,
             model: false,
-            eye: [0.25, 0.5, 0.75],
-            opening: None,
         };
         let room = floats(&u);
         assert_eq!(room[0..4], [1.0, 1.0, 1.0, 1.0]);
@@ -1236,15 +1339,9 @@ mod tests {
         assert_eq!(room[8..12], [1.0, 0.0, 0.0, 0.0]);
         assert_eq!(room[16..20], [0.0, 0.0, 1.0, 0.0]);
         assert!((room[20] + 1.0).abs() < 1e-6 && (room[21] - 1.0).abs() < 1e-6);
-        assert_eq!(room[24..28], [1.0, 0.0, 0.0, 0.0], "stored as the screen shows it, no model, no opening");
-        assert_eq!(room[28..31], [0.25, 0.5, 0.75]);
-        assert!(room[39] > 0.0 && room[43] > 0.0, "sizes the shader divides by are never zero");
-        let opening = Opening { center: [1.0, 2.0, -3.0], right: [1.0, 0.0, 0.0], up: [0.0, 1.0, 0.0], half: [0.4, 0.0] };
-        let window = floats(&Uniform { model: true, encoded: false, opening: Some(opening), ..u });
-        assert_eq!(window[24..28], [0.0, 1.0, 1.0, 0.0], "linear, a model, through the opening");
-        assert_eq!(window[32..35], [1.0, 2.0, -3.0]);
-        assert_eq!(window[36..40], [1.0, 0.0, 0.0, 0.4]);
-        assert!(window[40..43] == [0.0, 1.0, 0.0] && window[43] > 0.0, "an opening with no height still divides");
+        assert_eq!(room[24..28], [1.0, 0.0, 0.0, 0.0], "stored as the screen shows it, no model");
+        let with_model = floats(&Uniform { model: true, encoded: false, ..u });
+        assert_eq!(with_model[24..28], [0.0, 1.0, 0.0, 0.0], "linear, a model");
     }
 
     /// The picture shader is valid WGSL, with the entry points the pipelines name.
@@ -1252,21 +1349,101 @@ mod tests {
     fn the_picture_shader_is_valid() {
         let module = wgpu::naga::front::wgsl::parse_str(SHADER).expect("the shader parses");
         let names: Vec<&str> = module.entry_points.iter().map(|e| e.name.as_str()).collect();
-        assert_eq!(names, ["vs", "fs_eye", "vs_pointer", "fs_pointer", "fs_window"]);
+        assert_eq!(names, ["vs", "fs_eye", "fs_pane", "vs_pointer", "fs_pointer", "fs_window"]);
         let flags = wgpu::naga::valid::ValidationFlags::all();
         let capabilities = wgpu::naga::valid::Capabilities::empty();
         wgpu::naga::valid::Validator::new(flags, capabilities).validate(&module).expect("the shader is valid");
     }
 
-    /// The opening the model shows through is the design view's rectangle on the window.
+    /// On the window each eye gets the window camera's own picture: what the camera turns about
+    /// stays where the monitor shows it, and only depth moves a point sideways, to the left for
+    /// the left eye and to the right for the right when it is behind. The head is not asked: the
+    /// pictures are the same wherever it is.
     #[test]
-    fn the_opening_is_the_design_views_rectangle_in_the_room() {
-        let screen = Screen::in_front(2.0, 2.0, 1.0, 0.0);
-        let pane = Pane { left: 0.5, top: 0.0, right: 1.0, bottom: 0.5 };
-        let opening = Opening::of(&pane, &screen);
-        assert_eq!(opening.center, [0.5, 0.25, -1.0]);
-        assert_eq!((opening.right, opening.up), ([1.0, 0.0, 0.0], [0.0, 1.0, 0.0]));
-        assert_eq!(opening.half, [0.5, 0.25]);
+    fn the_design_view_on_the_window_is_the_monitors_picture_for_each_eye() {
+        use solidcraft_viewport::Camera;
+        let project = |m: &view::Mat4, p: [f64; 3]| view::project(m, p).unwrap();
+        for fov in [0.0, 0.6] {
+            let camera = Camera { fov, ..Camera::default() };
+            let window = camera.view_proj(1.5, camera.distance).0;
+            let (target, (_, _, back)) = (camera.target, camera.basis());
+            // The point this far from the target toward the viewer (negative: away).
+            let toward = |far: f64| [target.x + back.x * far, target.y + back.y * far, target.z + back.z * far];
+            let [left, right] = pane_views(&window, &camera, None, [1.2, 0.8], 0.064, 1.2).unwrap();
+            let at = project(&window, toward(0.0));
+            for eye in [&left, &right] {
+                let seen = project(eye, toward(0.0));
+                assert!((seen[0] - at[0]).abs() < 1e-9 && (seen[1] - at[1]).abs() < 1e-9, "fov {fov}: the target stays put");
+            }
+            let behind = toward(-camera.distance * 0.25);
+            let (on_monitor, l, r) = (project(&window, behind), project(&left, behind), project(&right, behind));
+            assert!(l[0] < on_monitor[0] && on_monitor[0] < r[0], "fov {fov}: behind, each to its own side: {l:?} {on_monitor:?} {r:?}");
+            assert!((l[0] + r[0] - 2.0 * on_monitor[0]).abs() < 1e-9, "fov {fov}: by as much, so the monitor's place is between them");
+            assert!((l[1] - on_monitor[1]).abs() < 1e-12 && (r[1] - on_monitor[1]).abs() < 1e-12, "fov {fov}: never up or down");
+            assert!(r[0] - l[0] <= 2.0 * 0.064 / 1.2 + 1e-9, "fov {fov}: never farther apart than the eyes are");
+            let nearer = toward(camera.distance * 0.25);
+            assert!(project(&left, nearer)[0] > project(&right, nearer)[0], "fov {fov}: in front, crossed over");
+        }
+    }
+
+    /// No picture is made up for a design view or a camera that is not one, and the eyes'
+    /// distance is a pair of eyes' whatever the headset reports.
+    #[test]
+    fn a_design_view_that_is_not_one_gets_no_picture() {
+        use solidcraft_viewport::Camera;
+        let camera = Camera::default();
+        let window = camera.view_proj(1.5, camera.distance).0;
+        assert!(pane_views(&window, &camera, None, [1.2, 0.8], 0.064, 1.2).is_some());
+        assert_eq!(pane_views(&window, &camera, None, [0.0, 0.8], 0.064, 1.2), None, "no width");
+        assert_eq!(pane_views(&window, &camera, None, [1.2, 0.8], f64::NAN, 1.2), None);
+        let mut broken = window;
+        broken[0][0] = f64::NAN;
+        assert_eq!(pane_views(&broken, &camera, None, [1.2, 0.8], 0.064, 1.2), None);
+        let no_distance = Camera { fov: 0.6, distance: 0.0, ..Camera::default() };
+        assert_eq!(pane_views(&window, &no_distance, None, [1.2, 0.8], 0.064, 1.2), None);
+
+        // The view's rectangle in the window's picture: whole pixels, within the picture.
+        let pane = |left, top, right, bottom| Pane { left, top, right, bottom };
+        assert_eq!(pane_rect(&pane(0.25, 0.1, 1.0, 0.9), [2000, 1000]), Some([500, 100, 1500, 800]));
+        assert_eq!(pane_rect(&pane(0.0, 0.0, 1.0, 1.0), [1281, 721]), Some([0, 0, 1281, 721]));
+        assert_eq!(pane_rect(&pane(-0.5, 0.0, 3.0, 1.0), [100, 50]), Some([0, 0, 100, 50]), "cut to the picture");
+        assert_eq!(pane_rect(&pane(0.5, 0.0, 0.5, 1.0), [100, 50]), None, "no width");
+        assert_eq!(pane_rect(&pane(0.5, 0.0, 0.5004, 1.0), [100, 50]), None, "less than a pixel");
+        assert_eq!(pane_rect(&pane(0.9, 0.0, 0.1, 1.0), [100, 50]), None, "inside out");
+        assert_eq!(pane_rect(&pane(f64::NAN, 0.0, 1.0, 1.0), [100, 50]), None);
+        assert_eq!(pane_rect(&pane(0.0, 0.0, 1.0, 1.0), [0, 50]), None);
+
+        let a = std::f64::consts::FRAC_PI_4;
+        let eye = |x: f64| Eye {
+            pose: view::Pose { position: [x, 0.0, 0.0], ..view::Pose::IDENTITY },
+            fov: view::Fov { left: -a, right: a, up: a, down: -a },
+        };
+        assert_eq!(eye_distance(None), EYE_DISTANCE);
+        assert!((eye_distance(Some(&[eye(-0.033), eye(0.033)])) - 0.066).abs() < 1e-12);
+        assert_eq!(eye_distance(Some(&[eye(0.0), eye(0.0)])), EYE_DISTANCE, "both eyes in one place");
+        assert_eq!(eye_distance(Some(&[eye(0.0), eye(3.0)])), 0.08);
+        assert_eq!(eye_distance(Some(&[eye(0.0), eye(0.001)])), 0.05);
+        assert_eq!(eye_distance(Some(&[eye(f64::NAN), eye(0.03)])), EYE_DISTANCE);
+    }
+
+    /// The pointer on the design view's picture: the window's arrow, its tip where the model
+    /// point shows for that eye, as large as the window draws it. Numbers that are not finite,
+    /// or a view with no size, give none.
+    #[test]
+    fn the_pointer_is_drawn_on_the_design_views_picture() {
+        let colours = [[1.0, 1.0, 1.0, 1.0], [0.0, 0.0, 0.0, 1.0]];
+        let bytes = pane_pointer_vertices([0.25, -0.5], [800.0, 400.0], colours).unwrap();
+        let floats: Vec<f32> = bytes.as_chunks::<4>().0.iter().map(|b| f32::from_le_bytes(*b)).collect();
+        let corners = floats.as_chunks::<6>().0;
+        assert_eq!(corners.len() as u64, POINTER_VERTICES);
+        assert!(corners[..15].iter().all(|v| v[2..] == colours[1]) && corners[15..].iter().all(|v| v[2..] == colours[0]));
+        assert_eq!([corners[15][0], corners[15][1]], [0.25, -0.5], "the fill's tip is the point");
+        // 17 points down in a view 400 points high is 17 / 200 of the picture's half height.
+        assert!((corners[16][0] - 0.25).abs() < 1e-6 && (corners[16][1] - (-0.5 - 17.0 / 200.0)).abs() < 1e-6, "{:?}", corners[16]);
+        assert!(corners[15..].iter().all(|v| v[0] >= 0.25 - 1e-6 && v[1] <= -0.5 + 1e-6), "the arrow hangs down and to the right of its tip");
+        assert_eq!(pane_pointer_vertices([f64::NAN, 0.0], [800.0, 400.0], colours), None);
+        assert_eq!(pane_pointer_vertices([0.0, 0.0], [0.0, 400.0], colours), None);
+        assert_eq!(pane_pointer_vertices([0.0, 0.0], [800.0, f64::INFINITY], colours), None);
     }
 
     /// The pointer on the model is the window's arrow as an eye sees it at the model's depth: an

@@ -2927,6 +2927,14 @@ pub fn request_graphics_restart(app: &mut SolveApp) -> Result<(), String> {
     Ok(())
 }
 
+/// Launch VR: restart in the VR view through the normal unsaved-design prompts. Refused where
+/// the host cannot restart itself, as the graphics restart is.
+pub fn request_vr_launch(app: &mut SolveApp) -> Result<(), String> {
+    check_graphics_restart(app)?;
+    crate::update::restart_into_vr(app);
+    Ok(())
+}
+
 /// The settings `graphics.json` keeps for the next start, beside the graphics API: a change to
 /// any of them writes the file ([`save_graphics`]).
 #[derive(Clone, PartialEq, Debug)]
@@ -3641,7 +3649,8 @@ pub fn control(app: &mut SolveApp, p: &serde_json::Value) -> Result<serde_json::
         Some("apply") => prefs_window::press(app, WINDOW_PAGES, prefs_window::Button::Apply)?,
         Some("defaults") => prefs_window::press(app, WINDOW_PAGES, prefs_window::Button::Defaults)?,
         Some("restart_graphics") => request_graphics_restart(app)?,
-        Some(b) => return Err(format!("unknown button `{b}` (ok, cancel, apply, defaults, restart_graphics)")),
+        Some("launch_vr") => request_vr_launch(app)?,
+        Some(b) => return Err(format!("unknown button `{b}` (ok, cancel, apply, defaults, restart_graphics, launch_vr)")),
         None => {}
     }
     if button.is_some() {
@@ -9641,11 +9650,31 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
-    /// Preferences › Graphics › Show in a VR headset (#2172): off by default and in settings saved
-    /// before it existed; `ui.prefs` saves the choice in `graphics.json` beside the other
-    /// settings for the next start, refuses what is not a yes or no, and Cancel and Graphics'
-    /// Restore Defaults take it back, in the file too. The row shows only where the host has a
-    /// VR view, with what the host says this run is doing.
+    /// Launch VR restarts the app through the ordinary graphics restart with `--vr` for that one
+    /// start, after the host's own arguments, and leaves the saved Start with VR alone. Where the
+    /// host cannot restart itself it is refused and nothing is started.
+    #[test]
+    fn launch_vr_restarts_once_into_vr_and_is_refused_where_the_host_cannot_restart() {
+        use serde_json::json;
+        let mut h = crate::scenario::Harness::new();
+        h.app.services.graphics_restart = None;
+        assert!(h.call("ui.prefs", json!({"button": "launch_vr"}))["error"].as_str().is_some(), "no restart command: refused");
+        assert!(crate::update::take_launch(&mut h.app).is_none(), "and nothing is started");
+        h.app.services.graphics_restart = Some(("solidcraft".into(), vec!["--control".into(), "7".into()]));
+        let out = h.call("ui.prefs", json!({"button": "launch_vr"}));
+        assert!(out.get("error").is_none(), "{out}");
+        assert!(crate::update::take_graphics_restart(&mut h.app), "an ordinary graphics restart");
+        let (program, args) = crate::update::take_launch(&mut h.app).expect("a restart is scheduled");
+        assert_eq!(program, std::path::PathBuf::from("solidcraft"));
+        assert_eq!(args, ["--control", "7", "--vr"], "the host's own arguments, then VR for that start");
+        assert!(!h.app.preferences.vr_headset, "the saved Start with VR is left as it was");
+    }
+
+    /// `vr_headset` (Start with VR) is off by default, also in settings saved before it existed;
+    /// `ui.prefs` saves the choice in `graphics.json` beside the other settings for the next
+    /// start, refuses what is not a yes or no, and Cancel and Graphics' Restore Defaults take it
+    /// back, in the file too. The section shows only where the host has a VR view, with what the
+    /// host says this run is doing.
     #[test]
     fn the_vr_headset_view_is_off_by_default_and_saved_for_the_next_start() {
         use serde_json::json;
@@ -9678,14 +9707,15 @@ mod tests {
             (Some("vulkan"), Some("Named GPU"), Some(2))
         );
 
-        // The row: only where the host has a VR view, with the host's words under it.
+        // The section: only where the host has a VR view, with the host's words under it.
         h.call("ui.prefs", json!({"open": "Graphics"}));
         h.frames(2);
         assert!(crate::scenario::handle_at("prefs:vr_headset").is_none(), "no VR view on this host: no row");
         h.app.services.vr_status = Some("Showing in the headset: Test headset on Test runtime.".into());
         super::reveal_preference(&mut h, "prefs:vr_headset");
         assert!(crate::scenario::handle_at("prefs:vr_headset").is_some());
-        assert!(crate::scenario::handle_at("prefs:vr_model_in_room").is_some(), "the model in the room is offered with it");
+        assert!(crate::scenario::handle_at("prefs:vr_launch").is_some(), "Launch VR sits beside it");
+        assert!(crate::scenario::handle_at("prefs:vr_model_in_room").is_some(), "Extend viewport is offered with it");
 
         // The model in the room: off by default and in older settings, an ordinary setting that
         // is not one of the next start's (the file keeps what it had), refused when not a yes or no.

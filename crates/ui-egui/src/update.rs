@@ -969,6 +969,18 @@ pub fn restart_graphics(app: &mut SolveApp) {
     }
 }
 
+/// Launch VR: restart through the ordinary quit flow, as [`restart_graphics`] does, with `--vr`
+/// for that one start (the VR software has to make the graphics device the window draws with, so
+/// the window cannot move to it while it runs). The saved Start with VR stays as it is.
+pub fn restart_into_vr(app: &mut SolveApp) {
+    if let Some((program, mut args)) = app.services.graphics_restart.clone() {
+        args.push("--vr".into());
+        app.updater.launch = Some((program, args));
+        app.updater.graphics_restart = true;
+        crate::documents::request_quit(app);
+    }
+}
+
 /// Whether the pending launch applies graphics settings, consumed by the native host.
 pub fn take_graphics_restart(app: &mut SolveApp) -> bool {
     std::mem::take(&mut app.updater.graphics_restart) && app.updater.launch.is_some()

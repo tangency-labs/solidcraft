@@ -6046,6 +6046,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         .map(|p| pick_cached(app, &proj, p))
         .unwrap_or_default();
     app.viewport.stereo.pointing(&hits);
+    app.viewport.stereo.bounded(proj.bounds.map(|b| [[b.min.x, b.min.y, b.min.z], [b.max.x, b.max.y, b.max.z]]));
     // The Fillet and Chamfer window resolves its own corners: the nearest sketch point to a
     // corner drawn from the origin is the fixed origin, which ends no two curves.
     let corner = hover.filter(|_| inside && !navigating).and_then(|p| crate::sketch_modify_ui::corner_hit(app, &proj, p));

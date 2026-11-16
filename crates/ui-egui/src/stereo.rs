@@ -14,9 +14,9 @@ use solidcraft_viewport_gpu::view::Frame;
 /// The design view of one frame, for a second camera.
 pub struct Source {
     /// The window's frame: the same scenes, section, analysis and colours. The camera fields
-    /// (`view_proj`, `turned_depth`, `eye`, `size_px`) are the window's and are replaced for each
-    /// eye; `back` stays, so the light and the glass order are the same for both eyes and do not
-    /// move with the head.
+    /// (`view_proj`, `turned_depth`, `eye`, `size_px`) are the window's, and a host replaces
+    /// those its eye's camera changes; `back` stays, so the light and the glass order are the
+    /// same for both eyes and do not move with the head.
     pub frame: Frame,
     /// The camera the window drew with.
     pub camera: Camera,
@@ -29,6 +29,10 @@ pub struct Source {
     /// seem to sink into what it points at. `None` over empty space, over the UI, and while the
     /// view is being moved (nothing is picked then).
     pub pointer: Option<[f64; 3]>,
+    /// The box around the scene the view shows (its least and greatest corner, model units),
+    /// when known: how deep the picture is, so a host can keep the depth it gives each eye within
+    /// what eyes can follow.
+    pub bounds: Option<[[f64; 3]; 2]>,
 }
 
 impl Source {
@@ -43,7 +47,7 @@ impl Source {
         frame.ssaa = 1.0;
         frame.ao_radius = 0.0;
         frame.upload_error = None;
-        Source { frame, camera, rect, background, pointer: None }
+        Source { frame, camera, rect, background, pointer: None, bounds: None }
     }
 }
 
@@ -55,6 +59,8 @@ pub struct Stereo {
     source: Option<Source>,
     /// The model point under the pointer, from this frame's pick, until the view is published.
     pointer: Option<[f64; 3]>,
+    /// The scene's box, from this frame's projection, until the view is published.
+    bounds: Option<[[f64; 3]; 2]>,
 }
 
 impl Stereo {
@@ -76,18 +82,26 @@ impl Stereo {
         };
     }
 
+    /// The box around the scene this frame's view shows (its least and greatest corner), when it
+    /// is known. An empty box, or one that is not finite, is none. Called every frame the design
+    /// view is laid out, so a box from an earlier frame does not stay.
+    pub(crate) fn bounded(&mut self, bounds: Option<[[f64; 3]; 2]>) {
+        self.bounds =
+            bounds.filter(|[min, max]| self.on && min.iter().chain(max).all(|v| v.is_finite()) && min.iter().zip(max).all(|(lo, hi)| lo <= hi));
+    }
+
     /// The design view was drawn: keep what a second camera needs, when a host asks for it.
     pub(crate) fn publish(&mut self, frame: &Frame, camera: Camera, rect: egui::Rect, background: [egui::Color32; 2]) {
-        let pointer = self.pointer.take();
+        let (pointer, bounds) = (self.pointer.take(), self.bounds.take());
         if self.on {
-            self.source = Some(Source { pointer, ..Source::new(frame, camera, rect, background) });
+            self.source = Some(Source { pointer, bounds, ..Source::new(frame, camera, rect, background) });
         }
     }
 
     /// This frame's design view, once: `None` when no design view was drawn since the last take,
     /// or the host has not switched stereo on.
     pub fn take(&mut self) -> Option<Source> {
-        self.pointer = None;
+        (self.pointer, self.bounds) = (None, None);
         self.source.take().filter(|_| self.on)
     }
 }
@@ -180,6 +194,30 @@ mod tests {
         stereo.publish(&frame(), Camera::default(), RECT, BACKGROUND);
         stereo.on = false;
         assert!(stereo.take().is_none());
+    }
+
+    /// The scene's box goes with the frame it was laid out in. An empty box, one that is not
+    /// finite, a frame that laid out none and stereo switched off leave none.
+    #[test]
+    fn the_scenes_box_goes_with_its_frame() {
+        let boxed = |stereo: &mut Stereo, bounds: Option<[[f64; 3]; 2]>| {
+            stereo.bounded(bounds);
+            stereo.publish(&frame(), Camera::default(), RECT, BACKGROUND);
+            stereo.take().and_then(|source| source.bounds)
+        };
+        let mut stereo = Stereo { on: true, ..Stereo::default() };
+        let good = [[-1.0, -2.0, -3.0], [4.0, 5.0, 6.0]];
+        assert_eq!(boxed(&mut stereo, Some(good)), Some(good));
+        assert_eq!(boxed(&mut stereo, Some([[0.0; 3]; 2])), Some([[0.0; 3]; 2]), "a point is a box");
+        assert_eq!(boxed(&mut stereo, None), None, "no box this frame: none kept from the one before");
+        assert_eq!(boxed(&mut stereo, Some([[1.0, 0.0, 0.0], [0.0, 1.0, 1.0]])), None, "an empty box");
+        assert_eq!(boxed(&mut stereo, Some([[0.0; 3], [f64::INFINITY, 1.0, 1.0]])), None);
+        assert_eq!(boxed(&mut stereo, Some([[f64::NAN, 0.0, 0.0], [1.0; 3]])), None);
+        stereo.bounded(Some(good));
+        assert!(stereo.take().is_none());
+        stereo.publish(&frame(), Camera::default(), RECT, BACKGROUND);
+        assert_eq!(stereo.take().and_then(|source| source.bounds), None, "a box without its view does not reach a later one");
+        assert_eq!(boxed(&mut Stereo::default(), Some(good)), None);
     }
 
     /// The pointer is drawn on the model where the pick found a point on it: the first such hit,

@@ -533,6 +533,12 @@ pub struct Services {
     /// words for Preferences › Graphics, where the setting for the next start is then offered.
     /// `None`: this host has no VR view (the browser, macOS), and Preferences does not mention it.
     pub vr_status: Option<String>,
+    /// The host's VR view is open (showing in the headset, or waiting for it): Preferences offers
+    /// Stop VR instead of Launch VR. Written by the host each frame.
+    pub vr_running: bool,
+    /// Preferences' Stop VR was pressed: the host ends the VR view on its next frame and clears
+    /// this.
+    pub vr_stop: bool,
     /// HTTPS GET for the update check (`update`); None: never check (browser, tests).
     pub http_get: Option<update::HttpGet>,
     /// HTTPS download to a file, with progress, for one-click updates (`update::install`).

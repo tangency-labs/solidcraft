@@ -270,14 +270,10 @@ impl Pane {
         (pane.right - pane.left > 1e-6 && pane.bottom - pane.top > 1e-6).then_some(pane)
     }
 
-    /// The pane's four corners in the room, on `screen`.
-    pub fn corners(&self, screen: &Screen) -> [[f64; 3]; 4] {
-        [
-            screen.point(self.left, self.top),
-            screen.point(self.right, self.top),
-            screen.point(self.right, self.bottom),
-            screen.point(self.left, self.bottom),
-        ]
+    /// The pane on `screen`, in the room: its middle, and its width and height (metres).
+    pub fn on(&self, screen: &Screen) -> ([f64; 3], [f64; 2]) {
+        let middle = screen.point((self.left + self.right) * 0.5, (self.top + self.bottom) * 0.5);
+        (middle, [(self.right - self.left) * screen.width, (self.bottom - self.top) * screen.height])
     }
 }
 
@@ -373,6 +369,107 @@ pub fn same_apparent_size(from: [f64; 3], reference: [f64; 3], at: [f64; 3]) -> 
     if ratio.is_finite() && ratio > 1e-6 && near > 1e-6 { ratio } else { 1.0 }
 }
 
+/// How the desktop camera sees depth, for giving each eye its own copy of the camera's picture
+/// ([`stereo_view_proj`]).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Depth {
+    /// A perspective camera `distance` model units from the point it turns about. Its clip-space
+    /// w is the distance from the camera, as the viewport's perspective projection gives it.
+    Perspective { distance: f64 },
+    /// A parallel (orthographic) camera: it has no distance of its own, so the picture is given
+    /// the depth a viewer `viewing_distance` metres from the window would see.
+    Parallel {
+        /// The camera's direction toward the viewer (unit), and the point it turns about.
+        back: [f64; 3],
+        target: [f64; 3],
+        /// Metres per model unit as the window shows the model.
+        metres_per_unit: f64,
+        /// From the viewer to the window (metres).
+        viewing_distance: f64,
+    },
+}
+
+/// How far a parallel camera's picture moves the scene's deepest and its nearest point for an
+/// eye, as a share of the strength, at its most ([`Depth::parallel`]). At 1 the deepest point
+/// would be seen infinitely far away; at half of that it is as far behind the window as the
+/// viewer is in front of it, and the nearest a third of the way from the window to the viewer.
+pub const PARALLEL_REACH: f64 = 0.5;
+
+impl Depth {
+    /// The depth of a parallel `camera`'s picture, shown at `metres_per_unit` to a viewer
+    /// `viewing_distance` metres from the window, and kept within what eyes follow with ease: of
+    /// `bounds` (the box around the scene, its least and greatest corner), the corner farthest
+    /// behind or in front of the point the camera turns about is moved by [`PARALLEL_REACH`] of
+    /// the strength at most. A scene deeper than that is flattened to it, as happens when the
+    /// view is zoomed in on a small part of a large design. Without a box the scene is taken to
+    /// be as deep as the camera shows it high.
+    pub fn parallel(camera: &CameraFrame, metres_per_unit: f64, viewing_distance: f64, bounds: Option<[[f64; 3]; 2]>) -> Depth {
+        let deepest = bounds
+            .filter(|[min, max]| finite(*min) && finite(*max))
+            .map(|[min, max]| {
+                (0..8usize)
+                    .map(|i| {
+                        let corner = [0, 1, 2].map(|k| if (i >> k) & 1 == 0 { min[k] } else { max[k] });
+                        dot(sub(corner, camera.target), camera.back).abs()
+                    })
+                    .fold(0.0, f64::max)
+            })
+            .filter(|deepest| deepest.is_finite())
+            .unwrap_or(2.0 * camera.half_height);
+        // The scale at which the deepest corner is moved by exactly the reach.
+        let most = PARALLEL_REACH * viewing_distance / deepest;
+        let metres_per_unit = if most.is_finite() && most > 0.0 { metres_per_unit.min(most) } else { metres_per_unit };
+        Depth::Parallel { back: camera.back, target: camera.target, metres_per_unit, viewing_distance }
+    }
+}
+
+/// Half the distance between the eyes as a share of half the picture's width, at its most: a
+/// picture too narrow for the eyes it is shown to would push far points apart beyond what eyes
+/// can follow.
+pub const MAX_STEREO: f64 = 0.25;
+
+/// The desktop camera's picture for one eye: `view_proj` (model point to the camera's clip
+/// space) with each point moved sideways by how far it lies behind or in front of the point the
+/// camera turns about. That point stays where it is for both eyes, so it is seen in the
+/// window's plane; farther points move toward the eye's own side and are seen behind the window,
+/// nearer ones in front of it. Nothing else changes: height, depth and size are the camera's, so
+/// the picture is the one on the monitor and everything drawn over it is in its place.
+///
+/// `side` is −1 for the left eye and 1 for the right. `strength` is the distance between the
+/// eyes divided by the picture's width as the viewer sees it (both in metres), brought within
+/// [`MAX_STEREO`]. `None` when a number is not finite or the camera has no distance.
+pub fn stereo_view_proj(view_proj: &Mat4, side: f64, strength: f64, depth: &Depth) -> Option<Mat4> {
+    if !(side.is_finite() && strength.is_finite()) || view_proj.iter().flatten().any(|v| !v.is_finite()) {
+        return None;
+    }
+    let shift = side.clamp(-1.0, 1.0) * strength.clamp(0.0, MAX_STEREO);
+    // How far behind the camera's target a point is, as a row over the point (x, y, z, 1): the
+    // clip-space x of each eye is the camera's plus `shift` times this.
+    let behind: [f64; 4] = match *depth {
+        Depth::Perspective { distance } => {
+            if !(distance.is_finite() && distance > 0.0) {
+                return None;
+            }
+            // w is the distance from the camera, so w − distance is the depth behind the target;
+            // after the divide by w a far point's shift comes to rest at `shift` itself.
+            [view_proj[0][3], view_proj[1][3], view_proj[2][3], view_proj[3][3] - distance]
+        }
+        Depth::Parallel { back, target, metres_per_unit, viewing_distance } => {
+            let back = unit(back)?;
+            let k = metres_per_unit / viewing_distance;
+            if !(k.is_finite() && k > 0.0 && finite(target)) {
+                return None;
+            }
+            [-back[0] * k, -back[1] * k, -back[2] * k, dot(target, back) * k]
+        }
+    };
+    let mut out = *view_proj;
+    for (column, add) in out.iter_mut().zip(behind) {
+        column[0] += shift * add;
+    }
+    out.iter().flatten().all(|v| v.is_finite()).then_some(out)
+}
+
 /// The view of `placement` from `eye`, or `None` when the eye's pose or field of view is not one
 /// a picture can be drawn for (tracking lost, a runtime's zeros).
 pub fn eye_view(eye: &Eye, placement: &Placement) -> Option<EyeView> {
@@ -385,31 +482,6 @@ pub fn eye_view(eye: &Eye, placement: &Placement) -> Option<EyeView> {
     let column = |k: usize| [m[k][0], m[k][1], m[k][2]];
     let eye_model = [dot(offset, column(0)) / s2, dot(offset, column(1)) / s2, dot(offset, column(2)) / s2];
     (view_proj.iter().flatten().all(|v| v.is_finite()) && finite(eye_model)).then_some(EyeView { view_proj, eye: eye_model })
-}
-
-/// The rectangle of an eye's picture (x, y, width, height in pixels of a `size` picture) that
-/// holds the room points `corners`: what the model is drawn within, so that it shows through the
-/// design view and not around the window. `None` when the corners are not all in front of the
-/// eye or the rectangle is empty: nothing of the pane can be seen.
-pub fn pane_scissor(eye: &Eye, corners: &[[f64; 3]; 4], size: [u32; 2]) -> Option<[u32; 4]> {
-    let room = room_view_proj(eye)?;
-    let (w, h) = (f64::from(size[0]), f64::from(size[1]));
-    let (mut lo, mut hi) = ([f64::INFINITY; 2], [f64::NEG_INFINITY; 2]);
-    for corner in corners {
-        let [x, y, _, cw] = apply(&room, *corner);
-        if !(cw.is_finite() && cw > 1e-6) {
-            return None;
-        }
-        let px = [(x / cw + 1.0) * 0.5 * w, (1.0 - y / cw) * 0.5 * h];
-        if !px[0].is_finite() || !px[1].is_finite() {
-            return None;
-        }
-        lo = [lo[0].min(px[0]), lo[1].min(px[1])];
-        hi = [hi[0].max(px[0]), hi[1].max(px[1])];
-    }
-    let (x0, y0) = (lo[0].floor().clamp(0.0, w), lo[1].floor().clamp(0.0, h));
-    let (x1, y1) = (hi[0].ceil().clamp(0.0, w), hi[1].ceil().clamp(0.0, h));
-    (x1 > x0 && y1 > y0).then_some([x0 as u32, y0 as u32, (x1 - x0) as u32, (y1 - y0) as u32])
 }
 
 #[cfg(test)]
@@ -599,7 +671,6 @@ mod tests {
             Fov { left: -std::f64::consts::FRAC_PI_2, right: 0.5, up: 0.5, down: -0.5 },
         ] {
             assert_eq!(eye_view(&Eye { fov, ..good }, &placement), None, "{fov:?}");
-            assert_eq!(pane_scissor(&Eye { fov, ..good }, &WHOLE.corners(&Screen::in_front(2.0, 2.0, 1.0, 0.0)), [100, 100]), None, "{fov:?}");
         }
         assert_eq!(good.fov.projection(0.0, 10.0), None);
         assert_eq!(good.fov.projection(1.0, 1.0), None);
@@ -620,6 +691,115 @@ mod tests {
         let centred = eye_view(&eye_at([0.0; 3]), &placement).unwrap();
         let [x, y, _, w] = apply(&centred.view_proj, camera.target);
         assert!(w > 0.0 && (x / w).abs() < 1e-9 && (y / w).abs() < 1e-9);
+    }
+
+    /// A perspective camera at the origin looking down −Z, as the viewport projects: clip-space w
+    /// is the distance from the camera.
+    fn perspective() -> Mat4 {
+        let (n, f) = (0.1, 1000.0);
+        [[1.5, 0.0, 0.0, 0.0], [0.0, 2.0, 0.0, 0.0], [0.0, 0.0, f / (n - f), -1.0], [0.0, 0.0, n * f / (n - f), 0.0]]
+    }
+
+    /// Each eye gets the camera's own picture: the point the camera turns about stays put for
+    /// both, farther points move toward the eye's own side and come to rest, nearer ones cross
+    /// over. Height, depth and w are untouched, so the picture is the monitor's.
+    #[test]
+    fn each_eye_sees_the_cameras_picture_moved_sideways_by_depth() {
+        let camera = perspective();
+        let depth = Depth::Perspective { distance: 10.0 };
+        let (left, right) = (stereo_view_proj(&camera, -1.0, 0.1, &depth).unwrap(), stereo_view_proj(&camera, 1.0, 0.1, &depth).unwrap());
+        let x = |m: &Mat4, p: [f64; 3]| project(m, p).unwrap()[0];
+        for m in [&left, &right] {
+            assert!(x(m, [0.0, 0.0, -10.0]).abs() < 1e-12, "the target is in the window's plane for both eyes");
+            assert!((x(m, [2.0, 1.0, -10.0]) - x(&camera, [2.0, 1.0, -10.0])).abs() < 1e-12, "and so is everything at its depth");
+        }
+        assert!(
+            (x(&right, [0.0, 0.0, -20.0]) - 0.05).abs() < 1e-12 && (x(&left, [0.0, 0.0, -20.0]) + 0.05).abs() < 1e-12,
+            "behind: each to its own side"
+        );
+        assert!((x(&right, [0.0, 0.0, -5.0]) + 0.1).abs() < 1e-12 && (x(&left, [0.0, 0.0, -5.0]) - 0.1).abs() < 1e-12, "in front: crossed over");
+        assert!((x(&right, [0.0, 0.0, -900.0]) - 0.1).abs() < 2e-3, "far points come to rest: the eyes look straight ahead");
+        for p in [[1.0, 2.0, -3.0], [-4.0, 0.5, -30.0]] {
+            let (a, b) = (apply(&camera, p), apply(&right, p));
+            assert_eq!((a[1], a[2], a[3]), (b[1], b[2], b[3]), "height, depth and w are the camera's");
+        }
+        assert_eq!(stereo_view_proj(&camera, 0.0, 0.1, &depth), Some(camera), "no side: the camera's own picture");
+        assert_eq!(stereo_view_proj(&camera, 1.0, 0.0, &depth), Some(camera), "no strength: the same");
+    }
+
+    /// A parallel camera has no distance, so depth is what a viewer at the window's distance would
+    /// see: a point as far behind the window as the viewer is in front moves by the full strength.
+    #[test]
+    fn a_parallel_camera_gets_the_depth_a_viewer_at_the_window_sees() {
+        // Looking down −Z at (1, 2, 3); 1 model unit is 1 cm on the window, seen from 1.2 m.
+        let depth = Depth::Parallel { back: [0.0, 0.0, 1.0], target: [1.0, 2.0, 3.0], metres_per_unit: 0.01, viewing_distance: 1.2 };
+        let right = stereo_view_proj(&IDENTITY, 1.0, 0.1, &depth).unwrap();
+        let x = |p: [f64; 3]| project(&right, p).unwrap()[0];
+        assert!((x([1.0, 2.0, 3.0]) - 1.0).abs() < 1e-12 && (x([7.0, -5.0, 3.0]) - 7.0).abs() < 1e-12, "the target's depth stays put");
+        assert!((x([1.0, 2.0, 3.0 - 120.0]) - (1.0 + 0.1)).abs() < 1e-12, "1.2 m behind the window: the full strength");
+        assert!((x([1.0, 2.0, 3.0 + 60.0]) - (1.0 - 0.05)).abs() < 1e-12, "0.6 m in front: half of it, crossed");
+        let left = stereo_view_proj(&IDENTITY, -1.0, 0.1, &depth).unwrap();
+        assert!((project(&left, [1.0, 2.0, -117.0]).unwrap()[0] - 0.9).abs() < 1e-12);
+    }
+
+    /// A parallel camera's scene is shown as deep as it is while eyes follow that with ease, and
+    /// flattened to that when it is deeper: zoomed in on a part of a large design, the far end of
+    /// the design does not pull the eyes apart. A box that is no box changes nothing.
+    #[test]
+    fn a_deep_scene_is_flattened_to_what_eyes_follow() {
+        let camera = CameraFrame { target: [0.0; 3], right: [1.0, 0.0, 0.0], up: [0.0, 1.0, 0.0], back: [0.0, 0.0, 1.0], half_height: 50.0 };
+        let scale = |depth: Depth| match depth {
+            Depth::Parallel { metres_per_unit, .. } => metres_per_unit,
+            Depth::Perspective { .. } => f64::NAN,
+        };
+        // 1 cm a unit, seen from 1.2 m: a box 40 units deep is 0.4 m, within reach as it is.
+        let shallow = Depth::parallel(&camera, 0.01, 1.2, Some([[-30.0, -30.0, -40.0], [30.0, 30.0, 10.0]]));
+        assert_eq!(shallow, Depth::Parallel { back: camera.back, target: camera.target, metres_per_unit: 0.01, viewing_distance: 1.2 });
+        // 600 units deep would be 6 m: flattened so that its far corner moves by half the strength.
+        let deep = Depth::parallel(&camera, 0.01, 1.2, Some([[-30.0, -30.0, -600.0], [30.0, 30.0, 10.0]]));
+        assert!((scale(deep) - 0.001).abs() < 1e-12, "{deep:?}");
+        let far = project(&stereo_view_proj(&IDENTITY, 1.0, 0.1, &deep).unwrap(), [0.0, 0.0, -600.0]).unwrap()[0];
+        assert!((far - 0.1 * PARALLEL_REACH).abs() < 1e-12, "{far}");
+        // The nearest corner counts as the deepest does.
+        let near = Depth::parallel(&camera, 0.01, 1.2, Some([[-30.0, -30.0, -10.0], [30.0, 30.0, 1200.0]]));
+        assert!((scale(near) - 0.0005).abs() < 1e-12, "{near:?}");
+        // No box: as deep as the camera shows the scene high (100 units, 1 m at this scale).
+        assert!((scale(Depth::parallel(&camera, 0.01, 1.2, None)) - 0.006).abs() < 1e-12);
+        assert_eq!(scale(Depth::parallel(&camera, 0.001, 1.2, None)), 0.001);
+        // A box that is a point, or not numbers, leaves the scale as it is shown.
+        assert_eq!(scale(Depth::parallel(&camera, 0.01, 1.2, Some([[0.0; 3], [0.0; 3]]))), 0.01);
+        assert_eq!(scale(Depth::parallel(&camera, 0.01, 1.2, Some([[f64::NAN; 3], [1.0; 3]]))), 0.006, "taken as no box");
+        assert_eq!(scale(Depth::parallel(&camera, 0.01, 1.2, Some([[f64::NEG_INFINITY; 3], [f64::INFINITY; 3]]))), 0.006);
+    }
+
+    /// A strength past what eyes can follow is brought within it, a side past an eye is an eye,
+    /// and a camera or numbers that are not ones give no picture.
+    #[test]
+    fn a_stereo_picture_stays_within_what_eyes_can_follow() {
+        let camera = perspective();
+        let depth = Depth::Perspective { distance: 10.0 };
+        let x = |m: &Mat4| project(m, [0.0, 0.0, -1e9]).unwrap()[0];
+        assert!((x(&stereo_view_proj(&camera, 1.0, 50.0, &depth).unwrap()) - MAX_STEREO).abs() < 1e-6);
+        assert!((x(&stereo_view_proj(&camera, 9.0, 0.1, &depth).unwrap()) - 0.1).abs() < 1e-6);
+        assert_eq!(stereo_view_proj(&camera, 1.0, -3.0, &depth), Some(camera), "a negative strength is none");
+        for bad in [Depth::Perspective { distance: 0.0 }, Depth::Perspective { distance: -2.0 }, Depth::Perspective { distance: f64::NAN }] {
+            assert_eq!(stereo_view_proj(&camera, 1.0, 0.1, &bad), None, "{bad:?}");
+        }
+        let parallel = |back, target, metres_per_unit, viewing_distance| Depth::Parallel { back, target, metres_per_unit, viewing_distance };
+        for bad in [
+            parallel([0.0; 3], [0.0; 3], 0.01, 1.2),
+            parallel([0.0, 0.0, 1.0], [f64::NAN, 0.0, 0.0], 0.01, 1.2),
+            parallel([0.0, 0.0, 1.0], [0.0; 3], 0.0, 1.2),
+            parallel([0.0, 0.0, 1.0], [0.0; 3], 0.01, 0.0),
+            parallel([0.0, 0.0, 1.0], [0.0; 3], f64::INFINITY, 1.2),
+        ] {
+            assert_eq!(stereo_view_proj(&IDENTITY, 1.0, 0.1, &bad), None, "{bad:?}");
+        }
+        assert_eq!(stereo_view_proj(&camera, f64::NAN, 0.1, &depth), None);
+        assert_eq!(stereo_view_proj(&camera, 1.0, f64::NAN, &depth), None);
+        let mut broken = camera;
+        broken[1][1] = f64::INFINITY;
+        assert_eq!(stereo_view_proj(&broken, 1.0, 0.1, &depth), None);
     }
 
     /// A point shows where the eye sees it: straight ahead in the middle, 45° right at the right
@@ -664,28 +844,14 @@ mod tests {
         assert_eq!(same_apparent_size([f64::INFINITY, 0.0, 0.0], window, [0.0, 0.0, -2.0]), 1.0);
     }
 
-    /// The model is drawn within the pane as the eye sees it: its rectangle in the eye's picture.
+    /// A pane's place in the room is its share of the window: its middle and its size in metres.
     #[test]
-    fn the_pane_is_a_rectangle_of_the_eyes_picture() {
-        // A 1 m square window 1 m ahead: to an eye that sees 45° each way (2 m across there), the
-        // middle half of the picture.
-        let screen = Screen::in_front(1.0, 1.0, 1.0, 0.0);
-        let corners = WHOLE.corners(&screen);
-        // The rectangle is rounded outward to whole pixels, so an edge that falls on a pixel's
-        // border may take that pixel too: each side within one pixel, and never short.
-        let covers = |got: [u32; 4], want: [u32; 4]| {
-            let (g, w) = ([got[0], got[1], got[0] + got[2], got[1] + got[3]], [want[0], want[1], want[0] + want[2], want[1] + want[3]]);
-            g[0] <= w[0] && g[1] <= w[1] && g[2] >= w[2] && g[3] >= w[3] && g.iter().zip(&w).all(|(a, b)| a.abs_diff(*b) <= 1)
-        };
-        let centred = pane_scissor(&eye_at([0.0; 3]), &corners, [1000, 800]).unwrap();
-        assert!(covers(centred, [250, 200, 500, 400]), "{centred:?}");
-        // From the left the window is to the right in the picture, and cut off at its edge.
-        let from_left = pane_scissor(&eye_at([-1.0, 0.0, 0.0]), &corners, [1000, 800]).unwrap();
-        assert!(covers(from_left, [750, 200, 250, 400]), "{from_left:?}");
-        assert_eq!(from_left[0] + from_left[2], 1000, "cut off at the picture's edge");
-        // Beside the eye's view altogether, or behind it: nothing to draw in.
-        assert_eq!(pane_scissor(&eye_at([5.0, 0.0, 0.0]), &corners, [1000, 800]), None);
-        assert_eq!(pane_scissor(&eye_at([0.0, 0.0, -2.0]), &corners, [1000, 800]), None);
-        assert_eq!(pane_scissor(&eye_at([0.0; 3]), &corners, [0, 0]), None);
+    fn a_pane_has_its_place_on_the_window_in_the_room() {
+        let screen = Screen::in_front(2.0, 2.0, 1.0, 0.0);
+        let (middle, size) = Pane { left: 0.5, top: 0.0, right: 1.0, bottom: 0.5 }.on(&screen);
+        assert!(close(middle, [0.5, 0.25, -1.0]), "{middle:?}");
+        assert!((size[0] - 1.0).abs() < 1e-12 && (size[1] - 0.5).abs() < 1e-12, "{size:?}");
+        let (middle, size) = WHOLE.on(&screen);
+        assert!(close(middle, screen.center) && (size[0] - screen.width).abs() < 1e-12 && (size[1] - screen.height).abs() < 1e-12);
     }
 }

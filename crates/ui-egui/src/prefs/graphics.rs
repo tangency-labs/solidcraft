@@ -385,7 +385,6 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                 if app.services.graphics_path.is_some() {
                     graphics_api_row(app, ui, help_label_width);
                     graphics_card_row(app, ui, help_label_width);
-                    vr_headset_row(app, ui);
                 }
                 #[cfg(target_os = "linux")]
                 window_system_row(app, ui, help_label_width);
@@ -399,6 +398,7 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                 }
             });
         });
+        vr_section(app, ui);
     });
 }
 
@@ -619,20 +619,36 @@ fn graphics_card_row(app: &mut SolveApp, ui: &mut egui::Ui, label_width: f32) {
     }
 }
 
-/// The VR headset view (#2172), where the host has one: the setting for the next start, and what
-/// this run is doing (running on a headset, or why not).
-fn vr_headset_row(app: &mut SolveApp, ui: &mut egui::Ui) {
+/// 3D viewing: the VR headset view (#2172), where the host has one, in a section of its own at the
+/// page's end, as few use it. Launch VR (or Stop VR while it runs) beside Start with VR, what this
+/// run is doing (running on a headset, or why not), and Extend viewport.
+fn vr_section(app: &mut SolveApp, ui: &mut egui::Ui) {
     let Some(status) = app.services.vr_status.clone() else { return };
-    ui.horizontal_wrapped(|ui| {
-        let response = setting::vr_headset(app, ui).backing_on_hover_text(app.tr("prefs.vr_headset_help"));
-        crate::scenario::publish_target("prefs:vr_headset", response.rect);
-        ui_kit::settings_badge(ui, app.tr("prefs.graphics_page.restart"), true);
+    ui_kit::settings_section(ui, "viewing_3d", app.tr("prefs.graphics_page.viewing_3d"), |ui| {
+        computer_card(ui, |ui| {
+            ui.horizontal_wrapped(|ui| {
+                let running = app.services.vr_running;
+                let (label, help) = if running { ("vr.stop", "vr.stop_help") } else { ("vr.launch", "vr.launch_help") };
+                let label = app.tr(label).to_string();
+                let button = ui_kit::button(ui, &label, ui_kit::Button::Normal).backing_on_hover_text(app.tr(help));
+                crate::scenario::publish_target("prefs:vr_launch", button.rect);
+                if button.clicked() {
+                    if running {
+                        app.services.vr_stop = true;
+                    } else if let Err(error) = super::request_vr_launch(app) {
+                        app.set_status(error, true);
+                    }
+                }
+                let response = setting::vr_headset(app, ui).backing_on_hover_text(app.tr("prefs.vr_headset_help"));
+                crate::scenario::publish_target("prefs:vr_headset", response.rect);
+            });
+            if !status.is_empty() {
+                ui_kit::text(ui, &status, ui_kit::Text::Hint("vr_status"));
+            }
+            let response = setting::vr_model_in_room(app, ui).backing_on_hover_text(app.tr("prefs.vr_model_in_room_help"));
+            crate::scenario::publish_target("prefs:vr_model_in_room", response.rect);
+        });
     });
-    if !status.is_empty() {
-        ui_kit::text(ui, &status, ui_kit::Text::Hint("vr_status"));
-    }
-    let response = setting::vr_model_in_room(app, ui).backing_on_hover_text(app.tr("prefs.vr_model_in_room_help"));
-    crate::scenario::publish_target("prefs:vr_model_in_room", response.rect);
 }
 
 /// Perspective view's Field of view (#5364): the kit slider in degrees, typed or dragged, kept to
