@@ -2878,13 +2878,14 @@ fn regions_overlap_keeps_shared_edges_whole() {
     let (inside, near) = pieces_against(&sq, &right, eps).unwrap();
     assert!(!inside);
     assert!((1..=8).contains(&near.len()), "{} near chords", near.len());
-    // a circle crossing the square's edge: a few pieces at each crossing, none along the edge
+    // a circle crossing the square's edge: the stretch of the edge inside the circle is clear of
+    // the circle's flattened boundary (not of its arcs' hull boxes), so it is found inside
     let disc = Region2 {
         outer: circle(p(2.0, 1.0), 0.5),
         holes: vec![],
     };
     let (inside, near) = pieces_against(&sq, &disc, eps).unwrap();
-    assert!(!inside);
+    assert!(inside);
     assert!(near.len() <= 16, "{} near chords", near.len());
     // a curved boundary running along an equal one is kept whole once flat
     let (inside, near) = pieces_against(&disc, &disc.clone(), 1e-3).unwrap();
