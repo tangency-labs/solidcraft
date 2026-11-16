@@ -34,7 +34,6 @@
 use crate::blend::fillet_exact::{
     arc_section_implicit, class_surface, classify_supports, BlendSpine, ClassInputs, QuadricKind,
 };
-use crate::surface::procedural_blend::bead::BeadDefinition;
 use crate::error::{Result, SolidError};
 use crate::geom::axis2_placement::Axis2Placement;
 use crate::geom::tol::are_same;
@@ -45,6 +44,7 @@ use crate::nurbs::b_spline_curve::BSplineCurve;
 use crate::surface::implicit::{
     check_exact_net, lies_on, AnalyticSupport, ClassSurface, ExactNetCheck, Implicit, LeaderMap,
 };
+use crate::surface::procedural_blend::bead::BeadDefinition;
 use crate::surface::procedural_blend::chamfer::ChamferDefinition;
 use crate::surface::surface::Surface;
 

@@ -250,19 +250,24 @@ impl FilletSession<'_> {
         Ok(out)
     }
 
-    /// The region between the blends' faces and the target's faces they run on, as a body
-    /// of its own: [`Self::subtract_removal_region`]'s steps up to its Boolean. Each variable
-    /// round on planes must hold its law; each open end is cut ([`cut_fillet_at_open_end`]);
-    /// the intermediate body is closed ([`close_removal_region`]), stitched, and oriented as a
-    /// solid (`BadMerge` otherwise), and the fillet edges' attribute leaves its edges. The
-    /// target is only read. `apart` names the refusal for a body apart
-    /// ([`FilletSession::set_bodies_apart`], #15129) instead of a cliff overflow.
+    /// The fork's `SmFilletExecutive::SubtractRemovalRegion` (WR-631, `8ba4667`; its errors
+    /// as `ae2a6de` keeps them, WR-638): in a cliff overflow, subtract the region the blends
+    /// remove from the target: the blends built on their faces' continuations, then cut by
+    /// what lies beyond the cliffs.
+    ///
+    /// Each variable round on planes must hold its law (`NoRoom` otherwise); each open end
+    /// is cut ([`cut_fillet_at_open_end`]); the intermediate body is closed into the
+    /// removal region ([`close_removal_region`]), stitched, and oriented as a solid; a
+    /// region that is not a manifold solid without lamina edges is `BadMerge`. The fillet
+    /// edges' attribute leaves the region's edges, and the region is subtracted from the
+    /// target by the manifold Boolean (`BadMerge` when that fails). Each refusal is noted
+    /// in the error info.
     ///
     /// # Errors
     /// The refusals as `SM_ERR`; those of the steps.
     #[allow(clippy::too_many_lines)] // one fork routine
-    pub(super) fn closed_removal_region(&mut self, k: &mut Kernel, apart: bool) -> Result<Brep> {
-        crate::profile::profile_scope!(k, "blend::session::closed_removal_region");
+    pub(super) fn subtract_removal_region(&mut self, k: &mut Kernel) -> Result<()> {
+        crate::profile::profile_scope!(k, "blend::session::subtract_removal_region");
         if self.objects.intermediate.is_none() {
             return Err(SolidError::blend_missing(OP, "the intermediate body"));
         }
@@ -391,7 +396,6 @@ impl FilletSession<'_> {
             self.noted(note.take(), cut)?;
         }
         let mut blended = Blended::of_edges(self.objects.target, &blended_edges)?;
-        blended.annulus = apart;
         // the filleted edge of each fillet face of the sheet (WR-636, `bba9914`), read
         // after the cuts, which can replace a geometry's face
         for (&solver, &edge) in solvers.iter().zip(&blended_edges) {
@@ -445,19 +449,12 @@ impl FilletSession<'_> {
             self.note_refusal(Refusal {
                 code: FilletErrorType::BadMerge,
                 reason: None,
-                comment: if apart {
-                    "Fillet Error: the blends' faces do not close into a body apart"
-                } else {
-                    "Fillet Error: a cliff overflow's removal region does not close into a solid"
-                },
+                comment:
+                    "Fillet Error: a cliff overflow's removal region does not close into a solid",
             });
             return Err(SolidError::blend_failed(
                 OP,
-                if apart {
-                    "the blends' faces do not close into a body apart"
-                } else {
-                    "the cliff overflow's removal region does not close into a solid"
-                },
+                "the cliff overflow's removal region does not close into a solid",
             ));
         }
 
@@ -480,27 +477,6 @@ impl FilletSession<'_> {
             }
         }
 
-        Ok(region)
-    }
-
-    /// The fork's `SmFilletExecutive::SubtractRemovalRegion` (WR-631, `8ba4667`; its errors
-    /// as `ae2a6de` keeps them, WR-638): in a cliff overflow, subtract the region the blends
-    /// remove from the target: the blends built on their faces' continuations, then cut by
-    /// what lies beyond the cliffs.
-    ///
-    /// Each variable round on planes must hold its law (`NoRoom` otherwise); each open end
-    /// is cut ([`cut_fillet_at_open_end`]); the intermediate body is closed into the
-    /// removal region ([`close_removal_region`]), stitched, and oriented as a solid; a
-    /// region that is not a manifold solid without lamina edges is `BadMerge`. The fillet
-    /// edges' attribute leaves the region's edges, and the region is subtracted from the
-    /// target by the manifold Boolean (`BadMerge` when that fails). Each refusal is noted
-    /// in the error info.
-    ///
-    /// # Errors
-    /// The refusals as `SM_ERR`; those of the steps.
-    pub(super) fn subtract_removal_region(&mut self, k: &mut Kernel) -> Result<()> {
-        crate::profile::profile_scope!(k, "blend::session::subtract_removal_region");
-        let region = self.closed_removal_region(k, false)?;
         // the region from the target, by the Boolean (the merge modifies the target in
         // place; the region is deleted after)
         // (a snapshot, not a clone: the target put back must still own its geometry,

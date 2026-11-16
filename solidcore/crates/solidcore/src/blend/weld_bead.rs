@@ -30,9 +30,6 @@
 
 use crate::blend::fillet_exact::ClassInputs;
 use crate::boolean::api_brep::boolean_difference;
-use crate::nurbs::knots::Side;
-use crate::surface::procedural_blend::exact::ExactRound;
-use crate::surface::surface::Surface;
 use crate::curve::curve::p2::CurveKind;
 use crate::curve::curve::Curve;
 use crate::error::{Result, SolidError};
@@ -40,18 +37,21 @@ use crate::geom::axis2_placement::Axis2Placement;
 use crate::geom::vector3d::{Point3, Vec3};
 use crate::kernel::Kernel;
 use crate::math::EFF_ZERO;
-use core::f64::consts::TAU;
 use crate::nurbs::b_spline_curve::{BSplineCurve, NurbCircleParam};
+use crate::nurbs::knots::Side;
 use crate::primitive::api_curves::create_line_segment;
 use crate::primitive::api_primitives::create_sphere;
 use crate::surface::procedural_blend::bead::{BeadArc, BeadDefinition, BeadSpan};
 use crate::surface::procedural_blend::chamfer::{ChamferDefinition, ChamferSize};
+use crate::surface::procedural_blend::exact::ExactRound;
 use crate::surface::surface::p2::SurfaceKind;
+use crate::surface::surface::Surface;
 use crate::sweep::api_brep::create_linear_sweep;
 use crate::topology::edge;
 use crate::topology::edgeuse::p1 as eu1;
 use crate::topology::edgeuse::p3::{evaluate_binormal, BinormalOptions};
 use crate::topology::{Brep, EdgeId, FaceId};
+use core::f64::consts::TAU;
 
 const OP: &str = "blend::weld_bead";
 
@@ -273,11 +273,7 @@ impl Frame {
     fn sweep(&self, k: &mut Kernel, t0: f64, t1: f64) -> Result<Brep> {
         // swept counter-clockwise about the sweep (the feet's turn about the edge)
         let ccw = self.feet[0].cross(self.feet[1]).dot(self.dir) > 0.0;
-        let (base, way) = if ccw {
-            (t0, self.dir)
-        } else {
-            (t1, -self.dir)
-        };
+        let (base, way) = if ccw { (t0, self.dir) } else { (t1, -self.dir) };
         let shift = self.dir * base;
         let edge = self.start + shift;
         let f1 = edge + self.feet[0];
@@ -316,9 +312,10 @@ impl Frame {
             .iter()
             .copied()
             .filter(|&f| {
-                body.face(f).ok().and_then(|face| face.surface.as_ref()).is_some_and(|s| {
-                    !matches!(s.kind(), SurfaceKind::Plane(_))
-                })
+                body.face(f)
+                    .ok()
+                    .and_then(|face| face.surface.as_ref())
+                    .is_some_and(|s| !matches!(s.kind(), SurfaceKind::Plane(_)))
             })
             .collect();
         let [face] = curved.as_slice() else {
@@ -401,9 +398,8 @@ impl Frame {
 
 /// The weld beads along `edges` of `target`, each as a body of its own built from its own
 /// faces, in the order of `edges`; `target` is left as it was. Each edge is straight between
-/// two planes in an inside corner; `sizes` (one per edge), `sagitta` as
-/// [`crate::blend::fillet_executive::session::FilletSession::prepare_beads_along`]'s, and the
-/// first distance of a size runs along the face in `along` where one of the edge's faces is.
+/// two planes in an inside corner; `sizes` (one per edge: the chamfer's setbacks, the bead's toes), `sagitta` the arc's height
+/// over the chord (`> 0` convex, `< 0` concave, [`BeadDefinition`]), and the first distance of a size runs along the face in `along` where one of the edge's faces is.
 /// A convex bead overhanging its toe is built: no trimming is involved.
 ///
 /// `target` is mutable only for evaluating its edges' faces (a missing trim curve may be

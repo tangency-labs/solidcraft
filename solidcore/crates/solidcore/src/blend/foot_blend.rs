@@ -126,7 +126,11 @@ impl FootBlend {
         }
         let [a, b] = <[FootSide; 2]>::try_from(sides)
             .map_err(|_| SolidError::invalid_input(OP, "an edge between two faces"))?;
-        let sides = if first == Some(b.face) { [b, a] } else { [a, b] };
+        let sides = if first == Some(b.face) {
+            [b, a]
+        } else {
+            [a, b]
+        };
         Ok(Self {
             edge: edge_id,
             curve,
@@ -162,7 +166,8 @@ impl FootBlend {
         };
         let tangent = d.unitize()?;
         // to rounding: the feet are exact at their stations
-        let tol = 1e-11 * (1.0 + root.max_dimension() + legs.iter().fold(0.0_f64, |m, z| m.max(*z)));
+        let tol =
+            1e-11 * (1.0 + root.max_dimension() + legs.iter().fold(0.0_f64, |m, z| m.max(*z)));
         let mut feet = [Point3::ZERO; 2];
         let mut uvs = [Point2::new(0.0, 0.0); 2];
         for (i, side) in self.sides.iter().enumerate() {
@@ -307,9 +312,7 @@ impl FootBlend {
         tol: f64,
     ) -> Result<Surface> {
         let (lo, hi) = (self.interval.min(), self.interval.max());
-        Ok(self
-            .segment(k, target, legs, sagitta, tol, lo, hi)?
-            .face)
+        Ok(self.segment(k, target, legs, sagitta, tol, lo, hi)?.face)
     }
 
     /// [`Self::section_face`] over the leader's parameters `a..b` inside its interval, with
@@ -436,7 +439,9 @@ impl FootBlend {
             let (Some(side), Some(&uv)) = (self.sides.get(i), s.uv.get(i)) else {
                 continue;
             };
-            let d = side.surface.evaluate(k, uv, 1, 1, EvaluateFlags::default())?;
+            let d = side
+                .surface
+                .evaluate(k, uv, 1, 1, EvaluateFlags::default())?;
             let (Some(&du), Some(&dv)) = (
                 d.get(1).and_then(|r| r.first()),
                 d.first().and_then(|r| r.get(1)),
@@ -559,7 +564,9 @@ fn net_through_rows(
                 .get(i)
                 .map(|c| c.x)
                 .filter(|w| *w > 0.0)
-                .ok_or_else(|| SolidError::blend_failed(OP, "a section's weight is not positive"))?;
+                .ok_or_else(|| {
+                    SolidError::blend_failed(OP, "a section's weight is not positive")
+                })?;
             points.push(Point3::new(p.x / w, p.y / w, p.z / w));
             net_weights.push(w);
         }
@@ -584,8 +591,6 @@ fn net_through_rows(
     })?;
     Ok((Surface::from(net), sides))
 }
-
-
 
 /// How many segments a closed joint's bead is built in: each face then runs less than a full
 /// turn round it, so no face needs a seam.
@@ -665,9 +670,12 @@ impl FootBlend {
         for (j, pair) in cuts.windows(2).enumerate() {
             let &[a, b] = pair else { continue };
             let seg = self.segment(k, target, legs, sagitta, tol, a, b)?;
-            let (Some(ra), Some(rb), Some(sa), Some(sb)) =
-                (rungs.get(j), rungs.get(j + 1), sections.get(j), sections.get(j + 1))
-            else {
+            let (Some(ra), Some(rb), Some(sa), Some(sb)) = (
+                rungs.get(j),
+                rungs.get(j + 1),
+                sections.get(j),
+                sections.get(j + 1),
+            ) else {
                 return Err(SolidError::blend_missing(OP, "a cut's curves"));
             };
             let [f1, f2] = &seg.feet;
@@ -699,12 +707,7 @@ impl FootBlend {
                 };
                 let s = self.station(k, target, t, legs)?;
                 let plane = Surface::from(Plane::from_normal(s.root, s.tangent));
-                face_of_loop(
-                    k,
-                    body,
-                    plane,
-                    vec![same(r1), same(section), opposite(r2)],
-                )?;
+                face_of_loop(k, body, plane, vec![same(r1), same(section), opposite(r2)])?;
             }
         }
         Ok(())

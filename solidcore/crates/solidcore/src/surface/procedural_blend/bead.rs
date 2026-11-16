@@ -111,8 +111,8 @@ impl BeadDefinition {
     /// chord at `phi` and the chord meets support i at `beta_i`, so it leans back over the face
     /// past the toe where `beta_i + phi > pi / 2`, `h > (c / 2) tan((pi / 2 - max(beta_i)) / 2)`
     /// (0 where a toe is already obtuse). The geometry allows such a bead up to [`Self::bound`];
-    /// the blend's trimming does not build it yet (it fails or builds a wrong body), so
-    /// [`crate::blend::fillet_executive::session::FilletSession::prepare_beads_along`] refuses it.
+    /// a blend that trims its faces at the rails takes the wrong side of a rail there (the
+    /// weld's beads are built apart from the part and are not trimmed, so they are built).
     #[must_use]
     pub fn overhang_bound(&self) -> f64 {
         overhang_bound(self.chord(), self.toe_angles())

@@ -2467,59 +2467,6 @@ impl FilletBrep {
     }
 
     #[allow(clippy::too_many_arguments, clippy::too_many_lines)]
-    /// The unit vector from `at` on rail `ii`'s fillet edge to the other rail's, less its
-    /// part along `tangent` (the rail's tangent there): the side of the rail the fillet lies
-    /// on (`fillet_trim_inside_by_chord`). `None` where the other rail has no fillet edge,
-    /// its point does not drop, or the chord is along the rail.
-    ///
-    /// # Errors
-    ///
-    /// Those of the fillet edge lookups, the drop and the evaluation.
-    fn chord_binormal(
-        &self,
-        k: &Kernel,
-        geom: &super::p1::FilletGeom,
-        ii: usize,
-        fillet_brep: &Brep,
-        at: Point3,
-        tangent: Vec3,
-    ) -> Result<Option<Vec3>> {
-        let Some(other) = geom.rail(1 - ii) else {
-            return Ok(None);
-        };
-        let Some(edge_id) = self.fillet_edge(other)?.fillet_brep_edge1 else {
-            return Ok(None);
-        };
-        let Some(curve) = fillet_brep.edge(edge_id)?.curve.as_ref() else {
-            return Ok(None);
-        };
-        let interval = edge::interval(fillet_brep, edge_id)?;
-        let dropped = curve.drop_point(
-            k,
-            &interval,
-            at,
-            None,
-            edge::tolerance(fillet_brep, edge_id)?,
-            None,
-            SolverOperation::Minimize,
-        )?;
-        if !dropped.success {
-            return Ok(None);
-        }
-        let (foot, _) = evaluate_tangent(k, curve, dropped.parameter, OP_TRIM)?;
-        let chord = foot - at;
-        let t2 = tangent.dot(tangent);
-        if t2 <= EFF_ZERO_SQ {
-            return Ok(None);
-        }
-        let square = chord - tangent * (chord.dot(tangent) / t2);
-        let length = square.dot(square).sqrt();
-        if length <= EFF_ZERO {
-            return Ok(None);
-        }
-        Ok(Some(square * (1.0 / length)))
-    }
-
     fn trim_original_surfaces_resolved<'s>(
         &self,
         k: &Kernel,
@@ -2682,19 +2629,6 @@ impl FilletBrep {
                 )?;
                 let mid_pnt = fillet_eval.point;
                 let fillet_bin = fillet_eval.binormal;
-                // With `fillet_trim_inside_by_chord` (#15129, solidcore-native): the fillet's
-                // side at the rail is the way to the other rail, square to the edge, not the
-                // fillet face's binormal. The face leaves the rail at the section's toe angle,
-                // which passes 90 degrees for a convex section (a weld bead overhanging its
-                // toe): its binormal then points over the face's outer piece, and the whole
-                // body but that piece was deleted. The chord leaves at its own toe angle,
-                // under 90 degrees wherever the offsets are positive.
-                let fillet_bin = if k.fixes.fillet_trim_inside_by_chord {
-                    self.chord_binormal(k, geom, ii, fillet_brep, mid_pnt, fillet_eval.tangent)?
-                        .unwrap_or(fillet_bin)
-                } else {
-                    fillet_bin
-                };
 
                 // Drop the m_pFilletBrep->Edge->MidPoint onto the Orig
                 // m_pTargetBrep->Edge->Curve

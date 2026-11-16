@@ -4840,7 +4840,6 @@ impl crate::blend::fillet_intersector::FilletSolverOps for IntersectorSolver<'_>
             None
         };
         let chamfer = self.ops.solver().chamfer;
-        let bead = self.ops.solver().bead;
         let solver = self.ops.solver_mut();
         let approx_tol_3d = solver.approx_tol_3d;
         let this_ang_tol_rad = solver.this_ang_tol_rad();
@@ -4855,7 +4854,6 @@ impl crate::blend::fillet_intersector::FilletSolverOps for IntersectorSolver<'_>
             radii,
             chord,
             chamfer,
-            bead,
             ang_tol_rad: this_ang_tol_rad,
             law,
         };

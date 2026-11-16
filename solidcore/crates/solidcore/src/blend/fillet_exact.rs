@@ -1841,7 +1841,9 @@ pub fn arc_section_implicit(
     // the side away from the edge: the offsets' line's, square to the chord and the line
     let off = p - middle;
     let unit = chord.unitize().ok()?;
-    let toward = (off - unit * off.dot(unit) - d * off.dot(d)).unitize().ok()?;
+    let toward = (off - unit * off.dot(unit) - d * off.dot(d))
+        .unitize()
+        .ok()?;
     let h = sagitta.abs();
     let radius = (c * c / 4.0 + h * h) / (2.0 * h);
     let apex = middle + toward * sagitta;

@@ -2922,11 +2922,6 @@ pub struct CircleBall {
     ///
     /// [`FilletSolver::chamfer`]: crate::blend::fillet_solver::p1::FilletSolver::chamfer
     pub chamfer: Option<crate::surface::procedural_blend::chamfer::ChamferDefinition>,
-    /// The weld bead the solver was made for ([`FilletSolver::bead`]; the linear generator's,
-    /// #15129): its section is the bead's arc, not the chord.
-    ///
-    /// [`FilletSolver::bead`]: crate::blend::fillet_solver::p1::FilletSolver::bead
-    pub bead: Option<crate::surface::procedural_blend::bead::BeadDefinition>,
     /// `GetThisAngTolRad()`.
     pub ang_tol_rad: f64,
     /// A variable-radius solver's round (`static_cast<SmVariableRadiusFS *>`, 0d43b4c;
@@ -3514,31 +3509,6 @@ impl super::p1::LinearCrossSectionFsg {
             }
             _ => return Ok(None),
         };
-        // a bead (#15129): between planes the arc swept along the edge, a cylinder; elsewhere
-        // not built yet, and never built as the chord it is not
-        if let Some(bead) = ball.bead {
-            if !planes {
-                return bead_on_curved_faces(
-                    k,
-                    approx_tol_3d,
-                    center_line,
-                    [&*rail1, &*rail2],
-                    bead.sagitta,
-                )
-                .map(Some);
-            }
-            return bead_between_planes(
-                k,
-                approx_tol_3d,
-                center_line,
-                [rail1, rail2],
-                bases,
-                uv,
-                inward,
-                offsets,
-                bead,
-            );
-        }
         // between planes the chord is the plane through the feet, exact (#2486)
         if planes {
             return chord_between_planes(
@@ -3567,31 +3537,23 @@ impl super::p1::LinearCrossSectionFsg {
     }
 }
 
-/// The feet of a chamfer or a bead between planes (#2486, #15129): the line the offsets meet
-/// in (`X . n_i = P_i . n_i + r_i`, the faces' unit normals `n_i` towards it), the plane square
-/// to the centre line's ends cutting it there, and the feet `L - r_i n_i` on the faces. The
-/// rails and uv curves become the feet's lines. `None` where the solver's rails are not those
-/// feet, or the faces are not planes.
-struct PlaneFeet {
-    /// The centre line's interval.
-    s: [f64; 2],
-    /// The feet on face 1 and face 2, each at the centre line's start and end.
-    feet: [[Point3; 2]; 2],
-    /// The offsets' line at the centre line's start.
-    l0: Point3,
-    /// The offsets' line as a degree-1 curve over the centre line's interval.
-    leader: BSplineCurve,
-    /// Each foot's uv on its face at the start.
-    feet_uv: [Point2; 2],
-}
-
-/// [`PlaneFeet`] of the solver's centre line, rails, faces and offsets.
+/// A chamfer between planes by its definition (#2486), the chord's exact class: the line
+/// its offsets meet in (`X . n_i = P_i . n_i + r_i`, the faces' unit normals `n_i` towards
+/// it), the plane square to the centre line's ends cutting it there, the feet `L - r_i n_i`
+/// on the faces, and the plane through them, `F_1(u) + v (F_2(u) - F_1(u))` over the
+/// centre line's interval and `[0, 1]`, a `Plane` keeping the chord's definition
+/// ([`ExactRound::chord`], re-certified at once). The rails and uv curves become the
+/// feet's lines. `None` (built as before) where the solver's rails are not those feet.
+///
+/// [`ExactRound::chord`]: crate::surface::procedural_blend::exact::ExactRound::chord
 ///
 /// # Errors
 ///
-/// Those of the evaluations and the curves' rebuild.
+/// Those of the evaluations, the curves' rebuild, the definition and its
+/// re-certification.
 #[allow(clippy::too_many_arguments)]
-fn feet_between_planes(
+fn chord_between_planes(
+    k: &Kernel,
     tol: f64,
     center_line: &BSplineCurve,
     rails: [&mut BSplineCurve; 2],
@@ -3599,9 +3561,14 @@ fn feet_between_planes(
     uv: [&mut BSplineCurve; 2],
     inward: [Vec3; 2],
     offsets: [f64; 2],
-) -> Result<Option<PlaneFeet>> {
+    chamfer: crate::surface::procedural_blend::chamfer::ChamferDefinition,
+) -> Result<Option<Surface>> {
+    use crate::blend::fillet_exact::ClassInputs;
+    use crate::geom::extent2d::Extent2d;
+    use crate::geom::vector2d::Vec2;
     use crate::nurbs::b_spline_curve::{BSplineCurveForm, CanonicalData, KnotType};
     use crate::surface::plane::Plane;
+    use crate::surface::procedural_blend::exact::ExactRound;
     use crate::surface::surface::SurfaceKind;
     let ivl = center_line.natural_interval();
     let (s0, s1) = (ivl.min(), ivl.max());
@@ -3643,6 +3610,20 @@ fn feet_between_planes(
             return Ok(None);
         }
     }
+    let [[a0, a1], [b0, _]] = feet;
+    let along = a1 - a0;
+    let across = b0 - a0;
+    let (Ok(x), Ok(y)) = (along.unitize(), across.unitize()) else {
+        return Ok(None);
+    };
+    let sx = along.length() / (s1 - s0);
+    let plane = Plane::new(
+        a0 - x * (sx * s0),
+        x,
+        y,
+        Vec2::new(sx, across.length()),
+        &Extent2d::from_bounds(s0, 0.0, s1, 1.0),
+    );
     // the feet's lines and their uv lines on the faces
     // the degree-1 line from a to b over [s0, s1]
     let set_line = |c: &mut BSplineCurve, dim: u64, a: Point3, b: Point3| -> Result<()> {
@@ -3681,30 +3662,6 @@ fn feet_between_planes(
             Point3::new(w1.x, w1.y, 0.0),
         )?;
     }
-    Ok(Some(PlaneFeet {
-        s: [s0, s1],
-        feet,
-        l0,
-        leader,
-        feet_uv,
-    }))
-}
-
-/// What the exact class of a chamfer or a bead between planes is read with: the faces at the
-/// feet, the centre's signed offsets along their own normals.
-///
-/// # Errors
-///
-/// Those of the normals' evaluation.
-fn plane_class_inputs(
-    k: &Kernel,
-    tol: f64,
-    bases: [&Surface; 2],
-    f: &PlaneFeet,
-    offsets: [f64; 2],
-) -> Result<crate::blend::fillet_exact::ClassInputs> {
-    use crate::blend::fillet_exact::ClassInputs;
-    let (feet, feet_uv, l0) = (&f.feet, f.feet_uv, f.l0);
     // what the class is read with: the faces at the feet, the centre's signed offsets
     // along their own normals
     let mut signed = [0.0; 2];
@@ -3717,298 +3674,19 @@ fn plane_class_inputs(
         let normal = b.evaluate_normal(k, w, Side::Left, Side::Left)?.unitize()?;
         *o = (l0 - f[0]).dot(normal).signum() * r;
     }
-    Ok(ClassInputs {
+    let inputs = ClassInputs {
         uv: feet_uv,
         offsets: signed,
         centre: l0,
         tol,
         ball_on_collapsed: false,
         radii_can_change: false,
-    })
-}
-
-/// A chamfer between planes by its definition (#2486), the chord's exact class: on the feet of
-/// [`feet_between_planes`], the plane through them, `F_1(u) + v (F_2(u) - F_1(u))` over the
-/// centre line's interval and `[0, 1]`, a `Plane` keeping the chord's definition
-/// ([`ExactRound::chord`], re-certified at once). `None` (built as before) where the solver's
-/// rails are not those feet.
-///
-/// [`ExactRound::chord`]: crate::surface::procedural_blend::exact::ExactRound::chord
-///
-/// # Errors
-///
-/// Those of the evaluations, the curves' rebuild, the definition and its
-/// re-certification.
-#[allow(clippy::too_many_arguments)]
-fn chord_between_planes(
-    k: &Kernel,
-    tol: f64,
-    center_line: &BSplineCurve,
-    rails: [&mut BSplineCurve; 2],
-    bases: [&Surface; 2],
-    uv: [&mut BSplineCurve; 2],
-    inward: [Vec3; 2],
-    offsets: [f64; 2],
-    chamfer: crate::surface::procedural_blend::chamfer::ChamferDefinition,
-) -> Result<Option<Surface>> {
-    use crate::geom::extent2d::Extent2d;
-    use crate::geom::vector2d::Vec2;
-    use crate::surface::plane::Plane;
-    use crate::surface::procedural_blend::exact::ExactRound;
-    let Some(f) = feet_between_planes(tol, center_line, rails, bases, uv, inward, offsets)? else {
-        return Ok(None);
     };
-    let [s0, s1] = f.s;
-    let feet = f.feet;
-    let [[a0, a1], [b0, _]] = feet;
-    let along = a1 - a0;
-    let across = b0 - a0;
-    let (Ok(x), Ok(y)) = (along.unitize(), across.unitize()) else {
-        return Ok(None);
-    };
-    let sx = along.length() / (s1 - s0);
-    let plane = Plane::new(
-        a0 - x * (sx * s0),
-        x,
-        y,
-        Vec2::new(sx, across.length()),
-        &Extent2d::from_bounds(s0, 0.0, s1, 1.0),
-    );
-    let inputs = plane_class_inputs(k, tol, bases, &f, offsets)?;
-    let round = ExactRound::chord(k, bases, chamfer, Some(&f.leader), inputs)?;
+    let round = ExactRound::chord(k, bases, chamfer, Some(&leader), inputs)?;
     let mut surface = Surface::from(plane);
     round.recertify(k, &surface)?;
     surface.set_exact_round(Some(round));
     Ok(Some(surface))
-}
-
-/// A weld bead between planes (#15129): on the feet of [`feet_between_planes`], the circular
-/// arc from foot to foot at the bead's sagitta, swept along the edge: a circular cylinder,
-/// exact (its arcs rational quadratic), parametrised as the chord's plane is, u the centre
-/// line's parameter and v from rail 1 (0) to rail 2 (1). The arc bulges away from the edge (to the offsets' line's
-/// side of the chord) for a positive sagitta and towards it for a negative one. `None` where
-/// the solver's rails are not those feet.
-///
-/// # Errors
-///
-/// Those of the evaluations, the curves' rebuild and the arc.
-#[allow(clippy::too_many_arguments)]
-fn bead_between_planes(
-    k: &Kernel,
-    tol: f64,
-    center_line: &BSplineCurve,
-    rails: [&mut BSplineCurve; 2],
-    bases: [&Surface; 2],
-    uv: [&mut BSplineCurve; 2],
-    inward: [Vec3; 2],
-    offsets: [f64; 2],
-    bead: crate::surface::procedural_blend::bead::BeadDefinition,
-) -> Result<Option<Surface>> {
-    use crate::nurbs::b_spline_curve::KnotType;
-    use crate::nurbs::b_spline_surface::p1::{BSplineSurfaceForm, CanonicalSurfaceData};
-    use crate::surface::procedural_blend::bead::BeadArc;
-    use crate::surface::procedural_blend::exact::ExactRound;
-    let Some(f) = feet_between_planes(tol, center_line, rails, bases, uv, inward, offsets)? else {
-        return Ok(None);
-    };
-    let [s0, s1] = f.s;
-    let [[a0, a1], [b0, _]] = f.feet;
-    let along = a1 - a0;
-    let middle = a0 + (b0 - a0) * 0.5;
-    let arc = BeadArc::new(a0, b0, along, f.l0 - middle, bead.sagitta)?;
-    // the chord's definition (order 0) with its sagitta beside the sizes, as the chord keeps
-    // its plane's
-    let inputs = plane_class_inputs(k, tol, bases, &f, offsets)?;
-    let round = ExactRound::chord(k, bases, bead.chamfer, Some(&f.leader), inputs)?
-        .with_sagitta(bead.sagitta)?;
-    // across: the arc from rail 1 (v = 0) to rail 2 (v = 1) in two rational quadratic halves
-    // (a convex bead may turn past a half turn), `BeadArc::rows`
-    let (row, [_, w, _, _, _]) = arc.rows();
-    // along: the row at the centre line's start and at its end (degree 1, u = s as the
-    // chord's plane has it)
-    let mut points = row.to_vec();
-    points.extend(row.iter().map(|&p| p + along));
-    let weights = [1.0, w, 1.0, w, 1.0, 1.0, w, 1.0, w, 1.0];
-    let net = BSplineSurface::create_canonical(&CanonicalSurfaceData {
-        u_degree: 1,
-        v_degree: 2,
-        control_points: &points,
-        form: BSplineSurfaceForm::Unspecified,
-        u_multiplicities: &[2, 2],
-        v_multiplicities: &[3, 2, 3],
-        u_knots: &[s0, s1],
-        v_knots: &[0.0, 0.5, 1.0],
-        knot_type: KnotType::Unspecified,
-        weights: Some(&weights),
-        uv_domain: None,
-    })?;
-    let mut surface = Surface::from(net);
-    round.recertify(k, &surface)?;
-    surface.set_exact_round(Some(round));
-    Ok(Some(surface))
-}
-
-/// A weld bead on faces that are not both planes (#15129): at each station of the centre line
-/// the circular arc from rail 1's foot to rail 2's at the bead's sagitta, in the plane of the
-/// two feet and the centre (bulging towards the centre, away from the edge, for a positive
-/// sagitta), and through those arcs a rational net: u the centre line's parameter, v from
-/// rail 1 (0) to rail 2 (1) in the two rational quadratic halves of [`BeadArc::rows`]. The
-/// chord's length varies along the edge, so the arcs' weights do too: the rows are
-/// interpolated in homogeneous form (cubic in u) at the centre line's knots and three
-/// stations between each pair, doubled until the net holds the rails and the arcs' apexes
-/// between its stations within `tol`. The net is exact at its stations and fitted between
-/// them: a plain B-spline surface, not yet a definition with a certificate.
-///
-/// [`BeadArc::rows`]: crate::surface::procedural_blend::bead::BeadArc::rows
-///
-/// # Errors
-///
-/// Native invalid input where the arc would cut into a face at a station (a concave bead
-/// whose sagitta is past the bound at that station's wedge and chord); those of the
-/// evaluations, the arcs (feet that coincide, a centre on the chord) and the interpolation; a failure where the net does not hold the rails and apexes within `tol`
-/// after its refinements, or its rows do not share their knots.
-fn bead_on_curved_faces(
-    k: &Kernel,
-    tol: f64,
-    center_line: &BSplineCurve,
-    rails: [&BSplineCurve; 2],
-    sagitta: f64,
-) -> Result<Surface> {
-    use crate::nurbs::b_spline_curve::KnotType;
-    use crate::nurbs::b_spline_surface::p1::{BSplineSurfaceForm, CanonicalSurfaceData};
-    use crate::nurbs::crv_fit::p1::ParamMethod;
-    use crate::surface::procedural_blend::bead::BeadArc;
-    const OP: &str = "blend::fillet_standard_solver::p2::bead_on_curved_faces";
-    let [rail1, rail2] = rails;
-    // one station's arc
-    let arc_at = |u: f64| -> Result<BeadArc> {
-        let (a, b) = (rail1.evaluate_point(u)?, rail2.evaluate_point(u)?);
-        let convex = center_line.evaluate_point(u)? - (a + (b - a) * 0.5);
-        let arc = BeadArc::new(a, b, (b - a).cross(convex), convex, sagitta)?;
-        // the arc leaves each foot outside its face (the face's normal there runs from the
-        // foot to the centre): a concave bead past its bound at this station would cut in
-        let m = center_line.evaluate_point(u)?;
-        if arc.tangent(0.0).dot(m - a) < 0.0 || arc.tangent(arc.turn).dot(m - b) > 0.0 {
-            return Err(SolidError::invalid_input(
-                OP,
-                "a concave weld bead cuts into a face along the edge (its sagitta is past the bound there)",
-            ));
-        }
-        Ok(arc)
-    };
-    let (knots, _) = center_line.knots(None)?;
-    let mut between = 3_usize;
-    for _ in 0..5 {
-        // the stations: the knots and `between` stations in each span
-        let mut stations = Vec::new();
-        for pair in knots.windows(2) {
-            let &[lo, hi] = pair else { continue };
-            for i in 0..=between {
-                stations.push(lo + (hi - lo) * i as f64 / (between + 1) as f64);
-            }
-        }
-        if let Some(&last) = knots.last() {
-            stations.push(last);
-        }
-        // the five rows in homogeneous form, and the corners' weight
-        let mut rows: [Vec<Point3>; 5] = Default::default();
-        let mut weight = Vec::new();
-        for &u in &stations {
-            let (points, w) = arc_at(u)?.rows();
-            for ((row, p), w) in rows.iter_mut().zip(points).zip(w) {
-                row.push(Point3::new(p.x * w, p.y * w, p.z * w));
-            }
-            weight.push(Point3::new(w[1], 0.0, 0.0));
-        }
-        let through = |points: &[Point3]| {
-            BSplineCurve::create_interpolating_curve_with_params(
-                ParamMethod::ChordLength,
-                3,
-                3,
-                points,
-                &[],
-                None,
-                false,
-                Some(&stations),
-            )
-        };
-        let curves = [
-            through(&rows[0])?,
-            through(&rows[1])?,
-            through(&rows[2])?,
-            through(&rows[3])?,
-            through(&rows[4])?,
-        ];
-        let weights = through(&weight)?;
-        let (u_knots, u_mults) = curves[0].knots(None)?;
-        for c in curves.iter().chain([&weights]) {
-            if c.knots(None)? != (u_knots.clone(), u_mults.clone()) {
-                return Err(SolidError::blend_failed(
-                    OP,
-                    "the bead's rows do not share their knots",
-                ));
-            }
-        }
-        let count = curves[0].control_points()?.len();
-        let w_row = weights.control_points()?;
-        let mut points = Vec::with_capacity(count * 5);
-        let mut net_weights = Vec::with_capacity(count * 5);
-        for i in 0..count {
-            let w = w_row
-                .get(i)
-                .map(|c| c.x)
-                .filter(|w| *w > 0.0)
-                .ok_or_else(|| SolidError::blend_failed(OP, "a bead's weight is not positive"))?;
-            for (j, c) in curves.iter().enumerate() {
-                let p = c
-                    .control_points()?
-                    .get(i)
-                    .copied()
-                    .ok_or_else(|| SolidError::blend_missing(OP, "a row's control point"))?;
-                let corner = j == 1 || j == 3;
-                let by = if corner { w } else { 1.0 };
-                points.push(Point3::new(p.x / by, p.y / by, p.z / by));
-                net_weights.push(by);
-            }
-        }
-        let net = BSplineSurface::create_canonical(&CanonicalSurfaceData {
-            u_degree: 3,
-            v_degree: 2,
-            control_points: &points,
-            form: BSplineSurfaceForm::Unspecified,
-            u_multiplicities: &u_mults,
-            v_multiplicities: &[3, 2, 3],
-            u_knots: &u_knots,
-            v_knots: &[0.0, 0.5, 1.0],
-            knot_type: KnotType::Unspecified,
-            weights: Some(&net_weights),
-            uv_domain: None,
-        })?;
-        let surface = Surface::from(net);
-        // between the stations: the rails and the arcs' apexes
-        let mut worst = 0.0_f64;
-        for pair in stations.windows(2) {
-            let &[lo, hi] = pair else { continue };
-            let u = 0.5 * (lo + hi);
-            let arc = arc_at(u)?;
-            for (v, want) in [
-                (0.0, arc.point(0.0)),
-                (0.5, arc.point(0.5 * arc.turn)),
-                (1.0, arc.point(arc.turn)),
-            ] {
-                let got = surface.evaluate_point(k, Point2::new(u, v))?;
-                worst = worst.max(got.distance(want));
-            }
-        }
-        if worst <= tol {
-            return Ok(surface);
-        }
-        between = 2 * between + 1;
-    }
-    Err(SolidError::blend_failed(
-        OP,
-        "the bead's net does not hold its rails and arcs within the tolerance",
-    ))
 }
 
 const OP_LINEAR_DEF: &str =

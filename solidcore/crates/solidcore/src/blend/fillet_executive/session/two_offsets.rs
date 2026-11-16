@@ -537,64 +537,6 @@ impl FilletSession<'_> {
         self.objects.knife_chamfers.extend(knives);
         Ok(offsets)
     }
-
-    /// Weld beads along `edges` (#15129): [`Self::prepare_chamfers_along`] with the same sizes,
-    /// the rails at the chamfer's setbacks, and each edge's section the circular arc between
-    /// them at `sagitta` over the chord (`> 0` convex, `< 0` concave;
-    /// [`BeadDefinition`]). Between planes along a straight edge the bead is the arc swept
-    /// along it, a circular cylinder; elsewhere it is refused when it is built. Not upstream
-    /// (solidcore's).
-    ///
-    /// # Errors
-    ///
-    /// Those of [`Self::prepare_chamfers_along`]; native invalid input for a sagitta that is 0,
-    /// not finite or past its bound at an edge's wedge ([`BeadDefinition::new`]), a convex bead
-    /// that overhangs its toe ([`BeadDefinition::overhang_bound`]) without the kernel's
-    /// `fillet_trim_inside_by_chord` (the blend's trimming takes the wrong side of its rails
-    /// there), or a knife edge (no wedge to lay a bead in).
-    ///
-    /// [`BeadDefinition`]: crate::surface::procedural_blend::bead::BeadDefinition
-    /// [`BeadDefinition::new`]: crate::surface::procedural_blend::bead::BeadDefinition::new
-    /// [`BeadDefinition::overhang_bound`]: crate::surface::procedural_blend::bead::BeadDefinition::overhang_bound
-    pub fn prepare_beads_along(
-        &mut self,
-        k: &Kernel,
-        edges: &[EdgeId],
-        sizes: &[ChamferSize],
-        sagitta: f64,
-        along: &[crate::topology::FaceId],
-    ) -> Result<Vec<[f64; 2]>> {
-        use crate::surface::procedural_blend::bead::BeadDefinition;
-        let solvers_before = self.objects.solvers.len();
-        let knives_before = self.objects.knife_chamfers.len();
-        let offsets = self.prepare_chamfers_along(k, edges, sizes, along)?;
-        if self.objects.knife_chamfers.len() != knives_before {
-            return Err(invalid("a weld bead on a knife edge"));
-        }
-        let apart = self.bodies_apart();
-        for i in solvers_before..self.objects.solvers.len() {
-            if let Some(Some(solver)) = self.objects.solvers.get_mut(i) {
-                let chamfer = solver
-                    .base()
-                    .chamfer
-                    .ok_or_else(|| invalid("a bead's chamfer sizes"))?;
-                let bead = BeadDefinition::new(chamfer, sagitta)?;
-                // a convex bead leaning back over its face past a toe is trimmed on the
-                // wrong side without `fillet_trim_inside_by_chord` (#15129): refused there,
-                // never built wrong (a body apart trims nothing, so it is built)
-                if !apart
-                    && !k.fixes.fillet_trim_inside_by_chord
-                    && sagitta >= bead.overhang_bound()
-                {
-                    return Err(invalid(
-                        "a convex weld bead that overhangs its toe (needs fillet_trim_inside_by_chord)",
-                    ));
-                }
-                solver.base_mut().bead = Some(bead);
-            }
-        }
-        Ok(offsets)
-    }
 }
 
 #[cfg(test)]

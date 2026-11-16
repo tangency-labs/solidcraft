@@ -505,13 +505,6 @@ impl FilletSurfaceGenerator {
                 return Ok((s, None));
             }
         }
-        // a bead is its arc or nothing: never the chord the generator builds below (#15129)
-        if ball.is_some_and(|b| b.bead.is_some()) {
-            return Err(SolidError::invalid_input(
-                "blend::fillet_solver::p1::FilletSurfaceGenerator::create_surface_replacing_uv",
-                "a weld bead is built between planes along a straight edge only so far",
-            ));
-        }
         let uv = [uv1, uv2];
         let [s1, s2] = surfaces;
         let [uv1, uv2] = uv;
@@ -683,10 +676,6 @@ pub struct FilletSolver {
     /// ([`crate::blend::fillet_executive::session::FilletSession::prepare_chamfers`]),
     /// which its surface by its definition keeps (solidcore's, #2486).
     pub chamfer: Option<crate::surface::procedural_blend::chamfer::ChamferDefinition>,
-    /// The weld bead this solver was made for
-    /// ([`crate::blend::fillet_executive::session::FilletSession::prepare_beads_along`]): its
-    /// section is the bead's arc on the chamfer's rails (solidcore's, #15129).
-    pub bead: Option<crate::surface::procedural_blend::bead::BeadDefinition>,
     /// The fork's `m_vLawCornerPieces` (7babe17; `AddLawCornerPieces`): the rounds this
     /// solver skinned piece by piece between their radius law's corners, as their exact
     /// pieces ([`crate::blend::law_corners::LawCornerPieces`]).
@@ -749,7 +738,6 @@ impl FilletSolver {
             detached: Vec::new(),
             rolled_faces: [None, None],
             chamfer: None,
-            bead: None,
             law_corner_pieces: Vec::new(),
         }
     }

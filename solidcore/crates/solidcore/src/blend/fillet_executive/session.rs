@@ -97,7 +97,6 @@ use crate::topology::{Brep, EdgeId, EdgeuseId, FaceId, VertexId};
 pub mod ball_regular;
 pub mod band_cuts;
 mod blend_face_log;
-mod bodies_apart;
 mod classification;
 mod cliff_overflow;
 mod concave_nxn;
@@ -313,12 +312,6 @@ struct SessionObjects<'target> {
     second_base: Option<SecondBase<'target>>,
     pseudo: FilletBrep,
     intermediate: Option<Brep>,
-    /// (not upstream, #15129) Build the blends as a body apart: the intermediate body is
-    /// closed on the target's faces into a body of its own and the target is left as it was
-    /// ([`FilletSession::set_bodies_apart`]).
-    apart: bool,
-    /// The body apart the last filleting built ([`FilletSession::take_body_apart`]).
-    body_apart: Option<Brep>,
     insertion_curves: insertion::curves::InsertionCurves,
     notification_records: crate::topology::topology::NotifyRecords,
     solvers: Vec<Option<SolverObject>>,
@@ -1586,8 +1579,6 @@ impl<'target> FilletSession<'target> {
                 second_base,
                 pseudo,
                 intermediate: None,
-                apart: false,
-                body_apart: None,
                 insertion_curves: insertion::curves::InsertionCurves::default(),
                 notification_records: crate::topology::topology::NotifyRecords::new(),
                 solvers: Vec::new(),
