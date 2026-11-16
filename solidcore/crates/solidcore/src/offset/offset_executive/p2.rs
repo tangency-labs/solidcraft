@@ -57,7 +57,7 @@
 //!
 //! Cancellation: the solid, extended and shell paths poll the kernel's cancel token (#2136, #2372) per face, edge use, vertex and stitch pass; the static offset's status collapse passes `Cancelled` through, and the shell and offset APIs return `Cancelled`, not `Ok`, under a fired token.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 use super::attributes;
 use super::p1::{OffsetExecutive, OffsetOperation};
@@ -97,7 +97,7 @@ use crate::topology::edgeuse::{p1 as eu, p2 as eu2};
 use crate::topology::face::p2 as face;
 #[cfg(test)]
 use crate::topology::topology::Topology;
-use crate::topology::{Brep, BrepId, EdgeId, EdgeuseId, FaceId, FaceuseId, RegionId};
+use crate::topology::{Brep, BrepId, EdgeId, EdgeuseId, FaceId, FaceuseId, RegionId, VertexId};
 
 const OP_OFFSET: &str = "offset::offset_executive::p2::offset_brep";
 const OP_SHELL: &str = "offset::offset_executive::p2::shell_brep";
@@ -2164,15 +2164,27 @@ fn shell_difference_with(
 /// closes), and then the one pass alone loses the body. So when the offset is to be a
 /// solid and the pass leaves it not closed and manifold:
 /// - if the pass closes no finite region (nothing would survive `MakeManifold`), the
-///   stitch widens, as upstream's;
-/// - otherwise the widening is tried on copies, with the kernel context's callbacks lent
-///   out ([`crate::geom::context::Context::take_notify_lease`]) so that no application
-///   sees the trial, and runs on the body itself (its notifications delivered) only when
-///   what `MakeManifold` (every finite region kept) leaves of the widened copy is closed
-///   and manifold, keeps every face it leaves of the one pass and more, and adds to the
-///   level-0 `check_brep` failures (as a stitched body) of what it leaves of the one pass
-///   nothing but the edge/surface gaps upstream's widening leaves on its welds (so no
-///   vertex tolerance its clearance does not excuse, the weld #855 made).
+///   stitch widens, as upstream's. A B-rep without an infinite region counts as closing
+///   none: with no outside to tell a region from, `MakeManifold` keeps nothing as a
+///   region's boundary, as when no region is closed;
+/// - otherwise the widening is tried on copies ([`Brep::clone_for_trial`]: face
+///   surface cache slots of their own), with the kernel context's callbacks lent out
+///   ([`crate::geom::context::Context::take_notify_lease`]) so that no application sees
+///   the trial. It runs on the body itself (its notifications delivered) only when what
+///   `MakeManifold` (every finite region kept) leaves of the widened copy is closed and
+///   manifold, keeps every face it leaves of the one pass and more, and, for every class
+///   of level-0 `check_brep` failure (as a stitched body: reporting type, list, test and
+///   owner type), has no more failures than what `MakeManifold` leaves of the one pass,
+///   except the edge/surface gaps upstream's widening leaves on its welds (so no vertex
+///   tolerance its clearance does not excuse, the weld #855 made). Every edge/surface
+///   gap is left out, welded or not; those gaps are not
+///   bounded by anything but the widening's own tolerance, at most a 200th of the
+///   body's size, as upstream's. The widening on the body is checked against the
+///   trial's (its faces, edges and vertices, and whether it is closed and manifold); if
+///   it differs, or fails, it is rolled back ([`Brep::with_rollback`]) and the offset
+///   fails with `PortInvariant`: listeners have already seen the rolled-back edits. The
+///   trial starts from the body's cache state ([`Brep::clone_for_trial`]) and the
+///   stitch is deterministic, so this does not happen in the tests.
 ///   The trial's `MakeManifold` keeps every finite region; an inset's cavity selection
 ///   only drops regions after it.
 ///
@@ -2181,8 +2193,11 @@ fn shell_difference_with(
 ///
 /// # Errors
 ///
-/// Those of the one pass (SER), the copies, the lease and the topology queries; the
-/// widening stitch's and the trials' `MakeManifold` statuses are ignored, as upstream's.
+/// Those of the one pass (SER), the copies, the snapshot and the topology queries;
+/// `PortInvariant` when the widening on the body does not reproduce its trial; the
+/// lease's `InvalidInput` when the offset runs inside a lend of the kernel context's
+/// callbacks (no caller does). The widening stitch's and the trials' `MakeManifold`
+/// statuses are ignored, as upstream's.
 pub(crate) fn stitch_merged_offset(
     kernel: &mut Kernel,
     result: &mut Brep,
@@ -2197,80 +2212,114 @@ pub(crate) fn stitch_merged_offset(
     if !to_be_solid || brep_is_closed_manifold(result)? {
         return Ok(());
     }
-    // (a B-rep without an infinite region counts as closing none)
     let infinite = result.infinite_region();
     let closes_a_region = bp1::regions(result, None)?
         .into_iter()
         .any(|region| infinite.is_some_and(|outside| region != outside));
-    let widen = if closes_a_region {
-        let lease = kernel.context.take_notify_lease()?;
-        let trial = widening_completes(kernel, result);
-        kernel.context.restore_notify_lease(lease)?;
-        trial?
-    } else {
+    if !closes_a_region {
         // nothing would survive `MakeManifold`: the body's own seams are open
-        true
+        return crate::error::ignore_status(stitch::stitch_into_solid(kernel, result));
+    }
+    let lease = kernel.context.take_notify_lease()?;
+    let trial = widening_trial(kernel, result);
+    kernel.context.restore_notify_lease(lease)?;
+    let Some(widened) = trial? else {
+        return Ok(());
     };
-    if widen {
-        // on the body itself, its notifications delivered (the trial ran the same
-        // deterministic stitch on a copy with the same ids)
-        crate::error::ignore_status(stitch::stitch_into_solid(kernel, result))?;
+    // on the body itself, its notifications delivered
+    let mut reproduced = false;
+    result.with_rollback(
+        |b| {
+            crate::error::ignore_status(stitch::stitch_into_solid(kernel, b))?;
+            Shape::of(b)
+        },
+        |shape| {
+            reproduced = matches!(shape, Ok(shape) if *shape == widened);
+            reproduced
+        },
+    )?;
+    if !reproduced {
+        return Err(SolidError::port_invariant(
+            "offset::offset_executive::p2::stitch_merged_offset",
+            "the widening stitch on the body left other topology than its trial",
+        ));
     }
     Ok(())
 }
 
-/// [`stitch_merged_offset`]'s trial, on copies of `b`: whether widening `b`'s stitch
-/// completes the solid.
-fn widening_completes(kernel: &mut Kernel, b: &Brep) -> Result<bool> {
+/// The topology a widening stitch left: what [`stitch_merged_offset`] compares its
+/// widening of the body with its trial's.
+#[derive(PartialEq, Eq)]
+struct Shape {
+    faces: BTreeSet<FaceId>,
+    edges: BTreeSet<EdgeId>,
+    vertices: BTreeSet<VertexId>,
+    closed_manifold: bool,
+}
+
+impl Shape {
+    fn of(b: &Brep) -> Result<Self> {
+        Ok(Self {
+            faces: bp1::faces(b, None)?.into_iter().collect(),
+            edges: bp1::edges(b, None)?.into_iter().collect(),
+            vertices: bp1::vertices(b, None)?.into_iter().collect(),
+            closed_manifold: brep_is_closed_manifold(b)?,
+        })
+    }
+}
+
+/// [`stitch_merged_offset`]'s trial, on copies of `b`: the topology widening `b`'s
+/// stitch leaves when that completes the solid; `None` when it does not.
+fn widening_trial(kernel: &mut Kernel, b: &Brep) -> Result<Option<Shape>> {
     let one_pass = kept_by_make_manifold(kernel, b)?;
-    let mut widened = b.clone_standing_for_self()?;
+    let mut widened = b.clone_for_trial()?;
     crate::error::ignore_status(stitch::stitch_into_solid(kernel, &mut widened))?;
     let Some(mut kept) = kept_by_make_manifold(kernel, &widened)? else {
-        return Ok(false);
+        return Ok(None);
     };
     let before = match one_pass {
         Some(mut one_pass) => {
             let more = kept.faces.len() > one_pass.faces.len();
             if !more || !one_pass.faces.iter().all(|face| kept.faces.contains(face)) {
-                return Ok(false);
+                return Ok(None);
             }
             stitched_failures(kernel, &mut one_pass.body)?.unwrap_or_default()
         }
-        None => BTreeSet::new(),
+        None => BTreeMap::new(),
     };
-    // The widened body's level-0 failures (as a stitched body) beyond those of what the
-    // one pass would keep may be only edge/surface gaps (`SmBrep` list 2, test 4, on an
-    // edge use): upstream's widening leaves each edge it welds over a gap that gap off the
-    // other face's surface without raising its tolerance (main's default does so on every
-    // weld). Anything else, such as a vertex tolerance no clearance excuses (the weld #855
-    // made), refuses the widening.
     let Some(after) = stitched_failures(kernel, &mut kept.body)? else {
-        return Ok(false);
+        return Ok(None);
     };
-    Ok(after.difference(&before).all(|failure| {
-        failure.0 == crate::geom::a_object::BREP_TYPE
-            && failure.1 == 2
-            && failure.2 == 4
-            && failure.3 == crate::geom::assert_array::labels::EDGEUSE_TYPE
-    }))
+    let completes = after
+        .iter()
+        .all(|(class, &count)| count <= before.get(class).copied().unwrap_or(0));
+    if !completes {
+        return Ok(None);
+    }
+    Ok(Some(Shape::of(&widened)?))
 }
 
-/// One `check_brep` failure: reporting type, label list, test, owner type and owner.
-type CheckFailure = (
-    i64,
-    u64,
-    u64,
-    i64,
-    Option<crate::geom::assert_array::ObjectKey>,
-);
+/// A class of `check_brep` failure: reporting type, label list, test and owner type.
+type CheckClass = (i64, u64, u64, i64);
 
 /// The failures of `check_brep` at level 0 of `b` as a stitched body
 /// ([`ValidityScope::Stitched`]: a gap past a tolerance is excused only where its ball is
-/// proven to reach no other topology); `None` when the check fails in an ordinary way or
-/// reports a failure without a report (a pointer status, a skipped or silent check).
+/// proven to reach no other topology), counted by class, leaving out the edge/surface
+/// gaps (`SmBrep` list 2, test 4, on an edge use): upstream's widening leaves each edge
+/// it welds over a gap that gap off the other face's surface without raising its
+/// tolerance (main's default does so on every weld). `None` when the check fails in an
+/// ordinary way or reports a failure without a report (a pointer status, a skipped or
+/// silent check).
+///
+/// Counted by class, not by owner: a stitch merges vertices and edges, the survivor
+/// keeping one of their ids, so a failure on a merged vertex could otherwise pass for
+/// one the one pass already had on another vertex of that id.
 ///
 /// [`ValidityScope::Stitched`]: crate::topology::brep::validation::ValidityScope::Stitched
-fn stitched_failures(kernel: &mut Kernel, b: &mut Brep) -> Result<Option<BTreeSet<CheckFailure>>> {
+fn stitched_failures(
+    kernel: &mut Kernel,
+    b: &mut Brep,
+) -> Result<Option<BTreeMap<CheckClass, usize>>> {
     let Some(checked) =
         crate::error::ignored(crate::topology::brep::validation::check_brep_scoped(
             kernel,
@@ -2285,20 +2334,19 @@ fn stitched_failures(kernel: &mut Kernel, b: &mut Brep) -> Result<Option<BTreeSe
     if failures.len() != checked.failure_count() {
         return Ok(None);
     }
-    Ok(Some(
-        failures
-            .into_iter()
-            .map(|r| {
-                (
-                    r.reporting_type,
-                    r.list_index,
-                    r.test_index,
-                    r.owner_type,
-                    r.owner,
-                )
-            })
-            .collect(),
-    ))
+    let mut counts = BTreeMap::new();
+    for r in failures {
+        let weld_gap = r.reporting_type == crate::geom::a_object::BREP_TYPE
+            && r.list_index == 2
+            && r.test_index == 4
+            && r.owner_type == crate::geom::assert_array::labels::EDGEUSE_TYPE;
+        if !weld_gap {
+            *counts
+                .entry((r.reporting_type, r.list_index, r.test_index, r.owner_type))
+                .or_insert(0) += 1;
+        }
+    }
+    Ok(Some(counts))
 }
 
 /// What `do_extended_offset` goes on with after `MakeManifold` (every finite region kept;
@@ -2314,7 +2362,7 @@ struct Kept {
 /// [`Kept`] of `b` when it is closed and manifold (the offset and shell gates' test);
 /// `None` otherwise.
 fn kept_by_make_manifold(kernel: &mut Kernel, b: &Brep) -> Result<Option<Kept>> {
-    let mut body = b.clone_standing_for_self()?;
+    let mut body = b.clone_for_trial()?;
     crate::error::ignored(crate::topology::brep::p5::make_manifold(
         kernel, &mut body, None, false,
     ))?;
@@ -3740,14 +3788,8 @@ mod tests {
         let mut fixture = NotificationFixture::new(&original);
         let entities = [
             (EntityRef::Edge(EdgeId::from_index(0)), 37),
-            (
-                EntityRef::Vertex(crate::topology::VertexId::from_index(0)),
-                11,
-            ),
-            (
-                EntityRef::Vertex(crate::topology::VertexId::from_index(1)),
-                53,
-            ),
+            (EntityRef::Vertex(VertexId::from_index(0)), 11),
+            (EntityRef::Vertex(VertexId::from_index(1)), 53),
         ];
         for (entity, value) in entities {
             fixture
@@ -4759,12 +4801,9 @@ mod tests {
                             other.as_ref().unwrap().key(),
                             if inset { shell_key } else { original_key_value }
                         );
-                        let vertex = EntityRef::Vertex(crate::topology::VertexId::from_index(0));
+                        let vertex = EntityRef::Vertex(VertexId::from_index(0));
                         assert_eq!(
-                            adapter.object_key(
-                                false,
-                                MergeEntity::Vertex(crate::topology::VertexId::from_index(0))
-                            ),
+                            adapter.object_key(false, MergeEntity::Vertex(VertexId::from_index(0))),
                             (if inset { original_key } else { result_key })(vertex).key
                         );
                         assert_eq!(
@@ -5647,6 +5686,9 @@ mod tests {
     /// the inner box less the hole's offset disk (cut by x = 1.5), over the height 8.5,
     /// valid at every `check_brep` level. `contacts_at_ends` adds the other opt-in of #855
     /// (a tangential contact is found at a curve's end), which must not change this shell.
+    /// The one pass closes the inner region here but leaves the rims open, so this is the
+    /// trial's refusal: widened, the stitch makes upstream's weld and the shell is refused
+    /// with 1001 (as with the widening run unconditionally).
     #[test]
     fn issue_855_offset_stitch_keeps_the_bodys_tolerance() {
         let shell = |contacts_at_ends: bool| -> Result<Option<f64>> {
