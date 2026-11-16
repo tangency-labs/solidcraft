@@ -24,6 +24,8 @@
 //!   the continuity array to the knot count but fills only the first `count - 1`
 //!   entries, so the zero-filled last entry is [`ContinuityType::Undefined`]
 //!   (`SmTArray::SetSize` clears new elements) and knot `0` is included in `min_cont`.
+//!   Multiplicity above degree is [`ContinuityType::Discontinuous`], correcting
+//!   upstream's saturation of negative continuity orders to C0 (#17549).
 //! - **Geometric continuities** (`bCalcGeometric == TRUE`) build iso-parametric
 //!   curves with `EvaluateIsoParametricCurveSimple`, which returns `SM_ERR` in
 //!   upstream's build (no `USE_VOLUMES`, see [`BSplineVolume`]), so this path always
@@ -68,8 +70,10 @@ const fn lower(a: ContinuityType, b: ContinuityType) -> bool {
 /// The representational continuity of a knot of multiplicity `mult` in degree
 /// `degree`.
 fn knot_continuity(degree: usize, mult: usize) -> ContinuityType {
-    // save representational continuity at knot
-    let cont = degree.saturating_sub(mult);
+    // A negative continuity order permits a jump across the knot.
+    let Some(cont) = degree.checked_sub(mult) else {
+        return ContinuityType::Discontinuous;
+    };
     match cont {
         0 => ContinuityType::C0,
         1 => ContinuityType::C1,
@@ -434,6 +438,61 @@ mod tests {
             ]
         );
         assert_eq!(d.min_cont, ContinuityType::C1);
+    }
+
+    #[test]
+    fn interior_knot_multiplicity_above_degree_is_discontinuous() {
+        for degree in 0..=3 {
+            // Two independent Bezier pieces: the join has multiplicity p + 1,
+            // so the representation permits a jump, including when p is zero.
+            let knots: Vec<_> = [0.0, 0.5, 1.0]
+                .into_iter()
+                .flat_map(|knot| std::iter::repeat_n(knot, degree + 1))
+                .collect();
+            let v = volume([degree; 3], [&knots; 3]);
+            let k = Kernel::default();
+            for param in [VolumeParam::U, VolumeParam::V, VolumeParam::W] {
+                let mut out = DirectionDiscontinuities {
+                    unaligned: false,
+                    min_cont: ContinuityType::Undefined,
+                    params: vec![],
+                    conts: vec![],
+                };
+                v.calculate_continuities_simple(&k, param, &mut out, false)
+                    .unwrap();
+                assert_eq!(out.params, vec![0.0, 0.5, 1.0]);
+                assert_eq!(out.conts[1], ContinuityType::Discontinuous);
+                assert_eq!(out.min_cont, ContinuityType::Discontinuous);
+            }
+            let vol = Volume::new(VolumeKind::BSpline(v.clone()));
+            let mut disc = Discontinuities3d::new();
+            assert!(vol.has_discontinuities(&k, Some(&mut disc), false).unwrap());
+            for direction in [&disc.u, &disc.v, &disc.w] {
+                assert_eq!(direction.conts[1], ContinuityType::Discontinuous);
+                assert_eq!(direction.min_cont, ContinuityType::Discontinuous);
+            }
+            assert!(vol.has_discontinuities(&k, None, false).unwrap());
+        }
+    }
+
+    #[test]
+    fn interior_knot_multiplicity_equal_to_degree_is_c0() {
+        let k = Kernel::default();
+        for degree in 1..=3 {
+            let mut knots = vec![0.0; degree + 1];
+            knots.extend(std::iter::repeat_n(0.5, degree));
+            knots.extend(std::iter::repeat_n(1.0, degree + 1));
+            let v = volume([degree; 3], [&knots; 3]);
+            let mut disc = Discontinuities3d::new();
+            assert!(v
+                .has_discontinuities_simple(&k, Some(&mut disc), false)
+                .unwrap());
+            for direction in [&disc.u, &disc.v, &disc.w] {
+                assert_eq!(direction.params, vec![0.0, 0.5, 1.0]);
+                assert_eq!(direction.conts[1], ContinuityType::C0);
+                assert_eq!(direction.min_cont, ContinuityType::C0);
+            }
+        }
     }
 
     #[test]
