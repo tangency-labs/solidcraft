@@ -11688,7 +11688,7 @@ fn tapered_reach(
             envelopes.push(Traced::unnamed(kernel::extrude_tapered_between(&start_plane, &outer, 0.0, through, 0.0, sign, taper, corner)?));
         } else {
             let (lo, hi) = if sign < 0.0 { (base - through, base) } else { (base, base + through) };
-            envelopes.extend(centered_extrude(&ss.plane, &outer, lo, hi, None, None, false, None)?);
+            envelopes.extend(centered_extrude(&ss.plane, &outer, lo, hi, None, None, CapRoles::ByHeight, None)?);
         }
     }
     let cut = match trim_to_curved_face(envelopes, target, face, to, to_offset, &ss.plane, base, base + sign * through) {
