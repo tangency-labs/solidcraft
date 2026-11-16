@@ -17,7 +17,6 @@
 //! one undo step. Nothing here runs plugin code in any other way, and programmatic calls never
 //! open this dialog.
 
-use std::collections::BTreeSet;
 use std::path::Path;
 
 use serde_json::{Map, Value, json};
@@ -49,25 +48,24 @@ pub(crate) struct State {
     /// `listed` has been read at least once since the plugins last changed (the ribbon reads it
     /// once rather than every frame).
     pub(crate) loaded: bool,
-    pub(crate) dialog: Option<EntryDialog>,
-    /// The run waiting in the control queue: its request's serial and the session it is for.
-    pending: Option<(u64, u64)>,
+    /// The open entry dialogs, oldest first: each plugin entry has its own, with its own window,
+    /// title and field values, so several can be open at once.
+    pub(crate) dialogs: Vec<EntryDialog>,
+    /// The next dialog's id.
+    next_dialog: u64,
+    /// The runs waiting in the control queue: each one's request serial and the session it is for.
+    pending: Vec<(u64, u64)>,
 }
 
-/// An installed plugin, as its package read when the menu opened.
-#[derive(Clone, Debug)]
-pub(crate) struct Listed {
-    pub(crate) id: String,
-    pub(crate) name: String,
-    pub(crate) version: String,
-    pub(crate) description: String,
-    pub(crate) path: String,
-    /// The package's content hash, which `plugin.run` checks.
-    pub(crate) approval: String,
-    /// The sensitive command groups the manifest asks for.
-    pub(crate) groups: BTreeSet<String>,
-    pub(crate) entries: Vec<solidcraft_engine::plugin::Entry>,
+#[cfg(test)]
+impl State {
+    /// The most recently opened entry dialog.
+    pub(crate) fn dialog(&self) -> Option<&EntryDialog> {
+        self.dialogs.last()
+    }
 }
+
+pub(crate) use crate::plugins::Plugin as Listed;
 
 /// One property of an entry's input schema, as a field of the dialog.
 #[derive(Clone, Debug, PartialEq)]
@@ -444,47 +442,17 @@ pub(crate) fn choose_ribbon(app: &mut SolveApp, id: &str) -> bool {
 
 /// The command groups `plugin` asks for that the user has not granted.
 pub(crate) fn missing_groups(app: &SolveApp, plugin: &Listed) -> Vec<String> {
-    plugin.groups.iter().filter(|g| !app.session.plugin_state.command_groups.contains(*g)).cloned().collect()
+    let granted = app.session.plugin_state.grants.get(&plugin.id);
+    plugin.groups.iter().filter(|g| granted.is_none_or(|grants| !grants.command_groups.contains(*g))).cloned().collect()
 }
 
 /// The plugins installed in `dir` and those inspected this session, by name. Reading a package
 /// runs none of its code.
 pub(crate) fn list(app: &SolveApp, dir: Option<&Path>) -> Vec<Listed> {
-    // A package the session inspected explicitly comes first: when an installed folder has the
-    // same id, the inspected one is what `plugin.run` was pointed at, as the engine keeps it.
-    let mut paths: Vec<String> = app.session.plugin_state.packages.values().cloned().collect();
-    if let Some(dir) = dir
-        && let Ok(folders) = std::fs::read_dir(dir)
-    {
-        let mut found: Vec<String> = folders
-            .flatten()
-            .filter(|f| f.file_type().is_ok_and(|t| t.is_dir()) && !f.file_name().to_string_lossy().starts_with('.'))
-            .take(1024)
-            .map(|f| f.path().to_string_lossy().into_owned())
-            .collect();
-        found.sort();
-        paths.extend(found);
+    let (mut listed, _) = crate::plugins::inventory(dir, app.session.plugin_state.packages.values());
+    for plugin in &mut listed {
+        plugin.disabled = !crate::plugins::enabled(app, &plugin.id);
     }
-    let mut seen = BTreeSet::new();
-    let mut listed: Vec<Listed> = paths
-        .iter()
-        .filter_map(|path| solidcraft_engine::plugin::read_package(path).ok().map(|p| (path, p)))
-        .filter_map(|(path, package)| {
-            let runtime = package.manifest.runtime?;
-            let id = package.manifest.id;
-            seen.insert(id.clone()).then(|| Listed {
-                id,
-                name: package.manifest.name,
-                version: package.manifest.version,
-                description: package.manifest.description,
-                path: path.clone(),
-                approval: package.approval,
-                groups: runtime.permissions.command_groups,
-                entries: runtime.entries,
-            })
-        })
-        .collect();
-    listed.sort_by(|a, b| a.name.cmp(&b.name).then_with(|| a.id.cmp(&b.id)));
     listed
 }
 
@@ -493,13 +461,13 @@ pub(crate) fn rows(app: &SolveApp) -> Vec<crate::app_bar::FileRow> {
     use crate::app_bar::{FileItem, FileRow};
     let item = |id: String, label: String, enabled: bool| FileRow::Item(FileItem { id, label, key: String::new(), icon: String::new(), enabled });
     let mut rows = vec![item(INSTALL.into(), app.tr("ui.plugin_menu_install").into(), true), FileRow::Separator];
-    if app.plugin_menu.listed.is_empty() {
+    if app.plugin_menu.listed.iter().all(|plugin| plugin.entries.is_empty()) {
         rows.push(item("empty".into(), app.tr("ui.plugin_menu_empty").into(), false));
     } else if !app.plugin_menu.listed.iter().any(|p| shown(app, p)) {
         rows.push(item("empty".into(), app.tr("ui.plugin_menu_all_off").into(), false));
     }
     // A plugin turned off in Preferences › Plugins is left out; the others keep their index.
-    for (p, plugin) in app.plugin_menu.listed.iter().enumerate().filter(|(_, p)| shown(app, p)) {
+    for (p, plugin) in app.plugin_menu.listed.iter().enumerate().filter(|(_, p)| shown(app, p) && !p.entries.is_empty()) {
         let entries: Vec<FileRow> = plugin
             .entries
             .iter()
@@ -538,8 +506,7 @@ pub(crate) fn toggle_below(app: &mut SolveApp, ctx: &egui::Context, rect: egui::
 
 /// Read the installed plugins again, as the menu shows them when it opens.
 pub(crate) fn refresh(app: &mut SolveApp) {
-    app.plugin_menu.listed = list(app, crate::plugins::plugins_dir().as_deref());
-    app.plugin_menu.loaded = true;
+    app.plugin_menu.listed = list(app, app.session.plugin_state.plugins_dir().as_deref());
 }
 
 /// Where the File menu holds the Plugins menu (a narrow app bar): a submenu of the same rows,
@@ -601,6 +568,8 @@ pub(crate) fn install_plugin_action(app: &mut SolveApp) {
 
 /// The dialog of one plugin entry.
 pub(crate) struct EntryDialog {
+    /// Names this dialog's window and its runs; no other open dialog has it.
+    pub(crate) id: u64,
     pub(crate) plugin: Listed,
     /// The session (design tab) the dialog was opened on: Run acts on that design only.
     pub(crate) session: u64,
@@ -628,8 +597,17 @@ pub(crate) fn open_entry(app: &mut SolveApp, p: usize, e: usize) {
     if !shown(app, &plugin) {
         return;
     }
+    // The entry's dialog is already open on this design: it keeps its values, and stays where it
+    // is. Another design's dialog for the same entry belongs to that design.
+    let session = app.session.uid;
+    if app.plugin_menu.dialogs.iter().any(|d| d.plugin.id == plugin.id && d.entry == entry.name && d.session == session) {
+        return;
+    }
     let fields = form(&entry.input_schema);
-    app.plugin_menu.dialog = Some(EntryDialog {
+    let id = app.plugin_menu.next_dialog;
+    app.plugin_menu.next_dialog += 1;
+    app.plugin_menu.dialogs.push(EntryDialog {
+        id,
         label: command_title(&plugin, entry),
         entry: entry.name.clone(),
         read: entry.effect == solidcraft_engine::plugin::Effect::Read,
@@ -663,10 +641,17 @@ impl EntryDialog {
     }
 }
 
-/// Run the open dialog's entry: one `plugin.run` request with the package's content hash, queued
-/// as the control channel's are, so it computes on its worker and lands as one undo step.
+/// Run the most recently opened dialog's entry.
+#[cfg(test)]
 pub(crate) fn run(app: &mut SolveApp) -> Result<(), String> {
-    let Some(dialog) = app.plugin_menu.dialog.as_ref() else { return Ok(()) };
+    let Some(id) = app.plugin_menu.dialog().map(|d| d.id) else { return Ok(()) };
+    run_dialog(app, id)
+}
+
+/// Run the entry of dialog `id`: one `plugin.run` request with the package's content hash, queued
+/// as the control channel's are, so it computes on its worker and lands as one undo step.
+pub(crate) fn run_dialog(app: &mut SolveApp, id: u64) -> Result<(), String> {
+    let Some(dialog) = app.plugin_menu.dialogs.iter().find(|d| d.id == id) else { return Ok(()) };
     if dialog.running.is_some() {
         return Ok(());
     }
@@ -675,9 +660,9 @@ pub(crate) fn run(app: &mut SolveApp) -> Result<(), String> {
         "path": dialog.plugin.path, "approval": dialog.plugin.approval, "entry": dialog.entry, "params": params}});
     let (req, reply) = solidcraft_control::ControlRequest::new("engine.execute", request);
     let ticket = req.ticket.clone();
-    app.plugin_menu.pending = Some((req.serial, app.session.uid));
+    app.plugin_menu.pending.push((req.serial, app.session.uid));
     app.control_held.push_back(req);
-    if let Some(dialog) = app.plugin_menu.dialog.as_mut() {
+    if let Some(dialog) = app.plugin_menu.dialogs.iter_mut().find(|d| d.id == id) {
         dialog.running = Some(Running { reply, ticket });
         dialog.error = None;
         dialog.result = None;
@@ -688,19 +673,23 @@ pub(crate) fn run(app: &mut SolveApp) -> Result<(), String> {
 /// A queued run is for the design its dialog was opened on: refused, when its turn comes, if
 /// another design tab is active by then.
 pub(crate) fn check_dispatch(app: &mut SolveApp, req: &solidcraft_control::ControlRequest) -> Result<(), String> {
-    match app.plugin_menu.pending {
-        Some((serial, session)) if serial == req.serial => {
-            app.plugin_menu.pending = None;
-            if session == app.session.uid { Ok(()) } else { Err(app.tr("ui.plugin_dialog_other_design").into()) }
-        }
-        _ => Ok(()),
+    let Some(at) = app.plugin_menu.pending.iter().position(|(serial, _)| *serial == req.serial) else { return Ok(()) };
+    let (_, session) = app.plugin_menu.pending.remove(at);
+    if session == app.session.uid { Ok(()) } else { Err(app.tr("ui.plugin_dialog_other_design").into()) }
+}
+
+/// Take the finished runs' replies: an edit closes its dialog, a read shows its result, an error
+/// stays in its dialog.
+pub(crate) fn poll(app: &mut SolveApp) {
+    let ids: Vec<u64> = app.plugin_menu.dialogs.iter().map(|d| d.id).collect();
+    for id in ids {
+        poll_dialog(app, id);
     }
 }
 
-/// Take a finished run's reply: an edit closes the dialog, a read shows its result, an error
-/// stays in the dialog.
-pub(crate) fn poll(app: &mut SolveApp) {
-    let Some(dialog) = app.plugin_menu.dialog.as_mut() else { return };
+fn poll_dialog(app: &mut SolveApp, id: u64) {
+    let Some(at) = app.plugin_menu.dialogs.iter().position(|d| d.id == id) else { return };
+    let dialog = &mut app.plugin_menu.dialogs[at];
     let Some(running) = &dialog.running else { return };
     let reply = match running.reply.try_recv() {
         Ok(reply) => reply,
@@ -720,14 +709,31 @@ pub(crate) fn poll(app: &mut SolveApp) {
         return;
     }
     let done = solidcraft_ui_text::format("ui.plugin_dialog_done", &[("entry", &dialog.label)]);
-    app.plugin_menu.dialog = None;
+    app.plugin_menu.dialogs.remove(at);
     app.set_status(done, false);
 }
 
-/// Draw the open entry dialog.
+/// Draw every open entry dialog, each in its own window.
 pub(crate) fn show(app: &mut SolveApp, ctx: &egui::Context) {
     poll(app);
-    let Some(mut dialog) = app.plugin_menu.dialog.take() else { return };
+    for mut dialog in std::mem::take(&mut app.plugin_menu.dialogs) {
+        let id = dialog.id;
+        let (stays, run_it) = show_dialog(app, ctx, &mut dialog);
+        if !stays {
+            continue;
+        }
+        app.plugin_menu.dialogs.push(dialog);
+        if run_it
+            && let Err(error) = run_dialog(app, id)
+            && let Some(dialog) = app.plugin_menu.dialogs.iter_mut().find(|d| d.id == id)
+        {
+            dialog.error = Some(error);
+        }
+    }
+}
+
+/// Draw one dialog. Returns whether it stays open, and whether Run was pressed.
+fn show_dialog(app: &mut SolveApp, ctx: &egui::Context, dialog: &mut EntryDialog) -> (bool, bool) {
     let ready = dialog.ready(app);
     let running = dialog.running.is_some();
     if running {
@@ -736,30 +742,23 @@ pub(crate) fn show(app: &mut SolveApp, ctx: &egui::Context) {
     // Just the command's own title ("Gears"): no plugin or menu name after it.
     let title = dialog.label.clone();
     let (run_label, close_label) = (app.tr("ui.plugin_dialog_run").to_owned(), app.tr(if dialog.read { "ui.close" } else { "ui.cancel" }).to_owned());
-    let (closed, action) = ui_kit::Window::new(egui::Id::unique("sc_plugin_entry"), "prefs_plugins", &title)
+    let (closed, action) = ui_kit::Window::new(egui::Id::unique("sc_plugin_entry").with(dialog.id), "prefs_plugins", &title)
         .fields()
         .actions(&run_label, &close_label, None)
-        .show(ctx, ready.is_ok() && !running, |ui| body(app, ui, &mut dialog, ready.as_ref().err()));
+        .show(ctx, ready.is_ok() && !running, |ui| body(app, ui, dialog, ready.as_ref().err()));
     for (handle, key) in [("plugin_dialog:run", "dialog:ok"), ("plugin_dialog:cancel", "dialog:cancel")] {
         if let Some(at) = crate::scenario::handle_at(key) {
             crate::scenario::publish_handle(handle, at);
         }
     }
-    let close = closed || action == ui_kit::Action::Cancel;
-    if close {
+    if closed || action == ui_kit::Action::Cancel {
         // A run still computing is stopped: nothing of it is applied.
         if let Some(running) = &dialog.running {
             running.ticket.stop();
         }
-        return;
+        return (false, false);
     }
-    app.plugin_menu.dialog = Some(dialog);
-    if action == ui_kit::Action::Ok
-        && let Err(error) = run(app)
-        && let Some(dialog) = app.plugin_menu.dialog.as_mut()
-    {
-        dialog.error = Some(error);
-    }
+    (true, action == ui_kit::Action::Ok)
 }
 
 fn body(app: &SolveApp, ui: &mut egui::Ui, dialog: &mut EntryDialog, why_not: Option<&String>) {

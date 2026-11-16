@@ -1393,3 +1393,85 @@ fn builtin() -> Vec<(String, Script)> {
     v.extend(malformed());
     v
 }
+
+#[cfg(test)]
+mod wr446_tests {
+    use super::*;
+    use solidcore::topology::edgeuse::{p1 as eu1, p3 as eu3};
+
+    /// The `[sum, weighted sum]` digest of each 256-entry block, as the golden stores an
+    /// integer array longer than 16.
+    fn digest(xs: &[i64]) -> Vec<[i64; 2]> {
+        xs.chunks(256)
+            .map(|b| {
+                let (mut sum, mut weighted) = (0i64, 0i64);
+                for (j, &x) in b.iter().enumerate() {
+                    sum = sum.wrapping_add(x);
+                    weighted = weighted.wrapping_add((j as i64 + 1).wrapping_mul(x));
+                }
+                [sum, weighted]
+            })
+            .collect()
+    }
+
+    /// WR-446: the three rows whose topology moved when `validation_does_not_make_uv_trims`
+    /// was retired. `EndShell(TRUE)`'s `ValidatePointers` no longer makes UV trims. The
+    /// body each case now builds, given the trims upstream's check made (for every edge
+    /// use with a trim, its clockwise neighbour's, evaluated at its end with
+    /// `ok_to_make_uv_trim_curve` as upstream passed it, until none is missing), dumps to
+    /// exactly the topology of the rows before the retirement (their digests below, from
+    /// `expected/topology.brep_constructor.jsonl` at the merge base). So the rows differ
+    /// only by the trims the check used to store, and the check no longer edits the body
+    /// it checks.
+    #[test]
+    fn validation_rows_differ_only_by_the_trims_the_check_made() {
+        let before: [(&str, &[[i64; 2]]); 3] = [
+            ("fan_four_shared_stitched", &[[1435, 242_487], [1827, 182_248]]),
+            ("fan_three_shared_stitched", &[[1340, 221_155], [539, 29821]]),
+            ("gen0011", &[[1339, 221_973], [540, 29816]]),
+        ];
+        let ctx = CaseContext {
+            root: crate::case::repo_root(),
+            seeds: 16,
+        };
+        let cases = Runner.cases(&ctx).unwrap();
+        for (name, old) in before {
+            let case = cases.iter().find(|c| c.name == name).unwrap();
+            let i: Inputs = case.parse().unwrap();
+            let s = script::decode(&i.script).unwrap();
+            let (k, b, deferred) = constructor::build_brep(&s);
+            assert!(deferred.is_none(), "{name}: deferred");
+            let mut b = b.unwrap();
+            let bound = 4 * s.ops.len() + 16;
+            let ints = |t: Vec<f64>| t.into_iter().map(|x| x as i64).collect::<Vec<i64>>();
+            let now = ints(constructor::dump(&k, &b, bound).unwrap().0);
+            assert_ne!(digest(&now), old, "{name}: the row did not move");
+            let mut made = 0;
+            loop {
+                let mut missing = Vec::new();
+                for eu in b.edgeuses().ids().collect::<Vec<_>>() {
+                    if eu1::uv_trim_curve(&b, eu).unwrap().0.is_none() {
+                        continue;
+                    }
+                    if let Some(cw) = b.edgeuse(eu).unwrap().cw {
+                        if eu1::uv_trim_curve(&b, cw).unwrap().0.is_none() {
+                            missing.push(cw);
+                        }
+                    }
+                }
+                if missing.is_empty() {
+                    break;
+                }
+                for cw in missing {
+                    if eu1::uv_trim_curve(&b, cw).unwrap().0.is_none() {
+                        eu3::normalized_evaluate(&k, &mut b, cw, 1.0, true, false, true).unwrap();
+                        made += 1;
+                    }
+                }
+            }
+            assert!(made > 0, "{name}: no trim to make");
+            let upstream = ints(constructor::dump(&k, &b, bound).unwrap().0);
+            assert_eq!(digest(&upstream), old, "{name}: {made} trims made");
+        }
+    }
+}

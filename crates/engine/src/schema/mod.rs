@@ -56,6 +56,7 @@ mod tests;
 // The contracts, by command file.
 pub mod align;
 pub mod appearance;
+pub mod board_import;
 pub mod bom;
 pub mod browser;
 pub mod canvas;
@@ -147,6 +148,7 @@ pub mod surface_blend;
 pub mod surface_boundary;
 pub mod surface_match;
 pub mod surface_ruled;
+pub mod tab_views;
 pub mod timeline_clipboard;
 pub mod ui_prefs;
 pub mod view_navigation;

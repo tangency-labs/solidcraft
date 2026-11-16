@@ -460,7 +460,12 @@ fn allocation_columns<'a>(layout: &'a Layout, registry: &PanelRegistry, env: &Al
                 continue;
             }
             // Unavailable members still constrain widths, just like inactive tabs.
-            let (min, max) = column_bounds(layout, registry, &column.id)?;
+            let ranges = column_widths(layout, registry, &column.id)?;
+            let (min, max) = ranges
+                .iter()
+                .copied()
+                .find(|(lo, hi)| (*lo..=*hi).contains(&column.width))
+                .ok_or_else(|| error(Rule::Bounds, "saved width outside column intervals"))?;
             let preferred = column.width.clamp(min, max);
             limits.push(AxisLimit { min, max: preferred, weight: (preferred - min).max(0.001), preferred: None, priority: 0 });
             columns.push(AllocationColumn { column, members, width: 0.0 });
