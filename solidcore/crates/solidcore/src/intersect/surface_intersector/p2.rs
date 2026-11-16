@@ -1918,8 +1918,8 @@ const fn sweep_refusal(why: sphere_span::SweepRefusal) -> &'static str {
              curve"
         }
         sphere_span::SweepRefusal::TurnsBack => {
-            "the UV trim on the sphere turns back in its sweep coordinate where the curve \
-             does not in longitude, and no handles make it monotone"
+            "a refitted span of the UV trim on the sphere could not be certified monotone \
+             in its sweep coordinate where the curve is monotone in longitude"
         }
         sphere_span::SweepRefusal::Degenerate => {
             "the UV trim on the sphere made monotone in its sweep coordinate has a zero \
