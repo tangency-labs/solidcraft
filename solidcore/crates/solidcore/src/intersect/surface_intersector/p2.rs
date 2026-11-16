@@ -912,7 +912,9 @@ impl SurfaceIntersector<'_> {
     /// # Errors
     ///
     /// Those of the degenerate curves and of [`flush_crv`]; [`SolidError::Unported`]
-    /// from the curve evaluations of [`is_point_unique`].
+    /// from the curve evaluations of [`is_point_unique`]; cancellation, and
+    /// `IntersectFailed` for a UV trim on a sphere the monotone-sweep fit refuses
+    /// ([`sphere_span::fit_monotone_sweep`]).
     pub fn flush_curve(&mut self, k: &Kernel, out: &mut TsectCurves) -> Result<()> {
         // take (and clear) the curve points
         let ids = core::mem::take(&mut self.curve_points);
@@ -1062,19 +1064,26 @@ impl SurfaceIntersector<'_> {
 
         // Not upstream (#17110): each span of a UV trim on a sphere is made monotone in
         // its sweep coordinate wherever its 3D span is monotone in longitude, certified, or
-        // the whole intersection is refused (IntersectFailed); the trace's points stay
+        // the whole intersection is refused (IntersectFailed); the trace's points stay.
+        // Cancellation is polled inside the fit
         for (srf, ctrl) in [SrfIndex::First, SrfIndex::Second]
             .into_iter()
             .zip(&mut ctrl_uv)
         {
             let fitted = sphere_span::fit_monotone_sweep(
+                k,
                 self.surface(srf),
                 ctrl,
                 &ctrl_3d,
                 self.this_approx_tol_3d,
-            );
-            if let Err(why) = fitted {
-                return Err(SolidError::intersect_failed(OP_FLUSH, sweep_refusal(why)));
+            )?;
+            match fitted {
+                // the refitted trim's certified distance from the 3D curve joins the
+                // published deviation
+                Ok(fit) => max_deviation = max_deviation.max(fit.bound),
+                Err(why) => {
+                    return Err(SolidError::intersect_failed(OP_FLUSH, sweep_refusal(why)));
+                }
             }
         }
 
