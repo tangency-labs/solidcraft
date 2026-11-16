@@ -7,7 +7,7 @@
 
 use std::f64::consts::TAU;
 
-use super::GRAZE;
+use super::{GRAZE, MIN_CROSSING};
 
 /// An edge in the hinge frame, `(u, v)` coordinates.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -205,6 +205,38 @@ pub fn outside(a0: f64, a1: f64, zone: &[(f64, f64)]) -> Vec<(f64, f64)> {
     out
 }
 
+/// The component of the open set `zone` that holds `x`, if one does.
+pub fn component(zone: &[(f64, f64)], x: f64) -> Option<(f64, f64)> {
+    zone.iter().copied().find(|&(lo, hi)| lo < x && x < hi)
+}
+
+/// Whether the crossing of a row with the plate's edge at `x` is clean (design 6.6 rule 1).
+/// `chain` is the near set of the crossing's chain with reach `rho`, `air_below` whether the air is
+/// at `u < x`, `crossings` every crossing of the row with the plate's boundary (`x` among them),
+/// `others` the union of the other near sets (closed edges and the plate's other chains). Clean
+/// when the component `K` of `chain` holding `x` reaches at most `rho / sin(MIN_CROSSING)` into the
+/// material, holds no other crossing, and meets no other near set.
+pub fn clean_crossing(
+    x: f64,
+    air_below: bool,
+    rho: f64,
+    chain: &[(f64, f64)],
+    crossings: &[f64],
+    others: &[(f64, f64)],
+) -> bool {
+    let Some((lo, hi)) = component(chain, x) else {
+        return false;
+    };
+    let into = if air_below { hi - x } else { x - lo };
+    if into > rho / MIN_CROSSING.sin() + GRAZE {
+        return false;
+    }
+    if crossings.iter().any(|&c| c != x && lo < c && c < hi) {
+        return false;
+    }
+    !others.iter().any(|&(a, b)| a < hi && lo < b)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -287,5 +319,29 @@ mod tests {
         same(&outside(20.1, 39.9, &[(-1.0, 25.0)]), &[(25.0, 39.9)]);
         assert!(outside(20.1, 39.9, &[(10.0, 50.0)]).is_empty());
         same(&outside(20.1, 39.9, &[(40.0, 50.0)]), &[(20.1, 39.9)]);
+    }
+
+    #[test]
+    fn a_square_crossing_is_clean_and_a_corner_or_a_slant_is_not() {
+        // The edge u = 0, air below; rho = 1.4 (design 17.1 case A).
+        let edge = NearEdge::Line((0.0, -10.0), (0.0, 80.0));
+        let chain = near_set(&edge, 50.0, 1.4);
+        assert!(clean_crossing(0.0, true, 1.4, &chain, &[0.0, 60.0], &[]));
+        // A side edge alongside the row meets K: a plate corner.
+        let side = NearEdge::Line((0.0, 50.5), (60.0, 50.5));
+        let others = near_set(&side, 50.0, 1.4);
+        assert!(!clean_crossing(
+            0.0,
+            true,
+            1.4,
+            &chain,
+            &[0.0, 60.0],
+            &others
+        ));
+        // An edge at 30 degrees to the row reaches rho / sin 30 = 2.8 > 1.617 into the material.
+        let (s, c) = (30f64.to_radians()).sin_cos();
+        let slant = NearEdge::Line((-10.0 * c, 50.0 - 10.0 * s), (10.0 * c, 50.0 + 10.0 * s));
+        let chain = near_set(&slant, 50.0, 1.4);
+        assert!(!clean_crossing(0.0, true, 1.4, &chain, &[0.0], &[]));
     }
 }
