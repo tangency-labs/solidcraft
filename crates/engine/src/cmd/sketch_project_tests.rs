@@ -1509,21 +1509,23 @@ fn intersect_through_a_torus_axis_at_an_angle_gives_the_profile_circle() {
     }
 }
 
-/// A plane 1e-7 off a cylinder's axis, the cylinder standing a million from the axis's origin
-/// (z 1000000 to 1000001), misses the cylinder's walls by 0.005 there: the exact section leaves
+/// A plane 1e-7 off a cylinder's axis, the cylinder reaching a million from the axis's origin
+/// (z 0 to 1000001), misses the cylinder's walls by 0.005 there: the exact section leaves
 /// it (`None`) and Intersect cuts the face as it did, which finds the wall (#17496).
 #[test]
 fn intersect_leaves_a_plane_near_the_axis_far_from_its_origin_to_the_section() {
     use solidcore_record::{Plane, Vec3};
     let mut s = Session::default();
-    run(&mut s, "solid.cylinder", json!({"base": [0, 0, 1000000], "radius": 1, "height": 1, "body_name": "Far"}));
+    // Standing on z = 0 and a million tall, so the stored axis origin is at the base and the face
+    // the point below picks lies a million from it.
+    run(&mut s, "solid.cylinder", json!({"base": [0, 0, 0], "radius": 1, "height": 1000001, "body_name": "Far"}));
     run(&mut s, "sketch.create", json!({"plane": {"origin": [0, 0, 0], "x_dir": [0, 1, 0], "y_dir": [-1e-7, 0, 1]}}));
     let plane = Plane { origin: Vec3::new(0.0, 0.0, 0.0), x: Vec3::new(0.0, 1.0, 0.0), y: Vec3::new(-1e-7, 0.0, 1.0) };
     let st = s.model.state();
     let far = &st.body("Far").unwrap().body;
     // The test only proves the section guard if the cylinder's stored axis origin lies far from
-    // the face (which spans z = 1,000,000..1,000,001): were it stored near the base, the old
-    // guard would reject this plane too. So the origin must be near z = 0.
+    // the face the point below picks (z = 1,000,000.5): were it stored near that, the old guard
+    // would reject this plane too. So the origin must be near z = 0.
     let mut origins = Vec::new();
     for face in 0..far.face_count() {
         if let Some(solidcraft_kernel::FaceSurface::Cylinder { origin, .. }) = solidcraft_kernel::face_surface(far, face) {
