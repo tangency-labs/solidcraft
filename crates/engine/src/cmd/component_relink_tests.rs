@@ -941,3 +941,307 @@ fn relink_of_one_placement_moves_its_joints_to_the_same_faces() {
     assert_eq!(moved, names[index], "{moved} is not the face that was {face}: {names:?}");
     let _ = std::fs::remove_dir_all(dir);
 }
+
+fn configured_part(path: &Path) -> (Session, u64, u64) {
+    let mut s = Session::default();
+    run(&mut s, "parameters.add", json!({"name": "L", "expression": "25 mm"}));
+    run(&mut s, "solid.box", json!({"length": "L", "width": 10, "height": 10, "corner": [0,0,0], "body_name": "Bolt"}));
+    run(&mut s, "config.configure", json!({"params": ["L"]}));
+    run(&mut s, "config.row", json!({"name": "Default", "rename": "Short"}));
+    run(&mut s, "config.row", json!({"name": "Long", "values": {"L": "30 mm"}}));
+    let id = |name: &str| s.doc.configs.rows.iter().find(|r| r.name == name).unwrap().id;
+    let (short, long) = (id("Short"), id("Long"));
+    run(&mut s, "config.activate", json!({"row": short}));
+    run(&mut s, "file.save", json!({"path": path}));
+    (s, short, long)
+}
+
+fn assert_variant_length(s: &mut Session, occurrence: u64, length: f64) {
+    let p = run(s, "occurrence.properties", json!({"occurrence": occurrence}));
+    assert_eq!(p["body_count"], 1, "{p}");
+    assert!((p["total"]["volume_mm3"].as_f64().unwrap() - length * 100.0).abs() < 1e-5, "{p}");
+    let bbox = &p["total"]["bbox"];
+    assert!((bbox["max"][0].as_f64().unwrap() - bbox["min"][0].as_f64().unwrap() - length).abs() < 1e-6, "{p}");
+}
+
+#[test]
+fn linked_configurations_keep_distinct_sizes_through_reuse_updates_and_offline_reopen() {
+    let dir = folder("configuration-lifecycle");
+    let file = dir.join("family.sc");
+    let assembly = dir.join("assembly.sc");
+    let (mut source, short, long) = configured_part(&file);
+    let bytes = std::fs::read(&file).unwrap();
+    let mut s = Session::default();
+    let small = run(&mut s, "component.insert_design", json!({"path": file, "configuration": "Short", "reuse": true}));
+    let large = run(&mut s, "component.insert_design", json!({"path": file, "configuration": long, "reuse": true, "translate": [50,0,0]}));
+    let saved = run(&mut s, "component.insert_design", json!({"path": file, "reuse": true, "translate": [100,0,0]}));
+    let small_id = small["component"].as_u64().unwrap();
+    let large_id = large["component"].as_u64().unwrap();
+    let saved_id = saved["component"].as_u64().unwrap();
+    assert_ne!(small_id, large_id);
+    assert_ne!(small_id, saved_id, "an explicit row differs from following the saved state");
+    assert_eq!(s.doc.links[&small_id].configuration, Some(short));
+    assert_eq!(s.doc.links[&large_id].configuration, Some(long));
+    assert_eq!(s.doc.links[&saved_id].configuration, None);
+    let reused = run(&mut s, "component.insert_design", json!({"path": file, "configuration": short, "reuse": true}));
+    assert_eq!(reused["component"], small_id, "name and fixed id identify the same row");
+    let reused_saved = run(&mut s, "component.insert_design", json!({"path": file, "configuration": null, "reuse": true}));
+    assert_eq!(reused_saved["component"], saved_id);
+    assert_eq!(std::fs::read(&file).unwrap(), bytes, "selecting a row never saves the source");
+    let occurrences = [small["occurrence"].as_u64().unwrap(), large["occurrence"].as_u64().unwrap(), saved["occurrence"].as_u64().unwrap()];
+    for (occurrence, length) in occurrences.into_iter().zip([25.0, 30.0, 25.0]) {
+        assert_variant_length(&mut s, occurrence, length);
+    }
+    run(&mut source, "config.row", json!({"name": short, "rename": "Short renamed", "values": {"L": "27 mm"}}));
+    run(&mut source, "config.activate", json!({"row": long}));
+    run(&mut source, "file.save", json!({"path": file}));
+    for _ in 0..2 {
+        run(&mut s, "component.update_links", json!({}));
+        for (occurrence, length) in occurrences.into_iter().zip([27.0, 30.0, 30.0]) {
+            assert_variant_length(&mut s, occurrence, length);
+        }
+    }
+    let links = run(&mut s, "component.links", json!({}));
+    assert_eq!(links["links"].as_array().unwrap().iter().find(|l| l["component"] == small_id).unwrap()["configuration"], short);
+    run(&mut s, "file.save", json!({"path": assembly}));
+    std::fs::remove_file(&file).unwrap();
+    let mut reopened = Session::default();
+    run(&mut reopened, "doc.open", json!({"path": assembly}));
+    assert_eq!(reopened.doc.links[&small_id].configuration, Some(short));
+    for (occurrence, length) in occurrences.into_iter().zip([27.0, 30.0, 30.0]) {
+        assert_variant_length(&mut reopened, occurrence, length);
+    }
+    let mut uncached = Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap());
+    for (occurrence, length) in occurrences.into_iter().zip([27.0, 30.0, 30.0]) {
+        assert_variant_length(&mut uncached, occurrence, length);
+    }
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn linked_configurations_reject_invalid_or_deleted_rows_without_retargeting() {
+    let dir = folder("configuration-errors");
+    let file = dir.join("family.sc");
+    let (mut source, short, long) = configured_part(&file);
+    run(&mut source, "config.row", json!({"name": "Degenerate", "values": {"L": "0 mm"}}));
+    run(&mut source, "file.save", json!({"path": file}));
+    let mut s = Session::default();
+    let inserted = run(&mut s, "component.insert_design", json!({"path": file, "configuration": short}));
+    let component = inserted["component"].as_u64().unwrap();
+    let occurrence = inserted["occurrence"].as_u64().unwrap();
+    let valid = run(&mut s, "component.insert_design", json!({"path": file, "configuration": long}));
+    let valid_component = valid["component"].as_u64().unwrap();
+    let valid_occurrence = valid["occurrence"].as_u64().unwrap();
+    let before = s.doc.clone();
+    let undo = s.undo.len();
+    for configuration in [json!("Missing"), json!(u64::MAX), json!(true), json!({}), json!("Degenerate")] {
+        for command in ["component.insert_design", "component.relink"] {
+            let mut params = json!({"path": file, "configuration": configuration});
+            if command == "component.relink" {
+                params["component"] = json!(component);
+            }
+            assert!(s.execute(command, &params).is_err(), "{command}: {params}");
+            assert_eq!(s.doc, before);
+            assert_eq!(s.undo.len(), undo);
+            assert_variant_length(&mut s, occurrence, 25.0);
+        }
+    }
+    run(&mut source, "config.row", json!({"name": long, "values": {"L": "32 mm"}}));
+    run(&mut source, "config.activate", json!({"row": long}));
+    run(&mut source, "config.row", json!({"name": short, "delete": true}));
+    run(&mut source, "config.row", json!({"name": "Short", "values": {"L": "40 mm"}}));
+    run(&mut source, "file.save", json!({"path": file}));
+    assert!(s.execute("component.update_links", &json!({"component": component})).is_err());
+    assert_eq!(s.doc, before, "a new row with the old name must not take the deleted row's link");
+    assert_eq!(s.undo.len(), undo);
+    assert!(s.execute("component.update_links", &json!({"components": [component]})).is_err());
+    assert_eq!(s.doc, before, "a list in which every link fails also rolls back");
+    let result = run(&mut s, "component.update_links", json!({"components": [component, valid_component]}));
+    assert_eq!(result["failed"].as_array().unwrap().len(), 1);
+    assert_eq!(result["updated"].as_array().unwrap().len(), 1);
+    assert_eq!(s.doc.links[&component], before.links[&component], "failed list updates retain the old digest and row");
+    assert_variant_length(&mut s, occurrence, 25.0);
+    assert_variant_length(&mut s, valid_occurrence, 32.0);
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn linked_configurations_reject_row_ids_recycled_after_source_undo() {
+    for legacy in [false, true] {
+        let dir = folder(if legacy { "configuration-undo-legacy" } else { "configuration-undo" });
+        let file = dir.join("family.sc");
+        let assembly = dir.join("assembly.sc");
+        let (mut source, _, _) = configured_part(&file);
+        run(&mut source, "config.row", json!({"name": "Victim", "values": {"L": "35 mm"}}));
+        let row = source.doc.configs.rows.iter().find(|r| r.name == "Victim").unwrap().id;
+        if legacy {
+            source.doc_mut().configs.row_identities.remove(&row);
+        }
+        run(&mut source, "file.save", json!({"path": file}));
+        let mut s = Session::default();
+        let inserted = run(&mut s, "component.insert_design", json!({"path": file, "configuration": row, "reuse": true}));
+        let component = inserted["component"].as_u64().unwrap();
+        let occurrence = inserted["occurrence"].as_u64().unwrap();
+        let identity = s.doc.links[&component].configuration_identity;
+        assert_eq!(identity.is_none(), legacy);
+        run(&mut s, "file.save", json!({"path": assembly}));
+        let mut reopened = Session::default();
+        run(&mut reopened, "doc.open", json!({"path": assembly}));
+        assert_eq!(reopened.doc.links[&component].configuration_identity, identity);
+        s = reopened;
+
+        run(&mut source, "edit.undo", json!({}));
+        // The replacement deliberately has identical geometry: another link can warm the
+        // shared read cache, but neither that cache nor reuse may bypass the identity check.
+        run(&mut source, "config.row", json!({"name": "Replacement", "values": {"L": "35 mm"}}));
+        let replacement = source.doc.configs.rows.iter().find(|r| r.name == "Replacement").unwrap().id;
+        assert_eq!(replacement, row, "the source counter rewound with undo");
+        assert_ne!(source.doc.configs.row_identity(row), identity);
+        run(&mut source, "file.save", json!({"path": file}));
+        let fresh = run(&mut s, "component.insert_design", json!({"path": file, "configuration": row, "reuse": true}));
+        let fresh_component = fresh["component"].as_u64().unwrap();
+        assert_ne!(fresh_component, component, "a replacement row must not reuse the stale definition");
+        let before = s.doc.clone();
+        let undo = s.undo.len();
+        for (command, params) in
+            [("component.update_links", json!({"component": component})), ("component.relink", json!({"component": component, "path": file}))]
+        {
+            let error = s.execute(command, &params).unwrap_err().to_string();
+            assert!(error.contains("replaced"), "{error}");
+            assert_eq!(s.doc, before);
+            assert_eq!(s.undo.len(), undo);
+            assert_variant_length(&mut s, occurrence, 35.0);
+        }
+        let result = run(&mut s, "component.update_links", json!({"components": [component, fresh_component]}));
+        assert_eq!(result["failed"][0]["component"], component);
+        assert_eq!(s.doc.links[&component], before.links[&component]);
+        // An explicit selection intentionally accepts the replacement and records its identity.
+        run(&mut s, "component.relink", json!({"component": component, "path": file, "configuration": row}));
+        assert_eq!(s.doc.links[&component].configuration_identity, source.doc.configs.row_identity(row));
+        run(&mut source, "config.row", json!({"name": row, "rename": "Renamed", "values": {"L": "80 mm"}}));
+        run(&mut source, "file.save", json!({"path": file}));
+        run(&mut s, "component.update_links", json!({"component": component}));
+        assert_variant_length(&mut s, occurrence, 80.0);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+}
+
+#[test]
+fn relinking_one_occurrence_selects_a_configuration_and_keeps_other_placements() {
+    let dir = folder("configuration-placement");
+    let file = dir.join("family.sc");
+    let (_, short, long) = configured_part(&file);
+    let mut s = Session::default();
+    let small = run(&mut s, "component.insert_design", json!({"path": file, "configuration": short, "reuse": true}));
+    let component = small["component"].as_u64().unwrap();
+    let first = small["occurrence"].as_u64().unwrap();
+    let second = run(&mut s, "occurrence.copy", json!({"occurrence": first, "translate": [50,0,0]}))["occurrence"].as_u64().unwrap();
+    let was = s.doc.occurrences.iter().find(|o| o.id == second).unwrap().clone();
+    let before = s.doc.clone();
+    let result = run(&mut s, "component.relink", json!({"component": component, "occurrence": second, "path": file, "configuration": "Long"}));
+    let linked = result["component"].as_u64().unwrap();
+    assert_ne!(linked, component);
+    let now = s.doc.occurrences.iter().find(|o| o.id == second).unwrap();
+    assert_eq!((now.parent, now.transform, now.grounded), (was.parent, was.transform, was.grounded));
+    assert_eq!(s.doc.links[&linked].configuration, Some(long));
+    assert_eq!(s.doc.links[&component].configuration, Some(short));
+    assert_variant_length(&mut s, first, 25.0);
+    assert_variant_length(&mut s, second, 30.0);
+    run(&mut s, "edit.undo", json!({}));
+    assert_eq!(s.doc, before);
+    assert_variant_length(&mut s, second, 25.0);
+    run(&mut s, "edit.redo", json!({}));
+    assert_variant_length(&mut s, second, 30.0);
+    // A single placement can change row in place; omitting the selector preserves that row.
+    run(&mut s, "component.relink", json!({"component": linked, "path": file}));
+    assert_eq!(s.doc.links[&linked].configuration, Some(long));
+    assert_variant_length(&mut s, second, 30.0);
+    run(&mut s, "component.relink", json!({"component": linked, "path": file, "configuration": null}));
+    assert_eq!(s.doc.links[&linked].configuration, None);
+    assert_variant_length(&mut s, second, 25.0);
+    run(&mut s, "component.relink", json!({"component": linked, "path": file, "configuration": long}));
+    let other = dir.join("other.sc");
+    part(&other, 45);
+    run(&mut s, "component.relink", json!({"component": linked, "path": other}));
+    assert_eq!(s.doc.links[&linked].configuration, None, "a different file does not inherit source-local row ids");
+    assert!((volume(&mut s) - (2500.0 + 9000.0)).abs() < 1e-5);
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[cfg(unix)]
+#[test]
+fn relinking_through_a_source_alias_preserves_the_selected_configuration() {
+    let dir = folder("configuration-alias");
+    let file = dir.join("family.sc");
+    let alias = dir.join("alias.sc");
+    let (mut source, short, long) = configured_part(&file);
+    run(&mut source, "config.activate", json!({"row": long}));
+    run(&mut source, "file.save", json!({"path": file}));
+    std::os::unix::fs::symlink(&file, &alias).unwrap();
+    let mut s = Session::default();
+    let inserted = run(&mut s, "component.insert_design", json!({"path": file, "configuration": short}));
+    let component = inserted["component"].as_u64().unwrap();
+    let occurrence = inserted["occurrence"].as_u64().unwrap();
+    for path in [&alias, &file] {
+        let result = run(&mut s, "component.relink", json!({"component": component, "path": path}));
+        assert_eq!(result["geometry_changed"], false);
+        assert_eq!(s.doc.links[&component].configuration, Some(short));
+        assert_variant_length(&mut s, occurrence, 25.0);
+    }
+    // Repairing a refused old source must still work, without treating it as an alias.
+    s.doc_mut().links.get_mut(&component).unwrap().path = r"\\blocked-link-server\parts\family.sc".into();
+    run(&mut s, "component.relink", json!({"component": component, "path": file}));
+    assert_eq!(s.doc.links[&component].configuration, None);
+    run(&mut s, "component.relink", json!({"component": component, "path": file, "configuration": short}));
+    run(&mut s, "component.relink", json!({"component": component, "path": alias, "configuration": null}));
+    assert_eq!(s.doc.links[&component].configuration, None);
+    assert_variant_length(&mut s, occurrence, 30.0);
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn linked_configuration_cache_keeps_materials_distinct_for_identical_geometry() {
+    let dir = folder("configuration-material-cache");
+    let file = dir.join("family.sc");
+    let mut source = properties_part(&file, "Steel", None, [12, 34, 56]);
+    run(&mut source, "config.configure", json!({"materials": ["Cube"]}));
+    run(&mut source, "config.row", json!({"name": "Default", "rename": "Steel row"}));
+    run(&mut source, "config.row", json!({"name": "Aluminum row", "values": {"material:Cube": "Aluminum"}}));
+    run(&mut source, "file.save", json!({"path": file}));
+    let mut s = Session::default();
+    let steel = run(&mut s, "component.insert_design", json!({"path": file, "configuration": "Steel row"}))["component"].as_u64().unwrap();
+    let aluminum = run(&mut s, "component.insert_design", json!({"path": file, "configuration": "Aluminum row"}))["component"].as_u64().unwrap();
+    for _ in 0..2 {
+        run(&mut s, "component.update_links", json!({"components": [steel, aluminum]}));
+        assert_link_properties(&mut s, steel, "Steel", 7.85, [12, 34, 56]);
+        assert_link_properties(&mut s, aluminum, "Aluminum", 2.7, [12, 34, 56]);
+    }
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn replace_with_link_by_path_does_not_reuse_a_pinned_configuration() {
+    let dir = folder("configuration-replacement");
+    let file = dir.join("family.sc");
+    let (mut source, short, long) = configured_part(&file);
+    let mut s = Session::default();
+    let pinned = run(&mut s, "component.insert_design", json!({"path": file, "configuration": short}));
+    let pinned_component = pinned["component"].as_u64().unwrap();
+    let pinned_occurrence = pinned["occurrence"].as_u64().unwrap();
+    let local = run(&mut s, "component.create", json!({"name": "Local bolt"}));
+    let local_occurrence = local["occurrence"].as_u64().unwrap();
+    run(&mut s, "solid.box", json!({"length": 25, "width": 10, "height": 10, "corner": [0,0,0]}));
+    run(&mut s, "component.activate", json!({"component": 0}));
+    let replaced = run(&mut s, "component.replace_with_link", json!({"component": local["component"], "path": file}));
+    let replacement = replaced["component"].as_u64().unwrap();
+    assert_ne!(replacement, pinned_component, "a path alone must follow saved source state even when a pinned row currently matches it");
+    assert_eq!(s.doc.links[&replacement].configuration, None);
+    assert_variant_length(&mut s, pinned_occurrence, 25.0);
+    assert_variant_length(&mut s, local_occurrence, 25.0);
+    run(&mut source, "config.activate", json!({"row": long}));
+    run(&mut source, "file.save", json!({"path": file}));
+    run(&mut s, "component.update_links", json!({}));
+    assert_variant_length(&mut s, pinned_occurrence, 25.0);
+    assert_variant_length(&mut s, local_occurrence, 30.0);
+    let _ = std::fs::remove_dir_all(dir);
+}

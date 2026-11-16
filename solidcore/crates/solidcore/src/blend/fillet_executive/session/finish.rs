@@ -536,9 +536,10 @@ impl FilletSession<'_> {
     ///
     /// # Errors
     /// The first stage error, with the executive's error info recorded as upstream.
-    /// With `fixes.fillet_vertex_error_diagnostics`, a missing-corner note from the
-    /// corner stage is kept in [`FilletSession::error_info`] across the later failure;
-    /// the returned error is still the later stage's own status.
+    /// Not upstream (WR-513, #1469): a missing-corner note written by this call's corner
+    /// stage is kept in [`FilletSession::error_info`] across the later failure, unless
+    /// that failure is a no-room refusal; the returned error is still the later stage's
+    /// own status.
     ///
     /// Not upstream (#2510): the fillet is built to the target's approximation tolerance
     /// (`SmTol::GetApproxTol3d`, its solvers' and its merge's), so a face it rolls on that
@@ -559,15 +560,23 @@ impl FilletSession<'_> {
             self.executive.error.comment = "ERROR: fillet parameters not set up.".into();
             return Err(invalid("fillet parameters not set up"));
         }
+        let noted_before = self.executive.error.clone();
         self.create_corners(k, None)?;
-        // The opt-in missing-corner note is the reason the later stage fails; keep it
-        // through that later error so `error_info()` reports the unsupported vertex,
-        // while the returned failure stays the later stage's own status.
-        let missing_corner_note = (k.fixes.fillet_vertex_error_diagnostics
-            && self.executive.error.code == FilletErrorType::CornerUnsupported as i32)
+        // The missing-corner note this call's corner stage wrote is the reason the later
+        // stage fails; keep it through that later error so `error_info()` reports the
+        // unsupported vertex, while the returned failure stays the later stage's own
+        // status. A note left from before this call is not this call's, and a later
+        // no-room refusal keeps its own record (its reason and the size that fits are
+        // read from it below and by the callers).
+        let missing_corner_note = (self.executive.error.code
+            == FilletErrorType::CornerUnsupported as i32
+            && self.executive.error != noted_before)
             .then(|| self.executive.error.clone());
         let (result, split_and_logged) = self.filleting_split_and_logged(k, None);
-        if result.is_err() {
+        if result.is_err()
+            && self.executive.error.code != FilletErrorType::NoRoom as i32
+            && self.executive.error.no_room == noted_before.no_room
+        {
             if let Some(note) = missing_corner_note {
                 self.executive.error = note;
             }
@@ -598,11 +607,10 @@ impl FilletSession<'_> {
     /// # Errors
     /// The first stage error, with all earlier mutations retained.
     ///
-    /// With `fixes.fillet_corner_per_vertex_fan` (WR-665, the fork's
-    /// tangency-labs/smlib@e418750) the vertices the fillet parameters split by fans are
-    /// joined again afterwards where the blends left more than one at a split point,
-    /// whether the blends built or not (`JoinBlendedVertexFans`); the filleting's own
-    /// error comes first.
+    /// As the fork does (WR-665, tangency-labs/smlib@e418750), the vertices the fillet
+    /// parameters split by fans are joined again afterwards where the blends left more
+    /// than one at a split point, whether the blends built or not
+    /// (`JoinBlendedVertexFans`); the filleting's own error comes first.
     ///
     /// A round whose radius law has a corner is split there (the fork's
     /// `SplitFilletFacesAtRadiusCorners`, which its `DoFillet` runs), so a session filleted
