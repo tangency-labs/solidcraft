@@ -16,7 +16,7 @@ use crate::prism::profile::{Loop2, Seg2};
 
 use crate::cell_grid::lattice::{Lattice, CIRCLE_SIDES};
 use crate::cell_grid::region::{clip_halfplane, poly_area, Bounds, Convex, Loop, Prim, Region};
-use crate::cell_grid::snap::{piece_hits, simple, snap_loop};
+use crate::cell_grid::snap::{piece_hits, simple, snap_loop as snap_loop_by};
 use crate::cell_grid::vec::{ring_next, ring_prev, Vec2Ext};
 use crate::cell_grid::*;
 use crate::prism::profile::cross2;
@@ -628,6 +628,11 @@ fn an_arc_meets_a_convex_polygon_only_where_it_passes_through_it() {
 
 // --- snapping ---
 
+/// A loop snapped with no inset.
+fn snap_loop(lp: &Loop, lat: &Lattice) -> Result<Loop, &'static str> {
+    snap_loop_by(lp, lat, 0)
+}
+
 fn aligned_loop() -> Loop {
     frame_rect(ALIGNED.0, ALIGNED.1, ALIGNED.2, ALIGNED.3)
 }
@@ -1007,6 +1012,68 @@ fn pieces_that_overlap_along_a_stretch_are_not_simple() {
     assert!(!simple(&overlapping));
     let backwards = [Prim::arc(c, r, 0.0, PI), Prim::arc(c, r, 1.5 * PI, -PI)];
     assert!(!simple(&backwards));
+}
+
+#[test]
+fn a_snap_inset_moves_each_straight_field_edge_in_by_whole_lattice_lines() {
+    let lat = lattice(CellShape::Hexagon);
+    let field = frame_rect(0.3, 0.2, 60.1, 50.7);
+    let b = |n| snap_loop_by(&field, &lat, n).unwrap().bounds();
+    // The horizontal lattice lines are P / 2 apart (P is the cell pitch), at multiples of it: the
+    // field's y edges 0.2 and 50.7 snap in to 3.1 and 49.6, and each inset moves each of them in
+    // by exactly one more line. Worked out here from the pitch, not from the lattice code.
+    let step = P / 2.0;
+    for n in 0..4u32 {
+        let got = b(n);
+        let want = (step * (1.0 + f64::from(n)), step * (16.0 - f64::from(n)));
+        assert!(
+            (got.y0 - want.0).abs() < 1e-9,
+            "inset {n}: y0 {} not {}",
+            got.y0,
+            want.0
+        );
+        assert!(
+            (got.y1 - want.1).abs() < 1e-9,
+            "inset {n}: y1 {} not {}",
+            got.y1,
+            want.1
+        );
+    }
+    // The vertical edges move in too, by less than a cell column each step.
+    for n in 0..3u32 {
+        let (lo, hi) = (b(n), b(n + 1));
+        assert!(lo.x0 < hi.x0 && hi.x0 - lo.x0 <= H + 1e-9, "{lo:?} {hi:?}");
+        assert!(hi.x1 < lo.x1 && lo.x1 - hi.x1 <= H + 1e-9, "{lo:?} {hi:?}");
+    }
+    // A keep-out (clockwise) is not moved by an inset, whatever the field gets.
+    let hole = frame_rect(10.0, 10.0, 12.0, 11.0).oriented(false);
+    let plain = snap_loop(&hole, &lat).unwrap().bounds();
+    let spec = CellGridSpec {
+        snap_inset: 2,
+        ..with_clip(CellShape::Hexagon, Clip::Snap)
+    };
+    let region = vec![rect(0.3, 0.2, 60.1, 50.7), circle(30.0, 25.0, 2.1)];
+    let moved = run(&region, &spec);
+    let still = run(&region, &with_clip(CellShape::Hexagon, Clip::Snap));
+    assert!(moved.cells.len() < still.cells.len());
+    assert!(moved.open_area < still.open_area);
+    assert!(plain.x0 <= 10.0 && plain.x1 >= 12.0);
+}
+
+#[test]
+fn a_snap_inset_needs_snap_and_a_sane_count() {
+    let with = |clip, snap_inset| CellGridSpec {
+        snap_inset,
+        ..with_clip(CellShape::Hexagon, clip)
+    };
+    let field = [rect(0.3, 0.2, 60.1, 50.7)];
+    assert!(plan(&field, &with(Clip::Snap, 1)).is_ok());
+    assert!(plan(&field, &with(Clip::Free, 1)).is_err());
+    assert!(plan(&field, &with(Clip::Whole, 1)).is_err());
+    assert!(plan(&field, &with(Clip::Snap, MAX_SNAP_INSET + 1)).is_err());
+    // An inset that eats the whole field keeps it as drawn, with a warning, and never panics.
+    let eaten = plan(&field, &with(Clip::Snap, MAX_SNAP_INSET)).unwrap();
+    assert!(!eaten.warnings.is_empty());
 }
 
 #[test]

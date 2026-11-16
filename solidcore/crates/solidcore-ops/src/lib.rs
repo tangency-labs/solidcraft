@@ -32,6 +32,7 @@
 #![cfg_attr(not(test), deny(clippy::float_arithmetic))]
 
 pub mod affine;
+pub mod axial_section;
 pub mod blend;
 pub mod blend_definition;
 pub mod blend_surface;
@@ -54,6 +55,7 @@ pub mod export_geometry;
 pub mod extend;
 pub mod face_surface;
 pub mod file;
+pub mod import_geometry;
 pub mod joint_turn;
 pub mod label;
 pub mod measure;
