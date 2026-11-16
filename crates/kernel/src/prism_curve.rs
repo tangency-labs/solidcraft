@@ -855,6 +855,41 @@ mod tests {
         }
     }
 
+    /// #17707: a few hundredths of a millimetre of a circle or an ellipse bends off its chord by
+    /// about 1e-5 mm. That is under the tolerance a part's edges are read with (1e-6 of its size,
+    /// 7.7e-5 mm for the report's part) but over the 1e-5 mm an edge may lie off its face. Read
+    /// as a line, it gave an Extrude To Object prism a flat side off the cylinder it lies on, and
+    /// the join was refused. It is read as the curve it is; a conic that is straight stays a line.
+    #[test]
+    fn a_short_piece_of_a_circle_or_an_ellipse_is_not_a_line() {
+        let tol = 7.7e-5;
+        // A rational quadratic piece of the ellipse (a cos t, b sin t) from t0 to t0 + 2h.
+        let piece = |a: f64, b: f64, t0: f64, h: f64| {
+            let (w, mid, t1) = (h.cos(), t0 + h, t0 + 2. * h);
+            let homogeneous = vec![[a * t0.cos(), b * t0.sin(), 0., 1.], [a * mid.cos(), b * mid.sin(), 0., w], [a * t1.cos(), b * t1.sin(), 0., 1.]];
+            Curve::RationalSpline { knots: bezier_knots(2), homogeneous }
+        };
+        // 0.036 mm of a circle of radius 15 (its sagitta 1.08e-5), and 0.08 mm of an ellipse of
+        // semi-axes 30 and 15 about the end of its minor axis, where its radius of curvature is
+        // 60 (its sagitta 1.33e-5).
+        let h = 0.0012;
+        let k = 0.04 / 30.;
+        for (c, mid) in [
+            (piece(15., 15., 0., h), Vec2::new(15. * h.cos(), 15. * h.sin())),
+            (piece(30., 15., std::f64::consts::FRAC_PI_2 - k, k), Vec2::new(0., 15.)),
+        ] {
+            for forward in [true, false] {
+                let segs = segment(&run(&c, forward), &Plane::XY, tol, &mut 2_000_000).unwrap();
+                let [seg] = segs.as_slice() else { panic!("one segment: {segs:?}") };
+                assert!(!matches!(seg, Seg2::Line { .. }), "read as a line: {seg:?}");
+                assert!(seg.mid().dist(mid) < 1e-9, "{seg:?} misses the curve's middle {mid:?}");
+            }
+        }
+        // A rational quadratic whose control points lie on one line is that line.
+        let line = Curve::RationalSpline { knots: bezier_knots(2), homogeneous: vec![[0., 0., 0., 1.], [2.5, 0., 0., 0.5], [10., 0., 0., 1.]] };
+        assert!(matches!(segment(&run(&line, true), &Plane::XY, tol, &mut 2_000_000).unwrap()[..], [Seg2::Line { .. }]));
+    }
+
     #[test]
     fn discontinuous_and_multiple_winding_curves_decline() {
         let spline = |knots: Vec<f64>, homogeneous: Vec<[f64; 4]>| Curve::RationalSpline { knots, homogeneous };

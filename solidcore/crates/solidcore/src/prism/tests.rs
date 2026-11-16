@@ -882,6 +882,64 @@ fn a_moved_input_is_refused() {
     assert!(planar_pieces(&k, &run(&k, &quarter, iv, true), &xy(), 1e-5, &mut 0, false).is_none());
 }
 
+/// #17707: a few hundredths of a millimetre of a circle or an ellipse bends off its chord by
+/// about 1e-5. That is under the tolerance a part's edges are read with (1e-6 of its size,
+/// 7.7e-5 for the report's part) but over the 1e-5 an edge may lie off its face; read as a line,
+/// it gave an Extrude To Object prism a flat side off the cylinder it lies on. It is read as the
+/// curve it is; a conic whose control points lie on one line stays that line.
+#[test]
+fn a_short_piece_of_a_circle_or_an_ellipse_is_not_a_line() {
+    let k = Kernel::default();
+    let tol = 7.7e-5;
+    let knots = vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0];
+    // a rational quadratic piece of the ellipse (a cos t, b sin t) from t0 to t0 + 2h
+    let piece = |a: f64, b: f64, t0: f64, h: f64| {
+        let (mid, t1) = (t0 + h, t0 + 2.0 * h);
+        spline(
+            &k,
+            knots.clone(),
+            vec![
+                [a * t0.cos(), b * t0.sin(), 0.0, 1.0],
+                [a * mid.cos(), b * mid.sin(), 0.0, h.cos()],
+                [a * t1.cos(), b * t1.sin(), 0.0, 1.0],
+            ],
+        )
+    };
+    // 0.036 of a circle of radius 15 (its sagitta 1.08e-5), and 0.08 of an ellipse of
+    // semi-axes 30 and 15 about the end of its minor axis, where its radius of curvature is 60
+    // (its sagitta 1.33e-5)
+    let (h, g) = (0.0012, 0.04 / 30.0);
+    let cases = [
+        (piece(15.0, 15.0, 0.0, h), p(15.0 * h.cos(), 15.0 * h.sin())),
+        (piece(30.0, 15.0, FRAC_PI_2 - g, g), p(0.0, 15.0)),
+    ];
+    for ((c, iv), mid) in cases {
+        for forward in [true, false] {
+            let r = read(&k, &c, iv, forward, &xy(), tol).unwrap();
+            let [seg] = r.as_slice() else {
+                panic!("one segment: {r:?}")
+            };
+            assert!(!matches!(seg, Seg2::Line { .. }), "read as a line: {seg:?}");
+            assert!(
+                seg.point_at(0.5).distance(mid) < 1e-9,
+                "{seg:?} misses the curve's middle {mid:?}"
+            );
+        }
+    }
+    // a rational quadratic whose control points lie on one line is that line
+    let (line, iv) = spline(
+        &k,
+        knots,
+        vec![
+            [0.0, 0.0, 0.0, 1.0],
+            [2.5, 0.0, 0.0, 0.5],
+            [10.0, 0.0, 0.0, 1.0],
+        ],
+    );
+    let r = read(&k, &line, iv, true, &xy(), tol).unwrap();
+    assert!(matches!(r[..], [Seg2::Line { .. }]), "{r:?}");
+}
+
 /// Samples do not certify: a C0 quadratic spline on the x axis at every knot k/16 and bowing 1
 /// off it in its first span is no line; a cubic retracing its line is none; a curve twice round
 /// a circle is no arc.

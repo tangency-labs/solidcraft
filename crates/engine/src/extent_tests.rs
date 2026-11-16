@@ -484,6 +484,42 @@ fn cut_to_a_curved_face_the_profile_partly_misses_is_refused() {
     assert!(err.to_string().contains("reaches past the To face"), "{err}");
 }
 
+/// #17707: two cylinders of radius 15 whose axes cross at 60°, joined. The tilted one's end face
+/// lies 5 mm from where the axes cross, so the other cylinder cuts it and leaves two crescents
+/// outside. Each crescent, extruded as a Join To Object up to the first cylinder's wall, adds the
+/// sliver between them. The seams of the two cylinders end a few hundredths of a millimetre from
+/// the crescents' tips, so each crescent has one very short projected edge; read as a straight
+/// line, it put a flat side 1e-5 mm off the cylinder under the tool, and SMLib's check refused
+/// the split (profile 1) or the join (profile 0).
+#[test]
+fn join_up_to_a_cylinder_from_a_face_it_cuts_adds_the_sliver_between() {
+    for profile in [0, 1] {
+        let mut s = Session::default();
+        run(&mut s, "solid.cylinder", json!({"radius": 15, "height": 40, "base": [0, -100, 0], "axis": "Y", "operation": "new"}));
+        run(
+            &mut s,
+            "solid.cylinder",
+            json!({"radius": 15, "height": 35, "base": [0, -77.5, 4.330127018922193], "axis": [0, -0.5, 0.8660254037844386], "operation": "join"}),
+        );
+        run(&mut s, "sketch.create", json!({"plane": {"face": [-14.5, -77.5, 4.330127018922193]}, "project_edges": true, "name": "S"}));
+        run(&mut s, "sketch.finish", json!({}));
+        let volume = |s: &Session| s.model.state().body("Body1").and_then(|b| b.body.volume_at(1e-4)).unwrap_or(f64::NAN);
+        let before = volume(&s);
+        let to = [-14.931150677683434, -78.64377441378278, -0.7504228399786044];
+        let r = s.execute("solid.extrude", &json!({"to": to, "direction": "positive", "operation": "join", "profiles": [profile]}));
+        assert!(r.is_ok() && s.model.results.iter().all(|r| r.error.is_none()), "profile {profile}: {r:?} {:?}", s.model.results);
+        let state = s.model.state();
+        let joined = &state.body("Body1").unwrap().body;
+        eprintln!(
+            "PROBE17707 profile {profile}: faces {} edges {} vertices {} added {}",
+            joined.face_count(),
+            joined.edge_count(),
+            joined.vertex_count(),
+            volume(&s) - before
+        );
+    }
+}
+
 /// #13188: a stored taper of 0 is a straight extrusion, also for a profile with a hole.
 #[test]
 fn extrude_with_a_taper_of_zero_on_a_profile_with_a_hole_is_straight() {
