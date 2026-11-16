@@ -30,6 +30,7 @@ use solidcore::geom::object::ObjectRef;
 use solidcore::kernel::{Kernel, KernelOptions};
 use solidcore::mass::integrator::properties::{brep_volume, PropertyAttributes};
 use solidcore::math::Point3;
+use solidcore::topology::brep::validation::{check_brep, CheckLevel};
 use solidcore::topology::brep::{p2, p3};
 use solidcore::topology::Brep;
 use solidcore::EntityRef;
@@ -113,6 +114,8 @@ fn join() -> (f64, f64, f64) {
     let mut union = boolean(k, &cone, &lip, BooleanOperation::Union);
     let mut common = boolean(k, &cone, &lip, BooleanOperation::Intersection);
     assert!(p2::is_manifold_solid(&union).unwrap());
+    let check = check_brep(k, &mut union, CheckLevel::Level2).unwrap();
+    assert_eq!(check.failure_count(), 0, "{:?}", check.lines());
     let worst_vertex = union
         .vertex_list()
         .iter()
@@ -128,8 +131,9 @@ fn join() -> (f64, f64, f64) {
     (worst_vertex, worst_edge, lost)
 }
 
-/// Every tolerance stays under 1e-4 (the creases' near miss is about 1.6e-5; upstream's
-/// were 1.73 mm), and union + intersection is the two skins' volumes.
+/// The union passes the level-2 check, every tolerance stays under 1e-4 (the creases' near
+/// miss is about 1.6e-5; upstream's were 1.73 mm), and union + intersection is the two
+/// skins' volumes.
 #[test]
 fn issue_1058_join_keeps_its_tolerances_with_the_fix() {
     let (vertex, edge, lost) = join();
