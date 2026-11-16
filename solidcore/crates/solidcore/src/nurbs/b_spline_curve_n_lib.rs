@@ -31,6 +31,7 @@
 //! | [`BSplineCurve::make_curves_compatible`]               | `SmBSplineCurve::MakeCurvesCompatible`         |
 //! | [`BSplineCurve::deform_to_end_point_targets`], [`InValueType`] | `SmBSplineCurve::DeformToEndPointTargets`, `SmInValueType` |
 //! | [`BSplineCurve::remove_knots`]                         | `SmBSplineCurve::RemoveKnots`                  |
+//! | [`BSplineCurve::remove_knot_certified`]                | (solidcore's: `N_CrvRemoveKnot` with a certified bound) |
 //! | [`BSplineCurve::reparametrize_with_arc_length`]        | `SmBSplineCurve::ReparametrizeWithArcLength`   |
 //! | [`BSplineCurve::make_non_rational`]                    | `SmBSplineCurve::MakeNonRational`              |
 //! | [`BSplineCurve::scale`]                                | `SmBSplineCurve::Scale(double)`                |
@@ -128,6 +129,7 @@
 //!   evaluations of `SetIntersectionCurveThroughPoint` (a failed one leaves upstream's
 //!   default-constructed vectors, [`Vec3::UNDEF`]).
 
+use crate::blend::fillet_section::interval::Ivl;
 use crate::error::nurbs::BSplineFailure;
 use crate::error::{nurbs::NurbsFailure, Result, SolidError};
 use crate::geom::axis2_placement::Axis2Placement;
@@ -184,7 +186,7 @@ const OP_APPROX_CRV: &str = "nurbs::b_spline_curve_n_lib::BSplineCurve::create_a
 const OP_DAMPEN: &str = "nurbs::b_spline_curve_n_lib::BSplineCurve::dampen_knot_spacing";
 const OP_DEG_RED: &str = "nurbs::b_spline_curve_n_lib::BSplineCurve::degree_reduction";
 const OP_INS_ONE: &str = "nurbs::b_spline_curve_n_lib::BSplineCurve::insert_one_knot";
-const OP_REMOVE_ONE: &str = "nurbs::b_spline_curve_n_lib::BSplineCurve::remove_one_knot";
+const OP_REMOVE_CERT: &str = "nurbs::b_spline_curve_n_lib::BSplineCurve::remove_knot_certified";
 const OP_THROUGH: &str =
     "nurbs::b_spline_curve_n_lib::BSplineCurve::set_intersection_curve_through_point";
 const OP_EVEN: &str = "nurbs::b_spline_curve_n_lib::BSplineCurve::equally_spaced_points";
@@ -354,6 +356,81 @@ fn nurb_of<'a>(curve: &'a BSplineCurve, operation: &'static str) -> Result<&'a C
         .nurb
         .as_ref()
         .ok_or_else(|| SolidError::b_spline(operation, BSplineFailure::NoNurbsForm))
+}
+
+/// Not upstream: an upper bound on the distance, at every parameter, between the
+/// non-rational curve `before` and `after`, which is `before` with its knot `knot`
+/// removed `removed` times ([`BSplineCurve::remove_knot_certified`]). `knot` is inserted
+/// back `removed` times into `after` by Boehm's algorithm in rounded interval arithmetic:
+/// each new control point `a P[i] + (1 - a) P[i-1]`, `a = (knot - U[i]) / (U[i+p] - U[i])`,
+/// is enclosed, so the enclosures hold the control points of `after` over `before`'s
+/// knot vector. With one basis (non-negative, summing to one) the curves differ by at
+/// most the largest distance between paired control points, taken as the upper end of
+/// its enclosure. `None` when that knot vector is not `before`'s bit for bit, a curve is
+/// rational, the point counts or dimensions differ, or a bound is not finite. The loops
+/// are bounded by `removed` and the point count.
+fn removal_moves_at_most(before: &Curve, after: &Curve, knot: f64, removed: usize) -> Option<f64> {
+    let p = before.degree();
+    let planar = before.cpts().first()?.z == NOZ;
+    let same_form = |c: &CPoint| c.w == NOW && (c.z == NOZ) == planar;
+    if after.degree() != p
+        || !before.cpts().iter().all(same_form)
+        || !after.cpts().iter().all(same_form)
+    {
+        return None;
+    }
+    let z = |c: &CPoint| if planar { 0.0 } else { c.z };
+    let mut u: Vec<f64> = after.knots().to_vec();
+    let mut q: Vec<[Ivl; 3]> = after
+        .cpts()
+        .iter()
+        .map(|c| [Ivl::from(c.x), Ivl::from(c.y), Ivl::from(z(c))])
+        .collect();
+    for _ in 0..removed {
+        // the span k with U[k] <= knot < U[k+1], inside the curve's knots
+        let k = u.iter().rposition(|&x| x <= knot)?;
+        if k < p || k + 1 >= u.len().checked_sub(p)? {
+            return None;
+        }
+        let mut next: Vec<[Ivl; 3]> = Vec::new();
+        for i in 0..=q.len() {
+            let point = if i + p <= k {
+                *q.get(i)?
+            } else if i > k {
+                *q.get(i.checked_sub(1)?)?
+            } else {
+                let ui = Ivl::from(*u.get(i)?);
+                let a = (Ivl::from(knot) - ui) / (Ivl::from(*u.get(i + p)?) - ui);
+                let b = Ivl::from(1.0) - a;
+                let [x1, y1, z1] = *q.get(i)?;
+                let [x0, y0, z0] = *q.get(i.checked_sub(1)?)?;
+                [a * x1 + b * x0, a * y1 + b * y0, a * z1 + b * z0]
+            };
+            next.push(point);
+        }
+        q = next;
+        let mut grown: Vec<f64> = u.iter().take(k + 1).copied().collect();
+        grown.push(knot);
+        grown.extend(u.iter().skip(k + 1));
+        u = grown;
+    }
+    if u.as_slice() != before.knots() || q.len() != before.cpts().len() {
+        return None;
+    }
+    let mut worst = 0.0_f64;
+    for (c, [x, y, w]) in before.cpts().iter().zip(&q) {
+        let (dx, dy, dz) = (
+            Ivl::from(c.x) - *x,
+            Ivl::from(c.y) - *y,
+            Ivl::from(z(c)) - *w,
+        );
+        let d = (dx * dx + dy * dy + dz * dz).sqrt().hi;
+        if !d.is_finite() {
+            return None;
+        }
+        worst = worst.max(d);
+    }
+    Some(worst)
 }
 
 /// A copy of the NURB of `curve` (`sm_CreateNlibCurve`: `N_AllocCrvAndArrays` +
@@ -1208,23 +1285,46 @@ impl BSplineCurve {
         Ok(())
     }
 
-    /// Not upstream: removes the interior knot `knot` `times` times when every removal
-    /// moves the curve by at most `tol` (`N_CrvRemoveKnot`, algorithm A5.8 with its
-    /// basis-maximum error bound, each removal bounded against the curve before it), so
-    /// the curve moves by at most `times * tol`. All or nothing: the curve is left as it
-    /// is, and `false` returned, when fewer removals pass.
+    /// Not upstream: removes the interior knot `knot` up to `times` times
+    /// (`N_CrvRemoveKnot`, algorithm A5.8, stopping at the first removal its error
+    /// estimate puts above `tol`), and keeps the `r` removals that pass only when a
+    /// certified bound says the curve moved by at most `r * tol`. Returns `r`; `0`
+    /// leaves the curve as it was.
+    ///
+    /// The certificate does not rest on A5.8's estimate (an exact-arithmetic bound with
+    /// a numerically found basis maximum). The knot is inserted back `r` times into the
+    /// result in rounded interval arithmetic (Boehm's algorithm). That encloses the
+    /// control points of the result over the original knot vector, so the two curves
+    /// share one basis, which is non-negative and sums to one: they differ nowhere by
+    /// more than the largest distance between paired control points, enclosed the same
+    /// way. A rational curve is left as it is: its basis depends on the weights, which a
+    /// removal changes.
     ///
     /// # Errors
     ///
     /// `SM_ERR` without a NURB; those of the removal for a knot on or outside the ends.
-    pub fn remove_one_knot(&mut self, knot: f64, times: usize, tol: f64) -> Result<bool> {
-        let cur_p = nurb_of(self, OP_REMOVE_ONE)?;
-        let removal = cur_p.remove_knot(knot, times, tol)?;
-        if removal.removed != times {
-            return Ok(false);
+    pub fn remove_knot_certified(&mut self, knot: f64, times: usize, tol: f64) -> Result<usize> {
+        let cur_p = nurb_of(self, OP_REMOVE_CERT)?;
+        if times == 0 || cur_p.cpts().iter().any(|c| c.w != NOW) {
+            return Ok(0);
         }
-        self.swap_in_nurb(&removal.curve);
-        Ok(true)
+        let removal = cur_p.remove_knot(knot, times, tol)?;
+        let removed = removal.removed;
+        if removed == 0 {
+            return Ok(0);
+        }
+        // the result as it would be stored (its knots fixed up), so the bound is on it
+        let candidate = Self::from_gw_nurb(self.dim, &removal.curve);
+        let after = nurb_of(&candidate, OP_REMOVE_CERT)?;
+        let Some(moved) = removal_moves_at_most(cur_p, after, knot, removed) else {
+            return Ok(0);
+        };
+        let budget = (Ivl::from(removed as f64) * Ivl::from(tol)).hi;
+        if moved.is_nan() || budget.is_nan() || moved > budget {
+            return Ok(0);
+        }
+        self.nurb = candidate.nurb;
+        Ok(removed)
     }
 
     /// Inserts the interior knot `knot` `times` times (`InsertOneKnot`,
@@ -2760,6 +2860,51 @@ fn end_span_is_pole(cpts: &[CPoint], first: usize, degree: usize, tol: f64) -> b
 mod tests {
     use super::*;
     use crate::nurbs::nurbs_crv::allocate_nurb_curve;
+
+    /// The removal certificate bounds the move at every parameter, sees a control point
+    /// the removal did not put there, and refuses a curve whose knots do not fit.
+    #[test]
+    fn the_removal_certificate_bounds_the_move_and_sees_a_moved_point() {
+        let pw = vec![
+            CPoint::new(0.0, 0.0, 0.0, NOW),
+            CPoint::new(1.0, 2.0, 0.5, NOW),
+            CPoint::new(3.0, 3.0, -1.0, NOW),
+            CPoint::new(4.0, 1.0, 2.0, NOW),
+            CPoint::new(6.0, 0.0, 1.0, NOW),
+        ];
+        let u = vec![0.0, 0.0, 0.0, 0.0, 1.0, 2.5, 2.5, 2.5, 2.5];
+        let before = Curve::new(pw, 3, u).unwrap();
+        let removal = before.remove_knot(1.0, 1, 10.0).unwrap();
+        assert_eq!(removal.removed, 1);
+        let after = BSplineCurve::from_gw_nurb(3, &removal.curve);
+        let after = nurb_of(&after, OP_REMOVE_CERT).unwrap().clone();
+        let bound = removal_moves_at_most(&before, &after, 1.0, 1).unwrap();
+        let sampled = |a: &Curve, b: &Curve| {
+            let (ca, cb) = (
+                BSplineCurve::from_gw_nurb(3, a),
+                BSplineCurve::from_gw_nurb(3, b),
+            );
+            (0..=250)
+                .map(|j| {
+                    let t = 0.01 * f64::from(j);
+                    let (p, q) = (ca.evaluate_point(t).unwrap(), cb.evaluate_point(t).unwrap());
+                    p.distance(q)
+                })
+                .fold(0.0_f64, f64::max)
+        };
+        let moved = sampled(&before, &after);
+        assert!(moved > 0.1 && moved <= bound, "{moved} {bound}");
+        // the first control point moved by 1e-3, which the reinsertion maps to itself
+        let mut nudged = after.clone();
+        nudged.cpts_mut()[0].x += 1e-3;
+        let b2 = removal_moves_at_most(&before, &nudged, 1.0, 1).unwrap();
+        assert!(
+            b2 >= bound.max(1e-3) && b2 >= sampled(&before, &nudged),
+            "{b2}"
+        );
+        // the knot reinserted twice does not give the curve's knots
+        assert!(removal_moves_at_most(&before, &after, 1.0, 2).is_none());
+    }
 
     fn cubic() -> BSplineCurve {
         let pts = [
