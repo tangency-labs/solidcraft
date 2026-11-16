@@ -1188,10 +1188,6 @@ fn cut_keeps_posts_joined_while_apart_in_one_body() {
     }
 }
 
-/// Designs saved before that fix combined the pieces the cut split off: tools "Posts" and
-/// "Posts (1)", or "Posts (1)" joined back into "Posts". The cut keeps them in "Posts" now, so
-/// the combine takes "Posts" and says the piece is part of it, instead of failing on
-/// "Posts (1)" and leaving both posts off the case. Any other missing body still fails.
 /// A later feature whose targets name a body an earlier Combine has since joined into its target
 /// (the Combine was edited to take it as a tool) works on that target and says so, as a Combine
 /// tool does, instead of failing with ``unknown body `Boss` `` (#17807). A body a Combine cut
@@ -1224,6 +1220,10 @@ fn a_target_an_earlier_combine_joined_in_is_the_body_it_is_part_of() {
     assert!(cut.error.as_deref().is_some_and(|e| e.contains("unknown body `Boss`")), "{:?}", cut.error);
 }
 
+/// Designs saved before that fix combined the pieces the cut split off: tools "Posts" and
+/// "Posts (1)", or "Posts (1)" joined back into "Posts". The cut keeps them in "Posts" now, so
+/// the combine takes "Posts" and says the piece is part of it, instead of failing on
+/// "Posts (1)" and leaving both posts off the case. Any other missing body still fails.
 #[test]
 fn combine_of_a_piece_a_cut_used_to_split_off_takes_the_body_it_is_part_of() {
     let posts_cut = || {
