@@ -2271,6 +2271,31 @@ fn a_tap_marking_still_searches_the_bodies_within_its_reach() {
     }
 }
 
+/// A tap marking in a part looks in that part's own bodies first: the bodies of other parts are
+/// in their own coordinates, so a part built alike has a face at the same point, and searching
+/// it too tessellated every such body for nothing.
+#[test]
+fn a_tap_marking_in_a_part_searches_that_parts_bodies_first() {
+    let mut doc = Document::new("parts");
+    let mut parts = Vec::new();
+    for name in ["A", "B"] {
+        let comp = doc.add_component(Some(name), 0).unwrap();
+        shaft(&mut doc, &format!("Shaft {name}"), Vec3::ZERO, 3.0, 6.0);
+        doc.features.last_mut().unwrap().component = comp;
+        parts.push(comp);
+    }
+    let mut model = Model::new();
+    model.evaluate(&doc);
+    let id = doc.add_feature(marking(Vec3::new(3.0, 0.0, 3.0)), None).unwrap();
+    doc.feature_mut(id).unwrap().component = parts[1];
+    let work = counted(|| model.evaluate(&doc));
+    assert_eq!(model.result(id).unwrap().error, None, "the marking builds");
+    assert_eq!(work.cylinder_search, 1, "only part B's shaft is searched");
+    let threads = &model.state().threads;
+    assert_eq!(threads.len(), 1);
+    assert_eq!(threads[0].body, "Shaft B");
+}
+
 /// A flat sheet of the default rule (2.5 mm steel) on a `w` x `h` rectangle from `corner` on XY.
 fn flat_sheet(doc: &mut Document, corner: Vec2, w: f64, h: f64) {
     let mut sk = Sketch::new();
