@@ -3788,31 +3788,68 @@ mod tests {
         )
     }
 
-    /// #18052: a pole edge that is not collapsed (the bilinear surface has none) must
-    /// not yield a success farther from the point than the guess or the pole.
+    /// #18052: the bilinear surface has no collapsed edge, so the pole the routine
+    /// assumes next to the guess is not one. A guess whose drop lands farther from the
+    /// point than the guess and the pole is a failure; every other inversion that is
+    /// reported must be no farther than the guess, and inversions that find the closest
+    /// point still succeed.
     #[test]
     fn near_singularity_never_reports_a_point_farther_than_the_guess() {
         let k = Kernel::default();
         let s = bilinear();
         let dom = Extent2d::from_bounds(0.0, 0.0, 1.0, 1.0);
         let tol = 1e-4;
+        let dist = |uv: Point2, p: Vec3| s.evaluate_point(&k, uv).unwrap().distance(p);
+
+        // The drop lands farther than the guess: reported as a success before the fix.
+        for (p, guess) in [
+            (Vec3::new(1.0, 1.5, 0.2), Point2::new(0.3, 0.5)),
+            (Vec3::new(-0.5, 2.0, 0.1), Point2::new(0.3, 0.5)),
+        ] {
+            assert!(
+                s.invert_point_near_singularity(&k, p, &dom, guess, tol)
+                    .is_err(),
+                "a drop farther than the guess at {p:?} was reported as a success"
+            );
+        }
+
+        // The drop finds a closer point: still a success, and closer than the guess.
+        let mut found = 0;
+        for (p, guess) in [
+            (Vec3::new(1.0, 1.5, 0.2), Point2::new(0.99, 0.4)),
+            (Vec3::new(-0.5, 2.0, 0.1), Point2::new(0.99, 0.4)),
+            (Vec3::new(0.3, -50.0, -4.0), Point2::new(0.01, 0.6)),
+            (Vec3::new(1.0, 40.0, 3.0), Point2::new(0.99, 0.4)),
+        ] {
+            let r = s
+                .invert_point_near_singularity(&k, p, &dom, guess, tol)
+                .unwrap();
+            assert!(dist(r.uv, p) <= dist(guess, p) + tol);
+            found += 1;
+        }
+        assert_eq!(found, 4);
+
+        // Whatever else is asked, a success is never farther than the guess.
         for p in [
-            Vec3::new(1.0, 40.0, 3.0),
             Vec3::new(-30.0, -2.0, 5.0),
             Vec3::new(2.0, 1.5, 100.0),
-            Vec3::new(0.3, -50.0, -4.0),
+            Vec3::new(5.0, 5.0, 5.0),
+            Vec3::new(-1.0, -1.0, 0.0),
+            Vec3::new(1.0, -8.0, 0.0),
         ] {
-            for guess in [Point2::new(0.99, 0.4), Point2::new(0.01, 0.6)] {
-                let Ok(r) = s.invert_point_near_singularity(&k, p, &dom, guess, tol) else {
-                    continue;
-                };
-                let guess_pt = s.evaluate_point(&k, guess).unwrap();
-                let got = s.evaluate_point(&k, r.uv).unwrap();
-                assert!(
-                    got.distance(p) <= guess_pt.distance(p) + tol,
-                    "result {:?} is farther from {p:?} than the guess",
-                    r.uv
-                );
+            for guess in [
+                Point2::new(0.99, 0.4),
+                Point2::new(0.01, 0.6),
+                Point2::new(0.5, 0.99),
+                Point2::new(0.3, 0.5),
+            ] {
+                if let Ok(r) = s.invert_point_near_singularity(&k, p, &dom, guess, tol) {
+                    assert!(
+                        dist(r.uv, p) <= dist(guess, p) + tol,
+                        "result {:?} is farther from {p:?} than the guess",
+                        r.uv
+                    );
+                }
             }
         }
     }

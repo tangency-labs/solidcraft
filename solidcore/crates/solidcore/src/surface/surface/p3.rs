@@ -2377,7 +2377,8 @@ mod tests {
     /// The flat sheet is planar to `SM_EFF_ZERO` (`IsPlanar` tests the unpadded pseudo
     /// box, `SmSurface.cpp:22371` at `3fd5b95`), so `GetMaxAnalyticDomain` expands it
     /// relatively by 100 instead of by half a span per cubic direction. The search over
-    /// that domain reaches the folded continuation and the cover fails, changing nothing.
+    /// that domain reaches the folded continuation and the cover fails, changing nothing;
+    /// the fold rule reports the turn.
     /// At `c9c5979` the padded box was not planar; the domain ended at the fold
     /// (u = 1.5) and only the fold rule (WR-407, #434) refused the cover.
     #[test]
@@ -2388,8 +2389,14 @@ mod tests {
             !covered.success,
             "the planar sheet's cover across the fold fails: {covered:?}"
         );
-        // The search failed before the fold rule ran.
-        assert_eq!(covered.fold, None);
+        // The search reaches the folded continuation and the fold rule names the turn, a
+        // little past the fold at u = 1.5 (#18052: a near-singularity inversion that
+        // lands farther than its guess now fails instead of ending the search early).
+        assert!(
+            matches!(covered.fold, Some(ContinuationFold::TurnsBack { uv, .. }) if uv.x > 1.5),
+            "the fold rule names the turn: {:?}",
+            covered.fold
+        );
         assert_eq!(u_max, 1.0);
         Ok(())
     }
