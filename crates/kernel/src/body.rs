@@ -769,6 +769,24 @@ impl Body {
         }
     }
 
+    /// The face of `self` nearest `p` within `tol`, or `None`.
+    pub fn face_at(&self, p: Vec3, tol: f64) -> Option<usize> {
+        if !p.is_finite() {
+            return None;
+        }
+        let (ops, order) = self.ops_body()?;
+        let dists = ops.face_distances_within(order, &[[p.x, p.y, p.z]], tol).ok()?;
+        dists
+            .into_iter()
+            .enumerate()
+            .filter_map(|(f, row)| {
+                let d = row.first().copied().flatten()?;
+                (d <= tol).then_some((d, f))
+            })
+            .min_by(|a, b| a.0.total_cmp(&b.0))
+            .map(|(_, f)| f)
+    }
+
     /// The face of `self` nearest `p` and its exact distance, or `None` for a mesh body or empty body.
     pub fn nearest_face(&self, p: Vec3) -> Option<(f64, usize)> {
         let (ops, order) = self.ops_body()?;
