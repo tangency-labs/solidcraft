@@ -677,10 +677,15 @@ pub fn judge_ball_at(k: &Kernel, solver: &mut SolverObject, pnt: &TsectPnt) -> R
 /// dropped on its surface extended it may land on another sheet of it (the far side of a
 /// boss), where the solve finds the ball rolling there (#15767). On a seam of that surface the
 /// point is taken on the side the ball rolls onto (`fillet_tangent_rollover::section_seeds`).
-/// Also not the fork's: a face's surface that closes on itself in a direction is solved over
-/// its natural interval there, wrapping across its seam (`FilletSolver::seam_domain`), not over
-/// that interval extended past the seam, where the extension is not the closed surface: a
-/// contact just past the seam of the face it rolls on is found on the same surface (#15767).
+/// Also not the fork's: with `seam` [`SeamDomain::Wrapped`], a face's surface that closes on
+/// itself in a direction is solved over its natural interval there, wrapping across its seam
+/// (`FilletSolver::seam_domain`), not over that interval extended past the seam, where the
+/// extension is not the closed surface: a contact just past the seam of the face it rolls on
+/// is found on the same surface (#15767). [`SeamDomain::Extended`] solves as the trace does,
+/// the domain extended past the seam: the proposal of a rollover of a round in a blend of
+/// several (`rails_wholly_past`) asks for it, as its acceptance after the trace cannot prove a
+/// rail rolled across a seam onto the rest of its surface, which the rollover recovery after
+/// the trace builds instead, as on main.
 ///
 /// [`rolled_edge_point`]: crate::blend::fillet_tangent_rollover::rolled_edge_point
 pub(crate) fn ball_section_at(
@@ -690,6 +695,7 @@ pub(crate) fn ball_section_at(
     edge_curve: &Curve,
     t: f64,
     guess: Option<&TsectPnt>,
+    seam: SeamDomain,
 ) -> Result<Option<TsectPnt>> {
     let ops = ops_of(solver);
     let bases: [Surface; 2] = {
@@ -750,11 +756,12 @@ pub(crate) fn ball_section_at(
         dropped = drop.success;
         *g = drop.result_uv;
     }
-    // the plane solves wrap a closed base across its seam (`FilletSolver::seam_domain`): a
-    // contact just past the seam lies on the same surface, where the domain extended past the
-    // seam is no longer it; the solver's own flag back after, whatever the solves did
+    // the plane solves on the caller's domain (`FilletSolver::seam_domain`): wrapped, a closed
+    // base across its seam, as a contact just past the seam lies on the same surface, where the
+    // domain extended past the seam is no longer it; the solver's own flag back after, whatever
+    // the solves did
     let saved = ops.solver().seam_domain;
-    ops.solver_mut().seam_domain = SeamDomain::Wrapped;
+    ops.solver_mut().seam_domain = seam;
     let solved = solve_section(
         ops,
         k,
@@ -849,7 +856,15 @@ fn regular_at(
     }
     let mut found = false;
     let result = (|| -> Result<()> {
-        if let Some(pnt) = ball_section_at(k, target, solver, edge_curve, t, near.0.as_ref())? {
+        if let Some(pnt) = ball_section_at(
+            k,
+            target,
+            solver,
+            edge_curve,
+            t,
+            near.0.as_ref(),
+            SeamDomain::Wrapped,
+        )? {
             found = true;
             let judged = judge_ball_at(k, solver, &pnt);
             near.0 = Some(pnt);
@@ -1419,14 +1434,22 @@ mod tests {
             )
             .unwrap();
             let t = edge.natural_interval().evaluate(0.5);
-            let section = ball_section_at(&k, &mut target, &mut solver, &edge, t, None)
-                .unwrap()
-                .unwrap_or_else(|| {
-                    panic!(
-                        "ø60 on rail {}: no section",
-                        order.iter().position(|&l| l == 0).unwrap()
-                    )
-                });
+            let section = ball_section_at(
+                &k,
+                &mut target,
+                &mut solver,
+                &edge,
+                t,
+                None,
+                SeamDomain::Wrapped,
+            )
+            .unwrap()
+            .unwrap_or_else(|| {
+                panic!(
+                    "ø60 on rail {}: no section",
+                    order.iter().position(|&l| l == 0).unwrap()
+                )
+            });
             assert!(
                 ops_of(&mut solver).solver().seam_domain == SeamDomain::Extended,
                 "the flag is restored"
@@ -1442,6 +1465,36 @@ mod tests {
                 assert!(
                     got.distance(want) < 1e-6,
                     "first {first} rail {rail}: {got:?} vs {want:?}"
+                );
+            }
+            // on the domain extended past the seam, as the trace solves, with the ø60 wall on
+            // the first rail its contact is not found there: the extension past the seam is not
+            // the closed surface (on the second rail the extended solve happens to reach it)
+            if first != 0 {
+                continue;
+            }
+            let extended = ball_section_at(
+                &k,
+                &mut target,
+                &mut solver,
+                &edge,
+                t,
+                None,
+                SeamDomain::Extended,
+            )
+            .unwrap();
+            if let Some(section) = extended {
+                let rail = order.iter().position(|&l| l == 0).unwrap();
+                let uv = section.uv_pos(if rail == 0 {
+                    SrfIndex::First
+                } else {
+                    SrfIndex::Second
+                });
+                let got = walls[0].0.evaluate_point(&k, uv).unwrap();
+                let want = contact(lobes[0]);
+                assert!(
+                    got.distance(want) > 1e-3,
+                    "first {first}: extended found {got:?}"
                 );
             }
         }

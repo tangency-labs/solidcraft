@@ -2120,3 +2120,74 @@ fn a_lone_round_between_a_plane_and_a_cylinder_rolls_over_the_seam() {
         }
     }
 }
+
+/// The area an R `r` round takes from the corner where the disc of radius `big` about the
+/// origin meets the line y = `h` (0 < h < big), the corner at (sqrt(big^2 - h^2), h): the region
+/// bounded by the line from the corner to the ball's contact, the ball to its contact on the
+/// circle, and the circle back to the corner, by Green's theorem over its line and two arcs.
+fn disc_corner_round_area(big: f64, h: f64, r: f64) -> f64 {
+    let corner = ((big * big - h * h).sqrt(), h);
+    let centre = (((big - r).powi(2) - (h - r).powi(2)).sqrt(), h - r);
+    let t1 = (centre.0, h);
+    let l = (big - r) / big;
+    let t2 = (centre.0 / l, centre.1 / l);
+    let angle = |cx: f64, cy: f64, q: (f64, f64)| (q.1 - cy).atan2(q.0 - cx);
+    let short = |from: f64, to: f64| {
+        let mut d = to - from;
+        while d > PI {
+            d -= 2.0 * PI;
+        }
+        while d < -PI {
+            d += 2.0 * PI;
+        }
+        from + d
+    };
+    let arc = |cx: f64, cy: f64, rad: f64, from: f64, to: f64| {
+        0.5 * (rad * rad * (to - from) + cx * rad * (to.sin() - from.sin())
+            - cy * rad * (to.cos() - from.cos()))
+    };
+    let (s1, s2) = (angle(centre.0, centre.1, t1), angle(centre.0, centre.1, t2));
+    let (q2, p2) = (angle(0.0, 0.0, t2), angle(0.0, 0.0, corner));
+    let total = 0.5 * (corner.0 * t1.1 - t1.0 * corner.1)
+        + arc(centre.0, centre.1, r, s1, short(s1, s2))
+        + arc(0.0, 0.0, big, q2, short(q2, p2));
+    total.abs()
+}
+
+/// #17349's cover, its first fillet (`CornerR18`): R18 on the four straight edges where a disc
+/// of radius 100, seamed at 35.13 deg as SolidCraft seams its cylinders, meets the flats
+/// y = +-60. The (80, 60) round's contact on the disc passes its seam, 1.74 deg from the edge.
+/// A round of a blend of several is proposed rolled over a smooth far edge only where its
+/// acceptance after the trace can prove it, which a rail rolled across a seam onto the rest of
+/// its surface is not: wrapping that proposal's sections across the seam refused this fillet
+/// (`RailLeavesFace`), where the rollover recovery after the trace builds it, as on main.
+#[test]
+fn four_rounds_on_a_seamed_disc_build_across_its_seam() {
+    fixes();
+    let mut input = seamed_cylinder(([0.0, 0.0], 100.0), LOBE_SEAM.to_degrees(), 0.0, 30.0);
+    for y in [60.0, -120.0] {
+        let cut = make_box([-110.0, y, -5.0], [220.0, 60.0, 40.0]).unwrap();
+        input = boolean(input, cut, BooleanOp::Subtract).unwrap().unwrap();
+    }
+    // the premise: the (80, 60) round's contact on the disc lies past the seam
+    let centre_angle = (42.0_f64 / 82.0).asin();
+    assert!(centre_angle < LOBE_SEAM && 0.6_f64.atan2(0.8) > LOBE_SEAM);
+    let corners = [[80.0, 60.0], [-80.0, 60.0], [80.0, -60.0], [-80.0, -60.0]];
+    let b = input.copy().unwrap();
+    let edges: Vec<usize> = corners
+        .iter()
+        .map(|c| edge_at(&b, [c[0], c[1], 15.0]))
+        .collect();
+    blend(&b, Blend::Round, &edges, &[18.0; 4], &[], Corners::Filled)
+        .unwrap_or_else(|err| panic!("{err:?}"));
+    let report = b.check(CheckLevel::All).unwrap();
+    assert!(report.is_valid(), "{report}");
+    // the band |y| <= 60 of the disc, less the four corners' rounds
+    let band = 2.0 * (60.0 * 80.0 + 10000.0 * 0.6_f64.asin());
+    let expected = 30.0 * (band - 4.0 * disc_corner_round_area(100.0, 60.0, 18.0));
+    let v = b.volume(1e-9).unwrap();
+    assert!(
+        (v - expected).abs() < 1e-6 * expected,
+        "volume {v}, expected {expected}"
+    );
+}

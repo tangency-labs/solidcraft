@@ -34,7 +34,7 @@ use crate::blend::fillet_custom_solver::{OffsetSurface, SurfaceId};
 use crate::blend::fillet_geom::p1::FilletSolverId;
 use crate::blend::fillet_solver::p1::{
     test_manifold_tangent_rollover, FilletSolver, FilletSurfaceGenerator,
-    FilletSurfaceGeneratorType, OffsetSurfaceSlot,
+    FilletSurfaceGeneratorType, OffsetSurfaceSlot, SeamDomain,
 };
 use crate::blend::fillet_tangent_rollover::{tangent_rollover_supports, Rollover};
 use crate::curve::curve::Curve;
@@ -284,7 +284,20 @@ fn sections(
     let mut out: Vec<TsectPnt> = Vec::new();
     for &t in ts {
         k.check_cancelled(OP)?;
-        let Some(section) = ball_section_at(k, target, solver, curve, t, out.last())? else {
+        // on the trace's domain, extended past a closed surface's seam: a rail rolled across a
+        // seam onto the rest of its surface is not proposed here, as its acceptance after the
+        // trace ([`rail_within_face`]) cannot prove it; the rollover recovery after the trace
+        // builds it, as on main
+        let Some(section) = ball_section_at(
+            k,
+            target,
+            solver,
+            curve,
+            t,
+            out.last(),
+            SeamDomain::Extended,
+        )?
+        else {
             return Ok(None);
         };
         if !is_ball_at(k, target, solver, offsets, curve, t, &section)? {
@@ -513,7 +526,16 @@ fn sides_wholly_off(
     let mut previous: Option<TsectPnt> = None;
     for &t in &ts {
         k.check_cancelled(OP)?;
-        let Some(section) = ball_section_at(k, target, solver, &curve, t, previous.as_ref())?
+        // on the trace's domain, as in [`sections`]
+        let Some(section) = ball_section_at(
+            k,
+            target,
+            solver,
+            &curve,
+            t,
+            previous.as_ref(),
+            SeamDomain::Extended,
+        )?
         else {
             return Ok(None);
         };
