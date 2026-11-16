@@ -430,9 +430,10 @@ fn an_open_sheet_with_crossing_loops_offsets_only_merged() {
 }
 
 /// The same sheet thickened by 2 into the L (`create_offset_solid`), results not merged:
-/// refused as [`LoopCrossing::Unmerged`] like its plain offset. The hole moved to (10, 5), well clear of the bend, it
-/// thickens unmerged into a valid manifold solid of the closed-form volume: the L's two
-/// slabs (20 x 10 x 2 and 2 x 10 x 8) less the hole's r 1 x 2 cylinder.
+/// refused as [`LoopCrossing::Unmerged`] like its plain offset (the same refusal, no branch
+/// of its own). The hole moved to (10, 5), well clear of the bend, it thickens unmerged into
+/// a valid manifold solid of the closed-form volume: the L's two slabs (20 x 10 x 2 and
+/// 2 x 10 x 8) less the hole's r 1 x 2 cylinder.
 #[test]
 fn a_thickened_sheet_with_crossing_loops_unmerged_is_refused() {
     let thicken = |k: &mut Kernel, hole_x: f64| {
