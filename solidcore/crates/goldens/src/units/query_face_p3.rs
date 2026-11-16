@@ -1362,12 +1362,6 @@ mod tight_box_certificate {
         ("query.brep", "gen0571"),
     ];
 
-    /// Sides that miss their face. brep gen0128's body fails `check_brep` Level 2
-    /// (`SmBSplineSurface` test 5, its control net doubles back): its face's boundary along
-    /// u = 0 rises to z 0.4367128727741, a certified lower bound taken at a point of that
-    /// pcurve, while the search starts from the edges' boxes, which stop at 0.435344.
-    const KNOWN_MISSES: &[&str] = &["gen0128 face 0 +z"];
-
     #[test]
     #[ignore = "re-runs the moved cases of three golden units and refines each face's bounds"]
     fn moved_tight_box_rows_hold_their_faces() {
@@ -1421,14 +1415,11 @@ mod tight_box_certificate {
                             let short = bd.upper - side;
                             let tag = format!("{name} face {} {}{}", f.index(), if sign > 0.0 { "+" } else { "-" }, ["x", "y", "z"][axis]);
                             // every side holds its face to within 1e-9 of its size (the
-                            // refinement's budget; most to 1e-13), but brep gen0128's z max,
-                            // which misses a point of its face's boundary by 1.37e-3
-                            if KNOWN_MISSES.contains(&tag.as_str()) {
-                                if short <= 1e-3 * scale {
-                                    failures.push(format!("{tag}: no longer misses its face ({short:e})"));
-                                }
-                            } else if short > 1e-9 * scale {
-                                failures.push(format!("{tag}: short of its face's certified bound by {short:e}"));
+                            // refinement's budget; most to 1e-13)
+                            if short > 1e-9 * scale {
+                                failures.push(format!(
+                                    "{tag}: short of its face's certified bound by {short:e}"
+                                ));
                             }
                             report.push(format!(
                                 "{unit_id} {name} face {} {}{}: side {:.17e} certified [{:.17e}, {:.17e}] side short of upper by {:.3e} ({:.2e} rel) items {}",
