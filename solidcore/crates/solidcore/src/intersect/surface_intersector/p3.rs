@@ -89,7 +89,7 @@
 //!   `SM_ASSERT`s (no-ops in release builds) and the user pointers
 //!   (`m_apUserPointer`, not modelled by [`TsectPnt`]).
 
-use crate::blend::blend_corner::on_face::{bezier_pieces, Hom};
+use crate::blend::blend_corner::on_face::{bezier_pieces, pieces_rounding, Hom};
 use crate::blend::fillet_standard_solver::p1::FilletLaw;
 use crate::curve::curve::Curve;
 use crate::error::{passed_on, Result, SolidError};
@@ -808,12 +808,15 @@ impl SurfaceIntersector<'_> {
     /// chord `[a, b]` stays within `d` of it. A piece of the boundary from `a` to `b` whose
     /// control points are within `e` of the line through them passes within `e` of each
     /// point of the chord (its foot on the line runs from `a` to `b`). Where the computed
-    /// points are within `r` of the exact ones, the boundary piece is within `e + r` of the
-    /// line and its exact ends within `r` of `a` and `b`, so within `e + 2 r` of each point
-    /// of the chord. Each piece of the curve needs one piece of the boundary with `d + e`,
-    /// the curve piece's `r` and twice the boundary piece's below the tolerance. False otherwise: also for a curve or boundary [`bezier_pieces`] does not
-    /// cut (another kind, a weight not positive, a failed decomposition) or a boundary
-    /// piece whose ends coincide; such a curve is kept.
+    /// points are within `r` of the exact ones ([`pieces_rounding`]), the boundary piece is
+    /// within `e + r` of the line and its exact ends within `r` of `a` and `b`, so within
+    /// `e + 2 r` of each point of the chord. Each piece of the curve needs one piece of the
+    /// boundary with `d + e`, the curve's `r` and twice the boundary's below the tolerance,
+    /// the sum rounded up by `gamma(4)`. False otherwise: also for a curve or boundary
+    /// [`bezier_pieces`] does not cut (another kind, a weight not positive, a failed
+    /// decomposition) or whose rounding is not bounded. A boundary piece whose ends coincide
+    /// gives no chord, and one that bends away from its chord by the tolerance gives none a
+    /// curve piece is near, so a curve along an arc of the boundary is kept.
     ///
     /// # Errors
     ///
@@ -834,12 +837,17 @@ impl SurfaceIntersector<'_> {
         else {
             return Ok(false);
         };
+        let (Some(r_curve), Some(r_boundary)) =
+            (pieces_rounding(k, curve)?, pieces_rounding(k, boundary)?)
+        else {
+            return Ok(false);
+        };
         // each boundary piece's chord and how far the piece strays from it, its rounding
         // counted twice (its points off the line, its ends off the chord's)
         let mut chords = Vec::new();
         for piece in &along {
             k.check_cancelled(OP_ALONG)?;
-            let Some((points, rounding)) = hull_points(piece) else {
+            let Some(points) = euclidean(piece) else {
                 return Ok(false);
             };
             let (Some(&a), Some(&b)) = (points.first(), points.last()) else {
@@ -848,24 +856,27 @@ impl SurfaceIntersector<'_> {
             let stray = points
                 .iter()
                 .map(|&q| distance_to_chord(q, a, b, false))
-                .try_fold(0.0f64, |m, d| d.map(|d| m.max(d)))
-                .map(|e| e + 2.0 * rounding);
+                .try_fold(0.0f64, |m, d| d.map(|d| m.max(d)));
             if let Some(stray) = stray {
-                chords.push((a, b, stray));
+                chords.push((a, b, stray + 2.0 * r_boundary));
             }
         }
         for piece in &pieces {
-            k.check_cancelled(OP_ALONG)?;
-            let Some((points, rounding)) = hull_points(piece) else {
+            let Some(points) = euclidean(piece) else {
                 return Ok(false);
             };
-            let near = chords.iter().any(|&(a, b, stray)| {
-                points
+            let mut near = false;
+            for &(a, b, stray) in &chords {
+                k.check_cancelled(OP_ALONG)?;
+                let far = points
                     .iter()
                     .map(|&p| distance_to_chord(p, a, b, true))
-                    .try_fold(0.0f64, |m, d| d.map(|d| m.max(d)))
-                    .is_some_and(|far| far + rounding + stray < tol)
-            });
+                    .try_fold(0.0f64, |m, d| d.map(|d| m.max(d)));
+                if far.is_some_and(|far| (far + r_curve + stray) * (1.0 + gamma(4)) < tol) {
+                    near = true;
+                    break;
+                }
+            }
             if !near {
                 return Ok(false);
             }
@@ -2143,33 +2154,26 @@ fn surface_drop_and_trim_curve<O: Copy + PartialEq>(
     })
 }
 
-/// The Euclidean control points of a rational Bézier piece (its homogeneous points) and
-/// the bound of their rounding: `3 gamma(10)` of its largest homogeneous coordinate over
-/// its least weight (shrunk by the weights' own rounding), for the 8 operations of the knot
-/// insertions that cut it from its B-spline and the division, as
-/// `blend_corner::on_face` bounds an unhalved piece. `None` where a weight is not positive
-/// or a coordinate not finite.
-fn hull_points(piece: &[Hom]) -> Option<(Vec<Vec3>, f64)> {
-    let (mut most, mut w_min) = (0.0f64, f64::INFINITY);
-    let mut points = Vec::with_capacity(piece.len());
+/// The Euclidean control points of a rational Bézier piece (its homogeneous points);
+/// `None` where a weight is not positive or a coordinate not finite.
+fn euclidean(piece: &[Hom]) -> Option<Vec<Vec3>> {
+    let mut points = Vec::new();
     for h in piece {
         let positive = h[3] > 0.0;
         if !(positive && h.iter().all(|c| c.is_finite())) {
             return None;
         }
-        most = most.max(h[0].abs()).max(h[1].abs()).max(h[2].abs());
-        w_min = w_min.min(h[3]);
         points.push(Vec3::new(h[0] / h[3], h[1] / h[3], h[2] / h[3]));
     }
-    let rounding = 3.0 * gamma(10) * most / (w_min * (1.0 - gamma(8)));
-    rounding.is_finite().then_some((points, rounding))
+    Some(points)
 }
 
 /// The distance from `p` to the segment `[a, b]` (`clamp`) or to the line through `a` and
 /// `b`, plus the bound of its rounding: `8 gamma(16)` of the largest coordinate `s` of the
-/// three (the differences, dot products, quotient and root are at most 16 rounded
-/// operations on numbers of at most `2 sqrt 3 s`). `None` where `a` and `b` coincide or a
-/// number is not finite.
+/// three. Whatever the quotient `t` rounds to, the point `a + t (b - a)` is on the line (in
+/// the segment once clamped), so the distance to it bounds the distance from above; the
+/// differences, products, sums and root are at most 16 rounded operations on numbers of
+/// at most `4 sqrt 3 s`. `None` where `a` and `b` coincide or a number is not finite.
 fn distance_to_chord(p: Vec3, a: Vec3, b: Vec3, clamp: bool) -> Option<f64> {
     let size = [p, a, b].iter().fold(0.0f64, |m, c| {
         m.max(c.x.abs()).max(c.y.abs()).max(c.z.abs())
@@ -2491,9 +2495,11 @@ mod tests {
 
     /// #11749: a crossing curve through a deferred contact that runs within the tolerance
     /// along the contact's boundary curve, either way round, is the contact and gives way
-    /// to its touching point. A curve through it that leaves the boundary stays and covers
-    /// it: by twice the tolerance at its far end, by 0.1, or by 0.012 in its middle with
-    /// both ends on the boundary. A tangent curve along the boundary stays too.
+    /// to its touching point, a cubic of two pieces that wavers within half the tolerance
+    /// too. A curve through it that leaves the boundary stays and covers it: by twice the
+    /// tolerance at its far end, by 0.1, by 0.012 in its middle with both ends on the
+    /// boundary, by 3 tolerances between the points it is on the boundary at, or along the
+    /// boundary's line past its end. A tangent curve along the boundary stays too.
     #[test]
     fn a_crossing_curve_along_the_boundary_of_a_deferred_contact_gives_way_to_it() {
         let k = &Kernel::default();
@@ -2537,6 +2543,19 @@ mod tests {
         }
         let out = run(line(at, [0.3, 0.5, 0.5 * tol]), TsectCurveType::NearTangent);
         assert_eq!(out.curve_types, [TsectCurveType::Touching]);
+        let cubic = |zs: [f64; 5], knots: Vec<f64>| {
+            let pw = [0.0, 0.25, 0.5, 0.75, 1.0]
+                .iter()
+                .zip(zs)
+                .map(|(&s, z)| CPoint::new(0.2 + 0.1 * s, 0.5, z * tol, NOW))
+                .collect();
+            let c = NurbCurve::new(pw, 3, knots).expect("cubic");
+            Curve::from(BSplineCurve::from_nurb(c, 3, false))
+        };
+        let two = vec![0.0, 0.0, 0.0, 0.0, 0.5, 1.0, 1.0, 1.0, 1.0];
+        let waver = cubic([0.0, 0.4, 0.1, 0.45, 0.3], two);
+        let out = run(waver, TsectCurveType::Crossing);
+        assert_eq!(out.curve_types, [TsectCurveType::Touching]);
         // leaving the boundary: the curve stays and covers the point
         for far in [2.0 * tol, 0.1] {
             let out = run(line(at, [0.3, 0.5, far]), TsectCurveType::Crossing);
@@ -2565,6 +2584,9 @@ mod tests {
         let off = wave.evaluate_point(k, 0.25).unwrap().z;
         assert!((off - 3.0 * tol).abs() < 1e-3 * tol, "{off}");
         let out = run(wave, TsectCurveType::Crossing);
+        assert_eq!(out.curve_types, [TsectCurveType::Crossing]);
+        // along the boundary's line past its end at x = 1
+        let out = run(line(at, [1.2, 0.5, 0.0]), TsectCurveType::Crossing);
         assert_eq!(out.curve_types, [TsectCurveType::Crossing]);
         // a tangent curve along the boundary is no crossing
         let out = run(line(at, [0.3, 0.5, 0.5 * tol]), TsectCurveType::Tangent);
