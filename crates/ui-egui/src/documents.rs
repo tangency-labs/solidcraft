@@ -782,6 +782,18 @@ pub fn views_info(app: &SolveApp, design: usize) -> Vec<(DesignView, bool)> {
     views_of(app, design).map(|set| set.views().iter().map(|view| (view.clone(), view.id == set.active().id)).collect()).unwrap_or_default()
 }
 
+/// Whether the sub-tabs of the design in tab `design` are folded into its tab. False for a tab
+/// that does not exist.
+pub fn views_collapsed(app: &SolveApp, design: usize) -> bool {
+    views_of(app, design).is_some_and(ViewSet::collapsed)
+}
+
+/// Fold the shown design's sub-tabs into its tab (`collapsed`: its name and how many views it
+/// has, with a chevron that shows them again), or show them. The views are unchanged.
+pub fn view_collapse(app: &mut SolveApp, collapsed: bool) {
+    app.docs.views.set_collapsed(collapsed);
+}
+
 /// How many views each design has, in tab order (the count badge of a tab with more than one).
 pub fn view_counts(app: &SolveApp) -> Vec<usize> {
     (0..app.docs.count()).map(|design| views_of(app, design).map_or(1, ViewSet::len)).collect()
@@ -832,6 +844,11 @@ pub(crate) fn view_command(app: &mut SolveApp, command: &str, mut v: Value) -> R
             Some(asked)
         }
         "tab.view.duplicate" => Some(view_duplicate(app, asked).ok_or("there is no such view, or the design has too many views")?),
+        "tab.view.collapse" => {
+            let collapsed = v.get("collapsed").and_then(Value::as_bool).unwrap_or(!app.docs.views.collapsed());
+            view_collapse(app, collapsed);
+            None
+        }
         "tab.view.move" => {
             let len = app.docs.views.len();
             let (from, to) = (place("from").filter(|n| *n < len), place("to").filter(|n| *n < len));
@@ -845,6 +862,9 @@ pub(crate) fn view_command(app: &mut SolveApp, command: &str, mut v: Value) -> R
     if let Some(reply) = v.as_object_mut() {
         if let Some(id) = id {
             reply.insert("id".into(), json!(id));
+        }
+        if matches!(command, "tab.view.collapse" | "tab.view.list") {
+            reply.insert("collapsed".into(), json!(app.docs.views.collapsed()));
         }
         if command == "tab.view.list" {
             let list = views_info(app, app.docs.active)
@@ -1694,6 +1714,7 @@ const TAB_HANDLES: crate::app_bar::TabHandles<'static> = crate::app_bar::TabHand
     view_new: "tab:view_new",
     view_more: "tab:view_more",
     switcher: "tab:switcher",
+    view_collapse: "tab:view_collapse",
 };
 
 /// How far below the bar (points) a design tab is released to tear it off: the distance
@@ -1779,6 +1800,7 @@ pub fn tabs(app: &mut SolveApp, ui: &mut egui::Ui, r: Rect, x0: f32, x1: f32) {
     let design_views: Vec<Vec<(DesignView, bool)>> = (0..n).map(|design| views_info(app, design)).collect();
     let view_tips: Vec<Vec<String>> =
         design_views.iter().map(|views| views.iter().enumerate().map(|(k, (view, _))| view_tip(view, k)).collect()).collect();
+    let folded: Vec<bool> = (0..n).map(|design| views_collapsed(app, design)).collect();
     let view_tabs: Vec<Vec<crate::app_bar::ViewTab>> = design_views
         .iter()
         .zip(&view_tips)
@@ -1794,13 +1816,15 @@ pub fn tabs(app: &mut SolveApp, ui: &mut egui::Ui, r: Rect, x0: f32, x1: f32) {
                 .zip(&places)
                 .zip(&badges)
                 .zip(&view_tabs)
-                .map(|(((((list_name, dirty), name), place), security), views)| crate::app_bar::DocTab {
+                .zip(&folded)
+                .map(|((((((list_name, dirty), name), place), security), views), collapsed)| crate::app_bar::DocTab {
                     name,
                     list_name,
                     dirty: *dirty,
                     place,
                     security: *security,
                     views,
+                    collapsed: *collapsed,
                 })
                 .collect(),
             selected,
@@ -1826,6 +1850,8 @@ pub fn tabs(app: &mut SolveApp, ui: &mut egui::Ui, r: Rect, x0: f32, x1: f32) {
                 new_view: solidcraft_ui_text::tr_label("Open another view"),
                 more: more_text,
                 switch_view: solidcraft_ui_text::tr("tab_strip.switch_view"),
+                collapse_views: solidcraft_ui_text::tr("tab_strip.collapse_views"),
+                expand_views: solidcraft_ui_text::tr("tab_strip.expand_views"),
             },
             view_menu: &crate::design_view_ui::VIEW_MENU,
             view_right_row: crate::design_view_ui::VIEW_CLOSE_RIGHT,
@@ -3401,8 +3427,8 @@ mod tests {
     }
 
     /// With "Reopen a design's views" on, a saved design's views come back when it opens again:
-    /// those that can still be shown, nothing from a stale memory, and nothing at all when the
-    /// preference is off.
+    /// those that can still be shown, folded into its tab if they were, nothing from a stale
+    /// memory, and nothing at all when the preference is off.
     #[test]
     fn a_design_gets_its_remembered_views_back_when_the_preference_is_on() {
         let dir = std::env::temp_dir().join(format!("solidcraft-documents-views-{}", std::process::id()));
@@ -3422,6 +3448,7 @@ mod tests {
         remember_views_in(&h.app, 0, &dir);
         assert!(!dir.exists(), "off: nothing is kept");
         h.app.preferences.design_reopen_views = true;
+        view_collapse(&mut h.app, true);
         remember_views_in(&h.app, 0, &dir);
         h.app.docs.views = ViewSet::new();
         h.app.preferences.design_reopen_views = false;
@@ -3432,6 +3459,7 @@ mod tests {
         let kinds: Vec<ViewKind> = h.app.docs.views.views().iter().map(|view| view.kind).collect();
         assert_eq!(kinds, [ViewKind::Model, ViewKind::Sketch], "the sheet has no workspace yet");
         assert_eq!(h.app.docs.views.active().kind, ViewKind::Model);
+        assert!(h.app.docs.views.collapsed(), "folded sub-tabs come back folded");
         // A sketch the design no longer has is dropped, and with nothing left the views stay.
         let mut stale = ViewSet::new();
         stale.open(ViewKind::Sketch, Some("987654".into()), true);
@@ -3441,6 +3469,42 @@ mod tests {
         restore_views_in(&mut h.app, &path, &dir);
         assert_eq!(h.app.docs.views.len(), 2);
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// The chevron between a design's + and × folds its sub-tabs into its tab and shows them
+    /// again; `tab.view.collapse` does the same (toggling without `collapsed`), `tab.view.list`
+    /// says which, and each design keeps its own.
+    #[test]
+    fn the_chevron_and_the_command_fold_a_designs_sub_tabs() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.app.preferences.design_views_as_tabs = true;
+        let call =
+            |h: &mut crate::scenario::Harness, command: &str, params: Value| h.call("engine.execute", json!({"command": command, "params": params}));
+        assert_eq!(call(&mut h, "tab.view.open", json!({"kind": "animation"}))["ok"], true);
+        h.frames(2);
+        assert!(crate::scenario::rect_of("tab:view:1").is_some(), "the sub-tabs are shown");
+        h.step(&json!({"click": {"handle": "tab:view_collapse"}})).unwrap();
+        h.frames(2);
+        assert!(h.app.docs.views.collapsed());
+        assert!(crate::scenario::rect_of("tab:view:1").is_none(), "folded: no sub-tabs");
+        assert!(crate::scenario::rect_of("tab:view_collapse").is_some(), "the chevron stays to show them again");
+        assert_eq!(call(&mut h, "tab.view.list", json!({}))["result"]["collapsed"], true);
+        h.step(&json!({"click": {"handle": "tab:view_collapse"}})).unwrap();
+        h.frames(2);
+        assert!(!h.app.docs.views.collapsed() && crate::scenario::rect_of("tab:view:1").is_some(), "shown again");
+        // The command: toggling, then as asked.
+        assert_eq!(call(&mut h, "tab.view.collapse", json!({}))["result"]["collapsed"], true);
+        assert_eq!(call(&mut h, "tab.view.collapse", json!({"collapsed": true}))["result"]["collapsed"], true);
+        assert_eq!(call(&mut h, "tab.view.collapse", json!({"collapsed": false}))["result"]["collapsed"], false);
+        assert_eq!(call(&mut h, "tab.view.collapse", json!({"collapsed": "yes"}))["ok"], false);
+        // Each design keeps its own: folding the second leaves the first as it was.
+        call(&mut h, "tab.view.collapse", json!({"collapsed": true}));
+        open_tab(&mut h.app, Session::default()).unwrap();
+        assert!(!views_collapsed(&h.app, 1));
+        call(&mut h, "tab.view.open", json!({"kind": "render"}));
+        switch(&mut h.app, 0);
+        assert!(views_collapsed(&h.app, 0) && !views_collapsed(&h.app, 1));
     }
 
     /// #3187: dragging a tab along the strip drops it where it is released; a drag mostly down

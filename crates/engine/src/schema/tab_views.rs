@@ -80,6 +80,16 @@ pub struct TabViewMoveParams {
     pub to: u64,
 }
 
+/// `tab.view.collapse`: fold the sub-tabs of the shown design into its tab, or unfold them.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct TabViewCollapseParams {
+    /// True folds the views into the design's tab (its name and how many views it has), false
+    /// shows them as sub-tabs again. Default: the other way round from now.
+    #[serde(default)]
+    pub collapsed: Option<bool>,
+}
+
 /// `tab.view.reopen` and `tab.view.list` take no parameters.
 #[derive(Debug, Deserialize, JsonSchema)]
 #[schemars(deny_unknown_fields)]
@@ -132,6 +142,10 @@ pub struct TabViewReply {
     /// The views of the shown design in tab order (`tab.view.list`, from the window).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub views: Option<Vec<TabViewInfo>>,
+    /// Whether the shown design's views are folded into its tab: asked for (`tab.view.collapse`),
+    /// then (from the window) as they are after the call; `tab.view.list` says it too.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub collapsed: Option<bool>,
     /// In the warn parameter-check mode: what the call's parameters got wrong.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub param_warnings: Vec<String>,

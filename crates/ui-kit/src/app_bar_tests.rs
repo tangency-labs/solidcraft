@@ -155,6 +155,7 @@ const TAB_HANDLES: TabHandles<'static> = TabHandles {
     view_new: "t:vnew",
     view_more: "t:vmore",
     switcher: "t:switcher",
+    view_collapse: "t:vcollapse",
 };
 
 const VIEW_MENU: [TabMenuRow<'static>; 3] = [
@@ -215,6 +216,8 @@ struct TabsRig {
     rename: Option<usize>,
     text: std::cell::RefCell<String>,
     focused: std::cell::Cell<bool>,
+    /// The first design's sub-tabs are folded into its tab.
+    collapsed: std::cell::Cell<bool>,
 }
 
 impl TabsRig {
@@ -237,6 +240,7 @@ impl TabsRig {
             rename: rename.map(|(k, _)| k),
             text: std::cell::RefCell::new(text),
             focused: std::cell::Cell::new(false),
+            collapsed: std::cell::Cell::new(false),
         };
         rig.frame(Vec::new());
         rig
@@ -252,8 +256,9 @@ impl TabsRig {
             focused: true,
             ..Default::default()
         };
-        let tab = |name: &'static str| DocTab { name, list_name: name, dirty: false, place: "Not saved yet", security: None, views: &[] };
-        let first = DocTab { views: if self.views.is_some() { &VIEWS } else { &[] }, ..tab("One") };
+        let tab =
+            |name: &'static str| DocTab { name, list_name: name, dirty: false, place: "Not saved yet", security: None, views: &[], collapsed: false };
+        let first = DocTab { views: if self.views.is_some() { &VIEWS } else { &[] }, collapsed: self.collapsed.get(), ..tab("One") };
         let (mut text, mut focused) = (self.text.borrow().clone(), self.focused.get());
         let mut strip = TabStrip {
             tabs: vec![first, tab("Two"), tab("Three")],
@@ -276,6 +281,8 @@ impl TabsRig {
                 new_view: "Open another view",
                 more: "{n} more",
                 switch_view: "Switch view",
+                collapse_views: "Collapse views",
+                expand_views: "Expand views",
             },
             view_menu: &VIEW_MENU,
             view_right_row: "vright",
@@ -528,6 +535,36 @@ fn the_sub_tabs_return_what_was_clicked_and_dragged() {
     actions.extend(rig.frame(vec![egui::Event::PointerMoved(to)]));
     actions.extend(rig.frame(vec![press(to, false)]));
     assert_eq!(actions, vec![TabAction::ReorderView { from: 0, to: 2 }]);
+}
+
+/// The chevron between the + and the × folds the selected design's sub-tabs into its tab, which
+/// then shows its name, how many views it has, the +, the chevron and the ×, and takes less room;
+/// the chevron shows them again. Behind a view switcher there is nothing to fold and no chevron.
+#[test]
+fn the_chevron_folds_the_sub_tabs_and_shows_them_again() {
+    let rect = |name: &str| solidcraft_ui_registry::rect_of(name).unwrap_or_else(|| panic!("{name} is drawn"));
+    let between = |label: &str| {
+        let (plus, chevron, close) = (rect("t:vnew"), rect("t:vcollapse"), rect("t:close:0"));
+        assert!(plus.right() <= chevron.left() && chevron.right() <= close.left(), "{label}: + {plus:?}, chevron {chevron:?}, × {close:?}");
+    };
+    let rig = TabsRig::with(Some(true));
+    between("expanded");
+    let next_expanded = rect("t:tab:1").left();
+    assert_eq!(rig.press(rig.at("t:vcollapse"), egui::PointerButton::Primary), vec![TabAction::CollapseViews(true)]);
+    rig.collapsed.set(true);
+    rig.frame(Vec::new());
+    assert!(solidcraft_ui_registry::rect_of("t:view:0").is_none(), "no sub-tabs while folded");
+    between("folded");
+    assert!(rect("t:tab:1").left() < next_expanded, "the folded tab takes less room");
+    assert_eq!(rig.press(rig.at("t:vcollapse"), egui::PointerButton::Primary), vec![TabAction::CollapseViews(false)]);
+    // A click on the folded tab's name still just selects it.
+    assert_eq!(rig.press(rig.at("t:tab:1"), egui::PointerButton::Primary), vec![TabAction::Select(1)]);
+
+    let switcher = TabsRig::with(Some(false));
+    switcher.collapsed.set(true);
+    switcher.frame(Vec::new());
+    assert!(solidcraft_ui_registry::rect_of("t:vcollapse").is_none(), "no chevron behind a switcher");
+    assert!(solidcraft_ui_registry::rect_of("t:switcher").is_some(), "the switcher is unchanged");
 }
 
 /// With a view switcher the views list in a menu: a row picks a view, the footer's rows are the app's.

@@ -78,6 +78,9 @@ pub struct ViewSet {
     /// Closed views with the place each had, the latest last.
     closed: Vec<(usize, DesignView)>,
     next_id: u64,
+    /// The sub-tabs are folded into the design's tab, which shows its name and how many views it
+    /// has (the chevron between its + and ×). The views themselves are unchanged.
+    collapsed: bool,
 }
 
 impl Default for ViewSet {
@@ -90,7 +93,17 @@ impl ViewSet {
     /// A design's first views: one Model view, active.
     pub fn new() -> Self {
         let model = DesignView { id: 1, kind: ViewKind::Model, name: ViewKind::Model.label().into(), subject: None };
-        ViewSet { views: vec![model], active: 1, closed: Vec::new(), next_id: 2 }
+        ViewSet { views: vec![model], active: 1, closed: Vec::new(), next_id: 2, collapsed: false }
+    }
+
+    /// Whether the sub-tabs are folded into the design's tab.
+    pub fn collapsed(&self) -> bool {
+        self.collapsed
+    }
+
+    /// Fold the sub-tabs into the design's tab (`collapsed`), or show them again.
+    pub fn set_collapsed(&mut self, collapsed: bool) {
+        self.collapsed = collapsed;
     }
 
     /// The views in tab order (never empty).
@@ -130,8 +143,8 @@ impl ViewSet {
 
     /// Open a view of `kind` showing `subject` and make it the active one. With `reuse`, a view
     /// already showing the same kind and subject is activated instead. A new view is named by
-    /// kind and number ("Sketch 2") and goes last. Full (`MAX_VIEWS`): the active view stays.
-    /// Returns the id of the view that is active now.
+    /// kind and number ("Sketch 2") and goes last, and folded sub-tabs show again so it can be
+    /// seen. Full (`MAX_VIEWS`): the active view stays. Returns the id of the view that is active now.
     pub fn open(&mut self, kind: ViewKind, subject: Option<String>, reuse: bool) -> u64 {
         if reuse && let Some(view) = self.views.iter().find(|view| view.kind == kind && view.subject == subject) {
             self.active = view.id;
@@ -144,6 +157,7 @@ impl ViewSet {
         let name = self.default_name(kind);
         self.views.push(DesignView { id, kind, name, subject });
         self.active = id;
+        self.collapsed = false;
         id
     }
 
@@ -203,8 +217,8 @@ impl ViewSet {
         }
     }
 
-    /// Bring back the view closed last, in its old place, and make it active. None when no view
-    /// was closed (or the set is full).
+    /// Bring back the view closed last, in its old place, and make it active (folded sub-tabs show
+    /// again). None when no view was closed (or the set is full).
     pub fn reopen(&mut self) -> Option<u64> {
         if self.views.len() >= MAX_VIEWS {
             return None;
@@ -213,6 +227,7 @@ impl ViewSet {
         let id = view.id;
         self.views.insert(at.min(self.views.len()), view);
         self.active = id;
+        self.collapsed = false;
         Some(id)
     }
 
@@ -230,7 +245,8 @@ impl ViewSet {
     }
 
     /// Copy the view with `id` into a new one right after it (same kind and subject, a new
-    /// default name) and make it active. None when there is no such view or the set is full.
+    /// default name) and make it active (folded sub-tabs show again). None when there is no such
+    /// view or the set is full.
     pub fn duplicate(&mut self, id: u64) -> Option<u64> {
         let i = self.index_of(id)?;
         if self.views.len() >= MAX_VIEWS {
@@ -240,6 +256,7 @@ impl ViewSet {
         let copy = DesignView { id: self.take_id(), kind, name: self.default_name(kind), subject };
         self.active = copy.id;
         self.views.insert(i + 1, copy);
+        self.collapsed = false;
         Some(self.active)
     }
 
@@ -261,6 +278,7 @@ impl ViewSet {
             "next_id": self.next_id,
             "views": self.views.iter().map(view_json).collect::<Vec<_>>(),
             "closed": self.closed.iter().map(|(at, view)| json!({"at": at, "view": view_json(view)})).collect::<Vec<_>>(),
+            "collapsed": self.collapsed,
         })
     }
 
@@ -294,7 +312,8 @@ impl ViewSet {
         let highest = used.iter().copied().max().unwrap_or(0);
         let next_id = value.get("next_id").and_then(Value::as_u64).unwrap_or(0).clamp(highest + 1, MAX_ID + 1);
         let active = value.get("active").and_then(Value::as_u64).filter(|id| views.iter().any(|view| view.id == *id)).unwrap_or(views[0].id);
-        Some(ViewSet { views, active, closed, next_id })
+        let collapsed = value.get("collapsed").and_then(Value::as_bool).unwrap_or(false);
+        Some(ViewSet { views, active, closed, next_id, collapsed })
     }
 
     fn take_id(&mut self) -> u64 {
@@ -536,6 +555,38 @@ mod tests {
         assert_eq!(set.views().iter().map(|view| view.id).collect::<Vec<_>>(), ids);
     }
 
+    /// Folding hides the sub-tabs only: showing or moving a view keeps them folded, and a view
+    /// added (opened, a copy, one reopened) shows them again so it can be seen.
+    #[test]
+    fn folded_sub_tabs_show_again_for_a_new_view_only() {
+        let mut set = sketches(3);
+        let ids: Vec<u64> = set.views().iter().map(|view| view.id).collect();
+        set.set_collapsed(true);
+        set.activate(ids[0]);
+        set.move_view(0, 2);
+        set.rename(ids[1], "Profile");
+        assert!(set.collapsed(), "showing, moving or renaming a view keeps them folded");
+        set.open(ViewKind::Sketch, Some("s0".into()), true);
+        assert!(set.collapsed(), "a view shown again by reuse is not a new one");
+        for add in [0, 1, 2] {
+            set.set_collapsed(true);
+            match add {
+                0 => {
+                    set.open(ViewKind::Render, None, false);
+                }
+                1 => {
+                    set.duplicate(ids[0]);
+                }
+                _ => {
+                    set.close(ids[2]);
+                    set.set_collapsed(true);
+                    set.reopen();
+                }
+            }
+            assert!(!set.collapsed(), "case {add}: a new view shows the sub-tabs");
+        }
+    }
+
     #[test]
     fn json_round_trips_views_active_closed_and_ids() {
         let mut set = sketches(3);
@@ -544,8 +595,16 @@ mod tests {
         set.rename(ids[2], "Profile");
         set.close(ids[1]);
         set.activate(ids[3]);
+        set.set_collapsed(true);
         let back = ViewSet::from_json(&set.to_json()).unwrap();
         assert_eq!(back, set);
+        assert!(back.collapsed(), "folded sub-tabs stay folded");
+        // A set saved before sub-tabs could fold, or with a bad value, shows them.
+        for old in [json!(null), json!("yes"), json!(1)] {
+            let mut saved = set.to_json();
+            saved["collapsed"] = old.clone();
+            assert!(!ViewSet::from_json(&saved).unwrap().collapsed(), "{old}");
+        }
         let mut back = back;
         assert_eq!(back.reopen(), Some(ids[1]));
         assert!(back.open(ViewKind::Sheet, None, false) > ids[4], "ids stay unique after a reload");

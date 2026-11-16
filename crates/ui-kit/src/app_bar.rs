@@ -24,8 +24,11 @@ const MIN_TAB: f32 = 90.0;
 /// The expanded design tab (option A): its height and corner radius.
 const DESIGN_PILL_HEIGHT: f32 = 34.0;
 const PILL_RADIUS: u8 = 8;
-/// The room a pill keeps right of its views: the +, a separator, the close button and its padding.
-const PILL_AFTER: f32 = 63.0;
+/// The room a pill keeps right of its views: the +, the chevron that folds them, a separator, the
+/// close button and its padding.
+const PILL_AFTER: f32 = 87.0;
+/// What the chevron takes in a selected design's tab whose views are folded into it.
+const CHEVRON: f32 = 22.0;
 /// A view's sub-tab: its height, corner radius, label size, the gap between sub-tabs and the
 /// longest label drawn before it is cut.
 const VIEW_HEIGHT: f32 = 24.0;
@@ -587,6 +590,8 @@ pub struct TabHandles<'a> {
     pub view_new: &'a str,
     pub view_more: &'a str,
     pub switcher: &'a str,
+    /// The chevron between the selected design's + and ×, which folds its sub-tabs or shows them.
+    pub view_collapse: &'a str,
 }
 
 /// One document tab.
@@ -606,6 +611,9 @@ pub struct DocTab<'a> {
     /// small + after its name). Several: the selected design's tab expands to show them (or a
     /// view switcher), and any other design's tab carries a count badge.
     pub views: &'a [ViewTab<'a>],
+    /// Its sub-tabs are folded: selected, with several views shown as sub-tabs, it stays a plain
+    /// tab with its name, how many views it has, the +, a chevron that shows them again, and ×.
+    pub collapsed: bool,
 }
 
 /// What a view's sub-tab says about its source.
@@ -646,6 +654,9 @@ pub struct ViewText<'a> {
     pub new_view: &'a str,
     pub more: &'a str,
     pub switch_view: &'a str,
+    /// The chevron's name and hover text: it folds the sub-tabs, or shows them again.
+    pub collapse_views: &'a str,
+    pub expand_views: &'a str,
 }
 
 /// The state a design tab's shield shows. The colour carries the state; the tooltip has the words.
@@ -807,6 +818,8 @@ pub enum TabAction {
     CloseView(usize),
     /// The + was clicked and the strip has no menu for it.
     NewView,
+    /// The chevron folds the selected design's sub-tabs into its tab (true) or shows them (false).
+    CollapseViews(bool),
     /// The name typed into view `view` of the selected design was kept, or the edit given up.
     ViewRenameDone {
         view: usize,
@@ -1058,9 +1071,19 @@ fn more_label(strip: &TabStrip, hidden: usize) -> String {
     strip.view_text.more.replace("{n}", &hidden.to_string())
 }
 
-/// Whether tab `i` is the shown, selected design with a single view: its tab carries a small + after its name.
+/// Whether tab `i` is the shown, selected design with a single view, or with its sub-tabs folded:
+/// its tab carries a small + after its name.
 fn small_plus(strip: &TabStrip, i: usize) -> bool {
-    i == strip.selected && strip.shown_selected == Some(i) && strip.tabs.get(i).is_some_and(|tab| tab.views.len() == 1)
+    i == strip.selected && strip.shown_selected == Some(i) && strip.tabs.get(i).is_some_and(|tab| tab.views.len() == 1) || folded(strip, i)
+}
+
+/// Whether tab `i` is the shown, selected design whose sub-tabs are folded into it: a plain tab
+/// with a count badge and a chevron between its + and ×.
+fn folded(strip: &TabStrip, i: usize) -> bool {
+    i == strip.selected
+        && strip.shown_selected == Some(i)
+        && strip.views_as_tabs
+        && strip.tabs.get(i).is_some_and(|tab| tab.views.len() > 1 && tab.collapsed)
 }
 
 fn line_colour(t: &Tokens) -> egui::Color32 {
@@ -1249,6 +1272,31 @@ fn plus_button(ui: &mut egui::Ui, strip: &TabStrip, rect: Rect, icon: f32, pen: 
     }
 }
 
+/// The chevron between the selected design's + and ×, in `rect`: pointing left it folds the
+/// design's sub-tabs into its tab; `collapsed`, pointing right, it shows them again.
+fn collapse_button(ui: &mut egui::Ui, strip: &TabStrip, rect: Rect, collapsed: bool, pen: &mut Pen) {
+    let t = Tokens::get();
+    let label = if collapsed { strip.view_text.expand_views } else { strip.view_text.collapse_views };
+    let resp = ui.interact(rect, ui.scope_id().with("view_collapse"), Sense::click());
+    resp.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, label));
+    ui.ctx().accesskit_node_builder(resp.id, |node| node.set_expanded(!collapsed));
+    solidcraft_ui_registry::publish_target(strip.handles.view_collapse, rect);
+    let hot = resp.hovered() || resp.has_focus();
+    if hot {
+        ui.painter().rect_filled(rect, VIEW_RADIUS, t.app_bar_hover_button);
+    }
+    let ink = t.app_bar_text.gamma_multiply(if hot { 1.0 } else { 0.7 });
+    let icon = Rect::from_center_size(rect.center(), vec2(12.0, 12.0));
+    if collapsed {
+        crate::icons::paint_ink(ui.painter(), icon, "chevron_right", ink);
+    } else {
+        crate::icons::paint_ink_mirrored(ui.painter(), icon, "chevron_right", ink);
+    }
+    if resp.backing_on_hover_text(label).clicked() {
+        pen.actions.push(TabAction::CollapseViews(!collapsed));
+    }
+}
+
 /// The close button of the selected design's expanded tab, in `rect` with a glyph `icon` points wide.
 fn close_design_button(ui: &mut egui::Ui, strip: &TabStrip, tab: &DocTab, g: &Geom, rect: Rect, icon: f32, pen: &mut Pen) {
     let t = Tokens::get();
@@ -1388,7 +1436,8 @@ fn draw_pill(ui: &mut egui::Ui, strip: &TabStrip, tab: &DocTab, pr: Rect, g: &Ge
     separator(name_end + 0.5);
     let close = Rect::from_center_size(pos2(pr.right() - 17.0, cy), vec2(24.0, 24.0));
     separator(close.left() - 4.0);
-    let plus = Rect::from_center_size(pos2(close.left() - 20.0, cy), vec2(24.0, 24.0));
+    let chevron = Rect::from_center_size(pos2(close.left() - 20.0, cy), vec2(24.0, 24.0));
+    let plus = Rect::from_center_size(pos2(chevron.left() - 12.0, cy), vec2(24.0, 24.0));
     let start = name_end + 1.0 + 8.0 + VIEW_GAP;
     let active = tab.views.iter().position(|v| v.active).unwrap_or(0);
     let (first, count) = view_window(&g.view_ws, active, pr.right() - PILL_AFTER - start, g.more_w + VIEW_GAP);
@@ -1415,6 +1464,7 @@ fn draw_pill(ui: &mut egui::Ui, strip: &TabStrip, tab: &DocTab, pr: Rect, g: &Ge
         }
     }
     plus_button(ui, strip, plus, 14.0, pen);
+    collapse_button(ui, strip, chevron, false, pen);
     close_design_button(ui, strip, tab, g, close, 12.0, pen);
 }
 
@@ -1514,10 +1564,16 @@ pub fn tabs(ui: &mut egui::Ui, strip: &mut TabStrip, r: Rect, x0: f32, x1: f32) 
     let typed = strip.rename.as_ref().map(|r| r.text.clone());
     let view_typed = strip.view_rename.as_ref().map(|(k, r)| (*k, r.text.clone()));
     // The selected design's several views: a pill or a switcher, as far as the bar has room.
-    let geom = strip.tabs.get(strip.selected).copied().filter(|tab| strip.shown_selected == Some(strip.selected) && tab.views.len() > 1).map(|tab| {
-        let room = (x1 - x0 - 34.0 - MIN_TAB * n.saturating_sub(1) as f32).max(0.0);
-        measure(ui, strip, &tab, typed.as_deref().unwrap_or(tab.name), view_typed.as_ref().map(|(k, text)| (*k, text.as_str())), room)
-    });
+    // Folded, it stays a plain tab.
+    let geom = strip
+        .tabs
+        .get(strip.selected)
+        .copied()
+        .filter(|tab| strip.shown_selected == Some(strip.selected) && tab.views.len() > 1 && !folded(strip, strip.selected))
+        .map(|tab| {
+            let room = (x1 - x0 - 34.0 - MIN_TAB * n.saturating_sub(1) as f32).max(0.0);
+            measure(ui, strip, &tab, typed.as_deref().unwrap_or(tab.name), view_typed.as_ref().map(|(k, text)| (*k, text.as_str())), room)
+        });
     let selected = strip.selected;
     let kind_of = |i: usize| geom.as_ref().filter(|_| i == selected).map_or(SelectedLayout::Plain, |g| g.kind);
     let (first, shown, w) = tab_layout(n, strip.selected, x1 - x0 - geom.as_ref().map_or(0.0, |g| (g.width - MIN_TAB).max(0.0)));
@@ -1537,8 +1593,9 @@ pub fn tabs(ui: &mut egui::Ui, strip: &mut TabStrip, r: Rect, x0: f32, x1: f32) 
             let text = text_width(ui, &label, crate::type_face::semibold(t.font_button));
             let badge = if tab.security.is_some() { 18.0 } else { 0.0 };
             let plus = if small_plus(strip, i) { SMALL_PLUS } else { 0.0 };
+            let chevron = if folded(strip, i) { CHEVRON } else { 0.0 };
             let count = if tab.views.len() > 1 { 7.0 + badge_width(ui, tab.views.len()) } else { 0.0 };
-            (text + 40.0 + badge + plus + count).clamp(72.0, MAX_FIT)
+            (text + 40.0 + badge + plus + chevron + count).clamp(72.0, MAX_FIT)
         })
         .collect();
     let fit_all = shown == n && natural.iter().sum::<f32>() <= x1 - x0 - 34.0;
@@ -1663,9 +1720,13 @@ pub fn tabs(ui: &mut egui::Ui, strip: &mut TabStrip, r: Rect, x0: f32, x1: f32) 
         let text_size = g.size();
         let badge = if tab.security.is_some() { 18.0 } else { 0.0 };
         let plus = if small_plus(strip, i) { SMALL_PLUS } else { 0.0 };
+        let chevron = if folded(strip, i) { CHEVRON } else { 0.0 };
         let count = if tab.views.len() > 1 && plain { 7.0 + badge_width(ui, tab.views.len()) } else { 0.0 };
-        let (text_x, text_w) =
-            if plain { (tr.left() + 10.0, (tr.width() - 30.0 - badge - plus - count).max(10.0)) } else { (tr.left() + 13.0 + dot, name_w - badge) };
+        let (text_x, text_w) = if plain {
+            (tr.left() + 10.0, (tr.width() - 30.0 - badge - plus - chevron - count).max(10.0))
+        } else {
+            (tr.left() + 13.0 + dot, name_w - badge)
+        };
         let tip = tab_tip(tab.name, tab.place, text_size.x > text_w);
         let clip = Rect::from_min_size(tr.min, vec2(text_x - tr.left() + text_w, tr.height()));
         match strip.rename.as_mut().filter(|_| active) {
@@ -1680,7 +1741,7 @@ pub fn tabs(ui: &mut egui::Ui, strip: &mut TabStrip, r: Rect, x0: f32, x1: f32) 
         if dot > 0.0 && tab.dirty {
             ui.painter().circle_filled(pos2(tr.left() + 13.0 + 3.5, tr.center().y), 3.5, t.warning);
         }
-        let shield_x = if plain { tr.right() - 31.0 - plus } else { text_x + text_w + 11.0 };
+        let shield_x = if plain { tr.right() - 31.0 - plus - chevron } else { text_x + text_w + 11.0 };
         if let Some(badge) = tab.security {
             let br = Rect::from_center_size(pos2(shield_x, tr.center().y), vec2(14.0, 14.0));
             crate::icons::paint_ink(ui.painter(), br, "shield", badge.ink(&t));
@@ -1696,8 +1757,13 @@ pub fn tabs(ui: &mut egui::Ui, strip: &mut TabStrip, r: Rect, x0: f32, x1: f32) 
                 count_badge(ui, at, tab.views.len(), false);
             }
             if plus > 0.0 {
-                let pr = Rect::from_center_size(pos2(tr.right() - 35.0, tr.center().y), vec2(20.0, 20.0));
+                let pr = Rect::from_center_size(pos2(tr.right() - 35.0 - chevron, tr.center().y), vec2(20.0, 20.0));
                 plus_button(ui, strip, pr, 12.0, &mut pen);
+            }
+            // Folded sub-tabs: the chevron between the + and the × shows them again.
+            if chevron > 0.0 {
+                let cr = Rect::from_center_size(pos2(tr.right() - 35.0, tr.center().y), vec2(20.0, 20.0));
+                collapse_button(ui, strip, cr, true, &mut pen);
             }
             // ×
             let xr = Rect::from_center_size(pos2(tr.right() - 13.0, tr.center().y), vec2(16.0, 16.0));

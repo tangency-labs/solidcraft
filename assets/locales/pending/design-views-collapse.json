@@ -1,0 +1,42 @@
+{
+  "en": {
+    "cmd.tab.view.collapse": "Collapse Views",
+    "tab_strip.collapse_views": "Collapse views",
+    "tab_strip.expand_views": "Expand views"
+  },
+  "ar": {
+    "cmd.tab.view.collapse": "طيّ العروض",
+    "tab_strip.collapse_views": "طيّ العروض",
+    "tab_strip.expand_views": "توسيع العروض"
+  },
+  "de": {
+    "cmd.tab.view.collapse": "Ansichten einklappen",
+    "tab_strip.collapse_views": "Ansichten einklappen",
+    "tab_strip.expand_views": "Ansichten ausklappen"
+  },
+  "he": {
+    "cmd.tab.view.collapse": "כיווץ תצוגות",
+    "tab_strip.collapse_views": "כיווץ תצוגות",
+    "tab_strip.expand_views": "הרחבת תצוגות"
+  },
+  "ja": {
+    "cmd.tab.view.collapse": "ビューを折りたたむ",
+    "tab_strip.collapse_views": "ビューを折りたたむ",
+    "tab_strip.expand_views": "ビューを展開"
+  },
+  "ko": {
+    "cmd.tab.view.collapse": "뷰 접기",
+    "tab_strip.collapse_views": "뷰 접기",
+    "tab_strip.expand_views": "뷰 펼치기"
+  },
+  "vi": {
+    "cmd.tab.view.collapse": "Thu gọn các góc nhìn",
+    "tab_strip.collapse_views": "Thu gọn các góc nhìn",
+    "tab_strip.expand_views": "Mở rộng các góc nhìn"
+  },
+  "zh": {
+    "cmd.tab.view.collapse": "折叠视图",
+    "tab_strip.collapse_views": "折叠视图",
+    "tab_strip.expand_views": "展开视图"
+  }
+}

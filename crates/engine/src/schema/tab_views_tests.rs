@@ -1,6 +1,9 @@
 use serde_json::{Value, json};
 
-use super::{TabViewActivateParams, TabViewIdParams, TabViewMoveParams, TabViewNoParams, TabViewOpenParams, TabViewRenameParams, TabViewReply};
+use super::{
+    TabViewActivateParams, TabViewCollapseParams, TabViewIdParams, TabViewMoveParams, TabViewNoParams, TabViewOpenParams, TabViewRenameParams,
+    TabViewReply,
+};
 use crate::Session;
 use crate::schema::tests::{assert_keys, conforms};
 use crate::schema::{ParamCheck, input_schema_for, output_schema_for};
@@ -12,6 +15,7 @@ fn schemas_and_the_key_check_agree() {
     assert_keys(input_schema_for::<TabViewActivateParams>(), &["id", "index"]);
     assert_keys(input_schema_for::<TabViewRenameParams>(), &["id", "name"]);
     assert_keys(input_schema_for::<TabViewMoveParams>(), &["from", "to"]);
+    assert_keys(input_schema_for::<TabViewCollapseParams>(), &["collapsed"]);
     assert_keys(input_schema_for::<TabViewNoParams>(), &[]);
 }
 
@@ -36,6 +40,9 @@ fn the_view_commands_check_and_echo_without_editing_the_design() {
         ("tab.view.rename", json!({"id": 4}), json!({"id": 4})),
         ("tab.view.duplicate", json!({"id": 1}), json!({"id": 1})),
         ("tab.view.move", json!({"from": 0, "to": 2}), json!({"from": 0, "to": 2})),
+        ("tab.view.collapse", json!({}), json!({})),
+        ("tab.view.collapse", json!({"collapsed": true}), json!({"collapsed": true})),
+        ("tab.view.collapse", json!({"collapsed": false}), json!({"collapsed": false})),
         ("tab.view.list", json!({}), json!({})),
     ] {
         let r = s.execute(id, &params).unwrap_or_else(|e| panic!("{id} {params}: {e}"));
@@ -69,6 +76,9 @@ fn bad_view_requests_are_refused() {
         ("tab.view.rename", json!({"name": 5})),
         ("tab.view.move", json!({"from": 0})),
         ("tab.view.move", json!({"from": 0, "to": 1.5})),
+        ("tab.view.collapse", json!({"collapsed": "yes"})),
+        ("tab.view.collapse", json!({"collapsed": 1})),
+        ("tab.view.collapse", json!({"id": 1})),
         ("tab.view.list", json!({"all": true})),
     ] {
         assert!(s.execute(id, &params).is_err(), "{id} {params}");
@@ -82,6 +92,7 @@ fn the_view_shortcuts_are_the_defaults() {
         ("tab.view.reopen", Some("Ctrl+Shift+T")),
         ("tab.view.rename", Some("F2")),
         ("tab.view.close", None),
+        ("tab.view.collapse", None),
         ("tab.view.list", None),
     ] {
         assert_eq!(crate::find_command(id).map(|c| c.shortcut), Some(key), "{id}");

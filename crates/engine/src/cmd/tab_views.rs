@@ -9,7 +9,8 @@ use crate::params::bad;
 use crate::schema::TypedContract;
 use crate::schema::output_schema_for;
 use crate::schema::tab_views::{
-    MAX_NAME, TabViewActivateParams, TabViewIdParams, TabViewMoveParams, TabViewNoParams, TabViewOpenParams, TabViewRenameParams, TabViewReply,
+    MAX_NAME, TabViewActivateParams, TabViewCollapseParams, TabViewIdParams, TabViewMoveParams, TabViewNoParams, TabViewOpenParams,
+    TabViewRenameParams, TabViewReply,
 };
 use crate::{Result, Session};
 
@@ -18,6 +19,7 @@ const ID_CONTRACT: TypedContract<TabViewIdParams> = TypedContract::new();
 const ACTIVATE_CONTRACT: TypedContract<TabViewActivateParams> = TypedContract::new();
 const RENAME_CONTRACT: TypedContract<TabViewRenameParams> = TypedContract::new();
 const MOVE_CONTRACT: TypedContract<TabViewMoveParams> = TypedContract::new();
+const COLLAPSE_CONTRACT: TypedContract<TabViewCollapseParams> = TypedContract::new();
 const NO_PARAMS_CONTRACT: TypedContract<TabViewNoParams> = TypedContract::new();
 
 pub static COMMANDS: &[CommandSpec] = &[
@@ -42,9 +44,12 @@ pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("tab.view.move", "Move View", crate::checked!("tab.view.move", move_view))
         .icon("list").noundo().doc_only().contract(&MOVE_CONTRACT).output(output_schema_for::<TabViewReply>)
         .params("from, to: places in tab order (0 first) → from, to; moves the view among the views of its design"),
+    CommandSpec::new("tab.view.collapse", "Collapse Views", crate::checked!("tab.view.collapse", collapse))
+        .icon("list").noundo().doc_only().contract(&COLLAPSE_CONTRACT).output(output_schema_for::<TabViewReply>)
+        .params("collapsed?: bool (default: the other way round from now) → collapsed: as the views are now; folds the shown design's sub-tabs into its tab (its name and how many views it has) or shows them again; the views themselves are unchanged"),
     CommandSpec::new("tab.view.list", "List Views", crate::checked!("tab.view.list", list))
         .icon("list").noundo().doc_only().contract(&NO_PARAMS_CONTRACT).output(output_schema_for::<TabViewReply>)
-        .params("no parameters → views: [{id, kind, name, subject?, active}] of the shown design in tab order; read-only")];
+        .params("no parameters → views: [{id, kind, name, subject?, active}] of the shown design in tab order, collapsed: whether they are folded into its tab; read-only")];
 
 /// `p` as the contract type `P`; no parameters at all (`null`) is the empty object.
 fn parse<P: DeserializeOwned>(cmd: &str, p: &Value) -> Result<P> {
@@ -107,6 +112,11 @@ fn duplicate(_s: &mut Session, p: &Value) -> Result<Value> {
 fn move_view(_s: &mut Session, p: &Value) -> Result<Value> {
     let request: TabViewMoveParams = parse("tab.view.move", p)?;
     reply("tab.view.move", TabViewReply { from: Some(request.from), to: Some(request.to), ..Default::default() })
+}
+
+fn collapse(_s: &mut Session, p: &Value) -> Result<Value> {
+    let request: TabViewCollapseParams = parse("tab.view.collapse", p)?;
+    reply("tab.view.collapse", TabViewReply { collapsed: request.collapsed, ..Default::default() })
 }
 
 fn list(_s: &mut Session, p: &Value) -> Result<Value> {

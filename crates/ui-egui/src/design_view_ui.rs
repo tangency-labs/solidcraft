@@ -76,6 +76,7 @@ pub fn handle(app: &mut SolveApp, action: TabAction) -> bool {
                 documents::view_close(app, id);
             }
         }
+        TabAction::CollapseViews(collapsed) => documents::view_collapse(app, collapsed),
         TabAction::NewView => {
             documents::view_open(app, ViewKind::Model, None, false);
         }
