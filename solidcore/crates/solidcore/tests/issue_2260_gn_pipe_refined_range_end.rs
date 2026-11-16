@@ -140,7 +140,6 @@ const SOLIDCRAFT_C494A18: &[&str] = &[
     "planar_path_profile_placement_statuses",
     "planar_path_sweep_statuses",
     "point_class_gap_3d_propagates_no_drop_error",
-    "point_on_start_point_squared_tolerance",
     "point_solve_keeps_triangle_guess",
     "proto_edge_self_loop_on_vertex_degenerate",
     "proto_edge_splits_at_captured_vertices",
