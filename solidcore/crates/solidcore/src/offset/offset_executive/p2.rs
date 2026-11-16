@@ -426,6 +426,10 @@ impl OffsetExecutive {
     ) -> ShellOutcome {
         let original_key = original.key();
         let mut input = Some(original);
+        // (not upstream) the Boolean difference leaves `doing_boolean` set on its error
+        // exits (SmMerge.cpp:2551, 3114, 4148); a refused shell hands the kernel back as
+        // it came, as `with_doing_boolean` does, so a reused kernel carries no stale flag.
+        let doing_boolean = kernel.context.doing_boolean();
         let result = (|| {
             let original = required(input.as_mut(), OP_SHELL)?;
             // (not upstream) the source's own attributes go to the caller's stores, as
@@ -604,6 +608,9 @@ impl OffsetExecutive {
             make_shell_edges_exact(kernel, &mut shell, notifications)?;
             Ok(shell)
         })();
+        if result.is_err() {
+            kernel.context.set_doing_boolean(doing_boolean);
+        }
         // (not upstream) the attributes the notifications left on the result's objects
         let result = result.and_then(|mut shell| {
             attributes::finish_attributes(&mut shell, original_key, notifications)?;

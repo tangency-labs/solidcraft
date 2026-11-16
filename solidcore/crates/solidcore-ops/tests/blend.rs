@@ -2044,48 +2044,62 @@ fn the_ledge_corner_rolls_over_across_the_bores_tangent_seam() {
     assert!(report.is_valid(), "{}", report.text);
     assert!(b.is_manifold_solid().unwrap());
     b.check_solid().unwrap();
+    // the app's record holds it (each pcurve runs over its edge's interval), as built and
+    // after a round trip through a .smb file (the case's render reads it back)
+    b.to_record().unwrap();
+    let back = Body::from_smb(b.to_smb(true).unwrap(), true).unwrap();
+    back.to_record().unwrap();
     let want = v0 + ledge_rolled_change(0.5);
-    let v = b.volume(1e-12).unwrap();
-    assert!(rel(v, want) < 1e-11, "{v} {want}");
-    enclosure_holds(&b, want, 1e-3);
-    // the cap's two faces meet along the seam's line from W to S, where the rib's two pieces
-    // meet: S on that line (x = 12, z = 33) at the torus's height h = sqrt((rho - r)(3r - rho))
-    // over its centre plane y = 30 - r, rho = sqrt(ua^2 + r^2) W's distance from A1
-    let r: f64 = 0.5;
-    let ua = ((12.0 + r) * (12.0 + r) - r * r).sqrt() - 12.0;
-    let rho = (ua * ua + r * r).sqrt();
-    let h = ((rho - r) * (3.0 * r - rho)).sqrt();
-    let (w, s) = ([12.0, 30.0, 33.0], [12.0, 30.0 - r + h, 33.0]);
-    let (_, brep) = kernel_copy(&b);
-    let near = |p: Vec3, q: [f64; 3]| (p - Vec3::new(q[0], q[1], q[2])).length() <= 1e-9;
-    let ends = |e: EdgeId| {
-        let v0 = edge::start_vertex(&brep, e).unwrap().unwrap();
-        let v1 = edge::end_vertex(&brep, e).unwrap().unwrap();
-        (
-            brep.vertex(v0).unwrap().point,
-            brep.vertex(v1).unwrap().point,
-        )
-    };
-    let seam: Vec<EdgeId> = brep
-        .edges()
-        .ids()
-        .filter(|&e| {
-            let (p, q) = ends(e);
-            (near(p, w) && near(q, s)) || (near(p, s) && near(q, w))
-        })
-        .collect();
-    assert_eq!(seam.len(), 1, "the cap's seam edge from W to S");
-    let faces = edge::faces(&brep, seam[0], None).unwrap();
-    assert!(faces.len() == 2 && faces[0] != faces[1], "{faces:?}");
-    let at_s = brep
-        .edges()
-        .ids()
-        .filter(|&e| {
-            let (p, q) = ends(e);
-            near(p, s) || near(q, s)
-        })
-        .count();
-    assert_eq!(at_s, 3, "S: the seam edge and the rib's two pieces");
+    // the volume and the seam, on the body as built and as read back from the .smb file
+    for (which, body) in [("built", &b), ("reloaded", &back)] {
+        let v = body.volume(1e-12).unwrap();
+        assert!(rel(v, want) < 1e-11, "{which}: {v} {want}");
+        enclosure_holds(body, want, 1e-3);
+        // the cap's two faces meet along the seam's line from W to S, where the rib's two pieces
+        // meet: S on that line (x = 12, z = 33) at the torus's height h = sqrt((rho - r)(3r - rho))
+        // over its centre plane y = 30 - r, rho = sqrt(ua^2 + r^2) W's distance from A1
+        let r: f64 = 0.5;
+        let ua = ((12.0 + r) * (12.0 + r) - r * r).sqrt() - 12.0;
+        let rho = (ua * ua + r * r).sqrt();
+        let h = ((rho - r) * (3.0 * r - rho)).sqrt();
+        let (w, s) = ([12.0, 30.0, 33.0], [12.0, 30.0 - r + h, 33.0]);
+        let (_, brep) = kernel_copy(body);
+        let near = |p: Vec3, q: [f64; 3]| (p - Vec3::new(q[0], q[1], q[2])).length() <= 1e-9;
+        let ends = |e: EdgeId| {
+            let v0 = edge::start_vertex(&brep, e).unwrap().unwrap();
+            let v1 = edge::end_vertex(&brep, e).unwrap().unwrap();
+            (
+                brep.vertex(v0).unwrap().point,
+                brep.vertex(v1).unwrap().point,
+            )
+        };
+        let seam: Vec<EdgeId> = brep
+            .edges()
+            .ids()
+            .filter(|&e| {
+                let (p, q) = ends(e);
+                (near(p, w) && near(q, s)) || (near(p, s) && near(q, w))
+            })
+            .collect();
+        assert_eq!(seam.len(), 1, "{which}: the cap's seam edge from W to S");
+        let faces = edge::faces(&brep, seam[0], None).unwrap();
+        assert!(
+            faces.len() == 2 && faces[0] != faces[1],
+            "{which}: {faces:?}"
+        );
+        let at_s = brep
+            .edges()
+            .ids()
+            .filter(|&e| {
+                let (p, q) = ends(e);
+                near(p, s) || near(q, s)
+            })
+            .count();
+        assert_eq!(
+            at_s, 3,
+            "{which}: S, the seam edge and the rib's two pieces"
+        );
+    }
 }
 
 /// The ledge's planar twin (#10876): the slab [0, 10] x [-10, 10] x [-10, 0] with the riser
@@ -2461,6 +2475,93 @@ fn a_ledge_twin_whose_roll_over_does_not_build_keeps_its_refusal() {
         got.err()
     );
     assert!(rel(b.volume(1e-12).unwrap(), 3000.0) < 1e-12);
+}
+
+/// #17617's plate and wall, turned so that the wall's profile lies in z = 0: the plate
+/// [29.5, 138.5] x [-4, 0] x [-33, 117] and on its face y = -4 the wall, `profile` swept 5
+/// along z.
+fn plate_and_wall(profile: &[(f64, f64)]) -> Body {
+    let plate = make_box([29.5, -4.0, -33.0], [109.0, 4.0, 150.0]).unwrap();
+    let sides: Vec<_> = (0..profile.len())
+        .map(|i| segment(profile[i], profile[(i + 1) % profile.len()]))
+        .collect();
+    let wall = swept(&sides, 5.0);
+    solidcore_ops::boolean::boolean(plate, wall, solidcore_ops::BooleanOp::Union)
+        .unwrap()
+        .unwrap()
+}
+
+/// A round of 2 on the concave edge E between the plate's face y = -4 and the wall's face
+/// z = 5 (#17617). E runs from x = 129.5, where the wall's end is square, to V = (29.5, -4, 5),
+/// the plate's end, where the wall's end face W slants out past the plate (the plane through
+/// x = 29.5, y = -4 and x = 10, y = -40). At V four edges meet: E, the plate's corner edge
+/// x = 29.5, y = -4 (convex) and W's two edges with the wall's face z = 5 (convex) and with the
+/// plate's end x = 29.5. The rails end on the two convex edges, at (29.5, -4, 7) and at
+/// (29.5 - 2 * 19.5 / 36, -6, 5), so the round ends on W's plane and W grows over the end's
+/// cap (it held no cap on the plate's end plane, and the round was refused as no closed
+/// solid). The round's cross-section is the square of side 2 less the ball's quarter disc,
+/// its length 100 plus how far W slants back over that section. The wall's other edge with the
+/// plate (its face z = 0) is the mirror image, its side edges the other way round V.
+#[test]
+#[allow(clippy::disallowed_methods)] // the test's closed form, not ops computing geometry
+fn a_round_ending_where_a_slanted_wall_overhangs_its_plate_ends_on_the_wall() {
+    rig_fixes();
+    // first, on both of the wall's sides, the same wall with its end square, overhanging the
+    // plate's end by 19.5: the round ends on the plate's end plane (as before #17617)
+    for z in [5.0, 0.0] {
+        let b = plate_and_wall(&[(10.0, -4.0), (129.5, -4.0), (129.5, -40.0), (10.0, -40.0)]);
+        let e = nearest_edge(&b, [80.0, -4.0, z]);
+        blend(&b, Blend::Round, &[e], &[2.0], &[], Corners::Filled).unwrap();
+        assert!(b.check(CheckLevel::All).unwrap().is_valid(), "z = {z}");
+        assert_eq!(b.counts().unwrap(), [13, 32, 21], "z = {z}");
+        let v = b.volume(1e-12).unwrap();
+        let want = 65400.0 + 119.5 * 36.0 * 5.0 + 100.0 * (4.0 - PI);
+        assert!(rel(v, want) < 1e-11, "z = {z}: {v}");
+    }
+    let slant = 19.5 / 36.0;
+    let before = 65400.0 + 0.5 * (100.0 + 119.5) * 36.0 * 5.0;
+    // the wall's face z and the side of it the round lies on
+    for (z, out) in [(5.0, 1.0), (0.0, -1.0)] {
+        let b = plate_and_wall(&[(29.5, -4.0), (129.5, -4.0), (129.5, -40.0), (10.0, -40.0)]);
+        assert_eq!(b.counts().unwrap(), [11, 25, 16]);
+        assert!(rel(volume(&b), before) < 1e-12);
+        let e = nearest_edge(&b, [80.0, -4.0, z]);
+        blend(&b, Blend::Round, &[e], &[2.0], &[], Corners::Filled).unwrap();
+        assert!(b.check(CheckLevel::All).unwrap().is_valid(), "z = {z}");
+        assert_eq!(b.counts().unwrap(), [12, 28, 18], "z = {z}");
+        // the section's area 4 - pi, its first moment about the plate's face 20/3 - 2 pi
+        let want = before + 100.0 * (4.0 - PI) + slant * (20.0 / 3.0 - 2.0 * PI);
+        let v = b.volume(1e-12).unwrap();
+        assert!(rel(v, want) < 1e-11, "z = {z}: {v} {want}");
+        let (k, brep) = kernel_copy(&b);
+        let near = |a: Vec3, p: [f64; 3]| (a - Vec3::new(p[0], p[1], p[2])).length() < 1e-9;
+        let top = z + 2.0 * out;
+        let (mut rounds, mut walls) = (0, 0);
+        for &f in brep.face_list() {
+            let bb = face_bounding_box(&k, &brep, f, true).unwrap();
+            match brep.face(f).unwrap().surface.as_ref().unwrap().kind() {
+                SurfaceKind::Cone(c) => {
+                    assert!(c.is_cylinder(), "z = {z}: the round on a cone");
+                    let lo = [29.5 - 2.0 * slant, -6.0, z.min(top)];
+                    assert!(near(bb.min(), lo), "z = {z}: {bb:?}");
+                    assert!(near(bb.max(), [129.5, -4.0, z.max(top)]), "z = {z}: {bb:?}");
+                    rounds += 1;
+                }
+                SurfaceKind::Plane(_) => {
+                    // W, out to the cap's far side
+                    let (lo, hi) = ([10.0, -40.0, top.min(0.0)], [29.5, -4.0, top.max(5.0)]);
+                    if near(bb.min(), lo) && near(bb.max(), hi) {
+                        walls += 1;
+                    }
+                }
+                _ => panic!(
+                    "a face on {}",
+                    surface_kind_name(brep.face(f).unwrap().surface.as_ref().unwrap())
+                ),
+            }
+        }
+        assert_eq!((rounds, walls), (1, 1), "z = {z}");
+    }
 }
 
 /// A block 30 x 30 x 10 with the pocket [5, 25]^2 x [4, 10], its four vertical edges rounded

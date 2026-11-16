@@ -589,11 +589,11 @@ crates/solidcore/src/intersect/surface_intersector/p3.rs	SurfaceIntersector::fin
 crates/solidcore/src/intersect/surface_intersector/p3.rs	SurfaceIntersector::find_boundary_start_points_body	int-rem	2	proven	l_crv % 2	constant non-zero divisor
 crates/solidcore/src/intersect/surface_intersector/p3.rs	unlink	Vec::remove	1	proven	remove(pos)	pos is position() in the same Vec
 crates/solidcore/src/intersect/surface_intersector/p4.rs	do_law_intersection_with	Vec::insert	1	proven	insert(ip, new_tsect)	inside while ip < curve_pnts.len(), with no removal before insertion
-crates/solidcore/src/intersect/surface_intersector/p5.rs	AdvSurfaceIntersector::do_intersection_in	Vec::remove	1	proven	remove(ii)	ii < curves_3d.len() in loop and all four companion lengths checked before removal
-crates/solidcore/src/intersect/surface_intersector/p5.rs	AdvSurfaceIntersector::do_intersection_in	Vec::remove	2	proven	remove(ii)	ii < curves_3d.len() in loop and all four companion lengths checked before removal
-crates/solidcore/src/intersect/surface_intersector/p5.rs	AdvSurfaceIntersector::do_intersection_in	Vec::remove	3	proven	remove(ii)	ii < curves_3d.len() in loop and all four companion lengths checked before removal
-crates/solidcore/src/intersect/surface_intersector/p5.rs	AdvSurfaceIntersector::do_intersection_in	Vec::remove	4	proven	remove(ii)	ii < curves_3d.len() in loop and all four companion lengths checked before removal
-crates/solidcore/src/intersect/surface_intersector/p5.rs	AdvSurfaceIntersector::do_intersection_in	Vec::remove	5	proven	remove(ii)	ii < curves_3d.len() in loop and all four companion lengths checked before removal
+crates/solidcore/src/intersect/surface_intersector/p5.rs	remove_covered_degenerate_curves_then_add_touching	Vec::remove	1	proven	remove(ii)	ii < curves_3d.len() in loop and all four companion lengths checked before removal
+crates/solidcore/src/intersect/surface_intersector/p5.rs	remove_covered_degenerate_curves_then_add_touching	Vec::remove	2	proven	remove(ii)	ii < curves_3d.len() in loop and all four companion lengths checked before removal
+crates/solidcore/src/intersect/surface_intersector/p5.rs	remove_covered_degenerate_curves_then_add_touching	Vec::remove	3	proven	remove(ii)	ii < curves_3d.len() in loop and all four companion lengths checked before removal
+crates/solidcore/src/intersect/surface_intersector/p5.rs	remove_covered_degenerate_curves_then_add_touching	Vec::remove	4	proven	remove(ii)	ii < curves_3d.len() in loop and all four companion lengths checked before removal
+crates/solidcore/src/intersect/surface_intersector/p5.rs	remove_covered_degenerate_curves_then_add_touching	Vec::remove	5	proven	remove(ii)	ii < curves_3d.len() in loop and all four companion lengths checked before removal
 crates/solidcore/src/intersect/surface_intersector/singular_splits.rs	split_curves_at_singular_points	windows	1	proven	windows(2)	constant non-zero size
 crates/solidcore/src/intersect/surface_intersector/tangent_curves.rs	covers	int-div	1	proven	rc.len() / 40	constant non-zero divisor
 crates/solidcore/src/intersect/surface_intersector/tangent_curves.rs	covers_crossing	int-div	1	proven	rc.len() / 40	constant non-zero divisor
