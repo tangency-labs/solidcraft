@@ -851,6 +851,9 @@ pub struct FitSearch {
 /// close estimate settles the search in two or three blends where bisection takes eleven or
 /// more. Where building is monotone in the size (everything below the largest that fits builds),
 /// the size found is the one bisection finds; it never depends on how the bracket narrowed.
+///
+/// Building is not monotone in the size: a narrow band of sizes can build between sizes that fail,
+/// so a search that found nothing has not shown that nothing smaller builds.
 fn largest_that_fits(size: f64, hint: Option<f64>, blend: impl Fn(f64) -> Result<Body>) -> Result<FitSearch> {
     if !(size.is_finite() && size > 1e-6) {
         return Ok(FitSearch { found: None, smallest_refused: None, tried: 0 });
@@ -1155,6 +1158,14 @@ fn first_face_normal(body: &Body, pick: Vec3, flip: bool) -> Option<Vec3> {
 /// edge (a cylinder's seam at its rim), the sharp edge. Picks that find no edge are refused.
 pub fn blend_edges(body: &Body, picks: &[Vec3]) -> Result<Vec<usize>> {
     crate::blend_smlib::picked_edges(body, picks).map(|(edges, _)| edges)
+}
+
+/// Whether each pick takes a smooth edge, as a blend takes it ([`blend_edges`]): its faces meet
+/// tangentially all along it, so a blend of it is refused (there is nothing to round).
+pub fn smooth_picks(body: &Body, picks: &[Vec3]) -> Result<Vec<bool>> {
+    let (edges, _) = crate::blend_smlib::picked_edges(body, picks)?;
+    let rec = Faces::of(body)?;
+    edges.into_iter().map(|e| smooth_join(&rec, e)).collect()
 }
 
 /// The picked edges' tangent chains, for a blend that is to run along them: `picks` (each the
@@ -2433,6 +2444,18 @@ mod tests {
         assert_eq!(e.to_string(), KernelError::TooLarge(format!("refused at {at}")).to_string());
     }
 
+    /// A narrow band of sizes that build between sizes that fail (the fuzzer's seed 242) is not
+    /// found by the bisection: the search keeps no claim that nothing smaller builds, only what it tried.
+    #[test]
+    fn a_band_of_sizes_that_build_between_failures_is_not_called_absent() {
+        let body = crate::build::box_solid(Vec3::ZERO, Vec3::new(1.0, 1.0, 1.0)).unwrap();
+        let in_band = |r: f64| (0.08..=0.1166).contains(&r);
+        let search =
+            largest_that_fits(2.5, None, |r| if in_band(r) { Ok(body.clone()) } else { Err(KernelError::TooLarge("too large".into())) }).unwrap();
+        assert!(search.found.is_none(), "bisection misses the band");
+        assert!(search.smallest_refused.is_some() && search.tried > 1);
+    }
+
     /// A search that builds a candidate reports it and no refusal.
     #[test]
     fn a_search_that_builds_reports_what_it_built() {
@@ -3085,6 +3108,23 @@ mod tests {
         let actual = crate::measure(&body).unwrap().volume - crate::measure(&out).unwrap().volume;
         assert!((actual - removed).abs() < 1e-3, "{actual} vs {removed}");
         assert_eq!(out.face_count(), body.face_count() + 4);
+        assert!(out.validity().is_empty(), "{:?}", out.validity());
+    }
+
+    /// A cylinder r 10, h 50 whose top rim is chamfered 10, the top's radius (#17198): the
+    /// chamfer takes the whole top and is a cone with its apex on the axis, as a round of 10
+    /// is a dome. It was refused as larger than the faces allow. The cone removes the ring
+    /// between the r 10, h 10 cylinder and the cone in it, two thirds of that cylinder; the
+    /// body keeps the side, the bottom and the cone.
+    #[test]
+    fn a_chamfer_as_large_as_a_cylinder_top_makes_a_cone_to_its_centre() {
+        let can = crate::build::cylinder(Vec3::ZERO, Vec3::Z, 10.0, 50.0).unwrap();
+        let out = chamfer(&can, &[Vec3::new(10.0, 0.0, 50.0)], 10.0).unwrap();
+        let pi = std::f64::consts::PI;
+        let want = pi * 100.0 * 50.0 - 2.0 / 3.0 * pi * 100.0 * 10.0;
+        let got = crate::measure(&out).unwrap().volume;
+        assert!((got - want).abs() < 1e-6 * want, "{got} vs {want}");
+        assert_eq!(out.face_count(), 3);
         assert!(out.validity().is_empty(), "{:?}", out.validity());
     }
 }

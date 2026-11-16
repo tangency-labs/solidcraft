@@ -18,6 +18,7 @@
 //! | [`OffsetFailure::ExactCurveUncut`]     | `SM_ERR` (solidcore-native)               |
 //! | [`OffsetFailure::TangentBranchUncertified`] | `SM_ERR` (solidcore-native)            |
 //! | [`OffsetFailure::TangentEndOffCurve`]  | `SM_ERR` (solidcore-native)               |
+//! | [`OffsetFailure::LooseTangentEdge`]    | `SM_ERR` (WR-530, solidcore-native)       |
 //! | [`OffsetFailure::FacesApart`]          | `SM_ERR` (solidcore-native)               |
 //! | [`OffsetFailure::ReachUncertified`]    | `SM_ERR` (solidcore-native)               |
 //! | [`OffsetFailure::LoopGapUncertified`]  | `SM_ERR` (solidcore-native)               |
@@ -82,24 +83,31 @@ pub enum OffsetFailure {
     /// the B-rep's tolerance (a round inset by its radius). The offset is no surface there,
     /// and the faces beside it would have to meet across it, which the offset does not
     /// build (#2350).
+    ///
+    /// Also an extended inset's face whose offset reaches or passes such a radius (WR-346:
+    /// the face is dropped and its neighbours mated across it) where that mating cannot
+    /// bridge it: there the face is not built inside out, it is left out, so what fails is
+    /// the collapse, not a fold. `radius` is then a radius the face attains, sampled, not
+    /// a certified minimum, or, where the proof finds none, `|distance|`: an upper bound
+    /// (within the tolerance) on the face's least radius, not one it is known to attain.
     Collapses {
         /// The face whose offset collapses.
         face: FaceId,
         /// The offset distance asked for (signed, as the operation takes it).
         distance: f64,
-        /// The radius of curvature the face attains on the displaced side.
+        /// A radius of curvature the face attains on the displaced side, or (WR-346, where
+        /// no radius is proved) `|distance|`, an upper bound on its least radius.
         radius: f64,
     },
     /// Loops of the offset of `face` touch without crossing, so the offset walls they
-    /// come from meet there (with `fixes.offset_resolve_crossing_loops`).
+    /// come from meet there.
     WallsTouch {
         /// The face whose offset's loops touch, when known.
         face: Option<FaceId>,
         /// How they touch.
         contact: WallContact,
     },
-    /// Loops of the offset of `face` cross in a way the offset does not resolve (opt-in
-    /// `fixes.offset_resolve_crossing_loops`).
+    /// Loops of the offset of `face` cross in a way the offset does not resolve.
     LoopsCross {
         /// The face whose offset's loops cross, when known.
         face: Option<FaceId>,
@@ -154,6 +162,21 @@ pub enum OffsetFailure {
     /// vertex on the curve: the end is not where the edges meet, and no cut chosen by
     /// distance stands in for it.
     TangentEndOffCurve,
+    /// In a local operation, an edge tangent in the input whose new curve, lifted onto
+    /// one face's new surface, lands on the other face's new surface farther than ten
+    /// times the larger of the edge tolerance and the approximation tolerance (WR-530):
+    /// only one of the two faces moved, so they no longer meet along the edge, and no
+    /// later step of a local operation closes the gap.
+    LooseTangentEdge {
+        /// The tangent edge, of the operation's input, where the handle names one.
+        edge: Option<EdgeId>,
+        /// How far the new curve, dropped onto the other face's new surface, lands from
+        /// it at most (`max_drop_to_surf`; NaN where the drop gave no finite distance).
+        max_drop_to_surf: f64,
+        /// The limit it was held to: ten times the larger of the edge tolerance and the
+        /// approximation tolerance.
+        meet_tol: f64,
+    },
     /// Two curved faces tangent at the old edge now cross, but the intersection
     /// branch on their retained sides has not been certified.
     TangentBranchUncertified,
@@ -315,6 +338,10 @@ pub enum LoopCrossing {
     ArriveMoreThanOneWay,
     /// The face comes apart around a hole.
     ComesApartAroundHole,
+    /// The offset's results are not merged, so the walls the crossing loops come from
+    /// are not cut where they pass through each other; only the merge cuts them (the local
+    /// operation, always unmerged, included).
+    Unmerged,
 }
 
 impl OffsetFailure {
@@ -335,6 +362,7 @@ impl OffsetFailure {
                 .map(EntityRef::Edge)
                 .or_else(|| face.map(EntityRef::Face)),
             Self::LoopGapUncertified { face } => face.map(EntityRef::Face),
+            Self::LooseTangentEdge { edge, .. } => edge.map(EntityRef::Edge),
             Self::Unsound { what } => what.entity(),
             Self::ExactCurveUncut
             | Self::TangentEndOffCurve
@@ -385,6 +413,7 @@ impl OffsetFailure {
             | Self::SeamOpened { .. }
             | Self::ExactCurveUncut
             | Self::TangentEndOffCurve
+            | Self::LooseTangentEdge { .. }
             | Self::TangentBranchUncertified
             | Self::FacesApart { .. }
             | Self::ReachUncertified { .. }
@@ -417,6 +446,7 @@ impl OffsetFailure {
             | Self::SeamOpened { .. }
             | Self::ExactCurveUncut
             | Self::TangentEndOffCurve
+            | Self::LooseTangentEdge { .. }
             | Self::TangentBranchUncertified
             | Self::FacesApart { .. }
             | Self::ReachUncertified { .. }
@@ -439,6 +469,7 @@ impl OffsetFailure {
             | Self::ReachUncertified { .. }
             | Self::ExactCurveUncut
             | Self::TangentEndOffCurve
+            | Self::LooseTangentEdge { .. }
             | Self::TangentBranchUncertified
             | Self::LoopGapUncertified { .. }
             | Self::Unsound { .. }
@@ -470,6 +501,7 @@ impl OffsetFailure {
             | Self::ReachUncertified { .. }
             | Self::ExactCurveUncut
             | Self::TangentEndOffCurve
+            | Self::LooseTangentEdge { .. }
             | Self::TangentBranchUncertified
             | Self::LoopGapUncertified { .. }
             | Self::Unsound { .. } => ErrorKind::Unsupported,
@@ -539,6 +571,10 @@ impl core::fmt::Display for LoopCrossing {
                 "the loops arrive at a crossing more than one way"
             }
             LoopCrossing::ComesApartAroundHole => "the face comes apart around a hole",
+            LoopCrossing::Unmerged => {
+                "the results are not merged, so the walls the loops come from are not cut where \
+                 they cross; only a merged offset cuts them"
+            }
         })
     }
 }
@@ -704,6 +740,17 @@ impl core::fmt::Display for OffsetFailure {
             Self::TangentBranchUncertified => f.write_str(
                 "two curved faces tangent at the old edge now cross, but the intersection \
                  branch on their retained sides has no certificate",
+            ),
+            Self::LooseTangentEdge {
+                edge,
+                max_drop_to_surf,
+                meet_tol,
+            } => write!(
+                f,
+                "in a local operation, the new faces beside {} that was tangent no longer \
+                 meet along it: one moved off the other ({max_drop_to_surf:e} apart, limit {meet_tol:e}), and \
+                 nothing closes the gap",
+                edge.map_or_else(|| "an edge".to_owned(), |e| format!("edge {}", e.index()))
             ),
             Self::TangentEndOffCurve => f.write_str(
                 "an edge ends beside a tangent edge whose new faces now cross, and that edge's new \
@@ -975,6 +1022,16 @@ mod tests {
             ),
             // a stage that failed with no reason the kernel names: its fault, in its class
             (O::StageFailed, ErrorKind::StageFailed, false, true),
+            (
+                O::LooseTangentEdge {
+                    edge: None,
+                    max_drop_to_surf: 0.5,
+                    meet_tol: 1e-4,
+                },
+                ErrorKind::Unsupported,
+                false,
+                false,
+            ),
         ];
         let row = |o: &O| -> usize {
             match o {
@@ -999,6 +1056,7 @@ mod tests {
                 O::Inconsistent(_) => 18,
                 O::TangentBranchUncertified => 19,
                 O::StageFailed => 20,
+                O::LooseTangentEdge { .. } => 21,
             }
         };
         for (i, (o, class, phrase, defect)) in pinned.iter().enumerate() {
@@ -1083,7 +1141,7 @@ mod tests {
             20,
             &[
                 ("offset/offset_executive/p1.rs", 9),
-                ("offset/offset_executive/p2.rs", 9),
+                ("offset/offset_executive/p2.rs", 8),
                 ("offset/offset_faces.rs", 4),
                 ("offset/offset_geometry_creation.rs", 1),
             ],

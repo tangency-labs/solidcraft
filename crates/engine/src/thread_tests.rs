@@ -290,6 +290,19 @@ fn automatic_sizing_past_the_coarse_range_suggests_a_size_with_its_pitch() {
 }
 
 #[test]
+fn the_dialog_fills_in_a_size_with_its_pitch_past_the_coarse_range() {
+    let mut s = Session::default();
+    run(&mut s, "solid.cylinder", json!({"radius": 75, "height": 10, "body_name": "Shaft"}));
+    let state = s.model.state();
+    let size = crate::cmd::large_thread_size(&state, Vec3::new(75.0, 0.0, 5.0)).unwrap();
+    assert_eq!(size, "M150x4");
+    run(&mut s, "solid.thread", json!({"face": [75, 0, 5], "designation": size}));
+    // A cylinder the coarse table covers is sized automatically, so there is nothing to fill in.
+    run(&mut s, "solid.cylinder", json!({"base":[300,0,0],"radius": 10, "height": 10, "body_name": "Small", "operation": "new"}));
+    assert_eq!(crate::cmd::large_thread_size(&s.model.state(), Vec3::new(310.0, 0.0, 5.0)), None);
+}
+
+#[test]
 fn qualified_automatic_sizing_past_the_coarse_range_ignores_another_bodys_valid_size() {
     let mut s = Session::default();
     run(&mut s, "solid.cylinder", json!({"base":[33.5,0,0],"radius":4,"height":10,"body_name":"Small","operation":"new"}));
@@ -1784,6 +1797,9 @@ fn grouped_thread_faces_reject_invalid_plural_input_atomically() {
         json!({"faces":[{"point":[4,0,2]}]}),
         json!({"faces":[{"body":"missing","point":[4,0,2]}]}),
         json!({"faces":[{"body":false,"point":[4,0,2]}]}),
+        json!({"faces":[{"body":"Shaft","point":[4,0,2]}],"single_face_selection":"true"}),
+        json!({"face":[4,0,2],"single_face_selection":true}),
+        json!({"faces":[{"body":"Shaft","point":[4,0,2]},{"body":"Shaft","point":[4,0,2]}],"single_face_selection":true}),
     ];
     invalid.push(json!({"faces":vec![[4,0,2];1025]}));
     for params in invalid {
@@ -1807,6 +1823,7 @@ fn a_single_thread_keeps_the_legacy_command_and_serialized_face() {
     assert_eq!(thread["face"], json!([4.0, 0.0, 2.0]));
     assert!(thread.get("additional_faces").is_none());
     assert!(thread.get("target_bodies").is_none());
+    assert!(thread.get("single_face_selection").is_none());
     let reopened = Session::new(solidcraft_doc::Document::from_json(&value.to_string()).unwrap());
     assert_eq!(reopened.model.state().threads.len(), 1);
 }

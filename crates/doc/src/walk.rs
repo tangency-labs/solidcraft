@@ -412,7 +412,7 @@ impl PlaneRef {
             return;
         }
         match self {
-            Self::Construction { feature } => f(Ref::Feature(feature)),
+            Self::Construction { feature, .. } => f(Ref::Feature(feature)),
             Self::Offset { base, .. } | Self::Flipped { base, .. } => base.walk_feature_refs(f, depth + 1),
             Self::ThroughPoint { base, point } => {
                 base.walk_feature_refs(f, depth + 1);
@@ -452,7 +452,7 @@ impl PlaneRef {
             return;
         }
         match self {
-            Self::Construction { feature } => f(Ref::Feature(feature)),
+            Self::Construction { feature, .. } => f(Ref::Feature(feature)),
             Self::Offset { base, .. } | Self::Flipped { base, .. } => base.walk_feature_refs_mut(f, depth + 1),
             Self::ThroughPoint { base, point } => {
                 base.walk_feature_refs_mut(f, depth + 1);

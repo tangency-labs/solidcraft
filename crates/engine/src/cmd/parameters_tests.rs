@@ -765,6 +765,44 @@ fn stored_points(s: &Session, feature: u64) -> Vec<solidcore_record::Vec2> {
     s.doc.sketch(feature).unwrap().points.iter().map(|p| p.pos).collect()
 }
 
+/// Where the circle's centre is in the stored sketch `feature`.
+fn circle_centre(s: &Session, feature: u64) -> solidcore_record::Vec2 {
+    let sk = s.doc.sketch(feature).unwrap();
+    match sk.curves.iter().map(|c| &c.kind).find(|k| matches!(k, solidcraft_sketch::CurveKind::Circle { .. })) {
+        Some(solidcraft_sketch::CurveKind::Circle { c, .. }) => sk.points[*c].pos,
+        _ => solidcore_record::Vec2::new(f64::NAN, f64::NAN),
+    }
+}
+
+#[test]
+fn a_dimension_driven_to_zero_and_back_keeps_its_side() {
+    // #15766: a pin drawn at (-10, -5), dimensioned from the origin by `x` and `y`. At 0 its
+    // centre is on the axis; a value after that puts it back on the side it was drawn on.
+    let mut s = Session::default();
+    run(&mut s, "parameters.add", json!({"name": "x", "expression": "10 mm"}));
+    run(&mut s, "parameters.add", json!({"name": "y", "expression": "5 mm"}));
+    let feature = run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Pin sketch"}))["sketch"].as_u64().unwrap();
+    run(&mut s, "sketch.circle.center", json!({"center": [-10, -5], "radius": 2}));
+    run(&mut s, "sketch.dimension", json!({"entities": ["origin", "c1.center"], "type": "horizontal", "value": "x"}));
+    run(&mut s, "sketch.dimension", json!({"entities": ["origin", "c1.center"], "type": "vertical", "value": "y"}));
+    run(&mut s, "sketch.dimension", json!({"entities": ["c1"], "type": "radius", "value": "2 mm"}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"sketch": "Pin sketch", "distance": "1 mm"}));
+    for (name, value, want) in [
+        ("y", "0 mm", (-10.0, 0.0)),
+        ("y", "5 mm", (-10.0, -5.0)),
+        ("y", "0 mm", (-10.0, 0.0)),
+        ("y", "3 mm", (-10.0, -3.0)),
+        ("x", "0 mm", (0.0, -3.0)),
+        ("x", "4 mm", (-4.0, -3.0)),
+    ] {
+        run(&mut s, "parameters.change", json!({"name": name, "expression": value}));
+        let c = circle_centre(&s, feature);
+        assert!((c.x - want.0).abs() < 1e-9 && (c.y - want.1).abs() < 1e-9, "{name} = {value}: centre {c:?}, want {want:?}");
+        assert!(s.model.results.iter().all(|r| r.error.is_none() && r.warning.is_none()), "{name} = {value}");
+    }
+}
+
 #[test]
 fn an_unsolvable_value_edit_is_refused_and_changes_nothing() {
     let (mut s, feature, params) = linkage_session();

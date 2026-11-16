@@ -4,7 +4,8 @@
 //! to round, and each end of that edge is also on the seam where the top runs tangent
 //! into the rounded end. `SmFilletNx1Corner::MakeCornerTopology` takes the tangent
 //! top/round edge as the side edge, so it picks the round as the end face, which the
-//! fillet never meets. The opt-in `Kernel::fixes.fillet_nx1_tangent_side_edge` skips it.
+//! fillet never meets. The tangent side-edge skip (once the opt-in
+//! `fillet_nx1_tangent_side_edge`, now the only path) skips it.
 #![allow(
     clippy::unwrap_used,
     clippy::expect_used,
@@ -63,9 +64,8 @@ fn slot_top_edge(b: &Brep, slot_floor: f64) -> solidcore::topology::EdgeId {
         .expect("slot top edge")
 }
 
-fn fillet(flag: bool, slot_floor: f64) -> solidcore::Result<(f64, Brep)> {
+fn fillet(slot_floor: f64) -> solidcore::Result<(f64, Brep)> {
     let mut k = Kernel::default();
-    k.fixes.fillet_nx1_tangent_side_edge = flag;
     let mut body = bar_with_slot(&mut k, slot_floor);
     let e = slot_top_edge(&body, slot_floor);
     fillet_edges(&mut k, &mut body, &[e], RADIUS, 1, 1, 1.0)?;
@@ -79,29 +79,33 @@ fn fillet(flag: bool, slot_floor: f64) -> solidcore::Result<(f64, Brep)> {
     Ok((v, body))
 }
 
-/// The bar less the slot, less the round's section (4 - pi) over the slot's 6 mm.
-fn expected_volume() -> f64 {
+/// The bar less the slot (its half disc of the round end, and the strip of `slot_floor`
+/// x 19 beyond the seam), less the round's section `4 - pi` (r 2, convex) over the slot's
+/// 6 mm: the round's ends lie in the slot walls Z = 3.5 and 9.5, square to the edge.
+fn expected_volume(slot_floor: f64) -> f64 {
     let pi = core::f64::consts::PI;
-    14.0 * (25.0 * 19.0 + pi * R * R) - 6.0 * pi * R * R / 2.0 - 6.0 * (4.0 - pi)
-}
-
-#[test]
-fn seam_edge_round_is_refused_by_default() {
-    assert!(fillet(false, 0.0).is_err());
+    14.0 * (25.0 * 19.0 + pi * R * R)
+        - 6.0 * (pi * R * R / 2.0 + slot_floor * 2.0 * R)
+        - 6.0 * (4.0 - pi)
 }
 
 #[test]
 fn seam_edge_round_with_the_fix() {
-    let (v, _) = fillet(true, 0.0).unwrap();
-    assert!(
-        (v - expected_volume()).abs() < 1e-3 * expected_volume(),
-        "{v}"
-    );
+    let (v, _) = fillet(0.0).unwrap();
+    let want = expected_volume(0.0);
+    eprintln!("seam volume {v} vs {want}");
+    assert!((v - want).abs() < 1e-3, "{v} vs {want}");
 }
 
+/// Formerly `off_seam_round_builds_a_manifold_solid`; `fillet` still asserts the
+/// manifold solid. The tolerance, 1e-3 absolute (MEASURED), is far below the round's own
+/// 6 (4 - pi) = 5.15, so an unrounded or partly rounded body fails.
 #[test]
-fn off_seam_round_is_unchanged_by_the_fix() {
-    let (off, _) = fillet(false, 0.5).unwrap();
-    let (on, _) = fillet(true, 0.5).unwrap();
-    assert_eq!(off.to_bits(), on.to_bits());
+fn off_seam_round_holds_its_closed_form() {
+    let (v, _) = fillet(0.5).unwrap();
+    let want = expected_volume(0.5);
+    // pins the arithmetic of expected_volume
+    assert!((want - 9706.665662772806).abs() < 1e-9);
+    eprintln!("off-seam volume {v} vs {want}");
+    assert!((v - want).abs() < 1e-3, "{v} vs {want}");
 }

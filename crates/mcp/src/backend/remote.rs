@@ -118,6 +118,16 @@ impl Remote {
             params: Self::scoped(params),
         };
         let reply = self.conn.exchange(request, retry_busy)?;
+        // Every connection the app serves is taken (#10967): it ran nothing and closed this one.
+        if reply.get("error").and_then(Value::as_str) == Some(solidcraft_control::auth::TOO_MANY_CONNECTIONS) {
+            self.conn.disconnect();
+            return Err(format!(
+                "the SolidCraft app at {} {}: it is serving as many connections as it takes (each \
+                 MCP server, CLI run or script connected to it holds one). Close one of them, or send the call again once one has ended",
+                self.conn.addr(),
+                super::REFUSED_UNRUN
+            ));
+        }
         self.echoed = echoed(&reply);
         Ok(self.conn.outcome(&reply)?)
     }

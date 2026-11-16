@@ -400,8 +400,8 @@ pub(crate) fn coincidence_bound(
 ///   `edge_remove` of the pair, the sector's mate and loop tests, `set_orientation`,
 ///   `add_oriented_eu_pair`, a surviving wire's `edge_remove` and vertex-use unlinking, the
 ///   surviving edge's `set_tolerance` and `destroy` of the deleted edge; then `merge_shells`,
-///   `test_closure_split_region_attempt` (whose status passes on with
-///   `brep_edit_statuses_pass_on`, and which may draw from `k.rng`), `is_spine` and
+///   `test_closure_split_region_attempt` (whose status is ignored, as upstream, and which
+///   may draw from `k.rng`), `is_spine` and
 ///   `test_closure_split_region_edge`.
 ///
 /// A failure at an "after" site would leave the operand half glued, so a check up front
