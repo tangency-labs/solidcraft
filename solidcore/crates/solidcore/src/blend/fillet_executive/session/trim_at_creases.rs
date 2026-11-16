@@ -251,8 +251,8 @@ fn crease_meets(
         }
         let dt = (ar * bb - ab * br) / det;
         let du = (ab * ar - aa * br) / det;
-        t = (t + dt).clamp(ci.min(), ci.max());
-        u = (u + du).clamp(oi.min(), oi.max());
+        t = smos_min(smos_max(t + dt, ci.min()), ci.max());
+        u = smos_min(smos_max(u + du, oi.min()), oi.max());
     }
     Ok(found.map(|(_, p)| p))
 }
@@ -547,7 +547,7 @@ fn move_edge_onto_crease(
             trims.push((e2, curve, at(a)?, at(z)?));
         }
     }
-    let mut pieces = Vec::with_capacity(trims.len());
+    let mut pieces = Vec::new();
     for (e2, curve, pa, pz) in trims {
         let Some(p) = piece_between(k, &curve, pa, pz)? else {
             return Ok(false);
