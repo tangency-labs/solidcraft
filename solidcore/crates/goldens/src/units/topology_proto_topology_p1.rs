@@ -7655,7 +7655,7 @@ mod tests {
         };
         let p1 = replay_matches_golden(&Runner);
         let p3 = replay_matches_golden(&super::super::topology_proto_topology_p3::Runner);
-        let get = |m: &std::collections::BTreeMap<String, Fired>, c: &str| {
+        let get = |m: &BTreeMap<String, Fired>, c: &str| {
             *m.get(c).unwrap_or_else(|| panic!("moved row {c} is not a case"))
         };
         for c in WR73_P1 {
