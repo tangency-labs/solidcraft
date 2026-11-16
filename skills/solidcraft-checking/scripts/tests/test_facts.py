@@ -2,6 +2,7 @@
 solidcraft-modeling. A failure here means the skill text is out of date."""
 
 import json
+import os
 import subprocess
 import sys
 from math import cos, dist, pi, radians, sin
@@ -59,23 +60,29 @@ def holes(count: str) -> list:
 
 # Traps
 
-def test_a_dimension_driven_to_zero_can_break_the_next_change():
-    with pytest.raises(SolidCraftError, match="would conflict"):
-        execute([
-            cmd("parameters.add", name="y", expression="5 mm"),
-            cmd("sketch.create", plane="XY", name="Pin sketch"),
-            cmd("sketch.circle.center", center=[-10, -5], radius=2),
-            cmd("sketch.dimension", entities=["origin", "c1.center"], type="horizontal", value="10 mm"),
-            cmd("sketch.dimension", entities=["origin", "c1.center"], type="vertical", value="y"),
-            cmd("sketch.dimension", entities=["c1"], type="radius", value="2 mm"),
-            cmd("sketch.finish"),
-            cmd("solid.extrude", sketch="Pin sketch", distance="1 mm"),
-            cmd("parameters.change", name="y", expression="0 mm"),
-            cmd("parameters.change", name="y", expression="5 mm"),
-        ])
+def test_a_dimension_driven_to_zero_can_move_the_body_to_the_other_side():
+    before, at_zero, restored = run_commands([
+        cmd("parameters.add", name="y", expression="5 mm"),
+        cmd("sketch.create", plane="XY", name="Pin sketch"),
+        cmd("sketch.circle.center", center=[-10, -5], radius=2),
+        cmd("sketch.dimension", entities=["origin", "c1.center"], type="horizontal", value="10 mm"),
+        cmd("sketch.dimension", entities=["origin", "c1.center"], type="vertical", value="y"),
+        cmd("sketch.dimension", entities=["c1"], type="radius", value="2 mm"),
+        cmd("sketch.finish"),
+        cmd("solid.extrude", sketch="Pin sketch", distance="1 mm"),
+        cmd("document.inspect", measure=True),
+        cmd("parameters.change", name="y", expression="0 mm"),
+        cmd("document.inspect", measure=True),
+        cmd("parameters.change", name="y", expression="5 mm"),
+    ])[-5::2]
+    for inspection, expected_y in zip((before, at_zero, restored), (-5, 0, 5)):
+        assert inspection["sketches"][0]["dof"] == 0
+        body = inspection["bodies"][0]
+        assert body["center_of_mass"] == pytest.approx([-10, expected_y, 0.5], abs=1e-3)
+        assert body["volume_mm3"] == pytest.approx(4 * pi, rel=1e-8)
 
 
-def slot_centre(*changes: list) -> float:
+def slot_centre(*changes: dict) -> float:
     """The slot's centre on x after the given parameter changes."""
     body = execute([
         cmd("parameters.add", name="n", expression="3", unit=""),
@@ -92,14 +99,12 @@ def slot_centre(*changes: list) -> float:
     return (body["bbox"]["min"][0] + body["bbox"]["max"][0]) / 2
 
 
-def test_a_slot_held_by_other_constraints_keeps_its_side_at_zero():
-    # Drawn at x = -6. At n = 1 the distance is 0, so the slot slides to the origin; when the
-    # value comes back the solver takes the shortest step that fits and the slot keeps the side
-    # it was drawn on, so it no longer comes back mirrored.
+def test_a_slot_held_by_other_constraints_can_change_sides_after_zero():
+    # The slot slides to the origin at n = 1, then moves to the other side at n = 3.
     assert slot_centre() == pytest.approx(-6, abs=1e-3)
     assert slot_centre(cmd("parameters.change", name="n", expression="1")) == pytest.approx(0, abs=1e-3)
     assert slot_centre(cmd("parameters.change", name="n", expression="1"),
-                       cmd("parameters.change", name="n", expression="3")) == pytest.approx(-6, abs=1e-3)
+                       cmd("parameters.change", name="n", expression="3")) == pytest.approx(6, abs=1e-3)
 
 
 def centred_row(position: list) -> list:
@@ -116,23 +121,34 @@ def centred_row(position: list) -> list:
         cmd("solid.extrude", sketch="Hole sketch", distance="6 mm", direction="negative", operation="cut",
             targets=["Plate"], name="Hole"),
         cmd("solid.pattern.rectangular", features=["Hole"], dir1=[1, 0, 0], count1="n", spacing1="10 mm"),
+        cmd("document.inspect", measure=True),
         cmd("parameters.change", name="n", expression="1"),
+        cmd("document.inspect", measure=True),
         cmd("parameters.change", name="n", expression="3"),
     ]
 
 
 def test_a_position_measured_from_an_anchor_point_survives_reaching_zero():
-    with pytest.raises(SolidCraftError, match="would conflict"):
-        execute(centred_row([
-            cmd("sketch.dimension", entities=["origin", "c1.center"], type="horizontal", value="(n - 1) / 2 * 10 mm"),
-        ]))
-    body = execute(centred_row([
+    from_origin = [
+        cmd("sketch.dimension", entities=["origin", "c1.center"], type="horizontal", value="(n - 1) / 2 * 10 mm"),
+    ]
+    from_anchor = [
         cmd("sketch.point", point=[-100, 0]),
         cmd("sketch.dimension", entities=["origin", "p1"], type="horizontal", value="100 mm"),
         cmd("sketch.constraint.horizontal_vertical", points=["origin", "p1"], mode="horizontal"),
         cmd("sketch.dimension", entities=["p1", "c1.center"], type="horizontal", value="100 mm - (n - 1) / 2 * 10 mm"),
-    ]))["bodies"][0]
-    assert body["volume_mm3"] == pytest.approx(100 * 40 * 4 - 3 * pi * 4, rel=2e-4)
+    ]
+    hole_volume = 4 * pi
+    plate_volume = 100 * 40 * 4
+    # The origin dimension moves all three holes 20 mm to the right on the return to n = 3.
+    shifted_centre = -3 * hole_volume * 20 / (plate_volume - 3 * hole_volume)
+    for position, expected_centres in ((from_origin, (0, 0, shifted_centre)), (from_anchor, (0, 0, 0))):
+        inspections = run_commands(centred_row(position))[-5::2]
+        for inspection, holes, expected_centre in zip(inspections, (3, 1, 3), expected_centres):
+            assert inspection["sketches"][0]["dof"] == 0
+            body = inspection["bodies"][0]
+            assert body["volume_mm3"] == pytest.approx(plate_volume - holes * hole_volume, rel=1e-8)
+            assert body["center_of_mass"][0] == pytest.approx(expected_centre, abs=1e-4)
 
 
 def test_pattern_counts_run_from_1_to_1000_and_a_range_rule_does_not_stop_0():
@@ -147,15 +163,19 @@ def test_pattern_counts_run_from_1_to_1000_and_a_range_rule_does_not_stop_0():
         ])
 
 
-def test_a_fractional_count_rounds_to_the_nearest_whole_number():
-    def copies(n):
+def test_a_fractional_count_is_refused_unless_explicitly_rounded():
+    def copies(n, count="n"):
         return len(execute([
             cmd("parameters.add", name="n", expression=n, unit=""),
             cmd("solid.cylinder", diameter="2 mm", height="2 mm", operation="new", body_name="Pin", name="Pin"),
-            cmd("solid.pattern.rectangular", bodies=["Pin"], dir1=[1, 0, 0], count1="n", spacing1="10 mm"),
+            cmd("solid.pattern.rectangular", bodies=["Pin"], dir1=[1, 0, 0], count1=count, spacing1="10 mm"),
         ])["bodies"])
 
-    assert (copies("6.4"), copies("6.5")) == (6, 7)
+    assert copies("6") == 6
+    for n, rounded in (("6.4", 6), ("6.5", 7)):
+        with pytest.raises(SolidCraftError, match="a count must be a whole number"):
+            copies(n)
+        assert copies(n, "round(n)") == rounded
 
 
 HEXAGON = [
@@ -166,18 +186,17 @@ HEXAGON = [
 ]
 
 
-def test_a_circumscribed_polygon_needs_the_polygon_constraint():
-    assert sketch_dof(HEXAGON) == 1
+def test_a_circumscribed_polygon_is_regular_without_an_extra_polygon_constraint():
+    assert sketch_dof(HEXAGON) == 0
     assert sketch_dof([*HEXAGON, cmd("sketch.constraint.polygon", lines=[f"l{i}" for i in range(1, 7)])]) == 0
 
 
-def test_round_features_measure_about_1e_4_off():
+def test_cylinder_volume_matches_the_analytic_volume():
     body = execute([cmd("solid.cylinder", diameter="20 mm", height="10 mm")])["bodies"][0]
-    error = abs(body["volume_mm3"] / (pi * 100 * 10) - 1)
-    assert 1e-7 < error < 1.5e-4
+    assert body["volume_mm3"] == pytest.approx(pi * 100 * 10, rel=1e-8)
 
 
-def test_shallow_arcs_measure_much_worse_than_round_features():
+def test_shallow_arc_segment_volume_matches_the_analytic_volume():
     radius, span = 1000, radians(20)
     half = radius * sin(span / 2)
     rise = radius - radius * cos(span / 2)
@@ -189,7 +208,7 @@ def test_shallow_arcs_measure_much_worse_than_round_features():
         cmd("solid.extrude", sketch="Segment sketch", distance="10 mm"),
     ])["bodies"][0]
     exact = radius ** 2 / 2 * (span - sin(span)) * 10
-    assert 2e-4 < abs(body["volume_mm3"] / exact - 1) < 5e-3
+    assert body["volume_mm3"] == pytest.approx(exact, rel=1e-8)
 
 
 def test_centre_of_mass_and_bounding_box_measure_within_5e_5_of_the_part_size():
@@ -207,7 +226,7 @@ def test_centre_of_mass_and_bounding_box_measure_within_5e_5_of_the_part_size():
     assert abs(body["center_of_mass"][1] - 4 * radius / (3 * pi)) < 5e-5 * size
 
 
-def test_expressions_have_no_conditionals_and_sign_of_zero_is_one():
+def test_expressions_have_no_conditionals_and_sign_of_zero_is_zero():
     def evaluate(expression):
         done = subprocess.run(
             ["solidcraft-cli", "exec", "expr.evaluate", json.dumps({"expression": expression, "kind": "unitless"})],
@@ -216,8 +235,10 @@ def test_expressions_have_no_conditionals_and_sign_of_zero_is_one():
         return json.loads(done.stdout)
 
     assert not evaluate("if(1 > 0, 1, 2)")["ok"]
-    assert evaluate("sign(0)")["value"] == 1
+    assert evaluate("sign(0)")["value"] == 0
+    assert evaluate("sign(-0)")["value"] == 0
     assert evaluate("sign(-3)")["value"] == -1
+    assert evaluate("sign(3)")["value"] == 1
     assert evaluate("log(100)")["value"] == 2
     with pytest.raises(SolidCraftError, match="got an angle"):
         execute([cmd("parameters.add", name="a", expression="atan(1)", unit="")])
@@ -296,39 +317,50 @@ def test_a_command_script_works_as_a_design(tmp_path):
     script.write_text(json.dumps({"commands": BLOCK}))
     assert execute([], design=script)["bodies"][0]["volume_mm3"] == pytest.approx(40 * 40 * 12)
     shot = tmp_path / "shot.png"
+    # This checks script input on hosts with or without a working GPU renderer.
     subprocess.run(["solidcraft-cli", "snapshot", script, "--out", shot, "--width", "64", "--height", "64"],
-                   capture_output=True, check=True)
+                   capture_output=True, check=True, env={**os.environ, "SOLIDCRAFT_GPU": "cpu"})
     assert shot.stat().st_size > 0
 
 
 # Corrections to solidcraft-modeling
 
-def slot_along_y(last: dict) -> list:
-    return [
+def test_a_slot_along_y_is_fixed_by_its_centre_line_and_midpoint():
+    commands = [
         cmd("sketch.create", plane="XY"),
         cmd("sketch.draw.dimensioned", command="sketch.slot.overall", params={"p0": [10, 4], "p1": [10, 34], "width": 2},
             dimensions={"length": "30 mm", "width": "2 mm"}),
-        cmd("sketch.dimension", entities=["origin", "a1.center"], type="horizontal", value="10 mm"),
-        cmd("sketch.dimension", entities=["origin", "a1.center"], type="vertical", value="5 mm"),
-        last,
     ]
-
-
-def test_a_slot_along_y_takes_a_horizontal_dimension_on_its_second_arc():
-    with pytest.raises(SolidCraftError, match="over-constrain"):
-        execute(slot_along_y(cmd("sketch.dimension", entities=["origin", "a2.center"], type="vertical", value="33 mm")))
-    assert sketch_dof(slot_along_y(
-        cmd("sketch.dimension", entities=["origin", "a2.center"], type="horizontal", value="10 mm"))) == 0
+    assert sketch_dof(commands) == 3
+    inspection = run_commands([
+        *commands,
+        cmd("sketch.constraint.horizontal_vertical", line="l3", mode="vertical"),
+        cmd("sketch.dimension", entities=["origin", "p5"], type="horizontal", value="10 mm"),
+        cmd("sketch.dimension", entities=["origin", "p5"], type="vertical", value="19 mm"),
+        cmd("sketch.inspect"),
+    ])[-2]
+    assert inspection["dof"] == 0
+    points = {point["id"]: point["at"] for point in inspection["points"]}
+    assert points["a1.center"] == pytest.approx([10, 33])
+    assert points["a2.center"] == pytest.approx([10, 5])
+    assert points["p5"] == pytest.approx([10, 19])
 
 
 def test_slot_ids_count_on_from_the_curves_before_it():
-    created = run_commands([
+    slot, inspection = run_commands([
         cmd("sketch.create", plane="XY"),
         cmd("sketch.rectangle.two_point", p0=[-30, -20], p1=[30, 20]),
         cmd("sketch.slot.overall", p0=[-10, 0], p1=[10, 0], width=4),
-    ])[-2]["created"]
-    assert created["curves"] == ["l5", "a1", "l6", "a2"]
-    assert created["points"] == ["p5", "p6", "p7", "p8", "a1.center", "a2.center"]
+        cmd("sketch.inspect"),
+    ])[-3:-1]
+    assert slot["curves"] == ["l5", "a1", "l6", "a2"]
+    assert slot["created"]["curves"] == ["l5", "a1", "l6", "a2", "l7"]
+    assert slot["created"]["points"] == ["p5", "p6", "p7", "p8", "a1.center", "a2.center", "p9"]
+    assert slot["centre_line"] == "l7"
+    assert slot["middle"] == "p9"
+    centre_line = next(curve for curve in inspection["curves"] if curve["id"] == slot["centre_line"])
+    assert centre_line["construction"]
+    assert {centre_line["start"], centre_line["end"]} == {"a1.center", "a2.center"}
 
 
 def test_two_concentric_circles_extrude_as_a_ring():
@@ -363,15 +395,25 @@ def test_a_hole_sketch_under_the_part_drills_up_into_it(offset):
     assert body["center_of_mass"][2] > 5
 
 
-def test_a_fillet_between_curved_faces_stops_the_shell():
+def test_a_fillet_between_curved_faces_can_be_shelled():
     neck = [
         cmd("solid.cylinder", radius=8, height=20, body_name="C"),
         cmd("solid.sphere", radius=15, center=[0, 0, 30], operation="join", targets=["C"]),
     ]
-    shell = cmd("solid.shell", faces=[[0, 0, 0]], thickness=1.5)
-    with pytest.raises(SolidCraftError, match="offset: only bodies with planes"):
-        execute([*neck, cmd("solid.fillet", edges=[[8, 0, 30 - (15 ** 2 - 8 ** 2) ** 0.5]], radius=2), shell])
-    execute([*neck, shell])
+    filleted, shelled = run_commands([
+        *neck,
+        cmd("solid.fillet", edges=[[8, 0, 30 - (15 ** 2 - 8 ** 2) ** 0.5]], radius=2),
+        cmd("document.inspect", measure=True),
+        cmd("solid.shell", faces=[[0, 0, 0]], thickness=1.5),
+    ])[-3::2]
+    outer = filleted["bodies"][0]
+    wall, = shelled["bodies"]
+    assert wall["closed"]
+    assert bbox(wall) == pytest.approx((-15, -15, 0, 15, 15, 45), abs=1e-6)
+    assert 0 < wall["volume_mm3"] < outer["volume_mm3"]
+    assert wall["face_types"]["cylinder"] == 2
+    assert wall["face_types"]["sphere"] == 2
+    assert wall["face_types"]["other"] > outer["face_types"]["other"]
 
 
 OPEN_BOX = [
@@ -383,14 +425,20 @@ SHELL = cmd("solid.shell", faces=[[0, 0, 20]], thickness=2)
 FILLET_CENTROID = (10 - 3 * pi) / (12 - 3 * pi)  # distance of a fillet's cross-section centroid from its edge, per unit radius
 
 
-def test_an_open_rim_is_rounded_after_the_shell():
-    with pytest.raises(SolidCraftError, match="offset"):
-        execute([*OPEN_BOX, RIM, SHELL])
-    outer = (40 * 30 - (4 - pi) * 9) * 20
-    cavity = (36 * 26 - (4 - pi) * 1) * 18
-    rim = (1 - pi / 4) * (2 * (40 - 6) + 2 * (30 - 6) + 2 * pi * (3 - FILLET_CENTROID))
-    body = execute([*OPEN_BOX, SHELL, RIM])["bodies"][0]
-    assert body["volume_mm3"] == pytest.approx(outer - cavity - rim, rel=2e-4)
+def rounded_open_box_volume(length: float, width: float, height: float) -> float:
+    """Analytic volume with 3 mm corners, a 2 mm wall and a 1 mm outer rim fillet."""
+    outer = (length * width - (4 - pi) * 9) * height
+    cavity = ((length - 4) * (width - 4) - (4 - pi)) * (height - 2)
+    # The fillet removes a quarter-circle complement swept along its centroid's path.
+    rim = (1 - pi / 4) * (2 * (length - 6) + 2 * (width - 6) + 2 * pi * (3 - FILLET_CENTROID))
+    return outer - cavity - rim
+
+
+@pytest.mark.parametrize("operations", [(RIM, SHELL), (SHELL, RIM)], ids=["rim-first", "shell-first"])
+def test_an_open_rim_can_be_rounded_in_either_order(operations):
+    body, = execute([*OPEN_BOX, *operations])["bodies"]
+    assert body["closed"]
+    assert body["volume_mm3"] == pytest.approx(rounded_open_box_volume(40, 30, 20), rel=1e-6)
 
 
 def test_the_centre_of_a_centred_rectangle_is_p5():
@@ -433,38 +481,32 @@ RING = [
 ]
 
 
-def standoffs_at(standoffs: list, height: float) -> tuple[float, dict]:
-    """Volume gap at `height` against the height-5 volume plus the rings' growth, and each feature's warning."""
-    low = execute([*SHELLED_CASE, *standoffs])["bodies"][0]["volume_mm3"]
-    high = execute([*SHELLED_CASE, *standoffs, cmd("parameters.change", name="h", expression=f"{height} mm")])
-    gap = high["bodies"][0]["volume_mm3"] - low - (height - 5) * RING_GROWTH
-    return gap, {f["name"]: f["warning"] for f in high["timeline"] if f.get("warning")}
+def assert_standoffs_after_rebuild(standoffs: list, height: float) -> None:
+    inspection = execute([*SHELLED_CASE, *standoffs, cmd("parameters.change", name="h", expression=f"{height} mm")])
+    body, = inspection["bodies"]
+    assert body["closed"]
+    exact = rounded_open_box_volume(91, 62, 30) + height * RING_GROWTH
+    assert body["volume_mm3"] == pytest.approx(exact, rel=1e-6)
+    assert [f["warning"] for f in inspection["timeline"] if f.get("warning")] == []
 
 
-def test_a_boolean_retry_reports_tool_displacement_without_excess_material():
-    gap, warned = standoffs_at(TWO_CYLINDERS, 7)
-    assert abs(gap) < 0.5
-    assert "Standoff" not in warned
-    assert "tool displacement" in warned["Pilot"]
+def test_joining_then_cutting_a_patterned_standoff_grows_without_a_retry_warning():
+    assert_standoffs_after_rebuild(TWO_CYLINDERS, 7)
 
 
-def test_sinking_the_join_removes_the_warning():
-    gap, warned = standoffs_at([
+def test_standoffs_with_a_sunk_join_and_a_cut_grow_without_warnings():
+    assert_standoffs_after_rebuild([
         cmd("solid.cylinder", diameter="6 mm", height="h + 1 mm", base=["-39 mm", "-24.5 mm", "1 mm"], operation="join",
             targets=["Case"], name="Standoff"),
         cmd("solid.cylinder", diameter="2.5 mm", height="h + 1 mm", base=["-39 mm", "-24.5 mm", "2 mm"], operation="cut",
             targets=["Case"], name="Pilot"),
         cmd("solid.pattern.rectangular", features=["Standoff", "Pilot"], **STANDOFF_GRID),
     ], 7)
-    assert abs(gap) < 0.5
-    assert warned == {}
 
 
 @pytest.mark.parametrize("height", [3, 7, 12, 20])
 def test_a_ring_profile_builds_the_same_standoffs_exactly(height):
-    gap, warned = standoffs_at(RING, height)
-    assert abs(gap) < 0.5
-    assert warned == {}
+    assert_standoffs_after_rebuild(RING, height)
 
 
 def test_a_sunk_join_on_a_shelled_floor_does_not_warn():

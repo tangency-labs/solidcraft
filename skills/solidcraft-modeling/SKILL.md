@@ -42,9 +42,7 @@ Work the part out as numbers first. Then build it in a few large `batch` calls, 
   - A pick is resolved once and then follows its edge when parameters change.
   - A face can be given by name instead of a point (`faces:["F1:+z"]`, the `face` of `sheet.convert`). `body_topology` lists each face's `name`, a `point` that lies on it (the centroid of a face with a hole is in the hole) and, for a cylinder, `{origin, axis, radius}`.
 - **Profiles:** extrude takes every region by default, and a region inside another is a hole in it: two concentric circles give a ring. A third circle inside the ring gives a separate disc body. Pass `profiles` to choose regions.
-- **Order:** fillet the outside edges before you shell, so the shell follows the fillets. There are two exceptions:
-  - An edge of the face the shell removes, such as the rim of an open box: round it after the shell, because the shell can fail on it.
-  - A fillet between two curved faces, such as a sphere joined to a cylinder: the shell then fails with `offset: only bodies with planes, cylinders, cones, spheres and tori`. Shell first. The inside corner then stays sharp, so the wall there is thinner than `thickness`.
+- **Order:** fillet before shelling when the inner wall should follow the outside round. In SolidCraft 0.41.0, this works for a 2 mm fillet between a cylinder and sphere with a 1.5 mm shell. Shell first when the fillet only needs to round the outside edge of the opening. A 1 mm outer rim round on a box with 2 mm walls also works before shelling. Check the opening and wall thickness after both features.
 
 ## Verify
 - **Each stage:** run `measure {}` (about 0.9 KB per body; `{"summary":true}` keeps only name, volume, bbox, face count and `closed` per body) and compare the volume, bbox and face count with your numbers. A cut or hole that leaves the volume unchanged has missed, even though it reported success.

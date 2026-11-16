@@ -30,7 +30,7 @@ def run_commands(commands: list, design: Path | None = None, save: Path | None =
             args += ["--in", str(design)]
         if save:
             args += ["--save", str(save)]
-        done = subprocess.run(args, capture_output=True, text=True)
+        done = subprocess.run(args, capture_output=True, encoding="utf-8")
     if done.returncode:
         raise SolidCraftError(done.stderr.strip().removeprefix("error: "))
     return json.loads(done.stdout)
