@@ -33,7 +33,7 @@
 //! | [`SurfaceCache::has_cached_curves`]               | `SmSurfaceCache::HasCachedCurves`                |
 //! | [`SurfaceCache::find_unmarked_leaf_node`]         | `SmSurfaceCache::FindUnmarkedLeafNode`           |
 //! | [`SurfaceCache::first_bezier_patch`]              | `SmTreeNode::GetFirstBezierPatch` (unit `geom.tree`) on the cache's data |
-//! | [`SurfaceCache::surface_continuity`], [`SurfaceCache::surface_continuity_opt_in`], [`SurfaceCache::surface_continuity_with_kernel`] | `SmSurfaceCache::GetSurfaceContinuity` |
+//! | [`SurfaceCache::surface_continuity`] | `SmSurfaceCache::GetSurfaceContinuity` |
 //! | [`SurfaceCache::connected_region`], [`ConnectedRegion`] | `SmSurfaceCache::GetConnectedRegion`       |
 //! | [`SurfaceCache::mark_face_containment`]           | `SmSurfaceCache::MarkFaceContainment`            |
 //! | [`SurfaceCache::mark_face_containment_with`], [`FaceContainmentClassifier`] | `MarkFaceContainment` with the virtual `PointClassify` of a derived cache |
@@ -133,11 +133,10 @@
 //!   the singular sides and pole points). The values are the ones the lazy call would
 //!   compute; when that call fails with [`SolidError::Unported`] the memo is not used.
 //!   Upstream also copies no surface per split (`subdivide_node_split` borrows it).
-//! - **V continuity loop bound (WR-42 opt-in).** `GetSurfaceContinuity` uses
+//! - **V continuity loop bound (WR-42).** Upstream's `GetSurfaceContinuity` uses
 //!   `iv + 1 < rVConts.GetSize() - 1` in V, skipping the last internal V knot.
-//!   `surface_continuity` keeps that for pinned parity; `surface_continuity_opt_in` /
-//!   `surface_continuity_with_kernel` with `surface_continuity_checks_last_v_knot`
-//!   checks all internal V knots (`iv + 1 < rVConts.GetSize()`).
+//!   [`SurfaceCache::surface_continuity`] checks all internal V knots
+//!   (`iv + 1 < rVConts.GetSize()`).
 //! - **Not ported here.** `GetNthBoundingPlane`, `AddCurvesToCache`, the destructor
 //!   (`surface.surface_cache_p2`, [`crate::surface::surface_cache::p2`]), the tree construction
 //!   (`surface.surface_cache_p3`, [`crate::surface::surface_cache::p3`]),
@@ -2738,18 +2737,14 @@ impl<O: Copy + PartialEq> SurfaceCache<O> {
     }
 
     /// The lowest continuity at an internal knot of the surface inside `uv_domain`
-    /// (`GetSurfaceContinuity`), optionally checking the last internal V knot when
-    /// `check_last_v` is true (WR-42).
+    /// (`GetSurfaceContinuity`); `SM_CT_CINFINITY` without internal knots. Every
+    /// internal V knot is checked (not upstream, WR-42: its loop bound skips the last).
     ///
     /// # Errors
     ///
     /// `InvalidInput` when a continuity array is longer than the knot list (upstream
     /// reads past it); [`SolidError::Unported`] from `GetKnots`.
-    pub fn surface_continuity_opt_in(
-        &self,
-        uv_domain: &Extent2d,
-        check_last_v: bool,
-    ) -> Result<ContinuityType> {
+    pub fn surface_continuity(&self, uv_domain: &Extent2d) -> Result<ContinuityType> {
         // init return
         let mut ret = ContinuityType::CInfinity;
 
@@ -2787,12 +2782,7 @@ impl<O: Copy + PartialEq> SurfaceCache<O> {
         // remember lowest internal V continuity value
         if !v_conts.is_empty() {
             let mut iv = 1;
-            let v_bound = if check_last_v {
-                v_conts.len()
-            } else {
-                v_conts.len().saturating_sub(1)
-            };
-            while iv + 1 < v_bound {
+            while iv + 1 < v_conts.len() {
                 let c = *v_conts.get(iv).ok_or_else(|| invalid(OP_CONT, "index"))?;
                 let knot = *knots
                     .get(iv)
@@ -2805,32 +2795,6 @@ impl<O: Copy + PartialEq> SurfaceCache<O> {
         }
 
         Ok(ret)
-    }
-
-    /// The lowest continuity at an internal knot of the surface inside `uv_domain`
-    /// (`GetSurfaceContinuity`) with kernel opt-in fixes applied (WR-42).
-    ///
-    /// # Errors
-    ///
-    /// As [`Self::surface_continuity_opt_in`].
-    pub fn surface_continuity_with_kernel(
-        &self,
-        k: &Kernel,
-        uv_domain: &Extent2d,
-    ) -> Result<ContinuityType> {
-        self.surface_continuity_opt_in(uv_domain, k.fixes.surface_continuity_checks_last_v_knot)
-    }
-
-    /// The lowest continuity at an internal knot of the surface inside `uv_domain`
-    /// (`GetSurfaceContinuity`); `SM_CT_CINFINITY` without internal knots. Keeps
-    /// upstream's v loop bound, which skips the last internal v knot.
-    ///
-    /// # Errors
-    ///
-    /// `InvalidInput` when a continuity array is longer than the knot list (upstream
-    /// reads past it); [`SolidError::Unported`] from `GetKnots`.
-    pub fn surface_continuity(&self, uv_domain: &Extent2d) -> Result<ContinuityType> {
-        self.surface_continuity_opt_in(uv_domain, false)
     }
 
     /// The unmarked leaves connected to the leaf `start` through shared sides that
@@ -3879,68 +3843,33 @@ mod tests {
     }
 
     #[test]
-    fn wr42_surface_continuity_last_v_knot_skipped_by_default() {
+    fn wr42_surface_continuity_checks_the_last_v_knot() {
         let cache = make_wr42_cache();
         let domain = Extent2d::from_bounds(0.0, 0.0, 1.0, 4.0);
 
-        // Default behavior (pinned C++ parity) terminates early: iv + 1 < v_conts.len() - 1,
-        // skipping knot 3.0 (C0) and returning C1.
-        let default_continuity = cache.surface_continuity(&domain).unwrap();
-        assert_eq!(default_continuity, ContinuityType::C1);
-
-        // Opt-in checks all internal knots: iv + 1 < v_conts.len(), detecting knot 3.0 (C0).
-        let opt_in_continuity = cache.surface_continuity_opt_in(&domain, true).unwrap();
-        assert_eq!(opt_in_continuity, ContinuityType::C0);
-    }
-
-    #[test]
-    fn wr42_surface_continuity_with_kernel() {
-        let cache = make_wr42_cache();
-        let domain = Extent2d::from_bounds(0.0, 0.0, 1.0, 4.0);
-
-        // Kernel default has fix disabled.
-        let k_default = Kernel::default();
-        assert!(!k_default.fixes.surface_continuity_checks_last_v_knot);
-        let c_default = cache
-            .surface_continuity_with_kernel(&k_default, &domain)
-            .unwrap();
-        assert_eq!(c_default, ContinuityType::C1);
-
-        // Kernel with opt-in enabled.
-        let mut k_opt_in = Kernel::default();
-        k_opt_in.fixes.surface_continuity_checks_last_v_knot = true;
-        let c_opt_in = cache
-            .surface_continuity_with_kernel(&k_opt_in, &domain)
-            .unwrap();
-        assert_eq!(c_opt_in, ContinuityType::C0);
+        // Every internal knot is checked (iv + 1 < v_conts.len()), so knot 3.0 (C0) counts.
+        // Upstream's bound, iv + 1 < v_conts.len() - 1, skips it and returns C1.
+        assert_eq!(
+            cache.surface_continuity(&domain).unwrap(),
+            ContinuityType::C0
+        );
     }
 
     #[test]
     fn wr42_surface_continuity_subdomain_filtering() {
         let cache = make_wr42_cache();
 
-        // Subdomain [0.0, 1.0] x [0.0, 2.5] excludes knot 3.0.
-        // Both default and opt-in see only knots 1.0 and 2.0 (C1).
+        // Subdomain [0.0, 1.0] x [0.0, 2.5] excludes knot 3.0: only knots 1.0 and 2.0 (C1).
         let sub_early = Extent2d::from_bounds(0.0, 0.0, 1.0, 2.5);
         assert_eq!(
             cache.surface_continuity(&sub_early).unwrap(),
             ContinuityType::C1
         );
-        assert_eq!(
-            cache.surface_continuity_opt_in(&sub_early, true).unwrap(),
-            ContinuityType::C1
-        );
 
         // Subdomain [0.0, 1.0] x [2.5, 4.0] includes only knot 3.0 (C0).
-        // Default skips knot 3.0 and sees no internal knots in domain -> CInfinity.
-        // Opt-in checks knot 3.0 -> C0.
         let sub_late = Extent2d::from_bounds(0.0, 2.5, 1.0, 4.0);
         assert_eq!(
             cache.surface_continuity(&sub_late).unwrap(),
-            ContinuityType::CInfinity
-        );
-        assert_eq!(
-            cache.surface_continuity_opt_in(&sub_late, true).unwrap(),
             ContinuityType::C0
         );
     }

@@ -77,10 +77,8 @@ const SOLIDCRAFT_C494A18: &[&str] = &[
     "found_torus_sphere_keep_tested_nurb",
     "geometric_g2_continuity",
     "imprint_extends_edge_to_proto_vertex",
-    "join_touching_loops",
     "keep_operand_uv_trims",
     "linear_sweep_arc_is_cylinder",
-    "local_surface_intersect_guards_max_boundary_retry",
     "new_edge_vertex_tolerance_covers_gap",
     "offset_analytic_mate_edges",
     "offset_edges_keep_source_tolerance",
@@ -97,7 +95,6 @@ const SOLIDCRAFT_C494A18: &[&str] = &[
     "ssi_split_curves_at_singular_points",
     "ssi_tangent_curve_tracer",
     "ssi_trace_tangent_curves_once",
-    "surface_continuity_checks_last_v_knot",
     "sweep_statuses_pass_on",
     "uv_trim_corner_end_points_only",
 ];
