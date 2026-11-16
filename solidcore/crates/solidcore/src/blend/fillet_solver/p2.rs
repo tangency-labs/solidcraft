@@ -553,11 +553,17 @@ fn run_side_edge_on_along_its_line(
     // cone, a ruling of it (its UV trim a line): the surface continues as itself past its
     // domain (`offset_extension_as_itself`), along that line. A closed rim's seam is one: a
     // disc's rim rounded past its 2 mm wall meets the seam's line below the wall.
+    let uv_linear = uv_trim.is_linear(k, EFF_ZERO, false)?.linear;
     if !(side_3d.is_linear(k, EFF_ZERO, false)?.linear
-        && uv_trim.is_linear(k, EFF_ZERO, false)?.linear
+        && uv_linear
         && (base.is_planar(k, EFF_ZERO)?.is_planar
             || matches!(base.kind(), crate::surface::surface::SurfaceKind::Cone(_))))
     {
+        if uv_linear {
+            return run_tangent_seam_on_in_its_surface(
+                k, b, side_eu, side_edge, uv_trim, base, solver, intervals,
+            );
+        }
         return Ok(false);
     }
     let edge_ivl = intervals
@@ -643,6 +649,77 @@ fn run_side_edge_on_along_its_line(
         return Ok(true);
     }
     Ok(false)
+}
+
+/// Not the fork's (tangency-labs/solidcraft#17715): a side edge whose faces meet
+/// tangentially at the corner's vertex (a tangent seam T, as in
+/// [`run_side_edge_on_along_its_line`]), and whose UV trim on the rail's surface is a line
+/// of that surface's parameters, runs on past that vertex along the same line, as far as
+/// the line stays in the surface's own domain. That run-on lies on the surface itself, so
+/// it is exact whatever the surface's kind and the edge's curve (the circle of a torus's
+/// generating point through the seam). Where the face across T ends at the vertex, short
+/// of the rail, the rail meets T there continued: a concave round between a revolved end
+/// cap and a ring's round band, whose cap closes to a cusp against a flat side running
+/// tangent into the band, touches the band on T's circle a little past the cap's plane.
+/// Returns whether it widened the interval.
+///
+/// # Errors
+/// Those of the topology queries, the tangency test, the domain and the trim's evaluation.
+#[allow(clippy::too_many_arguments)] // the solve's state, read in place
+fn run_tangent_seam_on_in_its_surface(
+    k: &Kernel,
+    b: &mut Brep,
+    side_eu: EdgeuseId,
+    side_edge: EdgeId,
+    uv_trim: &Curve,
+    base: &Surface,
+    solver: &FilletSolver,
+    intervals: &mut ExtentNd,
+) -> Result<bool> {
+    let filleted = match solver.edgeuse(0)? {
+        Some(eu) => eu::edge(b, eu)?,
+        None => None,
+    };
+    let Some(filleted) = filleted else {
+        return Ok(false);
+    };
+    let (filleted_start, filleted_end) = edge::start_end_vertices(b, filleted)?;
+    let (side_start, side_end) = edge::start_end_vertices(b, side_edge)?;
+    let on_filleted =
+        |v: Option<VertexId>| v.is_some() && (v == filleted_start || v == filleted_end);
+    // the end of the side edge at the corner, and only one
+    let (corner_vertex, at_start) = match (on_filleted(side_start), on_filleted(side_end)) {
+        (true, false) => (side_start, true),
+        (false, true) => (side_end, false),
+        _ => return Ok(false),
+    };
+    let Some(corner_vertex) = corner_vertex else {
+        return Ok(false);
+    };
+    if !crate::blend::fillet_corner::topology::check_tangential_edgeuse_at_vertex(
+        k,
+        b,
+        side_eu,
+        corner_vertex,
+        rad_to_deg(solver.tangency_tolerance()),
+    )? {
+        return Ok(false);
+    }
+    let edge_ivl = intervals
+        .get(0)
+        .ok_or_else(|| invalid("no edge-use parameter interval"))?;
+    let own = base.natural_uv_domain_with_nurb(k)?;
+    let (in_lo, in_hi) = line_in_domain(k, uv_trim, &edge_ivl, &own)?;
+    let (before, after) = if at_start { (in_lo, 0.0) } else { (0.0, in_hi) };
+    if !(before > 0.0 || after > 0.0) {
+        return Ok(false);
+    }
+    set_interval(
+        intervals,
+        0,
+        Extent1d::from_min_max(edge_ivl.min() - before, edge_ivl.max() + after),
+    );
+    Ok(true)
 }
 
 /// How far (in its parameters) the linear UV trim `uv_trim` runs on past the start and
