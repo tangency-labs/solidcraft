@@ -80,7 +80,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use crate::boolean::merge::p4::KernelManifoldIntersector;
 use crate::curve::curve::{Curve, CurveKind};
-use crate::error::{ignore_status, ignored, EntityRef, Result, SolidError};
+use crate::error::{ignore_status, EntityRef, Result, SolidError};
 use crate::geom::context::{Context, MarkType};
 use crate::geom::extent1d::Extent1d;
 use crate::geom::extent2d::Extent2d;
@@ -945,10 +945,7 @@ impl OffsetExecutive {
     ) -> Result<()> {
         // remove curve and surface portions not used by edges and faces (status
         // ignored upstream)
-        ignore_status(crate::error::passed_on(
-            shrink_geometry(kernel, brep),
-            kernel.fixes.brep_edit_statuses_pass_on,
-        )?)?;
+        shrink_geometry(kernel, brep)?;
 
         // for every face
         let mut fix = Vec::new();
@@ -1056,12 +1053,9 @@ impl OffsetExecutive {
 
         // Clean up those faces we have collected.
         let editing_enabled = result.editing_enabled();
-        // cpp:2099–2102 ignores ordinary RemoveFaces failures but still executes
-        // its editing guard and traversal-mark effects. Missing work must defer.
-        ignore_status(crate::error::passed_on(
-            crate::topology::brep::p5::remove_faces(kernel, result, editing_enabled, &delete_faces),
-            kernel.fixes.brep_edit_statuses_pass_on,
-        )?)?;
+        // cpp:2099–2102 ignores RemoveFaces' status; it is passed on here (WR-658,
+        // tangency-labs/smlib 4803d6d).
+        crate::topology::brep::p5::remove_faces(kernel, result, editing_enabled, &delete_faces)?;
 
         // Forget the deleted faces and edgeuses, so later lookups in the relations
         // (lamina side walls, PiecewiseMerge) cannot return them. For m_vEUToEU also
@@ -1104,12 +1098,9 @@ impl OffsetExecutive {
         for id in crate::topology::brep::p1::edges(result, None)? {
             let primary = required(eu::primary_edgeuse(result, id)?)?;
             // NormalizedEvaluate(0.5, FALSE, sPnt): 3d. Upstream ignores the evaluation
-            // status and keeps the initialized point.
-            let point = ignored(crate::error::passed_on(
-                eu3::normalized_evaluate(kernel, result, primary, 0.5, false, false, true),
-                kernel.fixes.brep_edit_statuses_pass_on,
-            )?)?
-            .map_or(Vec3::UNDEF, |eval| eval.point);
+            // status and keeps the initialized point; it is passed on here (WR-658).
+            let point =
+                eu3::normalized_evaluate(kernel, result, primary, 0.5, false, false, true)?.point;
             // cpp:2069–2072: the solve runs with the original's editing disabled and
             // leaves it enabled afterwards (still disabled when the solve fails)
             original.set_editing_enabled(false);
@@ -1884,7 +1875,7 @@ impl OffsetExecutive {
         if !self.merge_results {
             self.clear_relations();
             let mut result = required(self.offset_brep.take())?;
-            // the stitch statuses are ignored upstream. Its edits notify the offset's
+            // the stitch statuses are ignored upstream and passed on here (WR-658). Its edits notify the offset's
             // objects (its glue merges and splits carry their attributes, as upstream's
             // objects' own do) through the caller's stores under the result identities;
             // without them, on call-local records.
@@ -1897,16 +1888,11 @@ impl OffsetExecutive {
                     // Tol: StitchIntoShell() adds in the tols of the topology objects,
                     // so the Brep's tolerance should be plenty.
                     let stitch_tol_3d = result.tolerance();
-                    ignore_status(crate::error::passed_on(
-                        stitch::stitch_into_shell_with(kernel, result, true, stitch_tol_3d, edits),
-                        kernel.fixes.brep_edit_statuses_pass_on,
-                    )?)
+                    stitch::stitch_into_shell_with(kernel, result, true, stitch_tol_3d, edits)?;
                 } else {
-                    ignore_status(crate::error::passed_on(
-                        stitch::stitch_into_solid_with(kernel, result, edits),
-                        kernel.fixes.brep_edit_statuses_pass_on,
-                    )?)
+                    stitch::stitch_into_solid_with(kernel, result, edits)?;
                 }
+                Ok(())
             };
             match notifications {
                 Some(n) => {
@@ -2257,10 +2243,7 @@ impl OffsetExecutive {
                         Vec3::new(start.x, start.y, 0.0),
                         Vec3::new(end.x, end.y, 0.0),
                     )?;
-                    ignore_status(crate::error::passed_on(
-                        line.edit_parameterization(&ivl),
-                        kernel.fixes.brep_edit_statuses_pass_on,
-                    )?)?;
+                    line.edit_parameterization(&ivl)?;
                     box_curves.push(Curve::from(line));
                 }
 
@@ -2316,10 +2299,7 @@ impl OffsetExecutive {
                 ] {
                     copy_domain.add_point(plane.project_point_to_uv_domain(corner));
                 }
-                ignore_status(crate::error::passed_on(
-                    plane.adjust_step_uv_domain(&copy_domain),
-                    kernel.fixes.brep_edit_statuses_pass_on,
-                )?)?;
+                plane.adjust_step_uv_domain(&copy_domain)?;
                 let copy_plane_domain = copy_plane.natural_uv_domain_with_nurb(kernel)?;
 
                 // make a planar face using the offset UV trim curves (as 3D curves)
@@ -2402,10 +2382,7 @@ impl OffsetExecutive {
             let mut uv_curves = made.curves_3d.unwrap_or_default();
             // Convert face 3dCurves into 2D curves (all their Z components are zero).
             for curve in &mut uv_curves {
-                ignore_status(crate::error::passed_on(
-                    curve.convert_to_2d(kernel),
-                    kernel.fixes.brep_edit_statuses_pass_on,
-                )?)?;
+                curve.convert_to_2d(kernel)?;
             }
             let mut loops = Vec::new();
             for &count in &made.curve_loops {
@@ -2631,21 +2608,19 @@ impl OffsetExecutive {
             // The deletion edits the offset B-rep through the kernel context, whose
             // callbacks a kernel-context caller has lent to `notifications.context`
             // (upstream: the one context); without returning them the deletion
-            // failed as a nested edit and, its status ignored, kept the face.
+            // fails as a nested edit. Upstream ignores its status; it is passed on
+            // here (WR-658).
             let lent = notifications.context.as_deref_mut();
-            ignore_status(crate::error::passed_on(
-                Context::with_lease_returned(kernel, lent, |kernel| {
-                    KernelManifoldIntersector::delete_faces_in(
-                        kernel,
-                        brep,
-                        &delete_faces,
-                        &mut *notifications.records,
-                        &mut *notifications.attributes,
-                        DELETE_FACES_NAMESPACE,
-                    )
-                }),
-                kernel.fixes.brep_edit_statuses_pass_on,
-            )?)?;
+            Context::with_lease_returned(kernel, lent, |kernel| {
+                KernelManifoldIntersector::delete_faces_in(
+                    kernel,
+                    brep,
+                    &delete_faces,
+                    &mut *notifications.records,
+                    &mut *notifications.attributes,
+                    DELETE_FACES_NAMESPACE,
+                )
+            })?;
             new_faces.retain(|face| !delete_faces.contains(face));
         }
         Ok(new_faces)
@@ -2714,34 +2689,23 @@ impl OffsetExecutive {
         let original_face = original.face(required(original_use.face)?)?;
         let brep = self.required_offset_brep()?;
         let offset_face = brep.face(offset_face)?;
-        // Intersect's status is ignored; upstream initializes its output on failure.
-        let domain = ignored(crate::error::passed_on(
-            original_face.uv_domain.intersect(&offset_face.uv_domain),
-            kernel.kernel().fixes.brep_edit_statuses_pass_on,
-        )?)?
-        .unwrap_or_else(Extent2d::new);
+        // Upstream ignores Intersect's status and initializes its output on failure;
+        // it is passed on here (WR-658).
+        let domain = original_face.uv_domain.intersect(&offset_face.uv_domain)?;
         let mid_uv = domain.evaluate(0.5, 0.5);
         // (`EvaluateNormal(sMidUV, TRUE, TRUE, ..)`: from the left)
-        let normal = ignored(crate::error::passed_on(
-            required(original_face.surface.as_ref())?.evaluate_normal(
-                kernel.kernel(),
-                mid_uv,
-                Side::Left,
-                Side::Left,
-            ),
-            kernel.kernel().fixes.brep_edit_statuses_pass_on,
-        )?)?
-        .unwrap_or(Vec3::UNDEF);
-        let offset_normal = ignored(crate::error::passed_on(
-            required(offset_face.surface.as_ref())?.evaluate_normal(
-                kernel.kernel(),
-                mid_uv,
-                Side::Left,
-                Side::Left,
-            ),
-            kernel.kernel().fixes.brep_edit_statuses_pass_on,
-        )?)?
-        .unwrap_or(Vec3::UNDEF);
+        let normal = required(original_face.surface.as_ref())?.evaluate_normal(
+            kernel.kernel(),
+            mid_uv,
+            Side::Left,
+            Side::Left,
+        )?;
+        let offset_normal = required(offset_face.surface.as_ref())?.evaluate_normal(
+            kernel.kernel(),
+            mid_uv,
+            Side::Left,
+            Side::Left,
+        )?;
         let same_normals = normal.dot(offset_normal) > 0.0;
         let mut original_uses: Vec<Option<EdgeuseId>> =
             eu::faceuse_edgeuses(original, original_faceuse, false, None)?
@@ -3018,14 +2982,8 @@ fn relate_surface_pair(
 fn uv_curve_bounding_box(kernel: &Kernel, curve: &mut Curve) -> Result<Extent3d> {
     // CreateCurvesFromFace supplied B-spline slicing copies or lines.
     match curve.kind_mut() {
-        CurveKind::BSpline(curve) => ignore_status(crate::error::passed_on(
-            curve.convert_to_3d(),
-            kernel.fixes.brep_edit_statuses_pass_on,
-        )?)?,
-        CurveKind::Line(curve) => ignore_status(crate::error::passed_on(
-            curve.convert_to_3d(),
-            kernel.fixes.brep_edit_statuses_pass_on,
-        )?)?,
+        CurveKind::BSpline(curve) => curve.convert_to_3d()?,
+        CurveKind::Line(curve) => curve.convert_to_3d()?,
         // UV curves from CreateCurvesFromFace are slicing copies, never analytic
         // non-line kinds. Reject malformed values rather than silently changing them.
         _ => {
@@ -3035,10 +2993,10 @@ fn uv_curve_bounding_box(kernel: &Kernel, curve: &mut Curve) -> Result<Extent3d>
             ));
         }
     }
-    // cpp:3777–3780 ignores both statuses. An ordinary bounding-box failure leaves
-    // the initialized extent, while a genuinely missing dependency must still defer.
-    Ok(ignored(crate::error::passed_on(
-        curve.calculate_bounding_box(
+    // cpp:3777–3780 ignores both statuses and keeps the initialized extent; they are
+    // passed on here (WR-658, tangency-labs/smlib 4803d6d).
+    Ok(curve
+        .calculate_bounding_box(
             kernel,
             &curve.natural_interval(),
             crate::nurbs::b_spline_curve::BoundingBoxRequest {
@@ -3047,11 +3005,9 @@ fn uv_curve_bounding_box(kernel: &Kernel, curve: &mut Curve) -> Result<Extent3d>
                 polar: false,
             },
             true,
-        ),
-        kernel.fixes.brep_edit_statuses_pass_on,
-    )?)?
-    .and_then(|boxes| boxes.normal)
-    .unwrap_or_else(Extent3d::new))
+        )?
+        .normal
+        .unwrap_or_else(Extent3d::new))
 }
 
 fn required<T>(value: Option<T>) -> Result<T> {
@@ -4354,20 +4310,25 @@ mod tests {
             .remove_excess_faces(&mut kernel, &mut original, &mut result)
             .unwrap();
         executive.set_shell_faces(&[]);
+        // RemoveFaces' editing-disabled refusal, which upstream ignores (cpp:2099-2102)
+        // and the fork passes on (WR-658, tangency-labs/smlib 4803d6d)
+        let editing_refused = |r: Result<()>| {
+            assert!(
+                matches!(&r, Err(e) if e.sm_status() == Some(1001)
+                    && e.to_string().contains("editing is not enabled")),
+                "{r:?}"
+            );
+        };
         // No result edge: the original's editing flag is not touched; the empty
-        // deletion list still reaches RemoveFaces, whose editing-disabled refusal is
-        // ignored (cpp:2099-2102).
-        executive
-            .remove_excess_faces(&mut kernel, &mut original, &mut result)
-            .unwrap();
+        // deletion list still reaches RemoveFaces, which refuses on the result whose
+        // editing is disabled.
+        editing_refused(executive.remove_excess_faces(&mut kernel, &mut original, &mut result));
         assert!(!original.editing_enabled());
         add_use(&mut result, 0.0, 1.0, 1.0);
         add_use(&mut result, 0.0, 1.0, 2.0);
         // The edges evaluate and solve against the empty original; no result face is
-        // close to it, so nothing is removed.
-        executive
-            .remove_excess_faces(&mut kernel, &mut original, &mut result)
-            .unwrap();
+        // close to it, so nothing is removed, and RemoveFaces refuses as above.
+        editing_refused(executive.remove_excess_faces(&mut kernel, &mut original, &mut result));
         assert_eq!(result.edges().len(), 2);
         assert_eq!(result.edgeuses().len(), 2);
         assert!(result.faces().is_empty());
@@ -4584,9 +4545,14 @@ mod tests {
         let mut exec = executive();
         exec.set_merge_results(true);
         // Native RemoveExcessFaces ignores the editing-disabled refusal from
-        // RemoveFaces. No traversal mark is acquired by that refused inner call.
-        exec.remove_excess_faces(&mut kernel, &mut original, &mut result)
-            .unwrap();
+        // RemoveFaces; the fork passes it on (WR-658, tangency-labs/smlib 4803d6d). No
+        // traversal mark is acquired by that refused inner call.
+        let r = exec.remove_excess_faces(&mut kernel, &mut original, &mut result);
+        assert!(
+            matches!(&r, Err(e) if e.sm_status() == Some(1001)
+                && e.to_string().contains("editing is not enabled")),
+            "{r:?}"
+        );
         assert!(!result.editing_enabled());
         assert_eq!(kernel.context.current_mark(MarkType::Mark), 1);
         result.set_editing_enabled(true);
@@ -4968,13 +4934,25 @@ mod tests {
     }
 
     #[test]
-    fn uv_boolean_bounds_ignore_ordinary_failures_and_keep_conversion_side_effects() {
+    fn uv_boolean_bounds_return_a_failed_conversion() {
         let kernel = Kernel::default();
         // Rust-only error-path input: upstream ConvertTo3D dereferences the missing NURB.
+        // The conversion's status is passed on (WR-658, tangency-labs/smlib 4803d6d), so no
+        // initialized extent stands in for the box of a curve that was not converted.
         let mut curve = Curve::from(BSplineCurve::new(2));
-        let bbox = uv_curve_bounding_box(&kernel, &mut curve).unwrap();
-        assert_eq!(bbox.min(), Extent3d::new().min());
-        assert_eq!(bbox.max(), Extent3d::new().max());
+        let r = uv_curve_bounding_box(&kernel, &mut curve);
+        assert!(
+            matches!(
+                r,
+                Err(SolidError::Upstream {
+                    operation: "nurbs::b_spline_curve::p1::BSplineCurve::make_nurb",
+                    code: 1001,
+                    ..
+                })
+            ),
+            "{r:?}"
+        );
+        // the conversion's side effects before its failure stay
         let CurveKind::BSpline(curve) = curve.kind() else {
             panic!("expected the original B-spline kind");
         };

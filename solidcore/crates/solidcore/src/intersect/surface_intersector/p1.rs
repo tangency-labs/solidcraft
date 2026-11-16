@@ -701,9 +701,6 @@ pub struct SurfaceIntersector<'s> {
     /// ([`SurfaceIntersector::add_deferred_touching_points`]; not upstream, which
     /// drops them for good).
     pub(crate) deferred_touching: Vec<super::p3::DeferredTouching>,
-    /// `Kernel::fixes.brep_edit_statuses_pass_on` captured from the constructing kernel
-    /// (WR-658; fork e7ebc8d's `SmAdvSurfaceIntersector` statuses).
-    pub(crate) edit_statuses: bool,
     /// The object is an `SmAdvSurfaceIntersector`: the virtual
     /// `ComputeSingularityPoint` that `ComputePointValues` calls is that class's
     /// override, not the basic `SM_ERR` one.
@@ -813,7 +810,6 @@ impl<'s> SurfaceIntersector<'s> {
             start_points: Vec::new(),
             through_points: Vec::new(),
             deferred_touching: Vec::new(),
-            edit_statuses: k.fixes.brep_edit_statuses_pass_on,
             advanced: false,
         })
     }

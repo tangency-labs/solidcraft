@@ -50,7 +50,6 @@ const SOLIDCRAFT_C494A18: &[&str] = &[
     "boolean_union_refuses_solid_leak",
     "boolean_vertex_by_best_crossing",
     "box_face_failures_propagate",
-    "brep_edit_statuses_pass_on",
     "bspline_trim_preserves_uv_spans",
     "classify_edge_interval",
     "cone_create_canonical_preserves_inside_out_and_checks_height",
