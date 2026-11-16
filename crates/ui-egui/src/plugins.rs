@@ -618,6 +618,38 @@ fn page_in_dir(app: &mut SolveApp, ui: &mut egui::Ui, dir: Option<&Path>) {
     remove_confirmation(app, ui.ctx());
 }
 
+/// What was approved at install for `plugin`'s current package, in plain words: command groups,
+/// folders with their access, and memory. Grants made for another version count for nothing.
+pub(crate) fn approved_text(app: &SolveApp, plugin: &Plugin) -> String {
+    use solidcraft_ui_text::{format, tr};
+    let Some(grants) = app.session.plugin_state.grants.get(&plugin.id).filter(|g| g.package_hash.as_deref() == Some(plugin.approval.as_str())) else {
+        return tr("prefs.plugin_approved_nothing").to_string();
+    };
+    let mut parts: Vec<String> = grants
+        .command_groups
+        .iter()
+        .map(|group| match group.as_str() {
+            "app" | "doc" | "file" | "plugin" => tr(&std::format!("prefs.plugin_group_short_{group}")).to_string(),
+            other => other.to_string(),
+        })
+        .collect();
+    for folder in &grants.folders {
+        let access = tr(match (folder.read, folder.write) {
+            (true, true) => "prefs.plugin_folder_read_write",
+            (false, true) => "prefs.plugin_folder_write",
+            _ => "prefs.plugin_folder_read",
+        });
+        parts.push(format("prefs.plugin_folder", &[("name", &folder.name), ("access", access)]));
+    }
+    if let Some(memory) = grants.memory_mib {
+        parts.push(format("prefs.plugin_approved_memory", &[("memory", &memory.to_string())]));
+    }
+    if parts.is_empty() {
+        return tr("prefs.plugin_approved_nothing").to_string();
+    }
+    format("prefs.plugin_approved", &[("list", &parts.join(", "))])
+}
+
 fn plugin_card(app: &mut SolveApp, ui: &mut egui::Ui, dir: &Path, plugin: &Plugin) {
     use crate::ui_kit;
     let mut on = enabled(app, &plugin.id);
@@ -644,6 +676,14 @@ fn plugin_card(app: &mut SolveApp, ui: &mut egui::Ui, dir: &Path, plugin: &Plugi
         .inner;
     let response = card.response;
     let ((folder, check), remove) = card.inner;
+    // What the user approved for this exact package, under its card.
+    ui.add_space(solidcraft_theme::Tokens::get().space_2);
+    let approved = approved_text(app, plugin);
+    let t = solidcraft_theme::Tokens::get();
+    ui.horizontal_wrapped(|ui| {
+        ui.add_space(t.space_12);
+        ui.label(RichText::new(approved).size(t.font_small).color(t.text_dim));
+    });
     crate::scenario::publish_target(&format!("prefs:plugin:{}:folder", plugin.id), folder.rect);
     crate::scenario::publish_target(&format!("prefs:plugin:{}", plugin.id), check.rect);
     if folder.clicked()
@@ -712,7 +752,7 @@ mod tests {
         let ctx = crate::fonts::test_context();
         let mut textures = std::collections::HashMap::new();
         for frame in 0..6 {
-            let bounds = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(900.0, 1200.0));
+            let bounds = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1280.0, 720.0));
             let mut output = ctx.run_ui(egui::RawInput { screen_rect: Some(bounds), time: Some(frame as f64 / 60.0), ..Default::default() }, |ui| {
                 crate::ui_kit::scope(ui, |ui| page_in_dir(app, ui, Some(dir)))
             });

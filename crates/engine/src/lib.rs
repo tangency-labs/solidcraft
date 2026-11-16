@@ -33,6 +33,7 @@ pub mod recovery;
 pub mod render_jobs;
 pub mod render_lights;
 pub mod render_preparation;
+pub mod report_issue;
 pub mod sample;
 pub mod schema;
 #[cfg(not(target_arch = "wasm32"))]
@@ -665,6 +666,9 @@ pub struct Session {
     render_jobs: render_jobs::Jobs,
     /// The visibility the design file holds (what `is_dirty` compares with).
     saved_visibility: Visibility,
+    /// The design as `doc.open` made it from a STEP, IGES or mesh file, never saved yet: while it
+    /// is still that, closing it loses nothing the file doesn't hold ([`Session::unchanged_import`]).
+    opened_import: Option<Arc<Document>>,
     /// States to go back to (`edit.checkpoint`, `edit.restore_checkpoint`): how batches of
     /// commands are undone however long the undo history is.
     pub(crate) checkpoints: Vec<Checkpoint>,
@@ -927,6 +931,7 @@ impl Session {
             next_checkpoint: 1,
             replacements: 0,
             saved_visibility: visibility.clone(),
+            opened_import: None,
             visibility,
             camera: None,
             render_viewport: None,
@@ -1034,6 +1039,21 @@ impl Session {
     /// component moved and not captured yet (#9736).
     pub fn is_dirty(&self) -> bool {
         self.document_differs() || self.visibility != self.saved_visibility || self.moved_uncaptured()
+    }
+
+    /// The design is a STEP, IGES or mesh file just opened (`doc.open`) and not changed since:
+    /// not saved as a design yet, so [`Session::is_dirty`], but closing it loses nothing the file
+    /// doesn't hold, and its tab closes without asking (#15111).
+    pub fn unchanged_import(&self) -> bool {
+        self.path.is_none()
+            && self.opened_import.as_ref().is_some_and(|opened| Arc::ptr_eq(opened, &self.doc) || **opened == *self.doc)
+            && self.visibility == self.saved_visibility
+            && !self.moved_uncaptured()
+    }
+
+    /// Remember the design as `doc.open` just made it from another kind of file.
+    pub(crate) fn opened_from_import(&mut self) {
+        self.opened_import = Some(self.doc.clone());
     }
 
     /// A component was moved and its position not captured yet (#9736). The placements of an
@@ -1743,6 +1763,9 @@ impl Session {
         // after the refresh below (the same checks `settle` runs on an edit's own solve).
         let solved_geometry: std::collections::BTreeMap<u64, solidcraft_sketch::Sketch> =
             self.model.results.iter().filter_map(|r| r.state.sketch(r.id).map(|k| (r.id, k.sketch.clone()))).collect();
+        // Whose 3D constraints held before the edit: only those can it break (#10608).
+        let wires_held: std::collections::BTreeSet<u64> =
+            self.model.results.iter().filter(|r| r.state.sketch(r.id).is_some_and(|k| k.report.wires_ok())).map(|r| r.id).collect();
         // Quantity changes alter topology, so store the regenerated instances in the same
         // transaction as the parameter edit. Later picks and undo must see those same ids.
         let mut updated: Vec<_> = self
@@ -1770,12 +1793,26 @@ impl Session {
         }
         self.refresh();
         for r in &self.model.results {
+            // A value a 3D dimension or point of this sketch cannot take (#10608) is refused like
+            // one that conflicts; an error from upstream is not the edit's to refuse.
+            if r.error.is_some()
+                && solved_before.contains_key(&r.id)
+                && let Ok(sk) = self.doc.sketch(r.id)
+                && !sk.wire_constraints.is_empty()
+                && let Err(e) = self.doc.apply_wire_values(&self.doc.evaluation_values(), &mut sk.clone())
+            {
+                return Err(EngineError::Other(format!("sketch `{}`: {e}; the values were not changed", r.name)));
+            }
             let (Some(before), Some(k)) = (solved_before.get(&r.id), r.state.sketch(r.id)) else { continue };
             if own_values(&k.sketch) == *before {
                 continue;
             }
             if !k.report.keeps_orientation() {
                 let why = k.report.failure(|f| format!("its constraints would conflict ({f})"));
+                return Err(EngineError::Other(format!("sketch `{}`: {why}; the values were not changed", r.name)));
+            }
+            if let Some(w) = k.report.wires.as_ref().filter(|w| !w.ok && wires_held.contains(&r.id)) {
+                let why = w.failure(|f| format!("its 3D constraints would conflict ({f})"));
                 return Err(EngineError::Other(format!("sketch `{}`: {why}; the values were not changed", r.name)));
             }
             // The value changed this sketch and it still solves: refuse it the way `settle`
@@ -2189,6 +2226,7 @@ impl Session {
             render_viewport: self.render_viewport.clone(),
             render_jobs: self.render_jobs.scratch(),
             saved_visibility: self.saved_visibility.clone(),
+            opened_import: self.opened_import.clone(),
             evaluations: 0,
             motion_traces: self.motion_traces.clone(),
             command_check: self.command_check.clone(),
@@ -2628,6 +2666,16 @@ pub(crate) type SketchValues = std::collections::BTreeMap<u64, std::collections:
 fn own_values(sk: &solidcraft_sketch::Sketch) -> std::collections::BTreeMap<String, f64> {
     let mut values: std::collections::BTreeMap<_, _> =
         sk.constraints.iter().filter(|c| c.param.is_some() && !c.driven).filter_map(|c| Some((c.id.clone(), c.kind.value()?))).collect();
+    // 3D dimensions, and 3D points placed by expressions (#10608).
+    for c in &sk.wire_constraints {
+        match &c.kind {
+            solidcraft_sketch::WireConstraintKind::Fix { at, exprs: Some(_), .. } => {
+                values.extend([(format!("{}.x", c.id), at.x), (format!("{}.y", c.id), at.y), (format!("{}.z", c.id), at.z)]);
+            }
+            k if c.param.is_some() && !c.driven => values.extend(k.value().map(|v| (c.id.clone(), v))),
+            _ => {}
+        }
+    }
     for p in &sk.patterns {
         use solidcraft_sketch::SketchPatternKind;
         let inputs = match p.kind {

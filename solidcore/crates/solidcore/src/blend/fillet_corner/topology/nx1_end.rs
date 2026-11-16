@@ -20,8 +20,9 @@
 //! The end face at a tangent side is extended `CInfinity` and that side's cap edge is
 //! `OnExtendEdge` (WR-600, the fork's tangency-labs/smlib@856b54e). At a multi-neighbour
 //! end face whose side edges are both cliff edges, the end face is the side face whose
-//! surface holds the other side edge; upstream takes the first side's, whatever its
-//! surface. There is no recursion.
+//! surface holds the other side edge or, where neither surface holds it and only one tangent
+//! plane at the vertex holds the other side edge's direction there, that plane's face (WR-783);
+//! otherwise, as upstream, the first side's, whatever its surface. There is no recursion.
 
 use std::collections::BTreeMap;
 
@@ -29,7 +30,8 @@ use crate::blend::fillet_corner::p1::face_by_two_edgeuses;
 use crate::blend::fillet_corner::p3::FilletCorner;
 use crate::blend::fillet_executive::session::{FilletBody, FilletObject, SolverObject};
 use crate::blend::fillet_geom::p1::{
-    FilletBrep, FilletCornerId, FilletEdgeType, FilletGeomId, FilletVertex, FilletVertexType,
+    FilStatus, FilletBrep, FilletCornerId, FilletEdgeType, FilletGeomId, FilletVertex,
+    FilletVertexType,
 };
 use crate::blend::fillet_solver::p1::FilletSolver;
 use crate::blend::fillet_standard_solver::p1::VariableRadiusFs;
@@ -43,7 +45,7 @@ use crate::query::brep::{BrepFaceServices, FaceCaches};
 use crate::surface::surface::Surface;
 use crate::topology::brep_cache::CacheObject;
 use crate::topology::edge;
-use crate::topology::edgeuse::p1 as eu1;
+use crate::topology::edgeuse::{p1 as eu1, p3 as eu3};
 use crate::topology::{Brep, EdgeId, EdgeuseId, FaceId, Vertex, VertexId};
 
 const OP: &str = "blend::fillet_corner::topology::make_nx1_corner_topology";
@@ -97,6 +99,44 @@ fn face_holds_edge(
             &mut services,
         )?
         .is_some())
+}
+
+/// Whether the edge of `other` leaves `vertex` in the tangent plane of `side`'s face there:
+/// square to that face's normal at the vertex (read on `side` at its edge's end there) within
+/// `ang_tol_deg`. The end cap's edge along `other` runs from the vertex to the rail's end on
+/// it, so the cap can lie on that face's surface only if this holds. An edge that does not end
+/// at the vertex, a zero tangent and a failed evaluation answer `false`; of a closed edge, the
+/// tangent and the face's normal are read at its start. The normal is read without building a
+/// UV trim curve (`use_3d_only`), so the test leaves `target` as it was.
+///
+/// # Errors
+/// `Unported` and a cancellation; any other failure answers `false`.
+fn edge_leaves_in_face(
+    k: &Kernel,
+    target: &mut Brep,
+    side: EdgeuseId,
+    other: EdgeuseId,
+    vertex: VertexId,
+    ang_tol_deg: f64,
+) -> Result<bool> {
+    super::or_false((|| {
+        let side_edge = need(eu1::edge(target, side)?, "side edge use without edge")?;
+        let other_edge = need(eu1::edge(target, other)?, "side edge use without edge")?;
+        let Some(leaving) = tangent_leaving(k, target, other_edge, vertex)? else {
+            return Ok(false);
+        };
+        let interval = edge::interval(target, side_edge)?;
+        let t = if edge::start_vertex(target, side_edge)? == Some(vertex) {
+            interval.min()
+        } else if edge::end_vertex(target, side_edge)? == Some(vertex) {
+            interval.max()
+        } else {
+            return Ok(false);
+        };
+        let options = eu3::BinormalOptions::default();
+        let normal = eu3::evaluate_binormal(k, target, side, t, true, &options)?.face_normal;
+        Ok(normal.is_perpendicular_to(leaving, ang_tol_deg))
+    })())
 }
 
 /// `sm_FindSurfaceExtensionDistAtCorner`: an extension distance for the end surface of
@@ -815,6 +855,63 @@ fn pseudo_edge(edge: EdgeId) -> FilletObject {
 }
 
 impl FilletCorner {
+    /// Not upstream (#10876): the Roll-over's End across the cliff's tangent seam
+    /// ([`crate::blend::blend_corner::rollover::seam_end`]) for the second pass's corner at V
+    /// (`self.roll_over`): a mixed corner, one side a tangent seam the rail on B1 crosses (its
+    /// end face the cliff's face across that seam), the other side's edge F's edge on E, and
+    /// a constant-radius round. `None` for every other corner, and where the geometry is not
+    /// the Roll-over's.
+    ///
+    /// # Errors
+    /// Those of [`crate::blend::blend_corner::rollover::seam_end`] and the topology lookups.
+    #[allow(clippy::too_many_arguments)] // the end's topology, as `finish_nx1_end` holds it
+    fn roll_over_seam_end(
+        &self,
+        k: &Kernel,
+        target: &mut Brep,
+        solver: &SolverObject,
+        vertex: VertexId,
+        mixed: bool,
+        tangent_side: [bool; 2],
+        sides: [EdgeuseId; 2],
+        end_face: Option<FaceId>,
+        extend_edge: Option<EdgeId>,
+        turned_back: [Option<TurnedBack>; 2],
+    ) -> Result<Option<crate::blend::blend_corner::rollover::SeamEnd>> {
+        let one_tangent = tangent_side[0] != tangent_side[1];
+        if !(self.roll_over && mixed && one_tangent && turned_back.iter().all(Option::is_none)) {
+            return Ok(None);
+        }
+        let (Some(end_face), Some(tangent_seam)) = (end_face, extend_edge) else {
+            return Ok(None);
+        };
+        let r2 = match solver {
+            SolverObject::ConstantRadius(cr) => {
+                let (a, b) = (cr.fillet_radius(0)?, cr.fillet_radius(1)?);
+                if a.to_bits() != b.to_bits() {
+                    return Ok(None);
+                }
+                a
+            }
+            _ => return Ok(None),
+        };
+        let other = usize::from(tangent_side[0]);
+        let side = *need(sides.get(other), "side index")?;
+        let Some(side_edge) = eu1::edge(target, side)? else {
+            return Ok(None);
+        };
+        crate::blend::blend_corner::rollover::seam_end(
+            k,
+            target,
+            vertex,
+            end_face,
+            side_edge,
+            tangent_seam,
+            r2,
+            self.approx_tol_3d,
+        )
+    }
+
     /// From the extension distance on: the end rib, its end face, the extended end
     /// surface and, at a mixed-convexity corner, the vertex on the original vertex and
     /// the two side edges joining it to the rail vertices; the gap checks of a
@@ -849,18 +946,64 @@ impl FilletCorner {
             0.0
         };
 
+        // Not upstream (#10876): the Roll-over's second pass's End whose rib runs across the
+        // cliff's tangent seam, from the tangent end on the end face to the rail's end on the
+        // wall's rim (`rollover::seam_end`)
+        let seam = self.roll_over_seam_end(
+            k,
+            target,
+            &*solver,
+            vertex,
+            mixed,
+            tangent_side,
+            sides,
+            end_face,
+            extend_edge,
+            turned_back,
+        )?;
+
         let start = self.vertices.first().copied();
         let end = self.vertices.get(1).copied();
-        let rib = pseudo.make_fillet_edge(start, end, Some(corner))?;
-        pseudo
-            .fillet_edge_mut(rib)?
-            .set_fillet_edge_type(FilletEdgeType::FilletXSideFace);
-        let primary = need(
-            eu1::primary_edgeuse(pseudo.brep(), rib)?,
-            "end rib without primary edge use",
-        )?;
-        pseudo.set_edgeuse_fillet_geom(primary, Some(geometry))?;
-        self.edges.push(rib);
+        // the rib, or its two pieces through S (the piece at the tangent end on the end face,
+        // the other on the wall)
+        let mut split_vertex = None;
+        let pieces = match seam {
+            Some(se) => {
+                let fs = pseudo.brep_mut().add_unlinked_vertex_record(Vertex {
+                    point: se.split,
+                    tolerance: 0.0,
+                    ..Vertex::default()
+                })?;
+                pseudo.insert_fillet_vertex(fs, FilletVertex::new(k, Some(corner)));
+                let record = pseudo.fillet_vertex_mut(fs)?;
+                record.set_point_class(PointClassType::Face, Some(EntityRef::Face(se.wall)));
+                record.set_fillet_vertex_type(FilletVertexType::Precomputed);
+                record.set_status(FilStatus::Processed);
+                split_vertex = Some(fs);
+                // tangent_side[1]: the rib's end is the tangent end, its start on the wall
+                let (first_face, second_face) = if tangent_side[1] {
+                    (Some(se.wall), end_face)
+                } else {
+                    (end_face, Some(se.wall))
+                };
+                vec![(start, Some(fs), first_face), (Some(fs), end, second_face)]
+            }
+            None => vec![(start, end, None)],
+        };
+        let mut ribs = Vec::new();
+        for (from, to, face) in pieces {
+            let rib = pseudo.make_fillet_edge(from, to, Some(corner))?;
+            pseudo
+                .fillet_edge_mut(rib)?
+                .set_fillet_edge_type(FilletEdgeType::FilletXSideFace);
+            let primary = need(
+                eu1::primary_edgeuse(pseudo.brep(), rib)?,
+                "end rib without primary edge use",
+            )?;
+            pseudo.set_edgeuse_fillet_geom(primary, Some(geometry))?;
+            self.edges.push(rib);
+            ribs.push((rib, face));
+        }
 
         // In the mixed-cvxty case, pEndFace will be NULL when we arrive here
         // if both side edges have opposite convexity to the filleted edge.
@@ -877,9 +1020,9 @@ impl FilletCorner {
                         (first, second)
                     } else if same[1] {
                         (second, first)
-                    } else if !face_holds_edge(k, target, first, second, self.approx_tol_3d)?
-                        && face_holds_edge(k, target, second, first, self.approx_tol_3d)?
-                    {
+                    } else if face_holds_edge(k, target, first, second, self.approx_tol_3d)? {
+                        (first, second)
+                    } else if face_holds_edge(k, target, second, first, self.approx_tol_3d)? {
                         // Both are cliff edges. The cap lies on the end face's surface
                         // between the end rib and both side edges, so the end face is the
                         // one whose surface holds the other side edge (the gap check asks
@@ -889,7 +1032,22 @@ impl FilletCorner {
                         // the vertex: the mirror image built and the part did not (#15768).
                         (second, first)
                     } else {
-                        (first, second)
+                        // Neither surface holds the whole other side edge (a wall whose slanted
+                        // end overhangs a plate: the plate's corner edge runs on past the wall's
+                        // end face, the wall's edge leaves the plate's end plane). The cap's edge
+                        // along it, from the vertex to the rail's end, lies on the end face's
+                        // surface only if the edge leaves the vertex in it: on the first face's
+                        // surface, picked whatever, the cap was left off the result, refused as
+                        // no closed solid (#17617, WR-783). Where both or neither leave so, the
+                        // first, as upstream.
+                        let tol_deg = crate::math::rad_to_deg(self.tangency_tol_radians);
+                        if !edge_leaves_in_face(k, target, first, second, vertex, tol_deg)?
+                            && edge_leaves_in_face(k, target, second, first, vertex, tol_deg)?
+                        {
+                            (second, first)
+                        } else {
+                            (first, second)
+                        }
                     };
                     end_face = eu1::face(target, pick)?;
                     extend_edge = eu1::edge(target, pick)?;
@@ -903,7 +1061,11 @@ impl FilletCorner {
                 }
             }
         }
-        pseudo.fillet_edge_mut(rib)?.set_original_face(end_face);
+        for &(piece, face) in &ribs {
+            pseudo
+                .fillet_edge_mut(piece)?
+                .set_original_face(face.or(end_face));
+        }
 
         // compute how much to extend the sideSurface to make sure it covers the 'hole'
         let mut do_extend = extend_edge.is_some();
@@ -945,6 +1107,26 @@ impl FilletCorner {
             ) {
                 new_extend_face = Some(face);
             }
+        }
+
+        // Not upstream (#10876): across the cliff's tangent seam the wall is continued as
+        // itself, whether or not the end face is, so that it holds the rib's piece and the
+        // cap's past its own boundary (S is on its continuation, r2 - h past W)
+        if let Some(se) = seam {
+            let surface = need(
+                target.face(se.wall)?.surface.as_ref(),
+                "the wall without surface",
+            )?;
+            let new_surface = surface
+                .extended_sides(
+                    k,
+                    &crate::surface::side::BoxSide::ALL,
+                    crate::surface::extend::Continuity::Natural,
+                    ext_dist,
+                )?
+                .surface
+                .copy_and_add_analytics(k)?;
+            Self::add_extended_original_surface_with_map(extended_surfaces, se.wall, new_surface);
         }
 
         // When adding an endSurface to fill the 'hole',
@@ -1092,6 +1274,22 @@ impl FilletCorner {
 
             // When endFace connects to more than the filletSurface and 1 other Face,
             // check for gaps
+            // Not upstream (#10876): the End across the cliff's tangent seam keeps S, and
+            // its cap is split there
+            if let Some(se) = seam {
+                let fs = need(split_vertex, "the seam's split vertex")?;
+                let end_face = need(end_face, "the seam cap's end face")?;
+                self.vertices.push(fs);
+                let tangent_at_end = tangent_side[1];
+                self.seam_cap = Some(crate::blend::fillet_corner::p3::SeamCap {
+                    split_vertex: fs,
+                    rail_vertex: if tangent_at_end { v0 } else { v1 },
+                    end_face,
+                    wall: se.wall,
+                    seam_point: se.at,
+                });
+            }
+
             if multi_neighbor_end_face {
                 return Ok(Some(Nx1GapCheck {
                     edge1,

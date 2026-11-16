@@ -32,6 +32,7 @@
 #![cfg_attr(not(test), deny(clippy::float_arithmetic))]
 
 pub mod affine;
+pub mod axial_section;
 pub mod blend;
 pub mod blend_definition;
 pub mod blend_surface;
@@ -54,6 +55,7 @@ pub mod export_geometry;
 pub mod extend;
 pub mod face_surface;
 pub mod file;
+pub mod import_geometry;
 pub mod joint_turn;
 pub mod label;
 pub mod measure;
@@ -92,8 +94,9 @@ pub use error::{
     Unsoundness,
 };
 pub use measure::{
-    point_distance, points_meet, Distance, EdgePoint, EdgeRayPoint, FaceCentroid, GapSample,
-    MassPropertiesEstimate, Normal, PointClass, SquareFaceLevel,
+    point_distance, points_meet, Distance, EdgeCurve, EdgePoint, EdgeRayPoint, FaceCentroid,
+    FaceRayHit, GapSample, MassPropertiesEstimate, MembersClosest, Normal, PointClass,
+    SquareFaceLevel,
 };
 pub use offset::{draft, offset_faces, offset_sheet, shell, thicken};
 pub use order::Order;

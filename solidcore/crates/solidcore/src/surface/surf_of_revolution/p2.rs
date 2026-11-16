@@ -21,9 +21,9 @@
 //! Deviations:
 //! - **`TrimKeepsParameterization`** (WR-700) is the fork's
 //!   (tangency-labs/smlib@6f811b8), for the shrink's kept trims (`SmFace::ShrinkGeometry`).
-//! - **Rejected generator intervals (#428).** With
-//!   `Kernel::fixes.ellipse_step_interval_checks`, the surface analytic domain is
-//!   stored only after its generator accepts the STEP interval. Default order is C++.
+//! - **Rejected generator intervals (#428, WR-211).** The surface analytic domain is
+//!   stored only after its generator accepts the STEP interval; upstream stores it
+//!   first.
 //! - **Arguments.** Out-params become return values; `SmContext` arguments, the
 //!   `Notify` calls and `TrimWithDomain`'s in/out domain (upstream never writes it) are
 //!   dropped. `STEPInversion` and `GlobalSurfaceIntersect` take the kernel for the
@@ -184,20 +184,16 @@ impl SurfOfRevolution {
             return Ok(());
         }
 
-        // Preserve upstream's update order by default. The opt-in keeps a
-        // rejected generator edit from changing the surface's advertised domain.
-        if !k.fixes.ellipse_step_interval_checks {
-            self.anal_uv_domain = *new_step_uv_domain;
-        }
+        // Not upstream (#428, WR-211): the domain is stored only after the generator
+        // accepts it, so a rejected generator edit does not change the surface's
+        // advertised domain (upstream stores it first).
         let v_ivl = new_step_uv_domain.v_interval();
         let gen = self
             .gen_curve
             .as_mut()
             .ok_or_else(|| SolidError::surface_missing(OP_ADJUST, "the generator curve"))?;
         gen_adjust_step_interval(k, gen, &v_ivl)?;
-        if k.fixes.ellipse_step_interval_checks {
-            self.anal_uv_domain = *new_step_uv_domain;
-        }
+        self.anal_uv_domain = *new_step_uv_domain;
 
         // build Nurb domain from Analytic domain
         let mut nurb_domain = *new_step_uv_domain;

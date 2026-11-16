@@ -16,10 +16,10 @@ use crate::params::{UNKNOWN_COMMAND, bad, bool_, expr, expr_problem, req_expr, s
 use crate::schema::features::SweepParams;
 use crate::schema::features::{
     AppliedRadius, BoundingSolidParams, BoxParams, ChamferParams, CombineParams, CombineResult, ConeParams, CylinderParams, ExtrudeParams,
-    FeatureNotice, FeatureResult, FilletParams, FilletResult, MoveParams, MoveResult, NoticeAction, OffsetPlaneParams, PipeParams,
+    FeatureNotice, FeatureResult, FilletParams, FilletResult, MirrorParams, MoveParams, MoveResult, NoticeAction, OffsetPlaneParams, PipeParams,
     PlaneAtAngleParams, PressPullParams, PressPullResult, RevolveParams, ScaleParams, SphereParams, TorusParams,
 };
-use crate::schema::features::{PatternCircularParams, PatternCircularResult};
+use crate::schema::features::{PatternCircularParams, PatternPathParams, PatternRectangularParams, PatternResult};
 use crate::schema::split::{SplitBodyParams, SplitFaceParams};
 use crate::schema::{TypedContract, output_schema_for};
 use crate::{EngineError, Result, Session};
@@ -43,8 +43,11 @@ const CHAMFER_CONTRACT: TypedContract<ChamferParams> = TypedContract::new();
 const SPLIT_FACE_CONTRACT: TypedContract<SplitFaceParams> = TypedContract::new();
 const SPLIT_BODY_CONTRACT: TypedContract<SplitBodyParams> = TypedContract::new();
 const PATTERN_CIRCULAR_CONTRACT: TypedContract<PatternCircularParams> = TypedContract::new();
+const PATTERN_RECTANGULAR_CONTRACT: TypedContract<PatternRectangularParams> = TypedContract::new();
+const PATTERN_PATH_CONTRACT: TypedContract<PatternPathParams> = TypedContract::new();
 const PRESS_PULL_CONTRACT: TypedContract<PressPullParams> = TypedContract::new();
 const MOVE_CONTRACT: TypedContract<MoveParams> = TypedContract::new();
+const MIRROR_CONTRACT: TypedContract<MirrorParams> = TypedContract::new();
 
 pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("solid.extrude", "Extrude", crate::checked!("solid.extrude", extrude))
@@ -116,21 +119,30 @@ pub static COMMANDS: &[CommandSpec] = &[
         .contract(&COMBINE_CONTRACT)
         .output(output_schema_for::<CombineResult>)
         .params("target: body; tools: [body]; operation?: join|cut|intersect; touching?: separate|one_body (what a join makes of pieces that share no face: separate, the default, makes each piece that touches another only along an edge or at a point a body of its own and keeps pieces that touch nothing in one body; one_body keeps every piece in one body); keep_tools?: bool; new_component?: bool (the result goes into a new component; component_name?)"),
-    CommandSpec::new("solid.pattern.rectangular", "Rectangular Pattern", pattern_rect)
+    CommandSpec::new("solid.pattern.rectangular", "Rectangular Pattern", crate::checked!("solid.pattern.rectangular", pattern_rect))
         .at("SOLID", "CREATE")
         .icon("pattern_rect")
+        .contract(&PATTERN_RECTANGULAR_CONTRACT)
+        .output(output_schema_for::<PatternResult>)
         .params("features: [names] | bodies: [names] | components: [names]; dir1: [x,y,z]; count1; spacing1; dir2?, count2?, spacing2?; alignment?, alignment2?: left|center|right (default right; counts include the original); reversed?, reversed2?: bool (Flip)"),
     CommandSpec::new("solid.pattern.circular", "Circular Pattern", crate::checked!("solid.pattern.circular", pattern_circ))
         .at("SOLID", "CREATE")
         .icon("pattern_circ")
         .contract(&PATTERN_CIRCULAR_CONTRACT)
-        .output(output_schema_for::<PatternCircularResult>)
+        .output(output_schema_for::<PatternResult>)
         .params("features: [names] | bodies: [names] | components: [names]; axis: X|Y|Z | construction axis name (followed when edited) | {origin, dir} (origin coordinates may be length expressions; the pattern follows them) | {edge|face: [x,y,z]} (a straight or circular edge, or a cylinder, cone or torus face: about its axis, followed as the model changes); count; angle? (default 360 deg; partial arcs include both ends); alignment?: left|center|right (default right; original stays fixed); reversed?: bool (Flip; selects the extra side for even centered counts)"),
-    CommandSpec::new("solid.pattern.path", "Pattern on Path", pattern_path)
+    CommandSpec::new("solid.pattern.path", "Pattern on Path", crate::checked!("solid.pattern.path", pattern_path))
         .at("SOLID", "CREATE")
         .icon("pattern_path")
+        .contract(&PATTERN_PATH_CONTRACT)
+        .output(output_schema_for::<PatternResult>)
         .params("features: [names] | bodies: [names]; path_sketch: sketch; path: [curve ids in order]; count; spacing (between instances) | distance (first to last); orientation?: identical|path; flip?: bool"),
-    CommandSpec::new("solid.mirror", "Mirror", mirror).at("SOLID", "CREATE").icon("mirror").params("features: [names] | bodies: [names] (combine?: join with the original); plane: XY|XZ|YZ|construction plane name or id|{origin, normal}|{origin, x_dir, y_dir} (origin coordinates may be length expressions; the mirror follows them, or a construction plane)"),
+    CommandSpec::new("solid.mirror", "Mirror", crate::checked!("solid.mirror", mirror))
+        .at("SOLID", "CREATE")
+        .icon("mirror")
+        .contract(&MIRROR_CONTRACT)
+        .output(output_schema_for::<FeatureResult>)
+        .params("features: [names] | bodies: [names] (combine?: join with the original); plane: XY|XZ|YZ|construction plane name or id|{origin, normal}|{origin, x_dir, y_dir} (origin coordinates may be length expressions; the mirror follows them, or a construction plane)"),
     CommandSpec::new("solid.hole", "Hole", hole)
         .at("SOLID", "CREATE")
         .icon("hole")
@@ -147,7 +159,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .icon("bounding_solid")
         .contract(&BOUNDING_SOLID_CONTRACT)
         .output(output_schema_for::<FeatureResult>)
-        .params("bodies?: [names] (default: all); margin?: expr; name?, body_name?"),
+        .params("bodies?: [names] (default: all); margin?: expr; margins?: [-X, +X, -Y, +Y, -Z, +Z] exprs (a margin per side instead of margin; negative sets a side into the bodies); name?, body_name?"),
     CommandSpec::new("solid.scale", "Scale", crate::checked!("solid.scale", scale))
         .at("SOLID", "MODIFY")
         .icon("scale")
@@ -206,7 +218,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .at("SOLID", "MODIFY")
         .icon("presspull")
         .key("Q")
-        .params("face: [x,y,z] and distance: expr (positive adds material, negative cuts), or edges: [[x,y,z]…] and distance (a fillet); body?: the body the face or edges are on (for edges, as for solid.fillet)"),
+        .params("face: [x,y,z] and distance: expr (positive adds material, negative cuts), or edges: [[x,y,z]…] and distance (a fillet); body?: the body the face or edges are on (for edges, as for solid.fillet); face_body?: the body a flat face is on, used when body is omitted"),
     CommandSpec::new("solid.move", "Move/Copy", crate::checked!("solid.move", move_bodies))
         .at("SOLID", "MODIFY").icon("move").key("M").enabled(not_in_sketch)
         .contract(&MOVE_CONTRACT).output(output_schema_for::<MoveResult>)
@@ -904,6 +916,13 @@ pub(super) fn add_feature_in(s: &mut Session, p: &Value, kind: FeatureKind, worl
     let changed: Vec<&str> =
         st.bodies.iter().filter(|b| b.feature != id && old.get(b.name.as_str()).is_some_and(|o| !o.same(&b.body))).map(|b| b.name.as_str()).collect();
     let removed: Vec<&str> = before.bodies.iter().map(|b| b.name.as_str()).filter(|n| !now.contains(n)).collect();
+    let pieces: Vec<(String, String)> = st
+        .bodies
+        .iter()
+        .filter(|b| !old.contains_key(b.name.as_str()))
+        .filter_map(|b| b.split_from.clone().map(|from| (b.name.clone(), from)))
+        .collect();
+    carry_looks(s, &pieces);
     let fname = s.doc.feature(id).map(|f| f.name.clone()).unwrap_or_default();
     // A warning (a reference found again elsewhere, a reduced radius) is part of
     // the reply: a script or an agent sees it without asking the timeline (#616).
@@ -936,6 +955,32 @@ pub(super) fn add_feature_in(s: &mut Session, p: &Value, kind: FeatureKind, worl
 }
 
 type FaceProfile = (u64, Option<ProfileSel>, Option<String>);
+
+/// Give each new piece a cut or intersect split off a body (`(piece, body)`) that body's
+/// physical material and appearance, so it is still made of what the body was. A piece that
+/// already has its own (kept under its name from before) keeps it.
+fn carry_looks(s: &mut Session, pieces: &[(String, String)]) {
+    let needs = |piece: &str, from: &str| {
+        (!s.doc.materials.contains_key(piece) && s.doc.materials.contains_key(from))
+            || (!s.doc.appearances.bodies.contains_key(piece) && s.doc.appearances.bodies.contains_key(from))
+    };
+    if !pieces.iter().any(|(piece, from)| needs(piece, from)) {
+        return;
+    }
+    let doc = s.doc_mut();
+    for (piece, from) in pieces {
+        if !doc.materials.contains_key(piece)
+            && let Some(material) = doc.materials.get(from).cloned()
+        {
+            doc.materials.insert(piece.clone(), material);
+        }
+        if !doc.appearances.bodies.contains_key(piece)
+            && let Some(look) = doc.appearances.bodies.get(from).cloned()
+        {
+            doc.appearances.bodies.insert(piece.clone(), look);
+        }
+    }
+}
 
 fn extrude(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "solid.extrude";
@@ -2117,7 +2162,16 @@ fn press_pull(s: &mut Session, p: &Value) -> Result<Value> {
         _ => Expr::new(format!("-({distance})")),
     };
     let (dist, dir, op) = if d > 0.0 { (distance, "positive", "join") } else { (flipped, "negative", "cut") };
-    extrude(s, &json!({"face": face, "distance": dist, "direction": dir, "operation": op}))
+    let mut q = json!({"face": face, "distance": dist, "direction": dir, "operation": op});
+    // Match the frame mapper's precedence so the face point and body name stay together.
+    if let Some(body) = p.get("body").or_else(|| p.get("face_body")).filter(|body| body.is_string()) {
+        q["face_body"] = body.clone();
+        q["targets"] = json!([body]);
+    }
+    extrude(s, &q).map_err(|error| match error {
+        EngineError::BadParams { msg, .. } => bad(cmd, msg),
+        other => other,
+    })
 }
 
 fn fillet(s: &mut Session, p: &Value) -> Result<Value> {
@@ -2816,33 +2870,74 @@ fn mirror(s: &mut Session, p: &Value) -> Result<Value> {
         add_feature(s, p, FeatureKind::Mirror { features, plane, bodies: bodies.iter().cloned().map(BodyName).collect(), combine, placements })?;
     if !combine {
         super::print_face::copies_keep_print_faces(s, &reply, &bodies);
-        copies_keep_looks(s, &reply, &bodies);
+        copies_keep_looks(s, &reply, &bodies)?;
     }
     Ok(reply)
 }
 
 /// Copies are made of what the bodies they were made from are: each takes its source's physical
-/// material and appearance, unless it has its own (kept under its name from before). The copies
+/// material and body/face appearances, unless it has its own (kept under its name from before). The copies
 /// are the bodies feature `reply` made, in the order of `sources`, as
 /// [`super::print_face::copies_keep_print_faces`] takes them.
-fn copies_keep_looks(s: &mut Session, reply: &Value, sources: &[String]) {
-    let Some(id) = reply.get("feature").and_then(Value::as_u64) else { return };
+fn copies_keep_looks(s: &mut Session, reply: &Value, sources: &[String]) -> Result<()> {
+    let Some(id) = reply.get("feature").and_then(Value::as_u64) else { return Ok(()) };
     let state = s.model.state();
     let copies: Vec<_> = state.bodies.iter().filter(|b| b.feature == id).collect();
     if copies.len() != sources.len() {
-        return;
+        return Ok(());
     }
-    let pairs: Vec<(String, String)> = sources
-        .iter()
-        .zip(copies)
-        .filter_map(|(source, copy)| state.body(source).map(|b| (copy.definition_name().to_string(), b.definition_name().to_string())))
-        .collect();
+    let mut pairs = Vec::new();
+    let mut faces = Vec::new();
+    for (source, copy) in sources.iter().zip(copies) {
+        let Some(source) = state.body(source) else { continue };
+        pairs.push((copy.definition_name().to_string(), source.definition_name().to_string()));
+        let looks = s.doc.authored_face_colors(source);
+        if looks.is_empty() {
+            continue;
+        }
+        let source_names = solidcraft_doc::naming::face_names(source);
+        let copy_names = solidcraft_doc::naming::face_names(copy);
+        let mut indices = std::collections::BTreeMap::<&str, Option<usize>>::new();
+        for (index, name) in copy_names.iter().enumerate() {
+            if solidcraft_doc::naming::face_name_exact(copy, index) {
+                indices.entry(name.as_str()).and_modify(|found| *found = None).or_insert(Some(index));
+            }
+        }
+        let assigned: std::collections::BTreeSet<_> = s.doc.authored_face_colors(copy).into_iter().map(|(index, _)| index).collect();
+        for (source_index, look) in looks {
+            if !solidcraft_doc::naming::face_name_exact(source, source_index) {
+                continue;
+            }
+            let Some(source_name) = source_names.get(source_index) else { continue };
+            // Mirror's exact history appends one instance to each source face, including
+            // the complete identity of a split face or a face from an earlier copy.
+            let name = format!("{source_name}@F{id}.1");
+            let Some(index) = indices.get(name.as_str()).copied().flatten().filter(|index| !assigned.contains(index)) else { continue };
+            if s.doc.appearances.faces.len().saturating_add(faces.len()) >= 100_000 {
+                return Err(bad("solid.mirror", "too many face appearances"));
+            }
+            // The name chooses the face; the exact trimmed face supplies its saved point.
+            let point = solidcraft_kernel::guard("mirror face appearance", || {
+                solidcraft_kernel::point_closest(Vec3::ZERO, &copy.body, solidcraft_kernel::Members::Faces(&[index]))
+            })?
+            .ok_or_else(|| bad("solid.mirror", "the copied face has no exact geometry for its appearance"))?
+            .to;
+            faces.push(solidcraft_doc::appearance::FaceLook {
+                body: copy.definition_name().to_string(),
+                point,
+                look,
+                name: Some(name),
+                strict_name: false,
+                certificate: None,
+            });
+        }
+    }
     let needs = |copy: &str, from: &str| {
         (!s.doc.materials.contains_key(copy) && s.doc.materials.contains_key(from))
             || (!s.doc.appearances.bodies.contains_key(copy) && s.doc.appearances.bodies.contains_key(from))
     };
-    if !pairs.iter().any(|(copy, from)| needs(copy, from)) {
-        return;
+    if faces.is_empty() && !pairs.iter().any(|(copy, from)| needs(copy, from)) {
+        return Ok(());
     }
     let doc = s.doc_mut();
     for (copy, from) in pairs {
@@ -2857,6 +2952,8 @@ fn copies_keep_looks(s: &mut Session, reply: &Value, sources: &[String]) {
             doc.appearances.bodies.insert(copy, look);
         }
     }
+    doc.appearances.faces.extend(faces);
+    Ok(())
 }
 
 impl Session {
@@ -3484,7 +3581,12 @@ fn hole(s: &mut Session, p: &Value) -> Result<Value> {
             format!("`position` [{}, {}, {}] is not on a face of a body; pick a point on the face to drill", position.x, position.y, position.z),
         ));
     }
-    let direction = match (p.get("direction").and_then(vec3), &points) {
+    let supplied_direction = p.get("direction").and_then(vec3);
+    // Ordinary sketch-point holes use the sketch normal and ignore this input.
+    if supplied_direction.is_none() && p.get("direction").is_some_and(|v| !v.is_null()) && points.as_ref().is_none_or(|(sp, _, _)| sp.single) {
+        return Err(bad(cmd, "`direction` must be a non-zero [x, y, z]"));
+    }
+    let direction = match (supplied_direction, &points) {
         (None, Some((sp, _, d))) if !sp.single => *d,
         (d, _) => match d {
             Some(d) => d.normalized().ok_or_else(|| bad(cmd, "`direction` must be non-zero"))?,
@@ -4295,7 +4397,18 @@ fn bounding_solid(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "solid.bounding_solid";
     let margin = expr(p, "margin").unwrap_or_else(|| "0".into());
     check_expr(s, &margin, Kind::Length, cmd, "margin")?;
-    add_feature(s, p, FeatureKind::BoundingSolid { bodies: string_list(cmd, p, "bodies")?.into_iter().map(BodyName).collect(), margin })
+    let margins = match p.get("margins").and_then(Value::as_array) {
+        Some(a) if a.len() == 6 => {
+            let e: Vec<String> = a.iter().map(|v| v.as_str().map(str::to_string).unwrap_or_else(|| v.to_string())).collect();
+            for x in &e {
+                check_expr(s, x, Kind::Length, cmd, "margins")?;
+            }
+            Some([e[0].clone().into(), e[1].clone().into(), e[2].clone().into(), e[3].clone().into(), e[4].clone().into(), e[5].clone().into()])
+        }
+        Some(_) => return Err(bad(cmd, "`margins` must have six values: -X, +X, -Y, +Y, -Z, +Z")),
+        None => None,
+    };
+    add_feature(s, p, FeatureKind::BoundingSolid { bodies: string_list(cmd, p, "bodies")?.into_iter().map(BodyName).collect(), margin, margins })
 }
 
 fn scale(s: &mut Session, p: &Value) -> Result<Value> {

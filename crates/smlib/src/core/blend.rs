@@ -930,7 +930,21 @@ fn blend_call(
         // overflow their faces across cliffs and others fit, the overflowing ones are built
         // first, on a fresh copy, and the others then round what is left of their edges. An edge
         // the overflow removes whole is gone (`dropped`); one it cuts keeps the rest.
-        let may_go_first = OVERFLOW_GOES_FIRST && back.is_empty() && open == Corners::Filled && picked.len() > 1;
+        // Where two picks meet at a vertex that is there only for splits of the faces beside
+        // them on their own surfaces, the blend runs through it as along one edge: those splits
+        // are taken out before the construction, as ops' blend does (#16654).
+        let through =
+            if back.is_empty() && open == Corners::Filled { solidcore_ops::blend::without_splits_at_picks(k, &w, &picked, &each)? } else { None };
+        let merged = through.is_some();
+        let (picked, each) = match through {
+            Some((clean, picks, kept)) => {
+                w = clean;
+                let sizes: Vec<f64> = kept.iter().map(|&i| each.get(i).copied().unwrap_or(0.0)).collect();
+                (picks, sizes)
+            }
+            None => (picked, each),
+        };
+        let may_go_first = OVERFLOW_GOES_FIRST && !merged && back.is_empty() && open == Corners::Filled && picked.len() > 1;
         let (mut stopped, mut mitred) = (None, Vec::new());
         let first = may_go_first.then_some(OverflowFirst { classify_only: false, stopped: &mut stopped, mitred: Some(&mut mitred) });
         let done = blend_edges_stopping(k, &mut w, &picked, &each, section, None, &back, (open == Corners::Open).then_some(&mut patches), first)?;

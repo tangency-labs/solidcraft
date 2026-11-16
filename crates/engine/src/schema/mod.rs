@@ -56,6 +56,7 @@ mod tests;
 // The contracts, by command file.
 pub mod align;
 pub mod appearance;
+pub mod board_import;
 pub mod bom;
 pub mod browser;
 pub mod canvas;
@@ -105,6 +106,7 @@ pub mod render;
 pub mod render_bindings;
 pub mod render_camera;
 pub mod render_hdr;
+pub mod render_info;
 pub mod render_jobs;
 pub mod render_library;
 pub mod render_lights;

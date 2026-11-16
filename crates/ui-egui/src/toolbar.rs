@@ -189,7 +189,6 @@ const APP_BAR_HANDLES: app_bar::Handles<'static> = app_bar::Handles {
     home_rect: &["titlebar:home", "appbar:home"],
     file: &["appbar:file", "appbar:folder"],
     file_rect: &["appbar:file"],
-    plugins: "appbar:plugins",
     button: &["appbar:", "titlebar:"],
     separator: "titlebar:separator:",
     search: "titlebar:search",
@@ -210,8 +209,10 @@ pub fn app_bar(app: &mut SolveApp, ui: &mut egui::Ui) {
     Container::new(ui.ctx(), Surface::ApplicationBar).show_edge(ui, app_bar.exact_size(APP_BAR_HEIGHT).show_separator_line(false), frame, |ui| {
         let r = ui.max_rect();
         // The bar is the window's title bar: its empty space moves the window, the traffic lights
-        // or the caption buttons take its ends.
-        let chrome = crate::window_chrome::TitleBar { traffic_lights: app.integrated_titlebar, caption_buttons: app.custom_titlebar };
+        // or the caption buttons take its ends. In full screen macOS shows the traffic lights in
+        // its own title bar that slides down over the window, not in the bar: no room for them.
+        let fullscreen = ui.ctx().input(|i| i.viewport().fullscreen.unwrap_or(false));
+        let chrome = crate::window_chrome::TitleBar { traffic_lights: app.integrated_titlebar && !fullscreen, caption_buttons: app.custom_titlebar };
         let action = chrome.show(ui, r, |ui, content| {
             // While a file loads the design waits: no menus or commands from the bar.
             let idle = !app.file_load_holds();
@@ -240,9 +241,6 @@ pub fn app_bar(app: &mut SolveApp, ui: &mut egui::Ui) {
                 home: app_bar::BarButton { id: "home", icon: "home", tip: app.tr("ui.start_page"), enabled: idle, narrow: false, wide_only: false },
                 file: app.tr("ui.file"),
                 file_open,
-                // The web build runs no plugins: no Plugins menu there. Its accessible name says
-                // "menu", so it is not taken for Preferences' Plugins page.
-                plugins: (!cfg!(target_arch = "wasm32")).then(|| (app.tr("ui.plugins"), app.plugin_menu.open, app.tr("ui.plugin_menu_name"))),
                 actions: vec![
                     action("save", "save", &save_tip, shown, false),
                     action("undo", "undo", &undo_tip, shown, true),
@@ -253,7 +251,11 @@ pub fn app_bar(app: &mut SolveApp, ui: &mut egui::Ui) {
                 settings: app_bar::BarButton { id: "settings", icon: "settings", tip: &prefs_tip, enabled: true, narrow: false, wide_only: false },
                 report: app_bar::Report {
                     label: solidcraft_ui_text::tr("ui.report_a_bug"),
-                    tip: solidcraft_ui_text::tr_label("Report a bug — review a screenshot and open a GitHub draft"),
+                    tip: if crate::issue_report::ticket::enabled(app) {
+                        solidcraft_ui_text::tr("report.pill_tip")
+                    } else {
+                        solidcraft_ui_text::tr_label("Report a bug — review a screenshot and open a GitHub draft")
+                    },
                     icon_only: app.header.report == ReportButton::Icon,
                 },
                 pills: crate::links::pills(app, r.width() >= app_bar::PILL_LABEL_MIN),
@@ -264,21 +266,13 @@ pub fn app_bar(app: &mut SolveApp, ui: &mut egui::Ui) {
                 handles: APP_BAR_HANDLES,
             };
             let out = app_bar::show(ui, &bar, r, content);
-            app.plugin_menu.in_file_menu = out.plugins_in_file;
             ui.ctx().data_mut(|d| d.insert_temp(egui::Id::unique("sc_file_menu_x"), out.file.left()));
             for action in &out.actions {
                 match action {
                     app_bar::BarAction::Home => app.home.show(app.session.revision),
-                    app_bar::BarAction::Plugins { rect } => {
-                        app.ui.palette_open = false;
-                        crate::plugin_menu::toggle(app, &ui.ctx().clone(), *rect);
-                    }
                     app_bar::BarAction::File { .. } => {
                         app.ui.palette_open = false;
                         app.plugin_menu.open = false;
-                        if app.plugin_menu.in_file_menu {
-                            crate::plugin_menu::refresh(app);
-                        }
                         let ctx = ui.ctx().clone();
                         let open = ctx.data(|d| d.get_temp::<bool>(egui::Id::unique("sc_file_menu")).unwrap_or(false));
                         let pass = ctx.cumulative_pass_nr();
@@ -468,7 +462,7 @@ fn file_menu(app: &mut SolveApp, ctx: &egui::Context) {
 }
 
 /// The File menu's rows, each named by what it runs ([`run_file_row`]).
-fn file_rows(app: &SolveApp) -> Vec<app_bar::FileRow> {
+pub(crate) fn file_rows(app: &SolveApp) -> Vec<app_bar::FileRow> {
     use app_bar::{FileItem, FileRow};
     let row = |id: &str, label: &str, key: &str, icon: &str, enabled: bool| {
         FileRow::Item(FileItem { id: id.to_string(), label: label.to_string(), key: key.to_string(), icon: icon.to_string(), enabled })
@@ -526,9 +520,10 @@ fn file_rows(app: &SolveApp) -> Vec<app_bar::FileRow> {
     rows.push(FileRow::Separator);
     rows.push(row("document.metadata", &format!("{}…", app.tr_label("Design Properties")), "", "settings", shown));
     rows.push(FileRow::Separator);
-    // A narrow app bar has no room for the Plugins button: its menu is here instead.
-    if app.plugin_menu.in_file_menu {
-        rows.push(crate::plugin_menu::file_submenu(app));
+    // Plugins… opens Preferences on the Plugins page: install, turn on or off, and remove plugins
+    // there. The web build runs no plugins.
+    if !cfg!(target_arch = "wasm32") {
+        rows.push(row("plugins.preferences", &format!("{}…", app.tr("ui.plugins")), "", "prefs_plugins", true));
         rows.push(FileRow::Separator);
     }
     // The browser can install SolidCraft as an app (`install`): only while it offers to.
@@ -549,9 +544,9 @@ fn file_rows(app: &SolveApp) -> Vec<app_bar::FileRow> {
 }
 
 /// Runs the File menu's row `id` ([`file_rows`]).
-fn run_file_row(app: &mut SolveApp, id: &str) {
-    if let Some(id) = id.strip_prefix("plugins:") {
-        crate::plugin_menu::choose(app, id);
+pub(crate) fn run_file_row(app: &mut SolveApp, id: &str) {
+    if id == "plugins.preferences" {
+        crate::prefs::open_at(app, crate::prefs::PAGE_PLUGINS);
         return;
     }
     if crate::plugin_slots::items(app, crate::plugin_slots::Slot::Menu("File")).iter().any(|item| item.command == id) {
@@ -2439,6 +2434,10 @@ pub(crate) fn cancel_unfinished(app: &mut SolveApp) -> bool {
     }
     if crate::select_other::is_open(app) {
         crate::select_other::close(app);
+    } else if !app.preferences.escape_closes_analyses && app.tool.as_ref().is_some_and(|t| t.cmd == "inspect.curvature_comb") {
+        // Escape puts the comb tool down and keeps its combs on; a right click or the button
+        // still turns them off. `escape_closes_analyses` brings back Escape turning them off.
+        app.tool = None;
     } else if app.tool.is_some() {
         crate::tools::finish(app);
     } else {
@@ -2651,7 +2650,7 @@ pub fn shortcuts(app: &mut SolveApp, ctx: &egui::Context) {
                 // Not while a tool is still out (its first Esc only ended a chain): this press
                 // puts it down, and the next quick one finishes.
                 if again
-                    && !(crate::viewport_status::enabled(app) && (app.viewport_status.open_key.is_some() || crate::viewport_status::has_effect(app)))
+                    && !(crate::viewport_status::enabled(app) && crate::viewport_status::owns_escape(app))
                     && app.tool.is_none()
                     && app.dialog.is_none()
                     && let Some(sketch) = app.session.active_sketch
@@ -3385,6 +3384,31 @@ mod header_report_tests {
         assert_eq!(search.right(), rect("titlebar:preferences").left() - HEADER_SEARCH_GAP);
         h.step(&json!({"click":{"handle":"titlebar:search"}})).unwrap();
         assert!(h.app.ui.palette_open, "the magnifier opens search");
+    }
+
+    /// macOS keeps room for the traffic lights at the bar's left end in a window, but not in full
+    /// screen, where they are in the title bar that slides down from the top of the screen: the
+    /// logo starts at the left edge there, as it does on Windows and Linux.
+    #[test]
+    fn full_screen_bar_has_no_room_for_the_traffic_lights() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        let home_left = |h: &mut crate::scenario::Harness, fullscreen: bool| {
+            for _ in 0..3 {
+                let mut raw = egui::RawInput { screen_rect: Some(Rect::from_min_size(egui::Pos2::ZERO, vec2(1600.0, 1000.0))), ..Default::default() };
+                raw.viewports.get_mut(&egui::ViewportId::ROOT).unwrap().fullscreen = Some(fullscreen);
+                let app = &mut h.app;
+                h.ctx.run_ui(raw, |ui| app.ui(ui)).textures_delta.clear();
+            }
+            crate::scenario::rect_of("titlebar:home").unwrap().left()
+        };
+        let room = crate::window_chrome::TRAFFIC_LIGHTS;
+        for traffic_lights in [true, false, true] {
+            h.app.integrated_titlebar = traffic_lights;
+            let (window, full) = (home_left(&mut h, false), home_left(&mut h, true));
+            let expected = if traffic_lights { room } else { 0.0 };
+            assert!((window - full - expected).abs() < 0.1, "traffic lights {traffic_lights}: {window} in a window, {full} in full screen");
+        }
     }
 
     /// With native menus the bar keeps its own Settings, so search the host put in the bar sits

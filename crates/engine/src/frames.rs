@@ -77,7 +77,7 @@ fn table(id: &str) -> &'static [(&'static str, K)] {
         "solid.thread" => &[("face", Pick), ("faces", Picks), ("from", Pick), ("up_to", Plane)],
         "solid.emboss" => &[("face", Make)],
         "solid.draft" => &[("faces", Picks), ("neutral", Plane), ("pull", Dir), ("body", Body)],
-        "solid.press_pull" => &[("face", Pick), ("edges", Picks), ("body", Body)],
+        "solid.press_pull" => &[("face", Pick), ("edges", Picks), ("body", Body), ("face_body", Body)],
         "solid.replace_face" => &[("faces", Picks), ("target_face", Pick), ("target", Plane), ("body", Body)],
         // Align finds its picks where they are shown and takes both ends into the moved bodies'
         // frame itself: a pick mapped into the frame of the body under it would put the two ends
@@ -343,6 +343,22 @@ impl Mapper<'_> {
             m.insert("origin".into(), x);
         }
         for k in ["normal", "x_dir", "y_dir"] {
+            if let Some(x) = o.get(k).and_then(|x| self.dir(x)) {
+                m.insert(k.into(), x);
+            }
+        }
+        Some(Value::Object(m))
+    }
+
+    /// An explicit plane whose `origin` has length expressions: the origin (kept as expressions)
+    /// and the directions in the active frame, none of them evaluated.
+    fn expressed_plane(&mut self, v: &Value) -> Option<Value> {
+        let o = v.as_object()?;
+        let mut m = o.clone();
+        if let Some(x) = o.get("origin").and_then(|x| self.make(x)) {
+            m.insert("origin".into(), x);
+        }
+        for k in ["x_dir", "y_dir"] {
             if let Some(x) = o.get(k).and_then(|x| self.dir(x)) {
                 m.insert(k.into(), x);
             }
@@ -980,7 +996,10 @@ fn map_local_with_input(
                     }
                     m.here = true;
                     // Body names stay: the sketch's view of the model keeps them.
-                    let r = if *kind == HerePlane { m.plane(v) } else { m.picks(v, None) };
+                    // A plane whose origin has length expressions (#8192) is mapped without
+                    // evaluating them: the origin stays expressions, written in the frame.
+                    let expressed = v.get("origin").and_then(Value::as_array).is_some_and(|a| a.iter().any(Value::is_string));
+                    let r = if *kind == HerePlane { if expressed { m.expressed_plane(v) } else { m.plane(v) } } else { m.picks(v, None) };
                     m.here = false;
                     m.f.sketch = keep;
                     r

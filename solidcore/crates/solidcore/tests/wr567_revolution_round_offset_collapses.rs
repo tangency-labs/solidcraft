@@ -4,8 +4,10 @@
 //! fillet's surface of revolution of an arc; moved in past its radius it has no offset,
 //! as a torus's, and the floor's and side's offsets meet across it in a circle. Upstream's
 //! `SmSurfOfRevolution` never collapses, and its offset builds the arc turned inside out
-//! (r 0.1 or 0.5 round its centre): the shell fails with 1001 open at the rounded end's
-//! other side, and is 0.85% and 4.2% low open at the rounded end.
+//! (r 0.1 or 0.5 round its centre): upstream's shell fails with 1001 open at the rounded
+//! end's other side, and is 0.85% and 4.2% low open at the rounded end. Without the
+//! collapse test the kernel's cavity selection (WR-667) still gives the closed form open
+//! at the other end.
 //!
 //! Expected: the cavity is the cylinder r 15 - t, 5 - t deep; the round takes
 //! r^2 (1 - pi/4) from the disc's section, its centroid r (10 - 3 pi) / (3 (4 - pi)) in
@@ -24,9 +26,9 @@ use core::f64::consts::PI;
 
 use offset_fixture::{planar_faces_at, report, shell};
 use solidcore::blend::fillet_executive::api::fillet_edges;
-use solidcore::kernel::UpstreamFixes;
 use solidcore::math::Point3;
 use solidcore::primitive::api_primitives::create_cylinder;
+use solidcore::topology::brep::validation::{check_brep, CheckLevel};
 use solidcore::{Brep, Kernel};
 
 const RD: f64 = 15.0;
@@ -61,17 +63,6 @@ fn expected(t: f64) -> f64 {
     PI * RD * RD * H - corner - PI * (RD - t) * (RD - t) * (H - t)
 }
 
-/// The rounds' mating across collapsed faces (`offset_collapsed_rounds_mated`), with or
-/// without the revolution's collapse test.
-fn kernel(revolution_collapses: bool) -> Kernel {
-    let mut k = Kernel::default();
-    let mut f = UpstreamFixes::default();
-    f.offset_collapsed_rounds_mated = true;
-    f.revolution_round_offset_collapses = revolution_collapses;
-    k.fixes = f;
-    k
-}
-
 /// Shells the disc rounded at `edge_z` by `t`, open at `open_z`; whether the result is
 /// an intact manifold solid of the expected volume to 1e-6.
 fn shelled(k: &mut Kernel, edge_z: f64, open_z: f64, t: f64) -> bool {
@@ -88,22 +79,30 @@ fn shelled(k: &mut Kernel, edge_z: f64, open_z: f64, t: f64) -> bool {
     )
 }
 
-#[test]
-fn wr567_default_fails_open_at_the_other_end() {
-    // upstream: the round's offset is the arc turned inside out
-    let mut k = kernel(false);
-    assert!(!shelled(&mut k, -H, 0.0, 1.6));
-}
-
+/// The round's offset collapses where the shell moves past its radius, and the floor's and
+/// side's offsets meet across it in a circle: every case is the closed form, and the shell
+/// is valid at every `check_brep` level.
 #[test]
 fn wr567_round_thinner_than_the_wall_collapses() {
     for (edge_z, open_z) in [(-H, 0.0), (-H, -H), (0.0, -H)] {
         for t in [1.6, 2.0] {
-            let mut k = kernel(true);
+            let mut k = Kernel::default();
             assert!(
                 shelled(&mut k, edge_z, open_z, t),
                 "rounded at z {edge_z}, open at z {open_z}, shelled {t}"
             );
+            let b = rounded_disc(&mut k, edge_z);
+            let open = planar_faces_at(&k, &b, 2, open_z);
+            let mut result = shell(&mut k, b, -t, &open).unwrap();
+            result.refresh_cached_topology();
+            for level in [CheckLevel::Level0, CheckLevel::Level1, CheckLevel::Level2] {
+                let checked = check_brep(&mut k, &mut result, level).unwrap();
+                assert!(
+                    checked.is_valid(),
+                    "rounded at z {edge_z}, open at z {open_z}, shelled {t}, {level:?}: {:?}",
+                    checked.lines()
+                );
+            }
         }
     }
 }

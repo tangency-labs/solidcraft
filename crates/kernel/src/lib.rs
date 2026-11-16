@@ -169,8 +169,8 @@ pub use blend::{
 pub use blend_corner::fillet_radii;
 pub use blend_variable::{RadiusSpline, Taper, fillet_chord, fillet_tapered, fillet_variable, fillet_variable_points, fillet_variable_spline, taper};
 pub use body::{
-    Body, COLOUR_NAME_MAX, CapSignature, DISPLAY_ANGLE, DisplayShare, EdgeInfo, FaceInfo, FacePaint, FaceSource, MeshTolerance, Paint, PointClass,
-    Refusal, SurfaceKind, colour_name,
+    Body, COLOUR_NAME_MAX, CapSignature, DISPLAY_ANGLE, DisplayShare, EdgeInfo, FaceInfo, FacePaint, FaceSource, MESH_MIN_ANGLE, MeshSpec,
+    MeshTolerance, Paint, PlanStats, PointClass, Refusal, SurfaceKind, colour_name, placed_mesh,
 };
 pub use boundary::{Boundary, boundary_patch};
 pub use boundary_network::{BoundaryCurve, CurveSource, MAX_CHAIN_CURVES, MAX_EDGE_PICKS, boundary_join, boundary_surface};
@@ -187,7 +187,7 @@ pub use continuity_order::{Construction, Continuity};
 pub use corner_g2::{CURVATURE_SHARE, DEFAULT_SETBACK_FACTOR};
 pub use curvature_comb::{CombTooth, MAX_COMB_TEETH, MIN_COMB_TEETH, comb_edge_near, edge_comb, edge_distance, iso_comb};
 pub use delete_face::delete_faces;
-pub use distance::{BodyDistance, DistanceShape, body_distance};
+pub use distance::{BodyDistance, DistanceShape, Members, body_distance, edges_closest, point_closest};
 pub use draft_corners::{CornerFill, CornerOption, CornerRefusal, CornerReport, DraftCorner, draft_corners};
 pub use emboss::{cylinder_emboss_anchor, emboss_cylinder, emboss_cylinder_at, has_cylinder_emboss_wall, infer_cylinder_emboss};
 pub use fair::{
@@ -234,7 +234,7 @@ pub use step_in::{
 };
 pub use step_out::{ExportBody, ExportProduct, StepExport, StepHeader, step_export_bodies, step_export_bodies_with_face_ids, step_export_products};
 pub use surface_extend::{ExtendLimit, ExtendMode, ExtendOptions, extend_surface};
-pub use surface_kind::{EdgeCircle, FaceSurface, edge_circle, face_edge_indices, face_surface};
+pub use surface_kind::{AxialPiece, EdgeCircle, FaceSurface, axial_face_section, edge_circle, face_edge_indices, face_surface};
 pub use surface_offset::offset_surface;
 pub use surface_ruled::{Ruled, RuledCorners, RuledMode, ruled_far_handles, ruled_surface, ruled_surface_with};
 pub use surface_trim::{TrimKeep, mutual_trim, trim, trim_keep};
@@ -277,6 +277,7 @@ impl From<solidcore_tess::TessError> for KernelError {
             solidcore_tess::TessError::Invalid(m) => KernelError::Invalid(m),
             solidcore_tess::TessError::Failed(m) => KernelError::Failed(m),
             solidcore_tess::TessError::Internal(m) => KernelError::Internal(m),
+            e @ solidcore_tess::TessError::TooManyVertices { .. } => KernelError::TooLarge(e.to_string()),
         }
     }
 }
