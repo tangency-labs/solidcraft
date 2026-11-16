@@ -3353,7 +3353,10 @@ mod tests {
         h.frames(2);
         let chip = rect_of("timeline-folder-chip:Mid").unwrap();
         let marker = rect_of("history:marker").unwrap();
-        assert!(marker.left() > chip.right(), "the marker waits after the folded chip: {marker:?} {chip:?}");
+        assert!(
+            (marker.center().x - chip.right() - 2.0).abs() < 0.01,
+            "the marker line sits in the existing gap after the folded chip: {marker:?} {chip:?}"
+        );
         let y = chip.center().y;
         h.step(&json!({"drag": [[marker.center().x, marker.center().y], [chip.left() + 2.0, y]]})).unwrap();
         h.settle();

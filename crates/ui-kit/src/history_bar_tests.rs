@@ -218,6 +218,18 @@ fn a_click_on_a_step_returns_select_with_its_modifiers_and_runs_nothing() {
 }
 
 #[test]
+fn ordinary_steps_keep_the_original_pitch_at_every_marker_position() {
+    let mut rig = Rig::new(&["A", "B", "C", "D"], 4);
+    for marker in 0..=4 {
+        rig.bar.marker = marker;
+        rig.frame(Vec::new());
+        for pair in [["test:A", "test:B"], ["test:B", "test:C"], ["test:C", "test:D"]] {
+            assert_eq!(rig.at(pair[1]).x - rig.at(pair[0]).x, 32.0, "marker {marker}");
+        }
+    }
+}
+
+#[test]
 fn moving_the_marker_keeps_flat_and_folded_steps_at_the_same_click_targets() {
     for folded in [None, Some((1, 3))] {
         let mut rig = Rig::new(&["A", "B", "C", "D"], 4);
@@ -229,14 +241,100 @@ fn moving_the_marker_keeps_flat_and_folded_steps_at_the_same_click_targets() {
             rig.bar.marker = marker;
             rig.frame(Vec::new());
             assert_eq!(solidcraft_ui_registry::handles("test:"), original, "marker {marker}, folded {folded:?}");
-            let grab = solidcraft_ui_registry::rect_of("test:marker").expect("marker is drawn").expand2(vec2(3.0, 0.0));
             for (name, at) in &original {
-                let width = if name == "test:folded" { 40.0 } else { 28.0 };
-                assert!(!Rect::from_center_size(*at, vec2(width, 28.0)).intersects(grab), "marker {marker} must not steal clicks on {name}");
+                if name == "test:folded" {
+                    continue;
+                }
+                let step = match name.as_str() {
+                    "test:A" => 1,
+                    "test:B" => 2,
+                    "test:C" => 3,
+                    "test:D" => 4,
+                    _ => panic!("unexpected step {name}"),
+                };
+                for dx in [-13.5, 0.0, 13.5] {
+                    for dy in [-13.5, 0.0, 13.5] {
+                        assert_eq!(
+                            rig.click(*at + vec2(dx, dy)),
+                            vec![Action::Select { step, modifiers: Modifiers::NONE }],
+                            "marker {marker} must not steal clicks on {name} at ({dx}, {dy})"
+                        );
+                    }
+                }
             }
             assert_eq!(rig.click(d), vec![Action::Select { step: 4, modifiers: Modifiers::NONE }]);
         }
     }
+}
+
+#[test]
+fn dragging_a_chip_edge_beside_the_marker_reorders_the_chip() {
+    let rig = Rig::new(&["A", "B", "C"], 1);
+    let end = rig.at("test:C") + vec2(40.0, 0.0);
+    for (label, step, dx) in [("test:A", 1, 13.5), ("test:B", 2, -13.5)] {
+        for dy in [-13.5, 0.0, 13.5] {
+            assert_eq!(rig.drag(rig.at(label) + vec2(dx, dy), end), vec![Action::Reorder { step, slot: 3, before: false }]);
+        }
+    }
+}
+
+#[test]
+fn dropping_the_marker_before_a_wide_open_group_keeps_its_slot() {
+    struct Groups;
+    impl Contents for Groups {
+        fn entries(&mut self, strip: &mut Strip<'_, '_>) {
+            for slot in 0..3 {
+                if slot == 1 {
+                    strip.chip(1, 3, true, 0, |_, _, _| 160.0);
+                }
+                strip.step(&Step {
+                    id: slot as u64,
+                    slot,
+                    label: "Step",
+                    icon: "box",
+                    icon_accent: None,
+                    state: StepState::default(),
+                    error: false,
+                    warning: false,
+                    ink: None,
+                    tip: &|| crate::StatusTip::default(),
+                    handle: None,
+                });
+            }
+            strip.end_tray();
+        }
+    }
+    let ctx = crate::test_support::context();
+    let rect = Rect::from_min_size(pos2(0.0, 100.0), vec2(700.0, 40.0));
+    let mut time = 0.0;
+    let mut frame = |events| {
+        time += 1.0 / 60.0;
+        let mut actions = Vec::new();
+        crate::test_support::raw_frame(
+            &ctx,
+            RawInput {
+                screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(800.0, 300.0))),
+                time: Some(time),
+                events,
+                focused: true,
+                ..Default::default()
+            },
+            |ui| {
+                actions = strip(ui, &bar(3, 1), rect, rect, "grouped_drag", &mut Groups).actions;
+            },
+        );
+        actions
+    };
+    frame(Vec::new());
+    let marker = solidcraft_ui_registry::rect_of("test:marker").expect("marker is drawn").center();
+    frame(vec![Event::PointerMoved(marker)]);
+    frame(vec![Event::PointerButton { pos: marker, button: PointerButton::Primary, pressed: true, modifiers: Modifiers::NONE }]);
+    frame(vec![Event::PointerMoved(marker + vec2(0.0, 10.0))]);
+    frame(vec![Event::PointerMoved(marker)]);
+    assert_eq!(
+        frame(vec![Event::PointerButton { pos: marker, button: PointerButton::Primary, pressed: false, modifiers: Modifiers::NONE }]),
+        vec![Action::Seek { slot: 1, before: false }]
+    );
 }
 
 #[test]
@@ -393,6 +491,17 @@ fn a_folded_chip_of_the_apps_own_takes_its_slots_and_the_marker_inside_it_goes_a
     assert!(folded.x < marker.x && marker.x < d.x, "the marker inside a folded chip is drawn after it");
     assert_eq!(rig.drag(a, folded), vec![Action::Reorder { step: 1, slot: 1, before: true }], "a drop on a folded chip lands before it");
     assert_eq!(rig.drag(d, folded - vec2(20.0, 0.0)), vec![Action::Reorder { step: 4, slot: 1, before: true }]);
+}
+
+#[test]
+fn dropping_on_a_folded_chip_at_the_start_lands_before_the_group() {
+    let mut rig = Rig::new(&["A", "B", "C"], 3);
+    rig.folded = Some((0, 2));
+    rig.frame(Vec::new());
+    let (folded, c) = (rig.at("test:folded"), rig.at("test:C"));
+    for dx in [0.0, -19.0, 19.0] {
+        assert_eq!(rig.drag(c, folded + vec2(dx, 0.0)), vec![Action::Reorder { step: 3, slot: 0, before: true }]);
+    }
 }
 
 #[test]
