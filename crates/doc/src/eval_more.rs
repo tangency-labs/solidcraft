@@ -204,7 +204,9 @@ pub(super) fn eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, 
                     // A rigid alignment keeps each face's identity. Carry the transform's
                     // exact history, as Move does, instead of naming the result by overlap
                     // with the body still at its old position (#20288).
+                    let grain = crate::wood::GrainFrame::moved(mb, &m, false);
                     *mb = mb.remade(Traced::step(nb, &[&mb.traced()]));
+                    mb.grain_frame = Some(grain.into());
                 }
             }
             Ok(())

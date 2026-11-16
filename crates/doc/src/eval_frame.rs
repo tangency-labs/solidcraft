@@ -230,24 +230,32 @@ fn built(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, st: &mut M
         Vec::new()
     };
     let mut later_of = |m: usize| split.get_mut(m).map(std::mem::take).unwrap_or_default();
+    // Every piece of a member runs along its member's line: the grain's default.
+    let axis = |m: usize| segments.get(m).and_then(|(_, a, b)| (*b - *a).normalized());
+    let grained = |name: String, t: Traced, m: usize| {
+        let mut body = ModelBody::traced_new(name, t, f.id);
+        body.grain_frame = Some(crate::wood::GrainFrame { member_axis: axis(m), ..Default::default() }.into());
+        body
+    };
     if !f.body_names.is_empty() {
         // A copy (pasted, or in a copied component) names its members by position, as any
         // feature's bodies.
-        let all: Vec<Traced> = made.into_iter().enumerate().flat_map(|(m, t)| t.into_iter().chain(later_of(m).into_iter().map(|p| p.1))).collect();
-        for (k, t) in all.into_iter().enumerate() {
+        let all: Vec<(usize, Traced)> =
+            made.into_iter().enumerate().flat_map(|(m, t)| t.into_iter().chain(later_of(m).into_iter().map(|p| p.1)).map(move |t| (m, t))).collect();
+        for (k, (m, t)) in all.into_iter().enumerate() {
             let name = new_name(st, f, k);
-            st.bodies.push(ModelBody::traced_new(name, t, f.id));
+            st.bodies.push(grained(name, t, m));
         }
         return Ok(());
     }
     let base = body_name.as_deref().map(str::trim).filter(|n| !n.is_empty()).map_or(description, str::to_string);
-    let ids: Vec<String> = segments.into_iter().map(|(id, _, _)| id).collect();
+    let ids: Vec<String> = segments.iter().map(|(id, _, _)| id.clone()).collect();
     let named = member_names(st, &ids, &parts, names, &base);
     let piece_pins: Vec<(&String, &str)> = names.iter().filter(|(k, _)| k.contains('>')).map(|(k, n)| (k, n.trim())).collect();
     // A piece with no body leaves its name unused.
     for (m, (name, t)) in named.iter().zip(made).enumerate() {
         if let Some(t) = t {
-            st.bodies.push(ModelBody::traced_new(name.clone(), t, f.id));
+            st.bodies.push(grained(name.clone(), t, m));
         }
         // A later piece of a tube split where another overlaps it, `L>X` (X: the other's line or pair id, a piece's
         // line's, or an earlier tube's id, [`earlier::earlier_tools`]): its pinned name, else `<its name> · <the
@@ -271,7 +279,7 @@ fn built(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, st: &mut M
             let pinned = names.get(&id).map(|n| n.trim().to_string()).filter(|n| !n.is_empty() && free(n));
             let joined = format!("{name} · {}", x_name.map_or("", String::as_str));
             let piece = (1..=MAX_MEMBERS + 1).map(|k| if k == 1 { joined.clone() } else { format!("{joined} ({k})") }).find(free);
-            st.bodies.push(ModelBody::traced_new(pinned.or(piece).unwrap_or(joined), t, f.id));
+            st.bodies.push(grained(pinned.or(piece).unwrap_or(joined), t, m));
         }
     }
     Ok(())

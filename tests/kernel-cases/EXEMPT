@@ -523,6 +523,7 @@ view.bottom                       the view: camera, layout, display
 view.delete                       the view: camera, layout, display
 view.fit                          the view: camera, layout, display
 view.front                        the view: camera, layout, display
+view.grain                        wood grain guides on screen: crates/ui-egui/src/wood_grain_tests.rs
 view.graphics_preset              the view: camera, layout, display
 view.grid                         the view: camera, layout, display
 view.ground_shadow                the view: camera, layout, display
@@ -563,6 +564,8 @@ view.tool.zoom                    the view: camera, layout, display
 view.top                          the view: camera, layout, display
 view.visual_style                 the view: camera, layout, display
 window.options.use_as_default     copies pop-out presentation settings to preferences; no geometry
+wood.grain                        a body's grain direction, no geometry: crates/engine/src/cmd/wood_grain_tests.rs
+wood.grain.query                  a body's grain direction, no geometry: crates/engine/src/cmd/wood_grain_tests.rs
 
 # Commands that make or change geometry and have no case yet. This section only shrinks: the
 # pull request that gives one a case in solidcore's corpus or a test moves its line to the section
