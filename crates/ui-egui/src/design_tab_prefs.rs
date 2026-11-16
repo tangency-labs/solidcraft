@@ -1,5 +1,6 @@
 //! The Layout page's "Design tabs" choices, read from one place by the tab strip and the views code.
 
+use crate::design_views::ViewKind;
 use crate::prefs::Prefs;
 
 /// How a design's views are shown and opened, copied from the preferences.
@@ -17,6 +18,19 @@ pub struct DesignTabPrefs {
     pub reuse_views: bool,
     /// A design opens with the views it had when it was last closed.
     pub reopen_views: bool,
+}
+
+impl DesignTabPrefs {
+    /// Whether a view of `kind` may be added as a sub-tab: Model always, the others when their
+    /// toggle is on (off: the design enters that state in the view already shown).
+    pub fn opens_sub_tab(&self, kind: ViewKind) -> bool {
+        match kind {
+            ViewKind::Model => true,
+            ViewKind::Sketch => self.sub_tab_sketches,
+            ViewKind::Sheet => self.sub_tab_sheets,
+            ViewKind::Render | ViewKind::Animation => self.sub_tab_render,
+        }
+    }
 }
 
 impl From<&Prefs> for DesignTabPrefs {

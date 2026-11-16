@@ -107,8 +107,15 @@ part placed at a station follows the station. Other moves of it (a drag, another
 undo, saving and opening keep the expressions. Renaming a parameter carries into them, and
 deleting one they use is refused. A move by expressions is captured at once (`capture: false` is
 refused with them). If an expression stops working out (say a parameter becomes an angle), the
-part stays where it is until it works out again. The rotation (`axis`, `angle`, `origin`) and a
-`matrix` are still worked out once, when the move is made.
+part stays where it is until it works out again.
+
+The same holds for the `origin` a move turns about (a part that turns about a point that follows a
+parameter is carried by what the turn leaves behind when the point moves), for the translation
+column of a `matrix` (the last entry of each of the first three rows, or entries 4, 8 and 12 of a
+flat one; the rotation entries are numbers), and for the `matrix` of `file.insert_step`, which
+places the new part the same way. A grounded part stays put, as with `translate`. The turn's
+`angle`, the rotation entries of a `matrix` and an absolute placement (`to`, `to_matrix`) are
+worked out once, when the move is made.
 
 Paste New copies nested component definitions, sketches, feature histories and generated
 dimension parameters. Repeated child instances remain shared within the new copy. Materials,
@@ -159,13 +166,19 @@ point, its x and y running along the two edges into the face. The edge, the face
 are found again by name, so a bracket set 40 mm in from a panel's corner (a planar joint with
 values `[40, 40, 0]`) stays 40 mm in from that corner when the panel changes size.
 
-A joint's offset, angle and values can be typed as expressions over the design's parameters
+A joint's Z offset, angle and values can be typed as expressions over the design's parameters
 (`"offset": "gap + 2"`, `"values": ["travel"]`). The joint keeps them and works them out again
 whenever the design changes, so a part seated `gap` above a panel moves with `gap`. Renaming a
 parameter carries into the joints that use it, and deleting one they use is refused. If an
 expression stops working out (say a parameter becomes an angle), the joint is left out of the
 solve and `joint.solve` gives the reason, instead of placing the part from old numbers. Typing a
 plain number, or driving the value, drops that expression.
+
+**Edit Joint → Position** shows **Offset X**, **Offset Y** and **Offset Z**. X and Y move along
+the saved first attachment's axes. Their expressions are evaluated once, as during creation;
+scripts use `offset_x` and `offset_y`. Older designs keep their saved attachment positions,
+with X and Y initially zero for additional shifts from those positions. Assembly constraints
+keep their existing controls and reference geometry until changed to a plain joint.
 
 **Relations** are joints that tie only part of a placement, so a part is placed the way a
 designer describes it, one relation at a time: `parallel` (z along z, free to move and turn
@@ -552,8 +565,8 @@ the component shares them, Paste New copies them, and they are saved with the co
 `component.metadata.set {component, part_number?, description?, revision?, bom_type?, values?, properties?}`
 changes them in one undo step (an empty value removes a field). The root component is the
 design itself: its properties are `document.metadata`'s. Standard parts (`parts.insert`) get a
-part number from their standard and size (`ISO 4762 M6x20`, or a bearing's designation) and a
-description; **Change Part Size** renumbers them, keeping a field you changed yourself.
+part number from their standard and size (`ISO 4762 M6x20`, `GOST 7798-70 M12x60`, or a bearing's
+designation) and a description; **Change Part Size** renumbers them, keeping a field you changed yourself.
 
 **Bill of Materials** (`assembly.bom`, on the **INSPECT** panel) counts the placed components:
 

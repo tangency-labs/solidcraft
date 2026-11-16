@@ -1,6 +1,6 @@
 # STEP import
 
-SolidCraft reads STEP (ISO 10303-21; AP203, AP214 and AP242 geometry) with its own reader in `crates/kernel/src/step_in` (written from the public standards; no third-party STEP code). A STEP file becomes an **Import** base feature on the timeline: it holds the file's B-rep (the STEP text is kept in the design, so the design reopens without the file) and later features — fillets, holes, cuts sketched on its faces, shells — build on its bodies.
+SolidCraft reads STEP (ISO 10303-21; AP203, AP214 and AP242 geometry) with its own reader in `crates/kernel/src/step_in` (written from the public standards; no third-party STEP code). The reader tells which protocol a file declares, and for AP242 which edition, 1 to 4, from the identifier after the schema name (`solidcore-record`'s `step::protocol`). A file is read the same whatever it declares: an AP242 file without a known edition, or a file with no known schema, is read with a warning. A STEP file becomes an **Import** base feature on the timeline: it holds the file's B-rep (the STEP text is kept in the design, so the design reopens without the file) and later features — fillets, holes, cuts sketched on its faces, shells — build on its bodies.
 
 - **Open**: File → Open (`doc.open`) accepts `.step`/`.stp` in any case and starts a new design; `solidcraft part.step`; `solidcraft-cli eval part.step`, `solidcraft-cli run script.json --in part.step`; the MCP `open` tool.
 - **Insert** into the current design: File → Insert STEP… or SOLID → INSERT (`file.insert_step {path}`).

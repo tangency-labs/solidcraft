@@ -1314,6 +1314,293 @@ fn wr711_exact_circles_of_one_arc_count_keep_the_progressive_round_on_its_balls(
     );
 }
 
+/// The largest distance from a variable round's skin to the union of its balls, sampled
+/// on a 400 x 33 grid of the round's face where the edge runs (`y` in [2, 18], clear of the
+/// ends, where the surface runs on past the balls of `s` in [0, 1]), and the solver's
+/// approximation tolerance there (4 x the edge's tolerance, `TOL_FACTOR`). The round's
+/// faces and the points measured are counted, so a result with no round, or with every point
+/// filtered away, fails rather than measuring nothing.
+fn skin_off_balls(law: [f64; 5]) -> (f64, f64) {
+    let mut k = solidcraft_kernel();
+    let mut b = box_10_20_30(&mut k).unwrap();
+    let e = pick(&k, &b, [10.0, 10.0, 30.0]);
+    let tol = 4.0 * edge::tolerance(&b, e).unwrap();
+    spline_round(&mut k, &mut b, e, law).unwrap();
+    let curve = greville_cubic_curve(law);
+    let planes = box_planes(10.0, 20.0, 30.0);
+    let ids: Vec<FaceId> = b.faces().ids().collect();
+    let mut off: f64 = 0.0;
+    let (mut rounds, mut measured) = (0usize, 0usize);
+    for f in ids {
+        let srf = face::surface(&b, f).unwrap().unwrap().clone();
+        if planes.iter().any(|&q| on_face(&k, &srf, q)) {
+            continue;
+        }
+        rounds += 1;
+        let dom = face::uv_domain(&b, f).unwrap();
+        for a in 0..=400 {
+            for c in 0..=32 {
+                let uv = Point2::new(
+                    dom.min().x + (dom.max().x - dom.min().x) * f64::from(a) / 400.0,
+                    dom.min().y + (dom.max().y - dom.min().y) * f64::from(c) / 32.0,
+                );
+                let x = srf.evaluate_point(&k, uv).unwrap();
+                if (2.0..=18.0).contains(&x.y) {
+                    off = off.max(distance_to_balls_union(&curve, x));
+                    measured += 1;
+                }
+            }
+        }
+    }
+    // one round face, and the edge's middle 16 of 20 is most of its 401 x 33 grid
+    assert_eq!(rounds, 1, "law {law:?}: {rounds} round faces");
+    assert!(
+        measured > 401 * 33 / 2,
+        "law {law:?}: {measured} points measured"
+    );
+    (off, tol)
+}
+
+/// #15256: a variable round's skin, not only its rails, lies within the solver's
+/// approximation tolerance of its balls between the trace's stations. Before, the stations
+/// were accepted on the rails alone and the skin between them was unbounded: the
+/// progressive law 8.7e-5 off (2.2 times the 4e-5 tolerance), `[2, 4, 2, 4, 2]` 4.1e-4
+/// (10.2 times) and `[3, 3, 3, 3, 1]` 3.2e-4 (7.9 times).
+#[test]
+fn a_variable_round_s_skin_lies_within_its_tolerance_of_its_balls() {
+    for law in [
+        HOLDS_LAW,
+        [2.0, 2.0, 6.0, 3.0, 1.0],
+        [1.0, 3.0, 5.0, 3.0, 1.0],
+        [2.0, 4.0, 2.0, 4.0, 2.0],
+        [3.0, 3.0, 3.0, 3.0, 1.0],
+    ] {
+        let (off, tol) = skin_off_balls(law);
+        println!("law {law:?}: skin {off:.3e} off its balls, tolerance {tol:e}");
+        assert!(
+            off <= tol,
+            "law {law:?}: skin {off:e} off its balls, past {tol:e}"
+        );
+    }
+}
+
+/// A variable round pinched to zero radius at one end (#15257 review; the shape of the rig's
+/// `ladder/07-fillets/006-variable-r5-to-zero`): the linear law 4 -> 0 and 0 -> 4 along the
+/// box's top edge (the cubic law with Greville values `[4, 3, 2, 1, 0]` is exactly linear).
+/// Built with SolidCraft's fixes, as the app builds it (the round as its definition
+/// declines a round whose rails meet at an end, so this one is a B-spline skin the check
+/// measures): it builds, refused by none of the check's refusals, and the skin lies within
+/// the solver's tolerance of its balls (sampled, clear of the ends).
+#[test]
+fn a_variable_round_pinched_to_zero_keeps_its_skin_on_its_balls() {
+    for law in [[4.0, 3.0, 2.0, 1.0, 0.0], [0.0, 1.0, 2.0, 3.0, 4.0]] {
+        let (off, tol) = skin_off_balls(law);
+        println!("law {law:?}: skin {off:.3e} off its balls, tolerance {tol:e}");
+        assert!(
+            off <= tol,
+            "law {law:?}: skin {off:e} off its balls, past {tol:e}"
+        );
+    }
+}
+
+/// A constant-distance round whose ball varies (#15257 review): a solid cylinder of radius
+/// `R` = 10 cut by a plane tilted `tilt` degrees about the y axis through (0, 0, 20). Along
+/// the elliptical edge the angle between the faces changes, so a ball whose feet are a
+/// constant chord `l` apart changes its radius. At the angle `phi` around the axis, with `u`
+/// the radial direction and `n` the plane's outward normal, the ball touching both faces from
+/// inside has its centre `R - r` from the axis and `r` below the plane, and its feet `r u`
+/// and `r n` from its centre, so `l = r |u - n|`: `r(phi) = l / sqrt(2 - 2 n.u)`. Returns the
+/// largest distance from the round faces to that family's envelope (a 1-D search over
+/// `phi` per point), the solver's tolerance (4 x the edge's), and the radius range.
+fn constant_distance_round_on_an_oblique_cylinder(tilt: f64, l: f64) -> (f64, f64, f64, f64) {
+    use solidcore::boolean::api_brep::boolean_intersection;
+    use solidcore::topology::proto_topology::p1::api_transform::{api_rotate, TransformObject};
+    const R: f64 = 10.0;
+    let mut k = Kernel::default();
+    let cylinder = create_cylinder(&mut k, Point3::new(0.0, 0.0, 0.0), R, 40.0).unwrap();
+    let mut slab =
+        create_box(&mut k, Point3::new(-50.0, -50.0, -60.0), 100.0, 100.0, 80.0).unwrap();
+    let p0 = Point3::new(0.0, 0.0, 20.0);
+    api_rotate(
+        &mut k,
+        Some(TransformObject::Brep(&mut slab)),
+        p0,
+        Vec3::new(0.0, 1.0, 0.0),
+        tilt,
+    )
+    .unwrap();
+    let mut b = boolean_intersection(&mut k, cylinder, slab).unwrap();
+    // the elliptical edge (the bottom circle is at z = 0)
+    let top: Vec<EdgeId> = b
+        .edges()
+        .ids()
+        .filter(|&e| {
+            let ivl = edge::interval(&b, e).unwrap();
+            let c = edge::curve(&b, e).unwrap().unwrap();
+            let x = c.evaluate_point(&k, ivl.evaluate(0.25)).unwrap();
+            let y = c.evaluate_point(&k, ivl.evaluate(0.75)).unwrap();
+            // (not the bottom circle, and not the cylinder's vertical seam)
+            x.z > 5.0 && (x.x - y.x).hypot(x.y - y.y) > 1e-6
+        })
+        .collect();
+    assert!(!top.is_empty(), "no top edge");
+    // the rotated top's normal: its x sign is the one the edge lies on
+    let a = tilt.to_radians();
+    let x_far = {
+        let e = top[0];
+        let c = edge::curve(&b, e).unwrap().unwrap();
+        let ivl = edge::interval(&b, e).unwrap();
+        (0..=64)
+            .map(|i| {
+                c.evaluate_point(&k, ivl.evaluate(f64::from(i) / 64.0))
+                    .unwrap()
+            })
+            .fold(p0, |m, x| if x.x.abs() > m.x.abs() { x } else { m })
+    };
+    let n = [1.0, -1.0]
+        .into_iter()
+        .map(|sx| Vec3::new(sx * a.sin(), 0.0, a.cos()))
+        .min_by(|p, q| {
+            (x_far - p0)
+                .dot(*p)
+                .abs()
+                .total_cmp(&(x_far - p0).dot(*q).abs())
+        })
+        .unwrap();
+    let on_plane = |x: Point3| (x - p0).dot(n);
+    for &e in &top {
+        let ivl = edge::interval(&b, e).unwrap();
+        let c = edge::curve(&b, e).unwrap().unwrap();
+        for f in [0.1, 0.5, 0.9] {
+            let x = c.evaluate_point(&k, ivl.evaluate(f)).unwrap();
+            assert!(
+                on_plane(x).abs() < 1e-7,
+                "the edge is off the tilted plane: {}",
+                on_plane(x)
+            );
+            assert!(
+                ((x.x * x.x + x.y * x.y).sqrt() - R).abs() < 1e-7,
+                "the edge is off the cylinder"
+            );
+        }
+    }
+    let tol = 4.0
+        * top
+            .iter()
+            .map(|&e| edge::tolerance(&b, e).unwrap())
+            .fold(0.0, f64::max);
+    let mut session = FilletSession::new(&mut k, &mut b).unwrap();
+    session
+        .prepare_per_edge_constant_distance(
+            &mut k,
+            &top,
+            &[l],
+            &[FilletSurfaceGeneratorType::Circular],
+            2,
+            0.0,
+        )
+        .unwrap();
+    session.do_fillet(&mut k).unwrap();
+    drop(session);
+    let lines = check_brep(&mut k, &mut b, CheckLevel::Level2)
+        .unwrap()
+        .lines();
+    assert!(
+        lines.is_empty(),
+        "the result fails {} validity tests",
+        lines.len()
+    );
+    // the closed-form balls
+    let ball = |phi: f64| {
+        let u = Vec3::new(phi.cos(), phi.sin(), 0.0);
+        let r = l / (2.0 - 2.0 * n.dot(u)).sqrt();
+        // `n.c = n.p0 - r`, `c = (R - r) u + z e_z`
+        let z = (n.dot(p0) - r - (R - r) * n.dot(u)) / n.z;
+        (u * (R - r) + Vec3::new(0.0, 0.0, z), r)
+    };
+    let off_balls = |x: Point3| {
+        let signed = |phi: f64| {
+            let (c, r) = ball(phi);
+            x.distance(c) - r
+        };
+        let m = 4096;
+        let step = 2.0 * PI / f64::from(m);
+        let (mut best, mut bd) = (0.0, f64::INFINITY);
+        for i in 0..m {
+            let phi = f64::from(i) * step;
+            let d = signed(phi);
+            if d < bd {
+                (best, bd) = (phi, d);
+            }
+        }
+        let (mut lo, mut hi) = (best - step, best + step);
+        let g = (5f64.sqrt() - 1.0) / 2.0;
+        for _ in 0..80 {
+            let (s1, s2) = (hi - g * (hi - lo), lo + g * (hi - lo));
+            if signed(s1) < signed(s2) {
+                hi = s2;
+            } else {
+                lo = s1;
+            }
+        }
+        signed(0.5 * (lo + hi)).abs()
+    };
+    // the round faces: neither the cylinder, the bottom nor the tilted plane
+    let (mut off, mut rounds, mut measured) = (0.0_f64, 0usize, 0usize);
+    let ids: Vec<FaceId> = b.faces().ids().collect();
+    for f in ids {
+        let srf = face::surface(&b, f).unwrap().unwrap().clone();
+        let dom = face::uv_domain(&b, f).unwrap();
+        let at = |a: f64, c: f64| {
+            let uv = Point2::new(
+                dom.min().x + (dom.max().x - dom.min().x) * a,
+                dom.min().y + (dom.max().y - dom.min().y) * c,
+            );
+            srf.evaluate_point(&k, uv).unwrap()
+        };
+        let probes = [at(0.3, 0.4), at(0.6, 0.7), at(0.5, 0.5)];
+        let original = probes
+            .iter()
+            .all(|x| ((x.x * x.x + x.y * x.y).sqrt() - R).abs() < 1e-9)
+            || probes.iter().all(|x| x.z.abs() < 1e-9)
+            || probes.iter().all(|&x| on_plane(x).abs() < 1e-9);
+        if original {
+            continue;
+        }
+        rounds += 1;
+        for i in 0..=400 {
+            for j in 0..=32 {
+                off = off.max(off_balls(at(f64::from(i) / 400.0, f64::from(j) / 32.0)));
+                measured += 1;
+            }
+        }
+    }
+    assert!(rounds >= 1, "no round face");
+    assert_eq!(measured, rounds * 401 * 33, "every point measured");
+    let (r_lo, r_hi) = (
+        l / (2.0 + 2.0 * a.sin()).sqrt(),
+        l / (2.0 - 2.0 * a.sin()).sqrt(),
+    );
+    (off, tol, r_lo, r_hi)
+}
+
+/// #15257 review: `ball_radius_varies` turns the skin check on for a constant-distance round
+/// too. Here its ball really varies (from 1.22 to 1.74 at 20 degrees with a 2 mm chord): the
+/// round builds, valid, and its skin lies within the solver's tolerance of the balls' closed-form
+/// envelope (sampled, 401 x 33 points per round face).
+#[test]
+fn a_constant_distance_round_whose_ball_varies_keeps_its_skin_on_its_balls() {
+    for tilt in [20.0, 35.0] {
+        let (off, tol, r_lo, r_hi) = constant_distance_round_on_an_oblique_cylinder(tilt, 2.0);
+        println!("tilt {tilt}: radius {r_lo:.4} to {r_hi:.4}; skin {off:.3e} off its balls, tolerance {tol:e}");
+        assert!(r_hi - r_lo > 0.3, "the ball does not vary");
+        assert!(
+            off <= tol,
+            "tilt {tilt}: skin {off:e} off its balls, past {tol:e}"
+        );
+    }
+}
+
 /// `cf1c08b` + `0389af2`: the folded cubic law `[2, 2, 40, 3, 2]` is refused (the great
 /// circles built it folded, far off the union of its balls, before the G^n section's flag was
 /// retired).

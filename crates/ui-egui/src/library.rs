@@ -1307,16 +1307,16 @@ mod tests {
         let listing = read_folder(&h.dir, &h.dir).unwrap();
         let names: Vec<_> = listing.entries.iter().map(|entry| entry.name.as_str()).collect();
         assert_eq!(names, ["Project", "B newest.solidcraft", "Z newest.solidcraft", "A old.solidcraft"]);
-        // Track the shared current/legacy design extensions, without listing import formats.
+        // Track supported design extensions, excluding retired associations and import formats.
         for name in ["Current.SC", "Legacy.solvecraft", "Plain.json", "Import.step", "Import.iges", "Import.stl"] {
             std::fs::write(h.dir.join(name), b"listing fixture").unwrap();
         }
         let listing = read_folder(&h.dir, &h.dir).unwrap();
-        for name in ["Current.SC", "Legacy.solvecraft", "Plain.json"] {
+        for name in ["Current.SC", "Plain.json"] {
             assert!(listing.entries.iter().any(|entry| entry.name == name), "missing {name}");
         }
-        for name in ["Import.step", "Import.iges", "Import.stl"] {
-            assert!(!listing.entries.iter().any(|entry| entry.name == name), "import file listed: {name}");
+        for name in ["Legacy.solvecraft", "Import.step", "Import.iges", "Import.stl"] {
+            assert!(!listing.entries.iter().any(|entry| entry.name == name), "unsupported browser file listed: {name}");
         }
     }
 

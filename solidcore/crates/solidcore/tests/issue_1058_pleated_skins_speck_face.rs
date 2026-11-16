@@ -3,8 +3,10 @@
 //! tolerance of 1.73 mm against 0.01. Where two pleat creases pass about 1e-5 apart, both
 //! ends of a short intersection curve fall in one proto vertex; `SmProtoEdge::Resolve`
 //! keeps it, a speck face is split off holding a 15 mm intersection edge, and
-//! `RadialSectorClassify` drops that edge's trim 0.86 mm off the face. The join also loses
-//! volume. The opt-in `Kernel::fixes.degenerate_proto_edge_in_one_vertex` makes such a
+//! `RadialSectorClassify` drops that edge's trim 0.86 mm off the face. Before #16735 the
+//! volume integrator leaked through that gap, and union + intersection lost 18.8 mm^3 of
+//! the skins; it now closes tolerant edges' gaps, so the identity holds on both paths. The
+//! opt-in `Kernel::fixes.degenerate_proto_edge_in_one_vertex` makes such a
 //! curve the vertex (the fork's "an intersection curve inside one vertex is that vertex,
 //! not a closed edge on it").
 //!
@@ -132,12 +134,14 @@ fn issue_1058_flag_is_off_by_default() {
     assert!(!Kernel::default().fixes.degenerate_proto_edge_in_one_vertex);
 }
 
-/// Upstream: tolerances of 1.73 mm, and the join and the intersection lose 18.8 mm^3.
+/// Upstream: tolerances of 1.73 mm. The 18.8 mm^3 the join and the intersection lost was
+/// the integrator leaking through the 0.86 mm trim gap; with the gaps closed (#16735) union +
+/// intersection is the skins' volumes (1.8e-10 relative, MEASURED), as with the fix.
 #[test]
 fn issue_1058_upstream_join_has_millimetre_tolerances() {
     let (vertex, edge, lost) = join(false);
     assert!(vertex > 1.0 && edge > 1.0, "{vertex:e} {edge:e}");
-    assert!(lost > 1e-4, "{lost:e}");
+    assert!(lost.abs() < 1e-6, "{lost:e}");
 }
 
 /// With the fix every tolerance stays under 1e-4 (the creases' near miss is about 1.6e-5),
