@@ -143,9 +143,21 @@ pub enum NoPlateFaces {
 }
 
 /// `T`'s plate faces at `P` (normal `n`): among `candidates` (the planar faces the caller found
-/// beside the contact), the pairs that are square to `n`, opposite each other, and whose levels
+/// beside the contact), the pairs that are square to `n`, opposite each other, whose levels
 /// along `m` are the strip's extent along `m` within `tol` (`strip_extent(m)` gives that extent as
-/// `(lo, hi)`); the narrowest pair wins, and a tie within `tol` is [`NoPlateFaces::NotAPlate`].
+/// `(lo, hi)`), and whose thickness is not more than the strip's width across them (its extent
+/// along `n × m`) plus `tol`; the narrowest pair wins, and a tie within `tol` is
+/// [`NoPlateFaces::NotAPlate`].
+///
+/// The width rule is what makes the pair the plate's thickness and not its length. Bounding the
+/// strip is checked along `m` only, so with `T` notched under one face the strip no longer
+/// reaches that face, the thin pair drops out, and the length pair (whose faces still bound the
+/// strip at its ends) would be left to read as a plate as thick as `T` is long. A plate's
+/// thickness is never more than how wide its strip is across it, so the length pair fails the
+/// width rule and there is no pair: the contact is skipped rather than given a wrong tab. One
+/// rule on the other in-plane direction is enough (a second check along `m` against both
+/// directions would ask the same question twice); a square post still passes it both ways and
+/// stays a tie.
 ///
 /// # Errors
 ///
@@ -168,7 +180,7 @@ pub fn plate_faces(
         if bearing(n, a.normal)? != Bearing::Square {
             continue;
         }
-        for b in &candidates[i + 1..] {
+        for b in candidates.iter().skip(i + 1) {
             if bearing(a.normal, b.normal)? != Bearing::Opposite {
                 continue;
             }
@@ -189,6 +201,13 @@ pub fn plate_faces(
                 return Err(invalid("the strip's extent is not finite and ordered"));
             }
             if (s_lo - lo).abs() > tol || (s_hi - hi).abs() > tol {
+                continue;
+            }
+            let (w_lo, w_hi) = strip_extent(n.cross(m))?;
+            if !(w_lo.is_finite() && w_hi.is_finite() && w_lo <= w_hi) {
+                return Err(invalid("the strip's extent is not finite and ordered"));
+            }
+            if thickness > w_hi - w_lo + tol {
                 continue;
             }
             let pair = PlateFaces {
@@ -236,7 +255,8 @@ pub fn strip_extent(
     let du = m.dot(Vec3::new(xx, xy, xz));
     let dv = m.dot(Vec3::new(yx, yy, yz));
     let d = crate::math::Vec2::new(du, dv);
-    if !((d.length() - 1.0).abs() <= SQUARE_SLACK) {
+    let off = (d.length() - 1.0).abs();
+    if off.is_nan() || off > SQUARE_SLACK {
         return Err(invalid("the direction does not lie in the strip's plane"));
     }
     let d = d

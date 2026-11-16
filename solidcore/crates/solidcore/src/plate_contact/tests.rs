@@ -27,12 +27,12 @@ fn wall() -> [Plane; 6] {
 
 /// Σ, the strip where Wall stands on Bottom: x ∈ [20, 140], y ∈ [30, 36] (its extent along an
 /// axis direction).
-fn strip(m: Vec3) -> Result<(f64, f64)> {
+fn strip(m: Vec3) -> (f64, f64) {
     let corners = [(20.0, 30.0), (140.0, 30.0), (20.0, 36.0), (140.0, 36.0)];
     let levels = corners.map(|(x, y)| m.dot(Vec3::new(x, y, 6.0)));
     let lo = levels.iter().copied().fold(f64::INFINITY, f64::min);
     let hi = levels.iter().copied().fold(f64::NEG_INFINITY, f64::max);
-    Ok((lo, hi))
+    (lo, hi)
 }
 
 const TOL: f64 = 1.0e-3;
@@ -120,7 +120,9 @@ fn touch_needs_the_face_to_face_down() {
 fn wall_plate_faces_are_the_narrow_pair() {
     // F: the x pair is 140 − 20 = 120 apart (it bounds the strip along its length); the y pair is
     // 36 − 30 = 6 apart: the narrower pair wins, t_T = 6, m = +y.
-    let got = plate_faces(&wall(), Vec3::Z, TOL, strip).unwrap().unwrap();
+    let got = plate_faces(&wall(), Vec3::Z, TOL, |m| Ok(strip(m)))
+        .unwrap()
+        .unwrap();
     assert_eq!(got.thickness, 6.0);
     assert_eq!(got.b.normal, Vec3::Y);
     assert_eq!(got.a.normal, -Vec3::Y);
@@ -133,7 +135,9 @@ fn wall_plate_faces_any_order() {
     // The same answer whichever of the pair comes first.
     let mut faces = wall();
     faces.swap(2, 3);
-    let got = plate_faces(&faces, Vec3::Z, TOL, strip).unwrap().unwrap();
+    let got = plate_faces(&faces, Vec3::Z, TOL, |m| Ok(strip(m)))
+        .unwrap()
+        .unwrap();
     assert_eq!(got.thickness, 6.0);
     assert_eq!(got.b.normal, Vec3::Y);
 }
@@ -166,7 +170,7 @@ fn no_square_faces_no_pair() {
     // Only the end and top faces (parallel to n): nothing square to n.
     let faces = [wall()[4], wall()[5]];
     assert_eq!(
-        plate_faces(&faces, Vec3::Z, TOL, strip).unwrap(),
+        plate_faces(&faces, Vec3::Z, TOL, |m| Ok(strip(m))).unwrap(),
         Err(NoPlateFaces::NoPair)
     );
 }
@@ -175,8 +179,6 @@ fn no_square_faces_no_pair() {
 fn plate_faces_must_bound_the_strip() {
     // A strip narrower than the pair (y ∈ [31, 36]: T notched under one face): the y pair's
     // level −(−30) = 30 is 1 from the strip's 31, over tol, so the y pair does not qualify.
-    // The strip still runs x ∈ [20, 140], the x pair's levels, so of all six faces the x pair
-    // (120 thick) is the one left (design v2 5.4: a pair qualifies on its own direction only).
     let narrow = |m: Vec3| -> Result<(f64, f64)> {
         let c = [(20.0, 31.0), (140.0, 31.0), (20.0, 36.0), (140.0, 36.0)];
         let l = c.map(|(x, y)| m.dot(Vec3::new(x, y, 6.0)));
@@ -185,10 +187,6 @@ fn plate_faces_must_bound_the_strip() {
             l.iter().copied().fold(f64::NEG_INFINITY, f64::max),
         ))
     };
-    let got = plate_faces(&wall(), Vec3::Z, TOL, narrow).unwrap().unwrap();
-    assert_eq!(got.thickness, 120.0);
-    assert_eq!(got.b.normal, Vec3::X);
-    // With the y pair alone: no pair.
     let y_pair = [wall()[2], wall()[3]];
     assert_eq!(
         plate_faces(&y_pair, Vec3::Z, TOL, narrow).unwrap(),
@@ -197,9 +195,36 @@ fn plate_faces_must_bound_the_strip() {
 }
 
 #[test]
+fn a_notched_wall_is_not_read_along_its_length() {
+    // Wall notched under its y = 30 face: the strip is x ∈ [20, 140], y ∈ [31, 36]. The y pair
+    // fails to bound it (30 vs 31). The x pair bounds it along x (20 and 140), but it is
+    // 140 − 20 = 120 thick and the strip is only 36 − 31 = 5 wide across it (along +z × +x = +y):
+    // 120 > 5 + tol, so it is no plate thickness either. All six faces: no pair, not t_T = 120.
+    let notched = |m: Vec3| -> Result<(f64, f64)> {
+        let c = [(20.0, 31.0), (140.0, 31.0), (20.0, 36.0), (140.0, 36.0)];
+        let l = c.map(|(x, y)| m.dot(Vec3::new(x, y, 6.0)));
+        Ok((
+            l.iter().copied().fold(f64::INFINITY, f64::min),
+            l.iter().copied().fold(f64::NEG_INFINITY, f64::max),
+        ))
+    };
+    assert_eq!(
+        plate_faces(&wall(), Vec3::Z, TOL, notched).unwrap(),
+        Err(NoPlateFaces::NoPair)
+    );
+    // The whole wall still reads as 6 thick: its strip is 120 long across the y pair (6 ≤ 120)
+    // and the x pair, 120 thick, is wider than the 6 the strip spans across it.
+    let got = plate_faces(&wall(), Vec3::Z, TOL, |m| Ok(strip(m)))
+        .unwrap()
+        .unwrap();
+    assert_eq!(got.thickness, 6.0);
+    assert_eq!(got.b.normal, Vec3::Y);
+}
+
+#[test]
 fn plate_faces_refuses_bad_input() {
-    assert!(plate_faces(&wall(), Vec3::new(0.0, 0.0, 2.0), TOL, strip).is_err());
-    assert!(plate_faces(&wall(), Vec3::Z, f64::INFINITY, strip).is_err());
+    assert!(plate_faces(&wall(), Vec3::new(0.0, 0.0, 2.0), TOL, |m| Ok(strip(m))).is_err());
+    assert!(plate_faces(&wall(), Vec3::Z, f64::INFINITY, |m| Ok(strip(m))).is_err());
     let nan = |_: Vec3| -> Result<(f64, f64)> { Ok((f64::NAN, 1.0)) };
     assert!(plate_faces(&wall(), Vec3::Z, TOL, nan).is_err());
 }
