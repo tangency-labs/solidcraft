@@ -26,8 +26,8 @@
 {"case":"edge_vd_imprint_errors_huge","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":{"blocks":[[43088.26205000001,83110.26205000002,4066733.646099999]],"n":174}}}
 {"case":"edge_vd_imprint_errors_tiny","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":{"blocks":[[3078.000410101621,3100.000810101622,116376.03983354344]],"n":174}}}
 {"case":"edge_vd_imprint_errors_unit","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":{"blocks":[[3082.0010262049996,3108.0010262049996,116771.03576460999]],"n":174}}}
-{"case":"edge_vertex_defs_huge","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":{"blocks":[[54670.64199999999,54694.64199999999,10393794.449000003],[24732.860058999275,68742.36005899927,914097.2130039958]],"n":347}}}
-{"case":"edge_vertex_defs_tiny","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":{"blocks":[[5661.25031010192,5685.25031010192,581481.305315083],[232.7502450020005,242.7506450020005,3595.5090950235285]],"n":347}}}
+{"case":"edge_vertex_defs_huge","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":{"blocks":[[54670.64199999999,54694.64199999999,10393794.449000003],[34731.76005899928,78741.26005899928,1094077.4130039955]],"n":347}}}
+{"case":"edge_vertex_defs_tiny","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":{"blocks":[[5661.25031010192,5685.25031010192,581481.305315083],[233.7501450010005,243.75054500100052,3613.5072950055287]],"n":347}}}
 {"case":"edge_vertex_defs_unit","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":{"blocks":[[5665.151039200003,5689.151039200003,582229.5046199],[235.14870430305047,249.14870430305047,3686.2423310833024]],"n":347}}}
 {"case":"gen0000","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":{"blocks":[[2961.037818991076,3019.045663287965,424167.4990745971],[62.529609076470145,149.9336086123099,3077.422243129604]],"n":413}}}
 {"case":"gen0001","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":{"blocks":[[24.0,28.0,285.0]],"n":20}}}
