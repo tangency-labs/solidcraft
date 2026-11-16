@@ -686,8 +686,10 @@ fn with_largest_fit(
         Ok(kernel::FitSearch { found: Some((largest, _)), .. }) => {
             kernel::KernelError::TooLarge(format!("{why}; {}", kernel::largest_fit_note(size, largest)))
         }
-        Ok(kernel::FitSearch { found: None, smallest_refused: Some((at, e)), .. }) => kernel::KernelError::TooLarge(format!(
-            "{}; no smaller {size} builds either (down to {} mm: {})",
+        // The search samples sizes and building is not monotone in the size, so it says what it
+        // tried, not that nothing smaller builds.
+        Ok(kernel::FitSearch { found: None, smallest_refused: Some((at, e)), tried, .. }) => kernel::KernelError::TooLarge(format!(
+            "{}; none of the {tried} sizes tried builds (the smallest, {} mm: {})",
             kernel::without_fit_note(&why),
             show_mm(at),
             kernel::without_fit_note(&e.to_string())
@@ -4098,7 +4100,8 @@ mod largest_fit_tests {
         })
         .to_string();
         assert!(!e.contains("that fits is"), "{e}");
-        assert!(e.contains("no smaller radius builds either (down to 0.001 mm: "), "{e}");
+        assert!(!e.contains("no smaller"), "{e}");
+        assert!(e.contains("none of the 14 sizes tried builds (the smallest, 0.001 mm: "), "{e}");
         assert!(e.contains("the trim leaks"), "{e}");
     }
 
@@ -6331,8 +6334,10 @@ fn hole_drill_scope(f: &Feature) -> &[String] {
 /// it. When the hole cuts every body, or none, every body counts.
 pub fn hole_start(st: &ModelState, f: &Feature, p: Vec3, dir: Vec3) -> Vec3 {
     let anywhere = hole_on_surface(st, p, dir, &[]);
-    // `hole_on_surface` hands `p` itself back when `p` is on a face (or meets no body at all).
-    if anywhere == p {
+    // `hole_on_surface` hands `p` itself back when `p` is on a face's mesh (or meets no body at
+    // all). On a round face, a point between its mesh's vertices lies off the mesh: the B-rep
+    // says whether it is on the face.
+    if anywhere == p || on_a_brep_face(st, p) {
         return p;
     }
     let targets = hole_targets(st, f);
@@ -6341,6 +6346,17 @@ pub fn hole_start(st: &ModelState, f: &Feature, p: Vec3, dir: Vec3) -> Vec3 {
     }
     let scope: Vec<String> = targets.iter().map(|b| b.name.clone()).collect();
     hole_on_surface(st, p, dir, &scope)
+}
+
+/// Whether `p` lies on a face of a B-rep body, within the body's chord tolerance
+/// ([`ModelBody::display_tol`], so the face's mesh is within reach): solidcore decides it on the
+/// face's surface and trim ([`solidcraft_kernel::Body::point_lies_on_face`]); the mesh only
+/// names the faces to ask.
+fn on_a_brep_face(st: &ModelState, p: Vec3) -> bool {
+    let reach = st.bodies.iter().map(ModelBody::display_tol).fold(0.0, f64::max);
+    faces_near(st, p, reach, &[])
+        .into_iter()
+        .any(|(_, i, face, _)| st.bodies.get(i).is_some_and(|b| matches!(b.body.point_lies_on_face(face as usize, p, b.display_tol()), Ok(Some(_)))))
 }
 
 fn in_hole_scope(scope: &[String], b: &ModelBody) -> bool {

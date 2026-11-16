@@ -8368,6 +8368,7 @@ pub(crate) fn refresh_layout(app: &mut SolveApp, ctx: &egui::Context) {
                     axis_view: Rect::NOTHING,
                     confirm: app.viewport.host_confirm.unwrap_or(Rect::NOTHING),
                     usable: None,
+                    panel_obstacles: None,
                 });
                 return;
             };
@@ -15703,6 +15704,8 @@ mod tests {
     #[test]
     fn a_shift_marquee_adds_the_other_region_of_an_imported_svg_sketch() {
         let mut h = crate::scenario::Harness::new();
+        // Leave room for the marquee's endpoints outside the fitted sketch.
+        h.app.preferences.home_fit_size = 0.8;
         let svg = r#"<svg width="80mm" height="40mm" viewBox="0 0 80 40"><path d="M0 0 H30 V30 H0 Z"/><path d="M50 0 H80 V30 H50 Z"/></svg>"#;
         let imported = h.app.run("sketch.insert_svg", json!({"text": svg})).unwrap();
         let sketch = imported["sketch"].as_u64().unwrap();

@@ -168,6 +168,20 @@ impl Body {
         BodyGuard(self.0.lock().unwrap_or_else(PoisonError::into_inner))
     }
 
+    /// Two different bodies locked at once, returned in the order given. They are locked in one
+    /// order whichever is given first (by address, which stays put while both are borrowed), so
+    /// two calls holding the same two bodies, on threads of their own, never wait on each other
+    /// for good. The only way ops holds two bodies at once.
+    pub(crate) fn lock_pair<'a>(a: &'a Body, b: &'a Body) -> (BodyGuard<'a>, BodyGuard<'a>) {
+        if std::ptr::from_ref(a) < std::ptr::from_ref(b) {
+            let ga = a.lock();
+            (ga, b.lock())
+        } else {
+            let gb = b.lock();
+            (a.lock(), gb)
+        }
+    }
+
     /// The kernel's body, locked, unless a panic left it unfinished or it is held now (never
     /// waited for): why not, if not.
     pub(crate) fn try_read(&self) -> std::result::Result<BodyGuard<'_>, &'static str> {

@@ -52,7 +52,6 @@
   "ssi_split_curves_at_singular_points",
   "point_class_gap_3d_propagates_no_drop_error",
   "fillet_variable_span_follows_fillet",
-  "face_tight_box_searches_trim",
   "box_face_failures_propagate",
   "fillet_removal_takes_ring_fillets",
   "boolean_union_refuses_solid_leak",
