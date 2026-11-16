@@ -110,16 +110,25 @@ pub(crate) fn has_effect(app: &SolveApp) -> bool {
     app.session.newest_status_item(&eligible(app)).is_some()
 }
 
+/// Whether an idle Escape is this row's: an open key card always is; an analysis or section
+/// only with the `escape_closes_analyses` preference (off by default, so Escape keeps them).
+pub(crate) fn owns_escape(app: &SolveApp) -> bool {
+    app.viewport_status.open_key.is_some() || (app.preferences.escape_closes_analyses && has_effect(app))
+}
+
 /// Called only after existing Escape owners have yielded. A repeat cannot cascade clears.
 pub(crate) fn escape(app: &mut SolveApp, repeat: bool) -> bool {
     if repeat {
-        return app.viewport_status.open_key.is_some() || has_effect(app);
+        return owns_escape(app);
     }
     if let Some(open) = app.viewport_status.open_key.clone()
         && app.session.status_items().iter().any(|effect| presentation(app, effect).is_some_and(|item| item.has_key && item.id == open))
     {
         app.viewport_status.close_details();
         return true;
+    }
+    if !app.preferences.escape_closes_analyses {
+        return false;
     }
     if let Some(effect) = app.session.newest_status_item(&eligible(app)) {
         clear(app, &effect);

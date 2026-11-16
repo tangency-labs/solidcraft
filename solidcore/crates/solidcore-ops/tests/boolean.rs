@@ -115,6 +115,39 @@ fn a_union_that_fills_a_void_is_the_whole_box() {
     assert!(near(volume(&u), 7900.0), "{}", volume(&u));
 }
 
+/// A cylinder cavity cut into a box whose side touches the box's y = 5 wall along a line (and
+/// the x = 25 wall too, in the second cut), inside the box from z = 22.5 to 32.5. The contact
+/// line leaves a slit loop in the wall, whose removal splits the box's shell from the cavity's.
+/// The cavity's shell lies inside the box's, so both bound the one solid: its outer shell and
+/// a void, as when the cavity is clear of the wall. The record has the exterior, the material
+/// and the cavity, and two shells.
+#[test]
+fn a_cavity_touching_the_outside_along_a_line_is_one_solid_with_a_void() {
+    for fixes in [false, true] {
+        if fixes {
+            all_fixes();
+        }
+        for base in [[30.0, 7.5, 22.5], [27.5, 7.5, 22.5]] {
+            let b = make_box([25.0, 5.0, 12.5], [20.0, 30.0, 22.5]).unwrap();
+            let cavity = solidcore_ops::make_cylinder(base, 2.5, 10.0).unwrap();
+            let d = boolean(b, cavity, BooleanOp::Subtract).unwrap().unwrap();
+            let expected = 20.0 * 30.0 * 22.5 - PI * 2.5 * 2.5 * 10.0;
+            assert!(
+                near(volume(&d), expected),
+                "{base:?} fixes {fixes}: {}",
+                volume(&d)
+            );
+            assert_eq!(d.solid_count().unwrap(), 1, "{base:?} fixes {fixes}");
+            let (record, _) = d.to_record().unwrap();
+            assert_eq!(
+                (record.regions.len(), record.shells.len()),
+                (3, 2),
+                "{base:?} fixes {fixes}"
+            );
+        }
+    }
+}
+
 #[test]
 fn a_cube_on_a_void_is_kept_out_by_a_difference_and_shares_nothing_with_it() {
     all_fixes();
@@ -1655,6 +1688,35 @@ fn a_traced_cut_meeting_an_earlier_cut_removes_its_tool() {
         .unwrap()
         .unwrap();
     one_valid_solid_of_volume(&r, [46, 132, 88], want, 1e-9);
+}
+
+/// #14599's cut as SolidCraft passed it: a 0.3 x 6 x 5 rib less a tool as long as the rib, whose
+/// profile is the rib's top, its side x = -19.1 down to z = 2.5 and a round of radius 10.5667
+/// tangent to that side at z = 2.5. The rib's side runs along the round's tangent line at the
+/// front and lies 5.8e-10 inside the round at the back, where the two crossed 2.2e-4 apart; the
+/// cut was not a solid. The tool lies inside the rib, so the cut removes exactly its volume and
+/// leaves the rib's six faces with the round in place of its top.
+#[test]
+fn a_traced_cut_whose_round_is_tangent_to_a_thin_ribs_side_removes_its_tool() {
+    all_fixes();
+    let body = traced_operands("issue_14599_cut_flush_with_a_thin_rib");
+    let want = body("target").volume(1e-11).unwrap() - body("tool").volume(1e-11).unwrap();
+    let r = boolean(body("target"), body("tool"), BooleanOp::Subtract)
+        .unwrap()
+        .unwrap();
+    one_valid_solid_of_volume(&r, [6, 12, 8], want, 1e-9);
+    // the vertices are the rib's bottom corners, its top corners on the far side and the
+    // round's tangent points at z = 2.5, none at the second crossing 1.1e-4 above them
+    let (_, brep) = common::kernel_copy(&r);
+    for &v in brep.vertex_list() {
+        let z = solidcore::query::api_queries::vertex_get_point(&brep, v)
+            .unwrap()
+            .z;
+        assert!(
+            [0.0, 2.5, 5.0].iter().any(|h| (z - h).abs() < 1e-6),
+            "a vertex at z = {z}"
+        );
+    }
 }
 
 /// #16935's intersect as SolidCraft passed it. Both bodies are a decagon of side 10, 10 tall, with

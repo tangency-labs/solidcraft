@@ -235,16 +235,21 @@ pub struct OffsetExecutive {
     crossing_edgeuses: BTreeSet<EdgeuseId>,
     /// Not upstream (WR-346): the original faces of an inset whose offset collapses (a
     /// convex round thinner than the wall), mated across instead of offset
-    /// (`m_sCollapsedFaces`; only with `Kernel::fixes.offset_collapsed_rounds_mated`).
+    /// (`m_sCollapsedFaces`).
     pub(super) collapsed_faces: Vec<FaceId>,
+    /// Not upstream (WR-346): for each of [`Self::collapsed_faces`], the signed distance its
+    /// surface was offset by along its own NURB normal (the offset distance, negated where
+    /// the offset face use is opposite its face), for [`OffsetFailure::Collapses`]'s radius.
+    ///
+    /// [`OffsetFailure::Collapses`]: crate::error::offset::OffsetFailure::Collapses
+    pub(super) collapsed_displacements: Vec<(FaceId, f64)>,
     /// Not upstream (solidcraft#16983): the offset faces with an edge whose offset is
     /// inverted (its neighbours' offsets crossed over it; `TrimmedEdge`), which
     /// `resolve_crossing_loops` resolves when they have one loop.
     pub(super) inverted_faces: BTreeSet<FaceId>,
     /// Not upstream (WR-344 refinement, tangency-labs/solidcore#1795): the original edge
     /// uses whose edge `EdgeuseOffset` could not mate (`MateEdges` failed); the merge
-    /// intersects their faces' offsets as upstream does, not taking them as mated (only
-    /// with `Kernel::fixes.offset_extended_edges_mated`).
+    /// intersects their faces' offsets as upstream does, not taking them as mated.
     pub(super) unmated_edgeuses: BTreeSet<EdgeuseId>,
     /// The faces of a local operation and the surfaces replacing theirs, in step (the
     /// part of `SmLocalOperationGeometryCreation` the executive reads: `m_vFaces`,
@@ -304,6 +309,7 @@ impl OffsetExecutive {
             kept_edgeuses: BTreeSet::new(),
             crossing_edgeuses: BTreeSet::new(),
             collapsed_faces: Vec::new(),
+            collapsed_displacements: Vec::new(),
             inverted_faces: BTreeSet::new(),
             unmated_edgeuses: BTreeSet::new(),
             local_faces: Vec::new(),
@@ -835,8 +841,17 @@ impl OffsetExecutive {
     /// [`super::reach::extended_by_margin`], which the local reach's ball check builds too): a plane,
     /// cone, sphere or torus as itself, a ball patch with its pole (a side collapsed to a
     /// point) as a ball patch on the same sphere (one without a pole takes the generic ruled
-    /// extension), a procedural blend by its definition, an offset surface as the offset of
-    /// its base extended. A hit never re-extends or replaces the cached surface.
+    /// extension), an offset surface as the offset of its base extended. A hit never
+    /// re-extends or replaces the cached surface.
+    ///
+    /// A procedural blend is extended as its net, the B-spline the face's surface is (its
+    /// definition is the certificate's, within its bound of the net): the margin runs past
+    /// where the definition holds. Along the spine the definition is
+    /// continued only while each foot stays on its support, and a round's supports end with
+    /// the face; across, its bound grows by the closed-form Chebyshev factor of the span
+    /// continued (`surface::extend::blend`). A margin is a ruled piece of surface for the
+    /// neighbours' offsets to meet, which the net continued gives at any distance, as for
+    /// every other spline face (#17373).
     ///
     /// The margin is how far the face's offset must reach past the face for its
     /// neighbours' offsets to meet it ([`Self::original_extension_margin`],
@@ -871,7 +886,20 @@ impl OffsetExecutive {
             std::collections::btree_map::Entry::Vacant(entry) => {
                 // The obsolete offset-specific `else` at cpp:2158 is unreachable:
                 // NER(pBase) already established pOrigSurf == pBase != NULL.
-                let extension = super::reach::extended_by_margin(kernel, base, margin)?;
+                let extension = if margin == 0.0 {
+                    base.clone()
+                } else {
+                    // a blend as its net (above)
+                    let net;
+                    let base = match base.kind() {
+                        SurfaceKind::ProceduralBlend(pb) => {
+                            net = Surface::from(pb.net.clone());
+                            &net
+                        }
+                        _ => base,
+                    };
+                    super::reach::extended_by_margin(kernel, base, margin)?
+                };
                 Ok(entry.insert(extension))
             }
         }
@@ -1939,32 +1967,24 @@ impl OffsetExecutive {
                     }
                     if edge::is_manifold(original, edge_id)? {
                         let primary = required(eu::primary_edgeuse(original, edge_id)?)?;
-                        // Not upstream (WR-344, tangency-labs/solidcore#469), opt-in
-                        // `Kernel::fixes.offset_extended_edges_mated`: see
+                        // Not upstream (WR-344, tangency-labs/solidcore#469): see
                         // `relates_mated_offsets`.
-                        let flag = kernel.fixes.offset_extended_edges_mated;
-                        let unmated = flag
-                            && edge::edgeuses(original, edge_id, None, None)?
-                                .iter()
-                                .any(|eu| self.unmated_edgeuses.contains(eu));
+                        let unmated = edge::edgeuses(original, edge_id, None, None)?
+                            .iter()
+                            .any(|eu| self.unmated_edgeuses.contains(eu));
                         // (not upstream: a kept edge's offsets keep their own curves)
                         let kept = self.kept_edges.contains(&edge_id);
                         if kept
-                            || relates_mated_offsets(
-                                flag,
-                                self.extend_convex_edges(),
-                                unmated,
-                                || {
-                                    eu2::is_tangent_sector(
-                                        kernel,
-                                        original,
-                                        primary,
-                                        self.tangency_tol_degrees(),
-                                        false,
-                                        true,
-                                    )
-                                },
-                            )?
+                            || relates_mated_offsets(self.extend_convex_edges(), unmated, || {
+                                eu2::is_tangent_sector(
+                                    kernel,
+                                    original,
+                                    primary,
+                                    self.tangency_tol_degrees(),
+                                    false,
+                                    true,
+                                )
+                            })?
                         {
                             for edgeuse in edge::edgeuses(original, edge_id, None, None)? {
                                 if eu::faceuse(original, edgeuse)? == Some(faceuse) {
@@ -2950,24 +2970,22 @@ fn offset_env<'a>(
 /// `IsTangentSector` of the edge's primary edge use, evaluated only when needed.
 ///
 /// Upstream relates a tangent sector only. Not upstream (WR-344, tangency-labs/solidcore#469;
-/// the fork's tangency-labs/smlib@85bbfaf), opt-in `flag`
-/// (`Kernel::fixes.offset_extended_edges_mated`): with `extend_convex` (extended convex
-/// edges) every such edge had its faces' offsets mated along it (`EdgeuseOffset`), so it is
-/// related without the tangency test, as the fork's `||` does. Under the same flag an edge
-/// whose mate failed in `EdgeuseOffset` (`unmated`; #1795: the offsets stop meeting round a
-/// closed edge) is related in neither case, tangent sector or not, and its faces' offsets are
-/// intersected as any other pair's (the fork's tangency-labs/smlib@9d8ace9:
+/// the fork's tangency-labs/smlib@85bbfaf): with `extend_convex` (extended convex edges)
+/// every such edge had its faces' offsets mated along it (`EdgeuseOffset`), so it is
+/// related without the tangency test, as the fork's `||` does. An edge whose mate failed
+/// in `EdgeuseOffset` (`unmated`; #1795: the offsets stop meeting round a closed edge) is
+/// related in neither case, tangent sector or not, and its faces' offsets are intersected
+/// as any other pair's (the fork's tangency-labs/smlib@9d8ace9:
 /// `!m_sUnmatedEdges.IsIn(pE) && (m_bExtendConvexEdges || IsTangentSector(..))`).
 fn relates_mated_offsets(
-    flag: bool,
     extend_convex: bool,
     unmated: bool,
     tangent_sector: impl FnOnce() -> Result<bool>,
 ) -> Result<bool> {
-    if flag && unmated {
+    if unmated {
         return Ok(false);
     }
-    if flag && extend_convex {
+    if extend_convex {
         return Ok(true);
     }
     tangent_sector()
@@ -3432,36 +3450,26 @@ mod tests {
     use crate::topology::{Edge, Edgeuse, Face, Faceuse, ShellId, Vertex, Vertexuse};
 
     /// The fork's tangency-labs/smlib@9d8ace9 (tangency-labs/solidcore#1795, WR-344):
-    /// under `offset_extended_edges_mated` an edge whose mate failed is left out of the
-    /// merge's no-SSI pairs in the tangent-sector branch too, not only the extended
-    /// convex one. A tangent sector whose mate failed is intersected; with the flag off
-    /// the tangency test alone decides, as upstream.
+    /// an edge whose mate failed is left out of the merge's no-SSI pairs in the
+    /// tangent-sector branch too, not only the extended convex one. A tangent sector whose
+    /// mate failed is intersected.
     #[test]
     fn fork_9d8ace9_unmated_tangent_sector_is_intersected() {
         let tangent = || Ok(true);
         let not_tangent = || Ok(false);
         // the fork's fix: an unmated edge is related in neither branch
         for extend_convex in [false, true] {
-            assert!(!relates_mated_offsets(true, extend_convex, true, tangent).unwrap());
-            assert!(!relates_mated_offsets(true, extend_convex, true, not_tangent).unwrap());
+            assert!(!relates_mated_offsets(extend_convex, true, tangent).unwrap());
+            assert!(!relates_mated_offsets(extend_convex, true, not_tangent).unwrap());
         }
         // a mated edge: related with extended convex edges, else when tangent
-        assert!(relates_mated_offsets(true, true, false, not_tangent).unwrap());
-        assert!(relates_mated_offsets(true, false, false, tangent).unwrap());
-        assert!(!relates_mated_offsets(true, false, false, not_tangent).unwrap());
-        // flag off (upstream): the tangency test alone, whatever the mate did
-        for extend_convex in [false, true] {
-            for unmated in [false, true] {
-                assert!(relates_mated_offsets(false, extend_convex, unmated, tangent).unwrap());
-                assert!(
-                    !relates_mated_offsets(false, extend_convex, unmated, not_tangent).unwrap()
-                );
-            }
-        }
+        assert!(relates_mated_offsets(true, false, not_tangent).unwrap());
+        assert!(relates_mated_offsets(false, false, tangent).unwrap());
+        assert!(!relates_mated_offsets(false, false, not_tangent).unwrap());
         // the tangency test is not evaluated where the fork short-circuits it
         let unreachable = || -> Result<bool> { Err(SolidError::sm_err("test: not evaluated")) };
-        assert!(!relates_mated_offsets(true, true, true, unreachable).unwrap());
-        assert!(relates_mated_offsets(true, true, false, unreachable).unwrap());
+        assert!(!relates_mated_offsets(true, true, unreachable).unwrap());
+        assert!(relates_mated_offsets(true, false, unreachable).unwrap());
     }
 
     /// Runs `run` with empty notification stores keyed by arena identity.
@@ -4094,6 +4102,52 @@ mod tests {
             7.0
         );
         assert_eq!(executive.extended_surfaces.len(), 2);
+    }
+
+    /// A round's margin is its net continued, past where its definition holds (#17373).
+    /// The round's spine runs x = 0 to 10 and its supports x = 0 to 20, so its definition
+    /// continued 15 before x = 0 leaves both supports and is refused; the margin of 15 is
+    /// the net extended ruled on every side, the net itself over the face and its straight
+    /// spine continued 15 past each end.
+    #[test]
+    fn a_rounds_margin_is_its_net_continued_past_its_supports() {
+        let (kernel, pb) = crate::surface::extend::tests::round_blend(1, true);
+        let round = Surface::from(pb);
+        let margin = 15.0;
+        assert!(round
+            .extended_sides_keeping_parameters(&kernel, &BoxSide::ALL, Continuity::Ruled, margin)
+            .is_err());
+        let mut executive = executive();
+        let made = executive
+            .get_create_extended_surface(&kernel, 7, &round, margin)
+            .unwrap()
+            .clone();
+        assert!(
+            matches!(made.kind(), SurfaceKind::BSpline(_)),
+            "{:?}",
+            made.kind()
+        );
+        let face = round.natural_uv_domain_with_nurb(&kernel).unwrap();
+        let grown = made.natural_uv_domain_with_nurb(&kernel).unwrap();
+        assert!(
+            grown.min().x < face.min().x
+                && grown.max().x > face.max().x
+                && grown.min().y < face.min().y
+                && grown.max().y > face.max().y,
+            "{face:?} {grown:?}"
+        );
+        for i in 0..=4 {
+            for j in 0..=4 {
+                let uv = face.evaluate(f64::from(i) / 4.0, f64::from(j) / 4.0);
+                let a = made.evaluate_point(&kernel, uv).unwrap();
+                let b = round.evaluate_point(&kernel, uv).unwrap();
+                assert!(a.distance(b) <= 1e-9, "{uv:?}: {a:?} {b:?}");
+            }
+        }
+        let mid = 0.5 * (face.min().y + face.max().y);
+        let end = |u: f64| made.evaluate_point(&kernel, Vec2::new(u, mid)).unwrap().x;
+        assert!(end(grown.max().x) >= 25.0 - 1e-6, "{}", end(grown.max().x));
+        assert!(end(grown.min().x) <= -15.0 + 1e-6, "{}", end(grown.min().x));
     }
 
     #[test]

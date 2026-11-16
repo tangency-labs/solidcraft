@@ -32,7 +32,7 @@ use solidcore::topology::{edge, loopuse};
 use solidcore::{EdgeId, FaceId, Point2, Vec3};
 use solidcore_record::brep::Brep as Record;
 
-use solidcore_ops::sweep::{extrude, Curve, DraftCorner};
+use solidcore_ops::sweep::{extrude, Curve, DraftCorner, SweepFrame};
 use solidcore_ops::{
     blend, blend_ordered, chamfer_sides, edge_faces_along, fillet_variable, make_box, make_cone,
     make_cylinder, tangent_chain, Blend, BlendOptions, Body, ChamferSecond, CheckLevel, Corners,
@@ -1470,6 +1470,70 @@ fn a_round_too_small_to_change_the_part_is_refused() {
     assert!(volume(&b) < before);
 }
 
+/// #17511: a round of 8 on a quarter circle of radius 10 that meets a straight side 16.7
+/// degrees off tangent. On the top, the round of the arc touches the circle of radius 2 about
+/// the arc's centre and the round of the side touches the line 8 in from it; they cross twice,
+/// 2.4 apart, and the corner is where the arc's own round meets the side's: on the arc's side of
+/// its end. The arc is shorter than twice the radius, so a guess measured along the edges lies
+/// near the arc's far end, and the solve found the other crossing, a ball past the arc's end,
+/// whose mitre with the side's round did not reach it. The crossing nearest the vertex builds.
+#[test]
+fn a_round_on_an_arc_shorter_than_its_diameter_meets_the_next_side_at_its_own_crossing() {
+    all_fixes();
+    let b = swept(
+        &[
+            segment((0.0, 0.0), (30.0, 0.0)),
+            segment((30.0, 0.0), (30.0, 20.0)),
+            arc_deg((20.0, 20.0), 10.0, 0.0, 90.0),
+            segment((20.0, 30.0), (0.0, 24.0)),
+            segment((0.0, 24.0), (0.0, 0.0)),
+        ],
+        10.0,
+    );
+    let half = 0.5_f64.sqrt() * 10.0;
+    let edges = [
+        edge_at(&b, [15.0, 0.0, 10.0]),
+        edge_at(&b, [30.0, 10.0, 10.0]),
+        edge_at(&b, [20.0 + half, 20.0 + half, 10.0]),
+        edge_at(&b, [10.0, 27.0, 10.0]),
+        edge_at(&b, [0.0, 12.0, 10.0]),
+    ];
+    let before = volume(&b);
+    blend(&b, Blend::Round, &edges, &[8.0], &[], Corners::Filled).unwrap();
+    assert!(volume(&b) < before);
+    assert!(b.check(CheckLevel::All).unwrap().is_valid());
+    // the side's unit direction from the arc's end and its normal into the part
+    let len = 436.0_f64.sqrt();
+    let (t, n) = ((-20.0 / len, -6.0 / len), (6.0 / len, -20.0 / len));
+    // the round's contact circle about (20, 20) meets the side's contact line 8 in from it
+    let h = 8.0 - 200.0 / len;
+    let w = (4.0 - h * h).sqrt();
+    let crossing = |sign: f64| {
+        [
+            20.0 + h * n.0 + sign * w * t.0,
+            20.0 + h * n.1 + sign * w * t.1,
+            10.0,
+        ]
+    };
+    let nearest = |p: [f64; 3]| {
+        let (_, brep) = kernel_copy(&b);
+        brep.vertex_list()
+            .iter()
+            .map(|&v| {
+                let q = solidcore::query::api_queries::vertex_get_point(&brep, v).unwrap();
+                ((q.x - p[0]).powi(2) + (q.y - p[1]).powi(2) + (q.z - p[2]).powi(2)).sqrt()
+            })
+            .fold(f64::INFINITY, f64::min)
+    };
+    // on the arc's side of its end (x > 20): a vertex; past it: none
+    assert!(
+        nearest(crossing(-1.0)) < 1e-6,
+        "{}",
+        nearest(crossing(-1.0))
+    );
+    assert!(nearest(crossing(1.0)) > 1.0, "{}", nearest(crossing(1.0)));
+}
+
 /// solidcore#2250's box: 40 x 30 x 20, its top back edge chamfered 5 (V0 23500); A, the
 /// chamfer's top edge (a 135 degree wedge), and B, the bottom front edge (90 degrees), rounded
 /// curvature-continuously r 2 in one call, in either order. Each round takes off its own ball's
@@ -2748,6 +2812,74 @@ fn a_round_on_a_revolved_torus_end_edge_survives_reload() {
     }
 }
 
+/// A closed section in the plane x = `x` about (0, 20): 12 cubic Bezier pieces through the
+/// points of the circle of radius `r` at every 30 degrees from `phase`. The end tangents
+/// are the circle's, a third of the piece's chord long, times `1 + skew` after every third
+/// joint from the first and `1 - skew` before it, and the reverse at the joint after: two
+/// pieces join with one tangent direction, at speeds `skew` apart.
+fn bezier_circle(x: f64, r: f64, phase: f64, skew: f64) -> Vec<Curve> {
+    let at = |i: u32| {
+        let t = phase + std::f64::consts::TAU * f64::from(i % 12) / 12.0;
+        let sign = match i % 3 {
+            1 => 1.0,
+            2 => -1.0,
+            _ => 0.0,
+        };
+        (
+            Vec3::new(x, r * t.sin(), 20.0 - r * t.cos()),
+            Vec3::new(0.0, t.cos(), t.sin()),
+            skew * sign,
+        )
+    };
+    (0..12)
+        .map(|i| {
+            let ((p0, t0, k0), (p3, t3, k3)) = (at(i), at(i + 1));
+            let third = p0.distance(p3) / 3.0;
+            let p1 = p0 + t0 * (third * (1.0 + k0));
+            let p2 = p3 - t3 * (third * (1.0 - k3));
+            Curve::Nurbs {
+                degree: 3,
+                points: [p0, p1, p2, p3].map(|p| [p.x, p.y, p.z, 1.0]).to_vec(),
+                knots: vec![0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0],
+            }
+        })
+        .collect()
+}
+
+/// A round on the end rim of a ruled loft whose one side face is G1 only to about 1e-10
+/// rad at its knot lines (tangency-labs/solidcraft#15858). The loft runs from a circle of
+/// radius 15 to one of radius 20 turned 0.01 rad, each 12 Bezier pieces that join with one
+/// tangent direction. The first circle's pieces join at equal speeds and the second's at
+/// speeds 1e-7 apart, and the two sections' tangents at a joint are 0.01 rad apart, so the
+/// ruled face's derivative along the section, `(1 - u) a0 T0 + u a1 T1` before a joint and
+/// `(1 - u) b0 T0 + u b1 T1` after it, turns the face's normal there. The round's stations
+/// on those lines were solved on the pieces after and before them, a jump apart, and the
+/// round did not close on itself (`NotSolid`; with the issue's own sections, where the jump
+/// is 4e-10 rad, a station's feet did not converge).
+///
+/// The round must build. What it removes is the cone's round: the section between the end
+/// plane and a wall 85.236 degrees from it (the wall leans atan(5 / 60)),
+/// `r^2 (cot(alpha / 2) - (pi - alpha) / 2)` = 1.0393 for r = 2, swept round at its
+/// centroid's radius, 19.46: 127.1.
+#[test]
+fn a_round_runs_over_knot_lines_where_a_loft_face_s_normal_turns() {
+    all_fixes();
+    let sections = [
+        bezier_circle(-30.0, 15.0, 0.0, 0.0),
+        bezier_circle(30.0, 20.0, 0.01, 1.0e-7),
+    ];
+    let b = solidcore_ops::sweep::loft(&sections, 1, true).unwrap();
+    let before = volume(&b);
+    let rim = edge_at(
+        &b,
+        [30.0, 20.0 * f64::sin(0.01), 20.0 - 20.0 * f64::cos(0.01)],
+    );
+    let made = blend(&b, Blend::Round, &[rim], &[2.0], &[], Corners::Filled).unwrap();
+    assert_eq!(made.dropped, vec![false]);
+    let removed = before - volume(&b);
+    assert!((removed - 127.1).abs() < 1.0, "removed {removed}");
+}
+
 /// The plate of [`shallow_corner_plate`] drafted `draft` degrees in (its walls meet the cap at
 /// z = 0, its outline, at 90 - `draft` degrees), with the record indices of the two edges of
 /// that cap at the kink.
@@ -3167,6 +3299,57 @@ fn a_rim_round_across_a_loft_s_creases_is_certified_or_refused() {
             "{e:?}"
         ),
     }
+}
+
+/// SolidCraft #17263: a 12.2 x 2.2 bar swept along an arc with its orientation kept (the arc from
+/// (0, 0, 0) to (30, 0, 0) about (15, 0, 330), dipping to z = 330 - R at its middle, R = hypot(15,
+/// 330)), its lower long edge at y = 0 rounded at 0.2. The faces beside the edge are 2.2 and 12.2
+/// wide; the round was refused as cutting the part in pieces, naming about 0.07, because the middle
+/// of a section's arc, inside the material, was classified as lying outside the part. Past that,
+/// the round (a torus about the arc's axis) took its section from the solver's first one, which
+/// lies past the edge's end on the lower face's ruled extension, 5.5e-6 off the half-plane through
+/// the axis: the revolution failed its own check and the result was refused as no solid. It builds.
+/// The bar is 12.2 x 2.2 x 30 (each section x = const is the profile moved). The round takes off
+/// its corner section A = (1 - pi/4) r^2, whose centroid lies d = r (10 - 3 pi) / (12 - 3 pi)
+/// inside the lower face, swept about the arc's axis through its angle theta (Pappus), and at each
+/// end the wedge between the upright end face and the radial plane through the edge's end, A 15 d /
+/// 330.
+#[test]
+fn a_round_on_a_bar_swept_along_a_wide_arc_is_not_refused_as_cutting_the_part() {
+    all_fixes();
+    let (c, r, w, h) = (330.0_f64, 0.2, 12.2, 2.2);
+    let big = 15.0_f64.hypot(c);
+    let theta = 2.0 * (15.0 / big).asin();
+    let line = |a: [f64; 3], b: [f64; 3]| Curve::Line { start: a, end: b };
+    let profile = [
+        line([0.0, 0.0, 0.0], [0.0, 0.0, h]),
+        line([0.0, 0.0, h], [0.0, w, h]),
+        line([0.0, w, h], [0.0, w, 0.0]),
+        line([0.0, w, 0.0], [0.0, 0.0, 0.0]),
+    ];
+    let path = [Curve::Arc {
+        center: [15.0, 0.0, c],
+        axis: [0.0, -1.0, 0.0],
+        reference: [-15.0 / big, 0.0, -c / big],
+        radius: big,
+        start: 0.0,
+        end: theta,
+    }];
+    let (b, _, _) =
+        solidcore_ops::sweep::sweep_placed(&profile, &path, SweepFrame::Translate, true).unwrap();
+    assert!(rel(volume(&b), w * h * 30.0) < 1e-9, "{}", volume(&b));
+    let e = edge_at(&b, [15.0, 0.0, c - big]);
+    // `blend` rounds `b` in place (its result names the faces it made, not a new body)
+    let made = blend(&b, Blend::Round, &[e], &[r], &[], Corners::Filled).unwrap();
+    assert!(!made.made.is_empty());
+    let area = (1.0 - PI / 4.0) * r * r;
+    let d = r * (10.0 - 3.0 * PI) / (12.0 - 3.0 * PI);
+    let want = w * h * 30.0 - area * (big - d) * theta - 2.0 * area * 15.0 * d / c;
+    assert!(
+        (volume(&b) - want).abs() < 1e-6,
+        "{} (want {want})",
+        volume(&b)
+    );
 }
 
 /// #17016: the round at the foot of a cylinder boss (radius 6 about the z axis, from z = 25)

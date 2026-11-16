@@ -316,13 +316,13 @@ pub(crate) fn shared_presentation(app: &SolveApp) -> Option<crate::panel_runtime
     let _language = solidcraft_ui_text::scope(&app.preferences.language);
     let world = crate::open_meshing::session_world(&app.session);
     let sketch = world.sketch(app.session.active_sketch?)?;
-    let solved = sketch.report.ok();
+    let solved = sketch.report.shown_ok();
     let title =
         if sketch.name.trim().is_empty() || sketch.name.len() > 256 { app.tr("ui.palette_sketch_options").to_owned() } else { sketch.name.clone() };
     Some(crate::panel_runtime::PanelPresentation {
         title,
         icon: "sketch".into(),
-        status: Some(constraint_status(sketch.report.dof, solved, has_geometry(&sketch.sketch))),
+        status: Some(constraint_status(sketch.report.shown_dof(), solved, has_geometry(&sketch.sketch))),
         attention: !solved,
         actions: Vec::new(),
     })
@@ -336,8 +336,8 @@ pub(crate) fn shared_body(app: &mut SolveApp, ui: &mut egui::Ui) {
         let Some(ss) = app.session.active_sketch.and_then(|s| st.sketch(s)) else { return };
         (
             ss.sketch.view.clone(),
-            ss.report.dof,
-            ss.report.ok(),
+            ss.report.shown_dof(),
+            ss.report.shown_ok(),
             unconstrained_total(&ss.sketch),
             has_geometry(&ss.sketch),
             ss.ends.open.len(),
