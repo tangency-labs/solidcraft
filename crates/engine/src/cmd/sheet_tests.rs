@@ -2470,12 +2470,11 @@ fn measure_counts_round_holes_through_unfold_and_refold() {
             if holes == 0 {
                 blank_volumes[stage_index] = measured_volume;
             }
-            // A hole adds one wall and two circular rims, with one vertex on each rim.
-            // The flat extrusion also keeps each whole cylinder's seam.
+            // A hole adds one whole cylindrical wall: two circular rims, one vertex on each,
+            // and the wall's seam, folded or flat.
             // The folded blank extrudes an eight-segment L-section: ten faces, 24 edges, 16 vertices.
             let blank = if stage == "unfolded" { [6, 12, 8] } else { [10, 24, 16] };
-            let edges_per_hole = if stage == "unfolded" { 3 } else { 2 };
-            assert_eq!(counts, [blank[0] + holes, blank[1] + edges_per_hole * holes, blank[2] + 2 * holes], "{holes} holes, {stage}: {body}");
+            assert_eq!(counts, [blank[0] + holes, blank[1] + 3 * holes, blank[2] + 2 * holes], "{holes} holes, {stage}: {body}");
             assert_eq!(body["face_types"].as_object().unwrap().values().map(|n| n.as_u64().unwrap()).sum::<u64>(), counts[0]);
             assert_eq!(body["sheet_metal"], true);
             for (key, count) in ["faces", "edges", "vertices"].into_iter().zip(counts) {
@@ -2489,6 +2488,56 @@ fn measure_counts_round_holes_through_unfold_and_refold() {
 fn faces(s: &mut Session) -> (u64, u64) {
     let body = run(s, "inspect.measure", json!({}))["bodies"][0].clone();
     (body["faces"].as_u64().unwrap(), body["face_types"]["cylinder"].as_u64().unwrap_or(0))
+}
+
+#[test]
+fn round_sheet_hole_has_one_wall_and_chamfers_to_one_cone() {
+    use solidcore_record::brep::Surface;
+
+    for cut in [false, true] {
+        let mut s = Session::default();
+        run(&mut s, "sheet.manage_rules", json!({"name":"SM3","thickness":3,"bend_radius":4,"k_factor":0.4,"active":true}));
+        run(&mut s, "sketch.create", json!({"plane":"XY","name":"Blank"}));
+        run(&mut s, "sketch.rectangle.two_point", json!({"p0":[0,0],"p1":[100,60]}));
+        if !cut {
+            run(&mut s, "sketch.circle.center", json!({"center":[50,30],"radius":5}));
+        }
+        run(&mut s, "sketch.finish", json!({}));
+        run(&mut s, "sheet.flange", json!({"sketch":"Blank","profiles":[{"point":[10,10]}]}));
+        if cut {
+            circle_sketch(&mut s, "Hole", json!("XY"), [50.0, 30.0], 10.0);
+            run(&mut s, "solid.extrude", json!({"sketch":"Hole","through_all":true,"direction":"symmetric","operation":"cut"}));
+        }
+        let body = &s.model.state().bodies[0].body;
+        assert_eq!(body.face_count(), 7, "cut={cut}");
+        assert_eq!(body.edge_count(), 15, "two circular rims and one seam");
+        assert_eq!(body.record().faces.iter().filter(|f| matches!(f.surface, Surface::Cylinder { .. })).count(), 1);
+        let expected = (100.0 * 60.0 - PI * 25.0) * 3.0;
+        assert!((volume(&mut s) - expected).abs() < 0.01);
+        assert_eq!(faces(&mut s), (7, 1));
+        run(&mut s, "solid.chamfer", json!({"edges":[[53.53553390593274,33.53553390593274,3]],"distance":1.5,"tangent_chain":false}));
+        let body = &s.model.state().bodies[0].body;
+        assert_eq!(body.face_count(), 8, "cut={cut}");
+        assert_eq!(body.record().faces.iter().filter(|f| matches!(f.surface, Surface::Cylinder { .. })).count(), 1);
+        assert_eq!(body.record().faces.iter().filter(|f| matches!(f.surface, Surface::Cone { .. })).count(), 1);
+        let removed = PI * (5.0 * 1.5_f64.powi(2) + 1.5_f64.powi(3) / 3.0);
+        assert!((volume(&mut s) - (expected - removed)).abs() < 0.01);
+        assert_eq!(faces(&mut s), (8, 1));
+    }
+}
+
+#[test]
+fn round_sheet_blank_has_one_rim_face() {
+    use solidcore_record::brep::Surface;
+
+    let mut s = Session::default();
+    circle_sketch(&mut s, "Disc", json!("XY"), [0.0, 0.0], 20.0);
+    run(&mut s, "sheet.flange", json!({"sketch":"Disc"}));
+    let body = &s.model.state().bodies[0].body;
+    assert_eq!(body.face_count(), 3);
+    assert_eq!(body.edge_count(), 3, "two circular rims and one seam");
+    assert_eq!(body.record().faces.iter().filter(|f| matches!(f.surface, Surface::Cylinder { .. })).count(), 1);
+    assert!((volume(&mut s) - PI * 100.0 * 2.5).abs() < 0.01);
 }
 
 #[test]
@@ -5558,15 +5607,15 @@ fn a_hole_on_a_folded_panel_keeps_the_name_of_its_sketch_circle() {
     let curve = circle["curves"][0].as_str().unwrap_or("c1").to_string();
     run(&mut s, "sketch.finish", json!({}));
     run(&mut s, "solid.extrude", json!({"sketch": "Hole", "through_all": true, "operation": "cut", "direction": "symmetric"}));
-    let side = format!(":side:{curve}#");
+    let side = format!(":side:{curve}");
     let flat = hole_face_names(&mut s);
-    assert_eq!(flat.len(), 2, "{flat:?}");
+    assert_eq!(flat.len(), 1, "{flat:?}");
     assert!(flat.iter().all(|n| n.contains(&side)), "before the fold: {flat:?}");
     fold_line(&mut s);
     run(&mut s, "sheet.fold", json!({"sketch": "FoldLine", "curve": "fl"}));
     assert!(bbox(&mut s)["max"][2].as_f64().unwrap_or(0.0) > 20.0, "the hole's panel stands up");
     let folded = hole_face_names(&mut s);
-    assert_eq!(folded.len(), 2, "{folded:?}");
+    assert_eq!(folded.len(), 1, "{folded:?}");
     assert!(folded.iter().all(|n| n.contains(&side)), "after the fold the hole is still circle {curve}: {folded:?} (before: {flat:?})");
 }
 

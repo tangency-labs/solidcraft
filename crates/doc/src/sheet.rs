@@ -1271,6 +1271,45 @@ enum Piece {
     Zone(usize),
 }
 
+/// Neighbouring arcs of one circle in a loop as one arc: the region boolean leaves a curve cut
+/// where its circle started (two round holes run into a slot), and an arc's wall is one face, as
+/// the outline draws it, including a whole circle with one seam.
+fn joined_arcs(segs: &[Seg2]) -> Vec<Seg2> {
+    let join = |x: &Seg2, y: &Seg2| match (*x, *y) {
+        (Seg2::Arc { center, radius, start, sweep }, Seg2::Arc { center: c1, radius: r1, sweep: s1, .. })
+            if center.dist(c1) < LINEAR_TOL
+                && (radius - r1).abs() < LINEAR_TOL
+                && sweep * s1 > 0.0
+                && (sweep + s1).abs() <= std::f64::consts::TAU + 1e-9
+                && x.end().dist(y.start()) < LINEAR_TOL =>
+        {
+            Some(Seg2::Arc { center, radius, start, sweep: sweep + s1 })
+        }
+        _ => None,
+    };
+    let mut out: Vec<Seg2> = Vec::with_capacity(segs.len());
+    for s in segs {
+        match out.last().and_then(|last| join(last, s)) {
+            Some(j) => {
+                if let Some(last) = out.last_mut() {
+                    *last = j;
+                }
+            }
+            None => out.push(*s),
+        }
+    }
+    // The loop's last arc runs on into its first.
+    if out.len() > 1
+        && let Some(j) = out.last().zip(out.first()).and_then(|(l, f)| join(l, f))
+    {
+        out.pop();
+        if let Some(first) = out.first_mut() {
+            *first = j;
+        }
+    }
+    out
+}
+
 /// A flat piece of the sheet (counter-clockwise outer loop, clockwise holes).
 #[derive(Clone, Debug)]
 struct Cell {
@@ -2348,6 +2387,11 @@ impl SheetBody {
         let (pa, pb) = (self.map3(piece, a, z), self.map3(piece, b, z));
         match (piece, e) {
             (Piece::Panel(_), Seg2::Line { .. }) => Ok(EdgeSpec::Line { a: pa, b: pb }),
+            (Piece::Panel(_), Seg2::Arc { center, sweep, .. }) if (sweep.abs() - std::f64::consts::TAU).abs() < 1e-9 => {
+                let center = self.map3(piece, *center, z);
+                let normal = (self.map3(piece, a, z + 1.0) - pa) * sweep.signum();
+                Ok(EdgeSpec::Circle { center, normal, start: pa })
+            }
             (Piece::Panel(_), Seg2::Arc { .. }) => Ok(EdgeSpec::Arc { a: pa, b: pb, mid: self.map3(piece, e.point_at(0.5), z) }),
             (Piece::Zone(i), _) => {
                 let f = self.flanges.get(i).ok_or_else(|| DocError::Invalid("bend".into()))?;
@@ -2449,14 +2493,17 @@ impl SheetBody {
         work.charge(edges.saturating_mul(edges).saturating_mul(4))?;
         let corners: Vec<Vec2> = cells.iter().flat_map(|c| c.outer.iter().chain(c.holes.iter().flatten()).map(Seg2::start)).collect();
         let mut split_edges = 0usize;
-        let mut split_loop = |segs: &[Seg2]| -> Result<Vec<Seg2>> {
+        // A flat panel's arcs of one circle are one wall (`joined_arcs`); a bend zone's stay as cut,
+        // since each bends to a curve of its own.
+        let mut split_loop = |segs: &[Seg2], panel: bool| -> Result<Vec<Seg2>> {
             let mut v = Vec::new();
-            for e in segs {
+            let joined = if panel { joined_arcs(segs) } else { segs.to_vec() };
+            for e in &joined {
                 let Seg2::Line { a, b } = *e else {
-                    // A closed curve (a whole circle is one arc, `Loop2::circle`) in its two
-                    // exact halves: a sewn edge runs between two vertices, and an arc's wall is
-                    // the cylinder through its ends and middle.
-                    let halves = if e.start().dist(e.end()) < LINEAR_TOL {
+                    // A closed curve (a whole circle is one arc, `Loop2::circle`) on a bend in its
+                    // two exact halves, each bent to a fitted chain of its own; a panel's circle
+                    // stays one periodic edge with one cylindrical wall.
+                    let halves = if !panel && e.start().dist(e.end()) < LINEAR_TOL {
                         let (h0, h1) = e.split_half();
                         vec![h0, h1]
                     } else {
@@ -2507,8 +2554,9 @@ impl SheetBody {
         };
         let mut split_cells = Vec::new();
         for c in cells {
-            let outer = split_loop(&c.outer)?;
-            let holes = c.holes.iter().map(|h| split_loop(h)).collect::<Result<_>>()?;
+            let panel = matches!(c.piece, Piece::Panel(_));
+            let outer = split_loop(&c.outer, panel)?;
+            let holes = c.holes.iter().map(|h| split_loop(h, panel)).collect::<Result<_>>()?;
             split_cells.push(Cell { piece: c.piece, outer, holes });
         }
         // Reserve the complete adjacency scan before visiting any wall.
@@ -2593,7 +2641,7 @@ impl SheetBody {
                 let outward = (self.map3(c.piece, centre, z + 1.0) - p) * sign;
                 faces.push(FaceSpec { loops: loops(z, rev)?, surface, probe: Some((p, outward)) });
             }
-            // Walls along edges no other cell shares.
+            // Each unshared boundary edge has one wall, including a circle with a seam.
             for e in c.outer.iter().chain(c.holes.iter().flatten()) {
                 if shared(ci, e) {
                     continue;
@@ -2605,7 +2653,10 @@ impl SheetBody {
                 let down_a = EdgeSpec::Line { a: self.map3(c.piece, a, z1), b: self.map3(c.piece, a, z0) };
                 let surface = match (c.piece, e) {
                     (Piece::Panel(_), Seg2::Arc { .. }) => {
-                        let (pa, pb, pm) = (self.map3(c.piece, a, z0), self.map3(c.piece, b, z0), self.map3(c.piece, e.point_at(0.5), z0));
+                        let closed = matches!(bottom, EdgeSpec::Circle { .. });
+                        let pb = self.map3(c.piece, if closed { e.point_at(0.5) } else { b }, z0);
+                        let pm = self.map3(c.piece, e.point_at(if closed { 0.25 } else { 0.5 }), z0);
+                        let pa = self.map3(c.piece, a, z0);
                         SurfSpec::Extruded { a: pa, b: pb, mid: pm, dir: self.map3(c.piece, a, z1) - pa }
                     }
                     // A cut-out wall across a bend at an angle: square to the sheet, so its
@@ -2618,7 +2669,7 @@ impl SheetBody {
                 // face is z1 when the bend turns up and z0 when it turns down.
                 let collapsed = |e: &EdgeSpec| match e {
                     EdgeSpec::Arc { a, b, .. } | EdgeSpec::Line { a, b } => a.dist(*b) < LINEAR_TOL,
-                    EdgeSpec::Chain { .. } => false,
+                    EdgeSpec::Circle { .. } | EdgeSpec::Chain { .. } => false,
                 };
                 let inner_bottom = inner_sharp == Some(z0) && collapsed(&bottom);
                 let inner_top = inner_sharp == Some(z1) && collapsed(&top_ab);
