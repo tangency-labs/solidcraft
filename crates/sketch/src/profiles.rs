@@ -1100,7 +1100,7 @@ fn seg_boxes(s: &Seg2, out: &mut Vec<solidcraft_geom::Aabb2>) {
 }
 
 /// A fingerprint of everything [`island_loops`] reads for a group of curves: their places in
-/// the sketch, ids, kinds, end points and geometry.
+/// the sketch, ids, kinds, whether they are linked, end points and geometry.
 fn fingerprint(sk: &Sketch, curves: &[usize], max_edges: usize) -> u128 {
     use std::hash::{Hash, Hasher};
     let mut h = [std::collections::hash_map::DefaultHasher::new(), std::collections::hash_map::DefaultHasher::new()];
@@ -1116,7 +1116,7 @@ fn fingerprint(sk: &Sketch, curves: &[usize], max_edges: usize) -> u128 {
             put(&|x| (ci, u8::MAX).hash(x));
             continue;
         };
-        put(&|x| (ci, &c.id, c.construction, c.centerline, c.infinite, std::mem::discriminant(&c.kind)).hash(x));
+        put(&|x| (ci, &c.id, c.construction, c.centerline, c.infinite, c.link.is_some(), std::mem::discriminant(&c.kind)).hash(x));
         if let Some((a, b)) = c.kind.ends() {
             put(&|x| {
                 (a, b).hash(x);
@@ -1598,6 +1598,9 @@ fn island_loops(sk: &Sketch, curves: &[usize], max_edges: usize) -> Island {
         node(*a, None);
     }
     let mut loops: Vec<IslandLoop> = Vec::new();
+    // The whole circles that made loops of their own: centre, radius and whether the curve is
+    // linked (a projected edge, an included curve).
+    let mut whole_loops: Vec<(Vec2, f64, bool)> = Vec::new();
     let mut edges: Vec<Edge> = Vec::new();
     for (k, (ci, sh)) in shapes.iter().enumerate() {
         let mut ts = cuts.get(k).cloned().unwrap_or_default();
@@ -1659,6 +1662,15 @@ fn island_loops(sk: &Sketch, curves: &[usize], max_edges: usize) -> Island {
             Shape::Round { c, r, start, sweep } => {
                 let full = sweep >= TAU - 1e-12;
                 if full && ts.is_empty() {
+                    // A circle drawn onto a linked circle (a hole's projected rim) bounds the same
+                    // region: the first of the two in sketch order makes the loop, as where the
+                    // pieces of curves lie on each other ([`without_overlaps`]). Two circles of the
+                    // sketch's own drawn on each other stay a profile each (#10521).
+                    let linked = sk.curves.get(*ci).is_some_and(|c| c.link.is_some());
+                    if whole_loops.iter().any(|&(c2, r2, l2)| (linked || l2) && same_circle(c, r, c2, r2, tol)) {
+                        continue;
+                    }
+                    whole_loops.push((c, r, linked));
                     loops.push(IslandLoop::new(
                         Loop2::circle(c, r),
                         vec![id.clone()],

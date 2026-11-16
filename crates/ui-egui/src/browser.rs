@@ -1013,6 +1013,8 @@ pub(crate) fn present(
         .scroll(scroll)
         .shrink(shrink)
         .events_per_row(true)
+        // Not while the app's own name editor is open: it needs Enter, F2 and the arrows itself.
+        .keyboard(app.preferences.browser_arrow_keys && app.menu.rename.is_none())
         .show(ui, |rows| draw(app, rows, acts));
     app.tree.content.current_mut().browser = state;
     crate::semantic_content::record_drawn(ui, &output);
@@ -3197,7 +3199,9 @@ pub(crate) fn inline_rename(app: &mut SolveApp, ui: &mut egui::Ui, row: NameAt, 
     if escape {
         // Dropping the state cancels the edit.
     } else if commit {
+        // A refused name keeps the editor open, focused with the name selected.
         if crate::context_menu::commit_rename(app, &rename).is_err() {
+            rename.focused = false;
             app.menu.rename = Some(rename);
         }
     } else {

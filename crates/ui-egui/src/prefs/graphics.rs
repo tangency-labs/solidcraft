@@ -303,11 +303,13 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                     ("viewport_section_status", "Section", "prefs.viewport_section_status_help"),
                     ("viewport_status_details", "prefs.graphics_page.live_details", "prefs.viewport_status_details_help"),
                     ("viewport_status_summary", "prefs.graphics_page.fold_items", "prefs.viewport_status_summary_help"),
+                    ("escape_closes_analyses", "prefs.graphics_page.escape_closes", "prefs.escape_closes_analyses_help"),
                 ] {
                     let value = match id {
                         "viewport_analysis_status" => &mut app.preferences.viewport_analysis_status,
                         "viewport_section_status" => &mut app.preferences.viewport_section_status,
                         "viewport_status_details" => &mut app.preferences.viewport_status_details,
+                        "escape_closes_analyses" => &mut app.preferences.escape_closes_analyses,
                         _ => &mut app.preferences.viewport_status_summary,
                     };
                     let response = ui_kit::choice_chip(

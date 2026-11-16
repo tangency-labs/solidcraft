@@ -38,7 +38,7 @@ use crate::blend::fillet_corner::topology::check_tangential_edgeuse_at_vertex;
 use crate::blend::fillet_solver::p5::is_concave_edge;
 use crate::error::{Result, SolidError};
 use crate::kernel::Kernel;
-use crate::math::Vec3;
+use crate::math::{Point3, Vec3};
 use crate::surface::surface::{Surface, SurfaceKind};
 use crate::topology::edgeuse::p1 as eu1;
 use crate::topology::{edge, Brep, EdgeId, EdgeuseId, FaceId, VertexId};
@@ -129,6 +129,181 @@ pub fn classify_roll_over(
         concave,
     }))
 }
+
+/// The End of the second pass's concave chain at V whose rib runs across the cliff's tangent
+/// seam ([`seam_end`]): the chain's corner at V ends on the end face F (the cliff's face the
+/// rail on B1 runs onto across B1's tangent seam), and F meets the wall (the cliff's other
+/// face, past E's rim) along the seam at W, the far end of F's edge on E. The rib runs from
+/// the tangent end on F to the seam at S, then on the wall to the rail's end on the rim.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct SeamEnd {
+    /// W: the far end of the end face's edge on E, where the seam meets E.
+    pub vertex: VertexId,
+    /// W's point.
+    pub at: Point3,
+    /// The wall: the face across the seam from the end face (a plane parallel to B1's axis).
+    pub wall: FaceId,
+    /// S: where the torus crosses the seam's line, the point the rib passes from the end face
+    /// onto the wall.
+    pub split: Point3,
+}
+
+/// Whether the second pass's corner at V (`corner_vertex`) ends across the cliff's tangent
+/// seam, and where: [`SeamEnd`]. `end_face` is F, the face its tangent end's rib lies on
+/// (across B1's tangent seam `tangent_seam` from B1's face), `side_edge` the corner's other
+/// side edge (F's edge on E, from V to W), `r2` the concave round's radius.
+///
+/// The torus is the Roll-over's: B1 a cylinder (axis A1, radius `r1`), E a plane square to
+/// A1, the torus's centre on A1 at `r2` from E on B1's side, major radius `R = r1 + r2`,
+/// minor `r2`. F must be a cylinder along A1 and the wall a plane parallel to A1, meeting F
+/// tangentially at W along the seam (their profiles square to A1 meet G1 at W's profile
+/// point), the seam running on from W away from B1, so that S, on B1's side of W, lies on
+/// the wall's continuation over the seam's line. The torus's rail on E crosses E's rim, not F's edge, exactly where W's distance
+/// `rho` from A1 is less than `R` (the seam inside the rail's circle on E, as
+/// [`geometry::Profile::pieces`] takes it); then S is on the seam's line at the torus's
+/// height `h = sqrt((rho - r1) (R + r2 - rho))` over its centre plane, on E's side. The
+/// decision needs `r1 + tol < rho < R - tol`: within `tol` of the rail through W, or of
+/// B1's rail, `None` (the corner is as before).
+///
+/// `None` wherever the geometry is not this one.
+///
+/// # Errors
+/// Those of the topology walks and the tangency test.
+#[allow(clippy::too_many_arguments)] // the corner's faces, edges, the radius and the tolerance
+pub fn seam_end(
+    k: &Kernel,
+    b: &mut Brep,
+    corner_vertex: VertexId,
+    end_face: FaceId,
+    side_edge: EdgeId,
+    tangent_seam: EdgeId,
+    r2: f64,
+    tol: f64,
+) -> Result<Option<SeamEnd>> {
+    let tol_deg = k.tolerances.ang_tol_deg;
+    let sized = r2 > 0.0 && r2.is_finite() && tol > 0.0 && tol.is_finite();
+    if !sized {
+        return Ok(None);
+    }
+    // B1: the face across the tangent seam from F, a cylinder
+    let seam_faces = edge::faces(b, tangent_seam, None)?;
+    let [f, g] = seam_faces.as_slice() else {
+        return Ok(None);
+    };
+    let b1 = match (*f == end_face, *g == end_face) {
+        (true, false) => *g,
+        (false, true) => *f,
+        _ => return Ok(None),
+    };
+    let cylinder = |f: FaceId| -> Result<Option<(Point3, Vec3, f64)>> {
+        Ok(match b.face(f)?.surface.as_ref().map(Surface::kind) {
+            Some(SurfaceKind::Cone(c)) if c.is_cylinder() => {
+                let place = c.rev().position();
+                Some((place.origin(), place.z_axis(), c.radius(0.0)))
+            }
+            _ => None,
+        })
+    };
+    let (Some((origin, axis, r1)), Some((_, f_axis, _))) = (cylinder(b1)?, cylinder(end_face)?)
+    else {
+        return Ok(None);
+    };
+    let Ok(axis) = axis.unitize() else {
+        return Ok(None);
+    };
+    if !(r1 > tol && r1.is_finite() && f_axis.is_parallel_to(axis, tol_deg)) {
+        return Ok(None);
+    }
+    // E: F's other face along the side edge, a plane square to A1
+    let side_faces = edge::faces(b, side_edge, None)?;
+    let Some(&e_face) = side_faces.iter().find(|&&f| f != end_face) else {
+        return Ok(None);
+    };
+    match plane_normal(b, e_face)? {
+        Some(n) if n.is_parallel_to(axis, tol_deg) => {}
+        _ => return Ok(None),
+    }
+    // W: the side edge's far end
+    let far = if edge::start_vertex(b, side_edge)? == Some(corner_vertex) {
+        edge::end_vertex(b, side_edge)?
+    } else {
+        edge::start_vertex(b, side_edge)?
+    };
+    let Some(w) = far.filter(|&w| w != corner_vertex) else {
+        return Ok(None);
+    };
+    // the seam at W: F against a plane parallel to A1, not E, tangential at W
+    let sin_tol = (tol_deg * (crate::math::PI / 180.0)).sin();
+    let mut wall = None;
+    for x in crate::topology::vertex::edges(b, w, None)? {
+        if x == side_edge || edge::is_closed(b, x)? {
+            continue;
+        }
+        let xf = edge::faces(b, x, None)?;
+        let [f, g] = xf.as_slice() else {
+            continue;
+        };
+        let other = match (*f == end_face, *g == end_face) {
+            (true, false) => *g,
+            (false, true) => *f,
+            _ => continue,
+        };
+        if other == e_face {
+            continue;
+        }
+        let parallel = match plane_normal(b, other)? {
+            Some(n) => n.dot(axis).abs() <= sin_tol * n.length(),
+            None => false,
+        };
+        if parallel && tangential_at(k, b, x, w, tol_deg)? {
+            wall = Some((other, x));
+            break;
+        }
+    }
+    let Some((wall, seam)) = wall else {
+        return Ok(None);
+    };
+    // the torus: towards E is against the tangent seam's direction leaving V (B1 runs away
+    // from E along A1)
+    let away = leaving(k, b, tangent_seam, corner_vertex, OP_SEAM)?;
+    let towards_e = if away.dot(axis) > 0.0 { -axis } else { axis };
+    // the seam runs on from W past E, away from B1: S, on B1's side of W, is then on the
+    // wall's continuation over the seam's line (the extension the End's rib lies on)
+    if leaving(k, b, seam, w, OP_SEAM)?.dot(towards_e) <= 0.0 {
+        return Ok(None);
+    }
+    let at = b.vertex(w)?.point;
+    let on_e = origin + axis * (at - origin).dot(axis);
+    let centre = on_e - towards_e * r2;
+    let radii = crease::Radii { r1, r2 };
+    let Ok(frame) = geometry::TorusFrame::new(centre, towards_e, at - centre, radii) else {
+        return Ok(None);
+    };
+    // W is at height r2 over the centre plane by construction (the centre is W's foot on A1
+    // moved r2 off E, which holds W)
+    let q = frame.local(at);
+    let rho = (q[0] * q[0] + q[1] * q[1]).sqrt();
+    let big_r = r1 + r2;
+    let inside = rho > r1 + tol && rho < big_r - tol;
+    if !inside {
+        return Ok(None);
+    }
+    let h = ((rho - r1) * (big_r + r2 - rho)).sqrt();
+    // on the seam's line through W (parallel to A1), at the torus's height
+    let split = at - towards_e * (r2 - h);
+    let finite = split.x.is_finite() && split.y.is_finite() && split.z.is_finite();
+    if !finite {
+        return Ok(None);
+    }
+    Ok(Some(SeamEnd {
+        vertex: w,
+        at,
+        wall,
+        split,
+    }))
+}
+
+const OP_SEAM: &str = "blend::blend_corner::rollover::seam_end";
 
 /// The unit normal of face `f`'s surface where it is a plane; `None` otherwise.
 fn plane_normal(b: &Brep, f: FaceId) -> Result<Option<Vec3>> {

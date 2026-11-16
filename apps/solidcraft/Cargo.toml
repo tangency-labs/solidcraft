@@ -102,10 +102,10 @@ solidcraft-3dx-client = { workspace = true }
 # The 3D mouse (src/space_mouse.rs), in the shared-device open mode so that a running 3DxWare
 # driver does not shut the app out.
 hidapi = { version = "2.6.7", default-features = false, features = ["macos-shared-device"] }
-# Files opened from Finder and the Dock (src/open_documents.rs), and the fullscreen title-bar
-# inset (src/main.rs); all already come with eframe and rfd.
+# Files opened from Finder and the Dock (src/open_documents.rs), and the full-screen title bar's
+# window (src/main.rs); all already come with eframe and rfd.
 objc2 = "0.6"
-objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSAccessibility", "NSApplication", "NSResponder", "NSWindow", "NSWorkspace"] }
+objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSAccessibility", "NSApplication", "NSButton", "NSControl", "NSResponder", "NSView", "NSWindow", "NSWorkspace"] }
 objc2-foundation = { version = "0.3", default-features = false, features = ["std", "block2", "NSArray", "NSNotification", "NSOperation", "NSProcessInfo", "NSString", "NSURL"] }
 block2 = "0.6"
 # Native crash capture (src/native_crash_macos.rs): the signal handler, the faulting module

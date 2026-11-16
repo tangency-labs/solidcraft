@@ -21,8 +21,7 @@
 //! Not upstream (WR-406, tangency-labs/solidcore#891): a UV trim's turn at its
 //! ends is judged on its face's surface, so the check no longer straightens a
 //! circle's exact trim on a face whose parameters run at different speeds.
-//! Not upstream (WR-446, opt-in `Kernel::fixes.validation_does_not_make_uv_trims`):
-//! `sm_CheckEdgeuseGeometry` evaluates the clockwise neighbour with
+//! Not upstream (WR-446): `sm_CheckEdgeuseGeometry` evaluates the clockwise neighbour with
 //! `ok_to_make_uv_trim_curve = FALSE`, so the `const` validation no longer stores a
 //! new UV trim curve on a neighbour that had none. The 3D evaluation, its drop onto
 //! the existing face and every status are kept.
@@ -1891,20 +1890,11 @@ fn check_edgeuse_geometry(k: &Kernel, b: &mut Brep, eu: EdgeuseId) -> Result<()>
     let cw = required(b.edgeuse(eu)?.cw)?;
     let uv = eu3::normalized_evaluate(k, b, eu, 0.0, true, false, true)?.point;
     // The self UV evaluation above already had a trim. The neighbour evaluation below
-    // can create one (`ok_to_make_uv_trim_curve`), which
-    // `validation_does_not_make_uv_trims` disables (WR-446). These evaluations can
-    // also fail even though the following distance tests only issue warnings in the
-    // release reference.
+    // makes none (`ok_to_make_uv_trim_curve = FALSE`, WR-446; upstream's makes one).
+    // These evaluations can also fail even though the following distance tests only
+    // issue warnings in the release reference.
     eu3::normalized_evaluate(k, b, eu, 0.0, false, false, true)?;
-    eu3::normalized_evaluate(
-        k,
-        b,
-        cw,
-        1.0,
-        true,
-        false,
-        !k.fixes.validation_does_not_make_uv_trims,
-    )?;
+    eu3::normalized_evaluate(k, b, cw, 1.0, true, false, false)?;
     eu3::normalized_evaluate(k, b, cw, 1.0, false, false, true)?;
     let point =
         required(b.face(f)?.surface.as_ref())?.evaluate_point(k, Point2::new(uv.x, uv.y))?;
@@ -2715,10 +2705,9 @@ mod issue_891_tests {
 
     /// WR-446 (`plan/upstream-issues/WR-446--brepconstructor-endshell-validatepointers-makes-uv-trim-curves.md`):
     /// the public `validate_pointers` must not make UV trim curves. [`half_disc`]
-    /// starts with only the arc's exact trim, so the default check evaluates the
-    /// clockwise chord edge use in UV space and creates its trim.
-    /// `fixes.validation_does_not_make_uv_trims` stops that creation while keeping the
-    /// status, the reports and the existing arc trims as they were.
+    /// starts with only the arc's exact trim, so upstream's check evaluates the
+    /// clockwise chord edge use in UV space and creates its trim. The port makes none,
+    /// keeping the status, the reports and the existing arc trims as they were.
     mod wr446_tests {
         use super::*;
 
@@ -2783,9 +2772,8 @@ mod issue_891_tests {
         }
 
         /// One `validate_pointers` run on a fresh [`half_disc`].
-        fn run(no_new: bool) -> Run {
+        fn run() -> Run {
             let mut k = Kernel::default();
-            k.fixes.validation_does_not_make_uv_trims = no_new;
             let mut b = half_disc(&mut k);
             let before = trimmed_edgeuses(&b);
             let arc_before = before
@@ -2825,30 +2813,18 @@ mod issue_891_tests {
                 );
             }
 
-            let made = run(false);
-            let no_new = run(true);
+            let no_new = run();
+            assert_eq!(no_new.status, SUCCESS);
 
-            for r in [&made, &no_new] {
-                assert_eq!(r.status, SUCCESS);
-            }
-
-            // The default check creates at least one UV trim on the chord.
-            assert!(
-                made.after.iter().any(|id| chord.contains(id)),
-                "the default check created no UV trim on the chord"
-            );
-
-            // With the fix no chord trim is made, and nothing present is removed.
+            // No chord trim is made, and nothing present is removed.
             assert_eq!(
                 no_new.before, no_new.after,
-                "the fix created or removed a UV trim"
+                "the check created or removed a UV trim"
             );
             assert!(no_new.after.iter().all(|id| !chord.contains(id)));
 
-            // The new flag leaves the existing arc trims as they are.
-            assert_eq!(made.arc_after, no_new.arc_after);
-            // And it does not change the trims present before the check.
-            assert_eq!(made.arc_before, no_new.arc_before);
+            // The existing arc trims are left as they were.
+            assert_eq!(no_new.arc_before, no_new.arc_after);
         }
 
         /// Provide every edge use's trim through the public evaluator once, as setup.
@@ -2861,9 +2837,8 @@ mod issue_891_tests {
             }
         }
 
-        fn all_present_run(no_new: bool) -> ReversalRun {
+        fn all_present_run() -> ReversalRun {
             let mut k = Kernel::default();
-            k.fixes.validation_does_not_make_uv_trims = no_new;
             let mut b = half_disc(&mut k);
             give_every_edgeuse_a_trim(&k, &mut b);
             let all: Vec<_> = b.edgeuses().iter().map(|(id, _)| id).collect();
@@ -2871,52 +2846,56 @@ mod issue_891_tests {
                 assert!(has_trim(&b, *eu), "edge use {eu:?} has no trim");
             }
             let raw_before = trimmed_edgeuses(&b);
+            let geometry_before: Vec<_> = raw_before
+                .iter()
+                .map(|&eu| (eu, trim_samples(&k, &b, eu)))
+                .collect();
             let mut reports = AssertArray::new();
             let status = validate_pointers(&k, &mut b, Some(&mut reports), 2, true, &key).unwrap();
             assert!(reports.is_empty(), "{:?}", reports.reports());
             let after_ids = trimmed_edgeuses(&b);
             assert_eq!(after_ids, raw_before, "the check changed the stored trims");
-            let after = after_ids
+            let after: Vec<_> = after_ids
                 .iter()
                 .map(|&eu| (eu, trim_samples(&k, &b, eu)))
                 .collect();
+            assert_eq!(
+                after, geometry_before,
+                "the check changed the trim geometry"
+            );
             (status, after_ids, after)
         }
 
-        /// With every edge use already trimmed the flag changes nothing: the check has
-        /// no missing neighbour trim to make, so status, topology and trim geometry
-        /// match.
+        /// With every edge use already trimmed the check has no missing neighbour trim
+        /// to make: it succeeds and keeps the stored trims and their geometry (asserted
+        /// in the run). Two runs give the same status, topology and trim geometry.
         #[test]
         fn wr446_all_trims_present_is_inert() {
-            let (s0, t0, g0) = all_present_run(false);
-            let (s1, t1, g1) = all_present_run(true);
+            let (s0, t0, g0) = all_present_run();
+            let (s1, t1, g1) = all_present_run();
             assert_eq!(s0, SUCCESS);
             assert_eq!(s0, s1);
             assert_eq!(t0, t1);
             assert_eq!(g0, g1);
         }
 
-        /// With no UV trim at all `sm_CheckEdgeuseGeometry` returns at its first test,
-        /// so the flag changes nothing there either.
+        /// With no UV trim at all `sm_CheckEdgeuseGeometry` returns at its first test
+        /// and makes no trim.
         #[test]
         fn wr446_no_trims_is_unchanged() {
-            for no_new in [false, true] {
-                let mut k = Kernel::default();
-                k.fixes.validation_does_not_make_uv_trims = no_new;
-                let mut b = half_disc_without_trims(&mut k);
-                assert!(trimmed_edgeuses(&b).is_empty());
-                let before = b.edgeuses().iter().count();
-                let mut reports = AssertArray::new();
-                let status =
-                    validate_pointers(&k, &mut b, Some(&mut reports), 2, true, &key).unwrap();
-                assert_eq!(status, SUCCESS);
-                assert!(reports.is_empty(), "{:?}", reports.reports());
-                assert!(
-                    trimmed_edgeuses(&b).is_empty(),
-                    "the check made a trim with no witness"
-                );
-                assert_eq!(b.edgeuses().iter().count(), before);
-            }
+            let mut k = Kernel::default();
+            let mut b = half_disc_without_trims(&mut k);
+            assert!(trimmed_edgeuses(&b).is_empty());
+            let before = b.edgeuses().iter().count();
+            let mut reports = AssertArray::new();
+            let status = validate_pointers(&k, &mut b, Some(&mut reports), 2, true, &key).unwrap();
+            assert_eq!(status, SUCCESS);
+            assert!(reports.is_empty(), "{:?}", reports.reports());
+            assert!(
+                trimmed_edgeuses(&b).is_empty(),
+                "the check made a trim with no witness"
+            );
+            assert_eq!(b.edgeuses().iter().count(), before);
         }
     }
 }

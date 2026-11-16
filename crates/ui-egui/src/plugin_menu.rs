@@ -35,8 +35,6 @@ pub(crate) const RIBBON_PREFIX: &str = "plugin_entry:";
 #[derive(Default)]
 pub(crate) struct State {
     pub(crate) open: bool,
-    /// The app bar had no room for the Plugins button this frame: Plugins is a File submenu.
-    pub(crate) in_file_menu: bool,
     /// The pass the menu opened on: that click is not a click elsewhere.
     opened_pass: u64,
     /// The left edge of the Plugins button, where the menu opens.
@@ -509,29 +507,6 @@ pub(crate) fn refresh(app: &mut SolveApp) {
     app.plugin_menu.listed = list(app, app.session.plugin_state.plugins_dir().as_deref());
 }
 
-/// Where the File menu holds the Plugins menu (a narrow app bar): a submenu of the same rows,
-/// their ids under `plugins:`.
-pub(crate) fn file_submenu(app: &SolveApp) -> crate::app_bar::FileRow {
-    use crate::app_bar::FileRow;
-    fn prefixed(rows: Vec<FileRow>) -> Vec<FileRow> {
-        rows.into_iter()
-            .map(|row| match row {
-                FileRow::Item(mut item) => {
-                    item.id = format!("plugins:{}", item.id);
-                    FileRow::Item(item)
-                }
-                FileRow::Button { mut item, tip } => {
-                    item.id = format!("plugins:{}", item.id);
-                    FileRow::Button { item, tip }
-                }
-                FileRow::Sub { label, rows } => FileRow::Sub { label, rows: prefixed(rows) },
-                FileRow::Separator => FileRow::Separator,
-            })
-            .collect()
-    }
-    FileRow::Sub { label: app.tr("ui.plugins").to_owned(), rows: prefixed(rows(app)) }
-}
-
 /// Run the Plugins menu's row `id` (from the menu or the File submenu).
 pub(crate) fn choose(app: &mut SolveApp, id: &str) {
     if id == INSTALL {
@@ -582,6 +557,8 @@ pub(crate) struct EntryDialog {
     pub(crate) error: Option<String>,
     /// A read entry's result, as indented JSON.
     pub(crate) result: Option<String>,
+    /// An importer's extensions: its button chooses the file to open, with these options.
+    pub(crate) opens: Option<Vec<String>>,
 }
 
 /// A run waiting for its reply.
@@ -604,6 +581,7 @@ pub(crate) fn open_entry(app: &mut SolveApp, p: usize, e: usize) {
         return;
     }
     let fields = form(&entry.input_schema);
+    let opens = (entry.kind == solidcraft_engine::plugin::EntryKind::Importer).then(|| entry.extensions.clone());
     let id = app.plugin_menu.next_dialog;
     app.plugin_menu.next_dialog += 1;
     app.plugin_menu.dialogs.push(EntryDialog {
@@ -617,6 +595,7 @@ pub(crate) fn open_entry(app: &mut SolveApp, p: usize, e: usize) {
         running: None,
         error: None,
         result: None,
+        opens,
     });
 }
 
@@ -656,6 +635,24 @@ pub(crate) fn run_dialog(app: &mut SolveApp, id: u64) -> Result<(), String> {
         return Ok(());
     }
     let params = dialog.ready(app)?;
+    // An importer: choose the file, then open it as a new design on the file worker, as File ›
+    // Open does, with the options from this dialog.
+    if let Some(extensions) = dialog.opens.clone() {
+        let format = std::format!("{}.{}", dialog.plugin.id, dialog.entry);
+        app.plugin_menu.dialogs.retain(|d| d.id != id);
+        let extensions: Vec<&str> = extensions.iter().map(String::as_str).collect();
+        app.pick_open_for(&extensions, move |app, path| {
+            let Some(path) = path else { return };
+            let mut request = crate::file_load::Request::new(&path, crate::file_load::Kind::Open);
+            request.plugin_import = true;
+            request.options.insert("format".into(), json!(format));
+            request.options.insert("options".into(), params);
+            if let Err(error) = crate::file_load::begin_request(app, request) {
+                app.set_status(error, true);
+            }
+        });
+        return Ok(());
+    }
     let request = json!({"command":"plugin.run","params":{
         "path": dialog.plugin.path, "approval": dialog.plugin.approval, "entry": dialog.entry, "params": params}});
     let (req, reply) = solidcraft_control::ControlRequest::new("engine.execute", request);
@@ -741,7 +738,8 @@ fn show_dialog(app: &mut SolveApp, ctx: &egui::Context, dialog: &mut EntryDialog
     }
     // Just the command's own title ("Gears"): no plugin or menu name after it.
     let title = dialog.label.clone();
-    let (run_label, close_label) = (app.tr("ui.plugin_dialog_run").to_owned(), app.tr(if dialog.read { "ui.close" } else { "ui.cancel" }).to_owned());
+    let run_key = if dialog.opens.is_some() { "ui.plugin_dialog_choose_file" } else { "ui.plugin_dialog_run" };
+    let (run_label, close_label) = (app.tr(run_key).to_owned(), app.tr(if dialog.read { "ui.close" } else { "ui.cancel" }).to_owned());
     let (closed, action) = ui_kit::Window::new(egui::Id::unique("sc_plugin_entry").with(dialog.id), "prefs_plugins", &title)
         .fields()
         .actions(&run_label, &close_label, None)

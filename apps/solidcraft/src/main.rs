@@ -330,7 +330,7 @@ impl eframe::App for App {
             menu.raw_input_hook(&mut self.solve, ctx, raw);
         }
         #[cfg(target_os = "macos")]
-        macos_fullscreen_content(ctx, raw);
+        macos_fullscreen_title_bar();
         // Before the app's own hook, which adds the control channel's events.
         #[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos"))]
         if let Some(space_mouse) = &mut self.space_mouse {
@@ -635,26 +635,37 @@ fn content_ui(app: &mut SolveApp, ui: &mut egui::Ui) {
     ui.scope_builder(egui::UiBuilder::new().max_rect(content), |ui| app.ui(ui));
 }
 
-/// A transparent macOS title bar still intercepts clicks at the top in fullscreen (#3643).
-/// `contentLayoutRect` reports the whole content view once that bar auto-hides, so reserve
-/// the native titled-window height even then. AppKit supplies the height in logical points;
-/// egui's UI zoom is separate from the display's Retina scale.
+/// macOS full screen: AppKit moves the title bar (the traffic lights) into a window of its own
+/// over the top of the app's window, invisible (alpha 0) until the pointer reaches the top of the
+/// screen, when it slides down over the application bar like any full-screen app's. The bar keeps
+/// its place under it: no strip is reserved, so the bar starts right below the menu bar or the
+/// notch. That invisible window must not take the clicks meant for File, Undo and Redo under it
+/// (#3643): while it is fully transparent it ignores the mouse, and it takes clicks again as soon
+/// as it shows. The pointer moving over it reaches the app then, so the next frame restores it.
 #[cfg(target_os = "macos")]
-fn macos_fullscreen_content(ctx: &egui::Context, raw: &mut egui::RawInput) {
+fn macos_fullscreen_title_bar() {
+    use objc2_app_kit::{NSApplication, NSWindowButton, NSWindowStyleMask};
     let Some(mtm) = objc2::MainThreadMarker::new() else { return };
-    let frame = objc2_app_kit::NSWindow::frameRectForContentRect_styleMask(Default::default(), objc2_app_kit::NSWindowStyleMask::Titled, mtm);
-    fullscreen_content_insets(raw, frame.size.height as f32, ctx.zoom_factor());
+    for window in NSApplication::sharedApplication(mtm).windows().iter() {
+        if !window.styleMask().contains(NSWindowStyleMask::FullScreen) {
+            continue;
+        }
+        // In full screen the close button lives in the title bar's own window.
+        let Some(bar) = window.standardWindowButton(NSWindowButton::CloseButton).and_then(|b| b.window()) else { continue };
+        if bar == window {
+            continue;
+        }
+        let ignore = hidden_title_bar_ignores_clicks(bar.alphaValue());
+        if bar.ignoresMouseEvents() != ignore {
+            bar.setIgnoresMouseEvents(ignore);
+        }
+    }
 }
 
+/// The full-screen title bar's window lets clicks through while it can't be seen.
 #[cfg(any(target_os = "macos", test))]
-fn fullscreen_content_insets(raw: &mut egui::RawInput, title_height: f32, zoom: f32) {
-    let fullscreen = raw.viewports.get(&raw.viewport_id).and_then(|v| v.fullscreen).unwrap_or(false);
-    let mut insets = raw.safe_area_insets.unwrap_or_default();
-    if fullscreen && title_height.is_finite() && title_height > 0.0 && zoom.is_finite() && zoom > 0.0 {
-        insets.0.top = insets.0.top.max(title_height / zoom);
-    }
-    // Explicitly reset on leaving fullscreen: None would retain the preceding frame's inset.
-    raw.safe_area_insets = Some(insets);
+fn hidden_title_bar_ignores_clicks(alpha: f64) -> bool {
+    alpha.is_nan() || alpha <= 0.0
 }
 
 fn services(cc: &eframe::CreationContext<'_>, folder: &DialogFolder) -> Services {
@@ -679,11 +690,21 @@ fn services(cc: &eframe::CreationContext<'_>, folder: &DialogFolder) -> Services
                 dialog = dialog.add_filter(label, &case_variants(first));
             }
             // The groups come from the format registry, so a new format joins this dialog by itself.
-            let mut everything = io::formats::open_extensions(true);
+            // Installed importer plugins read more kinds of file: they join "everything" and add
+            // a group of their own, named after the plugin.
+            let plugins = io::formats::plugin_open_filters();
+            let mut everything: Vec<&str> = io::formats::open_extensions(true);
             everything.extend(["dxf", "svg"]);
+            for (_, exts) in &plugins {
+                everything.extend(exts.iter().map(String::as_str).filter(|e| !io::formats::open_extensions(true).contains(e)));
+            }
             dialog = dialog.add_filter(solidcraft_ui_text::tr("file.open.drawing_filter"), &case_variants(&everything));
             for (label, exts) in io::formats::import_filters(true) {
                 dialog = dialog.add_filter(label, &case_variants(&exts));
+            }
+            for (label, exts) in &plugins {
+                let exts: Vec<&str> = exts.iter().map(String::as_str).collect();
+                dialog = dialog.add_filter(label.as_str(), &case_variants(&exts));
             }
             let future = dialog.add_filter("All files", &["*"]).pick_file();
             let folder = open_folder.clone();
@@ -1004,38 +1025,20 @@ fn graphics_path() -> Option<std::path::PathBuf> {
     settings_dir().ok().flatten().map(|d| d.join("graphics.json"))
 }
 
-/// Compatibility shim (docs/compatibility.md): on the first launch after the rename, copy the
-/// settings of earlier releases into the new folder. They kept `graphics.json` (and, on Linux
-/// and macOS, the recovery folder) under the old product name, and eframe's `app.ron` under the
-/// window's old app id. In the Flatpak sandbox, earlier releases kept everything under an
-/// old app id's `~/.var/app` folder; those copies come first, newest first. The old folders
-/// are never changed.
+/// Compatibility shim (docs/compatibility.md): on the first launch after the app id changed, copy
+/// the settings of earlier releases into the new folder. In the Flatpak sandbox, earlier releases
+/// kept everything under an old app id's `~/.var/app` folder; those copies come first, newest
+/// first. The old folders are never changed.
 fn adopt_legacy_settings() {
-    let (Some(current), Some(legacy)) = (settings_dir().ok().flatten(), eframe::storage_dir("SolveCraft")) else { return };
-    let legacy_eframe = eframe::storage_dir(solidcraft_engine::io::LEGACY_APP_ID);
-    let old_flatpak = solidcraft_engine::io::legacy_flatpak_paths(&current);
-    if let Err(e) = adopt_settings(&current, &old_flatpak, &legacy, legacy_eframe.as_deref()) {
+    let Some(current) = settings_dir().ok().flatten() else { return };
+    if let Err(e) = adopt_settings(&current, &solidcraft_engine::io::legacy_flatpak_paths(&current)) {
         log::warn!("settings: could not copy the previous release's settings into {}: {e}", current.display());
     }
 }
 
-fn adopt_settings(
-    current: &std::path::Path,
-    old_flatpak: &[std::path::PathBuf],
-    legacy: &std::path::Path,
-    legacy_eframe: Option<&std::path::Path>,
-) -> std::io::Result<()> {
-    let fresh = !current.exists();
+fn adopt_settings(current: &std::path::Path, old_flatpak: &[std::path::PathBuf]) -> std::io::Result<()> {
     for old in old_flatpak {
         solidcraft_engine::io::adopt_legacy_dir(current, old)?;
-    }
-    solidcraft_engine::io::adopt_legacy_dir(current, legacy)?;
-    if let Some(old) = legacy_eframe.map(|d| d.join("app.ron")).filter(|p| fresh && p.is_file()) {
-        std::fs::create_dir_all(current)?;
-        let new = current.join("app.ron");
-        if !new.exists() {
-            std::fs::copy(old, new)?;
-        }
     }
     Ok(())
 }
@@ -1235,7 +1238,7 @@ fn main() -> eframe::Result {
     let mut notes: Vec<String> = Vec::new();
     let mut failed_starts = 0;
     if let Some(dir) = &settings {
-        notes.extend(startup::check_settings(dir, &[solidcraft_ui_egui::prefs::STORAGE_KEY, solidcraft_ui_egui::prefs::LEGACY_STORAGE_KEY]));
+        notes.extend(startup::check_settings(dir, &[solidcraft_ui_egui::prefs::STORAGE_KEY]));
         failed_starts = startup::begin(dir);
     }
     if failed_starts >= startup::FAILED_STARTS_FOR_SAFE_MODE && !safe_mode {
@@ -1406,6 +1409,8 @@ fn main() -> eframe::Result {
             app.graphics_fallback = fallback_note.clone();
             let stored_ui = cc.storage.and_then(|s| solidcraft_ui_egui::prefs::stored(|k| s.get_string(k)));
             restore_preferences(&mut app, stored_ui.as_deref(), graphics().as_ref(), safe_mode);
+            // The administrator's policy holds in safe mode too.
+            app.policy = solidcraft_ui_egui::policy::load();
             if let Some(path) = &theme_file
                 && let Err(e) = solidcraft_ui_egui::prefs::follow_theme_file_for_run(&mut app, path)
             {
@@ -1686,7 +1691,7 @@ fn startup_step(step: &'static str, detail: &str) {
 }
 
 /// The renderer settings: with `cpu`, the software adapter (WARP, lavapipe, llvmpipe). The
-/// backends come from `startup::choose_backends` (on Windows D3D12 first, and only the backend
+/// backends come from `startup::choose_backends` (on Windows Vulkan first, and only the backend
 /// in use is started); `preference` is `graphics.json`'s `backend`.
 fn wgpu_options(cpu: bool, preference: Option<&str>) -> eframe::egui_wgpu::WgpuConfiguration {
     // One frame in flight, as eframe's own default (`NativeOptions::default`): egui-wgpu's
@@ -2151,13 +2156,14 @@ mod viewport_tests {
         assert_eq!(viewport.app_id.as_deref(), Some(super::APP_ID));
     }
 
+    /// Full screen keeps the application bar at the top of the window, with no strip reserved
+    /// above it, and Undo and Redo in the bar keep working (#3643).
     #[test]
-    fn fullscreen_bar_clears_native_chrome_and_undo_redo_keep_working() {
+    fn fullscreen_bar_starts_at_the_top_and_undo_redo_keep_working() {
         use egui::{Event, PointerButton, Pos2, RawInput, Rect, ViewportId, vec2};
         use serde_json::json;
         use solidcraft_ui_egui::scenario::handle_at;
 
-        // AppKit points are independent of Retina scale and of the user's UI zoom.
         for (zoom, retina) in [(1.0, 1.0), (1.0, 2.0), (1.5, 2.0), (2.0, 2.0)] {
             let ctx = egui::Context::default();
             solidcraft_ui_egui::fonts::setup_bundled_fonts(&ctx);
@@ -2185,17 +2191,15 @@ mod viewport_tests {
                 let viewport = raw.viewports.get_mut(&ViewportId::ROOT).unwrap();
                 viewport.fullscreen = Some(fullscreen);
                 viewport.native_pixels_per_point = Some(retina);
-                super::fullscreen_content_insets(&mut raw, 32.0, zoom);
                 ctx.run_ui(raw, |ui| super::content_ui(app, ui)).textures_delta.clear();
             };
-            // Enter, leave, and enter again: no stale inset when returning to a normal window.
+            // Enter, leave, and enter again: nothing stale when returning to a normal window.
             for fullscreen in [false, true, false, true] {
                 frame(&mut app, fullscreen, vec![]);
                 frame(&mut app, fullscreen, vec![]);
-                let top = if fullscreen { 32.0 / zoom } else { 0.0 };
                 for name in ["appbar:file", "appbar:undo", "appbar:redo", "appbar:help"] {
                     let at = handle_at(name).unwrap();
-                    assert!((at.y - top - 17.0).abs() < 0.1, "{name}: {at:?}, fullscreen={fullscreen}, zoom={zoom}");
+                    assert!((at.y - 17.0).abs() < 0.1, "{name}: {at:?}, fullscreen={fullscreen}, zoom={zoom}");
                 }
                 for (handle, bodies) in [("appbar:undo", 0), ("appbar:redo", 1)] {
                     let at = handle_at(handle).unwrap();
@@ -2214,19 +2218,11 @@ mod viewport_tests {
     }
 
     #[test]
-    fn fullscreen_inset_preserves_existing_safe_areas_and_resets_on_exit() {
-        use egui::epaint::MarginF32;
-        use egui::{RawInput, SafeAreaInsets, ViewportId};
-        let mut raw = RawInput::default();
-        raw.viewports.get_mut(&ViewportId::ROOT).unwrap().fullscreen = Some(true);
-        raw.safe_area_insets = Some(SafeAreaInsets(MarginF32 { top: 40.0, left: 5.0, right: 6.0, bottom: 7.0 }));
-        super::fullscreen_content_insets(&mut raw, 32.0, 2.0);
-        assert_eq!(raw.safe_area_insets.unwrap().0, MarginF32 { top: 40.0, left: 5.0, right: 6.0, bottom: 7.0 });
-
-        raw.viewports.get_mut(&ViewportId::ROOT).unwrap().fullscreen = Some(false);
-        raw.safe_area_insets = None;
-        super::fullscreen_content_insets(&mut raw, 32.0, 1.0);
-        assert_eq!(raw.safe_area_insets, Some(SafeAreaInsets::default()));
+    fn hidden_fullscreen_title_bar_lets_clicks_through_only_while_unseen() {
+        assert!(super::hidden_title_bar_ignores_clicks(0.0));
+        assert!(super::hidden_title_bar_ignores_clicks(f64::NAN));
+        assert!(!super::hidden_title_bar_ignores_clicks(0.01));
+        assert!(!super::hidden_title_bar_ignores_clicks(1.0));
     }
 }
 
@@ -2318,21 +2314,16 @@ mod msaa_tests {
     fn first_launch_adopts_the_previous_release_settings() {
         let d = std::env::temp_dir().join(format!("solidcraft-adopt-settings-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&d);
-        let (current, legacy, legacy_eframe) = (d.join("solidcraft"), d.join("solvecraft"), d.join("ai.storyteller.solvecraft"));
-        std::fs::create_dir_all(&legacy).unwrap();
-        std::fs::create_dir_all(&legacy_eframe).unwrap();
-        std::fs::write(legacy.join("graphics.json"), r#"{"msaa":8}"#).unwrap();
-        std::fs::write(legacy_eframe.join("app.ron"), "(prefs)").unwrap();
-        super::adopt_settings(&current, &[], &legacy, Some(&legacy_eframe)).unwrap();
+        let (current, old) = (d.join("solidcraft"), d.join("ai.storyteller.solidcraft"));
+        std::fs::create_dir_all(&old).unwrap();
+        std::fs::write(old.join("graphics.json"), r#"{"msaa":8}"#).unwrap();
+        super::adopt_settings(&current, std::slice::from_ref(&old)).unwrap();
         assert_eq!(std::fs::read_to_string(current.join("graphics.json")).unwrap(), r#"{"msaa":8}"#);
-        assert_eq!(std::fs::read_to_string(current.join("app.ron")).unwrap(), "(prefs)");
-        assert!(legacy.join("graphics.json").is_file() && legacy_eframe.join("app.ron").is_file());
+        assert!(old.join("graphics.json").is_file());
         // Later launches leave the current settings alone.
-        std::fs::write(current.join("app.ron"), "(mine)").unwrap();
-        std::fs::remove_file(current.join("graphics.json")).unwrap();
-        super::adopt_settings(&current, &[], &legacy, Some(&legacy_eframe)).unwrap();
-        assert_eq!(std::fs::read_to_string(current.join("app.ron")).unwrap(), "(mine)");
-        assert!(!current.join("graphics.json").exists());
+        std::fs::write(current.join("graphics.json"), r#"{"msaa":2}"#).unwrap();
+        super::adopt_settings(&current, &[old]).unwrap();
+        assert_eq!(std::fs::read_to_string(current.join("graphics.json")).unwrap(), r#"{"msaa":2}"#);
         let _ = std::fs::remove_dir_all(&d);
     }
 

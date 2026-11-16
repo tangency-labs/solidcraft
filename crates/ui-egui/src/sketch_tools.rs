@@ -951,6 +951,11 @@ fn mode(id: &str) -> Option<Mode> {
     })
 }
 
+/// Whether an extra sketch tool draws new geometry from clicks rather than picking existing entities.
+pub fn is_drawing_tool(id: &str) -> bool {
+    matches!(mode(id), Some(Mode::Points(_) | Mode::Construction))
+}
+
 /// A tool for one of the extra sketch commands.
 pub fn tool_for(id: &str) -> Option<Tool> {
     mode(id)?;

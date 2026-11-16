@@ -19,6 +19,7 @@
 //! | [`vertex_get_point`] | `SmApiVertexGetPoint` |
 //! | [`edge_plane_crossings`] | not upstream: where an edge, over its own interval, meets a plane |
 //! | [`edge_crossing_on_face`] | not upstream: where a curve meets an edge, solved on one of the edge's faces |
+//! | [`closest_to_members`], [`edge_curve_copy`] | not upstream: `ShapeCurveSolve`/`ShapePointSolve` minimum of a curve or point against faces and edges |
 //! | [`point_distance`], [`vertex_distance`], [`edge_face_gap_samples`], [`edgeuse_face_frame`] | not upstream: certified distances (the last on `SmCrvSrfGapFunction`'s samples) |
 //! | [`box_max_distance_to_point`] | not upstream: [`Extent3d::max_distance_to_point`] of a box given by two corners |
 //! | `count_contained_samples`, `edge_piece_points`, `point_in_solid`, `target_curve_crossings` (private) | `sm_CountContainedSamples`, `sm_PointInSolid`, its `BrepCurveSolve` |
@@ -44,8 +45,10 @@
 //! serialized counts.
 
 use crate::curve::curve::p1::GlobalPointSolveOptions;
+use crate::curve::curve::p2::BSPLINE_CURVE_TYPE;
 use crate::curve::curve::Curve;
 use crate::error::{ignored, EntityRef, Result, SolidError};
+use crate::geom::attribute::ObjectKey;
 use crate::geom::extent1d::Extent1d;
 use crate::geom::extent3d::Extent3d;
 use crate::geom::global_solver::{SolutionRequested, SolverOperation};
@@ -259,6 +262,56 @@ fn solve_options(_k: &Kernel, requested: SolutionRequested) -> TopologySolveOpti
     }
 }
 
+/// The point of `object` in `solution`, its parameters starting at `parameter` (the vertex's own
+/// point, the curve's or edge's at one parameter, the surface's or face's at two): the step of
+/// [`solution_point`] at its object.
+fn object_point<O: SolutionObject>(
+    k: &Kernel,
+    objects: &dyn TopologyObjects<O>,
+    object: O,
+    solution: &Solution<O>,
+    parameter: usize,
+) -> Result<Point3> {
+    let kind = object.kind();
+    if kind == ObjectKind::Vertex {
+        return objects.vertex_point(object);
+    }
+    if matches!(kind, ObjectKind::Curve | ObjectKind::Edge) {
+        let curve = if kind == ObjectKind::Edge {
+            objects
+                .edge_curve(object)?
+                .ok_or_else(|| SolidError::query_missing(OP, "the edge's curve"))?
+        } else {
+            object
+        };
+        return Ok(ignored(
+            objects
+                .curve(curve)?
+                .evaluate_point(k, solution.start.param(parameter)?),
+        )?
+        .unwrap_or(Point3::UNDEF));
+    }
+    if matches!(kind, ObjectKind::Surface | ObjectKind::Face) {
+        let surface = if kind == ObjectKind::Face {
+            objects.face_surface(object)?
+        } else {
+            object
+        };
+        return Ok(ignored(objects.surface(surface)?.evaluate_point(
+            k,
+            Point2::new(
+                solution.start.param(parameter)?,
+                solution.start.param(parameter + 1)?,
+            ),
+        ))?
+        .unwrap_or(Point3::UNDEF));
+    }
+    Err(SolidError::query_failed(
+        OP,
+        "the solution's object is not a vertex, curve or edge",
+    ))
+}
+
 // SmSolution::GetPoint using the same caller-owned geometry adapter as the solver.
 fn solution_point<O: SolutionObject>(
     k: &Kernel,
@@ -277,43 +330,7 @@ fn solution_point<O: SolutionObject>(
             object.ok_or_else(|| SolidError::query_missing(OP, "the solution's object"))?;
         let kind = object.kind();
         if i == index {
-            if kind == ObjectKind::Vertex {
-                return objects.vertex_point(object);
-            }
-            if matches!(kind, ObjectKind::Curve | ObjectKind::Edge) {
-                let curve = if kind == ObjectKind::Edge {
-                    objects
-                        .edge_curve(object)?
-                        .ok_or_else(|| SolidError::query_missing(OP, "the edge's curve"))?
-                } else {
-                    object
-                };
-                return Ok(ignored(
-                    objects
-                        .curve(curve)?
-                        .evaluate_point(k, solution.start.param(parameter)?),
-                )?
-                .unwrap_or(Point3::UNDEF));
-            }
-            if matches!(kind, ObjectKind::Surface | ObjectKind::Face) {
-                let surface = if kind == ObjectKind::Face {
-                    objects.face_surface(object)?
-                } else {
-                    object
-                };
-                return Ok(ignored(objects.surface(surface)?.evaluate_point(
-                    k,
-                    Point2::new(
-                        solution.start.param(parameter)?,
-                        solution.start.param(parameter + 1)?,
-                    ),
-                ))?
-                .unwrap_or(Point3::UNDEF));
-            }
-            return Err(SolidError::query_failed(
-                OP,
-                "the solution's object is not a vertex, curve or edge",
-            ));
+            return object_point(k, objects, object, solution, parameter);
         }
         parameter += match kind {
             ObjectKind::Curve | ObjectKind::Edge => 1,
@@ -971,6 +988,133 @@ pub fn face_closest_point_in_shape<O: SolutionObject>(
     Ok(ClosestPoint {
         point: solution_point(k, objects, solution, 0)?,
         distance: solution.start.solution_value,
+    })
+}
+
+/// A copy of edge `id`'s curve with the edge's own interval of it (not upstream): the curve to
+/// measure as a [`Probe::Curve`] against faces and edges of this or another B-rep.
+///
+/// # Errors
+///
+/// [`SolidError::query_failed`] for an edge without a curve; a dangling edge; those of the copy.
+pub fn edge_curve_copy(k: &Kernel, brep: &Brep, id: EdgeId) -> Result<(Curve, Extent1d)> {
+    let edge = brep.edge(id)?;
+    let curve = edge
+        .curve
+        .as_ref()
+        .ok_or_else(|| SolidError::query_failed(OP, "the edge has no curve"))?;
+    Ok((curve.copy(k)?, edge.interval))
+}
+
+/// What [`closest_to_members`] measures from: a curve over an interval (an edge's curve over the
+/// edge's own interval, taken from any B-rep), or a point.
+#[derive(Debug, Clone, Copy)]
+pub enum Probe<'c> {
+    /// A curve over `interval`; the minimum is sought over that interval only, its ends included.
+    Curve {
+        /// The curve.
+        curve: &'c Curve,
+        /// The stretch of it measured.
+        interval: Extent1d,
+    },
+    /// A point.
+    Point(Point3),
+}
+
+/// The closest points of a [`Probe`] and some faces and edges of a B-rep
+/// ([`closest_to_members`]).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct MembersClosest {
+    /// The distance the solver reached between the two points.
+    pub distance: f64,
+    /// The point of the probe: on its curve, within its interval, or the point itself.
+    pub on_probe: Point3,
+    /// The point of the faces (as they are trimmed) and edges (over their intervals).
+    pub on_members: Point3,
+}
+
+/// The closest points of `probe` and the faces `faces` (as they are trimmed, their edges and
+/// vertices included) and edges `edges` (over their own intervals, their vertices included) of
+/// B-rep `brep`, known as `id` (not upstream): the kernel's own minimum-distance solve on the
+/// exact geometry (`ShapeCurveSolve` or `ShapePointSolve` of the members' shape), never on a
+/// tessellation. A curve's minimum against an edge is the curve/curve global solve over both
+/// intervals, so the closest point of an arc lies inside the arc, or at one of its ends when the
+/// curves come nearest past it. The probe's point is the probe curve's at the solution's
+/// parameter; the members' point is the solution's point on the member it names.
+///
+/// # Errors
+///
+/// [`SolidError::query_failed`] when the solve finds no closest points or a point does not
+/// evaluate; those of the shape, the solver and the solution point.
+pub fn closest_to_members(
+    k: &mut Kernel,
+    brep: &mut Brep,
+    id: BrepId,
+    faces: &[FaceId],
+    edges: &[EdgeId],
+    probe: Probe<'_>,
+) -> Result<MembersClosest> {
+    let face_keys: Vec<FaceKey> = faces.iter().map(|f| (id, *f)).collect();
+    let edge_keys: Vec<_> = edges.iter().map(|e| (id, *e)).collect();
+    let shape = Shape::new(k, &(id, &*brep), &[], &face_keys, &edge_keys, &[])?;
+    let query = qbrep::BrepQuery::of_brep(brep);
+    let identity = query.effective_identity();
+    let objects = qbrep::LiveBrepObjects::new(brep, &identity, None)?;
+    let k = &*k;
+    let options = solve_options(k, SolutionRequested::Single);
+    let (solutions, member) = match probe {
+        Probe::Curve { curve, interval } => {
+            // The probe curve belongs to no B-rep the objects hold: a handle of its own kind.
+            let handle = CacheObject::Other(ObjectRef {
+                type_code: BSPLINE_CURVE_TYPE,
+                key: ObjectKey(0),
+            });
+            let solutions = TopologySolver::shape_curve_solve(
+                k,
+                &objects,
+                &shape,
+                CurveRef { curve, handle },
+                &interval,
+                options,
+            )?;
+            (solutions, 1)
+        }
+        Probe::Point(point) => (
+            TopologySolver::shape_point_solve(k, &objects, &shape, point, options)?,
+            0,
+        ),
+    };
+    let solution = solutions
+        .as_slice()
+        .first()
+        .ok_or_else(|| SolidError::query_failed(OP, "no closest points were found"))?;
+    let on_probe = match probe {
+        Probe::Curve { curve, .. } => curve.evaluate_point(k, solution.start.param(0)?)?,
+        Probe::Point(point) => point,
+    };
+    // The members' point: the solution's object after the probe, whose parameters follow the
+    // probe curve's one (a point probe has none). The probe curve's handle is of no kind the
+    // solution's own point extraction counts, so the offset is given here.
+    let object = solution
+        .objects
+        .get(member)
+        .copied()
+        .flatten()
+        .ok_or_else(|| SolidError::query_failed(OP, "the solution names no member"))?;
+    let first_parameter = member; // the probe curve's one parameter comes first
+    let on_members = object_point(k, &objects, object, solution, first_parameter)?;
+    let evaluated =
+        |p: Point3| !p.is_undef() && p.x.is_finite() && p.y.is_finite() && p.z.is_finite();
+    if !(evaluated(on_probe) && evaluated(on_members)) {
+        return Err(SolidError::query_failed(
+            OP,
+            "a closest point does not evaluate",
+        ));
+    }
+    Ok(MembersClosest {
+        distance: solution.start.solution_value,
+        on_probe,
+        on_members,
     })
 }
 
@@ -2376,6 +2520,95 @@ mod tests {
     fn whole(k: &mut Kernel, curve: Curve) -> (Brep, EdgeId) {
         let interval = curve.natural_interval();
         wire(k, curve, interval)
+    }
+
+    /// The closest points of the arc of `radius` about `center` over the angles `from..to`
+    /// (degrees from +X, counterclockwise; the kernel's exact circle segment, over its whole
+    /// interval) and a whole analytic circle of `whole_radius` about (0, 0, `z`), both in XY
+    /// planes ([`closest_to_members`]).
+    fn arc_to_circle(
+        center: Point3,
+        radius: f64,
+        [from, to]: [f64; 2],
+        whole_radius: f64,
+        z: f64,
+    ) -> MembersClosest {
+        let mut k = Kernel::default();
+        let circle = crate::primitive::api_curves::create_analytic_circle(
+            &k,
+            Point3::new(0.0, 0.0, z),
+            whole_radius,
+        )
+        .unwrap();
+        let (mut b, e) = whole(&mut k, Curve::from(circle));
+        let probe = Curve::from(
+            crate::primitive::api_curves::create_arc(center, radius, from, to).unwrap(),
+        );
+        let interval = probe.natural_interval();
+        // the arc runs from its `from` end to its `to` end
+        for (t, deg) in [(interval.min(), from), (interval.max(), to)] {
+            let end = probe.evaluate_point(&k, t).unwrap();
+            let (cos, sin) = (deg.to_radians().cos(), deg.to_radians().sin());
+            let want = center + Vec3::new(radius * cos, radius * sin, 0.0);
+            assert!(end.distance(want) <= 1e-9, "{end:?} {want:?}");
+        }
+        closest_to_members(
+            &mut k,
+            &mut b,
+            BrepId::from_index(0),
+            &[],
+            &[e],
+            Probe::Curve {
+                curve: &probe,
+                interval,
+            },
+        )
+        .unwrap()
+    }
+
+    /// A half circle of radius 35 about the centre of a circle of radius 20 is 15 from it,
+    /// at points on both.
+    #[test]
+    fn closest_to_members_of_concentric_circles_is_their_radii_apart() {
+        let c = arc_to_circle(Point3::new(0.0, 0.0, 5.0), 35.0, [0.0, 180.0], 20.0, 5.0);
+        assert!((c.distance - 15.0).abs() <= 1e-9, "{c:?}");
+        let radius = |p: Point3| p.x.hypot(p.y);
+        assert!((radius(c.on_probe) - 35.0).abs() <= 1e-9, "{c:?}");
+        assert!((radius(c.on_members) - 20.0).abs() <= 1e-9, "{c:?}");
+        assert!(c.on_probe.y >= -1e-9, "{c:?}");
+    }
+
+    /// The radius 35 arc moved 2 up, over its lower left quarter, against the radius 20 circle:
+    /// a point P of the circle is 35 - |P - C| from the arc's circle, largest |P - C| at
+    /// P = (0, -20), whose nearest arc point is the arc's end (0, -33): 13 apart.
+    #[test]
+    fn closest_to_members_of_shifted_circles_is_at_their_lowest_points() {
+        let c = arc_to_circle(Point3::new(0.0, 2.0, 0.0), 35.0, [180.0, 270.0], 20.0, 0.0);
+        assert!((c.distance - 13.0).abs() <= 1e-9, "{c:?}");
+        assert!(
+            c.on_members.distance(Point3::new(0.0, -20.0, 0.0)) <= 1e-9,
+            "{c:?}"
+        );
+        assert!(
+            c.on_probe.distance(Point3::new(0.0, -33.0, 0.0)) <= 1e-9,
+            "{c:?}"
+        );
+    }
+
+    /// A radius 10 arc about (40, 0) over 0°..170° against the radius 10 circle about the
+    /// origin: the circles come nearest at 180° on the arc's circle, past its end, and a point
+    /// at angle t of the arc is sqrt(1700 + 800 cos t) - 10 from the circle, least at the end
+    /// E (t = 170°), with the circle's point 10 E / |E|.
+    #[test]
+    fn closest_to_members_of_an_arc_past_its_end_is_at_the_end() {
+        let end = 170f64.to_radians();
+        let c = arc_to_circle(Point3::new(40.0, 0.0, 0.0), 10.0, [0.0, 170.0], 10.0, 0.0);
+        let e = Point3::new(40.0 + 10.0 * end.cos(), 10.0 * end.sin(), 0.0);
+        let reach = (1700.0 + 800.0 * end.cos()).sqrt();
+        assert!((c.distance - (reach - 10.0)).abs() <= 1e-9, "{c:?}");
+        assert!(c.on_probe.distance(e) <= 1e-9, "{c:?}");
+        let near = Point3::new(e.x * 10.0 / reach, e.y * 10.0 / reach, 0.0);
+        assert!(c.on_members.distance(near) <= 1e-9, "{c:?}");
     }
 
     /// Each crossing's point is on its edge at its parameter, to 1e-9.

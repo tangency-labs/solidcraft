@@ -38,6 +38,85 @@ fn a_mirrored_copy_keeps_the_material_and_appearance_of_its_body() {
     assert_eq!(s.doc.appearances.bodies.get(&copy), look);
 }
 
+/// Face paint follows the copied face identity, including another mirror and a rebuild.
+#[test]
+fn mirrored_bodies_keep_face_appearances_after_rebuild_and_reopen() {
+    fn check(s: &Session, body: &str, point: [f64; 3], color: [u8; 3], opacity: f64) {
+        let state = s.model.state();
+        let body = state.body(body).unwrap();
+        let face = solidcraft_doc::appearance::face_index_at(body, solidcore_record::Vec3::from(point)).unwrap();
+        let colors = s.doc.authored_face_colors(body);
+        let look = colors.iter().find(|(index, _)| *index == face).map(|(_, look)| look);
+        assert_eq!(look.map(|l| (l.color, l.opacity)), Some((color, opacity)), "{} at {point:?}", body.name);
+    }
+
+    let mut s = Session::default();
+    run(&mut s, "parameters.add", json!({"name":"height", "expression":"10 mm"}));
+    for (name, x, color, opacity) in [("Red", 0, "#ff0000", 1.0), ("Blue", 20, "#0000ff", 0.6)] {
+        run(&mut s, "solid.box", json!({"length":10,"width":10,"height":"height","corner":[x,10,0],"body_name":name}));
+        run(&mut s, "appearance.assign", json!({"body":name,"faces":[[x+5,15,10]],"color":color,"opacity":opacity}));
+    }
+    run(&mut s, "appearance.assign", json!({"body":"Red","faces":[[5,10,5]],"color":"#00ff00"}));
+    let before = s.doc.appearances.clone();
+    let reply = run(&mut s, "solid.mirror", json!({"bodies":["Blue","Red"],"plane":"XZ"}));
+    let blue = reply["created_bodies"][0].as_str().unwrap().to_string();
+    let red = reply["created_bodies"][1].as_str().unwrap().to_string();
+    check(&s, &blue, [25., -15., 10.], [0, 0, 255], 0.6);
+    check(&s, &red, [5., -15., 10.], [255, 0, 0], 1.0);
+    check(&s, &red, [5., -10., 5.], [0, 255, 0], 1.0);
+    assert_eq!(s.doc.appearances.faces.len(), 6);
+    run(&mut s, "edit.undo", json!({}));
+    assert_eq!(s.doc.appearances, before);
+    run(&mut s, "edit.redo", json!({}));
+    check(&s, &red, [5., -15., 10.], [255, 0, 0], 1.0);
+    let nested = run(&mut s, "solid.mirror", json!({"bodies":[red],"plane":"YZ"}));
+    let nested = nested["created_bodies"][0].as_str().unwrap().to_string();
+    check(&s, &nested, [-5., -15., 10.], [255, 0, 0], 1.0);
+    check(&s, &nested, [-5., -10., 5.], [0, 255, 0], 1.0);
+    run(&mut s, "parameters.change", json!({"name":"height","expression":"20 mm"}));
+    let reopened = Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap());
+    for session in [&s, &reopened] {
+        check(session, "Red", [5., 15., 20.], [255, 0, 0], 1.0);
+        check(session, "Blue", [25., 15., 20.], [0, 0, 255], 0.6);
+        check(session, &red, [5., -15., 20.], [255, 0, 0], 1.0);
+        check(session, &blue, [25., -15., 20.], [0, 0, 255], 0.6);
+        check(session, &nested, [-5., -15., 20.], [255, 0, 0], 1.0);
+        check(session, &nested, [-5., -10., 5.], [0, 255, 0], 1.0);
+    }
+}
+
+#[test]
+fn a_mirrored_curved_face_keeps_its_appearance() {
+    let mut s = Session::default();
+    run(&mut s, "solid.cylinder", json!({"radius":3,"height":10,"base":[0,10,0],"body_name":"Post"}));
+    run(&mut s, "appearance.assign", json!({"body":"Post","faces":[[3,10,5]],"color":"#a030d0","opacity":0.7}));
+    let reply = run(&mut s, "solid.mirror", json!({"bodies":["Post"],"plane":"XZ"}));
+    let copy = reply["created_bodies"][0].as_str().unwrap();
+    let state = s.model.state();
+    let body = state.body(copy).unwrap();
+    let face = solidcraft_doc::appearance::face_index_at(body, solidcore_record::Vec3::new(3., -10., 5.)).unwrap();
+    let colors = s.doc.authored_face_colors(body);
+    assert_eq!(colors.len(), 1);
+    assert_eq!(colors[0].0, face);
+    assert_eq!((colors[0].1.color, colors[0].1.opacity), ([160, 48, 208], 0.7));
+}
+
+#[test]
+fn a_mirror_over_the_face_appearance_limit_leaves_the_design_unchanged() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length":10,"width":10,"height":10,"corner":[0,10,0],"body_name":"Block"}));
+    run(&mut s, "appearance.assign", json!({"body":"Block","faces":[[5,15,10]],"color":"#ff0000"}));
+    let mut unrelated = s.doc.appearances.faces[0].clone();
+    unrelated.body = "Unrelated".into();
+    s.doc_mut().appearances.faces.resize(100_000, unrelated);
+    let before = s.doc.clone();
+    let error = s.execute("solid.mirror", &json!({"bodies":["Block"],"plane":"XZ"})).unwrap_err();
+    assert!(error.to_string().contains("too many face appearances"), "{error}");
+    assert_eq!(s.doc.appearances, before.appearances);
+    assert_eq!(s.doc.features.len(), before.features.len());
+    assert_eq!(s.model.state().bodies.len(), 1);
+}
+
 /// Whether a mirrored copy meets its body, which the Mirror dialog sets Join or New Body from:
 /// apart, mirrored about its own face (touching) and through itself (overlapping), on the exact
 /// geometry. A Mirror of features has no answer, and asking makes nothing.
@@ -1127,6 +1206,27 @@ fn copies_of_a_boss_and_a_cut_up_to_its_top_make_both_copies() {
             assert_eq!(count(&both, what), want, "{command}: {what}: bar {bar}, one boss {one}, both {both}");
         }
     }
+}
+
+/// #17692: a pocket cut up to the plate's top, then a chamfer round the pocket's mouth that cuts
+/// the top away where the cut's end was picked. The pattern comes after the chamfer and copies
+/// only the pocket: its copy ends at the plate's top, as the pocket does, so it is the same
+/// 22 × 22 × 5 pocket. The copy used to end at the chamfer's slope left at the pick and was
+/// refused ("the profile reaches past the To face").
+#[test]
+fn a_copied_cut_up_to_a_face_a_later_chamfer_cut_away_at_the_pick_ends_at_that_face() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 84, "width": 42, "height": 5, "corner": [0, 0, 0], "body_name": "Plate"}));
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Cell"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [10, 10], "p1": [32, 32]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"sketch": "Cell", "profiles": [0], "to": [33, 21, 5], "operation": "cut", "name": "Pocket"}));
+    run(&mut s, "solid.chamfer", json!({"edges": [[21, 10, 5], [21, 32, 5], [10, 21, 5], [32, 21, 5]], "distance": 3, "name": "Lip"}));
+    let before = volume(&mut s);
+    let r = run(&mut s, "solid.pattern.rectangular", json!({"features": ["Pocket"], "dir1": [1, 0, 0], "count1": 2, "spacing1": 42}));
+    assert!(r["error"].is_null() && r["warning"].is_null(), "{r}");
+    let after = volume(&mut s);
+    assert!(rel(before - after, 22.0 * 22.0 * 5.0) < 1e-9, "the copy removed {} mm³, expected {} mm³", before - after, 22.0 * 22.0 * 5.0);
 }
 
 /// #14305: in a component, a pattern or mirror of two cuts makes the copies of both. The first
