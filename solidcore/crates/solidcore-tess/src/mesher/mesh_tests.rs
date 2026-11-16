@@ -149,19 +149,34 @@ fn two_faces_splitting_one_side_put_one_node_on_its_edge() {
 /// loop's first, while the shaping kept the boundary's sides by their places in the loop, so it
 /// did not keep the slit's side at that vertex and flipped it away: "triangulation does not
 /// follow the boundary". Meshed at SolidCraft's export spec (a chord of 1/5000 of the size, the
-/// vertices' box diagonal): no triangle side has more than two triangles, every side with one
-/// lies on one of the two circles (none crosses or opens the slit), nothing folds, and the
-/// area is the annulus's within what its chords cut off: the nodes lie on the circles, so the
-/// outer polygon lacks and the hole's polygon gives back at most the chord times each
-/// circumference.
+/// vertices' box diagonal and its edges' quarter points, as SolidCraft's `Body::size`): nothing
+/// folds, no triangle side has more than two, every side of the slit has two (one either side)
+/// and they add up to its length, every side with one lies on one of the two circles, and the
+/// triangles' area is exactly what the boundary's polygons bound (the annulus less the segments
+/// the outer circle's chords cut off, plus those the inner circle's chords cut off the hole), to
+/// rounding: nothing is missing, nothing overlaps.
 #[test]
 fn a_ring_bounded_by_a_slit_loop_follows_its_boundary_on_the_mesh_path() {
     let b = crate::fixtures::fixture("rig_ruled_cylinder_rim_flat_ring");
+    // SolidCraft's size of the body (`Body::size`): the box diagonal of its vertices and of each
+    // edge's points at a quarter, a half and three quarters of its interval.
     let (mut lo, mut hi) = ([f64::INFINITY; 3], [f64::NEG_INFINITY; 3]);
-    for v in &b.vertices {
+    let mut add = |p: [f64; 3]| {
         for k in 0..3 {
-            lo[k] = lo[k].min(v.point[k]);
-            hi[k] = hi[k].max(v.point[k]);
+            lo[k] = lo[k].min(p[k]);
+            hi[k] = hi[k].max(p[k]);
+        }
+    };
+    for v in &b.vertices {
+        add(v.point);
+    }
+    for e in &b.edges {
+        let curve = solidcore_convert::curve(e.parameters()).expect("the edge's curve");
+        let c = solidcore::eval::CurveEval::new(&curve).expect("evaluates");
+        let [t0, t1] = e.interval;
+        for i in 1..4 {
+            let p = c.point(t0 + (t1 - t0) * f64::from(i) / 4.0).expect("on the curve");
+            add([p.x, p.y, p.z]);
         }
     }
     let size = length(sub(P::new(hi[0], hi[1], hi[2]), P::new(lo[0], lo[1], lo[2])));
@@ -182,16 +197,43 @@ fn a_ring_bounded_by_a_slit_loop_follows_its_boundary_on_the_mesh_path() {
         }
     }
     let radius = |i: u32| length(sub(m.positions[i as usize], centre));
-    let on_circle = |i: u32| [10.0, 15.0].iter().any(|r| (radius(i) - r).abs() <= 1e-9 * 15.0);
+    let circle = |i: u32| [10.0, 15.0].into_iter().find(|r| (radius(i) - r).abs() <= 1e-9 * 15.0);
+    // The slit: the line from the inner circle's vertex out to the outer one's.
+    let point = |v: usize| P::new(b.vertices[v].point[0], b.vertices[v].point[1], b.vertices[v].point[2]);
+    let (s0, s1) = (point(0), point(1));
+    let along = sub(s1, s0);
+    let on_slit = |i: u32| {
+        let d = sub(m.positions[i as usize], s0);
+        let f = dot(d, along) / dot(along, along);
+        (-1e-12..=1.0 + 1e-12).contains(&f) && length(cross(d, along)) / length(along) <= 1e-9 * 15.0
+    };
+    // The area the boundary's polygons bound, exactly: the annulus, less the segment each chord of
+    // the outer circle cuts off it, plus the segment each chord of the inner circle cuts off the
+    // hole (r² (θ − sin θ) / 2 for a chord c of a circle of radius r, θ = 2 asin(c / 2r)).
+    let segment = |r: f64, c: f64| {
+        let theta = 2.0 * (c / (2.0 * r)).min(1.0).asin();
+        0.5 * r * r * (theta - theta.sin())
+    };
+    let annulus = std::f64::consts::PI * (15.0f64.powi(2) - 10.0f64.powi(2));
+    let (mut bounded, mut slit) = (annulus, 0.0);
     for (&(i, j), &uses) in &sides {
+        let c = length(sub(m.positions[i as usize], m.positions[j as usize]));
         assert!(uses <= 2, "side {i}-{j} has {uses} triangles");
+        if on_slit(i) && on_slit(j) {
+            // The slit is kept: each of its sides has a triangle either side.
+            assert_eq!(uses, 2, "the slit's side {i}-{j} has {uses} triangles");
+            slit += c;
+        }
         if uses == 1 {
-            assert!(on_circle(i) && on_circle(j), "side {i}-{j} is open off the circles: radii {} and {}", radius(i), radius(j));
+            match (circle(i), circle(j)) {
+                (Some(r), Some(q)) if r == q && r > 12.5 => bounded -= segment(r, c),
+                (Some(r), Some(q)) if r == q => bounded += segment(r, c),
+                _ => panic!("side {i}-{j} is open off the circles: radii {} and {}", radius(i), radius(j)),
+            }
         }
     }
-    let annulus = std::f64::consts::PI * (15.0f64.powi(2) - 10.0f64.powi(2));
-    let cut = chord * 2.0 * std::f64::consts::PI * (15.0 + 10.0);
-    assert!((area - annulus).abs() <= cut, "area {area}, the annulus {annulus}, within {cut}");
+    assert!((slit - along.iter().map(|x| x * x).sum::<f64>().sqrt()).abs() <= 1e-9 * 15.0, "the slit's sides add up to {slit}");
+    assert!((area - bounded).abs() <= 1e-9 * annulus, "area {area}, the boundary's polygons bound {bounded}");
 }
 
 /// Every triangle's facet normal on the side of its corners' surface normals (nothing folded

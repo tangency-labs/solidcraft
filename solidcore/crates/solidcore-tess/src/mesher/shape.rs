@@ -359,6 +359,8 @@ pub(crate) fn shape(
             let name = |i: u32| named.get(i as usize).copied().unwrap_or(i);
             let (na, nb) = (name(a), name(b));
             if na != nb {
+                // A side the loops run twice (a slit's two runs, one edge) keeps its first run's
+                // nodes: either names the edge's segment.
                 fixed.entry(key(na, nb)).or_insert((a, b));
             }
         }
