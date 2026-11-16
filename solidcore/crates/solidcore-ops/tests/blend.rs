@@ -2248,6 +2248,18 @@ fn plate_and_wall(profile: &[(f64, f64)]) -> Body {
 #[allow(clippy::disallowed_methods)] // the test's closed form, not ops computing geometry
 fn a_round_ending_where_a_slanted_wall_overhangs_its_plate_ends_on_the_wall() {
     rig_fixes();
+    // first, on both of the wall's sides, the same wall with its end square, overhanging the
+    // plate's end by 19.5: the round ends on the plate's end plane (as before #17617)
+    for z in [5.0, 0.0] {
+        let b = plate_and_wall(&[(10.0, -4.0), (129.5, -4.0), (129.5, -40.0), (10.0, -40.0)]);
+        let e = nearest_edge(&b, [80.0, -4.0, z]);
+        blend(&b, Blend::Round, &[e], &[2.0], &[], Corners::Filled).unwrap();
+        assert!(b.check(CheckLevel::All).unwrap().is_valid(), "z = {z}");
+        assert_eq!(b.counts().unwrap(), [13, 32, 21], "z = {z}");
+        let v = b.volume(1e-12).unwrap();
+        let want = 65400.0 + 119.5 * 36.0 * 5.0 + 100.0 * (4.0 - PI);
+        assert!(rel(v, want) < 1e-11, "z = {z}: {v}");
+    }
     let slant = 19.5 / 36.0;
     let before = 65400.0 + 0.5 * (100.0 + 119.5) * 36.0 * 5.0;
     // the wall's face z and the side of it the round lies on
@@ -2292,16 +2304,6 @@ fn a_round_ending_where_a_slanted_wall_overhangs_its_plate_ends_on_the_wall() {
         }
         assert_eq!((rounds, walls), (1, 1), "z = {z}");
     }
-    // the same wall with its end square, overhanging the plate's end by 19.5: the round
-    // ends on the plate's end plane
-    let b = plate_and_wall(&[(10.0, -4.0), (129.5, -4.0), (129.5, -40.0), (10.0, -40.0)]);
-    let before = 65400.0 + 119.5 * 36.0 * 5.0;
-    let e = nearest_edge(&b, [80.0, -4.0, 5.0]);
-    blend(&b, Blend::Round, &[e], &[2.0], &[], Corners::Filled).unwrap();
-    assert!(b.check(CheckLevel::All).unwrap().is_valid());
-    assert_eq!(b.counts().unwrap(), [13, 32, 21]);
-    let v = b.volume(1e-12).unwrap();
-    assert!(rel(v, before + 100.0 * (4.0 - PI)) < 1e-11, "{v}");
 }
 
 /// A block 30 x 30 x 10 with the pocket [5, 25]^2 x [4, 10], its four vertical edges rounded

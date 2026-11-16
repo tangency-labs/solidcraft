@@ -20,9 +20,9 @@
 //! The end face at a tangent side is extended `CInfinity` and that side's cap edge is
 //! `OnExtendEdge` (WR-600, the fork's tangency-labs/smlib@856b54e). At a multi-neighbour
 //! end face whose side edges are both cliff edges, the end face is the side face whose
-//! surface holds the other side edge or, where neither surface holds it, the one whose tangent
-//! plane at the vertex the other side edge leaves in; upstream takes the first side's,
-//! whatever its surface. There is no recursion.
+//! surface holds the other side edge or, where neither surface holds it and only one tangent
+//! plane at the vertex holds the other side edge's direction there, that plane's face (WR-783);
+//! otherwise, as upstream, the first side's, whatever its surface. There is no recursion.
 
 use std::collections::BTreeMap;
 
@@ -104,7 +104,9 @@ fn face_holds_edge(
 /// square to that face's normal at the vertex (read on `side` at its edge's end there) within
 /// `ang_tol_deg`. The end cap's edge along `other` runs from the vertex to the rail's end on
 /// it, so the cap can lie on that face's surface only if this holds. An edge that does not end
-/// at the vertex, a zero tangent and a failed evaluation answer `false`.
+/// at the vertex, a zero tangent and a failed evaluation answer `false`; of a closed edge, the
+/// tangent and the face's normal are read at its start. The normal is read without building a
+/// UV trim curve (`use_3d_only`), so the test leaves `target` as it was.
 ///
 /// # Errors
 /// `Unported` and a cancellation; any other failure answers `false`.
@@ -131,7 +133,7 @@ fn edge_leaves_in_face(
             return Ok(false);
         };
         let options = eu3::BinormalOptions::default();
-        let normal = eu3::evaluate_binormal(k, target, side, t, false, &options)?.face_normal;
+        let normal = eu3::evaluate_binormal(k, target, side, t, true, &options)?.face_normal;
         Ok(normal.is_perpendicular_to(leaving, ang_tol_deg))
     })())
 }
@@ -932,7 +934,8 @@ impl FilletCorner {
                         // along it, from the vertex to the rail's end, lies on the end face's
                         // surface only if the edge leaves the vertex in it: on the first face's
                         // surface, picked whatever, the cap was left off the result, refused as
-                        // no closed solid (#17617).
+                        // no closed solid (#17617, WR-783). Where both or neither leave so, the
+                        // first, as upstream.
                         let tol_deg = crate::math::rad_to_deg(self.tangency_tol_radians);
                         if !edge_leaves_in_face(k, target, first, second, vertex, tol_deg)?
                             && edge_leaves_in_face(k, target, second, first, vertex, tol_deg)?
