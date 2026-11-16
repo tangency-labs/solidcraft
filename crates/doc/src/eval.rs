@@ -6365,9 +6365,9 @@ fn hole_position(vals: &BTreeMap<String, Value>, position: &crate::FacePick, at:
 // A hole drilled across a pocket or a slot leaves its wall in pieces along the axis (#13505):
 // every piece the hole reaches (`reach`, its depth from `entry`) is returned, nearest the entry
 // first, each as (its start and end from the entry along `inward`, a point on it).
-fn parallel_tapped_wall(st: &ModelState, entry: Vec3, inward: Vec3, radius: f64, reach: f64) -> Vec<(f64, f64, Vec3)> {
+fn parallel_tapped_wall(st: &ModelState, entry: Vec3, inward: Vec3, radius: f64, reach: f64) -> Vec<(f64, f64, Vec3, Option<Mat>)> {
     let tol = (radius * 1e-6).max(1e-6);
-    let mut walls: Vec<(f64, f64, Vec3)> = Vec::new();
+    let mut walls: Vec<(f64, f64, Vec3, Option<Mat>)> = Vec::new();
     for body in &st.bodies {
         // A wall found lies on the line through `entry` along `inward`, give or take its radius
         // (and the slant its axis may have off `inward` over the body's distance), and its
@@ -6396,13 +6396,21 @@ fn parallel_tapped_wall(st: &ModelState, entry: Vec3, inward: Vec3, radius: f64,
             let hi = a.max(b);
             // One piece of wall made of several faces (a cylinder split at its seams) is one.
             let mid = (lo + hi) * 0.5;
-            if hi > lo + 1e-9 && lo < reach - 1e-6 && !walls.iter().any(|(l, h, _)| (*l..=*h).contains(&mid)) {
-                walls.push((lo, hi, entry + inward * mid + inward.any_perp() * radius));
+            if hi > lo + 1e-9 && lo < reach - 1e-6 && !walls.iter().any(|(l, h, _, _)| (*l..=*h).contains(&mid)) {
+                walls.push((lo, hi, entry + inward * mid + inward.any_perp() * radius, tool_frame(&body.name)));
             }
         }
     }
     walls.sort_by(|a, b| a.0.total_cmp(&b.0));
     walls
+}
+
+/// The model as a hole's tools meet it: the bodies it cuts (those it names, else its component's
+/// own, as [`apply_traced`] takes them) where they are shown in the frame it is drilled in
+/// (#17623). Its points, depth, direction and tapped walls are all found there.
+fn hole_as_shown<'a>(st: &'a ModelState, f: &Feature) -> Result<std::borrow::Cow<'a, ModelState>> {
+    let (_, cut) = boolean_scope(st, f, &[]);
+    targets_as_shown(st, f, &cut)
 }
 
 /// The cutting tools of a hole feature at every spot, each with its exact geometry when it is a
@@ -6417,7 +6425,7 @@ fn hole_feature_tools(
     // A hole at sketch points is drilled in its sketch's frame: the bodies it cuts are met where
     // they are shown, so a body of another, moved component is drilled only where the hole
     // reaches it there (#17623).
-    let shown = targets_as_shown(st, f, &[])?;
+    let shown = hole_as_shown(st, f)?;
     let st: &ModelState = &shown;
     let (spots, dir) = hole_spots(doc, vals, st, f)?;
     if spots.is_empty() || spots.len() > 10_000 {
@@ -9923,7 +9931,25 @@ fn eval_feature(
             if thread_depth.is_some_and(|d| !d.is_finite() || d <= 0.0) {
                 return Err(DocError::Invalid("thread depth must be finite and positive".into()));
             }
-            let (spots, dir) = hole_spots(doc, vals, st, f)?;
+            // Where and which way it drills, and how deep, in its own frame (#17623).
+            let (spots, dir, reaches) = {
+                let shown = hole_as_shown(st, f)?;
+                let (spots, dir) = hole_spots(doc, vals, &shown, f)?;
+                // How deep each hole goes (through all: as far as the wall goes), read before the
+                // cut: the pieces of a wall the thread runs along lie within it.
+                let reaches: Vec<f64> = if thread.is_some() {
+                    spots
+                        .iter()
+                        .map(|at| match hole_depth_to(&shown, at, dir, &to.map(Vec3::from), depth)? {
+                            Some(e) => val(vals, &e, Kind::Length),
+                            None => Ok(f64::INFINITY),
+                        })
+                        .collect::<Result<_>>()?
+                } else {
+                    Vec::new()
+                };
+                (spots, dir, reaches)
+            };
             let points_gone = hole_points_gone(st, f);
             if !points_gone.is_empty() {
                 append_warning(
@@ -9931,19 +9957,6 @@ fn eval_feature(
                     format!("sketch point(s) {} no longer in the sketch: not drilled there (edit the Hole to drop them)", backticked(&points_gone)),
                 );
             }
-            // How deep each hole goes (through all: as far as the wall goes), read before the cut:
-            // the pieces of a wall the thread runs along lie within it.
-            let reaches: Vec<f64> = if thread.is_some() {
-                spots
-                    .iter()
-                    .map(|at| match hole_depth_to(st, at, dir, &to.map(Vec3::from), depth)? {
-                        Some(e) => val(vals, &e, Kind::Length),
-                        None => Ok(f64::INFINITY),
-                    })
-                    .collect::<Result<_>>()?
-            } else {
-                Vec::new()
-            };
             let tools = hole_feature_tools(doc, vals, st, f)?;
             let handled = sheet_hole_cut(st, f, &tools, warning)?;
             let tools: Vec<Traced> = tools.into_iter().map(|(tool, _)| tool).collect();
@@ -9980,16 +9993,20 @@ fn eval_feature(
                 });
                 let ease = thread::runout(vals, ease_out)?;
                 for (p, reach) in spots.into_iter().zip(reaches) {
-                    let walls = parallel_tapped_wall(st, p, dir, r, reach);
+                    // The walls are found where the bodies are shown, each with the frame of its
+                    // body: the thread goes on that body, in its own frame (#17623).
+                    let walls = parallel_tapped_wall(&*hole_as_shown(st, f)?, p, dir, r, reach);
                     if pipe && walls.is_empty() {
                         return Err(DocError::Invalid("no cylindrical pipe-thread wall remains".into()));
                     }
                     // A pipe thread is one taper from the entry: its first wall only.
-                    let walls: Vec<(f64, f64, Vec3)> = match walls.first() {
-                        None => vec![(0.0, f64::INFINITY, p + dir.any_perp() * r + dir * (r * 0.5))],
+                    let walls: Vec<(f64, f64, Vec3, Option<Mat>)> = match walls.first() {
+                        None => vec![(0.0, f64::INFINITY, p + dir.any_perp() * r + dir * (r * 0.5), None)],
                         Some(first) if pipe => vec![*first],
                         Some(_) => walls,
                     };
+                    let point_in = |m: &Option<Mat>, q: Vec3| m.as_ref().map_or(q, |m| crate::apply_point(m, q));
+                    let dir_in = |m: &Option<Mat>| m.as_ref().map_or(dir, |m| crate::apply_vector(m, dir));
                     // The thread depth runs from where the first wall starts, through every piece
                     // of the wall it reaches (#13505).
                     let first = walls.first().map_or(0.0, |w| w.0);
@@ -10000,7 +10017,7 @@ fn eval_feature(
                         // at a blind hole's bottom the groove stops clear of it, or fades out
                         // before it with a runout. Every piece is found before any is cut.
                         let mut on = Vec::new();
-                        for (lo, hi, wall) in &walls {
+                        for (lo, hi, wall, m) in &walls {
                             let extent = match stop {
                                 None => thread::Extent::Full,
                                 Some(s) if s >= *hi => thread::Extent::Full,
@@ -10008,25 +10025,27 @@ fn eval_feature(
                                 Some(_) => break,
                             };
                             // A piece past the first starts at its end nearest the entry.
-                            let from = if on.is_empty() { p } else { p + dir * *lo };
+                            let from = point_in(m, if on.is_empty() { p } else { p + dir * *lo });
                             let ask = thread::ThreadAsk { modeled: true, extent, from: Some(from), ease_out: ease, ..ask };
-                            on.push(thread_on(st, f.id, *wall, &ask)?);
+                            on.push(thread_on(st, f.id, point_in(m, *wall), &ask)?);
                         }
                         for o in on {
                             thread::cut(st, o, (crate::thread_forms::ThreadTip::None, None, None))?;
                         }
                         continue;
                     }
-                    let mut threads = Vec::new();
-                    for (lo, _, wall) in &walls {
+                    // Each thread with the entry and the drilling direction in its body's frame.
+                    let mut threads: Vec<(ThreadInfo, Vec3, Vec3)> = Vec::new();
+                    for (lo, _, wall, m) in &walls {
                         if stop.is_some_and(|s| s <= *lo) {
                             break;
                         }
-                        threads.push(thread_on(st, f.id, *wall, &ask)?.info);
+                        threads.push((thread_on(st, f.id, point_in(m, *wall), &ask)?.info, point_in(m, p), dir_in(m)));
                     }
                     if let Some(depth) = thread_depth {
-                        let useful =
-                            |t: &ThreadInfo| (t.axis_point + t.axis * t.start - p).dot(dir).max((t.axis_point + t.axis * t.end - p).dot(dir));
+                        let useful = |(t, p, dir): &(ThreadInfo, Vec3, Vec3)| {
+                            (t.axis_point + t.axis * t.start - *p).dot(*dir).max((t.axis_point + t.axis * t.end - *p).dot(*dir))
+                        };
                         let available = threads.last().map_or(0.0, |t| useful(t) - first);
                         if depth > available + 1e-9 {
                             return Err(DocError::Invalid(format!(
@@ -10038,8 +10057,9 @@ fn eval_feature(
                         // Stop `depth` past the first wall's start in the drilling direction,
                         // independently of the wall probe's position and the cylinder surface's
                         // axis orientation.
-                        if let (Some(t), Some(s)) = (threads.last_mut(), stop) {
-                            let past = useful(t) - s;
+                        if let (Some(last), Some(s)) = (threads.last_mut(), stop) {
+                            let past = useful(&*last) - s;
+                            let (t, _, dir) = last;
                             if past > 0.0 {
                                 if dir.dot(t.axis) > 0.0 {
                                     t.end -= past;
@@ -10049,7 +10069,7 @@ fn eval_feature(
                             }
                         }
                     }
-                    st.threads.extend(threads);
+                    st.threads.extend(threads.into_iter().map(|(t, _, _)| t));
                 }
             }
             Ok(())

@@ -690,6 +690,23 @@ fn a_root_hole_at_sketch_points_drills_only_the_part_it_reaches() {
     run(&mut s, "timeline.redefine", json!({"feature": "H", "command": "solid.hole", "params": only}));
     assert_eq!(s.doc.find_feature("H").unwrap().participants, vec!["Base block".to_string()]);
     assert!(body_volume(&s, "Base block") < BLOCK - 1.0 && (body_volume(&s, "Cap block") - BLOCK).abs() < 1e-6);
+
+    // A tapped pipe-thread hole from a root sketch on Cap, defined at x 0 and placed at x 100:
+    // its wall is found where Cap is shown, and the thread goes on Cap in Cap's own frame.
+    let mut s = two_parts(0.0, [100.0, 0.0, 0.0]);
+    run(&mut s, "component.activate", json!({"component": "root"}));
+    run(&mut s, "sketch.create", json!({"plane": {"face": [120, 15, 10]}, "name": "Tap", "project_edges": false}));
+    run(&mut s, "sketch.point", json!({"point": [120, 15], "id": "t"}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.hole", json!({"sketch": "Tap", "points": ["t"], "single": true, "thread": "G 1/4", "depth": 8}));
+    assert!(s.model.results.iter().all(|r| r.error.is_none()), "{:?}", s.model.results);
+    assert!(body_volume(&s, "Cap block") < BLOCK - 1.0 && (body_volume(&s, "Base block") - BLOCK).abs() < 1e-6);
+    let st = s.model.state();
+    let [t] = st.threads.as_slice() else { panic!("one thread, not {}", st.threads.len()) };
+    assert_eq!(t.body, "Cap block");
+    let axis = t.axis.vec();
+    let off = t.axis_point - Vec3::new(20.0, 15.0, 0.0);
+    assert!((off - axis * off.dot(axis)).len() < 1e-6 && axis.z.abs() > 1.0 - 1e-9, "{:?} {axis:?}", t.axis_point);
 }
 
 /// #6000: in a turned component, a named plane ("XY") is the component's own; an explicit
