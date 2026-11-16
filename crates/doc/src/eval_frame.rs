@@ -347,9 +347,9 @@ pub(super) fn trim(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, 
     Ok(())
 }
 
-/// The member of feature `f` on line `line`, as its feature laid it out (before any trim): the
-/// plane square to the line at its start (x × y along the line), its length, and its profile in
-/// that plane.
+/// The member of feature `f` on line `line` as its body is now: the plane square to the line at
+/// its start (x × y along the line), its length between its ends (where trims moved them, along
+/// the middle of the section) and its profile in that plane.
 pub(crate) fn member_section(
     doc: &Document,
     vals: &BTreeMap<String, Value>,
@@ -358,10 +358,11 @@ pub(crate) fn member_section(
     line: &str,
 ) -> Result<(Plane, f64, Region2)> {
     let lay = layout(doc, vals, f, st)?;
-    let m = lay.member(line).ok_or_else(|| DocError::Unknown(format!("line `{line}` of the member feature")))?;
-    let (plane, len) = (m.plane, m.len);
-    let region = lay.regions.into_iter().next().ok_or_else(|| DocError::Invalid("the member profile has no area".into()))?;
-    Ok((plane, len, region))
+    let laid = lay.member(line).ok_or_else(|| DocError::Unknown(format!("line `{line}` of the member feature")))?;
+    let ends = st.frame_members.iter().rev().find(|m| m.feature == f.id && m.line == line).map_or([None, None], |m| m.ends);
+    let (_, t0, t1) = laid.axis(&lay, &ends)?;
+    let region = lay.regions.first().cloned().ok_or_else(|| DocError::Invalid("the member profile has no area".into()))?;
+    Ok((laid.plane, t1 - t0, region))
 }
 
 /// A plane a member is trimmed to, where it is now: a body face's plane follows the face, as a

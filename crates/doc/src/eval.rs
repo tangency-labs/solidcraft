@@ -3516,6 +3516,28 @@ fn placement_digest(doc: &Document, f: &Feature, st: Option<&ModelState>) -> u64
                 }
             }
         }
+        // A trim's face targets are read as an end cap's faces are: in the frame each was picked
+        // in, through the placement it was picked at, so moving that occurrence trims again.
+        FeatureKind::FrameTrim { to, .. } => {
+            let faces = to.iter().filter_map(|t| match t {
+                crate::frame::TrimTarget::Plane { plane } => crate::face_anchor::plane_face_anchor(plane),
+                crate::frame::TrimTarget::Member { .. } => None,
+            });
+            for anchor in faces {
+                match anchor.author_frame(doc, f.component) {
+                    Ok(m) => {
+                        hash_placement(&m, &mut h);
+                        frame.get_or_insert(m);
+                    }
+                    Err(e) => e.to_string().hash(&mut h),
+                }
+                if anchor.path.is_empty() {
+                    reads.components.insert(anchor.component);
+                } else {
+                    reads.paths.push(anchor.path.clone());
+                }
+            }
+        }
         _ => {}
     }
     reads.paths.extend(datums);

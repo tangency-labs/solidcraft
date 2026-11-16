@@ -1743,6 +1743,17 @@ fn rename_one(s: &mut Session, cmd: &str, given: &str, name: &str) -> Result<Bod
                 }
             }
         }
+        if let FeatureKind::FrameTrim { to, .. } = &mut f.kind {
+            for target in to {
+                if let solidcraft_doc::frame::TrimTarget::Plane { plane } = target
+                    && let Some(anchor) = super::sketch::face::anchor_mut(plane)
+                    && anchor.target.body == old
+                {
+                    let ids = std::collections::BTreeMap::from([(anchor.target.origin_feature, anchor.target.origin_feature)]);
+                    anchor.remap_target(&ids, &std::collections::BTreeMap::from([(old.clone(), name.to_string())]))?;
+                }
+            }
+        }
         let Ok(mut v) = serde_json::to_value(&f.kind) else { continue };
         if replace_body_name(&mut v, &old, name, false, 0) {
             match serde_json::from_value(v) {

@@ -2309,3 +2309,76 @@ fn trims_put_member_ends_where_the_hand_derived_answer_says() {
         }
     }
 }
+
+/// A trimmed member's end takes an end cap as any end does, and the cap reads the member's
+/// trimmed length: an inward cap longer than the trimmed member is refused, though the member
+/// as first made was long enough for it.
+#[test]
+fn an_end_cap_closes_a_trimmed_members_end() {
+    let mut s = capped_post(square_tube());
+    run(&mut s, "frame.trim", json!({"members": ["Post"], "to": {"plane": {"origin": [0, 0, 250], "normal": [0, 0, 1]}}, "end": "end"}));
+    let top = face_pick(&s, "Post", [18.5, 0.0, 250.0], [0.0, 0.0, 1.0]);
+    let before = s.doc.to_json();
+    let e = s.execute("frame.end_cap", &json!({"faces": [top.clone()], "thickness": 260, "direction": "inward"})).unwrap_err().to_string();
+    assert!(e.contains("needs a longer member"), "{e}");
+    assert_eq!(s.doc.to_json(), before);
+    run(&mut s, "frame.end_cap", json!({"faces": [top], "thickness": 6}));
+    let cap = measured(&mut s, "Post End Cap");
+    assert!(rel(cap.1, 40.0 * 40.0 * 6.0) < 1e-9, "{cap:?}");
+    assert!(near3(cap.2, [-20.0, -20.0, 250.0]) && near3(cap.3, [20.0, 20.0, 256.0]), "{cap:?}");
+}
+
+/// Moving the occurrence that places a trim's target face trims the member again: the incremental
+/// model gives what a model built from scratch does.
+#[test]
+fn moving_a_trim_targets_occurrence_trims_as_from_scratch() {
+    let mut s = Session::default();
+    let bar = members_3d(&mut s, "Bar", &[([100.0, 0.0, 0.0], [300.0, 0.0, 0.0])]);
+    run(&mut s, "solid.box", json!({"length": 10, "width": 100, "height": 100, "corner": [0, -50, -50], "body_name": "Plate"}));
+    let holder = run(&mut s, "component.create", json!({"name": "Holder", "grounded": false}))["component"].as_u64().unwrap();
+    run(&mut s, "occurrence.move", json!({"occurrence": "Holder:1", "translate": [20, 0, 0]}));
+    run(&mut s, "component.activate", json!({"component": 0}));
+    std::sync::Arc::make_mut(&mut s.doc).body_components.insert("Plate".into(), holder);
+    s.refresh();
+    // The plate's face at x = 10 in its component, x = 30 where its occurrence places it.
+    let face = face_pick(&s, "Plate", [10.0, 0.0, 0.0], [1.0, 0.0, 0.0]);
+    let face = json!({"body": "Plate", "index": face["index"], "face": [30.0, 0.0, 0.0]});
+    run(&mut s, "frame.trim", json!({"members": bar, "to": {"plane": face}}));
+    let trimmed = measured(&mut s, "Bar");
+    assert!((trimmed.2[0] - 30.0).abs() < 1e-6, "{trimmed:?}");
+    run(&mut s, "occurrence.move", json!({"occurrence": "Holder:1", "translate": [50, 0, 0]}));
+    let warm = bodies(&mut s);
+    let mut cold = Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap());
+    let cold = bodies(&mut cold);
+    assert_eq!(warm.len(), cold.len(), "{warm:?} vs {cold:?}");
+    for (w, c) in warm.iter().zip(&cold) {
+        assert!(w.0 == c.0 && rel(w.1, c.1) < 1e-9 && near3(w.2, c.2) && near3(w.3, c.3), "{w:?} vs {c:?}");
+    }
+    assert!((measured(&mut s, "Bar").2[0] - trimmed.2[0]).abs() > 1.0, "the trim followed the move");
+}
+
+/// A trim pasted with the members and the face it trims to targets their copies: the pasted bar
+/// ends on the pasted plate's face, not on the face of the plate it was copied from.
+#[test]
+fn a_pasted_trim_trims_to_the_pasted_face() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 10, "width": 100, "height": 100, "corner": [0, -50, -50], "body_name": "Plate", "name": "Plate box"}));
+    let bar = members_3d(&mut s, "Bar", &[([100.0, 0.0, 0.0], [300.0, 0.0, 0.0])]);
+    let face = face_pick(&s, "Plate", [10.0, 0.0, 0.0], [1.0, 0.0, 0.0]);
+    run(&mut s, "frame.trim", json!({"members": bar, "to": {"plane": face}, "name": "Butt"}));
+    assert!((measured(&mut s, "Bar").2[0] - 10.0).abs() < 1e-6);
+    // The member feature made by `members_3d` is Member1.
+    run(&mut s, "timeline.copy", json!({"features": ["Plate box", "Bar", "Member1", "Butt"]}));
+    let pasted = run(&mut s, "timeline.paste", json!({"translate": [200, 500, 0]}));
+    assert!(pasted["errors"].as_array().unwrap().is_empty(), "{pasted}");
+    let all = bodies(&mut s);
+    let copy =
+        all.iter().find(|b| b.0.starts_with("Bar") && b.2[1] > 400.0).cloned().unwrap_or_else(|| panic!("no pasted bar: {all:?} after {pasted}"));
+    // The pasted plate's face is at x = 210: the pasted bar, 300 to 500, is extended back to it.
+    assert!(near3(copy.2, [210.0, 477.5, -22.5]) && near3(copy.3, [500.0, 522.5, 22.5]), "{copy:?}");
+    assert!((measured(&mut s, "Bar").2[0] - 10.0).abs() < 1e-6, "the original keeps its trim");
+    // A moved trim to a face the paste leaves behind is refused, as a moved sketch on one is.
+    run(&mut s, "timeline.copy", json!({"features": ["Bar", "Member1", "Butt"]}));
+    let refused = s.execute("timeline.paste", &json!({"translate": [0, 900, 0]})).unwrap_err().to_string();
+    assert!(refused.contains("external exact face attachment"), "{refused}");
+}
