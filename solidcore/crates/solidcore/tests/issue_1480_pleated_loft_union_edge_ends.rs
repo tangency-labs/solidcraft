@@ -1,7 +1,7 @@
 //! tangency-labs/solidcore#1480 (#470, WR-498): the union of two crossing pleated loft
 //! skins. Where pleat ridges cross, two vertex definitions 3e-5 to 8e-5 apart fall in one
 //! proto vertex, which `Resolve` makes two vertices of; the proto vertex's position is
-//! their mean. With `imprint_extends_edge_to_proto_vertex` (and the end trim, WR-452) an
+//! their mean. With the end extension (WR-453) and the end trim (WR-452) an
 //! intersection curve that already ended on its own vertex was continued to that mean,
 //! leaving edge ends up to 8.06e-5 off their vertices and dropping 104 short edges
 //! (992 edges, 608 vertices). The fork's ffaf4e8, folded into both end fits, sends such an
@@ -116,34 +116,23 @@ fn union_edge_ends(k: &mut Kernel) -> (usize, usize, f64) {
     (r.edge_list().len(), r.vertex_list().len(), worst)
 }
 
-/// The extension flag, with `new_edge_vertex_tolerance_covers_gap` (whose wider vertex
-/// tolerances gave the extension its reach in #1480's bisect). Without ffaf4e8 the
+/// The end extension (always on), with `new_edge_vertex_tolerance_covers_gap` (whose wider
+/// vertex tolerances gave the extension its reach in #1480's bisect). Without ffaf4e8 the
 /// extended union had 992 edges, 608 vertices and an edge end 8.061e-5 off its vertex. With
 /// every `UpstreamFixes` flag on (SolidCraft's set) the union is the C++ fork's: 1096 edges,
 /// 712 vertices, worst edge end 1.206e-5.
-fn kernel(extend: bool) -> Kernel {
+fn kernel() -> Kernel {
     let mut k = Kernel::new(&KernelOptions::default());
     k.fixes.new_edge_vertex_tolerance_covers_gap = true;
-    k.fixes.imprint_extends_edge_to_proto_vertex = extend;
     k
 }
 
 #[test]
 fn issue_1480_union_edges_end_at_their_own_vertices() {
-    let mut k = kernel(true);
+    let mut k = kernel();
     let (edges, vertices, worst) = union_edge_ends(&mut k);
     assert_eq!((edges, vertices), (1096, 712));
     assert!(worst <= 2e-5, "worst edge end {worst:e} off its vertex");
-}
-
-#[test]
-fn issue_1480_union_without_the_extension_keeps_upstream_s_ends() {
-    let mut k = kernel(false);
-    let (edges, vertices, worst) = union_edge_ends(&mut k);
-    // The end trim alone moves no curve end here: upstream's topology, every end within
-    // 7.5e-6.
-    assert_eq!((edges, vertices), (1096, 712));
-    assert!(worst < 7.5e-6, "worst edge end {worst:e} off its vertex");
 }
 
 /// The union, with `new_edge_vertex_tolerance_covers_gap` cleared, then set (every
