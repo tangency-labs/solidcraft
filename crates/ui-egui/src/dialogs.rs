@@ -4813,6 +4813,19 @@ fn enter_applies(d: &Dialog) -> bool {
         && !matches!(&d.kind, Kind::Material { editor, .. } if editor.editing())
 }
 
+/// Dialog OK (`ui.dialog_ok`, a key of the user's choosing, #17416): runs OK in the open dialog on
+/// the next frame, as Enter does, in the dialogs where Enter runs OK. Otherwise the status line
+/// says there is no OK to run.
+pub(crate) fn confirm(app: &mut SolveApp) {
+    match app.dialog.as_mut() {
+        Some(d) if enter_applies(d) => d.confirm = true,
+        _ => {
+            let text = app.tr("ui.dialog_ok_none").to_owned();
+            app.set_status(text, false);
+        }
+    }
+}
+
 /// A right-click in the viewport with a dialog open confirms its active input (#6159): it goes
 /// on to the next input that is still empty, and once every input holds something, runs OK as
 /// Enter does. An empty input the dialog can't make its feature without stays active, and the
@@ -9252,6 +9265,30 @@ mod right_click_tests {
         }
         let bounds = h.app.session.world_state().unwrap().bodies.first().map(|b| b.mesh().bounds());
         assert_eq!(bounds.map(|b| b.max.z - b.min.z), Some(25.0), "extruded by the typed value");
+    }
+
+    #[test]
+    fn a_key_bound_to_dialog_ok_runs_ok_and_says_so_with_no_dialog() {
+        let mut h = Harness::new();
+        crate::keymap::bind(&mut h.app, "ui.dialog_ok", "F9", false).unwrap();
+        h.step(&json!({"key": "F9"})).unwrap();
+        assert_eq!(h.app.status.as_ref().map(|(text, _, _)| text.as_str()), Some(h.app.tr("ui.dialog_ok_none")));
+        let mut h = mirror();
+        h.app.preferences.right_click_confirms = false;
+        let bound = h.call("ui.shortcut", json!({"command": "ui.dialog_ok", "key": "F9"}));
+        assert_eq!(bound["result"]["key"], "F9", "the control channel binds Dialog OK: {bound}");
+        h.step(&json!({"click": {"world": [25, 15, 20]}})).unwrap();
+        h.app.dialog.as_mut().unwrap().active = 1;
+        h.step(&json!({"click": {"world": [50, 15, 10]}})).unwrap();
+        assert!(h.app.dialog.as_ref().is_some_and(|d| d.inputs.iter().all(|i| !i.items.is_empty())));
+        let features = h.app.session.doc.features.len();
+        h.step(&json!({"key": "F9"})).unwrap();
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
+        while h.app.dialog.is_some() {
+            assert!(std::time::Instant::now() < deadline, "OK did not finish: {:?}", h.app.dialog.as_ref().and_then(|d| d.error.clone()));
+            h.frames(1);
+        }
+        assert_eq!(h.app.session.doc.features.len(), features + 1, "the key made the Mirror feature");
     }
 
     #[test]
