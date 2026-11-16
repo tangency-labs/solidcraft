@@ -824,8 +824,8 @@ pub struct ModelState {
     /// feature id, in the order of [`crate::FeatureKind::face_points`]): a pattern or mirror of
     /// the feature puts its copies there, where the feature found the faces before it ran. A cut
     /// up to a face it splits leaves no one face of that name for the copies to find (#15054).
-    /// Not in the digest (the definitions before a pattern, which its key covers, decide them)
-    /// nor in a saved model: a state opened from one has none, and copies look the names up.
+    /// Not in the digest (the definitions before a pattern, which its key covers, decide them).
+    /// Saved models share these points between states, keeping copies editable after reopening.
     named_faces: BTreeMap<u64, Vec<Vec3>>,
     /// The radius per edge a fillet used when it reduced a radius too large for some of its edges
     /// (by feature id, see `FilletFit::Reduce`).
