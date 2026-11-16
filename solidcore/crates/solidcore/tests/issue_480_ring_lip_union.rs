@@ -22,7 +22,7 @@ use solidcore::mass::integrator::properties::{brep_volume, PropertyAttributes};
 use solidcore::math::Point3;
 use solidcore::math::Vec3;
 use solidcore::primitive::api_primitives::{create_box, create_cylinder, create_sphere};
-use solidcore::topology::brep::p1::{edges, faces};
+use solidcore::topology::brep::p1::{edges, faces, vertices};
 use solidcore::topology::brep::p2::is_manifold_solid;
 use solidcore::topology::brep::validation::{check_brep, CheckLevel};
 use solidcore::topology::proto_topology::p1::api_transform::{api_rotate, TransformObject};
@@ -187,6 +187,11 @@ fn box_corner_inside_a_sphere_by_less_than_tolerance_unites_validly() {
         edges(&r, None).unwrap().len(),
         13,
         "the box's twelve and the seam"
+    );
+    assert_eq!(
+        vertices(&r, None).unwrap().len(),
+        10,
+        "the box's eight and the sphere's poles"
     );
 
     let store = AttributeStore::default();
