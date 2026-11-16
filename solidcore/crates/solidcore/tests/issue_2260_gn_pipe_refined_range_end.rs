@@ -56,7 +56,6 @@ const SOLIDCRAFT_C494A18: &[&str] = &[
     "corner_patch_face_side_twist",
     "curve_contacts_at_curve_ends",
     "curve_loop_normal_from_area",
-    "degenerate_proto_edge_in_one_vertex",
     "degen_param_tiebreak_uses_actual_param",
     "edgeuse_convexity_propagates_step_off_failure",
     "fillet_chamfer_cone_on_arc",

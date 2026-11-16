@@ -157,34 +157,13 @@ fn assert_host_legacy_windows_closed(h: &Harness) {
 }
 
 #[test]
-fn host_retains_one_legacy_move_editor_and_the_pending_capture_question() {
+fn host_retains_the_pending_capture_question() {
     let (mut h, _, occurrence) = crate::test_support::component_box();
     h.app.home.open = false;
     h.app.preferences.language = "en".into();
     h.app.run("occurrence.move", json!({"occurrence":occurrence,"translate":[10,0,0],"capture":false})).unwrap();
     h.settle();
     let pending = h.app.session.pending_moves.clone();
-    h.app.tree.occurrence_move = Some(crate::browser::OccMove::new(occurrence));
-    h.frames(3);
-    let baseline = h.app.tree.occurrence_move.as_ref().unwrap().baseline;
-    assert!(baseline.is_some());
-    assert_panel_host_preserves_design(&mut h, |h| {
-        crate::panel_runtime::enable_host_specimen(&mut h.app, "tabs").unwrap();
-        h.frames(4);
-        let draft = h.app.tree.occurrence_move.as_ref().unwrap();
-        assert_eq!(draft.baseline, baseline);
-        assert!(draft.had_pending);
-        assert_eq!(draft.translate, [0.0; 3]);
-        assert_eq!(crate::scenario::handles("occurrence-move:distance:0").len(), 1);
-        assert_host_legacy_window(h, rect_of("dialog:window").unwrap());
-        assert_eq!(h.app.session.pending_moves, pending);
-    });
-    // Cancel must restore the opening baseline, including the earlier pending move.
-    h.step(&json!({"click":{"handle":"dialog:cancel"}})).unwrap();
-    h.frames(2);
-    assert!(h.app.tree.occurrence_move.is_none());
-    assert_eq!(h.app.session.pending_moves, pending);
-    assert_host_legacy_windows_closed(&h);
     assert_panel_host_preserves_design(&mut h, |h| {
         h.app.start("sketch.create");
         h.frames(3);

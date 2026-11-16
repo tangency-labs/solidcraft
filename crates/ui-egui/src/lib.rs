@@ -2209,9 +2209,10 @@ impl SolveApp {
             joint_handles::start(self);
             return;
         }
-        // One selected placement moves as a component, the same way as its Browser menu,
-        // retaining the exact instance path and the grounding/rigid-group restrictions.
-        // A selected body, or a component picked in the tree, opens Move/Copy on those bodies.
+        // One selected placement opens Move/Copy on it the same way as its Browser menu (it
+        // moves by its placement), retaining the exact instance path and the grounding and
+        // rigid-group restrictions, and asking nothing about its pending move first. Selected
+        // bodies, or a component picked in the tree, open Move/Copy on those.
         if id == "solid.move"
             && let [solidcraft_engine::Sel::Occurrence { path }] = self.session.selection.as_slice()
         {
