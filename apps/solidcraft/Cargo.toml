@@ -90,6 +90,10 @@ windows-sys = { version = "0.61", features = [
     "Win32_UI_WindowsAndMessaging",
 ] }
 winreg = "0.56"
+# The vendored winit's quiet window move (nothing drawn while the window is dragged by its title
+# bar), set from Preferences > Layout's `windows_smooth_window_drag` (src/native_frame.rs; already
+# in the tree through eframe).
+winit = { version = "0.30", default-features = false }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 muda = { version = "0.21.2", default-features = false }

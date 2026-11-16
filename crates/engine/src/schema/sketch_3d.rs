@@ -19,7 +19,7 @@ use super::check::whole;
 use super::motion::require;
 use super::sketch_ends::SketchTarget;
 use super::sketch_shapes::Created;
-use super::types::Point3;
+use super::types::{Point3, SketchRef, present};
 use crate::params;
 
 /// Draw 3D lines through world points, one line per segment, joined end to end. Needs 3D Sketch
@@ -94,8 +94,8 @@ pub struct Point3dParams {
     pub sketch: Option<SketchTarget>,
 }
 
-/// Move one fit point of a drawn 3D curve or point, to a world point or by a world offset. The
-/// points joined to it move too. One undo step.
+/// Move one fit point of a drawn 3D curve or point, or a point on the sketch plane, to a world
+/// point or by a world offset. The points joined to it move too. One undo step.
 #[derive(Debug, Deserialize, JsonSchema)]
 #[schemars(deny_unknown_fields, transform = move_required)]
 pub struct Move3dParams {
@@ -104,6 +104,13 @@ pub struct Move3dParams {
     #[serde(default, deserialize_with = "some", skip_serializing_if = "Option::is_none")]
     #[schemars(with = "WireId")]
     pub wire: Option<WireId>,
+    /// Instead of `wire`: a point on the sketch plane (`l1.end`, `p3`: a line's end, a fit point
+    /// of a spline, a lone point). The lines and fit-point splines through it, or the lone
+    /// point, become drawn 3D curves through the same places first; their constraints and
+    /// dimensions go. Needs 3D Sketch on.
+    #[serde(default, deserialize_with = "some", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "PlanePointId")]
+    pub point: Option<PlanePointId>,
     /// Which fit point of the curve (0 is the first), below 500. Default: 0.
     #[serde(default, deserialize_with = "some", skip_serializing_if = "Option::is_none")]
     #[schemars(with = "FitIndex")]
@@ -143,8 +150,15 @@ fn ends_required(schema: &mut Schema) {
 }
 
 fn move_required(schema: &mut Schema) {
-    require(schema, "wire");
-    schema.insert("anyOf".into(), json!([{"required": ["to"]}, {"required": ["by"]}]));
+    schema.insert(
+        "allOf".into(),
+        json!([
+            {"anyOf": [{"required": ["wire"]}, {"required": ["point"]}]},
+            {"not": {"required": ["wire", "point"]}},
+            {"not": {"required": ["point", "index"]}},
+            {"anyOf": [{"required": ["to"]}, {"required": ["by"]}]},
+        ]),
+    );
 }
 
 /// The `points` of `sketch.line3d` and `sketch.spline3d`: a list of 2 to 500 points, as their
@@ -254,6 +268,32 @@ impl JsonSchema for WireId {
     }
 }
 
+/// The `point` of `sketch.move3d`: a sketch point reference (`p3`, `l1.end`). Whether the
+/// sketch has that point is the handler's to check.
+#[derive(Clone, Debug, PartialEq)]
+pub struct PlanePointId(pub String);
+
+impl<'de> Deserialize<'de> for PlanePointId {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        match Value::deserialize(d)? {
+            Value::String(s) => Ok(PlanePointId(s)),
+            _ => Err(D::Error::custom("must be a sketch point id")),
+        }
+    }
+}
+
+impl JsonSchema for PlanePointId {
+    fn schema_name() -> Cow<'static, str> {
+        "PlanePointId".into()
+    }
+    fn inline_schema() -> bool {
+        true
+    }
+    fn json_schema(_: &mut SchemaGenerator) -> Schema {
+        json_schema!({"type": "string"})
+    }
+}
+
 /// The `index` of `sketch.move3d`: a whole number below 500, as the handler reads it.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct FitIndex(pub usize);
@@ -286,6 +326,8 @@ impl JsonSchema for FitIndex {
 pub struct Curves3dResult {
     /// The ids of the curves drawn: one per segment for a line, one for a spline or an arc.
     pub curves: Vec<String>,
+    /// The Coincident constraints that join what was drawn to the drawn 3D ends it meets (#10608).
+    pub constraints: Vec<String>,
     /// The sketch's solve: `{solved, dof}`.
     pub sketch: Value,
     /// Everything the call added to the sketch: `{points, curves, constraints, dimensions}`, and
@@ -302,6 +344,8 @@ pub struct Curves3dResult {
 pub struct Point3dResult {
     /// The id of the point drawn.
     pub point: String,
+    /// The Coincident constraints that join what was drawn to the drawn 3D ends it meets (#10608).
+    pub constraints: Vec<String>,
     /// The sketch's solve: `{solved, dof}`.
     pub sketch: Value,
     /// Everything the call added to the sketch: `{points, curves, constraints, dimensions}`, and
@@ -318,6 +362,54 @@ pub struct Point3dResult {
 pub struct Move3dResult {
     /// How many fit points moved: the one asked for and the points joined to it.
     pub moved: usize,
+    /// With `point`: the drawn 3D curves the plane geometry through it became.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub curves: Vec<String>,
+    /// With `point`: the drawn curve the moved point is on now (the first of `curves`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub wire: Option<String>,
+    /// With `point`: which fit point of `wire` it is, for moving it again with `wire` and `index`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub index: Option<usize>,
+    /// The sketch's solve: `{solved, dof}`.
+    pub sketch: Value,
+    /// In the warn parameter-check mode: what the call's parameters got wrong.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub param_warnings: Vec<String>,
+}
+
+/// An axis of the sketch's 3D space.
+#[derive(Clone, Copy, Debug, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum AxisName {
+    X,
+    Y,
+    Z,
+}
+
+/// Make drawn 3D lines parallel to an axis.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct AlongAxisParams {
+    /// A drawn 3D line's id.
+    #[serde(default)]
+    pub line: Option<String>,
+    /// Several drawn 3D lines' ids, each made parallel to the axis.
+    #[serde(default)]
+    pub lines: Option<Vec<String>>,
+    /// The axis of the sketch's 3D space (its component's, for a sketch in a component).
+    pub axis: AxisName,
+    /// The sketch (default: the one being edited).
+    #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "SketchRef")]
+    pub sketch: Option<SketchRef>,
+}
+
+/// What `sketch.constraint.along_axis` returns.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct AlongAxisResult {
+    /// The constraint ids, one per line (an existing one when the line already had it).
+    pub constraints: Vec<String>,
     /// The sketch's solve: `{solved, dof}`.
     pub sketch: Value,
     /// In the warn parameter-check mode: what the call's parameters got wrong.

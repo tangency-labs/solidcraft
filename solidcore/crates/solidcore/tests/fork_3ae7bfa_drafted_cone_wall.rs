@@ -11,7 +11,7 @@
 //! - 3ae7bfa (no flag: `CurveExtension` is the fork's own corner rule, WR-520's area): a
 //!   drafted arc's wall is its exact cone (`sm_DraftCone`), not the B-spline ruled between
 //!   its ends, and its seams' pcurves are cut at the cone's spans.
-//! - dda881f (`cover_wraps_across_closed_seam`, WR-599): the union's cover reads the
+//! - dda881f (WR-599's cover across a closed seam): the union's cover reads the
 //!   closure of a surface whose NURBS swaps u and v (the cones) in the step's direction, so
 //!   it takes the disc's cone face over the bar's and the two are one face; the vertex
 //!   V = (40, 10 tan 5, 10) where the front top edge meets the concave arc has three edges.
@@ -200,14 +200,11 @@ fn check(k: &mut Kernel, b: &mut Brep) {
     assert!(lines.is_empty(), "check_brep: {lines:?}");
 }
 
-/// The kernel of the peg's union: WR-599's cover across a closed seam (`cover`) and
-/// WR-598's seam iso-curve join (`delete_vertex_joins_seam_iso_curve`), which merges the seam's vertex the cover leaves on the
+/// The kernel of the peg's union. WR-598's seam iso-curve join and WR-599's cover across a
+/// closed seam are both always on: the join merges the seam's vertex the cover leaves on the
 /// bar's bottom arc (the fork's counts need both).
-fn peg_kernel(cover: bool) -> Kernel {
-    let mut k = Kernel::default();
-    k.fixes.cover_wraps_across_closed_seam = cover;
-    k.fixes.delete_vertex_joins_seam_iso_curve = true;
-    k
+fn peg_kernel() -> Kernel {
+    Kernel::default()
 }
 
 fn peg(k: &mut Kernel) -> Brep {
@@ -261,7 +258,7 @@ fn the_bars_arc_wall_is_its_exact_cone() {
 /// closed-form volume.
 #[test]
 fn the_drafted_peg_has_one_cone_face() {
-    let mut k = peg_kernel(true);
+    let mut k = peg_kernel();
     let mut b = peg(&mut k);
     assert_eq!(counts(&b), (7, 15, 10));
     let cones = cone_faces(&k, &b);
@@ -275,18 +272,6 @@ fn the_drafted_peg_has_one_cone_face() {
     // (the fork at dda881f: 8291.612193902547 at accuracy 1e-10; here 1e-6, to keep the test
     // quick)
     assert!((v - want).abs() <= 1e-7 * want, "volume {v} want {want}");
-}
-
-/// WR-599's cover off (upstream refuses every crossing of a seam): the two cone walls stay
-/// apart, four edges at V, as the fork before dda881f.
-#[test]
-fn without_the_cover_the_cone_walls_stay_two_faces() {
-    let mut k = peg_kernel(false);
-    let mut b = peg(&mut k);
-    assert_eq!(counts(&b).0, 8);
-    assert_eq!(cone_faces(&k, &b).len(), 2);
-    assert_eq!(edges_at(&b, v_point()), Some(4));
-    check(&mut k, &mut b);
 }
 
 /// `int_0^1 g`, composite Simpson over 2000 panels (to rounding for the smooth integrands

@@ -11,6 +11,8 @@ const COLORS: crate::preview::Colors = crate::preview::Colors {
     added: [2, 2, 2, 255],
     new_body: [2, 2, 2, 255],
     removed: [3, 3, 3, 100],
+    lost: [5, 5, 5, 100],
+    selected: [7, 7, 7, 255],
     mirrored: [6, 6, 6, 100],
     edge: [0, 0, 0, 255],
     ghost: true,

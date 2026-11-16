@@ -999,3 +999,32 @@ fn surface_extrude_dialog_has_the_drag_arrow_on_every_side() {
         assert!((total - expected).abs() < 1.0, "{direction}: dragging the arrow sets the distance, got {distance}");
     }
 }
+
+/// Double-clicking the distance arrow in the view reverses the direction, as Reverse Direction
+/// does, and keeps the distance (#17402); Symmetric has no direction to reverse.
+#[test]
+fn double_click_on_the_arrow_reverses_the_direction() {
+    use solidcraft_engine::doc::Direction;
+    let mut h = make(json!({}));
+    open(&mut h);
+    h.step(&json!({"click":{"handle":"arrow"},"double":true})).unwrap();
+    h.frames(2);
+    h.step(&json!({"widget":"OK"})).unwrap();
+    assert!(h.app.dialog.is_none(), "{:?}", h.app.session.log);
+    let e = extent(&h);
+    assert_eq!(e.direction, Direction::Negative);
+    let distance = h.app.session.doc.eval(e.distance.as_str(), solidcraft_engine::doc::expr::Kind::Length).unwrap();
+    assert!((distance - 10.0).abs() < 1e-9, "the distance stays: {}", e.distance);
+    open(&mut h);
+    h.step(&json!({"click":{"handle":"arrow"},"double":true})).unwrap();
+    h.frames(2);
+    h.step(&json!({"widget":"OK"})).unwrap();
+    assert_eq!(extent(&h).direction, Direction::Positive, "a second double-click turns it back");
+
+    let mut h = make(json!({"direction":"symmetric"}));
+    open(&mut h);
+    h.step(&json!({"click":{"handle":"arrow"},"double":true})).unwrap();
+    h.frames(2);
+    h.step(&json!({"widget":"OK"})).unwrap();
+    assert_eq!(extent(&h).direction, Direction::Symmetric, "Symmetric stays symmetric");
+}

@@ -4,8 +4,7 @@
 //!
 //! Not upstream: the SolidCraft fork's `source/SMLib/src/SmFilletCliffOverflow.cpp`
 //! (tangency-labs/smlib `8ba4667` and `ae2a6de`, rev `68fb9162`; `eddf0ed` and `bba9914`,
-//! branch `replay/1.0.1`), behind `fixes.fillet_cliff_overflow` (WR-631, WR-638, WR-635,
-//! WR-636). The executive computes the fillet on the
+//! branch `replay/1.0.1`; WR-631, WR-638, WR-635, WR-636). The executive computes the fillet on the
 //! support faces' surfaces (`m_bCliffOverflow`): its fillet B-rep is the sheet of fillet and
 //! corner faces, its boundary on the surfaces of the faces the blends roll on and end on.
 //! The session's `SubtractRemovalRegion`

@@ -371,6 +371,10 @@ pub struct Principal {
     pub k1: f64,
     /// The smaller.
     pub k2: f64,
+    /// Gaussian curvature, 1/mm²: `k1 * k2`, independent of the face's orientation.
+    pub gaussian: f64,
+    /// Mean curvature, 1/mm: `(k1 + k2) / 2`, convex positive against the face's normal.
+    pub mean: f64,
     /// The unit direction of `k1`.
     pub d1: [f64; 3],
     /// The unit direction of `k2`.
@@ -380,8 +384,8 @@ pub struct Principal {
 /// The principal curvatures of `sheet` at each of `points`: each point dropped on every face's
 /// surface, the face whose foot is nearest (the kernel's distance) answering with the kernel's
 /// [`solidcore::query::continuity::principal_curvatures`] there (`k1 >= k2`, convex positive
-/// against the face's normal in its shell, with their directions). `None` for a point no face
-/// answers for (no foot, or a pole).
+/// against the face's normal in its shell, with their directions, Gaussian and mean curvature).
+/// `None` for a point no face answers for (no foot, or a singular point such as a pole).
 ///
 /// # Errors
 /// [`Error::Argument`] for more than [`MAX_CURVATURE_POINTS`] points or a coordinate not finite
@@ -413,6 +417,8 @@ pub fn principal_curvatures(
             out.push(best.map(|(_, pr)| Principal {
                 k1: pr.k1,
                 k2: pr.k2,
+                gaussian: pr.gaussian,
+                mean: pr.mean,
                 d1: array(pr.d1),
                 d2: array(pr.d2),
             }));
