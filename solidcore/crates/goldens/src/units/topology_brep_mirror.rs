@@ -28,6 +28,10 @@ use super::boolean_merge_p1::graph_owned;
 use super::topology_vertexuse::{path_of, BrepIn};
 use crate::{Case, CaseContext, HarnessError, Output, Rng, UnitDiff};
 
+// The case's transform certificate log (test builds only).
+#[cfg(test)]
+use super::topology_brep_p5::transform_certificate::Fired as CertificateLog;
+
 /// The runner of `SmBrep::Mirror`.
 pub struct Runner;
 
@@ -197,14 +201,13 @@ fn clear_logical_lists(b: &mut Brep) -> SolidResult<()> {
     Ok(())
 }
 
-impl UnitDiff for Runner {
-    fn id(&self) -> &'static str {
-        "topology.brep_mirror"
-    }
-
-    fn run_rust(&self, case: &Case) -> Result<Output, HarnessError> {
-        #[cfg(test)]
-        super::topology_brep_p5::transform_certificate::begin_case(&case.name);
+impl Runner {
+    /// [`UnitDiff::run_rust`], with the case's certificate log in test builds.
+    fn run(
+        &self,
+        case: &Case,
+        #[cfg(test)] log: &mut CertificateLog,
+    ) -> Result<Output, HarnessError> {
         let i: Inputs = case.parse()?;
         let mut k = Kernel::default();
         // the Rust reader's B-rep of the same file, its geometry owners named by the
@@ -229,7 +232,8 @@ impl UnitDiff for Runner {
             // 4x4 transforms are checked, one `Transform` step at a time)
             #[cfg(test)]
             if let (Ok(()), Some(m)) = (&r, &i.matrix) {
-                replay_certified(&mut k, input, &b, m, i.scale_tol).expect("certificate replay");
+                replay_certified(&mut k, input, &b, m, i.scale_tol, log)
+                    .expect("certificate replay");
             }
             let st = status(r)?;
             let mut record = vec![st];
@@ -246,6 +250,31 @@ impl UnitDiff for Runner {
             }
             Err(e) => Output::unported(&e).ok_or_else(|| herr(e)),
         }
+    }
+}
+
+#[cfg(test)]
+impl super::topology_brep_p5::transform_certificate::Certified for Runner {
+    fn run_certified(
+        &self,
+        case: &Case,
+        log: &mut CertificateLog,
+    ) -> Result<Output, HarnessError> {
+        self.run(case, log)
+    }
+}
+
+impl UnitDiff for Runner {
+    fn id(&self) -> &'static str {
+        "topology.brep_mirror"
+    }
+
+    fn run_rust(&self, case: &Case) -> Result<Output, HarnessError> {
+        self.run(
+            case,
+            #[cfg(test)]
+            &mut CertificateLog::default(),
+        )
     }
 
     fn generate(&self, rng: &mut Rng) -> Option<Value> {
@@ -510,6 +539,7 @@ fn replay_certified(
     result: &Brep,
     m: &[[f64; 4]; 4],
     scale_tol: bool,
+    log: &mut CertificateLog,
 ) -> SolidResult<()> {
     use super::topology_brep_p5::transform_certificate::Snapshot;
     let Some(steps) = matrix_steps(m, scale_tol)? else {
@@ -520,7 +550,7 @@ fn replay_certified(
             Step::Transform(placement, scale, scale_tol) => {
                 let before = Snapshot::before_transform(k, &copy, *scale)?;
                 solidcore::topology::brep::p5::transform(k, &mut copy, placement, *scale, *scale_tol)?;
-                before.check(k, &mut copy, *scale, *scale_tol, "brep_mirror step")?;
+                before.check(k, &mut copy, *scale, *scale_tol, "brep_mirror step", log)?;
             }
             Step::Mirror(plane) => mirror(k, &mut copy, plane)?,
         }

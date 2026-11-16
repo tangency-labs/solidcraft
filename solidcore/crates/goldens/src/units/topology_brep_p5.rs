@@ -113,7 +113,14 @@ fn curve() -> Curve {
     ))
 }
 
-fn rust_record(k: &mut Kernel, b: &mut Brep, i: &Inputs) -> SolidResult<Vec<f64>> {
+/// The op's record. In test builds `log` is the case's certificate log (see
+/// [`transform_certificate::Fired`]), which the transform (op 12) counts into.
+fn rust_record(
+    k: &mut Kernel,
+    b: &mut Brep,
+    i: &Inputs,
+    #[cfg(test)] log: &mut transform_certificate::Fired,
+) -> SolidResult<Vec<f64>> {
     let v1 = vertex(b, i.first);
     let v2 = vertex(b, i.second);
     let e = edge(b, i.aux);
@@ -290,7 +297,7 @@ fn rust_record(k: &mut Kernel, b: &mut Brep, i: &Inputs) -> SolidResult<Vec<f64>
             if r.is_ok() {
                 let s = i.scale.map(v);
                 before
-                    .check(k, b, s, i.scale_tolerances, "brep_p5 op 12")
+                    .check(k, b, s, i.scale_tolerances, "brep_p5 op 12", log)
                     .expect("certificate check");
             }
             vec![status(r)?]
@@ -569,13 +576,13 @@ fn own_fixture(f: &[f64; 11]) -> Result<Result<Brep, Output>, HarnessError> {
     }
 }
 
-impl UnitDiff for Runner {
-    fn id(&self) -> &'static str {
-        "topology.brep_p5"
-    }
-    fn run_rust(&self, case: &Case) -> Result<Output, HarnessError> {
-        #[cfg(test)]
-        transform_certificate::begin_case(&case.name);
+impl Runner {
+    /// [`UnitDiff::run_rust`], with the case's certificate log in test builds.
+    fn run(
+        &self,
+        case: &Case,
+        #[cfg(test)] log: &mut transform_certificate::Fired,
+    ) -> Result<Output, HarnessError> {
         let i: Inputs = case.parse()?;
         let mut b = match own_fixture(&i.fixture)? {
             Ok(b) => b,
@@ -594,7 +601,7 @@ impl UnitDiff for Runner {
             bind_transform_owners(&mut kernel, &mut b)
                 .map_err(|e| HarnessError::new(e.to_string()))?;
         }
-        match rust_record(&mut kernel, &mut b, &i) {
+        match rust_record(&mut kernel, &mut b, &i, #[cfg(test)] log) {
             Ok(record) if i.op == 2 => Ok(Output::new().values("target_stage", record)),
             // a use or shell the edit unlinked stays in its arena (append-only records)
             // where upstream deletes it; [`graph`] compares only the records reachable
@@ -608,6 +615,26 @@ impl UnitDiff for Runner {
             }
             Err(e) => Output::unported(&e).ok_or_else(|| HarnessError::new(e.to_string())),
         }
+    }
+}
+
+#[cfg(test)]
+impl transform_certificate::Certified for Runner {
+    fn run_certified(
+        &self,
+        case: &Case,
+        log: &mut transform_certificate::Fired,
+    ) -> Result<Output, HarnessError> {
+        self.run(case, log)
+    }
+}
+
+impl UnitDiff for Runner {
+    fn id(&self) -> &'static str {
+        "topology.brep_p5"
+    }
+    fn run_rust(&self, case: &Case) -> Result<Output, HarnessError> {
+        self.run(case, #[cfg(test)] &mut transform_certificate::Fired::default())
     }
     fn generate(&self, rng: &mut Rng) -> Option<Value> {
         let scale = 10f64.powi(rng.range_i64(-6, 6) as i32);
@@ -716,7 +743,8 @@ pub(super) mod transform_certificate {
         points: Vec<[u64; 3]>,
     }
 
-    /// The certified checks one case went through (see [`begin_case`]).
+    /// The certified checks one case went through: the case's certificate log, owned by
+    /// the replay ([`replay_matches_golden`]) and passed down to each checked transform.
     #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
     pub(crate) struct Fired {
         /// WR-507 / WR-508: transforms that scaled the tolerances (closed form checked).
@@ -727,32 +755,57 @@ pub(super) mod transform_certificate {
         pub(crate) identity: usize,
     }
 
-    thread_local! {
-        static FIRED: std::cell::RefCell<(String, std::collections::BTreeMap<String, Fired>)> =
-            std::cell::RefCell::default();
+    impl Fired {
+        fn add(&mut self, other: Self) {
+            self.scaled += other.scaled;
+            self.unscaled += other.unscaled;
+            self.identity += other.identity;
+        }
     }
 
-    /// Starts recording the checks of the case `name` (each runner's `run_rust`).
-    pub(crate) fn begin_case(name: &str) {
-        FIRED.with(|f| {
-            let mut f = f.borrow_mut();
-            f.0 = name.to_string();
-            f.1.entry(name.to_string()).or_default();
-        });
+    /// A runner whose transforms the certificate checks: its [`crate::UnitDiff::run_rust`]
+    /// with the case's log passed down to every transform.
+    pub(crate) trait Certified: crate::UnitDiff {
+        /// Runs `case` as `run_rust` does, counting each checked transform into `log`.
+        fn run_certified(
+            &self,
+            case: &crate::Case,
+            log: &mut Fired,
+        ) -> Result<crate::Output, crate::HarnessError>;
     }
 
-    /// Counts a check for the current case.
-    pub(crate) fn fired(count: impl FnOnce(&mut Fired)) {
-        FIRED.with(|f| {
-            let mut f = f.borrow_mut();
-            let name = f.0.clone();
-            count(f.1.entry(name).or_default());
-        });
+    /// `unit` as the goldens check runs it during one replay, which owns the logs of
+    /// every case it ran, by case name.
+    struct Replay<'a, U: ?Sized> {
+        unit: &'a U,
+        logs: std::cell::RefCell<std::collections::BTreeMap<String, Fired>>,
     }
 
-    /// The checks recorded on this thread so far, by case, and clears them.
-    pub(crate) fn take_fired() -> std::collections::BTreeMap<String, Fired> {
-        FIRED.with(|f| std::mem::take(&mut f.borrow_mut().1))
+    impl<U: Certified + ?Sized> crate::UnitDiff for Replay<'_, U> {
+        fn id(&self) -> &'static str {
+            self.unit.id()
+        }
+        fn run_rust(&self, case: &crate::Case) -> Result<crate::Output, crate::HarnessError> {
+            self.logs.borrow_mut().entry(case.name.clone()).or_default();
+            let mut log = Fired::default();
+            let out = self.unit.run_certified(case, &mut log);
+            if let Some(f) = self.logs.borrow_mut().get_mut(&case.name) {
+                f.add(log);
+            }
+            out
+        }
+        fn generate(&self, rng: &mut crate::Rng) -> Option<serde_json::Value> {
+            self.unit.generate(rng)
+        }
+        fn abs_floors(&self) -> &'static [crate::AbsFloor] {
+            self.unit.abs_floors()
+        }
+        fn cases(
+            &self,
+            ctx: &crate::CaseContext,
+        ) -> Result<Vec<crate::Case>, crate::HarnessError> {
+            self.unit.cases(ctx)
+        }
     }
 
     /// Runs every case of `unit` through the goldens check, in this test build (so every
@@ -760,8 +813,8 @@ pub(super) mod transform_certificate {
     /// blessed golden line: the certificates then checked the very computation the
     /// blessed rows record, and their side work (copies, a kernel shared with the run)
     /// changed none of them. Returns the checks each case went through.
-    pub(crate) fn replay_matches_golden(
-        unit: &dyn crate::UnitDiff,
+    pub(crate) fn replay_matches_golden<U: Certified + ?Sized>(
+        unit: &U,
     ) -> std::collections::BTreeMap<String, Fired> {
         let ctx = crate::CaseContext {
             root: crate::case::repo_root(),
@@ -770,9 +823,12 @@ pub(super) mod transform_certificate {
         let dir = crate::golden::default_dir();
         let golden = crate::golden::read(&dir, unit.id()).unwrap();
         let known = crate::golden::known_failing(&dir, unit.id()).unwrap();
-        let _ = take_fired();
-        let res = crate::golden::check_unit(
+        let replay = Replay {
             unit,
+            logs: std::cell::RefCell::default(),
+        };
+        let res = crate::golden::check_unit(
+            &replay,
             &ctx,
             &crate::runner::RunOptions::default(),
             &golden,
@@ -789,7 +845,7 @@ pub(super) mod transform_certificate {
             res.added,
             res.removed
         );
-        take_fired()
+        replay.logs.into_inner()
     }
 
     impl Snapshot {
@@ -855,6 +911,7 @@ pub(super) mod transform_certificate {
         /// tolerance-scaling step has scale `scale` (`None`: no scale) are the closed
         /// form's. A scale `approx_eq` to `(1, 1, 1)` may also take `SmBrep::Transform`'s
         /// identity exit, which changes nothing. The model size is checked bit for bit.
+        /// Counts the check that passed into the case's `log`.
         pub(crate) fn check(
             &self,
             k: &mut Kernel,
@@ -862,6 +919,7 @@ pub(super) mod transform_certificate {
             scale: Option<Vec3>,
             scale_tolerances: bool,
             what: &str,
+            log: &mut Fired,
         ) -> Result<()> {
             let after = Self::of(k, b)?;
             assert_eq!(
@@ -880,7 +938,7 @@ pub(super) mod transform_certificate {
                     self.size.to_bits(),
                     "{what}: model size estimate"
                 );
-                fired(|f| f.unscaled += 1);
+                log.unscaled += 1;
                 return Ok(());
             };
             // `SmBrep::Transform`'s identity exit (an identity placement and a scale
@@ -889,7 +947,7 @@ pub(super) mod transform_certificate {
             if scale.is_some_and(|v| v.approx_eq(Vec3::new(1.0, 1.0, 1.0)))
                 && self.unchanged(&after)
             {
-                fired(|f| f.identity += 1);
+                log.identity += 1;
                 return Ok(());
             }
             // The size is taken from the transformed body before its tolerances are
@@ -944,7 +1002,7 @@ pub(super) mod transform_certificate {
                     );
                 }
             }
-            fired(|f| f.scaled += 1);
+            log.scaled += 1;
             Ok(())
         }
     }

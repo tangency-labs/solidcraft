@@ -103,6 +103,10 @@ use crate::case::{CaseContext, CaseSource};
 use crate::runner::default_cases;
 use crate::{Case, HarnessError, Output, Rng, UnitDiff};
 
+// The case's transform certificate log (test builds only).
+#[cfg(test)]
+use super::topology_brep_p5::transform_certificate::Fired as CertificateLog;
+
 /// Generated cases per run, whatever `--seeds` says (it can only raise this).
 pub const MIN_GENERATED: usize = 1500;
 
@@ -5092,6 +5096,7 @@ fn apply_transform_op(
     k: &mut Kernel,
     target: Option<TransformObject<'_>>,
     op: &TOpIn,
+    log: &mut CertificateLog,
 ) -> solidcore::Result<()> {
     use super::topology_brep_p5::transform_certificate::Snapshot;
     match target {
@@ -5104,7 +5109,7 @@ fn apply_transform_op(
             let r = apply_transform_op_inner(k, Some(TransformObject::Brep(&mut *b)), op);
             if r.is_ok() {
                 before
-                    .check(k, b, s, true, "proto_topology_p1")
+                    .check(k, b, s, true, "proto_topology_p1", log)
                     .expect("certificate check");
             }
             r
@@ -5172,7 +5177,11 @@ fn append_constructed_transform_record(
     Ok(())
 }
 
-fn run_transform_sequence(obj: &TObjIn, ops: &[TOpIn]) -> Result<Vec<f64>, Fail> {
+fn run_transform_sequence(
+    obj: &TObjIn,
+    ops: &[TOpIn],
+    #[cfg(test)] log: &mut CertificateLog,
+) -> Result<Vec<f64>, Fail> {
     if !(2..=8).contains(&ops.len()) {
         return Err(harness("transform sequence length").into());
     }
@@ -5190,6 +5199,8 @@ fn run_transform_sequence(obj: &TObjIn, ops: &[TOpIn]) -> Result<Vec<f64>, Fail>
             &mut k,
             Some(TransformObject::Brep(&mut brep)),
             op,
+            #[cfg(test)]
+            log,
         ))?;
         let mut record = Vec::new();
         append_constructed_transform_record(&k, &brep, &mut record)?;
@@ -5199,7 +5210,12 @@ fn run_transform_sequence(obj: &TObjIn, ops: &[TOpIn]) -> Result<Vec<f64>, Fail>
     Ok(out)
 }
 
-fn run_transform(obj: &TObjIn, op: &TOpIn, probe: bool) -> Result<Vec<f64>, Fail> {
+fn run_transform(
+    obj: &TObjIn,
+    op: &TOpIn,
+    probe: bool,
+    #[cfg(test)] log: &mut CertificateLog,
+) -> Result<Vec<f64>, Fail> {
     let mut k = Kernel::default();
     let mut curve = None;
     let mut surface = None;
@@ -5339,7 +5355,7 @@ fn run_transform(obj: &TObjIn, op: &TOpIn, probe: bool) -> Result<Vec<f64>, Fail
         TObjIn::Other => Some(TransformObject::Other),
         TObjIn::Null => None,
     };
-    let s = transform_status(apply_transform_op(&mut k, target, op))?;
+    let s = transform_status(apply_transform_op(&mut k, target, op, #[cfg(test)] log))?;
     let mut o = vec![s];
     if let Some(frame) = &probe_frame {
         o.push(frame.initial_types.len() as f64);
@@ -5382,6 +5398,14 @@ fn run_transform(obj: &TObjIn, op: &TOpIn, probe: bool) -> Result<Vec<f64>, Fail
 }
 
 pub(super) fn rust_run(s: &Script) -> Result<Vec<f64>, Fail> {
+    rust_run_logged(s, #[cfg(test)] &mut CertificateLog::default())
+}
+
+/// [`rust_run`], with the case's certificate log in test builds.
+fn rust_run_logged(
+    s: &Script,
+    #[cfg(test)] log: &mut CertificateLog,
+) -> Result<Vec<f64>, Fail> {
     match s {
         Script::List { slots, ops } => run_list(slots, ops),
         Script::Proto {
@@ -5391,9 +5415,11 @@ pub(super) fn rust_run(s: &Script) -> Result<Vec<f64>, Fail> {
             override_tol,
             ops,
         } => run_proto(objects, *approx_tol, *capture, *override_tol, ops, None),
-        Script::Transform { obj, op } => run_transform(obj, op, false),
-        Script::ScaleProbe { obj, op } => run_transform(obj, op, true),
-        Script::TransformSequence { obj, ops } => run_transform_sequence(obj, ops),
+        Script::Transform { obj, op } => run_transform(obj, op, false, #[cfg(test)] log),
+        Script::ScaleProbe { obj, op } => run_transform(obj, op, true, #[cfg(test)] log),
+        Script::TransformSequence { obj, ops } => {
+            run_transform_sequence(obj, ops, #[cfg(test)] log)
+        }
     }
 }
 
@@ -5430,7 +5456,15 @@ pub(super) fn proto_state_before(s: &Script, index: usize) -> Result<Option<Prot
 }
 
 pub(super) fn rust(s: &Script) -> Result<Output, HarnessError> {
-    match rust_run(s) {
+    rust_logged(s, #[cfg(test)] &mut CertificateLog::default())
+}
+
+/// [`rust`], with the case's certificate log in test builds.
+fn rust_logged(
+    s: &Script,
+    #[cfg(test)] log: &mut CertificateLog,
+) -> Result<Output, HarnessError> {
+    match rust_run_logged(s, #[cfg(test)] log) {
         Ok(v) => Ok(Output::new().values("out", v)),
         Err(Fail::Deferred(d)) => Ok(*d),
         Err(Fail::Harness(e)) => Err(e),
@@ -7446,8 +7480,6 @@ pub fn generate_p3(rng: &mut Rng) -> Option<Value> {
 
 /// Runs a case on the Rust side.
 pub fn run_rust_case(case: &Case) -> Result<Output, HarnessError> {
-    #[cfg(test)]
-    super::topology_brep_p5::transform_certificate::begin_case(&case.name);
     rust(&case.parse()?)
 }
 
@@ -7489,9 +7521,18 @@ impl UnitDiff for Runner {
     }
 
     fn run_rust(&self, case: &Case) -> Result<Output, HarnessError> {
-        #[cfg(test)]
-        super::topology_brep_p5::transform_certificate::begin_case(&case.name);
         rust(&case.parse()?)
+    }
+}
+
+#[cfg(test)]
+impl super::topology_brep_p5::transform_certificate::Certified for Runner {
+    fn run_certified(
+        &self,
+        case: &Case,
+        log: &mut CertificateLog,
+    ) -> Result<Output, HarnessError> {
+        rust_logged(&case.parse()?, log)
     }
 }
 
