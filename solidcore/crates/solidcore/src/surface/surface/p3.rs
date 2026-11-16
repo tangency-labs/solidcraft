@@ -56,12 +56,16 @@
 //!   of a 21 x 21 grid over the domain the merge uses; otherwise the cover fails (the
 //!   faces keep the edge between them) instead of merging onto a continuation that is not
 //!   one sheet, and [`CoverCoincident::fold`] names the reversed pair
-//!   ([`ContinuationFold`]). tangency-labs/solidcore#434. The fork also refused a sample
-//!   whose normal is shorter than `SM_EFF_ZERO_SQRT` times the normal at the centre of
-//!   the natural domain; that cut-off is no derived bound, and it refused covers at
-//!   degenerate points of the surface's own domain (an edge where `Du` and `Dv` are
-//!   parallel, whose normal is exactly zero, or a collapsed edge, whose evaluated normal
-//!   is short but has its limit direction). Here a sample whose computed normal is no
+//!   ([`ContinuationFold`]). tangency-labs/solidcore#434. The fork also refused any
+//!   sample whose normal is not longer than `SM_EFF_ZERO_SQRT` times the normal at the
+//!   centre of the natural domain. Past the natural domain this rule is kept: a vanishing
+//!   normal there is a degenerate point (a pole or a cusp) that the continuation adds and
+//!   the surface's own domain does not have, such as the pole a hemisphere's continuation
+//!   reaches, and the merged face would take it on ([`ContinuationFold::Vanishes`]).
+//!   Inside the natural domain (boundary included) it refused covers at the surface's
+//!   own degenerate points (an edge where `Du` and `Dv` are parallel, whose normal is
+//!   exactly zero, or a collapsed edge, whose evaluated normal is short but has its limit
+//!   direction), which the face already has. There a sample whose computed normal is no
 //!   longer than the cross product's own rounding bound (`2 γ_4 |Du| |Dv|`) has no
 //!   direction and witnesses nothing: each comparison bridges it to the last sample with
 //!   a direction along its grid row and column, so a reversal across it is still a fold.
@@ -350,8 +354,21 @@ pub enum ContinuationFold {
         /// The dot product of the two unit normals.
         dot: f64,
     },
-    /// The first derivatives could not be evaluated at `uv`, or the normal there is not
-    /// finite.
+    /// At `uv`, outside the surface's natural domain, the normal vanishes: its length
+    /// `length` is not above `cutoff`, `SM_EFF_ZERO_SQRT` times the length of the normal
+    /// at the centre of the natural domain. The continuation runs into a degenerate point
+    /// (a pole or a cusp) that the surface's own domain does not have.
+    Vanishes {
+        /// The sample.
+        uv: Point2,
+        /// The length of the normal there.
+        length: f64,
+        /// The cut-off it is not above.
+        cutoff: f64,
+    },
+    /// The first derivatives could not be evaluated at `uv` (or at the centre of the
+    /// natural domain, for the cut-off of [`ContinuationFold::Vanishes`]), or the normal
+    /// at `uv` is not finite.
     NotEvaluated {
         /// The sample.
         uv: Point2,
@@ -1608,8 +1625,11 @@ impl Surface {
     /// The first fold of this surface (with out-of-bounds evaluation on) over `domain`
     /// in its STEP parameters, on the `21 x 21` grid `CoverCoincidentSurface`'s fold rule
     /// samples (WR-407): two neighbouring samples whose unit normals turn back
-    /// (`!(dot > 0)`, so a NaN dot refuses), or a sample that cannot be evaluated or whose
-    /// normal is not finite. A sample whose computed normal is no longer than its own
+    /// (`!(dot > 0)`, so a NaN dot refuses), a sample past the natural domain whose normal
+    /// vanishes (not longer than `SM_EFF_ZERO_SQRT` times the normal at the natural
+    /// domain's centre, the fork's cut-off), or a sample that cannot be evaluated or whose
+    /// normal is not finite. Inside the natural domain (boundary included), a sample whose
+    /// computed normal is no longer than its own
     /// rounding bound ([`Surface::step_normal_with_noise`]; an exact zero included, as
     /// at a degenerate edge where `Du` and `Dv` are parallel) has no direction and
     /// witnesses nothing; the next sample along its row and its column is compared with
@@ -1620,6 +1640,14 @@ impl Surface {
     ///
     /// Those of the evaluation.
     fn continuation_fold(&self, k: &Kernel, domain: &Extent2d) -> Result<Option<ContinuationFold>> {
+        // The natural domain and the length of the normal at its centre, the scale of the
+        // continuation's vanishing-normal cut-off.
+        let natural = self.step_uv_domain();
+        let centre = natural.evaluate(0.5, 0.5);
+        let Some((_, reference)) = self.step_normal(k, centre)? else {
+            return Ok(Some(ContinuationFold::NotEvaluated { uv: centre }));
+        };
+        let cutoff = EFF_ZERO_SQRT * reference;
         // The last sample with a direction in each grid column (fixed v), and its uv.
         let mut column: [Option<(Point2, Vec3)>; NUM_FOLD_SAMPLES] = [None; NUM_FOLD_SAMPLES];
         for ii in 0..NUM_FOLD_SAMPLES {
@@ -1637,6 +1665,15 @@ impl Surface {
                 // that has a direction), refuses.
                 if !length.is_finite() || !noise.is_finite() {
                     return Ok(Some(ContinuationFold::NotEvaluated { uv }));
+                }
+                // Past the natural domain, a normal that vanishes is a degenerate point the
+                // surface itself does not have (a pole or a cusp the continuation runs
+                // into): the merged face would take on a singularity, so the cover refuses
+                // (`!(length > cutoff)`, so an incomparable cut-off refuses too).
+                if !Extent2d::from_points(uv, uv).is_contained_by(&natural, 0.0)
+                    && length.partial_cmp(&cutoff) != Some(core::cmp::Ordering::Greater)
+                {
+                    return Ok(Some(ContinuationFold::Vanishes { uv, length, cutoff }));
                 }
                 // No direction: within the cross product's own rounding (also an exact
                 // zero, and a normal whose length underflows).
@@ -2432,6 +2469,34 @@ mod tests {
                 dot: -1.0,
             })
         );
+        Ok(())
+    }
+
+    /// A degenerate point that only the continuation has still refuses, as the fork's
+    /// rule did (the pole a hemisphere's continuation reaches; solidcore-ops'
+    /// `a_dome_1e_8_off_its_circle_joins_to_its_mirror`). `P(u, v) = (u, (u + 1)^2 v)`
+    /// has the normal `(0, 0, (u + 1)^2)`, along +z everywhere but on the line u = -1,
+    /// which it collapses to a point. The natural domain `[0, 1]^2` has no such point;
+    /// over `[-1, 1] x [0, 1]` the first grid row lies on it, so the cover would give the
+    /// face a collapsed edge it does not have.
+    #[test]
+    fn wr_407_collapsed_edge_of_the_continuation_refuses() -> Result<()> {
+        let k = Kernel::default();
+        let s = wr_407_bezier_sheet(&[
+            &[[0.0, 0.0], [0.0, 1.0]],
+            &[[0.5, 0.0], [0.5, 2.0]],
+            &[[1.0, 0.0], [1.0, 4.0]],
+        ])?;
+        let domain = Extent2d::from_bounds(-1.0, 0.0, 1.0, 1.0);
+        let fold = s.continuation_fold(&k, &domain)?;
+        let Some(ContinuationFold::Vanishes { uv, length, cutoff }) = fold else {
+            panic!("the collapsed edge at u = -1 refuses: {fold:?}");
+        };
+        assert_eq!(uv, Point2::new(-1.0, 0.0));
+        assert!(length <= cutoff && cutoff > 0.0, "{length} {cutoff}");
+        // Within the natural domain the same surface is no fold.
+        let inside = Extent2d::from_bounds(0.0, 0.0, 1.0, 1.0);
+        assert_eq!(s.continuation_fold(&k, &inside)?, None);
         Ok(())
     }
 
