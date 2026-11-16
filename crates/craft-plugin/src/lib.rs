@@ -119,7 +119,8 @@ pub struct CommandSchema {
 }
 
 /// A named folder resolved by the app after user approval, never a guest-supplied root.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
 pub struct FileGrant {
     pub name: String,
     pub folder: PathBuf,

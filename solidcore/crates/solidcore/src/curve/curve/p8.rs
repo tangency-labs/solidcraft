@@ -401,6 +401,7 @@ impl Curve {
             &mut None,
             &mut None,
             [None, None],
+            0.0,
         )
     }
 
@@ -439,6 +440,7 @@ impl Curve {
             cache1,
             cache2,
             [None, None],
+            0.0,
         )
     }
 
@@ -451,7 +453,9 @@ impl Curve {
     /// before the body reaches it, and a `None` tolerance builds as that method does.
     /// A populated slot must also match its supplied owner tolerance. These hints
     /// govern the two intersection-tree slots only; nested coincidence and drop
-    /// routines retain their existing curve-owner context.
+    /// routines retain their existing curve-owner context. Coplanar circles
+    /// overlapping past touching by less than `contact_tol` touch at one point
+    /// (WR-787, #15429; [`analytic_curve_intersect`]); zero keeps upstream's crossings.
     ///
     /// # Errors
     ///
@@ -467,6 +471,7 @@ impl Curve {
         cache1: &mut Option<CurveCache<O>>,
         cache2: &mut Option<CurveCache<O>>,
         zone_tols: [Option<f64>; 2],
+        contact_tol: f64,
     ) -> Result<SolutionArray<O>> {
         if opts.handles == [None, None] && opts.analytic_handles == [None, None] {
             let own = operand_handles(self, other);
@@ -486,6 +491,7 @@ impl Curve {
                     &mut None,
                     &mut None,
                     zone_tols,
+                    contact_tol,
                 )?
                 .without_objects());
         }
@@ -499,6 +505,7 @@ impl Curve {
             cache1,
             cache2,
             zone_tols,
+            contact_tol,
         )
     }
 
@@ -541,6 +548,7 @@ impl Curve {
                 cache1,
                 cache2,
                 [None, None],
+                0.0,
             )?
             .without_objects())
     }
@@ -561,6 +569,7 @@ impl Curve {
         cache1_slot: &mut Option<CurveCache<O>>,
         cache2_slot: &mut Option<CurveCache<O>>,
         zone_tols: [Option<f64>; 2],
+        contact_tol: f64,
     ) -> Result<SolutionArray<O>> {
         let [h_this, h_other] = opts.handles;
         let same_curve = core::ptr::eq(self, other);
@@ -588,6 +597,7 @@ impl Curve {
                 AnalyticOperand::Curve(other),
                 other_interval,
                 dist_tol,
+                contact_tol,
                 h_this,
                 h_other,
             )?;
@@ -685,6 +695,7 @@ impl Curve {
                     AnalyticOperand::Curve(a2),
                     other_interval,
                     dist_tol,
+                    contact_tol,
                     a1_handle,
                     a2_handle,
                 )?;

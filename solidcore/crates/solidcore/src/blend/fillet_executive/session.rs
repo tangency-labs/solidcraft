@@ -69,6 +69,7 @@ use crate::blend::fillet_geom::p1::{
     CornerLookup, FilletBrep, FilletCornerId, FilletCornerType, FilletSolverId, FilletVertexType,
 };
 use crate::blend::fillet_geom::p3::SplitCorners;
+use crate::blend::fillet_geom::p4::rail_crossing_nearest;
 use crate::blend::fillet_geom::p5::FilletEdgeContext;
 use crate::blend::fillet_section::section::OperationScope;
 use crate::blend::fillet_solver::curve_blend_sih::MakeCurveBlendSih;
@@ -1851,7 +1852,7 @@ impl<'target> FilletSession<'target> {
     /// per edge, the offset of the second edge use's surface (`radii` gives the first's).
     /// With a linear cross-section that is a chamfer with setbacks `radii[i]` and
     /// `second_radii[i]`. It runs the same `SetFilletParameters`, so the fork's vertex-fan
-    /// split (`fixes.fillet_corner_per_vertex_fan`) applies to it.
+    /// split (WR-665) applies to it.
     ///
     /// # Errors
     /// Those of [`FilletSession::prepare_per_edge_constant_radius`]; native invalid input
@@ -2164,6 +2165,38 @@ impl<'target> FilletSession<'target> {
                     vertex,
                     &edgeuses,
                     &earlier_pass_faces,
+                    |edgeuse| {
+                        let object =
+                            FilletObject::Topology(FilletBody::Target, EntityRef::Edgeuse(edgeuse));
+                        let Some(FilletObject::Solver(id)) =
+                            executive.fillet_solver_of_edgeuse(object)
+                        else {
+                            return false;
+                        };
+                        solvers
+                            .get(id.0 as usize)
+                            .and_then(Option::as_ref)
+                            .is_some_and(|s| {
+                                // only offsets fixed along the edge are a constant reach
+                                // (`OffsetRadiiCanChange`, as the swept corners read it): a
+                                // constant-distance solver's offsets are solved per section
+                                let can_change = match s {
+                                    SolverObject::ConstantRadius(s) => {
+                                        FilletSolverOps::offset_radii_can_change(&**s)
+                                    }
+                                    SolverObject::VariableRadius(s) => {
+                                        FilletSolverOps::offset_radii_can_change(&**s)
+                                    }
+                                    SolverObject::ConstantDistance(s) => {
+                                        FilletSolverOps::offset_radii_can_change(&**s)
+                                    }
+                                    SolverObject::SurfaceSurface(s) => {
+                                        FilletSolverOps::offset_radii_can_change(&**s)
+                                    }
+                                };
+                                matches!(can_change, Ok(false))
+                            })
+                    },
                     |edgeuse| {
                         let object =
                             FilletObject::Topology(FilletBody::Target, EntityRef::Edgeuse(edgeuse));
@@ -4272,9 +4305,10 @@ fn band_rails(
                 // The rail runs on past its ends (the surfaces are not trimmed yet),
                 // as far as a mitre at a corner needs and beyond: the band is the
                 // rail's part between the vertices that end it, where the corners have
-                // placed them (an end no corner has placed is the rail's own; a rail
-                // whose ends are one vertex is closed and whole). The fork's
-                // tangency-labs/smlib@d548305 (WR-649).
+                // placed them, or, at an End at a smooth vertex, where its cap will (any
+                // other end no corner has placed is the rail's own; a rail whose ends are
+                // one vertex is closed and whole). The fork's tangency-labs/smlib@d548305
+                // (WR-649).
                 let ivl = curve.natural_interval();
                 let pseudo = this.pseudo.brep();
                 let prim = eu::primary_edgeuse(pseudo, rail)?
@@ -4293,7 +4327,28 @@ fn band_rails(
                 let mut t_ends = [ivl.min(), ivl.max()];
                 if end0 != end1 {
                     for (t_end, end) in t_ends.iter_mut().zip([end0, end1]) {
-                        if !this.pseudo.fillet_vertex(end)?.is_processed() {
+                        let fv = this.pseudo.fillet_vertex(end)?;
+                        if !fv.is_processed() {
+                            // An End at a smooth vertex places its rails' ends on its cap
+                            // only in the corners' second pass, after this check. Where the
+                            // face a rail rolls on runs on past that vertex, its run-on would
+                            // be taken for band: its end is the rail's crossing with the cap
+                            // nearest the vertex, as that pass finds it.
+                            let Some(id) = fv.fillet_corner() else {
+                                continue;
+                            };
+                            let corner = CornerLookup::table(&this.corners).corner(id)?;
+                            let (Some(cap), Some(vertex)) =
+                                (corner.end_cap.as_ref(), corner.filleted_vertex())
+                            else {
+                                continue;
+                            };
+                            let near = crate::topology::vertex::point(this.target, vertex)?;
+                            if let Some((t, _)) =
+                                rail_crossing_nearest(k, &curve, cap, near, base.approx_tol_3d)?
+                            {
+                                *t_end = t;
+                            }
                             continue;
                         }
                         let at = crate::topology::vertex::point(pseudo, end)?;
@@ -5480,32 +5535,6 @@ impl SolverGeometryAccess<FilletObject> for SessionObjects<'_> {
         };
         Ok(Some((edge(first)?, edge(second)?)))
     }
-    fn geometry_rails_fit(
-        &mut self,
-        k: &mut Kernel,
-        solver: FilletObject,
-        executive: &FilletExecutive<FilletObject>,
-    ) -> Result<bool> {
-        let FilletObject::Solver(id) = solver else {
-            return Err(invalid("object is not a solver"));
-        };
-        let solver = self
-            .solvers
-            .get_mut(id.0 as usize)
-            .and_then(Option::as_mut)
-            .ok_or_else(|| invalid("solver is not live in this session"))?;
-        let mut context = SessionRollOver {
-            corners: &mut self.corners,
-            executive,
-        };
-        FilletSolver::rails_fit_their_faces_with_ops(
-            live_solver_ops(solver),
-            k,
-            self.target,
-            &mut self.pseudo,
-            &mut context,
-        )
-    }
     fn geometry_rails_fit_judged(
         &mut self,
         k: &mut Kernel,
@@ -5570,6 +5599,11 @@ impl SolverGeometryAccess<FilletObject> for SessionObjects<'_> {
         else {
             return Err(invalid("solver edge is not a target edge"));
         };
+        // a sheet's edge bounds no material: its blend adds none (not the fork's, whose
+        // `IsConcaveEdge` fails there)
+        if !crate::blend::fillet_solver::p5::edge_bounds_material(self.target, edge)? {
+            return Ok(false);
+        }
         crate::blend::fillet_solver::p5::is_concave_edge(k, self.target, edge)
     }
     fn geometry_generator_is_linear(&self, solver: FilletObject) -> Result<bool> {

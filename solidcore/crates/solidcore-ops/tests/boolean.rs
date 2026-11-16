@@ -193,6 +193,146 @@ fn two_large_cylinders_touching_along_a_line_union() {
     }
 }
 
+/// The area two circles of radius `r` whose centres are `d` apart have in common.
+#[allow(clippy::disallowed_methods)] // the test's closed form, not ops computing geometry
+fn lens_area(r: f64, d: f64) -> f64 {
+    2.0 * r * r * (d / (2.0 * r)).acos() - 0.5 * d * (4.0 * r * r - d * d).sqrt()
+}
+
+/// A drill of radius 2.5 into the box face y = 0 along +y, centred at (x, z): its wall `depth`
+/// deep, then a 118° point; it starts 1 outside the face.
+#[allow(clippy::disallowed_methods)] // the test's operand geometry, not ops computing it
+fn drill(x: f64, z: f64, depth: f64) -> Body {
+    let (r, top) = (2.5, -1.0);
+    let tip = r / 59f64.to_radians().tan();
+    let p = |u: f64, y: f64| [x, y, z + u];
+    let profile = [
+        Curve::Line {
+            start: p(0.0, top),
+            end: p(r, top),
+        },
+        Curve::Line {
+            start: p(r, top),
+            end: p(r, depth),
+        },
+        Curve::Line {
+            start: p(r, depth),
+            end: p(0.0, depth + tip),
+        },
+        Curve::Line {
+            start: p(0.0, depth + tip),
+            end: p(0.0, top),
+        },
+    ];
+    revolve(&profile, [x, 0.0, z], [0.0, 1.0, 0.0], TAU, true).unwrap()
+}
+
+/// Two parallel holes of radius 2.5 whose axes are 5 − ε apart, a hair less than tangent: their
+/// walls cross in two lines 2√(2.5 ε) apart and lie within ε of each other between them, and
+/// so do their rims on a face square to the axes. The sketch solver of
+/// tangency-labs/solidcraft#15429 left two drill centres 2.3e-9 closer than their diameter, the
+/// upper one with its wall on the plate's top face, and the second cut failed in the merge;
+/// through holes, and the two cylinders' union, failed as not a solid from ε = 1e-9. The walls
+/// and the rims touch within the contact tolerance, as for holes a hair apart (ε = −1e-9):
+/// each cut is one valid solid of the counts of the holes a hair apart and the volume less the
+/// overlap (the lens of the two circles; the points' overlap is below 1e-12), in either order,
+/// also for ε up to the contact tolerance (the zone tolerance, 1e-5), past the wall
+/// intersection's search band (5e-6), where the walls and the rims must still agree; past the
+/// intersection tolerance (2e-5) the walls cross in two lines, as the circles do, and the cut is
+/// one valid solid of the volume. Between the two (ε = 1.5e-5) the cut may be refused, but never
+/// a valid solid of another volume (a contact tolerance of 2e-5 kept the second tool whole, as a
+/// void, 39.27 short). The two cylinders unite to two solids touching along the
+/// line (to ε = 1e-7: beyond it their coplanar caps are not decided here). The drills keep the
+/// counts of drills a hair apart to the issue's ε; from 1e-8 their points, which only the
+/// marching intersection meets, add edges, and they are one valid solid of the volume.
+#[test]
+#[allow(clippy::disallowed_methods)] // the test's closed form, not ops computing geometry
+fn parallel_holes_a_hair_less_than_tangent_cut_as_touching() {
+    all_fixes();
+    let plate = || make_box([0.0, 0.0, 0.0], [20.0, 20.0, 10.0]).unwrap();
+    let cylinder = |y: f64| solidcore_ops::make_cylinder([10.0, y, -1.0], 2.5, 12.0).unwrap();
+    let cut_twice = |one: Body, two: Body| {
+        let first = boolean(plate(), one, BooleanOp::Subtract).unwrap().unwrap();
+        boolean(first, two, BooleanOp::Subtract).unwrap().unwrap()
+    };
+    let (r, depth) = (2.5, 5.0);
+    let tip = r / 59f64.to_radians().tan();
+    let lens = |eps: f64| {
+        if eps > 0.0 {
+            lens_area(r, 5.0 - eps)
+        } else {
+            0.0
+        }
+    };
+    // either order: the holes at a and b, or at b and a
+    let orders = |a: f64, b: f64| [(a, b), (b, a)];
+    for eps in [-1e-9, 1e-9, 2.3e-9, 1e-8, 1e-7, 3e-6, 9.9e-6, 2.5e-5] {
+        let through = 4000.0 - (2.0 * PI * r * r - lens(eps)) * 10.0;
+        // touching along one line, or past the intersection tolerance crossing in two
+        let counts = if eps < 1e-5 {
+            [8, 22, 14]
+        } else {
+            [10, 24, 16]
+        };
+        for (y1, y2) in orders(10.0, 5.0 + eps) {
+            let c = cut_twice(cylinder(y1), cylinder(y2));
+            one_valid_solid(&c, counts, through);
+        }
+    }
+    let eps = 1.5e-5;
+    let through = 4000.0 - (2.0 * PI * r * r - lens(eps)) * 10.0;
+    for (y1, y2) in orders(10.0, 5.0 + eps) {
+        let first = boolean(plate(), cylinder(y1), BooleanOp::Subtract)
+            .unwrap()
+            .unwrap();
+        // a refusal is allowed here; an empty result is not
+        if let Ok(c) = boolean(first, cylinder(y2), BooleanOp::Subtract) {
+            let c = c.unwrap();
+            let report = c.check(CheckLevel::All).unwrap();
+            assert!(report.is_valid(), "{eps}: {}", report.text);
+            assert!(
+                near(volume(&c), through),
+                "{eps}: {}, closed form {through}",
+                volume(&c)
+            );
+        }
+    }
+    for eps in [-1e-9, 1e-9, 2.3e-9, 1e-8, 1e-7] {
+        let u = boolean(cylinder(10.0), cylinder(5.0 + eps), BooleanOp::Union)
+            .unwrap()
+            .unwrap();
+        let report = u.check(CheckLevel::All).unwrap();
+        assert!(report.is_valid(), "{eps}: {}", report.text);
+        assert_eq!(u.solid_count().unwrap(), 2, "{eps}");
+        assert_eq!(u.counts().unwrap(), [6, 10, 6], "{eps}");
+        let want = (2.0 * PI * r * r - lens(eps)) * 12.0;
+        assert!(
+            near(volume(&u), want),
+            "{eps}: {}, closed form {want}",
+            volume(&u)
+        );
+    }
+    for eps in [-1e-9, 1e-9, 2.3e-9, 1e-8, 1e-7] {
+        let drilled = 4000.0 - 2.0 * PI * r * r * (depth + tip / 3.0) + lens(eps) * depth;
+        for (z1, z2) in orders(7.5, 2.5 + eps) {
+            let c = cut_twice(drill(5.0, z1, depth), drill(5.0, z2, depth));
+            if eps < 1e-8 {
+                one_valid_solid(&c, [12, 27, 16], drilled);
+            } else {
+                // the points' extra edges are not decided here: one valid solid, its volume
+                let report = c.check(CheckLevel::All).unwrap();
+                assert!(report.is_valid(), "{eps}: {}", report.text);
+                assert_eq!(c.solid_count().unwrap(), 1, "{eps}");
+                assert!(
+                    near(volume(&c), drilled),
+                    "{eps}: {}, closed form {drilled}",
+                    volume(&c)
+                );
+            }
+        }
+    }
+}
+
 #[test]
 fn an_imprint_cuts_the_faces_the_tool_crosses() {
     all_fixes();
@@ -1515,6 +1655,63 @@ fn a_traced_cut_meeting_an_earlier_cut_removes_its_tool() {
         .unwrap()
         .unwrap();
     one_valid_solid_of_volume(&r, [46, 132, 88], want, 1e-9);
+}
+
+/// #16935's intersect as SolidCraft passed it. Both bodies are a decagon of side 10, 10 tall, with
+/// a 6 tall top tapered at 45°. The target has a 6 mm groove down the middle of each slope, its
+/// edges rounded at 1 mm; the tool has the ten edges between the slopes rounded at 5 mm. Near the
+/// top each 5 mm round's cylinder runs within the tolerance of a 1 mm round and the corner patch
+/// beside it, so each of the twenty gaps it leaves in the intersection loop is closed along the
+/// target's edge between them. Ten passes of one closure each left ten of them open, and the
+/// first closure taken at a corner ran up the round's tangent line: the faces were classified
+/// across the gaps, the intersect lost eight of the ten 5 mm rounds and said nothing.
+///
+/// The intersection is the target less the ten wedges between the tool's sharp edges and its
+/// rounds, `V(sharp tool) - V(tool)`, plus what the target's 1 mm rounds and their corner
+/// patches already took out of those wedges near the top: under 1e-3 (the wedges classified
+/// against the target, column by column along the slopes' normals). Before, the intersect gave
+/// 6.38 more: eight wedges kept.
+#[test]
+#[allow(clippy::disallowed_methods)] // the test's closed form, not ops computing geometry
+fn a_traced_intersect_keeps_every_5_mm_round_beside_the_grooves_1_mm_rounds() {
+    all_fixes();
+    let body = traced_operands("issue_16935_hip_rounds_over_groove_rounds");
+    // the decagon's apothem and area, the top's apothem 6 less (45°), the frustum on the prism
+    let apothem = 10.0 / (2.0 * 18_f64.to_radians().tan());
+    let base = 10.0 * apothem * apothem * 18_f64.to_radians().tan();
+    let top = base * ((apothem - 6.0) / apothem).powi(2);
+    let sharp_tool = 10.0 * base + 6.0 / 3.0 * (base + top + (base * top).sqrt());
+    let wedges = sharp_tool - body("tool").volume(1e-11).unwrap();
+    let want = body("target").volume(1e-11).unwrap() - wedges;
+    let r = boolean(body("target"), body("tool"), BooleanOp::Intersect)
+        .unwrap()
+        .unwrap();
+    let report = r.check(CheckLevel::All).unwrap();
+    assert!(report.is_valid(), "{}", report.text);
+    assert_eq!(r.solid_count().unwrap(), 1);
+    // the target's 92 faces and the ten rounds
+    assert_eq!(r.counts().unwrap(), [102, 320, 220]);
+    let v = r.volume(1e-11).unwrap();
+    assert!(
+        v >= want && v <= want + 1e-3,
+        "volume {v}, target less the wedges {want}"
+    );
+}
+
+/// #14477's join as SolidCraft passed it: a 14 x 20 x 35 block with a 3.2 mm hole whose rim on
+/// the y = -20 face is chamfered 0.5 mm, joined with that face extruded 10 mm (a slab with a
+/// 4.2 mm hole, the chamfer's outer rim). The two touch on the face; the join is their sum.
+#[test]
+fn a_traced_join_onto_a_chamfered_holes_face_is_their_sum() {
+    all_fixes();
+    let body = traced_operands("issue_14477_join_over_chamfered_hole");
+    // the block less the 1.6 hole and the chamfer's ring (Pappus), the slab less its 2.1 hole
+    let block = 14.0 * 20.0 * 35.0 - PI * 1.6 * 1.6 * 20.0 - TAU * (1.6 + 0.5 / 3.0) * 0.125;
+    let slab = 14.0 * 10.0 * 35.0 - PI * 2.1 * 2.1 * 10.0;
+    let r = boolean(body("target"), body("tool"), BooleanOp::Union)
+        .unwrap()
+        .unwrap();
+    one_valid_solid_of_volume(&r, [9, 19, 12], block + slab, 1e-9);
 }
 
 /// A 10 mm cube with the vertical edge at x = 0, y = 0 rounded to radius 2.

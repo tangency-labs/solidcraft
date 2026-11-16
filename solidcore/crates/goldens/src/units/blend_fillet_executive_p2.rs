@@ -1126,6 +1126,33 @@ impl ExecutiveAccess<Handle> for Access {
                             let Some(Handle::Solver(idx)) =
                                 executive.fillet_solver_of_edgeuse(Handle::Edgeuse(eu))
                             else {
+                                return false;
+                            };
+                            solvers
+                                .get(idx)
+                                .is_some_and(|s| {
+                                    use solidcore::blend::fillet_solver::p1::FilletSolverOps;
+                                    let can_change = match s {
+                                        SolverEntry::ConstantRadius(s) => {
+                                            FilletSolverOps::offset_radii_can_change(s)
+                                        }
+                                        SolverEntry::ConstantDistance(s) => {
+                                            FilletSolverOps::offset_radii_can_change(s)
+                                        }
+                                        SolverEntry::VariableRadius(s) => {
+                                            FilletSolverOps::offset_radii_can_change(&**s)
+                                        }
+                                        SolverEntry::SurfaceSurface(s) => {
+                                            FilletSolverOps::offset_radii_can_change(s)
+                                        }
+                                    };
+                                    matches!(can_change, Ok(false))
+                                })
+                        },
+                        |eu| {
+                            let Some(Handle::Solver(idx)) =
+                                executive.fillet_solver_of_edgeuse(Handle::Edgeuse(eu))
+                            else {
                                 return missing();
                             };
                             solvers

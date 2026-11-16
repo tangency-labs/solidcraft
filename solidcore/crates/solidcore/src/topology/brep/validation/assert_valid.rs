@@ -104,6 +104,24 @@ impl CheckLevel {
     }
 }
 
+/// What a check holds the tolerance pass to ([`check_brep_scoped`], [`assert_valid_scoped`]).
+///
+/// [`ValidityScope::Body`] is the rule for every body: a vertex's gaps to its edges and faces
+/// within half its tolerance, an edge's gap to its faces within its tolerance. A body a stitch
+/// produced ([`ValidityScope::Stitched`]) may also carry a gap past those, up to the sum of the
+/// two zones it spans (vertex and edge, vertex and face, edge and face), where the tolerance ball
+/// that covers it is proven to reach no topology it does not bound
+/// ([`pointers::vertex_ball_reaches`], [`pointers::edge_tube_reaches`]: boxes, never samples; a
+/// proof that cannot be made leaves the gap reported).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ValidityScope {
+    /// The rule for every body.
+    #[default]
+    Body,
+    /// A body a stitch produced.
+    Stitched,
+}
+
 /// The result of [`check_brep`]: the pointer check, then (when it found nothing) the
 /// whole-body `AssertValid`, as the capi `smlib_brep_check` runs them.
 ///
@@ -327,6 +345,20 @@ fn report_line(r: &AssertReport) -> String {
 /// builder's identities to [`check_brep_with_keys`]); those of
 /// [`check_brep_with_keys`].
 pub fn check_brep(k: &mut Kernel, b: &mut Brep, level: CheckLevel) -> Result<BrepCheck> {
+    check_brep_scoped(k, b, level, ValidityScope::Body)
+}
+
+/// [`check_brep`] holding the tolerance pass to `scope`.
+///
+/// # Errors
+///
+/// As [`check_brep`].
+pub fn check_brep_scoped(
+    k: &mut Kernel,
+    b: &mut Brep,
+    level: CheckLevel,
+    scope: ValidityScope,
+) -> Result<BrepCheck> {
     let naming = b.naming();
     if naming == NamingScheme::Unknown {
         return Err(SolidError::invalid_input(
@@ -338,7 +370,7 @@ pub fn check_brep(k: &mut Kernel, b: &mut Brep, level: CheckLevel) -> Result<Bre
     let recorded = b.geometry_owner_keys().clone();
     let keys =
         |e: EntityRef| crate::topology::owner_identity_of(naming, recorded.get(&e).copied(), e);
-    check_brep_with_keys(k, b, level, &keys)
+    check_brep_with_keys_scoped(k, b, level, &keys, scope)
 }
 
 /// The capi `smlib_brep_check(brep, level)`: [`validate_pointers`] at `level` (its
@@ -356,6 +388,21 @@ pub fn check_brep_with_keys(
     level: CheckLevel,
     keys: &dyn Fn(EntityRef) -> ObjectRef,
 ) -> Result<BrepCheck> {
+    check_brep_with_keys_scoped(k, b, level, keys, ValidityScope::Body)
+}
+
+/// [`check_brep_with_keys`] holding the tolerance pass to `scope`.
+///
+/// # Errors
+///
+/// As [`check_brep_with_keys`].
+pub fn check_brep_with_keys_scoped(
+    k: &mut Kernel,
+    b: &mut Brep,
+    level: CheckLevel,
+    keys: &dyn Fn(EntityRef) -> ObjectRef,
+    scope: ValidityScope,
+) -> Result<BrepCheck> {
     let mut pointer_reports = AssertArray::new();
     let pointers_status =
         validate_pointers(k, b, Some(&mut pointer_reports), level.code(), false, keys)?;
@@ -363,13 +410,14 @@ pub fn check_brep_with_keys(
     let assert_valid = if pointer_reports.reports().iter().any(|r| !r.ok) {
         None
     } else {
-        Some(assert_valid(
+        Some(assert_valid_scoped(
             k,
             b,
             Some(&mut reports),
             level.code(),
             true,
             keys,
+            scope,
         )?)
     };
     Ok(BrepCheck {
@@ -401,6 +449,23 @@ pub fn assert_valid(
     walk: bool,
     keys: &dyn Fn(EntityRef) -> ObjectRef,
 ) -> Result<bool> {
+    assert_valid_scoped(k, b, reports, level, walk, keys, ValidityScope::Body)
+}
+
+/// [`assert_valid`] holding the tolerance pass to `scope`.
+///
+/// # Errors
+///
+/// As [`assert_valid`].
+pub fn assert_valid_scoped(
+    k: &mut Kernel,
+    b: &mut Brep,
+    reports: Option<&mut AssertArray>,
+    level: u8,
+    walk: bool,
+    keys: &dyn Fn(EntityRef) -> ObjectRef,
+    scope: ValidityScope,
+) -> Result<bool> {
     if level > LEVEL_GIVEN {
         return Err(super::invalid("invalid assert test level"));
     }
@@ -409,6 +474,7 @@ pub fn assert_valid(
         rep: Rep {
             array: reports,
             level,
+            stitched: scope == ValidityScope::Stitched,
         },
         keys,
         index,
@@ -451,6 +517,7 @@ pub fn validate_and_update_tolerances(
     let mut rep = Rep {
         array: reports,
         level,
+        stitched: false,
     };
     let (status, gaps) = brep::validate_and_update(k, b, &mut rep, validate_only)?;
     if status != SUCCESS {
@@ -514,6 +581,8 @@ impl Cx<'_> {
 struct Rep<'a> {
     array: Option<&'a mut AssertArray>,
     level: u8,
+    /// The tolerance pass runs under [`ValidityScope::Stitched`].
+    stitched: bool,
 }
 
 /// The key of a curve or surface object (see the `seams` key note): the shim's

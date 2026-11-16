@@ -753,15 +753,21 @@ pub(crate) fn seed_records(
     b: &Brep,
     key_of: &dyn Fn(EntityRef) -> ObjectRef,
 ) {
+    // (the scan passes every slot, emptied ones too, and the B-rep's key)
+    let visits = slot_counts(b).iter().sum::<usize>().saturating_add(1);
     if records.is_empty() {
         // Bulk build (sorted input is O(n)); the same map as entry-by-entry.
+        let noted = records.take_visits();
         *records = entities(b)
             .map(|e| key_of(e).key)
             .chain([p2::brep_ref(b).key])
             .map(|k| (k, topo::Topology::default()))
             .collect();
+        records.note_visits(usize::try_from(noted).unwrap_or(usize::MAX));
+        records.note_visits(visits);
         return;
     }
+    records.note_visits(visits);
     for e in entities(b) {
         records.or_default(key_of(e).key);
     }
@@ -829,10 +835,13 @@ pub(crate) fn reseed_records(
             && mark.slots.iter().zip(slots).all(|(&then, now)| then <= now)
     };
     if let Some((since, changed)) = records.changed_since(same) {
-        for &e in removals.get(since.removed..).unwrap_or_default() {
+        let removed = removals.get(since.removed..).unwrap_or_default();
+        records.note_visits(removed.len().saturating_add(changed.len()));
+        for &e in removed {
             records.settle(key_of(e), false);
         }
         for (kind, (from, to)) in since.slots.into_iter().zip(slots).enumerate() {
+            records.note_visits(to.saturating_sub(from));
             for index in (from..to).map_while(|i| u32::try_from(i).ok()) {
                 if is_live(b, kind, index) {
                     records.settle(key_of(kind_entity(kind, index)), true);
@@ -851,10 +860,25 @@ pub(crate) fn reseed_records(
         let mut keys: Vec<ObjectKey> = std::iter::once(scheme.brep_key)
             .chain(entities(b).map(key_of))
             .collect();
+        // (the tally: every slot scanned for the keys and the B-rep's key, the pairs the
+        // sortedness test and the removal of repeats each compare, a sort's comparisons.
+        // The sortedness test is counted as its whole pass, which it is for keys that come
+        // out in order, as the schemes in use give them; on other keys it stops early.)
+        let pairs = keys.len().saturating_sub(1);
+        let mut visits = slots
+            .iter()
+            .sum::<usize>()
+            .saturating_add(1)
+            .saturating_add(pairs)
+            .saturating_add(pairs);
         if !keys.is_sorted() {
-            keys.sort_unstable();
+            keys.sort_unstable_by(|a, b| {
+                visits = visits.saturating_add(1);
+                a.cmp(b)
+            });
         }
         keys.dedup();
+        records.note_visits(visits);
         records.reset_to_keys(&keys);
     }
     let mark = topo::ReseedMark {
@@ -1116,6 +1140,10 @@ pub(crate) fn with_caller_identities_for<R>(
             // (a source is read, never added to)
             let context = env.context.as_deref().unwrap_or(&k.context);
             check_keys(context, src, key_of, 0)?;
+            // (the tally: every slot of the source scanned, and the source itself; no
+            // prospective object, the window being 0)
+            env.records
+                .note_visits(slot_counts(src).iter().sum::<usize>().saturating_add(1));
         }
     }
     seed_records_once(env.records, (id, instance), b, env.key_of)?;
@@ -1235,6 +1263,7 @@ fn check_keys_once(
     let mut checked_to = progress.checked_to;
     let mut passed: Vec<(usize, usize)> = Vec::new();
     let mut skipped: Vec<(usize, usize)> = Vec::new();
+    let mut visits = 0_usize;
     let kinds = live_counts(b)
         .into_iter()
         .zip(slot_counts(b))
@@ -1258,6 +1287,7 @@ fn check_keys_once(
         }
         let from = *to;
         *to = from.max(slots).max(end);
+        visits = visits.saturating_add(to.saturating_sub(from));
         for i in from..*to {
             let covered = (count..end).contains(&i)
                 || u32::try_from(i).is_ok_and(|index| is_live(b, kind, index));
@@ -1273,6 +1303,13 @@ fn check_keys_once(
         return Err(RESERVED_KEY);
     }
     progress.checked_to = checked_to;
+    // (the tally: the indices passed, where they were asked and where they leave the
+    // unchecked set; the indices skipped; the B-rep's key)
+    visits = visits
+        .saturating_add(passed.len())
+        .saturating_add(passed.len())
+        .saturating_add(skipped.len())
+        .saturating_add(1);
     for (kind, i) in passed {
         if let Some(unchecked) = progress.unchecked.get_mut(kind) {
             unchecked.remove(&i);
@@ -1283,6 +1320,7 @@ fn check_keys_once(
             unchecked.insert(i);
         }
     }
+    records.note_visits(visits);
     Ok(())
 }
 
@@ -1310,6 +1348,7 @@ fn seed_records_once(
     }
     // (through the store's own methods, so a reset sees what was added)
     for (kind, (from, to)) in from.into_iter().zip(slots).enumerate() {
+        records.note_visits(to.saturating_sub(from));
         for index in (from..to).map_while(|i| u32::try_from(i).ok()) {
             if is_live(b, kind, index) {
                 records.or_default(key_of(kind_entity(kind, index)).key);
@@ -1317,6 +1356,7 @@ fn seed_records_once(
         }
     }
     records.or_default(brep_key);
+    records.note_visits(1);
     Ok(())
 }
 

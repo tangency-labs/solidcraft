@@ -517,6 +517,7 @@ impl LayoutService {
                     return Err(error(Rule::CollectionLimit, "transaction collection limit"));
                 }
             }
+            normalize_column_widths(&mut next, &self.registry)?;
             validate(&next, &self.registry)?;
             for before in &self.layout.instances {
                 if next.instances.iter().any(|after| after.id == before.id && after.kind != before.kind) {
@@ -1385,7 +1386,7 @@ fn apply(
         Mutation::Collapse { section, collapsed } => {
             section_mut(layout, &section)?.collapsed = collapsed;
         }
-        Mutation::SetSize { section, size } => {
+        Mutation::SetSize { section, mut size } => {
             size.validate()?;
             let source = layout.section(&section)?;
             let zone = source.location.zone();
@@ -1393,6 +1394,7 @@ fn apply(
             let priority = if zone.docked() { Some(next_extent_priority(layout, zone, &column)?) } else { None };
             if let Some(column) = layout.section(&section)?.column.clone() {
                 set_column_width(layout, registry, &column, size.width)?;
+                size.width = layout.column(&column)?.width;
             }
             let target = section_mut(layout, &section)?;
             target.size = size;
@@ -1714,6 +1716,7 @@ fn set_column_width(layout: &mut Layout, registry: &PanelRegistry, id: &ColumnId
     if !width.is_finite() || width <= 0.0 || width < min || width > max {
         return Err(error(Rule::Bounds, "column width outside composite stack bounds"));
     }
+    let width = resolve_column_width(layout, registry, id, width)?;
     let column = layout.columns.iter_mut().find(|c| c.id == *id).ok_or_else(|| error(Rule::MissingTarget, "column absent"))?;
     column.width = width;
     for section in layout.sections.iter_mut().filter(|s| s.column.as_ref() == Some(id)) {
