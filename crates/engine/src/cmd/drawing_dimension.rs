@@ -640,8 +640,8 @@ fn layout_on_sheet(s: &Session, d: &Drawing, dimension: &Dimension, r: &Resolved
         return (None, Some(NO_PLACE.to_string()));
     }
     let unstyled = crate::drawing_view::not_drawable(view.visual_style.value, view.reference_style.value);
-    let unstyled = unstyled.or_else(|| crate::drawing_view::not_cut_yet(&view));
-    if unstyled.or_else(|| crate::drawing_view::not_drawable_apart(&view)).is_some() {
+    // Not yet on a section view: its cut faces' edges are in no part (#13046).
+    if unstyled.or_else(|| crate::drawing_view::not_drawable_apart(&view)).is_some() || view.cut.is_some() {
         return not_drawn();
     }
     let on = match crate::drawing_view::on_sheet(s, d, id, INSPECT) {

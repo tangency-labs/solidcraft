@@ -49,6 +49,7 @@ use solidcraft_doc::config::RowKey;
 use solidcraft_doc::display_units::unit_scale;
 use solidcraft_doc::drawing::Drawing;
 use solidcraft_doc::drawing::balloon::Balloon;
+use solidcraft_doc::drawing::cutting_line::CuttingLine;
 use solidcraft_doc::drawing::dimension::{Dimension, LabelKind, MAX_DECIMALS, reading_label};
 use solidcraft_doc::drawing::fold::{FoldFor, FoldRefusal, FoldSide, auxiliary_side};
 use solidcraft_doc::drawing::note::Note;
@@ -78,8 +79,8 @@ use crate::schema::drawing_view::{
     CopyParams, CreateResult, DPI_RANGE, DrawnJointResult, DrawnRowResult, EditParams, EditResult, ExplodedParam, ExtentsResult, FlatParams,
     FromResult, InspectParams, InspectResult, LabelResult, LabelSet, LineResult, LinesStatusResult, MeasureParam, MeasurementResult, MoveParams,
     OutsideResult, PathSegResult, PictureResult, PieceResult, PlaceParam, PoseParam, PoseResult, ProjectedParams, ProjectionForParams,
-    ProjectionForResult, ScaleResult, SceneResult, SettingResult, SettingsResult, SnapshotParams, SnapshotResult, SourceResult, StudyPoseParam,
-    StudyStepResult, ToSheetResult, ViewLineParam, ViewMoveParams, ViewMoveResult, ViewResult, ViewSet,
+    ProjectionForResult, ScaleResult, SceneResult, SectionParams, SettingResult, SettingsResult, SnapshotParams, SnapshotResult, SourceResult,
+    StudyPoseParam, StudyStepResult, ToSheetResult, ViewLineParam, ViewMoveParams, ViewMoveResult, ViewResult, ViewSet,
 };
 use crate::schema::{TypedContract, output_schema_for};
 use crate::{Result, Session};
@@ -110,6 +111,8 @@ const FLAT_CONTRACT: TypedContract<FlatParams> = TypedContract::new();
 /// How far from its parent's centre `drawing.view.projection_for` takes a point, either way, in
 /// paper millimetres: the most two points of one sheet are apart along an axis.
 const MAX_OFFSET_MM: f64 = 2.0 * MAX_SIDE_MM;
+const SECTION: &str = "drawing.view.section";
+const SECTION_CONTRACT: TypedContract<SectionParams> = TypedContract::new();
 
 /// How far a new projected view's boundary is from its parent's, in paper millimetres, until a
 /// drawing style gives it.
@@ -128,7 +131,7 @@ pub static COMMANDS: &[CommandSpec] = &[CommandSpec::new(CMD, "Drawing View Snap
         .doc_only()
         .contract(&INSPECT_CONTRACT)
         .output(output_schema_for::<InspectResult>)
-        .params("view: a saved view's id → {view, sheet, kind: base|projected|flat, source, parent?, side?, direction, place: {at: [x, y]} or {aligned: n}, settings: {scale, visual_style, reference_style, reference_hides_model, tangent_edges, occurrences (null: every body), exploded (\"assembled\" or {view: id}), pose (\"designed\", {joints: [...]} as saved, in radians and mm, or {study: {id, step}}; with drawn?, skipped? and study? for a position of its own), configuration (\"active\" or {row: id}, with drawn: {id, name} or null, and errors?), hide: {value, from: this|parent|default, parent?, set}}, reference_shown_percent, boundary_mm: {min, max} on the sheet (a 20 x 20 mm placeholder round the view's centre when there's nothing to measure), extents: {min, max, error_mm, status: approximate|exact (a flat pattern view's)|placeholder, provenance (a placeholder's reason: past_walk_limit, no_bodies, not_placed, nothing_chosen, no_exploded_view, not_posed, no_configuration, not_configured or no_flat; a flat pattern view's: flat_pattern)} in model mm on the view's plane, linked? (a projected view's display settings: true, false or \"partly\"), dimensions: [its dimensions' ids, in id order], balloons: [its balloons' ids, in id order], choices: {visual_style, scale}}. Read-only; a view of another configuration evaluates a copy of the design; the design is unchanged."),
+        .params("view: a saved view's id → {view, sheet, kind: base|projected|flat, source, parent?, side?, direction, place: {at: [x, y]} or {aligned: n}, settings: {scale, visual_style, reference_style, reference_hides_model, tangent_edges, occurrences (null: every body), exploded (\"assembled\" or {view: id}), pose (\"designed\", {joints: [...]} as saved, in radians and mm, or {study: {id, step}}; with drawn?, skipped? and study? for a position of its own), configuration (\"active\" or {row: id}, with drawn: {id, name} or null, and errors?), hide: {value, from: this|parent|default, parent?, set}}, reference_shown_percent, boundary_mm: {min, max} on the sheet (a 20 x 20 mm placeholder round the view's centre when there's nothing to measure), extents: {min, max, error_mm, status: approximate|exact (a flat pattern view's)|placeholder, provenance (a placeholder's reason: past_walk_limit, no_bodies, not_placed, nothing_chosen, no_exploded_view, not_posed, no_configuration, not_configured, no_flat or cut_away; a flat pattern view's: flat_pattern)} in model mm on the view's plane, linked? (a projected view's display settings: true, false or \"partly\"), dimensions: [its dimensions' ids, in id order], balloons: [its balloons' ids, in id order], choices: {visual_style, scale}}. Read-only; a view of another configuration evaluates a copy of the design; the design is unchanged."),
     CommandSpec::new(EDIT, "Edit Drawing View", crate::checked!("drawing.view.edit", edit))
         .icon("edit")
         .in_drawing()
@@ -193,6 +196,13 @@ pub static COMMANDS: &[CommandSpec] = &[CommandSpec::new(CMD, "Drawing View Snap
         .contract(&FLAT_CONTRACT)
         .output(output_schema_for::<CreateResult>)
         .params("sheet: id or name; body?: a sheet-metal body's name (default the last one made); scale?: \"paper:model\" (default: the largest ISO 5455 preset at which it lies inside the sheet's drawing space and off its title block; saved either way); position_mm?: [x, y] for its centre (default the sheet's centre); turn?: 0 (default), 90, 180 or 270 degrees counter-clockwise → {view, sheet, scale: {text, factor, fitted}, boundary_mm, outside?}. The flat pattern as sheet.flat_pattern reports it: its outlines and cut-outs as visible lines, bends up as chain lines (long dash, dot) and bends down as double-chain lines (long dash, two dots), narrow. Refused as sheet.flat_pattern refuses the body. One undo step; no model is evaluated."),
+    CommandSpec::new(SECTION, "Section View", crate::checked!("drawing.view.section", section))
+        .icon("new")
+        .in_drawing()
+        .doc_only()
+        .contract(&SECTION_CONTRACT)
+        .output(output_schema_for::<CreateResult>)
+        .params("parent: a saved view's id; line: {kind: full|half|offset|aligned, points: 2 to 32 [x, y] on the parent's plane in model mm (full 2, half and aligned 3, offset an even number from 4), arrows: left|right, the side of the line walked from its first point that is kept and seen}; place?: {at: [x, y]} (default: where the projected view looking its way would sit, lined up with its parent, its boundary 20 mm past the parent's: away from the arrows in third angle, towards them in first) → {view, sheet: its parent's, scale: its parent's, boundary_mm, letter, outside?}. A view of the parent's model cut along the line, looking the arrows' way; its scale and display settings follow its parent. Only full sections draw their cut so far; the others say \"not supported yet\". One undo step; the design is unchanged."),
 ];
 
 fn snapshot(s: &mut Session, p: &Value) -> Result<Value> {
@@ -1227,20 +1237,10 @@ fn projected(s: &mut Session, p: &Value) -> Result<Value> {
         let mut staged = Drawing::clone(&record);
         staged.add_views([Arc::new(view.clone())]);
         staged.validate().map_err(|e| bad(PROJECTED, e.to_string()))?;
-        let theirs = crate::drawing_view::on_sheet(s, &staged, parent, PROJECTED)?.boundary;
-        let ours = crate::drawing_view::on_sheet(s, &staged, id, PROJECTED)?.boundary;
-        let half = (ours.max - ours.min) * 0.5;
-        // Past their boundary on the side `sign` says (1: after its max, -1: before its min).
-        let past = |sign: f64, min: f64, max: f64, half: f64| if sign > 0.0 { max + DEFAULT_GAP_MM + half } else { min - DEFAULT_GAP_MM - half };
+        let centre = place_beside(s, &staged, parent, id, beside, PROJECTED)?;
         view.place = match beside {
-            Beside::Side(side) => {
-                let sign = if matches!(side, ProjectedSide::Right | ProjectedSide::Above) { 1.0 } else { -1.0 };
-                ViewPlace::Aligned(past(sign, side.along(theirs.min), side.along(theirs.max), side.along(half)))
-            }
-            Beside::Diagonal(diagonal) => {
-                let (right, up) = diagonal.signs();
-                ViewPlace::At([past(right, theirs.min.x, theirs.max.x, half.x), past(up, theirs.min.y, theirs.max.y, half.y)])
-            }
+            Beside::Side(side) => ViewPlace::Aligned(side.along(centre)),
+            Beside::Diagonal(_) => ViewPlace::At([centre.x, centre.y]),
         };
     }
     s.edit_drawing(PROJECTED, |d| {
@@ -1428,6 +1428,58 @@ fn flat(s: &mut Session, p: &Value) -> Result<Value> {
     })?;
     let placed = crate::drawing_view::flat_on_sheet(s.drawing(FLAT)?, id, &Ok(flat), FLAT)?;
     created_at(s, FLAT, id, request.scale.is_none(), placed)
+}
+
+/// Where view `id`, staged in `staged`, goes `beside` its parent, for `cmd`: its centre, moved from
+/// its parent's until its boundary is [`DEFAULT_GAP_MM`] past the parent's, along the free axis
+/// beside it, or along both axes on a diagonal.
+fn place_beside(s: &Session, staged: &Drawing, parent: u64, id: u64, beside: Beside, cmd: &str) -> Result<Vec2> {
+    let theirs = crate::drawing_view::on_sheet(s, staged, parent, cmd)?.boundary;
+    let ours = crate::drawing_view::on_sheet(s, staged, id, cmd)?.boundary;
+    let parent_centre = staged.view_centre(parent).map_err(|e| bad(cmd, e.to_string()))?;
+    let half = (ours.max - ours.min) * 0.5;
+    // Past their boundary on the side `sign` says (1: after its max, -1: before its min).
+    let past = |sign: f64, min: f64, max: f64, half: f64| if sign > 0.0 { max + DEFAULT_GAP_MM + half } else { min - DEFAULT_GAP_MM - half };
+    Ok(match beside {
+        Beside::Side(side) => {
+            let sign = if matches!(side, ProjectedSide::Right | ProjectedSide::Above) { 1.0 } else { -1.0 };
+            side.on_free_axis(parent_centre, past(sign, side.along(theirs.min), side.along(theirs.max), side.along(half)))
+        }
+        Beside::Diagonal(diagonal) => {
+            let (right, up) = diagonal.signs();
+            Vec2::new(past(right, theirs.min.x, theirs.max.x, half.x), past(up, theirs.min.y, theirs.max.y, half.y))
+        }
+    })
+}
+
+fn section(s: &mut Session, p: &Value) -> Result<Value> {
+    let request: SectionParams = crate::schema::read(SECTION, p)?;
+    let record = s.drawing(SECTION)?.clone();
+    let (parent, sheet) = find(&record, request.parent.0, SECTION).map(|v| (v.id, v.sheet))?;
+    record.can_project_from(parent).map_err(|e| bad(SECTION, e.to_string()))?;
+    let points = request.line.points.iter().map(|point| point.0).collect();
+    let line = CuttingLine::new(request.line.kind.0, points, request.line.arrows.0).map_err(|e| bad(SECTION, e.to_string()))?;
+    let side = line.side(record.projection);
+    let id = record.allocate_id(&mut s.ids).map_err(|e| bad(SECTION, e.to_string()))?;
+    let parent_centre = record.view_centre(parent).map_err(|e| bad(SECTION, e.to_string()))?;
+    // A place lined up with the parent is passed on, for the drawing's own rule to refuse.
+    let place = request.place.map_or(ViewPlace::At([parent_centre.x, parent_centre.y]), |place| place.0);
+    let kind = ViewKind::Section { parent, line };
+    let mut view = View { id, sheet, kind, place, settings: ViewOverrides::default(), reference_shown_percent: 0.0, label: None };
+    if request.place.is_none() {
+        // Staged on its parent's centre to measure it, then moved along the free axis of the side a
+        // projected view looking its way takes, as `projected` places one.
+        let mut staged = Drawing::clone(&record);
+        staged.add_views([Arc::new(view.clone())]);
+        staged.validate().map_err(|e| bad(SECTION, e.to_string()))?;
+        let centre = place_beside(s, &staged, parent, id, Beside::Side(side), SECTION)?;
+        view.place = ViewPlace::At([centre.x, centre.y]);
+    }
+    s.edit_drawing(SECTION, |d| {
+        d.add_views([Arc::new(view)]);
+        d.give_letter(id).map_err(|e| bad(SECTION, e.to_string()))
+    })?;
+    created(s, SECTION, id, false)
 }
 
 /// The reply for view `id`, just made by `cmd`: its sheet, its scale (`fitted` when worked out),

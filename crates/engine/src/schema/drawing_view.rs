@@ -12,6 +12,7 @@ use schemars::{JsonSchema, Schema, SchemaGenerator, json_schema};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use solidcore_record::Seg2;
+use solidcraft_doc::drawing::cutting_line::{ArrowSide, SectionKind};
 use solidcraft_doc::drawing::view::{Beside, Diagonal, QuarterTurn, ViewPlace};
 use solidcraft_doc::drawing_view::{MAX_JOINT_VALUES, MAX_POSE_JOINTS, TangentEdges, ViewDirection, ViewSettings};
 use solidcraft_geom::drawing_sheet::{Orientation, PaperSize, SheetSize};
@@ -1103,7 +1104,74 @@ pub struct ProjectionForResult {
     pub why: Option<String>,
 }
 
-/// What `drawing.view.base`, `drawing.view.projected`, `drawing.view.auxiliary` and `drawing.view.flat` return.
+/// What `drawing.view.section` takes: its parent, the cutting line drawn across the parent, and
+/// where it sits.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+#[schemars(deny_unknown_fields)]
+pub struct SectionParams {
+    pub parent: ViewIdParam,
+    pub line: CuttingLineParam,
+    /// Where it sits: a point (when not given, where the projected view looking its way would sit,
+    /// lined up with its parent, a gap past the parent's boundary).
+    #[serde(default, deserialize_with = "super::present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "PlaceParam")]
+    pub place: Option<PlaceParam>,
+}
+
+/// A section view's cutting line, as the drawing saves it.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+#[schemars(deny_unknown_fields)]
+pub struct CuttingLineParam {
+    pub kind: SectionKindParam,
+    /// 2 to 32 points on the parent view's plane, in model millimetres from its origin: full 2, half
+    /// and aligned 3, offset an even number from 4.
+    #[schemars(length(min = 2, max = 32))]
+    pub points: Vec<Point2>,
+    pub arrows: ArrowSideParam,
+}
+
+/// A cutting line's shape.
+#[derive(Clone, Copy, Debug, PartialEq, Deserialize)]
+#[serde(transparent)]
+pub struct SectionKindParam(pub SectionKind);
+
+impl JsonSchema for SectionKindParam {
+    fn schema_name() -> Cow<'static, str> {
+        "SectionKind".into()
+    }
+    fn json_schema(_: &mut SchemaGenerator) -> Schema {
+        let names: Vec<Value> = SectionKind::ALL.iter().filter_map(|k| serde_json::to_value(k).ok()).collect();
+        json_schema!({
+            "description": "full: one straight cut; half: to the middle, then a square turn away from the arrows; offset: legs the first one's way joined by square steps; aligned: two arms about the middle point.",
+            "type": "string",
+            "enum": names
+        })
+    }
+}
+
+/// The side of a cutting line, walked from its first point, its arrows point to.
+#[derive(Clone, Copy, Debug, PartialEq, Deserialize)]
+#[serde(transparent)]
+pub struct ArrowSideParam(pub ArrowSide);
+
+impl JsonSchema for ArrowSideParam {
+    fn schema_name() -> Cow<'static, str> {
+        "ArrowSide".into()
+    }
+    fn json_schema(_: &mut SchemaGenerator) -> Schema {
+        let names: Vec<Value> = ArrowSide::ALL.iter().filter_map(|a| serde_json::to_value(a).ok()).collect();
+        json_schema!({
+            "description": "The side of the line, walked from its first point, its arrows point to: the side kept and seen.",
+            "type": "string",
+            "enum": names
+        })
+    }
+}
+
+/// What `drawing.view.base`, `drawing.view.projected`, `drawing.view.auxiliary`, `drawing.view.flat` and
+/// `drawing.view.section` return.
 #[derive(Debug, Serialize, JsonSchema)]
 pub struct CreateResult {
     /// The new view.

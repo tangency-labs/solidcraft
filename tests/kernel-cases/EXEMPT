@@ -137,6 +137,7 @@ drawing.view.move                 a drawing: its tests in crates/engine/src/cmd/
 drawing.view.move_to_sheet        a drawing: its tests in crates/engine/src/cmd/drawing*_tests.rs
 drawing.view.projected            a drawing: its tests in crates/engine/src/cmd/drawing*_tests.rs
 drawing.view.projection_for       a drawing: its tests in crates/engine/src/cmd/drawing*_tests.rs
+drawing.view.section              a drawing: its tests in crates/engine/src/cmd/drawing*_tests.rs
 drawing.view.snapshot             a drawing: its tests in crates/engine/src/cmd/drawing*_tests.rs
 edit.checkpoint                   undo, redo and checkpoints: an earlier state restored, no new geometry
 edit.redo                         undo, redo and checkpoints: an earlier state restored, no new geometry
