@@ -404,3 +404,58 @@ pub(super) fn normalize_face_shells(b: &mut Brep) -> SolidResult<()> {
     }
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use solidcore::topology::brep::validation::{check_brep, CheckLevel};
+
+    #[test]
+    fn successful_near_singular_transform_is_valid_or_known() {
+        let case = crate::case::regression_case(&Runner, "mat0076");
+        let input: Inputs = case.parse().unwrap();
+        let file = match path(&input) {
+            Ok(file) => file,
+            Err(error) => {
+                assert!(
+                    std::env::var_os("SOLIDCORE_REQUIRE_UPSTREAM").is_none(),
+                    "required transform fixture is unavailable: {error}"
+                );
+                return;
+            }
+        };
+        let read = || {
+            let mut kernel = Kernel::default();
+            let body = crate::own_reader::read_file_rebuild(&mut kernel, &file, input.rebuild)
+                .unwrap()
+                .unwrap();
+            (kernel, body)
+        };
+        // Check the input on an independent read, preserving the operation's evaluation order.
+        let (mut input_kernel, mut original) = read();
+        let input_check = check_brep(&mut input_kernel, &mut original, CheckLevel::Level2).unwrap();
+        assert!(input_check.is_valid(), "the input must be valid: {input_check:?}");
+
+        let (mut kernel, mut body) = read();
+        body.set_editing_enabled(input.editing);
+        let transformed = transform_matrix(
+            &mut kernel,
+            &mut body,
+            input.matrix.as_ref().unwrap(),
+            input.scale_tol,
+        );
+        let validity = if transformed.is_ok() {
+            check_brep(&mut kernel, &mut body, CheckLevel::Level2).map(|check| check.is_valid())
+        } else {
+            Ok(true) // A refusal does not claim a valid transformed body.
+        };
+        let invalid_success = !matches!(validity, Ok(true));
+        let known = crate::golden::known_failing(&crate::golden::default_dir(), Runner.id()).unwrap();
+        assert_eq!(
+            invalid_success,
+            known.contains_key(&case.name),
+            "a successful transform of a valid input must remain valid or be tracked as known wrong; \
+             a repaired case must leave that classification: result={transformed:?}, validity={validity:?}"
+        );
+    }
+}

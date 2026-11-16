@@ -717,14 +717,14 @@
 {"case":"maps_clear0_copy1","deferred":null,"error":null,"ints":{"maps":{"blocks":[[-30,831]],"n":42}},"topology":null,"values":{}}
 {"case":"maps_clear1_copy0","deferred":null,"error":null,"ints":{"maps":{"blocks":[[-95,-570]],"n":42}},"topology":null,"values":{}}
 {"case":"maps_clear1_copy1","deferred":null,"error":null,"ints":{"maps":{"blocks":[[-104,-807]],"n":42}},"topology":null,"values":{}}
-{"case":"overflow_regression_053","deferred":null,"error":null,"ints":{"count":[1]},"topology":null,"values":{"curves":{"blocks":[[2.6776245573266895e+300,3.0747323865925105e+301,5.45881654255369e+301]],"n":32}}}
-{"case":"overflow_regression_299","deferred":null,"error":null,"ints":{"count":[1]},"topology":null,"values":{"curves":{"blocks":[[-27.15082367328328,141.16084172363185,-213.73223624790546]],"n":32}}}
+{"case":"overflow_regression_053","deferred":null,"error":"geom::vector3d::Vec3::make_unit_ortho_vectors: no perpendicular vector found","ints":{},"topology":null,"values":{}}
+{"case":"overflow_regression_299","deferred":null,"error":"geom::vector3d::Vec3::make_unit_ortho_vectors: no perpendicular vector found","ints":{},"topology":null,"values":{}}
 {"case":"overflow_regression_427","deferred":null,"error":"nurbs::b_spline_curve_n_lib::BSplineCurve::create_extended_curve_by_distance: a NURBS routine it calls failed; caused by nurbs::crv_adv::p1::Curve::extend_by_dist_at_depth: invalid input: index out of range (malformed input or arguments)","ints":{},"topology":null,"values":{}}
 {"case":"overflow_regression_670","deferred":null,"error":"nurbs::b_spline_curve_n_lib::BSplineCurve::create_extended_curve_by_distance: a NURBS routine it calls failed; caused by nurbs::crv_adv::p1::Curve::extend_by_dist_at_depth: invalid input: index out of range (malformed input or arguments)","ints":{},"topology":null,"values":{}}
 {"case":"overflow_regression_689","deferred":null,"error":"nurbs::b_spline_curve_n_lib::BSplineCurve::create_extended_curve_by_distance: a NURBS routine it calls failed; caused by nurbs::crv_adv::p1::Curve::extend_by_dist_at_depth: invalid input: index out of range (malformed input or arguments)","ints":{},"topology":null,"values":{}}
-{"case":"overflow_regression_736","deferred":null,"error":null,"ints":{"count":[1]},"topology":null,"values":{"curves":{"blocks":[[-1.5647329603859703e+301,4.0706388293787846e+301,-2.4906553597622225e+302]],"n":32}}}
+{"case":"overflow_regression_736","deferred":null,"error":"geom::vector3d::Vec3::make_unit_ortho_vectors: no perpendicular vector found","ints":{},"topology":null,"values":{}}
 {"case":"overflow_regression_919","deferred":null,"error":"nurbs::b_spline_curve_n_lib::BSplineCurve::create_extended_curve_by_distance: a NURBS routine it calls failed; caused by nurbs::crv_adv::p1::Curve::extend_by_dist_at_depth: invalid input: index out of range (malformed input or arguments)","ints":{},"topology":null,"values":{}}
-{"case":"overflow_regression_987","deferred":null,"error":null,"ints":{"count":[1]},"topology":null,"values":{"curves":{"blocks":[[32.95258643480848,110.98908061401767,734.1910053565468]],"n":32}}}
+{"case":"overflow_regression_987","deferred":null,"error":"geom::vector3d::Vec3::make_unit_ortho_vectors: no perpendicular vector found","ints":{},"topology":null,"values":{}}
 {"case":"pivot_end","deferred":null,"error":null,"ints":{},"topology":null,"values":{"pivot":[2.0,0.0,0.0]}}
 {"case":"pivot_fallback","deferred":null,"error":null,"ints":{},"topology":null,"values":{"pivot":[4.0,3.0,0.0]}}
 {"case":"pivot_negative","deferred":null,"error":null,"ints":{},"topology":null,"values":{"pivot":[4.0,3.0,0.0]}}
@@ -733,15 +733,15 @@
 {"case":"pivot_start","deferred":null,"error":null,"ints":{},"topology":null,"values":{"pivot":[0.0,0.0,0.0]}}
 {"case":"position_circle","deferred":null,"error":null,"ints":{"count":[1]},"topology":null,"values":{"curves":{"blocks":[[47.64213562373095,108.21067811865476,937.9062043356596]],"n":32}}}
 {"case":"position_curved_path","deferred":null,"error":null,"ints":{"count":[3]},"topology":null,"values":{"curves":{"blocks":[[28.22020581824735,210.92073545151356,-299.3019530630065]],"n":96}}}
-{"case":"position_empty","deferred":null,"error":null,"ints":{"count":[0]},"topology":null,"values":{"curves":[]}}
-{"case":"position_empty_with_existing","deferred":null,"error":null,"ints":{"count":[1]},"topology":null,"values":{"curves":{"blocks":[[128.5,128.5,2332.0]],"n":32}}}
+{"case":"position_empty","deferred":null,"error":"geom::vector3d::Vec3::unitize: invalid input: zero-length vector","ints":{},"topology":null,"values":{}}
+{"case":"position_empty_with_existing","deferred":null,"error":"geom::vector3d::Vec3::unitize: invalid input: zero-length vector","ints":{},"topology":null,"values":{}}
 {"case":"position_existing_output","deferred":null,"error":null,"ints":{"count":[4]},"topology":null,"values":{"curves":{"blocks":[[81.3747010764856,257.1497152158342,4674.3218273304]],"n":128}}}
 {"case":"position_polygon_negative_x","deferred":null,"error":null,"ints":{"count":[3]},"topology":null,"values":{"curves":{"blocks":[[103.0,167.5,6077.0]],"n":96}}}
 {"case":"position_polygon_skew","deferred":null,"error":null,"ints":{"count":[3]},"topology":null,"values":{"curves":{"blocks":[[50.395759681557536,198.9969938042698,2587.803859416909]],"n":96}}}
 {"case":"position_polygon_vertical","deferred":null,"error":null,"ints":{"count":[3]},"topology":null,"values":{"curves":{"blocks":[[83.0,150.0,2777.0]],"n":96}}}
 {"case":"position_scale_huge","deferred":null,"error":null,"ints":{"count":[1]},"topology":null,"values":{"curves":{"blocks":[[46642136.62373095,107210679.11865476,935906206.3356595]],"n":32}}}
 {"case":"position_scale_tiny","deferred":null,"error":null,"ints":{"count":[1]},"topology":null,"values":{"curves":{"blocks":[[1.0000466421356236,1.0001072106781184,2.0009359062043353]],"n":32}}}
-{"case":"position_single_line","deferred":null,"error":null,"ints":{"count":[1]},"topology":null,"values":{"curves":{"blocks":[[51.0,51.0,952.0]],"n":32}}}
+{"case":"position_single_line","deferred":null,"error":"curve::curve::p3::compute_crvs_normal: the only curve is a line, which spans no plane","ints":{},"topology":null,"values":{}}
 {"case":"position_tied_tangent","deferred":null,"error":null,"ints":{"count":[3]},"topology":null,"values":{"curves":{"blocks":[[90.70321783290845,220.9236815853208,3195.44649055232]],"n":96}}}
 {"case":"position_tilted_profile","deferred":null,"error":null,"ints":{"count":[3]},"topology":null,"values":{"curves":{"blocks":[[54.925144216137014,244.5708368761802,2772.5560541872132]],"n":96}}}
 {"case":"primitive_0","deferred":null,"error":null,"ints":{"maps":[0,0,0,1,4,4]},"topology":null,"values":{"geometry":{"blocks":[[178.07009000000005,178.07009000000005,9640.29305]],"n":106}}}

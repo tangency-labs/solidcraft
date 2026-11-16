@@ -65,10 +65,12 @@
 //! Debug drawing/assertions are omitted. No recursion is introduced.
 //! `DeleteTopologicalVertex` leaves the vertex in place (the routine's silent `SM_ERR`)
 //! for an edge curve that is not of an `SmBSplineCurve` kind, where upstream dereferences
-//! the null cast (WR-598, the fork's tangency-labs/smlib@829b982); joining a curve on a
-//! B-spline-kind surface along a constant-u or constant-v UV line as that iso curve is
-//! opt-in (`Kernel::fixes.delete_vertex_joins_seam_iso_curve`). A line joined through
-//! the `SmBSplineCurve` join gets its NURB made first, as `GetOrCreateGwNurbPointer` does.
+//! the null cast (WR-598, the fork's tangency-labs/smlib@829b982), except a curve on a
+//! B-spline-kind surface along an exactly constant-u or constant-v UV line (the fork took a
+//! drift up to `EFF_ZERO` of the domain), which is joined as that iso curve; on a
+//! procedural blend (which evaluates its definition, not its net) only while the net's
+//! certified bound is within the joined edge's tolerance. A line joined through the `SmBSplineCurve` join gets its
+//! NURB made first, as `GetOrCreateGwNurbPointer` does.
 //! Not upstream (#15718): once [`remove_topological_edges_and_vertices`] has deleted its
 //! topological vertices, each surviving edge on a line and its vertices grow to the
 //! certified gaps the joins left between the line's ends and the vertices
@@ -939,16 +941,20 @@ pub(crate) fn delete_topological_vertex_joining(
         // Upstream casts each copy to `SmBSplineCurve` and calls `Trim` through the
         // result unchecked, so an edge curve of another kind (an `SmCrvOnSurf`) is a null
         // dereference (WR-598). Here such a curve is not joined: the routine's silent
-        // error, with nothing changed yet (the fork's tangency-labs/smlib@829b982).
-        // `Kernel::fixes.delete_vertex_joins_seam_iso_curve` also joins a curve on a
-        // B-spline surface along a constant-u or constant-v UV line as that iso curve.
-        let Some(mut deleted_copy) = exact_bspline_of_edge(k, b, deleted, deleted_interval)? else {
+        // error, with nothing changed yet (the fork's tangency-labs/smlib@829b982). A curve
+        // on a B-spline surface along a constant-u or constant-v UV line is joined as that
+        // iso curve. The joined edge is the survivor, with its tolerance.
+        let joined_tolerance = b.edge(survivor)?.tolerance;
+        let Some(mut deleted_copy) =
+            exact_bspline_of_edge(k, b, deleted, deleted_interval, joined_tolerance)?
+        else {
             return Err(SolidError::topology_failed(
                 OP,
                 "the deleted edge's curve has no exact B-spline form",
             ));
         };
-        let Some(mut surviving_copy) = exact_bspline_of_edge(k, b, survivor, survivor_interval)?
+        let Some(mut surviving_copy) =
+            exact_bspline_of_edge(k, b, survivor, survivor_interval, joined_tolerance)?
         else {
             return Err(SolidError::topology_failed(
                 OP,
@@ -1120,16 +1126,18 @@ pub(crate) fn cover_joined_line_gaps(k: &Kernel, b: &mut Brep, e: EdgeId) -> Res
 /// The edge's curve as a B-spline over the edge's interval, running the curve's way, to
 /// join it with its neighbour (the fork's `sm_ExactBSplineOfEdge`, tangency-labs/smlib@829b982):
 /// a curve of an `SmBSplineCurve` kind (lines and conics included) copied and trimmed, as
-/// upstream does. Any other curve is `None`; upstream dereferences the null cast instead
-/// (WR-598). With `Kernel::fixes.delete_vertex_joins_seam_iso_curve`, a curve on a
-/// B-spline-kind surface whose UV curve is a line of constant u or v (the seam an
-/// extrusion leaves on its wall) is that surface's iso curve over the stretch, which is
-/// the same curve exactly.
+/// upstream does. A curve on a B-spline-kind surface whose UV curve is a line of exactly
+/// constant u or v (the seam an extrusion leaves on its wall) is that surface's iso
+/// curve over the stretch, which is the same curve exactly (WR-598); on a procedural
+/// blend, which evaluates its definition rather than its net, only while the net's
+/// certified bound is within `tolerance`, the joined edge's. Any other curve is `None`;
+/// upstream dereferences the null cast instead.
 fn exact_bspline_of_edge(
     k: &Kernel,
     b: &Brep,
     edge: EdgeId,
     interval: Extent1d,
+    tolerance: f64,
 ) -> Result<Option<Curve>> {
     use crate::curve::curve::p2::{BSPLINE_CURVE_TYPE, LINE_TYPE};
     use crate::curve::curve::CurveKind;
@@ -1145,9 +1153,6 @@ fn exact_bspline_of_edge(
         )?;
         return Ok(Some(copy));
     }
-    if !k.fixes.delete_vertex_joins_seam_iso_curve {
-        return Ok(None);
-    }
     let CurveKind::CrvOnSurf(cos) = curve.kind() else {
         return Ok(None);
     };
@@ -1159,19 +1164,32 @@ fn exact_bspline_of_edge(
     if !surface.is_kind_of(crate::surface::surface::p2::B_SPLINE_SURFACE_TYPE)? {
         return Ok(None);
     }
+    // The iso curve is cut from the surface's net. A curve on a surface evaluates what the
+    // surface evaluates: a procedural blend its definition S (`Surface::evaluate` reads the
+    // net only inside a `NetScope`), every other B-spline kind its net, a screw sweep's
+    // wall and a blend face kept beside a B-spline net included (`SurfaceKind::BSpline`).
+    // On a net the iso curve is the edge's curve exactly. On a procedural blend it lies
+    // within the net's certified bound `|B - S| <= bound` of the edge, so it is joined only
+    // while that bound is within the joined edge's tolerance; the tolerance is never
+    // widened to admit it.
+    if let crate::surface::surface::SurfaceKind::ProceduralBlend(blend) = surface.kind() {
+        if !bound_within_tolerance(blend.def.bound, tolerance) {
+            return Ok(None);
+        }
+    }
     let a = uv_curve.evaluate_point(k, interval.min())?;
     let bb = uv_curve.evaluate_point(k, interval.max())?;
-    let dom = surface.natural_uv_domain_with_nurb(k)?;
-    let zero_u = crate::math::EFF_ZERO * dom.u_interval().length();
-    let zero_v = crate::math::EFF_ZERO * dom.v_interval().length();
-    let (iso, iso_value, from, to) = if (a.x - bb.x).abs() <= zero_u {
+    // Only an exactly constant coordinate makes the iso curve the edge's curve: a UV
+    // line that drifts by du moves up to |dS/du| du in space, which nothing here bounds
+    // (the fork accepted a drift of EFF_ZERO times the domain's length).
+    let (iso, iso_value, from, to) = if a.x == bb.x {
         (
             crate::nurbs::b_spline_surface::SurfParamType::U,
             a.x,
             a.y,
             bb.y,
         )
-    } else if (a.y - bb.y).abs() <= zero_v {
+    } else if a.y == bb.y {
         (
             crate::nurbs::b_spline_surface::SurfParamType::V,
             a.y,
@@ -1204,6 +1222,16 @@ fn exact_bspline_of_edge(
         iso_curve.reverse_parameterization(k, &natural)?;
     }
     Ok(Some(iso_curve))
+}
+
+/// Whether a net's certified distance `bound` from its definition is within `tolerance`
+/// (WR-598's join on a procedural blend). Both are compared as they are: the bound is
+/// already an outward-rounded enclosure, and `<=` on two finite doubles is exact. A NaN
+/// on either side is not within.
+fn bound_within_tolerance(bound: f64, tolerance: f64) -> bool {
+    bound
+        .partial_cmp(&tolerance)
+        .is_some_and(std::cmp::Ordering::is_le)
 }
 
 fn edge_curve(b: &Brep, edge: EdgeId) -> Result<&Curve> {
@@ -4375,6 +4403,263 @@ mod tests {
             .chain(native_failures(NO_VERTEX_SECTOR_OP, 1006))
         {
             assert!(!is_no_vertex_sector(&other), "{other:?}");
+        }
+    }
+
+    /// A wire edge whose curve is the UV line from `uv0` to `uv1` on `surface`, and the
+    /// edge's interval.
+    fn curve_on_surface_edge(
+        k: &mut Kernel,
+        b: &mut Brep,
+        surface: crate::surface::surface::Surface,
+        uv0: Point3,
+        uv1: Point3,
+    ) -> (EdgeId, Extent1d) {
+        use crate::curve::crv_on_surf::CrvOnSurf;
+        use crate::curve::line::Line;
+        let uv = Curve::from(Line::from_points(uv0, uv1, 2));
+        let cos = Curve::from(CrvOnSurf::new(k, uv, surface, None, 2).expect("curve on surface"));
+        let ivl = cos.natural_interval();
+        let e = create_wire_edge_from_curve(k, b, cos, ivl).expect("wire edge");
+        (e, ivl)
+    }
+
+    /// WR-598 takes an iso curve only for an exactly constant UV coordinate, u or v. On
+    /// `S(u, v) = (u / EFF_ZERO, v, u v / EFF_ZERO)` over `[0, 1]^2` the UV line from
+    /// `(0, 0)` to `(EFF_ZERO / 2, 1)` drifts in u by less than `EFF_ZERO` times the domain
+    /// (the fork's test), yet its far end is `(0.5, 1, 0.5)` and the `u = 0` iso curve's
+    /// `(0, 1, 0)`: it is not converted. The exactly constant `u = 0.5` line is. The same
+    /// with u and v swapped, for the constant-v branch.
+    #[test]
+    fn wr598_only_an_exactly_constant_uv_line_is_an_iso_curve() {
+        use crate::math::EFF_ZERO;
+        use crate::nurbs::b_spline_surface::BSplineSurface;
+        let big = 1.0 / EFF_ZERO;
+        // (the varying-u surface, then its swap: S(u, v) = (u, v / EFF_ZERO, u v / EFF_ZERO))
+        for swap in [false, true] {
+            let at = |u: f64, v: f64| {
+                if swap {
+                    Point3::new(v, u, 0.0)
+                } else {
+                    Point3::new(u, v, 0.0)
+                }
+            };
+            let space = |x: f64, y: f64, z: f64| {
+                if swap {
+                    Point3::new(y, x, z)
+                } else {
+                    Point3::new(x, y, z)
+                }
+            };
+            let mut k = Kernel::default();
+            let mut b = Brep::new_with_infinite_region().expect("brep");
+            let patch = BSplineSurface::create_bilinear_surface(
+                Point3::new(0.0, 0.0, 0.0),
+                if swap {
+                    Point3::new(1.0, 0.0, 0.0)
+                } else {
+                    Point3::new(big, 0.0, 0.0)
+                },
+                if swap {
+                    Point3::new(0.0, big, 0.0)
+                } else {
+                    Point3::new(0.0, 1.0, 0.0)
+                },
+                if swap {
+                    Point3::new(1.0, big, big)
+                } else {
+                    Point3::new(big, 1.0, big)
+                },
+            )
+            .expect("patch");
+            let surface = crate::surface::surface::Surface::from(patch);
+            let (drift, drift_ivl) = curve_on_surface_edge(
+                &mut k,
+                &mut b,
+                surface.clone(),
+                at(0.0, 0.0),
+                at(EFF_ZERO / 2.0, 1.0),
+            );
+            let end = edge_curve(&b, drift)
+                .expect("curve")
+                .evaluate_point(&k, drift_ivl.max())
+                .expect("end");
+            assert!(
+                end.closer_than(1e-9, space(0.5, 1.0, 0.5)),
+                "swap {swap}: {end:?}"
+            );
+            let tol = b.edge(drift).expect("edge").tolerance;
+            let converted = exact_bspline_of_edge(&k, &b, drift, drift_ivl, tol).expect("answers");
+            assert!(converted.is_none(), "swap {swap}: {converted:?}");
+
+            let (exact, exact_ivl) =
+                curve_on_surface_edge(&mut k, &mut b, surface, at(0.5, 0.0), at(0.5, 1.0));
+            let tol = b.edge(exact).expect("edge").tolerance;
+            let iso = exact_bspline_of_edge(&k, &b, exact, exact_ivl, tol)
+                .expect("answers")
+                .expect("an iso curve");
+            let iso_end = iso
+                .evaluate_point(&k, iso.natural_interval().max())
+                .expect("end");
+            let edge_end = edge_curve(&b, exact)
+                .expect("curve")
+                .evaluate_point(&k, exact_ivl.max())
+                .expect("end");
+            // both at 5e11 scale: equal up to rounding at that scale
+            assert!(
+                iso_end.closer_than(1e-2, edge_end),
+                "swap {swap}: {iso_end:?} {edge_end:?}"
+            );
+        }
+    }
+
+    /// WR-598 on a procedural blend, which evaluates its definition S, not its net: the iso
+    /// curve is cut from the net, within the net's certified bound of S, so it is taken
+    /// only while that bound is within the joined edge's tolerance (not at half the bound,
+    /// nor at a NaN tolerance); the tolerance is not widened to admit it.
+    #[test]
+    fn wr598_iso_curve_on_a_procedural_blend_needs_its_bound_within_the_tolerance() {
+        use crate::blend::fillet_section::section::GnSectionFsg;
+        use crate::nurbs::b_spline_curve::BSplineCurve;
+        use crate::nurbs::b_spline_surface::BSplineSurface;
+        use crate::surface::procedural_blend::{BlendDefinitionInput, ProceduralBlend};
+        use crate::surface::surface::{Surface, SurfaceKind};
+        // the plane-plane round of wr698_procedural_blend_definition.rs, bound 1e-3
+        let (l, r, bound) = (10.0, 2.0, 1e-3);
+        let mut k = Kernel::default();
+        let o = Point3::new(0.0, 0.0, 0.0);
+        let bilinear = |p: [Point3; 4]| {
+            BSplineSurface::create_bilinear_surface(p[0], p[1], p[2], p[3]).expect("bilinear")
+        };
+        let line = |a: Point3, c: Point3| BSplineCurve::create_line_segment(3, a, c).expect("line");
+        let a = Surface::from(bilinear([
+            o,
+            Point3::new(l, 0.0, 0.0),
+            Point3::new(0.0, 0.0, l),
+            Point3::new(l, 0.0, l),
+        ]));
+        let c = Surface::from(bilinear([
+            o,
+            Point3::new(l, 0.0, 0.0),
+            Point3::new(0.0, l, 0.0),
+            Point3::new(l, l, 0.0),
+        ]));
+        let net = bilinear([
+            o,
+            Point3::new(1.0, 0.0, 0.0),
+            Point3::new(0.0, 1.0, 0.0),
+            Point3::new(1.0, 1.0, 0.0),
+        ]);
+        let leader = line(Point3::new(0.0, r, r), Point3::new(l, r, r));
+        let seed = line(Point3::new(0.0, r / l, 0.0), Point3::new(1.0, r / l, 0.0));
+        let input = BlendDefinitionInput {
+            supports: [&a, &c],
+            sides: [-1.0, 1.0],
+            offsets: [r, r],
+            law: None,
+            order: 2,
+            thumbweight: 0.0,
+            leader: &leader,
+            seeds: [&seed, &seed],
+            bound,
+            chamfer: None,
+        };
+        let blend = ProceduralBlend::create(&k, &net, &input, |n, w| {
+            GnSectionFsg::is_valid(n as usize, w)
+        })
+        .expect("blend");
+        let surface = Surface::from(blend);
+        assert!(matches!(surface.kind(), SurfaceKind::ProceduralBlend(_)));
+        let mut b = Brep::new_with_infinite_region().expect("brep");
+        let (e, ivl) = curve_on_surface_edge(
+            &mut k,
+            &mut b,
+            surface,
+            Point3::new(0.5, 0.0, 0.0),
+            Point3::new(0.5, 1.0, 0.0),
+        );
+        let refused = exact_bspline_of_edge(&k, &b, e, ivl, bound / 2.0).expect("answers");
+        assert!(refused.is_none(), "{refused:?}");
+        assert!(exact_bspline_of_edge(&k, &b, e, ivl, f64::NAN)
+            .expect("answers")
+            .is_none());
+        let taken = exact_bspline_of_edge(&k, &b, e, ivl, bound).expect("answers");
+        assert!(taken.is_some());
+    }
+
+    /// The bound test refuses a NaN on either side and compares two finite doubles exactly.
+    #[test]
+    fn wr598_bound_within_tolerance_refuses_nan() {
+        assert!(!bound_within_tolerance(f64::NAN, 1.0));
+        assert!(!bound_within_tolerance(1e-3, f64::NAN));
+        assert!(!bound_within_tolerance(f64::NAN, f64::NAN));
+        assert!(bound_within_tolerance(1e-3, 1e-3));
+        assert!(!bound_within_tolerance(
+            1e-3,
+            f64::from_bits(1e-3_f64.to_bits() - 1)
+        ));
+    }
+
+    /// WR-598 on a screw sweep's wall: a B-spline net that keeps its definition beside it
+    /// but evaluates the net (`SurfaceKind::BSpline`), so the net's iso curve is the curve
+    /// on the wall exactly and is taken whatever the definition's bound: refusing it would
+    /// change nothing in space.
+    #[test]
+    fn wr598_iso_curve_on_a_sweep_wall_is_the_net_s() {
+        let mut k = Kernel::default();
+        let profile: Vec<Curve> = [(4.1, 0.0), (5.0, 0.0), (5.0, 0.9), (4.1, 0.9)]
+            .iter()
+            .zip([(5.0, 0.0), (5.0, 0.9), (4.1, 0.9), (4.1, 0.0)].iter())
+            .map(|(&(ar, az), &(br, bz))| {
+                Curve::from(crate::curve::line::Line::from_points(
+                    Point3::new(ar, 0.0, az),
+                    Point3::new(br, 0.0, bz),
+                    3,
+                ))
+            })
+            .collect();
+        let body = crate::sweep::screw::screw_sweep(
+            &mut k,
+            &profile,
+            Point3::new(0.0, 0.0, 0.0),
+            Point3::new(0.0, 0.0, 1.0),
+            1.0,
+            1.0,
+            1e-4,
+        )
+        .expect("screw sweep");
+        let wall = crate::topology::brep::p1::faces(&body, None)
+            .expect("faces")
+            .into_iter()
+            .find_map(|f| {
+                let s = crate::topology::face::p2::surface(&body, f).ok()??;
+                s.procedural_sweep().is_some().then(|| s.clone())
+            })
+            .expect("a wall that keeps its definition");
+        let bound = wall.procedural_definition().expect("definition").bound();
+        assert!(bound > 0.0, "{bound}");
+        let dom = wall.natural_uv_domain_with_nurb(&k).expect("domain");
+        let u = dom.u_interval().mid();
+        let (v0, v1) = (dom.v_interval().min(), dom.v_interval().max());
+        let mut b = Brep::new_with_infinite_region().expect("brep");
+        let (e, ivl) = curve_on_surface_edge(
+            &mut k,
+            &mut b,
+            wall,
+            Point3::new(u, v0, 0.0),
+            Point3::new(u, v1, 0.0),
+        );
+        let iso = exact_bspline_of_edge(&k, &b, e, ivl, bound / 2.0)
+            .expect("answers")
+            .expect("the net's iso curve");
+        let cos = edge_curve(&b, e).expect("curve");
+        let iso_ivl = iso.natural_interval();
+        for s in [0.0, 0.25, 0.5, 0.75, 1.0] {
+            let p = iso
+                .evaluate_point(&k, iso_ivl.evaluate(s))
+                .expect("iso point");
+            let q = cos.evaluate_point(&k, ivl.evaluate(s)).expect("edge point");
+            assert!(p.closer_than(1e-9, q), "s {s}: {p:?} {q:?}");
         }
     }
 }
