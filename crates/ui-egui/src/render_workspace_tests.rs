@@ -3446,7 +3446,7 @@ fn render_preview_navigates_like_the_modelling_viewport_in_every_preset() {
 /// view controls all work in the Render workspace, framing the product scene.
 #[test]
 fn render_workspace_view_keys_double_middle_click_and_navigators_work() {
-    for style in [crate::prefs::NavigatorStyle::Axes, crate::prefs::NavigatorStyle::Custom] {
+    for style in [crate::prefs::NavigatorStyle::Axes, crate::prefs::NavigatorStyle::Custom, crate::prefs::NavigatorStyle::Mecha] {
         let mut h = Harness::new();
         h.app.preferences.navigator_style = style;
         h.app.preferences.look_at_anim = false;
@@ -3486,20 +3486,25 @@ fn render_workspace_view_keys_double_middle_click_and_navigators_work() {
             "{style:?}: middle double-click"
         );
         assert_product_fits_canvas(&h.app);
-        // The navigator's Home control.
+        // Mecha keeps ISO and Fit separate; together they give the same framing as Home.
         off(&mut h);
-        let handle = match style {
+        if style == crate::prefs::NavigatorStyle::Mecha {
+            h.app.viewport.mecha_pinned = true;
+            h.frames(2);
+            h.step(&json!({"click":{"handle":"mecha:view:iso"}})).unwrap();
+            h.step(&json!({"click":{"handle":"mecha:fit"}})).unwrap();
+        } else {
             // Custom draws the signed axes until a body is chosen.
-            crate::prefs::NavigatorStyle::Axes | crate::prefs::NavigatorStyle::Custom => "axis_view:home",
-        };
-        h.step(&json!({"click":{"handle":handle}})).unwrap();
+            h.step(&json!({"click":{"handle":"axis_view:home"}})).unwrap();
+        }
         h.settle();
         assert!(
             (h.app.cam.yaw - home.yaw).abs() < 1e-6 && (h.app.cam.pitch - home.pitch).abs() < 1e-6,
             "{style:?}: navigator Home turns to the home view"
         );
         // A standard view from the navigator.
-        h.step(&json!({"click":{"handle":"axis_view:z"}})).unwrap();
+        let top = if style == crate::prefs::NavigatorStyle::Mecha { "mecha:view:top" } else { "axis_view:z" };
+        h.step(&json!({"click":{"handle":top}})).unwrap();
         h.settle();
         assert!(h.app.cam.back().dot(solidcore_record::Vec3::Z) > 0.999, "{style:?}: view from +Z, got {:?}", h.app.cam.back());
         assert!(h.app.session.selection.is_empty());

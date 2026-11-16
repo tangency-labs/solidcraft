@@ -445,6 +445,12 @@ altering the design or opening dialogs.
 | `Text::Inline` | Native truncated label; rect/handle `dialog:inline:TEXT` |
 | `Text::Cell` | Fixed-height clipped clickable cell with tooltip; rect/handle `dialog:cell:TEXT` |
 
+`ellipsize_middle(ui, text, font, max_width)` measures text with the active UI fonts
+and shortens long labels with a middle ellipsis, keeping both ends. It returns a
+string without painting or allocating space. Pass it as `RichText` to shared
+buttons so their state and contrast colors still apply, and retain the full label
+in the tooltip and accessibility metadata.
+
 `name_cell_with_hint(ui, name, strong, hint)` keeps the name cell's allocation and
 scenario identity, but owns its single tooltip: the action hint alone when the
 name fits, or the full name followed by the hint when it is clipped. Use it instead

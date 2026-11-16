@@ -1388,6 +1388,303 @@ fn view_analysis_buttons_are_one_toggle_group() {
     assert_eq!(active(&mut h), json!(null));
 }
 
+fn mecha_harness() -> Harness {
+    let mut h = Harness::new();
+    assert_ne!(h.app.preferences.navigator_style, crate::prefs::NavigatorStyle::Mecha, "the hand is opt-in");
+    assert!(crate::scenario::handle_at("mecha:hand").is_none());
+    h.app.run("view.navigator", json!({"style":"mecha"})).unwrap();
+    h.app.preferences.look_at_anim = false;
+    h.app.preferences.navigator_fit = false;
+    h.app.viewport.mecha_pinned = true;
+    h.frames(3);
+    h
+}
+
+/// The optional hand's labelled controls use the public view commands, keep framing while
+/// turning, and leave both the design and its undo history alone.
+#[test]
+fn mecha_standard_views_signed_roll_and_fit_use_view_commands() {
+    let mut h = mecha_harness();
+    h.app.run("solid.box", json!({"length":40,"width":30,"height":20})).unwrap();
+    h.app.session.selection.clear();
+    h.settle();
+    let document = h.app.session.doc.to_json();
+    let history = h.app.session.undo.len();
+    let revision = h.app.session.revision;
+    h.app.cam.target = solidcore_record::Vec3::new(3.0, 5.0, 7.0);
+    h.app.cam.distance = 300.0;
+    h.frames(2);
+    let framing = (h.app.cam.target, h.app.cam.distance, h.app.cam.fov, h.app.cam.up);
+    for (view, yaw, pitch) in [
+        ("front", 0.0, 0.0),
+        ("back", 180.0, 0.0),
+        ("left", 90.0, 0.0),
+        ("right", -90.0, 0.0),
+        ("top", 0.0, 90.0),
+        ("bottom", 0.0, -90.0),
+        ("iso", -45.0, 35.26438968275465),
+    ] {
+        h.step(&json!({"click":{"handle":format!("mecha:view:{view}")}})).unwrap();
+        let actual = h.app.cam.view_angles();
+        assert!((actual.yaw - yaw).abs() < 1e-3 && (actual.pitch - pitch).abs() < 1e-3 && actual.roll.abs() < 1e-9, "{view}: {actual:?}");
+        assert_eq!((h.app.cam.target, h.app.cam.distance, h.app.cam.fov, h.app.cam.up), framing, "{view} only turns the camera");
+    }
+    h.app.preferences.invert_navigator_arrows = true;
+    h.app.preferences.invert_curved_roll_arrows = true;
+    h.step(&json!({"click":{"handle":"mecha:roll:positive"}})).unwrap();
+    assert!((h.app.cam.view_angles().roll - 90.0).abs() < 1e-9, "a numeric +90 label always adds 90 degrees");
+    h.step(&json!({"click":{"handle":"mecha:roll:negative"}})).unwrap();
+    assert!(h.app.cam.view_angles().roll.abs() < 1e-9, "a numeric -90 label always subtracts 90 degrees");
+    h.app.cam.distance = 1000.0;
+    h.frames(2);
+    let before_fit = h.app.cam;
+    h.step(&json!({"click":{"handle":"mecha:fit"}})).unwrap();
+    assert_eq!((h.app.cam.yaw, h.app.cam.pitch, h.app.cam.roll, h.app.cam.up), (before_fit.yaw, before_fit.pitch, before_fit.roll, before_fit.up));
+    assert!(h.app.cam.distance < before_fit.distance, "Fit frames the box");
+    assert_ne!(h.app.cam.target, before_fit.target, "Fit recentres the box in the available view");
+    let viewport = h.app.viewport.rect.unwrap();
+    let projection = crate::viewport::projection(&h.app, viewport);
+    for x in [0.0, 40.0] {
+        for y in [0.0, 30.0] {
+            for z in [0.0, 20.0] {
+                let point = projection.to_screen(solidcore_record::Vec3::new(x, y, z)).unwrap();
+                assert!(viewport.contains(point), "the fitted box stays inside the viewport: {point:?}");
+            }
+        }
+    }
+    // The shared navigator-fit preference applies to labelled views as well as roll arrows.
+    h.app.preferences.navigator_fit = true;
+    h.app.cam.target = solidcore_record::Vec3::new(1000.0, -500.0, 300.0);
+    h.app.cam.distance = 1000.0;
+    h.frames(2);
+    let before_turn = h.app.cam;
+    h.step(&json!({"click":{"handle":"mecha:view:front"}})).unwrap();
+    let angles = h.app.cam.view_angles();
+    assert!(angles.yaw.abs() < 1e-9 && angles.pitch.abs() < 1e-9 && angles.roll.abs() < 1e-9, "the chosen direction stays exact: {angles:?}");
+    assert!(h.app.cam.distance < before_turn.distance, "the view button also frames the box when requested");
+    assert_ne!(h.app.cam.target, before_turn.target);
+    let projection = crate::viewport::projection(&h.app, viewport);
+    for x in [0.0, 40.0] {
+        for y in [0.0, 30.0] {
+            for z in [0.0, 20.0] {
+                let point = projection.to_screen(solidcore_record::Vec3::new(x, y, z)).unwrap();
+                assert!(viewport.contains(point), "navigator Fit keeps the whole box visible: {point:?}");
+            }
+        }
+    }
+    assert!(h.app.session.selection.is_empty());
+    assert_eq!(h.app.session.doc.to_json(), document);
+    assert_eq!(h.app.session.undo.len(), history);
+    assert_eq!(h.app.session.revision, revision);
+}
+
+/// Wheel and pinch over the hand share normal zoom, without anchoring to the model below the
+/// overlay. Only its hand starts an orbit, and camera locks still apply to that drag.
+#[test]
+fn mecha_hand_owns_zoom_and_orbit_without_selecting_the_model_below() {
+    use egui::{Event, Modifiers, PointerButton};
+    let mut h = mecha_harness();
+    h.app.preferences.smooth_wheel_zoom = false;
+    h.app.preferences.zoom_to_cursor = true;
+    h.app.preferences.zoom_reverse = false;
+    h.app.preferences.free_orbit = false;
+    h.app.run("solid.box", json!({"length":40,"width":30,"height":20})).unwrap();
+    h.app.session.selection.clear();
+    h.settle();
+    h.app.cam.set_view(solidcraft_viewport::StandardView::Front);
+    h.app.cam.target = solidcore_record::Vec3::new(20.0, 15.0, 10.0);
+    h.app.cam.distance = 3.0;
+    h.frames(2);
+    let viewport = h.app.viewport.rect.unwrap();
+    let hand = crate::scenario::handle_at("mecha:hand").unwrap();
+    let front = crate::scenario::handle_at("mecha:view:front").unwrap();
+    assert!(
+        crate::viewport::pick(&h.app, &crate::viewport::projection(&h.app, viewport), front).iter().any(|hit| matches!(hit, Hit::Face { .. })),
+        "the box really lies under the control"
+    );
+    h.step(&json!({"click":{"handle":"mecha:view:front"}})).unwrap();
+    assert!(h.app.session.selection.is_empty(), "the control owns its click");
+    let before = h.app.cam;
+    h.call("ui.scroll", json!({"x":hand.x,"y":hand.y,"delta":120}));
+    assert!(h.app.cam.distance < before.distance, "wheel over the hand zooms in");
+    assert_eq!((h.app.cam.target, h.app.cam.yaw, h.app.cam.pitch, h.app.cam.roll), (before.target, before.yaw, before.pitch, before.roll));
+    let before = h.app.cam;
+    h.frame_with(vec![Event::PointerMoved(hand), Event::Zoom(1.25)]);
+    assert!((h.app.cam.distance - before.distance / 1.25).abs() < 1e-9);
+    assert_eq!(h.app.cam.target, before.target, "pinch keeps the same orbit centre");
+    let before = h.app.cam;
+    h.call("ui.scroll", json!({"x":front.x,"y":front.y,"delta":120}));
+    assert_eq!(h.app.cam, before, "scrolling a view button cannot zoom the model below it");
+    h.app.ui.view_angles_lock_yaw = true;
+    h.call("ui.drag", json!({"x0":hand.x,"y0":hand.y,"x1":hand.x+35.0,"y1":hand.y+25.0,"button":"left","steps":6}));
+    assert!((h.app.cam.yaw - before.yaw).abs() < 1e-9, "the shared orbit respects yaw lock");
+    assert!((h.app.cam.pitch - before.pitch).abs() > 1e-3, "the same drag changes unlocked pitch");
+    assert_eq!(h.app.cam.target, before.target);
+    assert!(h.app.viewport.axis_drag.is_none(), "release ends the gizmo orbit");
+    let before = h.app.cam;
+    h.frame_with(vec![
+        Event::PointerMoved(front),
+        Event::PointerButton { pos: front, button: PointerButton::Primary, pressed: true, modifiers: Modifiers::NONE },
+    ]);
+    h.frame_with(vec![Event::PointerMoved(front + vec2(-18.0, 7.0))]);
+    h.frame_with(vec![Event::PointerButton {
+        pos: front + vec2(-18.0, 7.0),
+        button: PointerButton::Primary,
+        pressed: false,
+        modifiers: Modifiers::NONE,
+    }]);
+    h.frames(2);
+    assert_eq!(h.app.cam, before, "dragging a button cannot start an orbit");
+    assert!(h.app.session.selection.is_empty());
+    // Constraining an orbit must keep its pivot still, including the accumulated free turn
+    // used by Shift snapping and the free-orbit preference.
+    for free in [false, true] {
+        for snap in [false, true] {
+            h.app.preferences.free_orbit = free;
+            h.app.preferences.orbit_around = crate::prefs::OrbitAround::Origin;
+            h.app.cam.set_view(solidcraft_viewport::StandardView::Front);
+            h.app.cam.target = Vec3::new(20.0, 15.0, 10.0);
+            h.frames(2);
+            let before = h.app.cam;
+            let origin = before.frame_coords(Vec3::ZERO);
+            h.call("ui.drag", json!({"x0":hand.x,"y0":hand.y,"x1":hand.x+35.0,"y1":hand.y+80.0,"button":"left","steps":8,"shift":snap}));
+            assert!((h.app.cam.view_angles().yaw - before.view_angles().yaw).abs() < 1e-9, "yaw lock, free={free}, snap={snap}");
+            assert!((h.app.cam.pitch - before.pitch).abs() > 1e-3, "unlocked pitch moves, free={free}, snap={snap}");
+            assert!(h.app.cam.frame_coords(Vec3::ZERO).dist(origin) < 1e-9, "the origin stays put, free={free}, snap={snap}");
+            assert!(h.app.viewport.axis_drag.is_none());
+        }
+    }
+}
+
+/// Hover expands without moving the navigator, a tap can pin it, and the focused angle chip
+/// opens the shared exact-angle card even when the separate View angles preference is off.
+#[test]
+fn mecha_expansion_tap_and_keyboard_angles_keep_controls_accessible() {
+    use egui::{Event, Modifiers, PointerButton};
+    use solidcraft_viewport::ViewAngles;
+    let mut h = mecha_harness();
+    h.app.viewport.mecha_pinned = false;
+    h.frame_with(vec![Event::PointerGone]);
+    h.frames(3);
+    assert!(!h.app.preferences.show_view_angles);
+    assert!(!h.app.viewport.mecha_expanded);
+    assert!(crate::scenario::rect_of("mecha:angles").is_none());
+    let outer = crate::scenario::rect_of("axis_view:outer").unwrap();
+    let hand = crate::scenario::handle_at("mecha:hand").unwrap();
+    h.call("ui.move", json!({"x":hand.x,"y":hand.y}));
+    assert!(h.app.viewport.mecha_expanded);
+    assert_eq!(crate::scenario::rect_of("axis_view:outer"), Some(outer), "hover never shifts the model or controls");
+    let centre = h.app.viewport.rect.unwrap().center();
+    h.call("ui.move", json!({"x":centre.x,"y":centre.y}));
+    assert!(!h.app.viewport.mecha_expanded);
+    let expand = crate::scenario::handle_at("mecha:expand").unwrap();
+    // A platform touch tap carries pointer press/release and removes the hover pointer.
+    h.frame_with(vec![
+        Event::PointerMoved(expand),
+        Event::PointerButton { pos: expand, button: PointerButton::Primary, pressed: true, modifiers: Modifiers::NONE },
+    ]);
+    h.frame_with(vec![
+        Event::PointerButton { pos: expand, button: PointerButton::Primary, pressed: false, modifiers: Modifiers::NONE },
+        Event::PointerGone,
+    ]);
+    h.frames(3);
+    assert!(h.app.viewport.mecha_pinned && h.app.viewport.mecha_expanded, "tap exposes controls without hover");
+    h.app.viewport.mecha_pinned = false;
+    h.ctx.memory_mut(|memory| memory.request_focus(crate::view_angles::readout_id()));
+    h.frames(2);
+    assert!(h.app.viewport.mecha_expanded, "keyboard focus keeps the chip available");
+    let before = h.app.cam;
+    h.frame_with(vec![Event::Key { key: egui::Key::Enter, physical_key: None, pressed: true, repeat: false, modifiers: Modifiers::NONE }]);
+    h.frame_with(vec![Event::Key { key: egui::Key::Enter, physical_key: None, pressed: false, repeat: false, modifiers: Modifiers::NONE }]);
+    h.frames(2);
+    assert!(crate::scenario::rect_of("view_angles:card").is_some(), "Enter opens the same exact-angle card");
+    assert_eq!(h.app.cam, before);
+    h.ctx.data_mut(|data| data.insert_temp(crate::view_angles::draft_id(), ViewAngles { yaw: 30.0, pitch: -15.0, roll: 45.0 }));
+    h.call("ui.move", json!({"x":centre.x,"y":centre.y}));
+    assert!(h.app.viewport.mecha_expanded && crate::scenario::rect_of("view_angles:card").is_some(), "editing survives pointer exit");
+    h.step(&json!({"click":{"handle":"dialog:button:Apply"}})).unwrap();
+    let actual = h.app.cam.view_angles();
+    assert!((actual.yaw - 30.0).abs() < 1e-9 && (actual.pitch + 15.0).abs() < 1e-9 && (actual.roll - 45.0).abs() < 1e-9, "{actual:?}");
+    assert_eq!((h.app.cam.target, h.app.cam.distance, h.app.cam.up), (before.target, before.distance, before.up));
+    assert!(!h.app.preferences.show_view_angles, "using Mecha does not rewrite the separate preference");
+    h.step(&json!({"key":"Escape"})).unwrap();
+    h.frame_with(vec![Event::PointerGone]);
+    h.frames(3);
+    assert!(crate::scenario::rect_of("view_angles:card").is_none());
+    h.app.preferences.angle_decimals = 6;
+    h.app.cam = h.app.cam.with_view_angles(ViewAngles { yaw: 179.123456, pitch: -89.123456, roll: -179.123456 }).unwrap();
+    for (width, height) in [(1280, 720), (900, 700), (800, 600)] {
+        h.app.viewport.mecha_pinned = true;
+        h.call("ui.resize", json!({"width":width,"height":height}));
+        let viewport = h.app.viewport.rect.unwrap();
+        for name in [
+            "mecha:hand",
+            "mecha:expand",
+            "mecha:view:front",
+            "mecha:view:back",
+            "mecha:view:left",
+            "mecha:view:right",
+            "mecha:view:top",
+            "mecha:view:bottom",
+            "mecha:view:iso",
+            "mecha:fit",
+            "mecha:roll:positive",
+            "mecha:roll:negative",
+            "mecha:angles",
+        ] {
+            let rect = crate::scenario::rect_of(name).unwrap();
+            assert!(viewport.contains_rect(rect), "{width}x{height}: {name} stays inside the viewport: {rect:?} in {viewport:?}");
+            if name != "mecha:hand" {
+                let hand = crate::scenario::rect_of("mecha:hand").unwrap();
+                assert!(!rect.intersect(hand).is_positive(), "{name} cannot share an orbit target with the hand");
+            }
+        }
+        let chip = crate::scenario::rect_of("mecha:angles").unwrap();
+        let text = h
+            .shapes
+            .iter()
+            .find_map(|shape| match &shape.shape {
+                Shape::Text(text) if text.galley.job.text.starts_with("AZ 179.123456°") => Some(text),
+                _ => None,
+            })
+            .expect("the high-precision readout is painted");
+        assert_eq!(text.galley.rows.len(), 1, "the fixed-height chip never wraps");
+        assert!(text.galley.size().x <= chip.width() - 12.0 + 0.1, "the measured text fits inside its padded chip");
+        assert!(text.galley.elided, "the six-decimal label ends in an ellipsis");
+        assert_eq!(text.galley.job.wrap.overflow_character, Some('…'));
+        assert!(
+            h.output.accesskit_update.as_ref().unwrap().nodes.iter().any(|(_, node)| {
+                node.role() == egui::accesskit::Role::Button
+                    && node.label() == Some("Azimuth 179.123456° · Elevation -89.123456° · Roll -179.123456°")
+            }),
+            "accessibility retains every angle and its full localized name"
+        );
+    }
+}
+
+/// Two clicks during a glide add two complete quarter turns, as the existing navigator does.
+#[test]
+fn mecha_rapid_roll_clicks_accumulate_animation_targets() {
+    use egui::{Event, Modifiers, PointerButton};
+    let mut h = mecha_harness();
+    h.app.cam.set_view(solidcraft_viewport::StandardView::Front);
+    h.app.preferences.look_at_anim = true;
+    h.frames(2);
+    let roll = crate::scenario::handle_at("mecha:roll:positive").unwrap();
+    for expected in [90.0, 180.0] {
+        h.frame_with(vec![
+            Event::PointerMoved(roll),
+            Event::PointerButton { pos: roll, button: PointerButton::Primary, pressed: true, modifiers: Modifiers::NONE },
+        ]);
+        h.frame_with(vec![Event::PointerButton { pos: roll, button: PointerButton::Primary, pressed: false, modifiers: Modifiers::NONE }]);
+        let target = h.app.cam_anim.expect("the click starts a glide").to.view_angles();
+        assert!((target.roll - expected).abs() < 1e-9, "{target:?}");
+    }
+    h.settle();
+    assert!((h.app.cam.view_angles().roll - 180.0).abs() < 1e-9);
+    assert!(h.app.session.undo.is_empty());
+}
+
 /// The View angles readout (#6032) sits under the orientation gizmo only while View ▸ View angles
 /// is on, follows the view live with its projection, and its card turns the view to typed angles
 /// through `view.apply`, without touching the design or its history.
@@ -1452,6 +1749,42 @@ fn view_angles_readout_shows_only_when_on_and_applies_typed_angles() {
         assert!(crate::scenario::rect_of("view_angles:readout").is_none());
         assert_eq!(h.app.session.doc.to_json(), design);
         assert!(h.app.session.undo.is_empty());
+    }
+}
+
+/// The exact-angle card changes orientation only, including a Y-up camera in Render, where
+/// render.camera.set supplies the up axis as well as the three angles.
+#[test]
+fn view_angles_preserve_camera_up_axis_and_framing_in_each_workspace() {
+    use solidcraft_viewport::{UpAxis, ViewAngles};
+    for tab in ["MODEL", "RENDER"] {
+        for up in [UpAxis::Z, UpAxis::Y] {
+            let mut h = Harness::new();
+            h.app.preferences.look_at_anim = false;
+            h.app.ui.tab = tab.into();
+            h.app.ui.up_axis = up;
+            h.app.cam.up = up;
+            h.app.cam.target = solidcore_record::Vec3::new(3.0, 5.0, 7.0);
+            h.app.cam.distance = 123.0;
+            h.app.cam.fov = 0.6;
+            let before = h.app.cam;
+            let design = h.app.session.doc.to_json();
+            let requested = ViewAngles { yaw: 30.0, pitch: -15.0, roll: 45.0 };
+            crate::view_angles::apply(&mut h.app, requested);
+            let after = h.app.cam;
+            let actual = after.view_angles();
+            assert_eq!((after.target, after.distance, after.fov, after.up), (before.target, before.distance, before.fov, before.up), "{tab} {up:?}");
+            assert!(
+                (actual.yaw - requested.yaw).abs() < 1e-9
+                    && (actual.pitch - requested.pitch).abs() < 1e-9
+                    && (actual.roll - requested.roll).abs() < 1e-9,
+                "{tab} {up:?}: {actual:?}"
+            );
+            crate::view_angles::apply(&mut h.app, ViewAngles { yaw: f64::NAN, ..requested });
+            assert_eq!(h.app.cam, after, "invalid input leaves the camera alone");
+            assert_eq!(h.app.session.doc.to_json(), design);
+            assert!(h.app.session.undo.is_empty(), "view angles never add design history");
+        }
     }
 }
 

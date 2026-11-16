@@ -427,6 +427,53 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect, shown: cra
     }
 }
 
+/// Paint a built-in navigator or preference preview with the existing depth-buffered renderer.
+/// This presentation has no face picking: the hand's camera controls own their own targets.
+pub(super) fn paint_preview(painter: &egui::Painter, rect: Rect, shape: &Shape, camera: &Camera) {
+    if !rect.is_positive() || !rect.is_finite() || !camera.is_valid() {
+        return;
+    }
+    let ppp = painter.ctx().pixels_per_point();
+    let px = ((rect.width().min(rect.height()) * ppp).ceil().max(1.0) as usize).min(MAX_PIXELS);
+    let side = px * SS;
+    let image = Rect::from_center_size(rect.center(), vec2(px as f32, px as f32) / ppp);
+    let step = image.width() / side as f32;
+    let painter = painter.with_clip_rect(painter.clip_rect().intersect(rect));
+    let id = egui::Id::unique("navigator_preview").with(painter.layer_id());
+    let shared: Shared = painter.ctx().data_mut(|data| data.get_temp_mut_or_default::<Shared>(id).clone());
+    let Ok(mut cell) = shared.lock() else { return };
+    let key = (shape.id, camera.basis());
+    if !cell.as_ref().is_some_and(|cached| (cached.shape, cached.basis) == key && cached.side == side) {
+        let texture = cell.take().and_then(|cached| cached.texture);
+        *cell = Some(Cache { shape: key.0, basis: key.1, side, raster: raster(&shape.mesh, camera, side), faces: Vec::new(), look: None, texture });
+    }
+    let Some(cache) = cell.as_mut() else { return };
+    let t = Tokens::get();
+    let view = Tokens::view();
+    let look = Look {
+        hovered: None,
+        texture: NavigatorTexture::Modeled,
+        active: true,
+        colours: [t.navigator_face, t.navigator_hover, view.body, view.viewport_top],
+        lift: view.hover_face_lift,
+    };
+    if cache.look != Some(look) || cache.texture.is_none() {
+        let image = compose(&cache.raster, shape, &look);
+        match cache.texture.as_mut() {
+            Some(texture) => texture.set(image, egui::TextureOptions::LINEAR),
+            None => cache.texture = Some(painter.ctx().load_texture("navigator_preview", image, egui::TextureOptions::LINEAR)),
+        }
+        cache.look = Some(look);
+    }
+    if let Some(texture) = &cache.texture {
+        painter.image(texture.id(), image, Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)), view.figure_white);
+    }
+    let to_screen = |point: [f64; 2]| image.min + vec2(point[0] as f32 * step, point[1] as f32 * step);
+    for (_, from, to) in &cache.raster.edges {
+        painter.line_segment([to_screen(*from), to_screen(*to)], Stroke::new(0.75, view.body_edge));
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

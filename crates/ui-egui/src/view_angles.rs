@@ -1,6 +1,6 @@
 //! The View angles readout under the orientation gizmo (#6032): the view's pitch, yaw and roll in
 //! degrees and its projection, shown while View ▸ View angles is on (`view.angle_readout`). A
-//! click on it opens a small card to type exact angles; its Apply runs `view.apply`.
+//! click on it opens a small card to type exact angles through the workspace camera command.
 //!
 //! Each axis in the card also has a zero button that turns that angle to 0° at once, and a lock
 //! (#4581): a locked angle stays put while orbiting, turning with the arrow keys or using a 3D
@@ -100,7 +100,7 @@ pub(crate) fn keep_locked(app: &SolveApp, from: Camera, to: Camera) -> Camera {
     to.with_view_angles(angles).unwrap_or(to)
 }
 
-/// Turn the view to typed angles through `view.apply`, keeping its target, distance and projection.
+/// Turn the view to typed angles through its workspace camera command, keeping its framing and up axis.
 /// A locked axis keeps the angle the view has now, whatever the card holds for it.
 pub(crate) fn apply(app: &mut SolveApp, mut angles: ViewAngles) {
     let held = app.cam.view_angles();
@@ -114,18 +114,33 @@ pub(crate) fn apply(app: &mut SolveApp, mut angles: ViewAngles) {
         angles.roll = held.roll;
     }
     let Some(cam) = app.cam.with_view_angles(angles) else { return };
-    let camera = json!({"target": cam.target, "yaw": cam.yaw, "pitch": cam.pitch, "roll": cam.roll, "distance": cam.distance, "fov": cam.fov});
-    if app.run("view.apply", json!({ "camera": camera })).is_ok() {
+    // Render owns its complete camera; Design takes the up axis from the design settings.
+    let (command, camera) = if crate::render_workspace::active(app) {
+        ("render.camera.set", json!(cam))
+    } else {
+        (
+            "view.apply",
+            json!({
+                "target": cam.target, "yaw": cam.yaw, "pitch": cam.pitch, "roll": cam.roll,
+                "distance": cam.distance, "fov": cam.fov
+            }),
+        )
+    };
+    if app.run(command, json!({ "camera": camera })).is_ok() {
         app.follow_view_request(true);
     }
 }
 
 /// Paint the readout under the gizmo of the viewport `rect`, and the card when it is open.
 pub(crate) fn show(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect) {
+    // Mecha places the same editor beside its own controls. Do not close its draft when the
+    // ordinary readout is disabled or when this caller paints after the hand.
+    if crate::view_gizmo::style(app) == crate::prefs::NavigatorStyle::Mecha {
+        return;
+    }
     let axis = crate::viewport::axis_rect(app, rect);
     if !app.preferences.show_view_angles || !axis.is_positive() || !axis.is_finite() {
-        ui.data_mut(|d| d.remove::<ViewAngles>(draft_id()));
-        set_readout_rect(ui, rect, None);
+        hide(ui, rect);
         return;
     }
     let t = Tokens::get();
@@ -138,24 +153,67 @@ pub(crate) fn show(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect) {
     let size = vec2(first.size().x.max(second.size().x), first.size().y + gap + second.size().y) + vec2(12.0, 6.0);
     let chip = Rect::from_min_size(pos2(axis.right() - 4.0 - size.x, axis.bottom() + 2.0), size);
     if !rect.contains_rect(chip) {
-        ui.data_mut(|d| d.remove::<ViewAngles>(draft_id()));
-        set_readout_rect(ui, rect, None);
+        hide(ui, rect);
         return;
     }
-    set_readout_rect(ui, rect, Some(chip));
-    let mut draft = ui.data(|d| d.get_temp::<ViewAngles>(draft_id()));
+    let draft = ui.data(|d| d.get_temp::<ViewAngles>(draft_id()));
     painter.rect(chip, t.radius_sm, t.overlay, t.control_border_stroke(if draft.is_some() { t.accent } else { t.border }), egui::StrokeKind::Inside);
     let right = chip.right() - 6.0;
     painter.galley(pos2(right - first.size().x, chip.top() + 3.0), first, t.text);
     painter.galley(pos2(right - second.size().x, chip.bottom() - 3.0 - second.size().y), second, t.text_dim);
+    editor_at(app, ui, rect, chip, &format!("{angles} · {projection}"), solidcraft_ui_text::tr("ui.view_angles_help"));
+}
+
+/// The readout's stable focus target, shared by the ordinary and Mecha layouts.
+pub(crate) fn readout_id() -> egui::Id {
+    egui::Id::unique("sc_view_angles_readout_button")
+}
+
+/// Remove a readout that is not laid out this frame, including its open editor.
+pub(crate) fn hide(ui: &egui::Ui, viewport: Rect) {
+    ui.data_mut(|d| d.remove::<ViewAngles>(draft_id()));
+    set_readout_rect(ui, viewport, None);
+    ui.memory_mut(|m| m.surrender_focus(readout_id()));
+}
+
+/// Paint a compact readout at the navigator's chosen location and reuse the exact-angle card.
+/// The caller supplies a localized label; the editor keeps the existing camera convention.
+pub(crate) fn show_at(app: &mut SolveApp, ui: &mut egui::Ui, viewport: Rect, chip: Rect, label: &str) {
+    if !chip.is_positive() || !chip.is_finite() || !viewport.contains_rect(chip) {
+        hide(ui, viewport);
+        return;
+    }
+    let t = Tokens::get();
+    let open = ui.data(|d| d.get_temp::<ViewAngles>(draft_id())).is_some();
+    let focused = ui.memory(|m| m.has_focus(readout_id()));
+    let painter = ui.painter_at(chip);
+    painter.rect(chip, t.radius_sm, t.overlay, t.control_border_stroke(if open || focused { t.accent } else { t.border }), egui::StrokeKind::Inside);
+    let mut job = egui::text::LayoutJob::simple_singleline(label.to_owned(), FontId::proportional(t.font_caption), t.text);
+    job.wrap = egui::text::TextWrapping::truncate_at_width((chip.width() - 12.0).max(0.0));
+    let galley = painter.layout_job(job);
+    painter.galley(chip.center() - galley.size() * 0.5, galley, t.text);
+    // Long translated labels and six-decimal angles retain their complete meaning off-chip.
+    let angles = app.cam.view_angles();
+    let decimals = app.preferences.angle_decimals;
+    let full = solidcraft_ui_text::format(
+        "mecha.angles",
+        &[("azimuth", &degrees(angles.yaw, decimals)), ("elevation", &degrees(angles.pitch, decimals)), ("roll", &degrees(angles.roll, decimals))],
+    );
+    let help = format!("{full}\n\n{}", solidcraft_ui_text::tr("mecha.angles_help"));
+    editor_at(app, ui, viewport, chip, &full, &help);
+}
+
+fn editor_at(app: &mut SolveApp, ui: &mut egui::Ui, viewport: Rect, chip: Rect, label: &str, help: &str) {
+    let t = Tokens::get();
+    set_readout_rect(ui, viewport, Some(chip));
+    let mut draft = ui.data(|d| d.get_temp::<ViewAngles>(draft_id()));
     crate::scenario::publish_target("view_angles:readout", chip);
-    let label = format!("{angles} · {projection}");
-    let response = ui.interact(chip, ui.scope_id().with("view_angles_readout"), Sense::click());
-    response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, &label));
+    let response = ui.interact(chip, readout_id(), Sense::click());
+    response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, label));
     if response.hovered() {
         ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
     }
-    let response = response.backing_on_hover_text(solidcraft_ui_text::tr("ui.view_angles_help"));
+    let response = response.backing_on_hover_text(help);
     if response.clicked() {
         draft = if draft.is_some() { None } else { Some(app.cam.view_angles()) };
     }

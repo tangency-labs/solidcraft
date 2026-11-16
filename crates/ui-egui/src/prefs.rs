@@ -548,15 +548,18 @@ pub enum NavigatorStyle {
     Axes,
     /// A body of the user's choice ([`crate::view_gizmo`]); the signed axes until one is chosen.
     Custom,
+    /// The built-in mechanical hand and its camera controls.
+    Mecha,
 }
 
 impl NavigatorStyle {
-    pub const ALL: [Self; 2] = [Self::Axes, Self::Custom];
+    pub const ALL: [Self; 3] = [Self::Axes, Self::Custom, Self::Mecha];
 
     pub fn label(self) -> &'static str {
         match self {
             Self::Axes => "Signed axes",
             Self::Custom => "Custom",
+            Self::Mecha => solidcraft_ui_text::tr("prefs.navigation.mecha"),
         }
     }
 }
@@ -1091,7 +1094,7 @@ preference_settings! {
     show_donate_button: bool = true, PAGE_GENERAL => check_id("prefs.show_donate_button");
     /// The Discord button at the status bar's right end; the × on it turns it off.
     show_discord_button: bool = true, PAGE_GENERAL => check_id("prefs.show_discord_button");
-    /// View orientation widget: original signed axes (default) or a custom body.
+    /// View orientation widget: original signed axes (default), a custom body or the Mecha hand.
     navigator_style: NavigatorStyle = NavigatorStyle::default(), PAGE_NAVIGATION;
     /// The custom view gizmo's colours: the theme's (themed) or the body's own (modeled).
     navigator_texture: NavigatorTexture = NavigatorTexture::default(), PAGE_NAVIGATION;
@@ -10613,6 +10616,55 @@ mod tests {
         h.call("ui.click", json!({"x":axis.x,"y":axis.y}));
         assert!(h.app.cam.back().dist(Vec3::Y) < 1e-6, "original axes retain click-again reversal");
         assert_eq!(h.app.session.doc.to_json(), design);
+    }
+
+    #[test]
+    fn mecha_navigator_is_opt_in_and_follows_preference_transactions() {
+        assert_eq!(Prefs::default().navigator_style, NavigatorStyle::Axes);
+        let old = super::lenient(&json!({"nav":"solidworks"}));
+        assert_eq!(old.navigator_style, NavigatorStyle::Axes);
+        assert_eq!(serde_json::to_value(NavigatorStyle::Mecha).unwrap(), "mecha");
+        assert_eq!(serde_json::from_value::<NavigatorStyle>(json!("mecha")).unwrap(), NavigatorStyle::Mecha);
+
+        for (width, height) in [(1280, 720), (800, 600)] {
+            let mut h = crate::scenario::Harness::new();
+            h.app.home.open = false;
+            h.call("ui.resize", json!({"width":width,"height":height}));
+            h.call("ui.prefs", json!({"language":"en","open":"Navigation"}));
+            let camera = h.app.cam;
+            let design = h.app.session.doc.to_json();
+            let nav = h.app.preferences.nav.clone();
+            super::reveal_preference(&mut h, "prefs:navigator:Mecha hand");
+            h.step(&json!({"click":{"handle":"prefs:navigator:Mecha hand"}})).unwrap();
+            assert_eq!(h.app.preferences.navigator_style, NavigatorStyle::Mecha);
+            assert_eq!(h.app.preferences.nav, nav);
+            assert_eq!(h.app.cam, camera);
+            assert_eq!(h.app.session.doc.to_json(), design);
+
+            let mut restored = SolveApp::new(Default::default(), Default::default());
+            restored.load_prefs(&h.app.prefs());
+            assert_eq!(restored.preferences.navigator_style, NavigatorStyle::Axes, "an unapplied choice is not saved");
+            h.call("ui.prefs", json!({"button":"cancel"}));
+            assert_eq!(h.app.preferences.navigator_style, NavigatorStyle::Axes);
+            h.call("ui.prefs", json!({"open":"Navigation","navigator_style":"mecha"}));
+            h.call("ui.prefs", json!({"button":"apply"}));
+            restored.load_prefs(&h.app.prefs());
+            assert_eq!(restored.preferences.navigator_style, NavigatorStyle::Mecha, "the applied choice survives restart");
+            h.call("ui.prefs", json!({"button":"defaults"}));
+            assert_eq!(h.app.preferences.navigator_style, NavigatorStyle::Axes);
+            h.call("ui.prefs", json!({"button":"cancel"}));
+            assert_eq!(h.app.preferences.navigator_style, NavigatorStyle::Mecha, "Cancel restores the last applied choice");
+
+            let before = h.app.preferences.clone();
+            assert!(control(&mut h.app, &json!({"navigator_style":"not-a-navigator","nav":"blender"})).is_err());
+            assert_eq!(h.app.preferences, before, "invalid settings fail atomically");
+            h.app.run("view.navigator", json!({"style":"axes"})).unwrap();
+            assert_eq!(h.app.preferences.navigator_style, NavigatorStyle::Axes);
+            h.app.run("view.navigator", json!({"style":"mecha"})).unwrap();
+            assert_eq!(h.app.preferences.navigator_style, NavigatorStyle::Mecha);
+            assert!(h.app.dialog.is_none(), "the command never opens the custom-body dialog");
+            assert_eq!(h.app.session.doc.to_json(), design);
+        }
     }
 
     /// The texts one frame paints.
