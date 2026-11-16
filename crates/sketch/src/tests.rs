@@ -2385,6 +2385,25 @@ fn spline_handle_preview_matches_the_stored_handles() {
     assert!(sk.spline_handle_preview(control).is_none(), "a control point spline has no tangent handles");
 }
 
+/// #18208: two lines cross a circle exactly where a spline ends. The spline's ends are no ends of
+/// the lines or the circle, so they must not stop the lines from cutting the circle: the circle's
+/// inside is divided into the wedge between the lines and the rest, not one undivided profile.
+#[test]
+fn a_spline_ending_where_two_lines_cross_a_circle_does_not_stop_the_cut() {
+    let mut sk = Sketch::new();
+    sk.add_circle(v(0.0, 0.0), 10.0, None, Some("c1")).unwrap();
+    let (c, s) = (30.0_f64.to_radians().cos(), 30.0_f64.to_radians().sin());
+    let (top, bottom) = (v(10.0 * c, 10.0 * s), v(10.0 * c, -10.0 * s));
+    sk.add_line(v(0.0, 0.0), v(14.0 * c, 14.0 * s), None, None, Some("l1")).unwrap();
+    sk.add_line(v(0.0, 0.0), v(14.0 * c, -14.0 * s), None, None, Some("l2")).unwrap();
+    let pts: Vec<usize> = [top, v(13.0, 0.0), bottom].iter().map(|q| sk.add_point(*q, None).unwrap()).collect();
+    sk.add_curve(CurveKind::Spline { pts, control: false, degree: 2, periodic: false, nurbs: None, handles: Vec::new() }, Some("s1")).unwrap();
+    let ps = find_profiles(&sk);
+    let wedge = PI * 100.0 / 6.0;
+    assert!(ps.iter().any(|p| (p.area - wedge).abs() < 0.05 * wedge), "no wedge of {wedge}: {:?}", ps.iter().map(|p| p.area).collect::<Vec<_>>());
+    assert!(ps.iter().all(|p| p.area < PI * 100.0 - 1.0), "the circle stayed one undivided profile");
+}
+
 /// A band of rounded caps over the top of a ring (two arcs of radius 15 tangent to the ring's
 /// sides, joined by a line). On the left the cap's arc and the ring's corner arc leave the ring's
 /// side along one tangent, apart only by the solver's round-off; on the right the cap's arc ends

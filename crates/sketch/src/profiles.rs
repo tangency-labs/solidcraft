@@ -1535,6 +1535,10 @@ fn island_loops(sk: &Sketch, curves: &[usize], max_edges: usize) -> Island {
                         cand.into_iter()
                             .filter_map(|k| ends.get(k).copied())
                             .filter(|e| e.dist(p) < tol * 100.0)
+                            // Only ends of the two curves decide whether they cut each other here:
+                            // a third curve ending at the crossing (a spline ending on a circle
+                            // where two lines cross it) does not cut either of them for the other.
+                            .filter(|e| end_param(x, *e, tol).is_some() || end_param(y, *e, tol).is_some())
                             .fold((false, false), |(cut, weak), e| if misses(e) { (cut, true) } else { (true, weak) })
                     };
                     let (already, weak) = near_ends();
