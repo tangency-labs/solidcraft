@@ -351,7 +351,7 @@ fn folder_row(app: &mut SolveApp, ui: &mut egui::Ui, folder: Folder) {
                 });
             }
             if !folder.value(&mut app.preferences).is_empty() {
-                let response = ui_kit::button(ui, clear, ui_kit::Button::Ghost);
+                let response = ui_kit::button(ui, clear, ui_kit::Button::Normal);
                 crate::scenario::publish_target(&format!("prefs:{name}:clear"), response.rect);
                 if response.clicked() {
                     folder.value(&mut app.preferences).clear();
