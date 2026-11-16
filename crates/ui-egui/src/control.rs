@@ -759,12 +759,9 @@ fn dispatch(app: &mut SolveApp, ctx: &egui::Context, method: &str, p: &Value) ->
         "ui.help" => with(p, |q| ui_help(app, ctx, q)),
         "ui.selectOther" => wrap(crate::select_other::control(app, p)),
         "ui.menuPick" => with(p, |q: params::MenuPick| wrap(crate::context_menu::pick(app, &q.item))),
-        "ui.rename" => with(p, |q: params::Rename| {
-            if crate::context_menu::finish_rename(app, q.text.as_deref(), q.commit) {
-                ok(json!({"done": true}))
-            } else {
-                err("no rename in progress")
-            }
+        "ui.rename" => with(p, |q: params::Rename| match crate::context_menu::finish_rename(app, q.text.as_deref(), q.commit) {
+            Ok(()) => ok(json!({"done": true})),
+            Err(e) => err(e),
         }),
         "ui.window" => with(p, |q: params::Action| match crate::titlebar::window_action(app, ctx, q.action.as_deref().unwrap_or("")) {
             Ok(()) => ok(json!({"custom_titlebar": app.custom_titlebar, "maximized": ctx.input(|i| i.viewport().maximized)})),

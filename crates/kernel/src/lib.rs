@@ -170,7 +170,7 @@ pub use blend_corner::fillet_radii;
 pub use blend_variable::{RadiusSpline, Taper, fillet_chord, fillet_tapered, fillet_variable, fillet_variable_points, fillet_variable_spline, taper};
 pub use body::{
     Body, COLOUR_NAME_MAX, CapSignature, DISPLAY_ANGLE, DisplayShare, EdgeInfo, FaceInfo, FacePaint, FaceSource, MESH_MIN_ANGLE, MeshSpec,
-    MeshTolerance, Paint, PlanStats, PointClass, Refusal, SurfaceKind, colour_name, placed_mesh,
+    MeshTolerance, Paint, PlanStats, PointClass, RayPick, Refusal, SurfaceKind, colour_name, placed_mesh,
 };
 pub use boundary::{Boundary, boundary_patch};
 pub use boundary_network::{BoundaryCurve, CurveSource, MAX_CHAIN_CURVES, MAX_EDGE_PICKS, boundary_join, boundary_surface};
@@ -229,8 +229,8 @@ pub use step::{step_export, step_export_with_face_ids};
 /// The largest STEP text the importer parses; `solidcraft_io::limits` keeps it at the limit in force (#13329).
 pub use step_in::p21::{max_bytes as step_max_bytes, set_max_bytes as set_step_max_bytes};
 pub use step_in::{
-    ImportIssue, ImportReport, ImportedBody, IssueKind, StepImport, StepNode, StepReading, step_cache_alive, step_import, step_import_shared,
-    step_orientation_errors, step_validate,
+    ImportIssue, ImportReport, ImportedBody, IssueKind, LeftOut, StepImport, StepNode, StepReading, step_cache_alive, step_import,
+    step_import_shared, step_orientation_errors, step_validate,
 };
 pub use step_out::{ExportBody, ExportProduct, StepExport, StepHeader, step_export_bodies, step_export_bodies_with_face_ids, step_export_products};
 pub use surface_extend::{ExtendLimit, ExtendMode, ExtendOptions, extend_surface};

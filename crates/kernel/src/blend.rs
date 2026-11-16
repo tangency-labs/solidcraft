@@ -851,6 +851,9 @@ pub struct FitSearch {
 /// close estimate settles the search in two or three blends where bisection takes eleven or
 /// more. Where building is monotone in the size (everything below the largest that fits builds),
 /// the size found is the one bisection finds; it never depends on how the bracket narrowed.
+///
+/// Building is not monotone in the size: a narrow band of sizes can build between sizes that fail,
+/// so a search that found nothing has not shown that nothing smaller builds.
 fn largest_that_fits(size: f64, hint: Option<f64>, blend: impl Fn(f64) -> Result<Body>) -> Result<FitSearch> {
     if !(size.is_finite() && size > 1e-6) {
         return Ok(FitSearch { found: None, smallest_refused: None, tried: 0 });
@@ -2431,6 +2434,18 @@ mod tests {
         let (at, e) = search.smallest_refused.expect("a refusal");
         assert!(at > 0.0 && at < 0.001, "the bisection goes down to the step: {at}");
         assert_eq!(e.to_string(), KernelError::TooLarge(format!("refused at {at}")).to_string());
+    }
+
+    /// A narrow band of sizes that build between sizes that fail (the fuzzer's seed 242) is not
+    /// found by the bisection: the search keeps no claim that nothing smaller builds, only what it tried.
+    #[test]
+    fn a_band_of_sizes_that_build_between_failures_is_not_called_absent() {
+        let body = crate::build::box_solid(Vec3::ZERO, Vec3::new(1.0, 1.0, 1.0)).unwrap();
+        let in_band = |r: f64| (0.08..=0.1166).contains(&r);
+        let search =
+            largest_that_fits(2.5, None, |r| if in_band(r) { Ok(body.clone()) } else { Err(KernelError::TooLarge("too large".into())) }).unwrap();
+        assert!(search.found.is_none(), "bisection misses the band");
+        assert!(search.smallest_refused.is_some() && search.tried > 1);
     }
 
     /// A search that builds a candidate reports it and no refusal.

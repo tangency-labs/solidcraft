@@ -449,6 +449,102 @@ fn host_fit_uses_the_actual_contour_and_model_extent_with_the_full_projection() 
 }
 
 #[test]
+fn host_fit_keeps_narrow_parts_centred_across_window_sizes() {
+    use crate::panel_runtime::{egui_rect, logical_rect, resolve_usable_region};
+    use solidcraft_engine::panels::{Point, Size};
+    let bounds = Aabb3 { min: Vec3::new(-8.5, -8.5, 0.0), max: Vec3::new(8.5, 8.5, 40.0) };
+    for size in [vec2(1000.0, 720.0), vec2(1280.0, 720.0), vec2(1474.0, 1009.0), vec2(1896.0, 1030.0)] {
+        let viewport = Rect::from_min_max(pos2(0.0, crate::toolbar::APP_BAR_HEIGHT), pos2(size.x, size.y));
+        for (panels, middle) in [
+            (vec![], viewport.center()),
+            (vec![Rect::from_min_size(viewport.min, vec2(260.0, viewport.height()))], pos2((260.0 + size.x) * 0.5, viewport.center().y)),
+            (
+                vec![
+                    Rect::from_min_max(viewport.min, pos2(size.x, 130.0)),
+                    Rect::from_min_size(pos2(0.0, 130.0), vec2(260.0, 220.0)),
+                    Rect::from_min_max(pos2(0.0, size.y - 50.0), viewport.max),
+                ],
+                // The room beside a short Browser spans two free sweep pieces.
+                pos2((260.0 + size.x) * 0.5, (130.0 + size.y - 50.0) * 0.5),
+            ),
+            (
+                // The same left dock split into enough panels to use the bounded search fallback.
+                (0..18)
+                    .map(|i| {
+                        Rect::from_min_max(
+                            pos2(0.0, viewport.top() + viewport.height() * i as f32 / 18.0),
+                            pos2(260.0, viewport.top() + viewport.height() * (i + 1) as f32 / 18.0),
+                        )
+                    })
+                    .collect(),
+                pos2((260.0 + size.x) * 0.5, viewport.center().y),
+            ),
+        ] {
+            let usable = resolve_usable_region(logical_rect(viewport), &panels.iter().copied().map(logical_rect).collect::<Vec<_>>()).unwrap();
+            let bar = bar_rect(viewport);
+            let navigation = usable
+                .place_footprint(
+                    Size { width: bar.width(), height: bar.height() },
+                    Point { x: bar.center().x, y: bar.center().y },
+                    solidcraft_theme::Tokens::get().space_4,
+                )
+                .unwrap();
+            let layout = Layout::host(viewport, &usable, crate::prefs::NavigatorStyle::Axes, egui::Vec2::ZERO, egui_rect(navigation));
+            assert!(layout.navigation.is_positive() && layout.axis_view.is_positive());
+            for view in [StandardView::Front, StandardView::Iso] {
+                for fov in [0.0, 0.6] {
+                    let mut camera = Camera::default();
+                    camera.set_view(view);
+                    let fitted = fit_host_bounds(camera, &bounds, &layout, &usable, fov, 1.0).unwrap();
+                    let effective = Camera { fov, ..fitted };
+                    let radius = (bounds.diagonal() + bounds.center().dist(fitted.target)).max(effective.half_height() * 2.0).max(10.0);
+                    let project = |point| {
+                        let (x, y, _) = effective.to_screen(point, f64::from(viewport.width()), f64::from(viewport.height()), radius).unwrap();
+                        pos2(viewport.left() + x as f32, viewport.top() + y as f32)
+                    };
+                    let centre = project(bounds.center());
+                    assert!(centre.distance(middle) < 0.01, "{size:?}, panels={panels:?}, {view:?}, fov={fov}: {centre:?} vs {middle:?}");
+                    assert!(framing_centre(camera, &bounds, &layout).unwrap().distance(centre) < 0.01, "Fit and navigation use the same centre");
+                    let projection = host_projection_layout(&layout, &usable, viewport).unwrap();
+                    assert_eq!(
+                        fit_host_bounds(camera, &bounds, &projection, projection.usable.as_ref().unwrap(), fov, 1.0).unwrap(),
+                        fitted,
+                        "baking controls into the projection must retain the panel-only centre"
+                    );
+                    let mut footprint = Rect::NOTHING;
+                    for x in [bounds.min.x, bounds.max.x] {
+                        for y in [bounds.min.y, bounds.max.y] {
+                            for z in [bounds.min.z, bounds.max.z] {
+                                footprint.extend_with(project(Vec3::new(x, y, z)));
+                            }
+                        }
+                    }
+                    assert!(
+                        layout.usable.as_ref().unwrap().contains_rect(logical_rect(footprint.expand(solidcraft_theme::Tokens::get().space_8 - 0.01)))
+                    );
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn host_fit_finds_other_room_when_a_control_covers_the_panel_centre() {
+    use crate::panel_runtime::{logical_rect, resolve_usable_region};
+    let viewport = Rect::from_min_size(pos2(0.0, 0.0), vec2(1000.0, 720.0));
+    let usable = resolve_usable_region(logical_rect(viewport), &[]).unwrap();
+    let confirm = Rect::from_center_size(viewport.center(), vec2(120.0, 80.0));
+    let layout = Layout::host_with_retained_confirm(viewport, &usable, crate::prefs::NavigatorStyle::Axes, confirm, Rect::NOTHING, false);
+    let bounds = Aabb3 { min: Vec3::new(-8.5, -8.5, 0.0), max: Vec3::new(8.5, 8.5, 40.0) };
+    let mut camera = Camera::default();
+    camera.set_view(StandardView::Front);
+    let room = host_framing_room(camera, &bounds, &layout, &usable).expect("a covered centre still leaves fitting room elsewhere");
+    assert!(layout.usable.as_ref().unwrap().contains_rect(logical_rect(room.expand(solidcraft_theme::Tokens::get().space_8 - 0.01))));
+    assert!(!confirm.contains(room.center()));
+    assert!(fit_host_bounds(camera, &bounds, &layout, &usable, 0.0, 1.0).is_some());
+}
+
+#[test]
 fn host_fit_keeps_thin_and_degenerate_model_footprints_padded_at_both_scales() {
     use crate::panel_runtime::{logical_rect, resolve_usable_region};
     for scale in [1.0, 2.0] {
