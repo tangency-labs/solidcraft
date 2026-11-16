@@ -3068,7 +3068,7 @@ fn fit_chain_with_arcs(raw: &[Vec2], loose: Option<f64>, out: &mut Vec<LinkGeom>
             p.push(l);
         }
     }
-    if p.len() < 2 || ext <= tol {
+    if p.len() < 2 || ext <= 1e-9 {
         return;
     }
     if !exact {
@@ -3127,7 +3127,11 @@ fn fit_piece(p: &[Vec2], tol: f64, exact: bool, preserve_arcs: bool, out: &mut V
     }
     // A near-straight run is a line, not an arc of huge radius.
     let curved = |sw: f64| !preserve_arcs || exact || sw.abs() >= 20f64.to_radians();
-    let fitted_arc = || fits_circle(p, tol, exact, preserve_arcs).filter(|(_, _, sw)| curved(*sw)).and_then(|(c, r, sw)| arc_geom(p, c, r, sw, tol));
+    let fitted_arc = || {
+        fits_circle(p, tol, exact, preserve_arcs)
+            .filter(|(_, _, sw)| curved(*sw) || (!fits_line(p, tol) && sw.abs() >= 2f64.to_radians()))
+            .and_then(|(c, r, sw)| arc_geom(p, c, r, sw, tol))
+    };
     if preserve_arcs
         && (exact || p.len() >= 4)
         && let Some(g) = fitted_arc()
@@ -3225,5 +3229,37 @@ mod exact_loop_tests {
         let cubic = [p0, p0 * (1.0 / 3.0) + p1 * (2.0 / 3.0), p1 * (2.0 / 3.0) + p2 * (1.0 / 3.0), p2];
         let area = rational_area(&cubic).expect("degree-elevated quarter circle");
         assert!((area - std::f64::consts::FRAC_PI_4).abs() < 1e-8, "{area}");
+    }
+
+    /// A shallow circular arc (e.g. 10 degrees on an R10 torus, #17498) is preserved as an arc
+    /// rather than being flattened into a chord or discarded.
+    #[test]
+    fn shallow_ten_degree_arc_fits_as_an_arc_not_a_chord() {
+        let pts = [
+            Vec2::new(10.0, 20.0),
+            Vec2::new(9.9996192306417, 20.087265354984),
+            Vec2::new(9.9984769515639, 20.174524064373),
+            Vec2::new(9.9965732497556, 20.261769483079),
+            Vec2::new(9.993908270191, 20.348994967025),
+            Vec2::new(9.9904822158186, 20.436193873653),
+            Vec2::new(9.9862953475457, 20.523359562429),
+            Vec2::new(9.9813479842187, 20.610485395349),
+            Vec2::new(9.9756405025982, 20.697564737441),
+            Vec2::new(9.9691733373313, 20.784590957278),
+            Vec2::new(9.9619469809175, 20.871557427477),
+            Vec2::new(9.9539619836718, 20.958457525202),
+            Vec2::new(9.9452189536827, 21.045284632677),
+            Vec2::new(9.9357185567659, 21.132032137679),
+            Vec2::new(9.9254615164132, 21.218693434051),
+            Vec2::new(9.9144486137381, 21.305261922201),
+            Vec2::new(9.9026806874157, 21.391731009601),
+            Vec2::new(9.8901586336192, 21.478094111296),
+            Vec2::new(9.8768834059514, 21.564344650402),
+            Vec2::new(9.8628560153723, 21.650476058607),
+            Vec2::new(9.8480775301221, 21.736481776669),
+        ];
+        let mut out = Vec::new();
+        fit_chain_with_arcs(&pts, Some(1e-4), &mut out, true);
+        assert!(matches!(out.as_slice(), [LinkGeom::Arc { .. }]), "expected 10-degree arc preserved, got {out:?}");
     }
 }

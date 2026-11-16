@@ -10768,8 +10768,10 @@ fn eval_feature(
         }
         FeatureKind::FrameEndCap { .. } => crate::end_cap::evaluate(doc, vals, f, st),
         FeatureKind::FrameMember { .. } => frame_member::evaluate(doc, vals, f, st),
-        FeatureKind::BoundingSolid { bodies, margin } => {
+        FeatureKind::BoundingSolid { bodies, margin, margins } => {
             let m = val(vals, margin, Kind::Length)?;
+            let side = |i: usize| margins.as_ref().and_then(|ms| ms.get(i)).map_or(Ok(m), |e| val(vals, e, Kind::Length));
+            let (lo, hi) = (Vec3::new(side(0)?, side(2)?, side(4)?), Vec3::new(side(1)?, side(3)?, side(5)?));
             let mut bb = solidcraft_geom::Aabb3::EMPTY;
             for b in st.bodies.iter().filter(|b| bodies.is_empty() || bodies.iter().any(|t| *t == b.name)) {
                 bb = bb.union(&b.mesh().bounds());
@@ -10777,8 +10779,11 @@ fn eval_feature(
             if bb.is_empty() {
                 return Err(DocError::Invalid("no bodies to bound".into()));
             }
-            let pad = Vec3::new(m, m, m);
-            let b = crate::lineage::numbered_tool(kernel::box_solid(bb.min - pad, bb.max + pad)?);
+            let (min, max) = (bb.min - lo, bb.max + hi);
+            if !(min.x < max.x && min.y < max.y && min.z < max.z) {
+                return Err(DocError::Invalid("a side's margin reaches past the opposite side of the bodies".into()));
+            }
+            let b = crate::lineage::numbered_tool(kernel::box_solid(min, max)?);
             let name = unique_body_name(st, f.body_names.first().map(String::as_str).unwrap_or("Bounding"));
             st.bodies.push(ModelBody::traced_new(name, b, f.id));
             Ok(())

@@ -460,15 +460,33 @@ pub(super) fn text_link<'a>(sk: &'a Sketch, entity: &str) -> Option<&'a str> {
 
 /// Transform a text source as a unit; generated outlines remain linked and editable.
 pub(super) fn move_text(sk: &mut Sketch, link: &str, translate: Vec2, rotation: f64, center: Vec2, copy: bool) -> Result<Vec<usize>> {
+    let (sin, cos) = rotation.sin_cos();
+    let place = move |q: Vec2| {
+        let q = q - center;
+        center + Vec2::new(q.x * cos - q.y * sin, q.x * sin + q.y * cos) + translate
+    };
+    transform_text(sk, "sketch.move", link, &place, rotation, 1.0, copy)
+}
+
+/// Place a text source as a unit: its baseline start goes where `place` takes it, its angle
+/// turns by `rotation` and its height scales by `factor`. Generated outlines remain linked and
+/// editable.
+pub(super) fn transform_text(
+    sk: &mut Sketch,
+    cmd: &str,
+    link: &str,
+    place: &dyn Fn(Vec2) -> Vec2,
+    rotation: f64,
+    factor: f64,
+    copy: bool,
+) -> Result<Vec<usize>> {
     let Some(LinkSource::Text { text, at, height, angle, font, style, mut exprs }) = sk.link(link).map(|l| l.source.clone()) else {
-        return Err(bad("sketch.move", "the selected source is not text"));
+        return Err(bad(cmd, "the selected source is not text"));
     };
     if style.path.is_some() {
-        return Err(bad("sketch.move", "a text on a path follows its curve: move the curve, or take the text off it"));
+        return Err(bad(cmd, "a text on a path follows its curve: move the curve, or take the text off it"));
     }
-    let q = at - center;
-    let (sin, cos) = rotation.sin_cos();
-    let moved = center + Vec2::new(q.x * cos - q.y * sin, q.x * sin + q.y * cos) + translate;
+    let moved = place(at);
     // What the move changes is a number now, not the expression it was; the rest stays.
     if (moved.x - at.x).abs() > 1e-12 {
         exprs.x = None;
@@ -479,7 +497,10 @@ pub(super) fn move_text(sk: &mut Sketch, link: &str, translate: Vec2, rotation: 
     if rotation.abs() > 1e-12 {
         exprs.angle = None;
     }
-    let (at, angle) = (moved, angle + rotation);
+    if (factor - 1.0).abs() > 1e-12 {
+        exprs.height = None;
+    }
+    let (at, height, angle) = (moved, height * factor, angle + rotation);
     let geom = solidcraft_sketch::text_geometry_styled(font.as_deref(), &text, at, height, angle, &style, None)?;
     let source = LinkSource::Text { text, at, height, angle, font, style, exprs };
     let link = if copy {
@@ -487,7 +508,7 @@ pub(super) fn move_text(sk: &mut Sketch, link: &str, translate: Vec2, rotation: 
     } else {
         sk.set_link_source(link, source);
         if sk.update_link(link, &geom)? {
-            return Err(bad("sketch.move", "moving text must preserve its outline topology; edit the text source first"));
+            return Err(bad(cmd, "moving text must preserve its outline topology; edit the text source first"));
         }
         link.to_owned()
     };

@@ -88,7 +88,6 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.uv_trim_corner_end_points_only = true;
     f.bspline_trim_preserves_uv_spans = true;
     f.proto_edge_self_loop_on_vertex_degenerate = true;
-    f.cover_refuses_folded_continuation = true;
     f.boolean_vertex_by_best_crossing = true;
     f.classify_edge_interval = true;
     f.degenerate_proto_edge_in_one_vertex = true;
@@ -99,7 +98,6 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.analytic_copy_keeps_parameterization = true;
     f.offset_extension_from_base = true;
     f.fillet_cleanup_keeps_target_faces = true;
-    f.offset_stitch_at_body_tolerance = true;
     f.curve_contacts_at_curve_ends = true;
     f.ssi_tangent_contact_points = true;
     f.ssi_trace_tangent_curves_once = true;
@@ -140,7 +138,6 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.boolean_union_refuses_solid_leak = true;
     f.validation_does_not_make_uv_trims = true;
     f.proto_edge_split_upper_keeps_the_old_max = true;
-    f.point_on_start_point_squared_tolerance = true;
     f.fillet_exact_round_classes = true;
     f.offset_edges_keep_source_tolerance = true;
     f.surface_continuity_checks_last_v_knot = true;

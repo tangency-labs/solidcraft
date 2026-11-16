@@ -2561,6 +2561,24 @@ fn pipe_scale_offset_bounding_and_materials() {
     let m = run(&mut s, "inspect.measure", json!({"bodies": ["Stock"]}));
     let bb = &m["bodies"][0]["bbox"];
     assert!((bb["min"][1].as_f64().unwrap() + 3.0).abs() < 1e-6 && (bb["max"][1].as_f64().unwrap() - 41.0).abs() < 1e-6, "{bb}");
+    // A margin per side (#17043): none at the bottom, more on top, one side set into the tube.
+    let tube = run(&mut s, "inspect.measure", json!({"bodies": ["Tube"]}))["bodies"][0]["bbox"].clone();
+    let at = |b: &Value, end: &str, axis: usize| b[end][axis].as_f64().unwrap();
+    run(&mut s, "solid.bounding_solid", json!({"bodies": ["Tube"], "margin": 9, "margins": [1, 2, "-1 mm", 3, 0, "2 * 2"], "body_name": "Sided"}));
+    let sided = run(&mut s, "inspect.measure", json!({"bodies": ["Sided"]}))["bodies"][0]["bbox"].clone();
+    for (axis, lo, hi) in [(0, 1.0, 2.0), (1, -1.0, 3.0), (2, 0.0, 4.0)] {
+        assert!((at(&tube, "min", axis) - lo - at(&sided, "min", axis)).abs() < 1e-6, "{axis}: {sided} around {tube}");
+        assert!((at(&tube, "max", axis) + hi - at(&sided, "max", axis)).abs() < 1e-6, "{axis}: {sided} around {tube}");
+    }
+    let features = s.doc.features.len();
+    for margins in [json!([1, 2, 3]), json!([0, 0, 0, 0, -50, -50])] {
+        let refused = s.execute("solid.bounding_solid", &json!({"bodies": ["Tube"], "margins": margins}));
+        assert!(refused.is_err() || s.model.results.last().is_some_and(|r| r.error.is_some()), "{margins}: {refused:?}");
+        if refused.is_ok() {
+            run(&mut s, "edit.undo", json!({}));
+        }
+    }
+    assert_eq!(s.doc.features.len(), features);
     run(&mut s, "solid.box", json!({"corner": [100, 0, 0], "length": 10, "width": 10, "height": 10, "body_name": "Cube"}));
     run(&mut s, "solid.scale", json!({"bodies": ["Cube"], "factor": 2, "origin": [100, 0, 0]}));
     let vc = run(&mut s, "inspect.measure", json!({"bodies": ["Cube"]}))["total"]["volume_mm3"].as_f64().unwrap();
