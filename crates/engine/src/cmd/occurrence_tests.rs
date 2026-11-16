@@ -2324,7 +2324,7 @@ fn resolver_order_is_feature_first_at_every_site() {
 
     // plane_param: a sketch on the named plane is attached to the feature, not the datum.
     let sid = run(&mut s, "sketch.create", json!({"plane": &plane_key, "name": "On the feature"}))["sketch"].as_u64().unwrap();
-    let FeatureKind::Sketch { plane: PlaneRef::Construction { feature }, .. } = &s.doc.feature(sid).unwrap().kind else {
+    let FeatureKind::Sketch { plane: PlaneRef::Construction { feature, .. }, .. } = &s.doc.feature(sid).unwrap().kind else {
         panic!("{:?}", s.doc.feature(sid).unwrap().kind)
     };
     let named = s.doc.features.iter().find(|f| f.name == plane_key).unwrap().id;

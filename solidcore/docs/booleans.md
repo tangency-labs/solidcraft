@@ -303,6 +303,97 @@ entities within tolerance are one, and a decision across that band has to be mad
 every later step. The port's strip rule is one such decision; a general one for curved faces within
 tolerance is open.
 
+**One point or two.** A proto vertex holds the points the two operands' intersections give for one
+place. Each point is known to its tolerance (a proto vertex's, or the one a proto vertex made of
+the point would get: the largest of its deviation, the intersector's tolerance and its objects' zone
+tolerances), so two points whose distance exceeds the sum of their tolerances are provably two points,
+and no proto vertex may hold both: `find_proto_vertex_within` (`proto_topology/p1/proto.rs`) takes a
+proto vertex only within that combined tolerance, the distance shrunk by its rounding (`γ_4`), a NaN
+one apart. The capture distance (0.01, or half the nearest vertex pair of either operand) only says
+where to look. Upstream merges everything within it, and points 1.4e-4 to 1.7e-4 apart (a box edge
+crossing a 0.3 mm sphere twice, each crossing fixed to 5e-6) became one vertex: the arc between them
+a loop, the boolean the sphere alone or "no radial sector of the edge takes the new edge use".
+
+A point's tolerance is how well it is known across the curves that fix it. Along an edge that a
+curve crosses at angle θ, the crossing is known only to tolerance / sin θ: a curve moved by the
+tolerance moves its crossing that far along the edge (the bound of the near-coincident strips
+above). So a point that a curve fixes on an edge has an uncertainty region, the segment tolerance /
+sin θ either way along the edge, widened by the tolerance (`DeclaredContact::of_crossing`). θ is
+enclosed over the whole reach, not read at the point (`Curve::crossing_reach`, `curve/proximity.rs`):
+the tangents of a curve piece lie in the cone of the differences of its Bézier control points, so
+over a parameter window about the point θ is at least the angle between the two curves' cones'
+axes less both half angles, and the window is widened until tolerance / sin θ lies inside what
+both windows cover. For two edges crossing, the two curves are the edges. Where no window proves a
+reach (a curve grazing or running along its edge: an arc of radius 2 crossing at 0.16° turns by
+more than that within its first-order reach of 3.6e-3) the region reaches as far as the capture
+distance looks. The segment runs along the edge's tangent and is widened by how far the edge
+strays from that line within the reach, enclosed by the tangent cone of a window on each side of
+the point (`Curve::stray_from_line`); an edge with no such enclosure gives the ball of the capture
+distance. A point that no curve fixes but that lies on an edge of one operand and in a face of
+the other (a face pair's single point, a degenerate interval) is where the edge crosses the face's
+surface, known along the edge to tolerance / sin θ of that angle, which nothing encloses there: its
+region reaches as far as the capture distance looks. Two drills 1e-9 apart, the lower one 1e-9
+through the plate's bottom: its rim crosses the bottom at 2.8e-5 rad, twice, 1.4e-4 apart, and both
+crossings are one point with the end of the line where its wall touches the bottom, as for drills a
+hair inside. Any other point with no crossing angle has the ball of its tolerance. Two points
+are one when their regions are not proved apart (`DeclaredContact::overlaps`: the gap between the
+two segments' projections onto the direction of their closest pair, less its rounding, which no
+pair of their points is closer than even where the near-parallel solve picks the wrong pair), and
+each proto vertex keeps the regions of the points it holds, also when it is combined into another. A
+point goes to the closest proto vertex it is not proved apart from, so a point whose region also
+reaches a second proto vertex (one made after it, or merely farther) leaves two proto vertices that
+nothing proves two places: once every face pair's proto vertices are made, each such pair is
+combined (`combine_proto_vertices_not_proved_apart`), and a proto edge between them becomes a
+self-loop that is dropped within its ends' reach or refused (WR-214). A box corner 1.58e-5 inside a
+0.5 mm sphere (tess0033) crosses the sphere along its three edges 2.2e-5, 2.3e-5 and 9.9e-5 from the
+corner; the far crossing, on an edge 15° off the sphere, is fixed only to 1.2e-4 along it by one of
+its arcs, which reaches the corner: one point, the box and the sphere meeting there. A wall/round curve
+along a slab's edge at 5° and a rod/round curve across it at 40° end 9.3e-5 apart at 1e-5: one
+point (1e-5 / sin 5° = 1.1e-4). The two crossings of the sphere's circles by the box edge, 1.5e-4
+apart, are crossed at sines of 0.26 and more: 3.9e-5 each, two points.
+
+Two points farther apart than that are one only where a rule proves them one contact point, and the
+rule declares it before any proto vertex of a face pair is made (`DeclaredContact`,
+`set_declared_contacts`): every point within a radius of a segment, whatever their distance. The
+strip is such a proof. Two planes crossing at θ stay within tolerance of each other across a strip
+about the crossing line, bounded by an edge of either face lying within tolerance of the other plane
+(the gap between two planes is linear across it, zero on the crossing): the crossing is fixed only
+to that strip, so at each end of it the crossing's end and the bounding edges' ends are one contact
+point, the segment across the strip widened by the tolerance within which the edges cover the
+crossing and by how far their ends lie off the edges' offsets (`strip_contacts`,
+`coincident_strip.rs`; a half strip where only one edge bounds it). The strip ends at the
+innermost edge on each side, each proved on the other face's plane by its hull; an edge farther
+out bounds nothing beside the crossing. A
+crossing inside a coincident pair (near-coincident strips, above) makes no curve and so declares
+nothing; the contacts are those of the crossings that stay, read from the edge-on-face curve
+intervals beside them with each curve bounded over its certified hull. To declare them before those
+proto vertices exist, `intersect_topology` first intersects every face pair, then makes their proto
+topology in the same order (shell vertices and wire edges before them, as upstream).
+
+**One edge or two.** The same holds one dimension up. An intersection curve that runs between two
+vertices of a face which already has an edge between those two vertices is that edge when the two
+are proved one curve: every point of each within the sum of their tolerances (the larger of the
+face's and the curve's, plus the edge's, read at most the B-rep's) of the other, over their whole
+lengths, or within a vertex's tolerance of that vertex, which holds both ends. An edge's tolerance
+grows as its vertices take in points, so read as grown it made the answer depend on the order of
+the merges before (a sheet shelled by exactly two tolerances lost one of its four alike side walls). `SmEdgeDefinition::Imprint` then takes the
+edge and makes no second one beside it, in either operand (`face_edge_proved_to_be`,
+`proto_topology/p2.rs`; `find_edge_proved_along`, `geom/tools.rs`). The proof is an enclosure, never
+samples (`Curve::proved_together`, `curve/proximity.rs`): each curve is cut into pieces, a piece is
+enclosed by its chord and the largest distance of its Bézier control points from it (read off the
+knot span by blossoming, with their rounding), and a piece of one curve lies within its own radius,
+plus the distance of its chord's ends from the facing chord, plus that chord's radius, of the other
+curve; a piece that fails is halved, and what is not proved within a fixed number of pieces is two
+edges, as upstream makes them. Upstream always makes the second edge: the face then has coincident
+edges (`SmFace` tests 33 and 34). Two equal tubes meeting end to end are the case: the seat tube's
+end circle crosses the top tube's wall 2.9e-4 from its own seam vertex, itself 8.6e-5 from the
+corner where the two end circles meet. The three are three points (1e-5 each), and between the seam
+vertex and the crossing the wall's cut by the seat's end plane, an ellipse of radii 71 and 16, runs
+4e-9 inside the circle: the circle's edge. The capture distance used to make the three one vertex,
+which hid the question. A sliver between two such edges is no solid: two boxes overlapping in a
+wedge 1e-4 across and 5e-6 thick intersect in nothing (kept as two edges, the wedge was a body of
+three faces that failed its check).
+
 ## 6. Tangent contacts
 
 Where the two boundaries touch without crossing (a cylinder on a plane, a sphere in a cone, two boxes
