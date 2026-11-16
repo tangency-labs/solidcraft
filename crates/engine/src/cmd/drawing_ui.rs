@@ -12,7 +12,7 @@ use super::CommandSpec;
 pub const PENDING_ICONS: &[(&str, &str)] = &[
     ("drawing.view.base.planned", "drawing_base_view"),
     ("drawing.view.projected.planned", "drawing_projected_view"),
-    ("drawing.view.section", "drawing_section_view"),
+    ("drawing.view.section.planned", "drawing_section_view"),
     ("drawing.view.detail", "drawing_detail_view"),
     ("drawing.views.align", "drawing_align_views"),
     ("drawing.image", "drawing_image"),
@@ -40,7 +40,7 @@ pub fn pending_icon(id: &str) -> Option<&'static str> {
 pub static COMMANDS: &[CommandSpec] = &[
     planned!("drawing.view.base.planned", "Base View", "4816").at("DRAWING LAYOUT", "VIEWS").icon("placeholder"),
     planned!("drawing.view.projected.planned", "Projected View", "4816").at("DRAWING LAYOUT", "VIEWS").icon("placeholder"),
-    planned!("drawing.view.section", "Section View", "4816").at("DRAWING LAYOUT", "VIEWS").icon("placeholder"),
+    planned!("drawing.view.section.planned", "Section View", "4816").at("DRAWING LAYOUT", "VIEWS").icon("placeholder"),
     planned!("drawing.view.detail", "Detail View", "4816").at("DRAWING LAYOUT", "VIEWS").icon("placeholder"),
     planned!("drawing.views.align", "Align Views", "4894").at("DRAWING LAYOUT", "ARRANGE").icon("placeholder"),
     planned!("drawing.image", "Insert Image", "4894").at("DRAWING LAYOUT", "INSERT").icon("placeholder"),
@@ -70,7 +70,7 @@ mod tests {
     fn drawing_entries_are_metadata_only() {
         let mut session = crate::Session::new(Default::default());
         let before = serde_json::to_value(&session.doc).unwrap();
-        for id in ["drawing.export", "drawing.view.base", "drawing.view.projected"] {
+        for id in ["drawing.export", "drawing.view.base", "drawing.view.projected", "drawing.view.section"] {
             assert!(crate::find_command(id).unwrap().planned.is_none(), "the executable provider {id} stays registered");
         }
         assert!(crate::find_command("drawing.export.planned").unwrap().planned.is_some(), "the scaffold export stays disabled");

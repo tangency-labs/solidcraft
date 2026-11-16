@@ -4576,3 +4576,88 @@ fn a_flat_view_is_the_same_after_saving_and_opening() {
     assert_eq!(status.name(), "drawn", "{status:?}");
     assert_eq!((lines, status.name()), (was, before.name()));
 }
+
+/// `drawing.view.section` makes a section view of a saved view along the cutting line it is given,
+/// in one undo step: it saves that line and the place given, follows its parent's settings, and
+/// draws as the same view written into the drawing by hand does.
+#[test]
+fn a_section_view_is_made_along_its_line() {
+    use solidcraft_doc::drawing::cutting_line::{ArrowSide, CuttingLine, SectionKind};
+    let (mut s, [front, ..], by_hand) = drilled_with_tab();
+    let line = json!({"kind": "full", "points": [[50.0, -10.0], [50.0, 70.0]], "arrows": "right"});
+    let (made, id) = create(&mut s, SECTION, json!({"parent": ids::encode(front), "line": line, "place": {"at": [150.0, 60.0]}}));
+    let expected = CuttingLine::new(SectionKind::Full, vec![Vec2::new(50.0, -10.0), Vec2::new(50.0, 70.0)], ArrowSide::Right).unwrap();
+    let view = saved(&s, id);
+    assert_eq!(
+        (view.kind, view.place, view.settings),
+        (ViewKind::Section { parent: front, line: expected }, ViewPlace::At([150.0, 60.0]), ViewOverrides::default())
+    );
+    assert_eq!(made["scale"]["text"], inspect_view(&mut s, front)["settings"]["scale"]["value"], "{made}");
+    let ((_, _, ours), (_, _, theirs)) = (drawn_lines(&s, id), drawn_lines(&s, by_hand));
+    for visibility in [Visibility::Visible, Visibility::Hidden] {
+        assert_eq!(upright(&ours, visibility), upright(&theirs, visibility), "{visibility:?}");
+    }
+}
+
+/// With no place, a section view sits where a projected view looking its way would: lined up with
+/// its parent, its boundary a gap past the parent's, on the side the drawing's projection gives. On
+/// the block's front view at 1:2 (185..235 x 143.5..153.5), a line across it with its arrows down
+/// looks down on the half below the line, 50 x 25 on paper: above the parent in third angle, where
+/// the top view goes, and below it in first. An upright line with its arrows right looks at the
+/// right half from the left, 25 x 10: left of the parent in third angle.
+#[test]
+fn a_section_view_sits_where_the_projection_puts_it() {
+    let mut s = block_drawing();
+    let (_, front) = create(&mut s, BASE, json!({"sheet": "Sheet 1", "scale": "1:2"}));
+    let section = |s: &mut Session, points: Value| {
+        create(s, SECTION, json!({"parent": ids::encode(front), "line": {"kind": "full", "points": points, "arrows": "right"}}))
+    };
+    let across = json!([[-10.0, 10.0], [110.0, 10.0]]);
+    let (above, above_id) = section(&mut s, across.clone());
+    assert_box(&above, [185.0, 173.5], [235.0, 198.5]);
+    assert_eq!(saved(&s, above_id).place, ViewPlace::At([210.0, 186.0]));
+    assert_box(&section(&mut s, json!([[50.0, -10.0], [50.0, 30.0]])).0, [140.0, 143.5], [165.0, 153.5]);
+    set_projection(&mut s, Projection::First);
+    assert_box(&section(&mut s, across).0, [185.0, 98.5], [235.0, 123.5]);
+}
+
+/// What the drawing would refuse is refused before anything is saved, naming the command: a line
+/// with one point, two points on top of each other, a point past 1e12 mm, a half line that doesn't
+/// turn, a parent that isn't a view, and a place lined up with the parent.
+#[test]
+fn a_bad_cutting_line_is_refused() {
+    let mut s = block_drawing();
+    let (_, front) = create(&mut s, BASE, json!({"sheet": "Sheet 1", "scale": "1:2"}));
+    let sheet = s.drawing("test").unwrap().sheets[0].id;
+    let made =
+        |parent: u64, kind: &str, points: Value| json!({"parent": ids::encode(parent), "line": {"kind": kind, "points": points, "arrows": "left"}});
+    let mut aligned = made(front, "full", json!([[0.0, 10.0], [100.0, 10.0]]));
+    aligned["place"] = json!({"aligned": 40.0});
+    for bad in [
+        made(front, "full", json!([[0.0, 0.0]])),
+        made(front, "full", json!([[5.0, 5.0], [5.0, 5.0]])),
+        made(front, "full", json!([[0.0, 0.0], [1e13, 0.0]])),
+        made(front, "half", json!([[0.0, 0.0], [10.0, 0.0], [20.0, 0.0]])),
+        made(sheet, "full", json!([[0.0, 10.0], [100.0, 10.0]])),
+        aligned,
+    ] {
+        let why = create_refused(&mut s, SECTION, bad.clone());
+        assert!(why.contains(SECTION), "{bad}: {why}");
+    }
+}
+
+/// A section view takes its letter as it is made, the next one free: A for the first, then B.
+#[test]
+fn a_section_views_letter_is_given() {
+    let mut s = block_drawing();
+    let (_, front) = create(&mut s, BASE, json!({"sheet": "Sheet 1", "scale": "1:2"}));
+    let line = json!({"kind": "full", "points": [[-10.0, 10.0], [110.0, 10.0]], "arrows": "right"});
+    let mut letters = Vec::new();
+    for at in [[100.0, 60.0], [300.0, 60.0]] {
+        let (made, id) = create(&mut s, SECTION, json!({"parent": ids::encode(front), "line": line, "place": {"at": at}}));
+        let saved_letter = saved(&s, id).label.map(|label| label.letter);
+        assert_eq!(made["letter"].as_str(), saved_letter.as_deref(), "{made}");
+        letters.extend(saved_letter);
+    }
+    assert_eq!(letters, ["A", "B"]);
+}

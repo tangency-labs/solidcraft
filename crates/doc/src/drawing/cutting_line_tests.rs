@@ -291,3 +291,37 @@ fn a_line_round_trips_and_a_bad_one_is_refused_on_reading() {
     extra["label"] = serde_json::json!("A");
     assert!(serde_json::from_value::<CuttingLine>(extra).is_err());
 }
+
+/// A section view sits where the projected view looking its way would sit: on the side of its
+/// parent the drawing's projection gives (third angle: away from the arrows; first angle: towards
+/// them), whose projected basis is the section's own. That holds for a line along either paper axis,
+/// with its arrows either way and drawn either way. A slanted line goes by the paper axis nearest
+/// its arrows.
+#[test]
+fn a_section_sits_where_a_projected_view_looking_its_way_sits() {
+    use ArrowSide::{Left, Right};
+    use ProjectedSide::{Above, Below};
+    use solidcraft_geom::cell::Projection;
+    use solidcraft_geom::drawing_view::{ProjectedSide, projected_basis};
+    let front = NamedView::Front.basis();
+    let cases = [
+        // Horizontal, arrows down, then up; then drawn right to left, arrows down.
+        (((-10.0, 5.0), (50.0, 5.0)), Right, Above, Below),
+        (((-10.0, 5.0), (50.0, 5.0)), Left, Below, Above),
+        (((50.0, 5.0), (-10.0, 5.0)), Left, Above, Below),
+        // Upright, arrows right, then left.
+        (((5.0, -10.0), (5.0, 50.0)), Right, ProjectedSide::Left, ProjectedSide::Right),
+        (((5.0, -10.0), (5.0, 50.0)), Left, ProjectedSide::Right, ProjectedSide::Left),
+    ];
+    for ((a, b), arrows, third, first) in cases {
+        let line = full(a, b, arrows);
+        for (projection, side) in [(Projection::Third, third), (Projection::First, first)] {
+            assert_eq!(line.side(projection), side, "{a:?}-{b:?} {arrows:?} {projection:?}");
+            let projected = projected_basis(&front, side, projection).unwrap();
+            assert_eq!(axes(projected), axes(line.basis(&front).unwrap()), "{a:?}-{b:?} {arrows:?} {projection:?}");
+        }
+    }
+    // Slanted, its arrows nearer down than right.
+    let slanted = full((0.0, 0.0), (10.0, 3.0), Right);
+    assert_eq!((slanted.side(Projection::Third), slanted.side(Projection::First)), (Above, Below));
+}
