@@ -607,8 +607,6 @@ pub struct UpstreamFixes {
     pub local_operation_refuses_loose_tangent_edges: bool,
     /// A local operation that moves one of two tangent faces along its normal builds the step: `EdgeuseOffset` finds the two faces parallel but apart across the edge (`IsStepAcrossEdge`) and builds the ruled wall between their edges (`CreateStepWall`, rails of uniform weight made non-rational), kept out of the face extensions; `CloseLoopGaps` closes the gaps the wall leaves at its ends and the edges running past its corners are split; a vertex moved past an edge's other end is `SM_ERR_OFFSET_EDGE_VANISHES` (1043) (WR-530 addendum; tangency-labs/smlib 5d428ae, 90aabff, 34318f4).
     pub local_operation_step_walls: bool,
-    /// A surface of revolution whose generatrix is one circular arc (a fillet's round along a circular edge, a torus in all but its type) collapses when an offset runs towards the arc's centre by its radius or more: `Surface::offset_collapses` says so, as a torus's does, and `create_offset_surface` builds no surface, where upstream says it never collapses and builds the generatrix's offset past the arc's centre as the arc turned inside out, so an inward shell thicker than the round fails with 1001 or leaves a wrong volume (WR-567; the fork's tangency-labs/smlib@8b2090f, smlib#64; SolidCraft `shell_of_a_disc_rounded_smaller_than_the_wall`, solidcraft#319). The faces either side are mated across it (WR-346).
-    pub revolution_round_offset_collapses: bool,
     /// `sm_FixUVTrimCurves` moves only the end control points of the two UV trims meeting at a corner onto the vertex's UV point, without dropping the vertex onto them, trimming there and stretching them back over the edge interval (WR-255, #959/#570; the fork's tangency-labs/smlib@e5606fb (was 5af7070)).
     pub uv_trim_corner_end_points_only: bool,
     /// `BSplineCurve::trim` removes short end spans only for model-space curves
@@ -688,8 +686,6 @@ pub struct UpstreamFixes {
     pub new_edge_vertex_tolerance_covers_gap: bool,
     /// `SmTorus::IsNurbSurfaceTorus` and `SmSphere::IsNurbSurfaceSphere` keep the NURB they tested (rebuilding the analytic data from it, as `SetFromGwNurb` does), not the one made from the fitted circles (~1e-11 off), and the sphere test takes a half meridian within `180 + 360 * SM_EFF_ZERO` degrees, not `180 + SM_EFF_ZERO` (WR-493, #1433; tangency-labs/smlib@7ea6a96). The sphere's sweep interval is its polar curve's, so a small corner sphere passes `SmSurfOfRevolution` tests #6 and #7 (#2073; not in the fork).
     pub found_torus_sphere_keep_tested_nurb: bool,
-    /// `FindPolygonGuess` keeps a suspicious control-net triangle guess as a candidate against the nearest control point's, and returns the nearer one on the surface, so a rational surface whose control points are farther apart than its neighbouring parts does not lose a good guess (WR-444, #1164).
-    pub point_solve_keeps_triangle_guess: bool,
     /// `SmEdgeDefinition::Imprint` continues an intersection edge's 3d and UV curves, each by the polynomial of its own end span, to a proto vertex that lies a few tolerances past the curve's end, so the edge reaches its vertex (internal thread cuts; WR-453, #410; tangency-labs/smlib bf5d3ae (was a8caccd)). The end goes to its proto vertex's position only when that proto vertex is one vertex in each B-rep, else to its own final vertex (WR-498, #1480; tangency-labs/smlib 0b1b945 (was ffaf4e8)).
     pub imprint_extends_edge_to_proto_vertex: bool,
     /// `SmFilletSolver::ComputePointValues` chooses its finite-difference step for each point (1e-3 at a tangent point, 1e-5 otherwise), not once per process as the function-local static `sdStaticStep`, so a blend does not depend on the blends before it ([`Kernel::fillet_point_step`] is then neither read nor set, and an existing latch is kept as it is) (ND-3, #1173; the fork's tangency-labs/smlib@9e17f64 (was 0a05860)).
@@ -758,16 +754,6 @@ pub struct UpstreamFixes {
     /// minimum from the range's middle); only curves whose separation vanishes coincide
     /// over a range (the fork's 04b42b4).
     pub simple_coincidence_crossing_is_point: bool,
-    /// `SmBSplineSurface::IsParallelToVector` (and `SmPlane`'s inherited branch) returns
-    /// `false` when `vector` cannot be unitised, and tests subsequent control points of
-    /// each row or column against the chord direction `(line_end - line_pnt).unitize()`
-    /// rather than `line_end`. Upstream returns `SER(sTestVec.Unitize())`'s
-    /// `SM_ERR_INVALID_INPUT` (1004) as `SmBoolean` (`true`) for a zero vector and passes
-    /// `sLineEnd` as the line direction to `smgu_LinePointDistance(sLinePnt, sLineEnd, ..)`
-    /// (WR-39, #2145;
-    /// `plan/upstream-issues/WR-39--addendum-2026-10-31-parallel-to-vector.md`). Off by
-    /// default for pinned C++ parity.
-    pub surface_parallel_to_vector_checks: bool,
     /// Constant and variable-radius rounds between NURBS faces are built as their definition, a [`crate::surface::procedural_blend::ProceduralBlend`] (the fork's `SmProceduralBlend`): the two faces the ball rolls on, its radius or radius law, the section's order and thumbweight rule and the leader, which evaluate exactly; its net, the certified B-spline approximation within the certificate's bound (the radius law in the certificate), is what the surface cache and tessellation use (`SmBlendNetScope`), the cache's node boxes grown by the net's bound. With it the file reader reads a definition (`SmProceduralBlend_TYPE`, `SURF_BASE_TYPE + 41`); without it that type is refused as the pinned reader refuses it (WR-698, #2273; the fork's tangency-labs/smlib@014f66f to 729f893, smlib#79 step 7, merged at 5e8c9c1).
     ///
     /// Not the fork's (#2486): a chamfer (the linear section) of a constant-radius solver's two offsets between NURBS faces, or of a constant-distance solver's chord between planes, is built as its definition too, the section generator's order 0: the straight chord between the feet of the point at the two offsets off the faces, certified as any section; between planes it is the exact plane through the feet, a `Plane` at a bound of 0 carrying its definition ([`crate::surface::procedural_blend::exact::ExactClass::Chord`], reached through [`crate::surface::surface::Surface::procedural_blend`]); either way keeping the chamfer's sizes (two distances, a distance and an angle, or a chord, with the wedge angle they were converted at; [`crate::surface::procedural_blend::chamfer`], [`crate::blend::fillet_executive::session::FilletSession::prepare_chamfers`]). The record and the database carry the sizes.
