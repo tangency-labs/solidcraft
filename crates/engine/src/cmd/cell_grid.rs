@@ -16,7 +16,7 @@ use crate::{Result, Session};
 
 const CELL_GRID_CONTRACT: TypedContract<CellGridParams> = TypedContract::new();
 
-const HELP_HEAD: &str = "size: expr (a cell's inscribed diameter); web: expr (the wall between cells); depth: expr (or through_all: true); shape?: hexagon|square|triangle|circle|polygon (default hexagon); sides?: expr (polygon cells, 3 to 64; default 8); dot_grid?: hexagonal|square (where circle and polygon cells sit; default hexagonal); angle?: expr (the grid's rotation about the anchor; angle 45 deg with square cells gives a diamond layout); anchor?: [x,y,z] (a cell's centre, projected onto the sketch plane; default the sketch origin: grids with the same anchor, angle, size and web line up); clip?: whole|snap|free (cells the field's edge crosses: only whole cells; cells cut along the grid's own lines; cells trimmed to the edge as drawn; default snap); direction?: positive|negative|symmetric (default positive); sketch?: id|name (default: active or last sketch; its closed profiles hold the field: a loop inside another is a keep-out); profiles?: as solid.extrude; targets?: [body]; mode?: cut (the only mode so far); name?. Cuts at most ";
+const HELP_HEAD: &str = "size: expr (a cell's inscribed diameter); web: expr (the wall between cells); depth: expr (or through_all: true); shape?: hexagon|square|triangle|circle|polygon (default hexagon); sides?: expr (polygon cells, 3 to 64; default 8); dot_grid?: hexagonal|square (where circle and polygon cells sit; default hexagonal); angle?: expr (the grid's rotation about the anchor; angle 45 deg with square cells gives a diamond layout); anchor?: [x,y,z] (a cell's centre, projected onto the sketch plane; default the sketch origin: grids with the same anchor, angle, size and web line up); clip?: whole|snap|free (cells the field's edge crosses: only whole cells; cells cut along the grid's own lines; cells trimmed to the edge as drawn; default snap); keepout_clip?: whole|snap|free (the same for the edges of loops inside the field, the keep-outs; default: the value of clip, so one mode serves every loop; a cell that meets both kinds is dropped if either is whole, else trimmed if either is free); snap_inset?: expr (with clip snap, a whole number of lattice lines each straight field edge moves in after it snaps, so the edge cells are whole and the rim thicker by whole grid rows; default 0; keep-outs are not moved); margin?: expr (with clip whole, the least clearance from a cell to every edge of the field and its keep-outs, measured exactly; default 0, a cell may touch an edge); direction?: positive|negative|symmetric (default positive); sketch?: id|name (default: active or last sketch; its closed profiles hold the field: a loop inside another is a keep-out); profiles?: as solid.extrude; targets?: [body]; mode?: cut (the only mode so far); name?. Cuts at most ";
 const HELP_TAIL: &str = " cells in one operation; not for sheet metal (use sheet.perforate). The faces cut have no stable names yet";
 const HELP_LEN: usize = HELP_HEAD.len() + decimal_len(MAX_CUT_CELLS) + HELP_TAIL.len();
 const HELP_BYTES: [u8; HELP_LEN] = help_bytes();
@@ -94,6 +94,24 @@ fn cell_grid(s: &mut Session, p: &Value) -> Result<Value> {
     let shape = keyword(p, "shape", cmd, solidcore_record::cell_grid::CellShape::Hexagon, "hexagon, square, triangle, circle or polygon")?;
     let dot_grid = keyword(p, "dot_grid", cmd, solidcore_record::cell_grid::DotGrid::Hexagonal, "hexagonal or square")?;
     let clip = keyword(p, "clip", cmd, solidcore_record::cell_grid::Clip::Snap, "whole, snap or free")?;
+    let keepout_clip = match p.get("keepout_clip").filter(|v| !v.is_null()) {
+        None => None,
+        Some(_) => Some(keyword(p, "keepout_clip", cmd, clip, "whole, snap or free")?),
+    };
+    let snap_inset = expr(p, "snap_inset");
+    if let Some(e) = &snap_inset {
+        check_expr(s, e, Kind::Unitless, cmd, "snap_inset")?;
+        let n = s.doc.eval(e, Kind::Unitless).map_err(|err| bad(cmd, format!("snap_inset: {err}")))?;
+        let most = f64::from(solidcraft_doc::CELL_GRID_MAX_SNAP_INSET);
+        if !(n.is_finite() && n.fract() == 0.0 && (0.0..=most).contains(&n)) {
+            return Err(bad(cmd, format!("`snap_inset` must be a whole number from 0 to {most}, not {n}")));
+        }
+        if n > 0.0 && clip != solidcore_record::cell_grid::Clip::Snap {
+            return Err(bad(cmd, "`snap_inset` needs `clip: snap`"));
+        }
+    } else if p.get("snap_inset").is_some_and(|v| !v.is_null()) {
+        return Err(bad(cmd, "`snap_inset` must be a number or an expression"));
+    }
     let sides = expr(p, "sides");
     if let Some(e) = &sides {
         check_expr(s, e, Kind::Unitless, cmd, "sides")?;
@@ -112,6 +130,28 @@ fn cell_grid(s: &mut Session, p: &Value) -> Result<Value> {
         check_expr(s, a, Kind::Angle, cmd, "angle")?;
     }
     let anchor = point_param(s, p, "anchor", cmd)?;
+    let margin = match expr(p, "margin") {
+        Some(e) => {
+            check_expr(s, &e, Kind::Length, cmd, "margin")?;
+            // A bare number means the design's unit.
+            let typed: solidcraft_doc::Expr = s.doc.with_design_unit(&e, Kind::Length).into();
+            let v = s.doc.eval(&typed, Kind::Length).map_err(|err| bad(cmd, format!("margin: {err}")))?;
+            if !(v.is_finite() && v >= 0.0) {
+                return Err(bad(cmd, format!("`margin` must be 0 or more, not {v} mm")));
+            }
+            if v > 0.0
+                && (clip != solidcore_record::cell_grid::Clip::Whole || keepout_clip.is_some_and(|c| c != solidcore_record::cell_grid::Clip::Whole))
+            {
+                return Err(bad(
+                    cmd,
+                    "`margin` needs `clip: whole` (and `keepout_clip: whole` if given): snapped and trimmed cells meet the edge by design",
+                ));
+            }
+            Some(e)
+        }
+        None if p.get("margin").is_some_and(|v| !v.is_null()) => return Err(bad(cmd, "`margin` must be a number or an expression")),
+        None => None,
+    };
     let through_all = bool_(p, "through_all").unwrap_or(false);
     let depth = if through_all {
         None
@@ -147,6 +187,9 @@ fn cell_grid(s: &mut Session, p: &Value) -> Result<Value> {
             angle,
             anchor,
             clip,
+            keepout_clip,
+            snap_inset,
+            margin,
             depth,
             through_all,
             direction,

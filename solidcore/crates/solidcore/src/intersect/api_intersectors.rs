@@ -7,6 +7,7 @@
 //! |-------------------------------------------------------|--------------------------------|
 //! | [`intersect_curves`], [`CurveIntersections`]          | `SmApiIntersectCurves`         |
 //! | [`curve_crossings`]                                   | (not upstream)                 |
+//! | [`curve_plane_crossings`]                             | (not upstream)                 |
 //! | [`intersect_surfaces`]                                | `SmApiIntersectSurfaces`       |
 //! | [`intersect_surfaces_within`]                         | (not upstream)                 |
 //! | [`intersect_faces`], [`FaceBodies`], [`Intersections`] | `SmApiIntersectFaces`         |
@@ -46,6 +47,8 @@
 
 use crate::curve::curve::Curve;
 use crate::error::{ignored, Result, SolidError};
+use crate::eval::Frame;
+use crate::geom::axis2_placement::Axis2Placement;
 use crate::geom::extent1d::Extent1d;
 use crate::geom::extent2d::Extent2d;
 use crate::geom::solution_array::{
@@ -58,6 +61,7 @@ use crate::intersect::point_class::PointClassType;
 use crate::kernel::Kernel;
 use crate::nurbs::b_spline_curve_n_lib::TrimMode;
 use crate::query::brep::{BrepFaceServices, CurveFaceObject, CurveFaceServices};
+use crate::surface::plane::Plane;
 use crate::surface::surface::Surface;
 use crate::surface::surface_cache::face_context::FaceQueries;
 use crate::topology::brep::planar_section::{
@@ -71,6 +75,7 @@ use crate::topology::FaceId;
 const OP: &str = "intersect::api_intersectors::intersect_brep_with_plane";
 const OP_CURVES: &str = "intersect::api_intersectors::intersect_curves";
 const OP_CROSSINGS: &str = "intersect::api_intersectors::curve_crossings";
+const OP_PLANE_CROSSINGS: &str = "intersect::api_intersectors::curve_plane_crossings";
 const OP_SURFACES: &str = "intersect::api_intersectors::intersect_surfaces";
 
 /// The phrase of [`intersect_surfaces`]'s failure when the surfaces do not meet at all.
@@ -486,6 +491,65 @@ pub struct CurveHits {
 /// (`SM_ST_RANGE_OF_VALUES`), its start and its end (`[curve t, surface u, surface v]`).
 type CurveSurfaceSolution = (bool, SolutionEnd, SolutionEnd);
 
+/// Isolated intersections of `curve` over `interval` with the infinite plane of `frame`,
+/// in curve order and in the frame's local coordinates. The kernel's curve/surface solve
+/// uses the model's zone tolerance, including contacts at either interval endpoint.
+/// Overlapping intervals have no isolated intersection; a closed curve's seam is returned
+/// once. Points are evaluated on the curve's definition, never on display segments.
+///
+/// # Errors
+/// [`SolidError::InvalidInput`] for a nonfinite or reversed interval, or a frame that is
+/// not finite and orthonormal; those of the plane constructor and intersection solve.
+pub fn curve_plane_crossings(
+    k: &Kernel,
+    curve: &Curve,
+    interval: &Extent1d,
+    frame: &Frame,
+) -> Result<Vec<Point2>> {
+    if !interval.min().is_finite()
+        || !interval.max().is_finite()
+        || interval.min() > interval.max()
+        || !frame.origin.iter().all(|x| x.is_finite())
+        || crate::eval::check::frame(frame).is_err()
+    {
+        return Err(SolidError::invalid_input(
+            OP_PLANE_CROSSINGS,
+            "the interval or plane frame is invalid",
+        ));
+    }
+    let p3 = |[x, y, z]: [f64; 3]| Vec3::new(x, y, z);
+    let (origin, x, y) = (p3(frame.origin), p3(frame.x_axis), p3(frame.y_axis));
+    let placement = Axis2Placement::from_stored(origin, x, y);
+    let surface = Surface::from(Plane::create_canonical(&placement)?);
+    let tolerance = zone_tol3d(k, USE_DEFAULT);
+    let solutions = surface.global_curve_intersect(
+        k,
+        [Operand::Curve(curve), Operand::Surface(&surface)],
+        &surface.natural_uv_domain_with_nurb(k)?,
+        curve,
+        interval,
+        tolerance,
+    )?;
+    let mut parameters = Vec::new();
+    for solution in solutions.as_slice() {
+        if solution.solution_type == SolutionType::SingleValue {
+            parameters.push(solution.start.param(0)?);
+        }
+    }
+    parameters.sort_by(f64::total_cmp);
+    let mut kept: Vec<Point3> = Vec::new();
+    let mut out = Vec::new();
+    for parameter in parameters {
+        let point = curve.evaluate_point(k, parameter)?;
+        if !kept.iter().any(|p| point.distance(*p) <= tolerance) {
+            kept.push(point);
+            let relative = point - origin;
+            out.push(Point2::new(relative.dot(x), relative.dot(y)));
+        }
+    }
+    Ok(out)
+}
+
 /// The solutions `sm_AppendCurveSurfaceHits` walks: `pSurface->GlobalCurveIntersect` of
 /// `curve` over its natural interval and `surface` over `uv_domain`, within the fixed
 /// tolerance `0.001`.
@@ -766,6 +830,85 @@ pub fn intersect_brep_with_plane(
 mod tests {
     use super::*;
 
+    #[test]
+    fn curve_plane_crossings_include_both_arc_ends_and_respect_the_interval() {
+        use std::f64::consts::{PI, TAU};
+
+        let k = Kernel::default();
+        let circle = crate::eval::Curve::Circle {
+            frame: Frame {
+                origin: [0.0; 3],
+                x_axis: [1.0, 0.0, 0.0],
+                y_axis: [0.0, 1.0, 0.0],
+            },
+            radius: 10.0,
+        };
+        let frame = Frame {
+            origin: [0.0; 3],
+            x_axis: [1.0, 0.0, 0.0],
+            y_axis: [0.0, 0.0, -1.0],
+        };
+        let intersect = |range| {
+            let made = crate::curve::from_parameters::from_parameters(&k, &circle, range).unwrap();
+            curve_plane_crossings(&k, &made.curve, &made.interval, &frame).unwrap()
+        };
+        // Both directions of the reported semicircle, including the roundoff of radians.
+        for range in [[0.0, PI], [PI, TAU], [PI - 1e-15, TAU - 1e-15], [0.0, TAU]] {
+            let mut hits = intersect(range);
+            hits.sort_by(|a, b| a.x.total_cmp(&b.x));
+            assert_eq!(hits.len(), 2, "{range:?}: {hits:?}");
+            for (hit, x) in hits.iter().zip([-10.0, 10.0]) {
+                assert!((hit.x - x).abs() < 1e-9 && hit.y.abs() < 1e-9, "{hit:?}");
+            }
+        }
+        assert!(intersect([0.1, PI - 0.1]).is_empty());
+        let hits = intersect([0.0, PI / 2.0]);
+        assert_eq!(hits.len(), 1, "{hits:?}");
+        assert!((hits[0].x - 10.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn curve_plane_crossings_find_interior_contacts_but_not_coplanar_ranges() {
+        use std::f64::consts::PI;
+
+        let k = Kernel::default();
+        let xy = Frame {
+            origin: [0.0; 3],
+            x_axis: [1.0, 0.0, 0.0],
+            y_axis: [0.0, 1.0, 0.0],
+        };
+        let circle = crate::eval::Curve::Circle {
+            frame: xy.clone(),
+            radius: 10.0,
+        };
+        let made = crate::curve::from_parameters::from_parameters(&k, &circle, [0.0, PI]).unwrap();
+        let intersect = |y| {
+            curve_plane_crossings(
+                &k,
+                &made.curve,
+                &made.interval,
+                &Frame {
+                    origin: [0.0, y, 0.0],
+                    x_axis: [1.0, 0.0, 0.0],
+                    y_axis: [0.0, 0.0, -1.0],
+                },
+            )
+            .unwrap()
+        };
+        let hits = intersect(6.0);
+        assert_eq!(hits.len(), 2, "{hits:?}");
+        for (hit, x) in hits.iter().zip([8.0, -8.0]) {
+            assert!((hit.x - x).abs() < 1e-7 && hit.y.abs() < 1e-9, "{hit:?}");
+        }
+        let tangent = intersect(10.0);
+        assert_eq!(tangent.len(), 1, "{tangent:?}");
+        assert!(tangent[0].x.abs() < 1e-7 && tangent[0].y.abs() < 1e-9);
+        assert!(intersect(11.0).is_empty());
+        assert!(curve_plane_crossings(&k, &made.curve, &made.interval, &xy)
+            .unwrap()
+            .is_empty());
+    }
+
     fn curve(points: &[[f64; 3]]) -> Curve {
         let points: Vec<Point3> = points
             .iter()
@@ -896,7 +1039,7 @@ mod tests {
     fn intersect_surfaces_returns_the_curves_with_the_status() {
         let k = Kernel::default();
         let frame = |z: f64| {
-            let mut f = crate::geom::axis2_placement::Axis2Placement::default();
+            let mut f = Axis2Placement::default();
             f.set_canonical(Point3::new(0.0, 0.0, z), Vec3::X, Vec3::Y)
                 .unwrap();
             f
@@ -904,9 +1047,7 @@ mod tests {
         let sphere = Surface::from(
             crate::surface::sphere::Sphere::create_canonical(&k, &frame(0.0), 2.0).unwrap(),
         );
-        let plane = |z: f64| {
-            Surface::from(crate::surface::plane::Plane::create_canonical(&frame(z)).unwrap())
-        };
+        let plane = |z: f64| Surface::from(Plane::create_canonical(&frame(z)).unwrap());
         let (curves, status) = intersect_surfaces(&k, &sphere, &plane(1.0));
         status.unwrap();
         assert!(!curves.is_empty());

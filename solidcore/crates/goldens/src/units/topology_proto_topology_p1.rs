@@ -2585,6 +2585,7 @@ fn run_proto(
     capture: f64,
     override_tol: f64,
     ops: &[Vec<f64>],
+    stop: Option<(usize, &mut Option<ProtoRun>)>,
 ) -> Result<Vec<f64>, Fail> {
     let mut k = Kernel::default();
     let brep1 = H(100_000, ClassObjectKind::Other);
@@ -2851,8 +2852,15 @@ fn run_proto(
     };
     let mut o = Vec::new();
 
-    for opv in ops {
+    let mut stop = stop;
+    for (index, opv) in ops.iter().enumerate() {
         r.pool.sync_topo();
+        if let Some((at, state)) = stop.as_mut() {
+            if *at == index {
+                **state = Some(r);
+                return Ok(o);
+            }
+        }
         let mut rd = Rd {
             v: opv,
             at: 0,
@@ -4920,6 +4928,13 @@ fn run_proto(
         o.push(out.len() as f64);
         o.extend(out);
     }
+    if let Some((at, state)) = stop {
+        if at == ops.len() {
+            r.pool.sync_topo();
+            *state = Some(r);
+            return Ok(o);
+        }
+    }
     r.put_state(&mut o);
     Ok(o)
 }
@@ -5337,11 +5352,43 @@ pub(super) fn rust_run(s: &Script) -> Result<Vec<f64>, Fail> {
             capture,
             override_tol,
             ops,
-        } => run_proto(objects, *approx_tol, *capture, *override_tol, ops),
+        } => run_proto(objects, *approx_tol, *capture, *override_tol, ops, None),
         Script::Transform { obj, op } => run_transform(obj, op, false),
         Script::ScaleProbe { obj, op } => run_transform(obj, op, true),
         Script::TransformSequence { obj, ops } => run_transform_sequence(obj, ops),
     }
+}
+
+/// The proto run of the proto script `s` just before its op `index` (the state that op
+/// starts from, after the runner's per-op `sync_topo`), or after its last op for `index`
+/// equal to the op count, for tests that check a record against that state; `None` when
+/// the script is not a proto script or ends before that op.
+///
+/// # Errors
+///
+/// A deferred or harness failure of the ops before `index`.
+#[cfg(test)]
+pub(super) fn proto_state_before(s: &Script, index: usize) -> Result<Option<ProtoRun>, Fail> {
+    let Script::Proto {
+        objects,
+        approx_tol,
+        capture,
+        override_tol,
+        ops,
+    } = s
+    else {
+        return Ok(None);
+    };
+    let mut state = None;
+    run_proto(
+        objects,
+        *approx_tol,
+        *capture,
+        *override_tol,
+        ops,
+        Some((index, &mut state)),
+    )?;
+    Ok(state)
 }
 
 pub(super) fn rust(s: &Script) -> Result<Output, HarnessError> {
