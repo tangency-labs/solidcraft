@@ -1983,7 +1983,10 @@ impl SolveApp {
         }
         // Before the folder pick is cleared: a clicked Browser folder is what Show/Hide acts on.
         // With a menu open, this runs that menu's Show/Hide on what the menu is for.
-        if id == "ui.toggle_visibility" {
+        // Show/Hide (`browser.visibility`) started with nothing to act on, from a 3D mouse button,
+        // the command search or a key bound to it, does the same: it used to run with no
+        // parameters and answer "`visible` must be true or false" (#17912).
+        if matches!(id, "ui.toggle_visibility" | "browser.visibility") {
             if !context_menu::press_shortcut(self, "V") {
                 context_menu::toggle_visibility(self);
             }
