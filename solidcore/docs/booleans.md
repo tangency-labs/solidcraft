@@ -302,7 +302,15 @@ hair inside. Any other point with no crossing angle has the ball of its toleranc
 are one when their regions are not proved apart (`DeclaredContact::overlaps`: the gap between the
 two segments' projections onto the direction of their closest pair, less its rounding, which no
 pair of their points is closer than even where the near-parallel solve picks the wrong pair), and
-each proto vertex keeps the regions of the points it holds, also when it is combined into another. A wall/round curve
+each proto vertex keeps the regions of the points it holds, also when it is combined into another. A
+point goes to the closest proto vertex it is not proved apart from, so a point whose region also
+reaches a second proto vertex (one made after it, or merely farther) leaves two proto vertices that
+nothing proves two places: once every face pair's proto vertices are made, each such pair is
+combined (`combine_proto_vertices_not_proved_apart`), and a proto edge between them becomes a
+self-loop that is dropped within its ends' reach or refused (WR-214). A box corner 1.58e-5 inside a
+0.5 mm sphere (tess0033) crosses the sphere along its three edges 2.2e-5, 2.3e-5 and 9.9e-5 from the
+corner; the far crossing, on an edge 15° off the sphere, is fixed only to 1.2e-4 along it by one of
+its arcs, which reaches the corner: one point, the box and the sphere meeting there. A wall/round curve
 along a slab's edge at 5° and a rod/round curve across it at 40° end 9.3e-5 apart at 1e-5: one
 point (1e-5 / sin 5° = 1.1e-4). The two crossings of the sphere's circles by the box edge, 1.5e-4
 apart, are crossed at sines of 0.26 and more: 3.9e-5 each, two points.

@@ -3705,6 +3705,71 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
         Ok(ret_val)
     }
 
+    /// Not upstream: combines every two listed proto vertices that one point does not
+    /// tell apart (docs/booleans.md, "One point or two"). A point is taken in by the
+    /// closest proto vertex its region is not proved apart from
+    /// ([`ProtoTopologyManager::find_proto_vertex_within`]); a proto vertex made after it,
+    /// or a second one its region also reaches, stays another proto vertex although the
+    /// point may lie at either, so the two are not proved two places. After the face pairs'
+    /// proto vertices are made, each noted region is compared with every other listed proto
+    /// vertex within the capture distance of the region's point, as that lookup does (the
+    /// proto vertex's own ball and the regions of the points it holds), and the two are
+    /// combined (as `SplitIntersectingProtoEdges` combines and deletes), until no region
+    /// reaches a second proto vertex. A proto edge between the two becomes a self-loop,
+    /// which [`ProtoTopologyManager::resolve_proto_edge`] drops within its ends' reach or
+    /// refuses.
+    ///
+    /// # Errors
+    ///
+    /// [`SolidError::InvalidInput`] for a deleted listed proto vertex; those of
+    /// [`ProtoTopologyManager::combine_proto_vertex`] and the removal (passed on with
+    /// `pass`, as the combine of `SplitIntersectingProtoEdges`).
+    pub fn combine_proto_vertices_not_proved_apart(
+        &mut self,
+        k: &Kernel,
+        pass: bool,
+    ) -> Result<()> {
+        // (each combine removes a listed proto vertex)
+        for _ in 0..self.pvs.len() {
+            let mut pair = None;
+            'find: for (of, region) in &self.regions {
+                if !self.pvs.contains(of) {
+                    continue;
+                }
+                let centre = region.a + (region.b - region.a) * 0.5;
+                for &id in &self.pvs {
+                    if id == *of {
+                        continue;
+                    }
+                    let pv = self.pv(Some(id))?;
+                    if !face_p2::proto_vertex_contains_point(self, pv, centre) {
+                        continue;
+                    }
+                    let own = DeclaredContact::of_point(pv.position, pv.tolerance(k));
+                    if region.overlaps(&own)
+                        || self
+                            .regions
+                            .iter()
+                            .any(|(at, r)| *at == id && region.overlaps(r))
+                    {
+                        pair = Some((*of, id));
+                        break 'find;
+                    }
+                }
+            }
+            let Some((kept, gone)) = pair else {
+                break;
+            };
+            ignore_soft(passed_on(self.combine_proto_vertex(kept, gone), pass)?)?;
+            self.pv_mut(gone)?.clear_vertex_definitions();
+            ignore_soft(passed_on(self.remove_proto_vertex(gone), pass)?)?;
+            self.delete_proto_vertex_object(gone);
+            // (a region whose proto vertex is gone without a combine reaches nothing)
+            self.regions.retain(|(at, _)| *at != gone);
+        }
+        Ok(())
+    }
+
     /// The first edge definition (of the listed proto edges) whose B-rep `which`
     /// source or final edge is `target_edge` (`FindEdgeDefinitionFromEdge`).
     ///

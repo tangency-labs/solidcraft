@@ -1821,6 +1821,13 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
             .as_mut()
             .ok_or(invalid(OP_INTERSECT_TOPOLOGY, "no proto topology manager"))?;
 
+        // Not upstream: proto vertices that a point's uncertainty region does not tell
+        // apart are one (docs/booleans.md, "One point or two")
+        mgr.combine_proto_vertices_not_proved_apart(
+            k,
+            k.fixes.ssi_proto_topology_statuses_pass_on,
+        )?;
+
         // 1. for every ProtoEdge pair - split ProtoEdges at ProtoEdge/ProtoEdge XSects
         // (the list is re-read after each split: splitting appends proto edges)
         let mut ii = 0usize;
