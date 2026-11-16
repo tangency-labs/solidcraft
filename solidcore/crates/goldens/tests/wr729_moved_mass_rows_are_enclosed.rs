@@ -29,7 +29,7 @@
 //! then within twice its accuracy of the true one); a wider band prints `WIDE` and still
 //! holds both values within their accuracy.
 //!
-//! Run (about N min on a 24-thread machine, so `#[ignore]`d; the goldens job checks the
+//! Run (about 13 min on a 24-thread machine, so `#[ignore]`d; the goldens job checks the
 //! values themselves):
 //! `cargo test --profile goldens -p goldens --test wr729_moved_mass_rows_are_enclosed -- --ignored --nocapture`.
 #![allow(
@@ -841,19 +841,19 @@ const ROWS: &[Row] = &[
     (
         "real-box-fillet12-r3-shell-closed-issue-460",
         true,
-        &[3133.238275168064, 3116.4838356637574, 3116.4838356637574],
-        &[3133.238247593074, 3116.483835694628, 3116.483835694628],
+        &[3133.23890728014, 3116.48383559196, 3116.48383559196],
+        &[3133.23890728014, 3116.48383559196, 3116.48383559196],
     ),
     (
         "real-box-fillet12-r3-shell-open-top-issue-460",
         true,
-        &[2613.237961339107, 2444.4838356640444, 2444.4838356640444],
-        &[2613.2379337641178, 2444.4838356949117, 2444.4838356949117],
+        &[2613.23890728014, 2444.483835591966, 2444.483835591966],
+        &[2613.23890728014, 2444.483835591966, 2444.483835591966],
     ),
     (
         "real-box-fillet4v-r3-shell-closed",
         true,
-        &[3457.0265383187284, 3431.89403530672, 3431.89403530672],
+        &[3457.026538318426, 3431.8940353052085, 3431.8940353052085],
         &[3457.0265418358254, 3431.894035305209, 3431.894035305209],
     ),
     (
