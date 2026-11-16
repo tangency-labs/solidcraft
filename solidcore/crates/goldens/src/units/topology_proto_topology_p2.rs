@@ -1744,6 +1744,65 @@ mod tests {
         }
     }
 
+    /// The huge and tiny edge cases are scaled copies of the unit case (#18001): every curve
+    /// of their pool puts each parameter the cases use at `s` times the unit curve's point
+    /// there, so a definition at parameter `t` on a line sits at the position `pt(t)` it is
+    /// built with. The bound is a few rounding steps of the coordinate.
+    #[test]
+    fn edge_pool_is_the_unit_pool_scaled() {
+        let k = solidcore::kernel::Kernel::default();
+        for s in [1e4, 1e-4] {
+            for (i, (unit, scaled)) in edge_objects(1.0).iter().zip(&edge_objects(s)).enumerate() {
+                let (ObjIn::Curve(unit), ObjIn::Curve(scaled)) = (unit, scaled) else {
+                    continue;
+                };
+                let (unit, scaled) = (build_curve(unit).unwrap(), build_curve(scaled).unwrap());
+                for t in [0.0, 1e-9, 0.2, 0.5, 1.0, 1.5, 2.0, 10.0, 360.0] {
+                    let u = unit.evaluate_point(&k, t).unwrap();
+                    let c = scaled.evaluate_point(&k, t).unwrap();
+                    for (u, c) in [(u.x, c.x), (u.y, c.y), (u.z, c.z)] {
+                        let want = s * u;
+                        assert!(
+                            (c - want).abs() <= 4.0 * f64::EPSILON * want.abs().max(s),
+                            "s = {s}, curve {i}, t = {t}: {c} where the unit curve scaled gives {want}"
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    /// Every huge and tiny edge record is its unit record scaled (#18001): each value is the
+    /// unit value (codes, statuses, counts, parameters) or `s` times it (positions,
+    /// tolerances, gaps), compared as the goldens compare floats (`1e-9` relative). With
+    /// unscaled lines, `edge_vertex_defs_huge` classified a definition at 5000.25 where the
+    /// unit case has 0.75.
+    #[test]
+    fn edge_records_are_the_unit_records_scaled() {
+        let cases: BTreeMap<String, Value> = edge_cases().into_iter().collect();
+        let record = |name: &str| -> Vec<f64> {
+            let s: Script = serde_json::from_value(cases[name].clone()).unwrap();
+            let Ok(out) = rust_run(&s) else {
+                panic!("{name} does not run")
+            };
+            out
+        };
+        let near = |a: f64, b: f64| a == b || (a - b).abs() <= 1e-9 * a.abs().max(b.abs());
+        for name in cases.keys() {
+            let Some(base) = name.strip_suffix("_unit") else {
+                continue;
+            };
+            let unit = record(name);
+            for (sc, s) in [("huge", 1e4), ("tiny", 1e-4)] {
+                let scaled = record(&format!("{base}_{sc}"));
+                assert_eq!(unit.len(), scaled.len(), "{base}_{sc}");
+                for (i, (u, c)) in unit.iter().zip(&scaled).enumerate() {
+                    assert!(near(*u, *c) || near(s * u, *c), "{base}_{sc} value {i}: {c}, unit {u}");
+                }
+            }
+        }
+    }
+
     /// The arguments of the `MGR_UPDATE_EDGES` op `op`, decoded by the runner's own
     /// [`update_edges_args`] against the state `r` it starts from.
     fn op_update_edges_args(r: &ProtoRun, op: &[f64]) -> UpdateEdgesArgs {
