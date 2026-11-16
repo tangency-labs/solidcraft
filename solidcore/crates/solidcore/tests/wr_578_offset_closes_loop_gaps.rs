@@ -13,8 +13,9 @@
 //!
 //! 34318f4: a 30 x 35 x 7.5 box notched 22.5 x 5 down to z = 2.5 at its far corner, shelled
 //! 1.5 inward open at the far side under the notch: the wall moves the strip's top corner
-//! past the end of its edge, `SM_ERR_OFFSET_EDGE_VANISHES` (1043). Open at the notch's
-//! floor it shells.
+//! past the end of its edge. The fork refused it as `SM_ERR_OFFSET_EDGE_VANISHES` (1043).
+//! Now that offset faces whose loops cross are always rebuilt (WR-345), it shells into the
+//! closed form's solid. Open at the notch's floor it shells too.
 #![allow(
     clippy::unwrap_used,
     clippy::expect_used,
@@ -34,6 +35,7 @@ use solidcore::primitive::api_curves::{create_arc, create_line_segment};
 use solidcore::primitive::api_primitives::{create_box, create_cylinder};
 use solidcore::sweep::api_brep::create_linear_sweep;
 use solidcore::topology::brep::p5::transform;
+use solidcore::topology::brep::validation::{check_brep, CheckLevel};
 use solidcore::topology::proto_topology::p1::api_transform::{api_rotate, TransformObject};
 use solidcore::{Brep, Kernel};
 
@@ -154,16 +156,35 @@ fn notched(k: &mut Kernel) -> Brep {
     b
 }
 
+/// Open at the far side under the notch: the floor under the notch (2.5 thick) is thinner
+/// than the two walls' 2 x 1.5, so the cavity never reaches under it and the strip's top
+/// edge vanishes. The fork refused that (1043); with offset faces whose loops cross
+/// rebuilt (WR-345) the shell is built, `check_brep` Level 2 clean and a manifold solid.
+///
+/// Closed form: the notched block 30 x 35 x 7.5 - 22.5 x 5 x 5 = 7312.5 less the cavity,
+/// the block shrunk 1.5 except at the open side y = 35 (x 1.5..28.5, y 1.5..35,
+/// z 1.5..6: 27 x 33.5 x 4.5) less the notch grown 1.5 into it (x < 24, y > 28.5,
+/// z > 1: 22.5 x 6.5 x 4.5), so 7312.5 - (4070.25 - 658.125) = 3900.375.
 #[test]
-fn wr_578_shell_thicker_than_a_step_is_edge_vanishes() {
+fn wr_578_shell_thicker_than_a_step_shells_where_its_edge_vanishes() {
     let mut k = Kernel::default();
     let b = notched(&mut k);
     let strip = planar_faces_at(&k, &b, 1, 35.0);
     assert_eq!(strip.len(), 1, "the far side under the notch");
-    match shell(&mut k, b, -1.5, &strip) {
-        Err(e) => assert_eq!(e.sm_status(), Some(1043)),
-        other => panic!("SM_ERR_OFFSET_EDGE_VANISHES expected: {other:?}"),
-    }
+    let mut result = shell(&mut k, b, -1.5, &strip).unwrap();
+    result.use_arena_naming().unwrap();
+    let lines = check_brep(&mut k, &mut result, CheckLevel::Level2)
+        .unwrap()
+        .lines();
+    assert!(lines.is_empty(), "{lines:?}");
+    let want = 7312.5 - (27.0 * 33.5 * 4.5 - 22.5 * 6.5 * 4.5);
+    assert!(report(
+        &k,
+        "wr_578 notched open under the notch",
+        Ok(result),
+        Some(want),
+        1e-9
+    ));
 }
 
 #[test]
