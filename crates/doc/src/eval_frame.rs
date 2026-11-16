@@ -1,5 +1,6 @@
 //! Frame members (#4003): one body per straight line of a frame sketch, its cross-section a
-//! profile laid square to the line (`frame::member_axes`) and run from one end to the other.
+//! profile laid square to the line (`frame::member_axes`) and run from one end to the other; and
+//! their trims and corners, which rebuild a member with its ends moved to the planes they meet.
 
 use solidcraft_geom::prelude::*;
 use std::borrow::Cow;
@@ -7,12 +8,14 @@ use std::collections::{BTreeMap, HashSet};
 
 use solidcore_record::{Plane, Region2, Vec2, Vec3};
 use solidcraft_geom::{Aabb2, Ring};
-use solidcraft_kernel as kernel;
+use solidcraft_kernel::{self as kernel, Body};
+
+use crate::lineage::Traced;
 use solidcraft_sketch::CurveKind;
 
 use super::{ModelBody, ModelState, SolvedSketch, new_name, path_in_frame, select_profiles, sketch_in_feature_frame, val};
 use crate::expr::{Kind, Value};
-use crate::frame::{self, MAX_MEMBERS, MemberProfile};
+use crate::frame::{self, CornerKind, MAX_MEMBERS, MemberProfile, MemberRecord, MemberRef, Side, TrimEnd, TrimTarget};
 use crate::{DocError, Document, Feature, FeatureKind, ProfileSel, Result};
 
 /// Most profiles a profile sketch may have for its material to be worked out.
@@ -21,53 +24,62 @@ const MAX_PROFILE_PIECES: usize = 256;
 const MIN_LENGTH: f64 = 1e-6;
 /// How far (mm) a 3D sketch curve may stray from the line between its ends and still be a line.
 const STRAIGHT_TOL: f64 = 1e-3;
+/// Farthest (mm) a trim may move a member's end from its line's start.
+const MAX_REACH: f64 = 1e6;
+/// A plane meets a member when its normal leans at least this far (the cosine) from square to the
+/// member's line: a plane closer to running along the member does not cut it.
+const MIN_CROSSING: f64 = 1e-6;
 
-/// Evaluate a `FrameMember` feature: one new body per line, each named
-/// ([`member_names`], or by position for a copy whose `body_names` were set).
-pub(super) fn evaluate(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, st: &mut ModelState) -> Result<()> {
-    let FeatureKind::FrameMember { body_name, names, .. } = &f.kind else {
-        return Err(DocError::Invalid("not a frame member feature".into()));
-    };
-    let Layout { segments, regions, description, at, turn } = layout(doc, vals, f, st)?;
-    let mut made = Vec::with_capacity(segments.len());
-    for (id, a, b) in &segments {
-        let (x, y) = frame::member_axes(*b - *a, turn).ok_or_else(|| DocError::Invalid(format!("line `{id}` has no length")))?;
-        let plane = Plane::new(*a - x * at.x - y * at.y, x, y).ok_or_else(|| DocError::Invalid(format!("line `{id}`: no plane square to it")))?;
-        let mut bodies = kernel::extrude(&plane, &regions, 0.0, a.dist(*b))?;
-        let body = match (bodies.pop(), bodies.is_empty()) {
-            (Some(body), true) => body,
-            _ => return Err(DocError::Invalid(format!("the member on line `{id}` is not one solid"))),
+/// The members a `FrameMember` feature lays out, before they are built.
+pub(super) struct Layout {
+    pub members: Vec<Laid>,
+    /// The section, in its own plane's coordinates (mirrored if the feature mirrors it).
+    pub regions: Vec<Region2>,
+    /// The section's bounding box in those coordinates.
+    pub lo: Vec2,
+    pub hi: Vec2,
+    /// The section's point on its line, in those coordinates.
+    pub at: Vec2,
+    /// What members without a name of their own are named after.
+    pub description: String,
+}
+
+/// One member laid out: its line and the plane of its section at the line's start.
+pub(super) struct Laid {
+    pub id: String,
+    /// The direction of the line (a unit vector) and its length.
+    pub d: Vec3,
+    pub len: f64,
+    /// The section's plane at the line's start (the profile's own origin at its origin), its x × y
+    /// along the line.
+    pub plane: Plane,
+}
+
+impl Layout {
+    fn member(&self, line: &str) -> Option<&Laid> {
+        self.members.iter().find(|m| m.id == line)
+    }
+}
+
+impl Laid {
+    /// The line through the middle of the section's bounding box: its point at the line's start,
+    /// and how far along `d` from there each end of `ends` crosses it.
+    fn axis(&self, lay: &Layout, ends: &[Option<Plane>; 2]) -> Result<(Vec3, f64, f64)> {
+        let c0 = self.plane.to_world((lay.lo + lay.hi) * 0.5);
+        let at = |end: &Option<Plane>, default: f64| -> Result<f64> {
+            let Some(pl) = end else { return Ok(default) };
+            let nd = pl.normal().dot(self.d);
+            if !(nd.abs() >= MIN_CROSSING) {
+                return Err(DocError::Invalid(format!("the end of the member on line `{}` runs along it", self.id)));
+            }
+            Ok(pl.normal().dot(pl.origin - c0) / nd)
         };
-        made.push(crate::lineage::numbered_tool(body));
+        Ok((c0, at(&ends[0], 0.0)?, at(&ends[1], self.len)?))
     }
-    if !f.body_names.is_empty() {
-        // A copy (pasted, or in a copied component) names its members by position, as any
-        // feature's bodies.
-        for (k, t) in made.into_iter().enumerate() {
-            let name = new_name(st, f, k);
-            st.bodies.push(ModelBody::traced_new(name, t, f.id));
-        }
-        return Ok(());
-    }
-    let base = body_name.as_deref().map(str::trim).filter(|n| !n.is_empty()).map_or(description, str::to_string);
-    let ids: Vec<String> = segments.into_iter().map(|(id, _, _)| id).collect();
-    for (name, t) in member_names(st, &ids, names, &base).into_iter().zip(made) {
-        st.bodies.push(ModelBody::traced_new(name, t, f.id));
-    }
-    Ok(())
 }
 
-/// A member feature's lines (in its component frame), profile regions, default name, the
-/// profile point that sits on the lines and the profile's turn about them.
-struct Layout {
-    segments: Vec<(String, Vec3, Vec3)>,
-    regions: Vec<Region2>,
-    description: String,
-    at: Vec2,
-    turn: f64,
-}
-
-fn layout(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, st: &ModelState) -> Result<Layout> {
+/// Lay out a `FrameMember` feature's members: its lines in its component's frame, and its section.
+pub(super) fn layout(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, st: &ModelState) -> Result<Layout> {
     let FeatureKind::FrameMember { path_sketch, lines, profile, anchor, locate, angle, mirror, .. } = &f.kind else {
         return Err(DocError::Invalid("not a frame member feature".into()));
     };
@@ -79,6 +91,18 @@ fn layout(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, st: &Mode
     let (mut regions, description, origin) = profile_regions(vals, st, profile)?;
     if *mirror {
         regions = regions.iter().map(frame::mirrored).collect();
+    }
+    // Trim planes and reach limits must enclose the exact section, including spline extrema.
+    // A sampled profile can miss an extremum between stations.
+    let mut lo = Vec2::new(f64::INFINITY, f64::INFINITY);
+    let mut hi = Vec2::new(f64::NEG_INFINITY, f64::NEG_INFINITY);
+    for body in kernel::extrude(&Plane::XY, &regions, 0.0, 1.0)? {
+        let bounds = body.exact_bounds()?;
+        lo = Vec2::new(lo.x.min(bounds.min.x), lo.y.min(bounds.min.y));
+        hi = Vec2::new(hi.x.max(bounds.max.x), hi.y.max(bounds.max.y));
+    }
+    if !(lo.x <= hi.x && lo.y <= hi.y) {
+        return Err(DocError::Invalid("the member profile has no area".into()));
     }
     let at = match locate {
         Some([x, y]) => {
@@ -99,11 +123,341 @@ fn layout(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, st: &Mode
         Some(e) => val(vals, e, Kind::Angle)?,
         None => 0.0,
     };
-    Ok(Layout { segments, regions, description, at, turn })
+    let mut members = Vec::with_capacity(segments.len());
+    for (id, a, b) in segments {
+        let (x, y) = frame::member_axes(b - a, turn).ok_or_else(|| DocError::Invalid(format!("line `{id}` has no length")))?;
+        let plane = Plane::new(a - x * at.x - y * at.y, x, y).ok_or_else(|| DocError::Invalid(format!("line `{id}`: no plane square to it")))?;
+        let d = (b - a).normalized().ok_or_else(|| DocError::Invalid(format!("line `{id}` has no length")))?;
+        members.push(Laid { len: a.dist(b), d, plane, id });
+    }
+    Ok(Layout { members, regions, lo, hi, at, description })
 }
 
-/// The member of feature `f` on line `line`, as its body was made: the plane square to the line
-/// at its start (x × y along the line), its length, and its profile in that plane.
+/// Build a member: its section run along its line, each end square at the line's end or cut in
+/// its plane (`ends`, normals out of the member).
+pub(super) fn build(m: &Laid, lay: &Layout, ends: &[Option<Plane>; 2], feature: u64) -> Result<Traced> {
+    let corners = [lay.lo, Vec2::new(lay.hi.x, lay.lo.y), lay.hi, Vec2::new(lay.lo.x, lay.hi.y)].map(|c| m.plane.to_world(c));
+    // How far along the line an end plane is at each section corner, in the same order for
+    // both ends so their separation is measured along the same line through the section.
+    let reach = |end: &Option<Plane>, default: f64, start: bool| -> Result<[f64; 4]> {
+        let Some(pl) = end else { return Ok([default; 4]) };
+        let n = pl.normal();
+        let nd = n.dot(m.d);
+        // A start's normal points back along the line, an end's on along it.
+        if !(n.is_finite() && pl.origin.is_finite() && nd.abs() >= MIN_CROSSING) || (nd < 0.0) != start {
+            return Err(DocError::Invalid(format!("the member on line `{}`: an end plane faces the wrong way", m.id)));
+        }
+        Ok(corners.map(|c| n.dot(pl.origin - c) / nd))
+    };
+    let start = reach(&ends[0], 0.0, true)?;
+    let end = reach(&ends[1], m.len, false)?;
+    if !start.iter().chain(&end).all(|t| t.is_finite() && t.abs() <= MAX_REACH) {
+        return Err(DocError::Invalid(format!("the member on line `{}` would reach more than {MAX_REACH} mm", m.id)));
+    }
+    // The ends must leave the whole section between them. Their separation is affine over
+    // the section, so checking corresponding bounding corners suffices. Independent extrema
+    // may overlap along the axis even when two slanted ends leave material everywhere.
+    if !start.iter().zip(&end).all(|(s, e)| e - s > MIN_LENGTH) {
+        return Err(DocError::Invalid(format!("trimming leaves nothing of the member on line `{}` (its ends cross)", m.id)));
+    }
+    let extent = |ts: &[f64; 4]| {
+        let (lo, hi) = ts.iter().fold((f64::INFINITY, f64::NEG_INFINITY), |(lo, hi), &t| (lo.min(t), hi.max(t)));
+        let slants = hi - lo > 1e-9 * (1.0 + lo.abs());
+        if slants { (lo, hi, true) } else { (lo, lo, false) }
+    };
+    let (s_lo, s_hi, s_cut) = extent(&start);
+    let (e_lo, e_hi, e_cut) = extent(&end);
+    // An end cut at a slant: run the section past it, then cut it there.
+    let from = if s_cut { s_lo - (s_hi - s_lo) - 1.0 } else { s_lo };
+    let to = if e_cut { e_hi + (e_hi - e_lo) + 1.0 } else { e_hi };
+    let mut bodies = kernel::extrude(&m.plane, &lay.regions, from, to)?;
+    let body = match (bodies.pop(), bodies.is_empty()) {
+        (Some(body), true) => body,
+        _ => return Err(DocError::Invalid(format!("the member on line `{}` is not one solid", m.id))),
+    };
+    // Start from the extrusion's original numbered roles, before a boolean can reorder its
+    // faces. Cut caps take the role of the cap they replace; surviving sides follow history.
+    let caps = [false, true].map(|high| {
+        body.history().and_then(|h| {
+            h.faces.iter().position(|face| face.origins.iter().any(|o| matches!(o, kernel::history::FaceOrigin::Cap { end } if *end == high)))
+        })
+    });
+    let mut body = crate::lineage::numbered_rebuilt(body, feature);
+    for ((end, cut), cap) in ends.iter().zip([s_cut, e_cut]).zip(caps) {
+        if let (Some(pl), true) = (end, cut) {
+            // Keep the side the normal points away from. The half-space tool's end cap is
+            // the cut face, with the replaced member cap's name.
+            let (part, tool) = kernel::half_space(&body.body, pl, false)?;
+            let part = part.ok_or_else(|| DocError::Invalid(format!("trimming leaves nothing of the member on line `{}`", m.id)))?;
+            let cap = cap.ok_or_else(|| DocError::Invalid("the member's end face has no construction identity".into()))?;
+            let roles = crate::lineage::ProfileRoles { sketch: None, region: None, caps: [None, Some(format!("face:{cap}"))], thin: None };
+            let tool = roles.tool(tool, None).rebuilt(feature);
+            body = Traced::step(part, &[&body, &tool]);
+            if body.lineage.is_none() {
+                return Err(DocError::Invalid("the trimmed member's face identities could not be preserved".into()));
+            }
+        }
+    }
+    Ok(body)
+}
+
+/// The record of a member just built.
+fn record(feature: u64, line: &str, body: &str, ends: [Option<Plane>; 2], built: &Body) -> MemberRecord {
+    MemberRecord { feature, line: line.to_string(), body: body.to_string(), ends, built: Some(built.clone()) }
+}
+
+/// Evaluate a `FrameMember` feature: one new body per line, each named
+/// ([`member_names`], or by position for a copy whose `body_names` were set).
+pub(super) fn evaluate(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, st: &mut ModelState) -> Result<()> {
+    let FeatureKind::FrameMember { body_name, names, .. } = &f.kind else {
+        return Err(DocError::Invalid("not a frame member feature".into()));
+    };
+    let lay = layout(doc, vals, f, st)?;
+    let made = lay.members.iter().map(|m| build(m, &lay, &[None, None], f.id)).collect::<Result<Vec<_>>>()?;
+    let ids: Vec<String> = lay.members.iter().map(|m| m.id.clone()).collect();
+    let add = |st: &mut ModelState, name: String, id: &str, body: Traced| {
+        st.frame_members.push(record(f.id, id, &name, [None, None], &body.body));
+        st.bodies.push(ModelBody::traced_new(name, body, f.id));
+    };
+    if !f.body_names.is_empty() {
+        // A copy (pasted, or in a copied component) names its members by position, as any
+        // feature's bodies.
+        for (k, (body, id)) in made.into_iter().zip(&ids).enumerate() {
+            let name = new_name(st, f, k);
+            add(st, name, id, body);
+        }
+        return Ok(());
+    }
+    let base = body_name.as_deref().map(str::trim).filter(|n| !n.is_empty()).map_or(lay.description.clone(), str::to_string);
+    for ((name, body), id) in member_names(st, &ids, names, &base).into_iter().zip(made).zip(&ids) {
+        add(st, name, id, body);
+    }
+    Ok(())
+}
+
+/// A member a trim reads: its record in the model, the feature that lays it out and its place there.
+struct Found {
+    record: usize,
+    feature: u64,
+    name: String,
+}
+
+/// What a trim cuts to: a side of a member, or a plane.
+enum Tool {
+    Member { at: Found, side: Option<Side> },
+    Plane(Plane),
+}
+
+/// Evaluate a `FrameTrim` feature: rebuild each member with the end that meets each target moved
+/// to it, `gap` short of it. The member keeps its body's name and its record.
+pub(super) fn trim(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, st: &mut ModelState, warning: &mut Option<String>) -> Result<()> {
+    let FeatureKind::FrameTrim { members, to, end, gap } = &f.kind else {
+        return Err(DocError::Invalid("not a frame trim feature".into()));
+    };
+    if members.is_empty() || members.len() > MAX_MEMBERS {
+        return Err(DocError::Invalid(format!("a trim takes 1…{MAX_MEMBERS} members")));
+    }
+    if to.is_empty() || to.len() > frame::MAX_TRIM_TARGETS {
+        return Err(DocError::Invalid(format!("a trim takes 1…{} targets", frame::MAX_TRIM_TARGETS)));
+    }
+    let gap = match gap {
+        Some(e) => val(vals, e, Kind::Length)?,
+        None => 0.0,
+    };
+    if !(0.0..=frame::MAX_TRIM_GAP).contains(&gap) {
+        return Err(DocError::Invalid(format!("the gap must be 0…{} mm", frame::MAX_TRIM_GAP)));
+    }
+    // Each member feature laid out once.
+    let mut layouts: BTreeMap<u64, Layout> = BTreeMap::new();
+    let tools = to
+        .iter()
+        .map(|t| match t {
+            TrimTarget::Member { member, side } => Ok(Tool::Member { at: find(doc, vals, f, st, &mut layouts, member)?, side: *side }),
+            TrimTarget::Plane { plane } => Ok(Tool::Plane(target_plane(doc, vals, f, st, plane, warning)?)),
+        })
+        .collect::<Result<Vec<_>>>()?;
+    let mut seen = HashSet::new();
+    for r in members {
+        if !seen.insert(r) {
+            return Err(DocError::Invalid(format!("member `{}` of {} is listed twice", r.line, r.feature)));
+        }
+        let m = find(doc, vals, f, st, &mut layouts, r)?;
+        let rec = st.frame_members.get(m.record).cloned().ok_or_else(|| DocError::Invalid("member record".into()))?;
+        let lay = layouts.get(&m.feature).ok_or_else(|| DocError::Invalid("member layout".into()))?;
+        let laid = lay.member(&rec.line).ok_or_else(|| DocError::Unknown(format!("line `{}` of {}", rec.line, r.feature)))?;
+        let (c0, t0, t1) = laid.axis(lay, &rec.ends)?;
+        // The end each target moves, and the plane it moves to.
+        let mut ends = rec.ends;
+        let mut by: [Option<usize>; 2] = [None, None];
+        for (k, tool) in tools.iter().enumerate() {
+            let cut = match tool {
+                Tool::Member { at, side } => {
+                    if at.record == m.record {
+                        return Err(DocError::Invalid(format!("`{}` can't be trimmed to itself", m.name)));
+                    }
+                    let tr = st.frame_members.get(at.record).ok_or_else(|| DocError::Invalid("member record".into()))?;
+                    let tl = layouts.get(&at.feature).ok_or_else(|| DocError::Invalid("member layout".into()))?;
+                    let tm = tl.member(&tr.line).ok_or_else(|| DocError::Unknown(format!("line `{}`", tr.line)))?;
+                    to_member(laid, (c0, t0, t1), *end, (tm, tl, &tr.ends), *side, gap, &at.name)?
+                }
+                Tool::Plane(pl) => to_plane(laid, (c0, t0, t1), *end, pl, gap),
+            };
+            let Some((which, plane)) = cut else { continue };
+            if let Some(first) = by.get(which).copied().flatten() {
+                return Err(DocError::Invalid(format!(
+                    "targets {} and {} both trim the {} of `{}` (trim them in separate features)",
+                    first + 1,
+                    k + 1,
+                    if which == 0 { "start" } else { "end" },
+                    m.name
+                )));
+            }
+            if let (Some(slot), Some(e)) = (by.get_mut(which), ends.get_mut(which)) {
+                *slot = Some(k);
+                *e = Some(plane);
+            }
+        }
+        if by.iter().all(Option::is_none) {
+            return Err(DocError::Invalid(format!("`{}` meets none of the targets", m.name)));
+        }
+        let body = build(laid, lay, &ends, rec.feature)?;
+        replace(st, m.record, &rec, ends, body)?;
+    }
+    Ok(())
+}
+
+/// Put member `rec` (record `at` in the model), rebuilt as `body` with `ends`, in place of its
+/// body, and record its new ends.
+fn replace(st: &mut ModelState, at: usize, rec: &MemberRecord, ends: [Option<Plane>; 2], body: Traced) -> Result<()> {
+    let i = st.bodies.iter().position(|b| b.name == rec.body).ok_or_else(|| DocError::Unknown(format!("body `{}`", rec.body)))?;
+    let Some(mb) = st.bodies.get(i) else { return Err(DocError::Unknown(format!("body `{}`", rec.body))) };
+    let made = record(rec.feature, &rec.line, &rec.body, ends, &body.body);
+    // Its faces keep the names the member feature gave them, so what later features picked
+    // on it stays picked.
+    let rebuilt = ModelBody::traced_new(mb.name.clone(), body, mb.feature);
+    if let (Some(slot), Some(r)) = (st.bodies.get_mut(i), st.frame_members.get_mut(at)) {
+        *slot = rebuilt;
+        *r = made;
+    }
+    Ok(())
+}
+
+/// Evaluate a `FrameCorner` feature: the two members meet where their middle lines cross, and
+/// each is rebuilt with its end nearer that point cut on the plane halfway between them (the
+/// plane through it square to the difference of their directions away from it), each cut face
+/// `gap / 2` back from that plane. The members keep their bodies' names and their records.
+pub(super) fn corner(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, st: &mut ModelState) -> Result<()> {
+    let FeatureKind::FrameCorner { members, kind, gap } = &f.kind else {
+        return Err(DocError::Invalid("not a frame corner feature".into()));
+    };
+    let [ra, rb] = members.as_slice() else {
+        return Err(DocError::Invalid("a corner takes two members".into()));
+    };
+    let gap = match gap {
+        Some(e) => val(vals, e, Kind::Length)?,
+        None => 0.0,
+    };
+    if !(0.0..=frame::MAX_TRIM_GAP).contains(&gap) {
+        return Err(DocError::Invalid(format!("the gap must be 0…{} mm", frame::MAX_TRIM_GAP)));
+    }
+    let mut layouts: BTreeMap<u64, Layout> = BTreeMap::new();
+    let found = [find(doc, vals, f, st, &mut layouts, ra)?, find(doc, vals, f, st, &mut layouts, rb)?];
+    let [a, b] = &found;
+    if a.record == b.record {
+        return Err(DocError::Invalid(format!("`{}` can't make a corner with itself", a.name)));
+    }
+    // Each member: its record, its layout, its line laid out, and its middle line.
+    let mut sides = Vec::with_capacity(2);
+    for m in &found {
+        let rec = st.frame_members.get(m.record).cloned().ok_or_else(|| DocError::Invalid("member record".into()))?;
+        let lay = layouts.get(&m.feature).ok_or_else(|| DocError::Invalid("member layout".into()))?;
+        let laid = lay.member(&rec.line).ok_or_else(|| DocError::Unknown(format!("line `{}` of `{}`", rec.line, m.name)))?;
+        let axis = laid.axis(lay, &rec.ends)?;
+        sides.push((rec, lay, laid, axis));
+    }
+    let [(_, la, ma, (ca, a0, a1)), (_, lb, mb, (cb, b0, b1))] = sides.as_slice() else {
+        return Err(DocError::Invalid("a corner takes two members".into()));
+    };
+    // Where the two middle lines come closest: at `ta` along the first, `tb` along the second.
+    let cos = ma.d.dot(mb.d);
+    let denom = 1.0 - cos * cos;
+    if !(denom > 1e-12) {
+        return Err(DocError::Invalid(format!("`{}` and `{}` are parallel: a corner needs members at an angle", a.name, b.name)));
+    }
+    let w = *ca - *cb;
+    let ta = (cos * mb.d.dot(w) - ma.d.dot(w)) / denom;
+    let tb = mb.d.dot(w) + cos * ta;
+    let (pa, pb) = (*ca + ma.d * ta, *cb + mb.d * tb);
+    let size = |lay: &Layout| (lay.hi - lay.lo).len();
+    let tol = 1e-6 * (1.0 + size(la) + size(lb) + ma.len + mb.len);
+    let apart = pa.dist(pb);
+    if !(apart <= tol) {
+        return Err(DocError::Invalid(format!("the middle lines of `{}` and `{}` don't meet (they pass {apart:.3} mm apart)", a.name, b.name)));
+    }
+    let at = (pa + pb) * 0.5;
+    // Which end of each member is at the corner. Lines that meet at a point S put the corner
+    // there only when both sections sit on their lines by their middles: each middle line is its
+    // line moved square to it, by `oa` and `ob`, and the corner is where the middle lines cross.
+    // With `wa`, `wb` the ways from S along the members and c = wa·wb, the corner
+    // S + oa + sa·wa = S + ob + sb·wb gives, dotted with wa and with wb (oa·wa = ob·wb = 0),
+    //   sa − c·sb = ob·wa  and  c·sa − sb = −oa·wb,  so
+    //   sa = (ob·wa + c·oa·wb) / (1 − c²),  sb = (oa·wb + c·ob·wa) / (1 − c²),
+    // each how far in from its member's end the corner is (negative: past it). Only an offset's
+    // part across the other member counts, at most |o|·sin θ, so |sa| ≤ (|ob| + |cos θ|·|oa|) / sin θ,
+    // which grows as the angle closes: 45 bars on their outer edges 30° apart meet
+    // 22.5·(1 + cos 30°) / sin 30° = 22.5·cot 15° = 83.971 past their lines' ends. Taking that
+    // off leaves how far each line's end is from where the lines meet, which must be within its
+    // section's size (and the gap); a member that the other meets along its length (a T) is
+    // further. Each pair of ends is tried, and the one nearest the corner taken.
+    let (oa, ob) = (*ca - ma.plane.to_world(la.at), *cb - mb.plane.to_world(lb.at));
+    let fit = |ea: usize, eb: usize| {
+        let (wa, wb) = (if ea == 0 { ma.d } else { -ma.d }, if eb == 0 { mb.d } else { -mb.d });
+        let c = wa.dot(wb);
+        let (sa, sb) = ((ob.dot(wa) + c * oa.dot(wb)) / denom, (oa.dot(wb) + c * ob.dot(wa)) / denom);
+        let (ia, ib) = (if ea == 0 { ta - *a0 } else { *a1 - ta }, if eb == 0 { tb - *b0 } else { *b1 - tb });
+        ([ea, eb], [wa, wb], [(ia - sa).abs(), (ib - sb).abs()])
+    };
+    let worst = |off: &[f64; 2]| off[0].max(off[1]);
+    let (which, [wa, wb], off) = [fit(0, 0), fit(0, 1), fit(1, 0), fit(1, 1)]
+        .into_iter()
+        .reduce(|best, next| if worst(&next.2) < worst(&best.2) { next } else { best })
+        .ok_or_else(|| DocError::Invalid("a corner takes two members".into()))?;
+    for (k, (m, lay)) in [(a, la), (b, lb)].into_iter().enumerate() {
+        let off = off.get(k).copied().unwrap_or(f64::NAN);
+        if !(off <= size(lay) + gap) {
+            return Err(DocError::Invalid(format!(
+                "`{}` doesn't end at the corner with `{}`: the end of its line is {off:.3} mm from where the lines meet",
+                m.name,
+                if k == 0 { &b.name } else { &a.name }
+            )));
+        }
+    }
+    let planes = match kind {
+        CornerKind::Mitre => {
+            // The plane halfway between the members, its normal towards the first.
+            let n = (wa - wb).normalized().ok_or_else(|| DocError::Invalid(format!("`{}` and `{}` run the same way", a.name, b.name)))?;
+            // Each cut faces out of its member, towards the other.
+            [Plane::from_normal(at + n * (gap / 2.0), -n), Plane::from_normal(at - n * (gap / 2.0), n)]
+        }
+    };
+    let mut built = Vec::with_capacity(2);
+    for ((m, (rec, lay, laid, _)), (end, plane)) in found.iter().zip(&sides).zip(which.into_iter().zip(planes)) {
+        let plane = plane.ok_or_else(|| DocError::Invalid(format!("no corner plane for `{}`", m.name)))?;
+        let mut ends = rec.ends;
+        if let Some(e) = ends.get_mut(end) {
+            *e = Some(plane);
+        }
+        built.push((m.record, rec.clone(), ends, build(laid, lay, &ends, rec.feature)?));
+    }
+    for (at, rec, ends, body) in built {
+        replace(st, at, &rec, ends, body)?;
+    }
+    Ok(())
+}
+
+/// The member of feature `f` on line `line`, as its feature laid it out (before any trim): the
+/// plane square to the line at its start (x × y along the line), its length, and its profile in
+/// that plane.
 pub(crate) fn member_section(
     doc: &Document,
     vals: &BTreeMap<String, Value>,
@@ -111,12 +465,145 @@ pub(crate) fn member_section(
     st: &ModelState,
     line: &str,
 ) -> Result<(Plane, f64, Region2)> {
-    let Layout { segments, regions, at, turn, .. } = layout(doc, vals, f, st)?;
-    let (_, a, b) = segments.iter().find(|(id, _, _)| id == line).ok_or_else(|| DocError::Unknown(format!("line `{line}` of the member feature")))?;
-    let (x, y) = frame::member_axes(*b - *a, turn).ok_or_else(|| DocError::Invalid(format!("line `{line}` has no length")))?;
-    let plane = Plane::new(*a - x * at.x - y * at.y, x, y).ok_or_else(|| DocError::Invalid(format!("line `{line}`: no plane square to it")))?;
-    let region = regions.into_iter().next().ok_or_else(|| DocError::Invalid("the member profile has no area".into()))?;
-    Ok((plane, a.dist(*b), region))
+    let lay = layout(doc, vals, f, st)?;
+    let m = lay.member(line).ok_or_else(|| DocError::Unknown(format!("line `{line}` of the member feature")))?;
+    let (plane, len) = (m.plane, m.len);
+    let region = lay.regions.into_iter().next().ok_or_else(|| DocError::Invalid("the member profile has no area".into()))?;
+    Ok((plane, len, region))
+}
+
+/// A plane a member is trimmed to, where it is now: a body face's plane follows the face, as a
+/// sketch on that face does.
+fn target_plane(
+    doc: &Document,
+    vals: &BTreeMap<String, Value>,
+    f: &Feature,
+    st: &ModelState,
+    plane: &crate::PlaneRef,
+    warning: &mut Option<String>,
+) -> Result<Plane> {
+    let Some(anchor) = crate::face_anchor::plane_face_anchor(plane) else { return doc.resolve_plane_in(vals, plane, 0, f.component, Some(st)) };
+    let fst = crate::state_in_face_anchor_frame(doc, st, anchor, f.component)?;
+    let (pl, note) = doc.resolve_attached_plane_noted(vals, plane, f.component, st, &fst)?;
+    if let Some(note) = note {
+        super::append_warning(warning, note);
+    }
+    Ok(pl)
+}
+
+/// Find a member in the model: its record, and its feature laid out (into `layouts`). It must be
+/// a member of an earlier feature of the same component, with its body as that feature (or an
+/// earlier trim) left it. Changed targets also need refusal: their line and profile no longer
+/// establish where their sides are. A planar face target can follow such a body instead.
+fn find(
+    doc: &Document,
+    vals: &BTreeMap<String, Value>,
+    f: &Feature,
+    st: &ModelState,
+    layouts: &mut BTreeMap<u64, Layout>,
+    r: &MemberRef,
+) -> Result<Found> {
+    let mf = doc.find_feature(&r.feature).ok_or_else(|| DocError::Unknown(format!("feature `{}`", r.feature)))?;
+    if !matches!(mf.kind, FeatureKind::FrameMember { .. }) {
+        return Err(DocError::Invalid(format!("`{}` is not a frame member feature", r.feature)));
+    }
+    if mf.component != f.component {
+        return Err(DocError::Invalid(format!("not supported yet: trimming members of another component (`{}`)", r.feature)));
+    }
+    let record = st
+        .frame_members
+        .iter()
+        .position(|m| m.feature == mf.id && m.line == r.line)
+        .ok_or_else(|| DocError::Unknown(format!("member on line `{}` of `{}` (it must come earlier in the timeline)", r.line, r.feature)))?;
+    let rec = st.frame_members.get(record).ok_or_else(|| DocError::Invalid("member record".into()))?;
+    {
+        // A later feature may have removed the member's body and given its name to another.
+        let body = st
+            .body(&rec.body)
+            .filter(|b| b.feature == rec.feature)
+            .ok_or_else(|| DocError::Unknown(format!("body `{}` (member on line `{}` of `{}`)", rec.body, r.line, r.feature)))?;
+        if body.component != mf.component || body.transferred || !rec.is_unchanged(&body.body) {
+            return Err(DocError::Invalid(format!("`{}` was changed after it was made: trim it before the features that change it", rec.body)));
+        }
+    }
+    if let std::collections::btree_map::Entry::Vacant(slot) = layouts.entry(mf.id) {
+        slot.insert(layout(doc, vals, mf, st)?);
+    }
+    Ok(Found { record, feature: mf.id, name: rec.body.clone() })
+}
+
+/// The end of a member (whose middle line runs from `c0` along its `d`, between `t0` and `t1`)
+/// nearer `t` (along it), or the one asked for: 0 the start, 1 the end.
+fn which_end(t: f64, (t0, t1): (f64, f64), end: TrimEnd) -> usize {
+    match end {
+        TrimEnd::Start => 0,
+        TrimEnd::End => 1,
+        TrimEnd::Auto => usize::from((t - t0).abs() > (t - t1).abs()),
+    }
+}
+
+/// The plane an end of member `m` moves to against a side of member `target` (its laid-out
+/// line, its layout and its ends): `None` when the middle line of `m` misses the target.
+fn to_member(
+    m: &Laid,
+    (c0, t0, t1): (Vec3, f64, f64),
+    end: TrimEnd,
+    (tm, tl, tends): (&Laid, &Layout, &[Option<Plane>; 2]),
+    side: Option<Side>,
+    gap: f64,
+    name: &str,
+) -> Result<Option<(usize, Plane)>> {
+    let (tc0, s0, s1) = tm.axis(tl, tends)?;
+    // Where the two middle lines come closest.
+    let (d, td) = (m.d, tm.d);
+    let b = d.dot(td);
+    let denom = 1.0 - b * b;
+    if !(denom > 1e-12) {
+        // Alongside the target: a butt joint needs it across.
+        return Ok(None);
+    }
+    let w = c0 - tc0;
+    let t = (b * td.dot(w) - d.dot(w)) / denom;
+    let s = td.dot(w) + b * t;
+    // The point must lie in the target's section and along its length.
+    let p = c0 + d * t;
+    let (u, v) = (tm.plane.x.dot(p - tm.plane.origin), tm.plane.y.dot(p - tm.plane.origin));
+    let tol = 1e-6 * (1.0 + (tl.hi - tl.lo).len() + tm.len);
+    let inside = u >= tl.lo.x - tol && u <= tl.hi.x + tol && v >= tl.lo.y - tol && v <= tl.hi.y + tol;
+    if !(inside && s >= s0 - tol && s <= s1 + tol) {
+        return Ok(None);
+    }
+    let which = which_end(t, (t0, t1), end);
+    // The member stays on the side the kept end is.
+    let keep = if which == 0 { d } else { -d };
+    let (x, y, o) = (tm.plane.x, tm.plane.y, tm.plane.origin);
+    let sides =
+        [(Side::Right, x, o + x * tl.hi.x), (Side::Left, -x, o + x * tl.lo.x), (Side::Top, y, o + y * tl.hi.y), (Side::Bottom, -y, o + y * tl.lo.y)];
+    let pick = match side {
+        Some(want) => sides.iter().find(|(s, _, _)| *s == want),
+        None => sides.iter().max_by(|a, b| a.1.dot(keep).total_cmp(&b.1.dot(keep))),
+    };
+    let Some(&(_, n, q)) = pick else { return Ok(None) };
+    if !(n.dot(keep) >= MIN_CROSSING) {
+        return Err(DocError::Invalid(format!("that side of `{name}` faces away from the member trimmed to it")));
+    }
+    // The cut faces out of the member: back towards the target.
+    Ok(Plane::from_normal(q + n * gap, -n).map(|pl| (which, pl)))
+}
+
+/// The plane an end of member `m` moves to against plane `pl`: `None` when `m` runs along it.
+fn to_plane(m: &Laid, (c0, t0, t1): (Vec3, f64, f64), end: TrimEnd, pl: &Plane, gap: f64) -> Option<(usize, Plane)> {
+    let n = pl.normal();
+    let nd = n.dot(m.d);
+    if !(nd.abs() >= MIN_CROSSING) {
+        return None;
+    }
+    let t = n.dot(pl.origin - c0) / nd;
+    let which = which_end(t, (t0, t1), end);
+    // The member stays on the side the kept end is: the normal turned towards it.
+    let keep = if which == 0 { m.d } else { -m.d };
+    let n = if n.dot(keep) < 0.0 { -n } else { n };
+    Plane::from_normal(pl.origin + n * gap, -n).map(|cut| (which, cut))
 }
 
 /// The body name of the member on each of `lines`: its own name from `pinned` (by line id) when no
