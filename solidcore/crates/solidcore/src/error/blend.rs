@@ -1072,8 +1072,10 @@ mod tests {
             Failure::new("blend::op", BlendFailure::StageFailed).with_status(SM_ERR_NULL_POINTER);
         let after = line!();
         assert!((before..after).contains(&f.origin().line()));
+        // the path is written with the host's separator (`\` on Windows), so compare its
+        // components, not its text
         assert!(
-            f.origin().file().ends_with("error/blend.rs"),
+            std::path::Path::new(f.origin().file()).ends_with("error/blend.rs"),
             "{}",
             f.origin().file()
         );

@@ -3427,10 +3427,26 @@ fn fine_only_hint(t: &str) -> Option<String> {
 /// Largest nominal diameter automatic thread sizing knows (the last ISO coarse size).
 const LARGEST_COARSE: f64 = 56.0;
 
+/// The size the Thread dialog fills in for a cylinder past the coarse table (`M150x4` for a Ø150
+/// shaft), where automatic sizing has none to give. `None` for any other face.
+pub fn large_thread_size(st: &solidcraft_doc::ModelState, face: Vec3) -> Option<String> {
+    beyond_coarse_sizes(st, face)?.2.into_iter().next()
+}
+
 /// The refusal for automatic sizing on a cylinder too big for the coarse table (a Ø75 shaft):
 /// `None` when sizing finds a thread, or the cylinder is not past the table's end (the feature's
 /// own error then explains). It suggests sizes with a pitch to type, scaled to the diameter.
 fn beyond_coarse_range(st: &solidcraft_doc::ModelState, face: Vec3) -> Option<String> {
+    let (dia, kind, sizes) = beyond_coarse_sizes(st, face)?;
+    Some(format!(
+        "a {dia:.2} mm {kind} is beyond the coarse thread range (up to M{LARGEST_COARSE}): type a size with its pitch, e.g. {}",
+        sizes.join(" or ")
+    ))
+}
+
+/// The diameter, kind (`cylinder` or `hole`) and sizes with a pitch for a cylinder past the coarse
+/// table, `None` when sizing finds a thread or the cylinder is not past the table's end.
+fn beyond_coarse_sizes(st: &solidcraft_doc::ModelState, face: Vec3) -> Option<(f64, &'static str, Vec<String>)> {
     if solidcraft_doc::suggested_thread(st, face).is_ok() {
         return None;
     }
@@ -3449,11 +3465,7 @@ fn beyond_coarse_range(st: &solidcraft_doc::ModelState, face: Vec3) -> Option<St
     let first = PITCHES.iter().position(|p| *p <= dia / 25.0 + 1e-6).unwrap_or(PITCHES.len() - 1);
     let sizes: Vec<String> =
         PITCHES.iter().skip(first).take(2).map(|p| format!("M{}x{p}", if cyl.internal { dia + p } else { dia }.round())).collect();
-    let kind = if cyl.internal { "hole" } else { "cylinder" };
-    Some(format!(
-        "a {dia:.2} mm {kind} is beyond the coarse thread range (up to M{LARGEST_COARSE}): type a size with its pitch, e.g. {}",
-        sizes.join(" or ")
-    ))
+    Some((dia, if cyl.internal { "hole" } else { "cylinder" }, sizes))
 }
 
 fn hole(s: &mut Session, p: &Value) -> Result<Value> {
