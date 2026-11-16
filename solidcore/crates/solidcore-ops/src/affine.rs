@@ -5,7 +5,8 @@
 //! ([`solidcore::Transform::translation`], [`solidcore::Transform::rotation`],
 //! [`solidcore::Transform::uniform_scaling`], [`solidcore::Transform::reflection`],
 //! [`solidcore::Transform::concat`], [`solidcore::Transform::inverse`]); ops checks the
-//! numbers and passes them on.
+//! numbers and passes them on. Beside them, how far a point or a box reaches along a direction
+//! ([`distance_along`], [`span_along`]), as the kernel measures it.
 
 use solidcore::geom::certified::Verdict;
 use solidcore::geom::extent3d::Extent3d;
@@ -168,8 +169,8 @@ pub fn span_along(
     if !finite(&min) || !finite(&max) || !finite(&origin) || !finite(&direction) {
         return Err(Error::Argument);
     }
-    let span =
-        Extent3d::from_points(vec3(min), vec3(max)).span_along(vec3(origin), vec3(direction));
+    let span = Extent3d::from_bounds(min[0], min[1], min[2], max[0], max[1], max[2])
+        .span_along(vec3(origin), vec3(direction));
     if !finite(&span) {
         return Err(Error::Argument);
     }
