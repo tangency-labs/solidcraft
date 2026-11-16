@@ -972,7 +972,7 @@ fn untangle(
             // Halving cannot part two curves that touch or cross: where they come within the chord
             // tolerance of each other, they share nodes.
             let faces: Vec<usize> = tangled.iter().map(|(fi, _)| *fi).collect();
-            tangled = snap_touches(evals, edge_faces, tol, nodes, boundaries, face_boundary, &faces)?;
+            tangled = snap_touches(evals, edge_faces, tol, nodes, boundaries, face_boundary, &faces, why)?;
             // Each face still crossing, with why: planned leniently, and named (`plan_or_fill`).
             return Ok(tangled
                 .iter()
@@ -1042,7 +1042,7 @@ const MAX_SNAP: u32 = 8;
 /// polyline there: a slit, which bounds the face on neither side. A node is not snapped where the
 /// pinch would turn part of its loop inside out by more than the tolerance (two curves crossing
 /// at an angle: the boundary is wrong there, not within the tolerance). Every face of a changed
-/// edge has its boundary built again. Returns the faces whose boundaries still cross, with the
+/// edge has its boundary built again, except one already left out (`why`). Returns the faces whose boundaries still cross, with the
 /// crossing segments.
 #[allow(clippy::too_many_arguments)]
 fn snap_touches(
@@ -1053,6 +1053,7 @@ fn snap_touches(
     boundaries: &mut [Boundary],
     face_boundary: &(dyn Fn(usize, &[edges::Nodes]) -> Result<Boundary> + Sync),
     faces: &[usize],
+    why: &[Option<TessError>],
 ) -> Result<Vec<(usize, Vec<(u32, u32)>)>> {
     let crossing = |fi: usize, fb: &Boundary| -> Vec<(usize, usize)> {
         let Some(s) = evals.get(fi) else { return Vec::new() };
@@ -1085,6 +1086,10 @@ fn snap_touches(
         redo.dedup();
         tangled.clear();
         for fi in redo {
+            // A face already left out keeps its reason, as in [`untangle`]'s rounds.
+            if why.get(fi).is_some_and(Option::is_some) {
+                continue;
+            }
             let fb = face_boundary(fi, nodes)?;
             let crosses = !crossing(fi, &fb).is_empty();
             if let Some(slot) = boundaries.get_mut(fi) {
