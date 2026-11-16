@@ -548,8 +548,8 @@ fn a_box_round_offsets_to_the_round_of_r_plus_d_on_the_offset_faces() {
             panic!("d {d}: the offset is a {:?}", s.kind());
         };
         assert!(c.is_cylinder());
-        // to rounding at part scale: with every fix on the round's face is swapped
-        // (`face_swap_uv_transposes_trims`), and its offset cone's radius lands 2.5e-14 off
+        // to rounding at part scale: the round's face is swapped (`SmFace::SwapUV`), and with
+        // every fix on its offset cone's radius lands 2.5e-14 off
         assert!(
             (c.base_radius() - (2.0 + d)).abs() <= 1e-12,
             "d {d}: {}",

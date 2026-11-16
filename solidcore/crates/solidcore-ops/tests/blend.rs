@@ -3407,7 +3407,6 @@ fn the_inner_top_outline_of_13911_chamfers_and_rounds_at_every_size() {
     for f in [
         "brep_ray_classifies_current_trims",
         "closed_smooth_pole_tangent_limit",
-        "face_swap_uv_transposes_trims",
         "fillet_chamfer_corner",
     ] {
         if !fixes.iter().any(|x| x == f) {
