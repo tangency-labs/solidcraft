@@ -4,7 +4,7 @@
 {"case":"annulus_brep_mass_properties_eps1e-06","deferred":null,"error":null,"ints":{"status":[1007]},"topology":null,"values":{"out":[]}}
 {"case":"annulus_brep_volume_eps1e-06","deferred":null,"error":null,"ints":{"status":[0]},"topology":null,"values":{"out":[0.0]}}
 {"case":"annulus_face_area_eps1e-06","deferred":null,"error":null,"ints":{"status":[0]},"topology":null,"values":{"out":[0.6597344572538546]}}
-{"case":"annulus_face_centroid_eps1e-06","deferred":null,"error":null,"ints":{"status":[0]},"topology":null,"values":{"out":[0.6597344572538566,5.2588536399859733e-17,-1.8699175751356012e-17,0.0]}}
+{"case":"annulus_face_centroid_eps1e-06","deferred":null,"error":null,"ints":{"status":[0]},"topology":null,"values":{"out":[0.6597344572538565,4.207082911988779e-17,-1.8699175751356006e-17,0.0]}}
 {"case":"annulus_translated_face_area_eps1e-08","deferred":null,"error":null,"ints":{"status":[0]},"topology":null,"values":{"out":[0.6597344573680792]}}
 {"case":"annulus_translated_face_centroid_eps1e-08","deferred":null,"error":null,"ints":{"status":[0]},"topology":null,"values":{"out":[0.6597344572435636,2.500000000007326,-1.2500000000087201,3.75]}}
 {"case":"below_step_epsilon","deferred":null,"error":null,"ints":{"status":[0]},"topology":null,"values":{"out":[7.0,0.0,0.0]}}
@@ -15,7 +15,7 @@
 {"case":"disk_brep_mass_properties_eps1e-06","deferred":null,"error":null,"ints":{"status":[1007]},"topology":null,"values":{"out":[]}}
 {"case":"disk_brep_volume_eps1e-06","deferred":null,"error":null,"ints":{"status":[0]},"topology":null,"values":{"out":[0.0]}}
 {"case":"disk_face_area_eps1e-06","deferred":null,"error":null,"ints":{"status":[0]},"topology":null,"values":{"out":[0.7853981633974463]}}
-{"case":"disk_face_centroid_eps1e-06","deferred":null,"error":null,"ints":{"status":[0]},"topology":null,"values":{"out":[0.7853981633974484,4.4174370575882174e-17,-1.1336780655375653e-17,0.0]}}
+{"case":"disk_face_centroid_eps1e-06","deferred":null,"error":null,"ints":{"status":[0]},"topology":null,"values":{"out":[0.7853981633974483,3.533949646070574e-17,-1.575421771296387e-17,0.0]}}
 {"case":"disk_translated_face_area_eps1e-08","deferred":null,"error":null,"ints":{"status":[0]},"topology":null,"values":{"out":[0.785398163525955]}}
 {"case":"disk_translated_face_centroid_eps1e-08","deferred":null,"error":null,"ints":{"status":[0]},"topology":null,"values":{"out":[0.785398163388558,2.5000000000063665,-1.250000000006714,3.75]}}
 {"case":"edge_0_0","deferred":null,"error":null,"ints":{"status":[0]},"topology":null,"values":{"out":{"blocks":[[129.07907990496898,142.30745296946162,1448.2200074014474]],"n":27}}}
