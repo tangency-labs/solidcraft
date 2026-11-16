@@ -141,6 +141,11 @@ pub struct ImportIssue {
     /// The part's name in the file (empty: it has none).
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub part: String,
+    /// Product names from the root to the product that holds the part, at its first placement,
+    /// as [`ImportedBody::path`]: where a part that was not imported would have been (empty: the
+    /// file as a whole, or a solid outside any product).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub path: Vec<String>,
     /// Faces it concerns: one for a face left out, the count for faces not shown, else 0.
     #[serde(default)]
     pub faces: usize,
@@ -1042,6 +1047,13 @@ impl Reader {
     fn report(&self, warnings: &[String]) -> ImportReport {
         let parts = self.plan.iter().map(|p| p.item).collect::<HashSet<_>>().len();
         let solids = self.bodies.iter().filter(|b| b.closed && b.refused.is_none()).map(|b| b.source_item).collect::<HashSet<_>>().len();
+        // The products holding each part, at the first place the file puts it.
+        let mut paths: HashMap<u64, &[String]> = HashMap::new();
+        for p in &self.plan {
+            if let Some(batch) = self.batches.get(p.batch) {
+                paths.entry(p.item).or_insert(&batch.path);
+            }
+        }
         let issues = self
             .warnings
             .values()
@@ -1050,6 +1062,7 @@ impl Reader {
                 kind: n.kind,
                 item: n.item,
                 part: n.item.map(|i| self.part_name(i)).unwrap_or_default(),
+                path: n.item.and_then(|i| paths.get(&i)).map(|p| p.to_vec()).unwrap_or_default(),
                 faces: n.faces,
                 times: n.times,
                 detail: detail.clone(),

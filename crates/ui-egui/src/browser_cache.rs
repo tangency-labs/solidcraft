@@ -97,6 +97,8 @@ pub(super) struct Cache {
     pub root: Node,
     pub root_bodies: Vec<String>,
     pub occurrences: HashMap<Vec<u64>, Node>,
+    /// What each component's row says about the parts of it its import could not bring in.
+    pub defects: BTreeMap<u64, crate::ui_kit::StatusTip>,
 }
 
 impl Cache {
@@ -134,6 +136,7 @@ impl Cache {
         };
         self.scheduled = self.root.children.len();
         self.root_bodies = crate::context_menu::component_bodies(app, 0);
+        self.defects = crate::browser_defects::component_tips(&app.session.doc, &app.session.model);
         // Weak snapshot identities catch replacement and reevaluation without retaining a
         // closed design's geometry while the browser is collapsed.
         self.doc = Arc::downgrade(&app.session.doc);

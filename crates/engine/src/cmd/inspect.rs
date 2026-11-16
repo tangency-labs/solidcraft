@@ -11,7 +11,7 @@ use solidcraft_sketch::CurveKind;
 
 use super::CommandSpec;
 use crate::params::{bad, bool_, str_, string_list};
-use crate::schema::inspect::{BodiesDetail, DocumentBodies, TimelineDetail, TimelineRow};
+use crate::schema::inspect::{BodiesDetail, DocumentBodies, GeometryDefect, TimelineDetail, TimelineRow};
 use crate::schema::inspect::{
     BodyFailure, BodyFeaturesParams, BodyFigures, BodyListParams, BodyMeasurement, BodyName, BodyNames, BodyOutcome, BoundingBox,
     ColoredComponentsParams, ColoredComponentsResult, CommandEntry, CommandsParams, CurveShape, DocumentBody, DocumentBodyDetail,
@@ -577,6 +577,36 @@ fn revision(s: &mut Session, _p: &Value) -> Result<Value> {
     reply("document.revision", RevisionResult { document_id: s.document_id.clone(), revision, param_warnings: Vec::new() })
 }
 
+/// What imports found wrong with the bodies and components they made
+/// (`solidcraft_doc::import_defects`): each body's notes, then each component's parts that were
+/// not imported.
+fn geometry_defects(s: &Session) -> Vec<GeometryDefect> {
+    use solidcraft_doc::import_defects;
+    let kind = |k: solidcraft_doc::kernel::IssueKind| serde_json::to_value(k).ok().and_then(|v| v.as_str().map(str::to_owned)).unwrap_or_default();
+    let st = s.model.state();
+    let mut out: Vec<GeometryDefect> = st
+        .bodies
+        .iter()
+        .flat_map(|b| {
+            import_defects::body_import_issues(&s.model, b).into_iter().map(|i| GeometryDefect {
+                body: Some(b.name.clone()),
+                component: None,
+                kind: kind(i.kind),
+                detail: i.detail.clone(),
+            })
+        })
+        .collect();
+    for (component, issues) in import_defects::component_import_issues(&s.doc, &s.model) {
+        out.extend(issues.into_iter().map(|i| GeometryDefect {
+            body: None,
+            component: Some(component),
+            kind: kind(i.kind),
+            detail: i.detail.clone(),
+        }));
+    }
+    out
+}
+
 fn inspect(s: &mut Session, p: &Value) -> Result<Value> {
     let timeline_detail = TimelineDetail::read(p.get("timeline")).map_err(|e| bad("document.inspect", e))?;
     let bodies_detail = BodiesDetail::read(p.get("bodies")).map_err(|e| bad("document.inspect", e))?;
@@ -696,6 +726,7 @@ fn inspect(s: &mut Session, p: &Value) -> Result<Value> {
             timeline,
             bodies,
             sketches,
+            defects: geometry_defects(s),
             selection: serde_json::to_value(&s.selection).unwrap_or_default(),
             undo: s.undo.len(),
             redo: s.redo.len(),
