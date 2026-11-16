@@ -26,6 +26,8 @@ pub mod flat;
 pub mod golden;
 pub mod jobs;
 pub mod json;
+#[cfg(test)]
+mod operand_trim_rows;
 pub mod output;
 pub(crate) mod own_builder;
 pub(crate) mod own_reader;
@@ -37,6 +39,8 @@ pub mod solidcraft;
 pub mod soundness;
 pub mod ssi;
 pub mod step;
+#[cfg(test)]
+pub(crate) mod trims_on_edges;
 pub mod util;
 
 pub use case::{Case, CaseContext, CaseSource};
