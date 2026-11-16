@@ -94,7 +94,7 @@ use crate::kernel::Kernel;
 use crate::math::{max2, min2, min4, BIG_DOUBLE, EFF_ZERO, EFF_ZERO_SQRT, PI};
 use crate::nurbs::b_spline_curve::{BSplineCurve, ProjectionType};
 use crate::nurbs::math::gamma;
-use crate::nurbs::nurbs_crv::{crv_point_error, crv_speed_bound};
+use crate::nurbs::nurbs_crv::{crv_accel_bound, crv_point_error, crv_speed_bound};
 
 const OP_GCI: &str = "curve::curve::p8::Curve::global_curve_intersect";
 
@@ -249,8 +249,8 @@ fn move_contacts_to_curve_ends<O: SolutionObject>(
                 }
                 let drop_t = dropped.parameter;
                 // The curves within tolerance of one another over the whole stretch from
-                // the solution to the end, certified along the straight parameter path
-                // between the two contacts ([`curves_stay_within`]; a path monotone in
+                // the solution to the end, certified along a parameter path between the
+                // two contacts ([`curves_stay_within`]; a path monotone in
                 // both parameters covers both stretches, so each point of either stretch
                 // has a point of the other within tolerance). Not certified (a curve kind
                 // without a speed bound, a point too far, the piece budget spent): the
@@ -346,24 +346,42 @@ struct PathNode {
     below: f64,
 }
 
-/// Not upstream: whether curves `a` and `b` stay within `tol` of each other along the
-/// whole straight parameter path from `(a, b)` parameters `from` to `to`, certified
-/// (no sampled acceptance):
+/// Not upstream: whether curves `a` and `b` stay within `tol` of each other along a
+/// parameter path from `(a, b)` parameters `from` to `to` that is continuous and monotone
+/// in both parameters (so it covers both stretches), certified (no sampled acceptance):
 ///
+/// * the path is piecewise straight between nodes. It starts as one piece from `from` to
+///   `to`; a piece is halved at the midpoint of its path fraction, the new node putting
+///   `a` at that fraction of its stretch and `b` at the point of the piece's `b` stretch
+///   nearest to it ([`Curve::drop_point`], clamped between the neighbours' parameters, the
+///   straight path's parameter when the solve fails). Any `b` parameter between the
+///   neighbours' keeps the path monotone, so the solve only steers which path is bounded;
+///   every acceptance is the bounds below;
 /// * the speeds of both curves are bounded over the stretches the path runs on
 ///   ([`Curve::speed_bound`], from the curves' own data);
 /// * on a piece of the path between nodes `n0` and `n1`, the distance is at most
 ///   `(f0 + f1) / 2 + L / 2` with `f0`, `f1` bounds above at the nodes and `L = s_a
 ///   |Δt_a| + s_b |Δt_b|` its Lipschitz bound over the piece (a function of Lipschitz
 ///   constant `L` on a unit interval with end values `f0`, `f1` stays below that tent);
+/// * when both curves are C1 over the piece's stretches, with acceleration bounds `A_a`,
+///   `A_b` there ([`Curve::accel_bound`]), also at most `max(f0, f1) + M2 / 8` with
+///   `M2 = A_a Δt_a^2 + A_b Δt_b^2` (second order): on the piece, `D(λ) = a(t_a(λ)) - b(t_b(λ))` for `λ` in
+///   `[0, 1]` has `D' ` continuous and `|D''| = |a'' Δt_a^2 - b'' Δt_b^2| <= M2` wherever
+///   it exists, so `E = D - L` with `L` the chord from `D(0)` to `D(1)` vanishes at both
+///   ends and `E(λ) = -∫ G(λ, μ) E''(μ) dμ` with the Green's function `G >= 0`, `∫ G dμ =
+///   λ (1 - λ) / 2`; hence `|E| <= M2 / 8` (the norm of an integral is at most the
+///   integral of the norm) and `|D| <= |L| + |E| <= max(|D(0)|, |D(1)|) + M2 / 8` (a norm
+///   is convex). The piece is accepted when either bound is within `tol`; the second
+///   shrinks four times per halving where the first shrinks twice, so near-tolerance
+///   stretches certify in few pieces;
 /// * a node's bound above is its computed distance widened by `γ_6` (the distance's own
 ///   roundings) plus twice the two points' coordinate error bounds
 ///   ([`Curve::point_error_bound`]; a norm is within `√3 < 2` times a coordinate's);
-/// * pieces are halved (an explicit stack, left half first) until each bound, widened by
-///   `γ_4`, is within `tol`. The nodes are evaluated at rounded path parameters (clamped
-///   to the stretches); rounding keeps them monotone along the path, so the pieces
-///   between actual nodes still form a path monotone in both parameters, from `from` to
-///   `to` exactly.
+/// * pieces are halved (an explicit stack, left half first) until either bound, widened
+///   by `γ_4`, is within `tol`. The nodes are evaluated at rounded parameters (clamped to
+///   the stretches, `b`'s to its neighbours'); `a`'s rounding keeps them monotone along
+///   the path, so the pieces between actual nodes still form a path monotone in both
+///   parameters, from `from` to `to` exactly.
 ///
 /// `Ok(false)`, meaning not certified, when a curve kind has no speed bound, a number is
 /// not finite, a node is certainly farther than `tol` (its bound below exceeds it), or
@@ -372,7 +390,8 @@ struct PathNode {
 ///
 /// # Errors
 ///
-/// Those of the curves' point evaluations.
+/// Those of the curves' point evaluations, and those of the nearest-point solves that
+/// carry no upstream status.
 pub fn curves_stay_within(
     k: &Kernel,
     a: &Curve,
@@ -400,8 +419,7 @@ pub fn curves_stay_within(
             (s + l * (e - s)).max(i.min()).min(i.max())
         }
     };
-    let node = |l: f64| -> Result<Option<PathNode>> {
-        let t = [along(l, s0, e0, &ivl[0]), along(l, s1, e1, &ivl[1])];
+    let node = |l: f64, t: [f64; 2]| -> Result<Option<PathNode>> {
         let pa = a.evaluate_point(k, t[0])?;
         let pb = b.evaluate_point(k, t[1])?;
         let (Some(ea), Some(eb)) = (a.point_error_bound(t[0]), b.point_error_bound(t[1])) else {
@@ -413,7 +431,7 @@ pub fn curves_stay_within(
         let below = d * (1.0 - gamma(6)) - err;
         Ok((above.is_finite() && below.is_finite()).then_some(PathNode { l, t, above, below }))
     };
-    let (Some(first), Some(last)) = (node(0.0)?, node(1.0)?) else {
+    let (Some(first), Some(last)) = (node(0.0, [s0, s1])?, node(1.0, [e0, e1])?) else {
         return Ok(false);
     };
     let mut stack = vec![(first, last)];
@@ -428,12 +446,50 @@ pub fn curves_stay_within(
         if bound <= tol {
             continue;
         }
+        // second order, when both curves are C1 over the piece's own stretches (a piece
+        // holding a knot where a curve is only C0 keeps the first-order bound; halving
+        // shrinks such pieces around the knot)
+        let span = |i: usize| Extent1d::from_min_max(n0.t[i].min(n1.t[i]), n0.t[i].max(n1.t[i]));
+        let second = a
+            .accel_bound(&span(0))
+            .zip(b.accel_bound(&span(1)))
+            .map(|(acc_a, acc_b)| {
+                // the squares, products and sum round five times; the max and sum twice more
+                let (da, db) = (n1.t[0] - n0.t[0], n1.t[1] - n0.t[1]);
+                let m2 = (acc_a * da * da + acc_b * db * db) * (1.0 + gamma(8));
+                (n0.above.max(n1.above) + 0.125 * m2) * (1.0 + gamma(4))
+            });
+        if second.is_some_and(|s| s <= tol) {
+            continue;
+        }
         pieces += 1;
         let mid = 0.5 * (n0.l + n1.l);
         if pieces > PATH_PIECES || !(n0.l < mid && mid < n1.l) {
             return Ok(false);
         }
-        let Some(nm) = node(mid)? else {
+        // the new node: `a` at the path fraction, `b` at the point of its piece stretch
+        // nearest to it (any parameter between the neighbours' keeps the path monotone,
+        // so the choice only steers the bounds; a failed solve takes the straight path's)
+        let ta = along(mid, s0, e0, &ivl[0]);
+        let piece_b = span(1);
+        let straight = along(mid, s1, e1, &ivl[1])
+            .max(piece_b.min())
+            .min(piece_b.max());
+        let tb = match native_failure(b.drop_point(
+            k,
+            &piece_b,
+            a.evaluate_point(k, ta)?,
+            None,
+            tol,
+            Some(straight),
+            SolverOperation::Minimize,
+        ))? {
+            Some(d) if d.success && d.parameter.is_finite() => {
+                d.parameter.max(piece_b.min()).min(piece_b.max())
+            }
+            _ => straight,
+        };
+        let Some(nm) = node(mid, [ta, tb])? else {
             return Ok(false);
         };
         stack.push((nm, n1));
@@ -471,6 +527,28 @@ impl Curve {
             CurveKind::Parabola(c) => b_spline_speed_bound(c.base(), interval),
             CurveKind::Hermite(c) => c.speed_bound(interval),
             CurveKind::Line(c) => c.speed_bound(),
+            _ => None,
+        }
+    }
+
+    /// Not upstream: an upper bound on the acceleration `|c''(t)|` of
+    /// [`Curve::evaluate_point`] wherever it exists in `interval`, for a curve whose
+    /// derivative is continuous over `interval` (no sampling): the control points of a
+    /// B-spline and of the kinds evaluated through one, polynomial or rational
+    /// ([`crv_accel_bound`](crate::nurbs::nurbs_crv)), the power basis of a Hermite
+    /// curve, and `0` for a line (affine in its parameter, see [`Line`]'s speed bound).
+    /// `None`, meaning no certified bound (in particular a curve that is not C1 over
+    /// `interval`), for the other kinds and where those bounds give none.
+    #[must_use]
+    pub fn accel_bound(&self, interval: &Extent1d) -> Option<f64> {
+        let spline = |c: &BSplineCurve| crv_accel_bound(c.nurb_ref().ok()?, interval);
+        match self.kind() {
+            CurveKind::BSpline(c) => spline(c),
+            CurveKind::Ellipse(c) => spline(c.base()),
+            CurveKind::Hyperbola(c) => spline(c.base()),
+            CurveKind::Parabola(c) => spline(c.base()),
+            CurveKind::Hermite(c) => c.accel_bound(interval),
+            CurveKind::Line(_) => Some(0.0),
             _ => None,
         }
     }

@@ -432,6 +432,23 @@ impl HermiteCurve {
         (b.is_finite() && lo <= hi).then_some(b * (1.0 + gamma(4)))
     }
 
+    /// Not upstream: an upper bound on the acceleration `|H''(t)|` for `t` in `interval`,
+    /// from the power basis (no sampling). `H'' = 2 C + 6 D t` is affine in `t`, so its
+    /// norm is largest at an end of `interval` (a norm is convex). Rounding: each
+    /// coordinate is a sum of two products (three roundings), within `γ_3 (2 |C| + 6 |D|
+    /// M)` with `M = max(|lo|, |hi|)`; a norm is within `√3 < 2` times a coordinate's
+    /// error, and the norm's own rounding is covered by widening by `1 + γ_4`. `None` for
+    /// numbers not finite.
+    #[must_use]
+    pub(crate) fn accel_bound(&self, interval: &Extent1d) -> Option<f64> {
+        let (lo, hi) = (interval.min(), interval.max());
+        let a = |t: f64| 2.0 * self.c + 6.0 * t * self.d;
+        let m = lo.abs().max(hi.abs());
+        let slack = 2.0 * gamma(3) * (2.0 * self.c.length() + 6.0 * self.d.length() * m);
+        let b = (a(lo).length().max(a(hi).length()) * (1.0 + gamma(4)) + slack) * (1.0 + gamma(4));
+        (b.is_finite() && lo <= hi).then_some(b)
+    }
+
     /// Largest distance from the chord to the inner Bezier control points, or the
     /// control polygon length for a closed curve (`ComputeChordHeight`).
     #[must_use]

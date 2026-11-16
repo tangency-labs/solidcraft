@@ -1210,6 +1210,113 @@ mod tests {
         assert!(pts.iter().any(|p| (p[0] - 1.0).abs() < 1e-12 && p[1] == 0.0), "{pts:?}");
     }
 
+    /// `Curve::accel_bound` bounds every second difference of the curve: for a C1 curve
+    /// with `c''` bounded piecewise, `(c(t+h) - 2c(t) + c(t-h)) / h^2` is an average of
+    /// `c''` over `[t-h, t+h]` (weights `(h - |s|) / h^2 >= 0`, summing to one), so it is
+    /// at most the bound, up to the rounding of the three evaluations (each coordinate off
+    /// by at most `Curve::point_error_bound`, so `4 e / h^2` after the difference, norm
+    /// within `√3 < 2` times that). Generated circles (rational quadratic and quintic),
+    /// B-splines, Hermite curves and lines, over sub-intervals; the test samples, the
+    /// bound does not.
+    #[test]
+    fn acceleration_bounds_hold_over_second_differences() {
+        let k = Kernel::default();
+        let mut rng = Rng::new(11);
+        let mut bounded = [0usize; 2];
+        for _ in 0..400 {
+            // a generated circle past the arc builder's angle range is not a curve
+            let Ok(c) = build(&gen_curve(&mut rng)) else {
+                continue;
+            };
+            let nat = c.natural_interval();
+            for sub in 0..3 {
+                let (lo, hi) = if sub == 0 {
+                    (nat.min(), nat.max())
+                } else {
+                    let x = nat.min() + nat.length() * rng.uniform(0.0, 1.0);
+                    let y = nat.min() + nat.length() * rng.uniform(0.0, 1.0);
+                    (x.min(y), x.max(y))
+                };
+                let ivl = Extent1d::from_min_max(lo, hi);
+                let Some(acc) = c.accel_bound(&ivl) else {
+                    bounded[1] += 1;
+                    continue;
+                };
+                bounded[0] += 1;
+                let h = (hi - lo) / 1000.0;
+                if !(h > 0.0) {
+                    continue;
+                }
+                for i in 0..=64 {
+                    let t = lo + h + (hi - lo - 2.0 * h) * f64::from(i) / 64.0;
+                    let p = |s: f64| c.evaluate_point(&k, s).unwrap();
+                    let e = [t - h, t, t + h]
+                        .iter()
+                        .map(|&s| c.point_error_bound(s).unwrap_or(0.0))
+                        .fold(0.0_f64, f64::max);
+                    let mid = p(t);
+                    let size = mid.x.abs().max(mid.y.abs()).max(mid.z.abs()) + 1.0;
+                    let q = (p(t + h) - 2.0 * mid + p(t - h)) * (1.0 / (h * h));
+                    // evaluation errors, plus the difference's own roundings
+                    let slack = 2.0 * (4.0 * e + 8.0 * f64::EPSILON * size) / (h * h);
+                    assert!(
+                        q.length() <= acc * (1.0 + 1e-12) + slack,
+                        "{c:?} on [{lo}, {hi}] at {t}: |Δ²c/h²| {} > bound {acc}",
+                        q.length()
+                    );
+                }
+            }
+        }
+        assert!(bounded[0] > 600, "bounded {bounded:?}");
+    }
+
+    /// The second-order stretch bound certifies a chord against its circular arc just
+    /// past the arc's sagitta, and still refuses it just below: the arc of radius 10 from
+    /// -30 to 30 degrees and its chord (a degree-1 B-spline) meet at both ends and are
+    /// `10 - 10 cos 30° = 1.3397…` apart at the middle, the largest gap. A first-order
+    /// bound with the circle's crude speed bound would need far more than the piece
+    /// budget for the 0.1% margin.
+    #[test]
+    fn a_chord_stays_within_its_arcs_sagitta_and_not_less() {
+        use solidcore::nurbs::b_spline_curve::NurbCircleParam;
+        let k = Kernel::default();
+        let frame = Axis2Placement::new(
+            Vec3::new(0.0, 0.0, 0.0),
+            Vec3::new(1.0, 0.0, 0.0),
+            Vec3::new(0.0, 1.0, 0.0),
+        );
+        let arc = Curve::from(
+            BSplineCurve::create_circle_segment(
+                3,
+                &frame,
+                10.0,
+                -30.0,
+                30.0,
+                NurbCircleParam::Quadratic,
+            )
+            .unwrap(),
+        );
+        let x = 10.0 * 30.0_f64.to_radians().cos();
+        let mut cur = allocate_nurb_curve(1, 1, 3).unwrap();
+        for (d, s) in cur.cpts_mut().iter_mut().zip([[x, -5.0], [x, 5.0]]) {
+            d.x = s[0];
+            d.y = s[1];
+            d.z = 0.0;
+            d.w = NOW;
+        }
+        cur.knots_mut().copy_from_slice(&[0.0, 0.0, 1.0, 1.0]);
+        let chord = Curve::from(BSplineCurve::from_nurb(cur, 3, false));
+        let ivl = arc.natural_interval();
+        assert!(arc.accel_bound(&ivl).is_some());
+        let sagitta = 10.0 - x;
+        let within = |tol: f64| {
+            curves_stay_within(&k, &arc, &chord, [ivl.min(), 0.0], [ivl.max(), 1.0], tol)
+                .unwrap()
+        };
+        assert!(within(sagitta * (1.0 + 1e-3)));
+        assert!(!within(sagitta * (1.0 - 1e-3)));
+    }
+
     /// Generated cases mostly run (pass or defer), not harness errors.
     #[test]
     fn generated_cases_run() {

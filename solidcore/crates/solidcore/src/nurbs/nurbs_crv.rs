@@ -2433,6 +2433,184 @@ pub(crate) fn crv_speed_bound(cur: &Curve, ivl: &Extent1d) -> Option<f64> {
     (bound.is_finite() && bound >= 0.0).then_some(bound)
 }
 
+/// Not upstream: an upper bound on the acceleration `|c''(t)|` of the curve for every `t`
+/// in `ivl` where `c''` exists, for a curve that is C1 over `ivl`, from the control points
+/// of the knot spans that meet it. No sampling. The bound serves second-order distance
+/// bounds ([`curves_stay_within`](crate::curve::curve::p8::curves_stay_within)), which
+/// need `c'` continuous over `ivl` and `c''` bounded on each span.
+///
+/// * C1: `ivl` lies inside the knot domain (past it a clamped curve is held at its end,
+///   a kink) and no knot strictly inside `ivl` is repeated `p` times or more (a knot of
+///   multiplicity `m` leaves the homogeneous curve `C^(p-m)`; the rational curve is a
+///   quotient by a positive weight function, so it is C1 wherever the homogeneous one is).
+/// * Homogeneous derivatives: with `H = sum N[i,p] h[i]` (here `h[i] = (w[i] (P[i] - c),
+///   w[i])` for a fixed point `c`, or the points themselves when polynomial), on span
+///   `[U[s], U[s+1]]` `H' = sum N[j+1,p-1] Q1[j]` over `j` in `s-p..s`, `Q1[j] = p (h[j+1]
+///   - h[j]) / (U[j+p+1] - U[j+1])`, and `H'' = sum N[j+2,p-2] Q2[j]` over `j` in
+///   `s-p..s-1`, `Q2[j] = (p-1) (Q1[j+1] - Q1[j]) / (U[j+p+1] - U[j+2])` (the
+///   denominators all cover the span, so are positive). The bases are non-negative and sum
+///   to one, so the largest `|Q1|` and `|Q2|` (`P1`, `P2` for the point part, `W1`, `W2`
+///   for the weight) bound `|P'|`, `|P''|`, `|w'|`, `|w''|` there.
+/// * Polynomial: `c'' = H''`, so `P2` is the bound.
+/// * Rational (weights positive): from `P = w (c - c0)` with `P` the point part of `H`
+///   and `c0` the fixed point, `P' = w' (c - c0) + w c'` and `P'' = w'' (c - c0) + 2 w' c'
+///   + w c''`, so `c' = (P' - w' (c - c0)) / w` and `c'' = (P'' - 2 w' c' - w'' (c - c0)) /
+///   w`. With `w >= w_min` (a convex combination of the span's weights) and `|c - c0| <=
+///   R`, the largest distance from `c0` to the span's points (`c` is in their hull),
+///   `|c'| <= S = (P1 + W1 R) / w_min` and `|c''| <= (P2 + 2 W1 S + W2 R) / w_min`. `c0`
+///   is the points' mean, so `R` is about half their spread rather than their distance
+///   from the origin.
+///
+/// Rounding, per coordinate as absolute bounds that are carried along: a homogeneous
+/// coordinate `x - c0 w` is within `γ_2 (|x| + |c0| w)` of exact (none for a polynomial,
+/// `c0 = 0`); a computed `Q = k (b - a) / g` from inputs off by `e` is within `2 (γ_4 |Q|
+/// + 2 k e / g)` of exact (the factor 2 covers the `(1 + γ) / (1 - γ)` of solving for the
+/// exact value); a norm of a 3-vector with coordinate errors `e` is within `|v|_computed (1
+/// + γ_4) + 2 e` (`√3 < 2`); a point `x / w - c0` is within `γ_2 (|x / w| + |c0|)`
+/// per coordinate. The result is widened by `1 + γ_8` for the final products and
+/// quotients.
+///
+/// `None`, meaning no certified bound, unless `cur` is continuous and clamped (see
+/// `is_continuous_clamped`), C1 over `ivl` as above, every point of the spans met is
+/// finite with a positive weight, and the numbers stay finite.
+#[must_use]
+pub(crate) fn crv_accel_bound(cur: &Curve, ivl: &Extent1d) -> Option<f64> {
+    if !is_continuous_clamped(cur) {
+        return None;
+    }
+    let (p, n) = (cur.degree(), cur.n());
+    let knots = cur.knots();
+    let (first, last) = (*knots.get(p)?, *knots.get(n.checked_add(1)?)?);
+    let (lo, hi) = (ivl.min(), ivl.max());
+    // NaN fails every comparison, so refuses
+    if !(first <= lo && lo <= hi && hi <= last) {
+        return None;
+    }
+    // knots are non-decreasing (checked by `is_continuous_clamped`): a knot repeated `p`
+    // times or more has an equal knot `p - 1` places on
+    if p == 1 {
+        if knots.iter().any(|&a| lo < a && a < hi) {
+            return None;
+        }
+    } else if knots.iter().enumerate().any(|(i, &a)| {
+        lo < a
+            && a < hi
+            && i.checked_add(p - 1)
+                .and_then(|j| knots.get(j))
+                .is_some_and(|&b| b == a)
+    }) {
+        return None;
+    }
+    // the spans whose inside meets `ivl`'s (`c''` on a span only touching an end of `ivl`
+    // never acts inside it); a single parameter takes the spans holding it
+    let mut range: Option<(usize, usize)> = None;
+    for i in nonempty_spans(knots, p, n)? {
+        let (a, b) = (*knots.get(i)?, *knots.get(i + 1)?);
+        let meets = if lo < hi {
+            a < hi && b > lo
+        } else {
+            a <= hi && b >= lo
+        };
+        if meets {
+            let first_point = i.checked_sub(p)?;
+            range = Some(range.map_or((first_point, i), |(f, l)| (f.min(first_point), l.max(i))));
+        }
+    }
+    let (i0, i1) = range?;
+    let raw = cur.cpts().get(i0..=i1)?;
+    let points: Vec<(Vec3, f64)> = raw.iter().map(|&c| speed_point(c)).collect::<Option<_>>()?;
+    let rational = raw.iter().any(|c| c.w != NOW);
+    let count = points.len() as f64;
+    let c0 = if rational {
+        points
+            .iter()
+            .fold(Vec3::new(0.0, 0.0, 0.0), |s, (q, _)| s + *q)
+            * (1.0 / count)
+    } else {
+        Vec3::new(0.0, 0.0, 0.0)
+    };
+    let size3 = |v: Vec3| v.x.abs().max(v.y.abs()).max(v.z.abs());
+    // homogeneous points [x - c0 w, y - c0 w, z - c0 w, w] and their coordinate error
+    let mut e0 = 0.0_f64;
+    let mut homo: Vec<[f64; 4]> = Vec::new();
+    for (&c, &(_, w)) in raw.iter().zip(&points) {
+        let z = if c.z == NOZ { 0.0 } else { c.z };
+        let h = if rational {
+            e0 = e0.max(
+                gamma(2)
+                    * (c.x.abs() + c0.x.abs() * w)
+                        .max(c.y.abs() + c0.y.abs() * w)
+                        .max(z.abs() + c0.z.abs() * w),
+            );
+            [c.x - c0.x * w, c.y - c0.y * w, z - c0.z * w, w]
+        } else {
+            [c.x, c.y, z, 1.0]
+        };
+        homo.push(h);
+    }
+    // one derivative level: `k (b[j+1] - b[j]) / (U[j+p+1] - U[j+shift])` for `j` from
+    // `i0`, with the largest coordinate error of the outputs
+    let level = |b: &[[f64; 4]], e: f64, k: f64, shift: usize| -> Option<(Vec<[f64; 4]>, f64)> {
+        let mut out = Vec::new();
+        let mut err = 0.0_f64;
+        for (j, pair) in b.windows(2).enumerate() {
+            let (Some(x), Some(y)) = (pair.first(), pair.last()) else {
+                return None;
+            };
+            let jj = i0.checked_add(j)?;
+            let g = *knots.get(jj.checked_add(p)?.checked_add(1)?)?
+                - *knots.get(jj.checked_add(shift)?)?;
+            // NaN refuses too
+            if !(g > 0.0) {
+                return None;
+            }
+            let q = [
+                k * (y[0] - x[0]) / g,
+                k * (y[1] - x[1]) / g,
+                k * (y[2] - x[2]) / g,
+                k * (y[3] - x[3]) / g,
+            ];
+            let mag = q.iter().fold(0.0_f64, |m, v| m.max(v.abs()));
+            err = err.max(2.0 * (gamma(4) * mag + 2.0 * k * e / g));
+            out.push(q);
+        }
+        Some((out, err))
+    };
+    let pf = p as f64;
+    let (q1, e1) = level(&homo, e0, pf, 1)?;
+    let norms = |q: &[[f64; 4]], e: f64| -> (f64, f64) {
+        q.iter().fold((0.0_f64, 0.0_f64), |(pm, wm), v| {
+            let [x, y, z, w] = *v;
+            let pn = Vec3::new(x, y, z).length() * (1.0 + gamma(4)) + 2.0 * e;
+            (pm.max(pn), wm.max(w.abs() + e))
+        })
+    };
+    let (p1, w1) = norms(&q1, e1);
+    let (p2, w2) = if p >= 2 {
+        let (q2, e2) = level(&q1, e1, pf - 1.0, 2)?;
+        norms(&q2, e2)
+    } else {
+        // degree 1: `H` is affine on each span, and `ivl` holds no knot (multiplicity
+        // >= 1 = p), so `H'' = 0` there
+        (0.0, 0.0)
+    };
+    let bound = if rational {
+        let (mut w_min, mut reach) = (f64::INFINITY, 0.0_f64);
+        for (q, w) in &points {
+            w_min = w_min.min(*w);
+            let d = *q - c0;
+            reach =
+                reach.max(d.length() * (1.0 + gamma(4)) + 2.0 * gamma(2) * (size3(*q) + size3(c0)));
+        }
+        let speed = (p1 + w1 * reach) / w_min;
+        (p2 + 2.0 * w1 * speed + w2 * reach) / w_min
+    } else {
+        p2
+    };
+    let bound = bound * (1.0 + gamma(8));
+    (bound.is_finite() && bound >= 0.0).then_some(bound)
+}
+
 /// Not upstream: a bound on the error of each coordinate of the point the evaluation
 /// returns at any parameter ([`crv_eval`] inside the domain, an end control point at an
 /// end): [`piece_slack`]'s `16 levels eps M (w_max / w_min)` with `2p + 2` levels, `M`
