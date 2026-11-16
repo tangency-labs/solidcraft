@@ -84,6 +84,43 @@ fn editing_a_gear_rebuilds_its_teeth_in_place() {
 }
 
 #[test]
+fn editing_a_gear_to_the_values_it_has_changes_nothing() {
+    let mut s = Session::default();
+    let g = run(&mut s, "gear.insert", json!({"module": 2, "teeth": 20, "face_width": 10, "helix_angle": 15, "bore_diameter": 6}));
+    let comp = g["component"].as_u64().unwrap_or(0);
+    let (undo, features, revision) = (s.undo.len(), s.doc.features.len(), s.revision);
+    let ids: Vec<u64> = s.doc.features.iter().map(|f| f.id).collect();
+    // The form sends every value; sending the saved ones, or none, is no edit.
+    for p in
+        [json!({"component": comp}), json!({"component": comp, "module": 2, "teeth": 20, "face_width": 10, "helix_angle": 15, "bore_diameter": 6})]
+    {
+        let e = run(&mut s, "gear.edit", p);
+        assert_eq!(e["component"].as_u64(), Some(comp));
+        assert!((e["pitch_diameter"].as_f64().unwrap_or(0.0) - 40.0).abs() < 1e-9);
+    }
+    assert_eq!(s.undo.len(), undo, "no undo step");
+    assert_eq!(s.doc.features.len(), features);
+    assert_eq!(s.doc.features.iter().map(|f| f.id).collect::<Vec<_>>(), ids, "the features are not rebuilt");
+    assert_eq!(s.revision, revision, "the document is untouched");
+    // A real change still edits.
+    run(&mut s, "gear.edit", json!({"component": comp, "teeth": 21}));
+    assert_eq!(s.undo.len(), undo + 1);
+}
+
+#[test]
+fn the_form_diameters_are_the_ones_the_command_reports() {
+    let mut s = Session::default();
+    for (internal, shift) in [(false, 0.3), (true, 0.0)] {
+        let r = run(&mut s, "gear.insert", json!({"module": 2.5, "teeth": 24, "pressure_angle": 22, "profile_shift": shift, "internal": internal}));
+        let d = crate::cmd::gear_diameters(2.5, 24, 22.0, shift, internal).expect("diameters");
+        for (got, key) in d.iter().zip(["pitch_diameter", "base_diameter", "tip_diameter", "root_diameter"]) {
+            assert!((got - r[key].as_f64().unwrap_or(f64::NAN)).abs() < 1e-9, "{internal} {key}");
+        }
+    }
+    assert!(crate::cmd::gear_diameters(f64::NAN, 20, 20.0, 0.0, false).is_none());
+}
+
+#[test]
 fn a_gear_keeps_its_values_through_save_and_reopen() {
     let mut s = Session::default();
     let g = run(&mut s, "gear.insert", json!({"module": 1.5, "teeth": 24, "pressure_angle": 25, "face_width": 8, "backlash": 0.05}));

@@ -1,6 +1,8 @@
 //! Involute spur gears (#6796): a tooth outline from `gear_profile`, sketched and extruded like
 //! any other feature, so the gear stays an ordinary component.
 
+use std::sync::Arc;
+
 use serde_json::{Value, json};
 use solidcore_record::Vec2;
 use solidcraft_doc::SpurGear;
@@ -243,6 +245,16 @@ fn reply(g: &GearSpec, comp: u64, occ: u64, name: String) -> Result<Value> {
     serde_json::to_value(out).map_err(|e| bad("gear.insert", e.to_string()))
 }
 
+/// Pitch, base, tip and root diameters (mm) for the values a gear form holds, or `None` when they
+/// make no gear. The form shows these as the values change.
+pub fn gear_diameters(module: f64, teeth: u32, pressure_angle_deg: f64, shift: f64, internal: bool) -> Option<[f64; 4]> {
+    let mut g = GearSpec::new(module, teeth, pressure_angle_deg);
+    g.shift = if internal { 0.0 } else { shift };
+    g.internal = internal;
+    let d = [2.0 * g.pitch_radius(), 2.0 * g.base_radius(), 2.0 * g.tip_radius(), 2.0 * g.root_radius()];
+    d.iter().all(|v| v.is_finite() && *v > 0.0).then_some(d)
+}
+
 fn gear_name(internal: bool, module: f64, teeth: u32) -> String {
     format!("{} Gear M{module} Z{teeth}", if internal { "Internal" } else { "Spur" })
 }
@@ -264,6 +276,10 @@ fn insert(s: &mut Session, p: &Value) -> Result<Value> {
 fn edit_atomic(s: &mut Session, p: &Value) -> Result<Value> {
     let mut computed = s.scratch();
     let result = edit(&mut computed, p)?;
+    // Nothing was rebuilt: the document and its revision stay as they are.
+    if computed.revision == s.revision && Arc::ptr_eq(&computed.doc, &s.doc) {
+        return Ok(result);
+    }
     computed.undo.clear();
     computed.active_component = s.active_component;
     computed.active_occurrence_path = s.active_occurrence_path.clone();
@@ -318,6 +334,12 @@ fn edit(s: &mut Session, p: &Value) -> Result<Value> {
     }
     let (g, ext) = spec(&merged, cmd)?;
     outline(&g).map_err(|e| bad(cmd, e))?;
+    // The values it already has are no edit: nothing is rebuilt and no undo step is made.
+    if record(&g, &ext) == was {
+        let name = s.doc.components.iter().find(|c| c.id == comp).map(|c| c.name.clone()).unwrap_or_default();
+        let occ = s.doc.occurrences.iter().find(|o| o.component == comp).map(|o| o.id).unwrap_or(0);
+        return reply(&g, comp, occ, name);
+    }
     let ids: Vec<u64> = s.doc.features.iter().filter(|f| f.component == comp).map(|f| f.id).collect();
     for id in ids.iter().rev() {
         let _ = s.doc_mut().delete_feature(*id);

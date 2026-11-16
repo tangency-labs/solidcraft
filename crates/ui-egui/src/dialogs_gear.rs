@@ -137,6 +137,28 @@ pub fn rows(ui: &mut egui::Ui, g: &mut Gear) {
             number(ui, "gear.bore_offset", "dialog:gear:bore_offset", &mut g.bore_offset, -1e6..=1e6, 0.5, " mm");
         }
     }
+    ui.separator();
+    diameters(ui, g);
+}
+
+/// The profile's diameters, from the values as they are now. They follow the form, so they show
+/// before anything is inserted.
+fn diameters(ui: &mut egui::Ui, g: &Gear) {
+    let teeth = g.teeth.round().clamp(0.0, 1e6) as u32;
+    let Some(d) = solidcraft_engine::cmd::gear_diameters(g.module, teeth, g.pressure_angle, g.profile_shift, g.internal) else {
+        return;
+    };
+    for (key, handle, v) in [
+        ("gear.pitch_diameter", "dialog:gear:pitch_diameter", d[0]),
+        ("gear.base_diameter", "dialog:gear:base_diameter", d[1]),
+        ("gear.tip_diameter", "dialog:gear:tip_diameter", d[2]),
+        ("gear.root_diameter", "dialog:gear:root_diameter", d[3]),
+    ] {
+        form_row(ui, solidcraft_ui_text::tr(key), |ui| {
+            let r = ui.label(format!("{v:.3} mm"));
+            crate::scenario::publish_handle(handle, r.rect.center());
+        });
+    }
 }
 
 /// The command OK runs. Every value is sent, so an edit replaces what was saved. A value the
@@ -241,6 +263,18 @@ mod tests {
         assert!(h.app.dialog.is_none(), "{:?}", h.app.dialog.as_ref().and_then(|d| d.error.clone()));
         let (c, saved) = gear(&h).expect("still a gear");
         assert_eq!((c, saved.teeth, saved.rim_thickness, saved.internal), (component, 36, 5.0, true));
+    }
+
+    /// The form shows the profile's diameters before anything is inserted.
+    #[test]
+    fn the_form_shows_the_diameters_as_the_values_change() {
+        let mut h = Harness::new();
+        h.app.start("gear.insert");
+        h.frames(3);
+        for k in ["pitch", "base", "tip", "root"] {
+            assert!(handle_at(&format!("dialog:gear:{k}_diameter")).is_some(), "{k}");
+        }
+        assert!(h.app.session.doc.gears.is_empty(), "nothing is inserted to show them");
     }
 
     /// A menu opens Edit Gear on exactly the gear it was opened for, and the ribbon offers both commands.
