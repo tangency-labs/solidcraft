@@ -75,7 +75,6 @@ impl Body {
 pub(crate) fn fixes() -> UpstreamFixes {
     let mut f = UpstreamFixes::default();
     f.fillet_refuse_face_consuming_blends = true;
-    f.fillet_vertex_error_diagnostics = true;
     f.fillet_chamfer_cone_on_arc = true;
     f.offset_extended_edges_mated = true;
     f.keep_operand_uv_trims = true;
@@ -106,7 +105,6 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.analytic_copy_keeps_parameterization = true;
     f.offset_extension_from_base = true;
     f.fillet_cleanup_keeps_target_faces = true;
-    f.fillet_nx1_tangent_side_edge = true;
     f.offset_stitch_at_body_tolerance = true;
     f.curve_contacts_at_curve_ends = true;
     f.ssi_tangent_contact_points = true;
@@ -132,7 +130,6 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.box_face_failures_propagate = true;
     f.fillet_removal_takes_ring_fillets = true;
     // The fork's commits that reached `SMLIB_REV` at eaa998a (tangency-labs/smlib#68, #69, #70).
-    f.fillet_trim_inside_by_best_dot = true;
     f.curve_loop_normal_from_area = true;
     // The fork's commits in `SMLIB_REV` 2fc375f, ported to solidcore since.
     f.offset_extension_as_itself = true;
@@ -144,7 +141,6 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.simple_coincidence_crossing_is_point = true;
     f.fillet_trim_status = true;
     f.brep_edit_statuses_pass_on = true;
-    f.fillet_run_on_bspline_trims = true;
     f.query_statuses_pass_on = true;
     f.sweep_statuses_pass_on = true;
     f.ssi_proto_topology_statuses_pass_on = true;
