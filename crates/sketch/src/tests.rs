@@ -288,6 +288,41 @@ fn under_constrained_reports_dof() {
     assert!((a.y - 0.5).abs() < 0.05 && (b.y - 0.5).abs() < 0.05, "{a:?} {b:?}");
 }
 
+/// A distance at its longest reads as fixing more than it does. A point on a vertical line is
+/// held 10 from the origin, level with it, so the distance runs square to the line. The point
+/// can still slide along the line while the line moves in. To first order that slide leaves the
+/// distance unchanged, and the line's place looks fixed. A point dimensioned from the line moves
+/// with it, so it is not determined. Shown as determined, it moved anyway when another point was
+/// dragged, and only then turned free. The count of freedoms is the same either way.
+#[test]
+fn a_distance_at_its_longest_leaves_what_hangs_off_it_free() {
+    use ConstraintKind::*;
+    let build = |q_at: Vec2| {
+        let mut sk = Sketch::new();
+        let r = sk.add_line(v(q_at.x, -5.0), v(q_at.x, 5.0), None, None, None).unwrap();
+        let q = sk.add_point(q_at, None).unwrap();
+        let h = sk.add_line(v(0.0, 0.0), v(20.0, 0.0), None, None, None).unwrap();
+        let t = sk.add_point(v(q_at.x + 4.0, 0.0), None).unwrap();
+        let CurveKind::Line { a: h0, .. } = sk.curves[h].kind else { panic!() };
+        sk.add_constraint(Coincident { p: h0, q: 0 }, None).unwrap();
+        sk.add_constraint(Horizontal { l: h }, None).unwrap();
+        sk.add_constraint(Vertical { l: r }, None).unwrap();
+        sk.add_constraint(PointOnCurve { p: q, c: r }, None).unwrap();
+        sk.add_constraint(Distance { p: 0, q, value: 10.0 }, None).unwrap();
+        sk.add_constraint(PointOnCurve { p: t, c: h }, None).unwrap();
+        sk.add_constraint(PointLineDistance { p: t, l: r, value: 4.0 }, None).unwrap();
+        (sk, t)
+    };
+    let (mut level, t) = build(v(10.0, 0.0));
+    let at_longest = solve(&mut level);
+    let (mut slanted, _) = build(v(8.0, 6.0));
+    let generic = solve(&mut slanted);
+    assert!(at_longest.ok() && generic.ok(), "{at_longest:?} {generic:?}");
+    assert_eq!(at_longest.dof, generic.dof, "{at_longest:?} {generic:?}");
+    assert!(!generic.point_determined[t], "{generic:?}");
+    assert!(!at_longest.point_determined[t], "the point follows the line, which can move in: {at_longest:?}");
+}
+
 #[test]
 fn conflicting_constraints_fail_and_restore() {
     let mut sk = Sketch::new();

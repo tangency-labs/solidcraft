@@ -25,6 +25,13 @@
 //! | [`cs_identical_solutions`], [`cs_identical_solutions_in`], [`csi_identical_solutions`], [`csi_identical_solutions_in`] | `SmCSGlobalSolver::IdenticalSolutions`, `SmCSIGlobalSolver::IdenticalSolutions` |
 //!
 //! Deviations:
+//! - **A moved local foot (WR-56, #17773).** `DropPoint` keeps a converged local result
+//!   that `sm_GoodDropResult` refuses only for having moved from its guess, runs the
+//!   global solve, and returns the local result when the global solve found nothing or
+//!   the answer it would return from the global solve (the whole array, when solutions
+//!   are asked for and it has several) has no smaller solution value; upstream returns
+//!   the global answer alone. Only for intersect, minimise and normalise drops, whose
+//!   solution value is the distance; for the others the global solve decides alone.
 //! - **Solver classes without a Rust struct.** `SmCSGlobalSolver` and
 //!   `SmCSIGlobalSolver` have no struct yet (their constructors belong to unit
 //!   `surface.surface_p1`), so their `IdenticalSolutions` are free functions over the
@@ -94,7 +101,7 @@ use super::p1::{
 use super::p2::{LsiGlobalSolver, SurfaceEval, B_SPLINE_SURFACE_TYPE};
 use super::p4::is_point_on_normal;
 use super::p4::NoObject;
-use super::p7::{good_drop_result, load_guesses, SpGlobalSolver};
+use super::p7::{drop_result_verdict, load_guesses, DropVerdict, SpGlobalSolver};
 use super::{Surface, SurfaceKind};
 
 const OP_SING: &str = "surface::surface::p5::Surface::is_singularity";
@@ -1180,6 +1187,13 @@ impl Surface {
         }
 
         // Try LocalPointSolve if a guess was supplied.
+        // Not upstream (WR-56, #17773): a converged local result the last test of
+        // `good_drop_result` refuses for having moved from its guess is kept as a
+        // candidate, and returned after the global solve when that finds nothing or the
+        // answer the drop would return from it is farther (`keep_moved` below). Only for
+        // the operations whose solution value is a distance to minimise; for the others
+        // the global solve decides alone.
+        let mut moved_foot = false;
         if !success {
             if let Some(g) = guess {
                 match ignored(self.local_point_solve::<O>(k, domain, op, pt_to_drop, g))? {
@@ -1193,7 +1207,15 @@ impl Surface {
                 // Check whether we think that this solution is ok, i.e., was it a good
                 // enough guess?  [080206]
                 if success {
-                    success = good_drop_result(k, self, domain, pt_to_drop, g, &sol.start)?;
+                    let verdict = drop_result_verdict(k, self, domain, pt_to_drop, g, &sol.start)?;
+                    success = verdict == DropVerdict::Foot;
+                    moved_foot = verdict == DropVerdict::MovedFoot
+                        && matches!(
+                            op,
+                            SolverOperation::Intersect
+                                | SolverOperation::Minimize
+                                | SolverOperation::Normalize
+                        );
                 }
                 if success {
                     answer_in_sol = true;
@@ -1233,7 +1255,18 @@ impl Surface {
                 success = true;
                 answer_in_array = true;
             }
+
+            // Not upstream (WR-56, #17773): the moved local foot is the answer when the
+            // global solve found nothing (it can miss a foot on the domain's boundary).
+            if moved_foot && solutions.is_empty() {
+                success = true;
+                answer_in_sol = true;
+            }
         }
+        // Not upstream (WR-56, #17773): whether the moved local foot is nearer than the
+        // global answer of `value` (a local solve can stop at a local minimum the global
+        // solve beats). A value that is not a number is not nearer.
+        let keep_moved = |value: f64| moved_foot && sol.start.solution_value < value;
 
         // Check results of local and global drops.
         if answer_in_sol {
@@ -1250,7 +1283,14 @@ impl Surface {
                 is_multivalued = true;
             }
 
-            if opts.want_solutions && is_multivalued {
+            // (WR-56: the whole array is the answer here, so the moved foot is kept only
+            // when it is nearer than every solution of it)
+            let nearest = solutions
+                .as_slice()
+                .iter()
+                .map(|s| s.start.solution_value)
+                .fold(f64::INFINITY, f64::min);
+            if opts.want_solutions && is_multivalued && !keep_moved(nearest) {
                 return Ok(DropPoint {
                     success,
                     result_uv,
@@ -1355,6 +1395,23 @@ impl Surface {
             } else {
                 // should never happen.
                 success = false;
+            }
+
+            // (WR-56: the moved foot against the answer just picked, or against the
+            // whole array when that was asked for)
+            let picked = if opts.want_solutions && is_multivalued {
+                nearest
+            } else if best.is_some() {
+                gap
+            } else {
+                f64::INFINITY
+            };
+            if keep_moved(picked) {
+                result_uv = Point2::new(sol.start.param(0)?, sol.start.param(1)?);
+                gap = sol.start.solution_value;
+                solutions = SolutionArray::<O>::new();
+                is_multivalued = false;
+                success = true;
             }
         }
 
