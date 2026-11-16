@@ -37,7 +37,16 @@ fn drawn_from_the_front(mut s: Session) -> (Session, u64) {
     let (sheet, source) = (d.sheets[0].id, d.sources[0].id);
     let kind = ViewKind::Base { source, view: ViewDirection::Named(NamedView::Front) };
     let settings = ViewOverrides { scale: Some("1:1".parse().unwrap()), ..ViewOverrides::default() };
-    d.add_views([Arc::new(View { id, sheet, kind, place: ViewPlace::At([200.0, 150.0]), settings, reference_shown_percent: 0.0, label: None })]);
+    d.add_views([Arc::new(View {
+        id,
+        sheet,
+        kind,
+        place: ViewPlace::At([200.0, 150.0]),
+        settings,
+        reference_shown_percent: 0.0,
+        label: None,
+        rotation: 0.0,
+    })]);
     d.validate().unwrap();
     s.doc_mut().put_drawing(Arc::new(d));
     (s, id)
@@ -2705,4 +2714,50 @@ fn a_drag_that_cant_place_is_refused_and_changes_nothing() {
     run(&mut s, "drawing.open", json!({"drawing": ids::encode(drawing)}));
     let lost = json!(ids::encode(dimension));
     refuses(&mut s, &[(&lost, json!({"line_through_mm": [200, 190]}), "what it measures has no place to draw on its view")]);
+}
+
+/// A dimension on a view turned 90° keeps reading the same value (#13044's acceptance): the box's 80
+/// mm width, measured horizontally on the view's own axes. Its line turns with the view, so it runs up
+/// the sheet, and its text reads along it, up. Turned 180°, its line is horizontal again on the other
+/// side of the view's centre, as the box turned, and its text still reads left to right, not upside
+/// down. Turned back, it lays out exactly as before.
+#[test]
+fn a_turned_views_dimension_reads_the_same_and_turns_with_it() {
+    let (mut s, view) = front_view();
+    let added = add(&mut s, view, json!({"linear": {"a": [0, 0, 0], "b": [80, 0, 0], "direction": "horizontal"}}));
+    let id = added["dimension"].clone();
+    let layout = |s: &mut Session| run(s, INSPECT, json!({"dimension": id}));
+    let line = |v: &Value| -> (Vec2, Vec2) {
+        let points = v["layout"]["dimension_lines"][0].as_array().unwrap();
+        let at = |p: &Value| Vec2::new(p[0].as_f64().unwrap(), p[1].as_f64().unwrap());
+        (at(&points[0]), at(points.last().unwrap()))
+    };
+    let reads_along = |v: &Value| {
+        let corners = &v["layout"]["text_boxes"][0];
+        let at = |i: usize| Vec2::new(corners[i][0].as_f64().unwrap(), corners[i][1].as_f64().unwrap());
+        (at(1) - at(0)).normalized().unwrap()
+    };
+    let before = layout(&mut s);
+    let (a, b) = line(&before);
+    assert!((a.y - b.y).abs() < 1e-9 && a.y < 150.0, "horizontal, below the view's centre: {before}");
+    let turn = |s: &mut Session, degrees: f64| {
+        s.execute("drawing.view.edit", &json!({"view": ids::encode(view), "set": {"rotation": degrees}})).unwrap();
+    };
+
+    turn(&mut s, 90.0);
+    let upright = layout(&mut s);
+    reads(&upright, 80.0, "80.00");
+    let (a, b) = line(&upright);
+    assert!((a.x - b.x).abs() < 1e-9 && (a.y - b.y).abs() > 70.0, "it runs up the sheet: {upright}");
+    assert!((reads_along(&upright) - Vec2::new(0.0, 1.0)).len() < 1e-9, "its text reads up: {upright}");
+
+    turn(&mut s, 180.0);
+    let half = layout(&mut s);
+    reads(&half, 80.0, "80.00");
+    let (a, b) = line(&half);
+    assert!((a.y - b.y).abs() < 1e-9 && a.y > 150.0, "horizontal, above the view's centre: {half}");
+    assert!((reads_along(&half) - Vec2::X).len() < 1e-9, "its text reads left to right: {half}");
+
+    turn(&mut s, 0.0);
+    assert_eq!(layout(&mut s), before, "turned back, as before");
 }

@@ -898,7 +898,7 @@ fn draw(
     }
     // What the view chooses to show ([`crate::drawing_view::measured`]), and its reference parts' reach.
     let measured = crate::drawing_view::measured(shown, view).map(|(set, extents)| {
-        let around = crate::drawing_view::shows(&set, &view.basis, &extents, view.reference_shown_percent);
+        let around = crate::drawing_view::shows(&set, &view.drawn(), &extents, view.reference_shown_percent);
         (set, extents, around)
     });
     let placing = measured.as_ref().map(|(_, extents, around)| (*extents, *around)).map_err(|why| *why);
@@ -1042,7 +1042,7 @@ fn draw_flat(s: &Session, id: u64, view: &ResolvedView, of: &FlatOf) -> Drawn {
         Ok(flat) => flat,
         Err(e) => return none(Status::Failed(reason(e))),
     };
-    let frame = match crate::drawing_view::frame(view.basis, view.scale.value, &flat.model, Vec2::ZERO, CMD) {
+    let frame = match crate::drawing_view::frame(view.drawn(), view.scale.value, &flat.model, Vec2::ZERO, CMD) {
         Ok(frame) => frame,
         Err(e) => return none(Status::Failed(reason(e))),
     };
@@ -1106,9 +1106,11 @@ fn draw_dimensions(
         Ok(Some(resolved)) => {
             // On a view that draws none of the model's edges, it has no place to draw.
             let placed = !d.view(record.view).is_some_and(|view| crate::drawing_view::no_model_edges(view).is_some());
+            // Turned as its view is: a turn is the view's own, never its parent's.
+            let rotation = d.view(record.view).map_or(0.0, |view| view.rotation);
             let paper = frame(record.view)
                 .filter(|_| placed)
-                .and_then(|(frame, lines)| crate::drawing_dimension_paper::paper_group(record, resolved, &frame, lines, &lettering));
+                .and_then(|(frame, lines)| crate::drawing_dimension_paper::paper_group(record, resolved, &frame, rotation, lines, &lettering));
             let drawn = |group, fonts, why, pending| DrawnDimension {
                 dimension: record.id,
                 view: record.view,

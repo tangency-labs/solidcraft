@@ -599,7 +599,7 @@ pub fn measured<'a>(
         Some(cut) if cut.line.kind() == SectionKind::Full => Cow::Owned(sectioned(&set, cut)?),
         _ => set,
     };
-    let extents = measure(&set, &view.basis)?;
+    let extents = measure(&set, &view.drawn())?;
     Ok((set, extents))
 }
 
@@ -698,11 +698,12 @@ pub fn frame(basis: Plane, scale: Scale, model: &Aabb2, centre: Vec2, cmd: &str)
 
 /// The frame saved view `view` draws through, its middle at `centre` on paper: [`frame`]'s, the
 /// model's middle there, except a detail view's, whose boundary's centre is there, so the region
-/// it shows sits on its place whatever else the model holds.
+/// it shows sits on its place whatever else the model holds. Through its basis turned
+/// ([`ResolvedView::drawn`]); a detail view is never turned, nor drawn from a turned view.
 pub fn view_frame(view: &ResolvedView, model: &Aabb2, centre: Vec2, cmd: &str) -> Result<ViewFrame> {
     match view.detail {
         Some(boundary) => ViewFrame::new(view.basis, view.scale.value, boundary.centre(), centre).map_err(|e| bad(cmd, e.to_string())),
-        None => frame(view.basis, view.scale.value, model, centre, cmd),
+        None => frame(view.drawn(), view.scale.value, model, centre, cmd),
     }
 }
 
@@ -745,6 +746,8 @@ pub(crate) struct ViewOnSheet {
     pub size: Vec2,
     /// The line group its lines and records are drawn in.
     pub line_group: LineGroup,
+    /// Its turn on its sheet, in degrees anticlockwise: what is laid out on its own axes turns by it.
+    pub rotation: f64,
 }
 
 /// Where saved view `id` of `d` puts what it draws on its sheet, as the sheet draws it: its frame,
@@ -774,7 +777,7 @@ pub(crate) fn on_its_sheet(s: &Session, d: &Drawing, id: u64, cmd: &str) -> std:
     else {
         return Err(NOT_DRAWN);
     };
-    Ok(ViewOnSheet { frame: through, centre, size, line_group: view.line_group.value })
+    Ok(ViewOnSheet { frame: through, centre, size, line_group: view.line_group.value, rotation: view.rotation })
 }
 
 /// [`on_sheet`], drawn from `sessions`: one read of several views makes each copy once.
@@ -785,7 +788,7 @@ pub fn on_sheet_from(sessions: &mut ViewSessions, drawing: &Drawing, id: u64, cm
     }
     let centre = drawing.view_centre(id).map_err(|e| bad(cmd, e.to_string()))?;
     let shown = shown_by(sessions, &view);
-    let measured = measured(&shown, &view).map(|(set, e)| (e, shows(&set, &view.basis, &e, view.reference_shown_percent)));
+    let measured = measured(&shown, &view).map(|(set, e)| (e, shows(&set, &view.drawn(), &e, view.reference_shown_percent)));
     placed(&view, measured, centre, cmd)
 }
 

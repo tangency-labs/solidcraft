@@ -35,7 +35,7 @@ fn front() -> (Drawing, IdSource, u64) {
 fn add(d: &mut Drawing, id_source: &mut IdSource, kind: ViewKind, place: ViewPlace, settings: ViewOverrides) -> u64 {
     let id = d.allocate_id(id_source).unwrap();
     let sheet = d.sheets[0].id;
-    d.add_views([Arc::new(View { id, sheet, kind, place, settings, reference_shown_percent: 0.0, label: None })]);
+    d.add_views([Arc::new(View { id, sheet, kind, place, settings, reference_shown_percent: 0.0, label: None, rotation: 0.0 })]);
     id
 }
 
@@ -1330,4 +1330,112 @@ fn a_quarter_turn_is_saved_as_its_degrees() {
     for bad in [json!(45), json!(-90), json!(360), json!("90"), json!(90.5), json!(null)] {
         assert!(serde_json::from_value::<QuarterTurn>(bad.clone()).is_err(), "{bad}");
     }
+}
+
+/// A view turned on its sheet (#13044) saves its rotation, and nothing when unturned; it reads back as
+/// saved, the same bytes. Its basis stays the model's, which its dimensions measure on and its children
+/// fold from, so a view made from it resolves as before it turned; what it draws through is its basis
+/// turned anticlockwise on paper by the angle, and unturned that is its basis bit for bit.
+#[test]
+fn a_turned_view_draws_turned_and_its_children_dont() {
+    let (mut d, mut id_source, [front, _, top]) = three();
+    let below = add(&mut d, &mut id_source, projected(top, ProjectedSide::Below), ViewPlace::At([320.0, 80.0]), ViewOverrides::default());
+    let [top_before, below_before] = [top, below].map(|id| d.resolve_view(id).unwrap().basis);
+    view_mut(&mut d, top).rotation = 30.0;
+    d.validate().unwrap();
+    let v = file(&d);
+    let saved = |id: u64| v["views"].as_array().unwrap().iter().find(|view| view["id"] == json!(ids::encode(id))).cloned().unwrap();
+    assert_eq!(saved(top)["rotation"], json!(30.0));
+    assert_eq!(saved(front).get("rotation"), None, "unturned: not written");
+    let reopened = Drawing::from_json(&d.to_json().unwrap()).unwrap();
+    assert_eq!(reopened, d);
+    assert_eq!(reopened.to_json().unwrap(), d.to_json().unwrap());
+
+    let turned = d.resolve_view(top).unwrap();
+    assert_eq!((turned.basis, turned.rotation), (top_before, 30.0), "the model's basis");
+    assert_eq!(d.resolve_view(below).unwrap().basis, below_before, "its child folds from the model's basis");
+    assert_eq!(d.resolve_view(below).unwrap().rotation, 0.0, "a turn isn't inherited");
+    let drawn = turned.drawn();
+    solidcraft_geom::section::validate_plane(&drawn).unwrap();
+    let p = Vec3::new(12.0, -7.0, 31.0);
+    let (unturned, (sin, cos)) = (turned.basis.to_local(p), 30f64.to_radians().sin_cos());
+    let want = Vec2::new(unturned.x * cos - unturned.y * sin, unturned.x * sin + unturned.y * cos);
+    assert!(drawn.to_local(p).dist(want) < 1e-12, "{:?} vs {want:?}", drawn.to_local(p));
+    let front = d.resolve_view(front).unwrap();
+    assert_eq!(front.drawn(), front.basis, "unturned: its basis itself");
+}
+
+/// A view turned a quarter turn draws on exact axes, as a flat pattern's quarter turn does: the point
+/// 100 along its basis's x lands at (0, 100), (-100, 0) and (0, -100), with no rounding.
+#[test]
+fn a_quarter_turned_view_draws_on_exact_axes() {
+    let (mut d, _, [_, _, top]) = three();
+    let along_x = d.resolve_view(top).unwrap().basis;
+    let p = along_x.origin + along_x.x * 100.0;
+    for (degrees, want) in [(90.0, Vec2::new(0.0, 100.0)), (180.0, Vec2::new(-100.0, 0.0)), (270.0, Vec2::new(0.0, -100.0))] {
+        view_mut(&mut d, top).rotation = degrees;
+        let drawn = d.resolve_view(top).unwrap().drawn();
+        solidcraft_geom::section::validate_plane(&drawn).unwrap();
+        assert_eq!(drawn.to_local(p), want, "{degrees}");
+    }
+}
+
+/// A turn's rules, saved or made: 0 up to 360 degrees; a turned view is placed at a point, as it no
+/// longer lines up; no view lines up with a turned view; and no section or auxiliary view is made from
+/// a turned view yet, as their lines and sides are drawn on its paper. Projected views placed apart and
+/// pictorial views are made from it.
+#[test]
+fn a_turned_views_rules_are_kept() {
+    let (mut d, mut id_source, [front, right, top]) = three();
+    let at = |d: &Drawing, id: u64| file(d)["views"].as_array().unwrap().iter().position(|view| view["id"] == json!(ids::encode(id))).unwrap();
+    let top_at = at(&d, top);
+    // (A number past the reader's range, such as 1e308, is refused before the view's rules.)
+    for bad in [json!(-1.0), json!(360.0), json!(400.0), json!(1e6)] {
+        let error = refused(&d, |v| v["views"][top_at]["rotation"] = bad.clone());
+        assert!(error.contains("its rotation is 0 up to 360 degrees"), "{bad}: {error}");
+    }
+    assert!(refused(&d, |v| v["views"][top_at]["rotation"] = json!("30")).contains("invalid type"));
+    let why = |d: &Drawing| d.validate().unwrap_err().to_string();
+    let mut lined_up = d.clone();
+    view_mut(&mut lined_up, right).rotation = 90.0;
+    assert_eq!(why(&lined_up), format!("view {}: a turned view is placed at a point: it no longer lines up with its parent", ids::encode(right)));
+    let mut parent_turned = d.clone();
+    view_mut(&mut parent_turned, front).rotation = 90.0;
+    assert_eq!(why(&parent_turned), format!("view {}: a view lined up with its parent: its parent isn't turned", ids::encode(right)));
+
+    view_mut(&mut d, top).rotation = 45.0;
+    let refusal = "not supported yet: a section, auxiliary or detail view of a turned view";
+    for kind in [section(top), auxiliary(top, [1.0, 0.0])] {
+        let mut made = d.clone();
+        let child = add(&mut made, &mut id_source, kind, ViewPlace::At([60.0, 60.0]), ViewOverrides::default());
+        assert_eq!(why(&made), format!("view {}: {refusal}", ids::encode(child)));
+    }
+    for kind in [projected(top, ProjectedSide::Left), pictorial(top, Diagonal::AboveLeft)] {
+        let mut made = d.clone();
+        add(&mut made, &mut id_source, kind, ViewPlace::At([60.0, 60.0]), ViewOverrides::default());
+        made.validate().unwrap();
+    }
+}
+
+/// A turned view needs its letter, a base view too, as nothing else on the sheet says it is turned; its
+/// label reads its angle after its letter (`VIEW A 30°`), to two decimals at most, and alone when its
+/// letter is hidden.
+#[test]
+fn a_turned_views_label_reads_its_angle() {
+    let (mut d, _, [front, _, top]) = three();
+    d.give_letter(top).unwrap();
+    view_mut(&mut d, top).rotation = 30.0;
+    assert_eq!(d.label_text(top).as_deref(), Some("VIEW A 30°"));
+    view_mut(&mut d, top).rotation = 22.5;
+    assert_eq!(d.label_text(top).as_deref(), Some("VIEW A 22.5°"));
+    view_mut(&mut d, top).rotation = 1.0 / 3.0;
+    assert_eq!(d.label_text(top).as_deref(), Some("VIEW A 0.33°"));
+    view_mut(&mut d, top).label.as_mut().unwrap().show_letter = false;
+    assert_eq!(d.label_text(top).as_deref(), Some("0.33°"));
+
+    assert!(!d.view(front).unwrap().needs_letter());
+    view_mut(&mut d, front).rotation = 90.0;
+    assert!(d.view(front).unwrap().needs_letter(), "a turned base view");
+    d.give_letter(front).unwrap();
+    assert_eq!(d.label_text(front).as_deref(), Some("VIEW B 90°"));
 }

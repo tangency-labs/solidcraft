@@ -476,7 +476,7 @@ fn drag_on_sheet(s: &Session, d: &Drawing, id: u64, drag: Drag, cmd: &str) -> Re
     let r = read.into_iter().next().ok_or_else(|| bad(cmd, format!("dimension {} wasn't read", ids::encode(id))))?;
     let on = crate::drawing_view::on_its_sheet(s, d, dimension.view, cmd).map_err(|why| bad(cmd, why))?;
     let lettering = PaperFonts::new(&d.font, &d.language, false);
-    dragged(dimension, &r, &on.frame, &lettering, drag.seen_from(on.centre)).map_err(|why| {
+    dragged(dimension, &r, &on.frame, on.rotation, &lettering, drag.seen_from(on.centre)).map_err(|why| {
         let words = match why {
             NotDragged::NoPlace => NO_PLACE,
             NotDragged::ChainText => "a chain's texts sit on its members: drag its line",
@@ -736,7 +736,7 @@ fn alone_on_sheet(
     let on = crate::drawing_view::on_its_sheet(s, d, dimension.view, INSPECT).map_err(|why| Some(why.to_string()))?;
     let centre = on.centre;
     // Asks for a font to fall back to and doesn't wait: add and its dry run run on the window thread.
-    let Some(paper) = paper_group(dimension, r, &on.frame, on.line_group, &PaperFonts::new(&d.font, &d.language, false)) else {
+    let Some(paper) = paper_group(dimension, r, &on.frame, on.rotation, on.line_group, &PaperFonts::new(&d.font, &d.language, false)) else {
         return Err((!r.points.is_empty()).then(|| NO_PLACE.to_string()));
     };
     // No layout at all until the font is found: a short span's lines depend on its text's width.

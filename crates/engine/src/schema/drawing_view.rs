@@ -584,6 +584,12 @@ pub struct ViewSet {
     #[serde(deserialize_with = "super::present")]
     #[schemars(with = "f64")]
     pub reference_shown_percent: Option<f64>,
+    /// How far it is turned on its sheet about its centre, in degrees anticlockwise (#13044): any angle,
+    /// kept as 0 up to 360; 0 turns it back. Its lines and dimensions turn with it, the way it looks
+    /// doesn't, and a view lined up with it, or it with its parent, is placed apart where it is.
+    #[serde(deserialize_with = "super::present")]
+    #[schemars(with = "f64")]
+    pub rotation: Option<f64>,
     /// A base view's direction.
     #[serde(deserialize_with = "super::present")]
     #[schemars(with = "ViewParam")]
@@ -795,6 +801,8 @@ pub struct InspectResult {
     pub place: PlaceParam,
     pub settings: SettingsResult,
     pub reference_shown_percent: f64,
+    /// How far it is turned on its sheet about its centre, in degrees anticlockwise: 0 unturned.
+    pub rotation: f64,
     /// Where it sits on its sheet: its extents grown by `reference_shown_percent`, at its scale,
     /// with the model's middle on its centre; a placeholder 20 mm each way when there's nothing to measure.
     pub boundary_mm: BoxResult,

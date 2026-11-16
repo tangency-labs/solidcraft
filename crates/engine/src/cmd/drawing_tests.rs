@@ -1031,6 +1031,7 @@ fn inspect_lists_each_sheets_views_in_order() {
         settings: Default::default(),
         reference_shown_percent: 0.0,
         label: None,
+        rotation: 0.0,
     })]);
     // Inspect only lists it, so the part it numbers needn't be in the design.
     let edge = ModelEdge { body: "Block".into(), origin_feature: s.doc.features[0].id, name: "edge".into(), path: vec![1] };
@@ -1171,6 +1172,7 @@ fn inspect_lists_every_view_of_a_deep_or_large_drawing() {
         settings: scale(),
         reference_shown_percent: 0.0,
         label: None,
+        rotation: 0.0,
     })]);
     for _ in 1..MAX_VIEW_DEPTH {
         let id = d.allocate_id(&mut source).unwrap();
@@ -1184,6 +1186,7 @@ fn inspect_lists_every_view_of_a_deep_or_large_drawing() {
             settings: ViewOverrides::default(),
             reference_shown_percent: 0.0,
             label: None,
+            rotation: 0.0,
         })]);
         made.push(id);
     }
@@ -1203,6 +1206,7 @@ fn inspect_lists_every_view_of_a_deep_or_large_drawing() {
         settings: scale(),
         reference_shown_percent: 0.0,
         label: None,
+        rotation: 0.0,
     };
     let more: Vec<Arc<View>> = (d.views.len()..MAX_VIEWS).map(|_| Arc::new(base(d.allocate_id(&mut source).unwrap()))).collect();
     let mut many = d.clone();

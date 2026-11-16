@@ -48,7 +48,7 @@ fn length(direction: LinearDirection) -> DimensionKind {
 
 /// `dimension` on paper in the built-in font, in English.
 fn laid(dimension: &Dimension, resolved: &Resolved, frame: &ViewFrame) -> Option<OnPaper> {
-    paper_group(dimension, resolved, frame, LineGroup::DEFAULT, &PaperFonts::new("", "en", true))
+    paper_group(dimension, resolved, frame, 0.0, LineGroup::DEFAULT, &PaperFonts::new("", "en", true))
 }
 
 fn drawn(kind: DimensionKind, offset: f64, points: &[[f64; 2]], text: &str, scale: &str) -> Group {
@@ -80,7 +80,7 @@ fn a_dimensions_lines_are_its_groups_thin_line() {
     let widths = |group| {
         let d = dimension(length(LinearDirection::Horizontal), 10.0, TextPlace::Centred);
         let drawn =
-            paper_group(&d, &read(&[[0.0, 0.0], [40.0, 0.0]], "40.00"), &view_at("1:1"), group, &PaperFonts::new("", "en", true)).unwrap().group;
+            paper_group(&d, &read(&[[0.0, 0.0], [40.0, 0.0]], "40.00"), &view_at("1:1"), 0.0, group, &PaperFonts::new("", "en", true)).unwrap().group;
         let strokes = drawn.items.iter().filter_map(|i| match i {
             Item::Stroke { width_mm, .. } => Some(*width_mm),
             _ => None,
@@ -699,7 +699,7 @@ fn off_the_line(layout: &Layout, p: Vec2) -> f64 {
 fn a_dragged_dimension_lays_out_where_it_was_dragged() {
     let (frame, fonts) = (view_at("1:1"), PaperFonts::new("", "en", true));
     let after = |d: &Dimension, r: &Resolved, drag: Drag| {
-        let (offset_mm, text) = dragged(d, r, &frame, &fonts, drag).unwrap_or_else(|why| panic!("{drag:?}: {why:?}"));
+        let (offset_mm, text) = dragged(d, r, &frame, 0.0, &fonts, drag).unwrap_or_else(|why| panic!("{drag:?}: {why:?}"));
         laid(&Dimension { offset_mm, text, ..d.clone() }, r, &frame).unwrap().layout
     };
     let at = Vec2::new;
@@ -725,7 +725,7 @@ fn a_dragged_dimension_lays_out_where_it_was_dragged() {
             assert!(off_the_line(&after(&d, &shaft, Drag::Line(p)), p) < 1e-9, "{p:?}");
             assert!(box_centre(&after(&d, &shaft, Drag::Text(p))).dist(p) < 1e-9, "{p:?}");
         }
-        assert_eq!(dragged(&d, &shaft, &frame, &fonts, Drag::Line(at(20.0, 0.0))), Err(NotDragged::BetweenEnds));
+        assert_eq!(dragged(&d, &shaft, &frame, 0.0, &fonts, Drag::Line(at(20.0, 0.0))), Err(NotDragged::BetweenEnds));
     }
 
     // An angle and a cone, each with its vertex at the origin.
@@ -761,7 +761,7 @@ fn a_dragged_dimension_lays_out_where_it_was_dragged() {
     let p = at(25.0, -12.0);
     let moved = after(&chain, &holes, Drag::Line(p));
     assert!(moved.arrows.len() == 6 && moved.arrows.iter().all(|(tip, _)| close(tip.y, p.y)), "{moved:?}");
-    assert_eq!(dragged(&chain, &holes, &frame, &fonts, Drag::Text(p)), Err(NotDragged::ChainText));
+    assert_eq!(dragged(&chain, &holes, &frame, 0.0, &fonts, Drag::Text(p)), Err(NotDragged::ChainText));
 }
 
 /// Any measured points and offsets, at the sizes and shapes that break layouts (zero spans, equal
@@ -800,7 +800,7 @@ fn hostile_points_and_offsets_never_panic() {
         for kind in kinds {
             let d = dimension(kind, offset, text);
             for drag in [Drag::Text(to), Drag::Line(to)] {
-                let _ = dragged(&d, &read(&points, "1"), &view_at("1:5"), &fonts, drag);
+                let _ = dragged(&d, &read(&points, "1"), &view_at("1:5"), 0.0, &fonts, drag);
             }
             if let Some(on) = laid(&d, &read(&points, "1"), &view_at("1:5")) {
                 let layout = on.layout;

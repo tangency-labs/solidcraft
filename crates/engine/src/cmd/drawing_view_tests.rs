@@ -66,7 +66,7 @@ pub(crate) fn three_views_of(mut s: Session) -> (Session, [u64; 3]) {
     let (sheet, source) = (d.sheets[0].id, d.sources[0].id);
     let mut add = |d: &mut Drawing, kind: ViewKind, place: ViewPlace, settings: ViewOverrides| {
         let id = d.allocate_id(&mut id_source).unwrap();
-        d.add_views([Arc::new(View { id, sheet, kind, place, settings, reference_shown_percent: 0.0, label: None })]);
+        d.add_views([Arc::new(View { id, sheet, kind, place, settings, reference_shown_percent: 0.0, label: None, rotation: 0.0 })]);
         id
     };
     let front_settings =
@@ -3678,6 +3678,7 @@ fn section_of(
         settings: ViewOverrides::default(),
         reference_shown_percent: 0.0,
         label: None,
+        rotation: 0.0,
     };
     d.add_views([Arc::new(view)]);
     d.validate().unwrap();
@@ -5202,4 +5203,88 @@ fn hatch_lines_end_on_the_true_outline_within_the_flattening() {
             assert!(off <= FLATTEN_MM + 1e-9, "a hatch line ends {off} mm off the outline at {p:?}");
         }
     }
+}
+
+/// A view turned on its sheet (#13044) turns its box about its centre: a quarter turn swaps the
+/// box's width and height. It saves its turn, inspect and the edit's reply say it, and it gets its
+/// letter, its label reading the angle. Turned while lined up with it, the right view is placed apart
+/// where it was, with its letter. Turned back with 0, the front view keeps its place. A turn is kept
+/// as 0 up to 360, and one that isn't a number is refused.
+#[test]
+fn a_turned_view_turns_its_box_and_what_lines_up_with_it_is_placed_apart() {
+    let (mut s, [front, right, top]) = three_views();
+    let (size, centre) = boundary(&inspect_view(&mut s, front));
+    let right_centre = boundary(&inspect_view(&mut s, right)).1;
+    let reply = edit_view(&mut s, front, json!({"rotation": 90}));
+    assert!(reply["changed"].as_array().unwrap().contains(&json!("rotation")), "{reply}");
+    let turned = inspect_view(&mut s, front);
+    assert_eq!((&turned["rotation"], &turned["label"]["text"]), (&json!(90.0), &json!("VIEW A 90°")), "{turned}");
+    let (turned_size, turned_centre) = boundary(&turned);
+    assert!((turned_size - Vec2::new(size.y, size.x)).len() < EPS && (turned_centre - centre).len() < EPS, "{turned}");
+    let apart = saved(&s, right);
+    let ViewPlace::At(at) = apart.place else { panic!("{:?}", apart.place) };
+    assert!((Vec2::from(at) - right_centre).len() < EPS && apart.label.is_some(), "{apart:?}");
+    assert_eq!(saved(&s, right).rotation, 0.0, "a turn isn't inherited");
+
+    edit_view(&mut s, front, json!({"rotation": 0}));
+    let back = inspect_view(&mut s, front);
+    assert_eq!(back["rotation"], json!(0.0));
+    let (back_size, back_centre) = boundary(&back);
+    assert!((back_size - size).len() < EPS && (back_centre - centre).len() < EPS, "{back}");
+    for (given, kept) in [(-90.0, 270.0), (720.5, 0.5), (360.0, 0.0)] {
+        edit_view(&mut s, top, json!({"rotation": given}));
+        assert_eq!(saved(&s, top).rotation, kept, "{given}");
+    }
+    let why = edit_refused(&mut s, top, json!({"rotation": "30"}));
+    assert!(why.contains("rotation"), "{why}");
+}
+
+/// A view that has an auxiliary view isn't turned, as its side is drawn on its paper: the edit is
+/// refused and the drawing is as it was.
+#[test]
+fn a_view_with_an_auxiliary_view_isnt_turned() {
+    let (mut s, [front, _, _]) = three_views();
+    let mut d = (**s.drawing("test").unwrap()).clone();
+    let id = d.allocate_id(&mut solidcraft_doc::ids::IdSource::seeded(13044)).unwrap();
+    let kind = ViewKind::Auxiliary { parent: front, toward: [0.0, 1.0] };
+    let sheet = d.sheets[0].id;
+    let settings = ViewOverrides::default();
+    d.add_views([Arc::new(View {
+        id,
+        sheet,
+        kind,
+        place: ViewPlace::At([60.0, 250.0]),
+        settings,
+        reference_shown_percent: 0.0,
+        label: None,
+        rotation: 0.0,
+    })]);
+    s.doc_mut().put_drawing(Arc::new(d));
+    let before = s.drawing("test").unwrap().to_json().unwrap();
+    let why = edit_refused(&mut s, front, json!({"rotation": 30}));
+    assert!(why.contains("not supported yet: a section, auxiliary or detail view of a turned view"), "{why}");
+    assert_eq!(s.drawing("test").unwrap().to_json().unwrap(), before);
+}
+
+/// A detail view's region is saved on its parent's unturned plane, so a detail and a turn don't meet
+/// yet: no detail of a turned view, no turn for a view with a detail, and no turned detail view. Each
+/// is refused and the drawing is as it was.
+#[test]
+fn a_detail_view_and_a_turned_view_are_kept_apart() {
+    let (mut s, [_, _, top]) = three_views();
+    let detail_of_top =
+        json!({"parent": ids::encode(top), "boundary": {"circle": {"centre": [0.0, 0.0], "radius": 10.0}}, "place": {"at": [60.0, 60.0]}});
+    let refusal = "not supported yet: a section, auxiliary or detail view of a turned view";
+    run(&mut s, EDIT, json!({"view": ids::encode(top), "set": {"rotation": 30}}));
+    let before = s.drawing("test").unwrap().to_json().unwrap();
+    let why = s.execute("drawing.view.detail", &detail_of_top).err().map(|e| e.to_string()).unwrap_or_default();
+    assert!(why.contains(refusal), "{why}");
+    assert_eq!(s.drawing("test").unwrap().to_json().unwrap(), before);
+    run(&mut s, EDIT, json!({"view": ids::encode(top), "set": {"rotation": 0}}));
+    let detail = ids::decode(run(&mut s, "drawing.view.detail", detail_of_top)["view"].as_str().unwrap()).unwrap();
+    let before = s.drawing("test").unwrap().to_json().unwrap();
+    assert!(edit_refused(&mut s, top, json!({"rotation": 30})).contains(refusal));
+    let why = edit_refused(&mut s, detail, json!({"rotation": 30}));
+    assert!(why.contains("not supported yet: a turned detail view"), "{why}");
+    assert_eq!(s.drawing("test").unwrap().to_json().unwrap(), before);
 }

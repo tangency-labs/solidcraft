@@ -71,7 +71,7 @@ fn front_and_top_of(mut s: Session) -> (Session, u64, [u64; 2]) {
     let (sheet, source) = (d.sheets[0].id, d.sources[0].id);
     let mut add = |d: &mut Drawing, kind: ViewKind, place: ViewPlace, settings: ViewOverrides| {
         let id = d.allocate_id(&mut id_source).unwrap();
-        d.add_views([Arc::new(View { id, sheet, kind, place, settings, reference_shown_percent: 0.0, label: None })]);
+        d.add_views([Arc::new(View { id, sheet, kind, place, settings, reference_shown_percent: 0.0, label: None, rotation: 0.0 })]);
         id
     };
     let half = ViewOverrides { scale: Some("1:2".parse().unwrap()), ..ViewOverrides::default() };
@@ -1113,7 +1113,16 @@ fn two_assembled_one_apart() -> (Session, u64, [u64; 3], u64) {
         let id = d.allocate_id(&mut id_source).unwrap();
         let settings = ViewOverrides { scale: Some("1:1".parse().unwrap()), exploded, ..ViewOverrides::default() };
         let kind = ViewKind::Base { source, view: ViewDirection::Named(NamedView::Front) };
-        d.add_views([Arc::new(View { id, sheet, kind, place: ViewPlace::At(at), settings, reference_shown_percent: 0.0, label: None })]);
+        d.add_views([Arc::new(View {
+            id,
+            sheet,
+            kind,
+            place: ViewPlace::At(at),
+            settings,
+            reference_shown_percent: 0.0,
+            label: None,
+            rotation: 0.0,
+        })]);
         id
     };
     let views = [
@@ -1629,7 +1638,16 @@ fn each_dimension_on_a_sheet_takes_its_own_views_answer() {
     for (id, at, pose, exploded) in made {
         let settings = ViewOverrides { scale: Some("1:1".parse().unwrap()), pose, exploded, ..ViewOverrides::default() };
         let kind = ViewKind::Base { source, view: ViewDirection::Named(NamedView::Top) };
-        d.add_views([Arc::new(View { id, sheet, kind, place: ViewPlace::At(at), settings, reference_shown_percent: 0.0, label: None })]);
+        d.add_views([Arc::new(View {
+            id,
+            sheet,
+            kind,
+            place: ViewPlace::At(at),
+            settings,
+            reference_shown_percent: 0.0,
+            label: None,
+            rotation: 0.0,
+        })]);
     }
     d.validate().unwrap();
     s.doc_mut().put_drawing(Arc::new(d));
@@ -1744,7 +1762,8 @@ fn a_held_deferred_drawing_exports_the_same_from_a_scratch_copy() {
     let id = d.allocate_id(&mut solidcraft_doc::ids::IdSource::seeded(10431)).unwrap();
     let kind = ViewKind::Base { source, view: ViewDirection::Named(NamedView::Top) };
     let settings = ViewOverrides { scale: Some("1:2".parse().unwrap()), ..ViewOverrides::default() };
-    let view = View { id, sheet: other, kind, place: ViewPlace::At([150.0, 150.0]), settings, reference_shown_percent: 0.0, label: None };
+    let view =
+        View { id, sheet: other, kind, place: ViewPlace::At([150.0, 150.0]), settings, reference_shown_percent: 0.0, label: None, rotation: 0.0 };
     d.add_views([Arc::new(view)]);
     d.validate().unwrap();
     s.doc_mut().put_drawing(Arc::new(d));
@@ -5128,7 +5147,7 @@ fn an_uncut_section_view_draws_no_picture() {
     let ends = vec![solidcore_record::Vec2::new(-60.0, 0.0), solidcore_record::Vec2::new(60.0, 0.0)];
     let line = CuttingLine::new(SectionKind::Full, ends, ArrowSide::Right).unwrap();
     let (kind, place) = (ViewKind::Section { parent: front, line }, ViewPlace::At([200.0, 60.0]));
-    let view = View { id: cut, sheet, kind, place, settings: ViewOverrides::default(), reference_shown_percent: 0.0, label: None };
+    let view = View { id: cut, sheet, kind, place, settings: ViewOverrides::default(), reference_shown_percent: 0.0, label: None, rotation: 0.0 };
     d.add_views([Arc::new(view)]);
     d.validate().unwrap();
     s.doc_mut().put_drawing(Arc::new(d));
