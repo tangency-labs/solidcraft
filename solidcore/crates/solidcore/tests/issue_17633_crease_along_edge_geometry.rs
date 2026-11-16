@@ -85,8 +85,8 @@ fn assert_valid(k: &mut Kernel, b: &mut Brep, what: &str) {
     assert!(lines.is_empty(), "{what}: {lines:?}");
 }
 
-/// The box's round a hair past its bottom: its closed form to 1e-8, the edge at the
-/// crease, not g from it.
+/// The box's round a hair past its bottom: its closed form to 1e-8, and the bottom edge's
+/// ends on the crease, not g from it.
 #[test]
 fn a_round_whose_crease_runs_along_the_bottom_edge_keeps_its_closed_form() {
     for r in [10.01, 10.02] {
@@ -107,6 +107,21 @@ fn a_round_whose_crease_runs_along_the_bottom_edge_keeps_its_closed_form() {
             (v - expected).abs() <= 1e-8 * expected,
             "r {r}: {v} against {expected}"
         );
+        // the bottom edge's ends moved onto the crease, g inside the old corner at y = 20
+        let g = r - (r * r - (r - 10.0) * (r - 10.0)).sqrt();
+        let mut ends = 0;
+        for &v in b.vertex_list() {
+            let p = solidcore::topology::vertex::point(&b, v).unwrap();
+            if p.z.abs() <= 1e-9 && p.y > 19.0 {
+                ends += 1;
+                assert!(
+                    (p.y - (20.0 - g)).abs() <= 1e-9,
+                    "r {r}: a bottom corner at {p:?}, not y = {}",
+                    20.0 - g
+                );
+            }
+        }
+        assert_eq!(ends, 2, "r {r}: the bottom edge's two ends");
         assert_valid(&mut k, &mut b, &format!("r {r}"));
     }
 }
