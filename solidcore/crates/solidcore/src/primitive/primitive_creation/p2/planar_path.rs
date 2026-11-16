@@ -22,7 +22,7 @@
 //! (WR-400, tangency-labs/solidcore#837): `SweepProfilesAlongPath` asks for caps only for a profile that closes.
 //! Not upstream (WR-780, #13687): the reference points of a mitre trim stay within the
 //! reach of the cutting line. No recursion.
-//! Not upstream (#17314): a corner where the path turns back within 2 degrees is refused,
+//! Not upstream (WR-793, #17314): a corner where the path turns back within 2 degrees is refused,
 //! where upstream takes it for a smooth joint and never mitres it, and so is a sweep of a
 //! closed profile meant as a solid that does not close (upstream returns it).
 
@@ -48,11 +48,11 @@ use crate::topology::brep::p10::TrimType;
 use crate::topology::BrepId;
 
 const OP: &str = "primitive::primitive_creation::p2::planar_path";
-/// The refusal of a corner where the path turns back within 2 degrees (#17314).
+/// The refusal of a corner where the path turns back within 2 degrees (WR-793).
 const TURNS_BACK: &str = "the path turns back on itself at a corner";
 /// The refusal of a sweep of a closed profile meant as a solid that does not close
-/// (#17314).
-const NOT_CLOSED: &str = "a corner is too sharp for its mitre: the sweep does not close";
+/// (WR-793).
+const NOT_CLOSED: &str = "the sweep does not close";
 
 /// The solver handles of the cutting curve (0) and an intersection curve (1).
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -237,7 +237,7 @@ impl PrimitiveCreation {
     /// `SM_ERR` when the pieces do not unite into one B-rep, or for a manifold
     /// result without material; `SM_ERR` for a corner where the path turns back within
     /// 2 degrees, and for a closed profile meant as a solid (`cap_start` and `cap_end`, or
-    /// a closed path) whose result does not close (not upstream, #17314); those of the
+    /// a closed path) whose result does not close (not upstream, WR-793); those of the
     /// union, the final stitch and the region classification. Mandatory evaluations, geometry construction, cap
     /// removals, trims and cleanup also propagate (not upstream, #483); every owned
     /// temporary is deleted on any error. No transaction is imposed on the caller's
@@ -701,11 +701,11 @@ impl PrimitiveCreation {
         // Solid intent with a manifold boundary gets the nested-solid parity
         // classification.
         let solid_intent = closed || (cap_start && cap_end);
-        // Not upstream (#17314): a closed profile meant as a solid must close. A corner
-        // too sharp for its mitre leaves the pieces open: the pieces run `extend` past
-        // the corner and the cutting line reaches as far, while the mitre of a profile
-        // `w` wide on either side of the path reaches `w / sin(beta / 2)`, beta the
-        // angle between the legs.
+        // Not upstream (WR-793): a closed profile meant as a solid must close, whatever
+        // left it open. One cause is a corner too sharp for its mitre: at an inner corner
+        // the pieces run `extend` past the corner and the cutting line reaches as far,
+        // while the mitre of a profile `w` wide on either side of the path reaches
+        // `w / sin(beta / 2)`, beta the angle between the legs.
         if solid_intent
             && profile_closes(a.kernel(sweep)?, profiles, tol)?
             && !crate::topology::brep::p2::is_closed_manifold(a.brep(sweep)?)?

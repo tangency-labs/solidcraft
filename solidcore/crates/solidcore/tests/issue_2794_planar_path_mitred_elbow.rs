@@ -6,7 +6,7 @@
 //! like a large one. The result is checked directly: a valid closed body of the
 //! closed-form volume.
 //!
-//! #17314: a corner too sharp for its mitre. The pieces run past a corner by
+//! #17314, WR-793: a corner too sharp for its mitre. The pieces run past a corner by
 //! `2 sqrt(2) M` (`M` the largest coordinate of the profile's box), and the cutting line
 //! reaches as far from it. The mitre of a profile `w` wide on either side of the path
 //! reaches `w / sin(beta / 2)` from the corner, `beta` the angle between the legs; past
@@ -149,14 +149,12 @@ fn a_corner_too_sharp_for_its_mitre_is_refused() {
     }
     // With the circle at the origin `M = 1`, so the reach is `2 sqrt(2)` and the mitre
     // fits from beta = 2 asin(1 / (2 sqrt(2))) = 41.4 degrees. Below it the pieces stay
-    // open (22 faces at 2 degrees, the two caps alone from 12 to 41).
-    for a in [2., 10., 30., 41.] {
+    // open (22 faces at 2.5 degrees, the two caps alone from 12 to 41).
+    for a in [2.5, 10., 30., 41.] {
         let e = turn(&mut Kernel::default(), a, 0.).err();
         assert_eq!(
             e.as_ref().and_then(SolidError::primitive_failure),
-            Some(&PrimitiveFailure::Failed(
-                "a corner is too sharp for its mitre: the sweep does not close"
-            )),
+            Some(&PrimitiveFailure::Failed("the sweep does not close")),
             "a {a}: {e:?}"
         );
     }
