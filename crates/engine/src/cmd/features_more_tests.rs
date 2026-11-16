@@ -448,6 +448,31 @@ fn rib_to_the_next_face_fills_the_corner() {
 }
 
 #[test]
+fn rib_ending_flush_with_a_wall_keeps_a_square_end() {
+    // A tray 60 x 40 x 20 with 3 mm walls and floor (16788 mm³); a rib on XZ at y = 20 along
+    // z = 12, 4 thick, runs down to the floor at z = 3. An end flush with the inner face of a
+    // wall (x = 3 or x = 57) must stay square, whichever way the line runs.
+    for (from, to, volume_expected) in [
+        (3.0, 57.0, 16788.0 + 54.0 * 4.0 * 9.0),
+        (57.0, 3.0, 16788.0 + 54.0 * 4.0 * 9.0),
+        (10.0, 57.0, 16788.0 + 47.0 * 4.0 * 9.0),
+        (3.0, 50.0, 16788.0 + 47.0 * 4.0 * 9.0),
+        (10.0, 50.0, 16788.0 + 40.0 * 4.0 * 9.0),
+    ] {
+        let mut s = Session::default();
+        run(&mut s, "solid.box", json!({"length": 60, "width": 40, "height": 20, "corner": [0, 0, 0], "operation": "new", "body_name": "T"}));
+        run(&mut s, "solid.box", json!({"length": 54, "width": 34, "height": 20, "corner": [3, 3, 3], "operation": "cut", "targets": ["T"]}));
+        run(&mut s, "sketch.create", json!({"plane": "XZ", "offset": 20, "name": "R"}));
+        run(&mut s, "sketch.line", json!({"points": [[from, -12.0], [to, -12.0]], "ids": ["l1"]}));
+        run(&mut s, "sketch.finish", json!({}));
+        run(&mut s, "solid.rib", json!({"sketch": "R", "curves": ["l1"], "thickness": 4}));
+        let v = volume(&mut s);
+        assert!(rel(v, volume_expected) < 1e-6, "{from} -> {to}: {v}, expected {volume_expected}");
+        assert_eq!(measure(&mut s)["body_count"], 1, "{from} -> {to}");
+    }
+}
+
+#[test]
 fn rib_finds_a_tray_floor_whatever_the_tray_length() {
     // An open tray L x 30 x 12 with 2 mm walls and floor, a rib line across it at z = 8 on the
     // mid plane x = L / 2: the rib runs down to the floor. Finding the material side and the

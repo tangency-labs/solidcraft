@@ -245,7 +245,6 @@ fn default_kernel_builds_the_depths_below_the_floor() {
 /// SolidCraft's `UpstreamFixes` preset (183 flags).
 fn solidcraft_flags(k: &mut Kernel) {
     k.fixes.analytic_copy_keeps_parameterization = true;
-    k.fixes.boolean_splits_definition_across_split = true;
     k.fixes.boolean_vertex_by_best_crossing = true;
     k.fixes.box_face_failures_propagate = true;
     k.fixes.bspline_trim_preserves_uv_spans = true;
@@ -253,9 +252,7 @@ fn solidcraft_flags(k: &mut Kernel) {
     k.fixes.cover_refuses_folded_continuation = true;
     k.fixes.curve_contacts_at_curve_ends = true;
     k.fixes.curve_loop_normal_from_area = true;
-    k.fixes.cylinder_rebuild_mean_radius = true;
     k.fixes.degenerate_proto_edge_in_one_vertex = true;
-    k.fixes.ellipse_trim_seam_lines_span_cone_height = true;
     k.fixes.face_tight_box_searches_trim = true;
     k.fixes.fillet_chamfer_cone_on_arc = true;
     k.fixes.fillet_cleanup_keeps_target_faces = true;
@@ -280,7 +277,6 @@ fn solidcraft_flags(k: &mut Kernel) {
     k.fixes.local_operation_refuses_loose_tangent_edges = true;
     k.fixes.local_operation_step_walls = true;
     k.fixes.new_edge_vertex_tolerance_covers_gap = true;
-    k.fixes.nurb_cylinder_inside_out_frame = true;
     k.fixes.offset_analytic_mate_edges = true;
     k.fixes.offset_collapsed_rounds_mated = true;
     k.fixes.offset_extended_edges_mated = true;
