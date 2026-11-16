@@ -12,8 +12,6 @@ solid.hole
 solid.loft
 solid.mirror
 solid.offset_face
-solid.pattern.path
-solid.pattern.rectangular
 solid.shell
 solid.thread
 surface.extrude

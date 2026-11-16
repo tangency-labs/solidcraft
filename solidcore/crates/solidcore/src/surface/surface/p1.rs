@@ -2611,16 +2611,15 @@ impl Surface {
             SurfaceKind::Plane(p) => Ok(Some(Self::from(
                 p.create_offset_surface(k, signed_offset_distance)?,
             ))),
-            // `Kernel::fixes.revolution_round_offset_collapses` (WR-567): an offset that
-            // shrinks the generatrix arc onto its centre or past it is no surface
+            // (WR-567): an offset that shrinks the generatrix arc onto its centre or past
+            // it is no surface
             SurfaceKind::SurfOfRevolution(s)
-                if k.fixes.revolution_round_offset_collapses
-                    && self.revolution_offset_collapses(
-                        k,
-                        s,
-                        signed_offset_distance,
-                        approx_tol_3d,
-                    )? =>
+                if self.revolution_offset_collapses(
+                    k,
+                    s,
+                    signed_offset_distance,
+                    approx_tol_3d,
+                )? =>
             {
                 Ok(None)
             }
@@ -2660,10 +2659,9 @@ impl Surface {
 
     /// Not upstream (`SmSurface::OffsetCollapses`, WR-464): whether the offset by
     /// `signed_offset_distance` shrinks a cone, cylinder, sphere or torus onto its spine
-    /// (radius below `tol`), the only case where [`Self::create_offset_surface`] gives no
-    /// surface. With `Kernel::fixes.revolution_round_offset_collapses` (WR-567) also a
-    /// surface of revolution of one circular arc moved in past the arc's radius
-    /// (`revolution_offset_collapses`). `false` for every other surface.
+    /// (radius below `tol`), or a surface of revolution of one circular arc onto the arc's
+    /// centre or past it (`revolution_offset_collapses`, WR-567): the cases where
+    /// [`Self::create_offset_surface`] gives no surface. `false` for every other surface.
     ///
     /// # Errors
     ///
@@ -2694,7 +2692,7 @@ impl Surface {
             SurfaceKind::Torus(s) => s.offset_collapses(signed_offset_distance, tol),
             // the fork's SmBallPatch::OffsetCollapses (f8e6709)
             SurfaceKind::BallPatch(s) => s.offset_collapses(k, signed_offset_distance, tol),
-            SurfaceKind::SurfOfRevolution(s) if k.fixes.revolution_round_offset_collapses => {
+            SurfaceKind::SurfOfRevolution(s) => {
                 self.revolution_offset_collapses(k, s, signed_offset_distance, tol)?
             }
             _ => false,

@@ -26,7 +26,6 @@ use core::f64::consts::PI;
 
 use offset_fixture::{planar_faces_at, report, shell};
 use solidcore::blend::fillet_executive::api::fillet_edges;
-use solidcore::kernel::UpstreamFixes;
 use solidcore::math::Point3;
 use solidcore::primitive::api_primitives::create_cylinder;
 use solidcore::topology::brep::validation::{check_brep, CheckLevel};
@@ -64,16 +63,6 @@ fn expected(t: f64) -> f64 {
     PI * RD * RD * H - corner - PI * (RD - t) * (RD - t) * (H - t)
 }
 
-/// The default kernel (the rounds are mated across collapsed faces), with or without the
-/// revolution's collapse test.
-fn kernel(revolution_collapses: bool) -> Kernel {
-    let mut k = Kernel::default();
-    let mut f = UpstreamFixes::default();
-    f.revolution_round_offset_collapses = revolution_collapses;
-    k.fixes = f;
-    k
-}
-
 /// Shells the disc rounded at `edge_z` by `t`, open at `open_z`; whether the result is
 /// an intact manifold solid of the expected volume to 1e-6.
 fn shelled(k: &mut Kernel, edge_z: f64, open_z: f64, t: f64) -> bool {
@@ -90,35 +79,30 @@ fn shelled(k: &mut Kernel, edge_z: f64, open_z: f64, t: f64) -> bool {
     )
 }
 
-/// Without the revolution's collapse test the round's offset is the arc turned inside out
-/// (upstream), and the shell failed with 1001 open at the other end while the inset kept
-/// every finite region. Keeping only the cavity regions (WR-667) gives the closed form, a
-/// shell valid at every `check_brep` level. (Deduced, not checked: with fewer than two
-/// finite regions the selection is skipped, so the result would not have changed; this
-/// merge leaves at least two.)
-#[test]
-fn wr567_without_collapse_open_at_the_other_end_keeps_the_cavity() {
-    let mut k = kernel(false);
-    assert!(shelled(&mut k, -H, 0.0, 1.6));
-    let b = rounded_disc(&mut k, -H);
-    let open = planar_faces_at(&k, &b, 2, 0.0);
-    let mut result = shell(&mut k, b, -1.6, &open).unwrap();
-    result.refresh_cached_topology();
-    for level in [CheckLevel::Level0, CheckLevel::Level1, CheckLevel::Level2] {
-        let checked = check_brep(&mut k, &mut result, level).unwrap();
-        assert!(checked.is_valid(), "{level:?}: {:?}", checked.lines());
-    }
-}
-
+/// The round's offset collapses where the shell moves past its radius, and the floor's and
+/// side's offsets meet across it in a circle: every case is the closed form, and the shell
+/// is valid at every `check_brep` level.
 #[test]
 fn wr567_round_thinner_than_the_wall_collapses() {
     for (edge_z, open_z) in [(-H, 0.0), (-H, -H), (0.0, -H)] {
         for t in [1.6, 2.0] {
-            let mut k = kernel(true);
+            let mut k = Kernel::default();
             assert!(
                 shelled(&mut k, edge_z, open_z, t),
                 "rounded at z {edge_z}, open at z {open_z}, shelled {t}"
             );
+            let b = rounded_disc(&mut k, edge_z);
+            let open = planar_faces_at(&k, &b, 2, open_z);
+            let mut result = shell(&mut k, b, -t, &open).unwrap();
+            result.refresh_cached_topology();
+            for level in [CheckLevel::Level0, CheckLevel::Level1, CheckLevel::Level2] {
+                let checked = check_brep(&mut k, &mut result, level).unwrap();
+                assert!(
+                    checked.is_valid(),
+                    "rounded at z {edge_z}, open at z {open_z}, shelled {t}, {level:?}: {:?}",
+                    checked.lines()
+                );
+            }
         }
     }
 }

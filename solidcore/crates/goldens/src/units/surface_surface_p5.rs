@@ -1875,6 +1875,92 @@ mod tests {
         }
     }
 
+    /// The generated drop case `c`: its surface, point, domain and options.
+    fn wr56_drop(c: usize) -> (Surface, Vec3, Extent2d, DropPointOptions) {
+        let mut rng = Rng::new(CaseContext::seed_for("surface.surface_p5", c));
+        let i: Inputs = serde_json::from_value(Runner.generate(&mut rng).unwrap()).unwrap();
+        let OpIn::Drop {
+            dom,
+            p,
+            guess,
+            sop,
+            tgt,
+            want,
+        } = &i.op
+        else {
+            panic!("case {c}: not a drop");
+        };
+        let opts = DropPointOptions {
+            guess_uv: guess.map(p2),
+            operation: sop_of(*sop).unwrap(),
+            tgt_seam_side: tgt.map(v3),
+            want_solutions: *want,
+        };
+        (surface_of(&i.surface).unwrap(), v3(*p), dom_of(*dom), opts)
+    }
+
+    /// WR-56 (#17467, #17773): guessed drops whose local result moved from its guess. The
+    /// global solve decides them, and the local result is kept when the global solve finds
+    /// nothing or nothing as near.
+    /// - `gen0558`: the local result, a foot on the `v = 1` side 3.2e-5 from the point, is
+    ///   the answer: the global solve finds nothing there. It is enclosed
+    ///   ([`crate::certify::nearest`]).
+    /// - `gen2872`: the point is on the surface twice, on both sides of a seam; both are
+    ///   returned (want solutions), each within the evaluation's rounding of the point,
+    ///   where main and the in-order test returned one local foot 3.5e-12 off.
+    /// - `gen1398`: the answer is no farther than main's (3.645652443993998e-10); the
+    ///   point is that near the surface, so the enclosure bounds it only from above.
+    #[test]
+    fn wr56_moved_guessed_drops_are_decided_by_the_global_solve() {
+        use crate::certify::{evaluation_slack, nearest};
+        let k = Kernel::default();
+
+        let (s, p, dom, opts) = wr56_drop(558);
+        let r = s.drop_point::<Obj>(&k, p, &dom, &opts).unwrap();
+        assert!(r.success, "gen0558: the drop failed");
+        let d = p.distance(s.evaluate_point(&k, r.result_uv).unwrap());
+        let e = nearest(&k, &s, Some(&dom), p, r.result_uv);
+        eprintln!("gen0558: foot {:?} distance {d:e} in {e:?}", r.result_uv);
+        assert!(e.holds(d), "gen0558: {d:e} outside {e:?}");
+        assert!(d < 3.2e-5, "gen0558: {d:e}");
+        // the nearest point to within 1.1e-13 (measured width 1.05e-13)
+        assert!(e.width() <= 1.1e-13, "gen0558: {e:?} is not tight");
+
+        let (s, p, dom, opts) = wr56_drop(2872);
+        assert!(opts.want_solutions);
+        let r = s.drop_point::<Obj>(&k, p, &dom, &opts).unwrap();
+        let slack = evaluation_slack(&k, &s);
+        assert!(r.success && r.is_multivalued, "gen2872: {r:?}");
+        let uvs: Vec<Point2> = r
+            .solutions
+            .as_slice()
+            .iter()
+            .map(|x| Point2::new(x.start.param(0).unwrap(), x.start.param(1).unwrap()))
+            .collect();
+        assert_eq!(uvs.len(), 2, "gen2872: {uvs:?}");
+        assert!(uvs[0].distance(uvs[1]) > 1.0, "gen2872: {uvs:?}");
+        for uv in &uvs {
+            let d = p.distance(s.evaluate_point(&k, *uv).unwrap());
+            eprintln!("gen2872: solution {uv:?} distance {d:e} (slack {slack:e})");
+            assert!(d <= slack, "gen2872: {uv:?} at {d:e}");
+        }
+        let before = p.distance(
+            s.evaluate_point(&k, Point2::new(1.193_852_141_363_828_8, 1.655_483_801_347_883_9))
+                .unwrap(),
+        );
+        eprintln!("gen2872: the foot before {before:e}");
+        assert!(before > slack, "gen2872: {before:e}");
+
+        let (s, p, dom, opts) = wr56_drop(1398);
+        let r = s.drop_point::<Obj>(&k, p, &dom, &opts).unwrap();
+        assert!(r.success, "gen1398: the drop failed");
+        let d = p.distance(s.evaluate_point(&k, r.result_uv).unwrap());
+        let e = nearest(&k, &s, Some(&dom), p, r.result_uv);
+        eprintln!("gen1398: foot {:?} distance {d:e} gap {:e} in {e:?}", r.result_uv, r.gap);
+        assert!(e.holds(d), "gen1398: {d:e} outside {e:?}");
+        assert!(r.gap <= 3.645_652_443_993_998e-10, "gen1398: {:e}", r.gap);
+    }
+
     /// Generated cases cover every op, and most of the comparable ones are not deferred.
     #[test]
     fn generated_cases_are_diverse() {
