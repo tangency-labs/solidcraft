@@ -3832,3 +3832,88 @@ fn a_round_on_a_revolved_end_cap_that_closes_to_a_cusp_builds() {
     let added = volume(&b) - before;
     assert!((0.0360..=0.0381).contains(&added), "{added}");
 }
+
+/// #17616: the issue's sheet-metal part, 3 thick with 2 mm bends: a 90 x 75 base, a three-bend
+/// flange on its back edge, and on its right edge a flange split into an 8 mm and a 50 mm
+/// segment. The record is the body SolidCraft's trace gives the round
+/// (`tests/data/issue_17616_split_flange_tab.bodies.json.gz`).
+fn issue_17616_body() -> Body {
+    let case = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../solidcore/tests/data/issue_17616_split_flange_tab.bodies.json.gz"
+    );
+    let mut text = String::new();
+    flate2::read::GzDecoder::new(std::fs::File::open(case).unwrap())
+        .read_to_string(&mut text)
+        .unwrap();
+    let records: serde_json::Value = serde_json::from_str(&text).unwrap();
+    let record: Record = serde_json::from_value(records["b1"].clone()).unwrap();
+    Body::from_record(&record, true).unwrap().0
+}
+
+/// Each cylinder face of `b` (the bends): its UV domain and its surface's natural domain.
+fn bend_domains(b: &Body) -> Vec<([f64; 4], [f64; 4])> {
+    use solidcore::topology::face::p2 as face;
+    let (k, brep) = kernel_copy(b);
+    let mut out = Vec::new();
+    for &f in brep.face_list() {
+        let s = face::surface(&brep, f).unwrap().unwrap();
+        if !matches!(s.kind(), SurfaceKind::Cone(c) if c.is_cylinder()) {
+            continue;
+        }
+        let d = face::uv_domain(&brep, f).unwrap();
+        let n = s.natural_uv_domain_with_nurb(&k).unwrap();
+        out.push((
+            [d.u_min(), d.u_max(), d.v_min(), d.v_max()],
+            [n.u_min(), n.u_max(), n.v_min(), n.v_max()],
+        ));
+    }
+    out
+}
+
+/// #17616: an R10 round on the 50 mm tab's top outside edge (x = 90, z = 50, y 35 to 70)
+/// overflows the 3 mm top face and runs onto the inside face x = 87. Its ball's centre is
+/// (80, 40) in x, z, so the round takes off, per unit length, the tab's 3 x 10 corner less the
+/// disc strip under the arc: `30 - I(7, 10; 10)`, over the 35 of the tab. The top face goes and
+/// the round comes in its place, bounded by its rail on x = 90, its crease on x = 87 and its
+/// arcs on the tab's ends: 45 faces, 93 edges, 50 vertices, as before.
+///
+/// On main the round's last step (sewn faces on one surface made one face) tested the edge
+/// between the two bends of the split flange, which lie on one cylinder, for removal although
+/// it is kept, and the test expanded one bend's surface onto both, its parameterisation
+/// changing, while the bend kept its UV domain. Its trims dropped off that domain, and the
+/// round was not closed (ops) or its trim was fitted on a third of its edge (SolidCraft's
+/// export: "a UV trim on [0, 0.33], its edge on [0, 1]"). Every bend now keeps its surface.
+#[test]
+fn a_round_overflowing_a_split_flange_s_tab_top_leaves_the_bends_on_their_surfaces() {
+    rig_fixes();
+    let b = issue_17616_body();
+    let before = volume(&b);
+    // each bend's UV domain is its surface's whole natural domain
+    let on_its_surface = |b: &Body| {
+        let bends = bend_domains(b);
+        assert_eq!(bends.len(), 10);
+        for (d, n) in &bends {
+            for (x, y) in d.iter().zip(n) {
+                assert!((x - y).abs() <= 1e-9, "a bend's domain {d:?} is not its surface's {n:?}");
+            }
+        }
+    };
+    on_its_surface(&b);
+    let e = edge_at(&b, [90.0, 52.5, 50.0]);
+    let made = blend(&b, Blend::Round, &[e], &[10.0], &[], Corners::Filled)
+        .unwrap_or_else(|e| panic!("the tab's top edge does not round: {e:?}"));
+    let report = b.check(CheckLevel::All).unwrap();
+    assert!(report.is_valid(), "{report}");
+    assert_eq!(b.counts().unwrap(), [45, 93, 50]);
+    let removed = 35.0 * (30.0 - disc_strip(7.0, 10.0, 10.0));
+    let after = volume(&b);
+    assert!(rel(before - after, removed) < 1e-6, "{before} - {after} vs {removed}");
+    // the round is one face, kept as its definition
+    assert_eq!(made.made.len(), 1);
+    let (_, brep) = kernel_copy(&b);
+    let round = brep.face(brep.face_list()[made.made[0]]).unwrap();
+    assert!(round.surface.as_ref().unwrap().procedural_blend().is_some());
+    // the bends the round does not reach as they were
+    on_its_surface(&b);
+}
