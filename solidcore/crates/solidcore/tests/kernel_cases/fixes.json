@@ -65,7 +65,6 @@
   "ssi_tangent_contact_points",
   "ssi_low_angle_start_on_probation",
   "ssi_trace_tangent_curves_once",
-  "point_on_start_point_squared_tolerance",
   "ssi_pole_point_keeps_its_tangent",
   "ssi_tangent_curve_tracer",
   "ssi_split_curves_at_singular_points",
