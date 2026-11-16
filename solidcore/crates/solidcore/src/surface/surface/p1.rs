@@ -2718,9 +2718,10 @@ impl Surface {
     /// [`SolidError::Unported`] from the arc test or the evaluations; those of the
     /// natural UV domain; `Unsupported` for a generatrix that is neither proved on the
     /// circle its samples nominate nor off it (it comes to the tolerance's edge, or has no
-    /// exact NURB form to bound), or (not a circle) whose curvature where the side is read
-    /// is not within half of the circle's, or whose own radius there would decide the
-    /// collapse the other way: the offset is refused, not dropped.
+    /// exact NURB form to bound, its NURB not made yet, or more pieces than
+    /// [`on_circle`]'s bound), whose curvature where the side is read is not within half of
+    /// the circle's (NaN or zero included), or (not a circle) whose own radius there would
+    /// decide the collapse the other way: the offset is refused, not dropped.
     fn revolution_offset_collapses(
         &self,
         k: &Kernel,
@@ -2782,16 +2783,22 @@ impl Surface {
         // on it (solidcraft#17907's review). A circle is its own curvature everywhere.
         let towards_centre = normal.dot(curvature) * radius;
         let sign = if towards_centre < 0.0 { -1.0 } else { 1.0 };
-        let collapses = radius - signed_offset_distance * sign < tol;
-        if is_exact_circle(gen) {
-            return Ok(collapses);
-        }
+        // The side is taken only where the generatrix bends clearly as its circle does:
+        // within half of `±1`. Any band below 1 fixes the sign; half keeps the local radius
+        // within [2r/3, 2r] of the circle's, a same-side bend by a factor-of-two margin,
+        // while an exact arc's rounding (far below it) passes. A NaN or zero `N . k` (a
+        // degenerate normal or derivative, or a generatrix that does not bend along the
+        // normal) is refused, a circle's too: no side is read from it.
         #[allow(clippy::neg_cmp_op_on_partial_ord)] // refuses NaN too
         if !((towards_centre - sign).abs() <= 0.5) {
             return Err(SolidError::Unsupported {
                 operation: OP_REV_COLLAPSE,
                 reason: "the generatrix bends unlike its circle where its side is read",
             });
+        }
+        let collapses = radius - signed_offset_distance * sign < tol;
+        if is_exact_circle(gen) {
+            return Ok(collapses);
         }
         let local = radius / towards_centre.abs();
         if (local - signed_offset_distance * sign < tol) != collapses {
