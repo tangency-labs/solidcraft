@@ -102,6 +102,12 @@
 //!   subpatch gives no solution is divided, and at the limits counts with that bound, its
 //!   control-point hull raised by the subpatch's rounding (its loose box when that has no
 //!   finite bound, a typed error when neither has).
+//!   Not the fork's (#13753): such a cell is set aside only on bounds (its control
+//!   points' greatest; their least, with every solution classified outside; or a
+//!   monotone net), a solve's value at a point in the face only raising the box so far,
+//!   and at the limits it counts with its own bound; a way along which its control
+//!   values are level is not halved. The fork set a cell aside on its solve's value,
+//!   which the surface takes but need not be its greatest.
 //!   Not the fork's (#14460): a cell is divided only the ways a knot lies inside it while
 //!   either way has one, halved both ways only once it lies within one span each way.
 //!   The step-off loops keep upstream's bounds (20 rounds in the sector
@@ -742,6 +748,12 @@ struct CellDirectedMax {
     in_face: bool,
     /// Whether the solver gave a solution.
     found: bool,
+    /// The greatest value at a point inside the face (`-BIG_DOUBLE` without one): a value
+    /// the face takes (#13753).
+    face_top: f64,
+    /// Whether every solution was classified, and outside the face (`SM_PC_UNKNOWN`):
+    /// none on its boundary, none left unclassified (#13753).
+    outside: bool,
 }
 
 /// `sm_CellDirectedMax`: `GlobalPointSolve(SM_SO_3D_SIGNED_DIRECTED_MAXIMIZE)` over `cell`
@@ -777,6 +789,8 @@ fn cell_directed_max(
         top: -crate::math::BIG_DOUBLE,
         in_face: false,
         found: !solutions.is_empty(),
+        face_top: -crate::math::BIG_DOUBLE,
+        outside: !solutions.is_empty(),
     };
     let mut in_face_top = -crate::math::BIG_DOUBLE;
     let mut pt_class = PointClassification::new(face_zone_tol_3d);
@@ -789,7 +803,7 @@ fn cell_directed_max(
         let pos = eval_pos(&mut eval)?;
         let value = pos.x * dir.x + pos.y * dir.y + pos.z * dir.z;
         out.top = out.top.max(value);
-        ignored(point_classify(
+        let classified = ignored(point_classify(
             k,
             lb.get_mut()?,
             f,
@@ -801,7 +815,10 @@ fn cell_directed_max(
                 use_uv_classification: true,
                 ..PointClassifyOptions::default()
             },
-        ))?;
+        ))?
+        .is_some();
+        out.outside =
+            out.outside && classified && pt_class.point_class() == PointClassType::Unknown;
         // Inside the face only (`SM_PC_FACE`, tangency-labs/smlib@95bf434). A point on an
         // edge or a vertex lies within the face's zone tolerance of its boundary, inside or
         // out: where the surface runs on past the boundary it is up to that tolerance
@@ -816,6 +833,7 @@ fn cell_directed_max(
     if out.in_face {
         out.top = out.top.max(in_face_top);
     }
+    out.face_top = in_face_top;
     Ok(out)
 }
 
@@ -1081,6 +1099,41 @@ fn patch_hull_max(patch: &BSplineSurface, dir: Vec3) -> Option<f64> {
     hull
 }
 
+/// Whether the control values `P . dir` of `patch` are level along v (`along_v`) or along
+/// u, to [`EFF_ZERO_SQRT`], at every index across (#13753): then `S . dir` is level that
+/// way too (with positive weights each isocurve's value is a convex combination of level
+/// values), and halving the patch that way leaves each half's hull where it was. `false`
+/// when it cannot be told (no net, a NaN).
+fn patch_level_along(patch: &BSplineSurface, dir: Vec3, along_v: bool) -> bool {
+    let Ok(control) = patch.control_point_net() else {
+        return false;
+    };
+    let (nu, nv) = (control.u_count, control.v_count);
+    if nu == 0 || nv == 0 || control.points.len() != nu * nv {
+        return false;
+    }
+    let value = |p: &Point3| p.x * dir.x + p.y * dir.y + p.z * dir.z;
+    let (across, along) = if along_v { (nu, nv) } else { (nv, nu) };
+    (0..across).all(|a| {
+        let mut values = (0..along).filter_map(|t| {
+            let (i, j) = if along_v { (a, t) } else { (t, a) };
+            control.points.get(i * nv + j).map(value)
+        });
+        let Some(first) = values.next() else {
+            return false;
+        };
+        let (mut lo, mut hi) = (first, first);
+        for v in values {
+            if v.is_nan() {
+                return false;
+            }
+            lo = lo.min(v);
+            hi = hi.max(v);
+        }
+        hi - lo <= EFF_ZERO_SQRT
+    })
+}
+
 /// The face's B-spline surface over `cell` alone: its exact subpatch there
 /// ([`cell_patch`]), owned by the same face with the same zone tolerance, so a solve over
 /// the cell starts from the cell's own control net (the control-net guesses of the
@@ -1109,7 +1162,8 @@ fn loose_top(
         + (lo.z * dir.z).max(hi.z * dir.z))
 }
 
-/// A bound on `S . dir` over a cell [`face_directed_max`] leaves unsolved at its limits:
+/// A bound on `S . dir` over a cell [`face_directed_max`] leaves at its limits unsolved or
+/// with control points (#13753):
 /// its subpatch's control-point hull (`hull`, from [`patch_hull_max`]) raised by the
 /// subpatch's rounding ([`sub_patch_rounding`]); without a subpatch, or when that rounding
 /// has no finite bound (a weight not positive, a NaN or an overflow anywhere in the base's
@@ -1146,7 +1200,7 @@ fn unsolved_cell_top(
     } else {
         Err(SolidError::invalid_input(
             OP_TIGHT,
-            "a trimmed-face cell left unsolved at the search's limits has no finite bound",
+            "a trimmed-face cell left at the search's limits has no finite bound",
         ))
     }
 }
@@ -1170,6 +1224,15 @@ fn unsolved_cell_top(
 /// A cell left at [`FACE_EXTREME_MAX_DEPTH`] or past [`FACE_EXTREME_MAX_CELLS`] counts
 /// with its greatest value, or unsolved with its own bound ([`unsolved_cell_top`]). The cells are an explicit stack (no recursion), taken last
 /// first, as the fork's.
+///
+/// Not the fork's (#13753): a solve's greatest is a value the surface takes, a lower
+/// bound on the cell's greatest, so the fork's 1.–3. on it can set aside a cell with a
+/// higher point the solve missed. A cell of a B-spline face open both ways (its subpatch,
+/// [`cell_patch`]) is decided on its control points instead: 1. on their greatest; 2. a
+/// solve's value at a point in the face only raises `best`; 3. on their least, less the
+/// subpatch's rounding, above `best` and the zone tolerance, with every solution
+/// classified outside; at the limits it counts with its own bound; and a way along which
+/// its control values are level is not halved. Other faces keep the fork's rules.
 fn face_directed_max(
     k: &Kernel,
     lb: &mut LazyBrep<'_>,
@@ -1186,6 +1249,7 @@ fn face_directed_max(
         f,
         surface,
         uv_domain,
+        face_zone_tol_3d,
         dir,
         best,
         SearchLimits {
@@ -1212,7 +1276,8 @@ struct SearchLimits {
 type CellSolve<'a, 'b> =
     dyn FnMut(&mut LazyBrep<'b>, &Surface, &Extent2d, Vec3) -> Result<CellDirectedMax> + 'a;
 
-/// [`face_directed_max`] within `limits`, each cell solved by `solve`.
+/// [`face_directed_max`] within `limits`, each cell solved by `solve`; `zone_tol` is the
+/// face's zone tolerance, how far its trim may lie from its edges.
 #[allow(clippy::too_many_arguments)]
 fn face_directed_max_with<'b>(
     k: &Kernel,
@@ -1220,6 +1285,7 @@ fn face_directed_max_with<'b>(
     f: FaceId,
     surface: &Surface,
     uv_domain: &Extent2d,
+    zone_tol: f64,
     dir: Vec3,
     mut best: f64,
     limits: SearchLimits,
@@ -1243,9 +1309,16 @@ fn face_directed_max_with<'b>(
         && !surface
             .is_closed(k, uv_domain, SurfParamType::V, None, false)?
             .0;
+    // How far a subpatch's control points may lie from their exact values (3. below).
+    let rounding = if by_patch {
+        patch_base(k, surface)?.and_then(sub_patch_rounding)
+    } else {
+        None
+    };
     let mut cells: Vec<(Extent2d, u32)> = vec![(*uv_domain, 0)];
     let mut divided = 0usize;
     while let Some((cell, depth)) = cells.pop() {
+        k.check_cancelled(OP_TIGHT)?;
         // The cell's subpatch and the greatest `P . dir` of its control points, which no
         // point of the cell exceeds (each is a convex combination of them).
         let patch = if by_patch {
@@ -1266,7 +1339,27 @@ fn face_directed_max_with<'b>(
             .map(|(patch, _)| cell_sub_surface(surface, patch.clone()));
         let solve_on = sub.as_ref().unwrap_or(surface);
         let top = solve(lb, solve_on, &cell, dir)?;
-        if top.found {
+        if let Some((patch, hull)) = &patch {
+            // (#13753) A solved value is one the surface takes, no bound on the cell's
+            // greatest: the solve over a whole Mixed chamfer face found its edges' value
+            // and missed a dip of 7.2e-4 inside it. With the control points to bound the
+            // cell, a value at a point in the face only raises `best` (2.), and 1. is asked
+            // again of the hull. 3. takes the least control point, less the subpatch's
+            // rounding, above `best` and the zone tolerance (the trim lies within it of the
+            // edges `best` holds), so no trim curve crosses the cell, and every solution
+            // classified outside: the whole cell is.
+            best = best.max(top.face_top);
+            if *hull <= best + EFF_ZERO_SQRT {
+                continue;
+            }
+            if top.outside
+                && patch_hull_max(patch, -dir)
+                    .zip(rounding)
+                    .is_some_and(|(least, rounding)| -least - rounding > best + zone_tol)
+            {
+                continue;
+            }
+        } else if top.found {
             if top.top <= best + EFF_ZERO_SQRT {
                 continue;
             }
@@ -1297,10 +1390,11 @@ fn face_directed_max_with<'b>(
             divided > limits.max_cells
         };
         if exhausted {
-            // Solved, the solver's greatest, above `best` (a lower one was passed over
-            // above). Unsolved, the cell's own bound, never below `best`: no point of the
-            // cell lies above it (#16249: its `-BIG_DOUBLE` threw away the box so far).
-            best = if top.found {
+            // Solved without control points, the solver's greatest, above `best` (a lower
+            // one was passed over above). Unsolved, or with control points (#13753), the
+            // cell's own bound, never below `best`: no point of the cell lies above it
+            // (#16249: its `-BIG_DOUBLE` threw away the box so far).
+            best = if top.found && patch.is_none() {
                 top.top
             } else {
                 best.max(unsolved_cell_top(
@@ -1318,7 +1412,21 @@ fn face_directed_max_with<'b>(
         let (u0, v0, u1, v1) = (cell.min().x, cell.min().y, cell.max().x, cell.max().y);
         // WR-651 (tangency-labs/smlib@326de73): divided at a knot inside the cell, a way
         // within one span left whole while the other has one, else at the middles.
-        let (at_u, at_v) = cell_division(&knots_u, &knots_v, &cell);
+        let (at_u, at_v) = match (cell_division(&knots_u, &knots_v, &cell), &patch) {
+            // (#13753) a way along which the control values are level is not halved: its
+            // halves have the same hull, so a greatest value along a line inside the face
+            // (a cylinder's) would double its cells at every depth to the cell limit
+            ((Some(u), Some(v)), Some((patch, _))) => {
+                if patch_level_along(patch, dir, true) {
+                    (Some(u), None)
+                } else if patch_level_along(patch, dir, false) {
+                    (None, Some(v))
+                } else {
+                    (Some(u), Some(v))
+                }
+            }
+            (at, _) => at,
+        };
         let us = match at_u {
             Some(u) => [(u0, u), (u, u1)].to_vec(),
             None => [(u0, u1)].to_vec(),
@@ -3412,6 +3520,8 @@ mod tests {
                 top: -crate::math::BIG_DOUBLE,
                 in_face: false,
                 found: false,
+                face_top: -crate::math::BIG_DOUBLE,
+                outside: false,
             })
         };
         let up = Vec3::new(0.0, 0.0, 1.0);
@@ -3426,6 +3536,7 @@ mod tests {
                 f,
                 &surface,
                 &domain,
+                1e-6,
                 up,
                 0.0,
                 limits,
@@ -3437,6 +3548,99 @@ mod tests {
                 "depth {max_depth}, cells {max_cells}: z max {top}"
             );
         }
+    }
+
+    /// #13753: a solve's value is no bound on its cell. Every solve here finds a point at
+    /// z = 0 on the face's boundary (the edges' value, not inside the face), as the solve
+    /// over the Mixed chamfer face did: a cell is set aside only on its control points, so
+    /// the cell holding the crown's peak (4) is divided to the search's limits and counts
+    /// there with its hull (at most the whole net's, 9), not with the solve's 0, which set
+    /// every cell aside at once.
+    #[test]
+    fn a_solve_that_misses_the_peak_does_not_set_its_cell_aside() {
+        let (k, b, f) = crowned_trimmed_face(0.0, true);
+        let face = b.face(f).unwrap();
+        let surface = face.surface.clone().unwrap();
+        let domain = face.uv_domain;
+        let mut lb: LazyBrep<'_> = (&b).into();
+        let mut missed = |_: &mut LazyBrep<'_>, _: &Surface, _: &Extent2d, _: Vec3| {
+            Ok(CellDirectedMax {
+                top: 0.0,
+                in_face: false,
+                found: true,
+                face_top: -crate::math::BIG_DOUBLE,
+                outside: false,
+            })
+        };
+        let up = Vec3::new(0.0, 0.0, 1.0);
+        for (max_depth, max_cells) in [(16, 4096), (2, 4096), (16, 3)] {
+            let limits = SearchLimits {
+                max_depth,
+                max_cells,
+            };
+            let top = face_directed_max_with(
+                &k,
+                &mut lb,
+                f,
+                &surface,
+                &domain,
+                1e-6,
+                up,
+                0.0,
+                limits,
+                &mut missed,
+            )
+            .unwrap();
+            assert!(
+                (4.0..=9.0 + 1e-9).contains(&top),
+                "depth {max_depth}, cells {max_cells}: z max {top}"
+            );
+        }
+    }
+
+    /// #13753: the search asks for cancellation at every cell, as a face's search can now
+    /// divide to its cell limit. The token is cancelled by the third solve, inside the
+    /// search of one direction: the search stops there with the cancellation.
+    #[test]
+    fn a_cancelled_search_stops_at_its_next_cell() {
+        let (mut k, b, f) = crowned_trimmed_face(0.0, true);
+        let token = crate::kernel::CancelToken::new();
+        k.set_cancel_token(token.clone());
+        let face = b.face(f).unwrap();
+        let surface = face.surface.clone().unwrap();
+        let domain = face.uv_domain;
+        let mut lb: LazyBrep<'_> = (&b).into();
+        let mut solves = 0;
+        let mut cancelling = |_: &mut LazyBrep<'_>, _: &Surface, _: &Extent2d, _: Vec3| {
+            solves += 1;
+            if solves == 3 {
+                token.cancel();
+            }
+            Ok(CellDirectedMax {
+                top: 0.0,
+                in_face: false,
+                found: true,
+                face_top: -crate::math::BIG_DOUBLE,
+                outside: false,
+            })
+        };
+        let limits = SearchLimits {
+            max_depth: FACE_EXTREME_MAX_DEPTH,
+            max_cells: FACE_EXTREME_MAX_CELLS,
+        };
+        let got = face_directed_max_with(
+            &k,
+            &mut lb,
+            f,
+            &surface,
+            &domain,
+            1e-6,
+            Vec3::new(0.0, 0.0, 1.0),
+            0.0,
+            limits,
+            &mut cancelling,
+        );
+        assert!(matches!(got, Err(SolidError::Cancelled { .. })), "{got:?}");
     }
 
     /// The rounding of a subpatch's hull is a small finite bound for the crown, and none

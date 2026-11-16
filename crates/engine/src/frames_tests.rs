@@ -173,6 +173,12 @@ fn canvases_move_with_their_component() {
     let part = s.active_component;
     assert_ne!(part, 0);
     run(&mut s, "canvas.insert", json!({"data": PNG, "plane": "XY", "name": "Plan"}));
+    run(
+        &mut s,
+        "construct.plane.three_points",
+        json!({"a": {"point": [50, 0, 5]}, "b": {"point": [51, 0, 5]}, "c": {"point": [50, 1, 5]}, "name": "ImagePlane"}),
+    );
+    run(&mut s, "canvas.insert", json!({"data": PNG, "plane": "ImagePlane", "name": "OnPoints"}));
     // From the root, on the moved block's top face (world).
     run(&mut s, "component.activate", json!({"component": "root"}));
     run(&mut s, "canvas.insert", json!({"data": PNG, "plane": {"face": [65, 10, 10]}, "name": "Lid", "width": 10}));
@@ -180,27 +186,29 @@ fn canvases_move_with_their_component() {
     let (vals, _) = s.doc.param_values();
     let world = |s: &Session, name: &str| {
         let c = s.doc.canvases.iter().find(|c| c.name == name).unwrap();
-        (c.component, s.doc.canvas_plane(&vals, c).unwrap())
+        (c.component, s.doc.canvas_plane(&vals, c, &s.model.state()).unwrap())
     };
     let (c, p) = world(&s, "Plan");
     assert_eq!(c, part);
     assert!(near(p.origin, Vec3::new(50.0, 0.0, 0.0)), "{:?}", p.origin);
+    assert!(near(world(&s, "OnPoints").1.origin, Vec3::new(50.0, 0.0, 5.0)));
     let (c, p) = world(&s, "Lid");
     assert_eq!(c, 0, "the active component's");
     let lid = s.doc.canvases.iter().find(|c| c.name == "Lid").unwrap();
     let centre = p.to_world(lid.center);
     assert!(near(centre, Vec3::new(65.0, 10.0, 10.0)), "{centre:?}");
     assert_eq!(world(&s, "Root").0, 0);
-    // Moving the occurrence carries its canvases, not the root's.
+    // Moving the occurrence carries its canvases and the root canvas attached to its face.
     run(&mut s, "occurrence.move", json!({"occurrence": "Part:1", "translate": [0, 40, 0]}));
     let (vals, _) = s.doc.param_values();
     let plan = s.doc.canvases.iter().find(|c| c.name == "Plan").unwrap();
-    assert!(near(s.doc.canvas_plane(&vals, plan).unwrap().origin, Vec3::new(50.0, 40.0, 0.0)));
+    assert!(near(s.doc.canvas_plane(&vals, plan, &s.model.state()).unwrap().origin, Vec3::new(50.0, 40.0, 0.0)));
+    assert!(near(world(&s, "OnPoints").1.origin, Vec3::new(50.0, 40.0, 5.0)));
     let lid = s.doc.canvases.iter().find(|c| c.name == "Lid").unwrap();
-    let centre = s.doc.canvas_plane(&vals, lid).unwrap().to_world(lid.center);
-    assert!(near(centre, Vec3::new(65.0, 10.0, 10.0)), "{centre:?}");
+    let centre = s.doc.canvas_plane(&vals, lid, &s.model.state()).unwrap().to_world(lid.center);
+    assert!(near(centre, Vec3::new(65.0, 50.0, 10.0)), "{centre:?}");
     let root = s.doc.canvases.iter().find(|c| c.name == "Root").unwrap();
-    assert!(near(s.doc.canvas_plane(&vals, root).unwrap().origin, Vec3::ZERO));
+    assert!(near(s.doc.canvas_plane(&vals, root, &s.model.state()).unwrap().origin, Vec3::ZERO));
     // The component survives a save and reopen.
     let back = solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap();
     assert_eq!(back.canvases, s.doc.canvases);
@@ -1149,4 +1157,25 @@ fn cross_component_sketch_refs_follow_the_component() {
     // The offset plane, built on the datum, follows the move too - offset and all.
     let (_, _, off) = crate::view::construction_planes(&s).into_iter().find(|(_, n, _)| n == "Off child").unwrap();
     assert!(near(off.origin, Vec3::new(130.0, 0.0, 5.0)), "{off:?}");
+}
+
+/// #8192: a plane whose origin is length expressions, made in an active component that is moved
+/// and turned, is written in that component's frame still as expressions, so the sketch sits at
+/// the world point the expressions give and follows the parameter.
+#[test]
+fn a_plane_origin_given_as_expressions_maps_into_a_moved_and_turned_component() {
+    let mut s = block_in_component();
+    run(&mut s, "occurrence.move", json!({"occurrence": "C:1", "axis": [0, 0, 1], "angle": "90 deg"}));
+    run(&mut s, "occurrence.move", json!({"occurrence": "C:1", "translate": [100, 0, 0], "space": "world"}));
+    run(&mut s, "parameters.add", json!({"name": "station", "expression": "10 mm"}));
+    run(&mut s, "component.activate", json!({"component": "C"}));
+    run(&mut s, "sketch.create", json!({"name": "S", "plane": {"origin": ["station", 0, 0], "x_dir": [1, 0, 0], "y_dir": [0, 1, 0]}}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [1, 1]}));
+    run(&mut s, "sketch.finish", json!({}));
+    // The first sketch point is the plane's origin, in the world.
+    for (station, expected) in [("10 mm", Vec3::new(10.0, 0.0, 0.0)), ("20 mm", Vec3::new(20.0, 0.0, 0.0))] {
+        run(&mut s, "parameters.change", json!({"name": "station", "expression": station}));
+        let world = sketch_world_points(&mut s, "S");
+        assert!(world.iter().any(|p| near(*p, expected)), "station {station}: {world:?}");
+    }
 }

@@ -60,7 +60,10 @@
 //!   [`XsectClassification`]; an out-of-domain guess keeps its unclamped values, as
 //!   upstream. `SmCurve::EvaluateGeometric` failing with `SM_ERR` marks the point touching
 //!   (other failures propagate; upstream would read uninitialised vectors). The shape
-//!   variables only read on paths where they were set start at zero.
+//!   variables only read on paths where they were set start at zero. With an edge and a
+//!   face, osculating circles overlapping past touching by less than [`contact_tol_3d`]
+//!   are tangent (WR-787, #15429), and so are a line and an osculating circle (#14599); a
+//!   bare curve or surface keeps upstream's zero.
 //! - **Kernel.** `is_on_seam` and `global_point_solve` (and `global_point_solve_starts`)
 //!   take the [`Kernel`] that the tolerance, drop and cache callees now need.
 //! - **Unported callees** (return [`SolidError::Unported`]): the zone tolerance of a face's
@@ -81,8 +84,8 @@ use crate::geom::assert_array::labels::{EDGE_TYPE, FACE_TYPE};
 use crate::geom::extent1d::Extent1d;
 use crate::geom::extent2d::Extent2d;
 use crate::geom::geom_utility::p1::{
-    circle_coplanar_circle_intersect, line_coplanar_circle_intersect, line_point_distance,
-    vec_lin_comb_two_vectors, CircleCircle,
+    circle_coplanar_circle_intersect_in_contact, line_coplanar_circle_intersect_distinct,
+    line_point_distance, vec_lin_comb_two_vectors, CircleCircle,
 };
 use crate::geom::global_solver::{SolutionRequested, SolverOperation};
 use crate::geom::local_solve_nd::{compute_jacobian, EvalNFunctions};
@@ -90,6 +93,7 @@ use crate::geom::matrix::Matrix;
 use crate::geom::solution_array::{
     ObjectKind, OperandObject, Solution, SolutionArray, SolutionEnd, SolutionObject, MAX_TREES,
 };
+use crate::geom::tol::contact_tol_3d;
 use crate::geom::vector2d::Vec2;
 use crate::geom::vector3d::{asin, sqrt as sm_sqrt};
 use crate::kernel::Kernel;
@@ -2174,7 +2178,13 @@ pub fn classify_curve_surface_xsect_point_with(
     // heuristics.
     let mut curve_tol = EFF_ZERO_SQRT; // default values, if nothing else to use.
     let mut surface_tol = EFF_ZERO_SQRT;
+    // Not upstream (WR-787, #15429, #14599): osculating circles, or a line and an osculating
+    // circle, a hair less than tangent touch where an edge meets a face, at the walls' and
+    // rims' contact tolerance; the radius bands of a bare curve or surface are a search
+    // heuristic and keep upstream's zero.
+    let mut topology = [false; 2];
     if curve.owner().is_some_and(|o| o.type_code == EDGE_TYPE) {
+        topology[0] = true;
         // pCurveOwner->GetTolerance(), as the caller resolves it
         curve_tol = edge_tolerance.ok_or_else(|| {
             // UNPORTED(topology.edge): SmEdge::GetTolerance (a caller without the edge)
@@ -2187,6 +2197,7 @@ pub fn classify_curve_surface_xsect_point_with(
         curve_tol = curve_radius / 1000.0;
     }
     if surface.owner().is_some_and(|o| o.type_code == FACE_TYPE) {
+        topology[1] = true;
         // pSurfaceOwner->GetTolerance(): the direct owner is the face, so the face the
         // surface reaches; its tolerance as cached by the B-rep
         surface_tol = surface.owner_zone_tol_3d().ok_or_else(|| {
@@ -2200,6 +2211,11 @@ pub fn classify_curve_surface_xsect_point_with(
         surface_tol = surface_radius / 1000.0;
     }
     let tol_3d = curve_tol + surface_tol;
+    let contact_tol = if topology == [true; 2] {
+        contact_tol_3d(k)
+    } else {
+        0.0
+    };
 
     // when both curve and surface shapes are lines
     if curve_line && surface_line {
@@ -2231,13 +2247,15 @@ pub fn classify_curve_surface_xsect_point_with(
     // when curve is linear or close enough
     if curve_line {
         // intersect CurveLine with SurfaceOsculating Circle
-        let params = line_coplanar_circle_intersect(
+        let params = line_coplanar_circle_intersect_distinct(
             curve_point,
             curve_vec,
             surface_center,
             surface_circle_normal,
             surface_radius,
             tol_3d,
+            tol_3d,
+            contact_tol,
         )?;
 
         // If only have one or zero intersections we are done without picking up extra
@@ -2264,13 +2282,15 @@ pub fn classify_curve_surface_xsect_point_with(
         let mut local_type = TsectCurveType::Unknown;
         let mut local_type2 = TsectCurveType::Unknown;
 
-        let params = line_coplanar_circle_intersect(
+        let params = line_coplanar_circle_intersect_distinct(
             surface_point,
             surface_vec,
             curve_center,
             curve_circle_normal,
             curve_radius,
             tol_3d,
+            tol_3d,
+            contact_tol,
         )?;
 
         // use number of intersections to classify the point against SurfaceVec
@@ -2288,13 +2308,15 @@ pub fn classify_curve_surface_xsect_point_with(
         // when surface is represented by two lines
         if surface_two_lines {
             // intersect SurfaceLine2 with CurveOsculating Circle
-            let params2 = line_coplanar_circle_intersect(
+            let params2 = line_coplanar_circle_intersect_distinct(
                 surface_point,
                 surface_vec2,
                 curve_center,
                 curve_circle_normal,
                 curve_radius,
                 tol_3d,
+                tol_3d,
+                contact_tol,
             )?;
 
             // use number of intersections to classify the point against SurfaceVec2
@@ -2341,22 +2363,24 @@ pub fn classify_curve_surface_xsect_point_with(
     if !curve_line && !surface_line {
         // intersect osculating curve and surface circles: BiggerCircle/SmallerCircle
         let hit = if curve_radius > surface_radius {
-            circle_coplanar_circle_intersect(
+            circle_coplanar_circle_intersect_in_contact(
                 curve_circle_normal,
                 curve_center,
                 curve_radius,
                 surface_center,
                 surface_radius,
                 tol_3d,
+                contact_tol,
             )?
         } else {
-            circle_coplanar_circle_intersect(
+            circle_coplanar_circle_intersect_in_contact(
                 surface_circle_normal,
                 surface_center,
                 surface_radius,
                 curve_center,
                 curve_radius,
                 tol_3d,
+                contact_tol,
             )?
         };
 

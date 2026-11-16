@@ -53,8 +53,7 @@
 //!   not returned, except by `check_for_squeeze_vertices_into`, which appends to the
 //!   caller's lists as upstream does (a failure after the first conflict keeps its
 //!   appends). The `NotUsed` `bMakingManifoldSolid` of `EdgeEdgeIntersect` is kept.
-//! - **Opt-in (WR-527, #1526).** With `Kernel::fixes.boolean_skips_faces_apart`,
-//!   `IntersectTopology` skips a face pair whose face boxes are disjoint by the
+//! - **Not upstream (WR-527, #1526).** `IntersectTopology` skips a face pair whose face boxes are disjoint by the
 //!   intersection tolerance (the fork's tangency-labs/smlib@60b1c6a). It then visits,
 //!   for each face of the B-rep, only the faces of the other B-rep a box search
 //!   (`SpatialIndex`) finds not disjoint from its box, in ascending order (the fork's
@@ -66,10 +65,9 @@
 //!   each face pair the face loop of `IntersectTopology` visits adds one to
 //!   [`WorkCounters::face_pairs`](crate::kernel::WorkCounters::face_pairs). It changes no
 //!   result.
-//! - **Opt-in (WR-528).** With `Kernel::fixes.close_loop_relates_only_coincident_edges`,
-//!   `CloseIntersectionLoop` relates the target edge to the sole other edge between the
-//!   mated vertices only when its midpoint drops within the edges' tolerance (the
-//!   fork's tangency-labs/smlib@e881cdb).
+//! - **Not upstream (WR-528).** `CloseIntersectionLoop` relates the target edge to the
+//!   sole other edge between the mated vertices only when its midpoint drops within the
+//!   edges' tolerance (the fork's tangency-labs/smlib@e881cdb).
 //! - **Deleted curves.** `IntersectTopology` and `IntersectInsertRelate` return the
 //!   curve handles deleted (by `SplitIntersectingProtoEdges`, the resolution, the
 //!   imprint and the manager's destructor), as [`p1`](super::p1) does.
@@ -116,6 +114,14 @@
 //!   `FixupSplitVertexPair` read the same value. The `sbRelateFaces` block of
 //!   `SetRelationships` is compiled out (`FALSE`); `SM_DEBUG_CODE` / `SM_USE_TBB`
 //!   blocks are not built upstream and not ported.
+//! - **Not upstream (#16935).** `CloseIntersectionLoop` tries first the unmated edges whose
+//!   far vertex ends the intersection loop too (it is mated and only one of its edges is),
+//!   then the others, each group in upstream's order. A gap lies between two ends of the
+//!   loop; an edge from one end to a vertex the loop already passes through leaves the
+//!   other end open and gives that vertex a third common edge. Upstream took the first
+//!   edge in the vertex's order: where a 5 mm round's cylinder grazed a 1 mm round and the
+//!   corner patch beside it within the tolerance, the gap at the corner was "closed" up the
+//!   round's tangent line, and the round's own end stayed open.
 //! - **Recursion.** None.
 
 use crate::curve::curve::p2::{Curve, CurveKind};
@@ -997,7 +1003,8 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
     /// `CloseIntersectionLoop(pBrepVertex, rbMadeNewTopology, rDeletedVertices,
     /// rDeletedEdges)`: tries to close a gap in
     /// the intersection loop at a B-rep vertex mated to an other-B-rep vertex. For each
-    /// unmated edge of the vertex whose far vertex is mated: when the two mated
+    /// unmated edge of the vertex whose far vertex is mated, those whose far vertex ends the
+    /// loop too first (not upstream, #16935; see the module's Deviations): when the two mated
     /// vertices of the other B-rep share exactly one edge and the edge's midpoint drops
     /// onto it (within twice the larger mated-vertex distance), the two edges are
     /// related; else, when the edge's curve is coincident with the other B-rep
@@ -1049,8 +1056,8 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
         deleted_vertices.clear();
         deleted_edges.clear();
 
-        // get all edges connected to target vertex
-        let brep_edges = brep.vertex_edges(brep_vertex)?;
+        // get all edges connected to target vertex, those to another end of the loop first
+        let brep_edges = self.loop_ends_first(brep, brep_vertex, false)?;
 
         // for every edge connected to target vertex
         for be in brep_edges {
@@ -1112,21 +1119,17 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
                     SolverOperation::Minimize,
                 )?;
 
-                // Opt-in (WR-528, fork e881cdb): the closest point must lie within the
-                // edges' tolerance (the closest-point drop always succeeds): two
+                // Not upstream (WR-528, fork e881cdb): the closest point must lie within
+                // the edges' tolerance (the closest-point drop always succeeds): two
                 // different edges between the same pair of vertices, such as a circle's
                 // long arc and another solid's arc that only shares its ends, were
                 // related as one
-                let within = if k.fixes.close_loop_relates_only_coincident_edges {
-                    let tol = |e| {
-                        brep.topology_tolerance(e)
-                            .ok_or(invalid(OP_CLOSE_LOOP, "topology handle is unknown"))
-                    };
-                    let on_tol = max2(max_dist * 2.0, max2(tol(be)?, tol(o_edge)?));
-                    dropped.distance <= on_tol
-                } else {
-                    true
+                let tol = |e| {
+                    brep.topology_tolerance(e)
+                        .ok_or(invalid(OP_CLOSE_LOOP, "topology handle is unknown"))
                 };
+                let on_tol = max2(max_dist * 2.0, max2(tol(be)?, tol(o_edge)?));
+                let within = dropped.distance <= on_tol;
 
                 // when point dropped to curve within tolerance
                 if dropped.success && within {
@@ -1163,8 +1166,8 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
         // when no topology was added to m_pOther - see if other edges can be added to this
         // m_pBrep
         if !made_new_topology {
-            // get all edges connected to other vertex
-            let other_edges = brep.vertex_edges(other_vertex)?;
+            // get all edges connected to other vertex, those to another end of the loop first
+            let other_edges = self.loop_ends_first(brep, other_vertex, true)?;
 
             // for every edge connected to otherVertex
             for oe in other_edges {
@@ -1210,6 +1213,72 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
 
         // all done
         Ok(made_new_topology)
+    }
+
+    /// The edges of `vertex` (of the other B-rep when `other_side`), in the vertex's order,
+    /// with those whose far vertex ends the intersection loop ([`Self::ends_loop`]) first.
+    /// Not upstream (#16935): see the module's Deviations.
+    ///
+    /// # Errors
+    ///
+    /// Those of the vertex and edge walks.
+    fn loop_ends_first(
+        &self,
+        brep: &impl IntersectorBrepP2<O>,
+        vertex: O,
+        other_side: bool,
+    ) -> Result<Vec<O>> {
+        let mut to_ends = Vec::new();
+        let mut others = Vec::new();
+        for e in brep.vertex_edges(vertex)? {
+            let far = brep.edge_other_vertex(e, Some(vertex))?;
+            let to_end = match far {
+                Some(v) if v != vertex => self.ends_loop(brep, v, other_side)?,
+                _ => false,
+            };
+            if to_end {
+                to_ends.push(e);
+            } else {
+                others.push(e);
+            }
+        }
+        to_ends.extend(others);
+        Ok(to_ends)
+    }
+
+    /// Whether `vertex` (of the other B-rep when `other_side`) ends an intersection loop: it is
+    /// mated, and it has one common edge, a closed edge counting twice (the count of
+    /// `SmMerge::MarkCommon`'s single vertices).
+    ///
+    /// # Errors
+    ///
+    /// Those of the vertex and edge walks.
+    fn ends_loop(
+        &self,
+        brep: &impl IntersectorBrepP2<O>,
+        vertex: O,
+        other_side: bool,
+    ) -> Result<bool> {
+        let mate = |x: O| {
+            if other_side {
+                self.brep_mate(Some(x))
+            } else {
+                self.other_mate(Some(x))
+            }
+        };
+        if mate(vertex).is_none() {
+            return Ok(false);
+        }
+        let mut count = 0_usize;
+        for e in brep.vertex_edges(vertex)? {
+            if mate(e).is_some() {
+                count += 1;
+            }
+            if brep.edge_other_vertex(e, Some(vertex))? == Some(vertex) {
+                count += 1;
+            }
+        }
+        Ok(count == 1)
     }
 
     /// `SM_CAST_PTR`: the mate when it is of `kind`, else null.
@@ -1491,7 +1560,7 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
             }
         }
 
-        // Opt-in (WR-527, #1526/#1527): each face's bounding box, for skipping the pairs
+        // Not upstream (WR-527, #1526/#1527): each face's bounding box, for skipping the pairs
         // below that lie apart. A box that cannot be computed, or holds nothing, rules
         // nothing out.
         let face_boxes = |faces: &[O]| -> Result<Vec<Extent3d>> {
@@ -1511,17 +1580,14 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
             }
             Ok(out)
         };
-        let skip_apart = k.fixes.boolean_skips_faces_apart;
-        let (boxes1, boxes2) = if skip_apart {
-            (face_boxes(&faces1)?, face_boxes(&faces2)?)
-        } else {
-            (Vec::new(), Vec::new())
-        };
+        let (boxes1, boxes2) = (face_boxes(&faces1)?, face_boxes(&faces2)?);
         // (the fork's tangency-labs/smlib@84a7998) the other B-rep's faces whose box may
         // lie within the tolerance of a face's box: a superset of the pairs the box test
         // below keeps, in ascending order. The pairs it leaves out reach nothing before
         // that test but lookups without effect (no intersection table is registered).
-        let pair_search = (skip_apart && self.intersection_table().is_none())
+        let pair_search = self
+            .intersection_table()
+            .is_none()
             .then(|| SpatialIndex::new(boxes2.iter().copied().map(Some)));
 
         // Finally, the Face-Face intersections.
@@ -1555,7 +1621,7 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
                 // No existing SSI, check coincidence or intersection.
                 let tol = self.this_approx_tol_3d();
 
-                // Opt-in (WR-527): no work - faces farther apart than the intersection
+                // (WR-527) no work - faces farther apart than the intersection
                 // tolerance cannot meet
                 if let (Some(box1), Some(box2)) = (boxes1.get(ii), boxes2.get(jj)) {
                     if box1.are_disjoint(box2, tol) {
@@ -1772,7 +1838,11 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
     /// `SetRelationships()`: relates the final vertices of every vertex definition and
     /// the final edges of every edge definition of the manager (a definition without
     /// both is skipped with a warning; `Relate`'s status is unchecked). Coincident
-    /// faces are not related (`sbRelateFaces` is `FALSE`). Always `SM_SUCCESS`.
+    /// faces are not related (`sbRelateFaces` is `FALSE`). Always `SM_SUCCESS`. Not
+    /// upstream (#16937): an edge pair is not related where either edge's mate stands
+    /// beside the other edge in its own operand ([`TopologyIntersector::mate_stands_beside`]),
+    /// so the refusal `brep_edit_statuses_pass_on` passes on is a conflict between edges
+    /// at different places only.
     ///
     /// # Errors
     ///
@@ -1804,8 +1874,19 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
         }
 
         for (t1, t2) in pairs {
-            if t1.is_none() || t2.is_none() {
+            let (Some(e1), Some(e2)) = (t1, t2) else {
                 // WARN: Brep Topology not set.
+                continue;
+            };
+            // Not upstream (#16937): one operand may have two edges at one place, between
+            // the same two vertices and along each other (where a body pinches to no
+            // thickness: a hole tangent to the body's side meets that side along the
+            // hole's seam and the edge between the side's two parts). An edge of the other
+            // operand along them is defined against each, but it can stand for only one:
+            // the first definition relates it, and the second makes no relation of its own,
+            // as upstream, which drops `Relate`'s status here. Any other refusal is passed
+            // on.
+            if self.mate_stands_beside(k, &*brep, e1, e2)? {
                 continue;
             }
             ignore_soft(crate::error::passed_on(
@@ -1814,6 +1895,93 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
             )?)?;
         }
         Ok(())
+    }
+
+    /// Not upstream (#16937): whether the edge `e1` of the B-rep and the edge `e2` of the
+    /// other B-rep are each already related to an edge of their own operand that stands at
+    /// the same place ([`TopologyIntersector::edges_coincide`]): `e2`'s mate beside `e1`, or
+    /// `e1`'s mate beside `e2`. Vertices and other kinds never are.
+    ///
+    /// # Errors
+    ///
+    /// Those of [`TopologyIntersector::edges_coincide`].
+    fn mate_stands_beside(
+        &self,
+        k: &Kernel,
+        brep: &impl IntersectorBrep<O>,
+        e1: O,
+        e2: O,
+    ) -> Result<bool> {
+        if e1.class_kind() != ClassObjectKind::Edge || e2.class_kind() != ClassObjectKind::Edge {
+            return Ok(false);
+        }
+        if let Some(mate) = self.brep_mate(Some(e2)).filter(|&m| m != e1) {
+            return Self::edges_coincide(k, brep, mate, e1);
+        }
+        if let Some(mate) = self.other_mate(Some(e1)).filter(|&m| m != e2) {
+            return Self::edges_coincide(k, brep, mate, e2);
+        }
+        Ok(false)
+    }
+
+    /// Not upstream (#16937): whether two distinct edges `a` and `b` of one operand stand
+    /// at one place: `b` is open, runs between `a`'s two vertices, and lies along `a`
+    /// within the sum of the two edges' tolerances, found as WR-580 finds an edge a face
+    /// already has along a curve (`SmTools::FindCoincidentEdge` over the edges of each of
+    /// `a`'s faces, with `b`'s curve over its interval at `b`'s tolerance), and only where
+    /// `coincidence_bound` proves the two edges within the sum of their tolerances over
+    /// their whole lengths (no bound for the pair: not at one place).
+    ///
+    /// # Errors
+    ///
+    /// Those of the topology walks and of the search; [`SolidError::InvalidInput`] for an
+    /// unknown handle.
+    fn edges_coincide(k: &Kernel, brep: &impl IntersectorBrep<O>, a: O, b: O) -> Result<bool> {
+        if a == b || a.class_kind() != ClassObjectKind::Edge {
+            return Ok(false);
+        }
+        let Some(start) = brep.edge_start_vertex(b)? else {
+            return Ok(false);
+        };
+        let Some(end) = brep.edge_other_vertex(b, Some(start))? else {
+            return Ok(false);
+        };
+        if start == end {
+            return Ok(false);
+        }
+        let curve = brep
+            .edge_curve(b)
+            .ok_or(invalid(OP_SET_RELS, "edge handle is unknown"))?;
+        let curve = curve_of(brep, curve)?;
+        let interval = brep
+            .edge_interval(b)
+            .ok_or(invalid(OP_SET_RELS, "edge handle is unknown"))?;
+        let curve_a = brep
+            .edge_curve(a)
+            .ok_or(invalid(OP_SET_RELS, "edge handle is unknown"))?;
+        let curve_a = curve_of(brep, curve_a)?;
+        let interval_a = brep
+            .edge_interval(a)
+            .ok_or(invalid(OP_SET_RELS, "edge handle is unknown"))?;
+        let (tol_a, tol_b) = (tol_of(brep, a)?, tol_of(brep, b)?);
+        // The search finds a candidate; the proof is the derived bound over the whole of both
+        // edges (not the search's samples), and a pair with no bound is not accepted.
+        // written so that a NaN bound or tolerance refuses
+        let proved =
+            crate::boolean::api_brep::coincidence_bound(curve_a, &interval_a, curve, &interval)
+                .is_some_and(|d| d <= tol_a + tol_b);
+        if !proved {
+            return Ok(false);
+        }
+        for face in brep.edge_faces(a)? {
+            let found = brep.face_coincident_edge(k, face, start, end, curve, interval, tol_b)?;
+            if let Some((edge, _)) = found {
+                if edge == a {
+                    return Ok(true);
+                }
+            }
+        }
+        Ok(false)
     }
 
     // ---- the classification-pair fix-ups ------------------------------------------------

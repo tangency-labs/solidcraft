@@ -1,6 +1,7 @@
 //! The Plugins menu and its entry dialog: schema fields, required gating, and a run through the
 //! dialog matching `plugin.run`.
 use super::*;
+use std::collections::BTreeSet;
 
 fn gear_schema() -> Value {
     json!({"type":"object","required":["module","teeth"],"properties":{
@@ -31,11 +32,42 @@ fn each_schema_type_becomes_its_field_with_limits_labels_and_defaults() {
     assert_eq!((&fields[3].0.kind, &fields[3].1), (&Kind::Boolean, &Input::Boolean(false)));
     assert_eq!(fields[4].0.label, "name", "no title: the key");
     assert_eq!(fields[4].0.kind, Kind::Text { min_length: None, max_length: Some(8) });
-    assert_eq!(fields[5].0.kind, Kind::Choice(vec!["14.5".into(), "20".into(), "25".into()]));
+    let angles: Vec<String> = vec!["14.5".into(), "20".into(), "25".into()];
+    assert_eq!(fields[5].0.kind, Kind::Choice { values: angles.clone(), titles: angles }, "enum: each value shown as it is");
     assert_eq!(fields[5].1, Input::Choice(Some(1)), "the default");
     let no_default = form(&json!({"type":"object","properties":{"p":{"type":"string","enum":["a","b"]}}})).unwrap();
     assert_eq!(no_default[0].1, Input::Choice(None), "no default: nothing chosen yet");
     assert_eq!(form(&json!({"type":"object"})), Some(Vec::new()), "no properties: nothing to fill");
+}
+
+#[test]
+fn choice_options_show_their_titles_and_send_their_values() {
+    let schema = json!({"type":"object","properties":{"up":{"type":"string","title":"Up axis","default":"as_is","oneOf":[
+        {"const":"as_is","title":"As in the file"},{"const":"stand_up","title":"Stand up (Y-up to Z-up)","description":"Turns the design"},{"const":"raw"}
+    ]}}});
+    let mut fields = form(&schema).expect("drawn");
+    assert_eq!(
+        fields[0].0.kind,
+        Kind::Choice {
+            values: vec!["as_is".into(), "stand_up".into(), "raw".into()],
+            titles: vec!["As in the file".into(), "Stand up (Y-up to Z-up)".into(), "raw".into()]
+        },
+        "an option without a title shows its value"
+    );
+    assert_eq!(fields[0].1, Input::Choice(Some(0)), "the default, by value");
+    fields[0].1 = Input::Choice(Some(1));
+    assert_eq!(params(&fields), Ok(json!({"up":"stand_up"})), "the value goes to the plugin, not the title");
+    for options in [
+        json!([]),
+        json!([{"const":1,"title":"One"}]),
+        json!([{"const":"a"},{"const":"a","title":"Again"}]),
+        json!([{"const":"a","pattern":"x"}]),
+        json!([{"title":"No value"}]),
+        json!(["a"]),
+    ] {
+        assert_eq!(form(&json!({"type":"object","properties":{"p":{"type":"string","oneOf":options}}})), None, "{options}");
+    }
+    assert_eq!(form(&json!({"type":"object","properties":{"p":{"type":"string","enum":["a"],"oneOf":[{"const":"a"}]}}})), None, "not both");
 }
 
 #[test]
@@ -137,6 +169,7 @@ fn listed(id: &str, entries: Vec<solidcraft_engine::plugin::Entry>) -> Listed {
         version: "0.1.0".into(),
         description: String::new(),
         path: String::new(),
+        disabled: false,
         approval: String::new(),
         groups: BTreeSet::new(),
         entries,
@@ -180,7 +213,7 @@ fn each_plugin_command_has_its_own_menu_row_and_ribbon_button_and_a_disabled_plu
     let labels: Vec<&str> = buttons.iter().map(|b| b.label.as_str()).collect();
     assert_eq!(labels, ["gears plugin", "measure", "Tidy up"], "one command: the plugin's name; a ribbon slot names its button");
     assert!(buttons.iter().all(|b| b.icon == "prefs_plugins"), "no manifest icon yet: the generic plugin icon");
-    assert!(app.plugin_menu.dialog.is_none(), "listing opens nothing");
+    assert!(app.plugin_menu.dialogs.is_empty(), "listing opens nothing");
 
     let menu = rows(&app);
     assert!(matches!(&menu[2], FileRow::Item(i) if i.id == "entry:0:0" && i.label == "gears plugin…"));
@@ -188,7 +221,7 @@ fn each_plugin_command_has_its_own_menu_row_and_ribbon_button_and_a_disabled_plu
 
     // The ribbon button opens that one command's dialog, titled by it alone.
     assert!(choose_ribbon(&mut app, "plugin_entry:tools:tidy"));
-    let dialog = app.plugin_menu.dialog.take().expect("its dialog");
+    let dialog = app.plugin_menu.dialogs.pop().expect("its dialog");
     assert_eq!((dialog.plugin.id.as_str(), dialog.entry.as_str(), dialog.label.as_str()), ("tools", "tidy", "tidy"));
     assert!(!choose_ribbon(&mut app, "sketch.line"), "a command's id is not a plugin's");
 
@@ -209,7 +242,7 @@ fn each_plugin_command_has_its_own_menu_row_and_ribbon_button_and_a_disabled_plu
     assert!(matches!(&menu[2], FileRow::Sub { label, .. } if label == "tools plugin"));
     choose_ribbon(&mut app, "plugin_entry:gears:spur");
     choose(&mut app, "entry:0:0");
-    assert!(app.plugin_menu.dialog.is_none(), "a plugin turned off opens nothing");
+    assert!(app.plugin_menu.dialogs.is_empty(), "a plugin turned off opens nothing");
 
     app.preferences.disabled_plugins.insert("tools".into());
     assert!(ribbon_buttons(&app).is_empty());
@@ -223,7 +256,7 @@ fn plugin_dialog_titles_are_the_command_alone_and_plugin_text_has_no_long_dashes
     gears.name = "Gears".into();
     app.plugin_menu.listed = vec![gears];
     open_entry(&mut app, 0, 0);
-    assert_eq!(app.plugin_menu.dialog.as_ref().map(|d| d.label.as_str()), Some("Gears"), "no \"- Plugins\" after it");
+    assert_eq!(app.plugin_menu.dialog().map(|d| d.label.as_str()), Some("Gears"), "no \"- Plugins\" after it");
     // Every plugin string the user can see, in English and in the sources that draw them.
     let en: serde_json::Map<String, Value> = serde_json::from_str(include_str!("../../../assets/locales/en.json")).expect("en.json");
     for (key, text) in en.iter().filter(|(k, _)| k.contains("plugin")) {
@@ -252,7 +285,41 @@ fn the_file_submenu_holds_the_same_rows_and_opens_the_same_dialog() {
     let ids: Vec<&str> = rows.iter().filter_map(|r| if let FileRow::Item(i) = r { Some(i.id.as_str()) } else { None }).collect();
     assert_eq!(ids, ["plugins:install", "plugins:entry:0:0"]);
     choose(&mut app, "entry:0:0");
-    assert_eq!(app.plugin_menu.dialog.as_ref().map(|d| d.entry.as_str()), Some("spur"));
+    assert_eq!(app.plugin_menu.dialog().map(|d| d.entry.as_str()), Some("spur"));
+}
+
+/// Each plugin entry has its own dialog: opening a second one leaves the first open with its values.
+#[test]
+fn each_plugin_entry_has_its_own_dialog_with_its_own_values() {
+    let mut app = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
+    let with_size = |name: &str| {
+        let mut e = entry(name, "edit", json!([]));
+        e.input_schema = json!({"type":"object","properties":{"size":{"type":"number","default":1.0}}});
+        e
+    };
+    app.plugin_menu.listed = vec![listed("gears", vec![with_size("spur")]), listed("bolts", vec![with_size("hex")])];
+    open_entry(&mut app, 0, 0);
+    app.plugin_menu.dialogs[0].fields.as_mut().unwrap()[0].1 = Input::Number(42.0);
+    open_entry(&mut app, 1, 0);
+    assert_eq!(app.plugin_menu.dialogs.iter().map(|d| d.entry.as_str()).collect::<Vec<_>>(), ["spur", "hex"], "both stay open");
+    assert_ne!(app.plugin_menu.dialogs[0].id, app.plugin_menu.dialogs[1].id, "a window each");
+    let size = |d: &EntryDialog| d.fields.as_ref().unwrap()[0].1.clone();
+    assert!(matches!(size(&app.plugin_menu.dialogs[0]), Input::Number(v) if v == 42.0));
+    assert!(matches!(size(&app.plugin_menu.dialogs[1]), Input::Number(v) if v != 42.0), "no value leaks to the other plugin");
+    // Choosing an entry that is already open keeps its dialog as it is.
+    open_entry(&mut app, 0, 0);
+    assert_eq!(app.plugin_menu.dialogs.len(), 2);
+    assert!(matches!(size(&app.plugin_menu.dialogs[0]), Input::Number(v) if v == 42.0));
+    // Both draw, and closing one leaves the other.
+    let mut h = crate::scenario::Harness::new();
+    h.app.plugin_menu.listed = app.plugin_menu.listed.clone();
+    open_entry(&mut h.app, 0, 0);
+    open_entry(&mut h.app, 1, 0);
+    h.frames(3);
+    assert_eq!(h.app.plugin_menu.dialogs.len(), 2, "both are drawn and stay open");
+    h.app.plugin_menu.dialogs.remove(0);
+    h.frames(2);
+    assert_eq!(h.app.plugin_menu.dialogs.iter().map(|d| d.entry.as_str()).collect::<Vec<_>>(), ["hex"]);
 }
 
 #[test]
@@ -262,12 +329,16 @@ fn ungranted_command_groups_keep_run_off_and_are_named() {
     plugin.groups = ["file".to_string()].into();
     app.plugin_menu.listed = vec![plugin];
     open_entry(&mut app, 0, 0);
-    let dialog = app.plugin_menu.dialog.as_ref().unwrap();
+    let dialog = app.plugin_menu.dialog().unwrap();
     let why = dialog.ready(&app).unwrap_err();
     assert!(why.contains("file"), "{why}");
     assert!(run(&mut app).is_err() && app.control_held.is_empty(), "nothing is queued");
     app.session.plugin_state.command_groups.insert("file".into());
-    assert!(app.plugin_menu.dialog.as_ref().unwrap().ready(&app).is_ok());
+    assert!(app.plugin_menu.dialog().unwrap().ready(&app).is_err(), "legacy global grants do not approve this plugin");
+    app.session.plugin_state.grants.entry("other".into()).or_default().command_groups.insert("file".into());
+    assert!(app.plugin_menu.dialog().unwrap().ready(&app).is_err(), "another plugin's grants do not approve this plugin");
+    app.session.plugin_state.grants.entry("files".into()).or_default().command_groups.insert("file".into());
+    assert!(app.plugin_menu.dialog().unwrap().ready(&app).is_ok());
 }
 
 #[cfg(all(not(target_arch = "wasm32"), any(target_arch = "x86_64", target_arch = "aarch64")))]
@@ -296,7 +367,7 @@ mod native {
     fn settle(h: &mut crate::scenario::Harness) {
         for _ in 0..500 {
             h.frames(1);
-            if h.app.plugin_menu.dialog.as_ref().is_none_or(|d| d.running.is_none()) {
+            if h.app.plugin_menu.dialog().is_none_or(|d| d.running.is_none()) {
                 return;
             }
             std::thread::sleep(std::time::Duration::from_millis(10));
@@ -319,16 +390,16 @@ mod native {
         reference.execute("plugin.run", &json!({"path":plugin.path,"approval":plugin.approval,"entry":"make","params":params})).unwrap();
 
         open_entry(&mut h.app, 0, 0);
-        let dialog = h.app.plugin_menu.dialog.as_mut().unwrap();
+        let dialog = h.app.plugin_menu.dialogs.last_mut().unwrap();
         assert_eq!(dialog.label, "Box");
         let fields = dialog.fields.as_mut().unwrap();
         fields.iter_mut().find(|(f, _)| f.key == "length").unwrap().1 = Input::Number(30.0);
-        assert_eq!(h.app.plugin_menu.dialog.as_ref().unwrap().ready(&h.app), Ok(params));
+        assert_eq!(h.app.plugin_menu.dialog().unwrap().ready(&h.app), Ok(params));
         let undo = h.app.session.undo.len();
         let before = h.app.session.doc.clone();
         run(&mut h.app).unwrap();
         settle(&mut h);
-        assert!(h.app.plugin_menu.dialog.is_none(), "an edit closes the dialog");
+        assert!(h.app.plugin_menu.dialogs.is_empty(), "an edit closes the dialog");
         assert_eq!(h.app.session.doc.as_ref(), reference.doc.as_ref(), "same document as plugin.run");
         assert_eq!(h.app.session.undo.len(), undo + 1, "one undo step");
         h.app.run("edit.undo", json!({})).unwrap();
@@ -355,7 +426,7 @@ mod native {
         crate::documents::switch(&mut h.app, 1);
         let other = h.app.session.doc.clone();
         settle(&mut h);
-        let error = h.app.plugin_menu.dialog.as_ref().and_then(|d| d.error.clone()).expect("refused in the dialog");
+        let error = h.app.plugin_menu.dialog().and_then(|d| d.error.clone()).expect("refused in the dialog");
         assert!(error.contains(h.app.tr("ui.plugin_dialog_other_design")), "{error}");
         assert!(std::sync::Arc::ptr_eq(&other, &h.app.session.doc), "the other design is untouched");
         crate::documents::switch(&mut h.app, 0);
@@ -388,7 +459,7 @@ mod native {
         let doc = h.app.session.doc.clone();
         run(&mut h.app).unwrap();
         settle(&mut h);
-        let error = h.app.plugin_menu.dialog.as_ref().and_then(|d| d.error.clone()).expect("the dialog stays with its error");
+        let error = h.app.plugin_menu.dialog().and_then(|d| d.error.clone()).expect("the dialog stays with its error");
         assert!(error.contains("approval"), "{error}");
         assert!(std::sync::Arc::ptr_eq(&doc, &h.app.session.doc));
         let _ = std::fs::remove_dir_all(root);
@@ -405,7 +476,7 @@ mod native {
         assert!(h.app.plugin_menu.open && h.app.plugin_menu.listed.len() == 1);
         h.step(&json!({"widget":"Box…"})).unwrap();
         h.frames(2);
-        assert_eq!(h.app.plugin_menu.dialog.as_ref().map(|d| d.entry.as_str()), Some("make"));
+        assert_eq!(h.app.plugin_menu.dialog().map(|d| d.entry.as_str()), Some("make"));
         assert!(crate::scenario::handle_at("plugin_dialog:field:length").is_some());
         let _ = std::fs::remove_dir_all(root);
     }

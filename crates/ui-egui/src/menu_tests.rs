@@ -1040,6 +1040,68 @@ fn canvas_menu_hides_renames_calibrates_and_deletes() {
     assert!(app.session.doc.canvases.is_empty());
 }
 
+#[test]
+fn deleting_sketch_entities_ignores_a_canvas_removed_by_undo() {
+    for include_existing_canvas in [false, true] {
+        let mut app = SolveApp::new(Session::default(), Services::default());
+        let sketch = app.run("sketch.create", json!({"plane": "XY"})).unwrap()["sketch"].as_u64().unwrap();
+        let line = app.run("sketch.line", json!({"points": [[0, 0], [30, 10]], "infer": false})).unwrap()["curves"][0].as_str().unwrap().to_owned();
+        let mut png = b"\x89PNG\r\n\x1a\n\0\0\0\rIHDR".to_vec();
+        png.extend(2u32.to_be_bytes());
+        png.extend(2u32.to_be_bytes());
+        png.extend([8, 6, 0, 0, 0, 0, 0, 0, 0]);
+        let data = solidcraft_engine::doc::canvas::base64_encode(&png);
+        let kept = app.run("canvas.insert", json!({"data": data, "plane": "XY", "width": 40})).unwrap()["canvas"].as_u64().unwrap();
+        let removed = app.run("canvas.insert", json!({"data": data, "plane": "XY", "width": 40})).unwrap()["canvas"].as_u64().unwrap();
+        // A Browser selection is UI state, so Undo leaves the removed canvas picked.
+        app.tree.picked_canvases = vec![removed];
+        app.run("edit.undo", json!({})).unwrap();
+        assert!(!app.session.doc.canvases.iter().any(|canvas| canvas.id == removed));
+        app.run("select.set", json!({"items": [{"type": "sketch_curve", "id": line}]})).unwrap();
+        if include_existing_canvas {
+            app.tree.picked_canvases.push(kept);
+        }
+        crate::delete::delete_selection(&mut app);
+        assert!(app.session.model.state().sketch(sketch).unwrap().sketch.curves.is_empty(), "a removed canvas must not block deleting the line");
+        assert_eq!(app.session.doc.canvases.iter().any(|canvas| canvas.id == kept), !include_existing_canvas);
+        // Deleting the line and any existing selected canvas remains one undoable step.
+        app.run("edit.undo", json!({})).unwrap();
+        assert!(app.session.model.state().sketch(sketch).unwrap().sketch.curves.iter().any(|curve| curve.id == line));
+        assert!(app.session.doc.canvases.iter().any(|canvas| canvas.id == kept));
+        assert!(!app.session.doc.canvases.iter().any(|canvas| canvas.id == removed));
+        app.run("select.clear", json!({})).unwrap();
+        app.tree.picked_canvases = vec![removed];
+        assert!(crate::delete::nothing_to_delete(&app));
+        let before = serde_json::to_value(&*app.session.doc).unwrap();
+        let revision = app.session.revision;
+        crate::delete::delete_selection(&mut app);
+        assert_eq!(serde_json::to_value(&*app.session.doc).unwrap(), before);
+        assert_eq!(app.session.revision, revision);
+    }
+}
+
+/// The toolbar's Edit Canvas edits the canvas the user picked in the Browser, not just the
+/// first one in the design (#16518).
+#[test]
+fn edit_canvas_from_the_toolbar_edits_the_picked_canvas() {
+    let mut app = sample_app();
+    let mut png = b"\x89PNG\r\n\x1a\n\0\0\0\rIHDR".to_vec();
+    png.extend(400u32.to_be_bytes());
+    png.extend(200u32.to_be_bytes());
+    png.extend([8, 6, 0, 0, 0, 0, 0, 0, 0]);
+    let data = solidcraft_engine::doc::canvas::base64_encode(&png);
+    let first = app.run("canvas.insert", json!({"data": data, "plane": "XY", "width": 80})).unwrap()["canvas"].as_u64().unwrap();
+    let second = app.run("canvas.insert", json!({"data": data, "plane": "XZ", "width": 80})).unwrap()["canvas"].as_u64().unwrap();
+    app.tree.picked_canvases = vec![second];
+    assert!(!crate::sketch_tools::start_hook(&mut app, "canvas.edit"));
+    let panel = app.tree.canvas_panel.clone().unwrap();
+    assert_eq!(panel.canvas, second, "the picked canvas is edited, not the first one");
+    app.tree.picked_canvases.clear();
+    assert!(!crate::sketch_tools::start_hook(&mut app, "canvas.edit"));
+    let panel = app.tree.canvas_panel.clone().unwrap();
+    assert_eq!(panel.canvas, first, "with nothing picked, the first canvas is edited");
+}
+
 /// The canvas and browser menus keep their items in a fixed order.
 #[test]
 fn menus_follow_fusion_order() {

@@ -66,7 +66,7 @@
 //!   `RailEdgeuseIntersect` widens a straight side edge's parameter interval on a planar
 //!   base surface past both ends (`run_side_edge_on_along_its_line`, the fork's
 //!   tangency-labs/smlib@6e77631), past the end away from the filleted edge's vertex
-//!   only (WR-643, the fork's tangency-labs/smlib@7224896). With `fixes.fillet_run_on_bspline_trims` too, a widened
+//!   only (WR-643, the fork's tangency-labs/smlib@7224896). A widened
 //!   side edge's B-spline UV trim (its local copy) evaluates out of bounds, so it runs on
 //!   along its line as a line trim does instead of clamping to its ends
 //!   (`continue_bspline_trim_past_its_ends`, WR-654, #1981). With far-end-only (and WR-600,
@@ -649,7 +649,7 @@ fn line_in_domain(
     Ok((reach([a.x, a.y], -1.0), reach([c.x, c.y], 1.0)))
 }
 
-/// Opt-in (`fixes.fillet_run_on_bspline_trims`, WR-654, #1981), not upstream: turns
+/// Not upstream (WR-654, #1981): turns
 /// on out-of-bounds evaluation of a side edge's B-spline UV trim that
 /// [`run_side_edge_on_along_its_line`] widened, so the solve finds a point of its line
 /// past its ends, as on a line trim (whose evaluation is never clamped). An
@@ -1192,15 +1192,14 @@ impl FilletSolver {
     /// # Errors
     ///
     /// With the opt-in `Kernel::fixes.fillet_chamfer_cone_on_arc` (not upstream, WR-421) a
-    /// linear generator is revolved too, into a cone; with
-    /// `Kernel::fixes.fillet_chamfer_cone_stored_as_cone` as well (WR-572) that revolution
-    /// is stored as the cone `CopyAndAddAnalytics` finds in its NURBS form, the rails made on
-    /// it.
+    /// linear generator is revolved too, into a cone, and that revolution is stored as the
+    /// cone `CopyAndAddAnalytics` finds in its NURBS form, the rails made on it (WR-572).
     /// Not upstream: a section centred on the arc's axis has its rail points turned into
     /// the half-planes through the edge's ends and takes the edge's start for the nearest
     /// point (WR-422); a start rail point within the solver's tolerance of the arc's axis
     /// is moved onto the axis (WR-592); the span is the turn from the start section to the
-    /// end one, without `IsArc`'s start angle (WR-568).
+    /// end one, without `IsArc`'s start angle (WR-568), and exactly 360 degrees along a
+    /// whole closed edge whose end section is its start one (WR-789).
     ///
     /// `SM_ERR` when the generator is not circular, the edge curve is not an arc, the
     /// radius is tiny or changes, or the nearest point on the edge is not unique; those
@@ -1445,7 +1444,14 @@ impl FilletSolver {
             k.fixes.fillet_statuses_pass_on,
         )? {
             Ok(a) => a,
-            Err(e @ (SolidError::Unported { .. } | SolidError::Cancelled { .. })) => return Err(e),
+            Err(e)
+                if matches!(
+                    e,
+                    SolidError::Unported { .. } | SolidError::Cancelled { .. }
+                ) || e.is_not_certified() =>
+            {
+                return Err(e)
+            }
             Err(_) => 0.0,
         };
         if span_ang < ANG_TOL_RAD {
@@ -1458,8 +1464,20 @@ impl FilletSolver {
         // not start at 0), not from the start section, so it is no part of that turn
         let mut angle_span = rad_to_deg(span_ang);
 
+        // Not upstream (WR-789): a round along a whole closed edge, its end section its start
+        // one (both at the edge's seam, their rail points within the solver's tolerance),
+        // turns exactly once. The two sections are solved apart, so the turn measured
+        // between them falls a hair either side of the wrap: just past 0 the `ANG_TOL_RAD`
+        // test above makes it a full turn (clamped to 360 below), but just short of 2 pi it
+        // stayed short, a sweep a few 1e-9 degrees short of the closed circle its polar
+        // converter takes, which `SmSurfOfRevolution`'s check refuses (Test #7).
+        let closed_edge = curve.is_closed(k, &ivl, 0.0)?;
+        if closed_edge && p0.distance(end_p0) < center_tol && p1.distance(end_p1) < center_tol {
+            angle_span = 360.0;
+        }
+
         // Determine if we need to extend the span even when 'm_bExtendBefore' is FALSE
-        if !curve.is_closed(k, &ivl, 0.0)? && !s.extend_after {
+        if !closed_edge && !s.extend_after {
             // for both filletSector->edgeuses
             for i in 0..2 {
                 let eu_i = s.edgeuse(i)?.ok_or_else(|| invalid("no edge use"))?;
@@ -1589,12 +1607,12 @@ impl FilletSolver {
             trans.translate(origin);
             torus.transform(k, &trans, None)?;
         }
-        // `fixes.fillet_chamfer_cone_stored_as_cone` (WR-572, the fork's b5743ec): a linear
-        // section revolved is a cone, and is stored as one (SmCone), as a straight edge's
-        // round is stored as its cylinder: the revolution's NURBS form (its
+        // Not upstream (WR-572, the fork's b5743ec): a linear section revolved is a cone,
+        // and is stored as one (SmCone), as a straight edge's round is stored as its
+        // cylinder: the revolution's NURBS form (its
         // `SmBSplineSurface::Copy`) through `CopyAndAddAnalytics`, kept when that gives a
         // cone; anything else stays the revolution
-        let torus = if linear_section && k.fixes.fillet_chamfer_cone_stored_as_cone {
+        let torus = if linear_section {
             let cone = torus.base().copy().copy_and_add_analytics(k)?;
             if matches!(cone.kind(), crate::surface::surface::SurfaceKind::Cone(_)) {
                 cone
@@ -2009,7 +2027,6 @@ impl FilletSolver {
         // allocate NewtonRaphson evaluator - contains equation definitions being solved
         let mut eval = SphereEval(FilletSphereSolveEnfo::new(plane_normal, plane_d, ops), k);
         let mut ls = LocalSolveNd::new(&mut eval, Some(&intervals), Some(&periodicities));
-        ls.set_skips_failed_evaluations(k.fixes.oscillating_skips_failed_guesses);
 
         // set solve parameters
         ls.set_desired_accuracy(EFF_ZERO_SQ);
@@ -2127,11 +2144,11 @@ impl FilletSolver {
                     ops.solver(),
                     &mut intervals,
                 )?;
-                // Opt-in (`fixes.fillet_run_on_bspline_trims`, WR-654, #1981): a B-spline
-                // trim clamps to its ends, so the widened interval reached no point of
-                // its line past them; a line trim on the other wall did, and the two
-                // rails' ends at the side vertex fell apart.
-                if widened && k.fixes.fillet_run_on_bspline_trims {
+                // Not upstream (WR-654, #1981): a B-spline trim clamps to its ends, so
+                // the widened interval reached no point of its line past them; a line
+                // trim on the other wall did, and the two rails' ends at the side vertex
+                // fell apart.
+                if widened {
                     continue_bspline_trim_past_its_ends(&mut uv_trim);
                 }
             }
@@ -2187,7 +2204,6 @@ impl FilletSolver {
             k,
         );
         let mut ls = LocalSolveNd::new(&mut eval, Some(&intervals), Some(&periodicities));
-        ls.set_skips_failed_evaluations(k.fixes.oscillating_skips_failed_guesses);
         ls.set_desired_accuracy(EFF_ZERO_SQ);
         ls.set_boundary_handler(BoundaryHandler::TotalBoundaryHits, 8);
         ls.set_maximum_iterations(30);
@@ -2405,7 +2421,6 @@ impl FilletSolver {
             // when the resulting rails are classified and trimmed.
             let bounds = (!affine).then_some(&intervals);
             let mut ls = LocalSolveNd::new(&mut eval, bounds, Some(&periodicities));
-            ls.set_skips_failed_evaluations(k.fixes.oscillating_skips_failed_guesses);
             ls.set_desired_accuracy(EFF_ZERO_SQ);
             ls.set_boundary_handler(BoundaryHandler::TotalBoundaryHits, 8);
             ls.set_maximum_iterations(30);
@@ -3474,7 +3489,7 @@ mod tests {
     /// WR-654 (#1981): a side edge's degree-1 B-spline UV trim clamps the parameter to
     /// its natural interval, so past its start it gives the start point, where a line
     /// trim runs on; `continue_bspline_trim_past_its_ends` (what `RailEdgeuseIntersect`
-    /// applies to its copy of a widened trim with `fillet_run_on_bspline_trims`) makes it
+    /// applies to its copy of a widened trim) makes it
     /// run on along its line past both ends, and leaves its points inside and a line
     /// trim as they were.
     #[test]

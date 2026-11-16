@@ -460,7 +460,12 @@ fn allocation_columns<'a>(layout: &'a Layout, registry: &PanelRegistry, env: &Al
                 continue;
             }
             // Unavailable members still constrain widths, just like inactive tabs.
-            let (min, max) = column_bounds(layout, registry, &column.id)?;
+            let ranges = column_widths(layout, registry, &column.id)?;
+            let (min, max) = ranges
+                .iter()
+                .copied()
+                .find(|(lo, hi)| (*lo..=*hi).contains(&column.width))
+                .ok_or_else(|| error(Rule::Bounds, "saved width outside column intervals"))?;
             let preferred = column.width.clamp(min, max);
             limits.push(AxisLimit { min, max: preferred, weight: (preferred - min).max(0.001), preferred: None, priority: 0 });
             columns.push(AllocationColumn { column, members, width: 0.0 });
@@ -546,23 +551,6 @@ pub fn effective_allocation_bounds(
     let height = section_height_limit(layout, registry, section, env)?;
     min.height = height.min;
     max.height = height.max;
-    if section.location.zone().side() && !section.collapsed {
-        let count = layout.sections.iter().filter(|member| member.column == section.column && presented(member, env).is_some()).count();
-        if count == 1
-            && let Some(instance) = presented(section, env)
-        {
-            let width = allocation_columns(layout, registry, env)?
-                .iter()
-                .find(|column| Some(&column.column.id) == section.column.as_ref())
-                .map(|column| column.width)
-                .ok_or_else(|| error(Rule::MissingTarget, "presented column missing"))?;
-            let request = ContentMeasureRequest { instance: instance.clone(), width, chrome_height: env.header_height + env.footer_height };
-            let measure = measure_for(env, &request)?;
-            if measure.policy == SideHeightPolicy::Content {
-                max.height = measure.needed_height.clamp(min.height, max.height);
-            }
-        }
-    }
     Ok((min, max))
 }
 
@@ -653,14 +641,13 @@ pub fn allocate_layout(layout: &Layout, registry: &PanelRegistry, env: &Allocati
         if column.members.len() == 1
             && let (Some(section), Some(limit)) = (column.members.first(), limits.first_mut())
             && !section.collapsed
+            && limit.preferred.is_none()
             && let Some(instance) = presented(section, env)
         {
             let request =
                 ContentMeasureRequest { instance: instance.clone(), width: column.width, chrome_height: env.header_height + env.footer_height };
             let measure = measure_for(env, &request)?;
-            // Sole presentation follows actual content/declared Fill, retaining
-            // an explicit stack preference only for a later multi-section state.
-            limit.preferred = None;
+            // Without an explicit height, a sole panel follows content or fills the column.
             limit.weight = 1.0;
             if measure.policy == SideHeightPolicy::Content {
                 limit.max = measure.needed_height.clamp(limit.min, limit.max);
