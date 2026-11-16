@@ -583,7 +583,8 @@ pub fn footprint_across(
 
 /// Whether T runs through S (design v2 5.3 [m22], skip `passes_through`): some far face of S, a
 /// planar face facing `−n` below P (the frame's plane, normal `n`), shares area with T's section
-/// by that face's plane ([`footprint_across`]). Pure 2D: the face is read as regions of the
+/// just past that face's plane (by `tol`, so a T flush with the face is accepted;
+/// [`footprint_across`]). Pure 2D: the face is read as regions of the
 /// frame moved down to its level ([`prism::sheet`](crate::prism::sheet)) and compared with
 /// [`regions_overlap`](crate::prism::profile::regions_overlap) (`eps = tol`); no boolean runs and
 /// neither plate is changed. A face only touching the section along an edge or at a corner is
@@ -646,7 +647,18 @@ pub fn passes_through(
             x_axis: frame.x_axis,
             y_axis: frame.y_axis,
         };
-        let section = footprint_across(k, t, &at, tol)?;
+        // T's section just past the far face (by `tol`): a T flush with the face (its end in
+        // the face's plane) has none there and is accepted (design v2 5.3).
+        let past = crate::eval::Frame {
+            origin: [
+                at.origin[0] - tol * n.x,
+                at.origin[1] - tol * n.y,
+                at.origin[2] - tol * n.z,
+            ],
+            x_axis: frame.x_axis,
+            y_axis: frame.y_axis,
+        };
+        let section = footprint_across(k, t, &past, tol)?;
         if section.is_empty() {
             continue;
         }
@@ -667,6 +679,94 @@ pub fn passes_through(
         }
     }
     Ok(false)
+}
+
+/// Why a pair of plates (T, S) at P gives no joint, as far as [`pair`] and [`with_swap`] decide.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum PairSkip {
+    /// T meets P neither touching nor overlapping (`end_not_flat`, `no_contact`).
+    Contact(Contact),
+    /// T has no plate faces at the contact ([`plate_faces`]).
+    NoPlateFaces(NoPlateFaces),
+    /// T is not at 90° to P: the angle between `n` and a side face of T, in degrees; `None` when
+    /// T lies face to face on S.
+    NotSquare(Option<f64>),
+    /// The reverse pair (S as tab plate, T as slot plate) is a plate joint [m10].
+    Swapped,
+}
+
+/// A plate joint of T on P: how T meets P and T's plate faces there.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct PairJoint {
+    /// The contact, [`Contact::Touch`] or [`Contact::Overlap`].
+    pub contact: Contact,
+    /// T's plate faces and thickness.
+    pub faces: PlateFaces,
+}
+
+/// The pair-level decision of design v2 5.3 and 5.4 for T on P (normal `n`): the contact first
+/// (only a touch or an overlap goes on), then T's plate faces among `candidates` (its planar
+/// faces beside the contact, [`plate_faces`] with `strip_extent`). When no pair qualifies, a
+/// candidate at an angle to `n` other than square names T's tilt (`not_square`, the angle
+/// [`bearing`] gives). A pair whose thickness is not less than `rise` (T's extent along `n` from
+/// P) less `tol` is T lying face to face on S: `not_square` with no angle, never a plate as thick
+/// as T is wide.
+///
+/// # Errors
+///
+/// Those of [`plate_faces`] and [`bearing`]; [`SolidError::InvalidInput`] for a `rise` that is
+/// not finite.
+pub fn pair(
+    contact: Contact,
+    candidates: &[Plane],
+    n: Vec3,
+    rise: f64,
+    tol: f64,
+    strip_extent: impl Fn(Vec3) -> Result<(f64, f64)>,
+) -> Result<core::result::Result<PairJoint, PairSkip>> {
+    check_tol(tol)?;
+    if !rise.is_finite() {
+        return Err(invalid("the tab plate's rise is not finite"));
+    }
+    if !matches!(contact, Contact::Touch { .. } | Contact::Overlap) {
+        return Ok(Err(PairSkip::Contact(contact)));
+    }
+    match plate_faces(candidates, n, tol, strip_extent)? {
+        Ok(faces) if faces.thickness >= rise - tol => Ok(Err(PairSkip::NotSquare(None))),
+        Ok(faces) => Ok(Ok(PairJoint { contact, faces })),
+        Err(NoPlateFaces::NoPair) => {
+            for f in candidates {
+                if let Bearing::Oblique(deg) = bearing(n, f.normal)? {
+                    return Ok(Err(PairSkip::NotSquare(Some(deg))));
+                }
+            }
+            Ok(Err(PairSkip::NoPlateFaces(NoPlateFaces::NoPair)))
+        }
+        Err(why) => Ok(Err(PairSkip::NoPlateFaces(why))),
+    }
+}
+
+/// Swapped [m10]: `forward` is the pair (T, S); when it is skipped for want of T's plate faces or
+/// because T lies face to face on S, `reverse` (S as tab plate, T as slot plate) is tried, and a
+/// joint there makes the skip [`PairSkip::Swapped`]; otherwise the first reason stands. Any
+/// other outcome of `forward` is returned as it is and `reverse` is not asked.
+///
+/// # Errors
+///
+/// Those of `forward` and `reverse`.
+pub fn with_swap<J>(
+    forward: impl FnOnce() -> Result<core::result::Result<J, PairSkip>>,
+    reverse: impl FnOnce() -> Result<core::result::Result<J, PairSkip>>,
+) -> Result<core::result::Result<J, PairSkip>> {
+    match forward()? {
+        Err(skip @ (PairSkip::NoPlateFaces(_) | PairSkip::NotSquare(None))) => {
+            Ok(Err(match reverse()? {
+                Ok(_) => PairSkip::Swapped,
+                Err(_) => skip,
+            }))
+        }
+        other => Ok(other),
+    }
 }
 
 /// A face bounding the strip Σ across it (along `w`), as [`eased_edge`] reads it.

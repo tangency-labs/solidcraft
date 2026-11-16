@@ -508,7 +508,7 @@ fn box_solid(k: &mut crate::kernel::Kernel, lo: [f64; 3], hi: [f64; 3]) -> crate
 /// its section at z = 6 is x ∈ [20, 140], sharing x ∈ [80, 140] with the thin part's bottom:
 /// `passes_through`. Its section at z = 0 (the thick part's bottom) is empty. T from z = 9 (3
 /// below P) reaches no far face: no. T over the thick part only (x ∈ [10, 70]), 9 deep: no.
-/// tol 0: refused.
+/// T from z = 6, flush with the thin part's bottom: accepted (5.3). tol 0: refused.
 #[test]
 fn a_tab_running_through_the_thin_part_passes_through() {
     use crate::math::Vec2;
@@ -543,5 +543,86 @@ fn a_tab_running_through_the_thin_part_passes_through() {
     assert!(!passes_through(&k, &s, &shallow, &p, TOL).expect("shallow"));
     let thick = box_solid(&mut k, [10.0, 30.0, 3.0], [70.0, 36.0, 66.0]);
     assert!(!passes_through(&k, &s, &thick, &p, TOL).expect("thick"));
+    // Flush with the thin part's bottom (T from z = 6): accepted.
+    let flush = box_solid(&mut k, [20.0, 30.0, 6.0], [140.0, 36.0, 66.0]);
+    assert!(!passes_through(&k, &s, &flush, &p, TOL).expect("flush"));
     assert!(passes_through(&k, &s, &deep, &p, 0.0).is_err());
+}
+
+/// The pair on F: Wall touching P (rise 66 − 6 = 60): a joint, Wall's y pair, 6 thick. No
+/// contact: that contact is the skip. A 100 × 50 × 6 slab lying flat on P (strip x ∈ [0, 100],
+/// y ∈ [0, 50], rise 6): the x pair is 100 thick, wider than the strip's 50 across it, out; the
+/// y pair is 50 thick, not less than the rise: face to face, `not_square` with no angle. Wall
+/// tilted 5° about x (its y faces' normals (0, −cos 5°, sin 5°) and (0, cos 5°, −sin 5°), the
+/// first 85° from +z): no pair, `not_square` naming 85° (the first such face).
+#[test]
+fn the_pair_is_a_joint_a_skip_or_not_square() {
+    let touch = Contact::Touch { delta: 0.0 };
+    let wall_pair = || pair(touch, &wall(), Vec3::Z, 60.0, TOL, |m| Ok(strip(m)));
+    let got = wall_pair().unwrap().unwrap();
+    assert_eq!(got.faces.thickness, 6.0);
+    assert_eq!(got.contact, touch);
+    let far = Contact::NoContact { distance: 2.0 };
+    assert_eq!(
+        pair(far, &wall(), Vec3::Z, 60.0, TOL, |m| Ok(strip(m))).unwrap(),
+        Err(PairSkip::Contact(far))
+    );
+    let slab = [
+        plane(0.0, 0.0, 0.0, -1.0, 0.0, 0.0),
+        plane(100.0, 0.0, 0.0, 1.0, 0.0, 0.0),
+        plane(0.0, 0.0, 0.0, 0.0, -1.0, 0.0),
+        plane(0.0, 50.0, 0.0, 0.0, 1.0, 0.0),
+    ];
+    let slab_strip = |m: Vec3| {
+        let levels = [(0.0, 0.0), (100.0, 0.0), (0.0, 50.0), (100.0, 50.0)]
+            .map(|(x, y)| m.dot(Vec3::new(x, y, 6.0)));
+        let lo = levels.iter().copied().fold(f64::INFINITY, f64::min);
+        let hi = levels.iter().copied().fold(f64::NEG_INFINITY, f64::max);
+        Ok((lo, hi))
+    };
+    let flat = || pair(touch, &slab, Vec3::Z, 6.0, TOL, slab_strip);
+    assert_eq!(flat().unwrap(), Err(PairSkip::NotSquare(None)));
+    let tilt = 5.0_f64.to_radians();
+    let tilted = [
+        Plane::through(
+            Vec3::new(0.0, 30.0, 6.0),
+            Vec3::new(0.0, -tilt.cos(), tilt.sin()),
+        )
+        .unwrap(),
+        Plane::through(
+            Vec3::new(0.0, 36.0, 6.0),
+            Vec3::new(0.0, tilt.cos(), -tilt.sin()),
+        )
+        .unwrap(),
+    ];
+    match pair(touch, &tilted, Vec3::Z, 60.0, TOL, |m| Ok(strip(m))).unwrap() {
+        Err(PairSkip::NotSquare(Some(deg))) => assert!((deg - 85.0).abs() < 1e-9, "{deg}"),
+        ),
+        other => panic!("{other:?}"),
+    }
+}
+
+/// Swapped [m10]: the slab flat on P is `not_square` face to face; the reverse pair (here Wall's
+/// joint standing for it) is a joint: `swapped`. With no joint the other way: the first reason.
+/// A forward joint does not ask the reverse; a contact skip is not swapped.
+#[test]
+fn a_skip_whose_reverse_is_a_joint_is_swapped() {
+    let joint = || Ok(Ok(1));
+    let face_to_face = || Ok(Err(PairSkip::NotSquare(None)));
+    let none = || Ok(Err(PairSkip::NoPlateFaces(NoPlateFaces::NoPair)));
+    assert_eq!(
+        with_swap(face_to_face, joint).unwrap(),
+        Err(PairSkip::Swapped)
+    );
+    assert_eq!(with_swap(none, joint).unwrap(), Err(PairSkip::Swapped));
+    assert_eq!(
+        with_swap(face_to_face, none).unwrap(),
+        Err(PairSkip::NotSquare(None))
+    );
+    assert_eq!(with_swap(joint, || panic!("not asked")).unwrap(), Ok(1));
+    let tilt = || Ok(Err(PairSkip::NotSquare(Some(85.0))));
+    assert_eq!(
+        with_swap(tilt, || panic!("not asked")).unwrap(),
+        Err(PairSkip::NotSquare(Some(85.0)))
+    );
 }
