@@ -1,0 +1,130 @@
+{
+  "open-shell-after": {
+    "status": 0.0,
+    "valid": false,
+    "reports": [
+      {
+        "message": "Edge/Vertex gap across Edgeuse start larger than tol",
+        "tolerance": 5e-06,
+        "value": 9.480188961906866e-06
+      },
+      {
+        "message": "Vertex/Face gap across Edgeuse end larger than tol",
+        "tolerance": 1.16046873788523e-05,
+        "value": 3.019034067154111e-05
+      },
+      {
+        "message": "Edge/Surface gap across Edgeuse larger than tol",
+        "tolerance": 2.32093747577046e-05,
+        "value": 3.019034068882236e-05
+      },
+      {
+        "message": "Vertex/Face gap across Edgeuse start larger than tol",
+        "tolerance": 1.16046873788523e-05,
+        "value": 3.019034067154111e-05
+      },
+      {
+        "message": "Edge/Surface gap across Edgeuse larger than tol",
+        "tolerance": 2.32093747577046e-05,
+        "value": 3.019034068882236e-05
+      },
+      {
+        "message": "Edge/Vertex gap across Edgeuse end larger than tol",
+        "tolerance": 5e-06,
+        "value": 9.480188961906866e-06
+      },
+      {
+        "message": "Edge/Surface gap across Edgeuse larger than tol",
+        "tolerance": 1e-05,
+        "value": 1.3007079267868388e-05
+      },
+      {
+        "message": "Edge/Surface gap across Edgeuse larger than tol",
+        "tolerance": 1e-05,
+        "value": 1.1364845725152534e-05
+      },
+      {
+        "message": "Vertex-Face Gap exceeds XSectTol3d for one (or more) Faces",
+        "tolerance": 2e-05,
+        "value": 3.019034067154111e-05
+      }
+    ]
+  },
+  "degenerate-round-before": {
+    "status": 0.0,
+    "valid": false,
+    "reports": [
+      {
+        "message": "SmBSplineSurface has an Internal pole caused by combinations of coincident CPts",
+        "tolerance": 1.0000000000000002e-06,
+        "value": 1.23456e-61
+      }
+    ]
+  },
+  "tabbed-plate-after": {
+    "status": 0.0,
+    "valid": true,
+    "reports": []
+  },
+  "open-shell-before": {
+    "status": 0.0,
+    "valid": false,
+    "reports": [
+      {
+        "message": "Edge/Vertex gap across Edgeuse start larger than tol",
+        "tolerance": 5e-06,
+        "value": 9.480188961906866e-06
+      },
+      {
+        "message": "Vertex/Face gap across Edgeuse end larger than tol",
+        "tolerance": 1.16046873788523e-05,
+        "value": 3.019034067154111e-05
+      },
+      {
+        "message": "Edge/Surface gap across Edgeuse larger than tol",
+        "tolerance": 2.32093747577046e-05,
+        "value": 3.019034068882236e-05
+      },
+      {
+        "message": "Vertex/Face gap across Edgeuse start larger than tol",
+        "tolerance": 1.16046873788523e-05,
+        "value": 3.019034067154111e-05
+      },
+      {
+        "message": "Edge/Surface gap across Edgeuse larger than tol",
+        "tolerance": 2.32093747577046e-05,
+        "value": 3.019034068882236e-05
+      },
+      {
+        "message": "Edge/Vertex gap across Edgeuse end larger than tol",
+        "tolerance": 5e-06,
+        "value": 9.480188961906866e-06
+      },
+      {
+        "message": "Edge/Surface gap across Edgeuse larger than tol",
+        "tolerance": 1e-05,
+        "value": 1.3007079267868388e-05
+      },
+      {
+        "message": "Edge/Surface gap across Edgeuse larger than tol",
+        "tolerance": 1e-05,
+        "value": 1.1364845725152534e-05
+      },
+      {
+        "message": "Vertex-Face Gap exceeds XSectTol3d for one (or more) Faces",
+        "tolerance": 2e-05,
+        "value": 3.019034067154111e-05
+      }
+    ]
+  },
+  "tabbed-plate-before": {
+    "status": 0.0,
+    "valid": true,
+    "reports": []
+  },
+  "degenerate-round-after": {
+    "status": 0.0,
+    "valid": true,
+    "reports": []
+  }
+}

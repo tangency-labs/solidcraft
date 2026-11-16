@@ -1,6 +1,6 @@
 //! WR-635 / WR-636 (#960; the SolidCraft fork's tangency-labs/smlib@eddf0ed and bba9914,
-//! branch `replay/1.0.1`): with `fillet_cliff_overflow`, the removal region of a cliff
-//! overflow also closes
+//! branch `replay/1.0.1`): the removal region of a cliff overflow also
+//! closes
 //!
 //! - (WR-635) where an Nx1 corner of mixed convexity ends the blend on a face of the sheet
 //!   on the end wall's surface extended (that face's lamina edges pass onto the next wall;
@@ -24,7 +24,6 @@
 )]
 
 use solidcore::blend::fillet_executive::session::FilletSession;
-use solidcore::blend::fillet_geom::p1::FilletErrorType;
 use solidcore::boolean::api_brep::boolean_difference;
 use solidcore::curve::curve::Curve;
 use solidcore::geom::attribute::{AttributeStore, ObjectKey};
@@ -37,12 +36,9 @@ use solidcore::topology::brep::p2::is_manifold_solid;
 use solidcore::topology::{edge, EdgeId};
 use solidcore::{Brep, Kernel};
 
-fn kernel(cliff: bool) -> Kernel {
+fn kernel() -> Kernel {
     let mut k = Kernel::default();
-    k.fixes.fillet_refuse_rails_leaving_faces = true;
     k.fixes.fillet_trace_reaches_rails = true;
-    k.fixes.fillet_rail_end_on_continued_surface = true;
-    k.fixes.fillet_cliff_overflow = cliff;
     k
 }
 
@@ -79,19 +75,18 @@ fn edge_between(k: &Kernel, b: &Brep, a: Point3, q: Point3) -> EdgeId {
 #[derive(Debug)]
 enum Outcome {
     Built(f64),
-    Refused(i32, #[allow(dead_code)] String),
+    Refused(#[allow(dead_code)] i32, #[allow(dead_code)] String),
 }
 
 /// Chamfers (`chamfer`) or rounds the edges between the point pairs `edges` of the body
 /// `make` builds, by `r`.
 fn blend(
-    cliff: bool,
     make: fn(&mut Kernel) -> Brep,
     edges: &[(Point3, Point3)],
     r: f64,
     chamfer: bool,
 ) -> Outcome {
-    let mut k = kernel(cliff);
+    let mut k = kernel();
     let mut b = make(&mut k);
     let ids: Vec<EdgeId> = edges
         .iter()
@@ -125,13 +120,6 @@ fn assert_builds(outcome: &Outcome, expected: f64, rel: f64) {
         "volume {v} against {expected} (rel {})",
         (v - expected).abs() / expected
     );
-}
-
-fn assert_no_room(outcome: &Outcome) {
-    let Outcome::Refused(code, _) = outcome else {
-        panic!("expected a refusal, got {outcome:?}");
-    };
-    assert_eq!(*code, FilletErrorType::NoRoom as i32, "{outcome:?}");
 }
 
 // ---- WR-636: a pocket's rim chamfered all round --------------------------------------------
@@ -180,17 +168,16 @@ fn a_pocket_rim_chamfer_past_the_floor_is_subtracted() {
             .into_iter()
             .map(|(a, b)| (p(a.x, a.y, 20.0), p(b.x, b.y, 20.0)))
             .collect();
-        let Outcome::Built(deep) = blend(true, deep_pocketed_plate, &deep_rim, d, true) else {
+        let Outcome::Built(deep) = blend(deep_pocketed_plate, &deep_rim, d, true) else {
             panic!("the deep pocket's chamfer {d} must build");
         };
         let removed = 48_000.0 - 9_000.0 - deep;
         assert_builds(
-            &blend(true, pocketed_plate, &pocket_rim(), d, true),
+            &blend(pocketed_plate, &pocket_rim(), d, true),
             24_000.0 - 3_000.0 - removed,
             1e-6 * removed / 21_000.0,
         );
     }
-    assert_no_room(&blend(false, pocketed_plate, &pocket_rim(), 5.5, true));
 }
 
 // ---- WR-635: a sloped basin's front rim chamfered past the slab's front ----------------------
@@ -334,15 +321,9 @@ fn a_sloped_basin_rim_chamfer_past_the_slab_front_is_subtracted() {
     ];
     for (basin, d) in cases {
         let edge = (p(20.0, basin.rim, 30.0), p(80.0, basin.rim, 30.0));
-        let outcome = blend_body(true, basin, &[edge], d, true);
+        let outcome = blend_body(basin, &[edge], d, true);
         assert_builds(&outcome, basin.chamfered_volume(d), 1e-8);
     }
-    let basin = Basin {
-        rim: 1.0,
-        lean: 0.25,
-    };
-    let edge = (p(20.0, 1.0, 30.0), p(80.0, 1.0, 30.0));
-    assert_no_room(&blend_body(false, basin, &[edge], 2.0, true));
 }
 
 #[test]
@@ -353,23 +334,14 @@ fn a_small_sloped_basin_rim_chamfer_is_unchanged() {
         lean: 0.25,
     };
     let edge = (p(20.0, 1.0, 30.0), p(80.0, 1.0, 30.0));
-    for cliff in [false, true] {
-        let outcome = blend_body(cliff, basin, &[edge], 0.5, true);
-        assert_builds(&outcome, basin.chamfered_volume(0.5), 1e-8);
-    }
+    let outcome = blend_body(basin, &[edge], 0.5, true);
+    assert_builds(&outcome, basin.chamfered_volume(0.5), 1e-8);
 }
 
 /// [`blend`] on a [`Basin`].
-fn blend_body(
-    cliff: bool,
-    basin: Basin,
-    edges: &[(Point3, Point3)],
-    r: f64,
-    chamfer: bool,
-) -> Outcome {
+fn blend_body(basin: Basin, edges: &[(Point3, Point3)], r: f64, chamfer: bool) -> Outcome {
     BASIN.with(|c| c.set(Some((basin.rim, basin.lean))));
     blend(
-        cliff,
         |k| {
             let (rim, lean) = BASIN.with(std::cell::Cell::get).unwrap();
             Basin { rim, lean }.build(k)

@@ -1538,7 +1538,6 @@ mod tests {
         use crate::surface::procedural_sweep::ProceduralSweep;
 
         with_brep(|k, b, fenv| {
-            k.fixes.internal_pole_row_through_knot = true;
             k.fixes.keep_exact_pcurves = true;
             let circle = |frame: Axis2Placement, start, end| {
                 BSplineCurve::create_circle_segment(

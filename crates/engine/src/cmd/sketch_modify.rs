@@ -607,7 +607,7 @@ fn trim(s: &mut Session, p: &Value) -> Result<Value> {
     let at = req_vec2(cmd, p, "at")?;
     let (out, info) = edit(s, p, cmd, false, |sk, doc| {
         let ci = curve_arg(sk, p, cmd)?;
-        let released = release_line_offsets(sk, doc, ci, cmd)?;
+        let released = release_trim_offsets(sk, doc, ci, cmd)?;
         let (out, _) = remove_piece(sk, ci, at, cmd)?;
         doc.prune_model_params();
         Ok(out.released(released))
@@ -615,16 +615,33 @@ fn trim(s: &mut Session, p: &Value) -> Result<Value> {
     reply(cmd, TrimResult { result: out, sketch: info, created: None, param_warnings: Vec::new() })
 }
 
-/// Source lines and their single-line offsets can have independent endpoints. Materialize
-/// the affected line chains before Trim, retaining their original driving distance parameters
-/// as point-line dimensions. Without a dimension, the stored distance stays a fixed distance.
-/// Closed or mixed-curve output chains still need their association.
-fn release_line_offsets(sk: &mut Sketch, doc: &solidcraft_doc::Document, ci: usize, cmd: &str) -> Result<Vec<String>> {
+/// Which family of curve an offset Trim can release: lines, or circles and arcs (round).
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Released {
+    Line,
+    Round,
+}
+
+fn released_family(kind: &CurveKind) -> Option<Released> {
+    match kind {
+        CurveKind::Line { .. } => Some(Released::Line),
+        CurveKind::Circle { .. } | CurveKind::Arc { .. } => Some(Released::Round),
+        _ => None,
+    }
+}
+
+/// Source lines, circles and arcs and their offsets can have independent ends. Materialize the
+/// affected offsets before Trim, retaining their original driving distance parameters as
+/// point-line dimensions (lines) or nested circle-circle gaps (circles and arcs, #7390). Without
+/// a dimension, the stored distance stays a fixed distance. Offsets mixing lines with arcs still
+/// need their association.
+fn release_trim_offsets(sk: &mut Sketch, doc: &solidcraft_doc::Document, ci: usize, cmd: &str) -> Result<Vec<String>> {
     let Some(curve) = sk.curves.get(ci) else { return Ok(Vec::new()) };
-    if curve.infinite || sk.is_linked_curve(ci) || !matches!(curve.kind, CurveKind::Line { .. }) {
+    if curve.infinite || sk.is_linked_curve(ci) || released_family(&curve.kind).is_none() {
         return Ok(Vec::new());
     }
     let id = curve.id.clone();
+    let family = |id: &String| sk.curve_index(id).and_then(|ci| sk.curves.get(ci)).and_then(|c| released_family(&c.kind));
     let affected: Vec<usize> = sk
         .offsets
         .iter()
@@ -633,10 +650,12 @@ fn release_line_offsets(sk: &mut Sketch, doc: &solidcraft_doc::Document, ci: usi
             (offset.topology.is_none()
                 && (offset.sources.iter().any(|(source, _)| source == &id) || (offset.sources.len() == 1 && offset.outputs.contains(&id)))
                 && offset.sources.len() == offset.outputs.len()
-                && offset.sources.iter().zip(&offset.outputs).all(|((source, _), output)| {
-                    [source, output]
+                && offset.sources.first().and_then(|(first, _)| family(first)).is_some_and(|kind| {
+                    offset
+                        .sources
                         .iter()
-                        .all(|id| sk.curve_index(id).and_then(|ci| sk.curves.get(ci)).is_some_and(|c| matches!(c.kind, CurveKind::Line { .. })))
+                        .zip(&offset.outputs)
+                        .all(|((source, _), output)| family(source) == Some(kind) && family(output) == Some(kind))
                 }))
             .then_some(i)
         })
@@ -691,7 +710,9 @@ fn release_offsets(sk: &mut Sketch, doc: &solidcraft_doc::Document, mut affected
             let source = sk.curve_index(source).ok_or_else(|| bad(cmd, "missing offset source"))?;
             let target = sk.curve_index(output).ok_or_else(|| bad(cmd, "missing offset line"))?;
             let kind = match sk.curves.get(target).map(|c| &c.kind) {
-                Some(CurveKind::Arc { .. }) => ConstraintKind::CircleCircleDistance { a: source, b: target, value, circles: TwoCircles::Nested },
+                Some(CurveKind::Arc { .. } | CurveKind::Circle { .. }) => {
+                    ConstraintKind::CircleCircleDistance { a: source, b: target, value, circles: TwoCircles::Nested }
+                }
                 Some(CurveKind::Line { a: p, .. }) => {
                     let p = *p;
                     if !sk.constraints.iter().any(|c| {
@@ -702,7 +723,7 @@ fn release_offsets(sk: &mut Sketch, doc: &solidcraft_doc::Document, mut affected
                     }
                     ConstraintKind::PointLineDistance { p, l: source, value }
                 }
-                _ => return Err(bad(cmd, "only offset lines and arcs can be released")),
+                _ => return Err(bad(cmd, "only offset lines, circles and arcs can be released")),
             };
             let id = sk.add_constraint(kind.clone(), dimension.as_ref().and_then(|c| c.param.clone()))?;
             if let Some(dimension) = &dimension
@@ -987,7 +1008,7 @@ fn trim_path_reply(s: &mut Session, p: &Value) -> Result<TrimPathResult> {
             after = (si, t);
             // A piece trim refuses (a closed spline crossed once) stays as it was.
             let before = sk.clone();
-            let cut = release_line_offsets(sk, doc, ci, cmd).and_then(|released| {
+            let cut = release_trim_offsets(sk, doc, ci, cmd).and_then(|released| {
                 let (out, gone) = remove_piece(sk, ci, q, cmd)?;
                 Ok((out.released(released), gone))
             });

@@ -3805,8 +3805,8 @@ pub(crate) fn convert_domain_from_nurbs_to_step_with(
 /// The fraction of the domain, in `u` and in `v`, a step of `CoverCoincidentSurface`'s
 /// drops may cover before [`crossed_seam_or_pole`] calls it a crossing of a seam or a pole
 /// (`sdMaxStepRatio`, local to `sm_CrossedSeamOrPole` upstream; at file scope in the
-/// SolidCraft fork, tangency-labs/smlib@16bf1cb, so the seam-jump test of
-/// `Kernel::fixes.cover_wraps_across_closed_seam` reads the same limit).
+/// SolidCraft fork, tangency-labs/smlib@16bf1cb, so WR-599's seam-jump test reads the
+/// same limit).
 pub(crate) const MAX_STEP_RATIO: f64 = 0.4;
 
 /// Whether a step from `prev_uv` to `curr_uv` crossed a seam or a pole

@@ -488,14 +488,13 @@ pub use brep::ToleranceGaps;
 /// `SmBrep::ValidateAndUpdateTolerances(bValidateOnly, rbTolerancesViolatedOrUpdated,
 /// .., pAList, eTestLevel)`: for every face's upward-faceuse edge use (an edge use and
 /// its mate once) the vertex/edge and vertex/face gaps at both ends and the edge/face
-/// gap. Unless `validate_only`, a vertex with a gap over its tolerance (over half of
-/// it with [`crate::kernel::UpstreamFixes::validate_tolerances_fixes_reported_gaps`],
-/// WR-679) is grown to twice its larger gap, and an edge with an edge/face gap over its
-/// tolerance is grown (with its vertices) to twice the gap when the gap is under the
-/// B-rep's box diagonal / 800; tolerances only grow. The gaps still over half the vertex
-/// tolerance (tests 0-3) or over the edge tolerance (test 4) are then reported into
-/// `reports` (list 2 of `SmBrep`, about the edge use) at `level` (0..4), in native
-/// order. Returns whether a gap was over its tolerance and the largest vertex gaps.
+/// gap. Unless `validate_only`, a vertex with a gap over half its tolerance (not upstream,
+/// WR-679: upstream takes the whole tolerance) is grown to twice its larger gap, and an
+/// edge with an edge/face gap over its tolerance is grown (with its vertices) to twice the
+/// gap when the gap is under the B-rep's box diagonal / 800; tolerances only grow. The
+/// gaps still over half the vertex tolerance (tests 0-3) or over the edge tolerance (test
+/// 4) are then reported into `reports` (list 2 of `SmBrep`, about the edge use) at
+/// `level` (0..4), in native order. Returns whether a gap was over its tolerance and the largest vertex gaps.
 ///
 /// # Errors
 ///
