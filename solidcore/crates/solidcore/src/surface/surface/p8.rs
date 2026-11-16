@@ -3293,6 +3293,23 @@ impl Surface {
         } else {
             Point2::new(good_param, degen_param)
         };
+
+        // The pole assumption may not hold (the edge need not be collapsed), and the
+        // drop is not checked by the steps above. The closest point is never farther
+        // than the guess or the pole, both surface points: a result farther than
+        // both is not a closest point, so it is reported as a failure (#18052).
+        let result_pt = self.evaluate_point(k, uv)?;
+        let bound_sq = srf_pt
+            .distance_squared(test_pt)
+            .min(pole_pt.distance_squared(test_pt));
+        let slack = tol.max(EFF_ZERO) + crate::geom::vector3d::sqrt(bound_sq) * EFF_ZERO;
+        let limit = crate::geom::vector3d::sqrt(bound_sq) + slack;
+        if result_pt.distance_squared(test_pt) > limit * limit {
+            return Err(SolidError::surface_failed(
+                OP_INVERT,
+                "the point dropped near the singularity is farther than the guess",
+            ));
+        }
         Ok(SingularityInversion { uv, reason })
     }
 }
@@ -3769,6 +3786,35 @@ mod tests {
             )
             .unwrap(),
         )
+    }
+
+    /// #18052: a pole edge that is not collapsed (the bilinear surface has none) must
+    /// not yield a success farther from the point than the guess or the pole.
+    #[test]
+    fn near_singularity_never_reports_a_point_farther_than_the_guess() {
+        let k = Kernel::default();
+        let s = bilinear();
+        let dom = Extent2d::from_bounds(0.0, 0.0, 1.0, 1.0);
+        let tol = 1e-4;
+        for p in [
+            Vec3::new(1.0, 40.0, 3.0),
+            Vec3::new(-30.0, -2.0, 5.0),
+            Vec3::new(2.0, 1.5, 100.0),
+            Vec3::new(0.3, -50.0, -4.0),
+        ] {
+            for guess in [Point2::new(0.99, 0.4), Point2::new(0.01, 0.6)] {
+                let Ok(r) = s.invert_point_near_singularity(&k, p, &dom, guess, tol) else {
+                    continue;
+                };
+                let guess_pt = s.evaluate_point(&k, guess).unwrap();
+                let got = s.evaluate_point(&k, r.uv).unwrap();
+                assert!(
+                    got.distance(p) <= guess_pt.distance(p) + tol,
+                    "result {:?} is farther from {p:?} than the guess",
+                    r.uv
+                );
+            }
+        }
     }
 
     #[test]
