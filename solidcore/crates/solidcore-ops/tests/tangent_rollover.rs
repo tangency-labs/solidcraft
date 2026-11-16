@@ -1523,8 +1523,8 @@ fn boss_edge_round_removed(r: f64) -> f64 {
 /// bottom circle, square to E. The round ends on the wall continued below the boss's bottom,
 /// with a cap edge from R to W on the side. Before, the end corner's patch on the wall failed:
 /// "Fillet Corner Error: Corner Geometry Computation Failure" (status 1001), with the corpus's
-/// fix set and with none. Now, with either: valid at the full check, the round one procedural
-/// blend face with its rails the lines along x through (x, -20 + r, 30) and (x, -20, 30 - r),
+/// fix set and with none. Now, with either: valid at the full check, the round one face on its
+/// exact cylinder with its rails the lines along x through (x, -20 + r, 30) and (x, -20, 30 - r),
 /// the cap edge through R and W, and the volume the input's less [`boss_edge_round_removed`].
 /// 10 faces, 24 edges and 16 vertices: the input's 9, 21 and 14 with the round's face; its two
 /// rails, its two end curves and the cap edge in place of the rounded edge and E (the cap lies
@@ -1583,8 +1583,9 @@ fn a_round_ending_at_a_block_across_its_edge_ends_on_the_block_s_side_below_its_
 const BLOCK_EDGE_ROUND_TOPOLOGY: (usize, usize, usize) = (13, 33, 22);
 
 /// The box's edge y = -20, z = 30 of `input` rounded `r`, with the corpus's fix set (`corpus`)
-/// or none: built, valid at the full check, `topology` (faces, edges, vertices), one procedural
-/// blend face, its rails the lines along x through (x, -20 + r, 30) and (x, -20, 30 - r), the
+/// or none: built, valid at the full check, `topology` (faces, edges, vertices), the round one
+/// face on its exact class, the cylinder of radius r along x about (-20 + r, 30 - r), its rails
+/// the lines along x through (x, -20 + r, 30) and (x, -20, 30 - r), the
 /// cap edge on the side through x = -`side_x`, z = (30 - r + 28) / 2, and the volume the
 /// input's less `removed`.
 fn assert_round_into_boss_builds(
@@ -1596,6 +1597,7 @@ fn assert_round_into_boss_builds(
     corpus: bool,
 ) {
     use solidcore::query::api_queries::edge_closest_point;
+    use solidcore::surface::surface::SurfaceKind;
     let b = input();
     let before = b.volume(1e-9).unwrap();
     let e = edge_at(&b, [-30.0, -20.0, 30.0]);
@@ -1617,18 +1619,25 @@ fn assert_round_into_boss_builds(
         counts, topology,
         "r {r} corpus {corpus}: faces, edges, vertices"
     );
+    // the round's face is its exact class: the cylinder of radius r along x about
+    // (-20 + r, 30 - r)
     let rounds = brep
         .face_list()
         .iter()
         .filter(|&&f| {
-            brep.face(f)
-                .unwrap()
-                .surface
-                .as_ref()
-                .is_some_and(|s| s.procedural_blend().is_some())
+            let surface = brep.face(f).unwrap().surface.as_ref().unwrap();
+            match surface.kind() {
+                SurfaceKind::Cone(c) if c.is_cylinder() && (c.bot_radius() - r).abs() < 1e-9 => {
+                    let place = c.rev().position();
+                    let (o, a) = (place.origin(), place.z_axis());
+                    (o.y - (-20.0 + r)).hypot(o.z - (30.0 - r)) < 1e-9
+                        && a.y.hypot(a.z) < 1e-9 * a.length()
+                }
+                _ => false,
+            }
         })
         .count();
-    assert_eq!(rounds, 1, "r {r} corpus {corpus}: procedural blend faces");
+    assert_eq!(rounds, 1, "r {r} corpus {corpus}: the round's cylinder");
     let on_edge = |p: [f64; 3]| {
         let q = solidcore::Vec3::new(p[0], p[1], p[2]);
         brep.edge_list().iter().any(|&e| {
