@@ -1574,6 +1574,62 @@ mod tests {
         }
     }
 
+    /// A tolerance the caller gives, larger than the other surface's own, keeps a touching
+    /// point within it: the crossing loop of `ssi-revolution-plane-oblique-swapped` (round
+    /// the axis of a revolution about 2 across) is bigger than the revolution's tolerance
+    /// 5.15e-3 but far smaller than the plane's default tolerance 3.49e3. Asked for at that
+    /// tolerance, the plane-first intersection gives one touching point, deviation 0.2,
+    /// past the revolution's tolerance and within the caller's: an answer at the size the
+    /// caller asked for, which `intersect_surfaces_within` keeps. Without a tolerance from
+    /// the caller the same point is refused
+    /// (`plane_first_pairs_refuse_touching_points_where_the_plane_crosses`).
+    #[test]
+    fn a_touching_point_within_the_callers_tolerance_is_not_refused() {
+        use solidcore::intersect::api_intersectors::intersect_surfaces_within;
+        use solidcore::surface::surface::TsectCurveType;
+        let name = "ssi-revolution-plane-oblique-swapped";
+        let c = plane_first(name);
+        let (t, surface_tolerance) = c.tolerances();
+
+        // the premises: touching points only, one past the revolution's tolerance, none
+        // past the caller's, and the loop is smaller than the caller's tolerance
+        let (r, status) = c.intersect(Some(t));
+        status.unwrap();
+        assert!(
+            !r.curve_types.is_empty()
+                && r.curve_types.iter().all(|ty| *ty == TsectCurveType::Touching),
+            "{name}: {:?} {:?}",
+            r.curve_types,
+            r.deviations
+        );
+        assert!(
+            r.deviations.iter().any(|d| *d > surface_tolerance)
+                && r.deviations.iter().all(|d| *d <= t),
+            "{name}: {:?}",
+            r.deviations
+        );
+        let (crossing, status) = c.intersect(Some(surface_tolerance));
+        status.unwrap();
+        assert_crossing_curves(&c, name, &crossing, (1, Crossing::Loop), surface_tolerance);
+        let iv = crossing.curves_3d[0].natural_interval();
+        let pts: Vec<Vec3> = (0..=64)
+            .map(|i| {
+                crossing.curves_3d[0]
+                    .evaluate_point(&c.k, iv.evaluate(f64::from(i) / 64.0))
+                    .unwrap()
+            })
+            .collect();
+        let span = pts
+            .iter()
+            .flat_map(|p| pts.iter().map(move |q| p.distance(*q)))
+            .fold(0.0, f64::max);
+        assert!(surface_tolerance < span && span < t, "{name}: loop {span} across");
+
+        let (curves, status) = intersect_surfaces_within(&c.k, &c.plane, &c.revolution, Some(t));
+        status.unwrap();
+        assert_eq!(curves.len(), r.curves_3d.len(), "{name}");
+    }
+
     /// Known failing, tangency-labs/solidcraft#17720 (replaces
     /// `wr51_plane_first_pairs_report_their_touching_point`, which asserted the lone touching
     /// point): with the plane first and the default tolerance, the intersection should find

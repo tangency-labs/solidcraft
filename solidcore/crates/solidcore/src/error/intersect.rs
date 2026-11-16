@@ -53,7 +53,8 @@ pub enum IntersectFailure {
     /// has no direction.
     StepTangentTooShort,
     /// A surface/surface intersection found touching points only, farther from one of the
-    /// surfaces than the other surface's own tolerance, but the other surface has points
+    /// surfaces than the other surface's own tolerance (and than the caller's tolerance,
+    /// when it gave a larger one), but the other surface has points
     /// strictly on both sides of the plane it was intersected with, over the plane's
     /// domain: the plane crosses it along curves the intersection missed. `tolerance` is the
     /// approximation tolerance the intersection ran at; `surface_tolerance` is the other

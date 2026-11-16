@@ -46,7 +46,8 @@
 //! curve with its natural interval). `SM_ASSERT_VALID` and the
 //! `SM_DEBUG_CODE` drawing are not ported. Not upstream (tangency-labs/solidcraft#17720):
 //! [`intersect_surfaces`] and [`intersect_surfaces_within`] refuse a result of touching
-//! points only, any farther from the surfaces than the other surface's own tolerance,
+//! points only, any farther from the surfaces than the other surface's own tolerance
+//! (and than the caller's tolerance of [`intersect_surfaces_within`], when larger),
 //! between a plane and a surface the plane crosses
 //! ([`IntersectFailure::PointsWhereAPlaneCrosses`]); upstream returns the points.
 
@@ -351,15 +352,16 @@ const CROSSING_WITNESS_REL: f64 = 1e-9;
 /// the other surface's box lies over the plane's domain, every zero is a point of both
 /// surfaces, so the intersection has a curve. Touching points are still an answer when
 /// each lies within the other surface's own tolerance of both surfaces (its deviation),
-/// as for a crossing curve smaller than that tolerance; a point farther apart is the
-/// wrong answer, and the result is refused. The grid only finds witnesses: a result with
-/// no witness on one side is kept as before.
+/// as for a crossing curve smaller than that tolerance, or within `approx_tol_3d` when
+/// the caller gives a larger one (an answer at the size the caller asked for); a point
+/// farther apart than both is the wrong answer, and the result is refused. The grid
+/// only finds witnesses: a result with no witness on one side is kept as before, as is
+/// one whose tolerances cannot be computed.
 ///
 /// # Errors
 ///
 /// [`IntersectFailure::PointsWhereAPlaneCrosses`] when the result is touching points
-/// only and the plane crosses the other surface; those of the intersector's default
-/// tolerances when it names them.
+/// only and the plane crosses the other surface.
 fn refuse_points_where_a_plane_crosses(
     k: &Kernel,
     surfaces: [&Surface; 2],
@@ -448,23 +450,36 @@ fn refuse_points_where_a_plane_crosses(
         return Ok(());
     }
 
+    // (a tolerance that cannot be computed keeps the result, as the checks above do)
+    let Ok(other_first) =
+        SurfaceIntersector::new(k, other, other_domain, plane_surface, plane_domain, false)
+    else {
+        return Ok(());
+    };
+    let surface_tolerance = other_first.this_approx_tol_3d;
+    // a point within the other surface's own tolerance of both surfaces is an answer at
+    // that surface's size (a crossing curve smaller than the tolerance, as at a cone's
+    // apex), and one within the caller's tolerance is an answer at the size the caller
+    // asked for; only points farther apart than both are refused (a NaN deviation is
+    // not within)
+    let accepted = match approx_tol_3d {
+        Some(t) if t > surface_tolerance => t,
+        _ => surface_tolerance,
+    };
+    let within = result.deviations.len() == result.curve_types.len()
+        && result.deviations.iter().all(|d| *d <= accepted);
+    if within {
+        return Ok(());
+    }
     let [s1, s2] = surfaces;
     let [d1, d2] = domains;
     let tolerance = match approx_tol_3d {
         Some(t) => t,
-        None => SurfaceIntersector::new(k, s1, d1, s2, d2, false)?.this_approx_tol_3d,
+        None => match SurfaceIntersector::new(k, s1, d1, s2, d2, false) {
+            Ok(si) => si.this_approx_tol_3d,
+            Err(_) => return Ok(()),
+        },
     };
-    let surface_tolerance =
-        SurfaceIntersector::new(k, other, other_domain, plane_surface, plane_domain, false)?
-            .this_approx_tol_3d;
-    // a point within the other surface's own tolerance of both surfaces is an answer at
-    // that surface's size (a crossing curve smaller than the tolerance, as at a cone's
-    // apex); only points farther apart than it are refused (a NaN deviation is not within)
-    let within = result.deviations.len() == result.curve_types.len()
-        && result.deviations.iter().all(|d| *d <= surface_tolerance);
-    if within {
-        return Ok(());
-    }
     Err(SolidError::intersect(
         OP_SURFACES,
         IntersectFailure::PointsWhereAPlaneCrosses {
