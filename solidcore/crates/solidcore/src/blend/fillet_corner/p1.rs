@@ -1361,10 +1361,10 @@ fn keep_end_definition_of(
     if !k.fixes.fillet_round_as_definition {
         return Ok(());
     }
-    let mut boundary = Vec::with_capacity(curves.len());
-    for curve in curves {
-        boundary.push(nurbs_curve(curve)?.clone());
-    }
+    let boundary = curves
+        .iter()
+        .map(|curve| nurbs_curve(curve).cloned())
+        .collect::<Result<Vec<_>>>()?;
     let definition = CornerDefinition::end(k, support, boundary)?;
     definition.recertify(k, net)?;
     net.set_corner_definition(definition);
@@ -2822,7 +2822,7 @@ impl FilletCorner {
         // first part: S, the edges up to the cut, the head, then W back to S; second: S to W,
         // the tail, the rest
         let mut first: Vec<Curve> = Vec::new();
-        let mut second: Vec<Curve> = vec![Curve::from(Line::from_points(s_point, w_point, 3))];
+        let mut rest: Vec<Curve> = Vec::new();
         let mut first_faces = Vec::new();
         for (i, &e) in loop_edges.iter().enumerate() {
             let fe = env.pseudo.fillet_edge(e)?;
@@ -2835,12 +2835,14 @@ impl FilletCorner {
                     first_faces.extend(rib_face);
                 }
                 core::cmp::Ordering::Equal => {}
-                core::cmp::Ordering::Greater => second.push(curve_of(e)?),
+                core::cmp::Ordering::Greater => rest.push(curve_of(e)?),
             }
         }
         first.push(head.copy(env.k)?);
         first.push(Curve::from(Line::from_points(w_point, s_point, 3)));
-        second.insert(1, tail);
+        let mut second: Vec<Curve> =
+            vec![Curve::from(Line::from_points(s_point, w_point, 3)), tail];
+        second.extend(rest);
         let first_on_end = first_faces.contains(&cap.end_face);
         let (end_part, wall_part) = if first_on_end {
             (first, second)
