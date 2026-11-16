@@ -280,7 +280,6 @@ fn solidcraft_flags(k: &mut Kernel) {
     k.fixes.offset_analytic_mate_edges = true;
     k.fixes.offset_extension_as_itself = true;
     k.fixes.offset_extension_from_base = true;
-    k.fixes.offset_resolve_crossing_loops = true;
     k.fixes.offset_stitch_at_body_tolerance = true;
     k.fixes.point_solve_keeps_triangle_guess = true;
     k.fixes.proto_edge_self_loop_on_vertex_degenerate = true;
