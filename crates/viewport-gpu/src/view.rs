@@ -723,16 +723,17 @@ pub struct BlockTris {
 }
 
 /// A body's edge lines in a model scene block ([`BlockBytes::lines`], by line), drawn again in
-/// three styles ([`lit_line_style`]): a halo, the line over it, and where the model hides the
-/// edge, a dimmed line.
+/// up to three styles ([`lit_line_style`]): a halo, the line over it, and where the model hides
+/// the edge, a dimmed line. A style left out (`None`) is not drawn: a hovered body has no dimmed
+/// line, a selected body's hidden edges (a preference) only that one.
 #[derive(Clone, Debug, PartialEq)]
 pub struct LitEdges {
     /// The block's key ([`SceneBlock::key`]).
     pub block: u64,
     pub lines: std::ops::Range<u32>,
-    pub halo: u32,
-    pub core: u32,
-    pub hidden: u32,
+    pub halo: Option<u32>,
+    pub core: Option<u32>,
+    pub hidden: Option<u32>,
 }
 
 /// The largest palette index a lit line can name: its style rides in the draw's first vertex,
@@ -1744,16 +1745,17 @@ fn lit_lines(
     p: &wgpu::RenderPipeline,
     blocks: &std::collections::HashMap<u64, BlockGpu>,
     edges: &[LitEdges],
-    style: fn(&LitEdges) -> u32,
+    style: fn(&LitEdges) -> Option<u32>,
     tally: &Tally,
 ) {
-    if edges.is_empty() {
+    if edges.iter().all(|e| style(e).is_none()) {
         return;
     }
     pass.set_pipeline(p);
     for e in edges {
+        let Some(style) = style(e) else { continue };
         let Some(batch) = blocks.get(&e.block).and_then(|b| b.lines.as_ref()) else { continue };
-        let first = style(e).saturating_mul(6);
+        let first = style.saturating_mul(6);
         // The block's lines may span several buffers: each draws its share of the range.
         let mut at = 0u32;
         for (buffer, count) in &batch.parts {

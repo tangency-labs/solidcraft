@@ -933,8 +933,10 @@ mod imp {
         let (brep, [_, middle, last]) = swept(plane, pieces, path, translate)?;
         let body = body_of(brep, "sweep")?;
         // The walls known by the profile carried half way (past the start's edges: a wall the
-        // start touches by no edge, as round a closed path, and walls along later path segments).
-        let inside = seeds(plane, pieces, |q| apply(&middle, q));
+        // start touches by no edge, as round a closed path), and half way along each segment of
+        // the path (SMLib makes a wall along each segment of a path of several).
+        let mut inside = seeds(plane, pieces, |q| apply(&middle, q));
+        inside.extend(segment_seeds(plane, pieces, path, 0..path.len(), translate));
         let start = path.first().map(crate::PathSeg::start);
         let end = path.last().map(seg_ends).transpose()?.map(|(_, b)| b);
         let roles = match (start, end) {
@@ -1125,6 +1127,7 @@ mod imp {
             let (piece, at_end) = if translate {
                 let (piece, [_, middle, last]) = swept(&pose, pieces, segs, true)?;
                 inside.extend(seeds(&pose, pieces, |q| apply(&middle, q)));
+                inside.extend(segment_seeds(&pose, pieces, segs, 0..segs.len(), true));
                 (piece, placed(&pose, &last))
             } else {
                 // On past each mitre, far enough to take every point of the section to the
@@ -1153,6 +1156,8 @@ mod imp {
                     let at = carried_along(&route, pre + 0.5 * run_length - ahead).map_or_else(|| apply(&middle, q), |m| apply(&m, q));
                     Seed { at, piece }
                 }));
+                let lead = usize::from(pre > 0.0);
+                inside.extend(segment_seeds(&from, pieces, &route, lead..lead + segs.len(), false));
                 if let Some((at, toward, _)) = entry {
                     piece = combined(&piece, &half_space(at, -toward, size)?, solidcraft_smlib::BooleanOp::Subtract, "sweep mitre")?;
                 }
@@ -1175,6 +1180,39 @@ mod imp {
         let body = body_of(brep, "sweep")?;
         let roles = roles(&body, plane, (!closed).then_some(&pose), &seeds(plane, pieces, |q| q), &inside, false)?;
         with_history(body, &roles, pieces)
+    }
+
+    /// Each piece's middle carried half way along each segment of `route` in `segments` (the
+    /// profile on `plane` where the route starts): on the wall the piece sweeps along that
+    /// segment, wherever it is carried to, since the motion is the sweep's own (moved only, when
+    /// `translate`; else as [`carried_along`] carries it, so none past a segment that is not a
+    /// line or an arc). A route of one segment has its walls known by its middle already.
+    fn segment_seeds(plane: &Plane, pieces: &[Piece], route: &[crate::PathSeg], segments: std::ops::Range<usize>, translate: bool) -> Vec<Seed> {
+        let Some((origin, t0)) = route.first().and_then(|s| seg_at(s, 0.0)) else { return Vec::new() };
+        if route.len() < 2 {
+            return Vec::new();
+        }
+        let mut out = Vec::new();
+        let mut before = 0.0;
+        for (j, s) in route.iter().enumerate() {
+            let length = seg_len(s);
+            let middle = before + 0.5 * length;
+            before += length;
+            if !segments.contains(&j) || !middle.is_finite() {
+                continue;
+            }
+            for (piece, x) in pieces.iter().enumerate() {
+                let q = plane.to_world(x.seg.point_at(0.5));
+                // A point standing ahead of the path's start keeps that lead along it.
+                let motion = if translate {
+                    seg_at(s, 0.5).map(|(at, _)| affine_moved(&IDENTITY, at - origin))
+                } else {
+                    carried_along(route, middle - solidcore_ops::affine::distance_along(origin.into(), t0.into(), q.into()))
+                };
+                out.extend(motion.map(|m| Seed { at: apply(&m, q), piece }));
+            }
+        }
+        out
     }
 
     /// The rigid motion carrying a section from the start of `route` to `along` (clamped to the

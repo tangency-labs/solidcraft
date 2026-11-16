@@ -21,6 +21,7 @@ mod text_value;
 /// admission in one place prevents independent binary/size/parser variants.
 struct ParsedDxf {
     pairs: Vec<(i32, String)>,
+    malformed_groups: bool,
 }
 
 impl ParsedDxf {
@@ -31,21 +32,34 @@ impl ParsedDxf {
         if text.starts_with("AutoCAD Binary DXF") {
             return Err(IoError::Invalid("binary DXF is not supported; save as ASCII DXF".into()));
         }
-        Ok(Self { pairs: pairs(text) })
+        Ok(parse_pairs(text))
     }
 }
 
 /// One group-code parser: text values1/3 stay raw; other values normalize.
 /// Legacy Ent::text access retains its historical trim. Layered callers read raw Ent::s.
-fn pairs(text: &str) -> Vec<(i32, String)> {
+fn parse_pairs(text: &str) -> ParsedDxf {
     let mut out = Vec::new();
+    let mut malformed_groups = false;
     let mut lines = text.lines();
-    while let (Some(c), Some(v)) = (lines.next(), lines.next()) {
-        let Ok(code) = c.trim().parse::<i32>() else { continue };
+    while let Some(c) = lines.next() {
+        let Some(v) = lines.next() else {
+            malformed_groups = true;
+            break;
+        };
+        let Ok(code) = c.trim().parse::<i32>() else {
+            malformed_groups = true;
+            continue;
+        };
         let value = if matches!(code, 1 | 3) { v } else { v.trim() };
         out.push((code, value.to_string()));
     }
-    out
+    ParsedDxf { pairs: out, malformed_groups }
+}
+
+#[cfg(test)]
+fn pairs(text: &str) -> Vec<(i32, String)> {
+    parse_pairs(text).pairs
 }
 
 fn units_scale(p: &[(i32, String)]) -> f64 {
@@ -143,6 +157,9 @@ pub fn read_dxf_file_with_profile(text: &str, profile: DxfReadProfile) -> Result
 }
 
 fn read_layered(parsed: ParsedDxf) -> Result<DxfFile<DxfShape>> {
+    if parsed.malformed_groups {
+        return Err(IoError::Invalid("invalid layered DXF group-code/value pair".into()));
+    }
     let p = parsed.pairs;
     let start = layered_section_start(&p, "ENTITIES")?.ok_or_else(|| IoError::Invalid("no ENTITIES section".into()))?;
     layered_integer_fields(&p, start, &[67])?;
@@ -547,6 +564,20 @@ fn layered_polyline(entity: &Ent, k: f64, linetype: DxfLinetype, bytes: &mut usi
     let bulges = entity.f.iter().filter(|(code, _)| *code == 42);
     if entity.s.iter().any(|(code, _)| *code == 42) || bulges.clone().count() > count || bulges.clone().any(|(_, value)| *value != 0.0) {
         return Err(IoError::Invalid("not supported yet: bulged or invalid DXF polyline".into()));
+    }
+    // An X starts one vertex; its Y must precede the next X. Counting two
+    // independent streams cannot prove which vertex owns a component.
+    let mut awaiting_y = false;
+    for (code, _) in &entity.f {
+        match code {
+            10 if !awaiting_y => awaiting_y = true,
+            20 if awaiting_y => awaiting_y = false,
+            10 | 20 => return Err(IoError::Invalid("invalid layered DXF vertex component order".into())),
+            _ => {}
+        }
+    }
+    if awaiting_y {
+        return Err(IoError::Invalid("missing layered DXF vertex Y component".into()));
     }
     Ok(DxfShape::Polyline { points: layered_points(entity, count, k)? })
 }
@@ -4056,5 +4087,28 @@ mod tests {
         let records = section(&parsed.pairs, start).unwrap();
         let mut work = MAX_WORK - 1;
         assert!(layered_plot_styles(&parsed.pairs, &records, &mut work).unwrap_err().to_string().contains("complex"));
+    }
+    #[test]
+    fn layered_straight_vertices_refuse_cross_vertex_coordinate_pairing() {
+        let wrap = |fields: &str| format!("0\nSECTION\n2\nENTITIES\n0\nLWPOLYLINE\n90\n2\n70\n128\n{fields}0\nENDSEC\n0\nEOF\n");
+        let good = wrap("10\n1\n20\n2\n42\n0\n10\n3\n20\n4\n");
+        assert_eq!(
+            read_dxf_file(&good).unwrap().entities()[0].geometry(),
+            &DxfShape::Polyline { points: vec![Vec2::new(1.0, 2.0), Vec2::new(3.0, 4.0)] }
+        );
+        for fields in ["10\n1\n10\n3\n20\n2\n20\n4\n", "10\n1\n20\n2\n20\n4\n10\n3\n", "20\n2\n10\n1\n10\n3\n20\n4\n", "10\n1\n20\n2\n10\n3\n"] {
+            assert!(read_dxf_file(&wrap(fields)).is_err(), "{fields}");
+        }
+    }
+
+    #[test]
+    fn layered_lexical_groups_refuse_without_changing_sketch_import_compatibility() {
+        let base = "0\nSECTION\n2\nENTITIES\n0\nLINE\n10\n0\n20\n0\n11\n1\n21\n2\n0\nENDSEC\n0\nEOF\n";
+        assert!(read_dxf_file(base).is_ok());
+        let expected = read_dxf(base).unwrap();
+        for text in [format!("garbage\n7\n{base}"), format!("10.5\n7\n{base}"), format!("2147483648\n7\n{base}"), format!("{base}999\n")] {
+            assert!(read_dxf_file(&text).is_err(), "{text}");
+            assert_eq!(read_dxf(&text).unwrap(), expected);
+        }
     }
 }

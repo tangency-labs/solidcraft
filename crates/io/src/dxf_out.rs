@@ -3154,4 +3154,22 @@ mod tests {
             &DxfShape::LwPolyline { verts: vec![(Vec2::new(1.0, 4.0), 1.0), (Vec2::new(5.0, 4.0), 1.0)], closed: true }
         );
     }
+    #[test]
+    fn flat_profile_167_rectangles_do_not_overflow_a_32_bit_work_estimate() {
+        // 167 * 200_000 * 129 = 4_308_600_000 exceeds u32::MAX,
+        // although these contours contain only 668 actual line entities.
+        assert!(167u64 * 200_000 * 129 > u64::from(u32::MAX));
+        let mut file = DxfFile::for_flat_pattern_export(167, 0, 0).unwrap();
+        let layer = file.declare_layer("OUTLINE", 7, DxfLinetype::Continuous, None).unwrap();
+        for i in 0..167 {
+            let x = f64::from(i) * 2.0;
+            let points = [Vec2::new(x, 0.0), Vec2::new(x + 1.0, 0.0), Vec2::new(x + 1.0, 1.0), Vec2::new(x, 1.0), Vec2::new(x, 0.0)];
+            for pair in points.windows(2) {
+                file.push(layer, DxfShape::Line(pair[0], pair[1]), None).unwrap();
+            }
+        }
+        let output = write_dxf_file(&file).unwrap();
+        assert_eq!(entities(&output).len(), 668);
+        assert!(output.len() < 1_000_000);
+    }
 }

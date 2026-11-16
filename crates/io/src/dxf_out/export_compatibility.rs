@@ -172,8 +172,13 @@ impl DxfFile<DxfShape> {
         let entities = add(add(path_entities, mul(bends, 2)?)?, perforations)?;
         // An exact path item has at most 129 sampled extent points (ELLIPSE),
         // or <= 40 SPLINE values; bulged path vertices also fit this ceiling.
-        let values = add(add(mul(path_entities, 129)?, mul(bends, 6)?)?, mul(perforations, 2)?)?;
-        let budget = Budget::new(Producer::FlatPattern, add(contours, 9)?, entities, values, mul(bends, 2048)?)?;
+        // These are conservative ceilings, not allocated or consumed counts.
+        // A modest contour count can exceed usize on wasm32 because every path
+        // reserves the maximum curve complexity. Actual work stays checked.
+        let values = (path_entities as u128) * 129 + (bends as u128) * 6 + (perforations as u128) * 2;
+        let values = usize::try_from(values).unwrap_or(usize::MAX);
+        let text_bytes = usize::try_from((bends as u128) * 2048).unwrap_or(usize::MAX);
+        let budget = Budget::new(Producer::FlatPattern, add(contours, 9)?, entities, values, text_bytes)?;
         Self::with_export_budget(budget)
     }
 
