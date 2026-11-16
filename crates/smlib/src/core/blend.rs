@@ -599,16 +599,6 @@ pub(super) fn finish(k: &mut Kernel, mut b: Brep, solid_in: bool) -> solidcore::
     Ok(Ok(b))
 }
 
-/// [`finish`] for a blend: a closed solid that a blend turns into something that is not one has
-/// been blended past what its faces allow (two chamfers that overlap at a corner, each fine
-/// alone), so it is [`Error::NoRoom`], the refusal that says why, not the generic non-solid one.
-fn finish_blend(k: &mut Kernel, b: Brep, solid_in: bool) -> solidcore::Result<Out<Brep>> {
-    Ok(match finish(k, b, solid_in)? {
-        Err(Error::NotSolid) => Err(Error::NoRoom),
-        other => other,
-    })
-}
-
 /// Runs `f` on a copy of `body` (`brep_copy`).
 pub(super) fn on_copy(call: &'static str, body: &Body, f: impl FnOnce(&mut Kernel, Brep) -> solidcore::Result<Out<Brep>>) -> Result<Body> {
     if body.0.is_poisoned() {
@@ -927,7 +917,7 @@ fn blend_call(
                 let chamfers: Vec<ChamferSize> = each.iter().map(|&d| ChamferSize::Distances([d, d])).collect();
                 let section = Section::Chamfer { sizes: &chamfers, along: &[] };
                 return Ok(match blend_edges(k, &mut w, &picked, &[], section, None, &[], None)? {
-                    Ok(()) => finish_blend(k, w, solid_in)?,
+                    Ok(()) => finish(k, w, solid_in)?,
                     Err(Ok(_)) => Err(Error::Unsupported),
                     Err(Err(e)) => Err(e),
                 });
@@ -960,7 +950,7 @@ fn blend_call(
         let done = blend_edges_stopping(k, &mut w, &picked, &each, section, None, &back, (open == Corners::Open).then_some(&mut patches), first)?;
         if stopped.is_some() {
             return Ok(match overflow_first(k, body, points, tolerance, section, &picked, &mitred, &each, &mut w, dropped)? {
-                Ok(fresh) => finish_blend(k, fresh, solid_in)?,
+                Ok(fresh) => finish(k, fresh, solid_in)?,
                 Err(e) => Err(e),
             });
         }
@@ -975,12 +965,12 @@ fn blend_call(
                 Ok(_) => {}
                 Err(e) => return Ok(Err(Error::Internal(e.to_string()))),
             }
-            return finish_blend(k, w, solid_in);
+            return finish(k, w, solid_in);
         }
         // Each corner opened: its patch removed, the edges round its hole in the result's
         // orders, once per corner point (a vertex picked twice gives its hole twice).
         if !brep_p2::is_manifold_solid(&w)? {
-            return Ok(Err(if solid_in { Error::NoRoom } else { Error::NotSolid }));
+            return Ok(Err(Error::NotSolid));
         }
         let rims = match open_corners(k, &mut w, &patches)? {
             Ok(r) => r,
@@ -1203,7 +1193,7 @@ pub(crate) fn chamfer_sides(body: &Body, points: &[[f64; 3]], tolerance: f64, di
         };
         let section = Section::Chamfer { sizes: std::slice::from_ref(&size), along: &along };
         Ok(match blend_edges(k, &mut w, &picked, &[], section, None, &[], None)? {
-            Ok(()) => finish_blend(k, w, solid_in)?,
+            Ok(()) => finish(k, w, solid_in)?,
             Err(Ok(_)) => Err(Error::Unsupported),
             Err(Err(e)) => Err(e),
         })
@@ -1385,7 +1375,7 @@ pub(crate) fn fillet_variable(
         let solid_in = brep_p2::is_manifold_solid(&w)?;
         let (r0, r1) = (radii.first().copied().unwrap_or(0.0), radii.last().copied().unwrap_or(0.0));
         Ok(match blend_edges(k, &mut w, &[e], &[r0.max(r1)], Section::Round(Turn::Mitre), Some(law), &[], None)? {
-            Ok(()) => finish_blend(k, w, solid_in)?,
+            Ok(()) => finish(k, w, solid_in)?,
             Err(Ok(_)) => Err(Error::Unsupported),
             Err(Err(e)) => Err(e),
         })

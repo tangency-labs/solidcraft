@@ -5816,7 +5816,7 @@ impl SolverGeometryAccess<FilletObject> for SessionObjects<'_> {
                 let edge_start_b = edge_curve_b.evaluate_point(k, edge_ivl_b.min())?;
                 let edge_end_b = edge_curve_b.evaluate_point(k, edge_ivl_b.max())?;
                 for (ia, (face_a, curve_a, kept_a)) in rails_a.iter().enumerate() {
-                    for (ib, (face_b, curve_b, _)) in rails_b.iter().enumerate() {
+                    for (ib, (face_b, curve_b, kept_b)) in rails_b.iter().enumerate() {
                         if face_a != face_b {
                             continue;
                         }
@@ -5841,8 +5841,27 @@ impl SolverGeometryAccess<FilletObject> for SessionObjects<'_> {
                             let mut grown = *eb;
                             grown.expand_absolute(reach);
                             if box_a.are_disjoint(&grown, 0.0) {
-                                continue; // no sample can fall inside the band
+                                // no sample can fall inside the band, and the rails cannot
+                                // cross: `grown` holds rail `b`'s box
+                                continue;
                             }
+                        }
+                        // Not the fork's (#18178): the two kept rails cross or touch on the
+                        // face they share. A rail is the edge of its blend's band there, so
+                        // the other rail runs into that band: the blends overlap where their
+                        // edges share no corner to trim them, and the body built from them is
+                        // not closed. The samples below can step over a short overlap (two
+                        // chamfers at a narrow place, where one's corner mitre reaches a few
+                        // hundredths past the other's rail); the crossing is exact, found by
+                        // the curves' intersection within the solvers' tolerance. Each pair
+                        // once.
+                        if a < b
+                            && !crate::intersect::api_intersectors::curve_crossings(
+                                k, curve_a, kept_a, curve_b, kept_b, None, tol,
+                            )?
+                            .is_empty()
+                        {
+                            return Ok(false);
                         }
                         let ivl_a = *kept_a;
                         let ivl_b = curve_b.natural_interval();
