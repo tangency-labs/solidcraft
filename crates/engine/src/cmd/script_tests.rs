@@ -248,6 +248,52 @@ fn a_design_that_moved_off_its_active_row_keeps_the_table_and_reports_the_row() 
     same(&mut s, &mut t);
 }
 
+/// The export leaves the whole table out and says why, and the rest of the script replays
+/// without it (#15441).
+fn left_out(s: &mut Session, reason: &str) {
+    let r = run(s, "timeline.export_script", json!({}));
+    let omitted = r["omitted"].to_string();
+    assert!(omitted.contains("configurations (") && omitted.contains(reason), "{r}");
+    let t = replay(&r["script"]);
+    assert!(t.doc.configs.is_empty(), "the table is left out whole");
+}
+
+#[test]
+fn a_column_for_a_text_parameter_leaves_the_table_out() {
+    let mut s = Session::default();
+    plate(&mut s);
+    // The script does not create text parameters, so a replay would have no `Label` to configure.
+    s.doc_mut().text_params.push(solidcraft_doc::text_params::TextParam { name: "Label".into(), text: "Plate".into(), comment: String::new() });
+    run(&mut s, "config.configure", json!({"params": ["Label"]}));
+    left_out(&mut s, "parameter `Label`");
+}
+
+#[test]
+fn a_body_column_whose_body_is_not_there_leaves_the_table_out() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 5, "width": 5, "height": 5, "body_name": "Tab"}));
+    let tab = s.doc.features.last().unwrap().name.clone();
+    run(&mut s, "config.configure", json!({"materials": ["Tab"]}));
+    // The feature that makes `Tab` is suppressed, so a replay builds no `Tab` to put a column on.
+    run(&mut s, "timeline.suppress", json!({"feature": tab, "suppressed": true}));
+    left_out(&mut s, "body `Tab`");
+}
+
+#[test]
+fn a_row_the_rules_refuse_leaves_the_table_out() {
+    let mut s = Session::default();
+    plate(&mut s);
+    run(&mut s, "parameters.add", json!({"name": "cap", "expression": "100 mm"}));
+    run(&mut s, "config.configure", json!({"params": ["w"]}));
+    run(&mut s, "config.row", json!({"name": "Wide", "values": {"param:w": "60 mm"}}));
+    let rule = json!({"id": "span", "name": "Width range", "condition": {"type": "always"},
+        "effect": {"type": "parameter_range", "parameter": "w", "minimum": "10 mm", "maximum": "cap"}});
+    run(&mut s, "config.rule", json!({"rules": [rule]}));
+    // Lowering the cap leaves the stored row outside the range; `config.rule` would refuse it.
+    run(&mut s, "parameters.change", json!({"name": "cap", "expression": "50 mm"}));
+    left_out(&mut s, "row `Wide`");
+}
+
 #[test]
 fn a_recorded_feature_that_does_not_fit_is_refused_and_changes_nothing() {
     let mut s = Session::default();

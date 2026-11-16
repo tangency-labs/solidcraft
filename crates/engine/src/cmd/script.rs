@@ -37,7 +37,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .output(output_schema_for::<ExportScriptResult>)
         .params(
         "path?: write the script to this file → script: {commands: [...]} that rebuilds the design (solidcraft-cli eval/run), \
-         steps, omitted: what the script leaves out (appearances, folders, views, configurations with face-appearance columns, print-face assignments); components and assemblies \
+         steps, omitted: what the script leaves out (appearances, folders, views, configurations a replay cannot rebuild, print-face assignments); components and assemblies \
          are not supported yet",
     ),
 ];
@@ -186,7 +186,8 @@ pub(crate) fn step_params(cmd: &str, v: Option<&Value>) -> Result<Vec<Param>> {
 
 fn export_script(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "timeline.export_script";
-    let (commands, omitted) = script_steps(&s.doc)?;
+    let state = s.model.state();
+    let (commands, omitted) = script_steps(&s.doc, &|body| state.body(body).is_some())?;
     let steps = commands.len();
     let script = Script {
         about: ScriptAbout {
@@ -216,8 +217,9 @@ fn not_supported(what: &str) -> EngineError {
     EngineError::Other(format!("not supported yet: a command script of a design with {what} (#886)"))
 }
 
-/// The steps that rebuild `doc` on an empty design, and what they leave out.
-pub(crate) fn script_steps(doc: &Document) -> Result<(Vec<Value>, Vec<String>)> {
+/// The steps that rebuild `doc` on an empty design, and what they leave out. `has_body` says
+/// whether the design has a body of that name now, for the columns of the configuration table.
+pub(crate) fn script_steps(doc: &Document, has_body: &dyn Fn(&str) -> bool) -> Result<(Vec<Value>, Vec<String>)> {
     if !doc.components.is_empty() || !doc.occurrences.is_empty() || !doc.parts.is_empty() || !doc.links.is_empty() {
         return Err(not_supported("components"));
     }
@@ -393,7 +395,7 @@ pub(crate) fn script_steps(doc: &Document) -> Result<(Vec<Value>, Vec<String>)> 
 
     // The configuration table, once the features, parameters and bodies its columns name exist.
     if !doc.configs.is_empty() {
-        match config_steps(doc, &mut omitted) {
+        match config_steps(doc, has_body, &mut omitted) {
             Ok(steps) => out.extend(steps),
             Err(why) => omitted.push(format!("configurations ({why})")),
         }
@@ -407,17 +409,32 @@ pub(crate) fn script_steps(doc: &Document) -> Result<(Vec<Value>, Vec<String>)> 
 
 /// The steps that rebuild the configuration table: its columns, its rows, its rules, then the
 /// active row. Row ids are not kept (a row is found by its name). `Err` says why the table
-/// can't be written, and then none of it is.
-fn config_steps(doc: &Document, omitted: &mut Vec<String>) -> std::result::Result<Vec<Value>, String> {
+/// can't be written, and then none of it is: a replay that stops at one of its steps is worse
+/// than a table listed as left out.
+fn config_steps(doc: &Document, has_body: &dyn Fn(&str) -> bool, omitted: &mut Vec<String>) -> std::result::Result<Vec<Value>, String> {
     let table = &doc.configs;
     let mut out = Vec::new();
+    // The parameters the script creates: the design's own and the inputs the features name. Text
+    // parameters are not among them.
+    let known = doc.all_param_exprs();
     for column in &table.columns {
         let params = match column {
-            Column::Param(name) => json!({"param": name}),
+            Column::Param(name) => {
+                if !known.iter().any(|(known, _, _)| known == name) {
+                    return Err(format!("a column for parameter `{name}`, which the script does not create"));
+                }
+                json!({"param": name})
+            }
             Column::Suppress(id) => {
                 // `config.column` finds the feature by name, so the name has to pick out this one.
                 let name = doc.feature(*id).map(|f| f.name.as_str()).filter(|n| doc.find_feature(n).is_some_and(|f| f.id == *id));
                 json!({"feature": name.ok_or("a suppression column whose feature a name does not pick out")?})
+            }
+            // `config.column` finds the body in the design as the replay has built it by then. A
+            // body that is not there now (its feature is suppressed) is not there then either.
+            Column::Material(body) | Column::Appearance(body) if !has_body(body) => {
+                let kind = if matches!(column, Column::Material(_)) { "material" } else { "appearance" };
+                return Err(format!("a {kind} column for body `{body}`, which is not in the design as it is now"));
             }
             Column::Material(body) => json!({"material": body}),
             Column::Appearance(body) => json!({"appearance": body}),
@@ -435,6 +452,13 @@ fn config_steps(doc: &Document, omitted: &mut Vec<String>) -> std::result::Resul
         out.push(step("config.row", json!({"name": name, "values": values})));
     }
     if !table.rules.is_empty() {
+        // `config.rule` makes every row pass the rules, so a stored row they refuse (a parameter
+        // changed after the row was made) would stop the replay there.
+        for row in &table.rows {
+            if doc.clone().apply_configuration(row.id).is_err() {
+                return Err(format!("row `{}`, which the rules refuse", row.name));
+            }
+        }
         let rules = serde_json::to_value(&table.rules).map_err(|e| e.to_string())?;
         out.push(step("config.rule", json!({"rules": rules})));
     }
