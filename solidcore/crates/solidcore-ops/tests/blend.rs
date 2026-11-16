@@ -784,6 +784,56 @@ fn a_variable_round_s_net_is_certified_on_wide_pieces() {
     assert_eq!(rounds, 1);
 }
 
+/// tangency-labs/solidcraft#17640: a kernel certifies a record's procedural blend once. Every
+/// boolean in an application gives back a record that the next operation reads again, and each
+/// read gave every blend its definition back and certified its net again (6 s a boolean on a
+/// part of 60 such rounds). Read on one kernel twice, the variable round's record certifies its
+/// blend the first time only, and builds the same body both times; with the memo off
+/// (`memoize_curve_caches`, as `curve-memo-off` builds every kernel) each read certifies it.
+#[test]
+fn a_records_procedural_blend_is_certified_once_on_a_kernel() {
+    all_fixes();
+    let b = make_box([0.0; 3], [10.0, 20.0, 30.0]).unwrap();
+    let e = edge_at(&b, [10.0, 10.0, 30.0]);
+    let start = vertex_at(&b, [10.0, 0.0, 30.0]);
+    fillet_variable(&b, e, start, 1, &[0.0, 0.0, 1.0, 1.0], &[2.0, 5.0]).unwrap();
+    let (record, _) = b.to_record().unwrap();
+    let blends = record
+        .faces
+        .iter()
+        .filter(|f| matches!(f.surface, solidcore_record::brep::Surface::Blend { .. }))
+        .count() as u64;
+    assert!(blends > 0, "the variable round kept no definition");
+    for memo in [true, false] {
+        let mut k = Kernel {
+            fixes: solidcore::kernel::UpstreamFixes::all(),
+            memoize_curve_caches: memo,
+            ..Kernel::default()
+        };
+        let read = |k: &mut Kernel| {
+            let before = k.work_counters.blends_recertified();
+            let (mut made, _) = solidcore_convert::brep::to_kernel(k, &record, true).unwrap();
+            let (again, _) = solidcore_convert::brep::to_record(k, &mut made).unwrap();
+            (k.work_counters.blends_recertified() - before, again)
+        };
+        let (first, once) = read(&mut k);
+        let (second, twice) = read(&mut k);
+        assert_eq!(
+            first, blends,
+            "memo {memo}: the first read certifies each blend"
+        );
+        assert_eq!(
+            second,
+            if memo { 0 } else { blends },
+            "memo {memo}: the second read"
+        );
+        assert_eq!(
+            once, twice,
+            "memo {memo}: the two reads build different bodies"
+        );
+    }
+}
+
 /// A law with a corner rounds its edge as the union of its balls (`docs/generic-blend.md` §3.2,
 /// "Corners in a radius law"): at a peak the two sides' rounds cross and end on their crossing,
 /// at a dip the corner ball's zone lies between them. Each removes its balls' union, integrated

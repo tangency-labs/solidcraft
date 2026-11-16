@@ -707,14 +707,12 @@ pub fn definition_surface(
     };
     Ok(match definition {
         FaceDefinition::Procedural(d) => {
-            let pb = from_record(
-                k,
-                &ProceduralBlendRecord {
-                    definition: (**d).clone(),
-                    net,
-                },
-            )?;
-            certified(pb.recertify(k), d.bound)?.map(|()| Surface::from(pb))
+            let record = ProceduralBlendRecord {
+                definition: (**d).clone(),
+                net,
+            };
+            let pb = from_record(k, &record)?;
+            certified(recertify_remembered(k, &pb, &record), d.bound)?.map(|()| Surface::from(pb))
         }
         FaceDefinition::ExactRound(d) => {
             let rec = ExactRoundRecord {
@@ -739,6 +737,72 @@ pub fn definition_surface(
             proved.map(|()| made)
         }
     })
+}
+
+/// [`RecertifyMemo`]'s cap on the bytes its keys hold: past it the memo starts again empty.
+const RECERTIFY_MEMO_BYTES: usize = 64 << 20;
+
+/// The memo of the procedural blends a kernel recertified as it gave a record's faces their
+/// definitions back (not upstream): the bound [`ProceduralBlend::recertify`] proved for each,
+/// by every bit of the blend's record (its definition and its net, by their debug text,
+/// which writes each double so that it reads back exactly) and of the kernel's tolerances
+/// and fixes. The certificate reads nothing else, so a hit returns what recertifying the
+/// blend again returns. A body that goes through one boolean after another comes back from
+/// each as a record, and its blends unchanged by the boolean are certified once, not again
+/// at every import. Only a certificate that finished is kept, not a refusal or a cancel.
+/// [`Kernel::memoize_curve_caches`] turns it off, with the curve cache memo.
+#[derive(Debug, Default)]
+pub struct RecertifyMemo {
+    bounds: std::collections::HashMap<String, f64>,
+    bytes: usize,
+}
+
+impl RecertifyMemo {
+    /// The blends the memo keeps.
+    #[must_use]
+    pub fn len(&self) -> usize {
+        self.bounds.len()
+    }
+
+    /// Whether it keeps none.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.bounds.is_empty()
+    }
+}
+
+/// `pb`'s [`ProceduralBlend::recertify`], from the kernel's [`RecertifyMemo`] when it
+/// recertified the same `record` (the one `pb` was made from) before.
+fn recertify_remembered(
+    k: &Kernel,
+    pb: &ProceduralBlend,
+    record: &ProceduralBlendRecord,
+) -> Result<f64> {
+    use std::fmt::Write as _;
+    if !k.memoize_curve_caches {
+        k.work_counters.add_blend_recertified();
+        return pb.recertify(k);
+    }
+    let mut key = format!("{:?}", k.tolerances);
+    for (name, on) in k.fixes.flags() {
+        key.push_str(if on { "+" } else { "-" });
+        key.push_str(name);
+    }
+    // (writing to a `String` never fails)
+    let _ = write!(key, "\n{record:?}");
+    if let Some(&hit) = k.recertify_memo.borrow().bounds.get(&key) {
+        return Ok(hit);
+    }
+    k.work_counters.add_blend_recertified();
+    let bound = pb.recertify(k)?;
+    let mut memo = k.recertify_memo.borrow_mut();
+    if memo.bytes + key.len() > RECERTIFY_MEMO_BYTES {
+        memo.bounds.clear();
+        memo.bytes = 0;
+    }
+    memo.bytes += key.len();
+    memo.bounds.insert(key, bound);
+    Ok(bound)
 }
 
 /// Give each face of `faces` its definition back: its net is the face's surface as it was
