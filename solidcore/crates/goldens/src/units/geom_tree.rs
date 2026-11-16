@@ -268,7 +268,7 @@ fn flag(b: bool) -> i64 {
 fn status_of(e: &SolidError) -> i64 {
     match e {
         SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. } => 1007,
-        SolidError::Upstream { code, .. } => i64::from(*code),
+        err if solidcore::error::upstream_status(err).is_some() => i64::from(solidcore::error::upstream_status(err).unwrap_or(-1)),
         _ => 1001,
     }
 }

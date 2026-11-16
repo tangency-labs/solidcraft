@@ -1,5 +1,6 @@
 //! Built-in authored resources and explicit runtime projections. The source catalogs
 //! retain their original authoring status; unsupported concepts never become fake presets.
+use solidcraft_geom::MeshGeom;
 use std::{
     collections::BTreeMap,
     sync::{Arc, OnceLock},

@@ -497,6 +497,7 @@ mod tests {
                         to_offset: None,
                         from: None,
                         to_body_apart: false,
+                        picked_placements: Vec::new(),
                     },
                     operation: crate::Operation::NewBody,
                     targets: vec![],
@@ -545,7 +546,16 @@ mod tests {
         sketch.add_circle(Vec2::new(0., 0.), 3., None, Some("circle")).unwrap();
         let report = solve(&mut sketch);
         let profiles = find_profiles(&sketch);
-        let ss = SolvedSketch { feature: 1, name: "ordinary circle".into(), plane: Plane::XY, sketch, report, profiles, ends: Default::default() };
+        let ss = SolvedSketch {
+            feature: 1,
+            name: "ordinary circle".into(),
+            plane: Plane::XY,
+            sketch,
+            report,
+            profiles,
+            profiles_3d: Vec::new(),
+            ends: Default::default(),
+        };
         assert_eq!(ss.profiles.len(), 1);
         let indices = vec![0; 600];
         let selection = ProfileSel::Indices { indices: indices.clone() };
@@ -593,7 +603,7 @@ mod tests {
         }
         let report = solve(&mut sketch);
         let profiles = find_profiles(&sketch);
-        SolvedSketch { feature: 1, name: "S".into(), plane: Plane::XY, sketch, report, profiles, ends: Default::default() }
+        SolvedSketch { feature: 1, name: "S".into(), plane: Plane::XY, sketch, report, profiles, profiles_3d: Vec::new(), ends: Default::default() }
     }
 
     #[test]
@@ -682,6 +692,7 @@ mod tests {
                         to_offset: None,
                         from: None,
                         to_body_apart: false,
+                        picked_placements: Vec::new(),
                     },
                     operation: crate::Operation::NewBody,
                     targets: vec![],

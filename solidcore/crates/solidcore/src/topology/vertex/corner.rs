@@ -558,7 +558,10 @@ pub fn calc_corner_from_faces(k: &Kernel, b: &mut Brep, v: VertexId) -> Result<F
 
         _ => {
             // SM_DBG_WARN: unexpected number of TgtFaces
-            return Err(SolidError::sm_err(OP));
+            return Err(SolidError::topology_failed(
+                OP,
+                "the vertex has more than three faces",
+            ));
         }
     }
 
@@ -592,7 +595,7 @@ pub fn is_on_face_corner(k: &Kernel, b: &mut Brep, v: VertexId) -> Result<(bool,
         // the SM_ERR of more than three target faces leaves the initial outputs; with
         // the opt-in fix any failure is no best point (tangency-labs/smlib 7a35f33)
         Err(e)
-            if matches!(e, SolidError::Upstream { operation: OP, .. })
+            if (e.operation() == OP && e.upstream_status().is_some())
                 || (k.fixes.query_statuses_pass_on && !e.is_unported_or_cancelled()) =>
         {
             FaceCorner {

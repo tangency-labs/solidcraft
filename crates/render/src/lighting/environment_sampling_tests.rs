@@ -135,7 +135,7 @@ fn hostile_options_variates_and_directions_refuse_without_panics() {
 fn direct_conductor_estimates_average_once_and_do_not_cross_geometry() {
     let data = decoded([[128, 64, 32, 129]; 8], "PRIMARIES=0.64 0.33 0.30 0.60 0.15 0.06 0.3127 0.3290\n");
     let env = prepared(&data, 0.0, 1.0);
-    let surface = crate::surface::OpaqueSurface::new(Vec3::new(1.0, 1.0, 1.0), 1.0, 1.0, 1.5).unwrap();
+    let surface = solidcraft_viewport::surface::OpaqueSurface::new(Vec3::new(1.0, 1.0, 1.0), 1.0, 1.0, 1.5).unwrap();
     let mut mean = Vec3::ZERO;
     for i in 0..4096 {
         let u = [(f64::from(i) + 0.5) / 4096.0, 0.375];

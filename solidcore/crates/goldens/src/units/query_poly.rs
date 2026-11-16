@@ -330,10 +330,7 @@ fn opt<T: Copy>(x: Option<T>, f: impl Fn(T) -> u32) -> f64 {
 
 /// The `SmStatus` of a Rust error (`SM_ERR_INVALID_INPUT` for invalid input).
 fn code_of(e: &SolidError) -> f64 {
-    match e {
-        SolidError::Upstream { code, .. } => f64::from(*code),
-        _ => 1007.0,
-    }
+    solidcore::error::upstream_status(e).map_or(1007.0, f64::from)
 }
 
 /// Unported errors abort the case (deferred); others become a status.

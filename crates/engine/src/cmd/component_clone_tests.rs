@@ -134,6 +134,104 @@ fn reassigned_body_owned_move_replays_once_and_original_stays_unchanged() {
 }
 
 #[test]
+fn reassigned_plate_fillet_copy_keeps_editable_independent_geometry() {
+    let mut s = Session::default();
+    let plate = run(&mut s, "solid.box", json!({"length":40,"width":30,"height":5,"body_name":"Plate"}))["feature"].as_u64().unwrap();
+    let part = run(&mut s, "component.create", json!({"name":"Lid","activate":false}))["component"].as_u64().unwrap();
+    run(&mut s, "component.move_bodies", json!({"component":part,"bodies":["Plate"]}));
+    run(&mut s, "component.activate", json!({"component":part}));
+    let fillet = run(&mut s, "solid.fillet", json!({"edges":[[20,0,5]],"radius":2}))["feature"].as_u64().unwrap();
+
+    let check = |session: &mut Session, component: u64, length: f64, radius: f64, y: f64| {
+        let properties = run(session, "component.properties", json!({"component":component}));
+        assert_eq!(properties["body_count"], 1);
+        assert_eq!(properties["bodies"][0]["closed"], true);
+        let total = &properties["total"];
+        // The rounded edge removes a square minus a quarter disk along the plate's length.
+        let removed_section = radius * radius * (1.0 - std::f64::consts::FRAC_PI_4);
+        near(total["volume_mm3"].as_f64().unwrap(), length * (30.0 * 5.0 - removed_section));
+        let area = 2.0 * (length * 30.0 + length * 5.0 + 30.0 * 5.0) - 2.0 * radius * length + std::f64::consts::FRAC_PI_2 * radius * length
+            - 2.0 * removed_section;
+        near(total["area_mm2"].as_f64().unwrap(), area);
+        assert_eq!(total["faces"], 7);
+        for (bound, expected) in [("min", [0.0, y, 0.0]), ("max", [length, y + 30.0, 5.0])] {
+            for (axis, coordinate) in expected.into_iter().enumerate() {
+                near(total["bbox"][bound][axis].as_f64().unwrap(), coordinate);
+            }
+        }
+    };
+    check(&mut s, part, 40.0, 2.0, 0.0);
+    let before = s.doc.to_json();
+    let copied = run(&mut s, "component.paste_new", json!({"component":part,"translate":[0,-60,0]}));
+    let new = copied["component"].as_u64().unwrap();
+    assert_eq!(copied["frozen_bodies"], json!(["Plate"]));
+    check(&mut s, new, 40.0, 2.0, -60.0);
+    check(&mut s, part, 40.0, 2.0, 0.0);
+    run(&mut s, "edit.undo", json!({}));
+    assert_eq!(s.doc.to_json(), before);
+    check(&mut s, part, 40.0, 2.0, 0.0);
+    run(&mut s, "edit.redo", json!({}));
+    check(&mut s, new, 40.0, 2.0, -60.0);
+
+    let source_radius = s.doc.feature(fillet).unwrap().param_names[0].clone();
+    let copied_radius =
+        s.doc.features.iter().find(|f| f.component == new && matches!(f.kind, solidcraft_doc::FeatureKind::Fillet { .. })).unwrap().param_names[0]
+            .clone();
+    assert_ne!(source_radius, copied_radius);
+    run(&mut s, "parameters.change", json!({"name":copied_radius,"expression":"1 mm"}));
+    check(&mut s, new, 40.0, 1.0, -60.0);
+    check(&mut s, part, 40.0, 2.0, 0.0);
+    let source_length = s.doc.feature(plate).unwrap().param_names[0].clone();
+    run(&mut s, "parameters.change", json!({"name":source_length,"expression":"50 mm"}));
+    check(&mut s, part, 50.0, 2.0, 0.0);
+    check(&mut s, new, 40.0, 1.0, -60.0);
+
+    let mut reopened = Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap());
+    assert!(reopened.doc.features.iter().all(|f| reopened.model.result(f.id).is_some_and(|r| r.error.is_none())));
+    check(&mut reopened, part, 50.0, 2.0, 0.0);
+    check(&mut reopened, new, 40.0, 1.0, -60.0);
+}
+
+#[test]
+fn reassigned_join_fillet_copy_preserves_external_and_owned_faces() {
+    for inside in [false, true] {
+        let mut s = Session::default();
+        run(&mut s, "solid.box", json!({"length":40,"width":30,"height":5,"body_name":"Plate"}));
+        let post = |s: &mut Session| run(s, "solid.cylinder", json!({"base":[20,15,5],"radius":5,"height":5,"operation":"join","targets":["Plate"]}));
+        if !inside {
+            post(&mut s);
+        }
+        let part = run(&mut s, "component.create", json!({"name":"Lid","activate":false}))["component"].as_u64().unwrap();
+        run(&mut s, "component.move_bodies", json!({"component":part,"bodies":["Plate"]}));
+        run(&mut s, "component.activate", json!({"component":part}));
+        if inside {
+            post(&mut s);
+        }
+        run(&mut s, "solid.fillet", json!({"edges":[[25,15,5]],"radius":1}));
+        let check = |session: &mut Session, component: u64, radius: f64| {
+            // Revolve the square-minus-quarter-disk fillet section around the R5 boss.
+            let added = std::f64::consts::TAU * ((5.0 + radius) * radius * radius * (1.0 - std::f64::consts::FRAC_PI_4) - radius.powi(3) / 6.0);
+            near(volume(session, component), 6000.0 + std::f64::consts::PI * 125.0 + added);
+        };
+        check(&mut s, part, 1.0);
+        let new = run(&mut s, "component.paste_new", json!({"component":part,"translate":[0,-60,0]}))["component"].as_u64().unwrap();
+        check(&mut s, new, 1.0);
+        check(&mut s, part, 1.0);
+        let radius =
+            s.doc.features.iter().find(|f| f.component == new && matches!(f.kind, solidcraft_doc::FeatureKind::Fillet { .. })).unwrap().param_names
+                [0]
+            .clone();
+        run(&mut s, "parameters.change", json!({"name":radius,"expression":"0.5 mm"}));
+        check(&mut s, new, 0.5);
+        check(&mut s, part, 1.0);
+        let mut reopened = Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap());
+        assert!(reopened.doc.features.iter().all(|f| reopened.model.result(f.id).is_some_and(|r| r.error.is_none())));
+        check(&mut reopened, new, 0.5);
+        check(&mut reopened, part, 1.0);
+    }
+}
+
+#[test]
 fn copied_external_destructive_target_is_atomic() {
     let mut s = Session::default();
     box2(&mut s);
@@ -748,4 +846,52 @@ fn paste_new_of_a_mesh_import_with_one_label_on_all_objects_moves_the_copy_of_ea
     let copied = run(&mut s, "component.paste_new", json!({"component":part}))["component"].as_u64().unwrap();
     assert_eq!(corners(&s, part), lifted());
     assert_eq!(corners(&s, copied), lifted(), "{:?}", body_names(&s));
+}
+
+/// A construction axis through a nested placement's origin datum is copied with its datum path
+/// rebuilt through the copy (the source's ancestors are not in the occurrence map); an axis
+/// whose datum names a placement outside the copied tree refuses the copy - the reference could
+/// not follow, and a dangling one would resolve against whatever then sits at those ids.
+#[test]
+fn cloned_datum_references_follow_the_copy() {
+    let mut s = Session::default();
+    let parent = component(&mut s, "Parent");
+    run(&mut s, "component.create", json!({"name": "Child", "parent": "Parent"}));
+    run(&mut s, "solid.box", json!({"length": 2, "width": 2, "height": 2, "operation": "new"}));
+    let parent_occ = s.doc.occurrence_of(parent).unwrap().id;
+    let child_occ = s.doc.occurrences.iter().find(|o| o.parent == parent).unwrap().id;
+    run(&mut s, "component.activate", json!({"component": "Parent"}));
+    run(
+        &mut s,
+        "construct.axis.two_points",
+        json!({"a": format!("o:{parent_occ}/{child_occ}/origin/O"), "b": {"point": [12, 0, 0]}, "name": "DatumAxis"}),
+    );
+    let r = copy(&mut s, parent);
+    let new_comp = r["component"].as_u64().unwrap();
+    let new_parent_occ = r["occurrence"].as_u64().unwrap();
+    let new_child_occ = s.doc.occurrences.iter().find(|o| o.parent == new_comp).unwrap().id;
+    let axis =
+        s.doc.features.iter().find(|f| f.component == new_comp && matches!(f.kind, solidcraft_doc::FeatureKind::ConstructionAxis { .. })).unwrap();
+    let solidcraft_doc::FeatureKind::ConstructionAxis { def } = &axis.kind else { panic!("expected a construction axis: {:?}", axis.kind) };
+    let solidcraft_doc::construct::AxisDef::TwoPoints { a, .. } = def else { panic!("expected a two-points axis: {def:?}") };
+    match a {
+        solidcraft_doc::construct::GeoRef::Datum { datum } => {
+            assert_eq!(datum.path, vec![new_parent_occ, new_child_occ], "the datum names the copy's own nested placement");
+        }
+        other => panic!("expected a datum reference, got {other:?}"),
+    }
+    // An axis whose datum names a placement outside the copied tree refuses the copy. Outside is
+    // made at the root: `component.create` places under the active component (the paste left
+    // Parent active), and a datum key names its placement from the root, so a placement inside
+    // Parent would be unreachable to the resolver and inside the copy's map at once.
+    run(&mut s, "component.activate", json!({"component": 0}));
+    let outside = component(&mut s, "Outside");
+    run(&mut s, "solid.box", json!({"length": 2, "width": 2, "height": 2, "operation": "new"}));
+    let outside_occ = s.doc.occurrence_of(outside).unwrap().id;
+    run(&mut s, "component.activate", json!({"component": "Parent"}));
+    run(&mut s, "construct.axis.two_points", json!({"a": format!("o:{outside_occ}/origin/O"), "b": {"point": [12, 0, 0]}, "name": "OutsideAxis"}));
+    assert!(
+        s.execute("component.paste_new", &json!({"component": parent, "translate": [40, 0, 0]})).is_err(),
+        "a datum into another tree cannot follow the copy"
+    );
 }

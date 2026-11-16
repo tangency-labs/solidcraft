@@ -395,7 +395,7 @@ fn str_codes(o: &mut Vec<f64>, s: &str) {
 fn status(e: &SolidError) -> f64 {
     match e {
         SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. } => 1007.0,
-        SolidError::Upstream { code, .. } => f64::from(*code),
+        err if solidcore::error::upstream_status(err).is_some() => f64::from(solidcore::error::upstream_status(err).unwrap_or(-1)),
         _ => -1.0,
     }
 }
@@ -623,7 +623,7 @@ fn rust(k: &Kernel, i: &Inputs) -> Result<Output, HarnessError> {
         }
         Inputs::SimplePreds { p, a, b: e, .. } => {
             let pt = tri!(o, v.is_point_in_param_domain_simple(v3(*p)));
-            let ln = tri!(o, v.is_line_in_param_domain_simple(k, v3(*a), v3(*e)));
+            let ln = tri!(o, v.is_line_in_param_domain_simple(v3(*a), v3(*e)));
             let cv = tri!(o, v.is_curve_in_param_domain_simple(&Kernel::default(), &line(*a, *e)));
             o.extend([0.0, b(pt), b(ln), b(cv)]);
         }

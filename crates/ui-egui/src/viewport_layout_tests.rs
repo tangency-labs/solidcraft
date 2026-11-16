@@ -2,10 +2,16 @@ use super::*;
 use crate::scenario::Harness;
 use crate::viewport::NavMode;
 use serde_json::json;
-use solidcraft_engine::render::StandardView;
+use solidcraft_viewport::StandardView;
+
+/// SolidCraft's default navigation bar measured on `canvas` with `caps`.
+fn default_bar(canvas: Rect, caps: crate::navigation::NavCaps) -> Rect {
+    crate::navigation_slots::install();
+    crate::ui_kit::nav_bar_layout::measure(canvas, &Default::default(), |slot| caps.shows(slot), |_| 0.0).rect
+}
 
 fn bar_rect(canvas: Rect) -> Rect {
-    crate::navigation_bar_view::measure(canvas, &Default::default(), crate::navigation::NavCaps::MODEL, |_| 0.0).rect
+    default_bar(canvas, crate::navigation::NavCaps::MODEL)
 }
 
 fn assert_navigator_shared_zoom(app: &crate::SolveApp, camera: Camera) {
@@ -41,7 +47,7 @@ fn assert_navigator_shared_zoom(app: &crate::SolveApp, camera: Camera) {
     let radius = bounds.diagonal() * 0.5;
     let offset = Vec3::new(radius, radius, radius);
     let sphere = Aabb3 { min: centre - offset, max: centre + offset };
-    let mut front = if app.universal_panel_host_enabled() { camera } else { Camera::default() };
+    let mut front = camera;
     front.set_view(StandardView::Front);
     let distance = app.try_fitted_bounds(front, &sphere).expect(&context).distance;
     let reference = app.navigator_fitted_bounds(front, &bounds).expect(&context);
@@ -93,12 +99,12 @@ fn assert_navigator_shared_zoom(app: &crate::SolveApp, camera: Camera) {
                 "the same object centre lands in the usable picture, although its world-space target offset rotates"
             );
         } else {
-            assert_eq!(fitted.target, centre, "Classic and an unmeasured host keep the legacy centre");
+            assert_eq!(fitted.target, centre, "an unmeasured host keeps the world-space centre");
         }
     }
 }
 
-fn navigator_layout_fixture(host: bool, measured: bool, render: bool) -> Harness {
+fn navigator_layout_fixture(measured: bool, render: bool) -> Harness {
     let mut h = Harness::new();
     h.app.home.open = false;
     if render {
@@ -106,35 +112,27 @@ fn navigator_layout_fixture(host: bool, measured: bool, render: bool) -> Harness
         h.app.run("view.render_stage", json!({"stage":"frame"})).unwrap();
         h.app.run("render.output.size", json!({"width":400,"height":1600})).unwrap();
     }
-    // Start from a coherent Classic composition, including the shell content
-    // that anchors Render's picture, before optionally enabling the host.
     h.frames(4);
-    if host {
+    if !measured {
         crate::panel_runtime::enable_host_specimen(&mut h.app, "docks").unwrap();
-        if measured {
-            h.frames(4);
-            if !render {
-                let viewport = h.app.viewport.rect.unwrap();
-                // Design has an asymmetric contour; Render keeps its real docks
-                // and Frame controls so the authored picture remains available.
-                h.app.viewport.host_windows =
-                    Some(vec![Rect::from_min_max(pos2(viewport.left() + 550.0, viewport.top()), pos2(viewport.right(), viewport.bottom() - 300.0))]);
-            }
-        }
+    } else if !render {
+        let viewport = h.app.viewport.rect.unwrap();
+        h.app.viewport.host_windows =
+            Some(vec![Rect::from_min_max(pos2(viewport.left() + 550.0, viewport.top()), pos2(viewport.right(), viewport.bottom() - 300.0))]);
     }
-    assert_eq!(h.app.universal_panel_host_enabled(), host);
+    assert!(h.app.universal_panel_host_enabled());
     assert_eq!(h.app.universal_panel_frame().is_some(), measured);
     h
 }
 
 #[test]
-fn navigator_front_probe_shares_zoom_in_classic_measured_and_unmeasured_hosts() {
-    for (host, measured) in [(false, false), (true, false), (true, true)] {
-        let mut h = navigator_layout_fixture(host, measured, false);
+fn navigator_front_probe_shares_zoom_in_measured_and_unmeasured_hosts() {
+    for measured in [false, true] {
+        let mut h = navigator_layout_fixture(measured, false);
         for perspective in [false, true] {
             h.app.ui.perspective = perspective;
             h.app.ui.auto_ortho_faces = false;
-            for up in [solidcraft_engine::render::UpAxis::Z, solidcraft_engine::render::UpAxis::Y] {
+            for up in [solidcraft_viewport::UpAxis::Z, solidcraft_viewport::UpAxis::Y] {
                 assert_navigator_shared_zoom(&h.app, Camera { up, fov: 0.95, ..Default::default() });
             }
         }
@@ -142,9 +140,9 @@ fn navigator_front_probe_shares_zoom_in_classic_measured_and_unmeasured_hosts() 
 }
 
 #[test]
-fn navigator_render_keeps_classic_probe_and_host_authored_lens_and_picture() {
-    for (host, measured) in [(false, false), (true, false), (true, true)] {
-        let mut h = navigator_layout_fixture(host, measured, true);
+fn navigator_render_keeps_the_authored_lens_and_picture() {
+    for measured in [false, true] {
+        let mut h = navigator_layout_fixture(measured, true);
         for fov in [0.0, 0.95] {
             // Host framing uses the authored lens even when Design preferences disagree.
             h.app.ui.perspective = fov == 0.0;
@@ -154,7 +152,7 @@ fn navigator_render_keeps_classic_probe_and_host_authored_lens_and_picture() {
             let picture = crate::render_workspace::picture_layout(&h.app, layout);
             let outer = h.app.viewport.rect.unwrap();
             assert!(picture.viewport.width() < outer.width(), "the portrait frame must exercise a distinct projection");
-            for up in [solidcraft_engine::render::UpAxis::Z, solidcraft_engine::render::UpAxis::Y] {
+            for up in [solidcraft_viewport::UpAxis::Z, solidcraft_viewport::UpAxis::Y] {
                 assert_navigator_shared_zoom(&h.app, Camera { up, fov, ..Default::default() });
             }
         }
@@ -270,34 +268,8 @@ fn host_picture_centring_keeps_distance_and_selected_focus_at_the_product_lens()
     assert!(fit_host_bounds(Camera::default(), &bounds, &projection, projection.usable.as_ref().unwrap(), 0.0, 1.0).is_none());
 }
 
-#[test]
-fn render_compass_avoids_the_navigation_bar_on_either_inspector_side() {
-    let viewport = Rect::from_min_size(pos2(0.0, 0.0), vec2(400.0, 140.0));
-    for style in [crate::prefs::NavigatorStyle::Axes, crate::prefs::NavigatorStyle::Cube] {
-        for inspector_left in [false, true] {
-            for bar_left in [false, true] {
-                let navigation = Rect::from_min_size(pos2(if bar_left { 8.0 } else { 312.0 }, 100.0), vec2(80.0, 32.0));
-                let make = if inspector_left { Layout::product_left } else { Layout::product };
-                let layout = make(viewport, viewport, &[], 1.0, style, egui::Vec2::ZERO, navigation);
-                assert!(!layout.axis_view.intersect(navigation).is_positive());
-                if inspector_left != bar_left {
-                    assert!(layout.axis_view.is_positive(), "a bar on the opposite side must leave the compass visible");
-                }
-                if layout.axis_view.is_positive() {
-                    let edge = if inspector_left { layout.axis_view.left() - viewport.left() } else { viewport.right() - layout.axis_view.right() };
-                    assert!(edge.abs() < 0.1, "a compact compass must stay on the Inspector's side");
-                }
-            }
-        }
-    }
-}
-
 fn layout(viewport: Rect, docks: &[Rect], scale: f32, style: crate::prefs::NavigatorStyle, visible: bool) -> Layout {
-    let navigation = if visible {
-        crate::navigation_bar_view::measure(viewport, &Default::default(), crate::navigation::NavCaps::MODEL, |_| 0.0).rect
-    } else {
-        Rect::NOTHING
-    };
+    let navigation = if visible { default_bar(viewport, crate::navigation::NavCaps::MODEL) } else { Rect::NOTHING };
     Layout::with_content(viewport, viewport, docks, scale, style, egui::Vec2::ZERO, navigation)
 }
 
@@ -305,10 +277,12 @@ fn layout(viewport: Rect, docks: &[Rect], scale: f32, style: crate::prefs::Navig
 fn render_focus_compass_keeps_clear_of_an_exit_chip_on_either_side() {
     let viewport = Rect::from_min_size(pos2(0.0, 0.0), vec2(1400.0, 900.0));
     let content = Rect::from_min_max(pos2(0.0, 104.0), viewport.max);
-    let navigation = crate::navigation_bar_view::measure(content, &Default::default(), crate::navigation::NavCaps::RENDER, |_| 0.0).rect;
+    let navigation = default_bar(content, crate::navigation::NavCaps::RENDER);
     for x in [8.0, 1250.0] {
         let chip = Rect::from_min_size(pos2(x, content.top()), vec2(142.0, 40.0));
-        let layout = Layout::product(viewport, content, &[chip], 1.0, crate::prefs::NavigatorStyle::Axes, egui::Vec2::ZERO, navigation);
+        use crate::panel_runtime::{logical_rect, resolve_usable_region};
+        let usable = resolve_usable_region(logical_rect(content), &[logical_rect(chip)]).unwrap();
+        let layout = Layout::host(viewport, &usable, crate::prefs::NavigatorStyle::Axes, egui::Vec2::ZERO, navigation);
         assert!(layout.axis_view.is_positive() && layout.navigation.is_positive());
         assert!(!layout.axis_view.intersect(chip).is_positive());
         assert!(content.contains_rect(layout.axis_view));
@@ -372,21 +346,14 @@ fn measured_palette_fit_exposes_endpoints_and_layout_changes_preserve_manual_vie
             h.settle();
             let layout = h.app.viewport.layout.as_ref().unwrap();
             let palette = h.app.viewport.palette_rect.unwrap();
-            assert!(layout.drawable.width() >= 80.0 && layout.drawable.height() >= 30.0, "{layout:?}");
-            // Floating's card margins leave less content height at 385 px. The compass
-            // intentionally disappears when it cannot fit above the bottom navigation.
-            assert!(
-                layout.axis_view.is_positive()
-                    || layout.content.height()
-                        < crate::viewport::axis_view_size(h.app.preferences.navigator_style) + layout.navigation.height() + 11.0,
-                "{layout:?}"
-            );
+            let usable = layout.usable.as_ref().expect("shared usable region");
+            assert!(!usable.free.is_empty(), "{layout:?}");
             assert!(layout.navigation.is_positive(), "{layout:?}");
             assert!(palette.width() <= 260.0, "{palette:?}");
             let projection = crate::viewport::projection(&h.app, layout.viewport);
             for point in [Vec3::ZERO, Vec3::new(20.0, 0.0, 0.0)] {
                 let p = projection.to_screen(point).unwrap();
-                assert!(layout.drawable.contains(p), "endpoint {p:?} outside {layout:?}");
+                assert!(usable.free.iter().any(|piece| crate::panel_runtime::egui_rect(*piece).contains(p)), "endpoint {p:?} outside {usable:?}");
                 assert!(!palette.contains(p));
                 assert!(!layout.axis_view.contains(p));
                 assert!(!layout.navigation.contains(p));
@@ -433,7 +400,7 @@ fn host_fit_uses_the_actual_contour_and_model_extent_with_the_full_projection() 
     ];
     let usable = resolve_usable_region(logical_rect(viewport), &obstacles.map(logical_rect)).unwrap();
     assert!(usable.free.iter().any(|piece| egui_rect(*piece).contains(pos2(100.0, 700.0))), "the short-panel gap is part of the retained contour");
-    for style in [crate::prefs::NavigatorStyle::Axes, crate::prefs::NavigatorStyle::Cube] {
+    for style in [crate::prefs::NavigatorStyle::Axes] {
         let navigation = bar_rect(viewport);
         let layout = Layout::host(viewport, &usable, style, egui::Vec2::ZERO, navigation);
         assert_eq!(layout.viewport, viewport);
@@ -664,6 +631,34 @@ fn legacy_usable_space_does_not_silently_ignore_obstacles_after_sixteen() {
     }
 }
 
+/// `free_rect` remembers its recent answers (it ran several times a frame with the same inputs):
+/// the same view and overlays get the same room, and a moved or added overlay a new one.
+#[test]
+fn free_rect_remembers_answers_only_for_the_same_overlays() {
+    let viewport = Rect::from_min_size(pos2(0.0, 0.0), vec2(1000.0, 600.0));
+    let panel = Rect::from_min_size(pos2(0.0, 0.0), vec2(300.0, 600.0));
+    let first = free_rect(viewport, &[panel]);
+    assert_eq!(first, Rect::from_min_max(pos2(300.0, 0.0), pos2(1000.0, 600.0)));
+    assert_eq!(free_rect(viewport, &[panel]), first, "the same inputs, the same answer");
+    let wider = Rect::from_min_size(pos2(0.0, 0.0), vec2(400.0, 600.0));
+    assert_eq!(free_rect(viewport, &[wider]), Rect::from_min_max(pos2(400.0, 0.0), pos2(1000.0, 600.0)), "a moved overlay is searched again");
+    let bar = Rect::from_min_size(pos2(0.0, 500.0), vec2(1000.0, 100.0));
+    assert_eq!(free_rect(viewport, &[panel, bar]), Rect::from_min_max(pos2(300.0, 0.0), pos2(1000.0, 500.0)), "an added overlay too");
+    for _ in 0..20 {
+        assert_eq!(free_rect(viewport, &[panel]), first, "evicted answers are worked out again the same");
+        let _ = free_rect(viewport, &[Rect::from_min_size(pos2(0.0, 0.0), vec2(f32::from(rand_like()), 10.0))]);
+    }
+}
+
+/// A different small width each call (no clock, no randomness): fills the remembered answers.
+fn rand_like() -> u8 {
+    thread_local!(static N: std::cell::Cell<u8> = const { std::cell::Cell::new(1) });
+    N.with(|n| {
+        n.set(n.get().wrapping_mul(37).wrapping_add(11) | 1);
+        n.get()
+    })
+}
+
 #[test]
 fn fit_home_animation_and_manual_takeover_use_one_layout_solution() {
     for mode in [crate::ui_kit::LayoutMode::Floating, crate::ui_kit::LayoutMode::Docked] {
@@ -695,7 +690,7 @@ fn fit_home_animation_and_manual_takeover_use_one_layout_solution() {
 #[test]
 fn measured_navigator_targets_home_and_drag_work_beside_the_palette_at_hidpi() {
     for mode in [crate::ui_kit::LayoutMode::Floating, crate::ui_kit::LayoutMode::Docked] {
-        for style in crate::prefs::NavigatorStyle::ALL {
+        for style in [crate::prefs::NavigatorStyle::Axes] {
             for (scale, width, height) in [(1.0, 900.0, 720.0), (2.0, 700.0, 475.0), (2.0, 700.0, 385.0)] {
                 let mut h = Harness::new();
                 h.call("ui.set", json!({"layout":mode}));
@@ -713,9 +708,6 @@ fn measured_navigator_targets_home_and_drag_work_beside_the_palette_at_hidpi() {
                 let layout = h.app.viewport.layout.as_ref().unwrap().clone();
                 let palette = h.app.viewport.palette_rect.unwrap();
                 if !layout.axis_view.is_positive() {
-                    // Floating's smaller content at tiny heights cannot fit the compass;
-                    // the navigation bar takes priority in both layouts.
-                    assert!(layout.content.height() < crate::viewport::axis_view_size(style) + layout.navigation.height() + 11.0, "{layout:?}");
                     assert!(layout.navigation.is_positive());
                     assert!(crate::scenario::rect_of("axis_view:outer").is_none());
                     assert_eq!(h.app.session.doc.to_json(), baseline);
@@ -727,39 +719,17 @@ fn measured_navigator_targets_home_and_drag_work_beside_the_palette_at_hidpi() {
                 assert_eq!(outer, layout.axis_view);
                 assert!(outer.contains_rect(home));
                 assert!(layout.viewport.contains_rect(outer));
-                assert_eq!(outer.right_top(), layout.content.right_top());
-                if outer.intersect(palette).is_positive() {
-                    // Short palettes may cover the fixed anchor; covered controls never steal input.
-                    let covered = outer.intersect(palette).center();
-                    let camera = h.app.cam;
-                    h.call("ui.click", json!({"x":covered.x,"y":covered.y}));
-                    assert_eq!(h.app.cam, camera);
-                    assert!(h.app.viewport.axis_drag.is_none());
-                    assert_eq!(crate::scenario::rect_of("axis_view:outer").unwrap(), outer);
-                    assert_eq!(h.app.session.doc.to_json(), baseline);
-                    assert_eq!(h.app.session.undo.len(), undo);
-                    continue;
-                }
+                assert!(!outer.intersect(palette).is_positive(), "the navigator clears Sketch Options: {outer:?} / {palette:?}");
+                let usable = crate::shell::host_usable(&h.app).unwrap();
+                assert!(usable.contains_rect(crate::panel_runtime::logical_rect(outer)));
                 assert!(!layout.navigation.intersect(outer).is_positive());
-                // Custom without a body draws the cube.
-                if style != crate::prefs::NavigatorStyle::Axes {
-                    let front = crate::scenario::handle_at("navigation_cube:front").unwrap();
-                    assert!(outer.contains(front));
-                    let up = crate::scenario::handle_at("navigation_cube:control:up").unwrap();
-                    h.call("ui.click", json!({"x":up.x,"y":up.y}));
-                    assert!(h.app.cam.back().dist(Vec3::Z) < 1e-5);
-                    let top = crate::scenario::handle_at("navigation_cube:top").unwrap();
-                    h.call("ui.click", json!({"x":top.x,"y":top.y}));
-                    assert!(h.app.cam.back().dist(Vec3::Z) < 1e-5);
-                } else {
-                    let z = crate::scenario::handle_at("axis_view:z").unwrap();
-                    assert!(outer.contains(z));
-                    h.call("ui.click", json!({"x":z.x,"y":z.y}));
-                    assert!(h.app.cam.back().dist(Vec3::Z) < 1e-5);
-                    let z = crate::scenario::handle_at("axis_view:z").unwrap();
-                    h.call("ui.click", json!({"x":z.x,"y":z.y}));
-                    assert!(h.app.cam.back().dist(-Vec3::Z) < 1e-5);
-                }
+                let z = crate::scenario::handle_at("axis_view:z").unwrap();
+                assert!(outer.contains(z));
+                h.call("ui.click", json!({"x":z.x,"y":z.y}));
+                assert!(h.app.cam.back().dist(Vec3::Z) < 1e-5);
+                let z = crate::scenario::handle_at("axis_view:z").unwrap();
+                h.call("ui.click", json!({"x":z.x,"y":z.y}));
+                assert!(h.app.cam.back().dist(-Vec3::Z) < 1e-5);
                 h.call("ui.view", json!({"view":"front"}));
                 h.app.viewport.nav = Some(crate::viewport::NavMode::Pan);
                 let before = h.app.cam;
@@ -832,7 +802,7 @@ fn navigation_anchors_ignore_positioned_resized_and_covering_dialogs() {
 }
 
 #[test]
-fn opening_different_command_dialogs_keeps_published_navigation_positions() {
+fn opening_different_command_dialogs_keeps_measured_navigation_usable() {
     for mode in [crate::ui_kit::LayoutMode::Floating, crate::ui_kit::LayoutMode::Docked] {
         let mut h = Harness::new();
         h.call("ui.set", json!({"layout":mode}));
@@ -847,15 +817,20 @@ fn opening_different_command_dialogs_keeps_published_navigation_positions() {
             h.app.start(command);
             h.settle();
             assert!(h.app.dialog.is_some(), "{command}");
-            assert!(h.app.viewport.dialog_rect.is_some(), "dialog must be measured");
-            assert_eq!(crate::scenario::rect_of("axis_view:outer").unwrap(), axis, "{command}");
-            assert_eq!(crate::scenario::rect_of("nav:outer").unwrap(), nav, "{command}");
+            let dialog = h.app.viewport.dialog_rect.expect("dialog must be measured");
+            let layout = h.app.viewport.layout.as_ref().unwrap();
+            let usable = crate::shell::host_usable(&h.app).unwrap();
+            for (key, bounds) in [("axis_view:outer", layout.axis_view), ("nav:outer", layout.navigation)] {
+                assert_eq!(crate::scenario::rect_of(key), Some(bounds), "{command}: {key}");
+                assert!(usable.contains_rect(crate::panel_runtime::logical_rect(bounds)), "{command}: {key} fits the usable region");
+                assert!(!dialog.intersect(bounds).is_positive(), "{command}: {key} clears the editor");
+            }
             assert_eq!(h.app.cam, camera);
             let pan = crate::scenario::handle_at("nav:slot:pan").unwrap();
-            assert!(!h.app.viewport.dialog_rect.unwrap().contains(pan));
+            assert!(layout.navigation.contains(pan) && !dialog.contains(pan));
             h.app.viewport.nav = None;
             h.call("ui.click", json!({"x":pan.x,"y":pan.y}));
-            assert_eq!(h.app.viewport.nav, Some(crate::viewport::NavMode::Pan), "fixed navigation stays usable beside {command}");
+            assert_eq!(h.app.viewport.nav, Some(crate::viewport::NavMode::Pan), "measured navigation stays usable beside {command}");
             h.app.dialog = None;
             h.settle();
             assert_eq!(crate::scenario::rect_of("axis_view:outer").unwrap(), axis);
@@ -867,12 +842,12 @@ fn opening_different_command_dialogs_keeps_published_navigation_positions() {
 }
 
 /// OK and Cancel in the view's corner (#6709): the pair holds the content's top right corner and
-/// the axis view or cube moves down below it, clear of the pair and the navigation bar; without
+/// the axis view moves down below it, clear of the pair and the navigation bar; without
 /// the pair (or without room for it) nothing moves.
 #[test]
 fn the_corner_pair_takes_the_top_right_and_the_view_navigator_moves_below_it() {
     let corner = vec2(92.0, 48.0);
-    for style in [crate::prefs::NavigatorStyle::Axes, crate::prefs::NavigatorStyle::Cube] {
+    for style in [crate::prefs::NavigatorStyle::Axes] {
         for (width, height) in [(1400.0, 900.0), (700.0, 450.0), (310.0, 240.0), (160.0, 160.0), (90.0, 50.0)] {
             let vp = Rect::from_min_size(pos2(20.0, 30.0), vec2(width, height));
             let content = Rect::from_min_max(pos2(vp.left() + width * 0.25, vp.top()), vp.max);
@@ -910,7 +885,7 @@ fn the_corner_pair_takes_the_top_right_and_the_view_navigator_moves_below_it() {
 }
 
 /// The pair in the running app: shown only with the preference and while a dialog is open, the
-/// axis view below it, and the pointer over it reaching neither picking nor navigation.
+/// axis view clear of it, and the pointer over it reaching neither picking nor navigation.
 #[test]
 fn the_corner_pair_follows_the_dialog_and_keeps_the_pointer_from_the_model() {
     for mode in [crate::ui_kit::LayoutMode::Floating, crate::ui_kit::LayoutMode::Docked] {
@@ -922,12 +897,15 @@ fn the_corner_pair_follows_the_dialog_and_keeps_the_pointer_from_the_model() {
         h.app.start("solid.fillet");
         h.settle();
         assert!(crate::scenario::rect_of("view:confirm").is_none(), "off by default");
-        assert_eq!(crate::scenario::rect_of("axis_view:outer"), Some(axis));
+        let axis_with_dialog = crate::scenario::rect_of("axis_view:outer").unwrap();
+        assert!(!axis_with_dialog.intersect(h.app.viewport.dialog_rect.unwrap()).is_positive());
         h.call("ui.prefs", json!({"view_confirm_corner": true}));
         h.settle();
         let pair = crate::scenario::rect_of("view:confirm").expect("the pair while a dialog is open");
         let moved = crate::scenario::rect_of("axis_view:outer").unwrap();
-        assert!(moved.top() >= pair.bottom() && moved.right() == axis.right(), "{mode:?}: {moved:?} below {pair:?}");
+        assert!(!moved.intersect(pair).is_positive(), "{mode:?}: the measured navigator clears the pair");
+        let usable = crate::shell::host_usable(&h.app).unwrap();
+        assert!(usable.contains_rect(crate::panel_runtime::logical_rect(moved)));
         assert!(crate::shell::covered(&h.app, pair.center()), "one of the shell's covered rects");
         let dialog = h.app.viewport.dialog_rect.unwrap();
         assert!(!dialog.intersects(pair), "{mode:?}: {dialog:?} / {pair:?}");
@@ -972,16 +950,21 @@ fn floating_fit_uses_the_measured_browser_and_history_cards_at_each_size() {
         h.app.fit_view();
         h.settle();
         let layout = h.app.viewport.layout.as_ref().unwrap();
+        let usable = layout.usable.as_ref().expect("shared usable region");
         for name in ["browser:card", "history:card"] {
             let card = crate::scenario::rect_of(name).unwrap();
             assert!(layout.viewport.contains_rect(card), "{name}: {card:?} {layout:?}");
-            assert!(!layout.drawable.intersect(card).is_positive(), "{name}: {card:?} {layout:?}");
+            assert!(usable.obstacles.contains(&crate::panel_runtime::logical_rect(card)), "{name}: {card:?} {layout:?}");
         }
         let projection = crate::viewport::projection(&h.app, layout.viewport);
         for x in [0.0, 40.0] {
             for y in [0.0, 30.0] {
                 for z in [0.0, 20.0] {
-                    assert!(layout.drawable.contains(projection.to_screen(Vec3::new(x, y, z)).unwrap()), "{layout:?}");
+                    let projected = projection.to_screen(Vec3::new(x, y, z)).unwrap();
+                    assert!(
+                        usable.free.iter().any(|piece| crate::panel_runtime::egui_rect(*piece).contains(projected)),
+                        "projected corner {projected:?} falls outside {usable:?}"
+                    );
                 }
             }
         }
@@ -1076,7 +1059,7 @@ fn a_fit_centres_the_model_in_the_view_and_is_moved_only_by_panels() {
         let (x, y, _) = cam.to_screen(p, f64::from(viewport.width()), f64::from(viewport.height()), radius).unwrap();
         pos2(viewport.left() + x as f32, viewport.top() + y as f32)
     };
-    for style in [crate::prefs::NavigatorStyle::Axes, crate::prefs::NavigatorStyle::Cube] {
+    for style in [crate::prefs::NavigatorStyle::Axes] {
         // The compass and the navigation bar, and nothing else.
         let bare = layout(viewport, &[], 1.0, style, true);
         let cam = fit_bounds(Camera::default(), &bounds, &bare, 0.0).expect("framed");

@@ -535,7 +535,10 @@ impl<O: ClassObject> CurveClassification<O> {
         let mut out = ExtractedGeometry::default();
         self.cleanup_and_validate(k, geometry, other)?;
         if self.size() != other.size() {
-            return Err(SolidError::sm_err(OP));
+            return Err(SolidError::intersect_failed(
+                OP,
+                "the two classifications have different numbers of intervals",
+            ));
         }
         let mut found = Vec::new();
         for i in 0..self.size() {
@@ -569,7 +572,12 @@ impl<O: ClassObject> CurveClassification<O> {
         for j in 0..self.size() {
             let (this, _) = Self::p5_point_class_by_index(self, j)?;
             let (that, _) = Self::p5_point_class_by_index(other, j)?;
-            let found_current = found.get(j).copied().ok_or(SolidError::sm_err(OP))?;
+            let found_current = found.get(j).copied().ok_or_else(|| {
+                SolidError::intersect_failed(
+                    OP,
+                    "the classification has no found flag for the interval",
+                )
+            })?;
             if contained_point(this.point_class())
                 && contained_point(that.point_class())
                 && !found_current
@@ -615,7 +623,12 @@ impl<O: ClassObject> CurveClassification<O> {
                 if self.fix_end_point_class(k, geometry, i, start)?
                     || self.fix_end_point_class(k, geometry, i + 1, end)?
                 {
-                    restarts = restarts.checked_sub(1).ok_or(SolidError::sm_err(OP))?;
+                    restarts = restarts.checked_sub(1).ok_or_else(|| {
+                        SolidError::intersect_failed(
+                            OP,
+                            "fixing the interval end classes did not settle",
+                        )
+                    })?;
                     continue 'restart;
                 }
             }
@@ -1280,7 +1293,10 @@ impl<O: ClassObject> CurveClassification<O> {
         link: PairLink,
     ) -> Result<(MergedTopology<O>, MergedTopology<O>)> {
         if self.size() != other.size() {
-            return Err(SolidError::sm_err(OP));
+            return Err(SolidError::intersect_failed(
+                OP,
+                "the two classifications have different numbers of intervals",
+            ));
         }
         let mut out = MergedTopology::default();
         let mut out_other = MergedTopology::default();
@@ -1540,7 +1556,10 @@ fn insert_solutions_in<O: ClassObject>(
             .surface(object)
             .is_some_and(|s| matches!(s.kind(), SurfaceKind::Plane(_)));
     if !has_target && !plane {
-        return Err(SolidError::sm_err(OP));
+        return Err(SolidError::intersect_failed(
+            OP,
+            "the object is neither an edge with a curve nor a plane",
+        ));
     }
     for sol in solutions {
         collapse_short_range(k, access.geometry(), sol, tol)?;
@@ -1588,8 +1607,18 @@ fn insert_solutions_in<O: ClassObject>(
                 if let Some(target) = target {
                     let a = source.evaluate(k, sol.start.param(0)?, 1, true, true)?;
                     let b = target.evaluate(k, sol.start.param(1)?, 1, true, true)?;
-                    let ta = a.get(1).copied().ok_or(SolidError::sm_err(OP))?;
-                    let tb = b.get(1).copied().ok_or(SolidError::sm_err(OP))?;
+                    let ta = a.get(1).copied().ok_or_else(|| {
+                        SolidError::intersect_failed(
+                            OP,
+                            "the source curve's first derivative was not evaluated",
+                        )
+                    })?;
+                    let tb = b.get(1).copied().ok_or_else(|| {
+                        SolidError::intersect_failed(
+                            OP,
+                            "the target curve's first derivative was not evaluated",
+                        )
+                    })?;
                     let mut angle = tb.angle_between(ta).unwrap_or(1.0);
                     if angle > PI / 2.0 {
                         angle = PI - angle;
@@ -1733,7 +1762,8 @@ fn edge_end_vertex_snap<O: ClassObject>(
         } else {
             start_vertex
         };
-        let vertex = vertex.ok_or(SolidError::null_pointer(OP))?;
+        let vertex =
+            vertex.ok_or_else(|| SolidError::intersect_missing(OP, "the edge's vertex"))?;
         let vtx = geometry
             .topology_handle_in(eb, EntityRef::Vertex(vertex))
             .ok_or(SolidError::invalid_input(OP, "vertex without handle"))?;
@@ -2159,7 +2189,10 @@ mod tests {
             let other_before = other.intervals().to_vec();
             assert!(matches!(
                 cc.merge_classifications(&k, &g, &mut other, true),
-                Err(SolidError::Upstream { code: 1001, .. })
+                Err(ref e) if matches!(
+                    e.intersect_failure(),
+                    Some(crate::error::intersect::IntersectFailure::Failed(_))
+                ) && e.sm_status() == Some(1001)
             ));
             assert_eq!(cc.intervals(), before);
             assert_eq!(other.intervals(), other_before);

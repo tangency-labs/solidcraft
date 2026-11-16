@@ -60,7 +60,10 @@
 //!   [`XsectClassification`]; an out-of-domain guess keeps its unclamped values, as
 //!   upstream. `SmCurve::EvaluateGeometric` failing with `SM_ERR` marks the point touching
 //!   (other failures propagate; upstream would read uninitialised vectors). The shape
-//!   variables only read on paths where they were set start at zero.
+//!   variables only read on paths where they were set start at zero. With an edge and a
+//!   face, osculating circles overlapping past touching by less than [`contact_tol_3d`]
+//!   are tangent (WR-787, #15429), and so are a line and an osculating circle (#14599); a
+//!   bare curve or surface keeps upstream's zero.
 //! - **Kernel.** `is_on_seam` and `global_point_solve` (and `global_point_solve_starts`)
 //!   take the [`Kernel`] that the tolerance, drop and cache callees now need.
 //! - **Unported callees** (return [`SolidError::Unported`]): the zone tolerance of a face's
@@ -81,8 +84,8 @@ use crate::geom::assert_array::labels::{EDGE_TYPE, FACE_TYPE};
 use crate::geom::extent1d::Extent1d;
 use crate::geom::extent2d::Extent2d;
 use crate::geom::geom_utility::p1::{
-    circle_coplanar_circle_intersect, line_coplanar_circle_intersect, line_point_distance,
-    vec_lin_comb_two_vectors, CircleCircle,
+    circle_coplanar_circle_intersect_in_contact, line_coplanar_circle_intersect_distinct,
+    line_point_distance, vec_lin_comb_two_vectors, CircleCircle,
 };
 use crate::geom::global_solver::{SolutionRequested, SolverOperation};
 use crate::geom::local_solve_nd::{compute_jacobian, EvalNFunctions};
@@ -90,6 +93,7 @@ use crate::geom::matrix::Matrix;
 use crate::geom::solution_array::{
     ObjectKind, OperandObject, Solution, SolutionArray, SolutionEnd, SolutionObject, MAX_TREES,
 };
+use crate::geom::tol::contact_tol_3d;
 use crate::geom::vector2d::Vec2;
 use crate::geom::vector3d::{asin, sqrt as sm_sqrt};
 use crate::kernel::Kernel;
@@ -164,7 +168,10 @@ impl EvalNFunctions for CsIntersectEnfo<'_> {
         let k = self.kernel;
         check_len(x, f, 3, OP_CS_INTERSECT)?;
         let (Some(&t), Some(&u), Some(&v)) = (x.first(), x.get(1), x.get(2)) else {
-            return Err(SolidError::sm_err(OP_CS_INTERSECT));
+            return Err(SolidError::surface_failed(
+                OP_CS_INTERSECT,
+                "the solver variables are too few",
+            ));
         };
 
         // count calls
@@ -185,7 +192,10 @@ impl EvalNFunctions for CsIntersectEnfo<'_> {
             || dv.length_squared() < EFF_ZERO_SQ
             || ct.length_squared() < EFF_ZERO_SQ
         {
-            return Err(SolidError::sm_err(OP_CS_INTERSECT));
+            return Err(SolidError::surface_failed(
+                OP_CS_INTERSECT,
+                "a tangent of the curve or surface has zero length",
+            ));
         }
 
         // get Gap Vector = S - C
@@ -285,7 +295,10 @@ impl EvalNFunctions for CsNormalizeEnfo<'_> {
         let count = if directed { 4 } else { 3 };
         check_len(x, f, count, OP_CS_NORMALIZE)?;
         let (Some(&t), Some(&u), Some(&v)) = (x.first(), x.get(1), x.get(2)) else {
-            return Err(SolidError::sm_err(OP_CS_NORMALIZE));
+            return Err(SolidError::surface_failed(
+                OP_CS_NORMALIZE,
+                "the solver variables are too few",
+            ));
         };
 
         // evaluate Curve Point and derivs
@@ -304,7 +317,10 @@ impl EvalNFunctions for CsNormalizeEnfo<'_> {
             || su.length_squared() < EFF_ZERO_SQ
             || sv.length_squared() < EFF_ZERO_SQ
         {
-            return Err(SolidError::sm_err(OP_CS_NORMALIZE));
+            return Err(SolidError::surface_failed(
+                OP_CS_NORMALIZE,
+                "a tangent of the curve or surface has zero length",
+            ));
         }
 
         // get gap vector
@@ -333,7 +349,10 @@ impl EvalNFunctions for CsNormalizeEnfo<'_> {
 
         if directed {
             if self.opt_vectors.unwrap_or(&[]).is_empty() {
-                return Err(SolidError::null_pointer(OP_CS_NORMALIZE));
+                return Err(SolidError::surface_missing(
+                    OP_CS_NORMALIZE,
+                    "the direction vector",
+                ));
             }
             let dir = nth(self.opt_vectors.unwrap_or(&[]), 0, OP_CS_NORMALIZE)?;
 
@@ -416,7 +435,10 @@ impl EvalNFunctions for SspIntersectEnfo<'_> {
         let (Some(&u1), Some(&v1), Some(&u2), Some(&v2)) =
             (x.first(), x.get(1), x.get(2), x.get(3))
         else {
-            return Err(SolidError::sm_err(OP_SSP_INTERSECT));
+            return Err(SolidError::surface_failed(
+                OP_SSP_INTERSECT,
+                "the solver variables are too few",
+            ));
         };
 
         // get surface 3d points - with 1st derivatives
@@ -446,13 +468,16 @@ impl EvalNFunctions for SspIntersectEnfo<'_> {
             }
             let plane_norm = norm1.cross(norm2);
             if plane_norm.length_squared() < EFF_ZERO_SQ {
-                return Err(SolidError::sm_err(OP_SSP_INTERSECT));
+                return Err(SolidError::surface_failed(
+                    OP_SSP_INTERSECT,
+                    "the surface normals are parallel",
+                ));
             }
             temp_plane = Plane::from_normal(through, plane_norm.unitize_or_z());
             &temp_plane
         } else {
             self.plane
-                .ok_or_else(|| SolidError::null_pointer(OP_SSP_INTERSECT))?
+                .ok_or_else(|| SolidError::surface_missing(OP_SSP_INTERSECT, "the plane"))?
         };
 
         // evaluate Plane derivatives
@@ -483,7 +508,10 @@ impl EvalNFunctions for SspIntersectEnfo<'_> {
             || dug.length_squared() < EFF_ZERO_SQ
             || dvg.length_squared() < EFF_ZERO_SQ
         {
-            return Err(SolidError::sm_err(OP_SSP_INTERSECT));
+            return Err(SolidError::surface_failed(
+                OP_SSP_INTERSECT,
+                "a surface tangent has zero length",
+            ));
         }
 
         // get gap vector
@@ -545,7 +573,10 @@ impl EvalNFunctions for SsiNormalizeEnfo<'_> {
         let (Some(&u1), Some(&v1), Some(&u2), Some(&v2)) =
             (x.first(), x.get(1), x.get(2), x.get(3))
         else {
-            return Err(SolidError::sm_err(OP_SSI_NORMALIZE));
+            return Err(SolidError::surface_failed(
+                OP_SSI_NORMALIZE,
+                "the solver variables are too few",
+            ));
         };
 
         let uv = Point2::new(u1, v1);
@@ -566,7 +597,10 @@ impl EvalNFunctions for SsiNormalizeEnfo<'_> {
             || du2.length_squared() < EFF_ZERO_SQ
             || dv2.length_squared() < EFF_ZERO_SQ
         {
-            return Err(SolidError::sm_err(OP_SSI_NORMALIZE));
+            return Err(SolidError::surface_failed(
+                OP_SSI_NORMALIZE,
+                "a surface tangent has zero length",
+            ));
         }
 
         // when the gap is small
@@ -607,7 +641,10 @@ impl EvalNFunctions for SsiNormalizeEnfo<'_> {
                 .surface
                 .evaluate_normal(k, uv, Side::Left, Side::Left)?;
             if nu.length_squared() < EFF_ZERO_SQ {
-                return Err(SolidError::sm_err(OP_SSI_NORMALIZE));
+                return Err(SolidError::surface_failed(
+                    OP_SSI_NORMALIZE,
+                    "the first surface has no normal",
+                ));
             }
         }
         let nu = nu.unitize_or_z();
@@ -619,7 +656,10 @@ impl EvalNFunctions for SsiNormalizeEnfo<'_> {
                 .surface
                 .evaluate_normal(k, uv2, Side::Left, Side::Left)?;
             if n2u.length_squared() < EFF_ZERO_SQ {
-                return Err(SolidError::sm_err(OP_SSI_NORMALIZE));
+                return Err(SolidError::surface_failed(
+                    OP_SSI_NORMALIZE,
+                    "the second surface has no normal",
+                ));
             }
         }
         let n2u = n2u.unitize_or_z();
@@ -676,7 +716,10 @@ impl EvalNFunctions for SsNormalizeEnfo<'_> {
         let (Some(&u1), Some(&v1), Some(&u2), Some(&v2)) =
             (x.first(), x.get(1), x.get(2), x.get(3))
         else {
-            return Err(SolidError::sm_err(OP_SS_NORMALIZE));
+            return Err(SolidError::surface_failed(
+                OP_SS_NORMALIZE,
+                "the solver variables are too few",
+            ));
         };
 
         // Surf1Point and Surf2Point current solution values
@@ -693,7 +736,10 @@ impl EvalNFunctions for SsNormalizeEnfo<'_> {
             || s2u.length_squared() < EFF_ZERO_SQ
             || s2v.length_squared() < EFF_ZERO_SQ
         {
-            return Err(SolidError::sm_err(OP_SS_NORMALIZE));
+            return Err(SolidError::surface_failed(
+                OP_SS_NORMALIZE,
+                "a surface tangent has zero length",
+            ));
         }
 
         // when the gap is small
@@ -724,7 +770,10 @@ impl EvalNFunctions for SsNormalizeEnfo<'_> {
 
         if directed {
             if self.opt_vectors.unwrap_or(&[]).is_empty() {
-                return Err(SolidError::null_pointer(OP_SS_NORMALIZE));
+                return Err(SolidError::surface_missing(
+                    OP_SS_NORMALIZE,
+                    "the direction vector",
+                ));
             }
             let dir = nth(self.opt_vectors.unwrap_or(&[]), 0, OP_SS_NORMALIZE)?;
 
@@ -868,7 +917,8 @@ impl SurfaceEval<'_> {
 
         // On the high side of the 'good' domain, this must be flipped (because it's
         // decreasing).
-        let surface = surface.ok_or(SolidError::null_pointer(OP_EVAL_NORMAL))?;
+        let surface =
+            surface.ok_or_else(|| SolidError::surface_missing(OP_EVAL_NORMAL, "the surface"))?;
         let domain = surface.natural_uv_domain_with_nurb(k)?;
         if sing_u {
             let mut n = duv.cross(dv);
@@ -1231,7 +1281,10 @@ impl Surface {
         if !(uv_domain.contains_point(start_uv, EFF_ZERO)
             && uv_domain.contains_point(end_uv, EFF_ZERO))
         {
-            return Err(SolidError::sm_err(OP_LINE_ON_SURF));
+            return Err(SolidError::surface_failed(
+                OP_LINE_ON_SURF,
+                "an end point is outside the UV domain",
+            ));
         }
 
         // Build the UV line
@@ -1696,9 +1749,12 @@ impl Surface {
                             && cache.point_test_enabled
                             && !cache.face_was_modified
                         {
-                            let face = cache.face()?.ok_or(SolidError::null_pointer(
-                                "surface::surface::p4::global_point_solve",
-                            ))?;
+                            let face = cache.face()?.ok_or_else(|| {
+                                SolidError::surface_missing(
+                                    "surface::surface::p4::global_point_solve",
+                                    "the cache's face",
+                                )
+                            })?;
                             let queries = context.face_queries().ok_or_else(|| {
                                 SolidError::unported(
                                     "prepared face classifier for fast drop",
@@ -1946,7 +2002,7 @@ pub fn classify_curve_surface_xsect_point_with(
     // a[0] position, a[1] first derivative, a[2] curvature vector
     let geom = match curve_evaluate_geometric(k, curve, current_t, 2, true) {
         Ok(v) => v,
-        Err(SolidError::Upstream { code: SM_ERR, .. }) => {
+        Err(e) if e.upstream_status() == Some(SM_ERR) => {
             // no extra guesses or possible coincidence signalled for degenerate curves
             out.point_type = TsectCurveType::Touching;
             return Ok(out);
@@ -2122,7 +2178,13 @@ pub fn classify_curve_surface_xsect_point_with(
     // heuristics.
     let mut curve_tol = EFF_ZERO_SQRT; // default values, if nothing else to use.
     let mut surface_tol = EFF_ZERO_SQRT;
+    // Not upstream (WR-787, #15429, #14599): osculating circles, or a line and an osculating
+    // circle, a hair less than tangent touch where an edge meets a face, at the walls' and
+    // rims' contact tolerance; the radius bands of a bare curve or surface are a search
+    // heuristic and keep upstream's zero.
+    let mut topology = [false; 2];
     if curve.owner().is_some_and(|o| o.type_code == EDGE_TYPE) {
+        topology[0] = true;
         // pCurveOwner->GetTolerance(), as the caller resolves it
         curve_tol = edge_tolerance.ok_or_else(|| {
             // UNPORTED(topology.edge): SmEdge::GetTolerance (a caller without the edge)
@@ -2135,6 +2197,7 @@ pub fn classify_curve_surface_xsect_point_with(
         curve_tol = curve_radius / 1000.0;
     }
     if surface.owner().is_some_and(|o| o.type_code == FACE_TYPE) {
+        topology[1] = true;
         // pSurfaceOwner->GetTolerance(): the direct owner is the face, so the face the
         // surface reaches; its tolerance as cached by the B-rep
         surface_tol = surface.owner_zone_tol_3d().ok_or_else(|| {
@@ -2148,6 +2211,11 @@ pub fn classify_curve_surface_xsect_point_with(
         surface_tol = surface_radius / 1000.0;
     }
     let tol_3d = curve_tol + surface_tol;
+    let contact_tol = if topology == [true; 2] {
+        contact_tol_3d(k)
+    } else {
+        0.0
+    };
 
     // when both curve and surface shapes are lines
     if curve_line && surface_line {
@@ -2179,13 +2247,15 @@ pub fn classify_curve_surface_xsect_point_with(
     // when curve is linear or close enough
     if curve_line {
         // intersect CurveLine with SurfaceOsculating Circle
-        let params = line_coplanar_circle_intersect(
+        let params = line_coplanar_circle_intersect_distinct(
             curve_point,
             curve_vec,
             surface_center,
             surface_circle_normal,
             surface_radius,
             tol_3d,
+            tol_3d,
+            contact_tol,
         )?;
 
         // If only have one or zero intersections we are done without picking up extra
@@ -2212,13 +2282,15 @@ pub fn classify_curve_surface_xsect_point_with(
         let mut local_type = TsectCurveType::Unknown;
         let mut local_type2 = TsectCurveType::Unknown;
 
-        let params = line_coplanar_circle_intersect(
+        let params = line_coplanar_circle_intersect_distinct(
             surface_point,
             surface_vec,
             curve_center,
             curve_circle_normal,
             curve_radius,
             tol_3d,
+            tol_3d,
+            contact_tol,
         )?;
 
         // use number of intersections to classify the point against SurfaceVec
@@ -2236,13 +2308,15 @@ pub fn classify_curve_surface_xsect_point_with(
         // when surface is represented by two lines
         if surface_two_lines {
             // intersect SurfaceLine2 with CurveOsculating Circle
-            let params2 = line_coplanar_circle_intersect(
+            let params2 = line_coplanar_circle_intersect_distinct(
                 surface_point,
                 surface_vec2,
                 curve_center,
                 curve_circle_normal,
                 curve_radius,
                 tol_3d,
+                tol_3d,
+                contact_tol,
             )?;
 
             // use number of intersections to classify the point against SurfaceVec2
@@ -2289,22 +2363,24 @@ pub fn classify_curve_surface_xsect_point_with(
     if !curve_line && !surface_line {
         // intersect osculating curve and surface circles: BiggerCircle/SmallerCircle
         let hit = if curve_radius > surface_radius {
-            circle_coplanar_circle_intersect(
+            circle_coplanar_circle_intersect_in_contact(
                 curve_circle_normal,
                 curve_center,
                 curve_radius,
                 surface_center,
                 surface_radius,
                 tol_3d,
+                contact_tol,
             )?
         } else {
-            circle_coplanar_circle_intersect(
+            circle_coplanar_circle_intersect_in_contact(
                 surface_circle_normal,
                 surface_center,
                 surface_radius,
                 curve_center,
                 curve_radius,
                 tol_3d,
+                contact_tol,
             )?
         };
 

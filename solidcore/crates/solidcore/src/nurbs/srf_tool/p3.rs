@@ -31,6 +31,12 @@
 //!   does the same for NLib errors (keeping the surface upstream leaves behind) but
 //!   returns non-NLib errors, which mark inputs where upstream indexes outside its
 //!   arrays.
+//! - `N_SrfJoin` of a rational and a non-rational surface loads both nets as they are,
+//!   so its knot removal runs on a net that mixes weights with the non-rational marker
+//!   `NL_NOW`, and only then sets the marker to `1.0` (`WR-773`). [`join`] gives the
+//!   non-rational piece weights `1.0` first ([`make_rat_compatible`]), so the removal
+//!   runs on the net upstream has after that loop (the joint weight `0.5 * w1 + 0.5 * w2`
+//!   equals upstream's `0.5 * (w1 + w2)` while `w1 + w2` is finite).
 //! - `N_MakeSrfsCompatible` ignores the status of `N_SrfReparam` /
 //!   `N_SrfReparamToInterval`; their only Rust error is `InvalidInput` for a knot
 //!   vector shorter than the degree (where upstream writes outside the array), which
@@ -49,7 +55,7 @@ use crate::math::max2;
 use crate::nurbs::basis_basic::{compatible_knot_array, find_all_span_maxima};
 use crate::nurbs::geom::Rectangle;
 use crate::nurbs::knots::KnotVector;
-use crate::nurbs::math::{CPoint, BIGD, NOW};
+use crate::nurbs::math::{CPoint, BIGD};
 use crate::nurbs::srf_basic::{make_rat_compatible, Direction, Surface, WEIGHT_MAX, WEIGHT_MIN};
 
 use super::p1::{
@@ -804,7 +810,8 @@ impl RemoveAll {
 /// one and the knot vectors are merged by knot insertion. Knots of different
 /// surfaces within the knot-merge tolerance are moved to their average first.
 ///
-/// Errors: `InvalidInput` for an empty slice or invalid surfaces; errors of the
+/// Errors: `InvalidInput` for an empty slice, invalid surfaces, or a surface whose
+/// control points mix rational and non-rational (changing nothing); errors of the
 /// degree elevation, the knot merge and the knot insertion (the surfaces are left as
 /// far as upstream got).
 pub fn make_compatible(sur: &mut [Surface], dir: Direction) -> Result<()> {
@@ -814,6 +821,11 @@ pub fn make_compatible(sur: &mut [Surface], dir: Direction) -> Result<()> {
             operation: OP,
             reason: "no surfaces",
         });
+    }
+    // As in `join`: on a mixed net the rational conversion would move weighted points
+    // or keep `NOW` as a weight.
+    for s in sur.iter() {
+        s.refuse_mixed_rationality(OP)?;
     }
 
     // Make surface definitions compatible.
@@ -937,15 +949,22 @@ fn merge_knots(sur: &mut [Surface], d: Direction) -> Result<Vec<Vec<f64>>> {
 /// Joins `sur1` and `sur2` along `dir` (`N_SrfJoin`): the end of `sur1` in `dir`
 /// meets the start of `sur2` (whose knots are shifted to continue `sur1`'s); the
 /// boundary rows are averaged into one, the lower degree is elevated first, and the
-/// joint knot is then removed as often as `tol` allows. Any `dir` other than
-/// [`Direction::U`] joins in v.
+/// joint knot is then removed as often as `tol` allows. A rational and a non-rational
+/// surface join as a rational one (weights `1.0` on the non-rational one). Any `dir`
+/// other than [`Direction::U`] joins in v.
 ///
 /// Errors: [`NurbsFailure::Input`] when the net sizes or degrees across `dir` differ;
-/// errors of the degree elevation; `InvalidInput` for invalid surfaces.
+/// errors of the degree elevation; `InvalidInput` for invalid surfaces and for a
+/// surface whose control points mix rational and non-rational.
 pub fn join(sur1: &Surface, sur2: &Surface, dir: Direction, tol: f64) -> Result<Surface> {
     const OP: &str = "nurbs::srf_tool::p3::join";
-    let rat1 = sur1.is_rational();
-    let rat2 = sur2.is_rational();
+
+    // A net mixed after construction (through `Surface::cpt_mut`, `set_cpts_and_knots`
+    // or `set_size_indices`) is refused here: the rational conversion below judges a
+    // piece by `Pw[0][0]` alone, so it would give a weighted point of a "non-rational"
+    // piece the weight 1.0 (moving it), or keep `NOW` as a weight on a "rational" one.
+    sur1.refuse_mixed_rationality(OP)?;
+    sur2.refuse_mixed_rationality(OP)?;
 
     // Work in the v direction; the u direction transposes the inputs and the result.
     let tr = |s: &Surface| {
@@ -977,6 +996,12 @@ pub fn join(sur1: &Surface, sur2: &Surface, dir: Direction, tol: f64) -> Result<
             (a, e)
         }
     };
+    // A rational and a non-rational piece join as rational: the non-rational one gets
+    // weights 1.0 before its points are loaded, so the joined net, and the knot removal
+    // on it, never takes the non-rational marker `NOW` as a weight.
+    let mut pieces = [a, b];
+    make_rat_compatible(&mut pieces);
+    let [a, b] = pieces;
     let Local {
         n: n1,
         m: m1,
@@ -1020,13 +1045,7 @@ pub fn join(sur1: &Surface, sur2: &Surface, dir: Direction, tol: f64) -> Result<
         }
         let a1 = at2(&pw1, ii, m1, OP)?;
         let b0 = at2(&pw2, ii, 0, OP)?;
-        let mut c = CPoint::combine2(0.5, a1, 0.5, b0);
-        if rat1 != rat2 {
-            let w1 = if a1.w == NOW { 1.0 } else { a1.w };
-            let w2 = if b0.w == NOW { 1.0 } else { b0.w };
-            c.w = 0.5 * (w1 + w2);
-        }
-        put2(&mut pwj, ii, m1, c, OP)?;
+        put2(&mut pwj, ii, m1, CPoint::combine2(0.5, a1, 0.5, b0), OP)?;
         for (kk, jj) in ((m1 + 1)..).zip(1..=m2) {
             put2(&mut pwj, ii, kk, at2(&pw2, ii, jj, OP)?, OP)?;
         }
@@ -1041,18 +1060,6 @@ pub fn join(sur1: &Surface, sur2: &Surface, dir: Direction, tol: f64) -> Result<
         Err(e) => return Err(e),
     }
 
-    // Make sure weights/rationality is consistently set.
-    if rat1 != rat2 {
-        for i in 0..=surj.n() {
-            for j in 0..=surj.m() {
-                let c = surj.cpt_mut(i, j)?;
-                if c.w == NOW {
-                    c.w = 1.0;
-                }
-            }
-        }
-    }
-
     if dir == Direction::U {
         surj.swap_uv();
     }
@@ -1063,6 +1070,7 @@ pub fn join(sur1: &Surface, sur2: &Surface, dir: Direction, tol: f64) -> Result<
 mod tests {
     use super::*;
     use crate::nurbs::knots::Side;
+    use crate::nurbs::math::NOW;
 
     fn sample() -> Surface {
         let net: Vec<Vec<CPoint>> = (0..5)
@@ -1129,6 +1137,108 @@ mod tests {
             join(&s, &a, Direction::U, 1e-9),
             Err(ref e) if matches!(e.nurbs_failure(), Some(NurbsFailure::Input))
         ));
+    }
+
+    #[test]
+    fn rational_and_non_rational_halves_join_as_rational() {
+        let s = sample();
+        for (t, dir, rational_first) in [(0.4, Direction::U, true), (0.3, Direction::V, false)] {
+            let (mut a, mut b) = super::super::p1::split(&s, t, dir).unwrap();
+            if rational_first {
+                a.non_rat_to_rat();
+            } else {
+                b.non_rat_to_rat();
+            }
+            let j = join(&a, &b, dir, 1e-9).unwrap();
+            // The joint knot is removed again and every weight is the 1.0 of `s`.
+            assert_eq!((j.n(), j.m()), (s.n(), s.m()));
+            assert!(j.rows().flatten().all(|pw| pw.w == 1.0));
+            assert!(max_dist(&s, &j) < 1e-9);
+        }
+        // A rational piece keeps its own weights. With `tol < 0` no knot goes, so the
+        // joined net is `a`'s points, the averaged joint column, then `b`'s with weight 1.0.
+        let (mut a, b) = super::super::p1::split(&s, 0.3, Direction::V).unwrap();
+        for i in 0..=a.n() {
+            let w = 2.0 + 0.25 * f64::from(u32::try_from(i).unwrap());
+            for k in 0..=a.m() {
+                let c = a.cpt_mut(i, k).unwrap();
+                *c = CPoint::new(c.x * w, c.y * w, c.z * w, w);
+            }
+        }
+        let mut b1 = b.clone();
+        b1.non_rat_to_rat();
+        let j = join(&a, &b, Direction::V, -1.0).unwrap();
+        let m1 = a.m();
+        assert_eq!((j.n(), j.m()), (a.n(), m1 + b.m()));
+        for i in 0..=a.n() {
+            for k in 0..m1 {
+                assert_eq!(j.cpt(i, k).unwrap(), a.cpt(i, k).unwrap());
+            }
+            let joint = CPoint::combine2(0.5, a.cpt(i, m1).unwrap(), 0.5, b1.cpt(i, 0).unwrap());
+            assert_eq!(j.cpt(i, m1).unwrap(), joint);
+            for k in 1..=b.m() {
+                assert_eq!(j.cpt(i, m1 + k).unwrap(), b1.cpt(i, k).unwrap());
+            }
+        }
+    }
+
+    #[test]
+    fn piece_mixed_through_cpt_mut_is_refused() {
+        // `Surface::new` refuses a mixed net, but `cpt_mut` can mix one later. Their
+        // rational conversion judges a piece by `Pw[0][0]` alone: it would give the
+        // weighted points of a "non-rational" piece the weight 1.0 (moving them), and
+        // keep `NOW` as a weight on a "rational" one. So `join` and `make_compatible`
+        // refuse such a piece themselves (not only through the `Surface::new` of the
+        // joined net), and `make_compatible` changes nothing.
+        fn refused_by<T>(r: &Result<T>, op: &str) -> bool {
+            const WHY: &str = "control points mix rational and non-rational";
+            matches!(r, Err(SolidError::InvalidInput { operation, reason }) if *operation == op && *reason == WHY)
+        }
+        let mut not_refused = Vec::new();
+        let s = sample();
+        for (t, dir) in [(0.4, Direction::U), (0.3, Direction::V)] {
+            let (a, b) = super::super::p1::split(&s, t, dir).unwrap();
+            let mut rational = a.clone();
+            rational.non_rat_to_rat();
+            // An inner point, and the last one (on the joint row when the piece is first).
+            for last in [false, true] {
+                let at = |x: &Surface| if last { (x.n(), x.m()) } else { (1, 1) };
+                // A weighted point among non-rational ones, and the reverse.
+                let mut weighted = b.clone();
+                let (i, k) = at(&weighted);
+                let c = weighted.cpt_mut(i, k).unwrap();
+                *c = CPoint::new(c.x * 2.0, c.y * 2.0, c.z * 2.0, 2.0);
+                let mut unweighted = rational.clone();
+                let (i, k) = at(&unweighted);
+                let c = unweighted.cpt_mut(i, k).unwrap();
+                *c = c.unweighted();
+                let pairs = [
+                    (&rational, &weighted),
+                    (&weighted, &rational),
+                    (&a, &weighted),
+                    (&unweighted, &a),
+                    (&a, &unweighted),
+                ];
+                for (n, (p1, p2)) in pairs.into_iter().enumerate() {
+                    let r = join(p1, p2, dir, 1e-9);
+                    if !refused_by(&r, "nurbs::srf_tool::p3::join") {
+                        not_refused
+                            .push(format!("join {dir:?} last={last} pair {n}: {:?}", r.err()));
+                    }
+                    let mut pair = [p1.clone(), p2.clone()];
+                    let r = make_compatible(&mut pair, dir);
+                    if !refused_by(&r, "nurbs::srf_tool::p3::make_compatible")
+                        || pair != [p1.clone(), p2.clone()]
+                    {
+                        not_refused.push(format!(
+                            "make_compatible {dir:?} last={last} pair {n}: {:?}",
+                            r.err()
+                        ));
+                    }
+                }
+            }
+        }
+        assert!(not_refused.is_empty(), "{not_refused:#?}");
     }
 
     #[test]

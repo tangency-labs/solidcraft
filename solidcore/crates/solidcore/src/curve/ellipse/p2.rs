@@ -68,13 +68,26 @@
 //!   than [`MAX_PERIOD_SHIFTS`] shifts, the set-up returns
 //!   [`SolidError::NotConverged`] with the converter left impossible and the saved
 //!   STEP interval restored, so the temporary full-circle domain does not leak.
-//!   With the opt-in `Kernel::fixes.ellipse_open_arc_keeps_end_angle` (WR-719, the
-//!   fork's cbeb14b) an open arc's end angles are its ends' own polar angles rather than
+//!   An open arc's (WR-719, the fork's cbeb14b) end angles are its ends' own polar angles rather than
 //!   `STEPInversion`'s, whose seam rule turns an end just short of 360 into 0.
 //! - **Notifications.** `SmBSplineCurve::SetFromGwNurb` and `Transform` send
 //!   `SM_NO_POST_EDIT`, whose `SmEllipse::Notify` override rebuilds the polar
 //!   converter (status ignored); the port calls [`Ellipse::set_up_polar_conversion`]
 //!   at those points. The other notifications only drop caches and are omitted.
+//! - **Circles a hair less than tangent.** [`Ellipse::intersect_with_ellipse`] takes a
+//!   contact tolerance apart from `tol` (WR-787, #15429): coplanar circles overlapping past
+//!   touching by less than it touch at one point; zero keeps upstream's two crossings.
+//!   [`Ellipse::intersect_with_line`] takes the same contact tolerance for a line in the
+//!   circle's plane (#14599); a line tilted out of it keeps upstream's crossings.
+//! - **Two crossings stay two.** `IntersectWithLine` and `IntersectWithEllipse` find
+//!   their candidate points with `smgu_LineCoPlanarCircleIntersect` at ten times the
+//!   intersection tolerance, which upstream also uses to merge the line's two
+//!   crossings into one: crossings up to ten tolerances apart became a single point
+//!   mid-chord, off the circle, and both were lost. The port keeps the ten-fold band for
+//!   finding the line and merges the crossings only when the merged point lies on the
+//!   circle within the intersection tolerance ([`line_coplanar_circle_intersect_distinct`]). Where upstream would have merged
+//!   them, a solution of the second crossing that repeats one of the first (both
+//!   dropped onto the end of a short arc) is not added again.
 //! - **Co-port.** The geometric constructor belongs to unit `curve.ellipse_p1`; it is
 //!   ported here because every method of this unit needs an ellipse with its NURB
 //!   (made by `MakeNurb`, `p1`).
@@ -92,7 +105,8 @@
 //!   `SmCurve::GlobalCoincidenceChecker` of the ellipse are
 //!   [`curve_base::Curve::global_point_solve`] and
 //!   [`curve_base::Curve::global_coincidence_checker`] on copies of the ellipses as
-//!   curve kinds (taking the [`Kernel`]). The
+//!   curve kinds (taking the [`Kernel`]). These query copies preserve knots exactly,
+//!   since copy-constructor cleanup can collapse a nonzero parameter interval. The
 //!   line's `GlobalPointSolve(SM_SO_INTERSECT)` of `IntersectWithLine` is the line's
 //!   `DropPointFast`, which handles every intersection. `SmCurve::LocalCurveSolve` (unit
 //!   `curve.curve_p3`) evaluates the ellipse through its B-spline base and the line
@@ -111,8 +125,9 @@ use crate::geom::assert_array::labels::POLAR_CONVERSION_TYPE;
 use crate::geom::axis2_placement::Axis2Placement;
 use crate::geom::extent1d::Extent1d;
 use crate::geom::geom_utility::p1::{
-    circle_coplanar_circle_intersect, line_coplanar_circle_intersect, line_plane_intersect,
-    point_project_to_plane, transform_point_to_start_plane, vector_project_to_plane, CircleCircle,
+    circle_coplanar_circle_intersect_in_contact, line_coplanar_circle_intersect_distinct,
+    line_plane_intersect, point_project_to_plane, transform_point_to_start_plane,
+    vector_project_to_plane, CircleCircle,
 };
 use crate::geom::geom_utility::p2::{intersect_two_planes, PlanesIntersection};
 use crate::geom::global_solver::{SolutionRequested, SolverOperation};
@@ -192,7 +207,7 @@ fn ellipse_global_point_solve<O: Copy>(
     point: Point3,
     tol: f64,
 ) -> Result<Vec<Solution<O>>> {
-    let c = curve_base::Curve::from(curve.clone());
+    let c = curve_base::Curve::from(curve.clone_exact_bounded());
     let opts = GlobalPointSolveOptions {
         handle: Some(ParamHandle(curve.base.natural_interval())),
         ..GlobalPointSolveOptions::default()
@@ -291,7 +306,7 @@ fn local_curve_solve_line<O: Copy>(
     guesses: [f64; 2],
 ) -> Result<(bool, Solution<O>)> {
     // (the line evaluates through the curve dispatch, as its virtual Evaluate)
-    let other = curve_base::Curve::from(other.clone());
+    let other = curve_base::Curve::from(other.clone_exact_bounded());
     local_curve_solve(
         k,
         &curve.base,
@@ -320,8 +335,8 @@ fn global_coincidence_checker<O: Copy>(
     tol: f64,
     objects: [Option<O>; 2],
 ) -> Result<(bool, Vec<Solution<O>>)> {
-    let a = curve_base::Curve::from(curve.clone());
-    let b = curve_base::Curve::from(other.clone());
+    let a = curve_base::Curve::from(curve.clone_exact_bounded());
+    let b = curve_base::Curve::from(other.clone_exact_bounded());
     let handles = [
         Some(IndexHandle(0, curve.base.natural_interval())),
         Some(IndexHandle(1, other.base.natural_interval())),
@@ -517,7 +532,10 @@ impl PolarConversion {
         let angle_deg = ivl.clamp_value(angle_deg);
 
         if !inside {
-            return Err(SolidError::sm_err(OP_ANGLE));
+            return Err(SolidError::curve_failed(
+                OP_ANGLE,
+                "the angle is outside the arc",
+            ));
         }
 
         // quick convert end parameters
@@ -542,7 +560,10 @@ impl PolarConversion {
 
         // check determinate for error condition
         if d < 0.0 {
-            return Err(SolidError::sm_err(OP_ANGLE));
+            return Err(SolidError::curve_failed(
+                OP_ANGLE,
+                "the quadratic has no real root",
+            ));
         }
 
         // Solve quadratic Equation for Normalized T - get solution in region [0.0 to 1.0]
@@ -553,7 +574,10 @@ impl PolarConversion {
             t = (-b - d) / (2.0 * a);
 
             if !(0.0..=1.0).contains(&t) {
-                return Err(SolidError::sm_err(OP_ANGLE));
+                return Err(SolidError::curve_failed(
+                    OP_ANGLE,
+                    "neither root is in [0, 1]",
+                ));
             }
         }
 
@@ -726,7 +750,10 @@ impl PolarConversion {
                 step_pnt,
             )?;
             if !found {
-                return Err(SolidError::sm_err(OP_TO_NURBS));
+                return Err(SolidError::curve_failed(
+                    OP_TO_NURBS,
+                    "no NURBS parameter was found for the step point",
+                ));
             }
             param
         };
@@ -1204,7 +1231,10 @@ impl Ellipse {
     /// `SM_ERR` for more than 3 derivatives.
     pub fn evaluate_step(&self, step_param: f64, num_derivs: usize) -> Result<Vec<Vec3>> {
         if num_derivs > 3 {
-            return Err(SolidError::sm_err(OP_EVAL_STEP));
+            return Err(SolidError::curve_failed(
+                OP_EVAL_STEP,
+                "more than 3 derivatives were asked",
+            ));
         }
         Ok(self.eval_step(step_param, num_derivs))
     }
@@ -1439,17 +1469,26 @@ impl Ellipse {
 
         // no work - no polar conversion
         if !self.polar.is_polar_conversion_possible() {
-            return Err(SolidError::sm_err(OP_DROP));
+            return Err(SolidError::curve_failed(
+                OP_DROP,
+                "the polar conversion is not possible",
+            ));
         }
 
         // no work - not a circle or circular arc
         if !self.is_circle() {
-            return Err(SolidError::sm_err(OP_DROP));
+            return Err(SolidError::curve_failed(
+                OP_DROP,
+                "the ellipse is not a circle",
+            ));
         }
 
         // no work - operation not minimize or intersect
         if operation != SolverOperation::Minimize && operation != SolverOperation::Intersect {
-            return Err(SolidError::sm_err(OP_DROP));
+            return Err(SolidError::curve_failed(
+                OP_DROP,
+                "the operation is neither minimize nor intersect",
+            ));
         }
 
         // get angle of TestPoint in ellipse coordinate system as a side effect of
@@ -1565,6 +1604,8 @@ impl Ellipse {
     /// only). Non-circles, and circles in planes less than 10 degrees apart but not
     /// parallel, need the general intersector; the same curve has no intersections.
     /// Parallel planes farther apart than `tol` and circles that miss give none.
+    /// Coplanar circles that overlap past touching by less than `contact_tol` touch at
+    /// one point (WR-787, #15429; zero keeps upstream's two crossings).
     /// Otherwise each candidate point is dropped onto both curves and refined with the
     /// local curve solver. Solutions name `this_obj` and `other_obj`.
     ///
@@ -1580,6 +1621,7 @@ impl Ellipse {
         other: &Self,
         other_interval: &Extent1d,
         tol: f64,
+        contact_tol: f64,
         this_obj: Option<O>,
         other_obj: Option<O>,
     ) -> Result<EllipseIntersection<O>> {
@@ -1607,6 +1649,9 @@ impl Ellipse {
         let other_center = other.position.origin();
 
         let mut intersection_points: Vec<Point3> = Vec::new();
+        // Two crossings upstream would have merged into one (see the module docs):
+        // the second one may not add a solution the first already gave.
+        let mut merged_upstream = false;
 
         // Check for coplanar circles: use the sine of the angle, not the cosine.
         let cross = this_normal.cross(other_normal);
@@ -1629,13 +1674,14 @@ impl Ellipse {
             }
 
             // intersect two coplanar circles
-            match circle_coplanar_circle_intersect(
+            match circle_coplanar_circle_intersect_in_contact(
                 this_normal,
                 this_center,
                 self.x_radius(),
                 other_center,
                 other.x_radius(),
                 tol,
+                contact_tol,
             )? {
                 // no intersections - all done
                 CircleCircle::None => {
@@ -1676,20 +1722,23 @@ impl Ellipse {
                 match intersect_two_planes(this_center, this_normal, other_center, other_normal)? {
                     PlanesIntersection::Line { point, direction } => (point, direction),
                     PlanesIntersection::Parallel { .. } => {
-                        return Err(SolidError::sm_err(
+                        return Err(SolidError::curve_failed(
                             "curve::ellipse::p2::Ellipse::intersect_with_ellipse",
+                            "the ellipses' planes are parallel",
                         ))
                     }
                 };
 
             // intersect circle with line of intersections
-            let line_params = line_coplanar_circle_intersect(
+            let line_params = line_coplanar_circle_intersect_distinct(
                 line_pnt,
                 line_vec,
                 this_center,
                 this_normal,
                 self.x_radius(),
                 tol * 10.0,
+                tol,
+                0.0,
             )?;
 
             // no intersections
@@ -1703,6 +1752,7 @@ impl Ellipse {
                 // get the 3d intersection point
                 intersection_points.push(line_pnt + *p * line_vec);
             }
+            merged_upstream = crossings_merged_upstream(&intersection_points, tol);
         }
 
         // Drop point onto each curve to get the intersection point.
@@ -1713,7 +1763,11 @@ impl Ellipse {
         sol.num_variables = 2;
         sol.solution_type = SolutionType::SingleValue;
 
-        for ip in &intersection_points {
+        let mut first_candidate_end = 0;
+        for (candidate, ip) in intersection_points.iter().enumerate() {
+            if candidate == 1 {
+                first_candidate_end = out.solutions.len();
+            }
             let solutions1: Vec<Solution<O>> =
                 ellipse_global_point_solve(k, self, interval, *ip, tol * 10.0)?;
 
@@ -1774,7 +1828,15 @@ impl Ellipse {
                     }
 
                     // All refined if necessary; see about using this result.
-                    if dist <= tol + scaled_zero {
+                    if dist <= tol + scaled_zero
+                        && !(merged_upstream
+                            && candidate == 1
+                            && self.repeats_solution(
+                                out.solutions.get(..first_candidate_end).unwrap_or(&[]),
+                                sol.start.parameters[0],
+                                tol,
+                            )?)
+                    {
                         sol.start.solution_value = dist;
                         out.solutions.push(sol);
                     }
@@ -1793,7 +1855,11 @@ impl Ellipse {
     /// the circle (a line perpendicular to the plane needs the general intersector,
     /// one that misses gives none). Each candidate point is dropped onto both curves
     /// and, when the line is not exactly in the plane, refined with the local curve
-    /// solver. Solutions name `this_obj` and `line_obj`; `start.parameters` holds
+    /// solver. A line in the circle's plane (up to `SM_EFF_ZERO_SQRT`) that overlaps the
+    /// circle past touching by less than `contact_tol` touches it at one point (WR-787,
+    /// #14599; zero keeps upstream's two crossings): at an end of the arc or the line that
+    /// lies on the stretch between the two crossings, else at the chord's midpoint.
+    /// Solutions name `this_obj` and `line_obj`; `start.parameters` holds
     /// `[ellipse param, line param]`.
     ///
     /// # Errors
@@ -1808,6 +1874,7 @@ impl Ellipse {
         line: &Line,
         other_interval: &Extent1d,
         tol: f64,
+        contact_tol: f64,
         this_obj: Option<O>,
         line_obj: Option<O>,
     ) -> Result<EllipseIntersection<O>> {
@@ -1829,6 +1896,9 @@ impl Ellipse {
         let line_vec = line.line_vector() * line.line_scale();
 
         let mut intersection_points: Vec<Point3> = Vec::new();
+        // Two crossings upstream would have merged into one (see the module docs):
+        // the second one may not add a solution the first already gave.
+        let mut merged_upstream = false;
         let mut may_need_refinement = false;
 
         // Check to see if circles and line are somewhat on the same plane.
@@ -1860,15 +1930,39 @@ impl Ellipse {
                 return Ok(out);
             }
 
-            // Intersect the projected line with the ellipse.
-            let line_params = line_coplanar_circle_intersect(
-                line_plane_pnt,
-                line_plane_vec,
-                this_center,
-                this_normal,
-                self.x_radius(),
-                tol * 10.0,
-            )?;
+            // Intersect the projected line with the ellipse. Only a line in the plane can
+            // touch the circle: a tilted one meets it where it pierces the plane, at one of
+            // the crossings, and the chord's midpoint lies off the line (#14599).
+            let contact = if may_need_refinement {
+                0.0
+            } else {
+                contact_tol
+            };
+            let intersect = |contact: f64| {
+                line_coplanar_circle_intersect_distinct(
+                    line_plane_pnt,
+                    line_plane_vec,
+                    this_center,
+                    this_normal,
+                    self.x_radius(),
+                    tol * 10.0,
+                    tol,
+                    contact,
+                )
+            };
+            let mut line_params = intersect(contact)?;
+            if let ([touch], [t0, t1]) = (&mut line_params[..], &intersect(0.0)?[..]) {
+                // a touch where upstream crosses twice: at a curve's end on that stretch
+                *touch = self.touch_at_an_end(
+                    interval,
+                    line,
+                    other_interval,
+                    (line_plane_pnt, line_plane_vec),
+                    [*t0, *t1],
+                    *touch,
+                    contact + tol,
+                )?;
+            }
             if line_params.is_empty() {
                 out.needs_more_intersections = false;
                 return Ok(out);
@@ -1876,6 +1970,7 @@ impl Ellipse {
             for p in &line_params {
                 intersection_points.push(line_plane_pnt + *p * line_plane_vec);
             }
+            merged_upstream = crossings_merged_upstream(&intersection_points, tol);
         }
 
         // Drop point onto each curve to get the intersection point.
@@ -1886,7 +1981,11 @@ impl Ellipse {
         sol.num_variables = 2;
         sol.solution_type = SolutionType::SingleValue;
 
-        for ip in &intersection_points {
+        let mut first_candidate_end = 0;
+        for (candidate, ip) in intersection_points.iter().enumerate() {
+            if candidate == 1 {
+                first_candidate_end = out.solutions.len();
+            }
             // (a failing status returns SM_SUCCESS upstream; Unported propagates)
             let solutions2: Vec<Solution<O>> =
                 match line_global_point_solve(line, other_interval, *ip, tol * 10.0) {
@@ -1947,7 +2046,15 @@ impl Ellipse {
                         }
                     }
 
-                    if dist <= tol + scaled_zero {
+                    if dist <= tol + scaled_zero
+                        && !(merged_upstream
+                            && candidate == 1
+                            && self.repeats_solution(
+                                out.solutions.get(..first_candidate_end).unwrap_or(&[]),
+                                sol.start.parameters[0],
+                                tol,
+                            )?)
+                    {
                         sol.start.solution_value = dist;
                         out.solutions.push(sol);
                     }
@@ -1957,6 +2064,64 @@ impl Ellipse {
 
         out.needs_more_intersections = false;
         Ok(out)
+    }
+
+    /// Where a line in this circle's plane that overlaps it by less than the contact
+    /// tolerance touches it (not upstream, #14599): the line `(point, vector)` crosses the
+    /// circle at the line parameters `crossings` and stays within `near` of it between
+    /// them, so the curves touch along that whole stretch. Where an end of the arc
+    /// (`interval`) within `near` of the line, or an end of the line (`line_interval`),
+    /// lies on the stretch (to `near` along it), they touch at that end, the one nearest
+    /// `midpoint`, as the line parameter of its projection; otherwise at `midpoint`. An arc
+    /// that starts on the line inside the stretch then touches it at its start, not a
+    /// point further along it.
+    ///
+    /// # Errors
+    ///
+    /// The arc's evaluation.
+    fn touch_at_an_end(
+        &self,
+        interval: &Extent1d,
+        line: &Line,
+        line_interval: &Extent1d,
+        (point, vector): (Point3, Vec3),
+        crossings: [f64; 2],
+        midpoint: f64,
+        near: f64,
+    ) -> Result<f64> {
+        let length_sq = vector.length_squared();
+        let length = vector.length();
+        let [lo, hi] = crossings;
+        let mut ends = Vec::with_capacity(4);
+        for t in [interval.min(), interval.max()] {
+            let p = self.base.evaluate_point(t)?;
+            let s = (p - point).dot(vector) / length_sq;
+            if p.distance(point + s * vector) <= near {
+                ends.push(s);
+            }
+        }
+        for t in [line_interval.min(), line_interval.max()] {
+            ends.push((line.evaluate_point(t) - point).dot(vector) / length_sq);
+        }
+        let on_stretch = |s: f64| (lo - s) * length <= near && (s - hi) * length <= near;
+        Ok(ends
+            .into_iter()
+            .filter(|&s| on_stretch(s))
+            .min_by(|a, b| (a - midpoint).abs().total_cmp(&(b - midpoint).abs()))
+            .unwrap_or(midpoint))
+    }
+
+    /// Whether the point at `t` on this ellipse lies within `tol` of the ellipse point
+    /// of one of the `earlier` solutions (not upstream: see the module docs, "Two
+    /// crossings stay two").
+    fn repeats_solution<O>(&self, earlier: &[Solution<O>], t: f64, tol: f64) -> Result<bool> {
+        let p = self.base.evaluate_point(t)?;
+        for s in earlier {
+            if self.base.evaluate_point(s.start.parameters[0])?.distance(p) <= tol {
+                return Ok(true);
+            }
+        }
+        Ok(false)
     }
 
     // ---- edits ------------------------------------------------------------------------
@@ -2001,7 +2166,10 @@ impl Ellipse {
         let mut d_scale = 1.0;
         if let Some(s) = scale {
             if !are_same(s.x, s.y) || !are_same(s.x, s.z) || s.x.abs() < EFF_ZERO {
-                return Err(SolidError::sm_err(OP_TRANSFORM));
+                return Err(SolidError::curve_failed(
+                    OP_TRANSFORM,
+                    "the scale is not uniform",
+                ));
             }
             d_scale = s.x;
         }
@@ -2014,7 +2182,9 @@ impl Ellipse {
                 self.position.x_axis(),
                 self.position.y_axis(),
             )
-            .map_err(|_| SolidError::sm_err(OP_TRANSFORM))?;
+            .map_err(|_| {
+                SolidError::curve_failed(OP_TRANSFORM, "the placement could not be set")
+            })?;
 
         // apply rotation to scaled placement
         let tmp = ell_place.transform_axis2_placement(rotate_n_move);
@@ -2028,9 +2198,9 @@ impl Ellipse {
 
         // apply transformation to underlying Nurb, which notifies the polar converter
         if self.base.nurb.is_some() {
-            self.base
-                .transform(rotate_n_move, scale)
-                .map_err(|_| SolidError::sm_err(OP_TRANSFORM))?;
+            self.base.transform(rotate_n_move, scale).map_err(|_| {
+                SolidError::curve_failed(OP_TRANSFORM, "the NURB could not be transformed")
+            })?;
             self.notify_post_edit(k)?;
         }
         Ok(())
@@ -2056,14 +2226,20 @@ pub(crate) fn set_up_polar_conversion(
 
     // get curve knots (a NURB-less ellipse would make its NURB here, re-entering)
     if e.base.nurb.is_none() {
-        return Err(SolidError::sm_err(OP_SET_UP));
+        return Err(SolidError::curve_failed(
+            OP_SET_UP,
+            "the ellipse has no NURB",
+        ));
     }
     let (knots, multiplicities) = e.base.knots(None)?;
     pc.natural_knots = knots;
 
     // no work - start/end knots are not full multiplicities
     if multiplicities.first().copied() != Some(3) || multiplicities.last().copied() != Some(3) {
-        return Err(SolidError::sm_err(OP_SET_UP));
+        return Err(SolidError::curve_failed(
+            OP_SET_UP,
+            "the end knots are not of full multiplicity",
+        ));
     }
 
     let cnt = pc.natural_knots.len();
@@ -2098,7 +2274,7 @@ pub(crate) fn set_up_polar_conversion(
         let pnt1 = e.base.evaluate_point(lowest_angle_param)?;
         let pnt2 = e.base.evaluate_point(highest_angle_param)?;
 
-        // With the opt-in fix (WR-719, the fork's cbeb14b): STEPInversion() on the full
+        // WR-719 (the fork's cbeb14b): STEPInversion() on the full
         // circle set above takes a point at its seam's end (360, to its zone tolerance /
         // 100 and 1e-4 deg) as the seam's start (0): right for a closed curve, whose end
         // is its start, but an open arc ending that near the seam (an ellipse trimmed
@@ -2106,9 +2282,7 @@ pub(crate) fn set_up_polar_conversion(
         // disagreeing with its NURB by the gap. An open arc's ends are their own polar
         // angles, as STEPInversion() computes them before that rule.
         let (mut lowest_deg, mut highest_deg);
-        if !k.fixes.ellipse_open_arc_keeps_end_angle
-            || is_closed_base(k, &e.base, &e.base.natural_interval(), 0.0)?
-        {
+        if is_closed_base(k, &e.base, &e.base.natural_interval(), 0.0)? {
             lowest_deg = e.step_inversion(k, pnt1, false, 0.0).0;
             highest_deg = e.step_inversion(k, pnt2, false, 0.0).0;
         } else {
@@ -2274,7 +2448,10 @@ pub(crate) fn set_up_polar_conversion(
     // quit - something went wrong
     if pc.angles.len() != pc.natural_knots.len() || pc.exact_conversion.len() + 1 != pc.angles.len()
     {
-        return Err(SolidError::sm_err(OP_SET_UP));
+        return Err(SolidError::curve_failed(
+            OP_SET_UP,
+            "the angles do not match the knots",
+        ));
     }
 
     // Reset the curve's analytic interval to what we've calculated.
@@ -2286,6 +2463,15 @@ pub(crate) fn set_up_polar_conversion(
     // all done - conversion tables are set up
     pc.possible = true;
     Ok(())
+}
+
+/// Whether the two candidate crossings are close enough that upstream's merge (ten
+/// times the intersection tolerance) would have made them one point.
+fn crossings_merged_upstream(points: &[Point3], tol: f64) -> bool {
+    match points {
+        [a, b] => a.distance(*b) <= tol * 10.0,
+        _ => false,
+    }
 }
 
 #[cfg(test)]
@@ -2543,6 +2729,32 @@ mod tests {
     }
 
     #[test]
+    fn point_solve_keeps_a_nonzero_arc_parameter_domain() {
+        let k = kernel();
+        let interval = Extent1d::from_min_max(0.999_999_999_998_075_2, 1.0);
+        let mut arc = circle(&k, 0.0, 90.0, 2.0, false);
+        // The same quarter circle on a short parameter interval is still a
+        // quarter circle. Query wrappers must not clean up its knots on copying.
+        arc.base.edit_parameterization(&interval).unwrap();
+        arc.set_up_polar_conversion(&k).unwrap();
+        let original = arc.base.gw_nurb().unwrap().clone();
+        let point = arc.base.evaluate_point(interval.mid()).unwrap();
+        let solutions = ellipse_global_point_solve::<()>(&k, &arc, &interval, point, 1e-8)
+            .expect("a known point on the quarter circle is found");
+        assert!(!solutions.is_empty());
+        assert!(solutions.iter().any(|s| {
+            interval.contains_value(s.start.parameters[0], 0.0)
+                && arc
+                    .base
+                    .evaluate_point(s.start.parameters[0])
+                    .unwrap()
+                    .distance(point)
+                    <= 1e-8
+        }));
+        assert_eq!(arc.base.gw_nurb(), Some(&original));
+    }
+
+    #[test]
     fn angle_param_conversion() {
         let t = PolarConversion::angle_param_to_nurb_param(0.0, 1.0, 0.0, 90.0, 45.0).expect("t");
         assert!((t - 0.5).abs() < 1e-12);
@@ -2560,7 +2772,7 @@ mod tests {
         let ivl = a.base().natural_interval();
         // same object
         let r = a
-            .intersect_with_ellipse::<i64>(&k, &ivl, &a, &ivl, 1e-6, None, None)
+            .intersect_with_ellipse::<i64>(&k, &ivl, &a, &ivl, 1e-6, 0.0, None, None)
             .expect("same");
         assert!(!r.needs_more_intersections);
         // parallel planes far apart
@@ -2576,7 +2788,7 @@ mod tests {
         )
         .expect("b");
         let r = a
-            .intersect_with_ellipse::<i64>(&k, &ivl, &b, &ivl, 1e-6, None, None)
+            .intersect_with_ellipse::<i64>(&k, &ivl, &b, &ivl, 1e-6, 0.0, None, None)
             .expect("far");
         assert!(!r.needs_more_intersections);
         assert!(r.solutions.is_empty());
@@ -2593,7 +2805,7 @@ mod tests {
         )
         .expect("c");
         let r = a
-            .intersect_with_ellipse::<i64>(&k, &ivl, &c, &ivl, 1e-6, None, None)
+            .intersect_with_ellipse::<i64>(&k, &ivl, &c, &ivl, 1e-6, 0.0, None, None)
             .expect("crossing");
         assert_eq!(r.solutions.len(), 2);
     }
@@ -2643,5 +2855,73 @@ mod tests {
         assert_eq!(c.step_interval(), interval);
         c.set_out_of_bounds_enabled(false);
         assert_eq!(c.base().evaluate_point(-0.1).unwrap(), clamped);
+    }
+
+    /// WR-787 for a line (#14599): a line in the circle's plane 5e-6 inside a circle of
+    /// radius 10 touches it once below a contact tolerance of 1e-5 (through
+    /// `Line::intersect_with_ellipse` too) and crosses it twice, 0.02 apart, without one. A
+    /// line tilted 3° out of the plane through a point of the circle, whose projection is
+    /// 5e-6 inside it, still meets it at that point: its chord's midpoint lies 5e-4 off the
+    /// line. An arc that starts on the line at a crossing touches it at its start.
+    #[test]
+    fn a_line_a_hair_inside_a_circle_touches_it_only_in_its_plane() {
+        let k = kernel();
+        let a = circle(&k, 0.0, 360.0, 10.0, false);
+        let ivl = a.base().natural_interval();
+        let (c, delta) = (Vec3::new(1.0, 2.0, 3.0), 5e-6);
+        let flat = Line::from_points(
+            c + Vec3::new(-20.0, 10.0 - delta, 0.0),
+            c + Vec3::new(20.0, 10.0 - delta, 0.0),
+            3,
+        );
+        let flat_ivl = flat.natural_interval();
+        for (contact, want) in [(1e-5, 1), (0.0, 2)] {
+            let r = flat
+                .intersect_with_ellipse::<i64>(&k, &flat_ivl, &a, &ivl, 1e-5, contact, None, None)
+                .expect("flat");
+            assert_eq!(r.solutions.len(), want, "contact {contact}");
+        }
+        let s = (2.0 * 10.0 * delta - delta * delta).sqrt();
+        let x = c + Vec3::new(s, 10.0 - delta, 0.0);
+        // an arc that starts on the line at the right crossing touches it at its start, not
+        // at the chord's midpoint further along it
+        let theta = 90.0 - (s / 10.0).asin().to_degrees();
+        let arc = circle(&k, theta, 180.0, 10.0, false);
+        let r = flat
+            .intersect_with_ellipse::<i64>(
+                &k,
+                &flat_ivl,
+                &arc,
+                &arc.base().natural_interval(),
+                1e-5,
+                1e-5,
+                None,
+                None,
+            )
+            .expect("arc");
+        let [sol] = r.solutions.as_slice() else {
+            panic!("arc: one solution expected, {}", r.solutions.len());
+        };
+        let p = arc.base().evaluate_point(sol.start.parameters[1]).unwrap();
+        assert!(p.distance(x) < 1e-6, "arc: {p:?} vs {x:?}");
+        let d = Vec3::new(3_f64.to_radians().cos(), 0.0, 3_f64.to_radians().sin());
+        let tilted = Line::from_points(x - 20.0 * d, x + 20.0 * d, 3);
+        let r = a
+            .intersect_with_line::<i64>(
+                &k,
+                &ivl,
+                &tilted,
+                &tilted.natural_interval(),
+                1e-5,
+                1e-5,
+                None,
+                None,
+            )
+            .expect("tilted");
+        let [sol] = r.solutions.as_slice() else {
+            panic!("one solution expected, {}", r.solutions.len());
+        };
+        let p = a.base().evaluate_point(sol.start.parameters[0]).unwrap();
+        assert!(p.distance(x) < 1e-6, "{p:?} vs {x:?}");
     }
 }

@@ -62,6 +62,8 @@
 //!   builder honor upstream's ignored sampling status without inventing values.
 //!   Counts are checked and capped at [`MAX_BOUNDARY_SAMPLES`] before any allocation;
 //!   outputs otherwise grow as samples are computed. No function here recurses.
+//! - **[`LOCAL_CURVE_INTERSECT_STEPS`]** (not upstream) names the 20 iterations of
+//!   `LocalCurveIntersect`'s solve, for callers that report them.
 
 use crate::curve::curve::p3::PointSolveOptions;
 use crate::curve::curve::Curve;
@@ -106,6 +108,11 @@ const OP_SAMPLE: &str = "surface::surface::p6::DerivSurfDefinition::sample_value
 pub const MAX_BOUNDARY_SAMPLES: u64 = 65_536;
 const OP_SS: &str = "surface::surface::p6::SsGlobalSolver::solutions_identical";
 const OP_CS_INTERSECT: &str = "surface::surface::p6::cs_intersect_local_solve";
+/// The most Newton steps the solve of [`Surface::local_curve_intersect`] takes (upstream's
+/// `SetMaximumIterations(20)` in `LocalCurveIntersect`). From a guess near a crossing, Newton
+/// reaches its desired accuracy in a few; the rest is room for its step cuts and boundary hits.
+/// Named for the callers that report it when the solve finds nothing.
+pub const LOCAL_CURVE_INTERSECT_STEPS: u32 = 20;
 const OP_SC: &str = "surface::surface::p6::sc_local_solve";
 
 /// `SM_CONTINUITY_ANGLE` (`SM_ANG_TOL_DEG`, degrees): the default angle tolerance of
@@ -246,7 +253,10 @@ impl Surface {
 
         // check state
         if other_knots.len() <= 1 {
-            return Err(SolidError::sm_err(OP_CONT));
+            return Err(SolidError::surface_failed(
+                OP_CONT,
+                "the surface has fewer than two unique knots in the other direction",
+            ));
         }
 
         // init output continuities to [Discontinuous, G1, ... G1, Discontinuous]
@@ -278,7 +288,10 @@ impl Surface {
         // when reduce knot count to 5 sample points (don't need more)
         if knots.len() > 5 {
             let (Some(&first), Some(&last)) = (knots.first(), knots.last()) else {
-                return Err(SolidError::sm_err(OP_CONT));
+                return Err(SolidError::surface_failed(
+                    OP_CONT,
+                    "the sample knots are empty",
+                ));
             };
             let k4 = last;
             let k3 = first + 0.845 * (k4 - first);
@@ -321,15 +334,20 @@ impl Surface {
 
             // For each interior knot:
             for jj in 1..tmp_conts.len().saturating_sub(1) {
-                let cont = tmp_conts
-                    .get_mut(jj)
-                    .ok_or_else(|| SolidError::sm_err(OP_CONT))?;
+                let cont = tmp_conts.get_mut(jj).ok_or_else(|| {
+                    SolidError::surface_failed(
+                        OP_CONT,
+                        "the iso curve continuity is past the end of the continuities",
+                    )
+                })?;
                 if code(*cont) < code(ContinuityType::G1) {
                     // A C0 or worse discontinuity in the isocurve.
-                    let iso_knot = iso_knots
-                        .get(jj)
-                        .copied()
-                        .ok_or_else(|| SolidError::sm_err(OP_CONT))?;
+                    let iso_knot = iso_knots.get(jj).copied().ok_or_else(|| {
+                        SolidError::surface_failed(
+                            OP_CONT,
+                            "the iso curve knot is past the end of the knots",
+                        )
+                    })?;
                     let uv = if surf_param == SurfParamType::U {
                         Point2::new(iso_knot, parameter)
                     } else {
@@ -369,10 +387,12 @@ impl Surface {
                     // SM_CT_UNDEFINED, the zeroed memory of SetSize)
                     conts_at_knots = vec![ContinuityType::Undefined; surface_knot_cnt];
                     for (jj, cont) in tmp_conts.iter().enumerate() {
-                        let iso_knot = iso_knots
-                            .get(jj)
-                            .copied()
-                            .ok_or_else(|| SolidError::sm_err(OP_CONT))?;
+                        let iso_knot = iso_knots.get(jj).copied().ok_or_else(|| {
+                            SolidError::surface_failed(
+                                OP_CONT,
+                                "the iso curve knot is past the end of the knots",
+                            )
+                        })?;
                         if let Some(index) = find_element(&other_knots, iso_knot) {
                             if let Some(c) = conts_at_knots.get_mut(index) {
                                 *c = *cont;
@@ -394,10 +414,12 @@ impl Surface {
                     let index = if same_knots {
                         Some(jj)
                     } else {
-                        let iso_knot = iso_knots
-                            .get(jj)
-                            .copied()
-                            .ok_or_else(|| SolidError::sm_err(OP_CONT))?;
+                        let iso_knot = iso_knots.get(jj).copied().ok_or_else(|| {
+                            SolidError::surface_failed(
+                                OP_CONT,
+                                "the iso curve knot is past the end of the knots",
+                            )
+                        })?;
                         find_element(&other_knots, iso_knot)
                     };
                     if let Some(c) = index.and_then(|i| conts_at_knots.get_mut(i)) {
@@ -1267,12 +1289,18 @@ impl DerivSurfDefinition<'_> {
                 || tt == T::MatchNeighbors
                 || tt == T::DirToReferenceCurve)
             {
-                return Err(SolidError::sm_err(OP_SAMPLE));
+                return Err(SolidError::surface_failed(
+                    OP_SAMPLE,
+                    "the tangency type has no derivative surface",
+                ));
             }
 
             // check state
             if !self.assert_valid(None, ObjectKey(0))? {
-                return Err(SolidError::sm_err(OP_SAMPLE));
+                return Err(SolidError::surface_failed(
+                    OP_SAMPLE,
+                    "the derivative surface definition is not valid",
+                ));
             }
 
             // the outputs grow sample by sample (upstream sizes them first)
@@ -1316,7 +1344,10 @@ impl DerivSurfDefinition<'_> {
                 // insist on non-degenerate curves
                 let scaled_zero = EFF_ZERO * (1.0 + boundary_interval.length());
                 if crv_tan.length_squared() <= scaled_zero {
-                    return Err(SolidError::sm_err(OP_SAMPLE));
+                    return Err(SolidError::surface_failed(
+                        OP_SAMPLE,
+                        "the boundary curve is degenerate",
+                    ));
                 }
 
                 // project CurvePoint to Surface
@@ -1329,14 +1360,20 @@ impl DerivSurfDefinition<'_> {
                     guess,
                 )?;
                 if !success {
-                    return Err(SolidError::sm_err(OP_SAMPLE));
+                    return Err(SolidError::surface_failed(
+                        OP_SAMPLE,
+                        "the curve point does not project onto the surface",
+                    ));
                 }
                 uv_guess = surface_uv0;
 
                 // Surface Normal
                 let mut normal = surface.evaluate_normal(k, surface_uv0, Side::Left, Side::Left)?;
                 if normal.length_squared() <= EFF_ZERO {
-                    return Err(SolidError::sm_err(OP_SAMPLE));
+                    return Err(SolidError::surface_failed(
+                        OP_SAMPLE,
+                        "the surface normal is degenerate",
+                    ));
                 }
                 normal = normal.unitize_or_z();
 
@@ -1349,7 +1386,10 @@ impl DerivSurfDefinition<'_> {
                 let bi_length = binormal.length();
                 let scaled_zero = EFF_ZERO * (1.0 + crv_tan.max_dimension());
                 if bi_length <= scaled_zero {
-                    return Err(SolidError::sm_err(OP_SAMPLE));
+                    return Err(SolidError::surface_failed(
+                        OP_SAMPLE,
+                        "the binormal is degenerate",
+                    ));
                 }
                 binormal /= bi_length;
 
@@ -1374,7 +1414,10 @@ impl DerivSurfDefinition<'_> {
                                 if e.is_unported_or_cancelled() {
                                     e
                                 } else {
-                                    SolidError::sm_err(OP_SAMPLE)
+                                    SolidError::surface_failed(
+                                        OP_SAMPLE,
+                                        "the binormal has no direction in the surface's parameters",
+                                    )
                                 }
                             })?;
                         let uv_binormal = unitize_2d_ignored(k, uv_binormal)?;
@@ -1390,15 +1433,18 @@ impl DerivSurfDefinition<'_> {
                     }
                     T::DirToReferenceCurve => {
                         // reference point
-                        let reference = self
-                            .tangent_reference
-                            .ok_or_else(|| SolidError::null_pointer(OP_SAMPLE))?;
+                        let reference = self.tangent_reference.ok_or_else(|| {
+                            SolidError::surface_missing(OP_SAMPLE, "the tangent reference curve")
+                        })?;
                         let mut reference_pnt = reference.evaluate_point(k, crv_param)?;
                         let mut reference_gap = reference_pnt - crv_pos;
                         reference_gap_len = reference_gap.length();
                         let scaled_zero = EFF_ZERO * (1.0 + reference_pnt.max_dimension());
                         if reference_gap_len <= scaled_zero {
-                            return Err(SolidError::sm_err(OP_SAMPLE));
+                            return Err(SolidError::surface_failed(
+                                OP_SAMPLE,
+                                "the reference curve point lies on the boundary curve",
+                            ));
                         }
 
                         // Positive Dist = reference gap in same direction as 1st cross-deriv
@@ -1424,7 +1470,12 @@ impl DerivSurfDefinition<'_> {
                         let dir = param_direction_ignored(k, surface, surface_uv0, reference_gap)?;
                         unitize_2d_ignored(k, dir)?
                     }
-                    _ => return Err(SolidError::sm_err(OP_SAMPLE)),
+                    _ => {
+                        return Err(SolidError::surface_failed(
+                            OP_SAMPLE,
+                            "the tangency type has no derivative surface",
+                        ))
+                    }
                 };
 
                 // Surface directional derivatives up to the num of derivs being stored
@@ -1452,7 +1503,10 @@ impl DerivSurfDefinition<'_> {
                 let tgt_1st_len = tgt1.length();
                 let scaled_zero = EFF_ZERO * (1.0 * tgt0.max_dimension());
                 if tgt_1st_len <= scaled_zero {
-                    return Err(SolidError::sm_err(OP_SAMPLE));
+                    return Err(SolidError::surface_failed(
+                        OP_SAMPLE,
+                        "the surface's first tangent is degenerate",
+                    ));
                 }
 
                 // let positions = Curve Positions
@@ -1567,10 +1621,10 @@ impl<O: SolutionObject> SsGlobalSolver<'_, '_, O> {
         {
             let surf1 = self
                 .surface1
-                .ok_or_else(|| SolidError::null_pointer(OP_SS))?;
+                .ok_or_else(|| SolidError::surface_missing(OP_SS, "the first surface"))?;
             let surf2 = self
                 .surface2
-                .ok_or_else(|| SolidError::null_pointer(OP_SS))?;
+                .ok_or_else(|| SolidError::surface_missing(OP_SS, "the second surface"))?;
 
             // At a singularity, the same 3d point can have different uv values.
             let uv1a = Point2::new(sol1.start.param(1)?, sol1.start.param(2)?);
@@ -1957,7 +2011,7 @@ fn knot(knots: &[f64], i: usize) -> Result<f64> {
     knots
         .get(i)
         .copied()
-        .ok_or_else(|| SolidError::sm_err(OP_CONT))
+        .ok_or_else(|| SolidError::surface_failed(OP_CONT, "the knot is past the end of the knots"))
 }
 
 /// `SmTArray::FindElement`: the first index of an exactly equal value.
@@ -1978,10 +2032,9 @@ fn iso_knots_of(k: &Kernel, curve: &Curve) -> Result<Vec<f64>> {
 
 /// `aeConts[j]`.
 fn cont_at(conts: [ContinuityType; 2], j: usize) -> Result<ContinuityType> {
-    conts
-        .get(j)
-        .copied()
-        .ok_or_else(|| SolidError::sm_err(OP_SC))
+    conts.get(j).copied().ok_or_else(|| {
+        SolidError::surface_failed(OP_SC, "the continuity is past the end of the continuities")
+    })
 }
 
 /// Entry `i` of an evaluation result.
@@ -2331,11 +2384,10 @@ fn cs_intersect_local_solve(
     let periodicities = [false; 3];
     let mut equations = CsIntersectEnfo::new(k, curve, surface, squared_tol);
     let mut solver = LocalSolveNd::new(&mut equations, Some(&bounds), Some(&periodicities));
-    solver.set_skips_failed_evaluations(k.fixes.oscillating_skips_failed_guesses);
     solver.set_desired_accuracy(EFF_ZERO / 10.0);
     solver.set_step_cutting_enabled(true);
     solver.set_boundary_handler(BoundaryHandler::TotalBoundaryHits, 6);
-    solver.set_maximum_iterations(20);
+    solver.set_maximum_iterations(u64::from(LOCAL_CURVE_INTERSECT_STEPS));
 
     // Solve it
     let solution = solver.solve_it(guess, solve_tol)?;
@@ -2344,7 +2396,10 @@ fn cs_intersect_local_solve(
     }
     match solution.x.as_slice() {
         [t, u, v, ..] => Ok(Some([*t, *u, *v])),
-        _ => Err(SolidError::sm_err(OP_CS_INTERSECT)),
+        _ => Err(SolidError::surface_failed(
+            OP_CS_INTERSECT,
+            "the solver returned fewer than three values",
+        )),
     }
 }
 
@@ -2640,5 +2695,47 @@ mod tests {
             singular_end(&Extent1d::from_min_max(0.2, 0.6), &all, 0.5),
             0.6
         );
+    }
+
+    /// The continuity and sampling failures keep the operation, status, kind and entity of the bare
+    /// `Upstream` statuses they replace (a sample).
+    #[test]
+    fn typed_surface_failures_keep_their_upstream_answers() {
+        use crate::error::surface::SurfaceFailure;
+        let samples: [(&'static str, SurfaceFailure, i32); 3] = [
+            (
+                OP_CONT,
+                SurfaceFailure::Failed(
+                    "the surface has fewer than two unique knots in the other direction",
+                ),
+                crate::error::SM_ERR,
+            ),
+            (
+                OP_SAMPLE,
+                SurfaceFailure::Missing("the tangent reference curve"),
+                crate::error::SM_ERR_NULL_POINTER,
+            ),
+            (
+                OP_CS_INTERSECT,
+                SurfaceFailure::Failed("the solver returned fewer than three values"),
+                crate::error::SM_ERR,
+            ),
+        ];
+        for (operation, failure, code) in samples {
+            let typed = SolidError::surface(operation, failure);
+            let before = SolidError::Upstream {
+                operation,
+                code,
+                entity: None,
+            };
+            assert_eq!(typed.sm_status(), before.sm_status(), "{typed:?}");
+            assert_eq!(typed.upstream_status(), Some(code), "{typed:?}");
+            assert_eq!(typed.kind(), before.kind(), "{typed:?}");
+            assert_eq!(typed.operation(), before.operation(), "{typed:?}");
+            assert_eq!(typed.entity(), None, "{typed:?}");
+            assert_eq!(typed.is_port_failure(), before.is_port_failure());
+            assert_eq!(typed.is_status_answer(), before.is_status_answer());
+            assert_eq!(typed.surface_failure(), Some(&failure));
+        }
     }
 }

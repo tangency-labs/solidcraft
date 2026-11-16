@@ -135,7 +135,10 @@ impl TranslationalSweepGeometry {
         let swept = original + self.sweep_vector;
         let tol = vertex::tolerance(b, v)?;
         if self.sweep_vector.length() < 2.0 * tol {
-            return Err(SolidError::sm_err(OP));
+            return Err(SolidError::sweep_failed(
+                OP,
+                "the sweep is shorter than twice the vertex tolerance",
+            ));
         }
         Ok((swept, tol))
     }
@@ -158,10 +161,14 @@ impl TranslationalSweepGeometry {
     /// `SM_ERR` for a diminishing sweep; otherwise those of lookup/copy/transform.
     /// The trim status is ignored upstream and here, except `Unported`.
     pub fn edge_sweep_same(&self, k: &Kernel, b: &Brep, e: EdgeId) -> Result<(Curve, f64)> {
-        let original = edge::curve(b, e)?.ok_or(SolidError::null_pointer(OP))?;
+        let original =
+            edge::curve(b, e)?.ok_or_else(|| SolidError::sweep_missing(OP, "the edge's curve"))?;
         let tol = edge::tolerance(b, e)?;
         if self.sweep_vector.length() < 2.0 * tol {
-            return Err(SolidError::sm_err(OP));
+            return Err(SolidError::sweep_failed(
+                OP,
+                "the sweep is shorter than twice the edge tolerance",
+            ));
         }
         let mut curve = original.copy(k)?;
         let mut ivl = edge::interval(b, e)?;
@@ -177,10 +184,14 @@ impl TranslationalSweepGeometry {
     /// # Errors
     /// `SM_ERR` for a diminishing sweep; otherwise those of lookup/copy/transform.
     pub fn face_sweep_same(&self, k: &Kernel, b: &Brep, f: FaceId) -> Result<(Surface, f64)> {
-        let original = face::p2::surface(b, f)?.ok_or(SolidError::null_pointer(OP))?;
+        let original = face::p2::surface(b, f)?
+            .ok_or_else(|| SolidError::sweep_missing(OP, "the face's surface"))?;
         let tol = face::p2::tolerance(b, f)?;
         if self.sweep_vector.length() < 2.0 * tol {
-            return Err(SolidError::sm_err(OP));
+            return Err(SolidError::sweep_failed(
+                OP,
+                "the sweep is shorter than twice the face tolerance",
+            ));
         }
         let mut surface = original.copy_and_add_analytics(k)?;
         surface.transform(k, &self.sweep_transform(), None)?;
@@ -233,22 +244,28 @@ impl TranslationalSweepGeometry {
     /// `SM_ERR` for tangencies, diminishing sweeps or a mismatching start point;
     /// `SM_ERR_NULL_POINTER` without a B-spline-derived curve; callee errors propagate.
     pub fn edge_sweep_higher(&self, k: &Kernel, b: &Brep, e: EdgeId) -> Result<EdgeSweep> {
-        let original = edge::curve(b, e)?.ok_or(SolidError::null_pointer(OP))?;
+        let original =
+            edge::curve(b, e)?.ok_or_else(|| SolidError::sweep_missing(OP, "the edge's curve"))?;
         let mut interval = edge::interval(b, e)?;
         let length = self.sweep_vector.length();
         let direction = self.sweep_vector / length;
-        gen_base(original).map_err(|_| SolidError::null_pointer(OP))?;
+        gen_base(original)
+            .map_err(|_| SolidError::sweep_missing(OP, "the edge curve's B-spline form"))?;
         let brep_tol = b.tolerance();
         if self.check_curve_sweep(k, original, &interval, self.base.eps, direction)?
             != SweepCheckType::Okay
         {
-            return Err(SolidError::sm_err(OP));
+            return Err(SolidError::sweep_failed(
+                OP,
+                "the edge's curve cannot be swept along the vector",
+            ));
         }
         let mut start = original.copy(k)?;
         start.trim(k, &mut interval, TrimMode::Notify)?;
-        let start_id = edge::start_vertex(b, e)?.ok_or(SolidError::null_pointer(OP))?;
-        let end_id =
-            edge::other_vertex(b, e, Some(start_id))?.ok_or(SolidError::null_pointer(OP))?;
+        let start_id = edge::start_vertex(b, e)?
+            .ok_or_else(|| SolidError::sweep_missing(OP, "the edge's start vertex"))?;
+        let end_id = edge::other_vertex(b, e, Some(start_id))?
+            .ok_or_else(|| SolidError::sweep_missing(OP, "the edge's end vertex"))?;
         let start_tol = vertex::tolerance(b, start_id)?;
         let end_tol = if end_id == start_id {
             0.0
@@ -257,9 +274,21 @@ impl TranslationalSweepGeometry {
         };
         let tol = edge::tolerance(b, e)?;
         if !(length > 2.0 * start_tol && length > 2.0 * end_tol && length > 2.0 * tol) {
-            return Err(SolidError::sm_err(OP));
+            return Err(SolidError::sweep_failed(
+                OP,
+                "the sweep is shorter than twice the edge or vertex tolerances",
+            ));
         }
-        let base = gen_base_mut(&mut start).ok_or(SolidError::null_pointer(OP))?;
+        // `CreateLinearSweep(.., pBSC2, ..)` on the trimmed copy itself: its
+        // GetOrCreateGwNurbPointer runs a line's own MakeNurb (a two-point line has no NURB
+        // yet, and a trim to its whole interval makes none), status ignored
+        if let crate::curve::curve::CurveKind::Line(l) = start.kind_mut() {
+            if l.base().gw_nurb().is_none() {
+                ignore_status(l.make_nurb())?;
+            }
+        }
+        let base = gen_base_mut(&mut start)
+            .ok_or_else(|| SolidError::sweep_missing(OP, "the trimmed curve's B-spline form"))?;
         let surface = BSplineSurface::create_linear_sweep(base, self.sweep_vector)?;
         let output_surface = if self.base.make_analytics {
             surface.copy_and_add_analytics(k)?
@@ -280,7 +309,10 @@ impl TranslationalSweepGeometry {
             (d00, domain.min())
         };
         if distance > brep_tol {
-            return Err(SolidError::sm_err(OP));
+            return Err(SolidError::sweep_failed(
+                OP,
+                "the swept surface does not start at the edge",
+            ));
         }
         let normal = output_surface.evaluate_normal(k, uv, Side::Left, Side::Left)?;
         let iso = |param, value| {

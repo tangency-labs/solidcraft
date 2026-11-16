@@ -79,7 +79,7 @@ pub enum SideExtension {
 
 /// For a cone, sphere, torus or surface of revolution, whether side `side` runs round its
 /// axis (its NURBS u is the sweep unless swapped); `None` for any other kind.
-pub(super) fn round_the_axis(s: &Surface, side: BoxSide) -> Option<bool> {
+pub(crate) fn round_the_axis(s: &Surface, side: BoxSide) -> Option<bool> {
     let swap = match s.kind() {
         SurfaceKind::Cone(c) => c.rev().swap_uv(),
         SurfaceKind::Sphere(sp) => sp.base.swap_uv,
@@ -234,7 +234,9 @@ impl Surface {
             if !asked.contains(&source_side) {
                 continue;
             }
-            let side = *on.get(at).ok_or_else(|| SolidError::sm_err(OP))?;
+            let side = *on.get(at).ok_or_else(|| {
+                SolidError::surface_failed(OP, "the side has no counterpart on the surface")
+            })?;
             let surface = current.as_ref().map_or(self, |e| &e.surface);
             let dom = surface.natural_uv_domain_with_nurb(k)?;
             let param = if source_side.is_u() {
@@ -300,7 +302,9 @@ impl Surface {
                     if !matches!(done, SideExtension::Extended(_)) {
                         continue;
                     }
-                    let side = *on.get(at).ok_or_else(|| SolidError::sm_err(OP))?;
+                    let side = *on.get(at).ok_or_else(|| {
+                        SolidError::surface_failed(OP, "the side has no counterpart on the surface")
+                    })?;
                     let across = measured.length_across_side(k, &face, side, super::REL)?;
                     if !across.converged
                         || across.enclosure.lower

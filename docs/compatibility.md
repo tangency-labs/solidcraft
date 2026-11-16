@@ -198,3 +198,63 @@ order, and the design's later features name the piece they work on by that name 
 names its pieces so its later features find them: each name goes to the piece the points those
 features picked lie on. A name no later feature uses keeps SMLib's order. Designs saved since
 format 14 name pieces after their faces and are not affected.
+
+## Edge references after the kernel swap
+
+Designs saved before the SMLib kernel replay their timeline on the new kernel. A face, edge or
+vertex reference that no longer finds what it named is reported on its feature ("no longer
+exists as it was picked; reselect it"). It is never picked again silently. The new kernel names
+some faces differently. A fillet or chamfer edge reference is found at its saved pick point in
+two such cases, and only where that point decides exactly one edge:
+
+- One of the edge's two faces is gone, but its feature still made faces of the body (renamed,
+  not removed). The edge is the one of the remaining face that the pick lies on, clear of its
+  ends (#14959).
+- A face is named after the faces around it (`F44:top#[F43:side:l7]`) and that neighbour list
+  changed (the face still has one, a different one), so the name finds that face only by its
+  stem or finds several faces. For example,
+  joining one extrude over another's footprint names the walls it joins differently, and it can
+  leave two faces of that stem. The candidates are the edges between faces answering to the
+  name's two faces, at least one of them by a neighbour list that is not its own. The edge is
+  the one candidate whose exact curve passes through the saved point, within the pick tolerance.
+  If no candidate passes through the point, or several do, the reference asks to be picked again.
+  A named face that was split into pieces is not renamed: an edge that split with it still asks.
+
+Tests: `a_join_that_makes_the_body_bigger_leaves_round_walls_it_never_touched_alone`,
+`a_chamfer_saved_under_a_top_faces_old_neighbours_is_found_at_its_pick`,
+`a_chamfer_whose_old_name_and_pick_fit_two_edges_asks_again` (`crates/engine/src/face_name_tests.rs`).
+
+Numbered round faces (#16602): 0.30.1 split a cylinder's or cone's round side into numbered pieces
+(`F1:side#2`) and built a round tool's wall in several pieces (`F4:bore:side:1`, now
+`F4:bore:side:0`), so a thread saved then names a face that is whole now. A cosmetic or modelled
+thread finds the whole face when it is the only face of that stem, is a cylinder or cone, and the
+saved pick lies on it (exact geometry, not the mesh). A pick off the face, or a stem that still has
+several faces, asks to be picked again. The recovery applies to threads only: any other feature
+(a projection, a shell, a hole, a plane) saved under such a piece would take in material the old
+piece never covered, so it asks to be picked again, as does a flat numbered face unless its original
+construction feature made it. Tests:
+`a_thread_saved_under_a_numbered_side_piece_of_a_cylinder_is_found_at_its_pick`,
+`a_modelled_thread_saved_under_a_numbered_bore_wall_is_found_at_its_pick`,
+`a_shell_saved_under_a_numbered_side_piece_of_a_cylinder_still_asks_to_reselect`
+(`crates/engine/src/face_name_tests.rs`).
+
+Numbered pieces (#16535): 0.30.1 split a round face into numbered pieces (`F302:side#1`), and a
+design saved then can still name a fillet or chamfer edge that way, though the kernel now builds
+the face whole. The edge is found when the name without its piece numbers names exactly one edge
+whose faces are each whole, and the saved pick lies on that edge. A pick on another edge, or a
+face still in several pieces, asks to be picked again. Test:
+`a_chamfer_saved_under_numbered_side_pieces_of_a_peg_is_found_at_its_pick`
+(`crates/engine/src/face_name_tests.rs`).
+
+Round edge numbers (#14479): where a fillet or chamfer rounded one of several edges between the
+same two faces (`F2:side:c1|F2:side:l1~2`), 0.30.1 wrote an edge of that round in the older form,
+with the round's edge number at the end (`F2:top|F3:blend:F2:side:c1|F2:side:l1~2`). That form
+reads a trailing number as the whole edge's, so such a name finds no edge as read. A fillet, a
+chamfer or a Sketch Project link then reads the number as the round's edge, and takes the one
+edge between the other face and a face answering to that round whose curve the saved pick lies
+on. A blend of several edges between the same two faces names each of its faces after all of
+them, so the pick, not the number, tells those faces apart. A pick on an edge between other faces
+asks to be picked again, and so do other references (holes, joints, construction geometry) with
+such a name. Test:
+`a_chamfer_saved_on_a_rounds_edge_with_its_number_at_the_end_is_found_at_its_pick`
+(`crates/engine/src/face_name_tests.rs`).

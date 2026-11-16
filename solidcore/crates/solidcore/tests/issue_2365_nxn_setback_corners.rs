@@ -32,6 +32,7 @@
     clippy::indexing_slicing
 )] // test helpers
 
+use solidcore::blend::blend_refusal::{BlendRefusal, SetbackTooShortWhy};
 use solidcore::blend::fillet_executive::session::FilletSession;
 use solidcore::blend::fillet_geom::p1::FilletCornerType;
 use solidcore::blend::fillet_solver::p1::FilletSurfaceGeneratorType;
@@ -46,7 +47,7 @@ use solidcore::query::api_queries::{get_edges, get_faces};
 use solidcore::topology::brep::p2::is_manifold_solid;
 use solidcore::topology::brep::p5::{stitch_and_orient, StitchAndOrientOptions};
 use solidcore::topology::{edge, EdgeId, VertexId};
-use solidcore::{Brep, Kernel};
+use solidcore::{Brep, Kernel, SolidError};
 
 /// The corpus's fix list (`tests/kernel_cases/fixes.json`, SolidCraft's), and
 /// `closed_smooth_pole_tangent_limit`, which the rig run turned on too.
@@ -142,7 +143,7 @@ fn round_set_back(
     corner: [f64; 3],
     setback: f64,
     mark: bool,
-) -> Result<(FilletCornerType, usize), (i32, String)> {
+) -> Result<(FilletCornerType, usize), (i32, String, SolidError)> {
     let edges: Vec<EdgeId> = at.iter().map(|&p| pick(k, b, p)).collect();
     let radii = vec![radius; edges.len()];
     let v = vertex_at(b, corner);
@@ -157,12 +158,12 @@ fn round_set_back(
     )
     .unwrap();
     s.add_set_back_vertex(v);
-    let refused = |s: &FilletSession<'_>| {
+    let refused = |s: &FilletSession<'_>, e: SolidError| {
         let info = s.error_info();
-        (info.code, info.comment.clone())
+        (info.code, info.comment.clone(), e)
     };
-    if s.create_corners(k, None).is_err() {
-        return Err(refused(&s));
+    if let Err(e) = s.create_corners(k, None) {
+        return Err(refused(&s, e));
     }
     let mut found = None;
     for (i, c) in s.fillet_corners().unwrap().into_iter().enumerate() {
@@ -173,8 +174,8 @@ fn round_set_back(
     }
     let (index, id) = found.expect("the set-back vertex's corner");
     s.set_mark_corner_patches(mark);
-    if s.do_filleting(k, None).is_err() {
-        return Err(refused(&s));
+    if let Err(e) = s.do_filleting(k, None) {
+        return Err(refused(&s, e));
     }
     // the corner filleted (the Setback is decided where its setback is read, in do_filleting)
     let kind = s.corner(id).unwrap().corner_type();
@@ -289,19 +290,43 @@ fn ladder_015_and_9_g2_corner_patch_is_marked() {
 /// corner (40, 30, 20), three r3 rounds, the G2 corner set back 3.5 (rig: V 23830.420377,
 /// 10 faces, 24 edges, SolidCraft's G2 patch). The Setback's G1 fill stays convex only from
 /// a setback of 3.5595: 3.5 is refused (`NoRoom`), naming it, where the N x N corner built
-/// a patch (V 23826.811198).
+/// a patch (V 23826.811198). The refusal carries it as data
+/// (`SetbackTooShort { why: ConvexFill }`, tangency-labs/solidcraft#13913), and a setback of
+/// it builds.
 #[test]
 fn every_box_corner_r3_setback_3_5_is_refused_naming_the_setback_that_builds() {
     let at = [[20.0, 30.0, 20.0], [40.0, 15.0, 20.0], [40.0, 30.0, 10.0]];
+    let corner = [40.0, 30.0, 20.0];
     let mut k = solidcraft_fixes();
     let mut b = create_box(&mut k, Point3::new(0.0, 0.0, 0.0), 40.0, 30.0, 20.0).unwrap();
-    let (code, comment) =
-        round_set_back(&mut k, &mut b, &at, 3.0, [40.0, 30.0, 20.0], 3.5, true).unwrap_err();
+    let v = vertex_at(&b, corner);
+    let (code, comment, error) =
+        round_set_back(&mut k, &mut b, &at, 3.0, corner, 3.5, true).unwrap_err();
     assert_eq!(code, 8, "{comment}");
     assert!(
         comment.contains("a setback of 3.5595 builds it"),
         "{comment}"
     );
+    let SolidError::BlendRefused {
+        refusal:
+            BlendRefusal::SetbackTooShort {
+                vertex,
+                least,
+                why: SetbackTooShortWhy::ConvexFill,
+            },
+        ..
+    } = error
+    else {
+        panic!("{error:?}");
+    };
+    assert_eq!(vertex, v);
+    // the scale on a grid of thousandths: 1.017 of the 3.5 asked
+    assert!((least - 3.5595).abs() <= 1e-12, "{least}");
+    // set back that far, the corner builds
+    let mut k = solidcraft_fixes();
+    let mut b = create_box(&mut k, Point3::new(0.0, 0.0, 0.0), 40.0, 30.0, 20.0).unwrap();
+    let (kind, patch) = round_set_back(&mut k, &mut b, &at, 3.0, corner, least, true).unwrap();
+    finish(&mut k, b, kind, patch);
 }
 
 /// fillets/report-fillet-g2-corner-of-bar-running-into-cylinder (rig: V 9362.194188, 11

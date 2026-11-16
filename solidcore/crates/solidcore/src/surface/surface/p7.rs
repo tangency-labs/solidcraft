@@ -64,9 +64,10 @@
 //!   `SM_ASSERT`s, `EvaluateNormal`'s static list of bad surfaces) is not ported, nor
 //!   is `FindDegenParamForDirection`'s angle bookkeeping (`dBestRad`,
 //!   `dNearBestRad`: computed in release builds but never read).
-//! - **Upstream quirks kept:** `GetFlatCorners` masks its return value with `&=` while
-//!   filling the corner points (the opt-in `Kernel::fixes.flat_corners_test_bits` tests each
-//!   bit instead, WR-384); `SmSSGlobalSolver::BranchMayContainAnswers` returns
+//! - **Flat corners (WR-384).** `GetFlatCorners` tests each corner bit while filling
+//!   the corner points; upstream masks its return value with `&=` there, so it returns
+//!   at most the first corner's flag and point.
+//! - **Upstream quirks kept:** `SmSSGlobalSolver::BranchMayContainAnswers` returns
 //!   `SM_SUCCESS` (that is, `FALSE`) for a node outside its face and `NER`'s status
 //!   (non-zero: `TRUE`) for a missing patch; `sm_GoodDropResult` compares the guess and
 //!   result distances with swapped names (the opt-in
@@ -1062,18 +1063,11 @@ impl Surface {
             }
         }
 
-        // optional output (upstream masks the return value while testing: `if (lRtn &=
-        // bit)`; the opt-in `Kernel::fixes.flat_corners_test_bits` tests each bit, WR-384)
-        let test_bits = k.fixes.flat_corners_test_bits;
+        // optional output: each bit is tested (WR-384; upstream masks the return value
+        // while testing, `if (lRtn &= bit)`, so it loses every other corner)
         if let Some(pts) = points.as_mut() {
             for ((c, bit), p) in corners.iter().zip(FLAT_CORNER_BITS).zip(pts.iter_mut()) {
-                let flat = if test_bits {
-                    rtn & bit
-                } else {
-                    rtn &= bit;
-                    rtn
-                };
-                if flat != 0 {
+                if rtn & bit != 0 {
                     if let Some(v) = ignored(self.evaluate_point(k, *c))? {
                         *p = v;
                     }
@@ -1210,7 +1204,10 @@ impl Surface {
 
         // No solution: all sample tangents point away from the given dir.
         if near_best_f < 0.0 && best_f < 0.0 {
-            return Err(SolidError::sm_err(OP_DEGEN));
+            return Err(SolidError::surface_failed(
+                OP_DEGEN,
+                "every sample tangent points away from the direction",
+            ));
         }
 
         // solve with NewtonRaphson iteration starting at the near best param, then
@@ -1340,7 +1337,9 @@ impl Surface {
             }
             &owned
         };
-        let surface_tree = cache.tree().ok_or(SolidError::null_pointer(OP_SOLVE))?;
+        let surface_tree = cache
+            .tree()
+            .ok_or_else(|| SolidError::surface_missing(OP_SOLVE, "the surface cache's tree"))?;
 
         // put point into a single node PointTree
         let point_tree: Tree<O> = Tree::from_point(test_point, 0.0, false);
@@ -1474,7 +1473,7 @@ impl Surface {
         };
         let surface_tree = surface_cache
             .tree()
-            .ok_or(SolidError::null_pointer(OP_SOLVE))?;
+            .ok_or_else(|| SolidError::surface_missing(OP_SOLVE, "the surface cache's tree"))?;
         let curve_cache = match crate::curve::curve::p5::make_curve_cache::<O>(k, curve, handles[0])
         {
             Ok(c) => c,
@@ -1484,11 +1483,11 @@ impl Surface {
             {
                 return Err(e);
             }
-            Err(_) => return Err(SolidError::null_pointer(OP_SOLVE)),
+            Err(_) => return Err(SolidError::surface_missing(OP_SOLVE, "the curve cache")),
         };
         let curve_tree = curve_cache
             .tree()
-            .ok_or(SolidError::null_pointer(OP_SOLVE))?;
+            .ok_or_else(|| SolidError::surface_missing(OP_SOLVE, "the curve cache's tree"))?;
 
         // instance the solver (the leaf solve reads the curve and the surface cache)
         let mut gs = super::p1::CsGlobalSolver::new(
@@ -1679,8 +1678,12 @@ impl Surface {
                 solve_surface_cache(k, other, handles[1])?,
             ),
         };
-        let tree1 = cache1.tree().ok_or(SolidError::null_pointer(OP_SOLVE))?;
-        let tree2 = cache2.tree().ok_or(SolidError::null_pointer(OP_SOLVE))?;
+        let tree1 = cache1.tree().ok_or_else(|| {
+            SolidError::surface_missing(OP_SOLVE, "the first surface cache's tree")
+        })?;
+        let tree2 = cache2.tree().ok_or_else(|| {
+            SolidError::surface_missing(OP_SOLVE, "the second surface cache's tree")
+        })?;
 
         let mut gs = SsGlobalSolver::new(
             tree1,
@@ -1931,7 +1934,7 @@ impl Surface {
             if e.is_unported_or_cancelled() {
                 e
             } else {
-                SolidError::null_pointer(OP_PROJ)
+                SolidError::surface_missing(OP_PROJ, "the surface cache")
             }
         };
         match context.as_mut() {
@@ -2073,7 +2076,7 @@ fn planar_of(k: &Kernel, s: &BSplineSurface, uv_domain: &Extent2d) -> Result<Pse
 fn point_solve_best_answer_sq(op: SolverOperation, target: Option<f64>) -> Result<f64> {
     let mut best = BIG_DOUBLE;
     if op == SolverOperation::AtDistance && target.is_none() {
-        return Err(SolidError::null_pointer(OP_SOLVE));
+        return Err(SolidError::surface_missing(OP_SOLVE, "the target distance"));
     }
     if op == SolverOperation::Minimize || op == SolverOperation::Normalize {
         if let Some(t) = target {
@@ -2111,12 +2114,15 @@ fn solve_surface_cache<O: SolutionObject>(
     let mut cache = match super::p1::get_surface_cache(k, surface, handle) {
         Ok(c) => c,
         Err(e) if e.is_unported_or_cancelled() => return Err(e),
-        Err(_) => return Err(SolidError::null_pointer(OP_SOLVE)),
+        Err(_) => return Err(SolidError::surface_missing(OP_SOLVE, "the surface cache")),
     };
     match cache.get_tree(k) {
         Ok(_) => Ok(cache),
         Err(e) if e.is_unported_or_cancelled() => Err(e),
-        Err(_) => Err(SolidError::null_pointer(OP_SOLVE)),
+        Err(_) => Err(SolidError::surface_missing(
+            OP_SOLVE,
+            "the surface cache's tree",
+        )),
     }
 }
 
@@ -2137,7 +2143,7 @@ fn solve_surface_cache_with<O: SolutionObject>(
         {
             return Err(e);
         }
-        Err(_) => return Err(SolidError::null_pointer(OP_SOLVE)),
+        Err(_) => return Err(SolidError::surface_missing(OP_SOLVE, "the curve cache")),
     };
     match cache.get_tree(k) {
         Ok(_) => Ok(cache),
@@ -2147,7 +2153,10 @@ fn solve_surface_cache_with<O: SolutionObject>(
         {
             Err(e)
         }
-        Err(_) => Err(SolidError::null_pointer(OP_SOLVE)),
+        Err(_) => Err(SolidError::surface_missing(
+            OP_SOLVE,
+            "the curve cache's tree",
+        )),
     }
 }
 
@@ -2160,7 +2169,7 @@ fn pair_solve_best_answer_sq(
 ) -> Result<f64> {
     let mut best = BIG_DOUBLE;
     if op == SolverOperation::AtDistance && target.is_none() {
-        return Err(SolidError::null_pointer(OP_SOLVE));
+        return Err(SolidError::surface_missing(OP_SOLVE, "the target distance"));
     }
     if op == SolverOperation::Minimize {
         if let Some(t) = target {
@@ -2752,7 +2761,10 @@ pub fn check_seam_drop<S: SurfaceEvaluate + ?Sized>(
     location: LocationType,
 ) -> Result<Point2> {
     if location == LocationType::Pole {
-        return Err(SolidError::sm_err(OP_SEAM));
+        return Err(SolidError::surface_failed(
+            OP_SEAM,
+            "the point is at a pole",
+        ));
     }
 
     if location != LocationType::USeam
@@ -2780,8 +2792,12 @@ pub fn check_seam_drop<S: SurfaceEvaluate + ?Sized>(
     let (_, other_u, other_v) = d;
 
     // Unitize them, so that dot-product comparisons mean direction only.
-    let mut other_u = other_u.unitize().map_err(|_| SolidError::sm_err(OP_SEAM))?;
-    let mut other_v = other_v.unitize().map_err(|_| SolidError::sm_err(OP_SEAM))?;
+    let mut other_u = other_u.unitize().map_err(|_| {
+        SolidError::surface_failed(OP_SEAM, "the other surface's u tangent has zero length")
+    })?;
+    let mut other_v = other_v.unitize().map_err(|_| {
+        SolidError::surface_failed(OP_SEAM, "the other surface's v tangent has zero length")
+    })?;
 
     // Flip directions of the derivatives if they are at the top of their domains.
     if other_uv.x > other_domain.u_interval().mid() {
@@ -2980,7 +2996,9 @@ impl<O: SolutionObject> SpGlobalSolver<'_, '_, O> {
         let k = self.kernel;
         // When point testing is on and node is known to be outside of Surface->Face
         let surface_node = self.base.branch_node(branch, 1)?;
-        let cache = self.surface_cache.ok_or(SolidError::null_pointer(OP_MAY))?;
+        let cache = self
+            .surface_cache
+            .ok_or_else(|| SolidError::surface_missing(OP_MAY, "the surface cache"))?;
         if !is_node_valid(self.base.tree(1)?.owner(), cache, surface_node)? {
             return Ok(false);
         }
@@ -2991,11 +3009,9 @@ impl<O: SolutionObject> SpGlobalSolver<'_, '_, O> {
             // When we have a child SurfacePatch node
             if surface_node.aux_type == AuxDataType::BezierSurface && surface_node.child1.is_some()
             {
-                let surface_id = branch
-                    .get(1)
-                    .copied()
-                    .flatten()
-                    .ok_or(SolidError::null_pointer(OP_MAY))?;
+                let surface_id = branch.get(1).copied().flatten().ok_or_else(|| {
+                    SolidError::surface_missing(OP_MAY, "the branch's surface node")
+                })?;
                 let patch = cache.patch(surface_id)?;
 
                 // (the second sm_IsNodeValid test upstream repeats the first)
@@ -3009,7 +3025,7 @@ impl<O: SolutionObject> SpGlobalSolver<'_, '_, O> {
                     for corner in patch.pseudo_box.corners() {
                         let vec = corner - test_pnt;
                         if vec.length_squared() > EFF_ZERO {
-                            tmp_polar.add_vector_with_kernel(k, vec, None);
+                            tmp_polar.add_vector(vec, None);
                         }
                     }
 
@@ -3105,7 +3121,10 @@ impl<O: SolutionObject> SsGlobalSolver<'_, '_, O> {
                     let id1 = branch.first().copied().flatten();
                     let id2 = branch.get(1).copied().flatten();
                     let (Some(id1), Some(id2)) = (id1, id2) else {
-                        return Err(SolidError::null_pointer(OP_SOLVE));
+                        return Err(SolidError::surface_missing(
+                            OP_SOLVE,
+                            "a branch's surface node",
+                        ));
                     };
                     let tree1 = self.base.tree(0)?;
                     let tree2 = self.base.tree(1)?;
@@ -3253,7 +3272,6 @@ fn cs_normalize_local_solve(
         EFF_ZERO_SQ,
     );
     let mut solver = LocalSolveNd::new(&mut equations, Some(&bounds), Some(&periodicities));
-    solver.set_skips_failed_evaluations(k.fixes.oscillating_skips_failed_guesses);
     solver.set_boundary_handler(BoundaryHandler::TotalBoundaryHits, 5);
     let solution = solver.solve_it(guess, EFF_ZERO_SQRT)?;
     // No: see note in upstream [B234]: not found is not found, whatever the reason.
@@ -3328,10 +3346,10 @@ mod tests {
 
     /// tangency-labs/solidcore#525 (WR-384): with the corner points wanted, upstream's
     /// `if (lRtn &= bit)` clears the other corners' bits (4 flat corners come back as
-    /// none, with only the first point); the opt-in tests each bit.
+    /// none, with only the first point); each bit is tested.
     #[test]
     fn issue_525_flat_corners_keep_their_bits() {
-        let mut k = Kernel::default();
+        let k = Kernel::default();
         // a degenerate bilinear patch: every corner's derivatives are parallel
         let s = Surface::from(
             BSplineSurface::create_bilinear_surface(
@@ -3343,9 +3361,6 @@ mod tests {
             .unwrap(),
         );
         assert_eq!(s.flat_corners(&k, 1.0, false).unwrap().flags, 15);
-        let up = s.flat_corners(&k, 1.0, true).unwrap();
-        assert_eq!(up.flags, 0);
-        k.fixes.flat_corners_test_bits = true;
         let fixed = s.flat_corners(&k, 1.0, true).unwrap();
         assert_eq!(fixed.flags, 15);
         assert!(fixed.points.unwrap().iter().all(|p| *p != Vec3::UNDEF));
@@ -3362,8 +3377,7 @@ mod tests {
     fn flat_corner_points_preserve_each_mask_bit() {
         use crate::nurbs::math::{CPoint, NOW};
 
-        let mut k = Kernel::default();
-        k.fixes.flat_corners_test_bits = true;
+        let k = Kernel::default();
         // Only the lower/lower corner has nonzero parallel tangents. Reverse
         // either control-net direction to exercise each of the four bits.
         for reverse_u in [false, true] {
@@ -3405,8 +3419,7 @@ mod tests {
     #[test]
     fn flat_corner_points_preserve_multiple_bits_and_regular_corners() {
         use crate::nurbs::math::{CPoint, NOW};
-        let mut k = Kernel::default();
-        k.fixes.flat_corners_test_bits = true;
+        let k = Kernel::default();
         let net = vec![
             vec![
                 CPoint::new(0.0, 0.0, 0.0, NOW),
@@ -4057,6 +4070,46 @@ mod tests {
             assert!(off.converged);
             let expected = if input_s < 0.5 { 0.25 } else { 0.75 };
             assert!((off.uv.x - expected).abs() < 1e-9);
+        }
+    }
+
+    /// The global solve failures keep the operation, status, kind and entity of the bare
+    /// `Upstream` statuses they replace (a sample).
+    #[test]
+    fn typed_surface_failures_keep_their_upstream_answers() {
+        use crate::error::surface::SurfaceFailure;
+        let samples: [(&'static str, SurfaceFailure, i32); 3] = [
+            (
+                OP_SOLVE,
+                SurfaceFailure::Missing("the surface cache's tree"),
+                crate::error::SM_ERR_NULL_POINTER,
+            ),
+            (
+                OP_SEAM,
+                SurfaceFailure::Failed("the point is at a pole"),
+                crate::error::SM_ERR,
+            ),
+            (
+                OP_DEGEN,
+                SurfaceFailure::Failed("every sample tangent points away from the direction"),
+                crate::error::SM_ERR,
+            ),
+        ];
+        for (operation, failure, code) in samples {
+            let typed = SolidError::surface(operation, failure);
+            let before = SolidError::Upstream {
+                operation,
+                code,
+                entity: None,
+            };
+            assert_eq!(typed.sm_status(), before.sm_status(), "{typed:?}");
+            assert_eq!(typed.upstream_status(), Some(code), "{typed:?}");
+            assert_eq!(typed.kind(), before.kind(), "{typed:?}");
+            assert_eq!(typed.operation(), before.operation(), "{typed:?}");
+            assert_eq!(typed.entity(), None, "{typed:?}");
+            assert_eq!(typed.is_port_failure(), before.is_port_failure());
+            assert_eq!(typed.is_status_answer(), before.is_status_answer());
+            assert_eq!(typed.surface_failure(), Some(&failure));
         }
     }
 }

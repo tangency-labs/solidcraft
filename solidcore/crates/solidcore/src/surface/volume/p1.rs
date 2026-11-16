@@ -58,7 +58,8 @@
 //!
 //! Deviations:
 //! - **WR-3.** The bounded rectilinear line-domain check requires both endpoints
-//!   with `Kernel::fixes.extent3d_contains_both_segment_endpoints`; default is upstream OR.
+//!   inside the box, so the whole segment is inside (upstream's `ContainsLineSeg3d`
+//!   accepts either end).
 //! - **Nesting.** `with_maps` and `add_next_map` return `InvalidInput` when the next-map chain would nest
 //!   deeper than [`MAX_GEOMETRY_NESTING`]
 //!   (32; upstream fixtures nest at most 3), which bounds the recursive dispatch,
@@ -427,7 +428,10 @@ impl Volume {
     /// [`SolidError::Unported`] for the unported kinds.
     pub fn copy(&self, simple_map_only: bool) -> Result<Self> {
         match &self.kind {
-            VolumeKind::Base => Err(SolidError::sm_err("surface::volume::p1::Volume::copy")),
+            VolumeKind::Base => Err(SolidError::surface_failed(
+                "surface::volume::p1::Volume::copy",
+                "a plain volume cannot be copied",
+            )),
             VolumeKind::Transform(_)
             | VolumeKind::BSpline(_)
             | VolumeKind::Bend(_)
@@ -806,7 +810,7 @@ impl Volume {
         with_compounding: bool,
     ) -> Result<bool> {
         // pass the call along
-        let mut is_in = self.is_line_in_param_domain_simple(k, start, end)?;
+        let mut is_in = self.is_line_in_param_domain_simple(start, end)?;
 
         // when asked - check compounded volumes as well
         if let (true, true, Some(next)) = (is_in, with_compounding, self.next_map.as_deref()) {
@@ -921,7 +925,10 @@ impl Volume {
         }
         // check input - number of supported derivatives is exceeded
         if n > MAX_DERIV {
-            return Err(SolidError::sm_err(OP_EVAL));
+            return Err(SolidError::surface_failed(
+                OP_EVAL,
+                "a derivative order above the volume's maximum was asked",
+            ));
         }
         let next_map = if opts.with_compounding {
             self.next_map.as_deref()
@@ -967,7 +974,10 @@ impl Volume {
     pub fn map(&self, in_point: Point3, n: usize, opts: &EvalOptions) -> Result<Vec<Vec3>> {
         // check input - number of supported derivatives is exceeded
         if n > MAX_DERIV {
-            return Err(SolidError::sm_err(OP_MAP));
+            return Err(SolidError::surface_failed(
+                OP_MAP,
+                "a derivative order above the volume's maximum was asked",
+            ));
         }
         let next_map = if opts.with_compounding {
             self.next_map.as_deref()
@@ -1134,8 +1144,9 @@ impl Volume {
     ) -> Result<Vec<Vec3>> {
         // check state
         if n > MAX_DERIV {
-            return Err(SolidError::sm_err(
+            return Err(SolidError::surface_failed(
                 "surface::volume::p1::Volume::orient_directional_derivs",
+                "a derivative order above the volume's maximum was asked",
             ));
         }
         // make the evaluation: exact tangent values, zero sampling
@@ -1258,14 +1269,13 @@ impl Volume {
         opts: &EvalOptions,
     ) -> Result<Vec<Vec3>> {
         match &self.kind {
-            VolumeKind::Base => Err(SolidError::sm_err(
+            VolumeKind::Base => Err(SolidError::surface_failed(
                 "surface::volume::p1::Volume::evaluate_simple",
+                "a plain volume has no evaluation",
             )),
             VolumeKind::Transform(t) => t.evaluate_simple(param_point, n),
             VolumeKind::BSpline(b) => b.evaluate_simple(param_point, n, opts),
-            VolumeKind::Twist(t) => {
-                t.evaluate_simple_impl(param_point, n, opts.fixes.twist_simple_duw_sign)
-            }
+            VolumeKind::Twist(t) => t.evaluate_simple(param_point, n),
             VolumeKind::Unbend(u) => u.evaluate_simple(param_point, n),
             VolumeKind::Bend(b) => b.evaluate_simple(param_point, n),
         }
@@ -1318,8 +1328,9 @@ impl Volume {
     /// [`SolidError::Unported`] for the unported kinds.
     pub fn inv_evaluate_guess_point_simple(&self, proj_point: Point3) -> Result<Vec<Point3>> {
         match &self.kind {
-            VolumeKind::Base => Err(SolidError::sm_err(
+            VolumeKind::Base => Err(SolidError::surface_failed(
                 "surface::volume::p1::Volume::inv_evaluate_guess_point_simple",
+                "a plain volume has no inversion guess",
             )),
             VolumeKind::Transform(t) => t.inv_evaluate_guess_point_simple(proj_point),
             VolumeKind::BSpline(b) => b.inv_evaluate_guess_point_simple(proj_point),
@@ -1328,8 +1339,9 @@ impl Volume {
             VolumeKind::Bend(b) => match b.inv_evaluate_guess_point_simple(proj_point) {
                 (points, true) => Ok(points),
                 // the guesses written with SM_ERR are dropped (callers propagate it)
-                (_, false) => Err(SolidError::sm_err(
+                (_, false) => Err(SolidError::surface_failed(
                     "surface::bend_volume::BendVolume::inv_evaluate_guess_point_simple",
+                    "the bend volume's inversion guess failed",
                 )),
             },
         }
@@ -1374,20 +1386,16 @@ impl Volume {
         }
     }
 
-    /// Whether the parameter segment is in the natural domain (always, unbounded;
-    /// upstream's `ContainsLineSeg3d` tests either end) (`IsLineInParamDomainSimple`,
-    /// virtual). With `extent3d_contains_both_segment_endpoints` (WR-3), bounded
-    /// rectilinear domains require both endpoints inside instead.
+    /// Whether the parameter segment is in the natural domain
+    /// (`IsLineInParamDomainSimple`, virtual): always for an unbounded domain; a
+    /// bounded rectilinear domain needs both endpoints inside, which for a box (a
+    /// convex set) is exactly the whole segment inside (WR-3: upstream's
+    /// `ContainsLineSeg3d` accepts either end).
     ///
     /// # Errors
     ///
     /// [`SolidError::Unported`] for the unported kinds.
-    pub fn is_line_in_param_domain_simple(
-        &self,
-        k: &Kernel,
-        start: Point3,
-        end: Point3,
-    ) -> Result<bool> {
+    pub fn is_line_in_param_domain_simple(&self, start: Point3, end: Point3) -> Result<bool> {
         match &self.kind {
             VolumeKind::Twist(t) => Ok(t.is_line_in_param_domain_simple()),
             VolumeKind::Unbend(u) => Ok(u.is_line_in_param_domain_simple(start, end)),
@@ -1395,11 +1403,7 @@ impl Volume {
             _ => {
                 if self.is_bounded_simple()? {
                     let domain = self.natural_param_domain()?;
-                    return Ok(if k.fixes.extent3d_contains_both_segment_endpoints {
-                        domain.contains_point(start, 0.0) && domain.contains_point(end, 0.0)
-                    } else {
-                        domain.contains_line_seg(start, end, 0.0)
-                    });
+                    return Ok(domain.contains_point(start, 0.0) && domain.contains_point(end, 0.0));
                 }
                 Ok(true)
             }
@@ -1664,7 +1668,10 @@ impl EvalNFunctions for FindPvIntersect<'_> {
             || dv.length_squared() < EFF_ZERO_SQ
             || dw.length_squared() < EFF_ZERO_SQ
         {
-            return Err(SolidError::sm_err(OP_PV));
+            return Err(SolidError::surface_failed(
+                OP_PV,
+                "a volume tangent has zero length",
+            ));
         }
 
         // get gap vector
@@ -2626,10 +2633,10 @@ mod tests {
         // a B-spline volume cannot (no USE_VOLUMES upstream)
         let mut s = Volume::new(VolumeKind::BSpline(b_spline()));
         let before = s.kind().clone();
-        assert!(matches!(
-            s.transform(&ax, None),
-            Err(SolidError::Upstream { code: 1001, .. })
-        ));
+        assert_eq!(
+            s.transform(&ax, None).unwrap_err().upstream_status(),
+            Some(1001)
+        );
         assert_eq!(s.kind(), &before);
     }
 

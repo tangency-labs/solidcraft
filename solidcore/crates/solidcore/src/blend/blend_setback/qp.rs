@@ -42,6 +42,14 @@ fn at(m: &[f64], i: usize) -> Result<f64> {
     el(m, i)
 }
 
+/// Row `i` of the row-major `C` with `n` columns: the scans read it as one slice, the
+/// same coefficients in the same order as indexing each.
+fn row_of(cm: &[f64], i: usize, n: usize) -> Result<&[f64]> {
+    let start = i.checked_mul(n).ok_or_else(sm_err)?;
+    let end = start.checked_add(n).ok_or_else(sm_err)?;
+    cm.get(start..end).ok_or_else(sm_err)
+}
+
 /// The dual method's state (`sm_SbDualQP`'s locals): `J` (`J' G J = I`, turned as
 /// constraints join), the solution, the active rows and their multipliers, and `R`. Kept
 /// between calls, it continues the method on more rows ([`dual_qp_rows`] beside a curved
@@ -134,9 +142,10 @@ fn dual_run(
     let mut z = vec![0.0; n];
     let mut r = vec![0.0; n];
     let slack = |y: &[f64], i: usize| -> Result<f64> {
+        let ci = row_of(cm, i, n)?;
         let mut s = -at(b, i)?;
-        for (k, &yk) in y.iter().enumerate() {
-            s += at(cm, i * n + k)? * yk;
+        for (&c, &yk) in ci.iter().zip(y) {
+            s += c * yk;
         }
         Ok(s)
     };
@@ -332,11 +341,12 @@ pub(super) fn dual_qp(
 /// `(n + 1) eps (sum_k |C_ik y_k| + |b_i|)`, the bound of its dot product's rounding. Negative
 /// only where the row is violated by more than its rounding can account for.
 fn violation(cm: &[f64], b: &[f64], y: &[f64], i: usize, n: usize) -> Result<f64> {
+    let ci = row_of(cm, i, n)?;
     let bi = at(b, i)?;
     let mut s = -bi;
     let mut size = bi.abs();
-    for (k, &yk) in y.iter().enumerate() {
-        let t = at(cm, i * n + k)? * yk;
+    for (&c, &yk) in ci.iter().zip(y) {
+        let t = c * yk;
         s += t;
         size += t.abs();
     }

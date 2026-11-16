@@ -9,8 +9,8 @@ use crate::{
     ProductScene,
     anisotropic_surface::{AnisotropicSurface, VisualFrame},
     job::{self, AnisotropicOrientation, ErrorCode, JobError, RaytraceOptions},
-    surface::OpaqueSurface,
 };
+use solidcraft_viewport::surface::OpaqueSurface;
 
 use super::{TraceError, Triangle, lighting::Lighting};
 

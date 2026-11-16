@@ -188,7 +188,7 @@ impl crate::Sketch {
     /// clamped, with positive weights (a loaded design is checked before it is used).
     pub fn validate_spline_knots(&self) -> Result<()> {
         for curve in &self.curves {
-            if let crate::CurveKind::Spline { pts, control, degree, periodic, nurbs: Some(nurbs) } = &curve.kind {
+            if let crate::CurveKind::Spline { pts, control, degree, periodic, nurbs: Some(nurbs), .. } = &curve.kind {
                 if !*control || *periodic {
                     return bad("only an open control spline has its own knots");
                 }

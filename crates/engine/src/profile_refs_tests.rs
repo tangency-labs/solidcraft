@@ -2,6 +2,7 @@
 //! them, so a face sketch whose projected outline is rebuilt still extrudes the same region.
 
 use serde_json::{Value, json};
+use solidcraft_geom::MeshGeom;
 
 use crate::Session;
 
