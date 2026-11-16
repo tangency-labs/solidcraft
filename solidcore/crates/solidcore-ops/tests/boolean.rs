@@ -2082,6 +2082,85 @@ fn a_traced_join_of_each_wedge_alone_is_the_first_join_turned_into_place() {
     }
 }
 
+/// The ten wedges joined to the target one at a time, compared with each joined alone. Each
+/// wedge changes the target only near itself, so the vertices of the joint result are the
+/// target's, less those each join alone removed and plus those each join alone added, and the
+/// same holds for the midpoints of the edges. Every point must be within 1e-6 (a tenth of the
+/// tolerance) of one expected and the other way round, which checks the faces' trims in the
+/// sequential result without its volume.
+#[test]
+#[allow(clippy::disallowed_methods)] // the test's comparison, not ops computing geometry
+fn a_traced_join_of_the_ten_wedges_in_turn_has_the_vertices_and_edges_of_each_join_alone() {
+    all_fixes();
+    let body = traced_operands("issue_17118_wedge_cut_over_groove_rounds");
+    // the body's vertices, then the midpoints of its edges
+    let points = |r: &Body| -> [Vec<[f64; 3]>; 2] {
+        let (k, brep) = common::kernel_copy(r);
+        let vertices = brep
+            .vertices()
+            .ids()
+            .map(|v| {
+                let p = brep.vertex(v).unwrap().point;
+                [p.x, p.y, p.z]
+            })
+            .collect();
+        let midpoints = brep
+            .edges()
+            .ids()
+            .filter_map(|e| {
+                let edge = brep.edge(e).unwrap();
+                let p = edge
+                    .curve
+                    .as_ref()?
+                    .evaluate_point(&k, edge.interval.evaluate(0.5))
+                    .unwrap();
+                Some([p.x, p.y, p.z])
+            })
+            .collect();
+        [vertices, midpoints]
+    };
+    let near = |p: &[f64; 3], set: &[[f64; 3]]| {
+        set.iter().any(|q| {
+            ((p[0] - q[0]).powi(2) + (p[1] - q[1]).powi(2) + (p[2] - q[2]).powi(2)).sqrt() <= 1e-6
+        })
+    };
+    let target = points(&body("target"));
+    let mut want = target.clone();
+    let mut r = body("target");
+    for i in 0..10 {
+        let wedge = || body(&format!("wedge{i}"));
+        let alone = points(
+            &boolean(body("target"), wedge(), BooleanOp::Union)
+                .unwrap()
+                .unwrap(),
+        );
+        for kind in 0..2 {
+            let removed: Vec<_> = target[kind]
+                .iter()
+                .filter(|p| !near(p, &alone[kind]))
+                .copied()
+                .collect();
+            want[kind].retain(|p| !near(p, &removed));
+            want[kind].extend(alone[kind].iter().filter(|p| !near(p, &target[kind])));
+        }
+        r = boolean(r, wedge(), BooleanOp::Union).unwrap().unwrap();
+    }
+    let report = r.check(CheckLevel::All).unwrap();
+    assert!(report.is_valid(), "{}", report.text);
+    let got = points(&r);
+    for (kind, name) in [(0, "vertex"), (1, "edge midpoint")] {
+        assert_eq!(got[kind].len(), want[kind].len(), "{name}s");
+        for (a, b, which) in [
+            (&got[kind], &want[kind], "of the result is not expected"),
+            (&want[kind], &got[kind], "expected is not in the result"),
+        ] {
+            for p in a {
+                assert!(near(p, b), "a {name} {which}: {p:?}");
+            }
+        }
+    }
+}
+
 /// A 10 mm cube with the vertical edge at x = 0, y = 0 rounded to radius 2.
 fn filleted_cube() -> Body {
     let block = make_box([0.0; 3], [10.0, 10.0, 10.0]).unwrap();
