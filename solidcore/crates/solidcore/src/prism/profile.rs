@@ -885,12 +885,97 @@ fn region_holds(r: &Region2, p: Point2) -> Option<bool> {
     Some(odd)
 }
 
+/// The distance from `p` to the segment `s`–`e`.
+fn distance_to_segment(p: Point2, s: Point2, e: Point2) -> f64 {
+    let d = Point2::new(e.x - s.x, e.y - s.y);
+    let len2 = d.x * d.x + d.y * d.y;
+    let t = if len2 > 0.0 {
+        (((p.x - s.x) * d.x + (p.y - s.y) * d.y) / len2).clamp(0.0, 1.0)
+    } else {
+        0.0
+    };
+    (p.x - s.x - t * d.x).hypot(p.y - s.y - t * d.y)
+}
+
+/// The chord of a span when the span lies within `tol` of it (its control points do, and by
+/// the convex hull of a span with positive weights so does the span); `None` otherwise.
+fn flat_chord(c: &[H2], tol: f64) -> Option<(Point2, Point2)> {
+    let (s, e) = (point_of(*c.first()?), point_of(*c.last()?));
+    c.iter()
+        .all(|q| q[2] > 0.0 && distance_to_segment(point_of(*q), s, e) <= tol)
+        .then_some((s, e))
+}
+
+/// A region's boundary as chords, each within `tol` of the boundary; a span not flat within
+/// `tol` after [`MAX_OVERLAP_DEPTH`] halvings is left out (it only loses the shortcut in
+/// [`pieces_against`]).
+fn flat_chords(r: &Region2, tol: f64) -> Option<Vec<(Point2, Point2)>> {
+    let mut out = Vec::new();
+    let mut todo: Vec<(Vec<H2>, u32)> = boundary_spans(r)?.into_iter().map(|c| (c, 0)).collect();
+    while let Some((c, depth)) = todo.pop() {
+        if let Some(chord) = flat_chord(&c, tol) {
+            out.push(chord);
+        } else if depth < MAX_OVERLAP_DEPTH {
+            let (l, r) = halves(&c);
+            todo.push((l, depth + 1));
+            todo.push((r, depth + 1));
+        }
+    }
+    Some(out)
+}
+
+/// Consecutive chords (one ending where the next starts) joined while every point of the run
+/// stays within `eps` of the joined chord.
+fn merge_collinear(chords: Vec<(Point2, Point2)>, eps: f64) -> Vec<(Point2, Point2)> {
+    let mut out: Vec<(Point2, Point2)> = Vec::new();
+    let mut run: Vec<Point2> = Vec::new();
+    for (s, e) in chords {
+        let joins = out.last().is_some_and(|last| {
+            last.1 == s
+                && run
+                    .iter()
+                    .chain(std::iter::once(&s))
+                    .all(|q| distance_to_segment(*q, last.0, e) <= eps)
+        });
+        match out.last_mut() {
+            Some(last) if joins => {
+                run.push(s);
+                last.1 = e;
+            }
+            _ => {
+                run.clear();
+                out.push((s, e));
+            }
+        }
+    }
+    out
+}
+
 /// What halving `a`'s boundary against `b`'s found: a piece clear of `b`'s boundary lying
-/// inside `b`, and the pieces left within `eps` of `b`'s boundary (as chords).
-fn pieces_against(a: &Region2, b: &Region2, eps: f64) -> Option<(bool, Vec<(Point2, Point2)>)> {
+/// inside `b`, and the pieces left within `eps` of `b`'s boundary (as chords, in boundary order,
+/// collinear neighbours merged).
+///
+/// Cost: a piece is halved only while it is neither clear of `b`'s boundary nor flat and
+/// wholly within `eps / 2` of one of `b`'s flattened chords. A stretch running along `b`'s
+/// boundary is therefore kept whole (one near chord per chord of `b` it runs beside), and only the
+/// pieces at a place where the boundaries meet or part go on halving, one per level, at most
+/// [`MAX_OVERLAP_DEPTH`] levels. So with `m` such places on a span, the span gives at most
+/// `2 · MAX_OVERLAP_DEPTH · (m + 1)` pieces and `m + 1` near chords plus those it runs beside,
+/// not the `length / eps` (about 2^21 per millimetre at 1e-6) that halving down to `eps` gave
+/// (`prism::tests::regions_overlap_keeps_shared_edges_whole` checks the count).
+pub(super) fn pieces_against(
+    a: &Region2,
+    b: &Region2,
+    eps: f64,
+) -> Option<(bool, Vec<(Point2, Point2)>)> {
     let other: Vec<(Point2, Point2)> = boundary_spans(b)?.iter().map(|c| hull_box(c)).collect();
+    let other_chords = flat_chords(b, 0.25 * eps)?;
     let mut near = Vec::new();
-    let mut todo: Vec<(Vec<H2>, u32)> = boundary_spans(a)?.into_iter().map(|c| (c, 0)).collect();
+    let mut todo: Vec<(Vec<H2>, u32)> = boundary_spans(a)?
+        .into_iter()
+        .rev()
+        .map(|c| (c, 0))
+        .collect();
     while let Some((c, depth)) = todo.pop() {
         let bx = hull_box(&c);
         if !other.iter().any(|o| boxes_meet(bx, *o, eps)) {
@@ -899,16 +984,29 @@ fn pieces_against(a: &Region2, b: &Region2, eps: f64) -> Option<(bool, Vec<(Poin
             }
             continue;
         }
+        // flat within eps / 4 and its chord within eps / 2 of one chord of b (which is within
+        // eps / 4 of b): the distance to a segment is convex, so the ends bound the whole chord
+        if let Some((s, e)) = flat_chord(&c, 0.25 * eps) {
+            let beside = other_chords.iter().any(|&(p, q)| {
+                distance_to_segment(s, p, q) <= 0.5 * eps
+                    && distance_to_segment(e, p, q) <= 0.5 * eps
+            });
+            if beside {
+                near.push((s, e));
+                continue;
+            }
+        }
         let (lo, hi) = bx;
         if (hi.x - lo.x).max(hi.y - lo.y) <= eps || depth >= MAX_OVERLAP_DEPTH {
             near.push((point_of(*c.first()?), point_of(*c.last()?)));
             continue;
         }
+        // right first so the left half is taken next: the near chords come in boundary order
         let (l, r) = halves(&c);
-        todo.push((l, depth + 1));
         todo.push((r, depth + 1));
+        todo.push((l, depth + 1));
     }
-    Some((false, near))
+    Some((false, merge_collinear(near, eps)))
 }
 
 /// Whether two regions (outer loops counter-clockwise, holes clockwise) share area beyond a

@@ -2862,3 +2862,20 @@ fn regions_overlap_only_where_they_share_area() {
     assert_eq!(regions_overlap(&sq, &disc, eps), Some(true));
     assert_eq!(regions_overlap(&sq, &inner, 0.0), None);
 }
+
+/// A boundary running along the other one is kept whole, not halved down to `eps`: two equal
+/// squares give one near chord per edge, two squares sharing an edge a few (the shared edge and
+/// a short piece at each corner where the boundaries part), so the pair check stays small.
+#[test]
+fn regions_overlap_keeps_shared_edges_whole() {
+    use super::profile::pieces_against;
+    let eps = 1e-6;
+    let sq = rectangle(p(0.0, 0.0), p(2.0, 2.0));
+    let right = rectangle(p(2.0, 0.0), p(4.0, 2.0));
+    let (inside, near) = pieces_against(&sq, &sq.clone(), eps).unwrap();
+    assert!(!inside);
+    assert_eq!(near.len(), 4);
+    let (inside, near) = pieces_against(&sq, &right, eps).unwrap();
+    assert!(!inside);
+    assert!((1..=8).contains(&near.len()), "{} near chords", near.len());
+}
