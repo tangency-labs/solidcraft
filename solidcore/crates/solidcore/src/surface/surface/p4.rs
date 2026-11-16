@@ -77,9 +77,7 @@ use crate::curve::crv_on_surf::CrvOnSurf;
 use crate::curve::curve::p2::evaluate_geometric as curve_evaluate_geometric;
 use crate::curve::curve::Curve;
 use crate::curve::line::Line;
-use crate::error::{
-    ignore_or_pass_on, ignored, ignored_or_pass_on, passed_on, Result, SolidError, SM_ERR,
-};
+use crate::error::{ignored, Result, SolidError, SM_ERR};
 use crate::geom::assert_array::labels::{EDGE_TYPE, FACE_TYPE};
 use crate::geom::extent1d::Extent1d;
 use crate::geom::extent2d::Extent2d;
@@ -289,8 +287,7 @@ impl EvalNFunctions for CsNormalizeEnfo<'_> {
         mut jacobian: Option<&mut Matrix>,
     ) -> Result<bool> {
         let k = self.kernel;
-        // (the fork's `SER(Unitize)`, with the opt-in fix: WR-663, tangency-labs/smlib 21dcf69)
-        let pass = k.fixes.query_statuses_pass_on;
+        // (the fork's `SER(Unitize)`: WR-663, tangency-labs/smlib 21dcf69)
         let directed = self.solver_operation == SolverOperation::Signed3dDirectedMinimize;
         let count = if directed { 4 } else { 3 };
         check_len(x, f, count, OP_CS_NORMALIZE)?;
@@ -344,7 +341,7 @@ impl EvalNFunctions for CsNormalizeEnfo<'_> {
         }
 
         // Unitize Ct and get its derivative.
-        let ct_unit = unitize_or_pass_on(ct, pass)?;
+        let ct_unit = ct.unitize()?;
         let ct_unit_t = ct.unitized_derivative(ctt);
 
         if directed {
@@ -361,7 +358,7 @@ impl EvalNFunctions for CsNormalizeEnfo<'_> {
             let cross_u = su.derivative_of_cross_product(sv, suu, suv);
             let cross_v = su.derivative_of_cross_product(sv, suv, svv);
 
-            let n = unitize_or_pass_on(cross, pass)?;
+            let n = cross.unitize()?;
             let n_u = cross.unitized_derivative(cross_u);
             let n_v = cross.unitized_derivative(cross_v);
 
@@ -394,10 +391,10 @@ impl EvalNFunctions for CsNormalizeEnfo<'_> {
             set_all(f, &[ct_unit.dot(n), vec.x, vec.y, vec.z]);
         } else {
             // Normalization, Minimization, Maximization: unitized Ct, Su and Sv.
-            let su_unit = unitize_or_pass_on(su, pass)?;
+            let su_unit = su.unitize()?;
             let su_unit_u = su.unitized_derivative(suu);
             let su_unit_v = su.unitized_derivative(suv);
-            let sv_unit = unitize_or_pass_on(sv, pass)?;
+            let sv_unit = sv.unitize()?;
             let sv_unit_u = sv.unitized_derivative(suv);
             let sv_unit_v = sv.unitized_derivative(svv);
 
@@ -708,8 +705,7 @@ impl EvalNFunctions for SsNormalizeEnfo<'_> {
         mut jacobian: Option<&mut Matrix>,
     ) -> Result<bool> {
         let k = self.kernel;
-        // (the fork's `SER(Unitize)`, with the opt-in fix: WR-663, tangency-labs/smlib 21dcf69)
-        let pass = k.fixes.query_statuses_pass_on;
+        // (the fork's `SER(Unitize)`: WR-663, tangency-labs/smlib 21dcf69)
         let directed = self.solver_operation == SolverOperation::Signed3dDirectedMinimize;
         let count = if directed { 5 } else { 4 };
         check_len(x, f, count, OP_SS_NORMALIZE)?;
@@ -761,10 +757,10 @@ impl EvalNFunctions for SsNormalizeEnfo<'_> {
         }
 
         // Unitize S1u and S1v and get their derivatives.
-        let s1u_unit = unitize_or_pass_on(s1u, pass)?;
+        let s1u_unit = s1u.unitize()?;
         let s1u_unit_u = s1u.unitized_derivative(s1uu);
         let s1u_unit_v = s1u.unitized_derivative(s1uv);
-        let s1v_unit = unitize_or_pass_on(s1v, pass)?;
+        let s1v_unit = s1v.unitize()?;
         let s1v_unit_u = s1v.unitized_derivative(s1uv); // not the same as s1u_unit_v
         let s1v_unit_v = s1v.unitized_derivative(s1vv);
 
@@ -782,7 +778,7 @@ impl EvalNFunctions for SsNormalizeEnfo<'_> {
             let cross2_u = s2u.derivative_of_cross_product(s2v, s2uu, s2uv);
             let cross2_v = s2u.derivative_of_cross_product(s2v, s2uv, s2vv);
 
-            let n2 = unitize_or_pass_on(cross2, pass)?;
+            let n2 = cross2.unitize()?;
             let n2_u = cross2.unitized_derivative(cross2_u);
             let n2_v = cross2.unitized_derivative(cross2_v);
 
@@ -827,10 +823,10 @@ impl EvalNFunctions for SsNormalizeEnfo<'_> {
             );
         } else {
             // Unitize S2u and S2v and get their derivatives.
-            let s2u_unit = unitize_or_pass_on(s2u, pass)?;
+            let s2u_unit = s2u.unitize()?;
             let s2u_unit_u = s2u.unitized_derivative(s2uu);
             let s2u_unit_v = s2u.unitized_derivative(s2uv);
-            let s2v_unit = unitize_or_pass_on(s2v, pass)?;
+            let s2v_unit = s2v.unitize()?;
             let s2v_unit_u = s2v.unitized_derivative(s2uv); // not the same as s2u_unit_v
             let s2v_unit_v = s2v.unitized_derivative(s2vv);
 
@@ -891,8 +887,8 @@ impl SurfaceEval<'_> {
             return Ok(());
         }
         // upstream ignores the status (`Eval();`) and reads the matrix as it stands
-        // (passed on with the opt-in fix, WR-663, tangency-labs/smlib 21dcf69)
-        ignore_or_pass_on(self.eval(), k.fixes.query_statuses_pass_on)?;
+        // (passed on as the fork does, WR-663, tangency-labs/smlib 21dcf69)
+        self.eval()?;
 
         let uv = self.uv();
         let (u_left, v_left) = self.sides();
@@ -971,11 +967,10 @@ impl SurfaceEval<'_> {
             return Ok(());
         }
 
-        // upstream ignores the statuses of both evaluations (passed on with the opt-in
-        // fix, WR-663, tangency-labs/smlib 21dcf69)
-        let pass = k.fixes.query_statuses_pass_on;
-        ignore_or_pass_on(self.eval(), pass)?;
-        ignore_or_pass_on(self.eval_normal(k), pass)?;
+        // upstream ignores the statuses of both evaluations (passed on as the fork does,
+        // WR-663, tangency-labs/smlib 21dcf69)
+        self.eval()?;
+        self.eval_normal(k)?;
 
         let dir = self.sect_dir();
         let st = self.state_mut();
@@ -1137,28 +1132,23 @@ pub fn is_point_on_normal(
             if on_boundary {
                 // Get Surface 3d outside pointing vector
                 let outward = -bi_norm;
-                // (passed on with the opt-in fix, WR-663, tangency-labs/smlib 21dcf69)
-                let srf_pd = ignored_or_pass_on(
-                    evaluate_directional_derivs(
-                        k,
-                        surface,
-                        uv_to_test,
-                        outward,
-                        1,
-                        Side::Left,
-                        Side::Left,
-                    ),
-                    k.fixes.query_statuses_pass_on,
+                // (passed on as the fork does, WR-663, tangency-labs/smlib 21dcf69)
+                let pd = evaluate_directional_derivs(
+                    k,
+                    surface,
+                    uv_to_test,
+                    outward,
+                    1,
+                    Side::Left,
+                    Side::Left,
                 )?;
-                if let Some(pd) = srf_pd {
-                    if let (Some(&p0), Some(&p1)) = (pd.first(), pd.get(1)) {
-                        // the drop vector from SrfPoint3d to 3dTestPoint
-                        let drop_vec: Vec3 = point_to_test - p0;
-                        // when UVPoint is on boundary and the drop vector is heading
-                        // beyond the surface
-                        if drop_vec.dot(p1) > EFF_ZERO {
-                            out.reason = NormalTestReason::OutsideOfDomain;
-                        }
+                if let (Some(&p0), Some(&p1)) = (pd.first(), pd.get(1)) {
+                    // the drop vector from SrfPoint3d to 3dTestPoint
+                    let drop_vec: Vec3 = point_to_test - p0;
+                    // when UVPoint is on boundary and the drop vector is heading
+                    // beyond the surface
+                    if drop_vec.dot(p1) > EFF_ZERO {
+                        out.reason = NormalTestReason::OutsideOfDomain;
                     }
                 }
             }
@@ -1959,8 +1949,7 @@ pub fn classify_curve_surface_xsect_point_with(
     current_t: f64,
     edge_tolerance: Option<f64>,
 ) -> Result<XsectClassification> {
-    // (the fork's `SER`s, with the opt-in fix: WR-663, tangency-labs/smlib 21dcf69)
-    let pass = k.fixes.query_statuses_pass_on;
+    // (the fork's `SER`s: WR-663, tangency-labs/smlib 21dcf69)
     let mut out = XsectClassification {
         found_guess: false,
         new_uv_guess: Point2::UNDEF,
@@ -2068,7 +2057,7 @@ pub fn classify_curve_surface_xsect_point_with(
 
     // get the cosine of the angle between the surfaceSectionNormal plane and the plane
     // of the curve's osculating circle (needed for Meusnier's Theorem)
-    let ang_rad = passed_on(curve_binormal.angle_between(surface_normal), pass)?.unwrap_or(0.0);
+    let ang_rad = curve_binormal.angle_between(surface_normal)?;
     let cos_phi = (ang_rad - PI / 2.0).cos().abs();
 
     // characterize the curve shape as a circle or a line
@@ -2131,8 +2120,8 @@ pub fn classify_curve_surface_xsect_point_with(
                 let d_x = sm_sqrt(tmp);
                 surface_vec = d_y * pk_vec1 + d_x * pk_vec2;
                 surface_vec2 = d_y * pk_vec1 - d_x * pk_vec2;
-                surface_vec = unitize_or_pass_on(surface_vec, pass)?;
-                surface_vec2 = unitize_or_pass_on(surface_vec2, pass)?;
+                surface_vec = surface_vec.unitize()?;
+                surface_vec2 = surface_vec2.unitize()?;
             }
             LocalSurfaceType::Cylindrical => {
                 out.point_type = TsectCurveType::Tangent;
@@ -2165,7 +2154,7 @@ pub fn classify_curve_surface_xsect_point_with(
         let mut circle_center_vec = curve_binormal
             .cross(sgn(surface_section_curvature) * surface_normal)
             .cross(curve_binormal);
-        circle_center_vec = unitize_or_pass_on(circle_center_vec, pass)?;
+        circle_center_vec = circle_center_vec.unitize()?;
 
         // the center lies in direction of the circle center vector, not the surface
         // normal
@@ -2488,17 +2477,6 @@ pub fn global_point_solve_starts(
         requested,
     )?;
     Ok(solutions.as_slice().iter().map(|s| s.start).collect())
-}
-
-/// `Unitize()` whose status SMLib drops and the fork passes on (`SER`): with `pass_on`
-/// (the opt-in `Kernel::fixes.query_statuses_pass_on`, WR-663; tangency-labs/smlib
-/// 21dcf69) a zero vector is returned as the error, without it `(0, 0, 1)` as upstream.
-fn unitize_or_pass_on(v: Vec3, pass_on: bool) -> Result<Vec3> {
-    if pass_on {
-        v.unitize()
-    } else {
-        Ok(v.unitize_or_z())
-    }
 }
 
 #[cfg(test)]

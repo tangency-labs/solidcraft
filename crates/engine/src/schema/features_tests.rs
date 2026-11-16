@@ -1224,7 +1224,7 @@ fn press_pull_block(level: ParamCheck, rounded: bool) -> Session {
 /// output schema: a new feature from a flat face and from edges, and a fillet's size edited.
 #[test]
 fn press_pull_contract_and_replies() {
-    assert_keys(input_schema_for::<PressPullParams>(), &["body", "distance", "edges", "face"]);
+    assert_keys(input_schema_for::<PressPullParams>(), &["body", "distance", "edges", "face", "face_body"]);
     assert_strict_keeps_todays_errors(&[
         ("solid.press_pull", json!({"face": [0, 0, 0]})),
         ("solid.press_pull", json!({"distance": 1})),

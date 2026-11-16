@@ -43,7 +43,11 @@
 //! - **Ignored statuses.** Where upstream ignores an evaluation's status, its outputs
 //!   keep their previous values (their initial values: zero vectors for
 //!   `SmVector2d`/`SmVector3d` outputs it clears first, [`Vec3::UNDEF`] for default
-//!   constructed points); [`SolidError::Unported`] is still propagated.
+//!   constructed points); [`SolidError::Unported`] is still propagated. Where the fork
+//!   passes the status on (WR-663, tangency-labs/smlib 21dcf69: the coincidence
+//!   check's boxes, points, normals and drops, the iso knots, the boundary sampler's
+//!   parameter directions, unitizations and directional derivatives) the port returns
+//!   it, and points that cannot be evaluated are not shown the same solution.
 //! - **Iso curves.** `CreateIsoParametricCurve` is the B-spline, plane and surface of
 //!   revolution and cone overrides (units `nurbs.b_spline_surface_p2`, `surface.plane_p1`,
 //!   `surface.surf_of_revolution_p1`, `surface.cone_p1`); the base body (other kinds) belongs to
@@ -69,7 +73,7 @@ use crate::curve::curve::p3::PointSolveOptions;
 use crate::curve::curve::Curve;
 use crate::curve::iso_curve::IsoCurve;
 use crate::curve::line::Line;
-use crate::error::{ignored, ignored_or_pass_on, passed_on, Result, SolidError};
+use crate::error::{ignored, Result, SolidError};
 use crate::geom::assert_array::ObjectKey;
 use crate::geom::axis2_placement::Axis2Placement;
 use crate::geom::extent1d::{Extent1d, ExtentNd};
@@ -307,8 +311,9 @@ impl Surface {
 
             // make temp isoParameter curve for this knot sample value
             let mut iso = create_iso_parametric_curve(k, self, get_sp, parameter, None)?.0;
-            // (status ignored)
-            let iso_knots = iso_knots_of(k, &iso)?;
+            // (status ignored upstream; passed on as the fork does, WR-663,
+            // tangency-labs/smlib 21dcf69)
+            let (iso_knots, _) = iso.knots(k, None)?;
 
             // When curve is degenerate - try another knot sample value
             if iso.is_degenerate(k, EFF_ZERO, None)? {
@@ -717,24 +722,21 @@ impl Surface {
         cache: Option<&crate::surface::surface_cache::SurfaceCache<O>>,
         context: Option<&mut dyn super::p1::SurfaceSolveContext<O>>,
     ) -> Result<Option<Solution<O>>> {
-        // First try boxing (statuses ignored; passed on with the opt-in fix, WR-663,
-        // tangency-labs/smlib 21dcf69).
-        let pass = k.fixes.query_statuses_pass_on;
-        let this_box = ignored_or_pass_on(
-            self.calculate_bounding_box(k, uv_domain, [true, false, false], true),
-            pass,
-        )?
-        .and_then(|b| b.normal_box)
-        .unwrap_or_default();
+        // First try boxing (statuses ignored upstream; passed on as the fork does,
+        // WR-663, tangency-labs/smlib 21dcf69).
+        let this_box = self
+            .calculate_bounding_box(k, uv_domain, [true, false, false], true)?
+            .normal_box
+            .unwrap_or_default();
         let req = CurveBoxRequest {
             normal: true,
             pseudo: false,
             polar: false,
         };
-        let curv_box =
-            ignored_or_pass_on(curve.calculate_bounding_box(k, interval, req, true), pass)?
-                .and_then(|b| b.normal)
-                .unwrap_or_default();
+        let curv_box = curve
+            .calculate_bounding_box(k, interval, req, true)?
+            .normal
+            .unwrap_or_default();
         if this_box.are_disjoint(&curv_box, tol_3d) {
             return Ok(None);
         }
@@ -743,8 +745,8 @@ impl Surface {
         // the complete range of coincidence)
         let mut sampled_ivl = Extent1d::new();
         let mut num_hits: u64 = 0;
-        // sNorm: one variable for every (status ignored) normal evaluation
-        let mut norm = Vec3::UNDEF;
+        // sNorm: every normal evaluation's status is ignored upstream and passed on as
+        // the fork does (WR-663, tangency-labs/smlib 21dcf69)
 
         // First drop the Curve MidPoint to Surface. Use a Global point solve, because
         // we have no guess uv.
@@ -792,7 +794,7 @@ impl Surface {
             if mag > EFF_ZERO {
                 mid_pt1 /= mag;
             }
-            norm = normal_ignored(k, self, mid_uv, norm)?;
+            let norm = self.evaluate_normal(k, mid_uv, Side::Right, Side::Right)?;
             let dot = mid_pt1.dot(norm);
 
             found = dot.abs() < 0.017; // about 1 degree
@@ -858,7 +860,7 @@ impl Surface {
                     st_pnt1 /= mag;
                 }
                 let uv = Point2::new(sol.start.param(0)?, sol.start.param(1)?);
-                norm = normal_ignored(k, self, uv, norm)?;
+                let norm = self.evaluate_normal(k, uv, Side::Right, Side::Right)?;
                 let dot = st_pnt1.dot(norm);
 
                 found_start = dot.abs() < 0.017; // about 1 degree
@@ -913,7 +915,7 @@ impl Surface {
                     en_pnt1 /= mag;
                 }
                 let uv = Point2::new(sol.start.param(0)?, sol.start.param(1)?);
-                norm = normal_ignored(k, self, uv, norm)?;
+                let norm = self.evaluate_normal(k, uv, Side::Right, Side::Right)?;
                 let dot = en_pnt1.dot(norm);
 
                 found_end = dot.abs() < 0.017; // about 1 degree
@@ -1051,9 +1053,10 @@ impl Surface {
         let [sp0, sp1, sp2] = start_par;
         let [dp0, dp1, dp2] = delta_par;
 
-        // get Solution segment start points and gapVector (statuses ignored)
-        let point0 = curve_point_ignored(k, curve, sp0, Vec3::UNDEF)?;
-        let point1 = point_ignored(k, self, Point2::new(sp1, sp2), Vec3::UNDEF)?;
+        // get Solution segment start points and gapVector (statuses ignored upstream;
+        // passed on as the fork does, WR-663, tangency-labs/smlib 21dcf69)
+        let point0 = curve.evaluate_point(k, sp0)?;
+        let point1 = self.evaluate_point(k, Point2::new(sp1, sp2))?;
         let xsect_gap = point1 - point0;
 
         // scale zero to current intersection point location
@@ -1094,38 +1097,25 @@ impl Surface {
             let t2 = sp1 + delta * dp1;
             let t3 = sp2 + delta * dp2;
 
-            // get Curve sample point (status ignored)
-            let prev = slot(&curve_point, tgt)?;
-            set_slot(
-                &mut curve_point,
-                tgt,
-                curve_point_ignored(k, curve, t1, prev)?,
-            )?;
+            // get Curve sample point (status ignored upstream; passed on as the fork
+            // does)
+            set_slot(&mut curve_point, tgt, curve.evaluate_point(k, t1)?)?;
 
-            // Find the surface point nearest the curve point (status ignored; passed on
-            // with the opt-in fix, WR-663, tangency-labs/smlib 21dcf69)
-            let (found, solution) = ignored_or_pass_on(
-                local_point_solve::<O>(
-                    k,
-                    self,
-                    &reg,
-                    SolverOperation::Normalize,
-                    slot(&curve_point, tgt)?,
-                    Point2::new(t2, t3),
-                ),
-                k.fixes.query_statuses_pass_on,
-            )?
-            .unwrap_or_default();
+            // Find the surface point nearest the curve point (status ignored upstream;
+            // passed on as the fork does, WR-663, tangency-labs/smlib 21dcf69)
+            let (found, solution) = local_point_solve::<O>(
+                k,
+                self,
+                &reg,
+                SolverOperation::Normalize,
+                slot(&curve_point, tgt)?,
+                Point2::new(t2, t3),
+            )?;
 
             if found {
                 // evaluate the nearest surface point
                 let drop_point = Point2::new(solution.start.param(0)?, solution.start.param(1)?);
-                let prev = slot(&surface_point, tgt)?;
-                set_slot(
-                    &mut surface_point,
-                    tgt,
-                    point_ignored(k, self, drop_point, prev)?,
-                )?;
+                set_slot(&mut surface_point, tgt, self.evaluate_point(k, drop_point)?)?;
 
                 // get the Curve/Surface gapVector: subtract the StartPoint gap from
                 // every gap SamplePoint to keep tolerance problems from creating
@@ -1397,9 +1387,11 @@ impl DerivSurfDefinition<'_> {
                 let surface_uv1 = match tt {
                     T::NoTangency => {
                         // 2d dir = projection of 3d binormal into surface UV space (status
-                        // ignored)
-                        let dir = param_direction_ignored(k, surface, surface_uv0, binormal)?;
-                        unitize_2d_ignored(k, dir)?
+                        // ignored upstream; passed on as the fork does, WR-663,
+                        // tangency-labs/smlib 21dcf69)
+                        surface
+                            .compute_param_direction(k, surface_uv0, binormal)?
+                            .unitize()?
                     }
                     T::TanToEdges | T::MatchNeighbors => {
                         // dir = linear interp between the start and end angles
@@ -1420,7 +1412,8 @@ impl DerivSurfDefinition<'_> {
                                     )
                                 }
                             })?;
-                        let uv_binormal = unitize_2d_ignored(k, uv_binormal)?;
+                        // (status ignored upstream; passed on as the fork does)
+                        let uv_binormal = uv_binormal.unitize()?;
 
                         // linearly interp the dir rotation angle
                         let ang_rad = deg2rad(
@@ -1466,9 +1459,11 @@ impl DerivSurfDefinition<'_> {
                             reference_gap = crv_pos - reference_pnt;
                         }
 
-                        // Project sGap into Surface UV plane (status ignored)
-                        let dir = param_direction_ignored(k, surface, surface_uv0, reference_gap)?;
-                        unitize_2d_ignored(k, dir)?
+                        // Project sGap into Surface UV plane (status ignored upstream;
+                        // passed on as the fork does)
+                        surface
+                            .compute_param_direction(k, surface_uv0, reference_gap)?
+                            .unitize()?
                     }
                     _ => {
                         return Err(SolidError::surface_failed(
@@ -1479,23 +1474,19 @@ impl DerivSurfDefinition<'_> {
                 };
 
                 // Surface directional derivatives up to the num of derivs being stored
-                // (status ignored: the outputs stay zero; passed on with the opt-in fix,
-                // WR-663, tangency-labs/smlib 21dcf69)
+                // (status ignored upstream, leaving the outputs zero; passed on as the
+                // fork does, WR-663, tangency-labs/smlib 21dcf69)
                 let mut tgt_values = [Vec3::new(0.0, 0.0, 0.0); 4];
-                if let Some(d) = ignored_or_pass_on(
-                    surface.evaluate_directional_derivs(
-                        k,
-                        surface_uv0,
-                        surface_uv1,
-                        num_derivatives,
-                        true,
-                        true,
-                    ),
-                    k.fixes.query_statuses_pass_on,
-                )? {
-                    for (dst, src) in tgt_values.iter_mut().zip(d) {
-                        *dst = src;
-                    }
+                let d = surface.evaluate_directional_derivs(
+                    k,
+                    surface_uv0,
+                    surface_uv1,
+                    num_derivatives,
+                    true,
+                    true,
+                )?;
+                for (dst, src) in tgt_values.iter_mut().zip(d) {
+                    *dst = src;
                 }
                 let [tgt0, mut tgt1, tgt2, tgt3] = tgt_values;
 
@@ -1632,15 +1623,14 @@ impl<O: SolutionObject> SsGlobalSolver<'_, '_, O> {
             let uv2a = Point2::new(sol1.start.param(3)?, sol1.start.param(4)?);
             let uv2b = Point2::new(sol2.start.param(3)?, sol2.start.param(4)?);
 
-            // Check positions (statuses ignored; with the opt-in fix points that cannot be
-            // evaluated are not shown the same, WR-663, tangency-labs/smlib 21dcf69).
-            let undef = (!k.fixes.query_statuses_pass_on).then_some(Vec3::UNDEF);
+            // Check positions (points that cannot be evaluated are not shown the same, as
+            // the fork, WR-663, tangency-labs/smlib 21dcf69).
             let mut pts = [Vec3::UNDEF; 4];
             for (slot, (surf, uv)) in
                 pts.iter_mut()
                     .zip([(surf1, uv1a), (surf1, uv1b), (surf2, uv2a), (surf2, uv2b)])
             {
-                let Some(p) = ignored(surf.evaluate_point(k, uv))?.or(undef) else {
+                let Some(p) = ignored(surf.evaluate_point(k, uv))? else {
                     return Ok((SolutionPairType::DiffParameters, None));
                 };
                 *slot = p;
@@ -2019,17 +2009,6 @@ fn find_element(values: &[f64], target: f64) -> Option<usize> {
     values.iter().position(|&v| v == target)
 }
 
-/// `pIsoCrv->GetKnots(sIsoKnots)` with its status ignored (no knots on failure); passed
-/// on with the opt-in `Kernel::fixes.query_statuses_pass_on` (WR-663,
-/// tangency-labs/smlib 21dcf69).
-fn iso_knots_of(k: &Kernel, curve: &Curve) -> Result<Vec<f64>> {
-    Ok(
-        ignored_or_pass_on(curve.knots(k, None), k.fixes.query_statuses_pass_on)?
-            .map(|(k, _)| k)
-            .unwrap_or_default(),
-    )
-}
-
 /// `aeConts[j]`.
 fn cont_at(conts: [ContinuityType; 2], j: usize) -> Result<ContinuityType> {
     conts.get(j).copied().ok_or_else(|| {
@@ -2064,56 +2043,6 @@ fn set_slot<T>(a: &mut [T; 3], i: usize, v: T) -> Result<()> {
     })?;
     *s = v;
     Ok(())
-}
-
-// The helpers below are the fork's `SER` sites (tangency-labs/smlib 21dcf69): with the
-// opt-in `Kernel::fixes.query_statuses_pass_on` (WR-663) the failure is returned.
-
-/// `EvaluatePoint(uv, pt)` with its status ignored: `prev` on failure.
-fn point_ignored(k: &Kernel, surface: &Surface, uv: Point2, prev: Point3) -> Result<Point3> {
-    Ok(ignored_or_pass_on(
-        surface.evaluate_point(k, uv),
-        k.fixes.query_statuses_pass_on,
-    )?
-    .unwrap_or(prev))
-}
-
-/// `crCurve.EvaluatePoint(t, pt)` with its status ignored: `prev` on failure.
-fn curve_point_ignored(k: &Kernel, curve: &Curve, t: f64, prev: Point3) -> Result<Point3> {
-    Ok(
-        ignored_or_pass_on(curve.evaluate_point(k, t), k.fixes.query_statuses_pass_on)?
-            .unwrap_or(prev),
-    )
-}
-
-/// `EvaluateNormal(uv, FALSE, FALSE, n)` with its status ignored: `prev` on failure.
-fn normal_ignored(k: &Kernel, surface: &Surface, uv: Point2, prev: Vec3) -> Result<Vec3> {
-    Ok(ignored_or_pass_on(
-        surface.evaluate_normal(k, uv, Side::Right, Side::Right),
-        k.fixes.query_statuses_pass_on,
-    )?
-    .unwrap_or(prev))
-}
-
-/// `ComputeParamDirection(uv, vec, dir)` with its status ignored: the cleared output
-/// `(0, 0)` on failure.
-fn param_direction_ignored(k: &Kernel, surface: &Surface, uv: Point2, vec: Vec3) -> Result<Vec2> {
-    Ok(ignored_or_pass_on(
-        surface.compute_param_direction(k, uv, vec),
-        k.fixes.query_statuses_pass_on,
-    )?
-    .unwrap_or(Vec2::new(0.0, 0.0)))
-}
-
-/// `Unitize()` of a 2D direction with its status ignored (the vector is left as it was);
-/// passed on with the opt-in fix.
-fn unitize_2d_ignored(k: &Kernel, v: Vec2) -> Result<Vec2> {
-    Ok(
-        match passed_on(v.unitize(), k.fixes.query_statuses_pass_on)? {
-            Ok(u) => u,
-            Err(_) => v,
-        },
-    )
 }
 
 /// `SmIsoCurve(*pSrfEval, dir, value, bFromLeft)` (input clamped) as a curve.
