@@ -110,3 +110,34 @@ fn an_arc_and_its_shorter_copy_coincide_over_the_copy() {
         );
     }
 }
+
+/// Two 90 degree arcs of radius 5 whose centres are `d` = 5e-6 apart along the arcs'
+/// bisector: the separation is `d cos(theta - 45 deg)` to first order, `d` in the middle and
+/// `d / sqrt 2` = 3.54e-6 at the ends, on one side throughout and never zero. The curves come
+/// nearest at the ends, not where the separation is stationary in the middle (its maximum).
+/// The answer is one point no farther apart than the nearer end, here an end itself (within
+/// second-order term, `(d / sqrt 2)^2 / (2 r)` = 1.25e-12, bounded by 1e-11).
+#[test]
+fn wr_647_separation_that_bulges_comes_nearest_at_an_end() {
+    let k = Kernel::default();
+    let d = 5e-6;
+    let shift = d / 2f64.sqrt();
+    let a = arc(5.0);
+    let b = Curve::from(create_arc(Point3::new(-shift, -shift, 0.0), 5.0, 0.0, 90.0).unwrap());
+    let (ia, ib) = (a.natural_interval(), b.natural_interval());
+    let sols = a
+        .simple_coincidence_checker(&k, &ia, &b, &ib, TOL, None, None, [Some(0u8), Some(1u8)])
+        .unwrap();
+    assert_eq!(sols.len(), 1, "{sols:?}");
+    let s = &sols[0];
+    assert_eq!(s.solution_type, SolutionType::SingleValue, "{s:?}");
+    let p = a.evaluate_point(&k, s.start.parameters[0]).unwrap();
+    let q = b.evaluate_point(&k, s.start.parameters[1]).unwrap();
+    // the separation at the arcs' ends, from the closed form to first order in d / r
+    let at_ends = shift;
+    assert!(
+        p.distance(q) <= at_ends + 1e-11,
+        "the point is {} apart, the ends {at_ends}",
+        p.distance(q)
+    );
+}

@@ -1624,6 +1624,19 @@ impl Curve {
                     "the curves are within tolerance but no nearest point was found",
                 ));
             }
+            // The minimum of the separation over the range is at a stationary point inside
+            // it or at an end. The local solve from the range's middle finds a stationary
+            // point, which can be where the curves are farthest apart (a separation that
+            // bulges between the ends); an end nearer than it is the nearer point. (A NaN
+            // value keeps the end: the comparison is written so NaN does not win.)
+            let solved = nearest.start.solution_value;
+            let nearer_end = if first.2 <= last.2 { first } else { last };
+            if !matches!(
+                solved.partial_cmp(&nearer_end.2),
+                Some(core::cmp::Ordering::Less | core::cmp::Ordering::Equal)
+            ) {
+                return Ok(vec![pair_solution(objects, nearer_end, None)]);
+            }
             nearest.num_variables = 2;
             nearest.num_objects = 2;
             nearest.solution_type = SolutionType::SingleValue;
