@@ -288,3 +288,93 @@ fn case_d_closed_keep_out_splits_and_shortens() {
         assert!(middle(row).iter().all(|e| e.2 == SlotKind::Whole));
     }
 }
+
+/// Case E: a through hole (46.5, 20)-(53.5, 40) in the plate. Rows inside it have two spans,
+/// [0, 20] and [40, 60], whose ends at the hole are open where the crossing is clean (rows v 48.5,
+/// 50, 51.5) and closed where a side of the hole lies within `rho` = 1.4 (rows v 47, 53). `Z_o` on
+/// a row is the near set of the hole's edges with reach 1.4. Rows 48.5 and 51.5 run out into the
+/// hole from both sides: [8.6, 21.4] and [38.6, 51.4]. Rows v 45.5 and 54.5, 1.0 outside, are
+/// shortened by the hole's corner discs to 20 - sqrt(1.4^2 - 1) and 40 + sqrt(1.4^2 - 1). The
+/// middle slots of rows 47, 50 and 53 lie in the hole: 95 - 3 = 92.
+#[test]
+fn case_e_runs_out_into_a_hole() {
+    let s = spec(HingeClip::RunOut, 3.0);
+    let lattice = Lattice::centred(&s, &BAND).unwrap();
+    let rho = s.edge_reach();
+    let in_hole = |v: f64| 46.5 < v && v < 53.5;
+    let side_gap = |v: f64| (v - 46.5).abs().min((v - 53.5).abs());
+    let plan = plan_rows_zoned(
+        &s,
+        &lattice,
+        |_, v| {
+            if in_hole(v) {
+                let clean = side_gap(v) >= rho;
+                vec![
+                    RowSpan {
+                        lo: 0.0,
+                        hi: 20.0,
+                        lo_open: true,
+                        hi_open: clean,
+                    },
+                    RowSpan {
+                        lo: 40.0,
+                        hi: 60.0,
+                        lo_open: clean,
+                        hi_open: true,
+                    },
+                ]
+            } else {
+                vec![RowSpan {
+                    lo: 0.0,
+                    hi: 60.0,
+                    lo_open: true,
+                    hi_open: true,
+                }]
+            }
+        },
+        |_, v| {
+            let d = side_gap(v);
+            if in_hole(v) && d >= rho {
+                vec![(20.0 - rho, 20.0 + rho), (40.0 - rho, 40.0 + rho)]
+            } else if in_hole(v) {
+                // The side's near set covers the hole's ends' zones: one interval.
+                vec![(20.0 - rho, 40.0 + rho)]
+            } else if d < rho {
+                let reach = (rho * rho - d * d).sqrt();
+                vec![(20.0 - reach, 40.0 + reach)]
+            } else {
+                Vec::new()
+            }
+        },
+    );
+    assert_eq!(plan.slots.len(), 92);
+    let middle = |row: i64| -> Vec<(f64, f64, SlotKind)> {
+        row_ends(&plan, row)
+            .into_iter()
+            .filter(|e| e.0 > 8.0 && e.1 < 52.0)
+            .collect()
+    };
+    for row in [12, 14] {
+        assert_ends(
+            &middle(row),
+            &[
+                (8.6, 21.4, SlotKind::RunOut),
+                (38.6, 51.4, SlotKind::RunOut),
+            ],
+        );
+    }
+    let corner = (1.4_f64 * 1.4 - 1.0).sqrt();
+    assert!((20.0 - corner - 19.020204).abs() < 1e-6);
+    for row in [10, 16] {
+        assert_ends(
+            &middle(row),
+            &[
+                (8.6, 20.0 - corner, SlotKind::Shortened),
+                (40.0 + corner, 51.4, SlotKind::Shortened),
+            ],
+        );
+    }
+    for row in [11, 13, 15] {
+        assert!(middle(row).is_empty(), "{:?}", middle(row));
+    }
+}
