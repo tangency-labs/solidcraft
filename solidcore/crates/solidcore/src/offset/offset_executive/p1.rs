@@ -239,6 +239,12 @@ pub struct OffsetExecutive {
     /// convex round thinner than the wall), mated across instead of offset
     /// (`m_sCollapsedFaces`; only with `Kernel::fixes.offset_collapsed_rounds_mated`).
     pub(super) collapsed_faces: Vec<FaceId>,
+    /// Not upstream (#15409): the refusal of the first face of a solid offset whose offset
+    /// collapses, to less than the body's tolerance (`super::p2::refuse_collapsed_face`), kept
+    /// from the face pass. The merged result returns it in place of a body that lost its
+    /// input's manifold (the cause named); a result that is still a manifold solid, or has no
+    /// face (#2092), is returned.
+    pub(super) pending_collapse: Option<SolidError>,
     /// Not upstream (solidcraft#16983): the offset faces with an edge whose offset is
     /// inverted (its neighbours' offsets crossed over it; `TrimmedEdge`), which
     /// `resolve_crossing_loops` resolves when they have one loop.
@@ -306,6 +312,7 @@ impl OffsetExecutive {
             kept_edgeuses: BTreeSet::new(),
             crossing_edgeuses: BTreeSet::new(),
             collapsed_faces: Vec::new(),
+            pending_collapse: None,
             inverted_faces: BTreeSet::new(),
             unmated_edgeuses: BTreeSet::new(),
             local_faces: Vec::new(),
