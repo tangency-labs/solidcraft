@@ -242,6 +242,54 @@ fn mirror_uses_the_only_preselected_construction_line_among_multiple_lines() {
     }
 }
 
+/// #11700: with circles preselected, Mirror opens on the empty Mirror line. A further circle
+/// clicked then joins the Entities (the line field refuses it), so every selected circle is
+/// mirrored instead of the last one being dropped without a word; the line is still picked next.
+#[test]
+fn mirror_takes_a_circle_clicked_while_the_mirror_line_is_active_into_the_entities() {
+    let mut h = Harness::new();
+    h.app.run("sketch.create", json!({"plane": "XY"})).unwrap();
+    h.app.run("sketch.line", json!({"points": [[0, -30], [0, 30]], "construction": true, "ids": ["axis"]})).unwrap();
+    for y in [-15, 0, 15] {
+        h.app.run("sketch.circle.center", json!({"center": [10, y], "radius": 3})).unwrap();
+    }
+    h.settle();
+    h.step(&json!({"click": {"world": [13, -15, 0]}})).unwrap();
+    h.step(&json!({"click": {"world": [13, 0, 0]}, "ctrl": true})).unwrap();
+    h.step(&json!({"start": "sketch.mirror"})).unwrap();
+    assert_eq!(h.app.dialog.as_ref().unwrap().active, 1, "the window waits for the mirror line");
+    h.step(&json!({"click": {"world": [13, 15, 0]}})).unwrap();
+    let d = h.app.dialog.as_ref().unwrap();
+    let curve = |id: &str| Sel::SketchCurve { id: id.into(), sketch: None };
+    assert_eq!(d.inputs[0].items, vec![curve("c1"), curve("c2"), curve("c3")]);
+    assert!(d.inputs[1].items.is_empty());
+    assert_eq!(d.active, 1, "the mirror line is still the next pick");
+    // Clicked again, the circle leaves the Entities, as a pick in that list does.
+    h.step(&json!({"click": {"world": [13, 15, 0]}})).unwrap();
+    assert_eq!(h.app.dialog.as_ref().unwrap().inputs[0].items, vec![curve("c1"), curve("c2")]);
+    h.step(&json!({"click": {"world": [13, 15, 0]}})).unwrap();
+    h.step(&json!({"click": {"world": [0, 25, 0]}})).unwrap();
+    assert_eq!(h.app.dialog.as_ref().unwrap().inputs[1].items, vec![curve("axis")]);
+    h.frames(2);
+    h.step(&json!({"key": "Enter"})).unwrap();
+    h.settle();
+    assert!(h.app.dialog.is_none(), "{:?}", h.app.status);
+    let state = h.app.session.model.state();
+    let sketch = &state.sketch(h.app.session.active_sketch.unwrap()).unwrap().sketch;
+    let mut centres: Vec<(i64, i64)> = sketch
+        .curves
+        .iter()
+        .filter_map(|c| match c.kind {
+            solidcraft_engine::sketch::CurveKind::Circle { c, .. } => sketch.point(c),
+            _ => None,
+        })
+        .filter(|p| p.x < 0.0)
+        .map(|p| (p.x.round() as i64, p.y.round() as i64))
+        .collect();
+    centres.sort();
+    assert_eq!(centres, vec![(-10, -15), (-10, 0), (-10, 15)], "every selected circle is mirrored");
+}
+
 #[test]
 fn mirror_auto_line_requires_one_preselected_straight_construction_line_and_the_preference() {
     for (count, selected, enabled) in [(0, 1, true), (1, 0, true), (2, 0, true), (1, 1, true), (2, 1, true), (2, 2, true), (1, 1, false)] {
@@ -503,6 +551,31 @@ fn a_plain_move_takes_the_geometry_with_it() {
     let ys: Vec<f64> = sk.points.iter().filter(|p| corners.contains(&p.id)).map(|p| p.pos.y).collect();
     assert_eq!(ys.len(), 4, "{ys:?}");
     assert!(ys.iter().all(|y| (*y - 15.0).abs() < 1e-6 || (*y - 25.0).abs() < 1e-6), "the rectangle moved up by 5 mm: {ys:?}");
+    assert!(!h.app.status_undo, "nothing tied it to what stays, so nothing is let go: {:?}", h.app.status);
+}
+
+/// #2980: a rectangle drawn from the origin moves whole, and the status line says its corner's
+/// coincidence with the origin was let go; its Undo button undoes the move.
+#[test]
+fn a_move_that_lets_go_of_the_origin_says_so_and_offers_undo() {
+    let mut h = rectangle();
+    let sid = h.app.session.active_sketch.unwrap();
+    h.step(&json!({"start": "sketch.move"})).unwrap();
+    let picks: Vec<Sel> = curve_ids(&h).iter().map(|id| Sel::SketchCurve { id: id.clone(), sketch: None }).collect();
+    {
+        let d = h.app.dialog.as_mut().unwrap();
+        d.inputs[0].items = picks;
+        d.kind = Kind::SketchModify(Mod::Move { x: "15 mm".into(), y: "0 mm".into(), angle: "0 deg".into(), copy: false });
+    }
+    h.frames(2);
+    h.step(&json!({"key": "Enter"})).unwrap();
+    h.settle();
+    let (msg, _, error) = h.app.status.clone().expect("the move says what it let go");
+    assert!(!error, "{msg}");
+    assert!(msg.contains("1 constraint") && msg.contains("Coincident"), "{msg}");
+    assert!(h.app.status_undo, "the message offers Undo");
+    let xs: Vec<f64> = h.app.session.model.state().sketch(sid).unwrap().sketch.points.iter().filter(|p| p.id != "origin").map(|p| p.pos.x).collect();
+    assert!(xs.iter().all(|x| (*x - 15.0).abs() < 1e-6 || (*x - 35.0).abs() < 1e-6), "the rectangle moved whole: {xs:?}");
 }
 
 #[test]

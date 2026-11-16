@@ -60,7 +60,21 @@ Cancellation, failure and final publication clear the provisional slot while
 preserving the previous successful result when no newer final exists. Each
 externally retained preview keeps its own admitted memory reservation.
 
+`ui.inspect.render.displayed_receipt` identifies the cached image submitted by the
+last completed, non-discarded UI pass. It contains the job, scene generation, pixel
+size, final/preview kind, optional checkpoint count/sequence and adaptive phase,
+and the egui frame/pass numbers. A live image uses its own captured source identity.
+Merely decoding or retaining an image does not produce a receipt. A completed UI pass
+without an image, or with a hidden, fully clipped, zero-opacity or comparison view,
+publishes no receipt. Logic-only updates retain the old completed pass numbers, so
+receipt presence alone does not establish a fresh paint. This is an image-shape submission receipt,
+not acknowledgement of GPU execution, compositor presentation or every visible paint.
+
 ## Native and browser execution
+
+Native Single, All and live CAD preparation workers use `kernel::kernel_thread`
+with an 8 MiB stack for Solidcore rc1. The admitted image executors consume the
+captured triangles; this worker policy adds no kernel calls to image execution.
 
 Each application installs one CPU host, shared by its documents. Native execution uses
 one worker and at most two queued inputs across documents; it runs without UI polling.

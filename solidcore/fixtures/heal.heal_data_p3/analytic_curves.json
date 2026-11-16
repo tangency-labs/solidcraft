@@ -1,0 +1,54 @@
+{
+  "cases": [
+    {
+      "name": "ellipse_arc_cache_props",
+      "upstream_ref": "source/SMLib/src/SmHealData.cpp (analytic SmEllipse edge)",
+      "inputs": {
+        "case": "heal",
+        "brep": {
+          "kind": "ellipse_face",
+          "circle": false,
+          "origin": [0.02, -0.03, 0.01],
+          "axis": 0,
+          "radii": [0.03, 0.01],
+          "angles": [-90.0, 270.0],
+          "natural": [-4.0, 3.0],
+          "inside_out": false,
+          "oob": false
+        },
+        "init_gaps": false,
+        "targets": { "v": "all", "e": "all", "f": "all" },
+        "steps": [
+          { "step": "cache_edge_props" },
+          { "step": "cache_vertex_props" }
+        ],
+        "validate_only": false
+      }
+    },
+    {
+      "name": "circle_full_cache_props",
+      "upstream_ref": "source/SMLib/src/SmHealData.cpp (analytic SmCircle edge)",
+      "inputs": {
+        "case": "heal",
+        "brep": {
+          "kind": "ellipse_face",
+          "circle": true,
+          "origin": [0.0, 0.0, 0.0],
+          "axis": 2,
+          "radii": [0.5, 0.5],
+          "angles": [-180.0, 180.0],
+          "natural": [0.0, 4.0],
+          "inside_out": false,
+          "oob": false
+        },
+        "init_gaps": false,
+        "targets": { "v": "all", "e": "all", "f": "all" },
+        "steps": [
+          { "step": "cache_edge_props" },
+          { "step": "cache_vertex_props" }
+        ],
+        "validate_only": false
+      }
+    }
+  ]
+}

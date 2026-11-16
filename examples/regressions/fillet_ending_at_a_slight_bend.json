@@ -1,0 +1,556 @@
+{
+  "description": "Reproduction for #15603: a circle with a handle, extruded 16 mm. The concave arc joining handle and circle meets the circle at a 6 degree bend, not tangentially. A fillet of the arc and handle top edges with tangent propagation stopped at the bend and SMLib could not end the round on the circle wall there (status 1001).",
+  "commands": [
+    {
+      "command": "timeline.add",
+      "params": {
+        "feature": {
+          "id": 1,
+          "name": "Sketch1",
+          "plane": {
+            "name": "XY",
+            "type": "origin"
+          },
+          "sketch": {
+            "constraints": [
+              {
+                "id": "k1",
+                "l": 0,
+                "param": "d1",
+                "type": "line_angle",
+                "value": 0.7853981633974483
+              },
+              {
+                "id": "k2",
+                "l": 0,
+                "param": "d2",
+                "type": "length",
+                "value": 220.0
+              },
+              {
+                "id": "k3",
+                "l": 1,
+                "param": "d3",
+                "type": "line_angle",
+                "value": -0.7853981633974483
+              },
+              {
+                "id": "k4",
+                "l": 1,
+                "param": "d4",
+                "type": "length",
+                "value": 220.0
+              },
+              {
+                "id": "k5",
+                "l": 2,
+                "param": "d5",
+                "type": "line_angle",
+                "value": -2.356194490192345
+              },
+              {
+                "id": "k6",
+                "l": 2,
+                "param": "d6",
+                "type": "length",
+                "value": 220.0
+              },
+              {
+                "a": 2,
+                "b": 3,
+                "id": "k7",
+                "type": "perpendicular"
+              },
+              {
+                "id": "k8",
+                "p": 1,
+                "q": 0,
+                "type": "horizontal_points"
+              },
+              {
+                "id": "k9",
+                "p": 0,
+                "q": 5,
+                "type": "coincident"
+              },
+              {
+                "c": 4,
+                "id": "k10",
+                "param": "d7",
+                "text": [
+                  -48.370745878715354,
+                  -88.03122355674836
+                ],
+                "type": "diameter",
+                "value": 110.0
+              },
+              {
+                "id": "k11",
+                "p": 0,
+                "param": "d8",
+                "q": 1,
+                "text": [
+                  29.3986640704981,
+                  -180.0479283017765
+                ],
+                "type": "distance",
+                "value": 80.0
+              },
+              {
+                "c": 1,
+                "id": "k12",
+                "p": 6,
+                "type": "point_on_curve"
+              },
+              {
+                "id": "k13",
+                "l": 6,
+                "type": "horizontal"
+              },
+              {
+                "id": "k14",
+                "l": 6,
+                "p": 6,
+                "param": "d9",
+                "text": [
+                  -12.25912455137216,
+                  -7.3912653806634125
+                ],
+                "type": "point_line_distance",
+                "value": 45.0
+              },
+              {
+                "c": 4,
+                "id": "k15",
+                "p": 7,
+                "type": "point_on_curve"
+              },
+              {
+                "c": 5,
+                "id": "k16",
+                "p": 7,
+                "type": "point_on_curve"
+              },
+              {
+                "c": 5,
+                "id": "k17",
+                "p": 8,
+                "type": "point_on_curve"
+              },
+              {
+                "a": 7,
+                "b": 8,
+                "id": "k18",
+                "type": "perpendicular"
+              },
+              {
+                "a": 8,
+                "b": 9,
+                "id": "k19",
+                "type": "perpendicular"
+              },
+              {
+                "id": "k20",
+                "l": 7,
+                "param": "d10",
+                "text": [
+                  8.643603831198082,
+                  -10.437055898407978
+                ],
+                "type": "length",
+                "value": 110.0
+              },
+              {
+                "id": "k21",
+                "l": 8,
+                "param": "d11",
+                "text": [
+                  -0.768354897550668,
+                  9.832691820903387
+                ],
+                "type": "length",
+                "value": 16.0
+              },
+              {
+                "c": 4,
+                "id": "k22",
+                "p": 11,
+                "type": "point_on_curve"
+              },
+              {
+                "c": 4,
+                "id": "k23",
+                "p": 12,
+                "type": "point_on_curve"
+              },
+              {
+                "c": 10,
+                "id": "k24",
+                "p": 12,
+                "type": "point_on_curve"
+              },
+              {
+                "a": 10,
+                "b": 9,
+                "id": "k25",
+                "type": "tangent"
+              },
+              {
+                "id": "k26",
+                "l": 9,
+                "param": "d12",
+                "text": [
+                  9.31236221647699,
+                  -15.567263296963612
+                ],
+                "type": "length",
+                "value": 84.0
+              },
+              {
+                "c": 10,
+                "id": "k27",
+                "param": "d13",
+                "text": [
+                  -6.984164889669813,
+                  -28.600861324152632
+                ],
+                "type": "radius",
+                "value": 49.0
+              }
+            ],
+            "counters": {
+              "a": 1,
+              "c": 1,
+              "k": 27,
+              "l": 9,
+              "p": 5
+            },
+            "curves": [
+              {
+                "a": 1,
+                "b": 2,
+                "construction": true,
+                "id": "l1",
+                "type": "line"
+              },
+              {
+                "a": 2,
+                "b": 3,
+                "construction": true,
+                "id": "l2",
+                "type": "line"
+              },
+              {
+                "a": 3,
+                "b": 4,
+                "construction": true,
+                "id": "l3",
+                "type": "line"
+              },
+              {
+                "a": 4,
+                "b": 1,
+                "construction": true,
+                "id": "l4",
+                "type": "line"
+              },
+              {
+                "c": 5,
+                "construction": false,
+                "id": "c1",
+                "r": 55.0,
+                "type": "circle"
+              },
+              {
+                "a": 0,
+                "b": 6,
+                "construction": true,
+                "id": "l5",
+                "type": "line"
+              },
+              {
+                "a": 0,
+                "b": 3,
+                "construction": true,
+                "id": "l6",
+                "type": "line"
+              },
+              {
+                "a": 7,
+                "b": 8,
+                "construction": false,
+                "id": "l7",
+                "type": "line"
+              },
+              {
+                "a": 8,
+                "b": 9,
+                "construction": false,
+                "id": "l8",
+                "type": "line"
+              },
+              {
+                "a": 9,
+                "b": 10,
+                "construction": false,
+                "id": "l9",
+                "type": "line"
+              },
+              {
+                "a": 11,
+                "b": 10,
+                "c": 13,
+                "construction": false,
+                "id": "a1",
+                "reversed": true,
+                "type": "arc"
+              }
+            ],
+            "points": [
+              {
+                "fixed": true,
+                "id": "origin",
+                "pos": [
+                  0.0,
+                  0.0
+                ]
+              },
+              {
+                "fixed": false,
+                "id": "l1.start",
+                "pos": [
+                  -80.0,
+                  0.0
+                ]
+              },
+              {
+                "fixed": false,
+                "id": "l1.end",
+                "pos": [
+                  75.56349186104046,
+                  155.56349186104043
+                ]
+              },
+              {
+                "fixed": false,
+                "id": "l2.end",
+                "pos": [
+                  231.12698372208095,
+                  0.0
+                ]
+              },
+              {
+                "fixed": false,
+                "id": "l3.end",
+                "pos": [
+                  75.56349186104046,
+                  -155.5634918610405
+                ]
+              },
+              {
+                "fixed": false,
+                "id": "c1.center",
+                "pos": [
+                  0.0,
+                  0.0
+                ]
+              },
+              {
+                "fixed": false,
+                "id": "p1",
+                "pos": [
+                  186.12698372208092,
+                  45.0
+                ]
+              },
+              {
+                "fixed": false,
+                "id": "p2",
+                "pos": [
+                  53.45974871144608,
+                  12.924986178291988
+                ]
+              },
+              {
+                "fixed": false,
+                "id": "p3",
+                "pos": [
+                  160.37924613433825,
+                  38.774958534875964
+                ]
+              },
+              {
+                "fixed": false,
+                "id": "l8.end",
+                "pos": [
+                  156.61925015519876,
+                  54.32688543275118
+                ]
+              },
+              {
+                "fixed": false,
+                "id": "l9.end",
+                "pos": [
+                  74.97163394135383,
+                  34.58690654226886
+                ]
+              },
+              {
+                "fixed": false,
+                "id": "p4",
+                "pos": [
+                  35.728226336305426,
+                  41.81499543060756
+                ]
+              },
+              {
+                "fixed": false,
+                "id": "p5",
+                "pos": [
+                  35.728226336305426,
+                  41.81499543060756
+                ]
+              },
+              {
+                "fixed": false,
+                "id": "a1.center",
+                "pos": [
+                  63.45664625523915,
+                  82.21468266701174
+                ]
+              }
+            ]
+          },
+          "suppressed": false,
+          "type": "sketch"
+        },
+        "params": [
+          {
+            "expression": "45",
+            "name": "d1",
+            "unit": "deg"
+          },
+          {
+            "expression": "220",
+            "name": "d2",
+            "unit": "mm"
+          },
+          {
+            "expression": "-45",
+            "name": "d3",
+            "unit": "deg"
+          },
+          {
+            "expression": "220",
+            "name": "d4",
+            "unit": "mm"
+          },
+          {
+            "expression": "-135",
+            "name": "d5",
+            "unit": "deg"
+          },
+          {
+            "expression": "220",
+            "name": "d6",
+            "unit": "mm"
+          },
+          {
+            "expression": "110",
+            "name": "d7",
+            "unit": "mm"
+          },
+          {
+            "expression": "80",
+            "name": "d8",
+            "unit": "mm"
+          },
+          {
+            "expression": "45",
+            "name": "d9",
+            "unit": "mm"
+          },
+          {
+            "expression": "110",
+            "name": "d10",
+            "unit": "mm"
+          },
+          {
+            "expression": "16",
+            "name": "d11",
+            "unit": "mm"
+          },
+          {
+            "expression": "84",
+            "name": "d12",
+            "unit": "mm"
+          },
+          {
+            "expression": "49",
+            "name": "d13",
+            "unit": "mm"
+          }
+        ]
+      }
+    },
+    {
+      "command": "timeline.add",
+      "params": {
+        "feature": {
+          "body_names": [
+            "Body2"
+          ],
+          "extent": {
+            "convention": "total_distance",
+            "direction": "positive",
+            "distance": "16 mm"
+          },
+          "id": 4,
+          "name": "Extrude1",
+          "operation": "new_body",
+          "param_names": [
+            "d14"
+          ],
+          "profiles": {
+            "loops": [
+              [
+                "c1",
+                "c1"
+              ],
+              [
+                "c1",
+                "l7",
+                "l8",
+                "l9",
+                "a1"
+              ]
+            ],
+            "type": "curves"
+          },
+          "sketch": 1,
+          "suppressed": false,
+          "type": "extrude"
+        }
+      }
+    },
+    {
+      "command": "solid.fillet",
+      "params": {
+        "body": "Body2",
+        "edges": [
+          [
+            54.58082722618695,
+            34.025266437267746,
+            16.0
+          ],
+          [
+            115.7954420482763,
+            44.45689598751002,
+            16.0
+          ]
+        ],
+        "radius": "2 mm"
+      }
+    }
+  ]
+}

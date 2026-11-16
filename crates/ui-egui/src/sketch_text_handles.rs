@@ -13,8 +13,8 @@ use solidcore_record::Vec2;
 use solidcraft_engine::sketch::{CurveKind, LinkKind, LinkSource};
 
 use crate::SolveApp;
-use crate::theme::Tokens;
 use crate::viewport::{Hit, Proj};
+use solidcraft_theme::Tokens;
 
 /// Pixels from a handle's centre that still grab it.
 const GRAB_PX: f32 = 8.0;
@@ -294,7 +294,7 @@ pub(crate) fn show(app: &SolveApp, ui: &egui::Ui, painter: &Painter, proj: &Proj
     let line = Stroke::new(1.0, tk.accent);
     let mut outline = s.corners.to_vec();
     outline.push(s.corners[0]);
-    painter.extend(crate::viewport::dashed_line(&outline, painter.clip_rect(), line, 5.0, 4.0));
+    painter.extend(crate::ui_kit::dashed_line(&outline, painter.clip_rect(), line, 5.0, 4.0));
     painter.line_segment([s.knob_base, s.knob], line);
     let drag = DRAG.with(|d| d.borrow().as_ref().map(|d| d.grab));
     let under = hover.and_then(|p| hit(app, proj, p)).map(|(_, g)| g);
@@ -327,7 +327,7 @@ pub(crate) fn show(app: &SolveApp, ui: &egui::Ui, painter: &Painter, proj: &Proj
             }
             Grab::Rotate => format!("{:.1}°", f.angle.to_degrees()),
         };
-        painter.text(p + vec2(14.0, -14.0), Align2::LEFT_BOTTOM, label, FontId::proportional(crate::theme::Tokens::get().font_body), tk.accent);
+        painter.text(p + vec2(14.0, -14.0), Align2::LEFT_BOTTOM, label, FontId::proportional(solidcraft_theme::Tokens::get().font_body), tk.accent);
     }
 }
 

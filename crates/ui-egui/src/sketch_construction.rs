@@ -30,23 +30,25 @@ pub(crate) fn typed_length(t: &Tool) -> Option<&str> {
 }
 
 /// A digit typed while a one-click tool's Length box waits gives that box the keyboard, so the
-/// digit is its first character. Anything else (a tool's shortcut letter) still reaches the
-/// shortcuts: the box only takes the keyboard once a number is being typed.
+/// digit is its first character. Horizontal, vertical and parallel keep that: two clicks then
+/// draw a dimensioned segment. The Offset box is opt-in and takes a digit only after it already
+/// has the keyboard. A letter still reaches the shortcuts.
 pub fn claim_typed_length(app: &SolveApp, ctx: &egui::Context) {
     let Some(t) = app.tool.as_ref() else { return };
     if !construction_line_mode(t.cmd).is_some_and(length_box_at_start) || !t.pts.is_empty() || t.hover.is_none() {
         return;
     }
-    if t.dims.first().is_none_or(|b| b.label != "Length") || ctx.memory(|m| m.focused().is_some()) {
+    if ctx.memory(|m| m.focused().is_some()) {
         return;
     }
+    let Some(index) = t.dims.iter().position(|b| b.label == "Length") else { return };
     let digit = ctx.input(|i| {
         !i.modifiers.command
             && !i.modifiers.alt
             && i.events.iter().any(|e| matches!(e, egui::Event::Text(text) if text.chars().next().is_some_and(|c| c.is_ascii_digit())))
     });
     if digit {
-        ctx.memory_mut(|m| m.request_focus(crate::sketch_dims::box_id(0)));
+        ctx.memory_mut(|m| m.request_focus(crate::sketch_dims::box_id(index)));
     }
 }
 
@@ -61,9 +63,9 @@ pub fn line_type_switch(ui: &mut egui::Ui, t: &mut Tool) {
     }
     let Some(i) = t.dims.iter().position(|b| b.label == "Length") else { return };
     let Some(length_box) = ui.ctx().memory(|m| m.area_rect(egui::Id::unique(("sc_dim_area", i)))) else { return };
-    let tokens = crate::theme::Tokens::get();
+    let tokens = solidcraft_theme::Tokens::get();
     let has_length = typed_length(t).is_some();
-    let reason = crate::i18n::tr("ui.construction.normal_needs_length");
+    let reason = solidcraft_ui_text::tr("ui.construction.normal_needs_length");
     let refused = [Some(reason), Some(reason)];
     // The Sketch Palette's own line type names, which `segmented` translates.
     let options = ["Construction", "Normal"];
@@ -93,16 +95,17 @@ pub fn line_type_switch(ui: &mut egui::Ui, t: &mut Tool) {
 pub fn hint(id: &str) -> String {
     let key = match construction_line_mode(id).unwrap_or("free") {
         "free" => "ui.construction.free_hint",
-        "horizontal" | "vertical" => "ui.construction.point_hint",
+        "horizontal" | "vertical" => "ui.construction.axis_hint",
         "angle" => "ui.construction.angle_hint",
-        "parallel" | "perpendicular" => "ui.construction.reference_hint",
+        "parallel" => "ui.construction.parallel_hint",
+        "perpendicular" => "ui.construction.reference_hint",
         "tangent_external" => "ui.construction.external_hint",
         "tangent_at" => "ui.construction.contact_hint",
         "tangent_two" => "ui.construction.common_hint",
         "bisector" => "ui.construction.bisector_hint",
         _ => "ui.construction.point_hint",
     };
-    crate::i18n::tr(key).to_owned()
+    solidcraft_ui_text::tr(key).to_owned()
 }
 
 fn arg(point: &(Vec2, Option<String>), preview: bool) -> Value {
@@ -140,6 +143,15 @@ fn params(app: &SolveApp, t: &Tool, pointer: &(Vec2, Option<String>), preview: b
         p["angle"] = json!(angle.to_degrees());
         if !preview && let Some(expression) = crate::sketch_dims::locked_expression(t, "Angle") {
             p["angle"] = json!(expression);
+        }
+    }
+    if matches!(mode, "parallel" | "horizontal" | "vertical") {
+        if let Some(offset) = crate::sketch_dims::locked_value(app, t, "Offset") {
+            p["offset"] = json!(offset);
+        }
+        // A locked box the user cleared is no offset. An empty string is not a length expression.
+        if !preview && let Some(expression) = crate::sketch_dims::locked_expression(t, "Offset").filter(|text| !text.trim().is_empty()) {
+            p["offset"] = json!(expression);
         }
     }
     if let Some(expression) = typed_length(t) {
@@ -196,11 +208,13 @@ pub fn place_point(app: &mut SolveApp, t: &mut Tool, at: (Vec2, Option<String>))
         return;
     }
     let at = crate::sketch_dims::placed(app, t, &at);
+    // Only a typed length waits for a second click and pins this one as the segment's start.
+    // A typed offset places the infinite line on this click, on the cursor's side of the reference.
     let picks_side = length_box_at_start(mode) && typed_length(t).is_some();
     if (matches!(mode, "free" | "angle" | "tangent_external") || picks_side) && t.pts.is_empty() {
         t.pts.push(at);
         if picks_side {
-            app.set_status(crate::i18n::tr("ui.construction.side_hint").to_owned(), false);
+            app.set_status(solidcraft_ui_text::tr("ui.construction.side_hint").to_owned(), false);
         }
         return;
     }
@@ -228,7 +242,7 @@ pub fn preview(app: &SolveApp, t: &Tool, painter: &egui::Painter, proj: &Proj) {
     let Some(ss) = app.session.active_sketch.and_then(|sid| state.sketch(sid)) else { return };
     let Ok(lines) = construction_line_solutions(&ss.sketch, &p, mode) else { return };
     let chosen = construction_line_choice(&lines, &p).ok();
-    let tokens = crate::theme::Tokens::get();
+    let tokens = solidcraft_theme::Tokens::get();
     let center = ss.plane.to_local(app.cam.target);
     let extent = app.cam.half_height().max(1.0) * 20.0;
     let length = p.get("length").and_then(Value::as_f64);

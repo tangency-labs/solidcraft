@@ -1,0 +1,34 @@
+{
+  "cases": [
+    {
+      "fuzz": {
+        "base": "extended_sphere_outset",
+        "mutations": ["/config/member_approx_tol = -1e-300"],
+        "seed": 18246873986750999509
+      },
+      "inputs": {
+        "config": {
+          "create_offset_solid": true,
+          "extend_convex": true,
+          "inset": false,
+          "member_approx_tol": -1e-300,
+          "member_distance": 0.4,
+          "merge_results": false
+        },
+        "operation": "extended",
+        "source": {
+          "kind": "sphere",
+          "origin": [0.5, 1, -1],
+          "radius": 2.5
+        },
+        "tolerance": 1e-6
+      },
+      "name": "fuzz00167"
+    }
+  ],
+  "fuzz_failure": {
+    "case": "fuzz00167",
+    "detail": "cpp: killed by signal 11",
+    "verdict": "crash"
+  }
+}

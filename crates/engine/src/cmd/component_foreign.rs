@@ -25,9 +25,10 @@ pub(super) fn paste_from_design(s: &mut Session, p: &Value) -> Result<Value> {
     let path = match given {
         Some(path) => path,
         None if to == s.active_component => s.active_occurrence_path.clone().unwrap_or_else(|| s.doc.first_path(to)),
-        None => placing::placement_of(s, &s.placed_document(), to, None, "component_path", cmd)?.0,
+        None => placing::placement_of(s, &s.design_document(), to, None, "component_path", cmd)?.0,
     };
-    let frame = s.placed_document().path_transform(to, &path).ok_or_else(|| bad(cmd, "that path is not a placement of the target"))?;
+    // The target as the design places it, without an exploded view shown.
+    let frame = s.design_document().path_transform(to, &path).ok_or_else(|| bad(cmd, "that path is not a placement of the target"))?;
     let into_target = solidcraft_doc::mat_inverse(&frame).ok_or_else(|| bad(cmd, "the target's frame is not invertible"))?;
     if copy.bodies.is_empty() {
         return paste_components(s, &copy, to, path, into_target, p);

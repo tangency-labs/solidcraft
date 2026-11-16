@@ -6,6 +6,7 @@
   {"expect": {"home": true, "prefs": {"dialog": "Assistant"}}},
   {"until": {"not_shown": "Looking for agents…"}},
   {"expect": {"shown": "Add agent…"}},
-  {"click": {"handle": "prefs:ai_add"}},
+  {"note": "An installed agent's card pushes Add agent below the visible page (#12354): the widget step scrolls it into view before clicking."},
+  {"widget": "Add agent…"},
   {"until": {"shown_handles": ["ai_add:add"], "shown": "Add agent"}}
 ]

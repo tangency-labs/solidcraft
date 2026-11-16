@@ -319,7 +319,7 @@ pub fn scope_targets(app: &SolveApp, d: &Dialog, cmds: &mut [(String, Value)]) -
             continue;
         }
         if shown.is_empty() {
-            return Err(crate::i18n::tr("dialog.no_shown_body").to_string());
+            return Err(solidcraft_ui_text::tr("dialog.no_shown_body").to_string());
         }
         if let Some(map) = p.as_object_mut() {
             map.insert("targets".into(), Value::from(shown.clone()));

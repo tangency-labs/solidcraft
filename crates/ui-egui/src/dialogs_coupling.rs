@@ -16,10 +16,10 @@ use crate::SolveApp;
 use crate::dialogs::{field, form_row};
 use crate::dialogs_assembly::Asm;
 use crate::selection::{EDGES, FACES, SelInput};
-use crate::theme::Tokens;
+use solidcraft_theme::Tokens;
 
 /// What a round-face input takes: a face, or an edge of one.
-const ROUND: u16 = FACES | EDGES;
+const ROUND: crate::selection::Accept = FACES | EDGES;
 
 #[derive(Clone, Debug)]
 pub struct CouplingForm {
@@ -38,6 +38,8 @@ pub struct CouplingForm {
     pub animate: bool,
     /// Animation phase, 0…1.
     pub phase: f64,
+    /// Editing motion link this instead of adding a new one (#6825).
+    pub editing: Option<usize>,
 }
 
 /// Joints with a value that turns (`turn`) or slides: (id, label).
@@ -88,7 +90,7 @@ pub fn start(app: &SolveApp, id: &str) -> Option<(Asm, Vec<SelInput>)> {
         }
         _ => return None,
     };
-    let f = CouplingForm { command, a, b, sizes, internal: false, reverse: false, picked: [None, None], animate: false, phase: 0.0 };
+    let f = CouplingForm { command, a, b, sizes, internal: false, reverse: false, picked: [None, None], animate: false, phase: 0.0, editing: None };
     Some((Asm::Coupling(Box::new(f)), inputs))
 }
 
@@ -160,11 +162,11 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, f: &mut CouplingForm, inputs:
         form_row(ui, label, |ui| {
             match (pick(inputs, i), picked_radius(s, inputs, i)) {
                 (_, Some(r)) => {
-                    ui.label(format!("{} mm  ({})", trim(r), crate::i18n::tr_label("picked")));
+                    ui.label(format!("{} mm  ({})", trim(r), solidcraft_ui_text::tr_label("picked")));
                 }
                 // A pick on a flat face or a straight edge has no radius: say so rather than fail on OK.
                 (Some(_), None) => {
-                    ui.label(RichText::new(crate::i18n::tr_label("not a round face")).color(t.warning));
+                    ui.label(RichText::new(solidcraft_ui_text::tr_label("not a round face")).color(t.warning));
                 }
                 (None, None) => *enter |= field(ui, text),
             }
@@ -205,9 +207,9 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, f: &mut CouplingForm, inputs:
         ui.label(RichText::new(shown.unwrap_or_else(|| "-".into())).color(t.text_dim));
     });
     form_row(ui, "Animate", |ui| {
-        let label = crate::i18n::tr(if f.animate { "ui.joint_stop" } else { "ui.joint_play" });
+        let label = solidcraft_ui_text::tr(if f.animate { "ui.joint_stop" } else { "ui.joint_play" });
         let r = crate::ui_kit::button(ui, label, crate::ui_kit::Button::Normal)
-            .backing_on_hover_text(crate::i18n::tr_label("Play the joint's motion in the view"));
+            .backing_on_hover_text(solidcraft_ui_text::tr_label("Play the joint's motion in the view"));
         crate::scenario::publish_handle("dialog:Animate", r.rect.center());
         if r.clicked() {
             f.animate = !f.animate;
@@ -254,6 +256,20 @@ pub fn commands(app: &SolveApp, f: &CouplingForm, inputs: &[SelInput]) -> Result
         _ => json!({"a": a, "b": b, "pitch": f.sizes[0].trim()}),
     };
     p["reverse"] = json!(f.reverse);
+    // When editing, a size left out of the box means "keep the old one" (a picked round face
+    // included), so send no key at all rather than an empty one (#6825).
+    if f.editing.is_some()
+        && let Some(obj) = p.as_object_mut()
+    {
+        for k in ["ra", "rb", "radius", "pitch"] {
+            if obj.get(k).and_then(Value::as_str).is_some_and(|t| t.trim().is_empty()) {
+                obj.remove(k);
+            }
+        }
+    }
+    if let Some(index) = f.editing {
+        p["link"] = json!(index);
+    }
     Ok(vec![(f.command.to_string(), p)])
 }
 

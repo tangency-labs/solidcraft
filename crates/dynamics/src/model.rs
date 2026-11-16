@@ -141,10 +141,172 @@ pub struct Joint {
     pub b: Marker,
 }
 
-/// A force element.
+/// One value of a joint: `dof` indexes [`JointKind::values`]. Revolute, slider, cylindrical
+/// and planar joints have values that springs, motors, drives and links can act on; ball and
+/// rigid joints have none.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Coord {
+    pub joint: usize,
+    #[serde(default)]
+    pub dof: usize,
+}
+
+impl Coord {
+    pub fn new(joint: usize, dof: usize) -> Coord {
+        Coord { joint, dof }
+    }
+}
+
+/// Points a table may hold at most.
+pub const MAX_PROFILE_POINTS: usize = 10_000;
+
+/// A value along time (s): a motor's torque or force, or the value a drive imposes (radians,
+/// mm).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum Profile {
+    Constant {
+        value: f64,
+    },
+    /// `value + rate·t`.
+    Linear {
+        value: f64,
+        rate: f64,
+    },
+    /// From `from` to `to` between `start` and `start + duration`, along a cycloidal step
+    /// (`τ − sin(2πτ)/2π`) whose speed and acceleration both start and end at zero.
+    Ramp {
+        from: f64,
+        to: f64,
+        #[serde(default)]
+        start: f64,
+        duration: f64,
+    },
+    /// `offset + amplitude·sin(2π·frequency·t + phase)` (frequency in Hz).
+    Harmonic {
+        #[serde(default)]
+        offset: f64,
+        amplitude: f64,
+        frequency: f64,
+        #[serde(default)]
+        phase: f64,
+    },
+    /// (time, value) points, times increasing: linear in between, held before the first and
+    /// after the last. As a drive its speed jumps at the points (its acceleration is taken as 0).
+    Table {
+        points: Vec<(f64, f64)>,
+    },
+}
+
+impl Profile {
+    /// The value and its first and second time derivatives at `t`.
+    pub fn eval(&self, t: f64) -> (f64, f64, f64) {
+        match self {
+            Profile::Constant { value } => (*value, 0.0, 0.0),
+            Profile::Linear { value, rate } => (value + rate * t, *rate, 0.0),
+            Profile::Ramp { from, to, start, duration } => {
+                let tau = (t - start) / duration;
+                if !(tau > 0.0) {
+                    return (*from, 0.0, 0.0);
+                }
+                if tau >= 1.0 {
+                    return (*to, 0.0, 0.0);
+                }
+                let span = to - from;
+                let (s, c) = (std::f64::consts::TAU * tau).sin_cos();
+                (
+                    from + span * (tau - s / std::f64::consts::TAU),
+                    span / duration * (1.0 - c),
+                    span / (duration * duration) * std::f64::consts::TAU * s,
+                )
+            }
+            Profile::Harmonic { offset, amplitude, frequency, phase } => {
+                let w = std::f64::consts::TAU * frequency;
+                let (s, c) = (w * t + phase).sin_cos();
+                (offset + amplitude * s, amplitude * w * c, -amplitude * w * w * s)
+            }
+            Profile::Table { points } => {
+                let (Some(first), Some(last)) = (points.first(), points.last()) else { return (0.0, 0.0, 0.0) };
+                if t <= first.0 {
+                    return (first.1, 0.0, 0.0);
+                }
+                if t >= last.0 {
+                    return (last.1, 0.0, 0.0);
+                }
+                points
+                    .windows(2)
+                    .find_map(|w| {
+                        let (a, b) = (w.first()?, w.get(1)?);
+                        (t >= a.0 && t < b.0).then(|| {
+                            let slope = (b.1 - a.1) / (b.0 - a.0);
+                            (a.1 + slope * (t - a.0), slope, 0.0)
+                        })
+                    })
+                    .unwrap_or((last.1, 0.0, 0.0))
+            }
+        }
+    }
+
+    fn validate(&self) -> std::result::Result<(), String> {
+        let fin = |x: f64| x.is_finite() && x.abs() < MAX_MAGNITUDE;
+        let ok = match self {
+            Profile::Constant { value } => fin(*value),
+            Profile::Linear { value, rate } => fin(*value) && fin(*rate),
+            Profile::Ramp { from, to, start, duration } => fin(*from) && fin(*to) && fin(*start) && fin(*duration) && *duration > 1e-9,
+            Profile::Harmonic { offset, amplitude, frequency, phase } => {
+                fin(*offset) && fin(*amplitude) && fin(*frequency) && fin(*phase) && frequency.abs() < 1e6
+            }
+            Profile::Table { points } => {
+                if points.is_empty() || points.len() > MAX_PROFILE_POINTS {
+                    return Err(format!("a table needs 1 to {MAX_PROFILE_POINTS} points"));
+                }
+                points.iter().all(|(t, v)| fin(*t) && fin(*v))
+                    && points.windows(2).all(|w| matches!((w.first(), w.get(1)), (Some(a), Some(b)) if b.0 > a.0))
+            }
+        };
+        if ok { Ok(()) } else { Err("a profile's numbers must be finite (ramps need a duration, tables increasing times)".into()) }
+    }
+}
+
+/// A joint value made to follow a profile along time (radians or mm): the joint turns or
+/// slides as told, whatever it takes; [`crate::Sample::drives`] reports what it takes.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Drive {
+    pub at: Coord,
+    pub motion: Profile,
+}
+
+/// A motion link: `follower = ratio·driver + offset`, between values of two joints (a gear
+/// pair: angle to angle; a rack and pinion: angle to distance, the ratio being the pinion's
+/// radius; a screw: angle to distance along the same cylindrical joint, the ratio being
+/// pitch / 2π). Without an offset, the one that holds at the start is kept.
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Link {
+    pub driver: Coord,
+    pub follower: Coord,
+    pub ratio: f64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub offset: Option<f64>,
+}
+
+/// A force element.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum Force {
+    /// A spring and damper on a joint value: the joint is pushed back by
+    /// `stiffness·(value − rest) + damping·rate` (torsional for an angle: mN·mm per radian and
+    /// mN·mm·s; linear for a distance: kg/s² and kg/s).
+    JointSpring {
+        at: Coord,
+        stiffness: f64,
+        #[serde(default)]
+        damping: f64,
+        #[serde(default)]
+        rest: f64,
+    },
+    /// A motor's torque (mN·mm) or force (mN) along a joint value, following a profile: it
+    /// pushes B's side forward and A's side back.
+    Motor { at: Coord, effort: Profile },
     /// A linear spring and damper between two points: the tension is
     /// `stiffness·(length − free_length) + damping·(rate of length) + preload`.
     Spring {
@@ -243,6 +405,10 @@ pub struct Model {
     pub joints: Vec<Joint>,
     #[serde(default)]
     pub forces: Vec<Force>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub drives: Vec<Drive>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub links: Vec<Link>,
     /// Gravity (mm/s²), e.g. `(0, 0, −9806.65)`.
     #[serde(default)]
     pub gravity: Vec3,
@@ -282,7 +448,10 @@ impl Model {
         if self.forces.len() > MAX_FORCES {
             return Err(DynamicsError::TooLarge(format!("{} force elements (at most {MAX_FORCES})", self.forces.len())));
         }
-        let rows: usize = self.joints.iter().map(|j| j.kind.equations()).sum();
+        if self.drives.len() > MAX_JOINTS || self.links.len() > MAX_JOINTS {
+            return Err(DynamicsError::TooLarge(format!("drives and links: at most {MAX_JOINTS} each")));
+        }
+        let rows: usize = self.joints.iter().map(|j| j.kind.equations()).sum::<usize>() + self.drives.len() + self.links.len();
         if rows > MAX_CONSTRAINT_ROWS {
             return Err(DynamicsError::TooLarge(format!("{rows} constraint equations (at most {MAX_CONSTRAINT_ROWS})")));
         }
@@ -339,7 +508,45 @@ impl Model {
                         return Err(bad(format!("force {i}: point, force and torque must be finite")));
                     }
                 }
+                Force::JointSpring { at, stiffness, damping, rest } => {
+                    self.check_coord(*at).map_err(|e| bad(format!("force {i}: {e}")))?;
+                    let ok = |x: f64| (0.0..MAX_MAGNITUDE).contains(&x);
+                    if !ok(*stiffness) || !ok(*damping) || !rest.is_finite() || rest.abs() >= MAX_MAGNITUDE {
+                        return Err(bad(format!("force {i}: stiffness and damping must be ≥ 0 and finite, rest finite")));
+                    }
+                }
+                Force::Motor { at, effort } => {
+                    self.check_coord(*at).map_err(|e| bad(format!("force {i}: {e}")))?;
+                    effort.validate().map_err(|e| bad(format!("force {i}: {e}")))?;
+                }
             }
+        }
+        for (i, d) in self.drives.iter().enumerate() {
+            self.check_coord(d.at).map_err(|e| bad(format!("drive {i}: {e}")))?;
+            d.motion.validate().map_err(|e| bad(format!("drive {i}: {e}")))?;
+        }
+        for (i, l) in self.links.iter().enumerate() {
+            self.check_coord(l.driver).map_err(|e| bad(format!("link {i}: {e}")))?;
+            self.check_coord(l.follower).map_err(|e| bad(format!("link {i}: {e}")))?;
+            if l.driver == l.follower {
+                return Err(bad(format!("link {i}: a value can't drive itself")));
+            }
+            let fin = |x: f64| x.is_finite() && x.abs() < MAX_MAGNITUDE;
+            if !fin(l.ratio) || !l.offset.is_none_or(fin) {
+                return Err(bad(format!("link {i}: ratio and offset must be finite")));
+            }
+        }
+        Ok(())
+    }
+
+    /// The joint and value a [`Coord`] names, if they exist and can be acted on.
+    fn check_coord(&self, c: Coord) -> std::result::Result<(), String> {
+        let j = self.joints.get(c.joint).ok_or_else(|| format!("no joint {}", c.joint))?;
+        if matches!(j.kind, JointKind::Ball | JointKind::Rigid) {
+            return Err(format!("joint {}: not supported yet: springs, motors, drives and links on {:?} joints", c.joint, j.kind));
+        }
+        if c.dof >= j.kind.values().len() {
+            return Err(format!("joint {} has no value {}", c.joint, c.dof));
         }
         Ok(())
     }

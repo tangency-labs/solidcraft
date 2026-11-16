@@ -1,0 +1,88 @@
+{
+ "issue": "https://github.com/tangency-labs/solidcraft/issues/3170",
+ "pr": "https://github.com/tangency-labs/solidcraft/pull/3472",
+ "test": "crates/doc/src/sheet.rs: overlapping_corners_keep_surface_clearance_and_flat_material",
+ "summary": "Port of the original 16-case regression, not a replacement by pre-trimmed boxes. Four inside flanges on a 120 x 90 mm XY base are joined at the front/left corner. The original alu rule is thickness 2, radius 1, K 0.5, notch relief 2 x 1, corner relief 8 and gap 0.5 mm. Covering/covered end distances are measured at both thickness faces against the neighbour's signed inner plane. Every case requires a valid folded solid, exactly one non-overlapping flat region, changed flat area after closing the corner, and abs(volume - flat_area * thickness) < volume * 1e-3. Sheet construction, corner joining and unfolding have no harness adapter yet; these cases must defer, never pass on volume or lump count alone.",
+ "cases": [
+  {
+   "name": "positive_90_partial_front_covers",
+   "steps": [{"op":"sheet_corner","id":"result","base_size":[120,90],"thickness":2,"bend_radius":1,"k_factor":0.5,"height":38.6,"angle_degrees":90,"gap":0.5,"relief_size":[2,1],"corner_relief":8,"covering":0,"overlap":1}],
+   "expect": {"sheet_corner":{"end_face_distances":[-1,0.5],"distance_tol":1e-9,"flat_regions":1,"volume_relative_tol":1e-3}}
+  },
+  {
+   "name": "positive_90_partial_left_covers",
+   "steps": [{"op":"sheet_corner","id":"result","base_size":[120,90],"thickness":2,"bend_radius":1,"k_factor":0.5,"height":38.6,"angle_degrees":90,"gap":0.5,"relief_size":[2,1],"corner_relief":8,"covering":3,"overlap":1}],
+   "expect": {"sheet_corner":{"end_face_distances":[0.5,-1],"distance_tol":1e-9,"flat_regions":1,"volume_relative_tol":1e-3}}
+  },
+  {
+   "name": "positive_90_full_front_covers",
+   "steps": [{"op":"sheet_corner","id":"result","base_size":[120,90],"thickness":2,"bend_radius":1,"k_factor":0.5,"height":38.6,"angle_degrees":90,"gap":0.5,"relief_size":[2,1],"corner_relief":8,"covering":0,"overlap":2}],
+   "expect": {"sheet_corner":{"end_face_distances":[-2,0.5],"distance_tol":1e-9,"flat_regions":1,"volume_relative_tol":1e-3}}
+  },
+  {
+   "name": "positive_90_full_left_covers",
+   "steps": [{"op":"sheet_corner","id":"result","base_size":[120,90],"thickness":2,"bend_radius":1,"k_factor":0.5,"height":38.6,"angle_degrees":90,"gap":0.5,"relief_size":[2,1],"corner_relief":8,"covering":3,"overlap":2}],
+   "expect": {"sheet_corner":{"end_face_distances":[0.5,-2],"distance_tol":1e-9,"flat_regions":1,"volume_relative_tol":1e-3}}
+  },
+  {
+   "name": "positive_72_partial_front_covers",
+   "steps": [{"op":"sheet_corner","id":"result","base_size":[120,90],"thickness":2,"bend_radius":1,"k_factor":0.5,"height":38.6,"angle_degrees":72,"gap":0.5,"relief_size":[2,1],"corner_relief":8,"covering":0,"overlap":1}],
+   "expect": {"sheet_corner":{"end_face_distances":[-1,0.5],"distance_tol":1e-9,"flat_regions":1,"volume_relative_tol":1e-3}}
+  },
+  {
+   "name": "positive_72_partial_left_covers",
+   "steps": [{"op":"sheet_corner","id":"result","base_size":[120,90],"thickness":2,"bend_radius":1,"k_factor":0.5,"height":38.6,"angle_degrees":72,"gap":0.5,"relief_size":[2,1],"corner_relief":8,"covering":3,"overlap":1}],
+   "expect": {"sheet_corner":{"end_face_distances":[0.5,-1],"distance_tol":1e-9,"flat_regions":1,"volume_relative_tol":1e-3}}
+  },
+  {
+   "name": "positive_72_full_front_covers",
+   "steps": [{"op":"sheet_corner","id":"result","base_size":[120,90],"thickness":2,"bend_radius":1,"k_factor":0.5,"height":38.6,"angle_degrees":72,"gap":0.5,"relief_size":[2,1],"corner_relief":8,"covering":0,"overlap":2}],
+   "expect": {"sheet_corner":{"end_face_distances":[-2,0.5],"distance_tol":1e-9,"flat_regions":1,"volume_relative_tol":1e-3}}
+  },
+  {
+   "name": "positive_72_full_left_covers",
+   "steps": [{"op":"sheet_corner","id":"result","base_size":[120,90],"thickness":2,"bend_radius":1,"k_factor":0.5,"height":38.6,"angle_degrees":72,"gap":0.5,"relief_size":[2,1],"corner_relief":8,"covering":3,"overlap":2}],
+   "expect": {"sheet_corner":{"end_face_distances":[0.5,-2],"distance_tol":1e-9,"flat_regions":1,"volume_relative_tol":1e-3}}
+  },
+  {
+   "name": "negative_90_partial_front_covers",
+   "steps": [{"op":"sheet_corner","id":"result","base_size":[120,90],"thickness":2,"bend_radius":1,"k_factor":0.5,"height":38.6,"angle_degrees":-90,"gap":0.5,"relief_size":[2,1],"corner_relief":8,"covering":0,"overlap":1}],
+   "expect": {"sheet_corner":{"end_face_distances":[-1,0.5],"distance_tol":1e-9,"flat_regions":1,"volume_relative_tol":1e-3}}
+  },
+  {
+   "name": "negative_90_partial_left_covers",
+   "steps": [{"op":"sheet_corner","id":"result","base_size":[120,90],"thickness":2,"bend_radius":1,"k_factor":0.5,"height":38.6,"angle_degrees":-90,"gap":0.5,"relief_size":[2,1],"corner_relief":8,"covering":3,"overlap":1}],
+   "expect": {"sheet_corner":{"end_face_distances":[0.5,-1],"distance_tol":1e-9,"flat_regions":1,"volume_relative_tol":1e-3}}
+  },
+  {
+   "name": "negative_90_full_front_covers",
+   "steps": [{"op":"sheet_corner","id":"result","base_size":[120,90],"thickness":2,"bend_radius":1,"k_factor":0.5,"height":38.6,"angle_degrees":-90,"gap":0.5,"relief_size":[2,1],"corner_relief":8,"covering":0,"overlap":2}],
+   "expect": {"sheet_corner":{"end_face_distances":[-2,0.5],"distance_tol":1e-9,"flat_regions":1,"volume_relative_tol":1e-3}}
+  },
+  {
+   "name": "negative_90_full_left_covers",
+   "steps": [{"op":"sheet_corner","id":"result","base_size":[120,90],"thickness":2,"bend_radius":1,"k_factor":0.5,"height":38.6,"angle_degrees":-90,"gap":0.5,"relief_size":[2,1],"corner_relief":8,"covering":3,"overlap":2}],
+   "expect": {"sheet_corner":{"end_face_distances":[0.5,-2],"distance_tol":1e-9,"flat_regions":1,"volume_relative_tol":1e-3}}
+  },
+  {
+   "name": "negative_72_partial_front_covers",
+   "steps": [{"op":"sheet_corner","id":"result","base_size":[120,90],"thickness":2,"bend_radius":1,"k_factor":0.5,"height":38.6,"angle_degrees":-72,"gap":0.5,"relief_size":[2,1],"corner_relief":8,"covering":0,"overlap":1}],
+   "expect": {"sheet_corner":{"end_face_distances":[-1,0.5],"distance_tol":1e-9,"flat_regions":1,"volume_relative_tol":1e-3}}
+  },
+  {
+   "name": "negative_72_partial_left_covers",
+   "steps": [{"op":"sheet_corner","id":"result","base_size":[120,90],"thickness":2,"bend_radius":1,"k_factor":0.5,"height":38.6,"angle_degrees":-72,"gap":0.5,"relief_size":[2,1],"corner_relief":8,"covering":3,"overlap":1}],
+   "expect": {"sheet_corner":{"end_face_distances":[0.5,-1],"distance_tol":1e-9,"flat_regions":1,"volume_relative_tol":1e-3}}
+  },
+  {
+   "name": "negative_72_full_front_covers",
+   "steps": [{"op":"sheet_corner","id":"result","base_size":[120,90],"thickness":2,"bend_radius":1,"k_factor":0.5,"height":38.6,"angle_degrees":-72,"gap":0.5,"relief_size":[2,1],"corner_relief":8,"covering":0,"overlap":2}],
+   "expect": {"sheet_corner":{"end_face_distances":[-2,0.5],"distance_tol":1e-9,"flat_regions":1,"volume_relative_tol":1e-3}}
+  },
+  {
+   "name": "negative_72_full_left_covers",
+   "steps": [{"op":"sheet_corner","id":"result","base_size":[120,90],"thickness":2,"bend_radius":1,"k_factor":0.5,"height":38.6,"angle_degrees":-72,"gap":0.5,"relief_size":[2,1],"corner_relief":8,"covering":3,"overlap":2}],
+   "expect": {"sheet_corner":{"end_face_distances":[0.5,-2],"distance_tol":1e-9,"flat_regions":1,"volume_relative_tol":1e-3}}
+  }
+ ]
+}

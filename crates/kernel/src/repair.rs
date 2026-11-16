@@ -256,7 +256,7 @@ fn rebuild_refused(record: &mut Brep, report: &mut RepairReport) -> Result<()> {
 /// trims it has no closed form for). The face's edges and loops stay as they were. `None` for a
 /// face on another surface.
 fn rebuilt_face(r: &Brep, f: usize) -> Result<Option<b::Face>> {
-    use solidcraft_geom::brep::pcurve::{TrimEdge, TrimFace, TrimUse, Trims};
+    use solidcore_ops::pcurve::{TrimEdge, TrimFace, TrimUse, Trims};
     let face = r.faces.get(f).ok_or_else(|| invalid(format!("no face {f}")))?;
     if !matches!(face.surface, b::Surface::Cylinder { .. } | b::Surface::Cone { .. } | b::Surface::Sphere { .. } | b::Surface::Torus { .. }) {
         return Ok(None);
@@ -312,7 +312,18 @@ fn rebuilt_face(r: &Brep, f: usize) -> Result<Option<b::Face>> {
         local.iter().filter_map(|&e| r.edges.get(e as usize)).map(|e| e.tolerance).fold(r.tolerance, f64::max),
     )
     .ok_or_else(|| invalid("no NURBS form of its surface over its boundary"))?;
-    let trim = TrimFace { surface: &face.surface, nurbs: Some(&form), domain, edges, vertices: points, loops, tolerance: r.tolerance };
+    // No vertex reach: the repaired face keeps its edges' tolerances, so SMLib may not move an
+    // edge's end farther than they cover.
+    let trim = TrimFace {
+        surface: &face.surface,
+        nurbs: Some(&form),
+        domain,
+        edges,
+        vertices: points,
+        vertex_tolerances: Vec::new(),
+        loops,
+        tolerance: r.tolerance,
+    };
     let pcurves = solidcraft_smlib::pcurves::SmlibTrims.trims(&trim).map_err(KernelError::Failed)?;
     let mut out = face.clone();
     out.nurbs = Some(form);

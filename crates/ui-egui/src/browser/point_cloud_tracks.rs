@@ -5,7 +5,9 @@
 //! for the values the coloured property takes over what is kept: the ramp's automatic range.
 
 use std::collections::HashMap;
-use std::sync::{Arc, Condvar, Mutex};
+#[cfg(not(target_arch = "wasm32"))]
+use std::sync::Condvar;
+use std::sync::{Arc, Mutex};
 
 use egui::Color32;
 use solidcraft_engine::doc::point_cloud::{Filter, PALETTE, PLAIN, PointCloud, byte, height_ramp};
@@ -128,6 +130,8 @@ struct Inner {
 #[derive(Default)]
 struct Shared {
     inner: Mutex<Inner>,
+    /// Wakes the worker thread (the browser build answers on the window thread instead).
+    #[cfg(not(target_arch = "wasm32"))]
     asked: Condvar,
 }
 

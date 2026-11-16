@@ -132,6 +132,74 @@ fn sample_designs_open_from_their_model_as_evaluated() {
     }
 }
 
+/// A cut up to its boss's top face splits that face. Copies need the face point found before
+/// the cut, including after opening from the saved model (#17426).
+#[test]
+fn reopened_patterns_and_mirrors_keep_the_faces_the_source_cut_split() {
+    let pattern = json!({"features":["Boss","Slot"],"dir1":[-1,0,0],"count1":2,"spacing1":40,"name":"Pat"});
+    let spacing = json!({"feature":"Pat","command":"solid.pattern.rectangular","params":{
+        "features":["Boss","Slot"],"dir1":[-1,0,0],"count1":2,"spacing1":45
+    }});
+    for thinned in [false, true] {
+        for (name, command, params) in [
+            ("spacing", "timeline.redefine", spacing.clone()),
+            ("pattern", "solid.pattern.rectangular", pattern.clone()),
+            ("mirror", "solid.mirror", json!({"features":["Boss","Slot"],"plane":"YZ"})),
+        ] {
+            let mut built = Session::default();
+            for (command, params) in [
+                ("solid.box", json!({"length":80,"width":10,"height":10,"corner":[-40,0,-10],"body_name":"Bar"})),
+                ("sketch.create", json!({"plane":"XY","name":"B"})),
+                ("sketch.rectangle.two_point", json!({"p0":[5,0],"p1":[35,10]})),
+                ("sketch.finish", json!({})),
+                ("solid.extrude", json!({"sketch":"B","profiles":[0],"name":"Boss","distance":5,"operation":"join"})),
+                ("sketch.create", json!({"plane":"XY","name":"C"})),
+                ("sketch.rectangle.two_point", json!({"p0":[15,0],"p1":[25,10]})),
+                ("sketch.finish", json!({})),
+                ("solid.extrude", json!({"sketch":"C","profiles":[0],"name":"Slot","to":[20,5,5],"operation":"cut"})),
+            ] {
+                built.execute(command, &params).unwrap();
+            }
+            if name == "spacing" {
+                built.execute("solid.pattern.rectangular", &pattern).unwrap();
+            }
+            let path = temp(&format!("split-face-{name}-{thinned}"));
+            if thinned {
+                let saved = built.model.saved(&built.doc).unwrap();
+                let pieces: Vec<Vec<(usize, usize)>> = (0..saved.bodies.len()).map(|i| vec![(i, 1 << 20)]).collect();
+                let (saved, _, _) = saved.thinned(&pieces, 0).unwrap();
+                assert_eq!(saved.records["states"].as_array().unwrap().len(), 1);
+                let bytes = solidcraft_engine::io::write_design_container_with_cache(
+                    &built.design(),
+                    solidcraft_engine::io::DesignCompression::Fast,
+                    None,
+                    Some(&saved),
+                )
+                .unwrap();
+                std::fs::write(&path, bytes).unwrap();
+            } else {
+                built.execute("file.save_as", &json!({"path":path})).unwrap();
+            }
+            let mut cached = open(&path);
+            if thinned {
+                assert!(cached.model.recomputed > 0, "{name}: states omitted from the cache were rebuilt");
+                assert!(cached.model.recomputed < built.doc.features.len(), "{name}: the saved final state was adopted");
+            } else {
+                assert_eq!(cached.model.last_recomputed, 0, "{name}: the saved model was adopted");
+            }
+            built.execute(command, &params).unwrap();
+            cached.execute(command, &params).unwrap_or_else(|error| panic!("{name}: {error}"));
+            assert_eq!(model(name, &cached), model(name, &built), "{name}: the same edit before and after reopening");
+            let state = cached.model.state();
+            assert_eq!(state.bodies.len(), 1);
+            let volume = solidcraft_engine::kernel::measure(&state.bodies[0].body).unwrap().volume;
+            // Bar + two bosses, each minus its slot: 80*10*10 + 2*(30*10*5 - 10*10*5).
+            assert!((volume - 10_000.0).abs() < 1e-6, "{name}: volume {volume}");
+            std::fs::remove_file(path).unwrap();
+        }
+    }
+}
+
 #[test]
 fn imported_assemblies_open_from_their_model_as_evaluated() {
     // A STEP assembly of the hinge sample: parts placed several times.
@@ -318,7 +386,7 @@ fn a_model_saved_under_another_check_mode_is_evaluated_again() {
 /// opened from its model or evaluated anew. Two edges of a 20 mm box rounded r2 (a mitre at the
 /// corner (20, 0, 20)), saved; opened, the upright edge there rounded r3: the corner all three
 /// rounded at once make (SMLib's setback corner, kernel `three_rounds_at_a_corner`), 15 faces and
-/// 7928.142563938 mm³, the same body as the design evaluated anew.
+/// 7927.72428251348 mm³, the same body as the design evaluated anew.
 #[test]
 fn a_later_round_after_opening_blends_the_saved_rounds_again() {
     let mut built = Session::default();
@@ -336,7 +404,7 @@ fn a_later_round_after_opening_blends_the_saved_rounds_again() {
         let b = &st.body("Box").unwrap().body;
         let v = solidcraft_engine::kernel::measure(b).unwrap().volume;
         assert_eq!(b.face_count(), 15);
-        assert!((v - 7928.142563938).abs() < 1e-6, "{v}");
+        assert!((v - 7927.72428251348).abs() < 1e-6, "{v}"); // solidcore#2382's setback corner
     }
     assert_eq!(model("later round", &cached), model("later round", &rebuilt));
     let _ = std::fs::remove_file(&path);

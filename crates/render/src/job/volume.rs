@@ -144,3 +144,46 @@ mod tests {
         assert!(serde_json::from_str::<HomogeneousVolume>(r#"{"density_grid":"arbitrary"}"#).is_err());
     }
 }
+
+#[cfg(test)]
+mod cpu_contract_tests {
+    use super::*;
+    use crate::job::{CpuPathOptions, CpuProgressiveOptions, RaytraceOptions};
+    #[test]
+    fn cpu_atmosphere_preserves_typed_bounds_zero_and_explicit_incompatible_intent() {
+        let v = HomogeneousVolume {
+            min_mm: [-2.0, -3.0, -4.0],
+            max_mm: [5.0, 6.0, 7.0],
+            extinction_per_mm: 0.2,
+            scattering_albedo: [0.1, 0.3, 0.7],
+            anisotropy: -0.4,
+        };
+        let mut options = RaytraceOptions {
+            volume: Some(v),
+            path: Some(CpuPathOptions { max_depth: 4 }),
+            progressive: Some(CpuProgressiveOptions { samples_per_pixel: 4, seed: 9 }),
+            ..Default::default()
+        };
+        options.validate().unwrap();
+        let saved = serde_json::to_value(&options).unwrap();
+        assert_eq!(serde_json::from_value::<RaytraceOptions>(saved.clone()).unwrap(), options);
+        options.denoise = true;
+        assert!(options.validate().unwrap_err().message.contains("Denoise"));
+        assert_eq!(options.volume, Some(v));
+        options.denoise = false;
+        options.path = None;
+        assert!(options.validate().unwrap_err().message.contains("Indirect lighting"));
+        options.volume.as_mut().unwrap().extinction_per_mm = 0.0;
+        options.denoise = true;
+        options.validate().unwrap();
+        assert_eq!(options.retained_volume_bytes().unwrap(), 0, "authored inactive intent owns no additional allocation");
+        assert_eq!(saved["volume"]["anisotropy"], -0.4);
+        for key in ["min_mm", "max_mm", "scattering_albedo"] {
+            let mut bad = saved.clone();
+            bad["volume"][key] = serde_json::json!([1, 2]);
+            assert!(serde_json::from_value::<RaytraceOptions>(bad).is_err());
+        }
+        assert!(serde_json::from_value::<RaytraceOptions>(serde_json::json!({"volume":{"density_grid":"hidden"}})).is_err());
+        assert!(serde_json::to_value(RaytraceOptions::default()).unwrap().get("volume").is_none());
+    }
+}

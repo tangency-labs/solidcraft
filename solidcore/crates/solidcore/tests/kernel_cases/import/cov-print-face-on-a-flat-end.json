@@ -1,0 +1,105 @@
+{
+  "area": "import",
+  "bodies": {},
+  "calls": [
+    {
+      "inputs": [],
+      "op": "extrude",
+      "outputs": [
+        "b1"
+      ],
+      "params": {
+        "cap": true,
+        "corner": "curvature",
+        "direction": [
+          0.0,
+          0.0,
+          1.0
+        ],
+        "distance": 20.0,
+        "draft": 0.0,
+        "profile": [
+          {
+            "arc": {
+              "axis": [
+                0.0,
+                0.0,
+                1.0
+              ],
+              "center": [
+                0.0,
+                0.0,
+                0.0
+              ],
+              "end": 6.896285307179586,
+              "radius": 10.0,
+              "reference": [
+                1.0,
+                0.0,
+                0.0
+              ],
+              "start": 0.6131
+            }
+          }
+        ]
+      }
+    }
+  ],
+  "case": "cov-print-face-on-a-flat-end",
+  "expected": {
+    "body_count": 1,
+    "faces": 3,
+    "method": "(3,4,20) is on the top end of the cylinder r 10, h 20 about z: a flat face, so it is marked, and the body is unchanged: V = pi*100*20 = 6283.1853, 3 faces",
+    "results": [
+      {
+        "json": {
+          "body": "Peg"
+        },
+        "step": 2
+      }
+    ],
+    "source": "analytic",
+    "sources": [],
+    "volume_mm3": 6283.185307,
+    "what": "a cylinder's flat end marked as the face a slicer export lays it on"
+  },
+  "expressible": false,
+  "operation_expressible": true,
+  "outcome": {
+    "ran": true,
+    "raw_counts": {
+      "edges": 3,
+      "faces": 3,
+      "vertices": 2
+    }
+  },
+  "result": [
+    {
+      "body": "Peg",
+      "made": "b1"
+    }
+  ],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": {
+      "area_mm2": 1884.9555921603364,
+      "body_count": 1,
+      "edges": 3,
+      "faces": 3,
+      "vertices": 2,
+      "volume_mm3": 6283.18530724481
+    },
+    "refused_with": null,
+    "status": "pass"
+  },
+  "sources": [],
+  "traced_ops": [
+    "extrude"
+  ],
+  "ungraded": [
+    "results: SolidCraft computes it"
+  ],
+  "what": "a cylinder's flat end marked as the face a slicer export lays it on",
+  "why_not": []
+}

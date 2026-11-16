@@ -263,6 +263,8 @@ impl Value {
             _ => {
                 let hint = if k == Kind::Unitless && self.len == 1 && self.ang == 0 {
                     " (a count needs a unit-less value: divide by a length, e.g. `floor(L / (210 mm))`)"
+                } else if k == Kind::Length && self.len > 1 && self.ang == 0 {
+                    " (a length needs a 1D value: divide by a length, e.g. `(L * L) / (1 mm)`, or set the parameter's Unit to none in Parameters)"
                 } else {
                     ""
                 };
@@ -631,11 +633,12 @@ pub fn is_literal(s: &str) -> bool {
     }
 }
 
-/// Is the expression a bare number without a unit, like `20` or `-1.5`? A leading `=` only marks
+/// Is the expression a bare number without a unit, like `20`, `-1.5` or `2,5`? A leading `=` only marks
 /// a formula (#4681), so `=20` is the same bare number.
 pub fn is_bare_number(s: &str) -> bool {
-    let number = s.trim().strip_prefix('=').unwrap_or(s);
-    is_literal(s) && number.trim().trim_start_matches(['-', '+']).trim().parse::<f64>().is_ok()
+    // One number token, as the lexer reads it, so a decimal comma (`2,5`) and a mixed number
+    // (`2 1/8`) count like `2.5` and `2.125`.
+    is_literal(s) && lex(s).is_ok_and(|toks| matches!(toks.as_slice(), [Tok::Num(_)] | [Tok::Op('-' | '+'), Tok::Num(_)]))
 }
 
 /// Is `s` shaped like a parameter name: a letter or `_`, then letters, digits and `_`? The shape
@@ -897,6 +900,15 @@ fn modulo(a: Value, b: Value, d: Defaults) -> Result<Value, DocError> {
     if y == 0.0 {
         return Err(DocError::Expr("modulo by zero".into()));
     }
+    // Unit conversion leaves the quotient an ulp or two off a whole number (`3 in % 1 in` divides
+    // 76.2 mm by 25.4 mm), and the exact remainder is then almost a whole divisor instead of 0. A
+    // quotient that close to a whole number is that number, so the remainder is 0. Past 1e12 the
+    // quotient has no fraction left to judge, so the exact remainder stands.
+    let q = x / y;
+    let nearest = q.round();
+    if nearest != 0.0 && nearest.abs() < 1e12 && (q - nearest).abs() <= 4.0 * f64::EPSILON * nearest.abs() {
+        return Ok(Value { v: 0.0, len, ang });
+    }
     Ok(Value { v: x.rem_euclid(y), len, ang })
 }
 
@@ -982,6 +994,12 @@ fn call(f: &str, args: &[Value], d: Defaults) -> Result<Value, DocError> {
             // Round in the value's own default unit (round(2.4 in) = 2 in for an inch parameter).
             let scale = scale_bare(Value::num(1.0), a.len, a.ang, d);
             let x = if scale != 0.0 { a.v / scale } else { a.v };
+            // Unit conversions leave a rounding error of an ulp or two (`3 in / 1 in` is
+            // 2.9999999999999996): a value that close to a whole number is that number, so `floor`
+            // does not drop to 2. The tolerance is relative to the whole number, so a tiny value
+            // never snaps to 0, and it stays under 1/8 so no real fraction is absorbed.
+            let nearest = x.round();
+            let x = if (x - nearest).abs() <= (4.0 * f64::EPSILON * nearest.abs()).min(0.125) { nearest } else { x };
             let r = match f {
                 "floor" => x.floor(),
                 "ceil" => x.ceil(),
@@ -1444,6 +1462,43 @@ mod tests {
         }
     }
 
+    /// `floor`, `ceil`, `trunc` and `round` work on the number a person typed, not on float noise:
+    /// `3 in / 1 in` is 2.9999999999999996 in floats, and `floor` of it must still be 3.
+    #[test]
+    fn rounding_functions_ignore_float_noise() {
+        for (e, want) in [("floor(3 in / 1 in)", 3.0), ("ceil(3 in / 1 in)", 3.0), ("trunc(3 in / 1 in)", 3.0), ("floor(-3 in / 1 in)", -3.0)] {
+            assert_eq!(ev(e, Kind::Unitless).unwrap(), want, "{e}");
+        }
+        let d = Defaults { len: 25.4, ang: std::f64::consts::PI / 180.0 };
+        let look = |_: &str| Err(DocError::Expr("no parameters".into()));
+        for e in ["floor(3 in)", "ceil(3 in)", "trunc(3 in)", "round(3 in)"] {
+            let got = eval_with_defaults(e, &look, d).unwrap().to_kind_in(Kind::Length, d).unwrap();
+            assert!((got - 76.2).abs() < 1e-9, "{e} gave {got}");
+        }
+        let got = eval_with_defaults("floor(30 deg)", &look, Defaults::default()).unwrap().to_kind(Kind::Angle).unwrap();
+        assert!((got - 30f64.to_radians()).abs() < 1e-9, "floor(30 deg) gave {got}");
+        // A real fraction still rounds the way its name says, however small, and large values keep working.
+        for (e, want) in [
+            ("floor(2.9999)", 2.0),
+            ("ceil(3.0001)", 4.0),
+            ("floor(100.99999995)", 100.0),
+            ("ceil(100.00000005)", 101.0),
+            ("floor(1000000000.7)", 1_000_000_000.0),
+            ("ceil(1000000000.7)", 1_000_000_001.0),
+            ("trunc(1000000000.7)", 1_000_000_000.0),
+            ("round(1000000000.7)", 1_000_000_001.0),
+            ("ceil(1e-16)", 1.0),
+            ("floor(-1e-16)", -1.0),
+            ("trunc(1e-16)", 0.0),
+            ("trunc(-1e-16)", 0.0),
+            ("round(1e-16)", 0.0),
+            ("round(-1e-16)", 0.0),
+            ("floor(1000000000000000.5)", 1_000_000_000_000_000.0),
+        ] {
+            assert_eq!(ev(e, Kind::Unitless).unwrap(), want, "{e}");
+        }
+    }
+
     /// A count from a length (`(L - 20) / 210`, the 210 read as unit-less) names the fix (#5901).
     #[test]
     fn a_length_where_a_count_is_expected_says_to_divide_by_a_length() {
@@ -1451,6 +1506,21 @@ mod tests {
         assert!(e.contains("expected a unit-less number, got a length") && e.contains("divide by a length"), "{e}");
         assert_eq!(ev("floor(width / (6 mm))", Kind::Unitless).unwrap(), 6.0);
         let e = ev("45 deg", Kind::Unitless).unwrap_err().to_string();
+        assert!(!e.contains("divide"), "{e}");
+    }
+
+    /// A squared or higher-dimension length where a length is expected names the fix (#17257).
+    #[test]
+    fn a_squared_length_where_a_length_is_expected_says_to_divide_by_a_length() {
+        let e = ev("width * width", Kind::Length).unwrap_err().to_string();
+        assert!(
+            e.contains("expected a length, got a value in length^2")
+                && e.contains("divide by a length, e.g. `(L * L) / (1 mm)`, or set the parameter's Unit to none in Parameters"),
+            "{e}"
+        );
+        let e = ev("width ^ 3", Kind::Length).unwrap_err().to_string();
+        assert!(e.contains("expected a length, got a value in length^3") && e.contains("divide by a length"), "{e}");
+        let e = ev("45 deg", Kind::Length).unwrap_err().to_string();
         assert!(!e.contains("divide"), "{e}");
     }
 
@@ -1704,5 +1774,38 @@ mod tests {
         assert_eq!(reported_value(Value::length(50.8)), 50.8);
         assert_eq!(round_reported(reported_value(Value::angle(30f64.to_radians()))), 30.0);
         assert_eq!(reported_value(Value::num(4.0)), 4.0);
+    }
+
+    /// `mod` of a value by a whole-number fraction of itself is 0 even when unit conversion leaves
+    /// the quotient an ulp or two off: `3 in % 1 in` is 25.39999999999999 mm without that.
+    #[test]
+    fn mod_ignores_float_noise_in_the_quotient() {
+        let look = |_: &str| Err(DocError::Expr("no parameters".into()));
+        let rem = |e: &str| eval_with(e, &look).unwrap().v;
+        for e in [
+            "3 in % 1 in",
+            "mod(3 in, 0.5 in)",
+            "mod(-3 in, 1 in)",
+            "mod(76.2 mm, 1 in)",
+            "mod(0.3, 0.1)",
+            "mod(1, 0.1)",
+            "mod(7 mm, 0.7 mm)",
+            "mod(0.9 rad, 0.3 rad)",
+            "mod(3 in, -1 in)",
+        ] {
+            assert_eq!(rem(e), 0.0, "{e}");
+        }
+        // A real remainder is untouched, including a tiny one and one against a huge quotient.
+        for (e, want) in [
+            ("mod(7, 3)", 1.0),
+            ("mod(-1, 3)", 2.0),
+            ("mod(5, -3)", 2.0),
+            ("mod(3.0000001, 1)", 3.0000001 % 1.0),
+            ("mod(1e20, 3)", 1e20_f64.rem_euclid(3.0)),
+            ("mod(2.5 in, 1 in)", 12.7),
+            ("mod(1e-9, 3)", 1e-9),
+        ] {
+            assert!((rem(e) - want).abs() < 1e-9 * want.abs().max(1.0), "{e} gave {}", rem(e));
+        }
     }
 }

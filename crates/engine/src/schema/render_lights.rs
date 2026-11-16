@@ -19,7 +19,7 @@ pub struct ListResult {
     pub lights: Vec<Light>,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct Light {
     /// Family and zero-based source slot: directional:N, point:N, spot:N or area:N.
     /// Point and spot share their punctual-list index. Stable across numerical edits,
@@ -41,13 +41,13 @@ pub struct Light {
     pub geometry: Geometry,
 }
 
-#[derive(Clone, Copy, Debug, Serialize, Deserialize, JsonSchema)]
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum Geometry {
     Directional {
         /// World direction towards the source, as stored; need not be unit length.
         direction: [f64; 3],
-        /// Present for the GPU finite-disk sun only, in radians.
+        /// Present for a finite-disk Sun, in radians. CPU requires explicit Path transport.
         #[serde(skip_serializing_if = "Option::is_none")]
         angular_radius_rad: Option<f64>,
     },
@@ -134,6 +134,11 @@ pub struct LightPatch {
     /// World-space fields, lowered to the existing renderer parameters.
     pub position_mm: Option<[f64; 3]>,
     pub direction: Option<[f64; 3]>,
+    /// Spot-only world emission direction FROM the light. Conflicts with aim_at.
+    pub emitted_axis: Option<[f64; 3]>,
+    /// Spot half cones in radians; require 0 <= inner < outer <= pi/2.
+    pub inner_half_angle_radians: Option<f64>,
+    pub outer_half_angle_radians: Option<f64>,
     pub edge_u_mm: Option<[f64; 3]>,
     pub edge_v_mm: Option<[f64; 3]>,
     pub radiance: Option<[f64; 3]>,
@@ -154,9 +159,21 @@ pub struct EditParams {
     pub expected_revision: Option<u64>,
 }
 
+/// A surviving source's address before and after this exact structural edit.
+/// `before` verifies the mapping belongs to the caller's draft, not a different
+/// settings override. New or duplicated sources never inherit an old identity.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct LightIdRemap {
+    pub before: Light,
+    pub after_id: String,
+}
+
 #[derive(Debug, Serialize, JsonSchema)]
 pub struct EditResult {
     pub id: Option<String>,
+    #[schemars(length(max = 20))]
+    pub id_remap: Vec<LightIdRemap>,
     pub name: String,
     pub setup: Value,
 }

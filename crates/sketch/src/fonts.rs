@@ -8,7 +8,7 @@ use std::sync::{Arc, Mutex, OnceLock};
 
 use crate::model::{Result, SketchError};
 
-static DEFAULT_FONT: &[u8] = include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/../../assets/fonts/liberation-sans/LiberationSans-Regular.ttf"));
+static DEFAULT_FONT: &[u8] = include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/assets/fonts/liberation-sans/LiberationSans-Regular.ttf"));
 
 /// Family name of the built-in font (also what an empty or absent font name means).
 pub const DEFAULT_FONT_FAMILY: &str = "Liberation Sans";
@@ -82,6 +82,12 @@ pub fn font_data(name: Option<&str>) -> Result<FontData> {
     }
     find_family_in(&font_dirs(), name)?
         .ok_or_else(|| SketchError::Invalid(format!("unknown font `{name}`: not an installed font family, and not a .ttf/.otf file path")))
+}
+
+/// The file a font name means (`~` and `%VAR%` expanded), or `None` for a family name.
+pub fn font_file_path(name: &str) -> Option<PathBuf> {
+    let name = name.trim();
+    (name.len() <= MAX_FONT_NAME && is_path(name)).then(|| expand(name))
 }
 
 /// The face of a font for a style: the bold and/or italic face of an installed family (or the
@@ -492,6 +498,17 @@ mod tests {
     /// A face of family "Arial" whose full name is `full`.
     fn face(full: &str, bold: bool, italic: bool) -> FaceNames {
         FaceNames { index: 0, bold, italic, names: vec![(name_id::FAMILY, normalize("Arial")), (name_id::FULL_NAME, normalize(full))] }
+    }
+
+    #[test]
+    fn a_font_file_path_is_expanded_and_a_family_name_is_none() {
+        assert_eq!(font_file_path(" /fonts/Foo-Bold.ttf "), Some(PathBuf::from("/fonts/Foo-Bold.ttf")));
+        assert_eq!(font_file_path("Foo.otf"), Some(PathBuf::from("Foo.otf")));
+        if let Some(home) = home() {
+            assert_eq!(font_file_path("~/Foo.ttf"), Some(PathBuf::from(format!("{}/Foo.ttf", home.display()))));
+        }
+        assert_eq!(font_file_path("DejaVu Sans"), None);
+        assert_eq!(font_file_path(&format!("/{}.ttf", "a".repeat(MAX_FONT_NAME))), None);
     }
 
     #[test]

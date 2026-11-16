@@ -85,6 +85,45 @@ fn context(app: &SolveApp) -> PartContext {
 }
 
 #[test]
+fn a_selected_configuration_refuses_edit_in_place_without_opening_another_row() {
+    let mut f = assembly("configuration");
+    let mut source = Session::default();
+    for (command, params) in [
+        ("parameters.add", json!({"name": "L", "expression": "10 mm"})),
+        ("solid.box", json!({"length": "L", "width": 20, "height": 30})),
+        ("config.configure", json!({"params": ["L"]})),
+        ("config.row", json!({"name": "Default", "rename": "Short"})),
+        ("config.row", json!({"name": "Long", "values": {"L": "15 mm"}})),
+        ("config.activate", json!({"row": "Short"})),
+        ("file.save", json!({"path": f.plate_file, "overwrite": true})),
+    ] {
+        source.execute(command, &params).unwrap();
+    }
+    f.app.run("component.relink", json!({"component": f.plate, "path": f.plate_file, "configuration": "Long"})).unwrap();
+    assert!((volume(&f.app) - 10_000.0).abs() < 1e-6, "the assembly shows Long while the file stores Short");
+    let before = f.app.session.doc.clone();
+    let source_bytes = std::fs::read(&f.plate_file).unwrap();
+    let tabs = f.app.docs.count();
+    let undo = f.app.session.undo.len();
+    let message = "Edit this configuration in the source design, then update the links.";
+    for ask in [false, true] {
+        assert_eq!(enter(&mut f.app, f.plate, None, ask).unwrap_err(), message);
+    }
+    assert!(f.app.run("component.edit_in_place", json!({"component": f.plate})).is_err());
+    double_click_component(&mut f.app, json!({"component": f.plate}));
+    settle(&mut f.app);
+    let expected_status = format!("Edit in Place: {message}");
+    assert_eq!(f.app.status.as_ref().map(|status| status.0.as_str()), Some(expected_status.as_str()));
+    assert!(showing(&f.app, &f.folder.join("case.solidcraft")));
+    assert_eq!(f.app.docs.count(), tabs);
+    assert_eq!(f.app.session.doc, before);
+    assert_eq!(f.app.session.undo.len(), undo);
+    assert!(f.app.edit_in_place.active.is_none() && f.app.edit_in_place.pending.is_none());
+    assert!(f.app.file_load.idle());
+    assert_eq!(std::fs::read(&f.plate_file).unwrap(), source_bytes);
+}
+
+#[test]
 fn a_linked_component_is_edited_in_place_and_finish_editing_updates_the_assembly() {
     let mut f = assembly("finish");
     double_click_component(&mut f.app, json!({"component": f.plate}));
@@ -404,7 +443,7 @@ fn finish_editing_is_a_model_tab_button_only_while_a_part_is_edited_in_place() {
     // Under a press Finish Edit stays plain, as Finish Sketch does; the release finishes.
     let button = crate::scenario::rect_of("button:component.finish_edit").unwrap();
     h.frame_with(crate::test_support::pointer(button.center(), true));
-    let soft = crate::theme::Tokens::get().accent_soft;
+    let soft = solidcraft_theme::Tokens::get().accent_soft;
     let lit = h.shapes.iter().any(|s| match &s.shape {
         egui::Shape::Rect(r) => r.rect == button && r.fill == soft,
         egui::Shape::Vec(v) => v.iter().any(|s| matches!(s, egui::Shape::Rect(r) if r.rect == button && r.fill == soft)),
@@ -589,12 +628,13 @@ fn what_is_done_in_the_assembly_while_it_refreshes_stays() {
 
 #[test]
 fn the_ribbon_button_reads_finish_edit_not_a_surface_finish() {
+    crate::i18n::install();
     // A bare "Finish" is a surface finish in other catalogs (German "Oberfläche")
     let label = crate::workspace::ribbon_button_label(solidcraft_engine::find_command("component.finish_edit").unwrap());
     assert_eq!(label, "Finish Edit");
-    assert_eq!(crate::i18n::Locale::for_language("de").label(label), "Bearbeitung beenden");
+    assert_eq!(solidcraft_ui_text::Locale::for_language("de").label(label), "Bearbeitung beenden");
     for language in ["ar", "he", "ja", "vi", "zh"] {
-        assert_ne!(crate::i18n::Locale::for_language(language).label(label), label, "{language}");
+        assert_ne!(solidcraft_ui_text::Locale::for_language(language).label(label), label, "{language}");
     }
 }
 
@@ -663,7 +703,7 @@ fn a_refresh_waits_for_a_command_still_queued_in_the_assembly() {
     save_box(&f.post_file, [10.0, 10.0, 10.0], true);
     refresh(&mut f.app);
     crate::documents::switch(&mut f.app, 0);
-    f.app.deferred_queue.push(("view.fit".into(), json!({})));
+    f.app.deferred_queue.push(("view.fit".into(), json!({}), 0));
     for _ in 0..200 {
         tick(&mut f.app);
         std::thread::sleep(std::time::Duration::from_millis(1));
@@ -783,7 +823,7 @@ fn a_queued_edit_is_checked_when_asked_for_and_waits_for_what_runs() {
     assert!(e.contains("already"), "one at a time: {e}");
     // The turn ends while a command still waits in the design: the edit waits too
     f.app.agent_chat.set_state(crate::agent_chat::State::Ready);
-    f.app.deferred_queue.push(("view.fit".into(), json!({})));
+    f.app.deferred_queue.push(("view.fit".into(), json!({}), 0));
     tick(&mut f.app);
     assert!(f.app.edit_in_place.enter_after_turn.is_some() && f.app.docs.count() == 1);
     f.app.deferred_queue.clear();
@@ -817,7 +857,7 @@ fn stopping_the_agent_forgets_what_it_queued() {
 #[test]
 fn a_command_queued_in_the_assembly_holds_up_entering() {
     let mut f = assembly("queued-enter");
-    f.app.deferred_queue.push(("view.fit".into(), json!({})));
+    f.app.deferred_queue.push(("view.fit".into(), json!({}), 0));
     let e = f.app.run("component.edit_in_place", json!({"component": f.plate})).unwrap_err();
     assert!(e.contains("Wait"), "{e}");
     settle(&mut f.app);

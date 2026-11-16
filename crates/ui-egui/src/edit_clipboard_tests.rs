@@ -2,8 +2,11 @@
 
 use serde_json::{Value, json};
 use solidcore_record::Vec2;
-use solidcraft_engine::Sel;
 use solidcraft_engine::geom::prelude::*;
+use solidcraft_engine::{
+    Sel,
+    doc::{FeatureKind, PlaneRef},
+};
 
 use crate::scenario::Harness;
 
@@ -858,6 +861,84 @@ fn paste_new_is_off_while_a_component_is_cut() {
     let find = |id: &str| menu.iter().find(|i| i.id == id).unwrap();
     assert!(find("ui.paste").enabled);
     assert!(!find("ui.pasteNew").enabled);
+}
+
+/// Paste New from a parent component's menu keeps face-attached sketches in a copied child.
+#[test]
+fn paste_new_into_selected_parent_keeps_child_face_attachment() {
+    use crate::context_menu::{Target, items, run_item};
+
+    let mut app = plain_app();
+    let parent = app.run("component.create", json!({"name":"Component1"})).unwrap();
+    let parent_component = parent["component"].as_u64().unwrap();
+    let parent_occurrence = parent["occurrence"].as_u64().unwrap();
+    let child = app.run("component.create", json!({"name":"Component2"})).unwrap();
+    let child_component = child["component"].as_u64().unwrap();
+    let child_occurrence = child["occurrence"].as_u64().unwrap();
+
+    app.run("sketch.create", json!({"plane":"XY","name":"Sketch1"})).unwrap();
+    app.run("sketch.circle.center", json!({"center":[0,0],"diameter":32})).unwrap();
+    app.run("sketch.finish", json!({})).unwrap();
+    app.run("solid.extrude", json!({"sketch":"Sketch1","distance":10,"operation":"new_body","body_name":"Disc"})).unwrap();
+    let source_path = vec![parent_occurrence, child_occurrence];
+    let placed = app.session.placed_document();
+    let body_name = placed.body_frames_with_source(&app.session.model.state()).into_iter().find(|(_, _, _, path, _)| path == &source_path).unwrap().0;
+    let world = app.session.world_state().unwrap();
+    let body = world.body(&body_name).unwrap();
+    let face = body
+        .body
+        .faces(0.01)
+        .unwrap()
+        .into_iter()
+        .find(|face| body.body.face_plane(face.index).is_some_and(|plane| plane.normal().dot(solidcore_record::Vec3::Z) > 0.999))
+        .unwrap();
+    let uncut_volume = app.run("inspect.measure", json!({"bodies":[body_name]})).unwrap()["total"]["volume_mm3"].as_f64().unwrap();
+    app.run("sketch.create", json!({"plane":{"body":body_name,"face":face.centroid,"index":face.index,"path":source_path},"name":"Sketch2"}))
+        .unwrap();
+    app.run("sketch.circle.center", json!({"center":[0,0],"diameter":16})).unwrap();
+    app.run("sketch.finish", json!({})).unwrap();
+    app.run("solid.extrude", json!({"sketch":"Sketch2","distance":-10,"operation":"cut","targets":["Disc"]})).unwrap();
+    let cut_volume = app.run("inspect.measure", json!({"bodies":[body_name]})).unwrap()["total"]["volume_mm3"].as_f64().unwrap();
+    assert!(cut_volume < uncut_volume, "the face-attached sketch must cut Disc: {cut_volume} >= {uncut_volume}");
+
+    select(&mut app, json!({"type":"occurrence","path":source_path}));
+    assert!(super::copy(&mut app));
+    assert!(super::paste_into(&mut app, None, false, Some((parent_component, vec![parent_occurrence]))));
+    select(&mut app, json!({"type":"occurrence","path":[parent_occurrence,child_occurrence]}));
+    assert!(super::copy(&mut app));
+    select(&mut app, json!({"type":"occurrence","path":[parent_occurrence]}));
+    assert_eq!(app.session.active_component, child_component);
+    let paste_new = items(&app, &Target::Occurrence { path: vec![parent_occurrence] }).into_iter().find(|item| item.id == "ui.pasteNew").unwrap();
+    assert!(paste_new.enabled);
+    run_item(&mut app, &paste_new, egui::Pos2::ZERO);
+    assert!(!app.status.as_ref().is_some_and(|(_, _, error)| *error), "{:?}", app.status);
+
+    let [Sel::Occurrence { path: copied_path }] = app.session.selection.as_slice() else { panic!("Paste New did not select one occurrence") };
+    assert_eq!(copied_path.first(), Some(&parent_occurrence));
+    let copied_occurrence = *copied_path.last().unwrap();
+    let copied_component = app.session.doc.occurrences.iter().find(|occurrence| occurrence.id == copied_occurrence).unwrap().component;
+    let copied_body = app
+        .session
+        .placed_document()
+        .body_frames_with_source(&app.session.model.state())
+        .into_iter()
+        .find(|(_, _, _, body_path, _)| body_path == copied_path)
+        .unwrap()
+        .0;
+    let copied_anchor = app
+        .session
+        .doc
+        .features
+        .iter()
+        .find_map(|feature| {
+            if feature.component != copied_component {
+                return None;
+            }
+            let FeatureKind::Sketch { plane: PlaneRef::Face { anchor: Some(anchor), .. }, .. } = &feature.kind else { return None };
+            Some(anchor)
+        })
+        .expect("copied Sketch2 has no face anchor");
+    assert_eq!(copied_anchor.target.body, copied_body);
 }
 
 /// A body of a component's second placement is that component's body seen there: it isn't cut on

@@ -1,0 +1,2577 @@
+{
+ "cases": [
+  {
+   "name": "brep_cache_vertex_tree_cube",
+   "upstream_ref": "source/SMLib/src/SmBrepCache.cpp:246",
+   "inputs": {
+    "kind": "spatial",
+    "ctor": {
+     "type": "spatial",
+     "bbox": [
+      0,
+      0,
+      0,
+      1,
+      1,
+      1
+     ]
+    },
+    "ops": [
+     {
+      "op": "add",
+      "bbox": [
+       0,
+       0,
+       0,
+       0,
+       0,
+       0
+      ],
+      "obj": 0,
+      "geom": 1
+     },
+     {
+      "op": "add",
+      "bbox": [
+       0,
+       0,
+       1,
+       0,
+       0,
+       1
+      ],
+      "obj": 1,
+      "geom": 1
+     },
+     {
+      "op": "add",
+      "bbox": [
+       0,
+       1,
+       0,
+       0,
+       1,
+       0
+      ],
+      "obj": 2,
+      "geom": 1
+     },
+     {
+      "op": "add",
+      "bbox": [
+       0,
+       1,
+       1,
+       0,
+       1,
+       1
+      ],
+      "obj": 3,
+      "geom": 1
+     },
+     {
+      "op": "add",
+      "bbox": [
+       1,
+       0,
+       0,
+       1,
+       0,
+       0
+      ],
+      "obj": 4,
+      "geom": 1
+     },
+     {
+      "op": "add",
+      "bbox": [
+       1,
+       0,
+       1,
+       1,
+       0,
+       1
+      ],
+      "obj": 5,
+      "geom": 1
+     },
+     {
+      "op": "add",
+      "bbox": [
+       1,
+       1,
+       0,
+       1,
+       1,
+       0
+      ],
+      "obj": 6,
+      "geom": 1
+     },
+     {
+      "op": "add",
+      "bbox": [
+       1,
+       1,
+       1,
+       1,
+       1,
+       1
+      ],
+      "obj": 7,
+      "geom": 1
+     },
+     {
+      "op": "in_box",
+      "bbox": [
+       0,
+       0,
+       0,
+       0.5,
+       0.5,
+       0.5
+      ]
+     },
+     {
+      "op": "find",
+      "bbox": [
+       1,
+       1,
+       1,
+       1,
+       1,
+       1
+      ]
+     },
+     {
+      "op": "intersects",
+      "bbox": [
+       2,
+       2,
+       2,
+       3,
+       3,
+       3
+      ]
+     },
+     {
+      "op": "dump"
+     },
+     {
+      "op": "info"
+     }
+    ]
+   }
+  },
+  {
+   "name": "brep_cache_curve_tree_cube_edges",
+   "upstream_ref": "source/SMLib/src/SmBrepCache.cpp:258",
+   "inputs": {
+    "kind": "spatial",
+    "ctor": {
+     "type": "spatial",
+     "bbox": [
+      0,
+      0,
+      0,
+      1,
+      1,
+      1
+     ]
+    },
+    "ops": [
+     {
+      "op": "add",
+      "bbox": [
+       0,
+       0,
+       0,
+       1,
+       0,
+       0
+      ],
+      "obj": 100,
+      "geom": 2
+     },
+     {
+      "op": "add",
+      "bbox": [
+       0,
+       1,
+       0,
+       1,
+       1,
+       0
+      ],
+      "obj": 101,
+      "geom": 2
+     },
+     {
+      "op": "add",
+      "bbox": [
+       0,
+       0,
+       1,
+       1,
+       0,
+       1
+      ],
+      "obj": 102,
+      "geom": 2
+     },
+     {
+      "op": "add",
+      "bbox": [
+       0,
+       1,
+       1,
+       1,
+       1,
+       1
+      ],
+      "obj": 103,
+      "geom": 2
+     },
+     {
+      "op": "add",
+      "bbox": [
+       0,
+       0,
+       0,
+       0,
+       1,
+       0
+      ],
+      "obj": 104,
+      "geom": 2
+     },
+     {
+      "op": "add",
+      "bbox": [
+       1,
+       0,
+       0,
+       1,
+       1,
+       0
+      ],
+      "obj": 105,
+      "geom": 2
+     },
+     {
+      "op": "add",
+      "bbox": [
+       0,
+       0,
+       1,
+       0,
+       1,
+       1
+      ],
+      "obj": 106,
+      "geom": 2
+     },
+     {
+      "op": "add",
+      "bbox": [
+       1,
+       0,
+       1,
+       1,
+       1,
+       1
+      ],
+      "obj": 107,
+      "geom": 2
+     },
+     {
+      "op": "add",
+      "bbox": [
+       0,
+       0,
+       0,
+       0,
+       0,
+       1
+      ],
+      "obj": 108,
+      "geom": 2
+     },
+     {
+      "op": "add",
+      "bbox": [
+       1,
+       0,
+       0,
+       1,
+       0,
+       1
+      ],
+      "obj": 109,
+      "geom": 2
+     },
+     {
+      "op": "add",
+      "bbox": [
+       0,
+       1,
+       0,
+       0,
+       1,
+       1
+      ],
+      "obj": 110,
+      "geom": 2
+     },
+     {
+      "op": "add",
+      "bbox": [
+       1,
+       1,
+       0,
+       1,
+       1,
+       1
+      ],
+      "obj": 111,
+      "geom": 2
+     },
+     {
+      "op": "dump"
+     },
+     {
+      "op": "in_box",
+      "bbox": [
+       0.4,
+       -0.1,
+       -0.1,
+       0.6,
+       0.1,
+       0.1
+      ]
+     },
+     {
+      "op": "node_list",
+      "node": 0
+     },
+     {
+      "op": "node_list",
+      "node": 2
+     },
+     {
+      "op": "node_list",
+      "node": 99
+     }
+    ]
+   }
+  },
+  {
+   "name": "brep_cache_surface_tree_cube_faces",
+   "upstream_ref": "source/SMLib/src/SmBrepCache.cpp:269",
+   "inputs": {
+    "kind": "spatial",
+    "ctor": {
+     "type": "spatial",
+     "bbox": [
+      0,
+      0,
+      0,
+      1,
+      1,
+      1
+     ]
+    },
+    "ops": [
+     {
+      "op": "add",
+      "bbox": [
+       0,
+       0,
+       0,
+       1,
+       1,
+       0
+      ],
+      "obj": 200,
+      "geom": 3
+     },
+     {
+      "op": "add",
+      "bbox": [
+       0,
+       0,
+       1,
+       1,
+       1,
+       1
+      ],
+      "obj": 201,
+      "geom": 3
+     },
+     {
+      "op": "add",
+      "bbox": [
+       0,
+       0,
+       0,
+       1,
+       0,
+       1
+      ],
+      "obj": 202,
+      "geom": 3
+     },
+     {
+      "op": "add",
+      "bbox": [
+       0,
+       1,
+       0,
+       1,
+       1,
+       1
+      ],
+      "obj": 203,
+      "geom": 3
+     },
+     {
+      "op": "add",
+      "bbox": [
+       0,
+       0,
+       0,
+       0,
+       1,
+       1
+      ],
+      "obj": 204,
+      "geom": 3
+     },
+     {
+      "op": "add",
+      "bbox": [
+       1,
+       0,
+       0,
+       1,
+       1,
+       1
+      ],
+      "obj": 205,
+      "geom": 3
+     },
+     {
+      "op": "dump"
+     }
+    ]
+   }
+  },
+  {
+   "name": "null_object_expands_tree",
+   "upstream_ref": "source/SMLib/src/SmBrepCache.cpp:509",
+   "inputs": {
+    "kind": "spatial",
+    "ctor": {
+     "type": "spatial",
+     "bbox": [
+      0,
+      0,
+      0,
+      1,
+      1,
+      1
+     ]
+    },
+    "ops": [
+     {
+      "op": "add",
+      "bbox": [
+       0.1,
+       0.1,
+       0.1,
+       0.2,
+       0.2,
+       0.2
+      ],
+      "obj": 1,
+      "geom": 1
+     },
+     {
+      "op": "add",
+      "bbox": [
+       -5,
+       -5,
+       -5,
+       5,
+       5,
+       5
+      ],
+      "obj": -1,
+      "geom": 3
+     },
+     {
+      "op": "dump"
+     },
+     {
+      "op": "add",
+      "bbox": [
+       0,
+       0,
+       0,
+       0.5,
+       0.5,
+       0.5
+      ],
+      "obj": -1,
+      "geom": 1
+     },
+     {
+      "op": "dump"
+     }
+    ]
+   }
+  },
+  {
+   "name": "outside_object_rebuilds_tree",
+   "upstream_ref": "source/SMLib/src/SmTree.cpp:269",
+   "inputs": {
+    "kind": "spatial",
+    "ctor": {
+     "type": "spatial",
+     "bbox": [
+      0,
+      0,
+      0,
+      1,
+      1,
+      1
+     ]
+    },
+    "ops": [
+     {
+      "op": "add",
+      "bbox": [
+       0.0,
+       0,
+       0,
+       0.05,
+       0.05,
+       0.05
+      ],
+      "obj": 0,
+      "geom": 1
+     },
+     {
+      "op": "add",
+      "bbox": [
+       0.08,
+       0,
+       0,
+       0.13,
+       0.05,
+       0.05
+      ],
+      "obj": 1,
+      "geom": 1
+     },
+     {
+      "op": "add",
+      "bbox": [
+       0.16,
+       0,
+       0,
+       0.21000000000000002,
+       0.05,
+       0.05
+      ],
+      "obj": 2,
+      "geom": 1
+     },
+     {
+      "op": "add",
+      "bbox": [
+       0.24,
+       0,
+       0,
+       0.29,
+       0.05,
+       0.05
+      ],
+      "obj": 3,
+      "geom": 1
+     },
+     {
+      "op": "add",
+      "bbox": [
+       0.32,
+       0,
+       0,
+       0.37,
+       0.05,
+       0.05
+      ],
+      "obj": 4,
+      "geom": 1
+     },
+     {
+      "op": "add",
+      "bbox": [
+       0.4,
+       0,
+       0,
+       0.45,
+       0.05,
+       0.05
+      ],
+      "obj": 5,
+      "geom": 1
+     },
+     {
+      "op": "add",
+      "bbox": [
+       0.48,
+       0,
+       0,
+       0.53,
+       0.05,
+       0.05
+      ],
+      "obj": 6,
+      "geom": 1
+     },
+     {
+      "op": "add",
+      "bbox": [
+       0.56,
+       0,
+       0,
+       0.6100000000000001,
+       0.05,
+       0.05
+      ],
+      "obj": 7,
+      "geom": 1
+     },
+     {
+      "op": "add",
+      "bbox": [
+       0.64,
+       0,
+       0,
+       0.6900000000000001,
+       0.05,
+       0.05
+      ],
+      "obj": 8,
+      "geom": 1
+     },
+     {
+      "op": "add",
+      "bbox": [
+       0.72,
+       0,
+       0,
+       0.77,
+       0.05,
+       0.05
+      ],
+      "obj": 9,
+      "geom": 1
+     },
+     {
+      "op": "add",
+      "bbox": [
+       0.8,
+       0,
+       0,
+       0.8500000000000001,
+       0.05,
+       0.05
+      ],
+      "obj": 10,
+      "geom": 1
+     },
+     {
+      "op": "add",
+      "bbox": [
+       0.88,
+       0,
+       0,
+       0.93,
+       0.05,
+       0.05
+      ],
+      "obj": 11,
+      "geom": 1
+     },
+     {
+      "op": "dump"
+     },
+     {
+      "op": "add",
+      "bbox": [
+       3,
+       3,
+       3,
+       4,
+       4,
+       4
+      ],
+      "obj": 50,
+      "geom": 2
+     },
+     {
+      "op": "dump"
+     },
+     {
+      "op": "find",
+      "bbox": [
+       3,
+       3,
+       3,
+       4,
+       4,
+       4
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "name": "readd_same_object_unions_box",
+   "upstream_ref": "source/SMLib/src/SmTree.cpp:352",
+   "inputs": {
+    "kind": "spatial",
+    "ctor": {
+     "type": "spatial",
+     "bbox": [
+      0,
+      0,
+      0,
+      1,
+      1,
+      1
+     ]
+    },
+    "ops": [
+     {
+      "op": "add",
+      "bbox": [
+       0.1,
+       0.1,
+       0.1,
+       0.2,
+       0.2,
+       0.2
+      ],
+      "obj": 5,
+      "geom": 1
+     },
+     {
+      "op": "add",
+      "bbox": [
+       0.15,
+       0.0,
+       0.15,
+       0.3,
+       0.25,
+       0.18
+      ],
+      "obj": 5,
+      "geom": 1
+     },
+     {
+      "op": "dump"
+     }
+    ]
+   }
+  },
+  {
+   "name": "remove_found_missing_and_parent",
+   "upstream_ref": "source/SMLib/src/SmTree.cpp:555",
+   "inputs": {
+    "kind": "spatial",
+    "ctor": {
+     "type": "spatial",
+     "bbox": [
+      0,
+      0,
+      0,
+      1,
+      1,
+      1
+     ]
+    },
+    "ops": [
+     {
+      "op": "add",
+      "bbox": [
+       0.0,
+       0.5,
+       0.5,
+       0.01,
+       0.51,
+       0.51
+      ],
+      "obj": 0,
+      "geom": 1
+     },
+     {
+      "op": "add",
+      "bbox": [
+       0.09,
+       0.5,
+       0.5,
+       0.09999999999999999,
+       0.51,
+       0.51
+      ],
+      "obj": 1,
+      "geom": 1
+     },
+     {
+      "op": "add",
+      "bbox": [
+       0.18,
+       0.5,
+       0.5,
+       0.19,
+       0.51,
+       0.51
+      ],
+      "obj": 2,
+      "geom": 1
+     },
+     {
+      "op": "add",
+      "bbox": [
+       0.27,
+       0.5,
+       0.5,
+       0.28,
+       0.51,
+       0.51
+      ],
+      "obj": 3,
+      "geom": 1
+     },
+     {
+      "op": "add",
+      "bbox": [
+       0.36,
+       0.5,
+       0.5,
+       0.37,
+       0.51,
+       0.51
+      ],
+      "obj": 4,
+      "geom": 1
+     },
+     {
+      "op": "add",
+      "bbox": [
+       0.44999999999999996,
+       0.5,
+       0.5,
+       0.45999999999999996,
+       0.51,
+       0.51
+      ],
+      "obj": 5,
+      "geom": 1
+     },
+     {
+      "op": "add",
+      "bbox": [
+       0.54,
+       0.5,
+       0.5,
+       0.55,
+       0.51,
+       0.51
+      ],
+      "obj": 6,
+      "geom": 1
+     },
+     {
+      "op": "add",
+      "bbox": [
+       0.63,
+       0.5,
+       0.5,
+       0.64,
+       0.51,
+       0.51
+      ],
+      "obj": 7,
+      "geom": 1
+     },
+     {
+      "op": "add",
+      "bbox": [
+       0.72,
+       0.5,
+       0.5,
+       0.73,
+       0.51,
+       0.51
+      ],
+      "obj": 8,
+      "geom": 1
+     },
+     {
+      "op": "add",
+      "bbox": [
+       0.8099999999999999,
+       0.5,
+       0.5,
+       0.82,
+       0.51,
+       0.51
+      ],
+      "obj": 9,
+      "geom": 1
+     },
+     {
+      "op": "add",
+      "bbox": [
+       0.8999999999999999,
+       0.5,
+       0.5,
+       0.9099999999999999,
+       0.51,
+       0.51
+      ],
+      "obj": 10,
+      "geom": 1
+     },
+     {
+      "op": "add",
+      "bbox": [
+       0.05,
+       0.05,
+       0.05,
+       0.95,
+       0.95,
+       0.95
+      ],
+      "obj": 40,
+      "geom": 1
+     },
+     {
+      "op": "dump"
+     },
+     {
+      "op": "rm",
+      "bbox": [
+       0.0,
+       0.5,
+       0.5,
+       0.01,
+       0.51,
+       0.51
+      ],
+      "obj": 0
+     },
+     {
+      "op": "rm",
+      "bbox": [
+       0.0,
+       0.5,
+       0.5,
+       0.01,
+       0.51,
+       0.51
+      ],
+      "obj": 0
+     },
+     {
+      "op": "rm",
+      "bbox": [
+       0.9,
+       0.5,
+       0.5,
+       0.91,
+       0.51,
+       0.51
+      ],
+      "obj": 40
+     },
+     {
+      "op": "rm",
+      "bbox": [
+       0.9,
+       0.5,
+       0.5,
+       0.91,
+       0.51,
+       0.51
+      ],
+      "obj": 77
+     },
+     {
+      "op": "dump"
+     }
+    ]
+   }
+  },
+  {
+   "name": "identical_boxes_min_size_ratio",
+   "upstream_ref": "source/SMLib/src/SmTree.cpp:431",
+   "inputs": {
+    "kind": "spatial",
+    "ctor": {
+     "type": "spatial",
+     "bbox": [
+      0,
+      0,
+      0,
+      1,
+      1,
+      1
+     ]
+    },
+    "ops": [
+     {
+      "op": "add",
+      "bbox": [
+       0.3,
+       0.3,
+       0.3,
+       0.3001,
+       0.3001,
+       0.3001
+      ],
+      "obj": 0,
+      "geom": 1
+     },
+     {
+      "op": "add",
+      "bbox": [
+       0.3,
+       0.3,
+       0.3,
+       0.3001,
+       0.3001,
+       0.3001
+      ],
+      "obj": 1,
+      "geom": 1
+     },
+     {
+      "op": "add",
+      "bbox": [
+       0.3,
+       0.3,
+       0.3,
+       0.3001,
+       0.3001,
+       0.3001
+      ],
+      "obj": 2,
+      "geom": 1
+     },
+     {
+      "op": "add",
+      "bbox": [
+       0.3,
+       0.3,
+       0.3,
+       0.3001,
+       0.3001,
+       0.3001
+      ],
+      "obj": 3,
+      "geom": 1
+     },
+     {
+      "op": "add",
+      "bbox": [
+       0.3,
+       0.3,
+       0.3,
+       0.3001,
+       0.3001,
+       0.3001
+      ],
+      "obj": 4,
+      "geom": 1
+     },
+     {
+      "op": "add",
+      "bbox": [
+       0.3,
+       0.3,
+       0.3,
+       0.3001,
+       0.3001,
+       0.3001
+      ],
+      "obj": 5,
+      "geom": 1
+     },
+     {
+      "op": "add",
+      "bbox": [
+       0.3,
+       0.3,
+       0.3,
+       0.3001,
+       0.3001,
+       0.3001
+      ],
+      "obj": 6,
+      "geom": 1
+     },
+     {
+      "op": "add",
+      "bbox": [
+       0.3,
+       0.3,
+       0.3,
+       0.3001,
+       0.3001,
+       0.3001
+      ],
+      "obj": 7,
+      "geom": 1
+     },
+     {
+      "op": "add",
+      "bbox": [
+       0.3,
+       0.3,
+       0.3,
+       0.3001,
+       0.3001,
+       0.3001
+      ],
+      "obj": 8,
+      "geom": 1
+     },
+     {
+      "op": "add",
+      "bbox": [
+       0.3,
+       0.3,
+       0.3,
+       0.3001,
+       0.3001,
+       0.3001
+      ],
+      "obj": 9,
+      "geom": 1
+     },
+     {
+      "op": "add",
+      "bbox": [
+       0.3,
+       0.3,
+       0.3,
+       0.3001,
+       0.3001,
+       0.3001
+      ],
+      "obj": 10,
+      "geom": 1
+     },
+     {
+      "op": "add",
+      "bbox": [
+       0.3,
+       0.3,
+       0.3,
+       0.3001,
+       0.3001,
+       0.3001
+      ],
+      "obj": 11,
+      "geom": 1
+     },
+     {
+      "op": "add",
+      "bbox": [
+       0.3,
+       0.3,
+       0.3,
+       0.3001,
+       0.3001,
+       0.3001
+      ],
+      "obj": 12,
+      "geom": 1
+     },
+     {
+      "op": "add",
+      "bbox": [
+       0.3,
+       0.3,
+       0.3,
+       0.3001,
+       0.3001,
+       0.3001
+      ],
+      "obj": 13,
+      "geom": 1
+     },
+     {
+      "op": "add",
+      "bbox": [
+       0.3,
+       0.3,
+       0.3,
+       0.3001,
+       0.3001,
+       0.3001
+      ],
+      "obj": 14,
+      "geom": 1
+     },
+     {
+      "op": "add",
+      "bbox": [
+       0.3,
+       0.3,
+       0.3,
+       0.3001,
+       0.3001,
+       0.3001
+      ],
+      "obj": 15,
+      "geom": 1
+     },
+     {
+      "op": "add",
+      "bbox": [
+       0.3,
+       0.3,
+       0.3,
+       0.3001,
+       0.3001,
+       0.3001
+      ],
+      "obj": 16,
+      "geom": 1
+     },
+     {
+      "op": "add",
+      "bbox": [
+       0.3,
+       0.3,
+       0.3,
+       0.3001,
+       0.3001,
+       0.3001
+      ],
+      "obj": 17,
+      "geom": 1
+     },
+     {
+      "op": "add",
+      "bbox": [
+       0.3,
+       0.3,
+       0.3,
+       0.3001,
+       0.3001,
+       0.3001
+      ],
+      "obj": 18,
+      "geom": 1
+     },
+     {
+      "op": "add",
+      "bbox": [
+       0.3,
+       0.3,
+       0.3,
+       0.3001,
+       0.3001,
+       0.3001
+      ],
+      "obj": 19,
+      "geom": 1
+     },
+     {
+      "op": "add",
+      "bbox": [
+       0.3,
+       0.3,
+       0.3,
+       0.3001,
+       0.3001,
+       0.3001
+      ],
+      "obj": 20,
+      "geom": 1
+     },
+     {
+      "op": "add",
+      "bbox": [
+       0.3,
+       0.3,
+       0.3,
+       0.3001,
+       0.3001,
+       0.3001
+      ],
+      "obj": 21,
+      "geom": 1
+     },
+     {
+      "op": "add",
+      "bbox": [
+       0.3,
+       0.3,
+       0.3,
+       0.3001,
+       0.3001,
+       0.3001
+      ],
+      "obj": 22,
+      "geom": 1
+     },
+     {
+      "op": "add",
+      "bbox": [
+       0.3,
+       0.3,
+       0.3,
+       0.3001,
+       0.3001,
+       0.3001
+      ],
+      "obj": 23,
+      "geom": 1
+     },
+     {
+      "op": "add",
+      "bbox": [
+       0.3,
+       0.3,
+       0.3,
+       0.3001,
+       0.3001,
+       0.3001
+      ],
+      "obj": 24,
+      "geom": 1
+     },
+     {
+      "op": "add",
+      "bbox": [
+       0.3,
+       0.3,
+       0.3,
+       0.3001,
+       0.3001,
+       0.3001
+      ],
+      "obj": 25,
+      "geom": 1
+     },
+     {
+      "op": "add",
+      "bbox": [
+       0.3,
+       0.3,
+       0.3,
+       0.3001,
+       0.3001,
+       0.3001
+      ],
+      "obj": 26,
+      "geom": 1
+     },
+     {
+      "op": "add",
+      "bbox": [
+       0.3,
+       0.3,
+       0.3,
+       0.3001,
+       0.3001,
+       0.3001
+      ],
+      "obj": 27,
+      "geom": 1
+     },
+     {
+      "op": "add",
+      "bbox": [
+       0.3,
+       0.3,
+       0.3,
+       0.3001,
+       0.3001,
+       0.3001
+      ],
+      "obj": 28,
+      "geom": 1
+     },
+     {
+      "op": "add",
+      "bbox": [
+       0.3,
+       0.3,
+       0.3,
+       0.3001,
+       0.3001,
+       0.3001
+      ],
+      "obj": 29,
+      "geom": 1
+     },
+     {
+      "op": "add",
+      "bbox": [
+       0.3,
+       0.3,
+       0.3,
+       0.3001,
+       0.3001,
+       0.3001
+      ],
+      "obj": 30,
+      "geom": 1
+     },
+     {
+      "op": "add",
+      "bbox": [
+       0.3,
+       0.3,
+       0.3,
+       0.3001,
+       0.3001,
+       0.3001
+      ],
+      "obj": 31,
+      "geom": 1
+     },
+     {
+      "op": "add",
+      "bbox": [
+       0.3,
+       0.3,
+       0.3,
+       0.3001,
+       0.3001,
+       0.3001
+      ],
+      "obj": 32,
+      "geom": 1
+     },
+     {
+      "op": "add",
+      "bbox": [
+       0.3,
+       0.3,
+       0.3,
+       0.3001,
+       0.3001,
+       0.3001
+      ],
+      "obj": 33,
+      "geom": 1
+     },
+     {
+      "op": "add",
+      "bbox": [
+       0.3,
+       0.3,
+       0.3,
+       0.3001,
+       0.3001,
+       0.3001
+      ],
+      "obj": 34,
+      "geom": 1
+     },
+     {
+      "op": "add",
+      "bbox": [
+       0.3,
+       0.3,
+       0.3,
+       0.3001,
+       0.3001,
+       0.3001
+      ],
+      "obj": 35,
+      "geom": 1
+     },
+     {
+      "op": "add",
+      "bbox": [
+       0.3,
+       0.3,
+       0.3,
+       0.3001,
+       0.3001,
+       0.3001
+      ],
+      "obj": 36,
+      "geom": 1
+     },
+     {
+      "op": "add",
+      "bbox": [
+       0.3,
+       0.3,
+       0.3,
+       0.3001,
+       0.3001,
+       0.3001
+      ],
+      "obj": 37,
+      "geom": 1
+     },
+     {
+      "op": "add",
+      "bbox": [
+       0.3,
+       0.3,
+       0.3,
+       0.3001,
+       0.3001,
+       0.3001
+      ],
+      "obj": 38,
+      "geom": 1
+     },
+     {
+      "op": "add",
+      "bbox": [
+       0.3,
+       0.3,
+       0.3,
+       0.3001,
+       0.3001,
+       0.3001
+      ],
+      "obj": 39,
+      "geom": 1
+     },
+     {
+      "op": "dump"
+     }
+    ]
+   }
+  },
+  {
+   "name": "boxes_on_split_planes",
+   "upstream_ref": "source/SMLib/src/SmTree.cpp:1692",
+   "inputs": {
+    "kind": "spatial",
+    "ctor": {
+     "type": "spatial",
+     "bbox": [
+      0,
+      0,
+      0,
+      1,
+      1,
+      1
+     ]
+    },
+    "ops": [
+     {
+      "op": "add",
+      "bbox": [
+       0.5455,
+       0.5,
+       0.5,
+       0.5455,
+       0.5,
+       0.5
+      ],
+      "obj": 0,
+      "geom": 1
+     },
+     {
+      "op": "add",
+      "bbox": [
+       0.5455,
+       0.5,
+       0.5,
+       0.5455,
+       0.5,
+       0.5
+      ],
+      "obj": 1,
+      "geom": 1
+     },
+     {
+      "op": "add",
+      "bbox": [
+       0.5455,
+       0.5,
+       0.5,
+       0.5455,
+       0.5,
+       0.5
+      ],
+      "obj": 2,
+      "geom": 1
+     },
+     {
+      "op": "add",
+      "bbox": [
+       0.5455,
+       0.5,
+       0.5,
+       0.5455,
+       0.5,
+       0.5
+      ],
+      "obj": 3,
+      "geom": 1
+     },
+     {
+      "op": "add",
+      "bbox": [
+       0.5455,
+       0.5,
+       0.5,
+       0.5455,
+       0.5,
+       0.5
+      ],
+      "obj": 4,
+      "geom": 1
+     },
+     {
+      "op": "add",
+      "bbox": [
+       0.5455,
+       0.5,
+       0.5,
+       0.5455,
+       0.5,
+       0.5
+      ],
+      "obj": 5,
+      "geom": 1
+     },
+     {
+      "op": "add",
+      "bbox": [
+       0.5455,
+       0.5,
+       0.5,
+       0.5455,
+       0.5,
+       0.5
+      ],
+      "obj": 6,
+      "geom": 1
+     },
+     {
+      "op": "add",
+      "bbox": [
+       0.5455,
+       0.5,
+       0.5,
+       0.5455,
+       0.5,
+       0.5
+      ],
+      "obj": 7,
+      "geom": 1
+     },
+     {
+      "op": "add",
+      "bbox": [
+       0.5455,
+       0.5,
+       0.5,
+       0.5455,
+       0.5,
+       0.5
+      ],
+      "obj": 8,
+      "geom": 1
+     },
+     {
+      "op": "add",
+      "bbox": [
+       0.5455,
+       0.5,
+       0.5,
+       0.5455,
+       0.5,
+       0.5
+      ],
+      "obj": 9,
+      "geom": 1
+     },
+     {
+      "op": "add",
+      "bbox": [
+       0.4545000000001,
+       0,
+       0,
+       0.4545000000001,
+       0,
+       0
+      ],
+      "obj": 20,
+      "geom": 1
+     },
+     {
+      "op": "add",
+      "bbox": [
+       0.54549999999,
+       0,
+       0,
+       0.54549999999,
+       0,
+       0
+      ],
+      "obj": 21,
+      "geom": 1
+     },
+     {
+      "op": "dump"
+     }
+    ]
+   }
+  },
+  {
+   "name": "zero_size_world_box",
+   "upstream_ref": "source/SMLib/src/SmTree.cpp:164",
+   "inputs": {
+    "kind": "spatial",
+    "ctor": {
+     "type": "spatial",
+     "bbox": [
+      1,
+      1,
+      1,
+      1,
+      1,
+      1
+     ]
+    },
+    "ops": [
+     {
+      "op": "add",
+      "bbox": [
+       1,
+       1,
+       1,
+       1,
+       1,
+       1
+      ],
+      "obj": 1,
+      "geom": 0
+     },
+     {
+      "op": "add",
+      "bbox": [
+       1,
+       1,
+       1,
+       2,
+       1,
+       1
+      ],
+      "obj": 2,
+      "geom": 0
+     },
+     {
+      "op": "dump"
+     },
+     {
+      "op": "info"
+     }
+    ]
+   }
+  },
+  {
+   "name": "point_tree_list_false",
+   "upstream_ref": "source/SMLib/src/SmTree.cpp:110",
+   "inputs": {
+    "kind": "spatial",
+    "ctor": {
+     "type": "point",
+     "p": [
+      1,
+      2,
+      3
+     ],
+     "size": 0.25,
+     "with_list": false
+    },
+    "ops": [
+     {
+      "op": "find",
+      "bbox": [
+       1,
+       2,
+       3,
+       1,
+       2,
+       3
+      ]
+     },
+     {
+      "op": "find",
+      "bbox": [
+       5,
+       5,
+       5,
+       6,
+       6,
+       6
+      ]
+     },
+     {
+      "op": "in_box",
+      "bbox": [
+       0,
+       0,
+       0,
+       5,
+       5,
+       5
+      ]
+     },
+     {
+      "op": "intersects",
+      "bbox": [
+       1.2,
+       2.2,
+       3.2,
+       4,
+       4,
+       4
+      ]
+     },
+     {
+      "op": "node_list",
+      "node": 0
+     },
+     {
+      "op": "dump"
+     },
+     {
+      "op": "rm",
+      "bbox": [
+       1,
+       2,
+       3,
+       1,
+       2,
+       3
+      ],
+      "obj": -1
+     },
+     {
+      "op": "dump"
+     },
+     {
+      "op": "info"
+     }
+    ]
+   }
+  },
+  {
+   "name": "point_tree_list_true",
+   "upstream_ref": "source/SMLib/src/SmTree.cpp:110",
+   "inputs": {
+    "kind": "spatial",
+    "ctor": {
+     "type": "point",
+     "p": [
+      1,
+      2,
+      3
+     ],
+     "size": 0.25,
+     "with_list": true
+    },
+    "ops": [
+     {
+      "op": "find",
+      "bbox": [
+       1,
+       2,
+       3,
+       1,
+       2,
+       3
+      ]
+     },
+     {
+      "op": "find",
+      "bbox": [
+       5,
+       5,
+       5,
+       6,
+       6,
+       6
+      ]
+     },
+     {
+      "op": "in_box",
+      "bbox": [
+       0,
+       0,
+       0,
+       5,
+       5,
+       5
+      ]
+     },
+     {
+      "op": "intersects",
+      "bbox": [
+       1.2,
+       2.2,
+       3.2,
+       4,
+       4,
+       4
+      ]
+     },
+     {
+      "op": "node_list",
+      "node": 0
+     },
+     {
+      "op": "dump"
+     },
+     {
+      "op": "rm",
+      "bbox": [
+       1,
+       2,
+       3,
+       1,
+       2,
+       3
+      ],
+      "obj": -1
+     },
+     {
+      "op": "dump"
+     },
+     {
+      "op": "info"
+     }
+    ]
+   }
+  },
+  {
+   "name": "grid_2x2_neighbors",
+   "upstream_ref": "source/SMLib/src/SmTree.cpp:2921",
+   "inputs": {
+    "kind": "subdiv",
+    "nodes": [
+     {
+      "parent": -1,
+      "c1": 1,
+      "c2": 2,
+      "aux": 4,
+      "split": 0,
+      "marked": false,
+      "class": 0,
+      "face": -1,
+      "surface": -1
+     },
+     {
+      "parent": 0,
+      "c1": 3,
+      "c2": 4,
+      "aux": 6,
+      "split": 1,
+      "marked": false,
+      "class": 0,
+      "face": -1,
+      "surface": -1
+     },
+     {
+      "parent": 0,
+      "c1": 5,
+      "c2": 6,
+      "aux": 6,
+      "split": 1,
+      "marked": false,
+      "class": 0,
+      "face": -1,
+      "surface": -1
+     },
+     {
+      "parent": 1,
+      "c1": -1,
+      "c2": -1,
+      "aux": 6,
+      "split": 2,
+      "marked": false,
+      "class": 0,
+      "face": -1,
+      "surface": -1
+     },
+     {
+      "parent": 1,
+      "c1": -1,
+      "c2": -1,
+      "aux": 6,
+      "split": 2,
+      "marked": false,
+      "class": 0,
+      "face": -1,
+      "surface": -1
+     },
+     {
+      "parent": 2,
+      "c1": -1,
+      "c2": -1,
+      "aux": 6,
+      "split": 2,
+      "marked": false,
+      "class": 0,
+      "face": -1,
+      "surface": -1
+     },
+     {
+      "parent": 2,
+      "c1": -1,
+      "c2": -1,
+      "aux": 6,
+      "split": 2,
+      "marked": false,
+      "class": 0,
+      "face": -1,
+      "surface": -1
+     }
+    ],
+    "ops": [
+     {
+      "op": "neighbors",
+      "node": 0
+     },
+     {
+      "op": "neighbors",
+      "node": 1
+     },
+     {
+      "op": "neighbors",
+      "node": 2
+     },
+     {
+      "op": "neighbors",
+      "node": 3
+     },
+     {
+      "op": "neighbors",
+      "node": 4
+     },
+     {
+      "op": "neighbors",
+      "node": 5
+     },
+     {
+      "op": "neighbors",
+      "node": 6
+     }
+    ]
+   }
+  },
+  {
+   "name": "uneven_tree_neighbors",
+   "upstream_ref": "source/SMLib/src/SmTree.cpp:3027",
+   "inputs": {
+    "kind": "subdiv",
+    "nodes": [
+     {
+      "parent": -1,
+      "c1": 1,
+      "c2": 2,
+      "aux": 4,
+      "split": 0,
+      "marked": false,
+      "class": 0,
+      "face": -1,
+      "surface": -1
+     },
+     {
+      "parent": 0,
+      "c1": -1,
+      "c2": -1,
+      "aux": 6,
+      "split": 2,
+      "marked": false,
+      "class": 0,
+      "face": -1,
+      "surface": -1
+     },
+     {
+      "parent": 0,
+      "c1": 3,
+      "c2": 4,
+      "aux": 6,
+      "split": 1,
+      "marked": false,
+      "class": 0,
+      "face": -1,
+      "surface": -1
+     },
+     {
+      "parent": 2,
+      "c1": 5,
+      "c2": 6,
+      "aux": 6,
+      "split": 0,
+      "marked": false,
+      "class": 0,
+      "face": -1,
+      "surface": -1
+     },
+     {
+      "parent": 2,
+      "c1": 7,
+      "c2": 8,
+      "aux": 6,
+      "split": 0,
+      "marked": false,
+      "class": 0,
+      "face": -1,
+      "surface": -1
+     },
+     {
+      "parent": 3,
+      "c1": -1,
+      "c2": -1,
+      "aux": 6,
+      "split": 2,
+      "marked": false,
+      "class": 0,
+      "face": -1,
+      "surface": -1
+     },
+     {
+      "parent": 3,
+      "c1": 9,
+      "c2": 10,
+      "aux": 6,
+      "split": 1,
+      "marked": false,
+      "class": 0,
+      "face": -1,
+      "surface": -1
+     },
+     {
+      "parent": 4,
+      "c1": -1,
+      "c2": -1,
+      "aux": 6,
+      "split": 2,
+      "marked": false,
+      "class": 0,
+      "face": -1,
+      "surface": -1
+     },
+     {
+      "parent": 4,
+      "c1": -1,
+      "c2": -1,
+      "aux": 6,
+      "split": 2,
+      "marked": false,
+      "class": 0,
+      "face": -1,
+      "surface": -1
+     },
+     {
+      "parent": 6,
+      "c1": -1,
+      "c2": -1,
+      "aux": 6,
+      "split": 2,
+      "marked": false,
+      "class": 0,
+      "face": -1,
+      "surface": -1
+     },
+     {
+      "parent": 6,
+      "c1": -1,
+      "c2": -1,
+      "aux": 6,
+      "split": 2,
+      "marked": false,
+      "class": 0,
+      "face": -1,
+      "surface": -1
+     }
+    ],
+    "ops": [
+     {
+      "op": "neighbors",
+      "node": 0
+     },
+     {
+      "op": "neighbors",
+      "node": 1
+     },
+     {
+      "op": "neighbors",
+      "node": 2
+     },
+     {
+      "op": "neighbors",
+      "node": 3
+     },
+     {
+      "op": "neighbors",
+      "node": 4
+     },
+     {
+      "op": "neighbors",
+      "node": 5
+     },
+     {
+      "op": "neighbors",
+      "node": 6
+     },
+     {
+      "op": "neighbors",
+      "node": 7
+     },
+     {
+      "op": "neighbors",
+      "node": 8
+     },
+     {
+      "op": "neighbors",
+      "node": 9
+     },
+     {
+      "op": "neighbors",
+      "node": 10
+     }
+    ]
+   }
+  },
+  {
+   "name": "grid_propagate_marks_classes",
+   "upstream_ref": "source/SMLib/src/SmTree.cpp:2749",
+   "inputs": {
+    "kind": "subdiv",
+    "nodes": [
+     {
+      "parent": -1,
+      "c1": 1,
+      "c2": 2,
+      "aux": 4,
+      "split": 0,
+      "marked": false,
+      "class": 0,
+      "face": -1,
+      "surface": -1
+     },
+     {
+      "parent": 0,
+      "c1": 3,
+      "c2": 4,
+      "aux": 6,
+      "split": 1,
+      "marked": false,
+      "class": 0,
+      "face": -1,
+      "surface": -1
+     },
+     {
+      "parent": 0,
+      "c1": 5,
+      "c2": 6,
+      "aux": 6,
+      "split": 1,
+      "marked": false,
+      "class": 0,
+      "face": -1,
+      "surface": -1
+     },
+     {
+      "parent": 1,
+      "c1": -1,
+      "c2": -1,
+      "aux": 6,
+      "split": 2,
+      "marked": false,
+      "class": 0,
+      "face": -1,
+      "surface": -1
+     },
+     {
+      "parent": 1,
+      "c1": -1,
+      "c2": -1,
+      "aux": 6,
+      "split": 2,
+      "marked": false,
+      "class": 0,
+      "face": -1,
+      "surface": -1
+     },
+     {
+      "parent": 2,
+      "c1": -1,
+      "c2": -1,
+      "aux": 6,
+      "split": 2,
+      "marked": false,
+      "class": 0,
+      "face": -1,
+      "surface": -1
+     },
+     {
+      "parent": 2,
+      "c1": -1,
+      "c2": -1,
+      "aux": 6,
+      "split": 2,
+      "marked": false,
+      "class": 0,
+      "face": -1,
+      "surface": -1
+     }
+    ],
+    "ops": [
+     {
+      "op": "set",
+      "node": 3,
+      "marked": true,
+      "class": 1,
+      "face": 2
+     },
+     {
+      "op": "set",
+      "node": 4,
+      "marked": true,
+      "class": 1,
+      "face": 2
+     },
+     {
+      "op": "propagate",
+      "node": 3
+     },
+     {
+      "op": "dump"
+     },
+     {
+      "op": "set",
+      "node": 5,
+      "marked": true,
+      "class": 2,
+      "face": -1
+     },
+     {
+      "op": "set",
+      "node": 6,
+      "marked": false,
+      "class": 1,
+      "face": 1
+     },
+     {
+      "op": "propagate",
+      "node": 5
+     },
+     {
+      "op": "dump"
+     },
+     {
+      "op": "set",
+      "node": 6,
+      "marked": true,
+      "class": 3,
+      "face": -1
+     },
+     {
+      "op": "propagate",
+      "node": 6
+     },
+     {
+      "op": "dump"
+     }
+    ]
+   }
+  },
+  {
+   "name": "non_subdivision_nodes",
+   "upstream_ref": "source/SMLib/src/SmTree.cpp:2925",
+   "inputs": {
+    "kind": "subdiv",
+    "nodes": [
+     {
+      "parent": -1,
+      "c1": 1,
+      "c2": 2,
+      "aux": 4,
+      "split": 0,
+      "marked": false,
+      "class": 0,
+      "face": -1,
+      "surface": -1
+     },
+     {
+      "parent": 0,
+      "c1": -1,
+      "c2": -1,
+      "aux": 8,
+      "split": 2,
+      "marked": false,
+      "class": 0,
+      "face": -1,
+      "surface": -1
+     },
+     {
+      "parent": 0,
+      "c1": -1,
+      "c2": -1,
+      "aux": 0,
+      "split": 2,
+      "marked": false,
+      "class": 0,
+      "face": -1,
+      "surface": -1
+     }
+    ],
+    "ops": [
+     {
+      "op": "neighbors",
+      "node": 1
+     },
+     {
+      "op": "neighbors",
+      "node": 2
+     },
+     {
+      "op": "propagate",
+      "node": 1
+     },
+     {
+      "op": "dump"
+     },
+     {
+      "op": "first_patch",
+      "node": 1
+     },
+     {
+      "op": "first_patch",
+      "node": 0
+     },
+     {
+      "op": "owner_object",
+      "node": 2
+     }
+    ]
+   }
+  },
+  {
+   "name": "unknown_split_direction",
+   "upstream_ref": "source/SMLib/src/SmTree.cpp:455",
+   "inputs": {
+    "kind": "subdiv",
+    "nodes": [
+     {
+      "parent": -1,
+      "c1": 1,
+      "c2": 2,
+      "aux": 4,
+      "split": 2,
+      "marked": false,
+      "class": 0,
+      "face": -1,
+      "surface": -1
+     },
+     {
+      "parent": 0,
+      "c1": -1,
+      "c2": -1,
+      "aux": 6,
+      "split": 2,
+      "marked": false,
+      "class": 0,
+      "face": -1,
+      "surface": -1
+     },
+     {
+      "parent": 0,
+      "c1": -1,
+      "c2": -1,
+      "aux": 6,
+      "split": 2,
+      "marked": false,
+      "class": 0,
+      "face": -1,
+      "surface": -1
+     }
+    ],
+    "ops": [
+     {
+      "op": "neighbors",
+      "node": 1
+     },
+     {
+      "op": "neighbors",
+      "node": 2
+     }
+    ]
+   }
+  },
+  {
+   "name": "first_patch_bezier_surface",
+   "upstream_ref": "source/SMLib/src/SmTree.cpp:2654",
+   "inputs": {
+    "kind": "subdiv",
+    "nodes": [
+     {
+      "parent": -1,
+      "c1": 1,
+      "c2": 2,
+      "aux": 3,
+      "split": 0,
+      "marked": false,
+      "class": 0,
+      "face": -1,
+      "surface": -1
+     },
+     {
+      "parent": 0,
+      "c1": -1,
+      "c2": -1,
+      "aux": 3,
+      "split": 2,
+      "marked": false,
+      "class": 0,
+      "face": -1,
+      "surface": -1
+     },
+     {
+      "parent": 0,
+      "c1": -1,
+      "c2": -1,
+      "aux": 3,
+      "split": 2,
+      "marked": false,
+      "class": 0,
+      "face": -1,
+      "surface": -1
+     }
+    ],
+    "ops": [
+     {
+      "op": "first_patch",
+      "node": 1
+     }
+    ]
+   }
+  }
+ ]
+}

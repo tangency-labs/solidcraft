@@ -3,7 +3,9 @@
 //!
 //! The crate knows nothing of documents or occurrences: a [`Model`] lists bodies (mass,
 //! inertia about the centre of mass, starting pose and velocities), joints between frames on
-//! them ([`JointKind`]: rigid, revolute, slider, cylindrical, planar, ball) and force elements;
+//! them ([`JointKind`]: rigid, revolute, slider, cylindrical, planar, ball), force elements
+//! (point and joint spring-dampers, motors along joint values, loads), drives that make a joint
+//! value follow a [`Profile`] in time, and motion links (gears, racks, screws) between values;
 //! [`simulate`] returns a [`Trajectory`] of poses, joint values and rates, joint reactions and
 //! energies at a fixed output interval. The assembly layer maps occurrences and joints to it.
 //!
@@ -31,8 +33,8 @@ use solidcore_record::Vec3;
 pub use integrate::simulate;
 pub use math::{Mat3, Quat};
 pub use model::{
-    Anchor, Body, Force, Integrator, Joint, JointKind, MAX_BODIES, MAX_CONSTRAINT_ROWS, MAX_FORCES, MAX_JOINTS, MAX_MAGNITUDE,
-    MAX_PROJECTION_ITERATIONS, MAX_SAMPLES, MAX_STEPS, Marker, Model, STANDARD_GRAVITY, Settings,
+    Anchor, Body, Coord, Drive, Force, Integrator, Joint, JointKind, Link, MAX_BODIES, MAX_CONSTRAINT_ROWS, MAX_FORCES, MAX_JOINTS, MAX_MAGNITUDE,
+    MAX_PROFILE_POINTS, MAX_PROJECTION_ITERATIONS, MAX_SAMPLES, MAX_STEPS, Marker, Model, Profile, STANDARD_GRAVITY, Settings,
 };
 
 /// Why a simulation could not run or stopped.
@@ -90,13 +92,24 @@ pub struct Energy {
     pub kinetic: f64,
     /// Potential energy of gravity, zero at the world origin.
     pub gravity: f64,
-    /// Energy stored in springs (preload included).
+    /// Energy stored in springs, point and joint ones (preload included).
     pub spring: f64,
+    /// Work put in since the start by motors, drives and loads.
+    #[serde(default)]
+    pub input: f64,
+    /// Energy taken out since the start by dampers.
+    #[serde(default)]
+    pub dissipated: f64,
 }
 
 impl Energy {
+    /// Kinetic plus potential energy.
     pub fn total(&self) -> f64 {
         self.kinetic + self.gravity + self.spring
+    }
+    /// `total + dissipated − input`: constant along a run up to the integration error.
+    pub fn balance(&self) -> f64 {
+        self.total() + self.dissipated - self.input
     }
 }
 
@@ -107,8 +120,12 @@ pub struct Sample {
     pub time: f64,
     pub bodies: Vec<BodyState>,
     pub joints: Vec<JointResult>,
+    /// What each drive applies along its joint value to make it follow (mN·mm for an angle, mN
+    /// for a distance), in [`Model::drives`] order.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub drives: Vec<f64>,
     pub energy: Energy,
-    /// The largest joint equation error (mm for points; directions are unitless).
+    /// The largest constraint equation error (mm for points; directions are unitless).
     pub constraint_error: f64,
 }
 

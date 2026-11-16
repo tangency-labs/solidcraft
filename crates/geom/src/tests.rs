@@ -22,6 +22,70 @@ fn cube_mesh(s: f64) -> Mesh {
 }
 
 #[test]
+fn crease_normals_respect_angles_groups_and_duplicate_vertex_seams() {
+    let theta = 30f64.to_radians();
+    let mesh = Mesh {
+        positions: vec![Vec3::ZERO, Vec3::X, Vec3::Y, Vec3::new(0., -theta.cos(), theta.sin())],
+        triangles: vec![[0, 1, 2], [1, 0, 3]],
+        ..Default::default()
+    };
+    let flat = mesh.crease_corner_normals(20f64.to_radians(), None).unwrap();
+    assert!((flat[0][0] - Vec3::Z).len() < 1e-12);
+    assert!((flat[1][1] - Vec3::new(0., theta.sin(), theta.cos())).len() < 1e-12);
+    let smooth = mesh.crease_corner_normals(40f64.to_radians(), None).unwrap();
+    let expected = Vec3::new(0., (theta / 2.).sin(), (theta / 2.).cos());
+    assert!((smooth[0][0] - expected).len() < 1e-12);
+    assert_eq!(smooth[0][0], smooth[1][1]);
+    assert_eq!(mesh.crease_corner_normals(1., Some(&[1, 2])).unwrap(), flat);
+    assert_eq!(mesh.crease_corner_normals(1., Some(&[0, 0])).unwrap(), flat);
+    assert_eq!(mesh.crease_corner_normals(1., Some(&[7, 7])).unwrap(), smooth);
+    let split = Mesh {
+        positions: mesh.triangles.iter().flatten().map(|&i| mesh.positions[i as usize]).collect(),
+        triangles: vec![[0, 1, 2], [3, 4, 5]],
+        ..Default::default()
+    };
+    assert_eq!(split.crease_corner_normals(1., None).unwrap(), smooth);
+    assert!(mesh.crease_corner_normals(f64::NAN, None).is_err());
+    assert!(mesh.crease_corner_normals(1., Some(&[1])).is_err());
+    let cube = cube_mesh(1.);
+    let normals = cube.crease_corner_normals(45f64.to_radians(), None).unwrap();
+    for (t, n) in cube.triangles.iter().zip(normals) {
+        let [a, b, c] = t.map(|i| cube.positions[i as usize]);
+        let face = (b - a).cross(c - a).normalized().unwrap();
+        for n in n {
+            assert!((n - face).len() < 1e-12);
+        }
+    }
+}
+
+#[test]
+fn crease_normals_skip_degenerate_faces_without_breaking_valid_fans() {
+    let theta = 30f64.to_radians();
+    let mut mesh = Mesh {
+        positions: vec![Vec3::ZERO, Vec3::X, Vec3::Y, Vec3::new(0., -theta.cos(), theta.sin())],
+        triangles: vec![[0, 1, 2], [1, 0, 3]],
+        ..Default::default()
+    };
+    let expected = mesh.crease_corner_normals(40f64.to_radians(), None).unwrap();
+    // Repeated indices, coincident vertices and distinct collinear vertices all
+    // touch the healthy pair's shared edge. None may break that smoothing fan.
+    mesh.positions.extend([Vec3::X, Vec3::X * 2.]);
+    mesh.triangles.extend([[0, 1, 1], [0, 1, 4], [0, 1, 5]]);
+    let groups = vec![7; mesh.triangles.len()];
+    for groups in [None, Some(groups.as_slice())] {
+        let normals = mesh.crease_corner_normals(40f64.to_radians(), groups).unwrap();
+        assert_eq!(&normals[..2], expected.as_slice());
+        assert_eq!(&normals[2..], &[[Vec3::Z; 3]; 3]);
+        assert!(normals.iter().flatten().all(|n| n.is_finite() && (n.len() - 1.).abs() < 1e-12));
+    }
+    mesh.triangles.push([0, 1, u32::MAX]);
+    assert!(mesh.crease_corner_normals(1., None).unwrap_err().contains("index is missing"));
+    mesh.triangles.pop();
+    mesh.positions[0] = Vec3::new(f64::INFINITY, 0., 0.);
+    assert!(mesh.crease_corner_normals(1., None).unwrap_err().contains("non-finite"));
+}
+
+#[test]
 fn display_edge_masks_keep_identity_and_break_only_certified_sharp_patches() {
     let mut mesh =
         Mesh { edges: vec![vec![Vec3::ZERO, Vec3::Z]; 2], edge_faces: vec![vec![0, 1], vec![1, 2]], seams: vec![true, true], ..Mesh::default() };
@@ -207,6 +271,26 @@ fn tangent_chains_follow_smooth_edges() {
     assert_eq!(seam.tangent_chain(0, 5f64.to_radians()), vec![0]);
 }
 
+#[test]
+fn a_mesh_chain_runs_through_one_and_a_half_degrees_and_stops_at_three() {
+    // Edges of an open polyline whose direction turns `turn` degrees at each vertex.
+    let polyline = |turn: f64| {
+        let mut m = Mesh { positions: vec![Vec3::ZERO, Vec3::X], ..Default::default() };
+        let (mut p, mut a) = (Vec3::ZERO, 0.0f64);
+        for _ in 0..4 {
+            let q = p + Vec3::new(a.cos(), a.sin(), 0.0) * 5.0;
+            m.edges.push(vec![p, q]);
+            (p, a) = (q, a + turn.to_radians());
+        }
+        m.edge_faces = vec![vec![0]; 4];
+        m
+    };
+    let mut c = polyline(1.5).tangent_chain(0, TANGENT_CHAIN);
+    c.sort();
+    assert_eq!(c, vec![0, 1, 2, 3], "1.5° is inside the chain angle");
+    assert_eq!(polyline(3.0).tangent_chain(0, TANGENT_CHAIN), vec![0], "3° is a corner");
+}
+
 /// A helix of `pieces` edge pieces (a thread's crest), each five points long.
 fn helix(pieces: usize) -> Mesh {
     let at = |t: f64| Vec3::new(4.0 * t.cos(), 4.0 * t.sin(), 0.2 * t);
@@ -222,75 +306,30 @@ fn helix(pieces: usize) -> Mesh {
     m
 }
 
-/// The tangent chain of a helix of `pieces` pieces: every piece of it joins, and how long finding
-/// the chain took. The mesh is built before the clock starts.
-fn helix_chain(pieces: usize) -> std::time::Duration {
+/// The tangent chain of a helix of `pieces` pieces: every piece of it joins, and how many edges
+/// finding the chain looked at ([`crate::mesh::CHAIN_CANDIDATES`]).
+fn helix_chain(pieces: usize) -> usize {
     let m = helix(pieces);
-    let began = std::time::Instant::now();
+    let before = crate::mesh::CHAIN_CANDIDATES.with(std::cell::Cell::get);
     let chain = m.tangent_chain(pieces / 2, 2f64.to_radians());
-    let took = began.elapsed();
+    let looked = crate::mesh::CHAIN_CANDIDATES.with(std::cell::Cell::get) - before;
     let mut sorted = chain.clone();
     sorted.sort_unstable();
     assert_eq!(sorted, (0..pieces).collect::<Vec<_>>(), "every piece of the helix is in the chain");
-    took
-}
-
-/// Whether a job four times the size took at most about twice linear: `pair` times the small job,
-/// then the big one. Linear is 4x, the quadratic that the bug cost 16x or more, so eight times the
-/// small time is the limit. The load of the other test binaries can rise between the two runs, so a
-/// pair that misses is measured again, up to three times. Load only ever slows a run, so each size
-/// keeps its fastest time and the ratio is taken of those: a retry cannot pass a regression on a
-/// small run that a spike happened to slow, once an earlier small run was fast.
-///
-/// `slack` is the room the noise of a busy machine gets, on top of the ratio.
-fn scales_linearly(mut pair: impl FnMut() -> (std::time::Duration, std::time::Duration), slack: std::time::Duration) -> Result<(), String> {
-    let limit = |small: f64| 8.0 * small + slack.as_secs_f64();
-    let (mut small, mut big) = (f64::INFINITY, f64::INFINITY);
-    let mut runs = Vec::new();
-    for _ in 0..3 {
-        let (s, b) = pair();
-        small = small.min(s.as_secs_f64());
-        big = big.min(b.as_secs_f64());
-        runs.push(format!("{s:?} then {b:?}"));
-        if big < limit(small) {
-            return Ok(());
-        }
-    }
-    Err(format!("{}; fastest {small:.3} s and {big:.3} s, limit {:.3} s", runs.join(", "), limit(small)))
-}
-
-#[test]
-fn scales_linearly_keeps_each_sizes_fastest_run() {
-    let pairs = |p: Vec<(u64, u64)>| {
-        let mut p = p.into_iter().map(|(s, b)| (std::time::Duration::from_millis(s), std::time::Duration::from_millis(b)));
-        move || p.next().unwrap_or((std::time::Duration::from_secs(1), std::time::Duration::from_secs(1)))
-    };
-    let slack = std::time::Duration::from_millis(0);
-    // Linear: four times the work, four times the time.
-    assert!(scales_linearly(pairs(vec![(5, 20)]), slack).is_ok());
-    // A big run slowed by load, then a quiet pair.
-    assert!(scales_linearly(pairs(vec![(5, 80), (5, 20)]), slack).is_ok());
-    // A quadratic cost (16x) whose later small runs a spike slowed: the fast first one still counts.
-    let r = scales_linearly(pairs(vec![(5, 80), (15, 80), (15, 80)]), slack);
-    assert!(r.as_ref().is_err_and(|e| e.contains("fastest 0.005 s and 0.080 s, limit 0.040 s")), "{r:?}");
+    looked
 }
 
 /// #3745: the tangent chain of a long helix (a thread's crest, in many edge pieces) is found
 /// without scanning every edge for every edge of it: hovering a threaded part's edge looked for
 /// its rim this way, and took seconds inside the frame. Every piece joins, in edge order.
 ///
-/// A ratio and not a limit: a test must not depend on wall-clock timing (CONTRIBUTING.md), the
-/// machine is busy. Four times the pieces must not cost sixteen times the time.
+/// The edges looked at are counted, not the time taken, so a busy machine can't fail it (#9901).
+/// Four times the pieces: linear is four times the edges, the scan sixteen times; at most eight.
 #[test]
 fn a_long_helical_tangent_chain_is_found_quickly() {
-    /// The room the noise of a run on a busy machine gets, on top of the ratio: the chain of 750
-    /// pieces takes a fraction of a second, so this is the noise of one run and not a change of
-    /// scale.
-    const SLACK: std::time::Duration = std::time::Duration::from_millis(20);
     let pieces = 3_000usize;
-    if let Err(missed) = scales_linearly(|| (helix_chain(pieces / 4), helix_chain(pieces)), SLACK) {
-        panic!("{pieces} pieces took {missed}");
-    }
+    let (small, big) = (helix_chain(pieces / 4), helix_chain(pieces));
+    assert!(small > 0 && big <= 8 * small, "{} pieces looked at {small} edges, {pieces} looked at {big}", pieces / 4);
 }
 
 #[test]
@@ -1023,4 +1062,13 @@ fn a_similarity_moves_each_kind_of_segment_exactly() {
     ] {
         assert!(Similarity2::new(scale, angle, shift).is_none(), "{scale} {angle} {shift:?}");
     }
+}
+
+/// The display mesh and its levels of detail are solidcore-tess's own types, not copies: a mesh
+/// the kernel's tessellation makes is the one the viewport draws, with nothing converted.
+#[test]
+fn the_display_mesh_and_its_levels_are_solidcore_tess_types() {
+    let mesh: solidcore_tess::Mesh = crate::Mesh { positions: vec![Vec3::X], ..Default::default() };
+    let level: solidcore_tess::simplify::Level = crate::simplify::Level { error: 0.5, ..Default::default() };
+    assert_eq!((mesh.positions, level.error), (vec![Vec3::X], 0.5));
 }

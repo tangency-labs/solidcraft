@@ -101,6 +101,41 @@ fn editing_sweeps_keeps_their_options() {
     }
 }
 
+/// #2216: the path of a sweep is the path the user chose: an edge of a body can be the path, as
+/// a sketch's curve is. The pick goes into the Path input and the sweep is built with it.
+#[test]
+fn a_sweep_takes_a_body_edge_as_its_path() {
+    let mut h = Harness::new();
+    h.app.set_origin_shown(false);
+    // A block whose upright corner edge is the path, and a square profile at its foot.
+    h.app.run("solid.box", json!({"length": 40, "width": 20, "height": 10, "corner": [-40, 0, 0]})).unwrap();
+    h.app.run("sketch.create", json!({"plane":"XY","name":"Q"})).unwrap();
+    h.app.run("sketch.rectangle.two_point", json!({"p0":[-5,-5],"p1":[5,5]})).unwrap();
+    h.app.run("sketch.finish", json!({})).unwrap();
+    let sketch = h.app.session.doc.find_feature("Q").unwrap().id;
+    h.step(&json!({"call":"ui.start","params":{"command":"solid.sweep"}})).unwrap();
+    h.frames(3);
+    let d = h.app.dialog.as_mut().unwrap();
+    d.inputs[0].items = vec![Sel::Profile { sketch, index: 0 }];
+    // The Path input is the one the click goes to.
+    d.active = 1;
+    let Kind::Sweep { operation, .. } = &mut d.kind else { panic!("{:?}", d.kind) };
+    *operation = 0;
+    h.frames(2);
+    // The corner edge of the block, where the cursor is.
+    let at = h.at(&json!({"world": [0.0, 0.0, 5.0]})).unwrap();
+    h.step(&json!({"move": at})).unwrap();
+    h.step(&json!({"click": at})).unwrap();
+    let path = h.app.dialog.as_ref().unwrap().inputs[1].items.clone();
+    assert!(matches!(path.as_slice(), [Sel::Edge { .. }]), "the path took the edge: {path:?}");
+    h.step(&json!({"widget":"OK"})).unwrap();
+    let refused = h.app.dialog.as_ref().and_then(|d| d.error.clone());
+    assert!(refused.is_none(), "the sweep was refused: {refused:?}");
+    assert!(h.app.dialog.is_none(), "{:?}", h.app.session.log);
+    let f = h.app.session.doc.features.last().unwrap();
+    assert!(matches!(f.kind, FeatureKind::Sweep { .. }), "{:?}", f.kind);
+}
+
 /// A rail picked in the dialog reaches the command with its sketch, the fit with it; editing the
 /// sweep brings both back and keeps them.
 #[test]
@@ -139,4 +174,27 @@ fn a_rail_picked_in_the_dialog_is_kept_through_an_edit() {
     h.step(&json!({"widget":"OK"})).unwrap();
     assert!(h.app.dialog.is_none(), "{:?}", h.app.session.log);
     assert_eq!(rails(&h), (stored, fit));
+}
+
+/// #2216: a sweep whose path is a body's edge comes back on the body it was picked on, even
+/// when another body has an edge at the same place: the path must not change on an edit.
+#[test]
+fn a_sweep_path_edge_is_restored_on_the_body_it_was_picked_on() {
+    let mut h = Harness::new();
+    // Two blocks that share the upright edge at (0, 20): the path is on the second one.
+    h.app.run("solid.box", json!({"length": 40, "width": 20, "height": 10, "corner": [-40, 0, 0], "body_name": "B"})).unwrap();
+    h.app.run("solid.box", json!({"length": 40, "width": 20, "height": 10, "corner": [-40, 20, 0], "body_name": "A"})).unwrap();
+    // A square profile at the origin.
+    h.app.run("sketch.create", json!({"plane":"XY","name":"Q"})).unwrap();
+    h.app.run("sketch.rectangle.two_point", json!({"p0":[-5,-5],"p1":[5,5]})).unwrap();
+    h.app.run("sketch.finish", json!({})).unwrap();
+    // The sweep's path is the shared edge, on the body A.
+    h.app.run("solid.sweep", json!({"sketch":"Q","path_body":"A","path_edges":[[0,20,5]],"operation":"new","name":"Swept"})).unwrap();
+    h.step(&json!({"call":"ui.editFeature","params":{"feature":"Swept"}})).unwrap();
+    h.frames(8);
+    let path = h.app.dialog.as_ref().unwrap().inputs[1].items.clone();
+    match path.as_slice() {
+        [Sel::Edge { body, .. }] => assert_eq!(body, "A", "the path was restored on another body"),
+        other => panic!("the path was not restored as an edge: {other:?}"),
+    }
 }

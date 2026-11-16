@@ -19,7 +19,7 @@ pub fn synthetic_registry() -> PanelResult<PanelRegistry> {
         registry.register(PanelSpec {
             kind: PanelKind::new(kind)?,
             title_key: "ui.panel".into(),
-            icon: "panel".into(),
+            icon: "list".into(),
             allowed_zones,
             default_zone: Zone::Left,
             min_size: Size { width: 160.0, height: 120.0 },
@@ -28,6 +28,10 @@ pub fn synthetic_registry() -> PanelResult<PanelRegistry> {
             edge_rule: if pinned { EdgeRule::PinOuter } else { EdgeRule::None },
             surface: PanelSurface::FollowZone,
             features: PanelFeatures { multi_instance: multi, ..PanelFeatures::default() },
+            side_height_policy: SideHeightPolicy::Content,
+            fixed_bottom_height: None,
+            header_actions: Vec::new(),
+            text_heavy: false,
         })?;
     }
     Ok(registry)

@@ -1,0 +1,9672 @@
+{
+ "cases": [
+  {
+   "name": "zerovec_local_zero_8_1e+20_False",
+   "inputs": {
+    "op": "local",
+    "solver": {
+     "op": 8,
+     "req": 1,
+     "tol": 1e-06,
+     "best": 1e+20,
+     "vecs": [
+      [
+       0,
+       0,
+       0
+      ]
+     ]
+    },
+    "objects": [
+     {
+      "vertex": {
+       "p": [
+        3,
+        -2,
+        5
+       ],
+       "tol": 1e-07
+      }
+     },
+     {
+      "vertex": {
+       "p": [
+        0,
+        0,
+        0
+       ],
+       "tol": 0.0
+      }
+     }
+    ],
+    "local": {
+     "kind": 2,
+     "point": [
+      0.5,
+      0.25,
+      -1
+     ],
+     "swap": false
+    },
+    "calls": [
+     [
+      -1,
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "zerovec_local_zero_8_1e+20_True",
+   "inputs": {
+    "op": "local",
+    "solver": {
+     "op": 8,
+     "req": 1,
+     "tol": 1e-06,
+     "best": 1e+20,
+     "vecs": [
+      [
+       0,
+       0,
+       0
+      ]
+     ]
+    },
+    "objects": [
+     {
+      "vertex": {
+       "p": [
+        3,
+        -2,
+        5
+       ],
+       "tol": 1e-07
+      }
+     },
+     {
+      "vertex": {
+       "p": [
+        0,
+        0,
+        0
+       ],
+       "tol": 0.0
+      }
+     }
+    ],
+    "local": {
+     "kind": 2,
+     "point": [
+      0.5,
+      0.25,
+      -1
+     ],
+     "swap": true
+    },
+    "calls": [
+     [
+      0,
+      -1
+     ]
+    ]
+   }
+  },
+  {
+   "name": "zerovec_local_zero_8_4_False",
+   "inputs": {
+    "op": "local",
+    "solver": {
+     "op": 8,
+     "req": 1,
+     "tol": 1e-06,
+     "best": 4.0,
+     "vecs": [
+      [
+       0,
+       0,
+       0
+      ]
+     ]
+    },
+    "objects": [
+     {
+      "vertex": {
+       "p": [
+        3,
+        -2,
+        5
+       ],
+       "tol": 1e-07
+      }
+     },
+     {
+      "vertex": {
+       "p": [
+        0,
+        0,
+        0
+       ],
+       "tol": 0.0
+      }
+     }
+    ],
+    "local": {
+     "kind": 2,
+     "point": [
+      0.5,
+      0.25,
+      -1
+     ],
+     "swap": false
+    },
+    "calls": [
+     [
+      -1,
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "zerovec_local_zero_8_4_True",
+   "inputs": {
+    "op": "local",
+    "solver": {
+     "op": 8,
+     "req": 1,
+     "tol": 1e-06,
+     "best": 4.0,
+     "vecs": [
+      [
+       0,
+       0,
+       0
+      ]
+     ]
+    },
+    "objects": [
+     {
+      "vertex": {
+       "p": [
+        3,
+        -2,
+        5
+       ],
+       "tol": 1e-07
+      }
+     },
+     {
+      "vertex": {
+       "p": [
+        0,
+        0,
+        0
+       ],
+       "tol": 0.0
+      }
+     }
+    ],
+    "local": {
+     "kind": 2,
+     "point": [
+      0.5,
+      0.25,
+      -1
+     ],
+     "swap": true
+    },
+    "calls": [
+     [
+      0,
+      -1
+     ]
+    ]
+   }
+  },
+  {
+   "name": "zerovec_local_zero_9_1e+20_False",
+   "inputs": {
+    "op": "local",
+    "solver": {
+     "op": 9,
+     "req": 1,
+     "tol": 1e-06,
+     "best": 1e+20,
+     "vecs": [
+      [
+       0,
+       0,
+       0
+      ]
+     ]
+    },
+    "objects": [
+     {
+      "vertex": {
+       "p": [
+        3,
+        -2,
+        5
+       ],
+       "tol": 1e-07
+      }
+     },
+     {
+      "vertex": {
+       "p": [
+        0,
+        0,
+        0
+       ],
+       "tol": 0.0
+      }
+     }
+    ],
+    "local": {
+     "kind": 2,
+     "point": [
+      0.5,
+      0.25,
+      -1
+     ],
+     "swap": false
+    },
+    "calls": [
+     [
+      -1,
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "zerovec_local_zero_9_1e+20_True",
+   "inputs": {
+    "op": "local",
+    "solver": {
+     "op": 9,
+     "req": 1,
+     "tol": 1e-06,
+     "best": 1e+20,
+     "vecs": [
+      [
+       0,
+       0,
+       0
+      ]
+     ]
+    },
+    "objects": [
+     {
+      "vertex": {
+       "p": [
+        3,
+        -2,
+        5
+       ],
+       "tol": 1e-07
+      }
+     },
+     {
+      "vertex": {
+       "p": [
+        0,
+        0,
+        0
+       ],
+       "tol": 0.0
+      }
+     }
+    ],
+    "local": {
+     "kind": 2,
+     "point": [
+      0.5,
+      0.25,
+      -1
+     ],
+     "swap": true
+    },
+    "calls": [
+     [
+      0,
+      -1
+     ]
+    ]
+   }
+  },
+  {
+   "name": "zerovec_local_zero_9_4_False",
+   "inputs": {
+    "op": "local",
+    "solver": {
+     "op": 9,
+     "req": 1,
+     "tol": 1e-06,
+     "best": 4.0,
+     "vecs": [
+      [
+       0,
+       0,
+       0
+      ]
+     ]
+    },
+    "objects": [
+     {
+      "vertex": {
+       "p": [
+        3,
+        -2,
+        5
+       ],
+       "tol": 1e-07
+      }
+     },
+     {
+      "vertex": {
+       "p": [
+        0,
+        0,
+        0
+       ],
+       "tol": 0.0
+      }
+     }
+    ],
+    "local": {
+     "kind": 2,
+     "point": [
+      0.5,
+      0.25,
+      -1
+     ],
+     "swap": false
+    },
+    "calls": [
+     [
+      -1,
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "zerovec_local_zero_9_4_True",
+   "inputs": {
+    "op": "local",
+    "solver": {
+     "op": 9,
+     "req": 1,
+     "tol": 1e-06,
+     "best": 4.0,
+     "vecs": [
+      [
+       0,
+       0,
+       0
+      ]
+     ]
+    },
+    "objects": [
+     {
+      "vertex": {
+       "p": [
+        3,
+        -2,
+        5
+       ],
+       "tol": 1e-07
+      }
+     },
+     {
+      "vertex": {
+       "p": [
+        0,
+        0,
+        0
+       ],
+       "tol": 0.0
+      }
+     }
+    ],
+    "local": {
+     "kind": 2,
+     "point": [
+      0.5,
+      0.25,
+      -1
+     ],
+     "swap": true
+    },
+    "calls": [
+     [
+      0,
+      -1
+     ]
+    ]
+   }
+  },
+  {
+   "name": "zerovec_may_zero_9",
+   "inputs": {
+    "op": "may",
+    "solver": {
+     "op": 9,
+     "req": 1,
+     "tol": 1e-06,
+     "best": 4.0,
+     "vecs": [
+      [
+       0,
+       0,
+       0
+      ]
+     ]
+    },
+    "pairs": [
+     [
+      [
+       0,
+       0,
+       0,
+       1,
+       1,
+       1
+      ],
+      [
+       0,
+       0,
+       5,
+       1,
+       1,
+       6
+      ]
+     ],
+     [
+      [
+       0,
+       0,
+       0,
+       1,
+       1,
+       1
+      ],
+      [
+       4,
+       0,
+       0,
+       5,
+       1,
+       1
+      ]
+     ],
+     [
+      [
+       0,
+       0,
+       0,
+       1,
+       1,
+       1
+      ],
+      [
+       0.5,
+       0.5,
+       0.5,
+       2,
+       2,
+       2
+      ]
+     ]
+    ]
+   }
+  },
+  {
+   "name": "zerovec_local_zero_11_1e+20_False",
+   "inputs": {
+    "op": "local",
+    "solver": {
+     "op": 11,
+     "req": 1,
+     "tol": 1e-06,
+     "best": 1e+20,
+     "vecs": [
+      [
+       0,
+       0,
+       0
+      ],
+      [
+       0,
+       0,
+       0
+      ]
+     ]
+    },
+    "objects": [
+     {
+      "vertex": {
+       "p": [
+        3,
+        -2,
+        5
+       ],
+       "tol": 1e-07
+      }
+     },
+     {
+      "vertex": {
+       "p": [
+        0,
+        0,
+        0
+       ],
+       "tol": 0.0
+      }
+     }
+    ],
+    "local": {
+     "kind": 2,
+     "point": [
+      0.5,
+      0.25,
+      -1
+     ],
+     "swap": false
+    },
+    "calls": [
+     [
+      -1,
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "zerovec_local_zero_11_1e+20_True",
+   "inputs": {
+    "op": "local",
+    "solver": {
+     "op": 11,
+     "req": 1,
+     "tol": 1e-06,
+     "best": 1e+20,
+     "vecs": [
+      [
+       0,
+       0,
+       0
+      ],
+      [
+       0,
+       0,
+       0
+      ]
+     ]
+    },
+    "objects": [
+     {
+      "vertex": {
+       "p": [
+        3,
+        -2,
+        5
+       ],
+       "tol": 1e-07
+      }
+     },
+     {
+      "vertex": {
+       "p": [
+        0,
+        0,
+        0
+       ],
+       "tol": 0.0
+      }
+     }
+    ],
+    "local": {
+     "kind": 2,
+     "point": [
+      0.5,
+      0.25,
+      -1
+     ],
+     "swap": true
+    },
+    "calls": [
+     [
+      0,
+      -1
+     ]
+    ]
+   }
+  },
+  {
+   "name": "zerovec_local_zero_11_4_False",
+   "inputs": {
+    "op": "local",
+    "solver": {
+     "op": 11,
+     "req": 1,
+     "tol": 1e-06,
+     "best": 4.0,
+     "vecs": [
+      [
+       0,
+       0,
+       0
+      ],
+      [
+       0,
+       0,
+       0
+      ]
+     ]
+    },
+    "objects": [
+     {
+      "vertex": {
+       "p": [
+        3,
+        -2,
+        5
+       ],
+       "tol": 1e-07
+      }
+     },
+     {
+      "vertex": {
+       "p": [
+        0,
+        0,
+        0
+       ],
+       "tol": 0.0
+      }
+     }
+    ],
+    "local": {
+     "kind": 2,
+     "point": [
+      0.5,
+      0.25,
+      -1
+     ],
+     "swap": false
+    },
+    "calls": [
+     [
+      -1,
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "zerovec_local_zero_11_4_True",
+   "inputs": {
+    "op": "local",
+    "solver": {
+     "op": 11,
+     "req": 1,
+     "tol": 1e-06,
+     "best": 4.0,
+     "vecs": [
+      [
+       0,
+       0,
+       0
+      ],
+      [
+       0,
+       0,
+       0
+      ]
+     ]
+    },
+    "objects": [
+     {
+      "vertex": {
+       "p": [
+        3,
+        -2,
+        5
+       ],
+       "tol": 1e-07
+      }
+     },
+     {
+      "vertex": {
+       "p": [
+        0,
+        0,
+        0
+       ],
+       "tol": 0.0
+      }
+     }
+    ],
+    "local": {
+     "kind": 2,
+     "point": [
+      0.5,
+      0.25,
+      -1
+     ],
+     "swap": true
+    },
+    "calls": [
+     [
+      0,
+      -1
+     ]
+    ]
+   }
+  },
+  {
+   "name": "zerovec_may_zero_11",
+   "inputs": {
+    "op": "may",
+    "solver": {
+     "op": 11,
+     "req": 1,
+     "tol": 1e-06,
+     "best": 4.0,
+     "vecs": [
+      [
+       0,
+       0,
+       0
+      ],
+      [
+       0,
+       0,
+       0
+      ]
+     ]
+    },
+    "pairs": [
+     [
+      [
+       0,
+       0,
+       0,
+       1,
+       1,
+       1
+      ],
+      [
+       0,
+       0,
+       5,
+       1,
+       1,
+       6
+      ]
+     ],
+     [
+      [
+       0,
+       0,
+       0,
+       1,
+       1,
+       1
+      ],
+      [
+       4,
+       0,
+       0,
+       5,
+       1,
+       1
+      ]
+     ],
+     [
+      [
+       0,
+       0,
+       0,
+       1,
+       1,
+       1
+      ],
+      [
+       0.5,
+       0.5,
+       0.5,
+       2,
+       2,
+       2
+      ]
+     ]
+    ]
+   }
+  },
+  {
+   "name": "zerovec_local_zero_12_1e+20_False",
+   "inputs": {
+    "op": "local",
+    "solver": {
+     "op": 12,
+     "req": 1,
+     "tol": 1e-06,
+     "best": 1e+20,
+     "vecs": [
+      [
+       0,
+       0,
+       0
+      ],
+      [
+       0,
+       0,
+       0
+      ]
+     ]
+    },
+    "objects": [
+     {
+      "vertex": {
+       "p": [
+        3,
+        -2,
+        5
+       ],
+       "tol": 1e-07
+      }
+     },
+     {
+      "vertex": {
+       "p": [
+        0,
+        0,
+        0
+       ],
+       "tol": 0.0
+      }
+     }
+    ],
+    "local": {
+     "kind": 2,
+     "point": [
+      0.5,
+      0.25,
+      -1
+     ],
+     "swap": false
+    },
+    "calls": [
+     [
+      -1,
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "zerovec_local_zero_12_1e+20_True",
+   "inputs": {
+    "op": "local",
+    "solver": {
+     "op": 12,
+     "req": 1,
+     "tol": 1e-06,
+     "best": 1e+20,
+     "vecs": [
+      [
+       0,
+       0,
+       0
+      ],
+      [
+       0,
+       0,
+       0
+      ]
+     ]
+    },
+    "objects": [
+     {
+      "vertex": {
+       "p": [
+        3,
+        -2,
+        5
+       ],
+       "tol": 1e-07
+      }
+     },
+     {
+      "vertex": {
+       "p": [
+        0,
+        0,
+        0
+       ],
+       "tol": 0.0
+      }
+     }
+    ],
+    "local": {
+     "kind": 2,
+     "point": [
+      0.5,
+      0.25,
+      -1
+     ],
+     "swap": true
+    },
+    "calls": [
+     [
+      0,
+      -1
+     ]
+    ]
+   }
+  },
+  {
+   "name": "zerovec_local_zero_12_4_False",
+   "inputs": {
+    "op": "local",
+    "solver": {
+     "op": 12,
+     "req": 1,
+     "tol": 1e-06,
+     "best": 4.0,
+     "vecs": [
+      [
+       0,
+       0,
+       0
+      ],
+      [
+       0,
+       0,
+       0
+      ]
+     ]
+    },
+    "objects": [
+     {
+      "vertex": {
+       "p": [
+        3,
+        -2,
+        5
+       ],
+       "tol": 1e-07
+      }
+     },
+     {
+      "vertex": {
+       "p": [
+        0,
+        0,
+        0
+       ],
+       "tol": 0.0
+      }
+     }
+    ],
+    "local": {
+     "kind": 2,
+     "point": [
+      0.5,
+      0.25,
+      -1
+     ],
+     "swap": false
+    },
+    "calls": [
+     [
+      -1,
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "zerovec_local_zero_12_4_True",
+   "inputs": {
+    "op": "local",
+    "solver": {
+     "op": 12,
+     "req": 1,
+     "tol": 1e-06,
+     "best": 4.0,
+     "vecs": [
+      [
+       0,
+       0,
+       0
+      ],
+      [
+       0,
+       0,
+       0
+      ]
+     ]
+    },
+    "objects": [
+     {
+      "vertex": {
+       "p": [
+        3,
+        -2,
+        5
+       ],
+       "tol": 1e-07
+      }
+     },
+     {
+      "vertex": {
+       "p": [
+        0,
+        0,
+        0
+       ],
+       "tol": 0.0
+      }
+     }
+    ],
+    "local": {
+     "kind": 2,
+     "point": [
+      0.5,
+      0.25,
+      -1
+     ],
+     "swap": true
+    },
+    "calls": [
+     [
+      0,
+      -1
+     ]
+    ]
+   }
+  },
+  {
+   "name": "zerovec_may_zero_12",
+   "inputs": {
+    "op": "may",
+    "solver": {
+     "op": 12,
+     "req": 1,
+     "tol": 1e-06,
+     "best": 4.0,
+     "vecs": [
+      [
+       0,
+       0,
+       0
+      ],
+      [
+       0,
+       0,
+       0
+      ]
+     ]
+    },
+    "pairs": [
+     [
+      [
+       0,
+       0,
+       0,
+       1,
+       1,
+       1
+      ],
+      [
+       0,
+       0,
+       5,
+       1,
+       1,
+       6
+      ]
+     ],
+     [
+      [
+       0,
+       0,
+       0,
+       1,
+       1,
+       1
+      ],
+      [
+       4,
+       0,
+       0,
+       5,
+       1,
+       1
+      ]
+     ],
+     [
+      [
+       0,
+       0,
+       0,
+       1,
+       1,
+       1
+      ],
+      [
+       0.5,
+       0.5,
+       0.5,
+       2,
+       2,
+       2
+      ]
+     ]
+    ]
+   }
+  },
+  {
+   "name": "zerovec_local_zero_13_1e+20_False",
+   "inputs": {
+    "op": "local",
+    "solver": {
+     "op": 13,
+     "req": 1,
+     "tol": 1e-06,
+     "best": 1e+20,
+     "vecs": [
+      [
+       0,
+       0,
+       0
+      ],
+      [
+       0,
+       0,
+       0
+      ]
+     ]
+    },
+    "objects": [
+     {
+      "vertex": {
+       "p": [
+        3,
+        -2,
+        5
+       ],
+       "tol": 1e-07
+      }
+     },
+     {
+      "vertex": {
+       "p": [
+        0,
+        0,
+        0
+       ],
+       "tol": 0.0
+      }
+     }
+    ],
+    "local": {
+     "kind": 2,
+     "point": [
+      0.5,
+      0.25,
+      -1
+     ],
+     "swap": false
+    },
+    "calls": [
+     [
+      -1,
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "zerovec_local_zero_13_1e+20_True",
+   "inputs": {
+    "op": "local",
+    "solver": {
+     "op": 13,
+     "req": 1,
+     "tol": 1e-06,
+     "best": 1e+20,
+     "vecs": [
+      [
+       0,
+       0,
+       0
+      ],
+      [
+       0,
+       0,
+       0
+      ]
+     ]
+    },
+    "objects": [
+     {
+      "vertex": {
+       "p": [
+        3,
+        -2,
+        5
+       ],
+       "tol": 1e-07
+      }
+     },
+     {
+      "vertex": {
+       "p": [
+        0,
+        0,
+        0
+       ],
+       "tol": 0.0
+      }
+     }
+    ],
+    "local": {
+     "kind": 2,
+     "point": [
+      0.5,
+      0.25,
+      -1
+     ],
+     "swap": true
+    },
+    "calls": [
+     [
+      0,
+      -1
+     ]
+    ]
+   }
+  },
+  {
+   "name": "zerovec_local_zero_13_4_False",
+   "inputs": {
+    "op": "local",
+    "solver": {
+     "op": 13,
+     "req": 1,
+     "tol": 1e-06,
+     "best": 4.0,
+     "vecs": [
+      [
+       0,
+       0,
+       0
+      ],
+      [
+       0,
+       0,
+       0
+      ]
+     ]
+    },
+    "objects": [
+     {
+      "vertex": {
+       "p": [
+        3,
+        -2,
+        5
+       ],
+       "tol": 1e-07
+      }
+     },
+     {
+      "vertex": {
+       "p": [
+        0,
+        0,
+        0
+       ],
+       "tol": 0.0
+      }
+     }
+    ],
+    "local": {
+     "kind": 2,
+     "point": [
+      0.5,
+      0.25,
+      -1
+     ],
+     "swap": false
+    },
+    "calls": [
+     [
+      -1,
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "zerovec_local_zero_13_4_True",
+   "inputs": {
+    "op": "local",
+    "solver": {
+     "op": 13,
+     "req": 1,
+     "tol": 1e-06,
+     "best": 4.0,
+     "vecs": [
+      [
+       0,
+       0,
+       0
+      ],
+      [
+       0,
+       0,
+       0
+      ]
+     ]
+    },
+    "objects": [
+     {
+      "vertex": {
+       "p": [
+        3,
+        -2,
+        5
+       ],
+       "tol": 1e-07
+      }
+     },
+     {
+      "vertex": {
+       "p": [
+        0,
+        0,
+        0
+       ],
+       "tol": 0.0
+      }
+     }
+    ],
+    "local": {
+     "kind": 2,
+     "point": [
+      0.5,
+      0.25,
+      -1
+     ],
+     "swap": true
+    },
+    "calls": [
+     [
+      0,
+      -1
+     ]
+    ]
+   }
+  },
+  {
+   "name": "zerovec_may_zero_13",
+   "inputs": {
+    "op": "may",
+    "solver": {
+     "op": 13,
+     "req": 1,
+     "tol": 1e-06,
+     "best": 4.0,
+     "vecs": [
+      [
+       0,
+       0,
+       0
+      ],
+      [
+       0,
+       0,
+       0
+      ]
+     ]
+    },
+    "pairs": [
+     [
+      [
+       0,
+       0,
+       0,
+       1,
+       1,
+       1
+      ],
+      [
+       0,
+       0,
+       5,
+       1,
+       1,
+       6
+      ]
+     ],
+     [
+      [
+       0,
+       0,
+       0,
+       1,
+       1,
+       1
+      ],
+      [
+       4,
+       0,
+       0,
+       5,
+       1,
+       1
+      ]
+     ],
+     [
+      [
+       0,
+       0,
+       0,
+       1,
+       1,
+       1
+      ],
+      [
+       0.5,
+       0.5,
+       0.5,
+       2,
+       2,
+       2
+      ]
+     ]
+    ]
+   }
+  },
+  {
+   "name": "zerovec_local_zero_14_1e+20_False",
+   "inputs": {
+    "op": "local",
+    "solver": {
+     "op": 14,
+     "req": 1,
+     "tol": 1e-06,
+     "best": 1e+20,
+     "vecs": [
+      [
+       0,
+       0,
+       0
+      ]
+     ]
+    },
+    "objects": [
+     {
+      "vertex": {
+       "p": [
+        3,
+        -2,
+        5
+       ],
+       "tol": 1e-07
+      }
+     },
+     {
+      "vertex": {
+       "p": [
+        0,
+        0,
+        0
+       ],
+       "tol": 0.0
+      }
+     }
+    ],
+    "local": {
+     "kind": 2,
+     "point": [
+      0.5,
+      0.25,
+      -1
+     ],
+     "swap": false
+    },
+    "calls": [
+     [
+      -1,
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "zerovec_local_zero_14_1e+20_True",
+   "inputs": {
+    "op": "local",
+    "solver": {
+     "op": 14,
+     "req": 1,
+     "tol": 1e-06,
+     "best": 1e+20,
+     "vecs": [
+      [
+       0,
+       0,
+       0
+      ]
+     ]
+    },
+    "objects": [
+     {
+      "vertex": {
+       "p": [
+        3,
+        -2,
+        5
+       ],
+       "tol": 1e-07
+      }
+     },
+     {
+      "vertex": {
+       "p": [
+        0,
+        0,
+        0
+       ],
+       "tol": 0.0
+      }
+     }
+    ],
+    "local": {
+     "kind": 2,
+     "point": [
+      0.5,
+      0.25,
+      -1
+     ],
+     "swap": true
+    },
+    "calls": [
+     [
+      0,
+      -1
+     ]
+    ]
+   }
+  },
+  {
+   "name": "zerovec_local_zero_14_4_False",
+   "inputs": {
+    "op": "local",
+    "solver": {
+     "op": 14,
+     "req": 1,
+     "tol": 1e-06,
+     "best": 4.0,
+     "vecs": [
+      [
+       0,
+       0,
+       0
+      ]
+     ]
+    },
+    "objects": [
+     {
+      "vertex": {
+       "p": [
+        3,
+        -2,
+        5
+       ],
+       "tol": 1e-07
+      }
+     },
+     {
+      "vertex": {
+       "p": [
+        0,
+        0,
+        0
+       ],
+       "tol": 0.0
+      }
+     }
+    ],
+    "local": {
+     "kind": 2,
+     "point": [
+      0.5,
+      0.25,
+      -1
+     ],
+     "swap": false
+    },
+    "calls": [
+     [
+      -1,
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "zerovec_local_zero_14_4_True",
+   "inputs": {
+    "op": "local",
+    "solver": {
+     "op": 14,
+     "req": 1,
+     "tol": 1e-06,
+     "best": 4.0,
+     "vecs": [
+      [
+       0,
+       0,
+       0
+      ]
+     ]
+    },
+    "objects": [
+     {
+      "vertex": {
+       "p": [
+        3,
+        -2,
+        5
+       ],
+       "tol": 1e-07
+      }
+     },
+     {
+      "vertex": {
+       "p": [
+        0,
+        0,
+        0
+       ],
+       "tol": 0.0
+      }
+     }
+    ],
+    "local": {
+     "kind": 2,
+     "point": [
+      0.5,
+      0.25,
+      -1
+     ],
+     "swap": true
+    },
+    "calls": [
+     [
+      0,
+      -1
+     ]
+    ]
+   }
+  },
+  {
+   "name": "zerovec_may_zero_14",
+   "inputs": {
+    "op": "may",
+    "solver": {
+     "op": 14,
+     "req": 1,
+     "tol": 1e-06,
+     "best": 4.0,
+     "vecs": [
+      [
+       0,
+       0,
+       0
+      ]
+     ]
+    },
+    "pairs": [
+     [
+      [
+       0,
+       0,
+       0,
+       1,
+       1,
+       1
+      ],
+      [
+       0,
+       0,
+       5,
+       1,
+       1,
+       6
+      ]
+     ],
+     [
+      [
+       0,
+       0,
+       0,
+       1,
+       1,
+       1
+      ],
+      [
+       4,
+       0,
+       0,
+       5,
+       1,
+       1
+      ]
+     ],
+     [
+      [
+       0,
+       0,
+       0,
+       1,
+       1,
+       1
+      ],
+      [
+       0.5,
+       0.5,
+       0.5,
+       2,
+       2,
+       2
+      ]
+     ]
+    ]
+   }
+  },
+  {
+   "name": "zerovec_local_zero_15_1e+20_False",
+   "inputs": {
+    "op": "local",
+    "solver": {
+     "op": 15,
+     "req": 1,
+     "tol": 1e-06,
+     "best": 1e+20,
+     "vecs": [
+      [
+       0,
+       0,
+       0
+      ]
+     ]
+    },
+    "objects": [
+     {
+      "vertex": {
+       "p": [
+        3,
+        -2,
+        5
+       ],
+       "tol": 1e-07
+      }
+     },
+     {
+      "vertex": {
+       "p": [
+        0,
+        0,
+        0
+       ],
+       "tol": 0.0
+      }
+     }
+    ],
+    "local": {
+     "kind": 2,
+     "point": [
+      0.5,
+      0.25,
+      -1
+     ],
+     "swap": false
+    },
+    "calls": [
+     [
+      -1,
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "zerovec_local_zero_15_1e+20_True",
+   "inputs": {
+    "op": "local",
+    "solver": {
+     "op": 15,
+     "req": 1,
+     "tol": 1e-06,
+     "best": 1e+20,
+     "vecs": [
+      [
+       0,
+       0,
+       0
+      ]
+     ]
+    },
+    "objects": [
+     {
+      "vertex": {
+       "p": [
+        3,
+        -2,
+        5
+       ],
+       "tol": 1e-07
+      }
+     },
+     {
+      "vertex": {
+       "p": [
+        0,
+        0,
+        0
+       ],
+       "tol": 0.0
+      }
+     }
+    ],
+    "local": {
+     "kind": 2,
+     "point": [
+      0.5,
+      0.25,
+      -1
+     ],
+     "swap": true
+    },
+    "calls": [
+     [
+      0,
+      -1
+     ]
+    ]
+   }
+  },
+  {
+   "name": "zerovec_local_zero_15_4_False",
+   "inputs": {
+    "op": "local",
+    "solver": {
+     "op": 15,
+     "req": 1,
+     "tol": 1e-06,
+     "best": 4.0,
+     "vecs": [
+      [
+       0,
+       0,
+       0
+      ]
+     ]
+    },
+    "objects": [
+     {
+      "vertex": {
+       "p": [
+        3,
+        -2,
+        5
+       ],
+       "tol": 1e-07
+      }
+     },
+     {
+      "vertex": {
+       "p": [
+        0,
+        0,
+        0
+       ],
+       "tol": 0.0
+      }
+     }
+    ],
+    "local": {
+     "kind": 2,
+     "point": [
+      0.5,
+      0.25,
+      -1
+     ],
+     "swap": false
+    },
+    "calls": [
+     [
+      -1,
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "zerovec_local_zero_15_4_True",
+   "inputs": {
+    "op": "local",
+    "solver": {
+     "op": 15,
+     "req": 1,
+     "tol": 1e-06,
+     "best": 4.0,
+     "vecs": [
+      [
+       0,
+       0,
+       0
+      ]
+     ]
+    },
+    "objects": [
+     {
+      "vertex": {
+       "p": [
+        3,
+        -2,
+        5
+       ],
+       "tol": 1e-07
+      }
+     },
+     {
+      "vertex": {
+       "p": [
+        0,
+        0,
+        0
+       ],
+       "tol": 0.0
+      }
+     }
+    ],
+    "local": {
+     "kind": 2,
+     "point": [
+      0.5,
+      0.25,
+      -1
+     ],
+     "swap": true
+    },
+    "calls": [
+     [
+      0,
+      -1
+     ]
+    ]
+   }
+  },
+  {
+   "name": "zerovec_may_zero_15",
+   "inputs": {
+    "op": "may",
+    "solver": {
+     "op": 15,
+     "req": 1,
+     "tol": 1e-06,
+     "best": 4.0,
+     "vecs": [
+      [
+       0,
+       0,
+       0
+      ]
+     ]
+    },
+    "pairs": [
+     [
+      [
+       0,
+       0,
+       0,
+       1,
+       1,
+       1
+      ],
+      [
+       0,
+       0,
+       5,
+       1,
+       1,
+       6
+      ]
+     ],
+     [
+      [
+       0,
+       0,
+       0,
+       1,
+       1,
+       1
+      ],
+      [
+       4,
+       0,
+       0,
+       5,
+       1,
+       1
+      ]
+     ],
+     [
+      [
+       0,
+       0,
+       0,
+       1,
+       1,
+       1
+      ],
+      [
+       0.5,
+       0.5,
+       0.5,
+       2,
+       2,
+       2
+      ]
+     ]
+    ]
+   }
+  },
+  {
+   "name": "zerovec_local_zero_21_1e+20_False",
+   "inputs": {
+    "op": "local",
+    "solver": {
+     "op": 21,
+     "req": 1,
+     "tol": 1e-06,
+     "best": 1e+20,
+     "vecs": [
+      [
+       0,
+       0,
+       0
+      ],
+      [
+       0,
+       0,
+       0
+      ]
+     ]
+    },
+    "objects": [
+     {
+      "vertex": {
+       "p": [
+        3,
+        -2,
+        5
+       ],
+       "tol": 1e-07
+      }
+     },
+     {
+      "vertex": {
+       "p": [
+        0,
+        0,
+        0
+       ],
+       "tol": 0.0
+      }
+     }
+    ],
+    "local": {
+     "kind": 2,
+     "point": [
+      0.5,
+      0.25,
+      -1
+     ],
+     "swap": false
+    },
+    "calls": [
+     [
+      -1,
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "zerovec_local_zero_21_1e+20_True",
+   "inputs": {
+    "op": "local",
+    "solver": {
+     "op": 21,
+     "req": 1,
+     "tol": 1e-06,
+     "best": 1e+20,
+     "vecs": [
+      [
+       0,
+       0,
+       0
+      ],
+      [
+       0,
+       0,
+       0
+      ]
+     ]
+    },
+    "objects": [
+     {
+      "vertex": {
+       "p": [
+        3,
+        -2,
+        5
+       ],
+       "tol": 1e-07
+      }
+     },
+     {
+      "vertex": {
+       "p": [
+        0,
+        0,
+        0
+       ],
+       "tol": 0.0
+      }
+     }
+    ],
+    "local": {
+     "kind": 2,
+     "point": [
+      0.5,
+      0.25,
+      -1
+     ],
+     "swap": true
+    },
+    "calls": [
+     [
+      0,
+      -1
+     ]
+    ]
+   }
+  },
+  {
+   "name": "zerovec_local_zero_21_4_False",
+   "inputs": {
+    "op": "local",
+    "solver": {
+     "op": 21,
+     "req": 1,
+     "tol": 1e-06,
+     "best": 4.0,
+     "vecs": [
+      [
+       0,
+       0,
+       0
+      ],
+      [
+       0,
+       0,
+       0
+      ]
+     ]
+    },
+    "objects": [
+     {
+      "vertex": {
+       "p": [
+        3,
+        -2,
+        5
+       ],
+       "tol": 1e-07
+      }
+     },
+     {
+      "vertex": {
+       "p": [
+        0,
+        0,
+        0
+       ],
+       "tol": 0.0
+      }
+     }
+    ],
+    "local": {
+     "kind": 2,
+     "point": [
+      0.5,
+      0.25,
+      -1
+     ],
+     "swap": false
+    },
+    "calls": [
+     [
+      -1,
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "zerovec_local_zero_21_4_True",
+   "inputs": {
+    "op": "local",
+    "solver": {
+     "op": 21,
+     "req": 1,
+     "tol": 1e-06,
+     "best": 4.0,
+     "vecs": [
+      [
+       0,
+       0,
+       0
+      ],
+      [
+       0,
+       0,
+       0
+      ]
+     ]
+    },
+    "objects": [
+     {
+      "vertex": {
+       "p": [
+        3,
+        -2,
+        5
+       ],
+       "tol": 1e-07
+      }
+     },
+     {
+      "vertex": {
+       "p": [
+        0,
+        0,
+        0
+       ],
+       "tol": 0.0
+      }
+     }
+    ],
+    "local": {
+     "kind": 2,
+     "point": [
+      0.5,
+      0.25,
+      -1
+     ],
+     "swap": true
+    },
+    "calls": [
+     [
+      0,
+      -1
+     ]
+    ]
+   }
+  },
+  {
+   "name": "zerovec_may_zero_21",
+   "inputs": {
+    "op": "may",
+    "solver": {
+     "op": 21,
+     "req": 1,
+     "tol": 1e-06,
+     "best": 4.0,
+     "vecs": [
+      [
+       0,
+       0,
+       0
+      ],
+      [
+       0,
+       0,
+       0
+      ]
+     ]
+    },
+    "pairs": [
+     [
+      [
+       0,
+       0,
+       0,
+       1,
+       1,
+       1
+      ],
+      [
+       0,
+       0,
+       5,
+       1,
+       1,
+       6
+      ]
+     ],
+     [
+      [
+       0,
+       0,
+       0,
+       1,
+       1,
+       1
+      ],
+      [
+       4,
+       0,
+       0,
+       5,
+       1,
+       1
+      ]
+     ],
+     [
+      [
+       0,
+       0,
+       0,
+       1,
+       1,
+       1
+      ],
+      [
+       0.5,
+       0.5,
+       0.5,
+       2,
+       2,
+       2
+      ]
+     ]
+    ]
+   }
+  },
+  {
+   "name": "zerovec_local_zero0_8_1e+20_False",
+   "inputs": {
+    "op": "local",
+    "solver": {
+     "op": 8,
+     "req": 1,
+     "tol": 1e-06,
+     "best": 1e+20,
+     "vecs": [
+      [
+       0,
+       0,
+       0
+      ]
+     ]
+    },
+    "objects": [
+     {
+      "vertex": {
+       "p": [
+        3,
+        -2,
+        5
+       ],
+       "tol": 1e-07
+      }
+     },
+     {
+      "vertex": {
+       "p": [
+        0,
+        0,
+        0
+       ],
+       "tol": 0.0
+      }
+     }
+    ],
+    "local": {
+     "kind": 2,
+     "point": [
+      0.5,
+      0.25,
+      -1
+     ],
+     "swap": false
+    },
+    "calls": [
+     [
+      -1,
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "zerovec_local_zero0_8_1e+20_True",
+   "inputs": {
+    "op": "local",
+    "solver": {
+     "op": 8,
+     "req": 1,
+     "tol": 1e-06,
+     "best": 1e+20,
+     "vecs": [
+      [
+       0,
+       0,
+       0
+      ]
+     ]
+    },
+    "objects": [
+     {
+      "vertex": {
+       "p": [
+        3,
+        -2,
+        5
+       ],
+       "tol": 1e-07
+      }
+     },
+     {
+      "vertex": {
+       "p": [
+        0,
+        0,
+        0
+       ],
+       "tol": 0.0
+      }
+     }
+    ],
+    "local": {
+     "kind": 2,
+     "point": [
+      0.5,
+      0.25,
+      -1
+     ],
+     "swap": true
+    },
+    "calls": [
+     [
+      0,
+      -1
+     ]
+    ]
+   }
+  },
+  {
+   "name": "zerovec_local_zero0_8_4_False",
+   "inputs": {
+    "op": "local",
+    "solver": {
+     "op": 8,
+     "req": 1,
+     "tol": 1e-06,
+     "best": 4.0,
+     "vecs": [
+      [
+       0,
+       0,
+       0
+      ]
+     ]
+    },
+    "objects": [
+     {
+      "vertex": {
+       "p": [
+        3,
+        -2,
+        5
+       ],
+       "tol": 1e-07
+      }
+     },
+     {
+      "vertex": {
+       "p": [
+        0,
+        0,
+        0
+       ],
+       "tol": 0.0
+      }
+     }
+    ],
+    "local": {
+     "kind": 2,
+     "point": [
+      0.5,
+      0.25,
+      -1
+     ],
+     "swap": false
+    },
+    "calls": [
+     [
+      -1,
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "zerovec_local_zero0_8_4_True",
+   "inputs": {
+    "op": "local",
+    "solver": {
+     "op": 8,
+     "req": 1,
+     "tol": 1e-06,
+     "best": 4.0,
+     "vecs": [
+      [
+       0,
+       0,
+       0
+      ]
+     ]
+    },
+    "objects": [
+     {
+      "vertex": {
+       "p": [
+        3,
+        -2,
+        5
+       ],
+       "tol": 1e-07
+      }
+     },
+     {
+      "vertex": {
+       "p": [
+        0,
+        0,
+        0
+       ],
+       "tol": 0.0
+      }
+     }
+    ],
+    "local": {
+     "kind": 2,
+     "point": [
+      0.5,
+      0.25,
+      -1
+     ],
+     "swap": true
+    },
+    "calls": [
+     [
+      0,
+      -1
+     ]
+    ]
+   }
+  },
+  {
+   "name": "zerovec_local_zero0_9_1e+20_False",
+   "inputs": {
+    "op": "local",
+    "solver": {
+     "op": 9,
+     "req": 1,
+     "tol": 1e-06,
+     "best": 1e+20,
+     "vecs": [
+      [
+       0,
+       0,
+       0
+      ]
+     ]
+    },
+    "objects": [
+     {
+      "vertex": {
+       "p": [
+        3,
+        -2,
+        5
+       ],
+       "tol": 1e-07
+      }
+     },
+     {
+      "vertex": {
+       "p": [
+        0,
+        0,
+        0
+       ],
+       "tol": 0.0
+      }
+     }
+    ],
+    "local": {
+     "kind": 2,
+     "point": [
+      0.5,
+      0.25,
+      -1
+     ],
+     "swap": false
+    },
+    "calls": [
+     [
+      -1,
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "zerovec_local_zero0_9_1e+20_True",
+   "inputs": {
+    "op": "local",
+    "solver": {
+     "op": 9,
+     "req": 1,
+     "tol": 1e-06,
+     "best": 1e+20,
+     "vecs": [
+      [
+       0,
+       0,
+       0
+      ]
+     ]
+    },
+    "objects": [
+     {
+      "vertex": {
+       "p": [
+        3,
+        -2,
+        5
+       ],
+       "tol": 1e-07
+      }
+     },
+     {
+      "vertex": {
+       "p": [
+        0,
+        0,
+        0
+       ],
+       "tol": 0.0
+      }
+     }
+    ],
+    "local": {
+     "kind": 2,
+     "point": [
+      0.5,
+      0.25,
+      -1
+     ],
+     "swap": true
+    },
+    "calls": [
+     [
+      0,
+      -1
+     ]
+    ]
+   }
+  },
+  {
+   "name": "zerovec_local_zero0_9_4_False",
+   "inputs": {
+    "op": "local",
+    "solver": {
+     "op": 9,
+     "req": 1,
+     "tol": 1e-06,
+     "best": 4.0,
+     "vecs": [
+      [
+       0,
+       0,
+       0
+      ]
+     ]
+    },
+    "objects": [
+     {
+      "vertex": {
+       "p": [
+        3,
+        -2,
+        5
+       ],
+       "tol": 1e-07
+      }
+     },
+     {
+      "vertex": {
+       "p": [
+        0,
+        0,
+        0
+       ],
+       "tol": 0.0
+      }
+     }
+    ],
+    "local": {
+     "kind": 2,
+     "point": [
+      0.5,
+      0.25,
+      -1
+     ],
+     "swap": false
+    },
+    "calls": [
+     [
+      -1,
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "zerovec_local_zero0_9_4_True",
+   "inputs": {
+    "op": "local",
+    "solver": {
+     "op": 9,
+     "req": 1,
+     "tol": 1e-06,
+     "best": 4.0,
+     "vecs": [
+      [
+       0,
+       0,
+       0
+      ]
+     ]
+    },
+    "objects": [
+     {
+      "vertex": {
+       "p": [
+        3,
+        -2,
+        5
+       ],
+       "tol": 1e-07
+      }
+     },
+     {
+      "vertex": {
+       "p": [
+        0,
+        0,
+        0
+       ],
+       "tol": 0.0
+      }
+     }
+    ],
+    "local": {
+     "kind": 2,
+     "point": [
+      0.5,
+      0.25,
+      -1
+     ],
+     "swap": true
+    },
+    "calls": [
+     [
+      0,
+      -1
+     ]
+    ]
+   }
+  },
+  {
+   "name": "zerovec_may_zero0_9",
+   "inputs": {
+    "op": "may",
+    "solver": {
+     "op": 9,
+     "req": 1,
+     "tol": 1e-06,
+     "best": 4.0,
+     "vecs": [
+      [
+       0,
+       0,
+       0
+      ]
+     ]
+    },
+    "pairs": [
+     [
+      [
+       0,
+       0,
+       0,
+       1,
+       1,
+       1
+      ],
+      [
+       0,
+       0,
+       5,
+       1,
+       1,
+       6
+      ]
+     ],
+     [
+      [
+       0,
+       0,
+       0,
+       1,
+       1,
+       1
+      ],
+      [
+       4,
+       0,
+       0,
+       5,
+       1,
+       1
+      ]
+     ],
+     [
+      [
+       0,
+       0,
+       0,
+       1,
+       1,
+       1
+      ],
+      [
+       0.5,
+       0.5,
+       0.5,
+       2,
+       2,
+       2
+      ]
+     ]
+    ]
+   }
+  },
+  {
+   "name": "zerovec_local_zero0_11_1e+20_False",
+   "inputs": {
+    "op": "local",
+    "solver": {
+     "op": 11,
+     "req": 1,
+     "tol": 1e-06,
+     "best": 1e+20,
+     "vecs": [
+      [
+       0,
+       0,
+       0
+      ],
+      [
+       1,
+       0,
+       0
+      ]
+     ]
+    },
+    "objects": [
+     {
+      "vertex": {
+       "p": [
+        3,
+        -2,
+        5
+       ],
+       "tol": 1e-07
+      }
+     },
+     {
+      "vertex": {
+       "p": [
+        0,
+        0,
+        0
+       ],
+       "tol": 0.0
+      }
+     }
+    ],
+    "local": {
+     "kind": 2,
+     "point": [
+      0.5,
+      0.25,
+      -1
+     ],
+     "swap": false
+    },
+    "calls": [
+     [
+      -1,
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "zerovec_local_zero0_11_1e+20_True",
+   "inputs": {
+    "op": "local",
+    "solver": {
+     "op": 11,
+     "req": 1,
+     "tol": 1e-06,
+     "best": 1e+20,
+     "vecs": [
+      [
+       0,
+       0,
+       0
+      ],
+      [
+       1,
+       0,
+       0
+      ]
+     ]
+    },
+    "objects": [
+     {
+      "vertex": {
+       "p": [
+        3,
+        -2,
+        5
+       ],
+       "tol": 1e-07
+      }
+     },
+     {
+      "vertex": {
+       "p": [
+        0,
+        0,
+        0
+       ],
+       "tol": 0.0
+      }
+     }
+    ],
+    "local": {
+     "kind": 2,
+     "point": [
+      0.5,
+      0.25,
+      -1
+     ],
+     "swap": true
+    },
+    "calls": [
+     [
+      0,
+      -1
+     ]
+    ]
+   }
+  },
+  {
+   "name": "zerovec_local_zero0_11_4_False",
+   "inputs": {
+    "op": "local",
+    "solver": {
+     "op": 11,
+     "req": 1,
+     "tol": 1e-06,
+     "best": 4.0,
+     "vecs": [
+      [
+       0,
+       0,
+       0
+      ],
+      [
+       1,
+       0,
+       0
+      ]
+     ]
+    },
+    "objects": [
+     {
+      "vertex": {
+       "p": [
+        3,
+        -2,
+        5
+       ],
+       "tol": 1e-07
+      }
+     },
+     {
+      "vertex": {
+       "p": [
+        0,
+        0,
+        0
+       ],
+       "tol": 0.0
+      }
+     }
+    ],
+    "local": {
+     "kind": 2,
+     "point": [
+      0.5,
+      0.25,
+      -1
+     ],
+     "swap": false
+    },
+    "calls": [
+     [
+      -1,
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "zerovec_local_zero0_11_4_True",
+   "inputs": {
+    "op": "local",
+    "solver": {
+     "op": 11,
+     "req": 1,
+     "tol": 1e-06,
+     "best": 4.0,
+     "vecs": [
+      [
+       0,
+       0,
+       0
+      ],
+      [
+       1,
+       0,
+       0
+      ]
+     ]
+    },
+    "objects": [
+     {
+      "vertex": {
+       "p": [
+        3,
+        -2,
+        5
+       ],
+       "tol": 1e-07
+      }
+     },
+     {
+      "vertex": {
+       "p": [
+        0,
+        0,
+        0
+       ],
+       "tol": 0.0
+      }
+     }
+    ],
+    "local": {
+     "kind": 2,
+     "point": [
+      0.5,
+      0.25,
+      -1
+     ],
+     "swap": true
+    },
+    "calls": [
+     [
+      0,
+      -1
+     ]
+    ]
+   }
+  },
+  {
+   "name": "zerovec_may_zero0_11",
+   "inputs": {
+    "op": "may",
+    "solver": {
+     "op": 11,
+     "req": 1,
+     "tol": 1e-06,
+     "best": 4.0,
+     "vecs": [
+      [
+       0,
+       0,
+       0
+      ],
+      [
+       1,
+       0,
+       0
+      ]
+     ]
+    },
+    "pairs": [
+     [
+      [
+       0,
+       0,
+       0,
+       1,
+       1,
+       1
+      ],
+      [
+       0,
+       0,
+       5,
+       1,
+       1,
+       6
+      ]
+     ],
+     [
+      [
+       0,
+       0,
+       0,
+       1,
+       1,
+       1
+      ],
+      [
+       4,
+       0,
+       0,
+       5,
+       1,
+       1
+      ]
+     ],
+     [
+      [
+       0,
+       0,
+       0,
+       1,
+       1,
+       1
+      ],
+      [
+       0.5,
+       0.5,
+       0.5,
+       2,
+       2,
+       2
+      ]
+     ]
+    ]
+   }
+  },
+  {
+   "name": "zerovec_local_zero0_12_1e+20_False",
+   "inputs": {
+    "op": "local",
+    "solver": {
+     "op": 12,
+     "req": 1,
+     "tol": 1e-06,
+     "best": 1e+20,
+     "vecs": [
+      [
+       0,
+       0,
+       0
+      ],
+      [
+       1,
+       0,
+       0
+      ]
+     ]
+    },
+    "objects": [
+     {
+      "vertex": {
+       "p": [
+        3,
+        -2,
+        5
+       ],
+       "tol": 1e-07
+      }
+     },
+     {
+      "vertex": {
+       "p": [
+        0,
+        0,
+        0
+       ],
+       "tol": 0.0
+      }
+     }
+    ],
+    "local": {
+     "kind": 2,
+     "point": [
+      0.5,
+      0.25,
+      -1
+     ],
+     "swap": false
+    },
+    "calls": [
+     [
+      -1,
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "zerovec_local_zero0_12_1e+20_True",
+   "inputs": {
+    "op": "local",
+    "solver": {
+     "op": 12,
+     "req": 1,
+     "tol": 1e-06,
+     "best": 1e+20,
+     "vecs": [
+      [
+       0,
+       0,
+       0
+      ],
+      [
+       1,
+       0,
+       0
+      ]
+     ]
+    },
+    "objects": [
+     {
+      "vertex": {
+       "p": [
+        3,
+        -2,
+        5
+       ],
+       "tol": 1e-07
+      }
+     },
+     {
+      "vertex": {
+       "p": [
+        0,
+        0,
+        0
+       ],
+       "tol": 0.0
+      }
+     }
+    ],
+    "local": {
+     "kind": 2,
+     "point": [
+      0.5,
+      0.25,
+      -1
+     ],
+     "swap": true
+    },
+    "calls": [
+     [
+      0,
+      -1
+     ]
+    ]
+   }
+  },
+  {
+   "name": "zerovec_local_zero0_12_4_False",
+   "inputs": {
+    "op": "local",
+    "solver": {
+     "op": 12,
+     "req": 1,
+     "tol": 1e-06,
+     "best": 4.0,
+     "vecs": [
+      [
+       0,
+       0,
+       0
+      ],
+      [
+       1,
+       0,
+       0
+      ]
+     ]
+    },
+    "objects": [
+     {
+      "vertex": {
+       "p": [
+        3,
+        -2,
+        5
+       ],
+       "tol": 1e-07
+      }
+     },
+     {
+      "vertex": {
+       "p": [
+        0,
+        0,
+        0
+       ],
+       "tol": 0.0
+      }
+     }
+    ],
+    "local": {
+     "kind": 2,
+     "point": [
+      0.5,
+      0.25,
+      -1
+     ],
+     "swap": false
+    },
+    "calls": [
+     [
+      -1,
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "zerovec_local_zero0_12_4_True",
+   "inputs": {
+    "op": "local",
+    "solver": {
+     "op": 12,
+     "req": 1,
+     "tol": 1e-06,
+     "best": 4.0,
+     "vecs": [
+      [
+       0,
+       0,
+       0
+      ],
+      [
+       1,
+       0,
+       0
+      ]
+     ]
+    },
+    "objects": [
+     {
+      "vertex": {
+       "p": [
+        3,
+        -2,
+        5
+       ],
+       "tol": 1e-07
+      }
+     },
+     {
+      "vertex": {
+       "p": [
+        0,
+        0,
+        0
+       ],
+       "tol": 0.0
+      }
+     }
+    ],
+    "local": {
+     "kind": 2,
+     "point": [
+      0.5,
+      0.25,
+      -1
+     ],
+     "swap": true
+    },
+    "calls": [
+     [
+      0,
+      -1
+     ]
+    ]
+   }
+  },
+  {
+   "name": "zerovec_may_zero0_12",
+   "inputs": {
+    "op": "may",
+    "solver": {
+     "op": 12,
+     "req": 1,
+     "tol": 1e-06,
+     "best": 4.0,
+     "vecs": [
+      [
+       0,
+       0,
+       0
+      ],
+      [
+       1,
+       0,
+       0
+      ]
+     ]
+    },
+    "pairs": [
+     [
+      [
+       0,
+       0,
+       0,
+       1,
+       1,
+       1
+      ],
+      [
+       0,
+       0,
+       5,
+       1,
+       1,
+       6
+      ]
+     ],
+     [
+      [
+       0,
+       0,
+       0,
+       1,
+       1,
+       1
+      ],
+      [
+       4,
+       0,
+       0,
+       5,
+       1,
+       1
+      ]
+     ],
+     [
+      [
+       0,
+       0,
+       0,
+       1,
+       1,
+       1
+      ],
+      [
+       0.5,
+       0.5,
+       0.5,
+       2,
+       2,
+       2
+      ]
+     ]
+    ]
+   }
+  },
+  {
+   "name": "zerovec_local_zero0_13_1e+20_False",
+   "inputs": {
+    "op": "local",
+    "solver": {
+     "op": 13,
+     "req": 1,
+     "tol": 1e-06,
+     "best": 1e+20,
+     "vecs": [
+      [
+       0,
+       0,
+       0
+      ],
+      [
+       1,
+       0,
+       0
+      ]
+     ]
+    },
+    "objects": [
+     {
+      "vertex": {
+       "p": [
+        3,
+        -2,
+        5
+       ],
+       "tol": 1e-07
+      }
+     },
+     {
+      "vertex": {
+       "p": [
+        0,
+        0,
+        0
+       ],
+       "tol": 0.0
+      }
+     }
+    ],
+    "local": {
+     "kind": 2,
+     "point": [
+      0.5,
+      0.25,
+      -1
+     ],
+     "swap": false
+    },
+    "calls": [
+     [
+      -1,
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "zerovec_local_zero0_13_1e+20_True",
+   "inputs": {
+    "op": "local",
+    "solver": {
+     "op": 13,
+     "req": 1,
+     "tol": 1e-06,
+     "best": 1e+20,
+     "vecs": [
+      [
+       0,
+       0,
+       0
+      ],
+      [
+       1,
+       0,
+       0
+      ]
+     ]
+    },
+    "objects": [
+     {
+      "vertex": {
+       "p": [
+        3,
+        -2,
+        5
+       ],
+       "tol": 1e-07
+      }
+     },
+     {
+      "vertex": {
+       "p": [
+        0,
+        0,
+        0
+       ],
+       "tol": 0.0
+      }
+     }
+    ],
+    "local": {
+     "kind": 2,
+     "point": [
+      0.5,
+      0.25,
+      -1
+     ],
+     "swap": true
+    },
+    "calls": [
+     [
+      0,
+      -1
+     ]
+    ]
+   }
+  },
+  {
+   "name": "zerovec_local_zero0_13_4_False",
+   "inputs": {
+    "op": "local",
+    "solver": {
+     "op": 13,
+     "req": 1,
+     "tol": 1e-06,
+     "best": 4.0,
+     "vecs": [
+      [
+       0,
+       0,
+       0
+      ],
+      [
+       1,
+       0,
+       0
+      ]
+     ]
+    },
+    "objects": [
+     {
+      "vertex": {
+       "p": [
+        3,
+        -2,
+        5
+       ],
+       "tol": 1e-07
+      }
+     },
+     {
+      "vertex": {
+       "p": [
+        0,
+        0,
+        0
+       ],
+       "tol": 0.0
+      }
+     }
+    ],
+    "local": {
+     "kind": 2,
+     "point": [
+      0.5,
+      0.25,
+      -1
+     ],
+     "swap": false
+    },
+    "calls": [
+     [
+      -1,
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "zerovec_local_zero0_13_4_True",
+   "inputs": {
+    "op": "local",
+    "solver": {
+     "op": 13,
+     "req": 1,
+     "tol": 1e-06,
+     "best": 4.0,
+     "vecs": [
+      [
+       0,
+       0,
+       0
+      ],
+      [
+       1,
+       0,
+       0
+      ]
+     ]
+    },
+    "objects": [
+     {
+      "vertex": {
+       "p": [
+        3,
+        -2,
+        5
+       ],
+       "tol": 1e-07
+      }
+     },
+     {
+      "vertex": {
+       "p": [
+        0,
+        0,
+        0
+       ],
+       "tol": 0.0
+      }
+     }
+    ],
+    "local": {
+     "kind": 2,
+     "point": [
+      0.5,
+      0.25,
+      -1
+     ],
+     "swap": true
+    },
+    "calls": [
+     [
+      0,
+      -1
+     ]
+    ]
+   }
+  },
+  {
+   "name": "zerovec_may_zero0_13",
+   "inputs": {
+    "op": "may",
+    "solver": {
+     "op": 13,
+     "req": 1,
+     "tol": 1e-06,
+     "best": 4.0,
+     "vecs": [
+      [
+       0,
+       0,
+       0
+      ],
+      [
+       1,
+       0,
+       0
+      ]
+     ]
+    },
+    "pairs": [
+     [
+      [
+       0,
+       0,
+       0,
+       1,
+       1,
+       1
+      ],
+      [
+       0,
+       0,
+       5,
+       1,
+       1,
+       6
+      ]
+     ],
+     [
+      [
+       0,
+       0,
+       0,
+       1,
+       1,
+       1
+      ],
+      [
+       4,
+       0,
+       0,
+       5,
+       1,
+       1
+      ]
+     ],
+     [
+      [
+       0,
+       0,
+       0,
+       1,
+       1,
+       1
+      ],
+      [
+       0.5,
+       0.5,
+       0.5,
+       2,
+       2,
+       2
+      ]
+     ]
+    ]
+   }
+  },
+  {
+   "name": "zerovec_local_zero0_14_1e+20_False",
+   "inputs": {
+    "op": "local",
+    "solver": {
+     "op": 14,
+     "req": 1,
+     "tol": 1e-06,
+     "best": 1e+20,
+     "vecs": [
+      [
+       0,
+       0,
+       0
+      ]
+     ]
+    },
+    "objects": [
+     {
+      "vertex": {
+       "p": [
+        3,
+        -2,
+        5
+       ],
+       "tol": 1e-07
+      }
+     },
+     {
+      "vertex": {
+       "p": [
+        0,
+        0,
+        0
+       ],
+       "tol": 0.0
+      }
+     }
+    ],
+    "local": {
+     "kind": 2,
+     "point": [
+      0.5,
+      0.25,
+      -1
+     ],
+     "swap": false
+    },
+    "calls": [
+     [
+      -1,
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "zerovec_local_zero0_14_1e+20_True",
+   "inputs": {
+    "op": "local",
+    "solver": {
+     "op": 14,
+     "req": 1,
+     "tol": 1e-06,
+     "best": 1e+20,
+     "vecs": [
+      [
+       0,
+       0,
+       0
+      ]
+     ]
+    },
+    "objects": [
+     {
+      "vertex": {
+       "p": [
+        3,
+        -2,
+        5
+       ],
+       "tol": 1e-07
+      }
+     },
+     {
+      "vertex": {
+       "p": [
+        0,
+        0,
+        0
+       ],
+       "tol": 0.0
+      }
+     }
+    ],
+    "local": {
+     "kind": 2,
+     "point": [
+      0.5,
+      0.25,
+      -1
+     ],
+     "swap": true
+    },
+    "calls": [
+     [
+      0,
+      -1
+     ]
+    ]
+   }
+  },
+  {
+   "name": "zerovec_local_zero0_14_4_False",
+   "inputs": {
+    "op": "local",
+    "solver": {
+     "op": 14,
+     "req": 1,
+     "tol": 1e-06,
+     "best": 4.0,
+     "vecs": [
+      [
+       0,
+       0,
+       0
+      ]
+     ]
+    },
+    "objects": [
+     {
+      "vertex": {
+       "p": [
+        3,
+        -2,
+        5
+       ],
+       "tol": 1e-07
+      }
+     },
+     {
+      "vertex": {
+       "p": [
+        0,
+        0,
+        0
+       ],
+       "tol": 0.0
+      }
+     }
+    ],
+    "local": {
+     "kind": 2,
+     "point": [
+      0.5,
+      0.25,
+      -1
+     ],
+     "swap": false
+    },
+    "calls": [
+     [
+      -1,
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "zerovec_local_zero0_14_4_True",
+   "inputs": {
+    "op": "local",
+    "solver": {
+     "op": 14,
+     "req": 1,
+     "tol": 1e-06,
+     "best": 4.0,
+     "vecs": [
+      [
+       0,
+       0,
+       0
+      ]
+     ]
+    },
+    "objects": [
+     {
+      "vertex": {
+       "p": [
+        3,
+        -2,
+        5
+       ],
+       "tol": 1e-07
+      }
+     },
+     {
+      "vertex": {
+       "p": [
+        0,
+        0,
+        0
+       ],
+       "tol": 0.0
+      }
+     }
+    ],
+    "local": {
+     "kind": 2,
+     "point": [
+      0.5,
+      0.25,
+      -1
+     ],
+     "swap": true
+    },
+    "calls": [
+     [
+      0,
+      -1
+     ]
+    ]
+   }
+  },
+  {
+   "name": "zerovec_may_zero0_14",
+   "inputs": {
+    "op": "may",
+    "solver": {
+     "op": 14,
+     "req": 1,
+     "tol": 1e-06,
+     "best": 4.0,
+     "vecs": [
+      [
+       0,
+       0,
+       0
+      ]
+     ]
+    },
+    "pairs": [
+     [
+      [
+       0,
+       0,
+       0,
+       1,
+       1,
+       1
+      ],
+      [
+       0,
+       0,
+       5,
+       1,
+       1,
+       6
+      ]
+     ],
+     [
+      [
+       0,
+       0,
+       0,
+       1,
+       1,
+       1
+      ],
+      [
+       4,
+       0,
+       0,
+       5,
+       1,
+       1
+      ]
+     ],
+     [
+      [
+       0,
+       0,
+       0,
+       1,
+       1,
+       1
+      ],
+      [
+       0.5,
+       0.5,
+       0.5,
+       2,
+       2,
+       2
+      ]
+     ]
+    ]
+   }
+  },
+  {
+   "name": "zerovec_local_zero0_15_1e+20_False",
+   "inputs": {
+    "op": "local",
+    "solver": {
+     "op": 15,
+     "req": 1,
+     "tol": 1e-06,
+     "best": 1e+20,
+     "vecs": [
+      [
+       0,
+       0,
+       0
+      ]
+     ]
+    },
+    "objects": [
+     {
+      "vertex": {
+       "p": [
+        3,
+        -2,
+        5
+       ],
+       "tol": 1e-07
+      }
+     },
+     {
+      "vertex": {
+       "p": [
+        0,
+        0,
+        0
+       ],
+       "tol": 0.0
+      }
+     }
+    ],
+    "local": {
+     "kind": 2,
+     "point": [
+      0.5,
+      0.25,
+      -1
+     ],
+     "swap": false
+    },
+    "calls": [
+     [
+      -1,
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "zerovec_local_zero0_15_1e+20_True",
+   "inputs": {
+    "op": "local",
+    "solver": {
+     "op": 15,
+     "req": 1,
+     "tol": 1e-06,
+     "best": 1e+20,
+     "vecs": [
+      [
+       0,
+       0,
+       0
+      ]
+     ]
+    },
+    "objects": [
+     {
+      "vertex": {
+       "p": [
+        3,
+        -2,
+        5
+       ],
+       "tol": 1e-07
+      }
+     },
+     {
+      "vertex": {
+       "p": [
+        0,
+        0,
+        0
+       ],
+       "tol": 0.0
+      }
+     }
+    ],
+    "local": {
+     "kind": 2,
+     "point": [
+      0.5,
+      0.25,
+      -1
+     ],
+     "swap": true
+    },
+    "calls": [
+     [
+      0,
+      -1
+     ]
+    ]
+   }
+  },
+  {
+   "name": "zerovec_local_zero0_15_4_False",
+   "inputs": {
+    "op": "local",
+    "solver": {
+     "op": 15,
+     "req": 1,
+     "tol": 1e-06,
+     "best": 4.0,
+     "vecs": [
+      [
+       0,
+       0,
+       0
+      ]
+     ]
+    },
+    "objects": [
+     {
+      "vertex": {
+       "p": [
+        3,
+        -2,
+        5
+       ],
+       "tol": 1e-07
+      }
+     },
+     {
+      "vertex": {
+       "p": [
+        0,
+        0,
+        0
+       ],
+       "tol": 0.0
+      }
+     }
+    ],
+    "local": {
+     "kind": 2,
+     "point": [
+      0.5,
+      0.25,
+      -1
+     ],
+     "swap": false
+    },
+    "calls": [
+     [
+      -1,
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "zerovec_local_zero0_15_4_True",
+   "inputs": {
+    "op": "local",
+    "solver": {
+     "op": 15,
+     "req": 1,
+     "tol": 1e-06,
+     "best": 4.0,
+     "vecs": [
+      [
+       0,
+       0,
+       0
+      ]
+     ]
+    },
+    "objects": [
+     {
+      "vertex": {
+       "p": [
+        3,
+        -2,
+        5
+       ],
+       "tol": 1e-07
+      }
+     },
+     {
+      "vertex": {
+       "p": [
+        0,
+        0,
+        0
+       ],
+       "tol": 0.0
+      }
+     }
+    ],
+    "local": {
+     "kind": 2,
+     "point": [
+      0.5,
+      0.25,
+      -1
+     ],
+     "swap": true
+    },
+    "calls": [
+     [
+      0,
+      -1
+     ]
+    ]
+   }
+  },
+  {
+   "name": "zerovec_may_zero0_15",
+   "inputs": {
+    "op": "may",
+    "solver": {
+     "op": 15,
+     "req": 1,
+     "tol": 1e-06,
+     "best": 4.0,
+     "vecs": [
+      [
+       0,
+       0,
+       0
+      ]
+     ]
+    },
+    "pairs": [
+     [
+      [
+       0,
+       0,
+       0,
+       1,
+       1,
+       1
+      ],
+      [
+       0,
+       0,
+       5,
+       1,
+       1,
+       6
+      ]
+     ],
+     [
+      [
+       0,
+       0,
+       0,
+       1,
+       1,
+       1
+      ],
+      [
+       4,
+       0,
+       0,
+       5,
+       1,
+       1
+      ]
+     ],
+     [
+      [
+       0,
+       0,
+       0,
+       1,
+       1,
+       1
+      ],
+      [
+       0.5,
+       0.5,
+       0.5,
+       2,
+       2,
+       2
+      ]
+     ]
+    ]
+   }
+  },
+  {
+   "name": "zerovec_local_zero0_21_1e+20_False",
+   "inputs": {
+    "op": "local",
+    "solver": {
+     "op": 21,
+     "req": 1,
+     "tol": 1e-06,
+     "best": 1e+20,
+     "vecs": [
+      [
+       0,
+       0,
+       0
+      ],
+      [
+       1,
+       0,
+       0
+      ]
+     ]
+    },
+    "objects": [
+     {
+      "vertex": {
+       "p": [
+        3,
+        -2,
+        5
+       ],
+       "tol": 1e-07
+      }
+     },
+     {
+      "vertex": {
+       "p": [
+        0,
+        0,
+        0
+       ],
+       "tol": 0.0
+      }
+     }
+    ],
+    "local": {
+     "kind": 2,
+     "point": [
+      0.5,
+      0.25,
+      -1
+     ],
+     "swap": false
+    },
+    "calls": [
+     [
+      -1,
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "zerovec_local_zero0_21_1e+20_True",
+   "inputs": {
+    "op": "local",
+    "solver": {
+     "op": 21,
+     "req": 1,
+     "tol": 1e-06,
+     "best": 1e+20,
+     "vecs": [
+      [
+       0,
+       0,
+       0
+      ],
+      [
+       1,
+       0,
+       0
+      ]
+     ]
+    },
+    "objects": [
+     {
+      "vertex": {
+       "p": [
+        3,
+        -2,
+        5
+       ],
+       "tol": 1e-07
+      }
+     },
+     {
+      "vertex": {
+       "p": [
+        0,
+        0,
+        0
+       ],
+       "tol": 0.0
+      }
+     }
+    ],
+    "local": {
+     "kind": 2,
+     "point": [
+      0.5,
+      0.25,
+      -1
+     ],
+     "swap": true
+    },
+    "calls": [
+     [
+      0,
+      -1
+     ]
+    ]
+   }
+  },
+  {
+   "name": "zerovec_local_zero0_21_4_False",
+   "inputs": {
+    "op": "local",
+    "solver": {
+     "op": 21,
+     "req": 1,
+     "tol": 1e-06,
+     "best": 4.0,
+     "vecs": [
+      [
+       0,
+       0,
+       0
+      ],
+      [
+       1,
+       0,
+       0
+      ]
+     ]
+    },
+    "objects": [
+     {
+      "vertex": {
+       "p": [
+        3,
+        -2,
+        5
+       ],
+       "tol": 1e-07
+      }
+     },
+     {
+      "vertex": {
+       "p": [
+        0,
+        0,
+        0
+       ],
+       "tol": 0.0
+      }
+     }
+    ],
+    "local": {
+     "kind": 2,
+     "point": [
+      0.5,
+      0.25,
+      -1
+     ],
+     "swap": false
+    },
+    "calls": [
+     [
+      -1,
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "zerovec_local_zero0_21_4_True",
+   "inputs": {
+    "op": "local",
+    "solver": {
+     "op": 21,
+     "req": 1,
+     "tol": 1e-06,
+     "best": 4.0,
+     "vecs": [
+      [
+       0,
+       0,
+       0
+      ],
+      [
+       1,
+       0,
+       0
+      ]
+     ]
+    },
+    "objects": [
+     {
+      "vertex": {
+       "p": [
+        3,
+        -2,
+        5
+       ],
+       "tol": 1e-07
+      }
+     },
+     {
+      "vertex": {
+       "p": [
+        0,
+        0,
+        0
+       ],
+       "tol": 0.0
+      }
+     }
+    ],
+    "local": {
+     "kind": 2,
+     "point": [
+      0.5,
+      0.25,
+      -1
+     ],
+     "swap": true
+    },
+    "calls": [
+     [
+      0,
+      -1
+     ]
+    ]
+   }
+  },
+  {
+   "name": "zerovec_may_zero0_21",
+   "inputs": {
+    "op": "may",
+    "solver": {
+     "op": 21,
+     "req": 1,
+     "tol": 1e-06,
+     "best": 4.0,
+     "vecs": [
+      [
+       0,
+       0,
+       0
+      ],
+      [
+       1,
+       0,
+       0
+      ]
+     ]
+    },
+    "pairs": [
+     [
+      [
+       0,
+       0,
+       0,
+       1,
+       1,
+       1
+      ],
+      [
+       0,
+       0,
+       5,
+       1,
+       1,
+       6
+      ]
+     ],
+     [
+      [
+       0,
+       0,
+       0,
+       1,
+       1,
+       1
+      ],
+      [
+       4,
+       0,
+       0,
+       5,
+       1,
+       1
+      ]
+     ],
+     [
+      [
+       0,
+       0,
+       0,
+       1,
+       1,
+       1
+      ],
+      [
+       0.5,
+       0.5,
+       0.5,
+       2,
+       2,
+       2
+      ]
+     ]
+    ]
+   }
+  },
+  {
+   "name": "zerovec_local_zero1_8_1e+20_False",
+   "inputs": {
+    "op": "local",
+    "solver": {
+     "op": 8,
+     "req": 1,
+     "tol": 1e-06,
+     "best": 1e+20,
+     "vecs": [
+      [
+       0,
+       0,
+       1
+      ]
+     ]
+    },
+    "objects": [
+     {
+      "vertex": {
+       "p": [
+        3,
+        -2,
+        5
+       ],
+       "tol": 1e-07
+      }
+     },
+     {
+      "vertex": {
+       "p": [
+        0,
+        0,
+        0
+       ],
+       "tol": 0.0
+      }
+     }
+    ],
+    "local": {
+     "kind": 2,
+     "point": [
+      0.5,
+      0.25,
+      -1
+     ],
+     "swap": false
+    },
+    "calls": [
+     [
+      -1,
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "zerovec_local_zero1_8_1e+20_True",
+   "inputs": {
+    "op": "local",
+    "solver": {
+     "op": 8,
+     "req": 1,
+     "tol": 1e-06,
+     "best": 1e+20,
+     "vecs": [
+      [
+       0,
+       0,
+       1
+      ]
+     ]
+    },
+    "objects": [
+     {
+      "vertex": {
+       "p": [
+        3,
+        -2,
+        5
+       ],
+       "tol": 1e-07
+      }
+     },
+     {
+      "vertex": {
+       "p": [
+        0,
+        0,
+        0
+       ],
+       "tol": 0.0
+      }
+     }
+    ],
+    "local": {
+     "kind": 2,
+     "point": [
+      0.5,
+      0.25,
+      -1
+     ],
+     "swap": true
+    },
+    "calls": [
+     [
+      0,
+      -1
+     ]
+    ]
+   }
+  },
+  {
+   "name": "zerovec_local_zero1_8_4_False",
+   "inputs": {
+    "op": "local",
+    "solver": {
+     "op": 8,
+     "req": 1,
+     "tol": 1e-06,
+     "best": 4.0,
+     "vecs": [
+      [
+       0,
+       0,
+       1
+      ]
+     ]
+    },
+    "objects": [
+     {
+      "vertex": {
+       "p": [
+        3,
+        -2,
+        5
+       ],
+       "tol": 1e-07
+      }
+     },
+     {
+      "vertex": {
+       "p": [
+        0,
+        0,
+        0
+       ],
+       "tol": 0.0
+      }
+     }
+    ],
+    "local": {
+     "kind": 2,
+     "point": [
+      0.5,
+      0.25,
+      -1
+     ],
+     "swap": false
+    },
+    "calls": [
+     [
+      -1,
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "zerovec_local_zero1_8_4_True",
+   "inputs": {
+    "op": "local",
+    "solver": {
+     "op": 8,
+     "req": 1,
+     "tol": 1e-06,
+     "best": 4.0,
+     "vecs": [
+      [
+       0,
+       0,
+       1
+      ]
+     ]
+    },
+    "objects": [
+     {
+      "vertex": {
+       "p": [
+        3,
+        -2,
+        5
+       ],
+       "tol": 1e-07
+      }
+     },
+     {
+      "vertex": {
+       "p": [
+        0,
+        0,
+        0
+       ],
+       "tol": 0.0
+      }
+     }
+    ],
+    "local": {
+     "kind": 2,
+     "point": [
+      0.5,
+      0.25,
+      -1
+     ],
+     "swap": true
+    },
+    "calls": [
+     [
+      0,
+      -1
+     ]
+    ]
+   }
+  },
+  {
+   "name": "zerovec_local_zero1_9_1e+20_False",
+   "inputs": {
+    "op": "local",
+    "solver": {
+     "op": 9,
+     "req": 1,
+     "tol": 1e-06,
+     "best": 1e+20,
+     "vecs": [
+      [
+       0,
+       0,
+       1
+      ]
+     ]
+    },
+    "objects": [
+     {
+      "vertex": {
+       "p": [
+        3,
+        -2,
+        5
+       ],
+       "tol": 1e-07
+      }
+     },
+     {
+      "vertex": {
+       "p": [
+        0,
+        0,
+        0
+       ],
+       "tol": 0.0
+      }
+     }
+    ],
+    "local": {
+     "kind": 2,
+     "point": [
+      0.5,
+      0.25,
+      -1
+     ],
+     "swap": false
+    },
+    "calls": [
+     [
+      -1,
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "zerovec_local_zero1_9_1e+20_True",
+   "inputs": {
+    "op": "local",
+    "solver": {
+     "op": 9,
+     "req": 1,
+     "tol": 1e-06,
+     "best": 1e+20,
+     "vecs": [
+      [
+       0,
+       0,
+       1
+      ]
+     ]
+    },
+    "objects": [
+     {
+      "vertex": {
+       "p": [
+        3,
+        -2,
+        5
+       ],
+       "tol": 1e-07
+      }
+     },
+     {
+      "vertex": {
+       "p": [
+        0,
+        0,
+        0
+       ],
+       "tol": 0.0
+      }
+     }
+    ],
+    "local": {
+     "kind": 2,
+     "point": [
+      0.5,
+      0.25,
+      -1
+     ],
+     "swap": true
+    },
+    "calls": [
+     [
+      0,
+      -1
+     ]
+    ]
+   }
+  },
+  {
+   "name": "zerovec_local_zero1_9_4_False",
+   "inputs": {
+    "op": "local",
+    "solver": {
+     "op": 9,
+     "req": 1,
+     "tol": 1e-06,
+     "best": 4.0,
+     "vecs": [
+      [
+       0,
+       0,
+       1
+      ]
+     ]
+    },
+    "objects": [
+     {
+      "vertex": {
+       "p": [
+        3,
+        -2,
+        5
+       ],
+       "tol": 1e-07
+      }
+     },
+     {
+      "vertex": {
+       "p": [
+        0,
+        0,
+        0
+       ],
+       "tol": 0.0
+      }
+     }
+    ],
+    "local": {
+     "kind": 2,
+     "point": [
+      0.5,
+      0.25,
+      -1
+     ],
+     "swap": false
+    },
+    "calls": [
+     [
+      -1,
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "zerovec_local_zero1_9_4_True",
+   "inputs": {
+    "op": "local",
+    "solver": {
+     "op": 9,
+     "req": 1,
+     "tol": 1e-06,
+     "best": 4.0,
+     "vecs": [
+      [
+       0,
+       0,
+       1
+      ]
+     ]
+    },
+    "objects": [
+     {
+      "vertex": {
+       "p": [
+        3,
+        -2,
+        5
+       ],
+       "tol": 1e-07
+      }
+     },
+     {
+      "vertex": {
+       "p": [
+        0,
+        0,
+        0
+       ],
+       "tol": 0.0
+      }
+     }
+    ],
+    "local": {
+     "kind": 2,
+     "point": [
+      0.5,
+      0.25,
+      -1
+     ],
+     "swap": true
+    },
+    "calls": [
+     [
+      0,
+      -1
+     ]
+    ]
+   }
+  },
+  {
+   "name": "zerovec_may_zero1_9",
+   "inputs": {
+    "op": "may",
+    "solver": {
+     "op": 9,
+     "req": 1,
+     "tol": 1e-06,
+     "best": 4.0,
+     "vecs": [
+      [
+       0,
+       0,
+       1
+      ]
+     ]
+    },
+    "pairs": [
+     [
+      [
+       0,
+       0,
+       0,
+       1,
+       1,
+       1
+      ],
+      [
+       0,
+       0,
+       5,
+       1,
+       1,
+       6
+      ]
+     ],
+     [
+      [
+       0,
+       0,
+       0,
+       1,
+       1,
+       1
+      ],
+      [
+       4,
+       0,
+       0,
+       5,
+       1,
+       1
+      ]
+     ],
+     [
+      [
+       0,
+       0,
+       0,
+       1,
+       1,
+       1
+      ],
+      [
+       0.5,
+       0.5,
+       0.5,
+       2,
+       2,
+       2
+      ]
+     ]
+    ]
+   }
+  },
+  {
+   "name": "zerovec_local_zero1_11_1e+20_False",
+   "inputs": {
+    "op": "local",
+    "solver": {
+     "op": 11,
+     "req": 1,
+     "tol": 1e-06,
+     "best": 1e+20,
+     "vecs": [
+      [
+       0,
+       0,
+       1
+      ],
+      [
+       0,
+       0,
+       0
+      ]
+     ]
+    },
+    "objects": [
+     {
+      "vertex": {
+       "p": [
+        3,
+        -2,
+        5
+       ],
+       "tol": 1e-07
+      }
+     },
+     {
+      "vertex": {
+       "p": [
+        0,
+        0,
+        0
+       ],
+       "tol": 0.0
+      }
+     }
+    ],
+    "local": {
+     "kind": 2,
+     "point": [
+      0.5,
+      0.25,
+      -1
+     ],
+     "swap": false
+    },
+    "calls": [
+     [
+      -1,
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "zerovec_local_zero1_11_1e+20_True",
+   "inputs": {
+    "op": "local",
+    "solver": {
+     "op": 11,
+     "req": 1,
+     "tol": 1e-06,
+     "best": 1e+20,
+     "vecs": [
+      [
+       0,
+       0,
+       1
+      ],
+      [
+       0,
+       0,
+       0
+      ]
+     ]
+    },
+    "objects": [
+     {
+      "vertex": {
+       "p": [
+        3,
+        -2,
+        5
+       ],
+       "tol": 1e-07
+      }
+     },
+     {
+      "vertex": {
+       "p": [
+        0,
+        0,
+        0
+       ],
+       "tol": 0.0
+      }
+     }
+    ],
+    "local": {
+     "kind": 2,
+     "point": [
+      0.5,
+      0.25,
+      -1
+     ],
+     "swap": true
+    },
+    "calls": [
+     [
+      0,
+      -1
+     ]
+    ]
+   }
+  },
+  {
+   "name": "zerovec_local_zero1_11_4_False",
+   "inputs": {
+    "op": "local",
+    "solver": {
+     "op": 11,
+     "req": 1,
+     "tol": 1e-06,
+     "best": 4.0,
+     "vecs": [
+      [
+       0,
+       0,
+       1
+      ],
+      [
+       0,
+       0,
+       0
+      ]
+     ]
+    },
+    "objects": [
+     {
+      "vertex": {
+       "p": [
+        3,
+        -2,
+        5
+       ],
+       "tol": 1e-07
+      }
+     },
+     {
+      "vertex": {
+       "p": [
+        0,
+        0,
+        0
+       ],
+       "tol": 0.0
+      }
+     }
+    ],
+    "local": {
+     "kind": 2,
+     "point": [
+      0.5,
+      0.25,
+      -1
+     ],
+     "swap": false
+    },
+    "calls": [
+     [
+      -1,
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "zerovec_local_zero1_11_4_True",
+   "inputs": {
+    "op": "local",
+    "solver": {
+     "op": 11,
+     "req": 1,
+     "tol": 1e-06,
+     "best": 4.0,
+     "vecs": [
+      [
+       0,
+       0,
+       1
+      ],
+      [
+       0,
+       0,
+       0
+      ]
+     ]
+    },
+    "objects": [
+     {
+      "vertex": {
+       "p": [
+        3,
+        -2,
+        5
+       ],
+       "tol": 1e-07
+      }
+     },
+     {
+      "vertex": {
+       "p": [
+        0,
+        0,
+        0
+       ],
+       "tol": 0.0
+      }
+     }
+    ],
+    "local": {
+     "kind": 2,
+     "point": [
+      0.5,
+      0.25,
+      -1
+     ],
+     "swap": true
+    },
+    "calls": [
+     [
+      0,
+      -1
+     ]
+    ]
+   }
+  },
+  {
+   "name": "zerovec_may_zero1_11",
+   "inputs": {
+    "op": "may",
+    "solver": {
+     "op": 11,
+     "req": 1,
+     "tol": 1e-06,
+     "best": 4.0,
+     "vecs": [
+      [
+       0,
+       0,
+       1
+      ],
+      [
+       0,
+       0,
+       0
+      ]
+     ]
+    },
+    "pairs": [
+     [
+      [
+       0,
+       0,
+       0,
+       1,
+       1,
+       1
+      ],
+      [
+       0,
+       0,
+       5,
+       1,
+       1,
+       6
+      ]
+     ],
+     [
+      [
+       0,
+       0,
+       0,
+       1,
+       1,
+       1
+      ],
+      [
+       4,
+       0,
+       0,
+       5,
+       1,
+       1
+      ]
+     ],
+     [
+      [
+       0,
+       0,
+       0,
+       1,
+       1,
+       1
+      ],
+      [
+       0.5,
+       0.5,
+       0.5,
+       2,
+       2,
+       2
+      ]
+     ]
+    ]
+   }
+  },
+  {
+   "name": "zerovec_local_zero1_12_1e+20_False",
+   "inputs": {
+    "op": "local",
+    "solver": {
+     "op": 12,
+     "req": 1,
+     "tol": 1e-06,
+     "best": 1e+20,
+     "vecs": [
+      [
+       0,
+       0,
+       1
+      ],
+      [
+       0,
+       0,
+       0
+      ]
+     ]
+    },
+    "objects": [
+     {
+      "vertex": {
+       "p": [
+        3,
+        -2,
+        5
+       ],
+       "tol": 1e-07
+      }
+     },
+     {
+      "vertex": {
+       "p": [
+        0,
+        0,
+        0
+       ],
+       "tol": 0.0
+      }
+     }
+    ],
+    "local": {
+     "kind": 2,
+     "point": [
+      0.5,
+      0.25,
+      -1
+     ],
+     "swap": false
+    },
+    "calls": [
+     [
+      -1,
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "zerovec_local_zero1_12_1e+20_True",
+   "inputs": {
+    "op": "local",
+    "solver": {
+     "op": 12,
+     "req": 1,
+     "tol": 1e-06,
+     "best": 1e+20,
+     "vecs": [
+      [
+       0,
+       0,
+       1
+      ],
+      [
+       0,
+       0,
+       0
+      ]
+     ]
+    },
+    "objects": [
+     {
+      "vertex": {
+       "p": [
+        3,
+        -2,
+        5
+       ],
+       "tol": 1e-07
+      }
+     },
+     {
+      "vertex": {
+       "p": [
+        0,
+        0,
+        0
+       ],
+       "tol": 0.0
+      }
+     }
+    ],
+    "local": {
+     "kind": 2,
+     "point": [
+      0.5,
+      0.25,
+      -1
+     ],
+     "swap": true
+    },
+    "calls": [
+     [
+      0,
+      -1
+     ]
+    ]
+   }
+  },
+  {
+   "name": "zerovec_local_zero1_12_4_False",
+   "inputs": {
+    "op": "local",
+    "solver": {
+     "op": 12,
+     "req": 1,
+     "tol": 1e-06,
+     "best": 4.0,
+     "vecs": [
+      [
+       0,
+       0,
+       1
+      ],
+      [
+       0,
+       0,
+       0
+      ]
+     ]
+    },
+    "objects": [
+     {
+      "vertex": {
+       "p": [
+        3,
+        -2,
+        5
+       ],
+       "tol": 1e-07
+      }
+     },
+     {
+      "vertex": {
+       "p": [
+        0,
+        0,
+        0
+       ],
+       "tol": 0.0
+      }
+     }
+    ],
+    "local": {
+     "kind": 2,
+     "point": [
+      0.5,
+      0.25,
+      -1
+     ],
+     "swap": false
+    },
+    "calls": [
+     [
+      -1,
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "zerovec_local_zero1_12_4_True",
+   "inputs": {
+    "op": "local",
+    "solver": {
+     "op": 12,
+     "req": 1,
+     "tol": 1e-06,
+     "best": 4.0,
+     "vecs": [
+      [
+       0,
+       0,
+       1
+      ],
+      [
+       0,
+       0,
+       0
+      ]
+     ]
+    },
+    "objects": [
+     {
+      "vertex": {
+       "p": [
+        3,
+        -2,
+        5
+       ],
+       "tol": 1e-07
+      }
+     },
+     {
+      "vertex": {
+       "p": [
+        0,
+        0,
+        0
+       ],
+       "tol": 0.0
+      }
+     }
+    ],
+    "local": {
+     "kind": 2,
+     "point": [
+      0.5,
+      0.25,
+      -1
+     ],
+     "swap": true
+    },
+    "calls": [
+     [
+      0,
+      -1
+     ]
+    ]
+   }
+  },
+  {
+   "name": "zerovec_may_zero1_12",
+   "inputs": {
+    "op": "may",
+    "solver": {
+     "op": 12,
+     "req": 1,
+     "tol": 1e-06,
+     "best": 4.0,
+     "vecs": [
+      [
+       0,
+       0,
+       1
+      ],
+      [
+       0,
+       0,
+       0
+      ]
+     ]
+    },
+    "pairs": [
+     [
+      [
+       0,
+       0,
+       0,
+       1,
+       1,
+       1
+      ],
+      [
+       0,
+       0,
+       5,
+       1,
+       1,
+       6
+      ]
+     ],
+     [
+      [
+       0,
+       0,
+       0,
+       1,
+       1,
+       1
+      ],
+      [
+       4,
+       0,
+       0,
+       5,
+       1,
+       1
+      ]
+     ],
+     [
+      [
+       0,
+       0,
+       0,
+       1,
+       1,
+       1
+      ],
+      [
+       0.5,
+       0.5,
+       0.5,
+       2,
+       2,
+       2
+      ]
+     ]
+    ]
+   }
+  },
+  {
+   "name": "zerovec_local_zero1_13_1e+20_False",
+   "inputs": {
+    "op": "local",
+    "solver": {
+     "op": 13,
+     "req": 1,
+     "tol": 1e-06,
+     "best": 1e+20,
+     "vecs": [
+      [
+       0,
+       0,
+       1
+      ],
+      [
+       0,
+       0,
+       0
+      ]
+     ]
+    },
+    "objects": [
+     {
+      "vertex": {
+       "p": [
+        3,
+        -2,
+        5
+       ],
+       "tol": 1e-07
+      }
+     },
+     {
+      "vertex": {
+       "p": [
+        0,
+        0,
+        0
+       ],
+       "tol": 0.0
+      }
+     }
+    ],
+    "local": {
+     "kind": 2,
+     "point": [
+      0.5,
+      0.25,
+      -1
+     ],
+     "swap": false
+    },
+    "calls": [
+     [
+      -1,
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "zerovec_local_zero1_13_1e+20_True",
+   "inputs": {
+    "op": "local",
+    "solver": {
+     "op": 13,
+     "req": 1,
+     "tol": 1e-06,
+     "best": 1e+20,
+     "vecs": [
+      [
+       0,
+       0,
+       1
+      ],
+      [
+       0,
+       0,
+       0
+      ]
+     ]
+    },
+    "objects": [
+     {
+      "vertex": {
+       "p": [
+        3,
+        -2,
+        5
+       ],
+       "tol": 1e-07
+      }
+     },
+     {
+      "vertex": {
+       "p": [
+        0,
+        0,
+        0
+       ],
+       "tol": 0.0
+      }
+     }
+    ],
+    "local": {
+     "kind": 2,
+     "point": [
+      0.5,
+      0.25,
+      -1
+     ],
+     "swap": true
+    },
+    "calls": [
+     [
+      0,
+      -1
+     ]
+    ]
+   }
+  },
+  {
+   "name": "zerovec_local_zero1_13_4_False",
+   "inputs": {
+    "op": "local",
+    "solver": {
+     "op": 13,
+     "req": 1,
+     "tol": 1e-06,
+     "best": 4.0,
+     "vecs": [
+      [
+       0,
+       0,
+       1
+      ],
+      [
+       0,
+       0,
+       0
+      ]
+     ]
+    },
+    "objects": [
+     {
+      "vertex": {
+       "p": [
+        3,
+        -2,
+        5
+       ],
+       "tol": 1e-07
+      }
+     },
+     {
+      "vertex": {
+       "p": [
+        0,
+        0,
+        0
+       ],
+       "tol": 0.0
+      }
+     }
+    ],
+    "local": {
+     "kind": 2,
+     "point": [
+      0.5,
+      0.25,
+      -1
+     ],
+     "swap": false
+    },
+    "calls": [
+     [
+      -1,
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "zerovec_local_zero1_13_4_True",
+   "inputs": {
+    "op": "local",
+    "solver": {
+     "op": 13,
+     "req": 1,
+     "tol": 1e-06,
+     "best": 4.0,
+     "vecs": [
+      [
+       0,
+       0,
+       1
+      ],
+      [
+       0,
+       0,
+       0
+      ]
+     ]
+    },
+    "objects": [
+     {
+      "vertex": {
+       "p": [
+        3,
+        -2,
+        5
+       ],
+       "tol": 1e-07
+      }
+     },
+     {
+      "vertex": {
+       "p": [
+        0,
+        0,
+        0
+       ],
+       "tol": 0.0
+      }
+     }
+    ],
+    "local": {
+     "kind": 2,
+     "point": [
+      0.5,
+      0.25,
+      -1
+     ],
+     "swap": true
+    },
+    "calls": [
+     [
+      0,
+      -1
+     ]
+    ]
+   }
+  },
+  {
+   "name": "zerovec_may_zero1_13",
+   "inputs": {
+    "op": "may",
+    "solver": {
+     "op": 13,
+     "req": 1,
+     "tol": 1e-06,
+     "best": 4.0,
+     "vecs": [
+      [
+       0,
+       0,
+       1
+      ],
+      [
+       0,
+       0,
+       0
+      ]
+     ]
+    },
+    "pairs": [
+     [
+      [
+       0,
+       0,
+       0,
+       1,
+       1,
+       1
+      ],
+      [
+       0,
+       0,
+       5,
+       1,
+       1,
+       6
+      ]
+     ],
+     [
+      [
+       0,
+       0,
+       0,
+       1,
+       1,
+       1
+      ],
+      [
+       4,
+       0,
+       0,
+       5,
+       1,
+       1
+      ]
+     ],
+     [
+      [
+       0,
+       0,
+       0,
+       1,
+       1,
+       1
+      ],
+      [
+       0.5,
+       0.5,
+       0.5,
+       2,
+       2,
+       2
+      ]
+     ]
+    ]
+   }
+  },
+  {
+   "name": "zerovec_local_zero1_14_1e+20_False",
+   "inputs": {
+    "op": "local",
+    "solver": {
+     "op": 14,
+     "req": 1,
+     "tol": 1e-06,
+     "best": 1e+20,
+     "vecs": [
+      [
+       0,
+       0,
+       1
+      ]
+     ]
+    },
+    "objects": [
+     {
+      "vertex": {
+       "p": [
+        3,
+        -2,
+        5
+       ],
+       "tol": 1e-07
+      }
+     },
+     {
+      "vertex": {
+       "p": [
+        0,
+        0,
+        0
+       ],
+       "tol": 0.0
+      }
+     }
+    ],
+    "local": {
+     "kind": 2,
+     "point": [
+      0.5,
+      0.25,
+      -1
+     ],
+     "swap": false
+    },
+    "calls": [
+     [
+      -1,
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "zerovec_local_zero1_14_1e+20_True",
+   "inputs": {
+    "op": "local",
+    "solver": {
+     "op": 14,
+     "req": 1,
+     "tol": 1e-06,
+     "best": 1e+20,
+     "vecs": [
+      [
+       0,
+       0,
+       1
+      ]
+     ]
+    },
+    "objects": [
+     {
+      "vertex": {
+       "p": [
+        3,
+        -2,
+        5
+       ],
+       "tol": 1e-07
+      }
+     },
+     {
+      "vertex": {
+       "p": [
+        0,
+        0,
+        0
+       ],
+       "tol": 0.0
+      }
+     }
+    ],
+    "local": {
+     "kind": 2,
+     "point": [
+      0.5,
+      0.25,
+      -1
+     ],
+     "swap": true
+    },
+    "calls": [
+     [
+      0,
+      -1
+     ]
+    ]
+   }
+  },
+  {
+   "name": "zerovec_local_zero1_14_4_False",
+   "inputs": {
+    "op": "local",
+    "solver": {
+     "op": 14,
+     "req": 1,
+     "tol": 1e-06,
+     "best": 4.0,
+     "vecs": [
+      [
+       0,
+       0,
+       1
+      ]
+     ]
+    },
+    "objects": [
+     {
+      "vertex": {
+       "p": [
+        3,
+        -2,
+        5
+       ],
+       "tol": 1e-07
+      }
+     },
+     {
+      "vertex": {
+       "p": [
+        0,
+        0,
+        0
+       ],
+       "tol": 0.0
+      }
+     }
+    ],
+    "local": {
+     "kind": 2,
+     "point": [
+      0.5,
+      0.25,
+      -1
+     ],
+     "swap": false
+    },
+    "calls": [
+     [
+      -1,
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "zerovec_local_zero1_14_4_True",
+   "inputs": {
+    "op": "local",
+    "solver": {
+     "op": 14,
+     "req": 1,
+     "tol": 1e-06,
+     "best": 4.0,
+     "vecs": [
+      [
+       0,
+       0,
+       1
+      ]
+     ]
+    },
+    "objects": [
+     {
+      "vertex": {
+       "p": [
+        3,
+        -2,
+        5
+       ],
+       "tol": 1e-07
+      }
+     },
+     {
+      "vertex": {
+       "p": [
+        0,
+        0,
+        0
+       ],
+       "tol": 0.0
+      }
+     }
+    ],
+    "local": {
+     "kind": 2,
+     "point": [
+      0.5,
+      0.25,
+      -1
+     ],
+     "swap": true
+    },
+    "calls": [
+     [
+      0,
+      -1
+     ]
+    ]
+   }
+  },
+  {
+   "name": "zerovec_may_zero1_14",
+   "inputs": {
+    "op": "may",
+    "solver": {
+     "op": 14,
+     "req": 1,
+     "tol": 1e-06,
+     "best": 4.0,
+     "vecs": [
+      [
+       0,
+       0,
+       1
+      ]
+     ]
+    },
+    "pairs": [
+     [
+      [
+       0,
+       0,
+       0,
+       1,
+       1,
+       1
+      ],
+      [
+       0,
+       0,
+       5,
+       1,
+       1,
+       6
+      ]
+     ],
+     [
+      [
+       0,
+       0,
+       0,
+       1,
+       1,
+       1
+      ],
+      [
+       4,
+       0,
+       0,
+       5,
+       1,
+       1
+      ]
+     ],
+     [
+      [
+       0,
+       0,
+       0,
+       1,
+       1,
+       1
+      ],
+      [
+       0.5,
+       0.5,
+       0.5,
+       2,
+       2,
+       2
+      ]
+     ]
+    ]
+   }
+  },
+  {
+   "name": "zerovec_local_zero1_15_1e+20_False",
+   "inputs": {
+    "op": "local",
+    "solver": {
+     "op": 15,
+     "req": 1,
+     "tol": 1e-06,
+     "best": 1e+20,
+     "vecs": [
+      [
+       0,
+       0,
+       1
+      ]
+     ]
+    },
+    "objects": [
+     {
+      "vertex": {
+       "p": [
+        3,
+        -2,
+        5
+       ],
+       "tol": 1e-07
+      }
+     },
+     {
+      "vertex": {
+       "p": [
+        0,
+        0,
+        0
+       ],
+       "tol": 0.0
+      }
+     }
+    ],
+    "local": {
+     "kind": 2,
+     "point": [
+      0.5,
+      0.25,
+      -1
+     ],
+     "swap": false
+    },
+    "calls": [
+     [
+      -1,
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "zerovec_local_zero1_15_1e+20_True",
+   "inputs": {
+    "op": "local",
+    "solver": {
+     "op": 15,
+     "req": 1,
+     "tol": 1e-06,
+     "best": 1e+20,
+     "vecs": [
+      [
+       0,
+       0,
+       1
+      ]
+     ]
+    },
+    "objects": [
+     {
+      "vertex": {
+       "p": [
+        3,
+        -2,
+        5
+       ],
+       "tol": 1e-07
+      }
+     },
+     {
+      "vertex": {
+       "p": [
+        0,
+        0,
+        0
+       ],
+       "tol": 0.0
+      }
+     }
+    ],
+    "local": {
+     "kind": 2,
+     "point": [
+      0.5,
+      0.25,
+      -1
+     ],
+     "swap": true
+    },
+    "calls": [
+     [
+      0,
+      -1
+     ]
+    ]
+   }
+  },
+  {
+   "name": "zerovec_local_zero1_15_4_False",
+   "inputs": {
+    "op": "local",
+    "solver": {
+     "op": 15,
+     "req": 1,
+     "tol": 1e-06,
+     "best": 4.0,
+     "vecs": [
+      [
+       0,
+       0,
+       1
+      ]
+     ]
+    },
+    "objects": [
+     {
+      "vertex": {
+       "p": [
+        3,
+        -2,
+        5
+       ],
+       "tol": 1e-07
+      }
+     },
+     {
+      "vertex": {
+       "p": [
+        0,
+        0,
+        0
+       ],
+       "tol": 0.0
+      }
+     }
+    ],
+    "local": {
+     "kind": 2,
+     "point": [
+      0.5,
+      0.25,
+      -1
+     ],
+     "swap": false
+    },
+    "calls": [
+     [
+      -1,
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "zerovec_local_zero1_15_4_True",
+   "inputs": {
+    "op": "local",
+    "solver": {
+     "op": 15,
+     "req": 1,
+     "tol": 1e-06,
+     "best": 4.0,
+     "vecs": [
+      [
+       0,
+       0,
+       1
+      ]
+     ]
+    },
+    "objects": [
+     {
+      "vertex": {
+       "p": [
+        3,
+        -2,
+        5
+       ],
+       "tol": 1e-07
+      }
+     },
+     {
+      "vertex": {
+       "p": [
+        0,
+        0,
+        0
+       ],
+       "tol": 0.0
+      }
+     }
+    ],
+    "local": {
+     "kind": 2,
+     "point": [
+      0.5,
+      0.25,
+      -1
+     ],
+     "swap": true
+    },
+    "calls": [
+     [
+      0,
+      -1
+     ]
+    ]
+   }
+  },
+  {
+   "name": "zerovec_may_zero1_15",
+   "inputs": {
+    "op": "may",
+    "solver": {
+     "op": 15,
+     "req": 1,
+     "tol": 1e-06,
+     "best": 4.0,
+     "vecs": [
+      [
+       0,
+       0,
+       1
+      ]
+     ]
+    },
+    "pairs": [
+     [
+      [
+       0,
+       0,
+       0,
+       1,
+       1,
+       1
+      ],
+      [
+       0,
+       0,
+       5,
+       1,
+       1,
+       6
+      ]
+     ],
+     [
+      [
+       0,
+       0,
+       0,
+       1,
+       1,
+       1
+      ],
+      [
+       4,
+       0,
+       0,
+       5,
+       1,
+       1
+      ]
+     ],
+     [
+      [
+       0,
+       0,
+       0,
+       1,
+       1,
+       1
+      ],
+      [
+       0.5,
+       0.5,
+       0.5,
+       2,
+       2,
+       2
+      ]
+     ]
+    ]
+   }
+  },
+  {
+   "name": "zerovec_local_zero1_21_1e+20_False",
+   "inputs": {
+    "op": "local",
+    "solver": {
+     "op": 21,
+     "req": 1,
+     "tol": 1e-06,
+     "best": 1e+20,
+     "vecs": [
+      [
+       0,
+       0,
+       1
+      ],
+      [
+       0,
+       0,
+       0
+      ]
+     ]
+    },
+    "objects": [
+     {
+      "vertex": {
+       "p": [
+        3,
+        -2,
+        5
+       ],
+       "tol": 1e-07
+      }
+     },
+     {
+      "vertex": {
+       "p": [
+        0,
+        0,
+        0
+       ],
+       "tol": 0.0
+      }
+     }
+    ],
+    "local": {
+     "kind": 2,
+     "point": [
+      0.5,
+      0.25,
+      -1
+     ],
+     "swap": false
+    },
+    "calls": [
+     [
+      -1,
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "zerovec_local_zero1_21_1e+20_True",
+   "inputs": {
+    "op": "local",
+    "solver": {
+     "op": 21,
+     "req": 1,
+     "tol": 1e-06,
+     "best": 1e+20,
+     "vecs": [
+      [
+       0,
+       0,
+       1
+      ],
+      [
+       0,
+       0,
+       0
+      ]
+     ]
+    },
+    "objects": [
+     {
+      "vertex": {
+       "p": [
+        3,
+        -2,
+        5
+       ],
+       "tol": 1e-07
+      }
+     },
+     {
+      "vertex": {
+       "p": [
+        0,
+        0,
+        0
+       ],
+       "tol": 0.0
+      }
+     }
+    ],
+    "local": {
+     "kind": 2,
+     "point": [
+      0.5,
+      0.25,
+      -1
+     ],
+     "swap": true
+    },
+    "calls": [
+     [
+      0,
+      -1
+     ]
+    ]
+   }
+  },
+  {
+   "name": "zerovec_local_zero1_21_4_False",
+   "inputs": {
+    "op": "local",
+    "solver": {
+     "op": 21,
+     "req": 1,
+     "tol": 1e-06,
+     "best": 4.0,
+     "vecs": [
+      [
+       0,
+       0,
+       1
+      ],
+      [
+       0,
+       0,
+       0
+      ]
+     ]
+    },
+    "objects": [
+     {
+      "vertex": {
+       "p": [
+        3,
+        -2,
+        5
+       ],
+       "tol": 1e-07
+      }
+     },
+     {
+      "vertex": {
+       "p": [
+        0,
+        0,
+        0
+       ],
+       "tol": 0.0
+      }
+     }
+    ],
+    "local": {
+     "kind": 2,
+     "point": [
+      0.5,
+      0.25,
+      -1
+     ],
+     "swap": false
+    },
+    "calls": [
+     [
+      -1,
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "zerovec_local_zero1_21_4_True",
+   "inputs": {
+    "op": "local",
+    "solver": {
+     "op": 21,
+     "req": 1,
+     "tol": 1e-06,
+     "best": 4.0,
+     "vecs": [
+      [
+       0,
+       0,
+       1
+      ],
+      [
+       0,
+       0,
+       0
+      ]
+     ]
+    },
+    "objects": [
+     {
+      "vertex": {
+       "p": [
+        3,
+        -2,
+        5
+       ],
+       "tol": 1e-07
+      }
+     },
+     {
+      "vertex": {
+       "p": [
+        0,
+        0,
+        0
+       ],
+       "tol": 0.0
+      }
+     }
+    ],
+    "local": {
+     "kind": 2,
+     "point": [
+      0.5,
+      0.25,
+      -1
+     ],
+     "swap": true
+    },
+    "calls": [
+     [
+      0,
+      -1
+     ]
+    ]
+   }
+  },
+  {
+   "name": "zerovec_may_zero1_21",
+   "inputs": {
+    "op": "may",
+    "solver": {
+     "op": 21,
+     "req": 1,
+     "tol": 1e-06,
+     "best": 4.0,
+     "vecs": [
+      [
+       0,
+       0,
+       1
+      ],
+      [
+       0,
+       0,
+       0
+      ]
+     ]
+    },
+    "pairs": [
+     [
+      [
+       0,
+       0,
+       0,
+       1,
+       1,
+       1
+      ],
+      [
+       0,
+       0,
+       5,
+       1,
+       1,
+       6
+      ]
+     ],
+     [
+      [
+       0,
+       0,
+       0,
+       1,
+       1,
+       1
+      ],
+      [
+       4,
+       0,
+       0,
+       5,
+       1,
+       1
+      ]
+     ],
+     [
+      [
+       0,
+       0,
+       0,
+       1,
+       1,
+       1
+      ],
+      [
+       0.5,
+       0.5,
+       0.5,
+       2,
+       2,
+       2
+      ]
+     ]
+    ]
+   }
+  },
+  {
+   "name": "zerovec_local_tiny_8_1e+20_False",
+   "inputs": {
+    "op": "local",
+    "solver": {
+     "op": 8,
+     "req": 1,
+     "tol": 1e-06,
+     "best": 1e+20,
+     "vecs": [
+      [
+       0,
+       0,
+       1e-09
+      ]
+     ]
+    },
+    "objects": [
+     {
+      "vertex": {
+       "p": [
+        3,
+        -2,
+        5
+       ],
+       "tol": 1e-07
+      }
+     },
+     {
+      "vertex": {
+       "p": [
+        0,
+        0,
+        0
+       ],
+       "tol": 0.0
+      }
+     }
+    ],
+    "local": {
+     "kind": 2,
+     "point": [
+      0.5,
+      0.25,
+      -1
+     ],
+     "swap": false
+    },
+    "calls": [
+     [
+      -1,
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "zerovec_local_tiny_8_1e+20_True",
+   "inputs": {
+    "op": "local",
+    "solver": {
+     "op": 8,
+     "req": 1,
+     "tol": 1e-06,
+     "best": 1e+20,
+     "vecs": [
+      [
+       0,
+       0,
+       1e-09
+      ]
+     ]
+    },
+    "objects": [
+     {
+      "vertex": {
+       "p": [
+        3,
+        -2,
+        5
+       ],
+       "tol": 1e-07
+      }
+     },
+     {
+      "vertex": {
+       "p": [
+        0,
+        0,
+        0
+       ],
+       "tol": 0.0
+      }
+     }
+    ],
+    "local": {
+     "kind": 2,
+     "point": [
+      0.5,
+      0.25,
+      -1
+     ],
+     "swap": true
+    },
+    "calls": [
+     [
+      0,
+      -1
+     ]
+    ]
+   }
+  },
+  {
+   "name": "zerovec_local_tiny_8_4_False",
+   "inputs": {
+    "op": "local",
+    "solver": {
+     "op": 8,
+     "req": 1,
+     "tol": 1e-06,
+     "best": 4.0,
+     "vecs": [
+      [
+       0,
+       0,
+       1e-09
+      ]
+     ]
+    },
+    "objects": [
+     {
+      "vertex": {
+       "p": [
+        3,
+        -2,
+        5
+       ],
+       "tol": 1e-07
+      }
+     },
+     {
+      "vertex": {
+       "p": [
+        0,
+        0,
+        0
+       ],
+       "tol": 0.0
+      }
+     }
+    ],
+    "local": {
+     "kind": 2,
+     "point": [
+      0.5,
+      0.25,
+      -1
+     ],
+     "swap": false
+    },
+    "calls": [
+     [
+      -1,
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "zerovec_local_tiny_8_4_True",
+   "inputs": {
+    "op": "local",
+    "solver": {
+     "op": 8,
+     "req": 1,
+     "tol": 1e-06,
+     "best": 4.0,
+     "vecs": [
+      [
+       0,
+       0,
+       1e-09
+      ]
+     ]
+    },
+    "objects": [
+     {
+      "vertex": {
+       "p": [
+        3,
+        -2,
+        5
+       ],
+       "tol": 1e-07
+      }
+     },
+     {
+      "vertex": {
+       "p": [
+        0,
+        0,
+        0
+       ],
+       "tol": 0.0
+      }
+     }
+    ],
+    "local": {
+     "kind": 2,
+     "point": [
+      0.5,
+      0.25,
+      -1
+     ],
+     "swap": true
+    },
+    "calls": [
+     [
+      0,
+      -1
+     ]
+    ]
+   }
+  },
+  {
+   "name": "zerovec_local_tiny_9_1e+20_False",
+   "inputs": {
+    "op": "local",
+    "solver": {
+     "op": 9,
+     "req": 1,
+     "tol": 1e-06,
+     "best": 1e+20,
+     "vecs": [
+      [
+       0,
+       0,
+       1e-09
+      ]
+     ]
+    },
+    "objects": [
+     {
+      "vertex": {
+       "p": [
+        3,
+        -2,
+        5
+       ],
+       "tol": 1e-07
+      }
+     },
+     {
+      "vertex": {
+       "p": [
+        0,
+        0,
+        0
+       ],
+       "tol": 0.0
+      }
+     }
+    ],
+    "local": {
+     "kind": 2,
+     "point": [
+      0.5,
+      0.25,
+      -1
+     ],
+     "swap": false
+    },
+    "calls": [
+     [
+      -1,
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "zerovec_local_tiny_9_1e+20_True",
+   "inputs": {
+    "op": "local",
+    "solver": {
+     "op": 9,
+     "req": 1,
+     "tol": 1e-06,
+     "best": 1e+20,
+     "vecs": [
+      [
+       0,
+       0,
+       1e-09
+      ]
+     ]
+    },
+    "objects": [
+     {
+      "vertex": {
+       "p": [
+        3,
+        -2,
+        5
+       ],
+       "tol": 1e-07
+      }
+     },
+     {
+      "vertex": {
+       "p": [
+        0,
+        0,
+        0
+       ],
+       "tol": 0.0
+      }
+     }
+    ],
+    "local": {
+     "kind": 2,
+     "point": [
+      0.5,
+      0.25,
+      -1
+     ],
+     "swap": true
+    },
+    "calls": [
+     [
+      0,
+      -1
+     ]
+    ]
+   }
+  },
+  {
+   "name": "zerovec_local_tiny_9_4_False",
+   "inputs": {
+    "op": "local",
+    "solver": {
+     "op": 9,
+     "req": 1,
+     "tol": 1e-06,
+     "best": 4.0,
+     "vecs": [
+      [
+       0,
+       0,
+       1e-09
+      ]
+     ]
+    },
+    "objects": [
+     {
+      "vertex": {
+       "p": [
+        3,
+        -2,
+        5
+       ],
+       "tol": 1e-07
+      }
+     },
+     {
+      "vertex": {
+       "p": [
+        0,
+        0,
+        0
+       ],
+       "tol": 0.0
+      }
+     }
+    ],
+    "local": {
+     "kind": 2,
+     "point": [
+      0.5,
+      0.25,
+      -1
+     ],
+     "swap": false
+    },
+    "calls": [
+     [
+      -1,
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "zerovec_local_tiny_9_4_True",
+   "inputs": {
+    "op": "local",
+    "solver": {
+     "op": 9,
+     "req": 1,
+     "tol": 1e-06,
+     "best": 4.0,
+     "vecs": [
+      [
+       0,
+       0,
+       1e-09
+      ]
+     ]
+    },
+    "objects": [
+     {
+      "vertex": {
+       "p": [
+        3,
+        -2,
+        5
+       ],
+       "tol": 1e-07
+      }
+     },
+     {
+      "vertex": {
+       "p": [
+        0,
+        0,
+        0
+       ],
+       "tol": 0.0
+      }
+     }
+    ],
+    "local": {
+     "kind": 2,
+     "point": [
+      0.5,
+      0.25,
+      -1
+     ],
+     "swap": true
+    },
+    "calls": [
+     [
+      0,
+      -1
+     ]
+    ]
+   }
+  },
+  {
+   "name": "zerovec_may_tiny_9",
+   "inputs": {
+    "op": "may",
+    "solver": {
+     "op": 9,
+     "req": 1,
+     "tol": 1e-06,
+     "best": 4.0,
+     "vecs": [
+      [
+       0,
+       0,
+       1e-09
+      ]
+     ]
+    },
+    "pairs": [
+     [
+      [
+       0,
+       0,
+       0,
+       1,
+       1,
+       1
+      ],
+      [
+       0,
+       0,
+       5,
+       1,
+       1,
+       6
+      ]
+     ],
+     [
+      [
+       0,
+       0,
+       0,
+       1,
+       1,
+       1
+      ],
+      [
+       4,
+       0,
+       0,
+       5,
+       1,
+       1
+      ]
+     ],
+     [
+      [
+       0,
+       0,
+       0,
+       1,
+       1,
+       1
+      ],
+      [
+       0.5,
+       0.5,
+       0.5,
+       2,
+       2,
+       2
+      ]
+     ]
+    ]
+   }
+  },
+  {
+   "name": "zerovec_local_tiny_11_1e+20_False",
+   "inputs": {
+    "op": "local",
+    "solver": {
+     "op": 11,
+     "req": 1,
+     "tol": 1e-06,
+     "best": 1e+20,
+     "vecs": [
+      [
+       0,
+       0,
+       1e-09
+      ],
+      [
+       1e-09,
+       0,
+       0
+      ]
+     ]
+    },
+    "objects": [
+     {
+      "vertex": {
+       "p": [
+        3,
+        -2,
+        5
+       ],
+       "tol": 1e-07
+      }
+     },
+     {
+      "vertex": {
+       "p": [
+        0,
+        0,
+        0
+       ],
+       "tol": 0.0
+      }
+     }
+    ],
+    "local": {
+     "kind": 2,
+     "point": [
+      0.5,
+      0.25,
+      -1
+     ],
+     "swap": false
+    },
+    "calls": [
+     [
+      -1,
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "zerovec_local_tiny_11_1e+20_True",
+   "inputs": {
+    "op": "local",
+    "solver": {
+     "op": 11,
+     "req": 1,
+     "tol": 1e-06,
+     "best": 1e+20,
+     "vecs": [
+      [
+       0,
+       0,
+       1e-09
+      ],
+      [
+       1e-09,
+       0,
+       0
+      ]
+     ]
+    },
+    "objects": [
+     {
+      "vertex": {
+       "p": [
+        3,
+        -2,
+        5
+       ],
+       "tol": 1e-07
+      }
+     },
+     {
+      "vertex": {
+       "p": [
+        0,
+        0,
+        0
+       ],
+       "tol": 0.0
+      }
+     }
+    ],
+    "local": {
+     "kind": 2,
+     "point": [
+      0.5,
+      0.25,
+      -1
+     ],
+     "swap": true
+    },
+    "calls": [
+     [
+      0,
+      -1
+     ]
+    ]
+   }
+  },
+  {
+   "name": "zerovec_local_tiny_11_4_False",
+   "inputs": {
+    "op": "local",
+    "solver": {
+     "op": 11,
+     "req": 1,
+     "tol": 1e-06,
+     "best": 4.0,
+     "vecs": [
+      [
+       0,
+       0,
+       1e-09
+      ],
+      [
+       1e-09,
+       0,
+       0
+      ]
+     ]
+    },
+    "objects": [
+     {
+      "vertex": {
+       "p": [
+        3,
+        -2,
+        5
+       ],
+       "tol": 1e-07
+      }
+     },
+     {
+      "vertex": {
+       "p": [
+        0,
+        0,
+        0
+       ],
+       "tol": 0.0
+      }
+     }
+    ],
+    "local": {
+     "kind": 2,
+     "point": [
+      0.5,
+      0.25,
+      -1
+     ],
+     "swap": false
+    },
+    "calls": [
+     [
+      -1,
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "zerovec_local_tiny_11_4_True",
+   "inputs": {
+    "op": "local",
+    "solver": {
+     "op": 11,
+     "req": 1,
+     "tol": 1e-06,
+     "best": 4.0,
+     "vecs": [
+      [
+       0,
+       0,
+       1e-09
+      ],
+      [
+       1e-09,
+       0,
+       0
+      ]
+     ]
+    },
+    "objects": [
+     {
+      "vertex": {
+       "p": [
+        3,
+        -2,
+        5
+       ],
+       "tol": 1e-07
+      }
+     },
+     {
+      "vertex": {
+       "p": [
+        0,
+        0,
+        0
+       ],
+       "tol": 0.0
+      }
+     }
+    ],
+    "local": {
+     "kind": 2,
+     "point": [
+      0.5,
+      0.25,
+      -1
+     ],
+     "swap": true
+    },
+    "calls": [
+     [
+      0,
+      -1
+     ]
+    ]
+   }
+  },
+  {
+   "name": "zerovec_may_tiny_11",
+   "inputs": {
+    "op": "may",
+    "solver": {
+     "op": 11,
+     "req": 1,
+     "tol": 1e-06,
+     "best": 4.0,
+     "vecs": [
+      [
+       0,
+       0,
+       1e-09
+      ],
+      [
+       1e-09,
+       0,
+       0
+      ]
+     ]
+    },
+    "pairs": [
+     [
+      [
+       0,
+       0,
+       0,
+       1,
+       1,
+       1
+      ],
+      [
+       0,
+       0,
+       5,
+       1,
+       1,
+       6
+      ]
+     ],
+     [
+      [
+       0,
+       0,
+       0,
+       1,
+       1,
+       1
+      ],
+      [
+       4,
+       0,
+       0,
+       5,
+       1,
+       1
+      ]
+     ],
+     [
+      [
+       0,
+       0,
+       0,
+       1,
+       1,
+       1
+      ],
+      [
+       0.5,
+       0.5,
+       0.5,
+       2,
+       2,
+       2
+      ]
+     ]
+    ]
+   }
+  },
+  {
+   "name": "zerovec_local_tiny_12_1e+20_False",
+   "inputs": {
+    "op": "local",
+    "solver": {
+     "op": 12,
+     "req": 1,
+     "tol": 1e-06,
+     "best": 1e+20,
+     "vecs": [
+      [
+       0,
+       0,
+       1e-09
+      ],
+      [
+       1e-09,
+       0,
+       0
+      ]
+     ]
+    },
+    "objects": [
+     {
+      "vertex": {
+       "p": [
+        3,
+        -2,
+        5
+       ],
+       "tol": 1e-07
+      }
+     },
+     {
+      "vertex": {
+       "p": [
+        0,
+        0,
+        0
+       ],
+       "tol": 0.0
+      }
+     }
+    ],
+    "local": {
+     "kind": 2,
+     "point": [
+      0.5,
+      0.25,
+      -1
+     ],
+     "swap": false
+    },
+    "calls": [
+     [
+      -1,
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "zerovec_local_tiny_12_1e+20_True",
+   "inputs": {
+    "op": "local",
+    "solver": {
+     "op": 12,
+     "req": 1,
+     "tol": 1e-06,
+     "best": 1e+20,
+     "vecs": [
+      [
+       0,
+       0,
+       1e-09
+      ],
+      [
+       1e-09,
+       0,
+       0
+      ]
+     ]
+    },
+    "objects": [
+     {
+      "vertex": {
+       "p": [
+        3,
+        -2,
+        5
+       ],
+       "tol": 1e-07
+      }
+     },
+     {
+      "vertex": {
+       "p": [
+        0,
+        0,
+        0
+       ],
+       "tol": 0.0
+      }
+     }
+    ],
+    "local": {
+     "kind": 2,
+     "point": [
+      0.5,
+      0.25,
+      -1
+     ],
+     "swap": true
+    },
+    "calls": [
+     [
+      0,
+      -1
+     ]
+    ]
+   }
+  },
+  {
+   "name": "zerovec_local_tiny_12_4_False",
+   "inputs": {
+    "op": "local",
+    "solver": {
+     "op": 12,
+     "req": 1,
+     "tol": 1e-06,
+     "best": 4.0,
+     "vecs": [
+      [
+       0,
+       0,
+       1e-09
+      ],
+      [
+       1e-09,
+       0,
+       0
+      ]
+     ]
+    },
+    "objects": [
+     {
+      "vertex": {
+       "p": [
+        3,
+        -2,
+        5
+       ],
+       "tol": 1e-07
+      }
+     },
+     {
+      "vertex": {
+       "p": [
+        0,
+        0,
+        0
+       ],
+       "tol": 0.0
+      }
+     }
+    ],
+    "local": {
+     "kind": 2,
+     "point": [
+      0.5,
+      0.25,
+      -1
+     ],
+     "swap": false
+    },
+    "calls": [
+     [
+      -1,
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "zerovec_local_tiny_12_4_True",
+   "inputs": {
+    "op": "local",
+    "solver": {
+     "op": 12,
+     "req": 1,
+     "tol": 1e-06,
+     "best": 4.0,
+     "vecs": [
+      [
+       0,
+       0,
+       1e-09
+      ],
+      [
+       1e-09,
+       0,
+       0
+      ]
+     ]
+    },
+    "objects": [
+     {
+      "vertex": {
+       "p": [
+        3,
+        -2,
+        5
+       ],
+       "tol": 1e-07
+      }
+     },
+     {
+      "vertex": {
+       "p": [
+        0,
+        0,
+        0
+       ],
+       "tol": 0.0
+      }
+     }
+    ],
+    "local": {
+     "kind": 2,
+     "point": [
+      0.5,
+      0.25,
+      -1
+     ],
+     "swap": true
+    },
+    "calls": [
+     [
+      0,
+      -1
+     ]
+    ]
+   }
+  },
+  {
+   "name": "zerovec_may_tiny_12",
+   "inputs": {
+    "op": "may",
+    "solver": {
+     "op": 12,
+     "req": 1,
+     "tol": 1e-06,
+     "best": 4.0,
+     "vecs": [
+      [
+       0,
+       0,
+       1e-09
+      ],
+      [
+       1e-09,
+       0,
+       0
+      ]
+     ]
+    },
+    "pairs": [
+     [
+      [
+       0,
+       0,
+       0,
+       1,
+       1,
+       1
+      ],
+      [
+       0,
+       0,
+       5,
+       1,
+       1,
+       6
+      ]
+     ],
+     [
+      [
+       0,
+       0,
+       0,
+       1,
+       1,
+       1
+      ],
+      [
+       4,
+       0,
+       0,
+       5,
+       1,
+       1
+      ]
+     ],
+     [
+      [
+       0,
+       0,
+       0,
+       1,
+       1,
+       1
+      ],
+      [
+       0.5,
+       0.5,
+       0.5,
+       2,
+       2,
+       2
+      ]
+     ]
+    ]
+   }
+  },
+  {
+   "name": "zerovec_local_tiny_13_1e+20_False",
+   "inputs": {
+    "op": "local",
+    "solver": {
+     "op": 13,
+     "req": 1,
+     "tol": 1e-06,
+     "best": 1e+20,
+     "vecs": [
+      [
+       0,
+       0,
+       1e-09
+      ],
+      [
+       1e-09,
+       0,
+       0
+      ]
+     ]
+    },
+    "objects": [
+     {
+      "vertex": {
+       "p": [
+        3,
+        -2,
+        5
+       ],
+       "tol": 1e-07
+      }
+     },
+     {
+      "vertex": {
+       "p": [
+        0,
+        0,
+        0
+       ],
+       "tol": 0.0
+      }
+     }
+    ],
+    "local": {
+     "kind": 2,
+     "point": [
+      0.5,
+      0.25,
+      -1
+     ],
+     "swap": false
+    },
+    "calls": [
+     [
+      -1,
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "zerovec_local_tiny_13_1e+20_True",
+   "inputs": {
+    "op": "local",
+    "solver": {
+     "op": 13,
+     "req": 1,
+     "tol": 1e-06,
+     "best": 1e+20,
+     "vecs": [
+      [
+       0,
+       0,
+       1e-09
+      ],
+      [
+       1e-09,
+       0,
+       0
+      ]
+     ]
+    },
+    "objects": [
+     {
+      "vertex": {
+       "p": [
+        3,
+        -2,
+        5
+       ],
+       "tol": 1e-07
+      }
+     },
+     {
+      "vertex": {
+       "p": [
+        0,
+        0,
+        0
+       ],
+       "tol": 0.0
+      }
+     }
+    ],
+    "local": {
+     "kind": 2,
+     "point": [
+      0.5,
+      0.25,
+      -1
+     ],
+     "swap": true
+    },
+    "calls": [
+     [
+      0,
+      -1
+     ]
+    ]
+   }
+  },
+  {
+   "name": "zerovec_local_tiny_13_4_False",
+   "inputs": {
+    "op": "local",
+    "solver": {
+     "op": 13,
+     "req": 1,
+     "tol": 1e-06,
+     "best": 4.0,
+     "vecs": [
+      [
+       0,
+       0,
+       1e-09
+      ],
+      [
+       1e-09,
+       0,
+       0
+      ]
+     ]
+    },
+    "objects": [
+     {
+      "vertex": {
+       "p": [
+        3,
+        -2,
+        5
+       ],
+       "tol": 1e-07
+      }
+     },
+     {
+      "vertex": {
+       "p": [
+        0,
+        0,
+        0
+       ],
+       "tol": 0.0
+      }
+     }
+    ],
+    "local": {
+     "kind": 2,
+     "point": [
+      0.5,
+      0.25,
+      -1
+     ],
+     "swap": false
+    },
+    "calls": [
+     [
+      -1,
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "zerovec_local_tiny_13_4_True",
+   "inputs": {
+    "op": "local",
+    "solver": {
+     "op": 13,
+     "req": 1,
+     "tol": 1e-06,
+     "best": 4.0,
+     "vecs": [
+      [
+       0,
+       0,
+       1e-09
+      ],
+      [
+       1e-09,
+       0,
+       0
+      ]
+     ]
+    },
+    "objects": [
+     {
+      "vertex": {
+       "p": [
+        3,
+        -2,
+        5
+       ],
+       "tol": 1e-07
+      }
+     },
+     {
+      "vertex": {
+       "p": [
+        0,
+        0,
+        0
+       ],
+       "tol": 0.0
+      }
+     }
+    ],
+    "local": {
+     "kind": 2,
+     "point": [
+      0.5,
+      0.25,
+      -1
+     ],
+     "swap": true
+    },
+    "calls": [
+     [
+      0,
+      -1
+     ]
+    ]
+   }
+  },
+  {
+   "name": "zerovec_may_tiny_13",
+   "inputs": {
+    "op": "may",
+    "solver": {
+     "op": 13,
+     "req": 1,
+     "tol": 1e-06,
+     "best": 4.0,
+     "vecs": [
+      [
+       0,
+       0,
+       1e-09
+      ],
+      [
+       1e-09,
+       0,
+       0
+      ]
+     ]
+    },
+    "pairs": [
+     [
+      [
+       0,
+       0,
+       0,
+       1,
+       1,
+       1
+      ],
+      [
+       0,
+       0,
+       5,
+       1,
+       1,
+       6
+      ]
+     ],
+     [
+      [
+       0,
+       0,
+       0,
+       1,
+       1,
+       1
+      ],
+      [
+       4,
+       0,
+       0,
+       5,
+       1,
+       1
+      ]
+     ],
+     [
+      [
+       0,
+       0,
+       0,
+       1,
+       1,
+       1
+      ],
+      [
+       0.5,
+       0.5,
+       0.5,
+       2,
+       2,
+       2
+      ]
+     ]
+    ]
+   }
+  },
+  {
+   "name": "zerovec_local_tiny_14_1e+20_False",
+   "inputs": {
+    "op": "local",
+    "solver": {
+     "op": 14,
+     "req": 1,
+     "tol": 1e-06,
+     "best": 1e+20,
+     "vecs": [
+      [
+       0,
+       0,
+       1e-09
+      ]
+     ]
+    },
+    "objects": [
+     {
+      "vertex": {
+       "p": [
+        3,
+        -2,
+        5
+       ],
+       "tol": 1e-07
+      }
+     },
+     {
+      "vertex": {
+       "p": [
+        0,
+        0,
+        0
+       ],
+       "tol": 0.0
+      }
+     }
+    ],
+    "local": {
+     "kind": 2,
+     "point": [
+      0.5,
+      0.25,
+      -1
+     ],
+     "swap": false
+    },
+    "calls": [
+     [
+      -1,
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "zerovec_local_tiny_14_1e+20_True",
+   "inputs": {
+    "op": "local",
+    "solver": {
+     "op": 14,
+     "req": 1,
+     "tol": 1e-06,
+     "best": 1e+20,
+     "vecs": [
+      [
+       0,
+       0,
+       1e-09
+      ]
+     ]
+    },
+    "objects": [
+     {
+      "vertex": {
+       "p": [
+        3,
+        -2,
+        5
+       ],
+       "tol": 1e-07
+      }
+     },
+     {
+      "vertex": {
+       "p": [
+        0,
+        0,
+        0
+       ],
+       "tol": 0.0
+      }
+     }
+    ],
+    "local": {
+     "kind": 2,
+     "point": [
+      0.5,
+      0.25,
+      -1
+     ],
+     "swap": true
+    },
+    "calls": [
+     [
+      0,
+      -1
+     ]
+    ]
+   }
+  },
+  {
+   "name": "zerovec_local_tiny_14_4_False",
+   "inputs": {
+    "op": "local",
+    "solver": {
+     "op": 14,
+     "req": 1,
+     "tol": 1e-06,
+     "best": 4.0,
+     "vecs": [
+      [
+       0,
+       0,
+       1e-09
+      ]
+     ]
+    },
+    "objects": [
+     {
+      "vertex": {
+       "p": [
+        3,
+        -2,
+        5
+       ],
+       "tol": 1e-07
+      }
+     },
+     {
+      "vertex": {
+       "p": [
+        0,
+        0,
+        0
+       ],
+       "tol": 0.0
+      }
+     }
+    ],
+    "local": {
+     "kind": 2,
+     "point": [
+      0.5,
+      0.25,
+      -1
+     ],
+     "swap": false
+    },
+    "calls": [
+     [
+      -1,
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "zerovec_local_tiny_14_4_True",
+   "inputs": {
+    "op": "local",
+    "solver": {
+     "op": 14,
+     "req": 1,
+     "tol": 1e-06,
+     "best": 4.0,
+     "vecs": [
+      [
+       0,
+       0,
+       1e-09
+      ]
+     ]
+    },
+    "objects": [
+     {
+      "vertex": {
+       "p": [
+        3,
+        -2,
+        5
+       ],
+       "tol": 1e-07
+      }
+     },
+     {
+      "vertex": {
+       "p": [
+        0,
+        0,
+        0
+       ],
+       "tol": 0.0
+      }
+     }
+    ],
+    "local": {
+     "kind": 2,
+     "point": [
+      0.5,
+      0.25,
+      -1
+     ],
+     "swap": true
+    },
+    "calls": [
+     [
+      0,
+      -1
+     ]
+    ]
+   }
+  },
+  {
+   "name": "zerovec_may_tiny_14",
+   "inputs": {
+    "op": "may",
+    "solver": {
+     "op": 14,
+     "req": 1,
+     "tol": 1e-06,
+     "best": 4.0,
+     "vecs": [
+      [
+       0,
+       0,
+       1e-09
+      ]
+     ]
+    },
+    "pairs": [
+     [
+      [
+       0,
+       0,
+       0,
+       1,
+       1,
+       1
+      ],
+      [
+       0,
+       0,
+       5,
+       1,
+       1,
+       6
+      ]
+     ],
+     [
+      [
+       0,
+       0,
+       0,
+       1,
+       1,
+       1
+      ],
+      [
+       4,
+       0,
+       0,
+       5,
+       1,
+       1
+      ]
+     ],
+     [
+      [
+       0,
+       0,
+       0,
+       1,
+       1,
+       1
+      ],
+      [
+       0.5,
+       0.5,
+       0.5,
+       2,
+       2,
+       2
+      ]
+     ]
+    ]
+   }
+  },
+  {
+   "name": "zerovec_local_tiny_15_1e+20_False",
+   "inputs": {
+    "op": "local",
+    "solver": {
+     "op": 15,
+     "req": 1,
+     "tol": 1e-06,
+     "best": 1e+20,
+     "vecs": [
+      [
+       0,
+       0,
+       1e-09
+      ]
+     ]
+    },
+    "objects": [
+     {
+      "vertex": {
+       "p": [
+        3,
+        -2,
+        5
+       ],
+       "tol": 1e-07
+      }
+     },
+     {
+      "vertex": {
+       "p": [
+        0,
+        0,
+        0
+       ],
+       "tol": 0.0
+      }
+     }
+    ],
+    "local": {
+     "kind": 2,
+     "point": [
+      0.5,
+      0.25,
+      -1
+     ],
+     "swap": false
+    },
+    "calls": [
+     [
+      -1,
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "zerovec_local_tiny_15_1e+20_True",
+   "inputs": {
+    "op": "local",
+    "solver": {
+     "op": 15,
+     "req": 1,
+     "tol": 1e-06,
+     "best": 1e+20,
+     "vecs": [
+      [
+       0,
+       0,
+       1e-09
+      ]
+     ]
+    },
+    "objects": [
+     {
+      "vertex": {
+       "p": [
+        3,
+        -2,
+        5
+       ],
+       "tol": 1e-07
+      }
+     },
+     {
+      "vertex": {
+       "p": [
+        0,
+        0,
+        0
+       ],
+       "tol": 0.0
+      }
+     }
+    ],
+    "local": {
+     "kind": 2,
+     "point": [
+      0.5,
+      0.25,
+      -1
+     ],
+     "swap": true
+    },
+    "calls": [
+     [
+      0,
+      -1
+     ]
+    ]
+   }
+  },
+  {
+   "name": "zerovec_local_tiny_15_4_False",
+   "inputs": {
+    "op": "local",
+    "solver": {
+     "op": 15,
+     "req": 1,
+     "tol": 1e-06,
+     "best": 4.0,
+     "vecs": [
+      [
+       0,
+       0,
+       1e-09
+      ]
+     ]
+    },
+    "objects": [
+     {
+      "vertex": {
+       "p": [
+        3,
+        -2,
+        5
+       ],
+       "tol": 1e-07
+      }
+     },
+     {
+      "vertex": {
+       "p": [
+        0,
+        0,
+        0
+       ],
+       "tol": 0.0
+      }
+     }
+    ],
+    "local": {
+     "kind": 2,
+     "point": [
+      0.5,
+      0.25,
+      -1
+     ],
+     "swap": false
+    },
+    "calls": [
+     [
+      -1,
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "zerovec_local_tiny_15_4_True",
+   "inputs": {
+    "op": "local",
+    "solver": {
+     "op": 15,
+     "req": 1,
+     "tol": 1e-06,
+     "best": 4.0,
+     "vecs": [
+      [
+       0,
+       0,
+       1e-09
+      ]
+     ]
+    },
+    "objects": [
+     {
+      "vertex": {
+       "p": [
+        3,
+        -2,
+        5
+       ],
+       "tol": 1e-07
+      }
+     },
+     {
+      "vertex": {
+       "p": [
+        0,
+        0,
+        0
+       ],
+       "tol": 0.0
+      }
+     }
+    ],
+    "local": {
+     "kind": 2,
+     "point": [
+      0.5,
+      0.25,
+      -1
+     ],
+     "swap": true
+    },
+    "calls": [
+     [
+      0,
+      -1
+     ]
+    ]
+   }
+  },
+  {
+   "name": "zerovec_may_tiny_15",
+   "inputs": {
+    "op": "may",
+    "solver": {
+     "op": 15,
+     "req": 1,
+     "tol": 1e-06,
+     "best": 4.0,
+     "vecs": [
+      [
+       0,
+       0,
+       1e-09
+      ]
+     ]
+    },
+    "pairs": [
+     [
+      [
+       0,
+       0,
+       0,
+       1,
+       1,
+       1
+      ],
+      [
+       0,
+       0,
+       5,
+       1,
+       1,
+       6
+      ]
+     ],
+     [
+      [
+       0,
+       0,
+       0,
+       1,
+       1,
+       1
+      ],
+      [
+       4,
+       0,
+       0,
+       5,
+       1,
+       1
+      ]
+     ],
+     [
+      [
+       0,
+       0,
+       0,
+       1,
+       1,
+       1
+      ],
+      [
+       0.5,
+       0.5,
+       0.5,
+       2,
+       2,
+       2
+      ]
+     ]
+    ]
+   }
+  },
+  {
+   "name": "zerovec_local_tiny_21_1e+20_False",
+   "inputs": {
+    "op": "local",
+    "solver": {
+     "op": 21,
+     "req": 1,
+     "tol": 1e-06,
+     "best": 1e+20,
+     "vecs": [
+      [
+       0,
+       0,
+       1e-09
+      ],
+      [
+       1e-09,
+       0,
+       0
+      ]
+     ]
+    },
+    "objects": [
+     {
+      "vertex": {
+       "p": [
+        3,
+        -2,
+        5
+       ],
+       "tol": 1e-07
+      }
+     },
+     {
+      "vertex": {
+       "p": [
+        0,
+        0,
+        0
+       ],
+       "tol": 0.0
+      }
+     }
+    ],
+    "local": {
+     "kind": 2,
+     "point": [
+      0.5,
+      0.25,
+      -1
+     ],
+     "swap": false
+    },
+    "calls": [
+     [
+      -1,
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "zerovec_local_tiny_21_1e+20_True",
+   "inputs": {
+    "op": "local",
+    "solver": {
+     "op": 21,
+     "req": 1,
+     "tol": 1e-06,
+     "best": 1e+20,
+     "vecs": [
+      [
+       0,
+       0,
+       1e-09
+      ],
+      [
+       1e-09,
+       0,
+       0
+      ]
+     ]
+    },
+    "objects": [
+     {
+      "vertex": {
+       "p": [
+        3,
+        -2,
+        5
+       ],
+       "tol": 1e-07
+      }
+     },
+     {
+      "vertex": {
+       "p": [
+        0,
+        0,
+        0
+       ],
+       "tol": 0.0
+      }
+     }
+    ],
+    "local": {
+     "kind": 2,
+     "point": [
+      0.5,
+      0.25,
+      -1
+     ],
+     "swap": true
+    },
+    "calls": [
+     [
+      0,
+      -1
+     ]
+    ]
+   }
+  },
+  {
+   "name": "zerovec_local_tiny_21_4_False",
+   "inputs": {
+    "op": "local",
+    "solver": {
+     "op": 21,
+     "req": 1,
+     "tol": 1e-06,
+     "best": 4.0,
+     "vecs": [
+      [
+       0,
+       0,
+       1e-09
+      ],
+      [
+       1e-09,
+       0,
+       0
+      ]
+     ]
+    },
+    "objects": [
+     {
+      "vertex": {
+       "p": [
+        3,
+        -2,
+        5
+       ],
+       "tol": 1e-07
+      }
+     },
+     {
+      "vertex": {
+       "p": [
+        0,
+        0,
+        0
+       ],
+       "tol": 0.0
+      }
+     }
+    ],
+    "local": {
+     "kind": 2,
+     "point": [
+      0.5,
+      0.25,
+      -1
+     ],
+     "swap": false
+    },
+    "calls": [
+     [
+      -1,
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "zerovec_local_tiny_21_4_True",
+   "inputs": {
+    "op": "local",
+    "solver": {
+     "op": 21,
+     "req": 1,
+     "tol": 1e-06,
+     "best": 4.0,
+     "vecs": [
+      [
+       0,
+       0,
+       1e-09
+      ],
+      [
+       1e-09,
+       0,
+       0
+      ]
+     ]
+    },
+    "objects": [
+     {
+      "vertex": {
+       "p": [
+        3,
+        -2,
+        5
+       ],
+       "tol": 1e-07
+      }
+     },
+     {
+      "vertex": {
+       "p": [
+        0,
+        0,
+        0
+       ],
+       "tol": 0.0
+      }
+     }
+    ],
+    "local": {
+     "kind": 2,
+     "point": [
+      0.5,
+      0.25,
+      -1
+     ],
+     "swap": true
+    },
+    "calls": [
+     [
+      0,
+      -1
+     ]
+    ]
+   }
+  },
+  {
+   "name": "zerovec_may_tiny_21",
+   "inputs": {
+    "op": "may",
+    "solver": {
+     "op": 21,
+     "req": 1,
+     "tol": 1e-06,
+     "best": 4.0,
+     "vecs": [
+      [
+       0,
+       0,
+       1e-09
+      ],
+      [
+       1e-09,
+       0,
+       0
+      ]
+     ]
+    },
+    "pairs": [
+     [
+      [
+       0,
+       0,
+       0,
+       1,
+       1,
+       1
+      ],
+      [
+       0,
+       0,
+       5,
+       1,
+       1,
+       6
+      ]
+     ],
+     [
+      [
+       0,
+       0,
+       0,
+       1,
+       1,
+       1
+      ],
+      [
+       4,
+       0,
+       0,
+       5,
+       1,
+       1
+      ]
+     ],
+     [
+      [
+       0,
+       0,
+       0,
+       1,
+       1,
+       1
+      ],
+      [
+       0.5,
+       0.5,
+       0.5,
+       2,
+       2,
+       2
+      ]
+     ]
+    ]
+   }
+  }
+ ]
+}

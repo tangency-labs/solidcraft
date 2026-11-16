@@ -1,6 +1,7 @@
 #![allow(clippy::unwrap_used, clippy::panic)]
 use serde_json::{Value, json};
 use solidcraft_doc::{Document, FeatureKind, ProfileSel};
+use solidcraft_geom::MeshGeom;
 
 use crate::Session;
 

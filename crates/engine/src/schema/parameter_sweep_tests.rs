@@ -32,6 +32,22 @@ fn schemas_and_the_key_check_agree() {
     assert_keys(input_schema_for::<ParameterSweepParams>(), &["from", "parameter", "steps", "to", "values"]);
 }
 
+/// The schema requires `parameter`, as text, as the handler does: left out, `null` or a number,
+/// the handler refuses the call ("`parameter` is required"), so the schema refuses it too.
+#[test]
+fn the_schema_requires_the_parameter_as_text() {
+    let schema = input_schema_for::<ParameterSweepParams>();
+    let schema = schema.as_value();
+    for (p, takes) in [
+        (json!({"parameter": "w", "values": [1, 2]}), true),
+        (json!({"values": [1, 2]}), false),
+        (json!({"parameter": null, "values": [1, 2]}), false),
+        (json!({"parameter": 5, "values": [1, 2]}), false),
+    ] {
+        assert_eq!(conforms(schema, schema, &p), takes, "{p}");
+    }
+}
+
 /// A call that fails today gets the same message in strict. The handler looks the parameter up
 /// before it reads the values, so each call runs on a design that has one
 /// (`assert_strict_keeps_todays_errors` runs on one that has none).

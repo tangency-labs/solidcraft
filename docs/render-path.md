@@ -6,7 +6,7 @@ state intended coverage, not a claim that every backend has passed.
 
 Native applications can register `solidcraft_gpu::path::host()` alongside the
 existing CPU image host. `render.backends` then exposes `builtin/gpu-path` with
-Preview, Image, PNG, Pbr, Progressive and Refraction. The browser keeps its CPU image host.
+Preview/Final, Image, PNG, Pbr, Progressive and Refraction. The browser keeps its CPU image host.
 Device discovery follows `SOLIDCRAFT_GPU` and `WGPU_BACKEND`; a device which cannot
 create the compute pipeline does not register an available path executor.
 The native UI retains a factory for the viewport's selected adapter at installation,
@@ -22,10 +22,25 @@ scopes and unwind guards, so a running setup keeps `gpu-path-setup.json` (its ad
 settings folder and removes it when the setup answers or the app closes normally. A launch that
 finds it for the same adapter key leaves the setup failed with that explanation until the user
 chooses **Try again**; a driver update changes the key and so tries again.
-The path tracer runs on Vulkan, or on Metal on macOS (#3217). A viewport on D3D12 is reopened on the
-same GPU through Vulkan. Where there is no Vulkan or Metal driver (Windows over
-Remote Desktop or on the WARP software adapter, older drivers), the path executor reports
-itself unavailable and images render on the CPU. On an RTX 4090, D3D12 was never faster:
+The path tracer runs on Vulkan, or on Metal on macOS (#3217). On Windows, the viewport
+must already use Vulkan: opening a driver that startup deliberately avoided is unsafe.
+A Direct3D 12 session offers **Restart with Vulkan** in Render. The same saved choice is
+available in **Preferences > Graphics > Graphics API**. The host reads it before creating
+any adapter or device. Automatic keeps the existing Windows Direct3D 12 first policy.
+Elsewhere, an unsupported viewport backend may reopen the same GPU through Vulkan or Metal.
+Where there is no suitable driver or device (Remote Desktop, WARP, older drivers), the path
+executor reports itself unavailable and CPU image methods remain usable.
+
+Changing the API records its previous value in graphics.json. Before the first attempted
+startup, the host atomically marks that choice as started. Only presentation of the first
+frame confirms it. An interrupted attempt restores the previous choice on the next normal
+launch; a handled startup failure restores it before retrying. Safe mode, explicit launch
+overrides and process-local fallback launches leave a pending attempt untouched. This is
+startup recovery, not a timed image-confirmation or post-startup hang watchdog.
+Unrelated graphics preference changes preserve the backend and recovery metadata.
+The normal quit flow asks about unsaved documents before restart and reopens saved tabs.
+
+On an RTX 4090, D3D12 was never faster:
 equal per sample with DXC and about 55% slower with FXC, and it compiles the path shader
 at every start (about 82 s with DXC, about 2 hours with FXC), where Vulkan's compiled
 pipelines persist between runs.
@@ -35,20 +50,40 @@ checking or starting an image. These controls are transient image-job
 intent that can also be retained in typed saved setups. Each new saved concept
 uses the pending-format mechanism, without manually changing a version number.
 The canvas switches between live product preview and a large completed-image result,
-with Fit and 100% framing. Jobs report sample progress and export the completed PNG;
-partial accumulation buffers are not displayed on the canvas.
+with Fit and 100% framing. Fixed-sampling jobs publish an immutable PNG after every
+complete nonfinal production pass, using the same transport, denoising and finishing
+as the completed image. Partially computed passes are not displayed. The host retains
+at most two prepaid snapshots; pinned external snapshots may skip a publication without
+stalling final rendering, and this is counted in `preview_retention_skips`. Screen repaints may coalesce fast complete-pass updates.
+Provisional PNGs never become exportable results or retained linear EXR masters.
+Adaptive jobs also publish each complete pilot pass and production iteration. Pilot
+images show the pilot mean; those samples remain excluded from the final master.
+Production images normalize unfinished sums by their completed iteration count and
+retain already finished pixel means. Neither readback nor the optional preview
+denoiser writes the production accumulation. Progress labels distinguish pilots
+from production iterations because production counts vary per pixel. The host
+target includes pilots plus the configured maximum production count.
+
+Adaptive readback reserves one additional float4 plane (16 bytes per pixel). When
+denoising is selected, another independently reserved float4 plane supplies a
+normalized display input to the same filter; final denoising keeps its original
+production input. Final PNG and raw EXR remain identical with preview work disabled.
 
 ```json
 {"command":"render.start","params":{"settings":{"width":800,"height":600,"exposure_ev":0},"progressive":true,"samples":64,"max_depth":8,"seed":0}}
 ```
 
 `render.preflight` accepts the same input. It resolves the Progressive capability
-to the installed GPU host and performs admission without reserving memory. Start
-checks again and returns the existing session/serial/generation identity. Progress
+to the installed GPU host and validates the captured production representation
+under a temporary bounded work reservation. Check creates no job and releases the
+reservation afterward. Start validates the same conversions and certificates before
+assigning its session/serial/generation identity. Begin currently rebuilds immutable
+uploads and optical certificates; no preparation cache or cross-scene proof reuse
+is claimed. Progress
 reports complete samples per pixel; a partially computed sample is not counted.
 Cancel, status, retained-image ownership and atomic PNG export use the same host
 protocol as CPU jobs. Defaults are 64 samples, depth 8 and seed 0; the bounds are
-1–4096 samples and 1–16 bounces. Sampling controls require `progressive: true`.
+1–65,536 samples and 1–64 events. Sampling controls require `progressive: true`.
 
 Runtime request-only [glass overrides](render-transmission.md) and an optional
 [thin-lens camera](render-thin-lens.md) and [clear coat](render-clear-coat.md) are available through those same commands.
@@ -69,8 +104,11 @@ illumination.
 The original integrator uses software BVH traversal, opaque GGX/Smith/Schlick and
 the symmetric diffuse attenuation defined by `render::surface`. Each hit evaluates
 the three existing directional studio lights with shadow visibility. Continuation
-samples a mixture of cosine-weighted diffuse and GGX normals with the combined
-PDF; Russian roulette begins after four hits. There are indirect bounces, but no
+samples a mixture of cosine-weighted diffuse and visible GGX normals with the combined
+PDF. The diffuse lobe gets 0.5 × (1 − metallic) of the uncoated samples, so a
+pure metal, which has no diffuse response, spends all of them on its specular
+lobe; the density weights the lobes the same way, so the estimate is unbiased.
+Russian roulette begins after four hits. There are indirect bounces, but no
 environment illumination in the default legacy lighting profile. All legacy opaque colors use
 linear-sRGB base color, metallic 0, roughness 0.5, IOR 1.5. Explicit face appearances
 take precedence over body appearances.
@@ -83,9 +121,13 @@ transmission record is rejected by the path executor. Runtime
 [area lights](render-studio-lighting.md), [sun/HDR environment lighting](render-environment.md)
 and [opaque planar color/normal maps](render-runtime-textures.md) are available
 through explicit job inputs. They do not add saved document fields. An optional bounded edge-aware a-trous
-[denoiser](render-denoise.md) filters the final output while preserving raw accumulation.
-Texture LOD/mipmap selection, EXR and Final mode remain unimplemented by this
-executor; a path-traced preview does not declare those capabilities.
+[denoiser](render-denoise.md) filters progressive and final display images while preserving
+raw accumulation. Optional raw scene-linear EXR masters are retained only for completed
+images, before display filters. Preview/Image and Final/Image select the same physical
+path producer and preserve authored sample/depth/effect settings. Final is a supported
+image mode, not an automatic quality preset or a convergence certificate. Optional
+`texture_filtering: true` enables the production mip/footprint sampler; omission
+preserves the original LOD0 behavior.
 
 Each job builds a BVH over its immutable captured meshes with a sixteen-bin
 surface-area heuristic on triangle centres; there is no cross-document cache to
@@ -124,7 +166,9 @@ has at most two live jobs across both executors.
 
 Validation lives in `gpu::path::tests` and engine render job tests. Set
 `SOLIDCRAFT_REQUIRE_GPU=1` to make absence of an adapter fail device tests rather
-than skip them. BRDF parity is checked against the f64 oracle with 0.3% relative
+than skip them. The shared viewport crates (`solidcraft-viewport`, `-gpu`, `-egui`) read none of SolidCraft's
+variables: its own GPU tests take `VIEWPORT_TEST_GPU` (the adapter policy, as `SOLIDCRAFT_GPU`)
+and `VIEWPORT_TEST_REQUIRE_GPU=1` (a missing adapter fails), and CI sets both beside the app's. BRDF parity is checked against the f64 oracle with 0.3% relative
 plus 2e-5 absolute tolerance. The near-white furnace allows 0.07 absolute error:
 the existing single-scattering Schlick model is not a perfectly conserving pure
 Lambertian surface, even at IOR 1. Same-adapter determinism compares the actual
@@ -134,6 +178,45 @@ The ignored `path_performance` test builds a 1,048,576-triangle procedural spher
 and measures 1920×1080 dispatches, BVH construction and upload. Select sample count
 with `SOLIDCRAFT_PATH_BENCH_SAMPLES` (default 1). Run it explicitly with a clear GPU
 timing window; it is excluded from normal CI.
+
+## Clamping indirect light
+
+Polished metal can stay speckled however many samples a render takes: a rare path from
+a shiny surface to another and on to a bright light carries far more light than its
+neighbours, and the [denoiser](render-denoise.md) leaves smooth metal alone. The
+optional `clamp_indirect` job option limits such paths:
+
+```json
+{"command":"render.start","params":{"settings":{"width":800,"height":600},"progressive":true,"samples":1024,"denoise":true,"clamp_indirect":8}}
+```
+
+- From the first bounce on, each contribution a path adds (the direct light at one
+  surface or volume point, or one light, environment or sun hit) is scaled so its
+  largest channel is at most the limit, keeping its hue. What the camera's first hit
+  adds is never clamped: lights and the environment it sees directly, and the direct
+  light where it lands. Anything seen through glass or in a glass reflection is past
+  the first bounce, so it is clamped.
+- The limit is linear radiance before exposure, from 0.000001 to 1,000,000. Absent or
+  null means off; zero is refused rather than meaning off.
+- Light that rough, dispersive or thin-film glass connects to a light in a separate pass
+  after the path (the optical hard-light connections) is not clamped. Photon caustic
+  gathers and the direct light of a rough glass sheet are clamped like any other
+  contribution.
+- The clamp is compiled only into a separate version of each path program (opaque or
+  glass, with or without maps, the optical glass programs and the caustic camera
+  program), which the first job that sets it builds once per device and later ones
+  reuse. Jobs without it keep the ordinary programs, so their images do not change by a
+  single bit: even an untaken branch at the integrator's adds changes how the shader
+  compiler fuses them.
+- It is biased: it removes light, so it also dims real caustics, glints and bright
+  reflections of lights in shiny surfaces. A limit a few times the brightest radiance
+  a reflection should show keeps most real highlights; a lower one removes more speckle
+  and more real light.
+- It changes the path samples themselves, so the raw linear EXR master is clamped too,
+  not only the PNG.
+- Only the native `gpu-path` executor applies it; non-progressive requests and other
+  executors refuse it. Preflight reports it in `options.clamp_indirect` and an
+  `indirect_clamp` summary, and a saved GPU setup keeps it in `job.options`.
 
 ## Dispatch and device-loss behavior
 
@@ -160,3 +243,8 @@ fraction. This applies to the specular term and both diffuse transmission factor
 The existing actual-GPU BRDF oracle checks the limit at normal, oblique and grazing
 angles against the f64 surface, including mixed metallic values. Clear-coat and
 physical transmission contracts are unchanged by this base-lobe correction.
+
+The normal GPU Samples editor keeps the exact requested count, including values
+such as 17 or 31; every complete pass is published. Merely opening a saved setup
+does not round its count. **Use previous Render image defaults** retains the
+previous power-of-two rounding for an edited GPU Samples value.

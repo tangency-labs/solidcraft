@@ -37,6 +37,10 @@ pub struct Canvas {
     pub flip: bool,
     #[serde(default = "yes")]
     pub visible: bool,
+    /// Locked (#12310): its place, size, angle and flip stay as they are, and it is not deleted,
+    /// until it is unlocked. Its opacity, visibility and name can still change.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub locked: bool,
     /// The component it belongs to (its plane is in that component's frame, so it moves with
     /// the component's occurrence); 0 = the root.
     #[serde(default, skip_serializing_if = "is_root")]
@@ -79,9 +83,33 @@ impl Canvas {
 
 impl crate::Document {
     /// A canvas's plane in the world: resolved in its component's frame, then placed where the
-    /// component's occurrence puts it.
-    pub fn canvas_plane(&self, vals: &std::collections::BTreeMap<String, crate::expr::Value>, c: &Canvas) -> crate::Result<Plane> {
-        let p = self.resolve_plane(vals, &c.plane, 0)?;
+    /// component's occurrence puts it. Use the evaluated state so planes built from sketch
+    /// points, paths or other model geometry resolve as they do when the canvas is inserted.
+    /// Face attachments follow the current face in the same frame as attached sketches.
+    pub fn canvas_plane(
+        &self,
+        vals: &std::collections::BTreeMap<String, crate::expr::Value>,
+        c: &Canvas,
+        state: &crate::ModelState,
+    ) -> crate::Result<Plane> {
+        let p = if let Some(anchor) = crate::face_anchor::plane_face_anchor(&c.plane) {
+            // These wrappers need only the resolved face, so avoid copying the model every frame.
+            let mut base = &c.plane;
+            while let PlaneRef::Offset { base: next, .. }
+            | PlaneRef::Flipped { base: next, .. }
+            | PlaneRef::AtAngle { base: next, line: None, pivot: None, .. } = base
+            {
+                base = next;
+            }
+            let framed = if matches!(base, PlaneRef::Face { .. }) {
+                std::borrow::Cow::Borrowed(state)
+            } else {
+                crate::state_in_face_anchor_frame(self, state, anchor, c.component)?
+            };
+            self.resolve_attached_plane(vals, &c.plane, c.component, state, &framed)?
+        } else {
+            self.resolve_plane_in(vals, &c.plane, 0, c.component, Some(state))?
+        };
         let m = self.component_transform(c.component);
         if crate::is_identity(&m) {
             return Ok(p);

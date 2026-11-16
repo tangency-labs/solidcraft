@@ -1,0 +1,39 @@
+{
+  "area": "sweeps",
+  "bodies": {},
+  "calls": [],
+  "case": "3412-loft-sections-in-one-plane-refused",
+  "expected": {
+    "method": "the two sections are coplanar, so no solid exists between them: the right behaviour is a clean refusal with no body left, never a zero-volume body.",
+    "outcome": "refused",
+    "refusal": "loft sections 1 and 2 lie in the same plane",
+    "source": "invariants",
+    "sources": [
+      "tangency-labs/solidcraft#3412"
+    ],
+    "what": "a loft through two circles drawn on the same plane (no volume between them; it built a flat zero-volume body and reported success)"
+  },
+  "expressible": false,
+  "operation_expressible": false,
+  "outcome": {
+    "engine_error": "step 7 (solid.loft): invalid input: loft sections 1 and 2 lie in the same plane (no volume between them)",
+    "ran": false
+  },
+  "result": [],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": null,
+    "refused_with": "step 7 (solid.loft): invalid input: loft sections 1 and 2 lie in the same plane (no volume between them)",
+    "status": "pass"
+  },
+  "sources": [
+    "tangency-labs/solidcraft#3412"
+  ],
+  "traced_ops": [],
+  "ungraded": [],
+  "what": "a loft through two circles drawn on the same plane (no volume between them; it built a flat zero-volume body and reported success)",
+  "why_not": [
+    "no kernel operation ran before the failure: step 7 (solid.loft): invalid input: loft sections 1 and 2 lie in the same plane (no volume between them)"
+  ]
+}

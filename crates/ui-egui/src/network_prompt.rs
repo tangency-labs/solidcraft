@@ -1,13 +1,15 @@
-//! Files a design names on another computer: a linked design on `\\host\share`. On Windows,
-//! reading such a file, or only asking whether it exists, connects to that computer and may send
-//! it the user's Windows sign-in, so the engine refuses those paths until the server is allowed
-//! (`vfs::design_path_refusal`). Update Links and Open Linked Design ask first, naming the
-//! server: Allow once, Always allow this server (Preferences › Design), or Cancel.
+//! Files a design names on another computer: a linked design or a point cloud's file on
+//! `\\host\share`. On Windows, reading such a file, or only asking whether it exists, connects to
+//! that computer and may send it the user's Windows sign-in, so the engine refuses those paths
+//! until the server is allowed (`vfs::design_path_refusal`). Update Links, Open Linked Design and
+//! Reload from file ask first, naming the server: Allow once, Always allow this server
+//! (Preferences › Design), or Cancel.
 //!
 //! Only these user actions ask. Commands run programmatically or by an agent never prompt: they
 //! get the engine's error, and `component.links` reports such a link's `found` as unknown.
 
 use serde_json::Value;
+use solidcraft_engine::io::vfs::{Remote, design_path_refusal};
 
 use crate::SolveApp;
 use crate::ui_kit;
@@ -19,6 +21,9 @@ pub enum Then {
     UpdateLinks,
     /// Open Linked Design: open this file.
     OpenLinked(String),
+    /// Reload from file: read this point cloud's file again (`pointcloud.reload`, off the window
+    /// thread).
+    ReloadCloud(u64),
 }
 
 /// A user action waiting for its network servers to be allowed.
@@ -81,6 +86,17 @@ pub(crate) fn open_linked(app: &mut SolveApp, link: &Value) {
     app.open_path_async(file);
 }
 
+/// Reload from file on the Edit Point Cloud card: ask first when the cloud's file (`source`) is on
+/// a server not allowed yet. A path that is refused for good says so through the command's error.
+pub(crate) fn reload_cloud(app: &mut SolveApp, cloud: u64, source: &str) {
+    let design = app.session.path.as_deref();
+    if let Some(Remote::Network(host)) = design_path_refusal(source, design) {
+        app.network_prompt = Some(NetworkPrompt { hosts: vec![host], then: Then::ReloadCloud(cloud) });
+    } else {
+        run(app, Vec::new(), Then::ReloadCloud(cloud));
+    }
+}
+
 /// Run the action with `hosts` allowed for it alone.
 fn run(app: &mut SolveApp, hosts: Vec<String>, then: Then) {
     match then {
@@ -91,6 +107,13 @@ fn run(app: &mut SolveApp, hosts: Vec<String>, then: Then) {
         }
         // Opening a file reads only it, as File › Open does; the design it opens is checked anew.
         Then::OpenLinked(file) => app.open_path_async(&file),
+        Then::ReloadCloud(cloud) => {
+            let mut request = crate::file_load::Request::new("", crate::file_load::Kind::ReloadCloud);
+            request.options.insert("cloud".into(), serde_json::json!(cloud));
+            request.allow_hosts = hosts;
+            // An error is said in the status line, as for any file operation.
+            let _ = crate::file_load::begin_request(app, request);
+        }
     }
 }
 
@@ -115,16 +138,21 @@ pub fn answer(app: &mut SolveApp, answer: Answer) {
 /// The question, when one is waiting.
 pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     let Some(prompt) = app.network_prompt.as_ref() else { return };
-    let _language = crate::i18n::scope(&app.preferences.language);
+    let _language = solidcraft_ui_text::scope(&app.preferences.language);
     let hosts = prompt.hosts.iter().map(|h| format!("\\\\{h}")).collect::<Vec<_>>().join(", ");
-    let detail = crate::i18n::format("network.prompt_detail", &[("host", &hosts)]);
-    let (closed, action) = ui_kit::Confirm::new(egui::Id::unique("sc_network_prompt"), "status_warning", crate::i18n::tr("network.prompt_title"))
-        .tone(ui_kit::Tone::Warning)
-        .actions(crate::i18n::tr("network.allow_once"), crate::i18n::tr("ui.cancel"), Some(crate::i18n::tr("network.always_allow")))
-        .selected(ui_kit::Action::Cancel)
-        .show(ctx, true, |ui| {
-            ui_kit::text(ui, &detail, ui_kit::Text::Report("network_prompt", false));
-        });
+    let detail = solidcraft_ui_text::format("network.prompt_detail", &[("host", &hosts)]);
+    let (closed, action) =
+        ui_kit::Confirm::new(egui::Id::unique("sc_network_prompt"), "status_warning", solidcraft_ui_text::tr("network.prompt_title"))
+            .tone(ui_kit::Tone::Warning)
+            .actions(
+                solidcraft_ui_text::tr("network.allow_once"),
+                solidcraft_ui_text::tr("ui.cancel"),
+                Some(solidcraft_ui_text::tr("network.always_allow")),
+            )
+            .selected(ui_kit::Action::Cancel)
+            .show(ctx, true, |ui| {
+                ui_kit::text(ui, &detail, ui_kit::Text::Report("network_prompt", false));
+            });
     let mut chosen = match action {
         ui_kit::Action::Ok => Some(Answer::Once),
         ui_kit::Action::Apply => Some(Answer::Always),

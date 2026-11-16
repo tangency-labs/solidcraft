@@ -1,6 +1,6 @@
 //! Runtime rectangular emitters and constant environment radiance. Coordinates are
 //! world-space millimetres; radiance is linear RGB. Saved setups reuse these bounds.
-use super::{ErrorCode, JobError, Result};
+use super::{DirectionalLightOptions, ErrorCode, JobError, Result};
 use serde::{Deserialize, Serialize};
 use solidcore_record::Vec3;
 use solidcraft_geom::prelude::*;
@@ -137,16 +137,91 @@ impl<'de> Deserialize<'de> for AreaLights {
     }
 }
 
+pub const MAX_DIRECTIONAL_LIGHTS: usize = 8;
+
+/// Copyable hard directional sources. The optional finite Sun shares the same
+/// eight-source family limit, but keeps its separate angular-radiance contract.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct DirectionalLights {
+    entries: [DirectionalLightOptions; MAX_DIRECTIONAL_LIGHTS],
+    len: usize,
+}
+impl Default for DirectionalLights {
+    fn default() -> Self {
+        Self { entries: [DirectionalLightOptions { direction: [0.0, 0.0, 1.0], color: [0.0; 3], intensity: 0.0 }; MAX_DIRECTIONAL_LIGHTS], len: 0 }
+    }
+}
+impl DirectionalLights {
+    pub fn new(lights: &[DirectionalLightOptions]) -> Result<Self> {
+        if lights.len() > MAX_DIRECTIONAL_LIGHTS {
+            return Err(JobError::new(ErrorCode::InvalidRequest, "at most eight directional lights including the Sun"));
+        }
+        let mut result = Self::default();
+        for (slot, light) in result.entries.iter_mut().zip(lights) {
+            light.validate()?;
+            *slot = *light;
+        }
+        result.len = lights.len();
+        Ok(result)
+    }
+    pub fn iter(&self) -> impl Iterator<Item = &DirectionalLightOptions> {
+        self.entries.iter().take(self.len)
+    }
+    pub fn is_empty(&self) -> bool {
+        self.len == 0
+    }
+}
+impl Serialize for DirectionalLights {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error> {
+        serializer.collect_seq(self.iter())
+    }
+}
+impl<'de> Deserialize<'de> for DirectionalLights {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> std::result::Result<Self, D::Error> {
+        struct Visitor;
+        impl<'de> serde::de::Visitor<'de> for Visitor {
+            type Value = DirectionalLights;
+            fn expecting(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                f.write_str("an array of at most eight hard directional lights")
+            }
+            fn visit_seq<A: serde::de::SeqAccess<'de>>(self, mut seq: A) -> std::result::Result<Self::Value, A::Error> {
+                let mut result = DirectionalLights::default();
+                while let Some(light) = seq.next_element::<DirectionalLightOptions>()? {
+                    let slot = result.entries.get_mut(result.len).ok_or_else(|| serde::de::Error::custom("at most eight directional lights"))?;
+                    light.validate().map_err(serde::de::Error::custom)?;
+                    *slot = light;
+                    result.len += 1;
+                }
+                Ok(result)
+            }
+        }
+        deserializer.deserialize_seq(Visitor)
+    }
+}
+
 #[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct StudioLighting {
     pub sun: Option<Sun>,
+    #[serde(skip_serializing_if = "DirectionalLights::is_empty")]
+    pub directional_lights: DirectionalLights,
+    #[serde(skip_serializing_if = "super::PunctualLights::is_empty")]
+    pub punctual_lights: super::PunctualLights,
     pub environment: [f64; 3],
     pub area_lights: AreaLights,
 }
 
 impl StudioLighting {
     pub fn validate(self) -> Result<()> {
+        if self.directional_lights.iter().count() + usize::from(self.sun.is_some()) > MAX_DIRECTIONAL_LIGHTS {
+            return Err(JobError::new(ErrorCode::InvalidRequest, "at most eight directional lights including the Sun"));
+        }
+        for light in self.directional_lights.iter() {
+            light.validate()?;
+        }
+        for light in self.punctual_lights.iter() {
+            light.validate_gpu()?;
+        }
         if let Some(sun) = self.sun {
             sun.validate()?;
         }
@@ -231,5 +306,33 @@ mod tests {
             assert!((previous..=1.0).contains(&value));
             previous = value;
         }
+    }
+    #[test]
+    fn hard_directional_list_is_bounded_copyable_and_preserves_authored_values() {
+        fn is_copy<T: Copy>() {}
+        is_copy::<StudioLighting>();
+        let light = DirectionalLightOptions { direction: [f64::MIN_POSITIVE, 0.0, 0.0], color: [0.25, 0.5, 1.0], intensity: 0.0 };
+        let list = DirectionalLights::new(&[light; 8]).unwrap();
+        assert_eq!(list.iter().count(), 8);
+        assert_eq!(serde_json::from_value::<DirectionalLights>(serde_json::to_value(list).unwrap()).unwrap(), list);
+        assert!(DirectionalLights::new(&[light; 9]).is_err());
+        assert!(serde_json::from_value::<DirectionalLights>(serde_json::json!(vec![light; 9])).is_err());
+        for bad in [
+            DirectionalLightOptions { direction: [0.0; 3], ..light },
+            DirectionalLightOptions { color: [-0.1, 0.0, 0.0], ..light },
+            DirectionalLightOptions { intensity: 64.01, ..light },
+        ] {
+            assert!(DirectionalLights::new(&[bad]).is_err());
+        }
+        let sun = Sun { direction: [0.0, 0.0, 1.0], angular_radius_rad: 0.02, radiance: [1.0; 3] };
+        assert!(StudioLighting { sun: Some(sun), directional_lights: list, ..Default::default() }.validate().is_err());
+        assert!(
+            StudioLighting { sun: Some(sun), directional_lights: DirectionalLights::new(&[light; 7]).unwrap(), ..Default::default() }
+                .validate()
+                .is_ok()
+        );
+        let legacy: StudioLighting = serde_json::from_str(r#"{"sun":null,"environment":[0.1,0.2,0.3],"area_lights":[]}"#).unwrap();
+        assert!(legacy.directional_lights.is_empty());
+        assert!(serde_json::to_value(legacy).unwrap().get("directional_lights").is_none());
     }
 }

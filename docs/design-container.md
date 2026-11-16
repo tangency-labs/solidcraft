@@ -139,7 +139,7 @@ recorded once. Face names are kept as worked out (saving works out any not asked
 for yet), so a body taken from the file is named exactly as when it was saved.
 A design whose stored names predate format 14 (marked `?`) saves without a model:
 those names find no face or edge, and the features holding them ask for their
-references to be picked again.
+references to be picked again (a sketch names the projections it lost instead).
 
 Both entries are Deflate-compressed (level one) under either compression policy: the
 encoded bodies shrink about fourfold (an imported assembly) to tenfold (modelled parts),
@@ -162,7 +162,7 @@ Before #9170 one mesh body left the cache out for the whole model. As for a B-re
 mesh body is kept only when its slice reads back as the same vertices, bit for bit, the
 same triangles, colour and paint; the picture shown while opening draws its triangles.
 
-`cache/model.json` records `solidcraft-model-cache/9`, the producer revision
+`cache/model.json` records `solidcraft-model-cache/10`, the producer revision
 `solidcraft-truck-adapter/4`, the application version, the build (source commit,
 CPU architecture and OS), the evaluation source (below, with the CPU architecture
 and OS), the geometry kernel that computed it (`solidcore`; earlier builds could write `smlib`, a cache this build evaluates again), the SHA-256 of the exact `document.json` (whose blob references pin every
@@ -175,9 +175,9 @@ numbers on the same kernel; a design opened on the other kernel is evaluated on 
 The evaluation source (`SOLIDCRAFT_EVALUATION_SOURCE`, `crates/io/build.rs`) is a
 digest of the committed source a model is computed from: the `doc` crate and every
 workspace crate it is built from (a test checks the list against their manifests),
-the patched dependencies in `vendor/` (not the interface's renderer), the locked
-versions of every other dependency, the workspace `Cargo.toml` without the
-application's version, `.cargo/config.toml`, and the cache's own reader. An update
+the vendored kernel in `solidcore/` and the patched dependencies in `vendor/` (not the
+interface's renderer), the locked versions of every other dependency, the workspace `Cargo.toml`
+without the application's version, `.cargo/config.toml`, and the cache's own reader. An update
 that changed none of it (the interface, the commands, other file formats, a new
 version number) opens designs from the caches the build before it wrote (#7168);
 one that changed any of it (a kernel fix, the codec, a dependency) evaluates them
@@ -204,7 +204,12 @@ features (400 marked cylinders: 34 of a 37 MB manifest); each marking is written
 names its markings as runs of places, and a thinned cache keeps all of them. So are the states' sketch keys (the evaluation key of each
 sketch before the state): each distinct set is written once, as the keys it sets and drops
 relative to the set written before it, and a state names its set by place; a thinned cache
-keeps all of them too. When the rest of the
+keeps all of them too. Resolved face points are also stored once per feature and distinct value,
+with each state naming its entries as sorted runs of table positions. These are the points
+found before a feature ran: a pattern or mirror of a cut needs them when the cut split its
+target face. Thinning keeps and budgets the whole table. A cache without this table is
+discarded, so opening rebuilds the points from the design's history.
+When the rest of the
 manifest (the bodies' table, the slices) then leaves too little room, the choice
 is made again within that much less, and the final state alone is always tried.
 A feature whose state is left out records none. The cache is left out (and the
@@ -261,7 +266,7 @@ phase-one container PR (#327):
    loops, geometric domains, analytic/spline curve and surface definitions, units,
    tolerances and orientation must have explicit semantics. Preserve face-source
    certificates, persistent names and history using SolidCraft-owned identities.
-   No truck serialized structs, memory layouts, pointers or opaque kernel blobs
+   No kernel serialized structs, memory layouts, pointers or opaque kernel blobs
    form part of the persisted contract. No evaluated STEP round trip is a substitute.
 3. Separate adapters between the neutral schema and supported kernels. Unsupported
    geometry or provenance is a cache miss. Explicitly fitted intersection splines

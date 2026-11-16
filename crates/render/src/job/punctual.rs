@@ -25,7 +25,98 @@ pub struct PunctualLightOptions {
     pub cone: Option<SpotConeOptions>,
 }
 
+/// GPU spot feathers narrower than this cosine interval are explicitly refused.
+/// This keeps f32 unit-vector/dot rounding small compared with the authored
+/// feather instead of widening two distinct f64 bounds into the same f32 cone.
+pub const MIN_GPU_SPOT_COSINE_GAP: f64 = 1.0 / 1024.0;
+pub const MAX_PUNCTUAL_LIGHTS: usize = 8;
+
+/// Copyable bounded GPU source intent. CPU requests keep their existing DTO Vec.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct PunctualLights {
+    entries: [PunctualLightOptions; MAX_PUNCTUAL_LIGHTS],
+    len: usize,
+}
+impl Default for PunctualLights {
+    fn default() -> Self {
+        Self {
+            entries: [PunctualLightOptions {
+                position_mm: [0.0; 3],
+                color: [0.0; 3],
+                intensity: 0.0,
+                reference_distance_mm: 1.0,
+                minimum_distance_mm: 0.001,
+                cone: None,
+            }; MAX_PUNCTUAL_LIGHTS],
+            len: 0,
+        }
+    }
+}
+impl PunctualLights {
+    pub fn new(lights: &[PunctualLightOptions]) -> Result<Self> {
+        if lights.len() > MAX_PUNCTUAL_LIGHTS {
+            return Err(JobError::new(ErrorCode::InvalidRequest, "at most eight point and spot lights combined"));
+        }
+        let mut result = Self::default();
+        for (slot, light) in result.entries.iter_mut().zip(lights) {
+            light.validate_gpu()?;
+            *slot = *light;
+        }
+        result.len = lights.len();
+        Ok(result)
+    }
+    pub fn iter(&self) -> impl Iterator<Item = &PunctualLightOptions> {
+        self.entries.iter().take(self.len)
+    }
+    pub fn is_empty(&self) -> bool {
+        self.len == 0
+    }
+}
+impl Serialize for PunctualLights {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error> {
+        serializer.collect_seq(self.iter())
+    }
+}
+impl<'de> Deserialize<'de> for PunctualLights {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> std::result::Result<Self, D::Error> {
+        struct Lights;
+        impl<'de> serde::de::Visitor<'de> for Lights {
+            type Value = PunctualLights;
+            fn expecting(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                f.write_str("at most eight GPU point and spot lights combined")
+            }
+            fn visit_seq<A: serde::de::SeqAccess<'de>>(self, mut seq: A) -> std::result::Result<Self::Value, A::Error> {
+                let mut lights = PunctualLights::default();
+                while let Some(light) = seq.next_element::<PunctualLightOptions>()? {
+                    let slot =
+                        lights.entries.get_mut(lights.len).ok_or_else(|| serde::de::Error::custom("at most eight GPU point and spot lights"))?;
+                    light.validate_gpu().map_err(serde::de::Error::custom)?;
+                    *slot = light;
+                    lights.len += 1;
+                }
+                Ok(lights)
+            }
+        }
+        deserializer.deserialize_seq(Lights)
+    }
+}
+
 impl PunctualLightOptions {
+    /// GPU precision is a separate bounded domain; original CPU intent is never
+    /// clamped or rewritten when it cannot be represented by this consumer.
+    pub fn validate_gpu(&self) -> Result<()> {
+        self.validate()?;
+        if let Some(cone) = self.cone {
+            let gap = cone.inner_half_angle_radians.cos() - cone.outer_half_angle_radians.cos();
+            if gap < MIN_GPU_SPOT_COSINE_GAP {
+                return Err(JobError::new(
+                    ErrorCode::InvalidRequest,
+                    "GPU spot feather is too narrow for reliable precision; increase its angle range or use CPU",
+                ));
+            }
+        }
+        Ok(())
+    }
     pub fn validate(&self) -> Result<()> {
         let invalid = || JobError::new(ErrorCode::InvalidRequest, "invalid bounded point/spot light");
         if !self.position_mm.iter().all(|v| v.is_finite() && v.abs() <= 1e9)
@@ -192,5 +283,53 @@ pub struct PunctualDiagnostics {
 impl PunctualDiagnostics {
     pub fn is_empty(self) -> bool {
         self.near_source == 0 && self.radiance_limit == 0 && self.shadow_offset_crossed == 0
+    }
+}
+
+#[cfg(test)]
+mod gpu_tests {
+    use super::*;
+    fn point() -> PunctualLightOptions {
+        PunctualLightOptions {
+            position_mm: [1e9, 0.0, 1.0],
+            color: [0.25, 0.5, 1.0],
+            intensity: 2.0,
+            reference_distance_mm: 10.0,
+            minimum_distance_mm: 0.001,
+            cone: None,
+        }
+    }
+    #[test]
+    fn gpu_punctual_copy_list_preserves_exact_authored_values_and_rejects_hostile_ninth() {
+        let mut spot = point();
+        spot.cone = Some(SpotConeOptions { emitted_axis: [0.0, 0.0, -1e-200], inner_half_angle_radians: 0.2, outer_half_angle_radians: 0.5 });
+        let list = PunctualLights::new(&[point(), spot, point(), spot, point(), spot, point(), spot]).unwrap();
+        assert_eq!(list.iter().count(), 8);
+        assert_eq!(serde_json::from_value::<PunctualLights>(serde_json::to_value(list).unwrap()).unwrap(), list);
+        assert!(PunctualLights::new(&[point(); 9]).is_err());
+        assert!(serde_json::from_value::<PunctualLights>(serde_json::json!(vec![point(); 9])).is_err());
+        assert!(serde_json::to_value(super::super::StudioLighting::default()).unwrap().get("punctual_lights").is_none());
+        for mut invalid in [point(); 3] {
+            invalid.minimum_distance_mm = 0.0;
+            assert!(PunctualLights::new(&[invalid]).is_err());
+        }
+    }
+    #[test]
+    fn gpu_spot_precision_refusal_never_widens_or_rewrites_cpu_valid_cones() {
+        for (inner, outer) in [(0.2, 0.2000000001), (0.0, 0.0001), (1.0, 1.000000001)] {
+            let mut spot = point();
+            spot.cone = Some(SpotConeOptions { emitted_axis: [0.0, 0.0, -1.0], inner_half_angle_radians: inner, outer_half_angle_radians: outer });
+            let before = spot;
+            spot.validate().unwrap();
+            assert!(spot.validate_gpu().unwrap_err().message.contains("precision"));
+            assert_eq!(spot, before);
+        }
+        let mut spot = point();
+        spot.cone = Some(SpotConeOptions { emitted_axis: [0.0, 0.0, -1.0], inner_half_angle_radians: 0.2, outer_half_angle_radians: 0.5 });
+        assert!(spot.validate_gpu().is_ok());
+        let cone = spot.cone.unwrap();
+        let inner = cone.inner_half_angle_radians.cos() as f32;
+        let outer = cone.outer_half_angle_radians.cos() as f32;
+        assert!(inner > outer && f64::from(inner - outer) > MIN_GPU_SPOT_COSINE_GAP);
     }
 }

@@ -1,8 +1,8 @@
-//! The custom view navigator: a body of the user's choice drawn in place of the navigation cube
-//! (`viewport::body_gizmo` draws it). A right-click on any view navigator offers Axes, Cube and
+//! The custom view navigator: a body of the user's choice drawn in place of the signed axes
+//! (`viewport::body_gizmo` draws it). A right-click on any view navigator offers Axes and
 //! Custom ([`menu_items`]); Custom opens the Custom View Navigator panel, a feature panel with OK
 //! and Cancel ([`start`], [`rows`], [`run_dialog`]): the body is picked in the view, then its
-//! texture (the cube's colours, or the body's own) and whether the cube's rotation arrows and
+//! texture (the colours, or the body's own) and whether the rotation arrows and
 //! Home button go around it. The navigator previews the panel's choices while it is open. OK
 //! runs `view.navigator` ([`command`]), which scripts and the control channel run too.
 //!
@@ -11,6 +11,7 @@
 //! The snapshot is scaled so its longest side is 2 and packed as 16-bit whole numbers of
 //! 1/10000 ([`snapshot`]): every body is the same size in the gizmo, and the stored form stays
 //! small. Faces and edges keep their identities, so the gizmo can light one face and outline it.
+use solidcraft_engine::geom::MeshGeom;
 use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
 
@@ -19,11 +20,12 @@ use solidcore_record::Vec3;
 use solidcraft_engine::geom::{Mesh, Vec3Geom};
 
 use crate::SolveApp;
-use crate::context_menu::{Item, act};
+use crate::context_menu::act;
 use crate::dialogs::Kind;
 use crate::prefs::{NavigatorStyle, NavigatorTexture};
 use crate::selection::{BODIES, SelInput};
 use crate::ui_kit;
+use crate::ui_kit::Item;
 use solidcraft_engine::Sel;
 
 /// Bodies with more triangles cannot be the gizmo: the snapshot of one at the limit stays well
@@ -48,7 +50,7 @@ const UNIT: f64 = 10_000.0;
 /// The custom navigator's body.
 #[derive(Default)]
 pub struct State {
-    /// The body drawn in place of the cube (`None`: the cube is drawn).
+    /// The body drawn in place of the signed axes (`None`: the axes are drawn).
     pub shape: Option<Shape>,
     /// The stored form of `shape`, made once when it is chosen.
     stored: Option<Value>,
@@ -342,7 +344,7 @@ fn snapshot(name: &str, mesh: &Mesh, colour: Option<[u8; 3]>, faces: &BTreeMap<u
     }))
 }
 
-/// The menu a right-click on the view navigator opens: Axes, Cube and Custom, the current one
+/// The menu a right-click on the view navigator opens: Axes and Custom, the current one
 /// marked. Custom opens the Custom View Navigator panel, which sets it on OK.
 pub(crate) fn menu_items(app: &SolveApp) -> Vec<Item> {
     NavigatorStyle::ALL
@@ -350,8 +352,7 @@ pub(crate) fn menu_items(app: &SolveApp) -> Vec<Item> {
         .map(|style| {
             let (label, icon) = match style {
                 NavigatorStyle::Axes => (app.tr("prefs.axes"), "origin"),
-                NavigatorStyle::Cube => (crate::i18n::tr_label("Cube"), "box"),
-                NavigatorStyle::Custom => (crate::i18n::tr_label("Custom"), "body"),
+                NavigatorStyle::Custom => (solidcraft_ui_text::tr_label("Custom"), "body"),
             };
             act("ui.navigatorStyle", label, icon).with(json!({ "style": style })).key(if app.preferences.navigator_style == style {
                 "current"
@@ -362,7 +363,7 @@ pub(crate) fn menu_items(app: &SolveApp) -> Vec<Item> {
         .collect()
 }
 
-/// A menu pick: Axes and Cube at once; Custom opens its panel, as the toolbar would.
+/// A menu pick: Axes at once; Custom opens its panel, as the toolbar would.
 pub(crate) fn pick_style(app: &mut SolveApp, style: NavigatorStyle) {
     if style == NavigatorStyle::Custom {
         app.start("view.navigator");
@@ -371,11 +372,11 @@ pub(crate) fn pick_style(app: &mut SolveApp, style: NavigatorStyle) {
     }
 }
 
-/// Draw body `name` of the open design as the gizmo (`None`: no body, the cube again).
+/// Draw body `name` of the open design as the gizmo (`None`: no body, the signed axes again).
 fn set_body(app: &mut SolveApp, name: Option<&str>) -> Result<(), String> {
     let shape = match name {
         None => None,
-        Some(name) => Some(snapshot_of(&app.session, name).map_err(|reason| crate::i18n::tr(reason).to_string())?),
+        Some(name) => Some(snapshot_of(&app.session, name).map_err(|reason| solidcraft_ui_text::tr(reason).to_string())?),
     };
     app.view_gizmo.set(shape);
     Ok(())
@@ -502,31 +503,31 @@ pub(crate) fn rows(app: &SolveApp, ui: &mut egui::Ui, form: &mut Form, inputs: &
         form.preview = body.map(|name| (name.to_string(), snapshot_of(&app.session, name)));
     }
     if let Some((_, Err(reason))) = &form.preview {
-        ui_kit::text(ui, crate::i18n::tr(reason), ui_kit::Text::Error("view_gizmo_refused"));
+        ui_kit::text(ui, solidcraft_ui_text::tr(reason), ui_kit::Text::Error("view_gizmo_refused"));
     }
-    ui_kit::row(ui, crate::i18n::tr("view_gizmo.texture"), |ui| {
+    ui_kit::row(ui, solidcraft_ui_text::tr("view_gizmo.texture"), |ui| {
         let mut texture = usize::from(form.texture == NavigatorTexture::Modeled);
         let changed = ui_kit::segmented(
             ui,
             &mut texture,
-            &[crate::i18n::tr("view_gizmo.themed"), crate::i18n::tr_label("Modeled")],
+            &[solidcraft_ui_text::tr("view_gizmo.themed"), solidcraft_ui_text::tr_label("Modeled")],
             ui_kit::Segments { intrinsic: true, ..Default::default() },
         );
         if changed {
             form.texture = if texture == 1 { NavigatorTexture::Modeled } else { NavigatorTexture::Themed };
         }
     });
-    let arrows = ui_kit::checkbox(ui, crate::i18n::tr("view_gizmo.arrows"), &mut form.arrows);
+    let arrows = ui_kit::checkbox(ui, solidcraft_ui_text::tr("view_gizmo.arrows"), &mut form.arrows);
     crate::scenario::publish_target("view_gizmo:arrows", arrows.rect);
-    let home = ui_kit::checkbox(ui, crate::i18n::tr("view_gizmo.home"), &mut form.home);
+    let home = ui_kit::checkbox(ui, solidcraft_ui_text::tr("view_gizmo.home"), &mut form.home);
     crate::scenario::publish_target("view_gizmo:home", home.rect);
-    ui_kit::text(ui, crate::i18n::tr("view_gizmo.note"), ui_kit::Text::Note("view_gizmo_note"));
+    ui_kit::text(ui, solidcraft_ui_text::tr("view_gizmo.note"), ui_kit::Text::Note("view_gizmo_note"));
 }
 
 /// OK: the custom navigator with the panel's body (or the one it has), texture, arrows and Home.
 pub(crate) fn run_dialog(app: &mut SolveApp, form: &Form, inputs: &[SelInput]) -> Result<(), String> {
     if let Some((_, Err(reason))) = &form.preview {
-        return Err(crate::i18n::tr(reason).to_string());
+        return Err(solidcraft_ui_text::tr(reason).to_string());
     }
     let mut params = json!({"style": NavigatorStyle::Custom, "texture": form.texture, "arrows": form.arrows, "home": form.home});
     if let (Some(body), Some(o)) = (picked(inputs), params.as_object_mut()) {
@@ -543,6 +544,14 @@ pub(crate) struct Shown {
     pub texture: NavigatorTexture,
     pub arrows: bool,
     pub home: bool,
+}
+
+/// The navigator the view lays out for: Custom stands as the signed axes until a body is chosen.
+pub(crate) fn style(app: &SolveApp) -> NavigatorStyle {
+    match app.preferences.navigator_style {
+        NavigatorStyle::Custom if app.view_gizmo.shape.is_none() => NavigatorStyle::Axes,
+        style => style,
+    }
 }
 
 pub(crate) fn shown(app: &SolveApp) -> Shown {
@@ -728,19 +737,19 @@ mod tests {
     }
 
     #[test]
-    fn a_right_click_anywhere_on_the_navigator_offers_axes_cube_and_custom() {
+    fn a_right_click_anywhere_on_the_navigator_offers_axes_and_custom() {
         use crate::context_menu::{Target, items};
         let mut h = crate::scenario::Harness::new();
         h.app.run("solid.box", json!({"length": 40, "width": 20, "height": 10})).unwrap();
         h.frames(2);
         let design = h.app.session.doc.to_json();
-        for (from, pick, to) in [("axes", "Cube", NavigatorStyle::Cube), ("cube", "Axes", NavigatorStyle::Axes)] {
+        for (from, pick, to) in [("axes", "Axes", NavigatorStyle::Axes)] {
             h.call("ui.prefs", json!({"navigator_style": from}));
             h.frames(2);
             let outer = crate::scenario::rect_of("axis_view:outer").expect("the navigator is shown");
-            // The middle, a corner of its box, and its Home button on the cube.
+            // The middle, a corner of its box, and its Home button.
             let mut spots = vec![outer.center(), outer.left_bottom() + egui::vec2(3.0, -3.0)];
-            spots.extend(crate::scenario::handle_at("navigation_cube:control:home"));
+            spots.extend(crate::scenario::handle_at("navigator:control:home"));
             for at in spots {
                 crate::context_menu::close(&mut h.app);
                 h.call("ui.click", json!({"x": at.x, "y": at.y, "button": "right"}));
@@ -749,12 +758,12 @@ mod tests {
             }
             let rows = items(&h.app, &Target::ViewGizmo);
             let labels: Vec<_> = rows.iter().map(|r| r.label.as_str()).collect();
-            assert_eq!(labels, ["Axes", "Cube", "Custom"], "just the three types");
+            assert_eq!(labels, ["Axes", "Custom"], "just the two types");
             let current: Vec<_> = rows.iter().filter(|i| i.shortcut == "current").collect();
             assert_eq!(current.len(), 1);
             assert_eq!(current[0].params.as_ref().map(|p| p["style"].clone()), Some(json!(from)));
             assert_eq!(h.call("ui.menuPick", json!({"item": pick}))["ok"], true, "{pick}");
-            assert_eq!(h.app.preferences.navigator_style, to, "Axes and Cube apply at once");
+            assert_eq!(h.app.preferences.navigator_style, to, "Axes applies at once");
             assert!(h.app.dialog.is_none());
         }
         assert_eq!(h.app.session.doc.to_json(), design);
@@ -766,7 +775,6 @@ mod tests {
         let mut h = crate::scenario::Harness::new();
         h.app.preferences.look_at_anim = false;
         h.app.run("solid.box", json!({"length": 40, "width": 20, "height": 10})).unwrap();
-        h.call("ui.prefs", json!({"navigator_style": "cube"}));
         h.frames(2);
         let body = h.app.session.world_state().unwrap().bodies[0].name.clone();
         let open = |h: &mut crate::scenario::Harness| {
@@ -792,12 +800,12 @@ mod tests {
         open(&mut h);
         fill(&mut h);
         assert!(crate::scenario::count_of("body_gizmo:faces").is_some_and(|n| n >= 3.0), "the navigator previews the picked body");
-        assert!(crate::scenario::handle_at("navigation_cube:control:home").is_none(), "and the panel's Home, off");
-        assert!(crate::scenario::handle_at("navigation_cube:control:left").is_some(), "with its arrows");
+        assert!(crate::scenario::handle_at("navigator:control:home").is_none(), "and the panel's Home, off");
+        assert!(crate::scenario::handle_at("navigator:control:left").is_some(), "with its arrows");
         h.step(&json!({"click": {"handle": "dialog:cancel"}})).unwrap();
         h.frames(2);
         assert!(h.app.dialog.is_none());
-        assert_eq!(h.app.preferences.navigator_style, NavigatorStyle::Cube, "Cancel keeps the cube");
+        assert_eq!(h.app.preferences.navigator_style, NavigatorStyle::Axes, "Cancel keeps the axes");
         assert!(h.app.view_gizmo.shape.is_none() && h.app.preferences.navigator_home, "Cancel keeps Home on");
 
         let undo = h.app.session.undo.len();

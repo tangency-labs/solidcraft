@@ -483,7 +483,7 @@ fn detect_in(dirs: &[PathBuf], home: Option<&Path>, limit: Duration) -> Detectio
         argv.extend(k.args.iter().map(|a| a.to_string()));
         let mut result = if k.reports_version { probe(&path, limit) } else { Probe::default() };
         if let Some(version) = result.old_node.as_deref() {
-            result.problem = Some(crate::i18n::format("ui.agent_chat_node_too_old", &[("version", version)]));
+            result.problem = Some(solidcraft_ui_text::format("ui.agent_chat_node_too_old", &[("version", version)]));
             if uses_env_node(&path)
                 && let Some(node) = compatible_node(dirs, limit)
             {
@@ -561,6 +561,7 @@ mod tests {
     #[test]
     #[cfg(unix)]
     fn a_node_adapter_recovers_from_an_incompatible_desktop_runtime() {
+        crate::i18n::install();
         use super::super::process::{AgentProcess, FromAgent};
         use std::os::unix::fs::PermissionsExt;
 

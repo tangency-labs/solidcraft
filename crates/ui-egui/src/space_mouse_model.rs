@@ -95,7 +95,7 @@ pub(crate) fn paint(ui: &egui::Ui, rect: egui::Rect, pose: &Pose, moving: [bool;
     let painter = ui.painter_at(rect);
     let visuals = ui.visuals();
     let (_, at) = view(rect);
-    let (faint, accent) = (crate::theme::Tokens::get().text_dim, visuals.selection.stroke.color);
+    let (faint, accent) = (solidcraft_theme::Tokens::get().text_dim, visuals.selection.stroke.color);
     let marker = |live: bool| Stroke::new(if live { 2.5 } else { 1.5 }, if live { accent } else { faint });
     let outline = Stroke::new(1.0, faint);
     let (base_side, base_top) = (visuals.widgets.noninteractive.bg_stroke.color, visuals.widgets.inactive.bg_fill);
@@ -226,8 +226,37 @@ pub(crate) fn corner_rect(view: egui::Rect, position: crate::prefs::SpaceMouseGh
 /// The device in a corner of the 3D view (`rect`, from `corner_rect`), see-through so it doesn't hide the design:
 /// cap or trackball as `calibration` says, moving as the device does. A device without a
 /// calibration is read as it reports: each axis as a share of the full deflection a reading is
-/// scaled to (`FULL_SCALE`).
-pub(crate) fn corner(ui: &mut egui::Ui, rect: egui::Rect, calibration: Option<&Calibration>, raw: [i16; 6]) {
+/// scaled to (`FULL_SCALE`). The picture shows the device: each of the view's axes shows the
+/// motion that drives it (`source` and the driver's `mapping`), the way the device moves it. The
+/// user's own inversions are left to the view: they are a matter of taste, and a picture leaning
+/// against the user's hand would be worse than one that disagrees with the view.
+pub(crate) fn corner(
+    ui: &mut egui::Ui,
+    rect: egui::Rect,
+    calibration: Option<&Calibration>,
+    raw: [i16; 6],
+    source: [usize; 6],
+    mapping: Option<crate::space_mouse::DriverMapping>,
+) {
+    let (kind, travel, moving) = corner_reading(calibration, raw, source, mapping);
+    crate::scenario::publish_rect("space_mouse:corner", rect);
+    let mut corner = ui.new_child(egui::UiBuilder::new().id_salt("sc_space_mouse_corner").max_rect(rect));
+    corner.set_opacity(0.6);
+    let (travel, moving) = as_gestures(travel, moving);
+    draw(&corner, "corner", rect, kind, travel, moving);
+}
+
+/// What the corner picture shows for a reading: the kind of device, how far each of the view's
+/// axes has moved, and which markers light. The axes are the view's own — pan sideways, zoom, pan
+/// up and down, orbit up and down, orbit sideways and roll — so the picture shows every motion
+/// where the view uses it. The picture shows the device, though: the inversions belong to the
+/// view, so the cap in the picture leans the way the user leans it.
+fn corner_reading(
+    calibration: Option<&Calibration>,
+    raw: [i16; 6],
+    source: [usize; 6],
+    mapping: Option<crate::space_mouse::DriverMapping>,
+) -> (Kind, [f32; 6], [bool; 6]) {
     let (kind, travel, moving) = match calibration {
         Some(calibration) => (calibration.kind, calibration.travel(raw), calibration.apply(raw).map(|value| value != 0)),
         None => {
@@ -235,11 +264,52 @@ pub(crate) fn corner(ui: &mut egui::Ui, rect: egui::Rect, calibration: Option<&C
             (Kind::ReturnToCenter, travel, travel.map(|value| value.abs() > 0.05))
         }
     };
-    let travel = still_unless_moving(kind, travel, moving);
-    crate::scenario::publish_rect("space_mouse:corner", rect);
-    let mut corner = ui.new_child(egui::UiBuilder::new().id_salt("sc_space_mouse_corner").max_rect(rect));
-    corner.set_opacity(0.6);
-    draw(&corner, "corner", rect, kind, travel, moving);
+    let (travel, moving) = by_view_axis(travel, moving, source, mapping);
+    (kind, still_unless_moving(kind, travel, moving), moving)
+}
+
+/// The reading as the picture shows it: the rows are the device's own, each taking the motion it
+/// reads (`source`), and the driver's mapping (`mapping`) sends each row to the axis it drives in
+/// the view, so the picture shows every motion where the view uses it. The picture shows the
+/// device, so no inversion is drawn: the user's own inversions never reach the picture, and the
+/// driver's reversals are not drawn either — they are what makes the view follow the cap, and the
+/// cap is what the picture shows. An assignment that doesn't drive each motion once reads as the
+/// default, as the view does. A device with no mapping yet is read as it reports.
+fn by_view_axis(
+    travel: [f32; 6],
+    moving: [bool; 6],
+    source: [usize; 6],
+    mapping: Option<crate::space_mouse::DriverMapping>,
+) -> ([f32; 6], [bool; 6]) {
+    let source = if crate::space_mouse::drives_each_once(source) { source } else { crate::space_mouse::SAME_AXES };
+    let mapping = mapping.unwrap_or_default();
+    let mut values = [0.0; 6];
+    let mut lights = [false; 6];
+    for (row, from) in source.iter().enumerate() {
+        let Some(rule) = mapping.axes.get(row).copied() else { continue };
+        if !rule.enabled {
+            continue;
+        }
+        let Some(value) = values.get_mut(rule.output) else { continue };
+        *value = travel.get(*from).copied().unwrap_or(0.0);
+        if let Some(light) = lights.get_mut(rule.output) {
+            *light = moving.get(*from).copied().unwrap_or(false);
+        }
+    }
+    (values, lights)
+}
+
+/// The view's axes as the cap's gestures: the view pans sideways, zooms and pans up and down
+/// with the cap's slide, pull and press, and orbits up and down with the cap's tilt. The view
+/// spins sideways with the cap's twist and rolls with the cap's tilt, so the last two swap.
+fn as_gestures(travel: [f32; 6], moving: [bool; 6]) -> ([f32; 6], [bool; 6]) {
+    let mut gestures = [0.0; 6];
+    let mut lit = [false; 6];
+    for (axis, gesture) in [0usize, 1, 2, 3, 5, 4].into_iter().enumerate() {
+        gestures[gesture] = travel[axis];
+        lit[gesture] = moving[axis];
+    }
+    (gestures, lit)
 }
 
 /// A trackball's reading is a speed: within the dead zone it is noise, and rolling the picture by
@@ -397,7 +467,7 @@ pub(crate) mod ball {
         let painter = ui.painter_at(rect);
         let visuals = ui.visuals();
         let (scale, at) = view(rect);
-        let (faint, accent) = (crate::theme::Tokens::get().text_dim, visuals.selection.stroke.color);
+        let (faint, accent) = (solidcraft_theme::Tokens::get().text_dim, visuals.selection.stroke.color);
         let outline = Stroke::new(1.0, faint);
         let flat = |radius: f32, height: f32| ring(radius, height).into_iter().map(at).collect::<Vec<Pos2>>();
         let base: Vec<Pos2> = ring(BASE_RADIUS, 0.0).into_iter().chain(ring(BASE_RADIUS, BASE_HEIGHT)).map(at).collect();

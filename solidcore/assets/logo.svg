@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="-94.6 -108.0 189.2 216.0" role="img" aria-label="solidcore logo">
+  <title>solidcore</title>
+  <defs>
+    <linearGradient id="fillet" x1="-20.78" y1="0" x2="20.78" y2="0" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#5B6B82"/><stop offset="0.45" stop-color="#C7D2E0"/><stop offset="1" stop-color="#2E3B50"/>
+    </linearGradient>
+  </defs>
+  <path d="M-86.60,-50.00 L-20.78,-12.00 L-20.78,88.00 L-86.60,50.00 Z" fill="#5B6B82"/>
+  <path d="M20.78,-12.00 L86.60,-50.00 L86.60,50.00 L20.78,88.00 Z" fill="#2E3B50"/>
+  <path d="M-20.78,-12.00 Q0.00,0.00 20.78,-12.00 L20.78,88.00 Q0.00,100.00 -20.78,88.00 Z" fill="url(#fillet)"/>
+  <path d="M0.00,-100.00 L86.60,-50.00 L20.78,-12.00 Q0.00,0.00 -20.78,-12.00 L-86.60,-50.00 Z" fill="#E6ECF3"/>
+  <polyline points="-51.96,-48.00 -28.58,-78.50 -1.73,-29.00 43.30,-55.00" fill="none" stroke="#F97316" stroke-opacity="0.55" stroke-width="1.6" stroke-dasharray="3.5 3"/>
+  <path d="M-51.96,-48.00 C-28.58,-78.50 -1.73,-29.00 43.30,-55.00" fill="none" stroke="#F97316" stroke-width="4.2" stroke-linecap="round"/>
+  <circle cx="-51.96" cy="-48.00" r="3.6" fill="#F97316" stroke="#E6ECF3" stroke-width="1.4"/><circle cx="-28.58" cy="-78.50" r="3.6" fill="#F97316" stroke="#E6ECF3" stroke-width="1.4"/><circle cx="-1.73" cy="-29.00" r="3.6" fill="#F97316" stroke="#E6ECF3" stroke-width="1.4"/><circle cx="43.30" cy="-55.00" r="3.6" fill="#F97316" stroke="#E6ECF3" stroke-width="1.4"/>
+</svg>

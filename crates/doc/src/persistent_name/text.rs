@@ -4,7 +4,7 @@ use super::lexer::number;
 use super::*;
 
 /// The feature whose `F<n>:` starts the face name `name` (a copy's is its source's). Every name a
-/// feature made starts so (`F2:top`, `F5:blend:…`, `F3:inner:…`), so only that token is read:
+/// feature made starts so (`F2:top`, `F5:blend(…)`, `F3:inner(…)`), so only that token is read:
 /// cheap enough to ask of every face each frame.
 pub fn made_by(name: &str) -> Option<u64> {
     let rest = name.strip_prefix('F')?;
@@ -28,7 +28,7 @@ pub fn is_copy(name: &str) -> bool {
 
 /// Whether `name` is a fillet's or chamfer's face.
 pub fn is_blend(name: &str) -> bool {
-    FaceName::parse(name).map_or_else(|_| name.contains(":blend:"), |f| f.is_blend())
+    FaceName::parse(name).map_or_else(|_| name.contains(":blend:") || name.contains(":blend("), |f| f.is_blend())
 }
 
 /// Whether `name` is a piece told apart by a number (an older design's piece, or a tie).

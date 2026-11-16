@@ -1,0 +1,424 @@
+{
+ "cases": [
+  {
+   "name": "subdivide_flat_c0",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:18223 (SubdivideFaceAtDiscontinuities; 6eecf04 calls it after a variable round)",
+   "inputs": {
+    "file": "fixture:subdivide_g1.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "op": {
+     "subdivide": {
+      "face": 0,
+      "continuity": 2
+     }
+    }
+   }
+  },
+  {
+   "name": "subdivide_flat_g1",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:18223 (SubdivideFaceAtDiscontinuities; 6eecf04 calls it after a variable round)",
+   "inputs": {
+    "file": "fixture:subdivide_g1.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "op": {
+     "subdivide": {
+      "face": 0,
+      "continuity": 3
+     }
+    }
+   }
+  },
+  {
+   "name": "subdivide_flat_c1",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:18223 (SubdivideFaceAtDiscontinuities; 6eecf04 calls it after a variable round)",
+   "inputs": {
+    "file": "fixture:subdivide_g1.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "op": {
+     "subdivide": {
+      "face": 0,
+      "continuity": 7
+     }
+    }
+   }
+  },
+  {
+   "name": "subdivide_flat_cinf",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:18223 (SubdivideFaceAtDiscontinuities; 6eecf04 calls it after a variable round)",
+   "inputs": {
+    "file": "fixture:subdivide_g1.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "op": {
+     "subdivide": {
+      "face": 0,
+      "continuity": 13
+     }
+    }
+   }
+  },
+  {
+   "name": "subdivide_kinked_c0",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:18223 (SubdivideFaceAtDiscontinuities; 6eecf04 calls it after a variable round)",
+   "inputs": {
+    "file": "fixture:subdivide_c0.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "op": {
+     "subdivide": {
+      "face": 0,
+      "continuity": 2
+     }
+    }
+   }
+  },
+  {
+   "name": "subdivide_kinked_cinf",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:18223 (SubdivideFaceAtDiscontinuities; 6eecf04 calls it after a variable round)",
+   "inputs": {
+    "file": "fixture:subdivide_c0.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "op": {
+     "subdivide": {
+      "face": 0,
+      "continuity": 13
+     }
+    }
+   }
+  },
+  {
+   "name": "subdivide_u1v2_cinf",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:18223 (SubdivideFaceAtDiscontinuities; 6eecf04 calls it after a variable round)",
+   "inputs": {
+    "file": "fixture:subdivide_u1v2.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "op": {
+     "subdivide": {
+      "face": 0,
+      "continuity": 13
+     }
+    }
+   }
+  },
+  {
+   "name": "subdivide_u0v1_cinf",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:18223 (SubdivideFaceAtDiscontinuities; 6eecf04 calls it after a variable round)",
+   "inputs": {
+    "file": "fixture:subdivide_u0v1.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "op": {
+     "subdivide": {
+      "face": 0,
+      "continuity": 13
+     }
+    }
+   }
+  },
+  {
+   "name": "subdivide_u1v0_cinf",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:18223 (SubdivideFaceAtDiscontinuities; 6eecf04 calls it after a variable round)",
+   "inputs": {
+    "file": "fixture:subdivide_u1v0.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "op": {
+     "subdivide": {
+      "face": 0,
+      "continuity": 13
+     }
+    }
+   }
+  },
+  {
+   "name": "subdivide_surf_rev_c0",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:18223 (SubdivideFaceAtDiscontinuities; 6eecf04 calls it after a variable round)",
+   "inputs": {
+    "file": "surf_rev.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "op": {
+     "subdivide": {
+      "face": 0,
+      "continuity": 2
+     }
+    }
+   }
+  },
+  {
+   "name": "subdivide_surf_rev_c1",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:18223 (SubdivideFaceAtDiscontinuities; 6eecf04 calls it after a variable round)",
+   "inputs": {
+    "file": "surf_rev.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "op": {
+     "subdivide": {
+      "face": 0,
+      "continuity": 7
+     }
+    }
+   }
+  },
+  {
+   "name": "subdivide_surf_rev_cinf",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:18223 (SubdivideFaceAtDiscontinuities; 6eecf04 calls it after a variable round)",
+   "inputs": {
+    "file": "surf_rev.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "op": {
+     "subdivide": {
+      "face": 0,
+      "continuity": 13
+     }
+    }
+   }
+  },
+  {
+   "name": "subdivide_nurb_nurb_2_cinf",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:18223 (SubdivideFaceAtDiscontinuities; 6eecf04 calls it after a variable round)",
+   "inputs": {
+    "file": "Fillet/nurb_nurb_2.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "op": {
+     "subdivide": {
+      "face": 0,
+      "continuity": 13
+     }
+    }
+   }
+  },
+  {
+   "name": "subdivide_sphere_c0",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:18223 (SubdivideFaceAtDiscontinuities; 6eecf04 calls it after a variable round)",
+   "inputs": {
+    "file": "sphere.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "op": {
+     "subdivide": {
+      "face": 0,
+      "continuity": 2
+     }
+    }
+   }
+  },
+  {
+   "name": "subdivide_sphere_cinf",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:18223 (SubdivideFaceAtDiscontinuities; 6eecf04 calls it after a variable round)",
+   "inputs": {
+    "file": "sphere.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "op": {
+     "subdivide": {
+      "face": 0,
+      "continuity": 13
+     }
+    }
+   }
+  },
+  {
+   "name": "subdivide_mouse_1_cinf",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:18223 (SubdivideFaceAtDiscontinuities; 6eecf04 calls it after a variable round)",
+   "inputs": {
+    "file": "Solids/mouse_1.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "op": {
+     "subdivide": {
+      "face": 0,
+      "continuity": 13
+     }
+    }
+   }
+  },
+  {
+   "name": "subdivide_cylinder_face0_cinf",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:18223 (SubdivideFaceAtDiscontinuities; 6eecf04 calls it after a variable round)",
+   "inputs": {
+    "file": "Solids/cylinder.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "op": {
+     "subdivide": {
+      "face": 0,
+      "continuity": 13
+     }
+    }
+   }
+  },
+  {
+   "name": "subdivide_cylinder_face1_cinf",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:18223 (SubdivideFaceAtDiscontinuities; 6eecf04 calls it after a variable round)",
+   "inputs": {
+    "file": "Solids/cylinder.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "op": {
+     "subdivide": {
+      "face": 1,
+      "continuity": 13
+     }
+    }
+   }
+  },
+  {
+   "name": "subdivide_cylinder_face2_cinf",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:18223 (SubdivideFaceAtDiscontinuities; 6eecf04 calls it after a variable round)",
+   "inputs": {
+    "file": "Solids/cylinder.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "op": {
+     "subdivide": {
+      "face": 2,
+      "continuity": 13
+     }
+    }
+   }
+  },
+  {
+   "name": "subdivide_face_index_wraps",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:18223 (SubdivideFaceAtDiscontinuities; 6eecf04 calls it after a variable round)",
+   "inputs": {
+    "file": "fixture:subdivide_c0.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "op": {
+     "subdivide": {
+      "face": 5,
+      "continuity": 13
+     }
+    }
+   }
+  }
+ ]
+}

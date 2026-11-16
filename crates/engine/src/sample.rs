@@ -139,6 +139,8 @@ fn vents() -> Value {
 
 #[cfg(test)]
 mod tests {
+    use solidcraft_geom::MeshGeom;
+
     #[test]
     fn plate_boss_and_bore_planes_follow_thickness_without_weak_face_references() {
         let mut session = crate::Session::default();

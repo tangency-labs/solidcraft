@@ -27,6 +27,8 @@ fn handled(id: &str) -> bool {
                 | "render.shot.rename"
                 | "render.shot.remove"
                 | "render.library.appearance.apply"
+                | "render.coat.bind"
+                | "render.coat.unbind"
                 | "render.optics.bind"
                 | "render.optics.unbind"
                 | "render.library.surface.bind"
@@ -56,6 +58,12 @@ fn handled(id: &str) -> bool {
 }
 
 pub(super) fn busy(app: &SolveApp) -> bool {
+    if super::prepare::busy(app) {
+        return true;
+    }
+    if super::live::final_pending(app) {
+        return true;
+    }
     let queue = app.session.render_queue_state();
     if queue.running != 0 || queue.waiting != 0 {
         return true;
@@ -71,7 +79,7 @@ pub(super) fn busy(app: &SolveApp) -> bool {
 /// Reads only current host/job metadata and the numerical draft. No preflight,
 /// scene preparation, device discovery, resource IO or rendering during painting.
 pub(super) fn action_ready(app: &SolveApp, id: &str) -> Result<(), String> {
-    if app.file_load.busy() || app.file_picker.is_some() || inspector::confirmation_open(app) {
+    if app.file_load_holds() || app.file_picker.is_some() || inspector::confirmation_open(app) {
         return Err(app.tr("render.ribbon_finish_dialog").into());
     }
     match id {
@@ -89,7 +97,7 @@ pub(super) fn action_ready(app: &SolveApp, id: &str) -> Result<(), String> {
         }
         "render.compare" if app.render_workspace.view.retained.is_empty() => Err(app.tr("render.ribbon_no_result").into()),
         "render.preflight" | "render.start" => {
-            if id == "render.start" && busy(app) {
+            if super::prepare::busy(app) || (id == "render.start" && busy(app)) {
                 return Err(app.tr("render.ribbon_job_active").into());
             }
             super::image_params(app).map(|_| ())
@@ -117,6 +125,12 @@ pub(super) fn action_ready(app: &SolveApp, id: &str) -> Result<(), String> {
             }
             if id == "render.export" && app.render_workspace.view.studio.export_exr && !studio::linear_export_available(app) {
                 return Err(app.tr("render.linear_unavailable").into());
+            }
+            if id == "render.export" && app.render_workspace.view.studio.export_denoise_mask && !super::quality::mask_available(app) {
+                return Err(app.tr("render.denoise_mask_unavailable").into());
+            }
+            if id == "render.result.copy" && super::quality::mask_active(app) {
+                return Err(app.tr("render.denoise_mask_copy_help").into());
             }
             Ok(())
         }
@@ -149,13 +163,36 @@ pub(super) fn command_info(app: &SolveApp, command: &CommandSpec) -> CommandInfo
 /// No action falls back to a default executor, saved shot or a different result.
 pub(super) fn perform_job(app: &mut SolveApp, id: &str) -> Result<(), String> {
     action_ready(app, id)?;
-    match id {
-        "render.batch" => {
-            let request = super::image_params(app)?;
-            app.run(id, json!({"request":request}))?;
+    if matches!(id, "render.start" | "render.batch" | "render.result.regrade") {
+        let params = match id {
+            "render.batch" => json!({"request":super::image_params(app)?}),
+            "render.result.regrade" => {
+                let source = app.render_workspace.view.completed.ok_or_else(|| app.tr("render.ribbon_no_result").to_string())?;
+                json!({"job":source,"presentation":presentation(app)})
+            }
+            _ => super::image_params(app)?,
+        };
+        let pending = PendingFinal {
+            action: id.into(),
+            params,
+            document: std::sync::Arc::downgrade(&app.session.doc),
+            revision: app.session.revision,
+            model: std::sync::Arc::downgrade(&app.session.model.state()),
+            moves: app.session.pending_moves.clone(),
+            shot: app.render_workspace.view.name.clone(),
+            visual: final_visual(app),
+        };
+        if super::live::defer_final(app, pending.clone()) {
+            return Ok(());
         }
+        return submit_deferred(app, pending);
+    }
+    match id {
         "render.preflight" => {
             let request = super::image_params(app)?;
+            if super::prepare::enabled(app) {
+                return super::prepare::begin_ui(app, solidcraft_engine::render_preparation::Kind::Check, request);
+            }
             let reply = match app.run(id, request.clone()) {
                 Ok(reply) => reply,
                 Err(error) => {
@@ -167,26 +204,17 @@ pub(super) fn perform_job(app: &mut SolveApp, id: &str) -> Result<(), String> {
             inspector::record_check(app, &request, &reply);
             app.set_status(app.tr("render.image_supported").to_string(), false);
         }
-        "render.start" => {
-            let request = super::image_params(app)?;
-            let reply = app.run(id, request)?;
-            let job = serde_json::from_value(reply["job"].clone())
-                .map_err(|e| crate::i18n::format("render.error_job_identity", &[("error", &e.to_string())]))?;
-            app.render_workspace.view.job = Some(job);
-            app.render_workspace.view.job_shot = Some(app.render_workspace.view.name.clone());
-        }
         "render.result.copy" => {
             let job = app.render_workspace.view.completed.ok_or_else(|| app.tr("render.ribbon_no_result").to_string())?;
             app.run(id, json!({"job":job}))?;
         }
-        "render.result.regrade" => {
-            let source = app.render_workspace.view.completed.ok_or_else(|| app.tr("render.ribbon_no_result").to_string())?;
-            let reply = app.run(id, json!({"job":source,"presentation":presentation(app)}))?;
-            let job = serde_json::from_value(reply["job"].clone())
-                .map_err(|error| crate::i18n::format("render.error_regrade_identity", &[("error", &error.to_string())]))?;
-            app.render_workspace.view.job = Some(job);
-        }
         "render.cancel" => {
+            if super::prepare::cancel(app) {
+                return Ok(());
+            }
+            if super::live::cancel_final(app) {
+                return Ok(());
+            }
             let job = app
                 .session
                 .render_queue_state()
@@ -198,13 +226,101 @@ pub(super) fn perform_job(app: &mut SolveApp, id: &str) -> Result<(), String> {
         "render.export" => {
             let job = app.render_workspace.view.completed.ok_or_else(|| app.tr("render.ribbon_no_result").to_string())?;
             let overwrite = app.render_workspace.view.overwrite;
-            if app.render_workspace.view.studio.export_exr {
+            if app.render_workspace.view.studio.export_denoise_mask {
+                super::export_denoise_mask(app, job, overwrite);
+            } else if app.render_workspace.view.studio.export_exr {
                 super::export_linear_image(app, job, overwrite);
             } else {
                 super::export_image(app, job, overwrite);
             }
         }
-        _ => return Err(crate::i18n::tr("render.error_job_action").into()),
+        _ => return Err(solidcraft_ui_text::tr("render.error_job_action").into()),
+    }
+    Ok(())
+}
+
+#[derive(Clone)]
+pub(super) struct PendingFinal {
+    action: String,
+    params: serde_json::Value,
+    document: std::sync::Weak<solidcraft_engine::doc::Document>,
+    revision: u64,
+    model: std::sync::Weak<solidcraft_engine::doc::ModelState>,
+    moves: std::collections::BTreeMap<u64, solidcraft_engine::doc::Mat>,
+    shot: String,
+    visual: serde_json::Value,
+}
+pub(super) fn final_visual(app: &SolveApp) -> serde_json::Value {
+    json!({"request":super::image_request(app).ok(),"presentation":presentation(app),
+        "hidden_bodies":app.session.visibility.hidden_bodies,"hidden_occurrences":app.session.visibility.hidden_occurrences})
+}
+/// Submit the exact click-time request only after live capture/work has released its leases.
+/// This bypasses the pending action's own busy flag, never its captured source guard.
+pub(super) fn submit_deferred(app: &mut SolveApp, pending: PendingFinal) -> Result<(), String> {
+    // A command or automation may have submitted an original-session job while the
+    // live job drained. Never preempt it or bypass normal final-job priority.
+    if busy(app) {
+        return Err(app.tr("render.ribbon_job_active").into());
+    }
+    if !std::sync::Weak::ptr_eq(&pending.document, &std::sync::Arc::downgrade(&app.session.doc))
+        || pending.revision != app.session.revision
+        || !std::sync::Weak::ptr_eq(&pending.model, &std::sync::Arc::downgrade(&app.session.model.state()))
+        || pending.moves != app.session.pending_moves
+        || pending.shot != app.render_workspace.view.name
+        || pending.visual != final_visual(app)
+    {
+        return Err(app.tr("render.live.final_changed").into());
+    }
+    let id = pending.action.as_str();
+    match id {
+        "render.batch" => {
+            if super::prepare::enabled(app) {
+                return super::prepare::begin_batch_ui(app, pending.params);
+            }
+            app.run(id, pending.params)?;
+        }
+        "render.start" => {
+            if super::prepare::enabled(app) {
+                return super::prepare::begin_ui(app, solidcraft_engine::render_preparation::Kind::Start, pending.params);
+            }
+            let reply = app.run(id, pending.params)?;
+            follow_started(app, &reply)?;
+        }
+        "render.result.regrade" => {
+            let reply = app.run(id, pending.params)?;
+            let job = serde_json::from_value(reply["job"].clone())
+                .map_err(|error| solidcraft_ui_text::format("render.error_regrade_identity", &[("error", &error.to_string())]))?;
+            app.render_workspace.view.job = Some(job);
+        }
+
+        _ => return Err(solidcraft_ui_text::tr("render.error_job_action").into()),
+    }
+    Ok(())
+}
+
+/// The explicit Render click follows its newly minted real-session job. The
+/// asynchronous preparation path reuses this after the same command post-hooks.
+pub(super) fn follow_started(app: &mut SolveApp, reply: &serde_json::Value) -> Result<(), String> {
+    let job = serde_json::from_value(reply["job"].clone())
+        .map_err(|e| solidcraft_ui_text::format("render.error_job_identity", &[("error", &e.to_string())]))?;
+    app.render_workspace.view.job = Some(job);
+    app.render_workspace.view.job_shot = Some(app.render_workspace.view.name.clone());
+    // An explicit UI Render action must show the image being computed. Otherwise
+    // complete passes remain hidden behind the unchanged integrated model preview.
+    // Keep an intentional comparison open and retain the compatibility workflow.
+    if !app.preferences.render_legacy_image_defaults && app.render_workspace.view.compare.is_none() {
+        app.render_workspace.view.auto_result_job = if app.render_workspace.view.result {
+            None
+        } else {
+            Some(super::AutoResultJob { job, handle: app.session.render_job_handle(job).map_err(|error| error.to_string())? })
+        };
+        app.render_workspace.view.result = true;
+        app.render_workspace.view.follow_job = true;
+        app.render_workspace.view.result_scale = super::ResultScale::Fit;
+        app.cancel_view_animation();
+        app.viewport.nav = None;
+        app.viewport.key_hold = None;
+        app.viewport.orbit_free = None;
     }
     Ok(())
 }
@@ -297,7 +413,9 @@ fn navigate(app: &mut SolveApp, id: &str) -> Result<(), String> {
             focus(app, shot, None);
         }
         "render.settings.set" => app.render_workspace.view.save_shot_name = Some(String::new()),
-        "render.library.appearance.apply" | "render.optics.bind" | "render.optics.unbind" => focus(app, object, Some("surfaces")),
+        "render.library.appearance.apply" | "render.coat.bind" | "render.coat.unbind" | "render.optics.bind" | "render.optics.unbind" => {
+            focus(app, object, Some("surfaces"))
+        }
         "render.library.surface.bind" | "render.library.surface.prepare" | "render.library.surface.unbind" => {
             focus(app, object, Some("surfaces"));
         }
@@ -323,7 +441,7 @@ fn navigate(app: &mut SolveApp, id: &str) -> Result<(), String> {
             library::review_selected_quality(app)?;
         }
         "render.status" | "render.backends" => focus(app, RenderSelection::Check, None),
-        _ => return Err(crate::i18n::tr("render.error_interactive_command").into()),
+        _ => return Err(solidcraft_ui_text::tr("render.error_interactive_command").into()),
     }
     Ok(())
 }

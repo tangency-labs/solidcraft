@@ -1,8 +1,9 @@
 # Combined CPU direct lights
 
-Source-only integration: compilation, tests, native PNG inspection, Clippy,
-wasm and full CI have **NOT RUN** on this revision. Historical component
-results do not qualify this combination.
+The combined CPU-feature renderer has executed mixed-light radiance, maximum
+union, continuation and cancellation/work regressions. Current combined engine,
+UI, native PNG inspection and full-project/platform qualification remain separate;
+historical component results do not qualify those gates.
 
 The existing native `render.preflight` / `render.start` engine commands, also
 available through persistent MCP, accept these transient `raytrace` fields:
@@ -57,17 +58,18 @@ terms. Each secondary hit resets area and punctual continuation state.
 The existing HDR/reflection estimator partition and `primary_samples` 1/4/16
 policy remain; this adds no glass, MIS, GI, denoiser or material persistence.
 
-The ordinary CLI `render` wrapper still selects the raster path. Optional
-desktop CPU/AA controls are described in [CPU ray images](render-raytrace-image.md);
-they do not expose explicit light authoring. This integration adds no CLI
-lighting flags or UI light editor. A persistent native MCP session with the
-existing `raytrace-cpu` build and installed host is the command route for these
-lights. Feature-off and unavailable hosts refuse before capture.
+At the original source handoff, this light-union unit added no CLI lighting
+flags or UI light editor. The current Render workspace exposes installed CPU
+light families through the shared [Lighting controls](render-cpu-workspace.md).
+A persistent native MCP session with the existing `raytrace-cpu` build and
+installed host uses the same engine request. Feature-off and unavailable hosts
+refuse before capture; current combined workflow qualification remains separate.
 
 Written tests cover combined counts/capacities, recipe preservation and atomic
 refusals, N-independent area weights, mixed radiance, continuation partitioning,
 272 attempts, cancellation/work exhaustion, preflight and Record lease lifetime.
-They remain **NOT RUN**. Combined anisotropic/reflection/HDR fixtures, CLI
-workflow parity, exact-build layout and presentation acceptance remain pending.
+Renderer mixed-light and anisotropic/reflection/HDR combination cases have
+executed. Current combined engine contracts, CLI/UI workflow parity and native
+presentation acceptance remain pending.
 No external assets, dependencies or license changes are introduced; the existing
 SolidCraft implementations and their contribution licenses are retained.

@@ -20,6 +20,22 @@ says what it is; the default is millimetres, as for every other import. Lidar an
 usually in metres. The unit can be changed afterwards (Browser › Point Clouds › Edit Point Cloud,
 or `pointcloud.edit` with `units`): the points are scaled from the unit they came in as.
 
+## Reloading
+
+A cloud remembers where its file was (`source`, the absolute path it was inserted from), so a
+file that changed can be read again: **Reload from file** in the Edit Point Cloud card, or
+`pointcloud.reload`. The points, colours, segments, triangles and properties are replaced; the
+name, placement, units, point size and colouring are kept, and so are the filters on properties
+the file still has. A filter on a set of named values goes when the file no longer names them.
+Colouring by a property the file no longer has goes back to the file's colours. The file is read
+under the limit the cloud was inserted with (`max_points`), so the same file reads as the very
+same points and a file that grew comes in whole unless it exceeds that limit, when it is thinned
+as an insert would thin it. The file is read beside the window, with
+progress and Cancel. A cloud opened from a design saved before it remembered its file cannot be
+reloaded. A file on another computer (`\\host\share`) is treated as a linked design's is:
+**Reload from file** asks before it connects to that server, and `pointcloud.reload` is refused
+until the server is allowed in Preferences.
+
 ## Colours
 
 **Color By** in the Edit Point Cloud card (or `color_by`) says how the points are coloured:
@@ -109,8 +125,9 @@ file as a binary part (12 bytes a point, 3 more with colours).
 - `pointcloud.edit` — `cloud` (id or name); `name?`, `visible?`, `point_size?`, `color_by?`,
   `color?`, `color_range?`, `filters?`, `units?`, `matrix?` (a rigid placement, as
   `occurrence.move` takes it).
+- `pointcloud.reload` — `cloud`; reads its file again (see [Reloading](#reloading)).
 - `pointcloud.delete`.
-- `pointcloud.list` — each cloud with its segment and triangle counts, its properties (name, whole-numbered or not, span, named
+- `pointcloud.list` — each cloud with its `source`, its segment and triangle counts, its properties (name, whole-numbered or not, span, named
   values), its filters and its ramp's range as drawn (`color_range`).
 - `doc.open` opens a point cloud file as a new design holding it; dropping one on the window
   adds it to the open design.

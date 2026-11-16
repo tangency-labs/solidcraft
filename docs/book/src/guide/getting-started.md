@@ -9,7 +9,8 @@ working (see the [compatibility notes](https://github.com/tangency-labs/solidcra
 Download the installer for your system from the
 [Download section of the README](https://github.com/tangency-labs/solidcraft#download) or the
 [releases page](https://github.com/tangency-labs/solidcraft/releases), or build it yourself with
-stable Rust (1.95 or newer):
+[rustup](https://rustup.rs/), which installs the Rust version the repository pins
+(`rust-toolchain.toml`, 1.99.1) the first time you run `cargo` in it:
 
 ```sh
 git clone https://github.com/tangency-labs/solidcraft && cd solidcraft
@@ -24,7 +25,8 @@ cargo run --release -p solidcraft -- --sample   # opens with a sample part
 
 SolidCraft opens on the start page; the house at the top left brings it back.
 
-![The start page, numbered 1 to 6](../media/getting-started/start.png)
+<img class="dark-ui" src="../media/getting-started/start.png" alt="The start page, numbered 1 to 6">
+<img class="light-ui" src="../media/getting-started/start.light.png" alt="The start page, numbered 1 to 6">
 
 **1** A new design in millimetres (or inches, beside it) · **2** Open a saved design ·
 **3** Import a STEP, IGES or mesh file as a new design · **4** Designs you opened recently ·
@@ -135,10 +137,6 @@ every change). **Both can break, and a design saved in them may not open in the 
 keeps its designs, settings and recovery copies apart from the release's, so trying one never
 changes what the release sees, and nothing is copied between them: to move a design, save it to
 a file in one and open the file in the other. Search engines are told to skip both.
-
-Planned worker and tiered-storage integration is
-described in [web-runtime.md](https://github.com/tangency-labs/solidcraft/blob/main/docs/web-runtime.md)
-(design; not yet wired in the shipped wasm build).
 
 After the first visit the web app works offline: the browser keeps a copy of it. Online, each
 launch gets the latest published build (the browser downloads it once when it changes); offline,
@@ -351,6 +349,15 @@ A command that fails stops the script. A feature can also fail later, when a par
 rebuilds it; `run` then exits with status 1, lists the failing features and writes none of
 its `--out` and `--save` files, because the bodies lack what those features should have made.
 `--allow-errors` writes them anyway.
+
+`--quality standard|fine|finest` sets how closely an STL, OBJ or 3MF written by `--out`
+follows curved faces, as `file.export`'s `quality` does: a chord tolerance of 2e-4, 5e-5 or
+1e-5 of each body's size, though never under 1 µm, so on a small body `fine` and `finest`
+can come out the same. The default is `standard`.
+
+```sh
+solidcraft-cli run --in part.sc --out part.stl --quality fine
+```
 
 `--param-check warn|strict` checks each step against its command's parameter contract, for the
 commands that have one (`describe_command` in the MCP server shows them); the default, `off`,

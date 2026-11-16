@@ -22,6 +22,21 @@ pub fn interface(direction: Vec3, normal: Vec3, incident: f64, transmitted: f64)
     polarized_interface(direction, normal, incident, transmitted).map(|(optics, _)| optics)
 }
 
+/// General Path follows the captured smooth optical normal only while both
+/// delta directions cross the original geometric hemispheres correctly. Entry,
+/// exit, medium identity and source-plane exclusion always use the original face.
+pub(super) fn shaded_interface(direction: Vec3, geometric: Vec3, shading: Vec3, incident: f64, transmitted: f64) -> Result<(Interface, Vec3)> {
+    let geometric = unit(geometric).ok_or(TraceError::InvalidInput("CPU glass geometric normal"))?;
+    let direction = unit(direction).ok_or(TraceError::InvalidInput("CPU glass incident direction"))?;
+    let shading = unit(shading).filter(|n| n.dot(geometric) > 0.0 && n.dot(-direction) > 0.0).unwrap_or(geometric);
+    let candidate = interface(direction, shading, incident, transmitted)?;
+    if candidate.reflected.dot(geometric) <= 0.0 || candidate.transmitted.is_some_and(|d| d.dot(geometric) >= 0.0) {
+        Ok((interface(direction, geometric, incident, transmitted)?, geometric))
+    } else {
+        Ok((candidate, shading))
+    }
+}
+
 fn polarized_interface(direction: Vec3, normal: Vec3, incident: f64, transmitted: f64) -> Result<(Interface, [f64; 2])> {
     if ![incident, transmitted].into_iter().all(|n| n.is_finite() && (1.0..=3.0).contains(&n)) {
         return Err(TraceError::InvalidInput("dielectric IOR outside 1..3"));
@@ -84,6 +99,51 @@ pub(super) fn thin_sheet(direction: Vec3, normal: Vec3, material: &DielectricOpt
     Ok((Interface { transmitted: Some(direction), ..optics }, Vec3::new(rr, rg, rb), Vec3::new(tr, tg, tb)))
 }
 
+/// Three-band parallel-sheet closure. Smooth sheet directions are wavelength
+/// independent, so RGB coefficients share one scalar branch probability and the
+/// existing transmitted-shadow MIS chain; no hero wavelength is needed here.
+pub(super) fn modeled_sheet(direction: Vec3, normal: Vec3, material: &DielectricOptions) -> Result<(Interface, Vec3, Vec3)> {
+    let Some(model) = material.model.filter(|model| model.spectral()) else { return thin_sheet(direction, normal, material) };
+    if model.roughness > 0.0 {
+        return Err(TraceError::InvalidInput("rough thin-sheet transport requires its virtual interface walk"));
+    }
+    let direction = unit(direction).ok_or(TraceError::InvalidInput("modeled sheet incident direction"))?;
+    let normal = unit(normal).ok_or(TraceError::InvalidInput("modeled sheet normal"))?;
+    let optics = interface(direction, normal, 1.0, material.ior)?;
+    let mut reflection = [0.0; 3];
+    let mut transmission = [0.0; 3];
+    for (channel, wavelength) in crate::glass_model::WAVELENGTHS_NM.into_iter().enumerate() {
+        let ior = model.ior(material.ior, wavelength).map_err(|_| TraceError::InvalidInput("modeled sheet spectral IOR"))?;
+        let f = model
+            .fresnel((-direction.dot(normal)).clamp(0.0, 1.0), 1.0, ior, wavelength)
+            .map_err(|_| TraceError::InvalidInput("modeled sheet spectral Fresnel"))?;
+        let distance = if material.thickness_mm == 0.0 {
+            0.0
+        } else if let Some(cosine) = f.transmitted_cosine.filter(|cosine| *cosine > 0.0) {
+            material.thickness_mm / cosine
+        } else {
+            return Err(TraceError::InvalidInput("modeled sheet has no finite grazing optical distance"));
+        };
+        if !distance.is_finite() || !(0.0..=super::MAX_DISTANCE_MM).contains(&distance) {
+            return Err(TraceError::InvalidInput("modeled sheet optical distance exceeds finite bounds"));
+        }
+        let a = (-material.absorption_per_mm[channel] * distance).exp();
+        let series = |r: f64| {
+            let denominator = 1.0 - r * r * a * a;
+            if denominator <= 0.0 { (1.0, 0.0) } else { (r + (1.0 - r).powi(2) * r * a * a / denominator, (1.0 - r).powi(2) * a / denominator) }
+        };
+        let s = series(f.s);
+        let p = series(f.p);
+        reflection[channel] = (s.0 + p.0) * 0.5;
+        transmission[channel] = (s.1 + p.1) * 0.5;
+    }
+    Ok((
+        Interface { transmitted: Some(direction), ..optics },
+        Vec3::new(reflection[0], reflection[1], reflection[2]),
+        Vec3::new(transmission[0], transmission[1], transmission[2]),
+    ))
+}
+
 pub fn attenuation(sigma: [f64; 3], distance_mm: f64) -> Result<Vec3> {
     if !distance_mm.is_finite()
         || !(0.0..=super::MAX_DISTANCE_MM).contains(&distance_mm)
@@ -113,6 +173,13 @@ pub const MAX_BOX_TRIANGLES: usize = 1 << 16;
 /// coplanar triangles; a closed box is a mesh that is exactly the boundary of an axis-aligned
 /// box, in however many triangles ([`certify_box`]).
 pub fn certify(scene: &ProductScene, input: &DielectricOptions) -> Result<Certificate> {
+    if input.boundary == crate::job::DielectricBoundary::ClosedMesh || input.shadow_transmission {
+        return Err(TraceError::InvalidInput("general glass requires explicit CPU Path transport"));
+    }
+    certify_shape(scene, input)
+}
+/// Geometry-only certificate reused for the same thin-sheet boundary in Path.
+pub(super) fn certify_shape(scene: &ProductScene, input: &DielectricOptions) -> Result<Certificate> {
     let body = scene.meshes.get(input.body_index).ok_or(TraceError::InvalidInput("dielectric body ordinal"))?;
     if body.name != input.body_name {
         return Err(TraceError::InvalidInput("dielectric captured body identity mismatch"));
@@ -126,6 +193,13 @@ pub fn certify(scene: &ProductScene, input: &DielectricOptions) -> Result<Certif
         }
         return certify_box(mesh);
     }
+    certify_sheet(mesh)
+}
+
+/// The fixed two-triangle sheet proof, after captured identity was checked.
+/// This helper does not rescan the scene or allocate geometry scratch.
+pub(super) fn certify_sheet(mesh: &solidcraft_geom::Mesh) -> Result<Certificate> {
+    let unsupported = TraceError::InvalidInput("unsupported dielectric boundary tessellation");
     if !(1..=2).contains(&mesh.triangles.len()) || mesh.positions.len() > 36 {
         return Err(unsupported);
     }
@@ -173,7 +247,7 @@ pub fn certify(scene: &ProductScene, input: &DielectricOptions) -> Result<Certif
 }
 
 /// The mesh's triangle with these indices, refused where it is degenerate.
-fn triangle(mesh: &solidcraft_geom::Mesh, indices: &[u32; 3]) -> Result<Triangle> {
+pub(super) fn triangle(mesh: &solidcraft_geom::Mesh, indices: &[u32; 3]) -> Result<Triangle> {
     let mut vertices = [Vec3::ZERO; 3];
     for (v, index) in vertices.iter_mut().zip(indices) {
         *v = *mesh.positions.get(*index as usize).ok_or(TraceError::InvalidInput("dielectric vertex index"))?;

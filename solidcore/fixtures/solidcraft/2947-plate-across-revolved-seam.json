@@ -1,0 +1,316 @@
+{
+ "issue": "https://github.com/tangency-labs/solidcraft/issues/2947",
+ "pr": "https://github.com/tangency-labs/solidcraft/pull/2948",
+ "test": "crates/kernel/src/intersection_curve_tests.rs: a_plate_across_revolved_faces_holding_their_surfaces_seam_divides_them (draft PR, kernel-paused under tangency-labs/solidcraft#3992)",
+ "summary": "A plate cut across a small imported part gave up with 'loop not inside any face piece'. The part had a revolved face spanning most of a turn whose surface's seam (where its angle wraps from 2 pi to 0) lay inside the face. SolidCraft's earlier kernel followed each loop's boundary point by point in the surface's parameters and gave each angle within [0, 2 pi), so where a boundary crossed the seam its parameter polygon jumped by a period: the pieces' loops came out with the wrong area and sign, and the boolean refused. Geometry is the PR test's: a ring of rectangular section, radii 5 and 6 mm and 4 mm high, revolved 300 degrees about Z, intersected with the plate x, y -10..10, z 1..2. The PR's test re-parameterised each revolved surface so that its seam fell inside the face; SM_API builds the revolve's own surfaces, so here the ring is turned -50 degrees about Z, which puts angle 0 inside each revolved face, and a full turn is added, whose faces hold their seam by construction. Volumes are closed forms (a sector of an annulus times its height); only lumps and volume are expected. The tolerance is 0.01 mm^3, as in the other boolean cases.",
+ "cases": [
+  {
+   "name": "ring_300_alone",
+   "note": "Control: the 300 degree ring of rectangular section (radii 5 and 6, 4 high), not cut.",
+   "steps": [
+    {
+     "op": "revolve",
+     "id": "result",
+     "plane": "xz",
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "axis_point": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "axis_dir": [
+      0.0,
+      0.0,
+      1.0
+     ],
+     "angle_deg": 300.0,
+     "profile": [
+      {
+       "kind": "polygon",
+       "points": [
+        [
+         5.0,
+         0.0
+        ],
+        [
+         6.0,
+         0.0
+        ],
+        [
+         6.0,
+         4.0
+        ],
+        [
+         5.0,
+         4.0
+        ]
+       ]
+      }
+     ]
+    }
+   ],
+   "expect": {
+    "lumps": 1,
+    "volume": {
+     "value": 115.19173063162575,
+     "tol": 0.01,
+     "formula": "300/360 * pi * (6^2 - 5^2) * 4 = 110/3 * pi"
+    }
+   }
+  },
+  {
+   "name": "plate_across_ring_300",
+   "note": "The ring from angle 0 to 300 degrees, intersected with a plate z 1..2 that crosses all four of its faces' lengths.",
+   "steps": [
+    {
+     "op": "revolve",
+     "id": "ring",
+     "plane": "xz",
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "axis_point": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "axis_dir": [
+      0.0,
+      0.0,
+      1.0
+     ],
+     "angle_deg": 300.0,
+     "profile": [
+      {
+       "kind": "polygon",
+       "points": [
+        [
+         5.0,
+         0.0
+        ],
+        [
+         6.0,
+         0.0
+        ],
+        [
+         6.0,
+         4.0
+        ],
+        [
+         5.0,
+         4.0
+        ]
+       ]
+      }
+     ]
+    },
+    {
+     "op": "box",
+     "id": "plate",
+     "origin": [
+      -10.0,
+      -10.0,
+      1.0
+     ],
+     "size": [
+      20.0,
+      20.0,
+      1.0
+     ]
+    },
+    {
+     "op": "intersection",
+     "id": "result",
+     "a": "ring",
+     "b": "plate"
+    }
+   ],
+   "expect": {
+    "lumps": 1,
+    "volume": {
+     "value": 28.797932657906436,
+     "tol": 0.01,
+     "formula": "300/360 * pi * (6^2 - 5^2) * 1 = 55/6 * pi (the PR test's expected value)"
+    }
+   }
+  },
+  {
+   "name": "plate_across_ring_300_over_angle_zero",
+   "note": "The same ring turned -50 degrees about Z, so it runs from -50 to 250 degrees and angle 0, where a revolved surface's angle wraps from 2 pi to 0, lies inside each revolved face: the PR's case.",
+   "steps": [
+    {
+     "op": "revolve",
+     "id": "ring0",
+     "plane": "xz",
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "axis_point": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "axis_dir": [
+      0.0,
+      0.0,
+      1.0
+     ],
+     "angle_deg": 300.0,
+     "profile": [
+      {
+       "kind": "polygon",
+       "points": [
+        [
+         5.0,
+         0.0
+        ],
+        [
+         6.0,
+         0.0
+        ],
+        [
+         6.0,
+         4.0
+        ],
+        [
+         5.0,
+         4.0
+        ]
+       ]
+      }
+     ]
+    },
+    {
+     "op": "rotate",
+     "id": "ring",
+     "body": "ring0",
+     "point": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "axis": [
+      0.0,
+      0.0,
+      1.0
+     ],
+     "degrees": -50.0
+    },
+    {
+     "op": "box",
+     "id": "plate",
+     "origin": [
+      -10.0,
+      -10.0,
+      1.0
+     ],
+     "size": [
+      20.0,
+      20.0,
+      1.0
+     ]
+    },
+    {
+     "op": "intersection",
+     "id": "result",
+     "a": "ring",
+     "b": "plate"
+    }
+   ],
+   "expect": {
+    "lumps": 1,
+    "volume": {
+     "value": 28.797932657906436,
+     "tol": 0.01,
+     "formula": "300/360 * pi * (6^2 - 5^2) * 1 = 55/6 * pi"
+    }
+   }
+  },
+  {
+   "name": "plate_across_full_ring",
+   "note": "A full turn: the ring is closed, so every revolved face holds its surface's seam.",
+   "steps": [
+    {
+     "op": "revolve",
+     "id": "ring",
+     "plane": "xz",
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "axis_point": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "axis_dir": [
+      0.0,
+      0.0,
+      1.0
+     ],
+     "angle_deg": 360.0,
+     "profile": [
+      {
+       "kind": "polygon",
+       "points": [
+        [
+         5.0,
+         0.0
+        ],
+        [
+         6.0,
+         0.0
+        ],
+        [
+         6.0,
+         4.0
+        ],
+        [
+         5.0,
+         4.0
+        ]
+       ]
+      }
+     ]
+    },
+    {
+     "op": "box",
+     "id": "plate",
+     "origin": [
+      -10.0,
+      -10.0,
+      1.0
+     ],
+     "size": [
+      20.0,
+      20.0,
+      1.0
+     ]
+    },
+    {
+     "op": "intersection",
+     "id": "result",
+     "a": "ring",
+     "b": "plate"
+    }
+   ],
+   "expect": {
+    "lumps": 1,
+    "volume": {
+     "value": 34.55751918948772,
+     "tol": 0.01,
+     "formula": "pi * (6^2 - 5^2) * 1 = 11 * pi"
+    }
+   }
+  }
+ ]
+}

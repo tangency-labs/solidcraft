@@ -248,7 +248,7 @@ impl AcpBackend {
         // Drain replies first: an acknowledgement already waiting must keep the connection.
         if self.cancelling.is_some_and(|(_, started)| now.saturating_duration_since(started) >= CANCEL_GRACE) {
             self.proc.shutdown(false);
-            out.push(self.finish_exit(vec![crate::i18n::tr("ui.agent_chat_cancel_timeout").to_string()]));
+            out.push(self.finish_exit(vec![solidcraft_ui_text::tr("ui.agent_chat_cancel_timeout").to_string()]));
         }
         out
     }
@@ -359,9 +359,9 @@ pub fn test_agent(argv: &[String], cwd: &std::path::Path) -> Result<String, Test
                     }
                 }
                 Ok(FromAgent::Exited(tail)) => {
-                    return Err(TestError::Other(tail.last().cloned().unwrap_or_else(|| crate::i18n::tr("ui.agent_chat_exited").to_string())));
+                    return Err(TestError::Other(tail.last().cloned().unwrap_or_else(|| solidcraft_ui_text::tr("ui.agent_chat_exited").to_string())));
                 }
-                Err(_) => return Err(TestError::Other(crate::i18n::tr("ui.ai_no_answer").to_string())),
+                Err(_) => return Err(TestError::Other(solidcraft_ui_text::tr("ui.ai_no_answer").to_string())),
             }
         }
     };
@@ -372,7 +372,7 @@ pub fn test_agent(argv: &[String], cwd: &std::path::Path) -> Result<String, Test
         p.send(&acp::request(2, "session/new", acp::session_new_params(&session_cwd, None, &v, acp::SYSTEM_NOTE)));
         wait_for(&p, 2).map(|_| {
             let who = acp::agent_info(&v);
-            crate::i18n::format("ui.ai_test_acp_ok", &[("agent", if who.is_empty() { "?" } else { &who })])
+            solidcraft_ui_text::format("ui.ai_test_acp_ok", &[("agent", if who.is_empty() { "?" } else { &who })])
         })
     });
     p.shutdown(true);

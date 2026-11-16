@@ -29,6 +29,11 @@ pub type CallbackResources = type_map::TypeMap;
 pub struct Callback(Box<dyn CallbackTrait>);
 
 impl Callback {
+    /// Inspect the concrete callback without preparing or painting GPU work.
+    pub fn downcast_ref<T: CallbackTrait>(&self) -> Option<&T> {
+        (self.0.as_ref() as &dyn std::any::Any).downcast_ref()
+    }
+
     /// Creates a new [`epaint::PaintCallback`] from a callback trait instance.
     pub fn new_paint_callback(
         rect: epaint::emath::Rect,
@@ -85,7 +90,7 @@ impl Callback {
 /// # Example
 ///
 /// See the [`custom3d_wgpu`](https://github.com/emilk/egui/blob/main/crates/egui_demo_app/src/apps/custom3d_wgpu.rs) demo source for a detailed usage example.
-pub trait CallbackTrait: Send + Sync {
+pub trait CallbackTrait: Send + Sync + std::any::Any {
     fn prepare(
         &self,
         _device: &wgpu::Device,

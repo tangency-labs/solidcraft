@@ -1,0 +1,278 @@
+{
+ "issue": "https://github.com/tangency-labs/solidcraft/issues/7773",
+ "pr": "https://github.com/tangency-labs/solidcore/pull/1373",
+ "test": "none: the issue is open and has no fixing PR (SolidCraft's kernel work is paused, #3992), so `pr` points at the PR that adds this fixture, as the loader requires a /pull/ URL; the issue itself reproduces it (an Extrude, Operation = Join) and its triage comment; the numbers here are analytic",
+ "summary": "Extrude (Join) of a circular-segment profile that sits in the wide-end opening of a tube whose inner surface is a cone failed on SolidCraft's earlier kernel with 'boolean Union: the operation failed: no result' (reproduced on 0.24.1 and on main): 'not supported yet: the exact fallback for where the bodies meet (faces that touch, or cross at a shallow angle) takes planar faces only, and the target has 6 curved faces (cone, cylinder) and the tool has 2 curved faces (cylinder)'. Geometry is the issue's: the tube is the revolve about z of the section (r, z) = (20, 0), (4, 20), (28.8, 20), (28.8, 0), so its bore is a cone from radius 20 at z = 0 to 4 at z = 20 and its wall is a cylinder of radius 28.8; the tool is the circular segment of the radius-20 circle on the far side of the chord y = -14.08 (area 115.92 mm^2), extruded 22 mm from z = 0, built here as a cylinder intersected with a box. The volumes are closed form up to one integral, evaluated by Gauss-Legendre quadrature (400 nodes on each of two smooth pieces) and cross-checked on a 2000 x 2000 grid (within 3e-3 mm^3). The tolerance is 0.01 mm^3, as in the other boolean cases.",
+ "cases": [
+  {
+   "name": "join_segment_into_tube",
+   "note": "#7773: the join as the issue made it: the circular-segment prism (the part of the disc of radius 20 on the side y <= -14.08, 22 mm tall from the tube's wide end z = 0) united with the tube. The prism's bottom lies in the tube's wide-end face and its wall meets the cone along a curve.",
+   "steps": [
+    {
+     "op": "revolve",
+     "id": "tube",
+     "plane": "zx",
+     "axis_point": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "axis_dir": [
+      0.0,
+      0.0,
+      1.0
+     ],
+     "angle_deg": 360.0,
+     "profile": [
+      {
+       "kind": "polygon",
+       "points": [
+        [
+         0.0,
+         20.0
+        ],
+        [
+         20.0,
+         4.0
+        ],
+        [
+         20.0,
+         28.8
+        ],
+        [
+         0.0,
+         28.8
+        ]
+       ]
+      }
+     ]
+    },
+    {
+     "op": "cylinder",
+     "id": "disc",
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "radius": 20.0,
+     "height": 22.0
+    },
+    {
+     "op": "box",
+     "id": "slab",
+     "origin": [
+      -30.0,
+      -30.0,
+      -1.0
+     ],
+     "size": [
+      60.0,
+      15.92,
+      24.0
+     ]
+    },
+    {
+     "op": "intersection",
+     "id": "segment",
+     "a": "disc",
+     "b": "slab"
+    },
+    {
+     "op": "union",
+     "id": "result",
+     "a": "tube",
+     "b": "segment"
+    }
+   ],
+   "expect": {
+    "lumps": 1,
+    "volume": {
+     "value": 42290.60022700491,
+     "tol": 0.01,
+     "formula": "V = pi*(28.8^2*20 - int_0^20 (20 - 0.8*z)^2 dz) = pi*(16588.8 - (20^3 - 4^3)/2.4); V(tube) + V(segment) - overlap; A(r) = r^2*acos(c/r) - c*sqrt(r^2 - c^2), c = 14.08; V = 22*A(20); overlap = int_0^20 [A(20) - A(20 - 0.8*z)] dz (A = 0 once 20 - 0.8*z <= c, i.e. z >= 7.4), Gauss-Legendre on [0, 7.4] and [7.4, 20]"
+    }
+   }
+  },
+  {
+   "name": "overlap_of_segment_and_tube",
+   "note": "The same two bodies intersected: the part of the tube's wall inside the prism.",
+   "steps": [
+    {
+     "op": "revolve",
+     "id": "tube",
+     "plane": "zx",
+     "axis_point": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "axis_dir": [
+      0.0,
+      0.0,
+      1.0
+     ],
+     "angle_deg": 360.0,
+     "profile": [
+      {
+       "kind": "polygon",
+       "points": [
+        [
+         0.0,
+         20.0
+        ],
+        [
+         20.0,
+         4.0
+        ],
+        [
+         20.0,
+         28.8
+        ],
+        [
+         0.0,
+         28.8
+        ]
+       ]
+      }
+     ]
+    },
+    {
+     "op": "cylinder",
+     "id": "disc",
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "radius": 20.0,
+     "height": 22.0
+    },
+    {
+     "op": "box",
+     "id": "slab",
+     "origin": [
+      -30.0,
+      -30.0,
+      -1.0
+     ],
+     "size": [
+      60.0,
+      15.92,
+      24.0
+     ]
+    },
+    {
+     "op": "intersection",
+     "id": "segment",
+     "a": "disc",
+     "b": "slab"
+    },
+    {
+     "op": "intersection",
+     "id": "result",
+     "a": "tube",
+     "b": "segment"
+    }
+   ],
+   "expect": {
+    "lumps": 1,
+    "volume": {
+     "value": 1986.7049436875495,
+     "tol": 0.01,
+     "formula": "overlap = int_0^20 [A(20) - A(20 - 0.8*z)] dz (A = 0 once 20 - 0.8*z <= c, i.e. z >= 7.4), Gauss-Legendre on [0, 7.4] and [7.4, 20]"
+    }
+   }
+  },
+  {
+   "name": "segment_minus_tube",
+   "note": "The prism with the tube cut away: two pieces remain. One lies inside the conical bore, where the cone's radius is still above 14.08 (z < 7.4), and the other is the 2 mm of the prism above the tube's narrow end (z from 20 to 22).",
+   "steps": [
+    {
+     "op": "revolve",
+     "id": "tube",
+     "plane": "zx",
+     "axis_point": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "axis_dir": [
+      0.0,
+      0.0,
+      1.0
+     ],
+     "angle_deg": 360.0,
+     "profile": [
+      {
+       "kind": "polygon",
+       "points": [
+        [
+         0.0,
+         20.0
+        ],
+        [
+         20.0,
+         4.0
+        ],
+        [
+         20.0,
+         28.8
+        ],
+        [
+         0.0,
+         28.8
+        ]
+       ]
+      }
+     ]
+    },
+    {
+     "op": "cylinder",
+     "id": "disc",
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "radius": 20.0,
+     "height": 22.0
+    },
+    {
+     "op": "box",
+     "id": "slab",
+     "origin": [
+      -30.0,
+      -30.0,
+      -1.0
+     ],
+     "size": [
+      60.0,
+      15.92,
+      24.0
+     ]
+    },
+    {
+     "op": "intersection",
+     "id": "segment",
+     "a": "disc",
+     "b": "slab"
+    },
+    {
+     "op": "difference",
+     "id": "result",
+     "a": "segment",
+     "b": "tube"
+    }
+   ],
+   "expect": {
+    "lumps": 2,
+    "volume": {
+     "value": 563.54772300479,
+     "tol": 0.01,
+     "formula": "V(segment) - overlap; A(r) = r^2*acos(c/r) - c*sqrt(r^2 - c^2), c = 14.08; V = 22*A(20); overlap = int_0^20 [A(20) - A(20 - 0.8*z)] dz (A = 0 once 20 - 0.8*z <= c, i.e. z >= 7.4), Gauss-Legendre on [0, 7.4] and [7.4, 20]"
+    }
+   }
+  }
+ ]
+}

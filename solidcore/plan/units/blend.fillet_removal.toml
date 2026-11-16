@@ -1,0 +1,12 @@
+id = "blend.fillet_removal"
+upstream = ["source/SMLib/src/SmFilletRemoval.cpp", "source/SMLib/inc/SmFilletRemoval.h"]
+rust_module = "blend::fillet_removal"
+depends_on = ["curve.curve_p2", "curve.curve_p6", "nurbs.b_spline_curve_n_lib", "nurbs.b_spline_curve_p3", "nurbs.b_spline_surface_n_lib_p1", "surface.surface_p2", "surface.surface_p3", "topology.brep_p2", "topology.brep_p3", "topology.brep_p4", "topology.brep_p5", "topology.edge", "topology.edgeuse_p1", "topology.face_p4", "topology.vertex", "topology.vertexuse"]
+soft_depends_on = ["blend.fillet_corner_p3", "surface.surf_of_extrusion_p1", "surface.surf_of_revolution_p3", "topology.brep_p7"]
+est_lines = 1757
+layer = 62
+tests = ["SM_API_test:TestSmCircularFillet"]
+status = "green"
+claimed_by = ""
+claimed_at = ""
+notes = "GREEN: difftest 170 cases, 170 pass, 0 deferred, max_rel_err 3e-16 (every face of 18 upstream fillet solids; non-fillet faces compare the refusal). New unit (step 1 of #1060, the fork's SmOffsetFaces): SmFilletRemoval, SmFilletCornerInfo, SmFaceRemoval::MoveVtxAndEdgeToAdjacentFace, SmBrep::DeleteFilletFace (SmFilletRemoval.cpp). No upstream test reaches it except through SmApiRemoveFillet (TestSmCircularFillet), which also needs SmFace::IdentifyFillet and SmFeatureExecutive (unported; SmApiRemoveFillet follows IdentifyFillet). CO-PORTED in blend.fillet_removal (PR #1821): SmEdge::SetTrimCurve, SmBrep::GlueEdges, SmSurface::UpdateAnalyticalDomain (dispatch) -> crate::blend::fillet_removal. CO-PORTED in blend.fillet_removal (PR #1821): SmEdge::Replace3DCurve -> crate::topology::edge::replace_3d_curve (shared with offset_geometry_creation's SmBrep::ReplaceCurve). CO-PORTED in blend.fillet_removal (PR #1821): SmPlane::UpdateAnalyticalDomain, the plane's mutable SmBSplineSurface part -> crate::surface::plane::p1::Plane::{update_analytical_domain, base_mut}. CO-PORTED in blend.fillet_removal (PR #1821): SmEdge::ValidateGeometry(bFixTolerances) -> crate::topology::brep::validation::pointers::validate_geometry (check_edge_geometry its FALSE case). Shared: blend::fillet_corner::p3::join_with and topology::brep::p7::edge_remove made pub(crate)."

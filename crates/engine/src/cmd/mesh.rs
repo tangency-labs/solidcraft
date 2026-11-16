@@ -8,15 +8,22 @@ use super::{
     CommandSpec,
     features::{add_feature, check_expr},
 };
+use crate::schema::features::FeatureResult;
+use crate::schema::mesh::MeshConvertParams;
+use crate::schema::{TypedContract, output_schema_for};
 use crate::{
     Result, Sel, Session,
     params::{bad, expr, str_},
 };
 
+const MESH_CONVERT_CONTRACT: TypedContract<MeshConvertParams> = TypedContract::new();
+
 pub static COMMANDS: &[CommandSpec] = &[
-    CommandSpec::new("mesh.convert", "Convert Mesh", convert)
+    CommandSpec::new("mesh.convert", "Convert Mesh", crate::checked!("mesh.convert", convert))
         .icon("import")
-        .params("body?: mesh body name (default: the selected mesh body); tolerance?: length expression (default 0.05 mm): reconstruct a closed constant-section mechanical mesh as editable planar and cylindrical faces, with a parametric timeline feature in the mesh body's owning component (the active component must be that component or an ancestor; otherwise activate the named component first); the active component is unchanged; name?"),
+        .contract(&MESH_CONVERT_CONTRACT)
+        .output(output_schema_for::<FeatureResult>)
+        .params("body?: mesh body name (default: the selected mesh body); tolerance?: length expression (default 0.05 mm): rebuild a closed mesh as an editable solid — a constant-section part as planar and cylindrical faces, any other closed mesh as the faceted solid its triangles describe — with a parametric timeline feature in the mesh body's owning component (the active component must be that component or an ancestor; otherwise activate the named component first); the active component is unchanged; name?"),
 ];
 
 /// The mesh body to convert: `body`, else the one selected body.
@@ -35,8 +42,12 @@ fn target(s: &Session, p: &Value, cmd: &str) -> Result<String> {
 fn convert(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "mesh.convert";
     let state = s.model.state();
-    let body = target(s, p, cmd)?;
-    let source = state.body(&body).ok_or_else(|| bad(cmd, format!("no body `{body}`")))?;
+    let given = target(s, p, cmd)?;
+    // The selection and the Browser name a body of a further placement as the world shows it
+    // (`Mesh (Scan:2)`): that name means the body it shows, which the conversion edits in its
+    // component, as `appearance.assign` reads it (#9740).
+    let body = s.own_body_name(&given).ok_or_else(|| bad(cmd, format!("no body `{given}`")))?;
+    let source = state.body(&body).ok_or_else(|| bad(cmd, format!("no body `{given}`")))?;
     if !source.body.is_mesh() {
         return Err(bad(cmd, "select a mesh body"));
     }

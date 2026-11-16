@@ -1,0 +1,81 @@
+{
+ "cases": [
+  {
+   "name": "blend_success_without_face",
+   "inputs": {
+    "op": "blend_primitive",
+    "args": [0, 0, 0, 1, 1, 1, 0, 1, 3, 2, 1]
+   }
+  },
+  {
+   "name": "blend_success_with_face",
+   "inputs": {
+    "op": "blend_primitive",
+    "args": [0, 0, 0, 1, 1, 1, 0, 1, 2, 2, 1]
+   }
+  },
+  {
+   "name": "blend_corner_same_dir",
+   "inputs": {
+    "op": "blend_primitive",
+    "args": [0, 0, 0, 1, 1, 1, 0, 1, 1, 1, 1]
+   }
+  },
+  {
+   "name": "blend_corner_opposite_dir",
+   "inputs": {
+    "op": "blend_primitive",
+    "args": [0, 0, 0, 1, 1, 1, 0, 1, 1, 1, 0]
+   }
+  },
+  {
+   "name": "blend_cross_face_same_dir",
+   "inputs": {
+    "op": "blend_primitive",
+    "args": [0, 0, 0, 1, 1, 1, 0, 3, 1, 5, 1]
+   }
+  },
+  {
+   "name": "blend_cross_face_opposite_dir",
+   "inputs": {
+    "op": "blend_primitive",
+    "args": [0, 0, 0, 1, 1, 1, 0, 3, 1, 5, 0]
+   }
+  },
+  {
+   "name": "blend_invalid_face_association",
+   "inputs": {
+    "op": "blend_primitive",
+    "args": [0, 0, 0, 1, 1, 1, 0, 0, 1, 1, 1]
+   }
+  },
+  {
+   "name": "blend_invalid_both_face_associations",
+   "inputs": {
+    "op": "blend_primitive",
+    "args": [0, 0, 0, 1, 1, 1, 0, 0, 1, 0, 1]
+   }
+  },
+  {
+   "name": "blend_translated_box",
+   "inputs": {
+    "op": "blend_primitive",
+    "args": [100, -50, 25, 2, 3, 4, 6, 4, 9, 4, 0]
+   }
+  },
+  {
+   "name": "blend_small_scale",
+   "inputs": {
+    "op": "blend_primitive",
+    "args": [0, 0, 0, 0.001, 0.001, 0.001, 6, 4, 7, 4, 1]
+   }
+  },
+  {
+   "name": "blend_large_scale",
+   "inputs": {
+    "op": "blend_primitive",
+    "args": [0, 0, 0, 1000, 1000, 1000, 10, 5, 11, 5, 0]
+   }
+  }
+ ]
+}

@@ -71,10 +71,12 @@ Keys handled by the window itself:
 |---|---|
 | S | command search under the ribbon search field |
 | V | show or hide the selected bodies, sketches and planes; with a right-click menu open, its Show/Hide (a folder, the Origin folder, an origin plane) |
-| F2 | rename the selected browser or timeline item |
+| F2 | rename the selected browser or timeline item; with several bodies selected, all of them: the first takes the name, the others `name (2)`, `name (3)`…, as **Rename Selected Bodies** does in a selected body's menu |
 | F6 | fit the view to the model |
 | ← → ↑ ↓ | turn the view 15° (with Shift, a quarter turn) |
 | Ctrl+← → ↑ ↓ | pan the view |
+| PageUp / PageDown | zoom in / out |
+| + / − | zoom in / out |
 | Ctrl+8 | look straight at the selected face, plane or sketch |
 | Esc | cancel the running command, or clear the selection |
 
@@ -93,7 +95,13 @@ Mouse and touch:
 | Click again on the same spot | select the next thing under the cursor (click cycling) |
 | Hold the left button still (long-press on touch), or right-click › Select Other… | list everything under the cursor to pick from |
 | Double-click a sketch curve or edge | select its chain or tangent loop |
+| Right-click in the view with a dialog open | go on to the dialog's next empty selection box; once every box has something, OK. An empty box the feature needs stays, and the status line says what to pick (off by default; turn it on in Preferences › General › Dialogs › Right-click confirms dialog inputs) |
 | Double-click the middle button | go Home: the home view, framing everything shown (Preferences › Navigation › Middle double-click: Home, Fit or Off) |
+
+To zoom by dragging, assign a key to **Drag to Zoom** in File › Keyboard Shortcuts.
+Hold the shortcut, then drag up or down with the left mouse button in the viewport.
+Releasing the shortcut stops the zoom. The Zoom button in the navigation bar also
+shows the assigned shortcut.
 
 Help › Keyboard Shortcuts in the app lists the current bindings, including any you changed.
 

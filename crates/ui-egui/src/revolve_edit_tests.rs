@@ -254,7 +254,7 @@ fn sketch_axis_cancel_restores_original_document_and_history() {
 fn only_the_active_selection_field_looks_active() {
     let mut h = make(Harness::new(), json!("Y"));
     open(&mut h);
-    let t = crate::theme::Tokens::get();
+    let t = solidcraft_theme::Tokens::get();
     let border = |h: &Harness, label: &str| {
         let field = crate::scenario::rect_of(&format!("dialog:field:{label}")).unwrap();
         h.shapes
@@ -459,8 +459,18 @@ fn dialog_revolve_follows_the_highlighted_edge_when_the_curve_id_collides() {
         let d = revolve_dialog(&h.app, vec![Sel::Profile { sketch: profile, index: 0 }], Sel::SketchCurve { id: right.clone(), sketch: named });
         let cmds = apply_commands(&h.app, &d).unwrap();
         let axis = &cmds[0].1["axis"];
-        let origin_x = axis["origin"][0].as_f64().unwrap_or_else(|| panic!("named={named:?} stored {axis}, the colliding id"));
-        assert!((origin_x - 10.0).abs() < 1e-6, "named={named:?}: {axis}");
+        // A pick that names the sketch it came from is stored qualified by that owner (#6548);
+        // an unnamed pick, whose line only the highlight knows, is stored as the geometric line.
+        match axis.get("sketch") {
+            Some(owner) => {
+                assert_eq!(owner, &json!(named.unwrap()), "named={named:?}: {axis}");
+                assert_eq!(axis["curve"], json!(&*right), "named={named:?}: {axis}");
+            }
+            None => {
+                let origin_x = axis["origin"][0].as_f64().unwrap_or_else(|| panic!("named={named:?} stored {axis}, the colliding id"));
+                assert!((origin_x - 10.0).abs() < 1e-6, "named={named:?}: {axis}");
+            }
+        }
         let preview = h.app.session.preview(&cmds).unwrap();
         // About the highlighted edge x = 10, from a point near the far edge. The other probe is
         // the same construction about the profile sketch's line of this id.
@@ -472,10 +482,11 @@ fn dialog_revolve_follows_the_highlighted_edge_when_the_curve_id_collides() {
         *angle = "120 deg".into();
     }
     inputs[0].items = vec![Sel::Profile { sketch: profile, index: 0 }];
-    inputs[1].items = vec![Sel::SketchCurve { id: right, sketch: Some(axis_sketch) }];
+    inputs[1].items = vec![Sel::SketchCurve { id: right.clone(), sketch: Some(axis_sketch) }];
     let cmds = crate::dialogs_surface::commands(&h.app, &surf, &inputs, &serde_json::Map::new()).unwrap();
     assert_eq!(cmds[0].0, "surface.revolve");
-    assert!((cmds[0].1["axis"]["origin"][0].as_f64().unwrap() - 10.0).abs() < 1e-6, "{}", cmds[0].1["axis"]);
+    // The pick names its sketch, so the axis names the owner and follows it (#6548).
+    assert_eq!(cmds[0].1["axis"], json!({"sketch": axis_sketch, "curve": right}), "{}", cmds[0].1["axis"]);
 }
 
 fn linked_span(app: &crate::SolveApp, sketch: u64) -> (f64, f64, f64, f64) {
@@ -571,14 +582,10 @@ fn face_sketch_two_profiles_revolve_about_the_highlighted_edge() {
     assert!(other_mid.dist(left_mid) < 1e-4, "the colliding line should lie on the left edge, got {other_mid:?} vs {left_mid:?}");
     assert!(other_mid.dist(right_mid) > 1.0, "it must not be the profile line");
     let colliding = cmds[0].1["axis"].as_str().unwrap().to_string();
-    let d = revolve_dialog(&h.app, vec![Sel::Profile { sketch, index: outside }], Sel::SketchCurve { id: colliding, sketch: Some(other) });
+    let d = revolve_dialog(&h.app, vec![Sel::Profile { sketch, index: outside }], Sel::SketchCurve { id: colliding.clone(), sketch: Some(other) });
     let cmds = apply_commands(&h.app, &d).unwrap();
-    let origin = cmds[0].1["axis"]["origin"].as_array().unwrap_or_else(|| panic!("colliding pick stored {}", cmds[0].1["axis"]));
-    let got = Vec3::new(origin[0].as_f64().unwrap(), origin[1].as_f64().unwrap(), origin[2].as_f64().unwrap());
-    assert!(
-        got.dist(other_mid) < 1.0 || (got - other_a).cross((other_b - other_a).normalized().unwrap()).len() < 1e-4,
-        "axis {got:?} is not the highlighted line {other_a:?}–{other_b:?}"
-    );
+    // The pick names the other sketch, so the axis names that owner and follows it (#6548).
+    assert_eq!(cmds[0].1["axis"], json!({"sketch": other, "curve": colliding}), "colliding pick stored {}", cmds[0].1["axis"]);
     let preview = h.app.session.preview(&cmds).unwrap();
     assert_pivots_on(&preview, about_left, about_right, "face sketch, colliding id");
 }
@@ -591,4 +598,47 @@ fn spin(normal: Vec3, origin: Vec3, dir: Vec3, point: Vec3, deg: f64) -> Vec3 {
     let t = deg.to_radians();
     let v = point - origin;
     origin + v * t.cos() + axis.cross(v) * t.sin() + axis * (axis.dot(v) * (1.0 - t.cos()))
+}
+
+/// #6548: the axis line lives in another sketch and shares its id with a line of the profile
+/// sketch. The dialog must send the owning sketch with the id, and the solid must turn about
+/// the picked line, not the profile sketch's colliding one.
+#[test]
+fn dialog_axis_from_another_sketch_keeps_its_sketch() {
+    let mut h = Harness::new();
+    h.app.run("sketch.create", json!({"plane":"XY","name":"AxisSketch"})).unwrap();
+    h.app.run("sketch.line", json!({"points":[[0.0,-20.0],[0.0,20.0]],"construction":true})).unwrap();
+    h.app.run("sketch.finish", json!({})).unwrap();
+    h.app.run("sketch.create", json!({"plane":"XY","name":"ProfileSketch"})).unwrap();
+    h.app.run("sketch.line", json!({"points":[[15.0,-10.0],[15.0,10.0]],"construction":true})).unwrap();
+    h.app.run("sketch.rectangle.two_point", json!({"p0":[10.0,-5.0],"p1":[20.0,5.0]})).unwrap();
+    h.app.run("sketch.finish", json!({})).unwrap();
+    let profile = h.app.session.doc.find_feature("ProfileSketch").unwrap().id;
+    let axis_sketch = h.app.session.doc.find_feature("AxisSketch").unwrap().id;
+    let mut dialog = crate::dialogs::Dialog::for_command(&h.app, "solid.revolve").unwrap();
+    dialog.active = 0;
+    // The field arrives prefilled with this very profile (#684), so a blind pick would toggle it
+    // off: start from empty so the pick lands.
+    dialog.inputs[0].items.clear();
+    dialog.pick(&h.app.session, solidcraft_engine::Sel::Profile { sketch: profile, index: 0 });
+    dialog.active = 1;
+    dialog.inputs[1].items.clear();
+    dialog.pick(&h.app.session, solidcraft_engine::Sel::SketchCurve { id: "l1".into(), sketch: Some(axis_sketch) });
+    h.app.dialog = Some(dialog);
+    h.frames(4);
+    h.step(&json!({"widget":"OK"})).unwrap();
+    assert!(
+        h.app.dialog.is_none(),
+        "error={:?} preview={:?} log={:?}",
+        h.app.dialog.as_ref().and_then(|d| d.error.clone()),
+        h.app.preview.error,
+        h.app.session.log
+    );
+    let FeatureKind::Revolve { axis, .. } = &h.app.session.doc.features.last().unwrap().kind else { panic!("revolve") };
+    assert!(matches!(axis, AxisRef::SketchLine { curve, sketch: Some(owner) } if curve == "l1" && *owner == axis_sketch), "kept qualified: {axis:?}");
+    // π · (20² − 10²) · 10 about x = 0, not the crossing error the colliding id used to give.
+    let state = h.app.session.world_state().unwrap();
+    let volume: f64 = state.bodies.iter().map(|b| solidcraft_engine::doc::kernel::measure(&b.body).unwrap().volume).sum();
+    let expected = std::f64::consts::PI * 300.0 * 10.0;
+    assert!((volume - expected).abs() / expected < 1e-4, "{volume} != {expected}");
 }

@@ -1,0 +1,23 @@
+{
+  "cases": [
+    {"name":"branch_check","upstream_ref":"source/SMLib/src/SmBrep.cpp:5752","inputs":{"brep":{"kind":"file","file":"fixture:wire_branch.smb"},"op":"check"}},
+    {"name":"branch_edge0","upstream_ref":"source/SMLib/src/SmBrep.cpp:6560","inputs":{"brep":{"kind":"file","file":"fixture:wire_branch.smb"},"op":"delete_edge","target":0}},
+    {"name":"branch_edge4","upstream_ref":"source/SMLib/src/SmBrep.cpp:6849","inputs":{"brep":{"kind":"file","file":"fixture:wire_branch.smb"},"op":"delete_edge","target":4}},
+    {"name":"branch_edge5","upstream_ref":"source/SMLib/src/SmBrep.cpp:6949","inputs":{"brep":{"kind":"file","file":"fixture:wire_branch.smb"},"op":"delete_edge","target":5}},
+    {"name":"branch_edge6","upstream_ref":"source/SMLib/src/SmBrep.cpp:6949","inputs":{"brep":{"kind":"file","file":"fixture:wire_branch.smb"},"op":"delete_edge","target":6}},
+    {"name":"branch_edge7","upstream_ref":"source/SMLib/src/SmBrep.cpp:6949","inputs":{"brep":{"kind":"file","file":"fixture:wire_branch.smb"},"op":"delete_edge","target":7}},
+    {"name":"branch_edge5_noedit","upstream_ref":"source/SMLib/src/SmBrep.cpp:5752","inputs":{"brep":{"kind":"file","file":"fixture:wire_branch.smb"},"op":"delete_edge","target":5,"editing":false}},
+    {"name":"branch_vertex4","upstream_ref":"source/SMLib/src/SmBrep.cpp:7871","inputs":{"brep":{"kind":"file","file":"fixture:wire_branch.smb"},"op":"delete_vertex","target":4}},
+    {"name":"branch_vertex5","upstream_ref":"source/SMLib/src/SmBrep.cpp:7871","inputs":{"brep":{"kind":"file","file":"fixture:wire_branch.smb"},"op":"delete_vertex","target":5}},
+    {"name":"branch_vertex6","upstream_ref":"source/SMLib/src/SmBrep.cpp:7871","inputs":{"brep":{"kind":"file","file":"fixture:wire_branch.smb"},"op":"delete_vertex","target":6}},
+    {"name":"branch_vertex7","upstream_ref":"source/SMLib/src/SmBrep.cpp:7967","inputs":{"brep":{"kind":"file","file":"fixture:wire_branch.smb"},"op":"delete_vertex","target":7}},
+    {"name":"branch_vertex9","upstream_ref":"source/SMLib/src/SmBrep.cpp:7871","inputs":{"brep":{"kind":"file","file":"fixture:wire_branch.smb"},"op":"delete_vertex","target":9}},
+    {"name":"branch_shrink","upstream_ref":"source/SMLib/src/SmBrep.cpp:32218","inputs":{"brep":{"kind":"file","file":"fixture:wire_branch.smb"},"op":"shrink_geometry"}},
+    {"name":"branch_stitch","upstream_ref":"source/SMLib/src/SmBrep.cpp:26555","inputs":{"brep":{"kind":"file","file":"fixture:wire_branch.smb"},"op":"stitch_faces","tol":0.001,"flag":false}},
+    {"name":"branch_destroy","upstream_ref":"source/SMLib/src/SmBrep.cpp:695","inputs":{"brep":{"kind":"file","file":"fixture:wire_branch.smb"},"op":"destroy"}},
+    {"name":"adv_branch_noregion1_edge4","upstream_ref":"source/SMLib/src/SmBrep.cpp:6849","inputs":{"brep":{"kind":"file","file":"fixture:wire_branch.smb"},"op":"delete_edge","target":4,"damage":{"no_region":1}}},
+    {"name":"adv_branch_noregion1_edge5","upstream_ref":"source/SMLib/src/SmBrep.cpp:6949","inputs":{"brep":{"kind":"file","file":"fixture:wire_branch.smb"},"op":"delete_edge","target":5,"damage":{"no_region":1}}},
+    {"name":"adv_branch_noregion1_edge6","upstream_ref":"source/SMLib/src/SmBrep.cpp:6949","inputs":{"brep":{"kind":"file","file":"fixture:wire_branch.smb"},"op":"delete_edge","target":6,"damage":{"no_region":1}}},
+    {"name":"adv_branch_noregion1_edge7","upstream_ref":"source/SMLib/src/SmBrep.cpp:6949","inputs":{"brep":{"kind":"file","file":"fixture:wire_branch.smb"},"op":"delete_edge","target":7,"damage":{"no_region":1}}}
+  ]
+}

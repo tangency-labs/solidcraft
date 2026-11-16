@@ -15,11 +15,11 @@ description: "Use when a SolidCraft change is slow, blocks the window, runs long
 - Profile first. Time with `solidcraft-cli` from `main` and from your branch, alternating runs, after the load is low. On a shared machine check `cut -d' ' -f1 /proc/loadavg` and wait while it is over 24; build with `nice`.
 - Report medians with the range, the machine, and the cases. The pattern to follow is `docs/perf.md`: what was slow, why, the result, and proof that nothing changed (same bodies, volumes, areas and triangle counts).
 - A speed-up never skips work on a mesh's box: decide with the exact bounds (`Body::exact_bounds`, grown by the record's tolerance as `apart` in `crates/kernel/src/ops.rs` does). A mesh is for display, export, previews and mesh bodies.
-- Do not rewrite kernel code for speed: the kernel is being replaced, and kernel work is paused. Report a slow case with its file under the `kernel-perf` label (CONTRIBUTING.md, "Where help is wanted most").
+- A speed-up of kernel code goes in `solidcore/` with its root cause, per `solidcore/AGENTS.md`; do not grow `crates/kernel`. Report a slow case with its file under the `kernel-perf` label (CONTRIBUTING.md, "Where help is wanted most").
 - Pull requests run only the tests for what they touch; geometry-heavy tests run in the merge queue. Use `cargo xtask test` with the `ci` profile locally (`skills/solidcraft-tests/SKILL.md`).
 
 ## The browser build
 - Everything below the apps must build for `wasm32-unknown-unknown`: `cargo xtask wasm` checks every library crate and the web app, and is part of `cargo xtask ci`. Do not add a dependency that cannot.
 - Application code is Rust only. The browser requires two pieces of JavaScript: the service worker `apps/solidcraft-web/sw.js` and the small inline scripts in `apps/solidcraft-web/index.html`. Keep them minimal; `cargo xtask web-offline-test` covers the service worker.
 - Python 3.11+ is allowed only for asset authoring, lint and review tools (`assets/AGENTS.md`), never as an application dependency.
-- Design notes for the browser runtime: `docs/web-runtime.md`, `docs/browser-api.md`.
+- Design notes for the browser runtime: `docs/browser-api.md`.

@@ -29,7 +29,6 @@ use solidcore::nurbs::b_spline_curve::ControlPointForm;
 use solidcore::nurbs::b_spline_surface::p1::SurfParamType;
 use solidcore::nurbs::b_spline_surface_n_lib::p2::OrientType;
 use solidcore::nurbs::knots::Side;
-use solidcore::offset::construction::ShellRefusal;
 use solidcore::offset::offset_executive::p2::{OffsetOptions, ShellOptions, local_operation_simple, offset_brep_simple, shell_brep_simple};
 use solidcore::offset::offset_faces::{OffsetFacesExecutive, OffsetFacesRefusal};
 use solidcore::query::api_queries::{face_bounding_box, face_classify_uv, face_closest_point_in_shape, face_internal_point};
@@ -50,21 +49,19 @@ type Out<T> = std::result::Result<T, Error>;
 /// `SM_ERR_INVALID_INPUT`.
 const INVALID_INPUT: i32 = 1007;
 
-/// `SM_ERR_OFFSET_WALLS_TOUCH` (fork a759622), which `status` (smlib_shim.h) reports as
-/// `SMLIB_ERR_WALLS_TOUCH`.
-const OFFSET_WALLS_TOUCH: i32 = 1042;
-
-/// `status` (smlib_shim.h): an offset whose walls touch is [`Error::WallsTouch`]; a vertex moved
-/// past an edge's other end (`SM_ERR_OFFSET_EDGE_VANISHES`, fork 34318f4) is
-/// `SMLIB_ERR_UNSUPPORTED`; a wall whose face's offset folds, which solidcore's one construction
-/// refuses (`fixes.shell_one_construction`, solidcore#2367), is [`Error::WallFolds`] with the
-/// largest wall it names; any other status as the blends pass it on.
+/// `status` (smlib_shim.h): an offset's refusal as solidcore-ops routes it
+/// ([`solidcore_ops::offset::refusal`], the routing of ops' own offsets): walls that touch
+/// ([`Error::WallsTouch`]), a wall whose face's offset folds ([`Error::WallFolds`] with the largest
+/// wall it names, solidcore#2367), a vertex moved past an edge's other end
+/// (`SM_ERR_OFFSET_EDGE_VANISHES`, fork 34318f4: `SMLIB_ERR_UNSUPPORTED`); anything else as the
+/// blends pass it on, which carries ops' other offset refusals as they are.
 fn status(e: SolidError) -> Error {
-    match e {
-        SolidError::Upstream { code: OFFSET_WALLS_TOUCH, .. } => Error::WallsTouch,
-        SolidError::ShellRefused { refusal: ShellRefusal::Fold, size, .. } => Error::WallFolds { largest: size },
-        e if e.is_offset_edge_vanishes() => Error::Unsupported,
-        e => blend_status(e),
+    use solidcore_ops::Error as Ops;
+    match solidcore_ops::offset::refusal(&e) {
+        Some(Ops::WallsTouch) => Error::WallsTouch,
+        Some(Ops::WallFolds { largest }) => Error::WallFolds { largest },
+        Some(Ops::Unsupported(_)) => Error::Unsupported,
+        _ => blend_status(e),
     }
 }
 

@@ -1,0 +1,161 @@
+{
+  "area": "booleans",
+  "bodies": {
+    "b13": {
+      "keeping_splines": false,
+      "trusted": true
+    },
+    "b16": {
+      "keeping_splines": false,
+      "trusted": true
+    }
+  },
+  "calls": [
+    {
+      "inputs": [
+        "b13"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b14"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b14"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b15"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b16"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b17"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b17"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b18"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b15"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b19"
+      ],
+      "params": {
+        "operand": 0
+      }
+    },
+    {
+      "inputs": [
+        "b18"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b20"
+      ],
+      "params": {
+        "operand": 1
+      }
+    },
+    {
+      "inputs": [
+        "b19",
+        "b20"
+      ],
+      "op": "boolean",
+      "outputs": [
+        "b21"
+      ],
+      "params": {
+        "op": "union"
+      }
+    }
+  ],
+  "case": "3665-join-extrude-column-on-floor-and-curved-walls",
+  "expected": {
+    "body_count": 1,
+    "method": "housing 60x60x20 = 72000 minus the annular channel r16..24, 10 deep: pi(24^2-16^2)*10; the column r=4 centred on the channel's mid circle (r=20) is tangent to both walls and stands 6 mm on the floor: + pi*16*6. V = 72000 - 3200pi + 96pi",
+    "source": "analytic",
+    "sources": [
+      "tangency-labs/solidcraft#3665",
+      "tangency-labs/solidcraft#3666"
+    ],
+    "volume_mm3": 62248.4964,
+    "what": "a join extrude of a column standing on a channel's flat floor and lying along both its curved walls (column circle tangent to both walls)"
+  },
+  "expressible": true,
+  "operation_expressible": true,
+  "outcome": {
+    "ran": true,
+    "raw_counts": {
+      "edges": 26,
+      "faces": 13,
+      "vertices": 14
+    }
+  },
+  "records": "3665-join-extrude-column-on-floor-and-curved-walls.bodies.json.gz",
+  "result": [
+    {
+      "body": "Housing",
+      "made": "b21"
+    }
+  ],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": {
+      "area_mm2": 14664.070570226855,
+      "body_count": 1,
+      "edges": 24,
+      "faces": 12,
+      "vertices": 14,
+      "volume_mm3": 62248.49640327449
+    },
+    "refused_with": null,
+    "status": "pass"
+  },
+  "sources": [
+    "tangency-labs/solidcraft#3665",
+    "tangency-labs/solidcraft#3666"
+  ],
+  "traced_ops": [
+    "extrude",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean"
+  ],
+  "ungraded": [],
+  "what": "a join extrude of a column standing on a channel's flat floor and lying along both its curved walls (column circle tangent to both walls)",
+  "why_not": []
+}

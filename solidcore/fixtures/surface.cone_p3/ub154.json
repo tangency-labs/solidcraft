@@ -1,0 +1,252 @@
+{
+  "cases": [
+    {
+      "fuzz": {
+        "base": "issue #276",
+        "mutations": ["/domains/2 = -1e+300"]
+      },
+      "inputs": {
+        "cone": [0, 0, 0, 1, 0, 0, 0, 1, 0, 1.3350324487892218, 1.3350324487892218, 1.4140964945880001, 0, 360, 1, 1, 0],
+        "domains": [0, 0, -1e+300, 1, 0, 0, 1, 1],
+        "op": 0,
+        "other": [0, 0.7070482472940001, 0.7070482472940001, 1, 0, 0, 0, 0, 1, 1.3350324487892218, 1.3350324487892218, 1.4140964945880001, 0, 360, 0, 0, 0],
+        "same": false,
+        "tolerance": 1e-07
+      },
+      "name": "rejected_ub154_fuzz00656",
+      "upstream_ref": "source/SMLib/src/SmCone.cpp:5399-5405, 5463-5477; SmGeomUtility.cpp:694-695 (issue #276, UB-154: reversed trim domain of the first cone: both seams evaluate to the same point, zero length)"
+    },
+    {
+      "fuzz": {
+        "base": "issue #276",
+        "mutations": ["/domains/5 = 1e+300"]
+      },
+      "inputs": {
+        "cone": [0, 0, 0, 1, 0, 0, 0, 1, 0, 1294022.1249764236, 1294022.1249764236, 4492081.803763748, 0, 360, 0, 1, 0],
+        "domains": [0, 0, 1, 1, 0, 1e+300, 1, 1],
+        "op": 0,
+        "other": [0, 2246040.901881874, 2246040.901881874, 1, 0, 0, 0, 0, 1, 1294022.1249764236, 1294022.1249764236, 4492081.803763748, 0, 360, 0, 0, 0],
+        "same": false,
+        "tolerance": 0.1
+      },
+      "name": "rejected_ub154_fuzz09540",
+      "upstream_ref": "source/SMLib/src/SmCone.cpp:5399-5405, 5463-5477; SmGeomUtility.cpp:694-695 (issue #276, UB-154: reversed trim domain of the second cone: zero-length seams)"
+    },
+    {
+      "inputs": {
+        "cone": [0, 0, 0, 1, 0, 0, 0, 1, 0, 1294022.1249764236, 1294022.1249764236, 4492081.803763748, 0, 360, 0, 1, 0],
+        "domains": [0, 0, 1, 1, 0, 1e+300, 1, 1],
+        "op": 3,
+        "other": [0, 2246040.901881874, 2246040.901881874, 1, 0, 0, 0, 0, 1, 1294022.1249764236, 1294022.1249764236, 4492081.803763748, 0, 360, 0, 0, 0],
+        "same": false,
+        "tolerance": 0.1
+      },
+      "name": "rejected_ub154_fuzz09540_global",
+      "upstream_ref": "source/SMLib/src/SmCone.cpp:5399-5405, 5463-5477; SmGeomUtility.cpp:694-695 (issue #276, UB-154: same through GlobalSurfaceIntersect)"
+    },
+    {
+      "inputs": {
+        "cone": [0, 0, 0, 1, 0, 0, 0, 1, 0, 1294022.1249764236, 1294022.1249764236, 4492081.803763748, 0, 360, 0, 1, 0],
+        "domains": [0, 0, 1, 1, 0, 1, 1, 1],
+        "op": 0,
+        "other": [0, 2246040.901881874, 2246040.901881874, 1, 0, 0, 0, 0, 1, 1294022.1249764236, 1294022.1249764236, 4492081.803763748, 0, 360, 0, 0, 0],
+        "same": false,
+        "tolerance": 0.1
+      },
+      "name": "rejected_ub154_zero_height_other",
+      "upstream_ref": "source/SMLib/src/SmCone.cpp:5399-5405, 5463-5477; SmGeomUtility.cpp:694-695 (issue #276, UB-154: zero-height trim domain of the second cone)"
+    },
+    {
+      "inputs": {
+        "cone": [0, 0, 0, 1, 0, 0, 0, 1, 0, 1.3350324487892218, 1.3350324487892218, 1.4140964945880001, 0, 360, 1, 1, 0],
+        "domains": [0.5, 0, 0.5000000000007, 1, 0, 0, 1, 1],
+        "op": 0,
+        "other": [0, 0.7070482472940001, 0.7070482472940001, 1, 0, 0, 0, 0, 1, 1.3350324487892218, 1.3350324487892218, 1.4140964945880001, 0, 360, 0, 0, 0],
+        "same": false,
+        "tolerance": 1e-07
+      },
+      "name": "rejected_ub154_short_seam_cone",
+      "upstream_ref": "source/SMLib/src/SmCone.cpp:5399-5405, 5463-5477; SmGeomUtility.cpp:694-695 (issue #276, UB-154: first cone's seam 7e-13 * 1.414 < 1e-12)"
+    },
+    {
+      "inputs": {
+        "cone": [0, 0, 0, 1, 0, 0, 0, 1, 0, 1.3350324487892218, 1.3350324487892218, 1.4140964945880001, 0, 360, 1, 1, 0],
+        "domains": [0, 0, 1, 1, 0, 0.5, 1, 0.5000000000007],
+        "op": 0,
+        "other": [0, 0.7070482472940001, 0.7070482472940001, 1, 0, 0, 0, 0, 1, 1.3350324487892218, 1.3350324487892218, 1.4140964945880001, 0, 360, 0, 0, 0],
+        "same": false,
+        "tolerance": 1e-07
+      },
+      "name": "rejected_ub154_short_seam_other",
+      "upstream_ref": "source/SMLib/src/SmCone.cpp:5399-5405, 5463-5477; SmGeomUtility.cpp:694-695 (issue #276, UB-154: second cone's seam 7e-13 * 1.414 < 1e-12)"
+    },
+    {
+      "inputs": {
+        "cone": [0, 0, 0, 1, 0, 0, 0, 1, 0, 1.3350324487892218, 1.3350324487892218, 1.4140964945880001, 0, 360, 1, 1, 0],
+        "domains": [0, 0, 1, 1, 0, 0.5, 1, 0.5000000000007],
+        "op": 3,
+        "other": [0, 0.7070482472940001, 0.7070482472940001, 1, 0, 0, 0, 0, 1, 1.3350324487892218, 1.3350324487892218, 1.4140964945880001, 0, 360, 0, 0, 0],
+        "same": false,
+        "tolerance": 1e-07
+      },
+      "name": "rejected_ub154_short_seam_other_global",
+      "upstream_ref": "source/SMLib/src/SmCone.cpp:5399-5405, 5463-5477; SmGeomUtility.cpp:694-695 (issue #276, UB-154: same through GlobalSurfaceIntersect)"
+    },
+    {
+      "inputs": {
+        "cone": [0, 0, 0, 1, 0, 0, 0, 1, 0, 1.3350324487892218, 1.3350324487892218, 1.4140964945880001, 0, 360, 1, 1, 0],
+        "domains": [0.5, 0, 0.5000000000008, 1, 0, 0, 1, 1],
+        "op": 0,
+        "other": [0, 0.7070482472940001, 0.7070482472940001, 1, 0, 0, 0, 0, 1, 1.3350324487892218, 1.3350324487892218, 1.4140964945880001, 0, 360, 0, 0, 0],
+        "same": false,
+        "tolerance": 1e-07
+      },
+      "name": "ub154_seam_just_long_cone",
+      "upstream_ref": "source/SMLib/src/SmCone.cpp:5399-5405; SmGeomUtility.cpp:694-701 (issue #276, UB-154 neighbour: first cone's seam 8e-13 * 1.414 >= 1e-12)"
+    },
+    {
+      "inputs": {
+        "cone": [0, 0, 0, 1, 0, 0, 0, 1, 0, 1.3350324487892218, 1.3350324487892218, 1.4140964945880001, 0, 360, 1, 1, 0],
+        "domains": [0, 0, 1, 1, 0, 0.5, 1, 0.5000000000008],
+        "op": 0,
+        "other": [0, 0.7070482472940001, 0.7070482472940001, 1, 0, 0, 0, 0, 1, 1.3350324487892218, 1.3350324487892218, 1.4140964945880001, 0, 360, 0, 0, 0],
+        "same": false,
+        "tolerance": 1e-07
+      },
+      "name": "ub154_seam_just_long_other",
+      "upstream_ref": "source/SMLib/src/SmCone.cpp:5399-5405; SmGeomUtility.cpp:694-701 (issue #276, UB-154 neighbour: second cone's seam 8e-13 * 1.414 >= 1e-12)"
+    },
+    {
+      "inputs": {
+        "cone": [0, 0, 0, 1, 0, 0, 0, 1, 0, 1.3350324487892218, 1.3350324487892218, 1.4140964945880001, 0, 360, 1, 1, 0],
+        "domains": [0, 0, 1, 1, 0, 0.5, 1, 0.5000000000008],
+        "op": 3,
+        "other": [0, 0.7070482472940001, 0.7070482472940001, 1, 0, 0, 0, 0, 1, 1.3350324487892218, 1.3350324487892218, 1.4140964945880001, 0, 360, 0, 0, 0],
+        "same": false,
+        "tolerance": 1e-07
+      },
+      "name": "ub154_seam_just_long_other_global",
+      "upstream_ref": "source/SMLib/src/SmCone.cpp:5399-5405; SmGeomUtility.cpp:694-701 (issue #276, UB-154 neighbour: same through GlobalSurfaceIntersect)"
+    },
+    {
+      "inputs": {
+        "cone": [0, 0, 0, 1, 0, 0, 0, 1, 0, 1.3350324487892218, 1.3350324487892218, 1.4140964945880001, 0, 360, 1, 1, 0],
+        "domains": [0, 0, 1, 1, 0, 0.5, 1, 0.500000001],
+        "op": 0,
+        "other": [0, 0.7070482472940001, 0.7070482472940001, 1, 0, 0, 0, 0, 1, 1.3350324487892218, 1.3350324487892218, 1.4140964945880001, 0, 360, 0, 0, 0],
+        "same": false,
+        "tolerance": 1e-07
+      },
+      "name": "ub154_seam_tiny_other",
+      "upstream_ref": "source/SMLib/src/SmCone.cpp:5399-5405; SmGeomUtility.cpp:694-701 (issue #276, UB-154 neighbour: second cone's seam 1e-9 of its height)"
+    },
+    {
+      "inputs": {
+        "cone": [0, 0, 0, 1, 0, 0, 0, 1, 0, 1294022.1249764236, 1294022.1249764236, 4492081.803763748, 0, 360, 0, 1, 0],
+        "domains": [0, 0, 1, 1, 0, 0.999, 1, 1],
+        "op": 0,
+        "other": [0, 2246040.901881874, 2246040.901881874, 1, 0, 0, 0, 0, 1, 1294022.1249764236, 1294022.1249764236, 4492081.803763748, 0, 360, 0, 0, 0],
+        "same": false,
+        "tolerance": 0.1
+      },
+      "name": "ub154_fuzz09540_short_trim",
+      "upstream_ref": "source/SMLib/src/SmCone.cpp:5399-5405; SmGeomUtility.cpp:694-701 (issue #276, UB-154 neighbour: fuzz09540 with a defined trim domain, v0 = 0.999)"
+    },
+    {
+      "inputs": {
+        "cone": [0, 0, 0, 1, 0, 0, 0, 1, 0, 1.3350324487892218, 1.3350324487892218, 1.4140964945880001, 0, 360, 1, 1, 1],
+        "domains": [0, 0, 1, 1, 0, 0, 1, 1],
+        "op": 0,
+        "other": [-7.777530720232432e-07, 0, 4.277689313880728e-13, 0, 1, 0, -0.999999999999395, 0, 1.0999999999997781e-06, 1.3350324487892218, 1.3350324487892218, 1.4140964945880001, 0, 360, 0, 0, 1],
+        "same": false,
+        "tolerance": 1e-07
+      },
+      "name": "ub154_seam_near_parallel_1p1e6",
+      "upstream_ref": "source/SMLib/src/SmCone.cpp:5399-5405; SmGeomUtility.cpp:694-701 (issue #276, UB-154 neighbour: cylinder axes 1.1e-06 rad apart: seams 5.5e-07 rad from one ellipse plane)"
+    },
+    {
+      "inputs": {
+        "cone": [0, 0, 0, 1, 0, 0, 0, 1, 0, 1.3350324487892218, 1.3350324487892218, 1.4140964945880001, 0, 360, 1, 1, 1],
+        "domains": [0, 0, 1, 1, 0, 0.5, 1, 0.5000000000008],
+        "op": 0,
+        "other": [-7.777530720232432e-07, 0, 4.277689313880728e-13, 0, 1, 0, -0.999999999999395, 0, 1.0999999999997781e-06, 1.3350324487892218, 1.3350324487892218, 1.4140964945880001, 0, 360, 0, 0, 1],
+        "same": false,
+        "tolerance": 1e-07
+      },
+      "name": "ub154_seam_near_parallel_1p1e6_short",
+      "upstream_ref": "source/SMLib/src/SmCone.cpp:5399-5405; SmGeomUtility.cpp:694-701 (issue #276, UB-154 neighbour: same, second cone's seam 8e-13 * 1.414 long)"
+    },
+    {
+      "inputs": {
+        "cone": [0, 0, 0, 1, 0, 0, 0, 1, 0, 1.3350324487892218, 1.3350324487892218, 1.4140964945880001, 0, 360, 1, 1, 1],
+        "domains": [0, 0, 1, 1, 0, 0, 1, 1],
+        "op": 0,
+        "other": [-7.070482472822159e-06, 0, 3.535238768392901e-11, 0, 1, 0, -0.99999999995, 0, 9.999999999833334e-06, 1.3350324487892218, 1.3350324487892218, 1.4140964945880001, 0, 360, 0, 0, 1],
+        "same": false,
+        "tolerance": 1e-07
+      },
+      "name": "ub154_seam_near_parallel_1e5",
+      "upstream_ref": "source/SMLib/src/SmCone.cpp:5399-5405; SmGeomUtility.cpp:694-701 (issue #276, UB-154 neighbour: cylinder axes 1e-05 rad apart: seams 5e-06 rad from one ellipse plane)"
+    },
+    {
+      "inputs": {
+        "cone": [0, 0, 0, 1, 0, 0, 0, 1, 0, 1.3350324487892218, 1.3350324487892218, 1.4140964945880001, 0, 360, 1, 1, 1],
+        "domains": [0, 0, 1, 1, 0, 0.5, 1, 0.5000000000008],
+        "op": 0,
+        "other": [-7.070482472822159e-06, 0, 3.535238768392901e-11, 0, 1, 0, -0.99999999995, 0, 9.999999999833334e-06, 1.3350324487892218, 1.3350324487892218, 1.4140964945880001, 0, 360, 0, 0, 1],
+        "same": false,
+        "tolerance": 1e-07
+      },
+      "name": "ub154_seam_near_parallel_1e5_short",
+      "upstream_ref": "source/SMLib/src/SmCone.cpp:5399-5405; SmGeomUtility.cpp:694-701 (issue #276, UB-154 neighbour: same, second cone's seam 8e-13 * 1.414 long)"
+    },
+    {
+      "inputs": {
+        "cone": [0, 0, 0, 1, 0, 0, 0, 1, 0, 1, 1, 2, 0, 360, 0, 0, 1],
+        "domains": [0, 0, 1, 1, 0, 0, 1, 1],
+        "op": 1,
+        "other": [0, 0, 1, 0, 1, 0, 9.999999999999982e-08, 0, 0.999999999999995, -4, -4, 4, 4],
+        "same": false,
+        "tolerance": 1e-07
+      },
+      "name": "ub154_plane_near_parallel_1e7_op1",
+      "upstream_ref": "source/SMLib/src/SmCone.cpp:5399-5405; SmGeomUtility.cpp:694-701 (issue #276, UB-154 neighbour: plane 1e-07 rad from the cylinder axis: seams 1e-07 rad from the ellipse plane)"
+    },
+    {
+      "inputs": {
+        "cone": [0, 0, 0, 1, 0, 0, 0, 1, 0, 1, 1, 2, 0, 360, 0, 0, 1],
+        "domains": [0, 0, 1, 1, 0, 0, 1, 1],
+        "op": 2,
+        "other": [0, 0, 1, 0, 1, 0, 9.999999999999982e-08, 0, 0.999999999999995, -4, -4, 4, 4],
+        "same": false,
+        "tolerance": 1e-07
+      },
+      "name": "ub154_plane_near_parallel_1e7_op2",
+      "upstream_ref": "source/SMLib/src/SmCone.cpp:5399-5405; SmGeomUtility.cpp:694-701 (issue #276, UB-154 neighbour: plane 1e-07 rad from the cylinder axis: seams 1e-07 rad from the ellipse plane)"
+    },
+    {
+      "inputs": {
+        "cone": [0, 0, 0, 1, 0, 0, 0, 1, 0, 1, 1, 2, 0, 360, 0, 0, 1],
+        "domains": [0, 0, 1, 1, 0, 0, 1, 1],
+        "op": 1,
+        "other": [0, 0, 1, 0, 1, 0, 2.999999999999999e-08, 0, 0.9999999999999996, -4, -4, 4, 4],
+        "same": false,
+        "tolerance": 1e-07
+      },
+      "name": "ub154_plane_near_parallel_3e8_op1",
+      "upstream_ref": "source/SMLib/src/SmCone.cpp:5399-5405; SmGeomUtility.cpp:694-701 (issue #276, UB-154 neighbour: plane 3e-08 rad from the cylinder axis: seams 3e-08 rad from the ellipse plane)"
+    },
+    {
+      "inputs": {
+        "cone": [0, 0, 0, 1, 0, 0, 0, 1, 0, 1, 1, 2, 0, 360, 0, 0, 1],
+        "domains": [0, 0, 1, 1, 0, 0, 1, 1],
+        "op": 2,
+        "other": [0, 0, 1, 0, 1, 0, 2.999999999999999e-08, 0, 0.9999999999999996, -4, -4, 4, 4],
+        "same": false,
+        "tolerance": 1e-07
+      },
+      "name": "ub154_plane_near_parallel_3e8_op2",
+      "upstream_ref": "source/SMLib/src/SmCone.cpp:5399-5405; SmGeomUtility.cpp:694-701 (issue #276, UB-154 neighbour: plane 3e-08 rad from the cylinder axis: seams 3e-08 rad from the ellipse plane)"
+    }
+  ]
+}

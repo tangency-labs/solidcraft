@@ -1,0 +1,12 @@
+[package]
+name = "solidcraft-mcp-server"
+description = "MCP server machinery any app may share: JSON-RPC 2.0 over stdio, the MCP lifecycle, tool and resource methods, tool schemas and argument checks, image results"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+serde_json = { workspace = true }

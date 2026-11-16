@@ -42,7 +42,7 @@ class Synthetic(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         r = self.root = self.tmp.name
-        write(r, "tests/kernel-cases/PATHS-ALL", "# shared\ncrates/geom/**\n\n.github/workflows/kernel-rig.yml\n")
+        write(r, "tests/kernel-cases/PATHS-ALL", "# shared\ncrates/geom/**\nsolidcore/**\n\n.github/workflows/kernel-rig.yml\n")
         write(r, "tests/kernel-cases/fillets/PATHS", "# blends\ncrates/kernel/src/blend*.rs\n")
         write(r, "tests/kernel-cases/shell/PATHS", "crates/kernel/src/offset*.rs\ncrates/kernel/src/blend_smlib.rs\n")
         write(r, "tests/kernel-cases/ladder/ladder.json", "{}")
@@ -64,7 +64,7 @@ class Synthetic(unittest.TestCase):
         self.assertEqual(self.select("tests/kernel-cases/ladder/golden.json"), (["ladder"], True))
 
     def test_the_shared_core_runs_every_area(self):
-        for p in ["crates/geom/src/brep.rs", ".github/workflows/kernel-rig.yml"]:
+        for p in ["crates/geom/src/brep.rs", "solidcore/crates/solidcore/src/kernel.rs", ".github/workflows/kernel-rig.yml"]:
             self.assertEqual(self.select("docs/a.md", p), (["fillets", "shell", "ladder"], True), p)
 
     def test_unrelated_changes_run_nothing(self):
@@ -73,22 +73,6 @@ class Synthetic(unittest.TestCase):
     def test_a_registry_or_case_change_builds_for_the_coverage_check(self):
         self.assertEqual(self.select("crates/engine/src/cmd/view_navigation.rs"), ([], True))
         self.assertEqual(self.select("tests/kernel-cases/EXEMPT"), ([], True))
-
-    def test_a_solidcore_pin_change_runs_every_area(self):
-        moved = (
-            "--- a/Cargo.lock\n+++ b/Cargo.lock\n@@ -1,3 +1,3 @@\n name = \"solidcore\"\n"
-            '-source = "git+https://github.com/tangency-labs/solidcore?rev=97ed188#97ed188"\n'
-            '+source = "git+https://github.com/tangency-labs/solidcore?rev=8ddce90#8ddce90"\n'
-        )
-        everything = (["fillets", "shell", "ladder"], True)
-        self.assertEqual(plan.select(self.root, ["Cargo.lock", "Cargo.toml"], pin_diff=moved), everything)
-
-    def test_another_dependency_change_runs_nothing(self):
-        bumped = '--- a/Cargo.lock\n+++ b/Cargo.lock\n@@ -1,2 +1,2 @@\n name = "serde"\n-version = "1.0.1"\n+version = "1.0.2"\n'
-        self.assertEqual(plan.select(self.root, ["Cargo.lock", "Cargo.toml"], pin_diff=bumped), ([], False))
-        # A context line that names solidcore is no change to its pin.
-        context = '--- a/Cargo.toml\n+++ b/Cargo.toml\n@@ -1,2 +1,2 @@\n solidcore = { git = "https://github.com/tangency-labs/solidcore" }\n-a = 1\n+a = 2\n'
-        self.assertEqual(plan.select(self.root, ["Cargo.toml"], pin_diff=context), ([], False))
 
     def test_everything_runs_every_area(self):
         self.assertEqual(plan.select(self.root, [], everything=True), (["fillets", "shell", "ladder"], True))
@@ -163,12 +147,6 @@ class Real(unittest.TestCase):
         for g in globs:
             with self.subTest(glob=g):
                 self.assertTrue(any(t.match(sample(g)) for t in triggers), f"{g}: not under the workflow's trigger paths")
-
-    def test_the_workflow_triggers_on_the_pin_files(self):
-        triggers = [plan.glob_regex(g) for g in trigger_globs()["pull_request"]]
-        for f in plan.PIN_FILES:
-            with self.subTest(file=f):
-                self.assertTrue(any(t.match(f) for t in triggers), f"{f}: not under the workflow's trigger paths")
 
     def test_a_ui_change_runs_nothing(self):
         self.assertEqual(plan.select(ROOT, ["crates/ui-egui/src/app.rs", "docs/kernel-cases.md", "README.md"]), ([], False))

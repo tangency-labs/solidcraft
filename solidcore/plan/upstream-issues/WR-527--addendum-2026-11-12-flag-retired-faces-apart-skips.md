@@ -1,0 +1,5 @@
+Updates: WR-527
+
+- **Flag retired:** `Kernel::fixes.boolean_skips_faces_apart` is gone; its skips are the only path. `IntersectTopology` always skips a face pair whose boxes lie apart by the intersection tolerance (visiting only the pairs a box search finds when no intersection table is registered), and `MakeEdgeInFaceWithVU` on a plane always leaves in place an inner loop whose test point lies outside the new face's outer loop box.
+- **Why:** SolidCraft's preset ran with it on; `solidcore-ops` calls did not. Without it the planar region boolean of SolidCraft's perforated sheet (a plate less 1000 united r 2 holes) took 268 s on one core where the kernel's own copy, with the preset, took 9.6 s; with this flag alone ops took 9.4 s. `plan/findings/general--flag-pin-wr527-faces-apart-is-speed-only.md` records that it changes no result.
+- **Tests:** `tests/fork_edf7414_perforated_plate_work.rs` and `tests/boolean_2d_coincident_edges_work.rs` count the work on the default kernel. `tests/issue_1526_boolean_2d_faces_apart.rs` keeps its exact-area check; its comparison with the flag off is dropped.

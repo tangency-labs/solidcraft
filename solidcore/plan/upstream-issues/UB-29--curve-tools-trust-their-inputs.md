@@ -1,0 +1,11 @@
+#### UB-29. Curve tools trust their inputs
+- **Severity:** Crash / undefined behaviour
+- **Area:** NLib: curves, fitting, surfaces
+- **Location:** `NL_CrvTool.cpp:65` `N_CrvInsertKnot`, `:1369` `N_CrvRefine`, plus `N_CrvSplit`, `N_CrvDecomposeBez`, `N_CrvExtractCrvSeg`, `N_CrvRemoveKnotMaxErr`; `NL_SrfSymbol.cpp:4165` `N_CrossBoundDerivCrvNonRatSrf`.
+- **What happens:** No validation. Unclamped knots, multiplicity above `p`, out-of-range `ul`/`ur`, or a too-small surface index outside the arrays.
+- **Trigger:** `N_CrvInsertKnot` on a curve with an inner knot of multiplicity `p+1`.
+- **How found:** read during porting.
+- **Confirmed:** no.
+- **Severity:** crash/UB.
+- **Rust port:** Returns `InvalidInput`.
+- **Fuzz sweep trigger (2026-10-20):** `ul`/`ur` can be in range and the call still writes out of bounds. For `U = [0,0,0,0,1e-300,6,9,9,9,9]` (cubic, 6 control points), `N_CrvExtractCrvSeg(0, 1e-300)`: `N_BasisFindSpan` skips the too-short span, `ul = 0` lands in span 4, `spr - mlr < spl`, and upstream writes one knot past the `m + 1` it allocated for `UQ`. Found in the `nlib.srf_adv_p6` sweep. Its group may already list it, in which case keep one bullet. The Rust port returns `InvalidInput` (`crv_tool/p1.rs`, test `extract_seg_over_skipped_tiny_span_is_invalid_input`). Not confirmed.

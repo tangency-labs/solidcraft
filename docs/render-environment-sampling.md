@@ -51,12 +51,13 @@ and all other primaries refuse illumination; default Radiance RGB is not silentl
 relabeled sRGB. Supporting other primaries requires a separately validated gamut
 and white-point conversion. No clipping or invented conversion is used here.
 
-## CPU consumer source and remaining integration
+## CPU consumer and remaining qualification
 
-The new branch starts from actual upstream history. The separately qualified RT2
-source is not a commit parent or an executed validation result for this module.
-Integration must use its real prerequisite commit or an explicitly recorded
-source overlay before its own gates; no copied build outputs.
+At the original source handoff, the separately qualified RT2 source was not an
+executed validation result for this module. Integration required real prerequisite
+history or a recorded source overlay, without copied build outputs. Subsequent
+combined CPU renderer checks have executed for environment sampling and the
+actual image consumer; current combined workflow/native gates remain separate.
 
 1. Capture the admitted existing HDR source and preserve its original encoded allocation.
    Include encoded/decoded retained capacities, request clones and state in the
@@ -68,7 +69,7 @@ source overlay before its own gates; no copied build outputs.
    and creates short-lived borrowed views, without a self-referential borrow or a
    second decoded copy. Decoding validates corrected texels incrementally; internal
    views check shape and capacity without rescanning every texel for each sample.
-   Execution and visual acceptance remain pending.
+   Renderer decode/ownership/cancellation checks have executed; native visual acceptance remains pending.
 3. At an opaque hit, each environment direct sample creates one positive-minimum
    secondary visibility ray from the shared geometric offset. Reuse the existing
    resumable traversal cursor, charging every sample and traversal unit. Add visible
@@ -87,7 +88,9 @@ Original analytic tests generate RGBE bytes at runtime: constant map and PDF,
 single bright cell solid angle, black map, axes/rotation/seam/poles, cancellation
 and shared-budget failure, decoder corrections, unsupported primaries, hostile
 options/directions and an independent white-conductor hemispherical integral.
-They have NOT RUN. No external assets, dependencies or persistence fields added.
+The renderer analytic/input cases have executed. Engine source-removal and
+metadata contracts still need current combined qualification. This sampling
+helper itself adds no external assets, dependencies or persistence fields.
 
 Mathematical references only; no code or figures copied:
 [PBRT, Infinite Area Lights](https://pbr-book.org/4ed/Light_Sources/Infinite_Area_Lights)
@@ -95,7 +98,7 @@ for radiance and solid-angle estimators (its image mapping is different), and
 [W3C CSS Color 4, sRGB](https://www.w3.org/TR/css-color-4/#predefined-sRGB)
 for the sRGB/D65 primary coordinates and the distinction from encoded sRGB.
 
-## Opt-in request (not yet executed)
+## Opt-in request
 
 `render.preflight` / `render.start` accept an `environment` object alongside
 `integrator:"raytrace"`, for example:
@@ -120,16 +123,19 @@ The standalone HDR checkpoint has no reflection continuation. This isolated
 combined source connects secondary environment misses and explicitly selected
 metallic rough reflectors or ideal mirrors; see
 [the integration contract](render-hdr-reflections-integration.md). Mixed/diffuse
-rough HDR combinations and unknown optics fields refuse. No MIS, transmission,
-texture, emissive geometry, GPU or saved HDR environment is advertised. Existing
-saved environment controls remain refused; runtime controls are explicit above.
+rough HDR combinations and unknown optics fields refuse on that legacy route.
+This direct/reflection estimator itself adds no MIS or texture consumer. Saved
+CPU HDR references use the existing [resource contract](render-hdr-resources.md).
+Optional [opaque path lighting](render-cpu-path.md) adds matched light/BSDF MIS and
+BSDF-sampled mesh emission; certified dielectric transport remains a separate
+CPU route. These do not establish mixed glass/GI or general material-map support.
 
 Seven consumer source regressions complement the nine analytic/input regressions:
 an image-task PNG oracle and deterministic/background checks, decode/visibility
 cancellation and work exhaustion, native captured-source ownership, four-unit
 quanta, all traversal-to-shading transitions, engine rendering after source-file
 removal compared with unlit geometry, and capture-metadata lease release after
-PNG eviction. All 16 tests remain NOT RUN.
+PNG eviction. Renderer cases have executed; current combined engine contract and native workflow qualification remain separate.
 
 Consumer review repairs: environment cursor continuation charges traversal without
 an additional shading debit; each pixel quantum remains at most four shared work
@@ -141,4 +147,4 @@ retained there. Fixed metadata is charged to the Record-owned lease independentl
 of the PNG, while captured image storage stays under the work lease. Preflight
 includes retained request metadata in its combined per-job estimate. A regression
 withdraws the actual HDR file and compares lit geometry against the same unlit job.
-All tests remain NOT RUN.
+The renderer ownership and bounded-work cases have executed; the engine file-removal regression still needs current combined qualification.

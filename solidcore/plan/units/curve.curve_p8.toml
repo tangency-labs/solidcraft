@@ -1,0 +1,12 @@
+id = "curve.curve_p8"
+upstream = ["source/SMLib/src/SmCurve.cpp"]
+rust_module = "curve::curve::p8"
+depends_on = ["curve.curve_p1", "curve.curve_p2", "curve.curve_p4", "curve.curve_p6", "curve.curve_p7", "geom.a_object", "geom.extent1d", "geom.extent3d", "geom.object", "geom.solution_array", "geom.tol", "geom.vector3d"]
+soft_depends_on = ["curve.curve_cache", "geom.global_solver", "geom.tree"]
+est_lines = 1670
+layer = 20
+tests = ["prog_test:my_test_surface_closest_point", "prog_test:my_test_drop_point", "prog_test:my_test_matrix", "prog_test:my_test_reversed_line_join", "SM_API_test:TestSmCreateRectangle", "SM_API_test:TestSmCreateRegularPolygon"]
+status = "green"
+claimed_by = "swarm-curve.curve_p8-a1"
+claimed_at = "2026-10-13T05:23:28Z"
+notes = "main CI e33985411 (2026-10-23): PASS curve.curve_p8 cases=3068 passed=3068 failed=0 deferred=0. GREEN (promoted by curve.curve_p5: 3058 cases, 0 deferred after its stubs were wired); PARTIAL: difftest 3058 cases (58 fixture: SM_API_test TestSmCreateRectangle / TestSmCreateRegularPolygon edge pairs and my_test_reversed_line_join line pairs (with and without the coincidence check), edge cases: line/line and B-spline line crossings, overlaps, self intersections, polyline vertex touch, parabola tangency, parallel gaps at the tolerance limit, coincident cubics, degenerate Hermite, looping self intersection, disjoint boxes + 3000 generated: crossings, tangent lines, coincident partners, self intersections, closed and looping curves), 1968 pass bit-identical (max_rel_err 0), 1090 deferred (curve.curve_p5 1090: SmCCIntersectENFO::Evaluate, sm_IsPointSolutionAcrossClosedSeamBoundary, SmCurve::IsArc); --perturb SENSITIVE; wired UNPORTED(curve.curve_p8) in nurbs.b_spline_curve_p3 (TrimGap); 1 fns; largest: SmCurve::GlobalCurveIntersect; unit-SCC #22 (220 units); 317 upstream test entry points reach this unit"
