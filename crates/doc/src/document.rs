@@ -3470,6 +3470,18 @@ pub struct SpurGear {
     pub backlash: f64,
     /// Points along each flank.
     pub flank_points: u32,
+    /// Clearance coefficient (0.25 unless saved otherwise).
+    #[serde(default = "default_gear_clearance", skip_serializing_if = "is_default_gear_clearance")]
+    pub clearance: f64,
+    /// Radius rounding where a flank meets the root (mm); 0 for sharp.
+    #[serde(default, skip_serializing_if = "is_zero_f64")]
+    pub root_fillet: f64,
+    /// Radius rounding where a flank meets the tip (mm); 0 for sharp.
+    #[serde(default, skip_serializing_if = "is_zero_f64")]
+    pub tip_round: f64,
+    /// The backlash thickens the teeth instead of thinning them.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub backlash_thicker: bool,
     /// An internal gear: a ring with its teeth pointing inward.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub internal: bool,
@@ -3492,6 +3504,15 @@ pub struct SpurGear {
 
 fn is_zero_f64(v: &f64) -> bool {
     *v == 0.0
+}
+
+/// The clearance every gear saved before it could be set was built with.
+fn default_gear_clearance() -> f64 {
+    0.25
+}
+
+fn is_default_gear_clearance(v: &f64) -> bool {
+    *v == 0.25
 }
 
 /// A component whose contents come from another design file (Insert Design): where that file

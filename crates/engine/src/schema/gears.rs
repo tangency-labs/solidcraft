@@ -28,6 +28,18 @@ pub struct GearInsertParams {
     /// more closely and build more slowly.
     #[serde(default)]
     pub flank_points: Option<u32>,
+    /// Clearance coefficient from 0 to 0.6 of the module (default 0.25): the roots lie `module × (1 + clearance - profile_shift)` inside the pitch circle.
+    #[serde(default)]
+    pub clearance: Option<f64>,
+    /// Radius in millimetres rounding each corner where a flank meets the root, from 0 to the module (default 0: sharp).
+    #[serde(default)]
+    pub root_fillet: Option<f64>,
+    /// Radius in millimetres rounding each corner where a flank meets the tip, from 0 to the module (default 0: sharp).
+    #[serde(default)]
+    pub tip_round: Option<f64>,
+    /// `thinner` (default): the backlash is taken off the teeth. `thicker`: it is added to them, for a mate that carries the whole clearance.
+    #[serde(default)]
+    pub backlash_direction: Option<String>,
     /// An internal gear: a ring whose teeth point inward (default false). Profile shift is not used.
     #[serde(default)]
     pub internal: Option<bool>,
@@ -78,6 +90,18 @@ pub struct GearEditParams {
     /// New backlash in millimetres.
     #[serde(default)]
     pub backlash: Option<f64>,
+    /// New clearance coefficient from 0 to 0.6 of the module : the roots lie `module × (1 + clearance - profile_shift)` inside the pitch circle.
+    #[serde(default)]
+    pub clearance: Option<f64>,
+    /// New radius in millimetres rounding each corner where a flank meets the root, from 0 to the module.
+    #[serde(default)]
+    pub root_fillet: Option<f64>,
+    /// New radius in millimetres rounding each corner where a flank meets the tip, from 0 to the module.
+    #[serde(default)]
+    pub tip_round: Option<f64>,
+    /// `thinner`: the backlash is taken off the teeth. `thicker`: it is added to them, for a mate that carries the whole clearance.
+    #[serde(default)]
+    pub backlash_direction: Option<String>,
     /// New points per flank, 2 to 64.
     #[serde(default)]
     pub flank_points: Option<u32>,

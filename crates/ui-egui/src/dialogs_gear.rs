@@ -20,6 +20,11 @@ pub struct Gear {
     pub face_width: f64,
     pub profile_shift: f64,
     pub backlash: f64,
+    pub backlash_thicker: bool,
+    pub clearance: f64,
+    pub root_fillet: f64,
+    pub tip_round: f64,
+    pub flank_points: f64,
     pub rim_thickness: f64,
     pub bore_diameter: f64,
     pub bore_offset: f64,
@@ -39,6 +44,11 @@ impl Gear {
             face_width: 20.0,
             profile_shift: 0.0,
             backlash: 0.0,
+            backlash_thicker: false,
+            clearance: 0.25,
+            root_fillet: 0.0,
+            tip_round: 0.0,
+            flank_points: 8.0,
             rim_thickness: 4.0,
             bore_diameter: 0.0,
             bore_offset: 0.0,
@@ -57,6 +67,11 @@ impl Gear {
             face_width: g.face_width,
             profile_shift: g.profile_shift,
             backlash: g.backlash,
+            backlash_thicker: g.backlash_thicker,
+            clearance: g.clearance,
+            root_fillet: g.root_fillet,
+            tip_round: g.tip_round,
+            flank_points: f64::from(g.flank_points),
             rim_thickness: if g.rim_thickness > 0.0 { g.rim_thickness } else { g.module * 2.0 },
             bore_diameter: g.bore_diameter,
             bore_offset: g.bore_offset,
@@ -124,6 +139,16 @@ pub fn rows(ui: &mut egui::Ui, g: &mut Gear) {
         number(ui, "gear.profile_shift", "dialog:gear:profile_shift", &mut g.profile_shift, -2.0..=2.0, 0.05, "");
     }
     number(ui, "gear.backlash", "dialog:gear:backlash", &mut g.backlash, 0.0..=100.0, 0.01, " mm");
+    if g.backlash > 0.0 {
+        form_row(ui, "", |ui| {
+            let r = crate::ui_kit::checkbox(ui, solidcraft_ui_text::tr("gear.backlash_thicker"), &mut g.backlash_thicker);
+            crate::scenario::publish_handle("dialog:gear:backlash_thicker", r.rect.center());
+        });
+    }
+    number(ui, "gear.clearance", "dialog:gear:clearance", &mut g.clearance, 0.0..=0.6, 0.01, "");
+    number(ui, "gear.root_fillet", "dialog:gear:root_fillet", &mut g.root_fillet, 0.0..=1000.0, 0.05, " mm");
+    number(ui, "gear.tip_round", "dialog:gear:tip_round", &mut g.tip_round, 0.0..=1000.0, 0.05, " mm");
+    number(ui, "gear.flank_points", "dialog:gear:flank_points", &mut g.flank_points, 2.0..=64.0, 1.0, "");
     number(ui, "gear.helix_angle", "dialog:gear:helix_angle", &mut g.helix_angle, -45.0..=45.0, 0.5, "\u{b0}");
     if g.internal {
         number(ui, "gear.rim_thickness", "dialog:gear:rim_thickness", &mut g.rim_thickness, 0.001..=1e6, 0.5, " mm");
@@ -145,7 +170,7 @@ pub fn rows(ui: &mut egui::Ui, g: &mut Gear) {
 /// before anything is inserted.
 fn diameters(ui: &mut egui::Ui, g: &Gear) {
     let teeth = g.teeth.round().clamp(0.0, 1e6) as u32;
-    let Some(d) = solidcraft_engine::cmd::gear_diameters(g.module, teeth, g.pressure_angle, g.profile_shift, g.internal) else {
+    let Some(d) = solidcraft_engine::cmd::gear_diameters(g.module, teeth, g.pressure_angle, g.profile_shift, g.clearance, g.internal) else {
         return;
     };
     for (key, handle, v) in [
@@ -171,6 +196,10 @@ pub fn commands(g: &Gear) -> Result<Vec<(String, Value)>, String> {
         g.face_width,
         g.profile_shift,
         g.backlash,
+        g.clearance,
+        g.root_fillet,
+        g.tip_round,
+        g.flank_points,
         g.rim_thickness,
         g.bore_diameter,
         g.bore_offset,
@@ -187,6 +216,11 @@ pub fn commands(g: &Gear) -> Result<Vec<(String, Value)>, String> {
         "pressure_angle": g.pressure_angle,
         "face_width": g.face_width,
         "backlash": g.backlash,
+        "backlash_direction": if g.backlash_thicker && g.backlash > 0.0 { "thicker" } else { "thinner" },
+        "clearance": g.clearance,
+        "root_fillet": g.root_fillet,
+        "tip_round": g.tip_round,
+        "flank_points": g.flank_points.round().clamp(0.0, 1e6) as u32,
         "helix_angle": g.helix_angle,
         "internal": g.internal,
     });
@@ -240,6 +274,33 @@ mod tests {
         h.app.run("edit.undo", json!({})).unwrap();
         h.settle();
         assert!(h.app.session.doc.gears.is_empty(), "one undo removes the gear");
+    }
+
+    /// The form carries clearance, the two roundings, the backlash direction and the profile accuracy
+    /// to the gear, and Edit Gear brings them back.
+    #[test]
+    fn the_form_sets_clearance_roundings_backlash_direction_and_accuracy() {
+        let mut h = Harness::new();
+        h.app.start("gear.insert");
+        h.frames(3);
+        if let Some(Kind::Gear(g)) = h.app.dialog.as_mut().map(|d| &mut d.kind) {
+            (g.module, g.teeth, g.backlash, g.backlash_thicker) = (2.0, 24.0, 0.1, true);
+            (g.clearance, g.root_fillet, g.tip_round, g.flank_points) = (0.3, 0.5, 0.2, 12.0);
+        }
+        h.frames(2);
+        for k in ["clearance", "root_fillet", "tip_round", "flank_points", "backlash_thicker"] {
+            assert!(handle_at(&format!("dialog:gear:{k}")).is_some(), "{k}");
+        }
+        h.step(&json!({"key": "Enter"})).unwrap();
+        h.settle();
+        assert!(h.app.dialog.is_none(), "{:?}", h.app.dialog.as_ref().and_then(|d| d.error.clone()));
+        let (component, saved) = gear(&h).expect("a gear is saved");
+        assert_eq!((saved.clearance, saved.root_fillet, saved.tip_round, saved.flank_points, saved.backlash_thicker), (0.3, 0.5, 0.2, 12, true));
+        h.app.tree.picked_components = vec![component];
+        h.app.start("gear.edit");
+        h.frames(3);
+        let Some(Kind::Gear(g)) = h.app.dialog.as_ref().map(|d| d.kind.clone()) else { panic!("no gear form") };
+        assert_eq!((g.clearance, g.root_fillet, g.tip_round, g.flank_points, g.backlash_thicker), (0.3, 0.5, 0.2, 12.0, true));
     }
 
     /// Edit Gear starts from the selected gear's saved values and rebuilds it in place.

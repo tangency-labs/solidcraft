@@ -112,12 +112,12 @@ fn the_form_diameters_are_the_ones_the_command_reports() {
     let mut s = Session::default();
     for (internal, shift) in [(false, 0.3), (true, 0.0)] {
         let r = run(&mut s, "gear.insert", json!({"module": 2.5, "teeth": 24, "pressure_angle": 22, "profile_shift": shift, "internal": internal}));
-        let d = crate::cmd::gear_diameters(2.5, 24, 22.0, shift, internal).expect("diameters");
+        let d = crate::cmd::gear_diameters(2.5, 24, 22.0, shift, 0.25, internal).expect("diameters");
         for (got, key) in d.iter().zip(["pitch_diameter", "base_diameter", "tip_diameter", "root_diameter"]) {
             assert!((got - r[key].as_f64().unwrap_or(f64::NAN)).abs() < 1e-9, "{internal} {key}");
         }
     }
-    assert!(crate::cmd::gear_diameters(f64::NAN, 20, 20.0, 0.0, false).is_none());
+    assert!(crate::cmd::gear_diameters(f64::NAN, 20, 20.0, 0.0, 0.25, false).is_none());
 }
 
 #[test]
@@ -296,4 +296,118 @@ fn helical_and_offset_values_are_kept_through_save_and_refused_when_hostile() {
         assert!(s.execute("gear.insert", &p).is_err(), "{p}");
     }
     assert_eq!(volume(&mut s), 0.0);
+}
+
+fn root_diameter(r: &Value) -> f64 {
+    r["root_diameter"].as_f64().unwrap_or(0.0)
+}
+
+#[test]
+fn clearance_sets_how_deep_the_roots_lie_and_defaults_to_the_standard() {
+    let mut s = Session::default();
+    let std = run(&mut s, "gear.insert", json!({"module": 2, "teeth": 20, "face_width": 10}));
+    let deep = run(&mut s, "gear.insert", json!({"module": 2, "teeth": 20, "face_width": 10, "clearance": 0.4}));
+    // Root radius is pitch radius minus module times (1 + clearance): 20 - 2.5 and 20 - 2.8.
+    assert!((root_diameter(&std) - 35.0).abs() < 1e-9, "{}", root_diameter(&std));
+    assert!((root_diameter(&deep) - 34.4).abs() < 1e-9, "{}", root_diameter(&deep));
+    let comp = deep["component"].as_u64().unwrap_or(0);
+    assert_eq!(s.doc.gears[&comp].clearance, 0.4);
+    // An edit can change it back, and a gear saved before clearance existed reads as 0.25.
+    let back = run(&mut s, "gear.edit", json!({"component": comp, "clearance": 0.25}));
+    assert!((root_diameter(&back) - 35.0).abs() < 1e-9);
+    let old: solidcraft_doc::SpurGear =
+        serde_json::from_value(json!({"module": 2.0, "teeth": 20, "pressure_angle": 20.0, "face_width": 10.0, "flank_points": 8}))
+            .expect("an older gear reads");
+    assert_eq!((old.clearance, old.root_fillet, old.tip_round, old.backlash_thicker), (0.25, 0.0, 0.0, false));
+    let saved = serde_json::to_value(&s.doc.gears[&comp]).expect("saves");
+    assert!(saved.get("clearance").is_none() && saved.get("root_fillet").is_none(), "defaults are not written: {saved}");
+}
+
+#[test]
+fn a_root_fillet_adds_material_and_a_tip_rounding_takes_it_away() {
+    let mut s = Session::default();
+    let base = json!({"module": 3, "teeth": 24, "face_width": 10, "flank_points": 16});
+    let with = |extra: Value| {
+        let mut p = base.clone();
+        if let (Some(p), Some(e)) = (p.as_object_mut(), extra.as_object()) {
+            p.extend(e.clone());
+        }
+        p
+    };
+    let sharp = run(&mut s, "gear.insert", base.clone());
+    let sharp_v = volume(&mut s);
+    run(&mut s, "edit.undo", json!({}));
+    let _ = sharp;
+    run(&mut s, "gear.insert", with(json!({"root_fillet": 0.8})));
+    let filleted = volume(&mut s);
+    run(&mut s, "edit.undo", json!({}));
+    run(&mut s, "gear.insert", with(json!({"tip_round": 0.5})));
+    let rounded = volume(&mut s);
+    assert!(filleted > sharp_v + 1.0 && filleted < sharp_v * 1.02, "{sharp_v} {filleted}");
+    assert!(rounded < sharp_v - 1.0 && rounded > sharp_v * 0.98, "{sharp_v} {rounded}");
+}
+
+#[test]
+fn an_internal_gear_takes_a_root_fillet_and_a_tip_rounding_too() {
+    let mut s = Session::default();
+    let base = json!({"module": 2, "teeth": 40, "face_width": 8, "internal": true, "flank_points": 16});
+    run(&mut s, "gear.insert", base.clone());
+    let sharp = volume(&mut s);
+    run(&mut s, "edit.undo", json!({}));
+    let mut p = base;
+    p["root_fillet"] = json!(0.5);
+    p["tip_round"] = json!(0.3);
+    run(&mut s, "gear.insert", p);
+    let rounded = volume(&mut s);
+    // The ring's tooth roots lie outside its space: a fillet there is material removed from the ring,
+    // and rounding the tips is material removed too.
+    assert!(rounded != sharp && (rounded - sharp).abs() < sharp * 0.03, "{sharp} {rounded}");
+}
+
+#[test]
+fn the_backlash_direction_thins_or_thickens_the_teeth() {
+    let mut s = Session::default();
+    let v = |s: &mut Session, extra: Value| {
+        let mut p = json!({"module": 2, "teeth": 24, "face_width": 10});
+        if let (Some(p), Some(e)) = (p.as_object_mut(), extra.as_object()) {
+            p.extend(e.clone());
+        }
+        run(s, "gear.insert", p);
+        let x = volume(s);
+        run(s, "edit.undo", json!({}));
+        x
+    };
+    let none = v(&mut s, json!({}));
+    let thin = v(&mut s, json!({"backlash": 0.2}));
+    let explicit = v(&mut s, json!({"backlash": 0.2, "backlash_direction": "thinner"}));
+    let thick = v(&mut s, json!({"backlash": 0.2, "backlash_direction": "thicker"}));
+    assert!(thin < none && none < thick, "{thin} {none} {thick}");
+    assert!((thin - explicit).abs() < 1e-9);
+    // Equal and opposite on the pitch circle: the two are as far from the plain gear as each other.
+    assert!(((none - thin) - (thick - none)).abs() < 0.05 * (none - thin), "{thin} {none} {thick}");
+}
+
+#[test]
+fn hostile_clearance_fillet_and_direction_values_are_refused() {
+    let mut s = Session::default();
+    let ok = json!({"module": 2, "teeth": 20, "face_width": 10});
+    for extra in [
+        json!({"clearance": -0.1}),
+        json!({"clearance": 0.7}),
+        json!({"clearance": 1e300}),
+        json!({"root_fillet": -1}),
+        json!({"root_fillet": 2.5}),
+        json!({"tip_round": 2.5}),
+        json!({"root_fillet": 2.0, "flank_points": 2}),
+        json!({"backlash_direction": "sideways"}),
+        json!({"backlash_direction": 3}),
+        json!({"backlash": 3.1, "backlash_direction": "thicker"}),
+    ] {
+        let mut p = ok.clone();
+        if let (Some(p), Some(e)) = (p.as_object_mut(), extra.as_object()) {
+            p.extend(e.clone());
+        }
+        assert!(s.execute("gear.insert", &p).is_err(), "{extra}");
+    }
+    assert!(s.doc.gears.is_empty(), "a refused gear leaves nothing behind");
 }
