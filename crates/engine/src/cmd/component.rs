@@ -271,7 +271,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .icon("ground")
         .contract(&GROUND_CONTRACT)
         .output(output_schema_for::<GroundResult>)
-        .params("occurrence; grounded?: bool (default toggles)"),
+        .params("occurrence; grounded?: bool (default toggles) → grounded; transform: placement within its parent; moved: names of occurrences whose world placement changed; errors, conflicts: joint issues in the assembly solve"),
     CommandSpec::new("occurrence.reparent", "Move to Component", reparent::reparent).icon("move").params(
         "occurrence; path?: exact placement; parent: component id or name (0 or \"root\" for the design); parent_path?: the parent's \
          placement to place it by (default: its only one, else the active one; every instance of the parent gets it). The placement \
@@ -1115,7 +1115,21 @@ fn ground(s: &mut Session, p: &Value) -> Result<Value> {
     let o = s.doc_mut().occurrences.iter_mut().find(|o| o.id == id).ok_or_else(|| bad(cmd, "occurrence"))?;
     o.grounded = want.unwrap_or(!o.grounded);
     let g = o.grounded;
-    reply(GroundResult { occurrence: id, grounded: g, param_warnings: Vec::new() })
+    let before = super::motion::positions(s);
+    // Even a repeated grounded:false request must report existing joint issues. Use the normal
+    // refresh loop so features that read a changed placement are evaluated before the reply.
+    s.joints_settled = None;
+    let solved = s.refresh_with_joint_report().unwrap_or_default();
+    let moved = super::motion::moved(&before, &super::motion::positions(s)).map(|(name, _)| name.clone()).collect();
+    let transform = s.doc.occurrences.iter().find(|o| o.id == id).ok_or_else(|| bad(cmd, "occurrence"))?.transform;
+    reply(GroundResult {
+        occurrence: id,
+        grounded: g,
+        transform,
+        moved,
+        solved: super::joints::solve_report(&solved, &json!({"quiet": true})),
+        param_warnings: Vec::new(),
+    })
 }
 
 fn capture(s: &mut Session, _p: &Value) -> Result<Value> {

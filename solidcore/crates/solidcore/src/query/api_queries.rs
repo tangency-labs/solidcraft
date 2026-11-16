@@ -2522,6 +2522,95 @@ mod tests {
         wire(k, curve, interval)
     }
 
+    /// The closest points of the arc of `radius` about `center` over the angles `from..to`
+    /// (degrees from +X, counterclockwise; the kernel's exact circle segment, over its whole
+    /// interval) and a whole analytic circle of `whole_radius` about (0, 0, `z`), both in XY
+    /// planes ([`closest_to_members`]).
+    fn arc_to_circle(
+        center: Point3,
+        radius: f64,
+        [from, to]: [f64; 2],
+        whole_radius: f64,
+        z: f64,
+    ) -> MembersClosest {
+        let mut k = Kernel::default();
+        let circle = crate::primitive::api_curves::create_analytic_circle(
+            &k,
+            Point3::new(0.0, 0.0, z),
+            whole_radius,
+        )
+        .unwrap();
+        let (mut b, e) = whole(&mut k, Curve::from(circle));
+        let probe = Curve::from(
+            crate::primitive::api_curves::create_arc(center, radius, from, to).unwrap(),
+        );
+        let interval = probe.natural_interval();
+        // the arc runs from its `from` end to its `to` end
+        for (t, deg) in [(interval.min(), from), (interval.max(), to)] {
+            let end = probe.evaluate_point(&k, t).unwrap();
+            let (cos, sin) = (deg.to_radians().cos(), deg.to_radians().sin());
+            let want = center + Vec3::new(radius * cos, radius * sin, 0.0);
+            assert!(end.distance(want) <= 1e-9, "{end:?} {want:?}");
+        }
+        closest_to_members(
+            &mut k,
+            &mut b,
+            BrepId::from_index(0),
+            &[],
+            &[e],
+            Probe::Curve {
+                curve: &probe,
+                interval,
+            },
+        )
+        .unwrap()
+    }
+
+    /// A half circle of radius 35 about the centre of a circle of radius 20 is 15 from it,
+    /// at points on both.
+    #[test]
+    fn closest_to_members_of_concentric_circles_is_their_radii_apart() {
+        let c = arc_to_circle(Point3::new(0.0, 0.0, 5.0), 35.0, [0.0, 180.0], 20.0, 5.0);
+        assert!((c.distance - 15.0).abs() <= 1e-9, "{c:?}");
+        let radius = |p: Point3| p.x.hypot(p.y);
+        assert!((radius(c.on_probe) - 35.0).abs() <= 1e-9, "{c:?}");
+        assert!((radius(c.on_members) - 20.0).abs() <= 1e-9, "{c:?}");
+        assert!(c.on_probe.y >= -1e-9, "{c:?}");
+    }
+
+    /// The radius 35 arc moved 2 up, over its lower left quarter, against the radius 20 circle:
+    /// a point P of the circle is 35 - |P - C| from the arc's circle, largest |P - C| at
+    /// P = (0, -20), whose nearest arc point is the arc's end (0, -33): 13 apart.
+    #[test]
+    fn closest_to_members_of_shifted_circles_is_at_their_lowest_points() {
+        let c = arc_to_circle(Point3::new(0.0, 2.0, 0.0), 35.0, [180.0, 270.0], 20.0, 0.0);
+        assert!((c.distance - 13.0).abs() <= 1e-9, "{c:?}");
+        assert!(
+            c.on_members.distance(Point3::new(0.0, -20.0, 0.0)) <= 1e-9,
+            "{c:?}"
+        );
+        assert!(
+            c.on_probe.distance(Point3::new(0.0, -33.0, 0.0)) <= 1e-9,
+            "{c:?}"
+        );
+    }
+
+    /// A radius 10 arc about (40, 0) over 0°..170° against the radius 10 circle about the
+    /// origin: the circles come nearest at 180° on the arc's circle, past its end, and a point
+    /// at angle t of the arc is sqrt(1700 + 800 cos t) - 10 from the circle, least at the end
+    /// E (t = 170°), with the circle's point 10 E / |E|.
+    #[test]
+    fn closest_to_members_of_an_arc_past_its_end_is_at_the_end() {
+        let end = 170f64.to_radians();
+        let c = arc_to_circle(Point3::new(40.0, 0.0, 0.0), 10.0, [0.0, 170.0], 10.0, 0.0);
+        let e = Point3::new(40.0 + 10.0 * end.cos(), 10.0 * end.sin(), 0.0);
+        let reach = (1700.0 + 800.0 * end.cos()).sqrt();
+        assert!((c.distance - (reach - 10.0)).abs() <= 1e-9, "{c:?}");
+        assert!(c.on_probe.distance(e) <= 1e-9, "{c:?}");
+        let near = Point3::new(e.x * 10.0 / reach, e.y * 10.0 / reach, 0.0);
+        assert!(c.on_members.distance(near) <= 1e-9, "{c:?}");
+    }
+
     /// Each crossing's point is on its edge at its parameter, to 1e-9.
     fn on_the_edge(k: &Kernel, b: &Brep, e: EdgeId, crossings: &[PlaneCrossing]) {
         let curve = b.edge(e).unwrap().curve.clone().unwrap();
