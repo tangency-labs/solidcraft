@@ -23,8 +23,15 @@ use crate::{
     preview::{Built, Colors, Layer},
 };
 
-/// Most triangles moved this way each frame; beyond them the scratch-design preview runs.
+/// Most triangles built moved here at each change of the move, where the view draws no layer
+/// ([`layered`]) and the scratch-design preview can run beside the window instead; a layer builds
+/// its triangles once, so it has no such limit. In the browser the scratch design is evaluated
+/// on the window thread at every change (`preview::spawn`), which costs more than building the
+/// same triangles moved here, so the browser always builds them here (#17804).
 const MAX_TRIANGLES: usize = 2_000_000;
+
+/// Whether the scratch-design preview runs beside the window rather than on it.
+const SCRATCH_BESIDE_WINDOW: bool = cfg!(not(target_arch = "wasm32"));
 
 /// The most two bodies' motions may differ (per matrix entry, millimetres and rotation alike)
 /// to be drawn as one layer.
@@ -52,6 +59,8 @@ struct Cached {
     revision: u64,
     names: Vec<String>,
     meshes: Vec<Arc<Mesh>>,
+    /// The triangles of `meshes`.
+    triangles: usize,
     frames: Vec<Mat>,
     /// This cache and no other ([`CACHES`]): what a layer's scenes are built from.
     serial: u64,
@@ -187,7 +196,9 @@ impl MovePreview {
     }
 
     /// The preview of a `solid.move` (or its edit), or `None` to leave it to the scratch design:
-    /// another command, values that don't evaluate, a body not shown, or too many triangles.
+    /// another command, values that don't evaluate, a body not shown, or, built moved here
+    /// rather than drawn as a layer, more than [`MAX_TRIANGLES`] where the scratch design runs
+    /// beside the window.
     pub(crate) fn compute(&mut self, app: &SolveApp, commands: &[(String, Value)], colors: Colors) -> Option<Result<Built, String>> {
         let [(id, params)] = commands else { return None };
         let params = match id.as_str() {
@@ -266,9 +277,7 @@ impl MovePreview {
         {
             let state = crate::open_meshing::session_world(&app.session);
             let meshes: Vec<Arc<Mesh>> = names.iter().map(|n| state.body(n).map(|b| b.mesh())).collect::<Option<_>>()?;
-            if meshes.iter().map(|m| m.triangles.len()).sum::<usize>() > MAX_TRIANGLES {
-                return None;
-            }
+            let triangles = meshes.iter().map(|m| m.triangles.len()).sum();
             // A component's copy moves in the world (`occurrence.move`), so its bodies take the world's.
             let mut frames = placed_frames(app, &bodies);
             frames.resize(names.len(), IDENTITY);
@@ -277,6 +286,7 @@ impl MovePreview {
                 revision: app.session.revision,
                 names: names.clone(),
                 meshes,
+                triangles,
                 frames,
                 serial: CACHES.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
                 rest: None,
@@ -328,6 +338,9 @@ impl MovePreview {
             let scenes = (app.preview.layer_shown() != Some(key)).then(|| cache.rest_scenes(colors, copy));
             let bounds = cache.moved_bounds(&motion);
             return Some(Ok(built(GpuScene::default(), bounds, Some(Layer { key, scenes, motion }))));
+        }
+        if cache.triangles > MAX_TRIANGLES && SCRATCH_BESIDE_WINDOW {
+            return None;
         }
         let mut scene = GpuScene::default();
         let removed = scene.color(colors.removed);
@@ -479,6 +492,7 @@ mod tests {
             revision: app.session.revision,
             names: Vec::new(),
             meshes: Vec::new(),
+            triangles: 0,
             frames: Vec::new(),
             serial: 0,
             rest: None,

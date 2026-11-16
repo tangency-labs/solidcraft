@@ -4790,6 +4790,8 @@ fn highlight_geometry_key(app: &SolveApp) -> u64 {
     } else {
         crate::dialogs_move::chained(app).map(|(_, c)| c.iter().flatten().map(|v| v.to_bits()).collect::<Vec<_>>()).hash(&mut h);
     }
+    // And whether the preview draws them, so they are not lit whole (`build_highlight_with_projection`).
+    crate::dialogs_move::drawn_as_layer(app).hash(&mut h);
     app.origin_visible().hash(&mut h);
     app.picking_plane().hash(&mut h);
     app.preferences.reference_geometry_through_bodies.hash(&mut h);
@@ -5163,6 +5165,12 @@ fn build_highlight_with_projection(app: &SolveApp, projection: impl FnOnce() -> 
     let chained = live.as_ref().filter(|_| !dragging);
     let carry = |b: &solidcraft_engine::doc::ModelBody| chain_of(chained, &b.name);
     let replaced = |name: &str| moving(name) || (app.preview.effective_replaced().iter().any(|n| n == name) && chain_of(chained, name).is_none());
+    // Nor is a moved body lit whole while the preview draws it as a layer moved on the GPU: the
+    // layer shows it where the move puts it, and lighting it copied and moved its every triangle
+    // again at each change of the move, seconds a keystroke on a large assembly (#17804). Its
+    // picked faces, edges and points are still lit where they stand.
+    let as_layer = crate::dialogs_move::drawn_as_layer(app);
+    let lit_whole = |name: &str| !replaced(name) && !(as_layer && chain_of(chained, name).is_some());
     let shown = |b: &solidcraft_engine::doc::ModelBody| carried_mesh(carry(b), if product { b.mesh() } else { shown_mesh(app, b, &active_bodies) });
     let drawn = |b: &solidcraft_engine::doc::ModelBody| carried_mesh(carry(b), drawn_mesh(app, b));
     let items = app.highlighted();
@@ -5436,7 +5444,7 @@ fn build_highlight_with_projection(app: &SolveApp, projection: impl FnOnce() -> 
                 // As a face: lit over a live preview, the old body fought with it in slivers.
                 if let Some(b) = by_name.get(name)
                     && app.body_visible(name)
-                    && !replaced(name)
+                    && lit_whole(name)
                 {
                     if let Some(m) = outlines.then(|| shown(b)).filter(|mesh| has_pickable_outline(mesh)) {
                         for (_, e) in m.edges.iter().enumerate().filter(|(ei, _)| m.edge_pickable(*ei)) {
