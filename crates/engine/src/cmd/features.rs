@@ -109,7 +109,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .from_selection(super::model_selection::blend_edges)
         .contract(&FILLET_CONTRACT)
         .output(output_schema_for::<FilletResult>)
-        .params("edges: [[x,y,z] point on edge | {body, index}] ; radius: expr; tangent_chain?: bool (default true: each picked edge's tangent chain is rounded with it; false: exactly the picked edges); body?: the body the edges are on (without it, each point is looked up on every placed body, shown or hidden, and a point on edges of 2 bodies is refused, naming them); type?: constant|curvature (alias g2: curvature-continuous quintic between planar faces along straight edges, one planar end face at each end (including sloped ends); radius sets the equivalent circular setback, not constant curvature; exact fit only)|chord (radius is the width across)|variable (radius at the end nearest start, radius2 at the other; one end may be 0, where the round closes to the corner)|spline (the radius along the edge is a clamped B-spline from the end nearest start: radius is its first control radius, radii the rest, knots its knot vector from 0 to 1; one end may be 0); radius2?; start?: [x,y,z]; radii?: [expr, …]; knots?: [number, …]; mid?: [[position 0…1 from start, radius expr], …] (variable radii between the ends); smooth?: bool (smooth instead of straight between the radii); corner?: rolling|g2 (rolling, the default: the corners where three blended edges meet are pieces of the rolling ball's sphere, tangent to each blend; a curvature round's corners are always g2 patches, between its own sections; g2: each corner where three or more rounded edges meet, and every edge there is rounded, is set back (1.5 × the radius along each edge unless `setbacks` names it) and filled with a patch meeting the rounds and the faces round it to the second order (curvature-continuous seams, clear of the points where a round's section ends on a face), constant-radius exact fillets only, refused where it cannot be built); setbacks?: [{vertex: [x,y,z], distance: expr}, …] (corner setbacks: the corner at the vertex nearest `vertex`, where every edge meeting it is rounded, starts its patch `distance` along each of those edges from the vertex, past where the rounds would meet (past the radius at a square corner), so the rounds blend through a larger patch; one distance for all of a corner's edges; constant-radius exact fillets only; with `corner: g2`, the G2 patch's corners); turn?: mitre|swept (where two rounds turn round a sharp, straight, convex side edge square to both on a plane, such as the rounds along a boss's base at its upright edges: mitre, the default, runs them on to meet in a mitre; swept ends them at the side edge and fills the corner with their section revolved about it, a torus; swept takes type: constant, corner: rolling, no setbacks and fit: exact or reduce, and is refused with the reason where the rounds are unequal or the side edge is concave, curved or tangent); fit?: exact|reduce|taper (exact, the default: a radius too large for the geometry around the edges is refused, naming the largest that fits; reduce: where it doesn't fit it is reduced to the largest that does, one radius for edges sharing a face; the smallest used is returned as `radius_applied`, each edge's as `radii_applied: [{edge: [x,y,z], radius}]`, and noted in the feature's warning; taper: along each straight edge between planar faces where it doesn't fit, the radius follows the room there as a smooth spline, down to 0 where a face closes to a point, noted in the feature's warning)"),
+        .params("edges: [[x,y,z] point on edge | {body, index}] ; radius: expr; tangent_chain?: bool (default true: each picked edge's tangent chain is rounded with it; false: exactly the picked edges); body?: the body the edges are on (without it, each point is looked up on every placed body, shown or hidden, and a point on edges of 2 bodies is refused, naming them); type?: constant|curvature (alias g2: curvature-continuous quintic between planar faces along straight edges, one planar end face at each end (including sloped ends); radius sets the equivalent circular setback, not constant curvature; exact fit only)|chord (radius is the width across)|variable (radius at the end nearest start, radius2 at the other; one end may be 0, where the round closes to the corner)|spline (the radius along the edge is a clamped B-spline from the end nearest start: radius is its first control radius, radii the rest, knots its knot vector from 0 to 1; one end may be 0); radius2?; start?: [x,y,z]; radii?: [expr, …]; knots?: [number, …]; mid?: [[position 0…1 from start, radius expr], …] (variable radii between the ends); smooth?: bool (smooth instead of straight between the radii); corner?: rolling|g2 (rolling, the default: the corners where three blended edges meet are pieces of the rolling ball's sphere, tangent to each blend; a curvature round's corners are always g2 patches, between its own sections; g2: each corner where three or more rounded edges meet, and every edge there is rounded, is set back (1.5 × the radius along each edge unless `setbacks` names it) and filled with a patch meeting the rounds and the faces round it to the second order (curvature-continuous seams, clear of the points where a round's section ends on a face), constant-radius fillets only, refused where it cannot be built; with fit reduce every edge and corner takes the largest single radius that fits them all, and fit taper builds only where the radius fits, since a patch meets its rounds at one constant radius); setbacks?: [{vertex: [x,y,z], distance: expr}, …] (corner setbacks: the corner at the vertex nearest `vertex`, where every edge meeting it is rounded, starts its patch `distance` along each of those edges from the vertex, past where the rounds would meet (past the radius at a square corner), so the rounds blend through a larger patch; one distance for all of a corner's edges; constant-radius exact fillets only; with `corner: g2`, the G2 patch's corners); turn?: mitre|swept (where two rounds turn round a sharp, straight, convex side edge square to both on a plane, such as the rounds along a boss's base at its upright edges: mitre, the default, runs them on to meet in a mitre; swept ends them at the side edge and fills the corner with their section revolved about it, a torus; swept takes type: constant, corner: rolling, no setbacks and fit: exact or reduce, and is refused with the reason where the rounds are unequal or the side edge is concave, curved or tangent); fit?: exact|reduce|taper (exact, the default: a radius too large for the geometry around the edges is refused, naming the largest that fits; reduce: where it doesn't fit it is reduced to the largest that does, one radius for edges sharing a face; the smallest used is returned as `radius_applied`, each edge's as `radii_applied: [{edge: [x,y,z], radius}]`, and noted in the feature's warning; taper: along each straight edge between planar faces where it doesn't fit, the radius follows the room there as a smooth spline, down to 0 where a face closes to a point, noted in the feature's warning)"),
     CommandSpec::new("solid.chamfer", "Chamfer", crate::checked!("solid.chamfer", chamfer))
         .at("SOLID", "MODIFY")
         .icon("chamfer")
@@ -2293,8 +2293,8 @@ fn fillet(s: &mut Session, p: &Value) -> Result<Value> {
         Some("g2") => solidcraft_doc::FilletCorner::G2,
         Some(o) => return Err(bad(cmd, format!("unknown corner `{o}` (rolling or g2)"))),
     };
-    if !corner.is_rolling() && (!style.is_constant() || !fit.is_exact()) {
-        return Err(bad(cmd, "`corner: g2` is built for a constant-radius fillet (`type: constant`, `fit: exact`) only"));
+    if !corner.is_rolling() && !style.is_constant() {
+        return Err(bad(cmd, "`corner: g2` is built for a constant-radius fillet (`type: constant`) only"));
     }
     // Corner setbacks: each a vertex and the distance its patch starts along the edges there.
     let mut setbacks = Vec::new();
@@ -4798,7 +4798,6 @@ mod corner_tests {
         // An unknown word, and a style the G2 corner has no patch for, are refused as parameters.
         assert!(s.execute("solid.fillet", &json!({"edges": [[10, 0, 0]], "radius": 4, "corner": "round"})).is_err());
         assert!(s.execute("solid.fillet", &json!({"edges": [[10, 0, 0]], "radius": 4, "corner": "g2", "type": "chord"})).is_err());
-        assert!(s.execute("solid.fillet", &json!({"edges": [[10, 0, 0]], "radius": 4, "corner": "g2", "fit": "reduce"})).is_err());
         // A corner where convex and concave rounds meet (the top of a notch's inner edge, two
         // convex rounds and the concave one) is refused, the message naming it and why.
         let mut s = Session::default();
@@ -4809,6 +4808,58 @@ mod corner_tests {
         let err = s.execute("solid.fillet", &mixed).unwrap_err().to_string();
         eprintln!("mixed corner g2: {err}");
         assert!(err.contains("not supported yet") && err.contains("(40.000, 20.000, 20.000)") && err.contains("all convex or all concave"), "{err}");
+    }
+
+    /// Three rounds at a corner of a 20 x 20 x 6 box with `corner: g2` and `fit` (#12645): the
+    /// reply, and the body when it builds. The G2 patch sets back 1.5 r along each edge, so along
+    /// the upright edge, 6 long, it fits for r below 4.
+    fn g2_box_corner(radius: f64, fit: &str) -> (crate::Result<Value>, Option<solidcraft_kernel::Body>) {
+        let mut s = Session::default();
+        run(&mut s, "solid.box", &json!({"length": 20, "width": 20, "height": 6, "body_name": "B"}));
+        let p = json!({"edges": [[10, 0, 0], [0, 10, 0], [0, 0, 3]], "radius": radius, "corner": "g2", "fit": fit});
+        let out = s.execute("solid.fillet", &p);
+        let body = out.is_ok().then(|| s.world_state().unwrap().body("B").unwrap().body.clone());
+        (out, body)
+    }
+
+    /// A valid body's face count and volume.
+    fn faces_and_volume(b: &solidcraft_kernel::Body) -> (usize, f64) {
+        assert!(b.validity().is_empty(), "{:?}", b.validity());
+        let m = solidcraft_kernel::measure(b).unwrap();
+        (m.faces, m.volume)
+    }
+
+    /// `corner: g2` with `fit: reduce` and `fit: taper` (#12645). At r 3, where the patch fits,
+    /// every fit builds the body `exact` builds. At r 5 `exact` is refused, and `reduce` builds
+    /// every edge and corner at one radius that fits, below 4: the very body `exact` builds at
+    /// that radius. It says so. Run to the end, the fit search finds 3.993, but it stops after
+    /// 30 s (`largest_that_fits`), so on a loaded machine the radius can be one it built earlier.
+    #[test]
+    fn a_g2_corner_takes_fit_reduce_and_taper() {
+        let exact = faces_and_volume(&g2_box_corner(3.0, "exact").1.unwrap());
+        for fit in ["reduce", "taper"] {
+            let (out, body) = g2_box_corner(3.0, fit);
+            assert!(out.as_ref().unwrap().get("radius_applied").is_none(), "{fit}: {out:?}");
+            assert_eq!(faces_and_volume(&body.unwrap()), exact, "{fit}");
+        }
+        assert!(g2_box_corner(5.0, "exact").0.is_err());
+        let (out, reduced) = g2_box_corner(5.0, "reduce");
+        let out = out.unwrap();
+        let applied = out["radius_applied"].as_f64().unwrap();
+        assert!(0.0 < applied && applied < 4.0, "{applied}");
+        assert!(out.to_string().contains("reduced to"), "{out}");
+        assert_eq!(faces_and_volume(&reduced.unwrap()), faces_and_volume(&g2_box_corner(applied, "exact").1.unwrap()));
+    }
+
+    /// A taper too large for its G2 corner would vary the radius where a round meets the patch:
+    /// it is refused with the reason and a radius that fits, below 4: the largest the fit search
+    /// built before it stopped, 3.993 when it runs to the end (#12645).
+    #[test]
+    fn a_g2_corner_refuses_a_taper_too_large_for_it() {
+        let err = g2_box_corner(5.0, "taper").0.unwrap_err().to_string();
+        assert!(err.contains("`fit: taper` cannot vary the radius"), "{err}");
+        let named = err.split("the largest radius that fits is ").nth(1).and_then(|r| r.split(' ').next()?.parse::<f64>().ok());
+        assert!(named.is_some_and(|r| 0.0 < r && r < 4.0), "{err}");
     }
 
     /// `solid.fillet turn?: mitre|swept` on the four base edges of a 10 x 10 x 5 boss on a

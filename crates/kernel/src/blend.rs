@@ -807,6 +807,15 @@ pub fn fillet_max_why(body: &Body, edges: &[Vec3], radius: f64, turn: FilletTurn
     largest_that_fits(radius, hint, |r| fillet_turning(body, edges, r, turn))
 }
 
+/// [`fillet_max_why`] for rounds whose corners are G2 patches ([`fillet_g2_corners`]): the largest
+/// radius below `radius` at which the rounds and their corner patches all build, with the result.
+/// A patch's setback grows with the radius, so the corners can refuse a radius the rounds alone
+/// take. `hint` as for [`fillet_max_why`].
+pub fn fillet_g2_corners_max_why(body: &Body, edges: &[Vec3], radius: f64, setbacks: &[(Vec3, f64)], hint: Option<f64>) -> Result<FitSearch> {
+    let _span = solidcraft_profile::span("kernel", "fillet_g2_corners_max");
+    largest_that_fits(radius, hint, |r| fillet_g2_corners(body, edges, r, setbacks))
+}
+
 /// [`fillet_max`] for an equal-distance chamfer of these edges: the largest distance below
 /// `distance` (to three significant digits) at which it works, with its result.
 pub fn chamfer_max(body: &Body, edges: &[Vec3], distance: f64) -> Result<Option<(f64, Body)>> {

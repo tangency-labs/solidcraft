@@ -729,6 +729,44 @@ fn fillet_fitted(
     }
 }
 
+/// A constant fillet of `edges` whose corners are G2 patches ([`kernel::fillet_g2_corners`]),
+/// fitted as `fit` says, with the radius applied when it was reduced. A patch meets its rounds at
+/// one constant radius, so where `r` is too large [`FilletFit::Reduce`](crate::FilletFit::Reduce)
+/// builds every edge and corner at the largest single radius that fits them all
+/// ([`kernel::fillet_g2_corners_max_why`], the refusal's own figure tried first).
+/// [`FilletFit::Taper`](crate::FilletFit::Taper) would vary the radius where a round meets a
+/// patch: it builds where `r` fits and is otherwise refused, saying why and naming the largest
+/// radius that fits ([`with_largest_fit`]). The exact fit is refused as the corner construction
+/// refuses it.
+fn fillet_g2_fitted(
+    body: &kernel::Body,
+    edges: &[Vec3],
+    r: f64,
+    setbacks: &[(Vec3, f64)],
+    fit: crate::FilletFit,
+) -> std::result::Result<(kernel::Body, Option<f64>), kernel::KernelError> {
+    let why = match kernel::fillet_g2_corners(body, edges, r, setbacks) {
+        Ok(b) => return Ok((b, None)),
+        Err(kernel::KernelError::TooLarge(why)) => why,
+        Err(e) => return Err(e),
+    };
+    match fit {
+        crate::FilletFit::Exact => Err(kernel::KernelError::TooLarge(why)),
+        crate::FilletFit::Taper => {
+            let hint = kernel::named_fit(&why);
+            let because = "`fit: taper` cannot vary the radius where a round meets a G2 corner patch, which takes one constant radius: use `fit: reduce`, or `corner: rolling` to taper";
+            Err(match with_largest_fit(why, "radius", || kernel::fillet_g2_corners_max_why(body, edges, r, setbacks, hint)) {
+                kernel::KernelError::TooLarge(named) => kernel::KernelError::TooLarge(format!("{named}; {because}")),
+                e => e,
+            })
+        }
+        crate::FilletFit::Reduce => match kernel::fillet_g2_corners_max_why(body, edges, r, setbacks, kernel::named_fit(&why))?.found {
+            Some((largest, b)) => Ok((b, Some(largest))),
+            None => Err(kernel::KernelError::TooLarge(why)),
+        },
+    }
+}
+
 /// The warning of a fillet some of whose edges a larger round, overflowing its faces, removed
 /// whole: they are gone, so they are not rounded.
 fn removed_note(gone: &[Vec3]) -> String {
@@ -6673,14 +6711,22 @@ fn blend_raw(
             }
             (kernel::fillet_g2_with_g2_corners(&mb.body, edges, r, &corners)?, input)
         }
-        FeatureKind::Fillet { corner, setbacks, .. } if matches!(corner, crate::FilletCorner::G2) || !setbacks.is_empty() => {
+        FeatureKind::Fillet { corner, setbacks, fit, .. } if matches!(corner, crate::FilletCorner::G2) || !setbacks.is_empty() => {
             // Each setback: its corner's vertex and its distance.
             let mut corners = Vec::with_capacity(setbacks.len());
             for c in setbacks {
                 corners.push((c.vertex.0, val(vals, &c.distance, Kind::Length)?));
             }
             match corner {
-                crate::FilletCorner::G2 => (kernel::fillet_g2_corners(&mb.body, edges, r, &corners)?, input),
+                crate::FilletCorner::G2 => {
+                    let (b, applied) = fillet_g2_fitted(&mb.body, edges, r, &corners, *fit)?;
+                    if let Some(applied) = applied {
+                        let each = vec![applied; edges.len()];
+                        append_warning(warning, reduced_note(&each, r));
+                        used = Some(each);
+                    }
+                    (b, input)
+                }
                 crate::FilletCorner::Rolling => (kernel::fillet_setback(&mb.body, edges, r, &corners)?, input),
             }
         }
@@ -11951,11 +11997,12 @@ fn eval_feature_kind(
         FeatureKind::Fillet { edges, radius, body, .. } | FeatureKind::Chamfer { edges, distance: radius, body, .. } => {
             let r = val(vals, radius, Kind::Length)?;
             // A G2 corner is built by the corner construction alone, for a constant radius: any
-            // other style (or a fitted radius) has no corner patch to repeat.
-            if let FeatureKind::Fillet { corner: crate::FilletCorner::G2, style, fit, .. } = &f.kind
-                && (!matches!(style, crate::FilletStyle::Constant) || !matches!(fit, crate::FilletFit::Exact))
+            // other style has no corner patch to repeat. A fitted radius is one constant radius
+            // too (`fillet_g2_fitted`).
+            if let FeatureKind::Fillet { corner: crate::FilletCorner::G2, style, .. } = &f.kind
+                && !matches!(style, crate::FilletStyle::Constant)
             {
-                return Err(DocError::Invalid("a G2 corner is built for a constant-radius fillet (type: constant, fit: exact) only".into()));
+                return Err(DocError::Invalid("a G2 corner is built for a constant-radius fillet (type: constant) only".into()));
             }
             // Each edge is found on its own body (picked over several bodies, the edges of each
             // are blended on it), all against the bodies as they were before this feature.
