@@ -558,7 +558,9 @@ pub fn shaft_spline_preview(p: &Value) -> std::result::Result<SplinePreview, Spl
         SplineOutline { part: SplinePart::Hub, made: asked.numbers.with_hub, points: points(&planned.hub, planned.hub_start)? },
     ];
     let teeth = reply.teeth.max(1);
-    let pitch = planned.shaft.pitch_angle;
+    // From one tooth to the next of the teeth as counted. Not the outline's own pitch angle: with a master spline
+    // the outline is one period of the whole ring, a full turn.
+    let pitch = std::f64::consts::TAU / f64::from(teeth);
     let tooth_at = planned.master.as_ref().map_or(0.0, |made| made.turn + pitch * f64::from(made.tooth.saturating_add(teeth / 2) % teeth));
     let master = planned.master.as_ref().filter(|_| asked.master != MasterSplineParam::None).map(|made| {
         let arc = |s: MasterArc, by: f64| SplineArc { radius: s.radius, start: s.start + by, end: s.end + by };

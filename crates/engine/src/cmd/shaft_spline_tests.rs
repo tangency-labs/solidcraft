@@ -1499,6 +1499,16 @@ fn the_preview_refuses_what_the_command_refuses_in_the_same_words() {
     // A shaft alone: the hub is drawn for what it fits, and not made.
     let preview = shaft_spline_preview(&straight()).expect("the preview draws it");
     assert_eq!(preview.outlines.iter().map(|o| o.made).collect::<Vec<_>>(), [true, false]);
+    // With a master spline the outline is one period of the whole ring, but the drawing's pitch stays the angle
+    // from one tooth to the next, and the tooth its close-up shows is a whole number of pitches from the turn.
+    for form in ["tooth_out", "wide_tooth"] {
+        let keyed = with(straight(), json!({"make": "both", "hub_diameter": 40, "master_spline": form, "master_angle": 0}));
+        let preview = shaft_spline_preview(&keyed).expect("the preview draws it");
+        assert!((preview.pitch - TAU / 6.0).abs() < 1e-12, "{form}: pitch {}", preview.pitch);
+        let turn = preview.master.as_ref().expect("a master spline").turn.to_radians();
+        let pitches = (preview.tooth_at - turn) / preview.pitch;
+        assert!((pitches - pitches.round()).abs() < 1e-9 && (0.0..6.0).contains(&pitches.round()), "{form}: {pitches} pitches from the turn");
+    }
 }
 
 // ---------------------------------------------------------------------------------------------------------------
