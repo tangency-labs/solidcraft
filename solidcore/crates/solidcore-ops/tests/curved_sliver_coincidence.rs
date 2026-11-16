@@ -80,6 +80,25 @@ fn wedge_volume(overlap: f64) -> f64 {
     0.5 * RHO * RHO * overlap.sin() * H
 }
 
+/// Slice `c` against the second slice turned 120° − `overlap`: one valid solid of `counts`
+/// faces, edges and vertices whose volume is `want` within 1e-6 (the wedges are 0.14 and
+/// 0.43; the volume is measured to 1e-10, 1e-9 of a slice).
+fn assert_slices(c: f64, overlap: f64, op: BooleanOp, counts: [usize; 3], want: f64) {
+    let a = sector(c, 0.0);
+    let b = sector(c, 2.0 * PI / 3.0 - overlap);
+    let r = boolean(a, b, op).unwrap().unwrap();
+    let report = r.check(CheckLevel::All).unwrap();
+    assert!(report.is_valid(), "{c} {overlap} {op:?}: {}", report.text);
+    assert_eq!(r.solid_count().unwrap(), 1, "{c} {overlap} {op:?}");
+    assert_eq!(r.counts().unwrap(), counts, "{c} {overlap} {op:?}");
+    let v = r.volume(1e-10).unwrap();
+    let err = (v - want).abs();
+    assert!(
+        !(err.is_nan() || err > 1e-6),
+        "{c} {overlap} {op:?}: {v}, closed form {want}"
+    );
+}
+
 /// The second slice is turned 120° − 1e-6 rad, so its first wall lies 8.55e-5 inside the
 /// first slice at the corners. The arc centres miss the apex by 4.85e-5 along each slice's
 /// bisector, so the two arc cylinders' axes lie 8.4e-5 apart, yet over the sliver between the
@@ -92,24 +111,45 @@ fn pie_slices_with_off_centre_arcs_and_overlapping_walls_meet_in_the_wedge() {
     let overlap = 1e-6;
     let wedge = wedge_volume(overlap);
     for c in [-4.85e-5, 4.85e-5] {
-        for (op, counts, want) in [
-            (BooleanOp::Intersect, [5, 11, 8], wedge),
-            (BooleanOp::Subtract, [5, 9, 6], slice_volume(c) - wedge),
-        ] {
-            let a = sector(c, 0.0);
-            let b = sector(c, 2.0 * PI / 3.0 - overlap);
-            let r = boolean(a, b, op).unwrap().unwrap();
-            let report = r.check(CheckLevel::All).unwrap();
-            assert!(report.is_valid(), "{c} {op:?}: {}", report.text);
-            assert_eq!(r.solid_count().unwrap(), 1, "{c} {op:?}");
-            assert_eq!(r.counts().unwrap(), counts, "{c} {op:?}");
-            let v = r.volume(1e-10).unwrap();
-            // the wedge is 0.435; its volume is measured to 1e-10 (1e-9 of the slice)
-            let err = (v - want).abs();
-            assert!(
-                !(err.is_nan() || err > 1e-6),
-                "{c} {op:?}: {v}, closed form {want}"
-            );
-        }
+        assert_slices(c, overlap, BooleanOp::Intersect, [5, 11, 8], wedge);
+        assert_slices(
+            c,
+            overlap,
+            BooleanOp::Subtract,
+            [5, 9, 6],
+            slice_volume(c) - wedge,
+        );
+    }
+}
+
+/// The second slice turned 120° − 3.3e-7 rad, as SolidCraft builds three slices of a
+/// circle from a sketch with rounded points: the corners lie 2.82e-5 apart, each on the other
+/// slice's arc within 1.4e-11, and the arcs never cross between them. The second slice's arc
+/// therefore enters the first slice's arc face at an end the edge intersections leave
+/// unclassified, and was imprinted as a second edge 1e-11 beside the first slice's own arc:
+/// two edges of one body related to one edge of the other, refused (1001) or not a closed
+/// solid. Now that end is classified onto the arc edge, and all three operations are exact:
+/// the wedge, the slice less the wedge, and the two slices less the wedge.
+#[test]
+fn pie_slices_whose_arcs_run_along_each_other_without_crossing_meet_in_the_wedge() {
+    all_fixes();
+    let overlap = 3.3e-7;
+    let wedge = wedge_volume(overlap);
+    for c in [-4.85e-5, 4.85e-5] {
+        assert_slices(c, overlap, BooleanOp::Intersect, [5, 9, 6], wedge);
+        assert_slices(
+            c,
+            overlap,
+            BooleanOp::Subtract,
+            [5, 9, 6],
+            slice_volume(c) - wedge,
+        );
+        assert_slices(
+            c,
+            overlap,
+            BooleanOp::Union,
+            [6, 12, 8],
+            2.0 * slice_volume(c) - wedge,
+        );
     }
 }

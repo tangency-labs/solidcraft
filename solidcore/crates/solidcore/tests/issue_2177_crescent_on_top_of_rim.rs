@@ -5,8 +5,8 @@
 //! Upstream `CloseIntersectionLoop` relates the rim's long arc, the sole cylinder edge
 //! between the crescent's corners, with the crescent's bottom r 6 arc, so the result
 //! has an edge 38.16 off its face (level-2 check `#59`/`#82`), a UV trim of degree 3
-//! with 2 points and `brep_volume` fails with 1001. With
-//! `Kernel::fixes.close_loop_relates_only_coincident_edges` the union passes the
+//! with 2 points and `brep_volume` fails with 1001. With the fix (the only path since
+//! its flag was retired) the union passes the
 //! level-2 check, every UV trim has at least order points and the volume is exact.
 
 #![allow(
@@ -56,9 +56,8 @@ fn volume(k: &Kernel, b: &mut Brep) -> solidcore::Result<f64> {
 }
 
 /// The union of the cylinder and the crescent prism on its top rim.
-fn union(fixed: bool) -> (Kernel, Brep) {
+fn union() -> (Kernel, Brep) {
     let mut k = Kernel::default();
-    k.fixes.close_loop_relates_only_coincident_edges = fixed;
     let y = (R * R - 8.2 * 8.2).sqrt();
     let big = y.atan2(8.2).to_degrees();
     let small = y.atan2(8.2 - R).to_degrees();
@@ -122,7 +121,7 @@ fn short_trims(k: &mut Kernel, u: &mut Brep) -> Vec<String> {
 
 #[test]
 fn crescent_on_top_of_the_rim_is_exact_with_the_fix() {
-    let (mut k, mut u) = union(true);
+    let (mut k, mut u) = union();
     let c = check_brep(&mut k, &mut u, CheckLevel::Level2).unwrap();
     assert_eq!(c.failure_count(), 0, "{:?}", c.lines());
     let bad = short_trims(&mut k, &mut u);
@@ -133,16 +132,4 @@ fn crescent_on_top_of_the_rim_is_exact_with_the_fix() {
         (v - want).abs() <= 1e-6 * want,
         "volume {v}, expected {want}"
     );
-}
-
-#[test]
-fn crescent_on_top_of_the_rim_keeps_upstream_behaviour_without_the_fix() {
-    let (mut k, mut u) = union(false);
-    // at the default fixes the check stops at the short trim (1001 from
-    // `BSplineCurve::evaluate_point`); with the check-status fixes on it reports
-    // SmBrep test #59 (edge offset 38.16)
-    let clean =
-        check_brep(&mut k, &mut u, CheckLevel::Level2).is_ok_and(|c| c.failure_count() == 0);
-    assert!(!clean, "upstream's union now checks clean");
-    assert!(volume(&k, &mut u).is_err());
 }

@@ -8922,15 +8922,15 @@ mod issue_892_tests {
 
     /// The same 10 x 6 plate with the triangular hole whose corner touches the outline
     /// at (0, 3), built through the public capped sweep with only
-    /// `Kernel::fixes.join_touching_loops` toggled (WR-405). With the flag off (the
-    /// default, upstream's separate loops) the hole is a second outer loop, so the sweep
-    /// builds 12 faces with volume 122: both loops are taken as material, the plate plus
-    /// the hole's prism (area 1, 2 long) instead of the plate less it. With the flag on it
-    /// is 10 faces and volume 118 (the plate less the hole). `check_brep` at `Level2`
-    /// passes both bodies: validity does not see the difference, only the loops, the face
-    /// count and the volume do.
+    /// `Kernel::fixes.join_touching_loops` toggled (WR-405). Upstream's ordering (the
+    /// first end by index at the shared vertex) left the hole a second outer loop, so with
+    /// the flag off the sweep built 12 faces with volume 122: both loops taken as material,
+    /// the plate plus the hole's prism (area 1, 2 long) instead of the plate less it. The
+    /// loops now go on round the shared vertex (WR-591), which already orders the eight
+    /// lines into one loop, so either setting builds 10 faces and the closed-form volume
+    /// (60 - 1) * 2 = 118, the plate less the hole, and passes `check_brep` at `Level2`.
     #[test]
-    fn issue_892_only_join_touching_loops_changes_the_sweep() {
+    fn issue_892_touching_hole_is_the_plate_less_the_hole() {
         // the plane's loop structure, the sweep's face count and volume, and the
         // whole-body check's failure lines, for one setting of the flag
         fn measure(join: bool) -> (Vec<usize>, Vec<usize>, usize, f64, Vec<String>) {
@@ -8985,9 +8985,9 @@ mod issue_892_tests {
         // the flag is not part of the default kernel: pin it before either run
         assert!(!Kernel::default().fixes.join_touching_loops);
         let (outer, loops, faces, volume, lines) = measure(false);
-        assert_eq!((outer, loops), (vec![2], vec![5, 3]));
-        assert_eq!(faces, 12);
-        assert!((volume - 122.0).abs() < 1e-6, "volume {volume}");
+        assert_eq!((outer, loops), (vec![1], vec![8]));
+        assert_eq!(faces, 10);
+        assert!((volume - 118.0).abs() < 1e-6, "volume {volume}");
         assert!(lines.is_empty(), "{lines:?}");
 
         let (outer, loops, faces, volume, lines) = measure(true);

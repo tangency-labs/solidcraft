@@ -1785,3 +1785,275 @@ mod tests {
         assert!(output(&invalid).is_err());
     }
 }
+
+/// WR-457's tangent side-edge skip, now the only path, builds the 30 box-union rounds of
+/// `stubs_round3.json` and `corner_3x2.json` that upstream refused with status 1001. Each
+/// built body is certified: `check_brep` Level 2 reports no failure, it is one closed
+/// manifold solid, and its volume is enclosed by [`enclose_volume`] to an asserted width.
+#[cfg(test)]
+mod wr457_certificates {
+    use super::{apply, build, RealSolid};
+    use solidcore::kernel::Kernel;
+    use solidcore::mass::enclosure::enclose_volume;
+    use solidcore::surface::surface::p2::SurfaceKind;
+    use solidcore::topology::brep::p1;
+    use solidcore::topology::brep::p2::is_manifold_solid;
+    use solidcore::topology::brep::validation::{check_brep, CheckLevel};
+
+    /// The moved rows: (fixture file, case name).
+    const CASES: &[(&str, &str)] = &[
+        ("corner_3x2.json", "corner3x2-union-overhang-corner-edges6-12-r1"),
+        ("corner_3x2.json", "corner3x2-union-overhang-corner-edges6-13-r1"),
+        ("stubs_round3.json", "stubs3-union-overhang-corner-edges12-13-r1"),
+        ("stubs_round3.json", "stubs3-union-overhang-corner-edges14-15-r1"),
+        ("stubs_round3.json", "stubs3-union-overhang-corner-edges14-22-r1"),
+        ("stubs_round3.json", "stubs3-union-overhang-corner-edges15-22-r1"),
+        ("stubs_round3.json", "stubs3-union-overhang-front-edges14-15-r1"),
+        ("stubs_round3.json", "stubs3-union-overhang-front-edges14-22-r1"),
+        ("stubs_round3.json", "stubs3-union-overhang-front-edges15-16-r1"),
+    ];
+
+    /// The edges of the `nx1-multi-neighbour-end-face` cases (the box 20 x 10 x 10 and the
+    /// box [5, 15] x [-2, 4] x [10, 20] standing on it, overhanging its front face y = 0),
+    /// each rounded 0.5, 1 and 2, with the sign of the round's volume change: -1 for a
+    /// convex edge, whose round takes material off, +1 for a concave one, whose round adds
+    /// it. Convex: 9 and 12, the lower box's top front edge either side of the upper box;
+    /// 17 and 19, the overhang's underside meeting the upper box's side faces. Concave: 13,
+    /// the lower box's front face meeting the overhang's underside; 14 and 16, the lower
+    /// box's top meeting the upper box's side faces.
+    const NX1_EDGES: [(usize, f64); 7] = [
+        (9, -1.0),
+        (12, -1.0),
+        (13, 1.0),
+        (14, 1.0),
+        (16, 1.0),
+        (17, -1.0),
+        (19, -1.0),
+    ];
+
+    /// The union's volume, 20 x 10 x 10 + 10 x 6 x 10.
+    const UNION_VOLUME: f64 = 2600.0;
+
+    /// The two-edge cases whose edges are both concave and meet at a corner where the
+    /// rounds' ends are square to their edges: their volume has a closed form (see
+    /// [`two_concave_rounds`]).
+    const CONCAVE_PAIRS: [&str; 4] = [
+        "stubs3-union-overhang-corner-edges12-13-r1",
+        "stubs3-union-overhang-corner-edges14-15-r1",
+        "stubs3-union-overhang-front-edges14-15-r1",
+        "stubs3-union-overhang-front-edges15-16-r1",
+    ];
+
+    /// The two-edge cases that round one concave edge and one convex edge meeting at a
+    /// vertex whose third edge is concave and not rounded, with the concave and convex
+    /// edges' lengths: the corner patch where the rounds meet is a B-spline construction,
+    /// not an exact surface, so these have no closed form; see [`Form::Mixed`].
+    const MIXED: [(&str, f64, f64); 5] = [
+        ("corner3x2-union-overhang-corner-edges6-12-r1", 4.0, 10.0),
+        ("corner3x2-union-overhang-corner-edges6-13-r1", 8.0, 10.0),
+        ("stubs3-union-overhang-corner-edges14-22-r1", 8.0, 10.0),
+        ("stubs3-union-overhang-corner-edges15-22-r1", 4.0, 10.0),
+        ("stubs3-union-overhang-front-edges14-22-r1", 4.0, 10.0),
+    ];
+
+    /// What closed form, if any, a case's volume must match.
+    #[derive(Clone, Copy, Debug)]
+    enum Form {
+        /// One round, with the sign of its volume change.
+        Single(f64),
+        /// Two concave rounds meeting at a corner.
+        ConcavePair,
+        /// A concave and a convex round (their lengths) meeting at a corner patch: the
+        /// body must be planes, the two rounds' cylinders and exactly one B-spline face
+        /// (the patch), and its volume less the two straight rounds ending square at the
+        /// corner, `2600 + A (concave - convex)`, must be one shared constant across the
+        /// five cases (their intervals must meet): the same patch construction at r 1.
+        Mixed(f64, f64),
+    }
+
+    /// Each case with the closed form its volume must hold.
+    fn case_names() -> Vec<(&'static str, String, Form)> {
+        let mut out: Vec<_> = CASES
+            .iter()
+            .map(|&(f, n)| {
+                let form = if let Some(&(_, concave, convex)) = MIXED.iter().find(|m| m.0 == n) {
+                    Form::Mixed(concave, convex)
+                } else {
+                    assert!(CONCAVE_PAIRS.contains(&n), "{n}");
+                    Form::ConcavePair
+                };
+                (f, n.to_string(), form)
+            })
+            .collect();
+        for (e, sign) in NX1_EDGES {
+            for r in ["0.5", "1.0", "2.0"] {
+                out.push((
+                    "stubs_round3.json",
+                    format!("stubs3-overhang-union-nx1-multi-neighbour-end-face-edge{e}-r{r}"),
+                    Form::Single(sign),
+                ));
+            }
+        }
+        out
+    }
+
+    /// The volume of the union with two concave rounds of radius `r` whose edges, of
+    /// summed length `length`, meet at a vertex whose third edge is convex. Each round
+    /// adds its section, the square of side `r` less its quarter disc, of area
+    /// `A = r^2 (1 - pi/4)`, along its edge up to the plane through the convex edge square
+    /// to it. Between those two planes the round turns the corner: the section, whose
+    /// square corner lies on the convex edge, revolves a quarter turn about it, adding
+    /// `(pi/2) A d` (Pappus), where `d = r (10 - 3 pi) / (12 - 3 pi)` is the section's
+    /// centroid distance from its square corner along either leg. So the volume is
+    /// `2600 + A L + (pi/2) A d`. The premises (square ends, a convex third edge, a
+    /// rolling-ball quarter turn) are ARGUED from the fixture geometry; the cases are
+    /// picked by name in [`CONCAVE_PAIRS`].
+    fn two_concave_rounds(r: f64, length: f64) -> f64 {
+        use core::f64::consts::{FRAC_PI_2, FRAC_PI_4, PI};
+        let a = r * r * (1.0 - FRAC_PI_4);
+        let d = r * (10.0 - 3.0 * PI) / (12.0 - 3.0 * PI);
+        UNION_VOLUME + a * length + FRAC_PI_2 * a * d
+    }
+
+    fn load(file: &str, name: &str) -> RealSolid {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../fixtures/blend.fillet_executive_p3")
+            .join(file);
+        let text = std::fs::read_to_string(&path).expect("fixture");
+        let json: serde_json::Value = serde_json::from_str(&text).expect("fixture json");
+        let case = json["cases"]
+            .as_array()
+            .expect("cases")
+            .iter()
+            .find(|c| c["name"] == name)
+            .unwrap_or_else(|| panic!("no case {name}"));
+        serde_json::from_value(case["inputs"]["real_solid"].clone()).expect("real_solid")
+    }
+
+    /// Every built body is valid at Level 2 and one closed manifold solid, and its volume
+    /// is enclosed in an interval no wider than `1e-7 * 2600`. A single round's ends lie in
+    /// the end faces' planes, square to its straight edge (every face is axis-aligned;
+    /// ARGUED from the fixture geometry, not checked here), so its volume is the union's,
+    /// changed by its section `r^2 (1 - pi/4)` along the edge's length `L`. Two concave
+    /// rounds meeting at a convex corner hold [`two_concave_rounds`]. The enclosure must
+    /// hold the closed form, up to its f64 rounding. The live harness row (which the
+    /// goldens gate compares with `expected/blend.fillet_executive_p3.jsonl`) must record
+    /// the same body: status 0, the body's vertex, edge and face counts, and a
+    /// mass-properties volume within `1e-4` of the enclosure (MEASURED: the
+    /// mass integrator's accuracy is an estimate, not a bound).
+    #[test]
+    fn the_rounds_upstream_refused_build_valid_closed_solids() {
+        use core::f64::consts::FRAC_PI_4;
+        let names = case_names();
+        assert_eq!(names.len(), 30);
+        let width = 1e-7 * UNION_VOLUME;
+        // each mixed case's volume less its two straight rounds
+        let mut corner: Vec<(f64, f64)> = Vec::new();
+        for (file, name, form) in &names {
+            let input = load(file, name);
+            let mut k = Kernel::default();
+            let mut body = build(&mut k, &input)
+                .expect("fixture")
+                .expect("the box union");
+            let edges = p1::edges(&body, None).expect("edges");
+            let picked = input.edge_indices().expect("edge indices");
+            let selected: Vec<_> = picked
+                .iter()
+                .map(|&i| *edges.get(i).expect("selected edge"))
+                .collect();
+            let mut length = 0.0;
+            for &e in &selected {
+                let ivl = solidcore::topology::edge::interval(&body, e).expect("interval");
+                let c = solidcore::topology::edge::curve(&body, e)
+                    .expect("curve")
+                    .expect("a curve");
+                let a = c.evaluate_point(&k, ivl.min()).expect("start");
+                let b = c.evaluate_point(&k, ivl.max()).expect("end");
+                length += a.distance(b);
+            }
+            apply(&mut k, &mut body, &selected, &input)
+                .unwrap_or_else(|e| panic!("{name}: the round failed: {e:?}"));
+            let lines = check_brep(&mut k, &mut body, CheckLevel::Level2)
+                .expect("check")
+                .lines();
+            assert!(lines.is_empty(), "{name}: Level 2: {lines:?}");
+            assert!(
+                is_manifold_solid(&body).expect("manifold check"),
+                "{name}: not one closed manifold solid"
+            );
+            let e = enclose_volume(&k, &mut body, width).expect("enclosure");
+            assert!(e.width() <= width, "{name}: enclosure {e:?} wider than {width}");
+            eprintln!("{name}: volume in [{}, {}] ({:?})", e.lo, e.hi, e.stop);
+            let r = input.radius;
+            let exact = match *form {
+                Form::Single(sign) => {
+                    assert_eq!(selected.len(), 1, "{name}");
+                    Some(UNION_VOLUME + sign * length * r * r * (1.0 - FRAC_PI_4))
+                }
+                Form::ConcavePair => {
+                    assert_eq!(selected.len(), 2, "{name}");
+                    Some(two_concave_rounds(r, length))
+                }
+                Form::Mixed(concave, convex) => {
+                    assert_eq!(selected.len(), 2, "{name}");
+                    assert!((length - (concave + convex)).abs() < 1e-9, "{name}: {length}");
+                    let (mut patches, mut cylinders) = (0, 0);
+                    for f in p1::faces(&body, None).expect("faces") {
+                        let surface = solidcore::topology::face::surface(&body, f)
+                            .expect("surface")
+                            .expect("a surface");
+                        match surface.kind() {
+                            SurfaceKind::Plane(_) => {}
+                            SurfaceKind::Cone(_) => cylinders += 1,
+                            SurfaceKind::BSpline(_) => patches += 1,
+                            other => panic!("{name}: unexpected face kind {other:?}"),
+                        }
+                    }
+                    assert_eq!((patches, cylinders), (1, 2), "{name}: face kinds");
+                    let straight =
+                        UNION_VOLUME + (concave - convex) * r * r * (1.0 - FRAC_PI_4);
+                    let slack = 16.0 * f64::EPSILON * straight;
+                    corner.push((e.lo - straight - slack, e.hi - straight + slack));
+                    None
+                }
+            };
+            if let Some(exact) = exact {
+                // About ten f64 operations, plus about ten ulps of d from cancelling 3 pi
+                // and the rounding of the stored pi constants, all on terms of at most 9
+                // added to 2600: 16 eps |exact| bounds the error with ample margin.
+                let slack = 16.0 * f64::EPSILON * exact.abs();
+                assert!(
+                    e.lo - slack <= exact && exact <= e.hi + slack,
+                    "{name}: closed form {exact} outside [{}, {}]",
+                    e.lo,
+                    e.hi
+                );
+            }
+            let row = super::rust(&input).unwrap_or_else(|e| panic!("{name}: harness: {e:?}"));
+            let counts = [
+                0,
+                p1::vertices(&body, None).expect("vertices").len() as i64,
+                p1::edges(&body, None).expect("edges").len() as i64,
+                p1::faces(&body, None).expect("faces").len() as i64,
+            ];
+            assert_eq!(
+                row.ints["api_status_vertex_edge_face_counts"], counts,
+                "{name}: row status and counts"
+            );
+            assert_eq!(row.ints["mass_status"], [0], "{name}: mass status");
+            let volume = *row.values["mass_properties"].get(1).expect("volume");
+            assert!(
+                e.lo - 1e-4 <= volume && volume <= e.hi + 1e-4,
+                "{name}: row volume {volume} not within 1e-4 of [{}, {}]",
+                e.lo,
+                e.hi
+            );
+        }
+        // one patch construction: the five corners' contributions share a value
+        assert_eq!(corner.len(), MIXED.len());
+        let lo = corner.iter().map(|c| c.0).fold(f64::NEG_INFINITY, f64::max);
+        let hi = corner.iter().map(|c| c.1).fold(f64::INFINITY, f64::min);
+        eprintln!("mixed corners: their contribution in [{lo}, {hi}]");
+        assert!(lo <= hi, "the mixed corners differ: {corner:?}");
+    }
+}

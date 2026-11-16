@@ -1021,3 +1021,116 @@ fn a_nearly_axial_bore_through_a_cylinder_with_step_tolerances() {
         "volume {volume} vs {expected}"
     );
 }
+
+// ---- a pocket whose sides are tangent to a bore, a hair past the bore's axis --------------
+
+/// #17098, with the report's numbers: a block with a bore of radius 4.5 along z through it,
+/// cut by a pocket 2 deep at the block's end face `z = 26` (its end 1.5 micron short of the
+/// face), from the block's bottom face to 0.005 above the bore's axis, whose two sides are
+/// tangent to the bore. At the end face, the bore's circle and each of the pocket's edges
+/// along a side run 0.005 side by side from the tangent point to where the pocket's top
+/// meets the circle, 2.8 micron apart there, within the edges' tolerance. The boolean finds
+/// each such stretch twice: as the circle's arc against the pocket's end face, and as the
+/// pocket's edge against the block's end face. The second made a second edge in the block's
+/// end face beside the arc, and the pocket's edge, related to the arc, was asked for it too:
+/// "another entity is already related to the other one". On the side where the bore's seam
+/// is the two are definitions of one proto edge; on the other, of two proto edges between
+/// the same proto vertices.
+#[test]
+fn a_pocket_tangent_to_a_bore_just_past_its_axis_cuts() {
+    let (cx, cy, r) = (-26.724_830_725_384_454, 4.363_269_403_785_069, 4.5);
+    let bottom = -2.311_730_596_423_852;
+    let (x0, x1) = (-31.224_830_725_366_328, -22.224_830_725_456_723);
+    let (top, z1) = (bottom + 6.68, 25.999_998_476);
+    let (height, length) = (14.55, 26.0);
+
+    let mut k = rig_kernel();
+    let block = api::create_box(
+        &mut k,
+        Point3::new(cx - 18.0, bottom, 0.0),
+        36.0,
+        height,
+        length,
+    )
+    .unwrap();
+    let bore = api::create_cylinder(&mut k, Point3::new(cx, cy, -1.0), r, length + 2.0).unwrap();
+    let block = boolean_difference(&mut k, block, bore).unwrap();
+    let pocket = api::create_box(
+        &mut k,
+        Point3::new(x0, bottom, z1 - 2.0),
+        x1 - x0,
+        top - bottom,
+        2.0,
+    )
+    .unwrap();
+    let mut result = boolean_difference(&mut k, block, pocket).unwrap();
+    let check = check_brep(&mut k, &mut result, CheckLevel::Level2).unwrap();
+    assert!(check.is_valid(), "Level2 {:?}", check.lines());
+    // the pocket takes its box less the bore's part of it, the circle below the chord `h`
+    // above its centre
+    let h = top - cy;
+    let below = PI * r * r / 2.0 + h * (r * r - h * h).sqrt() + r * r * (h / r).asin();
+    let pocket_material = ((x1 - x0) * (top - bottom) - below) * 2.0;
+    let want = 36.0 * height * length - PI * r * r * length - pocket_material;
+    let got = volume_of(&k, &mut result);
+    assert!(
+        (got - want).abs() <= VOLUME_REL_TOL * want,
+        "volume {got} vs {want}"
+    );
+}
+
+// ---- a slot cut across a hole tangent to the face it starts on -------------------------
+
+/// The block of #16937: the 40 x 20 rectangle `x` in `[-40, 0]`, `y` in `[-10, 10]` less
+/// the circle of radius 8 about `(-20, -2)`, which touches the side `y = -10` at
+/// `(-20, -10)`, swept 60 along z. Its profile is one loop that runs along that side to the
+/// tangent point, round the circle and on along the side, as a sketch's region is, so the
+/// block pinches to no thickness along the line `x = -20`, `y = -10`, where it has two
+/// edges between the same two vertices: the edge between the side's two parts and the seam
+/// of the hole's wall. The block checks clean at Level2.
+fn block_with_a_tangent_hole(k: &mut Kernel) -> solidcore::Result<Brep> {
+    use solidcore::primitive::api_curves as curves;
+    let p = |x: f64, y: f64| Point3::new(x, y, 0.0);
+    let line = |a: Point3, b: Point3| Curve::from(curves::create_line_segment(a, b).unwrap());
+    let profile = [
+        line(p(-40.0, -10.0), p(-20.0, -10.0)),
+        Curve::from(curves::create_arc(p(-20.0, -2.0), 8.0, -90.0, 270.0)?),
+        line(p(-20.0, -10.0), p(0.0, -10.0)),
+        line(p(0.0, -10.0), p(0.0, 10.0)),
+        line(p(0.0, 10.0), p(-40.0, 10.0)),
+        line(p(-40.0, 10.0), p(-40.0, -10.0)),
+    ];
+    let refs: Vec<Option<&Curve>> = profile.iter().map(Some).collect();
+    create_linear_sweep(k, &refs, Vec3::new(0.0, 0.0, 1.0), 60.0, true)
+}
+
+/// #16937: a slot cut from the block's side `y = -10`, 18 deep, 8 high (`z` in `[24, 32]`)
+/// and past both of its ends. The cutter's face on that side is coplanar with the side on
+/// both sides of the pinch line and tangent to the wall along it, so its one edge along the
+/// line was defined against both of the block's edges there and related to both: "another entity is already
+/// related to the other one". The hole lies within the slot's depth, so the cut takes the
+/// slot's whole box out of the block, hole and all; the block keeps the pinch above and
+/// below the slot.
+#[test]
+fn a_slot_across_a_hole_tangent_to_its_face_cuts() {
+    let mut k = rig_kernel();
+    let mut block = block_with_a_tangent_hole(&mut k).unwrap();
+    let block_volume = volume_of(&k, &mut block);
+    let want_block = 40.0 * 20.0 * 60.0 - PI * 64.0 * 60.0;
+    assert!(
+        (block_volume - want_block).abs() <= VOLUME_REL_TOL * want_block,
+        "block volume {block_volume} vs {want_block}"
+    );
+
+    let slot = api::create_box(&mut k, Point3::new(-50.0, -10.0, 24.0), 60.0, 18.0, 8.0).unwrap();
+    let mut result = boolean_difference(&mut k, block, slot).unwrap();
+    // the slot's box within the block, less the hole's part of it, is gone
+    let want = want_block - 8.0 * (40.0 * 18.0 - PI * 64.0);
+    let check = check_brep(&mut k, &mut result, CheckLevel::Level2).unwrap();
+    assert!(check.is_valid(), "Level2 {:?}", check.lines());
+    let got = volume_of(&k, &mut result);
+    assert!(
+        (got - want).abs() <= VOLUME_REL_TOL * want,
+        "volume {got} vs {want}"
+    );
+}
