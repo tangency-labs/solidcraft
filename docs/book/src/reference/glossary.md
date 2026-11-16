@@ -372,13 +372,15 @@ How near a copy of Pattern on Face may come to something before it is left out, 
 copy itself, not its centre.
 
 The *edge margin* keeps copies away from the face's edges, round its holes and the foot of a boss
-too, and from hanging over them. The *avoid margin* keeps
+too; even at 0, no copy hangs over them. With *Allow overhang* on, only each copy's centre has to
+be on the face, and the edge margin is measured from that centre. The *avoid margin* keeps
 them away from what the Avoid pick holds: points, faces and bodies. With no avoid margin, a copy is
 left out only when it touches or overlaps one of those, or one holds the other. Distances are
 measured on the exact geometry.
 
-- **In SolidCraft:** `solid.pattern.face`'s `margin` and `avoid` (`geometry`, `bodies`, `margin`);
-  the Edge margin and Avoid margin fields and the Avoid pick of Pattern on Face.
+- **In SolidCraft:** `solid.pattern.face`'s `margin`, `overhang` and `avoid` (`geometry`, `bodies`,
+  `margin`); the Edge margin and Avoid margin fields, Allow overhang and the Avoid pick of Pattern
+  on Face.
 - **Don't use:** clearance (Inspect's Clearance measures the gaps between bodies), offset, gap.
 - **Elsewhere:** keep-out distance, border, edge distance.
 - **For translators:** a distance kept free round something, not a page margin.

@@ -1,7 +1,7 @@
 //! A pattern feature can lay its copies on a face: `"pattern": {"type": "face", ...}` with the face
 //! (a reference found again on each evaluation), the grid's two counts, and optionally `staggered`,
 //! `random` (a count, a seed and a noise colour, in place of the grid), `angle`, `margin` (the edge
-//! margin), `avoid` (points, faces and bodies, `geometry` and `bodies`, and its own `margin`), `flip`,
+//! margin), `overhang` (copies may hang over the face's edges; absent, none does), `avoid` (points, faces and bodies, `geometry` and `bodies`, and its own `margin`), `flip`,
 //! `anchor` (absent: the centre of the bottom of the copied bodies' bounding box) and `attract`:
 //! the attractors (`geometry` and `bodies`, and optionally `far_geometry` and `far_bodies`) and the
 //! scale, offset and turn each copy takes from its distance to them. Older designs have no such

@@ -2375,6 +2375,32 @@ fn a_face_pattern_edge_margin_is_measured_from_the_copy_and_round_holes() {
     assert_eq!(square_grid(&mut s, json!({"margin": 9})), 4, "the outer pins' centres are 10 mm in, their sides 8");
 }
 
+/// With no edge margin, no copy hangs over the face's edges or holes unless `overhang` allows it.
+/// A hole of radius 13 reaches under the inner pins' sides (10√2 − 2 ≈ 12.14 from its centre)
+/// while their centres (≈ 14.14) are still on the face; pins of radius 12 on the 4 × 4 grid hang
+/// 2 mm over the plate's edges wherever they are in an outer row or column.
+#[test]
+fn a_face_pattern_keeps_its_copies_on_the_face_unless_overhang_is_allowed() {
+    let mut s = Session::default();
+    square_plate_and_pin(&mut s, Some(13.0));
+    assert_eq!(square_grid(&mut s, json!({})), 12, "the inner pins hang over the hole");
+    assert_eq!(square_grid(&mut s, json!({"overhang": true})), 16, "only their centres must be on the face");
+    let mut s = Session::default();
+    square_plate_and_pin(&mut s, None);
+    run(&mut s, "solid.cylinder", json!({"radius": 12, "height": 6, "body_name": "Wide"}));
+    let wide = |s: &mut Session, extra: Value| {
+        let mut p = json!({"bodies": ["Wide"], "face": {"face": [20, 20, 10]}, "count1": 4, "count2": 4, "group": false});
+        if let (Some(p), Some(extra)) = (p.as_object_mut(), extra.as_object()) {
+            p.extend(extra.clone());
+        }
+        let r = run(s, "solid.pattern.face", p);
+        copies_of(s, &r).len()
+    };
+    assert_eq!(wide(&mut s, json!({})), 4, "the outer ones hang over the plate's edges");
+    assert_eq!(wide(&mut s, json!({"overhang": true})), 16, "allowed to");
+    assert_eq!(wide(&mut s, json!({"overhang": true, "margin": 15})), 4, "with overhang, the margin is measured from the centres");
+}
+
 /// Avoid leaves out the copies that come within its margin of a body, a face or a point, measured
 /// from each copy: a wall 4 mm thick across the plate at x = 38…42 is 6 mm from the pins' sides
 /// at x = 30 and x = 50. With no margin, a copy that touches or holds a point goes, and so does

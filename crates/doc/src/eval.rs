@@ -10511,13 +10511,27 @@ fn pattern_transforms(
                 out.push(rotation(origin, axis, step * alignment.multiplier(i, *reversed)));
             }
         }
-        crate::PatternKind::Face { face, count1, count2, staggered, random, angle, margin, avoid, flip, anchor, attract } => {
+        crate::PatternKind::Face { face, count1, count2, staggered, random, angle, margin, overhang, avoid, flip, anchor, attract } => {
             out = face_pattern(
                 doc,
                 vals,
                 st,
                 component,
-                FaceGrid { face, count1, count2, staggered: *staggered, random, angle, margin, avoid, flip: *flip, anchor, attract, sources },
+                FaceGrid {
+                    face,
+                    count1,
+                    count2,
+                    staggered: *staggered,
+                    random,
+                    angle,
+                    margin,
+                    overhang: *overhang,
+                    avoid,
+                    flip: *flip,
+                    anchor,
+                    attract,
+                    sources,
+                },
                 count,
             )?;
         }
@@ -10534,6 +10548,7 @@ struct FaceGrid<'a> {
     random: &'a Option<crate::RandomPlacement>,
     angle: &'a Option<crate::Expr>,
     margin: &'a Option<crate::Expr>,
+    overhang: bool,
     avoid: &'a Option<Box<crate::Avoid>>,
     flip: bool,
     anchor: &'a Option<crate::PointExpr>,
@@ -10595,11 +10610,27 @@ fn face_pattern(
         }
     };
     // What the copies keep clear of, measured from each copy itself: the face's edges within the
-    // edge margin (points along them, closer together than a twentieth of it), and the Avoid
-    // picks within the avoid margin.
-    let edges = match margin > 0.0 {
-        true => kernel::face_edge_points(&body.body, index, (margin / 20.0).clamp(1e-3, 0.5))?,
-        false => Vec::new(),
+    // edge margin, and the Avoid picks within the avoid margin. The edges are measured at points
+    // along them, closer together than a twentieth of the margin; at a margin of 0, than a
+    // fiftieth of the copies' footprint, so no copy hangs over an edge or a hole. With
+    // `overhang`, the stations alone keep each copy's centre the margin in from the edges.
+    let edges = match g.overhang {
+        true => Vec::new(),
+        false => {
+            let spacing = match margin > 0.0 {
+                true => margin / 20.0,
+                false => {
+                    let mut footprint = f64::INFINITY;
+                    for n in g.sources {
+                        let bb = st.body(n).ok_or_else(|| DocError::Unknown(format!("body `{n}`")))?.body.exact_bounds()?;
+                        let size = bb.size();
+                        footprint = footprint.min(size.x.max(size.y));
+                    }
+                    footprint / 50.0
+                }
+            };
+            kernel::face_edge_points(&body.body, index, spacing.clamp(1e-3, 0.5))?
+        }
     };
     let ctx = crate::construct::Ctx { doc, vals, st: &cst, depth: 0, component };
     let mut avoid_faces = Vec::new();
