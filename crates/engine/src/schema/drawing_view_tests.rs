@@ -1,9 +1,10 @@
-use serde_json::json;
+use serde_json::{Value, json};
+use solidcraft_doc::drawing::view::ViewPlace;
 use solidcraft_doc::drawing_view::ViewSettings;
 
-use super::{BaseParams, CopyParams, EditParams, InspectParams, MoveParams, ProjectedParams, SnapshotParams, ViewSet};
+use super::{BaseParams, CopyParams, EditParams, InspectParams, MoveParams, PlaceParam, ProjectedParams, SnapshotParams, ViewSet};
 use crate::schema::input_schema_for;
-use crate::schema::tests::{assert_keys, assert_strict_keeps_todays_errors};
+use crate::schema::tests::{assert_keys, assert_strict_keeps_todays_errors, conforms};
 
 #[test]
 fn schemas_and_the_key_check_agree() {
@@ -96,6 +97,46 @@ fn the_contract_lists_the_view_settings() {
     let mut ours: Vec<String> = schema.as_value()["properties"].as_object().map(|o| o.keys().cloned().collect()).unwrap_or_default();
     ours.sort();
     assert_eq!(ours, theirs);
+}
+
+/// A place reads and writes as the record's own, and its hand-written schema says the same: what
+/// the record writes fits exactly the branch named for its kind, and what the reader refuses fits
+/// none. The match names every kind, so a new one stops this compiling until its branch is written.
+#[test]
+fn a_place_reads_and_writes_as_the_record_and_its_schema_says_so() {
+    let schema = input_schema_for::<ProjectedParams>();
+    let root = schema.as_value();
+    let branches = root["$defs"]["PlaceParam"]["oneOf"].as_array().cloned().unwrap_or_default();
+    let fitting = |v: &Value| branches.iter().filter(|b| conforms(root, b, v)).cloned().collect::<Vec<_>>();
+    for place in [ViewPlace::At([12.5, -3.0]), ViewPlace::Aligned(42.0)] {
+        let key = match place {
+            ViewPlace::At(_) => "at",
+            ViewPlace::Aligned(_) => "aligned",
+        };
+        let written = serde_json::to_value(PlaceParam(place)).unwrap();
+        assert_eq!(written, serde_json::to_value(place).unwrap());
+        assert_eq!(serde_json::from_value::<PlaceParam>(written.clone()).unwrap(), PlaceParam(place));
+        let fits = fitting(&written);
+        assert_eq!(fits.len(), 1, "{written}");
+        assert_eq!(fits[0]["required"], json!([key]), "{written}");
+    }
+    let refused = [
+        json!(5),
+        json!("at"),
+        json!({}),
+        json!({"at": [1]}),
+        json!({"at": [1, 2, 3]}),
+        json!({"at": ["a", 0]}),
+        json!({"aligned": "x"}),
+        json!({"aligned": null}),
+        json!({"at": [1, 2], "aligned": 3}),
+        json!({"AT": [1, 2]}),
+        json!({"beside": 1}),
+    ];
+    for bad in refused {
+        assert!(serde_json::from_value::<PlaceParam>(bad.clone()).is_err(), "{bad}");
+        assert_eq!(fitting(&bad), Vec::<Value>::new(), "{bad}");
+    }
 }
 
 #[test]
