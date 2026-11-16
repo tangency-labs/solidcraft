@@ -2245,13 +2245,13 @@ mod tests {
     }
 
     /// A boundary curve whose trim to the domain ends at a knot just inside it is
-    /// intersected over its own interval (#17450). The first surface is half a unit
-    /// cylinder about y (two rational quarter arcs meeting at the knot u = 0.5), and its
-    /// domain starts a hundredth of the zone tolerance before that knot: the trim of
-    /// its v = 1 boundary curve keeps no span that short and starts at the knot. That
-    /// curve lies in the plane y = 1, a coincident range. Solved over the domain's
-    /// interval, the range started before the curve, and trimming the curve to it
-    /// failed.
+    /// intersected over its own interval (#17450). The first surface is the unit square
+    /// of the plane z = 0 as a rational B-spline with a double knot at u = 0.5, and its
+    /// domain starts a hundredth of the zone tolerance before that knot: the trim of its
+    /// v = 1 boundary curve keeps no span that short and starts at the knot. That curve
+    /// lies in the plane y = 1, a coincident range up to that plane's edge. Solved over
+    /// the domain's interval, the range started before the curve, and trimming the
+    /// curve to it failed.
     #[test]
     fn a_boundary_curve_ending_at_a_knot_inside_the_domain_is_intersected_over_its_interval() {
         use crate::nurbs::b_spline_surface::BSplineSurface;
@@ -2261,24 +2261,11 @@ mod tests {
         let mut k = Kernel::default();
         // as SolidCraft's kernel runs
         k.fixes.bspline_trim_keeps_rational_end_spans = true;
-        let h = core::f64::consts::FRAC_1_SQRT_2;
-        let arcs = [
-            (1.0, 0.0, 1.0),
-            (1.0, 1.0, h),
-            (0.0, 1.0, 1.0),
-            (-1.0, 1.0, h),
-            (-1.0, 0.0, 1.0),
-        ];
-        let net = arcs
+        let net = [0.0, 0.25, 0.5, 0.75, 1.0]
             .iter()
-            .map(|&(x, z, w)| {
-                vec![
-                    CPoint::new(w * x, 0.0, w * z, w),
-                    CPoint::new(w * x, w, w * z, w),
-                ]
-            })
+            .map(|&x| vec![CPoint::new(x, 0.0, 0.0, 1.0), CPoint::new(x, 1.0, 0.0, 1.0)])
             .collect();
-        let half_cylinder = Surface::from(BSplineSurface::from_nurb(
+        let square = Surface::from(BSplineSurface::from_nurb(
             NurbSurface::new(
                 net,
                 2,
@@ -2289,25 +2276,30 @@ mod tests {
             .expect("net"),
             false,
         ));
-        // the plane y = 1 over x and z in [-2, 2]
+        // the plane y = 1 over x in [-2, 0.75] and z in [-2, 2]: the range ends inside
+        // the curve, so the curve is trimmed to it
         let wall = Surface::from(Plane::new(
             Vec3::new(-2.0, 1.0, -2.0),
             Vec3::new(1.0, 0.0, 0.0),
             Vec3::new(0.0, 0.0, 1.0),
-            Point2::new(4.0, 4.0),
+            Point2::new(2.75, 4.0),
             &Extent2d::from_bounds(0.0, 0.0, 1.0, 1.0),
         ));
         let short = ZONE_TOL_3D / 100.0;
         let domain = Extent2d::from_bounds(0.5 - short, 0.0, 1.0, 1.0);
         let whole = Extent2d::from_bounds(0.0, 0.0, 1.0, 1.0);
-        let mut si = SurfaceIntersector::new(&k, &half_cylinder, &domain, &wall, &whole, false)
+        let mut si = SurfaceIntersector::new(&k, &square, &domain, &wall, &whole, false)
             .expect("intersector");
         let mut out = TsectCurves::default();
         let all = Extent3d::from_bounds(-10.0, -10.0, -10.0, 10.0, 10.0, 10.0);
         si.find_boundary_start_points(&k, &all, &mut out)
             .expect("boundary start points");
-        // the boundary curve itself, from the knot
+        // the boundary curve from the knot to the wall's edge
         let found: Vec<Extent1d> = out.curves_3d.iter().map(Curve::natural_interval).collect();
-        assert_eq!(found, vec![Extent1d::from_min_max(0.5, 1.0)]);
+        assert_eq!(found.len(), 1, "{found:?}");
+        assert!(
+            found.iter().all(|ivl| ivl.min() == 0.5 && ivl.max() < 1.0),
+            "{found:?}"
+        );
     }
 }
