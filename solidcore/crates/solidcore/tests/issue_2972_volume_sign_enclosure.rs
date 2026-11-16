@@ -385,14 +385,16 @@ fn solids_touching_along_an_edge_pair_their_sides() {
 
 #[test]
 fn a_g2_round_decides_around_its_volume() {
-    // the default kernel and every fix: on both the round is a procedural blend (its
-    // definition) whose net is certified within a bound above 0, and it is read on its net
+    // the default kernel: the round a bare net
+    let bare = Kernel::default();
     let v = 24000.0 - 40.0 * 9.0 * (1.0 - PI / 4.0);
-    for (name, mut k) in [
-        ("default", Kernel::default()),
-        ("definition", definitions_kernel()),
+    for (name, mut k, certified) in [
+        ("bare net", bare, false),
+        ("definition", definitions_kernel(), true),
     ] {
         let mut b = rounded_box_by(&mut k, 2, 2, GN_THUMBWEIGHT_EQUAL_AREA);
+        // with the definitions on, the round is a procedural blend whose net is certified
+        // within a bound above 0: it is read on its net
         let bounds: Vec<f64> = faces(&b, None)
             .unwrap()
             .into_iter()
@@ -401,7 +403,11 @@ fn a_g2_round_decides_around_its_volume() {
                 s.procedural_blend().map(|d| d.bound())
             })
             .collect();
-        assert!(bounds.iter().any(|&e| e > 0.0), "{name}: {bounds:?}");
+        if certified {
+            assert!(bounds.iter().any(|&e| e > 0.0), "{name}: {bounds:?}");
+        } else {
+            assert!(bounds.is_empty(), "{name}: {bounds:?}");
+        }
         let e = enclose_volume(&k, &mut b, 1e-3 * v).unwrap();
         assert!(
             holds(&e, v) && e.width() <= 1e-3 * v,
