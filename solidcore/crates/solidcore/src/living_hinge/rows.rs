@@ -7,7 +7,7 @@
 //! is not clean.
 
 use super::lattice::Lattice;
-use super::near::{component, outside};
+use super::near::outside;
 use super::{HingeClip, HingeSlot, LivingHingePlan, LivingHingeSpec, SlotKind, GRAZE};
 
 /// One stretch of material along a row, in `u`.
@@ -69,13 +69,35 @@ pub fn plan_rows_zoned(
         let mut pieces = Vec::new();
         let keep_out = zone(k, lattice.row_v(k));
         let claims = one_claim_per_slot(spec, lattice, k, &row_spans);
-        for (i, span) in row_spans(k).iter().enumerate() {
+        let spans_k = row_spans(k);
+        for (i, span) in spans_k.iter().enumerate() {
             let (j0, j1) = lattice.slots_meeting(k, span.lo, span.hi);
             for j in j0..=j1 {
-                let run = |side: Side| claims.contains(&(j, i, side));
-                match plan_slot(spec, lattice, k, j, span, (run(Side::Lo), run(Side::Hi))) {
+                let claim = claims.iter().find(|c| c.slot() == j);
+                let (planned, own) = match claim {
+                    // Planned with the span before it, through the hole.
+                    Some(&Claim::Through(_, h)) if h + 1 == i => continue,
+                    Some(&Claim::Through(_, h)) if h == i => {
+                        let next = spans_k.get(i + 1).copied().unwrap_or(*span);
+                        let merged = RowSpan {
+                            hi: next.hi,
+                            hi_open: next.hi_open,
+                            hi_chain: next.hi_chain,
+                            ..*span
+                        };
+                        let slot = plan_slot(spec, lattice, k, j, &merged, (false, false));
+                        (slot, vec![span.hi, next.lo])
+                    }
+                    _ => {
+                        let run = |side: Side| claim == Some(&Claim::Run(j, i, side));
+                        let slot =
+                            plan_slot(spec, lattice, k, j, span, (run(Side::Lo), run(Side::Hi)));
+                        (slot, slot.and_then(|s| s.crossing).into_iter().collect())
+                    }
+                };
+                match planned {
                     Some(slot) => {
-                        let cut = cut_by_zone(&slot, &keep_out);
+                        let cut = cut_by_zone(&slot, &keep_out, &own);
                         if cut.is_empty() {
                             left_out += 1;
                         }
@@ -160,9 +182,8 @@ fn runs_out<'a>(
     })
 }
 
-/// The open ends of `span` that lattice slot `(k, j)` claims to run out through (design 6.6
-/// rule 2). A slot that would run out at both ends of one span would cut the span's material loose
-/// (critique B1): it claims neither and keeps material at both.
+/// The open ends of `span` that lattice slot `(k, j)` wins under design 6.6 rule 2, both when it
+/// holds both; `one_claim_per_slot` then decides (design 6.6 B1).
 fn run_claims<'a>(
     spec: &LivingHingeSpec,
     lattice: &Lattice,
@@ -182,23 +203,37 @@ fn run_claims<'a>(
         && span.hi_open
         && holds(span.hi)
         && runs_out(lattice, k, Side::Hi, span.hi, span.hi_chain, row_spans);
-    if run_lo && run_hi {
-        (false, false)
-    } else {
-        (run_lo, run_hi)
+    (run_lo, run_hi)
+}
+
+/// What one lattice slot does at the plate's edge (design 6.6 B1).
+#[derive(Clone, Copy, PartialEq)]
+enum Claim {
+    /// Slot `j` runs out through the end `side` of span `i`.
+    Run(i64, usize, Side),
+    /// Slot `j` is one piece through the air between span `i` and span `i + 1`, no overrun.
+    Through(i64, usize),
+}
+
+impl Claim {
+    fn slot(self) -> i64 {
+        match self {
+            Self::Run(j, ..) | Self::Through(j, _) => j,
+        }
     }
 }
 
-/// The run-outs of row `k` as `(j, span index, side)`, at most one per lattice slot (critique B1
-/// across spans): a slot that claims open ends of two spans, across a hole or a neck, runs out
-/// only through the one nearest its centre (the lower on a tie) and keeps out of `Z_o` at the
-/// others, so it cuts no piece loose and leaves no two tools of one slot meeting in a narrow hole.
+/// The claims of row `k`, at most one per lattice slot (design 6.6 B1). A slot that wins the
+/// upper end of one span and the lower end of the next cuts through the air between them (a hole);
+/// otherwise it runs out only through the end it wins nearest its centre, the lower on a tie, and
+/// keeps out of `Z_o` at the others: it never runs out at both ends of one span (a neck, a strip),
+/// which would cut that material loose.
 fn one_claim_per_slot<'a>(
     spec: &LivingHingeSpec,
     lattice: &Lattice,
     k: i64,
     row_spans: &impl Fn(i64) -> &'a [RowSpan],
-) -> Vec<(i64, usize, Side)> {
+) -> Vec<Claim> {
     // (j, span index, side, |c - x|) in order of j, then of u.
     let mut all: Vec<(i64, usize, Side, f64)> = Vec::new();
     for (i, span) in row_spans(k).iter().enumerate() {
@@ -215,11 +250,26 @@ fn one_claim_per_slot<'a>(
         }
     }
     all.sort_by_key(|claim| claim.0);
-    let mut out: Vec<(i64, usize, Side)> = Vec::new();
+    let mut out = Vec::new();
     for group in all.chunk_by(|a, b| a.0 == b.0) {
+        // A hole: the upper end of span i and the lower end of span i + 1, nearest the centre first.
+        let hole = group
+            .iter()
+            .filter(|a| a.2 == Side::Hi)
+            .filter_map(|a| {
+                group
+                    .iter()
+                    .find(|b| b.2 == Side::Lo && b.1 == a.1 + 1)
+                    .map(|b| (a.0, a.1, a.3.min(b.3)))
+            })
+            .min_by(|a, b| a.2.total_cmp(&b.2));
+        if let Some((j, i, _)) = hole {
+            out.push(Claim::Through(j, i));
+            continue;
+        }
         // `min_by` keeps the first of equals: the lower end on a tie.
         let best = group.iter().min_by(|a, b| a.3.total_cmp(&b.3));
-        out.extend(best.map(|claim| (claim.0, claim.1, claim.2)));
+        out.extend(best.map(|claim| Claim::Run(claim.0, claim.1, claim.2)));
     }
     out
 }
@@ -284,12 +334,16 @@ fn plan_slot(
     })
 }
 
-/// The pieces of `slot` outside `zone` (design 6.5, 6.6 rule 4). A runner's own component `K` of
-/// the zone, the one holding its crossing, does not count against it, and only the piece through
-/// the crossing stays a run-out. A piece the zone changed is `Shortened`.
-fn cut_by_zone(slot: &HingeSlot, zone: &[(f64, f64)]) -> Vec<HingeSlot> {
-    let own = slot.crossing.and_then(|x| component(zone, x));
-    let rest: Vec<(f64, f64)> = zone.iter().copied().filter(|&z| Some(z) != own).collect();
+/// The pieces of `slot` outside `zone` (design 6.5, 6.6 rule 4). The components of the zone
+/// holding a point of `own` do not count against it: a runner's `K` at its crossing, both
+/// crossings of a hole a slot cuts through (6.6 B1). Only the piece through the crossing stays a
+/// run-out. A piece the zone changed is `Shortened`.
+fn cut_by_zone(slot: &HingeSlot, zone: &[(f64, f64)], own: &[f64]) -> Vec<HingeSlot> {
+    let rest: Vec<(f64, f64)> = zone
+        .iter()
+        .copied()
+        .filter(|&(lo, hi)| !own.iter().any(|&x| lo < x && x < hi))
+        .collect();
     outside(slot.a0, slot.a1, &rest)
         .into_iter()
         .map(|(a0, a1)| {

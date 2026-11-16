@@ -515,22 +515,18 @@ fn the_box_of_a_half_disc_holds_its_top() {
     assert!(close(b.v_min, 0.0) && close(b.v_max, 2.0));
 }
 
-#[test]
-fn a_slot_over_a_narrow_hole_runs_out_through_one_side_only() {
-    use SlotKind::*;
-    // One row (v 1.5, anchored so slot 0 is centred at u 31.5), a 3 mm hole at u 30..33: slot 0
-    // holds both of the hole's crossings at delta 1.5 each. Two run-outs would end 0.2 apart in the
-    // hole (critique B1); the lower one runs out and the other piece keeps rho = 1.4 from u 33.
-    let s = spec(HingeClip::RunOut, 3.0);
+/// One row (v 1.5) anchored so slot 0 is centred at `u`, with no neighbours (design 6.6 B1, G8
+/// fixtures): every crossing is won by rule 2. The zone is every open end's near set at rho.
+fn one_row(s: &LivingHingeSpec, u: f64, spans: &[(f64, f64)]) -> LivingHingePlan {
     let b = FrameBox {
-        u_min: 0.0,
-        u_max: 60.0,
+        u_min: -30.0,
+        u_max: 90.0,
         v_min: 0.0,
         v_max: 3.0,
     };
-    let lattice = Lattice::anchored(&s, &b, (31.5, 1.5)).unwrap();
+    let lattice = Lattice::anchored(s, &b, (u, 1.5)).unwrap();
     assert_eq!(lattice.rows, (0, 0));
-    let open = |lo: f64, hi: f64| RowSpan {
+    let open = |&(lo, hi): &(f64, f64)| RowSpan {
         lo,
         hi,
         lo_open: true,
@@ -538,15 +534,94 @@ fn a_slot_over_a_narrow_hole_runs_out_through_one_side_only() {
         lo_chain: None,
         hi_chain: None,
     };
-    let got = plan_rows(&s, &lattice, |_, _| vec![open(0.0, 30.0), open(33.0, 60.0)]);
+    let rho = s.edge_reach();
+    let zone = near::merge(
+        spans
+            .iter()
+            .flat_map(|&(lo, hi)| [(lo - rho, lo + rho), (hi - rho, hi + rho)])
+            .collect(),
+    );
+    plan_rows_zoned(
+        s,
+        &lattice,
+        |_, _| spans.iter().map(open).collect(),
+        |_, _| zone.clone(),
+    )
+}
+
+#[test]
+fn a_slot_over_a_narrow_hole_is_one_piece_through_it() {
+    use SlotKind::*;
+    // A 2.9 mm hole at u 30..32.9; slot 0 (21.55..41.35) wins both crossings. Two run-outs would
+    // end 0.1 apart in the hole; it is one piece through it, ignoring both hole components.
+    let got = one_row(
+        &spec(HingeClip::RunOut, 3.0),
+        31.45,
+        &[(0.0, 30.0), (32.9, 60.0)],
+    );
     assert_ends(
         &row_ends(&got, 0),
         &[
-            (-1.4, 18.4, RunOut),
-            (21.6, 31.4, RunOut),
-            (34.4, 41.4, Shortened),
-            (44.6, 61.4, RunOut),
+            (-1.4, 18.35, RunOut),
+            (21.55, 41.35, Whole),
+            (44.55, 61.4, RunOut),
         ],
     );
     assert_eq!(got.left_out, 0);
+}
+
+#[test]
+fn a_slot_over_a_wide_hole_is_one_piece_through_it() {
+    use SlotKind::*;
+    // A 6 mm hole at u 30..36, slot 0 (23.1..42.9) centred in it; slot -1 keeps rho from u 0.
+    let got = one_row(
+        &spec(HingeClip::RunOut, 3.0),
+        33.0,
+        &[(0.0, 30.0), (36.0, 60.0)],
+    );
+    assert_ends(
+        &row_ends(&got, 0),
+        &[
+            (1.4, 19.9, Shortened),
+            (23.1, 42.9, Whole),
+            (46.1, 61.4, RunOut),
+        ],
+    );
+    assert_eq!(got.left_out, 0);
+}
+
+#[test]
+fn a_slot_over_a_neck_runs_out_at_one_end_only() {
+    use SlotKind::*;
+    // Bridge 2.5 (mu 1.25, rho 1.35, pitch 22.5). A 4 mm neck u 0..4 between the plate's edge and
+    // a hole u 4..20; slot 0 (-7.9..11.9) wins both of the neck's ends at delta 2 each: it runs out
+    // at the lower only and keeps rho from u 4 (inside 2.75 >= bridge). Slot 3 (59.6..79.4) runs
+    // out at u 60 with 0.5 inside and is left out.
+    let got = one_row(
+        &spec(HingeClip::RunOut, 2.5),
+        2.0,
+        &[(0.0, 4.0), (20.0, 60.0)],
+    );
+    assert_ends(
+        &row_ends(&got, 0),
+        &[
+            (-1.35, 2.65, RunOut),
+            (18.65, 34.4, RunOut),
+            (37.1, 56.9, Whole),
+        ],
+    );
+    assert_eq!(got.left_out, 1);
+}
+
+#[test]
+fn a_slot_over_a_strip_runs_out_at_the_end_nearer_its_centre() {
+    use SlotKind::*;
+    // A 10 mm strip plate u 0..10; the one slot holds both ends.
+    let s = spec(HingeClip::RunOut, 3.0);
+    let lower = one_row(&s, 4.0, &[(0.0, 10.0)]);
+    assert_ends(&row_ends(&lower, 0), &[(-1.4, 8.6, RunOut)]);
+    let upper = one_row(&s, 6.0, &[(0.0, 10.0)]);
+    assert_ends(&row_ends(&upper, 0), &[(1.4, 11.4, RunOut)]);
+    let tie = one_row(&s, 5.0, &[(0.0, 10.0)]);
+    assert_ends(&row_ends(&tie, 0), &[(-1.4, 8.6, RunOut)]);
 }
