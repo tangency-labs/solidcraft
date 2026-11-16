@@ -3560,11 +3560,12 @@ pub fn control(app: &mut SolveApp, p: &serde_json::Value) -> Result<serde_json::
         .transpose()?;
     let button = rest.remove("button");
     if let Some(b) = button.as_ref().and_then(|v| v.as_str())
-        && !["ok", "cancel", "apply", "defaults", "restart_graphics"].contains(&b)
+        && !["ok", "cancel", "apply", "defaults", "restart_graphics", "launch_vr"].contains(&b)
     {
-        return Err(format!("unknown button `{b}` (ok, cancel, apply, defaults, restart_graphics)"));
+        return Err(format!("unknown button `{b}` (ok, cancel, apply, defaults, restart_graphics, launch_vr)"));
     }
-    if button.as_ref().and_then(serde_json::Value::as_str) == Some("restart_graphics") {
+    // A restart that cannot happen is refused before anything else in the request is applied.
+    if matches!(button.as_ref().and_then(serde_json::Value::as_str), Some("restart_graphics" | "launch_vr")) {
         check_graphics_restart(app)?;
     }
     let stand_up = rest.remove("stand_up").and_then(|v| v.as_bool());
