@@ -103,6 +103,7 @@ const SOLIDCRAFT_C494A18: &[&str] = &[
     "point_solve_keeps_triangle_guess",
     "proto_edge_self_loop_on_vertex_degenerate",
     "proto_edge_splits_at_captured_vertices",
+    "proto_vertex_miss_is_false",
     "revolution_round_offset_collapses",
     "revolve_analytic_profile_faces",
     "revolve_holed_profile_void",

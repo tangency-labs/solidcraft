@@ -4297,38 +4297,9 @@ fn run_proto(
                             }
                         }
                         if !skip {
-                            #[cfg(test)]
-                            let listed_before = r.mgr.proto_vertices().contains(&v);
                             let res = r
                                 .mgr
                                 .remove_coincident_no_edge_proto_vertex(k, &r.pool, e, v);
-                            // WR-73 certificate, replayed on every case by the unit's
-                            // tests: the answer says whether the proto vertex was
-                            // removed. `true` takes a listed vertex off the list; `false`
-                            // leaves the list as it was (upstream answered `true` on a
-                            // miss and kept the vertex listed).
-                            #[cfg(test)]
-                            if let Ok(answer) = res {
-                                let listed_after = r.mgr.proto_vertices().contains(&v);
-                                if answer {
-                                    assert!(
-                                        listed_before && !listed_after,
-                                        "WR-73: `true` but the vertex was not removed \
-                                         (listed {listed_before} -> {listed_after})"
-                                    );
-                                    super::topology_brep_p5::transform_certificate::fired(|f| {
-                                        f.wr73_removed += 1;
-                                    });
-                                } else {
-                                    assert_eq!(
-                                        listed_after, listed_before,
-                                        "WR-73: `false` but the vertex's listing changed"
-                                    );
-                                    super::topology_brep_p5::transform_certificate::fired(|f| {
-                                        f.wr73_kept += 1;
-                                    });
-                                }
-                            }
                             match st(res)? {
                                 Ok(f) => out.push(b(f)),
                                 Err(s) => {
@@ -7528,80 +7499,6 @@ impl UnitDiff for Runner {
 mod tests {
     use super::*;
 
-    /// The `topology.proto_topology_p1` rows WR-73 moved: each has a remove that answered
-    /// `false` and kept its proto vertex, and no transform.
-    const WR73_P1: [&str; 31] = [
-        "gen0012",
-        "gen0093",
-        "gen0119",
-        "gen0227",
-        "gen0394",
-        "gen0429",
-        "gen0454",
-        "gen0455",
-        "gen0470",
-        "gen0515",
-        "gen0543",
-        "gen0572",
-        "gen0591",
-        "gen0600",
-        "gen0655",
-        "gen0659",
-        "gen0688",
-        "gen0690",
-        "gen0753",
-        "gen0760",
-        "gen0864",
-        "gen0898",
-        "gen0899",
-        "gen0964",
-        "gen1067",
-        "gen1170",
-        "gen1321",
-        "gen1355",
-        "gen1378",
-        "gen1391",
-        "gen1431",
-    ];
-    /// The `topology.proto_topology_p3` rows WR-73 moved: each has a remove that answered
-    /// `false` and kept its proto vertex.
-    const WR73_P3: [&str; 35] = [
-        "gen0006",
-        "gen0090",
-        "gen0257",
-        "gen0334",
-        "gen0415",
-        "gen0440",
-        "gen0603",
-        "gen0740",
-        "gen0819",
-        "gen0924",
-        "gen1135",
-        "gen1161",
-        "gen1276",
-        "gen1384",
-        "gen1388",
-        "gen1515",
-        "gen1535",
-        "gen1651",
-        "gen1673",
-        "gen2003",
-        "gen2010",
-        "gen2034",
-        "gen2226",
-        "gen2242",
-        "gen2260",
-        "gen2347",
-        "gen2434",
-        "gen2446",
-        "gen2613",
-        "gen2639",
-        "gen2664",
-        "gen2757",
-        "gen2847",
-        "gen2907",
-        "gen2950",
-    ];
     /// The p1 rows whose transforms scale the tolerances (WR-507 / WR-508 closed form).
     const SCALED_P1: [&str; 23] = [
         "constructed_sequence_box_identity_between_edits",
@@ -7642,37 +7539,25 @@ mod tests {
         "public_scale_torus_reflection",
     ];
 
-    /// Every case of this unit and of `topology.proto_topology_p3` (which runs on this
-    /// unit's script engine) replays against its blessed golden line through the
-    /// runner's test-only certificates: the WR-73 one at each
-    /// `RemoveCoincidentNoEdgeProtoVertex` (the answer says whether the proto vertex was
-    /// removed) and the WR-507 / WR-508 transform one at each API transform of a B-rep.
-    /// Each row the retirement moved must have gone through its certified site.
+    /// Every case of this unit replays against its blessed golden line through the
+    /// runner's test-only WR-507 / WR-508 certificate at each API transform of a B-rep.
+    /// Each row the retirement moved must have gone through a certified transform.
     #[test]
-    fn every_case_meets_the_wr73_and_transform_certificates() {
+    fn every_case_meets_the_transform_certificate() {
         use super::super::topology_brep_p5::transform_certificate::{
             replay_matches_golden, Fired,
         };
         let p1 = replay_matches_golden(&Runner);
-        let p3 = replay_matches_golden(&super::super::topology_proto_topology_p3::Runner);
         let get = |m: &BTreeMap<String, Fired>, c: &str| {
             *m.get(c).unwrap_or_else(|| panic!("moved row {c} is not a case"))
         };
-        for c in WR73_P1 {
-            let f = get(&p1, c);
-            assert!(f.wr73_kept > 0 && f.scaled + f.unscaled == 0, "{c}: {f:?}");
-        }
-        for c in WR73_P3 {
-            let f = get(&p3, c);
-            assert!(f.wr73_kept > 0, "{c}: {f:?}");
-        }
         for c in SCALED_P1 {
             let f = get(&p1, c);
-            assert!(f.scaled > 0 && f.wr73_kept == 0, "{c}: {f:?}");
+            assert!(f.scaled > 0, "{c}: {f:?}");
         }
         for c in UNIT_SCALE_P1 {
             let f = get(&p1, c);
-            assert!(f.unscaled > 0 && f.scaled == 0 && f.wr73_kept == 0, "{c}: {f:?}");
+            assert!(f.unscaled > 0 && f.scaled == 0, "{c}: {f:?}");
         }
     }
 

@@ -77,6 +77,7 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.fillet_refuse_face_consuming_blends = true;
     f.fillet_chamfer_cone_on_arc = true;
     f.keep_operand_uv_trims = true;
+    f.proto_vertex_miss_is_false = true;
     f.revolve_analytic_profile_faces = true;
     f.revolve_holed_profile_void = true;
     f.join_touching_loops = true;

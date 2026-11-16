@@ -719,10 +719,6 @@ pub(super) mod transform_certificate {
     /// The certified checks one case went through (see [`begin_case`]).
     #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
     pub(crate) struct Fired {
-        /// WR-73: removes that answered `true` and removed a listed proto vertex.
-        pub(crate) wr73_removed: usize,
-        /// WR-73: removes that answered `false` and left the proto vertex as it was.
-        pub(crate) wr73_kept: usize,
         /// WR-507 / WR-508: transforms that scaled the tolerances (closed form checked).
         pub(crate) scaled: usize,
         /// Transforms with a scale of 1 or no tolerance scaling (nothing changed).

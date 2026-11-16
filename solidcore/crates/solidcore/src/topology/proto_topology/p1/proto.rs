@@ -3749,11 +3749,12 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
     /// Removes the proto vertex `pv` when it has no proto edges and lies on the curve
     /// of `pe` (the first definition's curve over the proto edge's interval, within
     /// twice the proto edge's tolerance) (`RemoveCoincidentNoEdgeProtoVertex`; the
-    /// proto vertex is unlisted, not deleted). When the point solve fails or finds
-    /// nothing the answer is `false`, with nothing removed (WR-73; upstream returns
-    /// `SM_SUCCESS` from its `SmBoolean` function there, which reads as `true`). A proto
-    /// vertex that has proto edges is `false` without its point solve (not upstream: no
-    /// outcome of the solve gives another answer).
+    /// proto vertex is unlisted, not deleted). As upstream, `true` is also returned,
+    /// with nothing removed, when the point solve fails or finds nothing (upstream
+    /// returns `SM_SUCCESS` from its `SmBoolean` function there), unless
+    /// `Kernel::fixes.proto_vertex_miss_is_false` is set (WR-73, then `false`). With that
+    /// opt-in a proto vertex that has proto edges is `false` without its point solve (not
+    /// upstream: no outcome of the solve gives another answer).
     ///
     /// # Errors
     ///
@@ -3788,10 +3789,11 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
         let crv = curve_of(geometry, crv_handle)?;
         let crv_ivl = e.xsect_interval;
 
-        // (not upstream) a proto vertex with proto edges is never removed, and a miss is
-        // FALSE as well (WR-73): the answer is FALSE whatever the point solve finds, so it
-        // is not run. A boolean of N tools in one call ran 4 N^2 - 2 N of these solves for
-        // nothing.
+        // (not upstream) a proto vertex with proto edges is never removed, and with
+        // `proto_vertex_miss_is_false` a miss is FALSE as well: the answer is FALSE whatever
+        // the point solve finds, so it is not run. (Without the opt-in a miss is TRUE, which
+        // ends the caller's loop over the proto edges, and the solve decides it.) A boolean
+        // of N tools in one call ran 4 N^2 - 2 N of these solves for nothing.
         //
         // Under an already-fired cancel token the solve runs as it did (it is where this
         // test notices the cancel, when it builds a curve's cache; a line's or a circle's
@@ -3799,7 +3801,10 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
         // skipped solve leaves its curve's cache cold, which a later cancelled call can
         // show as another label or outcome; the boolean asks the token again after this
         // step.
-        if !p.proto_edges.is_empty() && k.check_cancelled(OP_REMOVE_COINCIDENT).is_ok() {
+        if k.fixes.proto_vertex_miss_is_false
+            && !p.proto_edges.is_empty()
+            && k.check_cancelled(OP_REMOVE_COINCIDENT).is_ok()
+        {
             return Ok(false);
         }
 
@@ -3818,13 +3823,15 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
             SolutionRequested::All,
             &opts,
         ))?;
-        // a miss is FALSE: the proto vertex is not removed (WR-73; upstream returns
-        // SM_SUCCESS here, which reads as TRUE)
+        // upstream returns SM_SUCCESS here, which reads as TRUE (the proto vertex is
+        // not removed): plan/upstream-issues.md WR-73; FALSE with the opt-in
+        // `Kernel::fixes.proto_vertex_miss_is_false` (tangency-labs/solidcore#848)
+        let missed = !k.fixes.proto_vertex_miss_is_false;
         let Some(sols) = sols else {
-            return Ok(false);
+            return Ok(missed);
         };
         if sols.is_empty() {
-            return Ok(false);
+            return Ok(missed);
         }
 
         // When the ProtoVertex is Edgeless and XSects a ProtoEdge - remove it

@@ -168,9 +168,10 @@
 //!   call `GetType()` on null objects there (plan/upstream-issues.md UB-98).
 //! - **Manager destructor** leaves the objects it does not list in the store (upstream
 //!   allocates them from the context).
-//! - `RemoveCoincidentNoEdgeProtoVertex` returns `FALSE` when the point solve finds
-//!   nothing, where upstream's `return SM_SUCCESS` reads as `TRUE`
-//!   (plan/upstream-issues WR-73; tangency-labs/solidcore#848).
+//! - `RemoveCoincidentNoEdgeProtoVertex` keeps upstream's `return SM_SUCCESS` (read as
+//!   `TRUE`) when the point solve finds nothing (plan/upstream-issues.md WR-73); the
+//!   opt-in `Kernel::fixes.proto_vertex_miss_is_false` returns `FALSE` there
+//!   (tangency-labs/solidcore#848).
 //! - `Dump`, `Draw` and the `SM_DEBUG_CODE` blocks are not ported.
 //! - **Recursion.** None.
 
@@ -868,14 +869,12 @@ mod tests {
             .remove_coincident_no_edge_proto_vertex(&k, &geo, pe, v2)
             .unwrap());
         assert!(m.proto_vertices().is_empty());
-        // off the curve: (1, 5, 0) is 5 from the line y = z = 0, far past the 1e-5
-        // tolerance, so the point solve misses and the answer is `false` (WR-73: upstream's
-        // SM_SUCCESS read as TRUE); the vertex stays listed either way
+        // off the curve: no solution, and upstream's SM_SUCCESS reads as TRUE
         let v3 = m
             .new_proto_vertex(Point3::new(1.0, 5.0, 0.0), 1e-5)
             .unwrap();
         m.add_proto_vertex(v3);
-        assert!(!m
+        assert!(m
             .remove_coincident_no_edge_proto_vertex(&k, &geo, pe, v3)
             .unwrap());
         assert_eq!(m.proto_vertices(), &[v3]);
@@ -883,14 +882,15 @@ mod tests {
         assert_eq!(k.work_counters.proto_vertex_point_solves(), 2);
     }
 
-    /// A proto vertex that has proto edges is never removed and a miss is `false` too
-    /// (WR-73), so its point solve is not run: on the curve or off
+    /// With `proto_vertex_miss_is_false`, a proto vertex that has proto edges is never
+    /// removed and a miss is `false` too, so its point solve is not run: on the curve or off
     /// it, the answer is `false` and no solve is counted. An edge-less proto vertex is solved
     /// as before, and so is every proto vertex under a fired cancel token, where the solve is
     /// what may report the cancel.
     #[test]
     fn a_proto_vertex_with_proto_edges_is_not_solved() {
         let mut k = Kernel::default();
+        k.fixes.proto_vertex_miss_is_false = true;
         let geo = Geo(vec![line([0.0, 0.0, 0.0], [2.0, 0.0, 0.0])]);
         let mut m = manager();
         let ivl = geo.0[0].natural_interval();
@@ -958,12 +958,13 @@ mod tests {
         assert_eq!(k.work_counters.proto_vertex_point_solves(), 3);
     }
 
-    /// tangency-labs/solidcore#848 (WR-73): a proto vertex the proto edge does not reach
-    /// is reported as not removed, so the caller goes on testing it against the
-    /// remaining proto edges.
+    /// tangency-labs/solidcore#848 (WR-73): with the opt-in, a proto vertex the proto
+    /// edge does not reach is reported as not removed, so the caller goes on testing it
+    /// against the remaining proto edges.
     #[test]
     fn issue_848_no_hit_is_false() {
-        let k = Kernel::default();
+        let mut k = Kernel::default();
+        k.fixes.proto_vertex_miss_is_false = true;
         let geo = Geo(vec![line([0.0, 0.0, 0.0], [2.0, 0.0, 0.0])]);
         let mut m = manager();
         let ivl = geo.0[0].natural_interval();
@@ -1008,6 +1009,11 @@ mod tests {
             .remove_coincident_no_edge_proto_vertex(&k, &geo, pe, on)
             .unwrap());
         assert_eq!(m.proto_vertices(), &[off]);
+        // the default keeps upstream's TRUE
+        k.fixes.proto_vertex_miss_is_false = false;
+        assert!(m
+            .remove_coincident_no_edge_proto_vertex(&k, &geo, pe, off)
+            .unwrap());
     }
 
     #[test]
