@@ -3222,7 +3222,7 @@
 {"case":"thin0003","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[0.0,1.0,0.0,-7.738805761569829,-12.813852512140226]}}
 {"case":"thin0004","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[0.0,1.0,4.070144838902081e-15,-12.805517442405346,-8.264676555460904]}}
 {"case":"thin0005","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[0.0,0.0]}}
-{"case":"thin0006","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[0.0,1.0,0.00010242706385028679,0.35947970912966104,9.810772701874383]}}
+{"case":"thin0006","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[0.0,1.0,0.0001024270638515853,0.3594797091296616,9.810772701874383]}}
 {"case":"thin0007","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[0.0,0.0]}}
 {"case":"thin0008","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[0.0,1.0,4.440892098500626e-16,-7.787832209878848,-1.8629189796706778]}}
 {"case":"thin0009","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[0.0,1.0,0.056624234942044,-7.745149687995325,-9.02479936943801]}}
@@ -3236,10 +3236,10 @@
 {"case":"thin0017","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[0.0,0.0]}}
 {"case":"thin0018","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[0.0,1.0,1.5441860449996414,-0.048899761935668806,-11.637778959465667]}}
 {"case":"thin0019","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[0.0,0.0]}}
-{"case":"thin0020","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[0.0,1.0,9.234599533205852e-10,-4.287567843573364,-8.133138100112944]}}
+{"case":"thin0020","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[0.0,1.0,9.234592953519264e-10,-4.287564350031044,-8.133138100112944]}}
 {"case":"thin0021","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[0.0,0.0]}}
 {"case":"thin0022","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[0.0,0.0]}}
-{"case":"thin0023","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[0.0,1.0,0.047833941029825834,-1.7414488800227161,-3.0538653415081285]}}
+{"case":"thin0023","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[0.0,1.0,0.04783394102982673,-1.7414488800227166,-3.0538653415081285]}}
 {"case":"thin0024","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[0.0,1.0,0.00010184144141292291,-2.881848432195204,-9.381644928109095]}}
 {"case":"thin0025","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[0.0,1.0,5.801394109417253,-1.5274438055723927,8.42624947082571]}}
 {"case":"thin0026","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[0.0,1.0,0.00001722704415959749,2.2679130211375713,-8.096486306170856]}}
@@ -3320,12 +3320,12 @@
 {"case":"thin0101","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[0.0,1.0,1.04032682742206,1.270766397494038,-0.14989098605068207]}}
 {"case":"thin0102","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[0.0,1.0,4.440892098500626e-16,-8.506303563309718,-2.481796180385084]}}
 {"case":"thin0103","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[0.0,1.0,9.930136612989092e-16,2.11982470396012,3.2049644113005358]}}
-{"case":"thin0104","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[0.0,1.0,0.00003693299296302416,1.0054287020629822,2.7129190553881184]}}
+{"case":"thin0104","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[0.0,1.0,0.00003693762171881148,7.094863953327621,2.7129190570197395]}}
 {"case":"thin0105","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[0.0,1.0,0.8448662926273531,-1.3392745215178987,-8.364273689260981]}}
 {"case":"thin0106","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[0.0,1.0,0.09077642468995463,-11.232139293026538,-9.272268702517863]}}
 {"case":"thin0107","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[0.0,1.0,6.119186364539329e-10,3.3685370598858797,-0.6215563130197417]}}
 {"case":"thin0108","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[0.0,1.0,0.00010711081370259686,4.455512638691546,-4.86670847807407]}}
-{"case":"thin0109","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[0.0,1.0,0.06060969843322692,2.248798659183514,-1.465674439279928]}}
+{"case":"thin0109","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[0.0,1.0,0.06060969843322689,2.2487986591835134,-1.465674439279928]}}
 {"case":"thin0110","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[0.0,1.0,2.8031163486993513,4.75727258887642,3.2433206514455097]}}
 {"case":"thin0111","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[0.0,0.0]}}
 {"case":"thin0112","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[0.0,1.0,0.12324841815094585,-6.599973744789089,-14.278775143484053]}}
@@ -3361,7 +3361,7 @@
 {"case":"thin0142","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[0.0,1.0,1.067644452279915e-9,-10.67469922758752,-1.0772547144647824]}}
 {"case":"thin0143","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[0.0,1.0,3.5892897592084014,-5.09804402167304,1.1784272183149191]}}
 {"case":"thin0144","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[0.0,0.0]}}
-{"case":"thin0145","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[0.0,1.0,2.089974398037971e-10,8.16851337744371,-1.381972421149472]}}
+{"case":"thin0145","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[0.0,1.0,2.0899636112870885e-10,8.16851337744371,-1.3819734391350407]}}
 {"case":"thin0146","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[0.0,1.0,0.5217286352953538,5.2319024210416485,-7.693082352563537]}}
 {"case":"thin0147","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[0.0,1.0,0.00010492568602663019,-1.2427353265694165,7.7710348222896695]}}
 {"case":"thin0148","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[0.0,0.0]}}
