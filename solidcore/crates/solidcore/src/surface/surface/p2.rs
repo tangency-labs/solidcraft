@@ -4704,6 +4704,17 @@ pub trait SurfaceEvaluate {
     /// Those of the evaluation.
     fn evaluate_point(&self, k: &Kernel, uv: Point2) -> Result<Point3>;
 
+    /// The position an evaluation at `uv` writes even when its status fails (a cone's
+    /// NURB position at the apex, where the STEP parameters cannot be found): `None`
+    /// when none is written. Unported and cancelled evaluations still propagate.
+    ///
+    /// # Errors
+    ///
+    /// [`SolidError::Unported`] and [`SolidError::Cancelled`] of the evaluation.
+    fn evaluate_point_written(&self, k: &Kernel, uv: Point2) -> Result<Option<Point3>> {
+        crate::error::ignored(self.evaluate_point(k, uv))
+    }
+
     /// The virtual `operator==` (unit `surface.surface_p1`).
     ///
     /// # Errors
@@ -4828,6 +4839,19 @@ impl SurfaceEvaluate for Surface {
 
     fn evaluate_point(&self, k: &Kernel, uv: Point2) -> Result<Point3> {
         Self::evaluate_point(self, k, uv)
+    }
+
+    fn evaluate_point_written(&self, k: &Kernel, uv: Point2) -> Result<Option<Point3>> {
+        if let Some(p) = crate::error::ignored(Surface::evaluate_point(self, k, uv))? {
+            return Ok(Some(p));
+        }
+        let flags = EvaluateFlags::default();
+        Ok(
+            crate::error::ignored(self.evaluate_ignoring_status(k, uv, 0, 0, flags))?
+                .flatten()
+                .and_then(|m| m.first().and_then(|row| row.first()).copied())
+                .filter(|p| !p.is_undef()),
+        )
     }
 
     fn knots(
@@ -7667,16 +7691,11 @@ impl<O: SolutionObject> LsiGlobalSolver<'_, '_, O> {
             Ok(true)
         } else {
             // check lineVector for bounding box intersections
-            // (with the opt-in fix a box that cannot be intersected rules nothing out,
-            // WR-663, tangency-labs/smlib 21dcf69)
+            // (a box that cannot be intersected rules nothing out, as the fork, WR-663,
+            // tangency-labs/smlib 21dcf69)
             let hit = match surf_box.intersect_line(point_on_line, self.line_vector) {
                 Ok(h) => h,
-                Err(e)
-                    if self.kernel.fixes.query_statuses_pass_on
-                        && !e.is_unported_or_cancelled() =>
-                {
-                    return Ok(true);
-                }
+                Err(e) if !e.is_unported_or_cancelled() => return Ok(true),
                 Err(e) => return Err(e),
             };
             Ok(hit.count() > 0)

@@ -177,7 +177,7 @@ use crate::geom::extent2d::Extent2d;
 use crate::geom::object::{NotifyOperation, ObjectRef};
 use crate::geom::periodic_extent1d::PeriodicExtent1d;
 use crate::geom::tol::are_same_to_tol;
-use crate::geom::vector2d::{Point2, Vec2};
+use crate::geom::vector2d::Point2;
 use crate::heal::face_props::{FaceProps, LoopObject, Tri};
 use crate::intersect::curve_class::p1::CurveClassification;
 use crate::intersect::point_class::{ClassGeometry, PointClassType};
@@ -214,13 +214,6 @@ const OP: &str = "topology::face::p1";
 /// The deepest [`split_at_seam`] recursion accepted (upstream recurses once, from a U
 /// merge into the V merges of the faces it made).
 pub const MAX_SPLIT_AT_SEAM_DEPTH: usize = 8;
-
-/// A status SMLib drops and the fork passes on (`SER`, tangency-labs/smlib 6997962):
-/// returned with the opt-in [`crate::kernel::UpstreamFixes::query_statuses_pass_on`],
-/// handed on to the site's own ignore otherwise.
-fn pass<T>(k: &Kernel, r: Result<T>) -> Result<Result<T>> {
-    crate::error::passed_on(r, k.fixes.query_statuses_pass_on)
-}
 
 fn null(reason: &'static str) -> SolidError {
     SolidError::invalid_input(OP, reason)
@@ -1573,11 +1566,9 @@ fn swap_uv_notifying(
     surface_deref(b, f)?;
     let x_axis = Vec3::new(1.0, 1.0, 0.0).unitize()?;
     let mut mirror = Axis2Placement::default();
-    // x:[1 1 0] y:[0 0 1] z=cross(x,y):[1 -1 0] (status ignored)
-    let _ = pass(
-        k,
-        mirror.set_canonical(Point3::new(0.0, 0.0, 0.0), x_axis, Vec3::new(0.0, 0.0, 1.0)),
-    )?;
+    // x:[1 1 0] y:[0 0 1] z=cross(x,y):[1 -1 0] (status ignored upstream, passed on by
+    // the fork, tangency-labs/smlib 6997962)
+    mirror.set_canonical(Point3::new(0.0, 0.0, 0.0), x_axis, Vec3::new(0.0, 0.0, 1.0))?;
 
     // Mirror the UV trims and swap the surface (the steps that can fail) before changing
     // the face, so that a failure leaves the face unchanged.
@@ -1834,17 +1825,17 @@ fn shrink_geometry_notifying(
         None => false,
     };
 
-    // Trim the surface (status ignored)
+    // Trim the surface (status ignored upstream, passed on by the fork)
     if let Some(s) = b.face_mut(f)?.surface.as_mut() {
-        ignore_status(pass(k, s.trim_with_domain_with(k, &mut new_domain, trim))?)?;
+        s.trim_with_domain_with(k, &mut new_domain, trim)?;
     }
 
-    // remove all associated UVTrimCurves (status ignored; passed on with the opt-in fix,
+    // remove all associated UVTrimCurves (status ignored upstream; passed on as the fork,
     // tangency-labs/smlib 6997962, which keeps the curve trims below ignored); not
     // where the trim kept the surface's parameterization (WR-700): they lie on it as
     // they did and are kept
     if !same_map {
-        ignore_status(pass(k, remove_uv_trim_curves_notifying(b, f, notify))?)?;
+        remove_uv_trim_curves_notifying(b, f, notify)?;
     }
 
     // Now Trim all Curves to the face edges
@@ -1932,7 +1923,8 @@ fn class_is_quiet<O: LoopObject>(c: &CurveClassification<O>) -> bool {
 }
 
 /// The UV drop of curve point `param` of `curve` on `surface`
-/// (`EvaluateGeometric` then `DropPoint` and `DropVectors`, statuses ignored).
+/// (`EvaluateGeometric` then `DropPoint` and `DropVectors`; statuses ignored upstream,
+/// passed on as the fork, tangency-labs/smlib 6997962).
 fn sample_uv(
     k: &Kernel,
     curve: &Curve,
@@ -1941,33 +1933,25 @@ fn sample_uv(
     param: f64,
     pv: &mut [Vec3; 2],
 ) -> Result<Point2> {
-    if let Some(v) = ignored(pass(k, evaluate_geometric(k, curve, param, 1, true))?)? {
-        if let [p, d, ..] = v.as_slice() {
-            *pv = [*p, *d];
-        }
+    let v = evaluate_geometric(k, curve, param, 1, true)?;
+    if let [p, d, ..] = v.as_slice() {
+        *pv = [*p, *d];
     }
-    let mut uv = Vec2::UNDEF;
-    if let Some(r) = ignored(pass(
-        k,
-        surface.drop_point::<NoObject>(k, pv[0], uv_domain, &DropPointOptions::default()),
-    )?)? {
-        uv = r.result_uv;
-    }
+    let uv = surface
+        .drop_point::<NoObject>(k, pv[0], uv_domain, &DropPointOptions::default())?
+        .result_uv;
     // DropVectors of the tangent (its output is never read)
-    ignore_status(pass(
-        k,
-        drop_vectors_at(k, surface, uv, Side::Left, Side::Left, &pv[1..]),
-    )?)?;
+    drop_vectors_at(k, surface, uv, Side::Left, Side::Left, &pv[1..])?;
     Ok(uv)
 }
 
 /// The UV point of vertex use `vu`: its cached vertex/face gap's face UV, else
-/// `ComputeUVPoint(.., FALSE)` (status ignored, keeping `prev`).
-fn vertexuse_uv(k: &Kernel, b: &mut Brep, vu: VertexuseId, prev: Point2) -> Result<Point2> {
+/// `ComputeUVPoint(.., FALSE)` (status ignored upstream, passed on as the fork).
+fn vertexuse_uv(k: &Kernel, b: &mut Brep, vu: VertexuseId) -> Result<Point2> {
     if let Some(Some(gap)) = ignored(vu1::vertex_face_gap(k, b, vu, false))? {
         return Ok(gap.face_uv);
     }
-    Ok(ignored(pass(k, vu1::compute_uv_point(k, b, vu, false))?)?.unwrap_or(prev))
+    vu1::compute_uv_point(k, b, vu, false)
 }
 
 /// `MoveSeam`: on a periodic B-spline surface whose seam the face's edges cross (or
@@ -2067,9 +2051,9 @@ pub fn move_seam_notified<O: LoopObject>(
     let ivl_u = uv_domain.u_interval();
     let ivl_v = uv_domain.v_interval();
     let mut periodic_u = PeriodicExtent1d::full(ivl_u.length());
-    let _ = pass(k, periodic_u.set_min_max(0.0, 0.0, None, true))?;
+    periodic_u.set_min_max(0.0, 0.0, None, true)?;
     let mut periodic_v = PeriodicExtent1d::full(ivl_v.length());
-    let _ = pass(k, periodic_v.set_min_max(0.0, 0.0, None, true))?;
+    periodic_v.set_min_max(0.0, 0.0, None, true)?;
 
     // check State - SmBSplineSurfaces only
     if !surface0.is_kind_of(B_SPLINE_SURFACE_TYPE)? {
@@ -2158,7 +2142,7 @@ pub fn move_seam_notified<O: LoopObject>(
                     &mut periodic_v
                 };
                 let s = comp(uv_prev, ii) - ivl.min();
-                let _ = pass(k, periodic.set_min_max(s, s, None, true))?;
+                periodic.set_min_max(s, s, None, true)?;
             }
 
             'loops: for (j0, &lu) in loopuses.iter().enumerate() {
@@ -2235,9 +2219,8 @@ pub fn move_seam_notified<O: LoopObject>(
             let mut params: Vec<f64> = Vec::new();
             let mut unique: Vec<f64> = Vec::new();
             let mut param_ivl = Extent1d::new();
-            let mut pt_uv = uv_domain.mid();
             for &vu in &vus {
-                pt_uv = vertexuse_uv(k, b, vu, pt_uv)?;
+                let pt_uv = vertexuse_uv(k, b, vu)?;
                 let p = comp(pt_uv, ii);
                 params.push(p);
                 param_ivl.add_value(p);
@@ -2298,7 +2281,7 @@ pub fn move_seam_notified<O: LoopObject>(
                 let target = at(max_space_indx)?;
                 let mut paired: Vec<VertexuseId> = Vec::new();
                 for &vu in &vus {
-                    pt_uv = vertexuse_uv(k, b, vu, pt_uv)?;
+                    let pt_uv = vertexuse_uv(k, b, vu)?;
                     if are_same_to_tol(target, comp(pt_uv, ii), EFF_ZERO_PARAM) {
                         paired.push(vu);
                     }
@@ -2347,9 +2330,7 @@ pub fn move_seam_notified<O: LoopObject>(
             let mut dist = BIG_DOUBLE;
             let mut this_ivl = periodic;
             this_ivl.set_full_period(false);
-            let knots = ignored(pass(k, surface.knots_with_nurb(k, surf_param, None))?)?
-                .map(|(k, _)| k)
-                .unwrap_or_default();
+            let knots = surface.knots_with_nurb(k, surf_param, None)?.0;
             let k0 = knots.first().copied().unwrap_or(0.0);
             for (jj, &knot) in knots.iter().enumerate() {
                 let this_knot = knot - k0;
@@ -2357,7 +2338,7 @@ pub fn move_seam_notified<O: LoopObject>(
                 if this_dist < dist {
                     let lo = periodic.map_value(this_knot - ivl.min() - far);
                     let hi = periodic.map_value(this_knot - ivl.min() + far);
-                    let _ = pass(k, this_ivl.set_min_max(lo, hi, None, false))?;
+                    this_ivl.set_min_max(lo, hi, None, false)?;
                     if periodic.are_disjoint(&this_ivl) {
                         best = Some(jj);
                         dist = this_dist;
@@ -2399,10 +2380,9 @@ pub fn move_seam_notified<O: LoopObject>(
             let mut joined = Surface::from(joined);
             if surface_is_analytic {
                 if let SurfaceKind::BSpline(j) = joined.kind() {
-                    if let Some(a) = ignored(pass(k, j.copy_and_add_analytics(k))?)? {
-                        if a.is_kind_of(B_SPLINE_SURFACE_TYPE)? {
-                            joined = a;
-                        }
+                    let a = j.copy_and_add_analytics(k)?;
+                    if a.is_kind_of(B_SPLINE_SURFACE_TYPE)? {
+                        joined = a;
                     }
                 }
             }
@@ -2460,25 +2440,19 @@ pub fn move_seam_notified<O: LoopObject>(
         ))?
         .unwrap_or(false)
     {
-        // status ignored upstream
-        let pass_on = k.fixes.query_statuses_pass_on;
-        if let Some(s) = ignored(crate::error::passed_on(
-            split_at_seam_depth(
-                k,
-                b,
-                env,
-                f,
-                crv_class_u,
-                crv_class_v,
-                problem,
-                props,
-                resolve,
-                0,
-            ),
-            pass_on,
-        )?)? {
-            out.split = s;
-        }
+        // status ignored upstream, passed on by the fork (tangency-labs/smlib 6997962)
+        out.split = split_at_seam_depth(
+            k,
+            b,
+            env,
+            f,
+            crv_class_u,
+            crv_class_v,
+            problem,
+            props,
+            resolve,
+            0,
+        )?;
     }
     Ok(out)
 }
@@ -2806,23 +2780,20 @@ fn split_at_seam_merges<O: LoopObject>(
             ))?
             .unwrap_or(false);
             if has {
-                let pass_on = k.fixes.query_statuses_pass_on;
-                let s = ignored(crate::error::passed_on(
-                    split_at_seam_depth(
-                        k,
-                        b,
-                        env.as_deref_mut(),
-                        f,
-                        &mut cu,
-                        &mut cv,
-                        this_problem,
-                        props,
-                        resolve,
-                        depth + 1,
-                    ),
-                    pass_on,
-                )?)?
-                .unwrap_or_default();
+                // (status ignored upstream, passed on by the fork, tangency-labs/smlib
+                // 6997962)
+                let s = split_at_seam_depth(
+                    k,
+                    b,
+                    env.as_deref_mut(),
+                    f,
+                    &mut cu,
+                    &mut cv,
+                    this_problem,
+                    props,
+                    resolve,
+                    depth + 1,
+                )?;
                 out.faces.extend_from_slice(&s.faces);
                 if tgt != f && !out.faces.contains(&tgt) {
                     out.faces.push(tgt);
@@ -3501,8 +3472,14 @@ mod tests {
         b.face_mut(f).unwrap().surface =
             Some(Surface::from(Plane::from_normal(Vec3::ZERO, Vec3::Z)));
         shrink_geometry(&k, &mut b, f, &key_of).unwrap();
+        // A face with its own surface is shrunk. This one has no face use, so removing
+        // its UV trim curves fails, and the fork passes that status on
+        // (`SER( this->RemoveUVTrimCurves() )`, tangency-labs/smlib 6997962) where
+        // upstream drops it and reports success.
         let (mut b, f) = plane_face();
-        shrink_geometry(&k, &mut b, f, &key_of).unwrap();
+        let e = shrink_geometry(&k, &mut b, f, &key_of).unwrap_err();
+        assert_eq!(e.operation(), OP, "{e}");
+        assert!(e.to_string().contains("the face's upward face use"), "{e}");
     }
 
     #[test]

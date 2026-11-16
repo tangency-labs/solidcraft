@@ -357,7 +357,7 @@ fn a_blend_too_large_is_refused_with_the_largest_size_that_fits() {
 /// ([`solidcore_ops::blend::session_refusal`]), one case per reason a SolidCraft blend of
 /// boxes and cylinders gives, each the kernel's or ops' own case of that reason
 /// (solidcore's `wr696_fit_sizes.rs`): the L's inner edge past its
-/// wall's top, a can's rim chamfered across its top, a bossed can's rim past the boss, both
+/// wall's top, a square top chamfered across, a bossed can's rim past the boss, both
 /// edges of a narrow end, a cube's corner. The collapsed offset's is solidcraft-kernel's
 /// `a_ball_as_wide_as_the_round_it_rolls_on_is_refused_saying_why`. ops' thin wall
 /// (`BreaksThrough`) builds with SolidCraft's fixes, and the rest reach SolidCraft only from
@@ -381,16 +381,17 @@ fn each_room_reason_reaches_the_refusal_as_ops_gives_it() {
             K::Radius,
             [7.98, 8.0],
         ),
-        // the cone takes the whole top: an offset of 10 less the margin, as its distance
+        // the chamfers take the whole top of a 10 cube at its depth 5, less the margin, as
+        // their distance (a can's rim chamfered across its top builds a cone, #17198)
         (
-            "can_top",
-            Shape::Cylinder([0.0; 3], 10.0, 20.0).core(),
+            "square_top",
+            Shape::Box([0.0; 3], [10.0; 3]).core(),
             Blend::Chamfer,
-            vec![rim(10.0, 20.0)],
-            10.0,
+            vec![[5.0, 0.0, 10.0], [10.0, 5.0, 10.0], [5.0, 10.0, 10.0], [0.0, 5.0, 10.0]],
+            5.0,
             R::FaceConsumed,
             K::Distance,
-            [0.0, 10.0],
+            [0.0, 5.0],
         ),
         // the rail on the top, a circle of radius 7 - r, reaches the boss at r = 4.3
         (
