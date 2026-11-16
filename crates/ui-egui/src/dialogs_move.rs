@@ -516,6 +516,7 @@ fn with_transform(mut p: Value, m: &Mat) -> Value {
         o.remove("axis");
         o.remove("angle");
         o.remove("origin");
+        o.remove("about");
     }
     if th.abs() > 1e-12 {
         p["origin"] = json!([mm(0.0), mm(0.0), mm(0.0)]);
@@ -575,6 +576,11 @@ fn step(app: &SolveApp, d: &Dialog) -> Result<Step, String> {
             p["origin"] = num(o);
             p["axis"] = json!([a.x, a.y, a.z]);
             p["angle"] = json!(angle);
+            // A body's edge or round face is kept as a reference, so the turn follows it when an
+            // earlier step moves the body (#17974).
+            if let Some(about) = items(d, 1).first().and_then(turn_about) {
+                p["about"] = about;
+            }
         }
         POINT_TO_POINT => {
             let (from, to) = match (need_point(1, "the point to move from"), need_point(2, "the point to move to")) {
@@ -603,6 +609,15 @@ fn axis_line(app: &SolveApp, d: &Dialog, s: &Sel) -> Option<(Vec3, Vec3)> {
     match chain(d) {
         Some(c) if on_moved(&bodies_of(app, d), s) => Some((apply_point(&c, o), apply_vector(&c, a))),
         _ => Some((o, a)),
+    }
+}
+
+/// A picked body edge or face as the reference a Rotate's `about` keeps (#17974).
+fn turn_about(s: &Sel) -> Option<Value> {
+    match s {
+        Sel::Edge { body, point, .. } if !body.is_empty() => Some(json!({"edge": [point.x, point.y, point.z], "body": body})),
+        Sel::Face { body, point, .. } if !body.is_empty() => Some(json!({"face": [point.x, point.y, point.z], "body": body})),
+        _ => None,
     }
 }
 
