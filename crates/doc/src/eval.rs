@@ -4879,15 +4879,14 @@ fn apply_traced_with(
                 // body now (#17807), as a Combine tool that is part of another body is.
                 Err(DocError::Unknown(_)) if let Some(base) = joined_into(doc, state, f, t) => {
                     JOINED_TARGETS.with(|n| n.borrow_mut().push(format!("`{t}` is part of `{base}` now")));
-                    let i = named_target(doc, state, f, base)?;
-                    if v.contains(&i) {
-                        continue;
-                    }
-                    i
+                    named_target(doc, state, f, base)?
                 }
                 r => r?,
             };
-            v.push(i);
+            // A body named twice (once by a name it took in) takes part once.
+            if !v.contains(&i) {
+                v.push(i);
+            }
         }
         v
     };

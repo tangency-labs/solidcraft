@@ -1194,7 +1194,7 @@ fn cut_keeps_posts_joined_while_apart_in_one_body() {
 /// away is not part of anything, and still fails.
 #[test]
 fn a_target_an_earlier_combine_joined_in_is_the_body_it_is_part_of() {
-    let boxes = |tools: Value, operation: &str| {
+    let boxes = |tools: Value, operation: &str, targets: [&str; 2]| {
         let mut s = Session::default();
         let cube =
             |name: &str, corner: [f64; 3]| json!({"length": 10, "width": 10, "height": 10, "corner": corner, "operation": "new", "body_name": name});
@@ -1203,19 +1203,39 @@ fn a_target_an_earlier_combine_joined_in_is_the_body_it_is_part_of() {
         s.execute("solid.box", &cube("Extra", [0.0, 10.0, 0.0])).unwrap();
         s.execute("solid.combine", &json!({"target": "Base", "tools": ["Extra"], "operation": operation, "name": "Combine1"})).unwrap();
         // 4 mm cube across the Base/Boss wall: 2 mm in each.
-        s.execute("solid.box", &json!({"length": 4, "width": 4, "height": 4, "corner": [8, 3, 6], "operation": "cut", "targets": ["Base", "Boss"]}))
-            .unwrap();
+        s.execute("solid.box", &json!({"length": 4, "width": 4, "height": 4, "corner": [8, 3, 6], "operation": "cut", "targets": targets})).unwrap();
         let _ = s.execute("timeline.edit", &json!({"feature": "Combine1", "set": {"tools": tools}}));
         s
     };
-    let s = boxes(json!(["Extra", "Boss"]), "join");
-    let cut = s.model.results.last().unwrap();
-    assert_eq!((cut.error.as_deref(), cut.warning.as_deref()), (None, Some("`Boss` is part of `Base` now")));
+    // Either order of the targets: Base is cut once, not once for each name it stands for.
+    for targets in [["Base", "Boss"], ["Boss", "Base"]] {
+        let s = boxes(json!(["Extra", "Boss"]), "join", targets);
+        let cut = s.model.results.last().unwrap();
+        assert_eq!((cut.error.as_deref(), cut.warning.as_deref()), (None, Some("`Boss` is part of `Base` now")), "{targets:?}");
+        assert_eq!(s.model.state().bodies.iter().map(|b| b.name.as_str()).collect::<Vec<_>>(), ["Base"], "{targets:?}");
+        let v = volume(&s, "Base");
+        assert!((v - (3000.0 - 64.0)).abs() < 1e-6, "{targets:?}: {v}");
+    }
+
+    // A join that names Base twice (once as Boss) joins into it once and keeps it.
+    let mut s = Session::default();
+    let cube =
+        |name: &str, corner: [f64; 3]| json!({"length": 10, "width": 10, "height": 10, "corner": corner, "operation": "new", "body_name": name});
+    s.execute("solid.box", &cube("Base", [0.0, 0.0, 0.0])).unwrap();
+    s.execute("solid.box", &cube("Boss", [10.0, 0.0, 0.0])).unwrap();
+    s.execute("solid.box", &cube("Extra", [0.0, 10.0, 0.0])).unwrap();
+    s.execute("solid.combine", &json!({"target": "Base", "tools": ["Extra"], "operation": "join", "name": "Combine1"})).unwrap();
+    // 4 mm cube standing 1 mm out of Base's top: 16 mm³ outside it.
+    s.execute("solid.box", &json!({"length": 4, "width": 4, "height": 4, "corner": [3, 3, 7], "operation": "join", "targets": ["Boss", "Base"]}))
+        .unwrap();
+    let _ = s.execute("timeline.edit", &json!({"feature": "Combine1", "set": {"tools": ["Extra", "Boss"]}}));
+    let join = s.model.results.last().unwrap();
+    assert_eq!(join.error.as_deref(), None);
     assert_eq!(s.model.state().bodies.iter().map(|b| b.name.as_str()).collect::<Vec<_>>(), ["Base"]);
     let v = volume(&s, "Base");
-    assert!((v - (3000.0 - 64.0)).abs() < 1e-6, "{v}");
+    assert!((v - (3000.0 + 16.0)).abs() < 1e-6, "{v}");
 
-    let s = boxes(json!(["Boss"]), "cut");
+    let s = boxes(json!(["Boss"]), "cut", ["Base", "Boss"]);
     let cut = s.model.results.last().unwrap();
     assert!(cut.error.as_deref().is_some_and(|e| e.contains("unknown body `Boss`")), "{:?}", cut.error);
 }
