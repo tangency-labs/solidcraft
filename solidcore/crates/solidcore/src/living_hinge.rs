@@ -38,7 +38,7 @@ mod tests;
 
 pub use crate::cell_grid::{MAX_CELLS as MAX_SLOTS, MAX_COORD, MIN_SIZE};
 pub use near::{clean_crossing, component, near_set, near_union, outside, NearEdge};
-pub use rows::{plan_rows, RowSpan};
+pub use rows::{plan_rows, plan_rows_zoned, RowSpan};
 pub use spans::{row_crossings, row_spans};
 
 /// A field edge this near the plate's edge lies on it (mm): the gap a loop may have and still

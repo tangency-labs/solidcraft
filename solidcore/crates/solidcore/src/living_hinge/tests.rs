@@ -236,3 +236,55 @@ fn pieces_a_hair_apart_are_pulled_to_the_least_material() {
     );
     assert_eq!(plan.left_out, 0);
 }
+
+/// Case D: a keep-out square (45, 25)-(55, 35) in the sketch, margin 0, so `Z_c` reaches `r` = 0.1
+/// past its sides: on rows v 45.5 ..= 54.5 the zone is (24.9, 35.1). Rows with t even split their
+/// middle slot into [20.1, 24.9] and [35.1, 39.9]; rows with t odd shorten theirs to [8.6, 24.9] and
+/// [35.1, 51.4]. Rows v 44 and 56 pass it whole. 95 slots + 3 splits = 98.
+#[test]
+fn case_d_closed_keep_out_splits_and_shortens() {
+    let s = spec(HingeClip::RunOut, 3.0);
+    let lattice = Lattice::centred(&s, &BAND).unwrap();
+    let plan = plan_rows_zoned(
+        &s,
+        &lattice,
+        |_, _| {
+            vec![RowSpan {
+                lo: 0.0,
+                hi: 60.0,
+                lo_open: true,
+                hi_open: true,
+            }]
+        },
+        |_, v| {
+            if 44.9 < v && v < 55.1 {
+                vec![(24.9, 35.1)]
+            } else {
+                Vec::new()
+            }
+        },
+    );
+    assert_eq!(plan.slots.len(), 98);
+    let middle = |row: i64| -> Vec<(f64, f64, SlotKind)> {
+        row_ends(&plan, row)
+            .into_iter()
+            .filter(|e| e.0 > 8.0 && e.1 < 52.0)
+            .collect()
+    };
+    let shortened = SlotKind::Shortened;
+    for row in [11, 13, 15] {
+        assert_ends(
+            &middle(row),
+            &[(20.1, 24.9, shortened), (35.1, 39.9, shortened)],
+        );
+    }
+    for row in [10, 12, 14, 16] {
+        assert_ends(
+            &middle(row),
+            &[(8.6, 24.9, shortened), (35.1, 51.4, shortened)],
+        );
+    }
+    for row in [9, 17] {
+        assert!(middle(row).iter().all(|e| e.2 == SlotKind::Whole));
+    }
+}

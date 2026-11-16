@@ -7,6 +7,7 @@
 //! is not clean.
 
 use super::lattice::Lattice;
+use super::near::{component, outside};
 use super::{HingeClip, HingeSlot, LivingHingePlan, LivingHingeSpec, SlotKind, GRAZE};
 
 /// One stretch of material along a row, in `u`.
@@ -28,11 +29,25 @@ enum Side {
     Hi,
 }
 
-/// Plans every row of `lattice` from the spans `spans(k)` gives for row `k`.
+/// Plans every row of `lattice` from the spans `spans(k)` gives for row `k`, with no keep-out
+/// zones beyond the spans' own ends.
 pub fn plan_rows(
     spec: &LivingHingeSpec,
     lattice: &Lattice,
+    spans: impl FnMut(i64, f64) -> Vec<RowSpan>,
+) -> LivingHingePlan {
+    plan_rows_zoned(spec, lattice, spans, |_, _| Vec::new())
+}
+
+/// Plans every row of `lattice` from its spans and its keep-out zone `zone(k, v)`: `Z_c ∪ Z_o` on
+/// the row (design 6.5, 6.6 rule 4) as sorted, disjoint open intervals. A slot entering the zone is
+/// shortened to its boundary, one the zone splits gives two pieces, one inside it none. A runner
+/// keeps out of the zone everywhere but the component `K` that holds its crossing.
+pub fn plan_rows_zoned(
+    spec: &LivingHingeSpec,
+    lattice: &Lattice,
     mut spans: impl FnMut(i64, f64) -> Vec<RowSpan>,
+    mut zone: impl FnMut(i64, f64) -> Vec<(f64, f64)>,
 ) -> LivingHingePlan {
     let (first, last) = lattice.rows;
     // Rows first..=last, with one row of no material on each side for the neighbour rule.
@@ -47,11 +62,18 @@ pub fn plan_rows(
     let mut left_out = 0;
     for k in first..=last {
         let mut pieces = Vec::new();
+        let keep_out = zone(k, lattice.row_v(k));
         for span in row_spans(k) {
             let (j0, j1) = lattice.slots_meeting(k, span.lo, span.hi);
             for j in j0..=j1 {
                 match plan_slot(spec, lattice, k, j, span, &row_spans) {
-                    Some(slot) => pieces.push(slot),
+                    Some(slot) => {
+                        let cut = cut_by_zone(&slot, &keep_out);
+                        if cut.is_empty() {
+                            left_out += 1;
+                        }
+                        pieces.extend(cut);
+                    }
                     None => left_out += 1,
                 }
             }
@@ -196,6 +218,35 @@ fn plan_slot<'a>(
         kind,
         crossing,
     })
+}
+
+/// The pieces of `slot` outside `zone` (design 6.5, 6.6 rule 4). A runner's own component `K` of
+/// the zone, the one holding its crossing, does not count against it, and only the piece through
+/// the crossing stays a run-out. A piece the zone changed is `Shortened`.
+fn cut_by_zone(slot: &HingeSlot, zone: &[(f64, f64)]) -> Vec<HingeSlot> {
+    let own = slot.crossing.and_then(|x| component(zone, x));
+    let rest: Vec<(f64, f64)> = zone.iter().copied().filter(|&z| Some(z) != own).collect();
+    outside(slot.a0, slot.a1, &rest)
+        .into_iter()
+        .map(|(a0, a1)| {
+            let same = (a0 - slot.a0).abs() <= GRAZE && (a1 - slot.a1).abs() <= GRAZE;
+            let through = slot.crossing.filter(|&x| a0 <= x && x <= a1);
+            let kind = if through.is_some() {
+                SlotKind::RunOut
+            } else if same {
+                slot.kind
+            } else {
+                SlotKind::Shortened
+            };
+            HingeSlot {
+                a0,
+                a1,
+                kind,
+                crossing: through,
+                ..*slot
+            }
+        })
+        .collect()
 }
 
 /// Which end of a run-out piece is in the air: the end nearer its crossing, as in
