@@ -112,6 +112,11 @@ impl Frame {
         self.owners.entry(owner).or_default()
     }
 
+    /// Whether the Browser panel holds the keyboard: its last click was on one of its rows (#17931).
+    pub(crate) fn browser_focused(&self) -> bool {
+        self.owners.get(&ContentOwner::BROWSER).is_some_and(|owner| owner.browser.focused())
+    }
+
     /// The presentation being drawn (the Browser outside any).
     pub(crate) fn active_owner(&self) -> ContentOwner {
         self.active.map_or(ContentOwner::BROWSER, |(owner, _)| owner)

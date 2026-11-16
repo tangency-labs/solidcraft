@@ -315,6 +315,149 @@ fn iso_arc_exact(k: &Kernel, curve: &BSplineCurve, scaled_zero: f64) -> Result<O
     }))
 }
 
+/// The circle of a rational quadratic iso curve recovered from each segment's chord and
+/// normalised middle weight `w = cos α` instead of its legs: `r = |Q2 − Q0| / (2 sin α)`, the
+/// centre `r cos α` from the chord's midpoint, square to the chord in the circle's plane
+/// (The NURBS Book, Piegl and Tiller, §7.3). When the end nets are translates of each other,
+/// `axis`, the form's linear direction, gives the plane normal. A very short arc's legs and
+/// point angles amplify coordinate rounding past the tolerance; its chord and weight do not.
+/// The checks are [`iso_arc_exact`]'s. Used only where [`iso_arc_exact`]'s circles make no
+/// cylinder, so a form that was recognised keeps its circles to the last bit.
+///
+/// # Errors
+///
+/// Those of the degeneracy test and the Bézier decomposition.
+fn iso_arc_from_chord(
+    k: &Kernel,
+    curve: &BSplineCurve,
+    scaled_zero: f64,
+    axis: Option<Vec3>,
+) -> Result<Option<IsoArc>> {
+    /// One Bézier segment: its Euclidean control points, half sweep and plane normal.
+    struct Segment {
+        q0: Point3,
+        q1: Point3,
+        q2: Point3,
+        half: f64,
+        weight: f64,
+        normal: Option<Vec3>,
+    }
+    if curve.is_degenerate(k, scaled_zero, None)? {
+        return Ok(None);
+    }
+    let Some(nurb) = curve.nurb.as_ref() else {
+        return Ok(None);
+    };
+    let mut segments = Vec::new();
+    for segment in nurb.decompose_bez()? {
+        if segment.degree() != 2 {
+            return Ok(None);
+        }
+        let points = segment.cpts();
+        let (Some(&a), Some(&b), Some(&c)) = (points.first(), points.get(1), points.get(2)) else {
+            return Ok(None);
+        };
+        if !(a.w > 0.0 && b.w > 0.0 && c.w > 0.0) {
+            return Ok(None);
+        }
+        let (q0, q1, q2) = (to_euclid(a), to_euclid(b), to_euclid(c));
+        let (leg0, leg1, chord) = (q1 - q0, q2 - q1, q2 - q0);
+        if (leg0.length() - leg1.length()).abs() > scaled_zero {
+            return Ok(None);
+        }
+        // the legs made unit before their cross product: a short arc's legs are short, and
+        // the product of their lengths would fall under the unit vector's absolute floor
+        let (Ok(tangent), Ok(next)) = (leg0.unitize(), leg1.unitize()) else {
+            return Ok(None);
+        };
+        // the half sweep, from the leg and the chord
+        let half = tangent.cross(chord).length().atan2(tangent.dot(chord));
+        let weight = b.w / (a.w * c.w).sqrt();
+        if (weight - half.cos()).abs() > EFF_ZERO_SQRT {
+            return Ok(None);
+        }
+        segments.push(Segment {
+            q0,
+            q1,
+            q2,
+            half,
+            weight,
+            normal: tangent.cross(next).unitize().ok(),
+        });
+    }
+    // The circle is made from a segment of large sweep, well conditioned: a segment a hair
+    // long (an arc's extension past its face) fixes its centre only to the rounding of its
+    // points over its sweep. The first segment at least half as wide as the widest is taken,
+    // so equal sweeps (a whole circle's quarters) take the first. Every segment must then
+    // lie on that circle.
+    let widest = segments.iter().fold(0.0_f64, |m, s| m.max(s.half));
+    let Some(base) = segments.iter().find(|s| s.half >= 0.5 * widest) else {
+        return Ok(None);
+    };
+    let Some(plane_normal) = base.normal else {
+        return Ok(None);
+    };
+    let normal = if let Some(axis) = axis {
+        if !plane_normal.is_parallel_to(axis, EFF_ZERO_SQRT) {
+            return Ok(None);
+        }
+        if plane_normal.dot(axis) < 0.0 {
+            -axis
+        } else {
+            axis
+        }
+    } else {
+        plane_normal
+    };
+    let (leg0, leg1, chord) = (base.q1 - base.q0, base.q2 - base.q1, base.q2 - base.q0);
+    let Ok(across) = chord.unitize() else {
+        return Ok(None);
+    };
+    let radius = chord.length() / (2.0 * ((1.0 - base.weight) * (1.0 + base.weight)).sqrt());
+    // as `IsArc`: a radius too large for the arc's length makes no accurate circle
+    if radius.is_nan() || radius > (leg0.length() + leg1.length()) / EFF_ZERO_SQRT {
+        return Ok(None);
+    }
+    let centre = base.q0 + chord * 0.5 + normal.cross(across) * (radius * base.weight);
+    let mut sweep = 0.0_f64;
+    for s in &segments {
+        let on = |p: Point3| ((p - centre).length() - radius).abs() <= scaled_zero;
+        // the middle point is where the end tangents meet, r / cos α from the centre
+        let corner = ((s.q1 - centre).length() * s.weight - radius).abs() <= scaled_zero;
+        let flat = s
+            .normal
+            .is_none_or(|n| n.dot(normal) >= 1.0 - EFF_ZERO_SQRT);
+        if !(on(s.q0) && on(s.q2) && corner && flat) {
+            return Ok(None);
+        }
+        sweep += 2.0 * s.half;
+    }
+    let Some(first) = segments.first() else {
+        return Ok(None);
+    };
+    // X toward the start point on the recovered circle.
+    let Ok(x_axis) = (first.q0 - centre).unitize() else {
+        return Ok(None);
+    };
+    // the segments run one way round: each starts where the one before it ends
+    if segments.windows(2).any(|w| match w {
+        [a, b] => a.q2.distance(b.q0) > scaled_zero,
+        _ => false,
+    }) {
+        return Ok(None);
+    }
+    let end_ang = sweep.to_degrees();
+    if !(end_ang > 0.0 && end_ang <= 360.0 + EFF_ZERO_SQRT) {
+        return Ok(None);
+    }
+    Ok(Some(IsoArc {
+        frame: Axis2Placement::new(centre, x_axis, normal.cross(x_axis)),
+        radius,
+        start_ang: 0.0,
+        end_ang: end_ang.min(360.0),
+    }))
+}
+
 /// The point at the middle of the natural interval of a degenerate iso curve (status
 /// ignored upstream: `SM_UNDEF_DOUBLE` on failure).
 fn mid_point(curve: &BSplineCurve) -> Result<Point3> {
@@ -1040,6 +1183,22 @@ impl Cone {
         test_surface: &BSplineSurface,
         tolerance_scale: f64,
     ) -> Result<Option<Self>> {
+        if let Some(cylinder) =
+            Self::nurb_surface_cylinder(k, test_surface, tolerance_scale, false)?
+        {
+            return Ok(Some(cylinder));
+        }
+        Self::nurb_surface_cylinder(k, test_surface, tolerance_scale, true)
+    }
+
+    /// [`Self::is_nurb_surface_cylinder`] with its end circles from [`iso_arc_exact`], or with
+    /// `from_chord` from [`iso_arc_from_chord`].
+    fn nurb_surface_cylinder(
+        k: &Kernel,
+        test_surface: &BSplineSurface,
+        tolerance_scale: f64,
+        from_chord: bool,
+    ) -> Result<Option<Self>> {
         let deg_u = test_surface.degree(SurfParamType::U);
         let deg_v = test_surface.degree(SurfParamType::V);
         if deg_u + deg_v != 3
@@ -1073,23 +1232,52 @@ impl Cone {
             )
         };
 
+        // The form's ruling: the start corners of its top and bottom arcs (see below).
+        let top_start = if swap_uv {
+            Point2::new(uv_domain.max().x, uv_domain.min().y)
+        } else {
+            Point2::new(uv_domain.min().x, uv_domain.max().y)
+        };
+        let top_corner = test_surface.evaluate_point(top_start)?;
+        let min_corner = test_surface.evaluate_point(uv_domain.min())?;
+        let ruling = top_corner - min_corner;
         let top_iso = test_surface
             .create_iso_parametric_curve(k, surf_param, top_knot, IsoCurveOptions::default())?
             .curve;
         if top_iso.is_degenerate(k, pt_tol, None)? {
             return Ok(None);
         }
-        let Some(top) = iso_arc_exact(k, &top_iso, pt_tol)? else {
-            return Ok(None);
-        };
-
         let bot_iso = test_surface
             .create_iso_parametric_curve(k, surf_param, bot_knot, IsoCurveOptions::default())?
             .curve;
         if bot_iso.is_degenerate(k, pt_tol, None)? {
             return Ok(None);
         }
-        let Some(bot) = iso_arc_exact(k, &bot_iso, pt_tol)? else {
+        // The arcs' plane normal is the ruling when the end nets are translates of each other:
+        // a short arc's normal found from its legs amplifies coordinate rounding. A small twist
+        // is allowed by the angular tolerance, and its ruling is not the axis, so a twisted form
+        // keeps the normal from the legs.
+        let axis = top_iso
+            .nurb
+            .as_ref()
+            .zip(bot_iso.nurb.as_ref())
+            .filter(|(top, bot)| {
+                top.cpts().iter().zip(bot.cpts()).all(|(top, bot)| {
+                    (to_euclid(*top) - to_euclid(*bot) - ruling).length() <= pt_tol
+                })
+            })
+            .and_then(|_| ruling.unitize().ok());
+        let arc = |curve: &BSplineCurve| {
+            if from_chord {
+                iso_arc_from_chord(k, curve, pt_tol, axis)
+            } else {
+                iso_arc_exact(k, curve, pt_tol)
+            }
+        };
+        let Some(top) = arc(&top_iso)? else {
+            return Ok(None);
+        };
+        let Some(bot) = arc(&bot_iso)? else {
             return Ok(None);
         };
 
@@ -1118,14 +1306,6 @@ impl Cone {
         // it ran 3.3e-8 mm off the form. The ruling is required: a form with none (a
         // degenerate one, or one whose rows are not translates of each other) is no cylinder.
         // The arcs start at angle 0 by `iso_arc_exact`'s construction.
-        let top_start = if swap_uv {
-            Point2::new(uv_domain.max().x, uv_domain.min().y)
-        } else {
-            Point2::new(uv_domain.min().x, uv_domain.max().y)
-        };
-        let top_corner = test_surface.evaluate_point(top_start)?;
-        let min_corner = test_surface.evaluate_point(uv_domain.min())?;
-        let ruling = top_corner - min_corner;
         let height = ruling.length();
         if !height.is_finite() || height < EFF_ZERO || top.start_ang != 0.0 || bot.start_ang != 0.0
         {
@@ -3033,5 +3213,58 @@ mod tests {
         }
         // a radius that would go through the axis is refused
         assert!(cylinder.lean_cylinder(&k, 2.0, 4.0).is_err());
+    }
+
+    /// Two end arcs of a short cylinder differ by two ulps at one control point. Their
+    /// weights still describe the same circle; recovering each radius from point angles
+    /// amplifies that rounding enough to refuse the cylinder.
+    #[test]
+    fn short_cylinder_with_rounded_end_arcs_keeps_its_exact_class() {
+        use crate::nurbs::math::CPoint;
+        use crate::nurbs::srf_basic::Surface as Nurb;
+        use crate::surface::implicit::{lies_on, AnalyticSupport};
+
+        let k = kernel();
+        let (radius, half, start) = (300.0, 0.0009_f64, -0.4);
+        let weight = half.cos();
+        let mut net = Vec::new();
+        for y in [0.0, -80.0] {
+            let mut row = Vec::new();
+            for (i, (angle, w)) in [
+                (start, 1.0),
+                (start + half, weight),
+                (start + 2.0 * half, 1.0),
+            ]
+            .into_iter()
+            .enumerate()
+            {
+                let mut x = 10.0 + radius * angle.cos() / w;
+                let z = 30.0 + radius * angle.sin() / w;
+                if y < 0.0 && i == 1 {
+                    x = x.next_up().next_up();
+                }
+                row.push(CPoint::new(x * w, y * w, z * w, w));
+            }
+            net.push(row);
+        }
+        let form = BSplineSurface::from_nurb(
+            Nurb::new(
+                net,
+                1,
+                2,
+                vec![0.0, 0.0, 80.0, 80.0],
+                vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0],
+            )
+            .unwrap(),
+            false,
+        );
+        let cylinder = Cone::is_nurb_surface_cylinder(&k, &form, 1.0)
+            .unwrap()
+            .expect("a short cylinder");
+        assert!((cylinder.base_radius() - radius).abs() < 1e-6);
+        assert_eq!(cylinder.rev().base().gw_nurb(), form.gw_nurb());
+        let support =
+            AnalyticSupport::of(&crate::surface::surface::Surface::from(cylinder)).unwrap();
+        assert!(lies_on(&form, &support.implicit()).unwrap(), "{support:?}");
     }
 }

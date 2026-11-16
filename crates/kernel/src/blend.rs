@@ -1160,6 +1160,14 @@ pub fn blend_edges(body: &Body, picks: &[Vec3]) -> Result<Vec<usize>> {
     crate::blend_smlib::picked_edges(body, picks).map(|(edges, _)| edges)
 }
 
+/// Whether each pick takes a smooth edge, as a blend takes it ([`blend_edges`]): its faces meet
+/// tangentially all along it, so a blend of it is refused (there is nothing to round).
+pub fn smooth_picks(body: &Body, picks: &[Vec3]) -> Result<Vec<bool>> {
+    let (edges, _) = crate::blend_smlib::picked_edges(body, picks)?;
+    let rec = Faces::of(body)?;
+    edges.into_iter().map(|e| smooth_join(&rec, e)).collect()
+}
+
 /// The picked edges' tangent chains, for a blend that is to run along them: `picks` (each the
 /// nearest edge of `body` to it), then a point on every other edge that continues one of them
 /// tangentially (within 2°, [`solidcraft_geom::TANGENT_CHAIN`], at a shared vertex), until no more do. Each pick takes its edge as a
