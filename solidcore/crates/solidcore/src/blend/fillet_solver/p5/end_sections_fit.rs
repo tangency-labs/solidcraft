@@ -18,14 +18,19 @@ use crate::blend::fillet_solver::p1::{
     test_manifold_tangent_rollover, FilletSolver, FilletSolverOps,
 };
 use crate::error::{EntityRef, Result, SolidError};
+use crate::geom::axis2_placement::Axis2Placement;
 use crate::geom::extent1d::Extent1d;
+use crate::geom::extent2d::Extent2d;
 use crate::geom::global_solver::SolverOperation;
+use crate::geom::solution_array::{ObjectKind, SolutionObject, SolutionType};
 use crate::intersect::curve_class::p1::CurveClassification;
 use crate::intersect::curve_class::p2::ResetOptions;
 use crate::intersect::point_class::PointClassType;
 use crate::kernel::Kernel;
-use crate::math::{Point3, BIG_DOUBLE};
-use crate::topology::{edge, edgeuse::p1 as eu, vertex, Brep, FaceId};
+use crate::math::{Point3, Vec3, BIG_DOUBLE};
+use crate::surface::plane::p1::Plane;
+use crate::surface::surface::Surface;
+use crate::topology::{edge, edgeuse::p1 as eu, vertex, Brep, EdgeId, FaceId, VertexId};
 
 use super::rails_fit::{edge_bounds_material, is_concave_edge};
 
@@ -47,30 +52,120 @@ fn smos_max(a: f64, b: f64) -> f64 {
     }
 }
 
-/// Whether the end of rail `curve` nearest the vertex `v_point` lies past the far end `far`
-/// of the side edge from `v_point`: its projection on the side edge's line runs beyond `far`
-/// (by more than `tol`).
-fn rail_end_past_side_edge_end(
+/// The operands of a rail's intersection with the round's section plane at an end of its
+/// edge, named as the solver's solutions name them.
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum SectionOperand {
+    /// The rail's curve, with its natural interval.
+    Rail(Extent1d),
+    /// The section plane, with its natural domain.
+    Plane(Extent2d),
+}
+
+impl SolutionObject for SectionOperand {
+    fn kind(&self) -> ObjectKind {
+        match self {
+            Self::Rail(_) => ObjectKind::Curve,
+            Self::Plane(_) => ObjectKind::Surface,
+        }
+    }
+
+    fn natural_interval(&self) -> Option<Extent1d> {
+        match self {
+            Self::Rail(ivl) => Some(*ivl),
+            Self::Plane(_) => None,
+        }
+    }
+
+    fn natural_uv_domain(&self) -> Option<Extent2d> {
+        match self {
+            Self::Plane(domain) => Some(*domain),
+            Self::Rail(_) => None,
+        }
+    }
+}
+
+/// Where rail `curve` meets the plane through the edge's end `v_point` square to the edge's
+/// unit `tangent` there (the round's section at that end), the crossing nearest `v_point`:
+/// where the round's contact line is at the edge's end. `None` where the rail does not reach
+/// that plane. The rail's own end is not that point: a rail runs on past the edge's ends (the
+/// trace reaches past them), and a curved rail turns away from the side edge's line as it
+/// does (#17710).
+fn rail_at_edge_end(
     k: &Kernel,
     curve: &crate::curve::curve::Curve,
     v_point: Point3,
-    far: Point3,
+    tangent: Vec3,
     tol: f64,
-) -> Result<bool> {
-    let ivl = curve.natural_interval();
-    let a = curve.evaluate_point(k, ivl.min())?;
-    let b = curve.evaluate_point(k, ivl.max())?;
-    let end = if a.distance(v_point) <= b.distance(v_point) {
-        a
+) -> Result<Option<Point3>> {
+    // any unit vector square to the tangent spans the plane with the third
+    let x = if tangent.x.abs() < 0.9 {
+        Vec3::new(1.0, 0.0, 0.0).cross(tangent)
     } else {
-        b
+        Vec3::new(0.0, 1.0, 0.0).cross(tangent)
+    }
+    .unitize()?;
+    let y = tangent.cross(x);
+    let plane = Surface::from(Plane::create_canonical(&Axis2Placement::new(
+        v_point, x, y,
+    ))?);
+    let ivl = curve.natural_interval();
+    let domain = plane.natural_uv_domain_with_nurb(k)?;
+    let solutions = plane.global_curve_intersect(
+        k,
+        [SectionOperand::Rail(ivl), SectionOperand::Plane(domain)],
+        &domain,
+        curve,
+        &ivl,
+        tol,
+    )?;
+    let mut nearest: Option<(f64, Point3)> = None;
+    for sol in solutions.as_slice() {
+        let mut ts = vec![sol.start.param(0)?];
+        if sol.solution_type == SolutionType::RangeOfValues {
+            ts.push(sol.end.param(0)?);
+        }
+        for t in ts {
+            let p = curve.evaluate_point(k, t)?;
+            let d = p.distance(v_point);
+            if nearest.is_none_or(|(n, _)| d < n) {
+                nearest = Some((d, p));
+            }
+        }
+    }
+    Ok(nearest.map(|(_, p)| p))
+}
+
+/// The unit tangent of edge `e` at its end `v` (into the edge or out of it: only the line
+/// matters).
+fn tangent_at(k: &Kernel, target: &Brep, e: EdgeId, v: VertexId) -> Result<Vec3> {
+    let curve = edge::evaluation_curve(target, e)?
+        .ok_or_else(|| SolidError::blend_missing(OP, "the filleted edge's curve"))?;
+    let ivl = edge::interval(target, e)?;
+    let (start, _) = edge::start_end_vertices(target, e)?;
+    let t = if start == Some(v) {
+        ivl.min()
+    } else {
+        ivl.max()
     };
+    let d = curve.evaluate(k, t, 1, true, false)?;
+    let d = d
+        .get(1)
+        .copied()
+        .ok_or_else(|| SolidError::blend_missing(OP, "the filleted edge's tangent"))?;
+    d.unitize()
+}
+
+/// Whether `crossing`, a rail's point at the edge's end, lies past the far end `far`
+/// of the side edge from `v_point`: its projection on the side edge's line runs beyond `far`
+/// (by more than `tol`).
+fn crossing_past_side_edge_end(crossing: Point3, v_point: Point3, far: Point3, tol: f64) -> bool {
     let axis = far - v_point;
     let len = axis.length();
     if len <= tol {
-        return Ok(false);
+        return false;
     }
-    Ok((end - v_point).dot(axis) / len > len + tol)
+    (crossing - v_point).dot(axis) / len > len + tol
 }
 
 /// The side edge `side` from `v` with the edges it runs on into between the same two faces,
@@ -79,11 +174,7 @@ fn rail_end_past_side_edge_end(
 /// split by the tube's cylinder seam, #16654), and stops where there is none or more than one,
 /// or back at `v` (a closed run). An unsplit side is itself alone. Each end of the run is still
 /// judged for what stands on the end face there. The walk ends: an edge joins the run once.
-fn side_run(
-    target: &Brep,
-    side: crate::topology::EdgeId,
-    v: crate::topology::VertexId,
-) -> Result<Vec<(crate::topology::EdgeId, crate::topology::VertexId)>> {
+fn side_run(target: &Brep, side: EdgeId, v: VertexId) -> Result<Vec<(EdgeId, VertexId)>> {
     let faces = edge::faces(target, side, None)?;
     let same_faces = |other: &[FaceId]| {
         other.len() == faces.len()
@@ -124,8 +215,8 @@ fn side_run(
 fn concave_edge_of_face_at(
     k: &Kernel,
     target: &mut Brep,
-    run: &[(crate::topology::EdgeId, crate::topology::VertexId)],
-    at: crate::topology::VertexId,
+    run: &[(EdgeId, VertexId)],
+    at: VertexId,
     g: FaceId,
 ) -> Result<bool> {
     for e in vertex::edges(target, at, None)? {
@@ -322,19 +413,28 @@ impl FilletSolver {
                     if nearest == BIG_DOUBLE {
                         // The rail crosses no side
                         // edge at the vertex because it runs past the side edge's far end P
-                        // (its end beside the vertex projects past P on the side edge's line), and the end face
+                        // (its point at the edge's end, where it meets the plane through
+                        // the vertex square to the edge, projects past P on the side edge's
+                        // line), and the end face
                         // has a concave edge at P (something stands on it there): the end
                         // section starts past P, under material, and the fillet overflows its
-                        // end face. Else, as the fork: not judged.
+                        // end face. Else, as the fork: not judged. A rail that crosses no side
+                        // edge because its face runs on past the end face (the side edge
+                        // leaves the vertex the other way) is short of the vertex there, not
+                        // past P (#17710).
                         // P is each end along the side's run: a side split only by a seam
                         // (the joint of a tube, split by the tube's seam) has no end at the
                         // split, and the run's next edge there is the side, not something
                         // standing on the end face (#16654).
                         if let Some(g) = end_face {
+                            let tangent = tangent_at(k, target, fil_edge, v)?;
+                            let crossing =
+                                rail_at_edge_end(k, &curve, v_point, tangent, approx_tol)?;
                             for &(_, far) in &run {
                                 let p = vertex::point(target, far)?;
-                                if rail_end_past_side_edge_end(k, &curve, v_point, p, approx_tol)?
-                                    && concave_edge_of_face_at(k, target, &run, far, g)?
+                                if crossing.is_some_and(|x| {
+                                    crossing_past_side_edge_end(x, v_point, p, approx_tol)
+                                }) && concave_edge_of_face_at(k, target, &run, far, g)?
                                 {
                                     fit = false;
                                     break;
