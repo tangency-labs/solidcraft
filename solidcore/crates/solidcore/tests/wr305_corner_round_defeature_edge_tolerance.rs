@@ -250,5 +250,5 @@ fn cylinder_gap_bounds_a_known_distance() {
     let on = cylinder_gap(&segment(5.0), o, a, 5.0, 16);
     assert!(on < 1e-11, "{on:e}");
     let off = cylinder_gap(&segment(5.0001), o, a, 5.0, 16);
-    assert!(off >= 5.0001 - 5.0 && off < 1e-4 + 1e-11, "{off:e}");
+    assert!((5.0001 - 5.0..1e-4 + 1e-11).contains(&off), "{off:e}");
 }
