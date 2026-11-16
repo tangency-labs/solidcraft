@@ -347,6 +347,8 @@ pub(crate) fn shape(
     rules: &Rules,
 ) -> Shaped {
     let (ring_sides, fans, poles) = caps;
+    // The boundary's nodes: those of the loops, numbered first.
+    let boundary = loops.iter().map(|r| r.end).max().unwrap_or(0);
     let mut fixed: BitsMap<(u32, u32), (u32, u32)> = BitsMap::default();
     for r in loops {
         let n = r.len();
@@ -492,7 +494,14 @@ pub(crate) fn shape(
         }
         if !near.is_empty() {
             let edge_sides: Vec<(u32, u32)> = near.into_iter().filter(|e| m.fixed.contains_key(e)).collect();
+            // A triangle of boundary nodes alone that is narrower than the chord lies where the
+            // face is narrower than the chord, finer than the mesh resolves anything (two curves of
+            // the face within the chord of each other: a sliver). Splitting its sides would halve
+            // them round after round toward the sliver's width, without making it wider: it is
+            // left as it is.
+            let narrow = t.iter().all(|&i| (i as usize) < boundary) && (b - a).cross(c - a).len() < rules.tol * longest;
             match rules.whole {
+                None if narrow && !edge_sides.is_empty() => give_up(&mut m, ti, Some(ShapeLimit::Narrow), &mut limits),
                 None => {
                     for e in edge_sides {
                         if let Some(&side) = m.fixed.get(&e) {
