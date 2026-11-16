@@ -1522,7 +1522,16 @@ fn moved_from_the_rig(result: &[Slot], rig: f64, got: f64) -> Result<(), String>
         return Err(format!("{} result bodies, not one", result.len()));
     };
     let bytes = s.body.to_smb(true).map_err(|x| format!("to_smb: {x}"))?;
+    // the case's own fixes: the reader refuses what they write otherwise (a round kept as its
+    // definition, `fillet_round_as_definition`, writes a procedural blend surface)
     let mut k = solidcore::Kernel::default();
+    for name in session::fixes() {
+        let flag = k
+            .fixes
+            .flag_mut(name)
+            .ok_or_else(|| format!("unknown fix {name}"))?;
+        *flag = true;
+    }
     let mut b = volume_leak::read_smb(&mut k, &bytes, true);
     volume_leak::moved_by_the_old_leak(&k, &mut b, rig, got, VOLUME_ACCURACY).map(|line| {
         println!("#16735 move: {line}");
