@@ -1,14 +1,14 @@
-//! solidcore-ops' integration tests as one test binary: every file in `tests/` is a module
+//! solidcore-ops' integration tests as one test binary: the files in `tests/` are modules
 //! here, so the kernel is linked once, not once per file (tangency-labs/solidcraft#14926).
 //!
 //! The files stay where they are and come in by `#[path]`, so their `mod common;`, their
 //! `include_str!`/`include_bytes!` paths and their data files read as before. A test's name
 //! gains its file as a prefix: `cargo test -p solidcore-ops --test ops blend::` runs what
-//! `--test blend` ran. `kernel_cases.rs`, the rig's runner, is a target of its own
-//! (`--test kernel_cases`).
+//! `--test blend` ran. The files that are test targets of their own are listed in
+//! `Cargo.toml`, with why.
 //!
 //! A new test file in `tests/` is one `#[path]` line below, in order;
-//! `every_test_file_is_built` fails until it is there.
+//! `every_test_file_is_built` fails until it is there or in `Cargo.toml`.
 
 #[path = "../analytic_cv_edit.rs"]
 mod analytic_cv_edit;
@@ -28,8 +28,6 @@ mod blend_overflow_first;
 mod blend_room;
 #[path = "../blend_surface.rs"]
 mod blend_surface;
-#[path = "../boolean.rs"]
-mod boolean;
 #[path = "../classify_point_grazing_ray.rs"]
 mod classify_point_grazing_ray;
 #[path = "../coincidence_gate_definitions.rs"]
@@ -80,8 +78,6 @@ mod face_cvs;
 mod face_surface_eval;
 #[path = "../fillet_sheets_long_run.rs"]
 mod fillet_sheets_long_run;
-#[path = "../fixes.rs"]
-mod fixes;
 #[path = "../issue_2843_round_on_tangent_line.rs"]
 mod issue_2843_round_on_tangent_line;
 #[path = "../issue_2844_loft_rim.rs"]
@@ -100,10 +96,6 @@ mod issue_2947_basin_mitre_creases;
 mod issue_2952_tee_equal;
 #[path = "../issue_2953_drafted_peg.rs"]
 mod issue_2953_drafted_peg;
-#[path = "../issue_3012_filleted_boxes_apart.rs"]
-mod issue_3012_filleted_boxes_apart;
-#[path = "../issue_3045_round_at_plate_arc_end.rs"]
-mod issue_3045_round_at_plate_arc_end;
 #[path = "../measure.rs"]
 mod measure;
 #[path = "../normal_drop.rs"]
@@ -122,8 +114,6 @@ mod profile_hook;
 mod proof_reuse;
 #[path = "../railed.rs"]
 mod railed;
-#[path = "../round_between_crossing_cylinders.rs"]
-mod round_between_crossing_cylinders;
 #[path = "../round_ending_at_a_slight_bend.rs"]
 mod round_ending_at_a_slight_bend;
 #[path = "../round_on_noisy_cylinders.rs"]
