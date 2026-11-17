@@ -1161,7 +1161,7 @@ mod web {
         }
         fn raw_input_hook(&mut self, ctx: &egui::Context, raw: &mut egui::RawInput) {
             // First, so everything after sees the buttons the browser holds.
-            crate::mouse_buttons::reconcile(&self.mouse_buttons, ctx, raw);
+            let taps = crate::mouse_buttons::reconcile(&self.mouse_buttons, ctx, raw);
             solidcraft_ui_egui::window_chrome::release_stale_input(ctx, raw);
             let now = raw.time.unwrap_or_else(|| ctx.input(|i| i.time));
             if let Some(delay) = self.wheel_gestures.update(raw, now) {
@@ -1175,7 +1175,7 @@ mod web {
             }
             // Before the app's own hook, which adds the control channel's events.
             self.space_mouse.raw_input_hook(ctx, self.app.preferences.space_mouse_enabled, raw);
-            self.app.raw_input_hook(raw);
+            self.app.raw_input_hook_with_taps(ctx, raw, taps);
         }
         fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
             self.linked.tick(&mut self.app, ui.ctx());
@@ -1298,10 +1298,18 @@ mod web {
             // The window's pass (egui's) has no depth buffer: the scene has its own
             // (`install_viewport`).
             let mut options = eframe::WebOptions { depth_buffer: 0, ..Default::default() };
-            if webgl()
-                && let eframe::egui_wgpu::WgpuSetup::CreateNew(create) = &mut options.wgpu_options.wgpu_setup
-            {
-                create.instance_descriptor.backends = eframe::wgpu::Backends::GL;
+            if let eframe::egui_wgpu::WgpuSetup::CreateNew(create) = &mut options.wgpu_options.wgpu_setup {
+                if webgl() {
+                    create.instance_descriptor.backends = eframe::wgpu::Backends::GL;
+                }
+                // Indirect draws that start at an instance, where the browser has them: instanced
+                // meshes are drawn a call per pipeline (`solidcraft_viewport_gpu::INDIRECT_DRAWS`).
+                let base = create.device_descriptor.clone();
+                create.device_descriptor = std::sync::Arc::new(move |adapter| {
+                    let mut d = base(adapter);
+                    d.required_features |= adapter.features() & eframe::wgpu::Features::INDIRECT_FIRST_INSTANCE;
+                    d
+                });
             }
             let mouse_canvas = canvas.clone();
             let runner = eframe::WebRunner::new();

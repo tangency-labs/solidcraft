@@ -1273,7 +1273,7 @@ fn create_sketch_on(s: &mut Session, p: &Value, mut plane: PlaneRef, frame: Opti
 
 /// `flip` of `sketch.create`: `None` keeps the plane's own side, otherwise the axis to turn
 /// about (`true`: about y when the plane's y axis points upward, so it stays up, else about x).
-fn flip_param(s: &Session, p: &Value, plane: &PlaneRef, cmd: &str) -> Result<Option<bool>> {
+pub(super) fn flip_param(s: &Session, p: &Value, plane: &PlaneRef, cmd: &str) -> Result<Option<bool>> {
     let about_y = match p.get("flip") {
         None | Some(Value::Null) | Some(Value::Bool(false)) => return Ok(None),
         Some(Value::String(a)) if a.eq_ignore_ascii_case("x") => false,
@@ -1521,7 +1521,8 @@ fn finish_edit_history(s: &mut Session, entry: &SketchEntry, marker: Option<usiz
     before.marker = marker.filter(|m| *m < before.features.len());
     let mut after = (*s.doc).clone();
     after.marker = marker.filter(|m| *m < after.features.len());
-    let changed = before != after || entry.pending_moves != s.pending_moves || entry.visibility != s.visibility;
+    let section = s.undo.get(start..).unwrap_or_default().iter().find_map(|snap| snap.section.clone()).filter(|was| *was != s.section_state());
+    let changed = before != after || entry.pending_moves != s.pending_moves || entry.visibility != s.visibility || section.is_some();
     s.undo.truncate(start);
     if changed {
         s.undo.push(Snapshot {
@@ -1530,6 +1531,7 @@ fn finish_edit_history(s: &mut Session, entry: &SketchEntry, marker: Option<usiz
             active_sketch: None,
             pending_moves: entry.pending_moves.clone(),
             visibility: entry.visibility.clone(),
+            section,
         });
         if s.undo.len() > crate::MAX_UNDO {
             s.undo.remove(0);
