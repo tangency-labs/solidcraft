@@ -1031,6 +1031,8 @@ mod tests {
             native_menu: None,
             nav_bridge: crate::nav_bridge::NavBridge::inactive(),
             dialog_folder: crate::DialogFolder::default(),
+            #[cfg(target_os = "windows")]
+            window_move: crate::native_frame::WindowMove::default(),
         };
         let mut frame = eframe::Frame::_new_kittest();
         let input = egui::RawInput::default();
