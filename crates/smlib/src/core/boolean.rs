@@ -6,8 +6,6 @@
 //! As there, every operation works on copies of its operands (`SmApiBrepCopy`): `SM_API` edits
 //! the first operand in place and consumes the second, and a SolidCraft body never changes.
 
-use std::sync::PoisonError;
-
 use solidcore::Result as SolidResult;
 use solidcore::SolidError;
 use solidcore::boolean::api_brep::{self as sm, Boolean2dOutcome};
@@ -97,7 +95,7 @@ fn copies(k: &mut Kernel, bodies: &[&Body]) -> SolidResult<Vec<Brep>> {
     // One body's lock at a time, here as everywhere: two calls never deadlock on them.
     let mut out = Vec::with_capacity(bodies.len());
     for b in bodies {
-        let c = brep_copy(k, &b.0.lock().unwrap_or_else(PoisonError::into_inner))?;
+        let c = brep_copy(k, &b.kernel())?;
         out.push(c);
     }
     Ok(out)
@@ -105,7 +103,7 @@ fn copies(k: &mut Kernel, bodies: &[&Body]) -> SolidResult<Vec<Brep>> {
 
 fn result(d: Done, empty: Result<Option<Body>>) -> Result<Option<Body>> {
     match d {
-        Done::Body(b) => Ok(Some(Body::new(*b))),
+        Done::Body(b) => Ok(Some(Body::from_kernel(*b))),
         Done::Empty => empty,
         Done::NotSolid => Err(Error::NotSolid),
         Done::NoCut => Ok(None),
@@ -132,7 +130,7 @@ fn all_solid(bodies: &[Brep]) -> SolidResult<bool> {
 
 /// Fails when a panic left one of `bodies` half-edited: it is never used again.
 fn usable(call: &'static str, bodies: &[&Body]) -> Result<()> {
-    if bodies.iter().any(|b| b.0.is_poisoned()) {
+    if bodies.iter().any(|b| b.kernel_left_unfinished()) {
         return Err(Error::Internal(format!("{call}: the body was left unfinished by an earlier panic")));
     }
     Ok(())

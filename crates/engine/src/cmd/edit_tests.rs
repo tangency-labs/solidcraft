@@ -2439,6 +2439,45 @@ fn sketch_entities_name_their_sketch() {
     assert_eq!(it["sketch"], json!(s.active_sketch.unwrap()), "{it}");
 }
 
+/// #18233: Select All takes every shown body; in an open sketch, every curve of the sketch
+/// (construction ones too) and its points on no curve, not projected geometry or the origin.
+/// It replaces the selection and is no undo step.
+#[test]
+fn select_all_takes_the_shown_bodies_or_the_open_sketchs_own_geometry() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"body_name": "Block", "corner": [0, 0, 0], "length": 10, "width": 10, "height": 10}));
+    run(&mut s, "solid.box", json!({"body_name": "Spare", "corner": [30, 0, 0], "length": 5, "width": 5, "height": 5}));
+    run(&mut s, "solid.box", json!({"body_name": "Stowed", "corner": [60, 0, 0], "length": 5, "width": 5, "height": 5}));
+    run(&mut s, "browser.visibility", json!({"items": ["Stowed"], "visible": false}));
+    run(&mut s, "select.set", json!({"items": [{"type": "face", "body": "Block", "index": 0}]}));
+    let undo = s.undo.len();
+    assert_eq!(run(&mut s, "select.all", json!({}))["selected"], 2);
+    assert_eq!(s.selection, ["Block", "Spare"].map(|name| Sel::Body { name: name.into() }));
+    assert_eq!(s.undo.len(), undo, "no undo step");
+
+    run(&mut s, "sketch.create", json!({"plane": "XY"}));
+    run(&mut s, "sketch.project", json!({"refs": [{"edge": [5, 0, 0], "body": "Block"}]}));
+    run(&mut s, "sketch.line", json!({"points": [[20, 20], [40, 20]], "ids": ["rail"], "connect": false}));
+    run(&mut s, "sketch.line", json!({"points": [[20, 30], [40, 30]], "ids": ["guide"], "construction": true, "connect": false}));
+    run(&mut s, "sketch.point", json!({"point": [50, 50], "id": "pin", "connect": false}));
+    let undo = s.undo.len();
+    let doc = s.doc.to_json();
+    assert_eq!(run(&mut s, "select.all", json!({}))["selected"], 3);
+    let mut got: Vec<String> = s.selection.iter().map(|x| format!("{x:?}")).collect();
+    got.sort();
+    let mut want: Vec<String> = [
+        Sel::SketchCurve { id: "guide".into(), sketch: None },
+        Sel::SketchCurve { id: "rail".into(), sketch: None },
+        Sel::SketchPoint { id: "pin".into() },
+    ]
+    .iter()
+    .map(|x| format!("{x:?}"))
+    .collect();
+    want.sort();
+    assert_eq!(got, want, "the projected edge and the origin stay out");
+    assert_eq!((s.doc.to_json(), s.undo.len()), (doc, undo), "selecting edits nothing");
+}
+
 #[test]
 fn construction_points_report_their_position() {
     let mut s = Session::default();
@@ -2525,4 +2564,10 @@ fn feature_and_folder_names_count_characters_not_bytes() {
         let error = s.execute(command, &params).unwrap_err().to_string();
         assert!(error.contains("1…128 characters"), "{command}: {error}");
     }
+    // A new folder is given such a name too.
+    let made = run(&mut s, "timeline.group", json!({"name": too_long.chars().skip(1).collect::<String>()}))["group"].as_u64().unwrap();
+    assert_eq!(s.doc.timeline_groups.iter().find(|g| g.id == made).map(|g| g.name.chars().count()), Some(128));
+    // A design with such names is saved and opens again.
+    let reopened = solidcraft_doc::Document::from_json(&s.doc.to_json()).map_err(|e| e.to_string());
+    assert_eq!(reopened.map(|d| d.timeline_groups[0].name.clone()), Ok(long));
 }

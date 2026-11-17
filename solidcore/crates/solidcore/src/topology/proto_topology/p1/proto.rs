@@ -1274,6 +1274,26 @@ impl<O: ClassObject> VertexDefinition<O> {
         &self.absorbed_hull
     }
 
+    /// Not upstream (WR-306): takes over the hull points `points` of a definition combined
+    /// into this one, and grows the tolerance, never shrinks it, to
+    /// [`VertexDefinition::covering_tolerance`] where the definition is, so the curves that
+    /// definition absorbed stay within this one's tolerance.
+    ///
+    /// # Errors
+    ///
+    /// [`SolidError::Failed`] (a topology failure) when a point's distance from the
+    /// position is not finite; the definition is left unchanged then.
+    pub fn take_over_hull(&mut self, k: &Kernel, points: &[(Point3, f64)]) -> Result<()> {
+        let kept = self.absorbed_hull.len();
+        self.absorbed_hull.extend_from_slice(points);
+        let position = self.position;
+        if let Err(e) = self.set_position(k, position) {
+            self.absorbed_hull.truncate(kept);
+            return Err(e);
+        }
+        Ok(())
+    }
+
     /// Sets the owning proto vertex (`SetProtoVertex`).
     pub fn set_proto_vertex(&mut self, pv: Option<ProtoVertexId>) {
         self.proto_vertex = pv;
@@ -1869,8 +1889,8 @@ impl ProtoVertex {
 
     /// Not upstream (#16637): the computed points (positions and object points) of the
     /// vertex definitions combined away at this proto vertex, the attached curve ends
-    /// evaluated when it combined them, and the points of the definitions that remained
-    /// when it moved.
+    /// evaluated when it combined them, and, when it moved, the points of the definitions
+    /// that remained and the attached curve ends that trace to them.
     #[must_use]
     pub fn absorbed_points(&self) -> &[Point3] {
         &self.absorbed_points
@@ -3108,12 +3128,16 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
     /// are farther apart than the manager's tolerance and either classification has
     /// a gap, the position moves between them, proportionally closer to the object
     /// with the smaller gap but within both objects' zone tolerances. The status
-    /// output is always 0.
+    /// output is always 0. Not upstream (WR-306): the move goes through
+    /// [`VertexDefinition::set_position`], so the tolerance grows to keep every absorbed
+    /// hull point covered.
     ///
     /// # Errors
     ///
     /// [`SolidError::InvalidInput`] without a proto vertex; [`SolidError::Unported`]
-    /// from the classifications (topology objects).
+    /// from the classifications (topology objects); [`SolidError::Failed`] (from
+    /// `set_position`, the definition unchanged) when an absorbed hull point lies at no
+    /// finite distance from the new position.
     pub fn resolve_vertex_definition(
         &mut self,
         k: &Kernel,
@@ -3162,8 +3186,11 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
             let frac = dist1 / (dist1 + dist2);
             let frac = frac_ivl.clamp_value(frac);
             let position = pt1 + frac * vec;
+            // Not upstream (WR-306): through `set_position`, so a definition that absorbed
+            // a self-loop grows to keep the curve's hull covered from the new position (a
+            // definition with no hull is moved as upstream moves it).
             if let Some(v) = self.vertex_def_mut(vd) {
-                v.position = position;
+                v.set_position(k, position)?;
             }
         }
         Ok(0)

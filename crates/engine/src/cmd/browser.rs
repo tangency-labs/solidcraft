@@ -205,7 +205,7 @@ fn keys(p: &Value, k: &str, cmd: &str) -> Result<Vec<String>> {
     let v = v.ok_or_else(|| bad(cmd, format!("`{k}` must be a list of item keys")))?;
     // Past the 256-character cap only the datum keys go through, each bounded by its own parser:
     // an item's `o:<ids>/origin/<item>`, a folder's `o:<ids>/origin` - deep placements need them.
-    let past_cap = |x: &String| x.len() > 256 && crate::origins::item(x).is_none() && crate::origins::folder_path(x).is_none();
+    let past_cap = |x: &String| x.chars().count() > 256 && crate::origins::item(x).is_none() && crate::origins::folder_path(x).is_none();
     if v.len() > 10_000 || v.iter().any(|x| x.is_empty() || past_cap(x)) {
         return Err(bad(cmd, format!("`{k}` has bad keys")));
     }
@@ -231,7 +231,7 @@ fn entries(p: &Value, k: &str, cmd: &str) -> Result<Vec<BrowserEntry>> {
         _ => None,
     };
     let list = list.ok_or_else(|| bad(cmd, format!("`{k}` must be a list of item keys (strings) and group ids (numbers)")))?;
-    if list.len() > 10_000 || list.iter().any(|e| e.as_item().is_some_and(|k| k.is_empty() || k.len() > 256)) {
+    if list.len() > 10_000 || list.iter().any(|e| e.as_item().is_some_and(|k| k.is_empty() || k.chars().count() > 256)) {
         return Err(bad(cmd, format!("`{k}` has bad keys")));
     }
     Ok(list)
@@ -316,7 +316,7 @@ fn group(s: &mut Session, p: &Value) -> Result<Value> {
     let d = s.doc_mut();
     let id = d.allocate_id()?;
     let name = match str_(p, "name").map(str::trim).filter(|n| !n.is_empty()) {
-        Some(n) if n.len() <= 128 => n.to_string(),
+        Some(n) if n.chars().count() <= 128 => n.to_string(),
         Some(_) => return Err(bad(cmd, "`name` is too long")),
         None => format!("Group{}", d.browser_groups.iter().filter(|g| g.folder == folder).count() + 1),
     };
@@ -1231,7 +1231,7 @@ fn view_save(s: &mut Session, p: &Value) -> Result<Value> {
     let mut v = saved_view_form(c).map_err(|e| bad(cmd, e))?;
     let n = s.doc.named_views.len();
     v.name = match str_(p, "name").map(str::trim).filter(|n| !n.is_empty()) {
-        Some(n) if n.len() <= 128 => n.to_string(),
+        Some(n) if n.chars().count() <= 128 => n.to_string(),
         Some(_) => return Err(bad(cmd, "`name` is too long")),
         None => (n + 1..).map(|k| format!("Named View{k}")).find(|x| !s.doc.named_views.iter().any(|v| v.name == *x)).unwrap_or_default(),
     };
@@ -1455,7 +1455,7 @@ fn rename_body(s: &mut Session, p: &Value) -> Result<Value> {
     }
     let name = new_name(cmd, p)?;
     let targets = numbered_names(s, &olds, name);
-    if let Some(target) = targets.iter().find(|t| t.len() > MAX_BODY_NAME) {
+    if let Some(target) = targets.iter().find(|t| t.chars().count() > MAX_BODY_NAME) {
         return Err(bad(cmd, format!("`{target}` is longer than {MAX_BODY_NAME} characters; choose a shorter name")));
     }
     // Each rename reads the model (a feature's other bodies, the bodies named after this one),
@@ -1546,6 +1546,7 @@ fn rename_one(s: &mut Session, cmd: &str, given: &str, name: &str) -> Result<Bod
     let made = s.model.result(fid).map_or(&st.bodies, |r| &r.state.bodies);
     let siblings: Vec<String> = made.iter().filter(|x| x.feature == fid).map(|x| x.name.clone()).collect();
     let k = siblings.iter().position(|n| *n == old).unwrap_or(0);
+    let own_left_out = s.model.result(fid).map(|r| r.state.pattern_left_out(fid).to_vec()).unwrap_or_default();
     // A body numbered by the counter (`BodyN`) gives its number back once it has a name of its
     // own, and every counted body after it would move down one (`Body3` becoming `Body1`) and
     // break what names it. Those later features keep the names they made too (#1109): each one's
@@ -1555,36 +1556,37 @@ fn rename_one(s: &mut Session, cmd: &str, given: &str, name: &str) -> Result<Bod
     let derived = format!("{old} (");
     let at = s.doc.features.iter().position(|f| f.id == fid);
     let counts = at.and_then(|at| s.doc.features.get(at)).is_some_and(|f| counted(f, k));
-    let later: Vec<(u64, Vec<String>)> = match at {
+    let later: Vec<(u64, Vec<String>, Vec<usize>)> = match at {
         Some(at) => s
             .doc
             .features
             .iter()
             .skip(at + 1)
             .filter_map(|f| {
-                let made: Vec<String> = s.model.result(f.id)?.state.bodies.iter().filter(|x| x.feature == f.id).map(|x| x.name.clone()).collect();
+                let state = &s.model.result(f.id)?.state;
+                let made: Vec<String> = state.bodies.iter().filter(|x| x.feature == f.id).map(|x| x.name.clone()).collect();
                 let keep = (counts && (0..made.len()).any(|i| counted(f, i))) || made.iter().any(|n| n.starts_with(&derived));
-                keep.then_some((f.id, made))
+                keep.then(|| (f.id, made, state.pattern_left_out(f.id).to_vec()))
             })
             .collect(),
         None => Vec::new(),
     };
     // Frame members are named by their lines (#4003): each keeps the name it has now on its
     // line, whichever lines come and go later, and the renamed one takes its new name.
-    let later_pins: Vec<Option<BTreeMap<String, String>>> = later.iter().map(|(id, _)| member_pins(s, *id)).collect();
+    let later_pins: Vec<Option<BTreeMap<String, String>>> = later.iter().map(|(id, _, _)| member_pins(s, *id)).collect();
     let own_pins = member_pins(s, fid).and_then(|mut pins| {
         let line = pins.iter().find(|(_, n)| **n == old).map(|(line, _)| line.clone())?;
         pins.insert(line, name.to_string());
         Some(pins)
     });
     let d = s.doc_mut();
-    for ((id, made), pins) in later.iter().zip(later_pins) {
+    for ((id, made, left_out), pins) in later.iter().zip(later_pins) {
         if let Some(f) = d.feature_mut(*id) {
             if let (Some(pins), FeatureKind::FrameMember { names, .. }) = (pins, &mut f.kind) {
                 *names = pins;
                 f.body_names.clear();
             } else {
-                f.pin_body_names(made);
+                f.pin_body_names(made, left_out);
             }
         }
     }
@@ -1592,6 +1594,12 @@ fn rename_one(s: &mut Session, cmd: &str, given: &str, name: &str) -> Result<Bod
     if let (Some(pins), FeatureKind::FrameMember { names, .. }) = (own_pins, &mut f.kind) {
         *names = pins;
         f.body_names.clear();
+    } else if let Some((names, slots)) = f.pattern_pins(&siblings, &own_left_out) {
+        // A body Pattern keeps the names of the copies of the sources it left out, in their places.
+        f.body_names = names;
+        if let Some(stored) = slots.get(k).and_then(|slot| f.body_names.get_mut(*slot)) {
+            *stored = name.to_string();
+        }
     } else {
         // An Import keeps its names by the file's body index, its skipped bodies' too (#2175).
         let slots = f.body_name_slots(siblings.len().max(k + 1));
@@ -3690,5 +3698,43 @@ mod tests {
             let error = s.execute(command, &params).unwrap_err().to_string();
             assert!(error.contains("1…128 characters"), "{command}: {error}");
         }
+        // Several bodies with one name count characters too, the numbered ones included.
+        run(&mut s, "solid.box", json!({"body_name": "Other", "length": 5, "width": 5, "height": 5, "corner": [20, 0, 0]}));
+        run(&mut s, "body.rename", json!({"bodies": [long, "Other"], "name": long}));
+        let numbered = format!("{long} (2)");
+        assert_eq!(names(&s), vec![long.clone(), numbered]);
+        // So do the names a new group and a new view are given.
+        let made = run(&mut s, "browser.group", json!({"folder": "bodies", "items": [long], "name": long}))["group"].as_u64().unwrap();
+        assert_eq!(s.doc.browser_group(made).map(|g| g.name.as_str()), Some(long.as_str()));
+        let camera = json!({"target": [0, 0, 0], "yaw": 0, "pitch": 0, "distance": 100});
+        let second = "ł".repeat(99);
+        run(&mut s, "view.save", json!({"name": second, "camera": camera}));
+        assert!(s.doc.named_views.iter().any(|v| v.name == second), "{:?}", s.doc.named_views);
+        for (command, params) in
+            [("browser.group", json!({"folder": "bodies", "name": too_long})), ("view.save", json!({"name": too_long, "camera": camera}))]
+        {
+            let error = s.execute(command, &params).unwrap_err().to_string();
+            assert!(error.contains("too long"), "{command}: {error}");
+        }
+    }
+
+    /// An item key is at most 256 characters, not 256 bytes, so a body with any name the rename
+    /// commands take can be grouped, ordered and hidden by it: a hundred CJK characters are 300
+    /// bytes.
+    #[test]
+    fn a_body_with_a_long_multibyte_name_can_be_grouped_ordered_and_hidden() {
+        let mut s = Session::default();
+        run(&mut s, "solid.box", json!({"body_name": "Block", "length": 10, "width": 10, "height": 10}));
+        let long = "中".repeat(100);
+        run(&mut s, "body.rename", json!({"body": "Block", "name": long}));
+        let group = run(&mut s, "browser.group", json!({"folder": "bodies", "items": [long]}))["group"].as_u64().unwrap();
+        assert_eq!(s.doc.browser_group(group).map(|g| g.items.clone()), Some(vec![BrowserEntry::Item(long.clone())]));
+        run(&mut s, "browser.ungroup", json!({"group": group}));
+        run(&mut s, "browser.order", json!({"folder": "bodies", "order": [long]}));
+        run(&mut s, "browser.visibility", json!({"items": [long], "visible": false}));
+        assert!(s.visibility.hidden_bodies.contains(&long), "{:?}", s.visibility);
+        let too_long = "中".repeat(257);
+        let error = s.execute("browser.order", &json!({"folder": "bodies", "order": [too_long]})).unwrap_err().to_string();
+        assert!(error.contains("bad keys"), "{error}");
     }
 }
