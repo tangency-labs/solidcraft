@@ -454,11 +454,18 @@ fn an_edge_named_by_a_piece_of_a_face_that_is_whole_again_is_found() {
     assert!(crate::name_lookup::locate_edge(body, &gone, near).is_err(), "{gone}");
 }
 
-/// #18459: an edge picked on the start cap of a one-sided extrude is still found once the extrude
-/// is symmetric, when its low cap, the one facing the way the start cap did, answers to `start`.
+/// #18459: an edge picked on the start cap of a one-sided extrude is still found once an edit
+/// makes the extrude symmetric, on the cap at the end where the start cap lay, facing the same
+/// way: the low cap of an extrude that went along the sketch normal, the high cap of one that went
+/// against it. A symmetric extrude that does not know the way it went finds no `start` edge.
 #[test]
 fn an_edge_on_the_start_cap_is_found_when_the_extrude_becomes_symmetric() {
-    let build = |direction: &str| {
+    let evaluate = |doc: &Document| {
+        let mut model = crate::Model::new();
+        model.evaluate(doc);
+        model
+    };
+    let one_sided = |direction: &str| {
         let doc = Document {
             features: serde_json::from_value(serde_json::json!([
                 {
@@ -490,20 +497,39 @@ fn an_edge_on_the_start_cap_is_found_when_the_extrude_becomes_symmetric() {
             .unwrap(),
             ..Document::default()
         };
-        let doc = crate::format::read(&doc.to_json()).unwrap();
-        let mut model = crate::Model::new();
-        model.evaluate(&doc);
-        model
+        crate::format::read(&doc.to_json()).unwrap()
     };
-    let one_sided = build("positive");
-    let state = one_sided.state();
-    let names = crate::naming::edge_names(state.body("Body1").unwrap());
-    let picked = names.iter().find(|n| n.contains("F2:start") && n.contains("F2:side:l4")).expect("the side's edge on the start cap").clone();
-    let symmetric = build("symmetric");
-    let state = symmetric.state();
-    let body = state.body("Body1").unwrap();
-    let hit = crate::name_lookup::locate_edge(body, &picked, Vec3::new(0., 8.05, -3.)).unwrap_or_else(|e| panic!("{picked}: {e}"));
-    assert!(hit.point.z < 0.0, "the edge on the low cap: {:?}", hit.point);
+    // The start cap lies on the sketch plane, where the edge was picked.
+    let near = Vec3::new(0., 8.05, 0.);
+    for (direction, way, high) in [("positive", crate::Direction::Positive, false), ("negative", crate::Direction::Negative, true)] {
+        let doc = one_sided(direction);
+        let model = evaluate(&doc);
+        let state = model.state();
+        let names = crate::naming::edge_names(state.body("Body1").unwrap());
+        let picked = names.iter().find(|n| n.contains("F2:start") && n.contains("F2:side:l4")).expect("the side's edge on the start cap").clone();
+        // The edit makes it symmetric and records the way it went.
+        let old = doc.feature(2).unwrap().clone();
+        let mut new = old.clone();
+        if let crate::FeatureKind::Extrude { extent, .. } = &mut new.kind {
+            extent.direction = crate::Direction::Symmetric;
+        }
+        crate::keep_one_sided_direction(&model, &old, &mut new);
+        let crate::FeatureKind::Extrude { extent, .. } = &new.kind else { panic!("an extrude") };
+        assert_eq!(extent.one_sided_direction, Some(way), "{direction}");
+        let mut symmetric = doc.clone();
+        *symmetric.feature_mut(2).unwrap() = new.clone();
+        let model = evaluate(&symmetric);
+        let state = model.state();
+        let hit = crate::name_lookup::locate_edge(state.body("Body1").unwrap(), &picked, near).unwrap_or_else(|e| panic!("{picked}: {e}"));
+        assert_eq!(hit.point.z > 0.0, high, "{direction}: the edge on the cap facing the way the start cap did: {:?}", hit.point);
+        // Without the record no cap answers to `start`.
+        if let crate::FeatureKind::Extrude { extent, .. } = &mut symmetric.feature_mut(2).unwrap().kind {
+            extent.one_sided_direction = None;
+        }
+        let model = evaluate(&symmetric);
+        let state = model.state();
+        assert!(crate::name_lookup::locate_edge(state.body("Body1").unwrap(), &picked, near).is_err(), "{direction}: {picked}");
+    }
 }
 
 /// #13464: a mesh's flat patch outline drops a corner part way along a side, even when single
