@@ -150,6 +150,7 @@ drawing.view.projected            a drawing: its tests in crates/engine/src/cmd/
 drawing.view.projection_for       a drawing: its tests in crates/engine/src/cmd/drawing*_tests.rs
 drawing.view.section              a drawing: its tests in crates/engine/src/cmd/drawing*_tests.rs
 drawing.view.snapshot             a drawing: its tests in crates/engine/src/cmd/drawing*_tests.rs
+drawing.view.standard             placement and fitted scale in crates/engine/src/cmd/drawing_view_tests.rs
 edit.checkpoint                   undo, redo and checkpoints: an earlier state restored, no new geometry
 edit.redo                         undo, redo and checkpoints: an earlier state restored, no new geometry
 edit.repeat                       repeats the last command, whose own case grades it
