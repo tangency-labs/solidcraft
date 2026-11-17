@@ -103,8 +103,8 @@
 //!   `SolveIt`s, the tight boxes' evaluations and `IsOnPlane`; `IsOnPositiveSideOfPlanes`
 //!   is `FALSE` when the classification fails.
 //! - **Projected crossings (WR-647).** The projected intersections of `GlobalCurveSolve`
-//!   take a merged range for the crossing inside it by the rule of `GlobalCurveIntersect`
-//!   (unit `curve.curve_p8`), decided on the curves as projected
+//!   take a merged range for the crossing or touch inside it by the rule of
+//!   `GlobalCurveIntersect` (unit `curve.curve_p8`), decided on the curves as projected
 //!   ([`ProjectedCurve`]s built as the solver's leaf solve builds them). A projection
 //!   without its vectors is `InvalidInput` there.
 
@@ -1516,10 +1516,10 @@ impl Curve {
                 },
                 &mut sols,
             )?;
-            // Not upstream (WR-647): a merged range is a crossing seen through the
-            // tolerance when it ends where the projected curves part, inside both, and they
-            // change sides across it, as in `GlobalCurveIntersect`; decided on the curves as
-            // projected, which the solver compared
+            // Not upstream (WR-647): a merged range is a crossing or touch seen through
+            // the tolerance when it ends where the projected curves part, inside both, as
+            // in `GlobalCurveIntersect`; decided on the curves as projected, which the
+            // solver compared
             let vecs = opts.opt_vectors.unwrap_or(&[]);
             let vector = |i: usize| {
                 vecs.get(i).copied().ok_or(SolidError::invalid_input(
@@ -1552,7 +1552,7 @@ impl Curve {
                 .any(|s| s.solution_type == SolutionType::RangeOfValues)
             {
                 let (p1, p2) = (project(self)?, project(other)?);
-                p1.crossing_ranges_to_points(
+                p1.contacts_seen_through_tolerance(
                     k,
                     &mut sols,
                     &p2,

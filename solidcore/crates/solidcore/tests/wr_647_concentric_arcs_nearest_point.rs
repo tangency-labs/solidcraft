@@ -8,8 +8,9 @@
 //! come nearest; with a constant separation every point is nearest, and an edge against a
 //! fitted copy of itself, whose separation is never zero, fell apart into points: the
 //! coincident skins of tangency-labs/solidcore#1036.) A crossing of two distinct curves
-//! seen through the tolerance is decided on the merged range in `GlobalCurveIntersect`
-//! (`issue_1979_ring_lip_crossing_not_coincidence.rs`, and the crossing test below).
+//! or touch seen through the tolerance is decided on the merged range in
+//! `GlobalCurveIntersect` (`issue_1979_ring_lip_crossing_not_coincidence.rs`, and the
+//! crossing and touch tests below).
 #![allow(
     clippy::unwrap_used,
     clippy::expect_used,
@@ -259,4 +260,83 @@ fn wr_647_a_copy_changing_sides_within_tolerance_stays_a_range() {
     let all = intersect(&a, &b);
     assert_eq!(all.len(), 1, "{all:?}");
     assert_eq!(all[0].solution_type, SolutionType::RangeOfValues, "{all:?}");
+}
+
+fn bezier(control: &[Point3]) -> Curve {
+    let order = control.len();
+    Curve::from(
+        BSplineCurve::create_canonical(&CanonicalData {
+            dim: 3,
+            degree: order - 1,
+            control_points: control,
+            form: BSplineCurveForm::default(),
+            knot_multiplicities: &[order, order],
+            knots: &[0.0, 1.0],
+            knot_type: KnotType::default(),
+            weights: None,
+            trim: None,
+        })
+        .unwrap(),
+    )
+}
+
+/// The parabola y = `c` x² over -1 <= x <= 1 (a quadratic Bezier with controls (-1, c),
+/// (0, -c), (1, c), closed form: x = 2t - 1, y = c (2t - 1)²) touches the x axis from (-1, 0)
+/// to (1, 0) at the origin and nowhere else. They stay within the tolerance where
+/// c x² <= TOL, |x| <= sqrt(TOL / c), inside both curves, on one side. The answer is that
+/// one touch point, at the origin (t = 1/2 on both), as upstream already gives (its range
+/// classification takes the diverging range for its point); the merged-range rule keeps it.
+#[test]
+fn wr_647_a_parabola_touching_a_line_meets_it_at_one_point() {
+    let k = Kernel::default();
+    for c in [1e-2, 1e-3] {
+        let line = bezier(&[Point3::new(-1.0, 0.0, 0.0), Point3::new(1.0, 0.0, 0.0)]);
+        let parabola = bezier(&[
+            Point3::new(-1.0, c, 0.0),
+            Point3::new(0.0, -c, 0.0),
+            Point3::new(1.0, c, 0.0),
+        ]);
+        let all = intersect(&line, &parabola);
+        assert_eq!(all.len(), 1, "c {c}: {all:?}");
+        let s = &all[0];
+        assert_eq!(s.solution_type, SolutionType::SingleValue, "c {c}: {s:?}");
+        let p = line.evaluate_point(&k, s.start.parameters[0]).unwrap();
+        let q = parabola.evaluate_point(&k, s.start.parameters[1]).unwrap();
+        let origin = Point3::new(0.0, 0.0, 0.0);
+        assert!(
+            p.distance(origin) <= TOL && q.distance(origin) <= TOL,
+            "c {c}: {p:?} {q:?}"
+        );
+    }
+}
+
+/// The half parabola y = `c` x² over 0 <= x <= 1 (controls (0, 0), (1/2, 0), (1, c), closed
+/// form: x = t, y = c t²) leaves the x axis from (0, 0) to (1, 0) tangentially at their
+/// shared start, as a round meets a floor it is tangent to. They stay within the tolerance
+/// for x <= sqrt(TOL / c), a range that ends inside both curves on one side: where they
+/// part. The answer is that one touch point, the shared start, as upstream already gives
+/// here; the merged-range rule keeps it. (Where the range classification keeps such a
+/// range, the touch rule takes it for the point: the solidcore-ops round-on-floor cases.)
+#[test]
+fn wr_647_a_parabola_leaving_a_line_at_their_start_meets_it_at_one_point() {
+    let k = Kernel::default();
+    for c in [1e-2, 1e-3, 1e-4, 2e-5] {
+        let line = bezier(&[Point3::new(0.0, 0.0, 0.0), Point3::new(1.0, 0.0, 0.0)]);
+        let parabola = bezier(&[
+            Point3::new(0.0, 0.0, 0.0),
+            Point3::new(0.5, 0.0, 0.0),
+            Point3::new(1.0, c, 0.0),
+        ]);
+        let all = intersect(&line, &parabola);
+        assert_eq!(all.len(), 1, "c {c}: {all:?}");
+        let s = &all[0];
+        assert_eq!(s.solution_type, SolutionType::SingleValue, "c {c}: {s:?}");
+        let p = line.evaluate_point(&k, s.start.parameters[0]).unwrap();
+        let q = parabola.evaluate_point(&k, s.start.parameters[1]).unwrap();
+        let origin = Point3::new(0.0, 0.0, 0.0);
+        assert!(
+            p.distance(origin) <= TOL && q.distance(origin) <= TOL,
+            "c {c}: {p:?} {q:?}"
+        );
+    }
 }

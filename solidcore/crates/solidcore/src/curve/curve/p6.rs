@@ -79,8 +79,9 @@
 //!   check split the other curve, or `this` and the other are the same curve.
 //! - **Crossings are decided on the merged range (WR-647).**
 //!   [`Curve::simple_coincidence_checker`] returns upstream's range for one span pair.
-//!   Whether a range is a crossing of two distinct curves seen through the tolerance is
-//!   decided after `GlobalCurveIntersect` merges the span ranges (unit `curve.curve_p8`),
+//!   Whether a range is a crossing or touch of two distinct curves seen through the
+//!   tolerance is decided after `GlobalCurveIntersect` merges the span ranges (unit
+//!   `curve.curve_p8`),
 //!   where it shows whether the range ends where the curves part or where one of them
 //!   stops; on one span pair a fitted copy of a curve (its separation tolerance-scale
 //!   noise) looks the same as a grazing crossing.
