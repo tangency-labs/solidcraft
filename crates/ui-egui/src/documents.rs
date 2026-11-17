@@ -255,6 +255,8 @@ pub struct Documents {
     navigation: ViewNavigation,
     /// A view's name being typed in its sub-tab ([`view_rename_start`]).
     pub(crate) view_rename: Option<ViewRename>,
+    /// Click placement in progress (design tab id, view id).
+    pub(crate) view_placement: Option<(u64, u64)>,
 }
 
 /// A view of the shown design whose name is being typed: the view, the text and whether the
@@ -1335,14 +1337,23 @@ pub(crate) fn view_command(app: &mut SolveApp, command: &str, mut v: Value) -> R
             None
         }
         "tab.view.beside" => {
-            let edge = match v.get("edge").and_then(Value::as_str) {
-                Some("left") => solidcraft_views::Edge::Left,
-                Some("top") => solidcraft_views::Edge::Top,
-                Some("bottom") => solidcraft_views::Edge::Bottom,
-                _ => solidcraft_views::Edge::Right,
+            let id = if let Some(placement) = v.get("placement") {
+                let placement = serde_json::from_value::<solidcraft_engine::schema::tab_views::TabViewPlacement>(placement.clone())
+                    .map_err(|error| error.to_string())?;
+                if !change_views(app, |views| views.place_tile(asked, placement.into())) {
+                    return Err("the requested view cannot be placed in that cell".into());
+                }
+                asked
+            } else {
+                let edge = match v.get("edge").and_then(Value::as_str) {
+                    Some("left") => solidcraft_views::Edge::Left,
+                    Some("top") => solidcraft_views::Edge::Top,
+                    Some("bottom") => solidcraft_views::Edge::Bottom,
+                    _ => solidcraft_views::Edge::Right,
+                };
+                let asked = v.get("id").and_then(Value::as_u64);
+                view_beside(app, asked, edge).ok_or("a layout holds up to four Model and Render views, including one Render view")?
             };
-            let asked = v.get("id").and_then(Value::as_u64);
-            let id = view_beside(app, asked, edge).ok_or("a layout holds up to four Model and Render views, including one Render view")?;
             v["shown"] = json!(app.docs.views.tiles().map_or(1, solidcraft_views::Tiles::len));
             Some(id)
         }
@@ -2381,7 +2392,17 @@ pub fn tabs(app: &mut SolveApp, ui: &mut egui::Ui, r: Rect, x0: f32, x1: f32) {
     let more_text = solidcraft_ui_text::tr("tab_strip.more");
     let plus_menu = crate::design_view_ui::plus_menu(solidcraft_theme::is_dark());
     let layout_menu = crate::design_view_ui::layout_menu();
-    let layout_current = if app.docs.views.is_tiled() { "" } else { "layout.single" };
+    let layout_current = if app.docs.views.is_tiled() {
+        match app.docs.views.tiles().and_then(solidcraft_views::Tiles::preset_kind) {
+            Some(solidcraft_views::Preset::SideBySide) => "layout.side_by_side",
+            Some(solidcraft_views::Preset::Stacked) => "layout.stacked",
+            Some(solidcraft_views::Preset::LargeAndTwo) => "layout.large_and_two",
+            Some(solidcraft_views::Preset::Grid) => "layout.grid",
+            _ => "",
+        }
+    } else {
+        "layout.single"
+    };
     let actions = {
         let mut strip = crate::app_bar::TabStrip {
             tabs: info
@@ -2515,7 +2536,7 @@ pub fn tabs(app: &mut SolveApp, ui: &mut egui::Ui, r: Rect, x0: f32, x1: f32) {
             | crate::app_bar::TabAction::ViewRenameCancelled => {}
             view_action => {
                 if idle {
-                    crate::design_view_ui::handle(app, view_action);
+                    crate::design_view_ui::handle(app, ui.ctx(), view_action);
                 }
             }
         }
