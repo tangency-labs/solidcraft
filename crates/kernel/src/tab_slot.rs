@@ -4,7 +4,9 @@
 
 pub use solidcore::plate_contact::{PairSkip, Plane};
 pub use solidcore::tab_slot::Layout;
-pub use solidcore_ops::plate_contact::{JointSkip, NearPair, StretchPlan, TabPlan, TabSlotPlan, TabSlotSpec};
+pub use solidcore_ops::plate_contact::{
+    JointSkip, MAX_TOOL_FACES, NearPair, SLOW_TOOL_FACES, StretchPlan, TabPlan, TabSlotPlan, TabSlotSpec, ToolFaceCap, check_tool_faces,
+};
 
 use crate::body::Body;
 use crate::{KernelError, Result, guard};

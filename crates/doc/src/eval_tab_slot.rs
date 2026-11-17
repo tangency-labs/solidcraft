@@ -110,6 +110,24 @@ fn extent_along(b: &Body, p: &Plane) -> Result<f64> {
     Ok(n.x.abs() * (bx.max.x - bx.min.x) + n.y.abs() * (bx.max.y - bx.min.y) + n.z.abs() * (bx.max.z - bx.min.z))
 }
 
+/// The tool faces each plate's boolean takes (`per_plate`, by index into `names`) against `max`
+/// and `slow` (design v2 6.4): past `max` the feature is refused naming the plate
+/// (`too_many_tool_faces`), past `slow` it is made with a warning (`slow`).
+fn check_tool_faces(per_plate: &[usize], names: &[String], max: usize, slow: usize, warning: &mut Option<String>) -> Result<()> {
+    let name = |i: usize| names.get(i).map_or("?", String::as_str);
+    match kernel_ts::check_tool_faces(per_plate, max, slow) {
+        Some(kernel_ts::ToolFaceCap::TooMany { plate, faces }) => Err(DocError::Invalid(format!(
+            "tab and slot: {} would take {faces} tool faces, more than {max}: use fewer or wider tabs (too_many_tool_faces)",
+            name(plate)
+        ))),
+        Some(kernel_ts::ToolFaceCap::Slow { plate, faces }) => {
+            append_warning(warning, format!("tab and slot: {} takes {faces} tool faces and may be slow (slow)", name(plate)));
+            Ok(())
+        }
+        None => Ok(()),
+    }
+}
+
 /// The feature `k` applied to `st` (design 5.7): every tab plate against every slot plate, the
 /// pairs with a joint in pick order, each made joint cut in that order (a plate in several joints
 /// takes the previous joint's result), the plates replaced in place. Pairs that do not meet are
@@ -155,7 +173,8 @@ pub(crate) fn apply(vals: &BTreeMap<String, Value>, k: &FeatureKind, st: &mut Mo
         return Ok(());
     };
     let refs: Vec<&Body> = plates.iter().collect();
-    let (skips, _tool_faces) = kernel_ts::joints(&refs, &list, first, JOINT_TOL)?;
+    let (skips, tool_faces) = kernel_ts::joints(&refs, &list, first, JOINT_TOL)?;
+    check_tool_faces(&tool_faces, &names, kernel_ts::MAX_TOOL_FACES, kernel_ts::SLOW_TOOL_FACES, warning)?;
     for (j, ((ti, si, p), spec)) in list.iter().zip(&specs).enumerate() {
         if let Some(Some(skip)) = skips.get(j) {
             append_warning(warning, format!("tab and slot: {} on {} is skipped: {skip:?}", names[*ti], names[*si]));
@@ -257,5 +276,22 @@ mod tests {
         let volume = |n: &str| kernel::measure_mass(&st.body(n).unwrap().body).unwrap().volume;
         assert!((volume("Wall") - 45_360.0).abs() < 1e-6, "{}", volume("Wall"));
         assert!((volume("Bottom") - 93_745.68).abs() < 1e-6, "{}", volume("Bottom"));
+    }
+
+    /// Design v2 6.4: past the most tool faces the feature is refused naming the plate, past the
+    /// slow count it is made with a warning, below both nothing is said.
+    #[test]
+    fn tab_slot_tool_face_caps_refuse_or_warn_naming_the_plate() {
+        let names = vec!["Bottom".to_string(), "Wall".to_string()];
+        let mut warning = None;
+        check_tool_faces(&[24, 12], &names, 2_000, 800, &mut warning).unwrap();
+        assert!(warning.is_none(), "{warning:?}");
+        check_tool_faces(&[12, 900], &names, 2_000, 800, &mut warning).unwrap();
+        let said = warning.unwrap();
+        assert!(said.contains("Wall") && said.contains("900") && said.contains("slow"), "{said}");
+        let mut warning = None;
+        let err = check_tool_faces(&[2_150, 12], &names, 2_000, 800, &mut warning).unwrap_err().to_string();
+        assert!(err.contains("Bottom") && err.contains("2150") && err.contains("too_many_tool_faces"), "{err}");
+        assert!(warning.is_none(), "{warning:?}");
     }
 }
