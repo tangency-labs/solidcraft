@@ -957,8 +957,9 @@ pub fn loop_circle(lp: &Loop2) -> Option<(Vec2, f64)> {
 }
 
 /// Conservatively recognize one turn of an ellipse from rational quadratic pieces.
-/// Four quarter pieces retain their common-parallelogram recognition rules. Other
-/// partitions require exact stored joins and reconstruct one fixed returned ellipse:
+/// Four quarter pieces first try their common-parallelogram recognition rules. When
+/// those exact equalities fail, they and all other partitions require exact stored
+/// joins and reconstruct one fixed returned ellipse:
 /// shared vertices and tangent controls must fit componentwise cells no larger than
 /// half an ULP of the original vertices' local semiextent; required weights must lie
 /// strictly inside their stored rounding cells. This is local reconstruction, not
@@ -969,15 +970,17 @@ pub fn loop_ellipse(lp: &Loop2) -> Option<(Vec2, Vec2, f64)> {
     if lp.segs.len() > 200_000 {
         return None;
     }
-    if lp.segs.len() == 4
+    let quarters = lp.segs.len() == 4
         && lp.segs.iter().all(
             |seg| matches!(seg, Seg2::Conic { w, .. } if *w == std::f64::consts::FRAC_1_SQRT_2),
-        )
-    {
-        // Preserve both acceptance and rejection of this already-supported case.
-        return loop_as_quarter_ellipse(lp);
-    }
-    loop_as_general_ellipse(lp)
+        );
+    // Preserve this already-supported case's exact answer. A turned ellipse's quarters
+    // carry rounded cos/sin products that fail its exact equalities (#18399); they get
+    // the same certified reconstruction as every other partition.
+    quarters
+        .then(|| loop_as_quarter_ellipse(lp))
+        .flatten()
+        .or_else(|| loop_as_general_ellipse(lp))
 }
 
 /// The whole outline is one round wall only when every edge was admitted on
