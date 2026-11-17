@@ -7,6 +7,21 @@ for machining from a part corner) — set **Curve tolerance**, then choose **Exp
 a destination. All three settings are remembered. The Japanese menu is
 **ファイル → 現在の表示をDXFでエクスポート…**.
 
+## Export a 1:1 profile
+
+1. Face the profile square on. For a profile on the XY plane, choose **Top** on the view cube.
+2. Select **Orthographic** in the navigation bar. In the DXF dialog, check that it says
+   **Current orthographic view (1:1 mm)**.
+3. Export the DXF and open it in your destination tool. Check that the tool reads the file in
+   millimetres and that a known edge measures correctly. A 100 mm edge parallel to the view
+   plane should measure 100 mm in the exported profile.
+
+For a sheet-metal cutting outline, use **Export Flat Pattern as DXF** after creating the
+flat pattern. Current-view export projects the model as shown. It excludes drawing sheet
+borders and dimension annotations.
+
+## Export behaviour
+
 On desktop, the export runs on a background worker while the window continues repainting
 and responding to its title-bar controls. A progress card shows mesh preparation, surface
 preparation, projection, hidden-line removal and writing, with a count and progress bar for
