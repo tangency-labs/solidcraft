@@ -19,7 +19,7 @@ use super::profile::{
     check_regions, curve_on_frame, largest_arc_sweep, smallest_arc_sweep, tapered_flange_ends,
     Loop2, ProfileRefusal, Region2, Seg2,
 };
-use super::read::{planar_curves, planar_pieces, PlanarPiece, Run};
+use super::read::{arc_before_line, planar_curves, planar_pieces, PlanarPiece, Run};
 use super::sheet::{region_loops, sheet_regions};
 use crate::boolean::api_brep::{boolean_2d, Boolean2dOutcome};
 use crate::curve::curve::{Curve, CurveKind};
@@ -942,6 +942,23 @@ fn a_short_piece_of_a_circle_or_an_ellipse_is_not_a_line() {
         let r = read(&k, &line, iv, true, &xy(), tol).unwrap();
         assert!(matches!(r[..], [Seg2::Line { .. }]), "{off}: {r:?}");
     }
+    // 80 of a circle of radius 4e7 is rational though its middle weight is 1 - 5e-13: its middle
+    // control point lies 4e-5 off the chord, the arc 2e-5 (over the zone tolerance); the same
+    // control points with equal weights (a polynomial) are not
+    let (radius, h) = (4e7, 1e-6_f64);
+    let (w, y) = (h.cos(), radius * h.cos() - radius);
+    let (x, top) = (radius * h.sin(), radius / w - radius);
+    let piece = |w: f64, v: f64| {
+        vec![vec![
+            [-x * v, y * v, v],
+            [0.0, top * w, w],
+            [x * v, y * v, v],
+        ]]
+    };
+    assert!(arc_before_line(&piece(w, 1.0), 1e-5));
+    assert!(!arc_before_line(&piece(w, 1.0), 5e-5));
+    assert!(!arc_before_line(&piece(1.0, 1.0), 1e-5));
+    assert!(!arc_before_line(&piece(0.5, 0.5), 1e-5));
 }
 
 /// Samples do not certify: a C0 quadratic spline on the x axis at every knot k/16 and bowing 1

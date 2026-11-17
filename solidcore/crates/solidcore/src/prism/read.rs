@@ -426,16 +426,13 @@ pub fn planar_pieces(
             .iter()
             .all(|s| line_span(s, a, b, tol, error).is_some())
     {
-        // Within `tol` of its chord the piece is that line, unless it is rational (a circle's or
-        // a conic's) and its control points leave the chord by more than the zone tolerance an
-        // edge keeps to its face: the piece lies in their hull, so only then can the line lie
-        // farther off it. Read as the line, a few hundredths of a millimetre of a circle made a
-        // flat prism side 1e-5 off its cylinder. Such a piece is the arc it is proved on within
-        // `tol`; one that is no arc stays the line.
-        let rational = spans.iter().flatten().any(|p| (p[2] - 1.0).abs() > 1e-12);
-        let pts: Vec<Point2> = spans.iter().flatten().map(|p| point_of(*p)).collect();
-        let bends = rational && off_chord(&pts) > k.tolerances.zone_tol_3d;
-        let found = if bends { proved(work) } else { None };
+        // Within `tol` of its chord the piece is that line, unless `arc_before_line` says it
+        // is the arc it is proved on within `tol`; one that is no arc stays the line.
+        let found = if arc_before_line(&spans, k.tolerances.zone_tol_3d) {
+            proved(work)
+        } else {
+            None
+        };
         return Some(found.unwrap_or_else(|| vec![Seg2::Line { a, b }]));
     }
     proved(work)
@@ -589,6 +586,25 @@ fn span_by_span(spans: &[Vec<H2>], a: Point2, b: Point2, tol: f64) -> Option<Vec
         start = end;
     }
     Some(out)
+}
+
+/// Whether a piece within the reading tolerance of the chord between its ends is read as the
+/// arc it is proved on before that line: its Bézier `spans` (homogeneous, in the frame) are
+/// rational (a circle's or a conic's: the weights of a span differ by more than their rounding)
+/// and their control points leave the chord by more than `zone`, the zone tolerance an edge keeps
+/// to its face. The piece lies in the hull of its control points, so only then can the line lie
+/// farther than `zone` off it. Read as the line, a few hundredths of a millimetre of a circle made
+/// a flat prism side 1e-5 off its cylinder.
+#[must_use]
+pub fn arc_before_line(spans: &[Vec<H2>], zone: f64) -> bool {
+    let rational = spans.iter().any(|s| {
+        let max_w = s.iter().map(|p| p[2].abs()).fold(0.0, f64::max);
+        s.iter()
+            .zip(s.iter().skip(1))
+            .any(|(p, q)| (p[2] - q[2]).abs() > max_w * f64::EPSILON * 64.0)
+    });
+    let pts: Vec<Point2> = spans.iter().flatten().map(|p| point_of(*p)).collect();
+    rational && off_chord(&pts) > zone
 }
 
 /// How far the points lie off the chord between the first and the last.
