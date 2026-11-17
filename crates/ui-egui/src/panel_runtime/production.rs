@@ -222,7 +222,8 @@ impl Product {
                 ("references", "render.stage_panels.surfaces_references", "library"),
             ],
             Self::RenderInspector => vec![("remove", "render.inspector_remove", "delete")],
-            Self::Browser | Self::RenderShots | Self::SketchOptions | Self::Bom | Self::DrawingSheets | Self::DrawingInspector => Vec::new(),
+            Self::DrawingSheets => vec![("add-sheet", "ui.drawing_sheets.add", "plus"), ("sheet-settings", "cmd.drawing_sheet_set", "settings")],
+            Self::Browser | Self::RenderShots | Self::SketchOptions | Self::Bom | Self::DrawingInspector => Vec::new(),
         };
         entries.into_iter().map(|(id, key, icon)| HeaderActionSpec { id: ControlId(id.into()), label_key: key.into(), icon: icon.into() }).collect()
     }
@@ -313,7 +314,20 @@ impl Product {
                     .into_iter()
                     .collect()
             }
-            Self::Browser | Self::RenderShots | Self::SketchOptions | Self::Bom | Self::DrawingSheets | Self::DrawingInspector => Vec::new(),
+            Self::DrawingSheets => {
+                presentation.status = app.session.drawing("drawing.inspect").ok().map(|drawing| drawing.sheets.len().to_string());
+                self.header_actions()
+                    .into_iter()
+                    .map(|action| RuntimeAction {
+                        id: action.id,
+                        label: solidcraft_ui_text::tr(&action.label_key).into(),
+                        enabled: true,
+                        disabled_reason: None,
+                        pressed: None,
+                    })
+                    .collect()
+            }
+            Self::Browser | Self::RenderShots | Self::SketchOptions | Self::Bom | Self::DrawingInspector => Vec::new(),
         };
         presentation
     }
@@ -574,7 +588,15 @@ pub(crate) fn drain_production_actions(app: &mut crate::SolveApp) -> PanelResult
                 crate::render_workspace::library::set_library_mode(app, mode);
             }
             Product::RenderInspector => crate::render_workspace::inspector_panel::shared_remove(app),
-            Product::Browser | Product::RenderShots | Product::SketchOptions | Product::Bom | Product::DrawingSheets | Product::DrawingInspector => {}
+            Product::DrawingSheets => {
+                let command = match action.action.0.as_str() {
+                    "add-sheet" => "drawing.sheet.add",
+                    "sheet-settings" => "drawing.sheet.set",
+                    _ => continue,
+                };
+                crate::drawing_workspace::start(app, command);
+            }
+            Product::Browser | Product::RenderShots | Product::SketchOptions | Product::Bom | Product::DrawingInspector => {}
         }
     }
     Ok(())
