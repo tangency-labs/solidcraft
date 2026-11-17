@@ -107,11 +107,6 @@
 //!   direction. Upstream leaves the output at `aSingDirections[0]`, so where the first
 //!   inside direction is the nearest (or the only one) the curve starts along a
 //!   direction that need not point into either domain.
-//! - **Closure is no self intersection** (not upstream, #18117). A self intersection also
-//!   rejects two patches that are neighbours across the surface's closure (one at the start
-//!   and one at the end of a direction it closes in, meeting across it), as it rejects two
-//!   that share a side: upstream reports a closed surface's seam as a self intersection,
-//!   so a closed offset surface failed its own validity test.
 //! - **Not ported.** `Dump` and the `SM_DEBUG_CODE` drawing blocks; `SM_ASSERT`s.
 
 use crate::curve::conic::{Conic, ConicType};
@@ -1002,22 +997,6 @@ impl<'s, 't, O: SolutionObject + 't> AdvSurfaceIntersector<'s, 't, O> {
     }
 }
 
-/// Not upstream (#18117): whether two patch domains of a self intersection are neighbours
-/// across the surface's closure: in a direction the surface closes in over the intersected
-/// domain (`m_bClosedU`, `m_bClosedV`), one reaches the domain's start and the other its end,
-/// and their ranges across that direction overlap or touch. There the surface meets itself by
-/// its closure (its seam's two sides are one curve), which is no self intersection, as patches
-/// that share a side are none; upstream takes a closed surface's seam for one.
-fn neighbours_across_closure(base: &SurfaceIntersector<'_>, a: &Extent2d, b: &Extent2d) -> bool {
-    let dom = &base.uv_domains[0];
-    let ends_u = |p: &Extent2d, q: &Extent2d| p.u_min() <= dom.u_min() && q.u_max() >= dom.u_max();
-    let ends_v = |p: &Extent2d, q: &Extent2d| p.v_min() <= dom.v_min() && q.v_max() >= dom.v_max();
-    let meet_v = a.v_min() <= b.v_max() && b.v_min() <= a.v_max();
-    let meet_u = a.u_min() <= b.u_max() && b.u_min() <= a.u_max();
-    (base.closed_u[0] && meet_v && (ends_u(a, b) || ends_u(b, a)))
-        || (base.closed_v[0] && meet_u && (ends_v(a, b) || ends_v(b, a)))
-}
-
 impl<'t, O: SolutionObject + 't> GlobalSolve<'t, O> for AdvSurfaceIntersector<'_, 't, O> {
     fn solver(&self) -> &GlobalSolver<'t, O> {
         &self.solver
@@ -1079,11 +1058,8 @@ impl<'t, O: SolutionObject + 't> GlobalSolve<'t, O> for AdvSurfaceIntersector<'_
         }
 
         // If we are doing self intersection then reject case where domains are not
-        // disjoint (not upstream, #18117: nor neighbours across the surface's closure).
-        if self.base.doing_self_intersection
-            && (!uv_domain1.are_disjoint(&uv_domain2, 0.0)
-                || neighbours_across_closure(&self.base, &uv_domain1, &uv_domain2))
-        {
+        // disjoint.
+        if self.base.doing_self_intersection && !uv_domain1.are_disjoint(&uv_domain2, 0.0) {
             return Ok(false);
         }
 
