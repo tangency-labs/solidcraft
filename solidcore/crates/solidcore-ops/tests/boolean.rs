@@ -2740,3 +2740,55 @@ fn a_notch_passing_within_a_tolerance_outside_a_balls_seam_corner_cuts_it() {
         assert!((v - want).abs() <= 1e-8 * want, "d {d}: {v} vs {want}");
     }
 }
+
+/// #18689: a ring revolved a whole turn about z from a profile in the yz plane (the r 6
+/// ball's own arc from its equator down to z -2, the line out to r 6 and up to the equator),
+/// joined to that ball, both through their records as SolidCraft hands them on. The revolve
+/// axis is `off` along y from the ball's centre: the arc's centre is that far from the axis,
+/// so the revolve turns the arc into a sphere centred on the axis, the ball's own sphere
+/// moved by `off`. With the axis 3e-9 to 1e-7 off, within tolerance, the join was refused
+/// ("Face Near missing Seam", face test 36); at 0 and 1e-6 it joined. Every offset is one
+/// valid solid with the faces, edges and vertices of the join about the centre, and the
+/// ball's volume plus the ring's outside it, 4/3·π·6³ + π·∫₋₂⁰ z² dz = 288π + 8π/3.
+#[test]
+fn a_ring_turned_about_an_axis_within_tolerance_of_a_balls_centre_joins_it() {
+    all_fixes();
+    let want = 288.0 * PI + 8.0 * PI / 3.0;
+    let end = (1.0_f64 / 3.0).asin();
+    let (rim, corner) = ([0.0, -6.0 * end.cos(), -2.0], [0.0, -6.0, -2.0]);
+    let profile = [
+        // from (0, -6, 0) down the ball to the rim at z -2
+        Curve::Arc {
+            center: [0.0; 3],
+            axis: [1.0, 0.0, 0.0],
+            reference: [0.0, -1.0, 0.0],
+            radius: 6.0,
+            start: 0.0,
+            end,
+        },
+        Curve::Line {
+            start: rim,
+            end: corner,
+        },
+        Curve::Line {
+            start: corner,
+            end: [0.0, -6.0, 0.0],
+        },
+    ];
+    let mut about_the_centre = None;
+    for off in [0.0, 3e-9, 1e-8, 1e-7, 1e-6] {
+        let ball = make_sphere([0.0; 3], 6.0).unwrap();
+        let ring = revolve(&profile, [0.0, off, 0.0], [0.0, 0.0, 1.0], TAU, true)
+            .unwrap_or_else(|e| panic!("off {off}: {e:?}"));
+        let r = boolean(round_tripped(&ball), round_tripped(&ring), BooleanOp::Union)
+            .unwrap_or_else(|e| panic!("off {off}: {e:?}"))
+            .unwrap();
+        let report = r.check(CheckLevel::All).unwrap();
+        assert!(report.is_valid(), "off {off}: {}", report.text);
+        assert_eq!(r.solid_count().unwrap(), 1, "off {off}");
+        let counts = r.counts().unwrap();
+        assert_eq!(counts, *about_the_centre.get_or_insert(counts), "off {off}");
+        let v = volume(&r);
+        assert!((v - want).abs() <= 1e-8 * want, "off {off}: {v} vs {want}");
+    }
+}
