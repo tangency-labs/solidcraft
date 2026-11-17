@@ -2239,6 +2239,8 @@ impl Session {
             spec.allowed(self).map_err(|why| EngineError::Disabled(spec.id.to_string(), why))?;
         }
         let reads_model = spec.reads_model && !(self.open_drawing.is_some() && spec.part == cmd::Part::Sketch);
+        // What an import's SMLib check found since it was shown is in the model a command reads.
+        self.model.settle_import_checks();
         if live.is_none() {
             self.live_links = None;
             if reads_model && self.model.is_stale() {

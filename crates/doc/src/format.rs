@@ -1970,6 +1970,7 @@ mod tests {
                         to_body_apart: false,
                         from_level: false,
                         picked_placements: Vec::new(),
+                        one_sided_direction: None,
                     },
                     operation: Operation::NewBody,
                     targets: vec![],

@@ -1138,6 +1138,12 @@ pub fn face_has_name(b: &ModelBody, index: usize, name: &str) -> bool {
     legacy_name(name).is_none() && crate::history_names::matches(&naming::names(b), index, name).is_some_and(exactly)
 }
 
+/// Whether some face of a body is exactly the face a stored name names (see [`face_has_name`]).
+pub(crate) fn body_has_face_named(b: &ModelBody, name: &str) -> bool {
+    let names = naming::names(b);
+    legacy_name(name).is_none() && (0..face_names(b).len()).any(|i| crate::history_names::matches(&names, i, name).is_some_and(exactly))
+}
+
 /// The faces of a body that are the stored name's face or pieces of it (by stem). A name saved
 /// before format 14 has none.
 pub fn faces_with_stem(b: &ModelBody, name: &str) -> Vec<usize> {
