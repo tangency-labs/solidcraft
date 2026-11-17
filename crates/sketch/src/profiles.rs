@@ -1675,8 +1675,12 @@ fn island_loops(sk: &Sketch, curves: &[usize], max_edges: usize) -> Island {
                 let mut ps = vec![a];
                 ps.extend(ts.iter().map(|t| sh.point(*t)));
                 ps.push(b);
-                // Pieces split by other curves no longer stand for their whole piece.
-                let tag = if ts.is_empty() { tags.get(k).copied().flatten() } else { None };
+                // Pieces split by other curves keep their free-form segment's tag, so a loop that
+                // turns at the crossing gets the exact sub-segment up to the true crossing
+                // ([`restore_exact`]) rather than the polyline chord to it (#17462). A loop that
+                // runs over a split piece never counts as the whole segment there: its run has one
+                // piece more than the segment, or misses one.
+                let tag = tags.get(k).copied().flatten();
                 for (piece, w) in ps.windows(2).enumerate() {
                     let (p, q) = (w[0], w[1]);
                     if p.dist(q) > MERGE_TOL {
@@ -2735,6 +2739,34 @@ mod tests {
         let inside = profiles.iter().find(|p| !p.outer_curves.contains(&bulge)).unwrap();
         assert!(lens.area > 0.1 && lens.area < inside.area * 0.2, "{} of {}", lens.area, inside.area);
         assert!(lens.region.outer.joints().all(|(a, b)| a.end().dist(b.start()) < 1e-6), "{:?}", lens.region.outer.segs);
+    }
+
+    /// #17462: a spline crossing a circle bounds both regions with its exact sub-curve up to the
+    /// true crossings. The polyline pieces the circle splits lost their spline's tag, so each
+    /// loop bridged from the last whole piece to the crossing with a straight chord, a sliver
+    /// face on the extruded wall that a fillet along the spline then ran into.
+    #[test]
+    fn a_spline_crossing_a_circle_keeps_its_exact_curve_to_the_crossings() {
+        let mut sk = Sketch::new();
+        let circle = sk.add_circle(Vec2::new(0.0, 0.0), 5.0, None, None).unwrap();
+        let controls = [(0.5, -8.0), (6.0, -3.0), (6.5, 3.5), (1.0, 8.0)];
+        let pts = controls.into_iter().map(|(x, y)| sk.add_point(Vec2::new(x, y), None).unwrap()).collect();
+        let spline =
+            sk.add_curve(CurveKind::Spline { pts, control: true, degree: 3, periodic: false, nurbs: None, handles: Vec::new() }, None).unwrap();
+        let (circle, spline) = (sk.curves[circle].id.clone(), sk.curves[spline].id.clone());
+        let profiles = find_profiles(&sk);
+        assert_eq!(profiles.len(), 2, "the lens outside the spline and the rest of the disc: {profiles:?}");
+        for p in &profiles {
+            assert!(p.outer_curves.contains(&circle) && p.outer_curves.contains(&spline), "{:?}", p.outer_curves);
+            let segs = &p.region.outer.segs;
+            assert!(!segs.iter().any(|s| matches!(s, Seg2::Line { .. })), "no chord stands in for the spline: {segs:?}");
+            assert!(p.region.outer.joints().all(|(a, b)| a.end().dist(b.start()) < 1e-9), "{segs:?}");
+            for s in segs.iter().filter(|s| matches!(s, Seg2::Cubic { .. })) {
+                for end in [s.start(), s.end()] {
+                    assert!((end.len() - 5.0).abs() < 1e-9, "the spline's ends in the loop are its crossings: {end:?}");
+                }
+            }
+        }
     }
 
     /// #6896: past the edge limit, the old single search dropped profiles silently. The limit

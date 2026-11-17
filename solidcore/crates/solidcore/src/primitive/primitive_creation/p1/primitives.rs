@@ -41,6 +41,10 @@
 //! tangency-labs/smlib fd59111): [`PrimitiveCreation::create_linear_sweep`] tests a profile curve for an arc
 //! to the zero an `SmCylinder`'s own check holds its generating curve to (`arc_zero`),
 //! not to the B-rep's tolerance.
+//! Not upstream (SolidCraft #17462): a cylinder [`PrimitiveCreation::create_linear_sweep`]
+//! makes from an arc within the B-rep's tolerance of square to the sweep has the sweep
+//! direction as its axis and its origin in the profile's plane (`square_to_sweep`), not
+//! the arc fit's normal, which a very short arc leaves off the sweep.
 //! Not upstream (WR-596, opt-in `Kernel::fixes.box_face_failures_propagate`; the fork's
 //! tangency-labs/smlib 0df62c8, 35008b1, 449c81c): [`PrimitiveCreation::create_box`]
 //! returns each face's and the stitch's status and skips sides of zero extent, as the
@@ -1104,6 +1108,31 @@ fn arc_sweep_cylinder(
     Ok(Some(cylinder))
 }
 
+/// Not upstream (#17462): turn an arc's frame, already within the B-rep's tolerance of
+/// square to the sweep, exactly square to it, so the cylinder swept from it is the
+/// translation surface the sweep defines. The frame of a short arc fitted from a planar
+/// curve is ill-conditioned: a few hundredths of a degree of arc leave its normal up to
+/// `5e-8` off the plane's, and a cylinder on that normal leans across the sweep, its far
+/// edge `distance` times that off the swept curve and its rows no translates of each
+/// other. Z becomes `sweep_dir` (or its negation, keeping the frame's sense, so the arc's
+/// angles still run the same way), X the old X's component across it, and the origin
+/// moves along the new axis into the plane through `on_plane`, a point of the curve. A
+/// frame already exactly square is left as it is.
+fn square_to_sweep(frame: &mut Axis2Placement, sweep_dir: Vec3, on_plane: Vec3) -> Result<()> {
+    let z = frame.z_axis();
+    let axis = if sweep_dir.dot(z) < 0.0 {
+        -sweep_dir
+    } else {
+        sweep_dir
+    };
+    if z == axis {
+        return Ok(());
+    }
+    let origin = frame.origin();
+    let origin = origin + axis * (on_plane - origin).dot(axis);
+    frame.set_step_canonical(origin, axis, frame.x_axis())
+}
+
 /// Not upstream (WR-576, #1507): the zero a
 /// linear sweep tests a profile curve's arc to, the one an `SmCylinder`'s own check holds
 /// its generating curve to: `SM_EFF_ZERO * 1000 * (1 + the largest coordinate of the
@@ -1187,6 +1216,7 @@ impl PrimitiveCreation {
                         && angle > 360.0 - brep.tolerance()
                         && distance * frame.z_axis().cross(sweep_dir).length() <= brep.tolerance()
                     {
+                        square_to_sweep(&mut frame, sweep_dir, curve.ends(k)?.start)?;
                         if sweep_dir.dot(frame.z_axis()) < 0.0 {
                             frame.rotate_about_axis_at_point(
                                 180.0 * core::f64::consts::PI / 180.0,
@@ -1216,6 +1246,7 @@ impl PrimitiveCreation {
                         && angle <= 360.0 - brep.tolerance()
                         && distance * frame.z_axis().cross(sweep_dir).length() <= brep.tolerance()
                     {
+                        square_to_sweep(&mut frame, sweep_dir, curve.ends(k)?.start)?;
                         if let Some(cylinder) =
                             arc_sweep_cylinder(k, frame, radius, (start, end), sweep_dir, distance)?
                         {
