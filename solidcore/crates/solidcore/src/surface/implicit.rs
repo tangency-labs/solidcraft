@@ -8,6 +8,7 @@
 //!
 //! Deviations: none (no upstream counterpart). No recursion.
 
+use crate::blend::fillet_section::interval::Ivl;
 use crate::error::{Result, SolidError};
 use crate::geom::axis2_placement::Axis2Placement;
 use crate::geom::extent2d::Extent2d;
@@ -478,6 +479,176 @@ pub fn distance_bound(form: &BSplineSurface, a: &Implicit, delta: [f64; 2]) -> R
     }
     let bound = bound * (1.0 + 8.0 * f64::EPSILON);
     Ok(bound.is_finite().then_some(bound))
+}
+
+/// Not upstream (tangency-labs/solidcraft#18166): a certified bound on how far every point
+/// of the surface `form` lies from the plane or cone (a cylinder included) `a`, whether or
+/// not it lies on it; `None` for a sphere or torus, a weight that is not positive, a cone
+/// patch reaching the band about the apex where the bound does not hold, or a bound that is
+/// not finite (not a number included).
+///
+/// PROVEN, per Bézier patch (as [`distance_bound`], whose terms these are): every Bernstein
+/// coefficient of `a`'s equation of degree `d` in the patch's homogeneous coordinates is
+/// computed within `τ` ([`lies_on`]'s rounding), so the exact one is within `τ` of the
+/// computed, and by the convex hull property of the Bernstein basis
+/// `|W^d F(X)| ≤ c + τ` over the whole patch, `c` the largest computed coefficient's size.
+/// The weight is at least the least control weight `W₀ > 0` (a convex combination of
+/// them), so `|F(X)| ≤ (c + τ) / W₀^d`. For a plane `F` is the signed distance times the
+/// normal's length. For a cone, with `s` the height along the unit axis, `ρ` the distance
+/// from it and `R = r + t |a| s` (`|a|² = 1 + δ`, `δ` enclosed from the stored axis),
+/// `F = ρ² − ρ_P²` with `ρ_P = √(R² + δ s²)` the surface's radius at that height, and the
+/// point of the surface at the same height and angle lies `|ρ − ρ_P| = |F| / (ρ + ρ_P) ≤
+/// |F| / ρ_P` away. `ρ_P` is bounded below over the patch's heights by [`radius_floor`]
+/// (`None` near the apex, where it is not). The rounding of the Bézier decomposition and of
+/// the extraction of a sub-patch before it (knot insertions: chains of convex
+/// combinations, at most `2 (p + q)` per point between them) is the slack of
+/// [`distance_bound`] with `γ_{8(p+q)+8}`, twice its chain. The whole is the largest over
+/// the patches, grown by a few roundings.
+///
+/// # Errors
+///
+/// `SM_ERR` without NURB data; those of the Bézier decomposition.
+pub(crate) fn off_surface_bound(form: &BSplineSurface, a: &Implicit) -> Result<Option<f64>> {
+    let below = match *a {
+        Implicit::Plane { .. } => 0.0,
+        Implicit::Cone { axis, .. } => {
+            let sq = |x: f64| Ivl::from(x) * Ivl::from(x);
+            let delta = sq(axis.x) + sq(axis.y) + sq(axis.z) - Ivl::from(1.0);
+            if !delta.is_finite() {
+                return Ok(None);
+            }
+            (-delta.lo).max(0.0)
+        }
+        Implicit::Sphere { .. } | Implicit::Torus { .. } => return Ok(None),
+    };
+    let nurb = form
+        .gw_nurb()
+        .ok_or_else(|| SolidError::surface_failed(OP, "the B-spline surface has no NURB"))?;
+    let mut bound = 0.0_f64;
+    for row in decompose_to_bez(nurb)? {
+        for patch in row {
+            let (p, q) = patch.degrees();
+            let r = bezier_residual(p, q, patch.rows().flatten(), a);
+            let w0 = r.least_weight;
+            if !(w0 > 0.0 && w0.is_finite()) {
+                return Ok(None);
+            }
+            let mut top = 0.0_f64;
+            for c in &r.coefficients {
+                // (not a number refuses: `max` would drop it)
+                if !c.is_finite() {
+                    return Ok(None);
+                }
+                top = top.max(c.abs());
+            }
+            let power = match r.degree {
+                1 => Ivl::from(w0),
+                _ => Ivl::from(w0) * Ivl::from(w0),
+            };
+            // (not a number refuses)
+            let normal = power.lo >= f64::MIN_POSITIVE;
+            if !normal {
+                return Ok(None);
+            }
+            let f = (Ivl::from(top) + Ivl::from(r.tol)) / power;
+            let off = match *a {
+                // the normal's length, a few roundings from its computed value
+                Implicit::Plane { normal, .. } => {
+                    (f / Ivl::from(normal.length() * (1.0 - 4.0 * f64::EPSILON))).hi
+                }
+                Implicit::Cone {
+                    origin,
+                    axis,
+                    radius,
+                    tan_angle,
+                } => {
+                    let Some(floor) = radius_floor(
+                        patch.rows().flatten(),
+                        origin,
+                        axis,
+                        radius,
+                        tan_angle,
+                        below,
+                    ) else {
+                        return Ok(None);
+                    };
+                    (f / Ivl::from(floor)).hi
+                }
+                Implicit::Sphere { .. } | Implicit::Torus { .. } => return Ok(None),
+            };
+            let g = gamma(8 * (p + q) + 8);
+            // (`absolute` is a largest coordinate: a Euclidean length is under twice it)
+            let slack = 2.0 * g * r.absolute * (1.0 + r.wmax / w0) / w0;
+            let patch_bound = off + slack;
+            if !patch_bound.is_finite() {
+                return Ok(None);
+            }
+            bound = bound.max(patch_bound);
+        }
+    }
+    let bound = bound * (1.0 + 8.0 * f64::EPSILON);
+    Ok(bound.is_finite().then_some(bound))
+}
+
+/// A lower bound of the cone's radius `ρ_P = √(R² + δ s²)` over the heights `s` of the
+/// Bézier patch with homogeneous points `points` ([`off_surface_bound`]), `δ ≥ −below`:
+/// `ρ_P ≥ √(R_min² − below s_max²)`, `R_min` the least `|R|` over the heights (`R` linear
+/// in `s`, of one sign over them, so reached at an end) and `s_max` the largest `|s|`. The
+/// heights lie between the Euclidean points' (the patch is in their convex hull, `s`
+/// linear), widened by their rounding as [`clear_of_apex`]'s. `None` where `R` changes
+/// sign over them, the floor is not positive, or a value is not a number.
+fn radius_floor<'a>(
+    points: impl Iterator<Item = &'a crate::nurbs::math::CPoint>,
+    origin: Vec3,
+    axis: Vec3,
+    radius: f64,
+    tan_angle: f64,
+    below: f64,
+) -> Option<f64> {
+    let length = axis.length();
+    if !(length > 0.0 && length.is_finite()) {
+        return None;
+    }
+    let unit = axis * (1.0 / length);
+    let (mut lo, mut hi, mut size) = (f64::INFINITY, f64::NEG_INFINITY, 0.0_f64);
+    for c in points {
+        let w = if c.w == NOW { 1.0 } else { c.w };
+        // (not a number is not positive)
+        if w.partial_cmp(&0.0) != Some(core::cmp::Ordering::Greater) {
+            return None;
+        }
+        let x = Vec3::new(c.x, c.y, c.z) * (1.0 / w) - origin;
+        let s = x.dot(unit);
+        lo = lo.min(s);
+        hi = hi.max(s);
+        size = size.max(x.x.abs().max(x.y.abs()).max(x.z.abs()));
+    }
+    let spread =
+        32.0 * f64::EPSILON * (size + origin.x.abs().max(origin.y.abs()).max(origin.z.abs()));
+    let (lo, hi) = (lo - spread, hi + spread);
+    if !(lo <= hi && spread.is_finite()) {
+        return None;
+    }
+    // `R = r + t |a| s` at the ends, enclosed (the unit axis's length rounds within a few ε)
+    let slope = Ivl::from(tan_angle)
+        * Ivl::new(
+            length * (1.0 - 4.0 * f64::EPSILON),
+            length * (1.0 + 4.0 * f64::EPSILON),
+        );
+    let r_at = |s: f64| Ivl::from(radius) + slope * Ivl::from(s);
+    let (r_lo, r_hi) = (r_at(lo), r_at(hi));
+    let r_min = if r_lo.lo > 0.0 && r_hi.lo > 0.0 {
+        r_lo.lo.min(r_hi.lo)
+    } else if r_lo.hi < 0.0 && r_hi.hi < 0.0 {
+        (-r_lo.hi).min(-r_hi.hi)
+    } else {
+        return None;
+    };
+    let s_max = lo.abs().max(hi.abs());
+    let floor2 = Ivl::from(r_min) * Ivl::from(r_min)
+        - Ivl::from(below) * Ivl::from(s_max) * Ivl::from(s_max);
+    let floor = floor2.sqrt().lo;
+    (floor > 0.0 && floor.is_finite()).then_some(floor)
 }
 
 /// Whether every height `s` of the Bézier patch with homogeneous points `points` along
@@ -2544,5 +2715,132 @@ impl AnalyticSupport {
             Self::Sphere { .. } => SupportKind::Sphere,
             Self::Torus { .. } => SupportKind::Torus,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::math::Point3;
+    use crate::nurbs::b_spline_curve::KnotType;
+    use crate::nurbs::b_spline_surface::{BSplineSurfaceForm, CanonicalSurfaceData};
+    use crate::primitive::api_primitives as ap;
+
+    /// The NURBS form of an analytic surface, and its implicit equation.
+    fn form_and_equation(k: &Kernel, s: &Surface) -> (BSplineSurface, Implicit) {
+        let form = crate::blend::fillet_section::station::as_b_spline(k, s)
+            .unwrap()
+            .unwrap();
+        (
+            form.into_owned(),
+            AnalyticSupport::of(s).unwrap().implicit(),
+        )
+    }
+
+    /// The cone about Z through the origin, radius `radius` there.
+    fn cone(radius: f64, tan_angle: f64) -> Implicit {
+        Implicit::Cone {
+            origin: Vec3::ZERO,
+            axis: Vec3::Z,
+            radius,
+            tan_angle,
+        }
+    }
+
+    /// [`off_surface_bound`] of a plane patch a known distance off a plane: the bilinear
+    /// patch at x = 2 (y, z from 0 to 1) lies 0.5 from the plane x = 1.5, and its equation
+    /// is linear in the homogeneous coordinates (weights 1), so the bound is 0.5 within a
+    /// few roundings (PROVEN: never below the true distance), and on the plane x = 2 only
+    /// the counted rounding (the slack `2 γ₂₄ · 2 · 2`, under 1e-13; MEASURED 5.7e-14).
+    #[test]
+    fn a_plane_patch_off_a_plane_is_bounded_by_its_distance() {
+        let patch = BSplineSurface::create_canonical(&CanonicalSurfaceData {
+            u_degree: 1,
+            v_degree: 1,
+            control_points: &[
+                Point3::new(2.0, 0.0, 0.0),
+                Point3::new(2.0, 1.0, 0.0),
+                Point3::new(2.0, 0.0, 1.0),
+                Point3::new(2.0, 1.0, 1.0),
+            ],
+            form: BSplineSurfaceForm::Unspecified,
+            u_multiplicities: &[2, 2],
+            v_multiplicities: &[2, 2],
+            u_knots: &[0.0, 1.0],
+            v_knots: &[0.0, 1.0],
+            knot_type: KnotType::Unspecified,
+            weights: Some(&[1.0; 4]),
+            uv_domain: None,
+        })
+        .unwrap();
+        let plane = |x: f64| Implicit::Plane {
+            origin: Vec3::new(x, 0.0, 0.0),
+            normal: Vec3::X,
+        };
+        let off = off_surface_bound(&patch, &plane(1.5)).unwrap().unwrap();
+        assert!((0.5..=0.5 * (1.0 + 1e-12)).contains(&off), "{off:e}");
+        let on = off_surface_bound(&patch, &plane(2.0)).unwrap().unwrap();
+        assert!((0.0..=1e-13).contains(&on), "{on:e}");
+    }
+
+    /// [`off_surface_bound`] of a cylinder r 50, z 0 to 100, as the kernel stores it (a
+    /// rational form, exact in exact arithmetic): within roundings of 0 against its own
+    /// equation, and against the cylinders r 50 ∓ 1e-3 about the same axis, which every
+    /// point of it lies exactly 1e-3 from, at least 1e-3 (PROVEN: never below the true
+    /// distance) and at most 5e-3: `|ρ² − ρ_P²| / ρ_P` is `(ρ + ρ_P) / ρ_P ≈ 2` times the
+    /// distance, and the rational form's weights 1 and √2/2 give coefficients up to `W₀⁻² =
+    /// 2` times the values (ARGUED, so about 4e-3).
+    #[test]
+    fn a_cylinder_is_bounded_by_its_distance_from_a_coaxial_cylinder() {
+        let k = Kernel::default();
+        let s = Surface::from(ap::create_cylinder_surface(&k, Point3::ZERO, 50.0, 100.0).unwrap());
+        let (form, own) = form_and_equation(&k, &s);
+        let on = off_surface_bound(&form, &own).unwrap().unwrap();
+        assert!((0.0..=1e-9).contains(&on), "{on:e}");
+        for r in [50.0 - 1e-3, 50.0 + 1e-3] {
+            let off = off_surface_bound(&form, &cone(r, 0.0)).unwrap().unwrap();
+            assert!((1e-3..=5e-3).contains(&off), "{r} {off:e}");
+        }
+    }
+
+    /// [`off_surface_bound`] of a frustum r 50 at z 0 to r 30 at z 100 as the kernel
+    /// stores it: within roundings of 0 against its own equation; against the cone of the
+    /// same axis and angle shifted out by 1e-3 in radius (every point of the frustum is
+    /// 1e-3 · cos(semi-angle) from it), at least that distance (PROVEN) and at most eight
+    /// times it: `|ρ² − ρ_P²|` is up to `(50 + 50)` times the radial offset and is divided
+    /// by the least radius 30, the weights give up to 2 more, and the radial offset is
+    /// `√(1 + t²)` times the distance (ARGUED, so about 6.8; MEASURED 6.80). A sphere's
+    /// equation has no bound (`None`).
+    #[test]
+    fn a_cone_is_bounded_by_its_distance_from_a_shifted_cone() {
+        let k = Kernel::default();
+        let s =
+            Surface::from(ap::create_cone_surface(&k, Point3::ZERO, 50.0, 30.0, 100.0).unwrap());
+        let (form, own) = form_and_equation(&k, &s);
+        let on = off_surface_bound(&form, &own).unwrap().unwrap();
+        assert!((0.0..=1e-9).contains(&on), "{on:e}");
+        let Implicit::Cone {
+            origin,
+            axis,
+            radius,
+            tan_angle,
+        } = own
+        else {
+            panic!("{own:?}");
+        };
+        let shifted = Implicit::Cone {
+            origin,
+            axis,
+            radius: radius + 1e-3,
+            tan_angle,
+        };
+        let d = 1e-3 / (1.0 + tan_angle * tan_angle).sqrt();
+        let off = off_surface_bound(&form, &shifted).unwrap().unwrap();
+        assert!(d <= off && off <= 8.0 * d, "{d:e} {off:e}");
+        let sphere = Implicit::Sphere {
+            centre: Vec3::ZERO,
+            radius: 50.0,
+        };
+        assert_eq!(off_surface_bound(&form, &sphere).unwrap(), None);
     }
 }
