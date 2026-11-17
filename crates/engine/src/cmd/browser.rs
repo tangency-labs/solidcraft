@@ -37,6 +37,7 @@ const RENAME_GROUP_CONTRACT: TypedContract<BrowserRenameGroupParams> = TypedCont
 const MOVE_CONTRACT: TypedContract<BrowserMoveParams> = TypedContract::new();
 const ORDER_CONTRACT: TypedContract<BrowserOrderParams> = TypedContract::new();
 const VISIBILITY_CONTRACT: TypedContract<BrowserVisibilityParams> = TypedContract::new();
+const TOGGLE_CONTRACT: TypedContract<crate::schema::browser::BrowserToggleParams> = TypedContract::new();
 const FOLD_CONTRACT: TypedContract<BrowserFoldParams> = TypedContract::new();
 const REDEFINE_SKETCH_CONTRACT: TypedContract<RedefineSketchParams> = TypedContract::new();
 const VIEW_SAVE_CONTRACT: TypedContract<ViewSaveParams> = TypedContract::new();
@@ -140,6 +141,20 @@ pub static COMMANDS: &[CommandSpec] = &[
          or folder?: bodies|sketches|construction|origin|joints|all (all of it; showing also shows its browser folders and groups, and `all` takes in the occurrence hides too); \
          or tree_folders?: [browser folder or group key: c0/bodies, o:4/sketches, o:4/origin, c0/g7, c0/joints, c0/canvases, c0/point_clouds] (the folder or group itself: its items keep their own state; component origin items use o:4/origin/XY etc. in items); \
          or paths?: [[occurrence ids]] (exact placements and descendants), isolate?: bool (with paths or items of bodies, and visible:true: everything else is hidden, other placements as placements). Saved with the design and undone like any other change (the camera is not)",
+    ),
+    CommandSpec::new("browser.toggle_planes", "Show/Hide Planes", crate::checked!("browser.toggle_planes", toggle_planes))
+        .icon("eye")
+        .contract(&TOGGLE_CONTRACT)
+        .output(output_schema_for::<BrowserVisibilityResult>)
+        .params(
+        "(no parameters) the origin planes (XY, XZ, YZ) and every construction plane: hidden when any of them shows, shown otherwise;          axes, points and sketches keep their state. Saved with the design and undone like browser.visibility",
+    ),
+    CommandSpec::new("browser.toggle_reference", "Show/Hide Reference Geometry", crate::checked!("browser.toggle_reference", toggle_reference))
+        .icon("eye")
+        .contract(&TOGGLE_CONTRACT)
+        .output(output_schema_for::<BrowserVisibilityResult>)
+        .params(
+        "(no parameters) all reference geometry: the origin (point, axes, planes), every construction plane, axis and point, and every sketch;          hidden when any of it shows, shown otherwise (showing does not show a sketch a feature uses unless it was shown on its own).          Bodies and joints keep their state. Saved with the design and undone like browser.visibility",
     ),
     CommandSpec::new("browser.expand_all", "Expand All", crate::checked!("browser.expand_all", expand_all))
         .icon("folder")
@@ -855,6 +870,99 @@ fn visibility(s: &mut Session, p: &Value) -> Result<Value> {
     s.refresh_display();
     let visibility = VisibilityState::from(&s.visibility);
     reply(cmd, BrowserVisibilityResult { visible, changed: Some(items.len()), isolated: None, visibility, param_warnings: Vec::new() })
+}
+
+/// `browser.toggle_planes`: the origin planes and the construction planes, hidden when any shows.
+fn toggle_planes(s: &mut Session, _: &Value) -> Result<Value> {
+    let mut names: Vec<String> = ["XY", "XZ", "YZ"].iter().map(|n| n.to_string()).collect();
+    names.extend(s.doc.features.iter().filter(|f| matches!(f.kind, FeatureKind::ConstructionPlane { .. })).map(|f| f.name.clone()));
+    toggle_category(s, "browser.toggle_planes", &names, false)
+}
+
+/// `browser.toggle_reference`: the origin, construction geometry and sketches, hidden when any shows.
+fn toggle_reference(s: &mut Session, _: &Value) -> Result<Value> {
+    let mut names: Vec<String> = crate::origins::ITEMS.iter().map(|n| n.to_string()).collect();
+    names.extend(s.doc.features.iter().filter(|f| f.kind.is_construction()).map(|f| f.name.clone()));
+    toggle_category(s, "browser.toggle_reference", &names, true)
+}
+
+/// Hide the origin and construction items `names` (and, with `sketches`, every sketch) when any
+/// of them shows; otherwise show them all, the origin folder too. A sketch a feature uses comes
+/// back only if it was shown on its own, as before it was hidden.
+///
+/// Showing also shows the Construction folder (and, with `sketches`, the Sketches folder) and
+/// their groups, at every placement, since an item in a hidden folder stays hidden. Another
+/// construction item the Construction folder was hiding (an axis, for the planes) is hidden on
+/// its own instead, so it looks as it did.
+fn toggle_category(s: &mut Session, cmd: &str, names: &[String], sketches: bool) -> Result<Value> {
+    let sketch_ids: Vec<u64> =
+        if sketches { s.doc.features.iter().filter(|f| matches!(f.kind, FeatureKind::Sketch { .. })).map(|f| f.id).collect() } else { Vec::new() };
+    let origin_shown = s.visibility.origin_hidden != Some(true);
+    let item_shown = |n: &String| {
+        if crate::origins::ITEMS.contains(&n.as_str()) { origin_shown && !s.visibility.hidden_origin.contains(n) } else { s.construction_visible(n) }
+    };
+    let any_shown = names.iter().any(item_shown) || sketch_ids.iter().any(|id| crate::view::sketch_shown(s, *id));
+    let visible = !any_shown;
+    let (folder_keys, keep_hidden) = if visible { category_folders(s, names, sketches) } else { (Vec::new(), Vec::new()) };
+    let v = &mut s.visibility;
+    for n in names {
+        if visible {
+            v.hidden_origin.retain(|x| x != n);
+        } else if !v.hidden_origin.contains(n) {
+            v.hidden_origin.push(n.clone());
+        }
+    }
+    for id in &sketch_ids {
+        if visible {
+            v.hidden_sketches.retain(|x| x != id);
+        } else if !v.hidden_sketches.contains(id) {
+            v.hidden_sketches.push(*id);
+        }
+    }
+    v.hidden_folders.retain(|k| !folder_keys.contains(k));
+    for n in keep_hidden {
+        if !v.hidden_origin.contains(&n) {
+            v.hidden_origin.push(n);
+        }
+    }
+    if visible && names.iter().any(|n| crate::origins::ITEMS.contains(&n.as_str())) {
+        v.origin_hidden = Some(false);
+    }
+    s.refresh_display();
+    let visibility = VisibilityState::from(&s.visibility);
+    reply(
+        cmd,
+        BrowserVisibilityResult { visible, changed: Some(names.len() + sketch_ids.len()), isolated: None, visibility, param_warnings: Vec::new() },
+    )
+}
+
+/// The hidden folder and group keys showing a category clears (the Construction folder, and with
+/// `sketches` the Sketches folder, and groups of theirs), and the construction items outside
+/// `names` those keys hide, which stay hidden on their own.
+fn category_folders(s: &Session, names: &[String], sketches: bool) -> (Vec<String>, Vec<String>) {
+    let folders: &[&str] = if sketches { &["construction", "sketches"] } else { &["construction"] };
+    let ours = |key: &str| {
+        let Some(last) = key.rsplit('/').next() else { return false };
+        folders.contains(&last)
+            || last
+                .strip_prefix('g')
+                .and_then(|id| id.parse::<u64>().ok())
+                .and_then(|id| s.doc.browser_group(id))
+                .is_some_and(|g| folders.contains(&g.folder.as_str()))
+    };
+    let keys: Vec<String> = s.visibility.hidden_folders.iter().filter(|k| ours(k)).cloned().collect();
+    if keys.is_empty() {
+        return (keys, Vec::new());
+    }
+    let keep = s
+        .doc
+        .features
+        .iter()
+        .filter(|f| f.kind.is_construction() && !names.contains(&f.name) && !s.visibility.hidden_origin.contains(&f.name))
+        .filter(|f| s.feature_folder_hidden(f.id, "construction"))
+        .map(|f| f.name.clone())
+        .collect();
+    (keys, keep)
 }
 
 /// Browser rows that start open (`c0`, Bodies, placements) vs closed (Origin, Features).
@@ -2948,6 +3056,57 @@ mod tests {
         run(&mut s, "browser.visibility", json!({"folder": "construction", "visible": false}));
         assert_eq!(s.visibility.hidden_origin, ["Floor", "Spine", "Pin"]);
         assert!(s.visibility.hidden_bodies.is_empty() && s.visibility.hidden_sketches.is_empty(), "{:?}", s.visibility);
+    }
+
+    /// One command hides every plane, another all reference geometry (#18131); each shows its
+    /// category again when nothing of it shows, and each press is one undo step.
+    #[test]
+    fn planes_and_reference_geometry_toggle_as_categories() {
+        let mut s = Session::default();
+        run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10}));
+        let sketch = run(&mut s, "sketch.create", json!({"plane": "XY"}))["sketch"].as_u64().unwrap();
+        run(&mut s, "sketch.point", json!({"point": [25, 5]}));
+        run(&mut s, "sketch.finish", json!({}));
+        run(&mut s, "construct.plane.offset", json!({"base": "XY", "offset": 5, "name": "Floor"}));
+        run(&mut s, "construct.axis.two_planes", json!({"a": "XZ", "b": "YZ", "name": "Spine"}));
+        run(&mut s, "construct.point.three_planes", json!({"a": "XY", "b": "XZ", "c": "YZ", "name": "Pin"}));
+        run(&mut s, "browser.visibility", json!({"items": ["XZ"], "visible": false}));
+        let steps = s.undo.len();
+        // Planes: one shows, so all of them are hidden; axes, points and sketches stay.
+        let r = run(&mut s, "browser.toggle_planes", json!({}));
+        assert_eq!(r["visible"], false);
+        assert_eq!(s.visibility.hidden_origin, ["XZ", "XY", "YZ", "Floor"]);
+        assert!(crate::view::sketch_shown(&s, sketch) && s.visibility.hidden_bodies.is_empty());
+        // None shows: all of them come back, the XZ plane hidden on its own too.
+        assert_eq!(run(&mut s, "browser.toggle_planes", json!({}))["visible"], true);
+        assert!(s.visibility.hidden_origin.is_empty(), "{:?}", s.visibility.hidden_origin);
+        assert_eq!(s.undo.len(), steps + 2, "each press is one step");
+        // Reference geometry: the origin, construction planes, axes and points, and sketches.
+        assert_eq!(run(&mut s, "browser.toggle_reference", json!({}))["visible"], false);
+        assert_eq!(s.visibility.hidden_origin, ["O", "X", "Y", "Z", "XY", "XZ", "YZ", "Floor", "Spine", "Pin"]);
+        assert!(!crate::view::sketch_shown(&s, sketch));
+        assert!(s.visibility.hidden_bodies.is_empty() && s.visibility.hidden_joints.is_empty(), "bodies and joints stay");
+        // Planes alone come back while the rest stays hidden; then reference shows the rest.
+        assert_eq!(run(&mut s, "browser.toggle_planes", json!({}))["visible"], true);
+        assert_eq!(s.visibility.hidden_origin, ["O", "X", "Y", "Z", "Spine", "Pin"]);
+        assert_eq!(run(&mut s, "browser.toggle_reference", json!({}))["visible"], false, "planes show, so it hides");
+        assert_eq!(run(&mut s, "browser.toggle_reference", json!({}))["visible"], true);
+        assert!(s.visibility.hidden_origin.is_empty() && s.visibility.hidden_sketches.is_empty() && crate::view::sketch_shown(&s, sketch));
+        run(&mut s, "edit.undo", json!({}));
+        assert_eq!(s.visibility.hidden_origin.len(), 10, "one undo puts the hide back");
+        // Showing also shows the Sketches and Construction folders an item hides in; the Bodies
+        // folder keeps its own state.
+        run(&mut s, "browser.visibility", json!({"tree_folders": ["c0/sketches", "c0/construction", "c0/bodies"], "visible": false}));
+        assert_eq!(run(&mut s, "browser.toggle_reference", json!({}))["visible"], true);
+        assert!(crate::view::sketch_shown(&s, sketch), "the sketch in the hidden folder shows");
+        assert!(["Floor", "Spine", "Pin"].iter().all(|n| s.construction_visible(n)), "{:?}", s.visibility);
+        assert_eq!(s.visibility.hidden_folders, ["c0/bodies"]);
+        // The planes share the Construction folder with axes and points: those stay hidden.
+        run(&mut s, "browser.visibility", json!({"tree_folders": ["c0/construction"], "visible": false}));
+        run(&mut s, "browser.visibility", json!({"items": ["XY", "XZ", "YZ"], "visible": false}));
+        assert_eq!(run(&mut s, "browser.toggle_planes", json!({}))["visible"], true);
+        assert!(s.construction_visible("Floor") && !s.construction_visible("Spine") && !s.construction_visible("Pin"), "{:?}", s.visibility);
+        assert_eq!(s.visibility.hidden_folders, ["c0/bodies"]);
     }
 
     #[test]
