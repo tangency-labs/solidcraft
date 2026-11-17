@@ -847,11 +847,8 @@ fn slab_region(
             }
         };
         let mut next = Vec::new();
-        let n = poly.len();
-        for i in 0..n {
-            let (Some(&p), Some(&q)) = (poly.get(i), poly.get((i + 1) % n)) else {
-                continue;
-            };
+        // (each vertex with its successor, the last with the first)
+        for (&p, &q) in poly.iter().zip(poly.iter().cycle().skip(1)) {
             let (pin, qin) = (inside(p), inside(q));
             if pin {
                 next.push(p);
@@ -869,13 +866,10 @@ fn slab_region(
         return Ok(Some(()));
     }
     // a slab touching the domain along a side or at a point bounds no area
-    let n = poly.len();
     let mut area2 = 0.0;
     let mut scale = 0.0_f64;
-    for i in 0..n {
-        let (Some(&p), Some(&q)) = (poly.get(i), poly.get((i + 1) % n)) else {
-            continue;
-        };
+    // (each vertex with its successor, the last with the first)
+    for (&p, &q) in poly.iter().zip(poly.iter().cycle().skip(1)) {
         area2 += p.x * q.y - q.x * p.y;
         scale = scale.max(p.x.abs()).max(p.y.abs());
     }
@@ -895,10 +889,8 @@ fn slab_region(
             return Ok(None);
         }
     }
-    for i in 0..n {
-        let (Some(&p), Some(&q)) = (poly.get(i), poly.get((i + 1) % n)) else {
-            continue;
-        };
+    // (each vertex with its successor, the last with the first)
+    for (&p, &q) in poly.iter().zip(poly.iter().cycle().skip(1)) {
         let (a, b) = (
             inputs.plane.evaluate_point_fast(p),
             inputs.plane.evaluate_point_fast(q),
