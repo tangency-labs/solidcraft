@@ -4577,10 +4577,10 @@ fn construction(s: &mut Session, p: &Value) -> Result<Value> {
         let ps: Vec<usize> =
             point_ids.iter().map(|id| sk.point_index(id).ok_or_else(|| bad(cmd, format!("unknown point `{id}`")))).collect::<Result<_>>()?;
         // The selection switches together (a slot or polygon as a whole): to construction
-        // unless all of it already is. Projected curves may switch too. A centerline that
+        // unless all of it already is (the origin never counts: it stays as it is). Projected curves may switch too. A centerline that
         // becomes construction stops being a centerline (one line type at a time).
         let all_construction = cs.iter().all(|c| sk.curves.get(*c).is_some_and(|c| c.construction))
-            && ps.iter().all(|q| sk.points.get(*q).is_some_and(|q| q.construction));
+            && ps.iter().all(|q| *q == 0 || sk.points.get(*q).is_some_and(|q| q.construction));
         let to = want.unwrap_or(!all_construction);
         let mut n = 0;
         for c in cs {

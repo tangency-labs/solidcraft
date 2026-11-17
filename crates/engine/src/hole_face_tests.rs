@@ -891,4 +891,10 @@ fn a_construction_point_is_not_a_hole_site_and_the_flag_is_saved() {
     run(&mut s, "sketch.edit", json!({"sketch": "Pts"}));
     assert_eq!(run(&mut s, "sketch.construction", json!({"points": ["origin"]}))["changed"], 0);
     assert!(s.execute("sketch.construction", &json!({"points": ["nope"]})).is_err());
+    // The origin in the selection does not decide the switch: guide is normal again, and a
+    // repeat makes it construction again.
+    let flip = run(&mut s, "sketch.construction", json!({"points": ["origin", "guide"]}));
+    assert_eq!(flip["construction"].as_bool(), Some(true), "{flip}");
+    let flip = run(&mut s, "sketch.construction", json!({"points": ["origin", "guide"]}));
+    assert_eq!(flip["construction"].as_bool(), Some(false), "{flip}");
 }
