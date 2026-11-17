@@ -82,10 +82,15 @@
 //!   tolerance from both ends of each curve's interval: there the curves part) is taken
 //!   for the one contact inside it: the crossing when the curves change sides across it
 //!   (the separations at its ends, taken across this curve, both past the scaled zero
-//!   with a negative dot product), found by [`local_curve_intersect`] from where the
-//!   separation, taken as linear, vanishes; otherwise, when the stretch is all the
+//!   with a negative dot product) and part at both of its ends, found by [`local_curve_intersect`] from where the
+//!   separation, taken as linear, vanishes (or from the nearest range end) inside the
+//!   stretch and nearer than every range end; otherwise, when the stretch is all the
 //!   solutions, the touch: the least distance over it ([`Curve::local_curve_solve`],
-//!   `Minimize`, from the end where the curves are nearer, or that end). Curves that come
+//!   `Minimize`, from the range end where the curves are nearest, or that end, or a
+//!   minimum found from another range end nearer by more than the scaled zero), inside
+//!   the stretch or where the curves
+//!   meet, nearer than where they part, and for a curve against itself not on a fold.
+//!   Curves that come
 //!   back within the tolerance elsewhere are one coincidence whose fit error passes the
 //!   tolerance here and there (#1036), or several touches, kept as upstream; so is a
 //!   stretch whose crossing the solver does not find. Upstream keeps such a stretch,
@@ -2365,7 +2370,10 @@ impl Curve {
     /// The contact is
     /// - a crossing when the separations at the stretch's ends, taken across this curve
     ///   (the tangent's component removed), are both longer than the scaled zero and point
-    ///   to opposite sides (a negative dot product): the one [`local_curve_intersect`]
+    ///   to opposite sides (a negative dot product), and the curves part at both of its
+    ///   ends (a stretch that runs on to a curve end may be a crossing followed by the
+    ///   curves together within the tolerance up to that end, and keeps its ranges): the
+    ///   one [`local_curve_intersect`]
     ///   finds within `dist_tol` in the stretch, started where the separation, taken as
     ///   linear between the ends, vanishes, and when the point found there is no nearer
     ///   than the range end where the curves are nearest (the stretch's, or one where two
@@ -2376,8 +2384,13 @@ impl Curve {
     ///   nearest in it: the least distance over the closed stretch, the solver's interior
     ///   minimum ([`Curve::local_curve_solve`], `Minimize`, started at the range end, of
     ///   the stretch or where two of its ranges meet, where the curves are nearest) when it
-    ///   finds one nearer than that end, else that end (a round
-    ///   leaving a line it is tangent to at their shared end touches it there). The curves
+    ///   finds one nearer than that end, else that end; or, started at another range end
+    ///   of the stretch, a minimum found nearer than that end and nearer than this one by
+    ///   more than the scaled zero (the curves' nearer approach, which the first solve,
+    ///   local, may miss). Nearest at an end of the stretch,
+    ///   the curves draw nearer beyond it and the stretch holds no touch, unless they meet
+    ///   there within the scaled zero (a round leaving a line it is tangent to at their
+    ///   shared end touches it there). The curves
     ///   part at an end, so their separation is not constant and they touch where it is
     ///   least: a stretch whose parting ends are not farther apart than its touch (by
     ///   more than the scaled zero) keeps its ranges, a constant separation (concentric
@@ -2537,6 +2550,13 @@ impl Curve {
                 }
             }
             if da > scaled_zero && db > scaled_zero && separation_a.dot(separation_b) < 0.0 {
+                // the curves change sides in the stretch; it is their crossing only where
+                // they part at both ends: a stretch running on to a curve end may hold a
+                // crossing and then the two curves together within the tolerance up to
+                // that end, a coincidence
+                if !(parts_a && parts_b) {
+                    continue;
+                }
                 // start where the separation, taken as linear between the ends, vanishes;
                 // a point the solver accepts there no nearer than the nearest range end is
                 // not the crossing, so start again from that end
@@ -2578,19 +2598,22 @@ impl Curve {
             } else if members.len() == sols.len() {
                 // the least distance over the closed stretch: the solver's interior
                 // minimum, started at that nearest range end, or that end
-                let (found, nearest) = self.local_curve_solve(
-                    k,
-                    &ivl1,
-                    other,
-                    &ivl2,
-                    SolverOperation::Minimize,
-                    dist_tol,
-                    None,
-                    None,
-                    guess,
-                    [sol.objects[0], sol.objects[1]],
-                )?;
-                let touch = if found && nearest.start.solution_value < gap {
+                let minimum = |seed: [f64; 2]| {
+                    self.local_curve_solve(
+                        k,
+                        &ivl1,
+                        other,
+                        &ivl2,
+                        SolverOperation::Minimize,
+                        dist_tol,
+                        None,
+                        None,
+                        seed,
+                        [sol.objects[0], sol.objects[1]],
+                    )
+                };
+                let (found, nearest) = minimum(guess)?;
+                let mut touch = if found && nearest.start.solution_value < gap {
                     [
                         nearest.start.parameters[0],
                         nearest.start.parameters[1],
@@ -2599,10 +2622,33 @@ impl Curve {
                 } else {
                     [guess[0], guess[1], gap]
                 };
+                // the least: started at every other range end of the stretch, the solver
+                // may find another minimum (nearer than that end), the curves' nearer
+                // approach when nearer by more than the scaled zero
+                for &m in &members {
+                    let Some(r) = ends.get(m) else { continue };
+                    for (end, p) in [(r.0, r.2), (r.1, r.3)] {
+                        if end == guess {
+                            continue;
+                        }
+                        let end_gap = p.distance(other.evaluate_point(k, end[1])?);
+                        let (found, at) = minimum(end)?;
+                        let value = at.start.solution_value;
+                        if found && value < end_gap && value + scaled_zero < touch[2] {
+                            touch = [at.start.parameters[0], at.start.parameters[1], value];
+                        }
+                    }
+                }
                 // where the curves part they are apart: farther than at the touch (a
                 // constant separation is a coincidence)
                 let apart = |parts: bool, end_gap: f64| !parts || end_gap > touch[2] + scaled_zero;
                 if !(apart(parts_a, gap_a) && apart(parts_b, gap_b)) {
+                    continue;
+                }
+                // nearest at an end of the stretch, the curves draw nearer still beyond it:
+                // the stretch holds no touch unless they meet there (a shared end)
+                let interior = ivl1.min() < touch[0] && touch[0] < ivl1.max();
+                if !(interior || touch[2] <= scaled_zero) {
                     continue;
                 }
                 // a curve against itself nearest where it folds back onto itself (the

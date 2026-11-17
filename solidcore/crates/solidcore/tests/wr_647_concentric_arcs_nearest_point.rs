@@ -340,3 +340,99 @@ fn wr_647_a_parabola_leaving_a_line_at_their_start_meets_it_at_one_point() {
         );
     }
 }
+
+const ZA: [f64; 5] = [
+    -0.00010781025415934847,
+    -0.00012670256036516824,
+    0.00021511861334269806,
+    0.0002595283662315377,
+    -0.00009592442162159323,
+];
+const ZB: [f64; 5] = [
+    0.00020936248929282104,
+    -0.00012160629484595162,
+    0.00012094250528638395,
+    0.00026362296693292704,
+    -0.0001239771010247445,
+];
+
+/// The quadratic B-spline (knots 0, 0, 0, 1/3, 2/3, 1, 1, 1) in the plane x = 0.001 with
+/// y control values 0, 0.00025, ..., 0.001 and the z control values `z`.
+fn quadratic(z: &[f64; 5]) -> Curve {
+    let control: Vec<Point3> = z
+        .iter()
+        .enumerate()
+        .map(|(i, &z)| Point3::new(0.001, 0.00025 * i as f64, z))
+        .collect();
+    Curve::from(
+        BSplineCurve::create_canonical(&CanonicalData {
+            dim: 3,
+            degree: 2,
+            control_points: &control,
+            form: BSplineCurveForm::default(),
+            knot_multiplicities: &[3, 1, 1, 3],
+            knots: &[0.0, 1.0 / 3.0, 2.0 / 3.0, 1.0],
+            knot_type: KnotType::default(),
+            weights: None,
+            trim: None,
+        })
+        .unwrap(),
+    )
+}
+
+/// Two boundary curves of a face pair (the goldens row `intersect.surface_intersector_p2`
+/// gen1228), at tolerance 1e-4. They share x and y on the same knots, so they differ only
+/// in z, by the quadratic B-spline `d` with control values ZA - ZB (closed form, no
+/// sampling): on [1/3, 1] the Bezier control values of `d` on [1/3, 2/3] are all positive
+/// and below 1e-4, and on [2/3, 1] they are below 1e-4 with a negative discriminant and a
+/// positive leading coefficient, so 0 < d < 1e-4 there: the curves never meet on [1/3, 1]
+/// and stay within the tolerance to the curve end. That is a coincidence running to the
+/// end, not a crossing: the answer keeps a range reaching t = 1 and has no point on
+/// [1/3, 1]. (The crossing rule without the both-ends parting condition took the stretch
+/// for a crossing at t = 0.8926, where the curves are 1.05e-5 apart.)
+#[test]
+fn wr_647_a_coincidence_running_to_a_curve_end_is_not_a_crossing() {
+    let d: Vec<f64> = ZA.iter().zip(&ZB).map(|(a, b)| a - b).collect();
+    let mid = |a: f64, b: f64| (a + b) * 0.5;
+    // span [1/3, 2/3]: Bezier control values mid(d1, d2), d2, mid(d2, d3)
+    for b in [mid(d[1], d[2]), d[2], mid(d[2], d[3])] {
+        assert!(b > 1e-5 && b < 1e-4, "{b}");
+    }
+    // span [2/3, 1]: mid(d2, d3), d3, d4
+    let (b0, b1, b2) = (mid(d[2], d[3]), d[3], d[4]);
+    for b in [b0, b1, b2] {
+        assert!(b < 1e-4, "{b}");
+    }
+    let lead = b0 - 2.0 * b1 + b2;
+    let lin = 2.0 * (b1 - b0);
+    let disc = lin * lin - 4.0 * lead * b0;
+    // margins of 1e-9 against values of order 1e-8: rounding is below 1e-20
+    assert!(lead > 1e-5 && disc < -1e-9, "lead {lead} disc {disc}");
+
+    let k = Kernel::default();
+    let (a, b) = (quadratic(&ZA), quadratic(&ZB));
+    let (ia, ib) = (a.natural_interval(), b.natural_interval());
+    let sols = a
+        .global_curve_intersect(
+            &k,
+            &ia,
+            &b,
+            &ib,
+            1e-4,
+            &CurveIntersectOptions::<H>::default(),
+        )
+        .unwrap();
+    let all = sols.as_slice();
+    for s in all {
+        if s.solution_type == SolutionType::SingleValue {
+            assert!(s.start.parameters[0] < 1.0 / 3.0, "{all:?}");
+        }
+    }
+    assert!(
+        all.iter()
+            .any(|s| s.solution_type == SolutionType::RangeOfValues
+                && s.start.parameters[0] <= 1.0 / 3.0
+                && (s.end.parameters[0] - 1.0).abs() < 1e-9),
+        "{all:?}"
+    );
+}

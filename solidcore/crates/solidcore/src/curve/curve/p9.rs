@@ -105,8 +105,11 @@
 //! - **Projected crossings (WR-647).** The projected intersections of `GlobalCurveSolve`
 //!   take a merged range for the crossing or touch inside it by the rule of
 //!   `GlobalCurveIntersect` (unit `curve.curve_p8`), decided on the curves as projected
-//!   ([`ProjectedCurve`]s built as the solver's leaf solve builds them). A projection
-//!   without its vectors is `InvalidInput` there.
+//!   ([`ProjectedCurve`]s built as the solver's leaf solve builds them), for parallel
+//!   projections only: a perspective or rotation projection's derivatives are upstream's
+//!   secant approximations, on which the local solvers stop short of the contact (a
+//!   perspective crossing 7.9e-9 apart found at 8.6e-5), so those keep their ranges. A
+//!   projection without its vectors is `InvalidInput` there.
 
 use crate::curve::curve::p2::{
     proj_signed_angle, CcGlobalSolver, CciGlobalSolver, Curve, CurveKind, CurvePropertyType,
@@ -1546,10 +1549,15 @@ impl Curve {
                 )
                 .map(Curve::from)
             };
-            if sols
-                .as_slice()
-                .iter()
-                .any(|s| s.solution_type == SolutionType::RangeOfValues)
+            // (parallel projections only: the projected derivatives of a perspective or
+            // rotation projection are upstream's secant approximations, on which the
+            // solvers stop short of the contact, so a point found there may be farther
+            // than the range it replaces: those keep their ranges)
+            if projection_type == ProjectionType::Parallel
+                && sols
+                    .as_slice()
+                    .iter()
+                    .any(|s| s.solution_type == SolutionType::RangeOfValues)
             {
                 let (p1, p2) = (project(self)?, project(other)?);
                 p1.contacts_seen_through_tolerance(
