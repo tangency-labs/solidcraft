@@ -35,5 +35,23 @@ fn main() -> Result<(), Box<dyn Error>> {
          macro_rules! call_import {{ ($guest:expr, $store:expr, $entry:expr, $file:expr, $options:expr) => {{ $guest.{namespace}_{name}_importer().call_import_file($store, $entry, $file, $options) }}; }}\n"
     );
     fs::write(PathBuf::from(env::var("OUT_DIR")?).join("importer.rs"), importer)?;
+    // The compile cache keys entries by the Wasmtime that compiled them. Wasmtime's own
+    // compatibility hash covers its settings and target but not its version, so read the version
+    // from the lock file (outside this workspace there is none: the crate version stands in).
+    let lock = "../../Cargo.lock";
+    println!("cargo:rerun-if-changed={lock}");
+    let wasmtime = fs::read_to_string(lock)
+        .ok()
+        .and_then(|lock| {
+            let mut lines = lock.lines();
+            while let Some(line) = lines.next() {
+                if line == "name = \"wasmtime\"" {
+                    return lines.next()?.strip_prefix("version = \"")?.strip_suffix('"').map(str::to_owned);
+                }
+            }
+            None
+        })
+        .unwrap_or_else(|| "unknown".into());
+    println!("cargo:rustc-env=CRAFT_WASMTIME_VERSION={wasmtime}");
     Ok(())
 }

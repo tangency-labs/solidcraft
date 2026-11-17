@@ -330,7 +330,17 @@ extensions it claims, lowercase without the dot:
   call only, so the importer can report its history as unchecked instead of failing.
 - **Failures.** A trap fails that one import ("Sample failed on bracket.smp: ...") and the next
   one gets a fresh instance. The compiled component stays in memory, so the next file opens
-  without compiling again; nothing compiled is written to disk.
+  without compiling again.
+- **Compiled once.** Compiling a large component takes tens of seconds and gigabytes of memory,
+  so the app also keeps compiled components in its cache folder (`plugins/compiled` under
+  `%LOCALAPPDATA%\SolidCraft`, `~/Library/Caches/SolidCraft` or `~/.cache/solidcraft`), and the
+  next run of the app loads one in about a second instead. An entry is keyed by the component's
+  SHA-256 and by the runtime's version, target and settings (fuel, interruption, Wasm features,
+  stack), so another version of the plugin or of SolidCraft never reuses it. Each entry records the
+  size and SHA-256 of what was written; an entry that no longer matches its record (damaged,
+  truncated or changed) is compiled again and replaced, never loaded. The folder holds at most
+  2 GiB, and the least recently used entries are removed first. Deleting it is always safe. The
+  browser version runs no components, so it has no such folder.
 - **Limits.** An importer's component may be up to 64 MiB, its deadline up to 10 minutes, and its
   `stack_kib` up to 64 MiB (a command may ask for at most 1 MiB). Its fuel has to fit the user's ceiling in Preferences › Plugins, and
   its memory too unless the user approved more at install. Build it for `wasm32-unknown-unknown` and wrap it with

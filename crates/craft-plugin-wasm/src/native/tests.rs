@@ -684,3 +684,128 @@ fn an_importer_trap_or_runaway_loop_fails_that_one_call_and_the_next_call_works(
     assert_eq!(import(&manifest, root.join("fine.smp"), false).unwrap().design, b"fine");
     std::fs::remove_dir_all(root).unwrap();
 }
+
+fn compile_cache(max_bytes: u64) -> crate::CompileCache {
+    let dir = std::env::temp_dir().join(format!("craft-plugin-cache-{}-{}", std::process::id(), NEXT_FILE.fetch_add(1, Ordering::Relaxed)));
+    crate::CompileCache { dir, max_bytes }
+}
+fn cache_entries(cache: &crate::CompileCache) -> BTreeSet<PathBuf> {
+    std::fs::read_dir(cache.dir.join(cache::LAYOUT)).unwrap().map(|item| item.unwrap().path()).collect()
+}
+fn bytes_under(path: &Path) -> u64 {
+    if path.is_dir() { std::fs::read_dir(path).unwrap().map(|item| bytes_under(&item.unwrap().path())).sum() } else { path.metadata().unwrap().len() }
+}
+/// The compiled code Wasmtime wrote in a cache entry.
+fn cached_code(entry: &Path) -> PathBuf {
+    let mut folders = vec![entry.to_path_buf()];
+    while let Some(folder) = folders.pop() {
+        for item in std::fs::read_dir(folder).unwrap() {
+            let path = item.unwrap().path();
+            let name = path.file_name().unwrap().to_string_lossy().into_owned();
+            if path.is_dir() {
+                folders.push(path);
+            } else if name != cache::RECORD && !name.ends_with(".stats") && !name.contains(".wip-") {
+                return path;
+            }
+        }
+    }
+    panic!("no compiled code in {}", entry.display());
+}
+const STACK: usize = 512 * 1024;
+fn source(bytes: &[u8], stack: usize, disk: &crate::CompileCache) -> cache::Source {
+    compile_uncached(bytes, stack, Some(disk)).unwrap().2
+}
+
+#[test]
+fn a_compiled_component_is_kept_on_disk_the_next_run_loads_it_and_the_least_recently_used_go_first() {
+    use cache::Source::{Compiled, Disk};
+    let disk = compile_cache(1 << 30);
+    let bytes = component("call $box call $box");
+    let started = Instant::now();
+    assert_eq!(source(&bytes, STACK, &disk), Compiled);
+    let compiled = started.elapsed();
+    let started = Instant::now();
+    let (engine, loaded, from) = compile_uncached(&bytes, STACK, Some(&disk)).unwrap();
+    eprintln!("compiled in {compiled:?}, loaded from disk in {:?}", started.elapsed());
+    assert_eq!(from, Disk);
+    // The loaded component runs like a compiled one.
+    let manifest = manifest();
+    let runtime = manifest.runtime.as_ref().unwrap();
+    let mut app = App::default();
+    let commands = app.command_catalog().into_iter().map(|s| (s.name.clone(), s)).collect();
+    app.begin_transaction().unwrap();
+    let (state, outcome) = execute(app, runtime, &runtime.entries[0], "{}".into(), engine, loaded, (commands, BTreeSet::new()), BTreeMap::new());
+    outcome.unwrap();
+    assert_eq!(state.host.value, 2);
+
+    // Room for about two and a half entries: a third pushes out the one used longest ago.
+    let one = bytes_under(&disk.dir.join(cache::LAYOUT));
+    let disk = crate::CompileCache { max_bytes: one * 5 / 2, ..disk };
+    let (first, second, third) = (bytes, component("call $box"), component("call $box call $box call $box"));
+    assert_eq!(source(&second, STACK, &disk), Compiled);
+    std::thread::sleep(Duration::from_millis(20));
+    assert_eq!(source(&first, STACK, &disk), Disk);
+    std::thread::sleep(Duration::from_millis(20));
+    assert_eq!(source(&third, STACK, &disk), Compiled);
+    assert_eq!(cache_entries(&disk).len(), 2);
+    assert_eq!(source(&first, STACK, &disk), Disk);
+    assert_eq!(source(&third, STACK, &disk), Disk);
+    assert_eq!(source(&second, STACK, &disk), Compiled);
+    std::fs::remove_dir_all(&disk.dir).unwrap();
+}
+
+#[test]
+fn a_damaged_truncated_extra_or_foreign_cache_file_is_a_miss_that_compiles_again_and_replaces_the_entry() {
+    use cache::Source::{Compiled, Disk};
+    let disk = compile_cache(1 << 30);
+    let bytes = importer_component();
+    assert_eq!(source(&bytes, STACK, &disk), Compiled);
+    let entry = cache_entries(&disk).into_iter().next().unwrap();
+    let code = cached_code(&entry);
+    let original = std::fs::read(&code).unwrap();
+    let mut flipped = original.clone();
+    *flipped.last_mut().unwrap() ^= 1;
+    let damage: [&dyn Fn(); 5] = [
+        &|| std::fs::write(&code, &original[..original.len() / 2]).unwrap(),
+        // Same size, one bit changed: only the recorded SHA-256 tells.
+        &|| std::fs::write(&code, &flipped).unwrap(),
+        &|| std::fs::write(code.with_file_name("extra"), b"x").unwrap(),
+        &|| std::fs::write(entry.join(cache::RECORD), b"{").unwrap(),
+        &|| std::fs::remove_file(entry.join(cache::RECORD)).unwrap(),
+    ];
+    for (case, damage) in damage.iter().enumerate() {
+        damage();
+        assert_eq!(source(&bytes, STACK, &disk), Compiled, "case {case}");
+        assert_eq!(source(&bytes, STACK, &disk), Disk, "case {case}");
+    }
+    // Another component's record, copied over this entry's, names the wrong key.
+    let other = component("call $box");
+    assert_eq!(source(&other, STACK, &disk), Compiled);
+    let other_entry = cache_entries(&disk).into_iter().find(|e| *e != entry).unwrap();
+    std::fs::copy(other_entry.join(cache::RECORD), entry.join(cache::RECORD)).unwrap();
+    assert_eq!(source(&bytes, STACK, &disk), Compiled);
+    assert_eq!(source(&bytes, STACK, &disk), Disk);
+    std::fs::remove_dir_all(&disk.dir).unwrap();
+}
+
+#[test]
+fn another_runtime_configuration_never_reuses_a_cache_entry() {
+    let key = |config: &Config, stack: usize| cache::engine_key(&Engine::new(config).unwrap(), stack);
+    let base = key(&engine_config(STACK), STACK);
+    assert_eq!(base, key(&engine_config(STACK), STACK));
+    let mut no_fuel = engine_config(STACK);
+    no_fuel.consume_fuel(false);
+    let mut memory64 = engine_config(STACK);
+    memory64.wasm_memory64(true);
+    for other in [key(&no_fuel, STACK), key(&memory64, STACK), key(&engine_config(STACK * 2), STACK * 2)] {
+        assert_ne!(base, other);
+    }
+    // A run with another stack compiles into an entry of its own.
+    let disk = compile_cache(1 << 30);
+    let bytes = component("call $box");
+    assert_eq!(source(&bytes, STACK, &disk), cache::Source::Compiled);
+    assert_eq!(source(&bytes, STACK * 2, &disk), cache::Source::Compiled);
+    assert_eq!(cache_entries(&disk).len(), 2);
+    assert_eq!(source(&bytes, STACK * 2, &disk), cache::Source::Disk);
+    std::fs::remove_dir_all(&disk.dir).unwrap();
+}
