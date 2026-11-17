@@ -330,15 +330,16 @@ fn count_row_to(ui: &mut egui::Ui, doc: &solidcraft_engine::doc::Document, label
 
 /// The distance types a rectangular pattern direction offers, in the order of
 /// [`PatternDistance`]'s words.
-const PATTERN_DISTANCES: [(PatternDistance, &str); 3] = [
+const PATTERN_DISTANCES: [(PatternDistance, &str); 4] = [
     (PatternDistance::CountSpacing, "ui.pattern_count_spacing"),
     (PatternDistance::CountExtent, "ui.pattern_count_extent"),
     (PatternDistance::SpacingExtent, "ui.pattern_spacing_extent"),
+    (PatternDistance::CountList, "ui.pattern_count_list"),
 ];
 
 /// One rectangular pattern direction (`index` 0 or 1) as its own titled group: the direction's
-/// pick, its Distance Type, the values that type takes (Quantity, Spacing, Extent, Copy at the
-/// end) and (for features) Alignment, in the same order for both directions, so a direction's
+/// pick, its Distance Type, the values that type takes (Quantity, Spacing, Extent, Spacing List,
+/// Copy at the end) and (for features) Alignment, in the same order for both directions, so a direction's
 /// settings sit together (#9634, #8523).
 fn pattern_direction_group(app: &SolveApp, d: &mut Dialog, ui: &mut egui::Ui, index: usize) -> bool {
     let (key, title, quantity_label, spacing_label) = if index == 0 {
@@ -351,6 +352,7 @@ fn pattern_direction_group(app: &SolveApp, d: &mut Dialog, ui: &mut egui::Ui, in
     } else {
         ("ui.pattern_distance_type_2", "ui.pattern_extent_2", "ui.pattern_copy_at_end_2", "distance2", "copy_at_end2")
     };
+    let list_label = if index == 0 { "ui.pattern_spacing_list" } else { "ui.pattern_spacing_list_2" };
     let features = d.inputs.first().is_some_and(|i| i.accept == selection::FEATURES);
     ui_kit::section(ui, key, title, true, |ui| {
         let mut enter = false;
@@ -365,8 +367,8 @@ fn pattern_direction_group(app: &SolveApp, d: &mut Dialog, ui: &mut egui::Ui, in
         } else {
             d.extra.insert(type_key.into(), json!(distance.as_str()));
         }
-        if let Kind::PatternRect { count, spacing, count2, spacing2, extent, extent2 } = &mut d.kind {
-            let (count, spacing, extent) = if index == 0 { (count, spacing, extent) } else { (count2, spacing2, extent2) };
+        if let Kind::PatternRect { count, spacing, count2, spacing2, extent, extent2, list, list2 } = &mut d.kind {
+            let (count, spacing, extent, list) = if index == 0 { (count, spacing, extent, list) } else { (count2, spacing2, extent2, list2) };
             if distance.uses_count() {
                 enter |= quantity_row(ui, &app.session.doc, quantity_label, count);
             }
@@ -375,6 +377,11 @@ fn pattern_direction_group(app: &SolveApp, d: &mut Dialog, ui: &mut egui::Ui, in
             }
             if distance.uses_extent() {
                 enter |= expr_row_positive(ui, extent_label, extent);
+            }
+            if distance.uses_list() {
+                let row = ui.scope(|ui| ui_kit::row(ui, list_label, |ui| ui_kit::hint_field(ui, list, "10 mm; 20 mm; 30 mm")));
+                row.response.backing_on_hover_text(tr("ui.pattern_spacing_list_tip"));
+                enter |= row.inner;
             }
         }
         if distance == PatternDistance::SpacingExtent {

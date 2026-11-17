@@ -1737,6 +1737,49 @@ fn rectangular_pattern_distance_type_sends_what_it_uses_and_reopens() {
     );
 }
 
+/// Quantity and List: the dialog shows a Spacing List row in place of Spacing and sends
+/// the gaps typed between semicolons as a list, each with its unit; a pattern made with them
+/// opens with them again, and with no canvas value (a list is no one length to drag).
+#[test]
+fn rectangular_pattern_spacing_list_sends_its_gaps_and_reopens() {
+    let mut h = Harness::new();
+    h.app.run("solid.box", json!({"length": 40, "width": 30, "height": 10, "body_name": "Block"})).unwrap();
+    let mut d = Dialog::for_command(&h.app, "solid.pattern.rectangular").unwrap();
+    d.inputs[0].items = vec![Sel::Body { name: "Block".into() }];
+    d.inputs[1].items = vec![Sel::Axis { name: "X".into() }];
+    d.extra.insert("distance1".into(), json!("count_list"));
+    if let Kind::PatternRect { count, list, .. } = &mut d.kind {
+        *count = "5".into();
+        *list = " 50 mm;60;; 70,5 mm ".into();
+    }
+    assert!(d.primary().is_none(), "no canvas value for a spacing list");
+    let commands = apply_commands(&h.app, &d).unwrap();
+    let (id, p) = &commands[0];
+    assert_eq!(id, "solid.pattern.rectangular");
+    assert_eq!(p["distance1"], json!("count_list"), "{p}");
+    assert_eq!(p["count1"], json!("5"), "{p}");
+    let gaps = p["spacing_list1"].as_array().cloned().unwrap_or_default();
+    assert_eq!(gaps.len(), 3, "empty entries are dropped: {p}");
+    assert_eq!(gaps[0], json!("50 mm"), "{p}");
+    assert!(p.get("spacing1").is_none() && p.get("extent1").is_none(), "only the values the type uses: {p}");
+    h.app.dialog = Some(d);
+    h.settle();
+    assert!(scenario::rect_of("dialog:row:ui.pattern_spacing_list").is_some(), "the Spacing List row is shown");
+    assert!(scenario::rect_of("dialog:row:Spacing").is_none(), "no Spacing row");
+    h.step(&json!({"click":{"handle":"dialog:cancel"}})).unwrap();
+    h.settle();
+    h.app.run(id, p.clone()).unwrap();
+    assert_eq!(h.app.session.model.state().bodies.len(), 5);
+    let name = h.app.session.doc.features.last().unwrap().name.clone();
+    h.call("ui.editFeature", json!({"feature": name}));
+    h.settle();
+    let d = h.app.dialog.as_ref().expect("the pattern opens to edit");
+    assert_eq!(d.extra.get("distance1"), Some(&json!("count_list")));
+    let Kind::PatternRect { list, .. } = &d.kind else { panic!("{:?}", d.kind) };
+    assert_eq!(list.split(';').count(), 3, "{list}");
+    assert!(list.starts_with("50 mm; "), "{list}");
+}
+
 #[test]
 fn coil_from_a_profile_hides_the_primitive_section() {
     let h = fixture();

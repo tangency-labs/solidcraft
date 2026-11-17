@@ -652,6 +652,105 @@ fn rectangular_pattern_extent_reads_an_expression_in_the_design_unit() {
     assert_eq!(spacing1.as_str(), "25.4 mm");
 }
 
+/// A direction set by count and spacing list takes the list's gaps in turn and from the start
+/// again: 10, 20 and 30 mm with a count of 5 put the copies at 10, 30, 60 and 70 mm. Centred, the
+/// list runs out from the original on both sides; Flip runs it the other way.
+#[test]
+fn rectangular_pattern_spacing_list_places_the_copies() {
+    let x = |v: &[f64]| v.iter().map(|x| [*x, 0.0]).collect::<Vec<_>>();
+    let list = |extra: Value| {
+        let mut p = json!({"dir1": [1, 0, 0], "distance1": "count_list", "count1": 5, "spacing_list1": [10, "20 mm", 30]});
+        if let (Some(p), Some(extra)) = (p.as_object_mut(), extra.as_object()) {
+            p.extend(extra.clone());
+        }
+        rectangular_offsets(p)
+    };
+    let (got, s) = list(json!({}));
+    assert_offsets(&got, &x(&[10.0, 30.0, 60.0, 70.0]));
+    // The list is saved as given; the spacing keeps its first gap for switching back.
+    let Some(solidcraft_doc::FeatureKind::Pattern {
+        pattern: solidcraft_doc::PatternKind::Rectangular { spacing1, spacing_list1, distance1, .. },
+        ..
+    }) = s.doc.features.last().map(|f| &f.kind)
+    else {
+        panic!("no rectangular pattern");
+    };
+    assert_eq!(*distance1, solidcraft_doc::PatternDistance::CountList);
+    assert_eq!(spacing_list1.iter().map(|e| e.as_str()).collect::<Vec<_>>(), ["10", "20 mm", "30"]);
+    assert_eq!(spacing1.as_str(), "10 mm");
+    let (got, _) = list(json!({"count1": 7}));
+    assert_offsets(&got, &x(&[10.0, 30.0, 60.0, 70.0, 90.0, 120.0]));
+    let (got, _) = list(json!({"reversed": true}));
+    assert_offsets(&got, &x(&[-70.0, -60.0, -30.0, -10.0]));
+    let (got, _) = list(json!({"alignment": "center"}));
+    assert_offsets(&got, &x(&[-30.0, -10.0, 10.0, 30.0]));
+    // An even count centred: the extra copy goes ahead, or behind with Flip.
+    let (got, _) = list(json!({"alignment": "center", "count1": 4}));
+    assert_offsets(&got, &x(&[-10.0, 10.0, 30.0]));
+    let (got, _) = list(json!({"alignment": "center", "count1": 4, "reversed": true}));
+    assert_offsets(&got, &x(&[-30.0, -10.0, 10.0]));
+    let (got, _) = list(json!({"alignment": "left"}));
+    assert_offsets(&got, &x(&[-70.0, -60.0, -30.0, -10.0]));
+    // Each direction chooses on its own.
+    let (got, _) = rectangular_offsets(json!({
+        "dir1": [1, 0, 0], "count1": 2, "spacing1": 30,
+        "dir2": [0, 1, 0], "distance2": "count_list", "count2": 3, "spacing_list2": [5, 15]
+    }));
+    assert_offsets(&got, &[[0.0, 5.0], [0.0, 20.0], [30.0, 0.0], [30.0, 5.0], [30.0, 20.0]]);
+    // A list on a direction set another way isn't kept.
+    let (_, s) = rectangular_offsets(json!({"dir1": [1, 0, 0], "count1": 3, "spacing1": 10, "spacing_list1": [4, 5]}));
+    assert!(!s.doc.to_json().contains("spacing_list1"));
+}
+
+/// The spacing list is saved, undone and reopened with the design, and its gaps follow
+/// parameters.
+#[test]
+fn rectangular_pattern_spacing_list_saves_reopens_and_follows_parameters() {
+    let mut s = Session::default();
+    run(&mut s, "parameters.add", json!({"name": "gap", "expression": "10 mm"}));
+    run(&mut s, "solid.box", json!({"length": 2, "width": 2, "height": 2, "body_name": "Cube"}));
+    let before = s.doc.to_json();
+    run(
+        &mut s,
+        "solid.pattern.rectangular",
+        json!({"bodies": ["Cube"], "dir1": [1, 0, 0], "distance1": "count_list", "count1": 4, "spacing_list1": ["gap", "2 * gap"]}),
+    );
+    let reach = |s: &Session| {
+        let st = s.model.state();
+        st.bodies.iter().filter_map(|mb| solidcraft_kernel::measure(&mb.body).ok()).map(|m| m.bbox.max.x).fold(f64::NEG_INFINITY, f64::max)
+    };
+    // Copies at 10, 30 and 40 mm.
+    assert_eq!(s.model.state().bodies.len(), 4);
+    assert!((reach(&s) - 42.0).abs() < 1e-6, "{}", reach(&s));
+    let saved = s.doc.to_json();
+    run(&mut s, "edit.undo", json!({}));
+    assert_eq!(s.doc.to_json(), before);
+    run(&mut s, "edit.redo", json!({}));
+    assert_eq!(s.doc.to_json(), saved);
+    let mut reopened = Session::new(solidcraft_doc::Document::from_json(&saved).unwrap());
+    assert_eq!(reopened.model.state().bodies.len(), 4);
+    run(&mut reopened, "parameters.change", json!({"name": "gap", "expression": "20 mm"}));
+    // Now at 20, 60 and 80 mm.
+    assert!((reach(&reopened) - 82.0).abs() < 1e-6, "{}", reach(&reopened));
+    // In an inch design a bare number inside an expression is inches, for the copies and for the
+    // spacing kept for switching back alike.
+    let mut s = Session::default();
+    run(&mut s, "document.units", json!({"units": "in"}));
+    run(&mut s, "solid.box", json!({"length": "2 mm", "width": "2 mm", "height": "2 mm", "body_name": "Cube"}));
+    run(
+        &mut s,
+        "solid.pattern.rectangular",
+        json!({"bodies": ["Cube"], "dir1": [1, 0, 0], "distance1": "count_list", "count1": 3, "spacing_list1": ["1 + 0"]}),
+    );
+    assert!((reach(&s) - 52.8).abs() < 1e-6, "{}", reach(&s));
+    let Some(solidcraft_doc::FeatureKind::Pattern { pattern: solidcraft_doc::PatternKind::Rectangular { spacing1, .. }, .. }) =
+        s.doc.features.last().map(|f| &f.kind)
+    else {
+        panic!("no rectangular pattern");
+    };
+    assert_eq!(spacing1.as_str(), "25.4 mm");
+}
+
 /// The distance type, the extent and Copy at the end are saved, undone and reopened with the
 /// design, and the extent follows a parameter; a pattern set by count and spacing saves none of
 /// them, so older designs are unchanged.
@@ -695,7 +794,7 @@ fn rectangular_pattern_refuses_unusable_extents_atomically() {
     let before = s.doc.to_json();
     let undo = s.undo.len();
     let cases = [
-        (json!({"distance1": "pitch", "count1": 3, "spacing1": 10}), "`distance1` must be count_spacing, count_extent or spacing_extent"),
+        (json!({"distance1": "pitch", "count1": 3, "spacing1": 10}), "`distance1` must be count_spacing, count_extent, spacing_extent or count_list"),
         (json!({"distance1": 2, "count1": 3, "spacing1": 10}), "`distance1` must be"),
         (json!({"distance1": "spacing_extent", "spacing1": 10, "extent1": 80, "copy_at_end1": "yes"}), "`copy_at_end1` must be true or false"),
         (json!({"distance1": "count_extent", "count1": 3}), "`extent1`"),
@@ -711,6 +810,20 @@ fn rectangular_pattern_refuses_unusable_extents_atomically() {
         (json!({"distance1": "spacing_extent", "spacing1": 1e-300, "extent1": 1e8}), "pattern count must be"),
         (json!({"distance1": "count_extent", "count1": 3, "extent1": "5 deg"}), "extent1"),
         (json!({"count1": 2, "spacing1": 10, "dir2": [0, 1, 0], "distance2": "spacing_extent", "spacing2": 30, "extent2": 20}), "direction 2"),
+        (json!({"distance1": "count_list", "count1": 3}), "`spacing_list1` must list at least one spacing"),
+        (json!({"distance1": "count_list", "count1": 3, "spacing_list1": []}), "`spacing_list1` must list at least one spacing"),
+        (json!({"distance1": "count_list", "count1": 3, "spacing_list1": 10}), "`spacing_list1` must be a list of spacings"),
+        (json!({"distance1": "count_list", "count1": 3, "spacing_list1": [10, true]}), "`spacing_list1` must be a list of spacings"),
+        (json!({"distance1": "count_list", "count1": 3, "spacing_list1": [10, " "]}), "`spacing_list1` must be a list of spacings"),
+        (json!({"distance1": "count_list", "count1": 3, "spacing_list1": [10, "5 deg"]}), "spacing_list1 spacing 2"),
+        (json!({"distance1": "count_list", "count1": 3, "spacing_list1": [10, 0]}), "spacing 2 must be greater than zero"),
+        (json!({"distance1": "count_list", "count1": 3, "spacing_list1": [-10]}), "spacing 1 must be greater than zero"),
+        (json!({"distance1": "count_list", "spacing_list1": [10]}), "`count1`"),
+        (json!({"distance1": "count_list", "count1": 0, "spacing_list1": [10]}), "count"),
+        (
+            json!({"count1": 2, "spacing1": 10, "dir2": [0, 1, 0], "distance2": "count_list", "count2": 3}),
+            "`spacing_list2` must list at least one spacing",
+        ),
     ];
     for (mut p, message) in cases {
         p["bodies"] = json!(["Cube"]);

@@ -180,6 +180,7 @@ pub use eval::Model;
 pub use eval::ModelBody;
 pub use eval::ModelState;
 pub use eval::PatternRow;
+pub use eval::PatternRowValues;
 pub use eval::PendingChecks;
 pub use eval::PlacedBodies;
 pub use eval::PreparedMeshImport;

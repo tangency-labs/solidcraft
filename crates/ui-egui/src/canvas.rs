@@ -1169,6 +1169,25 @@ fn draw(app: &SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj: &Proj,
             box_place(app, proj),
         );
     }
+    // Quantity and List: no value to drag, so a faded arrow shows the way the copies go
+    // and how far they reach, each side its own when centred.
+    if let Kind::PatternRect { count, count2, list, list2, .. } = &d.kind {
+        let doc = &app.session.doc;
+        for (index, n, count, list) in [(0, dir, count, list), (1, pattern_dir2(app, d), count2, list2)] {
+            if crate::dialogs::pattern_distance(&d.extra, index) != PatternDistance::CountList {
+                continue;
+            }
+            let (Some(n), Some((ahead, behind))) = (n, list_reach(doc, &d.extra, index, count, list)) else { continue };
+            let ink = behind_ink(t.manipulator);
+            for (along, length) in [(1.0, ahead), (-1.0, behind)] {
+                if length > 0.0
+                    && let Some(tip) = proj.to_screen(base + n * (along * length))
+                {
+                    arrow(painter, bs, tip, ink);
+                }
+            }
+        }
+    }
     // A placement marker at the base: the arrow stands above it and the base dot is the marker's.
     let clear = crate::place_gizmo::arrow_clearance(app, d);
     // While an extrude's arrow is dragged, the flat faces it can stop at (#2398).
@@ -1742,6 +1761,33 @@ fn extent_sides(doc: &solidcraft_engine::doc::Document, extra: &serde_json::Map<
     let ahead = along.clone().fold(0.0_f64, f64::max) / steps;
     let behind = -along.fold(0.0_f64, f64::min) / steps;
     (ahead, behind)
+}
+
+/// How far a rectangular pattern direction (`index` 0 or 1) set by a spacing list reaches ahead
+/// of the original (the way its first copy goes) and behind it, in mm, worked out as the pattern
+/// places its copies. None while the quantity or the list doesn't evaluate.
+fn list_reach(
+    doc: &solidcraft_engine::doc::Document,
+    extra: &serde_json::Map<String, serde_json::Value>,
+    index: usize,
+    count: &str,
+    list: &str,
+) -> Option<(f64, f64)> {
+    use solidcraft_engine::doc::{Expr, PatternRowValues};
+    let (alignment, reversed) = pattern_layout(extra, index);
+    let gaps: Vec<Expr> = crate::dialogs::spacing_list_values(doc, list).into_iter().map(Expr::from).collect();
+    let given = PatternRowValues {
+        distance: PatternDistance::CountList,
+        count: Some(count.trim()),
+        spacing: None,
+        extent: None,
+        spacing_list: &gaps,
+        copy_at_end: false,
+    };
+    let row = solidcraft_engine::doc::pattern_row(&doc.evaluation_values(), given, alignment).ok()?;
+    let heading = pattern_heading(extra, index);
+    let along = row.offsets(alignment, reversed).into_iter().map(|o| o * heading);
+    Some((along.clone().fold(0.0_f64, f64::max), -along.fold(0.0_f64, f64::min)))
 }
 
 /// A rectangular pattern's extent arrow along `n`, drawn in `ink` (#8523): the share of the
@@ -3136,6 +3182,23 @@ mod pattern_arrow_tests {
         let spacing_extent = extra(json!({"distance2": "spacing_extent", "alignment2": "center"}));
         assert_eq!(extent_sides(&doc, &spacing_extent, 1, ""), (0.5, 0.5));
         assert_eq!(extent_sides(&doc, &spacing_extent, 0, ""), (1.0, 0.0));
+    }
+
+    /// A spacing list's arrow reaches the last copy on each side: 10; 20; 30 mm with Quantity 5
+    /// reach 70 mm ahead, centred 30 mm each way; Flip keeps it ahead of the turned arrow.
+    #[test]
+    fn a_spacing_list_arrow_reaches_the_last_copy_each_way() {
+        use serde_json::json;
+        let doc = solidcraft_engine::doc::Document::new("Arrows");
+        let extra = |v: serde_json::Value| v.as_object().cloned().unwrap_or_default();
+        let list = "10 mm; 20 mm; 30 mm";
+        assert_eq!(list_reach(&doc, &extra(json!({"distance1": "count_list"})), 0, "5", list), Some((70.0, 0.0)));
+        assert_eq!(list_reach(&doc, &extra(json!({"distance1": "count_list", "reversed": true})), 0, "5", list), Some((70.0, 0.0)));
+        let centred = extra(json!({"distance2": "count_list", "alignment2": "center"}));
+        assert_eq!(list_reach(&doc, &centred, 1, "5", list), Some((30.0, 30.0)));
+        assert_eq!(list_reach(&doc, &centred, 1, "4", list), Some((30.0, 10.0)));
+        assert_eq!(list_reach(&doc, &centred, 1, "5", ""), None);
+        assert_eq!(list_reach(&doc, &centred, 1, "nope", list), None);
     }
 
     /// The second arrow's colour follows the theme's: another hue at the same lightness, and a

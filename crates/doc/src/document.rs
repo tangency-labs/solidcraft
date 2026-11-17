@@ -3291,6 +3291,16 @@ pub enum PatternKind {
         copy_at_end1: bool,
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         copy_at_end2: bool,
+        /// Count and spacing list: the gaps between neighbours along the first direction, used
+        /// in turn and from the start again, so `10; 20; 30` with a count of 5 puts the copies
+        /// at 10, 30, 60 and 70.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        #[walk(length = "Spacing list")]
+        spacing_list1: Vec<Expr>,
+        /// The spacing list along the second direction.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        #[walk(length = "Spacing list 2")]
+        spacing_list2: Vec<Expr>,
     },
     Circular {
         /// A point on the axis the copies turn about: numbers, or length expressions it follows
@@ -3368,6 +3378,8 @@ pub enum PatternDistance {
     CountExtent,
     /// The spacing and the extent: as many evenly spaced copies as fit in the extent.
     SpacingExtent,
+    /// The count and a list of spacings, used in turn and from the start again.
+    CountList,
 }
 
 impl PatternDistance {
@@ -3381,12 +3393,13 @@ impl PatternDistance {
             Self::CountSpacing => "count_spacing",
             Self::CountExtent => "count_extent",
             Self::SpacingExtent => "spacing_extent",
+            Self::CountList => "count_list",
         }
     }
 
     /// Read [`PatternDistance::as_str`]'s word.
     pub fn from_word(word: &str) -> Option<Self> {
-        [Self::CountSpacing, Self::CountExtent, Self::SpacingExtent].into_iter().find(|d| d.as_str() == word)
+        [Self::CountSpacing, Self::CountExtent, Self::SpacingExtent, Self::CountList].into_iter().find(|d| d.as_str() == word)
     }
 
     /// Whether the count is given (else worked out from the spacing and the extent).
@@ -3394,14 +3407,20 @@ impl PatternDistance {
         self != Self::SpacingExtent
     }
 
-    /// Whether the spacing is given (else worked out from the count and the extent).
+    /// Whether one spacing is given (else worked out from the count and the extent, or the
+    /// list's first).
     pub fn uses_spacing(self) -> bool {
-        self != Self::CountExtent
+        matches!(self, Self::CountSpacing | Self::SpacingExtent)
     }
 
     /// Whether an extent is given.
     pub fn uses_extent(self) -> bool {
-        self != Self::CountSpacing
+        matches!(self, Self::CountExtent | Self::SpacingExtent)
+    }
+
+    /// Whether a list of spacings is given.
+    pub fn uses_list(self) -> bool {
+        self == Self::CountList
     }
 }
 

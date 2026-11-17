@@ -239,11 +239,14 @@ pub static COMMANDS: &[CommandSpec] = &[
             "count1; ",
             "spacing1; ",
             "dir2?, count2?, spacing2?; ",
-            "distance1?, distance2?: count_spacing|count_extent|spacing_extent (what sets each direction; default count_spacing; ",
+            "distance1?, distance2?: count_spacing|count_extent|spacing_extent|count_list (what sets each direction; default count_spacing; ",
             "count_extent: count<k> and extent<k>, the distance from the first copy to the last, spacing = extent / (count - 1); ",
-            "spacing_extent: spacing<k> and extent<k>, as many copies as fit, none past the extent's end); ",
+            "spacing_extent: spacing<k> and extent<k>, as many copies as fit, none past the extent's end; ",
+            "count_list: count<k> and spacing_list<k>); ",
             "extent1?, extent2?: expr (greater than zero); ",
             "copy_at_end1?, copy_at_end2?: bool (spacing_extent: one more copy exactly at the extent's end when the spacing doesn't divide it, so only the last gap is shorter); ",
+            "spacing_list1?, spacing_list2?: [expr] (count_list: the gaps between neighbours, each greater than zero, used in turn and from the start again: ",
+            "[10, 20, 30] with count 5 puts copies at 10, 30, 60 and 70; centred, out from the original on both sides); ",
             "alignment?, alignment2?: left|center|right (default right; counts include the original); ",
             "reversed?, reversed2?: bool (Flip)",
         )),
@@ -3466,6 +3469,8 @@ fn pattern_rect(s: &mut Session, p: &Value) -> Result<Value> {
         extent2: row2.extent,
         copy_at_end1: row1.copy_at_end,
         copy_at_end2: row2.copy_at_end,
+        spacing_list1: row1.spacing_list,
+        spacing_list2: row2.spacing_list,
     };
     finish_pattern(s, p, features, pattern, bodies)
 }
@@ -3477,9 +3482,38 @@ struct PatternDirection {
     spacing: Option<Expr>,
     extent: Option<Expr>,
     copy_at_end: bool,
+    spacing_list: Vec<Expr>,
 }
 
-/// Direction `k`'s `distance<k>`, `count<k>`, `spacing<k>`, `extent<k>` and `copy_at_end<k>`.
+/// The most spacings a pattern's spacing list holds.
+const MAX_SPACING_LIST: usize = 10_000;
+
+/// `spacing_list<k>`: the gaps of a count and spacing list direction, each a number or a length
+/// expression. Left out or `null`, none.
+fn spacing_list(s: &Session, p: &Value, cmd: &str, key: &str) -> Result<Vec<Expr>> {
+    let malformed = || bad(cmd, format!("`{key}` must be a list of spacings, each a number or an expression"));
+    let items = match p.get(key) {
+        None | Some(Value::Null) => return Ok(Vec::new()),
+        Some(Value::Array(items)) if items.len() <= MAX_SPACING_LIST => items,
+        Some(Value::Array(_)) => return Err(bad(cmd, format!("`{key}` may list at most {MAX_SPACING_LIST} spacings"))),
+        Some(_) => return Err(malformed()),
+    };
+    let mut out = Vec::with_capacity(items.len());
+    for (i, item) in items.iter().enumerate() {
+        let e = match item {
+            Value::Number(n) => crate::params::number_text(n).map(Expr::new),
+            Value::String(t) if !t.trim().is_empty() && t.len() <= 4096 => Some(Expr::new(t.trim())),
+            _ => None,
+        }
+        .ok_or_else(malformed)?;
+        check_expr(s, &e, Kind::Length, cmd, &format!("{key} spacing {}", i + 1))?;
+        out.push(e);
+    }
+    Ok(out)
+}
+
+/// Direction `k`'s `distance<k>`, `count<k>`, `spacing<k>`, `extent<k>`, `copy_at_end<k>` and
+/// `spacing_list<k>`.
 /// When `used` (direction 1, or a direction 2 with its `dir2`), the values its distance type
 /// needs are required and the row is worked out now, so a count over the limit or a spacing
 /// longer than the extent is refused with its own message; a count or spacing worked out and
@@ -3494,7 +3528,7 @@ fn pattern_direction(s: &Session, p: &Value, cmd: &str, k: &str, used: bool) -> 
         Some(v) => v
             .as_str()
             .and_then(PatternDistance::from_word)
-            .ok_or_else(|| bad(cmd, format!("`{}` must be count_spacing, count_extent or spacing_extent", key("distance"))))?,
+            .ok_or_else(|| bad(cmd, format!("`{}` must be count_spacing, count_extent, spacing_extent or count_list", key("distance"))))?,
     };
     let copy_at_end = match p.get(key("copy_at_end").as_str()) {
         None | Some(Value::Null) => false,
@@ -3509,6 +3543,10 @@ fn pattern_direction(s: &Session, p: &Value, cmd: &str, k: &str, used: bool) -> 
     let count = given("count", distance.uses_count())?;
     let spacing = given("spacing", distance.uses_spacing())?;
     let extent = given("extent", distance.uses_extent())?;
+    let list = spacing_list(s, p, cmd, &key("spacing_list"))?;
+    if used && distance.uses_list() && list.is_empty() {
+        return Err(bad(cmd, format!("`{}` must list at least one spacing", key("spacing_list"))));
+    }
     if let Some(c) = &count {
         check_count(s, c, cmd, &key("count"))?;
     }
@@ -3517,21 +3555,29 @@ fn pattern_direction(s: &Session, p: &Value, cmd: &str, k: &str, used: bool) -> 
             check_expr(s, e, Kind::Length, cmd, &name)?;
         }
     }
-    let mut direction = PatternDirection { distance, count, spacing, extent, copy_at_end: copy_at_end && distance == PatternDistance::SpacingExtent };
+    let mut direction = PatternDirection {
+        distance,
+        count,
+        spacing,
+        extent,
+        copy_at_end: copy_at_end && distance == PatternDistance::SpacingExtent,
+        // Kept only where it's used: switching the type away and back in the dialog finds it there.
+        spacing_list: if distance.uses_list() { list } else { Vec::new() },
+    };
     if !used {
         return Ok(direction);
     }
+    // As the feature evaluates it: a bare number in an expression reads in the design's unit.
     let vals = s.doc.evaluation_values();
-    let row = solidcraft_doc::pattern_row(
-        &vals,
+    let given = solidcraft_doc::PatternRowValues {
         distance,
-        direction.count.as_deref(),
-        direction.spacing.as_deref(),
-        direction.extent.as_deref(),
-        direction.copy_at_end,
-        alignment,
-    )
-    .map_err(|e| bad(cmd, format!("direction {k}: {e}")))?;
+        count: direction.count.as_deref(),
+        spacing: direction.spacing.as_deref(),
+        extent: direction.extent.as_deref(),
+        spacing_list: &direction.spacing_list,
+        copy_at_end: direction.copy_at_end,
+    };
+    let row = solidcraft_doc::pattern_row(&vals, given, alignment).map_err(|e| bad(cmd, format!("direction {k}: {e}")))?;
     if direction.count.is_none() {
         direction.count = Some(row.count.to_string().into());
     }

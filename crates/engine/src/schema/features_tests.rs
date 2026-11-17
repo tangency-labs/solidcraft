@@ -1395,6 +1395,8 @@ fn pattern_schemas_and_the_key_check_agree() {
             "reversed2",
             "spacing1",
             "spacing2",
+            "spacing_list1",
+            "spacing_list2",
         ],
     );
     assert_keys(
@@ -1466,6 +1468,13 @@ fn rectangular_pattern_contract_keeps_the_handlers_errors() {
             with(without(row(), "spacing1"), json!({"distance1": "spacing_extent", "extent1": 80})),
             with(row(), json!({"distance1": "spacing_extent", "spacing1": 90, "extent1": 80})),
             with(row(), json!({"distance1": "spacing_extent", "spacing1": -15, "extent1": 80})),
+            with(row(), json!({"distance1": "count_list"})),
+            with(row(), json!({"distance1": "count_list", "spacing_list1": []})),
+            with(row(), json!({"distance1": "count_list", "spacing_list1": 10})),
+            with(row(), json!({"distance1": "count_list", "spacing_list1": [10, true]})),
+            with(row(), json!({"distance1": "count_list", "spacing_list1": [10, "5 deg"]})),
+            with(row(), json!({"distance1": "count_list", "spacing_list1": [10, 0]})),
+            with(row(), json!({"spacing_list2": "10; 20"})),
         ],
     );
     for p in [
@@ -1542,6 +1551,11 @@ fn the_pattern_checks_take_what_the_schemas_allow() {
         (with(row(), json!({"distance2": "Count_Extent"})), false),
         (with(row(), json!({"extent1": true})), false),
         (with(row(), json!({"copy_at_end1": "yes"})), false),
+        (with(row(), json!({"distance1": "count_list", "spacing_list1": [10, "20 mm", "gap * 2"]})), true),
+        (with(row(), json!({"dir2": [0, 1, 0], "distance2": "count_list", "count2": 3, "spacing_list2": [5]})), true),
+        (with(row(), json!({"spacing_list1": null, "spacing_list2": null})), true),
+        (with(row(), json!({"spacing_list1": "10; 20"})), false),
+        (with(row(), json!({"spacing_list1": [10, true]})), false),
         (with(row(), json!({"bodies": "B", "components": [], "alignment": "left", "reversed": false, "name": "Grid"})), true),
         (with(row(), json!({"dir1": [1, 0]})), false),
         (with(row(), json!({"dir1": null})), false),
