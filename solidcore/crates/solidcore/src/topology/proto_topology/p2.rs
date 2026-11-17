@@ -5856,6 +5856,200 @@ mod tests {
         }
     }
 
+    /// A proto vertex at `at` (tolerance 1e-5) holding one definition there with tolerance
+    /// `tol`, listed at `m`: a vertex the growth tests below may reach.
+    fn another_vertex_at(
+        k: &Kernel,
+        m: &mut ProtoTopologyManager<H>,
+        geo: &Geo,
+        at: Point3,
+        tol: f64,
+    ) -> (ProtoVertexId, VertexDefId) {
+        let pv = m.new_proto_vertex(at, 1e-5).unwrap();
+        m.add_proto_vertex(pv);
+        let vd = VertexDefinition::new(k, geo, &region_pc(R0), &region_pc(R1), at, tol, 1e-9, None)
+            .unwrap();
+        let vd = m.insert_vertex_definition(vd).unwrap();
+        m.add_vertex_definition(pv, vd).unwrap();
+        (pv, vd)
+    }
+
+    /// #18312 (1): `resolve_vertex_definition`'s move may not grow the definition into
+    /// another vertex definition that its tolerance before the move kept clear of. As in
+    /// `a_resolved_definition_keeps_its_absorbed_curve_covered`, the definition moves to
+    /// (1.5e-4, 0, 0) and grows to about 1.5e-4 to cover the absorbed line. A definition of
+    /// another proto vertex at (3.8e-4, 0, 0) with tolerance 1e-4 is 2.3e-4 from there:
+    /// clear of the old tolerance (2e-4 < 2.3e-4) but reached by the grown one
+    /// (2.5e-4 >= 2.3e-4), so the resolution is refused for the Boolean and the definition
+    /// is left as it was. One at (6e-4, 0, 0) stays clear (4.5e-4 > 2.5e-4): the move goes
+    /// ahead.
+    #[test]
+    fn a_resolve_whose_cover_would_reach_another_definition_is_refused() {
+        for (x, refused) in [(3.8e-4, true), (6e-4, false)] {
+            let k = Kernel::default();
+            let mut geo = Geo::default();
+            geo.curves.push(line([0.0, 0.0, 0.0], [5e-5, 0.0, 0.0]));
+            geo.points.push(Point3::new(0.0, 0.0, 0.0));
+            geo.points.push(Point3::new(3e-4, 0.0, 0.0));
+            let mut m = manager();
+            m.set_capture_distance(0.01);
+            let p = Point3::new(0.0, 0.0, 0.0);
+            let pv = m.new_proto_vertex(p, 1e-5).unwrap();
+            m.add_proto_vertex(pv);
+            let point_pc = |i: usize| {
+                let mut pc = PointClassification::new(1e-5);
+                pc.set_class_object(PointClassType::Point, Some(H(i, ClassObjectKind::Point)));
+                pc.set_gap_3d(1e-5);
+                pc
+            };
+            let vd =
+                VertexDefinition::new(&k, &geo, &point_pc(0), &point_pc(1), p, 1e-4, 1e-9, None)
+                    .unwrap();
+            let vd = m.insert_vertex_definition(vd).unwrap();
+            m.add_vertex_definition(pv, vd).unwrap();
+            let (pv2, other) = another_vertex_at(&k, &mut m, &geo, Point3::new(x, 0.0, 0.0), 1e-4);
+
+            resolve_loop_at(&k, &mut m, &mut geo, pv, 0).unwrap();
+            assert!(!m.vertex_def(vd).unwrap().absorbed_hull().is_empty());
+            assert_eq!(m.vertex_def(vd).unwrap().tolerance(&k), 1e-4);
+
+            let result = m.resolve_proto_vertex(&k, &geo, pv);
+            let refusal = m.take_self_loop_refusal();
+            assert_eq!(m.proto_vertex(pv2).unwrap().vertex_definitions(), &[other]);
+            let def = m.vertex_def(vd).unwrap();
+            if refused {
+                let err = result.unwrap_err();
+                assert!(err.to_string().contains("another vertex"), "{err}");
+                assert!(refusal.is_some(), "kept for the Boolean");
+                assert_eq!(m.proto_vertex(pv).unwrap().vertex_definitions(), &[vd]);
+                assert_eq!(def.position(), p, "not moved");
+                assert_eq!(def.tolerance(&k), 1e-4, "not grown");
+            } else {
+                result.unwrap();
+                assert!(refusal.is_none(), "{x:e}");
+                assert_eq!(def.position(), Point3::new(1.5e-4, 0.0, 0.0), "{x:e}");
+                assert!(def.tolerance(&k) > 1.5e-4, "{x:e}: grown to cover the line");
+            }
+        }
+    }
+
+    /// #18312 (2): the definition that stays when `resolve_proto_vertex` combines away one
+    /// that absorbed a self-loop may not grow into another vertex definition that its own
+    /// tolerance kept clear of. As in
+    /// `a_combined_away_absorbing_definition_hands_its_curve_to_the_survivor`, `b` at
+    /// (1.5e-4, 0, 0) would grow to about 1.5e-4 to cover `a`'s line. A definition of another
+    /// proto vertex at (3.8e-4, 0, 0) with tolerance 1e-4 is 2.3e-4 from `b`: clear of `b`'s
+    /// tolerance (2e-4 < 2.3e-4), reached by the grown one (2.5e-4 >= 2.3e-4). The combine
+    /// is refused for the Boolean, with both definitions kept and `b` not grown. One at
+    /// (6e-4, 0, 0) stays clear and `a` is combined away.
+    #[test]
+    fn a_combine_whose_cover_would_reach_another_definition_is_refused() {
+        for (x, refused) in [(3.8e-4, true), (6e-4, false)] {
+            let k = Kernel::default();
+            let mut geo = Geo::default();
+            geo.curves.push(line([0.0, 0.0, 0.0], [5e-5, 0.0, 0.0]));
+            let mut m = manager();
+            m.set_capture_distance(0.01);
+            let p = Point3::new(0.0, 0.0, 0.0);
+            let pv = m.new_proto_vertex(p, 1e-5).unwrap();
+            m.add_proto_vertex(pv);
+            let mk = |m: &mut ProtoTopologyManager<H>, geo: &Geo, at: Point3, gap: f64| {
+                let vd = VertexDefinition::new(
+                    &k,
+                    geo,
+                    &region_pc(R0),
+                    &region_pc(R1),
+                    at,
+                    1e-4,
+                    gap,
+                    None,
+                )
+                .unwrap();
+                m.insert_vertex_definition(vd).unwrap()
+            };
+            let a = mk(&mut m, &geo, p, 2e-6);
+            m.add_vertex_definition(pv, a).unwrap();
+            resolve_loop_at(&k, &mut m, &mut geo, pv, 0).unwrap();
+            assert!(!m.vertex_def(a).unwrap().absorbed_hull().is_empty());
+
+            let at = Point3::new(1.5e-4, 0.0, 0.0);
+            let b = mk(&mut m, &geo, at, 1e-6);
+            m.add_vertex_definition(pv, b).unwrap();
+            let (pv2, other) = another_vertex_at(&k, &mut m, &geo, Point3::new(x, 0.0, 0.0), 1e-4);
+
+            let result = m.resolve_proto_vertex(&k, &geo, pv);
+            let refusal = m.take_self_loop_refusal();
+            assert_eq!(m.proto_vertex(pv2).unwrap().vertex_definitions(), &[other]);
+            let def = m.vertex_def(b).unwrap();
+            assert_eq!(def.position(), at);
+            if refused {
+                let err = result.unwrap_err();
+                assert!(err.to_string().contains("another vertex"), "{err}");
+                assert!(refusal.is_some(), "kept for the Boolean");
+                assert!(m.vertex_def(a).is_some(), "a is not combined away");
+                assert_eq!(m.proto_vertex(pv).unwrap().vertex_definitions(), &[a, b]);
+                assert_eq!(def.tolerance(&k), 1e-4, "not grown");
+                assert!(def.absorbed_hull().is_empty(), "a's hull not handed over");
+            } else {
+                result.unwrap();
+                assert!(refusal.is_none(), "{x:e}");
+                assert!(m.vertex_def(a).is_none(), "{x:e}: a is combined away");
+                assert!(def.tolerance(&k) > 1.5e-4, "{x:e}: grown to cover the line");
+            }
+        }
+    }
+
+    /// #18312 (3): a proto vertex that combines a definition away (#16637) may not grow its
+    /// tolerance into another proto vertex's definition that its tolerance before kept
+    /// clear of. As in `a_resolved_proto_vertex_covers_every_point_it_absorbed`, the proto
+    /// vertex at `p` (tolerance 1e-5) absorbs `a`, 3e-5 away, and would grow to 3e-5. A
+    /// definition of another proto vertex 3.5e-5 from `p` with tolerance 1e-5 is clear of
+    /// the old tolerance (2e-5 < 3.5e-5) but reached by the grown one (4e-5 >= 3.5e-5): the
+    /// resolution is refused for the Boolean and the proto vertex keeps its position and
+    /// tolerance. One 5e-5 away stays clear (4e-5 < 5e-5): the tolerance grows.
+    #[test]
+    fn a_placement_whose_cover_would_reach_another_definition_is_refused() {
+        for (dx, refused) in [(3.5e-5, true), (5e-5, false)] {
+            let k = Kernel::default();
+            let geo = Geo::default();
+            let mut m = manager();
+            let p = Point3::new(1.0, 2.0, 3.0);
+            let mk = |m: &mut ProtoTopologyManager<H>, at: Point3, a: H, b: H, gap: f64| {
+                let vd =
+                    VertexDefinition::new(&k, &geo, &region_pc(a), &region_pc(b), at, 1e-5, gap, None)
+                        .unwrap();
+                m.insert_vertex_definition(vd).unwrap()
+            };
+            let far = p + Vec3::new(3e-5, 0.0, 0.0);
+            let a = mk(&mut m, far, R0, R1, 2e-6);
+            let b = mk(&mut m, p, R0, R1, 1e-6);
+            let c = mk(&mut m, p, R0, L0, 1e-6);
+            let pv = m.new_proto_vertex(p, 1e-5).unwrap();
+            m.add_proto_vertex(pv);
+            for vd in [a, b, c] {
+                m.add_vertex_definition(pv, vd).unwrap();
+            }
+            let (pv2, other) = another_vertex_at(&k, &mut m, &geo, p - Vec3::new(dx, 0.0, 0.0), 1e-5);
+
+            let result = m.resolve_proto_vertex(&k, &geo, pv);
+            let refusal = m.take_self_loop_refusal();
+            assert_eq!(m.proto_vertex(pv2).unwrap().vertex_definitions(), &[other]);
+            let v = m.proto_vertex(pv).unwrap();
+            assert_eq!(v.position(), p);
+            if refused {
+                let err = result.unwrap_err();
+                assert!(err.to_string().contains("another vertex"), "{err}");
+                assert!(refusal.is_some(), "kept for the Boolean");
+                assert_eq!(v.raw_tolerance(), 1e-5, "not grown");
+            } else {
+                result.unwrap();
+                assert!(refusal.is_none(), "{dx:e}");
+                assert_eq!(v.vertex_definitions(), &[b, c]);
+                assert_eq!(v.raw_tolerance(), far.distance(p) * (1.0 + gamma(4)));
+            }
+        }
+    }
+
     #[test]
     fn proto_edges_create_add_combine_resolve() {
         let k = Kernel::default();
