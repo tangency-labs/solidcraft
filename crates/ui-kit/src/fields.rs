@@ -161,16 +161,30 @@ pub struct Count<'a> {
 }
 
 /// Expression editor for a whole-number count (a pattern's quantity), with up and down step
-/// arrows at its right edge. An arrow steps the evaluated count by one and stays within the
-/// limits: a plain number is replaced, an expression keeps its parameters and gains or adjusts
-/// a trailing `+ n`. The text changes as if typed, so previews follow. Returns accepted Enter.
+/// arrows at its right edge and Up/Down keys when focused. Each step changes the evaluated
+/// count by one within the limits: a plain number is replaced, while an expression keeps its
+/// parameters and gains or adjusts a trailing `+ n`. The text changes as if typed, so previews
+/// follow. Returns accepted Enter.
 /// Tokens: field tokens, `control_border`, `selected_bg`, `form_ink`, `form_dim`.
 pub fn count_field(ui: &mut Ui, value: &mut String, limits: &Count<'_>) -> bool {
+    // Remember the editor id across frames, so the key is handled before TextEdit sees it.
+    // At a limit, keep ordinary text editing; only the focused field steps.
+    let focus_id = ui.scope_id().with(("count_field", label(ui)));
+    let focused = ui.ctx().data(|d| d.get_temp::<egui::Id>(focus_id)).is_some_and(|id| ui.memory(|m| m.has_focus(id)));
+    let keyboard_step = if ui.is_enabled() && focused {
+        [(egui::Key::ArrowUp, 1), (egui::Key::ArrowDown, -1)].into_iter().find_map(|(key, delta)| {
+            let next = step_count(value, delta, limits)?;
+            ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, key)).then_some(next)
+        })
+    } else {
+        None
+    };
     let t = Tokens::get();
     let reserve = (t.control_height * 0.75).round();
     let (enter, _, response) = editor_reserving(ui, value, "", true, reserve);
+    ui.ctx().data_mut(|d| d.insert_temp(focus_id, response.id));
     let row = label(ui).to_owned();
-    if let Some(next) = step_arrows(ui, response.rect, reserve, &row, |delta| step_count(value, delta, limits)) {
+    if let Some(next) = keyboard_step.or_else(|| step_arrows(ui, response.rect, reserve, &row, |delta| step_count(value, delta, limits))) {
         *value = next;
     }
     enter
