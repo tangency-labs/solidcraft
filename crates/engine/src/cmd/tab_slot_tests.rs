@@ -105,3 +105,20 @@ fn a_tab_slot_edit_is_checked_against_the_model_before_it() {
     run(&mut s, "timeline.edit", json!({"feature": "Joints", "set": {"count": 2}}));
     assert!((volume(&s, "Wall") - 44_640.0).abs() < 1e-3, "{}", volume(&s, "Wall"));
 }
+
+#[test]
+fn a_tab_slot_near_point_lands_in_the_plates_component() {
+    let mut s = Session::default();
+    run(&mut s, "component.create", json!({"name": "Part", "grounded": false}));
+    run(&mut s, "solid.box", json!({"corner": [0, 0, 0], "length": 160, "width": 100, "height": 6, "body_name": "Bottom", "operation": "new"}));
+    run(&mut s, "solid.box", json!({"corner": [20, 30, 6], "length": 120, "width": 6, "height": 60, "body_name": "Wall", "operation": "new"}));
+    run(&mut s, "occurrence.move", json!({"occurrence": "Part:1", "translate": [50, 0, 0]}));
+    // The wall's foot, picked where it is shown: world (130, 33, 6).
+    let reply = tab_slot(&mut s, json!({"tab_plates": [{"body": "Wall", "near": [130, 33, 6]}]})).unwrap();
+    assert_eq!(reply["tabs"], 3, "{reply}");
+    let f = s.doc.features.last().unwrap();
+    let kind = serde_json::to_value(&f.kind).unwrap();
+    let near = crate::params::vec3(&kind["tab_plates"][0]["near"]).unwrap_or_else(|| panic!("{kind}"));
+    assert!((near.x - 80.0).abs() < 1e-6 && (near.y - 33.0).abs() < 1e-6 && (near.z - 6.0).abs() < 1e-6, "{kind}");
+    assert!((volume(&s, "Wall") - 45_360.0).abs() < 1e-3, "{reply}");
+}
