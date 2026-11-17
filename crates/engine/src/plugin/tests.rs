@@ -1220,7 +1220,10 @@ mod exporters {
         assert_eq!(listed["exporters"][0]["id"], "smp.copy");
         assert_eq!(listed["plugins"][0]["commands"], json!([]), "an exporter is not a command");
         let (before, undo) = (s.doc.to_json(), s.undo.len());
-        let inspected = s.execute("document.inspect", &json!({})).unwrap();
+        let mut inspected = s.execute("document.inspect", &json!({})).unwrap();
+        // The plugin reads a copy of the session that carries no undo history, so it counts none.
+        assert_eq!(inspected["undo"], 1);
+        inspected["undo"] = json!(0);
         // The extension picks the slot; the file holds exactly what the plugin read.
         let reply = s.execute("file.export", &json!({"path": at(&root, "bracket.smp")})).unwrap();
         assert_eq!((reply["format"].as_str(), reply["plugin"].as_str()), (Some("smp.copy"), Some("Sample Exporter")));
