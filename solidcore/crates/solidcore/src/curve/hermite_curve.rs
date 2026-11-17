@@ -130,6 +130,79 @@ pub fn classify_cubic(k: &Kernel, points: [Point3; 4]) -> Result<CubicStanding> 
     })
 }
 
+/// One piece of a cubic Bezier curve on `[0, 1]` ([`cubic_pieces`]): the cubic Bezier curve
+/// through `points` on `[0, 1]` and what it stands as ([`classify_cubic`]).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct CubicPiece {
+    /// Its four control points.
+    pub points: [Point3; 4],
+    /// What it stands as in the model.
+    pub standing: CubicStanding,
+}
+
+/// The two halves of the cubic Bezier curve through `points`, split at parameter 1/2 by de
+/// Casteljau's construction: together they are the same curve, each again a cubic Bezier
+/// curve on `[0, 1]`.
+fn halve_cubic([a, b, c, d]: [Point3; 4]) -> ([Point3; 4], [Point3; 4]) {
+    let ab = 0.5 * (a + b);
+    let bc = 0.5 * (b + c);
+    let cd = 0.5 * (c + d);
+    let abc = 0.5 * (ab + bc);
+    let bcd = 0.5 * (bc + cd);
+    let mid = 0.5 * (abc + bcd);
+    ([a, ab, abc, mid], [mid, bcd, cd, d])
+}
+
+/// The cubic Bezier curve through `points` on `[0, 1]` as pieces the model can keep, in order
+/// from its start: the whole curve when [`classify_cubic`] does not refuse it. A curve the
+/// B-spline curve check refuses (#16190: a bend whose radius is below the check's tolerance,
+/// which is relative to the curve's own size) is split exactly at parameter 1/2, and each refused
+/// half again, until every piece is either a curve the check passes or lies within the zone
+/// tolerance of its chord ([`CubicStanding::Chord`]). The pieces are the same curve, except that
+/// a chord piece is its chord, as the model cannot tell them apart.
+///
+/// The whole curve is returned as [`CubicStanding::Refused`] when no such split exists: when a
+/// chord piece has its ends within the zone tolerance of each other (a point, which cannot be an
+/// edge: a curve refused at a zero-speed end keeps a refused piece there at every split down to
+/// that size), or when a piece would be split more often than a parameter on `[0, 1]` resolves
+/// (`f64::MANTISSA_DIGITS` halvings).
+///
+/// # Errors
+///
+/// Those of [`classify_cubic`] on the curve or a piece.
+pub fn cubic_pieces(k: &Kernel, points: [Point3; 4]) -> Result<Vec<CubicPiece>> {
+    let standing = classify_cubic(k, points)?;
+    let whole = vec![CubicPiece { points, standing }];
+    if standing != CubicStanding::Refused {
+        return Ok(whole);
+    }
+    let zone = context_zone_tol_3d(k, None, SmallTopoType::NormalSize);
+    let mut pieces = Vec::new();
+    // The pieces still to classify, with their number of halvings; the next one last.
+    let (first, second) = halve_cubic(points);
+    let mut pending = vec![(second, 1u32), (first, 1u32)];
+    while let Some((piece, depth)) = pending.pop() {
+        let standing = classify_cubic(k, piece)?;
+        let [start, _, _, end] = piece;
+        match standing {
+            CubicStanding::Refused => {
+                if depth >= f64::MANTISSA_DIGITS {
+                    return Ok(whole);
+                }
+                let (first, second) = halve_cubic(piece);
+                pending.push((second, depth + 1));
+                pending.push((first, depth + 1));
+            }
+            CubicStanding::Chord if (end - start).length() <= zone => return Ok(whole),
+            CubicStanding::Chord | CubicStanding::Curve => pieces.push(CubicPiece {
+                points: piece,
+                standing,
+            }),
+        }
+    }
+    Ok(pieces)
+}
+
 /// A cubic Hermite curve on `[0, 1]` (`SmHermiteCurve`):
 ///
 /// ```text
