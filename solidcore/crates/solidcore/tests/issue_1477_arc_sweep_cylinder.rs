@@ -425,7 +425,7 @@ fn the_cylinder(b: &Brep) -> (Axis2Placement, f64) {
     let [one] = found.as_slice() else {
         panic!("one cylinder: {:?}", kinds(b));
     };
-    one.clone()
+    *one
 }
 
 /// The cubic Bezier of a 0.005 degree arc of radius 88.3 about (-8.19, 145.98) at z = -53,
