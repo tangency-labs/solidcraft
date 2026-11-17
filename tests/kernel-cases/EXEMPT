@@ -85,17 +85,20 @@ engine.describe                   the command registry itself
 explode.delete                    exploded views: display offsets
 explode.list                      exploded views: display offsets
 expr.evaluate                     expression evaluation
+file.copy                        file operations: tested in crates/engine/src/cmd/file_library.rs tests
 file.gerber_files                 a listing of a board's files: crates/engine/src/cmd/board_import_tests.rs
 file.gpg_keys                     GnuPG key listing: tested in crates/engine/src/gpg.rs tests
 file.import                       opens a file through an importer plugin: tested in crates/engine/src/plugin/tests.rs
 file.import_cache_clear           clears a cache of imported files
 file.insert_gerber                board import, tested in crates/engine/src/cmd/board_import_tests.rs
+file.move                        file operations: tested in crates/engine/src/cmd/file_library.rs tests
 file.open_in_easyprint            hands the file to another program
 file.save                         saving the design
 file.save_as                      saving the design
 file.save_mesh                    saving a display mesh
 file.send_to_slicer               hands the file to a slicer
 file.slicers                      a listing of slicers
+file.trash                       file guards and isolated trash: tested in crates/engine/src/cmd/file_library.rs tests
 file.verify                       signature checks: tested in crates/io/src/design/provenance.rs and the engine/UI signature tests
 frame.end_cap                     plates on member ends; tested in crates/engine/src/cmd/frame_tests.rs
 frame.profile.list                a listing of the profile library
@@ -179,6 +182,7 @@ plugin.list                       plugins: the installed plugins and their decla
 plugin.remove                     plugins: removes an installed plugin and its grants, no geometry; crates/engine/src/plugin/tests.rs
 plugin.run                        plugins: runs a sandboxed plugin's entry through the engine's own commands; crates/engine/src/plugin/tests.rs
 pointcloud.delete                 point clouds: points drawn, never a body
+pointcloud.deviation              point clouds: reads distances, changes nothing; tested in crates/engine/src/cmd/point_cloud_deviation.rs
 pointcloud.edit                   point clouds: points drawn, never a body
 pointcloud.insert                 point clouds: points drawn, never a body
 pointcloud.list                   point clouds: points drawn, never a body

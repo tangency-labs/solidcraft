@@ -2720,7 +2720,7 @@
   "render.cpu_body_choose": "Izaberite tijelo",
   "render.cpu_body_filter": "Filtriraj tijela po nazivu",
   "render.cpu_body_filter_more": "Suzite filter da vidite više tijela.",
-  "render.cpu_body_missing": "Cilj refleksije nedostaje, skriven je, dvosmislen ili ima naziv duži od 128 bajtova. Ponovo ga izaberite.",
+  "render.cpu_body_missing": "Cilj refleksije nedostaje, skriven je, dvosmislen ili ima naziv duži od 512 bajtova. Ponovo ga izaberite.",
   "render.cpu_budget": "CPU profil resursa",
   "render.cpu_budget_bodies": "Gornja granica tijela",
   "render.cpu_budget_compact": "Kompaktno (stara ograničenja)",
