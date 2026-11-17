@@ -773,6 +773,8 @@ pub enum PairSkip {
     /// T overlaps S and runs out through a far face of S ([`passes_through`], design v2 5.3
     /// [m22]).
     PassesThrough,
+    /// T meets S in several planes and no face pick (`near`) chooses one (design v2 4.2, 5.3).
+    SeveralContacts,
 }
 
 /// A plate joint of T on P: how T meets P and T's plate faces there.
@@ -1251,6 +1253,126 @@ pub fn pair_at(
         Some(r) => strip_extent(r, &frame, m, tol),
         None => Err(invalid("there is no strip")),
     })
+}
+
+/// Which of several contacts a face pick `near` chooses (design v2 4.2): `distances` are each
+/// contact's distance to `near` ([`contact_distance`]). One contact is taken as it is; of
+/// several, the nearest when it is nearer than every other by more than `tol`; else `None`
+/// (`several_contacts`). `None` too for no contacts.
+#[must_use]
+pub fn choose_contact(distances: &[f64], tol: f64) -> Option<usize> {
+    match distances {
+        [] => None,
+        [_] => Some(0),
+        _ => {
+            let (i, best) = distances
+                .iter()
+                .copied()
+                .enumerate()
+                .min_by(|a, b| a.1.total_cmp(&b.1))?;
+            let clear = distances
+                .iter()
+                .enumerate()
+                .all(|(j, &d)| j == i || d - best > tol);
+            clear.then_some(i)
+        }
+    }
+}
+
+/// The distance from `q` to segment `seg` of a region's loop: exact for lines and arcs; other
+/// segments are measured at their ends.
+fn seg_distance(seg: &crate::prism::profile::Seg2, q: crate::math::Point2) -> f64 {
+    use crate::prism::profile::Seg2;
+    let d = |a: crate::math::Point2| (a.x - q.x).hypot(a.y - q.y);
+    match *seg {
+        Seg2::Line { a, b } => {
+            let (ex, ey) = (b.x - a.x, b.y - a.y);
+            let l2 = ex * ex + ey * ey;
+            let s = if l2 > 0.0 {
+                (((q.x - a.x) * ex + (q.y - a.y) * ey) / l2).clamp(0.0, 1.0)
+            } else {
+                0.0
+            };
+            (a.x + s * ex - q.x).hypot(a.y + s * ey - q.y)
+        }
+        Seg2::Arc {
+            center,
+            radius,
+            start,
+            sweep,
+        } => {
+            let at = |t: f64| {
+                crate::math::Point2::new(center.x + radius * t.cos(), center.y + radius * t.sin())
+            };
+            let ang = (q.y - center.y).atan2(q.x - center.x);
+            let rel = if sweep >= 0.0 {
+                (ang - start).rem_euclid(core::f64::consts::TAU)
+            } else {
+                (start - ang).rem_euclid(core::f64::consts::TAU)
+            };
+            if rel <= sweep.abs() {
+                (d(center) - radius).abs()
+            } else {
+                d(at(start)).min(d(at(start + sweep)))
+            }
+        }
+        Seg2::Cubic { p0, p3, .. } => d(p0).min(d(p3)),
+        Seg2::Conic { a, b, .. } => d(a).min(d(b)),
+        Seg2::Bezier { n, p } => p
+            .iter()
+            .take(usize::from(n) + 1)
+            .enumerate()
+            .filter(|&(i, _)| i == 0 || i == usize::from(n))
+            .map(|(_, &a)| d(a))
+            .fold(f64::INFINITY, f64::min),
+    }
+}
+
+/// The distance from `near` to T's contact with S on `p` (design v2 4.2): from the point to the
+/// strip Σ ([`strip`]) in its plane, the height over `p` and the distance within it (0 inside
+/// Σ, else to its nearest loop) taken together. `None` when T meets no area of S's face on `p`.
+/// Neither body is changed.
+///
+/// # Errors
+///
+/// Those of [`strip`]; [`SolidError::InvalidInput`] for a `near` that is not finite.
+pub fn contact_distance(
+    k: &mut crate::kernel::Kernel,
+    t: &crate::topology::Brep,
+    s: &crate::topology::Brep,
+    p: Plane,
+    near: Point3,
+    tol: f64,
+) -> Result<Option<f64>> {
+    if !(near.x.is_finite() && near.y.is_finite() && near.z.is_finite()) {
+        return Err(invalid("the face pick is not finite"));
+    }
+    let Some(sigma) = strip(k, t, s, p, tol)? else {
+        return Ok(None);
+    };
+    let f = frame_of(p)?;
+    let v = Vec3::new(
+        near.x - f.origin[0],
+        near.y - f.origin[1],
+        near.z - f.origin[2],
+    );
+    let q = crate::math::Point2::new(
+        v.dot(Vec3::new(f.x_axis[0], f.x_axis[1], f.x_axis[2])),
+        v.dot(Vec3::new(f.y_axis[0], f.y_axis[1], f.y_axis[2])),
+    );
+    let height = v.dot(p.normal);
+    let inside =
+        sigma.outer.holds(q) == Some(true) && sigma.holes.iter().all(|h| h.holds(q) == Some(false));
+    let within = if inside {
+        0.0
+    } else {
+        sigma
+            .loops()
+            .flat_map(|l| l.segs.iter())
+            .map(|g| seg_distance(g, q))
+            .fold(f64::INFINITY, f64::min)
+    };
+    Ok(Some(height.hypot(within)))
 }
 
 /// A face bounding the strip Σ across it (along `w`), as [`eased_edge`] reads it.

@@ -20,6 +20,12 @@ pub type Pair = core::result::Result<PairJoint, PairSkip>;
 
 impl Answer for Pair {}
 
+/// A pair's answer over several candidate planes: the plane chosen and its joint, or why there
+/// is none.
+pub type NearPair = core::result::Result<(Plane, PairJoint), PairSkip>;
+
+impl Answer for NearPair {}
+
 /// What the Tab and Slot recipe is asked for (design 6, 7): the layout, the tab width `W`, the
 /// end distance `e`, the slot clearance `c` and the least land `MIN_LAND`, all the caller's.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -119,6 +125,65 @@ impl Body {
                 let s = copy_of(k, slot)?;
                 let forward = pc::pair_at(k, &t, &s, p, tol)?;
                 pc::with_swap(|| Ok(forward), || pc::pair_at(k, &s, &t, q, tol))
+            },
+        )
+    }
+
+    /// [`Body::plate_pair`] over several candidate planes of `slot` (design v2 4.2, 5.3): each is
+    /// asked in turn; one joint is taken as it is; of several, the face pick `near` chooses by
+    /// [`solidcore::plate_contact::choose_contact`] over each joint's
+    /// [`solidcore::plate_contact::contact_distance`], else the pair is skipped
+    /// [`PairSkip::SeveralContacts`]. No joint: the first plane's skip. Neither body changes.
+    ///
+    /// # Errors
+    /// Those of [`Body::plate_pair`]; [`crate::Error::Argument`] for no planes.
+    pub fn plate_pair_near(
+        &self,
+        slot: &Body,
+        planes: &[Plane],
+        near: Option<solidcore::Point3>,
+        tol: f64,
+    ) -> Result<NearPair> {
+        poisoned(&[self, slot])?;
+        if planes.is_empty() {
+            return Err(Error::Argument);
+        }
+        run_on(
+            "plate_contact::pair_near",
+            &[("t", self), ("s", slot)],
+            |k| {
+                let t = copy_of(k, self)?;
+                let s = copy_of(k, slot)?;
+                let mut joints = Vec::new();
+                let mut first = None;
+                for &p in planes {
+                    match pc::pair_at(k, &t, &s, p, tol)? {
+                        Ok(j) => joints.push((p, j)),
+                        Err(why) => {
+                            first.get_or_insert(why);
+                        }
+                    }
+                }
+                match joints.as_slice() {
+                    [] => Ok(Err(first.unwrap_or(PairSkip::SeveralContacts))),
+                    [one] => Ok(Ok(*one)),
+                    _ => {
+                        let Some(q) = near else {
+                            return Ok(Err(PairSkip::SeveralContacts));
+                        };
+                        let mut d = Vec::with_capacity(joints.len());
+                        for &(p, _) in &joints {
+                            d.push(
+                                pc::contact_distance(k, &t, &s, p, q, tol)?
+                                    .unwrap_or(f64::INFINITY),
+                            );
+                        }
+                        Ok(match pc::choose_contact(&d, tol) {
+                            Some(i) => joints.get(i).copied().ok_or(PairSkip::SeveralContacts),
+                            None => Err(PairSkip::SeveralContacts),
+                        })
+                    }
+                }
             },
         )
     }
@@ -680,5 +745,41 @@ mod tests {
                 .count()
         };
         assert_eq!((tabs(&first), tabs(&second)), (2, 2));
+    }
+
+    /// 16.2 several contacts and the face pick: an L of T standing on P and lying against S's
+    /// end face x = 160 meets S in two planes; with no `near` that is `several_contacts`; a
+    /// `near` on either contact chooses it; one equally near both (10 mm from each) is `several_contacts`.
+    #[test]
+    fn several_contacts_and_the_face_pick() {
+        let (s, p) = bottom();
+        let side = Plane {
+            normal: Vec3::X,
+            offset: 160.0,
+        };
+        let t = union_all(vec![
+            make_box([20.0, 30.0, 6.0], [120.0, 6.0, 60.0]).unwrap(),
+            make_box([140.0, 30.0, 26.0], [20.0, 6.0, 40.0]).unwrap(),
+            make_box([160.0, 30.0, -20.0], [60.0, 6.0, 86.0]).unwrap(),
+        ])
+        .unwrap();
+        let planes = [p, side];
+        assert_eq!(
+            t.plate_pair_near(&s, &planes, None, TOL).unwrap(),
+            Err(PairSkip::SeveralContacts)
+        );
+        let pick = |q: [f64; 3]| {
+            t.plate_pair_near(
+                &s,
+                &planes,
+                Some(solidcore::Point3::new(q[0], q[1], q[2])),
+                TOL,
+            )
+            .unwrap()
+        };
+        assert_eq!(pick([80.0, 33.0, 6.0]).unwrap().0, p);
+        assert_eq!(pick([160.0, 33.0, 3.0]).unwrap().0, side);
+        assert_eq!(pick([150.0, 33.0, 6.0]), Err(PairSkip::SeveralContacts));
+        assert_eq!(t.plate_pair_near(&s, &[], None, TOL), Err(Error::Argument));
     }
 }
