@@ -123,7 +123,6 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.point_class_gap_3d_propagates_no_drop_error = true;
     // Held back: see `HELD_BACK`.
     f.fillet_refuse_rounds_breaking_through = false;
-    f.fillet_round_as_definition = true;
     f.keep_exact_pcurves = true;
     f.face_swap_uv_transposes_trims = true;
     f.closed_smooth_pole_tangent_limit = true;

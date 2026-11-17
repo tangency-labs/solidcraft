@@ -271,8 +271,10 @@ pub trait ProtoBrep<O>: ProtoGeometry<O> + ProtoTopology<O> {
     /// Not upstream (docs/booleans.md, "One edge or two"): the edge of `face` between
     /// `start` and `end` that is proved to be `curve` over `interval`: the two within
     /// `tolerance` plus the edge's of each other over their whole lengths
-    /// ([`crate::geom::tools::find_edge_proved_along`]). An owner with no B-rep behind its
-    /// handles (the default body) has no such edge.
+    /// ([`crate::geom::tools::find_edge_proved_along`]). `crossing` is the face whose
+    /// surface cuts `face` in `curve`, when the curve is such an intersection: a seam of
+    /// `face` is the curve only within the curve's reach ("Seams and poles"). An owner
+    /// with no B-rep behind its handles (the default body) has no such edge.
     ///
     /// # Errors
     ///
@@ -287,6 +289,7 @@ pub trait ProtoBrep<O>: ProtoGeometry<O> + ProtoTopology<O> {
         _curve: &Curve,
         _interval: Extent1d,
         _tolerance: f64,
+        _crossing: Option<O>,
     ) -> Result<Option<O>> {
         Ok(None)
     }
@@ -1168,6 +1171,11 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
         let face_tol = brep
             .topology_tolerance(face)
             .ok_or(dangling("face handle is unknown"))?;
+        // the face whose surface cuts this one in the curve, when the other side is a face
+        let other = 3 - which;
+        let crossing = (d.src_topo_type(other) == PointClassType::Face)
+            .then(|| as_kind(d.src_topo(other), ClassObjectKind::Face))
+            .flatten();
         brep.face_edge_proved_along(
             k,
             face,
@@ -1176,6 +1184,7 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
             curve_of(brep, Some(curve))?,
             d.xsect_interval(),
             max2(face_tol, d.raw_tolerance()),
+            crossing,
         )
     }
 
