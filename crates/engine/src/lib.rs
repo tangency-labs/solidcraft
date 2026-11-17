@@ -2361,20 +2361,31 @@ impl Session {
         }
         let mut expected = (*original.doc).clone();
         expected.marker = source.doc.marker;
-        // Rolling the marker solves the joints again and stores where that puts each occurrence.
+        // Rolling the marker solves the joints again and stores where that puts each occurrence...
         if expected.occurrences.len() == source.doc.occurrences.len() {
-            for (e, s) in expected.occurrences.iter_mut().zip(&source.doc.occurrences) {
-                if e.id == s.id {
+            for e in &mut expected.occurrences {
+                if let Some(s) = source.doc.occurrences.iter().find(|s| s.id == e.id) {
                     e.transform = s.transform;
+                    e.expressed_moves.clone_from(&s.expressed_moves);
+                }
+            }
+        }
+        // ...and stores the solved degrees of freedom, offsets, and angles of matching joints...
+        if expected.assembly.joints.len() == source.doc.assembly.joints.len() {
+            for e in &mut expected.assembly.joints {
+                if let Some(s) = source.doc.assembly.joints.iter().find(|s| s.id == e.id) {
+                    e.values.clone_from(&s.values);
+                    e.offset = s.offset;
+                    e.angle = s.angle;
                 }
             }
         }
         // ...and works out each coupled joint's ratio and lift from the faces at that marker.
         if expected.assembly.links.len() == source.doc.assembly.links.len() {
-            for (e, s) in expected.assembly.links.iter_mut().zip(&source.doc.assembly.links) {
-                if (e.a, e.ia, e.b, e.ib) == (s.a, s.ia, s.b, s.ib) {
+            for e in &mut expected.assembly.links {
+                if let Some(s) = source.doc.assembly.links.iter().find(|s| (s.a, s.ia, s.b, s.ib) == (e.a, e.ia, e.b, e.ib)) {
                     e.ratio = s.ratio;
-                    e.lift = s.lift.clone();
+                    e.lift.clone_from(&s.lift);
                 }
             }
         }
