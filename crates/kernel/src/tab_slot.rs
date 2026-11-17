@@ -4,7 +4,7 @@
 
 pub use solidcore::plate_contact::{PairSkip, Plane};
 pub use solidcore::tab_slot::Layout;
-pub use solidcore_ops::plate_contact::{StretchPlan, TabPlan, TabSlotPlan, TabSlotSpec};
+pub use solidcore_ops::plate_contact::{JointSkip, NearPair, StretchPlan, TabPlan, TabSlotPlan, TabSlotSpec};
 
 use crate::body::Body;
 use crate::{KernelError, Result, guard};
@@ -33,15 +33,17 @@ fn kernel_error(e: solidcore_ops::Error) -> KernelError {
     }
 }
 
+/// One plate as solidcore-ops' body: refused for a mesh body or one the kernel cannot take.
+fn ops_of<'a>(b: &'a Body, name: &str) -> Result<&'a solidcore_ops::Body> {
+    if b.is_mesh() {
+        return Err(KernelError::Invalid(format!("{WHAT}: the {name} plate is a mesh body, not a solid")));
+    }
+    b.ops_body().map(|(o, _)| o).ok_or_else(|| KernelError::Failed(format!("{WHAT}: the kernel could not take the {name} plate")))
+}
+
 /// Both plates as solidcore-ops' bodies: refused for a mesh body or one the kernel cannot take.
 fn ops_pair<'a>(tab: &'a Body, slot: &'a Body) -> Result<(&'a solidcore_ops::Body, &'a solidcore_ops::Body)> {
-    let one = |b: &'a Body, name: &str| {
-        if b.is_mesh() {
-            return Err(KernelError::Invalid(format!("{WHAT}: the {name} plate is a mesh body, not a solid")));
-        }
-        b.ops_body().map(|(o, _)| o).ok_or_else(|| KernelError::Failed(format!("{WHAT}: the kernel could not take the {name} plate")))
-    };
-    Ok((one(tab, "tab")?, one(slot, "slot")?))
+    Ok((ops_of(tab, "tab")?, ops_of(slot, "slot")?))
 }
 
 fn back(b: &solidcore_ops::Body) -> Result<Body> {
@@ -73,6 +75,58 @@ pub fn cut(tab: &Body, slot: &Body, p: Plane, spec: TabSlotSpec, tol: f64) -> Re
     guard(WHAT, || match t.tab_slot_cut(s, p, spec, tol).map_err(kernel_error)? {
         Err(skip) => Ok(Err(skip)),
         Ok(c) => Ok(Ok(TabSlotCut { tab_plate: back(&c.tab_plate)?, slot_plate: back(&c.slot_plate)?, plan: c.plan })),
+    })
+}
+
+/// The planes of `slot`'s planar faces, each facing out of its material ([`Body::planar_face`]),
+/// one entry per plane: faces in one plane (normals within 1e-9, offsets within `tol`) share it.
+/// In face order; empty for a mesh body or a body with no planar face.
+#[must_use]
+pub fn slot_planes(slot: &Body, tol: f64) -> Vec<Plane> {
+    let mut out: Vec<Plane> = Vec::new();
+    for i in 0..slot.face_count() {
+        let Some(f) = slot.planar_face(i) else { continue };
+        let (x, y) = (f.x, f.y);
+        let n = solidcore::Vec3::new(x.y * y.z - x.z * y.y, x.z * y.x - x.x * y.z, x.x * y.y - x.y * y.x);
+        let Ok(p) = Plane::through(solidcore::Point3::new(f.origin.x, f.origin.y, f.origin.z), n) else { continue };
+        if !out.iter().any(|q| q.normal.dot(p.normal) > 1.0 - 1e-9 && (q.offset - p.offset).abs() <= tol) {
+            out.push(p);
+        }
+    }
+    out
+}
+
+/// The joint plane P of the tab plate `tab` on the slot plate `slot` (design 5.3): of `slot`'s
+/// planes ([`slot_planes`]), the one `tab` stands on, and its joint; of several, the face pick
+/// `near` chooses ([`solidcore_ops::Body::plate_pair_near`]), else
+/// [`PairSkip::SeveralContacts`]; no joint: why. Neither body changes.
+///
+/// # Errors
+/// [`KernelError::Invalid`] for a mesh body, a slot plate with no planar face, or a refused
+/// tolerance; [`KernelError::Failed`] for a body the kernel cannot take;
+/// [`KernelError::Internal`] for a kernel panic.
+pub fn joint_plane(tab: &Body, slot: &Body, near: Option<solidcore_record::Vec3>, tol: f64) -> Result<NearPair> {
+    let (t, s) = ops_pair(tab, slot)?;
+    let planes = slot_planes(slot, tol);
+    let near = near.map(|q| solidcore::Point3::new(q.x, q.y, q.z));
+    guard(WHAT, || t.plate_pair_near(s, &planes, near, tol).map_err(kernel_error))
+}
+
+/// One feature's joints in pick order (design 5.7, [`solidcore_ops::plate_contact::tab_slot_tool_faces`]):
+/// each `(t, s, p)` names the tab and slot plate by index into `plates` and P. The answer: per
+/// joint `None` (made) or why it is skipped (the pair's skip, `meets_other_plate_joint`,
+/// `other_direction`), and per plate the tool faces its boolean takes over the made joints. No
+/// plate changes.
+///
+/// # Errors
+/// [`KernelError::Invalid`] for a mesh plate, a plate index out of range or a refused spec or
+/// tolerance; [`KernelError::Failed`] for a plate the kernel cannot take;
+/// [`KernelError::Internal`] for a kernel panic.
+pub fn joints(plates: &[&Body], joints: &[(usize, usize, Plane)], spec: TabSlotSpec, tol: f64) -> Result<(Vec<Option<JointSkip>>, Vec<usize>)> {
+    let ops = plates.iter().map(|b| ops_of(b, "joint")).collect::<Result<Vec<_>>>()?;
+    guard(WHAT, || {
+        let owned = ops.iter().map(|b| b.copy().map_err(kernel_error)).collect::<Result<Vec<_>>>()?;
+        solidcore_ops::plate_contact::tab_slot_tool_faces(&owned, joints, spec, tol).map_err(kernel_error)
     })
 }
 
@@ -164,5 +218,38 @@ mod tests {
         assert!(matches!(zero, Err(KernelError::Invalid(_))), "{zero:?}");
         let zero = cut(&wall, &bottom, p, s, 0.0);
         assert!(matches!(zero, Err(KernelError::Invalid(_))), "{:?}", zero.map(|r| r.map(|c| c.plan)));
+    }
+
+    /// 5.3 on F: Bottom's planes are its six faces'; Wall stands on its top (z = 6), found with
+    /// and without a face pick. Wall lifted 4 mm off Bottom has no joint. A mesh is refused.
+    #[test]
+    fn joint_plane_on_f() {
+        let (wall, bottom, p) = fixture_f();
+        assert_eq!(slot_planes(&bottom, TOL).len(), 6);
+        let (q, _) = joint_plane(&wall, &bottom, None, TOL).unwrap().unwrap();
+        assert!((q.normal.dot(p.normal) - 1.0).abs() < 1e-9 && (q.offset - p.offset).abs() < 1e-9, "{q:?}");
+        let (q, _) = joint_plane(&wall, &bottom, Some(Vec3::new(80.0, 33.0, 6.0)), TOL).unwrap().unwrap();
+        assert!((q.offset - p.offset).abs() < 1e-9, "{q:?}");
+        let lifted = crate::box_solid(Vec3::new(20.0, 30.0, 10.0), Vec3::new(140.0, 36.0, 70.0)).unwrap();
+        assert!(joint_plane(&lifted, &bottom, None, TOL).unwrap().is_err());
+        let pos = [Vec3::new(0.0, 0.0, 0.0), Vec3::new(10.0, 0.0, 0.0), Vec3::new(0.0, 10.0, 0.0), Vec3::new(0.0, 0.0, 10.0)];
+        let mesh = crate::mesh_body(&pos, &[[0, 2, 1], [0, 1, 3], [0, 3, 2], [1, 2, 3]]).unwrap();
+        assert!(matches!(joint_plane(&wall, &mesh, None, TOL), Err(KernelError::Invalid(_))));
+    }
+
+    /// 5.7 on F (E1 spec): one joint is made and both plates take tool faces; the same joint asked
+    /// again meets the first's slots (`meets_other_plate_joint`); an index out of range is Invalid.
+    #[test]
+    fn joints_in_order_on_f() {
+        let (wall, bottom, p) = fixture_f();
+        let s = spec(Layout::Count(3), 20.0, 10.0);
+        let (skips, faces) = joints(&[&wall, &bottom], &[(0, 1, p)], s, TOL).unwrap();
+        assert_eq!(skips, vec![None]);
+        assert!(faces.len() == 2 && faces.iter().all(|&n| n > 0), "{faces:?}");
+        let (skips, again) = joints(&[&wall, &bottom], &[(0, 1, p), (0, 1, p)], s, TOL).unwrap();
+        assert_eq!(skips, vec![None, Some(JointSkip::MeetsOtherJoint(0))]);
+        assert_eq!(skips[1].as_ref().unwrap().reason_id(), "meets_other_plate_joint");
+        assert_eq!(again, faces);
+        assert!(matches!(joints(&[&wall, &bottom], &[(0, 5, p)], s, TOL), Err(KernelError::Invalid(_))));
     }
 }
