@@ -383,6 +383,21 @@ impl Mapper<'_> {
                 let out: Vec<Value> = a.iter().map(|x| self.body(x).unwrap_or_else(|| x.clone())).collect();
                 Some(Value::Array(out))
             }
+            // A body with a point that chooses on it (a Tab and Slot plate's `{body, near}`): the
+            // point into that body's frame.
+            Value::Object(o) => {
+                let b = o.get("body").and_then(Value::as_str)?.to_string();
+                let mut m = o.clone();
+                if let Some(near) = o.get("near")
+                    && let Some(p) = self.pick(near, Some(&b))
+                {
+                    m.insert("near".into(), p);
+                }
+                if let Some(own) = self.own_name(&b) {
+                    m.insert("body".into(), Value::String(own));
+                }
+                Some(Value::Object(m))
+            }
             _ => None,
         }
     }
