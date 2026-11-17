@@ -462,7 +462,14 @@ fn extreme(
         if bracketed {
             break;
         }
-        let (_, a, b) = cands.swap_remove(i);
+        // take candidate `i`, moving the last into its place (`swap_remove`'s order)
+        let Some(last) = cands.pop() else {
+            break;
+        };
+        let (_, a, b) = match cands.get_mut(i) {
+            Some(slot) => std::mem::replace(slot, last),
+            None => last,
+        };
         let m = a + (b - a) / 2.0;
         let interior = a < m && m < b;
         if !interior {
