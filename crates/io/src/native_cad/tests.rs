@@ -908,6 +908,23 @@ fn a_broken_mesh_record_is_left_out_with_why() {
     }
 }
 
+/// A part given as triangles of a body comes in hidden when a hidden layer names the triangles
+/// (the tessellation), as when it names the body; on no layer it comes in shown.
+#[test]
+fn triangles_on_a_hidden_layer_come_in_hidden() {
+    for on_layer in [false, true] {
+        let mut ir = mesh_placed_twice();
+        if on_layer {
+            let t = ir.model.tessellations.last().unwrap().id.to_string();
+            let layer = serde_json::json!({"id": "test:hidden:layer#0", "name": "Hidden parts", "visible": false, "items": [{"kind": "tessellation", "tessellation": t}]});
+            ir.model.presentation_layers.push(serde_json::from_value(layer).unwrap());
+        }
+        let (records, _) = traced_records(&ir, "twice", "", true);
+        assert_eq!(records.bodies.len(), 2, "{:?}", records.warnings);
+        assert!(records.bodies.iter().all(|b| b.hidden == on_layer), "on a hidden layer: {on_layer}");
+    }
+}
+
 /// A part on a layer the file hides (INVISIBILITY naming a PRESENTATION_LAYER_ASSIGNMENT) comes in
 /// hidden, as with SolidCraft's reader; on a layer that is not hidden it comes in shown.
 #[test]

@@ -172,7 +172,8 @@ fn traced_records(
             instance: None,
             color,
             paint,
-            hidden: body.is_some_and(|b| b.visible == Some(false)) || layers.bodies.contains(id),
+            // On a hidden layer: its body, or the tessellation itself (a layer names it by its id).
+            hidden: body.is_some_and(|b| b.visible == Some(false)) || layers.bodies.contains(id) || layers.bodies.contains(t.id.as_str()),
             placement,
             brep: None,
             face_origin: Vec::new(),
