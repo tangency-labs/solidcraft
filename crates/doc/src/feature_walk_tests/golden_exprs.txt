@@ -453,6 +453,15 @@ mesh_convert
     Tolerance = mesh_convert.tolerance (Length)
   expressions: mesh_convert.tolerance
 mesh_import
+wood_edge_profile
+  inputs:
+    Radius = wood.radius (Length)
+    Width = wood.width (Length)
+    Depth = wood.depth (Length)
+    Angle = wood.angle (Angle)
+    Step = wood.step (Length)
+    Fillet = wood.fillet (Length)
+  expressions: wood.radius, wood.width, wood.depth, wood.angle, wood.step, wood.fillet
 repair
   inputs:
     Gap = repair.gap (Length)

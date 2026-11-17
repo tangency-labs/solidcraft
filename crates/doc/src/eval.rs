@@ -924,6 +924,8 @@ pub struct ModelState {
     /// Not in the digest (the definitions before a pattern, which its key covers, decide them).
     /// Saved models share these points between states, keeping copies editable after reopening.
     named_faces: BTreeMap<u64, Vec<Vec3>>,
+    /// Length of each routed edge, measured on the feature input, in mm.
+    pub routed_lengths: BTreeMap<u64, Vec<f64>>,
     /// The radius per edge a fillet used when it reduced a radius too large for some of its edges
     /// (by feature id, see `FilletFit::Reduce`).
     fitted: BTreeMap<u64, Vec<f64>>,
@@ -1427,7 +1429,8 @@ impl ModelState {
     pub fn retained_bytes(&self) -> usize {
         let bodies: usize = self.bodies.iter().map(|b| if b.bytes > 0 { b.bytes } else { b.body.retained_bytes() }).sum();
         let sketches: usize = self.sketches.iter().map(|s| s.retained_bytes()).sum();
-        bodies + sketches + self.sheets.len() * 4096 + self.threads.len() * 192 + self.construct.len() * 192
+        let lengths: usize = self.routed_lengths.values().map(|v| v.len() * 8).sum();
+        bodies + lengths + sketches + self.sheets.len() * 4096 + self.threads.len() * 192 + self.construct.len() * 192
     }
 
     /// [`ModelState::retained_bytes`] of what this state holds that `before` does not: bodies
@@ -1451,7 +1454,8 @@ impl ModelState {
             .sum();
         let kept: std::collections::HashSet<*const SolvedSketch> = before.sketches.iter().map(Arc::as_ptr).collect();
         let sketches: usize = self.sketches.iter().filter(|s| !kept.contains(&Arc::as_ptr(s))).map(|s| s.retained_bytes()).sum();
-        bodies + sketches + self.sheets.len() * 4096 + self.threads.len() * 192 + self.construct.len() * 192
+        let lengths: usize = self.routed_lengths.values().map(|v| v.len() * 8).sum();
+        bodies + lengths + sketches + self.sheets.len() * 4096 + self.threads.len() * 192 + self.construct.len() * 192
     }
 
     pub fn body(&self, name: &str) -> Option<&ModelBody> {
@@ -11377,6 +11381,37 @@ fn eval_feature_kind(
                     let (name, feat) = (slot.name.clone(), slot.feature);
                     *slot = ModelBody::traced_new(name, nb, feat);
                 }
+            }
+            Ok(())
+        }
+        FeatureKind::WoodEdgeProfile { edges, body, profile, radius, width, depth, angle, step, fillet, tangent_chain } => {
+            if edges.is_empty() || edges.len() > 256 {
+                return Err(DocError::Invalid("router profiles require 1 to 256 edges of one body".into()));
+            }
+            let (ti, found) = crate::wood_edge_profile::resolve(st, body.as_deref(), &crate::plain(edges), *tangent_chain)?;
+            let mb = st.bodies.get(ti).ok_or_else(|| DocError::Invalid("router body missing".into()))?;
+            let indices: Vec<_> = found.iter().map(|p| p.edge).collect();
+            let picks: Vec<_> = found.iter().map(|p| p.point).collect();
+            let sizes = kernel::CornerSizes {
+                radius: val(vals, radius, Kind::Length)?,
+                width: val(vals, width, Kind::Length)?,
+                depth: val(vals, depth, Kind::Length)?,
+                angle: val(vals, angle, Kind::Angle)?,
+                step: val(vals, step, Kind::Length)?,
+                fillet: val(vals, fillet, Kind::Length)?,
+            };
+            let (cut, lengths) = match crate::wood_edge_profile::profile(profile)? {
+                Some(profile) => {
+                    let (cut, lengths) = kernel::edge_profile(&mb.body, &indices, profile, sizes)?;
+                    (Traced::step(cut, &[&mb.traced()]), lengths)
+                }
+                None => (mb.traced(), kernel::routed_edge_lengths(&mb.body, &indices)?),
+            };
+            let (name, source) = (mb.name.clone(), mb.feature);
+            st.routed_lengths.insert(f.id, lengths);
+            st.blend_edges.insert(f.id, picks);
+            if let Some(slot) = st.bodies.get_mut(ti) {
+                *slot = ModelBody::traced_new(name, cut, source);
             }
             Ok(())
         }

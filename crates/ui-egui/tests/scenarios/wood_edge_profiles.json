@@ -1,0 +1,82 @@
+[
+  {
+    "call": "engine.execute",
+    "params": {
+      "command": "solid.box",
+      "params": {
+        "length": 100,
+        "width": 50,
+        "height": 20,
+        "body_name": "Board"
+      }
+    }
+  },
+  {
+    "call": "engine.execute",
+    "params": {
+      "command": "view.fit",
+      "params": {}
+    }
+  },
+  {
+    "shot": "wood-stock"
+  },
+  {
+    "call": "engine.execute",
+    "params": {
+      "command": "wood.edge_profile",
+      "params": {
+        "edges": [
+          [
+            50,
+            0,
+            20
+          ]
+        ],
+        "profile": "roundover",
+        "radius": 6,
+        "name": "Routing"
+      }
+    }
+  },
+  {
+    "shot": "wood-roundover"
+  },
+  {
+    "call": "engine.execute",
+    "params": {
+      "command": "wood.edge_profile",
+      "params": {
+        "feature": "Routing",
+        "profile": "ogee",
+        "width": 12,
+        "depth": 12
+      }
+    }
+  },
+  {
+    "shot": "wood-ogee"
+  },
+  {
+    "call": "engine.execute",
+    "params": {
+      "command": "wood.edge_profile",
+      "params": {
+        "feature": "Routing",
+        "profile": "none"
+      }
+    }
+  },
+  {
+    "shot": "wood-restored"
+  },
+  {
+    "expect": {
+      "volume": 100000,
+      "faces": 6,
+      "bodies": 1,
+      "features": 2,
+      "errors": 0
+    }
+  }
+]
