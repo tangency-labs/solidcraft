@@ -182,6 +182,28 @@ fn on_one_of<'a>(
     Ok(false)
 }
 
+/// Whether `curve` over `interval` is a stretch of `piece` over `piece_interval` exactly:
+/// both are B-splines with the same NURB and `interval` lies inside `piece_interval`. The
+/// edge then runs along the piece by identity, which needs no bound; a long edge on a
+/// tight tolerance would otherwise use up the certificate's pieces.
+fn same_spline_within(
+    curve: &crate::curve::curve::Curve,
+    piece: &crate::curve::curve::Curve,
+    interval: &crate::geom::extent1d::Extent1d,
+    piece_interval: &crate::geom::extent1d::Extent1d,
+) -> bool {
+    use crate::curve::curve::CurveKind;
+    let (CurveKind::BSpline(a), CurveKind::BSpline(b)) = (curve.kind(), piece.kind()) else {
+        return false;
+    };
+    let (Ok(a), Ok(b)) = (a.nurb_ref(), b.nurb_ref()) else {
+        return false;
+    };
+    a == b
+        && piece_interval.contains_value(interval.min(), 0.0)
+        && piece_interval.contains_value(interval.max(), 0.0)
+}
+
 /// Whether the curve `curve` over `interval` runs along one of `pieces`, certified (no
 /// sampled acceptance): its two ends drop onto the piece within the larger of the
 /// piece's tolerance and `tolerance`, and [`curves_stay_within`] certifies that the whole
@@ -205,6 +227,9 @@ fn runs_along_one_of<'a>(
         curve.evaluate_point(k, ends[1])?,
     ];
     for (piece, piece_interval, piece_tolerance) in pieces {
+        if same_spline_within(curve, piece, interval, piece_interval) {
+            return Ok(true);
+        }
         let within = piece_tolerance.max(tolerance);
         let mut on_piece = [0.0; 2];
         let mut dropped_both = true;
