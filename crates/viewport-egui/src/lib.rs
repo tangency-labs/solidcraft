@@ -16,7 +16,7 @@ pub struct ViewportCallback(pub Frame);
 /// ([`Renderer::prepare_view`]).
 pub struct TileCallback(pub u64, pub Frame);
 /// A transparent, depth-correct selection/hover layer over live product pixels.
-pub struct ProductHighlightCallback(pub Frame, pub Option<u32>);
+pub struct ProductHighlightCallback(pub Frame, pub Option<u64>);
 
 /// The view's background: a vertical gradient from `top` at the top edge to `bottom` at the
 /// bottom edge. The viewport callback composites transparently onto this egui mesh, so the host

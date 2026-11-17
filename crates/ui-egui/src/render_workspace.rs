@@ -3788,7 +3788,7 @@ fn paint_product_kind(app: &mut SolveApp, ui: &mut egui::Ui, rect: egui::Rect, c
             hatch: Default::default(),
             moving: None,
         };
-        match (feedback, app.viewport.tile) {
+        match (feedback, app.viewport.scene_slot()) {
             (true, tile) => {
                 ui.painter().add(egui_wgpu::Callback::new_paint_callback(rect, solidcraft_viewport_egui::ProductHighlightCallback(frame, tile)));
             }

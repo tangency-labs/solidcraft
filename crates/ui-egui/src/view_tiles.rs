@@ -738,6 +738,36 @@ mod tests {
     use serde_json::json;
 
     #[test]
+    fn native_window_picture_slots_are_disjoint_from_saved_view_ids_and_other_windows() {
+        let ids = [(1_u64 << 40) + 1, (1_u64 << 40) + 2, 1_u64 << 53];
+        let mut main = crate::viewport::ViewportState::default();
+        for id in ids {
+            main.tile = Some(slot(id));
+            assert_eq!(main.scene_slot(), Some(id));
+        }
+        let mut first = crate::viewport::ViewportState::default();
+        let mut second = crate::viewport::ViewportState::default();
+        first.isolate_window_scenes();
+        second.isolate_window_scenes();
+        let mut expected = Vec::new();
+        for tile in std::iter::once(None).chain(ids.into_iter().map(Some)) {
+            first.tile = tile;
+            second.tile = tile;
+            let first_slot = first.scene_slot().unwrap();
+            let second_slot = second.scene_slot().unwrap();
+            assert!(first_slot >= 1_u64 << 63 && second_slot >= 1_u64 << 63);
+            assert_ne!(first_slot, second_slot, "the same view id in different native hosts has separate pictures");
+            assert_eq!(first.scene_slot(), Some(first_slot), "a host keeps its slot across frames");
+            assert!(!ids.contains(&first_slot) && !ids.contains(&second_slot));
+            expected.push(first_slot);
+        }
+        let mut retained: Vec<_> = first.window_scene_slots().collect();
+        retained.sort_unstable();
+        expected.sort_unstable();
+        assert_eq!(retained, expected, "closing a host can retire precisely its own pictures");
+    }
+
+    #[test]
     fn saved_view_ids_above_32_bits_keep_distinct_gpu_picture_slots() {
         let ids = [(1_u64 << 31) + 1, (1_u64 << 40) + 1, (1_u64 << 40) + 2, 1_u64 << 53];
         let saved = json!({

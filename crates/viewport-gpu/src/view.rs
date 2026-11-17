@@ -4615,6 +4615,14 @@ impl Renderer {
         }
     }
 
+    /// Release the GPU resources of a closed native window.
+    pub fn discard_views(&mut self, slots: &[u64]) {
+        if slots.contains(&self.pic_slot) {
+            self.activate(0);
+        }
+        self.parked.retain(|slot, _| !slots.contains(slot));
+    }
+
     fn prepare_frame(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, encoder: &mut wgpu::CommandEncoder, frame: &Frame, isolated: bool) {
         let res = self;
         let cb = frame;
