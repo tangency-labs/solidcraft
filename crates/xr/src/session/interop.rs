@@ -1,16 +1,38 @@
 //! The calls that have no safe API: opening the OpenXR loader, having the runtime create the
 //! Vulkan instance and device, handing those to wgpu, opening the session on them, and wrapping
-//! the runtime's pictures as wgpu textures. Each is one function with its `SAFETY` note; nothing
-//! else in the crate is `unsafe`.
+//! the runtime's pictures as wgpu textures. Each is one function with its `SAFETY` note, and the
+//! device's destruction is one closure, run once through `DoOnce`; nothing else in the crate is
+//! `unsafe`.
 #![allow(unsafe_code)]
 
 use std::ffi::{CStr, c_char};
+use std::sync::{Arc, Mutex, PoisonError};
 
 use ash::vk::{self, Handle as _};
 use openxr as xr;
 use wgpu::hal;
 
 use super::{Error, Gpu};
+
+/// Something to do at most once, from whichever of several places gets there first: here
+/// destroying the headset's Vulkan device, which both wgpu-hal's drop callback and the error path
+/// of handing the device to wgpu-hal may need to do.
+struct DoOnce(Mutex<Option<Box<dyn FnOnce() + Send>>>);
+
+impl DoOnce {
+    /// `action`, not done yet.
+    fn new(action: impl FnOnce() + Send + 'static) -> Arc<DoOnce> {
+        Arc::new(DoOnce(Mutex::new(Some(Box::new(action)))))
+    }
+
+    /// Do it, unless it was done already.
+    fn run(&self) {
+        let action = self.0.lock().unwrap_or_else(PoisonError::into_inner).take();
+        if let Some(action) = action {
+            action();
+        }
+    }
+}
 
 /// The Vulkan objects a session is opened on, as plain handles.
 #[derive(Clone, Copy)]
@@ -177,15 +199,28 @@ pub(super) fn open_graphics(
         let vk_device = vk::Device::from_raw(raw_device as u64);
         // SAFETY: `vk_device` was just created on `ash_instance`.
         let ash_device = unsafe { ash::Device::load(ash_instance.fp_v1_0(), vk_device) };
-        // Kept to destroy the device if wgpu-hal does not take it.
-        let unowned = ash_device.clone();
+        // The device is destroyed once, by whichever gets there first: wgpu-hal's drop callback,
+        // once wgpu-hal holds the device (it takes it before steps that can still fail, and then
+        // destroys it through the callback), or the error path below when wgpu-hal gave up before
+        // taking it (the callback is then dropped without being called).
+        let destroy = {
+            let device = ash_device.clone();
+            // SAFETY: run at most once (`DoOnce`), when nothing uses the device any more: from
+            // wgpu-hal's drop callback, after wgpu-hal destroyed what it made on the device, or
+            // from the error path when wgpu-hal never took it and nothing was made on it.
+            DoOnce::new(move || unsafe { device.destroy_device(None) })
+        };
+        let callback: hal::DropCallback = {
+            let destroy = Arc::clone(&destroy);
+            Box::new(move || destroy.run())
+        };
         // SAFETY: the device was created from this adapter with `queue_family`, the extensions
-        // and the features worked out above (the runtime only adds extensions); with no drop
-        // callback wgpu-hal owns it from now on.
+        // and the features worked out above (the runtime only adds extensions); with the drop
+        // callback wgpu-hal uses it from now on and leaves destroying it to `destroy`.
         let open = unsafe {
             hal_adapter.device_from_raw(
                 ash_device,
-                None,
+                Some(callback),
                 &device_extensions,
                 descriptor.required_features,
                 &descriptor.required_limits,
@@ -195,9 +230,8 @@ pub(super) fn open_graphics(
             )
         }
         .map_err(|e| {
-            // SAFETY: wgpu-hal refused the device, so nothing else holds it, and nothing was made
-            // on it yet.
-            unsafe { unowned.destroy_device(None) };
+            // Done already if wgpu-hal took the device before it failed.
+            destroy.run();
             Error::Vulkan(e.to_string())
         })?;
         (open, vk_device)
@@ -267,4 +301,49 @@ pub(super) fn wrap_image(device: &wgpu::Device, image: u64, format: wgpu::Textur
     drop(hal_device);
     // SAFETY: the texture was made on this device, with a descriptor that says what it is.
     Some(unsafe { device.create_texture_from_hal::<hal::api::Vulkan>(hal_texture, &descriptor, wgpu::TextureUses::UNINITIALIZED) })
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    use super::*;
+
+    /// The device is destroyed exactly once on each way handing it to wgpu-hal can go: wgpu-hal
+    /// took it and failed later (its callback, then the error path), wgpu-hal failed before
+    /// taking it (the callback dropped uncalled, then the error path), and the handover worked
+    /// (the callback alone, when wgpu drops the device). Dropping it undone does nothing.
+    #[test]
+    fn the_device_is_destroyed_exactly_once_on_every_path() {
+        let count = Arc::new(AtomicUsize::new(0));
+        let made = || {
+            let count = Arc::clone(&count);
+            DoOnce::new(move || {
+                count.fetch_add(1, Ordering::SeqCst);
+            })
+        };
+        let callback = |once: &Arc<DoOnce>| -> hal::DropCallback {
+            let once = Arc::clone(once);
+            Box::new(move || once.run())
+        };
+
+        let late = made();
+        callback(&late)();
+        late.run();
+        assert_eq!(count.load(Ordering::SeqCst), 1, "taken, then failed: once");
+
+        let early = made();
+        drop(callback(&early));
+        early.run();
+        assert_eq!(count.load(Ordering::SeqCst), 2, "failed before taking it: the error path destroys it");
+
+        let handed = made();
+        let kept = callback(&handed);
+        drop(handed);
+        kept();
+        assert_eq!(count.load(Ordering::SeqCst), 3, "handed over: destroyed when wgpu drops it");
+
+        drop(made());
+        assert_eq!(count.load(Ordering::SeqCst), 3, "never run: nothing destroyed");
+    }
 }

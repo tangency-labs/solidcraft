@@ -9853,8 +9853,11 @@ mod tests {
     /// before it existed; `ui.prefs` saves the choice in `graphics.json` beside the other settings
     /// for the next start, refuses what is not a yes or no, and Cancel and the page's Restore
     /// Defaults take it back, in the file too. The row shows only where the host has VR, with
-    /// what the host says this run is doing, and no other page has it.
+    /// what the host says this run is doing, and no other page has it. Only where VR can run
+    /// (Windows and Linux): elsewhere `ui.prefs` refuses the setting, which
+    /// `vr_headset_exists_where_vr_does` covers.
     #[test]
+    #[cfg(any(target_os = "windows", target_os = "linux"))]
     fn starting_in_vr_is_off_by_default_and_saved_for_the_next_start() {
         use serde_json::json;
         let dir = std::env::temp_dir().join(format!("sc_vr_headset_{}", std::process::id()));

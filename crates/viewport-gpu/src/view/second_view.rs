@@ -5,9 +5,14 @@
 use super::*;
 
 /// The textures a second view is drawn into. The caller keeps one between frames
-/// ([`Renderer::draw_second_view`] makes it, and makes it again when the size changes).
+/// ([`Renderer::draw_second_view`] makes it, and makes it again when the size or the renderer's
+/// sample count changes).
 pub struct ViewTarget {
     frame: Supersampled,
+    /// The renderer's sample count the textures were made with: a renderer whose multisampling
+    /// failed is replaced by a one-sample one (`check_msaa`), whose pipelines cannot draw into
+    /// them.
+    samples: u32,
     /// The see-through surfaces' targets, made when a scene first has such surfaces.
     oit: Option<oit::Targets>,
 }
@@ -28,6 +33,12 @@ impl ViewTarget {
     #[cfg(test)]
     pub(super) fn bind(&self) -> &wgpu::BindGroup {
         &self.frame.bind
+    }
+
+    /// The sample count the textures were made with.
+    #[cfg(test)]
+    pub(super) fn samples(&self) -> u32 {
+        self.samples
     }
 }
 
@@ -60,13 +71,13 @@ impl Renderer {
         let size = [size[0].clamp(1, max), size[1].clamp(1, max)];
         let samples = self.target.samples;
         let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("sc_second_view") });
-        if target.as_ref().is_none_or(|t| t.frame.size != size) {
+        if target.as_ref().is_none_or(|t| t.frame.size != size || t.samples != samples) {
             // The old picture goes before the new one is asked for.
             *target = None;
             match allocated(device, || self.supersampled(device, size)) {
                 Ok(made) => {
                     clear_resolve_targets(&mut encoder, made.resolve.as_ref());
-                    *target = Some(ViewTarget { frame: made, oit: None });
+                    *target = Some(ViewTarget { frame: made, samples, oit: None });
                 }
                 Err(e) => {
                     log::warn!("the second view is not drawn: the GPU refused a {} × {} picture: {e}", size[0], size[1]);

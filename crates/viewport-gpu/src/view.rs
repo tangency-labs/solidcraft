@@ -6724,6 +6724,30 @@ mod glass_tests {
         assert!(at(16, 40) && !at(48, 40), "the window's own camera: the triangle in its left half");
     }
 
+    /// A second view's picture is made again, at the same size, when the renderer drawing into
+    /// it has another sample count: `check_msaa` replaces a renderer whose multisampling fails by
+    /// a one-sample one, and the headset keeps its picture across that. The model still shows.
+    #[test]
+    fn a_second_view_remakes_its_picture_for_another_sample_count() {
+        let Some((_, device, queue)) = crate::open_headless(crate::test_env::policy()).ok() else { return };
+        let depth = crate::depth_format(&device, true);
+        let format = wgpu::TextureFormat::Rgba8Unorm;
+        let window = GpuTarget { format, depth: None, samples: 1, tess: false, oit: false };
+        let (w, h) = (64_u32, 48_u32);
+        let mut target = None;
+        for samples in [4, 1, 4] {
+            // A frame hands its scene over once: each renderer gets its own.
+            let frame = test_frame(test_scene(), 1.0);
+            let mut r = Renderer::with_window_target(&device, GpuTarget { depth: Some(depth), samples, ..window }, window, None);
+            render_frame(&mut r, &device, &queue, &frame, false);
+            assert!(r.draw_second_view(&device, &queue, &frame, [w, h], [0, 0, w, h], true, &mut target), "{samples} samples");
+            let view = target.as_ref().unwrap();
+            assert_eq!((view.size(), view.samples()), ([w, h], samples), "made for this renderer");
+            let pixels = read_second_view(&r, &device, &queue, view);
+            assert!(pixels.chunks(4).any(|p| p[0] > 200 && p[3] > 200), "{samples} samples: the model is drawn");
+        }
+    }
+
     /// A headset's room has a floor of its own: a second view drawn without the ground leaves
     /// the grid under everything and the ground shadow out, and one drawn with it shows them.
     #[test]
