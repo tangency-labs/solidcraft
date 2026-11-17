@@ -812,6 +812,23 @@ fn label_marked(k: &ConstraintKind, radius_mark: bool, expr: Option<&str>, drive
     if driven { format!("({text})") } else { text }
 }
 
+/// Remove only the current design unit from a displayed length dimension. The editor
+/// retains its units; angle labels keep their degree symbol. Driven labels end in a
+/// closing parenthesis, so the unit is removed from just before that mark (#16315).
+pub(crate) fn canvas_label(label: String, design_unit: &str, hide_design_unit: bool) -> String {
+    if !hide_design_unit {
+        return label;
+    }
+    let unit = format!(" {design_unit}");
+    if let Some(number) = label.strip_suffix(&unit) {
+        return number.to_string();
+    }
+    if let Some(number) = label.strip_suffix(')').and_then(|text| text.strip_suffix(&unit)) {
+        return format!("{number})");
+    }
+    label
+}
+
 /// Draw the active sketch's dimensions and remember where they are for picking.
 pub fn show(app: &mut SolveApp, ui: &egui::Ui, painter: &egui::Painter, proj: &Proj) {
     DRAFT_TEXT.with(|d| d.set(None));
@@ -933,7 +950,11 @@ pub fn show(app: &mut SolveApp, ui: &egui::Ui, painter: &egui::Painter, proj: &P
             crate::prefs::dimension_colour(&app.preferences, c.driven)
         };
         let galley = painter.layout_no_wrap(
-            frame_label(&frame, &c.kind, expr, c.driven, &app.session.doc.units, app.preferences.length_decimals, app.preferences.angle_decimals),
+            canvas_label(
+                frame_label(&frame, &c.kind, expr, c.driven, &app.session.doc.units, app.preferences.length_decimals, app.preferences.angle_decimals),
+                &app.session.doc.units,
+                app.preferences.dimension_hide_design_unit,
+            ),
             font.clone(),
             col,
         );
@@ -2136,6 +2157,22 @@ mod tests {
         // #18231: the label follows the Angle decimals preference.
         assert_eq!(label(&angle, Some("45 deg"), false, "in", 2, 3), "45.000°");
         assert_eq!(label(&angle, Some("45 deg"), false, "in", 2, 0), "45°");
+    }
+
+    /// Display labels can omit just the design's length unit. Inputs and the existing
+    /// unmodified label helper still retain their unit; angular dimensions keep degrees.
+    #[test]
+    fn canvas_labels_hide_only_the_design_length_unit_when_requested() {
+        let length = ConstraintKind::Length { l: 0, value: 25.4 };
+        let text = label(&length, Some("25.4 mm"), false, "mm", 2, 1);
+        assert_eq!(canvas_label(text.clone(), "mm", false), "25.40 mm");
+        assert_eq!(canvas_label(text, "mm", true), "25.40");
+        assert_eq!(canvas_label(label(&length, None, true, "in", 2, 1), "in", true), "(1.000)");
+        let radius = ConstraintKind::Radius { c: 0, value: 5.0 };
+        assert_eq!(canvas_label(label(&radius, Some("width / 2"), true, "mm", 2, 1), "mm", true), "(fx: R5.00)");
+        let angle = ConstraintKind::Angle { a: 0, b: 1, value: std::f64::consts::FRAC_PI_4, flip: false };
+        assert_eq!(canvas_label(label(&angle, None, false, "mm", 2, 1), "mm", true), "45.0°");
+        assert_eq!(canvas_label("1.00 mm".into(), "in", true), "1.00 mm", "different units stay explicit");
     }
 
     #[test]

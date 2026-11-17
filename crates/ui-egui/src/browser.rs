@@ -3554,14 +3554,18 @@ pub fn dims_overlay(app: &SolveApp, painter: &egui::Painter, proj: &crate::viewp
                 crate::prefs::dimension_colour(&app.preferences, c.driven)
             };
             let galley = painter.layout_no_wrap(
-                crate::dim_view::frame_label(
-                    &frame,
-                    &c.kind,
-                    expr,
-                    c.driven,
+                crate::dim_view::canvas_label(
+                    crate::dim_view::frame_label(
+                        &frame,
+                        &c.kind,
+                        expr,
+                        c.driven,
+                        &app.session.doc.units,
+                        app.preferences.length_decimals,
+                        app.preferences.angle_decimals,
+                    ),
                     &app.session.doc.units,
-                    app.preferences.length_decimals,
-                    app.preferences.angle_decimals,
+                    app.preferences.dimension_hide_design_unit,
                 ),
                 FontId::proportional(tk.font_caption * crate::prefs::dimension_text_scale(&app.preferences)),
                 col,

@@ -1902,6 +1902,10 @@ preference_settings! {
     /// Dimension text size). 1 draws it as the theme does; it also applies to Show Dimensions
     /// (#14121). A saved value outside the accepted range (a hand edit) reads as 1.
     dimension_text_scale: f32 = 1.0, PAGE_SKETCH, accept(DIMENSION_TEXT_SCALE);
+    /// Omit the design's length-unit suffix from dimension labels drawn in a sketch or
+    /// in Show Dimensions (#16315). The value editor and angle labels still show units.
+    /// Off keeps the prior labels, including "mm" and "in".
+    dimension_hide_design_unit: bool = false, PAGE_SKETCH;
     /// The colour a sketch dimension draws its lines, arrows and value in, or `None` for the
     /// theme's dimension colours (Preferences › Sketch › Dimension color, #14121). Selection, hover
     /// and conflicts keep their own colours.
@@ -7895,6 +7899,24 @@ mod tests {
             assert!(h.call("ui.prefs", json!({"viewport_background": bad}))["error"].is_string(), "{bad}");
             assert_eq!(lenient(&json!({"viewport_background": bad})).viewport_background, None, "{bad}");
         }
+    }
+
+    /// Hiding a sketch dimension's default length unit is opt-in, persists across
+    /// sessions and leaves the value input itself unchanged (#16315).
+    #[test]
+    fn sketch_dimension_unit_visibility_preference_is_optional_and_persistent() {
+        let mut h = crate::scenario::Harness::new();
+        assert!(!h.app.preferences.dimension_hide_design_unit);
+        let reply = h.call("ui.prefs", json!({"dimension_hide_design_unit":true}));
+        assert!(reply["error"].is_null(), "{reply}");
+        assert!(h.app.preferences.dimension_hide_design_unit);
+
+        let mut reopened = crate::SolveApp::new(solidcraft_engine::Session::default(), crate::Services::default());
+        reopened.load_prefs(&h.app.prefs());
+        assert!(reopened.preferences.dimension_hide_design_unit);
+        let reply = h.call("ui.prefs", json!({"dimension_hide_design_unit":false}));
+        assert!(reply["error"].is_null(), "{reply}");
+        assert!(!h.app.preferences.dimension_hide_design_unit);
     }
 
     /// #14121: the size and colour of sketch dimension text are saved preferences of their own.
