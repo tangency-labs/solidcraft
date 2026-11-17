@@ -59,6 +59,12 @@
 //!   curves (a parameter of the UV curve, which the lifted 3D curve does not keep: corners
 //!   landed up to 4.3e-5 apart) nor at the neighbour's offset vertex. Upstream's reading is
 //!   gone (no flag). Solidcore-native, no fork commit.
+//! - **A tangent edge's ends and its other UV curve (#17514).** `trim_extended_edge` takes a
+//!   grazing cut by a neighbour's offset as a crossing where the end has no tangent
+//!   neighbour and the curve meets the offset at more than the tangency tolerance (the
+//!   angle that classed no neighbour tangent there), and `extend_trim_edges` gives an edge whose two uses are on one surface (a
+//!   seam), with UV curves a period apart, the extended UV curve moved onto the other use's
+//!   side instead of a drop (`same_surface_twin`). Solidcore-native, no fork commit.
 //! - **Object handles.** Every `SmObject*` (topology, curves, surfaces) is a caller
 //!   handle `O` ([`ClassObject`] + [`SolutionObject`]), as in
 //!   [`proto_topology`](crate::topology::proto_topology) and the topology intersector.
@@ -1232,6 +1238,50 @@ fn b_spline_overload_copy(c: &Curve) -> Result<Curve> {
         CurveKind::Parabola(p) => p.base().clone(),
         _ => return Err(dangling("UV trim curve is not a B-spline curve")),
     }))
+}
+
+/// Not upstream (#17514): `extended`, an extended UV curve of an edge use on `surface`,
+/// moved onto the side of the edge's other use on the same surface, `this` and `other`
+/// being the two uses' own UV trim curves: by the step from the middle of `this` to the
+/// middle of `other`. Where the two run over one edge, their middles are one point of it:
+/// across a seam the step is the surface's period, and along the edge it is nought. The
+/// control points move as points, a 2D curve staying 2D (`CPoint::translate`), so the
+/// result keeps `extended`'s parameters.
+///
+/// `None` where the step does not carry `this` onto the same points of `surface` (at its
+/// two ends and its middle, within `tol`): the two curves then do not run over one edge
+/// (a pole's row and a meridian of a sphere), the moved curve would lie elsewhere, and
+/// the caller drops the lifted curve as upstream does.
+///
+/// # Errors
+///
+/// Those of the evaluations; `SM_ERR` without a NURB.
+fn same_surface_twin(
+    extended: &BSplineCurve,
+    this: &Curve,
+    other: &Curve,
+    surface: &Surface,
+    tol: f64,
+    k: &Kernel,
+) -> Result<Option<Curve>> {
+    let this_ivl = this.natural_interval();
+    let this_mid = this.evaluate_point(k, this_ivl.evaluate(0.5))?;
+    let other_mid = other.evaluate_point(k, other.natural_interval().evaluate(0.5))?;
+    let step = other_mid - this_mid;
+    for t in [this_ivl.min(), this_ivl.evaluate(0.5), this_ivl.max()] {
+        let p = this.evaluate_point(k, t)?;
+        let here = surface.evaluate_point(k, Point2::new(p.x, p.y))?;
+        let moved = p + step;
+        let there = surface.evaluate_point(k, Point2::new(moved.x, moved.y))?;
+        if (there - here).length() > tol {
+            return Ok(None);
+        }
+    }
+    let mut twin = extended.copy();
+    for pw in twin.get_or_create_gw_nurb()?.cpts_mut() {
+        *pw = pw.translate(step);
+    }
+    Ok(Some(Curve::from(twin)))
 }
 
 /// `new SmBSplineCurve(*pCurve)`, or the `SmBSplineCurve` data a static B-spline
@@ -3354,7 +3404,8 @@ impl OffsetGeometryCreation {
     /// mated, else the intersection of the base UV curve with the neighbour's UV trim
     /// curve extended ten lengths each way; the intersections of the 3D curve with the
     /// extended surfaces of the offsets of non-tangent neighbours (non-grazing ones
-    /// only); or, without candidates, the drop of the base vertex onto the curve. The
+    /// only; not upstream, #17514: a grazing one too at an end without a tangent
+    /// neighbour, where it meets the curve at more than the tangency tolerance); or, without candidates, the drop of the base vertex onto the curve. The
     /// candidate closest to the base vertex (and not the start already chosen) wins.
     /// Not upstream: beside a neighbour already offset (marked) whose faces were tangent in
     /// the input and whose new surfaces cross in a local operation
@@ -3819,15 +3870,29 @@ impl OffsetGeometryCreation {
                     // round meets the top face tangentially) crosses it twice within the
                     // tolerance, so it crosses only where it passes through by more than
                     // the tolerance ([`passes_through`]).
+                    // Not upstream (#17514): at an end with no tangent neighbour, a curve
+                    // that meets the surface at more than the operation's tangency tolerance
+                    // (`tan_tol_deg`, the angle by which `collect_neighbour` found no
+                    // neighbour tangent here) is not tangent to it, so it passes through
+                    // however shallow the angle, even where it comes back within the
+                    // tolerance (a plane cutting a torus 2.09 degrees from its bottom circle:
+                    // the offset seam meets the floor's offset 2.96 degrees off it and dips
+                    // under it by less than the tolerance, which [`passes_through`] reads as
+                    // a touch; the end then fell back to the old vertex's offset and the mate
+                    // moved the vertex along the edge). A curve that meets the surface within
+                    // that angle is weighed by [`passes_through`] as before: an offset edge
+                    // tangent to a neighbour's offset away from the vertex is no cut.
+                    let transversal = tan_eus.is_empty() && (angle_deg - 90.0).abs() > tan_tol_deg;
                     let crosses = !(angle_deg < 85.0 || angle_deg > 95.0)
-                        && passes_through(
-                            k,
-                            curve_of(brep, curve_3d)?,
-                            sol.start.param(0)?,
-                            surface_of(brep, ext_surface)?,
-                            uv,
-                            tol_3d,
-                        )?;
+                        && (transversal
+                            || passes_through(
+                                k,
+                                curve_of(brep, curve_3d)?,
+                                sol.start.param(0)?,
+                                surface_of(brep, ext_surface)?,
+                                uv,
+                                tol_3d,
+                            )?);
                     if angle_deg < 85.0 || angle_deg > 95.0 || crosses {
                         // save solution as possible trimPoint
                         solutions.add(sol);
@@ -4507,7 +4572,9 @@ impl OffsetGeometryCreation {
     /// each way, trimmed to the extended offset surface's domain and lifted to 3D; on a
     /// non-lamina edge that curve is dropped onto the other extended surface for the
     /// second UV curve (the piece closest to the other UV curve's midpoint, or a copy
-    /// of the original UV curve when the drop fails). `TrimExtendedEdge` finds the trim
+    /// of the original UV curve when the drop fails; not upstream, #17514: with both edge
+    /// uses on one surface and their UV curves a period apart, the extended UV curve moved
+    /// onto the other use's side, `same_surface_twin`). `TrimExtendedEdge` finds the trim
     /// interval; the three curves are trimmed to it and become the offset edge uses'
     /// geometry (`ReplaceEdgeCurves`).
     ///
@@ -4706,106 +4773,133 @@ impl OffsetGeometryCreation {
         // TrimExtendedEdge and is trimmed in place (cpp:1694)
         let mut other_uv_h: Option<O> = other_uv_curve;
         if let Some((other_ext_h, other_ext_domain)) = other_ext_surf {
-            // (pOffsetEdgeuse->GetEdge()->GetTolerance(): null is undefined)
-            let off_edge = brep
-                .edgeuse_edge(offset_edgeuse.ok_or(dangling("null offset edge use"))?)?
-                .ok_or(dangling("edge use without edge"))?;
-            let off_tol = brep.edge_tolerance(off_edge)?;
-
-            // Drop Lifted Curve onto other extended surface to make 2nd UVTrimCurve
-            // (the drop's trace gets the surface's cache, `smsurf_GetSurfaceCache`: the
-            // face's trimmed cache when a face owns the extended surface)
-            let other_ext = surface_of(brep, other_ext_h)?.clone_for_evaluation()?;
-            let mut face_cache = if other_ext.face()?.is_some() {
-                Some(brep.prepare_surface_solve_cache(k, &other_ext, Some(other_ext_h))?)
+            // Not upstream (#17514): both edge uses on one surface (a seam, the other side
+            // of a closed face's period) take the lifted curve back on that surface. Where
+            // the step between the two edge uses' own UV curves (a whole period across a
+            // seam) carries the first onto the same points of the surface, within the
+            // edge's tolerance (`same_surface_twin`), the second UV curve is the extended
+            // UV curve itself moved by that step: the same parameters, exactly. Dropping
+            // the lifted curve instead gives a piece on each side of the seam, and a piece
+            // cut short (a tube's extension turning past a whole turn) left the trim
+            // interval outside it. Two UV curves that do not run over one edge (a step
+            // that is not a period) are dropped as upstream does.
+            let twin = if other_ext_h == ext_surf_h {
+                let other = other_uv_curve.ok_or(dangling("null other UV curve"))?;
+                same_surface_twin(
+                    &uv_curve_extended,
+                    curve_of(brep, uv_curve)?,
+                    curve_of(brep, other)?,
+                    &ext_surface,
+                    edge_tol,
+                    k,
+                )?
             } else {
                 None
             };
-            let dropped = other_ext.drop_and_trim_curve_in::<O, O>(
-                k,
-                face_cache.as_mut(),
-                &other_ext_domain,
-                &lifted_curve,
-                &lifted_curve.natural_interval(),
-                off_tol / 3.0,
-                true,
-                true,
-                None,
-            )?;
-            // Not upstream (WR-530, #402; the fork's tangency-labs/smlib@23c5b0a): the edge is
-            // lifted onto one face's new surface and dropped onto the other's. Faces offset
-            // alike stay tangent, so the drop lands on the edge; when only one of them got a
-            // new surface (a local operation moving a face beside a blend, or one piece of a
-            // split face), the drop crosses the gap between them and the faces no longer
-            // meet there
-            if executive.is_local_operation() {
-                let meet_tol = 10.0 * smos_max(off_tol, self.this_approx_tol_3d());
-                let max_drop_to_surf = dropped.max_drop_to_surf;
-                if drop_is_loose(max_drop_to_surf, meet_tol) {
-                    // the edge of the input, named for the refusal where the handle names
-                    // one (error context only)
-                    let edge = match brep.topology_entity(edge) {
-                        Some((_, EntityRef::Edge(e))) => Some(e),
-                        _ => None,
-                    };
-                    let reason = OffsetFailure::LooseTangentEdge {
-                        edge,
-                        max_drop_to_surf,
-                        meet_tol,
-                    };
-                    return Err(Failure::new(OP_EXTEND, reason).into_error());
-                }
-            }
-            let uv_curves = dropped.uv_curves;
-            let mut closest_idx = 0usize;
-
-            // the candidate for the 2nd UVTrimCurve
-            let candidate_h = if uv_curves.is_empty() {
-                // LiftedCurve failed to Drop to OtherExtSurf - Unable to do dropping - just use
-                // original UV and copy it (the status of the copy is ignored)
-                let other = other_uv_curve.ok_or(dangling("null UV curve copied"))?;
-                // (`pOtherUVCurve->Copy(crContext, pOtherUVCurve)` on an
-                // `SmBSplineCurve*` binds the non-virtual `SmBSplineCurve*&` overload:
-                // a plain B-spline copy, a line's analytic data is dropped)
-                let copy = b_spline_overload_copy(curve_of(brep, other)?)?;
-                store_curve(brep, copy)?
+            let candidate_h = if let Some(twin) = twin {
+                store_curve(brep, twin)?
             } else {
-                // When Lifted Curve dropped to OtherExtSurf
+                // (pOffsetEdgeuse->GetEdge()->GetTolerance(): null is undefined)
+                let off_edge = brep
+                    .edgeuse_edge(offset_edgeuse.ok_or(dangling("null offset edge use"))?)?
+                    .ok_or(dangling("edge use without edge"))?;
+                let off_tol = brep.edge_tolerance(off_edge)?;
 
-                // When LiftedCurve dropped in more than 1 piece to OtherExtSurf
-                if uv_curves.len() > 1 {
-                    // Find the UVTrimCurve closest to the original - assume curve dropped to a seam
-                    let mut min_dist = BIG_DOUBLE;
-                    for (j, test) in uv_curves.iter().enumerate() {
-                        let tc = test.clone();
-                        let sols2: SolutionArray<O> = tc.global_point_solve(
-                            k,
-                            &tc.natural_interval(),
-                            SolverOperation::Minimize,
-                            other_mid,
-                            EFF_ZERO_SQRT,
-                            SolutionRequested::Single,
-                            &GlobalPointSolveOptions::default(),
-                        )?;
-                        let sol2 = sols2
-                            .get(0)
-                            .ok_or(dangling("point solve without solution"))?;
+                // Drop Lifted Curve onto other extended surface to make 2nd UVTrimCurve
+                // (the drop's trace gets the surface's cache, `smsurf_GetSurfaceCache`: the
+                // face's trimmed cache when a face owns the extended surface)
+                let other_ext = surface_of(brep, other_ext_h)?.clone_for_evaluation()?;
+                let mut face_cache = if other_ext.face()?.is_some() {
+                    Some(brep.prepare_surface_solve_cache(k, &other_ext, Some(other_ext_h))?)
+                } else {
+                    None
+                };
+                let dropped = other_ext.drop_and_trim_curve_in::<O, O>(
+                    k,
+                    face_cache.as_mut(),
+                    &other_ext_domain,
+                    &lifted_curve,
+                    &lifted_curve.natural_interval(),
+                    off_tol / 3.0,
+                    true,
+                    true,
+                    None,
+                )?;
+                // Not upstream (WR-530, #402; the fork's tangency-labs/smlib@23c5b0a): the edge is
+                // lifted onto one face's new surface and dropped onto the other's. Faces offset
+                // alike stay tangent, so the drop lands on the edge; when only one of them got a
+                // new surface (a local operation moving a face beside a blend, or one piece of a
+                // split face), the drop crosses the gap between them and the faces no longer
+                // meet there
+                if executive.is_local_operation() {
+                    let meet_tol = 10.0 * smos_max(off_tol, self.this_approx_tol_3d());
+                    let max_drop_to_surf = dropped.max_drop_to_surf;
+                    if drop_is_loose(max_drop_to_surf, meet_tol) {
+                        // the edge of the input, named for the refusal where the handle names
+                        // one (error context only)
+                        let edge = match brep.topology_entity(edge) {
+                            Some((_, EntityRef::Edge(e))) => Some(e),
+                            _ => None,
+                        };
+                        let reason = OffsetFailure::LooseTangentEdge {
+                            edge,
+                            max_drop_to_surf,
+                            meet_tol,
+                        };
+                        return Err(Failure::new(OP_EXTEND, reason).into_error());
+                    }
+                }
+                let uv_curves = dropped.uv_curves;
+                let mut closest_idx = 0usize;
 
-                        // save the UVTrimCurve with the shortest drop
-                        if sol2.start.solution_value < min_dist {
-                            closest_idx = j;
-                            min_dist = sol2.start.solution_value;
-                        }
-                    } // end iter every DropCurve candidate - looking for best to use
-                } // end LiftedCurve dropped in more than 1 piece check
+                // the candidate for the 2nd UVTrimCurve
+                if uv_curves.is_empty() {
+                    // LiftedCurve failed to Drop to OtherExtSurf - Unable to do dropping - just use
+                    // original UV and copy it (the status of the copy is ignored)
+                    let other = other_uv_curve.ok_or(dangling("null UV curve copied"))?;
+                    // (`pOtherUVCurve->Copy(crContext, pOtherUVCurve)` on an
+                    // `SmBSplineCurve*` binds the non-virtual `SmBSplineCurve*&` overload:
+                    // a plain B-spline copy, a line's analytic data is dropped)
+                    let copy = b_spline_overload_copy(curve_of(brep, other)?)?;
+                    store_curve(brep, copy)?
+                } else {
+                    // When Lifted Curve dropped to OtherExtSurf
 
-                // Set pOtherUVCurve to best LiftedCurve dropped to OtherExtSurf UVTrimCurve
-                let best = uv_curves
-                    .get(closest_idx)
-                    .ok_or(dangling("drop curve index"))?
-                    .clone();
-                store_curve(brep, best)?
-            }; // end LiftedCurve failed to drop to OtherExtSurf branch
+                    // When LiftedCurve dropped in more than 1 piece to OtherExtSurf
+                    if uv_curves.len() > 1 {
+                        // Find the UVTrimCurve closest to the original - assume curve dropped to a seam
+                        let mut min_dist = BIG_DOUBLE;
+                        for (j, test) in uv_curves.iter().enumerate() {
+                            let tc = test.clone();
+                            let sols2: SolutionArray<O> = tc.global_point_solve(
+                                k,
+                                &tc.natural_interval(),
+                                SolverOperation::Minimize,
+                                other_mid,
+                                EFF_ZERO_SQRT,
+                                SolutionRequested::Single,
+                                &GlobalPointSolveOptions::default(),
+                            )?;
+                            let sol2 = sols2
+                                .get(0)
+                                .ok_or(dangling("point solve without solution"))?;
+
+                            // save the UVTrimCurve with the shortest drop
+                            if sol2.start.solution_value < min_dist {
+                                closest_idx = j;
+                                min_dist = sol2.start.solution_value;
+                            }
+                        } // end iter every DropCurve candidate - looking for best to use
+                    } // end LiftedCurve dropped in more than 1 piece check
+
+                    // Set pOtherUVCurve to best LiftedCurve dropped to OtherExtSurf UVTrimCurve
+                    let best = uv_curves
+                        .get(closest_idx)
+                        .ok_or(dangling("drop curve index"))?
+                        .clone();
+                    store_curve(brep, best)?
+                } // end LiftedCurve failed to drop to OtherExtSurf branch
+            };
 
             // When using the RadialEdgeuse - swap the extended UVTrimCurves
             if use_rad_uv {
