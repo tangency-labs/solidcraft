@@ -66,6 +66,47 @@ fn centred(h: &Harness) -> bool {
     [point(h, "mid.start"), point(h, "mid.end")].iter().all(|p| (p.x - 5.0).abs() < 1e-6)
 }
 
+/// Pending picks stay highlighted and numbered until the constraint runs (#18474).
+#[test]
+fn pending_symmetry_lines_show_their_pick_order_until_applied() {
+    let mut h = between_two_lines();
+    h.app.start("sketch.constraint.symmetry");
+    h.frames(2);
+    assert!(crate::scenario::rect_of("viewport:constraint_pick:1").is_none());
+    for (n, xy) in [[0.0, 10.0], [10.0, 10.0]].into_iter().enumerate() {
+        let at = h.call("ui.at", json!({"sketch":xy}))["result"].clone();
+        h.step(&json!({"click":at})).unwrap();
+        h.frames(2);
+        for picked in 1..=n + 1 {
+            assert!(crate::scenario::rect_of(&format!("viewport:constraint_pick:{picked}")).is_some(), "pick {picked} stays marked");
+        }
+        assert!(crate::scenario::rect_of(&format!("viewport:constraint_pick:{}", n + 2)).is_none(), "only completed picks are marked");
+    }
+    // The third pick completes Symmetry and clears the pending overlay.
+    let at = h.call("ui.at", json!({"sketch":[3.0,10.0]}))["result"].clone();
+    h.step(&json!({"click":at})).unwrap();
+    h.frames(2);
+    assert!(h.app.tool.as_ref().is_some_and(|t| t.picks.is_empty()));
+    assert!(crate::scenario::rect_of("viewport:constraint_pick:1").is_none());
+    assert!(crate::scenario::rect_of("viewport:constraint_pick:2").is_none());
+    assert!(centred(&h));
+}
+
+/// Point picks use the same numbering as curves, including the original pick order.
+#[test]
+fn pending_symmetry_points_are_marked_before_picking_an_axis() {
+    let mut h = two_points_picked();
+    h.frames(2);
+    assert!(crate::scenario::rect_of("viewport:constraint_pick:1").is_some());
+    assert!(crate::scenario::rect_of("viewport:constraint_pick:2").is_some());
+    assert!(crate::scenario::rect_of("viewport:constraint_pick:3").is_none());
+    let at = h.call("ui.at", json!({"sketch":[0,6]}))["result"].clone();
+    h.step(&json!({"click":at})).unwrap();
+    h.frames(2);
+    assert!(crate::scenario::rect_of("viewport:constraint_pick:1").is_none());
+    assert!(crate::scenario::rect_of("viewport:constraint_pick:2").is_none());
+}
+
 #[test]
 fn the_construction_line_is_the_symmetry_line_whatever_the_pick_order() {
     for order in [["mid", "left", "right"], ["left", "mid", "right"], ["left", "right", "mid"]] {
