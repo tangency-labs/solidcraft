@@ -143,6 +143,8 @@ const COMMANDS: &[Command] = &[
 fn main() -> ExitCode {
     let mut args: Vec<String> = std::env::args().skip(1).collect();
     logger::init(&mut args);
+    // The kernel's fix set, named to solidcore-ops before any call runs on it.
+    solidcraft_engine::kernel::start();
     // `--profile` / `--profile-out` (run, eval, bench-open) or SOLIDCRAFT_PROFILE (any command):
     // record from here, and print the table when the command ends.
     let profiling = match args.first().map(String::as_str) {
@@ -863,7 +865,7 @@ fn cmd_snapshot(args: &[String]) -> Result<(), String> {
         None => solidcraft_engine::view::home_camera(&s).map_err(|e| e.to_string())?,
     };
     let guides = Guides { grid: !args.iter().any(|a| a == "--no-grid"), axes: !args.iter().any(|a| a == "--no-axes") };
-    let scene = solidcraft_engine::view::scene_with_guides(&s, &cam, s.section, guides).map_err(|e| e.to_string())?;
+    let scene = solidcraft_engine::view::scene_with_guides(&s, &cam, &s.section, guides).map_err(|e| e.to_string())?;
     let png = solidcraft_engine::capture::png(&scene, &cam, w, h)?;
     std::fs::write(out, &png.bytes).map_err(|e| format!("{out}: {e}"))?;
     let mut reply = json!({"path": out, "width": w, "height": h, "bytes": png.bytes.len(), "renderer": png.renderer});
