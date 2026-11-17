@@ -1631,6 +1631,42 @@ fn select_same_look_uses_resolved_looks_without_document_history_edits_and_refus
     assert_eq!(history, (s.undo.len(), s.redo.len(), s.evaluations));
 }
 
+/// #18105: Select Sharp Edges takes the edges whose faces turn by more than the threshold,
+/// judged on the exact faces. A 20 mm box with one edge rounded keeps its 11 other edges and gains
+/// the round's two end arcs, all at 90°; the round's two tangent edges are never taken.
+#[test]
+fn select_sharp_edges_takes_creases_over_the_angle_and_never_a_rounds_tangent_edges() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"corner":[0,0,0],"length":20,"width":20,"height":20,"body_name":"Block"}));
+    run(&mut s, "solid.fillet", json!({"edges": [[20, 10, 20]], "radius": 4}));
+    let history = (s.undo.len(), s.redo.len());
+    assert_eq!(run(&mut s, "select.sharp_edges", json!({"angle_deg": 30}))["selected"], 13);
+    for sel in &s.selection {
+        let Sel::Edge { body, point, .. } = sel else { panic!("not an edge: {sel:?}") };
+        assert_eq!(body, "Block");
+        let tangent = |x: f64, z: f64| (point.x - x).abs() < 1e-6 && (point.z - z).abs() < 1e-6;
+        assert!(!tangent(16.0, 20.0) && !tangent(20.0, 16.0), "a tangent edge is taken at {point:?}");
+    }
+    assert_eq!(run(&mut s, "select.sharp_edges", json!({"angle_deg": 89, "body": "Block"}))["selected"], 13);
+    assert_eq!(run(&mut s, "select.sharp_edges", json!({"angle_deg": 91}))["selected"], 0);
+    run(&mut s, "select.set", json!({"items":[{"type":"body","name":"Block"}]}));
+    assert_eq!(run(&mut s, "select.sharp_edges", json!({"angle_deg": 45, "add": true}))["selected"], 14);
+    let selected = s.selection.clone();
+    for params in [
+        json!({}),
+        json!({"angle_deg": 0}),
+        json!({"angle_deg": 180}),
+        json!({"angle_deg": f64::NAN}),
+        json!({"angle_deg": 30, "body": "missing"}),
+        json!({"angle_deg": 30, "extra": 1}),
+        json!([]),
+    ] {
+        assert!(s.execute("select.sharp_edges", &params).is_err(), "{params}");
+        assert_eq!(s.selection, selected);
+    }
+    assert_eq!(history, (s.undo.len(), s.redo.len()));
+}
+
 /// A body changed by a few hundred features in a row whose names nothing asks for, then
 /// filleted: reordering or moving an earlier feature evaluates them all again, and the fillet
 /// finds its edge by the names of the body before it, which are worked out from the body before
