@@ -21,15 +21,23 @@ struct App {
 }
 impl PluginHost for App {
     fn command_catalog(&self) -> Vec<CommandSchema> {
-        vec![CommandSchema {
-            name: "app.write".into(),
+        let schema = |name: &str, effect, group: Option<String>| CommandSchema {
+            name: name.into(),
             input_schema: json!({"type":"object"}),
             output_schema: json!({"type":"object"}),
-            effect: Effect::Edit,
-            group: self.write_group.clone(),
-        }]
+            effect,
+            group,
+        };
+        vec![
+            schema("app.write", Effect::Edit, self.write_group.clone()),
+            schema("document.inspect", Effect::Read, None),
+            schema("file.export", Effect::Read, Some("file".into())),
+        ]
     }
-    fn run_command(&mut self, _: &str, _: &Value) -> Result<Value> {
+    fn run_command(&mut self, name: &str, _: &Value) -> Result<Value> {
+        if name == "document.inspect" {
+            return Ok(json!({"name":"Bracket","bodies":1}));
+        }
         self.value += 1;
         Ok(json!({"value":self.value}))
     }
@@ -683,4 +691,61 @@ fn an_importer_trap_or_runaway_loop_fails_that_one_call_and_the_next_call_works(
     assert!(matches!(import(&manifest, root.join("loop.smp"), false), Err(HostError::LimitExceeded { .. })));
     assert_eq!(import(&manifest, root.join("fine.smp"), false).unwrap().design, b"fine");
     std::fs::remove_dir_all(root).unwrap();
+}
+
+fn exporter_manifest() -> Manifest {
+    let slot = |name: &str| json!({"name":name,"kind":"exporter","extensions":["smp"]});
+    craft_plugin::parse_manifest(
+        json!({"id":"sample","name":"Sample","version":"1","capabilities":["formats@0.1"],"runtime":{
+            "module":"sample.wasm","commands":["app.write","document.inspect","file.export"],
+            "entries":[slot("copy"),slot("error"),slot("trap"),slot("loop"),slot("write")],
+            "limits":{"fuel":10000000,"memory_mib":2,"deadline_ms":2000}
+        }})
+        .to_string()
+        .as_bytes(),
+        "sample",
+    )
+    .unwrap()
+}
+fn exporter_component() -> Vec<u8> {
+    let (package, version) = API.split_once('@').unwrap();
+    wat::parse_str(include_str!("../exporter_fixture.wat").replace("__PACKAGE__", package).replace("__VERSION__", version)).unwrap()
+}
+fn export(app: App, slot: &str) -> (App, Result<Vec<u8>>) {
+    crate::run_export(app, &exporter_manifest(), &exporter_component(), slot, &json!({}))
+}
+#[test]
+fn an_exporter_reads_the_design_through_read_commands_and_returns_the_file() {
+    let (app, file) = export(App::default(), "copy");
+    let file: Value = serde_json::from_slice(&file.unwrap()).unwrap();
+    assert_eq!(file, json!({"name":"Bracket","bodies":1}));
+    // The export ran in a transaction that was thrown away, whatever its commands did.
+    assert_eq!((app.begins, app.commits, app.rollbacks), (1, 0, 1));
+    // An exporter is not a command, and a command runtime is not an exporter.
+    let mut app = App::default();
+    assert!(matches!(run(&mut app, &exporter_manifest(), &exporter_component(), "copy", &json!({})), Err(HostError::InvalidInput { .. })));
+    let (_, wrong) = crate::run_export(App::default(), &manifest(), &component("call $box"), "make", &json!({}));
+    assert!(matches!(wrong, Err(HostError::InvalidInput { .. })));
+}
+#[test]
+fn an_exporter_that_fails_traps_or_runs_away_returns_no_file_and_the_next_export_works() {
+    let (_, failure) = export(App::default(), "error");
+    assert!(matches!(&failure, Err(HostError::Trap { reason }) if reason.contains("refused this design")), "{failure:?}");
+    let (_, failure) = export(App::default(), "trap");
+    assert!(matches!(&failure, Err(HostError::Trap { reason }) if reason.contains("UnreachableCodeReached")), "{failure:?}");
+    let (app, failure) = export(App::default(), "loop");
+    assert!(matches!(&failure, Err(HostError::LimitExceeded { limit }) if limit.starts_with("fuel")), "{failure:?}");
+    assert_eq!(app.rollbacks, 1);
+    assert!(export(App::default(), "copy").1.is_ok());
+}
+#[test]
+fn an_exporter_reaches_no_file_even_through_a_command_its_manifest_lists() {
+    // `file.export` is in the manifest's list, but it is in the `file` group: an exporter never
+    // gets it, nor any command that edits.
+    let (app, failure) = export(App { groups: ["file".to_string()].into(), ..App::default() }, "write");
+    assert!(matches!(&failure, Err(HostError::PermissionDenied { permission }) if permission.contains("file.export")), "{failure:?}");
+    assert_eq!(app.value, 0);
+    // A component built for the command world (it imports `files`) does not link as an exporter.
+    let (_, failure) = crate::run_export(App::default(), &exporter_manifest(), &files_component(true, false), "copy", &json!({}));
+    assert!(failure.is_err());
 }

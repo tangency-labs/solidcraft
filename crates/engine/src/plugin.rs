@@ -90,6 +90,9 @@ pub fn parse_manifest(text: &[u8], folder: &str) -> Result<Manifest> {
                 format!("unknown command group `{group}`; SolidCraft has {}", COMMAND_GROUPS.join(", ")),
             ));
         }
+        if runtime.is_exporter() {
+            export::refuse_unreadable(runtime)?;
+        }
         for command in &runtime.commands {
             if catalog_command(command).is_none() {
                 return Err(refuse(
@@ -251,6 +254,7 @@ pub fn run(session: &mut Session, package: Package, entry: &str, params: &serde_
     }
 }
 
+mod export;
 mod import;
 pub mod install;
 #[cfg(not(target_arch = "wasm32"))]
@@ -258,7 +262,8 @@ mod package;
 #[cfg(not(target_arch = "wasm32"))]
 pub use package::{remove, store_grants, validate_grants};
 
-pub use import::{Importer, describe as describe_importers, import_file, importer_for, importers, open_filters};
+pub use export::{describe as describe_exporters, export_file, exporter_for, exporters};
+pub use import::{FormatSlot, Importer, describe as describe_importers, format_slots, import_file, importer_for, importers, open_filters};
 #[cfg(test)]
 mod tests;
 

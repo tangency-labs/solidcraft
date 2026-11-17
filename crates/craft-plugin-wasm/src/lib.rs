@@ -82,3 +82,19 @@ pub fn run_import<H: PluginHost + 'static>(
         (host, Err(craft_plugin::HostError::Trap { reason: "component execution requires an x86-64 or AArch64 native build".into() }))
     }
 }
+
+/// Runs an export slot on the app's open design in a fresh instance and returns the file's bytes.
+/// The plugin reads the design through the read-only commands its manifest lists, in a
+/// transaction that is always rolled back, and reaches no file: the app writes the bytes to the
+/// path the user chose, and only when the whole call succeeds. A trap fails this call alone.
+pub fn run_export<H: PluginHost + 'static>(host: H, manifest: &Manifest, component: &[u8], slot: &str, options: &Value) -> (H, Result<Vec<u8>>) {
+    #[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
+    {
+        native::run_export(host, manifest, component, slot, options, RuntimeOptions::default())
+    }
+    #[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
+    {
+        let _ = (manifest, component, slot, options);
+        (host, Err(craft_plugin::HostError::Trap { reason: "component execution requires an x86-64 or AArch64 native build".into() }))
+    }
+}

@@ -3,7 +3,7 @@ use crate::{ImportRequest, Imported, RuntimeOptions};
 use cap_std::fs::OpenOptionsExt;
 use cap_std::fs::{Dir, OpenOptions};
 use craft_plugin::{
-    CommandSchema, Effect, HostError, Limits, LossReport, MAX_IMPORT_CHUNK_BYTES, MAX_IMPORT_DESIGN_BYTES, MAX_IMPORT_INPUT_BYTES, MAX_JSON_BYTES,
+    CommandSchema, Effect, HostError, Limits, LossReport, MAX_EXPORT_FILE_BYTES, MAX_IMPORT_CHUNK_BYTES, MAX_IMPORT_DESIGN_BYTES, MAX_IMPORT_INPUT_BYTES, MAX_JSON_BYTES,
     Manifest, PluginHost, Result,
 };
 use serde_json::Value;
@@ -24,6 +24,7 @@ mod bindings {
 }
 include!(concat!(env!("OUT_DIR"), "/aliases.rs"));
 include!(concat!(env!("OUT_DIR"), "/importer.rs"));
+include!(concat!(env!("OUT_DIR"), "/exporter.rs"));
 
 const MAX_CALLS: usize = 256;
 /// An importer streams its file in chunks and reports progress as it goes.
@@ -591,6 +592,9 @@ pub(super) fn run<H: PluginHost + 'static>(
         if runtime.is_importer() {
             return Err(HostError::InvalidInput { field: "entry".into(), reason: "an importer converts a file; open the file instead".into() });
         }
+        if runtime.is_exporter() {
+            return Err(HostError::InvalidInput { field: "entry".into(), reason: "an exporter writes a file; export the design instead".into() });
+        }
         if bytes.len() > runtime.max_component_bytes() {
             return Err(limit("component size"));
         }
@@ -928,6 +932,108 @@ pub(super) fn run_import<H: PluginHost + 'static>(
     })();
     let mut state = store.into_data();
     state.close_evaluation();
+    (state.host, outcome)
+}
+
+/// Runs an export slot in a fresh instance. The plugin reads the design only through the
+/// read-only commands its manifest lists, inside a transaction that is always rolled back, and
+/// reaches no file: it returns the bytes, and the caller writes them where the user chose.
+pub(super) fn run_export<H: PluginHost + 'static>(
+    mut host: H,
+    manifest: &Manifest,
+    bytes: &[u8],
+    slot: &str,
+    options: &Value,
+    runtime_options: RuntimeOptions,
+) -> (H, Result<Vec<u8>>) {
+    let prepared = (|| {
+        let runtime = manifest
+            .runtime
+            .as_ref()
+            .ok_or_else(|| HostError::InvalidManifest { field: "runtime".into(), reason: "no executable runtime".into() })?;
+        runtime.validate()?;
+        if !runtime.is_exporter() {
+            return Err(HostError::InvalidInput { field: "format".into(), reason: "this plugin is not an exporter".into() });
+        }
+        if bytes.len() > runtime.max_component_bytes() {
+            return Err(limit("component size"));
+        }
+        let entry = runtime
+            .entries
+            .iter()
+            .find(|e| e.name == slot)
+            .ok_or_else(|| HostError::InvalidInput { field: "format".into(), reason: "unknown export slot".into() })?;
+        let options = serde_json::to_string(options).map_err(|e| trap(e.to_string()))?;
+        if options.len() > MAX_JSON_BYTES {
+            return Err(limit("options exceed 1 MiB"));
+        }
+        let (engine, component) = compile(bytes, stack_bytes(&runtime.limits, runtime_options, true)?)?;
+        // Read-only commands the manifest lists, and no sensitive group: nothing reaches a file.
+        let commands: BTreeMap<String, CommandSchema> = host
+            .command_catalog()
+            .into_iter()
+            .filter(|s| runtime.commands.contains(&s.name) && s.effect == Effect::Read && s.group.is_none())
+            .map(|s| (s.name.clone(), s))
+            .collect();
+        if host.is_cancelled() {
+            return Err(HostError::Cancelled);
+        }
+        host.begin_transaction()?;
+        Ok((runtime, entry, options, engine, component, commands))
+    })();
+    let (runtime, entry, options, engine, component, commands) = match prepared {
+        Ok(prepared) => prepared,
+        Err(error) => return (host, Err(error)),
+    };
+    let limits = &runtime.limits;
+    let state = State {
+        host,
+        commands,
+        groups: BTreeSet::new(),
+        effect: Effect::Read,
+        folders: BTreeMap::new(),
+        staged: BTreeMap::new(),
+        clock: runtime.permissions.clock,
+        failed: None,
+        calls: 0,
+        max_calls: MAX_IMPORT_CALLS,
+        log_bytes: 0,
+        deadline: Instant::now() + Duration::from_millis(limits.deadline_ms),
+        limits: store_limits(limits, 1_000_000),
+        import: None,
+    };
+    let mut store = Store::new(&engine, state);
+    let outcome = (|| {
+        prepare_store(&mut store, limits)?;
+        reject_network_imports(&engine, &component)?;
+        let mut linker = Linker::new(&engine);
+        exporter_bindings::ExporterPlugin::add_to_linker::<_, wasmtime::component::HasSelf<_>>(&mut linker, |s| s)
+            .map_err(|e| trap(e.to_string()))?;
+        let response = with_interrupts(&engine, || {
+            let guest = exporter_bindings::ExporterPlugin::instantiate(&mut store, &component, &linker)?;
+            call_export!(guest, &mut store, &entry.name, &options)
+        })?;
+        if let Some(error) = store.data().failed.clone() {
+            return Err(error);
+        }
+        let response = response.map_err(|e| execution_error(&e, store.get_fuel().ok(), limits))?;
+        let file = response.map_err(host_error)?;
+        if file.len() > MAX_EXPORT_FILE_BYTES {
+            return Err(limit("export: a file of more than 256 MiB"));
+        }
+        if store.data().host.is_cancelled() {
+            return Err(HostError::Cancelled);
+        }
+        // A last host call can finish after the deadline, before the next epoch tick sees it.
+        if Instant::now() >= store.data().deadline {
+            return Err(limit("deadline"));
+        }
+        Ok(file)
+    })();
+    let mut state = store.into_data();
+    // An export never changes the app: what its commands did is always thrown away.
+    let rolled_back = state.host.rollback_transaction();
+    let outcome = rolled_back.and(outcome);
     (state.host, outcome)
 }
 

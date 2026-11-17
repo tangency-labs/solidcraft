@@ -710,6 +710,9 @@ pub(crate) struct EntryDialog {
     pub(crate) result: Option<String>,
     /// An importer's extensions: its button chooses the file to open, with these options.
     pub(crate) opens: Option<Vec<String>>,
+    /// An export slot's extensions: its button chooses where to save, then exports the design
+    /// with these options.
+    pub(crate) writes: Option<Vec<String>>,
     /// The design the selection fields' picks were made on. A change to it (an edit, an undo, an
     /// update) clears them: a reference into an older model never stands for another item.
     pub(crate) picked_on: Option<Arc<solidcraft_engine::doc::Document>>,
@@ -740,6 +743,7 @@ pub(crate) fn open_entry(app: &mut SolveApp, p: usize, e: usize) {
     }
     let mut fields = form(&entry.input_schema);
     let opens = (entry.kind == solidcraft_engine::plugin::EntryKind::Importer).then(|| entry.extensions.clone());
+    let writes = (entry.kind == solidcraft_engine::plugin::EntryKind::Exporter).then(|| entry.extensions.clone());
     let id = app.plugin_menu.next_dialog;
     app.plugin_menu.next_dialog += 1;
     // What is selected fills the first selection field, as far as that field takes it; the
@@ -764,6 +768,7 @@ pub(crate) fn open_entry(app: &mut SolveApp, p: usize, e: usize) {
         error: None,
         result: None,
         opens,
+        writes,
         picked_on: prefilled.then(|| app.session.doc.clone()),
         picks_cleared: false,
         preview: true,
@@ -1022,8 +1027,28 @@ pub(crate) fn run_dialog(app: &mut SolveApp, id: u64) -> Result<(), String> {
         });
         return Ok(());
     }
+    // An export slot: choose where to save, then export the design on the worker, as a run is,
+    // with the options from this dialog. The dialog stays open with any error until it is done.
+    if let Some(extensions) = dialog.writes.clone() {
+        let format = std::format!("{}.{}", dialog.plugin.id, dialog.entry);
+        let extension = extensions.first().cloned().unwrap_or_default();
+        let name = std::format!("{}.{extension}", crate::export_name::offered(app, None, &app.session.doc.name));
+        let extensions: Vec<&str> = extensions.iter().map(String::as_str).collect();
+        app.pick_save(&name, &extensions, move |app, path| {
+            let Some(path) = path else { return };
+            let request = json!({"command":"file.export","params":{"path": path, "format": format, "options": params}});
+            queue(app, id, request);
+        });
+        return Ok(());
+    }
     let request = json!({"command":"plugin.run","params":{
         "path": dialog.plugin.path, "approval": dialog.plugin.approval, "entry": dialog.entry, "params": params}});
+    queue(app, id, request);
+    Ok(())
+}
+
+/// Queue dialog `id`'s request on the control channel's worker, for the design it was opened on.
+fn queue(app: &mut SolveApp, id: u64, request: Value) {
     let (req, reply) = solidcraft_control::ControlRequest::new("engine.execute", request);
     let ticket = req.ticket.clone();
     app.plugin_menu.pending.push((req.serial, app.session.uid));
@@ -1033,7 +1058,6 @@ pub(crate) fn run_dialog(app: &mut SolveApp, id: u64) -> Result<(), String> {
         dialog.error = None;
         dialog.result = None;
     }
-    Ok(())
 }
 
 /// A queued run is for the design its dialog was opened on: refused, when its turn comes, if
@@ -1067,6 +1091,18 @@ fn poll_dialog(app: &mut SolveApp, id: u64) {
         let error = reply["error"].as_str().unwrap_or_default();
         let error = error.strip_prefix("plugin: ").unwrap_or(error);
         dialog.error = Some(solidcraft_ui_text::format("ui.plugin_dialog_failed", &[("error", error)]));
+        return;
+    }
+    if dialog.writes.is_some() {
+        let path = reply.pointer("/result/path").and_then(Value::as_str).unwrap_or_default().to_owned();
+        let notes: Vec<String> =
+            reply.pointer("/result/warnings").and_then(Value::as_array).into_iter().flatten().filter_map(Value::as_str).map(String::from).collect();
+        app.plugin_menu.dialogs.remove(at);
+        let mut done = solidcraft_ui_text::format("plugin_export.done", &[("path", &path)]);
+        for note in notes {
+            done = std::format!("{done} · {note}");
+        }
+        app.set_status(done, false);
         return;
     }
     if dialog.read {
@@ -1120,7 +1156,13 @@ fn show_dialog(app: &mut SolveApp, ctx: &egui::Context, dialog: &mut EntryDialog
     }
     // Just the command's own title ("Gears"): no plugin or menu name after it.
     let title = dialog.label.clone();
-    let run_key = if dialog.opens.is_some() { "ui.plugin_dialog_choose_file" } else { "ui.plugin_dialog_run" };
+    let run_key = if dialog.opens.is_some() {
+        "ui.plugin_dialog_choose_file"
+    } else if dialog.writes.is_some() {
+        "plugin_export.button"
+    } else {
+        "ui.plugin_dialog_run"
+    };
     let (run_label, close_label) = (app.tr(run_key).to_owned(), app.tr(if dialog.read { "ui.close" } else { "ui.cancel" }).to_owned());
     // This dialog's picker, when the viewport picks into its fields: drawn here, then put back.
     let mut picker = if picking(app) == Some(dialog.id) { app.dialog.take() } else { None };

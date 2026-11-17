@@ -264,7 +264,7 @@ running app commands, logging, progress and cancellation, named files, a clock, 
 entry. A plugin's `plugin.json` lists what it needs, for example
 `"capabilities": ["commands@0.1"]`; the host refuses an unknown or newer capability when it reads
 the manifest, with a plain message such as "needs commands 0.2; update SolidCraft or the plugin".
-`formats@0.1` adds importers (below). `ui`, `viewport` and `storage` arrive later as their own
+`formats@0.1` adds file-format slots: importers and exporters (below). `ui`, `viewport` and `storage` arrive later as their own
 versioned interfaces. While a version is 0.x, a minor version may break the one before it.
 
 ## Commands and permissions
@@ -274,8 +274,8 @@ past the open design are grouped (`file`, `doc`, `app`, `plugin`) and refused un
 manifest asks for the group in `permissions.command_groups` and the user grants it.
 File access requires approved folder grants. The reserved `net` permission is
 refused with a typed error. Traps, missing permissions, failed commands, limits
-and invalid manifest fields return structured errors. Phase 2 adds importers (below);
-exporters, author tooling and browser execution follow.
+and invalid manifest fields return structured errors. Phase 2 adds importers and exporters (below);
+author tooling and browser execution follow.
 
 ## Importers
 
@@ -335,6 +335,47 @@ extensions it claims, lowercase without the dot:
   `stack_kib` up to 64 MiB (a command may ask for at most 1 MiB). Its fuel has to fit the user's ceiling in Preferences › Plugins, and
   its memory too unless the user approved more at install. Build it for `wasm32-unknown-unknown` and wrap it with
   `wasm-tools component new`: the host links no WASI, so a component that imports any is refused.
+
+## Exporters
+
+An exporter writes the open design as a file of another format. It is an export slot in the sense
+of RFC 0015 §4: its manifest says `"capabilities": ["formats@0.1"]`, and each of its entries has
+`"kind": "exporter"`, the extensions it writes, an optional `label` for the Export list, and its
+options as `input_schema`, drawn as a form before the export. The commands it reads the design with
+are listed in `runtime.commands`:
+
+```json
+{"id": "sample-mesh", "name": "Sample Mesh", "version": "1.0.0", "capabilities": ["formats@0.1"],
+ "runtime": {"module": "sample.wasm", "commands": ["document.inspect", "model.mesh"],
+   "entries": [{"name": "write", "kind": "exporter", "extensions": ["smp"], "label": "Sample mesh",
+                "input_schema": {"type": "object", "properties": {"units": {"type": "string", "enum": ["mm", "in"], "default": "mm"}}}}],
+   "limits": {"fuel": 100000000000, "memory_mib": 512, "deadline_ms": 120000}}}
+```
+
+- **Exporting.** `file.export` writes a file whose extension SolidCraft does not write itself with
+  the installed, enabled exporter that claims it; `format` (`plugin_id.entry`, listed in
+  `plugin.list`'s `exporters`) picks one for any path, and `options` passes the slot's options.
+  Two exporters claiming one extension need `format`. File › Export lists each slot as
+  "Export <label> (.ext)…", and the Plugins menu has it too: its dialog shows the options, then
+  chooses where to save. Neither the command nor a script ever opens a dialog.
+- **The world.** The component implements `exporter-plugin`: it exports
+  `formats-provider.export-file(slot, options)`, which returns the file's bytes (at most 256 MiB),
+  and imports `commands`, `log`, `control` and `clock`. `commands.run` runs only the commands the
+  manifest lists, only those that read the design (`effect: read`) and reach no file or other design;
+  a manifest that lists another is refused when it is read. The commands run on a copy of the open
+  design that is thrown away, so an export never changes the design or its undo history.
+- **Files.** The plugin reaches no file at all: it has no `files` import and may ask for no folder,
+  command group or `input_folder`. The app writes the bytes it returns to the path the user chose
+  (subject to the caller's file scope), in one step through a temporary file beside it, and only
+  when the whole export succeeded. An export that fails, traps, runs out of fuel or is cancelled
+  leaves the folder as it was.
+- **Plugin data.** `"needs_plugin_data": true` marks a slot that will also read the design's own
+  data of its plugin (RFC 0015 §5). It is accepted, and until per-design plugin data lands the export
+  runs without it and its reply carries a warning saying so.
+- **Limits.** As an importer: a component of up to 64 MiB, a deadline of up to 10 minutes and a
+  `stack_kib` of up to 64 MiB, with fuel and memory within the user's ceilings.
+- **One kind per plugin.** A runtime's entries are all commands, all importers or all exporters, so
+  a format that is both read and written ships as two plugins for now.
 
 ## Plugin data in a design
 

@@ -125,7 +125,12 @@ fn install(s: &mut Session, p: &Value) -> Result<Value> {
         commands: runtime.map(|r| r.commands.iter().cloned().collect()).unwrap_or_default(),
         entries: runtime.map(|r| r.entries.iter().map(|e| format!("{}.{}", manifest.id, e.name)).collect()).unwrap_or_default(),
         entry_points: runtime.map(|r| r.entries.clone()).unwrap_or_default(),
-        opens: runtime.map(|r| r.entries.iter().flat_map(|e| e.extensions.iter().cloned()).collect()).unwrap_or_default(),
+        opens: runtime
+            .map(|r| r.entries.iter().filter(|e| e.kind == plugin::EntryKind::Importer).flat_map(|e| e.extensions.iter().cloned()).collect())
+            .unwrap_or_default(),
+        writes: runtime
+            .map(|r| r.entries.iter().filter(|e| e.kind == plugin::EntryKind::Exporter).flat_map(|e| e.extensions.iter().cloned()).collect())
+            .unwrap_or_default(),
         replaces,
         installed,
         folder: folder.to_string_lossy().into_owned(),
@@ -193,7 +198,12 @@ fn list(s: &mut Session, _p: &Value) -> Result<Value> {
             plugins.push(ListedPlugin { disabled: s.disabled_plugins.contains(&package.manifest.id), manifest: package.manifest, commands });
         }
     }
-    serde_json::to_value(ListResult { plugins, importers: plugin::describe_importers(s), param_warnings: vec![] })
+    serde_json::to_value(ListResult {
+        plugins,
+        importers: plugin::describe_importers(s),
+        exporters: plugin::describe_exporters(s),
+        param_warnings: vec![],
+    })
         .map_err(|e| bad("plugin.list", e.to_string()))
 }
 

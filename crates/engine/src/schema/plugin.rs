@@ -83,21 +83,45 @@ pub struct ListResult {
     /// The installed, enabled importers: the files `doc.open` and `file.import` open with them.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub importers: Vec<ImporterInfo>,
+    /// The installed, enabled exporters: the files `file.export` writes with them.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub exporters: Vec<ImporterInfo>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub param_warnings: Vec<String>,
 }
 
-/// An installed importer entry.
+/// An installed import or export slot.
 #[derive(Debug, Serialize, JsonSchema)]
 pub struct ImporterInfo {
     /// `plugin_id.entry`: what `format` names.
     pub id: String,
     /// The plugin's name.
     pub name: String,
+    /// The slot's own label, when it has one.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub label: String,
     /// The file extensions it claims, lowercase, without the dot.
     pub extensions: Vec<String>,
     /// Its options, as a JSON schema.
     pub input_schema: Value,
+}
+
+/// What an exporter plugin wrote: `file.export` with a format an exporter plugin writes.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct ExportedFile {
+    /// The file written.
+    pub path: String,
+    /// Its size in bytes.
+    pub bytes: usize,
+    /// The exporter that wrote it, as `plugin_id.entry`.
+    pub format: String,
+    /// That exporter plugin's name.
+    pub plugin: String,
+    /// The slot asks for the design's plugin data, which no export passes yet: a note saying so.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub warnings: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub param_warnings: Vec<String>,
 }
 
 /// Open a file with an installed importer plugin, as a new, unsaved design. Never opens a dialog.
@@ -189,6 +213,9 @@ pub struct InstallResult {
     /// For an importer: the file extensions it opens, lowercase, without the dot.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub opens: Vec<String>,
+    /// For an exporter: the file extensions it writes, lowercase, without the dot.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub writes: Vec<String>,
     /// The installed plugin of the same id, `name version`, when there is one.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub replaces: Option<String>,

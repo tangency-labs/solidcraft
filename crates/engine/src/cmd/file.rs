@@ -116,7 +116,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .noundo()
         .contract(&EXPORT_CONTRACT)
         .output(crate::schema::output_schema_for::<crate::schema::file::FileExportResult>)
-        .params("path; format?: stl|stla|obj|step|3mf|3mf-tagged|glb|urdf|json (default from extension; 3mf-tagged: 3MF whose triangles carry their B-rep face, at full precision, for meshing and analysis tools; docs/formats/3mf-face-tags.md; obj: the colours of the bodies go in a material library (`.mtl`) written next to the mesh file; glb: binary glTF in metres with Y up, each body placed and named, its colours, metallic and roughness as materials; a transparent body or face, or a body a render setup gives an image texture or optics, is refused; urdf: the whole assembly as a robot, with STL meshes written next to it; docs/urdf.md); bodies?: [names] (JSON and URDF export the complete design); urdf only: mesh_prefix? (before each mesh file name, e.g. package://robot/meshes/), effort? (default 1000), velocity? (default 10); quality?: standard|fine|finest (STL, OBJ, 3MF and GLB: how closely the mesh follows curved faces, a chord tolerance of 2e-4, 5e-5 or 1e-5 of each body's size; default standard); objects?: body|component (3MF only: one object per body, the default, or one object for each placed component with two or more bodies, with those bodies as its parts, so a slicer loads them as one object with parts); lay_on_print_faces?: bool (STL and 3MF only, default false: each body with a print face (body.print_face) is written laid on it, as a slicer export lays it → print_faces: the bodies laid, warnings: each body that has a print face but was written as it lies)"),
+        .params("path; format?: stl|stla|obj|step|3mf|3mf-tagged|glb|urdf|json, or plugin_id.entry for an installed exporter plugin (plugin.list exporters), which writes the whole design with options?: the slot's declared options (default from extension; an extension SolidCraft doesn't write goes to the exporter plugin that claims it; 3mf-tagged: 3MF whose triangles carry their B-rep face, at full precision, for meshing and analysis tools; docs/formats/3mf-face-tags.md; obj: the colours of the bodies go in a material library (`.mtl`) written next to the mesh file; glb: binary glTF in metres with Y up, each body placed and named, its colours, metallic and roughness as materials; a transparent body or face, or a body a render setup gives an image texture or optics, is refused; urdf: the whole assembly as a robot, with STL meshes written next to it; docs/urdf.md); bodies?: [names] (JSON and URDF export the complete design); urdf only: mesh_prefix? (before each mesh file name, e.g. package://robot/meshes/), effort? (default 1000), velocity? (default 10); quality?: standard|fine|finest (STL, OBJ, 3MF and GLB: how closely the mesh follows curved faces, a chord tolerance of 2e-4, 5e-5 or 1e-5 of each body's size; default standard); objects?: body|component (3MF only: one object per body, the default, or one object for each placed component with two or more bodies, with those bodies as its parts, so a slicer loads them as one object with parts); lay_on_print_faces?: bool (STL and 3MF only, default false: each body with a print face (body.print_face) is written laid on it, as a slicer export lays it → print_faces: the bodies laid, warnings: each body that has a print face but was written as it lies)"),
     // One command per format, so each File › Export item can have a key of its own; started
     // from a key or command search, the app opens the save picker (the mesh dialog for STL and
     // 3MF). Each takes `file.export`'s parameters for its format, without `format`.
@@ -2358,7 +2358,18 @@ fn export_laid_to(
 fn export(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "file.export";
     let path = path_arg(p, cmd)?;
-    let format = Format::from_name(str_(p, "format").unwrap_or(path))?;
+    // An exporter plugin: a `format` naming one (`plugin_id.entry`; SolidCraft's own formats have
+    // no dot), or a file whose extension SolidCraft does not write and an exporter claims.
+    let named = str_(p, "format");
+    let plugin_format = named.filter(|f| f.contains('.'));
+    if plugin_format.is_some() || (named.is_none() && Format::from_name(path).is_err()) {
+        if let Some(exporter) = crate::plugin::exporter_for(s, path, plugin_format)? {
+            return export_with_plugin(s, cmd, path, &exporter, p);
+        }
+    } else if p.get("options").is_some_and(|v| !v.is_null()) {
+        return Err(bad(cmd, "`options` applies to formats an exporter plugin writes"));
+    }
+    let format = Format::from_name(named.unwrap_or(path))?;
     if format == Format::Urdf {
         if !string_list(cmd, p, "bodies")?.is_empty() {
             return Err(bad(cmd, "urdf exports the whole assembly; omit bodies"));
@@ -2372,6 +2383,18 @@ fn export(s: &mut Session, p: &Value) -> Result<Value> {
         return export_laid(s, path, format, &bodies, &parts, quality);
     }
     export_to(s, cmd, path, format, &bodies, &parts, quality)
+}
+
+/// `file.export` through an exporter plugin: the whole design, with the slot's options.
+fn export_with_plugin(s: &Session, cmd: &str, path: &str, exporter: &crate::plugin::FormatSlot, p: &Value) -> Result<Value> {
+    for key in ["bodies", "quality", "objects", "lay_on_print_faces", "mesh_prefix", "effort", "velocity"] {
+        if p.get(key).is_some_and(|v| !v.is_null()) {
+            return Err(bad(cmd, format!("`{key}` is for SolidCraft's own formats; an exporter plugin writes the whole design with its `options`")));
+        }
+    }
+    let options = p.get("options").filter(|o| !o.is_null()).cloned().unwrap_or_else(|| json!({}));
+    let exported = crate::plugin::export_file(s, exporter, path, &options)?;
+    serde_json::to_value(exported).map_err(|e| EngineError::Other(e.to_string()))
 }
 
 fn export_step(s: &mut Session, p: &Value) -> Result<Value> {

@@ -1,0 +1,14 @@
+{
+  "en": {
+    "plugin_export.button": "Export…",
+    "plugin_export.done": "Exported {path}",
+    "plugin_export.menu": "Export {format} ({extensions})…",
+    "plugin_install.writes": "Writing {extensions} files from the open design"
+  },
+  "de": {
+    "plugin_export.button": "Exportieren…",
+    "plugin_export.done": "{path} exportiert",
+    "plugin_export.menu": "{format} exportieren ({extensions})…",
+    "plugin_install.writes": "Schreibt {extensions}-Dateien aus dem geöffneten Design"
+  }
+}
