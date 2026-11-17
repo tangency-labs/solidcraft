@@ -312,9 +312,15 @@ pub fn default_text_offset(f: &DimFrame, px: f64, half: Vec2) -> Vec2 {
         // Where a linear dimension to the minor axis end puts it.
         DimFrame::HalfAxis { dir, len, .. } => dir * (len * 0.5) + dir.perp() * linear_offset(dir, px, half),
         DimFrame::Radial { radius, .. } => Vec2::new(1.0, 1.0) * ((radius + 18.0 * px) * std::f64::consts::FRAC_1_SQRT_2),
-        DimFrame::Angular { d0, sweep, .. } => Vec2::from_angle(d0.angle() + sweep * 0.5) * (48.0 * px),
+        DimFrame::Angular { d0, sweep, .. } => bisector(d0, sweep) * (48.0 * px),
         DimFrame::ArcLength { radius, start, sweep, .. } => Vec2::from_angle(start + sweep * 0.5) * (radius + 20.0 * px),
     }
+}
+
+/// The unit direction halfway round an angle from the unit `d0` by `sweep`, where its text sits unless
+/// it is placed.
+fn bisector(d0: Vec2, sweep: f64) -> Vec2 {
+    Vec2::from_angle(d0.angle() + sweep * 0.5)
 }
 
 /// Points along an arc around `c` (counter-clockwise from `a0` by `sweep`).
@@ -398,15 +404,18 @@ fn box_exit(half: Vec2, u: Vec2) -> f64 {
 
 /// How far a linear dimension's line runs on past an arrow that is outside, in arrow lengths.
 const TAIL: f64 = 1.8;
+/// How far an angle's arc runs on past an arrow that is outside, in arrow lengths.
+const ARC_TAIL: f64 = 2.0;
 
-/// Half a linear dimension's text along its line (level, or running along it when `above`), and a gap.
+/// Half a dimension's text along its line where that runs along the unit `dir` (level, or running
+/// along it when `above`), and a gap.
 fn half_along(sizes: &DimSizes, dir: Vec2, half: Vec2) -> f64 {
     let text = if sizes.above { half.x } else { half.x * dir.x.abs() + half.y * dir.y.abs() };
     text + sizes.gap
 }
 
-/// Whether a linear dimension's arrows go inside its `span`: it holds them and its text, and the
-/// text, `s` along from the middle and `along` half long ([`half_along`]), lies between them.
+/// Whether a dimension's arrows go inside its `span` (a length along its line or arc): it holds them and
+/// its text, and the text, `s` along from the middle and `along` half long ([`half_along`]), lies between them.
 fn fits(span: f64, s: f64, along: f64, arrow: f64) -> bool {
     span > 2.0 * arrow + 2.0 * along && s.abs() + along <= span * 0.5
 }
@@ -420,7 +429,9 @@ pub enum DimText {
     At(Vec2),
     /// A linear dimension's text this far across its line, and along it in the middle when it fits
     /// between the arrows, or else beyond the arrow at the line's `dir` end, a gap past the arrow's
-    /// tail (ISO 129-1). The other kinds take their default place.
+    /// tail (ISO 129-1). An angle's text this far out from its vertex, in the middle of its arc when it
+    /// fits there, or else beyond the arrow at the arc's counter-clockwise end, a gap past the arrow's tail
+    /// along the arc's tangent there. The other kinds take their default place.
     Across(f64),
 }
 
@@ -442,10 +453,11 @@ pub fn dim_layout_reaching(f: &DimFrame, text: Option<Vec2>, px: f64, half: Vec2
 /// text box's half size in the text's own direction ([`DimLayout::text_dir`]).
 pub fn dim_layout_sized(f: &DimFrame, text: DimText, sizes: &DimSizes, half: Vec2, reach: [Option<(Vec2, Vec2)>; 2]) -> DimLayout {
     // The text's place from the frame's origin, given its default place.
-    let place = |default: Vec2| match text {
-        DimText::At(t) => t,
-        DimText::Across(h) if matches!(f, DimFrame::Linear { .. }) => Vec2::new(0.0, h),
-        DimText::Default | DimText::Across(_) => default,
+    let place = |default: Vec2| match (text, *f) {
+        (DimText::At(t), _) => t,
+        (DimText::Across(h), DimFrame::Linear { .. }) => Vec2::new(0.0, h),
+        (DimText::Across(h), DimFrame::Angular { d0, sweep, .. }) => bisector(d0, sweep) * h,
+        (DimText::Default | DimText::Across(_), _) => default,
     };
     let sizes = sizes.usable();
     let (arrow, gap, over) = (sizes.arrow, sizes.gap, sizes.overshoot);
@@ -588,20 +600,37 @@ pub fn dim_layout_sized(f: &DimFrame, text: DimText, sizes: &DimSizes, half: Vec
             }
             out.extensions = out.lines.len();
             let arc_len = r * sweep;
-            if arc_len > 2.5 * arrow {
+            // A text with no place along the arc that doesn't fit on it between the arrows goes beyond the
+            // one at the counter-clockwise end, as a linear one does: from its tip along the arc's tangent out
+            // of the angle (`out_dir`), its tail, a gap and half the level text. Its box is then past the line
+            // through the vertex and that tip, where no part of the angle reaches, and the tail's arc, which
+            // runs no further along `out_dir` than its own length, stays short of it (#13937).
+            let end = Vec2::from_angle(a0 + sweep);
+            let out_dir = end.perp();
+            let level = DimSizes { above: false, ..sizes };
+            let beyond = match text {
+                DimText::Across(_) if !fits(arc_len, 0.0, half_along(&level, bisector(d0, sweep).perp(), half), arrow) => {
+                    Some(vertex + end * r + out_dir * (ARC_TAIL * arrow + half_along(&level, out_dir, half)))
+                }
+                _ => None,
+            };
+            if arc_len > 2.5 * arrow && beyond.is_none() {
                 out.lines.push(arc_pts(vertex, r, a0, sweep));
                 out.arrows.push((vertex + Vec2::from_angle(a0) * r, -Vec2::from_angle(a0).perp()));
-                out.arrows.push((vertex + Vec2::from_angle(a0 + sweep) * r, Vec2::from_angle(a0 + sweep).perp()));
+                out.arrows.push((vertex + end * r, out_dir));
             } else {
-                // A narrow angle: arrows outside the sector pointing in.
-                let tail = 2.0 * arrow / r;
+                // A narrow angle, or its text beyond: arrows outside the sector pointing in.
+                let tail = ARC_TAIL * arrow / r;
                 out.lines.push(arc_pts(vertex, r, a0 - tail, sweep + 2.0 * tail));
                 out.arrows.push((vertex + Vec2::from_angle(a0) * r, Vec2::from_angle(a0).perp()));
-                out.arrows.push((vertex + Vec2::from_angle(a0 + sweep) * r, -Vec2::from_angle(a0 + sweep).perp()));
+                out.arrows.push((vertex + end * r, -out_dir));
             }
-            // Text beyond the sector: the arc reaches round to it.
+            if let Some(at) = beyond {
+                out.text = at;
+            }
+            // Text placed beyond the sector: the arc reaches round to it.
             let ta = (t.angle() - a0).rem_euclid(std::f64::consts::TAU);
-            if ta > sweep {
+            if ta > sweep && beyond.is_none() {
                 let (from, by) =
                     if ta - sweep < std::f64::consts::TAU - ta { (a0 + sweep, ta - sweep) } else { (t.angle(), std::f64::consts::TAU - ta) };
                 out.lines.push(arc_pts(vertex, r, from, by));
@@ -1027,10 +1056,10 @@ mod tests {
                 }
             }
         }
-        // The other kinds take their default place, and a text that has no finite place stays in the middle.
+        // Radii and arc lengths take their default place (an angle's is the next test), and a text that has no
+        // finite place stays in the middle.
         let others = [
             DimFrame::Radial { center: Vec2::ZERO, radius: 1.0, diameter: true, arc: None },
-            DimFrame::Angular { vertex: Vec2::ZERO, d0: Vec2::X, sweep: 0.1 },
             DimFrame::ArcLength { center: Vec2::ZERO, radius: 1.0, start: 0.0, sweep: 0.1 },
         ];
         for o in &others {
@@ -1049,6 +1078,79 @@ mod tests {
         for sizes in [above, PAPER] {
             let lay = dim_layout_sized(&far, DimText::Across(-1e308), &sizes, half, [None, None]);
             assert!(lay.text.x.is_finite() && lay.text.y.is_finite(), "{lay:?}");
+        }
+    }
+
+    /// Whether any line of `lay`, or a ray from `vertex` along `rays`, comes into the level text box of
+    /// half size `half` at `lay.text`. Each piece is checked at 200 points along it.
+    fn crosses_text(lay: &DimLayout, half: Vec2, vertex: Vec2, rays: [Vec2; 2]) -> bool {
+        let inside = |p: Vec2| (p.x - lay.text.x).abs() < half.x && (p.y - lay.text.y).abs() < half.y;
+        let rays = rays.map(|u| vec![vertex, vertex + u * 100.0]);
+        let mut pieces = lay.lines.iter().chain(&rays).flat_map(|line| line.iter().zip(line.iter().skip(1)));
+        pieces.any(|(a, b)| (0..=200).any(|i| inside(*a + (*b - *a) * (i as f64 / 200.0))))
+            || lay.arrows.iter().any(|(tip, dir)| (0..=20).any(|i| inside(*tip - *dir * (PAPER.arrow * i as f64 / 20.0))))
+    }
+
+    /// An angle's text with no place of its own that doesn't fit on its arc between the arrows goes beyond
+    /// the arrow at the counter-clockwise end, along the arc's tangent there, a gap past the arrow's tail, as
+    /// a linear one does (#13937, #13393). It is level, and nothing of the angle reaches into it.
+    #[test]
+    fn an_unplaced_angle_text_that_does_not_fit_goes_beyond_its_arc() {
+        let deg = std::f64::consts::PI / 180.0;
+        // The issue's wedge: "10.00°" in 3.5 mm text, 10 mm out from the corner of a 10° angle.
+        let (vertex, half) = (Vec2::new(3.0, -2.0), Vec2::new(7.0, 1.75));
+        let narrow = DimFrame::Angular { vertex, d0: Vec2::X, sweep: 10.0 * deg };
+        let end = Vec2::from_angle(10.0 * deg);
+        let out = end.perp();
+        // The tip at 10°, then along the tangent there: a tail of 2 arrows, a gap and the box's half reach.
+        let want = vertex + end * 10.0 + out * (6.0 + 1.0 + 7.0 * out.x.abs() + 1.75 * out.y.abs());
+        for sizes in [PAPER, DimSizes { above: true, ..PAPER }] {
+            let lay = dim_layout_sized(&narrow, DimText::Across(10.0), &sizes, half, [None, None]);
+            assert!(close(lay.text, want) && lay.text_dir == Vec2::X, "{lay:?}");
+            assert!(lay.arrows[0].1.dot(Vec2::new(0.0, 1.0)) > 0.0 && lay.arrows[1].1.dot(out) < 0.0, "outside, pointing in: {lay:?}");
+            assert!(!crosses_text(&lay, half, vertex, [Vec2::X, end]), "{lay:?}");
+            // Its two rays and its arc with a tail past each arrow: nothing reaches round to the text.
+            assert_eq!(lay.lines.len(), 3, "{lay:?}");
+        }
+        // It moves exactly where it stops fitting: at a radius 0.01 either side of the arrows, the gaps and
+        // the box's reach along the arc's middle.
+        for sweep in [10.0 * deg, 45.0 * deg, 90.0 * deg] {
+            let f = DimFrame::Angular { vertex, d0: Vec2::X, sweep };
+            let middle = Vec2::from_angle(sweep * 0.5);
+            let tangent = middle.perp();
+            let need = 2.0 * PAPER.arrow + 2.0 * (half.x * tangent.x.abs() + half.y * tangent.y.abs() + PAPER.gap);
+            for (r, moves) in [((need + 0.01) / sweep, false), ((need - 0.01) / sweep, true)] {
+                let lay = dim_layout_sized(&f, DimText::Across(r), &PAPER, half, [None, None]);
+                assert_eq!(!close(lay.text, vertex + middle * r), moves, "{} deg at {r}: {lay:?}", sweep / deg);
+                let rays = [Vec2::X, Vec2::from_angle(sweep)];
+                assert!(!moves || !crosses_text(&lay, half, vertex, rays), "{} deg at {r}: {lay:?}", sweep / deg);
+                // Arc lengths here are all over 2.5 arrows, so the arrows go outside only because the text does.
+                let out_dir = Vec2::from_angle(sweep).perp();
+                assert_eq!(lay.arrows[1].1.dot(out_dir) < 0.0, moves, "{} deg at {r}: {lay:?}", sweep / deg);
+            }
+        }
+        // A negative place out lays out as its size does: the arc doesn't reach round to the middle's far side.
+        let laid = |h: f64| format!("{:?}", dim_layout_sized(&narrow, DimText::Across(h), &PAPER, half, [None, None]));
+        assert_eq!(laid(-10.0), laid(10.0));
+        // A placed text keeps its place, however narrow the angle.
+        let at = Vec2::from_angle(5.0 * deg) * 10.0;
+        assert!(close(dim_layout_sized(&narrow, DimText::At(at), &PAPER, half, [None, None]).text, vertex + at));
+        // An angle of no sweep goes beyond its arrow too.
+        let zero = DimFrame::Angular { vertex: Vec2::ZERO, d0: Vec2::X, sweep: 0.0 };
+        let lay = dim_layout_sized(&zero, DimText::Across(10.0), &PAPER, half, [None, None]);
+        assert!(close(lay.text, Vec2::new(10.0, 6.0 + 1.0 + 1.75)), "{lay:?}");
+        // A box of no finite size, or a place as far out as a number goes: a finite layout. An infinite place
+        // lays out as a placed text there would; one that isn't a number takes the arrow's length, as a
+        // placed one does, and goes beyond.
+        for (h, half) in [(10.0, Vec2::new(f64::INFINITY, f64::NAN)), (1e308, half), (f64::NAN, half)] {
+            let lay = dim_layout_sized(&narrow, DimText::Across(h), &PAPER, half, [None, None]);
+            let mut points = lay.lines.iter().flatten().chain(lay.arrows.iter().map(|(p, _)| p));
+            assert!(lay.text.is_finite() && points.all(|p| p.is_finite()), "{h} {half:?}: {lay:?}");
+        }
+        for h in [f64::INFINITY, f64::NEG_INFINITY] {
+            let lay = dim_layout_sized(&narrow, DimText::Across(h), &PAPER, half, [None, None]);
+            let placed = dim_layout_sized(&narrow, DimText::At(Vec2::from_angle(5.0 * deg) * h), &PAPER, half, [None, None]);
+            assert_eq!(format!("{lay:?}"), format!("{placed:?}"), "{h}");
         }
     }
 
