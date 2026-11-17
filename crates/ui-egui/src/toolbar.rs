@@ -2620,6 +2620,11 @@ pub fn shortcuts(app: &mut SolveApp, ctx: &egui::Context) {
     if crate::params_dialog::cancel_on_escape(app, ctx) {
         return;
     }
+    if crate::view_tiles::cancel_placement_on_escape(app, ctx) {
+        app.esc_handled = true;
+        app.last_escape = None;
+        return;
+    }
     // A dimension value that is taking the keyboard: letters belong to it (a parameter name
     // starting with L or D), even on the frame before its field holds the focus.
     let popup_owner = egui::Popup::is_any_open(ctx)
