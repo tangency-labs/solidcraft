@@ -225,11 +225,7 @@ fn rounded_with(feature: Feature, r: f64) -> Result<(f64, usize)> {
 /// Integrating the faces on their surfaces continued where their trims leave the domain
 /// moved the r 8 cylinder boss and hole, cone boss and pit, 19 degree lean, prism boss and
 /// pocket and r 1.9 hole by one more last bit; the prisms and the r 1.9 hole are back on
-/// their figures from before. Transposing a swapped face's trims exactly, where they were
-/// mirrored through a rounded matrix (WR-729), moves trim coordinates by up to an ulp and no
-/// edge, vertex or surface: the r 8 cylinder hole and cone pit by two last bits, the prism
-/// pocket, r 1.9 hole and 19 degree lean by one; each stays as far from its closed form as
-/// before to within 1e-11, against the 2e-7 to 6e-7 the integration leaves.)
+/// their figures from before.)
 ///
 /// Since the trim pieces integrate by Gauss-Kronrod (#14460) every figure, `was` and pinned,
 /// is that integrator's: forced to accuracy 1e-11 and 1e-12 it gives each pinned volume to
@@ -244,6 +240,10 @@ fn rounded_with(feature: Feature, r: f64) -> Result<(f64, usize)> {
 /// Summing each Gauss-Kronrod rule about its centre value (exact on a constant integrand)
 /// moved the r 8 cylinder boss, cone boss and 19 degree lean, and the prism boss and r 1.9
 /// boss (`was` too: the gap closure moves neither), by one last bit each.
+/// Transposing a swapped face's trims exactly, where they were mirrored through a rounded
+/// matrix (WR-729), moves trim coordinates by up to an ulp and no edge, vertex or surface:
+/// the r 8 cylinder boss, cone boss and pit and 19 degree lean by one last bit each, every
+/// one still within 3.2e-16 relative of its 70-digit reference (`was` is left as it was).
 ///
 /// `was` is the figure before `brep_volume` closed the tolerant edges' gaps (#16735); where it
 /// differs, the move is checked to be that integrator's leak (`support/volume_leak.rs`).
@@ -274,8 +274,8 @@ fn assert_pinned(feature: Feature, r: f64, was: f64, volume: f64, faces: usize) 
 
 /// How far a pinned volume may lie from its closed form, relative: the bound this file holds
 /// the r 1.9 rounds to (`a_band_short_of_the_feature_leaves_it`). Each pin with a closed form
-/// lies 8e-12 to 2.3e-11 from it (MEASURED against 70-digit references), so the bits are not
-/// all the test rests on.
+/// lies within 6.6e-16 relative of it since the Gauss-Kronrod trim pieces (MEASURED against
+/// 70-digit references), so the bits are not all the test rests on.
 const CLOSED_FORM_REL: f64 = 1e-9;
 
 fn assert_near_closed_form(v: f64, want: f64) {
@@ -382,13 +382,31 @@ fn cone_pit(k: &mut Kernel, block: Brep) -> Result<Brep> {
 #[test]
 fn cylinders_keep_their_pinned_volumes() {
     let column = column_under_footprint();
-    let v = assert_pinned(cylinder_boss, 8.0, 23528.165527389272, 23528.165493405155, 9);
+    let v = assert_pinned(cylinder_boss, 8.0, 23528.165527389272, 23528.16549340515, 9);
     assert_near_closed_form(v, featured_rounded(true, 8.0) + column);
-    let v = assert_pinned(cylinder_hole, 8.0, 23402.501834781691, 23402.501787261564, 9);
+    let v = assert_pinned(
+        cylinder_hole,
+        8.0,
+        23402.501834781691,
+        23402.501787261564,
+        9,
+    );
     assert_near_closed_form(v, featured_rounded(false, 8.0) + column);
-    let v = assert_pinned(cylinder_boss, 1.9, 24031.843347866372, 24031.843347866372, 9);
+    let v = assert_pinned(
+        cylinder_boss,
+        1.9,
+        24031.843347866372,
+        24031.843347866372,
+        9,
+    );
     assert_near_closed_form(v, featured_rounded(true, 1.9));
-    let v = assert_pinned(cylinder_hole, 1.9, 23906.179641722782, 23906.179641722782, 9);
+    let v = assert_pinned(
+        cylinder_hole,
+        1.9,
+        23906.179641722782,
+        23906.179641722782,
+        9,
+    );
     assert_near_closed_form(v, featured_rounded(false, 1.9));
 }
 
@@ -414,12 +432,12 @@ fn prisms_keep_their_pinned_volumes() {
 fn cones_keep_their_pinned_volumes() {
     // the boss's footprint (radius 2) swept down to the round, as keep features continues a
     // boss's walls along the top's normal
-    let v = assert_pinned(cone_boss, 8.0, 23501.985588609361, 23501.985554625244, 11);
+    let v = assert_pinned(cone_boss, 8.0, 23501.985588609361, 23501.98555462524, 11);
     assert_near_closed_form(
         v,
         rounded_r8() + frustum(2.0, 1.0, 5.0) + column_under_footprint(),
     );
-    let v = assert_pinned(cone_pit, 8.0, 23427.54088905338, 23427.540827906978, 9);
+    let v = assert_pinned(cone_pit, 8.0, 23427.54088905338, 23427.54082790698, 9);
     assert_near_closed_form(v, rounded_r8() - cone_pit_void());
 }
 
@@ -440,7 +458,7 @@ fn a_boss_leaning_past_the_angular_tolerance_is_refused_as_the_fork() {
         boolean_union(k, block, c)
     }
     // its footprint swept down to the round, as the cone boss's
-    let v = assert_pinned(lean_19, 8.0, 23486.591790262424, 23486.591750622647, 11);
+    let v = assert_pinned(lean_19, 8.0, 23486.591790262424, 23486.59175062265, 11);
     assert_near_closed_form(
         v,
         rounded_r8() + frustum(2.0, 1.0, 2.9) + column_under_footprint(),
