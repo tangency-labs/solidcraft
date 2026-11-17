@@ -2619,10 +2619,6 @@ pub fn face_intersect_breps_cached(
     let other_zone_tol = face2::tolerance(ob, other)?;
     let this_zone_tol = face2::tolerance(b, f)?;
     let zone_tol = smos_max(this_zone_tol, other_zone_tol);
-    let is_cone = |s: &crate::surface::surface::Surface| {
-        matches!(s.kind(), crate::surface::surface::SurfaceKind::Cone(_))
-    };
-    let diag_cones = is_cone(surface_of(b, f)?) && is_cone(surface_of(ob, other)?);
 
     let mut curves_3d: Vec<Curve> = Vec::new();
     let mut uv_curves1: Vec<Option<Curve>> = Vec::new();
@@ -2799,17 +2795,6 @@ pub fn face_intersect_breps_cached(
                 *slot = TsectCurveType::Touching;
             }
             ii += 1;
-        }
-    }
-    #[allow(clippy::print_stderr, clippy::disallowed_methods)]
-    if diag_cones {
-        eprintln!("DIAGFF approx {approx_tol_3d} zones {this_zone_tol} {other_zone_tol} edges={curves_are_edges} n={}", curves_3d.len());
-        for (ii, c) in curves_3d.iter().enumerate() {
-            let iv = c.natural_interval();
-            let a = c.evaluate_point(k, iv.min())?;
-            let z = c.evaluate_point(k, iv.max())?;
-            let m = c.evaluate_point(k, 0.5 * (iv.min() + iv.max()))?;
-            eprintln!("DIAGFF  {ii} {:?} {a:?} -> {z:?} mid {m:?} uv1 {} uv2 {}", curve_types.get(ii), uv_curves1.get(ii).is_some_and(Option::is_some), uv_curves2.get(ii).is_some_and(Option::is_some));
         }
     }
     for (ii, curve) in curves_3d.iter().enumerate() {

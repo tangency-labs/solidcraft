@@ -620,21 +620,6 @@ pub(crate) fn finish_proved(
     };
     let outward = if closed { prove(k, &mut b)? } else { None };
     if outward.is_none() {
-        #[allow(clippy::print_stderr, clippy::disallowed_methods)]
-        {
-            eprintln!("DIAGNS closed {closed} faces {} edges {}", b.face_list().len(), b.edge_list().len());
-            eprintln!("DIAGNS shell vertices {}", solidcore::topology::brep::p2::shell_vertices(&b, None)?.len());
-            for &e in b.edge_list() {
-                let n = b.edge(e)?.edgeuses.len();
-                let vs = solidcore::topology::vertex::edge_vertices(&b, e)?;
-                let pts: Vec<_> = vs.iter().flatten().map(|&v| solidcore::topology::vertex::point(&b, v)).collect();
-                eprintln!("DIAGNS  edge {e:?} uses {n} {pts:?}");
-            }
-            for &f in b.face_list() {
-                let bx = solidcore::query::face::p1::calculate_bounding_box(k, &b, f, false);
-                eprintln!("DIAGNS  face {f:?} {bx:?}");
-            }
-        }
         return Ok(Err(Error::NotSolid));
     }
     Ok(Ok((b, outward)))
