@@ -2743,9 +2743,9 @@ mod wr56_certificates {
 /// centre on x = -3.5 at distance 4.5 from the origin, so the round is the torus about the
 /// x axis with major radius sqrt(8) and minor radius 0.5, through the circle x = -4,
 /// rho = sqrt(8) on the plane and the circle on the sphere at 10/9 of the centre circle.
-/// The round face, its contact edge on the sphere and its contact edge on the plane are
-/// each closer to that torus than before (CLOSER, measured against the closed form), and
-/// each lies within its own tolerance of it.
+/// The round face is that torus to rounding on both sides; its contact edges on the plane
+/// and on the sphere are each closer to it than before (CLOSER against the closed form:
+/// 4.8e-12 and 1.5e-6, before 3.5e-11 and 4.1e-6), and each lies within its own tolerance.
 #[cfg(test)]
 mod wr493_certificates {
     use super::{apply, build, RealSolid};
@@ -2848,16 +2848,23 @@ mod wr493_certificates {
              (tol {plane_tol:e}), on sphere {sphere_off:e} (tol {sphere_tol:e})"
         );
 
-        // Before (the refit sphere's rebuilt trims): face 6.66e-5, plane edge 9.09e-9,
-        // sphere edge 6.66e-5 off the torus.
-        let old = [6.659_272_874_603_994e-5, 9.094_153_319_288_978e-9, 6.659_884_231_030_588e-5];
+        // The round face is the torus itself, to rounding (before: 5.1e-15).
+        assert!(face_off <= 1e-13, "{NAME}: face {face_off:e} off the torus");
+        assert!(face_off <= face_tol);
+        // Before (the refit sphere's rebuilt trims), the contact edges were 3.50e-11 (plane)
+        // and 4.13e-6 (sphere) off the torus.
         for (now, before, tol, what) in [
-            (face_off, old[0], face_tol, "face"),
-            (plane_off, old[1], plane_tol, "edge on the plane"),
-            (sphere_off, old[2], sphere_tol, "edge on the sphere"),
+            (plane_off, 3.502_098_611_107_84e-11, plane_tol, "edge on the plane"),
+            (sphere_off, 4.132_889_777_963_555e-6, sphere_tol, "edge on the sphere"),
         ] {
-            assert!(now < before, "{NAME}: {what} {now:e} off the torus, before {before:e}");
-            assert!(now <= tol, "{NAME}: {what} {now:e} off the torus, beyond its tolerance {tol:e}");
+            assert!(
+                now < before,
+                "{NAME}: {what} {now:e} off the torus, before {before:e}"
+            );
+            assert!(
+                now <= tol,
+                "{NAME}: {what} {now:e} off the torus, beyond its tolerance {tol:e}"
+            );
         }
     }
 }
