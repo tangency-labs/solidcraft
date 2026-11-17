@@ -42,7 +42,8 @@
 //!   the status it returns there is non-zero, which its caller reads as `TRUE` (an
 //!   analytic surface was made, though none was added, and skips the Coons patch). The
 //!   port returns `Ok(false)` for those exits, so the caller builds the Coons patch
-//!   (`plan/upstream-issues/WR-254--smfilletcorner-makeanalyticcornersurface-reports-its-ser-ner--dup2.md`). Its fits that fail softly upstream
+//!   (`plan/upstream-issues/WR-254--smfilletcorner-makeanalyticcornersurface-reports-its-ser-ner--dup2.md`);
+//!   an exit that carries no upstream status propagates. Its fits that fail softly upstream
 //!   (`if (SM_SUCCESS != fit(..)) return FALSE;`) are `false`; only
 //!   [`SolidError::Unported`] and [`SolidError::InvalidInput`] propagate from them.
 //!   The fillet solvers are the base [`FilletSolver`]s of [`CornerEnv::solvers`]; a
@@ -900,14 +901,18 @@ impl FilletCorner {
     /// [`SolidError::InvalidInput`] where upstream dereferences `NULL` (a primary edge
     /// use, fillet solver, surface generator, start vertex or intersection curve);
     /// [`SolidError::Unported`] (`MakeConstantRadiusFillet`, unit
-    /// `blend.fillet_corner_p1`).
+    /// `blend.fillet_corner_p1`); [`SolidError::Cancelled`],
+    /// [`SolidError::PortInvariant`], a certificate past its work budget, and every
+    /// error that carries no upstream status (such as [`SolidError::NotFound`] for an
+    /// entity the corner names but the B-reps lack): none is read as a made surface.
     pub fn make_analytic_corner_surface(&mut self, env: &mut CornerEnv<'_>) -> Result<bool> {
         env.with_patch_env(|env| self.make_analytic_corner_surface_with(env))
     }
 
     /// [`FilletCorner::make_analytic_corner_surface`] against any [`CornerPatchEnv`].
     ///
-    /// A failing upstream status is `Ok(false)` (WR-254).
+    /// A failing upstream status is `Ok(false)` (WR-254); every other error is passed
+    /// on.
     ///
     /// # Errors
     /// As [`FilletCorner::make_analytic_corner_surface`].
@@ -917,21 +922,15 @@ impl FilletCorner {
     ) -> Result<bool> {
         match self.analytic_corner_surface(env) {
             Ok(made) => Ok(made),
-            Err(e)
-                if matches!(
-                    e,
-                    SolidError::Unported { .. }
-                        | SolidError::Cancelled { .. }
-                        | SolidError::InvalidInput { .. }
-                        | SolidError::PortInvariant { .. }
-                ) || e.is_not_certified() =>
-            {
-                Err(e)
-            }
             // `return sErr` / `return SM_ERR_NULL_POINTER` as an SmBoolean: no surface
-            // was added, so they read as FALSE (upstream reads TRUE; WR-254).
-            Err(e) if e.upstream_status().is_some() => Ok(false),
-            Err(_) => Ok(true),
+            // was added, so they read as FALSE (upstream reads TRUE; WR-254). A
+            // certificate past its work budget carries a status but is work given up.
+            Err(e) if e.upstream_status().is_some() && !e.is_not_certified() => Ok(false),
+            // `Unported`, `Cancelled`, `InvalidInput`, `PortInvariant`, and every error
+            // whose `upstream_status()` is `None` (`NotFound`, `Degenerate`, ...): no
+            // surface was added either, and none of them is an upstream FALSE to patch
+            // over, so they are passed on.
+            Err(e) => Err(e),
         }
     }
 
@@ -2162,6 +2161,20 @@ mod tests {
         (pseudo, c)
     }
 
+    /// The three-line [`line_chamfer_corner`] whose first edge is a rail-rail
+    /// interpolating arc (a unit circle) with `original_face`.
+    fn arc_chamfer_corner(original_face: Option<FaceId>) -> (FilletBrep, FilletCorner) {
+        let k = Kernel::default();
+        let (mut pseudo, c) = line_chamfer_corner(3);
+        let e = c.edges[0];
+        let circle = Curve::from(create_analytic_circle(&k, Point3::ZERO, 1.0).unwrap());
+        pseudo.brep_mut().edge_mut(e).unwrap().curve = Some(circle);
+        let fe = pseudo.fillet_edge_mut(e).unwrap();
+        fe.set_fillet_edge_type(FilletEdgeType::RailRailInterpolation);
+        fe.set_original_face(original_face);
+        (pseudo, c)
+    }
+
     #[test]
     fn analytic_corner_surface_needs_three_or_four_edges() {
         for n in [2, 5] {
@@ -2203,18 +2216,7 @@ mod tests {
     fn corner_patch_after_a_failing_analytic_exit_refuses_without_a_boundary_curve() {
         use crate::error::blend::BlendFailure;
         use crate::error::SM_ERR_NULL_POINTER;
-        let k = Kernel::default();
-        let arc_chamfer = || {
-            let (mut pseudo, c) = line_chamfer_corner(3);
-            let e = c.edges[0];
-            let circle = Curve::from(create_analytic_circle(&k, Point3::ZERO, 1.0).unwrap());
-            pseudo.brep_mut().edge_mut(e).unwrap().curve = Some(circle);
-            pseudo
-                .fillet_edge_mut(e)
-                .unwrap()
-                .set_fillet_edge_type(FilletEdgeType::RailRailInterpolation);
-            (pseudo, c)
-        };
+        let arc_chamfer = || arc_chamfer_corner(None);
 
         // the chamfer's exit: NER on the missing original face, after the arc's curve
         // was deleted
@@ -2297,6 +2299,36 @@ mod tests {
         pseudo.brep_mut().edge_mut(e).unwrap().curve = Some(circle);
         let r = with_env(&mut pseudo, |env| c.make_analytic_corner_surface(env));
         assert!(matches!(r, Err(SolidError::InvalidInput { .. })), "{r:?}");
+    }
+
+    /// An exit no upstream status stands for is passed on, never read as a made
+    /// surface: here the chamfer's arc names an original face the target does not have
+    /// (`NotFound`), after its curve was deleted to be recomputed. Read as `TRUE`, the
+    /// corner skipped the Coons patch and reported success with no surface and no face.
+    #[test]
+    fn analytic_corner_surface_passes_on_an_exit_without_upstream_status() {
+        let missing_face = FaceId::from_index(u32::MAX);
+        let is_missing_face = |e: &SolidError| match e {
+            SolidError::NotFound { entity, .. } => *entity == EntityRef::Face(missing_face),
+            _ => false,
+        };
+
+        let (mut pseudo, mut c) = arc_chamfer_corner(Some(missing_face));
+        let r = with_env(&mut pseudo, |env| c.make_analytic_corner_surface(env));
+        let e = r.unwrap_err();
+        assert!(is_missing_face(&e), "{e:?}");
+        assert_eq!(e.upstream_status(), None, "{e:?}");
+        assert!(c.surfaces.is_empty());
+        assert!(pseudo.brep().edge(c.edges[0]).unwrap().curve.is_none());
+
+        // the corner patch passes it on too, with no surface and no face
+        let (mut pseudo, mut c) = arc_chamfer_corner(Some(missing_face));
+        c.extended_surface_patch = false;
+        let r = with_env(&mut pseudo, |env| c.create_corner_patch_default(env));
+        let e = r.unwrap_err();
+        assert!(is_missing_face(&e), "{e:?}");
+        assert!(c.surfaces.is_empty());
+        assert!(c.surface_faces.is_empty());
     }
 
     /// A chamfer of three real lines makes one surface, reported `TRUE`, that lies in
