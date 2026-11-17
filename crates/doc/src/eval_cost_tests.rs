@@ -2922,3 +2922,60 @@ fn a_join_of_bodies_that_are_all_apart_runs_no_union() {
     assert_eq!(st.bodies[0].body.lumps().unwrap().len(), 1);
     assert!((kernel::measure(&st.bodies[0].body).unwrap().volume - 20.0).abs() < 1e-9);
 }
+
+/// When an import's background checks end having healed a part, the model takes the healed
+/// body in the import's place: settling marks the import and what follows it stale, the next
+/// evaluation reads the healed body under another fingerprint, and settling the same heal again
+/// changes nothing. Another model of the same design, whose checks healed nothing, keeps the
+/// file's bodies.
+#[test]
+fn an_imports_healed_parts_replace_its_bodies_once_its_checks_end() {
+    let mut doc = placed_imports(1);
+    let later = doc.add_feature(line_sketch(PlaneRef::Origin { name: "XY".into() }, Vec2::new(10.0, 1.0)), None).unwrap();
+    let mut model = Model::new();
+    model.evaluate(&doc);
+    assert!(model.results.iter().all(|r| r.error.is_none()));
+    let volumes = |m: &Model| {
+        let mut v = m.state().bodies.iter().map(|b| b.body.volume_at(1e-6).unwrap().round()).collect::<Vec<_>>();
+        v.sort_by(f64::total_cmp);
+        v
+    };
+    assert_eq!(volumes(&model), [125.0, 1000.0]);
+    let fingerprints = |m: &Model| m.results.iter().map(|r| r.fingerprint).collect::<Vec<_>>();
+    let before = fingerprints(&model);
+    let import = doc.features[0].id;
+    let issue = kernel::ImportIssue {
+        kind: kernel::IssueKind::Repaired,
+        item: Some(1),
+        part: String::new(),
+        faces: 0,
+        times: 1,
+        detail: "healed SMLib's check failures".into(),
+    };
+    let healed = kernel::box_solid(Vec3::ZERO, Vec3::new(3.0, 3.0, 3.0)).unwrap();
+    let face_origin = vec![0; healed.face_count()];
+    let checks = kernel::ImportChecks::ended_for_tests(vec![issue], vec![kernel::HealedBody { index: 0, body: healed, face_origin }]);
+    let r = model.results.iter_mut().find(|r| r.id == import).unwrap();
+    r.import_report = Some(Arc::new(kernel::ImportReport { parts: 2, solids: 2, issues: Vec::new(), checks: checks.clone() }));
+
+    assert!(model.settle_import_checks(), "a heal changes the import");
+    assert!(model.results.iter().all(|r| r.stale), "the import and what follows it are stale");
+    model.evaluate(&doc);
+    assert_eq!(volumes(&model), [27.0, 125.0], "the healed part replaces the file's");
+    let after = fingerprints(&model);
+    assert!(after.iter().zip(&before).all(|(a, b)| a != b), "no result keeps an unhealed fingerprint");
+    assert!(model.result(later).unwrap().error.is_none());
+
+    // The same heal settled again: nothing to do.
+    let r = model.results.iter_mut().find(|r| r.id == import).unwrap();
+    r.import_report = Some(Arc::new(kernel::ImportReport { parts: 2, solids: 2, issues: Vec::new(), checks }));
+    assert!(!model.settle_import_checks());
+    model.evaluate(&doc);
+    assert_eq!(model.last_recomputed, 0);
+    assert_eq!(fingerprints(&model), after);
+
+    let mut other = Model::new();
+    other.evaluate(&doc);
+    assert_eq!(volumes(&other), [125.0, 1000.0], "another model keeps the file's bodies");
+    assert_eq!(fingerprints(&other), before);
+}

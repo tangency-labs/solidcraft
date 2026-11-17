@@ -431,6 +431,14 @@ impl ImportChecks {
         (ImportChecks(Some(Arc::new(Handle(shared.clone())))), shared)
     }
 
+    /// Checks that have ended, finding `issues` and healing `bodies`: for callers' tests, which
+    /// cannot make a file whose part SMLib's check fails.
+    #[doc(hidden)]
+    pub fn ended_for_tests(issues: Vec<ImportIssue>, bodies: Vec<HealedBody>) -> ImportChecks {
+        let heals = (!bodies.is_empty()).then(|| Arc::new(ImportHeals::new(bodies)));
+        ImportChecks::shared(Some(Settled { issues: Arc::new(issues), stopped: false, heals })).0
+    }
+
     /// Checks that have already run, with these outcomes (a read with no threads ran them in its
     /// steps).
     /// The heal of the parts they fail runs here, on this thread.
