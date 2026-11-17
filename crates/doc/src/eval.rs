@@ -10686,7 +10686,7 @@ pub(crate) fn sheet_face_plane_in_frame(doc: &Document, st: &ModelState, comp: u
         }
         PlaneRef::AtAngle { base, axis_origin, axis_dir, angle, line, direction_only, pivot } => PlaneRef::AtAngle {
             base: Box::new(sheet_face_plane_in_frame(doc, st, comp, base)?),
-            axis_origin: *axis_origin,
+            axis_origin: axis_origin.clone(),
             axis_dir: *axis_dir,
             angle: angle.clone(),
             line: line.clone(),
