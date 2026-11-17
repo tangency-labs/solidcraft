@@ -41,6 +41,7 @@ pub mod boolean;
 pub mod cancel;
 pub mod cap;
 pub mod cell_grid;
+pub mod living_hinge;
 pub mod check;
 pub mod contact;
 pub mod continuity;

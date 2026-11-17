@@ -87,6 +87,21 @@ pub struct LivingHingeSpec {
     pub clip: HingeClip,
 }
 
+impl Default for LivingHingeSpec {
+    /// The pattern a new hinge starts from (design 15): 20 mm slots, 3 mm bridges, rows 1.5 mm
+    /// apart, a 0.2 mm kerf, no margin, run-outs at open edges.
+    fn default() -> Self {
+        Self {
+            slot_length: 20.0,
+            bridge: 3.0,
+            row_spacing: 1.5,
+            slot_width: 0.2,
+            margin: 0.0,
+            clip: HingeClip::RunOut,
+        }
+    }
+}
+
 impl LivingHingeSpec {
     /// Checks the sizes: every one finite and within [`MAX_COORD`], the straight part of a slot,
     /// the bridge, the width and the strip between rows at least [`MIN_SIZE`].
