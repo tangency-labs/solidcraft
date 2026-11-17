@@ -3008,6 +3008,89 @@ fn an_import_saved_by_an_older_step_reader_opens_with_its_bodies_in_place() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// #16857: a solid of an inserted STEP file that this reader leaves out takes no other body's
+/// name. The file holds three solids in one product; opened by a reader that can't read the
+/// middle one, the bodies were paired with the stored names by their place among the bodies
+/// read, so the last solid took the middle one's name, the Move after the import failed on the
+/// last name, and saving kept only two names. Bodies are matched by the solid they were read
+/// from: the last solid keeps its name and its move, and the middle solid's name keeps its
+/// slot, so it comes back on that solid once the solid reads again. Checked for a design that
+/// stored each body's STEP item and for one saved before items were stored (0.30.1), which is
+/// matched by the solids' order in the file.
+#[test]
+fn a_solid_left_out_on_opening_keeps_its_name_and_gives_it_to_no_other_body() {
+    use solidcraft_doc::FeatureKind;
+    use solidcraft_doc::kernel::StepNode;
+    let dir = std::env::temp_dir().join(format!("solidcraft-16857-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("abc.step").to_string_lossy().to_string();
+    let mut src = Session::default();
+    for (name, x, height) in [("Alpha", -5, 10), ("Bravo", 15, 20), ("Charlie", 35, 30)] {
+        run(&mut src, "solid.box", json!({"length": 10, "width": 10, "height": height, "corner": [x, -5, 0], "body_name": name}));
+    }
+    run(&mut src, "file.export", json!({"path": path}));
+    let text = std::fs::read_to_string(&path).unwrap();
+    // The same file with Bravo's solid unreadable: its shell is an entity the file doesn't have.
+    let solid = text.find("MANIFOLD_SOLID_BREP('Bravo',#").expect("Bravo is a solid of its own in the file");
+    let shell = solid + "MANIFOLD_SOLID_BREP('Bravo',".len();
+    let end = shell + text[shell..].find(')').unwrap();
+    let broken = format!("{}#999999{}", &text[..shell], &text[end..]);
+
+    let mut s = Session::default();
+    run(&mut s, "file.insert_step", json!({"path": path}));
+    let names: Vec<String> = s.world_state().unwrap().bodies.iter().map(|b| b.name.clone()).collect();
+    assert_eq!(names, ["Alpha", "Bravo", "Charlie"]);
+    run(&mut s, "solid.move", json!({"bodies": ["Charlie"], "translate": [0, 0, 20]}));
+    let charlie = placed_bounds(&s, "Charlie");
+    assert!(about(charlie.min.x, 35.0) && about(charlie.min.z, 20.0) && about(charlie.max.z, 50.0), "{charlie:?}");
+    let alpha = placed_bounds(&s, "Alpha");
+
+    fn strip_items(nodes: &mut [StepNode]) {
+        for n in nodes {
+            n.items.clear();
+            n.left_out.clear();
+            strip_items(&mut n.children);
+        }
+    }
+    for saved_before_items in [false, true] {
+        let mut doc = (*s.doc).clone();
+        let f = doc.features.iter_mut().find(|f| matches!(f.kind, FeatureKind::Import { .. })).unwrap();
+        if let FeatureKind::Import { step, components, .. } = &mut f.kind {
+            assert!(components.iter().all(|n| n.items.len() == n.bodies.len()), "the insert stores each body's item: {components:?}");
+            if saved_before_items {
+                strip_items(components);
+            }
+            *step = broken.as_str().into();
+        }
+        let opened = Session::opened(doc, None);
+        let what = if saved_before_items { "saved before items" } else { "with items" };
+        let now: Vec<String> = opened.world_state().unwrap().bodies.iter().map(|b| b.name.clone()).collect();
+        assert_eq!(now, ["Alpha", "Charlie"], "{what}");
+        let errors: Vec<_> = opened.model.results.iter().filter_map(|r| r.error.clone()).collect();
+        assert!(errors.is_empty(), "{what}: the Move finds Charlie: {errors:?}");
+        assert!(shifted(alpha, placed_bounds(&opened, "Alpha"), [0.0; 3]), "{what}");
+        let got = placed_bounds(&opened, "Charlie");
+        assert!(shifted(charlie, got, [0.0; 3]), "{what}: Charlie opened at {got:?}, was at {charlie:?}");
+        // Bravo's name stays in the feature, after the bodies the file gives now.
+        let f = opened.doc.features.iter().find(|f| matches!(f.kind, FeatureKind::Import { .. })).unwrap();
+        assert_eq!(f.body_names, ["Alpha", "Charlie", "Bravo"], "{what}");
+
+        // Saved as it is and read by a reader that reads Bravo again: each solid has its name.
+        let mut again = (*opened.doc).clone();
+        let f = again.features.iter_mut().find(|f| matches!(f.kind, FeatureKind::Import { .. })).unwrap();
+        if let FeatureKind::Import { step, .. } = &mut f.kind {
+            *step = text.as_str().into();
+        }
+        let back = Session::opened(again, None);
+        let now: Vec<String> = back.world_state().unwrap().bodies.iter().map(|b| b.name.clone()).collect();
+        assert_eq!(now, ["Alpha", "Bravo", "Charlie"], "{what}");
+        let bravo = placed_bounds(&back, "Bravo");
+        assert!(about(bravo.min.x, 15.0) && about(bravo.max.z, 20.0), "{what}: {bravo:?}");
+        assert!(shifted(charlie, placed_bounds(&back, "Charlie"), [0.0; 3]), "{what}");
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 /// A 20 × 30 × 8 plate made in its own component and stood up by its placement (turned
 /// `angle` degrees about X), the way an imported part set upright is: in the world it lies
 /// flat at `x0`..`x0 + 20`, y 0..30, z 0..8. The design is active again afterwards.

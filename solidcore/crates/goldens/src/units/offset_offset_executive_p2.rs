@@ -350,6 +350,7 @@ fn volume_pair(kernel: &Kernel, brep: Option<&mut Brep>) -> RResult<[f64; 2]> {
         store: &store,
         key_of: &|_| ObjectKey(0),
     };
+    crate::dump::body(kernel, "volume", brep);
     let (status, volume) = operation(brep_volume(kernel, brep, VOLUME_ACCURACY, &attributes))?;
     Ok([f64::from(status), volume.unwrap_or(0.0)])
 }
@@ -2903,6 +2904,27 @@ mod tests {
             assert!(near(g[2], 0.0) && near(g[5], 0.0), "{name}: {g:?}");
             assert!(near(g[3], d) && near(g[6], 4.0 - d), "{name}: {g:?}");
         }
+    }
+
+    /// A refused shell hands the kernel back with `doing_boolean` as it came. The inset of
+    /// the 2 x 3 plane sheet by exactly two tolerances reaches the Boolean difference, whose
+    /// passed-on status refuses it (1001); the difference's error exits leave the flag set,
+    /// and `OffsetExecutive::shell_brep` restores it (review of #16956).
+    #[test]
+    fn refused_shell_restores_doing_boolean() {
+        let context = CaseContext {
+            root: repo_root(),
+            seeds: 0,
+        };
+        let fixtures = context.fixture_cases(Runner.id()).unwrap();
+        let case = fixtures
+            .iter()
+            .find(|case| case.name == "shell_boundary_negative_exactly_two_tol")
+            .unwrap();
+        let output = Runner.run_rust(case).unwrap();
+        assert_eq!(output.ints["status"], [1001]);
+        assert_eq!(output.ints["result.present"], [0]);
+        assert_eq!(output.ints["doing_boolean"], [0, 0]);
     }
 
     /// WR-564 (planar side walls, always on): every case whose golden row the change

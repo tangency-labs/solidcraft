@@ -83,11 +83,11 @@
 //!   `Kernel::fixes.join_touching_loops`): `create_plane_with_3d_curves`
 //!   joins a loop touching another loop of its face at a vertex into that loop
 //!   (`join_touching_loops`, the SolidCraft fork's `JoinTouchingLoops`).
-//! - **`IsParallelToVector`** (WR-39, #2145, opt-in
-//!   `Kernel::fixes.surface_parallel_to_vector_checks`): [`Surface::is_parallel_to_vector`]
-//!   forwards `k` to [`BSplineSurface::is_parallel_to_vector_with_kernel`] and
-//!   [`Plane::is_parallel_to_vector_with_kernel`] for every `SmBSplineSurface`-derived
-//!   kind (`BSpline`, `Plane`, `Cone`, `SurfOfRevolution`, `SurfOfExtrusion`, `Sphere`,
+//! - **`IsParallelToVector`** (WR-39, #2145): [`Surface::is_parallel_to_vector`] is
+//!   `false` for a vector that cannot be unitised and tests the control net against the
+//!   chord direction ([`BSplineSurface::is_parallel_to_vector`],
+//!   [`Plane::is_parallel_to_vector`]) for every `SmBSplineSurface`-derived kind
+//!   (`BSpline`, `Plane`, `Cone`, `SurfOfRevolution`, `SurfOfExtrusion`, `Sphere`,
 //!   `Torus`).
 //! - **Edit notifications.** `SwapUV`'s `Notify` calls (`SetCanonical`'s for the
 //!   kinds built on `SmBSplineSurface`, `SmSrfInVolume`'s own) need a context and an
@@ -2633,18 +2633,18 @@ impl Surface {
             | SurfaceKind::Step(_)
             | SurfaceKind::OffsetSurface(_)
             | SurfaceKind::SrfInVolume(_) => return Ok(base_is_parallel_to_vector()),
-            SurfaceKind::Plane(s) => return Ok(s.is_parallel_to_vector_with_kernel(k, vector)),
+            SurfaceKind::Plane(s) => return Ok(s.is_parallel_to_vector(vector)),
             // (not a plane: the SmBSplineSurface net test)
             SurfaceKind::Cone(s) => s.rev().base(),
             SurfaceKind::SurfOfRevolution(s) => s.base(),
             SurfaceKind::SurfOfExtrusion(s) => {
                 let b = s.base_with_nurb_or_base(k)?;
-                return b.is_parallel_to_vector_with_kernel(k, vector);
+                return b.is_parallel_to_vector(vector);
             }
             SurfaceKind::Sphere(s) => s.base().base(),
             SurfaceKind::Torus(s) => s.base().base(),
         };
-        bspline.is_parallel_to_vector_with_kernel(k, vector)
+        bspline.is_parallel_to_vector(vector)
     }
 
     /// The unique knots in `param`'s direction and their multiplicities, optionally
@@ -2856,9 +2856,7 @@ impl Surface {
 
     /// Whether an analytic [`Self::step_inversion`] answered
     /// (`SmSurface::STEPInversionAnswered`, the SolidCraft fork's tangency-labs/smlib
-    /// dfc7cb6): it succeeded, or, with
-    /// [`UpstreamFixes::analytic_inversion_answers_apart`](crate::kernel::UpstreamFixes::analytic_inversion_answers_apart),
-    /// returned `SM_ERR_NOT_WITHIN_TOLERANCE` (the point is off the surface) or
+    /// dfc7cb6): it succeeded, or returned `SM_ERR_NOT_WITHIN_TOLERANCE` (the point is off the surface) or
     /// `SM_ERR_OUTSIDE_OF_DOMAIN` (outside a surface of revolution's sweep). Any other
     /// status is a failure.
     #[must_use]
@@ -2920,9 +2918,7 @@ impl Surface {
                 .step_inversion(k, point_on_surf, tol_3d, uv_guess)
                 .map_err(|e| {
                     // the fork (dfc7cb6): off the generator is an answer
-                    if k.fixes.analytic_inversion_answers_apart
-                        && crate::surface::surf_of_revolution::p2::is_off_generator(&e)
-                    {
+                    if crate::surface::surf_of_revolution::p2::is_off_generator(&e) {
                         crate::surface::surf_of_revolution::p2::not_within_tolerance(
                             "surface::surface::Surface::step_inversion",
                         )
@@ -2933,18 +2929,13 @@ impl Surface {
                 .and_then(|r| {
                     if r.inside {
                         Ok((r.uv, r.location))
-                    } else if k.fixes.analytic_inversion_answers_apart {
+                    } else {
                         // the fork (dfc7cb6): outside the sweep is an answer
                         Err(SolidError::surface(
                             "surface::surface::Surface::step_inversion",
                             SurfaceFailure::OutsideDomain(
                                 "the point is outside the sweep of the surface of revolution",
                             ),
-                        ))
-                    } else {
-                        Err(SolidError::surface_failed(
-                            "surface::surface::Surface::step_inversion",
-                            "the point is outside the sweep of the surface of revolution",
                         ))
                     }
                 }),
@@ -2959,7 +2950,7 @@ impl Surface {
                 let r = s.step_inversion(anal_domain, point_on_surf, tol_3d, uv_guess);
                 if r.on_surface {
                     Ok((r.uv, r.location))
-                } else if k.fixes.analytic_inversion_answers_apart && r.answered {
+                } else if r.answered {
                     // the fork (dfc7cb6): a point off the sphere is an answer
                     Err(SolidError::surface(
                         "surface::surface::Surface::step_inversion",
@@ -3949,11 +3940,8 @@ impl Surface {
             OFFSET_SURFACE_TYPE => Ok(Self::from(OffsetSurface::read_from_db(k, db, version)?)),
             SRF_IN_VOLUME_TYPE => Ok(Self::from(SrfInVolume::read_from_db(k, db, version)?)),
             STEP_SURFACE_TYPE => Ok(Self::from(StepSurface::read_from_db(k, db, version)?)),
-            // the fork's SmProceduralBlend (014f66f), read only with its flag: the pinned
-            // reader refuses the type
-            PROCEDURAL_BLEND_TYPE if k.fixes.fillet_round_as_definition => {
-                Ok(Self::from(ProceduralBlend::read_from_db(k, db, version)?))
-            }
+            // the fork's SmProceduralBlend (014f66f), which the pinned reader refuses
+            PROCEDURAL_BLEND_TYPE => Ok(Self::from(ProceduralBlend::read_from_db(k, db, version)?)),
             // the fork's SmBallPatch (f8e6709), which the pinned reader refuses
             BALL_PATCH_TYPE => Ok(Self::from(BallPatch::read_from_db(db, version)?)),
             _ => Err(SolidError::surface_failed(
