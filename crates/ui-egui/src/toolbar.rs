@@ -1164,11 +1164,9 @@ impl PluginGroup {
         if !open {
             return None;
         }
-        let area = Container::new(ui.ctx(), Surface::Popup)
-            .area(id)
-            .fixed_pos(group.label.left_bottom())
-            .order(egui::Order::Foreground)
-            .show(ui.ctx(), |ui| {
+        let area = Container::new(ui.ctx(), Surface::Popup).area(id).fixed_pos(group.label.left_bottom()).order(egui::Order::Foreground).show(
+            ui.ctx(),
+            |ui| {
                 crate::ui_kit::Menu::show_frame(ui, crate::ui_kit::Menu::frame(), |ui| {
                     ui.spacing_mut().item_spacing.y = 0.0;
                     ui.set_min_width(240.0);
@@ -1176,10 +1174,15 @@ impl PluginGroup {
                     egui::ScrollArea::vertical().id_salt("plugin_pin_rows").max_height(room).show(ui, |ui| {
                         for b in &self.all {
                             let entry = ribbon::MenuEntry {
-                                id: &b.id, label: &b.label, icon: &b.icon, shortcut: "",
-                                enabled: true, checked: None,
+                                id: &b.id,
+                                label: &b.label,
+                                icon: &b.icon,
+                                shortcut: "",
+                                enabled: true,
+                                checked: None,
                                 pinned: app.toolbar_custom.plugin_pinned(&b.id),
-                                tip: Some(ribbon::RowTip::Plain(&b.name)), app_paints: false,
+                                tip: Some(ribbon::RowTip::Plain(&b.name)),
+                                app_paints: false,
                             };
                             match ribbon::menu_row(ui, &entry, 240.0, None, &menu_style(app)).0 {
                                 Some(ribbon::MenuAction::TogglePin) => app.toolbar_custom.toggle_plugin_pin(&b.id),
@@ -1193,10 +1196,9 @@ impl PluginGroup {
                     });
                     ribbon::section_footer(ui, solidcraft_ui_text::tr("ui.ribbon_pin_footer"));
                 });
-            });
-        if (area.response.clicked_elsewhere() && !group.label_response.clicked())
-            || ui.input(|i| i.key_pressed(egui::Key::Escape))
-        {
+            },
+        );
+        if (area.response.clicked_elsewhere() && !group.label_response.clicked()) || ui.input(|i| i.key_pressed(egui::Key::Escape)) {
             ui.ctx().data_mut(|d| d.remove::<egui::Id>(egui::Id::unique("sc_panel_open")));
         }
         Some((id, area.response.rect))
@@ -4605,13 +4607,18 @@ mod app_bar_tests {
         let package = root.join("toolbox");
         std::fs::create_dir_all(&package).unwrap();
         std::fs::write(package.join("entry.wasm"), []).unwrap();
-        std::fs::write(package.join("plugin.json"), json!({
-            "id":"toolbox", "name":"Toolbox", "version":"1.0", "capabilities":["commands@0.1"],
-            "runtime":{"module":"entry.wasm","commands":[],"entries":[
-                {"name":"one","effect":"read"},
-                {"name":"two","effect":"read"}
-            ]}
-        }).to_string()).unwrap();
+        std::fs::write(
+            package.join("plugin.json"),
+            json!({
+                "id":"toolbox", "name":"Toolbox", "version":"1.0", "capabilities":["commands@0.1"],
+                "runtime":{"module":"entry.wasm","commands":[],"entries":[
+                    {"name":"one","effect":"read"},
+                    {"name":"two","effect":"read"}
+                ]}
+            })
+            .to_string(),
+        )
+        .unwrap();
         h.app.session.plugin_state.plugins_dir = Some(root);
         crate::plugin_menu::refresh(&mut h.app);
         let first = "plugin_entry:toolbox:one";
@@ -4622,8 +4629,10 @@ mod app_bar_tests {
             crate::test_support::frame(&h.ctx, egui::RawInput::default(), |ui| {
                 let data = RibbonPanels::new(&h.app, ui, "MODEL", &[], ui.painter(), None);
                 let plugin = data.plugins.as_ref().expect("plugins stay accessible on the Model tab");
-                result = Some((plugin.buttons.iter().map(|b| b.id.clone()).collect::<Vec<_>>(),
-                    plugin.all.iter().map(|b| b.id.clone()).collect::<Vec<_>>()));
+                result = Some((
+                    plugin.buttons.iter().map(|b| b.id.clone()).collect::<Vec<_>>(),
+                    plugin.all.iter().map(|b| b.id.clone()).collect::<Vec<_>>(),
+                ));
             });
             result.unwrap()
         };
