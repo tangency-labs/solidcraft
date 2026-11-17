@@ -1674,6 +1674,19 @@ fn select_parallel_edges_takes_a_box_edges_four_parallels_and_refuses_a_curved_e
     assert_eq!(history, (s.undo.len(), s.redo.len()));
 }
 
+/// #18096: a polyline edge is straight only when every point of it is on one line: one that bends
+/// by a tenth of a micron per millimetre is not, though each piece is within the parallel angle.
+#[test]
+fn a_bent_polyline_is_not_a_straight_edge() {
+    use crate::kernel::PathSeg;
+    let p = |x: f64, y: f64| Vec3::new(x, y, 0.0);
+    let line = |a, b| PathSeg::Line { a, b };
+    let bent = [line(p(0.0, 0.0), p(1.0, 0.0001)), line(p(1.0, 0.0001), p(2.0, 0.0))];
+    assert_eq!(super::straight_path(&bent, 1e-6), None);
+    let straight = [line(p(0.0, 0.0), p(1.0, 0.0)), line(p(1.0, 0.0), p(2.0, 0.0))];
+    assert_eq!(super::straight_path(&straight, 1e-6), Some((p(0.0, 0.0), p(2.0, 0.0))));
+}
+
 /// A body changed by a few hundred features in a row whose names nothing asks for, then
 /// filleted: reordering or moving an earlier feature evaluates them all again, and the fillet
 /// finds its edge by the names of the body before it, which are worked out from the body before
@@ -2480,6 +2493,45 @@ fn sketch_entities_name_their_sketch() {
     assert_eq!(it["entity"], "midpoint", "{it}");
     assert!(close3(&it["position"], [7.0, 7.0, 0.0]), "{it}");
     assert_eq!(it["sketch"], json!(s.active_sketch.unwrap()), "{it}");
+}
+
+/// #18233: Select All takes every shown body; in an open sketch, every curve of the sketch
+/// (construction ones too) and its points on no curve, not projected geometry or the origin.
+/// It replaces the selection and is no undo step.
+#[test]
+fn select_all_takes_the_shown_bodies_or_the_open_sketchs_own_geometry() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"body_name": "Block", "corner": [0, 0, 0], "length": 10, "width": 10, "height": 10}));
+    run(&mut s, "solid.box", json!({"body_name": "Spare", "corner": [30, 0, 0], "length": 5, "width": 5, "height": 5}));
+    run(&mut s, "solid.box", json!({"body_name": "Stowed", "corner": [60, 0, 0], "length": 5, "width": 5, "height": 5}));
+    run(&mut s, "browser.visibility", json!({"items": ["Stowed"], "visible": false}));
+    run(&mut s, "select.set", json!({"items": [{"type": "face", "body": "Block", "index": 0}]}));
+    let undo = s.undo.len();
+    assert_eq!(run(&mut s, "select.all", json!({}))["selected"], 2);
+    assert_eq!(s.selection, ["Block", "Spare"].map(|name| Sel::Body { name: name.into() }));
+    assert_eq!(s.undo.len(), undo, "no undo step");
+
+    run(&mut s, "sketch.create", json!({"plane": "XY"}));
+    run(&mut s, "sketch.project", json!({"refs": [{"edge": [5, 0, 0], "body": "Block"}]}));
+    run(&mut s, "sketch.line", json!({"points": [[20, 20], [40, 20]], "ids": ["rail"], "connect": false}));
+    run(&mut s, "sketch.line", json!({"points": [[20, 30], [40, 30]], "ids": ["guide"], "construction": true, "connect": false}));
+    run(&mut s, "sketch.point", json!({"point": [50, 50], "id": "pin", "connect": false}));
+    let undo = s.undo.len();
+    let doc = s.doc.to_json();
+    assert_eq!(run(&mut s, "select.all", json!({}))["selected"], 3);
+    let mut got: Vec<String> = s.selection.iter().map(|x| format!("{x:?}")).collect();
+    got.sort();
+    let mut want: Vec<String> = [
+        Sel::SketchCurve { id: "guide".into(), sketch: None },
+        Sel::SketchCurve { id: "rail".into(), sketch: None },
+        Sel::SketchPoint { id: "pin".into() },
+    ]
+    .iter()
+    .map(|x| format!("{x:?}"))
+    .collect();
+    want.sort();
+    assert_eq!(got, want, "the projected edge and the origin stay out");
+    assert_eq!((s.doc.to_json(), s.undo.len()), (doc, undo), "selecting edits nothing");
 }
 
 #[test]

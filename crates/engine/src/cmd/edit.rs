@@ -18,8 +18,8 @@ use crate::schema::edit::{
     TimelineUngroupParams, TimelineUngrouped,
 };
 use crate::schema::select::{
-    ParallelEdgesParams, PartialPick, SameLookParams, SelectClearParams, SelectClearResult, SelectFilterParams, SelectFilterResult, SelectItem,
-    SelectMode, SelectSetParams, SelectSetResult, read_item,
+    ParallelEdgesParams, PartialPick, SameLookParams, SelectAllParams, SelectClearParams, SelectClearResult, SelectFilterParams, SelectFilterResult,
+    SelectItem, SelectMode, SelectSetParams, SelectSetResult, read_item,
 };
 use crate::schema::{TypedContract, output_schema_for};
 use crate::{EngineError, Result, Sel, Session, Snapshot};
@@ -236,11 +236,18 @@ pub static COMMANDS: &[CommandSpec] = &[
         .contract(&PARALLEL_EDGES_CONTRACT)
         .output(output_schema_for::<SelectSetResult>)
         .params("body?: solid body name, edge?: edge index; both default to the selected edge → selects the body's straight edges parallel to that straight edge (exact lines)"),
+    CommandSpec::new("select.all", "Select All", crate::checked!("select.all", select_all))
+        .icon("select")
+        .key("Ctrl+A")
+        .noundo()
+        .contract(&SELECT_ALL_CONTRACT)
+        .output(output_schema_for::<SelectSetResult>),
 ];
 
 const SELECT_SET_CONTRACT: TypedContract<SelectSetParams> = TypedContract::new();
 const SELECT_FILTER_CONTRACT: TypedContract<SelectFilterParams> = TypedContract::new();
 const SELECT_CLEAR_CONTRACT: TypedContract<SelectClearParams> = TypedContract::new();
+const SELECT_ALL_CONTRACT: TypedContract<SelectAllParams> = TypedContract::new();
 const SAME_LOOK_CONTRACT: TypedContract<SameLookParams> = TypedContract::new();
 const PARALLEL_EDGES_CONTRACT: TypedContract<ParallelEdgesParams> = TypedContract::new();
 const COMPUTE_ALL_CONTRACT: TypedContract<TimelineComputeAllParams> = TypedContract::new();
@@ -955,14 +962,15 @@ fn feature_ids(s: &Session, p: &Value, cmd: &str) -> Result<Vec<u64>> {
 /// renamed (#1109). The suppressed feature keeps its own too: the counter passes the names of
 /// suppressed features by, so a body made meanwhile does not take `Body1` and lose it again when
 /// the feature is back.
-fn counted_names_from(s: &Session, ids: &[u64]) -> Vec<(u64, Vec<String>)> {
+fn counted_names_from(s: &Session, ids: &[u64]) -> Vec<(u64, Vec<String>, Vec<usize>)> {
     let made = |f: &Feature| -> Vec<String> {
         s.model.result(f.id).map(|r| r.state.bodies.iter().filter(|b| b.feature == f.id).map(|b| b.name.clone()).collect()).unwrap_or_default()
     };
     let makes_counted = |f: &Feature| (0..made(f).len()).any(|i| super::browser::counted(f, i));
     let first = s.doc.features.iter().position(|f| ids.contains(&f.id) && !f.suppressed && makes_counted(f));
     let Some(at) = first else { return Vec::new() };
-    s.doc.features.iter().skip(at).filter(|f| makes_counted(f)).map(|f| (f.id, made(f))).collect()
+    let left_out = |f: &Feature| s.model.result(f.id).map(|r| r.state.pattern_left_out(f.id).to_vec()).unwrap_or_default();
+    s.doc.features.iter().skip(at).filter(|f| makes_counted(f)).map(|f| (f.id, made(f), left_out(f))).collect()
 }
 
 fn suppress(s: &mut Session, p: &Value) -> Result<Value> {
@@ -989,9 +997,9 @@ fn suppress(s: &mut Session, p: &Value) -> Result<Value> {
     let keep = if want { counted_names_from(s, &ids) } else { Vec::new() };
     // One command, so one undo step however many features it changes.
     let doc = s.doc_mut();
-    for (id, made) in &keep {
+    for (id, made, left_out) in &keep {
         if let Some(f) = doc.feature_mut(*id) {
-            f.pin_body_names(made);
+            f.pin_body_names(made, left_out);
         }
     }
     for id in &ids {
@@ -1691,11 +1699,19 @@ fn select_same_look(s: &mut Session, p: &Value) -> Result<Value> {
 /// of a degree.
 const PARALLEL: f64 = 0.01 * std::f64::consts::PI / 180.0;
 
-/// The ends of edge `edge` of `rec` when its exact curve is one straight line (pieces that all
-/// run along one line count), from its start to its end; `None` for a curved or degenerate edge.
+/// The ends of edge `edge` of `rec` when its exact curve is one straight line, from its start to
+/// its end; `None` for a curved or degenerate edge ([`straight_path`]).
 fn straight_edge(rec: &solidcore_record::brep::Brep, edge: usize) -> Option<(solidcore_record::Vec3, solidcore_record::Vec3)> {
     let e = rec.edges.get(edge)?;
     let path = crate::kernel::curve_path(e.parameters(), e.interval).ok()?;
+    straight_path(&path, rec.tolerance.max(1e-9))
+}
+
+/// The ends of `path` when it is one straight line: line pieces only, every one of whose ends lies
+/// within `tolerance` of the line through the path's first and last point. A polyline that bends,
+/// however little, by more than that is not straight; how parallel two straight edges must be is
+/// [`PARALLEL`]'s business, not this one's.
+fn straight_path(path: &[crate::kernel::PathSeg], tolerance: f64) -> Option<(solidcore_record::Vec3, solidcore_record::Vec3)> {
     let ends = |seg: &crate::kernel::PathSeg| match seg {
         crate::kernel::PathSeg::Line { a, b } => Some((*a, *b)),
         _ => None,
@@ -1706,10 +1722,8 @@ fn straight_edge(rec: &solidcore_record::brep::Brep, edge: usize) -> Option<(sol
         return None;
     }
     let along = (end - start).normalized()?;
-    let on_line = |(a, b): (solidcore_record::Vec3, solidcore_record::Vec3)| {
-        (b - a).len() <= 1e-12 || (b - a).normalized().is_some_and(|d| d.cross(along).len() <= PARALLEL.sin())
-    };
-    path.iter().all(|seg| ends(seg).is_some_and(on_line)).then_some((start, end))
+    let on_line = |q: solidcore_record::Vec3| (q - start).cross(along).len() <= tolerance;
+    path.iter().all(|seg| ends(seg).is_some_and(|(a, b)| on_line(a) && on_line(b))).then_some((start, end))
 }
 
 fn select_parallel_edges(s: &mut Session, p: &Value) -> Result<Value> {
@@ -1748,6 +1762,39 @@ fn select_parallel_edges(s: &mut Session, p: &Value) -> Result<Value> {
         })
         .collect();
     select_set(s, &json!({"items": items}))
+}
+
+/// In an open sketch, every curve of it (construction ones too) and every point of it on no
+/// curve, leaving out its origin and projected geometry; outside a sketch, every shown body.
+fn select_all(s: &mut Session, _p: &Value) -> Result<Value> {
+    let all: Vec<Sel> = match s.active_sketch {
+        Some(id) => {
+            let sk = super::sketch_store::read(&s.doc, id)?;
+            let own = sk.curves.iter().filter(|c| c.link.is_none());
+            let on_curve = |q: usize| own.clone().any(|c| c.kind.uses(q));
+            own.clone()
+                .map(|c| Sel::SketchCurve { id: c.id.clone(), sketch: None })
+                .chain(
+                    sk.points
+                        .iter()
+                        .enumerate()
+                        .filter(|(q, p)| p.link.is_none() && p.id != "origin" && !on_curve(*q))
+                        .map(|(_, p)| Sel::SketchPoint { id: p.id.clone() }),
+                )
+                .take(10_001)
+                .collect()
+        }
+        None => {
+            let hidden = &s.visibility.hidden_bodies;
+            s.world_state()?.bodies.iter().filter(|b| !hidden.contains(&b.name)).take(10_001).map(|b| Sel::Body { name: b.name.clone() }).collect()
+        }
+    };
+    if all.len() > 10_000 {
+        return Err(bad("select.all", "too many items"));
+    }
+    s.selection = all;
+    s.refresh_display();
+    reply("select.all", SelectSetResult { selected: s.selection.len(), param_warnings: Vec::new() })
 }
 
 fn select_clear(s: &mut Session, _p: &Value) -> Result<Value> {

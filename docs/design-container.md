@@ -126,8 +126,9 @@ the final state fits.
 
 The model is the whole evaluation: every feature's result (warning, boolean
 diagnostics, whether it was skipped, its fingerprint) and the state after it
-(bodies, solved sketches, construction geometry, sheet metal bodies, threads and
-the blend records later features read), and the body check mode it was evaluated
+(bodies, solved sketches, construction geometry, sheet metal bodies, threads,
+the blend records later features read, and the bodies each body pattern left out,
+whose copies keep their stored names), and the body check mode it was evaluated
 under (`each_step`, `each_feature` or `off`): a design opened under another mode is
 evaluated again. A body made by constant-radius rounds is recorded with the edges they
 rounded and their radii, and the body they were made on (stored like any other body,
