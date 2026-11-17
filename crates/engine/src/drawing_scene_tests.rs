@@ -4069,6 +4069,71 @@ fn sheet_sketch_provider_keeps_mixed_paper_order_and_reuses_view_moves_and_edito
     assert_eq!((s.drawing_scenes.projections, s.drawing_scenes.sketch_solves), counts);
 }
 
+/// A view's sketch is in model millimetres in the view's plane (#5425). On paper it is drawn through
+/// its view: at the view's scale, with the view's line width, where the view puts that plane, over
+/// the view's lines. Moving or rescaling the view takes the sketch with it, solving nothing again.
+#[test]
+fn a_views_sketch_is_drawn_through_its_view_and_goes_with_it_without_solving_again() {
+    let (mut s, sheet, [front, _]) = front_and_top();
+    let made = run(&mut s, "drawing.sketch.create", json!({"owner":ids::encode(front)}));
+    assert_eq!((made["sheet"].as_str(), made["view"].as_str()), (Some(&*ids::encode(sheet)), Some(&*ids::encode(front))));
+    let id = ids::decode(made["sketch"].as_str().unwrap()).unwrap();
+    run(&mut s, "sketch.line", json!({"points":[[0,0],[50,0]],"infer":false}));
+    run(&mut s, "sketch.finish", json!({}));
+    // Where the view puts its plane's origin: its frame's map, then its centre, as its dimensions go.
+    let placed = |s: &mut Session| {
+        let shown = settled(s, sheet);
+        assert_eq!(bytes(&shown.scene), bytes(&built(s, sheet).scene));
+        let d = s.drawing("test").unwrap().clone();
+        let centre = views_on(&d, sheet).unwrap().into_iter().find(|(view, ..)| *view == front).unwrap().2;
+        let origin = s.drawing_scenes.views[&front].drawn.frame.unwrap().paper_map().apply(Vec2::ZERO) + centre;
+        let (path, _, width) = stroke_path(&cached_sketch_group(&shown.scene, id).items[0]);
+        let order: Vec<_> = shown.scene.groups.iter().map(|group| (group.object, group.kind)).collect();
+        let at = |one| order.iter().position(|o| *o == one).unwrap();
+        assert!(at((id, ObjectKind::Sketch)) > at((front, ObjectKind::View)), "over its view's lines");
+        (path[0].start().dist(origin), path[0].length(), width)
+    };
+    let (off, length, width) = placed(&mut s);
+    assert!(off < 1e-9 && (length - 25.0).abs() < 1e-9, "50 mm at 1:2 is 25 mm, from the plane's origin: {off} {length}");
+    let line_group = s.drawing("test").unwrap().resolve_view(front).unwrap().line_group.value;
+    assert_eq!(width, LineKind::Visible.width_mm(line_group), "a paper width, not scaled");
+    let solves = s.drawing_scenes.sketch_solves;
+    run(&mut s, "drawing.view.edit", json!({"view":ids::encode(front),"set":{"place":{"at":[200,160]}}}));
+    let (off, length, _) = placed(&mut s);
+    assert!(off < 1e-9 && (length - 25.0).abs() < 1e-9, "with its view: {off} {length}");
+    run(&mut s, "drawing.view.edit", json!({"view":ids::encode(front),"set":{"scale":"1:1"}}));
+    let (off, length, _) = placed(&mut s);
+    assert!(off < 1e-9 && (length - 50.0).abs() < 1e-9, "at its new scale: {off} {length}");
+    assert_eq!(s.drawing_scenes.sketch_solves, solves, "a move or a new scale solves nothing again");
+}
+
+/// A view's sketch whose view isn't drawn on the sheet says so; the sheet's own sketch still draws.
+#[test]
+fn a_views_sketch_whose_view_isnt_drawn_says_so_and_the_sheets_own_still_draws() {
+    let (s, sheet, _) = front_and_top();
+    let d = s.drawing("test").unwrap();
+    let record = d.sheets.iter().find(|record| record.id == sheet).unwrap();
+    let stroke = |id| Group {
+        object: id,
+        kind: ObjectKind::Sketch,
+        items: vec![Item::Stroke {
+            path: vec![Seg2::Line { a: Vec2::new(10.0, 10.0), b: Vec2::new(20.0, 10.0) }],
+            closed: false,
+            width_mm: 0.5,
+            pattern: None,
+        }],
+    };
+    let sketches = [
+        DrawnSketch { group: Some(stroke(101)), status: SketchStatus::Drawn, view: Some(10) },
+        DrawnSketch { group: Some(stroke(102)), status: SketchStatus::Drawn, view: None },
+    ];
+    let drawn = sketches.iter().enumerate().map(|(i, drawn)| (101 + i as u64, drawn));
+    let (scene, _, _, states) = assemble_with_sketches(record, Projection::Third, &[], std::iter::empty::<(u64, Vec2, Drawn)>(), drawn).unwrap();
+    assert!(matches!(&states[0].status, SketchStatus::Failed(why) if why.contains(NOT_DRAWN)), "{:?}", states[0].status);
+    assert_eq!(states[1].status, SketchStatus::Drawn);
+    assert_eq!(scene.groups.iter().filter(|group| group.kind == ObjectKind::Sketch).map(|group| group.object).collect::<Vec<_>>(), [102]);
+}
+
 #[test]
 fn sheet_sketch_provider_reuses_sheets_and_retires_deleted_undone_and_closed_owners() {
     let (mut s, drawing, first) = stroke_editor();
@@ -4220,8 +4285,8 @@ fn sheet_sketch_assembly_budget_names_only_the_excluded_sketch_and_can_recover()
         why: None,
     };
     let sketches = [
-        DrawnSketch { group: Some(group(101, ObjectKind::Sketch, 10)), status: SketchStatus::Drawn },
-        DrawnSketch { group: Some(group(102, ObjectKind::Sketch, 8)), status: SketchStatus::Drawn },
+        DrawnSketch { group: Some(group(101, ObjectKind::Sketch, 10)), status: SketchStatus::Drawn, view: None },
+        DrawnSketch { group: Some(group(102, ObjectKind::Sketch, 8)), status: SketchStatus::Drawn, view: None },
     ];
     let drawn = || sketches.iter().enumerate().map(|(i, drawn)| (101 + i as u64, drawn));
     let (scene, views, _, states) =

@@ -35,6 +35,16 @@ pub enum Owner {
     View(#[serde(with = "crate::ids")] u64),
 }
 
+impl Owner {
+    /// The view it moves with, if any.
+    pub fn view(self) -> Option<u64> {
+        match self {
+            Owner::Sheet(_) => None,
+            Owner::View(view) => Some(view),
+        }
+    }
+}
+
 /// Authored drawing geometry, in its owner's frame ([`Owner`]), regardless of the drawing's
 /// display units. A sheet sketch's origin is the sheet's lower-left corner, with x right and
 /// y up, not the border corner. No source path.
