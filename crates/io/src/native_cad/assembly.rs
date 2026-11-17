@@ -251,7 +251,7 @@ fn local(o: &Occurrence) -> Result<Transform, &'static str> {
 }
 
 /// `t` as SolidCraft's column-major 4 × 4.
-fn column_major(t: &Transform) -> M4 {
+pub(super) fn column_major(t: &Transform) -> M4 {
     let r = t.rows();
     let mut m = IDENTITY;
     for (c, col) in m.iter_mut().enumerate() {

@@ -828,3 +828,57 @@ fn a_placed_parts_centre_is_checked_in_its_own_coordinates() {
     let (records, warnings, _) = cadmpeg_step_records(format!("{}{props}{}", &text[..at], &text[at..]).as_bytes(), "cylinder_placed.step").unwrap();
     assert!(!records.warnings.iter().chain(&warnings).any(|w| w.contains("the file states")), "{warnings:?}");
 }
+
+/// A part an AP242 file gives as triangles alone: a 1 cm tetrahedron, as a TRIANGULATED_SURFACE_SET
+/// in a TESSELLATED_SHAPE_REPRESENTATION, in centimetres.
+const TETRAHEDRON_PART: &str = "ISO-10303-21;\nHEADER;\nFILE_DESCRIPTION((''),'2;1');\nFILE_NAME('tetrahedron','',(''),(''),'','','');\n\
+FILE_SCHEMA(('AP242_MANAGED_MODEL_BASED_3D_ENGINEERING_MIM_LF { 1 0 10303 442 1 1 4 }'));\nENDSEC;\nDATA;\n\
+#1=(LENGTH_UNIT() NAMED_UNIT(*) SI_UNIT(.CENTI.,.METRE.));\n#2=(NAMED_UNIT(*) PLANE_ANGLE_UNIT() SI_UNIT($,.RADIAN.));\n\
+#3=(GEOMETRIC_REPRESENTATION_CONTEXT(3) GLOBAL_UNIT_ASSIGNED_CONTEXT((#1,#2)) REPRESENTATION_CONTEXT('','3D'));\n\
+#4=APPLICATION_CONTEXT('managed model based 3d engineering');\n#5=PRODUCT_CONTEXT('',#4,'mechanical');\n\
+#6=PRODUCT('Tetrahedron','Tetrahedron','',(#5));\n#7=PRODUCT_DEFINITION_FORMATION('','',#6);\n\
+#8=PRODUCT_DEFINITION_CONTEXT('part definition',#4,'design');\n#9=PRODUCT_DEFINITION('design','',#7,#8);\n\
+#10=PRODUCT_DEFINITION_SHAPE('','',#9);\n\
+#11=COORDINATES_LIST('',4,((0.,0.,0.),(1.,0.,0.),(0.,1.,0.),(0.,0.,1.)));\n\
+#12=TRIANGULATED_SURFACE_SET('',#11,4,(),(),((1,3,2),(1,2,4),(2,3,4),(3,1,4)));\n\
+#13=TESSELLATED_SHAPE_REPRESENTATION('',(#12),#3);\n#14=SHAPE_DEFINITION_REPRESENTATION(#10,#13);\n\
+ENDSEC;\nEND-ISO-10303-21;\n";
+
+/// A part given as triangles alone comes in as a mesh body, in millimetres, with its triangles,
+/// its volume and its box, where it was left out before.
+#[test]
+fn a_part_given_as_triangles_comes_in_as_a_mesh_body() {
+    let (records, warnings, _) = cadmpeg_step_records(TETRAHEDRON_PART.as_bytes(), "tetrahedron.step").unwrap();
+    let imp = solidcraft_kernel::records_import(&records).unwrap();
+    assert_eq!(imp.bodies.len(), 1, "{warnings:?} {:?}", imp.warnings);
+    let b = &imp.bodies[0];
+    assert!(b.body.is_mesh() && b.closed, "{b:?}");
+    let m = solidcraft_kernel::measure(&b.body).unwrap();
+    assert_eq!(m.faces, 4);
+    assert!((m.volume - 1000.0 / 6.0).abs() < 1e-6, "{}", m.volume);
+    let (lo, hi) = ([m.bbox.min.x, m.bbox.min.y, m.bbox.min.z], [m.bbox.max.x, m.bbox.max.y, m.bbox.max.z]);
+    assert!(lo.iter().all(|v| v.abs() < 1e-9) && hi.iter().all(|v| (v - 10.0).abs() < 1e-9), "{lo:?} {hi:?}");
+}
+
+/// A mesh kept as records is hostile input like any record: too many vertices, a triangle naming
+/// a vertex the mesh lacks, or a vertex that is not finite leaves the body out with the reason.
+#[test]
+fn a_broken_mesh_record_is_left_out_with_why() {
+    let (records, _, _) = cadmpeg_step_records(TETRAHEDRON_PART.as_bytes(), "tetrahedron.step").unwrap();
+    for (breaking, why) in [
+        (
+            Box::new(|m: &mut solidcraft_kernel::RecordMesh| m.triangles[0][0] = 99) as Box<dyn Fn(&mut solidcraft_kernel::RecordMesh)>,
+            "names a vertex",
+        ),
+        (Box::new(|m: &mut solidcraft_kernel::RecordMesh| m.positions[0][0] = f64::NAN), "not finite"),
+        (Box::new(|m: &mut solidcraft_kernel::RecordMesh| m.positions.resize(1_000_001, [0.0; 3])), "at most"),
+        (Box::new(|m: &mut solidcraft_kernel::RecordMesh| m.triangles.clear()), "at most"),
+    ] {
+        let mut r = records.clone();
+        if let Some(mesh) = r.bodies[0].mesh.as_mut() {
+            breaking(mesh);
+        }
+        let imp = solidcraft_kernel::records_import(&r).unwrap();
+        assert!(imp.bodies.is_empty() && imp.warnings.iter().any(|w| w.contains(why)), "{why}: {:?}", imp.warnings);
+    }
+}
