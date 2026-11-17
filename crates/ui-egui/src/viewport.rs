@@ -5,10 +5,10 @@ use crate::ui_kit::BackingTooltipExt as _;
 use egui::{Align2, Color32, FontId, Pos2, Rect, Sense, Shape, Stroke, pos2, vec2};
 use serde_json::json;
 use solidcore_record::{Plane, Vec2, Vec3};
-use solidcraft_engine::Sel;
 use solidcraft_engine::geom::prelude::*;
 use solidcraft_engine::sketch::CurveKind;
 use solidcraft_engine::view::{GridFade, GridPlane, colors, grid_ext, grid_lines, grid_plane, grid_step, sketch_lines_with_sampler};
+use solidcraft_engine::{SectionPlane, Sel};
 use solidcraft_viewport::{Camera, Mat4, Rgb};
 use std::hash::{Hash, Hasher};
 
@@ -65,6 +65,8 @@ pub enum NavMode {
 
 #[derive(Default)]
 pub struct ViewportState {
+    /// Touchscreen gesture ownership and contacts for the shared camera handler.
+    pub(crate) touch: crate::navigation::TouchNavigation,
     /// The faces the modelling kernel refuses that the window points at (a failed operation's
     /// message, a "needs repair" row under the pointer): ringed in the error colour. What this
     /// frame asks for ([`crate::refused_part::ring`]) is drawn from the next one on, so the ring
@@ -326,6 +328,12 @@ pub struct ViewportState {
     /// The plane the grid was last drawn on while Preferences ▸ Grid follows the view is on
     /// (#1470), kept so the choice is hysteretic near the thresholds (#1993).
     pub(crate) grid_plane: std::sync::Mutex<GridPlane>,
+    /// Pencil mode's fingers on the view (`pencil::filter`).
+    pub(crate) fingers: crate::pencil::Fingers,
+    /// The layer the view was drawn in last frame, and its axes: a finger elsewhere is on
+    /// something over the view, which takes the tap.
+    pub(crate) layer: Option<egui::LayerId>,
+    pub(crate) axes: Option<Rect>,
 }
 
 /// Something under the cursor. The control channel reports it in the selection's own form
@@ -512,7 +520,7 @@ pub(crate) fn scene_bounds(app: &SolveApp) -> solidcraft_engine::geom::Aabb3 {
 /// so a preview in an empty design has its own. Nothing to draw has no occlusion (#9327).
 fn ao_radius(app: &SolveApp) -> f32 {
     let size = scene_bounds(app).diagonal();
-    if app.preferences.ambient_occlusion && app.ui.visual_style != 2 && size > 0.0 { (size * 0.04).clamp(1e-4, 1e6) as f32 } else { 0.0 }
+    if crate::safe_graphics::ambient_occlusion(app) && app.ui.visual_style != 2 && size > 0.0 { (size * 0.04).clamp(1e-4, 1e6) as f32 } else { 0.0 }
 }
 
 /// How close a perspective eye may come to the target: a small fraction of the scene, so zoom-in
@@ -754,8 +762,10 @@ fn base_scene_key(app: &SolveApp) -> u64 {
     // How bodies are drawn: from their plans on the GPU, or built here (until the evaluation
     // shader has compiled, #4860).
     app.viewport.gpu.is_some_and(|g| g.tess).hash(&mut h);
-    // The section plane (its cut outlines are part of the model scene).
-    section_plane(app).map(|(o, n)| [o.x, o.y, o.z, n.x, n.y, n.z].map(f64::to_bits)).hash(&mut h);
+    // The section's planes (their cut outlines are part of the model scene).
+    for c in section_planes(app) {
+        [c.origin.x, c.origin.y, c.origin.z, c.normal.x, c.normal.y, c.normal.z].map(f64::to_bits).hash(&mut h);
+    }
     app.cam.up.hash(&mut h);
     app.session.visibility.hidden_bodies.hash(&mut h);
     app.dialog.as_ref().map(|d| &d.edit_source_bodies).hash(&mut h);
@@ -920,7 +930,7 @@ pub(crate) fn sky_uniform(dark_parts: bool, finish: bool, up: solidcraft_viewpor
 
 fn ao_samples(app: &mut SolveApp, ctx: &egui::Context, view_proj: [[f32; 4]; 4], size_px: [f32; 2]) -> u32 {
     // Without AO (off, or wireframe) the count is unused: no repaint is asked for it.
-    if !app.preferences.ambient_occlusion || app.ui.visual_style == 2 || view_settled(app, ctx, view_proj, size_px) {
+    if !crate::safe_graphics::ambient_occlusion(app) || app.ui.visual_style == 2 || view_settled(app, ctx, view_proj, size_px) {
         solidcraft_viewport_gpu::view::AO_SAMPLES
     } else {
         solidcraft_viewport_gpu::view::AO_SAMPLES_MOVING
@@ -931,7 +941,7 @@ fn ao_samples(app: &mut SolveApp, ctx: &egui::Context, view_proj: [[f32; 4]; 4],
 /// ambient occlusion drawn, the view has held still for [`SS_SETTLE`], so the picture has all
 /// its samples (#7165). Reads the state the last painted frame left.
 pub(crate) fn ao_settled(app: &SolveApp, ctx: &egui::Context) -> bool {
-    !app.preferences.ambient_occlusion || app.ui.visual_style == 2 || ctx.input(|i| i.time) - app.viewport.ss_view.1 >= SS_SETTLE
+    !crate::safe_graphics::ambient_occlusion(app) || app.ui.visual_style == 2 || ctx.input(|i| i.time) - app.viewport.ss_view.1 >= SS_SETTLE
 }
 
 /// Whether the view (its view-projection and pixels) has held still for [`SS_SETTLE`]. Until it
@@ -979,25 +989,23 @@ fn drawn_plan(app: &SolveApp, b: &solidcraft_engine::doc::ModelBody, opaque: boo
             None => b.gpu_plan_at(solidcraft_engine::doc::display_quality::current()),
         })
         .flatten()
-        .filter(|plan| plan.vertex_count() <= solidcraft_viewport_gpu::MAX_BATCH)
+        .filter(|plan| plan.vertex_count() <= solidcraft_viewport_gpu::MAX_BATCH && solidcraft_viewport_gpu::validate_plan(plan).is_ok())
 }
 
-/// Whether `b` is a copy of a body the shown world places more than once (a component placed
+/// Whether `b` is a copy of a body the session's world places more than once (a component placed
 /// several times, a pattern's copies): drawn as an instance of its definition rather than from a
-/// plan of its own ([`drawn_plan`]). Counted once per world state.
+/// plan of its own ([`drawn_plan`]). Counted once per world state, over the whole world as opening
+/// counts it ([`crate::open_meshing::warm`]): while a design opens the shown world holds only the
+/// copies meshed so far, and a copy shown before its part's other copies was planned here, on the
+/// window's thread.
 fn repeated_copy(app: &SolveApp, b: &solidcraft_engine::doc::ModelBody) -> bool {
     let Some(definition) = b.placed_definition() else { return false };
-    let world = crate::open_meshing::shown_world(app);
+    let world = crate::open_meshing::session_world(&app.session);
     let Ok(mut cached) = app.viewport.repeated.lock() else { return false };
     let repeated = match cached.as_ref().filter(|(st, _)| std::sync::Arc::ptr_eq(st, &world)) {
         Some((_, set)) => set.clone(),
         None => {
-            let mut seen = std::collections::HashMap::<usize, usize>::new();
-            for id in world.bodies.iter().filter_map(solidcraft_engine::doc::ModelBody::placed_definition) {
-                *seen.entry(id).or_default() += 1;
-            }
-            let set: std::sync::Arc<std::collections::HashSet<usize>> =
-                std::sync::Arc::new(seen.into_iter().filter(|(_, n)| *n > 1).map(|(id, _)| id).collect());
+            let set = std::sync::Arc::new(crate::open_meshing::repeated_parts(&world));
             *cached = Some((world, set.clone()));
             set
         }
@@ -1804,16 +1812,20 @@ pub(crate) fn build_scene(app: &SolveApp) -> GpuScene {
     sc
 }
 
-/// Section: the outline of each body where the plane cuts it, in the view's text colour (#4146),
-/// and the cut solid bodies' hatches by part on their palette entries.
+/// Section: the outline of each body where each plane cuts what the section keeps, and where two
+/// planes' cuts meet, in the view's text colour (#4146), and the cut solid bodies' hatches by
+/// part on their palette entries.
 fn section_outlines(sc: &mut GpuScene, app: &SolveApp, st: &solidcraft_engine::doc::ModelState) {
-    let Some((o, n)) = section_plane(app) else { return };
+    let planes = section_planes(app);
+    if planes.is_empty() {
+        return;
+    }
     let s = &app.session;
     let active_bodies = active_body_names(app);
     let col = sc.color(c4(Tokens::view().text.gamma_multiply(0.9)));
     let mut kept = app.viewport.section_index.lock().map(|mut k| std::mem::take(&mut *k)).unwrap_or_default();
     let mut made = std::collections::HashMap::with_capacity(kept.len());
-    // The closed solid bodies the plane cuts and where it cuts them: their hatches by part.
+    // The closed solid bodies the section cuts and where it cuts them: their hatches by part.
     let by_part = app.preferences.section_hatch == crate::prefs::SectionHatch::ByPart;
     let mut cuts: Vec<(&str, Vec<(Vec3, Vec3)>)> = Vec::new();
     for b in st.bodies.iter().filter(|b| app.body_visible(&b.name)) {
@@ -1823,9 +1835,14 @@ fn section_outlines(sc: &mut GpuScene, app: &SolveApp, st: &solidcraft_engine::d
             Some((_, index)) => index,
             None => std::sync::Arc::new(solidcraft_engine::view::SectionIndex::new(&mesh)),
         };
-        let segments = index.segments(&mesh, o, n);
-        for (a, c) in &segments {
-            sc.line(a.to_f32(), c.to_f32(), col, 1.8, false);
+        let mut segments = Vec::new();
+        for (i, cut) in planes.iter().enumerate() {
+            let own = index.segments(&mesh, cut.origin, cut.normal);
+            let creases = solidcraft_engine::view::section_creases(&own, &planes, i, index.nudge());
+            for (a, c) in own.into_iter().filter_map(|(a, c)| solidcraft_engine::view::outline_part(a, c, &planes, i)).chain(creases) {
+                sc.line(a.to_f32(), c.to_f32(), col, 1.8, false);
+                segments.push((a, c));
+            }
         }
         made.insert(key, (mesh, index));
         let solid = b.is_closed() && !body_faded(app, b, &active_bodies) && s.doc.model_body_opacity(b) >= 0.999;
@@ -1833,10 +1850,11 @@ fn section_outlines(sc: &mut GpuScene, app: &SolveApp, st: &solidcraft_engine::d
             cuts.push((b.name.as_str(), segments));
         }
     }
-    // Each cut body's hatch on all its palette entries (its colour, faces and placements).
+    // Each cut body's hatch on all its palette entries (its colour, faces and placements), the
+    // parts told apart on the first plane.
     let parts: Vec<solidcraft_viewport::hatch::CutPart> =
         cuts.iter().map(|(name, segments)| solidcraft_viewport::hatch::CutPart { seed: solidcraft_viewport::hatch::seed(name), segments }).collect();
-    let hatches = solidcraft_viewport::hatch::hatches(&parts, n);
+    let hatches = planes.first().map(|c| solidcraft_viewport::hatch::hatches(&parts, c.normal)).unwrap_or_default();
     let arena = app.viewport.palette.lock().unwrap_or_else(|e| e.into_inner());
     let palette = std::sync::Arc::make_mut(&mut sc.palette);
     for ((name, _), hatch) in cuts.iter().zip(hatches) {
@@ -3736,10 +3754,11 @@ fn pick_hits(app: &SolveApp, proj: &Proj, pos: Pos2, other_sketch_points: bool, 
     {
         hits.push(far);
     }
-    // A section hides the material its normal points at: nothing there is picked, and where the
-    // plane crosses a body its cap hides what lies behind it (#6328), as `view.pick` answers.
-    let section = section_plane(app);
-    let kept = |p: Vec3| section.is_none_or(|(so, sn)| sn.dot(p) <= sn.dot(so) + crate::view_pick::SECTION_EPS);
+    // A section hides the material on the side any plane's normal points at: nothing there is
+    // picked, and where the cut crosses a body its cap hides what lies behind it (#6328), as
+    // `view.pick` answers.
+    let section = section_planes(app);
+    let kept = |p: Vec3| crate::view_pick::section_keeps(&section, p);
     let walk_eps = 1e-6 * (1.0 + scene_radius(app));
     // Nearest face along the ray (hides what is behind it); with `all`, every body's nearest.
     let mut bestf: Option<(f64, Hit)> = None;
@@ -3790,15 +3809,13 @@ fn pick_hits(app: &SolveApp, proj: &Proj, pos: Pos2, other_sketch_points: bool, 
     if crate::render_workspace::active(app) {
         return if all { faces.sorted().into_iter().map(|(_, hit)| hit).collect() } else { bestf.into_iter().map(|(_, hit)| hit).collect() };
     }
-    // Find the cap independently: a face within the clipping tolerance may lie just ahead
-    // of it. That face stays selectable, but cannot expose edges behind the cap.
-    let cap = section.and_then(|(so, sn)| {
-        let den = sn.dot(d);
-        let t_cap = (sn.dot(so) - sn.dot(o)) / den;
-        let crosses = den.abs() > 1e-12 && t_cap > 0.0;
+    // The cut cap, where a plane crosses a body, found independently of the faces: a face within
+    // the clipping tolerance may lie just ahead of it. That face stays selectable, but cannot
+    // expose edges behind the cap, and the cap is no face itself.
+    let cap = crate::view_pick::section_entry(&section, o, d).and_then(|(t_cap, _)| {
         let replaced = app.preview.effective_replaced();
         let shown_bodies = &None;
-        (crosses && crate::view_pick::body_cut_at(app, &st, &bounds, o, d, t_cap, true, replaced, shown_bodies).is_some()).then_some(t_cap)
+        crate::view_pick::body_cut_at(app, &st, &bounds, o, d, t_cap, true, replaced, shown_bodies).is_some().then_some(t_cap)
     });
     if let Some(t_cap) = cap {
         if bestf.as_ref().is_some_and(|(t, _)| t_cap < *t) {
@@ -4036,22 +4053,33 @@ fn pick_hits(app: &SolveApp, proj: &Proj, pos: Pos2, other_sketch_points: bool, 
     hits
 }
 
-/// The section cut shown now: the open Section Analysis dialog's plane, else the session's.
 /// The active sketch's display options (defaults when not sketching).
 pub fn active_view(app: &SolveApp) -> solidcraft_engine::sketch::SketchView {
     let st = crate::open_meshing::shown_world(app);
     app.session.active_sketch.and_then(|s| st.sketch(s)).map(|ss| ss.sketch.view.clone()).unwrap_or_default()
 }
 
-pub fn section_plane(app: &SolveApp) -> Option<(Vec3, Vec3)> {
+/// The section cut shown now, its planes: the open Section Analysis dialog's preview, else the
+/// session's (or a sketch's Slice).
+pub fn section_planes(app: &SolveApp) -> Vec<SectionPlane> {
     if let Some(d) = app.dialog.as_ref().filter(|d| matches!(d.kind, crate::dialogs::Kind::Section { .. })) {
-        let cmds = crate::dialogs::apply_commands(app, d).ok()?;
-        let (_, p) = cmds.into_iter().next()?;
+        // Adding or moving a plane shows the section as it is until the plane is picked.
+        let adding = matches!(d.kind, crate::dialogs::Kind::Section { add: true, .. } | crate::dialogs::Kind::Section { edit: Some(_), .. });
+        let Some((_, p)) = crate::dialogs::apply_commands(app, d).ok().and_then(|cmds| cmds.into_iter().next()) else {
+            return if adding { app.session.section.clone() } else { Vec::new() };
+        };
         let mut scratch = app.session.scratch();
-        scratch.execute("inspect.section", &p).ok()?;
-        return scratch.section;
+        scratch.set_section_state(app.session.section_state());
+        return match scratch.execute("inspect.section", &p) {
+            Ok(_) => scratch.section,
+            Err(_) if adding => app.session.section.clone(),
+            Err(_) => Vec::new(),
+        };
     }
-    slice_plane(app).or(app.session.section)
+    match slice_plane(app) {
+        Some((origin, normal)) => vec![SectionPlane { id: 0, origin, normal }],
+        None => app.session.section.clone(),
+    }
 }
 
 /// Slice (Sketch Palette): the plane of the sketch being edited, when Slice is on in it. It
@@ -4064,7 +4092,7 @@ fn slice_plane(app: &SolveApp) -> Option<(Vec3, Vec3)> {
     Some((ss.plane.origin, ss.plane.normal()))
 }
 
-/// Whether the section [`section_plane`] shows has hatched cut faces: an open Section Analysis
+/// Whether the section [`section_planes`] shows has hatched cut faces: an open Section Analysis
 /// dialog's Hatch option, a Slice's always, else the section's own.
 pub fn section_hatch(app: &SolveApp) -> bool {
     match app.dialog.as_ref().map(|d| &d.kind) {
@@ -4233,9 +4261,12 @@ fn selected_sketches(app: &SolveApp, items: &[Sel]) -> Vec<u64> {
     out
 }
 
-fn displayed_selection(app: &SolveApp, item: &Sel) -> Vec<Sel> {
+pub(crate) fn displayed_selection(app: &SolveApp, item: &Sel) -> Vec<Sel> {
     match item {
-        Sel::Feature { id } => feature_geometry(app, *id),
+        Sel::Feature { id } => match crate::timeline::viewport_sel_of_feature(&app.session.doc, *id) {
+            Some(construction) => vec![construction],
+            None => feature_geometry(app, *id),
+        },
         Sel::Occurrence { path } => app
             .session
             .occurrence_bodies(path, true)
@@ -4391,11 +4422,14 @@ pub(crate) fn analysis_legend_data(app: &SolveApp) -> Option<AnalysisLegend> {
     Some((title, along, rows))
 }
 
-fn section_clip(app: &SolveApp) -> [f32; 4] {
-    match section_plane(app) {
-        Some((o, n)) => [n.x as f32, n.y as f32, n.z as f32, n.dot(o) as f32],
-        None => [0.0; 4],
-    }
+/// The section's planes on show for the shader, and each one's hatch, kept by its id.
+pub(crate) fn section_clip(
+    app: &SolveApp,
+) -> ([[f32; 4]; solidcraft_viewport_gpu::view::MAX_SECTION_PLANES], [usize; solidcraft_viewport_gpu::view::MAX_SECTION_PLANES]) {
+    let planes = section_planes(app);
+    let clip: Vec<(Vec3, f64)> = planes.iter().map(SectionPlane::clip).collect();
+    let hatch: Vec<usize> = planes.iter().map(SectionPlane::hatch).collect();
+    (solidcraft_viewport_gpu::view::clip_planes(&clip), solidcraft_viewport_gpu::view::clip_hatches(&hatch))
 }
 
 /// Space kept free at the top right of the viewport for the axis view (docked dialogs start below).
@@ -4507,7 +4541,7 @@ pub fn candidate(app: &SolveApp, hits: &[Hit]) -> Option<(Hit, Sel)> {
     if let Some(d) = app.dialog.as_ref().filter(|d| d.wants_picks()) {
         let snap = d.face_snap(&app.session, hits);
         let snaps = crate::dialogs_assembly::takes_snaps(d);
-        return hits.iter().find_map(|h| {
+        return hits.iter().filter(|h| snap_allowed(app, snaps, h)).find_map(|h| {
             d.candidate_on(&app.session, h, snap.as_ref())
                 .map(|s| (h.clone(), crate::dialogs_assembly::woken_pick(app, snaps, crate::dialogs_move::component_pick(app, h, s))))
         });
@@ -4524,6 +4558,7 @@ pub fn candidates(app: &SolveApp, hits: &[Hit]) -> Vec<(Hit, Sel)> {
         let snaps = crate::dialogs_assembly::takes_snaps(d);
         return hits
             .iter()
+            .filter(|h| snap_allowed(app, snaps, h))
             .filter_map(|h| {
                 d.candidate_on(&app.session, h, snap.as_ref())
                     .map(|s| (h.clone(), crate::dialogs_assembly::woken_pick(app, snaps, crate::dialogs_move::component_pick(app, h, s))))
@@ -4531,6 +4566,21 @@ pub fn candidates(app: &SolveApp, hits: &[Hit]) -> Vec<(Hit, Sel)> {
             .collect();
     }
     hits.iter().filter(|h| pick_allowed(app, h)).filter_map(|h| hit_candidate(app, h)).collect()
+}
+
+/// What the selection filter lets a joint origin or trace point take (`snaps`: the dialog's active
+/// input takes joint snaps). With Edges or Vertices unchecked, an edge, a corner or a woken point
+/// (a face's corner or edge middle) is not taken and the face under it is, so Faces alone picks
+/// faces only (#18255). Other dialog inputs say for themselves what they take.
+pub(crate) fn snap_allowed(app: &SolveApp, snaps: bool, h: &Hit) -> bool {
+    let off = |k: &str| app.ui.pick_off.iter().any(|x| x == k);
+    match h {
+        _ if !snaps => true,
+        Hit::Edge { .. } => !off("edges"),
+        Hit::Vertex { .. } => !off("vertices"),
+        Hit::Face { .. } => !off("faces"),
+        _ => true,
+    }
 }
 
 /// What the selection filter lets a click pick with no dialog.
@@ -5088,7 +5138,7 @@ fn wireframe_highlight_plan(app: &SolveApp, b: &solidcraft_engine::doc::ModelBod
         .is_some_and(|g| g.tess)
         .then(|| refined(app, b).map(|(plan, _)| plan).or_else(|| b.gpu_plan_at(solidcraft_engine::doc::display_quality::current())))
         .flatten()
-        .filter(|plan| plan.vertex_count() <= solidcraft_viewport_gpu::MAX_BATCH)
+        .filter(|plan| plan.vertex_count() <= solidcraft_viewport_gpu::MAX_BATCH && solidcraft_viewport_gpu::validate_plan(plan).is_ok())
 }
 
 /// Whether the model draws a whole body opaque on the GPU, rather than building it on the CPU:
@@ -6196,6 +6246,8 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     let hover_frozen = crate::navigation::hover_is_frozen(&input, app);
     let CameraInput { hover, scroll, mods, middle, secondary_down, primary_down, primary_pressed, inside, axes, pinch, pan, primary_nav, mode } =
         input;
+    app.viewport.layer = Some(ui.layer_id());
+    app.viewport.axes = Some(axes);
     app.viewport.physical_scale = ui.ctx().pixels_per_point();
     // Suppress-snap chord and manipulator-free prefs; Shift midpoint targeting while sketching.
     // Preview reselect uses Primary but is skipped while a manipulator drag is under way.
@@ -6205,10 +6257,16 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     crate::tool_modifiers::set_manipulator_dragging(false);
     {
         let held = crate::tool_modifiers::Held::from_modifiers(mods);
+        // With square rectangles off, a rectangle tool has no descriptor of its own: Shift keeps
+        // preferring a line midpoint there.
+        let descriptor = |cmd: &str| {
+            crate::tool_modifiers::descriptor(cmd)
+                .filter(|_| app.preferences.sketch_square_rectangles || !matches!(cmd, "sketch.rectangle.two_point" | "sketch.rectangle.center"))
+        };
         let mid = if let Some(cmd) = app.tool.as_ref().map(|t| t.cmd) {
             let live = crate::tool_modifiers::resolve(
                 &[crate::tool_modifiers::Scope::SketchDraw, crate::tool_modifiers::Scope::SketchDrag],
-                crate::tool_modifiers::descriptor(cmd),
+                descriptor(cmd),
                 held,
                 crate::tool_modifiers::Trigger::Live,
             );
@@ -6217,6 +6275,16 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             false
         };
         crate::tool_modifiers::set_target_midpoint(mid);
+        let square = app.tool.as_ref().map(|t| t.cmd).is_some_and(|cmd| {
+            crate::tool_modifiers::resolve(
+                &[crate::tool_modifiers::Scope::SketchDraw, crate::tool_modifiers::Scope::SketchDrag],
+                descriptor(cmd),
+                held,
+                crate::tool_modifiers::Trigger::Live,
+            )
+            .contains(crate::tool_modifiers::ModAction::SquareRectangle)
+        });
+        crate::tool_modifiers::set_square_rectangle(square);
         let busy_dragging = manipulator_dragging || crate::ui_kit::is_scrubbing(ui.ctx());
         app.preview.rolled_back = preview_should_roll_back(app, held, busy_dragging);
     }
@@ -6345,6 +6413,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         let size_px = [rect.width() * ppp, rect.height() * ppp];
         let ssaa = supersampling(app, ui.ctx(), proj.vp.to_f32(), size_px);
         let ao_samples = ao_samples(app, ui.ctx(), proj.vp.to_f32(), size_px);
+        let (clip, clip_hatch) = section_clip(app);
         let cb = ViewportCallback(Frame {
             product_lights: None,
             ssaa,
@@ -6361,7 +6430,8 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             pv_slot: app.preview.slot.clone(),
             pv_hide: app.preview.rolled_back,
             preview_bounds: (app.preview.active && !app.preview.rolled_back).then_some(solidcraft_engine::render::view_bounds(&app.preview.bounds)),
-            clip: section_clip(app),
+            clip,
+            clip_hatch,
             cap: {
                 let [r, g, b, _] = t.section_cap.to_normalized_gamma_f32();
                 [r, g, b, if section_hatch(app) { 1.0 } else { 0.0 }]
@@ -6394,7 +6464,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                 let [r, g, b, _] = c.to_normalized_gamma_f32();
                 [r, g, b]
             }),
-            sky: sky_uniform(app.preferences.dark_parts_shading, app.preferences.viewport_material_finish, proj.cam.up),
+            sky: sky_uniform(crate::safe_graphics::dark_parts_shading(app), crate::safe_graphics::material_finish(app), proj.cam.up),
             moving,
         });
         crate::blur::viewport(&painter, rect, cb, rect, [t.viewport_top, t.viewport_bottom]);
@@ -6415,6 +6485,12 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     crate::frame_rate::paint(app, ui, &painter, overlay_rect);
 
     // ---- interaction ----
+    // Pencil mode: a finger double-tap on a planar face sketches on it (`pencil`).
+    if let Some(p) = app.viewport.fingers.double_tap.take()
+        && app.preferences.pencil_mode
+    {
+        crate::pencil::finger_double_tap(app, &proj, p);
+    }
     // A tool's click that moved on the way (#2448) clicks where the button is let go.
     if app.viewport.tool_click && resp.drag_stopped() {
         app.viewport.tool_click = false;
@@ -6521,6 +6597,8 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         crate::tools::on_click(app, &proj, p, mods.shift);
     }
     if let Some(p) = hover.filter(|_| inside) {
+        let pen_select =
+            app.preferences.pencil_mode && resp.clicked_by(egui::PointerButton::Primary) && crate::pencil::is_pen_release(app.pen_release, p);
         if app.tool.is_some() {
             crate::tools::on_hover(app, &proj, p, mods.shift);
         }
@@ -6625,10 +6703,10 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                     // A text's resize or rotation handle: the text stays selected.
                 } else if !crate::sketch3d::click(app, &proj, p) {
                     match annotation {
-                        Some(sel) => select(app, Some(sel), add, allow_toggle),
+                        Some(sel) => select(app, Some(sel), add || pen_select, allow_toggle || pen_select),
                         // Clicking again on the same spot selects the next thing under it (not
                         // the second click of a double-click, which has its own actions).
-                        None if !add && !resp.double_clicked() && crate::select_other::cycle_click(app, &proj, p) => {}
+                        None if !pen_select && !add && !resp.double_clicked() && crate::select_other::cycle_click(app, &proj, p) => {}
                         None => {
                             // Clicking empty space clears the selection, and the woken centre
                             // sleeps with it (#16346): the cross in the ring must not outlive
@@ -6637,13 +6715,41 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                             if !add && !took_the_woken_centre(app, cand.as_ref()) {
                                 app.viewport.woken_centre = None;
                             }
-                            let sel = cand.and_then(|c| c.1);
+                            // A pen's tap picks where it lifted: Safari's touch end clears the
+                            // hover in the same frame as the release, before this click is read.
+                            let sel = match cand.and_then(|c| c.1) {
+                                None if pen_select => {
+                                    let hits = pick_cached(app, &proj, p);
+                                    candidate(app, &hits).map(|(_, s)| s)
+                                }
+                                sel => sel,
+                            };
+                            // A pen tap on geometry toggles it. A tap on empty space clears.
+                            let (add, allow_toggle) = if pen_select { (sel.is_some(), true) } else { (add, allow_toggle) };
                             select(app, sel.clone(), add, allow_toggle);
-                            crate::select_other::note_click(app, p, if add { None } else { sel });
+                            crate::select_other::note_click(app, p, if add || pen_select { None } else { sel });
                         }
                     }
                 }
             }
+        }
+        // A pen double-tap takes the whole body or sketch under it. Its two taps toggled the
+        // item there and back, so the selection before them gains the whole.
+        if pen_select
+            && resp.double_clicked()
+            && !held
+            && app.tool.is_none()
+            && app.dialog.is_none()
+            && let Some(hit) = match app.viewport.hover.clone() {
+                Some(hit) => Some(hit),
+                None => {
+                    let hits = pick_cached(app, &proj, p);
+                    candidate(app, &hits).map(|(hit, _)| hit)
+                }
+            }
+            && let Some(items) = crate::pencil::whole(app, &hit)
+        {
+            let _ = app.run("select.set", json!({ "items": items, "add": true }));
         }
         // Double-click a dimension: edit its value in place (a finished sketch's shown dimension
         // too, without editing the sketch).
@@ -6667,6 +6773,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         }
         // Double-click a sketch curve: select the chain joined to it end to end.
         if resp.double_clicked()
+            && !pen_select
             && !held
             && !dim_edit
             && app.tool.is_none()
@@ -6691,6 +6798,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         }
         // Double-click an edge: select the edges that continue it smoothly (the loop).
         if resp.double_clicked()
+            && !pen_select
             && !held
             && !dim_edit
             && app.tool.is_none()
@@ -6709,6 +6817,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         // Double-click a face: edit a linked component in place, activate another component, or
         // else open the editor of the feature that made the face (as the Browser's row does).
         if resp.double_clicked()
+            && !pen_select
             && !held
             && !dim_edit
             && mods.is_none()
@@ -7228,6 +7337,7 @@ pub(crate) fn transient_messages(app: &mut SolveApp, ui: &egui::Ui, viewport: Re
         && !agent_computing
         && crate::space_mouse_offer::offerable(app).is_none()
         && !crate::stand_up::note_pending(app)
+        && crate::safe_graphics::line(app).is_none()
     {
         return Vec::new();
     }
@@ -7243,6 +7353,27 @@ pub(crate) fn transient_messages(app: &mut SolveApp, ui: &egui::Ui, viewport: Re
     let mut free = crate::viewport_layout::free_rect(view, &obstacles).shrink(t.space_8);
     if ToastPlace::current(ui.ctx()) == ToastPlace::Corner {
         free = corner_free(view, &obstacles);
+    }
+    // Safe graphics mode (`safe_graphics`): one line with its one button, until closed.
+    if let Some(line) = crate::safe_graphics::line(app) {
+        let (text, button) = crate::safe_graphics::line_text(app, line);
+        let actions: Vec<(&str, ToastKind)> = button.into_iter().map(|label| (label, ToastKind::Secondary)).collect();
+        let extras = ToastExtras { close: Some("toast:safe_graphics:close"), ..Default::default() };
+        if let Some(toast) = paint_toast_ext(ui, free, text.to_string(), ToastLead::Dot(false), &actions, extras) {
+            let r = toast.rect;
+            crate::scenario::publish_rect("toast:safe_graphics", r);
+            if let Some(button) = toast.buttons.first() {
+                crate::scenario::publish_target("toast:safe_graphics:button", *button);
+            }
+            obstacles.push(r);
+            free.max.y = r.top() - t.space_8;
+            shown.push(r);
+            if toast.clicked == Some(0) {
+                crate::safe_graphics::act(app, line);
+            } else if toast.closed {
+                app.safe_graphics_dismissed = true;
+            }
+        }
     }
     // The note offering to stand up a file just opened from a program not known to save Y up
     // (#7717): the shared toast with its buttons, which go by themselves and never block input.
@@ -7956,10 +8087,10 @@ fn origin_hidden_by_body(app: &SolveApp, proj: &Proj) -> bool {
     let t_origin = -o.dot(d);
     let st = crate::open_meshing::shown_world(app);
     let bounds = body_bounds(app, &st);
-    // A section hides the material its normal points at: removed material does not hide the
+    // A section hides the material its planes point at: removed material does not hide the
     // point, as when picking a vertex behind a section (#6328).
-    let section = section_plane(app);
-    let kept = |p: Vec3| section.is_none_or(|(so, sn)| sn.dot(p) <= sn.dot(so) + crate::view_pick::SECTION_EPS);
+    let section = section_planes(app);
+    let kept = |p: Vec3| crate::view_pick::section_keeps(&section, p);
     let walk_eps = 1e-6 * (1.0 + scene_radius(app));
     let slack = scene_pick_slack(app);
     for (i, b) in st.bodies.iter().enumerate() {
@@ -8828,6 +8959,318 @@ mod tests {
     use super::*;
     use crate::navigation::*;
 
+    /// A pen tap reuses the viewport's ordinary picking and can clear without a keyboard.
+    #[test]
+    fn pen_taps_toggle_sketch_picks_when_enabled() {
+        use egui::{Event, Modifiers, PointerButton};
+
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+        h.app.run("sketch.line", json!({"points":[[0,0],[20,0]],"infer":false})).unwrap();
+        h.app.run("sketch.line", json!({"points":[[0,10],[20,10]],"infer":false})).unwrap();
+        h.app.cam.distance = 80.0;
+        h.frames(4);
+        let point = |h: &mut crate::scenario::Harness, world| {
+            let [x, y] = h.at(&json!({"world": world})).unwrap();
+            pos2(x as f32, y as f32)
+        };
+        let a = point(&mut h, [10, 0, 0]);
+        let b = point(&mut h, [10, 10, 0]);
+        let empty = point(&mut h, [-15, -10, 0]);
+        let tap = |h: &mut crate::scenario::Harness, pos, pen: bool, modifiers| {
+            let button = |pressed| Event::PointerButton { pos, button: PointerButton::Primary, pressed, modifiers };
+            h.frame_with(vec![Event::ModifiersChanged(modifiers), Event::PointerMoved(pos), button(true)]);
+            h.frame_with_pen(vec![button(false)], pen.then_some(pos));
+            // Out of the double-tap window: a quick second tap is a double-tap.
+            h.frames(30);
+        };
+
+        tap(&mut h, a, true, Modifiers::NONE);
+        tap(&mut h, b, true, Modifiers::NONE);
+        assert_eq!(h.app.session.selection.len(), 1, "pen replaces the selection by default");
+        let only_b = h.app.session.selection.clone();
+
+        h.app.preferences.pencil_mode = true;
+        tap(&mut h, a, true, Modifiers::NONE);
+        assert_eq!(h.app.session.selection.len(), 2);
+        tap(&mut h, a, true, Modifiers::NONE);
+        assert_eq!(h.app.session.selection, only_b, "a repeated tap removes only the tapped line");
+        tap(&mut h, a, true, Modifiers::NONE);
+        assert_eq!(h.app.session.selection.len(), 2);
+        tap(&mut h, empty, true, Modifiers::NONE);
+        assert!(h.app.session.selection.is_empty());
+
+        tap(&mut h, a, true, Modifiers::NONE);
+        tap(&mut h, b, false, Modifiers::NONE);
+        assert_eq!(h.app.session.selection, only_b, "the following mouse click replaces the selection");
+        tap(&mut h, a, false, Modifiers::SHIFT);
+        assert_eq!(h.app.session.selection.len(), 2, "Shift-click still adds a pick");
+    }
+
+    /// A 10 mm box in view, with Pencil mode on.
+    fn pencil_box() -> crate::scenario::Harness {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.app.run("solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [0, 0, 0]})).unwrap();
+        h.app.animate_fit_all();
+        h.frames(30);
+        h.app.preferences.pencil_mode = true;
+        h
+    }
+
+    fn screen(h: &mut crate::scenario::Harness, world: [f64; 3]) -> Pos2 {
+        let [x, y] = h.at(&json!({ "world": world })).unwrap();
+        pos2(x as f32, y as f32)
+    }
+
+    /// An Apple Pencil tap at `pos` as Safari and eframe report it: `pointerdown` (a pen) makes a
+    /// press and runs a frame, `touchstart` (a stylus touch) another press with a touch, and
+    /// `pointerup` and `touchend` the release, the pointer gone and the touch's end. Each tap's
+    /// touch has its own id, as the browser's do.
+    fn pen_tap(h: &mut crate::scenario::Harness, pos: Pos2) {
+        use std::sync::atomic::{AtomicU64, Ordering};
+        static NEXT: AtomicU64 = AtomicU64::new(100);
+        let id = egui::TouchId(NEXT.fetch_add(1, Ordering::Relaxed));
+        let button = |pressed| egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed, modifiers: egui::Modifiers::NONE };
+        let touch = |phase| egui::Event::Touch { device_id: egui::TouchDeviceId(1), id, phase, pos, force: Some(0.5) };
+        let pen_down = crate::pencil::PlatformTaps { pen_down: true, ..Default::default() };
+        h.frame_with_taps(vec![egui::Event::PointerMoved(pos), button(true)], pen_down.clone());
+        h.frame_with_taps(vec![button(true), touch(egui::TouchPhase::Start)], crate::pencil::PlatformTaps { stylus: vec![id], ..pen_down });
+        // `pointerup` and `touchend` report the lift a few points apart (3.2 points on an iPad),
+        // and their two releases come in one frame.
+        let end = pos + egui::vec2(2.5, 2.0);
+        let release =
+            |at| egui::Event::PointerButton { pos: at, button: egui::PointerButton::Primary, pressed: false, modifiers: egui::Modifiers::NONE };
+        let touch_end = egui::Event::Touch { device_id: egui::TouchDeviceId(1), id, phase: egui::TouchPhase::End, pos: end, force: Some(0.0) };
+        h.frame_with_taps(
+            vec![button(false), release(end), egui::Event::PointerGone, touch_end],
+            crate::pencil::PlatformTaps { pen_release: Some(pos), ..Default::default() },
+        );
+    }
+
+    /// A finger tap at `pos` as eframe's web runner reports it: `pointerdown` makes a press and
+    /// runs a frame at once (the platform reports a finger down), `touchstart` makes another
+    /// press with the touch, and `touchend` the release, the pointer gone and the touch's end.
+    fn finger_tap(h: &mut crate::scenario::Harness, pos: Pos2, id: u64) {
+        let button = |pressed| egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed, modifiers: egui::Modifiers::NONE };
+        let touch = |phase| egui::Event::Touch { device_id: egui::TouchDeviceId(1), id: egui::TouchId(id), phase, pos, force: None };
+        h.frame_with_taps(
+            vec![egui::Event::PointerMoved(pos), button(true)],
+            crate::pencil::PlatformTaps { finger_down: Some(pos), ..Default::default() },
+        );
+        h.frame_with(vec![button(true), touch(egui::TouchPhase::Start)]);
+        h.frame_with(vec![button(false), egui::Event::PointerGone, touch(egui::TouchPhase::End)]);
+    }
+
+    /// Pencil mode: a finger tap in the view selects nothing (fingers move the view); with the
+    /// preference off it selects as a click does, as before.
+    #[test]
+    fn pencil_mode_finger_taps_in_the_view_do_not_select() {
+        let mut h = pencil_box();
+        let top = screen(&mut h, [5.0, 5.0, 10.0]);
+        finger_tap(&mut h, top, 1);
+        h.frames(30);
+        assert!(h.app.session.selection.is_empty(), "{:?}", h.app.session.selection);
+        assert!(h.app.session.active_sketch.is_none());
+
+        h.app.preferences.pencil_mode = false;
+        finger_tap(&mut h, top, 2);
+        h.frames(30);
+        assert!(matches!(h.app.session.selection.as_slice(), [solidcraft_engine::Sel::Face { .. }]), "{:?}", h.app.session.selection);
+    }
+
+    /// Pencil mode: a finger double-tap on a flat face selects it and starts a sketch on it; one
+    /// on empty space, or two taps too far apart in time, do nothing.
+    #[test]
+    fn pencil_mode_finger_double_tap_on_a_face_sketches_on_it() {
+        let mut h = pencil_box();
+        let empty = h.app.viewport.rect.map(|r| r.left_top() + egui::vec2(r.width() * 0.85, r.height() * 0.8)).unwrap();
+        finger_tap(&mut h, empty, 1);
+        finger_tap(&mut h, empty, 2);
+        h.frames(30);
+        assert!(h.app.session.active_sketch.is_none(), "empty space starts no sketch");
+
+        let top = screen(&mut h, [5.0, 5.0, 10.0]);
+        finger_tap(&mut h, top, 3);
+        h.frames(40);
+        finger_tap(&mut h, top, 4);
+        h.frames(30);
+        assert!(h.app.session.active_sketch.is_none(), "two slow taps are not a double-tap");
+
+        finger_tap(&mut h, top, 5);
+        finger_tap(&mut h, top, 6);
+        h.frames(30);
+        assert!(h.app.session.active_sketch.is_some(), "a double-tap on the top face sketches on it");
+    }
+
+    /// Pencil mode: a pen double-tap selects the whole body under it, and keeps what was
+    /// selected before; on the sketch being edited it selects every curve of the sketch.
+    #[test]
+    fn pencil_mode_pen_double_tap_selects_the_whole_body_or_sketch() {
+        let mut h = pencil_box();
+        let top = screen(&mut h, [5.0, 5.0, 10.0]);
+        let side = screen(&mut h, [10.0, 5.0, 5.0]);
+        pen_tap(&mut h, top);
+        h.frames(30);
+        let top_face = h.app.session.selection.clone();
+        assert_eq!(top_face.len(), 1, "one Pencil tap is one click: {top_face:?}");
+        pen_tap(&mut h, side);
+        pen_tap(&mut h, side);
+        h.frames(30);
+        let mut want = top_face.clone();
+        want.push(solidcraft_engine::Sel::Body { name: "Body1".into() });
+        assert_eq!(h.app.session.selection, want);
+        let empty = h.app.viewport.rect.map(|r| r.left_top() + egui::vec2(r.width() * 0.85, r.height() * 0.8)).unwrap();
+        pen_tap(&mut h, empty);
+        h.frames(30);
+        assert!(h.app.session.selection.is_empty(), "a pen tap on empty space clears: {:?}", h.app.session.selection);
+        assert!(h.app.session.active_sketch.is_none(), "the Apple Pencil's touches are not a finger's double-tap");
+
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.app.run("sketch.create", json!({"plane": "XY"})).unwrap();
+        h.app.run("sketch.line", json!({"points": [[0, 0], [20, 0]], "infer": false})).unwrap();
+        h.app.run("sketch.line", json!({"points": [[0, 10], [20, 10]], "infer": false})).unwrap();
+        h.app.cam.distance = 80.0;
+        h.frames(4);
+        h.app.preferences.pencil_mode = true;
+        let line = screen(&mut h, [10.0, 0.0, 0.0]);
+        pen_tap(&mut h, line);
+        pen_tap(&mut h, line);
+        h.frames(30);
+        assert_eq!(h.app.session.selection.len(), 2, "both lines: {:?}", h.app.session.selection);
+        assert!(h.app.session.selection.iter().all(|s| matches!(s, solidcraft_engine::Sel::SketchCurve { .. })));
+    }
+
+    /// Pencil mode: a one-finger drag across the view still orbits it (touchscreen navigation
+    /// needs to know the finger is over the view, which egui learns from the touch's press), and
+    /// selects nothing.
+    #[test]
+    fn pencil_mode_finger_drag_orbits_the_view() {
+        let mut h = pencil_box();
+        let start = screen(&mut h, [5.0, 5.0, 10.0]);
+        let (yaw, pitch) = (h.app.cam.yaw, h.app.cam.pitch);
+        let button =
+            |pos, pressed| egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed, modifiers: egui::Modifiers::NONE };
+        let touch = |phase, pos| egui::Event::Touch { device_id: egui::TouchDeviceId(1), id: egui::TouchId(7), phase, pos, force: None };
+        h.frame_with_taps(vec![button(start, true)], crate::pencil::PlatformTaps { finger_down: Some(start), ..Default::default() });
+        h.frame_with(vec![button(start, true), touch(egui::TouchPhase::Start, start)]);
+        let mut at = start;
+        for _ in 0..12 {
+            at += egui::vec2(8.0, 3.0);
+            h.frame_with(vec![egui::Event::PointerMoved(at), touch(egui::TouchPhase::Move, at)]);
+        }
+        h.frame_with(vec![button(at, false), egui::Event::PointerGone, touch(egui::TouchPhase::End, at)]);
+        h.frames(10);
+        assert!((h.app.cam.yaw - yaw).abs() > 1e-3 || (h.app.cam.pitch - pitch).abs() > 1e-3, "the view orbited");
+        assert!(h.app.session.selection.is_empty(), "{:?}", h.app.session.selection);
+    }
+
+    /// Pencil mode keeps a finger's presses where the finger is not on the open view (a panel,
+    /// the ribbon, a window over it), drops them while it is, and survives hostile positions.
+    #[test]
+    fn pencil_mode_filter_keeps_presses_off_the_view() {
+        let mut h = pencil_box();
+        let ctx = h.ctx.clone();
+        let press = |pos| egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed: true, modifiers: egui::Modifiers::NONE };
+        let frame = |events| egui::RawInput { time: Some(100.0), events, ..Default::default() };
+        let presses = |raw: &egui::RawInput| raw.events.iter().filter(|e| matches!(e, egui::Event::PointerButton { .. })).count();
+
+        let ribbon = pos2(5.0, 5.0);
+        let mut raw = frame(vec![press(ribbon)]);
+        crate::pencil::filter(&mut h.app, &ctx, &mut raw, &crate::pencil::PlatformTaps { finger_down: Some(ribbon), ..Default::default() });
+        assert_eq!(presses(&raw), 1, "a finger on the ribbon clicks it");
+
+        let top = screen(&mut h, [5.0, 5.0, 10.0]);
+        let mut raw = frame(vec![press(top)]);
+        crate::pencil::filter(&mut h.app, &ctx, &mut raw, &crate::pencil::PlatformTaps { finger_down: Some(top), ..Default::default() });
+        assert_eq!(presses(&raw), 0, "a finger on the view does not");
+        // Its touch events never came: presses are the pointer's again after a while.
+        let mut raw = egui::RawInput { time: Some(102.0), events: vec![press(top)], ..Default::default() };
+        crate::pencil::filter(&mut h.app, &ctx, &mut raw, &crate::pencil::PlatformTaps::default());
+        let mut raw = egui::RawInput { time: Some(102.1), events: vec![press(top)], ..Default::default() };
+        crate::pencil::filter(&mut h.app, &ctx, &mut raw, &crate::pencil::PlatformTaps::default());
+        assert_eq!(presses(&raw), 1);
+
+        for bad in [pos2(f32::NAN, 0.0), pos2(f32::INFINITY, f32::NEG_INFINITY)] {
+            let touch = |phase| egui::Event::Touch { device_id: egui::TouchDeviceId(1), id: egui::TouchId(9), phase, pos: bad, force: None };
+            let mut raw = frame(vec![press(bad), touch(egui::TouchPhase::Start), touch(egui::TouchPhase::Move), touch(egui::TouchPhase::End)]);
+            crate::pencil::filter(&mut h.app, &ctx, &mut raw, &crate::pencil::PlatformTaps { finger_down: Some(bad), ..Default::default() });
+        }
+    }
+
+    #[test]
+    fn pencil_mode_finger_hold_preserves_pen_buttons_and_finger_identity() {
+        let mut h = pencil_box();
+        let ctx = h.ctx.clone();
+        let finger_pos = screen(&mut h, [5.0, 5.0, 10.0]);
+        let pen_pos = finger_pos + egui::vec2(40.0, 0.0);
+        let button =
+            |pos, pressed| egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed, modifiers: egui::Modifiers::NONE };
+        let touch = |phase| egui::Event::Touch { device_id: egui::TouchDeviceId(1), id: egui::TouchId(1), phase, pos: finger_pos, force: None };
+        let mut start =
+            egui::RawInput { time: Some(1.0), events: vec![button(finger_pos, true), touch(egui::TouchPhase::Start)], ..Default::default() };
+        crate::pencil::filter(
+            &mut h.app,
+            &ctx,
+            &mut start,
+            &crate::pencil::PlatformTaps { finger_down: Some(finger_pos), pen_down: true, ..Default::default() },
+        );
+        assert!(
+            start.events.iter().any(|e| matches!(e, egui::Event::Touch { phase: egui::TouchPhase::Start, .. })),
+            "a finger starting while the pen is down remains a finger"
+        );
+        assert!(!start.events.iter().any(|e| matches!(e, egui::Event::PointerButton { .. })));
+        for pressed in [true, false] {
+            let taps = if pressed {
+                crate::pencil::PlatformTaps { pen_press: Some(pen_pos), pen_down: true, ..Default::default() }
+            } else {
+                crate::pencil::PlatformTaps { pen_release: Some(pen_pos), ..Default::default() }
+            };
+            let mut raw = egui::RawInput { time: Some(1.1), events: vec![button(pen_pos, pressed)], ..Default::default() };
+            crate::pencil::filter(&mut h.app, &ctx, &mut raw, &taps);
+            assert!(matches!(raw.events.as_slice(), [egui::Event::PointerButton { pressed: p, .. }] if *p == pressed));
+        }
+    }
+
+    #[test]
+    fn pencil_mode_finger_drag_returning_to_start_is_not_a_tap() {
+        let mut h = pencil_box();
+        let ctx = h.ctx.clone();
+        let at = screen(&mut h, [5.0, 5.0, 10.0]);
+        let touch = |id, phase, pos| egui::Event::Touch { device_id: egui::TouchDeviceId(1), id: egui::TouchId(id), phase, pos, force: None };
+        let mut filter = |time, events, taps| {
+            let mut raw = egui::RawInput { time: Some(time), events, ..Default::default() };
+            crate::pencil::filter(&mut h.app, &ctx, &mut raw, &taps);
+        };
+        filter(1.0, vec![touch(1, egui::TouchPhase::Start, at)], crate::pencil::PlatformTaps { finger_down: Some(at), ..Default::default() });
+        filter(1.1, vec![touch(1, egui::TouchPhase::Move, at + egui::vec2(30.0, 0.0))], Default::default());
+        filter(1.2, vec![touch(1, egui::TouchPhase::End, at)], Default::default());
+        filter(1.25, vec![touch(2, egui::TouchPhase::Start, at)], crate::pencil::PlatformTaps { finger_down: Some(at), ..Default::default() });
+        filter(1.3, vec![touch(2, egui::TouchPhase::End, at)], Default::default());
+        assert!(h.app.viewport.fingers.double_tap.is_none(), "a drag followed by one tap is not a double-tap");
+    }
+
+    #[test]
+    fn pencil_mode_whole_sketch_includes_spatial_wires() {
+        for mixed in [false, true] {
+            let mut h = crate::scenario::Harness::new();
+            h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+            if mixed {
+                h.app.run("sketch.line", json!({"points": [[0,0], [10,0]], "infer":false})).unwrap();
+            }
+            h.app.run("sketch.options", json!({"sketch_3d":true})).unwrap();
+            let wire =
+                h.app.run("sketch.spline3d", json!({"points": [[0,0,0], [10,5,10], [20,0,20]]})).unwrap()["curves"][0].as_str().unwrap().to_owned();
+            let sketch = h.app.session.active_sketch.unwrap();
+            let point = Hit::SketchPoint3d { sketch, id: format!("{wire}:0"), at: solidcore_record::Vec3::ZERO };
+            let selected = crate::pencil::whole(&h.app, &point).unwrap();
+            assert!(selected.iter().any(|s| matches!(s, Sel::SketchCurve { id, .. } if id == &wire)));
+            assert_eq!(selected.len(), if mixed { 2 } else { 1 });
+        }
+    }
+
     /// A component dragged with its Move triad is drawn as a layer: its bodies' scene is built
     /// once, where the drag found them, and drawn moved by the drag's motion, the rest of the
     /// model scene stays as it was (with the ground its ambient occlusion darkens put together
@@ -9447,6 +9890,115 @@ mod tests {
                 let rung = (x - left[0]) / step;
                 assert!((rung - rung.round()).abs() < 1e-6, "{axis} = {x} is off the ladder {left:?} (step {step}); right piece {right:?}");
             }
+        }
+    }
+
+    fn pole_revolve_app() -> SolveApp {
+        let mut s = solidcraft_engine::Session::default();
+        s.execute("sketch.create", &json!({"name": "Profile", "plane": {"origin": [0, 0, 0], "x_dir": [1, 0, 0], "y_dir": [0, 0, 1]}})).unwrap();
+        s.execute("sketch.arc.center_point", &json!({"center": [1, 1], "start": [0, 1], "end": [1, 0]})).unwrap();
+        s.execute("sketch.line", &json!({"points": [[1, 0], [2, 0], [2, 4], [0, 4], [0, 1]]})).unwrap();
+        s.execute("sketch.finish", &json!({})).unwrap();
+        s.execute("solid.revolve", &json!({"sketch": "Profile", "axis": "Z", "angle": "360 deg", "operation": "new", "body_name": "Rounded"}))
+            .unwrap();
+        s.execute("solid.box", &json!({"length": 2, "width": 2, "height": 2, "corner": [6, 0, 0], "body_name": "Box"})).unwrap();
+        let mut app = SolveApp::new(s, crate::Services::default());
+        app.set_origin_shown(false);
+        app.ui.show_grid = false;
+        app
+    }
+
+    /// A revolved round that ends tangent to its axis needs pole normals the GPU cannot
+    /// evaluate. Its complete CPU mesh stays visible beside an ordinary GPU-planned body,
+    /// including after refinement and while the whole body is highlighted (#16977).
+    #[test]
+    fn a_revolve_with_pole_nodes_keeps_its_faces_and_highlights_on_the_cpu() {
+        let mut app = pole_revolve_app();
+        app.viewport.gpu = Some(GpuTarget { format: egui_wgpu::wgpu::TextureFormat::Rgba8Unorm, depth: None, samples: 1, tess: true, oit: false });
+        let st = app.session.world_state().unwrap();
+        let rounded = st.body("Rounded").unwrap().clone();
+        let bx = st.body("Box").unwrap().clone();
+        let q = solidcraft_engine::doc::display_quality::current();
+        let box_plan = bx.gpu_plan_at(q).unwrap();
+        assert!(rounded.gpu_plan_at(q).unwrap().faces.iter().any(|f| !f.poles.is_empty()), "the round reaches a higher-order pole");
+        for refined in [false, true] {
+            if refined {
+                assert!(app.viewport.lod.lock().unwrap().force(&rounded, q, 1));
+            }
+            for style in [0, 3] {
+                app.ui.visual_style = style;
+                app.viewport.hover_bodies.clear();
+                app.session.selection.clear();
+                let scene = build_scene(&app).merged();
+                assert_eq!(scene.planned.len(), 1, "style {style}, refined {refined}: only the ordinary box is evaluated on the GPU");
+                assert!(std::sync::Arc::ptr_eq(&scene.planned[0].plan, &box_plan));
+                let mesh = drawn_mesh(&app, &rounded);
+                let faces: std::collections::HashSet<_> = mesh.tri_face.iter().copied().collect();
+                assert_eq!(faces.len(), rounded.body.face_count(), "every face has triangles");
+                assert_eq!(scene.tris.len(), mesh.triangles.len() * 3 * crate::gpu::TRI_SIZE, "the pole body's complete mesh is drawn on the CPU");
+                for selected in [false, true] {
+                    app.viewport.hover_bodies = if selected { Vec::new() } else { vec![rounded.name.clone()] };
+                    app.session.selection = if selected { vec![Sel::Body { name: rounded.name.clone() }] } else { Vec::new() };
+                    let lit = build_highlight(&app);
+                    assert!(lit.hover_planned.is_empty() && lit.selected_planned.is_empty());
+                    assert_eq!(lit.hover_blocks.len() + lit.selected_blocks.len(), 1, "whole-body feedback reuses the CPU mesh");
+                }
+            }
+            app.ui.visual_style = 2;
+            app.session.selection.clear();
+            app.viewport.hover_bodies = vec![rounded.name.clone()];
+            build_scene(&app);
+            let lit = build_highlight(&app);
+            assert!(lit.planned.is_empty(), "Wireframe feedback cannot evaluate the pole plan either");
+            assert!(!lit.merged().tris.is_empty(), "Wireframe feedback draws the CPU triangles");
+        }
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn a_revolve_with_pole_nodes_renders_beside_a_gpu_body() {
+        const SIZE: u32 = 512;
+        let mut app = pole_revolve_app();
+        app.fit_view();
+        let rect = Rect::from_min_size(Pos2::ZERO, vec2(SIZE as f32, SIZE as f32));
+        for style in [0, 3] {
+            app.ui.visual_style = style;
+            let mut render = |tess: bool| {
+                app.viewport.gpu = Some(GpuTarget { format: egui_wgpu::wgpu::TextureFormat::Rgba8Unorm, depth: None, samples: 1, tess, oit: false });
+                let proj = projection(&app, rect);
+                let e = proj.cam.eye().to_f32();
+                let eye = [e[0], e[1], e[2], 0.0];
+                let pixels = crate::gpu::render_offscreen(
+                    build_scene(&app).merged(),
+                    None,
+                    proj.vp.to_f32(),
+                    proj.cam.back().to_f32(),
+                    eye,
+                    SIZE,
+                    tess.then_some(solidcraft_viewport_gpu::SHADER),
+                    [0.0; 8],
+                    crate::gpu::analysis_colors(&Tokens::get().analysis),
+                )?;
+                if let Some(dir) = std::env::var_os("SOLIDCRAFT_POLE_EVIDENCE") {
+                    let image = image::RgbaImage::from_raw(SIZE, SIZE, pixels.clone()).unwrap();
+                    image.save(std::path::PathBuf::from(dir).join(format!("style-{style}-tess-{tess}.png"))).unwrap();
+                }
+                Some(pixels)
+            };
+            let (Some(gpu), Some(cpu)) = (render(true), render(false)) else {
+                eprintln!("skipping: no GPU adapter");
+                return;
+            };
+            let drawn = cpu.as_chunks::<4>().0.iter().filter(|p| p[..3] != [255, 255, 255]).count();
+            assert!(drawn > (SIZE * SIZE) as usize / 20, "the bodies cover the view");
+            let different = gpu
+                .as_chunks::<4>()
+                .0
+                .iter()
+                .zip(cpu.as_chunks::<4>().0)
+                .filter(|(a, b)| a[..3].iter().zip(&b[..3]).any(|(a, b)| a.abs_diff(*b) > 24))
+                .count();
+            assert!(different * 100 < drawn, "style {style}: {different} of {drawn} body pixels differ");
         }
     }
 
@@ -10285,6 +10837,30 @@ mod tests {
         assert!(!colours.contains(&c4(window)), "none in the window's");
     }
 
+    /// Where two planes' cut faces meet inside the body, the viewport draws the line between
+    /// them with the cut outlines, so the kept corner reads as two faces, not one flat shape.
+    #[test]
+    fn a_section_draws_where_two_cuts_meet() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.run("solid.box", json!({"length": 40, "width": 30, "height": 20})).unwrap();
+        h.app.run("inspect.section", json!({"plane": {"origin": [0, 15, 0], "normal": [0, -1, 0]}})).unwrap();
+        h.app.run("inspect.section", json!({"plane": {"origin": [20, 0, 0], "normal": [1, 0, 0]}, "add": true})).unwrap();
+        let scene = build_scene(&h.app);
+        let outline = c4(Tokens::view().text.gamma_multiply(0.9));
+        let f = |b: &[u8]| f64::from(f32::from_le_bytes([b[0], b[1], b[2], b[3]]));
+        let crease: f64 = scene
+            .lines
+            .as_chunks::<32>()
+            .0
+            .iter()
+            .filter(|l| scene.palette.get(crate::gpu::PaletteIndex(u32::from_le_bytes([l[24], l[25], l[26], l[27]]))) == Some(outline))
+            .map(|l| [0, 12].map(|at| Vec3::new(f(&l[at..]), f(&l[at + 4..]), f(&l[at + 8..]))))
+            .filter(|[a, b]| [a, b].iter().all(|p| p.dist_to_segment(Vec3::new(20.0, 15.0, 0.0), Vec3::new(20.0, 15.0, 20.0)) < 0.02))
+            .map(|[a, b]| a.dist(b))
+            .sum();
+        assert!((crease - 20.0).abs() < 0.05, "{crease} mm of the cuts' shared edge drawn");
+    }
+
     /// The view's picture is cut by the section the viewport shows: an open Section Analysis
     /// dialog's preview, a sketch's Slice.
     #[cfg(not(target_arch = "wasm32"))]
@@ -10308,7 +10884,7 @@ mod tests {
         h.app.start("inspect.section");
         let Some(crate::dialogs::Kind::Section { offset, .. }) = h.app.dialog.as_mut().map(|d| &mut d.kind) else { panic!("section dialog") };
         *offset = "15 mm".into();
-        assert!(h.app.session.section.is_none());
+        assert!(h.app.session.section.is_empty());
         let preview = pixels(&mut h, cam);
         assert!(whole.iter().zip(&preview).filter(|(a, b)| a != b).count() > 100, "the picture ignored the uncommitted section preview");
         assert!(std::sync::Arc::ptr_eq(&before, &h.app.session.doc));
@@ -10317,11 +10893,11 @@ mod tests {
         h.app.dialog = None;
         assert_eq!(preview, pixels(&mut h, cam), "preview and committed section must draw identically");
 
-        h.app.session.section = None;
+        h.app.session.section.clear();
         h.app.run("sketch.create", json!({"plane":{"origin":[0,0,10],"x_dir":[1,0,0],"y_dir":[0,1,0]}})).unwrap();
         let whole = pixels(&mut h, cam);
         h.app.run("sketch.options", json!({"slice":true})).unwrap();
-        assert!(h.app.session.section.is_none());
+        assert!(h.app.session.section.is_empty());
         let sliced = pixels(&mut h, cam);
         assert!(whole.iter().zip(&sliced).filter(|(a, b)| a != b).count() > 100, "the picture ignored the active Sketch Slice");
         h.app.run("sketch.options", json!({"slice":false})).unwrap();
@@ -10907,7 +11483,8 @@ mod tests {
                     turned_depth: Some(proj.vp.turned_depth_f32()),
                     back: proj.cam.back().to_f32(),
                     size_px: [w as f32, h as f32],
-                    clip: [0.0; 4],
+                    clip: [[0.0; 4]; solidcraft_viewport_gpu::view::MAX_SECTION_PLANES],
+                    clip_hatch: [0; solidcraft_viewport_gpu::view::MAX_SECTION_PLANES],
                     cap: [0.0; 4],
                     images: Vec::new(),
                     clouds: Vec::new(),
@@ -11260,6 +11837,55 @@ mod tests {
             // rounds them differently.
             assert!(differ * 50 < drawn, "{name}: {differ} of {drawn} pixels differ");
         }
+    }
+
+    /// Several parts, each placed many times, drawn by indirect draws (one arena, one instance
+    /// buffer, a call per look and pipeline) look as each placement's own triangles do: flat
+    /// (a box) and smooth (a cylinder) meshes, in their own colours.
+    #[test]
+    fn many_placements_of_several_parts_draw_indirectly_as_their_own_triangles() {
+        let mut app = SolveApp::new(solidcraft_engine::Session::default(), crate::Services::default());
+        app.ui.ground_shadow = false;
+        app.set_origin_shown(false);
+        app.viewport.gpu = Some(GpuTarget { format: egui_wgpu::wgpu::TextureFormat::Rgba8Unorm, depth: None, samples: 1, tess: false, oit: false });
+        for (name, (command, params), colour, y) in [("Box", PARTS[0], "#cc3333", 0), ("Can", PARTS[1], "#3366cc", 40)] {
+            app.run("component.create", json!({"name": name})).unwrap();
+            app.run(command, serde_json::from_str(params).unwrap()).unwrap();
+            app.run("component.activate", json!({"component": "root"})).unwrap();
+            app.run("appearance.assign", json!({"components": [name], "color": colour})).unwrap();
+            for k in 1..6 {
+                app.run("occurrence.copy", json!({"component": name, "translate": [30 * k, y, 0]})).unwrap();
+            }
+        }
+        let scene = build_scene(&app);
+        assert!(scene.instanced.len() >= 2 && scene.instanced.iter().map(|m| m.count()).sum::<usize>() >= 10, "both parts instanced");
+        app.fit_view();
+        const SIZE: u32 = 256;
+        let rect = Rect::from_min_size(Pos2::ZERO, vec2(SIZE as f32, SIZE as f32));
+        let proj = projection(&app, rect);
+        let e = proj.cam.eye().to_f32();
+        let eye = [e[0], e[1], e[2], if proj.cam.fov > 0.0 { 1.0 } else { 0.0 }];
+        let render = |scene: GpuScene| {
+            crate::gpu::render_offscreen(
+                scene,
+                None,
+                proj.vp.to_f32(),
+                proj.cam.back().to_f32(),
+                eye,
+                SIZE,
+                None,
+                [0.0; 8],
+                crate::gpu::analysis_colors(&Tokens::get().analysis),
+            )
+        };
+        let (Some(instanced), Some(own)) = (render(scene.clone()), render(scene.merged())) else {
+            eprintln!("skipping: no GPU adapter");
+            return;
+        };
+        let drawn = own.chunks(4).filter(|p| p[..3] != [255, 255, 255]).count();
+        assert!(drawn > 1000, "drawn {drawn}");
+        let differ = instanced.chunks(4).zip(own.chunks(4)).filter(|(a, b)| a.iter().zip(b.iter()).any(|(x, y)| x.abs_diff(*y) > 24)).count();
+        assert!(differ * 50 < drawn, "{differ} of {drawn} pixels differ");
     }
 
     /// Each placement of a part is picked where it stands, the turned one too, from the part's
@@ -12778,6 +13404,34 @@ mod tests {
         assert!(!merged.lines.is_empty() || !merged.overlay.is_empty() || !merged.hidden.is_empty(), "the selected edge is lit");
     }
 
+    /// A surface body takes no part in a section's count of the crossings behind its cut, built on
+    /// the CPU or drawn from the body's plan; a solid does.
+    #[test]
+    fn a_surface_bodys_triangles_are_left_out_of_the_section_count() {
+        let mut s = solidcraft_engine::Session::default();
+        for (c, p) in [
+            ("sketch.create", json!({"plane": "XY", "name": "L"})),
+            ("sketch.line", json!({"points": [[-30, -5], [-12, -5]], "ids": ["w"]})),
+            ("sketch.finish", json!({})),
+            ("surface.extrude", json!({"sketch": "L", "curves": ["w"], "distance": "20 mm", "name": "Sheet", "body_name": "Sheet"})),
+            ("solid.box", json!({"length": 15, "width": 10, "height": 20, "corner": [-45, -35, 0], "operation": "new_body"})),
+        ] {
+            s.execute(c, &p).unwrap();
+        }
+        let mut app = SolveApp::new(s, crate::Services::default());
+        let st = app.session.world_state().unwrap();
+        let sheet = st.bodies.iter().find(|b| b.is_surface()).expect("a surface body").mesh().triangles.len();
+        let solid = st.bodies.iter().find(|b| !b.is_surface()).expect("a solid body").mesh().triangles.len();
+        let sc = build_scene(&app);
+        let runs = |r: &[std::ops::Range<u32>]| r.iter().map(|r| r.len()).sum::<usize>();
+        let (opaque, closed) = sc.blocks.iter().fold((0, 0), |(o, c), b| (o + runs(&b.bytes.opaque), c + runs(&b.bytes.closed)));
+        assert_eq!((opaque, closed), (3 * (sheet + solid), 3 * solid), "the solid's vertices, and only those, are counted");
+        app.viewport.gpu = Some(GpuTarget { format: egui_wgpu::wgpu::TextureFormat::Rgba8Unorm, depth: None, samples: 1, tess: true, oit: false });
+        let sc = build_scene(&app);
+        let planned: Vec<(bool, usize)> = sc.planned.iter().map(|p| (p.closed, p.face_colors.len())).collect();
+        assert_eq!(planned, [(false, 1), (true, 6)], "the sheet's plan is open, the box's is not");
+    }
+
     /// A whole highlighted body is lit from the model's own triangles, not by copying every one
     /// of them onto the CPU (a whole assembly lit that way took most of a second a frame): from
     /// its display plan where the model draws one, else from its vertices in the model scene's
@@ -13439,12 +14093,12 @@ mod tests {
         h.app.run("sketch.create", json!({"plane":"Mid"})).unwrap();
         h.app.run("inspect.section", json!({"plane":"XZ","offset":15,"hatch":false})).unwrap();
         h.frames(2);
-        let across_y = |h: &crate::scenario::Harness| section_plane(&h.app).is_some_and(|(o, n)| n.y.abs() > 0.99 && (o.y.abs() - 15.0).abs() < 1e-9);
+        let across_y = |h: &crate::scenario::Harness| matches!(section_planes(&h.app)[..], [c] if c.normal.y.abs() > 0.99 && (c.origin.y.abs() - 15.0).abs() < 1e-9);
         assert!(across_y(&h));
         assert!(!section_hatch(&h.app));
         h.app.run("sketch.options", json!({"slice":true})).unwrap();
         h.frames(2);
-        let (o, n) = section_plane(&h.app).expect("the slice");
+        let [SectionPlane { origin: o, normal: n, .. }] = section_planes(&h.app)[..] else { panic!("the slice alone") };
         assert!(n.z.abs() > 0.99 && (o.z - 10.0).abs() < 1e-9, "{o:?} {n:?}");
         assert!(section_hatch(&h.app), "a slice is hatched as it is without a section");
         // Slice off, or the sketch closed: the section is back.
@@ -13465,7 +14119,7 @@ mod tests {
         h.app.run("inspect.section", json!({"plane": "XZ", "offset": 0})).unwrap();
         h.app.set_origin_shown(true);
         h.frames(2);
-        assert!(section_plane(&h.app).is_some());
+        assert!(!section_planes(&h.app).is_empty());
         let sc = build_highlight(&h.app).merged();
         let planes = origin_planes(&h.app).len();
         assert!(planes > 0);
@@ -15414,7 +16068,7 @@ mod tests {
         let mut s = solidcraft_engine::Session::default();
         s.execute("solid.box", &json!({"length": 40, "width": 30, "height": 20})).unwrap();
         let o = Vec3::new(0.0, 15.0, 0.0);
-        s.section = Some((o, Vec3::new(0.0, -1.0, 0.0)));
+        s.section = vec![SectionPlane { id: 1, origin: o, normal: Vec3::new(0.0, -1.0, 0.0) }];
         let mut app = SolveApp::new(s, crate::Services::default());
         let indexes =
             |app: &SolveApp| app.viewport.section_index.lock().unwrap().values().map(|(_, i)| std::sync::Arc::as_ptr(i) as usize).collect::<Vec<_>>();
@@ -15423,7 +16077,7 @@ mod tests {
         assert_eq!(first.len(), 1);
         for k in 1..4 {
             let a = (10.0 * k as f64).to_radians();
-            app.session.section = Some((o, Vec3::new(0.0, -a.cos(), a.sin())));
+            app.session.section = vec![SectionPlane { id: 1, origin: o, normal: Vec3::new(0.0, -a.cos(), a.sin()) }];
             build_scene(&app);
             assert_eq!(indexes(&app), first, "tilted {k}");
         }

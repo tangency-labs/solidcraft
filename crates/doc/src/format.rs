@@ -641,7 +641,7 @@ pub(crate) fn decode(mut v: Value, version: u32, applied: Option<&[String]>) -> 
         group.features.retain(|feature| feature_ids.contains(feature) && grouped_features.insert(*feature));
     }
     for group in &d.timeline_groups {
-        if group.name.trim().is_empty() || group.name.len() > 128 || !group_ids.insert(group.id) {
+        if group.name.trim().is_empty() || group.name.chars().count() > 128 || !group_ids.insert(group.id) {
             return Err(DocError::Invalid("damaged design: invalid timeline folder".into()));
         }
         if group.parent.is_some_and(|parent| parent == group.id) {
@@ -1955,6 +1955,7 @@ mod tests {
                         to_body_apart: false,
                         from_level: false,
                         picked_placements: Vec::new(),
+                        one_sided_direction: None,
                     },
                     operation: Operation::NewBody,
                     targets: vec![],

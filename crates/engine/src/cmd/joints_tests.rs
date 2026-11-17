@@ -859,6 +859,35 @@ fn omitted_sides_stay() {
     assert!(after.flip && after.name == "Flipped");
 }
 
+/// A joint's new name counts characters, as the other renames do: a hundred `ł` (200 bytes) is
+/// taken. A new name over 128 characters is refused with the reason and changes nothing, not
+/// dropped while the rest of the edit goes through. joint.create still takes any name, and a
+/// joint keeps its own name through an edit whatever its length; a blank name changes nothing.
+#[test]
+fn joint_names_count_characters_and_a_new_long_one_is_refused() {
+    let mut s = two_cubes();
+    let given = "x".repeat(200);
+    run(&mut s, "joint.create", json!({"type": "rigid", "name": given, "a": {"face": [5, 5, 10]}, "b": {"face": [25, 5, 0]}}));
+    assert_eq!(s.doc.assembly.joints[0].name, given);
+    run(&mut s, "joint.edit", json!({"joint": given, "flip": true, "name": given}));
+    assert!(s.doc.assembly.joints[0].flip, "the edit with the joint's own name goes through");
+    run(&mut s, "joint.edit", json!({"joint": given, "name": " "}));
+    assert_eq!(s.doc.assembly.joints[0].name, given, "a blank name changes nothing");
+    // A stored name with spaces round it is the joint's own name too.
+    let spaced = format!(" {given} ");
+    s.doc_mut().assembly.joints[0].name = spaced.clone();
+    let id = s.doc.assembly.joints[0].id;
+    run(&mut s, "joint.edit", json!({"joint": id, "flip": false, "name": given}));
+    assert_eq!(s.doc.assembly.joints[0].name, spaced, "kept as it is");
+    let long = "ł".repeat(100);
+    run(&mut s, "joint.edit", json!({"joint": id, "name": long}));
+    assert_eq!(s.doc.assembly.joints[0].name, long);
+    let doc = s.doc.clone();
+    let error = s.execute("joint.edit", &json!({"joint": long, "flip": false, "name": "ł".repeat(129)})).unwrap_err().to_string();
+    assert!(error.contains("joint.edit") && error.contains("at most 128 characters"), "{error}");
+    assert_eq!(s.doc, doc, "a refused name changes nothing");
+}
+
 /// One undo step puts the sides back, and the parts with them.
 #[test]
 fn one_undo_restores_the_old_sides() {

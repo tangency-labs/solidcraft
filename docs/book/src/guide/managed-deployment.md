@@ -2,7 +2,8 @@
 
 An administrator can set some SolidCraft settings for everyone who uses a computer, with Group
 Policy or Microsoft Intune. A setting under policy shows in Preferences as **Set by your
-organization**, and people cannot change it. This works on Windows today.
+organization**, and people cannot change it. While any policy is set, SolidCraft says it is
+**Managed by** the organization. This works on Windows today.
 
 A computer without a policy behaves exactly as before. SolidCraft only reads the policy: it
 writes nothing, and it sends nothing about the policy anywhere.
@@ -18,14 +19,15 @@ can run it.
 | Policy | Registry value | Type | Values |
 |---|---|---|---|
 | Check for updates | `CheckForUpdates` | `REG_DWORD` | `1`: checks at start and once a day, and people cannot turn them off. `0`: no checks at all, as with `SOLIDCRAFT_UPDATE_CHECK=0` ([Updates and privacy](updates.md)). |
+| Organization name | `OrganizationName` | `REG_SZ` | The name shown as **Managed by** and the name, up to 64 characters on one line. It changes no setting. |
 
 The values live in the key `Software\Policies\SolidCraft`:
 
 - under `HKEY_LOCAL_MACHINE` for everyone on the computer, or
 - under `HKEY_CURRENT_USER` for one person.
 
-When both hold a value, the computer's value wins. A value of another type, or a number other
-than the ones listed, counts as not set.
+When both hold a value, the computer's value wins. A value of another type, a number other
+than the ones listed, or an empty name counts as not set.
 
 SolidCraft reads the policy when it starts. A change applies the next time SolidCraft starts.
 When a policy is removed, the person's own earlier choice is back.
@@ -59,16 +61,22 @@ result, for example:
 
 ```
 reg add HKLM\Software\Policies\SolidCraft /v CheckForUpdates /t REG_DWORD /d 0 /f
+reg add HKLM\Software\Policies\SolidCraft /v OrganizationName /t REG_SZ /d "Example Corp" /f
 ```
 
 ## Check that a policy applies
+
+While any policy is set, the application bar shows a briefcase and **Managed by** with the
+organization's name (**Managed by your organization** without `OrganizationName`). A narrow
+window shows **Managed** or the briefcase alone, and the tooltip has the whole text. Clicking it
+opens Preferences, General. Preferences and About show the same line.
 
 Open Preferences, General, Updates. With `CheckForUpdates` set, **Check at start and once a day**
 is greyed out, shows the organization's choice, and says **Set by your organization**. With the
 value `0`, **Check now** is unavailable too.
 
 An agent or a script sees the same through the control channel: the reply of `ui.prefs` has a
-`policy` object that lists the locked settings, and a request that changes a locked setting is
+`policy` object that lists the locked settings and the organization's name, and a request that changes a locked setting is
 refused ([control protocol](https://github.com/tangency-labs/solidcraft/blob/main/docs/control-protocol.md)).
 
 ## A policy is not a launcher

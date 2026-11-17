@@ -926,6 +926,7 @@ impl ProtoBrep<H> for ArenaPair<'_> {
         curve: &SmCurve,
         interval: Extent1d,
         tolerance: f64,
+        crossing: Option<H>,
     ) -> crate::Result<Option<H>> {
         if face.kind != K_FACE
             || start.kind != K_VERTEX
@@ -936,6 +937,12 @@ impl ProtoBrep<H> for ArenaPair<'_> {
             return Err(invalid("not a face and two of its B-rep's vertices"));
         }
         let b = self.brep_r(face)?;
+        let crossing = match crossing {
+            Some(other) if other.kind == K_FACE => {
+                crate::topology::face::p2::surface(self.brep_r(other)?, fid(other))?
+            }
+            _ => None,
+        };
         let edges = crate::topology::face::p4::edges(b, fid(face), None, false, None)?;
         let query = crate::geom::tools::CoincidentEdgeQuery {
             start_vertex: vid(start),
@@ -946,7 +953,7 @@ impl ProtoBrep<H> for ArenaPair<'_> {
             tolerance,
         };
         Ok(
-            crate::geom::tools::find_edge_proved_along(k, b, &query, &edges)?
+            crate::geom::tools::find_edge_proved_along(k, b, fid(face), &query, &edges, crossing)?
                 .and_then(|found| edges.get(found))
                 .map(|e| hd(face.b, K_EDGE, e.index())),
         )

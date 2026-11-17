@@ -348,8 +348,11 @@ impl Walk for PlaneRef {
                     f(("Offset", distance, Kind::Length, ExprRole::Input));
                     p = base;
                 }
-                PlaneRef::AtAngle { base, angle, .. } => {
+                PlaneRef::AtAngle { base, angle, axis_origin, .. } => {
                     f(("Angle", angle, Kind::Angle, ExprRole::Input));
+                    for (label, e) in ["Axis X", "Axis Y", "Axis Z"].into_iter().zip(axis_origin) {
+                        f((label, e, Kind::Length, ExprRole::Placement));
+                    }
                     p = base;
                 }
                 PlaneRef::AlongPath { t, .. } => return f(("Distance (0 to 1)", t, Kind::Unitless, ExprRole::Input)),
@@ -375,8 +378,11 @@ impl Walk for PlaneRef {
                     f(("Offset", distance, Kind::Length, ExprRole::Input));
                     p = base;
                 }
-                PlaneRef::AtAngle { base, angle, .. } => {
+                PlaneRef::AtAngle { base, angle, axis_origin, .. } => {
                     f(("Angle", angle, Kind::Angle, ExprRole::Input));
+                    for (label, e) in ["Axis X", "Axis Y", "Axis Z"].into_iter().zip(axis_origin) {
+                        f((label, e, Kind::Length, ExprRole::Placement));
+                    }
                     p = base;
                 }
                 PlaneRef::AlongPath { t, .. } => return f(("Distance (0 to 1)", t, Kind::Unitless, ExprRole::Input)),
