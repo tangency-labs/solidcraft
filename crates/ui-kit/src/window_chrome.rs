@@ -809,6 +809,7 @@ mod tests {
                 RawInput { screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(400.0, 300.0))), time: Some(0.1), events, ..Default::default() };
             reapply_cursor_on_return(&ctx, &raw);
             let mut out = ctx.run_ui(raw, |_| {});
+            out.textures_delta.clear();
             out.viewport_output.remove(&ViewportId::ROOT).map(|v| v.commands).unwrap_or_default()
         };
         let reapplies = |cmds: &[ViewportCommand]| cmds.iter().any(|c| matches!(c, ViewportCommand::CursorVisible(true)));

@@ -43,7 +43,7 @@ if that happens; recording is cancelled if the app loses focus.
 | Ctrl+Z | Undo | Ctrl+Y | Redo |
 | Ctrl+N | New Design | Ctrl+O | Open |
 | Ctrl+S | Save | Delete | Delete the selection |
-| Ctrl+Shift+S | Save As | | |
+| Ctrl+Shift+S | Save As | Ctrl+A | Select All |
 | Ctrl+1 | Front View | Ctrl+2 | Back View |
 | Ctrl+3 | Left View | Ctrl+4 | Right View |
 | Ctrl+5 | Top View | Ctrl+6 | Bottom View |
@@ -73,7 +73,7 @@ Keys handled by the window itself:
 | V | show or hide the selected bodies, sketches and planes; with a right-click menu open, its Show/Hide (a folder, the Origin folder, an origin plane) |
 | F2 | rename the selected browser or timeline item; with several bodies selected, all of them: the first takes the name, the others `name (2)`, `name (3)`…, as **Rename Selected Bodies** does in a selected body's menu |
 | F6 | fit the view to the model |
-| ← → ↑ ↓ | turn the view 15° (with Shift, a quarter turn) |
+| ← → ↑ ↓ | turn the view 15° (with Shift, a quarter turn); while the Browser has the keyboard (after a click on one of its rows, until a click elsewhere), ↑ ↓ move the selection through its rows and ← → fold or unfold a row, and the view stays still (Preferences › Navigation › *Arrow keys move through the Browser while it has focus*) |
 | Ctrl+← → ↑ ↓ | pan the view |
 | PageUp / PageDown | zoom in / out |
 | + / − | zoom in / out |

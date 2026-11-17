@@ -81,7 +81,7 @@ another version of the `craft:plugin` interfaces is refused the same way before 
 Entry inputs are object schemas; selection and target fields are arrays. Named slots use
 `{"kind":"menu","name":"…"}` or `{"kind":"ribbon","name":"…"}`; the app decides which
 slots exist. SolidCraft matches File and Help menu names ignoring case; other menu names draw no
-host menu items. The app bar's Plugins menu lists every installed entry regardless of its slots.
+host menu items. The Model tab's Plugins group (and its Plugins menu) lists every installed entry regardless of its slots.
 Ribbon names match the existing Design tabs ignoring case; other names use the Plugins tab.
 Only enabled plugins contribute host slots. Each plugin's ribbon group carries its name, and every
 slot item has a plugin badge. Slot clicks resolve the namespaced entry against the Plugins menu's
@@ -94,7 +94,9 @@ expose the entry declarations. A read entry can call only commands marked read i
 `files.read-file` and `files.write-file` resolve paths only within matching app-approved folder
 grants with the requested access. The caller's file scope is checked against each complete
 path on every read and write; hidden paths require explicit authorization. Declaring a folder
-name does not itself grant access. Writes use temporary sibling files, and reads in the same call
+name does not itself grant access. Reading a file that does not exist returns `invalid-input`
+(field `path`, reason "no such file") without failing the run, so an entry can create its file
+on first use. Writes use temporary sibling files, and reads in the same call
 see their staged content. Targets are replaced only after successful guest execution and app
 transaction commit. A trap, refusal, cancellation or failed app commit removes staged files
 without replacing targets. If publication fails after app commit, the error reports that files
