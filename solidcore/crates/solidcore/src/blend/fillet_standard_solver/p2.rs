@@ -511,6 +511,20 @@ pub fn constant_radius_load_initial_values<S: ConstantRadiusOps + ?Sized>(
     r
 }
 
+/// One direction of the extended `domain` of an offset continued as itself, on its closed
+/// turn `closed` (`closed_turn`, wrapping there when `wraps`): the interval the rail-end solve
+/// takes and whether it wraps. Where the extension spans the closed turn, the closed turn,
+/// wrapped as it says; otherwise the extension cut to the closed turn, not wrapped: the
+/// extension names each of its points once, and a turn wider than it reaches round to the far
+/// side of the circle.
+fn within_closed_turn(domain: Extent1d, closed: Extent1d, wraps: bool) -> (Extent1d, bool) {
+    let slack = EFF_ZERO * (1.0 + closed.length().abs());
+    if domain.min() <= closed.min() + slack && domain.max() >= closed.max() - slack {
+        return (closed, wraps);
+    }
+    (domain.intersect(&closed).unwrap_or(domain), false)
+}
+
 /// [`constant_radius_load_initial_values`] inside the temporary change.
 #[allow(clippy::too_many_arguments, clippy::too_many_lines)]
 fn cr_initial_body<S: ConstantRadiusOps + ?Sized>(
@@ -760,12 +774,17 @@ fn cr_initial_body<S: ConstantRadiusOps + ?Sized>(
     // parameter pair inside its closed turn (`closed_turn`): round the axis it wraps there
     // (WR-650), along a circle generator it ends there. Solved on the extension's multiple
     // turns, a rail end found the right point by another turn's parameters, which the face's
-    // trim reads as off the face.
+    // trim reads as off the face. The closed turn only narrows the extension
+    // ([`within_closed_turn`]): where the extension is shorter than the turn (a face of less
+    // than half a turn, extended by half its length either side) it already names each point
+    // once, and the solve keeps upstream's interval, not wrapped. Widened to the whole turn,
+    // the rail ends of an R 5 round along a 45 degree chamfer round a block's R 7 corners
+    // (quarter-turn cylinders and cones) were solved off the extension and the round was
+    // refused ("Corner Edge Computation Failure").
     if let Some(dirs) = closed_turn(k, base2)? {
         for ((ivl, p), dir) in ivls.iter_mut().zip(periodic.iter_mut()).zip(dirs) {
             if let Some((closed, wraps)) = dir {
-                *ivl = closed;
-                *p = wraps;
+                (*ivl, *p) = within_closed_turn(*ivl, closed, wraps);
             }
         }
     }
