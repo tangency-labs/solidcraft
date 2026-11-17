@@ -499,14 +499,18 @@ fn a_sliver_narrower_than_the_chord_is_not_split_without_end_on_the_mesh_path() 
     let (w, refused) = plan.welded().unwrap();
     assert!(refused.is_empty(), "{refused:?}");
     assert_closed(&w, "lips on a base");
-    // Every face short of the spec's smallest angle is named, and is so only by a corner of its
-    // boundary sharper than the spec (the crescent's) or by less than 5 degrees the shaping's
-    // rounds left. Faces 11 and 17, the lips' end walls (1 x 18 mm, a side 0.0001 mm long at a
-    // corner), reach the spec at the longest side the body's extent gives with its edges counted.
+    // The faces named short of their shape, as measured: the crescent's faces 9, 10 and 16 for
+    // corners sharper than the spec, and faces 5 and 7 for the shaping's rounds alone, with a
+    // smallest angle of 25.05 degrees. Faces 11 and 17, the lips' end walls (1 x 18 mm, a side
+    // 0.0001 mm long at a corner), reach the spec at the longest side the body's extent gives with
+    // its edges counted.
+    let named: Vec<usize> = stats.unshaped.iter().map(|u| u.face).collect();
+    assert_eq!(named, [5, 7, 9, 10, 16], "{:?}", stats.unshaped);
     for u in &stats.unshaped {
-        assert!(u.limits.contains(&crate::ShapeLimit::Corner) || u.smallest_angle > spec.min_angle - 5.0, "{u:?}");
+        let corner = u.limits.contains(&crate::ShapeLimit::Corner);
+        assert_eq!(corner, [9, 10, 16].contains(&u.face), "{u:?}");
+        assert!(corner || u.smallest_angle > 25.05, "{u:?}");
     }
-    assert!(stats.unshaped.iter().all(|u| u.face != 11 && u.face != 17), "{:?}", stats.unshaped);
     let most = plan.edges.iter().map(Vec::len).max().unwrap_or(0);
     assert!(most < edges::MAX_EDGE_NODES / 10, "an edge has {most} nodes");
 }
