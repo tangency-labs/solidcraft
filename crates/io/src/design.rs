@@ -112,6 +112,10 @@ const LIMITS: Limits = Limits {
     cancelled: Some(crate::safe_write::cancelled),
 };
 
+/// [`LIMITS`] for reading back a container this process just wrote: no open-size check, since
+/// the bytes don't come from outside and a save may now be over that limit (#18686).
+const WRITTEN_LIMITS: Limits = Limits { max_expanded: || usize::MAX, check_size: |_| Ok(()), ..LIMITS };
+
 /// The Deflate level of a part: STEP sources take [`STEP_LEVEL`], and so does a mesh past the file
 /// limit: level 1 of a large payload leaves more on disk, and that part exists only because
 /// compression is what makes it fit. Everything else is level 1.
@@ -383,16 +387,10 @@ fn write_container(
     if let Some(png) = thumbnail {
         thumbnail::write(&mut writer, png, &metadata)?;
     }
-    let bytes = writer.finish()?;
-    if bytes.len() > max_design() {
-        return Err(invalid(format!(
-            "the design would be {} MB, over the {} MB a design file may hold. {}",
-            bytes.len() >> 20,
-            max_design() >> 20,
-            crate::limits::how_to_raise()
-        )));
-    }
-    Ok(bytes)
+    // A design over the limit for opening one is still written: refusing the save would leave
+    // the work unsaved, autosave included (#18686). The save says how to open it again
+    // ([`crate::limits::over_design_limit`]).
+    writer.finish()
 }
 
 fn validate_mesh(mesh: &MeshData) -> Result<()> {
@@ -497,11 +495,7 @@ fn decode_mesh(bytes: &[u8], mesh: &mut MeshData) -> Result<()> {
 fn encode_cloud(cloud: &solidcraft_doc::point_cloud::PointCloud) -> Result<Vec<u8>> {
     let n = cloud.points.len();
     let colored = !cloud.colors.is_empty();
-    let size = n
-        .checked_mul(if colored { 15 } else { 12 })
-        .and_then(|b| b.checked_add(24))
-        .filter(|&b| b <= crate::limits::max_design_bytes())
-        .ok_or_else(|| invalid("point cloud too large"))?;
+    let size = n.checked_mul(if colored { 15 } else { 12 }).and_then(|b| b.checked_add(24)).ok_or_else(|| invalid("point cloud too large"))?;
     let mut bytes = Vec::with_capacity(size);
     bytes.extend_from_slice(POINTS_MAGIC);
     bytes.extend_from_slice(&(n as u64).to_le_bytes());
@@ -628,10 +622,20 @@ pub fn read_design_provenance(bytes: &[u8]) -> Option<ProvenanceReport> {
 /// The provenance records a container carries, without verifying them. That is what a save
 /// appends to; verification is [`read_design_provenance`].
 pub fn read_design_provenance_chain(bytes: &[u8]) -> Option<ProvenanceChain> {
-    if bytes.len() > max_design() || !is_design_container(bytes) {
+    if bytes.len() > max_design() {
         return None;
     }
-    DesignContainerReader::new(Cursor::new(bytes)).ok()?.provenance_chain()
+    written_design_provenance_chain(bytes)
+}
+
+/// [`read_design_provenance_chain`] for a container this process just wrote: no open-size limit,
+/// since the bytes don't come from outside. A save over that limit still keeps its history for
+/// the next save (#18686).
+pub fn written_design_provenance_chain(bytes: &[u8]) -> Option<ProvenanceChain> {
+    if !is_design_container(bytes) {
+        return None;
+    }
+    provenance::read_chain(&mut PackageReader(Reader::new(Cursor::new(bytes), WRITTEN_LIMITS).ok()?))
 }
 
 /// [`read_design_provenance`] for a file on disk (or the browser's storage).
@@ -2831,7 +2835,7 @@ mod tests {
 
     /// A valid STEP cube, padded with a comment to `length` bytes. `noisy` padding barely
     /// compresses; otherwise it is repetitive like the text of a real large export.
-    fn padded_step(length: usize, noisy: bool) -> String {
+    pub(super) fn padded_step(length: usize, noisy: bool) -> String {
         use solidcore_record::Vec3;
         let cube = solidcraft_kernel::box_solid(Vec3::ZERO, Vec3::new(10.0, 20.0, 30.0)).unwrap();
         let step = solidcraft_kernel::step_export(&[&cube], "padded").unwrap();
@@ -2994,11 +2998,11 @@ mod tests {
         check_step_importable(&step).unwrap_or_else(|e| panic!("a STEP within the import limit is refused: {e}"));
     }
 
-    /// #3221: a STEP that no design file may hold is refused with a clear message, when the
-    /// design is saved: the import limit governs the import and the design file limit governs
-    /// the design (#2721).
+    /// #18686: a design over the limit for opening one is still written (it used to be refused,
+    /// #3221, which left Save, Save As and autosave failing and the work unsaved). The save says
+    /// how to open it again: the limit governs opening a design (#2721), not keeping one.
     #[test]
-    fn step_that_cannot_be_saved_even_compressed_is_refused_when_the_design_is_saved() {
+    fn a_design_over_the_open_limit_is_still_written_and_the_save_says_how_to_open_it() {
         let step = padded_step(crate::MAX_DESIGN_BYTES + (80 << 20), true);
         let mut doc = Document::new("Noisy import");
         doc.add_feature(
@@ -3006,8 +3010,43 @@ mod tests {
             None,
         )
         .unwrap();
-        let message = write_design_container(&doc).err().unwrap().to_string();
-        assert!(message.contains("the design would be") && message.contains("a design file may hold"), "{message}");
+        let bytes = write_design_container(&doc).expect("written, though over the limit");
+        assert!(bytes.len() > crate::MAX_DESIGN_BYTES);
+        let note = crate::limits::over_design_limit(bytes.len()).expect("the save says it is over the limit");
+        assert!(note.contains("was saved") && note.contains("Largest file to open"), "{note}");
+        assert!(crate::limits::over_design_limit(crate::MAX_DESIGN_BYTES).is_none(), "at the limit nothing is said");
+    }
+
+    /// A coloured cloud is 15 bytes a point, so one of the 20 million points a cloud may hold is
+    /// over the open limit; the save writes it instead of refusing it (#18686).
+    #[test]
+    fn a_coloured_cloud_over_the_open_limit_is_still_encoded() {
+        use solidcraft_doc::point_cloud::{ColorBy, Colors, Complex, PointCloud, Points};
+        let n = crate::MAX_DESIGN_BYTES / 15 + 1;
+        let cloud = PointCloud {
+            id: 1,
+            name: "Scan".into(),
+            file: "scan.ply".into(),
+            origin: solidcore_record::Vec3::new(0.0, 0.0, 0.0),
+            points: Points::new(vec![0.0; n * 3].into()),
+            colors: Colors(vec![128; n * 3].into()),
+            source_points: n as u64,
+            units: "mm".into(),
+            transform: solidcraft_doc::IDENTITY,
+            point_size: 2.0,
+            color_by: ColorBy::File,
+            color: None,
+            height_range: None,
+            visible: true,
+            complex: Complex::default(),
+            color_property: None,
+            filters: Vec::new(),
+            source: String::new(),
+            max_points: None,
+        };
+        let bytes = encode_cloud(&cloud).expect("a valid cloud is written whatever the open limit");
+        assert_eq!(bytes.len(), n * 15 + 24);
+        assert!(bytes.len() > crate::MAX_DESIGN_BYTES);
     }
 
     #[test]

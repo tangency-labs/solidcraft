@@ -174,7 +174,7 @@ pub fn max_step_bytes() -> usize {
     usize::try_from(effective().step).unwrap_or(usize::MAX)
 }
 
-/// The largest design file read (and written) now.
+/// The largest design file read now; a save writes past it and says so (#18686).
 pub fn max_design_bytes() -> usize {
     usize::try_from(effective().design).unwrap_or(usize::MAX)
 }
@@ -188,6 +188,20 @@ pub fn how_to_raise() -> &'static str {
     } else {
         "The web app can't open larger files; the desktop app can raise the limit."
     }
+}
+
+/// What a save says when the `size`-byte design it wrote is over the limit for opening a design:
+/// it is saved, and this is how to open it again (#18686). `None` within the limit.
+pub fn over_design_limit(size: usize) -> Option<String> {
+    let limit = max_design_bytes();
+    (size > limit).then(|| {
+        format!(
+            "The design was saved, but the file is {}, over the {} SolidCraft opens. To open it again: {}",
+            describe(size as u64),
+            describe(limit as u64),
+            how_to_raise()
+        )
+    })
 }
 
 /// The message refusing a `size`-byte file of this kind.
