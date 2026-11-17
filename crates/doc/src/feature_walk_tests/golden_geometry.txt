@@ -135,6 +135,10 @@ cell_grid
   moves: anchor[0], anchor[1], anchor[2]
   profiles: 1 indices
   placement: cell_grid.x, cell_grid.y, cell_grid.z
+living_hinge
+  moves: anchor[0], anchor[1], anchor[2]
+  profiles: 1 indices
+  placement: living_hinge.x, living_hinge.y, living_hinge.z
 sheet_base
   profiles: 1 all
 sheet_contour
