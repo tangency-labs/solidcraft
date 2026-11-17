@@ -5,6 +5,7 @@
 //! | Rust                   | Upstream |
 //! |------------------------|----------|
 //! | [`certified_distance`] | none     |
+//! | [`certified_hausdorff`] | none    |
 //! | [`interpolation_bound`] | none    |
 //!
 //! Both curves are cut into Bézier pieces over the union of their breakpoints
@@ -37,7 +38,7 @@
 //! lost to underflow.
 //!
 //! Deviations: none (no upstream counterpart). Non-rational 3D curves only, of degree 1 to
-//! [`MAX_DEGREE`]; their knot vectors clamped on one domain.
+//! [`MAX_DEGREE`]; their knot vectors clamped, on one domain for [`certified_distance`].
 
 use crate::error::{Result, SolidError};
 use crate::math::Vec3;
@@ -125,9 +126,124 @@ pub fn certified_distance(a: &Curve, b: &Curve) -> Result<f64> {
             "the curves are not on one domain",
         ));
     }
-    // In the curves' own frame: both moved by minus `a`'s first control point, so the
-    // rounding counted below follows their size, not their distance from the origin. The
-    // difference of the two is the same in either frame; each moved coordinate rounds once.
+    let (a_local, b_local) = in_own_frame(a, b)?;
+    let (a, b) = (&a_local, &b_local);
+    let q = a.degree().max(b.degree());
+    let size = largest_coordinate(a).max(largest_coordinate(b));
+    let moved = gamma(2) * size;
+    let (pa, ea) = pieces(a, b, &[], q, size)?;
+    let (pb, eb) = pieces(b, a, &[], q, size)?;
+    let (ea, eb) = (ea + moved, eb + moved);
+    let largest = largest_gap(&pa, &pb)?;
+    let bound = (largest + 2.0 * (ea + eb)) * (1.0 + gamma(2));
+    if !bound.is_finite() {
+        return Err(SolidError::query_failed(OP, "the bound is not finite"));
+    }
+    Ok(bound)
+}
+
+/// A bound `d` such that every point of `a` over `ia` is within `d` of a point of `b` over
+/// `ib` and every point of `b` over `ib` within `d` of a point of `a` over `ia` (their
+/// Hausdorff distance), every rounding of computing it included. The intervals need not be
+/// equal, nor the curves' domains: two edges whose ends differ in the last bits are bounded.
+///
+/// Over the parameters both intervals hold, `[c0, c1]`, the bound is [`certified_distance`]'s,
+/// taken on the Bézier pieces of that common interval only (each curve is also cut at both
+/// intervals' ends). A piece of one interval past the common one (`[ia_0, c0]`, say) lies in
+/// the convex hull of its control points, so each of its points is within the largest
+/// distance `s` of those from the curve's point at `c0`, which is within the common bound of
+/// the other curve's point at `c0`, a point of the other edge: the bound is the common one
+/// plus the largest such `s`. Each of the two points of an `s` carries the curve's coordinate
+/// error (`4 e` more), and the three sums round (`γ_5`).
+///
+/// # Errors
+///
+/// Those of [`certified_distance`] but for the domains; `InvalidInput` for an interval with a
+/// number not finite, reversed, or not inside its curve's domain, and for intervals that share
+/// no more than a point.
+pub fn certified_hausdorff(a: &Curve, ia: [f64; 2], b: &Curve, ib: [f64; 2]) -> Result<f64> {
+    check(a)?;
+    check(b)?;
+    let inside = |c: &Curve, [lo, hi]: [f64; 2]| {
+        lo.is_finite()
+            && hi.is_finite()
+            && lo <= hi
+            && c.knots().first().is_some_and(|&k| k <= lo)
+            && c.knots().last().is_some_and(|&k| hi <= k)
+    };
+    if !(inside(a, ia) && inside(b, ib)) {
+        return Err(SolidError::invalid_input(
+            OP,
+            "an interval not inside its curve's domain",
+        ));
+    }
+    let (c0, c1) = (ia[0].max(ib[0]), ia[1].min(ib[1]));
+    if c0 >= c1 {
+        return Err(SolidError::invalid_input(
+            OP,
+            "the intervals do not overlap",
+        ));
+    }
+    let (a_local, b_local) = in_own_frame(a, b)?;
+    let (a, b) = (&a_local, &b_local);
+    let q = a.degree().max(b.degree());
+    let size = largest_coordinate(a).max(largest_coordinate(b));
+    let moved = gamma(2) * size;
+    let ends = [ia[0], ia[1], ib[0], ib[1]];
+    let (pa, ea) = pieces(a, b, &ends, q, size)?;
+    let (pb, eb) = pieces(b, a, &ends, q, size)?;
+    let (ea, eb) = (ea + moved, eb + moved);
+    // the pieces over [lo, hi]; every interval end is a breakpoint of both curves' pieces
+    let over = |p: &[Curve], lo: f64, hi: f64| -> Vec<Curve> {
+        p.iter()
+            .filter(|x| {
+                x.knots().first().is_some_and(|&k| lo <= k)
+                    && x.knots().last().is_some_and(|&k| k <= hi)
+            })
+            .cloned()
+            .collect()
+    };
+    let (ca, cb) = (over(&pa, c0, c1), over(&pb, c0, c1));
+    if ca.is_empty() {
+        return Err(SolidError::query_failed(
+            OP,
+            "the curves' pieces do not share their spans",
+        ));
+    }
+    let largest = largest_gap(&ca, &cb)?;
+    // the largest distance of a piece past the common interval from the curve's point there
+    let beyond = |p: &[Curve], common: &[Curve], [lo, hi]: [f64; 2]| -> Result<f64> {
+        let first = common.first().and_then(|x| x.cpts().first());
+        let last = common.last().and_then(|x| x.cpts().last());
+        let (Some(&at_c0), Some(&at_c1)) = (first, last) else {
+            return Err(SolidError::query_failed(OP, "a piece without points"));
+        };
+        let mut s = 0.0_f64;
+        for (lo, hi, end) in [(lo, c0, at_c0), (c1, hi, at_c1)] {
+            if lo >= hi {
+                continue;
+            }
+            for r in over(p, lo, hi).iter().flat_map(Curve::cpts) {
+                let d = norm_up(r.x - end.x, r.y - end.y, r.z - end.z)
+                    .ok_or_else(|| SolidError::query_failed(OP, "the bound is not finite"))?;
+                s = s.max(d);
+            }
+        }
+        Ok(s)
+    };
+    let sliver = beyond(&pa, &ca, ia)?.max(beyond(&pb, &cb, ib)?);
+    let err = 2.0 * (ea + eb) + 4.0 * ea.max(eb);
+    let bound = (largest + sliver + err) * (1.0 + gamma(5));
+    if !bound.is_finite() {
+        return Err(SolidError::query_failed(OP, "the bound is not finite"));
+    }
+    Ok(bound)
+}
+
+/// `a` and `b` in their own frame: both moved by minus `a`'s first control point, so the
+/// rounding counted on them follows their size, not their distance from the origin. The
+/// difference of the two is the same in either frame; each moved coordinate rounds once.
+fn in_own_frame(a: &Curve, b: &Curve) -> Result<(Curve, Curve)> {
     let Some(&c0) = a.cpts().first() else {
         return Err(SolidError::invalid_input(OP, "a curve without points"));
     };
@@ -139,14 +255,12 @@ pub fn certified_distance(a: &Curve, b: &Curve) -> Result<f64> {
             .collect();
         Curve::new(pw, c.degree(), c.knots().to_vec())
     };
-    let (a_local, b_local) = (local(a)?, local(b)?);
-    let (a, b) = (&a_local, &b_local);
-    let q = a.degree().max(b.degree());
-    let size = largest_coordinate(a).max(largest_coordinate(b));
-    let moved = gamma(2) * size;
-    let (pa, ea) = pieces(a, b, q, size)?;
-    let (pb, eb) = pieces(b, a, q, size)?;
-    let (ea, eb) = (ea + moved, eb + moved);
+    Ok((local(a)?, local(b)?))
+}
+
+/// The largest distance between the control points of two lists of Bézier pieces of one
+/// degree on the same spans (computed, each rounded up by `γ_8`).
+fn largest_gap(pa: &[Curve], pb: &[Curve]) -> Result<f64> {
     if pa.len() != pb.len() {
         return Err(SolidError::query_failed(
             OP,
@@ -154,7 +268,7 @@ pub fn certified_distance(a: &Curve, b: &Curve) -> Result<f64> {
         ));
     }
     let mut largest = 0.0_f64;
-    for (x, y) in pa.iter().zip(&pb) {
+    for (x, y) in pa.iter().zip(pb) {
         if x.knots().first() != y.knots().first() || x.knots().last() != y.knots().last() {
             return Err(SolidError::query_failed(
                 OP,
@@ -173,11 +287,7 @@ pub fn certified_distance(a: &Curve, b: &Curve) -> Result<f64> {
             largest = largest.max(d);
         }
     }
-    let bound = (largest + 2.0 * (ea + eb)) * (1.0 + gamma(2));
-    if !bound.is_finite() {
-        return Err(SolidError::query_failed(OP, "the bound is not finite"));
-    }
-    Ok(bound)
+    Ok(largest)
 }
 
 /// An upper bound of the length of the difference `(dx, dy, dz)` (each one subtraction),
@@ -251,20 +361,29 @@ fn largest_coordinate(c: &Curve) -> f64 {
     })
 }
 
-/// The Bézier pieces of `c` over the union of its breakpoints and `other`'s, each raised to
-/// degree `q`, and the error each of their coordinates may carry (module docs), `size` the
-/// largest coordinate of both nets.
-fn pieces(c: &Curve, other: &Curve, q: usize, size: f64) -> Result<(Vec<Curve>, f64)> {
+/// The Bézier pieces of `c` over the union of its breakpoints, `other`'s and `ends`, each
+/// raised to degree `q`, and the error each of their coordinates may carry (module docs),
+/// `size` the largest coordinate of both nets.
+fn pieces(
+    c: &Curve,
+    other: &Curve,
+    ends: &[f64],
+    q: usize,
+    size: f64,
+) -> Result<(Vec<Curve>, f64)> {
     let (Some(&lo), Some(&hi)) = (c.knots().first(), c.knots().last()) else {
         return Err(SolidError::invalid_input(OP, "a curve without knots"));
     };
-    // the breakpoints of `other` that `c` lacks, once each, in order
-    let mut missing: Vec<f64> = Vec::new();
-    for &u in other.knots() {
-        if u > lo && u < hi && !c.knots().contains(&u) && missing.last() != Some(&u) {
-            missing.push(u);
-        }
-    }
+    // the breakpoints of `other` and the `ends` that `c` lacks, once each, in order
+    let mut missing: Vec<f64> = other
+        .knots()
+        .iter()
+        .chain(ends)
+        .copied()
+        .filter(|&u| u > lo && u < hi && !c.knots().contains(&u))
+        .collect();
+    missing.sort_by(f64::total_cmp);
+    missing.dedup();
     let refined = if missing.is_empty() {
         c.clone()
     } else {
@@ -483,6 +602,50 @@ mod tests {
         let d = certified_distance(&c, &higher).unwrap();
         // the raise itself rounds at 1e9 (u 1e9 is about 1e-7): the bound holds that, no more
         assert!(d < 1e-5, "{d}");
+    }
+
+    /// Over intervals that differ, each curve's point at `t` is within the bound of the other
+    /// curve's point at `t` held to the other's interval (the proof's path: a piece past the
+    /// common interval is bounded from the curve's point at the common end). The wave against
+    /// itself on a domain ending a few bits short, over its whole domain and over its first
+    /// half; intervals that do not overlap, or reach past the domain, are refused.
+    #[test]
+    fn intervals_that_differ_are_bounded_through_the_common_ends() {
+        let c = spline(&WAVE, 3);
+        let mut knots = c.knots().to_vec();
+        let short = 1.0 - 4.0 * f64::EPSILON;
+        for k in knots.iter_mut().filter(|k| **k == 1.0) {
+            *k = short;
+        }
+        let rounded = Curve::new(c.cpts().to_vec(), 3, knots).unwrap();
+        let d = certified_hausdorff(&c, [0.0, 1.0], &rounded, [0.0, short]).unwrap();
+        assert!(d < 1e-12, "{d}");
+        let d = certified_hausdorff(&rounded, [0.0, short], &c, [0.0, 1.0]).unwrap();
+        assert!(d < 1e-12, "{d}");
+        let d = certified_hausdorff(&c, [0.0, 1.0], &c, [0.0, 0.5]).unwrap();
+        for i in 0..=200 {
+            let t = f64::from(i) / 200.0;
+            let (p, r) = (
+                c.eval(t, Side::Left).unwrap(),
+                c.eval(t.min(0.5), Side::Left).unwrap(),
+            );
+            let gap2 = (p.x - r.x).powi(2) + (p.y - r.y).powi(2) + (p.z - r.z).powi(2);
+            assert!(gap2 <= d * d, "at {t}: {gap2} past {d}²");
+        }
+        let end = c.eval(1.0, Side::Left).unwrap();
+        let half = c.eval(0.5, Side::Left).unwrap();
+        assert!(d >= (end - half).length(), "{d}");
+        for (ia, ib) in [
+            ([0.0, 0.5], [0.5, 1.0]),
+            ([0.0, 1.0], [0.5, 1.5]),
+            ([0.6, 0.4], [0.0, 1.0]),
+            ([0.0, f64::NAN], [0.0, 1.0]),
+        ] {
+            assert!(matches!(
+                certified_hausdorff(&c, ia, &c, ib),
+                Err(SolidError::InvalidInput { .. })
+            ));
+        }
     }
 
     #[test]

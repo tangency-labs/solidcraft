@@ -312,11 +312,11 @@ fn copy_pairs(
 ///   (the triangle inequality), so at most the larger end distance at every `s`: both
 ///   segments lie within it of each other. The pairing with the smaller bound is taken; each
 ///   end's coordinate error `e` moves it by at most `sqrt(3) e < 2 e`.
-/// - Two B-splines (no other kind: their evaluation is their NURB's) on the same interval,
-///   inside both NURBs' domains: at every parameter of the NURBs' common domain the two are
-///   within [`certified_distance`](crate::nurbs::crv_deviation::certified_distance) of each
-///   other, so each edge's point at `t` is within it of the other's point at the same `t`.
-///   Rational and 2D NURBs, and NURBs on different domains, have no bound.
+/// - Two B-splines (no other kind: their evaluation is their NURB's), each interval inside its
+///   NURB's domain: [`certified_hausdorff`](crate::nurbs::crv_deviation::certified_hausdorff)
+///   of the NURBs over the two intervals, which need not be equal (two edges computed apart
+///   end at parameters that differ in the last bits, #11652). Rational and 2D NURBs, and
+///   intervals that share no more than a point, have no bound.
 /// - Every other pair: no bound.
 pub(crate) fn coincidence_bound(
     a: &crate::curve::curve::p2::Curve,
@@ -325,7 +325,7 @@ pub(crate) fn coincidence_bound(
     ib: &crate::geom::extent1d::Extent1d,
 ) -> Option<f64> {
     use crate::curve::curve::p2::CurveKind;
-    use crate::nurbs::crv_deviation::{certified_distance, norm_up};
+    use crate::nurbs::crv_deviation::{certified_hausdorff, norm_up};
     use crate::nurbs::math::gamma;
 
     match (a.kind(), b.kind()) {
@@ -341,20 +341,8 @@ pub(crate) fn coincidence_bound(
             bound.is_finite().then_some(bound)
         }
         (CurveKind::BSpline(ca), CurveKind::BSpline(cb)) => {
-            if ia != ib {
-                return None;
-            }
             let (na, nb) = (ca.nurb_ref().ok()?, cb.nurb_ref().ok()?);
-            let inside = |n: &crate::nurbs::crv_basic::Curve| {
-                matches!(
-                    (n.knots().first(), n.knots().last()),
-                    (Some(&lo), Some(&hi)) if lo <= ia.min() && ia.max() <= hi
-                )
-            };
-            if !(inside(na) && inside(nb)) {
-                return None;
-            }
-            certified_distance(na, nb).ok()
+            certified_hausdorff(na, [ia.min(), ia.max()], nb, [ib.min(), ib.max()]).ok()
         }
         _ => None,
     }
@@ -1236,9 +1224,11 @@ mod tests {
         let d = coincidence_bound(&a, &ivl, &copy, &ivl).unwrap();
         // the hull bound charges the rounding of its refinement and elevation
         assert!(d <= 1e-11, "{d}");
-        // on different intervals, or a line against a cubic, there is no bound
+        // over half its interval the copy ends 5 short of the straight cubic's end (x = 10 t);
+        // a line against a cubic has no bound
         let half = crate::geom::extent1d::Extent1d::from_min_max(0.0, 0.5);
-        assert!(coincidence_bound(&a, &ivl, &copy, &half).is_none());
+        let d = coincidence_bound(&a, &ivl, &copy, &half).unwrap();
+        assert!(d >= 5.0, "{d}");
         let line = segment([0.0; 3], [10.0, 0.0, 0.0]);
         assert!(coincidence_bound(&a, &ivl, &line, &ivl).is_none());
     }
