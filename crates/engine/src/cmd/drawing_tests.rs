@@ -1857,34 +1857,64 @@ fn sheet_editor_new_commands_validate_hostile_inputs_and_declare_schemas() {
     run(&mut s, "sketch.cancel", json!({}));
 }
 
-/// A sketch can belong to a view (#5425). Until a view's sketches go on paper through their view,
-/// the sheet doesn't draw one as its own and editing one is refused. Deleting its view takes it,
-/// as it takes the view's notes.
+/// A sketch can belong to a view (#5425). `drawing.sketch.create` makes one from the view's id, and
+/// it is edited, finished and cancelled as a sheet's is, its replies naming its view as well as its
+/// sheet. While it is being edited, neither its view nor its view's sheet can be deleted. Copying
+/// the view to a sheet copies it, owned by the copy; deleting its view takes it, as it takes the
+/// view's notes.
 #[test]
-fn a_view_sketch_goes_with_its_view_but_is_not_drawn_or_edited_as_a_sheet_sketch() {
-    use solidcraft_doc::drawing::{Owner, SheetSketch};
+fn a_view_sketch_is_made_edited_copied_and_deleted_with_its_view() {
+    use solidcraft_doc::drawing::Owner;
     let (mut s, d, on_sheet, made) = sheet_editor();
     run(&mut s, "sketch.line", json!({"points": [[0, 0], [40, 0]]}));
     run(&mut s, "sketch.finish", json!({}));
-    let view = run(&mut s, "drawing.view.base", json!({"sheet": made["sheet"], "scale": "1:1"}))["view"].clone();
+    let sheet = made["sheet"].clone();
+    let other = run(&mut s, "drawing.sheet.add", json!({"name": "Other"}))["sheet"].clone();
+    let view = run(&mut s, "drawing.view.base", json!({"sheet": sheet, "scale": "1:1"}))["view"].clone();
     let view_id = ids::decode(view.as_str().unwrap()).unwrap();
-    let on_view = open_one(&s).allocate_id(&mut IdSource::seeded(5425)).unwrap();
-    s.edit_drawing("test", |drawing| {
-        let sketch = drawing.sheet_sketch(on_sheet).unwrap().sketch.clone();
-        drawing.sketches.push(Arc::new(SheetSketch { id: on_view, owner: Owner::View(view_id), name: "On the view".into(), sketch }));
-        Ok(())
-    })
-    .unwrap();
-    let owner = open_one(&s);
-    let built = crate::drawing_scene::build(&s, &owner, owner.sheets[0].id).unwrap();
-    assert!(built.scene.groups.iter().any(|group| group.object == on_sheet));
-    assert!(!built.scene.groups.iter().any(|group| group.object == on_view), "a view's sketch is not drawn as the sheet's");
-    let e = refused(&mut s, "drawing.sketch.edit", json!({"sketch": ids::encode(on_view)}));
-    assert!(e.contains("not supported yet: editing a view's sketch"), "{e}");
-    run(&mut s, "selection.delete", json!({"items": [{"type": "drawing", "drawing": ids::encode(d), "object": view}]}));
+    let before = open_one(&s);
+    let e = refused(&mut s, "drawing.sketch.create", json!({"owner": ids::encode(on_sheet)}));
+    assert!(e.contains("no such sheet or view"), "{e}");
+    assert!(Arc::ptr_eq(&before, &open_one(&s)) && s.active_sheet_sketch.is_none(), "a refused owner changes nothing");
+
+    let undo = s.undo.len();
+    let made = run(&mut s, "drawing.sketch.create", json!({"owner": view, "name": "On the view"}));
+    assert_eq!((&made["sheet"], &made["view"], made["editing"].as_bool()), (&sheet, &view, Some(true)));
+    assert_eq!(s.undo.len(), undo + 1, "one undo step");
+    let on_view = ids::decode(made["sketch"].as_str().unwrap()).unwrap();
+    assert_eq!(open_one(&s).sheet_sketch(on_view).unwrap().owner, Owner::View(view_id));
+    run(&mut s, "sketch.line", json!({"points": [[0, 0], [30, 0]]}));
+    let item = json!({"items": [{"type": "drawing", "drawing": ids::encode(d), "object": view}]});
+    let e = refused(&mut s, "selection.delete", item.clone());
+    assert!(e.contains("finish or cancel"), "{e}");
+    let e = refused(&mut s, "drawing.sheet.delete", json!({"sheet": sheet, "contents": "delete"}));
+    assert!(e.contains("finish or cancel"), "{e}");
+    let finished = run(&mut s, "sketch.finish", json!({}));
+    assert_eq!((&finished["view"], finished["editing"].as_bool()), (&view, Some(false)));
+
+    let kept = open_one(&s).sheet_sketch(on_view).unwrap().clone();
+    let entered = run(&mut s, "drawing.sketch.edit", json!({"sketch": made["sketch"]}));
+    assert_eq!((&entered["view"], entered["editing"].as_bool()), (&view, Some(true)));
+    run(&mut s, "sketch.line", json!({"points": [[0, 10], [30, 10]]}));
+    let cancelled = run(&mut s, "sketch.cancel", json!({}));
+    assert_eq!((&cancelled["sheet"], &cancelled["view"], cancelled["removed"].as_bool()), (&sheet, &view, Some(false)));
+    assert!(Arc::ptr_eq(open_one(&s).sheet_sketch(on_view).unwrap(), &kept), "cancel restores it");
+    let entered = run(&mut s, "drawing.sketch.edit", json!({"sketch": ids::encode(on_sheet)}));
+    assert!(entered.get("view").is_none(), "a sheet's sketch names no view: {entered}");
+    run(&mut s, "sketch.finish", json!({}));
+
+    let copy = run(&mut s, "drawing.view.copy_to_sheet", json!({"view": view, "sheet": other}))["view"].clone();
+    let copy = ids::decode(copy.as_str().unwrap()).unwrap();
+    let after = open_one(&s);
+    let copies: Vec<_> = after.sketches.iter().filter(|record| record.owner == Owner::View(copy)).collect();
+    assert_eq!(copies.len(), 1, "the copy takes its view's sketch");
+    assert!(copies[0].id != on_view && copies[0].sketch == kept.sketch && copies[0].name == kept.name);
+    assert!(Arc::ptr_eq(after.sheet_sketch(on_view).unwrap(), &kept), "the original is unchanged");
+
+    run(&mut s, "selection.delete", item);
     let after = open_one(&s);
     assert!(after.sheet_sketch(on_view).is_none(), "the view's sketch goes with it");
-    assert!(after.sheet_sketch(on_sheet).is_some(), "the sheet's sketch stays");
+    assert!(after.sheet_sketch(on_sheet).is_some() && after.sheet_sketch(copies[0].id).is_some(), "the others stay");
 }
 
 #[test]

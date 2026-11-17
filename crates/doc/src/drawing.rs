@@ -674,7 +674,7 @@ impl Drawing {
         let dimensions = self.dimensions.iter().filter(|d| views.binary_search(&d.view).is_ok()).map(|d| d.id).collect();
         let balloons = self.balloons.iter().filter(|b| views.binary_search(&b.view).is_ok()).map(|b| b.id).collect();
         let notes = self.notes.iter().filter(|n| n.anchor.view().is_some_and(|v| views.binary_search(&v).is_ok())).map(|n| n.id).collect();
-        let in_views = |record: &&Arc<SheetSketch>| matches!(record.owner, Owner::View(view) if views.binary_search(&view).is_ok());
+        let in_views = |record: &&Arc<SheetSketch>| record.owner.view().is_some_and(|view| views.binary_search(&view).is_ok());
         let mut sketches: Vec<u64> = self.sketches.iter().filter(in_views).map(|record| record.id).collect();
         sketches.sort_unstable();
         let mut fills: Vec<u64> = self.fills.iter().filter(|fill| sketches.binary_search(&fill.sketch).is_ok()).map(|fill| fill.id).collect();

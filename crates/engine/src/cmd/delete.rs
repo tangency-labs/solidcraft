@@ -108,6 +108,9 @@ fn delete_in_drawing(s: &mut Session, p: &Value, items: &[Sel]) -> Result<Value>
     gone.notes.extend(notes);
     gone.notes.sort_unstable();
     gone.notes.dedup();
+    if s.active_sheet_sketch.as_ref().is_some_and(|entry| entry.goes_with(open.id, &gone)) {
+        return Err(bad(cmd, "finish or cancel the sketch being edited before deleting its view"));
+    }
     s.edit_drawing(cmd, |d| {
         d.remove_objects(&gone);
         Ok(())
