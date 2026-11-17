@@ -27,16 +27,13 @@
 //! Each changes the body it is given, as the kernel does; a refused or failed one leaves it as
 //! it came in ([`crate::session`]'s edit wrapper).
 //!
-//! **The result.** A blend's result has faces ([`Error::Empty`] if not), and a closed manifold
-//! body gives a closed manifold body ([`Error::NotSolid`] if not): the kernel's session stitches
-//! and orients what it builds, and that test is topological. A blend does not go on to prove
-//! its result valid and facing out, as the operations that build a body from operands do
-//! ([`crate::body`]'s `finish`): that proof decides the sign of the result's volume by
-//! enclosure, which on a body of many faces or of curvature-continuous rounds costs far more
-//! than the blend and, where its budget runs out, would refuse a body the blend built
-//! correctly. An application that needs the proof asks for it where it needs it
-//! ([`Body::check_solid`], [`Body::check`]). The blend corner's Roll-over is the one place a
-//! blend takes the proof: there it chooses between two constructions.
+//! **The result.** Each runs under a [`Contract`], [`Contract::Closed`] unless asked: a
+//! result has faces, and a closed manifold body gives a closed manifold body, by the topology
+//! test alone. [`blend_with`] and [`blend_ordered`] take the contract in their options, and
+//! under [`Contract::Proved`] prove the body before and the result after. The chamfers by
+//! sides and the variable rounds run closed. The blend corner's Roll-over takes the proof
+//! under either contract, once its passes have built: there the proof chooses between two
+//! constructions.
 
 use std::collections::{HashMap, HashSet};
 
@@ -74,7 +71,7 @@ use solidcore::topology::topology_traverser::Marks;
 use solidcore::topology::{edge, vertex, EdgeId, FaceId, VertexId};
 use solidcore::{Brep, EntityRef, Kernel, SolidError, Vec3};
 
-use crate::body::{finish, Body, Expect};
+use crate::body::{finish, finish_under, Body, Contract, Expect, Proof};
 use crate::error::status;
 use crate::session::{answer, measure_body, with_body};
 use crate::tangent::Chain;
@@ -154,6 +151,9 @@ pub struct BlendOptions {
     pub turn: Turn,
     /// How chamfers close a corner where every edge is chamfered (for [`Blend::Chamfer`]).
     pub chamfer_corner: ChamferCorner,
+    /// What is tested of the body and required of the result ([`Contract::Closed`] unless
+    /// asked).
+    pub contract: Contract,
 }
 
 /// A corner set back: its vertex and the setback along each of its edges.
@@ -1412,7 +1412,7 @@ const NO_COMMENT: &str = "<no comment>";
 /// and their neighbours); with [`Corners::Open`], [`Error::NotSolid`] for a body that is no
 /// closed solid once blended and [`Error::Unsupported`] for a corner patch that is not a disc
 /// between faces outside every patch; the kernel's other refusals; [`Error::Empty`]
-/// and [`Error::NotSolid`] as the module's result contract gives them.
+/// and [`Error::NotSolid`] as the result contract gives them.
 pub fn blend(
     body: &Body,
     kind: Blend,
@@ -1601,7 +1601,8 @@ fn blend_on_body(
     if order.is_some() && back.iter().any(|(v, _)| !b.vertex_list().contains(v)) {
         return Ok(Err(Error::Argument));
     }
-    let solid = is_manifold_solid(b)?;
+    let contract = options.contract;
+    let expect = Expect::under(k, b, Proof::default(), contract)?;
     let mut dropped = vec![false; edges.len()];
     let section: fn(&[f64]) -> Section<'_> = match kind {
         Blend::Round => |s| Section::Round(s),
@@ -1630,7 +1631,7 @@ fn blend_on_body(
             if let Err(e) = pass_or_refuse(k, b, p)? {
                 return Ok(Err(e));
             }
-            return Ok(done(b, solid)?.map(|()| Blended {
+            return Ok(done(k, b, expect, contract)?.map(|()| Blended {
                 dropped,
                 holes: Vec::new(),
                 made: Vec::new(),
@@ -1721,9 +1722,8 @@ fn blend_on_body(
             .and_then(|r| match r {
                 // taken only where it is proved a solid as the input is
                 Ok(rolled) => {
-                    let mut as_given = brep_copy(k, input)?;
-                    let expect = Expect::of(k, &mut as_given)?;
-                    finish(k, rolled, expect)
+                    let proved = proved_as_given(k, input, expect, contract)?;
+                    finish(k, rolled, proved)
                 }
                 Err(e) => Ok(Err(e)),
             });
@@ -1779,9 +1779,8 @@ fn blend_on_body(
                 match pass_or_refuse(k, &mut copy, p).and_then(|r| match r {
                     // taken only where it is proved a solid as the input is
                     Ok(_) => {
-                        let mut as_given = brep_copy(k, input)?;
-                        let expect = Expect::of(k, &mut as_given)?;
-                        finish(k, copy, expect)
+                        let proved = proved_as_given(k, input, expect, contract)?;
+                        finish(k, copy, proved)
                     }
                     Err(e) => Ok(Err(e)),
                 }) {
@@ -1818,7 +1817,7 @@ fn blend_on_body(
         )? {
             Ok(made) => {
                 *b = made;
-                Ok(done(b, solid)?.map(|()| Blended {
+                Ok(done(k, b, expect, contract)?.map(|()| Blended {
                     dropped,
                     holes: Vec::new(),
                     made: Vec::new(),
@@ -1833,7 +1832,7 @@ fn blend_on_body(
         Err(Refused::Error(e)) => return Ok(Err(e)),
     };
     if corners == Corners::Filled {
-        return Ok(done(b, solid)?.map(|()| Blended {
+        return Ok(done(k, b, expect, contract)?.map(|()| Blended {
             dropped,
             holes: Vec::new(),
             made: Vec::new(),
@@ -1876,7 +1875,7 @@ fn blend_on_body(
         }
         holes.push(hole);
     }
-    Ok(done(b, false)?.map(|()| Blended {
+    Ok(done(k, b, Expect::FACES, contract)?.map(|()| Blended {
         dropped,
         holes,
         made: Vec::new(),
@@ -2087,16 +2086,37 @@ fn splits_out_at(
     Ok(Some((c, picks, at)))
 }
 
-/// A blend's result contract on the body in place (the module's): it has faces, and with
-/// `solid` (its input was a closed manifold body) it is a closed manifold body.
-fn done(b: &Brep, solid: bool) -> solidcore::Result<Result<()>> {
-    if b.face_list().is_empty() {
-        return Ok(Err(Error::Empty));
+/// The result contract on the body in place ([`finish_under`]).
+fn done(
+    k: &mut Kernel,
+    b: &mut Brep,
+    expect: Expect,
+    contract: Contract,
+) -> solidcore::Result<Result<()>> {
+    let made = std::mem::take(b);
+    Ok(match finish_under(k, made, expect, contract)? {
+        Ok((r, _)) => {
+            *b = r;
+            Ok(())
+        }
+        Err(e) => Err(e),
+    })
+}
+
+/// What a Roll-over's result must be to be taken: proved a solid as the untouched `input` is,
+/// under either contract. `expect` is that already where the call runs proved; else the input
+/// is proved now, on a copy.
+fn proved_as_given(
+    k: &mut Kernel,
+    input: &Brep,
+    expect: Expect,
+    contract: Contract,
+) -> solidcore::Result<Expect> {
+    if contract == Contract::Proved {
+        return Ok(expect);
     }
-    if solid && !is_manifold_solid(b)? {
-        return Ok(Err(Error::NotSolid));
-    }
-    Ok(Ok(()))
+    let mut as_given = brep_copy(k, input)?;
+    Expect::of(k, &mut as_given)
 }
 
 /// One edge round an opened corner's hole, by the kernel's ids.
@@ -2461,8 +2481,8 @@ pub fn tangent_chain(
 /// strictly between 0 and pi; the kernel's refusals ([`Error::Status`] for a face that is not
 /// the edge's, faces that make no wedge or distances that fold on it,
 /// [`Error::ChamferAngleTooLarge`] for an angle past the wedge's room); [`Error::TooLarge`],
-/// [`Error::NoRoom`] and [`Error::NoEffect`] as for [`blend`]; those of the module's result
-/// contract.
+/// [`Error::NoRoom`] and [`Error::NoEffect`] as for [`blend`]; those of the result contract
+/// ([`Contract::Closed`]).
 pub fn chamfer_sides(
     body: &Body,
     edges: &[usize],
@@ -2576,7 +2596,7 @@ fn chamfer_sides_impl(
                 }
             }
         }
-        let solid = is_manifold_solid(b)?;
+        let expect = Expect::under(k, b, Proof::default(), Contract::Closed)?;
         let p = Pass {
             edges: &picked,
             section: Section::Chamfer {
@@ -2596,7 +2616,7 @@ fn chamfer_sides_impl(
         if let Err(e) = pass_or_refuse(k, b, p)? {
             return Ok(Err(e));
         }
-        done(b, solid)
+        done(k, b, expect, Contract::Closed)
     })?
 }
 
@@ -2666,8 +2686,8 @@ fn law_pinches(degree: usize, knots: &[f64], radii: &[f64]) -> bool {
 /// `start` that is not a vertex of the edge; [`Error::Unsupported`] for a law whose radius is
 /// zero inside the edge; [`Error::RoomRunsOut`] on a straight edge between planes for a law larger
 /// than its band's room at a station (the kernel's `law_fits_band`); [`Error::NoRoom`] for a
-/// law whose balls fold over one another; the refusals of [`blend`]; those of the module's
-/// result contract.
+/// law whose balls fold over one another; the refusals of [`blend`]; those of the result
+/// contract ([`Contract::Closed`]).
 pub fn fillet_variable(
     body: &Body,
     edge: usize,
@@ -2833,7 +2853,7 @@ fn fillet_variable_impl(
                 Err(e) => return Err(e),
             }
         }
-        let solid = is_manifold_solid(b)?;
+        let expect = Expect::under(k, b, Proof::default(), Contract::Closed)?;
         let (r0, r1) = (
             radii.first().copied().unwrap_or(0.0),
             radii.last().copied().unwrap_or(0.0),
@@ -2854,7 +2874,7 @@ fn fillet_variable_impl(
         if let Err(e) = pass_or_refuse(k, b, p)? {
             return Ok(Err(e));
         }
-        done(b, solid)
+        done(k, b, expect, Contract::Closed)
     })?
 }
 

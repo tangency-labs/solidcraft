@@ -215,62 +215,33 @@ fn corner_miss(m: Miss) -> Error {
 const ERR_PICK_NONE: i32 = -1101;
 const ERR_PICK_AMBIGUOUS: i32 = -1102;
 
-/// The process's solidcore-ops session runs with this backend's fixes ([`super::fixes`]), named
-/// once, before the first operation it runs.
-fn ops_session() {
-    static NAMED: std::sync::Once = std::sync::Once::new();
-    NAMED.call_once(|| {
-        if let Err(e) = solidcore_ops::session::set_fixes(crate::trace::fixes()) {
-            log::warn!(target: "smlib", "solidcore-ops runs without this backend's fixes: {e}");
-        }
-    });
-}
-
 /// Runs `f`, a step of the entry point `call` on solidcore-ops, for `body`, the entry point's
-/// input: under the token over this thread's work ([`crate::stop`]) and a profiler span, named
-/// as the call running now ([`super::dump::current`]), its refusal as SolidCraft's error
-/// ([`refused`]). Should it fail while a dump folder is set, `body` is left there
-/// ([`super::dump::failed`]), as a failing call on the kernel crate leaves its inputs; a stopped
-/// call is no failure to look into.
+/// input ([`super::call::ops_as`]: the session's fixes, the stop token, the profiler span, the
+/// call running now, and `body` left in the dump folder should it fail), its refusal as
+/// SolidCraft's error ([`refused`]).
 fn ops<T>(call: &'static str, body: &Body, f: impl FnOnce() -> solidcore_ops::Result<T>) -> Result<T> {
-    ops_session();
-    let _span = solidcraft_profile::span("solidcore", call);
-    let in_flight = super::dump::in_flight(call);
-    let r = match crate::stop::token() {
-        Some(stop) => solidcore_ops::cancel::within(&stop, f),
-        None => f(),
-    };
-    drop(in_flight);
-    r.map_err(|e| failed(call, body, refused(call, e)))
+    super::call::ops_as(call, &[("brep", body)], refused, f)
 }
 
-/// `e`, the failure of the entry point `call` on `body`: while a dump folder is set, `body` is
-/// left there ([`super::dump::failed`]). A stopped call is no failure to look into.
+/// `e`, a refusal of the entry point `call` on `body` that is this crate's own (a pick that
+/// chose nothing, the curvature fillet's wedges): while a dump folder is set, `body` is left
+/// there, as for a refusal of solidcore-ops'.
 fn failed(call: &'static str, body: &Body, e: Error) -> Error {
-    if !matches!(e, Error::Cancelled(_)) {
-        let why = e.to_string();
-        // Written on a kernel of this backend's; one that cannot be had writes nothing.
-        let _ = super::run("dump", |k| {
-            super::dump::failed(k, call, &why, &[("brep", body)]);
-            Ok(())
-        });
-    }
+    super::dump::failed_ops(call, &e.to_string(), &[("brep", body)]);
     e
 }
 
 /// A refusal of a solidcore-ops blend as SolidCraft's error: the refusals SolidCraft words itself
 /// by their fields as they are (a blend too large with the largest size that builds, a setback
 /// too short, a swept turn not built, a corner no blend handles), the kernel's statuses as the
-/// status, and every other refusal ops types carried as it is ([`Error::Refused`]).
-fn refused(call: &'static str, e: solidcore_ops::Error) -> Error {
+/// status, the blend refusals and failures ops types carried as they are ([`Error::Refused`]),
+/// and every other error as any solidcore-ops call's ([`super::call::error`]).
+fn refused(call: &'static str, e: solidcore_ops::Error, detail: Option<String>) -> Error {
     use solidcore_ops::Error as Ops;
     match e {
         Ops::Status(code) => Error::Status(code),
         // the kernel's refusal of its input (`SM_ERR_INVALID_INPUT`)
         Ops::Refused { .. } => Error::Status(INVALID_INPUT),
-        Ops::Argument => Error::Argument,
-        Ops::Empty => Error::Empty,
-        Ops::NotSolid => Error::NotSolid,
         Ops::NoRoom | Ops::SetbackTooLong { .. } => Error::NoRoom,
         Ops::TooLarge { size, kind, at, why } => Error::TooLarge { size, kind, at, why },
         Ops::SetbackTooShort { least, at, builds, .. } => Error::SetbackTooShort { least, at, builds },
@@ -280,10 +251,14 @@ fn refused(call: &'static str, e: solidcore_ops::Error) -> Error {
         Ops::NoEffect => Error::NoEffect,
         Ops::Unsupported(why) if why == MIXED_CORNER_RAILS_CROSS => Error::Unported(MIXED_CORNER_UNSUPPORTED),
         Ops::Unsupported(_) | Ops::Unported(_) => Error::Unsupported,
-        Ops::Exception => Error::Exception,
-        Ops::Cancelled => Error::Cancelled(call),
-        Ops::Internal(why) => Error::Internal(why),
-        e => Error::Refused(e),
+        e @ (Ops::BlendFailed { .. }
+        | Ops::BlendNotCertified { .. }
+        | Ops::EdgeNotBlendable { .. }
+        | Ops::ContinuesInto { .. }
+        | Ops::RoundTooSmall { .. }
+        | Ops::ChamferAngleTooLarge { .. }
+        | Ops::RoundsCross { .. }) => Error::Refused(e),
+        e => super::call::error(call, e, detail),
     }
 }
 
