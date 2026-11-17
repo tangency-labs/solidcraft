@@ -144,6 +144,7 @@ use crate::curve::curve::{Curve, CurveKind};
 use crate::error::{ignore_status, ignored, Result, SolidError};
 use crate::eval::collapse::certified_partials;
 use crate::eval::spline::EvalSurface;
+use crate::geom::certified;
 use crate::geom::extent1d::Extent1d;
 use crate::geom::extent1d::ExtentNd;
 use crate::geom::extent2d::Extent2d;
@@ -1305,11 +1306,15 @@ impl Surface {
         // end's and a kink's slopes must be proven, and a stationary point's curvature
         // counts as not positive unless it is proven above `SM_EFF_ZERO`.
         let certified = certified_evaluator(k, self)?;
-        let charges = |t: f64, f: f64, f_prime: f64| -> (f64, f64) {
+        let charges_at = |t: f64, f: f64, f_prime: f64| -> (f64, f64, f64) {
             certified
                 .as_ref()
                 .and_then(|e| slope_charges(e, uv, s_dir, singular_dir, t, f, f_prime))
-                .unwrap_or((0.0, 0.0))
+                .unwrap_or((0.0, 0.0, 0.0))
+        };
+        let charges = |t: f64, f: f64, f_prime: f64| -> (f64, f64) {
+            let (cf, cfp, _) = charges_at(t, f, f_prime);
+            (cf, cfp)
         };
         let efo = super::p1::FindSingularParamWithGivenTangentDir::new(
             k,
@@ -1353,7 +1358,16 @@ impl Surface {
             else {
                 return Ok(None);
             };
-            let (cf, _) = charges(s, f, 0.0);
+            // (the certified evaluator takes a knot's own span, so a one-sided slope is
+            // charged at the neighbouring double on its side, plus the slope's drift
+            // over that ulp, `|F'|` bounded there)
+            let at = if side == Side::Right {
+                certified::next_down(s)
+            } else {
+                certified::next_up(s)
+            };
+            let (cf, _, curvature) = charges_at(at, f, 0.0);
+            let cf = (cf + 2.0 * curvature * (at - s).abs()) * (1.0 + gamma(4));
             Ok(if f > cf {
                 Some(true)
             } else if f < -cf {
@@ -3646,8 +3660,9 @@ fn certified_evaluator(k: &Kernel, surface: &Surface) -> Result<Option<EvalSurfa
 /// and quotients' by their factors'), and the gap between the certified value and the
 /// solve's own is added (they are both computed: the exact value is within the bound
 /// of the first, so within that plus the gap of the second; a one-sided evaluation at
-/// a knot that differs from the certified side shows up in that gap). `None` where
-/// the evaluator gives no bound or `|w|` is not above its error.
+/// a knot that differs from the certified side shows up in that gap), and a bound on
+/// `|F'_exact|` at `s`. `None` where the evaluator gives no bound or `|w|` is not above
+/// its error.
 #[allow(clippy::too_many_arguments)]
 fn slope_charges(
     eval: &EvalSurface,
@@ -3657,7 +3672,7 @@ fn slope_charges(
     s: f64,
     f: f64,
     f_prime: f64,
-) -> Option<(f64, f64)> {
+) -> Option<(f64, f64, f64)> {
     let (q, w, ws, wss) = if singular_dir == SurfParamType::U {
         ([s, uv.y], (0, 1), (1, 1), (2, 1))
     } else {
@@ -3697,7 +3712,8 @@ fn slope_charges(
     let scale = 1.0 + gamma(16);
     let cf = ((d1 + own) + (fc - f).abs()) * scale;
     let cfp = ((d2 + own) + (fpc - f_prime).abs()) * scale;
-    (cf.is_finite() && cfp.is_finite()).then_some((cf, cfp))
+    let curvature = (fpc.abs() + d2 + own) * scale;
+    (cf.is_finite() && cfp.is_finite() && curvature.is_finite()).then_some((cf, cfp, curvature))
 }
 
 /// The Newton solve of `FindDegenParamForDirection`
