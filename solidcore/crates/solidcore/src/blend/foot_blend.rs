@@ -831,7 +831,8 @@ const BOUNDARY_SAMPLES: usize = 32;
 /// loop's edges, each at [`BOUNDARY_SAMPLES`] points in its edge use's direction, dropped onto
 /// the surface (a periodic direction unwrapped along the loop), and `uv` inside by the
 /// even-odd rule over all loops (an outer loop and its holes), moved by whole periods to the
-/// loops' range. Sampled, not exact: it decides only where the kernel's classification would
+/// loops' range; on the boundary (within a millionth of the loops' size) counts as on the face,
+/// as the kernel's classification counts an edge or a vertex. Sampled, not exact: it decides only where the kernel's classification would
 /// have to make a trim curve in the part ([`face_holds`]). `target` is only read.
 ///
 /// # Errors
@@ -895,6 +896,21 @@ fn boundary_holds(
         unwrap(uv.x, 0.5 * (lo.x + hi.x), pu),
         unwrap(uv.y, 0.5 * (lo.y + hi.y), pv),
     );
+    // on the boundary (to a millionth of the loops' size, in the parameters): on the face, as
+    // the kernel's classification counts an edge or a vertex
+    let near = 1e-6 * (hi.x - lo.x).max(hi.y - lo.y).max(f64::MIN_POSITIVE);
+    for polygon in &polygons {
+        for (j, &a) in polygon.iter().enumerate() {
+            let Some(&b) = polygon.get((j + 1) % polygon.len()) else {
+                continue;
+            };
+            let (ab, aq) = (b - a, at - a);
+            let t = (aq.dot(ab) / ab.dot(ab).max(f64::MIN_POSITIVE)).clamp(0.0, 1.0);
+            if (aq - ab * t).length() <= near {
+                return Ok(true);
+            }
+        }
+    }
     let mut inside = false;
     for polygon in &polygons {
         for (j, &a) in polygon.iter().enumerate() {
