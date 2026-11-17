@@ -633,16 +633,19 @@ fn wr_614_diverging_same_side_boxes_keep_crossing() {
 /// certifies the strip between E and that curve within tolerance of B
 /// (`topology_intersector::curved_strip`) and drops the curve: the union is one valid
 /// manifold solid. The two operands touch along the coincident faces and do not overlap,
-/// so its volume is the sum of theirs, each integrated to 1e-9 relative (MEASURED: they
-/// agree to 2e-16).
+/// so its volume is the sum of theirs: the certified enclosures (`enclose_volume`, each
+/// at most 0.04 wide) of the union and of the two operands' sum must meet (PROVEN when
+/// they do: both hold the true volume; MEASURED: body [47534.0631202, 47534.1021680],
+/// kept [150.8624456, 150.9011549], union [47684.9444051, 47684.9842170]).
 #[test]
 fn curved_strip_join_union_is_one_valid_solid() {
     use solidcore::geom::attribute::AttributeStore as Store;
+    use solidcore::mass::enclosure::enclose_volume;
     use solidcore::topology::api_files::read_brep_from_file;
     use solidcore::topology::brep::p10::TopologyEnv;
     use solidcore::topology::topology::NotifyRecords;
 
-    const JOIN_ACCURACY: f64 = 1e-9;
+    const WIDTH: f64 = 0.04;
     let load = |k: &mut Kernel, bytes: &[u8]| {
         let fresh = Brep::new();
         let mut store = Store::new();
@@ -659,29 +662,24 @@ fn curved_strip_join_union_is_one_valid_solid() {
         b.refresh_cached_topology();
         b
     };
-    let volume = |k: &Kernel, b: &mut Brep| {
-        let store = AttributeStore::default();
-        let attrs = PropertyAttributes {
-            store: &store,
-            key_of: &|_| ObjectKey(0),
-        };
-        brep_volume(k, b, JOIN_ACCURACY, &attrs).unwrap()
-    };
     let mut k = Kernel {
         fixes: UpstreamFixes::all(),
         ..Kernel::default()
     };
     let mut body = load(&mut k, include_bytes!("data/curved_strip_join_body.smb"));
     let mut kept = load(&mut k, include_bytes!("data/curved_strip_join_kept.smb"));
-    let want = volume(&k, &mut body) + volume(&k, &mut kept);
+    let body_v = enclose_volume(&k, &mut body, WIDTH).unwrap();
+    let kept_v = enclose_volume(&k, &mut kept, WIDTH).unwrap();
 
     let mut u = boolean_union(&mut k, body, kept).unwrap();
     assert_eq!(shape(&u).3, 1, "one solid region");
     assert!(shape(&u).4, "manifold solid");
     assert_valid(&mut k, &mut u, "curved strip join");
-    let v = volume(&k, &mut u);
+    let v = enclose_volume(&k, &mut u, WIDTH).unwrap();
+    // (the operands touch and do not overlap: the union's volume is their sum)
     assert!(
-        (v - want).abs() <= 2.0 * JOIN_ACCURACY * want,
-        "volume {v}, want {want}"
+        v.lo <= body_v.hi + kept_v.hi && v.hi >= body_v.lo + kept_v.lo,
+        "union {v:?}, body {body_v:?}, kept {kept_v:?}"
     );
 }
+

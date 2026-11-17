@@ -500,10 +500,18 @@ pub fn distance_bound(form: &BSplineSurface, a: &Implicit, delta: [f64; 2]) -> R
 /// point of the surface at the same height and angle lies `|ρ − ρ_P| = |F| / (ρ + ρ_P) ≤
 /// |F| / ρ_P` away. `ρ_P` is bounded below over the patch's heights by [`radius_floor`]
 /// (`None` near the apex, where it is not). The rounding of the Bézier decomposition and of
-/// the extraction of a sub-patch before it (knot insertions: chains of convex
-/// combinations, at most `2 (p + q)` per point between them) is the slack of
-/// [`distance_bound`] with `γ_{8(p+q)+8}`, twice its chain. The whole is the largest over
-/// the patches, grown by a few roundings.
+/// the extraction of a sub-patch before it is the slack of [`distance_bound`] with
+/// `γ_{24(p+q)+8}` (ARGUED, a count of the knot insertions, not checked): each is a level
+/// of convex combinations of homogeneous points, a point's chain running through at most
+/// `p` insertions at each end of the extraction in u and `2 (p − 1)` of the
+/// decomposition's at its span's two knots (and the same in v with `q`), at most
+/// `4 (p + q)` levels in all, each at most six roundings (the ratio, its complement, two
+/// products, a sum, and the ratio's own error carried through); `8` more cover the
+/// coefficients' scale. The margin against the uses is wide: the slack is a relative
+/// `γ_{152} ≈ 3.4e-14` for a bicubic patch, against bounds compared with tolerances of
+/// `1e-6` and more. A patch whose rounding `τ` is below `MIN_POSITIVE / ε` (where the
+/// coefficients' underflow is not inside the `γ` model, as [`distance_bound`]) has no
+/// bound. The whole is the largest over the patches, grown by a few roundings.
 ///
 /// # Errors
 ///
@@ -545,8 +553,10 @@ pub(crate) fn off_surface_bound(form: &BSplineSurface, a: &Implicit) -> Result<O
                 1 => Ivl::from(w0),
                 _ => Ivl::from(w0) * Ivl::from(w0),
             };
-            // (not a number refuses)
-            let normal = power.lo >= f64::MIN_POSITIVE;
+            // (not a number refuses; as [`distance_bound`], the `γ` model leaves out
+            // underflow, inside the final growth only with `τ ≥ MIN_POSITIVE / ε`)
+            let normal = power.lo >= f64::MIN_POSITIVE
+                && r.tol >= f64::MIN_POSITIVE / f64::EPSILON;
             if !normal {
                 return Ok(None);
             }
@@ -576,7 +586,7 @@ pub(crate) fn off_surface_bound(form: &BSplineSurface, a: &Implicit) -> Result<O
                 }
                 Implicit::Sphere { .. } | Implicit::Torus { .. } => return Ok(None),
             };
-            let g = gamma(8 * (p + q) + 8);
+            let g = gamma(24 * (p + q) + 8);
             // (`absolute` is a largest coordinate: a Euclidean length is under twice it)
             let slack = 2.0 * g * r.absolute * (1.0 + r.wmax / w0) / w0;
             let patch_bound = off + slack;
@@ -2751,7 +2761,8 @@ mod tests {
     /// patch at x = 2 (y, z from 0 to 1) lies 0.5 from the plane x = 1.5, and its equation
     /// is linear in the homogeneous coordinates (weights 1), so the bound is 0.5 within a
     /// few roundings (PROVEN: never below the true distance), and on the plane x = 2 only
-    /// the counted rounding (the slack `2 γ₂₄ · 2 · 2`, under 1e-13; MEASURED 5.7e-14).
+    /// the counted rounding (the slack `2 γ₅₆ · 2 · 2 ≈ 9.9e-14` plus the coefficients'
+    /// `τ`, under 2e-13). Not a number in a control point or in the equation has no bound.
     #[test]
     fn a_plane_patch_off_a_plane_is_bounded_by_its_distance() {
         let patch = BSplineSurface::create_canonical(&CanonicalSurfaceData {
@@ -2780,7 +2791,62 @@ mod tests {
         let off = off_surface_bound(&patch, &plane(1.5)).unwrap().unwrap();
         assert!((0.5..=0.5 * (1.0 + 1e-12)).contains(&off), "{off:e}");
         let on = off_surface_bound(&patch, &plane(2.0)).unwrap().unwrap();
-        assert!((0.0..=1e-13).contains(&on), "{on:e}");
+        assert!((0.0..=2e-13).contains(&on), "{on:e}");
+        // (not a number in the equation, or in a control point)
+        let nan_plane = Implicit::Plane {
+            origin: Vec3::new(f64::NAN, 0.0, 0.0),
+            normal: Vec3::X,
+        };
+        assert_eq!(off_surface_bound(&patch, &nan_plane).unwrap(), None);
+        assert_eq!(off_surface_bound(&patch, &cone(1.0, f64::NAN)).unwrap(), None);
+        let nan_patch = BSplineSurface::create_canonical(&CanonicalSurfaceData {
+            u_degree: 1,
+            v_degree: 1,
+            control_points: &[
+                Point3::new(2.0, 0.0, 0.0),
+                Point3::new(f64::NAN, 1.0, 0.0),
+                Point3::new(2.0, 0.0, 1.0),
+                Point3::new(2.0, 1.0, 1.0),
+            ],
+            form: BSplineSurfaceForm::Unspecified,
+            u_multiplicities: &[2, 2],
+            v_multiplicities: &[2, 2],
+            u_knots: &[0.0, 1.0],
+            v_knots: &[0.0, 1.0],
+            knot_type: KnotType::Unspecified,
+            weights: Some(&[1.0; 4]),
+            uv_domain: None,
+        });
+        // (a patch so small that its coefficients' rounding `τ` is below
+        // `MIN_POSITIVE / ε`, where underflow is outside the `γ` model: no bound)
+        let tiny = BSplineSurface::create_canonical(&CanonicalSurfaceData {
+            u_degree: 1,
+            v_degree: 1,
+            control_points: &[
+                Point3::new(2e-300, 0.0, 0.0),
+                Point3::new(2e-300, 1e-300, 0.0),
+                Point3::new(2e-300, 0.0, 1e-300),
+                Point3::new(2e-300, 1e-300, 1e-300),
+            ],
+            form: BSplineSurfaceForm::Unspecified,
+            u_multiplicities: &[2, 2],
+            v_multiplicities: &[2, 2],
+            u_knots: &[0.0, 1.0],
+            v_knots: &[0.0, 1.0],
+            knot_type: KnotType::Unspecified,
+            weights: Some(&[1.0; 4]),
+            uv_domain: None,
+        })
+        .unwrap();
+        let tiny_plane = Implicit::Plane {
+            origin: Vec3::new(1.5e-300, 0.0, 0.0),
+            normal: Vec3::X,
+        };
+        assert_eq!(off_surface_bound(&tiny, &tiny_plane).unwrap(), None);
+        // (a surface that cannot be made from it is refused earlier, as well)
+        if let Ok(nan_patch) = nan_patch {
+            assert_eq!(off_surface_bound(&nan_patch, &plane(2.0)).unwrap_or(None), None);
+        }
     }
 
     /// [`off_surface_bound`] of a cylinder r 50, z 0 to 100, as the kernel stores it (a

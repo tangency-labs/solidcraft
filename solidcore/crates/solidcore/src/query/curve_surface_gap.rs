@@ -382,6 +382,48 @@ fn certified_gap(
     Ok(worst.is_finite().then_some(worst))
 }
 
+/// A proved upper bound on `sup |C(t) − S(W(t))|` over `t` in `range`, for the 3D curve
+/// `curve` (`C`), a B-spline `uv` of parameters `(u, v, 0)` on the same parameter (`W`: a
+/// UV curve or trim of `C` on the surface), and `surface`'s net (`S`): how far the curve
+/// strays from the surface's image of its UV curve, the bound [`certified_gap`] encloses
+/// (not upstream, tangency-labs/solidcraft#18166). For a surface kept as the net of a
+/// definition (a blend's or a sweep's), `S` is the net: the caller adds the net's own bound.
+/// `floor` is the caller's scale, as for [`curve_face_gap_bound`].
+///
+/// `None` when the gap is not enclosed: an empty, unordered or not finite `range`, a
+/// surface that is not a NURBS net or whose net's parameters are not the surface's
+/// ([`NetSurface::of`], probed at `W`'s ends and middle), a `W` that cannot be evaluated,
+/// or a piece the bisection cannot bound.
+///
+/// # Errors
+///
+/// The kernel's unported and cancelled statuses.
+pub(crate) fn curve_uv_gap_bound(
+    k: &Kernel,
+    curve: &BSplineCurve,
+    uv: &BSplineCurve,
+    surface: &Surface,
+    range: [f64; 2],
+    floor: f64,
+) -> Result<Option<f64>> {
+    let [lo, hi] = range;
+    if !(lo.is_finite() && hi.is_finite() && lo < hi && floor.is_finite() && floor >= 0.0) {
+        return Ok(None);
+    }
+    let mut probe = Vec::new();
+    for t in [lo, 0.5 * (lo + hi), hi] {
+        let Ok(w) = uv.evaluate_point(t) else {
+            return Ok(None);
+        };
+        probe.push(Point2::new(w.x, w.y));
+    }
+    let surface = surface.clone_for_evaluation()?;
+    let Some(net) = NetSurface::of(k, &surface, &probe)? else {
+        return Ok(None);
+    };
+    certified_gap(curve, uv, &net, range, FIRST_PIECES, floor)
+}
+
 /// A proved upper bound on the distance from every point of `curve` over its parameters
 /// `range` to the surface of face `face` over that surface's parameter box: no point of the
 /// curve there is farther from the surface. `floor` is the caller's scale (a hundredth of the
@@ -530,5 +572,66 @@ mod tests {
                 .unwrap()
                 .is_none()
         ));
+    }
+
+    /// [`curve_uv_gap_bound`] of a line `lift` above the bilinear plane patch z = 0 (x, y
+    /// in 0..1), at the UV line under it with the same parameters: at least `lift` and no
+    /// more than rounding above it. The same line read at the UV line's reversed parameters
+    /// (the same image, other points) is bounded by its true gap, at least the half length
+    /// of the line's shadow; an empty range encloses nothing.
+    #[test]
+    fn a_line_over_its_uv_line_is_bounded_by_its_height() {
+        use crate::nurbs::b_spline_curve::KnotType;
+        use crate::nurbs::b_spline_surface::{
+            BSplineSurface, BSplineSurfaceForm, CanonicalSurfaceData,
+        };
+        let k = Kernel::default();
+        let plane = BSplineSurface::create_canonical(&CanonicalSurfaceData {
+            u_degree: 1,
+            v_degree: 1,
+            control_points: &[
+                Point3::new(0.0, 0.0, 0.0),
+                Point3::new(0.0, 1.0, 0.0),
+                Point3::new(1.0, 0.0, 0.0),
+                Point3::new(1.0, 1.0, 0.0),
+            ],
+            form: BSplineSurfaceForm::Unspecified,
+            u_multiplicities: &[2, 2],
+            v_multiplicities: &[2, 2],
+            u_knots: &[0.0, 1.0],
+            v_knots: &[0.0, 1.0],
+            knot_type: KnotType::Unspecified,
+            weights: Some(&[1.0; 4]),
+            uv_domain: None,
+        })
+        .unwrap();
+        let surface = Surface::from(plane);
+        let line = |a: [f64; 3], b: [f64; 3]| {
+            let c = NurbCurve::new(
+                vec![
+                    CPoint::new(a[0], a[1], a[2], NOW),
+                    CPoint::new(b[0], b[1], b[2], NOW),
+                ],
+                1,
+                vec![0.0, 0.0, 1.0, 1.0],
+            )
+            .unwrap();
+            BSplineCurve::from_nurb(c, 3, false)
+        };
+        let lift = 4.2e-7;
+        let curve = line([0.2, 0.3, lift], [0.7, 0.6, lift]);
+        let uv = line([0.2, 0.3, 0.0], [0.7, 0.6, 0.0]);
+        let g = curve_uv_gap_bound(&k, &curve, &uv, &surface, [0.0, 1.0], 1e-9)
+            .unwrap()
+            .unwrap();
+        assert!(g >= lift && g <= lift * (1.0 + 1e-6), "{g:e}");
+        let reversed = line([0.7, 0.6, 0.0], [0.2, 0.3, 0.0]);
+        let g = curve_uv_gap_bound(&k, &curve, &reversed, &surface, [0.0, 1.0], 1e-9)
+            .unwrap()
+            .unwrap();
+        let half_shadow = 0.5 * (0.5_f64 * 0.5 + 0.3 * 0.3).sqrt();
+        assert!(g >= half_shadow, "{g:e}");
+        let empty = curve_uv_gap_bound(&k, &curve, &uv, &surface, [0.5, 0.5], 1e-9).unwrap();
+        assert_eq!(empty, None);
     }
 }
