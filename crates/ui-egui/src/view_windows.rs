@@ -231,6 +231,13 @@ fn placement(app: &SolveApp, view: u64, request: &Value, pointer: Option<egui::P
     })
 }
 
+pub(crate) fn drag_window_outline(app: &SolveApp, view: u64, pointer: Option<egui::Pos2>) -> Option<egui::Rect> {
+    let placement = placement(app, view, &Value::Null, pointer)?;
+    let display = app.view_windows.displays.iter().find(|display| placement.display.as_deref() == Some(display.name.as_str()))?;
+    let origin = display.bounds.min + egui::vec2(placement.x, placement.y) * display.scale;
+    Some(egui::Rect::from_min_size(origin, egui::vec2(placement.w, placement.h) * display.scale))
+}
+
 fn placement_json(placement: Option<&WindowPlacement>) -> Value {
     placement.map_or(Value::Null, |p| json!({"x":p.x,"y":p.y,"w":p.w,"h":p.h,"maximised":p.maximised,"fullscreen":p.fullscreen}))
 }

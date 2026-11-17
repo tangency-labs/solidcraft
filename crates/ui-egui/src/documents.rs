@@ -2789,7 +2789,7 @@ pub fn tabs(app: &mut SolveApp, ui: &mut egui::Ui, r: Rect, x0: f32, x1: f32) {
             | crate::app_bar::TabAction::ViewRenameCancelled => {}
             crate::app_bar::TabAction::DockView { view, pointer, released } if idle => {
                 if let Some(id) = strip_view_id(app, view) {
-                    window_drop = crate::view_window_drag::route(app, ui.ctx(), id, pointer, released, r.bottom() + 6.0);
+                    window_drop = crate::view_window_drag::route(app, ui.ctx(), id, pointer, released);
                     if !window_drop && pointer.y > r.bottom() + 6.0 {
                         crate::view_tiles::tab_drag(app, ui.ctx(), id, pointer, released);
                     }
