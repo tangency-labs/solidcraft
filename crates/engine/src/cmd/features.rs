@@ -3925,6 +3925,23 @@ fn sketch_hole_points(s: &Session, sketch: u64) -> Vec<String> {
             solidcraft_sketch::CurveKind::Conic { a, b, apex, .. } => ends.extend([*a, *b, *apex]),
         }
     }
+    // A construction rectangle's centre sits at the midpoint of its construction diagonal: it is
+    // the rectangle's reference geometry, not a hole site. It counts as that when every line through
+    // the diagonal's ends (the rectangle's edges and both diagonals) is construction.
+    let line_ends = |c: &solidcraft_sketch::Curve| match &c.kind {
+        solidcraft_sketch::CurveKind::Line { a, b } => Some([*a, *b]),
+        _ => None,
+    };
+    for con in &ss.sketch.constraints {
+        let solidcraft_sketch::ConstraintKind::Midpoint { p, l } = &con.kind else { continue };
+        let Some(diag) = ss.sketch.curves.get(*l) else { continue };
+        let Some(diag_ends) = line_ends(diag) else { continue };
+        let all_construction =
+            ss.sketch.curves.iter().filter(|c| line_ends(c).is_some_and(|e| e.iter().any(|v| diag_ends.contains(v)))).all(|c| c.construction);
+        if all_construction {
+            ends.push(*p);
+        }
+    }
     ss.sketch.points.iter().enumerate().filter(|(i, p)| p.id != "origin" && !ends.contains(i)).map(|(_, p)| p.id.clone()).collect()
 }
 
