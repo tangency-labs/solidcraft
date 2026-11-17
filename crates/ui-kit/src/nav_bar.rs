@@ -337,6 +337,11 @@ fn overflow_menu(ui: &mut egui::Ui, bar: &Bar<'_>, open: &mut String, action: &m
     }
 }
 
+/// Room kept free above and below a submenu that scrolls.
+const SUBMENU_GAP: f32 = 16.0;
+/// The least height a scrolling submenu keeps for its rows.
+const SUBMENU_MIN_ROOM: f32 = 60.0;
+
 /// A menu's rows; the id of the row picked, if any.
 fn menu_rows(ui: &mut egui::Ui, entries: &[MenuEntry]) -> Option<String> {
     let mut picked = None;
@@ -352,15 +357,21 @@ fn menu_rows(ui: &mut egui::Ui, entries: &[MenuEntry]) -> Option<String> {
                     }
                     continue;
                 }
+                // A long submenu (many saved layouts) scrolls inside the window, so every row
+                // stays reachable in a short one.
+                let room = (ui.ctx().content_rect().height() - 2.0 * (f32::from(crate::NAV_POPUP_PADDING) + crate::NAV_BORDER) - SUBMENU_GAP)
+                    .max(SUBMENU_MIN_ROOM);
                 Container::new(ui.ctx(), Surface::Popup).menu(&response).frame(crate::navigation_popup_frame()).show(|ui| {
                     ui.set_width(crate::NAV_POPUP_WIDTH - 2.0 * (f32::from(crate::NAV_POPUP_PADDING) + crate::NAV_BORDER));
                     ui.spacing_mut().item_spacing.y = 0.0;
-                    for sub in &row.submenu {
-                        if menu_row(ui, sub).clicked() {
-                            picked = Some(sub.id.clone());
-                            ui.close();
+                    egui::ScrollArea::vertical().id_salt(("nav_submenu", &row.id)).max_height(room).min_scrolled_height(room).show(ui, |ui| {
+                        for sub in &row.submenu {
+                            if menu_row(ui, sub).clicked() {
+                                picked = Some(sub.id.clone());
+                                ui.close();
+                            }
                         }
-                    }
+                    });
                 });
             }
         }
