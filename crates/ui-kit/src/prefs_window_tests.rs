@@ -303,41 +303,47 @@ fn invalid_draft_fields_keep_ok_and_apply_editable_until_corrected() {
     }
 }
 
-/// #15908: the footer's Restore Defaults is drawn like Cancel, Apply and OK: the same rounded corners
-/// on a frame of its own, not the hairline square outline a frameless button shows.
 #[test]
-fn restore_defaults_is_drawn_like_the_footer_buttons() {
-    let (ctx, mut fake) = opened();
-    registry::clear_handles();
-    let output = crate::test_support::raw_frame(
-        &ctx,
-        egui::RawInput {
-            screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1200.0, 900.0))),
-            focused: true,
-            ..Default::default()
-        },
-        |ui| {
-            show(ui.ctx(), &mut fake, PAGES, &options("test"), |_| {});
-        },
-    );
-    /// The corner radius of the rectangle drawn over `rect`: on its centre, about its size.
-    fn corners(shape: &egui::Shape, rect: egui::Rect) -> Option<egui::CornerRadius> {
+fn restore_defaults_underlines_on_hover_without_a_frame() {
+    fn paints_frame(shape: &egui::Shape, hit_rect: egui::Rect) -> bool {
         match shape {
-            egui::Shape::Rect(r)
-                if (r.rect.center() - rect.center()).length() < 2.0
-                    && r.rect.width() <= rect.width() + 16.0
-                    && r.rect.height() <= rect.height() + 16.0
-                    && (r.fill != egui::Color32::TRANSPARENT || r.stroke.width > 0.0) =>
-            {
-                Some(r.corner_radius)
+            egui::Shape::Rect(rect) => {
+                (rect.rect.center() - hit_rect.center()).length() < 2.0
+                    && rect.rect.width() <= hit_rect.width() + 16.0
+                    && rect.rect.height() <= hit_rect.height() + 16.0
+                    && (rect.fill != egui::Color32::TRANSPARENT || !rect.stroke.is_empty())
             }
-            egui::Shape::Vec(shapes) => shapes.iter().find_map(|s| corners(s, rect)),
-            _ => None,
+            egui::Shape::Vec(shapes) => shapes.iter().any(|s| paints_frame(s, hit_rect)),
+            _ => false,
         }
     }
-    let of = |name: &str| {
-        let rect = registry::rect_of(name).unwrap_or_else(|| panic!("{name} is published"));
-        output.shapes.iter().find_map(|clipped| corners(&clipped.shape, rect)).unwrap_or_else(|| panic!("{name} is drawn on a frame"))
-    };
-    assert_eq!(of("test:defaults"), of("test:cancel"), "Restore Defaults has Cancel's corners");
+
+    let (ctx, mut fake) = opened();
+    let rect = registry::rect_of("test:defaults").expect("Restore Defaults is published");
+    let options = options("test");
+    for hovered in [false, true] {
+        let pointer = if hovered { rect.center() } else { egui::Pos2::ZERO };
+        let output = crate::test_support::raw_frame(
+            &ctx,
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1200.0, 900.0))),
+                focused: true,
+                events: vec![egui::Event::PointerMoved(pointer)],
+                ..Default::default()
+            },
+            |ui| {
+                show(ui.ctx(), &mut fake, PAGES, &options, |_| {});
+            },
+        );
+        assert!(!output.shapes.iter().any(|s| paints_frame(&s.shape, rect)));
+        let text = output
+            .shapes
+            .iter()
+            .find_map(|s| match &s.shape {
+                egui::Shape::Text(text) if text.galley.job.text == options.labels.restore_defaults => Some(text),
+                _ => None,
+            })
+            .expect("Restore Defaults label is painted");
+        assert_eq!(text.galley.job.sections.iter().any(|s| !s.format.underline.is_empty()), hovered);
+    }
 }
