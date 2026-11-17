@@ -68,6 +68,7 @@ pub fn export_file(session: &Session, exporter: &FormatSlot, path: &str, options
             session: session.scratch(),
             transaction: None,
             sketch_exits: Vec::new(),
+            view: None,
             groups: BTreeSet::new(),
             file_folders: Vec::new(),
             evaluation: None,
