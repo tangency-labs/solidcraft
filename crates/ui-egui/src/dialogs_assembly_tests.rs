@@ -364,6 +364,33 @@ fn edit_joint_runs_edit_and_limits() {
     assert!((j.offset - 2.0).abs() < 1e-12);
 }
 
+/// Edit Joint sends the joint's name with every edit: a joint whose own name is over 128
+/// characters (joint.create takes any) can still be edited from the dialog, its name kept.
+#[test]
+fn edit_joint_edits_a_joint_with_a_long_name() {
+    let mut app = two_boxes();
+    let (a, b) = (occ(&app, "A"), occ(&app, "B"));
+    let long = "x".repeat(200);
+    app.run(
+        "joint.create",
+        json!({"type": "slider", "name": long, "a": {"occurrence": a, "face": [10, 10, 10]}, "b": {"occurrence": b, "face": [40, 10, 0]}}),
+    )
+    .unwrap();
+    let id = app.session.doc.assembly.joints[0].id;
+    let mut d = edit_joint(&app, id).unwrap();
+    if let Kind::Assembly(Asm::Joint(f)) = &mut d.kind {
+        f.offset[2] = "2 mm".into();
+    }
+    let c = apply_commands(&app, &d).unwrap();
+    assert!(c.iter().any(|(id, p)| id == "joint.edit" && p["name"] == json!(long)), "the dialog sends the name: {c:?}");
+    for (id, p) in c {
+        app.run(&id, p).unwrap();
+    }
+    let j = &app.session.doc.assembly.joints[0];
+    assert!((j.offset - 2.0).abs() < 1e-12, "the edit went through");
+    assert_eq!(j.name, long);
+}
+
 /// An old edge pick saved as point/z keeps its face-normal axis when reopened and edited.
 #[test]
 fn editing_a_saved_joint_keeps_its_explicit_axis() {
@@ -1716,6 +1743,32 @@ fn a_woken_middle_lies_on_the_face_beside_its_edge() {
     assert_eq!(got.kind, SnapKind::EdgeMid);
     assert!(got.z.dist(-Vec3::Y) < 1e-9 || got.z.dist(Vec3::Z) < 1e-9, "the front or the top face's normal: {got:?}");
     assert!(got.param["edge"].is_array() && got.param["on"].is_array() && got.param.get("z").is_none(), "{}", got.param);
+}
+
+/// With only Faces in the selection filter, a joint origin clicked right on an edge is the face
+/// there, not the edge or a woken point on it, and no points wake (#18255). Unfiltered, the same
+/// click takes the edge's middle.
+#[test]
+fn a_faces_only_filter_keeps_joint_origins_on_faces() {
+    let mut h = joint_picking_component_1();
+    let middle = Vec3::new(10.0, 0.0, 10.0);
+    let at = h.call("ui.at", json!({ "world": [10, 0, 10] }))["result"].clone();
+    h.step(&json!({ "move": { "world": [10, 0, 10] } })).unwrap();
+    h.step(&json!({ "click": at })).unwrap();
+    let picked = h.app.dialog.as_ref().unwrap().inputs[0].items.clone();
+    assert!(matches!(picked.as_slice(), [Sel::Edge { .. } | Sel::Vertex { .. }]), "unfiltered, the edge: {picked:?}");
+
+    let mut h = joint_picking_component_1();
+    h.app.ui.pick_off = vec!["edges".into(), "vertices".into()];
+    h.step(&json!({ "move": { "world": [10, 0, 10] } })).unwrap();
+    assert!(h.app.viewport.woken.points.is_empty(), "no points wake: {:?}", h.app.viewport.woken.points);
+    h.step(&json!({ "click": at })).unwrap();
+    let d = h.app.dialog.as_ref().unwrap();
+    let picked = d.inputs[0].items.clone();
+    assert!(matches!(picked.as_slice(), [Sel::Face { body, .. }] if body == "Body1"), "the face at the edge: {picked:?}");
+    let got = snap_in(&h.app, &d.inputs[0], &picked[0]).unwrap();
+    assert_eq!(got.kind, SnapKind::FaceCenter);
+    assert_ne!(got.at, middle, "the face's centre, not the edge's middle: {got:?}");
 }
 
 /// A woken point that is not its item's own snap (a straight edge's end) stays a point, and a

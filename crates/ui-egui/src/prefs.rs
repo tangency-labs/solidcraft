@@ -782,6 +782,44 @@ impl StandUpUnknown {
     }
 }
 
+/// Where a new Extrude dialog starts its distance (Preferences, Tools: "New extrude distance").
+/// Editing an extrude always keeps its own distance.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ExtrudeStart {
+    /// The distance of the last new extrude applied (`extrude_last_distance`); 10 until there is one.
+    LastUsed,
+    /// The length typed in `extrude_custom_distance`; 10 while it isn't a usable length.
+    Custom,
+    /// 10 in the design's unit, as before (the default). A saved value this version doesn't know
+    /// reads as this.
+    #[default]
+    #[serde(other)]
+    Fixed,
+}
+
+impl ExtrudeStart {
+    pub const ALL: [Self; 3] = [Self::Fixed, Self::LastUsed, Self::Custom];
+
+    /// The choice as `ui.prefs` and the saved preferences spell it.
+    pub fn id(self) -> &'static str {
+        match self {
+            Self::Fixed => "fixed",
+            Self::LastUsed => "last_used",
+            Self::Custom => "custom",
+        }
+    }
+
+    /// The message id of the choice's label.
+    pub fn label_id(self) -> &'static str {
+        match self {
+            Self::Fixed => "prefs.extrude_start.fixed",
+            Self::LastUsed => "prefs.extrude_start.last_used",
+            Self::Custom => "prefs.extrude_start.custom",
+        }
+    }
+}
+
 /// Which program reads the 3D mouse on Linux when both spacenavd and the device itself (hidraw)
 /// are there (Preferences: "3D mouse driver"). Read by the app's reader, not by this crate.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -1048,10 +1086,18 @@ preference_settings! {
         agent_chat_width: f32 = 380.0;
         agent_chat_minimized: bool = false;
     }
+    /// Show Home on an ordinary empty launch and after closing the last design.
+    show_home_on_startup: bool = true, PAGE_GENERAL;
+    /// Show the optional document browser beside the design.
+    show_document_browser: bool = false, PAGE_LAYOUT;
+    /// Preview card density in the document browser; Large preserves the existing layout.
+    library_thumbnail_size: crate::library::ThumbnailSize = crate::library::ThumbnailSize::Large, PAGE_LAYOUT;
     /// Units of new designs.
     default_units: String = "mm".into(), PAGE_DESIGN;
     /// Mouse mapping: `fusion`, `solidworks` or `inventor`.
     nav: String = "fusion".into(), PAGE_NAVIGATION;
+    /// Touchscreen drags orbit/pan; off preserves the mouse mapping's selection behavior.
+    touchscreen_navigation: bool = false, PAGE_NAVIGATION => check_tr("nav.touchscreen.label");
     /// Opt in to rotation through both poles with roll, without the Shift axis-snap spring.
     /// Independent of mouse bindings; false also preserves existing saved presets' behavior.
     free_orbit: bool = false, PAGE_NAVIGATION;
@@ -1563,6 +1609,14 @@ preference_settings! {
     /// switches the extent to To Object (off: picks only add profiles, as before). A click into the
     /// Profiles box makes the next picks profiles again.
     extrude_auto_to_object: bool = true, PAGE_TOOLS => check_tr("ui.extrude_auto_to_object");
+    /// Where a new Extrude starts its distance: `fixed` (the default: 10 in the design's unit, as
+    /// before), `last_used` (the last new extrude's distance) or `custom` (`extrude_custom_distance`).
+    extrude_start: ExtrudeStart = ExtrudeStart::default(), PAGE_TOOLS;
+    /// The length a new Extrude starts at with `extrude_start` `custom` (any length expression).
+    extrude_custom_distance: String = "10 mm".into(), PAGE_TOOLS;
+    /// The distance the last new extrude was applied with, in mm (empty until one is); kept when
+    /// defaults are restored.
+    extrude_last_distance: String = String::new();
     /// Extrude turns the view to isometric each time it opens, so the depth can be seen (#9176).
     /// Off (the default): the view stays as it is.
     extrude_view_isometric: bool = false, PAGE_TOOLS => check_id("prefs.extrude_view_isometric");
@@ -1774,8 +1828,15 @@ preference_settings! {
     sketch_state_icons: bool = true, PAGE_SKETCH;
     /// Show the construction-line family in Sketch CREATE; off restores the earlier menu.
     sketch_construction_lines: bool = true, PAGE_SKETCH;
+    /// The construction line tools as before #15066: the Construction/Normal switch under the
+    /// Length box, and the Sketch Palette's Line Type icons leave these tools alone. Off (the
+    /// default): those icons set the tools' line type.
+    construction_line_classic: bool = false, PAGE_SKETCH;
     /// Use the only straight construction line in the preselection as Mirror's reference.
     sketch_mirror_auto_line: bool = true, PAGE_SKETCH;
+    /// Pressing an active tool or dialog's shortcut again closes it, as Esc does. Off: the key
+    /// starts the tool or dialog again.
+    shortcut_again_ends_tool: bool = true, PAGE_SKETCH;
     /// A sketch tool's shortcut pressed again before the first point steps to the tool's next
     /// creation mode (#2459). Off (the default): the key starts the tool again, as it always has.
     shortcut_cycles_modes: bool = false, PAGE_SKETCH;
@@ -1848,6 +1909,10 @@ preference_settings! {
     /// When true: Shift+click adds without removing; Primary toggles.
     /// When false (default): Shift and Primary both toggle.
     selection_shift_add_only: bool = false, PAGE_SKETCH;
+    /// Web app Pencil mode: pen taps toggle items and a pen double-tap takes the whole body or
+    /// sketch; finger touches in the view only navigate, and a finger double-tap on a flat face
+    /// starts a sketch on it. Off (the default): pens and fingers act as the mouse does.
+    pencil_mode: bool = false, PAGE_SKETCH;
     /// Prefer movable sketch points on exact selection ties; off keeps point insertion order.
     prefer_free_sketch_points: bool = true, PAGE_SKETCH;
     /// Opt in to displaying and selecting drawn 3D curve nodes as construction references.
@@ -1912,6 +1977,13 @@ impl MiddleDoubleClick {
 
     pub fn label(self) -> &'static str {
         Self::ALL.iter().find(|(m, _, _)| *m == self).map_or("Home", |(_, _, l)| l)
+    }
+}
+
+impl Prefs {
+    /// Explicit files, samples and control clients keep their existing launch behavior.
+    pub fn home_on_launch(&self, has_file: bool, sample: bool, controlled: bool) -> bool {
+        self.show_home_on_startup && !has_file && !sample && !controlled
     }
 }
 
@@ -2854,7 +2926,7 @@ fn window_system_row(app: &mut SolveApp, ui: &mut egui::Ui, label_width: f32) {
 }
 
 /// Read startup settings without replacing unreadable data with defaults during a UI edit.
-fn read_graphics_settings(path: &std::path::Path) -> Result<serde_json::Value, String> {
+pub(crate) fn read_graphics_settings(path: &std::path::Path) -> Result<serde_json::Value, String> {
     let bytes = match std::fs::read(path) {
         Ok(bytes) => bytes,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(json!({})),
@@ -3088,7 +3160,10 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
             }),
         },
         sidebar_footer: Some((Tokens::get().space_24 * 2.0, crate::settings_profiles::sidebar)),
-        above_page: Some(|ui, app| panel_restore_banner(app, ui, &Tokens::get())),
+        above_page: Some(|ui, app| {
+            crate::policy::note(app, ui, "prefs:managed");
+            panel_restore_banner(app, ui, &Tokens::get());
+        }),
     };
     prefs_window::show(ctx, app, WINDOW_PAGES, &options, |app| {
         // Former page names remain usable as scenario handles.
@@ -3641,9 +3716,12 @@ pub fn control(app: &mut SolveApp, p: &serde_json::Value) -> Result<serde_json::
         o.insert("stand_up_offer".into(), json!(app.stand_up));
         o.insert("stand_up_note".into(), json!(app.stand_up.is_some() && app.stand_up_note));
         o.insert("dark".into(), json!(app.ui.dark));
-        let locked = app.policy.locked();
-        if !locked.is_empty() {
-            o.insert("policy".into(), json!({ "locked": locked, "check_updates": crate::policy::check_updates(app) }));
+        if app.policy.managed() {
+            let mut policy = json!({ "locked": app.policy.locked(), "check_updates": crate::policy::check_updates(app) });
+            if let (Some(name), Some(p)) = (app.policy.organization(), policy.as_object_mut()) {
+                p.insert("organization".into(), json!(name));
+            }
+            o.insert("policy".into(), policy);
         }
         o.insert("viewport_dark".into(), json!(app.viewport_dark()));
         o.insert("theme_ids".into(), json!(theme_choices(app).into_iter().map(|(id, _)| id).collect::<Vec<_>>()));
@@ -4500,6 +4578,11 @@ fn prepare_preferences(
     {
         return Err("`stand_up_unknown` must be ask, note or off".into());
     }
+    if let Some(v) = p.get("extrude_start")
+        && !ExtrudeStart::ALL.iter().any(|c| v.as_str() == Some(c.id()))
+    {
+        return Err("`extrude_start` must be fixed, last_used or custom".into());
+    }
     if let Some(v) = p.get("dimension_input")
         && !matches!(v.as_str(), Some("view" | "window"))
     {
@@ -5085,6 +5168,129 @@ mod tests {
         let mut restored = crate::SolveApp::new(Default::default(), Default::default());
         restored.load_prefs(&h.app.prefs());
         assert!(restored.preferences.keep_unsaved_in_browser, "it is saved with the settings");
+    }
+
+    #[test]
+    fn startup_choice_general_picker_obeys_cancel_and_ok() {
+        use serde_json::json;
+        let mut h = crate::scenario::Harness::new();
+        h.call("ui.prefs", json!({"open": "General"}));
+        for button in ["cancel", "ok"] {
+            let picker = crate::scenario::rect_of("prefs:startup").unwrap().center();
+            h.call("ui.click", json!({"x": picker.x, "y": picker.y}));
+            let design = crate::scenario::rect_of("prefs:startup_design").unwrap().center();
+            h.call("ui.click", json!({"x": design.x, "y": design.y}));
+            assert!(!h.app.preferences.show_home_on_startup);
+            h.call("ui.prefs", json!({"button": button}));
+            assert_eq!(h.app.preferences.show_home_on_startup, button == "cancel");
+            h.call("ui.prefs", json!({"open": "General"}));
+        }
+    }
+
+    #[test]
+    fn document_browser_visibility_defaults_hidden_and_preserves_explicit_choices() {
+        use serde_json::json;
+        let mut app = crate::SolveApp::new(solidcraft_engine::Session::default(), crate::Services::default());
+        assert!(!app.preferences.show_document_browser);
+        for saved in [json!({}), json!({"preferences": {}}), json!({"document_library": {"root": "/legacy/CAD"}})] {
+            app.load_prefs(&saved.to_string());
+            assert!(!app.preferences.show_document_browser);
+        }
+        for collapsed in [true, false] {
+            app.load_prefs(&json!({"preferences": {}, "document_library": {"collapsed": collapsed}}).to_string());
+            assert_eq!(app.preferences.show_document_browser, !collapsed);
+            for visible in [false, true] {
+                app.load_prefs(&json!({"preferences": {"show_document_browser": visible}, "document_library": {"collapsed": collapsed}}).to_string());
+                assert_eq!(app.preferences.show_document_browser, visible, "the canonical preference wins over legacy state");
+                let mut restored = crate::SolveApp::new(solidcraft_engine::Session::default(), crate::Services::default());
+                restored.load_prefs(&app.prefs());
+                assert_eq!(restored.preferences.show_document_browser, visible);
+            }
+        }
+        super::reset_preferences(&mut app.preferences, super::PAGE_LAYOUT);
+        assert!(!app.preferences.show_document_browser);
+    }
+
+    #[test]
+    fn document_browser_visibility_checkbox_obeys_cancel_and_ok() {
+        use serde_json::json;
+        let mut h = crate::scenario::Harness::new();
+        for button in ["cancel", "ok"] {
+            h.call("ui.prefs", json!({"open": "Layout"}));
+            h.app.prefs_window.shell.filter = "Show documents".into();
+            h.frames(3);
+            h.step(&json!({"click": {"handle": "prefs:show_document_browser"}})).unwrap();
+            assert!(h.app.preferences.show_document_browser);
+            h.call("ui.prefs", json!({"button": button}));
+            assert_eq!(h.app.preferences.show_document_browser, button == "ok");
+        }
+    }
+
+    #[test]
+    fn library_thumbnail_size_picker_obeys_cancel_and_ok() {
+        use serde_json::json;
+        let mut h = crate::scenario::Harness::new();
+        for button in ["cancel", "ok"] {
+            h.call("ui.prefs", json!({"open": "Layout"}));
+            h.app.prefs_window.shell.filter = "Document browser".into();
+            h.frames(3);
+            h.step(&json!({"click": {"handle": "prefs:document_browser:small"}})).unwrap();
+            assert_eq!(h.app.preferences.library_thumbnail_size, crate::library::ThumbnailSize::Small);
+            h.call("ui.prefs", json!({"button": button}));
+            assert_eq!(
+                h.app.preferences.library_thumbnail_size,
+                if button == "cancel" { crate::library::ThumbnailSize::Large } else { crate::library::ThumbnailSize::Small }
+            );
+        }
+    }
+
+    #[test]
+    fn library_thumbnail_size_defaults_persists_and_resets() {
+        use crate::library::ThumbnailSize;
+        let legacy: super::Prefs = serde_json::from_value(serde_json::json!({})).unwrap();
+        assert_eq!(legacy.library_thumbnail_size, ThumbnailSize::Large);
+        let mut app = crate::SolveApp::new(solidcraft_engine::Session::default(), crate::Services::default());
+        for (name, size) in [("small", ThumbnailSize::Small), ("medium", ThumbnailSize::Medium), ("large", ThumbnailSize::Large)] {
+            super::set(&mut app, &serde_json::json!({"library_thumbnail_size": name})).unwrap();
+            let mut restored = crate::SolveApp::new(solidcraft_engine::Session::default(), crate::Services::default());
+            restored.load_prefs(&app.prefs());
+            assert_eq!(restored.preferences.library_thumbnail_size, size);
+        }
+        assert!(super::set(&mut app, &serde_json::json!({"library_thumbnail_size": "invalid"})).is_err());
+        app.preferences.library_thumbnail_size = ThumbnailSize::Small;
+        super::reset_preferences(&mut app.preferences, super::PAGE_LAYOUT);
+        assert_eq!(app.preferences.library_thumbnail_size, ThumbnailSize::Large);
+    }
+
+    #[test]
+    fn startup_choice_defaults_persists_and_resets() {
+        use serde_json::json;
+        let legacy: super::Prefs = serde_json::from_value(json!({"default_units": "in"})).unwrap();
+        assert!(legacy.show_home_on_startup);
+        let mut app = crate::SolveApp::new(solidcraft_engine::Session::default(), crate::Services::default());
+        for home in [false, true, false] {
+            super::set(&mut app, &json!({"show_home_on_startup": home, "default_units": "in"})).unwrap();
+            let mut restored = crate::SolveApp::new(solidcraft_engine::Session::default(), crate::Services::default());
+            restored.load_prefs(&app.prefs());
+            assert_eq!(restored.preferences.show_home_on_startup, home);
+            assert_eq!(restored.preferences.default_units, "in");
+        }
+        super::defaults(&mut app, 0);
+        assert!(app.preferences.show_home_on_startup);
+    }
+
+    #[test]
+    fn startup_choice_only_affects_an_ordinary_empty_launch() {
+        for home in [true, false] {
+            let prefs = super::Prefs { show_home_on_startup: home, ..Default::default() };
+            for has_file in [true, false] {
+                for sample in [true, false] {
+                    for controlled in [true, false] {
+                        assert_eq!(prefs.home_on_launch(has_file, sample, controlled), home && !has_file && !sample && !controlled);
+                    }
+                }
+            }
+        }
     }
 
     #[test]
@@ -8594,8 +8800,10 @@ mod tests {
                 ("line_hover_tangent_arc", "prefs.line_hover_tangent_arc"),
                 ("center_arc_follows_cursor", "prefs.sketch.center_arc"),
                 ("sketch_construction_lines", "prefs.sketch_construction_lines"),
+                ("construction_line_classic", "prefs.construction_line_classic"),
                 ("sketch_auto_dimensions", "prefs.sketch.auto_dimensions"),
                 ("sketch_auto_locate", "prefs.sketch.auto_locate"),
+                ("shortcut_again_ends_tool", "prefs.sketch.shortcut_again_ends_tool"),
                 ("shortcut_cycles_modes", "prefs.sketch.shortcut_cycles_modes"),
                 ("ribbon_click_ends_tool", "prefs.ribbon_click_ends_tool"),
                 ("project_options_dialog", "prefs.sketch.project_options"),
@@ -12529,6 +12737,76 @@ mod ui_scale_regression_tests {
 #[cfg(test)]
 mod ambient_occlusion_tests {
     use super::*;
+
+    /// Safe graphics mode keeps every optional drawing feature off, whatever the saved settings
+    /// say, and leaves those settings as they were for full graphics.
+    #[test]
+    fn safe_graphics_mode_turns_each_optional_feature_off_and_keeps_the_settings() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.preferences.ambient_occlusion = true;
+        h.app.preferences.dark_parts_shading = true;
+        h.app.preferences.viewport_material_finish = true;
+        let full = |app: &SolveApp| {
+            [
+                crate::safe_graphics::ambient_occlusion(app),
+                crate::safe_graphics::dark_parts_shading(app),
+                crate::safe_graphics::material_finish(app),
+                crate::safe_graphics::blur(app),
+                crate::safe_graphics::path_tracer(app),
+            ]
+        };
+        assert_eq!(full(&h.app), [true; 5], "full graphics draws what the settings ask for");
+        let saved = h.app.prefs();
+        h.app.safe_graphics = true;
+        assert_eq!(full(&h.app), [false; 5], "ambient occlusion, dark parts shading, studio finish, blur, path tracer");
+        assert_eq!(h.app.prefs(), saved, "the saved settings are untouched");
+        let mut restored = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
+        restored.load_prefs(&saved);
+        assert!(restored.preferences.ambient_occlusion && restored.preferences.viewport_material_finish);
+    }
+
+    /// The one line over the view: Try full graphics clears the record's sticky and next flags
+    /// (other settings stay) and offers a restart; Preferences › Graphics › Start in safe
+    /// graphics mode sets the next launch only; working launches show nothing.
+    #[test]
+    fn safe_graphics_line_tries_full_graphics_and_the_preference_asks_for_one_launch() {
+        let dir = std::env::temp_dir().join(format!("sc_safe_graphics_{}", std::process::id()));
+        let _ = std::fs::create_dir_all(&dir);
+        let path = dir.join("graphics.json");
+        std::fs::write(&path, r#"{"backend":"vulkan","safe_graphics":{"failures":2,"sticky":true,"next":false}}"#).unwrap();
+        let saved = || -> serde_json::Value { serde_json::from_str(&std::fs::read_to_string(&path).unwrap_or_default()).unwrap_or_default() };
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.app.services.graphics_path = Some(path.to_string_lossy().to_string());
+        h.frames(2);
+        assert!(crate::scenario::rect_of("toast:safe_graphics").is_none(), "full graphics shows no line");
+        h.app.safe_graphics = true;
+        h.frames(2);
+        assert!(crate::scenario::rect_of("toast:safe_graphics").is_some());
+        assert_eq!(crate::safe_graphics::line(&h.app), Some(crate::safe_graphics::Line::Started));
+        let button = crate::scenario::handle_at("toast:safe_graphics:button").unwrap();
+        h.call("ui.click", json!({"x":button.x,"y":button.y}));
+        assert_eq!(crate::safe_graphics::line(&h.app), Some(crate::safe_graphics::Line::FullNext));
+        let record = &saved()["safe_graphics"];
+        assert_eq!((record["sticky"].as_bool(), record["next"].as_bool(), record["failures"].as_u64()), (Some(false), Some(false), Some(2)));
+        assert_eq!(saved()["backend"], "vulkan");
+        let (_, restart) = crate::safe_graphics::line_text(&h.app, crate::safe_graphics::Line::FullNext);
+        assert_eq!(restart.is_some(), h.app.services.graphics_restart.is_some(), "a restart is offered where the host can restart");
+        h.app.safe_graphics_dismissed = true;
+        assert!(crate::safe_graphics::line(&h.app).is_none(), "closed for this launch");
+
+        crate::safe_graphics::set_next_launch(&mut h.app, true).unwrap();
+        assert_eq!(saved()["safe_graphics"]["next"], true);
+        assert_eq!(saved()["safe_graphics"]["failures"], 2, "the host's fields stay");
+        h.call("ui.prefs", json!({"open": "Graphics"}));
+        h.frames(2);
+        super::reveal_preference(&mut h, "prefs:safe_graphics_next");
+        let checkbox = crate::scenario::handle_at("prefs:safe_graphics_next").unwrap();
+        h.call("ui.click", json!({"x":checkbox.x,"y":checkbox.y}));
+        assert!(!h.app.safe_graphics_next);
+        assert_eq!(saved()["safe_graphics"]["next"], false);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 
     #[test]
     fn ambient_occlusion_is_optional_persistent_and_cancelable() {

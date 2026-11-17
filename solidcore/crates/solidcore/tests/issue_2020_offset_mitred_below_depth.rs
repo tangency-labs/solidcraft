@@ -249,9 +249,7 @@ fn solidcraft_flags(k: &mut Kernel) {
     k.fixes.box_face_failures_propagate = true;
     k.fixes.bspline_trim_preserves_uv_spans = true;
     k.fixes.classify_edge_interval = true;
-    k.fixes.curve_contacts_at_curve_ends = true;
     k.fixes.curve_loop_normal_from_area = true;
-    k.fixes.degenerate_proto_edge_in_one_vertex = true;
     k.fixes.fillet_chamfer_cone_on_arc = true;
     k.fixes.fillet_cleanup_keeps_target_faces = true;
     k.fixes.fillet_knife_edge_rounds = true;
@@ -272,7 +270,6 @@ fn solidcraft_flags(k: &mut Kernel) {
     k.fixes.offset_analytic_mate_edges = true;
     k.fixes.offset_extension_as_itself = true;
     k.fixes.offset_extension_from_base = true;
-    k.fixes.proto_edge_splits_at_captured_vertices = true;
     k.fixes.proto_vertex_miss_is_false = true;
     k.fixes.revolve_analytic_profile_faces = true;
     k.fixes.shell_edges_on_analytics_exact = true;

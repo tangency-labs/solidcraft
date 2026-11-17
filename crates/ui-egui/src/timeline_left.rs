@@ -875,7 +875,7 @@ pub(crate) fn vertical_features(app: &mut SolveApp, ui: &mut egui::Ui, names: bo
     let (features, groups, plan) = (&table.features, &table.groups, &table.rows);
     let n = features.len();
     let marker = app.session.doc.marker.unwrap_or(n);
-    let from_view = [crate::timeline::hovered_feature(app), crate::timeline::picked_feature(app)];
+    let from_view = crate::timeline::from_view(app);
     let drag_id = ui.scope_id().with("tl_vertical_drag");
     let mut rows = Rows {
         sketch_states: crate::sketch_state::SketchStates::of(app),
@@ -884,15 +884,7 @@ pub(crate) fn vertical_features(app: &mut SolveApp, ui: &mut egui::Ui, names: bo
         table: &table,
         order: &order,
         marker,
-        selected: app
-            .session
-            .selection
-            .iter()
-            .filter_map(|selection| match selection {
-                solidcraft_engine::Sel::Feature { id } => Some(*id),
-                _ => None,
-            })
-            .collect(),
+        selected: app.session.selection.iter().filter_map(|selection| crate::timeline::feature_of_sel(&app.session.doc, selection)).collect(),
         results: crate::timeline::result_index(&app.session.model.results),
         reveal: app.tree.timeline_reveal,
         from_view,

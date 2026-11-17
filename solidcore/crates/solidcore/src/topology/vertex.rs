@@ -622,6 +622,27 @@ pub fn edges(b: &Brep, v: VertexId, face: Option<FaceId>) -> Result<Vec<EdgeId>>
     Ok(out)
 }
 
+/// Not upstream: whether `face` surrounds the vertex on every side: the vertex has edges and
+/// each is a seam of `face` ([`crate::topology::edge::face_on_both_sides`]), as a sphere's
+/// pole. Such a vertex bounds no material; it is a point where the surface's
+/// parametrisation degenerates (docs/booleans.md, "Seams and poles").
+///
+/// # Errors
+///
+/// Those of [`edges`] and of the edge use queries.
+pub fn inside_face(b: &Brep, v: VertexId, face: FaceId) -> Result<bool> {
+    let all = edges(b, v, None)?;
+    if all.is_empty() {
+        return Ok(false);
+    }
+    for e in all {
+        if !crate::topology::edge::face_on_both_sides(b, e, face)? {
+            return Ok(false);
+        }
+    }
+    Ok(true)
+}
+
 /// `GetCommonEdges`: the edges of [`edges`] (on `face` when given) that join this
 /// vertex and `other` (closed edges included).
 ///

@@ -100,7 +100,7 @@ fn check_refuses_only_an_unknown_naming() {
     use solidcore::topology::NamingScheme;
     let name = |naming| {
         let (b, _) = case("box");
-        b.0.lock().unwrap().set_naming(naming);
+        b.kernel().set_naming(naming);
         check(&b, CheckLevel::All)
     };
     let refused = name(NamingScheme::Unknown).unwrap_err().to_string();
@@ -243,7 +243,7 @@ fn faces_apart_with_a_shell_each_check_valid() {
 
     let square = |x: f64| {
         let frame = Axis2Placement::new(Vec3::new(x, 0.0, 0.0), Vec3::new(1.0, 0.0, 0.0), Vec3::new(0.0, 1.0, 0.0));
-        run("create_rectangle", |k| create_rectangle(k, 0.0, 10.0, 10.0, &frame)).map(Body::new).unwrap()
+        run("create_rectangle", |k| create_rectangle(k, 0.0, 10.0, 10.0, &frame)).map(Body::from_kernel).unwrap()
     };
     let b = boolean2d(&square(0.0), &square(20.0), BooleanOp::Union).unwrap().unwrap();
     assert_eq!(counts(&b).unwrap()[0], 2);
@@ -302,7 +302,7 @@ fn a_sheet_hung_on_a_solid_counts_in_the_area() {
         let flap = create_plane(k, Vec3::new(10.0, 0.0, 10.0), 10.0, 10.0)?;
         boolean_merge(k, cube, flap)
     })
-    .map(Body::new)
+    .map(Body::from_kernel)
     .unwrap();
     let m = mass_properties(&both, 1e-8).unwrap();
     assert!((m.area - 700.0).abs() < 1e-6 && (m.volume - 1000.0).abs() < 1e-6, "{m:?}");
