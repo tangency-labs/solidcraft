@@ -1456,6 +1456,10 @@ preference_settings! {
     /// A design's views (Model, Sketch, Sheet, Render, Animation) are tabs inside its tab; off, the
     /// design keeps one tab and a view switcher lists them.
     design_views_as_tabs: bool = false, PAGE_LAYOUT;
+    /// With views as tabs off, a design's tab always shows its view switcher (even with one view),
+    /// and entering a sketch or Render opens a view of its own, as in 0.43.0. Off: the tab looks as
+    /// it did before design views, with no switcher until the user opens a second view.
+    show_design_view_switcher: bool = false, PAGE_LAYOUT;
     /// A drawing sheet opens as a view (a sub-tab) of its design.
     design_sub_tab_sheets: bool = true, PAGE_LAYOUT;
     /// Editing a sketch opens it as a view of its design; Finish Sketch returns to the previous view.
@@ -7140,6 +7144,7 @@ mod tests {
             ("pinned_constraints_in_grid", json!(false), PAGE_LAYOUT),
             ("tab_double_click_renames", json!(false), PAGE_LAYOUT),
             ("design_views_as_tabs", json!(false), PAGE_LAYOUT),
+            ("show_design_view_switcher", json!(true), PAGE_LAYOUT),
             ("design_sub_tab_sheets", json!(false), PAGE_LAYOUT),
             ("design_sub_tab_sketches", json!(false), PAGE_LAYOUT),
             ("design_sub_tab_render", json!(false), PAGE_LAYOUT),
@@ -7641,12 +7646,14 @@ mod tests {
             "design_sub_tab_render",
             "design_reuse_views",
             "design_reopen_views",
+            "show_design_view_switcher",
         ];
         let mut h = crate::scenario::Harness::new();
         let on = DesignTabPrefs::from(&h.app.preferences);
+        // Test change: the owner asked for "Show the design view switcher", off by default.
         assert_eq!(
-            [on.views_as_tabs, on.sub_tab_sheets, on.sub_tab_sketches, on.sub_tab_render, on.reuse_views, on.reopen_views],
-            [false, true, true, true, true, false]
+            [on.views_as_tabs, on.sub_tab_sheets, on.sub_tab_sketches, on.sub_tab_render, on.reuse_views, on.reopen_views, on.show_switcher],
+            [false, true, true, true, true, false, false]
         );
         let old = lenient(&json!({"theme": "light"}));
         assert_eq!(DesignTabPrefs::from(&old), on, "saved before they existed");
@@ -7670,9 +7677,10 @@ mod tests {
                 flipped.sub_tab_sketches,
                 flipped.sub_tab_render,
                 flipped.reuse_views,
-                flipped.reopen_views
+                flipped.reopen_views,
+                flipped.show_switcher
             ],
-            [true, false, false, false, false, true]
+            [true, false, false, false, false, true, true]
         );
         defaults(&mut h.app, PAGE_LAYOUT);
         assert_eq!(DesignTabPrefs::from(&h.app.preferences), on, "Layout's Restore Defaults");
