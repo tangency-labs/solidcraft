@@ -59,7 +59,7 @@ pub static COMMANDS: &[CommandSpec] = &[
          head up, shank down -z); flip?: bool (default false: turned over, head into the material with at, +z against direction \
          with point); material?: physical material (default \"Steel\"); name?; thread?: for a part with a metric thread, cosmetic (default: recorded on the face, the body unchanged) | \
          modeled (cut into the body over the standard's thread length from the tip, the start chamfered; slower, and refused past 80 \
-         turns) | none → component, occurrence, thread? (how the thread was made, for a part with a metric thread), joint?, directions (each placement's head direction in the world, the one \
+         turns) → component, occurrence, thread? (how the thread was made, for a part with a metric thread), joint?, directions (each placement's head direction in the world, the one \
          chosen), and with at: occurrences, joints (one per pick, in pick order)",
         ),
     CommandSpec::new("parts.seats", "Resolve Fastener Seats", crate::checked!("parts.seats", resolve_seats))
@@ -73,7 +73,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .icon("scale")
         .contract(&RESIZE_CONTRACT)
         .output(output_schema_for::<ResizedPart>)
-        .params("component: id|name of an inserted part; size?; length? — rebuilds it (joints keep it seated); thread?: cosmetic | modeled | none, as parts.insert takes it (left out: as the part has it)"),
+        .params("component: id|name of an inserted part; size?; length? — rebuilds it (joints keep it seated); thread?: cosmetic | modeled, as parts.insert takes it (left out: as the part has it)"),
 ];
 
 /// A family: (id, name, standard).
@@ -889,8 +889,6 @@ enum ThreadMode {
     Cosmetic,
     /// Cut into the body.
     Modeled,
-    /// Neither.
-    None,
 }
 
 impl ThreadMode {
@@ -898,7 +896,6 @@ impl ThreadMode {
         match self {
             ThreadMode::Cosmetic => "cosmetic",
             ThreadMode::Modeled => "modeled",
-            ThreadMode::None => "none",
         }
     }
 
@@ -906,7 +903,6 @@ impl ThreadMode {
     fn of(part: &solidcraft_doc::StandardPart) -> Self {
         match part.thread.as_deref() {
             Some("modeled") => ThreadMode::Modeled,
-            Some("none") => ThreadMode::None,
             _ => ThreadMode::Cosmetic,
         }
     }
@@ -933,10 +929,9 @@ fn thread_mode(p: &Value, cmd: &str, family: &str, base: ThreadMode) -> Result<T
         Some(Value::String(t)) => match t.as_str() {
             "cosmetic" => ThreadMode::Cosmetic,
             "modeled" | "modelled" => ThreadMode::Modeled,
-            "none" => ThreadMode::None,
-            _ => return Err(bad(cmd, "`thread` must be cosmetic, modeled or none")),
+            _ => return Err(bad(cmd, "`thread` must be cosmetic or modeled")),
         },
-        Some(_) => return Err(bad(cmd, "`thread` must be cosmetic, modeled or none")),
+        Some(_) => return Err(bad(cmd, "`thread` must be cosmetic or modeled")),
     };
     if mode != ThreadMode::Cosmetic && !threaded(family) {
         return Err(bad(cmd, "`thread` is for a part with a metric thread: this one has none (parts.library: threads)"));
@@ -994,7 +989,6 @@ fn check_turns(family: &str, sh: &Shape, mode: ThreadMode) -> std::result::Resul
 fn thread(s: &mut Session, mode: ThreadMode, (d, pitch): (f64, f64), at: Vec3, start: Vec3, length: Option<f64>, external: bool) -> Result<()> {
     let mut p = json!({"face": at, "designation": format!("M{}x{}", d, pitch)});
     match mode {
-        ThreadMode::None => Ok(()),
         // A cosmetic thread a part can't take is left off, as it always was.
         ThreadMode::Cosmetic => {
             let _ = run(s, "solid.thread", p);
@@ -1144,7 +1138,7 @@ fn library(_s: &mut Session, p: &Value) -> Result<Value> {
             }
         }
         let system = if is_inch(id) { "inch" } else { "metric" };
-        let threads = threaded(id).then(|| [ThreadMode::Cosmetic, ThreadMode::Modeled, ThreadMode::None].map(|m| m.id().to_string()).to_vec());
+        let threads = threaded(id).then(|| [ThreadMode::Cosmetic, ThreadMode::Modeled].map(|m| m.id().to_string()).to_vec());
         PartFamily { family: id.into(), name: name.into(), standard: standard.into(), system: system.into(), sizes, lengths, threads }
     };
     match str_(p, "family") {
@@ -2447,7 +2441,7 @@ mod tests {
 
     /// `thread: modeled` cuts the thread into the shank instead of recording it: the screw loses
     /// less than the whole ring between its major and minor diameters over its thread, and more
-    /// than a third of it. `none` leaves a plain shank and records nothing.
+    /// than a third of it.
     #[test]
     fn a_modeled_thread_is_cut_into_the_shank() {
         let screw = |thread: &str| {
@@ -2457,16 +2451,13 @@ mod tests {
         };
         let (plain, recorded, r) = screw("cosmetic");
         assert_eq!((recorded, r["thread"].as_str()), (1, Some("cosmetic")), "{r}");
-        let (bare, none, r) = screw("none");
-        assert_eq!((none, r["thread"].as_str()), (0, Some("none")), "{r}");
-        assert!((bare - plain).abs() < 1e-6, "{bare} {plain}");
         let (cut, modeled, r) = screw("modeled");
         assert_eq!((modeled, r["thread"].as_str()), (0, Some("modeled")), "{r}");
         // M6: the external minor diameter is d - 1.226869 P = 4.773.
         let ring = std::f64::consts::PI / 4.0 * (36.0 - 4.773 * 4.773) * 20.0;
         assert!(plain - cut > ring / 3.0 && plain - cut < ring, "{plain} - {cut} against a ring of {ring}");
         let m = run(&mut Session::default(), "parts.library", json!({"family": "socket_head_cap_screw"}));
-        assert_eq!(m["threads"], json!(["cosmetic", "modeled", "none"]), "{m}");
+        assert_eq!(m["threads"], json!(["cosmetic", "modeled"]), "{m}");
         let w = run(&mut Session::default(), "parts.library", json!({"family": "washer"}));
         assert!(w.get("threads").is_none_or(Value::is_null), "{w}");
     }
@@ -2491,7 +2482,7 @@ mod tests {
             assert!(e.contains("metric thread"), "{family}: {e}");
         }
         let e = s.execute("parts.insert", &json!({"family": "hex_nut", "size": "M6", "thread": "cut"})).unwrap_err().to_string();
-        assert!(e.contains("cosmetic, modeled or none"), "{e}");
+        assert!(e.contains("cosmetic or modeled"), "{e}");
         assert_eq!(s.doc.components.len(), made, "nothing is made for a refused call");
     }
 

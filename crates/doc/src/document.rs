@@ -4132,8 +4132,8 @@ pub struct StandardPart {
     pub size: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub length: Option<f64>,
-    /// How its metric thread is made: `modeled` (cut into the body) or `none`. Absent: a
-    /// cosmetic thread, recorded on the face, as before.
+    /// How its metric thread is made: `modeled` (cut into the body). Absent: a cosmetic thread,
+    /// recorded on the face, as before.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub thread: Option<String>,
 }
