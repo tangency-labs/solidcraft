@@ -88,7 +88,11 @@ fn entities(dxf: &str) -> Vec<Entity> {
         .iter()
         .map(|e| {
             Entity(
-                kind(e.geometry()).into(),
+                // A text's record kind is the file's, not its geometry's.
+                match e.source_text().map(|source| source.kind()) {
+                    Some(DxfTextRecordKind::MText) => "MTEXT".into(),
+                    _ => kind(e.geometry()).into(),
+                },
                 e.geometry().clone(),
                 file.layer(e.layer()).unwrap().name().into(),
                 e.weight(),
@@ -1173,8 +1177,8 @@ mod byte_regressions {
         ("per-body-1-exact.dxf", 6079, "a75e6c959f13e17584d7ad3462c8267efc91ad3ed0b9a68ebb27b318a40500fc"),
         ("per-body-0-arcs.dxf", 5867, "2cf53293bc9c3a146de20cc97ed04e2b3100bdca27dc08828727ff9e8bda0a67"),
         ("per-body-1-arcs.dxf", 6079, "a75e6c959f13e17584d7ad3462c8267efc91ad3ed0b9a68ebb27b318a40500fc"),
-        ("writer-bmp-controls.dxf", 5236, "d65c4af9750a54c24fcc8fc1ee68c35ab4c59315f375861c81040c4c1bbd2e5e"),
-        ("writer-bmp-cap.dxf", 6947, "b498adacdd4bd5606988b2288caa070d3065f58beb1d2353d3bbba186e33eb3b"),
+        ("writer-bmp-controls.dxf", 5259, "8237d6edba93809ec56483e99368a166b944ad463a449e8fc268218d97b7a4af"),
+        ("writer-bmp-cap.dxf", 6954, "637acb429ecc45551e53b3bce16ffee95030f16e94347f6428541ff1b8a2c2ef"),
         ("unicode-early.txt", 159, "90c374179d2388832a9bbcafbbabd4c3887edde4989eedd9cfcbd48b4199b4f1"),
         ("unicode-first-supplementary.txt", 159, "e14a0d3eb9fabbc361d3804fb00830c013771ad79ba52f24bd12d7ea8a8a02a0"),
         ("unicode-last-scalar.txt", 166, "f931160242245ee3cdf4f9b551bb20c2a4883d52114208a6b66d83dffca4a484"),
@@ -1409,14 +1413,16 @@ mod byte_regressions {
         {
             let dxf = legacy_dxf_baseline(&layers, &[note(text)]).unwrap();
             let es = entities(&dxf);
-            let value = encoded_text(es.iter().find(|e| e.0 == "TEXT").unwrap());
             if name == "writer-bmp-cap" {
-                assert_eq!(value, "\\U+FFFF".repeat(250));
+                // 251 characters on one line are TEXT, all of them: nothing is cut.
+                assert_eq!(encoded_text(es.iter().find(|e| e.0 == "TEXT").unwrap()), "\\U+FFFF".repeat(251));
             } else {
-                // This parser trims the three replaced trailing controls; the full byte pin
-                // below still includes every space in the actual group-code value.
-                assert_eq!(value, "ASCII %%d %%p %%c \\U+00B0 \\U+4E2D \\U+FFFF");
-                assert!(dxf.contains("\\U+FFFF   \n"));
+                // A line break makes it MTEXT: each typed `%` as `\U+0025`, the break as `\P`, the
+                // tab and DEL as spaces. This parser trims those two trailing spaces; the full byte
+                // pin below still includes them.
+                let value = encoded_text(es.iter().find(|e| e.0 == "MTEXT").unwrap());
+                assert_eq!(value, "ASCII \\U+0025\\U+0025d \\U+0025\\U+0025p \\U+0025\\U+0025c \\U+00B0 \\U+4E2D \\U+FFFF\\P");
+                assert!(dxf.contains("\\U+FFFF\\P  \n"));
             }
             capture.dxf(name, &dxf);
         }
