@@ -81,8 +81,10 @@
 //! - **Trim fit tolerance** (not upstream): `CreateUVTrimCurve` fits at the edge
 //!   tolerance, except where that tolerance only covers the edge's edge/face gap (at
 //!   most the gap gain times it): there it fits at the healer's tolerance for that gap
-//!   without the edge/edge term, capped by the edge tolerance (`trim_fit_tolerance`).
-//!   A tolerance raised to cover a gap so never loosens a trim fitted later.
+//!   without the edge/edge term, capped by the edge tolerance (`fit_tolerance`).
+//!   A tolerance raised to cover a gap so never loosens a trim fitted later. The
+//!   fillet's solver takes its approximation tolerance from the same value
+//!   (`blend::fillet_executive` `SetFilletParameters`).
 //! - **Passed-on statuses (WR-663).** The statuses the fork passes on
 //!   (tangency-labs/smlib 666242b: `CreateUVTrimCurve`'s box, seam transforms, 2D
 //!   conversions, trims, end evaluations and drops, `NormalizedEvaluate`;
@@ -361,8 +363,10 @@ fn seam_curves(k: &Kernel, uv_curve: &Curve, delta: Vec3) -> Result<Vec<Curve>> 
     Ok(vec![other, copy])
 }
 
-/// Not upstream: the tolerance [`create_uv_trim_curve`] fits the UV trim curve of an
-/// edge use of `e` at (upstream: the edge tolerance). The fit is the edge tolerance,
+/// Not upstream: the tolerance geometry fitted along the edge `e` is made at (upstream:
+/// the edge tolerance): [`create_uv_trim_curve`]'s UV trim curves of its edge uses, and
+/// the approximation tolerance of a fillet solver along it
+/// (`blend::fillet_executive::p2` `SetFilletParameters`). The fit is the edge tolerance,
 /// except where that tolerance only covers the edge's gap: at most the gap gain times the
 /// largest edge/face gap `g` of the edge's uses, as the healer sets it to cover a gap
 /// (`Fix_TolSizes`). The fit is then the healer's own value for the edge without an
@@ -375,7 +379,7 @@ fn seam_curves(k: &Kernel, uv_curve: &Curve, delta: Vec3) -> Result<Vec<Curve>> 
 ///
 /// [`SolidError::NotFound`] for a dangling id; the unported, cancelled and
 /// preparation errors of [`crate::topology::edgeuse::p1::calc_max_edge_face_gap`].
-fn trim_fit_tolerance(k: &Kernel, b: &mut Brep, e: EdgeId) -> Result<f64> {
+pub(crate) fn fit_tolerance(k: &Kernel, b: &mut Brep, e: EdgeId) -> Result<f64> {
     use crate::topology::edgeuse::p1 as eu1;
     let edge_tol = b.edge(e)?.tolerance;
     // (the largest face tolerance of the edge, as `Fix_TolSizes` takes it)
@@ -461,7 +465,7 @@ pub fn create_uv_trim_curve(
         .ok_or_else(|| SolidError::topology_missing(OP, "the edge use's face use"))?;
     let f = faceuse_face(b, fu)?.ok_or_else(|| null("CreateUVTrimCurve: face use without face"))?;
     // not upstream: the fit tolerance, the edge tolerance unless that only covers a gap
-    let fit_tol = trim_fit_tolerance(k, b, e)?;
+    let fit_tol = fit_tolerance(k, b, e)?;
     let face_rec = b.face(f)?;
     let face_surface = face_rec
         .surface
@@ -477,7 +481,7 @@ pub fn create_uv_trim_curve(
         .clone_for_evaluation()?;
     // the drops build the edge curve's cache at the edge's tolerance
     // (SmTol::GetApproxTol3d(&m_crCurve) reads pEdge->GetTolerance() through the owner;
-    // not upstream: at the fit tolerance, [`trim_fit_tolerance`])
+    // not upstream: at the fit tolerance, [`fit_tolerance`])
     curve.set_owner_zone_tol_3d(Some(fit_tol));
     let mut edge_domain = edge_rec.interval;
     let uv_trim_at_start = uv_trim_curve(b, eu)?.0.is_some();
@@ -614,7 +618,7 @@ pub fn create_uv_trim_curve(
         let mut surface = face_surface;
         let _ = surface.set_owner(None::<ObjectRef>);
 
-        // (not upstream: the fit tolerance, [`trim_fit_tolerance`], for the edge tolerance)
+        // (not upstream: the fit tolerance, [`fit_tolerance`], for the edge tolerance)
         let mut zone_tol = fit_tol;
 
         // iter 0 = DropCurve(), 1 = DropAndTrimCurve() only if DropCurve() fails

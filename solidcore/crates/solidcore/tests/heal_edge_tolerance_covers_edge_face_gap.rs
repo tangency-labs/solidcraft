@@ -149,3 +149,56 @@ fn sphere_plane_trim_fit_does_not_grow_with_the_gap_cover() {
     assert_eq!(tol.to_bits(), tol0.to_bits(), "{tol:e} {tol0:e}");
     assert_eq!(healed, unraised);
 }
+
+/// The fillet `blend.fillet_executive_p3` `source-file-corner_box-edge13` makes on
+/// `Fillet/corner_box.smb` (edge 13, radius 0.1, circular section, G1, thumbweight 1),
+/// with edge 13 at its tolerance as read (`lower` false) or at the tolerance before the
+/// gap cover (`lower` true, the default 1e-5). Returns the vertex, edge and face counts
+/// and the bits of the area, volume and centroid at the golden's accuracy (1e-4).
+fn corner_box_edge13_fillet(lower: bool) -> ([usize; 3], [u64; 5]) {
+    use solidcore::blend::fillet_executive::api::fillet_edges;
+    use solidcore::mass::integrator::properties::brep_mass_properties_default;
+    use solidcore::math::Vec3;
+    use solidcore::topology::brep::p1 as bl;
+    let mut k = Kernel::default();
+    let mut b = read(&mut k, "Fillet/corner_box.smb");
+    let e = bl::edges(&b, None).unwrap()[13];
+    let raised = b.edge(e).unwrap().tolerance;
+    // (the healer raised it to cover its 1.59e-5 edge/face gap)
+    assert!(raised > 1.7e-5, "edge 13 is raised: {raised:e}");
+    if lower {
+        b.edge_mut(e).unwrap().tolerance = 1.0e-5;
+    }
+    fillet_edges(&mut k, &mut b, &[e], 0.1, 1, 1, 1.0).unwrap();
+    let counts = [
+        bl::vertices(&b, None).unwrap().len(),
+        bl::edges(&b, None).unwrap().len(),
+        bl::faces(&b, None).unwrap().len(),
+    ];
+    let m = brep_mass_properties_default(&k, &mut b, 1e-4, 1.0, Vec3::ZERO).unwrap();
+    let bits = [
+        m.properties.area.to_bits(),
+        m.properties.volume.to_bits(),
+        m.centroid.x.to_bits(),
+        m.centroid.y.to_bits(),
+        m.centroid.z.to_bits(),
+    ];
+    (counts, bits)
+}
+
+/// Raising an edge's tolerance to cover its gap does not loosen the fillet along it. On
+/// `Fillet/corner_box.smb` the healer raises edge 13 from the default 1e-5 to 1.745e-5
+/// (gain times its 1.59e-5 gap). The fillet solver approximates at `TOL_FACTOR` times the
+/// edge's fit tolerance, which is the 1e-5 the edge had before the raise, so the round is
+/// the round made with the edge at 1e-5, bit for bit. Approximated at 4 times the raised
+/// tolerance, the round's volume moved 2.3e-9 relative.
+#[test]
+fn corner_box_fillet_does_not_loosen_with_the_gap_cover() {
+    let (counts, bits) = corner_box_edge13_fillet(false);
+    let (counts0, bits0) = corner_box_edge13_fillet(true);
+    assert_eq!(counts, [12, 18, 8]);
+    assert_eq!(counts, counts0);
+    let values = bits.map(f64::from_bits);
+    let values0 = bits0.map(f64::from_bits);
+    assert_eq!(bits, bits0, "{values:?} {values0:?}");
+}

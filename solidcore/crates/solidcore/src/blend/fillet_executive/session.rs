@@ -6303,11 +6303,13 @@ impl FilletParametersAccess<FilletObject> for SessionObjects<'_> {
         Ok(crate::topology::edge::blend_edgeuse(k, self.target, id)?
             .map(|id| FilletObject::Topology(FilletBody::Target, EntityRef::Edgeuse(id))))
     }
-    fn parameters_edge_tolerance(&self, edge: FilletObject) -> Result<f64> {
+    fn parameters_edge_tolerance(&mut self, k: &Kernel, edge: FilletObject) -> Result<f64> {
         let FilletObject::Topology(FilletBody::Target, EntityRef::Edge(id)) = edge else {
             return Err(invalid("edge is not in the target"));
         };
-        crate::topology::edge::tolerance(self.target, id)
+        // not upstream: the fit tolerance (the edge tolerance unless that only covers the
+        // edge's edge/face gap)
+        crate::topology::edgeuse::p3::fit_tolerance(k, self.target, id)
     }
     fn parameters_new_solver(
         &mut self,
