@@ -51,6 +51,8 @@ blend.fillet_executive_p3	real-box-fillet4v-r3-shell-closed	shell_geometry	97	ro
 blend.fillet_executive_p3	real-box-fillet4v-r3-shell-closed	shell_mass_properties	1	rounding	0
 blend.fillet_executive_p3	real-box-fillet4v-r3-shell-closed	shell_mass_properties	2	rounding	0
 blend.fillet_executive_p3	stubs4-delete-edge-bottle-e8-r0.1	mass_properties	0	quadrature	0
+blend.fillet_executive_p3	stubs4-delete-edge-bottle-e8-r0.1	mass_properties	4	quadrature	0
+blend.fillet_executive_p3	stubs4-delete-edge-bottle-e8-r0.1	mass_properties	9	quadrature	0
 blend.fillet_executive_p3	stubs4-delete-edge-bottle-e8-r0.1	mass_properties	11	quadrature	0
 query.brep	gen0269	steps	38	padding	0
 query.brep	gen0269	steps	39	padding	0
