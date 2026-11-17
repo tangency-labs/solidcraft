@@ -1007,8 +1007,8 @@ fn a_sketch_on_a_face_of_a_two_sided_cut_keeps_its_attachment() {
 }
 
 /// A sketch and an offset plane on the end face of a turned part keep their attachment after a
-/// modelled Thread on its side (#18460): the groove's faces, named from geometry, no longer take
-/// the name of the end face beside them, which left the end face without a name of its own.
+/// modelled Thread on its side (#18460): the thread's cut keeps its history, so the end face it
+/// never touched keeps its exact name, and no groove face named from geometry takes that name.
 #[test]
 fn a_sketch_and_a_plane_on_the_end_face_of_a_threaded_revolve_keep_their_attachment() {
     let mut s = Session::default();
