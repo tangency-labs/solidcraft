@@ -135,7 +135,7 @@ To keep the file with your other parts instead, tick **Keep in a folder** in the
 window (the desktop app only) and **Choose…** a folder. The file is then saved there, named after the
 design with the next free version (`Mount plate-v1.3mf`, `Mount plate-v2.3mf`, …), and the slicer
 opens that file. Tick **Replace file** to keep one file (`Mount plate.3mf`)
-instead. SolidCraft remembers the folder for each saved design, so the next send of it starts with
+instead. SolidCraft remembers the folder for each saved design (a design that was never saved asks again), so the next send of it starts with
 the folder already chosen; untick the box to go back to the slicer folder. Scripts pass `copy_to`
 (the folder) and, to replace the file, `copy_overwrite: true` to `file.send_to_slicer`; the reply has
 `copy: true` and the `version`.

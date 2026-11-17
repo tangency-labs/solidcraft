@@ -500,7 +500,9 @@ fn send_to_slicer_can_keep_the_file_in_a_folder_numbered_or_replaced() {
     let script = dir.join("fake-slicer");
     std::fs::write(&script, "#!/bin/sh\nexit 0\n").unwrap();
     std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
-    let keep = dir.join("kept");
+    // Two folders deep and not there yet; and a folder whose name ends in a space is that folder.
+    let keep = dir.join("kept/inner");
+    let spaced = dir.join("spaced ");
     run(&mut s, "select.set", json!({"items":[{"type":"body","name":"Mesh"}]}));
     crate::slicers::set_chosen_programs(&[script.to_string_lossy().into_owned()]);
     let send = |s: &mut Session, extra: Value| {
@@ -524,6 +526,10 @@ fn send_to_slicer_can_keep_the_file_in_a_folder_numbered_or_replaced() {
     assert_eq!(replace_a["path"], replace_b["path"]);
     let files = std::fs::read_dir(&keep).unwrap().count();
     assert_eq!(files, 3, "v1, v2 and the replaced one");
+    crate::slicers::set_chosen_programs(&[script.to_string_lossy().into_owned()]);
+    let in_spaced = send(&mut s, json!({"copy_to": spaced}));
+    crate::slicers::set_chosen_programs(&[]);
+    assert!(in_spaced.unwrap()["path"].as_str().unwrap().starts_with(spaced.to_str().unwrap()), "the folder keeps its spelling");
     // Without `copy_to` the file still goes to the slicer folder.
     crate::slicers::set_chosen_programs(&[script.to_string_lossy().into_owned()]);
     let plain = s.execute("file.send_to_slicer", &json!({"slicer": script, "wait": "no", "format": "stl"}));

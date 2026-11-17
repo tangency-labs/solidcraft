@@ -1726,7 +1726,7 @@ preference_settings! {
     send_slicer: String = String::new();
     /// Send to Slicer: the folder the file is kept in for each saved design (its path), asked for in
     /// the Send window (#18311). A design with no entry keeps it in the slicer folder; one that was
-    /// never saved is under the empty path.
+    /// never saved has none.
     slicer_copy_folders: std::collections::BTreeMap<String, String> = Default::default();
     /// Send to Slicer: a file kept in a folder is replaced each time, not numbered (#18311).
     slicer_copy_overwrite: bool = false;

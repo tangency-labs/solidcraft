@@ -2604,10 +2604,12 @@ fn send_to_slicer(s: &mut Session, p: &Value) -> Result<Value> {
         let spec = str_(p, "slicer").ok_or_else(|| bad(cmd, "give `slicer` (see file.slicers)"))?;
         let wait = send::Wait::parse(str_(p, "wait")).ok_or_else(|| bad(cmd, "`wait` is block, return or no"))?;
         // A folder to keep the file in, in place of the slicer folder; an agent reaches only its own folders.
-        let copy = match str_(p, "copy_to").map(str::trim).filter(|d| !d.is_empty()) {
+        // The folder as given: a blank one is no folder, but a name with spaces at its end is a name.
+        let copy = match str_(p, "copy_to").filter(|d| !d.trim().is_empty()) {
             None => None,
             Some(dir) if dir.len() < 4096 => {
-                solidcraft_io::vfs::check(dir).map_err(|e| EngineError::Other(e.to_string()))?;
+                // It may not exist yet: its nearest folder that does is checked.
+                solidcraft_io::vfs::check_new(dir).map_err(|e| EngineError::Other(e.to_string()))?;
                 Some(send::Copy { dir: dir.into(), overwrite: bool_(p, "copy_overwrite").unwrap_or(false) })
             }
             Some(_) => return Err(bad(cmd, "`copy_to` is too long")),

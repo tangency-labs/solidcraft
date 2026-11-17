@@ -106,14 +106,15 @@ fn write_in_folder(s: &mut Session, r: &Send<'_>) -> Result<Value> {
     if let Some(copy) = &r.copy {
         // The file the user keeps: named after the design, in their folder, and the slicer opens it.
         let stem = slicer_files::copy_stem(&s.doc.name);
-        let (stem, version) = if copy.overwrite {
-            (stem, None)
+        let (file, numbered, version) = if copy.overwrite {
+            let (file, numbered) =
+                slicer_files::write_copy(&copy.dir, &stem, ext, &bytes).map_err(|e| EngineError::Other(format!("{}: {e}", copy.dir.display())))?;
+            (file, numbered, None)
         } else {
-            let n = slicer_files::next_version(&copy.dir, &stem, ext);
-            (format!("{stem}-v{n}"), Some(n))
+            let (file, n) =
+                slicer_files::write_version(&copy.dir, &stem, ext, &bytes).map_err(|e| EngineError::Other(format!("{}: {e}", copy.dir.display())))?;
+            (file, false, Some(n))
         };
-        let (file, numbered) =
-            slicer_files::write_copy(&copy.dir, &stem, ext, &bytes).map_err(|e| EngineError::Other(format!("{}: {e}", copy.dir.display())))?;
         let mut out = json!({"path": file.to_string_lossy(), "bytes": bytes.len(), "format": ext, "numbered": numbered, "stl_fallback": fell_back, "copy": true});
         if let Some(n) = version {
             out["version"] = json!(n);

@@ -150,7 +150,8 @@ pub fn start(app: &SolveApp, id: &str) -> Option<(Kind, Vec<SelInput>)> {
     };
     let quality = QUALITIES.iter().position(|q| q.1 == p.save_mesh_quality).unwrap_or(0);
     // The folder this design's file was last kept in, if it was (#18311).
-    let copy_folder = p.slicer_copy_folders.get(&app.session.path.clone().unwrap_or_default()).cloned().unwrap_or_default();
+    // Only a saved design remembers one: unsaved designs are not told apart by anything but a counter.
+    let copy_folder = app.session.path.as_ref().and_then(|path| p.slicer_copy_folders.get(path)).cloned().unwrap_or_default();
     let copy = open && id == "file.send_to_slicer" && !copy_folder.is_empty();
     let kind = Kind::SaveMesh(SaveMesh {
         format,
@@ -420,6 +421,8 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut SaveMesh, inputs: &mu
         // Look at the machine once per opening, then settle on a slicer that exists.
         k.stale = false;
         app.slicer_menu.picked = None;
+        // A folder chosen for another opening is not this one's.
+        app.slicer_menu.picked_folder = None;
         app.slicer_menu.refresh(&app.preferences.custom_slicers);
         let entries = app.slicer_menu.entries();
         let easyprint = crate::easyprint_ui::available(app);
@@ -658,13 +661,16 @@ pub fn run(app: &mut SolveApp, k: &SaveMesh, inputs: &[SelInput]) -> Result<(), 
         if k.slicer == EASYPRINT {
             crate::easyprint_ui::request(app, params);
         } else {
-            // The folder is remembered for this design; turned off, it is forgotten.
-            let key = app.session.path.clone().unwrap_or_default();
+            // The folder is remembered for a saved design; turned off, it is forgotten.
+            if let Some(key) = app.session.path.clone() {
+                if k.copy {
+                    app.preferences.slicer_copy_folders.insert(key, k.copy_folder.clone());
+                } else {
+                    app.preferences.slicer_copy_folders.remove(&key);
+                }
+            }
             if k.copy {
-                app.preferences.slicer_copy_folders.insert(key, k.copy_folder.clone());
                 app.preferences.slicer_copy_overwrite = k.copy_overwrite;
-            } else {
-                app.preferences.slicer_copy_folders.remove(&key);
             }
             send_to_slicer(app, params);
         }
@@ -801,6 +807,9 @@ mod tests {
     fn a_folder_for_the_file_is_asked_kept_per_design_and_forgotten_when_turned_off() {
         let (mut app, seen, _) = app_with_fake_slicer("folder");
         let keep = seen.parent().unwrap().join("kept");
+        // Only a saved design remembers its folder.
+        let saved = "/designs/plate.solidcraft";
+        app.session.path = Some(saved.into());
         let key = app.preferences.custom_slicers[0].clone();
         app.preferences.send_slicer = key.clone();
         let (Kind::SaveMesh(mut k), mut inputs) = start(&app, "file.send_to_slicer").unwrap() else { panic!("not the mesh dialog") };
@@ -822,11 +831,16 @@ mod tests {
         assert_eq!(std::fs::read_dir(&keep).unwrap().count(), 1);
         let (Kind::SaveMesh(again), _) = start(&app, "file.send_to_slicer").unwrap() else { panic!("not the mesh dialog") };
         assert_eq!((again.copy, again.copy_folder.as_str(), again.copy_overwrite), (true, keep.to_str().unwrap(), true));
-        // Another design does not take it.
-        app.session.path = Some("/elsewhere/other.solidcraft".into());
-        let (Kind::SaveMesh(other), _) = start(&app, "file.send_to_slicer").unwrap() else { panic!("not the mesh dialog") };
-        assert!(!other.copy);
-        app.session.path = None;
+        // Another design does not take it, and an unsaved one neither takes nor leaves one.
+        for other in [Some("/elsewhere/other.solidcraft"), None] {
+            app.session.path = other.map(Into::into);
+            let (Kind::SaveMesh(k), _) = start(&app, "file.send_to_slicer").unwrap() else { panic!("not the mesh dialog") };
+            assert!(!k.copy, "{other:?}");
+        }
+        let before = app.preferences.slicer_copy_folders.clone();
+        run(&mut app, &SaveMesh { copy: true, copy_folder: keep.to_string_lossy().into_owned(), ..again.clone() }, &inputs).unwrap();
+        assert_eq!(app.preferences.slicer_copy_folders, before, "an unsaved design leaves no folder behind");
+        app.session.path = Some(saved.into());
         // Turned off, it is forgotten.
         k.copy = false;
         run(&mut app, &k, &inputs).unwrap();
