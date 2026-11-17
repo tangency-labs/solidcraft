@@ -4523,6 +4523,11 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
         && (enter || canvas_enter || (enter_free && nothing_focused) || confirm)
     {
         ok = true;
+        // Shift+Enter makes an Extrude a new body, whatever it would have joined or cut (#18455).
+        // Only a key press does: the OK button and a rebound OK key keep the dialog's choice.
+        if (enter || canvas_enter || enter_free) && ctx.input(|i| i.modifiers.shift) && d.editing.is_none() {
+            make_new_body(&mut d);
+        }
     }
     if !preset_prompt && !report_active && esc && !app.esc_handled && escape_routed_here {
         app.esc_handled = true;
@@ -4912,6 +4917,17 @@ fn mode_inputs_key(kind: &Kind) -> Option<usize> {
 /// Whether Enter (and a right-click in the viewport) runs OK: not where there is no OK, a
 /// deletion's confirmation, a table that takes Enter for its cells (configurations, a study's
 /// keys), or a material being edited.
+/// An Extrude that is being made (not edited) becomes a new body: the operation is New and no
+/// longer chosen for the user, and the bodies it would have joined or cut are let go.
+fn make_new_body(d: &mut Dialog) {
+    let Kind::Extrude { operation, auto_op, .. } = &mut d.kind else { return };
+    *operation = 0;
+    *auto_op = false;
+    for input in d.inputs.iter_mut().filter(|i| i.label == EXTRUDE_TARGETS) {
+        input.items.clear();
+    }
+}
+
 fn enter_applies(d: &Dialog) -> bool {
     !matches!(d.kind, Kind::Sketch | Kind::Measure { .. } | Kind::ConfirmDelete { .. })
         && !matches!(&d.kind, Kind::Motion(k) if k.wide())
@@ -9729,6 +9745,47 @@ mod extrude_mixed_pick_tests {
         let st = crate::open_meshing::session_world(&h.app.session);
         let volume: f64 = st.bodies.iter().map(|b| solidcraft_engine::doc::kernel::measure(&b.body).unwrap().volume).sum();
         assert!((volume - 8000.0).abs() < 1e-6, "the box grown to 20 mm: {volume}");
+    }
+}
+
+#[cfg(test)]
+mod extrude_shift_enter_tests {
+    //! Shift+Enter in an Extrude makes a new body (#18455).
+
+    use super::*;
+    use crate::scenario::Harness;
+
+    /// A box with a rectangle sketched on its top, the Extrude open with Join chosen by hand.
+    fn joined_extrude() -> Harness {
+        let mut h = Harness::new();
+        h.app.run("solid.box", json!({"length":20,"width":20,"height":10,"corner":[0,0,0]})).unwrap();
+        h.app.run("sketch.create", json!({"plane":{"origin":[0,0,10],"x_dir":[1,0,0],"y_dir":[0,1,0]}})).unwrap();
+        h.app.run("sketch.rectangle.two_point", json!({"p0":[5,5],"p1":[10,10]})).unwrap();
+        h.app.run("sketch.finish", json!({})).unwrap();
+        h.app.run("select.clear", json!({})).unwrap();
+        h.step(&json!({"start":"solid.extrude"})).unwrap();
+        h.frames(2);
+        let Some(d) = h.app.dialog.as_mut() else { panic!("the extrude dialog") };
+        if let Kind::Extrude { distance, operation, auto_op, .. } = &mut d.kind {
+            *distance = "5 mm".into();
+            *operation = 1;
+            *auto_op = false;
+        }
+        h.frames(2);
+        h
+    }
+
+    #[test]
+    fn shift_enter_makes_the_extrude_a_new_body_and_enter_alone_keeps_the_operation() {
+        let mut h = joined_extrude();
+        h.step(&json!({"key":"Enter","shift":true})).unwrap();
+        assert!(h.app.dialog.is_none(), "OK: {:?}", h.app.dialog.as_ref().and_then(|d| d.error.clone()));
+        assert_eq!(crate::open_meshing::session_world(&h.app.session).bodies.len(), 2, "a second body");
+
+        let mut h = joined_extrude();
+        h.step(&json!({"key":"Enter"})).unwrap();
+        assert!(h.app.dialog.is_none());
+        assert_eq!(crate::open_meshing::session_world(&h.app.session).bodies.len(), 1, "joined to the box");
     }
 }
 
