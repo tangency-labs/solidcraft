@@ -506,6 +506,33 @@ fn the_selection_fills_only_the_first_field_and_a_design_change_clears_the_picks
 }
 
 #[test]
+fn a_profile_field_keeps_profiles_from_several_sketches() {
+    let mut h = crate::scenario::Harness::new();
+    for x in [0, 40] {
+        h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+        h.app.run("sketch.rectangle.two_point", json!({"p0":[x,0],"p1":[x + 20,20]})).unwrap();
+        h.app.run("sketch.finish", json!({})).unwrap();
+    }
+    h.app.run("select.clear", json!({})).unwrap();
+    let mut make = entry("make", "edit", json!([]));
+    make.input_schema =
+        json!({"type":"object","properties":{"profiles":{"type":"array","x-solidcraft-selection":{"version":1,"accept":["profile"]}}}});
+    h.app.plugin_menu.listed = vec![listed("shapes", vec![make])];
+    h.app.plugin_menu.loaded = true;
+    open_entry(&mut h.app, 0, 0);
+    h.frames(2);
+    let sketches: Vec<u64> =
+        h.app.session.doc.features.iter().filter(|f| matches!(f.kind, solidcraft_engine::doc::FeatureKind::Sketch { .. })).map(|f| f.id).collect();
+    assert_eq!(sketches.len(), 2);
+    for sketch in &sketches {
+        let session = h.app.session.scratch();
+        h.app.dialog.as_mut().unwrap().pick(&session, Sel::Profile { sketch: *sketch, index: 0 });
+    }
+    h.frames(2);
+    assert_eq!(picks(&h)[0].len(), 2, "a plugin's profile field is not limited to one sketch: {:?}", picks(&h));
+}
+
+#[test]
 fn an_open_tool_keeps_the_viewport_until_it_is_done() {
     let mut h = box_and_pick_plugin();
     h.step(&json!({"start":"solid.fillet"})).unwrap();
