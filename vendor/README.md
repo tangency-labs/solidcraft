@@ -56,6 +56,23 @@ cached offscreen picture is never drawn). Another workspace that uses that crate
 crates to this tree the same way, with
 `[patch.crates-io] egui-wgpu = { path = ".../vendor/egui/crates/egui-wgpu" }` and the same for the others.
 
+SolidCraft changes to egui and eframe:
+- `crates/egui/src/data/input/raw_input.rs`, `crates/egui/src/input_state/mod.rs`,
+  `crates/eframe/src/epi.rs`, `crates/eframe/src/native/{winit,wgpu,glow}_integration.rs`:
+  backport of emilk/egui#8768 (open upstream, against egui's `main`). `RawInput::repaint_on_pointer_move`
+  (default true) lets pointer motion alone ask for no further frame, and
+  `App::repaint_on_window_event` / `App::repaint_on_device_event` let a native app answer
+  `Some(false)` to process a winit event without painting. The motion is still delivered with
+  the next frame. Tests: `pointer_motion_repaints_unless_asked_not_to` (egui) and
+  `the_app_can_override_the_repaint_an_event_asks_for` (eframe).
+- `crates/egui/src/context.rs`, `crates/egui/src/lib.rs`: `Context::widget_hits_at(pos)`, the
+  hit test the next pass would start with, run between passes against the last pass's widgets
+  (`begin_pass` and it share `prev_pass_hits`); `WidgetHits` is exported for it. Test:
+  `widget_hits_at_matches_the_next_pass`.
+
+The SolidCraft 3D view uses both to skip frames for pointer motion that changes nothing it
+draws (`viewport::motion_changes_nothing` in `crates/ui-egui`).
+
 SolidCraft changes to egui-wgpu (paths relative to `crates/egui-wgpu`; these lived in a
 separate copy at `vendor/egui-wgpu` before egui was vendored as a whole):
 - `src/setup.rs`, `src/lib.rs`: let a named adapter selector defer to the normal wgpu

@@ -70,6 +70,7 @@ fn an_importer_checks_its_own_design_apart_from_the_open_one() {
         session: Session::default(),
         transaction: None,
         sketch_exits: Vec::new(),
+        view: None,
         groups: BTreeSet::new(),
         file_folders: Vec::new(),
         evaluation: None,
@@ -98,6 +99,7 @@ fn every_built_command_is_reachable_and_sensitive_ones_need_their_group() {
         session: Session::default(),
         transaction: None,
         sketch_exits: Vec::new(),
+        view: None,
         groups: BTreeSet::new(),
         file_folders: Vec::new(),
         evaluation: None,
@@ -146,6 +148,7 @@ fn a_sensitive_command_is_refused_unless_granted_and_a_granted_file_command_sees
         session: Session::default(),
         transaction: None,
         sketch_exits: Vec::new(),
+        view: None,
         groups: BTreeSet::new(),
         file_folders: Vec::new(),
         evaluation: None,
@@ -661,6 +664,7 @@ mod native {
                     session: s,
                     transaction: None,
                     sketch_exits: Vec::new(),
+                    view: None,
                     groups: BTreeSet::new(),
                     file_folders: Vec::new(),
                     evaluation: None,
@@ -942,6 +946,7 @@ fn command_effects_are_explicit_and_independent_of_undo() {
         session: Session::default(),
         transaction: None,
         sketch_exits: Vec::new(),
+        view: None,
         groups: BTreeSet::new(),
         file_folders: Vec::new(),
         evaluation: None,
@@ -970,8 +975,15 @@ fn granted_roots_allow_hidden_ancestors_but_exclude_hidden_descendants() {
         FileGrant { name: "project".into(), folder: root.clone(), read: true, write: true },
         FileGrant { name: "hidden".into(), folder: root.join(".hidden"), read: true, write: false },
     ];
-    let host =
-        SolidCraftHost { session, transaction: None, sketch_exits: Vec::new(), groups: BTreeSet::new(), file_folders: Vec::new(), evaluation: None };
+    let host = SolidCraftHost {
+        session,
+        transaction: None,
+        sketch_exits: Vec::new(),
+        view: None,
+        groups: BTreeSet::new(),
+        file_folders: Vec::new(),
+        evaluation: None,
+    };
     solidcraft_io::vfs::scoped(None, || {
         for write in [false, true] {
             assert!(host.authorize_file_path(&root.join("public.txt"), write).is_ok());
