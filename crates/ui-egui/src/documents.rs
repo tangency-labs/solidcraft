@@ -501,9 +501,15 @@ fn swap_in(app: &mut SolveApp, mut slot: DocSlot) -> DocSlot {
     let mut outgoing_navigation = ViewLook::from_ui(&app.ui);
     outgoing_navigation.motion.swap(app);
     app.docs.navigation.insert(outgoing_view, outgoing_navigation);
+    // Tile slots are local to the shown design. Re-upload after another design used them.
+    for look in slot.navigation.values_mut() {
+        look.scenes = Default::default();
+    }
     let incoming_view = slot.views.active().id;
     if let Some(mut look) = slot.navigation.remove(&incoming_view) {
         look.swap(app);
+    } else {
+        crate::viewport::ViewScenes::default().swap(&mut app.viewport);
     }
     app.preview.reset();
     app.viewport.hover = None;
@@ -755,6 +761,7 @@ struct ViewOptions {
 struct ViewLook {
     options: ViewOptions,
     motion: ViewMotion,
+    scenes: crate::viewport::ViewScenes,
 }
 
 impl ViewOptions {
@@ -789,12 +796,13 @@ impl ViewOptions {
 
 impl ViewLook {
     fn from_ui(ui: &crate::UiState) -> Self {
-        Self { options: ViewOptions::from_ui(ui), motion: ViewMotion::default() }
+        Self { options: ViewOptions::from_ui(ui), motion: ViewMotion::default(), scenes: Default::default() }
     }
 
     fn swap(&mut self, app: &mut SolveApp) {
         self.options.swap(&mut app.ui);
         self.motion.swap(app);
+        self.scenes.swap(&mut app.viewport);
     }
 }
 
@@ -871,6 +879,10 @@ impl ViewMotion {
 fn switch_navigation(app: &mut SolveApp, before: u64, id: u64) {
     let mut look = app.docs.navigation.remove(&id).unwrap_or_else(|| ViewLook::from_ui(&app.ui));
     look.swap(app);
+    // A single view always uploads to slot zero, regardless of which sub-tab is shown.
+    if !app.docs.views.is_tiled() {
+        app.viewport.invalidate_view_uploads();
+    }
     if app.docs.views.has_open_or_closed(before) {
         app.docs.navigation.insert(before, look);
     }

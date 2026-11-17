@@ -538,6 +538,34 @@ mod tests {
     }
 
     #[test]
+    fn tiled_display_modes_queue_separate_gpu_scenes() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.app.run("solid.box", json!({"length":40,"width":30,"height":20})).unwrap();
+        h.app.viewport.gpu =
+            Some(crate::gpu::GpuTarget { format: egui_wgpu::wgpu::TextureFormat::Rgba8Unorm, depth: None, samples: 1, tess: false, oit: false });
+        h.app.ui.visual_style = 1;
+        assert_eq!(crate::documents::view_layout(&mut h.app, solidcraft_views::Preset::SideBySide), 2);
+        h.frames(4);
+        let card = h.app.viewport.cards[0].0;
+        crate::documents::with_view_look(&mut h.app, card, |app| {
+            app.run("view.visual_style", json!({"style":"wireframe"})).unwrap();
+        });
+        h.frame();
+        // egui prepares the GPU callbacks after the UI pass. Both source scenes must still be
+        // present, since each renderer callback consumes its pending upload.
+        let ground_slot = h.app.viewport.slot.clone();
+        let ground = ground_slot.lock().unwrap().take().unwrap().merged();
+        assert!(!ground.tris.is_empty());
+        crate::documents::with_view_look(&mut h.app, card, |app| {
+            assert!(!std::sync::Arc::ptr_eq(&ground_slot, &app.viewport.slot));
+            let wire = app.viewport.slot.lock().unwrap().take().unwrap().merged();
+            assert!(wire.tris.is_empty());
+            assert!(!wire.lines.is_empty());
+        });
+    }
+
+    #[test]
     fn a_view_keeps_its_frame_whether_it_is_the_ground_or_a_card() {
         let cell = Rect::from_min_max(pos2(10.0, 40.0), pos2(500.0, 600.0));
         let frame = frame_of(cell);
