@@ -314,7 +314,7 @@ pub(crate) fn sheets_section(app: &mut SolveApp, ui: &mut egui::Ui) {
             ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing.x = t.space_4;
                 for sheet in pair {
-                    sheet_card(app, ui, &drawing, sheet, width, selected == Some(sheet.id));
+                    ui.push_id(sheet.id, |ui| sheet_card(app, ui, &drawing, sheet, width, selected == Some(sheet.id)));
                 }
             });
         }
@@ -391,7 +391,11 @@ fn sheet_card(
                 Item::action("delete", app.tr("cmd.drawing_sheet_delete"), "delete")
                     .off_because((drawing.sheets.len() <= 1).then(|| app.tr("ui.drawing_sheets.last_sheet").into())),
             ];
-            items.iter().fold(None, |chosen, item| ui_kit::menu::list_row(ui, item).or(chosen))
+            let chosen = items.iter().fold(None, |chosen, item| ui_kit::menu::list_row(ui, item).or(chosen));
+            if chosen.is_some() {
+                ui.close();
+            }
+            chosen
         },
     );
     if let Some(Some(action)) = selected_action.inner {
