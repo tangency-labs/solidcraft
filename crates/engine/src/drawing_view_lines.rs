@@ -368,8 +368,8 @@ pub fn paper_lines(lines: &Lines, object: u64, group: LineGroup) -> (Group, Vec<
 
 /// ISO 128-20's narrow long-dashed dotted lines in line `group`, with its Table 3 lengths: a long dash
 /// of 24 widths of the narrow line, then `dots` dots of half a width, each after a gap of 3, and a gap
-/// of 3 to end. One dot is type 04 (a bend bent up); two, type 05 (a bend bent down).
-pub fn chain_dashes_mm(dots: usize, group: LineGroup) -> Vec<f64> {
+/// of 3 to end. One dot is ISO 128 type 04; two, type 05.
+pub(super) fn chain_dashes_mm(dots: usize, group: LineGroup) -> Vec<f64> {
     let d = LineKind::Thin.width_mm(group);
     let mut lengths = vec![24.0 * d, 3.0 * d];
     for _ in 0..dots {

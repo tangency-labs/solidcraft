@@ -143,7 +143,7 @@ pub fn flat_group(flat: &Flat, frame: &ViewFrame, object: u64, group: LineGroup)
 }
 
 /// A bend line's dashes in line `group`: bent up, ISO 128's chain line (type 04: long dash, dot);
-/// bent down, its double-chain line (type 05: long dash, two dots) ([`chain_dashes_mm`]).
+/// bent down, its double-chain line (type 05: long dash, two dots) (`chain_dashes_mm`).
 pub fn bend_dashes_mm(up: bool, group: LineGroup) -> Vec<f64> {
     chain_dashes_mm(if up { 1 } else { 2 }, group)
 }
