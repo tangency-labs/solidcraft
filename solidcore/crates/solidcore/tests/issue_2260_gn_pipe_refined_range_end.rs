@@ -48,7 +48,6 @@ const SOLIDCRAFT_C494A18: &[&str] = &[
     "analytic_copy_keeps_parameterization",
     "boolean_union_refuses_solid_leak",
     "boolean_vertex_by_best_crossing",
-    "box_face_failures_propagate",
     "bspline_trim_preserves_uv_spans",
     "classify_edge_interval",
     "corner_patch_face_side_twist",

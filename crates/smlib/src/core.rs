@@ -97,7 +97,6 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.proto_edge_splits_at_captured_vertices = true;
     f.linear_sweep_arc_is_cylinder = true;
     f.fillet_trace_reaches_rails = true;
-    f.box_face_failures_propagate = true;
     f.fillet_removal_takes_ring_fillets = true;
     // The fork's commits that reached `SMLIB_REV` at eaa998a (tangency-labs/smlib#68, #69, #70).
     f.curve_loop_normal_from_area = true;
