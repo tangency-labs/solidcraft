@@ -373,8 +373,10 @@ fn seam_curves(k: &Kernel, uv_curve: &Curve, delta: Vec3) -> Result<Vec<Curve>> 
 ///
 /// # Errors
 ///
-/// [`SolidError::NotFound`] for a dangling id; those of [`max_edge_face_gap`].
+/// [`SolidError::NotFound`] for a dangling id; the unported, cancelled and
+/// preparation errors of [`crate::topology::edgeuse::p1::calc_max_edge_face_gap`].
 fn trim_fit_tolerance(k: &Kernel, b: &mut Brep, e: EdgeId) -> Result<f64> {
+    use crate::topology::edgeuse::p1 as eu1;
     let edge_tol = b.edge(e)?.tolerance;
     // (the largest face tolerance of the edge, as `Fix_TolSizes` takes it)
     let mut max_face_tol = zone_tol3d(k, 0.0);
@@ -388,9 +390,19 @@ fn trim_fit_tolerance(k: &Kernel, b: &mut Brep, e: EdgeId) -> Result<f64> {
     if edge_tol <= brep_calc_edge_zone_tol_3d(k, 0.0, 0.0, b, Some(max_face_tol)) {
         return Ok(edge_tol);
     }
+    // (the cached gap, else the gap calculated without caching it, so the fit leaves
+    // the edge uses' gap caches as it found them; a failed calculation, ignored as
+    // `GetMaxEdgeFaceGap` ignores it, adds no gap)
     let mut gap = 0.0_f64;
     for eu in b.edge(e)?.edgeuses.clone() {
-        if let Some(g) = max_edge_face_gap(k, b, eu, false)? {
+        let g = if !eu1::has_edge_face_gap(b, eu)? {
+            None
+        } else if eu1::is_max_edge_face_gap_init(b, eu)? {
+            eu1::cached_max_edge_face_gap(b, eu)?
+        } else {
+            ignored(eu1::calc_max_edge_face_gap(k, b, eu, false))?
+        };
+        if let Some(g) = g {
             if g.gap_3d > gap {
                 gap = g.gap_3d;
             }
