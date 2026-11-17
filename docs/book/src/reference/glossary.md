@@ -40,6 +40,23 @@ Number measuring optical dispersion as `(nd - 1) / (nF - nC)` at the Fraunhofer 
 - **In SolidCraft:** Glass `model.dispersion.abbe_number`; larger values give less chromatic dispersion.
 - **For translators:** an optical material quantity, not a sample or photon count.
 
+### airfoil
+
+The cross-section shape of a wing, blade or fin, published as points along its outline with the
+chord running from 0 to 1.
+
+A file of those points (`.dat`, in the Selig or the Lednicer layout) is inserted into a sketch as
+one fit point spline through every point, scaled to the chord. The *chord* is the straight line
+from the leading edge (the nose) to the trailing edge; the *trailing edge* is open when the file's
+first and last point are apart, and a line then closes the profile.
+
+- **In SolidCraft:** `sketch.insert_airfoil`; its `chord`, `pivot`, `flip` and `format` keys; the
+  reply's `trailing_edge`, `te_gap`, `deviation` and `bulge`.
+- **Don't use:** profile (a sketch's closed region), section (a loft's or a view's), wing shape.
+- **Elsewhere:** aerofoil (UK), airfoil section, foil.
+- **For translators:** the aerodynamic shape, not a sketch profile and not a loft section; UK
+  English says aerofoil.
+
 ### appearance
 
 How a body, face or component looks on screen and in renders.

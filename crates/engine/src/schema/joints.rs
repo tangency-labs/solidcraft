@@ -72,13 +72,20 @@ pub struct EditJointParams {
     /// The distance from a's frame to b's along z: a length, or an expression the joint follows.
     #[serde(default, deserialize_with = "present")]
     pub offset: Option<LengthExpr>,
+    /// The lateral offset along a's frame x, in mm or a length expression evaluated once.
+    #[serde(default, deserialize_with = "present")]
+    pub offset_x: Option<LengthExpr>,
+    /// The lateral offset along a's frame y, in mm or a length expression evaluated once.
+    #[serde(default, deserialize_with = "present")]
+    pub offset_y: Option<LengthExpr>,
     /// The turn about that distance: an angle, or an expression the joint follows.
     #[serde(default, deserialize_with = "present")]
     pub angle: Option<AngleExpr>,
     /// Suppress the joint (true) or bring it back (false).
     #[serde(default, deserialize_with = "present")]
     pub suppressed: Option<bool>,
-    /// The joint's new name.
+    /// The joint's new name, at most 128 characters once surrounding spaces are cut (the joint's
+    /// own name is taken whatever its length). Blank text changes nothing.
     #[serde(default, deserialize_with = "present")]
     pub name: Option<String>,
     /// Leave out the degrees of freedom and the fixed occurrences in the reply.
@@ -509,6 +516,14 @@ pub struct CreateJointParams {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[schemars(with = "JointValue")]
     pub offset: Option<JointValue>,
+    /// The lateral offset along a's frame x, in mm or an expression evaluated once. Default: 0.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "JointValue")]
+    pub offset_x: Option<JointValue>,
+    /// The lateral offset along a's frame y, in mm or an expression evaluated once. Default: 0.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "JointValue")]
+    pub offset_y: Option<JointValue>,
     /// The turn about that distance, in degrees or an expression; for an angle relation, its tilt
     /// from mated. Default: none, or a half turn where that turns b less, so faces that already
     /// meet stay as they are.
@@ -538,6 +553,8 @@ impl<'de> Deserialize<'de> for CreateJointParams {
         let a = given(&m, "a", JointOriginArg::read)?;
         let b = given(&m, "b", JointOriginArg::read)?;
         let offset = given(&m, "offset", JointValue::read)?;
+        let offset_x = given(&m, "offset_x", JointValue::read)?;
+        let offset_y = given(&m, "offset_y", JointValue::read)?;
         let angle = given(&m, "angle", JointValue::read)?;
         let values = listed(&m, "values", JointValues::read)?;
         // `value` is read only when `values` is not a list.
@@ -552,6 +569,8 @@ impl<'de> Deserialize<'de> for CreateJointParams {
             limits,
             flip: flag(&m, "flip")?,
             offset,
+            offset_x,
+            offset_y,
             angle,
             name: text(&m, "name")?,
             quiet: flag(&m, "quiet")?,
@@ -661,7 +680,8 @@ pub struct EditConstraintParams {
     /// True turns b over: from the new rule's way after a type change, else from how it faces now.
     #[serde(default, deserialize_with = "present")]
     pub flip: Option<bool>,
-    /// The constraint's new name.
+    /// The constraint's new name, at most 128 characters once surrounding spaces are cut (the
+    /// constraint's own name is taken whatever its length). Blank text changes nothing.
     #[serde(default, deserialize_with = "present")]
     pub name: Option<String>,
     /// Suppress the constraint (true) or bring it back (false).
@@ -1135,6 +1155,8 @@ pub struct ListedJoint {
     pub flip: bool,
     /// The distance from a's frame to b's along z, in mm.
     pub offset: f64,
+    /// The offsets along a's frame x and y, in mm, before the joint's motion.
+    pub offset_xy: [f64; 2],
     /// Whether the joint is suppressed (it places nothing).
     pub suppressed: bool,
     /// Whether the joint is shown in the viewport.
@@ -1416,6 +1438,8 @@ pub struct InspectedJoint {
     pub flip: bool,
     /// The distance from a's frame to b's along z, in mm.
     pub offset: f64,
+    /// The offsets along a's frame x and y, in mm, before the joint's motion.
+    pub offset_xy: [f64; 2],
     /// The turn about that distance, in degrees.
     pub angle: f64,
     /// Its values as the solver places them, as joint.list gives them.
@@ -2437,6 +2461,10 @@ pub struct MotionLinkParams {
     /// Which of b's values follows, counted from zero (a negative number is 0). Default: 0.
     #[serde(default)]
     pub ib: Option<f64>,
+    /// Replace that motion link (its index in `joint.list`'s `links`) instead of adding one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "u64")]
+    pub link: Option<u64>,
     /// Leave out `dof` and `fixed` in the reply. Default: false.
     #[serde(default)]
     pub quiet: Option<bool>,
@@ -2471,7 +2499,7 @@ impl<'de> Deserialize<'de> for MotionLinkParams {
         })?;
         let (ia, ib) = (number(&m, "ia")?, number(&m, "ib")?);
         let offset = given(&m, "offset", JointValue::read)?;
-        Ok(MotionLinkParams { a, b, ratio, offset, ia, ib, quiet: flag(&m, "quiet")? })
+        Ok(MotionLinkParams { a, b, ratio, offset, ia, ib, link: link_index(&m, "link")?, quiet: flag(&m, "quiet")? })
     }
 }
 
@@ -2484,6 +2512,18 @@ pub struct CouplingResult {
     pub link: usize,
     /// The ratio worked out: b's units per a's, per degree (mm per degree, or degrees per mm).
     pub ratio: f64,
+    /// In the warn parameter-check mode: what the call's parameters got wrong.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub param_warnings: Vec<String>,
+}
+
+/// What `joint.motion_link` returns: the solve, then the motion link made or replaced.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct MotionLinkResult {
+    #[serde(flatten)]
+    pub solved: SolveReport,
+    /// The motion link made (or replaced), by its index in `joint.list`'s `links`.
+    pub link: usize,
     /// In the warn parameter-check mode: what the call's parameters got wrong.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub param_warnings: Vec<String>,
