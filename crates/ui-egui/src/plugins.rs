@@ -60,6 +60,9 @@ pub struct Plugin {
     pub disabled: bool,
     pub groups: std::collections::BTreeSet<String>,
     pub entries: Vec<solidcraft_engine::plugin::Entry>,
+    /// The images its entries name, read from the package (`plugin_images`): each relative path
+    /// with the icon name it is drawn by.
+    pub images: std::collections::BTreeMap<String, String>,
 }
 
 /// A folder under the plugins directory that is not a plugin.
@@ -122,6 +125,7 @@ fn check(m: Manifest, folder: &str) -> Result<Plugin, String> {
         disabled: false,
         groups: Default::default(),
         entries: Vec::new(),
+        images: Default::default(),
     })
 }
 
@@ -141,6 +145,7 @@ fn read_plugin(dir: &Path, folder: &str) -> Result<(Plugin, bool), String> {
         plugin.entries = runtime.entries;
         plugin.groups = runtime.permissions.command_groups;
     }
+    plugin.images = crate::plugin_images::load(dir, &plugin.id, &plugin.entries);
     Ok((plugin, executable))
 }
 
@@ -1433,6 +1438,7 @@ mod tests {
             disabled: false,
             groups: Default::default(),
             entries: Vec::new(),
+            images: Default::default(),
             id: "ftc-frc-parts".into(),
             name: "FTC and FRC parts".into(),
             version: "0.1.0".into(),
