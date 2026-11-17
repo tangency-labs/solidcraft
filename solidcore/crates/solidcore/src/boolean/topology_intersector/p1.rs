@@ -2800,6 +2800,17 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
                 )?;
 
                 let num_sols = solutions.len();
+                #[allow(clippy::print_stderr, clippy::disallowed_methods)]
+                if num_sols > 0 {
+                    let a = eval_curve_point(k, brep, curve, edge_domain.min())?;
+                    let z = eval_curve_point(k, brep, curve, edge_domain.max())?;
+                    eprintln!("DIAGEF tol {this_tol} edge {a:?}..{z:?} n {num_sols}");
+                    for sol in solutions.as_slice() {
+                        let t = sol.start.param(0)?;
+                        let p = eval_curve_point(k, brep, curve, t)?;
+                        eprintln!("DIAGEF   {:?} t {t} {p:?}", sol.solution_type);
+                    }
+                }
 
                 // If the edge is coincident with the face, it will return several solutions.
                 // That is not what we're looking for.

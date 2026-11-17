@@ -2642,7 +2642,7 @@ fn zz_diag_18475() {
         extrude_planar_regions(&plane, &[reg], 0.0, h).unwrap()
     };
     for app in [false] {
-    for d in [-1e-5, -2.1e-5, -2.5e-5, -3e-5] {
+    for d in [-1e-5, -2.2e-5, -2.4e-5, -2.5e-5] {
         let (first, along_y) = if app {
             let sq = Region2 { outer: Loop2::polygon(&[Vec2::new(0.0, -10.45), Vec2::new(25.0, -10.45), Vec2::new(25.0, 10.45), Vec2::new(0.0, 10.45)]), holes: vec![] };
             let block = extrude_planar_regions(&Plane::XY, &[sq], 0.0, 4.5).unwrap();
