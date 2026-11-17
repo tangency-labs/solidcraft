@@ -3,24 +3,34 @@
 //! a-priori bound of the kernel's own float evaluation. No element is FARTHER.
 //!
 //! The fix makes `drop_curve` return the iso line `(f, t)` of a B-spline surface, with
-//! ends exactly `(f, t0)` and `(f, t1)`, when the curve is that iso line. It moves 2429
-//! elements of `topology.edgeuse_p2` (42), `topology.edgeuse_p3` (2331) and
-//! `topology.face_p3` (56). `data/issue_18325_moved_rows.tsv` lists them (`E unit case key
-//! i main new class`, main's and the new golden's values and the pinned class), with the
-//! stations the drop quality maxima are taken over (`DC`/`DU` the edge's 3D curve or the UV
-//! line of its `CrvOnSurf`, `DI` the `drop_iso_curve` stations, `DG` the
-//! `surface_curve_max_distance_between` stations, as the kernel evaluated them), the cached
-//! edge/face gap stations (`G`) and the blade hub face's surface (`S`).
+//! ends exactly `(f, t0)` and `(f, t1)`, when the curve is that iso line, decided before the
+//! station loop so the drop quality is measured on that exact line; and it seeds the
+//! edge/face gap of a `CrvOnSurf` on the other surface itself at its own uv, the exact
+//! foot (`heal/gap.rs` `own_foot`). Together they move 2462 elements of 333 rows:
+//! `topology.edgeuse_p2` (47), `topology.edgeuse_p3` (2343) and `topology.face_p3` (72).
+//! `data/issue_18325_moved_rows.tsv` lists them (`E unit case key i main new class`, main's
+//! and the new golden's values and the pinned class), main's whole vector of every row (`M`,
+//! the bits) and main's old golden line (`O`), with the stations the drop quality maxima are
+//! taken over (`DC`/`DU` the edge's 3D curve or the UV line of its `CrvOnSurf`, `DI` the
+//! `drop_iso_curve` stations, `DG` the `surface_curve_max_distance_between` stations, as the
+//! kernel evaluated them) and the blade hub face's surface (`S`).
 //!
-//! The test replays every listed case through the goldens runner. Each element must
-//! reproduce its new value bit for bit. It then gets its certificate and class:
+//! The test replays every listed case through the goldens runner. Each row's vector must
+//! match the new golden bit for bit; every index not listed must equal main's (`M`) bit for
+//! bit; and main's block triple, recomputed from `M` as `golden.rs` encodes it, must equal
+//! the old golden (`O`). The data lines are tied to the replayed model: `DC`/`DU` must be
+//! the edge's curve (or its `CrvOnSurf`'s UV curve) and `S` the face's surface, bit for bit.
+//! Then every element gets its certificate and class:
 //!
 //! * The reference `r` is the value of the ideal pipeline, the exact iso line `(f, t)`:
-//!   `f` the face's domain side, `t` the parameter the op evaluates (computed by the kernel
-//!   as on main: the trim fix does not touch it). Trim control points and samples, uv
-//!   points and derivatives have exact double references. Surface values at `(f, t)`
-//!   (normal, binormal, uv vector, `CrvOnSurf` point and derivative, lifted samples) are
-//!   enclosed in narrow outward-rounded intervals of the exact rational value.
+//!   `f` the face's domain side, `t` the parameter the op evaluates. Which side is `f`
+//!   comes from main's values (main's fixed coordinate strictly nearer it than the other
+//!   side) and main's trim interval must equal the new one bit for bit; a normal uv's
+//!   direction comes from main. Nothing in a reference comes from the new output. Trim
+//!   control points and samples, uv points and derivatives have exact double references.
+//!   Surface values at `(f, t)` (normal, binormal, uv vector, `CrvOnSurf` point and
+//!   derivative, lifted samples) are enclosed in narrow outward-rounded intervals of the
+//!   exact rational value.
 //! * CLOSER: `|new − r| < |main − r|`, decided exactly (dyadic arithmetic) for a double
 //!   reference, or `r`'s whole enclosure on new's side of the midpoint of new and main.
 //! * EQUAL: `new == main`, or the two at the same exact distance from `r`.
@@ -29,42 +39,53 @@
 //!   - a degree-1 trim evaluation: `B = 64 ε max(|f|, |t0|, |t1|)` (`nurbs_crv.rs`
 //!     `crv_point_error`);
 //!   - a surface evaluation at the record's own uv: the exact homogeneous sums widened by
-//!     `γ_K Σ|terms|`, `K = 9p + 9q + (p+1)(q+1) + 8` (the basis recurrences, 3 roundings
-//!     per level and the derivative scaling per direction, a Bézier extraction allowance
-//!     `3p + 3q`, the tensor sum, 2 products per term), then one rounding per operation of
-//!     the rational quotient; a cross product `γ_2` per component, a dot product of `n`
-//!     terms `γ_n`, a normalisation `γ_3` (dot), `u` (square root) and `γ_2` (division),
-//!     the uv-vector solve `γ_2` per 2×2 minor and `u` per division;
+//!     `γ_K Σ|terms|`, `K = 7p + 7q + (p+1)(q+1) + 10`, counted from the evaluator
+//!     (`srf_nurb.rs` `first_derivs_span`, `univariate_first`): `6p` per direction for the
+//!     basis and its derivative, `2` plus `(p+1)(q+1)` for the tensor sum, `p + q + 6` for
+//!     the rational branch; then one rounding per operation of the rational quotient; a
+//!     cross product `γ_2` per component, a dot product of `n` terms `γ_n`, a normalisation
+//!     `γ_3` (dot), `u` (square root) and `γ_2` (division), the uv-vector solve `γ_2` per
+//!     2×2 minor and `u` per division;
 //!   - a `CrvOnSurf` point or derivative at `(f, t)`: `L e_in + γ_K M` with `L` the hull
 //!     bound of the surface's first (second, for a derivative) derivative net, `e_in` the
 //!     trim evaluation's `64 ε M` plus the parameter's own `γ_3 (|lo| + |hi|)`, `M` the net's
 //!     largest coordinate;
-//!   - a drop quality value (a maximum over stations): every station's `|dist|`, `dev`,
-//!     `line_param` and `drop_line_dist` enclosed from the station's own uv through the
-//!     float surface, normal and difference chain (each value of the dump checked inside
-//!     its enclosure), the reported value the maximum, or the kernel's `sqrt(d² + v²)` with
-//!     one rounding per operation. The reference is the exact maximum over the same
-//!     stations of the ideal pipeline: at `(f, t)` the exact split of `C(s) − S(f, t)`
-//!     along and across the normal, at a gap station at the curve's certified closest
-//!     approach (a sign change of the projection's derivative bracketed in interval
-//!     arithmetic, widened by the curve's Lipschitz bound times the bracket). The
-//!     enclosure is taken at each station's own uv, so it bounds the rounding only when
-//!     that uv is `(f, param)` within the trim evaluation's `64 ε M` (checked per station).
-//!     `|max x − max r| <= max_j sup |E_j − R_j|`; a station off the iso line (on the
-//!     drop's own Newton line, as on main) keeps the at-rounding class only if it cannot
-//!     set the maximum or its own `sup |E_j − R_j|` is within the on-iso stations' largest
-//!     (else the element must be CLOSER or EQUAL). At a gap station `e_in` also holds the
-//!     closest-point solver's residual in the curve parameter (the kernel's `s` against
-//!     the certified `s*`): the same solver as on main;
-//!   - a cached edge/face gap (`G`): `|S(trim(t)) − S(uv)|` at the closest-point solver's
-//!     uv, the reference `0` (the ideal `CrvOnSurf` is `S(f, ·)` itself); `e_in` is the
-//!     solver's uv residual, the same solver on main. `eu1`/`eu7` of the goc cases are
-//!     at-rounding against `0` for that reason, `eu2`/`eu6` CLOSER.
-//! * A binormal row's vertex/face-gap-cached flag (`1 → 0`): the reference is `0`. Only
-//!   `sm_FixUVTrimCurves` computes that gap on this path, and only when the trims meeting
-//!   at the vertex miss each other by more than `EFF_ZERO (1 + |uv|)`; the ideal trims, the
-//!   exact iso lines of the domain sides, meet exactly at the corner.
+//!   - a drop quality value (a maximum over stations): every station is on the exact iso
+//!     line, an iso station at `(f, param)` bit for bit, a gap station at curve parameter
+//!     `s = t` bit for bit and at the degree-1 trim's float uv, within the a-priori
+//!     `64 ε max(|f|, |t0|, |t1|)` of `(f, t)` (checked per station; no solver residual
+//!     enters). Every station's `|dist|`, `dev`, `line_param` and `drop_line_dist` is
+//!     enclosed from the station's own inputs through the float surface, normal and
+//!     difference chain (each dumped value checked inside its enclosure); the reported value
+//!     is the maximum, or the kernel's `sqrt(d² + v²)` with one rounding per operation. The
+//!     reference is the exact maximum over the same stations of the ideal pipeline: `0` at
+//!     every station when the edge's curve is the face's boundary row at `f` (a clamped end,
+//!     bit for bit) or its `CrvOnSurf` UV curve is the exact iso line; otherwise at `(f, t)`
+//!     the exact split of `C(s) − S(f, t)` along and across the normal, at a gap station at
+//!     the curve's certified closest approach (a bracketed sign change of the projection's
+//!     derivative, widened by the curve's Lipschitz bound times the bracket).
+//!     `|max x − max r| <= max_j sup |E_j − R_j|`. The table labels the maxima set at a gap
+//!     station (`max set at a gap station`): 56 at-rounding, 3 CLOSER;
+//!   - the cached edge/face gap of a goc case (a `CrvOnSurf` on its own face, checked on
+//!     the model) and `face_p3`'s mean and maximum curve/surface gaps (every edge curve of
+//!     the face its boundary row along a domain side, checked on the model): the reference
+//!     is `0`, and the new values are `0` exactly.
+//! * A binormal row's vertex/face-gap-cached flag (`1 → 0`): proven `0` on the replayed
+//!   model (`prove_corner_flag`): the edge's curve and its loop neighbour's at the shared
+//!   vertex are `create_iso_parametric_curve` of two domain sides of different coordinates,
+//!   so the vertex's ideal uv is their corner, where the ideal trims meet exactly; only
+//!   `sm_FixUVTrimCurves` computes that gap on this path, and only for trims that miss each
+//!   other by more than `EFF_ZERO (1 + |uv|)`.
 //! * FARTHER: none of the above, a defect. The pinned classes hold none.
+//!
+//! The rows are those of a fresh bless of main and of the fix, diffed bit for bit, in
+//! these three units, including elements that move by less than the goldens' tolerance;
+//! all of them are re-blessed. The same diff moves 42 rows of six other units by at most
+//! `1e-10` relative (`blend.fillet_solver_p2` 5, `boolean.api_brep` 1, `mass.integrator`
+//! 29, `query.face_p2` 2, `topology.brep_validation` 2, `topology.vertexuse` 2), all
+//! within the goldens' tolerance, so their expectations do not change and they are not
+//! certified here. Every one of those moves comes from the exact drop ends: with the gap
+//! seed reverted the fresh bless of all nine units is the same bit for bit.
 //!
 //! Run: `cargo test --profile goldens -p goldens --test issue_18325_moved_rows -- --nocapture`
 //! (prints the table: element classes per unit and kind, the largest `|new − r| / B` of the
@@ -89,8 +110,23 @@
 use std::collections::BTreeMap;
 
 use goldens::case::repo_root;
-use goldens::{registry, CaseContext};
+use goldens::golden::encode;
+use goldens::units::topology_edgeuse_p2::scene as scene_p2;
+use goldens::units::topology_edgeuse_p3::scene;
+use goldens::units::topology_face_p3::scene as face_scene;
+use goldens::{registry, CaseContext, Output};
 use serde_json::Value;
+use solidcore::curve::curve::{Curve, CurveKind};
+use solidcore::geom::extent2d::Extent2d;
+use solidcore::kernel::Kernel;
+use solidcore::math::Point2;
+use solidcore::nurbs::b_spline_curve::{BSplineCurve, ControlPointForm};
+use solidcore::nurbs::b_spline_surface::p1::SurfParamType;
+use solidcore::nurbs::b_spline_surface::p2::IsoCurveOptions;
+use solidcore::nurbs::b_spline_surface::BSplineSurface;
+use solidcore::surface::surface::{Surface, SurfaceKind};
+use solidcore::topology::edgeuse::p1 as eu1;
+use solidcore::topology::{vertexuse, Brep, EdgeuseId};
 
 const DATA: &str = include_str!("data/issue_18325_moved_rows.tsv");
 
@@ -510,13 +546,30 @@ impl Srf {
     }
 
     /// An enclosure of the kernel's float `S, S_u, S_v` at the doubles `(u, v)`: the exact
-    /// sums widened by `γ_K Σ|terms|`, `K = 9p + 9q + (p+1)(q+1) + 8` (the basis recurrences,
-    /// 3 roundings per level and the derivative scaling, per direction; a Bézier extraction
-    /// allowance of `3p + 3q`; the tensor sum of `(p+1)(q+1)` terms; 2 products per term),
-    /// then the rational quotient one rounding per operation.
+    /// sums widened by `γ_K Σ|terms|`, then the rational quotient one rounding per
+    /// operation. `K = 7p + 7q + (p+1)(q+1) + 10`, counted on the chain the values go
+    /// through (`Surface::first_derivs_span` in `nurbs/srf_nurb.rs`; `eval` the same
+    /// recurrences without the derivative):
+    /// - `univariate_first`, per direction: each level of the basis triangle rounds
+    ///   `left`/`right` (1), their sum, the divisor (1 more), the quotient `temp` (1), the
+    ///   product `right · temp` (1) and the sum `saved + …` (1) on nonnegative terms: `6p`
+    ///   relative to the terms. The first derivative's terms: the divisor of level `p`
+    ///   (2), the reciprocal (1), the product (1), the sum (1) and the factor `p` (1) on
+    ///   the level `p − 1` values (`6(p − 1)`): `6p` relative to `Σ|terms|` (`dua`).
+    /// - the tensor sum: `alpha = a · b` (1), `alpha · P` (1), and the running sum of the
+    ///   `(p+1)(q+1)` terms (`(p+1)(q+1)`).
+    /// - the rational branch (only the blade hub's net, every weight exactly `1`): the
+    ///   denominator `d00` and its derivatives (the inner and outer weight sums, `q + 1`
+    ///   and `p + 1`, and the product, 1), the reciprocal `inv_w00` (1), the products by
+    ///   the weight and by `inv_w00` (2) and the derivative recurrence's `c · r` product and
+    ///   difference (2): `p + q + 6` more, `7p + 7q + (p+1)(q+1) + 10` in all (a
+    ///   non-rational net needs `6p + 6q + (p+1)(q+1) + 2` of it).
+    ///
+    /// Every dumped value is checked inside its enclosure, so an undercount shows as a
+    /// failed containment, never as a wrong class.
     fn kernel(&self, u: f64, v: f64) -> Eval {
         let (mut a, m) = self.sums(Iv::p(u), Iv::p(v));
-        let g = gam(9 * self.p + 9 * self.q + (self.p + 1) * (self.q + 1) + 8);
+        let g = gam(7 * self.p + 7 * self.q + (self.p + 1) * (self.q + 1) + 10);
         for d in 0..3 {
             for c in 0..4 {
                 a[d][c] = a[d][c].widen(up_mul(g, m[d][c]));
@@ -856,9 +909,18 @@ fn line_bound(iso: &Iso) -> f64 {
 
 /// Labels the elements of every UV trim record in `v` that is an iso line of the face's
 /// surface with the exact references of the ideal pipeline: control points and samples
-/// `(f, t)`, `f` a side of the face's domain `dom` (`None`: a file B-rep, whose domain the
-/// row does not hold; the trim's own fixed value) and `t` the trim's own parameter.
-fn label_trims(v: &[f64], dom: Option<[f64; 4]>, out: &mut BTreeMap<usize, Cert>) -> Option<Iso> {
+/// `(f, t)`, `f` a side of the face's domain `dom` and `t` the trim's own parameter.
+///
+/// The side is not taken on the new output's word: main's trim at the same place (`main`,
+/// the committed golden's vector) has the same interval bit for bit (`t0`, `t1` are not
+/// the fix's output), and both of main's fixed-coordinate control points are strictly
+/// nearer `f` than the domain's other side.
+fn label_trims(
+    v: &[f64],
+    main: &[f64],
+    dom: [f64; 4],
+    out: &mut BTreeMap<usize, Cert>,
+) -> Option<Iso> {
     let mut first = None;
     let mut i = 0;
     while i < v.len() {
@@ -879,10 +941,22 @@ fn label_trims(v: &[f64], dom: Option<[f64; 4]>, out: &mut BTreeMap<usize, Cert>
                 continue;
             }
             let f = at(0);
-            if let Some(d) = dom {
-                if f != d[c] && f != d[c + 2] {
-                    continue;
-                }
+            if f != dom[c] && f != dom[c + 2] {
+                continue;
+            }
+            let other = if f == dom[c] { dom[c + 2] } else { dom[c] };
+            let mt = parse_trim(main, tr.cp - 5).expect("main's trim record");
+            assert_eq!(
+                [mt.ivl.0, mt.ivl.1].map(f64::to_bits),
+                [t0, t1].map(f64::to_bits),
+                "main's trim interval"
+            );
+            for k in 0..2 {
+                let m = main[tr.cp + 4 * k + c];
+                assert!(
+                    (m - f).abs() < (m - other).abs(),
+                    "main's fixed coordinate {m} is not nearer the side {f} than {other}"
+                );
             }
             let iso = Iso { c, f, ivl: tr.ivl };
             first.get_or_insert(iso);
@@ -967,16 +1041,42 @@ fn norm(a: &V3) -> Iv {
 /// normal, uv, uv_vector]`): the references at the exact `(f, t)` (`t` the edge interval's
 /// `evaluate(frac)`, as the kernel's), the enclosures from the row's own uv, normal and
 /// binormal through the surface's float evaluation.
-fn label_binormal(v: &[f64], srf: &Srf, iso: &Iso, frac: f64, out: &mut BTreeMap<usize, Cert>) {
+fn label_binormal(
+    v: &[f64],
+    main: &[f64],
+    srf: &Srf,
+    iso: &Iso,
+    frac: f64,
+    out: &mut BTreeMap<usize, Cert>,
+) {
     let n = v.len();
     let (lo, hi) = (v[n - 3], v[n - 2]);
     let t = ev(lo, hi, frac).clamp(lo, hi);
+    label_binormal_at(v, main, 0, true, t, srf, iso, out);
+}
+
+/// The binormal record `[point, binormal, tangent, normal, uv]` starting at `v[base]`,
+/// evaluated at the iso line's parameter `t`, with the uv vector after it when
+/// `uv_vector`. The normal's orientation is main's (`main`, the same record on main).
+#[allow(clippy::too_many_arguments)] // test
+fn label_binormal_at(
+    v: &[f64],
+    main: &[f64],
+    base: usize,
+    uv_vector: bool,
+    t: f64,
+    srf: &Srf,
+    iso: &Iso,
+    out: &mut BTreeMap<usize, Cert>,
+) {
+    let v = &v[base..];
+    let main = &main[base..];
     let mut uv = [t, t];
     uv[iso.c] = iso.f;
     let b = line_bound(iso);
     for (q, r) in uv.into_iter().enumerate() {
         out.insert(
-            12 + q,
+            base + 12 + q,
             Cert::Exact {
                 r,
                 b: Some(b),
@@ -987,7 +1087,7 @@ fn label_binormal(v: &[f64], srf: &Srf, iso: &Iso, frac: f64, out: &mut BTreeMap
     // references
     let (_, su, sv) = srf.exact(Iv::p(uv[0]), Iv::p(uv[1]));
     let cn = cross(&su, &sv);
-    let sg = sign_of(&pts(v, 9), &cn);
+    let sg = sign_of(&pts(main, 9), &cn);
     let nn = scale3(&cn, sg);
     let ln = norm(&nn);
     let t3 = pts(v, 6);
@@ -1006,7 +1106,7 @@ fn label_binormal(v: &[f64], srf: &Srf, iso: &Iso, frac: f64, out: &mut BTreeMap
     // enclosures
     let (_, ksu, ksv) = srf.kernel(v[12], v[13]);
     let kc = kcross(&ksu, &ksv);
-    let kn = scale3(&kunit(&kc), sign_of(&pts(v, 9), &kc));
+    let kn = scale3(&kunit(&kc), sign_of(&pts(main, 9), &kc));
     let kb = kunit(&kcross(&pts(v, 9), &t3));
     let br = pts(v, 3);
     let sub2 = |x: Iv, y: Iv| x.sub(y).widen(up_mul(gam(2), up_add(x.mag(), y.mag())));
@@ -1022,7 +1122,7 @@ fn label_binormal(v: &[f64], srf: &Srf, iso: &Iso, frac: f64, out: &mut BTreeMap
     ];
     for q in 0..3 {
         out.insert(
-            9 + q,
+            base + 9 + q,
             Cert::Enc {
                 r: nn[q].div(ln),
                 e: Some(kn[q]),
@@ -1030,7 +1130,7 @@ fn label_binormal(v: &[f64], srf: &Srf, iso: &Iso, frac: f64, out: &mut BTreeMap
             },
         );
         out.insert(
-            3 + q,
+            base + 3 + q,
             Cert::Enc {
                 r: bb[q].div(lb),
                 e: Some(kb[q]),
@@ -1038,9 +1138,12 @@ fn label_binormal(v: &[f64], srf: &Srf, iso: &Iso, frac: f64, out: &mut BTreeMap
             },
         );
     }
+    if !uv_vector {
+        return;
+    }
     for q in 0..2 {
         out.insert(
-            14 + q,
+            base + 14 + q,
             Cert::Enc {
                 r: uvv[q],
                 e: Some(kuv[q]),
@@ -1289,35 +1392,118 @@ fn comb(d: Iv, v: Iv, round: bool) -> Iv {
     r(q.clamp0().sqrt())
 }
 
+/// Whether `curve` is the face's boundary curve along the iso line `iso`: `f` a clamped end
+/// of the fixed direction's knots (`p + 1` equal knots), and the curve of the moving
+/// direction's degree and knots with the net's boundary row as its control points, bit for
+/// bit (a non-rational net's sentinel weight against weight `1`). Then
+/// `C(s) = S(f, s)` exactly for every `s`: at a clamped end the fixed direction's basis is
+/// exactly `1` on the boundary row and `0` elsewhere.
+fn is_boundary(srf: &Srf, iso: &Iso, curve: &Crv) -> bool {
+    let (fixed, deg, moving, mdeg) = if iso.c == 0 {
+        (&srf.u, srf.p, &srf.v, srf.q)
+    } else {
+        (&srf.v, srf.q, &srf.u, srf.p)
+    };
+    let n = fixed.len();
+    let rows = if iso.c == 0 {
+        srf.net.len()
+    } else {
+        srf.net[0].len()
+    };
+    let at = if fixed[..=deg].iter().all(|&x| x == iso.f) {
+        0
+    } else if fixed[n - 1 - deg..].iter().all(|&x| x == iso.f) {
+        rows - 1
+    } else {
+        return false;
+    };
+    let row: Vec<[f64; 4]> = if iso.c == 0 {
+        srf.net[at].clone()
+    } else {
+        srf.net.iter().map(|r| r[at]).collect()
+    };
+    let cp_eq = |a: &[f64; 4], b: &[f64; 4]| {
+        (0..3).all(|q| a[q].to_bits() == b[q].to_bits())
+            && (a[3].to_bits() == b[3].to_bits() || (!srf.rational && b[3] == 1.0))
+    };
+    curve.p == mdeg
+        && bits(&curve.knots) == bits(moving)
+        && row.len() == curve.cps.len()
+        && row.iter().zip(&curve.cps).all(|(a, b)| cp_eq(a, b))
+}
+
+fn bits(xs: &[f64]) -> Vec<u64> {
+    xs.iter().map(|x| x.to_bits()).collect()
+}
+
 /// The certificates of a row's reported drop quality (`state[0]`, or `state[0..2]`), from
 /// its stations. Every station's dumped value must lie in its enclosure (the data are the
-/// kernel's).
+/// kernel's), and every station must be on the exact iso line: an iso station's uv is
+/// `(f, param)` bit for bit; a gap station's curve parameter is `s = t` bit for bit and its
+/// uv is the degree-1 trim's float evaluation at `t`, within the a-priori [`line_bound`] of
+/// `(f, t)`. The enclosures are then of the kernel's float evaluation at those inputs (no
+/// solver residual enters). The references: `0` at every station when the edge's 3D curve is the face's
+/// boundary row at `f` ([`is_boundary`]) or a `CrvOnSurf` over the exact iso line; else
+/// the certified ideal values of [`station_refs`].
 fn label_drop(case: &str, srf: &Srf, iso: &Iso, d: &Drop, out: &mut BTreeMap<usize, Cert>) {
     let b = d.curve.is_none().then(|| srf.bounds());
-    let mut e = (Vec::new(), Vec::new());
-    let mut r = (Vec::new(), Vec::new());
-    // the enclosures below are of the kernel's evaluation at each station's own uv; they
-    // bound the rounding against the reference only when that uv is the exact `(f, param)`
-    // up to the float trim evaluation's `line_bound` (the certified input error). A station
-    // off by more (on the drop's own Newton line, as on main) may not set the reported
-    // maximum: if its enclosure reaches the maximum's lower bound, the element gets no
-    // at-rounding class and must be CLOSER or EQUAL.
-    let lb = line_bound(iso);
-    let uv_ok = |param: f64, u: f64, v: f64| {
+    let at = |param: f64| {
         let mut want = [param; 2];
         want[iso.c] = iso.f;
-        [u, v]
-            .into_iter()
-            .zip(want)
-            .all(|(got, want)| Iv::p(got).sub(Iv::p(want)).abs().hi <= lb)
+        want.map(f64::to_bits)
     };
-    let mut ok = Vec::new();
     for st in &d.isos {
-        ok.push(uv_ok(st[0], st[1], st[2]));
+        assert_eq!(
+            [st[1], st[2]].map(f64::to_bits),
+            at(st[0]),
+            "{case}: iso station {st:?} off the exact iso line"
+        );
     }
+    // a gap station's uv is the returned trim evaluated as a float B-spline (the
+    // `CrvOnSurf`'s UV curve): within the trim evaluation's a-priori `line_bound` of the
+    // exact `(f, t)`, the certified input error; its curve parameter is the station's own
+    let lb = line_bound(iso);
     for st in &d.gaps {
-        ok.push(uv_ok(st[0], st[1], st[2]));
+        let mut want = [st[0]; 2];
+        want[iso.c] = iso.f;
+        assert!(
+            [st[1], st[2]]
+                .into_iter()
+                .zip(want)
+                .all(|(got, want)| Iv::p(got).sub(Iv::p(want)).abs().hi <= lb),
+            "{case}: gap station {st:?} off the exact iso line"
+        );
+        assert_eq!(
+            st[3].to_bits(),
+            st[0].to_bits(),
+            "{case}: gap station {st:?}: the curve parameter is not the station's"
+        );
     }
+    let zero = match (&d.curve, &d.other_uv) {
+        (Some(c), _) => is_boundary(srf, iso, c),
+        (None, Some(u)) => {
+            let line = iso_curve(iso);
+            assert!(
+                u.p == 1
+                    && bits(&u.knots) == bits(&line.knots)
+                    && u.cps.iter().zip(&line.cps).all(|(a, b)| bits(a) == bits(b)),
+                "{case}: the CrvOnSurf's UV curve is not the exact iso line"
+            );
+            true
+        }
+        _ => panic!("{case}: drop data without a curve"),
+    };
+    let refs = |param: f64, gap: bool| {
+        if zero {
+            (Iv::p(0.0), Iv::p(0.0))
+        } else {
+            station_refs(srf, iso, d, param, gap)
+        }
+    };
+    let mut e = (Vec::new(), Vec::new());
+    let mut r = (Vec::new(), Vec::new());
+    // the dumped values, and whether the station is a gap station
+    let mut x = (Vec::new(), Vec::new());
     for st in &d.isos {
         let [p, u, v, dld, lp] = *st;
         let c = d.point(srf, b.as_ref(), p);
@@ -1326,11 +1512,13 @@ fn label_drop(case: &str, srf: &Srf, iso: &Iso, d: &Drop, out: &mut BTreeMap<usi
             ed.contains(lp.abs()) && ev.contains(dld),
             "{case}: iso station {st:?} outside {ed:?} {ev:?}"
         );
-        let (rd, rv) = station_refs(srf, iso, d, p, false);
+        let (rd, rv) = refs(p, false);
         e.0.push(ed);
         e.1.push(ev);
         r.0.push(rd);
         r.1.push(rv);
+        x.0.push((lp.abs(), false));
+        x.1.push((dld, false));
     }
     for st in &d.gaps {
         let [t, u, v, s, dist, dev] = *st;
@@ -1340,44 +1528,36 @@ fn label_drop(case: &str, srf: &Srf, iso: &Iso, d: &Drop, out: &mut BTreeMap<usi
             ed.contains(dist) && ev.contains(dev),
             "{case}: gap station {st:?} outside {ed:?} {ev:?}"
         );
-        let (rd, rv) = station_refs(srf, iso, d, t, true);
+        let (rd, rv) = refs(t, true);
         e.0.push(ed);
         e.1.push(ev);
         r.0.push(rd);
         r.1.push(rv);
+        x.0.push((dist, true));
+        x.1.push((dev, true));
     }
     let (ed, ev, rd, rv) = (imax(&e.0), imax(&e.1), imax(&r.0), imax(&r.1));
-    // `|max x − max r| <= max_j |x_j − r_j| <= max_j sup |E_j − R_j|`. An on-iso station's
-    // `sup |E_j − R_j|` is a rounding bound (certified inputs). An off-iso station keeps the
-    // at-rounding class only if it cannot set the maximum (its enclosure lies below the
-    // maximum's lower bound) or its own `sup |E_j − R_j|` is no larger than the on-iso
-    // stations' largest: then it adds nothing beyond that rounding bound.
-    let settled = |es: &[Iv], rs: &[Iv], mx: Iv| {
-        let gap = |x: &Iv, y: &Iv| up_add(x.hi.max(y.hi), -(x.lo.min(y.lo)));
-        let cert = es
-            .iter()
-            .zip(rs)
-            .zip(&ok)
-            .filter(|(_, ok)| **ok)
-            .map(|((x, y), _)| gap(x, y))
-            .fold(0.0, f64::max);
-        es.iter()
-            .zip(rs)
-            .zip(&ok)
-            .all(|((x, y), ok)| *ok || x.hi < mx.lo || gap(x, y) <= cert)
+    // whether only gap stations attain the reported maximum
+    let by_gap = |xs: &[(f64, bool)]| {
+        let mx = xs.iter().map(|y| y.0).fold(0.0, f64::max);
+        mx > 0.0 && xs.iter().all(|y| y.0 != mx || y.1)
     };
-    let (ok_d, ok_v) = (settled(&e.0, &r.0, ed), settled(&e.1, &r.1, ev));
+    let (gd, gv) = (by_gap(&x.0), by_gap(&x.1));
+    let tag = |g: bool, a: &'static str, b: &'static str| if g { b } else { a };
     if ["create_plain", "goc", "create_dev0"]
         .iter()
         .any(|k| case.contains(k))
     {
-        let what = "drop quality sqrt(dist² + dev²), max over stations";
         out.insert(
             0,
             Cert::Enc {
                 r: comb(rd, rv, false),
-                e: (ok_d && ok_v).then(|| comb(ed, ev, true)),
-                what,
+                e: Some(comb(ed, ev, true)),
+                what: tag(
+                    gd && gv,
+                    "drop quality sqrt(dist² + dev²), max over stations",
+                    "drop quality sqrt(dist² + dev²), max set at gap stations",
+                ),
             },
         );
     } else {
@@ -1385,16 +1565,24 @@ fn label_drop(case: &str, srf: &Srf, iso: &Iso, d: &Drop, out: &mut BTreeMap<usi
             0,
             Cert::Enc {
                 r: rd,
-                e: ok_d.then_some(ed),
-                what: "drop distance, max over stations",
+                e: Some(ed),
+                what: tag(
+                    gd,
+                    "drop distance, max over stations",
+                    "drop distance, max set at a gap station",
+                ),
             },
         );
         out.insert(
             1,
             Cert::Enc {
                 r: rv,
-                e: ok_v.then_some(ev),
-                what: "drop deviation, max over stations",
+                e: Some(ev),
+                what: tag(
+                    gv,
+                    "drop deviation, max over stations",
+                    "drop deviation, max set at a gap station",
+                ),
             },
         );
     }
@@ -1415,8 +1603,10 @@ struct Data {
     /// `(unit, case)` -> moved elements.
     els: BTreeMap<(String, String), Vec<El>>,
     drops: BTreeMap<String, Drop>,
-    /// The cached edge/face gap station: `t, u, v, gap`.
-    gocs: BTreeMap<String, [f64; 4]>,
+    /// `(unit, case)` -> main's whole vector of the row's moved key (`M`), bit for bit.
+    mains: BTreeMap<(String, String), (String, Vec<f64>)>,
+    /// `(unit, case)` -> main's committed golden of that key (`O`).
+    olds: BTreeMap<(String, String), Value>,
     /// The blade hub face's surface and domain.
     blade: Option<(Srf, [f64; 4])>,
 }
@@ -1502,9 +1692,19 @@ fn data() -> Data {
                     .gaps
                     .push([x[0], x[1], x[2], x[3], x[4], x[5]]);
             }
-            "G" => {
-                let x: Vec<f64> = c[2..6].iter().map(|s| f(s)).collect();
-                d.gocs.insert(c[1].to_owned(), [x[0], x[1], x[2], x[3]]);
+            "M" => {
+                let bits = c[4]
+                    .split(',')
+                    .map(|b| f64::from_bits(u64::from_str_radix(b, 16).unwrap()))
+                    .collect();
+                d.mains
+                    .insert((c[1].to_owned(), c[2].to_owned()), (c[3].to_owned(), bits));
+            }
+            "O" => {
+                d.olds.insert(
+                    (c[1].to_owned(), c[2].to_owned()),
+                    serde_json::from_str(c[4]).unwrap(),
+                );
             }
             "S" => d.blade = Some(srf(c[2])),
             k => panic!("unknown line kind {k}"),
@@ -1519,10 +1719,13 @@ fn data() -> Data {
 /// parameter the op evaluates (`s` from the normalised `t` over the trim interval as the
 /// kernel maps it, `1 − t` when the edge use runs against the trim), the derivative the unit
 /// vector along the moving axis.
-fn label_norm_uv(v: &[f64], inputs: &Value, iso: &Iso, out: &mut BTreeMap<usize, Cert>) {
+fn label_norm_uv(main: &[f64], inputs: &Value, iso: &Iso, out: &mut BTreeMap<usize, Cert>) {
     let c = iso.c;
     let (t0, t1) = iso.ivl;
-    let d = v[3 + 1 - c];
+    // the direction from main's derivative (not the fix's output): nonzero, along the
+    // moving axis
+    let d = main[3 + 1 - c];
+    assert!(d != 0.0 && d.abs() > 0.5, "main's derivative {d}");
     let opp = (d < 0.0) == (t1 > t0);
     let t = num(&inputs["t"]);
     let tt = if opp { 1.0 - t } else { t };
@@ -1569,29 +1772,197 @@ fn iso_curve(iso: &Iso) -> Crv {
     }
 }
 
-/// The cached edge/face gap of a `CrvOnSurf` edge (`get_or_create` records it at 0):
-/// `|S(trim(t)) − S(uv)|` at the closest-point solver's `uv`, enclosed; the reference `0`.
-fn label_goc(srf: &Srf, iso: &Iso, g: &[f64; 4], v: &[f64], out: &mut BTreeMap<usize, Cert>) {
-    let [t, u, w, gap] = *g;
-    assert_eq!(
-        v[0].to_bits(),
-        gap.to_bits(),
-        "the cached gap is not the station's"
-    );
-    let b = srf.bounds();
-    let c = cos_point(srf, &b, &iso_curve(iso), t);
-    let (p, _, _) = srf.kernel(u, w);
-    let diff: V3 = std::array::from_fn(|q| c[q].sub(p[q]).rel(U));
-    let e = kdot(&diff, &diff, 3).clamp0().sqrt().rel(U);
-    assert!(e.contains(gap), "gap {gap} outside {e:?}");
+/// The cached edge/face gap of a `CrvOnSurf` edge (`get_or_create` records it at 0): the
+/// edge's curve is a curve on the face's own surface (checked on the replayed model,
+/// [`Model::cos_on_face`]), so every point of it is on the face: the reference is `0`.
+fn label_goc(out: &mut BTreeMap<usize, Cert>) {
     out.insert(
         0,
-        Cert::Enc {
-            r: Iv::p(0.0),
-            e: Some(e),
-            what: "cached edge/face gap",
+        Cert::Exact {
+            r: 0.0,
+            b: None,
+            what: "cached edge/face gap (a CrvOnSurf on its face)",
         },
     );
+}
+
+// ---- the replayed model ----------------------------------------------------------------------
+
+/// A row's B-rep and edge use, built from the case as the unit builds them.
+struct Model {
+    brep: Brep,
+    eu: EdgeuseId,
+}
+
+fn bspline_surface(s: &Surface) -> &BSplineSurface {
+    match s.kind() {
+        SurfaceKind::BSpline(b) => b,
+        _ => panic!("not a B-spline surface"),
+    }
+}
+
+/// A B-spline curve as the data lines hold it: full knot vector, homogeneous points.
+fn crv_of(c: &BSplineCurve) -> Crv {
+    let (kv, km) = c.knots(None).unwrap();
+    let knots = kv
+        .iter()
+        .zip(&km)
+        .flat_map(|(x, m)| std::iter::repeat_n(*x, *m))
+        .collect();
+    let cps = (0..c.number_control_points().unwrap())
+        .map(|i| {
+            let (q, w) = c
+                .control_point(ControlPointForm::HomogeneousRational, i)
+                .unwrap();
+            [q.x, q.y, q.z, w]
+        })
+        .collect();
+    Crv {
+        p: c.degree().unwrap(),
+        knots,
+        cps,
+    }
+}
+
+fn same_crv(a: &Crv, b: &Crv) -> bool {
+    a.p == b.p
+        && bits(&a.knots) == bits(&b.knots)
+        && a.cps.len() == b.cps.len()
+        && a.cps.iter().zip(&b.cps).all(|(x, y)| bits(x) == bits(y))
+}
+
+fn same_nurb(a: &BSplineSurface, b: &BSplineSurface) -> bool {
+    let (Some(a), Some(b)) = (a.gw_nurb(), b.gw_nurb()) else {
+        return false;
+    };
+    let cp = |c: &Vec<Vec<solidcore::nurbs::math::CPoint>>| -> Vec<u64> {
+        c.iter()
+            .flatten()
+            .flat_map(|p| [p.x, p.y, p.z, p.w])
+            .map(f64::to_bits)
+            .collect()
+    };
+    a.degrees() == b.degrees()
+        && bits(a.u_knots()) == bits(b.u_knots())
+        && bits(a.v_knots()) == bits(b.v_knots())
+        && cp(&a.cpts()) == cp(&b.cpts())
+}
+
+impl Model {
+    fn of(case: &goldens::Case) -> Model {
+        let (brep, eu) = scene(case).unwrap().expect("the case builds its edge use");
+        Model { brep, eu }
+    }
+    fn curve(&self, eu: EdgeuseId) -> &Curve {
+        let e = eu1::edge(&self.brep, eu).unwrap().expect("an edge");
+        self.brep.edge(e).unwrap().curve.as_ref().expect("a curve")
+    }
+    fn surface(&self) -> &BSplineSurface {
+        let f = eu1::face(&self.brep, self.eu).unwrap().expect("a face");
+        bspline_surface(
+            self.brep
+                .face(f)
+                .unwrap()
+                .surface
+                .as_ref()
+                .expect("a surface"),
+        )
+    }
+    /// The edge's 3D curve, a B-spline, as a data line holds it.
+    fn bspline_curve(&self) -> Crv {
+        match self.curve(self.eu).kind() {
+            CurveKind::BSpline(b) => crv_of(b),
+            _ => panic!("the edge curve is not a B-spline"),
+        }
+    }
+    /// The UV curve of the edge's curve when it is a curve on the face's own surface (the
+    /// same B-spline, bit for bit).
+    fn cos_on_face(&self) -> Option<Crv> {
+        let CurveKind::CrvOnSurf(c) = self.curve(self.eu).kind() else {
+            return None;
+        };
+        if !same_nurb(bspline_surface(c.surface()), self.surface()) {
+            return None;
+        }
+        match c.uv_curve().kind() {
+            CurveKind::BSpline(b) => Some(crv_of(b)),
+            _ => None,
+        }
+    }
+    /// The domain side `(fixed coordinate, value)` whose `create_iso_parametric_curve` the
+    /// edge curve of `eu` is, bit for bit, if any.
+    fn iso_side(&self, k: &Kernel, eu: EdgeuseId, dom: [f64; 4]) -> Option<(usize, f64)> {
+        let CurveKind::BSpline(b) = self.curve(eu).kind() else {
+            return None;
+        };
+        let have = crv_of(b);
+        let s = self.surface();
+        let domain =
+            Extent2d::from_points(Point2::new(dom[0], dom[1]), Point2::new(dom[2], dom[3]));
+        for (c, param) in [(0, SurfParamType::U), (1, SurfParamType::V)] {
+            for side in [dom[c], dom[c + 2]] {
+                let opts = IsoCurveOptions {
+                    domain: Some(domain),
+                    uv_iso_curve: false,
+                };
+                let Ok(iso) = s.create_iso_parametric_curve(k, param, side, opts) else {
+                    continue;
+                };
+                if same_crv(&crv_of(&iso.curve), &have) {
+                    return Some((c, side));
+                }
+            }
+        }
+        None
+    }
+}
+
+/// A binormal row's vertex/face-gap-cached flag (`state[52]`): proven `0` for the ideal
+/// pipeline from the model. The edge use's curve and that of its loop neighbour at its
+/// vertex are `create_iso_parametric_curve` of two different domain sides (bit for bit),
+/// (two sides of different coordinates), and the vertex is the two edges' common vertex in
+/// the topology: the only common point of the two sides' uv lines is the domain corner
+/// they span, so the vertex's ideal uv is that corner. The ideal trims are
+/// the exact iso lines of those sides, which meet exactly at the corner. The joint's uv gap
+/// is `0 <= EFF_ZERO (1 + |uv|)`, so `sm_FixUVTrimCurves` never computes the vertex/face
+/// gap.
+fn prove_corner_flag(m: &Model, dom: [f64; 4]) {
+    let k = Kernel::default();
+    let vu = eu1::vertexuse(&m.brep, m.eu)
+        .unwrap()
+        .expect("a vertex use");
+    let v = vertexuse::vertex(&m.brep, vu).unwrap().expect("a vertex");
+    let (c0, f0) = m
+        .iso_side(&k, m.eu, dom)
+        .expect("the edge is a domain side's iso curve");
+    let has = |eu: EdgeuseId| {
+        let e = eu1::edge(&m.brep, eu).unwrap().expect("an edge");
+        m.brep.edge(e).unwrap().vertices.contains(&v)
+    };
+    assert!(has(m.eu), "the vertex use's vertex is not the edge's");
+    let mut met = false;
+    for nb in [
+        eu1::cw_edgeuse(&m.brep, m.eu),
+        eu1::ccw_edgeuse(&m.brep, m.eu),
+    ] {
+        let nb = nb.unwrap().expect("a loop neighbour");
+        if !has(nb) {
+            continue;
+        }
+        let (c1, f1) = m
+            .iso_side(&k, nb, dom)
+            .expect("the neighbour is a domain side's iso curve");
+        assert_ne!(c0, c1, "the two sides meet at a corner");
+        let mut corner = [0.0; 2];
+        corner[c0] = f0;
+        corner[c1] = f1;
+        assert!(
+            [dom[0], dom[2]].contains(&corner[0]) && [dom[1], dom[3]].contains(&corner[1]),
+            "corner {corner:?} of {dom:?}"
+        );
+        met = true;
+    }
+    assert!(met, "no loop neighbour meets the edge at its vertex");
 }
 
 /// The blade hub edge (a file B-rep): its 3D curve `C` is the face's `v = f` boundary
@@ -1683,19 +2054,22 @@ fn label_blade(v: &[f64], srf: &Srf, iso: &Iso, curve: &Crv, out: &mut BTreeMap<
 
 fn certificates(
     unit: &str,
-    case: &str,
-    inputs: &Value,
+    case: &goldens::Case,
     status: i64,
     v: &[f64],
+    main: &[f64],
     d: &Data,
 ) -> BTreeMap<usize, Cert> {
+    let (name, inputs) = (case.name.as_str(), &case.inputs);
     let mut out = BTreeMap::new();
-    let dom = inputs["brep"].get("dom").map(|x| {
+    let dom = if let Some(x) = inputs["brep"].get("dom") {
         let a = nums(x);
         [a[0], a[1], a[2], a[3]]
-    });
-    let dom = dom.or_else(|| (case == BLADE).then(|| d.blade.as_ref().expect("S line").1));
-    let iso = label_trims(v, dom, &mut out);
+    } else {
+        assert_eq!(name, BLADE, "a row without a domain");
+        d.blade.as_ref().expect("S line").1
+    };
+    let iso = label_trims(v, main, dom, &mut out);
     if unit == "topology.face_p3" {
         // `uv_trim`'s parameter-space joint gaps: the mean over the joints off the pole, the
         // maximum including the pole, whose parameter gap is the whole side, 1
@@ -1715,26 +2089,111 @@ fn certificates(
                 what: "max joint uv gap (the pole)",
             },
         );
+        // the mean and maximum curve/surface gaps (the drop distances of the edges'
+        // curves to the face): every edge curve of the face is the face's boundary curve
+        // along a side of its domain, bit for bit (`is_boundary`, checked on the replayed
+        // model), so every point of it is on the face: the reference is `0`
+        if v[2] != main[2] || v[3] != main[3] {
+            let (b, f) = face_scene(case).unwrap().expect("the case builds its face");
+            let srf = Srf::from_input(inputs);
+            assert!(
+                srf.is(bspline_surface(
+                    b.face(f).unwrap().surface.as_ref().expect("a surface")
+                )),
+                "{name}: the input net is not the face's surface"
+            );
+            let mut n = 0;
+            for (eu, _) in b.edgeuses().iter() {
+                if eu1::face(&b, eu).unwrap() != Some(f) {
+                    continue;
+                }
+                let e = eu1::edge(&b, eu).unwrap().expect("an edge");
+                let c = b.edge(e).unwrap().curve.as_ref().expect("an edge curve");
+                let CurveKind::BSpline(c) = c.kind() else {
+                    panic!("{name}: the edge curve of {eu:?} is not a B-spline");
+                };
+                let c = crv_of(c);
+                let on = [(0, dom[0]), (0, dom[2]), (1, dom[1]), (1, dom[3])]
+                    .into_iter()
+                    .any(|(c0, f0)| {
+                        let iso = Iso {
+                            c: c0,
+                            f: f0,
+                            ivl: (0.0, 0.0),
+                        };
+                        is_boundary(&srf, &iso, &c)
+                    });
+                assert!(
+                    on,
+                    "{name}: the edge curve of {eu:?} is not a boundary curve"
+                );
+                n += 1;
+            }
+            assert!(n > 0, "{name}: no edge curves");
+            for (i, what) in [(2, "mean curve/surface gap"), (3, "max curve/surface gap")] {
+                out.insert(
+                    i,
+                    Cert::Exact {
+                        r: 0.0,
+                        b: None,
+                        what,
+                    },
+                );
+            }
+        }
         return out;
     }
     if unit == "topology.edgeuse_p3" && inputs["op"] == "binormal" && status == 0 && v[16] == 1.0 {
         // `put_eu_state` after the 16 binormal values: `1`, the trim record, the owner, the
-        // three drop-fail values, then whether the vertex use's vertex/face gap is cached.
-        // Only `sm_FixUVTrimCurves` computes it on this path (`CreateUVTrimCurves` for the
-        // face's trimmed surface cache), and only when the trims meeting at the vertex miss
-        // each other by more than `EFF_ZERO (1 + |uv|)`. The ideal pipeline's trims are the
-        // exact iso lines of the domain sides, which meet exactly at the corner: the gap is
-        // never computed, the reference is `0`.
+        // three drop-fail values, then whether the vertex use's vertex/face gap is cached:
+        // proven `0` on the model (`prove_corner_flag`)
         if let Some(tr) = parse_trim(v, 17) {
-            out.insert(
-                tr.end + 4,
-                Cert::Exact {
-                    r: 0.0,
-                    b: None,
-                    what: "vertex/face gap cached (FixUVTrimCurves ran)",
-                },
-            );
+            if v[tr.end + 4] != main[tr.end + 4] {
+                prove_corner_flag(&Model::of(case), dom);
+                out.insert(
+                    tr.end + 4,
+                    Cert::Exact {
+                        r: 0.0,
+                        b: None,
+                        what: "vertex/face gap cached (proven: corner of two iso sides)",
+                    },
+                );
+            }
         }
+    }
+    if unit == "topology.edgeuse_p2" && inputs["op"] == "step_off" {
+        // `[code, point, binormal, tangent, normal, uv]` of `EvaluateBinormalStepOff` at
+        // `frac` of the edge: the edge is a domain side's iso curve on the replayed model
+        // (bit for bit), the side main's (main's fixed uv strictly nearer it), and `t` the
+        // edge interval's `evaluate(frac)`, the op's own parameter
+        let (b, eu) = scene_p2(case)
+            .unwrap()
+            .expect("the case builds its edge use");
+        let m = Model { brep: b, eu };
+        let k = Kernel::default();
+        let (c, f) = m
+            .iso_side(&k, eu, dom)
+            .expect("the edge is a domain side's iso curve");
+        let other = if f == dom[c] { dom[c + 2] } else { dom[c] };
+        assert!(
+            (main[13 + c] - f).abs() < (main[13 + c] - other).abs(),
+            "{name}: main's uv is not nearer the side"
+        );
+        let srf = Srf::from_input(inputs);
+        assert!(
+            srf.is(m.surface()),
+            "{name}: the input net is not the face's surface"
+        );
+        let e = eu1::edge(&m.brep, eu).unwrap().expect("an edge");
+        let ivl = m.brep.edge(e).unwrap().interval;
+        let t = ivl.evaluate(num(&inputs["frac"]));
+        let iso = Iso {
+            c,
+            f,
+            ivl: (ivl.min(), ivl.max()),
+        };
+        label_binormal_at(v, main, 1, false, t, &srf, &iso, &mut out);
+        return out;
     }
     let (Some(iso), 0) = (iso, status) else {
         return out;
@@ -1742,38 +2201,94 @@ fn certificates(
     if unit != "topology.edgeuse_p3" {
         return out;
     }
-    if case == BLADE {
+    if name == BLADE {
         let (s, _) = d.blade.as_ref().unwrap();
-        let curve = d.drops[case].curve.as_ref().unwrap();
+        let curve = d.drops[name].curve.as_ref().unwrap();
+        let m = Model::of(case);
+        // the data lines are the replayed model's: the edge's curve and the face's surface
+        assert!(
+            same_crv(&m.bspline_curve(), curve),
+            "{name}: DC is not the edge curve"
+        );
+        assert!(s.is(m.surface()), "{name}: S is not the face surface");
         label_blade(v, s, &iso, curve, &mut out);
         return out;
     }
     let srf = Srf::from_input(inputs);
-    let cos = case.starts_with("cos_open");
+    let cos = name.starts_with("cos_open");
     match inputs["op"].as_str().unwrap() {
         "binormal" => {
-            label_binormal(v, &srf, &iso, num(&inputs["frac"]), &mut out);
+            label_binormal(v, main, &srf, &iso, num(&inputs["frac"]), &mut out);
             if cos {
                 label_cos(v, inputs, &srf, &iso, &mut out);
             }
         }
         "normalized" => {
             if inputs["parameter_space"] == true {
-                label_norm_uv(v, inputs, &iso, &mut out);
+                label_norm_uv(main, inputs, &iso, &mut out);
             } else if cos {
                 label_cos(v, inputs, &srf, &iso, &mut out);
             }
         }
         _ => {
-            if let Some(g) = d.gocs.get(case) {
-                label_goc(&srf, &iso, g, v, &mut out);
+            if name.contains("_goc_") {
+                let m = Model::of(case);
+                let uv = m
+                    .cos_on_face()
+                    .expect("a CrvOnSurf on the face's own surface");
+                assert!(
+                    same_crv(&uv, &iso_curve(&iso)),
+                    "{name}: the edge's UV curve is not the iso line"
+                );
+                label_goc(&mut out);
             }
-            if let Some(dr) = d.drops.get(case) {
-                label_drop(case, &srf, &iso, dr, &mut out);
+            if let Some(dr) = d.drops.get(name) {
+                let m = Model::of(case);
+                assert!(
+                    srf.is(m.surface()),
+                    "{name}: the input net is not the face surface"
+                );
+                match (&dr.curve, &dr.other_uv) {
+                    (Some(c), _) => assert!(
+                        same_crv(&m.bspline_curve(), c),
+                        "{name}: DC is not the edge curve"
+                    ),
+                    (None, Some(u)) => assert!(
+                        same_crv(&m.cos_on_face().expect("a CrvOnSurf on the face"), u),
+                        "{name}: DU is not the edge's UV curve"
+                    ),
+                    _ => panic!("{name}: drop data without a curve"),
+                }
+                label_drop(name, &srf, &iso, dr, &mut out);
             }
         }
     }
     out
+}
+
+impl Srf {
+    /// Whether this net is the B-spline `s`, bit for bit (degrees, knots, points).
+    fn is(&self, s: &BSplineSurface) -> bool {
+        let n = s.gw_nurb().expect("a nurb");
+        let net: Vec<u64> = n
+            .cpts()
+            .iter()
+            .flatten()
+            .flat_map(|p| [p.x, p.y, p.z, p.w])
+            .map(f64::to_bits)
+            .collect();
+        let ours: Vec<u64> = self
+            .net
+            .iter()
+            .flatten()
+            .flatten()
+            .map(|x| x.to_bits())
+            .collect();
+        n.degrees() == (self.p, self.q)
+            && bits(n.u_knots()) == bits(&self.u)
+            && bits(n.v_knots()) == bits(&self.v)
+            && net == ours
+    }
 }
 
 /// `|new − r| / B` of an at-rounding element.
@@ -1832,7 +2347,39 @@ fn moved_elements_are_closer_equal_or_at_rounding() {
                 .get("status")
                 .and_then(|s| s.first().copied())
                 .unwrap_or(0);
-            let certs = certificates(&unit, name, &case.inputs, status, v, &d);
+            // completeness: main's whole vector (`M`) is the committed main golden's (`O`,
+            // re-encoded as `golden::encode` does), and the replay differs from it at the
+            // listed elements only
+            let (mkey, main) = &d.mains[&(unit.clone(), name.clone())];
+            assert_eq!(mkey, key, "{name}: M key");
+            let mine = Output {
+                values: BTreeMap::from([(key.clone(), main.clone())]),
+                ..Output::default()
+            };
+            assert_eq!(
+                encode(name, &mine)["values"][key],
+                d.olds[&(unit.clone(), name.clone())],
+                "{unit}/{name}: M is not main's committed golden"
+            );
+            assert_eq!(v.len(), main.len(), "{unit}/{name}: the vector's length");
+            let listed: BTreeMap<usize, &El> = els.iter().map(|e| (e.i, e)).collect();
+            for (i, (x, m)) in v.iter().zip(main).enumerate() {
+                match listed.get(&i) {
+                    Some(e) => assert_eq!(
+                        m.to_bits(),
+                        e.main.to_bits(),
+                        "{unit}/{name} {key}[{i}]: E's main is not M's"
+                    ),
+                    None => {
+                        if x.to_bits() != m.to_bits() {
+                            bad.push(format!(
+                                "{unit}/{name} {key}[{i}]: unlisted, moved {m:?} -> {x:?}"
+                            ));
+                        }
+                    }
+                }
+            }
+            let certs = certificates(&unit, case, status, v, main, &d);
             let mut worst = Class::Equal;
             for e in els {
                 seen += 1;
