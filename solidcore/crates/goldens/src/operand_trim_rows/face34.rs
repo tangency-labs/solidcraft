@@ -13,9 +13,9 @@
 //!   transversal meeting forces. Per edge, the curve end at `V` is the interval end nearer
 //!   it, and its *near stretch* runs from a base through the farthest end of its reported
 //!   ranges: the base is the end or one of the first knots past it ([`MAX_BASES`], nearest
-//!   first, the first pair that certifies taken; a short hook at the end, as e24's first
-//!   1e-5, is then left out of the stretch), and `g` bounds above how far the curve gets
-//!   from `V` between its end and its base. Over each near stretch the
+//!   first, the first pair that certifies taken), and `g` bounds above how far the curve
+//!   gets from `V` between its end and its base: its *hook* (e24's first 1e-5, which points
+//!   back, is one). Over each near stretch the
 //!   curve's derivative is enclosed in a box ([`curve_derivs_over`], rounded interval
 //!   arithmetic, pointed away from the end), and [`sine_lo`] bounds below by `σ > 0` the
 //!   sine of the angle between any vector of one box and any of the other (1 if no pair is
@@ -26,7 +26,11 @@
 //!   stretches at distance at most the pair's tolerance `t` have `r <= (t + g_a + g_b) / σ`
 //!   on either curve: their being within `t` is forced by the meeting alone, inside the
 //!   radius `R = (t + g_a + g_b) / σ` about each base, and no pair of points farther out is
-//!   that close. Every
+//!   that close. A hook is no exception: its points lie within `g` of `V`, inside its own
+//!   end contact `R + g`, and a point of the other curve within `t` of one lies within
+//!   `t + g` of `V`, which is checked to be inside the other curve's end contact (it is
+//!   whenever `σ <= 1`, as `R >= t + g_a + g_b`). So the end contact holds every pair of
+//!   points of the two curves, from end to farthest range, within `t` of each other. Every
 //!   reported range is enclosed ([`farthest_from`]) within `R + g` of `V`, the end contact
 //!   (for curves meeting at a right angle with ends on `V`, the vertex ball of radius `t`).
 //!   No stretch of either edge away from `V` is shared; a tangent meeting (`σ` not
@@ -222,8 +226,9 @@ fn farthest_from(c: &Curve, lo: f64, hi: f64, p: [f64; 3], tol: f64) -> Result<f
 
 /// Certifies `fp`'s line for `b` (see the module docs): every flagged pair is main's
 /// geometry, no looser than main's, and coincident only inside its shared vertex's end
-/// contact. Returns the flagged pairs' count and the largest enclosed distance of a range
-/// from the vertex over the end contact's reach (at most 1).
+/// contact. Returns the flagged pairs' count and the largest ratio, over the reported ranges
+/// and the hooks (and the points within tolerance of them), of an enclosed distance from the
+/// vertex to the end contact's reach (at most 1).
 ///
 /// # Errors
 ///
@@ -329,10 +334,10 @@ pub(crate) fn certify(k: &Kernel, b: &Brep, fp: &FalsePositive) -> Result<(usize
             return Err("not a pair".to_string());
         };
         // the first pair of bases, nearest the ends first, whose boxes are transversal
-        let Some((sine, gap_a, gap_b)) = ca
+        let Some((sine, gap_a, gap_b, base_a, base_b)) = ca
             .iter()
             .flat_map(|a| cb.iter().map(move |b| (a, b)))
-            .map(|(a, b)| (sine_lo(a.2, b.2), a.1, b.1))
+            .map(|(a, b)| (sine_lo(a.2, b.2), a.1, b.1, a.0, b.0))
             .find(|x| x.0 > 0.0)
         else {
             return Err(format!(
@@ -345,7 +350,6 @@ pub(crate) fn certify(k: &Kernel, b: &Brep, fp: &FalsePositive) -> Result<(usize
                 cb
             ));
         };
-        let gaps = [gap_a, gap_b];
         let tol = {
             let (ta, tb) = (
                 b.edge(pair.edges[0]).map_err(e)?.tolerance,
@@ -359,10 +363,37 @@ pub(crate) fn certify(k: &Kernel, b: &Brep, fp: &FalsePositive) -> Result<(usize
         };
         // the end contact's radius about either curve's base, then about the vertex
         let radius = round_up(round_up(round_up(tol + gap_a) + gap_b) / sine);
+        let reaches = [round_up(radius + gap_a), round_up(radius + gap_b)];
+        eprintln!(
+            "  face34 edges {}/{} at vertex {}: tolerance {tol:e}, bases {base_a:e}/{base_b:e}, \
+             hooks within {gap_a:e}/{gap_b:e}, sine >= {sine:e}, reaches {:e}/{:e}",
+            pair.edges[0].index(),
+            pair.edges[1].index(),
+            v.index(),
+            reaches[0],
+            reaches[1]
+        );
+        // the hooks: each curve's stretch from its end to its base (empty when the base is
+        // the end) lies within its gap of the vertex, so a point of the other curve within the
+        // tolerance of it lies within tolerance + gap of the vertex: inside the other curve's
+        // end contact, checked here, and the hook itself inside its own
+        for (i, (gap, base)) in [(gap_a, base_a), (gap_b, base_b)].into_iter().enumerate() {
+            let own = reaches.get(i).copied().unwrap_or(f64::NAN);
+            let other = reaches.get(1 - i).copied().unwrap_or(f64::NAN);
+            let touch = round_up(tol + gap);
+            if !(within(gap, own) && within(touch, other)) {
+                return Err(format!(
+                    "edge {}: hook to base {base:e} reaches {gap:e} from vertex {}; within \
+                     tolerance of it {touch:e}, past the end contacts {own:e} / {other:e}",
+                    pair.edges.get(i).map_or(u32::MAX, |x| x.index()),
+                    v.index(),
+                ));
+            }
+            worst = worst.max(gap / own).max(touch / other);
+        }
         for range in &pair.ranges {
             for (i, &(edge, c, _)) in near.iter().enumerate() {
-                let gap = gaps.get(i).copied().unwrap_or(f64::INFINITY);
-                let reach = round_up(radius + gap);
+                let reach = reaches.get(i).copied().unwrap_or(f64::NAN);
                 let d = farthest_from(c, range[i].0, range[i].1, p, reach)?;
                 if !within(d, reach) {
                     return Err(format!(
