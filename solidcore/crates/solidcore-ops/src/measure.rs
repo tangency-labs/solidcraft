@@ -1380,6 +1380,34 @@ fn across(b: &Brep, e: EdgeId, set: &[FaceId]) -> solidcore::Result<Result<FaceI
     })
 }
 
+/// Oriented stock dimensions in mm, largest first, and whether the prism box is exact.
+#[derive(Clone, Debug)]
+pub struct StockBox {
+    /// Dimensional classification: `panel`, `board` or `irregular`.
+    pub kind: &'static str,
+    /// Length, width and thickness in millimetres, in descending order.
+    pub dimensions: [f64; 3],
+    /// Unit axes in the body's coordinates, in the same order as the dimensions.
+    pub axes: [[f64; 3]; 3],
+    /// Whether the extents were measured on a straight-edged, planar B-rep's vertices.
+    pub exact: bool,
+}
+
+impl Answer for solidcore::query::stock::StockBox {}
+
+impl Body {
+    /// Measure stock along the part's planar faces and straight edges, without a display mesh.
+    pub fn stock_box(&self) -> Result<StockBox> {
+        let b = with_body("stock_box", self, solidcore::query::stock::stock_box)?;
+        Ok(StockBox {
+            kind: b.kind,
+            dimensions: b.dimensions,
+            axes: b.axes,
+            exact: b.exact,
+        })
+    }
+}
+
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;

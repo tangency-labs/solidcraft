@@ -32,6 +32,7 @@ pub mod control_job;
 mod control_params;
 pub mod control_switch;
 pub mod crash_ui;
+pub mod cutlist_panel;
 pub mod deferred;
 pub mod delete;
 pub mod design_properties;
@@ -686,6 +687,7 @@ pub struct SolveApp {
     pub kicad_import: Option<kicad_import_dialog::Dialog>,
     /// The Bill of Materials window, when open.
     pub bom: Option<bom_panel::BomPanel>,
+    pub cutlist: Option<cutlist_panel::CutListPanel>,
     material_card_review: Option<material_card_review::ReviewWindow>,
     /// Context menus, rename box and Properties window.
     pub menu: context_menu::MenuState,
@@ -1041,6 +1043,7 @@ impl SolveApp {
             sketch_report: None,
             kicad_import: None,
             bom: None,
+            cutlist: None,
             material_card_review: None,
             menu: context_menu::MenuState::default(),
             gesture: mouse_gesture::State::default(),
@@ -1897,6 +1900,7 @@ impl SolveApp {
                     render_workspace::reset_document(self);
                     dim_view::cancel();
                     self.bom = None;
+                    self.cutlist = None;
                     design_properties::close_object(self);
                     timeline::stop_playback(self);
                     self.menu.props = None;
@@ -2488,6 +2492,14 @@ impl SolveApp {
         }
         if id == "sketch.inspect" {
             sketch_report::open(self);
+            return;
+        }
+        if id == "cutlist.parts" {
+            if cutlist_panel::available(self) {
+                cutlist_panel::set_focus_pending(self, true);
+            } else {
+                cutlist_panel::open(self);
+            }
             return;
         }
         if id == "assembly.bom" {
