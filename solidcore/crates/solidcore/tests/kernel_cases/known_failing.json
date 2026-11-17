@@ -71,5 +71,15 @@
     "issue": "tangency-labs/solidcraft#13755",
     "reason": "the rig's volume is the body whose Mixed chamfer face, the bilinear Coons patch, stood 7.2e-4 out of the front face y = 0; that face now stays behind the plane, 0.0777 mm^3 less, and the corner has no closed form to grade a volume against",
     "fails": "volume 9383.373306182111 (rig 9383.4506602363)"
+  },
+  {
+    "case": "fillets/every-chamfer-counterbore-rim-20-1-past-the-floor-and-the-outer-rim",
+    "issue": "tangency-labs/solidcraft#18318",
+    "reason": "status 1001: the overflow is accepted, then the trim at the creases refuses it ('a blend past its faces reaches every face of the body (its creases and rails enclose no part of it)'); on the circular rim the chamfer's run past the floor is not fenced on the bore wall, the second of the two defects #14022 fixed for the straight stepped bar"
+  },
+  {
+    "case": "fillets/every-chamfer-counterbore-rim-9-7-past-the-floor",
+    "issue": "tangency-labs/solidcraft#18318",
+    "reason": "status 1001: the overflow is accepted, then the trim at the creases refuses it ('a blend past its faces reaches every face of the body (its creases and rails enclose no part of it)'); on the circular rim the chamfer's run past the floor is not fenced on the bore wall, the second of the two defects #14022 fixed for the straight stepped bar"
   }
 ]
