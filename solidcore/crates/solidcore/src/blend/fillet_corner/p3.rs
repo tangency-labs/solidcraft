@@ -2642,6 +2642,77 @@ fn mixed_corner_rails_cross(
     Ok(ang.is_some_and(|a| rad_to_deg(a) < ang_tol_deg))
 }
 
+/// The comment noted at a vertex whose corner [`face_closes_to_a_point`] refuses (#16404).
+pub const FACE_CLOSES_TO_A_POINT: &str = "a face beside the blended edge narrows to a point here, \
+     where the edge touches another edge of that face tangentially, so no blend of any size fits";
+
+/// Not upstream (#16404): whether a face around the vertex closes to a cusp between a blended
+/// edge and an edge not blended there: in some face's loop the two edges leave the vertex along
+/// one tangent, within `ang_tol_deg` degrees and in the same sense, so the face's corner angle
+/// between them is zero (a boss's base circle tangent to the rim of the face it stands on). A
+/// round with any width there runs off that face, whatever its size. The walk is
+/// [`FilletCorner::create_noting_roll_overs`]': each step is one face's corner at the vertex,
+/// the edge use leaving it and its clockwise neighbour arriving at it. Two edges that run on
+/// into each other (opposite senses), two uses of one edge, a pair both or neither blended, and
+/// a tangent that cannot be evaluated or is shorter than `SM_EFF_ZERO` are not this case.
+/// `solver_eus`: the blended edge uses at the vertex, the first leaving it.
+///
+/// # Errors
+///
+/// [`SolidError::InvalidInput`] for a walk that does not close or an edge use without a
+/// neighbour, radial partner or edge.
+pub fn face_closes_to_a_point(
+    k: &Kernel,
+    b: &Brep,
+    solver_eus: &[EdgeuseId],
+    ang_tol_deg: f64,
+) -> Result<bool> {
+    let Some(&start_eu) = solver_eus.first() else {
+        return Ok(false);
+    };
+    let edge_of = |eu: EdgeuseId| -> Result<EdgeId> {
+        eu1::edge(b, eu)?.ok_or_else(|| invalid(OP_CREATE, "edge use without edge"))
+    };
+    let blended = solver_eus
+        .iter()
+        .map(|&eu| edge_of(eu))
+        .collect::<Result<Vec<_>>>()?;
+    // the edge use's tangent at its start (`at` 0) or end (`at` 1), along its own sense
+    let tangent = |eu: EdgeuseId, at: f64| -> Option<Vec3> {
+        crate::topology::edgeuse::p3::normalized_evaluate_read_only(k, b, eu, at, false, true)
+            .ok()
+            .and_then(|e| e.first_deriv)
+            .filter(|d| d.length_squared() > crate::math::EFF_ZERO * crate::math::EFF_ZERO)
+    };
+    let mut eu = start_eu;
+    let mut steps = 0usize;
+    let max_steps = b.edgeuses().len();
+    loop {
+        steps += 1;
+        if steps > max_steps.saturating_add(1) {
+            return Err(invalid(OP_CREATE, "walk around the vertex does not close"));
+        }
+        let leaving = eu;
+        let arriving = eu1::cw_edgeuse(b, leaving)?
+            .ok_or_else(|| invalid(OP_CREATE, "edge use without clockwise neighbour"))?;
+        let (e0, e1) = (edge_of(leaving)?, edge_of(arriving)?);
+        if e0 != e1 && blended.contains(&e0) != blended.contains(&e1) {
+            // both pointing away from the vertex
+            if let (Some(d0), Some(d1)) = (tangent(leaving, 0.0), tangent(arriving, 1.0)) {
+                let ang = ignored(d0.angle_between(-d1))?;
+                if ang.is_some_and(|a| rad_to_deg(a) < ang_tol_deg) {
+                    return Ok(true);
+                }
+            }
+        }
+        eu = eu1::radial(b, arriving)?
+            .ok_or_else(|| invalid(OP_CREATE, "edge use without radial partner"))?;
+        if eu == start_eu {
+            return Ok(false);
+        }
+    }
+}
+
 /// `sm_TestG1Continuity` (unit `blend.fillet_corner_p1`).
 fn test_g1_continuity(
     k: &Kernel,

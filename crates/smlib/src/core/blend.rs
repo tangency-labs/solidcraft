@@ -25,7 +25,7 @@ use solidcore::EntityRef;
 use solidcore::SolidError;
 use solidcore::blend::blend_corner::BlendCornerEvent;
 use solidcore::blend::chamfer_side::faces_along;
-use solidcore::blend::fillet_corner::p3::MIXED_CORNER_RAILS_CROSS;
+use solidcore::blend::fillet_corner::p3::{FACE_CLOSES_TO_A_POINT, MIXED_CORNER_RAILS_CROSS};
 use solidcore::blend::fillet_executive::p1::{FilletLaw, FilletLawKind};
 use solidcore::blend::fillet_executive::session::FilletSession;
 use solidcore::blend::fillet_geom::p1::{FilletCornerType, FilletErrorType};
@@ -362,6 +362,20 @@ fn turn_refusal(s: &FilletSession<'_>) -> Option<Error> {
     Some(Error::TurnRefused { room, why, at: info.location.map(|p| [p.x, p.y, p.z]) })
 }
 
+/// The refusal of a corner `CreateFilletCorners` noted where a face beside a blended edge
+/// narrows to a point ([`Error::FaceClosesToPoint`], solidcore's
+/// `face_closes_to_a_point`), with the vertex's point; `None` for a note of
+/// another kind.
+fn face_closes_refusal(s: &FilletSession<'_>) -> Option<Error> {
+    let info = s.error_info();
+    if info.code != FilletErrorType::CornerUnsupported as i32 {
+        return None;
+    }
+    let why = info.comment.trim();
+    let why = why.strip_prefix("Fillet Error:").map_or(why, str::trim_start);
+    (why == FACE_CLOSES_TO_A_POINT).then(|| Error::FaceClosesToPoint { at: info.location.map(|p| [p.x, p.y, p.z]) })
+}
+
 /// `round_edges`' `overflow_first` argument: with it the session stops, nothing built, when blends
 /// of several edges overflow their faces across cliffs (`SetOverflowFirst`) or (`classify_only`)
 /// always (`SetClassifyOnly`), and `stopped` gets the edges whose blends overflow
@@ -453,7 +467,10 @@ fn blend_edges_stopping(
         let prepared_ok = prepared.is_ok();
         let mut step = prepared.and_then(|()| s.create_corners(k, None)).map(|()| Ok(Vec::new()));
         // A swept turn `CreateFilletCorners` refused, with solidcore's reason ([`turn_refusal`]).
-        let refused_turn = if swept && prepared_ok && step.is_err() { turn_refusal(&s) } else { None };
+        // A face narrowing to a point beside a blended edge, refused by its own words ahead of a
+        // swept turn's.
+        let refused_turn = if prepared_ok && step.is_err() { face_closes_refusal(&s) } else { None };
+        let refused_turn = refused_turn.or_else(|| if swept && prepared_ok && step.is_err() { turn_refusal(&s) } else { None });
         // A vertex `CreateFilletCorners` made no corner for, noted before a later step notes its
         // own failure over it ([`blend_failure`]).
         let corner = step.is_ok() && s.error_info().code == FilletErrorType::CornerUnsupported as i32;

@@ -2179,6 +2179,50 @@ impl<'target> FilletSession<'target> {
                     },
                     roll_over_classify.then_some(&mut *roll_overs),
                 )?;
+                // Not upstream (#16404): a face beside a blended edge that closes to a point
+                // at the vertex, between that edge and one not blended there, leaves no room
+                // for a round of any size, so the corner is refused saying so, in place of the
+                // unsupported corner or the later failure it would otherwise be. A round that
+                // runs out at the vertex (the degenerate corner) has no width there and builds.
+                if !made
+                    .as_ref()
+                    .is_some_and(|c| c.kind == FilletCornerKind::Degenerate)
+                {
+                    // the tightest tangency tolerance of the vertex's solvers, as the corner
+                    // takes it
+                    let mut tangency_tol_radians = f64::INFINITY;
+                    for &edgeuse in &edgeuses {
+                        let object =
+                            FilletObject::Topology(FilletBody::Target, EntityRef::Edgeuse(edgeuse));
+                        let Some(FilletObject::Solver(id)) =
+                            executive.fillet_solver_of_edgeuse(object)
+                        else {
+                            continue;
+                        };
+                        if let Some(s) = solvers.get(id.0 as usize).and_then(Option::as_ref) {
+                            tangency_tol_radians =
+                                tangency_tol_radians.min(s.base().tangency_tolerance);
+                        }
+                    }
+                    if tangency_tol_radians.is_finite()
+                        && crate::blend::fillet_corner::p3::face_closes_to_a_point(
+                            k,
+                            target,
+                            &edgeuses,
+                            crate::math::rad_to_deg(tangency_tol_radians),
+                        )?
+                    {
+                        let location = crate::topology::vertex::point(target, vertex).ok();
+                        return Ok(CornerCreation::Refused {
+                            location,
+                            error: crate::blend::fillet_geom::p1::FilletErrorType::CornerUnsupported,
+                            comment: crate::blend::fillet_corner::p3::FACE_CLOSES_TO_A_POINT
+                                .to_owned(),
+                            fit_edge: None,
+                            fit: None,
+                        });
+                    }
+                }
                 let Some(mut corner) = made else {
                     // The vertex's point feeds the opt-in vertex error note, as the
                     // fork's corrected overload reads it from the vertex itself.
