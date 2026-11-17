@@ -1812,9 +1812,9 @@ fn a_spindle_torus_is_its_meridian_circle_revolved() {
                 axis,
             }),
             reversed,
-        )) = geometry::surface(&g).unwrap()
+        )) = geometry::surface(&g, fit()).unwrap()
         else {
-            panic!("not a revolution: {:?}", geometry::surface(&g))
+            panic!("not a revolution: {:?}", geometry::surface(&g, fit()))
         };
         assert_eq!((origin, axis), ([1.0, 2.0, 3.0], [0.0, 0.0, 1.0]));
         let solidcore_record::brep::Curve::Circle { frame, radius } = profile else {
@@ -1838,7 +1838,7 @@ fn a_spindle_torus_is_its_meridian_circle_revolved() {
         TorusSurface::try_new(c, z, x, 20.0, 5.0).unwrap(),
     ));
     assert!(matches!(
-        geometry::surface(&g).unwrap(),
+        geometry::surface(&g, fit()).unwrap(),
         Some((geometry::FaceSurface::Record(_), false))
     ));
 }
