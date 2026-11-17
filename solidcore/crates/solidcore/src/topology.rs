@@ -1210,6 +1210,38 @@ impl Brep {
         Ok(copy)
     }
 
+    /// A [`Brep::clone_standing_for_self`] to be edited as a trial of an operation on this
+    /// B-rep (not upstream): the same ids and geometry owners, but each face surface's
+    /// top-level cache slot is its own ([`Surface::detach_for_edit`]), holding a copy of
+    /// what this B-rep's holds ([`Surface::copy_cache_slot_of`]: its tree state and its
+    /// trimmed surface cache), so that the trial starts from this B-rep's cache state and
+    /// no cache built on the edited copy reaches this B-rep's face surfaces. Nested
+    /// surfaces (an offset's or a STEP surface's base) and the surfaces of edge curves
+    /// still share their slots.
+    ///
+    /// # Errors
+    ///
+    /// Those of [`Brep::clone_standing_for_self`] and of the cache copies (a trimmed
+    /// surface cache in use).
+    pub(crate) fn clone_for_trial(&self) -> Result<Self> {
+        let mut copy = self.clone_standing_for_self()?;
+        let ids: Vec<FaceId> = copy.faces.ids().collect();
+        for &id in &ids {
+            if let Some(surface) = copy.face_mut(id)?.surface.as_mut() {
+                surface.detach_for_edit();
+            }
+        }
+        for id in ids {
+            if let (Some(surface), Some(original)) = (
+                copy.face(id)?.surface.as_ref(),
+                self.face(id)?.surface.as_ref(),
+            ) {
+                surface.copy_cache_slot_of(original, Ok)?;
+            }
+        }
+        Ok(copy)
+    }
+
     /// This B-rep as it is now, to put back with [`Brep::restore`] if an operation on it
     /// is refused (not upstream: an operation's rollback). Put back, the B-rep is the
     /// value it was, field for field:

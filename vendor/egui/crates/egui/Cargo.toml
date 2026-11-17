@@ -1,0 +1,123 @@
+[package]
+name = "egui"
+version.workspace = true
+authors = ["Emil Ernerfeldt <emil.ernerfeldt@gmail.com>"]
+description = "An easy-to-use immediate mode GUI that runs on both web and native"
+edition.workspace = true
+rust-version.workspace = true
+homepage = "https://github.com/emilk/egui"
+license.workspace = true
+readme = "../../README.md"
+repository = "https://github.com/emilk/egui"
+categories = ["gui", "game-development"]
+keywords = ["gui", "imgui", "immediate", "portable", "gamedev"]
+include = ["../../LICENSE-APACHE", "../../LICENSE-MIT", "**/*.rs", "Cargo.toml"]
+
+[lints]
+workspace = true
+
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--generate-link-to-definition"]
+targets = ["x86_64-unknown-linux-gnu", "wasm32-unknown-unknown"]
+
+[lib]
+
+
+[features]
+default = []
+
+## [`bytemuck`](https://docs.rs/bytemuck) enables you to cast [`epaint::Vertex`], [`emath::Vec2`] etc to `&[u8]`.
+bytemuck = ["epaint/bytemuck"]
+
+## Show a debug-ui on hover including the stacktrace to the hovered item.
+## This is very useful in finding the code that creates a part of the UI.
+## Does not work on web.
+callstack = ["dep:backtrace"]
+
+## [`cint`](https://docs.rs/cint) enables interoperability with other color libraries.
+cint = ["epaint/cint"]
+
+## Enable the [`hex_color`] macro.
+color-hex = ["epaint/color-hex"]
+
+## If set, egui will use `include_bytes!` to bundle some fonts.
+##
+## This is off by default, because only the application should decide whether to pay for the
+## bundled fonts. `eframe` enables it by default; an integration that is not `eframe` must
+## either enable it, or install a [`FontProvider`] of its own.
+default_fonts = ["epaint/default_fonts"]
+
+## Enable experimental egui features that might have massive breaking changes or be removed entirely in future updates.
+## Enabling this won't break semver, it's just future compatibility risk.
+##
+## Currently, this enables the theme plugin.
+experimental = []
+
+## [`mint`](https://docs.rs/mint) enables interoperability with other math libraries such as [`glam`](https://docs.rs/glam) and [`nalgebra`](https://docs.rs/nalgebra).
+mint = ["epaint/mint"]
+
+## Bundle the monochrome emoji fonts `NotoEmoji-Regular` and `emoji-icon-font`,
+## and put them in the default [`FontDefinitions`].
+##
+## They add about 1 MB to the binary, and are only needed if you want the same
+## (monochrome) emoji on every platform, instead of the platform's own color emoji
+## (see [`GlyphRasterizer`] and [`FontProvider`]).
+monochrome_emoji_fonts = ["default_fonts", "epaint/monochrome_emoji_fonts"]
+
+## Enable persistence of memory (window positions etc).
+persistence = ["serde", "epaint/serde", "ron"]
+
+
+## Enable parallel tessellation using [`rayon`](https://docs.rs/rayon).
+##
+## This can help performance for graphics-intense applications.
+rayon = ["epaint/rayon"]
+
+## Allow serialization using [`serde`](https://docs.rs/serde).
+serde = ["dep:serde", "epaint/serde", "accesskit/serde"]
+
+## Change Vertex layout to be compatible with unity
+unity = ["epaint/unity"]
+
+## Expose `DroppedFile::web_file`, the browser `File` handle of a dropped file (wasm32 only).
+##
+## This pulls in `web-sys`, and with it `js-sys` and `wasm-bindgen`, which add `wasm-bindgen`
+## symbols to the final binary. Integrations that are not `wasm-bindgen`-based can leave it off.
+## `eframe` enables it on the web.
+web_file = ["dep:web-sys"]
+
+## Override and disable the unity feature
+## This exists, so that when testing with --all-features, snapshots render correctly.
+_override_unity = ["epaint/_override_unity"]
+
+
+[dependencies]
+emath = { workspace = true, default-features = false }
+epaint = { workspace = true, default-features = false }
+
+accesskit.workspace = true
+ahash.workspace = true
+bitflags.workspace = true
+itertools.workspace = true
+log.workspace = true
+nohash-hasher.workspace = true
+profiling.workspace = true
+smallvec.workspace = true
+unicode-segmentation.workspace = true
+
+#! ### Optional dependencies
+
+backtrace = { workspace = true, optional = true }
+
+## Enable this when generating docs.
+document-features = { workspace = true, optional = true }
+
+ron = { workspace = true, optional = true }
+serde = { workspace = true, optional = true, features = ["derive", "rc"] }
+
+
+# web:
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+# For `DroppedFile::web_file`, which hands web apps a file handle instead of its contents.
+web-sys = { workspace = true, optional = true, features = ["File"] }

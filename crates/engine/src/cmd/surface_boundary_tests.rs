@@ -319,6 +319,28 @@ fn a_boundary_surface_and_a_loft_surface_on_one_curve_stitch() {
     assert_eq!(edges["edges"].as_array().map(Vec::len), Some(7), "{edges}");
 }
 
+/// #17197: a boundary curve made of two sketch lines that meet at a sharp corner can't be fitted
+/// smoothly, so the surface is refused, and the refusal names the corner and how sharply the
+/// curve turns there. The V runs from (0, 0) to (10, 0) and then back up to (4, 6): it turns by
+/// 135° at (10, 0, 0).
+#[test]
+fn a_curve_with_a_corner_is_refused_naming_the_corner() {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Vee"}));
+    let out = line(&mut s, [0.0, 0.0], [10.0, 0.0]);
+    let back = line(&mut s, [10.0, 0.0], [4.0, 6.0]);
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "sketch.create", json!({"plane": "XY", "offset": 10, "name": "High"}));
+    let high = line(&mut s, [0.0, 0.0], [10.0, 6.0]);
+    run(&mut s, "sketch.finish", json!({}));
+    let params = json!({"u": [{"sketch": "Vee", "curves": [out, back]}, {"sketch": "High", "curves": [high]}]});
+    let e = match s.execute("surface.boundary", &params) {
+        Ok(v) => panic!("a curve with a corner was built: {v}"),
+        Err(e) => e.to_string(),
+    };
+    assert!(e.contains("can't be fitted closely enough; its curves meet at (10, 0, 0) turning by 135.0°"), "{e}");
+}
+
 /// #17053: a boundary surface through two curves that meet at one end (a quarter arc on the
 /// ground and a straight side rising from one of its ends) is a loft whose side between them
 /// collapses to that point. Each side's distance from the surface is proved; a side starting at

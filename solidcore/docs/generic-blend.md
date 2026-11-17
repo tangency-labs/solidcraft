@@ -450,8 +450,12 @@ Each cause is decided from its own geometry, before the construction that it wou
 - **A collapsed offset.** A ball as wide as a face it rolls on (a cylinder or sphere of its radius,
   with the ball inside) has its offset of that face collapsed onto the axis or centre, so its centre
   is fixed. The zone it sweeps ends in a section of the ball only where the plane through an end of
-  the edge, square to it, holds that centre. A tray's seam and a cornered block's rim hold it at
-  both ends and build. The middle edge of an arc's tangent chain, rounded at its round's radius,
+  the edge, square to it, holds that centre. Where the edge ends on a side face it crosses and that
+  face holds the ball's one touch point on the other face, the round's end runs down to that point
+  on the other face's edge with the side: its rail there is a point on the face's boundary and it
+  takes the whole face, so that end is open too (a notch's floor rounded at the notch's radius,
+  ending on a curved side through the notch's axis). A tray's seam and a cornered block's rim hold
+  it at both ends and build. The middle edge of an arc's tangent chain, rounded at its round's radius,
   does not: refused, naming that radius, open. A larger ball that does not fit that face names it
   open the same way. An end where the chain runs on into another blended edge closes the zone:
   the Join there places the next round's section through the centre,
@@ -521,7 +525,11 @@ given.
 - **A boss or cut standing inside a round's band is kept** (its walls carried down to the round),
   as the "keep features" option of common practice; letting the round take it is a future option.
 - **A partly selected tangent chain** rounds exactly the selected edges and ends at the smooth vertex
-  with a real End.
+  with a real End. A vertex where the edge bends, within the tangency tolerance, is smooth. Where
+  the edge it runs on into turns towards the blend, the blend runs on past the vertex and out of the
+  part instead, ending on the end face. Not where the bend first takes that edge to the far side of
+  the blended edge continued, deeper than the face's zone tolerance: the part there stands across
+  the blend run on, which ends at the vertex (`blend_corner::end`, `run_on_leaves_the_part`).
 - **Folds are refused, never trimmed**, naming the radius.
 - **The user's geometry is never changed without consent**: no silent shrink, no auto-fit.
 - **The round is stored as its definition** with a certified net.

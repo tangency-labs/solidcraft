@@ -297,7 +297,7 @@ fn circle_span(c: &[H], center: Vec2, radius: f64, tol: f64, source_error: f64, 
 /// curve one segment): `None` when it doesn't lie in a plane parallel to `plane`, isn't read
 /// exactly, isn't finite or goes over the work budget.
 pub(crate) fn segment(run: &Run, plane: &Plane, tol: f64, work: &mut usize) -> Option<Vec<Seg2>> {
-    read(run, plane, tol, work, false)
+    read(run, plane, tol, work, false, false)
 }
 
 /// `run` in `plane` exactly as segments: as [`segment`], and a curve of several Bézier spans
@@ -305,7 +305,7 @@ pub(crate) fn segment(run: &Run, plane: &Plane, tol: f64, work: &mut usize) -> O
 /// line, conic or Bézier it is, for a planar region's outline. `None` when the edge doesn't lie
 /// in a plane parallel to `plane` or isn't read exactly.
 pub(crate) fn projected(run: &Run, plane: &Plane, tol: f64, work: &mut usize) -> Option<Vec<Seg2>> {
-    read(run, plane, tol, work, true)
+    read(run, plane, tol, work, true, false)
 }
 
 /// A free-form curve of several Bézier spans in a plane, as the one B-spline it is: its degree,
@@ -332,7 +332,7 @@ pub enum PlanarPiece {
 /// curves) as the one B-spline it is, its knots and weights its own. `None` when the edge
 /// doesn't lie in a plane parallel to `plane` or isn't read exactly.
 pub(crate) fn projected_curves(run: &Run, plane: &Plane, tol: f64, work: &mut usize) -> Option<Vec<PlanarPiece>> {
-    if let Some(segs) = read(run, plane, tol, work, false) {
+    if let Some(segs) = read(run, plane, tol, work, false, true) {
         return Some(segs.into_iter().map(PlanarPiece::Seg).collect());
     }
     one_spline(run, plane, tol, work).map(|s| vec![PlanarPiece::Spline(s)])
@@ -440,7 +440,7 @@ fn along(run: &Run, (degree, knots, ctrl): (usize, Vec<f64>, Vec<HPoint>)) -> Op
     Some((degree, knots.iter().rev().map(|k| sum - k).collect(), ctrl.into_iter().rev().collect()))
 }
 
-fn read(run: &Run, plane: &Plane, tol: f64, work: &mut usize, each_span: bool) -> Option<Vec<Seg2>> {
+fn read(run: &Run, plane: &Plane, tol: f64, work: &mut usize, each_span: bool, whole: bool) -> Option<Vec<Seg2>> {
     if !tol.is_finite() || tol <= 0. {
         return None;
     }
@@ -470,7 +470,9 @@ fn read(run: &Run, plane: &Plane, tol: f64, work: &mut usize, each_span: bool) -
             return (error < tol * 0.1 && a.dist(b) > tol && (level - plane.height(b3)).abs() + error <= tol).then_some(vec![Seg2::Line { a, b }]);
         }
         Curve::Polyline { points } => return polyline(points, ts, te, plane, level, tol, work),
-        Curve::Circle { frame, radius } => return circle(v3(frame.origin), v3(frame.x_axis), v3(frame.y_axis), *radius, ts, te, a, b, plane, tol),
+        Curve::Circle { frame, radius } => {
+            return circle(v3(frame.origin), v3(frame.x_axis), v3(frame.y_axis), *radius, ts, te, a, b, plane, tol, whole);
+        }
         _ => {}
     }
     let (spans, error) = controls(spans_of(run, work)?, plane, level, tol)?;
@@ -481,9 +483,15 @@ fn read(run: &Run, plane: &Plane, tol: f64, work: &mut usize, each_span: bool) -
         return None;
     }
     if a.dist(b) > tol && spans.iter().all(|s| line_span(s, a, b, tol, error, work).is_some()) {
-        return Some(vec![Seg2::Line { a, b }]);
+        // Within `tol` of its chord the piece is that line, unless the kernel says it is read as
+        // the arc it is proved on within `tol` first (a circle's or a conic's piece bending off
+        // its chord by more than the zone tolerance, #17707); one that is no arc stays the line.
+        let zone = solidcore_ops::sweep::zone_tolerance().unwrap_or(f64::INFINITY);
+        let bends = solidcore_ops::prism::arc_before_line(&spans, zone);
+        let proved = if bends { arc(&eval, (ts, te), &spans, plane, a, b, tol, error, work, whole) } else { None };
+        return Some(proved.unwrap_or_else(|| vec![Seg2::Line { a, b }]));
     }
-    arc(&eval, (ts, te), &spans, plane, a, b, tol, error, work)
+    arc(&eval, (ts, te), &spans, plane, a, b, tol, error, work, whole)
         .or_else(|| free_form(&spans, a, b, tol))
         .or_else(|| if each_span { span_by_span(&spans, a, b, tol) } else { None })
 }
@@ -522,9 +530,9 @@ fn polyline(points: &[[f64; 3]], ts: f64, te: f64, plane: &Plane, level: f64, to
 
 /// A circle (`o + r (cos t x + sin t y)`) from `ts` to `te`, ending at `a` and `b` in `plane`, as
 /// the arc it is: `None` when it doesn't lie in a plane parallel to `plane`. A whole circle comes
-/// back as its two halves.
+/// back as its two halves, or with `whole` (a sketch projecting it) as one arc of a full turn.
 #[allow(clippy::too_many_arguments)]
-fn circle(o: Vec3, x: Vec3, y: Vec3, radius: f64, ts: f64, te: f64, a: Vec2, b: Vec2, plane: &Plane, tol: f64) -> Option<Vec<Seg2>> {
+fn circle(o: Vec3, x: Vec3, y: Vec3, radius: f64, ts: f64, te: f64, a: Vec2, b: Vec2, plane: &Plane, tol: f64, whole: bool) -> Option<Vec<Seg2>> {
     let n = plane.normal();
     let z = x.cross(y);
     let tilt = radius * z.cross(n).len();
@@ -544,7 +552,10 @@ fn circle(o: Vec3, x: Vec3, y: Vec3, radius: f64, ts: f64, te: f64, a: Vec2, b: 
         return None;
     }
     if (sweep.abs() - std::f64::consts::TAU).abs() <= angular_tol {
-        let h = sweep.signum() * std::f64::consts::PI;
+        let h = if whole { sweep.signum() * std::f64::consts::TAU } else { sweep.signum() * std::f64::consts::PI };
+        if whole {
+            return Some(vec![Seg2::Arc { center, radius, start, sweep: h }]);
+        }
         return Some(vec![Seg2::Arc { center, radius, start, sweep: h }, Seg2::Arc { center, radius, start: start + h, sweep: h }]);
     }
     Some(vec![Seg2::Arc { center, radius, start, sweep }])
@@ -645,6 +656,7 @@ fn arc(
     tol: f64,
     error: f64,
     work: &mut usize,
+    whole: bool,
 ) -> Option<Vec<Seg2>> {
     // Samples are only a candidate proposal. Whole-span implicit and oriented
     // angular proofs below are required before converting any spline to an arc.
@@ -683,6 +695,9 @@ fn arc(
     if closed {
         if (sweep.abs() - std::f64::consts::TAU).abs() > angular_tol {
             return None;
+        }
+        if whole {
+            return Some(vec![Seg2::Arc { center, radius, start, sweep: sweep.signum() * std::f64::consts::TAU }]);
         }
         let h = sweep.signum() * std::f64::consts::PI;
         Some(vec![Seg2::Arc { center, radius, start, sweep: h }, Seg2::Arc { center, radius, start: start + h, sweep: h }])
@@ -843,6 +858,48 @@ mod tests {
         let arc = quarter();
         for tol in [1e-5, 2e-3] {
             assert!(matches!(segment(&run(&arc, true), &Plane::XY, tol, &mut 2_000_000).unwrap()[..], [Seg2::Arc { .. }]));
+        }
+    }
+
+    /// #17707: a few hundredths of a millimetre of a circle or an ellipse bends off its chord by
+    /// about 1e-5 mm. That is under the tolerance a part's edges are read with (1e-6 of its size,
+    /// 7.7e-5 mm for the report's part) but over the 1e-5 mm an edge may lie off its face. Read
+    /// as a line, it gave an Extrude To Object prism a flat side off the cylinder it lies on, and
+    /// the join was refused. It is read as an arc (within the reading tolerance, the ellipse's as
+    /// its circle of curvature); a rational piece within the zone tolerance of its chord, or on
+    /// it, stays a line.
+    #[test]
+    fn a_short_piece_of_a_circle_or_an_ellipse_is_not_a_line() {
+        let tol = 7.7e-5;
+        // A rational quadratic piece of the ellipse (a cos t, b sin t) from t0 to t0 + 2h.
+        let piece = |a: f64, b: f64, t0: f64, h: f64| {
+            let (w, mid, t1) = (h.cos(), t0 + h, t0 + 2. * h);
+            let homogeneous = vec![[a * t0.cos(), b * t0.sin(), 0., 1.], [a * mid.cos(), b * mid.sin(), 0., w], [a * t1.cos(), b * t1.sin(), 0., 1.]];
+            Curve::RationalSpline { knots: bezier_knots(2), homogeneous }
+        };
+        // 0.036 mm of a circle of radius 15 (its sagitta 1.08e-5), and 0.08 mm of an ellipse of
+        // semi-axes 30 and 15 about the end of its minor axis, where its radius of curvature is
+        // 60 (its sagitta 1.33e-5).
+        let h = 0.0012;
+        let k = 0.04 / 30.;
+        for (c, mid) in [
+            (piece(15., 15., 0., h), Vec2::new(15. * h.cos(), 15. * h.sin())),
+            (piece(30., 15., std::f64::consts::FRAC_PI_2 - k, k), Vec2::new(0., 15.)),
+        ] {
+            for forward in [true, false] {
+                let segs = segment(&run(&c, forward), &Plane::XY, tol, &mut 2_000_000).unwrap();
+                let [seg] = segs.as_slice() else { panic!("one segment: {segs:?}") };
+                assert!(!matches!(seg, Seg2::Line { .. }), "read as a line: {seg:?}");
+                assert!(seg.mid().dist(mid) < 1e-9, "{seg:?} misses the curve's middle {mid:?}");
+            }
+        }
+        // A rational quadratic whose middle control point lies on its chord, or 2e-7 off it (well
+        // within the 1e-5 zone tolerance; as an arc, its radius would be some 190 km), is that line.
+        for off in [0., 2e-7] {
+            let line =
+                Curve::RationalSpline { knots: bezier_knots(2), homogeneous: vec![[0., 0., 0., 1.], [2.5, 0.5 * off, 0., 0.5], [10., 0., 0., 1.]] };
+            let segs = segment(&run(&line, true), &Plane::XY, tol, &mut 2_000_000).unwrap();
+            assert!(matches!(segs[..], [Seg2::Line { .. }]), "{off}: {segs:?}");
         }
     }
 

@@ -2,8 +2,8 @@
 
 use crate::{EngineError, Result, Session};
 pub use craft_plugin::{
-    API, Effect, Entry, FileGrant, HostLimits, Limits, MAX_COMPONENT_BYTES, MAX_JSON_BYTES, MAX_MANIFEST_BYTES, MAX_MEMORY_MIB, Manifest,
-    RuntimeManifest, UiSlot, valid_id,
+    API, Effect, Entry, EntryKind, FileGrant, HostLimits, Limits, LossItem, LossReport, LossSeverity, MAX_COMPONENT_BYTES, MAX_JSON_BYTES,
+    MAX_MANIFEST_BYTES, MAX_MEMORY_MIB, Manifest, RuntimeManifest, UiSlot, valid_id,
 };
 use craft_plugin::{CommandSchema, HostError, PluginHost};
 use serde_json::{Value, json};
@@ -38,6 +38,10 @@ pub struct Grants {
     /// its manifest asks for, approved at install. Bound to `package_hash` like the rest.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub memory_mib: Option<usize>,
+    /// An importer may read the other files in the folder of the file it opens (its manifest's
+    /// `input_folder`), approved at install.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub input_folder: bool,
 }
 
 /// Trusted host state, never loaded from a design or supplied by guest code.
@@ -162,7 +166,7 @@ pub fn read_package(path: &str) -> Result<Package> {
     let manifest = parse_manifest(&bytes, folder)?;
     let component = if let Some(runtime) = &manifest.runtime {
         let module_path = dir.join(&runtime.module);
-        solidcraft_io::vfs::read(&module_path.to_string_lossy(), MAX_COMPONENT_BYTES).map_err(|e| error(e.to_string()))?
+        solidcraft_io::vfs::read(&module_path.to_string_lossy(), runtime.max_component_bytes()).map_err(|e| error(e.to_string()))?
     } else {
         Vec::new()
     };
@@ -180,6 +184,9 @@ pub fn host_limits_for(session: &Session, id: &str, approval: &str) -> HostLimit
     }
     limits
 }
+
+/// The most files and folders one plugin folder holds; install and removal both stop there.
+pub(super) const MAX_FILES: usize = 1024;
 
 pub(super) fn package_hash(manifest: &[u8], component: &[u8]) -> String {
     let mut digest = Sha256::new();
@@ -215,7 +222,15 @@ pub fn run(session: &mut Session, package: Package, entry: &str, params: &serde_
         let groups: BTreeSet<String> = rt.permissions.command_groups.intersection(&grants.command_groups).cloned().collect();
         let mut scratch = session.scratch();
         scratch.plugin_state.file_grants = grants.folders;
-        let host = SolidCraftHost { session: scratch, transaction: None, sketch_exits: Vec::new(), groups, file_folders: Vec::new() };
+        let host = SolidCraftHost {
+            session: scratch,
+            transaction: None,
+            sketch_exits: Vec::new(),
+            view: None,
+            groups,
+            file_folders: Vec::new(),
+            evaluation: None,
+        };
         let file_folders = host
             .granted_folders()
             .into_iter()
@@ -234,7 +249,7 @@ pub fn run(session: &mut Session, package: Package, entry: &str, params: &serde_
                 session.echo(message);
             }
         }
-        Ok(crate::schema::plugin::RunResult { result: value, sketch_exits: host.sketch_exits, param_warnings: vec![] })
+        Ok(crate::schema::plugin::RunResult { result: value, sketch_exits: host.sketch_exits, view: host.view, param_warnings: vec![] })
     }
     #[cfg(not(all(feature = "plugins", any(target_arch = "x86_64", target_arch = "aarch64"))))]
     {
@@ -243,12 +258,15 @@ pub fn run(session: &mut Session, package: Package, entry: &str, params: &serde_
     }
 }
 
+pub mod check;
+mod import;
 pub mod install;
 #[cfg(not(target_arch = "wasm32"))]
 mod package;
 #[cfg(not(target_arch = "wasm32"))]
 pub use package::{remove, store_grants, validate_grants};
 
+pub use import::{Importer, describe as describe_importers, import_file, importer_for, importers, open_filters};
 #[cfg(test)]
 mod tests;
 
@@ -257,12 +275,57 @@ pub struct SolidCraftHost {
     pub session: Session,
     transaction: Option<Session>,
     sketch_exits: Vec<Option<u64>>,
+    /// The last view command in this run. Cleared on rollback, like `sketch_exits`.
+    /// `accept_computed` does not copy `session.camera`, so the window applies this beside that.
+    view: Option<crate::schema::plugin::PluginView>,
     /// Granted sensitive command groups, for this call's manifest.
     groups: BTreeSet<String>,
     /// The file scope of a granted `file` command; every other command has none.
     file_folders: Vec<PathBuf>,
+    /// An importer's own design, opened to check it (`evaluate@0.1`), apart from every open design.
+    evaluation: Option<Box<Session>>,
 }
+
+impl SolidCraftHost {
+    /// Keep the last view command. `view.fit` and `view.home` frame in the window.
+    /// `view.navigate` does not store a camera; its reply is what the navigator applies.
+    /// Any other command that changes `session.camera` keeps that camera.
+    fn note_view(&mut self, name: &str, reply: &Value, before: Option<solidcraft_viewport::Camera>, after: Option<solidcraft_viewport::Camera>) {
+        if matches!(name, "view.fit" | "view.home") {
+            self.view = Some(if name == "view.home" { crate::schema::plugin::PluginView::Home } else { crate::schema::plugin::PluginView::Fit });
+        } else if name == "view.navigate" {
+            self.view = Some(crate::schema::plugin::PluginView::Navigate { reply: reply.clone() });
+        } else if after != before
+            && let Ok(camera) = serde_json::to_value(after)
+        {
+            self.view = Some(crate::schema::plugin::PluginView::Camera { camera });
+        }
+    }
+}
+
+/// The commands an importer may run on its own design to check it: they read the model, and
+/// `timeline.roll_to` moves only that private session's marker.
+pub const EVALUATE_COMMANDS: &[&str] = &["document.inspect", "inspect.measure", "model.edges", "model.faces", "timeline.roll_to"];
 impl PluginHost for SolidCraftHost {
+    fn evaluate_open(&mut self, design: &[u8]) -> craft_plugin::Result<()> {
+        let doc = solidcraft_io::read_design(design)
+            .map_err(|e| HostError::InvalidInput { field: "design".into(), reason: format!("SolidCraft can't read this design: {e}") })?;
+        let validation = self.session.validation();
+        // No file reaches this session: not a font, not a linked design.
+        let opened = solidcraft_io::vfs::scoped(Some(Default::default()), || Session::opened_at_validating(doc, None, None, validation));
+        self.evaluation = Some(Box::new(opened));
+        Ok(())
+    }
+    fn evaluate_run(&mut self, command: &str, args: &Value) -> craft_plugin::Result<Value> {
+        if !EVALUATE_COMMANDS.contains(&command) {
+            return Err(HostError::PermissionDenied { permission: format!("evaluate: {command} is not one of {}", EVALUATE_COMMANDS.join(", ")) });
+        }
+        let s = self.evaluation.as_mut().ok_or_else(|| HostError::InvalidInput { field: "evaluate".into(), reason: "no design is open".into() })?;
+        Ok(solidcraft_io::vfs::scoped(Some(Default::default()), || s.execute(command, args)).unwrap_or_else(|e| json!({"error": e.to_string()})))
+    }
+    fn evaluate_close(&mut self) {
+        self.evaluation = None;
+    }
     fn command_catalog(&self) -> Vec<CommandSchema> {
         crate::command_specs()
             .iter()
@@ -292,6 +355,7 @@ impl PluginHost for SolidCraftHost {
             _ => Default::default(),
         };
         let s = self.transaction.as_mut().ok_or_else(|| HostError::CommandFailed { command: name.into(), reason: "no active transaction".into() })?;
+        let camera_before = s.camera;
         let before = s.doc.clone();
         let previous: BTreeMap<_, _> = s.model.results.iter().map(|r| (r.id, r.error.clone())).collect();
         // Even implicit font and linked-design reads have no authority from a command grant.
@@ -305,9 +369,11 @@ impl PluginHost for SolidCraftHost {
         {
             return Err(HostError::CommandFailed { command: name.into(), reason: failed.error.clone().unwrap_or_default() });
         }
+        let camera_after = s.camera;
         if matches!(name, "sketch.finish" | "sketch.cancel") {
             self.sketch_exits.push(reply.get("sketch").and_then(Value::as_u64));
         }
+        self.note_view(name, &reply, camera_before, camera_after);
         Ok(reply)
     }
     fn begin_transaction(&mut self) -> craft_plugin::Result<()> {
@@ -338,6 +404,7 @@ impl PluginHost for SolidCraftHost {
     fn rollback_transaction(&mut self) -> craft_plugin::Result<()> {
         self.transaction = None;
         self.sketch_exits.clear();
+        self.view = None;
         Ok(())
     }
     fn granted_command_groups(&self) -> BTreeSet<String> {
@@ -414,7 +481,7 @@ pub fn describe_entry(s: &Session, id: &str) -> Result<Option<Value>> {
     let Some(path) = s.plugin_state.packages.get(package) else { return Ok(None) };
     let package = read_package(path)?;
     let Some(runtime) = package.manifest.runtime else { return Ok(None) };
-    let Some(entry) = runtime.entries.iter().find(|e| e.name == name) else { return Ok(None) };
+    let Some(entry) = runtime.entries.iter().find(|e| e.name == name && e.kind == EntryKind::Command) else { return Ok(None) };
     Ok(Some(json!({"id":id,"label":name,"params":"approval, params: declared entry inputs",
         "input":{"type":"object","required":["approval","params"],"additionalProperties":false,"properties":{
             "approval":{"type":"string"},"params":entry.input_schema}},

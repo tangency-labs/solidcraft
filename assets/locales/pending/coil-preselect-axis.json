@@ -1,0 +1,34 @@
+{
+  "ar": {
+    "prefs.coil_preselect_axis": "استخدام التحديد الحالي كمحور للولب",
+    "prefs.coil_preselect_axis.help": "املأ حقل المحور عند فتح أداة اللولب. أوقف هذا الخيار لاستخدام الوجه أو الرأس المحدد لتحديد الموضع."
+  },
+  "de": {
+    "prefs.coil_preselect_axis": "Aktuelle Auswahl als Spiralachse verwenden",
+    "prefs.coil_preselect_axis.help": "Beim Öffnen der Spirale die Achse vorausfüllen. Wenn diese Option deaktiviert ist, dient die ausgewählte Fläche oder Ecke zur Platzierung."
+  },
+  "en": {
+    "prefs.coil_preselect_axis": "Use the current selection as the Coil axis",
+    "prefs.coil_preselect_axis.help": "Fill Axis when Coil opens. Turn off to use a selected face or vertex for placement."
+  },
+  "he": {
+    "prefs.coil_preselect_axis": "שימוש בבחירה הנוכחית כציר הסליל",
+    "prefs.coil_preselect_axis.help": "מלא את שדה הציר בפתיחת כלי הסליל. כבה אפשרות זו כדי להשתמש בפאה או בקודקוד שנבחרו למיקום."
+  },
+  "ja": {
+    "prefs.coil_preselect_axis": "現在の選択をコイルの軸に使う",
+    "prefs.coil_preselect_axis.help": "コイルを開くときに軸を入力します。選択した面や頂点を配置に使うにはオフにします。"
+  },
+  "ko": {
+    "prefs.coil_preselect_axis": "현재 선택을 코일 축으로 사용",
+    "prefs.coil_preselect_axis.help": "코일을 열 때 축을 채웁니다. 선택한 면 또는 꼭짓점을 배치에 사용하려면 끄세요."
+  },
+  "vi": {
+    "prefs.coil_preselect_axis": "Dùng lựa chọn hiện tại làm trục cuộn xoắn",
+    "prefs.coil_preselect_axis.help": "Điền trục khi mở công cụ cuộn xoắn. Tắt để dùng mặt hoặc đỉnh đã chọn làm vị trí đặt."
+  },
+  "zh": {
+    "prefs.coil_preselect_axis": "将当前选择用作螺旋体轴线",
+    "prefs.coil_preselect_axis.help": "打开螺旋体工具时填入轴线。关闭后使用选定的面或顶点进行定位。"
+  }
+}

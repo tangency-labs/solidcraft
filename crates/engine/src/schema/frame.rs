@@ -36,7 +36,7 @@ use crate::params;
 const ANCHORS: [&str; 11] =
     ["origin", "center", "centroid", "top_left", "top", "top_right", "left", "right", "bottom_left", "bottom", "bottom_right"];
 
-/// The longest name a member may be given, in bytes once trimmed, as the handler requires.
+/// The longest name a member may be given, in characters once trimmed, as the handler requires.
 const MAX_NAME: usize = 128;
 
 /// `v` as the only key of an object, for the helpers that read `p.get(key)`.
@@ -443,8 +443,14 @@ pub struct CreatedIds {
 pub struct SketchSolve {
     /// Whether the constraints solved, keeping the sketch's orientation.
     pub solved: bool,
-    /// The degrees of freedom left.
+    /// The degrees of freedom left, a sketch's drawn 3D curves' included (#10608).
     pub dof: usize,
+    /// For a sketch with drawn 3D curves: the planar sketch's own degrees of freedom.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub planar_dof: Option<usize>,
+    /// For a sketch with drawn 3D curves: whether its 3D constraints hold.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub wires_solved: Option<bool>,
 }
 
 /// What `frame.profile.insert` returns.
@@ -498,7 +504,7 @@ impl JsonSchema for LineIds {
     }
 }
 
-/// The name members are named after: text of 1 to 128 bytes once trimmed, as `frame.member` reads
+/// The name members are named after: text of 1 to 128 characters once trimmed, as `frame.member` reads
 /// `body_name`.
 #[derive(Clone, Debug, PartialEq)]
 pub struct MemberName(pub String);
@@ -506,7 +512,7 @@ pub struct MemberName(pub String);
 impl<'de> Deserialize<'de> for MemberName {
     fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
         match Value::deserialize(d)? {
-            Value::String(s) if !s.trim().is_empty() && s.trim().len() <= MAX_NAME => Ok(MemberName(s)),
+            Value::String(s) if !s.trim().is_empty() && s.trim().chars().count() <= MAX_NAME => Ok(MemberName(s)),
             _ => Err(D::Error::custom(whole(format!("`body_name` must be 1…{MAX_NAME} characters")))),
         }
     }
@@ -518,13 +524,13 @@ impl JsonSchema for MemberName {
     }
     fn json_schema(_: &mut SchemaGenerator) -> Schema {
         json_schema!({
-            "description": "A name: text that isn't blank, at most 128 bytes once trimmed of the whitespace around it.",
+            "description": "A name: text that isn't blank, at most 128 characters once trimmed of the whitespace around it.",
             "type": "string", "pattern": not_blank_pattern()
         })
     }
 }
 
-/// `names`: up to 1000 line ids, each with a name of 1 to 128 bytes once trimmed.
+/// `names`: up to 1000 line ids, each with a name of 1 to 128 characters once trimmed.
 #[derive(Clone, Debug, PartialEq)]
 pub struct MemberNames(pub BTreeMap<String, String>);
 
@@ -533,7 +539,7 @@ impl<'de> Deserialize<'de> for MemberNames {
         match Value::deserialize(d)? {
             Value::Object(m) if m.len() <= MAX_MEMBERS => m
                 .into_iter()
-                .map(|(line, v)| match v.as_str().map(str::trim).filter(|n| !n.is_empty() && n.len() <= MAX_NAME) {
+                .map(|(line, v)| match v.as_str().map(str::trim).filter(|n| !n.is_empty() && n.chars().count() <= MAX_NAME) {
                     Some(name) => Ok((line, name.to_string())),
                     None => Err(D::Error::custom(whole(format!("`names`: the name of line `{line}` must be 1…{MAX_NAME} characters")))),
                 })
@@ -550,7 +556,7 @@ impl JsonSchema for MemberNames {
     }
     fn json_schema(_: &mut SchemaGenerator) -> Schema {
         json_schema!({
-            "description": "Names to keep, by line id. A name is text that isn't blank, at most 128 bytes once trimmed.",
+            "description": "Names to keep, by line id. A name is text that isn't blank, at most 128 characters once trimmed.",
             "type": "object",
             "additionalProperties": {"type": "string", "pattern": not_blank_pattern()},
             "maxProperties": MAX_MEMBERS

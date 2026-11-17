@@ -23,29 +23,30 @@
 //! The surface intersection method checks the kernel's cancel token before each face of
 //! its extraneous-face loop (#2756); results are unchanged. SolidCraft changes
 //! (tangency-labs/smlib 54148db, e8f23e0, in `taper_walls`):
-//! [`OffsetCornerType::CurveExtension`] and, under opt-in
-//! `fixes.taper_tangent_corner_planes` (WR-521), linear-extension corners of a profile
-//! of lines and arcs build their walls exactly and may refuse a corner; the refusal
-//! is a return value, not out-params.
+//! [`OffsetCornerType::CurveExtension`] and linear-extension corners of a profile of
+//! lines and arcs (WR-521) build their walls exactly and may refuse a corner; the
+//! refusal is a return value, not out-params.
 
 use super::taper_walls::{
-    curvature_keeping_walls, has_corner, lines_and_arcs, CornerRefusal, WallsInput,
+    curvature_keeping_walls, has_corner, lines_and_arcs, CornerRefusal, TaperCornerRefusal,
+    WallsInput,
 };
 use super::{as_bspline, PrimitiveCreationAccess};
 use crate::curve::composite_curve::{
     CompositeCurve, OffsetCornerType, OffsetDirection, OffsetMapAttribute, OffsetParams,
+    OffsetPiece,
 };
-use crate::curve::curve::p3::{compute_crvs_normal, crvs_fix_gaps};
+use crate::curve::curve::p3::{compute_crvs_normal_written, crvs_fix_gaps};
 use crate::curve::curve::p4::fix_chain_curves_list;
 use crate::curve::curve::p5::crvs_cleanup;
 use crate::curve::curve::Curve;
-use crate::error::{ignore_status, ignored, passed_on, Result, SolidError};
+use crate::error::{ignore_status, ignored, passed_on, status_passed_on, Result, SolidError};
 use crate::geom::axis2_placement::Axis2Placement;
 use crate::geom::extent1d::Extent1d;
 use crate::geom::geom_utility::p2::ContinuityType;
 use crate::geom::tol::ANG_TOL_DEG;
 use crate::kernel::Kernel;
-use crate::math::{Vec3, PI};
+use crate::math::{Point3, Vec3, PI};
 use crate::nurbs::b_spline_curve::p1::BSplineCurve;
 use crate::nurbs::b_spline_surface::p1::BSplineSurface;
 use crate::primitive::primitive_creation::p1::PrimitiveCreation;
@@ -159,8 +160,9 @@ impl PrimitiveCreation {
     /// intersection fallback finds no offsets; those of the chaining, merge and
     /// topology steps that upstream does not ignore; `InvalidInput` for a corner
     /// refused under [`OffsetCornerType::CurveExtension`] or
-    /// `fixes.taper_tangent_corner_planes` (see
-    /// [`Self::create_taper_extrude_with_refusal`]).
+    /// [`OffsetCornerType::LinearExtension`] (see
+    /// [`Self::create_taper_extrude_with_refusal`]), and for a height within the B-rep's
+    /// tolerance where those rules build the walls.
     pub fn create_taper_extrude(
         &mut self,
         a: &mut impl PrimitiveCreationAccess,
@@ -190,12 +192,11 @@ impl PrimitiveCreation {
     /// [`Self::create_taper_extrude`] reporting a refused corner: `Ok(Some(refusal))`
     /// is the fork's `SM_ERR_INVALID_INPUT` with `pOptRefusal` and
     /// `pOptRefusedCorner` set (SolidCraft change, tangency-labs/smlib 54148db): with
-    /// [`OffsetCornerType::CurveExtension`], or linear-extension corners under
-    /// `fixes.taper_tangent_corner_planes` (WR-521), a profile of lines and circular
-    /// arcs with a sharp corner gets walls that continue as themselves (or as their
-    /// tangent planes) to meet along their exact seams, and a corner they cannot
-    /// close is refused, the target left as it was. `CurveExtension` on a profile
-    /// without a sharp corner is `LinearExtension`.
+    /// [`OffsetCornerType::CurveExtension`], or linear-extension corners (WR-521), a
+    /// profile of lines and circular arcs with a sharp corner gets walls that continue
+    /// as themselves (or as their tangent planes) to meet along their exact seams, and
+    /// a corner they cannot close is refused, the target left as it was.
+    /// `CurveExtension` on a profile without a sharp corner is `LinearExtension`.
     ///
     /// # Errors
     ///
@@ -278,8 +279,9 @@ fn taper(
 
     if normal.length_squared() < 0.00001 {
         // compute the normal from curve sample points (zeroed before it can fail)
-        *normal = ignored(passed_on(compute_crvs_normal(a.kernel(brep)?, &input), p)?)?
-            .unwrap_or(Vec3::ZERO);
+        let (written, status) = compute_crvs_normal_written(a.kernel(brep)?, &input)?;
+        status_passed_on(status, p)?;
+        *normal = written;
         // snap curves to Z axis when close
         if normal.z > 0.98 {
             normal.x = 0.0;
@@ -293,8 +295,8 @@ fn taper(
         }
     } else {
         // check that the curves order conforms to the specified input normal
-        let computed = ignored(passed_on(compute_crvs_normal(a.kernel(brep)?, &input), p)?)?
-            .unwrap_or(Vec3::ZERO);
+        let (computed, status) = compute_crvs_normal_written(a.kernel(brep)?, &input)?;
+        status_passed_on(status, p)?;
         let angle = ignored(passed_on(computed.angle_between(*normal), p)?)?.unwrap_or(0.0);
         if (angle - PI).abs() < 0.0001 {
             // reverse all the curves, then rechain them
@@ -390,11 +392,10 @@ fn taper(
     // SolidCraft change (tangency-labs/smlib 54148db, e8f23e0): walls that keep their
     // curvature at the corners. Without a sharp corner the three corner rules give the
     // same walls, which the offset method builds. The tangent rule too, for lines and
-    // arcs (opt-in `fixes.taper_tangent_corner_planes`, WR-521): their walls continue
-    // exactly as their tangent planes. Other curves keep the offset method.
+    // arcs (WR-521): their walls continue exactly as their tangent planes. Other curves
+    // keep the offset method.
     let mut corner = corner;
-    let tangent_rule = a.kernel(brep)?.fixes.taper_tangent_corner_planes
-        && corner == OffsetCornerType::LinearExtension;
+    let tangent_rule = corner == OffsetCornerType::LinearExtension;
     let has_corner = (corner == OffsetCornerType::CurveExtension || tangent_rule)
         && has_corner(a.kernel(brep)?, &composite, *normal);
     let mut exact = false;
@@ -410,6 +411,14 @@ fn taper(
     let mut empty_offsets = false;
     let mut trim_curves: Vec<Curve> = Vec::new();
 
+    if (keep_curvature || tangent_planes) && (!height.is_finite() || height.abs() <= brep_tol) {
+        // the far end lies on the profile within the tolerance (no walls to build), or
+        // nowhere
+        return Err(SolidError::invalid_input(
+            OP,
+            "the draft height must be finite and its size over the B-rep's tolerance",
+        ));
+    }
     if keep_curvature || tangent_planes {
         let walls = curvature_keeping_walls(
             a,
@@ -457,6 +466,25 @@ fn taper(
             movement,
             surface_intersection,
         };
+
+        // walls that meet across the profile before the far end (#18452): refused at the
+        // lowest height where they meet
+        if let Some(at) = offset_junction(a.kernel(brep)?, &trimmed, 2.0 * zone_tol)? {
+            let corner = walls_meet(
+                a.kernel(brep)?,
+                &composite,
+                direction,
+                &params,
+                at,
+                translation,
+                brep_tol,
+                p,
+            )?;
+            return Ok(Some(CornerRefusal {
+                reason: TaperCornerRefusal::WallCloses,
+                corner,
+            }));
+        }
 
         if trimmed.is_empty() {
             state.missing_faces = true;
@@ -591,6 +619,83 @@ fn taper(
     ignore_status(passed_on(a.shrink_geometry(brep), p)?)?;
     ignore_status(passed_on(a.stitch_and_orient(brep), p)?)?;
     Ok(None)
+}
+
+/// Where three or more of the trimmed offset pieces `pieces` end at one point (within
+/// `tol`, the tolerance the pieces are chained with), or `None`. The trimmed offsets of one
+/// closed profile end two at each point, one piece running into the next. A third end
+/// there is a wall that runs on past the point where another wall meets it: the walls meet
+/// across the profile, as where a long corner extension (the tangent rule at a sharp notch)
+/// reaches a wall on the far side of the profile, which the offset method's trimming
+/// cannot split the section at (#18452). A piece whose ends lie within `tol` of each other
+/// is left out: chaining drops it, and it ends at its neighbours' ends.
+fn offset_junction(k: &Kernel, pieces: &[OffsetPiece], tol: f64) -> Result<Option<Point3>> {
+    let mut ends = Vec::new();
+    for piece in pieces {
+        let e = piece.curve.ends(k)?;
+        if e.start.distance(e.end) > tol {
+            ends.push(e.start);
+            ends.push(e.end);
+        }
+    }
+    for p in &ends {
+        if ends.iter().filter(|q| q.distance(*p) <= tol).count() > 2 {
+            return Ok(Some(*p));
+        }
+    }
+    Ok(None)
+}
+
+/// Halvings of the height to where walls first meet ([`walls_meet`]).
+const MEETING_HALVINGS: u32 = 100;
+
+/// The point where the walls of the draft first meet across the profile, given `at`, a
+/// point where the far end's trimmed offsets meet ([`offset_junction`]): the section at a
+/// fraction `f` of the height is the profile offset by `f` of the far end's offset, so the
+/// lowest fraction whose section has such a junction is halved to, until the bracket is
+/// within the B-rep's tolerance `tol` of the height, and the junction there is moved up by
+/// that fraction of `translation`, the height.
+#[allow(clippy::too_many_arguments)] // the offset method's state
+fn walls_meet(
+    k: &Kernel,
+    composite: &CompositeCurve,
+    direction: OffsetDirection,
+    params: &OffsetParams,
+    at: Point3,
+    translation: Vec3,
+    tol: f64,
+    p: bool,
+) -> Result<Point3> {
+    let height = translation.length();
+    let mut f_lo = 0.0;
+    let mut f_hi = 1.0;
+    let mut point = at;
+    for _ in 0..MEETING_HALVINGS {
+        if (f_hi - f_lo) * height <= tol {
+            break;
+        }
+        let f = 0.5 * (f_lo + f_hi);
+        let section = ignored(passed_on(
+            composite.create_trimmed_offsets(
+                k,
+                direction,
+                &OffsetParams {
+                    offset_distance: f * params.offset_distance,
+                    ..*params
+                },
+            ),
+            p,
+        )?)?
+        .unwrap_or_default();
+        match offset_junction(k, &section, params.xsect_tol_3d)? {
+            Some(q) => {
+                f_hi = f;
+                point = q;
+            }
+            None => f_lo = f,
+        }
+    }
+    Ok(point + f_hi * translation)
 }
 
 /// The missing-face fallback: ruled surfaces of the untrimmed offsets in

@@ -20,6 +20,34 @@ pub(super) fn evaluated(
     Ok(())
 }
 
+/// Each generated fillet surface's type code and, for a blend by its definition, its
+/// net's certified bound and the distance [`solidcore::surface::procedural_blend::ProceduralBlend::recertify`]
+/// proves between the net and the definition (the round-as-definition rows' proof, #16580).
+pub(super) fn certificates(
+    k: &Kernel,
+    session: &FilletSession<'_>,
+) -> Result<Vec<super::super::Certificate>> {
+    let mut out = Vec::new();
+    for object in &session.executive().solvers {
+        let FilletObject::Solver(id) = *object else {
+            return Err(SolidError::invalid_input(
+                "harness::generated_fillet",
+                "actual solver required",
+            ));
+        };
+        for &geom in &session.solver(id)?.base().fillet_geoms {
+            if let Some(surface) = session.fillet_surface(geom)? {
+                let certified = match surface.procedural_blend() {
+                    Some(blend) => Some((blend.bound(), blend.recertify(k)?)),
+                    None => None,
+                };
+                out.push((surface.type_code() as f64, certified));
+            }
+        }
+    }
+    Ok(out)
+}
+
 pub(super) fn snapshot(k: &Kernel, session: &FilletSession<'_>) -> Result<(Vec<f64>, Vec<f64>)> {
     let mut state = Vec::new();
     let mut values = Vec::new();

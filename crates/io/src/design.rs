@@ -1459,13 +1459,13 @@ mod tests {
             .collect();
         let state = json!({
             "bodies": [[0, bodies.len()]], "sketches": [], "body_counter": 7, "sheets": [], "construct": [], "threads": [],
-            "sketch_key_set": 0, "blend_edges": {}, "fitted": {}, "tapered": {},
+            "sketch_key_set": 0, "blend_edges": {}, "fitted": {}, "tapered": {}, "named_faces": [],
         });
         solidcraft_doc::SavedModel {
             records: json!({
                 "features": [{"id": 1, "fingerprint": "0000000000000000", "ms": 0.0, "skipped": false, "state": 0}],
                 "states": [state], "model_bodies": records, "names": [{"faces": [], "info": []}], "sketches": [], "sheets": [],
-                "threads": [], "rounds": [], "sketch_key_sets": [{"set": [], "drop": []}],
+                "threads": [], "rounds": [], "sketch_key_sets": [{"set": [], "drop": []}], "named_faces": [],
             }),
             bodies,
         }
@@ -1738,7 +1738,7 @@ mod tests {
                 let bodies = if i == 0 { json!([[0, 16]]) } else { json!([[0, 8], [8 * (i + 1), 8]]) };
                 json!({
                     "bodies": bodies, "sketches": [], "body_counter": 7, "sheets": [], "construct": [], "threads": [],
-                    "sketch_key_set": 0, "blend_edges": {}, "fitted": {}, "tapered": {},
+                    "sketch_key_set": 0, "blend_edges": {}, "fitted": {}, "tapered": {}, "named_faces": [],
                 })
             })
             .collect();
@@ -1751,6 +1751,7 @@ mod tests {
             records: json!({
                 "features": features, "states": states, "model_bodies": records, "names": [{"faces": [], "info": []}], "sketches": [],
                 "sheets": [], "threads": [], "validation": "each_feature", "rounds": [], "sketch_key_sets": [{"set": [], "drop": []}],
+                "named_faces": [],
             }),
             bodies,
         }
@@ -1802,7 +1803,7 @@ mod tests {
                 one.records["states"],
                 json!([{
                     "bodies": [[0, 16]], "sketches": [], "body_counter": 7, "sheets": [], "construct": [], "threads": [],
-                    "sketch_key_set": 0, "blend_edges": {}, "fitted": {}, "tapered": {},
+                    "sketch_key_set": 0, "blend_edges": {}, "fitted": {}, "tapered": {}, "named_faces": [],
                 }])
             );
         }
@@ -1944,6 +1945,52 @@ mod tests {
             assert!(cache.write(&key, &doc, &saved, &reply).is_err());
             assert_eq!(std::fs::read(&target).unwrap(), b"keep this design");
         }
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    /// #17697 review: a pending import-cache write stays visible to every reader until it is
+    /// done, so a second reader that comes while the first waits waits too and reads the entry.
+    #[test]
+    fn every_reader_waits_for_a_pending_import_cache_write() {
+        let dir = std::env::temp_dir().join(format!("solidcraft-import-pending-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let cache = ImportCache::new(dir.clone());
+        let body = native_geometry().bodies.remove(0);
+        let text = solidcraft_kernel::step_export_bodies(
+            &[solidcraft_kernel::ExportBody { body: &body, name: "Box".into(), color: None }],
+            &solidcraft_kernel::StepHeader::default(),
+        )
+        .unwrap();
+        let mut doc = Document::new("Box");
+        doc.add_feature(crate::step_import_feature(text.as_bytes(), "box.step").unwrap().kind, None).unwrap();
+        let mut model = solidcraft_doc::Model::new();
+        model.evaluate(&doc);
+        let saved = model.saved(&doc).unwrap();
+        let key = ImportCache::key(text.as_bytes(), "box.step", &json!({}));
+        let reply = json!({"content_sha256": digest(text.as_bytes())});
+        let path = dir.join(format!("{key}.sc"));
+        let (release, held) = std::sync::mpsc::channel::<()>();
+        cache.write_after(key.clone(), doc, saved, reply.clone(), move |_| {
+            let _ = held.recv();
+        });
+        let waiting = |n: usize| {
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
+            while ImportCache::waiting_for(&path) < n {
+                assert!(std::time::Instant::now() < deadline, "{n} readers never waited for the pending write");
+                std::thread::yield_now();
+            }
+        };
+        let read = || {
+            let (cache, key) = (cache.clone(), key.clone());
+            std::thread::spawn(move || cache.read(&key).map(|(_, _, reply)| reply))
+        };
+        let first = read();
+        waiting(1);
+        let second = read();
+        waiting(2);
+        release.send(()).unwrap();
+        assert_eq!(first.join().unwrap(), Some(reply.clone()));
+        assert_eq!(second.join().unwrap(), Some(reply));
         std::fs::remove_dir_all(dir).unwrap();
     }
 

@@ -187,7 +187,7 @@ pub(super) fn add_geometry(sk: &mut Sketch, geom: &[Geom2], f: &dyn Fn(Vec2) -> 
 }
 
 /// The box around a drawing's geometry (arcs, circles and curves by their extent).
-fn bounds_of(geom: &[Geom2]) -> Option<(Vec2, Vec2)> {
+pub(super) fn bounds_of(geom: &[Geom2]) -> Option<(Vec2, Vec2)> {
     let mut pts: Vec<Vec2> = Vec::new();
     for g in geom {
         match g {
@@ -232,16 +232,25 @@ fn bounds_of(geom: &[Geom2]) -> Option<(Vec2, Vec2)> {
     (lo.x.is_finite() && lo.y.is_finite() && hi.x.is_finite() && hi.y.is_finite()).then_some((lo, hi))
 }
 
+/// A drawing as read: its geometry, the box around it, its text, and what the reading warns
+/// about (an SVG cubic kept as drawn that the curve check refuses, #16190).
+type Drawing = (Vec<Geom2>, (Vec2, Vec2), String, Vec<String>);
+
 /// The drawing's geometry and the box around it; a drawing with none is an error that says why
 /// (#9641).
-fn read_drawing(p: &Value, cmd: &str, svg: bool) -> Result<(Vec<Geom2>, (Vec2, Vec2), String)> {
+fn read_drawing(p: &Value, cmd: &str, svg: bool) -> Result<Drawing> {
     let text = source_text(p, cmd, svg)?;
-    let geom = if svg { solidcraft_io::read_svg(&text) } else { solidcraft_io::read_dxf(&text) }.map_err(|e| drawing_error(p, svg, e.to_string()))?;
+    let (geom, warnings) = if svg {
+        solidcraft_io::read_svg_drawing(&text).map(|d| (d.geometry, d.warnings.iter().map(ToString::to_string).collect()))
+    } else {
+        solidcraft_io::read_dxf(&text).map(|g| (g, Vec::new()))
+    }
+    .map_err(|e| drawing_error(p, svg, e.to_string()))?;
     let Some(bounds) = bounds_of(&geom) else {
         let why = if svg { solidcraft_io::svg_nothing_to_import(&text) } else { "the DXF has no entities SolidCraft reads".to_string() };
         return Err(drawing_error(p, svg, why));
     };
-    Ok((geom, bounds, text))
+    Ok((geom, bounds, text, warnings))
 }
 
 /// The box around a drawing, as the reply describes it: `min`, `max` and the span between them.
@@ -257,14 +266,14 @@ fn drawing_bounds(_s: &mut Session, p: &Value) -> Result<Value> {
         Some(f) => !f.eq_ignore_ascii_case("dxf"),
         None => !name_is_dxf,
     };
-    let (_, bounds, text) = read_drawing(p, cmd, svg)?;
+    let (_, bounds, text, _) = read_drawing(p, cmd, svg)?;
     // Only an SVG names a sheet, and only when it says how big its sheet is.
     let sheet = svg.then(|| solidcraft_io::svg_sheet(&text)).flatten().map(drawing_box);
     reply(cmd, DrawingBoundsResult { drawing: drawing_box(bounds), sheet, param_warnings: Vec::new() })
 }
 
 fn insert(s: &mut Session, p: &Value, cmd: &str, svg: bool) -> Result<Value> {
-    let (geom, (lo, hi), text) = read_drawing(p, cmd, svg)?;
+    let (geom, (lo, hi), text, warnings) = read_drawing(p, cmd, svg)?;
     // What `width`, `height` and `align: center` refer to: the drawn geometry, or the SVG sheet.
     let (lo, hi) = match str_(p, "size_from") {
         None | Some("geometry") => (lo, hi),
@@ -367,6 +376,7 @@ fn insert(s: &mut Session, p: &Value, cmd: &str, svg: bool) -> Result<Value> {
             fixed: fixed.then_some(n_fixed),
             info,
             created: None,
+            warnings,
             param_warnings: Vec::new(),
         },
     )

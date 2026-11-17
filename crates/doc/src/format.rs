@@ -641,7 +641,7 @@ pub(crate) fn decode(mut v: Value, version: u32, applied: Option<&[String]>) -> 
         group.features.retain(|feature| feature_ids.contains(feature) && grouped_features.insert(*feature));
     }
     for group in &d.timeline_groups {
-        if group.name.trim().is_empty() || group.name.len() > 128 || !group_ids.insert(group.id) {
+        if group.name.trim().is_empty() || group.name.chars().count() > 128 || !group_ids.insert(group.id) {
             return Err(DocError::Invalid("damaged design: invalid timeline folder".into()));
         }
         if group.parent.is_some_and(|parent| parent == group.id) {
@@ -687,10 +687,20 @@ pub(crate) fn decode(mut v: Value, version: u32, applied: Option<&[String]>) -> 
         return Err(DocError::Invalid("damaged design: duplicate feature, component, occurrence or configuration row id".into()));
     }
     let component_ids: std::collections::BTreeSet<_> = d.components.iter().map(|component| component.id).chain(std::iter::once(0)).collect();
+    // A 3D constraint that no longer checks out (it names a fit point its curve no longer has)
+    // is dropped rather than refusing the design (#10608); damaged ids still refuse it.
+    for feature in &mut d.features {
+        if let crate::FeatureKind::Sketch { sketch, .. } = &mut feature.kind
+            && sketch.validate_wires().is_ok()
+        {
+            sketch.prune_wire_constraints();
+        }
+    }
     for feature in &d.features {
         if let crate::FeatureKind::Sketch { sketch, .. } = &feature.kind {
             sketch.validate_freeform_offsets().map_err(|e| DocError::Invalid(format!("damaged design: {e}")))?;
             sketch.validate_wires().map_err(|e| DocError::Invalid(format!("damaged design: {e}")))?;
+            sketch.validate_wire_constraints().map_err(|e| DocError::Invalid(format!("damaged design: {e}")))?;
             sketch.validate_patterns().map_err(|e| DocError::Invalid(format!("damaged design: {e}")))?;
             sketch.validate_periodic_splines().map_err(|e| DocError::Invalid(format!("damaged design: {e}")))?;
             sketch.validate_spline_knots().map_err(|e| DocError::Invalid(format!("damaged design: {e}")))?;
@@ -741,6 +751,7 @@ fn validate_sketch_sizes(value: &Value) -> Result<()> {
         if feature.get("type").and_then(Value::as_str) != Some("sketch") {
             continue;
         }
+        validate_sketch_plane_placement(feature.get("plane"))?;
         let Some(sketch) = feature.get("sketch") else { continue };
         let len = |key: &str| sketch.get(key).and_then(Value::as_array).map_or(0, Vec::len);
         // The ceilings, not the limits in force: a design made where the limit was raised opens (#10874).
@@ -748,6 +759,9 @@ fn validate_sketch_sizes(value: &Value) -> Result<()> {
             || len("curves") > solidcraft_sketch::CEILING_CURVES
             || len("constraints") > solidcraft_sketch::CEILING_CONSTRAINTS
             || len("patterns") > solidcraft_sketch::CEILING_CONSTRAINTS
+            // The 3D constraints too (#10608): refused here, before a typed list is built or
+            // stale entries are pruned from it.
+            || len("wire_constraints") > solidcraft_sketch::CEILING_CONSTRAINTS
         {
             return Err(invalid());
         }
@@ -792,6 +806,27 @@ fn validate_sketch_sizes(value: &Value) -> Result<()> {
                 }
             }
         }
+    }
+    Ok(())
+}
+
+fn validate_sketch_plane_placement(mut plane: Option<&Value>) -> Result<()> {
+    let invalid = || DocError::Invalid("damaged design: invalid captured construction plane placement".into());
+    let mut depth = 0;
+    while let Some(value) = plane {
+        depth += 1;
+        if depth > 64 {
+            return Err(invalid());
+        }
+        if value.get("type").and_then(Value::as_str) == Some("construction")
+            && let Some(placement) = value.get("placement").filter(|p| !p.is_null())
+        {
+            let placement: crate::Mat = serde_json::from_value(placement.clone()).map_err(|_| invalid())?;
+            if !crate::is_placement(&placement) {
+                return Err(invalid());
+            }
+        }
+        plane = value.get("base");
     }
     Ok(())
 }
@@ -964,6 +999,14 @@ fn validate_versioned_geometry(value: &Value) -> Result<()> {
             for link in links {
                 if link.get("auto_face").is_some_and(|marker| !marker.is_boolean()) {
                     return Err(invalid());
+                }
+                if let Some(pins) = link.get("sketch_placements") {
+                    let invalid = || DocError::Invalid("damaged design: invalid captured sketch projection placement".into());
+                    if pins.as_array().is_none_or(|pins| pins.len() > crate::project::MAX_SKETCH_PLACEMENTS) {
+                        return Err(invalid());
+                    }
+                    let link: solidcraft_sketch::Link = serde_json::from_value(link.clone()).map_err(|_| invalid())?;
+                    crate::project::validate_link_sketch_placements(&link)?;
                 }
             }
         }
@@ -1181,6 +1224,107 @@ fn normalise(d: &mut Document) -> Result<()> {
 mod tests {
     use super::*;
     use solidcraft_geom::prelude::*;
+
+    #[test]
+    fn captured_sketch_reference_placements_reject_damaged_metadata() {
+        let valid = serde_json::json!({"features":[{"type":"sketch", "sketch":{"links":[{
+            "id":"j1", "source":{"type":"sketch_point", "sketch":7, "point":"p1"},
+            "sketch_placements":[{"sketch":7, "placement":crate::IDENTITY}]
+        }]}}]});
+        assert!(validate_versioned_geometry(&valid).is_ok());
+        for pins in [
+            serde_json::json!({}),
+            serde_json::json!([{"sketch":8,"placement":crate::IDENTITY}]),
+            serde_json::json!([{"sketch":7,"placement":crate::IDENTITY},{"sketch":7,"placement":crate::IDENTITY}]),
+            serde_json::json!([{"sketch":7,"placement":[[1,0,0,0]]}]),
+            serde_json::json!(vec![serde_json::json!({"sketch":7,"placement":crate::IDENTITY}); crate::project::MAX_SKETCH_PLACEMENTS + 1]),
+        ] {
+            let mut damaged = valid.clone();
+            damaged["features"][0]["sketch"]["links"][0]["sketch_placements"] = pins;
+            assert!(validate_versioned_geometry(&damaged).is_err());
+        }
+        let mut scaled = crate::IDENTITY;
+        scaled[0][0] = 2.;
+        let mut damaged = valid;
+        damaged["features"][0]["sketch"]["links"][0]["sketch_placements"][0]["placement"] = serde_json::json!(scaled);
+        assert!(validate_versioned_geometry(&damaged).is_err());
+        let plane = serde_json::json!({"type":"construction", "feature":7,"placement":scaled});
+        assert!(validate_sketch_plane_placement(Some(&plane)).is_err());
+    }
+
+    fn older_design_with_anchored_component_sketch() -> (Value, u64) {
+        let mut document = Document::new("anchored component");
+        let base = document
+            .add_feature(
+                crate::FeatureKind::Box {
+                    corner: ["0".into(), "0".into(), "0".into()],
+                    length: "10".into(),
+                    width: "10".into(),
+                    height: "10".into(),
+                    operation: crate::Operation::NewBody,
+                    centred: false,
+                },
+                Some("Base"),
+            )
+            .unwrap();
+        document.feature_mut(base).unwrap().body_names = vec!["Base".into()];
+        let component = document.add_component(Some("Part"), 0).unwrap();
+        // The same certified box face as the raw anchor validation fixture below.
+        let plane = serde_json::from_value(serde_json::json!({
+            "type":"face", "plane":{"origin":[0,0,10], "x_dir":[1,0,0], "y_dir":[0,1,0]},
+            "at":[0,0,10], "name":format!("F{base}:+z"),
+            "anchor":{
+                "target":{"body":"Base", "origin_feature":base, "name":format!("F{base}:+z"), "point":[0,0,10],
+                    "certificate":{"kind":"box", "axis":2, "high":true}},
+                "component":0, "path":[], "author_path":document.first_path(component),
+                "coordinates":[0,0], "x_axis":[1,0]
+            }
+        }))
+        .unwrap();
+        let sketch = document.add_feature(crate::FeatureKind::Sketch { plane, sketch: solidcraft_sketch::Sketch::new() }, Some("Attached")).unwrap();
+        document.feature_mut(sketch).unwrap().component = component;
+        let mut file: Value = serde_json::from_str(&document.to_json()).unwrap();
+        // Predates the sketch-reference migration, including after its pending file is folded.
+        file["format"] = Value::from("solidcraft/56");
+        file.as_object_mut().unwrap().remove("format_pending");
+        (file, sketch)
+    }
+
+    #[test]
+    fn sketch_reference_migration_keeps_missing_author_paths_as_feature_errors() {
+        for author_path in [serde_json::json!([]), serde_json::json!([999_999])] {
+            let (mut file, sketch) = older_design_with_anchored_component_sketch();
+            file["features"][1]["plane"]["anchor"]["author_path"] = author_path.clone();
+            let opened = read(&file.to_string()).unwrap();
+            let feature = opened.feature(sketch).unwrap();
+            let crate::FeatureKind::Sketch { plane, .. } = &feature.kind else { panic!("attached sketch was not retained") };
+            let anchor = crate::face_anchor::plane_face_anchor(plane).unwrap();
+            assert_eq!(serde_json::to_value(&anchor.author_path).unwrap(), author_path);
+            assert!(anchor.author_frame(&opened, feature.component).is_err());
+            assert!(opened.newer_file.is_none());
+        }
+    }
+
+    #[test]
+    fn sketch_reference_migration_preserves_anchored_sketches_during_newer_file_salvage() {
+        let (mut file, sketch) = older_design_with_anchored_component_sketch();
+        // Salvage checks each feature alone, without components or occurrences in its stub.
+        let piece = serde_json::json!({"name":"", "params":[], "features":[file["features"][1].clone()]});
+        check_piece(piece, 56, None).unwrap();
+        file["format_pending"] = serde_json::json!(["a-later-change"]);
+        file["features"].as_array_mut().unwrap().push(serde_json::json!({
+            "id":900, "name":"Future", "type":"unknown_future_feature"
+        }));
+        let opened = read(&file.to_string()).unwrap();
+        let feature = opened.feature(sketch).unwrap();
+        let crate::FeatureKind::Sketch { plane, .. } = &feature.kind else { panic!("known sketch became a placeholder") };
+        let anchor = crate::face_anchor::plane_face_anchor(plane).unwrap();
+        assert!(anchor.author_frame(&opened, feature.component).is_ok());
+        assert!(matches!(opened.feature(900).unwrap().kind, crate::FeatureKind::NewerFileFeature { .. }));
+        let report = opened.newer_file.as_ref().unwrap();
+        assert!(report.not_understood.iter().any(|note| note.contains("Future")), "{:?}", report.not_understood);
+        assert!(!report.not_understood.iter().any(|note| note.contains("Attached")), "{:?}", report.not_understood);
+    }
 
     /// A pending change that records that its step ran, in `trace`.
     fn traced(name: &'static str) -> Part {
@@ -1809,7 +1953,9 @@ mod tests {
                         to_offset: Some("offset + 1 mm".into()),
                         from: Some(crate::FacePick(solidcore_record::Vec3::new(0.0, 0.0, 5.0))),
                         to_body_apart: false,
+                        from_level: false,
                         picked_placements: Vec::new(),
+                        one_sided_direction: None,
                     },
                     operation: Operation::NewBody,
                     targets: vec![],
@@ -1842,6 +1988,9 @@ mod tests {
         assert_eq!(upgraded.features[1].param_names.len(), 3);
         assert_eq!(upgraded.features[1].param_names[2], "d6");
         let saved: Value = serde_json::from_str(&upgraded.to_json()).unwrap();
+        // The extent is kept, and its From Object keeps starting at the face's level (#17639).
+        let mut old_kind = old_kind;
+        old_kind["extent"]["from_level"] = Value::Bool(true);
         for field in ["extent", "sketch", "operation", "profiles"] {
             assert_eq!(saved["features"][1][field], old_kind[field]);
         }
@@ -2371,6 +2520,34 @@ mod tests {
             *slot = Value::Array(vec![first; cap + 1]);
             let error = read(&value.to_string()).unwrap_err().to_string();
             assert!(error.contains("sketch too large"), "{key}: {error}");
+        }
+
+        // 3D constraints (#10608): a stale one (it names a fit point its curve does not have) is
+        // pruned as the design opens, up to the ceiling; one past the ceiling is refused first, so a huge
+        // list is neither built nor pruned away.
+        let mut sketch = Sketch::new();
+        let v = solidcore_record::Vec3::new;
+        let w = sketch.add_drawn_wire_in(&[v(0.0, 0.0, 0.0), v(10.0, 0.0, 0.0)], solidcraft_sketch::WireSpace::Component).unwrap();
+        let p = solidcraft_sketch::WirePoint { wire: w, index: 0 };
+        sketch.add_wire_constraint(solidcraft_sketch::WireConstraintKind::Fix { p, at: v(0.0, 0.0, 0.0), exprs: None }).unwrap();
+        let mut doc = Document::new("3D constraints");
+        doc.add_feature(crate::FeatureKind::Sketch { plane: crate::PlaneRef::Origin { name: "XY".into() }, sketch }, None).unwrap();
+        let mut stale: Value = serde_json::from_str(&doc.to_json()).unwrap();
+        let entry = &mut stale["features"][0]["sketch"]["wire_constraints"][0];
+        assert!(entry.to_string().contains("\"index\":0"), "the Fix names fit point 0: {entry}");
+        *entry = serde_json::from_str(&entry.to_string().replace("\"index\":0", "\"index\":9")).unwrap();
+        let one = stale["features"][0]["sketch"]["wire_constraints"][0].clone();
+        for (count, loads) in [(CEILING_CONSTRAINTS, true), (CEILING_CONSTRAINTS + 1, false)] {
+            let mut value = stale.clone();
+            value["features"][0]["sketch"]["wire_constraints"] = Value::Array(vec![one.clone(); count]);
+            match read(&value.to_string()) {
+                Ok(d) => {
+                    assert!(loads, "{count} 3D constraints must be refused");
+                    let crate::FeatureKind::Sketch { sketch, .. } = &d.features[0].kind else { panic!("sketch") };
+                    assert!(sketch.wire_constraints.is_empty(), "the stale ones are pruned");
+                }
+                Err(e) => assert!(!loads && e.to_string().contains("sketch too large"), "{count}: {e}"),
+            }
         }
     }
 

@@ -47,7 +47,6 @@ pub struct DocSlot {
     pre_sketch_component: Option<crate::PreSketchComponent>,
     pre_edit_component: Option<crate::PreEditComponent>,
     view: DocView,
-    occurrence_move: Option<crate::browser::OccMove>,
     reveals: crate::browser::PendingReveals,
     agent_chat: crate::agent_chat::AgentChat,
     /// Its linked design files as the design last read them (`Documents::link_stamps`).
@@ -163,7 +162,6 @@ impl DocSlot {
             pre_sketch_component: None,
             pre_edit_component: None,
             view: DocView::default(),
-            occurrence_move: None,
             reveals: Default::default(),
             agent_chat: Default::default(),
             link_stamps: Vec::new(),
@@ -221,6 +219,21 @@ pub(crate) struct ViewRename {
     view: u64,
     text: String,
     focused: bool,
+    /// The design it was begun in (see [`give_up_renames_of_other_designs`]).
+    session: u64,
+}
+
+/// Give up a rename begun in another design than the one shown (another tab, a design closed,
+/// opened, started or imported): a refused name stays in its field only while its design is
+/// shown, and the same id in another design names something else.
+pub(crate) fn give_up_renames_of_other_designs(app: &mut SolveApp) {
+    let shown = app.session.uid;
+    if app.menu.rename.as_ref().is_some_and(|r| r.session != shown) {
+        app.menu.rename = None;
+    }
+    if app.docs.view_rename.as_ref().is_some_and(|r| r.session != shown) {
+        app.docs.view_rename = None;
+    }
 }
 
 struct SaveGroup {
@@ -459,7 +472,6 @@ fn swap_in(app: &mut SolveApp, mut slot: DocSlot) -> DocSlot {
         pre_sketch_component: std::mem::replace(&mut app.pre_sketch_component, slot.pre_sketch_component),
         pre_edit_component: std::mem::replace(&mut app.pre_edit_component, slot.pre_edit_component),
         view: take_view(app),
-        occurrence_move: std::mem::replace(&mut app.tree.occurrence_move, slot.occurrence_move),
         reveals,
         agent_chat: slot.agent_chat,
         link_stamps: std::mem::replace(&mut app.docs.link_stamps, slot.link_stamps),
@@ -538,6 +550,8 @@ pub fn switch(app: &mut SolveApp, i: usize) {
     crate::linked_source::note_unread(app);
     let fit = incoming.fit;
     let out = swap_in(app, incoming);
+    // Give up the old design's renames now, before an editor drawn later in this frame commits one.
+    give_up_renames_of_other_designs(app);
     if fit {
         app.fit_view();
     }
@@ -612,7 +626,12 @@ fn enter_workspace(app: &mut SolveApp, render: bool) {
 /// is the active view (opened when the design has none for it), and with neither the Model view
 /// is, as the app left them by itself. Called each frame and after a design switch, so a view
 /// entered from anywhere in the app (a ribbon button, a command, Finish Sketch) shows in the strip.
+/// A view of a sketch the design no longer has (cancelled, undone or deleted) closes (#18264).
+/// While the strip shows no views (views as tabs and the switcher both off), no view is opened
+/// here: the design enters the sketch or workspace in the view shown, as before design views.
 pub(crate) fn sync_views(app: &mut SolveApp) {
+    let session = &app.session;
+    app.docs.views.drop_views(|view| view.kind != ViewKind::Sketch || can_restore(session, view.kind, view.subject.as_deref()));
     let shown = if crate::render_workspace::active(app) {
         Some((ViewKind::Render, None))
     } else {
@@ -622,7 +641,7 @@ pub(crate) fn sync_views(app: &mut SolveApp) {
     let views = &mut app.docs.views;
     match shown {
         Some((kind, subject)) => {
-            if prefs.opens_sub_tab(kind) && (views.active().kind != kind || views.active().subject != subject) {
+            if prefs.opens_views_by_itself() && prefs.opens_sub_tab(kind) && (views.active().kind != kind || views.active().subject != subject) {
                 views.open(kind, subject, prefs.reuse_views);
             }
         }
@@ -762,7 +781,7 @@ pub fn view_rename(app: &mut SolveApp, id: u64, name: &str) -> bool {
 /// it is. False when there is no such view.
 pub fn view_rename_start(app: &mut SolveApp, id: u64) -> bool {
     let Some(name) = app.docs.views.get(id).map(|view| view.name.clone()) else { return false };
-    app.docs.view_rename = Some(ViewRename { view: id, text: name, focused: false });
+    app.docs.view_rename = Some(ViewRename { view: id, text: name, focused: false, session: app.session.uid });
     true
 }
 
@@ -999,6 +1018,7 @@ pub fn adopt(app: &mut SolveApp, session: Session) -> bool {
         crate::design_properties::close_object(app);
         crate::sketch_attachment_ui::clear(app);
         app.session.replace_design(session);
+        give_up_renames_of_other_designs(app);
         reset_chat(app);
         // Another design in the tab: what waits for the blank one's tab no longer does.
         app.docs.active_tab = next_tab();
@@ -1159,6 +1179,7 @@ pub fn close(app: &mut SolveApp, i: usize, force: bool) {
         app.tool = None;
         app.bom = None;
         app.session.replace_design(Session::default());
+        give_up_renames_of_other_designs(app);
         app.session.revision = rev + 1;
         crate::prefs::apply_new_design(app);
         app.cam = Camera::default();
@@ -1166,7 +1187,7 @@ pub fn close(app: &mut SolveApp, i: usize, force: bool) {
         put_view(app, DocView::default());
         app.docs = Documents::default();
         app.edit_in_place = Default::default();
-        app.home.open = true;
+        app.home.open = app.preferences.show_home_on_startup;
         return;
     }
     if i == app.docs.active {
@@ -1325,11 +1346,14 @@ pub fn open_sessions(app: &SolveApp) -> Vec<&Session> {
     app.docs.slots.iter().map(|s| s.as_ref().map_or(&app.session, |d| &d.session)).collect()
 }
 
+/// Closing tab `i` asks to save first: it has changes, and is not a STEP, IGES or mesh file
+/// opened and only looked at (#15111), whose file still holds all of it.
 fn dirty(app: &SolveApp, i: usize) -> bool {
+    let asks = |s: &Session| s.is_dirty() && !s.unchanged_import();
     if i == app.docs.active || app.docs.slots.is_empty() {
-        return app.session.is_dirty();
+        return asks(&app.session);
     }
-    app.docs.slots.get(i).and_then(Option::as_ref).is_some_and(|s| s.session.is_dirty())
+    app.docs.slots.get(i).and_then(Option::as_ref).is_some_and(|s| asks(&s.session))
 }
 
 /// A tab's name: the file a saved design was opened or saved as (without its extension), so a
@@ -1817,6 +1841,7 @@ pub fn tabs(app: &mut SolveApp, ui: &mut egui::Ui, r: Rect, x0: f32, x1: f32) {
             id: tab_strip_id(),
             handles: TAB_HANDLES,
             views_as_tabs,
+            switcher_always: DesignTabPrefs::from(&app.preferences).switcher_always(),
             view_text: crate::app_bar::ViewText {
                 close_view: solidcraft_ui_text::tr_label("Close view"),
                 close_design: solidcraft_ui_text::tr_label("Close design"),
@@ -1846,9 +1871,13 @@ pub fn tabs(app: &mut SolveApp, ui: &mut egui::Ui, r: Rect, x0: f32, x1: f32) {
         }
     }
     match (kept, rename) {
-        (Some(true), Some(done)) => {
-            if names.get(selected).is_some_and(|shown| done.text.trim() != shown.trim()) {
-                let _ = crate::context_menu::commit_rename(app, &done);
+        (Some(true), Some(mut done)) => {
+            // A refused name keeps the field open, focused with the name selected; the status
+            // line says why (a name another component has takes a number, which can make it too
+            // long).
+            if names.get(selected).is_some_and(|shown| done.text.trim() != shown.trim()) && crate::context_menu::commit_rename(app, &done).is_err() {
+                done.focused = false;
+                app.menu.rename = Some(done);
             }
         }
         (Some(false), _) | (_, None) => {}
@@ -1861,8 +1890,15 @@ pub fn tabs(app: &mut SolveApp, ui: &mut egui::Ui, r: Rect, x0: f32, x1: f32) {
         _ => None,
     });
     match (view_kept, view_edit) {
-        (Some(true), Some(done)) => {
-            view_rename(app, done.view, &done.text);
+        // A refused name (control characters pasted in) keeps the field open with the name
+        // selected, as the tab does; a blank one gives up, as it does for the tab.
+        (Some(true), Some(mut done)) => {
+            if !done.text.trim().is_empty() && !view_rename(app, done.view, &done.text) {
+                let why = app.tr("tab_strip.view_name_refused").to_string();
+                app.set_status(why, true);
+                done.focused = false;
+                app.docs.view_rename = Some(done);
+            }
         }
         (None, Some(editing)) => app.docs.view_rename = Some(editing),
         _ => {}
@@ -1933,6 +1969,7 @@ fn start_tab_rename(app: &mut SolveApp, name: &str, tab: Rect) {
         focused: false,
         inline: true,
         inline_id: None,
+        session: app.session.uid,
     });
 }
 
@@ -2191,6 +2228,26 @@ pub(crate) fn saved_for_close(app: &mut SolveApp) {
     }
     quit_step(app);
     batch_step(app);
+}
+
+/// Snapshots for file guards on a worker; the file-operation lock keeps tabs unchanged.
+pub(crate) fn file_guard_sessions(app: &SolveApp) -> Vec<Session> {
+    std::iter::once(&app.session)
+        .chain(app.docs.slots.iter().flatten().map(|slot| &slot.session))
+        .map(|session| {
+            // The guard reads only paths and links, never model geometry or undo state.
+            let mut copy = Session::default();
+            copy.doc = session.doc.clone();
+            copy.path = session.path.clone();
+            copy
+        })
+        .collect()
+}
+
+/// Files in any open tab, including linked parts, must not disappear underneath it.
+pub(crate) fn uses_file(app: &SolveApp, path: &str) -> bool {
+    solidcraft_engine::session_uses_file(&app.session, path)
+        || app.docs.slots.iter().flatten().any(|slot| solidcraft_engine::session_uses_file(&slot.session, path))
 }
 
 /// Where SolidCraft's document tab strip keeps its state.
@@ -2622,6 +2679,132 @@ mod tests {
         assert_eq!(h.app.session.doc.name, "x".repeat(MAX_DESIGN_NAME), "the command takes it, cut to 128 characters");
     }
 
+    /// The field and the command both count characters: a hundred `ł` (200 bytes) is taken.
+    #[test]
+    fn a_long_name_with_accented_letters_is_taken() {
+        let mut h = design_open();
+        double_click_tab(&mut h, 0);
+        h.step(&json!({"text": "ł".repeat(100)})).unwrap();
+        h.step(&json!({"key": "Enter"})).unwrap();
+        h.frames(2);
+        assert_eq!(h.app.session.doc.name, "ł".repeat(100));
+        assert!(!renaming_tab(&h.app), "the field closed");
+    }
+
+    /// A refused name keeps the tab's field open with the name selected: the design takes a
+    /// number when a component already has the typed name, and a 128-character name with a
+    /// number is too long.
+    #[test]
+    fn a_refused_tab_name_keeps_the_field_open() {
+        let mut h = design_open();
+        let taken = "x".repeat(128);
+        h.app.run("component.create", json!({"name": taken, "activate": false})).unwrap();
+        let before = h.app.session.doc.name.clone();
+        double_click_tab(&mut h, 0);
+        h.step(&json!({"text": taken})).unwrap();
+        h.step(&json!({"key": "Enter"})).unwrap();
+        h.frames(2);
+        assert!(renaming_tab(&h.app), "the field stays open after a refused name");
+        assert_eq!(h.app.session.doc.name, before);
+        let (text, _, error) = h.app.status.clone().expect("the refusal is shown");
+        assert!(error && text.contains("1…128 characters"), "{text}");
+        h.step(&json!({"text": "Short"})).unwrap();
+        h.step(&json!({"key": "Enter"})).unwrap();
+        h.frames(2);
+        assert_eq!(h.app.session.doc.name, "Short", "the next keystrokes replace the name");
+        assert!(!renaming_tab(&h.app));
+    }
+
+    /// A refused tab name is given up when another design is shown: it never lands on that
+    /// design's tab, and Enter there renames nothing.
+    #[test]
+    fn a_refused_tab_name_is_given_up_when_another_tab_is_shown() {
+        let mut h = design_open();
+        open_tab(&mut h.app, Session::default()).unwrap();
+        h.frames(2);
+        let taken = "x".repeat(128);
+        h.app.run("component.create", json!({"name": taken, "activate": false})).unwrap();
+        let names = |h: &crate::scenario::Harness| tabs_info(&h.app).into_iter().map(|(name, _)| name).collect::<Vec<_>>();
+        let before = names(&h);
+        double_click_tab(&mut h, 1);
+        h.step(&json!({"text": taken})).unwrap();
+        h.step(&json!({"key": "Enter"})).unwrap();
+        h.frames(2);
+        assert!(renaming_tab(&h.app), "refused, so the field stays");
+        h.step(&json!({"click": {"handle": "tab:design:0"}})).unwrap();
+        h.frames(2);
+        assert_eq!(h.app.docs.active, 0);
+        assert!(!renaming_tab(&h.app), "the refused name is given up with its design");
+        h.step(&json!({"key": "Enter"})).unwrap();
+        h.frames(2);
+        assert_eq!(names(&h), before, "no design was renamed");
+    }
+
+    /// A refused tab name is given up when the last design is closed: it never lands on the new
+    /// design that takes its place.
+    #[test]
+    fn a_refused_tab_name_is_given_up_when_the_last_design_closes() {
+        let mut h = design_open();
+        let taken = "x".repeat(128);
+        h.app.run("component.create", json!({"name": taken, "activate": false})).unwrap();
+        double_click_tab(&mut h, 0);
+        h.step(&json!({"text": taken})).unwrap();
+        h.step(&json!({"key": "Enter"})).unwrap();
+        h.frames(2);
+        assert!(renaming_tab(&h.app), "refused, so the field stays");
+        close(&mut h.app, 0, true);
+        h.frames(2);
+        assert!(!renaming_tab(&h.app), "the refused name is given up with its design");
+        let fresh = h.app.session.doc.name.clone();
+        h.step(&json!({"key": "Enter"})).unwrap();
+        h.frames(2);
+        assert_eq!(h.app.session.doc.name, fresh, "the new design is not renamed");
+    }
+
+    /// Clicking away from a refused tab name commits it again, is refused again, and keeps the
+    /// field, as the other rename editors do.
+    #[test]
+    fn clicking_away_from_a_refused_tab_name_keeps_the_field() {
+        let mut h = design_open();
+        let taken = "x".repeat(128);
+        h.app.run("component.create", json!({"name": taken, "activate": false})).unwrap();
+        let before = h.app.session.doc.name.clone();
+        double_click_tab(&mut h, 0);
+        h.step(&json!({"text": taken})).unwrap();
+        h.step(&json!({"click": [700, 500]})).unwrap();
+        h.frames(2);
+        assert!(renaming_tab(&h.app), "the field stays after a refused click-away");
+        assert_eq!(h.app.session.doc.name, before);
+    }
+
+    /// A view's refused name (control characters pasted in) keeps its sub-tab's field open with
+    /// the name selected, as the design tab does; the next keystrokes replace it.
+    #[test]
+    fn a_refused_view_name_keeps_the_field_open() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.preferences.design_views_as_tabs = true;
+        h.app.home.open = false;
+        let call =
+            |h: &mut crate::scenario::Harness, command: &str, params: Value| h.call("engine.execute", json!({"command": command, "params": params}));
+        let id = call(&mut h, "tab.view.open", json!({"kind": "animation"}))["result"]["id"].as_u64().unwrap();
+        assert_eq!(call(&mut h, "tab.view.rename", json!({}))["ok"], true);
+        h.frames(2);
+        if let Some(r) = h.app.docs.view_rename.as_mut() {
+            r.text = "Bad\u{7}name".into();
+        }
+        h.step(&json!({"key": "Enter"})).unwrap();
+        h.frames(2);
+        assert!(h.app.docs.view_rename.is_some(), "the field stays open after a refused name");
+        let (text, _, error) = h.app.status.clone().expect("the refusal is shown");
+        assert!(error && text.contains("control characters"), "{text}");
+        assert_eq!(h.app.docs.views.get(id).map(|v| v.name.as_str()), Some("Animation 1"));
+        h.step(&json!({"text": "Good"})).unwrap();
+        h.step(&json!({"key": "Enter"})).unwrap();
+        h.frames(2);
+        assert_eq!(h.app.docs.views.get(id).map(|v| v.name.as_str()), Some("Good"), "the next keystrokes replace the name");
+        assert!(h.app.docs.view_rename.is_none());
+    }
+
     #[test]
     fn with_the_preference_off_a_double_click_does_not_rename() {
         let mut h = design_open();
@@ -2749,6 +2932,34 @@ mod tests {
         assert!(a.docs.closing.is_none() && a.docs.batch.is_none());
         let volume = a.run("inspect.measure", json!({})).unwrap()["total"]["volume_mm3"].as_f64().unwrap();
         assert!((volume - 1000.0).abs() < 1e-6, "the first tab's part: {volume}");
+    }
+
+    /// #15111: a STEP file opened in a tab and only looked at closes without asking to save,
+    /// although it was never saved as a design. Changed, it asks again.
+    #[test]
+    fn an_opened_step_file_closes_without_asking_until_it_is_changed() {
+        let dir = std::env::temp_dir().join(format!("solidcraft-close-step-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let step = dir.join("Block.step");
+        let mut maker = Session::default();
+        maker.execute("solid.box", &json!({"length": 10, "width": 10, "height": 10})).unwrap();
+        maker.execute("file.export", &json!({"path": step.to_string_lossy()})).unwrap();
+        let opened = || {
+            let mut s = Session::default();
+            s.execute("doc.open", &json!({"path": step.to_string_lossy()})).unwrap();
+            s
+        };
+        let mut a = app();
+        open_tab(&mut a, opened()).unwrap();
+        assert!(a.session.is_dirty() && a.session.path.is_none(), "still a design never saved");
+        control(&mut a, &json!({"action": "close", "index": 1}));
+        assert_eq!((a.docs.count(), a.docs.closing), (1, None), "closed without asking");
+
+        open_tab(&mut a, opened()).unwrap();
+        a.run("solid.box", json!({"length": 5, "width": 5, "height": 5, "corner": [30, 0, 0]})).unwrap();
+        control(&mut a, &json!({"action": "close", "index": 1}));
+        assert_eq!((a.docs.count(), a.docs.closing), (2, Some(1)), "a changed import asks first");
+        std::fs::remove_dir_all(dir).unwrap();
     }
 
     /// #3055: Close All Tabs, and Cancel at the first question: the tabs not closed yet stay.
@@ -3131,6 +3342,99 @@ mod tests {
         assert_eq!(h.app.docs.count(), 1);
     }
 
+    /// Closing a batch through the tab menu must use the same final screen as closing one tab.
+    #[test]
+    fn close_all_tabs_respects_startup_choice_after_discard_and_on_repeat() {
+        for (home, one_at_a_time) in [(true, true), (true, false), (false, true), (false, false)] {
+            let mut a = four_tabs();
+            a.preferences.show_home_on_startup = home;
+            a.preferences.save_prompt_one_at_a_time = one_at_a_time;
+            control(&mut a, &json!({"action": "close_all"}));
+            assert_eq!(a.docs.closing, Some(if one_at_a_time { 2 } else { 0 }));
+            if one_at_a_time {
+                answer_prompt(&mut a, Answer::DontSave);
+                assert_eq!(a.docs.closing, Some(0));
+            }
+            answer_prompt(&mut a, Answer::DontSave);
+            assert_eq!(a.docs.count(), 1);
+            assert!(active_is_blank(&a));
+            assert_eq!(a.home.open, home);
+            assert!(a.docs.batch.is_none() && a.docs.closing.is_none());
+            control(&mut a, &json!({"action": "close_all"}));
+            assert_eq!(a.docs.count(), 1);
+            assert!(active_is_blank(&a));
+            assert_eq!(a.home.open, home);
+        }
+    }
+
+    #[test]
+    fn last_document_and_repeated_untitled_closes_follow_home_preference() {
+        for home in [true, false] {
+            let mut a = app();
+            a.preferences.show_home_on_startup = home;
+            for _ in 0..3 {
+                close(&mut a, 0, false);
+                assert!(active_is_blank(&a));
+                assert_eq!(a.home.open, home);
+                assert_eq!(a.docs.count(), 1);
+                assert!(!a.quit_requested);
+            }
+            // The explicit Home tab is still available, and quitting is still quitting.
+            a.home.open = true;
+            assert!(active_is_blank(&a));
+            request_quit(&mut a);
+            assert!(a.quit_requested);
+        }
+    }
+
+    #[test]
+    fn saving_or_discarding_last_document_returns_to_preferred_screen() {
+        for home in [true, false] {
+            for answer in [Answer::Save, Answer::DontSave] {
+                let mut h = crate::scenario::Harness::new();
+                let a = &mut h.app;
+                a.preferences.show_home_on_startup = home;
+                a.home.open = false;
+                let path = h.dir.join("Close preference.solidcraft");
+                a.run("solid.box", json!({"length":4,"width":5,"height":6})).unwrap();
+                a.run("file.save_as", json!({"path":path.to_string_lossy()})).unwrap();
+                a.run("solid.sphere", json!({"diameter":2})).unwrap();
+                close(a, 0, false);
+                assert_eq!(a.docs.closing, Some(0));
+                assert!(!a.home.open);
+                answer_prompt(a, answer);
+                crate::save_job::tick(a, true);
+                assert!(active_is_blank(a));
+                assert_eq!(a.home.open, home);
+                assert_eq!(a.docs.count(), 1);
+                let saved = solidcraft_engine::io::read_design(&std::fs::read(path).unwrap()).unwrap();
+                assert_eq!(saved.features.len(), if matches!(answer, Answer::Save) { 2 } else { 1 });
+            }
+        }
+    }
+
+    #[test]
+    fn close_cancellation_and_cancelled_save_as_preserve_last_document() {
+        for home in [true, false] {
+            let mut a = app();
+            a.preferences.show_home_on_startup = home;
+            a.home.open = false;
+            a.run("solid.box", json!({"length":4,"width":5,"height":6})).unwrap();
+            let original = a.session.doc.to_json();
+            close(&mut a, 0, false);
+            answer_prompt(&mut a, Answer::Cancel);
+            assert_eq!(a.session.doc.to_json(), original);
+            assert!(a.session.is_dirty() && !a.home.open && a.docs.closing.is_none());
+            a.services.pick_save = Some(Box::new(|_: &str, _: &[&str]| Box::pin(std::future::ready(None))));
+            close(&mut a, 0, false);
+            answer_prompt(&mut a, Answer::Save);
+            crate::file_picker::tick(&mut a, &egui::Context::default());
+            assert!(!a.file_picker_busy());
+            assert_eq!(a.session.doc.to_json(), original);
+            assert!(a.session.is_dirty() && !a.home.open && a.docs.closing.is_none());
+        }
+    }
+
     /// A middle click on a tab closes it as its × does: at once when it has nothing to save,
     /// after asking when it has.
     #[test]
@@ -3254,6 +3558,7 @@ mod tests {
     #[test]
     fn the_views_of_a_design_follow_commands_keys_and_the_app() {
         let mut h = crate::scenario::Harness::new();
+        h.app.preferences.design_views_as_tabs = true;
         h.app.home.open = false;
         let call =
             |h: &mut crate::scenario::Harness, command: &str, params: Value| h.call("engine.execute", json!({"command": command, "params": params}));
@@ -3356,6 +3661,106 @@ mod tests {
         assert_eq!(h.app.docs.views.len(), 3);
     }
 
+    /// The owner's ask: by default a design tab shows no view switcher while the design has its one
+    /// view, and entering a sketch or Render stays in that view, so the tab looks as it did before
+    /// design views. The switcher shows once the user opens a second view, with "Show the design
+    /// view switcher" on (even for one view, and a sketch then opens its own view again), and views
+    /// as tabs keeps its sub-tabs and the tab's + for a new view.
+    #[test]
+    fn a_design_tab_shows_no_view_switcher_until_it_has_a_second_view() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.app.custom_titlebar = true;
+        h.call("ui.resize", json!({"width": 1280, "height": 720}));
+        let switcher = |h: &mut crate::scenario::Harness| {
+            h.frames(3);
+            crate::scenario::rect_of("tab:switcher").is_some()
+        };
+        assert!(!h.app.preferences.show_design_view_switcher && !h.app.preferences.design_views_as_tabs, "both off by default");
+        assert!(!switcher(&mut h), "one view: no switcher");
+        assert!(crate::scenario::handle_at("tab:design:0").is_some(), "the strip is drawn");
+        assert!(crate::scenario::handle_at("tab:view_new").is_none(), "nor the tab's + for a new view");
+        h.app.run("sketch.create", json!({"plane": "XY", "name": "Sketch1"})).unwrap();
+        h.frames(2);
+        assert!(h.app.session.active_sketch.is_some(), "the sketch is entered");
+        assert_eq!(h.app.docs.views.len(), 1, "in the view shown");
+        assert!(!switcher(&mut h), "still no switcher while sketching");
+        h.app.run("sketch.line", json!({"points": [[0, 0], [20, 10]]})).unwrap();
+        h.app.run("sketch.finish", json!({})).unwrap();
+        assert!(!switcher(&mut h), "nor after Finish Sketch");
+        // The preference brings the switcher back for one view, and sketches open views again.
+        h.app.preferences.show_design_view_switcher = true;
+        assert!(switcher(&mut h), "the preference shows it for one view");
+        h.app.run("sketch.create", json!({"plane": "XZ", "name": "Sketch2"})).unwrap();
+        h.frames(2);
+        assert_eq!(h.app.docs.views.len(), 2, "a sketch opens its own view with the switcher on");
+        h.app.run("sketch.finish", json!({})).unwrap();
+        h.frames(2);
+        h.app.preferences.show_design_view_switcher = false;
+        assert!(switcher(&mut h), "a second view shows it with the preference off");
+        // Views as tabs: sub-tabs, no switcher, whatever the preference (on a bar with room for them;
+        // a narrow one falls back to the switcher).
+        h.call("ui.resize", json!({"width": 1920, "height": 1080}));
+        h.app.preferences.design_views_as_tabs = true;
+        assert!(!switcher(&mut h), "views as tabs draws sub-tabs instead");
+        assert!(crate::scenario::rect_of("tab:view:0").is_some(), "the sub-tabs are drawn");
+        h.app.preferences.show_design_view_switcher = true;
+        assert!(!switcher(&mut h));
+        // Back to one view with both off: no switcher again; a view opened with Ctrl+T shows it.
+        h.app.preferences.design_views_as_tabs = false;
+        h.app.preferences.show_design_view_switcher = false;
+        let first = h.app.docs.views.views()[0].id;
+        view_close_others(&mut h.app, first);
+        assert!(!switcher(&mut h), "one view again");
+        h.app.preferences.design_views_as_tabs = true;
+        assert!(!switcher(&mut h));
+        assert!(crate::scenario::handle_at("tab:view_new").is_some(), "views as tabs keeps the tab's + for a new view");
+        h.app.preferences.design_views_as_tabs = false;
+        h.call("ui.key", json!({"key": "T", "cmd": true}));
+        assert_eq!(h.app.docs.views.len(), 2, "Ctrl+T still opens another view");
+        assert!(switcher(&mut h), "and the switcher shows");
+    }
+
+    /// #18264: cancelling a new sketch closes its view instead of leaving a tab that says the
+    /// sketch no longer exists; so does undoing a finished sketch away, and Reopen does not bring
+    /// either back. A finished sketch that stays keeps its view.
+    #[test]
+    fn a_view_closes_when_its_sketch_is_cancelled_or_undone_away() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        // Test change (#18264): editing a sketch opens a view of its own only while the strip shows
+        // views (the owner asked that it not by default), and this test is about closing such a
+        // view, so it runs with views as tabs on. With both off no sketch view opens at all, which
+        // `a_design_tab_shows_no_view_switcher_until_it_has_a_second_view` checks.
+        h.app.preferences.design_views_as_tabs = true;
+        let sketch_views = |h: &crate::scenario::Harness| h.app.docs.views.views().iter().filter(|view| view.kind == ViewKind::Sketch).count();
+        h.app.run("sketch.create", json!({"plane": "XY", "name": "Sketch1"})).unwrap();
+        h.frames(2);
+        h.app.run("sketch.line", json!({"points": [[0, 0], [20, 10]]})).unwrap();
+        h.app.run("sketch.finish", json!({})).unwrap();
+        h.frames(2);
+        assert_eq!(sketch_views(&h), 1, "the finished sketch keeps its view");
+        h.app.run("sketch.create", json!({"plane": "XY", "name": "Sketch2"})).unwrap();
+        h.frames(2);
+        assert_eq!(sketch_views(&h), 2);
+        h.app.run("sketch.cancel", json!({})).unwrap();
+        h.frames(2);
+        assert_eq!(sketch_views(&h), 1, "the cancelled sketch's view closes");
+        assert_eq!(h.app.docs.views.active().kind, ViewKind::Model);
+        assert!(!h.app.docs.views.can_reopen(), "Reopen has no dead view to bring back");
+        // Undo steps back into Sketch1 before it removes it; undo until the design has no sketch.
+        for _ in 0..8 {
+            if h.app.session.doc.features.iter().all(|feature| feature.name != "Sketch1") {
+                break;
+            }
+            h.app.run("edit.undo", json!({})).unwrap();
+            h.frames(2);
+        }
+        assert!(h.app.session.doc.features.iter().all(|feature| feature.name != "Sketch1"));
+        assert_eq!(sketch_views(&h), 0, "undoing Sketch1 away closes its view too");
+        assert_eq!(h.app.docs.views.len(), 1);
+    }
+
     /// With "Reopen a design's views" on, a saved design's views come back when it opens again:
     /// those that can still be shown, nothing from a stale memory, and nothing at all when the
     /// preference is off.
@@ -3365,6 +3770,9 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
         let mut h = crate::scenario::Harness::new();
         h.app.home.open = false;
+        // Test change: the owner asked that a sketch open no view of its own while the strip shows
+        // no views (the new default); with the switcher on it does, which is what this test needs.
+        h.app.preferences.show_design_view_switcher = true;
         let path = std::env::temp_dir().join("solidcraft-remembered.scd").to_string_lossy().into_owned();
         h.app.session.path = Some(path.clone());
         h.app.run("sketch.create", json!({"plane": "XY", "name": "Sketch1"})).unwrap();
@@ -3841,11 +4249,11 @@ mod tests {
     }
 
     /// Without the preference (the default), a switch cancels the dialog and the tool, as before
-    /// #9360; the design keeps its toolbar tab (`remember_toolbar_tab`, on by default).
+    /// #9360; with `remember_toolbar_tab` on (off by default) the design keeps its toolbar tab.
     #[test]
     fn a_tab_switch_cancels_the_dialog_and_tool_by_default() {
         let defaults = crate::prefs::Prefs::default();
-        assert!(!defaults.keep_work_on_tab_switch && defaults.remember_toolbar_tab);
+        assert!(!defaults.keep_work_on_tab_switch && !defaults.remember_toolbar_tab);
         let (mut a, _) = measuring_and_drawing(false, true);
         switch(&mut a, 0);
         assert!(a.dialog.is_none() && a.tool.is_none());
@@ -3878,6 +4286,7 @@ mod tests {
     #[test]
     fn each_design_remembers_its_own_toolbar_tab() {
         let mut a = app();
+        a.preferences.remember_toolbar_tab = true;
         a.run("solid.box", json!({"length": 1, "width": 1, "height": 1})).unwrap();
         a.ui.tab = "SURFACE".into();
         new_design_with_a_box(&mut a);

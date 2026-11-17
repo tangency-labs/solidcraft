@@ -29,6 +29,8 @@ browser.group                     the browser tree: order, groups and folding
 browser.move                      the browser tree: order, groups and folding
 browser.order                     the browser tree: order, groups and folding
 browser.rename_group              the browser tree: order, groups and folding
+browser.toggle_planes             the browser: crates/engine/src/cmd/browser.rs tests
+browser.toggle_reference          the browser: crates/engine/src/cmd/browser.rs tests
 browser.ungroup                   the browser tree: order, groups and folding
 canvas.calibrate                  reference images, and sketches traced from them (sketch only)
 canvas.decal                      reference images, and sketches traced from them (sketch only)
@@ -64,6 +66,8 @@ diagnostics.crash_reports         crash reports
 diagnostics.crash_reports.clear   crash reports
 diagnostics.crash_test            crash reports
 diagnostics.profile               timing: where a command's time goes
+diagnostics.report_issue          problem reports: tested in issue_report.rs
+diagnostics.report_issue_status   problem reports: tested in issue_report.rs
 diagnostics.validation            a setting: when the body check runs
 doc.open                          opening and recovering documents
 doc.recover                       opening and recovering documents
@@ -83,14 +87,20 @@ engine.describe                   the command registry itself
 explode.delete                    exploded views: display offsets
 explode.list                      exploded views: display offsets
 expr.evaluate                     expression evaluation
+file.copy                        file operations: tested in crates/engine/src/cmd/file_library.rs tests
+file.gerber_files                 a listing of a board's files: crates/engine/src/cmd/board_import_tests.rs
 file.gpg_keys                     GnuPG key listing: tested in crates/engine/src/gpg.rs tests
+file.import                       opens a file through an importer plugin: tested in crates/engine/src/plugin/tests.rs
 file.import_cache_clear           clears a cache of imported files
+file.insert_gerber                board import, tested in crates/engine/src/cmd/board_import_tests.rs
+file.move                        file operations: tested in crates/engine/src/cmd/file_library.rs tests
 file.open_in_easyprint            hands the file to another program
 file.save                         saving the design
 file.save_as                      saving the design
 file.save_mesh                    saving a display mesh
 file.send_to_slicer               hands the file to a slicer
 file.slicers                      a listing of slicers
+file.trash                       file guards and isolated trash: tested in crates/engine/src/cmd/file_library.rs tests
 file.verify                       signature checks: tested in crates/io/src/design/provenance.rs and the engine/UI signature tests
 frame.end_cap                     plates on member ends; tested in crates/engine/src/cmd/frame_tests.rs
 frame.profile.list                a listing of the profile library
@@ -168,12 +178,14 @@ parameters.move                   parameter bookkeeping; a value change that reb
 parameters.rename                 parameter bookkeeping; a value change that rebuilds is parameters.change, which cases use
 parameters.users                  parameter bookkeeping; a value change that rebuilds is parameters.change, which cases use
 parts.library                     a listing of the parts library
+plugin.check                      plugins: checks a package's manifest and component without running it, no geometry; crates/engine/src/plugin/tests.rs
 plugin.inspect                    plugins: a package's manifest and entries, no geometry; crates/engine/src/plugin/tests.rs
 plugin.install                    plugins: unpacks a plugin .zip into the plugins folder, no geometry; crates/engine/src/plugin/tests.rs
 plugin.list                       plugins: the installed plugins and their declared inputs; crates/engine/src/plugin/tests.rs
 plugin.remove                     plugins: removes an installed plugin and its grants, no geometry; crates/engine/src/plugin/tests.rs
 plugin.run                        plugins: runs a sandboxed plugin's entry through the engine's own commands; crates/engine/src/plugin/tests.rs
 pointcloud.delete                 point clouds: points drawn, never a body
+pointcloud.deviation              point clouds: reads distances, changes nothing; tested in crates/engine/src/cmd/point_cloud_deviation.rs
 pointcloud.edit                   point clouds: points drawn, never a body
 pointcloud.insert                 point clouds: points drawn, never a body
 pointcloud.list                   point clouds: points drawn, never a body
@@ -243,10 +255,12 @@ render.status                     rendering: images, cameras, stages
 render.surface.import             rendering image resources; crates/engine/src/cmd/render/library_tests.rs::imported_wood_maps_reopen_without_source_and_keep_geometry_history_and_resource_users
 render.texture.list               rendering image resources; crates/engine/src/cmd/render/library_tests.rs::imported_wood_maps_reopen_without_source_and_keep_geometry_history_and_resource_users
 render.texture.remove             rendering image resources; crates/engine/src/cmd/render/library_tests.rs::imported_wood_maps_reopen_without_source_and_keep_geometry_history_and_resource_users
+select.all                        the selection
 select.clear                      the selection
 select.filter                     the selection
 select.same_look                  the selection
 select.set                        the selection
+select.sharp_edges                the selection; crates/engine/src/cmd/edit_tests.rs
 selection.delete                  deletes what is selected through the commands that own each kind
 selection.get                     reads the selection, read only; crates/engine/src/cmd/edit_tests.rs
 settings.profile.apply            settings profiles: preferences saved, applied and shared
@@ -273,12 +287,14 @@ sketch.circle.three_tangent       2D sketch only (the sketch solver and engine t
 sketch.circle.two_point           2D sketch only (the sketch solver and engine tests); no kernel operation
 sketch.circle.two_tangent         2D sketch only (the sketch solver and engine tests); no kernel operation
 sketch.constrainer                2D sketch only (the sketch solver and engine tests); no kernel operation
+sketch.constraint.along_axis      3D sketch solve only (the 3D solver and engine tests, sketch_3d_frame_tests.rs); no kernel operation
 sketch.constraint.coincident      2D sketch only (the sketch solver and engine tests); no kernel operation
 sketch.constraint.collinear       2D sketch only (the sketch solver and engine tests); no kernel operation
 sketch.constraint.concentric      2D sketch only (the sketch solver and engine tests); no kernel operation
 sketch.constraint.curvature       2D sketch only (the sketch solver and engine tests); no kernel operation
 sketch.constraint.equal           2D sketch only (the sketch solver and engine tests); no kernel operation
 sketch.constraint.midpoint        2D sketch only (the sketch solver and engine tests); no kernel operation
+sketch.constraint.on_plane        3D sketch solve only (the 3D solver and engine tests, sketch_3d_frame_tests.rs); no kernel operation
 sketch.constraint.parallel        2D sketch only (the sketch solver and engine tests); no kernel operation
 sketch.constraint.perpendicular   2D sketch only (the sketch solver and engine tests); no kernel operation
 sketch.constraint.polygon         2D sketch only (the sketch solver and engine tests); no kernel operation
@@ -364,6 +380,7 @@ timeline.play                     plays the history back in the view: no new geo
 timeline.rename                   a feature name
 timeline.rename_group             a group name
 ui.assistant                      the view: camera, layout, display
+ui.dialog_ok                      the view: runs OK of the open feature dialog; tested in crates/engine/src/cmd/edit_tests.rs and crates/ui-egui/src/dialogs.rs
 ui.palette                        the view: the command search; tested in crates/ui-egui/src/keymap.rs
 ui.toggle_visibility              the view: hides what the app has selected; tested in crates/ui-egui/src/keymap.rs
 view.ambient_occlusion            the view: camera, layout, display
@@ -390,6 +407,7 @@ view.next_tab                     the view: camera, layout, display
 view.normal_to                    the view: camera, layout, display
 view.origin_axes_across_view       display-only preference: crates/engine/src/cmd/view_navigation.rs and crates/ui-egui/src/view_home_tests.rs
 view.perspective                  the view: camera, layout, display
+view.pick                         read-only ray pick, no geometry made: tested in crates/engine/src/cmd/view_pick.rs and solidcore/crates/solidcore-ops/tests/measure.rs
 view.previous_tab                 the view: camera, layout, display
 view.rename                       the view: camera, layout, display
 view.render_browser               the view: camera, layout, display
