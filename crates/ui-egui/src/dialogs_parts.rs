@@ -25,22 +25,19 @@ pub struct Family {
     /// Size names and their table rows.
     pub sizes: Vec<(String, Value)>,
     pub lengths: Option<Vec<f64>>,
-    /// It has a metric thread, which the Thread type row acts on.
+    /// It has a metric thread, which the Modeled thread checkbox acts on.
     pub threaded: bool,
 }
 
-/// How a thread is made: the command's word and the list's label.
-pub(crate) const THREADS: [(&str, &str); 3] = [("cosmetic", "Cosmetic thread"), ("modeled", "Modeled thread"), ("none", "No thread")];
-
-/// The Thread type row, for a family with a metric thread; `thread` indexes [`THREADS`].
-pub(crate) fn thread_row(ui: &mut egui::Ui, key: &str, f: &Family, thread: &mut usize) {
+/// The Modeled thread checkbox, for a family with a metric thread: ticked, the thread is cut
+/// into the body; unticked, it is cosmetic.
+pub(crate) fn thread_row(ui: &mut egui::Ui, f: &Family, modeled: &mut bool) {
     if !f.threaded {
-        *thread = 0;
+        *modeled = false;
         return;
     }
-    *thread = (*thread).min(THREADS.len() - 1);
-    crate::ui_kit::choice_row(ui, "Thread type", key, thread, &THREADS.map(|t| t.1));
-    if *thread == 1 {
+    form_row(ui, "Modeled thread", |ui| crate::dialogs::check(ui, modeled));
+    if *modeled {
         ui.vertical(|ui| {
             crate::ui_kit::text(ui, solidcraft_ui_text::tr("parts.thread.modeled_hint"), crate::ui_kit::Text::Note("parts_modeled"));
         });
@@ -99,8 +96,8 @@ pub struct Pt {
     pub picture: Option<(usize, usize, Option<usize>)>,
     /// The library, read once.
     pub lib: Option<Vec<Family>>,
-    /// How the part's thread is made: an index into [`THREADS`].
-    pub thread: usize,
+    /// The part's thread is cut into its body, not cosmetic.
+    pub modeled: bool,
 }
 
 /// The dialog for Insert Part.
@@ -109,7 +106,7 @@ pub fn start(_app: &SolveApp, id: &str) -> Option<(Kind, Vec<SelInput>)> {
     // that shows it (#8735), which did nothing before.
     matches!(id, "parts.fastener" | "parts.insert" | "parts.library").then(|| {
         (
-            Kind::Part(Pt { family: 0, size: 0, length: None, name: String::new(), picture: None, lib: None, thread: 0 }),
+            Kind::Part(Pt { family: 0, size: 0, length: None, name: String::new(), picture: None, lib: None, modeled: false }),
             vec![SelInput::new("parts.holes", FACES | EDGES, true)],
         )
     })
@@ -127,8 +124,8 @@ pub fn insert_params(lib: &[Family], k: &Pt, holes: &[Sel]) -> Result<Value, Str
     if let Some(l) = k.length.and_then(|i| f.lengths.as_ref().and_then(|ls| ls.get(i))) {
         p["length"] = json!(l);
     }
-    if let Some(t) = THREADS.get(k.thread).filter(|_| f.threaded && k.thread > 0) {
-        p["thread"] = json!(t.0);
+    if f.threaded && k.modeled {
+        p["thread"] = json!("modeled");
     }
     let at: Vec<Value> = holes
         .iter()
@@ -255,7 +252,7 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Pt, inputs: &[SelInpu
             k.length = Some(i);
         });
     }
-    thread_row(ui, "pt_thread", f, &mut k.thread);
+    thread_row(ui, f, &mut k.modeled);
     text_row(ui, "Name", &mut k.name, solidcraft_ui_text::tr("parts.automatic_name"));
     // The part, and its table values.
     let key = (k.family, k.size, k.length);
@@ -400,7 +397,7 @@ mod tests {
     #[test]
     fn insert_params_for_picks() {
         let l = lib();
-        let k = Pt { family: 0, size: 1, length: Some(2), name: String::new(), picture: None, lib: None, thread: 0 };
+        let k = Pt { family: 0, size: 1, length: Some(2), name: String::new(), picture: None, lib: None, modeled: false };
         let hole = Sel::Face { body: "Body1".into(), index: 3, point: Vec3::new(5.0, 0.0, 10.0) };
         let p = insert_params(&l, &k, std::slice::from_ref(&hole)).unwrap();
         assert_eq!(p, json!({"family": "socket_head_cap_screw", "size": "M6", "length": 20.0, "at": [5.0, 0.0, 10.0]}));
@@ -408,7 +405,7 @@ mod tests {
         let p = insert_params(&l, &k, &[hole, rim]).unwrap();
         assert_eq!(p["at"], json!([[5.0, 0.0, 10.0], [25.0, 0.0, 10.0]]));
         assert!(p.get("point").is_none());
-        let k = Pt { family: 1, size: 0, length: None, name: "Front bearing".into(), picture: None, lib: None, thread: 0 };
+        let k = Pt { family: 1, size: 0, length: None, name: "Front bearing".into(), picture: None, lib: None, modeled: false };
         let p = insert_params(&l, &k, &[]).unwrap();
         assert_eq!(p["point"], json!([0.0, 0.0, 0.0]));
         assert_eq!(p["name"], "Front bearing");
@@ -416,10 +413,10 @@ mod tests {
         assert!(insert_params(&[], &k, &[]).is_err());
     }
 
-    /// The Thread type row is there for a part with a metric thread, and what it picks reaches
-    /// the command; a cosmetic thread, the default, sends nothing, as before.
+    /// The Modeled thread checkbox is there for a part with a metric thread, and ticking it
+    /// reaches the command; a cosmetic thread, the default, sends nothing, as before.
     #[test]
-    fn the_thread_type_reaches_the_command() {
+    fn the_modeled_thread_checkbox_reaches_the_command() {
         let chosen = |h: &crate::scenario::Harness| {
             let Kind::Part(k) = &h.app.dialog.as_ref().unwrap().kind else { panic!("not Insert Part") };
             commands(&h.app, k, &[]).unwrap()[0].1.clone()
@@ -429,14 +426,16 @@ mod tests {
         h.app.start("parts.insert");
         h.frames(3);
         assert!(chosen(&h).get("thread").is_none());
-        h.step(&json!({"click":{"handle":"dialog:Thread type"}})).unwrap();
-        h.step(&json!({"click":{"handle":"dialog:Thread type:Modeled thread"}})).unwrap();
+        h.step(&json!({"click":{"handle":"dialog:Modeled thread"}})).unwrap();
         h.frames(2);
         assert_eq!(chosen(&h)["thread"], "modeled");
-        // A washer has no thread: no row, and nothing sent.
+        h.step(&json!({"click":{"handle":"dialog:Modeled thread"}})).unwrap();
+        h.frames(2);
+        assert!(chosen(&h).get("thread").is_none(), "unticked, the thread is cosmetic again");
+        // A washer has no thread: no checkbox, and nothing sent.
         let l = families(&solidcraft_engine::Session::default().execute("parts.library", &json!({})).unwrap());
         let washer = l.iter().position(|f| f.id == "washer").unwrap();
-        let k = Pt { family: washer, size: 0, length: None, name: String::new(), picture: None, lib: None, thread: 1 };
+        let k = Pt { family: washer, size: 0, length: None, name: String::new(), picture: None, lib: None, modeled: true };
         assert!(insert_params(&l, &k, &[]).unwrap().get("thread").is_none());
     }
 
