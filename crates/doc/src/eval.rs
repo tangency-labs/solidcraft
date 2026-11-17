@@ -816,6 +816,11 @@ impl ModelState {
         self.kept_separate.get(&feature).copied()
     }
 
+    /// What Tab and Slot `feature` did: its joints (cut or why skipped) and each plate's tool faces.
+    pub fn tab_slot_report(&self, feature: u64) -> Option<&tab_slot::TabSlotReport> {
+        self.tab_slots.get(&feature)
+    }
+
     /// Each edge fillet `feature` tapered (a point on it) with the radius spline it was given.
     pub fn tapered(&self, feature: u64) -> Option<&[(Vec3, kernel::Taper)]> {
         self.tapered.get(&feature).map(Vec::as_slice)
@@ -921,6 +926,8 @@ pub struct ModelState {
     /// How the pieces a join split off into bodies of their own touched the others (by feature
     /// id), for its notice.
     kept_separate: BTreeMap<u64, KeptSeparate>,
+    /// What each Tab and Slot did (by feature id), for its result.
+    tab_slots: BTreeMap<u64, tab_slot::TabSlotReport>,
     /// For a feature saved before format 14 that split a body, a digest of the later features'
     /// picks its pieces were named by (by feature id, see [`crate::lineage::order_legacy_lumps`]):
     /// the state stands for the feature only while those picks are the same.
@@ -2560,6 +2567,8 @@ struct Change {
     tapered: Option<Vec<(Vec3, kernel::Taper)>>,
     /// A join's touching pieces it kept as bodies of their own.
     kept_separate: Option<KeptSeparate>,
+    /// A Tab and Slot's joints and tool faces.
+    tab_slot: Option<tab_slot::TabSlotReport>,
     /// Where the feature found its named faces.
     named_faces: Option<Vec<Vec3>>,
 }
@@ -2607,6 +2616,7 @@ impl ModelState {
             && others_same(&self.fitted, &before.fitted, feature)
             && self.tapered.keys().filter(|k| **k != feature).eq(before.tapered.keys().filter(|k| **k != feature))
             && others_same(&self.kept_separate, &before.kept_separate, feature)
+            && others_same(&self.tab_slots, &before.tab_slots, feature)
             && others_same(&self.named_faces, &before.named_faces, feature)
             && serde_json::to_string(&self.threads).ok() == serde_json::to_string(&before.threads).ok();
         if !same_rest {
@@ -2638,6 +2648,7 @@ impl ModelState {
             fitted: self.fitted.get(&feature).cloned(),
             tapered: self.tapered.get(&feature).cloned(),
             kept_separate: self.kept_separate.get(&feature).copied(),
+            tab_slot: self.tab_slots.get(&feature).cloned(),
             named_faces: self.named_faces.get(&feature).cloned(),
         })
     }
@@ -2674,6 +2685,10 @@ impl ModelState {
         next.kept_separate.remove(&feature);
         if let Some(k) = change.kept_separate {
             next.kept_separate.insert(feature, k);
+        }
+        next.tab_slots.remove(&feature);
+        if let Some(r) = &change.tab_slot {
+            next.tab_slots.insert(feature, r.clone());
         }
         next.named_faces.remove(&feature);
         if let Some(p) = &change.named_faces {
@@ -9552,12 +9567,12 @@ mod more;
 pub use model_cache::SavedModel;
 #[path = "eval_cell_grid.rs"]
 pub mod cell_grid;
-#[path = "eval_tab_slot.rs"]
-pub(crate) mod tab_slot;
 #[path = "eval_frame.rs"]
 pub(crate) mod frame_member;
 #[path = "eval_surface.rs"]
 mod surface;
+#[path = "eval_tab_slot.rs"]
+pub(crate) mod tab_slot;
 #[path = "eval_thread.rs"]
 mod thread;
 use thread::thread_on;
@@ -10316,7 +10331,11 @@ fn eval_feature_kind(
             }
             Ok(())
         }
-        FeatureKind::TabSlot { .. } => tab_slot::apply(vals, &f.kind, st, warning),
+        FeatureKind::TabSlot { .. } => {
+            let report = tab_slot::apply(vals, &f.kind, st, warning)?;
+            st.tab_slots.insert(f.id, report);
+            Ok(())
+        }
         FeatureKind::Hole { thread, thread_depth, thread_class, diameter, hand, modeled, ease_out, depth, to, .. } => {
             if st.bodies.is_empty() {
                 return Err(empty_boolean_targets(doc, st, f, &[], f.participants.is_empty()));

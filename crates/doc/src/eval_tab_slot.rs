@@ -128,11 +128,32 @@ fn check_tool_faces(per_plate: &[usize], names: &[String], max: usize, slow: usi
     }
 }
 
+/// One plate pair of a Tab and Slot feature with a joint (design 5.7), for the feature's result.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TabSlotJoint {
+    /// The tab plate's body.
+    pub tab: String,
+    /// The slot plate's body.
+    pub slot: String,
+    /// Why the joint was not cut (`None`: cut).
+    pub skipped: Option<String>,
+}
+
+/// What a Tab and Slot feature did (design 5.7): its joints in pick order and the tool faces each
+/// plate's boolean took (by body, in pick order).
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct TabSlotReport {
+    /// The plate pairs with a joint, in the order they were cut.
+    pub joints: Vec<TabSlotJoint>,
+    /// Each plate's tool faces over the made joints.
+    pub tool_faces: Vec<(String, usize)>,
+}
+
 /// The feature `k` applied to `st` (design 5.7): every tab plate against every slot plate, the
 /// pairs with a joint in pick order, each made joint cut in that order (a plate in several joints
 /// takes the previous joint's result), the plates replaced in place. Pairs that do not meet are
-/// passed by; a joint skipped, or a pair the cut refuses, is named in `warning`.
-pub(crate) fn apply(vals: &BTreeMap<String, Value>, k: &FeatureKind, st: &mut ModelState, warning: &mut Option<String>) -> Result<()> {
+/// passed by; a joint skipped, or a pair the cut refuses, is named in `warning` and the report.
+pub(crate) fn apply(vals: &BTreeMap<String, Value>, k: &FeatureKind, st: &mut ModelState, warning: &mut Option<String>) -> Result<TabSlotReport> {
     let FeatureKind::TabSlot { tab_plates, slot_plates, .. } = k else {
         return Err(DocError::Invalid("not a tab and slot".into()));
     };
@@ -170,24 +191,32 @@ pub(crate) fn apply(vals: &BTreeMap<String, Value>, k: &FeatureKind, st: &mut Mo
     }
     let Some(first) = specs.first().copied() else {
         append_warning(warning, "tab and slot: no tab plate stands on a slot plate".into());
-        return Ok(());
+        return Ok(TabSlotReport::default());
     };
     let refs: Vec<&Body> = plates.iter().collect();
     let (skips, tool_faces) = kernel_ts::joints(&refs, &list, first, JOINT_TOL)?;
     check_tool_faces(&tool_faces, &names, kernel_ts::MAX_TOOL_FACES, kernel_ts::SLOW_TOOL_FACES, warning)?;
+    let mut report = TabSlotReport { joints: Vec::new(), tool_faces: names.iter().cloned().zip(tool_faces).collect() };
     for (j, ((ti, si, p), spec)) in list.iter().zip(&specs).enumerate() {
-        if let Some(Some(skip)) = skips.get(j) {
-            append_warning(warning, format!("tab and slot: {} on {} is skipped: {skip:?}", names[*ti], names[*si]));
-            continue;
-        }
-        let Some((tab, slot)) = plates.get(*ti).zip(plates.get(*si)) else { continue };
-        match kernel_ts::cut(tab, slot, *p, *spec, JOINT_TOL)? {
-            Ok(c) => {
-                plates[*ti] = c.tab_plate;
-                plates[*si] = c.slot_plate;
+        let (tab_name, slot_name) = (names[*ti].clone(), names[*si].clone());
+        let skipped = if let Some(Some(skip)) = skips.get(j) {
+            Some(format!("{skip:?}"))
+        } else if let Some((tab, slot)) = plates.get(*ti).zip(plates.get(*si)) {
+            match kernel_ts::cut(tab, slot, *p, *spec, JOINT_TOL)? {
+                Ok(c) => {
+                    plates[*ti] = c.tab_plate;
+                    plates[*si] = c.slot_plate;
+                    None
+                }
+                Err(skip) => Some(format!("{skip:?}")),
             }
-            Err(skip) => append_warning(warning, format!("tab and slot: {} on {} has no joint: {skip:?}", names[*ti], names[*si])),
+        } else {
+            continue;
+        };
+        if let Some(why) = &skipped {
+            append_warning(warning, format!("tab and slot: {tab_name} on {slot_name} is skipped: {why}"));
         }
+        report.joints.push(TabSlotJoint { tab: tab_name, slot: slot_name, skipped });
     }
     for (name, made) in names.iter().zip(plates) {
         if let Some(mb) = st.bodies.iter_mut().find(|b| &b.name == name)
@@ -196,7 +225,7 @@ pub(crate) fn apply(vals: &BTreeMap<String, Value>, k: &FeatureKind, st: &mut Mo
             *mb = mb.remade(Traced::unnamed(made));
         }
     }
-    Ok(())
+    Ok(report)
 }
 
 #[cfg(test)]
@@ -293,5 +322,26 @@ mod tests {
         let err = check_tool_faces(&[2_150, 12], &names, 2_000, 800, &mut warning).unwrap_err().to_string();
         assert!(err.contains("Bottom") && err.contains("2150") && err.contains("too_many_tool_faces"), "{err}");
         assert!(warning.is_none(), "{warning:?}");
+    }
+
+    /// Fixture F through the eval: the report names the one joint as cut and counts tool faces on
+    /// both plates, in pick order (tab plate first).
+    #[test]
+    fn tab_slot_apply_reports_the_joint_and_tool_faces_on_fixture_f() {
+        use solidcore_record::Vec3;
+        use solidcraft_kernel as kernel;
+        let mut st = ModelState::default();
+        let bottom = kernel::box_solid(Vec3::new(0.0, 0.0, 0.0), Vec3::new(160.0, 100.0, 6.0)).unwrap();
+        let wall = kernel::box_solid(Vec3::new(20.0, 30.0, 6.0), Vec3::new(140.0, 36.0, 66.0)).unwrap();
+        st.bodies.push(super::super::ModelBody::new("Bottom".into(), bottom, 0));
+        st.bodies.push(super::super::ModelBody::new("Wall".into(), wall, 0));
+        let k = kind(serde_json::json!({"clearance": "0.1", "count": "3", "tab_width": "20", "end_distance": "10"}));
+        let mut warning = None;
+        let report = apply(&BTreeMap::new(), &k, &mut st, &mut warning).unwrap();
+        assert_eq!(report.joints.len(), 1, "{report:?}");
+        let joint = &report.joints[0];
+        assert_eq!((joint.tab.as_str(), joint.slot.as_str(), joint.skipped.as_deref()), ("Wall", "Bottom", None));
+        assert_eq!(report.tool_faces.len(), 2, "{report:?}");
+        assert!(report.tool_faces.iter().all(|(_, n)| *n > 0), "{report:?}");
     }
 }
