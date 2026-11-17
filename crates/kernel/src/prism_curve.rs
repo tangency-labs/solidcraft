@@ -483,15 +483,11 @@ fn read(run: &Run, plane: &Plane, tol: f64, work: &mut usize, each_span: bool, w
         return None;
     }
     if a.dist(b) > tol && spans.iter().all(|s| line_span(s, a, b, tol, error, work).is_some()) {
-        // Within `tol` of its chord the piece is that line, unless it is rational (a circle's or
-        // a conic's) and its control points leave the chord by more than the zone tolerance an
-        // edge keeps to its face: the piece lies in their hull, so only then can the line lie
-        // farther off it. Read as the line, a few hundredths of a millimetre of a circle made a
-        // flat prism side 1e-5 mm off its cylinder (#17707). Such a piece is the arc it is proved
-        // on within `tol`; one that is no arc stays the line.
-        let rational = spans.iter().flatten().any(|p| (p[2] - 1.).abs() > 1e-12);
+        // Within `tol` of its chord the piece is that line, unless the kernel says it is read as
+        // the arc it is proved on within `tol` first (a circle's or a conic's piece bending off
+        // its chord by more than the zone tolerance, #17707); one that is no arc stays the line.
         let zone = solidcore_ops::sweep::zone_tolerance().unwrap_or(f64::INFINITY);
-        let bends = rational && off_chord(&spans.iter().flatten().map(|p| point(*p)).collect::<Vec<_>>()) > zone;
+        let bends = solidcore_ops::prism::arc_before_line(&spans, zone);
         let proved = if bends { arc(&eval, (ts, te), &spans, plane, a, b, tol, error, work, whole) } else { None };
         return Some(proved.unwrap_or_else(|| vec![Seg2::Line { a, b }]));
     }
