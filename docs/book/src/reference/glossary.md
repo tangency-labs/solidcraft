@@ -353,7 +353,7 @@ With **Object** the model goes the way the cap is pushed, tilted or twisted. Wit
 the camera goes that way, so the model goes the other way along every axis.
 
 - **In SolidCraft:** the `space_mouse_motion` preference (`object`, `target_camera`);
-  Preferences › Navigation › 3D mouse › Motion model.
+  Preferences › Input › 3D mouse › Motion model.
 - **Don't use:** navigation mode (the mouse mappings), camera mode.
 - **Elsewhere:** object mode, camera mode, target camera mode, navigation mode.
 - **For translators:** how the 3D mouse moves the view, not a 3D model and not a motion study.
