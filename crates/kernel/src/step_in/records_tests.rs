@@ -27,7 +27,14 @@ fn kept(text: &str) -> ImportRecords {
             sheet: s.sheet,
         })
         .collect();
-    let tree = vec![StepNode { name: "part".into(), transform: IDENTITY, bodies: (0..bodies.len()).collect(), children: Vec::new() }];
+    let tree = vec![StepNode {
+        name: "part".into(),
+        transform: IDENTITY,
+        bodies: (0..bodies.len()).collect(),
+        items: Vec::new(),
+        left_out: Vec::new(),
+        children: Vec::new(),
+    }];
     ImportRecords { bodies, tree, warnings: Vec::new(), system: String::new() }
 }
 

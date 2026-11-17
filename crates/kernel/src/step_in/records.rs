@@ -13,7 +13,7 @@ use serde::{Deserialize, Serialize};
 use solidcore_record::brep::Brep;
 
 use super::parallel::{Part, placed, record_part};
-use super::{ImportIssue, ImportReport, ImportedBody, IssueKind, M4, StepImport, StepNode};
+use super::{ImportIssue, ImportReport, ImportedBody, IssueKind, LeftOut, M4, StepImport, StepNode};
 use crate::{KernelError, Result};
 
 /// An import kept as records.
@@ -139,8 +139,8 @@ pub fn records_import(records: &ImportRecords) -> Result<StepImport> {
         });
     }
     Ok(StepImport {
+        tree: renumbered(&records.tree, &kept, &bodies),
         bodies,
-        tree: renumbered(&records.tree, &kept),
         warnings,
         report,
         schema: String::new(),
@@ -150,15 +150,26 @@ pub fn records_import(records: &ImportRecords) -> Result<StepImport> {
     })
 }
 
-/// `nodes` with each body index `k` the made body `kept[k]` is, and the bodies left out dropped.
-fn renumbered(nodes: &[StepNode], kept: &[Option<usize>]) -> Vec<StepNode> {
+/// `nodes` with each body index `k` the made body `kept[k]` is, with that body's file item, and
+/// the bodies left out at their place among the node's bodies, as a STEP import's tree keeps a
+/// solid it could not read: a stored body name stays with its body. An index past the records
+/// names no body and is dropped.
+fn renumbered(nodes: &[StepNode], kept: &[Option<usize>], made: &[ImportedBody]) -> Vec<StepNode> {
     nodes
         .iter()
-        .map(|n| StepNode {
-            name: n.name.clone(),
-            transform: n.transform,
-            bodies: n.bodies.iter().filter_map(|b| kept.get(*b).copied().flatten()).collect(),
-            children: renumbered(&n.children, kept),
+        .map(|n| {
+            let (mut bodies, mut items, mut left_out) = (Vec::new(), Vec::new(), Vec::new());
+            for (at, k) in n.bodies.iter().enumerate() {
+                match kept.get(*k) {
+                    Some(Some(b)) => {
+                        bodies.push(*b);
+                        items.push(made.get(*b).map_or(*k as u64, |b| b.source_item));
+                    }
+                    Some(None) => left_out.push(LeftOut { at, item: *k as u64 }),
+                    None => {}
+                }
+            }
+            StepNode { name: n.name.clone(), transform: n.transform, bodies, items, left_out, children: renumbered(&n.children, kept, made) }
         })
         .collect()
 }

@@ -1645,6 +1645,8 @@ mod tests {
             name: "block".into(),
             transform: [[1., 0., 0., 0.], [0., 1., 0., 0.], [0., 0., 1., 0.], [0., 0., 0., 1.]],
             bodies: vec![0],
+            items: Vec::new(),
+            left_out: Vec::new(),
             children: Vec::new(),
         }];
         let records = Arc::new(solidcraft_kernel::ImportRecords { bodies: vec![body], tree, warnings: Vec::new(), system: "FreeCAD".into() });
