@@ -384,7 +384,7 @@ fn parallel_body_preparation_reports_errors_in_place_and_preserves_placement() {
     // The second item is not in the file.
     let jobs: Vec<_> = [solid, 999_999_999, solid, solid]
         .into_iter()
-        .map(|item| parallel::Job { source: parallel::Source::Item { item, units }, placement, check_mesh: true, check: true })
+        .map(|item| parallel::Job { source: parallel::Source::Item { item, units }, placement, check_mesh: true })
         .collect();
     let serial = parallel::bodies(&ex, &jobs, 1);
     let threaded = parallel::bodies(&ex, &jobs, 4);
@@ -940,7 +940,7 @@ fn a_placement_that_scales_a_part_is_checked_as_placed() {
     assert_eq!(rigid.bodies.len(), 2, "{:?}", rigid.warnings);
     let own = crate::validation::failing_check(&rigid.bodies[0].body).unwrap().expect("the lifted block fails the check");
     assert_eq!(crate::validation::failing_check(&rigid.bodies[1].body).unwrap().as_ref(), Some(&own), "moved, it fails the same tests");
-    assert_eq!(checked(&rigid.warnings), [format!("solid 'Bloco': needs repair before it can be modelled: SMLib's check fails it: {own}")]);
+    assert_eq!(checked(&rigid.warnings), [format!("solid 'Bloco': needs repair before it can be modelled: SMLib's check fails it: {own} (×2)")]);
     let scaled = step_import(&with_scaled_instance(&fails, (10.0, 10.0, 10.0))).unwrap();
     assert_eq!(scaled.bodies.len(), 2, "{:?}", scaled.warnings);
     assert!((z_extent(&scaled.bodies[1].body) - 100.0).abs() < 1e-9);
@@ -950,32 +950,87 @@ fn a_placement_that_scales_a_part_is_checked_as_placed() {
     assert_eq!(checked(&scaled.warnings), want);
 }
 
+/// A check job for `body`, as the reader makes one (part `name`, `times` instances).
+fn check_job(body: &Body, name: &str, times: usize) -> checks::Job {
+    checks::Job { item: 101, part: name.into(), what: format!("solid '{name}'"), body: body.clone(), times }
+}
+
+/// The one body of the lifted block (failing SMLib's check when `fails`) and of the block as
+/// written (passing it).
+fn checked_blocks() -> (Body, Body) {
+    let fails = step_import(&lifted_bezier_block(2e-3)).unwrap().bodies.remove(0).body;
+    let passes = step_import(&lifted_bezier_block(0.0)).unwrap().bodies.remove(0).body;
+    (fails, passes)
+}
+
 /// #17689 review: the check at import runs on a copy it owns, so the token over the import's
-/// work stops it, and the import says it was stopped (the import then fails as cancelled). A
-/// token stopped before the import stops SMLib's read of the part first, so the check is stopped
-/// here on a part already made, as the workers do.
+/// work stops it, and the import says it was stopped (the import then fails as cancelled).
 #[test]
 fn a_stopped_import_stops_in_the_check() {
-    let text = lifted_bezier_block(3e-3);
-    let imp = step_import(&text).unwrap();
-    assert_eq!(imp.bodies.len(), 1);
-    let body = imp.bodies[0].body.clone();
-    let part = std::sync::Arc::new(parallel::Part { file_faces: 6, face_origin: vec![0; body.face_count()], body, closed: true, refused: None });
-    let ex = p21::parse(&text).unwrap();
-    let jobs: Vec<_> = [IDENTITY, translation([10.0, 0.0, 0.0])]
-        .into_iter()
-        .map(|placement| parallel::Job { source: parallel::Source::Oriented(part.clone()), placement, check_mesh: false, check: true })
-        .collect();
-    let checks = |made: Vec<parallel::Prepared>| -> Vec<parallel::PlacedCheck> {
-        made.into_iter().map(|m| m.ok().and_then(|m| m.check).expect("placed, with its check")).collect()
-    };
+    let (fails, _) = checked_blocks();
+    let jobs = || vec![check_job(&fails, "Bloco", 1), check_job(&fails, "Bloco", 1)];
     let stop = solidcraft_smlib::stop::Stop::new();
     stop.stop();
-    for c in checks(stop.within(|| parallel::bodies(&ex, &jobs, 1))) {
-        assert!(matches!(c, parallel::PlacedCheck::Stopped), "the check stops with the work");
+    assert!(stop.within(|| jobs().iter().all(|j| matches!(checks::check(j), checks::Outcome::Stopped))), "the check stops with the work");
+    assert_eq!(ImportChecks::start(jobs(), 2, Some(stop)).wait(), None, "checks stopped by the caller's token say so");
+    assert!(jobs().iter().all(|j| matches!(checks::check(j), checks::Outcome::NeedsRepair(_))), "unstopped, the lifted block fails the check");
+    let found = ImportChecks::start(jobs(), 2, None).wait().expect("unstopped, they end");
+    assert_eq!(found.len(), 2);
+}
+
+/// #17697 review: a part is checked once however often it is placed rigidly, and the warning
+/// counts every placement of it.
+#[test]
+fn a_part_placed_twice_rigidly_is_checked_once_and_counted_twice() {
+    let text = with_scaled_instance(&lifted_bezier_block(2e-3), (1.0, 1.0, 1.0));
+    for workers in [1, 4] {
+        let mut reading = StepReading::with_workers(&text, workers).unwrap();
+        while reading.rd.convert_next(reading.single) {}
+        assert_eq!(reading.rd.check_jobs.len(), 1, "one check for the part's two rigid placements");
+        assert_eq!(reading.rd.check_jobs[0].times, 2);
+        let imp = reading.finish().unwrap();
+        assert_eq!(imp.bodies.len(), 2, "{:?}", imp.warnings);
+        let repair: Vec<_> = imp.report.issues.iter().filter(|i| i.kind == IssueKind::NeedsRepair).collect();
+        assert_eq!(repair.len(), 1, "{:?}", imp.warnings);
+        assert_eq!(repair[0].times, 2, "both placements are flagged");
+        assert!(repair[0].detail.ends_with(" (×2)"), "{}", repair[0].detail);
+        assert!(imp.warnings.contains(&repair[0].detail));
     }
-    for c in checks(parallel::bodies(&ex, &jobs, 1)) {
-        assert!(matches!(c, parallel::PlacedCheck::Fails(_)), "unstopped, the lifted block fails the check");
+}
+
+/// #17697 review: the import returns before SMLib's check of its parts ends; what the check
+/// finds is in the report once every check has ended, the same as a waiting import says, and a
+/// window is told of it once.
+#[test]
+fn the_check_runs_after_a_shared_import_returns_and_reports_once() {
+    let text = lifted_bezier_block(2.2e-3);
+    let imp = step_import_shared(&text).unwrap();
+    assert!(!imp.report.checks.is_empty(), "the part is still to check");
+    assert!(imp.warnings.iter().all(|w| !w.contains("SMLib's check")), "the import's own warnings come first, alone");
+    let settled = imp.report.settled().expect("the checks end");
+    let waited = step_import(&text).unwrap();
+    assert_eq!(settled.issues, waited.report.issues, "the same issues as an import that waits");
+    assert!(!imp.report.checking());
+    assert_eq!(imp.report.current().issues, settled.issues, "settled, the report shows what the checks found");
+    let first = imp.report.checks.announce().expect("a window is told once");
+    assert_eq!(first.len(), 1);
+    assert_eq!(imp.report.checks.announce(), None, "and only once");
+}
+
+/// #17697 review: what the checks find is in the order the parts were read, however the threads
+/// finish.
+#[test]
+fn the_checks_report_in_read_order_whatever_the_threads() {
+    let (fails, passes) = checked_blocks();
+    let jobs = || -> Vec<checks::Job> {
+        (0..12).map(|k| if k % 3 == 1 { check_job(&passes, &format!("p{k}"), 1) } else { check_job(&fails, &format!("p{k}"), 1 + k % 2) }).collect()
+    };
+    let want: Vec<String> = (0..12).filter(|k| k % 3 != 1).map(|k| format!("p{k}")).collect();
+    for workers in [1, 2, 4, 8] {
+        for _ in 0..3 {
+            let found = ImportChecks::start(jobs(), workers, None).wait().unwrap();
+            assert_eq!(found.iter().map(|i| i.part.clone()).collect::<Vec<_>>(), want, "{workers} workers");
+        }
     }
 }
 

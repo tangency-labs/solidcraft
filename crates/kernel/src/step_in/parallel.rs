@@ -8,9 +8,6 @@ pub(super) struct Job {
     /// Where the body goes (its instance's placement in the assembly).
     pub placement: M4,
     pub check_mesh: bool,
-    /// Check the body placed, in SMLib ([`PlacedCheck`]): the first instance of its part under
-    /// its placement's class ([`super::check_class`]).
-    pub check: bool,
 }
 
 /// What a job places: a solid item to read from the file (and orient), or a part an earlier
@@ -43,22 +40,6 @@ pub(super) struct Made {
     pub part: Arc<Part>,
     /// This job read the item: what the read repaired and the faces it left out.
     pub read: Option<Vec<Note>>,
-    /// SMLib's check of the body placed, when the job asked for it.
-    pub check: Option<PlacedCheck>,
-}
-
-/// SMLib's check of a placed body, as an operation on it takes it
-/// ([`crate::validation::failing_check`]): operations that check their results refuse them
-/// while it fails or cannot run.
-pub(super) enum PlacedCheck {
-    /// Not run: the part is made of surfaces (no B-rep could be made of the whole solid).
-    Skipped,
-    /// It passes (or SMLib refuses the body outright, which [`Body::smlib_refusal`] says).
-    Passes,
-    Fails(crate::CheckFailure),
-    CouldNotRun(String),
-    /// The token over the import's work stopped it: the import is stopped.
-    Stopped,
 }
 
 /// What reading an item noted.
@@ -75,7 +56,7 @@ pub(super) struct Failure {
     pub msg: String,
 }
 
-pub(super) type Prepared = std::result::Result<Made, Failure>;
+type Prepared = std::result::Result<Made, Failure>;
 
 pub(super) fn workers() -> usize {
     #[cfg(not(target_arch = "wasm32"))]
@@ -101,21 +82,7 @@ pub(super) fn prepare(ex: &Exchange, job: &Job) -> Prepared {
         .map_err(|e| Failure { read: false, msg: e.to_string() })?;
     // Counted on the part (a placement meshes the same faces).
     let missing = if job.check_mesh { solidcraft_profile::scope("import", "step.mesh_check", || part.body.unmeshed_faces()) } else { 0 };
-    // The body as placed, which is what operations take: a placement that scales, shears or
-    // mirrors the part maps its geometry without its tolerances, so its check can differ from
-    // the part's. A check that cannot run refuses an operation's result too (check_kept).
-    let check = job.check.then(|| {
-        if part.refused.is_some() {
-            return PlacedCheck::Skipped;
-        }
-        match solidcraft_profile::scope("import", "step.check", || crate::validation::failing_check(&body)) {
-            Ok(None) => PlacedCheck::Passes,
-            Ok(Some(failure)) => PlacedCheck::Fails(failure),
-            Err(_) if solidcraft_smlib::stop::current().is_some_and(|s| s.is_stopped()) => PlacedCheck::Stopped,
-            Err(e) => PlacedCheck::CouldNotRun(e.to_string()),
-        }
-    });
-    Ok(Made { body, missing, part, read, check })
+    Ok(Made { body, missing, part, read })
 }
 
 /// The part's body where its instance goes: the very same body at the identity (it keeps the

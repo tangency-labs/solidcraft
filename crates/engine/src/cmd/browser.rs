@@ -1797,11 +1797,20 @@ mod tests {
         let mut s = Session::default();
         let r = run(&mut s, "file.insert_step", json!({"path": path.to_string_lossy()}));
         assert_eq!(r["created_bodies"], json!(["Bloco"]), "{r}");
-        let warnings: Vec<String> = r["warnings"].as_array().unwrap().iter().map(|w| w.as_str().unwrap().to_string()).collect();
-        assert!(
-            warnings.iter().any(|w| w.starts_with("solid 'Bloco': needs repair before it can be modelled: SMLib's check fails it: ")),
-            "{warnings:?}"
-        );
+        // The check runs on after the import returns (#17697): what it finds joins the import's
+        // result once it ends, and a window is told of it once.
+        let id = r["feature"].as_u64().unwrap_or_else(|| panic!("{r}"));
+        let report = s.model.result(id).and_then(|f| f.import_report.clone()).expect("the import's check is pending or done");
+        report.settled().expect("the check ends");
+        s.model.settle_import_checks();
+        let result = s.model.result(id).unwrap();
+        let warning = result.warning.clone().unwrap_or_default();
+        assert!(warning.contains("solid 'Bloco': needs repair before it can be modelled: SMLib's check fails it: "), "{warning}");
+        let issues = &result.import_report.as_ref().unwrap().issues;
+        assert!(issues.iter().any(|i| i.kind == solidcraft_kernel::IssueKind::NeedsRepair && i.part == "Bloco"), "{issues:?}");
+        assert_eq!(s.model.take_import_notices(), [id], "a window is told once");
+        s.model.settle_import_checks();
+        assert_eq!(s.model.take_import_notices(), Vec::<u64>::new());
         // A box joined to it at its far corner: the default each_feature check refuses the result,
         // and the message says the check fails the part as it was before the join.
         let err = s
