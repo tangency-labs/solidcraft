@@ -110,6 +110,18 @@ pub struct StripOut {
     pub hovered: Option<u64>,
 }
 
+/// An open chip of the app's own: its first slot is both before its tray and after the chip,
+/// inside it, so it is a drop's place at either. (The slot's marker position, before the tray,
+/// is in `Strip::xs`.)
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct Head {
+    slot: usize,
+    /// The chip's left and right edges.
+    chip: (f32, f32),
+    /// Where the drop bar goes inside it: the centre of the gap after the chip.
+    inside: f32,
+}
+
 #[derive(Clone, Debug, PartialEq)]
 enum Drag {
     Marker,
@@ -137,6 +149,8 @@ pub struct Strip<'u, 'b> {
     /// The last slot's marker position; open groups share their first step's slot.
     slot_space: Option<(usize, Rect)>,
     marker_rect: Option<Rect>,
+    /// Each open chip holding steps: their first slot, its chip, and the place after it.
+    heads: Vec<Head>,
     /// Each open tray: where it starts, its place under the chips, its depth.
     trays: Vec<(f32, egui::layers::ShapeIdx, usize)>,
     drag: Option<Drag>,
@@ -188,6 +202,7 @@ fn lay_out(ui: &mut egui::Ui, bar: Bar, rect: Rect, contents: &mut dyn Contents)
         folded: Vec::new(),
         slot_space: None,
         marker_rect: None,
+        heads: Vec::new(),
         trays: Vec::new(),
         drag,
         hovered: None,
@@ -202,7 +217,7 @@ fn lay_out(ui: &mut egui::Ui, bar: Bar, rect: Rect, contents: &mut dyn Contents)
     if bar.marker >= bar.steps && strip.marker_rect.is_none() {
         strip.marker_rect = Some(end_marker);
     }
-    let Strip { ui, painter: p, x: end, xs, folded, marker_rect, mut drag, hovered, edit, mut actions, .. } = strip;
+    let Strip { ui, painter: p, x: end, xs, folded, heads, marker_rect, mut drag, hovered, edit, mut actions, .. } = strip;
     let marker = bar.marker;
     let drop_end = end_marker.center().x;
     // Between chips, only the four-point gap grabs the marker. The painted circle may
@@ -239,7 +254,7 @@ fn lay_out(ui: &mut egui::Ui, bar: Bar, rect: Rect, contents: &mut dyn Contents)
     let before_marker = |slot: usize, x: f32| slot < marker || (slot == marker && marker_rect.is_none_or(|mr| x < mr.center().x));
     // The marker dropped where it already is needs no bar: the marker shows the spot.
     if let (Some(dg), Some(pp)) = (drag.as_ref(), pointer)
-        && let local = slot_at(&xs, &folded, drop_end, pp.x)
+        && let (local, stop) = slot_at(&xs, &folded, &heads, drop_end, pp.x)
         && !(matches!(dg, Drag::Marker) && local == marker)
     {
         // Centred in the gap between two chips, or beside the marker at its slot.
@@ -251,7 +266,7 @@ fn lay_out(ui: &mut egui::Ui, bar: Bar, rect: Rect, contents: &mut dyn Contents)
                     mr.right() + 2.0
                 }
             }
-            _ => xs.get(local).copied().unwrap_or(drop_end),
+            _ => stop,
         };
         // Kept inside the strip so the slot before the first step stays visible.
         let sx = sx.max(origin + t.space_2);
@@ -268,7 +283,7 @@ fn lay_out(ui: &mut egui::Ui, bar: Bar, rect: Rect, contents: &mut dyn Contents)
         && let Some(dg) = drag.take()
         && let Some(pp) = pointer
     {
-        let slot = slot_at(&xs, &folded, drop_end, pp.x);
+        let (slot, _) = slot_at(&xs, &folded, &heads, drop_end, pp.x);
         let before = before_marker(slot, pp.x);
         actions.push(match dg {
             Drag::Marker => Action::Seek { slot, before },
@@ -291,19 +306,26 @@ fn marker_at(rect: Rect, x: f32) -> Rect {
     Rect::from_min_size(pos2(x, rect.top() + 5.0), vec2(t.space_12, rect.height() - 10.0))
 }
 
-/// Slot index (0..=n) nearest to screen x, using the positions where the marker is drawn.
-fn slot_at(xs: &[f32], folded: &[(Rect, usize)], end: f32, x: f32) -> usize {
+/// Slot index (0..=n) nearest to screen x, using the positions where the marker is drawn, and
+/// where its drop bar goes. A drop on a folded chip lands before it. An open chip's first slot is
+/// both before its tray (where its marker is drawn) and after the chip; on the chip itself it is
+/// after it, inside it (an app may take that as a drop into what the chip holds, #18471).
+fn slot_at(xs: &[f32], folded: &[(Rect, usize)], heads: &[Head], end: f32, x: f32) -> (usize, f32) {
     if let Some((_, slot)) = folded.iter().find(|(rect, _)| (rect.left()..=rect.right()).contains(&x)) {
-        return *slot;
+        return (*slot, xs.get(*slot).copied().unwrap_or(end));
     }
-    let mut best = (0usize, f32::INFINITY);
-    for (i, sx) in xs.iter().chain(std::iter::once(&end)).enumerate() {
+    if let Some(head) = heads.iter().find(|h| h.chip.0 <= x && x <= h.chip.1) {
+        return (head.slot, head.inside);
+    }
+    let stops = xs.iter().copied().chain(std::iter::once(end)).enumerate().chain(heads.iter().map(|h| (h.slot, h.inside)));
+    let mut best = (0usize, end, f32::INFINITY);
+    for (i, sx) in stops {
         let d = (sx - x).abs();
-        if d < best.1 {
-            best = (i, d);
+        if d < best.2 {
+            best = (i, sx, d);
         }
     }
-    best.0
+    (best.0, best.1)
 }
 
 impl Strip<'_, '_> {
@@ -419,7 +441,8 @@ impl Strip<'_, '_> {
     /// A chip of the app's own for the steps in slots `start..end` (a folded run or folder), drawn
     /// by `draw` with its top left at the given point, returning its width. The marker goes before
     /// it at its first slot, and after it inside a folded one; a drop on a folded chip lands
-    /// before it. An `open` one starts a tray `depth` deep, ended by [`Strip::end_tray`].
+    /// before it. An `open` one starts a tray `depth` deep, ended by [`Strip::end_tray`]; a drop
+    /// left of it lands before the tray, and one on it or after it at its first slot, inside.
     /// Returns its rect.
     pub fn chip(&mut self, start: usize, end: usize, open: bool, depth: usize, draw: impl FnOnce(&mut egui::Ui, &Painter, Pos2) -> f32) -> Rect {
         self.quiet = None;
@@ -439,6 +462,10 @@ impl Strip<'_, '_> {
         }
         let at = pos2(self.x, self.rect.top() + 6.0);
         let width = draw(self.ui, &self.painter, at);
+        if open && start < end {
+            // The centre of the gap after the chip, where its first step's marker would be.
+            self.heads.push(Head { slot: start, chip: (at.x, at.x + width), inside: at.x + width + 2.0 });
+        }
         self.x += width + 4.0;
         if !open && start < end {
             let after = self.slot_here(end);

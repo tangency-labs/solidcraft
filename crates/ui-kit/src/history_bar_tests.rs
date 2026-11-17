@@ -493,6 +493,21 @@ fn a_folded_chip_of_the_apps_own_takes_its_slots_and_the_marker_inside_it_goes_a
     assert_eq!(rig.drag(d, folded - vec2(20.0, 0.0)), vec![Action::Reorder { step: 4, slot: 1, before: true }]);
 }
 
+/// An open chip's first slot is a drop's place both before its tray and after the chip: left of
+/// the chip the bar goes before the tray, on the chip or after it, before its first step (#18471).
+#[test]
+fn an_open_chips_first_slot_is_before_its_tray_or_after_the_chip() {
+    // Marker places: slot 0 (before step A) at 0, slot 1 at 30 before a tray whose chip spans
+    // 36..96 and holds step B (its slot shares the place before the tray), the end at 132.
+    let (xs, end) = ([0.0, 30.0], 132.0);
+    let heads = [Head { slot: 1, chip: (36.0, 96.0), inside: 98.0 }];
+    assert_eq!(slot_at(&xs, &[], &heads, end, 31.0), (1, 30.0), "just before the tray");
+    assert_eq!(slot_at(&xs, &[], &heads, end, 40.0), (1, 98.0), "on the chip's left end: after it");
+    assert_eq!(slot_at(&xs, &[], &heads, end, 97.0), (1, 98.0), "between the chip and its step");
+    assert_eq!(slot_at(&xs, &[], &heads, end, 10.0), (0, 0.0), "before A");
+    assert_eq!(slot_at(&xs, &[], &[], end, 70.0), (1, 30.0), "no open chip: before the tray");
+}
+
 #[test]
 fn dropping_on_a_folded_chip_at_the_start_lands_before_the_group() {
     let mut rig = Rig::new(&["A", "B", "C"], 3);
