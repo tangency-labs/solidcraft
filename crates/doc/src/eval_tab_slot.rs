@@ -139,7 +139,7 @@ pub(crate) fn apply(vals: &BTreeMap<String, Value>, k: &FeatureKind, st: &mut Mo
     let mut specs: Vec<TabSlotSpec> = Vec::new();
     for t in tab_plates {
         for s in slot_plates {
-            let (ti, si) = (index(&t.body.to_string()), index(&s.body.to_string()));
+            let (ti, si) = (index(&t.body), index(&s.body));
             if ti == si {
                 continue;
             }
@@ -171,10 +171,10 @@ pub(crate) fn apply(vals: &BTreeMap<String, Value>, k: &FeatureKind, st: &mut Mo
         }
     }
     for (name, made) in names.iter().zip(plates) {
-        if let Some(mb) = st.bodies.iter_mut().find(|b| &b.name == name) {
-            if !mb.body.same(&made) {
-                *mb = mb.remade(Traced::unnamed(made));
-            }
+        if let Some(mb) = st.bodies.iter_mut().find(|b| &b.name == name)
+            && !mb.body.same(&made)
+        {
+            *mb = mb.remade(Traced::unnamed(made));
         }
     }
     Ok(())
