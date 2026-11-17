@@ -84,6 +84,15 @@
 //!   [`SolidError::NotConverged`]. No compared case reaches the second `GetNextPoint` of
 //!   a span yet (the offset surface defers first), so the bound, the span stack and
 //!   `sm_AddToCurve` are untested until `surface.offset_surface` lands.
+//! - **C0 knot lines.** Not upstream: the UV curve turns its corner on a `C0` knot line
+//!   of a B-spline surface across which the surface is smooth ([`KnotLines`]). A span with such a line between its ends is
+//!   split where the dropped curve crosses it ([`knot_line_crossing`]), before it is
+//!   tested; a span that ends on a line keeps the tangent of the side it came from; and
+//!   the next span's start there is dropped again looking forward, for the tangent of
+//!   the side it runs to. Upstream's spans share one tangent at every joint, so a span
+//!   across a line, or ending a rounding error past one, turns the corner inside itself:
+//!   a notch a fraction of the tolerance deep whose radius of curvature is far below the
+//!   curve's. Where the two sides' tangents agree the joint is as upstream's.
 //! - **Not ported here.** The `SM_DEBUG_CODE` blocks, the `SM_ASSERT`s and the
 //!   messages.
 
@@ -114,13 +123,14 @@ use crate::surface::surface::Surface;
 use crate::surface::surface_point_solve::p2::with_out_of_bounds_enabled;
 
 use super::boundary_moves::MoveBound;
+use super::knot_lines::{KnotLine, KnotLines};
 use super::p1::{
     remove_duplicate_drop_point_solutions, DropFailRecord, DropPt, SM_ERR_OUTSIDE_OF_DOMAIN,
     SM_SUCCESS,
 };
 use super::p2::{
-    add_to_curve_bounded, flush_curve_bounded, DropOffset, SM_ERR_INVALID_INPUT,
-    SM_ERR_NOT_WITHIN_TOLERANCE, SS_NONE,
+    add_to_curve_bounded, flush_curve_bounded, DropOffset, SM_ERR_BAD_SURFACE_POINT,
+    SM_ERR_INVALID_INPUT, SM_ERR_NOT_WITHIN_TOLERANCE, SS_NONE,
 };
 
 /// `SM_ERR_NOT_CONVERGING` (`SmMessages.h`).
@@ -161,6 +171,103 @@ pub struct DropCurveOut {
     pub max_approx_dev: f64,
     /// `rUVCurves`: the UV curves (usually one; two for a curve along a seam).
     pub uv_curves: Vec<BSplineCurve>,
+}
+
+/// How many drops [`knot_line_crossing`] makes at most: the false position step with the
+/// Illinois rule at least halves the bracket every second step, so this is past what a
+/// bracket of doubles holds.
+const MAX_CROSSING_DROPS: usize = 128;
+
+/// Not upstream: the drop point, dropped from `start`, where the dropped curve crosses the
+/// surface's `C0` knot line `line` between `start` and `end`, which are on its two sides:
+/// the root of the drop's offset from the line ([`KnotLine::offset`]) over the curve
+/// parameter, bracketed by the two ends and found by false position with the Illinois
+/// rule. The root is a drop point on the line ([`KnotLines::settle`], through
+/// [`DropPt::set_properties`]), its UV tangent that of the side `start` is on.
+///
+/// `None` when the surface is creased where the curve crosses the line (the drop point
+/// there is not put on it), when the bracket closes without a drop point on the line
+/// (the drop jumps across it), or when the point on the line does not drop
+/// ([`SM_SUCCESS`]) as a split point has to: the span is then left to the accuracy test,
+/// as upstream.
+#[allow(clippy::too_many_arguments)] // `GetNextPoint`'s, the span and the line
+fn knot_line_crossing(
+    k: &Kernel,
+    surface: &Surface,
+    offset: &mut DropOffset,
+    singularities: u32,
+    pole_points: &[Point3],
+    uv_domain: &Extent2d,
+    srf_closure: SurfParamType,
+    curve: &Curve,
+    approx_tol_3d: f64,
+    start: &DropPt,
+    end: &DropPt,
+    line: KnotLine,
+) -> Result<Option<DropPt>> {
+    let mut before = (start.t, line.offset(start.uv_pd[0]));
+    let mut after = (end.t, line.offset(end.uv_pd[0]));
+    let mut moved_before: Option<bool> = None;
+    for _ in 0..MAX_CROSSING_DROPS {
+        let mut t = (before.0 * after.1 - after.0 * before.1) / (after.1 - before.1);
+        if !(before.0 < t && t < after.0) {
+            t = 0.5 * (before.0 + after.0);
+        }
+        if !(before.0 < t && t < after.0) {
+            return Ok(None);
+        }
+        let mut point = *end;
+        let status = match start.get_next_point(
+            k,
+            surface,
+            offset,
+            singularities,
+            Some(pole_points),
+            uv_domain,
+            srf_closure,
+            curve,
+            approx_tol_3d,
+            t,
+            &mut point,
+        ) {
+            Ok(code) => code,
+            Err(e) if e.is_unported_or_cancelled() => return Err(e),
+            Err(_) => return Ok(None),
+        };
+        let off = line.offset(point.uv_pd[0]);
+        let [on_u_line, on_v_line] = point.on_knot_line;
+        let on_line = if line.direction == SurfParamType::U {
+            on_u_line
+        } else {
+            on_v_line
+        };
+        if on_line {
+            return Ok((status == SM_SUCCESS).then_some(point));
+        }
+        // (an end that was not dropped has no UV point; one within the parameter zero
+        // of the line that was not put on it is on a crease of the surface)
+        if status == SM_ERR_BAD_SURFACE_POINT
+            || !off.is_finite()
+            || offset.knot_lines().is_within_zero(line, point.uv_pd[0])
+        {
+            return Ok(None);
+        }
+        // the Illinois rule: an end kept twice running has its offset halved
+        let on_starts_side = (off < 0.0) == (before.1 < 0.0);
+        if on_starts_side {
+            before = (t, off);
+            if moved_before == Some(true) {
+                after.1 *= 0.5;
+            }
+        } else {
+            after = (t, off);
+            if moved_before == Some(false) {
+                before.1 *= 0.5;
+            }
+        }
+        moved_before = Some(on_starts_side);
+    }
+    Ok(None)
 }
 
 /// The status upstream stores for a failed `GetNextPoint` (see the module notes).
@@ -795,6 +902,8 @@ impl Surface {
 
         // to reduce tolerances - define an offset surface
         let mut offset = DropOffset::new(1.0, singularities);
+        // not upstream: the surface's C0 knot lines, which the spans below end on
+        offset.set_knot_lines(KnotLines::of(this, &s_uv_domain)?);
 
         // Characterize Surface seams and singularities
         let mut singular_direction = SurfParamType::Neither;
@@ -1408,6 +1517,8 @@ impl Surface {
                     })?;
                     end.t = saved_end.t;
                     end.uv_pd = saved_end.uv_pd;
+                    // (not upstream: with the knot lines its UV point is on)
+                    end.on_knot_line = saved_end.on_knot_line;
                     let ambiguous_seam = ((srf_closure == SurfParamType::U
                         || srf_closure == SurfParamType::Both)
                         && (end.uv_pd[0].x - start.uv_pd[0].x).abs()
@@ -1446,6 +1557,43 @@ impl Surface {
                         }
                     }
                     ignore_status(ivl.set_min_max(start.t, end.t))?;
+
+                    // not upstream: a span with a C0 knot line of the surface between its
+                    // ends ends on the line (`knot_lines`): the point where the dropped
+                    // curve crosses it becomes the pending end, as a split point does
+                    if let Some(line) = offset.knot_lines().crossed(start.uv_pd[0], end.uv_pd[0]) {
+                        let crossing = knot_line_crossing(
+                            k,
+                            this,
+                            &mut offset,
+                            singularities,
+                            &pole_points,
+                            &s_uv_domain,
+                            srf_closure,
+                            curve,
+                            approx_tol_3d,
+                            &start,
+                            &end,
+                            line,
+                        )?;
+                        if let Some(crossing) = crossing {
+                            if stack.len() >= MAX_SPAN_DEPTH {
+                                return Err(SolidError::NotConverged {
+                                    operation: OP,
+                                    iterations: MAX_SPAN_DEPTH as u32,
+                                });
+                            }
+                            end = crossing;
+                            if max_drop_to_surf < end.drop_to_surf {
+                                max_drop_to_surf = end.drop_to_surf;
+                            }
+                            if max_approx_dev < end.approx_dev {
+                                max_approx_dev = end.approx_dev;
+                            }
+                            stack.push((start.t, end));
+                            continue;
+                        }
+                    }
 
                     // fix boundary tangents
                     let _fix_bt_change = start.fix_boundary_tangents(
@@ -1535,6 +1683,27 @@ impl Surface {
                         start.from_left_u = Some(!truthy(end.from_left_u));
                         start.from_left_v = Some(!truthy(end.from_left_v));
                         have_start_uv_tan = true;
+
+                        // not upstream: on a C0 knot line of the surface the UV tangent
+                        // the span arrived with is that of the side it came from. The
+                        // next span leaves on the side the curve runs to, so its start
+                        // is dropped again looking forward (status ignored, as the span
+                        // start's)
+                        if start.on_knot_line.contains(&true) {
+                            let pd = curve.evaluate(k, start.t, 2, true, true)?;
+                            for (dst, src) in start.crv_pd.iter_mut().zip(pd.iter()) {
+                                *dst = *src;
+                            }
+                            ignore_status(start.set_properties(
+                                k,
+                                this,
+                                &mut offset,
+                                singularities,
+                                approx_tol_3d,
+                                &s_uv_domain,
+                                false,
+                            ))?;
+                        }
                         let _ = stack.pop();
                         continue;
                     }

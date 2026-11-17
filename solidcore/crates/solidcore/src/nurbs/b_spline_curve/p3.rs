@@ -51,6 +51,12 @@
 //!   `GlobalPropertyAnalysis` fails, and fails tests 11/12 (`value` `SM_UNDEF_DOUBLE`)
 //!   when a derivative at a first-derivative solution cannot be evaluated.
 //!   [`SolidError::Unported`] is always passed on.
+//! - **A UV trim's corner.** Not upstream: `AssertValid` test 7 on a UV trim of a face
+//!   (a curve checked on its surface) reads the turn at a knot on the trim's image, each
+//!   tangent mapped by the surface's first derivatives on the side its piece lies on
+//!   ([`trim_turn_on_surface`]). Where the trim crosses a knot line across which the
+//!   surface is only `C0` in its parameters, the trim of a smooth curve turns a corner
+//!   and its image does not; anywhere else the image turns as the trim does.
 //! - **Crashes.** Where upstream dereferences a `NULL` (a curve without NURB in
 //!   `GetControlPoint` / `IsSegmentLine`, an extension `TrimGap` did not make, an
 //!   unclamped knot vector indexing before the control points in `HasInternalPole`)
@@ -806,6 +812,47 @@ fn trim_metric(
     let b = efg[1] / a;
     let c = (efg[0] * efg[2] - efg[1] * efg[1]).sqrt() / a;
     Ok(Some([a, b, c]))
+}
+
+/// Not upstream: the cosine of the angle the image on `surface` of the UV trim `trim`
+/// turns through at its parameter `param`: the trim's first derivative from each side,
+/// mapped by the surface's first derivatives at the trim's point there, each taken on the
+/// side its piece of the trim lies on (the arriving piece behind its tangent, the leaving
+/// piece ahead of it). The sides differ only at a knot of the surface, where its
+/// parameterisation may be only `C0`. `None` where the trim or the surface cannot be
+/// evaluated or an image tangent vanishes (the caller keeps the trim's own turn).
+///
+/// # Errors
+///
+/// [`SolidError::Unported`] and cancellation.
+fn trim_turn_on_surface(
+    k: &Kernel,
+    surface: &Surface,
+    trim: &BSplineCurve,
+    param: f64,
+) -> Result<Option<f64>> {
+    let image = |leaving: bool| -> Result<Option<Vec3>> {
+        let Some(eval) = ignored(trim.evaluate(param, 1, leaving, false))? else {
+            return Ok(None);
+        };
+        let (Some(point), Some(tangent)) = (eval.first(), eval.get(1)) else {
+            return Ok(None);
+        };
+        // the span starting at the knot is ahead of a rising parameter
+        let rising = |rate: f64| if leaving { rate >= 0.0 } else { rate < 0.0 };
+        let derivatives = surface.evaluate_1st_derivatives(
+            k,
+            Point2::new(point.x, point.y),
+            rising(tangent.x),
+            rising(tangent.y),
+        );
+        Ok(ignored(derivatives)?
+            .and_then(|(_, du, dv)| (du * tangent.x + dv * tangent.y).unitize().ok()))
+    };
+    let (Some(arriving), Some(leaving)) = (image(false)?, image(true)?) else {
+        return Ok(None);
+    };
+    Ok(Some(arriving.dot(leaving)))
 }
 
 /// A copy of `trim` with its control points mapped by [`trim_metric`]'s `l` (the
@@ -1924,7 +1971,21 @@ impl BSplineCurve {
                 };
 
                 // Check the angle between the unitized 1st derivatives
-                let dot = u1.dot(u2);
+                let mut dot = u1.dot(u2);
+
+                // Not upstream: a UV trim turns a corner where it crosses a knot line
+                // across which its face's surface is only C0 in its parameters, and its
+                // image on the surface is smooth there. A trim's turn is a kink only
+                // where its image turns: each tangent mapped by the surface's first
+                // derivatives on the side its piece lies on (off such a line the two
+                // sides are one, and the image turns as the trim does).
+                if dot < COSINE_TOL && dim == 2 {
+                    if let Some(surface) = ovr.trim_surface {
+                        if let Some(on_surface) = trim_turn_on_surface(k, surface, self, param)? {
+                            dot = on_surface;
+                        }
+                    }
+                }
 
                 // when angle between lower and upper ivl 1st Derivs is too big - not G1
                 if dot < COSINE_TOL {
