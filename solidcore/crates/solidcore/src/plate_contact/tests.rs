@@ -915,3 +915,64 @@ fn the_contact_distance_is_to_the_strip_on_s_face() {
     );
     assert_eq!(none.expect("lifted"), None);
 }
+
+/// Design 5.6, per-tab `t_S,k`: S stepped as in [m22] (12 thick under x ∈ [0, 80], 6 under
+/// x ∈ [80, 160], top P at z = 12). A slot over x ∈ [20, 60] reads 12, one over [100, 140]
+/// reads 6, one across the step [60, 100] is `Uneven`, one past S's end [170, 190] `Missing`.
+#[test]
+fn each_slot_reads_the_thickness_under_it() {
+    use crate::math::Vec2;
+    use crate::prism::profile::{Loop2, Region2, Seg2};
+    let rect = |x0: f64, x1: f64, y0: f64, y1: f64| {
+        let pts = [
+            Vec2::new(x0, y0),
+            Vec2::new(x1, y0),
+            Vec2::new(x1, y1),
+            Vec2::new(x0, y1),
+        ];
+        Loop2 {
+            segs: pts
+                .iter()
+                .zip(pts.iter().cycle().skip(1))
+                .map(|(a, b)| Seg2::Line { a: *a, b: *b })
+                .collect(),
+        }
+    };
+    let mut k = crate::kernel::Kernel::default();
+    let pts = [
+        Vec2::new(0.0, 0.0),
+        Vec2::new(12.0, 0.0),
+        Vec2::new(12.0, 160.0),
+        Vec2::new(6.0, 160.0),
+        Vec2::new(6.0, 80.0),
+        Vec2::new(0.0, 80.0),
+    ];
+    let outer = Loop2 {
+        segs: pts
+            .iter()
+            .zip(pts.iter().cycle().skip(1))
+            .map(|(a, b)| Seg2::Line { a: *a, b: *b })
+            .collect(),
+    };
+    let region = Region2 {
+        outer,
+        holes: vec![],
+    };
+    let side = frame_at([0.0; 3], [0.0, 0.0, 1.0], [1.0, 0.0, 0.0]);
+    let s = crate::prism::extrude::extrude_region(&mut k, &side, &region, 0.0, 100.0).expect("s");
+    let p = plane(0.0, 0.0, 12.0, 0.0, 0.0, 1.0);
+    let at = |k: &mut crate::kernel::Kernel, x0: f64, x1: f64| {
+        slot_thickness_under(k, &s, p, &rect(x0, x1, 30.0, 36.0), TOL).expect("read")
+    };
+    match at(&mut k, 20.0, 60.0) {
+        FarSide::Thickness(t) => assert!((t - 12.0).abs() < 1e-9, "{t}"),
+        other => panic!("{other:?}"),
+    }
+    match at(&mut k, 100.0, 140.0) {
+        FarSide::Thickness(t) => assert!((t - 6.0).abs() < 1e-9, "{t}"),
+        other => panic!("{other:?}"),
+    }
+    assert_eq!(at(&mut k, 60.0, 100.0), FarSide::Uneven);
+    assert_eq!(at(&mut k, 170.0, 190.0), FarSide::Missing);
+    assert!(slot_thickness_under(&mut k, &s, p, &rect(20.0, 60.0, 30.0, 36.0), 0.0).is_err());
+}

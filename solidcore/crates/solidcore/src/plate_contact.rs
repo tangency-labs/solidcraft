@@ -1095,6 +1095,79 @@ pub fn slot_thickness(
         .min_by(f64::total_cmp))
 }
 
+/// S's far side under one slot (design 5.6): the thickness `t_S,k` there, or why the tab is
+/// skipped.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum FarSide {
+    /// The nearest far face not `Outside` the slot holds it: `t_S,k`, its depth below P.
+    Thickness(f64),
+    /// `uneven_far_side`: that face's outline or one of its holes crosses the slot (S steps, or a
+    /// pocket edge runs under the slot).
+    Uneven,
+    /// `no_far_side`: no far face of S lies under the slot.
+    Missing,
+}
+
+/// Design 5.6 for one slot: S's planar faces facing away from `p`'s normal below `p`, nearest
+/// first, against `outline` (the slot's footprint in `p`'s frame, [`slot_face`]'s `(u, w)`
+/// plane); the first whose region is not `Outside` the outline decides ([`FarSide`]). S is not
+/// changed.
+///
+/// # Errors
+///
+/// [`SolidError::InvalidInput`] for `tol` not positive and finite, a bad plane or loops the
+/// placement cannot decide; those of the face reads.
+pub fn slot_thickness_under(
+    k: &mut crate::kernel::Kernel,
+    s: &crate::topology::Brep,
+    p: Plane,
+    outline: &crate::prism::profile::Loop2,
+    tol: f64,
+) -> Result<FarSide> {
+    use crate::prism::placement::LoopPlacement;
+    if !(tol.is_finite() && tol > 0.0) {
+        return Err(invalid("tol must be positive and finite"));
+    }
+    check_plane(p)?;
+    let frame = frame_of(p)?;
+    let down = -SQUARE_SLACK.cos();
+    let mut far: Vec<_> = read_faces(k, s, &frame, tol)?
+        .into_iter()
+        .filter(|f| f.plane.is_some_and(|q| q.normal.dot(p.normal) <= down) && f.high < -tol)
+        .collect();
+    far.sort_by(|a, b| b.high.total_cmp(&a.high));
+    let undecided = || invalid("the slot's place over S's far face cannot be decided");
+    for f in far {
+        let id = f.face;
+        let regions =
+            crate::prism::sheet::planar_face_regions(k, s, &frame, tol, |g, _| Ok(g == id))?
+                .regions;
+        'region: for region in &regions {
+            match outline
+                .placement(&region.outer, tol)
+                .ok_or_else(undecided)?
+            {
+                LoopPlacement::Outside => continue,
+                LoopPlacement::Inside => {}
+                _ => return Ok(FarSide::Uneven),
+            }
+            for hole in &region.holes {
+                match outline.placement(hole, tol).ok_or_else(undecided)? {
+                    LoopPlacement::Outside => {}
+                    LoopPlacement::Inside => continue 'region,
+                    _ => return Ok(FarSide::Uneven),
+                }
+                let probe = hole.segs.first().ok_or_else(undecided)?.start();
+                if outline.holds(probe).ok_or_else(undecided)? {
+                    return Ok(FarSide::Uneven);
+                }
+            }
+            return Ok(FarSide::Thickness(-f.high));
+        }
+    }
+    Ok(FarSide::Missing)
+}
+
 /// Slot `k`'s prism (design 7.2): its outline in `p`'s frame ([`slot_face`]'s `(u, w)` plane)
 /// extruded along `n` from `−t_S − over` to `+over`, `over` the overshoot past S's two faces.
 ///
