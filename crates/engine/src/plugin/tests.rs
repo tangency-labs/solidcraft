@@ -933,7 +933,10 @@ mod native {
         let tools = listed["tools"].as_array().unwrap();
         assert_eq!(tools.len(), 1, "{listed}");
         let tool = &tools[0];
-        assert_eq!((&tool["name"], &tool["kind"], &tool["plugin"], &tool["effect"]), (&json!("sample.make"), &json!("command"), &json!("sample"), &json!("edit")));
+        assert_eq!(
+            (&tool["name"], &tool["kind"], &tool["plugin"], &tool["effect"]),
+            (&json!("sample.make"), &json!("command"), &json!("sample"), &json!("edit"))
+        );
         assert_eq!((&tool["plugin_name"], &tool["description"]), (&json!("Sample"), &json!("Makes a box")));
         assert_eq!(tool["input_schema"]["additionalProperties"], false, "the listed inputs are as strict as the check");
         assert!(tool.get("approval").is_none(), "a listing reads no component");

@@ -124,8 +124,11 @@ fn check(schema: &Value, value: &Value, field: &str, depth: usize, steps: &mut u
             }
             if !matched {
                 let constants: Vec<String> = options.iter().filter_map(|o| o.get("const")).take(12).map(shown).collect();
-                let reason =
-                    if constants.is_empty() { "matches none of the declared options".to_string() } else { format!("must be one of {}", constants.join(", ")) };
+                let reason = if constants.is_empty() {
+                    "matches none of the declared options".to_string()
+                } else {
+                    format!("must be one of {}", constants.join(", "))
+                };
                 return Err(bad(field, reason));
             }
         }

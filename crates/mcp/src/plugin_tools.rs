@@ -52,8 +52,14 @@ fn definition(t: &Value) -> Option<Value> {
     let version = plugin_text(str_field(t, "plugin_version"));
     let effect = str_field(t, "effect");
     let kind = str_field(t, "kind");
-    let extensions: Vec<String> =
-        t.get("extensions").and_then(Value::as_array).into_iter().flatten().filter_map(Value::as_str).map(|e| format!(".{}", plugin_text(e))).collect();
+    let extensions: Vec<String> = t
+        .get("extensions")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(Value::as_str)
+        .map(|e| format!(".{}", plugin_text(e)))
+        .collect();
     let (title, what, annotation) = match kind {
         "importer" => (
             format!("Open {} files with {plugin_name}", extensions.join(", ")),
