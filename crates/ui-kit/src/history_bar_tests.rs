@@ -288,12 +288,32 @@ fn a_folded_chip_of_the_apps_own_takes_its_slots_and_the_marker_inside_it_goes_a
 fn an_open_chips_first_slot_is_before_its_tray_or_after_the_chip() {
     // Step A at 0, a tray from 32 whose chip spans 36..96, step B at 100, the end at 132.
     let (xs, end) = ([0.0, 100.0], 132.0);
-    let heads = [Head { slot: 1, tray: 32.0, chip: (36.0, 96.0) }];
+    let heads = [Head { slot: 1, tray: 32.0, chip: (36.0, 96.0), inside: 100.0 }];
     assert_eq!(slot_at(&xs, &heads, end, 31.0), (1, 32.0), "just before the tray");
     assert_eq!(slot_at(&xs, &heads, end, 40.0), (1, 100.0), "on the chip's left end: after it");
     assert_eq!(slot_at(&xs, &heads, end, 97.0), (1, 100.0), "between the chip and its step");
     assert_eq!(slot_at(&xs, &heads, end, 10.0), (0, 0.0), "before A");
     assert_eq!(slot_at(&xs, &[], end, 40.0), (0, 0.0), "no open chip: the nearest step");
+    // The chip's first slot opens another one: a tray from 100 whose chip spans 104..150, then B
+    // at 154. On the outer chip the bar goes right after it, before the inner tray, not past it.
+    let (xs, end) = ([0.0, 154.0], 186.0);
+    let heads = [Head { slot: 1, tray: 32.0, chip: (36.0, 96.0), inside: 100.0 }, Head { slot: 1, tray: 100.0, chip: (104.0, 150.0), inside: 154.0 }];
+    assert_eq!(slot_at(&xs, &heads, end, 60.0), (1, 100.0), "on the outer chip: before the inner tray");
+    assert_eq!(slot_at(&xs, &heads, end, 120.0), (1, 154.0), "on the inner chip: before B");
+}
+
+/// The drop bar at the marker's slot goes beside the marker, unless the drop is on or past an
+/// open chip whose first slot that is: then it is inside its tray, and the bar shows it there.
+#[test]
+fn the_drop_bar_at_the_marker_before_an_open_chip_shows_a_drop_on_the_chip_inside_it() {
+    // The marker at slot 1 spans 16..28, then a tray from 32 whose chip spans 36..96, step B at 100.
+    let marker = Rect::from_min_max(pos2(16.0, 5.0), pos2(28.0, 35.0));
+    let heads = [Head { slot: 1, tray: 32.0, chip: (36.0, 96.0), inside: 100.0 }];
+    assert_eq!(bar_x(1, 100.0, 60.0, Some(marker), &heads), 98.0, "on the chip: inside, after it");
+    assert_eq!(bar_x(1, 100.0, 97.0, Some(marker), &heads), 98.0, "past the chip: inside");
+    assert_eq!(bar_x(1, 32.0, 31.0, Some(marker), &heads), 30.0, "before the tray: after the marker");
+    assert_eq!(bar_x(1, 32.0, 18.0, Some(marker), &heads), 14.0, "left of the marker: before it");
+    assert_eq!(bar_x(1, 100.0, 60.0, None, &heads), 98.0, "the marker elsewhere");
 }
 
 #[test]

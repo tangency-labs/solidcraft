@@ -118,6 +118,8 @@ struct Head {
     tray: f32,
     /// The chip's left and right edges.
     chip: (f32, f32),
+    /// Where what it holds starts, after the chip (a nested open chip's tray, or a step).
+    inside: f32,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -243,17 +245,7 @@ fn lay_out(ui: &mut egui::Ui, bar: Bar, rect: Rect, contents: &mut dyn Contents)
         && let (local, stop) = slot_at(&xs, &heads, end, pp.x)
         && !(matches!(dg, Drag::Marker) && local == marker)
     {
-        // Centred in the gap between two chips, or beside the marker at its slot.
-        let sx = match marker_rect {
-            Some(mr) if local == marker => {
-                if before_marker(local, pp.x) {
-                    mr.left() - 2.0
-                } else {
-                    mr.right() + 2.0
-                }
-            }
-            _ => stop - 2.0,
-        };
+        let sx = bar_x(local, stop, pp.x, marker_rect.filter(|_| local == marker), &heads);
         // Kept inside the strip so the slot before the first step stays visible.
         let sx = sx.max(origin + t.space_2);
         crate::history_drop_bar(
@@ -292,12 +284,30 @@ fn marker_at(rect: Rect, x: f32) -> Rect {
     Rect::from_min_size(pos2(x, rect.top() + 5.0), vec2(t.space_12, rect.height() - 10.0))
 }
 
+/// Where the drop bar for `slot`, whose place is `stop`, goes with the pointer at `x`: centred in
+/// the gap between two chips, or beside `marker`, the marker's rect when it is at that slot. On or
+/// past an open chip whose first slot it is, the drop is inside the chip's tray, after the marker
+/// before it, so the bar shows it there.
+fn bar_x(slot: usize, stop: f32, x: f32, marker: Option<Rect>, heads: &[Head]) -> f32 {
+    let inside = heads.iter().any(|h| h.slot == slot && h.chip.0 <= x);
+    match marker {
+        Some(mr) if !inside => {
+            if x < mr.center().x {
+                mr.left() - 2.0
+            } else {
+                mr.right() + 2.0
+            }
+        }
+        _ => stop - 2.0,
+    }
+}
+
 /// Slot index (0..=n) nearest to screen x, given the left edges of the chips, and where its drop
 /// bar goes. An open chip's first slot is also just before its tray; on the chip itself it is
 /// after it, inside it (an app may take that as a drop into what the chip holds, #18471).
 fn slot_at(xs: &[f32], heads: &[Head], end: f32, x: f32) -> (usize, f32) {
     if let Some(head) = heads.iter().find(|h| h.chip.0 <= x && x <= h.chip.1) {
-        return (head.slot, xs.get(head.slot).copied().unwrap_or(end));
+        return (head.slot, head.inside);
     }
     let stops = xs.iter().copied().chain(std::iter::once(end)).enumerate().chain(heads.iter().map(|h| (h.slot, h.tray)));
     let mut best = (0usize, end, f32::INFINITY);
@@ -425,7 +435,7 @@ impl Strip<'_, '_> {
         let at = pos2(self.x, self.rect.top() + 6.0);
         let width = draw(self.ui, &self.painter, at);
         if open && start < end {
-            self.heads.push(Head { slot: start, tray, chip: (at.x, at.x + width) });
+            self.heads.push(Head { slot: start, tray, chip: (at.x, at.x + width), inside: at.x + width + 4.0 });
         }
         if !open {
             self.xs.extend(std::iter::repeat_n(self.x, end.saturating_sub(start)));
