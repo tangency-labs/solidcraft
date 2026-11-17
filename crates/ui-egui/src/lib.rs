@@ -233,6 +233,7 @@ pub mod params_dialog;
 pub mod personal_sheet_rules;
 pub(crate) mod pick_index;
 pub(crate) mod place_gizmo;
+mod plugin_images;
 pub mod plugin_install;
 pub(crate) mod plugin_menu;
 mod plugin_slots;
