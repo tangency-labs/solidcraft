@@ -708,7 +708,7 @@ pub fn offered(app: &SolveApp) -> Option<&Release> {
 /// organization's policy turned checks off.
 pub fn available(app: &mut SolveApp) -> bool {
     !app.updater.off
-        && app.policy.mandatory.check_for_updates != Some(false)
+        && app.policy.mandatory.check_for_updates() != Some(false)
         && (app.updater.feed.is_some() || (app.services.http_get.is_some() && app.updater.kind().checks()))
 }
 
@@ -1159,7 +1159,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
 
 /// Manual checks also have a visible result when no update can be offered.
 fn show_check_status(app: &mut SolveApp, ctx: &egui::Context) {
-    let (message, warning) = if app.policy.mandatory.check_for_updates == Some(false) {
+    let (message, warning) = if app.policy.mandatory.check_for_updates() == Some(false) {
         (solidcraft_ui_text::tr("policy.updates_off").to_string(), false)
     } else if !available(app) {
         (solidcraft_ui_text::tr("update.check_unavailable").to_string(), false)
@@ -1204,7 +1204,7 @@ enum State {
 pub fn prefs_rows(app: &mut SolveApp, ui: &mut egui::Ui) {
     let can = available(app);
     let kind = app.updater.kind().clone();
-    let policy = app.policy.mandatory.check_for_updates;
+    let policy = app.policy.mandatory.check_for_updates();
     let note = if kind == InstallKind::Web {
         solidcraft_ui_text::tr("update.prefs_web").to_string()
     } else if policy == Some(false) {

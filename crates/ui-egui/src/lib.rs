@@ -1384,6 +1384,8 @@ impl SolveApp {
                 obj.insert(key, value);
             }
         }
+        // A setting the organization's policy sets is saved with the person's own value.
+        policy::keep_own(self, &mut v);
         v.to_string()
     }
 
@@ -1497,6 +1499,8 @@ impl SolveApp {
             .map(|a| a.iter().filter_map(|c| serde_json::from_value::<[u8; 3]>(c.clone()).ok()).take(recent_colors::MAX_RECENT_COLORS).collect())
             .unwrap_or_default();
         panel_runtime::load_preferences(self, &v);
+        // Loaded values are the person's own; the organization's policy still sets its settings.
+        policy::enforce(self);
     }
 
     pub fn with_control(mut self, rx: Receiver<ControlRequest>) -> Self {
@@ -3715,6 +3719,8 @@ impl SolveApp {
         ui_kit::set_viewport_half_height(ctx, self.cam.half_height());
         // Tab or Shift+Tab into any text or number box selects its text, app-wide.
         ui_kit::install_keyboard_focus(ctx);
+        // A setting the organization's policy sets keeps its value, whatever changed it.
+        policy::enforce(self);
         // Shortcuts run here, before `ui` installs the language scope: a tool started by its
         // key must build its translated hint in the user's language, not in English.
         let _language = solidcraft_ui_text::scope(&self.preferences.language);

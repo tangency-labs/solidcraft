@@ -313,7 +313,12 @@ pub fn app_bar(app: &mut SolveApp, ui: &mut egui::Ui) {
                     }
                     app_bar::BarAction::HidePill { id } => {
                         if let Some(link) = crate::links::by_id(id) {
-                            (link.hide)(&mut app.preferences);
+                            // A pill the organization's policy shows stays: say why instead.
+                            if app.policy.locks(link.pref) {
+                                app.set_status(solidcraft_ui_text::tr("policy.set_by_organization").to_string(), false);
+                            } else {
+                                (link.hide)(&mut app.preferences);
+                            }
                         }
                     }
                     app_bar::BarAction::Version => ui.ctx().open_url(egui::OpenUrl::new_tab(&url)),

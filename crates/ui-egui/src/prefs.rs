@@ -2456,12 +2456,10 @@ fn defaults(app: &mut SolveApp, page: usize) {
     }
     let (msaa, window_system, adapter) = (app.preferences.msaa, app.preferences.window_system.clone(), app.preferences.graphics_adapter.clone());
     let units = app.preferences.default_units.clone();
-    let check_updates = app.preferences.check_updates;
     reset_preferences(&mut app.preferences, page);
-    // A setting the organization's policy locks keeps the person's choice for when the policy goes.
-    if app.policy.locks("check_updates") {
-        app.preferences.check_updates = check_updates;
-    }
+    // A setting the organization's policy sets keeps its value, and the person's own choice stays
+    // kept for when the policy goes.
+    crate::policy::enforce_after_reset(app);
     if page == PAGE_PLUGINS {
         app.prefs_window.plugin_limit_inputs = None;
     }
@@ -2664,7 +2662,7 @@ pub fn apply_new_design(app: &mut SolveApp) {
 }
 
 /// The new-design preference also applies to the blank, unsaved design already open.
-fn default_units_changed(app: &mut SolveApp) {
+pub(crate) fn default_units_changed(app: &mut SolveApp) {
     if crate::documents::active_is_blank(app) {
         apply_new_design(app);
     }
@@ -3665,7 +3663,13 @@ pub fn control(app: &mut SolveApp, p: &serde_json::Value) -> Result<serde_json::
         o.insert("stand_up_note".into(), json!(app.stand_up.is_some() && app.stand_up_note));
         o.insert("dark".into(), json!(app.ui.dark));
         if app.policy.managed() {
-            let mut policy = json!({ "locked": app.policy.locked(), "check_updates": crate::policy::check_updates(app) });
+            // The settings report the person's stored choices; `policy` has the values in force.
+            crate::policy::own_values(app, o);
+            let mut policy = json!({
+                "locked": app.policy.locked(),
+                "check_updates": crate::policy::check_updates(app),
+                "settings": crate::policy::in_force(app),
+            });
             if let (Some(name), Some(p)) = (app.policy.organization(), policy.as_object_mut()) {
                 p.insert("organization".into(), json!(name));
             }
@@ -4482,8 +4486,11 @@ fn prepare_preferences(
             if !o.contains_key(k) {
                 return Err(format!("unknown preference `{k}`"));
             }
-            // Writing back the stored value is not a change (a client may send every setting it read).
-            if app.policy.locks(k) && o.get(k) != Some(v) {
+            // Writing back what was read is not a change (a client may send every setting it read).
+            if app.policy.locks(k) {
+                if crate::policy::unchanged(app, k, v) {
+                    continue;
+                }
                 return Err(format!("`{k}` is set by your organization's policy and cannot be changed here"));
             }
             if k == "custom_themes" {
