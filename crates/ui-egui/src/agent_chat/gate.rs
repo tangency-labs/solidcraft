@@ -74,13 +74,7 @@ fn reads_only(id: &str) -> bool {
         || id.ends_with(".list")
         || matches!(
             id,
-            "edit.checkpoint"
-                | "selection.get"
-                | "render.status"
-                | "render.backends"
-                | "render.settings.get"
-                | "file.slicers"
-                | "engine.describe"
+            "edit.checkpoint" | "selection.get" | "render.status" | "render.backends" | "render.settings.get" | "file.slicers" | "engine.describe"
         )
 }
 
