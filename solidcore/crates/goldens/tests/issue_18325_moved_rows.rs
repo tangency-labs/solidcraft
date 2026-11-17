@@ -36,7 +36,9 @@
 //!   reference, or `r`'s whole enclosure on new's side of the midpoint of new and main.
 //! * EQUAL: `new == main`, or the two at the same exact distance from `r`.
 //! * EQUAL-at-rounding: `new` lies in the a-priori enclosure `E` of the kernel's own float
-//!   result, so `|new − r| <= B = sup_{x in E} |x − r|`, with `B = L e_in + γ_k M`:
+//!   result, so `|new − r| <= B = sup_{x in E} |x − r|`, with `B = L e_in + γ_k M`; for an
+//!   enclosed reference `R` must lie in `E` too (a reference wider than the kernel's
+//!   rounding decides nothing):
 //!   - a degree-1 trim evaluation: `B = 64 ε max(|f|, |t0|, |t1|)` (`nurbs_crv.rs`
 //!     `crv_point_error`);
 //!   - a surface evaluation at the record's own uv: the exact homogeneous sums widened by
@@ -63,10 +65,12 @@
 //!     every station when the edge's curve is the face's boundary row at `f` (a clamped end,
 //!     bit for bit) or its `CrvOnSurf` UV curve is the exact iso line; otherwise at `(f, t)`
 //!     the exact split of `C(s) − S(f, t)` along and across the normal, at a gap station at
-//!     the curve's certified closest approach (a bracketed sign change of the projection's
-//!     derivative, widened by the curve's Lipschitz bound times the bracket).
-//!     `|max x − max r| <= max_j sup |E_j − R_j|`. The table labels the maxima set at a gap
-//!     station (`max set at a gap station`): 56 at-rounding, 3 CLOSER;
+//!     the curve's closest approach to the normal line, `s*` certified by interval Newton
+//!     (unique in a box of a few hundred ulps, `h'` enclosed with the hull of the curve's
+//!     second-derivative control net over the box's span), the values taken at a double
+//!     near `s*` and bounded by the mean value theorem and the convexity of `dev²`
+//!     ([`gap_ref`]). At rounding needs `R ⊆ E` as well as `new ∈ E` (checked on the
+//!     maximum), so `|new − r| <= width(E)`, the kernel's rounding alone.
 //!   - the cached edge/face gap of a goc case (a `CrvOnSurf` on its own face, checked on
 //!     the model) and `face_p3`'s mean and maximum curve/surface gaps (every edge curve of
 //!     the face its boundary row along a domain side, checked on the model): the reference
@@ -84,7 +88,7 @@
 //! all of them are re-blessed. The same diff moves 41 rows of six other units by at most
 //! `1e-10` relative, all within the goldens' tolerance. Every one of those moves comes from
 //! the exact drop ends: with the gap seed reverted the fresh bless of all nine units is the
-//! same bit for bit. Six of them (82 elements) are certified here and re-blessed:
+//! same bit for bit. Eleven of them (103 elements) are certified here and re-blessed:
 //!
 //! * `topology.vertexuse` (2 rows): the uv point, tangents and sector angle at a vertex use
 //!   of a face whose edges are all domain sides' iso curves (checked on the replayed model,
@@ -99,11 +103,15 @@
 //!   an edge use's trim, the edge a domain side's iso curve on the replayed model
 //!   (`label_query`).
 //!
-//! The other 35 are not certified and keep main's expectations: `blend.fillet_solver_p2`
-//! (5 rows; the rail/edge-use intersection is a `LocalSolveNd` fixed point, so their class
-//! needs a solver bound), `mass.integrator` (29) and `boolean.api_brep` (1, two areas; both
-//! adaptive nested quadrature, whose reference needs an interval replay of the kernel's
-//! partition).
+//! * `blend.fillet_solver_p2` (5 rows): the rail / side edge-use intersection, a
+//!   `LocalSolveNd` fixed point of affine equations (two offset planes, a degree-1 trim): the
+//!   root enclosed from the exact residual at the new point, the kernel's own residual there
+//!   within its evaluation's rounding, and `|new − x*|` bounded by `|J⁻¹|` times it
+//!   (`label_rail_eu`).
+//!
+//! The other 30 are not certified and keep main's expectations: `mass.integrator` (29) and
+//! `boolean.api_brep` (1, two areas), both the kernel's nested adaptive integration along
+//! the trims, whose reference needs an interval replay of the integrator's own partition.
 //!
 //! Run: `cargo test --profile goldens -p goldens --test issue_18325_moved_rows -- --nocapture`
 //! (prints the table: element classes per unit and kind, the largest `|new − r| / B` of the
@@ -129,6 +137,7 @@ use std::collections::BTreeMap;
 
 use goldens::case::repo_root;
 use goldens::golden::encode;
+use goldens::units::blend_fillet_solver_p2::rail_eu_scene;
 use goldens::units::query_face_p2::scene as query_scene;
 use goldens::units::topology_brep_validation::scene as val_scene;
 use goldens::units::topology_edgeuse_p2::scene as scene_p2;
@@ -152,6 +161,7 @@ use solidcore::topology::{vertexuse, Brep, EdgeuseId};
 const DATA: &str = include_str!("data/issue_18325_moved_rows.tsv");
 
 const UNITS: &[&str] = &[
+    "blend.fillet_solver_p2",
     "query.face_p2",
     "topology.brep_validation",
     "topology.edgeuse_p2",
@@ -365,8 +375,23 @@ fn gam(n: usize) -> f64 {
 
 type V3 = [Iv; 3];
 
-/// A float dot product of `n` terms: the exact sum widened by `γ_n Σ |terms|`.
-fn kdot(a: &V3, b: &V3, n: usize) -> Iv {
+// The kernel-chain helpers below come in two modes over the same interval expression:
+// `round` widens every step by its float rounding (an enclosure of the kernel's float result
+// for inputs in the operand boxes); without it they are the exact operations. Interval
+// operations are inclusion-monotone, so the exact chain over the exact inputs' enclosures
+// lies inside the rounded chain over boxes holding them: the reference `R` inside `E`.
+
+/// `x` widened by `g |x|` when `round`.
+fn rnd(x: Iv, g: f64, round: bool) -> Iv {
+    if round {
+        x.rel(g)
+    } else {
+        x
+    }
+}
+
+/// A dot product of `n` terms; rounded: the exact sum widened by `γ_n Σ |terms|`.
+fn rdot(a: &V3, b: &V3, n: usize, round: bool) -> Iv {
     let mut s = Iv::p(0.0);
     let mut m = 0.0;
     for (x, y) in a.iter().zip(b) {
@@ -374,29 +399,35 @@ fn kdot(a: &V3, b: &V3, n: usize) -> Iv {
         s = s.add(t);
         m = up_add(m, t.mag());
     }
-    s.widen(up_mul(gam(n), m))
+    if round {
+        s.widen(up_mul(gam(n), m))
+    } else {
+        s
+    }
 }
 
-/// A float cross product: each component's two products and difference, `γ_2`.
-fn kcross(a: &V3, b: &V3) -> V3 {
-    let comp = |i: usize, j: usize| {
-        let p = a[i].mul(b[j]);
-        let q = a[j].mul(b[i]);
-        p.sub(q).widen(up_mul(gam(2), up_add(p.mag(), q.mag())))
-    };
+/// `x − y`; rounded: each operand a product, `γ_2 (|x| + |y|)`.
+fn rsub2(x: Iv, y: Iv, round: bool) -> Iv {
+    let d = x.sub(y);
+    if round {
+        d.widen(up_mul(gam(2), up_add(x.mag(), y.mag())))
+    } else {
+        d
+    }
+}
+
+/// A cross product; rounded: each component's two products and difference, `γ_2`.
+fn rcross(a: &V3, b: &V3, round: bool) -> V3 {
+    let comp = |i: usize, j: usize| rsub2(a[i].mul(b[j]), a[j].mul(b[i]), round);
     [comp(1, 2), comp(2, 0), comp(0, 1)]
 }
 
-/// A float normalisation `c / |c|`: the dot (`γ_3`), the square root (`u`), the division (`γ_2`,
-/// which also covers a reciprocal-and-multiply).
-fn kunit(c: &V3) -> V3 {
-    let q = kdot(c, c, 3);
-    let ln = q.sqrt().rel(U);
-    [
-        c[0].div(ln).rel(gam(2)),
-        c[1].div(ln).rel(gam(2)),
-        c[2].div(ln).rel(gam(2)),
-    ]
+/// A normalisation `c / |c|`; rounded: the dot (`γ_3`), the square root (`u`), the division
+/// (`γ_2`, which also covers a reciprocal-and-multiply).
+fn runit(c: &V3, round: bool) -> V3 {
+    let q = rdot(c, c, 3, round);
+    let ln = rnd(q.sqrt(), U, round);
+    std::array::from_fn(|i| rnd(c[i].div(ln), gam(2), round))
 }
 
 fn cross(a: &V3, b: &V3) -> V3 {
@@ -508,7 +539,11 @@ type Eval = (V3, V3, V3);
 
 impl Srf {
     fn from_input(inputs: &Value) -> Srf {
-        let b = &inputs["brep"]["surface"]["bspline"];
+        Srf::from_bspline(&inputs["brep"]["surface"]["bspline"])
+    }
+
+    /// A `bspline` surface input (`net`, `p`, `q`, `u`, `v`).
+    fn from_bspline(b: &Value) -> Srf {
         let net: Vec<Vec<[f64; 4]>> = b["net"]
             .as_array()
             .expect("net")
@@ -592,14 +627,62 @@ impl Srf {
     /// Every dumped value is checked inside its enclosure, so an undercount shows as a
     /// failed containment, never as a wrong class.
     fn kernel(&self, u: f64, v: f64) -> Eval {
-        let (mut a, m) = self.sums(Iv::p(u), Iv::p(v));
-        let g = gam(7 * self.p + 7 * self.q + (self.p + 1) * (self.q + 1) + 10);
+        self.kernel_iv(Iv::p(u), Iv::p(v))
+    }
+
+    /// [`Srf::kernel`] for every `(u, v)` in a parameter box (one polynomial piece).
+    fn kernel_iv(&self, u: Iv, v: Iv) -> Eval {
+        let (mut a, m) = self.sums(u, v);
+        let g = gam(srf_k(self.p, self.q));
         for d in 0..3 {
             for c in 0..4 {
                 a[d][c] = a[d][c].widen(up_mul(g, m[d][c]));
             }
         }
         self.quotient(a, true)
+    }
+
+    /// The kernel's float evaluation enclosed over a box (`round`), or the exact one. A box
+    /// that meets interior knots is split there and the pieces' enclosures joined (the
+    /// piece `[k, hi]` evaluates `k` on the span to its right, as the kernel does; the piece
+    /// `[lo, k]` adds the left span's limit, which only widens the enclosure).
+    fn eval(&self, u: Iv, v: Iv, round: bool) -> Eval {
+        let pieces = |kn: &[f64], x: Iv| -> Vec<Iv> {
+            let mut cuts: Vec<f64> = kn
+                .iter()
+                .copied()
+                .filter(|&k| x.lo < k && k <= x.hi)
+                .collect();
+            cuts.dedup();
+            let mut out = Vec::new();
+            let mut lo = x.lo;
+            for k in cuts {
+                out.push(Iv { lo, hi: k });
+                lo = k;
+            }
+            out.push(Iv { lo, hi: x.hi });
+            out
+        };
+        let mut acc: Option<Eval> = None;
+        for pu in pieces(&self.u, u) {
+            for pv in pieces(&self.v, v) {
+                let e = if round {
+                    self.kernel_iv(pu, pv)
+                } else {
+                    self.exact(pu, pv)
+                };
+                acc = Some(match acc {
+                    None => e,
+                    Some(a) => {
+                        let h = |x: &V3, y: &V3| -> V3 {
+                            std::array::from_fn(|q| Iv::hull(x[q], y[q]))
+                        };
+                        (h(&a.0, &e.0), h(&a.1, &e.1), h(&a.2, &e.2))
+                    }
+                });
+            }
+        }
+        acc.expect("a piece")
     }
 
     fn quotient(&self, a: [[Iv; 4]; 3], round: bool) -> Eval {
@@ -615,6 +698,12 @@ impl Srf {
         };
         (s, der(1), der(2))
     }
+}
+
+/// The rounding count `K` of the kernel's surface evaluation of degrees `(p, q)`, value
+/// and first derivatives ([`Srf::kernel`] counts it): `7p + 7q + (p+1)(q+1) + 10`.
+fn srf_k(p: usize, q: usize) -> usize {
+    7 * p + 7 * q + (p + 1) * (q + 1) + 10
 }
 
 /// A dumped B-spline curve (`deg`, the full knot vector, homogeneous control points
@@ -646,8 +735,18 @@ impl Crv {
         let cd: V3 = std::array::from_fn(|q| ad[q].sub(ad[3].mul(c[q])).div(w));
         (c, cd)
     }
-    /// An enclosure of the kernel's float `C(s)`: the exact sums widened by `γ_K Σ|terms|`,
-    /// `K = 9p + (p+1) + 8`, then the rational division (`γ_2`).
+    /// An enclosure of the kernel's float `C(s)` (`crv_eval` in `nurbs/nurbs_crv.rs`, the
+    /// path `BSplineCurve::evaluate_point` takes inside the interval; its ends return the
+    /// end control points, which this holds too): the exact sums widened by
+    /// `γ_K Σ|terms|`, `K = 7p + 2`, counted as [`Srf::kernel`]'s per direction:
+    /// - `basis_eval_into`, each of the `p` levels: `left`/`right` (1), their sum `delta`
+    ///   (1 more), the quotient (1), the product by `temp` (1) and the sum `saved + …` (1)
+    ///   on nonnegative terms: `6p` relative to the terms;
+    /// - the weighted sum: `alpha · Pw` (1) and the running sum of the `p + 1` terms
+    ///   (`p + 1`);
+    ///
+    /// then `to_euclid`'s division by the weight, one rounding (`u`) of the quotient of the
+    /// two enclosures.
     fn kernel(&self, s: f64) -> V3 {
         let (n, _, _) = basis(&self.knots, self.p, Iv::p(s));
         let mut a = [Iv::p(0.0); 4];
@@ -658,39 +757,87 @@ impl Crv {
                 m[q] = up_add(m[q], n[i].abs().mul(Iv::p(cp[q].abs())).hi);
             }
         }
-        let g = gam(9 * self.p + (self.p + 1) + 8);
+        let g = gam(7 * self.p + 2);
         let a: [Iv; 4] = std::array::from_fn(|q| a[q].widen(up_mul(g, m[q])));
         if !self.rational() {
             return [a[0], a[1], a[2]];
         }
-        std::array::from_fn(|q| a[q].div(a[3]).rel(gam(2)))
+        std::array::from_fn(|q| a[q].div(a[3]).rel(U))
     }
-    /// A bound on `|C'|` over the curve: `2 p max|P| / h_min` (non-rational), times
-    /// `4 w_max² / w_min²` for a rational curve.
-    fn lipschitz(&self) -> f64 {
-        let mx = self
-            .cps
-            .iter()
-            .flat_map(|c| c[..3].iter().map(|x| x.abs()))
-            .fold(0.0, f64::max);
-        let hmin = self
-            .knots
-            .windows(2)
-            .filter(|w| w[1] > w[0])
-            .map(|w| Iv::p(w[1]).sub(Iv::p(w[0])).lo)
-            .fold(f64::INFINITY, f64::min);
-        let mut l = Iv::p(mx)
-            .mul(Iv::p(2.0 * self.p as f64))
-            .div(Iv::p(hmin))
-            .hi;
-        if self.rational() {
-            let wmax = self.cps.iter().map(|c| c[3]).fold(0.0, f64::max);
-            let wmin = self.cps.iter().map(|c| c[3]).fold(f64::INFINITY, f64::min);
-            let wm = Iv::p(wmax);
-            let wn = Iv::p(wmin);
-            l = Iv::p(l).mul(Iv::p(4.0)).mul(wm.mul(wm)).div(wn.mul(wn)).hi;
+    /// The nonempty knot span holding the interval `s` (`knots[j] <= s.lo < knots[j + 1]`,
+    /// the last one at the end), asserting `s` does not straddle an interior knot.
+    fn span(&self, s: Iv) -> usize {
+        let n = self.cps.len();
+        let j = (self.p..n)
+            .rev()
+            .find(|&i| self.knots[i] <= s.lo && s.lo < self.knots[i + 1])
+            .unwrap_or(if s.lo < self.knots[self.p] {
+                self.p
+            } else {
+                n - 1
+            });
+        assert!(
+            s.hi <= self.knots[j + 1] || j == n - 1,
+            "parameter box {s:?} straddles a knot"
+        );
+        j
+    }
+    /// `C(S)`, `C'(S)`, `C''(S)` over the box `S` and `w(S)`: `C''` from the hull of the
+    /// homogeneous second-derivative control net over `S`'s span (the convex hull property:
+    /// the second derivative of the homogeneous curve on a span is a B-spline over that
+    /// span's `p − 1` second-derivative control points), `C'' = (A'' − 2 w' C' − w'' C) / w`.
+    fn homog_iv(&self, s: Iv) -> (V3, V3, V3, Iv) {
+        let (n, d, _) = basis(&self.knots, self.p, s);
+        let mut a = [Iv::p(0.0); 4];
+        let mut ad = [Iv::p(0.0); 4];
+        for (i, cp) in self.cps.iter().enumerate() {
+            for q in 0..4 {
+                a[q] = a[q].add(n[i].mul(Iv::p(cp[q])));
+                ad[q] = ad[q].add(d[i].mul(Iv::p(cp[q])));
+            }
         }
-        l
+        let w = a[3];
+        let c: V3 = std::array::from_fn(|q| a[q].div(w));
+        let cd: V3 = std::array::from_fn(|q| ad[q].sub(ad[3].mul(c[q])).div(w));
+        let add = self.d2_hull(s);
+        let cdd: V3 = std::array::from_fn(|q| {
+            add[q]
+                .sub(Iv::p(2.0).mul(ad[3]).mul(cd[q]))
+                .sub(add[3].mul(c[q]))
+                .div(w)
+        });
+        (c, cd, cdd, w)
+    }
+    /// The hull of the homogeneous second-derivative control points that act on `S`'s span:
+    /// `Q_i = p (H_{i+1} − H_i) / (k_{i+p+1} − k_{i+1})`, `R_i = (p − 1) (Q_{i+1} − Q_i) /
+    /// (k_{i+p+1} − k_{i+2})`, `i` in `j − p ..= j − 2` for the span `j` (every divisor
+    /// there holds the span, so it is positive). `0` for degree 1.
+    fn d2_hull(&self, s: Iv) -> [Iv; 4] {
+        let p = self.p;
+        if p < 2 {
+            return [Iv::p(0.0); 4];
+        }
+        let j = self.span(s);
+        let k = |i: usize| Iv::p(self.knots[i]);
+        let h = |i: usize| self.cps[i].map(Iv::p);
+        let pf = Iv::p(p as f64);
+        let q = |i: usize| -> [Iv; 4] {
+            let den = k(i + p + 1).sub(k(i + 1));
+            let (a, b) = (h(i + 1), h(i));
+            std::array::from_fn(|c| pf.mul(a[c].sub(b[c])).div(den))
+        };
+        let pm = Iv::p((p - 1) as f64);
+        let mut hull: Option<[Iv; 4]> = None;
+        for i in j - p..=j - 2 {
+            let den = k(i + p + 1).sub(k(i + 2));
+            let (a, b) = (q(i + 1), q(i));
+            let r: [Iv; 4] = std::array::from_fn(|c| pm.mul(a[c].sub(b[c])).div(den));
+            hull = Some(match hull {
+                None => r,
+                Some(x) => std::array::from_fn(|c| Iv::hull(x[c], r[c])),
+            });
+        }
+        hull.expect("a second-derivative control point")
     }
 }
 
@@ -781,8 +928,10 @@ impl Srf {
 
 /// An enclosure of the kernel's float `CrvOnSurf` point `S(trim(s))`, `trim` a degree-1 UV
 /// line: the exact surface point at the exact line point, widened by the line evaluation's
-/// error `64 ε max|cp|` through the hull Lipschitz bounds, and by the surface rounding
-/// `γ_K max|P|`.
+/// error `64 ε max|cp|` (`crv_point_error` at degree 1, [`line_bound`]) through the hull
+/// Lipschitz bounds, and by the surface rounding `γ_K max|P|`, `K` = [`srf_k`] (the
+/// surface's `evaluate_point` runs [`Srf::kernel`]'s counted chain without the derivative;
+/// a non-negative basis summing to 1 keeps `Σ|terms| <= max|P|`).
 fn cos_point(srf: &Srf, b: &Bounds, trim: &Crv, s: f64) -> V3 {
     assert!(trim.p == 1 && trim.cps.len() == 2 && !trim.rational());
     let (t0, t1) = (trim.knots[0], trim.knots[trim.knots.len() - 1]);
@@ -799,7 +948,7 @@ fn cos_point(srf: &Srf, b: &Bounds, trim: &Crv, s: f64) -> V3 {
     // the exact surface point over the line point's enclosure, widened through the hull
     // Lipschitz bounds by the evaluation error, and by the surface's rounding
     let (p, _, _) = srf.exact(uv[0], uv[1]);
-    let g = gam(9 * srf.p + 9 * srf.q + (srf.p + 1) * (srf.q + 1) + 8);
+    let g = gam(srf_k(srf.p, srf.q));
     std::array::from_fn(|q| {
         let r = up_add(
             up_add(up_mul(b.lu[q], e), up_mul(b.lv[q], e)),
@@ -859,9 +1008,12 @@ fn classify(new: f64, main: f64, c: &Cert) -> Class {
             } else {
                 r.hi < mid.lo
             };
+            // at rounding: new is in the kernel's float enclosure `E`, and the reference's
+            // enclosure lies inside `E` too, so `|new − ref| <= width(E)`, the kernel's own
+            // rounding (a reference wider than `E` decides nothing)
             if closer {
                 Class::Closer
-            } else if e.is_some_and(|e| e.contains(new)) {
+            } else if e.is_some_and(|e| e.contains(new) && e.lo <= r.lo && r.hi <= e.hi) {
                 Class::AtRounding
             } else {
                 Class::Farther
@@ -1063,8 +1215,9 @@ fn norm(a: &V3) -> Iv {
 
 /// `EvaluateBinormal` at a point of the iso line (record `[point, binormal, tangent,
 /// normal, uv, uv_vector]`): the references at the exact `(f, t)` (`t` the edge interval's
-/// `evaluate(frac)`, as the kernel's), the enclosures from the row's own uv, normal and
-/// binormal through the surface's float evaluation.
+/// `evaluate(frac)`, as the kernel's), the enclosures the same chain rounded as the kernel
+/// rounds it over the box holding the row's own uv and `(f, t)` ([`label_binormal_at`]),
+/// so the reference lies inside the enclosure.
 fn label_binormal(
     v: &[f64],
     main: &[f64],
@@ -1108,47 +1261,62 @@ fn label_binormal_at(
             },
         );
     }
-    // references
-    let (_, su, sv) = srf.exact(Iv::p(uv[0]), Iv::p(uv[1]));
-    let cn = cross(&su, &sv);
-    let sg = sign_of(&pts(main, 9), &cn);
-    let nn = scale3(&cn, sg);
-    let ln = norm(&nn);
-    let t3 = pts(v, 6);
-    let bb = cross(&nn, &t3);
-    let lb = norm(&bb);
-    let a00 = dot(&su, &su);
-    let a01 = dot(&su, &sv);
-    let a11 = dot(&sv, &sv);
-    let b0 = dot(&su, &bb);
-    let b1 = dot(&sv, &bb);
-    let det = a00.mul(a11).sub(a01.mul(a01));
-    let uvv = [
-        b0.mul(a11).sub(b1.mul(a01)).div(det).div(lb),
-        a00.mul(b1).sub(a01.mul(b0)).div(det).div(lb),
+    // The chain `n = ±unit(S_u × S_v)`, `b = unit(n × T)`, `uv_vector` the 2×2 solve of
+    // `[S_u S_v]ᵀ[S_u S_v] x = [S_u S_v]ᵀ b`, once exactly at `(f, t)` (the reference) and
+    // once as the kernel rounds it over the box holding its own uv and `(f, t)` (the
+    // enclosure). The tangent `T` is the edge's 3D curve tangent: an input the fix does not
+    // move (main's and the new row's bit for bit), which both chains take as it is, or, for
+    // a `CrvOnSurf` edge, the certified `cos derivative` (its reference in the exact chain,
+    // its enclosure in the rounded one).
+    let tangent: Vec<&Cert> = (0..3).filter_map(|q| out.get(&(base + 6 + q))).collect();
+    let (rt, et) = if tangent.is_empty() {
+        assert_eq!(
+            bits(&v[6..9]),
+            bits(&main[6..9]),
+            "the binormal's tangent moved"
+        );
+        (pts(v, 6), pts(v, 6))
+    } else {
+        let enc = |q: usize| match tangent[q] {
+            Cert::Enc { r, e: Some(e), .. } => (*r, *e),
+            c => panic!("the tangent's certificate {c:?}"),
+        };
+        (
+            std::array::from_fn(|q| enc(q).0),
+            std::array::from_fn(|q| enc(q).1),
+        )
+    };
+    let chain = |uvb: [Iv; 2], round: bool| -> (V3, V3, [Iv; 2]) {
+        let t3 = if round { et } else { rt };
+        let (_, su, sv) = srf.eval(uvb[0], uvb[1], round);
+        let c = rcross(&su, &sv, round);
+        let n = scale3(&runit(&c, round), sign_of(&pts(main, 9), &c));
+        let bn = runit(&rcross(&n, &t3, round), round);
+        let r = |x: Iv| rnd(x, U, round);
+        let a00 = rdot(&su, &su, 3, round);
+        let a01 = rdot(&su, &sv, 3, round);
+        let a11 = rdot(&sv, &sv, 3, round);
+        let b0 = rdot(&su, &bn, 3, round);
+        let b1 = rdot(&sv, &bn, 3, round);
+        let det = rsub2(a00.mul(a11), a01.mul(a01), round);
+        let uvv = [
+            r(rsub2(b0.mul(a11), b1.mul(a01), round).div(det)),
+            r(rsub2(a00.mul(b1), a01.mul(b0), round).div(det)),
+        ];
+        (n, bn, uvv)
+    };
+    let exact = [Iv::p(uv[0]), Iv::p(uv[1])];
+    let (rn, rb, ruv) = chain(exact, false);
+    let boxed = [
+        Iv::hull(exact[0], Iv::p(v[12])),
+        Iv::hull(exact[1], Iv::p(v[13])),
     ];
-    // enclosures
-    let (_, ksu, ksv) = srf.kernel(v[12], v[13]);
-    let kc = kcross(&ksu, &ksv);
-    let kn = scale3(&kunit(&kc), sign_of(&pts(main, 9), &kc));
-    let kb = kunit(&kcross(&pts(v, 9), &t3));
-    let br = pts(v, 3);
-    let sub2 = |x: Iv, y: Iv| x.sub(y).widen(up_mul(gam(2), up_add(x.mag(), y.mag())));
-    let ka00 = kdot(&ksu, &ksu, 3);
-    let ka01 = kdot(&ksu, &ksv, 3);
-    let ka11 = kdot(&ksv, &ksv, 3);
-    let kb0 = kdot(&ksu, &br, 3);
-    let kb1 = kdot(&ksv, &br, 3);
-    let kdet = sub2(ka00.mul(ka11), ka01.mul(ka01));
-    let kuv = [
-        sub2(kb0.mul(ka11), kb1.mul(ka01)).div(kdet).rel(U),
-        sub2(ka00.mul(kb1), ka01.mul(kb0)).div(kdet).rel(U),
-    ];
+    let (kn, kb, kuv) = chain(boxed, true);
     for q in 0..3 {
         out.insert(
             base + 9 + q,
             Cert::Enc {
-                r: nn[q].div(ln),
+                r: rn[q],
                 e: Some(kn[q]),
                 what: "bin normal",
             },
@@ -1156,7 +1324,7 @@ fn label_binormal_at(
         out.insert(
             base + 3 + q,
             Cert::Enc {
-                r: bb[q].div(lb),
+                r: rb[q],
                 e: Some(kb[q]),
                 what: "bin binormal",
             },
@@ -1169,7 +1337,7 @@ fn label_binormal_at(
         out.insert(
             base + 14 + q,
             Cert::Enc {
-                r: uvv[q],
+                r: ruv[q],
                 e: Some(kuv[q]),
                 what: "bin uv_vector",
             },
@@ -1186,7 +1354,7 @@ fn label_cos(v: &[f64], inputs: &Value, srf: &Srf, iso: &Iso, out: &mut BTreeMap
     let n = v.len();
     let (lo, hi) = (v[n - 3], v[n - 2]);
     let b = srf.bounds();
-    let g = gam(9 * srf.p + 9 * srf.q + (srf.p + 1) * (srf.q + 1) + 8);
+    let g = gam(srf_k(srf.p, srf.q));
     let e_uv = line_bound(iso);
     let mv = 1 - iso.c;
     let binormal = inputs["op"] == "binormal";
@@ -1311,52 +1479,59 @@ fn imax(xs: &[Iv]) -> Iv {
 
 /// The kernel's `eval_dist_and_dev` from its surface point and normal at `uv` and the curve
 /// point `c`: `(|dist|, dev)` enclosed.
-fn station_enc(srf: &Srf, uv: (f64, f64), c: &V3) -> (Iv, Iv) {
-    let (p, su, sv) = srf.kernel(uv.0, uv.1);
-    let n = kunit(&kcross(&su, &sv));
-    let gap: V3 = std::array::from_fn(|q| c[q].sub(p[q]).rel(U));
-    let d = kdot(&gap, &n, 3);
-    let npt: V3 = std::array::from_fn(|q| d.mul(n[q]).rel(U).add(p[q]).rel(U));
-    let diff: V3 = std::array::from_fn(|q| c[q].sub(npt[q]).rel(U));
-    let dev = kdot(&diff, &diff, 3).clamp0().sqrt().rel(U);
+fn station_enc(srf: &Srf, uv: [Iv; 2], c: &V3, round: bool) -> (Iv, Iv) {
+    let r = |x: Iv| rnd(x, U, round);
+    let (p, su, sv) = srf.eval(uv[0], uv[1], round);
+    let n = runit(&rcross(&su, &sv, round), round);
+    let gap: V3 = std::array::from_fn(|q| r(c[q].sub(p[q])));
+    let d = rdot(&gap, &n, 3, round);
+    let npt: V3 = std::array::from_fn(|q| r(r(d.mul(n[q])).add(p[q])));
+    let diff: V3 = std::array::from_fn(|q| r(c[q].sub(npt[q])));
+    let dev = r(rdot(&diff, &diff, 3, round).clamp0().sqrt());
     (absiv(d), dev)
 }
 
 /// `line_point_distance(S(uv), n(uv), c)`: `(|line_param|, drop_line_dist)` enclosed (`n`
 /// unit, so `line_param = (c − S).n / |n|²` with `|n|²` within rounding of 1).
-fn iso_enc(srf: &Srf, uv: (f64, f64), c: &V3) -> (Iv, Iv) {
-    let (p, su, sv) = srf.kernel(uv.0, uv.1);
-    let n = kunit(&kcross(&su, &sv));
-    let gap: V3 = std::array::from_fn(|q| c[q].sub(p[q]).rel(U));
-    let lp = kdot(&gap, &n, 3).div(kdot(&n, &n, 3)).rel(U);
-    let pnt: V3 = std::array::from_fn(|q| lp.mul(n[q]).rel(U).add(p[q]).rel(U));
-    let diff: V3 = std::array::from_fn(|q| pnt[q].sub(c[q]).rel(U));
-    let dld = kdot(&diff, &diff, 3).clamp0().sqrt().rel(U);
+fn iso_enc(srf: &Srf, uv: [Iv; 2], c: &V3, round: bool) -> (Iv, Iv) {
+    let r = |x: Iv| rnd(x, U, round);
+    let (p, su, sv) = srf.eval(uv[0], uv[1], round);
+    let n = runit(&rcross(&su, &sv, round), round);
+    let gap: V3 = std::array::from_fn(|q| r(c[q].sub(p[q])));
+    let lp = r(rdot(&gap, &n, 3, round).div(rdot(&n, &n, 3, round)));
+    let pnt: V3 = std::array::from_fn(|q| r(r(lp.mul(n[q])).add(p[q])));
+    let diff: V3 = std::array::from_fn(|q| r(pnt[q].sub(c[q])));
+    let dld = r(rdot(&diff, &diff, 3, round).clamp0().sqrt());
     (absiv(lp), dld)
 }
 
-/// The split of `C(s) − P` along and across `nvec`: `(|dist|, dev)`, exact enclosures.
-fn split(c: &V3, p: &V3, nvec: &V3) -> (Iv, Iv) {
-    let w = sub3(c, p);
+/// The closest approach `s*` of `curve` to the line `P + R nvec`, near `s0`: the root of
+/// `h(s) = (w − (w.n̂)n̂).C'(s)`, `w = C(s) − P`, located by secant steps in doubles and
+/// then certified by interval Newton: for a box `S` around the estimate `m`,
+/// `N = m − h(m) / h'(S)` with `h' = |C'|² − (C'.n̂)² + (w − (w.n̂)n̂).C''` enclosed over `S`
+/// ([`Crv::homog_iv`]); `N` strictly inside `S` proves `S` holds exactly one root, and that
+/// it lies in `N`. The box is then contracted by further Newton steps (`S ∩ N`). Returns
+/// the final box (a few hundred ulps at most: `h` is enclosed only to the rounding of its
+/// coordinates).
+fn closest_param(curve: &Crv, p: &V3, nvec: &V3, s0: f64) -> Iv {
     let nn = dot(nvec, nvec);
-    let wn = dot(&w, nvec);
-    let dist = absiv(wn).div(nn.sqrt());
-    let dev = dot(&w, &w).sub(wn.mul(wn).div(nn)).clamp0().sqrt();
-    (dist, dev)
-}
-
-/// The closest approach `s*` of `curve` to the line `P + R nvec`, near `s0`: a root of
-/// `h(s) = (w − (w.n̂)n̂).C'(s)`, `w = C(s) − P`, located by Newton steps in doubles and then
-/// bracketed by a sign change of `h` certified in interval arithmetic.
-fn closest_param(curve: &Crv, p: &V3, nvec: &V3, s0: f64) -> (f64, f64) {
+    let perp_of = |c: &V3| -> V3 {
+        let w = sub3(c, p);
+        let wn = dot(&w, nvec);
+        std::array::from_fn(|q| w[q].sub(wn.mul(nvec[q]).div(nn)))
+    };
     let h = |s: f64| {
         let (c, cd) = curve.exact(s);
-        let w = sub3(&c, p);
-        let nn = dot(nvec, nvec);
-        let wn = dot(&w, nvec);
-        let perp: V3 = std::array::from_fn(|q| w[q].sub(wn.mul(nvec[q]).div(nn)));
-        dot(&perp, &cd)
+        dot(&perp_of(&c), &cd)
     };
+    let dh = |s: Iv| {
+        let (c, cd, cdd, _) = curve.homog_iv(s);
+        let cn = dot(&cd, nvec);
+        dot(&cd, &cd)
+            .sub(cn.mul(cn).div(nn))
+            .add(dot(&perp_of(&c), &cdd))
+    };
+    let newton = |m: f64, s: Iv| Iv::p(m).sub(h(m).div(dh(s)));
     let (mut a, mut b) = (s0, s0 + 2f64.powi(-30) * s0.abs().max(1.0));
     let (mut fa, mut fb) = (h(a).mid(), h(b).mid());
     for _ in 0..80 {
@@ -1372,16 +1547,31 @@ fn closest_param(curve: &Crv, p: &V3, nvec: &V3, s0: f64) -> (f64, f64) {
             break;
         }
     }
-    let mut d = 2f64.powi(-50) * b.abs().max(2f64.powi(-20));
-    for _ in 0..40 {
-        let (lo, hi) = (b - d, b + d);
-        let (hl, hh) = (h(lo), h(hi));
-        if (hl.hi <= 0.0 && hh.lo >= 0.0) || (hl.lo >= 0.0 && hh.hi <= 0.0) {
-            return (lo, hi);
+    let mut d = 4.0 * f64::EPSILON * b.abs().max(f64::MIN_POSITIVE);
+    for _ in 0..60 {
+        let s = Iv::out(b - d, b + d);
+        let n = newton(b, s);
+        if s.lo < n.lo && n.hi < s.hi {
+            // `S` holds exactly one root, inside `N`: contract
+            let mut x = n;
+            for _ in 0..8 {
+                let m = x.mid();
+                let y = newton(m, x);
+                let z = Iv {
+                    lo: x.lo.max(y.lo),
+                    hi: x.hi.min(y.hi),
+                };
+                assert!(z.lo <= z.hi, "Newton contraction left the root's box");
+                if z.lo == x.lo && z.hi == x.hi {
+                    break;
+                }
+                x = z;
+            }
+            return x;
         }
         d *= 2.0;
     }
-    panic!("no certified bracket near {b}");
+    panic!("interval Newton did not certify a root near {b}");
 }
 
 /// The references of the ideal pipeline at the stations (the UV curve the exact iso line
@@ -1393,20 +1583,67 @@ fn station_refs(srf: &Srf, iso: &Iso, d: &Drop, param: f64, gap: bool) -> (Iv, I
     };
     let mut uv = [Iv::p(param); 2];
     uv[iso.c] = Iv::p(iso.f);
-    let (p, su, sv) = srf.exact(uv[0], uv[1]);
-    let nvec = cross(&su, &sv);
     if !gap {
         let (c, _) = curve.exact(param);
-        return split(&c, &p, &nvec);
+        return iso_enc(srf, uv, &c, false);
     }
-    let (lo, hi) = closest_param(curve, &p, &nvec, param);
-    let (d0, v0) = split(&curve.exact(lo).0, &p, &nvec);
-    let (d1, v1) = split(&curve.exact(hi).0, &p, &nvec);
-    let r = up_mul(curve.lipschitz(), hi - lo);
-    (
-        Iv::hull(d0, d1).widen(r).clamp0(),
-        Iv::hull(v0, v1).widen(r).clamp0(),
-    )
+    // the ideal pipeline's values at the certified `s*`
+    let (p, su, sv) = srf.exact(uv[0], uv[1]);
+    let s = closest_param(curve, &p, &cross(&su, &sv), param);
+    gap_ref(srf, uv, curve, s)
+}
+
+/// The ideal gap station's `(|dist|, dev)` at the closest approach `s*` in the certified box
+/// `S`. Evaluating `C` over `S` directly adds `|C'| w(S)` to every coordinate, so the
+/// values come from a double `m` in `S` near `s*` instead. With `n` the exact unit normal at
+/// the exact `uv`, `w(s) = C(s) − P`, `perp(s) = w − (w.n) n` and `h = perp.C'`:
+/// - `h' = |C'|² − (C'.n)² + perp.C''` is positive on `S` ([`closest_param`] certified
+///   it), so `|m − s*| <= x = |h(m)| / min h'(S)` (mean value theorem on `h`);
+/// - `dist(s) = w.n`: `dist(s*) ∈ dist(m) + (C'(S).n) [−x, x]`;
+/// - `dev(s)² = |perp|²` has derivative `2h` and second derivative `2h'`, so it is convex on
+///   `S` with its minimum at `s*`: `dev(m)² − max h'(S) x² <= dev(s*)² <= dev(m)²`.
+fn gap_ref(srf: &Srf, uv: [Iv; 2], curve: &Crv, s: Iv) -> (Iv, Iv) {
+    let (p, su, sv) = srf.eval(uv[0], uv[1], false);
+    let n = runit(&rcross(&su, &sv, false), false);
+    let perp_at = |c: &V3| -> V3 {
+        let w = sub3(c, &p);
+        let wn = dot(&w, &n);
+        std::array::from_fn(|q| w[q].sub(wn.mul(n[q])))
+    };
+    let h_at = |m: f64| {
+        let (c, cd) = curve.exact(m);
+        dot(&perp_at(&c), &cd)
+    };
+    let (cs, cds, cdds, _) = curve.homog_iv(s);
+    let cn = dot(&cds, &n);
+    let dh = dot(&cds, &cds)
+        .sub(cn.mul(cn))
+        .add(dot(&perp_at(&cs), &cdds));
+    assert!(
+        dh.lo > 0.0,
+        "h' not positive over the certified box {s:?}: {dh:?}"
+    );
+    // a double in `S` near `s*`: Newton steps in doubles from the box's middle
+    let mut m = s.mid();
+    for _ in 0..4 {
+        let next = m - h_at(m).mid() / dh.mid();
+        if !s.contains(next) || next == m {
+            break;
+        }
+        m = next;
+    }
+    let x = Iv::p(h_at(m).mag()).div(Iv::p(dh.lo)).hi;
+    let ds = Iv { lo: -x, hi: x };
+    let (cm, _) = curve.exact(m);
+    let dist = dot(&sub3(&cm, &p), &n).add(cn.mul(ds));
+    let pm = perp_at(&cm);
+    let dev2m = dot(&pm, &pm);
+    let dev2 = Iv {
+        lo: dev2m.lo - up_mul(dh.hi, up_mul(x, x)),
+        hi: dev2m.hi,
+    };
+    let dev2 = Iv::out(dev2.lo, dev2.hi);
+    (absiv(dist), dev2.clamp0().sqrt())
 }
 
 /// `sqrt(d² + v²)` as the kernel rounds it (`round`) or exactly.
@@ -1531,7 +1768,7 @@ fn label_drop(case: &str, srf: &Srf, iso: &Iso, d: &Drop, out: &mut BTreeMap<usi
     for st in &d.isos {
         let [p, u, v, dld, lp] = *st;
         let c = d.point(srf, b.as_ref(), p);
-        let (ed, ev) = iso_enc(srf, (u, v), &c);
+        let (ed, ev) = iso_enc(srf, [Iv::p(u), Iv::p(v)], &c, true);
         assert!(
             ed.contains(lp.abs()) && ev.contains(dld),
             "{case}: iso station {st:?} outside {ed:?} {ev:?}"
@@ -1547,7 +1784,12 @@ fn label_drop(case: &str, srf: &Srf, iso: &Iso, d: &Drop, out: &mut BTreeMap<usi
     for st in &d.gaps {
         let [t, u, v, s, dist, dev] = *st;
         let c = d.point(srf, b.as_ref(), s);
-        let (ed, ev) = station_enc(srf, (u, v), &c);
+        // the station's float uv and the exact `(f, t)` (within `line_bound` of it,
+        // asserted above): the enclosure holds the kernel's value and the exact chain's
+        let mut want = [Iv::p(t); 2];
+        want[iso.c] = Iv::p(iso.f);
+        let uv = [Iv::hull(Iv::p(u), want[0]), Iv::hull(Iv::p(v), want[1])];
+        let (ed, ev) = station_enc(srf, uv, &c, true);
         assert!(
             ed.contains(dist) && ev.contains(dev),
             "{case}: gap station {st:?} outside {ed:?} {ev:?}"
@@ -2086,6 +2328,10 @@ fn certificates(
 ) -> BTreeMap<usize, Cert> {
     let (name, inputs) = (case.name.as_str(), &case.inputs);
     let mut out = BTreeMap::new();
+    if unit == "blend.fillet_solver_p2" {
+        label_rail_eu(case, v, &mut out);
+        return out;
+    }
     let dom = if let Some(x) = inputs["brep"].get("dom") {
         let a = nums(x);
         [a[0], a[1], a[2], a[3]]
@@ -2128,6 +2374,45 @@ fn certificates(
                 what: "max joint uv gap (the pole)",
             },
         );
+        if v[7] != main[7] {
+            // on the replayed model: the face's surface has a pole (a domain side whose
+            // boundary row of control points is one point, bit for bit), and every such
+            // side's parameter extent is exactly 1
+            let (b, f) = face_scene(case).unwrap().expect("the case builds its face");
+            let srf = Srf::from_input(inputs);
+            assert!(
+                srf.is(bspline_surface(
+                    b.face(f).unwrap().surface.as_ref().expect("a surface")
+                )),
+                "{name}: the input net is not the face's surface"
+            );
+            let (nu, nv) = (srf.net.len(), srf.net[0].len());
+            let mut extents = Vec::new();
+            for (c, row) in [(0, 0), (0, nu - 1), (1, 0), (1, nv - 1)] {
+                let pts: Vec<[f64; 4]> = if c == 0 {
+                    srf.net[row].clone()
+                } else {
+                    srf.net.iter().map(|r| r[row]).collect()
+                };
+                if pts.iter().all(|x| bits(x) == bits(&pts[0])) {
+                    let (lo, hi) = (dom[1 - c], dom[3 - c]);
+                    // `hi − lo` and its rounding error (Knuth's TwoSum, exact): `0` makes
+                    // the double the exact extent
+                    let d = hi - lo;
+                    let bb = d - hi;
+                    let err = (hi - (d - bb)) + (-lo - bb);
+                    assert!(
+                        err == 0.0,
+                        "{name}: the pole side's extent {hi} − {lo} is not a double"
+                    );
+                    extents.push(d);
+                }
+            }
+            assert!(
+                !extents.is_empty() && extents.iter().all(|&d| d == 1.0),
+                "{name}: the pole sides' parameter extents {extents:?} are not exactly 1"
+            );
+        }
         // the mean and maximum curve/surface gaps (the drop distances of the edges'
         // curves to the face): every edge curve of the face is the face's boundary curve
         // along a side of its domain, bit for bit (`is_boundary`, checked on the replayed
@@ -2257,10 +2542,11 @@ fn certificates(
     let cos = name.starts_with("cos_open");
     match inputs["op"].as_str().unwrap() {
         "binormal" => {
-            label_binormal(v, main, &srf, &iso, num(&inputs["frac"]), &mut out);
+            // a `CrvOnSurf` edge's tangent is certified first: the binormal chain takes it
             if cos {
                 label_cos(v, inputs, &srf, &iso, &mut out);
             }
+            label_binormal(v, main, &srf, &iso, num(&inputs["frac"]), &mut out);
         }
         "normalized" => {
             if inputs["parameter_space"] == true {
@@ -2561,6 +2847,19 @@ fn label_validation(
             "the curve's ideal line",
         );
         let l = line_of(cand);
+        // the bounds below are of the kernel evaluating this degree-1 line: the curve's UV
+        // curve on the replayed model is it, bit for bit
+        let uvc = match curve.kind() {
+            CurveKind::CrvOnSurf(cs) => cs.uv_curve(),
+            _ => curve,
+        };
+        let CurveKind::BSpline(uvb) = uvc.kind() else {
+            panic!("a moved curve's UV curve that is not a B-spline");
+        };
+        assert!(
+            same_crv(&crv_of(uvb), &l),
+            "the moved curve's UV curve is not its ideal line, bit for bit"
+        );
         let (c, side, rev) = cand;
         let lb = line_bound(&Iso {
             c,
@@ -2644,9 +2943,9 @@ fn label_query(
     out: &mut BTreeMap<usize, Cert>,
 ) {
     let inputs = &case.inputs;
-    let Some((b, _, eu)) = query_scene(case).unwrap() else {
-        return;
-    };
+    let (b, _, eu) = query_scene(case)
+        .unwrap()
+        .expect("the case builds its scene");
     let m = Model { brep: b, eu };
     let srf = Srf::from_input(inputs);
     assert!(
@@ -2661,12 +2960,31 @@ fn label_query(
     let ivl = m.brep.edge(e).unwrap().interval;
     let (t0, t1) = (ivl.min(), ivl.max());
     let (trim, _) = eu1::uv_trim_curve(&m.brep, eu).unwrap();
-    let ti = trim.expect("a uv trim").natural_interval();
+    let trim = trim.expect("a uv trim");
+    let ti = trim.natural_interval();
     assert_eq!(
         bits(&[ti.min(), ti.max()]),
         bits(&[t0, t1]),
         "the trim's interval"
     );
+    // the ideal trim, the exact line `(f, t)`; the bounds below are of the kernel
+    // evaluating it, so the replayed trim (and a `CrvOnSurf` edge curve's UV curve) is it,
+    // bit for bit
+    let mut a = [f; 2];
+    let mut z = [f; 2];
+    a[1 - c] = t0;
+    z[1 - c] = t1;
+    let l = line(a, z, t0, t1);
+    let is_l =
+        |cv: &Curve| matches!(cv.kind(), CurveKind::BSpline(bc) if same_crv(&crv_of(bc), &l));
+    assert!(is_l(trim), "the replayed trim is not the exact line");
+    if let Some(CurveKind::CrvOnSurf(cs)) = m.brep.edge(e).unwrap().curve.as_ref().map(Curve::kind)
+    {
+        assert!(
+            is_l(cs.uv_curve()),
+            "the CrvOnSurf's UV curve is not the exact line"
+        );
+    }
     let iso = Iso {
         c,
         f,
@@ -2705,11 +3023,6 @@ fn label_query(
                 .expect("the class's vertex");
             let p = [Iv::p(vx.point.x), Iv::p(vx.point.y), Iv::p(vx.point.z)];
             let t = t0 + num(&at["a"]) * (t1 - t0);
-            let mut a = [f; 2];
-            let mut z = [f; 2];
-            a[1 - c] = t0;
-            z[1 - c] = t1;
-            let l = line(a, z, t0, t1);
             let uv = line_at(&l, t);
             let r = norm(&sub3(&p, &srf.exact(uv[0], uv[1]).0));
             let q = cos_point(&srf, &srf.bounds(), &l, t);
@@ -2724,6 +3037,245 @@ fn label_query(
             );
         }
         _ => {}
+    }
+}
+
+// ---- blend.fillet_solver_p2: the rail / side edge-use solve ---------------------------------
+
+/// The inverse of a square interval matrix by Gauss–Jordan elimination (every pivot an
+/// interval without `0`, chosen by the largest smallest magnitude in its column), an
+/// enclosure of the inverse of every matrix in the box.
+fn iv_inverse(a: &[Vec<Iv>]) -> Vec<Vec<Iv>> {
+    let n = a.len();
+    let mut m: Vec<Vec<Iv>> = a
+        .iter()
+        .enumerate()
+        .map(|(i, row)| {
+            assert_eq!(row.len(), n, "a square matrix");
+            let mut r = row.clone();
+            r.extend((0..n).map(|j| Iv::p(if i == j { 1.0 } else { 0.0 })));
+            r
+        })
+        .collect();
+    let mig = |x: Iv| {
+        if x.lo > 0.0 {
+            x.lo
+        } else if x.hi < 0.0 {
+            -x.hi
+        } else {
+            0.0
+        }
+    };
+    for c in 0..n {
+        let p = (c..n)
+            .max_by(|&i, &j| mig(m[i][c]).total_cmp(&mig(m[j][c])))
+            .expect("a row");
+        assert!(mig(m[p][c]) > 0.0, "a singular Jacobian column {c}");
+        m.swap(c, p);
+        let piv = m[c][c];
+        let row: Vec<Iv> = m[c].iter().map(|x| x.div(piv)).collect();
+        for (i, r) in m.iter_mut().enumerate() {
+            if i == c {
+                continue;
+            }
+            let f = r[c];
+            for (x, y) in r.iter_mut().zip(&row) {
+                *x = x.sub(f.mul(*y));
+            }
+        }
+        m[c] = row;
+    }
+    m.into_iter().map(|r| r[n..].to_vec()).collect()
+}
+
+/// The offset point `S(u, v) + d N(u, v)` of a degree-(1, 1) net over the uv box, `N` the unit
+/// normal `S_u × S_v / |S_u × S_v|`: exact (`round` false) or the kernel's float enclosed
+/// (`round`: [`Srf::kernel`], the cross product and normalisation chains, the product by `d`
+/// and the sum, one rounding each).
+fn offset_point(s: &Srf, d: f64, u: f64, v: f64, round: bool) -> V3 {
+    let (p, su, sv) = if round {
+        s.kernel(u, v)
+    } else {
+        s.exact(Iv::p(u), Iv::p(v))
+    };
+    let n = runit(&rcross(&su, &sv, round), round);
+    std::array::from_fn(|c| rnd(p[c].add(rnd(Iv::p(d).mul(n[c]), U, round)), U, round))
+}
+
+/// `blend.fillet_solver_p2` `rail_eu`: the edge parameter `t`, the rail's and the other
+/// surface's uv and the extra unknowns where the rail of two offset degree-(1, 1) planes
+/// meets the side edge use's UV trim (`rail_edgeuse_intersect`: `LocalSolveNd` on
+/// `RailUvCurveIntersectEnfo`). The fix moves only the guess (`uv_trim(guess)`, the exact
+/// iso line now), so the solve lands on another float fixed point of the same equations.
+///
+/// The certificate, on the replayed solve ([`rail_eu_scene`]): both nets are planar
+/// parallelograms of integer points (checked: degree 1, integer coordinates, no twist) and
+/// the trim a non-rational degree-1 segment, so `F(x)` (`trim(t) − uv_rail`,
+/// `P_rail(uv_rail) − P_other(uv_other)`, `x_k − (target + k)`) is affine with the constant
+/// Jacobian `J` and the root `x* = x − J⁻¹ F(x)` for any `x`; `x*` is enclosed (`R`) at the
+/// new point from the exact `F(new)`. The kernel's float `F` at `new` is enclosed (`Ê`, the
+/// value chains of [`Srf::kernel`] and [`Crv::kernel`] and one rounding per difference) and
+/// the kernel's own residual there (the solver's accepted point, read from the replay) must
+/// lie in `Ê` and within `b = sup|Ê − F(new)|` of `0`: the solve stopped at a residual of
+/// the evaluation's rounding, not at its tolerance. Then `|F(new)| <= |F̂(new)| + b` and
+/// `|new − x*| <= |J⁻¹| (|F̂(new)| + b)` per unknown, all rounding: `E` is `R` widened by it.
+/// Every unknown also lies strictly inside the solve's box (no clamp or boundary hit).
+fn label_rail_eu(case: &goldens::Case, v: &[f64], out: &mut BTreeMap<usize, Cert>) {
+    let inputs = &case.inputs;
+    assert_eq!(inputs["op"], "rail_eu", "{}: a rail_eu case", case.name);
+    let extra = inputs["cfg"]["extra"].as_u64().expect("extra") as usize;
+    let target = num(&inputs["cfg"]["target"]);
+    let rail = inputs["rail"].as_u64().expect("rail") as usize;
+    assert!(rail < 2);
+    let surfs = &inputs["surfs"];
+    assert!(
+        surfs["has"]
+            .as_array()
+            .expect("has")
+            .iter()
+            .all(|h| h == true),
+        "both offset surfaces"
+    );
+    let srf_of = |i: usize| -> (Srf, f64) {
+        let s = Srf::from_bspline(&surfs["base"][i]["bspline"]);
+        assert!(
+            s.p == 1 && s.q == 1 && !s.rational && s.net.len() == 2 && s.net[0].len() == 2,
+            "a bilinear net"
+        );
+        for c in 0..3 {
+            let x = |i: usize, j: usize| s.net[i][j][c];
+            assert!(
+                s.net
+                    .iter()
+                    .flatten()
+                    .all(|p| p[c].fract() == 0.0 && p[c].abs() < 1e6),
+                "integer points"
+            );
+            assert_eq!(
+                x(0, 0) + x(1, 1),
+                x(0, 1) + x(1, 0),
+                "a planar parallelogram"
+            );
+        }
+        (s, num(&surfs["off"][i]))
+    };
+    let (rs, rd) = srf_of(rail);
+    let (os, od) = srf_of(1 - rail);
+    // the unknowns: t, the rail's uv, the other's uv, the extras; output `flat` holds `t` at
+    // 5, the first surface's uv at 6, the second's at 8, the extras from 10, `t` again after
+    let (ir, io) = if rail == 0 { (6, 8) } else { (8, 6) };
+    let mut idx = vec![5, ir, ir + 1, io, io + 1];
+    idx.extend((0..extra).map(|k| 10 + k));
+    let n = idx.len();
+    assert_eq!(v[4], 1.0, "{}: found", case.name);
+    assert_eq!(
+        v[10 + extra].to_bits(),
+        v[5].to_bits(),
+        "curve_parameter is t"
+    );
+    let x: Vec<f64> = idx.iter().map(|&i| v[i]).collect();
+    let sc = rail_eu_scene(case, std::slice::from_ref(&x))
+        .unwrap()
+        .expect("the case builds its solve");
+    let CurveKind::BSpline(tb) = sc.trim.kind() else {
+        panic!("{}: a B-spline trim", case.name);
+    };
+    let trim = crv_of(tb);
+    assert!(
+        trim.p == 1 && trim.cps.len() == 2 && !trim.rational(),
+        "a degree-1 segment trim"
+    );
+    // no clamp: every unknown strictly inside the solve's box
+    let inside = |x: f64, lo: f64, hi: f64| lo < x && x < hi;
+    assert!(
+        inside(x[0], sc.interval.min(), sc.interval.max()),
+        "t inside"
+    );
+    for (k, d) in sc.domains.iter().enumerate() {
+        for c in 0..2 {
+            let (lo, hi) = if c == 0 {
+                (d.min().x, d.max().x)
+            } else {
+                (d.min().y, d.max().y)
+            };
+            assert!(inside(x[1 + 2 * k + c], lo, hi), "uv inside its domain");
+        }
+    }
+    assert!(x[5..].iter().all(|&e| inside(e, -100.0, 100.0)));
+    // F at new: exact, and the kernel's float enclosed
+    let rows = |round: bool| -> Vec<Iv> {
+        let (c, _) = trim.exact(x[0]);
+        let c = if round { trim.kernel(x[0]) } else { c };
+        let pr = offset_point(&rs, rd, x[1], x[2], round);
+        let po = offset_point(&os, od, x[3], x[4], round);
+        let mut f = vec![
+            rnd(c[0].sub(Iv::p(x[1])), U, round),
+            rnd(c[1].sub(Iv::p(x[2])), U, round),
+        ];
+        f.extend((0..3).map(|q| rnd(pr[q].sub(po[q]), U, round)));
+        f.extend((0..extra).map(|k| {
+            let tk = rnd(Iv::p(target).add(Iv::p(k as f64)), U, round);
+            rnd(Iv::p(x[5 + k]).sub(tk), U, round)
+        }));
+        f
+    };
+    let (fx, fk) = (rows(false), rows(true));
+    let kern = &sc.residuals[0];
+    let mut beta = Vec::new();
+    for j in 0..n {
+        assert!(
+            fk[j].contains(kern[j]),
+            "{}: the kernel's F[{j}] {} outside {:?}",
+            case.name,
+            kern[j],
+            fk[j]
+        );
+        let b = fk[j].sub(fx[j]).abs().hi;
+        assert!(
+            kern[j].abs() <= b,
+            "{}: the solve stopped at F[{j}] = {}, above its rounding {b}",
+            case.name,
+            kern[j]
+        );
+        beta.push(up_add(kern[j].abs(), b));
+    }
+    // the constant Jacobian (exact)
+    let (_, cd) = trim.exact(x[0]);
+    let (_, ru, rv) = rs.exact(Iv::p(x[1]), Iv::p(x[2]));
+    let (_, ou, ov) = os.exact(Iv::p(x[3]), Iv::p(x[4]));
+    let z = Iv::p(0.0);
+    let mut jm = vec![vec![z; n]; n];
+    jm[0][0] = cd[0];
+    jm[0][1] = Iv::p(-1.0);
+    jm[1][0] = cd[1];
+    jm[1][2] = Iv::p(-1.0);
+    for q in 0..3 {
+        jm[2 + q][1] = ru[q];
+        jm[2 + q][2] = rv[q];
+        jm[2 + q][3] = ou[q].neg();
+        jm[2 + q][4] = ov[q].neg();
+    }
+    for k in 0..extra {
+        jm[5 + k][5 + k] = Iv::p(1.0);
+    }
+    let inv = iv_inverse(&jm);
+    for (i, &at) in idx.iter().enumerate() {
+        let mut step = Iv::p(0.0);
+        let mut bound = 0.0;
+        for j in 0..n {
+            step = step.add(inv[i][j].mul(fx[j]));
+            bound = up_add(bound, up_mul(inv[i][j].mag(), beta[j]));
+        }
+        let r = Iv::p(x[i]).sub(step);
+        let cert = Cert::Enc {
+            r,
+            e: Some(r.widen(bound)),
+            what: "rail_eu",
+        };
+        if i == 0 {
+            out.insert(10 + extra, cert.clone());
+        }
+        out.insert(at, cert);
     }
 }
 

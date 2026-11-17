@@ -56,6 +56,7 @@
 //!   `(jj - cu) / (cv - 1)`, keeping them in `[0.0, 1.0]` (WR-88).
 //! - `GapArray::append` maintains the longest-gap index, unlike upstream (WR-90).
 
+use crate::curve::crv_on_surf::CrvOnSurf;
 use crate::curve::curve::p2::BSPLINE_CURVE_TYPE;
 use crate::curve::curve::p6::DroppedPoint;
 use crate::curve::curve::{Curve, CurveKind};
@@ -2344,19 +2345,20 @@ impl<'a> GapFunction<'a> {
         r
     }
 
-    /// Not upstream (#18325): the surface parameters of this curve's point at `t` when
-    /// the curve is a curve on a surface (`SmCrvOnSurf`) whose surface is the other
-    /// surface, a B-spline equal to it degree for degree, knot for knot and control point
-    /// for control point, and the parameters lie in the other surface's natural domain.
-    /// The curve's point is then that surface's point there by construction (the curve
-    /// evaluates its UV curve, then the surface), so they are the exact foot of the
-    /// point, at distance `0`. `None` for any other geometry.
+    /// Not upstream (#18325): this curve and the other surface's natural domain when the
+    /// curve is a curve on a surface (`SmCrvOnSurf`) whose surface is the other surface, a
+    /// B-spline equal to it degree for degree, knot for knot and control point for control
+    /// point. The curve's point at `t` is then that surface's point at the curve's own
+    /// surface parameters there by construction (the curve evaluates its UV curve, then the
+    /// surface), so, when they lie in the domain, they are the exact foot of the point, at
+    /// distance `0` ([`Self::evaluate_samples`] seeds the drop with them). `None` for any
+    /// other geometry. Checked once per sample set.
     ///
     /// Upstream seeds every drop with the previous sample's foot, and the closest-point
     /// solve stops within its convergence tolerance of the foot (about `1e-13` in `uv`
     /// for the natural trims of #18325), so a curve lying on the surface reported a gap
     /// of about `1e-12` rather than `0`.
-    fn own_foot(&self, k: &Kernel, t: f64) -> Result<Option<Point2>> {
+    fn own_surface(&self, k: &Kernel) -> Result<Option<(&'a CrvOnSurf, Extent2d)>> {
         let GapGeometry::CrvSrf { curve, other } = self.geometry else {
             return Ok(None);
         };
@@ -2378,9 +2380,7 @@ impl<'a> GapFunction<'a> {
         if !same {
             return Ok(None);
         }
-        let uv = cos.evaluate_uv_point(k, t)?;
-        let domain = other.natural_uv_domain_with_nurb(k)?;
-        Ok(domain.contains_point(uv, 0.0).then_some(uv))
+        Ok(Some((cos, other.natural_uv_domain_with_nurb(k)?)))
     }
 
     /// The sample loop of `BuildSampleSet`.
@@ -2397,6 +2397,7 @@ impl<'a> GapFunction<'a> {
             GapSampleType::CrvSrf | GapSampleType::SrfSrf
         );
         let mut last: Option<usize> = None;
+        let own = self.own_surface(k)?;
 
         // iteration statistics
         let mut min_gap = BIG_DOUBLE;
@@ -2437,8 +2438,11 @@ impl<'a> GapFunction<'a> {
                 };
                 // not upstream (#18325): a curve on the other surface itself is seeded at
                 // its own surface parameters, the exact foot of its point
-                if let Some(uv) = self.own_foot(k, this_u)? {
-                    (guess_u, guess_v) = (Some(uv.x), Some(uv.y));
+                if let Some((cos, domain)) = &own {
+                    let uv = cos.evaluate_uv_point(k, this_u)?;
+                    if domain.contains_point(uv, 0.0) {
+                        (guess_u, guess_v) = (Some(uv.x), Some(uv.y));
+                    }
                 }
 
                 let idx = row + ii;

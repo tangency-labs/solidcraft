@@ -196,13 +196,7 @@ const CONVENTIONS: crate::own_builder::Conventions<'static> = crate::own_builder
     // the runner records `Notify` itself, after the build
     naming: NamingScheme::Unknown,
 };
-/// The Rust B-rep of a [`BrepIn`] source built by the Rust kernel
-/// ([`crate::own_builder`], and the `SmBrepConstructor` sheet grids `grid_faces` and
-/// `shared_boundaries` through [`sheet_grid`], in the shim's call order) or, for an `.smb`
-/// file, read by the Rust reader and renumbered into the shim's traversal order
-/// ([`crate::own_reader::brep_in_order`]): native lists, face uses and geometry owners
-/// under [`CONVENTIONS`], `Notify` naming as [`imported`] sets it. A failed build is the
-/// shim's failed construction; a failed read is a Rust divergence, reported as an error.
+
 /// The replayed model of a case: the Rust B-rep as validation receives it, mutations
 /// applied (#18325's certificates, `tests/issue_18325_moved_rows.rs`); `None` when it does
 /// not build.
@@ -223,6 +217,13 @@ pub fn scene(case: &Case) -> Result<Option<Brep>, HarnessError> {
     Ok(Some(b))
 }
 
+/// The Rust B-rep of a [`BrepIn`] source built by the Rust kernel
+/// ([`crate::own_builder`], and the `SmBrepConstructor` sheet grids `grid_faces` and
+/// `shared_boundaries` through [`sheet_grid`], in the shim's call order) or, for an `.smb`
+/// file, read by the Rust reader and renumbered into the shim's traversal order
+/// ([`crate::own_reader::brep_in_order`]): native lists, face uses and geometry owners
+/// under [`CONVENTIONS`], `Notify` naming as [`imported`] sets it. A failed build is the
+/// shim's failed construction; a failed read is a Rust divergence, reported as an error.
 fn own_brep(i: &Inputs) -> Result<Result<Brep, Output>, HarnessError> {
     use crate::own_builder::{finish, in_new_brep, Built};
     let mut k = Kernel::default();
