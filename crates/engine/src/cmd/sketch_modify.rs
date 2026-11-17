@@ -4080,7 +4080,8 @@ fn move_copy(s: &mut Session, p: &Value) -> Result<Value> {
     let rotate_constraints = bool_(p, "rotate_constraints").unwrap_or(true);
     let selection = string_list(cmd, p, "entities")?;
     let (planar, drawn) = if copy { drawn_copy_selection(s, p, selection)? } else { (selection, Vec::new()) };
-    let target = sketch_store::target(s, p, cmd)?;
+    // Only drawn 3D curves name the sketch they join in; a drawing's sheet sketch has none.
+    let target = if drawn.is_empty() { None } else { Some(sketch_store::target(s, p, cmd)?) };
     let mut released = Vec::new();
     let mut added = Vec::new();
     let (out, info) = edit(s, p, cmd, false, |sk, doc| {
@@ -4113,7 +4114,7 @@ fn move_copy(s: &mut Session, p: &Value) -> Result<Value> {
                 wires.push(if wire.arc.is_some() { sk.add_drawn_arc_in(&fit, wire.space)? } else { sk.add_drawn_wire_in(&fit, wire.space)? });
             }
             // Copied 3D curves are joined where they meet, as drawn ones are (#10608).
-            if !wires.is_empty() {
+            if let Some(target) = target.filter(|_| !wires.is_empty()) {
                 super::sketch_3d::join_in(sk, doc, target, &wires)?;
             }
             ids.extend(wires);
