@@ -313,6 +313,10 @@ fn local_operation_recorded(
             crossable.insert(e);
         }
     }
+    // (issue #18502) the faces the input brought: a face the executive creates (a step
+    // wall) has no place in this set, and an edge that bounds one is that face's own
+    // boundary — the moved face's cut never removes it
+    let input_faces: BTreeSet<FaceId> = bp1::faces(b, None)?.into_iter().collect();
     // (issue #13622's hook) the eligibility provider: the gap pass defers the vanish of
     // an edge the reconstruction owns (its original in `crossable`, its correspondence
     // complete and unambiguous) instead of refusing it, and this operation consumes the
@@ -388,8 +392,16 @@ fn local_operation_recorded(
     // crossed (before the kept-edge gate, whose kept list it shrinks to the edges it
     // left as they were)
     let map = capture_edge_correspondence(b)?;
-    let reconstruction =
-        reconstruct_crossed_boundaries(k, b, &map, &kept, &crossable, &vanished, notifications)?;
+    let reconstruction = reconstruct_crossed_boundaries(
+        k,
+        b,
+        &map,
+        &kept,
+        &crossable,
+        &vanished,
+        &input_faces,
+        notifications,
+    )?;
     refuse_kept_edges_not_clear(k, b, &kept, &reconstruction)?;
     refuse_unsound(k, b, &input)?;
     Ok(reconstruction)
@@ -2536,17 +2548,36 @@ fn merge_lamina_twins(
     for &eu in order.iter().skip(2) {
         // the twin's vertex uses join the survivor's ends: the twins stand for one
         // geometric edge, and the edge's other-vertex lookup reads the survivor's
-        // primary pair (issue #13622)
+        // primary pair (issue #13622). The end is the one the survivor's uses carry,
+        // not the record's (a split copy of the same point may hold them, and the
+        // record lags behind — issue #18502)
         if let Some(vu) = eu1::vertexuse(b, eu)? {
             if let Some(v) = crate::topology::vertexuse::vertex(b, vu)? {
                 let keep_ends = b.edge(keep)?.vertices;
-                if !keep_ends.contains(&v) {
+                let mut carried: Vec<crate::topology::VertexId> = Vec::new();
+                for eu2 in order.iter().take(2) {
+                    if let Some(vu2) = eu1::vertexuse(b, *eu2)? {
+                        if let Some(x) = crate::topology::vertexuse::vertex(b, vu2)? {
+                            if !carried.contains(&x) {
+                                carried.push(x);
+                            }
+                        }
+                    }
+                }
+                // the guard reads the ends the survivor's uses carry, not the record's
+                // (the record lags behind a split copy of the same point)
+                if !carried.contains(&v) {
                     let point = b.vertex(v)?.point;
                     let tolerance = b.edge(keep)?.tolerance.max(b.tolerance());
-                    let target = keep_ends.iter().copied().find(|&x| {
-                        b.vertex(x)
-                            .is_ok_and(|r| r.point.distance(point) <= tolerance)
-                    });
+                    let target = carried
+                        .iter()
+                        .copied()
+                        .chain(keep_ends.iter().copied())
+                        .find(|&x| {
+                            x != v
+                                && b.vertex(x)
+                                    .is_ok_and(|r| r.point.distance(point) <= tolerance)
+                        });
                     if let Some(at) = target {
                         b.vertex_mut(v)?.vertexuses.retain(|&x| x != vu);
                         b.vertex_mut(at)?.vertexuses.push(vu);
@@ -2588,12 +2619,35 @@ fn split_vertex(
     for &e in moved {
         for eu in edge::edgeuses(b, e, None, None)? {
             let vu = eu1::vertexuse(b, eu)?.ok_or_else(|| null("the edge use's vertex use"))?;
-            if vu1::vertex(b, vu)? == Some(v) {
-                b.vertex_mut(v)?.vertexuses.retain(|&x| x != vu);
+            // (issue #18502) the end is a point, not a record: an edge closing to a
+            // point leaves the records at that corner several copies, and a split that
+            // matched one record left the other copies' uses behind
+            let at_point = vu1::vertex(b, vu)?.is_some_and(|q| {
+                q == v
+                    || b.vertex(q)
+                        .is_ok_and(|r| r.point.distance(point) <= tolerance)
+            });
+            if at_point {
+                if let Some(q) = vu1::vertex(b, vu)? {
+                    b.vertex_mut(q)?.vertexuses.retain(|&x| x != vu);
+                }
                 b.vertex_mut(copy)?.vertexuses.push(vu);
                 b.vertexuse_mut(vu)?.vertex = Some(copy);
             }
         }
+        // (issue #18502) the record's end follows its moved uses: the split's copy is
+        // the edge's end now, and the other-vertex reads of the primary use pair stay
+        // consistent with the uses the split moved
+        let mut ends = b.edge(e)?.vertices;
+        for slot in &mut ends {
+            if *slot == v
+                || b.vertex(*slot)
+                    .is_ok_and(|r| r.point.distance(point) <= tolerance)
+            {
+                *slot = copy;
+            }
+        }
+        b.edge_mut(e)?.vertices = ends;
     }
     Ok(copy)
 }
@@ -3139,6 +3193,7 @@ fn reconstruct_crossed_boundaries(
     kept: &[(crate::topology::EdgeId, KeptEdge)],
     crossable: &BTreeSet<crate::topology::EdgeId>,
     vanished: &BTreeSet<crate::topology::EdgeId>,
+    input_faces: &BTreeSet<FaceId>,
     notifications: &mut OffsetNotifications<'_>,
 ) -> Result<Reconstruction> {
     use crate::blend::fillet_section::interval::Ivl;
@@ -3228,6 +3283,10 @@ fn reconstruct_crossed_boundaries(
             return Err(deferred_edge_vanish(pending));
         }
     }
+    // (issue #18502) the descendants whose own event is the removal: the sever takes
+    // each one's fate on its own, never a whole original's group (a kept descendant of
+    // a partially removed original stays)
+    let mut removed_descendants: Vec<crate::topology::EdgeId> = Vec::new();
     for (&original, result_edges) in map {
         k.check_cancelled(OP)?;
         if !crossable.contains(&original) {
@@ -3279,7 +3338,24 @@ fn reconstruct_crossed_boundaries(
                     event = Some((crossing.event, crossing.proof, face.face));
                 }
             }
-            if let Some((ev, proof, clip_face)) = event {
+            if let Some((mut ev, proof, clip_face)) = event {
+                // (issue #18502) the moved face's cut never removes an edge that bounds
+                // a face the operation created (a step wall's own side edge): that face's
+                // boundary is the operation's own output, and the edge stays as it is.
+                // A deferred vanish obligation is exempt: its discharge is the certified
+                // removal, and where the edge cannot go the obligation refuses typed
+                // ([`Self::pending_vanishes`]' `VanishUnresolved`)
+                if matches!(ev, CrossEvent::Removed { .. }) && !vanished.contains(&original) {
+                    let bounds_new = edge::faces(b, e, None)?
+                        .iter()
+                        .any(|f| !input_faces.contains(f));
+                    if bounds_new {
+                        ev = CrossEvent::Clear;
+                    }
+                }
+                if matches!(ev, CrossEvent::Removed { .. }) {
+                    removed_descendants.push(e);
+                }
                 if let CrossEvent::Trimmed {
                     clip,
                     clip_t,
@@ -3417,16 +3493,10 @@ fn reconstruct_crossed_boundaries(
             key_of: &key_of,
         };
         crate::topology::brep::p3::seed_records(env.records, b, &key_of);
-        for record in &events {
-            if let CrossEvent::Removed { .. } = record.event {
-                for &e in map
-                    .get(&record.original)
-                    .map(Vec::as_slice)
-                    .unwrap_or_default()
-                {
-                    sever_edge(k, b, e, &mut env)?;
-                }
-            }
+        // (issue #18502) each descendant's own fate decides its own removal: a kept
+        // descendant of a partially removed original is never severed with it
+        for &e in &removed_descendants {
+            sever_edge(k, b, e, &mut env)?;
         }
         for (&original, result_edges) in map {
             if result_edges.len() != 2 {
@@ -6695,6 +6765,10 @@ mod tests {
                 &[(orig, kept)],
                 &crossable,
                 &vanished,
+                &crate::topology::brep::p1::faces(b, None)
+                    .unwrap()
+                    .into_iter()
+                    .collect(),
                 notes,
             )
         });
@@ -6746,6 +6820,10 @@ mod tests {
                 &[(orig, kept)],
                 &crossable,
                 &vanished,
+                &crate::topology::brep::p1::faces(b, None)
+                    .unwrap()
+                    .into_iter()
+                    .collect(),
                 notes,
             )
         });
@@ -7152,7 +7230,18 @@ mod tests {
         let crossable = BTreeSet::from([e]);
         let vanished = BTreeSet::from([e]);
         let r = with_notifications(&mut b, |b, notes| {
-            reconstruct_crossed_boundaries(&mut k, b, &map, &[], &crossable, &vanished, notes)
+            reconstruct_crossed_boundaries(
+                &mut k,
+                b,
+                &map,
+                &[],
+                &crossable,
+                &vanished,
+                &crate::topology::brep::p1::faces(b, None)?
+                    .into_iter()
+                    .collect(),
+                notes,
+            )
         });
         assert!(
             matches!(
@@ -7236,7 +7325,18 @@ mod tests {
         for (name, map, vanished) in cases {
             let crossable = vanished.clone();
             let r = with_notifications(&mut b, |b, notes| {
-                reconstruct_crossed_boundaries(&mut k, b, &map, &[], &crossable, &vanished, notes)
+                reconstruct_crossed_boundaries(
+                    &mut k,
+                    b,
+                    &map,
+                    &[],
+                    &crossable,
+                    &vanished,
+                    &crate::topology::brep::p1::faces(b, None)?
+                        .into_iter()
+                        .collect(),
+                    notes,
+                )
             });
             let e = r.expect_err(name);
             assert!(
