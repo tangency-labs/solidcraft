@@ -299,7 +299,7 @@ fn body_menu_isolates_renames_locks_and_deletes() {
     assert!(!app.session.visibility.hidden_bodies.contains(&b));
     // Rename through the rename box.
     context_menu::run_item(&mut app, &find(&items, "Rename"), pos2(10.0, 10.0));
-    assert!(context_menu::finish_rename(&mut app, Some("Base"), true));
+    context_menu::finish_rename(&mut app, Some("Base"), true).unwrap();
     assert!(app.session.model.state().body("Base").is_some());
     // Locked bodies can't be moved or deleted.
     let t = Target::Body { name: "Base".into() };
@@ -335,7 +335,7 @@ fn body_menu_rename_on_a_selection_renames_every_selected_body() {
     assert!(find(&items, "Rename").enabled);
     assert_eq!(find(&items, "Rename").shortcut, "", "F2 renames the selection, not only C");
     context_menu::run_item(&mut app, &find(&items, "Rename"), pos2(10.0, 10.0));
-    assert!(context_menu::finish_rename(&mut app, Some("Green"), true));
+    context_menu::finish_rename(&mut app, Some("Green"), true).unwrap();
     assert_eq!(names(&app), ["A", "B", "Green"]);
     // Rename Selected Bodies, beside it, renames both selected bodies.
     let items = context_menu::items(&app, &Target::Body { name: "Green".into() });
@@ -343,13 +343,13 @@ fn body_menu_rename_on_a_selection_renames_every_selected_body() {
     assert!(all.enabled);
     assert_eq!(all.shortcut, "F2");
     context_menu::run_item(&mut app, &all, pos2(10.0, 10.0));
-    assert!(context_menu::finish_rename(&mut app, Some("Red"), true));
+    context_menu::finish_rename(&mut app, Some("Red"), true).unwrap();
     assert_eq!(names(&app), ["Red", "B", "Red (2)"]);
     // A row outside the selection has Rename alone, and it renames only itself.
     let items = context_menu::items(&app, &Target::Body { name: "B".into() });
     assert!(!has(&items, "Rename Selected Bodies"));
     context_menu::run_item(&mut app, &find(&items, "Rename"), pos2(10.0, 10.0));
-    assert!(context_menu::finish_rename(&mut app, Some("Blue"), true));
+    context_menu::finish_rename(&mut app, Some("Blue"), true).unwrap();
     assert_eq!(names(&app), ["Red", "Blue", "Red (2)"]);
 }
 
@@ -677,21 +677,17 @@ fn move_shortcut_uses_the_selected_nested_instance_and_pending_position() {
     let path = vec![copy, child];
     app.run("component.activate", json!({"component":"root"})).unwrap();
     app.run("occurrence.move", json!({"occurrence":child,"path":path,"translate":[5,0,0],"capture":false})).unwrap();
-    let baseline = app.session.pending_moves[&child];
     app.run("select.set", json!({"items":[{"type":"occurrence","path":path}]})).unwrap();
     crate::keymap::bind(&mut app, "solid.move", "Shift+M", false).unwrap();
     crate::keymap::press(&mut app, "M", false);
-    assert!(app.tree.occurrence_move.is_none(), "the old shortcut was cleared");
+    assert!(app.dialog.is_none(), "the old shortcut was cleared");
     app.ui.tab = "INSPECT".into();
     crate::keymap::press(&mut app, "Shift+M", false);
     assert_eq!(app.ui.tab, "MODEL", "starting component Move still selects the command's workspace tab");
-    let movement = app.tree.occurrence_move.as_ref().expect("component Move opens from its rebound shortcut");
-    assert_eq!(movement.occurrence, child);
-    assert_eq!(movement.path, path, "use the selected copy's path, not the component's first placement");
-    assert_eq!(movement.baseline, Some(baseline));
-    assert!(movement.had_pending);
-    assert!(app.dialog.is_none(), "the body Move dialog must not open too");
+    let moving = crate::dialogs_move::moving(&app).expect("Move/Copy opens on the component from its rebound shortcut");
+    assert_eq!(moving, path, "use the selected copy's path, not the component's first placement");
     assert!(app.tree.capture_prompt.is_none(), "continuing a component move does not ask to capture it first");
+    assert!(app.session.pending_moves.contains_key(&child), "its pending move stays until OK");
 }
 
 #[test]
@@ -702,13 +698,12 @@ fn move_shortcut_respects_grounding_and_keeps_body_selection_as_a_body_move() {
     app.run("occurrence.ground", json!({"occurrence":occurrence,"grounded":true})).unwrap();
     app.run("select.set", json!({"items":[{"type":"occurrence","path":[occurrence]}]})).unwrap();
     crate::keymap::press(&mut app, "M", false);
-    assert!(app.tree.occurrence_move.is_none(), "a grounded component cannot move");
     assert!(app.dialog.is_none(), "do not fall back to moving the grounded component's bodies");
 
     app.run("occurrence.ground", json!({"occurrence":occurrence,"grounded":false})).unwrap();
     app.run("select.set", json!({"items":[{"type":"body","name":"Body1"}]})).unwrap();
     crate::keymap::press(&mut app, "M", false);
-    assert!(app.tree.occurrence_move.is_none(), "a body selection still edits geometry");
+    assert!(crate::dialogs_move::moving(&app).is_none(), "a body selection still edits geometry");
     let dialog = app.dialog.as_ref().expect("body Move opens");
     assert!(matches!(dialog.kind, crate::dialogs::Kind::Move { .. }));
     assert_eq!(dialog.inputs[0].items, vec![solidcraft_engine::Sel::Body { name: "Body1".into() }]);
@@ -760,7 +755,7 @@ fn folder_and_group_menus_make_rename_and_drop_groups() {
     assert!(context_menu::items(&app, &Target::Body { name: names[0].clone() }).iter().any(|i| i.label == "Group Selected"));
     let t = Target::Group { id: g.id, scope: "c0".into() };
     act(&mut app, &t, "Rename");
-    assert!(context_menu::finish_rename(&mut app, Some("Parts"), true));
+    context_menu::finish_rename(&mut app, Some("Parts"), true).unwrap();
     assert_eq!(app.session.doc.browser_groups[0].name, "Parts");
     // Show/Hide hides the group itself: its bodies keep their own state but aren't drawn.
     act(&mut app, &t, "Show/Hide");
@@ -923,11 +918,11 @@ fn browser_feature_menu_renames_its_target_and_supports_undo() {
     let undo = app.session.undo.len();
     act(&mut app, &Target::Feature { id: target }, "Rename");
     assert_eq!(app.menu.rename.as_ref().unwrap().text, target_name);
-    assert!(context_menu::finish_rename(&mut app, Some("Cancelled"), false));
+    context_menu::finish_rename(&mut app, Some("Cancelled"), false).unwrap();
     assert_eq!(app.session.doc.to_json(), saved);
     assert_eq!(app.session.undo.len(), undo);
     act(&mut app, &Target::Feature { id: target }, "Rename");
-    assert!(context_menu::finish_rename(&mut app, Some("Renamed feature"), true));
+    context_menu::finish_rename(&mut app, Some("Renamed feature"), true).unwrap();
     assert!(app.menu.rename.is_none());
     assert_eq!(app.session.doc.feature(target).unwrap().name, "Renamed feature");
     assert_eq!(app.session.doc.feature(keep).unwrap().name, keep_name);
@@ -936,6 +931,50 @@ fn browser_feature_menu_renames_its_target_and_supports_undo() {
     assert_eq!(app.session.doc.to_json(), saved);
     app.run("edit.redo", json!({})).unwrap();
     assert_eq!(app.session.doc.feature(target).unwrap().name, "Renamed feature");
+}
+
+/// A refused name keeps the Rename box open with the reason on the status line, as the
+/// browser's inline editor does (#10654); `ui.rename` answers with the refusal.
+#[test]
+fn a_refused_rename_keeps_the_rename_box_open_and_says_why() {
+    let mut h = crate::scenario::Harness::new();
+    for name in ["Base", "Lid"] {
+        h.app.run("solid.box", json!({"length": 10, "width": 10, "height": 10, "name": name})).unwrap();
+    }
+    let lid = h.app.session.doc.find_feature("Lid").unwrap().id;
+    context_menu::start_rename(&mut h.app, context_menu::RenameWhat::Feature(lid), pos2(300.0, 200.0));
+    h.frames(2);
+    h.step(&json!({"text": "Base"})).unwrap();
+    h.step(&json!({"key": "Enter"})).unwrap();
+    h.frames(2);
+    assert!(h.app.menu.rename.is_some() && crate::scenario::rect_of("rename:name").is_some(), "the box stays open after a refused rename");
+    let (text, _, error) = h.app.status.clone().expect("the refusal is shown");
+    assert!(error && text.contains("another feature is called"), "{text}");
+    assert_eq!(h.app.session.doc.feature(lid).unwrap().name, "Lid");
+    // The typed name can be corrected at once, without clicking the box first.
+    h.step(&json!({"text": "Top"})).unwrap();
+    h.step(&json!({"key": "Enter"})).unwrap();
+    h.frames(2);
+    assert!(h.app.menu.rename.is_none());
+    assert_eq!(h.app.session.doc.feature(lid).unwrap().name, "Top");
+}
+
+/// `ui.rename` answers a refused name with the reason and leaves the rename in progress.
+#[test]
+fn ui_rename_answers_a_refused_name_with_the_reason() {
+    let mut h = crate::scenario::Harness::new();
+    for name in ["Base", "Lid"] {
+        h.app.run("solid.box", json!({"length": 10, "width": 10, "height": 10, "name": name})).unwrap();
+    }
+    let lid = h.app.session.doc.find_feature("Lid").unwrap().id;
+    context_menu::start_rename(&mut h.app, context_menu::RenameWhat::Feature(lid), pos2(300.0, 200.0));
+    let reply = h.call("ui.rename", json!({"text": "Base"}));
+    assert_eq!(reply["ok"], false, "{reply}");
+    assert!(reply["error"].as_str().is_some_and(|e| e.contains("another feature is called")), "{reply}");
+    assert!(h.app.menu.rename.is_some(), "the rename is still in progress");
+    assert_eq!(h.call("ui.rename", json!({"text": "Top"}))["ok"], true);
+    assert!(h.app.menu.rename.is_none());
+    assert_eq!(h.app.session.doc.feature(lid).unwrap().name, "Top");
 }
 
 #[test]
@@ -1008,7 +1047,7 @@ fn canvas_menu_hides_renames_calibrates_and_deletes() {
     act(&mut app, &t, "Show/Hide");
     assert!(!app.session.doc.canvases[0].visible);
     act(&mut app, &t, "Rename");
-    assert!(context_menu::finish_rename(&mut app, Some("Photo"), true));
+    context_menu::finish_rename(&mut app, Some("Photo"), true).unwrap();
     assert_eq!(app.session.doc.canvases[0].name, "Photo");
     act(&mut app, &t, "Calibrate");
     let p = app.tree.canvas_panel.clone().unwrap();
@@ -1272,7 +1311,7 @@ fn named_views_save_restore_rename_and_delete() {
     act(&mut app, &t, "Restore");
     assert_eq!(app.cam_anim.map(|a| a.to), Some(saved), "animates back to the saved camera");
     act(&mut app, &t, "Rename");
-    assert!(context_menu::finish_rename(&mut app, Some("Front detail"), true));
+    context_menu::finish_rename(&mut app, Some("Front detail"), true).unwrap();
     let t = Target::NamedView { name: "Front detail".into() };
     act(&mut app, &t, "Delete");
     assert!(app.session.doc.named_views.is_empty());
@@ -1375,7 +1414,7 @@ fn f2_renames_the_selected_item() {
     let b = body(&app);
     app.run("select.set", json!({"items": [{"type": "body", "name": b}]})).unwrap();
     assert!(context_menu::rename_selection(&mut app, pos2(0.0, 0.0)));
-    assert!(context_menu::finish_rename(&mut app, Some("Base"), true));
+    context_menu::finish_rename(&mut app, Some("Base"), true).unwrap();
     assert!(app.session.model.state().body("Base").is_some());
     app.run("select.clear", json!({})).unwrap();
     assert!(!context_menu::rename_selection(&mut app, pos2(0.0, 0.0)), "nothing selected");
@@ -1488,33 +1527,8 @@ fn double_click_on_a_body_row_renames_it_in_the_row() {
     let at = crate::scenario::handle_at("row:Block").expect("the row is still there");
     h.call("ui.click", json!({"x": at.x, "y": at.y, "double": true}));
     h.frames(3);
-    assert!(context_menu::finish_rename(&mut h.app, Some("Base"), true));
+    context_menu::finish_rename(&mut h.app, Some("Base"), true).unwrap();
     assert!(h.app.session.model.state().body("Base").is_some());
-}
-
-#[test]
-fn occurrence_moves_turn_about_their_origin_then_move() {
-    let mut app = sample_app();
-    let b = body(&app);
-    app.run("component.from_bodies", json!({"bodies": [b]})).unwrap();
-    let occ = app.session.doc.occurrences[0].id;
-    app.run("occurrence.ground", json!({"occurrence": occ, "grounded": false})).unwrap();
-    let mut m = crate::browser::OccMove::new(occ);
-    m.pivot = Some(solidcore_record::Vec3::new(5.0, 0.0, 0.0));
-    m.translate = [10.0, 0.0, 0.0];
-    m.angles = [0.0, 0.0, 90.0];
-    crate::browser::apply_occurrence_move(&mut app, &m);
-    let t = *app.session.pending_moves.get(&occ).unwrap();
-    // The pivot lands 10 mm along X; X turns into Y.
-    let p = solidcraft_engine::doc::apply_point(&t, solidcore_record::Vec3::new(5.0, 0.0, 0.0));
-    let x = solidcraft_engine::doc::apply_vector(&t, solidcore_record::Vec3::X);
-    assert!((p.x - 15.0).abs() < 1e-9 && p.y.abs() < 1e-9, "{p:?}");
-    assert!((x.y - 1.0).abs() < 1e-9, "{x:?}");
-    // Changing the values again starts from where it was, not from the last move.
-    m.translate = [0.0, 0.0, 0.0];
-    m.angles = [0.0; 3];
-    crate::browser::apply_occurrence_move(&mut app, &m);
-    assert_eq!(*app.session.pending_moves.get(&occ).unwrap(), solidcraft_engine::doc::IDENTITY);
 }
 
 #[test]
@@ -1620,7 +1634,7 @@ fn construction_plane_row_opens_its_menu() {
     act(&mut h.app, &t, "Show/Hide");
     assert!(!h.app.session.visibility.hidden_origin.contains(&"Cut".to_string()));
     act(&mut h.app, &t, "Rename");
-    assert!(context_menu::finish_rename(&mut h.app, Some("Section"), true));
+    context_menu::finish_rename(&mut h.app, Some("Section"), true).unwrap();
     assert!(h.app.session.doc.find_feature("Section").is_some_and(|f| f.id == id));
     act(&mut h.app, &t, "Find in Timeline");
     assert_eq!(h.app.session.selection, vec![solidcraft_engine::Sel::Feature { id }]);
@@ -2201,6 +2215,19 @@ fn only_one_row_is_lit_while_a_flyout_is_closing() {
     h.frames(2);
     assert!(rect_of("menu:appearance.assign:Aluminum - Satin").is_some(), "the flyout is still closing");
     assert_eq!(lit_rows(&h, &rows), vec![other.label.clone()], "the parent gives up its highlight as soon as the pointer leaves it");
+    // On down the menu, over the separator below Appearance (#17668): nothing lights up again,
+    // and the flyout closes 0.3 s after the pointer left Appearance, not 0.3 s after the separator.
+    h.frames(10);
+    let at = rows.iter().position(|i| i.id == "ui.appearance").unwrap();
+    let sep = at + rows[at..].iter().position(Item::is_sep).unwrap();
+    let above = rect_of(&format!("menu:{}", rows[sep - 1].id)).unwrap();
+    let below = rect_of(&format!("menu:{}", rows[sep + 1].id)).unwrap();
+    h.step(&json!({"move":[above.center().x, (above.bottom() + below.top()) / 2.0]})).unwrap();
+    h.frames(2);
+    assert!(lit_rows(&h, &rows).is_empty(), "no row is lit over the separator: {:?}", lit_rows(&h, &rows));
+    h.frames(8);
+    assert!(rect_of("menu:appearance.assign:Aluminum - Satin").is_none(), "the flyout closed on time over the separator");
+    assert!(h.app.viewport.context_menu.is_some(), "the menu itself stays open");
 }
 
 /// A component's menu (its Component flyout holds Appearance, which has a flyout of its own),

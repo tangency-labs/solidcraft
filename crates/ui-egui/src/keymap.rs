@@ -501,7 +501,16 @@ pub fn press(app: &mut SolveApp, key: &str, repeat: bool) {
             }
             return;
         }
-        app.start(variant_for_key(app, id));
+        let resolved = variant_for_key(app, id);
+        if app.preferences.shortcut_again_ends_tool {
+            if repeat {
+                return;
+            }
+            if crate::toolbar::end_running_command(app, resolved) {
+                return;
+            }
+        }
+        app.start(resolved);
     } else if let Some(id) = sketch_tool_for(app, key) {
         let then = variant_for_key(app, id);
         app.start("sketch.create");
@@ -1569,6 +1578,29 @@ mod tests {
         h.frames(2);
         assert!(h.app.keymap.capturing.is_none(), "typing in the search stops the recording");
         assert_eq!(h.app.prefs_window.shell.filter, "fixx");
+    }
+
+    /// Dialog OK (`ui.dialog_ok`, #17416) has no default key: a Preferences search finds it on
+    /// the shortcuts page, a key recorded there binds it, and `ui.shortcut` reports that key.
+    #[test]
+    fn dialog_ok_is_found_in_a_preferences_search_and_takes_a_recorded_key() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.call("ui.prefs", json!({"open": "General"}));
+        h.frames(3);
+        h.step(&json!({"text": "dialog ok"})).expect("search");
+        h.frames(3);
+        h.step(&json!({"click": {"handle": "prefs:search:shortcuts"}})).expect("unfold the shortcut matches");
+        h.frames(2);
+        h.step(&json!({"click": {"handle": "shortcut:ui.dialog_ok"}})).expect("Dialog OK is listed");
+        assert!(capturing(&h.app), "recording Dialog OK's key");
+        h.step(&json!({"key": "F9", "pressed": true})).unwrap();
+        h.step(&json!({"key": "F9", "pressed": false})).unwrap();
+        h.frames(65);
+        assert!(h.app.keymap.capturing.is_none(), "{:?}", h.app.keymap.message);
+        assert_eq!(effective(&h.app, "ui.dialog_ok").as_deref(), Some("F9"));
+        let got = h.call("ui.shortcut", json!({"command": "ui.dialog_ok"}));
+        assert_eq!(got["result"]["key"], "F9", "{got}");
     }
 
     #[test]

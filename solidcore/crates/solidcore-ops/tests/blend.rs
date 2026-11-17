@@ -784,6 +784,94 @@ fn a_variable_round_s_net_is_certified_on_wide_pieces() {
     assert_eq!(rounds, 1);
 }
 
+/// tangency-labs/solidcraft#17640: a kernel certifies a record's procedural blend once. Every
+/// boolean in an application gives back a record that the next operation reads again, and each
+/// read gave every blend its definition back and certified its net again (6 s a boolean on a
+/// part of 60 such rounds). Read on one kernel twice, the variable round's record certifies its
+/// blend the first time only, and builds the same body both times; with the memo off
+/// (`memoize_curve_caches`, as `curve-memo-off` builds every kernel) each read certifies it.
+#[test]
+fn a_records_procedural_blend_is_certified_once_on_a_kernel() {
+    all_fixes();
+    let b = make_box([0.0; 3], [10.0, 20.0, 30.0]).unwrap();
+    let e = edge_at(&b, [10.0, 10.0, 30.0]);
+    let start = vertex_at(&b, [10.0, 0.0, 30.0]);
+    fillet_variable(&b, e, start, 1, &[0.0, 0.0, 1.0, 1.0], &[2.0, 5.0]).unwrap();
+    let (record, _) = b.to_record().unwrap();
+    let blends = record
+        .faces
+        .iter()
+        .filter(|f| matches!(f.surface, solidcore_record::brep::Surface::Blend { .. }))
+        .count() as u64;
+    assert!(blends > 0, "the variable round kept no definition");
+    for memo in [true, false] {
+        let mut k = Kernel {
+            fixes: solidcore::kernel::UpstreamFixes::all(),
+            memoize_curve_caches: memo,
+            ..Kernel::default()
+        };
+        let read = |k: &mut Kernel| {
+            let before = k.work_counters.blends_recertified();
+            let (mut made, _) = solidcore_convert::brep::to_kernel(k, &record, true).unwrap();
+            let (again, _) = solidcore_convert::brep::to_record(k, &mut made).unwrap();
+            (k.work_counters.blends_recertified() - before, again)
+        };
+        let (first, once) = read(&mut k);
+        let (second, twice) = read(&mut k);
+        assert_eq!(
+            first, blends,
+            "memo {memo}: the first read certifies each blend"
+        );
+        assert_eq!(
+            second,
+            if memo { 0 } else { blends },
+            "memo {memo}: the second read"
+        );
+        assert_eq!(
+            once, twice,
+            "memo {memo}: the two reads build different bodies"
+        );
+    }
+    // A hit needs every input of the certificate to match. A net with one control point moved,
+    // or the same record on a kernel of other tolerances, is certified again (whether or not it
+    // certifies), however often the record was read before.
+    let mut moved = record.clone();
+    let face = moved
+        .faces
+        .iter_mut()
+        .find(|f| matches!(f.surface, solidcore_record::brep::Surface::Blend { .. }))
+        .unwrap();
+    match face.nurbs.as_mut() {
+        Some(solidcore_record::brep::Surface::Spline { points, .. }) => points[1][1][0] += 1e-9,
+        Some(solidcore_record::brep::Surface::RationalSpline { homogeneous, .. }) => {
+            homogeneous[1][1][0] += 1e-9;
+        }
+        other => panic!("the blend's net is {other:?}"),
+    }
+    let mut k = Kernel {
+        fixes: solidcore::kernel::UpstreamFixes::all(),
+        memoize_curve_caches: true,
+        ..Kernel::default()
+    };
+    let certified = |k: &mut Kernel, r: &Record| {
+        let before = k.work_counters.blends_recertified();
+        let _ = solidcore_convert::brep::to_kernel(k, r, true);
+        k.work_counters.blends_recertified() - before
+    };
+    assert_eq!(certified(&mut k, &record), blends);
+    assert_eq!(certified(&mut k, &record), 0);
+    assert!(
+        certified(&mut k, &moved) >= 1,
+        "a moved net was taken as certified"
+    );
+    k.tolerances.model_size_estimate *= 2.0;
+    assert_eq!(
+        certified(&mut k, &record),
+        blends,
+        "other tolerances were taken as the same"
+    );
+}
+
 /// A law with a corner rounds its edge as the union of its balls (`docs/generic-blend.md` §3.2,
 /// "Corners in a radius law"): at a peak the two sides' rounds cross and end on their crossing,
 /// at a dip the corner ball's zone lies between them. Each removes its balls' union, integrated
@@ -1470,6 +1558,70 @@ fn a_round_too_small_to_change_the_part_is_refused() {
     assert!(volume(&b) < before);
 }
 
+/// #17511: a round of 8 on a quarter circle of radius 10 that meets a straight side 16.7
+/// degrees off tangent. On the top, the round of the arc touches the circle of radius 2 about
+/// the arc's centre and the round of the side touches the line 8 in from it; they cross twice,
+/// 2.4 apart, and the corner is where the arc's own round meets the side's: on the arc's side of
+/// its end. The arc is shorter than twice the radius, so a guess measured along the edges lies
+/// near the arc's far end, and the solve found the other crossing, a ball past the arc's end,
+/// whose mitre with the side's round did not reach it. The crossing nearest the vertex builds.
+#[test]
+fn a_round_on_an_arc_shorter_than_its_diameter_meets_the_next_side_at_its_own_crossing() {
+    all_fixes();
+    let b = swept(
+        &[
+            segment((0.0, 0.0), (30.0, 0.0)),
+            segment((30.0, 0.0), (30.0, 20.0)),
+            arc_deg((20.0, 20.0), 10.0, 0.0, 90.0),
+            segment((20.0, 30.0), (0.0, 24.0)),
+            segment((0.0, 24.0), (0.0, 0.0)),
+        ],
+        10.0,
+    );
+    let half = 0.5_f64.sqrt() * 10.0;
+    let edges = [
+        edge_at(&b, [15.0, 0.0, 10.0]),
+        edge_at(&b, [30.0, 10.0, 10.0]),
+        edge_at(&b, [20.0 + half, 20.0 + half, 10.0]),
+        edge_at(&b, [10.0, 27.0, 10.0]),
+        edge_at(&b, [0.0, 12.0, 10.0]),
+    ];
+    let before = volume(&b);
+    blend(&b, Blend::Round, &edges, &[8.0], &[], Corners::Filled).unwrap();
+    assert!(volume(&b) < before);
+    assert!(b.check(CheckLevel::All).unwrap().is_valid());
+    // the side's unit direction from the arc's end and its normal into the part
+    let len = 436.0_f64.sqrt();
+    let (t, n) = ((-20.0 / len, -6.0 / len), (6.0 / len, -20.0 / len));
+    // the round's contact circle about (20, 20) meets the side's contact line 8 in from it
+    let h = 8.0 - 200.0 / len;
+    let w = (4.0 - h * h).sqrt();
+    let crossing = |sign: f64| {
+        [
+            20.0 + h * n.0 + sign * w * t.0,
+            20.0 + h * n.1 + sign * w * t.1,
+            10.0,
+        ]
+    };
+    let nearest = |p: [f64; 3]| {
+        let (_, brep) = kernel_copy(&b);
+        brep.vertex_list()
+            .iter()
+            .map(|&v| {
+                let q = solidcore::query::api_queries::vertex_get_point(&brep, v).unwrap();
+                ((q.x - p[0]).powi(2) + (q.y - p[1]).powi(2) + (q.z - p[2]).powi(2)).sqrt()
+            })
+            .fold(f64::INFINITY, f64::min)
+    };
+    // on the arc's side of its end (x > 20): a vertex; past it: none
+    assert!(
+        nearest(crossing(-1.0)) < 1e-6,
+        "{}",
+        nearest(crossing(-1.0))
+    );
+    assert!(nearest(crossing(1.0)) > 1.0, "{}", nearest(crossing(1.0)));
+}
+
 /// solidcore#2250's box: 40 x 30 x 20, its top back edge chamfered 5 (V0 23500); A, the
 /// chamfer's top edge (a 135 degree wedge), and B, the bottom front edge (90 degrees), rounded
 /// curvature-continuously r 2 in one call, in either order. Each round takes off its own ball's
@@ -1841,6 +1993,200 @@ fn a_ledge_rounded_concave_first_refuses_its_convex_chain_with_its_reason() {
             );
         }
         other => panic!("not the trim's typed refusal: {other:?}"),
+    }
+}
+
+/// `int_a^b sqrt(r^2 - x^2) dx`, in closed form.
+fn disc_strip(a: f64, b: f64, r: f64) -> f64 {
+    let f = |x: f64| 0.5 * x * (r * r - x * x).sqrt() + 0.5 * r * r * (x / r).asin();
+    f(b) - f(a)
+}
+
+/// The ledge's operand volume, the kernel case's closed form (its `method`):
+///
+/// ```text
+/// 15 (1728 + 162 pi) - 6 (15 * 48 + I(-7.5, 7.5; 18)) - 432 pi - 216 pi + 36 * 27 * 18
+///   - 18 * 6 * 18 + 36 * 18 * 12 + 2916 pi - 18 (288 + 144 pi) - 3 * 72 pi - 6 * 2 I(9, 12; 12)
+/// ```
+///
+/// with `I(a, b; R) = int_a^b sqrt(R^2 - x^2) dx`: 43913.957931372.
+fn ledge_operand_volume() -> f64 {
+    15.0 * (1728.0 + 162.0 * PI)
+        - 6.0 * (15.0 * 48.0 + disc_strip(-7.5, 7.5, 18.0))
+        - 432.0 * PI
+        - 216.0 * PI
+        + 36.0 * 27.0 * 18.0
+        - 18.0 * 6.0 * 18.0
+        + 36.0 * 18.0 * 12.0
+        + 2916.0 * PI
+        - 18.0 * (288.0 + 144.0 * PI)
+        - 3.0 * 72.0 * PI
+        - 6.0 * 2.0 * disc_strip(9.0, 12.0, 12.0)
+}
+
+/// The ledge corner (#10876) rounded r 0.5 at both edges as the blend corner's Roll-over, its
+/// volume's change from the operand's. In the local frame u = x - 12, v = y - 30, w = z - 33
+/// (the ledge top w = 0 for v < 0, the arch's front v = 0, the bore's flat wall u = 0 above
+/// w = 0 and its round bottom, the circle of radius `RB` = 12 about u = -12, w = 0, below):
+/// - the convex round (E1, between the ledge top and the bore's bottom, from y = 21 to 30)
+///   takes its section `A1` over its length 9. Its axis A1 is at u = `ua` = sqrt(156) - 12,
+///   w = -r (the ball touching the top and outside the bore: `(RB + ua)^2 + r^2 = (RB + r)^2`);
+///   its section is the curvilinear triangle bounded by the top from (ua, 0) to the corner,
+///   the bore's circle from the corner to its tangent point T with the round, and the round's
+///   arc back: by Green's theorem `A1 = 1/2 (RB^2 (phi_t - sin phi_t) + loop_round)`, below;
+/// - the concave round (E2, between the top and the arch's front, from x = 12 to 18) adds its
+///   section `(1 - pi/4) r^2` over its remainder from u = ua (the convex round's rail on the
+///   top) to 6;
+/// - the torus about A1 (major radius 2 r, minor r) adds the material past that strip, as on
+///   the planar twin ([`roll_over_material`]): `I = int_r^(2r) rho (r - sqrt(r^2 - (2r -
+///   rho)^2)) theta_max(rho) d rho`, the meridian section of height `r - sqrt(..)` at distance
+///   `rho` from A1 swept over the directions `theta` (from +w towards -u) the cliff keeps. The
+///   cliff is the flat wall where its direction meets it above w = 0 (`rho sin theta = ua`,
+///   for `rho` past W's distance `rho_w = sqrt(ua^2 + r^2)` from A1) and the bore's circle
+///   below (`(RB + ua) sin theta + r cos theta = ((RB + r)^2 - RB^2 + rho^2) / (2 rho)`, for
+///   `rho` up to `rho_w`); with `rho = 2r - r cos phi` the integrand is analytic on each side
+///   of `phi_w`, and each side is integrated by two Gauss-Legendre rules (20 points on 8
+///   panels, 30 on 16) that agree to 1e-14 relative (asserted): the reference is their mean.
+fn ledge_rolled_change(r: f64) -> f64 {
+    let rb = 12.0;
+    let ua = ((rb + r) * (rb + r) - r * r).sqrt() - rb;
+    // A1: the loop top (ua, 0) -> corner (0, 0) -> T along the bore's circle -> back along
+    // the round's arc, counter-clockwise; 1/2 the integral of u dw - w du
+    let d = rb + r;
+    let phi_t = (-r / d).asin(); // T's angle about the bore's axis, below w = 0
+    let along_bore = rb * rb * (phi_t - phi_t.sin());
+    // the round's arc about (ua, -r) from T's direction psi_t to the top's tangent point at
+    // pi/2: with u = ua + r cos psi, w = -r + r sin psi, u dw - w du = (ua r cos psi + r^2 -
+    // r^2 sin psi) d psi, whose integral is ua r sin psi + r^2 psi + r^2 cos psi. T lies on the
+    // line from the bore's axis to the round's centre, so its direction from the centre is
+    // the opposite of (RB + ua, -r)
+    let psi_t = r.atan2(-(ua + rb));
+    let arc = |psi: f64| ua * r * psi.sin() + r * r * psi + r * r * psi.cos();
+    let along_round = arc(PI / 2.0) - arc(psi_t);
+    let a1 = 0.5 * (along_bore + along_round);
+    let strip = (1.0 - PI / 4.0) * r * r;
+    // the torus's material past the concave strip
+    let big_r = 2.0 * r;
+    let rho_w = (ua * ua + r * r).sqrt();
+    let beta = r.atan2(rb + ua);
+    let theta_max = |rho: f64| {
+        if rho >= rho_w {
+            (ua / rho).min(1.0).asin()
+        } else {
+            let s = (d * d - rb * rb + rho * rho) / (2.0 * rho * d);
+            s.min(1.0).asin() - beta
+        }
+    };
+    let f = |phi: f64| {
+        let rho = big_r - r * phi.cos();
+        rho * r * r * (1.0 - phi.sin()) * phi.sin() * theta_max(rho)
+    };
+    let phi_w = ((big_r - rho_w) / r).acos();
+    let both = |a: f64, b: f64| {
+        let x = gauss(&f, a, b, 20, 8);
+        let y = gauss(&f, a, b, 30, 16);
+        assert!((x - y).abs() <= 1e-14 * x.abs(), "{x} {y}");
+        0.5 * (x + y)
+    };
+    let material = both(0.0, phi_w) + both(phi_w, PI / 2.0);
+    -9.0 * a1 + (6.0 - ua) * strip + material
+}
+
+/// The kernel case `10876-fillet-ledge-convex-and-concave-edges-at-bore-r0-5` (#10876): the
+/// ledge's convex edge (top and bore bottom) and concave edge (top and arch front) rounded r
+/// 0.5 together, at the corner beside the bore's tangent seam. It builds as the blend corner's
+/// Roll-over: the concave round's End at the cliff spans the bore's round bottom and its flat
+/// wall across their tangent seam, its rib in two pieces through the seam's line. The result
+/// is valid at Level 2, one closed manifold solid facing out, and its volume is the operand's
+/// closed form plus [`ledge_rolled_change`] within 1e-11 relative (the End cut on the
+/// cylinder continued instead of the wall would move it 7.2e-6, 1.6e-10 relative), which the
+/// kernel's certified enclosure holds; the cap's two faces meet along the seam's line from W
+/// to S, at its closed-form point, where the rib's two pieces meet.
+///
+/// The enclosures are asked 1e-3 wide, not the 1e-5 of the stair twin: two of the operand's
+/// own edges, far from the corner (the radius-18 cylinder's at y = -16.36, z = 6, x from -7.5
+/// to 7.5, and the radius-12 bore's at y = 27, z = 25.06, x from -9 to 9), leave gaps between
+/// their faces whose strips settle the operand's enclosure at 7.4e-4 before any blend
+/// (measured; the blend's two rib pieces add 8e-7). 1e-3 still decides the Roll-over (the
+/// torus's material alone adds 0.032); the split at the seam is decided by the volume to
+/// 1e-11 and the seam edge, not by the enclosure.
+#[test]
+fn the_ledge_corner_rolls_over_across_the_bores_tangent_seam() {
+    rig_fixes();
+    let b = ledge();
+    let v0 = ledge_operand_volume();
+    assert!(rel(b.volume(1e-12).unwrap(), v0) < 1e-11, "{v0}");
+    enclosure_holds(&b, v0, 1e-3);
+    let e1 = nearest_edge(&b, [12.0, 25.5, 33.0]);
+    let e2 = nearest_edge(&b, [15.0, 30.0, 33.0]);
+    blend(
+        &b,
+        Blend::Round,
+        &[e1, e2],
+        &[0.5, 0.5],
+        &[],
+        Corners::Filled,
+    )
+    .unwrap();
+    let report = b.check(CheckLevel::All).unwrap();
+    assert!(report.is_valid(), "{}", report.text);
+    assert!(b.is_manifold_solid().unwrap());
+    b.check_solid().unwrap();
+    // the app's record holds it (each pcurve runs over its edge's interval), as built and
+    // after a round trip through a .smb file (the case's render reads it back)
+    b.to_record().unwrap();
+    let back = Body::from_smb(b.to_smb(true).unwrap(), true).unwrap();
+    back.to_record().unwrap();
+    let want = v0 + ledge_rolled_change(0.5);
+    // the volume and the seam, on the body as built and as read back from the .smb file
+    for (which, body) in [("built", &b), ("reloaded", &back)] {
+        let v = body.volume(1e-12).unwrap();
+        assert!(rel(v, want) < 1e-11, "{which}: {v} {want}");
+        enclosure_holds(body, want, 1e-3);
+        // the cap's two faces meet along the seam's line from W to S, where the rib's two pieces
+        // meet: S on that line (x = 12, z = 33) at the torus's height h = sqrt((rho - r)(3r - rho))
+        // over its centre plane y = 30 - r, rho = sqrt(ua^2 + r^2) W's distance from A1
+        let r: f64 = 0.5;
+        let ua = ((12.0 + r) * (12.0 + r) - r * r).sqrt() - 12.0;
+        let rho = (ua * ua + r * r).sqrt();
+        let h = ((rho - r) * (3.0 * r - rho)).sqrt();
+        let (w, s) = ([12.0, 30.0, 33.0], [12.0, 30.0 - r + h, 33.0]);
+        let (_, brep) = kernel_copy(body);
+        let near = |p: Vec3, q: [f64; 3]| (p - Vec3::new(q[0], q[1], q[2])).length() <= 1e-9;
+        let ends = |e: EdgeId| {
+            let v0 = edge::start_vertex(&brep, e).unwrap().unwrap();
+            let v1 = edge::end_vertex(&brep, e).unwrap().unwrap();
+            (
+                brep.vertex(v0).unwrap().point,
+                brep.vertex(v1).unwrap().point,
+            )
+        };
+        let seam: Vec<EdgeId> = brep
+            .edges()
+            .ids()
+            .filter(|&e| {
+                let (p, q) = ends(e);
+                (near(p, w) && near(q, s)) || (near(p, s) && near(q, w))
+            })
+            .collect();
+        assert_eq!(seam.len(), 1, "{which}: the cap's seam edge from W to S");
+        let faces = edge::faces(&brep, seam[0], None).unwrap();
+        assert!(
+            faces.len() == 2 && faces[0] != faces[1],
+            "{which}: {faces:?}"
+        );
+        let at_s = brep
+            .edges()
+            .ids()
+            .filter(|&e| {
+                let (p, q) = ends(e);
+                near(p, s) || near(q, s)
+            })
+            .count();
+        assert_eq!(
+            at_s, 3,
+            "{which}: S, the seam edge and the rib's two pieces"
+        );
     }
 }
 
@@ -2217,6 +2563,93 @@ fn a_ledge_twin_whose_roll_over_does_not_build_keeps_its_refusal() {
         got.err()
     );
     assert!(rel(b.volume(1e-12).unwrap(), 3000.0) < 1e-12);
+}
+
+/// #17617's plate and wall, turned so that the wall's profile lies in z = 0: the plate
+/// [29.5, 138.5] x [-4, 0] x [-33, 117] and on its face y = -4 the wall, `profile` swept 5
+/// along z.
+fn plate_and_wall(profile: &[(f64, f64)]) -> Body {
+    let plate = make_box([29.5, -4.0, -33.0], [109.0, 4.0, 150.0]).unwrap();
+    let sides: Vec<_> = (0..profile.len())
+        .map(|i| segment(profile[i], profile[(i + 1) % profile.len()]))
+        .collect();
+    let wall = swept(&sides, 5.0);
+    solidcore_ops::boolean::boolean(plate, wall, solidcore_ops::BooleanOp::Union)
+        .unwrap()
+        .unwrap()
+}
+
+/// A round of 2 on the concave edge E between the plate's face y = -4 and the wall's face
+/// z = 5 (#17617). E runs from x = 129.5, where the wall's end is square, to V = (29.5, -4, 5),
+/// the plate's end, where the wall's end face W slants out past the plate (the plane through
+/// x = 29.5, y = -4 and x = 10, y = -40). At V four edges meet: E, the plate's corner edge
+/// x = 29.5, y = -4 (convex) and W's two edges with the wall's face z = 5 (convex) and with the
+/// plate's end x = 29.5. The rails end on the two convex edges, at (29.5, -4, 7) and at
+/// (29.5 - 2 * 19.5 / 36, -6, 5), so the round ends on W's plane and W grows over the end's
+/// cap (it held no cap on the plate's end plane, and the round was refused as no closed
+/// solid). The round's cross-section is the square of side 2 less the ball's quarter disc,
+/// its length 100 plus how far W slants back over that section. The wall's other edge with the
+/// plate (its face z = 0) is the mirror image, its side edges the other way round V.
+#[test]
+#[allow(clippy::disallowed_methods)] // the test's closed form, not ops computing geometry
+fn a_round_ending_where_a_slanted_wall_overhangs_its_plate_ends_on_the_wall() {
+    rig_fixes();
+    // first, on both of the wall's sides, the same wall with its end square, overhanging the
+    // plate's end by 19.5: the round ends on the plate's end plane (as before #17617)
+    for z in [5.0, 0.0] {
+        let b = plate_and_wall(&[(10.0, -4.0), (129.5, -4.0), (129.5, -40.0), (10.0, -40.0)]);
+        let e = nearest_edge(&b, [80.0, -4.0, z]);
+        blend(&b, Blend::Round, &[e], &[2.0], &[], Corners::Filled).unwrap();
+        assert!(b.check(CheckLevel::All).unwrap().is_valid(), "z = {z}");
+        assert_eq!(b.counts().unwrap(), [13, 32, 21], "z = {z}");
+        let v = b.volume(1e-12).unwrap();
+        let want = 65400.0 + 119.5 * 36.0 * 5.0 + 100.0 * (4.0 - PI);
+        assert!(rel(v, want) < 1e-11, "z = {z}: {v}");
+    }
+    let slant = 19.5 / 36.0;
+    let before = 65400.0 + 0.5 * (100.0 + 119.5) * 36.0 * 5.0;
+    // the wall's face z and the side of it the round lies on
+    for (z, out) in [(5.0, 1.0), (0.0, -1.0)] {
+        let b = plate_and_wall(&[(29.5, -4.0), (129.5, -4.0), (129.5, -40.0), (10.0, -40.0)]);
+        assert_eq!(b.counts().unwrap(), [11, 25, 16]);
+        assert!(rel(volume(&b), before) < 1e-12);
+        let e = nearest_edge(&b, [80.0, -4.0, z]);
+        blend(&b, Blend::Round, &[e], &[2.0], &[], Corners::Filled).unwrap();
+        assert!(b.check(CheckLevel::All).unwrap().is_valid(), "z = {z}");
+        assert_eq!(b.counts().unwrap(), [12, 28, 18], "z = {z}");
+        // the section's area 4 - pi, its first moment about the plate's face 20/3 - 2 pi
+        let want = before + 100.0 * (4.0 - PI) + slant * (20.0 / 3.0 - 2.0 * PI);
+        let v = b.volume(1e-12).unwrap();
+        assert!(rel(v, want) < 1e-11, "z = {z}: {v} {want}");
+        let (k, brep) = kernel_copy(&b);
+        let near = |a: Vec3, p: [f64; 3]| (a - Vec3::new(p[0], p[1], p[2])).length() < 1e-9;
+        let top = z + 2.0 * out;
+        let (mut rounds, mut walls) = (0, 0);
+        for &f in brep.face_list() {
+            let bb = face_bounding_box(&k, &brep, f, true).unwrap();
+            match brep.face(f).unwrap().surface.as_ref().unwrap().kind() {
+                SurfaceKind::Cone(c) => {
+                    assert!(c.is_cylinder(), "z = {z}: the round on a cone");
+                    let lo = [29.5 - 2.0 * slant, -6.0, z.min(top)];
+                    assert!(near(bb.min(), lo), "z = {z}: {bb:?}");
+                    assert!(near(bb.max(), [129.5, -4.0, z.max(top)]), "z = {z}: {bb:?}");
+                    rounds += 1;
+                }
+                SurfaceKind::Plane(_) => {
+                    // W, out to the cap's far side
+                    let (lo, hi) = ([10.0, -40.0, top.min(0.0)], [29.5, -4.0, top.max(5.0)]);
+                    if near(bb.min(), lo) && near(bb.max(), hi) {
+                        walls += 1;
+                    }
+                }
+                _ => panic!(
+                    "a face on {}",
+                    surface_kind_name(brep.face(f).unwrap().surface.as_ref().unwrap())
+                ),
+            }
+        }
+        assert_eq!((rounds, walls), (1, 1), "z = {z}");
+    }
 }
 
 /// A block 30 x 30 x 10 with the pocket [5, 25]^2 x [4, 10], its four vertical edges rounded
@@ -3370,6 +3803,275 @@ fn a_round_split_by_rollover_ends_its_last_piece_at_a_closed_edge_s_seam() {
                 "{bx:?}"
             );
             assert!(p.z >= 33.55 - r - 0.5 && p.z <= 39.0, "{bx:?}");
+        }
+    }
+}
+
+/// The ring and the wedge of tangency-labs/solidcraft#17715: a ring about x, its outer side a
+/// band of the torus of radii 40 and 5 (the generating circle's arc from 175 to 210 degrees in
+/// the meridian half-plane, x = 5 cos t, rho = 40 + 5 sin t), and a wedge revolved 16 degrees
+/// about x, between the half-planes at 12 and 28 degrees from the ring's seam, the half-plane
+/// at angle theta running along (0, sin theta, -cos theta) (the issue's design, sketched on XZ).
+/// The wedge's profile is the arc from 180 to 210 degrees, the cone line to (x, rho) =
+/// (-1, 34), the cylinder line to (-5, 34) and the plane line x = -5 up to the arc's leftmost
+/// point, where it is tangent to the arc.
+fn ring_and_wedge() -> Body {
+    use solidcore_ops::boolean::boolean;
+    use solidcore_ops::sweep::revolve;
+    use solidcore_ops::BooleanOp;
+
+    let meridian = |theta: f64| {
+        let e = [0.0, theta.sin(), -theta.cos()];
+        let at = move |x: f64, rho: f64| [x, rho * e[1], rho * e[2]];
+        let arc = move |from: f64, to: f64| Curve::Arc {
+            center: at(0.0, 40.0),
+            // x cross e, so that the arc's angle t runs from x towards e
+            axis: [0.0, -e[2], e[1]],
+            reference: [1.0, 0.0, 0.0],
+            radius: 5.0,
+            start: from.to_radians(),
+            end: to.to_radians(),
+        };
+        (at, arc)
+    };
+    let line = |start: [f64; 3], end: [f64; 3]| Curve::Line { start, end };
+    let (at, arc) = meridian(0.0);
+    let t = |deg: f64| {
+        let r = f64::to_radians(deg);
+        (5.0 * r.cos(), 40.0 + 5.0 * r.sin())
+    };
+    let (x0, r0) = t(175.0);
+    let (x1, r1) = t(210.0);
+    let ring_profile = [
+        arc(175.0, 210.0),
+        line(at(x1, r1), at(0.0, 32.0)),
+        line(at(0.0, 32.0), at(0.0, 48.0)),
+        line(at(0.0, 48.0), at(x0, r0)),
+    ];
+    let ring = revolve(&ring_profile, [0.0; 3], [1.0, 0.0, 0.0], 2.0 * PI, true).unwrap();
+    let (at, arc) = meridian(12.0_f64.to_radians());
+    let wedge_profile = [
+        arc(180.0, 210.0),
+        line(at(x1, r1), at(-1.0, 34.0)),
+        line(at(-1.0, 34.0), at(-5.0, 34.0)),
+        line(at(-5.0, 34.0), at(-5.0, 40.0)),
+    ];
+    let wedge = revolve(
+        &wedge_profile,
+        [0.0; 3],
+        [1.0, 0.0, 0.0],
+        16.0_f64.to_radians(),
+        true,
+    )
+    .unwrap();
+    boolean(ring, wedge, BooleanOp::Union).unwrap().unwrap()
+}
+
+/// A round on the short edge where the wedge's end cap meets the ring's torus band, the arc
+/// from 180 to 210 degrees of the generating circle in the cap's half-plane at 28 degrees
+/// (tangency-labs/solidcraft#17715), builds. The cap lies between that arc and the plane line
+/// x = -5, which leaves the arc's 180 degree end along it: the cap closes to a cusp there, and
+/// the round's rail on it, the circle of radius 5 + r about the arc's centre, lies past x = -5
+/// wherever |t - 180| < acos(5 / (5 + r)), 19.4 degrees for r 0.3. There the material the
+/// round adds is trimmed flush with the plane x = -5 continued, and the band's rail ends on
+/// the band's tangent seam with that plane, continued past the cap's plane (without it the
+/// corner fails with status 1001). At the arc's 210 degree end the round ends on the plane
+/// square to the arc: the ring's rim circle there is square to the arc, and leans over the
+/// round only by its tangent's rounding (taken for a lean, the cap was tilted, and the faces
+/// the rails enclose were left open past them).
+///
+/// The added volume is the region within r of both the cap's plane and the band, outside the
+/// balls about the round's spine (centres 5 + r from the generating circle's centre in the
+/// half-plane at 28 + asin(r / rho) degrees), with x >= -5 and on the round's side of the end
+/// plane square to the arc at its 210 degree end. Integrated by Monte Carlo (10^7 points,
+/// about 0.3 % of error) it is 0.03675 without the sliver between the band and the plane
+/// x = -5 past the tangent circle, and 0.03742 with it; the bounds take 2 % more each way.
+#[test]
+fn a_round_on_a_revolved_end_cap_that_closes_to_a_cusp_builds() {
+    all_fixes();
+    let b = ring_and_wedge();
+    let before = volume(&b);
+    let theta = 28.0_f64.to_radians();
+    let on_cap = |x: f64, rho: f64| Vec3::new(x, rho * theta.sin(), -rho * theta.cos());
+    // the arc's chord's middle picks the arc, whose ends are the generating circle's points at
+    // 210 and 180 degrees
+    let e = nearest_edge(
+        &b,
+        [
+            -4.665063509461097,
+            38.75 * theta.sin(),
+            -38.75 * theta.cos(),
+        ],
+    );
+    let (k, brep) = kernel_copy(&b);
+    let edge_id = brep.edge_list()[e];
+    let curve = edge::curve(&brep, edge_id).unwrap().unwrap();
+    let ivl = edge::interval(&brep, edge_id).unwrap();
+    let ends = [ivl.min(), ivl.max()].map(|t| curve.evaluate_point(&k, t).unwrap());
+    for want in [on_cap(-2.5 * 3.0_f64.sqrt(), 37.5), on_cap(-5.0, 40.0)] {
+        assert!(ends.iter().any(|p| p.distance(want) < 1e-6), "{ends:?}");
+    }
+    let made = blend(&b, Blend::Round, &[e], &[0.3], &[], Corners::Filled)
+        .unwrap_or_else(|e| panic!("the round on the cap's arc does not build: {e:?}"));
+    assert!(!made.made.is_empty());
+    assert!(b.is_manifold_solid().unwrap());
+    let report = b.check(CheckLevel::All).unwrap();
+    assert!(report.is_valid(), "{report}");
+    let added = volume(&b) - before;
+    assert!((0.0360..=0.0381).contains(&added), "{added}");
+}
+
+/// #17616: the issue's sheet-metal part, 3 thick with 2 mm bends: a 90 x 75 base, a three-bend
+/// flange on its back edge, and on its right edge a flange split into an 8 mm and a 50 mm
+/// segment. The record is the body SolidCraft's trace gives the round
+/// (`tests/data/issue_17616_split_flange_tab.bodies.json.gz`).
+fn issue_17616_body() -> Body {
+    let case = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../solidcore/tests/data/issue_17616_split_flange_tab.bodies.json.gz"
+    );
+    let mut text = String::new();
+    flate2::read::GzDecoder::new(std::fs::File::open(case).unwrap())
+        .read_to_string(&mut text)
+        .unwrap();
+    let records: serde_json::Value = serde_json::from_str(&text).unwrap();
+    let record: Record = serde_json::from_value(records["b1"].clone()).unwrap();
+    Body::from_record(&record, true).unwrap().0
+}
+
+/// A cylinder face: its radius, its axis (a point and the unit direction), its UV domain and
+/// its surface's natural domain (u and v, each from and to).
+type Cylinder = (f64, [Vec3; 2], [f64; 4], [f64; 4]);
+
+/// Each cylinder face of `b`.
+fn issue_17616_cylinders(b: &Body) -> Vec<Cylinder> {
+    use solidcore::topology::face::p2 as face;
+    let (k, brep) = kernel_copy(b);
+    let mut out = Vec::new();
+    for &f in brep.face_list() {
+        let s = face::surface(&brep, f).unwrap().unwrap();
+        let SurfaceKind::Cone(c) = s.kind() else {
+            continue;
+        };
+        let cone = c.canonical();
+        assert!(cone.semi_angle_deg == 0.0, "a face on a cone");
+        let d = face::uv_domain(&brep, f).unwrap();
+        let n = s.natural_uv_domain_with_nurb(&k).unwrap();
+        out.push((
+            cone.radius,
+            [cone.origin.origin(), cone.origin.z_axis()],
+            [d.u_min(), d.u_max(), d.v_min(), d.v_max()],
+            [n.u_min(), n.u_max(), n.v_min(), n.v_max()],
+        ));
+    }
+    out
+}
+
+/// #17616: an R10 round on the 50 mm tab's top outside edge (x = 90, z = 50, y 35 to 70)
+/// overflows the 3 mm top face and runs onto the inside face x = 87. Its ball's centre is
+/// (80, 40) in x, z, so the round takes off, per unit length, the tab's 3 x 10 corner less the
+/// disc strip under the arc: `30 - I(7, 10; 10)`, over the 35 of the tab. The top face goes and
+/// the round comes in its place, bounded by its rail on x = 90, its crease on x = 87 and its
+/// arcs on the tab's ends: 45 faces, 93 edges, 50 vertices, as before.
+///
+/// On main the round's last step (sewn faces on one surface made one face) tested the edge
+/// between the two bends of the split flange, which lie on one cylinder, for removal although
+/// it is kept, and the test expanded one bend's surface onto both, its parameterisation
+/// changing, while the bend kept its UV domain. Its trims dropped off that domain, and the
+/// round was not closed (ops) or its trim was fitted on a third of its edge (SolidCraft's
+/// export: "a UV trim on [0, 0.33], its edge on [0, 1]"). Every bend now keeps its surface.
+#[test]
+fn a_round_overflowing_a_split_flange_s_tab_top_leaves_the_bends_on_their_surfaces() {
+    rig_fixes();
+    let b = issue_17616_body();
+    let before = volume(&b);
+    // the ten bends, of radius 2 inside and 5 outside, each with its UV domain its surface's
+    // whole natural domain
+    let bends_on_their_surfaces = |b: &Body| {
+        let bends: Vec<_> = issue_17616_cylinders(b)
+            .into_iter()
+            .filter(|c| c.0 < 6.0)
+            .collect();
+        assert_eq!(bends.len(), 10);
+        for (r, _, d, n) in &bends {
+            assert!(
+                (r - 2.0).abs() <= 1e-9 || (r - 5.0).abs() <= 1e-9,
+                "a bend of radius {r}"
+            );
+            for (x, y) in d.iter().zip(n) {
+                assert!(
+                    (x - y).abs() <= 1e-9,
+                    "a bend's domain {d:?} is not its surface's {n:?}"
+                );
+            }
+        }
+    };
+    // each bend's surface by its radius, its axis line (the foot of the perpendicular from the
+    // origin and the direction up to sign) and its natural domain's two ranges (in either
+    // order: the round's stitch may swap a face's u and v), sorted
+    let bend_surfaces = |b: &Body| {
+        let mut keys: Vec<[f64; 11]> = issue_17616_cylinders(b)
+            .into_iter()
+            .filter(|c| c.0 < 6.0)
+            .map(|(r, [o, d], _, n)| {
+                let foot = o - d * o.dot(d);
+                let d = if d.x + d.y + d.z < 0.0 { d * -1.0 } else { d };
+                let (mut s, mut t) = ([n[0], n[1]], [n[2], n[3]]);
+                if s[0] > t[0] {
+                    std::mem::swap(&mut s, &mut t);
+                }
+                [
+                    r, foot.x, foot.y, foot.z, d.x, d.y, d.z, s[0], s[1], t[0], t[1],
+                ]
+            })
+            .collect();
+        keys.sort_by(|a, c| {
+            a.iter()
+                .zip(c)
+                .map(|(x, y)| x.total_cmp(y))
+                .fold(std::cmp::Ordering::Equal, std::cmp::Ordering::then)
+        });
+        keys
+    };
+    bends_on_their_surfaces(&b);
+    let surfaces = bend_surfaces(&b);
+    assert_eq!(issue_17616_cylinders(&b).len(), 10);
+    let e = edge_at(&b, [90.0, 52.5, 50.0]);
+    blend(&b, Blend::Round, &[e], &[10.0], &[], Corners::Filled)
+        .unwrap_or_else(|e| panic!("the tab's top edge does not round: {e:?}"));
+    let report = b.check(CheckLevel::All).unwrap();
+    assert!(report.is_valid(), "{report}");
+    assert_eq!(b.counts().unwrap(), [45, 93, 50]);
+    let removed = 35.0 * (30.0 - disc_strip(7.0, 10.0, 10.0));
+    let after = volume(&b);
+    assert!(
+        rel(before - after, removed) < 1e-6,
+        "{before} - {after} vs {removed}"
+    );
+    // the round: one exact cylinder of radius 10 about the ball centres' line x = 80, z = 40
+    let rounds: Vec<_> = issue_17616_cylinders(&b)
+        .into_iter()
+        .filter(|c| c.0 >= 6.0)
+        .collect();
+    assert_eq!(rounds.len(), 1);
+    let (r, [origin, axis], _, _) = rounds[0];
+    assert!((r - 10.0).abs() <= 1e-9, "the round's radius {r}");
+    assert!(
+        axis.cross(Vec3::new(0.0, 1.0, 0.0)).length() <= 1e-12,
+        "the round's axis {axis:?}"
+    );
+    assert!(
+        (origin.x - 80.0).abs() <= 1e-9 && (origin.z - 40.0).abs() <= 1e-9,
+        "{origin:?}"
+    );
+    // the bends the round does not reach as they were: each on its own surface, unexpanded
+    bends_on_their_surfaces(&b);
+    for (was, now) in surfaces.iter().zip(&bend_surfaces(&b)) {
+        for (x, y) in was.iter().zip(now) {
+            assert!(
+                (x - y).abs() <= 1e-9,
+                "a bend's surface {was:?} is now {now:?}"
+            );
         }
     }
 }

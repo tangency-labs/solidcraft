@@ -530,7 +530,7 @@ pub(super) fn run_op(
             if *skip {
                 return Ok(());
             }
-            let got = res(r.mgr.find_or_create_proto_vertex(pt), st, skip)?;
+            let got = res(r.mgr.find_or_create_proto_vertex(&r.k, pt), st, skip)?;
             sync_counts(r);
             out.push(r.pv_id(got.map(|g| g.0)));
             out.push(b(got.is_some_and(|g| g.1)));

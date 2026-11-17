@@ -778,6 +778,7 @@ fn run_rust(
         store: &store,
         key_of: &|_| solidcore::geom::attribute::ObjectKey(0),
     };
+    crate::dump::body(k, "mass", &body);
     match solidcore::mass::integrator::properties::brep_mass_properties(
         k,
         &mut body,
@@ -799,6 +800,8 @@ fn run_rust(
         }
         Err(error) => values.push(status(error)?),
     }
+    // (a soundness probe's measure of the result: nothing unless capture is on)
+    crate::soundness::measure(&mut body);
     Ok(values)
 }
 /// Configure one actual retained corner between native corner creation and filleting.
@@ -1127,6 +1130,7 @@ fn shell_rust(k: &mut Kernel, input: &RealSolid, shell: ShellAfter) -> SolidResu
         store: &store,
         key_of: &|_| solidcore::geom::attribute::ObjectKey(0),
     };
+    crate::dump::body(k, "shell_mass", &result);
     match solidcore::mass::integrator::properties::brep_mass_properties(
         k,
         &mut result,
@@ -2055,5 +2059,139 @@ mod wr457_certificates {
         let hi = corner.iter().map(|c| c.1).fold(f64::INFINITY, f64::min);
         eprintln!("mixed corners: their contribution in [{lo}, {hi}]");
         assert!(lo <= hi, "the mixed corners differ: {corner:?}");
+    }
+}
+
+/// WR-455 (#17404): moving a contact to the curve end it runs on to moved one row,
+/// `stubs4-degenerate-brepForFillet2-e9-r0.5`. The round of edge 9 of `brepForFillet2.smb`
+/// builds with main's status, counts and topology record, and its volume moves by about
+/// `2.2e-7` in 3616. The body is certified, not compared with main's bits.
+#[cfg(test)]
+mod wr455_certificates {
+    use super::{apply, build, RealSolid};
+    use solidcore::kernel::Kernel;
+    use solidcore::mass::enclosure::enclose_volume;
+    use solidcore::topology::brep::p1;
+    use solidcore::topology::brep::p2::is_manifold_solid;
+    use solidcore::topology::brep::validation::{check_brep, CheckLevel};
+
+    const NAME: &str = "stubs4-degenerate-brepForFillet2-e9-r0.5";
+
+    /// The row's input, read as the goldens gate reads it (upstream file paths resolved).
+    fn load() -> RealSolid {
+        let case = crate::case::regression_case(&super::super::Runner, NAME);
+        let inputs: super::super::Inputs = case.parse().expect("inputs");
+        inputs.real_solid.expect("a real_solid case")
+    }
+
+    /// The built body is valid at Level 2 (PROVEN as far as `check_brep` Level 2 checks)
+    /// and one closed manifold solid. Its volume is enclosed in an interval no wider than
+    /// `0.02` (PROVEN, [`enclose_volume`]; the cell budget stops it near `0.0127`). The harness row records that body: status
+    /// 0, its vertex, edge and face counts, and a mass-properties volume within `1e-4` of
+    /// the enclosure (MEASURED: the integrator's accuracy is an estimate, not a bound).
+    #[test]
+    fn the_moved_round_builds_a_valid_closed_solid() {
+        let input = load();
+        let mut k = Kernel::default();
+        let mut body = build(&mut k, &input)
+            .expect("fixture")
+            .expect("brepForFillet2");
+        let edges = p1::edges(&body, None).expect("edges");
+        let selected: Vec<_> = input
+            .edge_indices()
+            .expect("edge indices")
+            .iter()
+            .map(|&i| *edges.get(i).expect("selected edge"))
+            .collect();
+        apply(&mut k, &mut body, &selected, &input)
+            .unwrap_or_else(|e| panic!("{NAME}: the round failed: {e:?}"));
+        let lines = check_brep(&mut k, &mut body, CheckLevel::Level2)
+            .expect("check")
+            .lines();
+        assert!(lines.is_empty(), "{NAME}: Level 2: {lines:?}");
+        assert!(
+            is_manifold_solid(&body).expect("manifold check"),
+            "{NAME}: not one closed manifold solid"
+        );
+        let width = 0.02;
+        let e = enclose_volume(&k, &mut body, width).expect("enclosure");
+        assert!(e.width() <= width, "{NAME}: enclosure {e:?} wider than {width}");
+        eprintln!("{NAME}: volume in [{}, {}] ({:?})", e.lo, e.hi, e.stop);
+        let row = super::rust(&input).unwrap_or_else(|e| panic!("{NAME}: harness: {e:?}"));
+        let counts = [
+            0,
+            p1::vertices(&body, None).expect("vertices").len() as i64,
+            p1::edges(&body, None).expect("edges").len() as i64,
+            p1::faces(&body, None).expect("faces").len() as i64,
+        ];
+        assert_eq!(counts, [0, 11, 17, 8], "{NAME}: main's counts");
+        assert_eq!(
+            row.ints["api_status_vertex_edge_face_counts"], counts,
+            "{NAME}: row status and counts"
+        );
+        assert_eq!(row.ints["mass_status"], [0], "{NAME}: mass status");
+        let volume = *row.values["mass_properties"].get(1).expect("volume");
+        assert!(
+            e.lo - 1e-4 <= volume && volume <= e.hi + 1e-4,
+            "{NAME}: row volume {volume} not within 1e-4 of [{}, {}]",
+            e.lo,
+            e.hi
+        );
+    }
+}
+
+/// WR-56 (#17467): the two rows it moved, `source-file-6_sided_corner-all-edges` and
+/// `source-file-nurb_box-all-edges`, round every edge of a B-spline body. Their mass
+/// properties did not move (bit for bit), and their topology and geometry records hold the
+/// same values in another order (the same body, its entities numbered differently).
+/// Each body is certified: `check_brep` Level 2 reports nothing, it is one manifold solid
+/// of positive volume, and its volume is enclosed ([`enclose_volume`]; asked for a relative
+/// width of 1e-7, the budget stops it at 2.3e-6 and 1.2e-5, asserted under 2e-5); the
+/// row's volume (the mass integrator's) lies in the enclosure.
+///
+/// [`enclose_volume`]: solidcore::mass::enclosure::enclose_volume
+#[cfg(test)]
+mod wr56_certificates {
+    use crate::UnitDiff;
+    use solidcore::mass::enclosure::VolumeSign;
+
+    #[test]
+    fn the_moved_rounds_are_valid_solids_with_enclosed_volumes() {
+        for name in [
+            "source-file-6_sided_corner-all-edges",
+            "source-file-nurb_box-all-edges",
+        ] {
+            let case = crate::case::regression_case(&super::super::Runner, name);
+            crate::soundness::start_enclosing(1e-7);
+            let row = super::super::Runner.run_rust(&case);
+            let found = crate::soundness::take();
+            let row = row.unwrap_or_else(|e| panic!("{name}: {e:?}"));
+            assert_eq!(found.len(), 1, "{name}: one result body");
+            let s = &found[0];
+            assert!(s.sound(), "{name}: {}", s.line());
+            assert_eq!(s.manifold, Some(true), "{name}: {}", s.line());
+            assert!(matches!(s.volume, Some(VolumeSign::Positive(_))), "{name}: {}", s.line());
+            let e = match &s.enclosure {
+                Some(Ok(e)) => *e,
+                other => panic!("{name}: no enclosure: {other:?}"),
+            };
+            // the enclosure is certified whatever width its budget reached
+            eprintln!("{name}: enclosure {e:?}, relative width {:e}", (e.hi - e.lo) / e.hi);
+            assert!(e.hi - e.lo <= 2e-5 * e.hi, "{name}: {e:?} is wider than 2e-5");
+            let mass = row.values.get("mass_properties").expect("mass properties");
+            let volume = *mass.get(1).expect("volume");
+            eprintln!(
+                "{name}: volume in [{}, {}], row {volume}; {}",
+                e.lo,
+                e.hi,
+                s.line()
+            );
+            assert!(
+                e.lo <= volume && volume <= e.hi,
+                "{name}: row volume {volume} not in [{}, {}]",
+                e.lo,
+                e.hi
+            );
+        }
     }
 }

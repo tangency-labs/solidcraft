@@ -14,13 +14,10 @@ use solidcraft_viewport::Camera;
 
 /// The key the apps keep the preferences under in eframe's storage.
 pub const STORAGE_KEY: &str = "solidcraft.prefs";
-/// The key earlier releases used. Compatibility shim (docs/compatibility.md): read when the
-/// current key is missing, never written.
-pub const LEGACY_STORAGE_KEY: &str = "solvecraft.prefs";
 
-/// The stored preferences, from the current key or else the legacy one.
+/// The stored preferences.
 pub fn stored(get: impl Fn(&str) -> Option<String>) -> Option<String> {
-    get(STORAGE_KEY).or_else(|| get(LEGACY_STORAGE_KEY))
+    get(STORAGE_KEY)
 }
 
 mod design;
@@ -1089,6 +1086,10 @@ preference_settings! {
     /// C for Cancel (#9841). Off by default: typing does nothing to the buttons, as before.
     /// A letter that fits two buttons does nothing, and a focused text field keeps the keystroke.
     dialog_first_letter_buttons: bool = false, PAGE_GENERAL => check_id("prefs.dialog_first_letter_buttons");
+    /// The upright orbit stands a rolled view up as the pointer moves, turning the way the
+    /// pointer goes on screen (#12458). Off: a rolled view keeps its roll and turns about the
+    /// world's up axis, as before, so an upside-down view stays upside down.
+    upright_orbit_unrolls: bool = true, PAGE_NAVIGATION => check_tr("nav.upright_orbit_unrolls.label");
     /// The Donate button (Ko-fi) at the status bar's right end. The button's × turns it off; the Help
     /// menu, About and the start page keep their link.
     show_donate_button: bool = true, PAGE_GENERAL => check_id("prefs.show_donate_button");
@@ -1244,6 +1245,10 @@ preference_settings! {
     profile_operations: bool = false, PAGE_GRAPHICS => check_tr("prefs.profile_operations");
     /// With the frame rate: a frame-time graph, a histogram and what the GPU drew (#2548).
     frame_rate_details: bool = false, PAGE_GRAPHICS;
+    /// While the Browser has the keyboard (the last click was on one of its rows), Up/Down move
+    /// the selection, Left/Right fold or unfold, and the arrows do not turn the view (#17931).
+    /// Off: the arrows always turn the view, as before.
+    browser_arrow_keys: bool = true, PAGE_NAVIGATION => check_tr("prefs.browser_arrow_keys");
     /// Draw a wider rim under finished sketch curves to improve contrast on shaded faces.
     sketch_halo: bool = false, PAGE_GRAPHICS => check("Halo under sketch curves");
     /// How joints look in the viewport: 0 the ring and axis drawn before badges, or a badge with
@@ -1594,6 +1599,11 @@ preference_settings! {
     /// they stay in sight as references wherever the view is (#11123). Off by default: short axes
     /// from the origin, solid then dashed, as before.
     origin_axes_across_view: bool = false, PAGE_DESIGN => check_id("prefs.origin_axes_across_view");
+    /// Hovering an Origin plane, axis or point row in the Browser shows that item in the view,
+    /// for the design's Origin and each part's, also while it is hidden (#15658): a hidden item
+    /// shows only during the hover, its eye and saved visibility unchanged. Off: a hover lights
+    /// only an origin plane that is already drawn, as before.
+    browser_hover_shows_origin: bool = true, PAGE_DESIGN => check_id("prefs.browser_hover_shows_origin");
     /// Handles on the preview of a feature placed on a face (Rest, Boss, Snap Fit, and the Box,
     /// Cylinder, Cone, Sphere, Torus and Coil): a marker that drags it across the model and, where
     /// it can turn in the face, a ring that turns it. Off by default: a Rest, Boss or Snap Fit is
@@ -1764,8 +1774,15 @@ preference_settings! {
     sketch_state_icons: bool = true, PAGE_SKETCH;
     /// Show the construction-line family in Sketch CREATE; off restores the earlier menu.
     sketch_construction_lines: bool = true, PAGE_SKETCH;
+    /// The construction line tools as before #15066: the Construction/Normal switch under the
+    /// Length box, and the Sketch Palette's Line Type icons leave these tools alone. Off (the
+    /// default): those icons set the tools' line type.
+    construction_line_classic: bool = false, PAGE_SKETCH;
     /// Use the only straight construction line in the preselection as Mirror's reference.
     sketch_mirror_auto_line: bool = true, PAGE_SKETCH;
+    /// Pressing an active tool or dialog's shortcut again closes it, as Esc does. Off: the key
+    /// starts the tool or dialog again.
+    shortcut_again_ends_tool: bool = true, PAGE_SKETCH;
     /// A sketch tool's shortcut pressed again before the first point steps to the tool's next
     /// creation mode (#2459). Off (the default): the key starts the tool again, as it always has.
     shortcut_cycles_modes: bool = false, PAGE_SKETCH;
@@ -2426,7 +2443,12 @@ fn defaults(app: &mut SolveApp, page: usize) {
     }
     let (msaa, window_system, adapter) = (app.preferences.msaa, app.preferences.window_system.clone(), app.preferences.graphics_adapter.clone());
     let units = app.preferences.default_units.clone();
+    let check_updates = app.preferences.check_updates;
     reset_preferences(&mut app.preferences, page);
+    // A setting the organization's policy locks keeps the person's choice for when the policy goes.
+    if app.policy.locks("check_updates") {
+        app.preferences.check_updates = check_updates;
+    }
     if page == PAGE_PLUGINS {
         app.prefs_window.plugin_limit_inputs = None;
     }
@@ -3626,6 +3648,10 @@ pub fn control(app: &mut SolveApp, p: &serde_json::Value) -> Result<serde_json::
         o.insert("stand_up_offer".into(), json!(app.stand_up));
         o.insert("stand_up_note".into(), json!(app.stand_up.is_some() && app.stand_up_note));
         o.insert("dark".into(), json!(app.ui.dark));
+        let locked = app.policy.locked();
+        if !locked.is_empty() {
+            o.insert("policy".into(), json!({ "locked": locked, "check_updates": crate::policy::check_updates(app) }));
+        }
         o.insert("viewport_dark".into(), json!(app.viewport_dark()));
         o.insert("theme_ids".into(), json!(theme_choices(app).into_iter().map(|(id, _)| id).collect::<Vec<_>>()));
         let follow = &app.prefs_window.follow;
@@ -4436,6 +4462,10 @@ fn prepare_preferences(
         for (k, v) in src {
             if !o.contains_key(k) {
                 return Err(format!("unknown preference `{k}`"));
+            }
+            // Writing back the stored value is not a change (a client may send every setting it read).
+            if app.policy.locks(k) && o.get(k) != Some(v) {
+                return Err(format!("`{k}` is set by your organization's policy and cannot be changed here"));
             }
             if k == "custom_themes" {
                 let values = v
@@ -8571,8 +8601,10 @@ mod tests {
                 ("line_hover_tangent_arc", "prefs.line_hover_tangent_arc"),
                 ("center_arc_follows_cursor", "prefs.sketch.center_arc"),
                 ("sketch_construction_lines", "prefs.sketch_construction_lines"),
+                ("construction_line_classic", "prefs.construction_line_classic"),
                 ("sketch_auto_dimensions", "prefs.sketch.auto_dimensions"),
                 ("sketch_auto_locate", "prefs.sketch.auto_locate"),
+                ("shortcut_again_ends_tool", "prefs.sketch.shortcut_again_ends_tool"),
                 ("shortcut_cycles_modes", "prefs.sketch.shortcut_cycles_modes"),
                 ("ribbon_click_ends_tool", "prefs.ribbon_click_ends_tool"),
                 ("project_options_dialog", "prefs.sketch.project_options"),
@@ -9562,11 +9594,10 @@ mod tests {
     }
 
     #[test]
-    fn stored_prefs_fall_back_to_the_legacy_key() {
-        let only_old = |k: &str| (k == super::LEGACY_STORAGE_KEY).then(|| "old".to_string());
-        assert_eq!(super::stored(only_old).as_deref(), Some("old"));
+    fn stored_prefs_come_from_the_current_key_only() {
         let both = |k: &str| Some(if k == super::STORAGE_KEY { "new" } else { "old" }.to_string());
         assert_eq!(super::stored(both).as_deref(), Some("new"));
+        assert_eq!(super::stored(|k| (k == "solvecraft.prefs").then(|| "old".to_string())), None);
         assert_eq!(super::stored(|_| None), None);
     }
 

@@ -1864,16 +1864,11 @@ pub fn run_item(app: &mut SolveApp, item: &Item, at: Pos2) {
                 if crate::joint_handles::begin(app, o) {
                     return;
                 }
-                let mut movement = crate::browser::OccMove::new(o);
-                movement.had_pending = app.session.pending_moves.contains_key(&o);
-                movement.path = p.get("path").and_then(Value::as_array).map(|p| p.iter().filter_map(Value::as_u64).collect()).unwrap_or_default();
-                movement.baseline = app
-                    .session
-                    .pending_moves
-                    .get(&o)
-                    .copied()
-                    .or_else(|| app.session.doc.occurrences.iter().find(|occ| occ.id == o).map(|occ| occ.transform));
-                app.tree.occurrence_move = Some(movement);
+                // Move/Copy on the component: it moves by its placement, at the placement named.
+                let path: Vec<u64> =
+                    p.get("path").and_then(Value::as_array).map(|p| p.iter().filter_map(Value::as_u64).collect()).unwrap_or_default();
+                let path = if path.last() == Some(&o) { path } else { crate::dialogs_move::first_path(app, o) };
+                crate::dialogs_move::open_on_occurrence(app, path, false);
             }
         }
         "ui.isolateOccurrence" => {
@@ -2927,6 +2922,7 @@ fn level_rows(
     picked: &mut Option<Item>,
 ) -> Seen {
     let mut seen = Seen::default();
+    let mut on_open = false;
     for (k, item) in rows.iter().enumerate() {
         if item.is_sep() || item.is_heading() {
             let _ = list_row_lit(ui, item, false);
@@ -2961,8 +2957,12 @@ fn level_rows(
         }
         if open == Some(k) {
             seen.anchor = Some(row.rect);
+            on_open |= row.hovered();
         }
     }
+    // A separator, a heading or the gap between two rows is not the open row either: its flyout
+    // goes on closing there instead of lighting its row again and starting the delay over (#17668).
+    seen.other_row |= !on_open && ui.rect_contains_pointer(ui.min_rect());
     seen
 }
 
@@ -2988,24 +2988,31 @@ fn show_rename(app: &mut SolveApp, ctx: &egui::Context) {
         done = Some(true);
     }
     match done {
+        // A refused name keeps the box open, focused with the name selected; the status line says
+        // why.
         Some(true) => {
-            let _ = commit_rename(app, &r);
+            if commit_rename(app, &r).is_err() {
+                r.focused = false;
+                app.menu.rename = Some(r);
+            }
         }
         Some(false) => {}
         None => app.menu.rename = Some(r),
     }
 }
 
-/// Finish a rename from automation: commit (true) or cancel.
-pub fn finish_rename(app: &mut SolveApp, text: Option<&str>, commit: bool) -> bool {
-    let Some(mut r) = app.menu.rename.take() else { return false };
+/// Finish a rename from automation: commit (true) or cancel. A refused name is the error and
+/// leaves the rename in progress, as the box stays open for a person.
+pub fn finish_rename(app: &mut SolveApp, text: Option<&str>, commit: bool) -> Result<(), String> {
+    let Some(mut r) = app.menu.rename.take() else { return Err("no rename in progress".into()) };
     if let Some(s) = text {
         r.text = s.to_string();
     }
-    if commit {
-        let _ = commit_rename(app, &r);
+    if commit && let Err(e) = commit_rename(app, &r) {
+        app.menu.rename = Some(r);
+        return Err(e);
     }
-    true
+    Ok(())
 }
 
 /// How the workspace menu shows each of SolidCraft's workspaces ([`Target::Workspace`]).

@@ -205,7 +205,7 @@ pub static FORMATS: &[FormatSpec] = &[
     FormatSpec {
         id: "design",
         label: "SolidCraft design",
-        extensions: &[crate::DESIGN_EXTS[0], crate::DESIGN_EXTS[1], crate::DESIGN_EXTS[2], "json"],
+        extensions: &[crate::DESIGN_EXTS[0], crate::DESIGN_EXTS[1], "json"],
         role: Role::Design,
         import: Some(ImportSpec { target: ImportTarget::Design, options: &[], native_only: false }),
         export: None,
@@ -451,6 +451,22 @@ pub fn import_filters(native: bool) -> Vec<(&'static str, Vec<&'static str>)> {
     groups
 }
 
+/// The Open dialog's groups for installed importer plugins: (plugin name, lower-case extensions).
+/// The app sets them before it shows the dialog; hosts add them after the built-in groups.
+static PLUGIN_OPEN_FILTERS: std::sync::RwLock<Vec<(String, Vec<String>)>> = std::sync::RwLock::new(Vec::new());
+
+/// Set the importer plugins' Open dialog groups (see [`plugin_open_filters`]).
+pub fn set_plugin_open_filters(filters: Vec<(String, Vec<String>)>) {
+    if let Ok(mut current) = PLUGIN_OPEN_FILTERS.write() {
+        *current = filters;
+    }
+}
+
+/// The importer plugins' Open dialog groups the app last set.
+pub fn plugin_open_filters() -> Vec<(String, Vec<String>)> {
+    PLUGIN_OPEN_FILTERS.read().map(|filters| filters.clone()).unwrap_or_default()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -558,7 +574,7 @@ mod tests {
     fn import_filter_groups_hold_the_expected_extensions() {
         let native = import_filters(true);
         let find = |label: &str| native.iter().find(|(l, _)| *l == label).map(|(_, e)| e.clone()).unwrap_or_default();
-        assert_eq!(find("SolidCraft design (container or JSON)"), vec!["sc", "solidcraft", "solvecraft", "json"]);
+        assert_eq!(find("SolidCraft design (container or JSON)"), vec!["sc", "solidcraft", "json"]);
         assert_eq!(find("STEP"), vec!["step", "stp"]);
         assert_eq!(find("IGES"), vec!["igs", "iges"]);
         assert_eq!(find("FreeCAD and Rhino"), vec!["fcstd", "3dm"]);
