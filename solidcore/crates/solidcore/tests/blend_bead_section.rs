@@ -2323,16 +2323,17 @@ fn a_foot_on_the_other_branch_is_not_proved() {
     );
 }
 
-/// An L of walls standing on a floor plate, joined by booleans: the floor [-40, 40]^2 x
-/// [-10, 0], walls x in [0, 40], y in [0, 10] and x in [0, 10], y in [0, 40], 40 high. The
+/// An L of walls standing on a floor plate, joined by booleans: the floor [-60, 60]^2 x
+/// [-10, 0], walls x in [0, 50], y in [0, 10] and x in [0, 10], y in [0, 50], 40 high. The
 /// booleans leave some of its edge uses without their uv curves (saved as none), which the
-/// kernel makes on demand when a point is classified on a face.
+/// kernel makes on demand when a point is classified on a face. The bead along a wall ends
+/// where the wall does, so its last toes lie on the wall face's boundary.
 fn walls_on_a_floor(k: &mut Kernel) -> Brep {
     use solidcore::boolean::api_brep::boolean_union;
     use solidcore::primitive::api_primitives::create_box;
-    let floor = create_box(k, Point3::new(-40.0, -40.0, -10.0), 80.0, 80.0, 10.0).unwrap();
-    let a = create_box(k, Point3::new(0.0, 0.0, 0.0), 40.0, 10.0, 40.0).unwrap();
-    let b = create_box(k, Point3::new(0.0, 0.0, 0.0), 10.0, 40.0, 40.0).unwrap();
+    let floor = create_box(k, Point3::new(-60.0, -60.0, -10.0), 120.0, 120.0, 10.0).unwrap();
+    let a = create_box(k, Point3::new(0.0, 0.0, 0.0), 50.0, 10.0, 40.0).unwrap();
+    let b = create_box(k, Point3::new(0.0, 0.0, 0.0), 10.0, 50.0, 40.0).unwrap();
     let walls = boolean_union(k, a, b).unwrap();
     boolean_union(k, floor, walls).unwrap()
 }
@@ -2340,7 +2341,8 @@ fn walls_on_a_floor(k: &mut Kernel) -> Brep {
 /// The toes are checked on their faces by reading the part only: a part saved without some
 /// edge uses' uv curves (the walls on a floor: the classification would make them in the
 /// part) keeps its file byte for byte, whether its bead is built or refused for a toe past
-/// its face (each face runs 40 mm from the joint here, so the refusal names 40 mm).
+/// its face (the wall runs 40 mm up from the joint here, so the refusal names 40 mm). Toes on
+/// a face's boundary (the bead's last station, where the wall ends) count as on the face.
 #[test]
 fn a_part_without_some_uv_curves_is_only_read() {
     use solidcore::error::{ErrorKind, FitMeasure};
