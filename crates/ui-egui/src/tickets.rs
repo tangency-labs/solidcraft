@@ -62,10 +62,8 @@ enum Step {
 /// /api/uploads has no file name, and a timed-out request otherwise gives no clue which
 /// attachment the app was sending (#17932).
 fn step_context(step: Step, files: &[payload::File], missing: &std::collections::VecDeque<usize>) -> String {
-    let file = |i: usize| {
-        files.get(i).map_or("attachment", |file| file.name.as_str())
-            .chars().filter(|c| !c.is_control()).take(100).collect::<String>()
-    };
+    let file =
+        |i: usize| files.get(i).map_or("attachment", |file| file.name.as_str()).chars().filter(|c| !c.is_control()).take(100).collect::<String>();
     match step {
         Step::Draft => "create report draft".into(),
         Step::Open(i) => format!("start upload of {}", file(i)),
