@@ -9555,6 +9555,8 @@ pub use model_cache::SavedModel;
 pub mod cell_grid;
 #[path = "eval_frame.rs"]
 pub(crate) mod frame_member;
+#[path = "eval_living_hinge.rs"]
+pub mod living_hinge;
 #[path = "eval_surface.rs"]
 mod surface;
 #[path = "eval_thread.rs"]
@@ -10315,8 +10317,17 @@ fn eval_feature_kind(
             }
             Ok(())
         }
-        // The cut lands with `eval_living_hinge.rs` (the next commit of the doc layer).
-        FeatureKind::LivingHinge { .. } => Err(DocError::Invalid("living hinge: not built yet".into())),
+        FeatureKind::LivingHinge { targets, .. } => {
+            // The report reaches the model state with the model cache's map (a later commit).
+            let (tools, _report) = living_hinge::tools(doc, vals, f, st, warning)?;
+            // An area beside the plate's material changes nothing: say so, as a cut does.
+            let before: Vec<Body> = st.bodies.iter().map(|b| b.body.clone()).collect();
+            apply_traced(doc, st, f, tools, Operation::Cut, &crate::plain(targets))?;
+            if !before.is_empty() && st.bodies.len() == before.len() && st.bodies.iter().zip(&before).all(|(b, old)| old.same(&b.body)) {
+                append_warning(warning, "the cut removes no material; check where its profile lies, the direction and the depth".into());
+            }
+            Ok(())
+        }
         FeatureKind::Hole { thread, thread_depth, thread_class, diameter, hand, modeled, ease_out, depth, to, .. } => {
             if st.bodies.is_empty() {
                 return Err(empty_boolean_targets(doc, st, f, &[], f.participants.is_empty()));

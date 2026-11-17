@@ -160,7 +160,7 @@ pub(crate) fn tools(
 /// How far from the sketch plane the bodies named in `scope` reach, with a margin: the distance a
 /// through-all cell must go on either side to leave nothing. From each body's exact bounds, not
 /// from its display mesh.
-fn exact_reach(st: &ModelState, plane: &Plane, scope: &[String]) -> Result<f64> {
+pub(crate) fn exact_reach(st: &ModelState, plane: &Plane, scope: &[String]) -> Result<f64> {
     let mut far: f64 = 0.0;
     let mut any = false;
     for b in st.bodies.iter().filter(|b| scope.contains(&b.name)) {
