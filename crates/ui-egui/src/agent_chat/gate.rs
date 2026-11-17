@@ -62,22 +62,30 @@ const FILE_EXTENSIONS: &[&str] = &[
     "toml",
 ];
 
-/// Commands that only read (not counted as changes).
+/// Commands that only read (not counted as changes). Section Analysis changes only the view, but
+/// each change is an undo step.
 fn reads_only(id: &str) -> bool {
-    id.starts_with("inspect.")
+    (id.starts_with("inspect.") && id != "inspect.section")
         || id.starts_with("model.")
         || id.ends_with(".inspect")
         || id.ends_with(".list")
         || matches!(
             id,
-            "edit.checkpoint" | "selection.get" | "render.status" | "render.backends" | "render.settings.get" | "file.slicers" | "engine.describe"
+            "edit.checkpoint"
+                | "selection.get"
+                | "render.status"
+                | "render.backends"
+                | "render.settings.get"
+                | "file.slicers"
+                | "engine.describe"
+                | "plugin.check"
         )
 }
 
 /// Commands that read or write a file by their nature: any string they are given in a path
 /// parameter is a file, whatever it looks like.
 fn is_file_verb(id: &str) -> bool {
-    if id == "plugin.inspect" {
+    if id == "plugin.inspect" || id == "plugin.check" {
         return true;
     }
     id.starts_with("library.") || ["export", "import", "save", "open", "insert", "load", "write", "recover"].iter().any(|v| id.contains(v))
@@ -373,6 +381,7 @@ mod tests {
             assert!(question.contains("sample") && question.contains("make"), "{question}");
         }
         assert!(matches!(exec("plugin.inspect", json!({"path":"sample"})), Verdict::Ask(_)));
+        assert!(matches!(exec("plugin.check", json!({"path":"sample"})), Verdict::Ask(_)), "checking a package reads its files");
     }
 
     #[test]
@@ -381,6 +390,9 @@ mod tests {
         assert!(matches!(request("engine.execute", &json!({"command": "edit.undo"}), 0), Verdict::Ask(_)));
         let batch = json!({"commands": [{"command": "solid.box"}, {"command": "edit.undo"}, {"command": "edit.undo"}]});
         assert!(matches!(request("engine.batch", &batch, 0), Verdict::Ask(_)));
+        assert_eq!(exec("inspect.section", json!({"plane": "XY"})), Verdict::Run { change: true });
+        let sectioned = json!({"commands": [{"command": "inspect.section", "params": {"plane": "XY"}}, {"command": "edit.undo"}]});
+        assert_eq!(request("engine.batch", &sectioned, 0), Verdict::Run { change: true });
     }
 
     #[test]

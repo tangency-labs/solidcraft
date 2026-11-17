@@ -66,13 +66,15 @@ pub enum PlaneRef {
     /// found there on each evaluation and `axis_origin`/`axis_dir` are where it was when picked.
     /// `line` can also be a construction axis ([`crate::construct::GeoRef::Axis`], by name),
     /// found on each evaluation the same way; without `line`, `axis_origin`/`axis_dir` are the
-    /// fixed axis (how designs saved before a construction axis was followed hold one).
+    /// fixed axis (how designs saved before a construction axis was followed hold one), and
+    /// `axis_origin` may hold length expressions the axis follows as the parameters change.
     /// With `direction_only`, only the axis direction is used: it is projected onto the base
     /// (nothing of that projection is kept as geometry) and the plane turns about the line
     /// through `pivot`, or through the base origin when `pivot` is absent.
     AtAngle {
         base: Box<PlaneRef>,
-        axis_origin: Vec3,
+        #[serde(with = "point_expr")]
+        axis_origin: PointExpr,
         axis_dir: Vec3,
         angle: Expr,
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -416,6 +418,14 @@ pub struct Extent {
     /// before it carry none and keep measuring against the placements shown.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub picked_placements: Vec<PickedPlacement>,
+    /// A symmetric extrude that was one-sided: the way it went then (`positive`: along the
+    /// sketch normal, so its `start` cap was its low cap; `negative`: against it, so its high
+    /// cap). That cap, now at the same end of the symmetric extrude, also answers to `start`, so
+    /// what was picked on the old start cap is still found on the cap facing the same way.
+    /// Absent (a design saved before it, or an extrude made symmetric where the old one's way
+    /// was not known): no cap answers to `start`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub one_sided_direction: Option<Direction>,
 }
 
 /// A component's placement relative to a feature's own component, as it was when the feature
@@ -1431,6 +1441,11 @@ pub enum FeatureKind {
         /// plane) instead of across the plane from the curves.
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         normal: bool,
+        /// Run the curves' open ends on in their own direction until they meet the body, so the
+        /// wall reaches the face beyond them. Ribs saved before this option have none and end
+        /// where their curves end (#13019).
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        extend: bool,
     },
     /// Move planar faces (at the given points) onto a target plane parallel to them.
     ReplaceFace {
@@ -4980,7 +4995,18 @@ impl Document {
                         let st = st.ok_or_else(|| DocError::Invalid("this plane is built from the model: evaluate first".into()))?;
                         crate::construct::model_axis_in(Some(self), st, g, component)?
                     }
-                    None => (*axis_origin, *axis_dir),
+                    None => {
+                        let [x, y, z] = axis_origin;
+                        let o = Vec3::new(
+                            Self::eval_in(vals, x, Kind::Length)?,
+                            Self::eval_in(vals, y, Kind::Length)?,
+                            Self::eval_in(vals, z, Kind::Length)?,
+                        );
+                        if ![o.x, o.y, o.z].iter().all(|c| c.is_finite() && c.abs() < 1e9) {
+                            return Err(DocError::Invalid("the plane's axis origin is out of range".into()));
+                        }
+                        (o, *axis_dir)
+                    }
                 };
                 let (axis_origin, d) = if *direction_only {
                     let n = b.normal();
