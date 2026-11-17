@@ -161,8 +161,21 @@ $Zip = Join-Path $Dist "solidcraft-$Version-windows-$Arch-portable.zip"
 Remove-Item -Force $Zip -ErrorAction SilentlyContinue
 Compress-Archive -Path $Portable -DestinationPath $Zip
 
+# ---- debug symbols (separate asset) ------------------------------------------------------------
+# solidcraft.pdb (profile.release debug = "line-tables-only") maps crash offsets to file and line.
+# It is not in the MSI or the portable zip, so those downloads stay small.
+$Outputs = @()
+if (-not $PortableOnly) {
+  $Pdb = Join-Path $Bin 'solidcraft.pdb'
+  if (-not (Test-Path $Pdb)) { throw "Missing debug symbols: $Pdb" }
+  $PdbZip = Join-Path $Dist "solidcraft-$Version-windows-$Arch.pdb.zip"
+  Remove-Item -Force $PdbZip -ErrorAction SilentlyContinue
+  Compress-Archive -Path $Pdb -DestinationPath $PdbZip
+  $Outputs += $PdbZip
+}
+
 # ---- the app as a plain download (x64) ---------------------------------------------------------
-$Outputs = if ($PortableOnly) { @($Zip) } else { @($Msi, $Zip) }
+$Outputs += if ($PortableOnly) { @($Zip) } else { @($Msi, $Zip) }
 if ($Arch -eq 'x64' -and -not $PortableOnly) {
   $Exe = Join-Path $Dist "SolidCraft-$Version-windows-$Arch.exe"
   Copy-Item (Join-Path $Stage 'solidcraft.exe') $Exe

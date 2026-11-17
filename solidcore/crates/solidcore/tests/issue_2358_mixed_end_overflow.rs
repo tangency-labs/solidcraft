@@ -229,12 +229,17 @@ fn tilt_20_is_refused_naming_the_largest_radius() {
 /// (WR-680) solidcore removes -0.576120035475 and -0.635614755905, 1.73e-4 and 1.74e-4
 /// less (it was -0.576293104474 and -0.635789178705 with the fitted trims, the fork's to
 /// 7.5e-9 and 4.1e-9). Since `brep_volume` closes tolerant edges' gaps (#16735) they are
-/// -0.576118862613 and -0.635617731939, the faces unchanged.
+/// -0.576118862613 and -0.635617731939, the faces unchanged. Since the trim pieces integrate
+/// by Gauss-Kronrod (#14460) they are -0.576118851131 and -0.635617720312 (from
+/// -0.576120023994 and -0.635614744278 before #16735): forced to accuracy 1e-11 and 1e-12
+/// Gauss-Kronrod gives the first to the last bit and the second within 7.3e-12, and the
+/// earlier Runge-Kutta trim pieces forced to 1e-12 within 1.2e-10 and 7.3e-11; the Runge-Kutta
+/// figures were 1.15e-8 and 1.16e-8 off.
 #[test]
 fn tilt_20_below_the_bound_builds() {
     for (r, removed, was) in [
-        (0.25, -0.576_118_862_613, -0.576_120_035_475),
-        (0.2625, -0.635_617_731_939, -0.635_614_755_905),
+        (0.25, -0.576_118_851_131, -0.576_120_023_994),
+        (0.2625, -0.635_617_720_312, -0.635_614_744_278),
     ] {
         let (got, faces, _) = rounded_seam(20.0, 0.0, r, Some(was)).unwrap();
         assert!((got - removed).abs() <= 5e-9, "{r}: {got}");
@@ -255,11 +260,15 @@ fn tilt_20_below_the_bound_builds() {
 /// With the cylinder's trims exact (WR-680) it is -33.432512368854, 4.2e-4 less removed
 /// than with the fitted trims; the faces and the rails' ends are unchanged. Since
 /// `brep_volume` closes tolerant edges' gaps (#16735) it is -33.432507111065, the faces and
-/// the rails' ends unchanged.
+/// the rails' ends unchanged. Since the trim pieces integrate by Gauss-Kronrod (#14460) it is
+/// -33.432507092853 (from -33.432512350570 before #16735), 1.8e-8 off the Runge-Kutta
+/// figure: Gauss-Kronrod gives
+/// it to the last bit forced to accuracy 1e-11 and 1e-12, the earlier Runge-Kutta pieces
+/// within 2.0e-10 at 1e-12.
 #[test]
 fn tilt_40_rail_continued_across_the_seam_vertex() {
-    let (got, faces, points) = rounded_seam(40.0, 125.13, 1.5, Some(-33.432_512_368_854)).unwrap();
-    assert!((got - -33.432_507_111_065).abs() <= 5e-9, "{got}");
+    let (got, faces, points) = rounded_seam(40.0, 125.13, 1.5, Some(-33.432_512_350_570)).unwrap();
+    assert!((got - -33.432_507_092_853).abs() <= 5e-9, "{got}");
     assert_eq!(faces, 10);
     for y in [-4.664_695_271, 4.664_695_271] {
         let want = Point3::new(-4.176_377_478, y, 0.893_582_223);
@@ -277,7 +286,10 @@ fn tilt_40_rail_continued_across_the_seam_vertex() {
 /// faces and -0.636117736700 removed. With the fitted trims solidcore removed
 /// -0.636117743787, the fork's to 7.1e-9; with the cylinder's trims exact (WR-680)
 /// -0.635683901346, 4.3e-4 less; since `brep_volume` closes tolerant edges' gaps (#16735)
-/// -0.635686884714, the faces unchanged.
+/// -0.635686884714, the faces unchanged; since the trim pieces integrate by Gauss-Kronrod
+/// (#14460) -0.635686873036 (from -0.635683890083 before #16735; the same to the last bit
+/// by Gauss-Kronrod forced to accuracy 1e-11 and 1e-12, within 1.2e-10 by the earlier
+/// Runge-Kutta pieces at 1e-12; the Runge-Kutta figure was 1.17e-8 off).
 #[test]
 fn tilt_20_seam_over_the_rim_refused_on_the_whole_rim() {
     let err = rounded_seam(20.0, 170.0, 1.5, None).unwrap_err();
@@ -287,8 +299,8 @@ fn tilt_20_seam_over_the_rim_refused_on_the_whole_rim() {
     assert_eq!(code, 1001);
     assert!((fit.size - 0.262_514_174).abs() <= 1e-9, "{}", fit.size);
     let (got, faces, _) =
-        rounded_seam(20.0, 170.0, 0.262_514_174, Some(-0.635_683_901_346)).unwrap();
-    assert!((got - -0.635_686_884_714).abs() <= 1e-8, "{got}");
+        rounded_seam(20.0, 170.0, 0.262_514_174, Some(-0.635_683_890_083)).unwrap();
+    assert!((got - -0.635_686_873_036).abs() <= 1e-8, "{got}");
     assert_eq!(faces, 10);
 }
 

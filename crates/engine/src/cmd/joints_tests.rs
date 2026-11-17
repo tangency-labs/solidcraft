@@ -576,6 +576,53 @@ fn invalid_lateral_joint_offsets_leave_the_design_unchanged() {
     }
 }
 
+/// A part on a revolute joint, nested in the part a slider moves, moves as far as the slider
+/// does (#17305). The part is made before the slider's part and then moved into it, so its
+/// occurrence has the lower id. A solve stored the placements in id order: the part in the frame
+/// its parent was leaving, then the parent, which moved the part a second time. A slider whose
+/// offset follows a parameter shows it in one solve: changing the parameter by 10 mm moved the
+/// slider's part 10 mm and the part inside it 20 mm.
+#[test]
+fn a_part_nested_in_a_slider_part_moves_as_far_as_the_slider() {
+    let mut s = Session::default();
+    for (name, x) in [("A", 0), ("C", 40), ("B", 20)] {
+        run(&mut s, "component.activate", json!({"component": "root"}));
+        run(&mut s, "component.create", json!({"name": name, "grounded": false}));
+        run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [x, 0, 0]}));
+    }
+    let (a, b, c) = (occ(&s, "A"), occ(&s, "B"), occ(&s, "C"));
+    assert!(c < b, "C's occurrence {c} is older than B's {b}");
+    run(&mut s, "occurrence.ground", json!({"occurrence": a, "grounded": true}));
+    run(&mut s, "occurrence.reparent", json!({"occurrence": c, "parent": "B"}));
+    // B's bottom onto A's top, sliding up and down; C rides inside B and moves with it.
+    let r = run(&mut s, "joint.create", json!({"type": "slider", "a": {"face": [5, 5, 10]}, "b": {"face": [25, 5, 0]}, "name": "Rail"}));
+    assert_eq!(r["conflicts"].as_array().map(Vec::len), Some(0), "{r}");
+    let (corner_b, corner_c) = (Vec3::new(20.0, 0.0, 0.0), Vec3::new(40.0, 0.0, 0.0));
+    assert!(near(place(&s, "C", corner_c), Vec3::new(20.0, 0.0, 10.0)), "C follows B onto A: {:?}", place(&s, "C", corner_c));
+    // C's bottom onto B's top, turning about their common normal.
+    let r = run(&mut s, "joint.create", json!({"type": "revolute", "a": {"face": [5, 5, 20]}, "b": {"face": [25, 5, 10]}, "name": "Turn"}));
+    assert_eq!(r["conflicts"].as_array().map(Vec::len), Some(0), "{r}");
+    run(&mut s, "parameters.add", json!({"name": "lift", "expression": "5 mm"}));
+    run(&mut s, "joint.edit", json!({"joint": "Rail", "offset": "lift"}));
+    let moved = |s: &Session, b0: Vec3, c0: Vec3| (place(s, "B", corner_b) - b0, place(s, "C", corner_c) - c0);
+    for (lift, by) in [("15 mm", 10.0), ("1 mm", -14.0), ("31 mm", 30.0)] {
+        let (b0, c0) = (place(&s, "B", corner_b), place(&s, "C", corner_c));
+        run(&mut s, "parameters.change", json!({"name": "lift", "expression": lift}));
+        let (db, dc) = moved(&s, b0, c0);
+        assert!(near(db, Vec3::new(0.0, 0.0, by)), "lift {lift}: B moves with the slider by {by}: {db:?}");
+        assert!(near(dc, db), "lift {lift}: C moves as far as B ({db:?}), not {dc:?}");
+    }
+    // Driving the slider moves both by the same distance too.
+    for travel in [10.0, -4.0] {
+        let (b0, c0) = (place(&s, "B", corner_b), place(&s, "C", corner_c));
+        let now =
+            solidcraft_doc::joints::joint_values(&s.doc.assembly).get(&s.doc.assembly.joints[0].id).and_then(|q| q.first().copied()).unwrap_or(0.0);
+        run(&mut s, "joint.drive", json!({"joint": "Rail", "value": now + travel}));
+        let (db, dc) = moved(&s, b0, c0);
+        assert!(near(db, Vec3::new(0.0, 0.0, travel)) && near(dc, db), "drive by {travel}: B {db:?}, C {dc:?}");
+    }
+}
+
 #[test]
 fn capture_position_saves_joint_values_and_revert_position_puts_them_back() {
     // #14275: Capture Position also saves every joint's values; Revert Position puts them back.
