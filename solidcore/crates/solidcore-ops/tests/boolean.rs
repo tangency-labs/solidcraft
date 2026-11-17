@@ -2465,10 +2465,10 @@ fn pocketed_bin() -> Body {
 }
 
 /// The top of #18064's insert: the quadratic spline from (y, z) = (2.85, 28) through the
-/// control point (200, 7) to (249.15, 7), tangent there to the pocket's floor z = 7, as
-/// (y, height above the floor, dy/dt) at `t`.
-fn insert_top(t: f64) -> [f64; 3] {
-    let (y0, ym, y1) = (2.85, 200.0, 249.15);
+/// control point (`ym`, 7) to (249.15, 7), tangent there to the pocket's floor z = 7, as
+/// (y, height above the floor, dy/dt) at `t`. The issue's insert has `ym` = 200.
+fn insert_top(ym: f64, t: f64) -> [f64; 3] {
+    let (y0, y1) = (2.85, 249.15);
     let u = 1.0 - t;
     let y = u * u * y0 + 2.0 * t * u * ym + t * t * y1;
     let dy = 2.0 * (1.0 - t) * (ym - y0) + 2.0 * t * (y1 - ym);
@@ -2477,8 +2477,8 @@ fn insert_top(t: f64) -> [f64; 3] {
 
 /// The parameter of `insert_top` at `y`.
 #[allow(clippy::disallowed_methods)] // the test's closed form, not ops computing it
-fn insert_top_at(y: f64) -> f64 {
-    let (y0, ym, y1) = (2.85_f64, 200.0_f64, 249.15_f64);
+fn insert_top_at(ym: f64, y: f64) -> f64 {
+    let (y0, y1) = (2.85_f64, 249.15_f64);
     let (a, b, c) = (y0 - 2.0 * ym + y1, 2.0 * (ym - y0), y0 - y);
     (-b + (b * b - 4.0 * a * c).sqrt()) / (2.0 * a)
 }
@@ -2486,9 +2486,9 @@ fn insert_top_at(y: f64) -> f64 {
 /// #18064's insert against the pocket's wall x = 2.85: a prism along y from 2.85 to 249.15
 /// whose section is the quadrilateral of the wall from z = 7 to 28, the floor out to
 /// x = 26.868841 and a side up to x = 9.247749 at z = 28, cut through along x by the region
-/// above `insert_top`. Its top meets the floor tangentially along the line y = 249.15, which
-/// touches the corner round there at its end.
-fn insert_flush_with_a_wall() -> Body {
+/// above `insert_top` with the control point at `ym`. Its top meets the floor tangentially
+/// along the line y = 249.15, which touches the corner round there at its end.
+fn insert_flush_with_a_wall(ym: f64) -> Body {
     let (f, top) = (7.0, 28.0);
     let q = [[2.85, f], [26.868841, f], [9.247749, top], [2.85, top]];
     let section: Vec<Curve> = (0..4)
@@ -2513,7 +2513,7 @@ fn insert_flush_with_a_wall() -> Body {
     let above = [
         Curve::Nurbs {
             degree: 2,
-            points: vec![[x, 2.85, top, 1.0], [x, 200.0, f, 1.0], [x, 249.15, f, 1.0]],
+            points: vec![[x, 2.85, top, 1.0], [x, ym, f, 1.0], [x, 249.15, f, 1.0]],
             knots: vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0],
         },
         Curve::Line {
@@ -2560,6 +2560,21 @@ fn simpson(f: impl Fn(f64) -> f64, a: f64, b: f64, n: u32) -> f64 {
 /// inside the walls outside the two rounds, its full section there, of height the top's.
 #[test]
 fn an_insert_whose_top_is_tangent_to_the_floor_at_a_corner_round_joins_its_bin() {
+    insert_with_its_top_tangent_to_the_floor_joins_its_bin(200.0);
+}
+
+/// #18064's insert with its top's control point at y = 100 instead of 200: the top is ten
+/// times flatter where it meets the floor, so the curve where it crosses the corner round
+/// stays within the scaled zero of the round's floor edge for longer before the touch.
+#[test]
+fn an_insert_whose_flatter_top_is_tangent_to_the_floor_at_a_corner_round_joins_its_bin() {
+    insert_with_its_top_tangent_to_the_floor_joins_its_bin(100.0);
+}
+
+/// The join of `insert_flush_with_a_wall(ym)` into `pocketed_bin`: the bin and the insert
+/// less what they share, the insert's corners inside the walls outside the two rounds, its
+/// full section there, of height the top's.
+fn insert_with_its_top_tangent_to_the_floor_joins_its_bin(ym: f64) {
     all_fixes();
     let r = 1.15_f64;
     // what the insert shares with the bin: over each corner square outside its round, the
@@ -2569,17 +2584,17 @@ fn an_insert_whose_top_is_tangent_to_the_floor_at_a_corner_round_joins_its_bin()
     let shared_over = |ya: f64, yb: f64, centre: f64| {
         simpson(
             |t| {
-                let [y, h, dy] = insert_top(t);
+                let [y, h, dy] = insert_top(ym, t);
                 width(y - centre) * h * dy
             },
-            insert_top_at(ya),
-            insert_top_at(yb),
+            insert_top_at(ym, ya),
+            insert_top_at(ym, yb),
             200_000,
         )
     };
     let shared = shared_over(2.85, 4.0, 4.0) + shared_over(248.0, 249.15, 248.0);
     let bin = pocketed_bin();
-    let insert = insert_flush_with_a_wall();
+    let insert = insert_flush_with_a_wall(ym);
     let want = bin.volume(1e-11).unwrap() + insert.volume(1e-11).unwrap() - shared;
     let joined = boolean(bin, insert, BooleanOp::Union).unwrap().unwrap();
     // the bin's 15 faces with the insert's top and slanted side
