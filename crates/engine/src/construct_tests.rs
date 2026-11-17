@@ -262,12 +262,17 @@ fn plane_through_point_square_to_line_follows_renamed_sources_edits_undo_and_reo
     let definition = run(&mut s, "timeline.inspect", json!({"feature": "Ward"}));
     assert_eq!(definition["definition"]["plane"]["line"]["name"], "Mast");
     assert_eq!(definition["definition"]["plane"]["point"]["name"], "Peg");
-    run(&mut s, "timeline.edit", json!({"feature": "Peg", "set": {"def.point": {"type": "point", "p": [5, 16, 7]}}}));
+    run(&mut s, "timeline.edit", json!({"feature": "Peg", "set": {"def.point": {"type": "point", "p": [5, 16, 17]}}}));
     let pl = plane(&s, "Ward");
     assert!(parallel(pl.normal(), Vec3::Z), "the plane stays square to the axis when the point moves");
-    assert!(on_plane(&pl, Vec3::new(5.0, 16.0, 7.0)));
+    // The new point leaves the plane of the old one (Z 7 → 17), so a plane that never follows the
+    // edit fails the assertions on both sides.
+    assert!(on_plane(&pl, Vec3::new(5.0, 16.0, 17.0)));
+    assert!(!on_plane(&pl, Vec3::new(15.0, 6.0, 7.0)), "the plane left the old point behind");
     run(&mut s, "edit.undo", json!({}));
-    assert!(on_plane(&plane(&s, "Ward"), Vec3::new(15.0, 6.0, 7.0)), "undo puts the point back");
+    let pl = plane(&s, "Ward");
+    assert!(on_plane(&pl, Vec3::new(15.0, 6.0, 7.0)), "undo puts the point back");
+    assert!(!on_plane(&pl, Vec3::new(5.0, 16.0, 17.0)), "undo puts the plane back too");
     run(&mut s, "edit.redo", json!({}));
     let reopened = solidcraft_doc::format::read(&s.doc.to_json()).unwrap();
     let mut cold = Session::new(reopened);
@@ -275,7 +280,7 @@ fn plane_through_point_square_to_line_follows_renamed_sources_edits_undo_and_reo
     assert!(cold.model.results.iter().all(|r| r.error.is_none()), "{:?}", cold.model.results);
     let pl = plane(&cold, "Ward");
     assert!(parallel(pl.normal(), Vec3::Z));
-    assert!(on_plane(&pl, Vec3::new(5.0, 16.0, 7.0)));
+    assert!(on_plane(&pl, Vec3::new(5.0, 16.0, 17.0)));
     run(&mut cold, "sketch.create", json!({"plane": "Ward"}));
 }
 
