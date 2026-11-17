@@ -23,8 +23,9 @@ const MAX_LOCAL_ID_BYTES: usize = 512;
 const AUXILIARY: [&str; 6] = ["links", "patterns", "offsets", "freeform_offsets", "wires", "equations"];
 
 /// What a drawing sketch belongs to. A sheet's sketch is in paper millimetres, from the sheet's
-/// lower-left corner. A view's sketch is in model millimetres in the view's plane, from the view's
-/// centre, and is placed on paper at the view's scale, so it moves and scales with its view.
+/// lower-left corner. A view's sketch is in model millimetres in the view's plane, in the plane's
+/// own coordinates (from its basis's origin, as the view's section curves are), and is placed on
+/// paper at the view's scale, so it moves and scales with its view.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Owner {
