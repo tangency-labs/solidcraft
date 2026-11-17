@@ -2899,4 +2899,28 @@ mod tests {
         }
         assert!(inside > 3000, "{inside}");
     }
+
+    /// A circle and an ellipse that touch at two points (the ellipse as wide as the circle and
+    /// taller). The ellipse takes part as chords, which run within their tolerance of the circle on
+    /// both sides of each touch and so crossed it twice a few hundredths apart, leaving four slivers
+    /// of a few 1e-6 that the drawing does not have. The drawing has three regions: the circle and
+    /// the two crescents between it and the ellipse, each pi r (a - r) / 2.
+    #[test]
+    fn tangent_touches_of_a_chorded_curve_leave_no_slivers() {
+        let mut sk = Sketch::new();
+        let (r, a) = (3.1, 6.2);
+        let o = Vec2::new(1.0, 2.0);
+        sk.add_circle(o, r, None, Some("circle")).unwrap();
+        let c = sk.add_point(o, None).unwrap();
+        let m = sk.add_point(Vec2::new(o.x, o.y + a), None).unwrap();
+        sk.add_curve(CurveKind::Ellipse { c, m, r }, Some("ellipse")).unwrap();
+        let mut areas: Vec<f64> = find_profiles(&sk).iter().map(|p| p.region.area()).collect();
+        areas.sort_by(f64::total_cmp);
+        let pi = std::f64::consts::PI;
+        let crescent = pi * r * (a - r) / 2.0;
+        assert_eq!(areas.len(), 3, "{areas:?}");
+        // the ellipse's chords set the crescents' areas to within their tolerance
+        assert!((areas[0] - crescent).abs() < 1e-3 && (areas[1] - crescent).abs() < 1e-3, "{areas:?}");
+        assert!((areas[2] - pi * r * r).abs() < 1e-6, "{areas:?}");
+    }
 }
