@@ -22,5 +22,21 @@
   "zh": {
     "cmd.plugin.grants": "插件授权",
     "cmd.plugin.revoke": "撤销插件授权"
+  },
+  "ar": {
+    "cmd.plugin.grants": "موافقات الإضافات",
+    "cmd.plugin.revoke": "سحب موافقات الإضافة"
+  },
+  "he": {
+    "cmd.plugin.grants": "אישורי תוספים",
+    "cmd.plugin.revoke": "ביטול אישורי התוסף"
+  },
+  "ko": {
+    "cmd.plugin.grants": "플러그인 승인",
+    "cmd.plugin.revoke": "플러그인 승인 취소"
+  },
+  "vi": {
+    "cmd.plugin.grants": "Quyền đã cấp cho plugin",
+    "cmd.plugin.revoke": "Thu hồi quyền của plugin"
   }
 }
