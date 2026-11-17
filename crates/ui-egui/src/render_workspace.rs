@@ -422,7 +422,7 @@ pub struct ViewState {
     dirty: bool,
     live_paused: bool,
     /// Product framing retained across Design/Render visits, never a saved setting.
-    render_camera: Option<Camera>,
+    pub(crate) render_camera: Option<Camera>,
     /// The CPU sampling choice was initialised or explicitly selected in this draft.
     cpu_sampling_initialized: bool,
     clean_setup: Option<RenderSetup>,
@@ -934,6 +934,12 @@ pub fn tick(app: &mut SolveApp, ctx: &egui::Context) {
         cache_render_images(app, ctx);
     }
     prepare::tick(app, ctx);
+    if active(app) || tiled(app) || !app.view_windows.has_render() {
+        tick_live(app, ctx);
+    }
+}
+
+pub(crate) fn tick_live(app: &mut SolveApp, ctx: &egui::Context) {
     let canvas = app.render_workspace.tile_canvas.filter(|(uid, _)| *uid == app.session.uid);
     if !app.home.open
         && tiled(app)

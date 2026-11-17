@@ -471,6 +471,7 @@ tab.view.layout                   sets how the design's views are tiled: no geom
 tab.view.list                     a listing of the design's views: no geometry, tested in the engine's tab_views tests and the UI's documents tests
 tab.view.move                     reorders the design's views: no geometry, tested in the engine's tab_views tests and the UI's documents tests
 tab.view.open                     opens a view of the design: no geometry, tested in the engine's tab_views tests and the UI's documents tests
+tab.view.pop_out                  moves a presentation of the same design to another window; no geometry
 tab.view.rename                   renames a view of the design: no geometry, tested in the engine's tab_views tests and the UI's documents tests
 tab.view.reopen                   brings back the view closed last: no geometry, tested in the engine's tab_views tests and the UI's documents tests
 timeline.dependents               a listing of dependents

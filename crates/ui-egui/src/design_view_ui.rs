@@ -139,8 +139,9 @@ fn view_menu(app: &mut SolveApp, index: usize, id: &str) -> bool {
             app.docs.view_placement = Some((app.docs.active_tab(), view));
         }
         VIEW_NEW_WINDOW => {
-            let kind = app.docs.views.get(view).map(|v| v.kind.key());
-            open_new_window(app, kind);
+            if let Err(reason) = app.run("tab.view.pop_out", serde_json::json!({"id": view})) {
+                app.set_status(reason, true);
+            }
         }
         VIEW_CLOSE => {
             documents::view_close(app, view);
@@ -192,6 +193,11 @@ fn switcher_menu(app: &mut SolveApp, id: &str) -> bool {
         }
         SWITCHER_REOPEN => {
             documents::view_reopen(app);
+        }
+        VIEW_NEW_WINDOW => {
+            if let Err(reason) = app.run("tab.view.pop_out", serde_json::json!({})) {
+                app.set_status(reason, true);
+            }
         }
         SWITCHER_AS_TABS => app.preferences.design_views_as_tabs = true,
         _ => return false,
