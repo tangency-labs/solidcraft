@@ -651,3 +651,48 @@ fn a_sliver_whose_vertices_come_twice_is_still_drawn() {
     }
 }
 
+
+/// A ring 1000 mm across with a 1 mm tube, cut in half at z = 0, with a 0.12 mm cube joined to its
+/// flat face (the stress corpus's S0437): every vertex lies within about a millimetre of the cube.
+/// The longest side was a fifth of an extent taken from the vertices alone, a fifth of a
+/// millimetre for the flat face's two circles 3142 mm long, which passed
+/// [`edges::MAX_EDGE_NODES`] nodes, and the torus face was left out. The extent counts the edges'
+/// points: the body is planned whole at the tolerance SolidCraft's contact test meshes at (1/10000
+/// of the body) and at the display's, and the tolerance alone splits each circle, into at most
+/// twice the segments a chord sagging the tolerance needs (bisection halves a chord at most once
+/// past it).
+#[test]
+fn a_thin_half_torus_is_sized_by_its_edges_not_its_vertices() {
+    use solidcore_ops::boolean::boolean;
+    use solidcore_ops::{BooleanOp, make_box, make_torus};
+    use crate::vec::VecExt as _;
+    let torus = make_torus([0.0; 3], 500.0, 0.5).expect("torus");
+    let below = make_box([-501.5, -501.5, -1.5], [1003.0, 1003.0, 1.5]).expect("box");
+    let half = boolean(torus, below, BooleanOp::Subtract).expect("cut").expect("a half torus");
+    let cube = make_box([499.94, -0.06, -0.12], [0.12, 0.12, 0.12]).expect("cube");
+    let joined = boolean(half, cube, BooleanOp::Union).expect("join").expect("a body");
+    let b = joined.to_record().expect("the record").0;
+    // The torus face, the flat face and the cube's five other faces; the flat face's two circles
+    // and the torus's seam, the cube's twelve edges; two seam vertices and the cube's eight.
+    assert_eq!((b.faces.len(), b.edges.len(), b.vertices.len()), (7, 15, 10));
+    // SolidCraft's size of the body: the box diagonal of its vertices and its edges' points.
+    let size = 2f64.sqrt() * 1001.0;
+    for t in [crate::MeshTolerance::chord(size * 1e-4), crate::MeshTolerance::display_of(size)] {
+        let (plan, stats) = crate::plan(&b, &t, size).expect("planned");
+        assert!(stats.unmeshed.is_empty(), "{t:?}: {:?}", stats.unmeshed);
+        let (tol, _) = t.rules(size);
+        // The chord that sags the tolerance on the smaller circle (radius 499.5).
+        let chord = (8.0 * 499.5 * tol).sqrt();
+        let circles: Vec<(f64, usize)> = plan
+            .edges
+            .iter()
+            .map(|n| (n.windows(2).map(|w| w[0].dist(w[1])).sum::<f64>(), n.len() - 1))
+            .filter(|(len, _)| *len > 3000.0)
+            .collect();
+        eprintln!("{t:?}: circles (length, segments) {circles:?}, chord {chord}");
+        assert_eq!(circles.len(), 2, "{t:?}: {circles:?}");
+        for (len, segments) in circles {
+            assert!(segments as f64 <= 2.0 * (len / chord).ceil(), "{t:?}: {segments} segments over {len} mm at a chord of {chord} mm");
+        }
+    }
+}
