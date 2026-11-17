@@ -118,7 +118,6 @@ fn overlapping_rounds_are_refused_and_rounds_that_fit_close() {
 /// build a valid body a little smaller than the part.
 #[test]
 fn chamfers_crossing_at_a_ring_corner_are_refused_and_apart_build() {
-    all_fixes();
     const C: [[f64; 3]; 3] = [
         [12.124_355_652_982_143, 0.0, -1.0],
         [-6.062_177_826_491_071, 10.5, -1.0],
@@ -130,6 +129,7 @@ fn chamfers_crossing_at_a_ring_corner_are_refused_and_apart_build() {
         [-6.062_177_826_491_071, 0.0, 40.0],
         [3.031_088_913_245_535_6, -5.25, 40.0],
     ];
+    all_fixes();
     let disc = make_cylinder([0.0; 3], 14.5, 40.0).unwrap();
     let sides: Vec<Curve> = (0..3)
         .map(|i| Curve::Line {
@@ -152,11 +152,13 @@ fn chamfers_crossing_at_a_ring_corner_are_refused_and_apart_build() {
     let edges: Vec<usize> = EDGES.iter().map(|&p| edge_at(&ring, p)).collect();
     let c = ring.copy().unwrap();
     match blend(&c, Blend::Chamfer, &edges, &[0.8], &[], Corners::Filled) {
-        Err(Error::NoRoom)
-        | Err(Error::TooLarge {
-            why: Some(RoomReason::BandsOverlap),
-            ..
-        }) => {}
+        Err(
+            Error::NoRoom
+            | Error::TooLarge {
+                why: Some(RoomReason::BandsOverlap),
+                ..
+            },
+        ) => {}
         other => panic!("{other:?}"),
     }
     let whole = volume(&ring);
