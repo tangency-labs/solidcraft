@@ -1267,9 +1267,22 @@ mod tests {
         std::fs::write(&path, b"old").unwrap();
         let modified = std::fs::metadata(&path).unwrap().modified().unwrap();
         let before = cache_path(path.to_str().unwrap()).unwrap();
-        std::thread::sleep(std::time::Duration::from_millis(2));
-        std::fs::write(&path, b"new").unwrap();
-        std::fs::File::options().write(true).open(&path).unwrap().set_times(std::fs::FileTimes::new().set_modified(modified)).unwrap();
+        // The change time ticks at the kernel's coarse clock (one jiffy, often 4 ms or more), so a
+        // replacement inside the same tick is indistinguishable by metadata. Replace until it ticks.
+        use std::os::unix::fs::MetadataExt;
+        let ctime = |p: &std::path::Path| std::fs::metadata(p).map(|m| (m.ctime(), m.ctime_nsec())).unwrap();
+        let first = ctime(&path);
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+        loop {
+            std::thread::sleep(std::time::Duration::from_millis(1));
+            std::fs::write(&path, b"new").unwrap();
+            std::fs::File::options().write(true).open(&path).unwrap().set_times(std::fs::FileTimes::new().set_modified(modified)).unwrap();
+            if ctime(&path) != first || std::time::Instant::now() > deadline {
+                break;
+            }
+        }
+        assert_ne!(ctime(&path), first, "the change time never moved");
+        assert_eq!(std::fs::metadata(&path).unwrap().modified().unwrap(), modified);
         assert_ne!(cache_path(path.to_str().unwrap()).unwrap(), before);
     }
 
