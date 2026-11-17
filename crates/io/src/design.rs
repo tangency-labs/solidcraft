@@ -2794,17 +2794,26 @@ mod tests {
         check_step_importable(&step).unwrap_or_else(|e| panic!("a STEP within the import limit is refused: {e}"));
     }
 
-    /// #3221: a STEP that no design file may hold is refused with a clear message, when the
-    /// design is saved: the import limit governs the import and the design file limit governs
-    /// the design (#2721).
+    /// #18686: a design over the limit the app opens files of is WRITTEN, not refused. The
+    /// limit guards reading a file this app did not write (crate::limits); the bytes of a
+    /// save are already in memory, so a refusal here loses the user's work: an assembly
+    /// that grew over the limit could not be saved at all, not even by Save As.
+    ///
+    /// #3221 asked for the refusal at the import, where the user can act on it, and the
+    /// design file's limit to govern the design that is saved. This is the other half of
+    /// that: the file is written, and the limit still guards opening it.
     #[test]
-    fn step_that_cannot_be_saved_even_compressed_is_refused_when_the_design_is_saved() {
+    fn a_design_over_the_limit_is_written_instead_of_refused() {
         let step = padded_step(crate::MAX_DESIGN_BYTES + (80 << 20), true);
         let mut doc = Document::new("Noisy import");
         doc.add_feature(FeatureKind::Import { file: "noisy.step".into(), step: step.into(), components: Vec::new(), skip: Vec::new() }, None)
             .unwrap();
-        let message = write_design_container(&doc).err().unwrap().to_string();
-        assert!(message.contains("the design would be") && message.contains("a design file may hold"), "{message}");
+        let bytes = write_design_container(&doc).expect("a design over the limit is written");
+        assert!(bytes.len() > crate::MAX_DESIGN_BYTES, "the design is over the limit: {} bytes", bytes.len());
+        assert!(is_design_container(&bytes), "the file that was written is a design container");
+        // The limit still guards reading: the app will not open this file until it is raised.
+        let message = crate::read_design(&bytes).unwrap_err().to_string();
+        assert!(message.contains("too large"), "{message}");
     }
 
     #[test]

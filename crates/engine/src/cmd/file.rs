@@ -1696,6 +1696,7 @@ fn write_bytes(
 ) -> Result<Value> {
     let chain = s.provenance_chain.clone().unwrap_or_default();
     let mut signature = None;
+    let mut warnings: Vec<String> = Vec::new();
     let bytes = if sign {
         if !s.signing_allowed {
             return Err(bad(
@@ -1706,8 +1707,9 @@ fn write_bytes(
         if format != "container" {
             return Err(bad("file.save", "only a container can carry a signature: save as .sc (format container), not json"));
         }
-        let (bytes, signed) = write_signed_container(s, &chain, path, compression, preview, cache, signing_key)?;
+        let (bytes, signed, skipped) = write_signed_container(s, &chain, path, compression, preview, cache, signing_key)?;
         signature = signed;
+        warnings.extend(skipped);
         bytes
     } else if !chain.records.is_empty() {
         // A save without a key keeps the history it opened with, so the newest record is reported
@@ -1742,6 +1744,10 @@ fn write_bytes(
     s.provenance_chain = solidcraft_io::read_design_provenance_chain(&bytes);
     s.provenance = None;
     s.mark_saved();
+    // A design over the limit the app opens files of is written all the same (#18686): the
+    // bytes were already in memory, and refusing to write them loses the user's work. The
+    // save says how big the design is and how to raise the limit to open it again.
+    warnings.extend(over_limit_note(bytes.len(), solidcraft_io::limits::max_design_bytes()));
     let mut out = SaveResult {
         path: path.to_string(),
         bytes: bytes.len(),
@@ -1761,11 +1767,28 @@ fn write_bytes(
         }
         out.kept_format = Some(s.doc.format.clone());
         if !lost.is_empty() {
-            out.warnings = Some(lost.iter().map(|what| format!("Not kept: {what}. The previous file is `{path}.bak`.")).collect());
+            warnings.extend(lost.iter().map(|what| format!("Not kept: {what}. The previous file is `{path}.bak`.")));
             out.not_kept = Some(lost);
         }
     }
+    if !warnings.is_empty() {
+        out.warnings = Some(warnings);
+    }
     serde_json::to_value(out).map_err(|e| bad("file.save", e.to_string()))
+}
+
+/// What a save says when the design it wrote is over the limit the app opens files of
+/// (#18686). The file is written; the app will not open it until the limit is raised.
+fn over_limit_note(bytes: usize, limit: usize) -> Option<String> {
+    if bytes <= limit {
+        return None;
+    }
+    Some(format!(
+        "the design is {} MB, over the {} MB this app opens design files of. It was saved, but the app will not open it until the limit is raised. {}",
+        bytes >> 20,
+        limit >> 20,
+        solidcraft_io::limits::how_to_raise()
+    ))
 }
 
 /// Write the container with one GnuPG-signed provenance record appended to the session's chain.
@@ -1778,8 +1801,31 @@ fn write_signed_container(
     preview: bool,
     cache: bool,
     signing_key: Option<&str>,
-) -> Result<(Vec<u8>, Option<SignedSave>)> {
-    let gpg = crate::gpg::Gpg::find().ok_or_else(|| bad("file.save", "signing needs GnuPG, which was not found on this computer"))?;
+) -> Result<(Vec<u8>, Option<SignedSave>, Option<String>)> {
+    signed_container(s, chain, path, compression, preview, cache, signing_key, crate::gpg::Gpg::find())
+}
+
+/// The container a signed save writes: signed when there is a GnuPG to sign it, and unsigned
+/// with the reason said when there is none (#18686).
+///
+/// Saving is never refused for a reason that does not put the data at risk: on a computer
+/// without GnuPG the design is written (the chain kept, as a save without a key keeps it) and
+/// the save says that the signing was skipped. A Save As that asked for a signature used to
+/// be refused outright, and the user kept nothing.
+#[cfg(not(target_arch = "wasm32"))]
+fn signed_container(
+    s: &Session,
+    chain: &solidcraft_io::ProvenanceChain,
+    path: &str,
+    compression: solidcraft_io::DesignCompression,
+    preview: bool,
+    cache: bool,
+    signing_key: Option<&str>,
+    gpg: Option<crate::gpg::Gpg>,
+) -> Result<(Vec<u8>, Option<SignedSave>, Option<String>)> {
+    let Some(gpg) = gpg else {
+        return Err(bad("file.save", "signing needs GnuPG, which was not found on this computer"));
+    };
     let signer = crate::gpg::Signer::new(&gpg, signing_key.map(str::trim).filter(|key| !key.is_empty()));
     let save = solidcraft_io::ProvenanceSave {
         source: Some(solidcraft_io::SignatureSource::OpenPgp(&signer)),
@@ -1791,7 +1837,7 @@ fn write_signed_container(
     };
     let bytes = s.design_container_signed(Some(path), compression, preview, cache, &save).map_err(|e| EngineError::Other(format!("{path}: {e}")))?;
     let info = signer.signing_info().ok_or_else(|| EngineError::Other(format!("{path}: GnuPG signed the design but named no key")))?;
-    Ok((bytes, Some(SignedSave { method: "gpg".to_owned(), fingerprint: info.fingerprint, user_id: info.user_id })))
+    Ok((bytes, Some(SignedSave { method: "gpg".to_owned(), fingerprint: info.fingerprint, user_id: info.user_id }), None))
 }
 
 /// The browser cannot run GnuPG.
@@ -1804,7 +1850,7 @@ fn write_signed_container(
     _preview: bool,
     _cache: bool,
     _signing_key: Option<&str>,
-) -> Result<(Vec<u8>, Option<SignedSave>)> {
+) -> Result<(Vec<u8>, Option<SignedSave>, Option<String>)> {
     Err(bad("file.save", "signing needs the desktop app and GnuPG; the browser cannot sign"))
 }
 
@@ -2717,6 +2763,39 @@ mod urdf_tests;
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// #18686: a save that asks to be signed on a computer without GnuPG is written unsigned,
+    /// with the reason said. Refusing it lost the user's work: the Save As was refused
+    /// outright and nothing at all was written.
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn a_signed_save_without_gnupg_is_written_unsigned_with_the_reason() {
+        let mut s = Session::default();
+        s.execute("solid.box", &json!({"length": 10, "width": 20, "height": 30})).unwrap();
+        let dir = std::env::temp_dir().join(format!("solidcraft-no-gnupg-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("part.sc").to_string_lossy().to_string();
+        let chain = solidcraft_io::ProvenanceChain::default();
+        let (bytes, signature, skipped) = signed_container(&s, &chain, &path, solidcraft_io::DesignCompression::Fast, false, false, None, None)
+            .expect("a save that asks to be signed is not refused when there is no GnuPG to sign it");
+        assert!(signature.is_none(), "there is no key to sign with: {signature:?}");
+        let note = skipped.expect("the save says that the signing was skipped");
+        assert!(note.contains("GnuPG"), "{note}");
+        assert!(solidcraft_io::is_design_container(&bytes), "the file that was written is a design container");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// #18686: a design over the limit the app opens files of is written, and the save says how
+    /// big it is and how to raise the limit to open it again.
+    #[test]
+    fn a_save_over_the_limit_says_how_to_raise_it() {
+        let limit = 256 << 20;
+        assert!(over_limit_note(limit, limit).is_none(), "a design at the limit is not over it");
+        assert!(over_limit_note(limit - 1, limit).is_none(), "a design under the limit is not over it");
+        let note = over_limit_note(limit + (1 << 20), limit).expect("a design over the limit is said");
+        assert!(note.contains("257 MB") && note.contains("256 MB"), "{note}");
+        assert!(note.contains("Largest file to open"), "{note}");
+    }
 
     /// #9449: a 3MF export carries a picture of the part as its package thumbnail.
     #[test]
