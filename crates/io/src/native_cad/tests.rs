@@ -584,6 +584,27 @@ fn a_mirrored_component_is_left_out_with_why() {
     assert!(records.warnings.iter().any(|w| w.contains("mirrors")), "{:?}", records.warnings);
 }
 
+/// A part whose every placement is left out (each mirrored, or the assembly that holds them)
+/// does not come in at all, rather than where its file defines it, which the warning would deny.
+#[test]
+fn a_part_whose_every_placement_is_left_out_does_not_come_in() {
+    use cadmpeg_ir::products::{Occurrence, OccurrenceParent};
+    let bytes = std::fs::read(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/step-conformance/cylinder_twice.step")).unwrap();
+    let mirror = cadmpeg_ir::transform::Transform::affine([[-1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0]]).unwrap();
+    let leaves = |o: &Occurrence| !matches!(o.parent, OccurrenceParent::Root {});
+    let root = |o: &Occurrence| matches!(o.parent, OccurrenceParent::Root {});
+    for (which, refused) in [("every placement", &leaves as &dyn Fn(&Occurrence) -> bool), ("the assembly", &root)] {
+        let mut ir = neutral(&bytes, "cylinder_twice.step");
+        for o in ir.model.occurrences.iter_mut().filter(|o| refused(o)) {
+            o.transform = mirror;
+        }
+        let (imp, warnings) = by_records(&ir);
+        let imp = imp.unwrap();
+        assert!(imp.bodies.is_empty(), "{which} mirrored: {} bodies", imp.bodies.len());
+        assert!(warnings.iter().any(|w| w.contains("mirrors")), "{which} mirrored: {warnings:?}");
+    }
+}
+
 /// Occurrences that contain each other end the walk with a warning, never a hang or a panic.
 #[test]
 fn occurrences_in_a_cycle_end_with_a_warning() {

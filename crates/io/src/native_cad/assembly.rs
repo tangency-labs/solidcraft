@@ -6,9 +6,10 @@
 //! A part used twice is two bodies, at its two placements: the second a copy of the first
 //! ([`RecordBody::copy_of`]), so the design knows them as one part and the record is kept once. A body no occurrence reaches stays where
 //! it is, under a root named after the file. An occurrence that mirrors or scales is left out with
-//! the reason, as a body whose own placement does is ([`solidcore_cadir`]).
+//! the reason, as a body whose own placement does is ([`solidcore_cadir`]), and so are the bodies
+//! of its part and of everything under it: they do not come in where the file defines them.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use cadmpeg_ir::document::CadIr;
 use cadmpeg_ir::products::{Occurrence, OccurrenceParent, ProductDefinition, PrototypeReference};
@@ -56,13 +57,15 @@ pub(super) fn placed(ir: &CadIr, product: &str, read: Vec<Unplaced>, warnings: &
     for list in walk.children.values_mut() {
         list.sort_by(order);
     }
+    let reached = reached(&roots, &walk.children, &walk.definitions);
     let mut tree: Vec<StepNode> = Vec::with_capacity(roots.len() + 1);
     for o in roots {
         let mut stack = Vec::new();
         tree.push(walk.node(o, &Transform::identity(), &[], false, 0, &mut stack));
     }
-    // Bodies no occurrence reaches stay where they are, under a root named after the file.
-    let loose: Vec<usize> = (0..read.len()).filter(|i| !walk.first.contains_key(i)).collect();
+    // Bodies no occurrence reaches stay where they are, under a root named after the file. Those
+    // of an occurrence left out (and of everything under it) stay out, as its warning says.
+    let loose: Vec<usize> = (0..read.len()).filter(|&i| read.get(i).is_some_and(|u| !reached.contains(u.body.as_str()))).collect();
     if !loose.is_empty() {
         let mut node = StepNode {
             name: product.to_string(),
@@ -83,6 +86,29 @@ pub(super) fn placed(ir: &CadIr, product: &str, read: Vec<Unplaced>, warnings: &
         tree.push(node);
     }
     (walk.bodies, tree)
+}
+
+/// The bodies of the parts every occurrence under `roots` uses (through `children`), whether or
+/// not it could be placed: each occurrence once, so a cycle ends.
+fn reached<'a>(
+    roots: &[&'a Occurrence],
+    children: &HashMap<&'a str, Vec<&'a Occurrence>>,
+    definitions: &HashMap<&'a str, &'a ProductDefinition>,
+) -> HashSet<&'a str> {
+    let (mut seen, mut bodies) = (HashSet::new(), HashSet::new());
+    let mut stack: Vec<&Occurrence> = roots.to_vec();
+    while let Some(o) = stack.pop() {
+        if !seen.insert(o.id.as_str()) {
+            continue;
+        }
+        if let PrototypeReference::Local { definition } = &o.prototype
+            && let Some(d) = definitions.get(definition.as_str()).copied()
+        {
+            bodies.extend(d.bodies.iter().map(|b| b.as_str()));
+        }
+        stack.extend(children.get(o.id.as_str()).into_iter().flatten().copied());
+    }
+    bodies
 }
 
 struct Walk<'a, 'w> {
