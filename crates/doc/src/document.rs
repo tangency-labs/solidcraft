@@ -66,13 +66,15 @@ pub enum PlaneRef {
     /// found there on each evaluation and `axis_origin`/`axis_dir` are where it was when picked.
     /// `line` can also be a construction axis ([`crate::construct::GeoRef::Axis`], by name),
     /// found on each evaluation the same way; without `line`, `axis_origin`/`axis_dir` are the
-    /// fixed axis (how designs saved before a construction axis was followed hold one).
+    /// fixed axis (how designs saved before a construction axis was followed hold one), and
+    /// `axis_origin` may hold length expressions the axis follows as the parameters change.
     /// With `direction_only`, only the axis direction is used: it is projected onto the base
     /// (nothing of that projection is kept as geometry) and the plane turns about the line
     /// through `pivot`, or through the base origin when `pivot` is absent.
     AtAngle {
         base: Box<PlaneRef>,
-        axis_origin: Vec3,
+        #[serde(with = "point_expr")]
+        axis_origin: PointExpr,
         axis_dir: Vec3,
         angle: Expr,
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -3792,7 +3794,7 @@ impl Visibility {
     }
 }
 
-/// A saved camera (orbit camera: target, yaw, pitch, distance; `fov` 0 for orthographic).
+/// A saved orbit camera; roll and up default to the original Z-up view for older designs.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct NamedView {
     #[serde(default)]
@@ -3803,6 +3805,10 @@ pub struct NamedView {
     pub distance: f64,
     #[serde(default)]
     pub fov: f64,
+    #[serde(default)]
+    pub roll: f64,
+    #[serde(default)]
+    pub up: solidcraft_viewport::UpAxis,
 }
 
 /// A browser group: items of one folder (`bodies`, `sketches` or `construction`) of a
@@ -4993,7 +4999,18 @@ impl Document {
                         let st = st.ok_or_else(|| DocError::Invalid("this plane is built from the model: evaluate first".into()))?;
                         crate::construct::model_axis_in(Some(self), st, g, component)?
                     }
-                    None => (*axis_origin, *axis_dir),
+                    None => {
+                        let [x, y, z] = axis_origin;
+                        let o = Vec3::new(
+                            Self::eval_in(vals, x, Kind::Length)?,
+                            Self::eval_in(vals, y, Kind::Length)?,
+                            Self::eval_in(vals, z, Kind::Length)?,
+                        );
+                        if ![o.x, o.y, o.z].iter().all(|c| c.is_finite() && c.abs() < 1e9) {
+                            return Err(DocError::Invalid("the plane's axis origin is out of range".into()));
+                        }
+                        (o, *axis_dir)
+                    }
                 };
                 let (axis_origin, d) = if *direction_only {
                     let n = b.normal();

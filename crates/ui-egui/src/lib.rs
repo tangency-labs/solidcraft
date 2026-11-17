@@ -2132,6 +2132,12 @@ impl SolveApp {
             let _ = self.run(id, json!({}));
             return;
         }
+        // The View ribbon's Save View captures the on-screen camera, like the Browser's
+        // New Named View action. Programmatic view.save still takes an explicit camera.
+        if id == "view.save" {
+            let _ = browser::save_view(self, None);
+            return;
+        }
         if id == "timeline.play" {
             if let Err(why) = self.run(id, json!({})) {
                 self.set_status(why, true);
@@ -3800,6 +3806,7 @@ impl SolveApp {
         file_load::tick(self, ctx);
         save_job::tick(self, false);
         verify_job::tick(self);
+        timeline::tick_import_checks(self, ctx);
         edit_in_place::tick(self);
         let typing = ctx.egui_wants_keyboard_input();
         if ctx.input(|i| i.pointer.button_clicked(egui::PointerButton::Extra1) || (i.key_pressed(egui::Key::BrowserBack) && !typing)) {
