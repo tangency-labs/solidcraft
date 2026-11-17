@@ -37,8 +37,8 @@ use solidcore::geom::axis2_placement::Axis2Placement;
 use solidcore::kernel::{KernelOptions, UpstreamFixes};
 use solidcore::mass::enclosure::EnclosureStop;
 use solidcore::mass::enclosure::{
-    enclose_face_area, enclose_mass_properties, enclose_volume, volume_sign, Bounds,
-    VolumeEnclosure, VolumeSign, CELL_BUDGET,
+    enclose_face_area, enclose_face_area_relative, enclose_mass_properties, enclose_volume,
+    volume_sign, Bounds, VolumeEnclosure, VolumeSign, CELL_BUDGET,
 };
 use solidcore::math::{Point3, Vec3, PI};
 use solidcore::primitive::api_primitives::{create_box, create_cylindrical_box, create_sphere};
@@ -293,6 +293,65 @@ fn face_areas_are_enclosed_one_face_at_a_time() {
         "{twice:?} {once:?}"
     );
     assert!(enclose_face_area(&k, &mut b, &[], 1.0).is_err());
+}
+
+/// `enclose_face_area_relative`, refined once toward a width relative to the area itself:
+/// - a cylinder's side of radius 2 and height 5 (no pole: it converges) at `rel` 1e-6 and a
+///   sphere of radius 2 at 1e-2 (the round-definition tests' `rel`) end `Reached`, at most
+///   `rel` of their upper end wide, holding their closed forms `20 pi` and `16 pi`;
+/// - the sphere at 1e-4 spends the cell budget first (its poles converge slowly): it ends
+///   at `Budget` within one check of [`CELL_BUDGET`] cells, wider than asked, and its band
+///   still holds `16 pi`;
+/// - a `rel` that is not positive (or NaN), and no faces, are refused.
+#[test]
+fn a_face_area_is_enclosed_relative_to_itself_in_one_refinement() {
+    use solidcore::primitive::api_primitives::create_cylinder;
+    // `n PI` for a power-of-two-times-5 `n` is off `n pi` only by PI's own rounding (under
+    // half an ulp of pi) and the one product's (half an ulp): under two ulps
+    let holds = |e: &VolumeEnclosure, exact: f64| {
+        let slack = 2.0 * f64::EPSILON * exact;
+        e.lo - slack <= exact && exact <= e.hi + slack
+    };
+    let mut k = Kernel::default();
+    let mut c = create_cylinder(&mut k, Point3::new(1.0, -2.0, 0.5), 2.0, 5.0).unwrap();
+    let side: Vec<_> = faces(&c, None)
+        .unwrap()
+        .into_iter()
+        .filter(|&f| {
+            let face = c.face(f).unwrap();
+            let s = face.surface.as_ref().unwrap();
+            s.evaluate_point(&k, face.uv_domain.mid()).is_ok_and(|p| {
+                let (x, y) = (p.x - 1.0, p.y + 2.0);
+                (x * x + y * y - 4.0).abs() < 1e-9
+            })
+        })
+        .collect();
+    assert_eq!(side.len(), 1, "one side face");
+    let e = enclose_face_area_relative(&k, &mut c, &side, 1e-6).unwrap();
+    assert_eq!(e.stop, EnclosureStop::Reached, "side: {e:?}");
+    assert!(e.width() <= 1e-6 * e.hi, "side: {e:?}");
+    assert!(holds(&e, 20.0 * PI), "side: {e:?}");
+
+    let mut s = create_sphere(&mut k, Point3::new(1.0, -2.0, 0.5), 2.0).unwrap();
+    let all = faces(&s, None).unwrap();
+    let e = enclose_face_area_relative(&k, &mut s, &all, 1e-2).unwrap();
+    assert_eq!(e.stop, EnclosureStop::Reached, "sphere 1e-2: {e:?}");
+    assert!(e.width() <= 1e-2 * e.hi, "sphere 1e-2: {e:?}");
+    assert!(holds(&e, 16.0 * PI), "sphere 1e-2: {e:?}");
+    let e = enclose_face_area_relative(&k, &mut s, &all, 1e-4).unwrap();
+    assert_eq!(e.stop, EnclosureStop::Budget, "sphere 1e-4: {e:?}");
+    assert!(e.counts.cells <= CELL_BUDGET + 1, "sphere 1e-4: {e:?}");
+    assert!(e.width() > 1e-4 * e.hi, "sphere 1e-4: {e:?}");
+    assert!(e.hi.is_finite(), "sphere 1e-4: {e:?}");
+    assert!(holds(&e, 16.0 * PI), "sphere 1e-4: {e:?}");
+
+    for rel in [0.0, -1.0, f64::NAN] {
+        assert!(
+            enclose_face_area_relative(&k, &mut s, &all, rel).is_err(),
+            "{rel}"
+        );
+    }
+    assert!(enclose_face_area_relative(&k, &mut s, &[], 1e-2).is_err());
 }
 
 #[test]
