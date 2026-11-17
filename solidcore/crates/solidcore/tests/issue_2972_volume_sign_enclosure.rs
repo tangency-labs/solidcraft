@@ -209,24 +209,18 @@ fn a_sphere_is_enclosed_across_its_seam_and_poles() {
 /// `16 pi`, centroid 0, inertia `2/5 m r^2`, products 0: its seam and poles, where the
 /// area's root is not analytic). The box's enclosures reach their widths, each at most
 /// `1e-5` of its scale wide; the sphere's area spends its cell budget near the poles
-/// (MEASURED, asked `1e-6`: 1.8e-3 wide, 3.7e-5 of the area), so its bands are asked to hold
-/// the closed forms at most `1e-4` of their scales wide, and its enclosures are refined to
-/// `1e-4 / (1 + 1e-4)` (a tighter ask only spends the area's budget past what is asserted).
-/// That is the most an ask can be and still bound the area's band by `1e-4` of the true area:
-/// an enclosure asked `rel` is at most `rel` of its upper end `hi` wide, and `hi` is at most
-/// the true value plus that width, so the width is at most `rel / (1 - rel)` of the true
-/// value (asked `1e-4` itself, MEASURED, the area's band ends 1.00006e-4 of `16 pi` wide).
+/// (MEASURED: 1.8e-3 wide, 3.7e-5 of the area), so its bands are asked to hold the closed
+/// forms at most `1e-4` of their scales wide.
 #[test]
 fn mass_properties_are_enclosed_around_their_closed_forms() {
     let check = |b: &mut Brep,
-                 ask: f64,
                  wide: f64,
                  area: f64,
                  centroid: [f64; 3],
                  inertia: [f64; 3],
                  products: [f64; 3]| {
         let k = Kernel::default();
-        let e = enclose_mass_properties(&k, b, ask).unwrap();
+        let e = enclose_mass_properties(&k, b, 1e-6).unwrap();
         if wide <= 1e-5 {
             assert_eq!(e.short, None, "{e:?}");
         }
@@ -259,7 +253,6 @@ fn mass_properties_are_enclosed_around_their_closed_forms() {
     let (xx, yy, zz) = (m([2, 0, 0]), m([0, 2, 0]), m([0, 0, 2]));
     check(
         &mut b,
-        1e-6,
         1e-5,
         148.0,
         [3.0, 4.5, 6.0],
@@ -268,15 +261,7 @@ fn mass_properties_are_enclosed_around_their_closed_forms() {
     );
     let mut s = create_sphere(&mut k, Point3::new(0.0, 0.0, 0.0), 2.0).unwrap();
     let i = 0.4 * (4.0 / 3.0 * PI * 8.0) * 4.0;
-    check(
-        &mut s,
-        1e-4 / (1.0 + 1e-4),
-        1e-4,
-        16.0 * PI,
-        [0.0; 3],
-        [i; 3],
-        [0.0; 3],
-    );
+    check(&mut s, 1e-4, 16.0 * PI, [0.0; 3], [i; 3], [0.0; 3]);
 }
 
 /// `enclose_face_area` on some of a box's faces: each face's enclosure holds its exact area
