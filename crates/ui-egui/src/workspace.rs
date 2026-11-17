@@ -671,6 +671,7 @@ pub const RIBBON_LABELS: &[(&str, &str)] = &[
     ("drawing.image", "Image"),
     ("drawing.leader", "Leader Note"),
     ("drawing.note", "Note"),
+    ("drawing.replace_model", "Replace"),
     ("drawing.print", "Print"),
     ("drawing.revise.planned", "Issue Rev."),
     ("drawing.revision", "Add Revision"),
@@ -1231,6 +1232,8 @@ mod tests {
         let mut h = crate::scenario::Harness::new();
         h.app.run("solid.box", json!({"length":40,"width":20,"height":3})).unwrap();
         h.app.preferences.drawings_preview = true;
+        // Sheet Settings' button is on the sheet strip, which shows in the legacy layout.
+        h.app.preferences.drawing_sheets_visibility = "legacy".into();
         h.call("ui.workspace", json!({"workspace":"drawing"}));
         h.app.run("drawing.create", json!({})).unwrap();
         h.app.run("drawing.sheet.add", json!({"name":"Second sheet"})).unwrap();

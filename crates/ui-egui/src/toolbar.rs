@@ -3261,6 +3261,7 @@ mod header_report_tests {
     fn file_menu_new_drawing_that_fails_in_drawing_stays_in_drawing() {
         let mut h = crate::scenario::Harness::new();
         h.app.home.open = false;
+        h.app.preferences.drawings_preview = true;
         h.app.run("solid.box", json!({"length":40,"width":20,"height":3})).unwrap();
         let template = h.app.preferences.part_drawing_template.clone();
         crate::workspace::enter(&mut h.app, "drawing").unwrap();

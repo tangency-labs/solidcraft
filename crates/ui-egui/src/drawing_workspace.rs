@@ -794,15 +794,22 @@ fn panel_body(app: &mut SolveApp, ui: &mut egui::Ui) {
     egui::ScrollArea::vertical().show(ui, |ui| panel_fields(app, ui));
 }
 
+/// `add` inset by the panel's standard margin, without a frame of its own (the panel draws it).
+pub(crate) fn inset<R>(ui: &mut egui::Ui, add: impl FnOnce(&mut egui::Ui) -> R) -> R {
+    let margin = Tokens::get().space_12;
+    ui.add_space(margin);
+    let rect = ui.available_rect_before_wrap().shrink2(vec2(margin, 0.0));
+    let inner = ui.scope_builder(egui::UiBuilder::new().max_rect(rect), add).inner;
+    ui.add_space(margin);
+    inner
+}
+
 fn panel_fields(app: &mut SolveApp, ui: &mut egui::Ui) {
     if let Some(placement) = &mut app.drawing_workspace.placement {
-        let finished = egui::Frame::NONE
-            .inner_margin(Tokens::get().space_12)
-            .show(ui, |ui| {
-                placement.fields(ui, &app.session.doc.name);
-                panels::finish_placement(ui)
-            })
-            .inner;
+        let finished = inset(ui, |ui| {
+            placement.fields(ui, &app.session.doc.name);
+            panels::finish_placement(ui)
+        });
         if finished {
             close_panel(app);
         }

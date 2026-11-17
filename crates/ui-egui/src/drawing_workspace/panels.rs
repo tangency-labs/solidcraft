@@ -389,7 +389,10 @@ pub(super) fn add_window(app: &mut SolveApp, ctx: &egui::Context, mut form: AddS
                 ui_kit::row(fields, tr("ui.drawing_panel.title_block"), |ui| {
                     ui_kit::dropdown_menu(ui, "drawing_add_sheet_block", current, |ui| {
                         for (index, label) in choices.into_iter().enumerate() {
-                            ui.selectable_value(&mut form.title_block, index, label);
+                            if ui_kit::list_picker(ui, &format!("drawing_add_sheet_block_{index}"), label, form.title_block == index).clicked() {
+                                form.title_block = index;
+                                ui.close();
+                            }
                         }
                     })
                 });
@@ -637,7 +640,7 @@ pub(super) fn sheet_settings(app: &mut SolveApp, ui: &mut egui::Ui) {
         return;
     };
     let t = Tokens::get();
-    egui::Frame::NONE.inner_margin(t.space_12).show(ui, |ui| {
+    super::inset(ui, |ui| {
         ui.spacing_mut().item_spacing.y = t.space_2;
         super::sheet_settings_actions(app, ui);
         ui_kit::settings_form(ui, t.form_label_width + t.space_24, |ui| {
