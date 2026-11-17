@@ -133,6 +133,16 @@ fn planar_region(region: &Region2) -> Result<Region2> {
     Ok(Region2 { outer: without_hairs(region.outer.ccw()), holes: region.holes.iter().map(|h| without_hairs(h.ccw().reversed())).collect() })
 }
 
+/// The parts of `holes` inside `panel`: a panel's own holes after a fold parts it.
+fn holes_in(holes: &[Loop2], panel: Region2, work: &mut FlatWork) -> Result<Vec<Loop2>> {
+    if holes.is_empty() {
+        return Ok(Vec::new());
+    }
+    let holes: Vec<Region2> = holes.iter().map(|h| Region2 { outer: h.ccw(), holes: Vec::new() }).collect();
+    let panel = planar_region(&panel)?;
+    Ok(material_boolean(&holes, &[panel], kernel::BoolOp::Intersect, work)?.into_iter().map(|r| r.outer.ccw().reversed()).collect())
+}
+
 /// Edges shorter than this (mm) are no edges to the planar booleans: SMLib refuses a face whose
 /// loop has one ("status 1001", measured up to 1e-5 mm; 4e-5 mm passes). They come from an
 /// outline with a corner a hair beside a bend zone's edge, split there. Below 0.1 µm: a ledge
@@ -1058,6 +1068,10 @@ pub struct SheetFlange {
     /// (flat coordinates, counter-clockwise).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub exact: Option<Loop2>,
+    /// Holes in this panel: material an earlier fold took out of it (a lip folded up between
+    /// cut-outs), so a later fold that carries the panel keeps them open.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub holes: Vec<Loop2>,
     /// A fold's bend zone as drawn, when a curved edge of the sheet crosses it (flat coordinates,
     /// counter-clockwise): `zone` is this instead of straight ends.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -2041,15 +2055,17 @@ impl SheetBody {
     /// Flat region of a flange's panel.
     pub fn panel(&self, f: &SheetFlange) -> Region2 {
         if let Some(lp) = &f.exact {
-            return Region2 { outer: lp.ccw(), holes: Vec::new() };
+            return Region2 { outer: lp.ccw(), holes: f.holes.clone() };
         }
         if let Some(sh) = &f.shape {
-            return Region2 { outer: Loop2::polygon(sh).ccw(), holes: Vec::new() };
+            return Region2 { outer: Loop2::polygon(sh).ccw(), holes: f.holes.clone() };
         }
         let ba = self.allowance(f);
         let a = f.p + f.n * ba - f.d * f.ext.0;
         let b = f.p + f.n * ba + f.d * (f.len + f.ext.1);
-        rect(a, b, b + f.n * f.leg + f.d * (f.slope.1 * f.leg), a + f.n * f.leg - f.d * (f.slope.0 * f.leg))
+        let mut region = rect(a, b, b + f.n * f.leg + f.d * (f.slope.1 * f.leg), a + f.n * f.leg - f.d * (f.slope.0 * f.leg));
+        region.holes = f.holes.clone();
+        region
     }
 
     /// Where a flange panel's far edge (`leg` past the bend zone) starts and ends, along the bend
@@ -4289,6 +4305,7 @@ impl SheetBody {
                     leg: leg.max(0.0),
                     shape: None,
                     exact: None,
+                    holes: Vec::new(),
                     zone_shape: None,
                     tag: String::new(),
                     ext: (0.0, 0.0),
@@ -4387,6 +4404,7 @@ impl SheetBody {
                 leg: leg.max(0.0),
                 shape: None,
                 exact: None,
+                holes: Vec::new(),
                 zone_shape: None,
                 tag: String::new(),
                 ext: (0.0, 0.0),
@@ -5615,6 +5633,7 @@ impl SheetBody {
             tear_ease: (0.0, 0.0),
             shape: None,
             exact: None,
+            holes: Vec::new(),
             zone_shape: None,
             tag: String::new(),
         });
@@ -5685,12 +5704,20 @@ impl SheetBody {
             let pts = dedup(&r.outer.ccw().polyline(1e-3));
             let (a2, b2) = (Vec2::new(fa.x, fa.y), Vec2::new(fb.x, fb.y));
             if pts.contains((a2 + b2) * 0.5) || polys_cross(&pts, &[a2, b2, (a2 + b2) * 0.5]) {
-                found = Some((pi, inv, a2, b2, pts, r.outer));
+                found = Some((pi, inv, a2, b2, pts, r.outer, r.holes));
                 break;
             }
         }
-        let (panel, inv, a2, b2, pts, outline) =
+        let (panel, inv, a2, b2, pts, outline, holes) =
             found.ok_or_else(|| DocError::Invalid("the fold line must lie on a flat face of the sheet".into()))?;
+        // A line on the base whose ends lie in cut-outs (a lip along the edge of a window, from
+        // corner relief to corner relief) folds only the material it parts from the rest.
+        if panel.is_none() && !other_side {
+            let q2 = fixed.map(|p| apply_point(&inv, p)).map(|q| Vec2::new(q.x, q.y));
+            if let Some(i) = self.fold_between_cutouts((a2, b2), q2, (angle, radius), position, flip, &pts)? {
+                return Ok(i);
+            }
+        }
         let d = (b2 - a2).normalized().ok_or_else(|| DocError::Invalid("the fold line has no length".into()))?;
         let mut n = Vec2::new(-d.y, d.x);
         let l0 = a2.dot(n);
@@ -5745,6 +5772,7 @@ impl SheetBody {
             tear_ease: (0.0, 0.0),
             shape: None,
             exact: None,
+            holes: Vec::new(),
             zone_shape: None,
             tag: String::new(),
         };
@@ -5774,7 +5802,7 @@ impl SheetBody {
         if strips.len() > 1 {
             let span = (a2.dot(d).min(b2.dot(d)), a2.dot(d).max(b2.dot(d)));
             let angle = if flip { -angle } else { angle };
-            return self.fold_tabs(panel, (&pts, &outline), (n, d), (s0, ba), span, (angle, radius), &strips);
+            return self.fold_tabs(panel, (&pts, &outline, &holes), (n, d), (s0, ba), span, (angle, radius), &strips);
         }
         // The bend zone is a rectangle across the panel, or straight edges of the sheet slant
         // across it, or curved ones do. Those ends fold to helices and curves, as torn ends and
@@ -5825,15 +5853,19 @@ impl SheetBody {
             }
             v.into_iter().map(snap).collect::<Vec<_>>()
         };
+        // The panel's holes go with the side they lie on.
+        let fixed_outer = fixed_exact.clone().unwrap_or_else(|| Loop2::polygon(&fixed_part)).ccw();
+        let mut work = FlatWork::new();
+        let fixed_holes = holes_in(&holes, Region2 { outer: fixed_outer.clone(), holes: Vec::new() }, &mut work)?;
+        let moving_outer = moving_exact.clone().unwrap_or_else(|| Loop2::polygon(&moving)).ccw();
+        let moving_holes = holes_in(&holes, Region2 { outer: moving_outer, holes: Vec::new() }, &mut work)?;
         match panel {
-            None => {
-                self.base =
-                    Region2 { outer: fixed_exact.clone().unwrap_or_else(|| Loop2::polygon(&fixed_part)).ccw(), holes: self.base.holes.clone() }
-            }
+            None => self.base = Region2 { outer: fixed_outer, holes: fixed_holes },
             Some(j) => {
                 if let Some(f) = self.flanges.get_mut(j) {
                     f.shape = Some(ccw(fixed_part.clone()));
                     f.exact = fixed_exact;
+                    f.holes = fixed_holes;
                 }
             }
         }
@@ -5853,6 +5885,7 @@ impl SheetBody {
             tear_ease: (0.0, 0.0),
             shape: Some(ccw(moving)),
             exact: moving_exact,
+            holes: moving_holes,
             zone_shape,
             tag: String::new(),
         });
@@ -5877,6 +5910,275 @@ impl SheetBody {
         Ok(i)
     }
 
+    /// A fold on the base whose line, run through the base's material (its outline less its
+    /// cut-outs), parts a piece of it from the rest between cut-outs: a lip along the edge of a
+    /// window, the line's ends in the window's corner reliefs. The material on the fixed point's
+    /// side of the line, and all that reaches it round the line's ends, stays; the piece parted
+    /// from it folds, its bend zone `position`ed at the line as [`Self::add_fold`] does, and the
+    /// zone and the piece leave a hole in the base. `None` where the line parts nothing so (no
+    /// cut-out, the fixed point off the material, or all the material on one side of the line
+    /// folding, as a line across the whole base folds it): the fold is then the plain one.
+    #[allow(clippy::too_many_arguments)]
+    fn fold_between_cutouts(
+        &mut self,
+        (a2, b2): (Vec2, Vec2),
+        fixed: Option<Vec2>,
+        (angle, radius): (f64, f64),
+        position: &str,
+        flip: bool,
+        outline: &[Vec2],
+    ) -> Result<Option<usize>> {
+        const EPS: f64 = 1e-6;
+        let Some(fixed) = fixed else { return Ok(None) };
+        if self.holes.is_empty() && self.base.holes.is_empty() {
+            return Ok(None);
+        }
+        let Some(d) = (b2 - a2).normalized() else { return Ok(None) };
+        let n0 = Vec2::new(-d.y, d.x);
+        let l0 = a2.dot(n0);
+        let span = (a2.dot(d).min(b2.dot(d)), a2.dot(d).max(b2.dot(d)));
+        let mut work = FlatWork::new();
+        let cuts: Vec<Region2> = self.holes.iter().filter(|h| encloses_area(h)).map(planar_region).collect::<Result<_>>()?;
+        let base = planar_region(&self.base)?;
+        let material = if cuts.is_empty() { vec![base] } else { material_boolean(&[base], &cuts, kernel::BoolOp::Cut, &mut work)? };
+        // The two sides of the line, each as far as the outline reaches.
+        let reach = outline.iter().map(|q| q.dist(a2)).fold(0.0, f64::max) * 2.0 + 1.0;
+        let half = |n: Vec2, from: f64| -> Region2 {
+            let o = a2 + n * (from - a2.dot(n));
+            Region2 {
+                outer: Loop2::polygon(&[o - d * reach, o + d * reach, o + d * reach + n * reach, o - d * reach + n * reach]).ccw(),
+                holes: Vec::new(),
+            }
+        };
+        let pos = material_boolean(&material, &[half(n0, l0)], kernel::BoolOp::Intersect, &mut work)?;
+        let neg = material_boolean(&material, &[half(n0 * -1.0, -l0)], kernel::BoolOp::Intersect, &mut work)?;
+        // Where each piece lies along the line, as intervals along `d`.
+        let contacts = |r: &Region2| -> Vec<(f64, f64)> {
+            let mut out = Vec::new();
+            for lp in std::iter::once(&r.outer).chain(&r.holes) {
+                let ring = lp.polyline(1e-3);
+                let m = ring.len();
+                for k in 0..m {
+                    let (Some(&p), Some(&q)) = (ring.get(k), ring.get((k + 1) % m)) else { continue };
+                    if (p.dot(n0) - l0).abs() < EPS && (q.dot(n0) - l0).abs() < EPS {
+                        out.push((p.dot(d).min(q.dot(d)), p.dot(d).max(q.dot(d))));
+                    }
+                }
+            }
+            out
+        };
+        let has = |r: &Region2, q: Vec2| {
+            let ring = dedup(&r.outer.ccw().polyline(1e-3));
+            (ring.contains(q) || near_outline(&ring, q, 1e-3))
+                && !r.holes.iter().any(|h| {
+                    let hole = dedup(&h.ccw().polyline(1e-3));
+                    hole.contains(q) && !near_outline(&hole, q, 1e-3)
+                })
+        };
+        let pieces: Vec<(bool, Region2, Vec<(f64, f64)>)> = pos
+            .into_iter()
+            .map(|r| (true, r))
+            .chain(neg.into_iter().map(|r| (false, r)))
+            .map(|(side, r)| {
+                let c = contacts(&r);
+                (side, r, c)
+            })
+            .collect();
+        // A line drawn shorter than the material it crosses bends it as far as the material runs
+        // along the line from each end, to the cut-outs or the outline there (a lip's line drawn
+        // a little short of the reliefs that part the lip).
+        let span = {
+            let mut along: Vec<(f64, f64)> = pieces.iter().flat_map(|p| p.2.iter().copied()).collect();
+            along.sort_by(|x, y| x.0.total_cmp(&y.0));
+            let mut runs: Vec<(f64, f64)> = Vec::new();
+            for (lo, hi) in along {
+                match runs.last_mut() {
+                    Some(last) if lo <= last.1 + EPS => last.1 = last.1.max(hi),
+                    _ => runs.push((lo, hi)),
+                }
+            }
+            let run_at = |u: f64| runs.iter().find(|r| u > r.0 + EPS && u < r.1 - EPS).copied();
+            (run_at(span.0).map_or(span.0, |r| r.0), run_at(span.1).map_or(span.1, |r| r.1))
+        };
+        // Pieces on either side that meet along the line beyond its ends are one.
+        let mut root: Vec<usize> = (0..pieces.len()).collect();
+        fn find(root: &[usize], mut r: usize) -> usize {
+            while let Some(&up) = root.get(r).filter(|up| **up != r) {
+                r = up;
+            }
+            r
+        }
+        let beyond_ends = |x: &[(f64, f64)], y: &[(f64, f64)]| {
+            x.iter().any(|&(a0, a1)| {
+                y.iter().any(|&(b0, b1)| {
+                    let (lo, hi) = (a0.max(b0), a1.min(b1));
+                    hi - lo > EPS && (span.0.min(hi) - lo > EPS || hi - span.1.max(lo) > EPS)
+                })
+            })
+        };
+        for i in 0..pieces.len() {
+            for j in (i + 1)..pieces.len() {
+                let (Some(pi), Some(pj)) = (pieces.get(i), pieces.get(j)) else { continue };
+                if pi.0 != pj.0 && beyond_ends(&pi.2, &pj.2) {
+                    let (a, b) = (find(&root, i), find(&root, j));
+                    if let Some(slot) = root.get_mut(a.max(b)) {
+                        *slot = a.min(b);
+                    }
+                }
+            }
+        }
+        let Some(stays) = pieces.iter().position(|p| has(&p.1, fixed)).map(|i| find(&root, i)) else { return Ok(None) };
+        let moving: Vec<usize> = (0..pieces.len()).filter(|&i| find(&root, i) != stays).collect();
+        let Some(side) = moving.first().and_then(|&i| pieces.get(i)).map(|p| p.0) else { return Ok(None) };
+        if moving.iter().any(|&i| pieces.get(i).is_some_and(|p| p.0 != side)) {
+            return Err(DocError::Invalid("not supported yet: a fold line between cut-outs that parts material on both of its sides".into()));
+        }
+        if pieces.iter().enumerate().all(|(i, p)| p.0 != side || moving.contains(&i)) {
+            return Ok(None);
+        }
+        // Where the moving pieces meet the line, between its ends: one run, the bend's length.
+        let mut runs: Vec<(f64, f64)> = moving
+            .iter()
+            .filter_map(|&i| pieces.get(i))
+            .flat_map(|p| p.2.iter().map(|&(a, b)| (a.max(span.0), b.min(span.1))))
+            .filter(|(a, b)| b - a > EPS)
+            .collect();
+        runs.sort_by(|x, y| x.0.total_cmp(&y.0));
+        let (u0, u1) = match runs.split_first() {
+            Some((&first, rest)) => rest.iter().try_fold(first, |(a, b), &(c, e)| (c <= b + EPS).then_some((a, b.max(e)))),
+            None => None,
+        }
+        .ok_or_else(|| DocError::Invalid("not supported yet: a fold line between cut-outs that folds more than one tab".into()))?;
+        let n = if side { n0 } else { n0 * -1.0 };
+        let l = a2.dot(n);
+        let probe = SheetFlange {
+            parent: None,
+            p: a2,
+            d,
+            len: 1.0,
+            n,
+            angle,
+            radius,
+            leg: 0.0,
+            ext: (0.0, 0.0),
+            slope: (0.0, 0.0),
+            tear: (false, false),
+            tear_curved: (false, false),
+            tear_ease: (0.0, 0.0),
+            shape: None,
+            exact: None,
+            holes: Vec::new(),
+            zone_shape: None,
+            tag: String::new(),
+        };
+        let ba = self.allowance(&probe);
+        let s0 = match position {
+            "centerline" | "center" | "centre" => l - ba / 2.0,
+            "start" => l,
+            "end" => l - ba,
+            "mould" | "mold" => l - (radius + self.t) * (angle / 2.0).tan(),
+            o => return Err(DocError::Invalid(format!("unknown fold position `{o}` (centerline, start, end or mould)"))),
+        };
+        let at = |u: f64, s: f64| snap(n * s + d * u);
+        let ccw = |mut v: Vec<Vec2>| {
+            if signed_area(&v) < 0.0 {
+                v.reverse();
+            }
+            v
+        };
+        // The bend zone: the sheet's material across the run between the zone's two lines, a
+        // rectangle or a strip whose ends are straight edges of the cut-outs slanting across it
+        // (slots along the bisectors at a polygon's corners), bounded by them on both sides.
+        let not_rectangle = || {
+            DocError::Invalid(
+                "not supported yet: a fold line between cut-outs whose bend zone is not a rectangle of the sheet (move the line clear of the cut-outs' corners)".into(),
+            )
+        };
+        let pad = (u1 - u0).max(ba) + ba;
+        let band = Region2 {
+            outer: Loop2::polygon(&[at(u0 - pad, s0), at(u1 + pad, s0), at(u1 + pad, s0 + ba), at(u0 - pad, s0 + ba)]).ccw(),
+            holes: Vec::new(),
+        };
+        let mid = at((u0 + u1) / 2.0, s0 + ba / 2.0);
+        let in_band = material_boolean(&material, std::slice::from_ref(&band), kernel::BoolOp::Intersect, &mut work)?;
+        let zone = match in_band.iter().filter(|r| has(r, mid)).collect::<Vec<_>>().as_slice() {
+            [one] if one.holes.is_empty() => ccw(dedup(&one.outer.ccw().polyline(1e-3)).iter().map(|q| snap(*q)).collect()),
+            _ => return Err(not_rectangle()),
+        };
+        let (zu0, zu1) = zone.iter().fold((f64::MAX, f64::MIN), |(lo, hi), q| (lo.min(q.dot(d)), hi.max(q.dot(d))));
+        if zu0 <= u0 - pad + EPS || zu1 >= u1 + pad - EPS {
+            return Err(not_rectangle());
+        }
+        let (u0, u1, ext, tear) = if ((zu1 - zu0) * ba - signed_area(&zone).abs()).abs() <= EPS * (zu1 - zu0).max(1.0) * ba.max(1.0) {
+            (zu0, zu1, (0.0, 0.0), (false, false))
+        } else {
+            slanted_zone(&zone, n, d, s0, ba).ok_or_else(not_rectangle)?
+        };
+        let parted: Vec<Region2> = moving.iter().filter_map(|&i| pieces.get(i)).map(|p| p.1.clone()).collect();
+        let beyond = material_boolean(&parted, &[half(n, s0 + ba)], kernel::BoolOp::Intersect, &mut work)?;
+        let moving_pts = match beyond.as_slice() {
+            [one] => ccw(dedup(&one.outer.ccw().polyline(1e-3)).iter().map(|q| snap(*q)).collect()),
+            _ => return Err(DocError::Invalid("the fold line must cross the sheet with material on both sides of the bend".into())),
+        };
+        let leg = moving_pts.iter().map(|q| q.dot(n) - s0 - ba).fold(0.0, f64::max);
+        if leg <= EPS {
+            return Err(DocError::Invalid("the fold line must cross the sheet with material on both sides of the bend".into()));
+        }
+        let hole = match merge_loops(&[zone, moving_pts.clone()], &mut work)?.as_slice() {
+            [one] => one.clone(),
+            _ => {
+                return Err(DocError::Invalid(
+                    "not supported yet: a fold line between cut-outs whose folding piece does not meet its bend zone".into(),
+                ));
+            }
+        };
+        let hole = Loop2::polygon(&hole).ccw().reversed();
+        let fixed_holes = holes_in(&self.base.holes, Region2 { outer: self.base.outer.clone(), holes: vec![hole.clone()] }, &mut work)?;
+        let moving_holes = holes_in(&self.base.holes, Region2 { outer: Loop2::polygon(&moving_pts).ccw(), holes: Vec::new() }, &mut work)?;
+        let p0 = at(u0, s0);
+        self.flanges.push(SheetFlange {
+            parent: None,
+            p: p0,
+            d,
+            len: u1 - u0,
+            n,
+            angle: if flip { -angle } else { angle },
+            radius,
+            leg,
+            ext,
+            slope: (0.0, 0.0),
+            tear,
+            tear_curved: (false, false),
+            tear_ease: (0.0, 0.0),
+            shape: Some(moving_pts),
+            exact: None,
+            holes: moving_holes,
+            zone_shape: None,
+            tag: String::new(),
+        });
+        let i = self.flanges.len() - 1;
+        // Flanges standing on the piece's edges fold with it; one across its bend can't.
+        let piece = Ring::from(self.flanges.get(i).and_then(|f| f.shape.clone()).unwrap_or_default());
+        for k in 0..i {
+            let Some(f) = self.flanges.get(k) else { continue };
+            let mid = f.p + f.d * (f.len / 2.0);
+            if f.parent.is_some() || !(piece.contains(mid) || near_outline(&piece, mid, 1e-6)) {
+                continue;
+            }
+            let (e0, e1) = ((f.p - p0).dot(n), (f.p + f.d * f.len - p0).dot(n));
+            if e0.min(e1) >= ba - EPS {
+                if let Some(f) = self.flanges.get_mut(k) {
+                    f.parent = Some(i);
+                }
+            } else {
+                return Err(DocError::Invalid("not supported yet: a fold through a flange's bend".into()));
+            }
+        }
+        self.base.holes = fixed_holes;
+        self.base.holes.push(hole);
+        Ok(Some(i))
+    }
+
     /// A fold whose bend zone falls apart into several pieces (`strips`: tabs on one line). The
     /// pieces the line's points span (`span`, along `d`) bend, each with the material beyond it;
     /// the rest of the panel stays put. `n` points to the moving side, the zone is `s0..s0 + ba`.
@@ -5884,7 +6186,7 @@ impl SheetBody {
     fn fold_tabs(
         &mut self,
         panel: Option<usize>,
-        (pts, outline): (&[Vec2], &Loop2),
+        (pts, outline, holes): (&[Vec2], &Loop2, &[Loop2]),
         (n, d): (Vec2, Vec2),
         (s0, ba): (f64, f64),
         span: (f64, f64),
@@ -5949,7 +6251,8 @@ impl SheetBody {
                 _ => return Err(DocError::Invalid("the fold line must cross the sheet with material on both sides of the bend".into())),
             };
             let leg = moving.iter().map(|q| q.dot(n) - s0 - ba).fold(0.0, f64::max);
-            made.push((u0, u1, n * s0 + d * u0, leg, moving));
+            let moving_holes = holes_in(holes, Region2 { outer: Loop2::polygon(&moving).ccw(), holes: Vec::new() }, &mut work)?;
+            made.push((u0, u1, n * s0 + d * u0, leg, moving, moving_holes));
         }
         // Flanges already on this panel: those beyond a folding tab move with it. A flange wholly
         // beyond the zone sits on one piece of the material beyond it, and goes where that piece
@@ -6024,17 +6327,19 @@ impl SheetBody {
             None => (None, Vec::new()),
         };
         moving_exact.resize(made.len(), None);
+        let fixed_holes = holes_in(holes, Region2 { outer: Loop2::polygon(&fixed).ccw(), holes: Vec::new() }, &mut work)?;
         match panel {
-            None => self.base = Region2 { outer: fixed_exact.unwrap_or_else(|| Loop2::polygon(&fixed).ccw()), holes: self.base.holes.clone() },
+            None => self.base = Region2 { outer: fixed_exact.unwrap_or_else(|| Loop2::polygon(&fixed).ccw()), holes: fixed_holes },
             Some(j) => {
                 if let Some(f) = self.flanges.get_mut(j) {
                     f.shape = Some(ccw(fixed));
                     f.exact = fixed_exact;
+                    f.holes = fixed_holes;
                 }
             }
         }
         let first = self.flanges.len();
-        for ((u0, u1, p0, leg, moving), exact) in made.into_iter().zip(moving_exact) {
+        for ((u0, u1, p0, leg, moving, moving_holes), exact) in made.into_iter().zip(moving_exact) {
             self.flanges.push(SheetFlange {
                 parent: panel,
                 p: snap(p0),
@@ -6051,6 +6356,7 @@ impl SheetBody {
                 tear_ease: (0.0, 0.0),
                 shape: Some(ccw(moving)),
                 exact,
+                holes: moving_holes,
                 zone_shape: None,
                 tag: String::new(),
             });
@@ -7052,6 +7358,7 @@ pub fn contour_flange_path(body: &str, rule: &str, rv: &RuleValues, plane: &Plan
                     tear_ease: (0.0, 0.0),
                     shape: None,
                     exact: None,
+                    holes: Vec::new(),
                     zone_shape: None,
                     tag: String::new(),
                 };

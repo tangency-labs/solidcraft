@@ -1467,6 +1467,169 @@ fn fold_through_cut_outs() {
     assert!((volume(&mut c) - want).abs() < 0.05, "{} vs {want}", volume(&mut c));
 }
 
+/// Lips folded up along the four edges of a window in a sheet, each line from corner relief to
+/// corner relief: only the strip between the line and the window folds, the frame round it
+/// stays, and each fold after the first finds the base where it was.
+#[test]
+fn lips_fold_up_round_a_window_between_its_corner_reliefs() {
+    let (t, r, k) = (2.5, 2.5, 0.44);
+    let ba = FRAC_PI_2 * (r + k * t);
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Frame"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [200, 160]}));
+    // The window 80 x 80, a 13 x 13 relief at each corner reaching 1 into it.
+    let window = [
+        [48, 28],
+        [61, 28],
+        [61, 40],
+        [139, 40],
+        [139, 28],
+        [152, 28],
+        [152, 41],
+        [140, 41],
+        [140, 119],
+        [152, 119],
+        [152, 132],
+        [139, 132],
+        [139, 120],
+        [61, 120],
+        [61, 132],
+        [48, 132],
+        [48, 119],
+        [60, 119],
+        [60, 41],
+        [48, 41],
+        [48, 28],
+    ];
+    run(&mut s, "sketch.line", json!({"points": window}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "sheet.flange", json!({"sketch": "Frame", "profiles": [{"point": [10, 10]}]}));
+    let blank = (200.0 * 160.0 - (80.0 * 80.0 + 4.0 * 168.0)) * t;
+    assert!(rel(volume(&mut s), blank) < 1e-9, "{} vs {blank}", volume(&mut s));
+    for line in [[[50, 32], [50, 128]], [[150, 32], [150, 128]], [[52, 30], [148, 30]], [[52, 130], [148, 130]]] {
+        let ends = json!([[line[0][0], line[0][1], t], [line[1][0], line[1][1], t]]);
+        run(&mut s, "sheet.fold", json!({"points": ends, "angle": 90, "position": "start", "fixed": [10, 80, t]}));
+    }
+    // Four bends 78 long; each lip a 10 strip, its leg 10 - BA above the bend.
+    let f = flat(&mut s);
+    assert_eq!(f["bends"].as_array().map(Vec::len), Some(4), "{f}");
+    let want = blank + 4.0 * 78.0 * t * (FRAC_PI_2 * (r + t / 2.0) - ba);
+    assert!(rel(volume(&mut s), want) < 1e-6, "{} vs {want}", volume(&mut s));
+    let b = bbox(&mut s);
+    let at = |k: &str, i: usize| b[k][i].as_f64().unwrap_or(f64::NAN);
+    assert!(at("min", 0).abs() < 1e-6 && (at("max", 0) - 200.0).abs() < 1e-6 && (at("max", 1) - 160.0).abs() < 1e-6, "{b}");
+    assert!((at("max", 2) - (t + r + 10.0 - ba)).abs() < 1e-6, "{b}");
+    run(&mut s, "sheet.unfold", json!({}));
+    assert!(rel(volume(&mut s), blank) < 1e-6, "{} vs {blank}", volume(&mut s));
+}
+
+/// A lip along a window's edge parted by slots running out from the window's corners at 45°,
+/// its line drawn short of the slots: the lip folds as far as the material runs along the line,
+/// its zone's ends slanting along the slots; the frame stays.
+#[test]
+fn a_lip_between_slanted_corner_slots_folds_from_a_short_line() {
+    let (t, r, k) = (2.5, 2.5, 0.44);
+    let ba = FRAC_PI_2 * (r + k * t);
+    let (h, len) = (1.0, 25.0);
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Frame"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [300, 260]}));
+    // The window 100 x 100, counter-clockwise, a slot 2 wide and 25 long out of each corner.
+    let corners = [[100.0, 80.0], [200.0, 80.0], [200.0, 180.0], [100.0, 180.0]];
+    let mut window = Vec::new();
+    for (i, c) in corners.iter().enumerate() {
+        let (prev, next) = (corners[(i + 3) % 4], corners[(i + 1) % 4]);
+        let unit = |a: [f64; 2], b: [f64; 2]| {
+            let (x, y) = (b[0] - a[0], b[1] - a[1]);
+            let l = x.hypot(y);
+            [x / l, y / l]
+        };
+        let (e_in, e_out) = (unit(prev, *c), unit(*c, next));
+        let o = [e_in[0] - e_out[0], e_in[1] - e_out[1]];
+        let o = [o[0] / o[0].hypot(o[1]), o[1] / o[0].hypot(o[1])];
+        let p = [o[1], -o[0]];
+        let q = 2f64.sqrt() * h;
+        window.push([c[0] - e_in[0] * q, c[1] - e_in[1] * q]);
+        window.push([c[0] + p[0] * h + o[0] * len, c[1] + p[1] * h + o[1] * len]);
+        window.push([c[0] - p[0] * h + o[0] * len, c[1] - p[1] * h + o[1] * len]);
+        window.push([c[0] + e_out[0] * q, c[1] + e_out[1] * q]);
+    }
+    window.push(window[0]);
+    run(&mut s, "sketch.line", json!({"points": window}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "sheet.flange", json!({"sketch": "Frame", "profiles": [{"point": [10, 10]}]}));
+    // Each slot beyond the square: 2h wide, from h inside the corner's diagonal out to its end.
+    let slot = 2.0 * h * len + h * h;
+    let blank = (300.0 * 260.0 - 100.0 * 100.0 - 4.0 * slot) * t;
+    assert!(rel(volume(&mut s), blank) < 1e-9, "{} vs {blank}", volume(&mut s));
+    run(&mut s, "sheet.fold", json!({"points": [[110, 195, t], [190, 195, t]], "angle": 90, "position": "start", "fixed": [10, 10, t]}));
+    assert_eq!(flat(&mut s)["bends"].as_array().map(Vec::len), Some(1));
+    // Between the slots' facing sides, x = 150 ± (y - 130 - h√2): the zone runs from y = 195
+    // down to 195 - BA.
+    let run_at = |y: f64| 2.0 * (y - 130.0 - 2f64.sqrt() * h);
+    let zone = (run_at(195.0) + run_at(195.0 - ba)) / 2.0 * ba;
+    let want = blank + zone * t * ((r + t / 2.0) / (r + k * t) - 1.0);
+    assert!(rel(volume(&mut s), want) < 1e-6, "{} vs {want}", volume(&mut s));
+    let b = bbox(&mut s);
+    let at = |k: &str, i: usize| b[k][i].as_f64().unwrap_or(f64::NAN);
+    assert!(at("min", 0).abs() < 1e-6 && (at("max", 0) - 300.0).abs() < 1e-6 && (at("max", 1) - 260.0).abs() < 1e-6, "{b}");
+    assert!((at("max", 2) - (t + r + 15.0 - ba)).abs() < 1e-6, "{b}");
+    run(&mut s, "sheet.unfold", json!({}));
+    assert!(rel(volume(&mut s), blank) < 1e-6, "{} vs {blank}", volume(&mut s));
+}
+
+/// A slot lip's vacated material stays absent when a later fold carries the lip along.
+#[test]
+fn a_fold_carries_a_slot_lip_without_filling_its_root() {
+    for tabs in [false, true] {
+        let mut s = Session::default();
+        run(&mut s, "sheet.manage_rules", json!({"name": "R", "thickness": 1, "bend_radius": 1, "k_factor": 0.5, "active": true}));
+        run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Blank"}));
+        if tabs {
+            run(
+                &mut s,
+                "sketch.line",
+                json!({"points": [[0, 0], [100, 0], [100, 60], [0, 60], [0, 50], [90, 50], [90, 45], [0, 45]], "closed": true}),
+            );
+            run(
+                &mut s,
+                "sketch.line",
+                json!({"points": [[20, 10], [70, 10], [70, 11], [21, 11], [21, 43], [70, 43], [70, 44], [20, 44]], "closed": true}),
+            );
+        } else {
+            run(&mut s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [100, 60]}));
+        }
+        run(
+            &mut s,
+            "sketch.line",
+            json!({"points": [[30, 20], [40, 20], [40, 21], [31, 21], [31, 39], [40, 39], [40, 40], [30, 40]], "closed": true}),
+        );
+        run(&mut s, "sketch.finish", json!({}));
+        run(&mut s, "sheet.flange", json!({"sketch": "Blank", "profiles": [{"point": [5, 5]}]}));
+        let before = flat(&mut s);
+        // The 100 × 60 sheet less a C slot: 10 × 20 minus its 9 × 18 tongue, 1 mm thick.
+        // The nested case also removes a 90 × 5 notch and a 50 × 34 - 49 × 32 C slot.
+        let want = 6000.0 - (200.0 - 162.0) - if tabs { 450.0 + 132.0 } else { 0.0 };
+        assert!((volume(&mut s) - want).abs() < 1e-6);
+        run(&mut s, "sheet.fold", json!({"points": [[37, 20, 1], [37, 40, 1]], "fixed": [10, 30, 1]}));
+        if tabs {
+            run(&mut s, "sheet.fold", json!({"points": [[60, 10, 1], [60, 44, 1]], "fixed": [90, 30, 1]}));
+        }
+        let x = if tabs { 85 } else { 70 };
+        run(&mut s, "sheet.fold", json!({"points": [[x, 0, 1], [x, 60, 1]], "fixed": [90, 30, 1]}));
+        assert_eq!(s.model.state().bodies.len(), 1);
+        let body = &s.model.state().bodies[0].body;
+        assert!(body.validity().is_empty() && body.shell_count() == 1, "{:?}", body.validity());
+        assert!(rel(volume(&mut s), want) < 1e-5);
+        let after = flat(&mut s);
+        assert_eq!(after["bends"].as_array().map(Vec::len), Some(if tabs { 4 } else { 2 }));
+        for key in ["outline", "cutouts"] {
+            assert_eq!(flat_points(&after[key], 1.0), flat_points(&before[key], 1.0), "{key}: {after}");
+        }
+        assert!((flat_area(&after) - want).abs() < 1e-6);
+    }
+}
+
 #[test]
 fn flange_edges_are_named_and_follow_the_base_sketch() {
     let mut s = Session::default();

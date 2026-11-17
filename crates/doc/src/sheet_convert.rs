@@ -1163,6 +1163,7 @@ pub fn convert_body(
                 slope: (0.0, 0.0),
                 shape: None,
                 exact: None,
+                holes: Vec::new(),
                 zone_shape: None,
                 tag: String::new(),
                 tear: (false, false),
