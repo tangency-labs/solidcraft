@@ -84,9 +84,9 @@ pub mod vertex_meet;
 pub use blend::{
     band_room, blend, blend_ordered, blend_with, carried_faces, carried_faces_ordered,
     chamfer_sides, chamfer_sides_facing, chamfer_sides_ordered, edge_faces_along,
-    edge_faces_along_ordered, fillet_variable, fillet_variable_from, fillet_variable_ordered,
-    tangent_chain, BandRoom, Blend, BlendOptions, Blended, CarriedFace, ChamferCorner,
-    ChamferSecond, Corners, EndRoom, Hole, HoleEdge, Room, SetBack, Turn,
+    edge_faces_along_ordered, edges_share_wedge, fillet_variable, fillet_variable_from,
+    fillet_variable_ordered, tangent_chain, BandRoom, Blend, BlendOptions, Blended, CarriedFace,
+    ChamferCorner, ChamferSecond, Corners, EndRoom, Hole, HoleEdge, Room, SetBack, Turn,
 };
 pub use body::{
     make_box, make_cone, make_cylinder, make_sphere, make_torus, Body, Contract, TurnedOver,

@@ -35,9 +35,9 @@ use solidcore_record::brep::Brep as Record;
 use solidcore_ops::sweep::{extrude, Curve, DraftCorner, SweepFrame};
 use solidcore_ops::{
     blend, blend_ordered, blend_with, chamfer_sides, chamfer_sides_facing, edge_faces_along,
-    fillet_variable, fillet_variable_from, make_box, make_cone, make_cylinder, tangent_chain,
-    Blend, BlendOptions, Body, ChamferSecond, CheckLevel, Corners, Error, FitKind, Order, SetBack,
-    Turn, Unblendable,
+    edges_share_wedge, fillet_variable, fillet_variable_from, make_box, make_cone, make_cylinder,
+    tangent_chain, Blend, BlendOptions, Body, ChamferSecond, CheckLevel, Corners, Error, FitKind,
+    Order, SetBack, Turn, Unblendable,
 };
 
 /// The block's top front edge, 30 long, between the top (z = 10) and the front (y = 0).
@@ -715,6 +715,30 @@ fn rounds_turn_as_asked_on_the_body_s_own_indices() {
         .err(),
         Some(Error::Argument)
     );
+}
+
+/// [`edges_share_wedge`] on solidcore#2250's box (40 x 30 x 20, its top back edge chamfered
+/// 5): the chamfer's top edge meets its faces at 135 degrees (the normals 45 degrees apart) and
+/// the bottom front edge at 90, so the two share no wedge in either order; the bottom front and
+/// top front edges are both square and share one; one edge, or none, shares its own. The
+/// measure leaves the body as it was.
+#[test]
+fn edges_share_a_wedge_where_their_faces_meet_at_one_angle() {
+    all_fixes();
+    let b = make_box([0.0; 3], [40.0, 30.0, 20.0]).unwrap();
+    let back = edge_at(&b, [20.0, 30.0, 20.0]);
+    blend(&b, Blend::Chamfer, &[back], &[5.0], &[], Corners::Filled).unwrap();
+    let before = b.to_record().unwrap().0;
+    let a = edge_at(&b, [20.0, 25.0, 20.0]);
+    let bottom = edge_at(&b, [20.0, 0.0, 0.0]);
+    let top = edge_at(&b, [20.0, 0.0, 20.0]);
+    assert_eq!(edges_share_wedge(&b, &[a, bottom]), Ok(false));
+    assert_eq!(edges_share_wedge(&b, &[bottom, a]), Ok(false));
+    assert_eq!(edges_share_wedge(&b, &[bottom, top]), Ok(true));
+    assert_eq!(edges_share_wedge(&b, &[a]), Ok(true));
+    assert_eq!(edges_share_wedge(&b, &[]), Ok(true));
+    assert_eq!(edges_share_wedge(&b, &[999]), Err(Error::Argument));
+    assert_eq!(b.to_record().unwrap().0, before);
 }
 
 /// [`chamfer_sides_facing`] takes each edge's first distance along the face that faces the

@@ -13,6 +13,8 @@
 //!   ([`fillet_variable_from`]) from its end nearest a point.
 //! - [`edge_faces_along`]: the two faces of an edge with how far each faces a direction, for an
 //!   application choosing the face a chamfer's first distance is along.
+//! - [`edges_share_wedge`]: whether the faces of some edges all meet at one angle, for an
+//!   application grouping the edges of a curvature-continuous blend.
 //! - [`tangent_chain`]: the edges a blend of some edges runs on into tangentially, on the
 //!   kernel's measures.
 //!
@@ -24,6 +26,17 @@
 //!
 //! Each changes the body it is given, as the kernel does; a refused or failed one leaves it as
 //! it came in ([`crate::session`]'s edit wrapper).
+//!
+//! **The result.** A blend's result has faces ([`Error::Empty`] if not), and a closed manifold
+//! body gives a closed manifold body ([`Error::NotSolid`] if not): the kernel's session stitches
+//! and orients what it builds, and that test is topological. A blend does not go on to prove
+//! its result valid and facing out, as the operations that build a body from operands do
+//! ([`crate::body`]'s `finish`): that proof decides the sign of the result's volume by
+//! enclosure, which on a body of many faces or of curvature-continuous rounds costs far more
+//! than the blend and, where its budget runs out, would refuse a body the blend built
+//! correctly. An application that needs the proof asks for it where it needs it
+//! ([`Body::check_solid`], [`Body::check`]). The blend corner's Roll-over is the one place a
+//! blend takes the proof: there it chooses between two constructions.
 
 use std::collections::{HashMap, HashSet};
 
@@ -33,7 +46,7 @@ use solidcore::blend::blend_corner::rollover::{
 };
 use solidcore::blend::blend_corner::BlendCornerEvent;
 use solidcore::blend::blend_refusal::{BlendRefusal, NotBlendable, SetbackTooShortWhy};
-use solidcore::blend::chamfer_side::faces_along;
+use solidcore::blend::chamfer_side::{faces_along, wedge_at_middle};
 use solidcore::blend::definition_check::BlendFaceLog;
 use solidcore::blend::fillet_executive::p3::{
     ErrorInfo, FitKind as KernelFit, FitSize as KernelFitSize, NoRoomReason,
@@ -1379,7 +1392,7 @@ const NO_COMMENT: &str = "<no comment>";
 /// overflow their faces across cliffs and others fit (more than one edge, no setbacks, corners
 /// filled), the overflowing ones go first and the others then round what is left of their
 /// edges, meeting them as one blend; an edge the overflow removed whole is reported dropped.
-/// A solid gives a solid. Two rounds that meet at a sharp side edge on a face they share turn
+/// A closed manifold body gives one. Two rounds that meet at a sharp side edge on a face they share turn
 /// mitred ([`blend_ordered`] takes the [`Turn`]).
 ///
 /// # Errors
@@ -1398,7 +1411,8 @@ const NO_COMMENT: &str = "<no comment>";
 /// leave a face whose boundary crosses itself (the kernel's `rounds_cross`, on the blends' faces
 /// and their neighbours); with [`Corners::Open`], [`Error::NotSolid`] for a body that is no
 /// closed solid once blended and [`Error::Unsupported`] for a corner patch that is not a disc
-/// between faces outside every patch; the kernel's other refusals; those of [`finish`].
+/// between faces outside every patch; the kernel's other refusals; [`Error::Empty`]
+/// and [`Error::NotSolid`] as the module's result contract gives them.
 pub fn blend(
     body: &Body,
     kind: Blend,
@@ -1587,7 +1601,7 @@ fn blend_on_body(
     if order.is_some() && back.iter().any(|(v, _)| !b.vertex_list().contains(v)) {
         return Ok(Err(Error::Argument));
     }
-    let expect = Expect::of(k, b)?;
+    let solid = is_manifold_solid(b)?;
     let mut dropped = vec![false; edges.len()];
     let section: fn(&[f64]) -> Section<'_> = match kind {
         Blend::Round => |s| Section::Round(s),
@@ -1616,7 +1630,7 @@ fn blend_on_body(
             if let Err(e) = pass_or_refuse(k, b, p)? {
                 return Ok(Err(e));
             }
-            return Ok(done(k, b, expect)?.map(|()| Blended {
+            return Ok(done(b, solid)?.map(|()| Blended {
                 dropped,
                 holes: Vec::new(),
                 made: Vec::new(),
@@ -1705,7 +1719,12 @@ fn blend_on_body(
                 &mut rolled_dropped,
             )
             .and_then(|r| match r {
-                Ok(rolled) => finish(k, rolled, expect),
+                // taken only where it is proved a solid as the input is
+                Ok(rolled) => {
+                    let mut as_given = brep_copy(k, input)?;
+                    let expect = Expect::of(k, &mut as_given)?;
+                    finish(k, rolled, expect)
+                }
                 Err(e) => Ok(Err(e)),
             });
             match rolled {
@@ -1758,7 +1777,12 @@ fn blend_on_body(
                     ..together(&mapped, section(each), turn, &[])
                 };
                 match pass_or_refuse(k, &mut copy, p).and_then(|r| match r {
-                    Ok(_) => finish(k, copy, expect),
+                    // taken only where it is proved a solid as the input is
+                    Ok(_) => {
+                        let mut as_given = brep_copy(k, input)?;
+                        let expect = Expect::of(k, &mut as_given)?;
+                        finish(k, copy, expect)
+                    }
                     Err(e) => Ok(Err(e)),
                 }) {
                     Ok(Ok(rolled)) => {
@@ -1794,7 +1818,7 @@ fn blend_on_body(
         )? {
             Ok(made) => {
                 *b = made;
-                Ok(done(k, b, expect)?.map(|()| Blended {
+                Ok(done(b, solid)?.map(|()| Blended {
                     dropped,
                     holes: Vec::new(),
                     made: Vec::new(),
@@ -1809,7 +1833,7 @@ fn blend_on_body(
         Err(Refused::Error(e)) => return Ok(Err(e)),
     };
     if corners == Corners::Filled {
-        return Ok(done(k, b, expect)?.map(|()| Blended {
+        return Ok(done(b, solid)?.map(|()| Blended {
             dropped,
             holes: Vec::new(),
             made: Vec::new(),
@@ -1852,11 +1876,60 @@ fn blend_on_body(
         }
         holes.push(hole);
     }
-    Ok(done(k, b, Expect::FACES)?.map(|()| Blended {
+    Ok(done(b, false)?.map(|()| Blended {
         dropped,
         holes,
         made: Vec::new(),
     }))
+}
+
+/// How far apart, in radians, two edges' wedges may be and still be one wedge
+/// ([`edges_share_wedge`]).
+const WEDGE_TOLERANCE: f64 = 1e-6;
+
+/// Whether the faces of every edge of `body` at native edge-list indices `edges` meet at the
+/// same wedge at the edge's middle (the kernel's
+/// [`solidcore::blend::chamfer_side::wedge_at_middle`], the angle between the two faces'
+/// outward normals there), within a millionth of a radian: for an application that groups the
+/// edges of a curvature-continuous blend by their wedge, or will not blend edges of different
+/// wedges in one call. An edge whose wedge the kernel answers with a status (an edge not
+/// between two faces, a normal that vanishes) shares no wedge: `false`. No edges share one:
+/// `true`.
+///
+/// # Errors
+/// [`Error::Argument`] for an index past the edges; the kernel's error from an evaluation that
+/// is no status; [`Error::Internal`] for a body a panic left unfinished.
+pub fn edges_share_wedge(body: &Body, edges: &[usize]) -> Result<bool> {
+    measure_body("edges_share_wedge", body, |k, b| {
+        let mut picked = Vec::new();
+        for &i in edges {
+            match b.edge_list().get(i) {
+                Some(&e) => picked.push(e),
+                None => return Ok(Err(Error::Argument)),
+            }
+        }
+        let mut first: Option<f64> = None;
+        for e in picked {
+            let Some(wedge) = answer(wedge_at_middle(k, b, e))? else {
+                return Ok(Ok(false));
+            };
+            match first {
+                None => first = Some(wedge),
+                Some(a) if wedges_differ(a, wedge) => return Ok(Ok(false)),
+                Some(_) => {}
+            }
+        }
+        Ok(Ok(true))
+    })?
+}
+
+/// Whether two of the kernel's wedges are farther apart than [`WEDGE_TOLERANCE`].
+#[allow(
+    clippy::float_arithmetic,
+    reason = "two of the kernel's angles compared with a tolerance, not a geometric quantity (docs/layers.md)"
+)]
+fn wedges_differ(a: f64, b: f64) -> bool {
+    (a - b).abs() > WEDGE_TOLERANCE
 }
 
 /// What [`without_splits_at_picks`] gives: the copy, the picks left as its edges, and the place
@@ -2014,16 +2087,16 @@ fn splits_out_at(
     Ok(Some((c, picks, at)))
 }
 
-/// The result contract on the body in place ([`finish`]).
-fn done(k: &mut Kernel, b: &mut Brep, expect: Expect) -> solidcore::Result<Result<()>> {
-    let made = std::mem::take(b);
-    Ok(match finish(k, made, expect)? {
-        Ok(r) => {
-            *b = r;
-            Ok(())
-        }
-        Err(e) => Err(e),
-    })
+/// A blend's result contract on the body in place (the module's): it has faces, and with
+/// `solid` (its input was a closed manifold body) it is a closed manifold body.
+fn done(b: &Brep, solid: bool) -> solidcore::Result<Result<()>> {
+    if b.face_list().is_empty() {
+        return Ok(Err(Error::Empty));
+    }
+    if solid && !is_manifold_solid(b)? {
+        return Ok(Err(Error::NotSolid));
+    }
+    Ok(Ok(()))
 }
 
 /// One edge round an opened corner's hole, by the kernel's ids.
@@ -2380,7 +2453,7 @@ pub fn tangent_chain(
 
 /// The edges of `body` at record indices `edges` chamfered `distance` back along the face of
 /// record index `along[i]` (one of edge i's two faces) and by `second` on the other, the
-/// corners bevelled. A solid gives a solid.
+/// corners bevelled. A closed manifold body gives one.
 ///
 /// # Errors
 /// [`Error::Argument`] for no edges, `along` not one per edge, an index past its list or an
@@ -2388,7 +2461,8 @@ pub fn tangent_chain(
 /// strictly between 0 and pi; the kernel's refusals ([`Error::Status`] for a face that is not
 /// the edge's, faces that make no wedge or distances that fold on it,
 /// [`Error::ChamferAngleTooLarge`] for an angle past the wedge's room); [`Error::TooLarge`],
-/// [`Error::NoRoom`] and [`Error::NoEffect`] as for [`blend`]; those of [`finish`].
+/// [`Error::NoRoom`] and [`Error::NoEffect`] as for [`blend`]; those of the module's result
+/// contract.
 pub fn chamfer_sides(
     body: &Body,
     edges: &[usize],
@@ -2502,7 +2576,7 @@ fn chamfer_sides_impl(
                 }
             }
         }
-        let expect = Expect::of(k, b)?;
+        let solid = is_manifold_solid(b)?;
         let p = Pass {
             edges: &picked,
             section: Section::Chamfer {
@@ -2522,7 +2596,7 @@ fn chamfer_sides_impl(
         if let Err(e) = pass_or_refuse(k, b, p)? {
             return Ok(Err(e));
         }
-        done(k, b, expect)
+        done(b, solid)
     })?
 }
 
@@ -2583,7 +2657,7 @@ fn law_pinches(degree: usize, knots: &[f64], radii: &[f64]) -> bool {
 
 /// The edge of `body` at native edge-list index `edge` rounded with the radius law of `degree`, `knots`
 /// and control radii `radii` (a clamped B-spline from 0 to 1), running from the edge's end at
-/// its vertex of native vertex-list index `start`. A solid gives a solid. A law with a corner gives the
+/// its vertex of native vertex-list index `start`. A closed manifold body gives one. A law with a corner gives the
 /// union of its balls, the round's faces split there (the kernel's law corners).
 ///
 /// # Errors
@@ -2592,7 +2666,8 @@ fn law_pinches(degree: usize, knots: &[f64], radii: &[f64]) -> bool {
 /// `start` that is not a vertex of the edge; [`Error::Unsupported`] for a law whose radius is
 /// zero inside the edge; [`Error::RoomRunsOut`] on a straight edge between planes for a law larger
 /// than its band's room at a station (the kernel's `law_fits_band`); [`Error::NoRoom`] for a
-/// law whose balls fold over one another; the refusals of [`blend`]; those of [`finish`].
+/// law whose balls fold over one another; the refusals of [`blend`]; those of the module's
+/// result contract.
 pub fn fillet_variable(
     body: &Body,
     edge: usize,
@@ -2606,6 +2681,7 @@ pub fn fillet_variable(
         None,
         edge,
         VariableStart::Vertex(start),
+        BandCheck::First,
         degree,
         knots,
         radii,
@@ -2637,6 +2713,7 @@ pub fn fillet_variable_ordered(
         Some(order),
         edge,
         VariableStart::Point(start),
+        BandCheck::First,
         degree,
         knots,
         radii,
@@ -2645,11 +2722,15 @@ pub fn fillet_variable_ordered(
 
 /// [`fillet_variable`] with the law running from the end of the edge's curve nearest `start`,
 /// as [`fillet_variable_ordered`] measures it (a tie starts at the interval's first end);
-/// `edge` indexes the body's native edge list.
+/// `edge` indexes the body's native edge list. It does not first refuse a law larger than its
+/// band's room ([`Error::RoomRunsOut`]): a round wider than a face is built over that face's
+/// far edge where the kernel builds it across the cliff there, and refused by the kernel's own
+/// tests where it does not.
 ///
 /// # Errors
-/// Those of [`fillet_variable`]; [`Error::Argument`] for a start point that is not finite or
-/// an edge without a curve; the kernel's refusal of endpoint evaluation or distance.
+/// Those of [`fillet_variable`] but [`Error::RoomRunsOut`]; [`Error::Argument`] for a start
+/// point that is not finite or an edge without a curve; the kernel's refusal of endpoint
+/// evaluation or distance.
 pub fn fillet_variable_from(
     body: &Body,
     edge: usize,
@@ -2663,10 +2744,19 @@ pub fn fillet_variable_from(
         None,
         edge,
         VariableStart::Point(start),
+        BandCheck::Never,
         degree,
         knots,
         radii,
     )
+}
+
+/// Whether a variable round's law is checked against its band's room (the kernel's
+/// `law_fits_band`) before it is built.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum BandCheck {
+    First,
+    Never,
 }
 
 #[derive(Clone, Copy)]
@@ -2680,6 +2770,7 @@ fn fillet_variable_impl(
     order: Option<&crate::Order>,
     edge: usize,
     start: VariableStart,
+    room: BandCheck,
     degree: usize,
     knots: &[f64],
     radii: &[f64],
@@ -2733,14 +2824,16 @@ fn fillet_variable_impl(
         let stations: Vec<f64> = (0..=LAW_STATIONS)
             .map(|i| i as f64 / LAW_STATIONS as f64)
             .collect();
-        match law_fits_band(k, b, e, &stations, &law) {
-            Ok(()) => {}
-            Err(e @ SolidError::RoundRefused { .. }) => {
-                return Ok(Err(room::refusal(b, e, reversed)))
+        if room == BandCheck::First {
+            match law_fits_band(k, b, e, &stations, &law) {
+                Ok(()) => {}
+                Err(e @ SolidError::RoundRefused { .. }) => {
+                    return Ok(Err(room::refusal(b, e, reversed)))
+                }
+                Err(e) => return Err(e),
             }
-            Err(e) => return Err(e),
         }
-        let expect = Expect::of(k, b)?;
+        let solid = is_manifold_solid(b)?;
         let (r0, r1) = (
             radii.first().copied().unwrap_or(0.0),
             radii.last().copied().unwrap_or(0.0),
@@ -2761,7 +2854,7 @@ fn fillet_variable_impl(
         if let Err(e) = pass_or_refuse(k, b, p)? {
             return Ok(Err(e));
         }
-        done(k, b, expect)
+        done(b, solid)
     })?
 }
 
