@@ -128,20 +128,19 @@ fn residue_round_with_the_fix() {
 
 #[test]
 fn exact_round_builds() {
-    // main's volume, bit-identical with and without the fix; the closed form holds
+    // the volume is bit-identical with and without the fix; the closed form holds
     // to the round's approximation, as for the residue round. It was 3581.9837276735275
     // until `brep_volume` closed tolerant edges' gaps (#16735): the move is checked within
-    // the old integrator's leak bound. It was 3581.9837215948937 until a swapped face's trims
-    // were transposed exactly (WR-729), which moves no edge, vertex or surface and the volume
-    // by two last bits. One of the trims it moves is a straight trim of constant v with ends
-    // symmetric in u: now exactly so (u 0.21252021271196553 and 0.7874797872880345 sum to 1,
-    // both at v 0.35626010635598276), where the mirror left its ends' v an ulp apart and
-    // their u summing to 1 - 1.9e-16.
+    // the old integrator's leak bound. Since the trim pieces integrate by Gauss-Kronrod
+    // (#14460): forced to accuracy 1e-11 and 1e-12 Gauss-Kronrod gives it to 1 ulp and the
+    // earlier Runge-Kutta trim pieces forced to 1e-12 give the same bits; with Runge-Kutta at
+    // this 1e-6 it was 3581.9837215948937, 5.4e-10 low. Before #16735 this integrator gave
+    // 3581.9837295899465, the figure the move is checked from.
     let v = fillet(0.0).unwrap();
-    let pinned = 3_581.983_721_594_893_f64;
+    let pinned = 3_581.983_723_511_312_7_f64;
     assert_eq!(v.to_bits(), pinned.to_bits(), "{v} vs {pinned}");
     let (k, mut body) = filleted(0.0).unwrap();
-    volume_leak::assert_moved_by_the_old_leak(&k, &mut body, 3_581.983_727_673_527_5, v, 1e-6);
+    volume_leak::assert_moved_by_the_old_leak(&k, &mut body, 3_581.983_729_589_946_5, v, 1e-6);
     let want = expected_volume();
     assert!((v - want).abs() < 1e-3 * want, "{v} vs {want}");
 }

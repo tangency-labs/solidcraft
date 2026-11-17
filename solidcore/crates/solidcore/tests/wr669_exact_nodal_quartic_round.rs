@@ -76,14 +76,8 @@ fn off_b(x: Point3) -> f64 {
 
 /// The two pipes united and their concave edge rounded; the round faces.
 fn pipes(exact: bool) -> (Kernel, Brep, Result<()>, Vec<FaceId>) {
-    pipes_kept(exact, false)
-}
-
-/// [`pipes`] with `definition` (`fillet_round_as_definition`, #2485) set.
-fn pipes_kept(exact: bool, definition: bool) -> (Kernel, Brep, Result<()>, Vec<FaceId>) {
     let mut k = Kernel::default();
     k.fixes.fillet_exact_round_classes = exact;
-    k.fixes.fillet_round_as_definition = definition;
     let a = create_cylinder(&mut k, Point3::new(0.0, 0.0, -10.0), R, 20.0).unwrap();
     let mut small = create_cylinder(&mut k, Point3::new(0.0, 0.0, 0.0), RHO, 10.0 - X0).unwrap();
     // z to x: the small pipe from (X0, R - RHO, 0) along +x
@@ -350,28 +344,16 @@ fn surface_bits(k: &Kernel, s: &Surface) -> Vec<[u64; 3]> {
     pts
 }
 
-/// The points of every face of `b` as bits.
-fn body_bits(k: &Kernel, b: &Brep) -> Vec<Vec<[u64; 3]>> {
-    b.faces()
-        .ids()
-        .filter_map(|f| face::surface(b, f).unwrap())
-        .map(|s| surface_bits(k, s))
-        .collect()
-}
-
 /// The nodal definition survives record and parameter edits, while altered geometry refuses.
 #[test]
 fn the_nodal_quartic_round_keeps_its_exact_definition() {
     // Both the offset identities and the canal-surface identity must certify at 0,
     // including after its supports, leader and net pass through a JSON record.
-    let (k, b, res, _) = pipes_kept(true, true);
+    let (k, b, res, _) = pipes(true);
     res.unwrap();
     let exact = exact_round_checks(&k, &b);
     assert_eq!(exact.len(), 1, "the nodal quartic keeps its definition");
     assert_eq!(exact[0].0, ExactClass::NodalQuartic);
-    let (k0, b0, r0, _) = pipes_kept(true, false);
-    r0.unwrap();
-    assert_eq!(body_bits(&k, &b), body_bits(&k0, &b0));
 
     let s = b
         .faces()

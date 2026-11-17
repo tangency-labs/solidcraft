@@ -2721,7 +2721,7 @@
   "render.cpu_body_choose": "Pilih bodi",
   "render.cpu_body_filter": "Filter bodi menurut nama",
   "render.cpu_body_filter_more": "Perhalus filter untuk melihat lebih banyak bodi.",
-  "render.cpu_body_missing": "Target pantulan hilang, tersembunyi, ambigu, atau namanya lebih panjang dari 128 byte. Pilih lagi.",
+  "render.cpu_body_missing": "Target pantulan hilang, tersembunyi, ambigu, atau namanya lebih panjang dari 512 byte. Pilih lagi.",
   "render.cpu_budget": "Profil sumber daya CPU",
   "render.cpu_budget_bodies": "Batas bodi",
   "render.cpu_budget_compact": "Ringkas (batas lama)",

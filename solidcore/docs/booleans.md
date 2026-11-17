@@ -449,6 +449,20 @@ What the port does today:
   second tool whole, as a void.
   Parallel cones (drill points) are met by the marching intersection and are not decided this
   way, nor are coplanar faces bounded by such circles.
+- **A curve ending tangent to an edge.** A curve that touches an edge in contact of high order
+  (where a wall's intersection with a top tangent to the floor ends on the floor's arc, apart from
+  it as the fourth power of the distance) stays within the scaled zero of the edge for a while
+  beside the touch, and the curve/curve intersection can report a range there with both ends
+  exact. Upstream keeps such a range as a coincidence and the curve is cut at its far end, which
+  is no event. `drop_ranges_of_tangencies` (`curve/curve/p8.rs`) drops a range whose gap grows
+  faster than linearly from a touching point beyond one of its ends (a point solution, or where
+  the two curves' interval ends meet) at which the curves are tangent, when the range stops short
+  of the touch and its far end, exact, lies off the ends of both curves: the touch is the
+  intersection. A coincidence through the touch reaches it, and one that ends where a curve ends
+  is not a flank; along a coincidence the gap is rounding and shows no growth either way. The
+  range is dropped before point contacts move to the curve ends (`move_contacts_to_curve_ends`),
+  which leaves a point whose stretch to the end crosses a range where it is: the flank's points
+  on the far side of the range then move to the touch.
 - **A line a hair inside a circle.** A line in a circle's plane, δ inside the circle, crosses
   it at two points `2√(2rδ)` apart and stays within δ of it between them, as two circles do.
   `line_coplanar_circle_intersect_distinct` (`geom/geom_utility/p1.rs`) takes an overlap below
@@ -488,9 +502,6 @@ only on a B-spline piece, since it is read point for point on its net. The test
 `a_boolean_cuts_a_reopened_round_on_its_definition` (`solidcore/tests/wr698_gn_round_is_its_definition.rs`)
 cuts a cylinder through a round, once as built and once rebuilt from its record, and checks the same
 volume, the same edges on the round, and every such edge on S within its own tolerance.
-
-The blend definitions themselves are opt-in (`fillet_round_as_definition`); without it a round is a
-bare net and there is no definition to keep.
 
 **Where exact edges still get fitted trims.**
 - A curve from a closed form (a line, circle or ellipse, [ssi.md](ssi.md) §5) has no UV curves; its

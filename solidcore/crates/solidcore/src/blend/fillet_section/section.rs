@@ -506,7 +506,11 @@ pub(crate) fn certificate_faces<'a>(
     let mut nurbs = Vec::new();
     // a face that is a blend by its definition: its definition enclosed over the
     // certificate's boxes (definition_partials_over_box), on the faces under it and its
-    // leader, whatever its net (c5b6bb7, WR-714, #2570)
+    // leader, whatever its net (c5b6bb7, WR-714, #2570). A face that keeps an exact round's
+    // definition (`Surface::set_exact_round`, #2485) is not one of these: its kind is its
+    // net's, and that net is S at bound 0, re-certified as lying on the class's surface
+    // derived from its supports (`ExactRound::recertify`), so enclosing its NURBS form
+    // encloses its definition
     let mut defs = GnDefs::default();
     for (f, face) in faces.into_iter().enumerate() {
         let Some(bs) = super::station::as_b_spline(k, face)? else {
@@ -1408,8 +1412,6 @@ impl GnSectionFsg {
             ));
         }
         let [rail1, rail2] = rails;
-        // (the fork's 4a10ed8, opt-in: the surface is the blend by its definition)
-        let definition = k.fixes.fillet_round_as_definition;
         let (c_min, c_max) = interval(center);
         // the stations: the unique knots of the rails and the centre line; with a law, the
         // solver's own stations' t (their feet the seeds) and the leader's and the law's
@@ -1841,12 +1843,10 @@ impl GnSectionFsg {
                 weights: None,
                 trim: None,
             };
-            if definition {
-                // (apUV[f]->Copy, then SetCanonical on the copy)
-                let mut seed = uv.clone();
-                seed.set_canonical(&uv_data)?;
-                seeds.push(seed);
-            }
+            // (apUV[f]->Copy, then SetCanonical on the copy)
+            let mut seed = uv.clone();
+            seed.set_canonical(&uv_data)?;
+            seeds.push(seed);
             if replace_rails {
                 let rail_cps: Vec<Point3> = (0..lnu).map(|i| jet(f, 0, i)).collect();
                 rail.set_canonical(&CanonicalData {
@@ -1893,10 +1893,6 @@ impl GnSectionFsg {
             })?;
             new_center = Some(c);
         }
-        if !definition {
-            return Ok(Some((Surface::from(surface), new_center)));
-        }
-
         // the blend by its definition on this net (4a10ed8): the faces, the ball's offsets
         // and sides, the section, the centre line as the leader the stations were solved
         // in, the seeds, the certified bound
@@ -2883,8 +2879,7 @@ mod tests {
             }
         }
         let cylinder = surface(2, 1, &cps, Some(&ws));
-        let mut k = Kernel::default();
-        k.fixes.fillet_round_as_definition = true;
+        let k = Kernel::default();
         let id = [1.0, 0.0];
         let mut center = quarter(3, rc * c, 2.0 * c, id, id);
         let inner: Vec<f64> = (1..knots).map(|i| i as f64 / knots as f64).collect();
