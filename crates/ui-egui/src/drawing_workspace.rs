@@ -21,6 +21,7 @@ pub struct State {
     previous_tab: Option<String>,
     sheets_override: Option<((u64, u64), bool)>,
     pub settings_open: bool,
+    sheet_notice: Option<panels::SheetNotice>,
     options: Option<Tool>,
     add_sheet: Option<panels::AddSheet>,
     first_sheet: Option<first_sheet::BlankSheet>,
@@ -252,7 +253,7 @@ fn sheet_settings_actions(app: &mut SolveApp, ui: &mut egui::Ui) {
             });
         });
     }
-    if ui_kit::button(ui, app.tr("ui.drawing_sheets.add"), ui_kit::Button::Normal).clicked() {
+    if !sheets_visible(app) && ui_kit::button(ui, app.tr("ui.drawing_sheets.add"), ui_kit::Button::Normal).clicked() {
         open_add_sheet(app);
     }
 }
@@ -681,11 +682,8 @@ fn panel_fields(app: &mut SolveApp, ui: &mut egui::Ui) {
         if panels::footer(ui, tool) {
             close_panel(app);
         }
-    } else {
-        sheet_settings_actions(app, ui);
-        if app.drawing_workspace.settings_open {
-            panels::sheet_settings(app, ui);
-        }
+    } else if app.drawing_workspace.settings_open {
+        panels::sheet_settings(app, ui);
     }
 }
 
@@ -693,6 +691,25 @@ fn panel_fields(app: &mut SolveApp, ui: &mut egui::Ui) {
 mod tests {
     use super::*;
     use crate::scenario::Harness;
+
+    #[test]
+    fn a_smaller_sheet_warns_about_views_without_moving_them() {
+        let mut h = Harness::new();
+        h.app.home.open = false;
+        h.app.run("solid.box", serde_json::json!({"length":40,"width":20,"height":3})).unwrap();
+        enter(&mut h.app, true).unwrap();
+        h.app.run("drawing.create", serde_json::json!({})).unwrap();
+        let view = h.app.run("drawing.view.base", serde_json::json!({"sheet":"Sheet 1","scale":"1:1","position_mm":[310,180]})).unwrap();
+        assert!(start(&mut h.app, "drawing.sheet.set"));
+        h.frames(4);
+        h.step(&serde_json::json!({"click":{"handle":"drawing:settings:paper"}})).unwrap();
+        h.frames(3);
+        h.step(&serde_json::json!({"click":{"handle":"drawing:settings:paper:A4"}})).unwrap();
+        h.frames(4);
+        assert!(h.widget("Views outside the drawing area (1)").is_some());
+        let inspected = h.app.run("drawing.view.inspect", serde_json::json!({"view":view["view"]})).unwrap();
+        assert_eq!(inspected["place"], serde_json::json!({"at":[310.0,180.0]}));
+    }
 
     #[test]
     fn blank_sheet_starts_a_drawing_from_the_workspace() {
