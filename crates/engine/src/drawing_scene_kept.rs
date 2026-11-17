@@ -11,7 +11,6 @@ use std::sync::Arc;
 
 use solidcraft_doc::drawing::Drawing;
 use solidcraft_doc::drawing::view::ResolvedView;
-use solidcraft_geom::drawing_view::ViewFrame;
 use solidcraft_io::{SheetView, ShownBody};
 
 use super::{
@@ -106,7 +105,7 @@ impl KeptLines {
 pub(super) fn from_file(d: &Drawing, bytes: &[u8]) -> Kept {
     let kept = |saved: SheetView| -> Option<(u64, KeptView)> {
         let view = d.resolve_view(saved.view).ok().filter(|view| view.flat.is_none() && digest(view) == saved.resolved)?;
-        let frame = ViewFrame::new(view.basis, view.scale.value, saved.model_centre, Vec2::ZERO).ok()?;
+        let frame = crate::drawing_view::frame_at(view.basis, view.scale.value, saved.model_centre, Vec2::ZERO, super::CMD).ok()?;
         let shows = saved.shows.into_iter().map(|b| (b.path, b.body, b.reference, b.geometry, b.threads)).collect();
         let drawn = Drawn {
             group: Some(saved.group),

@@ -1082,6 +1082,34 @@ fn a_drawing_opened_from_its_file_draws_what_changed_since() {
     assert_eq!(s.drawing_scenes.projections, 2);
 }
 
+/// A view of a position, or of a position and an exploded view, keeps its lines in the design's file
+/// as a view of the design's placement does: each is current by what it draws ([`shows_now`]), so
+/// the drawing opened from the file draws no view.
+#[test]
+fn a_drawing_opened_from_its_file_draws_no_posed_or_exploded_view() {
+    let folder = crate::tests::Folder::new("sheet-lines-posed");
+    let (mut s, _, _) = hinge_pair();
+    let drawing = json!({"drawing": ids::encode(s.open_drawing.unwrap())});
+    run(&mut s, "drawing.close", json!({}));
+    add_a_pin(&mut s);
+    let leaf = s.doc.occurrences.iter().find(|o| o.name.starts_with("Leaf")).map(|o| o.id).unwrap();
+    run(&mut s, "explode.create", json!({"name": "Apart", "moves": [{"occurrence": leaf, "translate": [0, 30, 0]}]}));
+    run(&mut s, "drawing.open", drawing.clone());
+    let sheet = s.drawing("test").unwrap().sheets[0].id;
+    for (at, exploded) in [([60.0, 250.0], "assembled"), ([250.0, 250.0], "Apart")] {
+        let p = json!({"sheet": ids::encode(sheet), "view": "top", "scale": "1:1", "position_mm": at, "exploded": exploded,
+                       "pose": [{"joint": "Hinge", "values": [90]}]});
+        run(&mut s, "drawing.view.base", p);
+    }
+    let before = settled(&mut s, sheet);
+    run(&mut s, "file.save", json!({"path": folder.path("hinge.sc")}));
+    let mut opened = Session::default();
+    run(&mut opened, "doc.open", json!({"path": folder.path("hinge.sc")}));
+    run(&mut opened, "drawing.open", drawing);
+    let after = settled(&mut opened, sheet);
+    assert_eq!((bytes(&after.scene), opened.drawing_scenes.projections), (bytes(&before.scene), 0));
+}
+
 /// A drawing not opened since its design was keeps its file's lines through a save: the copy saved
 /// opens with them, drawing nothing. The save runs on a copy of the session, as the window's does.
 #[test]

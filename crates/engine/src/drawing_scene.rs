@@ -2962,44 +2962,32 @@ fn set_waiting_dimensions(s: &mut Session, d: &Drawing, on: &[(u64, ResolvedView
 /// Each view of `on` drawn from another world state that showed what `state` shows takes `state`:
 /// drawn as it draws now, it is then up to date ([`Cache::fresh`]) and draws nothing. What a view
 /// shows is what it draws: the design as it places its parts, whose shown set is worked out once and
-/// kept for [`step`] to draw from, or its exploded view's (#13048), one for each exploded view behind.
-/// Each is worked out only when a view drawing it is behind. A view of another configuration is left
-/// behind: its copy evaluates the design, which only its job does ([`Job::run`]).
+/// kept for [`step`] to draw from, or its exploded view's (#13048), one for each exploded view behind
+/// ([`shows_now`]). Each is worked out only when a view drawing it is behind. A view of another
+/// configuration is left behind: its copy evaluates the design, which only its job does ([`Job::run`]).
 fn keep_what_shows_the_same(s: &mut Session, on: impl Iterator<Item = u64> + Clone, state: &Arc<ModelState>) {
+    // What each state of the design shows, by its key: the design's own kept for `state` once worked out.
+    let mut shown = BTreeMap::new();
+    if let Some((_, set)) = s.drawing_scenes.shown.take_if(|(was, _)| Arc::ptr_eq(was, state)) {
+        shown.insert(Choice::default(), set);
+    }
     // Each with what it says now: a joint deleted may leave its picture as it was. A view whose row
     // fails to build features is of another configuration, which is left behind.
     let says = |view: &ResolvedView| crate::drawing_view::state_reason(s, view, &[]);
-    // Each by the key of the session it draws from, so a view of the active row is the design's.
-    let behind: Vec<(u64, Choice, Option<String>)> = {
-        let sessions = ViewSessions::new(s);
-        on.filter_map(|id| {
+    let mut sessions = ViewSessions::new(s);
+    let behind: Vec<(u64, Option<Arc<SourceKey>>, Option<String>)> = on
+        .filter_map(|id| {
             let entry = s.drawing_scenes.views.get(&id).filter(|e| e.shows.is_some() && !Arc::ptr_eq(&e.state, state))?;
-            Some((id, sessions.choice(&entry.view), says(&entry.view)))
+            Some((id, shows_now(&mut sessions, &mut shown, &entry.view), says(&entry.view)))
         })
-        .collect()
-    };
-    let mut now: BTreeMap<Choice, Option<Arc<SourceKey>>> = BTreeMap::new();
-    if behind.iter().any(|(_, choice, _)| choice.is_placed()) {
-        let shown = match s.drawing_scenes.shown.take() {
-            Some((was, shown)) if Arc::ptr_eq(&was, state) => shown,
-            _ => crate::drawing_view::shown(s),
-        };
-        now.insert(Choice::default(), SourceKey::of(&shown));
-        s.drawing_scenes.shown = Some((state.clone(), shown));
-    }
-    {
-        let mut sessions = ViewSessions::new(s);
-        for (_, choice, _) in &behind {
-            if !now.contains_key(choice) && !choice.evaluates() {
-                let shown = sessions.drawing(choice).and_then(|(from, _)| crate::drawing_view::shown(from));
-                now.insert(choice.clone(), SourceKey::of(&shown));
-            }
-        }
+        .collect();
+    if let Some(set) = shown.remove(&Choice::default()) {
+        s.drawing_scenes.shown = Some((state.clone(), set));
     }
     let cache = &mut s.drawing_scenes;
-    for (id, choice, why) in behind {
-        let Some(Some(now)) = now.get(&choice) else { continue };
-        if let Some(entry) = cache.views.get_mut(&id).filter(|e| e.shows_the_same(state, now)) {
+    for (id, now, why) in behind {
+        let Some(now) = now else { continue };
+        if let Some(entry) = cache.views.get_mut(&id).filter(|e| e.shows_the_same(state, &now)) {
             entry.state = state.clone();
             // A new reason is a new drawing of the view, so the sheet is assembled again.
             if entry.drawn.why != why {
@@ -3262,6 +3250,24 @@ fn sheet_pictures(s: &mut Session, d: &Drawing, on: &[(u64, ResolvedView, Vec2)]
     (pictures.into(), waiting)
 }
 
+/// What view `view` shows now: what the session it draws from shows ([`ViewSessions::choice`]), the
+/// design as it places its parts or its copy in an exploded view, a position or a study step, each
+/// worked out once in `shown`. None for a view of another configuration: its copy evaluates the
+/// design, which only its view's job does ([`Choice::evaluates`]). The one rule a view's lines are
+/// current by, kept by the provider ([`keep_what_shows_the_same`]) and in the design's file
+/// ([`sheet_lines`]).
+fn shows_now(
+    sessions: &mut ViewSessions,
+    shown: &mut BTreeMap<Choice, std::result::Result<ShownSet, Unmeasured>>,
+    view: &ResolvedView,
+) -> Option<Arc<SourceKey>> {
+    let choice = sessions.choice(view);
+    if choice.evaluates() {
+        return None;
+    }
+    SourceKey::of(shown.entry(choice).or_insert_with_key(|choice| sessions.drawing(choice).and_then(|(from, _)| crate::drawing_view::shown(from))))
+}
+
 /// Each drawing's lines for the design's file to keep ([`solidcraft_io::SheetLines`]): the views of
 /// the drawing open and of those closed that are current ([`kept::saved`]), and, for a drawing not
 /// opened since the design was, the lines its file kept, as they came. Nothing is drawn: a view not
@@ -3271,8 +3277,10 @@ pub(crate) fn sheet_lines(s: &Session) -> Arc<Vec<(u64, SheetLines)>> {
     if let Some(saving) = &cache.saving {
         return saving.clone();
     }
-    // What the model shows, worked out once, and only for a drawing with lines to check.
-    let mut now: Option<Option<Arc<SourceKey>>> = None;
+    // What each state of the design a view draws shows now ([`shows_now`]), worked out once each, and
+    // only for a drawing with lines to check.
+    let mut sessions = ViewSessions::new(s);
+    let mut shown = BTreeMap::new();
     let mut lines = Vec::new();
     for d in &s.doc.drawings {
         let views: Vec<(u64, &ResolvedView, &Drawn, Option<&SourceKey>)> = if cache.drawing == Some(d.id) {
@@ -3285,8 +3293,10 @@ pub(crate) fn sheet_lines(s: &Session) -> Arc<Vec<(u64, SheetLines)>> {
             }
             continue;
         };
-        let Some(now) = now.get_or_insert_with(|| SourceKey::of(&crate::drawing_view::shown(s))).as_deref() else { continue };
-        let saved = views.into_iter().filter_map(|(id, view, drawn, shows)| kept::saved(d, id, view, drawn, shows, now));
+        let saved = views.into_iter().filter_map(|(id, view, drawn, shows)| {
+            let now = shows_now(&mut sessions, &mut shown, view)?;
+            kept::saved(d, id, view, drawn, shows, &now)
+        });
         lines.push((d.id, SheetLines::Views(saved.collect())));
     }
     Arc::new(lines)

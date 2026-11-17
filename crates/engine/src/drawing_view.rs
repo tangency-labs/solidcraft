@@ -695,9 +695,16 @@ pub fn shows(shown: &ShownSet, basis: &Plane, extents: &Extents, percent: f64) -
 
 /// The view through `basis` at `scale` on paper, with the middle of the model's box (model mm on its
 /// plane) at `centre`, however far reference parts grow what it shows, so it stays lined up with its
-/// projected views: the one rule the snapshot and saved views are placed by.
+/// projected views ([`frame_at`]).
 pub fn frame(basis: Plane, scale: Scale, model: &Aabb2, centre: Vec2, cmd: &str) -> Result<ViewFrame> {
-    ViewFrame::new(basis, scale, model.center(), centre).map_err(|e| bad(cmd, e.to_string()))
+    frame_at(basis, scale, model.center(), centre, cmd)
+}
+
+/// The view through `basis` at `scale` on paper, with `model_centre` (model mm on its plane, the
+/// middle of the model's box) at `centre`: the one rule the snapshot and saved views are placed by,
+/// and lines kept in the design's file are placed again by.
+pub fn frame_at(basis: Plane, scale: Scale, model_centre: Vec2, centre: Vec2, cmd: &str) -> Result<ViewFrame> {
+    ViewFrame::new(basis, scale, model_centre, centre).map_err(|e| bad(cmd, e.to_string()))
 }
 
 /// Saved view `id` of `drawing`, one of `s`'s design's drawings, on its sheet: the extents of what it
