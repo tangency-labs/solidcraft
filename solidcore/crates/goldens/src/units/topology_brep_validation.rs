@@ -203,6 +203,26 @@ const CONVENTIONS: crate::own_builder::Conventions<'static> = crate::own_builder
 /// ([`crate::own_reader::brep_in_order`]): native lists, face uses and geometry owners
 /// under [`CONVENTIONS`], `Notify` naming as [`imported`] sets it. A failed build is the
 /// shim's failed construction; a failed read is a Rust divergence, reported as an error.
+/// The replayed model of a case: the Rust B-rep as validation receives it, mutations
+/// applied (#18325's certificates, `tests/issue_18325_moved_rows.rs`); `None` when it does
+/// not build.
+///
+/// # Errors
+///
+/// A [`HarnessError`] for inputs that do not parse, are outside the contract, or a source
+/// the harness cannot read.
+pub fn scene(case: &Case) -> Result<Option<Brep>, HarnessError> {
+    let i: Inputs = case.parse()?;
+    if !in_contract(&i) {
+        return Err(herr("invalid argument: invalid B-rep validation arguments"));
+    }
+    let Ok(mut b) = own_brep(&i)? else {
+        return Ok(None);
+    };
+    mutate(&mut b, &i)?;
+    Ok(Some(b))
+}
+
 fn own_brep(i: &Inputs) -> Result<Result<Brep, Output>, HarnessError> {
     use crate::own_builder::{finish, in_new_brep, Built};
     let mut k = Kernel::default();

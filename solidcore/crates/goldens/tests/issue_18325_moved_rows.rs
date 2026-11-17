@@ -6,8 +6,9 @@
 //! ends exactly `(f, t0)` and `(f, t1)`, when the curve is that iso line, decided before the
 //! station loop so the drop quality is measured on that exact line; and it seeds the
 //! edge/face gap of a `CrvOnSurf` on the other surface itself at its own uv, the exact
-//! foot (`heal/gap.rs` `own_foot`). Together they move 2462 elements of 333 rows:
-//! `topology.edgeuse_p2` (47), `topology.edgeuse_p3` (2343) and `topology.face_p3` (72).
+//! foot (`heal/gap.rs` `own_foot`). Together they move 2462 elements of 333 rows of
+//! `topology.edgeuse_p2` (47), `topology.edgeuse_p3` (2343) and `topology.face_p3` (72),
+//! and the 82 elements of 6 rows of three other units below.
 //! `data/issue_18325_moved_rows.tsv` lists them (`E unit case key i main new class`, main's
 //! and the new golden's values and the pinned class), main's whole vector of every row (`M`,
 //! the bits) and main's old golden line (`O`), with the stations the drop quality maxima are
@@ -80,12 +81,29 @@
 //!
 //! The rows are those of a fresh bless of main and of the fix, diffed bit for bit, in
 //! these three units, including elements that move by less than the goldens' tolerance;
-//! all of them are re-blessed. The same diff moves 42 rows of six other units by at most
-//! `1e-10` relative (`blend.fillet_solver_p2` 5, `boolean.api_brep` 1, `mass.integrator`
-//! 29, `query.face_p2` 2, `topology.brep_validation` 2, `topology.vertexuse` 2), all
-//! within the goldens' tolerance, so their expectations do not change and they are not
-//! certified here. Every one of those moves comes from the exact drop ends: with the gap
-//! seed reverted the fresh bless of all nine units is the same bit for bit.
+//! all of them are re-blessed. The same diff moves 41 rows of six other units by at most
+//! `1e-10` relative, all within the goldens' tolerance. Every one of those moves comes from
+//! the exact drop ends: with the gap seed reverted the fresh bless of all nine units is the
+//! same bit for bit. Six of them (82 elements) are certified here and re-blessed:
+//!
+//! * `topology.vertexuse` (2 rows): the uv point, tangents and sector angle at a vertex use
+//!   of a face whose edges are all domain sides' iso curves (checked on the replayed model,
+//!   each vertex on sides of both coordinates): the corner main's point is nearest, the
+//!   axis vector main's tangent is nearest, and the exact multiple of 90° between them
+//!   (`label_vertexuse`).
+//! * `topology.brep_validation` (2 rows): the samples of the edge uses' UV trims and of the
+//!   edges' `CrvOnSurf` curves over copies of them, against the exact iso line (side and
+//!   direction those main's samples single out) and the exact surface point on it
+//!   (`label_validation`).
+//! * `query.face_p2` (2 rows): a face-class query uv and a vertex-class gap at a point of
+//!   an edge use's trim, the edge a domain side's iso curve on the replayed model
+//!   (`label_query`).
+//!
+//! The other 35 are not certified and keep main's expectations: `blend.fillet_solver_p2`
+//! (5 rows; the rail/edge-use intersection is a `LocalSolveNd` fixed point, so their class
+//! needs a solver bound), `mass.integrator` (29) and `boolean.api_brep` (1, two areas; both
+//! adaptive nested quadrature, whose reference needs an interval replay of the kernel's
+//! partition).
 //!
 //! Run: `cargo test --profile goldens -p goldens --test issue_18325_moved_rows -- --nocapture`
 //! (prints the table: element classes per unit and kind, the largest `|new − r| / B` of the
@@ -111,9 +129,12 @@ use std::collections::BTreeMap;
 
 use goldens::case::repo_root;
 use goldens::golden::encode;
+use goldens::units::query_face_p2::scene as query_scene;
+use goldens::units::topology_brep_validation::scene as val_scene;
 use goldens::units::topology_edgeuse_p2::scene as scene_p2;
 use goldens::units::topology_edgeuse_p3::scene;
 use goldens::units::topology_face_p3::scene as face_scene;
+use goldens::units::topology_vertexuse::scene as vu_scene;
 use goldens::{registry, CaseContext, Output};
 use serde_json::Value;
 use solidcore::curve::curve::{Curve, CurveKind};
@@ -131,9 +152,12 @@ use solidcore::topology::{vertexuse, Brep, EdgeuseId};
 const DATA: &str = include_str!("data/issue_18325_moved_rows.tsv");
 
 const UNITS: &[&str] = &[
+    "query.face_p2",
+    "topology.brep_validation",
     "topology.edgeuse_p2",
     "topology.edgeuse_p3",
     "topology.face_p3",
+    "topology.vertexuse",
 ];
 
 const BLADE: &str = "own_reader_blade_hub_create_eu36_rebuild";
@@ -2069,6 +2093,21 @@ fn certificates(
         assert_eq!(name, BLADE, "a row without a domain");
         d.blade.as_ref().expect("S line").1
     };
+    match unit {
+        "topology.vertexuse" => {
+            label_vertexuse(case, main, dom, &mut out);
+            return out;
+        }
+        "topology.brep_validation" => {
+            label_validation(case, v, main, dom, &mut out);
+            return out;
+        }
+        "query.face_p2" => {
+            label_query(case, v, main, dom, &mut out);
+            return out;
+        }
+        _ => {}
+    }
     let iso = label_trims(v, main, dom, &mut out);
     if unit == "topology.face_p3" {
         // `uv_trim`'s parameter-space joint gaps: the mean over the joints off the pole, the
@@ -2264,6 +2303,428 @@ fn certificates(
         }
     }
     out
+}
+
+// ---- the rows of the other units that move with the drop ends -------------------------------
+
+/// The iso side `(fixed coordinate, value)` of every edge use of the model's face, by edge
+/// use: each must be a domain side's `create_iso_parametric_curve`, bit for bit.
+fn face_sides(m: &Model, dom: [f64; 4]) -> Vec<(EdgeuseId, usize, f64)> {
+    let k = Kernel::default();
+    let f = eu1::face(&m.brep, m.eu).unwrap().expect("a face");
+    let mut sides = Vec::new();
+    for (eu, _) in m.brep.edgeuses().iter() {
+        if eu1::face(&m.brep, eu).unwrap() != Some(f) {
+            continue;
+        }
+        let (c, side) = m
+            .iso_side(&k, eu, dom)
+            .unwrap_or_else(|| panic!("the edge of {eu:?} is not a domain side's iso curve"));
+        sides.push((eu, c, side));
+    }
+    assert!(!sides.is_empty(), "no edge uses on the face");
+    sides
+}
+
+/// Every vertex of the face is a domain corner in the ideal pipeline: two of its edges are
+/// iso curves of sides of different coordinates (`face_sides`), whose uv lines meet only at
+/// the corner they span.
+fn prove_corner_vertices(m: &Model, dom: [f64; 4]) {
+    let sides = face_sides(m, dom);
+    for (v, _) in m.brep.vertices().iter() {
+        let on: Vec<(usize, f64)> = sides
+            .iter()
+            .filter(|(eu, _, _)| {
+                let e = eu1::edge(&m.brep, *eu).unwrap().expect("an edge");
+                m.brep.edge(e).unwrap().vertices.contains(&v)
+            })
+            .map(|&(_, c, f)| (c, f))
+            .collect();
+        assert!(
+            on.iter().any(|a| on.iter().any(|b| a.0 != b.0)),
+            "vertex {v:?} is not on sides of both coordinates: {on:?}"
+        );
+    }
+}
+
+/// The candidate of `cands` whose prediction `dist` of main's values is nearest: strictly
+/// nearer than `1e-9`, every other candidate farther than `1e-6`.
+fn pick<T: Copy + std::fmt::Debug>(cands: &[T], dist: impl Fn(T) -> f64, what: &str) -> T {
+    let mut d: Vec<(f64, T)> = cands.iter().map(|&c| (dist(c), c)).collect();
+    d.sort_by(|a, b| a.0.total_cmp(&b.0));
+    assert!(
+        d[0].0 < 1e-9 && d.get(1).is_none_or(|x| x.0 > 1e-6),
+        "{what}: main's values do not single out a candidate: {d:?}"
+    );
+    d[0].1
+}
+
+/// `topology.vertexuse` (`state`): the face's edges are iso curves of its domain's sides
+/// (on the replayed model), so each vertex's ideal uv is the corner main's point is nearest,
+/// the trims' ideal unit tangents at it are axis vectors (the cross component `0`, the
+/// moving one `±1`, the sign and axis main's), and the sector angle between two of them
+/// the exact multiple of 90° their quadrants give.
+fn label_vertexuse(
+    case: &goldens::Case,
+    main: &[f64],
+    dom: [f64; 4],
+    out: &mut BTreeMap<usize, Cert>,
+) {
+    let inputs = &case.inputs;
+    let b = vu_scene(case).unwrap().expect("the case builds its B-rep");
+    let eu = b.edgeuses().iter().next().expect("an edge use").0;
+    let m = Model { brep: b, eu };
+    let srf = Srf::from_input(inputs);
+    assert!(
+        srf.is(m.surface()),
+        "the input net is not the face's surface"
+    );
+    prove_corner_vertices(&m, dom);
+    let corners = [
+        [dom[0], dom[1]],
+        [dom[2], dom[1]],
+        [dom[0], dom[3]],
+        [dom[2], dom[3]],
+    ];
+    let corner = |i: usize, out: &mut BTreeMap<usize, Cert>| {
+        let c = pick(
+            &corners,
+            |c| (main[i] - c[0]).abs().max((main[i + 1] - c[1]).abs()),
+            "vertex corner",
+        );
+        for (q, &r) in c.iter().enumerate() {
+            out.insert(
+                i + q,
+                Cert::Exact {
+                    r,
+                    b: None,
+                    what: "vertex uv (domain corner)",
+                },
+            );
+        }
+    };
+    match inputs["op"].as_str().unwrap() {
+        "uv_point" => corner(1, out),
+        "uv_sector" => {
+            corner(6, out);
+            corner(8, out);
+            let axes = [[1.0, 0.0], [0.0, 1.0], [-1.0, 0.0], [0.0, -1.0]];
+            let mut quad = [0usize; 2];
+            for (k, i) in [10usize, 12].into_iter().enumerate() {
+                let q = pick(
+                    &[0usize, 1, 2, 3],
+                    |q| {
+                        (main[i] - axes[q][0])
+                            .abs()
+                            .max((main[i + 1] - axes[q][1]).abs())
+                    },
+                    "uv tangent axis",
+                );
+                quad[k] = q;
+                for (c, &r) in axes[q].iter().enumerate() {
+                    out.insert(
+                        i + c,
+                        Cert::Exact {
+                            r,
+                            b: None,
+                            what: "vertex uv tangent (axis)",
+                        },
+                    );
+                }
+            }
+            // the counter-clockwise angle from the start tangent to the end one
+            let r = 90.0 * ((quad[1] + 4 - quad[0]) % 4) as f64;
+            assert!(
+                (main[14] - r).abs() < 1e-9,
+                "main's sector angle {}",
+                main[14]
+            );
+            out.insert(
+                14,
+                Cert::Exact {
+                    r,
+                    b: None,
+                    what: "sector angle (axis tangents)",
+                },
+            );
+        }
+        _ => {}
+    }
+}
+
+/// A degree-1 trim from `a` to `b` over `[lo, hi]`.
+fn line(a: [f64; 2], b: [f64; 2], lo: f64, hi: f64) -> Crv {
+    Crv {
+        p: 1,
+        knots: vec![lo, lo, hi, hi],
+        cps: vec![[a[0], a[1], 0.0, 1.0], [b[0], b[1], 0.0, 1.0]],
+    }
+}
+
+/// The exact point of `line` at `s`, enclosed.
+fn line_at(l: &Crv, s: f64) -> [Iv; 2] {
+    let (t0, t1) = (l.knots[0], l.knots[3]);
+    let a = Iv::p(s).sub(Iv::p(t0)).div(Iv::p(t1).sub(Iv::p(t0)));
+    std::array::from_fn(|q| {
+        Iv::p(l.cps[0][q]).add(a.mul(Iv::p(l.cps[1][q]).sub(Iv::p(l.cps[0][q]))))
+    })
+}
+
+/// `topology.brep_validation` (`curve_samples`): `[lo, hi]` and 5 samples `[x, y, z]` at
+/// `evaluate(i/4)` per present curve, the edges' curves and then the edge uses' UV trims
+/// (in arena order, on the replayed model). Each edge curve here is a `CrvOnSurf` on the
+/// input surface over a copy of its edge use's trim. The ideal trim is a domain side's
+/// exact iso line over the curve's domain `[lo, hi]` (main's, bit for bit, and the side's
+/// moving extent): the side and direction main's samples single out (`pick`). A trim
+/// sample's references are the line's exact point, at rounding within the line evaluation
+/// bound; a `CrvOnSurf` sample's the exact surface point there, at rounding within the
+/// enclosure of the kernel's evaluation through the float line point (`cos_point`).
+fn label_validation(
+    case: &goldens::Case,
+    v: &[f64],
+    main: &[f64],
+    dom: [f64; 4],
+    out: &mut BTreeMap<usize, Cert>,
+) {
+    let srf = Srf::from_input(&case.inputs);
+    let bounds = srf.bounds();
+    let b = val_scene(case).unwrap().expect("the case builds its B-rep");
+    let curves: Vec<(bool, &Curve)> = b
+        .edges()
+        .iter()
+        .filter_map(|(_, e)| e.curve.as_ref().map(|c| (true, c)))
+        .chain(
+            b.edgeuses()
+                .iter()
+                .filter_map(|(_, eu)| eu.uv_trim_curve.as_ref().map(|c| (false, c))),
+        )
+        .collect();
+    assert_eq!(17 * curves.len(), v.len(), "every curve has 5 samples");
+    // the ideal lines: (fixed coordinate, side, reversed)
+    let mut cands = Vec::new();
+    for c in 0..2 {
+        for side in [dom[c], dom[c + 2]] {
+            for rev in [false, true] {
+                cands.push((c, side, rev));
+            }
+        }
+    }
+    for (k, (edge, curve)) in curves.iter().enumerate() {
+        let at = 17 * k;
+        if (at..at + 17).all(|i| v[i].to_bits() == main[i].to_bits()) {
+            continue;
+        }
+        let (lo, hi) = (main[at], main[at + 1]);
+        assert_eq!(bits(&v[at..at + 2]), bits(&[lo, hi]), "the curve's domain");
+        if *edge {
+            let CurveKind::CrvOnSurf(cs) = curve.kind() else {
+                panic!("a moved edge curve that is not a CrvOnSurf");
+            };
+            assert!(
+                srf.is(bspline_surface(cs.surface())),
+                "the CrvOnSurf's surface is not the input surface"
+            );
+        }
+        let line_of = |(c, side, rev): (usize, f64, bool)| {
+            let mut a = [side; 2];
+            let mut z = [side; 2];
+            a[1 - c] = if rev { hi } else { lo };
+            z[1 - c] = if rev { lo } else { hi };
+            line(a, z, lo, hi)
+        };
+        let ideal = |cand, s: f64| -> V3 {
+            let uv = line_at(&line_of(cand), s);
+            if *edge {
+                srf.exact(uv[0], uv[1]).0
+            } else {
+                [uv[0], uv[1], Iv::p(0.0)]
+            }
+        };
+        let samples: Vec<f64> = (0..5).map(|i| ev(lo, hi, f64::from(i) / 4.0)).collect();
+        let fits = cands
+            .iter()
+            .filter(|&&(c, _, _)| [dom[1 - c], dom[3 - c]] == [lo, hi])
+            .copied()
+            .collect::<Vec<_>>();
+        let cand = pick(
+            &fits,
+            |cand| {
+                samples
+                    .iter()
+                    .enumerate()
+                    .flat_map(|(i, &s)| {
+                        let p = ideal(cand, s);
+                        (0..3).map(move |q| (main[at + 2 + 3 * i + q] - p[q].mid()).abs())
+                    })
+                    .fold(0.0, f64::max)
+            },
+            "the curve's ideal line",
+        );
+        let l = line_of(cand);
+        let (c, side, rev) = cand;
+        let lb = line_bound(&Iso {
+            c,
+            f: side,
+            ivl: (lo, hi),
+        });
+        for (i, &s) in samples.iter().enumerate() {
+            let j = at + 2 + 3 * i;
+            if *edge {
+                let r = ideal(cand, s);
+                let e = cos_point(&srf, &bounds, &l, s);
+                for q in 0..3 {
+                    out.insert(
+                        j + q,
+                        Cert::Enc {
+                            r: r[q],
+                            e: Some(e[q]),
+                            what: "CrvOnSurf sample",
+                        },
+                    );
+                }
+                continue;
+            }
+            out.insert(
+                j + c,
+                Cert::Exact {
+                    r: side,
+                    b: Some(lb),
+                    what: "uv trim sample fixed",
+                },
+            );
+            out.insert(
+                j + 2,
+                Cert::Exact {
+                    r: 0.0,
+                    b: None,
+                    what: "uv trim sample z",
+                },
+            );
+            if rev {
+                let r = line_at(&l, s)[1 - c];
+                out.insert(
+                    j + 1 - c,
+                    Cert::Enc {
+                        r,
+                        e: Some(r.widen(lb)),
+                        what: "uv trim sample param",
+                    },
+                );
+            } else {
+                out.insert(
+                    j + 1 - c,
+                    Cert::Exact {
+                        r: s,
+                        b: Some(lb),
+                        what: "uv trim sample param",
+                    },
+                );
+            }
+        }
+    }
+}
+
+/// `query.face_p2` point classifications at a point of an edge use's trim (`at.mode`
+/// `trim`; `pc` = `[class, kind, index, gap, tol, pre_snap, t, u, v, set]`). The edge use's
+/// edge curve is a domain side's iso curve on the replayed model, so its ideal trim is the
+/// exact line `(f, t)` over the edge's interval, `t = t0 + a (t1 − t0)` as the harness
+/// computes it over the trim's interval (the new trim's interval is the edge's, bit for
+/// bit, so the replay's `t` is the ideal one).
+///
+/// * Face class (`102`): the query uv is `(f, t) + (du, dv)` exactly; the kernel's is the
+///   float line point (within the line bound) plus the offset, rounded once.
+/// * Vertex class (`104`, `d = 0`): the gap is `|V − S(f, t)|` to the class's vertex `V`
+///   (main's and the new vertex the same); the kernel's is the float distance from `V` to
+///   the float surface point at the float line point (`cos_point`), within `γ_6`.
+fn label_query(
+    case: &goldens::Case,
+    v: &[f64],
+    main: &[f64],
+    dom: [f64; 4],
+    out: &mut BTreeMap<usize, Cert>,
+) {
+    let inputs = &case.inputs;
+    let Some((b, _, eu)) = query_scene(case).unwrap() else {
+        return;
+    };
+    let m = Model { brep: b, eu };
+    let srf = Srf::from_input(inputs);
+    assert!(
+        srf.is(m.surface()),
+        "the input net is not the face's surface"
+    );
+    let k = Kernel::default();
+    let (c, f) = m
+        .iso_side(&k, eu, dom)
+        .expect("the edge is a domain side's iso curve");
+    let e = eu1::edge(&m.brep, eu).unwrap().expect("an edge");
+    let ivl = m.brep.edge(e).unwrap().interval;
+    let (t0, t1) = (ivl.min(), ivl.max());
+    let (trim, _) = eu1::uv_trim_curve(&m.brep, eu).unwrap();
+    let ti = trim.expect("a uv trim").natural_interval();
+    assert_eq!(
+        bits(&[ti.min(), ti.max()]),
+        bits(&[t0, t1]),
+        "the trim's interval"
+    );
+    let iso = Iso {
+        c,
+        f,
+        ivl: (t0, t1),
+    };
+    let lb = line_bound(&iso);
+    let at = &inputs["at"];
+    assert_eq!(v[0], main[0], "the class");
+    match v[0] {
+        102.0 => {
+            // the fixed coordinate `f`, the moving one the line's `t` itself
+            let t = t0 + num(&at["a"]) * (t1 - t0);
+            for (q, x, what) in [
+                (c, f, "query uv fixed coordinate"),
+                (1 - c, t, "query uv moving coordinate"),
+            ] {
+                let d = num(&at[if q == 0 { "du" } else { "dv" }]);
+                out.insert(
+                    7 + q,
+                    Cert::Enc {
+                        r: Iv::p(x).add(Iv::p(d)),
+                        e: Some(Iv::p(x).widen(lb).add(Iv::p(d)).rel(U)),
+                        what,
+                    },
+                );
+            }
+        }
+        104.0 => {
+            assert_eq!([num(&at["du"]), num(&at["dv"])], [0.0, 0.0], "no offset");
+            assert_eq!(bits(&v[1..3]), bits(&main[1..3]), "the class's vertex");
+            let (_, vx) = m
+                .brep
+                .vertices()
+                .iter()
+                .find(|(id, _)| f64::from(id.index()) == v[2])
+                .expect("the class's vertex");
+            let p = [Iv::p(vx.point.x), Iv::p(vx.point.y), Iv::p(vx.point.z)];
+            let t = t0 + num(&at["a"]) * (t1 - t0);
+            let mut a = [f; 2];
+            let mut z = [f; 2];
+            a[1 - c] = t0;
+            z[1 - c] = t1;
+            let l = line(a, z, t0, t1);
+            let uv = line_at(&l, t);
+            let r = norm(&sub3(&p, &srf.exact(uv[0], uv[1]).0));
+            let q = cos_point(&srf, &srf.bounds(), &l, t);
+            let e = norm(&sub3(&p, &q)).rel(gam(6));
+            out.insert(
+                3,
+                Cert::Enc {
+                    r,
+                    e: Some(e),
+                    what: "vertex class gap",
+                },
+            );
+        }
+        _ => {}
+    }
 }
 
 impl Srf {
