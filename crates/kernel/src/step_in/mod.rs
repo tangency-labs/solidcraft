@@ -511,14 +511,20 @@ impl Reader {
                 _ => {}
             }
         }
-        // An INVISIBILITY record names styled items or representations; a representation hides
-        // every item it lists, including the representations it is linked to.
+        // An INVISIBILITY record names styled items, representations or layers; a representation
+        // hides every item it lists, including the representations it is linked to, and a layer
+        // (PRESENTATION_LAYER_ASSIGNMENT) every item assigned to it.
         let mut invisible = HashSet::new();
         for target in std::mem::take(&mut self.invisible_targets) {
             let mut queue = vec![self.styled_items.get(&target).copied().unwrap_or(target)];
             let mut seen = HashSet::new();
             while let Some(target) = queue.pop() {
                 if !seen.insert(target) {
+                    continue;
+                }
+                if let Some(layer) = self.ex.get(target).filter(|e| e.name() == "PRESENTATION_LAYER_ASSIGNMENT") {
+                    let assigned = layer.params().get(2).and_then(Param::as_list).unwrap_or(&[]);
+                    queue.extend(assigned.iter().filter_map(Param::as_ref_id).map(|i| self.styled_items.get(&i).copied().unwrap_or(i)));
                     continue;
                 }
                 if let Some((items, _)) = self.reps.get(&target) {
