@@ -538,10 +538,9 @@ fn feature_row(
         acts.hovered = true;
     }
     if let Some(at) = r.secondary {
-        // A right-click on a feature outside the selection selects it first, as in both
-        // History layouts, so the menu's Copy and Delete act on the same features. A sketch row
-        // keeps its own menu's rule.
-        if !is_sketch && !app.session.selection.contains(&Sel::Feature { id }) {
+        // A right-click on a feature or sketch outside the selection selects it first, as in
+        // both History layouts, so the menu's Copy and Delete act on the same features.
+        if !app.session.selection.contains(&Sel::Feature { id }) {
             click_select(app, None, Some(Sel::Feature { id }));
         }
         acts.menu = Some((at, if is_sketch { Target::Sketch { id } } else { Target::Feature { id } }));
@@ -887,6 +886,46 @@ mod tests {
         h.frames(2);
         let copied: Vec<&str> = h.app.session.clipboard.iter().map(|f| f.name.as_str()).collect();
         assert_eq!(copied.len(), 2, "Copy takes both: {copied:?}");
+        h.step(&json!({"click": row(ids[1]), "button": "right"})).unwrap();
+        h.frames(2);
+        h.step(&json!({"widget": "Delete 2 Selected Features"})).unwrap();
+        h.settle();
+        let left: Vec<u64> = h.app.session.doc.features.iter().map(|f| f.id).collect();
+        assert_eq!(left, ids[2..], "Delete takes the same two");
+    }
+
+    /// The same for sketch rows, whose menu is the sketch's own: outside the selection a
+    /// right-click selects the sketch alone; inside it Copy and Delete take every selected sketch.
+    #[test]
+    fn browser_sketch_right_click_selects_outside_and_keeps_inside() {
+        let mut h = Harness::new();
+        let ids: Vec<u64> = (0..3)
+            .map(|i| {
+                let id = h.app.run("sketch.create", json!({"plane":"XY","name":format!("S{i}")})).unwrap()["sketch"].as_u64().unwrap();
+                h.app.run("sketch.circle.center", json!({"center":[i * 20, 0],"radius":3})).unwrap();
+                h.app.run("sketch.finish", json!({})).unwrap();
+                id
+            })
+            .collect();
+        // The History in the browser lists each sketch as a row of its own.
+        h.app.run("view.history_layout", json!({"dock":"browser"})).unwrap();
+        h.frames(3);
+        let row = |id: u64| json!({"handle": format!("row:browser-feature:c0:{id}")});
+        h.step(&json!({"click": row(ids[0])})).unwrap();
+        h.step(&json!({"click": row(ids[1]), "ctrl": true})).unwrap();
+        h.step(&json!({"click": row(ids[2]), "button": "right"})).unwrap();
+        h.frames(2);
+        assert_eq!(h.app.session.selection, [Sel::Feature { id: ids[2] }], "outside: the clicked sketch alone");
+        h.step(&json!({"key": "Escape"})).unwrap();
+
+        h.step(&json!({"click": row(ids[0])})).unwrap();
+        h.step(&json!({"click": row(ids[1]), "ctrl": true})).unwrap();
+        h.step(&json!({"click": row(ids[1]), "button": "right"})).unwrap();
+        h.frames(2);
+        assert_eq!(h.app.session.selection, [Sel::Feature { id: ids[0] }, Sel::Feature { id: ids[1] }], "inside keeps it");
+        h.step(&json!({"widget": "Copy"})).unwrap();
+        h.frames(2);
+        assert_eq!(h.app.session.clipboard.len(), 2, "Copy takes both");
         h.step(&json!({"click": row(ids[1]), "button": "right"})).unwrap();
         h.frames(2);
         h.step(&json!({"widget": "Delete 2 Selected Features"})).unwrap();

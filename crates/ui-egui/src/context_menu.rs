@@ -865,7 +865,12 @@ fn sketch_items(app: &SolveApp, id: u64) -> Vec<Item> {
         act("ui.cut", "Cut", "cut").key("Ctrl+X").on(crate::edit_clipboard::can_cut(app)),
         act("ui.copy", "Copy", "copy").key("Ctrl+C").on(crate::edit_clipboard::something_to_copy(app)),
         act("ui.paste", "Paste", "paste").key("Ctrl+V").on(crate::edit_clipboard::can_paste(app)),
-        act("ui.delete", "Delete", "delete").key("Del").with(json!({ "items": [{"type": "feature", "id": id}] })),
+        // The selected sketches when this one is among them, as Cut and Copy take the selection.
+        act("ui.delete", &crate::timeline::delete_label(sketches.len()), "delete").key("Del").with(json!({ "items": sketches
+            .iter()
+            .filter_map(|id| id.parse::<u64>().ok())
+            .map(|id| json!({"type": "feature", "id": id}))
+            .collect::<Vec<_>>() })),
         act("ui.rename", "Rename", "rename").key("F2").with(json!({ "feature": id })),
         crate::browser::sketches_to_parts_item(sketches).on(parts && !editing),
         Item::sep(),
