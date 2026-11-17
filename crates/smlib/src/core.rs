@@ -129,6 +129,7 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.closed_smooth_pole_tangent_limit = true;
     // Held back: see `HELD_BACK`.
     f.fillet_round_ends_on_outline = false;
+    f.fillet_chamfer_corner = true;
     f.brep_ray_classifies_current_trims = true;
     f
 }

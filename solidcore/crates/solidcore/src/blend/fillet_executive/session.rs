@@ -361,6 +361,7 @@ struct SessionObjects<'target> {
     /// `Kernel::blend_face_log` is on (`blend_face_log`).
     blend_face_marks: Vec<AttributeHandle>,
     /// The corner type of chamfers meeting at a vertex (`set_chamfer_corner`; WR-716).
+    /// Read only with `Kernel::fixes.fillet_chamfer_corner`.
     chamfer_corner: crate::blend::blend_corner::BlendChamferCorner,
     band_cut_cache: Option<band_cuts::BandCutCache>,
     /// (not upstream) The edges `prepare_chamfers_along` chamfered as knife edges: equal
@@ -2192,7 +2193,10 @@ impl<'target> FilletSession<'target> {
                 // edge is chamfered are the blend corner's chamfer event, closed by their
                 // planes, of the session's corner type; refused where that type does not
                 // exist there; a corner the event declines stays the pinned 3x3 one
-                if corner.chamfer && corner.kind == FilletCornerKind::ConvexNByN {
+                if k.fixes.fillet_chamfer_corner
+                    && corner.chamfer
+                    && corner.kind == FilletCornerKind::ConvexNByN
+                {
                     use crate::blend::blend_corner::chamfer::{classify_chamfer, ChamferClass};
                     let lookup = SweptSessionSolvers {
                         solvers: solvers.as_slice(),
@@ -2795,11 +2799,12 @@ impl<'target> FilletSession<'target> {
         self.objects.roll_over_ends = ends;
     }
 
-    /// How chamfers meeting at a vertex where every edge is chamfered close the corner
-    /// (WR-716): the Mitre (the default; the chamfer planes run on to meet each other)
-    /// or the Facet (one plane through the rails' crossings). It overrides the corner's
-    /// bevel flag ([`Self::set_corner_bevel`]) at such a corner. Set it before
-    /// [`Self::do_fillet`] (the corners are made there).
+    /// How chamfers meeting at a vertex where every edge is chamfered close the corner,
+    /// with `Kernel::fixes.fillet_chamfer_corner` (WR-716): the Mitre (the default; the
+    /// chamfer planes run on to meet each other) or the Facet (one plane through the
+    /// rails' crossings). It overrides the corner's bevel flag
+    /// ([`Self::set_corner_bevel`]) at such a corner. Set it before [`Self::do_fillet`]
+    /// (the corners are made there). Without the flag it changes nothing.
     pub fn set_chamfer_corner(&mut self, corner: crate::blend::blend_corner::BlendChamferCorner) {
         self.objects.chamfer_corner = corner;
     }

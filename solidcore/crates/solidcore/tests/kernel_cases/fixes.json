@@ -51,5 +51,6 @@
   "keep_exact_pcurves",
   "face_swap_uv_transposes_trims",
   "closed_smooth_pole_tangent_limit",
+  "fillet_chamfer_corner",
   "brep_ray_classifies_current_trims"
 ]
