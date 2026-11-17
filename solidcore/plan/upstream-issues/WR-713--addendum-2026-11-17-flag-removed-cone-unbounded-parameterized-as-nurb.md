@@ -41,12 +41,12 @@ Running with the fix always on exposed further defects in the same constructors.
   - 495 rows are EQUAL: both outputs meet it.
   - No row is FARTHER.
 
-  179 rows change a built cone into a refusal, each for inputs that define no cone, decided in closed form from the input numbers: 165 unbounded cones with a semi-angle of exactly 90 degrees (a plane), 13 with a zero axis (no direction), and one cylinder of radius 0 (a line). Two `surface.cone_p2` trims refuse where main succeeded; they rest on reading an axis of `(0, -1e-300, 0)` as the direction `-Y`, a convention (main replaced it by `Z`). The 6 `nurbs.b_spline_surface_n_lib_p2` corner blends are certified for G0 only: their tangency is best effort on both sides.
+  179 rows change a built cone into a refusal, each for inputs that define no cone, decided in closed form from the input numbers: 165 unbounded cones with a semi-angle of exactly 90 degrees (a plane), 13 with a zero axis (no direction), and one cylinder of radius 0 (a line). Two `surface.cone_p2` trims refuse where main succeeded; they rest on reading an axis of `(0, -1e-300, 0)` as the direction `-Y`, a convention (main replaced it by `Z`). The 6 `nurbs.b_spline_surface_n_lib_p2` corner blends are certified for G0 and for G1 old against new: their tangency to the data's cylinder is the same to the certificate's width (EQUAL).
   
   The certificates:
   - Built cones are checked net by net with `implicit::lies_on`.
   - Intersections of cylinders, of a cylinder and a cone, and of a cylinder and a plane are checked against their closed-form lines or emptiness.
-  - The corner blends are checked side by side against their loop curves, by Bézier blossoms, and the curves on their cylinder.
+  - The corner blends are checked side by side against their loop curves, by Bézier blossoms, and the curves on their cylinder. Their G1 is bounded above and below on both runs: the largest angle between the patch normal and the cylinder's normal along each side, from Bernstein hulls with forward error bounds.
   - The extrusion and cone curves are checked by convex-hull plane distances and by Bernstein bounds of the implicit cone.
 - **Tests:**
   - `crates/solidcore/tests/issue_2313_unbounded_cone_iso_circle.rs` asserts the fixed behaviour only.

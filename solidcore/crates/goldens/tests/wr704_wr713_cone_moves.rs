@@ -72,9 +72,11 @@
 //!   G0. Each patch side equals its loop curve (or its half for an n-sided patch), by
 //!   Bézier blossoms after degree elevation. The rows moved because the neighbour did:
 //!   a bounded cylinder on non-unit axes, whose NURB main built with radius `r |X|`
-//!   (the curves, STEP points, are certified on the data's cylinder). Tangency (G1) is
-//!   best effort for both runs, since the input curves leave the cylinder: ARGUED, not
-//!   compared.
+//!   (the curves, STEP points, are certified on the data's cylinder). G1: the largest
+//!   angle between the patch normal and the data cylinder's normal along each side with
+//!   a neighbour, bounded above and below for both runs (Bernstein hulls, forward error
+//!   bounds); the new bound must not lie above the old one. All 6 rows are EQUAL (the
+//!   largest angle is at the patch corners, set by the shared loop curves).
 //! * **Extrusion and cone curves** (`surface.surf_of_extrusion_p2`): every Bézier segment
 //!   lies within `tol` of the extrusion's planes (convex hull) and of the cone (a Bernstein
 //!   bound of the implicit equation, by de Casteljau halving).
@@ -1697,8 +1699,15 @@ fn certify(unit: &str, inputs: &Value, new: &Output, old: &Output) -> (String, V
             };
             // the new side is also judged on its inputs: they are points of the true
             // cylinder, where main's were not ([`cert_corner_inputs`])
-            let new_side = cert_corner_inputs(inputs).and_then(|()| side(new));
-            ("corner blend sides".into(), new_side, side(old))
+            let (g1_new, g1_old) = cert_corner_g1(inputs, new, old);
+            let new_side = cert_corner_inputs(inputs)
+                .and_then(|()| side(new))
+                .and(g1_new);
+            (
+                "corner blend sides and G1".into(),
+                new_side,
+                side(old).and(g1_old),
+            )
         }
         "surface.surf_of_extrusion_p2" => {
             let side = |o: &Output, other: &Output| match &o.error {
@@ -1743,6 +1752,388 @@ fn bezier_piece(b: &[Vec3], s0: f64, s1: f64) -> Vec<Vec3> {
         .collect()
 }
 
+/// The unit roundoff.
+const UNIT_RO: f64 = f64::EPSILON / 2.0;
+/// The factor that covers an error bound's own rounding: each bound below is a sum of
+/// at most 8 positive terms and products, computed with relative error under `γ_16`.
+fn err_up(e: f64) -> f64 {
+    e * (1.0 + gamma(16))
+}
+
+/// A computed value and a bound on its distance from the exact value (forward error
+/// analysis: each operation adds the propagated input errors and its own rounding,
+/// `u |result|`).
+#[derive(Clone, Copy, Debug)]
+struct Rv {
+    v: f64,
+    e: f64,
+}
+
+impl Rv {
+    fn add(self, q: Self) -> Self {
+        let v = self.v + q.v;
+        Rv {
+            v,
+            e: err_up(self.e + q.e + UNIT_RO * v.abs()),
+        }
+    }
+    fn sub(self, q: Self) -> Self {
+        let v = self.v - q.v;
+        Rv {
+            v,
+            e: err_up(self.e + q.e + UNIT_RO * v.abs()),
+        }
+    }
+    fn mul(self, q: Self) -> Self {
+        let v = self.v * q.v;
+        Rv {
+            v,
+            e: err_up(self.v.abs() * q.e + q.v.abs() * self.e + self.e * q.e + UNIT_RO * v.abs()),
+        }
+    }
+    /// times a positive weight computed within `γ_64` of its value
+    fn weigh(self, w: f64) -> Self {
+        let v = self.v * w;
+        Rv {
+            v,
+            e: err_up(self.e * w * (1.0 + gamma(64)) + v.abs() * gamma(66)),
+        }
+    }
+    fn half_sum(self, q: Self) -> Self {
+        let v = (self.v + q.v) * 0.5;
+        Rv {
+            v,
+            e: err_up((self.e + q.e) * 0.5 + UNIT_RO * v.abs()),
+        }
+    }
+}
+
+/// A vector of [`Rv`].
+#[derive(Clone, Copy, Debug)]
+struct R3 {
+    x: Rv,
+    y: Rv,
+    z: Rv,
+}
+
+impl R3 {
+    fn new(v: Vec3, e: f64) -> Self {
+        R3 {
+            x: Rv { v: v.x, e },
+            y: Rv { v: v.y, e },
+            z: Rv { v: v.z, e },
+        }
+    }
+    fn map(self, q: Self, f: impl Fn(Rv, Rv) -> Rv) -> Self {
+        R3 {
+            x: f(self.x, q.x),
+            y: f(self.y, q.y),
+            z: f(self.z, q.z),
+        }
+    }
+    fn add(self, q: Self) -> Self {
+        self.map(q, Rv::add)
+    }
+    fn sub(self, q: Self) -> Self {
+        self.map(q, Rv::sub)
+    }
+    fn times(self, c: Rv) -> Self {
+        R3 {
+            x: self.x.mul(c),
+            y: self.y.mul(c),
+            z: self.z.mul(c),
+        }
+    }
+    fn weigh(self, w: f64) -> Self {
+        R3 {
+            x: self.x.weigh(w),
+            y: self.y.weigh(w),
+            z: self.z.weigh(w),
+        }
+    }
+    fn dot(self, q: Self) -> Rv {
+        self.x.mul(q.x).add(self.y.mul(q.y)).add(self.z.mul(q.z))
+    }
+    fn cross(self, q: Self) -> Self {
+        R3 {
+            x: self.y.mul(q.z).sub(self.z.mul(q.y)),
+            y: self.z.mul(q.x).sub(self.x.mul(q.z)),
+            z: self.x.mul(q.y).sub(self.y.mul(q.x)),
+        }
+    }
+}
+
+/// The Bernstein coefficients of the product of two Bernstein polynomials (degrees
+/// `m`, `n`): `c_k = sum C(m, i) C(n, k - i) / C(m + n, k) f(a_i, b_{k-i})`, positive
+/// weights (each computed in under 64 operations, so within `γ_64`).
+fn bern_product<A: Copy, B: Copy, C: Copy>(
+    a: &[A],
+    b: &[B],
+    f: impl Fn(A, B) -> C,
+    weigh: impl Fn(C, f64) -> C,
+    add: impl Fn(C, C) -> C,
+) -> Vec<C> {
+    let (m, n) = (a.len() - 1, b.len() - 1);
+    let choose = |n: usize, k: usize| -> f64 {
+        (0..k).fold(1.0, |c, i| c * (n - i) as f64 / (i + 1) as f64)
+    };
+    (0..=m + n)
+        .map(|k| {
+            (k.saturating_sub(n)..=m.min(k))
+                .map(|i| {
+                    let w = choose(m, i) * choose(n, k - i) / choose(m + n, k);
+                    weigh(f(a[i], b[k - i]), w)
+                })
+                .reduce(&add)
+                .unwrap()
+        })
+        .collect()
+}
+
+/// De Casteljau halves of Bernstein coefficients.
+fn halves(c: &[Rv]) -> (Vec<Rv>, Vec<Rv>) {
+    let mut w = c.to_vec();
+    let (mut l, mut r) = (vec![w[0]], vec![w[w.len() - 1]]);
+    while w.len() > 1 {
+        w = w.windows(2).map(|p| p[0].half_sum(p[1])).collect();
+        l.push(w[0]);
+        r.push(w[w.len() - 1]);
+    }
+    r.reverse();
+    (l, r)
+}
+
+/// The halving depth past which the G1 bound has not converged (a failure, not a bound).
+const G1_DEPTH: usize = 60;
+
+/// The certified interval `[lo, hi]` of `max sin θ` over the patch sides that lie on a loop
+/// curve with a neighbour, `θ` the angle between the patch normal `N = ∂S/∂u x ∂S/∂v`
+/// and the cylinder's normal at the side point `P`: the radial vector `R = d - (d·Z) Z`,
+/// `d = P - origin`, `Z` the unit `X x Y` of the data (the normal of the data's cylinder
+/// at the point of it nearest `P`). On a side (clamped knots) the cross derivative is a
+/// positive multiple of `Σ (P_1j - P_0j) N_j`, so on each Bézier segment `N`, `R`,
+/// `f = |N x R|^2` and `g = |N|^2 |R|^2` are Bernstein polynomials and `sin^2 θ = f / g`.
+/// Upper: `max f_k / min g_k` over a piece (the convex hull), halving pieces until the
+/// bound is within `1e-9` of the best lower; lower: `f / g` at the pieces' ends (exact
+/// values of the polynomials). Each value carries a forward error bound ([`Rv`]) with
+/// the rounding of every operation charged. `Z`'s own rounding (`γ_16` from the exact
+/// unit axis) moves `sin θ` by at most `4 γ_16 |d| / |R|` (bounded by the largest `|d|`
+/// and the smallest `|R|` over the side's hull), added on both ends. No point is
+/// sampled: every value is a bound.
+fn corner_g1(inputs: &Value, out: &Output) -> Result<(f64, f64), Fail> {
+    let srfs = inputs["srfs"].as_array().unwrap();
+    let a = srfs.iter().find_map(|s| s.get("analytic")).unwrap();
+    let o = v3(&a["origin"]);
+    let z = v3(&a["x"]).cross(v3(&a["y"]));
+    let z = z * (1.0 / z.length());
+    let curves: Vec<Vec<Vec3>> = inputs["curves"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|c| c["cpts"].as_array().unwrap().iter().map(v3).collect())
+        .collect();
+    let size = curves.iter().flatten().fold(0.0f64, |m, p| m.max(mc(*p)));
+    let bound = gamma(256) * size;
+    let halves_of_loop = curves.len() > 4;
+    let ends: Vec<(usize, Vec3, Vec3)> = (0..curves.len())
+        .flat_map(|i| {
+            let c = &curves[i];
+            if halves_of_loop {
+                let m = blossom(c, &[0.5; 3]);
+                vec![(i, c[0], m), (i, m, c[3])]
+            } else {
+                vec![(i, c[0], c[3])]
+            }
+        })
+        .collect();
+    let dz = 4.0 * gamma(16);
+    let count = out.values.get("patch_count").unwrap()[0] as usize;
+    let (mut lo, mut hi) = (0.0f64, 0.0f64);
+    let mut sides_met = 0;
+    for pi in 0..count {
+        let get = |k: &str| {
+            out.values
+                .get(&format!("patch{pi}_{k}"))
+                .map_or(&[][..], Vec::as_slice)
+        };
+        let (cpts, dims, uk, vk) = (get("cpts"), get("dims"), get("u"), get("v"));
+        let (nu, nv, p, q) = (
+            dims[0] as usize + 1,
+            dims[1] as usize + 1,
+            dims[2] as usize,
+            dims[3] as usize,
+        );
+        let clamped = |k: &[f64], d: usize| {
+            k[..=d].iter().all(|t| *t == k[0])
+                && k[k.len() - 1 - d..].iter().all(|t| *t == k[k.len() - 1])
+        };
+        check(
+            clamped(uk, p) && clamped(vk, q),
+            "no closed form: unclamped knots",
+        )?;
+        let pt = |i: usize, j: usize| {
+            Vec3::new(
+                cpts[4 * (i * nv + j)],
+                cpts[4 * (i * nv + j) + 1],
+                cpts[4 * (i * nv + j) + 2],
+            )
+        };
+        let sides: [(Vec<Vec3>, Vec<Vec3>, usize, &[f64]); 4] = [
+            (
+                (0..nv).map(|j| pt(0, j)).collect(),
+                (0..nv).map(|j| pt(1, j) - pt(0, j)).collect(),
+                q,
+                vk,
+            ),
+            (
+                (0..nv).map(|j| pt(nu - 1, j)).collect(),
+                (0..nv).map(|j| pt(nu - 1, j) - pt(nu - 2, j)).collect(),
+                q,
+                vk,
+            ),
+            (
+                (0..nu).map(|i| pt(i, 0)).collect(),
+                (0..nu).map(|i| pt(i, 1) - pt(i, 0)).collect(),
+                p,
+                uk,
+            ),
+            (
+                (0..nu).map(|i| pt(i, nv - 1)).collect(),
+                (0..nu).map(|i| pt(i, nv - 1) - pt(i, nv - 2)).collect(),
+                p,
+                uk,
+            ),
+        ];
+        for (row, cross, deg, knots) in &sides {
+            let (e0, e1) = (row[0], row[row.len() - 1]);
+            let near = |x: Vec3, y: Vec3| (x - y).length() <= bound;
+            let Some(&(ci, _, _)) = ends.iter().find(|(_, c0, c1)| {
+                (near(e0, *c0) && near(e1, *c1)) || (near(e0, *c1) && near(e1, *c0))
+            }) else {
+                continue;
+            };
+            if srfs[ci].is_null() {
+                continue;
+            }
+            sides_met += 1;
+            // knot insertion: each inserted point is a convex combination of two, with
+            // relative error under `γ_6` of the net's largest coordinate `m`, chained once
+            // per insertion; a cross difference adds its own rounding (`2 m`)
+            let m = (0..nu * nv).fold(0.0f64, |acc, k| acc.max(mc(pt(k / nv, k % nv))));
+            let interior = {
+                let (lo, hi) = (knots[*deg], knots[knots.len() - 1 - deg]);
+                let mut ks: Vec<f64> = knots
+                    .iter()
+                    .copied()
+                    .filter(|t| *t > lo && *t < hi)
+                    .collect();
+                ks.dedup();
+                ks.len()
+            };
+            let gins = gamma(6 * deg * interior + 4);
+            let segs = bezier_segments(*deg, row, knots);
+            let csegs = bezier_segments(*deg, cross, knots);
+            check(
+                segs.len() == csegs.len(),
+                "a side's segments not its knots'",
+            )?;
+            let zr = R3::new(z, 0.0);
+            for (b, c) in segs.iter().zip(&csegs) {
+                let bp: Vec<R3> = b
+                    .iter()
+                    .map(|p| R3::new(*p, gins * m).sub(R3::new(o, 0.0)))
+                    .collect();
+                let dp: Vec<R3> = c.iter().map(|p| R3::new(*p, gins * 2.0 * m)).collect();
+                let t: Vec<R3> = bp.windows(2).map(|w| w[1].sub(w[0])).collect();
+                let n = bern_product(&dp, &t, R3::cross, R3::weigh, R3::add);
+                let r: Vec<R3> = bp.iter().map(|d| d.sub(zr.times(d.dot(zr)))).collect();
+                let nr = bern_product(&n, &r, R3::cross, R3::weigh, R3::add);
+                let f = bern_product(&nr, &nr, R3::dot, Rv::weigh, Rv::add);
+                let nn = bern_product(&n, &n, R3::dot, Rv::weigh, Rv::add);
+                let rr = bern_product(&r, &r, R3::dot, Rv::weigh, Rv::add);
+                let gg = bern_product(&nn, &rr, Rv::mul, Rv::weigh, Rv::add);
+                // |R| from below over the segment, |d| from above: for Z's rounding
+                let rmin = rr.iter().map(|c| c.v - c.e).fold(f64::INFINITY, f64::min);
+                check(rmin > 0.0, "no certificate: a side point on the axis")?;
+                let dmax = bp
+                    .iter()
+                    .map(|p| Vec3::new(p.x.v, p.y.v, p.z.v).length())
+                    .fold(0.0f64, f64::max);
+                let slack = dz * dmax * (1.0 + gamma(4)) / rmin.sqrt() * (1.0 + gamma(4));
+                let ratio_lo = |fc: Rv, gc: Rv| {
+                    let num = fc.v - fc.e;
+                    let den = gc.v + gc.e;
+                    (num / den).max(0.0) * (1.0 - gamma(2))
+                };
+                let ratio_v = |fc: Rv, gc: Rv| fc.v / gc.v;
+                let (fe, ge) = (f[f.len() - 1], gg[gg.len() - 1]);
+                let mut low = ratio_lo(f[0], gg[0]).max(ratio_lo(fe, ge));
+                // the same without the rounding charge: only to decide when to stop halving
+                let mut low_v = ratio_v(f[0], gg[0]).max(ratio_v(fe, ge));
+                let mut up = 0.0f64;
+                let mut stack = vec![(f.clone(), gg.clone(), 0usize)];
+                while let Some((fs, gs, depth)) = stack.pop() {
+                    let (f0, f1, g0, g1) = (fs[0], fs[fs.len() - 1], gs[0], gs[gs.len() - 1]);
+                    low = low.max(ratio_lo(f0, g0)).max(ratio_lo(f1, g1));
+                    low_v = low_v.max(ratio_v(f0, g0)).max(ratio_v(f1, g1));
+                    let fmax = fs.iter().map(|c| c.v + c.e).fold(0.0f64, f64::max);
+                    let gmin = gs.iter().map(|c| c.v - c.e).fold(f64::INFINITY, f64::min);
+                    let fmax_v = fs.iter().map(|c| c.v).fold(0.0f64, f64::max);
+                    let gmin_v = gs.iter().map(|c| c.v).fold(f64::INFINITY, f64::min);
+                    if gmin > 0.0 && fmax_v / gmin_v <= low_v * (1.0 + 1e-9) + 1e-30 {
+                        // the hull is down to the best value: the charged bound holds here
+                        up = up.max(fmax / gmin * (1.0 + gamma(2)));
+                        continue;
+                    }
+                    check(
+                        depth < G1_DEPTH,
+                        "no certificate: the G1 bound did not converge",
+                    )?;
+                    let (fl, fr) = halves(&fs);
+                    let (gl, gr) = halves(&gs);
+                    stack.push((fl, gl, depth + 1));
+                    stack.push((fr, gr, depth + 1));
+                }
+                lo = lo.max((low.sqrt() - slack).max(0.0));
+                hi = hi.max(up.max(low).sqrt() + slack);
+            }
+        }
+    }
+    check(sides_met > 0, "no side with a neighbour")?;
+    Ok((lo, hi))
+}
+
+/// G1 old against new ([`corner_g1`]): the new blend is FARTHER when its certified
+/// deviation is above the old one's, CLOSER when below, and EQUAL when the intervals
+/// meet (they are then the same value to the certificate's width, `1e-9` relative plus
+/// the rounding terms).
+fn cert_corner_g1(inputs: &Value, new: &Output, old: &Output) -> (Verdict, Verdict) {
+    let (n, o) = match (corner_g1(inputs, new), corner_g1(inputs, old)) {
+        (Ok(n), Ok(o)) => (n, o),
+        (Err(e), _) => return (Err(e), Ok(())),
+        (Ok(_), Err(e)) => return (Ok(()), Err(e)),
+    };
+    if n.0 > o.1 {
+        (
+            fail(format!(
+                "G1 deviation sin {:e} above the old {:e}",
+                n.0, o.1
+            )),
+            Ok(()),
+        )
+    } else if n.1 < o.0 {
+        (
+            Ok(()),
+            fail(format!(
+                "G1 deviation sin {:e} above the new {:e}",
+                o.0, n.1
+            )),
+        )
+    } else {
+        (Ok(()), Ok(()))
+    }
+}
+
 /// Why a moved corner-blend row moved: its neighbour is a bounded cylinder
 /// (`new_cylinder_bounded`) on perpendicular axes that are not unit. Main built its
 /// generator, and so its NURB, at `origin + r X` with the axis as given, `r |X|` from the
@@ -1753,8 +2144,7 @@ fn bezier_piece(b: &[Vec3], s0: f64, s1: f64) -> Vec<Vec3> {
 /// off by `r ||X| - 1|`), and every curve end (a point the neighbour evaluated) is at
 /// distance `r` from the axis through `origin` along `X x Y`, within the rounding of the
 /// evaluation and of this check (`γ_256` of the magnitudes, as in [`cert_corner_sides`]).
-/// Tangency to the neighbour is best effort on both sides (unchanged code) and is not
-/// compared: ARGUED.
+/// Tangency to the neighbour is certified separately, old against new ([`corner_g1`]).
 fn cert_corner_inputs(inputs: &Value) -> Verdict {
     let srfs = inputs["srfs"].as_array().unwrap();
     let Some(a) = srfs.iter().find_map(|s| s.get("analytic")) else {
