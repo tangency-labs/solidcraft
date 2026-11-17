@@ -1225,6 +1225,10 @@ fn bezier_piece(
     Ok(out)
 }
 
+/// The finest level [`rational_partial_bound`] cuts a piece at: 2^6 = 64 parts, as a blend's
+/// span is refined to at most level 6 (`docs/definitions-and-certificates.md` §4.5).
+const RATIONAL_BOUND_LEVELS: u32 = 6;
+
 /// A certified bound on `|∂S/∂x_d|` of a rational spline (positive weights) over the points
 /// whose `d` parameter lies in `along` (on the knot range, or past an end of it, where the end
 /// span's polynomials continue) and whose other parameter lies in `across`, on its knot range.
@@ -1257,6 +1261,12 @@ fn bezier_piece(
 /// Euclidean point's from its weight, the differences', lengths' and products'), and the bound
 /// is rounded up over its last few dozen operations.
 ///
+/// The hulls are those of the piece's points, so a shorter piece gives a tighter bound: each
+/// piece is cut into 2^L equal parts at level `L = 0, 1, …` up to [`RATIONAL_BOUND_LEVELS`],
+/// until the bound is at most `target`, as a blend's span is refined level by level
+/// (`docs/definitions-and-certificates.md` §4.5). Every level's bound holds; the least found is
+/// returned.
+///
 /// Refused where a weight of a piece is not certified positive (past the range a continued
 /// weight can reach zero), where `across` is off its knot range or `along` is empty, and for
 /// knots with an empty span where one is needed.
@@ -1265,6 +1275,7 @@ fn rational_partial_bound(
     d: usize,
     along: [f64; 2],
     across: [f64; 2],
+    target: f64,
 ) -> Result<f64, EvalError> {
     let EvalSurface::Nurbs(n) = s else {
         return Err(refused("a partial bound of a surface that is not a spline"));
@@ -1321,13 +1332,12 @@ fn rational_partial_bound(
         }
         Ok(out)
     };
-    let mut bound = 0.0f64;
-    for (sd, piece) in spans(k, p, m, along)? {
+    let windows = spans(kf, q, mf, across)?;
+    // The bound over one piece `[x0, x1]` of knot span `sd` along d, every span across.
+    let on_piece = |sd: usize, piece: [f64; 2]| -> Result<f64, EvalError> {
         let length = piece[1] - piece[0];
-        if !(length > 0.0) {
-            continue;
-        }
-        for (sf, _) in spans(kf, q, mf, across)? {
+        let mut bound = 0.0f64;
+        for &(sf, _) in &windows {
             // The rows not zero on this span across, each in Bézier form over the piece:
             // `rows[j][k]` the Euclidean point, its error, its weight and the weight's error.
             let mut rows: Vec<Vec<(Vec3, f64, f64, f64)>> = Vec::new();
@@ -1418,6 +1428,32 @@ fn rational_partial_bound(
                 ));
             }
             bound = bound.max(b);
+        }
+        Ok(bound)
+    };
+    let pieces = spans(k, p, m, along)?;
+    let mut bound = f64::INFINITY;
+    for level in 0..=RATIONAL_BOUND_LEVELS {
+        let cuts = 1usize << level;
+        let mut at_level = 0.0f64;
+        for &(sd, [x0, x1]) in &pieces {
+            if !(x1 > x0) {
+                continue;
+            }
+            let cut = |c: usize| {
+                if c == cuts {
+                    x1
+                } else {
+                    x0 + (x1 - x0) * (c as f64 / cuts as f64)
+                }
+            };
+            for c in 0..cuts {
+                at_level = at_level.max(on_piece(sd, [cut(c), cut(c + 1)])?);
+            }
+        }
+        bound = bound.min(at_level);
+        if bound <= target {
+            break;
         }
     }
     if !bound.is_finite() {
@@ -1560,7 +1596,7 @@ pub fn pcurve_onto_knots(
                 across = [across[0].min(y0), across[1].max(y0)];
             }
         }
-        o * rational_partial_bound(s, d, along, across)?
+        o * rational_partial_bound(s, d, along, across, tolerance / o)?
     };
     let displacement = shift * (1.0 + gamma(4));
     if !(displacement <= tolerance) {

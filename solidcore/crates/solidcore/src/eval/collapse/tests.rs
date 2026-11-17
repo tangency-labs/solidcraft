@@ -970,6 +970,40 @@ fn a_pcurve_past_a_rational_net_is_put_on_it_within_the_tolerance() {
     }
 }
 
+/// A trim along a corner's rounded edge (u at its start) from v = 1 to past v = 0 moves points
+/// all along v: the bound over the whole range is too wide in one piece (above 0.02 mm), and
+/// tight enough once the piece is cut into parts.
+#[test]
+fn a_pcurve_along_a_rational_net_past_its_range_is_bounded_in_parts() {
+    for (corner, past) in corners()
+        .iter()
+        .zip([0.007903823091784556, 0.006605362236920265])
+    {
+        let s = corner.surface();
+        let a = corner.u[0];
+        let one = rational_partial_bound(&s, 1, [-past, 1.0], [a, a], f64::INFINITY).unwrap();
+        let parts = rational_partial_bound(&s, 1, [-past, 1.0], [a, a], 0.0).unwrap();
+        assert!(past * one > 0.02 && parts < one, "{one} {parts}");
+        let pc = Curve2::Spline {
+            knots: vec![0.0, 0.0, 1.0, 1.0],
+            points: vec![[a, 1.0], [a, -past]],
+        };
+        let onto = pcurve_onto_knots(&s, &pc, 0.02).unwrap().unwrap();
+        let moved = (0..=400)
+            .map(|k| {
+                let t = f64::from(k) / 400.0;
+                let (v, w) = (1.0 - t * (1.0 + past), 1.0 - t);
+                (corner.continued(a, v) - corner.continued(a, w)).len()
+            })
+            .fold(0.0, f64::max);
+        assert!(
+            moved <= onto.displacement && onto.displacement <= 0.02,
+            "measured {moved}, bound {}",
+            onto.displacement
+        );
+    }
+}
+
 /// A pcurve past both of a rational net's ranges is refused: the move across is not bounded
 /// there.
 #[test]
