@@ -889,13 +889,21 @@ fn toggle_reference(s: &mut Session, _: &Value) -> Result<Value> {
 /// Hide the origin and construction items `names` (and, with `sketches`, every sketch) when any
 /// of them shows; otherwise show them all, the origin folder too. A sketch a feature uses comes
 /// back only if it was shown on its own, as before it was hidden.
+///
+/// Showing also shows the Construction folder (and, with `sketches`, the Sketches folder) and
+/// their groups, at every placement, since an item in a hidden folder stays hidden. Another
+/// construction item the Construction folder was hiding (an axis, for the planes) is hidden on
+/// its own instead, so it looks as it did.
 fn toggle_category(s: &mut Session, cmd: &str, names: &[String], sketches: bool) -> Result<Value> {
     let sketch_ids: Vec<u64> =
         if sketches { s.doc.features.iter().filter(|f| matches!(f.kind, FeatureKind::Sketch { .. })).map(|f| f.id).collect() } else { Vec::new() };
     let origin_shown = s.visibility.origin_hidden != Some(true);
-    let any_shown = names.iter().any(|n| !s.visibility.hidden_origin.contains(n) && (origin_shown || !crate::origins::ITEMS.contains(&n.as_str())))
-        || sketch_ids.iter().any(|id| crate::view::sketch_shown(s, *id));
+    let item_shown = |n: &String| {
+        if crate::origins::ITEMS.contains(&n.as_str()) { origin_shown && !s.visibility.hidden_origin.contains(n) } else { s.construction_visible(n) }
+    };
+    let any_shown = names.iter().any(item_shown) || sketch_ids.iter().any(|id| crate::view::sketch_shown(s, *id));
     let visible = !any_shown;
+    let (folder_keys, keep_hidden) = if visible { category_folders(s, names, sketches) } else { (Vec::new(), Vec::new()) };
     let v = &mut s.visibility;
     for n in names {
         if visible {
@@ -911,6 +919,12 @@ fn toggle_category(s: &mut Session, cmd: &str, names: &[String], sketches: bool)
             v.hidden_sketches.push(*id);
         }
     }
+    v.hidden_folders.retain(|k| !folder_keys.contains(k));
+    for n in keep_hidden {
+        if !v.hidden_origin.contains(&n) {
+            v.hidden_origin.push(n);
+        }
+    }
     if visible && names.iter().any(|n| crate::origins::ITEMS.contains(&n.as_str())) {
         v.origin_hidden = Some(false);
     }
@@ -920,6 +934,35 @@ fn toggle_category(s: &mut Session, cmd: &str, names: &[String], sketches: bool)
         cmd,
         BrowserVisibilityResult { visible, changed: Some(names.len() + sketch_ids.len()), isolated: None, visibility, param_warnings: Vec::new() },
     )
+}
+
+/// The hidden folder and group keys showing a category clears (the Construction folder, and with
+/// `sketches` the Sketches folder, and groups of theirs), and the construction items outside
+/// `names` those keys hide, which stay hidden on their own.
+fn category_folders(s: &Session, names: &[String], sketches: bool) -> (Vec<String>, Vec<String>) {
+    let folders: &[&str] = if sketches { &["construction", "sketches"] } else { &["construction"] };
+    let ours = |key: &str| {
+        let Some(last) = key.rsplit('/').next() else { return false };
+        folders.contains(&last)
+            || last
+                .strip_prefix('g')
+                .and_then(|id| id.parse::<u64>().ok())
+                .and_then(|id| s.doc.browser_group(id))
+                .is_some_and(|g| folders.contains(&g.folder.as_str()))
+    };
+    let keys: Vec<String> = s.visibility.hidden_folders.iter().filter(|k| ours(k)).cloned().collect();
+    if keys.is_empty() {
+        return (keys, Vec::new());
+    }
+    let keep = s
+        .doc
+        .features
+        .iter()
+        .filter(|f| f.kind.is_construction() && !names.contains(&f.name) && !s.visibility.hidden_origin.contains(&f.name))
+        .filter(|f| s.feature_folder_hidden(f.id, "construction"))
+        .map(|f| f.name.clone())
+        .collect();
+    (keys, keep)
 }
 
 /// Browser rows that start open (`c0`, Bodies, placements) vs closed (Origin, Features).
@@ -3051,6 +3094,19 @@ mod tests {
         assert!(s.visibility.hidden_origin.is_empty() && s.visibility.hidden_sketches.is_empty() && crate::view::sketch_shown(&s, sketch));
         run(&mut s, "edit.undo", json!({}));
         assert_eq!(s.visibility.hidden_origin.len(), 10, "one undo puts the hide back");
+        // Showing also shows the Sketches and Construction folders an item hides in; the Bodies
+        // folder keeps its own state.
+        run(&mut s, "browser.visibility", json!({"tree_folders": ["c0/sketches", "c0/construction", "c0/bodies"], "visible": false}));
+        assert_eq!(run(&mut s, "browser.toggle_reference", json!({}))["visible"], true);
+        assert!(crate::view::sketch_shown(&s, sketch), "the sketch in the hidden folder shows");
+        assert!(["Floor", "Spine", "Pin"].iter().all(|n| s.construction_visible(n)), "{:?}", s.visibility);
+        assert_eq!(s.visibility.hidden_folders, ["c0/bodies"]);
+        // The planes share the Construction folder with axes and points: those stay hidden.
+        run(&mut s, "browser.visibility", json!({"tree_folders": ["c0/construction"], "visible": false}));
+        run(&mut s, "browser.visibility", json!({"items": ["XY", "XZ", "YZ"], "visible": false}));
+        assert_eq!(run(&mut s, "browser.toggle_planes", json!({}))["visible"], true);
+        assert!(s.construction_visible("Floor") && !s.construction_visible("Spine") && !s.construction_visible("Pin"), "{:?}", s.visibility);
+        assert_eq!(s.visibility.hidden_folders, ["c0/bodies"]);
     }
 
     #[test]

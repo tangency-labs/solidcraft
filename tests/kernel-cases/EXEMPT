@@ -29,6 +29,8 @@ browser.group                     the browser tree: order, groups and folding
 browser.move                      the browser tree: order, groups and folding
 browser.order                     the browser tree: order, groups and folding
 browser.rename_group              the browser tree: order, groups and folding
+browser.toggle_planes             the browser: crates/engine/src/cmd/browser.rs tests
+browser.toggle_reference          the browser: crates/engine/src/cmd/browser.rs tests
 browser.ungroup                   the browser tree: order, groups and folding
 canvas.calibrate                  reference images, and sketches traced from them (sketch only)
 canvas.decal                      reference images, and sketches traced from them (sketch only)
