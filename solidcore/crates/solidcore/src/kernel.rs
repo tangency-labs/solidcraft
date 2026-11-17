@@ -827,6 +827,18 @@ pub struct UpstreamFixes {
     /// fillet at the cliff afterwards. Other curves, and points within the edge, are
     /// unchanged (solidcore-native, no fork commit).
     pub fillet_on_edge_continues_line: bool,
+    /// `sm_SurfacePlaneCurve`'s test that the two given end points lie on both surfaces
+    /// ([`crate::blend::fillet_geom::surface_plane_curve::ends_on_both`]) takes a point's
+    /// distance to a plane as its distance to the plane itself, where upstream drops it onto
+    /// the plane's domain, which ends at the edges of the face the plane was made for. A
+    /// corner's side curve at a shallow concave crease runs from the crease onto the side
+    /// face's plane continued past that edge; its far end dropped onto the bounded domain
+    /// lands on the edge, off by the overrun, so the plane
+    /// curve was never made, the general intersector found only the crease point, and the
+    /// fillet failed at any radius ("CalcFilletIntSideFace(): failure to calculate
+    /// intersection of fillet surface with side face"). The plane curve itself already
+    /// continues the plane. Non-planar surfaces are unchanged (solidcore-native, no fork commit).
+    pub fillet_plane_curve_ends_past_face: bool,
 }
 }
 
