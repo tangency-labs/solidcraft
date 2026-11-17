@@ -181,9 +181,11 @@ fn draw_opaque(pass: &mut wgpu::RenderPass<'_>, pipelines: &OpaquePipelines, lay
             pass.set_index_buffer(draw.mesh.indices.slice(..), wgpu::IndexFormat::Uint32);
             pass.draw_indexed(0..draw.mesh.index_count, 0, 0..1);
         }
-        for draw in batch.instanced.iter().filter(|d| d.look == super::InstanceLook::Opaque) {
-            draw.draw(pass, &pipelines.instanced, &pipelines.instanced_flat, &uncounted);
-        }
+        // The placements in view, each at the level the lit pass draws it: through the lit pass's
+        // indirect draws where the device has them. (Drawn one mesh at a time instead, a mesh the
+        // indirect draws batch kept the placement lists its last unbatched cull left: every
+        // placement at full detail, in view or not, which took longer than the lit pass.)
+        batch.draw_instanced(pass, super::InstanceLook::Opaque, false, &pipelines.instanced, &pipelines.instanced_flat, &uncounted);
     }
 }
 
