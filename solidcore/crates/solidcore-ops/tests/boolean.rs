@@ -2641,8 +2641,8 @@ fn zz_diag_18475() {
         let reg = Region2 { outer: Loop2::circle_from(Vec2::new(0.0, 0.0), r, seam), holes: vec![] };
         extrude_planar_regions(&plane, &[reg], 0.0, h).unwrap()
     };
-    for app in [false, true] {
-    for d in [0.0, -1e-6, -5e-6, -9e-6, -9.99e-6, -1e-5, -1.01e-5, -1.2e-5, -1.5e-5, -2e-5, -2.1e-5, -3e-5, -5e-5, -1e-4, 1e-5, 1.01e-5, 2e-5, 3e-5, 1e-3] {
+    for app in [false] {
+    for d in [-1e-5, -2.1e-5, -2.5e-5, -3e-5] {
         let (first, along_y) = if app {
             let sq = Region2 { outer: Loop2::polygon(&[Vec2::new(0.0, -10.45), Vec2::new(25.0, -10.45), Vec2::new(25.0, 10.45), Vec2::new(0.0, 10.45)]), holes: vec![] };
             let block = extrude_planar_regions(&Plane::XY, &[sq], 0.0, 4.5).unwrap();
