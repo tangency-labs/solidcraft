@@ -2,7 +2,7 @@
 use super::CommandSpec;
 use crate::schema::plugin::{
     CheckParams, ImportParams, ImportedDesign, InspectParams, InspectResult, InstallParams, InstallResult, ListParams, ListResult, ListedPlugin,
-    MeshParams, MeshResult, RemoveParams, RemoveResult, RunParams, RunResult,
+    MeshParams, MeshResult, RemoveParams, RemoveResult, RunParams, RunResult, ToolsParams, ToolsResult,
 };
 use crate::{
     Result, Session, checked,
@@ -36,7 +36,10 @@ pub static COMMANDS: &[CommandSpec] = &[
         .params("id: installed plugin id; removes its folder and stored grants without executing code"),
     CommandSpec::new("plugin.run", "Run Plugin", checked!("plugin.run", run)).icon("play")
         .contract(&TypedContract::<RunParams>::new()).output(output_schema_for::<RunResult>)
-        .params("path, approval: exact hash from plugin.inspect after reviewing permissions, entry, params?: JSON; explicit native Wasm component execution, one undo step; errors discard all edits"),
+        .params("path, approval: exact hash from plugin.inspect after reviewing permissions, entry, params?: JSON, named?: bool (refusals name the missing grant and how to approve it); explicit native Wasm component execution, one undo step; errors discard all edits"),
+    CommandSpec::new("plugin.tools", "List Plugin Tools", checked!("plugin.tools", tools)).icon("inspect").noundo().read_only().doc_only()
+        .contract(&TypedContract::<ToolsParams>::new()).output(output_schema_for::<ToolsResult>)
+        .params("name?: one tool, <plugin>.<entry>; every installed, enabled plugin's entries as tools for agents: name, kind (command or importer), the plugin's name, version and description, effect and strict input schema, and with name a command entry's approval hash; no plugin code runs"),
 ];
 fn check(s: &mut Session, p: &Value) -> Result<Value> {
     let p: CheckParams = serde_json::from_value(p.clone()).map_err(|e| bad("plugin.check", e.to_string()))?;
@@ -142,12 +145,24 @@ fn install(s: &mut Session, p: &Value) -> Result<Value> {
 }
 fn run(s: &mut Session, p: &Value) -> Result<Value> {
     let p: RunParams = serde_json::from_value(p.clone()).map_err(|e| bad("plugin.run", e.to_string()))?;
-    let package = plugin::read_package(&p.path)?;
+    // Called by name, an installed plugin is read with the app's authority (a tool call names
+    // the plugin, not a path); anything else through the caller's file scope.
+    let package = if p.named { plugin::with_installed(s, &p.path, || plugin::read_package(&p.path))? } else { plugin::read_package(&p.path)? };
     if p.approval != package.approval {
         return Err(bad("plugin.run", "approval does not match this manifest and component; inspect and review again"));
     }
-    let result = plugin::run(s, package, &p.entry, &p.params)?;
+    let manifest = p.named.then(|| package.manifest.clone());
+    let result = plugin::run(s, package, &p.entry, &p.params).map_err(|e| match &manifest {
+        Some(manifest) => plugin::explain_named(s, manifest, &p.entry, e),
+        None => e,
+    })?;
     serde_json::to_value(result).map_err(|e| bad("plugin.run", e.to_string()))
+}
+
+fn tools(s: &mut Session, p: &Value) -> Result<Value> {
+    let p: ToolsParams = serde_json::from_value(p.clone()).map_err(|e| bad("plugin.tools", e.to_string()))?;
+    serde_json::to_value(ToolsResult { tools: plugin::tools(s, p.name.as_deref()), param_warnings: vec![] })
+        .map_err(|e| bad("plugin.tools", e.to_string()))
 }
 
 fn mesh(s: &mut Session, p: &Value) -> Result<Value> {

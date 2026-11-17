@@ -916,6 +916,82 @@ mod native {
         assert_eq!(direct["result"], namespaced["result"]);
     }
 
+    /// An installed plugin's entry is a tool: listed with its plugin's text and strict inputs,
+    /// called by name as one undo step, gone from the listing once turned off or removed.
+    #[test]
+    fn installed_entries_are_tools_that_run_as_one_undo_step_until_removed() {
+        let f = Fixture::new("call $box");
+        let mut m = manifest();
+        m["description"] = json!("Makes a box");
+        m["runtime"]["entries"] = json!([{"name":"make","input_schema":{"type":"object","properties":{"size":{"type":"number"}}}}]);
+        std::fs::write(f.0.join("sample/plugin.json"), m.to_string()).unwrap();
+        let mut s = Session::default();
+        f.install(&mut s, json!({}));
+        let listed = s.execute("plugin.tools", &json!({})).unwrap();
+        let tools = listed["tools"].as_array().unwrap();
+        assert_eq!(tools.len(), 1, "{listed}");
+        let tool = &tools[0];
+        assert_eq!((&tool["name"], &tool["kind"], &tool["plugin"], &tool["effect"]), (&json!("sample.make"), &json!("command"), &json!("sample"), &json!("edit")));
+        assert_eq!((&tool["plugin_name"], &tool["description"]), (&json!("Sample"), &json!("Makes a box")));
+        assert_eq!(tool["input_schema"]["additionalProperties"], false, "the listed inputs are as strict as the check");
+        assert!(tool.get("approval").is_none(), "a listing reads no component");
+        let approval = s.execute("plugin.tools", &json!({"name":"sample.make"})).unwrap()["tools"][0]["approval"].clone();
+        assert!(approval.is_string());
+        let undo = s.undo.len();
+        s.execute("sample.make", &json!({"approval": approval, "params": {"size": 2}})).unwrap();
+        assert_eq!((s.doc.features.len(), s.undo.len()), (1, undo + 1));
+        s.execute("edit.undo", &json!({})).unwrap();
+        assert!(s.doc.features.is_empty(), "one undo takes back the whole call");
+        let refused = s.execute("sample.make", &json!({"approval": approval, "params": {"colour": "red"}})).unwrap_err();
+        assert!(matches!(&refused, EngineError::Plugin(HostError::InvalidInput { field, .. }) if field == "params.colour"), "{refused}");
+        assert!(s.doc.features.is_empty(), "refused before any plugin code ran");
+        s.disabled_plugins.insert("sample".into());
+        assert_eq!(s.execute("plugin.tools", &json!({})).unwrap()["tools"], json!([]));
+        s.disabled_plugins.clear();
+        assert_eq!(s.execute("plugin.tools", &json!({})).unwrap()["tools"].as_array().unwrap().len(), 1);
+        s.execute("plugin.remove", &json!({"id":"sample"})).unwrap();
+        assert_eq!(s.execute("plugin.tools", &json!({})).unwrap()["tools"], json!([]));
+    }
+
+    /// Called by name, a refusal says which grant the plugin lacks and how to approve it, or
+    /// which host import a read entry was refused; nothing waits for a dialog.
+    #[test]
+    fn a_named_call_names_the_missing_grant_and_the_refused_import() {
+        let f = Fixture::new("call $box");
+        std::fs::write(f.0.join("sample/plugin.wasm"), file_component(true)).unwrap();
+        let mut m = manifest();
+        m["runtime"]["permissions"] = json!({"files":[{"name":"project","read":true,"write":true}]});
+        std::fs::write(f.0.join("sample/plugin.json"), m.to_string()).unwrap();
+        let secret = f.0.join("secret.txt");
+        std::fs::write(&secret, b"original").unwrap();
+        let mut s = Session::default();
+        f.install(&mut s, json!({}));
+        let call = |s: &mut Session| {
+            let approval = s.execute("plugin.tools", &json!({"name":"sample.make"})).unwrap()["tools"][0]["approval"].clone();
+            s.execute("sample.make", &json!({"approval": approval})).unwrap_err().to_string()
+        };
+        let missing = call(&mut s);
+        assert_eq!(
+            structured_tool_error(&missing),
+            Some(json!({"plugin":"sample","grant":"files.write:project","approve":tools::APPROVE})),
+            "{missing}"
+        );
+        // A read entry with the folder granted for writing is still refused the write.
+        m["runtime"]["entries"] = json!([{"name":"make","effect":"read","input_schema":{"type":"object"}}]);
+        std::fs::write(f.0.join("sample/plugin.json"), m.to_string()).unwrap();
+        f.install(&mut s, json!({"folders":[{"name":"project","path":f.0,"read":true,"write":true}]}));
+        let refused = call(&mut s);
+        assert_eq!(structured_tool_error(&refused), Some(json!({"plugin":"sample","entry":"make","refused_import":"write-file"})), "{refused}");
+        assert_eq!(std::fs::read(&secret).unwrap(), b"original");
+        assert!(s.doc.features.is_empty());
+        // The same entry run by a person (plugin.run, not by name) is refused the same write.
+        let installed = s.plugin_state.packages["sample"].clone();
+        let approval = read_package(&installed).unwrap().approval;
+        let direct = s.execute("plugin.run", &json!({"path":installed,"approval":approval,"entry":"make"})).unwrap_err();
+        assert!(direct.to_string().contains("write-file"), "{direct}");
+        assert_eq!(std::fs::read(&secret).unwrap(), b"original");
+    }
+
     #[test]
     fn metadata_only_discovery_preserves_the_explicitly_inspected_path() {
         let f = Fixture::new("call $box");

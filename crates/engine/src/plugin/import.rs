@@ -20,7 +20,7 @@ pub struct Importer {
 }
 
 /// Reads only `plugin.json` from a package folder, through the caller's file scope.
-fn read_manifest(folder: &str) -> Result<Manifest> {
+pub(super) fn read_manifest(folder: &str) -> Result<Manifest> {
     let dir = Path::new(folder);
     let id = dir.file_name().and_then(|s| s.to_str()).ok_or_else(|| error("package needs an id folder"))?;
     let bytes = solidcraft_io::vfs::read(&dir.join("plugin.json").to_string_lossy(), MAX_MANIFEST_BYTES).map_err(|e| error(e.to_string()))?;
@@ -28,7 +28,7 @@ fn read_manifest(folder: &str) -> Result<Manifest> {
 }
 
 /// The installed plugins' folders, by id: the plugins folder, plus packages inspected this session.
-fn package_folders(session: &Session) -> BTreeMap<String, String> {
+pub(super) fn package_folders(session: &Session) -> BTreeMap<String, String> {
     #[cfg_attr(target_arch = "wasm32", allow(unused_mut))]
     let mut folders = session.plugin_state.packages.clone();
     #[cfg(not(target_arch = "wasm32"))]
@@ -52,7 +52,8 @@ pub fn importers(session: &Session) -> Vec<Importer> {
         if session.disabled_plugins.contains(&id) {
             continue;
         }
-        let Ok(manifest) = read_manifest(&folder) else { continue };
+        // An installed importer is read with the app's authority: a caller names a file, not it.
+        let Ok(manifest) = with_installed(session, &folder, || read_manifest(&folder)) else { continue };
         let Some(runtime) = manifest.runtime.as_ref().filter(|r| r.is_importer()) else { continue };
         for entry in &runtime.entries {
             found.push(Importer {
@@ -114,7 +115,7 @@ pub fn describe(session: &Session) -> Vec<ImporterInfo> {
 /// anywhere yet. Nothing changes unless the whole import succeeds; a trap names the plugin and file.
 pub fn import_file(session: &mut Session, importer: &Importer, path: &str, options: &Value) -> Result<ImportedDesign> {
     let file = Path::new(path).file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| path.into());
-    let package = read_package(&importer.folder)?;
+    let package = with_installed(session, &importer.folder, || read_package(&importer.folder))?;
     if package.manifest.id != importer.plugin_id || session.disabled_plugins.contains(&importer.plugin_id) {
         return Err(error("plugin is disabled or was replaced; open the file again"));
     }

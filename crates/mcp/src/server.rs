@@ -140,7 +140,11 @@ impl Tools for Agent {
 
     fn list(&mut self) -> Vec<Value> {
         self.listed = self.options();
-        tool_definitions_with(self.listed)
+        let mut tools = tool_definitions_with(self.listed);
+        // Every installed, enabled plugin's entries, read afresh: a plugin turned off or removed
+        // since the last listing is gone from this one.
+        tools.extend(crate::plugin_tools::definitions(self.backend.as_mut()));
+        tools
     }
 
     fn call(&mut self, name: &str, args: &Value) -> Value {

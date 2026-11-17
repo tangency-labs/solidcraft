@@ -6239,3 +6239,39 @@ fn plugin_runs_always_keep_per_run_consent() {
         }
     }
 }
+
+/// A plugin tool the agent calls by name (`<plugin>.<entry>`) waits for the user's answer in
+/// every mode, even one that allows everything or remembers the tool; listing the plugin tools
+/// asks nothing; arguments the entry does not declare are refused before anything is asked.
+#[test]
+fn plugin_tools_go_through_the_chats_approval_and_never_skip_it() {
+    let dir = std::env::temp_dir().join(format!("sc-agent-chat-plugin-tool-{}", std::process::id()));
+    let folder = dir.join("gears");
+    std::fs::create_dir_all(&folder).unwrap();
+    let manifest = json!({"id":"gears","name":"Gears","version":"1","capabilities":["commands@0.1"],"runtime":{
+        "module":"plugin.wasm","commands":["solid.box"],"limits":{"fuel":100000,"memory_mib":1,"deadline_ms":5000},
+        "entries":[{"name":"make","effect":"edit","input_schema":{"type":"object","properties":{"teeth":{"type":"integer"}}}}]}});
+    std::fs::write(folder.join("plugin.json"), manifest.to_string()).unwrap();
+    for mode in [agents::Mode::All, agents::Mode::Edits, agents::Mode::Ask] {
+        let (mut app, tx) = app_in_a_turn();
+        app.session.plugin_state.packages.insert("gears".into(), folder.to_string_lossy().into_owned());
+        app.agent_chat.running_id = "claude".into();
+        app.preferences.ai_permissions = mode;
+        agents::remember(&mut app.preferences, "claude", "gears.make");
+        agents::remember(&mut app.preferences, "claude", "plugin.run");
+        let call = ask(&tx, "engine.execute", json!({"command":"gears.make","params":{"approval":"hash","params":{"teeth":20}}}));
+        pump_tools(&mut app);
+        assert_eq!(app.agent_chat.waiting(), 1, "{mode:?}: an edit entry asks first");
+        assert!(call.try_recv().is_err(), "{mode:?}: nothing runs before the answer");
+        let undeclared = ask(&tx, "engine.execute", json!({"command":"gears.make","params":{"approval":"hash","params":{"colour":"red"}}}));
+        pump_tools(&mut app);
+        let refused = undeclared.try_recv().unwrap();
+        assert_eq!(refused["ok"], false);
+        assert!(refused["error"].as_str().unwrap().contains("params.colour"), "{refused}");
+        let list = ask(&tx, "engine.execute", json!({"command":"plugin.tools"}));
+        pump_tools(&mut app);
+        assert_eq!(app.agent_chat.waiting(), 1, "{mode:?}: listing asks nothing");
+        drop(list);
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+}

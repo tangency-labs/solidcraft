@@ -276,3 +276,47 @@ fn a_loss_report_is_bounded_printable_text() {
     };
     assert!(empty.validate().is_err());
 }
+
+#[test]
+fn entry_arguments_are_checked_as_strictly_as_app_commands() {
+    let schema = json!({"type":"object","required":["teeth"],"properties":{
+        "teeth":{"type":"integer","minimum":6,"maximum":200},
+        "module":{"type":"number","exclusiveMinimum":0},
+        "name":{"type":"string","maxLength":8},
+        "up_axis":{"type":"string","oneOf":[{"const":"as_is","title":"As in the file"},{"const":"stand_up","title":"Stand up"}]},
+        "bodies":{"type":"array","items":{"type":"string"},"maxItems":2},
+        "free":{"type":"object","additionalProperties":true},
+        "fixed":{"type":"object"}
+    }});
+    assert_eq!(check_input(&schema, &json!({"teeth": 20})), Ok(()));
+    assert_eq!(check_input(&schema, &json!({"teeth": 20, "up_axis": "stand_up", "bodies": ["b1"], "free": {"any": 1}})), Ok(()));
+    let field = |value: Value| match check_input(&schema, &value) {
+        Err(HostError::InvalidInput { field, .. }) => field,
+        other => panic!("{value} gave {other:?}"),
+    };
+    assert_eq!(field(json!({})), "params.teeth");
+    assert_eq!(field(json!({"teeth": 2.5})), "params.teeth");
+    assert_eq!(field(json!({"teeth": 4})), "params.teeth");
+    assert_eq!(field(json!({"teeth": 20, "module": 0})), "params.module");
+    assert_eq!(field(json!({"teeth": 20, "name": "much too long"})), "params.name");
+    assert_eq!(field(json!({"teeth": 20, "up_axis": "sideways"})), "params.up_axis");
+    assert_eq!(field(json!({"teeth": 20, "bodies": [1]})), "params.bodies[0]");
+    assert_eq!(field(json!({"teeth": 20, "bodies": ["a", "b", "c"]})), "params.bodies");
+    assert_eq!(field(json!({"teeth": 20, "extra": true})), "params.extra", "an undeclared field is refused");
+    assert_eq!(field(json!([20])), "params");
+    assert_eq!(field(json!({"teeth": 20, "fixed": {"any": 1}})), "params.fixed.any", "an object schema takes only what it declares");
+    // The listed schema says what the check does.
+    assert_eq!(strict_input_schema(&schema)["additionalProperties"], false);
+    assert_eq!(strict_input_schema(&schema)["properties"]["free"]["additionalProperties"], true);
+    assert_eq!(strict_input_schema(&schema)["properties"]["fixed"]["additionalProperties"], false);
+    // A hostile schema is bounded, never a crash.
+    let mut deep = json!({"type":"object"});
+    for _ in 0..100 {
+        deep = json!({"type":"object","properties":{"a":deep}});
+    }
+    let mut value = json!({});
+    for _ in 0..100 {
+        value = json!({"a": value});
+    }
+    assert!(check_input(&deep, &value).is_err());
+}

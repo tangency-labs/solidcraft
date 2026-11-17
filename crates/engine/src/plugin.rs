@@ -3,7 +3,7 @@
 use crate::{EngineError, Result, Session};
 pub use craft_plugin::{
     API, Effect, Entry, EntryKind, FileGrant, HostLimits, Limits, LossItem, LossReport, LossSeverity, MAX_COMPONENT_BYTES, MAX_JSON_BYTES,
-    MAX_MANIFEST_BYTES, MAX_MEMORY_MIB, Manifest, RuntimeManifest, UiSlot, valid_id,
+    MAX_MANIFEST_BYTES, MAX_MEMORY_MIB, Manifest, RuntimeManifest, UiSlot, check_input, valid_id,
 };
 use craft_plugin::{CommandSchema, HostError, PluginHost};
 use serde_json::{Value, json};
@@ -173,6 +173,20 @@ pub fn read_package(path: &str) -> Result<Package> {
     Ok(Package { manifest, approval: package_hash(&bytes, &component), component })
 }
 
+/// Whether `folder` is an installed package in the app's own plugins folder (`{plugins}/<id>`).
+pub fn is_installed_folder(session: &Session, folder: &str) -> bool {
+    let path = Path::new(folder);
+    session.plugin_state.plugins_dir().is_some_and(|root| path.parent() == Some(root.as_path()))
+        && path.file_name().and_then(|n| n.to_str()).is_some_and(valid_id)
+}
+
+/// Reads an installed package with the app's authority, whatever the caller's file scope: a
+/// plugin tool call names a plugin, never a path, and the plugins folder is the app's own. Any
+/// other folder is read through the caller's scope, as `plugin.inspect` reads it.
+pub fn with_installed<T>(session: &Session, folder: &str, read: impl FnOnce() -> T) -> T {
+    if is_installed_folder(session, folder) { solidcraft_io::vfs::scoped(None, read) } else { read() }
+}
+
 /// The ceilings a package runs under: the app's, raised to the memory the user approved for this
 /// exact manifest and component at install. A grant for another package hash raises nothing.
 pub fn host_limits_for(session: &Session, id: &str, approval: &str) -> HostLimits {
@@ -269,6 +283,8 @@ pub use package::{remove, store_grants, validate_grants};
 pub use import::{Importer, describe as describe_importers, import_file, importer_for, importers, open_filters};
 #[cfg(test)]
 mod tests;
+mod tools;
+pub use tools::{explain_named, missing_grant, structured_error as structured_tool_error, tools};
 
 /// The application adapter owns a scratch transaction. Wasmtime sees only PluginHost.
 pub struct SolidCraftHost {
@@ -470,7 +486,11 @@ pub fn resolve_call(s: &Session, id: &str, params: &Value) -> Result<Option<Valu
     }
     let approval =
         params.get("approval").and_then(Value::as_str).ok_or_else(|| crate::params::bad(id, "approval from plugin.inspect is required"))?;
-    Ok(Some(json!({"path":path,"approval":approval,"entry":entry,"params":params.get("params").cloned().unwrap_or(json!({}))})))
+    let inputs = params.get("params").cloned().unwrap_or(json!({}));
+    // Called by name, an entry's inputs are checked as strictly as a command's parameters.
+    tools::check_entry_inputs(s, path, id, entry, &inputs)?;
+    // `named`: a refusal comes back in words an agent can act on (`tools::explain`).
+    Ok(Some(json!({"path":path,"approval":approval,"entry":entry,"params":inputs,"named":true})))
 }
 
 pub fn describe_entry(s: &Session, id: &str) -> Result<Option<Value>> {

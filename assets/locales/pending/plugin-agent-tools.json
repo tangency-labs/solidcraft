@@ -1,0 +1,7 @@
+{
+  "en": { "cmd.plugin.tools": "List Plugin Tools" },
+  "de": { "cmd.plugin.tools": "Plugin-Werkzeuge auflisten" },
+  "es": { "cmd.plugin.tools": "Listar herramientas de complementos" },
+  "ja": { "cmd.plugin.tools": "プラグインツールを一覧表示" },
+  "zh": { "cmd.plugin.tools": "列出插件工具" }
+}

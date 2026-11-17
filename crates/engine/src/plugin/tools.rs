@@ -1,0 +1,170 @@
+//! Installed plugins as tools for agents (RFC 0002 section 6c): every enabled plugin's entries,
+//! listed with their declared inputs (`plugin.tools`), and the refusals a tool call can meet put
+//! in words an agent can act on: which plugin, which grant and how to approve it, or which host
+//! import a `read` entry was refused. A refusal is an error, never a prompt.
+use super::*;
+use crate::schema::plugin::{PluginTool, PluginToolKind};
+
+/// How a person approves a grant a plugin lacks.
+pub const APPROVE: &str = "approve it in Preferences › Plugins by installing the plugin again and allowing it, \
+or headlessly with plugin.install and its approve object";
+
+/// Every installed, enabled plugin's entries as tools, sorted by name, or only the tool `name`.
+/// Reads each manifest, and for the one tool `name` asks for its component (for the approval
+/// hash its call passes); runs no plugin code. A disabled or removed plugin has no tools.
+pub fn tools(session: &mut Session, name: Option<&str>) -> Vec<PluginTool> {
+    let mut found = Vec::new();
+    let wanted = name.map(|n| n.split_once('.').map_or(n, |(plugin, _)| plugin));
+    for (id, folder) in import::package_folders(session) {
+        if session.disabled_plugins.contains(&id) || wanted.is_some_and(|w| w != id) {
+            continue;
+        }
+        let Ok(manifest) = with_installed(session, &folder, || import::read_manifest(&folder)) else { continue };
+        let Some(runtime) = manifest.runtime.as_ref() else { continue };
+        // A command entry runs through `<plugin>.<entry>`, which needs the package's hash.
+        let approval = if runtime.is_importer() || name.is_none() {
+            None
+        } else {
+            let Ok(package) = with_installed(session, &folder, || read_package(&folder)) else { continue };
+            Some(package.approval)
+        };
+        #[cfg(not(target_arch = "wasm32"))]
+        session.plugin_state.register_discovered(id.clone(), folder.clone());
+        for entry in &runtime.entries {
+            let (kind, input_schema) = match entry.kind {
+                EntryKind::Command => (PluginToolKind::Command, craft_plugin::strict_input_schema(&entry.input_schema)),
+                EntryKind::Importer => (PluginToolKind::Importer, importer_schema(entry)),
+            };
+            found.push(PluginTool {
+                name: format!("{}.{}", manifest.id, entry.name),
+                kind,
+                plugin: manifest.id.clone(),
+                entry: entry.name.clone(),
+                plugin_name: manifest.name.clone(),
+                plugin_version: manifest.version.clone(),
+                description: manifest.description.clone(),
+                effect: entry.effect,
+                extensions: entry.extensions.clone(),
+                input_schema,
+                approval: (kind == PluginToolKind::Command).then(|| approval.clone()).flatten(),
+            });
+        }
+    }
+    found.retain(|t| name.is_none_or(|n| t.name == n));
+    found.sort_by(|a, b| a.name.cmp(&b.name));
+    found
+}
+
+/// An importer tool's arguments: the file, and the options the importer declares.
+fn importer_schema(entry: &Entry) -> Value {
+    let extensions: Vec<String> = entry.extensions.iter().map(|e| format!(".{e}")).collect();
+    json!({
+        "type": "object",
+        "properties": {
+            "path": {"type": "string", "description": format!("The file to open ({})", extensions.join(", "))},
+            "options": craft_plugin::strict_input_schema(&entry.input_schema),
+        },
+        "required": ["path"],
+        "additionalProperties": false,
+    })
+}
+
+/// Checks a `<plugin>.<entry>` call's inputs against the entry's declared schema, as strictly as
+/// an app command's parameters, before any plugin code runs.
+pub(super) fn check_entry_inputs(session: &Session, folder: &str, id: &str, entry: &str, inputs: &Value) -> Result<()> {
+    let manifest = with_installed(session, folder, || import::read_manifest(folder))?;
+    let declared = manifest.runtime.as_ref().and_then(|r| r.entries.iter().find(|e| e.name == entry && e.kind == EntryKind::Command));
+    let Some(declared) = declared else { return Err(EngineError::UnknownCommand(id.into())) };
+    craft_plugin::check_input(&declared.input_schema, inputs).map_err(Into::into)
+}
+
+/// The refusal of a call that needs a grant `plugin` does not have.
+pub fn missing_grant(plugin: &str, grant: &str) -> EngineError {
+    EngineError::Other(format!("plugin `{plugin}` does not have the grant `{grant}`: {APPROVE}"))
+}
+
+/// The refusal of something a `read` entry may not do: a host import (`write-file`) or an edit
+/// command, named in `what` ("import `write-file`", "command `solid.extrude`").
+fn read_only(plugin: &str, entry: &str, kind: &str, name: &str) -> EngineError {
+    EngineError::Other(format!("plugin `{plugin}` entry `{entry}` is a read entry and was refused the {kind} `{name}`: it may not change anything"))
+}
+
+/// A failed `<plugin>.<entry>` call's error in words an agent can act on ([`explain`]), with the
+/// grants `session` holds for the plugin.
+pub fn explain_named(session: &Session, manifest: &Manifest, entry: &str, error: EngineError) -> EngineError {
+    match error {
+        EngineError::Plugin(e) => explain(e, manifest, &session.plugin_state.grants.get(&manifest.id).cloned().unwrap_or_default(), entry),
+        e => e,
+    }
+}
+
+/// A run's failure in words an agent can act on: a grant the plugin lacks (named, with how to
+/// approve it) or what a read entry was refused (named). Anything else is left as it was.
+fn explain(error: HostError, manifest: &Manifest, grants: &Grants, entry: &str) -> EngineError {
+    let id = &manifest.id;
+    let Some(runtime) = manifest.runtime.as_ref() else { return error.into() };
+    match &error {
+        HostError::PermissionDenied { permission } => {
+            if let Some(import) = permission.strip_prefix(craft_plugin::READ_ENTRY_IMPORT) {
+                return read_only(id, entry, "host import", import);
+            }
+            if let Some(command) = permission.strip_prefix("edit command ").and_then(|p| p.strip_suffix(" from read entry")) {
+                return read_only(id, entry, "edit command", command);
+            }
+            // `files.read:<name>` or `files.write:<name>`, with nothing after: no such grant.
+            for (access, write) in [("files.read:", false), ("files.write:", true)] {
+                if let Some(name) = permission.strip_prefix(access)
+                    && !name.contains(':')
+                    && runtime.permissions.files.iter().any(|f| f.name == name && if write { f.write } else { f.read })
+                    && !grants.folders.iter().any(|g| g.name == name && if write { g.write } else { g.read })
+                {
+                    return missing_grant(id, &format!("{access}{name}"));
+                }
+            }
+            if let Some(group) = permission.split('`').nth(1).filter(|_| permission.contains(" permission"))
+                && runtime.permissions.command_groups.contains(group)
+                && !grants.command_groups.contains(group)
+            {
+                return missing_grant(id, &format!("command_groups.{group}"));
+            }
+            if permission.starts_with("stored plugin grants need re-approval") {
+                return missing_grant(id, "approval");
+            }
+            error.into()
+        }
+        HostError::LimitExceeded { limit } if limit.starts_with("memory exceeds") => missing_grant(id, "memory_mib"),
+        _ => error.into(),
+    }
+}
+
+/// A plugin tool refusal as data, from its text (wherever it sits in a longer message):
+/// `{plugin, grant, approve}` for a missing grant, `{plugin, entry, refused_import}` or
+/// `{plugin, entry, refused_command}` for a read entry. `None` for any other text.
+pub fn structured_error(text: &str) -> Option<Value> {
+    if text.len() > 8192 {
+        return None;
+    }
+    let start = text.find("plugin `")?;
+    let rest = &text[start + "plugin `".len()..];
+    let (plugin, rest) = rest.split_once('`')?;
+    if !valid_id(plugin) {
+        return None;
+    }
+    if let Some(rest) = rest.strip_prefix(" does not have the grant `") {
+        let (grant, rest) = rest.split_once('`')?;
+        rest.starts_with(": ").then(|| json!({"plugin": plugin, "grant": grant, "approve": APPROVE}))
+    } else {
+        let rest = rest.strip_prefix(" entry `")?;
+        let (entry, rest) = rest.split_once('`')?;
+        let rest = rest.strip_prefix(" is a read entry and was refused the ")?;
+        let (key, rest) = if let Some(r) = rest.strip_prefix("host import `") {
+            ("refused_import", r)
+        } else {
+            ("refused_command", rest.strip_prefix("edit command `")?)
+        };
+        let (name, _) = rest.split_once('`')?;
+        let mut refusal = json!({"plugin": plugin, "entry": entry});
+        refusal[key] = json!(name);
+        Some(refusal)
+    }
+}
