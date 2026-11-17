@@ -484,6 +484,67 @@ fn cut_to_a_curved_face_the_profile_partly_misses_is_refused() {
     assert!(err.to_string().contains("reaches past the To face"), "{err}");
 }
 
+/// #17707: two cylinders of radius 15 whose axes cross at 60°, joined. The tilted one's end face
+/// lies 5 mm from where the axes cross, so the other cylinder cuts it and leaves two crescents
+/// outside. Each crescent, extruded as a Join To Object up to the first cylinder's wall, adds the
+/// sliver between them. The seams of the two cylinders end a few hundredths of a millimetre from
+/// the crescents' tips, so each crescent has one very short projected edge; read as a straight
+/// line, it put a flat side 1e-5 mm off the cylinder under the tool, and SMLib's check refused
+/// the split (profile 1) or the join (profile 0).
+///
+/// Before the join the body has 8 faces, 18 edges and 12 vertices. The join takes the crescent's
+/// face away (one face fewer) and its three edges: its arc of the end circle and the ellipse where
+/// the end plane meets the first cylinder, one of them in two pieces where a seam ends on it.
+/// The tilted cylinder's wall runs on down to the first cylinder and meets it in two ellipse arcs
+/// that cross where the two walls touch, (±15, -75, 0) on the crescent's side: a new vertex
+/// there. One seam, the tilted cylinder's (profile 0) or the first cylinder's (profile 1), now
+/// ends on those arcs and splits one of them: three new edges. So 7 faces, 18 edges, 13 vertices,
+/// one shell.
+///
+/// The sliver's volume is the integral over the crescent of the distance from the end face, along
+/// the tilted axis, to the first cylinder's wall. In the end face's frame (u along x, v square to
+/// it in the face, c = 5 sqrt(3) / 2 the height of the face's centre above the first axis) the
+/// crescent is u^2 + v^2 <= 225 with u^2 + (c + v / 2)^2 >= 225, v from (c - sqrt 75) / 1.5 to
+/// (c + sqrt 75) / 1.5, and the distance is (c + v / 2 - sqrt(225 - u^2)) / (sqrt(3) / 2). The
+/// integral over u is closed form, the one over v by quadrature: 8.3467156 mm³.
+#[test]
+fn join_up_to_a_cylinder_from_a_face_it_cuts_adds_the_sliver_between() {
+    let topology = |s: &Session| {
+        let state = s.model.state();
+        let b = &state.body("Body1").unwrap().body;
+        (state.bodies.len(), b.face_count(), b.edge_count(), b.vertex_count(), b.record().shells.len())
+    };
+    // Whether the body has a vertex where the walls touch on the side x of sign `x`.
+    let touch = |s: &Session, x: f64| {
+        let state = s.model.state();
+        let b = &state.body("Body1").unwrap().body;
+        b.record().vertices.iter().any(|v| (v.point[0] - 15. * x).hypot(v.point[1] + 75.).hypot(v.point[2]) < 1e-6)
+    };
+    // Profile 0 is the crescent on +x, profile 1 the one on -x.
+    for (profile, x) in [(0, 1.), (1, -1.)] {
+        let mut s = Session::default();
+        run(&mut s, "solid.cylinder", json!({"radius": 15, "height": 40, "base": [0, -100, 0], "axis": "Y", "operation": "new"}));
+        run(
+            &mut s,
+            "solid.cylinder",
+            json!({"radius": 15, "height": 35, "base": [0, -77.5, 4.330127018922193], "axis": [0, -0.5, 0.8660254037844386], "operation": "join"}),
+        );
+        run(&mut s, "sketch.create", json!({"plane": {"face": [-14.5, -77.5, 4.330127018922193]}, "project_edges": true, "name": "S"}));
+        run(&mut s, "sketch.finish", json!({}));
+        let volume = |s: &Session| s.model.state().body("Body1").and_then(|b| b.body.volume_at(1e-4)).unwrap_or(f64::NAN);
+        let before = volume(&s);
+        assert_eq!(topology(&s), (1, 8, 18, 12, 1), "profile {profile}: before the join");
+        assert!(!touch(&s, 1.) && !touch(&s, -1.), "profile {profile}: no vertex where the walls touch yet");
+        let to = [-14.931150677683434, -78.64377441378278, -0.7504228399786044];
+        let r = s.execute("solid.extrude", &json!({"to": to, "direction": "positive", "operation": "join", "profiles": [profile]}));
+        assert!(r.is_ok() && s.model.results.iter().all(|r| r.error.is_none()), "profile {profile}: {r:?} {:?}", s.model.results);
+        assert_eq!(topology(&s), (1, 7, 18, 13, 1), "profile {profile}: bodies, faces, edges, vertices, shells");
+        assert!(touch(&s, x) && !touch(&s, -x), "profile {profile}: the new vertex is where the walls touch on its side");
+        let (added, want) = (volume(&s) - before, 8.346_715_6);
+        assert!((added - want).abs() < want * 1e-5, "profile {profile}: added {added}, want {want}");
+    }
+}
+
 /// #13188: a stored taper of 0 is a straight extrusion, also for a profile with a hole.
 #[test]
 fn extrude_with_a_taper_of_zero_on_a_profile_with_a_hole_is_straight() {

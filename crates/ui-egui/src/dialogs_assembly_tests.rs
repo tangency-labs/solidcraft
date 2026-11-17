@@ -364,6 +364,33 @@ fn edit_joint_runs_edit_and_limits() {
     assert!((j.offset - 2.0).abs() < 1e-12);
 }
 
+/// Edit Joint sends the joint's name with every edit: a joint whose own name is over 128
+/// characters (joint.create takes any) can still be edited from the dialog, its name kept.
+#[test]
+fn edit_joint_edits_a_joint_with_a_long_name() {
+    let mut app = two_boxes();
+    let (a, b) = (occ(&app, "A"), occ(&app, "B"));
+    let long = "x".repeat(200);
+    app.run(
+        "joint.create",
+        json!({"type": "slider", "name": long, "a": {"occurrence": a, "face": [10, 10, 10]}, "b": {"occurrence": b, "face": [40, 10, 0]}}),
+    )
+    .unwrap();
+    let id = app.session.doc.assembly.joints[0].id;
+    let mut d = edit_joint(&app, id).unwrap();
+    if let Kind::Assembly(Asm::Joint(f)) = &mut d.kind {
+        f.offset[2] = "2 mm".into();
+    }
+    let c = apply_commands(&app, &d).unwrap();
+    assert!(c.iter().any(|(id, p)| id == "joint.edit" && p["name"] == json!(long)), "the dialog sends the name: {c:?}");
+    for (id, p) in c {
+        app.run(&id, p).unwrap();
+    }
+    let j = &app.session.doc.assembly.joints[0];
+    assert!((j.offset - 2.0).abs() < 1e-12, "the edit went through");
+    assert_eq!(j.name, long);
+}
+
 /// An old edge pick saved as point/z keeps its face-normal axis when reopened and edited.
 #[test]
 fn editing_a_saved_joint_keeps_its_explicit_axis() {

@@ -977,6 +977,111 @@ fn ui_rename_answers_a_refused_name_with_the_reason() {
     assert_eq!(h.app.session.doc.feature(lid).unwrap().name, "Top");
 }
 
+/// After a refused `ui.rename` the box takes the keyboard again with the name selected, as after
+/// a refused Enter: the next keystrokes replace the name.
+#[test]
+fn a_refused_ui_rename_selects_the_name_for_the_next_keystrokes() {
+    let mut h = crate::scenario::Harness::new();
+    for name in ["Base", "Lid"] {
+        h.app.run("solid.box", json!({"length": 10, "width": 10, "height": 10, "name": name})).unwrap();
+    }
+    let lid = h.app.session.doc.find_feature("Lid").unwrap().id;
+    context_menu::start_rename(&mut h.app, context_menu::RenameWhat::Feature(lid), pos2(300.0, 200.0));
+    h.frames(2);
+    assert_eq!(h.call("ui.rename", json!({"text": "Base"}))["ok"], false);
+    h.frames(2);
+    h.step(&json!({"text": "Top"})).unwrap();
+    h.step(&json!({"key": "Enter"})).unwrap();
+    h.frames(2);
+    assert!(h.app.menu.rename.is_none(), "the corrected name was taken");
+    assert_eq!(h.app.session.doc.feature(lid).unwrap().name, "Top");
+}
+
+/// A Browser group's refused name keeps the Rename box open with the reason, and `ui.rename`
+/// answers with it, as for every other rename.
+#[test]
+fn a_refused_browser_group_rename_keeps_the_box_open() {
+    let mut h = crate::scenario::Harness::new();
+    h.app.run("solid.box", json!({"length": 10, "width": 10, "height": 10, "body_name": "Block"})).unwrap();
+    let group = h.app.run("browser.group", json!({"folder": "bodies", "items": ["Block"], "name": "Held"})).unwrap()["group"].as_u64().unwrap();
+    context_menu::start_rename(&mut h.app, context_menu::RenameWhat::Group(group), pos2(300.0, 200.0));
+    h.frames(2);
+    h.step(&json!({"text": "x".repeat(200)})).unwrap();
+    h.step(&json!({"key": "Enter"})).unwrap();
+    h.frames(2);
+    assert!(h.app.menu.rename.is_some() && crate::scenario::rect_of("rename:name").is_some(), "the box stays open after a refused rename");
+    let (text, _, error) = h.app.status.clone().expect("the refusal is shown");
+    assert!(error && text.contains("1…128 characters"), "{text}");
+    let reply = h.call("ui.rename", json!({"text": "y".repeat(200)}));
+    assert!(reply["error"].as_str().is_some_and(|e| e.contains("1…128 characters")), "{reply}");
+    assert_eq!(h.call("ui.rename", json!({"text": "Kept"}))["ok"], true);
+    assert_eq!(h.app.session.doc.browser_group(group).map(|g| g.name.as_str()), Some("Kept"));
+}
+
+/// A refused rename is given up when another design is shown: Enter there renames nothing, even
+/// a group with the same id.
+#[test]
+fn a_refused_group_rename_is_given_up_with_its_design() {
+    let mut h = crate::scenario::Harness::new();
+    let make = |h: &mut crate::scenario::Harness| {
+        h.app.run("solid.box", json!({"length": 10, "width": 10, "height": 10, "body_name": "Block"})).unwrap();
+        h.app.run("browser.group", json!({"folder": "bodies", "items": ["Block"], "name": "Held"})).unwrap()["group"].as_u64().unwrap()
+    };
+    let group = make(&mut h);
+    crate::documents::open_tab(&mut h.app, solidcraft_engine::Session::default()).unwrap();
+    assert_eq!(make(&mut h), group, "the other design's group has the same id");
+    crate::documents::switch(&mut h.app, 0);
+    h.frames(2);
+    context_menu::start_rename(&mut h.app, context_menu::RenameWhat::Group(group), pos2(300.0, 200.0));
+    h.frames(2);
+    h.step(&json!({"text": "x".repeat(200)})).unwrap();
+    h.step(&json!({"key": "Enter"})).unwrap();
+    h.frames(2);
+    assert!(h.app.menu.rename.is_some(), "refused, so the box stays");
+    crate::documents::switch(&mut h.app, 1);
+    // Read before the next frame gives it up, the other design's rename is not reported.
+    h.app.viewport.context_menu = Some(pos2(10.0, 10.0));
+    assert!(context_menu::describe(&h.app)["rename"].is_null(), "{}", context_menu::describe(&h.app));
+    h.app.viewport.context_menu = None;
+    h.frames(2);
+    assert!(h.app.menu.rename.is_none(), "the rename is given up with its design");
+    h.step(&json!({"text": "Renamed"})).unwrap();
+    h.step(&json!({"key": "Enter"})).unwrap();
+    h.frames(2);
+    assert_eq!(h.app.session.doc.browser_group(group).map(|g| g.name.as_str()), Some("Held"));
+    assert!(h.call("ui.rename", json!({"text": "Renamed"}))["ok"] == false, "no rename is in progress");
+}
+
+/// A joint's refused new name keeps the Rename box open with the reason, and the corrected
+/// name is taken.
+#[test]
+fn a_refused_joint_rename_keeps_the_box_open() {
+    let mut h = crate::scenario::Harness::new();
+    // Two parts, as joints join placements.
+    for (name, x) in [("A", 0), ("B", 20)] {
+        h.app.run("component.activate", json!({"component": "root"})).unwrap();
+        h.app.run("component.create", json!({"name": name, "grounded": false})).unwrap();
+        h.app.run("solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [x, 0, 0]})).unwrap();
+    }
+    h.app.run("component.activate", json!({"component": "root"})).unwrap();
+    let id =
+        h.app.run("joint.create", json!({"type": "rigid", "name": "Glue", "a": {"face": [5, 5, 10]}, "b": {"face": [25, 5, 0]}})).unwrap()["joint"]
+            .as_u64()
+            .unwrap();
+    context_menu::start_rename(&mut h.app, context_menu::RenameWhat::Joint(id), pos2(300.0, 200.0));
+    h.frames(2);
+    h.step(&json!({"text": "ł".repeat(129)})).unwrap();
+    h.step(&json!({"key": "Enter"})).unwrap();
+    h.frames(2);
+    assert!(h.app.menu.rename.is_some() && crate::scenario::rect_of("rename:name").is_some(), "the box stays open after a refused rename");
+    let (text, _, error) = h.app.status.clone().expect("the refusal is shown");
+    assert!(error && text.contains("at most 128 characters"), "{text}");
+    h.step(&json!({"text": "Hinge"})).unwrap();
+    h.step(&json!({"key": "Enter"})).unwrap();
+    h.frames(2);
+    assert_eq!(h.app.session.doc.assembly.joints.iter().find(|j| j.id == id).map(|j| j.name.as_str()), Some("Hinge"));
+}
+
 #[test]
 fn browser_feature_menu_confirms_dependent_changes_before_deleting() {
     let mut app = sample_app();

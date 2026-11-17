@@ -3720,7 +3720,7 @@
   "render.cpu_body_choose": "选择实体",
   "render.cpu_body_filter": "按名称筛选实体",
   "render.cpu_body_filter_more": "请缩小筛选范围以显示更多实体。",
-  "render.cpu_body_missing": "反射目标不存在、已隐藏、名称有歧义或超过128字节。请重新选择。",
+  "render.cpu_body_missing": "反射目标不存在、已隐藏、名称有歧义或超过512字节。请重新选择。",
   "render.cpu_budget": "CPU 资源配置",
   "render.cpu_budget_bodies": "实体数上限",
   "render.cpu_budget_compact": "紧凑型（旧版限制）",
