@@ -26,6 +26,34 @@ fn a_box_measures_exactly() {
     assert!((v - 6000.0).abs() < 6000.0 * 1e-9, "{v}");
 }
 
+/// A body held without a record names its faces, edges and vertices by their place in its own
+/// lists: the order has one entry per entity, a call takes its indices (a box's face 0 is some
+/// face of the box, every point of which is within nothing of it), and the body's tolerance is
+/// the kernel's default for a new body.
+#[test]
+fn a_body_s_native_order_names_its_own_lists() {
+    all_fixes();
+    let b = make_box([0.0; 3], [10.0, 20.0, 30.0]).unwrap();
+    let order = b.native_order().unwrap();
+    assert_eq!(
+        [order.faces.len(), order.edges.len(), order.vertices.len()],
+        b.counts().unwrap()
+    );
+    // The centre of the top face: on exactly one face, 15 from the two sides nearest it.
+    let rows = b
+        .face_distances_within(&order, &[[5.0, 10.0, 30.0]], 1.0)
+        .unwrap();
+    assert_eq!(rows.len(), 6);
+    let near: Vec<f64> = rows.iter().filter_map(|r| r[0]).collect();
+    assert_eq!(near.len(), 1, "{rows:?}");
+    assert!(near[0].abs() < 1e-12, "{near:?}");
+    let tol = b.tolerance().unwrap();
+    assert!(tol > 0.0 && tol < 1e-3, "{tol}");
+    // A copy has its own entities in the same places.
+    let copy = b.copy().unwrap();
+    assert_eq!(copy.native_order().unwrap().faces.len(), 6);
+}
+
 /// The accuracy goes to the kernel as given: one it refuses is its status.
 #[test]
 fn a_volume_accuracy_is_the_kernels_to_refuse() {

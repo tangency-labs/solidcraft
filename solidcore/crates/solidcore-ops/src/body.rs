@@ -402,6 +402,33 @@ impl Body {
         })
     }
 
+    /// The [`Order`] of this body as it stands, for a body held without a record: index `i`
+    /// names the `i`th face, edge and vertex of the body's own lists, in the order the kernel
+    /// holds them. It names this body's entities until an operation edits the body; a call
+    /// given it after that refuses an index whose entity is gone, as with any stale order.
+    ///
+    /// # Errors
+    /// Those of [`with_body`].
+    pub fn native_order(&self) -> Result<Order> {
+        read_body("native_order", self, |_, b| {
+            Ok(Order {
+                faces: b.face_list().to_vec(),
+                edges: b.edge_list().to_vec(),
+                vertices: b.vertex_list().to_vec(),
+            })
+        })
+    }
+
+    /// The body's own tolerance (`SmBrep::GetTolerance`): the distance within which the kernel
+    /// takes two of its points for one. A pick that finds two entities within it of each other
+    /// cannot tell them apart.
+    ///
+    /// # Errors
+    /// Those of [`with_body`].
+    pub fn tolerance(&self) -> Result<f64> {
+        read_body("tolerance", self, |_, b| Ok(b.tolerance()))
+    }
+
     /// The enclosed volume (`SmApiBrepComputeVolume`) at `relative_accuracy`, as the kernel's
     /// contract takes it (ops passes it on as given).
     ///
@@ -519,6 +546,8 @@ impl Body {
         out.ok_or(Error::Exception)
     }
 }
+
+impl crate::session::Answer for Order {}
 
 /// What an operation tests of a solid operand and requires of its result: every family's
 /// (booleans, blends, sweeps, offsets, splits). An operation's plain call runs under
