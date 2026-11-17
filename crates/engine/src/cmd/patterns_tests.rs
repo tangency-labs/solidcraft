@@ -365,18 +365,17 @@ fn circular_axis_origin_rejects_invalid_values_atomically() {
     let before = s.doc.to_json();
     let undo = s.undo.len();
     let invalid = [json!([0, 0]), json!([0, 0, 0, 0]), json!(null), json!(false), json!({"x":0,"y":0}), json!([1e9, 0, 0]), json!([0, 1e100, 0])];
-    // A circular pattern's origin takes length expressions (#10852); an angled plane's doesn't.
+    // A circular pattern's origin and an angled plane's both take length expressions (#10852),
+    // so both refuse the same values.
     for origin in invalid.iter().chain(&[json!(["nope", 0, 0]), json!(["2 deg", 0, 0])]) {
         let params = json!({"features":["Hole1"],"axis":{"origin":origin,"dir":[0,0,1]},"count":4});
         let error = s.execute("solid.pattern.circular", &params).unwrap_err().to_string();
         assert!(error.contains("axis.origin"), "{origin}: {error}");
         assert_eq!(s.doc.to_json(), before);
         assert_eq!(s.undo.len(), undo);
-    }
-    for origin in invalid.iter().chain(&[json!(["cx", "cy", 0]), json!(["50", 25, 0])]) {
         let params = json!({"base":"XY","axis":{"origin":origin,"dir":[1,0,0]},"angle":45});
         let error = s.execute("construct.plane.at_angle", &params).unwrap_err().to_string();
-        assert!(error.contains("axis.origin") && error.contains("expressions are not supported"), "{error}");
+        assert!(error.contains("axis.origin"), "{origin}: {error}");
         assert_eq!(s.doc.to_json(), before);
         assert_eq!(s.undo.len(), undo);
     }
@@ -1928,4 +1927,34 @@ fn a_pattern_keeps_the_names_of_a_left_out_bodys_copies() {
     assert_eq!(copies(&s), b_copies, "B's copies keep their names while A is left out");
     run(&mut s, "timeline.suppress", json!({"feature": a, "suppressed": false}));
     assert_eq!(copies(&s), before, "every copy has its name back");
+}
+
+/// Placing a part many times moves none of its bodies' records: the placed world keeps each
+/// part's record with each placement's motion, and a placement's record is moved only when its
+/// own exact geometry is needed. Every placement of a large assembly placed a hundred times was
+/// moved as it was placed, tens of gigabytes.
+#[test]
+fn placing_a_part_many_times_moves_no_record_until_one_is_needed() {
+    let mut s = Session::default();
+    let c = run(&mut s, "component.create", json!({"name": "Part", "grounded": false}));
+    for k in 0..3 {
+        run(&mut s, "solid.cylinder", json!({"base": [12 * k, 0, 0], "radius": 5, "height": 20, "body_name": format!("B{k}")}));
+    }
+    run(&mut s, "component.activate", json!({"component": 0}));
+    for k in 1..=10 {
+        run(&mut s, "occurrence.copy", json!({"component": c["component"], "translate": [0, 40 * k, 0]}));
+    }
+    let before = solidcraft_kernel::lazy_moves_made();
+    let world = s.world_state().unwrap();
+    assert_eq!(world.bodies.len(), 3 * 11);
+    // Their shapes are drawn, named and framed from the part's: meshes, face counts, outlines,
+    // whether they are closed (the viewport asks every frame it builds).
+    for b in &world.bodies {
+        let _ = (b.body.face_count(), b.mesh_in_place(), b.outline_bounds(), b.is_closed());
+    }
+    assert_eq!(solidcraft_kernel::lazy_moves_made(), before, "no placement's record moved to place or draw it");
+    // A measure of one placement needs its own geometry: that one is moved, once.
+    let placed = world.bodies.iter().find(|b| b.placed_definition().is_some()).unwrap();
+    let _ = placed.body.record();
+    assert_eq!(solidcraft_kernel::lazy_moves_made(), before + 1);
 }

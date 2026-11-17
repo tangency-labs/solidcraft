@@ -70,6 +70,7 @@ fn an_importer_checks_its_own_design_apart_from_the_open_one() {
         session: Session::default(),
         transaction: None,
         sketch_exits: Vec::new(),
+        view: None,
         groups: BTreeSet::new(),
         file_folders: Vec::new(),
         evaluation: None,
@@ -98,6 +99,7 @@ fn every_built_command_is_reachable_and_sensitive_ones_need_their_group() {
         session: Session::default(),
         transaction: None,
         sketch_exits: Vec::new(),
+        view: None,
         groups: BTreeSet::new(),
         file_folders: Vec::new(),
         evaluation: None,
@@ -146,6 +148,7 @@ fn a_sensitive_command_is_refused_unless_granted_and_a_granted_file_command_sees
         session: Session::default(),
         transaction: None,
         sketch_exits: Vec::new(),
+        view: None,
         groups: BTreeSet::new(),
         file_folders: Vec::new(),
         evaluation: None,
@@ -661,6 +664,7 @@ mod native {
                     session: s,
                     transaction: None,
                     sketch_exits: Vec::new(),
+                    view: None,
                     groups: BTreeSet::new(),
                     file_folders: Vec::new(),
                     evaluation: None,
@@ -724,6 +728,78 @@ mod native {
         s.plugin_state.grants.remove("sample");
         assert!(matches!(f.run(&mut s), Err(EngineError::Plugin(HostError::PermissionDenied { .. }))));
         assert!(s.doc.features.is_empty());
+    }
+
+    /// `plugin.check` finds what Install and a call would refuse, with a fix for each, and runs
+    /// no plugin code: the fixture's component would trap if it ran.
+    #[test]
+    fn check_reports_each_refusal_with_its_fix_and_runs_nothing() {
+        let f = Fixture::new("unreachable");
+        let mut s = Session::default();
+        let check = |s: &mut Session, path: &str| s.execute("plugin.check", &json!({"path":path})).unwrap();
+        let good = check(&mut s, &f.path());
+        assert_eq!((good["ok"].as_bool(), good["kind"].as_str()), (Some(true), Some("command")), "{good}");
+        assert_eq!(good["problems"], json!([]));
+        assert_eq!(good["approval"], s.execute("plugin.inspect", &json!({"path":f.path()})).unwrap()["approval"], "one hash for one package");
+        // The package as it ships: a .zip, checked by the installer's own reader.
+        let component = std::fs::read(f.0.join("sample/plugin.wasm")).unwrap();
+        let zip = |manifest: &Value, component: &[u8]| {
+            let path = f.0.join("package.zip");
+            let manifest = serde_json::to_vec(manifest).unwrap();
+            std::fs::write(&path, solidcraft_io::safe_zip::write(&[("plugin.json", &manifest), ("plugin.wasm", component)]).unwrap()).unwrap();
+            path.to_string_lossy().into_owned()
+        };
+        let zipped = check(&mut s, &zip(&manifest(), &component));
+        assert_eq!((zipped["ok"].as_bool(), &zipped["approval"]), (Some(true), &good["approval"]));
+        // Hidden files and the tests folder stay out of a package folder's check.
+        std::fs::create_dir_all(f.0.join("sample/tests")).unwrap();
+        std::fs::write(f.0.join("sample/tests/big.bin"), vec![0u8; 17 << 20]).unwrap();
+        std::fs::write(f.0.join("sample/.notes"), b"x").unwrap();
+        assert_eq!(check(&mut s, &f.path())["problems"], json!([]));
+        let fields = |reply: &Value| -> Vec<(String, String)> {
+            reply["problems"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|p| (p["severity"].as_str().unwrap().into(), p["field"].as_str().unwrap().into()))
+                .collect()
+        };
+        for (mutate, field) in [
+            ((|m: &mut Value| m["runtime"]["permissions"] = json!({"net": true})) as fn(&mut Value), "runtime.permissions.net"),
+            (|m: &mut Value| m["id"] = json!("Sample"), "id"),
+            (|m: &mut Value| m["capabilities"] = json!(["commands@0.2"]), "capabilities"),
+            (|m: &mut Value| m["runtime"]["commands"] = json!(["file.export"]), "runtime.commands"),
+            (|m: &mut Value| m["runtime"]["limits"]["deadline_ms"] = json!(60_000), "runtime.limits.deadline_ms"),
+            (|m: &mut Value| m["runtime"]["limits"]["fuel"] = json!(200_000_000_000_u64), "runtime.limits.fuel"),
+            (|m: &mut Value| m["runtime"]["module"] = json!("missing.wasm"), "runtime.module"),
+            (|m: &mut Value| m["surprise"] = json!(true), "manifest"),
+        ] {
+            let mut m = manifest();
+            mutate(&mut m);
+            let reply = check(&mut s, &zip(&m, &component));
+            assert_eq!(reply["ok"], false, "{m}");
+            assert_eq!(fields(&reply).first(), Some(&("error".to_string(), field.to_string())), "{reply}");
+            assert!(reply["problems"].as_array().unwrap().iter().all(|p| !p["fix"].as_str().unwrap().is_empty()), "{reply}");
+        }
+        // Memory over the ceiling installs once the user approves it: a warning.
+        let mut m = manifest();
+        m["runtime"]["limits"]["memory_mib"] = json!(512);
+        let reply = check(&mut s, &zip(&m, &component));
+        assert_eq!((reply["ok"].as_bool(), fields(&reply)), (Some(true), vec![("warning".to_string(), "runtime.limits.memory_mib".to_string())]));
+        // A core module, and a command component declared as an importer, do not link.
+        let core = wat::parse_str("(module)").unwrap();
+        let reply = check(&mut s, &zip(&manifest(), &core));
+        assert!(reply["problems"][0]["fix"].as_str().unwrap().contains("wasm-tools component new"), "{reply}");
+        let importer = json!({"id":"sample","name":"Sample","version":"1","capabilities":["formats@0.1"],"runtime":{"module":"plugin.wasm",
+            "commands":[],"entries":[{"name":"convert","kind":"importer","extensions":["smp"]}]}});
+        assert_eq!(fields(&check(&mut s, &zip(&importer, &component))), vec![("error".to_string(), "component".to_string())]);
+        // A folder named apart from its id still checks, with a note.
+        std::fs::rename(f.0.join("sample"), f.0.join("sample-src")).unwrap();
+        let renamed = check(&mut s, &f.0.join("sample-src").to_string_lossy());
+        assert_eq!((renamed["ok"].as_bool(), fields(&renamed)), (Some(true), vec![("warning".to_string(), "id".to_string())]));
+        std::fs::rename(f.0.join("sample-src"), f.0.join("sample")).unwrap();
+        assert!(s.doc.features.is_empty() && s.undo.is_empty(), "checking changes nothing");
+        assert!(!f.0.join("installed").exists(), "and installs nothing");
     }
 
     #[test]
@@ -942,6 +1018,7 @@ fn command_effects_are_explicit_and_independent_of_undo() {
         session: Session::default(),
         transaction: None,
         sketch_exits: Vec::new(),
+        view: None,
         groups: BTreeSet::new(),
         file_folders: Vec::new(),
         evaluation: None,
@@ -970,8 +1047,15 @@ fn granted_roots_allow_hidden_ancestors_but_exclude_hidden_descendants() {
         FileGrant { name: "project".into(), folder: root.clone(), read: true, write: true },
         FileGrant { name: "hidden".into(), folder: root.join(".hidden"), read: true, write: false },
     ];
-    let host =
-        SolidCraftHost { session, transaction: None, sketch_exits: Vec::new(), groups: BTreeSet::new(), file_folders: Vec::new(), evaluation: None };
+    let host = SolidCraftHost {
+        session,
+        transaction: None,
+        sketch_exits: Vec::new(),
+        view: None,
+        groups: BTreeSet::new(),
+        file_folders: Vec::new(),
+        evaluation: None,
+    };
     solidcraft_io::vfs::scoped(None, || {
         for write in [false, true] {
             assert!(host.authorize_file_path(&root.join("public.txt"), write).is_ok());

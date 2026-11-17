@@ -806,4 +806,96 @@ mod native {
         assert!(!h.app.preview.active, "no dialog, no preview");
         let _ = std::fs::remove_dir_all(root);
     }
+
+    /// A package with `home` (a box, then view.home), `edit` (a box and no view command) and `fail`.
+    fn view_package(tag: &str) -> std::path::PathBuf {
+        let root = std::env::temp_dir().join(format!("solidcraft-plugin-view-{}-{tag}", std::process::id()));
+        let dir = root.join("frames");
+        std::fs::create_dir_all(&dir).unwrap();
+        let (name, version) = solidcraft_engine::plugin::API.rsplit_once('@').unwrap();
+        let wat = include_str!("plugin_view_fixture.wat").replace("PLUGIN_PACKAGE", name).replace("PLUGIN_VERSION", version);
+        std::fs::write(dir.join("plugin.wasm"), wat::parse_str(&wat).unwrap()).unwrap();
+        let entry = |entry_name: &str, label: &str| json!({"name": entry_name, "effect": "edit", "input_schema": {"type": "object"}, "slots": [{"kind": "menu", "name": label}]});
+        let manifest = json!({"id":"frames","name":"Frames","version":"0.1.0","capabilities":["commands@0.1"],"runtime":{
+            "module":"plugin.wasm",
+            "entries":[entry("home", "Home"), entry("edit", "Edit"), entry("fail", "Fail")],
+            "commands":["solid.box", "view.home"]}});
+        std::fs::write(dir.join("plugin.json"), manifest.to_string()).unwrap();
+        root
+    }
+
+    fn same_camera(a: &solidcraft_viewport::Camera, b: &solidcraft_viewport::Camera) -> bool {
+        let near =
+            |p: solidcore_record::Vec3, q: solidcore_record::Vec3| (p.x - q.x).abs() < 1e-6 && (p.y - q.y).abs() < 1e-6 && (p.z - q.z).abs() < 1e-6;
+        near(a.target, b.target) && (a.distance - b.distance).abs() < 1e-6 && (a.yaw - b.yaw).abs() < 1e-9 && (a.pitch - b.pitch).abs() < 1e-9
+    }
+
+    #[test]
+    fn a_view_command_from_a_plugin_moves_the_camera_and_an_edit_without_one_leaves_it() {
+        let root = view_package("camera");
+        let mut h = crate::scenario::Harness::new();
+        h.app.preferences.look_at_anim = false;
+        h.app.plugin_menu.listed = list(&h.app, Some(&root));
+        assert_eq!(h.app.plugin_menu.listed.len(), 1);
+        let index = |name: &str| h.app.plugin_menu.listed[0].entries.iter().position(|entry| entry.name == name).expect(name);
+        let home = index("home");
+        let _ = (index("edit"), index("fail"));
+        h.app.cam.set_view(solidcraft_viewport::StandardView::Front);
+        h.app.cam.distance = 800.0;
+        h.app.cam.target = solidcore_record::Vec3::ZERO;
+        let parked = h.app.cam;
+
+        open_entry(&mut h.app, 0, home);
+        run(&mut h.app).unwrap();
+        settle(&mut h);
+        h.frames(2);
+        assert_eq!(h.app.session.doc.features.len(), 1, "the entry inserted its box");
+        let from_plugin = h.app.cam;
+        h.app.cancel_view_animation();
+        h.app.cam = parked;
+        h.app.run("view.home", json!({})).unwrap();
+        h.frames(2);
+        assert!(same_camera(&from_plugin, &h.app.cam), "view.home frames the inserted box the way Home does: {from_plugin:?} vs {:?}", h.app.cam);
+        let centre = h.app.cam.target;
+        let on_box = (centre.x - 5.0).abs() < 5.0 && (centre.y - 5.0).abs() < 5.0 && (centre.z - 5.0).abs() < 5.0;
+        assert!(on_box, "the frame is on that box: {centre:?}");
+
+        let stayed = h.app.cam;
+        // A frame can open the Plugins menu, and that reads the installed plugins again.
+        h.app.plugin_menu.listed = list(&h.app, Some(&root));
+        let edit = h.app.plugin_menu.listed[0].entries.iter().position(|entry| entry.name == "edit").expect("edit");
+        open_entry(&mut h.app, 0, edit);
+        let opened = h.app.plugin_menu.dialog().map(|d| d.entry.clone());
+        assert_eq!(
+            opened.as_deref(),
+            Some("edit"),
+            "the second entry's dialog opened; listed {:?}",
+            h.app.plugin_menu.listed.iter().map(|p| (p.id.clone(), p.entries.iter().map(|e| e.name.clone()).collect::<Vec<_>>())).collect::<Vec<_>>()
+        );
+        run(&mut h.app).unwrap();
+        assert!(h.app.plugin_menu.dialog().is_some_and(|d| d.running.is_some()), "the second entry was queued");
+        settle(&mut h);
+        h.frames(2);
+        let why = h
+            .app
+            .plugin_menu
+            .dialog()
+            .map(|d| d.error.clone().unwrap_or_else(|| format!("dialog still open for {}", d.entry)))
+            .unwrap_or_else(|| "dialog closed".into());
+        let names: Vec<_> = h.app.session.doc.features.iter().map(|f| f.name.clone()).collect();
+        assert_eq!(h.app.session.doc.features.len(), 2, "the second entry edited the design: {why}; features {names:?}; status {:?}", h.app.status);
+        assert!(same_camera(&h.app.cam, &stayed), "an edit with no view command leaves the camera: {:?} vs {stayed:?}", h.app.cam);
+
+        h.app.plugin_menu.listed = list(&h.app, Some(&root));
+        let fail = h.app.plugin_menu.listed[0].entries.iter().position(|entry| entry.name == "fail").expect("fail");
+        open_entry(&mut h.app, 0, fail);
+        run(&mut h.app).unwrap();
+        settle(&mut h);
+        h.frames(2);
+        let error = h.app.plugin_menu.dialog().and_then(|d| d.error.clone()).expect("the failed run stays in the dialog");
+        assert!(!error.is_empty(), "{error}");
+        assert_eq!(h.app.session.doc.features.len(), 2, "the failed run changes nothing");
+        assert!(same_camera(&h.app.cam, &stayed), "a failed run does not move the camera: {:?} vs {stayed:?}", h.app.cam);
+        let _ = std::fs::remove_dir_all(root);
+    }
 }
