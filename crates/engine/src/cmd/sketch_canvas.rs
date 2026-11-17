@@ -9,7 +9,7 @@ use super::CommandSpec;
 use crate::params::{bad, bool_, num, str_, vec2};
 use crate::schema::canvas::{
     CanvasCalibrateParams, CanvasCalibrated, CanvasDecalParams, CanvasDeleteParams, CanvasDeleted, CanvasEditParams, CanvasEdited,
-    CanvasFrameSketchParams, CanvasFramed, CanvasInsertParams, CanvasPlaced, CanvasStraightenParams, CanvasStraightened,
+    CanvasFrame, CanvasFrameSketchParams, CanvasFramed, CanvasInsertParams, CanvasPlaced, CanvasStraightenParams, CanvasStraightened,
 };
 use crate::schema::{TypedContract, output_schema_for};
 use crate::{EngineError, Result, Session};
@@ -33,13 +33,13 @@ pub static COMMANDS: &[CommandSpec] = &[
         .icon("canvas")
         .contract(&INSERT_CONTRACT)
         .output(output_schema_for::<CanvasPlaced>)
-        .params("path | data (base64 PNG, JPEG or SVG; an SVG is drawn into a PNG); resolution?: pixels (an SVG's longest side, default 1024, at most 4096); plane?: XY|XZ|YZ|{face: [x,y,z]}|… (default XY); center?: [x,y] on the plane, or at?: [x,y,z]; width?: mm (default 100); angle?: deg; opacity?: 0…1 (default 0.5); flip?; name?"),
+        .params("path | data (base64 PNG, JPEG or SVG; an SVG is drawn into a PNG); resolution?: pixels (an SVG's longest side, default 1024, at most 4096); plane?: XY|XZ|YZ|{face: [x,y,z]}|… (default XY); center?: [x,y] on the plane, or at?: [x,y,z]; width?: mm (default 100); angle?: deg; opacity?: 0…1 (default 0.5); flip?; name?; frame?: true ties the image to a construction rectangle around it (in the sketch being edited, which it must lie on, else in a new sketch), as canvas.frame_sketch does"),
     CommandSpec::new("canvas.decal", "Decal", crate::checked!("canvas.decal", add_decal))
         .at("SKETCH", "INSERT")
         .icon("decal")
         .contract(&DECAL_CONTRACT)
         .output(output_schema_for::<CanvasPlaced>)
-        .params("path | data (PNG, JPEG or SVG); resolution?: pixels (an SVG's longest side, default 1024); face: [x,y,z] on a planar face (the image is centred there), or the picked face as sketch.create's plane takes it ({face, body, index, path?}); width?: mm; angle?: deg; opacity?: (default 1)"),
+        .params("path | data (PNG, JPEG or SVG); resolution?: pixels (an SVG's longest side, default 1024); face: [x,y,z] on a planar face (the image is centred there), or the picked face as sketch.create's plane takes it ({face, body, index, path?}); width?: mm; angle?: deg; opacity?: (default 1); frame?: true ties the image to a construction rectangle around it, as canvas.frame_sketch does"),
     CommandSpec::new("canvas.edit", "Edit Canvas", crate::checked!("canvas.edit", edit_canvas))
         .at("SKETCH", "INSERT")
         .icon("canvas")
@@ -50,7 +50,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .icon("canvas")
         .contract(&FRAME_SKETCH_CONTRACT)
         .output(output_schema_for::<CanvasFramed>)
-        .params("canvas: id or name; name?: the sketch's name. Draws a construction rectangle on the canvas's plane exactly around the image, in a new sketch, and anchors the image's corners to it: dimension and constrain that rectangle to place and size the image → sketch, bottom_left, bottom_right, top_left (point ids)"),
+        .params("canvas: id or name; name?: the new sketch's name. Draws a construction rectangle exactly around the image, in the sketch being edited (the image must lie on its plane) or else in a new sketch on the canvas's plane, and anchors the image's corners to it: dimension and constrain that rectangle to place and size the image → sketch, bottom_left, bottom_right, top_left (point ids)"),
     CommandSpec::new("canvas.calibrate", "Calibrate Canvas", crate::checked!("canvas.calibrate", calibrate))
         .icon("measure")
         .contract(&CALIBRATE_CONTRACT)
@@ -108,6 +108,10 @@ fn make(s: &mut Session, p: &Value, cmd: &str, decal: bool) -> Result<Value> {
         return Err(bad(cmd, "`width` must be positive"));
     }
     let opacity = num(p, "opacity").unwrap_or(if decal { 1.0 } else { 0.5 }).clamp(0.0, 1.0);
+    let framed = match p.get("frame") {
+        None | Some(Value::Null) => false,
+        Some(v) => v.as_bool().ok_or_else(|| bad(cmd, "`frame` must be true or false"))?,
+    };
     // It belongs to the active component (its plane is in that frame) and moves with it.
     let component = s.active_component;
     let doc = s.doc_mut();
@@ -135,7 +139,15 @@ fn make(s: &mut Session, p: &Value, cmd: &str, decal: bool) -> Result<Value> {
         component,
         anchor: None,
     });
-    canvas_reply(cmd, CanvasPlaced { canvas: id, name, pixels, param_warnings: Vec::new() })
+    // A frame that cannot be drawn fails the command, and the engine puts the design back as it
+    // was: no image is left behind unframed.
+    let frame = if framed {
+        let i = s.doc.canvases.iter().position(|c| c.id == id).ok_or_else(|| bad(cmd, "canvas"))?;
+        Some(frame_canvas(s, i, None, cmd)?)
+    } else {
+        None
+    };
+    canvas_reply(cmd, CanvasPlaced { canvas: id, name, pixels, frame, param_warnings: Vec::new() })
 }
 
 fn add_canvas(s: &mut Session, p: &Value) -> Result<Value> {
@@ -331,46 +343,79 @@ fn delete_canvas(s: &mut Session, p: &Value) -> Result<Value> {
     canvas_reply(cmd, CanvasDeleted { deleted: c.id, param_warnings: Vec::new() })
 }
 
-/// A new sketch on the canvas's plane holding a construction rectangle exactly around the image,
-/// and the canvas anchored to its bottom-left, bottom-right and top-left corners: the sketch's
-/// dimensions and constraints then place, turn and size the image.
 fn frame_sketch(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "canvas.frame_sketch";
-    if s.active_sketch.is_some() {
-        return Err(bad(cmd, "finish the sketch being edited first"));
-    }
     let i = find(s, p, cmd)?;
+    let f = frame_canvas(s, i, str_(p, "name"), cmd)?;
+    let canvas = s.doc.canvases.get(i).map(|c| c.id).ok_or_else(|| bad(cmd, "canvas"))?;
+    canvas_reply(
+        cmd,
+        CanvasFramed {
+            canvas,
+            sketch: f.sketch,
+            name: f.name,
+            bottom_left: f.bottom_left,
+            bottom_right: f.bottom_right,
+            top_left: f.top_left,
+            param_warnings: Vec::new(),
+        },
+    )
+}
+
+/// A construction rectangle exactly around canvas `i`'s image, and the canvas anchored to its
+/// bottom-left, bottom-right and top-left corners: the sketch's dimensions and constraints then
+/// place, turn and size the image. The rectangle goes into the sketch being edited, so it can be
+/// tied to that sketch's own geometry; with none, into a new sketch on the canvas's plane, named
+/// `name` (default `<canvas> frame`).
+fn frame_canvas(s: &mut Session, i: usize, name: Option<&str>, cmd: &str) -> Result<CanvasFrame> {
     refuse_locked(s, i, cmd)?;
     let c = s.doc.canvases.get(i).cloned().ok_or_else(|| bad(cmd, "canvas"))?;
     if c.anchor.is_some() {
         return Err(bad(cmd, format!("{} already follows a sketch; clear its `anchor` with canvas.edit first", c.name)));
     }
-    // The sketch is made in the active component, on the canvas's plane in that frame.
+    // The sketch is in the active component, as the canvas's plane is.
     if c.component != s.active_component {
         return Err(bad(cmd, format!("{} belongs to another component: activate that component first", c.name)));
     }
-    // The frame unmirrored: a mirrored image's bottom-left corner is the frame's bottom-right.
-    let k = c.corners();
-    let (bl, br, tl) = if c.flip { (k[1], k[0], k[2]) } else { (k[0], k[1], k[3]) };
-    let name =
-        str_(p, "name").filter(|n| !n.trim().is_empty()).map(str::to_string).unwrap_or_else(|| s.doc.free_sketch_name(&format!("{} frame", c.name)));
-    let made = super::sketch::create_sketch_with_plane(s, &json!({ "name": name }), c.plane.clone(), None)?;
-    let sketch = made.get("sketch").and_then(Value::as_u64).ok_or_else(|| bad(cmd, "could not start a sketch on the canvas"))?;
     let finish = super::find_command("sketch.finish").ok_or_else(|| bad(cmd, "sketch.finish"))?.run;
     let rectangle = super::find_command("sketch.rectangle.three_point").ok_or_else(|| bad(cmd, "sketch.rectangle.three_point"))?.run;
-    let drawn = rectangle(s, &json!({"p0": [bl.x, bl.y], "p1": [br.x, br.y], "p2": [tl.x, tl.y], "construction": true}));
+    let (sketch, name, [bl, br, tl], made) = match super::sketch_store::active(s) {
+        Some(open) => {
+            let corners = frame_in_sketch(s, &c, open, cmd)?;
+            let name = s.doc.feature(open).map(|f| f.name.clone()).unwrap_or_default();
+            (open, name, corners, false)
+        }
+        None => {
+            // The frame unmirrored: a mirrored image's bottom-left corner is the frame's bottom-right.
+            let k = c.corners();
+            let corners = if c.flip { [k[1], k[0], k[2]] } else { [k[0], k[1], k[3]] };
+            let name = name
+                .filter(|n| !n.trim().is_empty())
+                .map(str::to_string)
+                .unwrap_or_else(|| s.doc.free_sketch_name(&format!("{} frame", c.name)));
+            let made = super::sketch::create_sketch_with_plane(s, &json!({ "name": name }), c.plane.clone(), None)?;
+            let sketch = made.get("sketch").and_then(Value::as_u64).ok_or_else(|| bad(cmd, "could not start a sketch on the canvas"))?;
+            (sketch, name, corners, true)
+        }
+    };
+    // Its own points: a corner landing on a point of the sketch is tied to it only when asked.
+    let drawn = rectangle(s, &json!({"p0": [bl.x, bl.y], "p1": [br.x, br.y], "p2": [tl.x, tl.y], "construction": true, "connect": false}));
     let drawn = match drawn {
         Ok(v) => v,
         Err(e) => {
-            let _ = finish(s, &json!({}));
+            if made {
+                let _ = finish(s, &json!({}));
+            }
             return Err(e);
         }
     };
-    finish(s, &json!({}))?;
+    if made {
+        finish(s, &json!({}))?;
+    }
     // Its sides run bottom-left to bottom-right, …, top-left to bottom-left.
     let side = |k: usize| drawn.get("curves").and_then(|c| c.get(k)).and_then(Value::as_str).map(str::to_string);
     let corners = (|| {
-        let sk = s.doc.sketch(sketch).ok()?;
+        let sk = super::sketch_store::read(&s.doc, sketch).ok()?;
         let line = |id: &str| match sk.curves.iter().find(|c| c.id == id).map(|c| &c.kind) {
             Some(solidcraft_sketch::CurveKind::Line { a, b }) => Some((*a, *b)),
             _ => None,
@@ -383,7 +428,39 @@ fn frame_sketch(s: &mut Session, p: &Value) -> Result<Value> {
     let anchor = CanvasAnchor { sketch, bottom_left: bottom_left.clone(), bottom_right: bottom_right.clone(), top_left: Some(top_left.clone()) };
     let canvas = s.doc_mut().canvases.get_mut(i).ok_or_else(|| bad(cmd, "canvas"))?;
     canvas.anchor = Some(anchor);
-    canvas_reply(cmd, CanvasFramed { canvas: canvas.id, sketch, name, bottom_left, bottom_right, top_left, param_warnings: Vec::new() })
+    Ok(CanvasFrame { sketch, name, bottom_left, bottom_right, top_left })
+}
+
+/// The bottom-left, bottom-right and top-left corners of canvas `c`'s frame (unmirrored) in the
+/// coordinates of sketch `sketch`, or why the image does not lie on that sketch's plane.
+fn frame_in_sketch(s: &Session, c: &Canvas, sketch: u64, cmd: &str) -> Result<[Vec2; 3]> {
+    let (vals, _) = s.doc.param_values();
+    let state = s.model.state();
+    let ss = state.sketch(sketch).ok_or_else(|| bad(cmd, "the sketch being edited has not been solved; finish or repair it first"))?;
+    // In the world, where the component's occurrence puts the canvas…
+    let world = s.doc.canvas_corners(&vals, c, &state).map_err(|e| bad(cmd, e.to_string()))?;
+    // …and back into the sketch's component's frame, which its plane is in.
+    let m = s.doc.component_transform(s.doc.feature(sketch).map_or(c.component, |f| f.component));
+    let back = if solidcraft_doc::is_identity(&m) {
+        None
+    } else {
+        Some(solidcraft_doc::mat_inverse(&m).ok_or_else(|| bad(cmd, "the sketch's component has no inverse placement"))?)
+    };
+    let (n, o) = (ss.plane.normal(), ss.plane.origin);
+    let tolerance = 1e-6 * (1.0 + c.width.max(c.height()));
+    let mut k = [Vec2::ZERO; 4];
+    for (slot, w) in k.iter_mut().zip(world) {
+        let q = back.as_ref().map_or(w, |b| solidcraft_doc::apply_point(b, w));
+        if !((q - o).dot(n).abs() <= tolerance) {
+            return Err(bad(
+                cmd,
+                format!("{} does not lie on the plane of sketch `{}`: put it on that plane, or finish the sketch to frame it in a new one", c.name, ss.name),
+            ));
+        }
+        *slot = ss.plane.to_local(q);
+    }
+    // A mirrored image's bottom-left corner is the frame's bottom-right.
+    Ok(if c.flip { [k[1], k[0], k[2]] } else { [k[0], k[1], k[3]] })
 }
 
 #[cfg(test)]
@@ -798,6 +875,67 @@ mod tests {
             assert_eq!(sketch.curves.iter().filter(|c| c.construction).count(), 4, "four construction sides");
             assert!(s.execute("canvas.frame_sketch", &json!({"canvas": id})).is_err(), "already anchored");
         }
+    }
+
+    /// An image put into the sketch being edited with `frame` gets its rectangle in that sketch,
+    /// so a constraint to the sketch's own geometry and a dimension place and size it, while the
+    /// sketch stays open; image and rectangle are one undo step. Frame Sketch does the same for an
+    /// image already there. Off the sketch's plane, framing is refused and nothing is left behind.
+    #[test]
+    fn an_image_framed_in_the_open_sketch_follows_its_constraints_and_dimensions() {
+        use solidcore_record::Vec3;
+        use solidcraft_geom::prelude::*;
+        let mut s = Session::default();
+        let sketch = s.execute("sketch.create", &json!({"plane": "XY"})).unwrap()["sketch"].as_u64().unwrap();
+        s.execute("sketch.line", &json!({"points": [[-50, -50], [-40, -45]]})).unwrap();
+        let curves = s.doc.sketch(sketch).unwrap().curves.len();
+        let r = s.execute("canvas.insert", &json!({"data": png(40, 20), "plane": "XY", "center": [30, 20], "width": 20, "frame": true})).unwrap();
+        let id = r["canvas"].as_u64().unwrap();
+        assert_eq!(r["frame"]["sketch"].as_u64(), Some(sketch), "{r}");
+        assert_eq!(s.active_sketch, Some(sketch), "the sketch stays open");
+        assert_eq!(s.doc.sketch(sketch).unwrap().curves.len(), curves + 4, "four construction sides in the open sketch");
+        let near = |a: Vec3, b: [f64; 3]| (a - Vec3::new(b[0], b[1], b[2])).len() < 1e-6;
+        let k = world_corners(&s, id);
+        assert!(near(k[0], [20.0, 15.0, 0.0]) && near(k[2], [40.0, 25.0, 0.0]), "the image stays where it was put: {k:?}");
+        let (bl, br) = (r["frame"]["bottom_left"].as_str().unwrap(), r["frame"]["bottom_right"].as_str().unwrap());
+        s.execute("sketch.constraint.coincident", &json!({"a": bl, "b": "origin"})).unwrap();
+        let k = world_corners(&s, id);
+        assert!(near(k[0], [0.0, 0.0, 0.0]), "its corner is on the sketch's origin: {k:?}");
+        let sk = s.doc.sketch(sketch).unwrap();
+        let point = |id: &str| sk.points.iter().position(|p| p.id == id).unwrap();
+        let ends = (point(bl), point(br));
+        let bottom = sk
+            .curves
+            .iter()
+            .find(|c| matches!(c.kind, solidcraft_sketch::CurveKind::Line { a, b } if (a, b) == ends || (b, a) == ends))
+            .map(|c| c.id.clone())
+            .unwrap();
+        s.execute("sketch.dimension", &json!({"entities": [bottom], "value": 30})).unwrap();
+        let k = world_corners(&s, id);
+        assert!(near(k[0], [0.0, 0.0, 0.0]) && ((k[1] - k[0]).len() - 30.0).abs() < 1e-6, "the dimension stretches it: {k:?}");
+        assert_eq!(s.active_sketch, Some(sketch));
+        // One undo step for each command since the image: the dimension, the coincidence, then
+        // the image and its rectangle together.
+        for _ in 0..3 {
+            s.execute("edit.undo", &json!({})).unwrap();
+        }
+        assert!(s.doc.canvases.is_empty());
+        assert_eq!(s.doc.sketch(sketch).unwrap().curves.len(), curves);
+        // An image already on the open sketch's plane: Frame Sketch draws into that sketch.
+        let id = s.execute("canvas.insert", &json!({"data": png(40, 20), "plane": "XY", "width": 20})).unwrap()["canvas"].as_u64().unwrap();
+        let framed = s.execute("canvas.frame_sketch", &json!({"canvas": id})).unwrap();
+        assert_eq!(framed["sketch"].as_u64(), Some(sketch), "{framed}");
+        assert_eq!(s.doc.sketch(sketch).unwrap().curves.len(), curves + 4);
+        // Off its plane: refused, with no image left behind.
+        let size = |s: &Session| {
+            let sk = s.doc.sketch(sketch).unwrap();
+            (s.doc.canvases.len(), sk.points.len(), sk.curves.len(), sk.constraints.len())
+        };
+        let before = size(&s);
+        let e = s.execute("canvas.insert", &json!({"data": png(40, 20), "plane": "XZ", "width": 20, "frame": true})).unwrap_err().to_string();
+        assert!(e.contains("does not lie on the plane"), "{e}");
+        assert_eq!(size(&s), before);
+        assert!(s.execute("canvas.insert", &json!({"data": png(40, 20), "frame": "yes"})).is_err());
     }
 
     /// An SVG decal is kept as the PNG it draws, at the resolution asked for.

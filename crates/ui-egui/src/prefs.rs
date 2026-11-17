@@ -1786,6 +1786,11 @@ preference_settings! {
     construction_line_classic: bool = false, PAGE_SKETCH;
     /// Use the only straight construction line in the preselection as Mirror's reference.
     sketch_mirror_auto_line: bool = true, PAGE_SKETCH;
+    /// An image (Canvas or Decal) placed on the plane of the sketch being edited gets a
+    /// construction rectangle around it in that sketch and follows it, so the sketch's constraints
+    /// and dimensions place and size the image (#18405). Off: the image is placed on its own, as
+    /// before, and Frame Sketch ties it to a rectangle when asked.
+    frame_images_in_sketch: bool = true, PAGE_SKETCH;
     /// Pressing an active tool or dialog's shortcut again closes it, as Esc does. Off: the key
     /// starts the tool or dialog again.
     shortcut_again_ends_tool: bool = true, PAGE_SKETCH;
@@ -7148,6 +7153,7 @@ mod tests {
             ("suppress_sketch_snap", json!(ModifierCombo::NONE), PAGE_SKETCH),
             ("sketch_state_icons", json!(false), PAGE_SKETCH),
             ("sketch_mirror_auto_line", json!(false), PAGE_SKETCH),
+            ("frame_images_in_sketch", json!(false), PAGE_SKETCH),
             ("sketch_tracking_guides", json!(false), PAGE_SKETCH),
             ("sketch_tracking_points", json!(false), PAGE_SKETCH),
             ("sketch_align_points", json!(true), PAGE_SKETCH),

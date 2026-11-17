@@ -70,6 +70,12 @@ pub struct CanvasInsertParams {
     /// Default: 1024. A PNG or JPEG is kept as it is.
     #[serde(default)]
     pub resolution: Option<f64>,
+    /// Tie the image to a construction rectangle drawn exactly around it, as `canvas.frame_sketch`
+    /// does: in the sketch being edited (the image must lie on its plane), else in a new sketch.
+    /// Dimensions and constraints on that rectangle then place, turn and size the image. Default:
+    /// false.
+    #[serde(default)]
+    pub frame: Option<bool>,
 }
 
 /// Put an image on a planar face of the model, like a sticker, kept in the design. Give the image
@@ -124,6 +130,11 @@ pub struct CanvasDecalParams {
     /// Default: 1024. A PNG or JPEG is kept as it is.
     #[serde(default)]
     pub resolution: Option<f64>,
+    /// Tie the image to a construction rectangle drawn exactly around it, as `canvas.frame_sketch`
+    /// does: in the sketch being edited (the face must be on its plane), else in a new sketch.
+    /// Default: false.
+    #[serde(default)]
+    pub frame: Option<bool>,
 }
 
 /// Change a canvas or decal: its place, size, angle, opacity, mirroring, visibility or name. Keys
@@ -183,10 +194,12 @@ pub struct CanvasAnchorParam {
     pub top_left: Option<String>,
 }
 
-/// Draw a construction rectangle exactly around a canvas or decal image, in a new sketch on its
-/// plane, and anchor the image's corners to it, so the sketch's dimensions and constraints place,
-/// turn and size the image. The canvas must belong to the active component and follow no sketch
-/// yet. One undo step.
+/// Draw a construction rectangle exactly around a canvas or decal image and anchor the image's
+/// corners to it, so the sketch's dimensions and constraints place, turn and size the image. The
+/// rectangle goes into the sketch being edited, which the image must lie on (it can then be tied
+/// to that sketch's own geometry), or, with no sketch being edited, into a new sketch on the
+/// image's plane. The canvas must belong to the active component and follow no sketch yet. One
+/// undo step.
 #[derive(Debug, Deserialize, JsonSchema)]
 #[schemars(deny_unknown_fields, transform = canvas_required)]
 pub struct CanvasFrameSketchParams {
@@ -195,7 +208,8 @@ pub struct CanvasFrameSketchParams {
     #[serde(default, deserialize_with = "some", skip_serializing_if = "Option::is_none")]
     #[schemars(with = "CanvasRef")]
     pub canvas: Option<CanvasRef>,
-    /// The new sketch's name. Default: `<the canvas's name> frame`.
+    /// The new sketch's name, when no sketch is being edited. Default: `<the canvas's name>
+    /// frame`.
     #[serde(default)]
     pub name: Option<String>,
 }
@@ -569,9 +583,26 @@ pub struct CanvasPlaced {
     pub name: String,
     /// The image's size in pixels, [width, height].
     pub pixels: [u32; 2],
+    /// With `frame`: the rectangle the image follows.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub frame: Option<CanvasFrame>,
     /// In the warn parameter-check mode: what the call's parameters got wrong.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub param_warnings: Vec<String>,
+}
+
+/// The construction rectangle a framed image follows.
+#[derive(Clone, Debug, Serialize, JsonSchema)]
+pub struct CanvasFrame {
+    /// The sketch holding it, by feature id.
+    pub sketch: u64,
+    /// That sketch's name.
+    pub name: String,
+    /// The ids of the rectangle's points at the image's bottom-left, bottom-right and top-left
+    /// corners.
+    pub bottom_left: String,
+    pub bottom_right: String,
+    pub top_left: String,
 }
 
 /// What `canvas.edit` returns.
@@ -625,7 +656,7 @@ pub struct CanvasDeleted {
 pub struct CanvasFramed {
     /// The canvas, by id.
     pub canvas: u64,
-    /// The new sketch's feature id.
+    /// The sketch holding the rectangle, by feature id: the one being edited, or the new one.
     pub sketch: u64,
     /// Its name.
     pub name: String,
