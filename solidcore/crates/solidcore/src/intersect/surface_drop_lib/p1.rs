@@ -77,14 +77,16 @@
 //!   construction, the surface's iso curve at a side `f` of the domain (equal to
 //!   `CreateIsoParametricCurve`'s, trimmed to the domain, as a face's natural edges are)
 //!   is `t -> S(f, t)`, so its exact UV ends are `(f, t0)` and `(f, t1)`; the segment now
-//!   ends exactly there (`exact_iso_ends`). Other curves are unchanged.
+//!   ends exactly there (`exact_iso_ends`), and the drop quality (`max_approx_dev`,
+//!   `max_drop_to_surf`) is measured at stations on that exact line, `(f, t)`, rather than
+//!   on the extrapolated one. Other curves are unchanged.
 //! - **Not ported here.** The `SM_DEBUG_CODE` blocks, `Dump`, `Draw`,
 //!   `my_AssertAndDrawDropCurve` (graphics) and the `SM_ASSERT`s.
 
 use crate::curve::curve::{Curve, CurveKind};
 use crate::curve::hermite_curve::HermiteCurve;
 use crate::error::intersect::IntersectFailure;
-use crate::error::{Result, SolidError};
+use crate::error::{native_failure, Result, SolidError};
 use crate::geom::extent1d::Extent1d;
 use crate::geom::extent2d::Extent2d;
 use crate::geom::geom_utility::p1::line_point_distance;
@@ -1293,8 +1295,8 @@ impl Surface {
     /// (`DropIsoCurve`): the start tangent must be parallel (within a degree) to a
     /// first derivative, and the curve points at evenly spaced parameters must lie
     /// within `approx_tol_3d` of the surface normal lines along that line. A curve that is
-    /// the surface's iso curve at a side of `uv_domain` drops to its exact ends (not
-    /// upstream, #18325: see `exact_iso_ends`).
+    /// the surface's iso curve at a side of `uv_domain` drops to its exact line, and its
+    /// stations are taken on that line (not upstream, #18325: see `exact_iso_ends`).
     ///
     /// # Errors
     ///
@@ -1421,6 +1423,12 @@ impl Surface {
             knots.push(interval.max());
         }
 
+        // not upstream (#18325): a curve that is this surface's iso curve at a side of the
+        // domain drops to its exact parameters. Decided before the stations, so the drop
+        // quality below is measured on the line that is returned.
+        let exact =
+            self.exact_iso_ends(k, uv_domain, curve, interval, dir_vec.x == 0.0, start_uv)?;
+
         // for every Curve span between knots
         let ivl_size = interval.max() - interval.min();
         let mut max_deviation = 0.0;
@@ -1433,11 +1441,14 @@ impl Surface {
             } else {
                 ivl_size
             };
-            let uv_test = start_uv + dir_vec * step / scale;
-            let uv_test = uv_domain.clamp_point(uv_test);
-
             // Clamp dParam to CurveInterval to account for tolerances
             let param = interval.clamp_value(interval.min() + step);
+
+            let uv_test = match exact {
+                // not upstream (#18325): the exact line's point at `param` is `(f, param)`
+                Some(iso) => iso.at(param),
+                None => uv_domain.clamp_point(start_uv + dir_vec * step / scale),
+            };
 
             // get curve/surfaceNormal gap for parameter points
             let c_pnt = curve.evaluate_point(k, param)?;
@@ -1464,11 +1475,8 @@ impl Surface {
 
         // get the surface parameter start/end points
         let uv_end = uv_domain.clamp_point(start_uv + dir_vec * ivl_size / scale);
-        // not upstream (#18325): a curve that is this surface's iso curve at a side of the
-        // domain drops to its exact parameters
-        let exact = self.exact_iso_ends(k, uv_domain, curve, interval, dir_vec.x == 0.0, start_uv);
         let (uv_start, uv_end) = match exact {
-            Some((s, e)) => (Point3::from(s), Point3::from(e)),
+            Some(iso) => (Point3::from(iso.at(iso.t0)), Point3::from(iso.at(iso.t1))),
             None => (Point3::from(start_uv), Point3::from(uv_end)),
         };
 
@@ -1529,14 +1537,16 @@ impl Surface {
         interval: &Extent1d,
         iso_u: bool,
         start: Point2,
-    ) -> Option<(Point2, Point2)> {
+    ) -> Result<Option<ExactIsoLine>> {
         let SurfaceKind::BSpline(surface) = self.kind() else {
-            return None;
+            return Ok(None);
         };
         let CurveKind::BSpline(b) = curve.kind() else {
-            return None;
+            return Ok(None);
         };
-        let nurb = b.gw_nurb()?;
+        let Some(nurb) = b.gw_nurb() else {
+            return Ok(None);
+        };
         let (fixed, lo, hi, moving, param) = if iso_u {
             (
                 start.x,
@@ -1562,30 +1572,53 @@ impl Surface {
         let (t0, t1) = (interval.min(), interval.max());
         let inside = |t: f64| moving.min() <= t && t <= moving.max();
         if !inside(t0) || !inside(t1) {
-            return None;
+            return Ok(None);
         }
         let options = IsoCurveOptions {
             domain: Some(*uv_domain),
             uv_iso_curve: false,
         };
-        let iso = surface
-            .create_iso_parametric_curve(k, param, side, options)
-            .ok()?;
-        let made = iso.curve.gw_nurb()?;
+        // an iso curve the surface cannot make is not this curve: the computed ends stay
+        // (a cancel or a port defect still propagates)
+        let Some(iso) =
+            native_failure(surface.create_iso_parametric_curve(k, param, side, options))?
+        else {
+            return Ok(None);
+        };
+        let Some(made) = iso.curve.gw_nurb() else {
+            return Ok(None);
+        };
         let same = made.degree() == nurb.degree()
             && made.cpts() == nurb.cpts()
             && made.knots() == nurb.knots();
-        if !same {
-            return None;
+        Ok(same.then_some(ExactIsoLine {
+            iso_u,
+            side,
+            t0,
+            t1,
+        }))
+    }
+}
+
+/// Not upstream (#18325): the exact UV line of an iso-curve drop,
+/// `t -> (side, t)` (`iso_u`) or `t -> (t, side)`, over `[t0, t1]`.
+#[derive(Debug, Clone, Copy)]
+struct ExactIsoLine {
+    iso_u: bool,
+    side: f64,
+    t0: f64,
+    t1: f64,
+}
+
+impl ExactIsoLine {
+    /// The line's UV point at curve parameter `t`: the surface point there is the curve
+    /// point at `t` by construction.
+    fn at(&self, t: f64) -> Point2 {
+        if self.iso_u {
+            Point2::new(self.side, t)
+        } else {
+            Point2::new(t, self.side)
         }
-        let at = |t: f64| {
-            if iso_u {
-                Point2::new(side, t)
-            } else {
-                Point2::new(t, side)
-            }
-        };
-        Some((at(t0), at(t1)))
     }
 }
 

@@ -58,7 +58,7 @@
 
 use crate::curve::curve::p2::BSPLINE_CURVE_TYPE;
 use crate::curve::curve::p6::DroppedPoint;
-use crate::curve::curve::Curve;
+use crate::curve::curve::{Curve, CurveKind};
 use crate::error::{ignored, Result, SolidError};
 use crate::geom::extent1d::Extent1d;
 use crate::geom::extent2d::Extent2d;
@@ -73,7 +73,7 @@ use crate::nurbs::b_spline_surface_n_lib::p2::EvaluateFlags;
 use crate::nurbs::knots::Side;
 use crate::nurbs::math::NOZ;
 use crate::surface::surface::p2::B_SPLINE_SURFACE_TYPE;
-use crate::surface::surface::Surface;
+use crate::surface::surface::{Surface, SurfaceKind};
 use crate::topology::edgeuse::p1 as eu1;
 use crate::topology::vertexuse as vu1;
 use crate::topology::{Brep, EdgeId, EdgeuseId, FaceId, VertexId, VertexuseId};
@@ -2344,6 +2344,45 @@ impl<'a> GapFunction<'a> {
         r
     }
 
+    /// Not upstream (#18325): the surface parameters of this curve's point at `t` when
+    /// the curve is a curve on a surface (`SmCrvOnSurf`) whose surface is the other
+    /// surface, a B-spline equal to it degree for degree, knot for knot and control point
+    /// for control point, and the parameters lie in the other surface's natural domain.
+    /// The curve's point is then that surface's point there by construction (the curve
+    /// evaluates its UV curve, then the surface), so they are the exact foot of the
+    /// point, at distance `0`. `None` for any other geometry.
+    ///
+    /// Upstream seeds every drop with the previous sample's foot, and the closest-point
+    /// solve stops within its convergence tolerance of the foot (about `1e-13` in `uv`
+    /// for the natural trims of #18325), so a curve lying on the surface reported a gap
+    /// of about `1e-12` rather than `0`.
+    fn own_foot(&self, k: &Kernel, t: f64) -> Result<Option<Point2>> {
+        let GapGeometry::CrvSrf { curve, other } = self.geometry else {
+            return Ok(None);
+        };
+        let CurveKind::CrvOnSurf(cos) = curve.kind() else {
+            return Ok(None);
+        };
+        let (SurfaceKind::BSpline(a), SurfaceKind::BSpline(b)) =
+            (cos.surface().kind(), other.kind())
+        else {
+            return Ok(None);
+        };
+        let (Some(a), Some(b)) = (a.gw_nurb(), b.gw_nurb()) else {
+            return Ok(None);
+        };
+        let same = a.degrees() == b.degrees()
+            && a.u_knots() == b.u_knots()
+            && a.v_knots() == b.v_knots()
+            && a.cpts() == b.cpts();
+        if !same {
+            return Ok(None);
+        }
+        let uv = cos.evaluate_uv_point(k, t)?;
+        let domain = other.natural_uv_domain_with_nurb(k)?;
+        Ok(domain.contains_point(uv, 0.0).then_some(uv))
+    }
+
     /// The sample loop of `BuildSampleSet`.
     fn evaluate_samples(
         &mut self,
@@ -2390,12 +2429,17 @@ impl<'a> GapFunction<'a> {
                     ),
                     None => None,
                 };
-                let guess_u = prev.map(|s| s.other_param.x);
-                let guess_v = if use_v {
+                let mut guess_u = prev.map(|s| s.other_param.x);
+                let mut guess_v = if use_v {
                     prev.map(|s| s.other_param.y)
                 } else {
                     None
                 };
+                // not upstream (#18325): a curve on the other surface itself is seeded at
+                // its own surface parameters, the exact foot of its point
+                if let Some(uv) = self.own_foot(k, this_u)? {
+                    (guess_u, guess_v) = (Some(uv.x), Some(uv.y));
+                }
 
                 let idx = row + ii;
                 let slot = samples
