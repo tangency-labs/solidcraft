@@ -4,9 +4,9 @@
 //! the curve/curve global solver on the two circles, whose span ends lie within 1e-9 of the
 //! other circle: `SmCurve::SimpleCoincidenceChecker` takes the span pair as a coincidence
 //! range, although the circles cross inside it, and the range becomes a tiny edge. Upstream
-//! (the default) is then non-manifold at e = 1e-4 (`SmTrimmingTools` #0/#2/#3/#4, as the fork
-//! reports) and gives no solid (volume 0) at e = 1e-3, which the union's WR-619 guard now
-//! refuses; with
+//! was then non-manifold at e = 1e-4 (`SmTrimmingTools` #0/#2/#3/#4, as the fork reports; the
+//! default union there is now valid, see below) and gives no solid (volume 0) at e = 1e-3,
+//! which the union's WR-619 guard now refuses; with
 //! `Kernel::fixes.simple_coincidence_crossing_is_point` the range is the crossing and every
 //! offset is a valid manifold solid of the analytic volume.
 #![allow(

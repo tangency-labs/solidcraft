@@ -220,6 +220,96 @@ fn verdict(what: &str, check: std::result::Result<solidcraft_smlib::CheckReport,
     }
 }
 
+/// SMLib's check of a body as an operation on it takes it ([`Body::smlib`], at every test): what
+/// it fails, or `None` when it passes or is not SMLib's to make (a mesh body, one SMLib refuses
+/// outright: [`Body::smlib_refusal`] says why). A check that cannot run is the error why.
+///
+/// The check runs on a copy of the body's SMLib form, which it owns, so the token over this
+/// thread's work stops it ([`solidcraft_smlib::Brep::check_owned`]), as it stops a feature's
+/// detached check ([`KeptCheck`]): an import stopped part way stops in the check too.
+pub fn failing_check(body: &Body) -> Result<Option<CheckFailure>> {
+    if body.is_mesh() || body.smlib_refusal().is_some() {
+        return Ok(None);
+    }
+    let copy = body.smlib()?.try_clone().map_err(|e| KernelError::smlib("SMLib copy", e))?;
+    let check = copy.check_owned(solidcraft_smlib::CheckLevel::All).map_err(|e| KernelError::smlib("SMLib's check", e))?;
+    Ok(CheckFailure::of(&check))
+}
+
+/// What SMLib's check failed in a body: how many tests failed, and each test that failed, where
+/// the check reports it (its site: the test's number and name, and the kind of entity it failed
+/// on), with how many times. Shown in a line ([`std::fmt::Display`]): `3 failed tests: SmEdge::Test
+/// #7 Bad Edge Length: less than edge tolerance (×2); SmLoop::Test #2 Bad Loop Orient`, in the
+/// order the check first reported them. Each failure's own values stay in the check's text.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct CheckFailure {
+    /// Failed tests, as the check counts them.
+    pub failures: usize,
+    /// The tests that failed, each once, in the order the check first reported them.
+    pub tests: Vec<FailedTest>,
+}
+
+/// One test SMLib's check failed: its site in the check.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct FailedTest {
+    /// The test as the check names it (`SmEdge::Test #7 Bad Edge Length: less than edge
+    /// tolerance`), without the values of each failure.
+    pub name: String,
+    /// The test's number (`7`), when the check gives one.
+    pub number: Option<u32>,
+    /// The kinds of entity it failed on (`SmVertex`), each once, when the check names them.
+    pub owners: Vec<String>,
+    /// How many times it failed.
+    pub times: usize,
+}
+
+impl CheckFailure {
+    /// The failure `check` reports, `None` when it passes.
+    pub fn of(check: &solidcraft_smlib::CheckReport) -> Option<CheckFailure> {
+        if check.is_valid() {
+            return None;
+        }
+        let mut tests: Vec<FailedTest> = Vec::new();
+        // "AssertValid skipped" says why the second half of the check did not run: not a test failed.
+        for line in check.text.lines().map(str::trim).filter(|l| !l.is_empty() && !l.starts_with("AssertValid skipped")) {
+            // The test's name ends where its values or its owner start.
+            let name =
+                [line.find(" ("), line.find(" [owner")].into_iter().flatten().min().map_or(line, |end| line.get(..end).unwrap_or(line)).trim_end();
+            let owner = line.rsplit_once("[owner ").and_then(|(_, rest)| rest.strip_suffix(']')).map(str::trim).filter(|o| !o.is_empty());
+            let i = match tests.iter().position(|t| t.name == name) {
+                Some(i) => i,
+                None => {
+                    let number = name.split_once("Test #").and_then(|(_, rest)| {
+                        let digits: String = rest.chars().take_while(char::is_ascii_digit).collect();
+                        digits.parse().ok()
+                    });
+                    tests.push(FailedTest { name: name.to_string(), number, owners: Vec::new(), times: 0 });
+                    tests.len() - 1
+                }
+            };
+            if let Some(t) = tests.get_mut(i) {
+                t.times += 1;
+                if let Some(owner) = owner.filter(|o| !t.owners.iter().any(|known| known == o)) {
+                    t.owners.push(owner.to_string());
+                }
+            }
+        }
+        Some(CheckFailure { failures: check.failures, tests })
+    }
+}
+
+impl std::fmt::Display for CheckFailure {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let s = if self.failures == 1 { "" } else { "s" };
+        write!(f, "{} failed test{s}: ", self.failures)?;
+        for (i, t) in self.tests.iter().enumerate() {
+            let sep = if i == 0 { "" } else { "; " };
+            if t.times > 1 { write!(f, "{sep}{} (×{})", t.name, t.times)? } else { write!(f, "{sep}{}", t.name)? }
+        }
+        Ok(())
+    }
+}
+
 /// [`check_result`] of a step's result nobody else reads, which it takes: the token over this
 /// thread's work stops it ([`solidcraft_smlib::Brep::check_owned`]).
 fn check_result_owned(r: solidcraft_smlib::Brep, how: Checked) -> std::result::Result<solidcraft_smlib::CheckReport, String> {
@@ -308,6 +398,37 @@ mod tests {
         let free = solidcraft_smlib::stop::Stop::new();
         let detached = free.within(|| detach_kept(&body));
         assert!(detached.run().is_ok(), "a token never stopped changes nothing");
+    }
+
+    /// #17689: [`failing_check`] checks a copy it owns, so a stopped token stops it (an import
+    /// stopped part way), and it names each test the check failed, at its site, once.
+    #[test]
+    fn a_failing_check_stops_with_the_work_and_names_each_failed_test() {
+        use solidcore_record::Vec3;
+        let good = crate::box_solid(Vec3::new(0.0, 0.0, 0.0), Vec3::new(10.0, 10.0, 10.0)).unwrap();
+        let mut record = good.record().clone();
+        record.vertices[0].point[2] += 0.5;
+        let bad = Body::from_record(record).unwrap();
+        let stop = solidcraft_smlib::stop::Stop::new();
+        stop.stop();
+        let r = stop.within(|| failing_check(&bad));
+        assert!(r.as_ref().is_err_and(|e| e.to_string().contains("cancelled")), "{r:?}");
+        // Run again with no token: the body's own SMLib form was not touched by the stopped check.
+        let failure = failing_check(&bad).unwrap().expect("the moved corner fails the check");
+        let report = bad.smlib().unwrap().check(solidcraft_smlib::CheckLevel::All).unwrap();
+        assert_eq!(failure.failures, report.failures);
+        let lines: Vec<&str> = report.text.lines().map(str::trim).filter(|l| !l.is_empty() && !l.starts_with("AssertValid skipped")).collect();
+        assert_eq!(failure.tests.iter().map(|t| t.times).sum::<usize>(), lines.len(), "{}", report.text);
+        for t in &failure.tests {
+            assert_eq!(lines.iter().filter(|l| l.starts_with(&t.name)).count(), t.times, "{t:?}");
+            assert_eq!(
+                t.number.map(|n| n.to_string()),
+                t.name.split_once("Test #").map(|(_, r)| r.chars().take_while(char::is_ascii_digit).collect())
+            );
+            assert!(t.owners.iter().all(|o| lines.iter().any(|l| l.starts_with(&t.name) && l.ends_with(&format!("[owner {o}]")))), "{t:?}");
+        }
+        assert!(failure.to_string().starts_with(&format!("{} failed test", report.failures)), "{failure}");
+        assert_eq!(failing_check(&good).unwrap(), None, "the box passes");
     }
 
     #[test]
