@@ -263,7 +263,8 @@ fn circle(z: f64, reference: [f64; 3]) -> Curve {
 /// along the whole circle, the disc's only edge and the tube's lower one, whether the tube's
 /// seam falls on the disc's (both along x) or a quarter turn round (along y). One seam over the
 /// whole of both edges, its stations on the circle, the faces square across it (G0, 90
-/// degrees), measured as the same pair sewn into one body measures it.
+/// degrees), measured as the same pair sewn into one body measures it (along both of its edges
+/// where sewing keeps two vertices on the circle).
 #[test]
 fn a_disc_capping_a_tube_meets_it_in_one_seam_round_the_whole_circle() {
     let disc = planar_faces(&[circle(0.0, [1.0, 0.0, 0.0])]).unwrap();
@@ -309,16 +310,24 @@ fn a_disc_capping_a_tube_meets_it_in_one_seam_round_the_whole_circle() {
             .body
             .continuity_report(&order, &[], 9, tolerances())
             .unwrap();
-        // the circle the two were sewn along (the tube's own seam rises from it)
+        // the circle the two were sewn along (the tube's own seam rises from it): sewing keeps
+        // both sheets' vertices on it, so it is one edge where the seams fall together and two
+        // where they do not
         let joined: Vec<_> = whole
             .seams
             .iter()
             .filter(|s| s.stations.iter().all(|st| st.point[2].abs() <= 1e-9))
             .collect();
-        assert_eq!(joined.len(), 1, "{reference:?}: {whole:?}");
-        let joined = joined[0];
-        assert_eq!(seam.report.order_at_stations, joined.order_at_stations);
-        let (w, j) = (worst(&seam.report), worst(joined));
+        let edges = if reference == [1.0, 0.0, 0.0] { 1 } else { 2 };
+        assert_eq!(joined.len(), edges, "{reference:?}: {whole:?}");
+        let mut j = [0.0_f64; 3];
+        for s in &joined {
+            assert_eq!(seam.report.order_at_stations, s.order_at_stations);
+            for (m, e) in j.iter_mut().zip(worst(s)) {
+                *m = m.max(e);
+            }
+        }
+        let w = worst(&seam.report);
         for o in 0..3 {
             assert!(
                 (w[o] - j[o]).abs() <= 1e-9,

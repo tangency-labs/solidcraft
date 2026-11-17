@@ -45,6 +45,15 @@
 //! above `d` once they are about `sqrt(8 R (radius - d))` long, `R` their radius of
 //! curvature.
 //!
+//! **A seam.** A closed curve's two ends are one point, its seam, and a point about the seam
+//! drops on either end of its interval. Where the other curve is closed within the radius
+//! (its ends within the radius of each other), the piece of it between two feet may run
+//! either way round: between the feet, or from the higher foot to the interval's end and
+//! from its start to the lower one. Each of those parts is a piece of the other curve, so
+//! each gives a true bound and the least is kept. This curve is cut where the other's seam
+//! drops on it, so that no piece of it runs past the other's seam and the pieces on either
+//! side are each faced by one of those parts (#18163).
+//!
 //! **The run.** Two curves that run together over part of each (two sheets' edges along one
 //! seam, one shorter or shifted along the other) meet over a run whose ends are ends of the
 //! curves: at each end of the run, one curve ends on the other. [`Curve::proved_overlap`] drops
@@ -571,9 +580,22 @@ impl Curve {
         let (Some(mine), Some(theirs)) = (form(self), form(other)) else {
             return Ok(false);
         };
-        let Some(cuts) = soft(mine.breaks(a, b))? else {
+        let Some(mut cuts) = soft(mine.breaks(a, b))? else {
             return Ok(false);
         };
+        // the other curve closed within the radius: this one is cut where its seam drops
+        // (module docs, "A seam")
+        let closed = soft(other.is_closed(k, other_interval, radius))?.unwrap_or(false);
+        if closed {
+            if let Some(seam) = soft(other.evaluate_point(k, lo))? {
+                if let Some((t, _)) = foot_on(k, self, interval, seam)? {
+                    let at = cuts.partition_point(|&c| c < t);
+                    if a < t && t < b && cuts.get(at) != Some(&t) {
+                        cuts.insert(at, t);
+                    }
+                }
+            }
+        }
         let mut stack: Vec<(f64, f64, usize)> = cuts
             .windows(2)
             .filter_map(|w| match *w {
@@ -607,12 +629,26 @@ impl Curve {
             let (Some(s), Some(t)) = (foot(piece.a)?, foot(piece.b)?) else {
                 return Ok(false);
             };
-            let Some(facing) = soft(theirs.tube(s.min(t), s.max(t)))?.flatten() else {
+            // the bound against the other curve's piece over `[u, v]`
+            let against = |u: f64, v: f64| -> Result<Option<f64>> {
+                Ok(soft(theirs.tube(u, v))?.flatten().map(|facing| {
+                    let reach = segment_distance(piece.a, facing.a, facing.b)
+                        .max(segment_distance(piece.b, facing.a, facing.b));
+                    (piece.rho + reach + facing.rho) * (1.0 + gamma(3))
+                }))
+            };
+            let (low, high) = (s.min(t), s.max(t));
+            let Some(mut bound) = against(low, high)? else {
                 return Ok(false);
             };
-            let reach = segment_distance(piece.a, facing.a, facing.b)
-                .max(segment_distance(piece.b, facing.a, facing.b));
-            let bound = (piece.rho + reach + facing.rho) * (1.0 + gamma(3));
+            if closed && bound > radius {
+                // the other curve's piece round its seam (module docs, "A seam")
+                for (u, v) in [(lo, low), (high, hi)] {
+                    if let Some(round) = against(u, v)? {
+                        bound = bound.min(round);
+                    }
+                }
+            }
             if bound <= radius {
                 continue;
             }
