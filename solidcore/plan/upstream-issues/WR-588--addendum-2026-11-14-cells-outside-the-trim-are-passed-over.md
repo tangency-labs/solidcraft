@@ -44,6 +44,10 @@ Updates: WR-588
   ways; the net's subpatch above is not taken for it directly. (`cell_monotone` reads the
   B-spline base `patch_base` gives, which for a procedural blend or ball patch is its net, as
   the fork's `sm_CellMonotone` does through `IsKindOf(SmBSplineSurface)`.)
+- **After the merge with #13753:** a blend face keeps the fork's rules 2 and 3 on its
+  solve (the control-point rules of #13753 are for a B-spline open both ways), and an
+  unsolved cell at the limits counts with the net's hull raised by `unsolved_cell_top`'s
+  own `net_gap`, not the bound a second time.
 - **Tests:** `trim_cover_of_a_square_tells_cells_outside_the_face` and
   `search_passes_over_cells_outside_the_trim_and_keeps_the_peak` (`query/face/p3.rs`). The
   crowned face, trimmed to `[-10, 10]^2` in `[-20, 20]^2` and rising to 50 at the outer corner,

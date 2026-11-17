@@ -108,6 +108,13 @@ fn button_appearance(ui: &Ui, response: Option<&Response>, tone: ButtonTone) -> 
     ButtonAppearance { fill, ink, stroke }
 }
 
+/// Fill, ink and border of a normal button in the response's current state, for controls
+/// that paint their own content (icon plus label) but must read as the kit's buttons.
+pub(super) fn normal_button_look(ui: &Ui, response: &Response) -> (egui::Color32, egui::Color32, egui::Stroke) {
+    let look = button_appearance(ui, Some(response), ButtonTone::Normal);
+    (look.fill, look.ink, look.stroke)
+}
+
 fn styled_button(ui: &Ui, label: egui::WidgetText, tone: ButtonTone) -> egui::Button<'static> {
     // Match egui's own Button lookup: its previous rectangle is hit-tested with this frame's
     // input before allocation. No extra UI scope or widget changes the button's identity.
@@ -534,7 +541,8 @@ pub fn button_pair(ui: &mut egui::Ui, key: &str, states: [bool; 2], buttons: [Pa
                         f32::from(t.icon.a()) / 255.0,
                     );
                 }
-                painter.galley(egui::pos2(left + icon_width, rect.center().y - galley.size().y / 2.0), galley, t.form_ink);
+                let ink = if on { crate::layout::ink_on(&t, t.selected_bg, t.form_ink, 4.5) } else { t.form_ink };
+                painter.galley(egui::pos2(left + icon_width, rect.center().y - galley.size().y / 2.0), galley, ink);
                 response.widget_info(|| egui::WidgetInfo::selected(egui::Role::Button, ui.is_enabled(), on, label));
                 t.button_bevel(ui, &response, on);
                 pointer_on_hover(ui, &response);

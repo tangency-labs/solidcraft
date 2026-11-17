@@ -17,15 +17,15 @@
 //! on F2. On the wall F1 + F2 the corner runs along B1's rail from A to P, where it meets
 //! the seam, up the seam's line past V to Q, where B2's rail on F2 crosses it, and along
 //! B2's rail back to B. The corner splits along the arc X-V in T: the face L (X, A, P, V)
-//! with B1 and the face U (X, V, Q, B) with B2, each a bicubically blended Coons patch in
-//! R^4 ([`algebra`]).
+//! with B1 and the face U (X, V, Q, B) with B2, each a Coons patch in R^4, bicubically
+//! blended for rounds ([`algebra`]).
 //!
 //! | Rust                      | Fork                                                  |
 //! |---------------------------|-------------------------------------------------------|
 //! | [`MixedCorner`]           | `SmBlendCorner`'s `m_apMixedSurface`, `m_vMixed3d`, `m_vMixedUV`, `m_vMixedOrients`, and `SmMixedRing` |
 //! | [`classify_mixed`]        | `SmBlendCorner::ClassifyMixed`                        |
 //! | `mixed_ring` (private)    | `sm_MixedRing`                                        |
-//! | `leaving` (private)       | `sm_MixedLeaving`                                     |
+//! | `leaving` (crate)         | `sm_MixedLeaving`                                     |
 //! | `param_of` (private)      | `sm_MixedParam`                                       |
 //! | `curve_surface` (private) | `sm_MixedCurveSurface`                                |
 //! | `rail_wall` (private)     | `sm_MixedRailWall`                                    |
@@ -497,7 +497,13 @@ impl SolutionObject for MxObject {
 /// [`crate::query::edge_turn::leaving_derivative`]'s ([`crate::query::edge_turn::leaving_tangent`]);
 /// this adds the closed edge's start and
 /// this module's errors (a vertex the edge does not meet, no curve, a tangent of no length).
-fn leaving(k: &Kernel, b: &Brep, e: EdgeId, vertex: VertexId, op: &'static str) -> Result<Vec3> {
+pub(crate) fn leaving(
+    k: &Kernel,
+    b: &Brep,
+    e: EdgeId,
+    vertex: VertexId,
+    op: &'static str,
+) -> Result<Vec3> {
     let at_start = edge::start_vertex(b, e)? == Some(vertex);
     if !at_start && edge::end_vertex(b, e)? != Some(vertex) {
         // the edge does not meet the vertex
@@ -851,8 +857,8 @@ fn normal_at(
 /// ([`algebra::compose`]). The rail pieces A-P and Q-B are the rails' own, the lines P-V
 /// and V-Q the seam's, the inflection V-X the conic in T leaving X along an asymptotic
 /// direction of the corner's shape operator and arriving at V along the edges. Each face
-/// is the Coons patch of its sides ([`algebra::coons`]; chamfers' the bilinear one),
-/// every ribbon G1 to its neighbour by its field.
+/// is the Coons patch of its sides ([`algebra::coons`]; chamfers' [`algebra::coons_chamfer`],
+/// G0), every ribbon G1 to its neighbour by its field.
 ///
 /// # Errors
 ///
@@ -889,7 +895,7 @@ pub fn calc_mixed_edge_geom(
     ];
     let geoms = [fs[0].first_fillet_geom()?, fs[1].first_fillet_geom()?];
     let tol = corner.approx_tol_3d;
-    // chamfers meet their faces G0: the corner's faces are then the bilinear Coons
+    // chamfers meet their faces G0: the corner's faces are then the chamfer's Coons
     // patches of their sides
     let mut chamfer = false;
     for s in fs {
@@ -1401,7 +1407,7 @@ pub fn calc_mixed_edge_geom(
         let o = 4 * f;
         let s = |i: usize| sides.get(o + i).ok_or_else(err);
         let mut srf = if chamfer {
-            algebra::coons_bilinear(s(0)?, s(1)?, s(2)?, s(3)?)?
+            algebra::coons_chamfer(s(0)?, s(1)?, s(2)?, s(3)?, tol)?
         } else {
             algebra::coons(s(0)?, s(1)?, s(2)?, s(3)?)?
         };

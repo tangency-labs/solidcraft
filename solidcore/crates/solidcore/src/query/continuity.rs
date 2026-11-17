@@ -20,6 +20,10 @@
 //! give the teeth of a comb: a curve's curvature vector `κ N`, and a surface's normal curvature along one of its parameter lines
 //! times its normal, `(n · S_tt / |S_t|²) n`.
 //!
+//! The two faces need not be in one body: [`continuity_on`] and [`continuity_over`] take each
+//! face use in its own B-rep and the curve to measure along, for the seam where two separate
+//! sheets meet (one sheet's edge over the part the other's runs with it).
+//!
 //! What is not proved: the drops find the nearest point of each surface from the given guess
 //! (a gap is never smaller than the true one only where the drop found the nearest foot), and
 //! the values are evaluated in floating point with no bound on their error.
@@ -32,7 +36,7 @@ use crate::eval::normal_section::normal_section;
 use crate::eval::{Partials, MAX_PARTIAL_ORDER};
 use crate::geom::extent1d::Extent1d;
 use crate::kernel::Kernel;
-use crate::math::{Point2, Point3, Vec3};
+use crate::math::{Point2, Point3, Vec3, EFF_ZERO};
 use crate::nurbs::b_spline_surface_n_lib::p2::{EvaluateFlags, OrientType};
 use crate::nurbs::knots::Side as Span;
 use crate::query::brep as qbrep;
@@ -230,6 +234,10 @@ pub struct Principal {
     pub k1: f64,
     /// The smaller principal curvature.
     pub k2: f64,
+    /// Gaussian curvature, 1/mm²: `k1 * k2`, independent of the face's orientation.
+    pub gaussian: f64,
+    /// Mean curvature, 1/mm: `(k1 + k2) / 2`, convex positive against `normal`.
+    pub mean: f64,
     /// The unit tangent direction of `k1`.
     pub d1: Vec3,
     /// The unit tangent direction of `k2`.
@@ -241,7 +249,9 @@ pub struct Principal {
 /// natural normal `Su x Sv`), read against the face's upward use's normal and signed convex
 /// positive (each negated and the two exchanged where the use runs with the natural normal), so
 /// `k1 >= k2` and a sphere's outside reads `1 / r` twice. `None` where the drop fails, the
-/// normal is zero, or the surface's forms degenerate there (a pole).
+/// normal is zero, the kernel marks the point singular (a pole), or the surface's forms
+/// degenerate there. Gaussian curvature is independent of the face's orientation; mean
+/// curvature has the same convex-positive sign convention as the principal curvatures.
 ///
 /// # Errors
 ///
@@ -264,6 +274,9 @@ pub fn principal_curvatures(
     let Some(one) = side(k, s, sign, p, None)? else {
         return Ok(None);
     };
+    if s.is_singularity(k, one.uv, EFF_ZERO, false)?.singular {
+        return Ok(None);
+    }
     let g = match s.evaluate_geometric(k, one.uv, Span::Left, Span::Left) {
         Ok(g) => g,
         Err(e) if e.is_unported_or_cancelled() => return Err(e),
@@ -285,7 +298,15 @@ pub fn principal_curvatures(
             g.principle_curvature_vector2,
         )
     };
-    if !(k1.is_finite() && k2.is_finite() && finite(d1) && finite(d2)) {
+    let gaussian = g.gaussian_curvature;
+    let mean = -sign * g.normal_curvature;
+    if !(k1.is_finite()
+        && k2.is_finite()
+        && gaussian.is_finite()
+        && mean.is_finite()
+        && finite(d1)
+        && finite(d2))
+    {
         return Ok(None);
     }
     Ok(Some(Principal {
@@ -293,6 +314,8 @@ pub fn principal_curvatures(
         normal: one.normal,
         k1,
         k2,
+        gaussian,
+        mean,
         d1,
         d2,
     }))
@@ -317,17 +340,38 @@ pub fn continuity_at(
     t: f64,
     guess: [Option<Point2>; 2],
 ) -> Result<Option<ContinuityAt>> {
+    let [fa, fb] = faceuses;
+    continuity_on(k, edge_curve(b, e)?, t, [(b, fa), (b, fb)], guess)
+}
+
+/// Edge `e`'s curve.
+fn edge_curve(b: &Brep, e: EdgeId) -> Result<&Curve> {
+    b.edge(e)?
+        .curve
+        .as_ref()
+        .ok_or_else(|| SolidError::invalid_input(OP, "edge without a curve"))
+}
+
+/// [`continuity_at`] at parameter `t` of `curve`, between two face uses each in its own B-rep
+/// (`sides`: face a's, then face b's): the seam where two separate sheets meet along a curve
+/// of one of them, measured as an edge between two faces of one body is.
+///
+/// # Errors
+///
+/// As [`continuity_at`], for each side in its own B-rep.
+pub fn continuity_on(
+    k: &Kernel,
+    curve: &Curve,
+    t: f64,
+    sides: [(&Brep, FaceuseId); 2],
+    guess: [Option<Point2>; 2],
+) -> Result<Option<ContinuityAt>> {
     if !t.is_finite() {
         return Err(SolidError::invalid_input(
             OP,
             "an edge parameter that is not finite",
         ));
     }
-    let curve = b
-        .edge(e)?
-        .curve
-        .as_ref()
-        .ok_or_else(|| SolidError::invalid_input(OP, "edge without a curve"))?;
     let d = curve.evaluate(k, t, 1, true, false)?;
     let (Some(&point), Some(&d1)) = (d.first(), d.get(1)) else {
         return Err(SolidError::query_failed(
@@ -340,9 +384,9 @@ pub fn continuity_at(
         return Ok(None);
     }
     let tangent = d1 * (1.0 / speed);
-    let mut sides = Vec::with_capacity(2);
+    let mut feet = Vec::with_capacity(2);
     let mut jets = Vec::with_capacity(2);
-    for (&fu, g) in faceuses.iter().zip(guess) {
+    for (&(b, fu), g) in sides.iter().zip(guess) {
         let f = b
             .faceuse(fu)?
             .face
@@ -362,11 +406,11 @@ pub fn continuity_at(
         let Some(jet) = normal_section(&d, one.normal, across * (1.0 / len)) else {
             return Ok(None);
         };
-        sides.push(one);
+        feet.push(one);
         jets.push(jet.values());
     }
     let (Some(a), Some(bb), Some(ja), Some(jb)) =
-        (sides.first(), sides.get(1), jets.first(), jets.get(1))
+        (feet.first(), feet.get(1), jets.first(), jets.get(1))
     else {
         return Err(SolidError::query_failed(
             OP,
@@ -514,11 +558,49 @@ pub fn continuity_along(
     faceuses: [FaceuseId; 2],
     stations: usize,
 ) -> Result<Vec<ContinuityStation>> {
+    let [fa, fb] = faceuses;
     let interval = b.edge(e)?.interval;
+    continuity_over(
+        k,
+        edge_curve(b, e)?,
+        interval,
+        [0.0, 1.0],
+        [(b, fa), (b, fb)],
+        stations,
+    )
+}
+
+/// [`continuity_on`] at `stations` even steps over the part `part` of `interval` (fractions of
+/// it, `[start, end]`; `[0, 1]` is the whole), its ends included, each station's drops
+/// starting from the last one's feet; each station's [`ContinuityStation::edge_fraction`] is
+/// its fraction of `interval`. The seam of two separate sheets over the part of one's edge
+/// where the other's runs with it ([`Curve::proved_overlap`]). Stations that say nothing are
+/// left out.
+///
+/// # Errors
+///
+/// [`SolidError::InvalidInput`] for a part not finite; those of [`continuity_on`].
+pub fn continuity_over(
+    k: &Kernel,
+    curve: &Curve,
+    interval: Extent1d,
+    part: [f64; 2],
+    sides: [(&Brep, FaceuseId); 2],
+    stations: usize,
+) -> Result<Vec<ContinuityStation>> {
+    let [f0, f1] = part;
+    if !(f0.is_finite() && f1.is_finite()) {
+        return Err(SolidError::invalid_input(
+            OP,
+            "a part of an edge that is not finite",
+        ));
+    }
     let mut out = Vec::new();
     let mut guess: [Option<Point2>; 2] = [None, None];
-    for f in fractions(stations, false) {
-        let Some(m) = continuity_at(k, b, e, faceuses, interval.evaluate(f), guess)? else {
+    for step in fractions(stations, false) {
+        // the whole interval's fractions exactly as they are: `0 + 1 * step` is `step`
+        let f = f0 + (f1 - f0) * step;
+        let Some(m) = continuity_on(k, curve, interval.evaluate(f), sides, guess)? else {
             continue;
         };
         guess = [Some(m.uv[0]), Some(m.uv[1])];

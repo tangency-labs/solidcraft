@@ -1,7 +1,9 @@
 //! tangency-labs/solidcore#1036: two capped degree-1 skins sharing three section curves
 //! (A through sections 0..4, B through 2..6), so their side faces coincide between z = 20
 //! and z = 40. Upstream (C++ at `c9c5979` and v1.0.1 `3fd5b95`) returns an empty A − B and
-//! all of A for A ∩ B, and fails A ∪ B (1001); the port does the same (WR-473).
+//! all of A for A ∩ B, and fails A ∪ B (1001) (WR-473); the port does the same with
+//! `simple_coincidence_crossing_is_point` (WR-647). By default the port refuses all three
+//! (1001, `MergeCurveClasses`); before #17200 it read a vertex a failed merge had squeezed.
 #![allow(
     clippy::unwrap_used,
     clippy::expect_used,
@@ -168,16 +170,14 @@ fn issue_1036_probe() {
         let mut x = skin_range(&mut k, from, to).unwrap();
         report.push(format!("{name} faces {:#?}", faces(&k, &mut x)));
     }
-    // The same with each opt-in that touches this path: WR-305 (an interval along a face
-    // edge classifies to the edge) for the slivers on A's top cap, and WR-304 (the
-    // clean-up re-checks edges a face merge leaves inside one face). Neither changes
-    // the results (run of 2026-10-27).
-    for fix in ["classify_edge_interval", "boolean_cleanup_removes_slits"] {
+    // The same with the opt-in that touches this path: WR-305 (an interval along a face
+    // edge classifies to the edge) for the slivers on A's top cap. It did not change the
+    // results (run of 2026-10-27), nor did WR-304 (the clean-up re-checks edges a face
+    // merge leaves inside one face), which is always on now.
+    {
+        let fix = "classify_edge_interval";
         let mut k = Kernel::default();
-        match fix {
-            "classify_edge_interval" => k.fixes.classify_edge_interval = true,
-            _ => k.fixes.boolean_cleanup_removes_slits = true,
-        }
+        k.fixes.classify_edge_interval = true;
         for (name, op) in [("A - B", 0), ("A n B", 1), ("A u B", 2)] {
             let (a, b) = (
                 skin_range(&mut k, 0, 5).unwrap(),
@@ -204,4 +204,51 @@ fn issue_1036_probe() {
         }
     }
     panic!("{report:#?}");
+}
+
+/// What one Boolean of the skins gave: its volume, or the error.
+fn outcome(k: &mut Kernel, op: usize) -> solidcore::Result<f64> {
+    let (a, b) = (skin_range(k, 0, 5)?, skin_range(k, 2, 7)?);
+    let mut r = match op {
+        0 => boolean_difference(k, a, b),
+        1 => boolean_intersection(k, a, b),
+        _ => boolean_union(k, a, b),
+    }?;
+    let issues = solidcore::topology::integrity::check(&r);
+    assert!(issues.is_ok(), "op {op}: invalid result {issues:?}");
+    volume(k, &mut r)
+}
+
+/// #17200: `MergeCurveClasses` failing after its squeeze deleted the vertex
+/// `CloseIntersectionLoop` was closing dropped the deletion, so `MarkCommon` kept the dead
+/// vertex as a loop end and `FixGaps` failed reading it ("topology handle is unknown").
+/// `MarkCommon` ignores the closure's own failure, as upstream does, and starts a new pass;
+/// each Boolean must then give the right body or a typed refusal. Today all three refuse
+/// with 1001 from a later `MergeCurveClasses` (the coincident side faces, WR-473).
+/// The right volumes follow from the operands: A ∩ B is the skin through sections 2..4
+/// (both skins are ruled through the same sections there), A − B = A − A ∩ B and
+/// A ∪ B = A + B − A ∩ B.
+#[test]
+fn issue_17200_no_dangling_vertex_after_failed_squeeze() {
+    let mut k = Kernel::default();
+    let mut skin = skin_range(&mut k, 0, 5).unwrap();
+    let va = volume(&k, &mut skin).unwrap();
+    let mut skin = skin_range(&mut k, 2, 7).unwrap();
+    let vb = volume(&k, &mut skin).unwrap();
+    let mut skin = skin_range(&mut k, 2, 5).unwrap();
+    let vab = volume(&k, &mut skin).unwrap();
+    for (op, want) in [(0, va - vab), (1, vab), (2, va + vb - vab)] {
+        match outcome(&mut k, op) {
+            Ok(v) => assert!(
+                (v - want).abs() <= 1e-6 * want,
+                "op {op}: volume {v}, want {want}"
+            ),
+            Err(e) => assert!(
+                matches!(e, solidcore::SolidError::Failed(_))
+                    && e.operation() == "boolean::topology_intersector::p3::merge_curve_classes"
+                    && e.sm_status() == Some(1001),
+                "op {op}: {e:?}"
+            ),
+        }
+    }
 }
