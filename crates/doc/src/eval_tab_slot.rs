@@ -4,10 +4,12 @@
 
 use std::collections::BTreeMap;
 
-use solidcraft_kernel::tab_slot::{Layout, TabSlotSpec};
+use solidcraft_kernel::Body;
+use solidcraft_kernel::tab_slot::{self as kernel_ts, Layout, Plane, TabSlotSpec};
 
-use super::val;
+use super::{ModelState, append_warning, val};
 use crate::expr::{Kind, Value};
+use crate::lineage::Traced;
 use crate::{DocError, FeatureKind, PlatePick, Result};
 
 /// The least land of a slot plate beside a slot, and between two openings (design 0 row 43, 8.4):
@@ -24,8 +26,6 @@ pub(crate) const MAX_TABS_PER_STRETCH: u32 = 10_000;
 /// The recipe's settings for one plate pair: the tab plate `t_tab` and the slot plate `t_slot`
 /// thick. The defaults are per pair: the tab width is three times the tab plate's thickness, the
 /// end distance is the tab width and the overshoot half the slot plate's thickness.
-// The eval arm calls it from the next commit of slice 3b.
-#[allow(dead_code)]
 pub(crate) fn spec_of(vals: &BTreeMap<String, Value>, k: &FeatureKind, t_tab: f64, t_slot: f64) -> Result<TabSlotSpec> {
     let FeatureKind::TabSlot { count, spacing, tab_width, end_distance, clearance, protrusion, .. } = k else {
         return Err(DocError::Invalid("not a tab and slot".into()));
@@ -86,8 +86,6 @@ pub(crate) fn spec_of(vals: &BTreeMap<String, Value>, k: &FeatureKind, t_tab: f6
 /// The first key that names more than one of `tab_plates` and `slot_plates` together, or a pick
 /// with no key (a key is minted on load, so that is a damaged design). Keys name every tool of a
 /// pick's joints: two picks with one key would share their names.
-// The eval arm calls it from the next commit of slice 3b.
-#[allow(dead_code)]
 pub(crate) fn bad_plate_key(tab_plates: &[PlatePick], slot_plates: &[PlatePick]) -> Option<String> {
     let mut seen = std::collections::BTreeSet::new();
     for p in tab_plates.iter().chain(slot_plates) {
@@ -99,6 +97,87 @@ pub(crate) fn bad_plate_key(tab_plates: &[PlatePick], slot_plates: &[PlatePick])
         }
     }
     None
+}
+
+/// The tolerance of the joints' contacts and plans.
+const JOINT_TOL: f64 = 1.0e-3;
+
+/// `b`'s extent along `p`'s normal: the slot plate's thickness where a tab stands on it (its
+/// box's, so a reach that may be long on a plate at an angle to the axes, never short).
+fn extent_along(b: &Body, p: &Plane) -> Result<f64> {
+    let bx = b.exact_bounds()?;
+    let n = p.normal;
+    Ok(n.x.abs() * (bx.max.x - bx.min.x) + n.y.abs() * (bx.max.y - bx.min.y) + n.z.abs() * (bx.max.z - bx.min.z))
+}
+
+/// The feature `k` applied to `st` (design 5.7): every tab plate against every slot plate, the
+/// pairs with a joint in pick order, each made joint cut in that order (a plate in several joints
+/// takes the previous joint's result), the plates replaced in place. Pairs that do not meet are
+/// passed by; a joint skipped, or a pair the cut refuses, is named in `warning`.
+pub(crate) fn apply(vals: &BTreeMap<String, Value>, k: &FeatureKind, st: &mut ModelState, warning: &mut Option<String>) -> Result<()> {
+    let FeatureKind::TabSlot { tab_plates, slot_plates, .. } = k else {
+        return Err(DocError::Invalid("not a tab and slot".into()));
+    };
+    if let Some(bad) = bad_plate_key(tab_plates, slot_plates) {
+        return Err(DocError::Invalid(format!("tab and slot: {bad}")));
+    }
+    // The plates, each once, as the state has them.
+    let mut names: Vec<String> = Vec::new();
+    for p in tab_plates.iter().chain(slot_plates) {
+        let name = p.body.to_string();
+        if st.body(&name).is_none() {
+            return Err(DocError::Invalid(format!("tab and slot: no body {name}")));
+        }
+        if !names.contains(&name) {
+            names.push(name);
+        }
+    }
+    let index = |n: &str| names.iter().position(|m| m == n).unwrap_or(0);
+    let mut plates: Vec<Body> = names.iter().filter_map(|n| st.body(n)).map(|b| b.body.clone()).collect();
+    // The pairs with a joint, in pick order, with their settings.
+    let mut list: Vec<(usize, usize, Plane)> = Vec::new();
+    let mut specs: Vec<TabSlotSpec> = Vec::new();
+    for t in tab_plates {
+        for s in slot_plates {
+            let (ti, si) = (index(&t.body.to_string()), index(&s.body.to_string()));
+            if ti == si {
+                continue;
+            }
+            let near = s.near.or(t.near).map(Into::into);
+            let Some((tab, slot)) = plates.get(ti).zip(plates.get(si)) else { continue };
+            let Ok((p, joint)) = kernel_ts::joint_plane(tab, slot, near, JOINT_TOL)? else { continue };
+            specs.push(spec_of(vals, k, joint.faces.thickness, extent_along(slot, &p)?)?);
+            list.push((ti, si, p));
+        }
+    }
+    let Some(first) = specs.first().copied() else {
+        append_warning(warning, "tab and slot: no tab plate stands on a slot plate".into());
+        return Ok(());
+    };
+    let refs: Vec<&Body> = plates.iter().collect();
+    let (skips, _tool_faces) = kernel_ts::joints(&refs, &list, first, JOINT_TOL)?;
+    for (j, ((ti, si, p), spec)) in list.iter().zip(&specs).enumerate() {
+        if let Some(Some(skip)) = skips.get(j) {
+            append_warning(warning, format!("tab and slot: {} on {} is skipped: {skip:?}", names[*ti], names[*si]));
+            continue;
+        }
+        let Some((tab, slot)) = plates.get(*ti).zip(plates.get(*si)) else { continue };
+        match kernel_ts::cut(tab, slot, *p, *spec, JOINT_TOL)? {
+            Ok(c) => {
+                plates[*ti] = c.tab_plate;
+                plates[*si] = c.slot_plate;
+            }
+            Err(skip) => append_warning(warning, format!("tab and slot: {} on {} has no joint: {skip:?}", names[*ti], names[*si])),
+        }
+    }
+    for (name, made) in names.iter().zip(plates) {
+        if let Some(mb) = st.bodies.iter_mut().find(|b| &b.name == name) {
+            if !mb.body.same(&made) {
+                *mb = mb.remade(Traced::unnamed(made));
+            }
+        }
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -158,5 +237,25 @@ mod tests {
         assert!(bad_plate_key(&[pick(Some(1), "A")], &[pick(Some(1), "B")]).unwrap().contains("key 1"));
         assert!(bad_plate_key(&[pick(Some(1), "A"), pick(Some(1), "C")], &[]).is_some());
         assert!(bad_plate_key(&[pick(None, "A")], &[]).unwrap().contains("no key"));
+    }
+
+    /// Fixture F (design 16): Bottom (0,0,0)-(160,100,6), Wall (20,30,6)-(140,36,66) on its top;
+    /// E1 laser (count 3, W 20, e 10, c 0.1) through the eval: Wall 45 360 and Bottom 93 745.68 mm³.
+    #[test]
+    fn tab_slot_apply_cuts_one_pair_on_fixture_f() {
+        use solidcore_record::Vec3;
+        use solidcraft_kernel as kernel;
+        let mut st = ModelState::default();
+        let bottom = kernel::box_solid(Vec3::new(0.0, 0.0, 0.0), Vec3::new(160.0, 100.0, 6.0)).unwrap();
+        let wall = kernel::box_solid(Vec3::new(20.0, 30.0, 6.0), Vec3::new(140.0, 36.0, 66.0)).unwrap();
+        st.bodies.push(super::super::ModelBody::new("Bottom".into(), bottom, 0));
+        st.bodies.push(super::super::ModelBody::new("Wall".into(), wall, 0));
+        let k = kind(serde_json::json!({"clearance": "0.1", "count": "3", "tab_width": "20", "end_distance": "10"}));
+        let mut warning = None;
+        apply(&BTreeMap::new(), &k, &mut st, &mut warning).unwrap();
+        assert!(warning.is_none(), "{warning:?}");
+        let volume = |n: &str| kernel::measure_mass(&st.body(n).unwrap().body).unwrap().volume;
+        assert!((volume("Wall") - 45_360.0).abs() < 1e-6, "{}", volume("Wall"));
+        assert!((volume("Bottom") - 93_745.68).abs() < 1e-6, "{}", volume("Bottom"));
     }
 }
