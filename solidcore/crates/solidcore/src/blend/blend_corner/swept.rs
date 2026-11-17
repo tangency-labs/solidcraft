@@ -523,18 +523,16 @@ pub fn swept_corner_edge_geom(
         }
     }
     let mut surface = Surface::from(torus);
-    if k.fixes.fillet_round_as_definition {
-        keep_definition(
-            k,
-            target,
-            corner,
-            &mut surface,
-            (line_pt, axis),
-            centre,
-            minor,
-            tol,
-        )?;
-    }
+    keep_definition(
+        k,
+        target,
+        corner,
+        &mut surface,
+        (line_pt, axis),
+        centre,
+        minor,
+        tol,
+    )?;
     let natural = surface.natural_uv_domain_with_nurb(k)?;
     let trims = surface.create_natural_uv_trim_curves(k, &natural, SurfParamType::V, true)?;
     if trims.curves_3d.len() != 3 || trims.uv_curves.len() != 3 || trims.orients.len() != 3 {
@@ -577,7 +575,7 @@ pub fn swept_corner_edge_geom(
     Ok(())
 }
 
-/// Not the fork (#2488, with `fillet_round_as_definition`): the Swept turn's torus keeps
+/// Not the fork (#2488): the Swept turn's torus keeps
 /// its definition ([`CornerDefinition::swept`]): the rounds' common face, the side edge's
 /// line, the balls' centres at the side vertex and their radius, re-certified at once
 /// ([`CornerDefinition::recertify`]: the net a torus, the torus the end section's about the

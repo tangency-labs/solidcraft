@@ -356,8 +356,11 @@ struct H {
 /// The knot span `j` of a B-spline of degree `p` (rational or not): its control points in
 /// homogeneous difference form, `w_s (P_s - P_0)` and `w_s`, its local knots, and the
 /// rounding of the points and weights read off it by blossoming.
-struct Span {
+pub(crate) struct Span {
     p: usize,
+    /// The span's first control point `P_0`, Euclidean, which the difference form is taken
+    /// from.
+    origin: Vec3,
     /// The knots `t_(j-p+1) ..= t_(j+p)`.
     knots: Vec<f64>,
     /// The knot span `[t_j, t_(j+1)]`: a piece within it is blossomed to the rounding bound.
@@ -382,7 +385,8 @@ fn difference_of_products(a: f64, b: f64, c: f64, d: f64) -> f64 {
 }
 
 impl Span {
-    fn of(c: &BSplineCurve, mid: f64) -> Result<Self> {
+    /// The knot span of `c` that holds `mid`.
+    pub(crate) fn of(c: &BSplineCurve, mid: f64) -> Result<Self> {
         let p = c.degree()?;
         let cpts = c.control_points()?;
         let (unique, mult) = c.knots(None)?;
@@ -454,6 +458,7 @@ impl Span {
         }
         Ok(Self {
             p,
+            origin: Vec3::new(c0.x / w0, c0.y / w0, z(&c0) / w0),
             knots: local,
             start,
             end,
@@ -504,6 +509,30 @@ impl Span {
                 self.blossom(&u)
             })
             .collect()
+    }
+
+    /// The Euclidean Bezier control points of the curve on `[a, b]` within this span, whose
+    /// convex hull holds the curve there, and the bound of each coordinate's rounding: the
+    /// blossomed difference point's and weight's through the division (as
+    /// [`Span::piece`]'s ends), and `gamma_2` of the point for the origin's own division and
+    /// the sum that puts it back. `None` for a piece outside the span or of no length,
+    /// where the rounding bound does not hold, and for numbers not finite.
+    pub(crate) fn hull(&self, a: f64, b: f64) -> Option<(Vec<Vec3>, f64)> {
+        if !(self.start <= a && a < b && b <= self.end) {
+            return None;
+        }
+        let pts = self.bezier(a, b);
+        let (e, ew, wl) = (self.rounding, self.rounding_w, self.w_min);
+        let size = pts.iter().fold(0.0_f64, |m, h| m.max(h.x.length() / h.w));
+        let from = self.origin;
+        let origin = from.x.abs().max(from.y.abs()).max(from.z.abs());
+        let rounding = (e + size * ew) / wl + gamma(2) * size + gamma(2) * (origin + size);
+        let out: Vec<Vec3> = pts.iter().map(|h| from + h.x * (1.0 / h.w)).collect();
+        let finite = rounding.is_finite()
+            && out
+                .iter()
+                .all(|p| p.x.is_finite() && p.y.is_finite() && p.z.is_finite());
+        finite.then_some((out, rounding))
     }
 
     /// The bracket of the piece `[a, b]` (module docs): its chord `c`, and `c / cos phi`,

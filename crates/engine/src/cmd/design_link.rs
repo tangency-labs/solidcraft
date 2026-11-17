@@ -15,7 +15,36 @@ use solidcraft_doc::{DesignLink, Document};
 
 /// The folder relative link paths are kept against: the design's own, once it has a file.
 fn base_dir(path: Option<&str>) -> Option<PathBuf> {
-    path.and_then(|p| absolute(Path::new(p)).parent().map(Path::to_path_buf))
+    path.and_then(|p| parent_dir(Path::new(p)))
+}
+
+/// Resolve directory aliases before comparing folders or working out `..`. Keep the final
+/// filename: a missing source or a file symlink must keep the name the user linked.
+fn parent_dir(path: &Path) -> Option<PathBuf> {
+    #[cfg(unix)]
+    if let Some(shown) = path.to_str()
+        && !shown.contains("://")
+        && solidcraft_io::vfs::remote(shown).is_none()
+        && solidcraft_io::vfs::check_new(shown).is_ok()
+        && let Ok(full) = std::path::absolute(path)
+    {
+        let mut parent = full.parent();
+        let mut missing = PathBuf::new();
+        while let Some(dir) = parent {
+            match dir.canonicalize() {
+                Ok(dir) => return Some(dir.join(missing)),
+                // A missing source folder still moves with the project. Stop at a dangling
+                // symlink or an inaccessible folder rather than guessing its destination.
+                Err(e) if e.kind() == ErrorKind::NotFound && dir.symlink_metadata().is_err_and(|e| e.kind() == ErrorKind::NotFound) => {}
+                _ => break,
+            }
+            let Some(name) = dir.file_name() else { break };
+            missing = Path::new(name).join(missing);
+            parent = dir.parent();
+        }
+    }
+    // Browser keys, Windows paths and unavailable folders retain their lexical spelling.
+    absolute(path).parent().map(Path::to_path_buf)
 }
 
 /// A path as given, made absolute when the platform can, with `.` and `..` worked out.
@@ -54,20 +83,28 @@ fn relative(base: &Path, target: &Path) -> Option<PathBuf> {
 
 /// How a link stores `file` for a design saved at `design` (`None`: not saved yet).
 pub(super) fn stored(design: Option<&str>, file: &Path) -> String {
-    let file = absolute(file);
-    match base_dir(design).and_then(|d| relative(&d, &file)) {
+    let whole = absolute(file);
+    let Some(base) = base_dir(design) else {
+        return whole.to_string_lossy().into_owned();
+    };
+    match relative(&base, &link_target(file)) {
         // Relative paths are written with `/`, so a design moves between systems with its parts.
         Some(rel) => rel.components().map(|c| c.as_os_str().to_string_lossy().into_owned()).collect::<Vec<_>>().join("/"),
-        None => file.to_string_lossy().into_owned(),
+        None => whole.to_string_lossy().into_owned(),
     }
+}
+
+/// A link's absolute target, resolving directory aliases while keeping file symlinks distinct.
+pub(super) fn link_target(file: &Path) -> PathBuf {
+    parent_dir(file).zip(file.file_name()).map(|(dir, name)| dir.join(name)).unwrap_or_else(|| absolute(file))
 }
 
 /// The file a stored link path names, for a design saved at `design`.
 pub(super) fn resolve(design: Option<&str>, link: &str) -> PathBuf {
     let p = Path::new(link);
-    match base_dir(design) {
+    match p.is_relative().then(|| base_dir(design)).flatten() {
         // Browser storage keys do not let the OS resolve `..` for us.
-        Some(d) if p.is_relative() => absolute(&d.join(p)),
+        Some(d) => absolute(&d.join(p)),
         _ => p.to_path_buf(),
     }
 }
@@ -228,6 +265,53 @@ mod tests {
         // A link kept whole (the design had no file yet) becomes relative too.
         let whole = root.join("parts").join("plate.solidcraft").to_string_lossy().into_owned();
         assert_eq!(rebase(&whole, None, &to), "../../parts/plate.solidcraft");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn directory_aliases_keep_relative_links_for_existing_and_missing_sources() {
+        let dir = folder("directory-aliases").canonicalize().unwrap();
+        let project = dir.join("projects/example");
+        std::fs::create_dir_all(project.join("out")).unwrap();
+        let output_alias = dir.join("output");
+        let source_alias = dir.join("source");
+        std::os::unix::fs::symlink(project.join("out"), &output_alias).unwrap();
+        std::os::unix::fs::symlink(&project, &source_alias).unwrap();
+        std::fs::write(project.join("part.sc"), b"{}").unwrap();
+        for name in ["part.sc", "missing.sc", "missing-dir/part.sc"] {
+            let expected = format!("../{name}");
+            for design in [project.join("out/assembly.sc"), output_alias.join("assembly.sc"), output_alias.join("../out/assembly.sc")] {
+                for source in [project.join(name), source_alias.join(name)] {
+                    let design = design.to_str().unwrap();
+                    assert_eq!(stored(Some(design), &source), expected);
+                    assert_eq!(resolve(Some(design), &expected), project.join(name));
+                }
+            }
+        }
+        assert!(!project.join("missing.sc").exists());
+        assert!(!project.join("missing-dir").exists());
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn source_file_symlinks_keep_their_names_through_directory_aliases() {
+        let dir = folder("source-alias").canonicalize().unwrap();
+        let project = dir.join("projects/example");
+        std::fs::create_dir_all(project.join("out")).unwrap();
+        let alias = dir.join("source");
+        std::os::unix::fs::symlink(&project, &alias).unwrap();
+        std::fs::write(project.join("first.sc"), b"first").unwrap();
+        std::fs::write(project.join("second.sc"), b"second").unwrap();
+        let current = project.join("current.sc");
+        std::os::unix::fs::symlink("first.sc", &current).unwrap();
+        let design = project.join("out/assembly.sc").to_string_lossy().into_owned();
+        let link = stored(Some(&design), &alias.join("current.sc"));
+        assert_eq!(link, "../current.sc");
+        std::fs::remove_file(&current).unwrap();
+        std::os::unix::fs::symlink("second.sc", &current).unwrap();
+        assert_eq!(std::fs::read(resolve(Some(&design), &link)).unwrap(), b"second");
+        let _ = std::fs::remove_dir_all(dir);
     }
 
     /// One folder per test, with the files it needs.

@@ -448,9 +448,9 @@
   "outcome": {
     "ran": true,
     "raw_counts": {
-      "edges": 51,
+      "edges": 53,
       "faces": 19,
-      "vertices": 34
+      "vertices": 36
     }
   },
   "records": "pocket-grazing-a-slanted-face.bodies.json.gz",
