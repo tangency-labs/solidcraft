@@ -2,7 +2,7 @@
 //!
 //! - **Geometry** is the scene on the nanometre grid ([`Prepared::on_grid`]), the one SVG writes, so
 //!   both draw the same joints, closures and merges. Curves are flattened within 1/8 px
-//!   ([`paper::flatten`]) and tiny-skia is given lines only: its own flattening stops at 64 lines a
+//!   ([`flatten`]) and tiny-skia is given lines only: its own flattening stops at 64 lines a
 //!   curve, more than a pixel off on a large arc at a high dpi.
 //! - **Paint** as the scene says: black or a coloured paper's ink, strokes with butt caps and miter joins (limit 4), fills
 //!   even-odd, text as its glyphs' outlines (the scene's, as SVG draws them) filled nonzero. Each
@@ -30,13 +30,14 @@ use std::io::Write;
 use std::ops::RangeInclusive;
 
 use solidcore_record::Vec2;
-use solidcraft_geom::paper::{self, Clip, Grid, GridDashes, GridItem, GridPath, GridReport, Picture, Pictures, Prepared};
+use solidcraft_geom::paper::{Clip, Grid, GridDashes, GridItem, GridPath, GridReport, Picture, Pictures, Prepared};
 use solidcraft_geom::pixel_grid::{GridWindow, MAX_SIDE_PX, PixelGrid, PixelGridError};
 use tiny_skia::{Color, FillRule, LineCap, LineJoin, Paint, Path, PathBuilder, Pixmap, PremultipliedColorU8, Stroke, StrokeDash, Transform};
 
 use solidcraft_doc::drawing::{DEFAULT_DPI, MAX_DPI, MIN_DPI};
 
 use super::PaperColour;
+use super::flatten::flatten;
 use crate::{IoError, Result};
 
 /// The resolutions a sheet PNG may have, in dots per inch: a sheet's.
@@ -435,7 +436,7 @@ impl Sheet {
 
     /// `path` onto `builder` in pixels, closed when it is.
     fn trace(&mut self, builder: &mut PathBuilder, path: &GridPath) -> Result<()> {
-        let points = paper::flatten(path, self.tolerance).map_err(|e| IoError::Invalid(e.to_string()))?;
+        let points = flatten(path, self.tolerance).map_err(|e| IoError::Invalid(e.to_string()))?;
         self.count(points.len())?;
         let at = |p: Vec2| ((p.x * self.px) as f32, ((self.height - p.y) * self.px) as f32);
         for (i, p) in points.into_iter().enumerate() {

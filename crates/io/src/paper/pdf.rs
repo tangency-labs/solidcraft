@@ -5,12 +5,12 @@
 //!   points, its content deflated, and an Info dictionary with the Producer, the Title when there
 //!   is one (ISO 32000-1 14.3.3: leave out what isn't known) and dates only from
 //!   [`PdfOptions::output_time`], never the clock, so a scene always gives the same bytes.
-//! - **Numbers** are the scene on a 10 nm grid ([`Grid::TEN_NANOMETRES`], whose walk gives the
+//! - **Numbers** are the scene on a 10 nm grid ([`PER_MM`] steps a millimetre, whose walk gives the
 //!   joints, closures and merges SVG and PNG draw), written as millimetres with up to five
 //!   decimals (Annex C's precision) inside one `cm` that scales millimetres to points. y is up on
 //!   the page as in the scene, so nothing flips.
 //! - **Curves:** lines `l` and cubics `c` as they are; a parabola raised to a cubic; an arc's
-//!   pieces (each at most a quarter turn) cut into cubics that stay within [`ARC_TOLERANCE_MM`],
+//!   pieces (each about a quarter turn, never a half) cut into cubics that stay within [`ARC_TOLERANCE_MM`],
 //!   their rounding onto the grid included.
 //! - **Paint:** strokes at their width `w` (the walk never gives 0, which 8.4.3.2 says is a device
 //!   pixel and shouldn't be used), butt caps, miter joins and a miter limit of 4, dashed by `d`;
@@ -37,6 +37,7 @@ use solidcore_record::{Seg2, Vec2};
 use solidcraft_geom::paper::{Grid, GridDashes, GridGroup, GridItem, GridPath, GridPoint, GridReport, ObjectKind, Piece, Prepared};
 use solidcraft_geom::prelude::*;
 
+use super::flatten::{seg, vec};
 use super::push_mm;
 use crate::{IoError, MAX_DRAWING_BYTES, Result};
 
@@ -52,6 +53,13 @@ const MAX_TITLE_CHARS: usize = 1000;
 const MAX_OUTPUT_TIME: u64 = 253_402_300_799;
 /// Decimals of a millimetre on the grid.
 const DECIMALS: u32 = 5;
+/// Steps a millimetre on the grid: 10 nm steps, [`DECIMALS`] decimals (Annex C's precision).
+const PER_MM: f64 = 1e5;
+
+/// The grid the scene is written on.
+fn grid() -> Result<Grid> {
+    Grid::new(PER_MM).ok_or_else(|| IoError::Invalid("the sheet PDF: no 10 nm grid".into()))
+}
 
 /// What a sheet PDF says beyond the scene.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -82,8 +90,8 @@ pub fn paper_pdf(scene: &Prepared, options: &PdfOptions) -> Result<(Vec<u8>, Pdf
         return Err(IoError::Invalid(format!("a sheet PDF's title is at most {MAX_TITLE_CHARS} characters")));
     }
     let date = options.output_time.map(date).transpose()?;
-    let on = scene.on_grid(Grid::TEN_NANOMETRES).map_err(|e| IoError::Invalid(e.to_string()))?;
-    let page = [on.size.x, on.size.y].map(|n| n as f64 / Grid::TEN_NANOMETRES.per_mm() * PT_PER_MM);
+    let on = scene.on_grid(grid()?).map_err(|e| IoError::Invalid(e.to_string()))?;
+    let page = [on.size.x, on.size.y].map(|n| n as f64 / PER_MM * PT_PER_MM);
     if page.iter().any(|side| *side < MIN_PAGE_PT) {
         return Err(IoError::Invalid(format!("a sheet PDF's page is at least {MIN_PAGE_PT} pt (about 1.06 mm) a side")));
     }
@@ -338,13 +346,13 @@ impl Content {
                 }
                 // A parabola is the cubic with its control points two thirds of the way to `c`.
                 Piece::Quadratic { c, to } => {
-                    let (a, c, b) = (at.vec(), c.vec(), to.vec());
+                    let (a, c, b) = (vec(at), vec(c), vec(to));
                     self.near(a + (c - a) * (2.0 / 3.0))?;
                     self.near(b + (c - b) * (2.0 / 3.0))?;
                     self.point(to)?;
                     self.append("c\n")?;
                 }
-                Piece::Arc { .. } => self.arc(piece.seg(at), piece.to())?,
+                Piece::Arc { .. } => self.arc(seg(piece, at), piece.to())?,
             }
             at = piece.to();
         }
@@ -381,7 +389,7 @@ impl Content {
 /// cubic of a θ arc strays at most r·(2/27)·sin⁶(θ/4)/cos²(θ/4) from it, outward; each control
 /// point rounded onto the grid moves the curve at most half a step's diagonal more.
 fn cubics_for(radius: f64, sweep: f64) -> Option<usize> {
-    let tolerance = ARC_TOLERANCE_MM * Grid::TEN_NANOMETRES.per_mm() - std::f64::consts::FRAC_1_SQRT_2;
+    let tolerance = ARC_TOLERANCE_MM * PER_MM - std::f64::consts::FRAC_1_SQRT_2;
     let strays = |theta: f64| radius * (2.0 / 27.0) * (theta / 4.0).sin().powi(6) / (theta / 4.0).cos().powi(2);
     // A quarter turn or less starts at one cubic, as it always has, so those arcs write the same bytes.
     let least = (sweep.abs() / FRAC_PI_2 - 1e-9).ceil().max(1.0);

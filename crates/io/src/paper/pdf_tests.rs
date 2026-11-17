@@ -313,12 +313,12 @@ fn a_circle_whose_rounded_pieces_turn_past_a_quarter_is_written() {
         let c = p(50.0 + f64::from(i) * 3.7e-6, 50.0 + f64::from(i) * 5.3e-6);
         let circle = scene(p(100.0, 100.0), vec![stroke(vec![Seg2::Arc { center: c, radius: 8.0, start: 0.3, sweep: TAU }], true, 0.35, None)]);
         let prepared = circle.prepare().unwrap();
-        for group in &prepared.on_grid(Grid::TEN_NANOMETRES).unwrap().groups {
+        for group in &prepared.on_grid(grid().unwrap()).unwrap().groups {
             for item in &group.items {
                 if let solidcraft_geom::paper::GridItem::Stroke { path, .. } = item {
                     let mut at = path.start;
                     for piece in &path.pieces {
-                        if let Seg2::Arc { sweep, .. } = piece.seg(at) {
+                        if let Seg2::Arc { sweep, .. } = seg(piece, at) {
                             over += usize::from(sweep.abs() > FRAC_PI_2 + 1e-9);
                         }
                         at = piece.to();
@@ -418,7 +418,7 @@ fn content_budget_is_cumulative_over_groups_and_fill_loops() {
             Group { object: 2, kind: ObjectKind::TitleBlock, items: vec![Item::Fill { region: Region2 { outer: square, holes: vec![] } }] },
         ],
     );
-    let on = source.prepare().unwrap().on_grid(Grid::TEN_NANOMETRES).unwrap();
+    let on = source.prepare().unwrap().on_grid(grid().unwrap()).unwrap();
     let complete = super::content(&on.groups).unwrap();
     assert_eq!(super::content_with_limit(&on.groups, complete.len()).unwrap(), complete);
     assert!(super::content_with_limit(&on.groups, complete.len() - 1).is_err(), "the final Q is part of the cumulative limit");
@@ -559,7 +559,7 @@ fn pdf_layers_obey_content_budget_and_skip_empty_groups() {
     assert!(!text(&bytes).contains("/OCProperties"));
     assert!(!content(&bytes).contains(" BDC"));
     let line = scene(p(210.0, 297.0), vec![stroke(vec![Seg2::Line { a: p(10.0, 10.0), b: p(100.0, 10.0) }], false, 0.35, None)]);
-    let grid = line.prepare().unwrap().on_grid(Grid::TEN_NANOMETRES).unwrap();
+    let grid = line.prepare().unwrap().on_grid(grid().unwrap()).unwrap();
     let full = super::content_with_limit(&grid.groups, MAX_DRAWING_BYTES).unwrap();
     assert!(full.contains("/OC /L0 BDC") && full.contains("EMC"));
     assert_eq!(super::content_with_limit(&grid.groups, full.len()).unwrap(), full);
@@ -682,7 +682,7 @@ fn flat_pdf_empty_scene_and_content_budget_keep_their_boundaries() {
     let empty = scene(p(210.0, 297.0), vec![]);
     assert_eq!(pdf(&empty, &options), pdf(&empty, &PdfOptions::default()), "empty groups invent no layer in either mode");
     let line = scene(p(210.0, 297.0), vec![stroke(vec![Seg2::Line { a: p(10.0, 10.0), b: p(100.0, 10.0) }], false, 0.35, None)]);
-    let grid = line.prepare().unwrap().on_grid(Grid::TEN_NANOMETRES).unwrap();
+    let grid = line.prepare().unwrap().on_grid(grid().unwrap()).unwrap();
     let flat = super::content_with_limit_and_layers(&grid.groups, None, MAX_DRAWING_BYTES).unwrap();
     assert_eq!(super::content_with_limit_and_layers(&grid.groups, None, flat.len()).unwrap(), flat);
     assert!(super::content_with_limit_and_layers(&grid.groups, None, flat.len() - 1).is_err());
@@ -854,7 +854,7 @@ fn merged_pdf_run_limits_charge_transitions_and_the_final_close() {
         .collect();
     let sheet = Scene::new(p(210.0, 297.0), groups);
     let prepared = sheet.prepare().unwrap();
-    let grid = prepared.on_grid(Grid::TEN_NANOMETRES).unwrap();
+    let grid = prepared.on_grid(grid().unwrap()).unwrap();
     // Literal independent stream: adjacent objects retain two strokes within
     // L0; only the change to L1 closes and reopens marked content.
     let expected = concat!(

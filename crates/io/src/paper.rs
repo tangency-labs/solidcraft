@@ -3,6 +3,7 @@
 
 use std::fmt::Write;
 
+mod flatten;
 mod pdf;
 mod png;
 mod svg;
