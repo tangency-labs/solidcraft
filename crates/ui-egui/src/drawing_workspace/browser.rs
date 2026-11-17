@@ -33,10 +33,14 @@ pub(crate) fn show(app: &mut SolveApp, rows: &mut Rows<'_>) {
     }
 
     let label = app.tr_label("Source design").to_string();
-    if branch(app, rows, "drawing:browser:source", Row { icon: "file", label: &label, name: true, ..Row::default() }, false) {
+    if branch(app, rows, "drawing:browser:source", Row { icon: "ws_design", label: &label, name: true, ..Row::default() }, false) {
         let name = app.session.doc.name.clone();
-        let node =
-            row(rows, "drawing:browser:source-design", Row { depth: 1, icon: "file", label: &name, name: true, ..Row::default() }, NodeMenu::None);
+        let node = row(
+            rows,
+            "drawing:browser:source-design",
+            Row { depth: 1, icon: "ws_design", label: &name, name: true, ..Row::default() },
+            NodeMenu::None,
+        );
         if node.clicked || node.double {
             app.start("document.metadata");
         }

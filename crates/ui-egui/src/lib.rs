@@ -764,7 +764,8 @@ pub struct SolveApp {
     /// `None`: it waits as long as it takes (headless use, tests). The desktop app sets it.
     pub apply_off_thread: Option<std::time::Duration>,
     /// One bounded native render proof/retirement owner, independent of tab state.
-    pub(crate) render_preparation: render_workspace::prepare::State,
+    /// Boxed: about 60 KB, a quarter of the app, which tests keep on the stack several times over.
+    pub(crate) render_preparation: Box<render_workspace::prepare::State>,
     /// Tests: work started off the window thread (a feature's evaluation, a Properties
     /// measurement) waits for this before it reports done.
     #[cfg(test)]
