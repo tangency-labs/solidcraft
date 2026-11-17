@@ -15,6 +15,11 @@ offscreen picture is never drawn). Another workspace that uses that crate patche
 this copy the same way, with `[patch.crates-io] egui-wgpu = { path = ".../vendor/egui-wgpu" }`.
 
 SolidCraft changes:
+- `src/winit.rs`, `src/lib.rs`: on Windows, reconcile the surface's requested size with
+  `Window::inner_size()` before each paint (#3043). Display wake can leave a transient resize
+  cached after egui-winit has already refreshed its size and native DPI. Use the guarded resize
+  path only when a nonzero live size differs; preserve device clamping and configure backoff.
+  Debug logs record configure attempts and reconciliations (including native DPI and egui scale).
 - `src/setup.rs`, `src/lib.rs`: let a named adapter selector defer to the normal wgpu
   request when the requested card is unavailable or incompatible with the window surface.
 - `src/lib.rs`: use 1x MSAA on the selected OpenGL adapter before creating pipelines,

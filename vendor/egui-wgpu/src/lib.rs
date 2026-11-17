@@ -1133,6 +1133,20 @@ pub fn clamp_surface_extent(width: u32, height: u32, max_side: u32) -> (u32, u32
     (fit(width), fit(height), scale_f32)
 }
 
+/// SolidCraft: reconcile the last resize event with the live window before painting (#3043).
+/// Compare the requested extent, not the device-clamped extent, to avoid reallocating every
+/// frame on large displays. A minimized window must never configure a zero-sized surface.
+#[doc(hidden)]
+pub fn surface_resize_for_window(
+    requested: (u32, u32),
+    current: (u32, u32),
+) -> Option<(core::num::NonZeroU32, core::num::NonZeroU32)> {
+    if requested == current {
+        return None;
+    }
+    Some((core::num::NonZeroU32::new(current.0)?, core::num::NonZeroU32::new(current.1)?))
+}
+
 #[cfg(test)]
 mod device_lost_tests {
     /// A loss is marked once, with the first reason, and every clone (and the shared flag) sees it.

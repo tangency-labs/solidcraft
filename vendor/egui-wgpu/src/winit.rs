@@ -181,6 +181,13 @@ impl Painter {
         }
 
         let device = &render_state.device;
+        // SolidCraft: record actual configure attempts, including retries after display wake.
+        log::debug!(
+            "Surface configure: size={width}x{height} requested={}x{} render_scale={}",
+            surface_state.requested.0,
+            surface_state.requested.1,
+            surface_state.scale,
+        );
         crate::configure_captured(device, &render_state.device_lost, || {
             surface_state.surface.configure(device, &surf_config);
         })
@@ -732,6 +739,31 @@ impl Painter {
             self.context
                 .request_repaint_after_for(std::time::Duration::from_millis(250), viewport_id);
             return vsync_sec;
+        }
+
+        // SolidCraft: Windows can deliver a transient resize while a display powers off,
+        // without a final resize on wake (#3043). egui-winit already reads inner_size and
+        // scale_factor for each frame's input; reconcile the surface before acquiring it too.
+        // Keep egui's pixels_per_point (including user zoom), and the existing clamp/retry path.
+        #[cfg(target_os = "windows")]
+        {
+            let size = window.inner_size();
+            if let Some(state) = self.surfaces.get(&viewport_id)
+                && let Some((width, height)) = crate::surface_resize_for_window(
+                    state.requested,
+                    (size.width, size.height),
+                )
+            {
+                log::debug!(
+                    "Surface reconcile: viewport={viewport_id:?} cached={}x{} window={}x{} native_pixels_per_point={} pixels_per_point={pixels_per_point}",
+                    state.requested.0,
+                    state.requested.1,
+                    size.width,
+                    size.height,
+                    window.scale_factor(),
+                );
+                self.on_window_resized(viewport_id, width, height);
+            }
         }
 
         // If the previous frame produced `CurrentSurfaceTexture::Lost`, the action match
