@@ -1643,8 +1643,9 @@ mod tests {
 
     /// The behaviour change on tiny primitives. The certificate either certifies or refuses
     /// (never an error), a certified body is never Negative under the full proof, and the 1e-3
-    /// box and cylinder are certified. Below the constructors' size resolution they refuse
-    /// with `InvalidInput` (the box at 1e-12), which is a result, not a failure. What the full
+    /// box and cylinder are certified. Below the constructors' size resolution they refuse:
+    /// `InvalidInput` for the box at 1e-12, and at 1e-6 and 1e-9 the face that cannot be
+    /// made (WR-596; main built no face there and returned the empty body). What the full
     /// proof says at each size is printed for the change list.
     #[test]
     fn tiny_primitives_and_the_full_proof() {
@@ -1673,10 +1674,15 @@ mod tests {
                 }
                 Err(e) => {
                     println!("TINY box {s:e}: constructor refuses: {e:?}");
-                    assert!(
-                        matches!(e, crate::SolidError::InvalidInput { .. }),
-                        "box {s:e}: {e:?}"
-                    );
+                    assert!(s < 1e-3, "box {s:e}: {e:?}");
+                    if s < 1e-9 {
+                        assert!(
+                            matches!(e, crate::SolidError::InvalidInput { .. }),
+                            "box {s:e}: {e:?}"
+                        );
+                    } else {
+                        assert_eq!(e.operation(), "topology::brep::p8", "box {s:e}: {e:?}");
+                    }
                 }
             }
             let mut k = Kernel::default();

@@ -3775,18 +3775,25 @@ mod tests_c5 {
     }
 
     #[test]
-    fn reversed_trace_ignores_a_failed_uv_trim_curve_creation() {
+    fn reversed_trace_returns_a_failed_uv_trim_curve_creation() {
         let mut f = Fixture::new();
         f.st.trace.reverse_tracing = true;
         f.fb.brep_mut()
             .edgeuse_mut(f.mates[0])
             .unwrap()
             .uv_trim_curve = None;
-        // the creation's status is ignored; NER(pUVCurve) then fails
+        // the creation's status is passed on (fork 66b02de `SER`, WR-661; upstream
+        // ignores it and fails later at NER(pUVCurve)): the edge use has no face use
         let e = f.run().unwrap_err();
-        assert_eq!(
-            e,
-            SolidError::blend_missing(OP, "the mate edge use's uv trim curve")
+        assert_eq!(e.upstream_status(), Some(SM_ERR_NULL_POINTER), "{e:?}");
+        assert!(
+            matches!(
+                e.failure().map(|f| &f.reason),
+                Some(crate::error::Reason::Topology(
+                    crate::error::topology::TopologyFailure::Missing("the edge use's face use")
+                ))
+            ),
+            "{e:?}"
         );
     }
 

@@ -102,6 +102,8 @@ mod tests {
         users: Vec<Option<usize>>,
         events: Vec<(bool, usize, usize)>,
         stop: Option<usize>,
+        /// every update fails with an ordinary status
+        failing: bool,
     }
     impl TopologyChangesAccess<usize> for Changes {
         type User = Option<usize>;
@@ -122,7 +124,10 @@ mod tests {
                     "blend.fillet_geom_p5",
                 ));
             }
-            Err(SolidError::sm_err("ordinary ignored update"))
+            if self.failing {
+                return Err(SolidError::sm_err("ordinary failed update"));
+            }
+            Ok(())
         }
         fn change_corner(&mut self, _: &Kernel, c: usize, _: usize, face: usize) -> Result<()> {
             self.events.push((true, c, face));
@@ -130,7 +135,7 @@ mod tests {
         }
     }
     #[test]
-    fn ordered_updates_ignore_ordinary_errors_then_visit_corners() {
+    fn ordered_updates_visit_every_geometry_then_the_corners() {
         let mut changes = Changes {
             users: vec![Some(8), None, Some(3), Some(9)],
             ..Changes::default()
@@ -162,10 +167,11 @@ mod tests {
         let k = Kernel::default();
         let mut changes = Changes {
             users: vec![Some(3), Some(8)],
+            failing: true,
             ..Changes::default()
         };
         let e = update_topology_changes(&k, &[2, 1], &[7], &mut changes, 0, 3).unwrap_err();
-        assert_eq!(e, SolidError::sm_err("ordinary ignored update"));
+        assert_eq!(e, SolidError::sm_err("ordinary failed update"));
         assert_eq!(changes.events, vec![(false, 20, 8)]);
     }
     #[test]

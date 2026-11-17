@@ -439,7 +439,7 @@ impl ExecutiveAccess<Handle> for Access {
                 "orientation must see temporary attributes"
             );
         }
-        self.orient_error.clone().map_or(Ok(()), Err) // ordinary errors are ignored
+        self.orient_error.clone().map_or(Ok(()), Err)
     }
     fn calc_corner_vertices(
         &mut self,
@@ -881,23 +881,49 @@ fn piecewise_return_restores_both_temporary_flags_on_success_and_error() {
     }
 }
 
+/// The stitch is retried five times with doubled tolerances; then the orientation's
+/// failure is the fillet's (fork 873c7c9, `SER( m_pTargetBrep->OrientTrimmedSurfaces(..) )`;
+/// upstream ignores it, WR-661). The one failure kept is the closed-solid check's "face
+/// uses gathered from both sides" on a result left open (lamina edges): that body is kept.
 #[test]
-fn stitching_retries_exactly_five_times_doubles_tolerance_and_ignores_orientation_error() {
-    let mut executive = state();
-    executive.options.trimming = true;
-    let mut access = Access {
-        stitch_lamina: 1,
-        orient_error: Some(failure()),
-        ..Access::default()
-    };
-    let mut k = Kernel::default();
-    executive.do_filleting(&mut k, &mut access, None).unwrap();
-    assert_eq!(access.stitch_tolerances, [0.125, 0.25, 0.5, 1.0, 2.0]);
-    assert_eq!(access.events.last(), Some(&"orient"));
-    assert!(access.events.contains(&"post"));
-    assert!(executive.fillet.is_none());
-    assert!(executive.intersector.other_brep().is_none());
-    assert!(!access.editing);
+fn stitching_retries_exactly_five_times_doubles_tolerance_then_passes_on_orientation_error() {
+    let gathered = SolidError::topology(
+        "topology::brep::p3",
+        crate::error::topology::TopologyFailure::Inconsistent(
+            crate::topology::brep::p3::GATHERED_BOTH_SIDES,
+        ),
+    );
+    for (lamina, error, kept) in [
+        (1, failure(), false),
+        (1, gathered.clone(), true),
+        (0, gathered, false),
+    ] {
+        let mut executive = state();
+        executive.options.trimming = true;
+        let mut access = Access {
+            stitch_lamina: lamina,
+            orient_error: Some(error.clone()),
+            ..Access::default()
+        };
+        let mut k = Kernel::default();
+        let result = executive.do_filleting(&mut k, &mut access, None);
+        if kept {
+            assert_eq!(result, Ok(()), "lamina {lamina}");
+        } else {
+            assert!(result.is_err(), "lamina {lamina}: {result:?}");
+        }
+        let tolerances: &[f64] = if lamina == 0 {
+            &[0.125]
+        } else {
+            &[0.125, 0.25, 0.5, 1.0, 2.0]
+        };
+        assert_eq!(access.stitch_tolerances, tolerances, "lamina {lamina}");
+        assert_eq!(access.events.last(), Some(&"orient"), "lamina {lamina}");
+        assert!(access.events.contains(&"post"));
+        assert!(executive.fillet.is_none());
+        assert!(executive.intersector.other_brep().is_none());
+        assert!(!access.editing);
+    }
 }
 
 #[test]
@@ -1132,10 +1158,8 @@ fn temporary_attributes_survive_orientation_and_are_cleaned_on_errors_or_deferra
             ..Access::default()
         };
         let result = executive.do_filleting(&mut Kernel::default(), &mut access, None);
-        assert_eq!(
-            result.is_err(),
-            error.as_ref().is_some_and(SolidError::is_unported)
-        );
+        // every orientation failure is passed on (fork 873c7c9 `SER`, WR-661)
+        assert_eq!(result.is_err(), error.is_some());
         assert_eq!(access.created_attributes, 1);
         assert!(access.attributes.is_empty());
         assert_eq!(access.events.last(), Some(&"delete_attr"));
