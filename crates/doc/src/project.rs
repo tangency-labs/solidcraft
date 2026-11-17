@@ -26,9 +26,170 @@ use crate::{DocError, Document, PlaneRef, Result};
 const AXIS_HALF: f64 = 100.0;
 /// Points in one fitted chain at most (longer chains are thinned).
 const MAX_CHAIN: usize = 4000;
+pub(crate) const MAX_SKETCH_PLACEMENTS: usize = 1_000;
 
 #[path = "project_order.rs"]
 mod order;
+
+/// Sketch definitions read by one link, including the two sides of an intersection.
+pub(crate) fn source_sketches(source: &LinkSource) -> Result<std::collections::BTreeSet<u64>> {
+    let mut sketches = std::collections::BTreeSet::new();
+    let mut pending = vec![(source, 0)];
+    let mut work = 0;
+    while let Some((source, depth)) = pending.pop() {
+        work += 1;
+        if depth > 64 || work > MAX_SKETCH_PLACEMENTS {
+            return Err(DocError::Invalid("too many nested sketch projection references".into()));
+        }
+        match source {
+            LinkSource::SketchCurve { sketch, .. } | LinkSource::SketchPoint { sketch, .. } | LinkSource::OnSurface { sketch, .. } => {
+                sketches.insert(*sketch);
+            }
+            LinkSource::Intersection { a, b } => pending.extend([(a.as_ref(), depth + 1), (b.as_ref(), depth + 1)]),
+            _ => {}
+        }
+    }
+    Ok(sketches)
+}
+
+/// Keep foreign sketch references in the assembly context in which an independently placed
+/// part was drawn. Root and same-component references continue to use their live placements.
+pub fn capture_link_sketch_placements(
+    doc: &Document,
+    author: u64,
+    frame: &crate::Mat,
+    source: &LinkSource,
+) -> Result<Vec<solidcraft_sketch::SketchPlacement>> {
+    if author == 0 {
+        return Ok(Vec::new());
+    }
+    let inverse = crate::mat_inverse(frame).ok_or_else(|| DocError::Invalid("projection author frame is invalid".into()))?;
+    let mut placements = Vec::new();
+    for sketch in source_sketches(source)? {
+        let Some(feature) = doc.feature(sketch).filter(|f| f.component != author) else { continue };
+        let placement = crate::mat_mul(&inverse, &doc.component_transform(feature.component));
+        if !crate::is_placement(&placement) {
+            return Err(DocError::Invalid("captured sketch projection placement is invalid".into()));
+        }
+        placements.push(solidcraft_sketch::SketchPlacement { sketch, placement });
+    }
+    Ok(placements)
+}
+
+/// A copy or feature move can make a formerly local reference foreign. Capture only the new
+/// relationships after reframing existing captures; a saved context is never replaced here.
+pub fn capture_missing_sketch_references(doc: &mut Document, id: u64, frame: Option<crate::Mat>) -> Result<()> {
+    let Some(feature) = doc.feature(id).filter(|feature| feature.component != 0) else { return Ok(()) };
+    let crate::FeatureKind::Sketch { plane, sketch } = &feature.kind else { return Ok(()) };
+    let frame = frame.unwrap_or_else(|| doc.component_transform(feature.component));
+    let mut additions = Vec::new();
+    for link in &sketch.links {
+        let mut pins = capture_link_sketch_placements(doc, feature.component, &frame, &link.source)?;
+        pins.retain(|pin| !link.sketch_placements.iter().any(|saved| saved.sketch == pin.sketch));
+        if !pins.is_empty() {
+            additions.push((link.id.clone(), pins));
+        }
+    }
+    let mut base = plane;
+    let mut next_plane = None;
+    for _ in 0..=64 {
+        match base {
+            PlaneRef::Construction { feature: source, placement: None }
+                if doc.feature(source.0).is_some_and(|source| source.component != feature.component) =>
+            {
+                let mut captured = plane.clone();
+                crate::capture_sketch_plane_placement(doc, &mut captured, feature.component, &frame)?;
+                next_plane = Some(captured);
+                break;
+            }
+            PlaneRef::Offset { base: inner, .. }
+            | PlaneRef::Flipped { base: inner, .. }
+            | PlaneRef::AtAngle { base: inner, .. }
+            | PlaneRef::ThroughPoint { base: inner, .. } => base = inner,
+            _ => break,
+        }
+    }
+    if let Some(crate::Feature { kind: crate::FeatureKind::Sketch { plane, sketch }, .. }) = doc.feature_mut(id) {
+        if let Some(captured) = next_plane {
+            *plane = captured;
+        }
+        for (id, pins) in additions {
+            if let Some(link) = sketch.links.iter_mut().find(|link| link.id == id) {
+                link.sketch_placements.extend(pins);
+            }
+        }
+    }
+    Ok(())
+}
+
+pub(crate) fn validate_link_sketch_placements(link: &Link) -> Result<()> {
+    if link.sketch_placements.is_empty() {
+        return Ok(());
+    }
+    let invalid = || DocError::Invalid("invalid captured sketch projection placement".into());
+    if link.sketch_placements.len() > MAX_SKETCH_PLACEMENTS {
+        return Err(invalid());
+    }
+    let sources = source_sketches(&link.source)?;
+    let mut seen = std::collections::BTreeSet::new();
+    for pin in &link.sketch_placements {
+        if pin.sketch == 0 || !sources.contains(&pin.sketch) || !seen.insert(pin.sketch) || !crate::is_placement(&pin.placement) {
+            return Err(invalid());
+        }
+    }
+    Ok(())
+}
+
+/// Re-express saved relationships when definitions are copied or moved into another frame.
+pub fn reframe_link_sketch_placements(sketch: &mut Sketch, author: &crate::Mat, source: impl Fn(u64) -> crate::Mat) -> Result<()> {
+    for link in &mut sketch.links {
+        validate_link_sketch_placements(link)?;
+        for pin in &mut link.sketch_placements {
+            let inverse = crate::mat_inverse(&source(pin.sketch)).ok_or_else(|| DocError::Invalid("projection source frame is invalid".into()))?;
+            let placement = crate::mat_mul(&crate::mat_mul(author, &pin.placement), &inverse);
+            if !crate::is_placement(&placement) {
+                return Err(DocError::Invalid("reframed sketch projection placement is invalid".into()));
+            }
+            pin.placement = placement;
+        }
+    }
+    Ok(())
+}
+
+/// `st` is already in the author's current frame. Correct only the source planes read by this
+/// link, from their current relative placement to the one captured with the link. Their solved
+/// curves and points remain live. Each link starts from `st`, so separately picked contexts do
+/// not change one another.
+fn state_for_link<'a>(
+    doc: &Document,
+    st: &'a ModelState,
+    link: &Link,
+    frame: Option<&(u64, crate::Mat)>,
+) -> Result<std::borrow::Cow<'a, ModelState>> {
+    use std::borrow::Cow;
+    validate_link_sketch_placements(link)?;
+    let mut result = Cow::Borrowed(st);
+    if link.sketch_placements.is_empty() {
+        return Ok(result);
+    }
+    let (author, frame) = frame.ok_or_else(|| DocError::Invalid("captured sketch projection requires its author frame".into()))?;
+    let inverse = crate::mat_inverse(frame).ok_or_else(|| DocError::Invalid("projection author frame is invalid".into()))?;
+    for pin in &link.sketch_placements {
+        let Some(feature) = doc.feature(pin.sketch) else { continue };
+        let current =
+            if feature.component == *author { crate::IDENTITY } else { crate::mat_mul(&inverse, &doc.component_transform(feature.component)) };
+        let undo = crate::mat_inverse(&current).ok_or_else(|| DocError::Invalid("projection source frame is invalid".into()))?;
+        let correction = crate::mat_mul(&pin.placement, &undo);
+        if crate::is_identity(&correction) || st.sketch(pin.sketch).is_none() {
+            continue;
+        }
+        if let Some(source) = result.to_mut().sketches.iter_mut().find(|sketch| sketch.feature == pin.sketch) {
+            let source = std::sync::Arc::make_mut(source);
+            source.plane = crate::eval::placed_plane(&correction, &source.plane)?;
+        }
+    }
+    Ok(result)
+}
 
 /// A resolved link: its geometry in sketch coordinates and the (possibly moved) reference.
 #[derive(Clone, Debug)]
@@ -377,9 +538,12 @@ fn resolve_uncached(
                 // Resolved to the feature's id here, once (#1134); a name that finds no feature
                 // dangles below, as it did when the reference carried the name.
                 let feature = doc.find_feature(name).map(|f| crate::FeatureId(f.id)).unwrap_or(crate::FeatureId::DANGLING);
-                PlaneRef::Construction { feature }
+                PlaneRef::Construction { feature, placement: None }
             };
             let other = doc.resolve_plane_in(vals, &pr, 0, 0, Some(st)).map_err(|_| lost(&format!("plane {name}")))?;
+            // A plane of another component is in that component's frame: brought into the
+            // sketch's, the trace of the two planes is where they meet (#17534).
+            let other = plane_in_sketch_frame(doc, &pr, other, st, frame)?;
             plane_trace(plane, &other).into_iter().collect()
         }
     };
@@ -1368,6 +1532,8 @@ fn refresh_links_in(
     let mut lost_by_name = Vec::new();
     let links = sk.links.clone();
     for l in &links {
+        let framed = state_for_link(doc, st, l, frame)?;
+        let st = framed.as_ref();
         let mut source = l.source.clone();
         let mut named_face = None;
         if !l.auto_face
@@ -2130,6 +2296,30 @@ fn plane_trace(sk: &Plane, other: &Plane) -> Option<LinkGeom> {
     let p0 = Vec2::new(a, b) * (c / n2);
     let u = Vec2::new(-b, a).normalized()?;
     Some(LinkGeom::Line(p0 - u * AXIS_HALF, p0 + u * AXIS_HALF))
+}
+
+/// The plane `pr` names, in the frame the sketch is in. A construction plane of another
+/// component is in that component's own frame: brought into the sketch's, the trace of the
+/// two planes is where they meet, and not where the plane's own frame has it (#17534).
+fn plane_in_sketch_frame(doc: &Document, pr: &PlaneRef, plane: Plane, st: &ModelState, frame: Option<&(u64, crate::Mat)>) -> Result<Plane> {
+    let PlaneRef::Construction { feature, .. } = pr else { return Ok(plane) };
+    // The sketch's own frame: the component it is authored in and where that component stands.
+    let Some((author, author_frame)) = frame else { return Ok(plane) };
+    if doc.occurrences.is_empty() {
+        return Ok(plane);
+    }
+    // The component the construction plane belongs to: the frame its geometry is in.
+    let owner = doc.features.iter().find(|f| f.id == feature.0).map(|f| f.component).unwrap_or(*author);
+    if owner == *author {
+        return Ok(plane);
+    }
+    // The plane as it was built, in its own component's frame.
+    let Some(crate::construct::ConstructGeom::Plane(built)) = st.construct.iter().find(|c| c.feature == feature.0).map(|c| &c.geom) else {
+        return Ok(plane);
+    };
+    let inverse = crate::mat_inverse(author_frame).ok_or_else(|| DocError::Invalid("the sketch's frame cannot be inverted".into()))?;
+    let m = crate::mat_mul(&inverse, &doc.component_transform(owner));
+    crate::eval::placed_plane(&m, built)
 }
 
 /// Most corners a mesh face's outline has and is still taken for a polygon.

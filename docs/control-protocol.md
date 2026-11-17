@@ -533,8 +533,9 @@ sock.sendall((json.dumps({"id": 1, "method": "ui.inspect", "params": {}, "token"
 The channel is untrusted input. A request line may be at most 16 MiB; a longer one is answered
 with `{"ok": false, "error": "request too large"}` and the connection is closed, as are
 connections that send eight lines that are not JSON. At most 16 connections are served at once
-(further ones get `{"ok": false, "error": "too many connections"}`), at most 64 queued requests
-run per frame so a flood cannot starve drawing, and a request that the UI thread has not
+(further ones get `{"ok": false, "error": "too many connections"}` and are closed, their request
+unrun; the app reads what they sent first, so the refusal is not lost to a reset), at most 64
+queued requests run per frame so a flood cannot starve drawing, and a request that the UI thread has not
 answered within 60 seconds (3600 seconds for `engine.batch`) is replied to with
 `{"ok": false, "running": true, "error": "timeout: … is still running …"}`. The same 16 MiB line
 limit applies to the MCP server.
@@ -764,6 +765,58 @@ sends it a line whenever the active design changes (#6985):
   ask `document.revision` for the design now. A `control.subscribe` that timed out or failed did
   not subscribe the connection: send it again.
 
+### Example: driving a hinge and reading its angle (#17909)
+
+A local tool can set a joint's value and read it back, including after someone moves the joint
+in the window. This example uses the repository's hinge fixture,
+`apps/solidcraft-cli/tests/corpus/joints-hinge.solidcraft`. It has two leaves, `LeafA` (grounded)
+and `LeafB`, joined by a revolute joint named `Hinge`. Open the fixture by its full path (the first
+request carries the connection's [token](#token)), then give the hinge limits of 0 to 90°:
+
+```text
+{"id":1,"method":"engine.execute","params":{"command":"doc.open","params":{"path":"/path/to/solidcraft/apps/solidcraft-cli/tests/corpus/joints-hinge.solidcraft"}},"token":"…"}
+{"id":2,"method":"engine.execute","params":{"command":"joint.limits","params":{"joint":"Hinge","min":0,"max":90}}}
+```
+
+To be told when the angle changes, subscribe first. Every change to the design, such as a drive
+from this tool or OK in Drive Joints in the window, is then followed by a `design.changed` line:
+
+```text
+{"id":3,"method":"control.subscribe"}
+→ {"id":3,"ok":true,"result":{"document_id":"…","revision":7}}
+```
+
+Drive the hinge with `joint.drive`. `value` is in degrees, or it can be an expression such as
+`"45 deg"`. `quiet: true` leaves out the solver's degrees-of-freedom report. The reply gives the
+value the joint ended at:
+
+```text
+{"id":4,"method":"engine.execute","params":{"command":"joint.drive","params":{"joint":"Hinge","value":45,"quiet":true}}}
+→ {"id":4,"ok":true,"result":{"joint":1,"moved":true,"values":[{"name":"angle","value":45.0,"unit":"deg","limits":[0.0,90.0]}],"requested":[{"name":"angle","value":45.0,"unit":"deg","limits":[0.0,90.0]}],"stopped_by_contact":null,"stopped_by_loop":null,"conflicts":[],"errors":[]}}
+{"event":"design.changed","params":{"document_id":"…","revision":8}}
+```
+
+A value outside the limits is clamped to them. `held` then says which value ended up somewhere
+other than requested, and why:
+
+```text
+{"id":5,"method":"engine.execute","params":{"command":"joint.drive","params":{"joint":"Hinge","value":120,"quiet":true}}}
+→ {"id":5,"ok":true,"result":{"joint":1,"moved":true,"values":[{"name":"angle","value":90.0,"unit":"deg","limits":[0.0,90.0]}],"requested":[{"name":"angle","value":120.0,"unit":"deg","limits":[0.0,90.0]}],"held":[{"name":"angle","requested":120.0,"value":90.0,"unit":"deg","why":"angle is held to its limits, 0 to 90 deg"}],"stopped_by_contact":null,"stopped_by_loop":null,"conflicts":[],"errors":[]}}
+```
+
+`joint.inspect` only reads the design, so it adds no undo step. Use it to read the angle at any
+time, for example after a `design.changed` line. The joint's `values` hold the angle (other fields
+left out here):
+
+```text
+{"id":6,"method":"engine.execute","params":{"command":"joint.inspect","params":{"joint":"Hinge"}}}
+→ {"id":6,"ok":true,"result":{"joints":[{"id":1,"name":"Hinge","type":"revolute","dofs":["angle"],"values":[{"name":"angle","value":90.0,"unit":"deg","limits":[0.0,90.0]}],…}]}}
+```
+
+While Drive Joints is open in the window, its preview does not change the design. `joint.inspect`
+still reads the last value set, and no event is sent until the dialog's OK stores the new angle.
+The joint id `1` comes from the fixture. The revisions are only examples.
+
 ### Slow commands and the window (#1989)
 
 With the preference **Preferences > AI > Keep the window responsive while agents run commands**
@@ -872,14 +925,14 @@ no box selection.
 | `ui.icon_audit` | `reset?`, `stop?` | `reset: true` enables collection on the UI thread and clears previous requests; returns `{requested: [{name, master, placeholder}]}` sorted by requested id. Each read drains names collected since the previous read/reset. Collection stays enabled until `stop: true` (which returns pending names before disabling it). Includes aliases, variable/table ids and cached paints. |
 | `ui.menuPick` | `item`: id or label | runs an item of the open menu or of any of its flyouts, as clicking it does; a row that only opens a flyout is refused |
 | `ui.selectOther` | `x?`, `y?`, `pick?`, `add?`, `hover?`, `close?` | Select Other: with a point, list compatible hidden and visible geometry near the pointer by default (as holding the left button does; disable `select_other_hidden` for the original visible-only list); the popup fits the available window space and scrolls only for overflow; `pick`: select row `pick` (`add`: as Shift-click; with a dialog open, into its active input); `hover`: light a row up; without: the open list (`open`, `at`, `total`: everything under the cursor, `rows`: label, icon, sel, at most 20 per kind, nearest first) |
-| `ui.rename` | `text?`, `commit?` (default true) | finishes the rename box a Rename item opened |
+| `ui.rename` | `text?`, `commit?` (default true) | finishes the rename box a Rename item opened; a refused name is the error and the box stays open |
 | `ui.selection` | | the selection, the open dialog's inputs, the hovered item, and the active sketch's drawn dimensions (`dimensions`: id and text centre, `dimension_selected`, `dimension_editing`), and finished sketches' dimensions shown in the model view (`shown_dimensions`: sketch, id and text centre; a double-click there edits the value) |
 | `ui.worldToScreen` | `points`: `[[x, y, z]…]` world points | their screen points |
 | `ui.triad` | | screen points of the 3D sketch move triad's handles (`x`, `y`, `z`, `plane`) |
 | `ui.sketchToScreen` | `points`: `[[x, y]…]` in active-sketch coordinates | their screen points (null when behind the camera) |
 | `ui.dialogInput` | `index` | what clicking an input's Select chip does: picks go to that input |
 | `ui.at` | `world: [x,y,z]` \| `sketch: [x,y]` \| `plane: "XY"` \| `axis: "Z"` \| `dimension: "d1"` (its value text) \| `handle: "arrow"` (a manipulator handle, see `scenario::publish_handle`) | the screen point (a scenario step's target; see `crates/ui-egui/src/scenario.rs`) |
-| `ui.pick` | `pixels?: [[x,y]…]`, `rays?: [{origin, dir}…]`, `frame?: "window"\|"model"`, `width?`, `height?`, `edges?` (default true), `edge_px?` (default 6), `all?`, `include_ghosted?` | read-only geometry under each pixel or ray (#6304): one entry per input, `null` where nothing is hit — body, face index, exact world `point` and outward `normal`, `depth`, `occurrence`/`component` for placed parts, `edge`/`vertex` within `edge_px` of a pixel, `section_cap: true` on a cut face. `window` pixels are physical pixels of a window screenshot; `model` pixels are pixels of a `ui.render` of `width`×`height` (default 960×600), without needing a window screenshot. Both frames and ray picking require the app's control channel; they are unavailable through `solidcraft-cli mcp --headless`. As `view.pick` through `engine.execute`/`engine.batch` when connected to the app; absent from the engine command registry (`list_commands` and `describe_command`). See `crates/ui-egui/src/view_pick.rs` |
+| `ui.pick` | `pixels?: [[x,y]…]`, `rays?: [{origin, dir}…]`, `frame?: "window"\|"model"`, `width?`, `height?`, `edges?` (default true), `edge_px?` (default 6), `all?`, `include_ghosted?` | read-only geometry under each pixel or ray (#6304): one entry per input, `null` where nothing is hit — body, face index, exact world `point` and outward `normal`, `depth`, `occurrence`/`component` for placed parts, `edge`/`vertex` within `edge_px` of a pixel, `section_cap: true` on a cut face. `window` pixels are physical pixels of a window screenshot; `model` pixels are pixels of a `ui.render` of `width`×`height` (default 960×600), without needing a window screenshot. Both pixel frames require the app's control channel; they are unavailable through `solidcraft-cli mcp --headless`. As `view.pick` through `engine.execute`/`engine.batch` when connected to the app. Without the app (`solidcraft-cli exec`, `run`, `mcp --headless`) the engine's `view.pick` answers `rays` (and `all`) with the same fields, decided on the bodies' exact faces, edges and vertices (`edge`/`vertex` name the one a ray passes through), and refuses `pixels`. See `crates/ui-egui/src/view_pick.rs` and `crates/engine/src/cmd/view_pick.rs` |
 | `ui.handles` | `prefix?` | the handles drawn last frame, `[{name, x, y}]`: toolbar buttons and drop-down items `toolbar:<command id>` (the button alone: `button:<command id>`; a drop-down row: `dropdown:<command id>`, highlighted `dropdown_hot:<command id>`, its pin `dropdown_pin:<command id>`; Customize Toolbar's check boxes `customize:<command id>`), ribbon tabs `tab:<name>` (MODEL, SURFACE, ASSEMBLE, INSERT, INSPECT, MANAGE, VIEW, SHEET METAL, WELDMENTS; contextual SKETCH; workspace RENDER), the toolbar menu button `ribbon:add_tab`, the hint when every tab is hidden `ribbon:tabs_hidden`, Preferences tab check boxes `prefs:toolbar_tab:<NAME>`, panel labels `panel:<tab>:<panel>` (also `ribbon:section:<TAB>:<SECTION>`), document overflow list `tab:overflow`, workspace column `ribbon:workspace`, command-search launcher `ribbon:search`, browser rows `row:<label>`, where each row's depth puts it `indent:<label>`, and fold arrows `fold:<label>`, manipulator handles; signed-axis tips `axis_view:z`, `axis_view:-y`; the custom navigator's controls `navigator:control:home` (and other actions); Preferences navigator picker `prefs:navigator`, options `prefs:navigator:Signed axes` and `prefs:navigator:Custom`; in the Motion Study dialog, where the chart puts its first and last step `motion:chart_start` and `motion:chart_end`, the Check collisions button `motion:check` and each collision found `motion:collision:<n>`; with Placement handles on, the move marker of an open placement dialog `<tool>:position` and its ring `<tool>:rotate` (`rest`, `boss`, `snap_fit`; `primitive:position` for Box, Cylinder, Cone, Sphere, Torus and Coil, which have no ring); with `hole_moves` on, a Single hole's markers `hole:<n>` |
 | `ui.editFolder` | `folder` (id or name) | Edit Holes on a History folder that holds holes only: one Hole dialog, filled in from its first hole, whose OK gives every hole in the folder the fields changed there. Replies as `ui.start` does |
 | `ui.editFeature` | `feature` (id or name) | what double-clicking a timeline item does: rolls back to it and opens its dialog filled in (sketches open in sketch mode). Items without an edit dialog show a status message naming their kind and saying there is nothing to edit; no command palette opens. Replies as `ui.start` does, with `dialog: null` for these items and the restored history `marker` |
@@ -945,6 +998,8 @@ listed, or is `null`.
 
 ### `ui.prefs` settings
 
+- `show_document_browser` (default false): show the document browser beside open designs; also available in Preferences → Layout → Panels and through the app-bar Show/Hide Documents toggle. Explicit visibility choices from earlier document-browser builds are preserved.
+
 `render_previous_geometry_budget` (Graphics, default false) restores the previous fixed Render preview geometry budget: 512 MiB on 64-bit desktop, 128 MiB elsewhere. With it off, desktop uses the device-based budget.
 
 
@@ -954,10 +1009,12 @@ One setting per line, sorted by name. A change that adds a setting adds its own 
 - `assembly_move_handles` (default true): explicit Assembly Move uses the permitted joint-motion handles; false keeps the previous Move panel.
 - `auto_operation` (default true: feature windows choose Join, New Body or Cut from what their material touches until one is picked; false: each keeps the operation it opens with, Extrude its own Join or Cut)
 - `background_image` (string, default empty: a picture's file, shown behind the model and covering the window from its centre).
+- `browser_arrow_keys` (default true: while the Browser has the keyboard, which a click on one of its rows gives it and a click elsewhere takes back, Up/Down move the selection through its rows, Left/Right fold or unfold the row, Enter opens it and F2 renames it, and the plain arrows do not turn the view; false: the arrows always turn the view, as before #17931; the Browser also lets them go while its name editor is open)
 - `browser_bodies_folders` (`several` (default): a component with one body and no groups lists it straight under the component in the browser, without a Bodies folder; `always`; `never`: components list their bodies and groups straight under them, and the folder's menu items are on the component's menu; the design's own Bodies folder, and one hidden with its eye, always show; #4217)
 - `browser_components_open` (default false: each component placement in the browser starts closed until it is opened, by its fold arrow, Expand All or Find in Browser; true: every placement starts open, as before #9274)
 - `browser_eye_left` (default false: each browser and History tree row's eye, handle `eye:<name>`, sits in a column at the rows' right end, clear of the fold arrow and the radio; true: between them, as before #8718)
-- `check_updates` (default true; [updates](book/src/guide/updates.md))
+- `browser_hover_shows_origin` (default true: an Origin plane, axis or point row under the pointer in the browser, the design's or a part's, shows that item in the view, and a hidden one only while the pointer is on its row, its eye and saved visibility unchanged and not pickable, #15658; false: only an origin plane already drawn lights up, as before; Preferences › Design › Origin)
+- `check_updates` (default true; [updates](book/src/guide/updates.md)). When the organization's policy sets it ([managed deployment](book/src/guide/managed-deployment.md)), the reply has `policy: {locked: ["check_updates"], check_updates: bool}` with the value in force (any policy adds that object, with `organization` when it names one; `locked` lists what it locks), `check_updates` itself stays the person's stored choice, and a request that changes it is refused
 - `color_vision` (`off` (default), `protan`, `deutan`, `tritan`: colour vision modes, #778)
 - `constraint_glyph_scale` (1…3, default 1: how large the open sketch's constraint glyphs are drawn, a multiple of their 15-pixel badge, letter and icon included; Preferences › Sketch › Constraint glyph size, #10794)
 - `default_units`

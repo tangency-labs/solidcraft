@@ -237,12 +237,14 @@ fn midpoint_schema() -> Value {
 }
 
 /// A point of `sketch.constraint.coincident`: an id, a model edge or vertex, or a line's middle
-/// as `{midpoint: line_id}`, which becomes a point tied there.
+/// as `{midpoint: line_id}`, which becomes a point tied there. A model edge's middle,
+/// `{midpoint: {edge: [x,y,z], body?}}`, projects the edge and is its line's middle (#17920).
 #[derive(Clone, Debug, PartialEq)]
 pub enum PointOperand {
     Id(String),
     Model(Value),
     Midpoint(String),
+    ModelMidpoint(Value),
 }
 
 impl JsonSchema for PointOperand {
@@ -251,9 +253,11 @@ impl JsonSchema for PointOperand {
     }
     fn json_schema(generator: &mut SchemaGenerator) -> Schema {
         let model = model_pick_schema(generator);
+        let point = generator.subschema_for::<Point3>();
+        let edge = json!({"type": "object", "properties": {"edge": point, "body": {"type": "string"}}, "required": ["edge"]});
         json_schema!({
-            "description": "A sketch point, curve or axis by its id, a model edge or vertex (projected into the sketch first), or a line's middle {\"midpoint\": line_id}.",
-            "anyOf": [{"type": "string"}, model, midpoint_schema()]
+            "description": "A sketch point, curve or axis by its id, a model edge or vertex (projected into the sketch first), or a line's middle {\"midpoint\": line_id} or a model edge's middle {\"midpoint\": {\"edge\": [x, y, z], \"body\"?}}.",
+            "anyOf": [{"type": "string"}, model, midpoint_schema(), {"type": "object", "properties": {"midpoint": edge}, "required": ["midpoint"]}]
         })
     }
 }
@@ -271,6 +275,7 @@ fn point_operand(v: Option<&Value>) -> Result<Option<PointOperand>, Wrong> {
         Some(v) if model_pick(v) => Ok(Some(PointOperand::Model(v.clone()))),
         Some(v) => match v.get("midpoint") {
             Some(Value::String(line)) => Ok(Some(PointOperand::Midpoint(line.clone()))),
+            Some(edge) if edge.get("edge").is_some() && model_pick(edge) => Ok(Some(PointOperand::ModelMidpoint(edge.clone()))),
             Some(_) => Err(Wrong::Midpoint),
             None => Err(Wrong::Form),
         },

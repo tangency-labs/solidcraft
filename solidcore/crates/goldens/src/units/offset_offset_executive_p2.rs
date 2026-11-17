@@ -2906,6 +2906,27 @@ mod tests {
         }
     }
 
+    /// A refused shell hands the kernel back with `doing_boolean` as it came. The inset of
+    /// the 2 x 3 plane sheet by exactly two tolerances reaches the Boolean difference, whose
+    /// passed-on status refuses it (1001); the difference's error exits leave the flag set,
+    /// and `OffsetExecutive::shell_brep` restores it (review of #16956).
+    #[test]
+    fn refused_shell_restores_doing_boolean() {
+        let context = CaseContext {
+            root: repo_root(),
+            seeds: 0,
+        };
+        let fixtures = context.fixture_cases(Runner.id()).unwrap();
+        let case = fixtures
+            .iter()
+            .find(|case| case.name == "shell_boundary_negative_exactly_two_tol")
+            .unwrap();
+        let output = Runner.run_rust(case).unwrap();
+        assert_eq!(output.ints["status"], [1001]);
+        assert_eq!(output.ints["result.present"], [0]);
+        assert_eq!(output.ints["doing_boolean"], [0, 0]);
+    }
+
     /// WR-564 (planar side walls, always on): every case whose golden row the change
     /// moved thickens a sheet whose side walls lie in planes. Each is checked on its own
     /// result body:

@@ -528,6 +528,33 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
         Ok(out)
     }
 
+    /// [`TopologyIntersector::merge_curve_classes`] that keeps its outputs when it fails:
+    /// upstream writes `rbTopologyWasDeleted`, `*paDeletedEdges` and `*paDeletedVertices`
+    /// through its out-params before a later step fails, so a squeeze that deleted
+    /// vertices or edges is reported with the failing status (#17200).
+    pub(crate) fn merge_curve_classes_attempt(
+        &mut self,
+        k: &mut Kernel,
+        brep: &mut impl IntersectorBrepP3<O>,
+        crv_class1: &mut CurveClassification<O>,
+        crv_class2: &mut CurveClassification<O>,
+        merge_singularities: bool,
+    ) -> (CurveClassesMerge<O>, Result<()>) {
+        let mut out = CurveClassesMerge::untouched();
+        let status = self.merge_curve_classes_into_using(
+            k,
+            brep,
+            ClassificationPair {
+                first: crv_class1,
+                second: crv_class2,
+                link: PairLink::Metadata,
+            },
+            merge_singularities,
+            &mut out,
+        );
+        (out, status)
+    }
+
     fn merge_curve_classes_into_using(
         &mut self,
         k: &mut Kernel,

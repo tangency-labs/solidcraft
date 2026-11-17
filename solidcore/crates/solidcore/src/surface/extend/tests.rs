@@ -1354,8 +1354,7 @@ fn round_blend_with(order: u32, certified: bool, thumbweight: f64) -> (Kernel, P
     use crate::geom::vector3d::Point3;
     use crate::nurbs::b_spline_curve::BSplineCurve;
     use crate::surface::procedural_blend::BlendDefinitionInput;
-    let mut kk = k();
-    kk.fixes.fillet_round_as_definition = true;
+    let kk = k();
     let (l, r) = (10.0, 2.0);
     let bilinear =
         |p: [Point3; 4]| BSplineSurface::create_bilinear_surface(p[0], p[1], p[2], p[3]).unwrap();

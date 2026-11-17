@@ -44,7 +44,7 @@ use super::topology_proto_topology_p1::script::{
     keeps_contract, pool as pk, proto_op as p, proto_op_p2 as q,
 };
 use super::topology_proto_topology_p1::{
-    b, build_curve, cat, dir, gen_curve, gen_scale, gen_tol, line, opv, pcv, rp, rust,
+    b, build_curve, cat, dir, gen_curve, gen_scale, gen_tol, opv, pcv, rp, rust,
     script_input, status, CurveIn, Fail, ObjIn, ProtoRun, Rd, Script, H,
 };
 use crate::case::{CaseContext, CaseSource};
@@ -530,7 +530,7 @@ pub(super) fn run_op(
             if *skip {
                 return Ok(());
             }
-            let got = res(r.mgr.find_or_create_proto_vertex(pt), st, skip)?;
+            let got = res(r.mgr.find_or_create_proto_vertex(&r.k, pt), st, skip)?;
             sync_counts(r);
             out.push(r.pv_id(got.map(|g| g.0)));
             out.push(b(got.is_some_and(|g| g.1)));
@@ -1536,14 +1536,25 @@ fn edge_cases() -> Vec<(String, Value)> {
         .collect()
 }
 
-/// The pool of the edge cases at `scale` (see [`edge_cases`]).
+/// The pool of the edge cases at `scale` (see [`edge_cases`]): the unit pool scaled by `s`.
+/// The lines carry `s` as their scale over the unit domain (`Line::bounded` unitises the
+/// direction), so parameter `t` on curves 3 and 4 is at `pt(t)` at every scale (#18001).
 fn edge_objects(s: f64) -> Vec<ObjIn> {
+    let line_x = |p: [f64; 3]| {
+        ObjIn::Curve(CurveIn::Line(super::topology_proto_topology_p1::LineIn {
+            p,
+            v: [1.0, 0.0, 0.0],
+            domain: [0.0, 2.0],
+            scale: s,
+            inside_out: false,
+        }))
+    };
     vec![
         ObjIn::Region,
         ObjIn::Region,
         ObjIn::Loop,
-        ObjIn::Curve(line([0.0, 0.0, 0.0], [s, 0.0, 0.0], [0.0, 2.0])),
-        ObjIn::Curve(line([0.0, 1e-9 * s, 0.0], [s, 0.0, 0.0], [0.0, 2.0])),
+        line_x([0.0, 0.0, 0.0]),
+        line_x([0.0, 1e-9 * s, 0.0]),
         ObjIn::Curve(CurveIn::Conic(super::topology_proto_topology_p1::ConicIn {
             center: [0.0, 0.0, 0.0],
             x: [1.0, 0.0, 0.0],
@@ -1741,6 +1752,65 @@ mod tests {
             Ok(o) => println!("rust {o:?}"),
             Err(Fail::Deferred(_)) => println!("rust deferred"),
             Err(Fail::Harness(e)) => println!("rust harness {e}"),
+        }
+    }
+
+    /// The huge and tiny edge cases are scaled copies of the unit case (#18001): every curve
+    /// of their pool puts each parameter the cases use at `s` times the unit curve's point
+    /// there, so a definition at parameter `t` on a line sits at the position `pt(t)` it is
+    /// built with. The bound is a few rounding steps of the coordinate.
+    #[test]
+    fn edge_pool_is_the_unit_pool_scaled() {
+        let k = solidcore::kernel::Kernel::default();
+        for s in [1e4, 1e-4] {
+            for (i, (unit, scaled)) in edge_objects(1.0).iter().zip(&edge_objects(s)).enumerate() {
+                let (ObjIn::Curve(unit), ObjIn::Curve(scaled)) = (unit, scaled) else {
+                    continue;
+                };
+                let (unit, scaled) = (build_curve(unit).unwrap(), build_curve(scaled).unwrap());
+                for t in [0.0, 1e-9, 0.2, 0.5, 1.0, 1.5, 2.0, 10.0, 360.0] {
+                    let u = unit.evaluate_point(&k, t).unwrap();
+                    let c = scaled.evaluate_point(&k, t).unwrap();
+                    for (u, c) in [(u.x, c.x), (u.y, c.y), (u.z, c.z)] {
+                        let want = s * u;
+                        assert!(
+                            (c - want).abs() <= 4.0 * f64::EPSILON * want.abs().max(s),
+                            "s = {s}, curve {i}, t = {t}: {c} where the unit curve scaled gives {want}"
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    /// Every huge and tiny edge record is its unit record scaled (#18001): each value is the
+    /// unit value (codes, statuses, counts, parameters) or `s` times it (positions,
+    /// tolerances, gaps), compared as the goldens compare floats (`1e-9` relative). With
+    /// unscaled lines, `edge_vertex_defs_huge` classified a definition at 5000.25 where the
+    /// unit case has 0.75.
+    #[test]
+    fn edge_records_are_the_unit_records_scaled() {
+        let cases: BTreeMap<String, Value> = edge_cases().into_iter().collect();
+        let record = |name: &str| -> Vec<f64> {
+            let s: Script = serde_json::from_value(cases[name].clone()).unwrap();
+            let Ok(out) = rust_run(&s) else {
+                panic!("{name} does not run")
+            };
+            out
+        };
+        let near = |a: f64, b: f64| a == b || (a - b).abs() <= 1e-9 * a.abs().max(b.abs());
+        for name in cases.keys() {
+            let Some(base) = name.strip_suffix("_unit") else {
+                continue;
+            };
+            let unit = record(name);
+            for (sc, s) in [("huge", 1e4), ("tiny", 1e-4)] {
+                let scaled = record(&format!("{base}_{sc}"));
+                assert_eq!(unit.len(), scaled.len(), "{base}_{sc}");
+                for (i, (u, c)) in unit.iter().zip(&scaled).enumerate() {
+                    assert!(near(*u, *c) || near(s * u, *c), "{base}_{sc} value {i}: {c}, unit {u}");
+                }
+            }
         }
     }
 
