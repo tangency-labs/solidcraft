@@ -3100,6 +3100,7 @@ mod tests {
     /// without the bare question; an answer keeps it.
     #[test]
     fn ticket_report_drops_the_unanswered_question() {
+        crate::i18n::install();
         let q = solidcraft_ui_text::tr("report.trying_to_do");
         let template = format!("**Failed:** Fillet (`solid.fillet`)\n**Error:** radius too large\n\n{q}\n");
         assert_eq!(ticket::without_unanswered(&template), "**Failed:** Fillet (`solid.fillet`)\n**Error:** radius too large\n");
@@ -3112,10 +3113,13 @@ mod tests {
 
         // Sent: the ticket's body has no bare question, and the title is not made from it.
         let (mut app, _, _, _) = ticket_app(true, None);
+        // Read again: making the app loads the message catalogs, which a test run alone in its
+        // own process has not loaded before.
+        let q = solidcraft_ui_text::tr("report.trying_to_do");
         let mut draft = draft_for(&app, None, Some("radius too large"));
         draft.title_prefix = "Fillet: ".into();
         let mut t = ticket::new_ticket(&mut app, &draft, None);
-        assert!(t.form.description.contains(q));
+        assert!(t.form.description.contains(q), "{}", t.form.description);
         t.form.title.clear();
         ticket::ready_to_send(&mut t.form);
         let report = ticket::outgoing(&draft, &t);
