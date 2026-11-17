@@ -241,8 +241,8 @@ fn a_copy_of_nothing_it_can_use_is_left_out_with_why() {
 }
 
 /// A record body's paint names faces by their face in the file; the body's paint has them on its
-/// own faces. Colours and opacities from a file are hostile: each comes in within 0..1, and a
-/// colour on a face the body does not have is dropped.
+/// own faces. Colours and opacities from a file are hostile: each comes in within 0..1, the body's
+/// own colour too, and a colour on a face the body does not have is dropped.
 #[test]
 fn a_record_bodys_paint_is_on_its_own_faces_within_range() {
     let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/step-conformance");
@@ -256,8 +256,10 @@ fn a_record_bodys_paint_is_on_its_own_faces_within_range() {
         ],
         name: Some("Body".into()),
     });
+    records.bodies[0].color = Some([-1.0, 0.5, 2.0]);
     let imp = records_import(&records).unwrap();
     let body = &imp.bodies[0];
+    assert_eq!((body.color, body.body.color()), (Some([0.0, 0.5, 1.0]), Some([0.0, 0.5, 1.0])));
     let paint = body.body.paint().expect("paint");
     assert_eq!((paint.opacity, paint.name.as_deref()), (1.0, Some("Body")));
     assert_eq!(paint.faces.len(), 1, "{paint:?}");

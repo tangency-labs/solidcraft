@@ -160,7 +160,9 @@ pub fn records_import(records: &ImportRecords) -> Result<StepImport> {
             warnings.push(detail);
             continue;
         };
-        let body = body.with_color(r.color).with_face_sources(Some(Arc::new(sources)));
+        // The body's colour too is from a file: kept in 0..1, as its faces' are.
+        let color = r.color.map(|c| c.map(unit));
+        let body = body.with_color(color).with_face_sources(Some(Arc::new(sources)));
         let body = match &r.paint {
             Some(paint) => body.with_paint(Some(body_paint(paint, &part.face_origin))),
             None => body,
@@ -175,7 +177,7 @@ pub fn records_import(records: &ImportRecords) -> Result<StepImport> {
             face_origin: part.face_origin,
             name: r.name.clone(),
             body,
-            color: r.color,
+            color,
             path: r.path.clone(),
             instance: r.instance.clone(),
             closed: part.closed,
@@ -255,7 +257,6 @@ pub fn records_text(records: &ImportRecords) -> Result<String> {
 /// the file face of each body face), as a STEP import paints them; a colour on a face the body
 /// does not have is dropped. Colours and opacities from a file are hostile: each is kept in 0..1.
 fn body_paint(paint: &crate::Paint, face_origin: &[u64]) -> crate::Paint {
-    let unit = |x: f32| if x.is_finite() { x.clamp(0.0, 1.0) } else { 1.0 };
     let by_file: std::collections::HashMap<u64, &crate::FacePaint> = paint.faces.iter().map(|f| (f.face as u64, f)).collect();
     let faces = face_origin
         .iter()
@@ -266,6 +267,11 @@ fn body_paint(paint: &crate::Paint, face_origin: &[u64]) -> crate::Paint {
         })
         .collect();
     crate::Paint { opacity: unit(paint.opacity), faces, name: paint.name.clone() }
+}
+
+/// A colour channel or an opacity from a file, kept in 0..1 (1 when it is not a number).
+fn unit(x: f32) -> f32 {
+    if x.is_finite() { x.clamp(0.0, 1.0) } else { 1.0 }
 }
 
 /// The body SMLib makes of one record, checked first: a record from a file is hostile input.
