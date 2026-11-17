@@ -529,6 +529,11 @@ pub struct OpenParams {
     /// 5000000.
     #[serde(default)]
     pub max_points: Option<MaxPoints>,
+    /// The desktop app only (ignored elsewhere): open the file as a design in a new tab at this
+    /// place among the tabs (0 the first, past the last at the end), never in place of the design
+    /// shown; a design already open shows its tab instead.
+    #[serde(default)]
+    pub tab: Option<u64>,
 }
 
 /// Another SolidCraft that has the design open, from its lock file.

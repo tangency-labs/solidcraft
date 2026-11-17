@@ -156,6 +156,7 @@ const TAB_HANDLES: TabHandles<'static> = TabHandles {
     view_new: "t:vnew",
     view_more: "t:vmore",
     switcher: "t:switcher",
+    file_drop: "t:file_drop",
 };
 
 const VIEW_MENU: [TabMenuRow<'static>; 3] = [

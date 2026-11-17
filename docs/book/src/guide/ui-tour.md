@@ -15,7 +15,10 @@ view.
 - **Title bar.** On Windows and Linux the application bar is the window's title bar. On the left:
   the File menu (New, Open, Save, Save As, Export…), undo and redo, the Home tab (the start page)
   and one tab per open design (each with its own undo history, selection and camera; a dot marks
-  unsaved changes). Double-click a design's tab to rename the design: type the name, then press
+  unsaved changes). Files dragged from a file manager onto the tabs open there, each as a design
+  in a new tab: a mark shows the place between the tabs. A CAD, mesh, drawing or point cloud file
+  dropped there becomes a design of its own; dropped on the view instead, it is inserted into a
+  design that has features. Double-click a design's tab to rename the design: type the name, then press
   Enter or click elsewhere to keep it, or Esc to leave the old one (Preferences › Interface turns
   this off, for a double-click that maximizes the window instead). On the right: Report a bug,
   Help (?), Preferences (which hold the theme) and the window's buttons. On Linux, to have your
