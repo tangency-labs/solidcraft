@@ -1,0 +1,13 @@
+Updates: WR-76
+
+#### WR-76 (update, 2026-11-17). `ssi_trace_tangent_curves_once` is removed
+
+The fix is the default and its flag is gone (tangency-labs/solidcraft#14246, group G6). `SurfaceIntersector` (`intersect/surface_intersector/`) always keeps one start point per cluster of tangent boundary start points (`add_start_point`), removes the clusters at a finished trace's ends, runs `TraceCurve`'s "already traced" test on a first step that snapped onto another start point, and stops a near-tangent trace at the free end of a curve already found. Removed: the field `UpstreamFixes::ssi_trace_tangent_curves_once`, SolidCraft's preset line (which already turned it on), its entries in `fixes.json` and `issue_2260`'s list, and the test settings in `issue_1945_fork_1207_step4.rs`, `issue_2020_offset_mitred_below_depth.rs` and `wr650_tabbed_plate_mitred_rounds.rs`. `issue_392_tangent_twice` keeps its fixed-path test; its flag-off run (the upstream double trace) is removed.
+
+Two defects of the opt-in path, found by the goldens when it became the default, are fixed with it:
+
+- A better tangent start point that replaces a cluster's representative keeps the representative's direction. With the replacement's own direction, `TestPoint` snapped a trace from the contact band's edge onto the cluster after one step and the cluster went with that stub: the coaxial sphere/cylinder tangent circle was lost (`intersect.api_intersectors`).
+- The stop at a found curve's free end: the "already traced" test needs the whole span (both ends and three Hermite samples) within the tolerance of one found curve, and the shortened span's step gets up to four secant corrections until its end is within the tolerance of the found curve's end along the span. The first-order step left a 7e-4 gap between the two curves of an offset's tangent circle; it is now 1.2e-8.
+
+- **Results:** 17 goldens rows move, each closer to the true intersection: `intersect.surface_intersector_p4` 10 (the trace from a point on its found curve retraces less of it, or none), `intersect.surface_intersector_p5` 6 (second traces of kept curves are dropped), `offset.offset_geometry_creation` 1 (a tangent circle's second curve no longer runs on over 31 degrees of the first, and ends on its start).
+- **Tests:** `crates/goldens/tests/wr76_wr79_flag_retirement_moves.rs` replays the 17 rows from the committed inventory with per-row certificates (control-point hulls against the found segment and planes, chord-line bounds of each dropped curve against a kept one, angular-wedge bounds of the offset circle's curves). `wr76_tangent_cluster_keeps_direction` (the sphere/cylinder circle, both operand orders) and `wr76_trace_end_meets_found_curve` (the offset curve's end) fail without the two fixes.
