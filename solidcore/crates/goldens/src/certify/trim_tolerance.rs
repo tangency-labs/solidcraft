@@ -17,6 +17,12 @@
 //!
 //! So every lowered tolerance still covers what it is the tolerance for, and it is lower than
 //! before: a tighter tolerance that is still valid.
+//!
+//! A raised tolerance (`n > o`, the corner fix's `keep_trim_covered` in
+//! `topology::face::p2`) must cover the same way, and the old one must not have: for an edge
+//! one of its trims' `B` exceeds `o` (the raise was needed for the enclosure; `B` is an upper
+//! bound, so this argues rather than proves that `o` was short), for a vertex `o` does not
+//! cover an edge end that `n` does.
 
 use solidcore::curve::curve::p2::CurveKind;
 use solidcore::kernel::Kernel;
@@ -28,16 +34,20 @@ use solidcore::topology::{edge, Brep, EdgeId, VertexId};
 use crate::case::repo_root;
 use crate::CaseContext;
 
-/// The moved values of each case whose moved values are all lower tolerances (below 0.05,
-/// positive, decreased) and whose output changed nowhere else.
+/// The moved values of each case whose moved values are all tolerances (below 0.05,
+/// positive; lowered, or raised to cover a trim a corner fix moved) and whose output
+/// changed nowhere else.
 const ROWS: &str = include_str!("trim_tolerance_rows.jsonl");
 
 /// The moved edges this certificate does not certify yet, one per line: unit, case, body,
 /// edge, class, and (diagnostic only, never part of a proof) a dense-sampling estimate of the
 /// edge's largest trim gap and its new tolerance. Classes:
 /// - `UNCOVERED`: the sampled gap of one of the edge's trims exceeds the new (and the old)
-///   tolerance: an open defect, the tolerance does not cover that trim either way;
-/// - `loose`: the sampled gap is within the new tolerance but the enclosure `B` is not;
+///   tolerance: an open defect, the tolerance does not cover that trim either way (none
+///   left: the 27 there were now keep upstream's tolerance or are raised to cover);
+/// - `loose`: the sampled gap is within the new tolerance but the enclosure `B` is not (for
+///   `single_face_fillet1019_8` the gap is a sampled Hausdorff distance: the trims' images
+///   run up to 6.8e-4 from the edge curve at the same parameter but 2.16e-4 from the curve);
 /// - `no-estimate`: the trim's image could not be sampled;
 /// - `face-bound-loose`: an edge whose B-rep keeps no UV trim, whose face-gap enclosure
 ///   exceeds the new tolerance.
@@ -249,6 +259,8 @@ struct Tally {
     trimless: usize,
     /// Moved edges listed in [`OPEN`].
     open: usize,
+    /// Raised edges: every trim's `B` within the new tolerance, one above the old.
+    raised: usize,
     /// The largest `B / n`.
     worst: f64,
 }
@@ -303,11 +315,13 @@ fn certify(unit: &str) -> Tally {
             );
             tally.values += 1;
         }
-        // each moved entity: its tolerance is lower, and covers what it is the tolerance for
+        // each moved entity: its tolerance covers what it is the tolerance for, and is lower,
+        // or raised past what the old one covered
         for &(body, is_edge, index, old, new) in &row.entities {
             let kind = if is_edge { "edge" } else { "vertex" };
             let at = format!("{unit} {} body {body} {kind} {index}", row.case);
-            assert!(new < old && new > 0.0, "{at}: {old:e} -> {new:e}");
+            assert!(new != old && new > 0.0, "{at}: {old:e} -> {new:e}");
+            let raised = new > old;
             let b = bodies.get(body).unwrap_or_else(|| panic!("{at}: no body"));
             if is_edge {
                 let (e, rec) = b
@@ -331,7 +345,18 @@ fn certify(unit: &str) -> Tally {
                     }
                 }
                 let key = (row.case.clone(), body, index);
-                if bad.is_empty() {
+                if raised {
+                    // a raise: the new tolerance covers every trim, and one trim's bound is
+                    // above the old tolerance (not in OPEN: a raise is certified or fails)
+                    let past = bounds.iter().flatten().any(|x| *x > old);
+                    if bad.is_empty() && past {
+                        tally.raised += 1;
+                    } else {
+                        failures.push(format!(
+                            "{at}: raised {old:e} -> {new:e}: {bad:?}, a bound past old: {past}"
+                        ));
+                    }
+                } else if bad.is_empty() {
                     tally.edges += 1;
                     assert!(!open.contains(&key), "{at}: certified, remove it from OPEN");
                 } else if open.contains(&key) {
@@ -347,7 +372,9 @@ fn certify(unit: &str) -> Tally {
                     .find(|(v, _)| usize::try_from(v.index()) == Ok(index))
                     .unwrap_or_else(|| panic!("{at}: no vertex"));
                 assert_eq!(rec.tolerance.to_bits(), new.to_bits(), "{at}: tolerance");
-                if vertex_covers_its_ends(&k, b, v, new) {
+                if raised && vertex_covers_its_ends(&k, b, v, old) {
+                    failures.push(format!("{at}: raised {old:e} -> {new:e}: old covered"));
+                } else if vertex_covers_its_ends(&k, b, v, new) {
                     tally.vertices += 1;
                 } else {
                     failures.push(format!("{at}: {old:e} -> {new:e}: an edge end is farther"));

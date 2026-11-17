@@ -80,7 +80,9 @@
 //!   3D on a face whose surface moves 100 per unit of UV). Where the edge's tolerance
 //!   provably covered a trim before the edit (`trim_deviation_bound` at most the
 //!   tolerance), it is raised to the edited trim's proved distance from the edge curve
-//!   when that is larger (`keep_trim_covered`); it is never lowered.
+//!   when that is larger and at most twice the tolerance (`keep_trim_covered`: a larger
+//!   bound is the enclosure's slack as often as the trim's move, and stays upstream's);
+//!   it is never lowered.
 //! - **Edit notifications.** [`fix_uv_trim_curves_notified`] notifies its two
 //!   `EditEndPoint`s (`SM_NO_PRE_EDIT` / `SM_NO_POST_EDIT`, caller and first data
 //!   object the UV trim curve under its kernel-issued identity) through the caller's
@@ -3380,6 +3382,12 @@ fn covered_trim(k: &Kernel, b: &Brep, eu: EdgeuseId, holder: EdgeuseId) -> Resul
 /// `holder` for `eu`, raises the edge's tolerance to the trim's enclosed distance from the
 /// edge curve (`trim_deviation_bound`) where the tolerance covered the trim before the edit
 /// (`covered`, [`covered_trim`]) and no longer does. Never lowers it.
+///
+/// Only a bound up to twice the tolerance is taken. The enclosure can be loose by orders of
+/// magnitude (0.03 and 0.27 over a tolerance of 1e-5 on read corpus bodies), and a
+/// tolerance raised to such a bound fails the B-rep's own tolerance checks; there the
+/// tolerance stays upstream's. Twice is `SetUVTrimCurve`'s own allowance: it raises an edge
+/// to twice the distance its trim reports.
 fn keep_trim_covered(
     k: &Kernel,
     b: &mut Brep,
@@ -3397,8 +3405,9 @@ fn keep_trim_covered(
         let trim = held_curve(b, holder)?;
         crate::topology::edgeuse::p3::trim_deviation_bound(k, b, eu, trim)?
     };
+    let tolerance = b.edge(e)?.tolerance;
     if let Some(bound) = bound {
-        if bound.is_finite() && bound > b.edge(e)?.tolerance {
+        if bound.is_finite() && bound > tolerance && bound <= 2.0 * tolerance {
             crate::topology::edge::set_tolerance(b, e, bound, true, true)?;
         }
     }
