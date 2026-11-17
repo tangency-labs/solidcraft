@@ -130,9 +130,9 @@ go to the new `.sc` file at its origin, with the parameters they use, and the co
 becomes linked to that file, as **Insert Design** makes it. Its placements and the joints to the
 rest of the assembly stay. Components whose own history builds the same bodies are offered to
 become placements of the new link too (`component.copies`, `component.replace_with_link`).
-The menu offers Extract only for a component that can leave: nothing outside uses its sketches
-or changes its bodies, no bodies were moved into or out of it, and none of its subcomponents is
-joined to the rest of the design.
+A component can leave when nothing outside uses its sketches or changes its bodies, no bodies
+were moved into or out of it, and none of its subcomponents is joined to the rest of the design.
+When it can't, the menu shows Extract greyed out, and hovering it says why.
 
 **Joints** (`joint.create`, J) connect two components by joint origins that snap to faces, edges,
 circles and vertices: rigid, revolute, slider, cylindrical, pin-slot, planar and ball, with

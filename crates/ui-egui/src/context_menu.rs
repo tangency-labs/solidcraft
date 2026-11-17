@@ -1187,8 +1187,11 @@ fn component_items(app: &SolveApp, id: u64) -> Vec<Item> {
     }
     if doc.links.contains_key(&id) {
         own.push(act("ui.relinkSource", "Relink Source (All Instances)…", "update").with(json!({"component": id})));
-    } else if id != 0 && app.session.can_extract(id) {
-        own.push(act("ui.extractComponent", "Extract to File…", "export").with(json!({"component": id})));
+    } else if id != 0 {
+        // Offered even when the component can't go, greyed out with the reason (#18623).
+        own.push(
+            act("ui.extractComponent", "Extract to File…", "export").with(json!({"component": id})).off_because(app.session.extract_refusal(id)),
+        );
     }
     own.push(Item::sep());
     own.push(

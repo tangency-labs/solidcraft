@@ -433,9 +433,15 @@ mod tests {
         let find =
             |app: &SolveApp, id: u64| context_menu::entries(app, &Target::Component { id }).into_iter().find(|i| i.id == "ui.extractComponent");
         assert!(find(&app, 0).is_none());
-        // Not offered while the component can't go: here, moved without Capture Position
+        assert!(find(&app, component).is_some_and(|i| i.enabled && i.tip.is_none()));
+        // Shown but off while the component can't go, saying why (#18623): here, moved without
+        // Capture Position
         app.run("occurrence.move", json!({"occurrence": occurrence, "translate": [5, 0, 0], "capture": false})).unwrap();
-        assert!(find(&app, component).is_none());
+        let off = find(&app, component).unwrap();
+        assert!(!off.enabled);
+        assert_eq!(off.tip.as_deref(), Some("Capture or revert the moved components first"));
+        context_menu::run_item(&mut app, &off, egui::Pos2::ZERO);
+        assert!(!app.file_picker_busy(), "a disabled entry asks for no file");
         app.run("component.revert_position", json!({})).unwrap();
         // In Relink Source's place in the Component flyout, right below New Component
         let rows = context_menu::items(&app, &Target::Component { id: component });
