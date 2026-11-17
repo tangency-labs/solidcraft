@@ -217,6 +217,13 @@ pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("select.filter", "Selection filter", crate::checked!("select.filter", select_filter)).icon("select").noundo().doc_only()
         .contract(&SELECT_FILTER_CONTRACT).output(output_schema_for::<SelectFilterResult>)
         .params("mode: body|face|component → validated UI pick granularity; headless echo only, no document edits or undo"),
+    CommandSpec::new("select.boundary", "Select Boundary", crate::checked!("select.boundary", select_boundary))
+        .icon("select")
+        .noundo()
+        .doc_only()
+        .contract(&BOUNDARY_CONTRACT)
+        .output(output_schema_for::<crate::schema::select::BoundaryResult>)
+        .params("body?: world body name, faces?: face indices of it (default: the selected faces, else the last selected body), holes?: bool, add?: bool → selects the edges that bound exactly one face of the set (exact topology), outer loops only unless holes; a body alone gives its free edges → selected, body, edges, loops, holes_left"),
     CommandSpec::new("select.clear", "Clear Selection", crate::checked!("select.clear", select_clear))
         .icon("select")
         .noundo()
@@ -233,6 +240,7 @@ pub static COMMANDS: &[CommandSpec] = &[
 
 const SELECT_SET_CONTRACT: TypedContract<SelectSetParams> = TypedContract::new();
 const SELECT_FILTER_CONTRACT: TypedContract<SelectFilterParams> = TypedContract::new();
+const BOUNDARY_CONTRACT: TypedContract<crate::schema::select::BoundaryParams> = TypedContract::new();
 const SELECT_CLEAR_CONTRACT: TypedContract<SelectClearParams> = TypedContract::new();
 const SAME_LOOK_CONTRACT: TypedContract<SameLookParams> = TypedContract::new();
 const COMPUTE_ALL_CONTRACT: TypedContract<TimelineComputeAllParams> = TypedContract::new();
@@ -1683,6 +1691,168 @@ fn select_clear(s: &mut Session, _p: &Value) -> Result<Value> {
     s.selection.clear();
     s.refresh_display();
     reply("select.clear", SelectClearResult { selected: 0, param_warnings: Vec::new() })
+}
+
+/// `select.boundary`: the edges round a set of faces, or a body's free edges, from the body's
+/// exact topology (#18098). See [`crate::schema::select::BoundaryParams`].
+fn select_boundary(s: &mut Session, p: &Value) -> Result<Value> {
+    use solidcore_record::brep::Loop;
+    use std::collections::BTreeSet;
+    const CMD: &str = "select.boundary";
+    let request: crate::schema::select::BoundaryParams = serde_json::from_value(p.clone()).map_err(|e| bad(CMD, e.to_string()))?;
+    // The body and its face set (None: every face of the body).
+    let (name, faces): (String, Option<BTreeSet<usize>>) = match (request.body, request.faces) {
+        (Some(body), faces) => (body, faces.map(|f| f.into_iter().collect())),
+        (None, Some(_)) => return Err(bad(CMD, "give body with faces")),
+        (None, None) => {
+            let picked: Vec<(&String, usize)> = s
+                .selection
+                .iter()
+                .filter_map(|x| match x {
+                    Sel::Face { body, index, .. } => Some((body, *index)),
+                    _ => None,
+                })
+                .collect();
+            match picked.first() {
+                Some((body, _)) if picked.iter().any(|(b, _)| b != body) => return Err(bad(CMD, "select faces of one body")),
+                Some((body, _)) => ((*body).clone(), Some(picked.iter().map(|(_, f)| *f).collect())),
+                None => {
+                    let body = s
+                        .selection
+                        .iter()
+                        .rev()
+                        .find_map(|x| match x {
+                            Sel::Body { name } => Some(name.clone()),
+                            _ => None,
+                        })
+                        .ok_or_else(|| bad(CMD, "select faces or a body, or give body"))?;
+                    (body, None)
+                }
+            }
+        }
+    };
+    let state = s.world_state()?;
+    let body = state.body(&name).ok_or_else(|| bad(CMD, format!("no body `{name}`")))?;
+    let record = body.body.record();
+    if record.faces.is_empty() {
+        return Err(bad(CMD, format!("`{name}` is a mesh body: it has no edge topology")));
+    }
+    let face_set = faces.is_some();
+    let set: BTreeSet<usize> = match faces {
+        Some(f) if f.is_empty() => return Err(bad(CMD, "faces is empty")),
+        Some(f) => match f.iter().find(|i| **i >= record.faces.len()) {
+            Some(i) => return Err(bad(CMD, format!("no face {i} of `{name}`"))),
+            None => f,
+        },
+        None => (0..record.faces.len()).collect(),
+    };
+    // How often the set's loops use each edge: once is the boundary; twice is an edge between two
+    // faces of the set, or a seam of one face.
+    let mut uses: BTreeMap<usize, usize> = BTreeMap::new();
+    for face in set.iter().filter_map(|f| record.faces.get(*f)) {
+        for l in &face.loops {
+            if let Loop::Edges { edges } = l {
+                for u in edges {
+                    *uses.entry(u.edge as usize).or_default() += 1;
+                }
+            }
+        }
+    }
+    // The boundary edges in closed loops: edges that meet at a vertex are in one loop.
+    let mut root: BTreeMap<u32, u32> = BTreeMap::new();
+    let find = |root: &BTreeMap<u32, u32>, mut v: u32| {
+        while let Some(&up) = root.get(&v) {
+            v = up;
+        }
+        v
+    };
+    let open: Vec<(usize, [u32; 2])> =
+        uses.iter().filter(|(_, n)| **n == 1).filter_map(|(e, _)| record.edges.get(*e).map(|edge| (*e, edge.vertices))).collect();
+    for (_, [a, b]) in &open {
+        let (ra, rb) = (find(&root, *a), find(&root, *b));
+        if ra != rb {
+            root.insert(ra, rb);
+        }
+    }
+    let mut grouped: BTreeMap<u32, Vec<usize>> = BTreeMap::new();
+    for (e, [a, _]) in &open {
+        grouped.entry(find(&root, *a)).or_default().push(*e);
+    }
+    let loops: Vec<Vec<usize>> = grouped.into_values().collect();
+    if loops.is_empty() {
+        return Err(bad(CMD, if face_set { format!("the faces of `{name}` have no boundary") } else { format!("`{name}` has no free edges") }));
+    }
+    // On a face set, a loop whose box lies inside a bigger loop's box is a hole or an island.
+    let boxes: Vec<Option<[[f64; 3]; 2]>> = loops.iter().map(|l| loop_box(record, l)).collect();
+    let is_hole = |i: usize| {
+        let Some(Some(a)) = boxes.get(i) else { return false };
+        boxes.iter().enumerate().any(|(j, b)| j != i && b.as_ref().is_some_and(|b| box_holds(b, a)))
+    };
+    let keep_holes = !face_set || request.holes.unwrap_or(false);
+    let (kept, left): (Vec<usize>, Vec<usize>) = (0..loops.len()).partition(|i| keep_holes || !is_hole(*i));
+    let edges: Vec<usize> = kept.iter().filter_map(|i| loops.get(*i)).flatten().copied().collect();
+    let items: Vec<Value> = edges.iter().map(|e| json!({"type": "edge", "body": name, "index": e})).collect();
+    drop(state);
+    let set = select_set(s, &json!({"items": items, "add": request.add.unwrap_or(false)}))?;
+    let selected = set.get("selected").and_then(Value::as_u64).unwrap_or_default() as usize;
+    let result =
+        crate::schema::select::BoundaryResult { selected, body: name, edges, loops: kept.len(), holes_left: left.len(), param_warnings: Vec::new() };
+    reply(CMD, result)
+}
+
+/// A box round a loop of edges from their exact curves: a circle's or an ellipse's whole turn, a
+/// spline's control points (which hold the curve). None when a curve has no such box.
+fn loop_box(record: &solidcore_record::brep::Brep, edges: &[usize]) -> Option<[[f64; 3]; 2]> {
+    use solidcore_record::brep::{Curve, Frame};
+    fn ellipse(frame: &Frame, r: [f64; 2], out: &mut Vec<[f64; 3]>) {
+        let reach: [f64; 3] = std::array::from_fn(|i| (r[0] * frame.x_axis[i]).hypot(r[1] * frame.y_axis[i]));
+        out.push(std::array::from_fn(|i| frame.origin[i] - reach[i]));
+        out.push(std::array::from_fn(|i| frame.origin[i] + reach[i]));
+    }
+    fn points(curve: &Curve, out: &mut Vec<[f64; 3]>) -> Option<()> {
+        match curve {
+            // A line edge runs between its vertices, which the loop's box already holds.
+            Curve::Line { .. } => {}
+            Curve::Polyline { points } | Curve::Spline { points, .. } => out.extend(points.iter().copied()),
+            Curve::RationalSpline { homogeneous, .. } => {
+                for [x, y, z, w] in homogeneous {
+                    if !w.is_finite() || *w <= 0.0 {
+                        return None;
+                    }
+                    out.push([x / w, y / w, z / w]);
+                }
+            }
+            Curve::Circle { frame, radius } => ellipse(frame, [*radius, *radius], out),
+            Curve::Ellipse { frame, radii } => ellipse(frame, *radii, out),
+            Curve::SurfaceIntersection { leader, tolerance, .. } => {
+                let mut near = Vec::new();
+                points(leader, &mut near)?;
+                for p in near {
+                    out.push(p.map(|c| c - tolerance));
+                    out.push(p.map(|c| c + tolerance));
+                }
+            }
+        }
+        Some(())
+    }
+    let mut all = Vec::new();
+    for e in edges {
+        let edge = record.edges.get(*e)?;
+        for v in edge.vertices {
+            all.push(record.vertices.get(v as usize)?.point);
+        }
+        points(&edge.curve, &mut all)?;
+    }
+    let first = *all.first()?;
+    let b = all.iter().fold([first, first], |[lo, hi], p| [std::array::from_fn(|i| lo[i].min(p[i])), std::array::from_fn(|i| hi[i].max(p[i]))]);
+    b.iter().flatten().all(|c| c.is_finite()).then_some(b)
+}
+
+/// Whether box `outer` holds box `inner` and is bigger than it.
+fn box_holds(outer: &[[f64; 3]; 2], inner: &[[f64; 3]; 2]) -> bool {
+    const SLACK: f64 = 1e-6;
+    let size = |b: &[[f64; 3]; 2]| (0..3).map(|i| b[1][i] - b[0][i]).sum::<f64>();
+    (0..3).all(|i| outer[0][i] <= inner[0][i] + SLACK && inner[1][i] <= outer[1][i] + SLACK) && size(outer) > size(inner) + SLACK
 }
 
 /// Features that worked in `before` and fail in `after`: (name, error).

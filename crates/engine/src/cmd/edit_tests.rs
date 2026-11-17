@@ -2532,3 +2532,78 @@ fn feature_and_folder_names_count_characters_not_bytes() {
     let reopened = solidcraft_doc::Document::from_json(&s.doc.to_json()).map_err(|e| e.to_string());
     assert_eq!(reopened.map(|d| d.timeline_groups[0].name.clone()), Ok(long));
 }
+
+/// #18098: the boundary of a face set from the exact topology. The top of a plate with a square
+/// through hole gives its outer square only, the hole's loop with `holes`; the top and a side
+/// give the one loop round both; an open tube's free edges are both its rims; a closed solid has
+/// none, and a bad call is refused with the selection as it was.
+#[test]
+fn select_boundary_takes_the_rim_of_a_face_set_and_leaves_its_holes() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"body_name":"Plate", "length":20, "width":20, "height":10}));
+    run(&mut s, "solid.box", json!({"corner":[5,5,-1], "length":10, "width":10, "height":12, "operation":"cut"}));
+    assert!(s.execute("select.boundary", &json!({})).is_err(), "nothing selected");
+    run(&mut s, "select.set", json!({"items":[{"type":"face","body":"Plate","point":[2,2,10]}]}));
+    let history = (s.undo.len(), s.redo.len());
+    let on_top = |p: Vec3| (p.z - 10.0).abs() < 1e-6;
+    let outer = |p: Vec3| [p.x, p.y].iter().any(|c| c.abs() < 1e-6 || (c - 20.0).abs() < 1e-6);
+
+    let r = run(&mut s, "select.boundary", json!({}));
+    assert_eq!((r["selected"].as_u64(), r["loops"].as_u64(), r["holes_left"].as_u64()), (Some(4), Some(1), Some(1)), "{r}");
+    for item in &s.selection {
+        let Sel::Edge { body, point, .. } = item else { panic!("{item:?}") };
+        assert!(body == "Plate" && on_top(*point) && outer(*point), "{item:?}");
+    }
+    assert_eq!(history, (s.undo.len(), s.redo.len()), "selecting is not an undo step");
+
+    run(&mut s, "select.set", json!({"items":[{"type":"face","body":"Plate","point":[2,2,10]}]}));
+    let top = match s.selection.first() {
+        Some(Sel::Face { index, .. }) => *index,
+        other => panic!("{other:?}"),
+    };
+    let r = run(&mut s, "select.boundary", json!({"holes":true}));
+    assert_eq!((r["selected"].as_u64(), r["loops"].as_u64(), r["holes_left"].as_u64()), (Some(8), Some(2), Some(0)), "{r}");
+    assert!(s.selection.iter().all(|x| matches!(x, Sel::Edge { point, .. } if on_top(*point))), "{:?}", s.selection);
+
+    // The top and the front side: one loop of six round both (their shared edge is inside the set).
+    run(&mut s, "select.set", json!({"items":[{"type":"face","body":"Plate","point":[10,0,5]}]}));
+    let side = match s.selection.first() {
+        Some(Sel::Face { index, .. }) => *index,
+        other => panic!("{other:?}"),
+    };
+    let r = run(&mut s, "select.boundary", json!({"body":"Plate", "faces":[top, side]}));
+    assert_eq!((r["selected"].as_u64(), r["loops"].as_u64(), r["holes_left"].as_u64()), (Some(6), Some(1), Some(1)), "{r}");
+    assert!(!s.selection.iter().any(|x| matches!(x, Sel::Edge { point, .. } if on_top(*point) && point.y.abs() < 1e-6)), "{:?}", s.selection);
+
+    // `add` keeps what was selected.
+    run(&mut s, "select.boundary", json!({"body":"Plate", "faces":[top], "holes":true, "add":true}));
+    // The top's eight edges, three of them already in the loop of six.
+    assert_eq!(s.selection.len(), 6 + 5, "{:?}", s.selection);
+
+    // An open tube of four walls: its free edges are both rims, on the body or on all its faces.
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Square"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [40, 0], "p1": [50, 10]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "surface.extrude", json!({"sketch": "Square", "distance": "10 mm", "name": "Tube", "body_name": "Tube"}));
+    run(&mut s, "select.set", json!({"items":[{"type":"body","name":"Tube"}]}));
+    let r = run(&mut s, "select.boundary", json!({}));
+    assert_eq!((r["selected"].as_u64(), r["loops"].as_u64(), r["body"].as_str()), (Some(8), Some(2), Some("Tube")), "{r}");
+    let r = run(&mut s, "select.boundary", json!({"body":"Tube", "faces":[0, 1, 2, 3]}));
+    assert_eq!((r["selected"].as_u64(), r["holes_left"].as_u64()), (Some(8), Some(0)), "both rims are kept: {r}");
+
+    let selected = s.selection.clone();
+    for params in [
+        json!({"body":"Plate"}),
+        json!({"faces":[top]}),
+        json!({"body":"Missing"}),
+        json!({"body":"Plate", "faces":[]}),
+        json!({"body":"Plate", "faces":[u64::MAX]}),
+        json!({"body":"Plate", "faces":[-1]}),
+        json!({"body":"Plate", "faces":[top], "extra":true}),
+        json!({"body":"Plate", "holes":"yes"}),
+        json!([]),
+    ] {
+        assert!(s.execute("select.boundary", &params).is_err(), "{params}");
+        assert_eq!(s.selection, selected, "{params}");
+    }
+}
