@@ -37,7 +37,8 @@
 //! (WR-619): a union whose step 6 deletes a face between the infinite region and a solid
 //! region, and after which that solid's side (the uses of its faces that stay) no longer lies
 //! in a solid region (the solid merged into the outside), is refused with `SM_ERR` (the face
-//! in the error) instead of returning that body.
+//! in the error) instead of returning that body. Where none of those uses is left, the union
+//! is refused when it has no solid region at all.
 //! Own design, not upstream: in step 6 a region that a deleted face joins to another, neither
 //! with merge data (no face of the other body was copied into them, as when a union fills a
 //! void exactly), takes the class a deleted face has on both sides ([`deleted_face_sides`]);
@@ -517,8 +518,12 @@ fn solid_leaks(b: &Brep, delete: &[FaceId]) -> Result<Vec<SolidLeak>> {
 }
 
 /// Not upstream (WR-619): whether the solid a [`SolidLeak`]'s face bounded still lies in a
-/// solid region: at least one of the face uses that bounded it is left, and each one left
-/// lies in a region that is neither the infinite one nor a void.
+/// solid region. Each face use that bounded it and is left must lie in a region that is
+/// neither the infinite one nor a void: the solid's material is in one of the operands, so
+/// a use whose side ends outside or in a void shows a wrong union. When no such use is left
+/// the solid cannot be located; the test is then the whole-body one, `b` has a solid region
+/// ([`has_solid_region`]), so that case refuses exactly what it refused before the per-leak
+/// check.
 fn leak_stays_solid(b: &Brep, leak: &SolidLeak) -> Result<bool> {
     let infinite = b.infinite_region();
     let mut located = false;
@@ -534,7 +539,21 @@ fn leak_stays_solid(b: &Brep, leak: &SolidLeak) -> Result<bool> {
         }
         located = true;
     }
-    Ok(located)
+    if located {
+        return Ok(true);
+    }
+    has_solid_region(b)
+}
+
+/// Not upstream (WR-619): whether `b` has a solid region other than the infinite one.
+fn has_solid_region(b: &Brep) -> Result<bool> {
+    let infinite = b.infinite_region();
+    for r in bp::regions(b, None)? {
+        if Some(r) != infinite && void(b, r)? == 0 {
+            return Ok(true);
+        }
+    }
+    Ok(false)
 }
 
 fn void(b: &Brep, r: RegionId) -> Result<i32> {
@@ -1593,9 +1612,10 @@ fn editing_stages(
     }
     // Not upstream (WR-619): a union whose face deletion merges a solid into the outside is
     // refused after post-processing, if the solid side of any deleted face between a solid
-    // and the outside no longer lies in a solid region. Such a face is also deleted where the
-    // other body's solid lies just across it (a coincident wall); that solid region then
-    // takes the material in, and the union is kept.
+    // and the outside no longer lies in a solid region. A leak whose solid's remaining face
+    // uses all lie in solid regions is kept, as the region count kept it; no known input
+    // records such a leak: coincident-wall joins delete no face between a solid and the
+    // outside.
     let leaks = if operation == BooleanOperation::Union {
         solid_leaks(primary, &faces.delete)?
     } else {
@@ -2164,6 +2184,73 @@ mod tests {
             );
         }
         out
+    }
+
+    /// WR-619's per-leak check on a cube [0, 1]^3: its region `solid` and every face's use
+    /// on each side. A leak names `solid` and the face uses that bounded it.
+    fn cube_leak_parts() -> (Kernel, Brep, RegionId, Vec<FaceuseId>, Vec<FaceuseId>) {
+        use crate::math::Point3;
+        use crate::primitive::api_primitives::create_box;
+        let mut k = Kernel::default();
+        let b = create_box(&mut k, Point3::new(0.0, 0.0, 0.0), 1.0, 1.0, 1.0).unwrap();
+        let infinite = b.infinite_region().unwrap();
+        let solid = bp::regions(&b, None)
+            .unwrap()
+            .into_iter()
+            .find(|&r| r != infinite)
+            .unwrap();
+        let (mut inside, mut outside) = (Vec::new(), Vec::new());
+        for f in bp::faces(&b, None).unwrap() {
+            let (fu1, fu2) = face::faceuses(&b, f).unwrap();
+            for fu in [fu1.unwrap(), fu2.unwrap()] {
+                match eu::faceuse_region(&b, fu).unwrap() {
+                    Some(r) if r == solid => inside.push(fu),
+                    Some(r) if r == infinite => outside.push(fu),
+                    other => panic!("face use {fu:?} in region {other:?}"),
+                }
+            }
+        }
+        assert_eq!((inside.len(), outside.len()), (6, 6));
+        (k, b, solid, inside, outside)
+    }
+
+    /// A leak whose remaining face uses lie in the solid region stays solid; one with a use
+    /// in the infinite region, or in a region flagged void, does not.
+    #[test]
+    fn wr_619_leak_with_a_use_left_follows_that_use() {
+        let (_k, mut b, solid, inside, outside) = cube_leak_parts();
+        let face = bp::faces(&b, None).unwrap()[0];
+        let leak = |bounding: Vec<FaceuseId>| SolidLeak {
+            face,
+            region: solid,
+            bounding,
+        };
+        assert!(leak_stays_solid(&b, &leak(inside.clone())).unwrap());
+        let mut mixed = inside.clone();
+        mixed.push(outside[0]);
+        assert!(!leak_stays_solid(&b, &leak(mixed)).unwrap());
+        assert!(!leak_stays_solid(&b, &leak(outside)).unwrap());
+        b.region_mut(solid).unwrap().set_is_void(1);
+        assert!(!leak_stays_solid(&b, &leak(inside)).unwrap());
+    }
+
+    /// A leak with none of its face uses left falls back to the whole-body test: it stays
+    /// solid exactly when the body still has a solid region (the check before per-leak
+    /// tracking), so this branch refuses nothing that test did not refuse.
+    #[test]
+    fn wr_619_leak_with_no_use_left_falls_back_to_a_solid_region() {
+        let (_k, mut b, solid, _inside, _outside) = cube_leak_parts();
+        let face = bp::faces(&b, None).unwrap()[0];
+        let unlocated = SolidLeak {
+            face,
+            region: solid,
+            bounding: Vec::new(),
+        };
+        assert!(has_solid_region(&b).unwrap());
+        assert!(leak_stays_solid(&b, &unlocated).unwrap());
+        b.region_mut(solid).unwrap().set_is_void(1);
+        assert!(!has_solid_region(&b).unwrap());
+        assert!(!leak_stays_solid(&b, &unlocated).unwrap());
     }
 
     /// WR-265: the outer shell comes first, as `SmBrep::AssertValid` test 12 wants
