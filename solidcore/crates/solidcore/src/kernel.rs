@@ -809,6 +809,14 @@ pub struct UpstreamFixes {
     /// against the untrimmed surface. Classifications outside editing are unchanged
     /// (WR-732, #2503; solidcore-native, no fork commit).
     pub brep_ray_classifies_current_trims: bool,
+    /// The extended offset's corner splits (`offset_splits_corner_vertices`) also take a
+    /// corner of four plane faces that is not convex: faces `a` and `c` across it gain the
+    /// edge from where `a`, `b` and `c` meet to where `c`, `d` and `a` meet, when each point
+    /// lies along its original edge out of the corner. A draft tilting a ceiling that met a
+    /// wall only at a vertex (the ceiling running under the wall line onto a pad, the floor
+    /// beyond the wall sloping away) left the wall's old edges in place and its new ones
+    /// lamina: not a closed solid (solidcore-native, no fork commit).
+    pub offset_splits_mixed_corner_vertices: bool,
 }
 }
 

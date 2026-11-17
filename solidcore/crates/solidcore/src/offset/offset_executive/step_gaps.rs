@@ -915,6 +915,7 @@ fn corner_split(
     v0: VertexId,
     sheet_of: &BTreeMap<FaceId, FaceId>,
     tol: f64,
+    mixed: bool,
 ) -> Result<Option<CornerSplit>> {
     let mut edges = crate::topology::vertex::edges(original, v0, None)?;
     edges.sort_unstable();
@@ -955,6 +956,8 @@ fn corner_split(
         .iter()
         .fold(Vec3::new(0.0, 0.0, 0.0), |sum, &d| sum + d);
     let mut planes: Vec<(Point3, Vec3)> = Vec::new();
+    let mut raw: Vec<(Point3, Vec3)> = Vec::new();
+    let mut edge_on = false;
     for f in &faces {
         let Some(sheet) = sheet_of.get(f) else {
             return Ok(None);
@@ -966,18 +969,24 @@ fn corner_split(
             return Ok(None);
         };
         let (point, normal, _) = plane.is_planar();
+        raw.push((point, normal));
         let side = normal.dot(inward);
         if side.abs() < EFF_ZERO {
-            return Ok(None);
+            edge_on = true;
         }
         planes.push((point, if side > 0.0 { normal * -1.0 } else { normal }));
     }
     // a convex corner: every edge runs inside every face's plane
-    if dirs
-        .iter()
-        .any(|&d| planes.iter().any(|&(_, n)| n.dot(d) > EFF_ZERO_SQRT))
+    if edge_on
+        || dirs
+            .iter()
+            .any(|&d| planes.iter().any(|&(_, n)| n.dot(d) > EFF_ZERO_SQRT))
     {
-        return Ok(None);
+        return Ok(if mixed {
+            mixed_corner_split(&faces, &dirs, &pairs, &raw, p0, tol)
+        } else {
+            None
+        });
     }
     // `a` and `c` across the corner (no edge between them), both ends inside the fourth
     // face
@@ -1010,6 +1019,79 @@ fn corner_split(
         }
     }
     Ok(None)
+}
+
+/// Not in the fork (opt-in `Kernel::fixes.offset_splits_mixed_corner_vertices`): the split of
+/// a corner of four plane faces that is not convex (some edge at it concave, or a face's plane
+/// containing the corner's mean edge direction), whose offset planes no longer meet in one
+/// point. Faces `a` and `c` across the corner (no edge between them) gain the edge from
+/// `t_b`, where `a`, `b` and `c` meet, to `t_d`, where `c`, `d` and `a` meet, when each lies
+/// along its original edge out of the corner -- `t_b` along its edge between `b` and `c` or
+/// `a` and `b`, `t_d` along `c`-`d` or `d`-`a`, each farther than `tol` -- so that the moved face
+/// grows into the corner as far as the unmoved pair's edges reach it. A draft that tilts a
+/// face across a corner where it met another face only at the vertex (a ceiling running
+/// under a wall line onto a pad, the wall's floor sloping away beyond it) needs exactly this
+/// edge between the two; the convex rule's inside test reads the wrong side at such a corner.
+/// `None` where no pairing passes, or both do (ambiguous).
+fn mixed_corner_split(
+    faces: &[FaceId],
+    dirs: &[Vec3],
+    pairs: &[[FaceId; 2]],
+    planes: &[(Point3, Vec3)],
+    p0: Point3,
+    tol: f64,
+) -> Option<CornerSplit> {
+    let dir_of = |f: FaceId, g: FaceId| -> Option<Vec3> {
+        pairs
+            .iter()
+            .position(|p| p.contains(&f) && p.contains(&g))
+            .and_then(|i| dirs.get(i).copied())
+    };
+    let mut found: Option<CornerSplit> = None;
+    for (a, c, bb, d) in [
+        (0, 1, 2, 3),
+        (0, 2, 1, 3),
+        (0, 3, 1, 2),
+        (1, 2, 0, 3),
+        (1, 3, 0, 2),
+        (2, 3, 0, 1),
+    ] {
+        let (fa, fb, fc, fd) = (
+            *faces.get(a)?,
+            *faces.get(bb)?,
+            *faces.get(c)?,
+            *faces.get(d)?,
+        );
+        if dir_of(fa, fc).is_some() {
+            continue;
+        }
+        // each point lies on its three planes, so along whichever of its two original edges
+        // (b-c or a-b for t_b, c-d or d-a for t_d) its unmoved faces bound
+        let along = |p: Point3, e1: Option<Vec3>, e2: Option<Vec3>| {
+            [e1, e2]
+                .into_iter()
+                .flatten()
+                .any(|d| (p - p0).dot(d) > tol)
+        };
+        let (pa, pb, pc, pd) = (
+            *planes.get(a)?,
+            *planes.get(bb)?,
+            *planes.get(c)?,
+            *planes.get(d)?,
+        );
+        let (Some(t_b), Some(t_d)) = (three_planes([pa, pb, pc]), three_planes([pc, pd, pa]))
+        else {
+            continue;
+        };
+        if along(t_b, dir_of(fb, fc), dir_of(fa, fb)) && along(t_d, dir_of(fc, fd), dir_of(fd, fa))
+        {
+            if found.is_some() {
+                return None;
+            }
+            found = Some(CornerSplit { b: fb, t_b, t_d });
+        }
+    }
+    found
 }
 
 /// The vertex the original's edges `e1` and `e2` share (one only).
@@ -1401,7 +1483,14 @@ impl OffsetExecutive {
         let tol = 10.0 * max2(original.tolerance(), approx_tol);
         let mut corners: BTreeMap<VertexId, CornerSplit> = BTreeMap::new();
         for v0 in bp1::vertices(original, None)? {
-            if let Some(split) = corner_split(original, b, v0, &sheet_of, tol)? {
+            if let Some(split) = corner_split(
+                original,
+                b,
+                v0,
+                &sheet_of,
+                tol,
+                kernel.fixes.offset_splits_mixed_corner_vertices,
+            )? {
                 corners.insert(v0, split);
             }
         }
