@@ -92,6 +92,7 @@ The command surface exposes management without opening dialogs:
 
 | Command | Parameters | Result |
 |---|---|---|
+| `plugin.check` | `{path}`: a package folder or `.zip` | `{ok, id, name, version, kind, approval, entries, problems: [{severity, field, problem, fix}]}`; installs nothing |
 | `plugin.install` | `{path, approval?, archive?, replace?, dry_run?, approve?: {command_groups, folders: [{name, path, read, write}], memory_mib?, input_folder?}}` | Package description and installation status, including declared `entry_points` |
 | `plugin.list` | `{}` | `{plugins: [{manifest, commands, disabled}]}` |
 | `plugin.remove` | `{id}` | `{id, removed: true}` |
@@ -299,14 +300,37 @@ past the open design are grouped (`file`, `doc`, `app`, `plugin`) and refused un
 manifest asks for the group in `permissions.command_groups` and the user grants it.
 File access requires approved folder grants. The reserved `net` permission is
 refused with a typed error. Traps, missing permissions, failed commands, limits
-and invalid manifest fields return structured errors. Phase 2 adds importers (below);
-exporters, author tooling and browser execution follow.
+and invalid manifest fields return structured errors. Phase 2 adds importers (below) and the
+author tools (`plugin check` and `plugin test`, below); exporters and browser execution follow.
+
+## Checking and testing a plugin
+
+[Writing a plugin](book/src/dev/plugins.md) walks from an empty folder to a working command
+plugin and importer.
+
+- `plugin.check` (`solidcraft-cli plugin check <folder|plugin.zip>`) checks a package without
+  running it, through the code Install and a call use: the installer's reader and limits, the
+  manifest, the permissions (`net` is refused), the limits against the app's ceilings, and the
+  component against its world (`command-plugin` or `importer-plugin`) and this app's WIT version,
+  with no WASI or network import. Each problem has a severity, the field, what is wrong and how to
+  fix it. In a folder, `tests/` and hidden files are left out. It runs no plugin code, installs
+  nothing and never opens a dialog.
+- `solidcraft-cli plugin test <folder|plugin.zip> [--json] [--out DIR]` checks the package, installs
+  it into a scratch plugins folder with the app's installer, and runs its test cases, `tests/*.json`,
+  through `plugin.run` and `file.import` with the app's limits. A case names the entry, its
+  parameters or file, the grants (default: everything the manifest asks for), and what to expect:
+  an error kind, values in the reply, values `inspect.measure` gives, files written. An entry
+  with no case runs once with its defaults when it needs nothing else. It exits with an error when
+  a case fails.
 
 ## Importers
 
 An importer turns a file of another format into a SolidCraft design. Its manifest says
 `"capabilities": ["formats@0.1"]`, and each of its entries has `"kind": "importer"` and the
-extensions it claims, lowercase without the dot:
+extensions it claims, lowercase without the dot. An importer's effect is `open`: it opens a file
+as a new design and leaves the open one as it is. It need not say so; `plugin.list` and
+`plugin.install` report it, and an importer that says `"effect": "edit"` is still read as `open`.
+Only an importer may say `open`.
 
 ```json
 {"id": "sample", "name": "Sample", "version": "1.0.0", "capabilities": ["formats@0.1"],
@@ -334,7 +358,14 @@ extensions it claims, lowercase without the dot:
   ("Parts of the file kept as they are"); `code` is the importer's stable code for it. Both may be empty.
   The Import report window shows the summary, then one line per title with how many items it covers,
   worst first, and folds every item with its code, subject and message under **Details**; programs
-  get the whole report in the reply.
+  get the whole report in the reply. `details` is the importer's own JSON (for example how far it
+  checked the history it rebuilt, and each feature it mapped or could not). The window shows it
+  under **From the importer** as folding lines: each field a line with its key read as words
+  (`final_body` reads "Final body"), each object or list a group, a list's element named by its
+  `name` (or `title`, `label`, `subject`, `stage`, `id`, `kind` or `code`) and its `status`, and
+  empty values left out. **Copy report** puts the whole report on the clipboard as text, and
+  **Save report…** saves it as a `.txt` file, or as a `.json` file in the shape of the reply.
+  After OK, Plugins › Last import report… shows the last import's report again.
   Nothing changes unless the whole import succeeds.
 - **Assemblies.** `source.read`, `source.size` and `source.resolve` with path `""` reach the file
   being imported. Any other path is relative to that file's folder (an assembly's parts) and needs

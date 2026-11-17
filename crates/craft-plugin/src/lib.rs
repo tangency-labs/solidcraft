@@ -118,9 +118,13 @@ fn invalid(field: impl Into<String>, reason: impl Into<String>) -> HostError {
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "lowercase")]
 pub enum Effect {
+    /// Reads the open design and changes nothing.
     Read,
+    /// Changes the open design.
     #[default]
     Edit,
+    /// Opens a file as a new design and leaves the open one as it is: every importer's effect.
+    Open,
 }
 
 /// The app supplies the same contracts it exposes to its other programmatic clients.
@@ -375,8 +379,10 @@ struct DeclaredEntry {
     kind: EntryKind,
     #[serde(default)]
     extensions: Vec<String>,
+    /// A command's effect is `edit` unless it says `read`; an importer's is `open`. An importer that
+    /// says `edit` (the only effect it could state before `open` existed) still opens a new design.
     #[serde(default)]
-    effect: Effect,
+    effect: Option<Effect>,
     #[serde(default = "empty_input_schema")]
     input_schema: Value,
     #[serde(default)]
@@ -400,7 +406,11 @@ impl From<EntryDeclaration> for Entry {
                 name: value.name,
                 kind: value.kind,
                 extensions: value.extensions,
-                effect: value.effect,
+                effect: match (value.kind, value.effect) {
+                    (EntryKind::Importer, None | Some(Effect::Edit)) => Effect::Open,
+                    (_, Some(effect)) => effect,
+                    (EntryKind::Command, None) => Effect::Edit,
+                },
                 input_schema: value.input_schema,
                 slots: value.slots,
                 job: value.job,
@@ -512,6 +522,9 @@ fn validate_kind(runtime: &RuntimeManifest, entry: &Entry) -> Result<()> {
     }
     match entry.kind {
         EntryKind::Command if !entry.extensions.is_empty() => Err(invalid(format!("{field}.extensions"), "only an importer claims file extensions")),
+        EntryKind::Command if entry.effect == Effect::Open => {
+            Err(invalid(format!("{field}.effect"), "only an importer opens a file as a new design; a command's effect is read or edit"))
+        }
         EntryKind::Importer if entry.job => {
             Err(invalid(format!("{field}.job"), "an import already runs as a long job; only a command is declared one"))
         }
@@ -526,8 +539,8 @@ fn validate_kind(runtime: &RuntimeManifest, entry: &Entry) -> Result<()> {
                     "an importer claims 1..32 distinct lowercase extensions without the dot, such as \"f3d\"",
                 ));
             }
-            if entry.effect != Effect::Edit {
-                return Err(invalid(format!("{field}.effect"), "an importer makes a design: its effect is edit"));
+            if entry.effect != Effect::Open {
+                return Err(invalid(format!("{field}.effect"), "an importer opens a file as a new design: its effect is open"));
             }
             Ok(())
         }

@@ -1,5 +1,5 @@
 //! WR-644 (the fork's tangency-labs/smlib@2223108; once the opt-in `fillet_mitre_gap_patch`): two rounds
-//! mitred at a face's concave corner (`fillet_mitre_concave_face_corners`, WR-642) whose walls
+//! mitred at a face's concave corner (WR-642) whose walls
 //! lean differently, so that their rails meet the corner edge at two places, fill the gap past
 //! the corner edge with a patch on the side wall's continuation. The fork's case: a sloped
 //! basin's rim rounded r 0.5 (SolidCraft's `1080-fillet-sloped-basin-1-mm-rim-r0-5-4-edges`).
@@ -28,7 +28,6 @@ use solidcore::{Brep, Kernel};
 fn kernel() -> Kernel {
     let mut k = Kernel::default();
     k.fixes.fillet_trace_reaches_rails = true;
-    k.fixes.fillet_mitre_concave_face_corners = true;
     k
 }
 
