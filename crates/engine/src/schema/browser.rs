@@ -954,6 +954,11 @@ fn some_visible<'de, D: Deserializer<'de>>(d: D) -> Result<Option<Visible>, D::E
     Visible::deserialize(d).map(Some)
 }
 
+/// `browser.toggle_planes` and `browser.toggle_reference` take no parameters: an empty object.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct BrowserToggleParams {}
+
 /// Show or hide what is in the Browser: name one kind of target (`items`, `joints`, `features`,
 /// `folder`, `tree_folders` or `paths`). Saved with the design and undone like any other
 /// change; the camera is not. With `isolate`, everything else is hidden.
