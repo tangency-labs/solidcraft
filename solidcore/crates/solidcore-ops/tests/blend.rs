@@ -3848,6 +3848,96 @@ fn a_round_split_by_rollover_ends_its_last_piece_at_a_closed_edge_s_seam() {
     }
 }
 
+/// A 60 x 90 block 15.8 high with its upright corners rounded R 7, the top outline chamfered 5
+/// (45 degrees) all round, then the edge where the chamfer meets the walls rounded R 5, as one
+/// tangent chain. Each rail end of the round sits on a seam between a flat wall and a corner's
+/// cylinder (or between their chamfers' plane and cone), a quarter turn of a cylinder whose
+/// offset continues as itself. The rail-end solve took the cylinder's whole closed turn, wider
+/// than the extension it searches on upstream, and left the extension for the circle's far
+/// side: the round was refused ("Fillet Corner Error: Corner Edge Computation Failure"). Taken
+/// from SolidCraft, where a tub's chamfered outline rounded so on 2026-11-09 and was refused
+/// after #13538.
+///
+/// Closed form: every face is one profile in the (inset `d` from the wall, `z`) plane swept
+/// round the outline, whose section at inset `d` is the 60 x 90 rectangle with corners R
+/// `7 - d`, area `A(d) = (60 - 2d)(90 - 2d) - (4 - pi)(7 - d)^2`. The profile is the wall
+/// `d = 0` up to the round's centre height `zc = T - 5 sqrt 2`, the R 5 arc
+/// `d = 5 - 5 cos t`, `z = zc + 5 sin t` for `t` in `[0, pi/4]`, and the chamfer
+/// `d = z - (T - 5)` from `d = 5 - 5/sqrt 2` up to the top.
+#[test]
+fn a_round_along_a_chamfered_rounded_outline_builds() {
+    const W: f64 = 60.0;
+    const H: f64 = 90.0;
+    const R: f64 = 7.0;
+    const T: f64 = 15.8;
+    all_fixes();
+    let line = |a: [f64; 2], b: [f64; 2]| Curve::Line {
+        start: [a[0], a[1], 0.0],
+        end: [b[0], b[1], 0.0],
+    };
+    let arc = |c: [f64; 2], start: f64| Curve::Arc {
+        center: [c[0], c[1], 0.0],
+        axis: [0.0, 0.0, 1.0],
+        reference: [1.0, 0.0, 0.0],
+        radius: R,
+        start,
+        end: start + PI / 2.0,
+    };
+    let outline = [
+        line([R, 0.0], [W - R, 0.0]),
+        arc([W - R, R], -PI / 2.0),
+        line([W, R], [W, H - R]),
+        arc([W - R, H - R], 0.0),
+        line([W - R, H], [R, H]),
+        arc([R, H - R], PI / 2.0),
+        line([0.0, H - R], [0.0, R]),
+        arc([R, R], PI),
+    ];
+    let b = extrude(
+        &outline,
+        [0.0, 0.0, 1.0],
+        T,
+        0.0,
+        DraftCorner::default(),
+        true,
+    )
+    .unwrap();
+    let chain = |b: &Body, z: f64| {
+        let pick = edge_at(b, [W / 2.0, 0.0, z]);
+        let chain = tangent_chain(b, None, &[pick], &[], HALF_DEGREE).unwrap();
+        assert!(chain.undecided.is_empty(), "{chain:?}");
+        chain.members
+    };
+    let top = chain(&b, T);
+    assert_eq!(top.len(), 8, "{top:?}");
+    blend(&b, Blend::Chamfer, &top, &[5.0; 8], &[], Corners::Filled).unwrap();
+    let foot = chain(&b, T - 5.0);
+    assert_eq!(foot.len(), 8, "{foot:?}");
+    blend(&b, Blend::Round, &foot, &[5.0; 8], &[], Corners::Filled)
+        .unwrap_or_else(|e| panic!("the chamfer's foot does not round: {e:?}"));
+    let report = b.check(CheckLevel::All).unwrap();
+    assert!(report.is_valid(), "{report}");
+    let (a0, a1, a2) = (
+        W * H - (4.0 - PI) * R * R,
+        -2.0 * (W + H) + 2.0 * (4.0 - PI) * R,
+        PI,
+    );
+    let antiderivative = |d: f64| a0 * d + a1 * d * d / 2.0 + a2 * d * d * d / 3.0;
+    let s = std::f64::consts::SQRT_2;
+    let zc = T - 5.0 * s;
+    // the arc: int A(5 - 5 cos t) 5 cos t dt over [0, pi/4], from int cos = sqrt 2 / 2,
+    // int cos^2 = pi/8 + 1/4 and int cos^3 = 5 sqrt 2 / 12
+    let arc = 5.0 * (a0 + 5.0 * a1 + 25.0 * a2) * s / 2.0
+        - 25.0 * (a1 + 10.0 * a2) * (PI / 8.0 + 0.25)
+        + 125.0 * a2 * 5.0 * s / 12.0;
+    let expected = a0 * zc + arc + antiderivative(5.0) - antiderivative(5.0 - 5.0 / s);
+    assert!(
+        rel(volume(&b), expected) < 1e-9,
+        "{} vs the closed form {expected}",
+        volume(&b)
+    );
+}
+
 /// The ring and the wedge of tangency-labs/solidcraft#17715: a ring about x, its outer side a
 /// band of the torus of radii 40 and 5 (the generating circle's arc from 175 to 210 degrees in
 /// the meridian half-plane, x = 5 cos t, rho = 40 + 5 sin t), and a wedge revolved 16 degrees

@@ -185,8 +185,18 @@ pub fn unit_info(u: &str) -> Option<(Kind, f64)> {
     match u.trim() {
         "" | "none" | "unitless" => Some((Kind::Unitless, 1.0)),
         "°" | "degree" | "degrees" => Some((Kind::Angle, std::f64::consts::PI / 180.0)),
-        t => UNITS.iter().find(|(n, _, _)| *n == t).map(|(_, k, s)| (*k, *s)),
+        t => {
+            let t = canonical_unit(t);
+            UNITS.iter().find(|(n, _, _)| *n == t).map(|(_, k, s)| (*k, *s))
+        }
     }
+}
+
+/// The spelling `UNITS` lists a unit under. The micro prefix is typed as the micro sign (U+00B5,
+/// what the Option key gives on a Mac) or as the Greek letter mu (U+03BC, what a Greek layout and
+/// most text on the web use): both are a micrometre.
+fn canonical_unit(name: &str) -> &str {
+    if name == "\u{3bc}m" { "\u{b5}m" } else { name }
 }
 
 /// How unit-less numbers are read: millimetres / degrees by default.
@@ -329,6 +339,7 @@ pub fn round_reported(v: f64) -> f64 {
 }
 
 fn unit(name: &str) -> Option<Value> {
+    let name = canonical_unit(name);
     UNITS.iter().find(|(n, _, _)| *n == name).map(|(_, k, s)| match k {
         Kind::Angle => Value::angle(*s),
         _ => Value::length(*s),
@@ -1731,6 +1742,19 @@ mod tests {
         for bad in ["w = = 3", "2 = 3", "w == 3", "w = 3 = 4", "= 5 ="] {
             assert!(ev(bad).is_err(), "{bad}");
         }
+    }
+
+    /// A micrometre typed with the Greek letter mu (U+03BC) is the same unit as with the micro sign
+    /// (U+00B5): both spell `um`.
+    #[test]
+    fn a_micrometre_is_the_same_with_either_mu() {
+        for (e, want) in [("5 \u{3bc}m", 0.005), ("5 \u{b5}m", 0.005), ("5\u{3bc}m + 1 um", 0.006), ("1 mm / 1 \u{3bc}m", 1000.0)] {
+            let v = eval_with(e, &|_| Err(DocError::Expr("no names".into()))).unwrap();
+            let got = if v.kind() == Some(Kind::Length) { v.v } else { v.to_kind(Kind::Unitless).unwrap() };
+            assert!((got - want).abs() < 1e-12, "{e}: {got}");
+        }
+        assert_eq!(unit_info("\u{3bc}m"), unit_info("um"));
+        assert_eq!(reserved_kind("\u{3bc}m"), Some("unit"));
     }
 
     /// A reserved name is refused by saying what kind of word it is.
