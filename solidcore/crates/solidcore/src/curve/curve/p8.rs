@@ -84,9 +84,10 @@
 //!   taken across this curve, both past the scaled zero with a negative dot product),
 //!   found by [`local_curve_intersect`] from where the separation, taken as linear,
 //!   vanishes; otherwise the touch, the nearest point ([`Curve::local_curve_solve`],
-//!   `Minimize`) from the end with the shorter separation, when the range is the curves'
-//!   only one (otherwise one coincidence whose fit error passes the tolerance here and
-//!   there, #1036, or several touches, kept as upstream). None found is `Failed`.
+//!   `Minimize`) from the end where the curves are nearer, or that end when the solver
+//!   finds nothing nearer, when the range is the curves' only solution (otherwise one
+//!   coincidence whose fit error passes the tolerance here and there, #1036, or several
+//!   touches, kept as upstream). No crossing found is `Failed`.
 //!   Upstream keeps such a range, which becomes a tiny edge or a false overlap (#1979).
 //!   A coincidence of two curves lying on each other ends where one of them stops, so a
 //!   fitted copy of a curve, whose tolerance-scale separation can change sides, stays a
@@ -1597,7 +1598,14 @@ impl Curve {
 
         // Not upstream (WR-647): a merged range that ends where the curves part is their
         // crossing or touch seen through the tolerance.
-        self.contacts_seen_through_tolerance(k, &mut sols, other, interval, other_interval, dist_tol)?;
+        self.contacts_seen_through_tolerance(
+            k,
+            &mut sols,
+            other,
+            interval,
+            other_interval,
+            dist_tol,
+        )?;
 
         // check each coincident interval solution: very short or diverging intervals
         // become point solutions.
@@ -2357,9 +2365,11 @@ impl Curve {
     ///   within `dist_tol` in the range, started where the separation, taken as linear
     ///   between the ends, vanishes;
     /// - otherwise, when it is the curves' only range, the point where they come nearest
-    ///   in it ([`Curve::local_curve_solve`], `Minimize`, started at the end with the
-    ///   shorter separation): the curves part at a range end, so their separation is not
-    ///   constant and they touch where it is least. Curves that come back within the
+    ///   in it: the least distance over the closed range, the solver's interior minimum
+    ///   ([`Curve::local_curve_solve`], `Minimize`, started at the end where the curves are
+    ///   nearer) when it finds one nearer than that end, else that end (a round leaving a
+    ///   line it is tangent to at their shared end touches it there). The curves part at a
+    ///   range end, so their separation is not constant and they touch where it is least. Curves that come back within the
     ///   tolerance in another range without changing sides are one coincidence whose
     ///   separation passes the tolerance here and there (a fitted copy of a closed
     ///   section, #1036), and keep their ranges; so do two separate touches of the same
@@ -2371,7 +2381,7 @@ impl Curve {
     ///
     /// Those of the evaluations, of [`local_curve_intersect`] and of
     /// [`Curve::local_curve_solve`]; `Failed` when the curves change sides across the
-    /// range but no crossing is found in it, or no nearest point is found.
+    /// range but no crossing is found in it.
     pub(crate) fn contacts_seen_through_tolerance<O: SolutionObject>(
         &self,
         k: &Kernel,
@@ -2451,8 +2461,14 @@ impl Curve {
                 sol.start.parameters[1] = cross.other_param;
                 sol.start.solution_value = cross.deviation;
             } else if alone {
-                // start at the end where the curves are nearer
-                let guess = if db < da { [e[0], e[1]] } else { [s[0], s[1]] };
+                // the least distance over the closed range: the solver's interior minimum,
+                // started at the end where the curves are nearer, or that end
+                let (gap_a, gap_b) = (this_a.distance(other_a), this_b.distance(other_b));
+                let (guess, gap) = if gap_b < gap_a {
+                    ([e[0], e[1]], gap_b)
+                } else {
+                    ([s[0], s[1]], gap_a)
+                };
                 let (found, nearest) = self.local_curve_solve(
                     k,
                     &ivl1,
@@ -2465,15 +2481,15 @@ impl Curve {
                     guess,
                     [sol.objects[0], sol.objects[1]],
                 )?;
-                if !found {
-                    return Err(SolidError::curve_failed(
-                        OP_GCI,
-                        "the curves part at an end of a range but no nearest point was found in it",
-                    ));
+                if found && nearest.start.solution_value < gap {
+                    sol.start.parameters[0] = nearest.start.parameters[0];
+                    sol.start.parameters[1] = nearest.start.parameters[1];
+                    sol.start.solution_value = nearest.start.solution_value;
+                } else {
+                    sol.start.parameters[0] = guess[0];
+                    sol.start.parameters[1] = guess[1];
+                    sol.start.solution_value = gap;
                 }
-                sol.start.parameters[0] = nearest.start.parameters[0];
-                sol.start.parameters[1] = nearest.start.parameters[1];
-                sol.start.solution_value = nearest.start.solution_value;
             } else {
                 // the curves come back within the tolerance elsewhere: one coincidence
                 // whose tolerance-scale separation passes the tolerance here and there
