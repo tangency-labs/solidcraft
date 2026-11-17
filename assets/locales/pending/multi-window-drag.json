@@ -2,41 +2,49 @@
   "en": {
     "multi_window.display_number": "Display {n}",
     "multi_window.drop_new": "Release to open here",
-    "multi_window.open_windows": "Open windows"
+    "multi_window.open_windows": "Open windows",
+    "multi_window.replace_tile": "Replace tile"
   },
   "ar": {
     "multi_window.display_number": "الشاشة {n}",
     "multi_window.drop_new": "أفلِت للفتح هنا",
-    "multi_window.open_windows": "النوافذ المفتوحة"
+    "multi_window.open_windows": "النوافذ المفتوحة",
+    "multi_window.replace_tile": "استبدال الخانة"
   },
   "de": {
     "multi_window.display_number": "Bildschirm {n}",
     "multi_window.drop_new": "Loslassen, um das Fenster hier zu öffnen",
-    "multi_window.open_windows": "Offene Fenster"
+    "multi_window.open_windows": "Offene Fenster",
+    "multi_window.replace_tile": "Feld ersetzen"
   },
   "he": {
     "multi_window.display_number": "מסך {n}",
     "multi_window.drop_new": "שחררו כדי לפתוח כאן",
-    "multi_window.open_windows": "חלונות פתוחים"
+    "multi_window.open_windows": "חלונות פתוחים",
+    "multi_window.replace_tile": "החלפת משבצת"
   },
   "ja": {
     "multi_window.display_number": "ディスプレイ {n}",
     "multi_window.drop_new": "ここで放すとウィンドウが開きます",
-    "multi_window.open_windows": "開いているウィンドウ"
+    "multi_window.open_windows": "開いているウィンドウ",
+    "multi_window.replace_tile": "タイルを置き換え"
   },
   "ko": {
     "multi_window.display_number": "디스플레이 {n}",
     "multi_window.drop_new": "여기에 놓으면 창이 열립니다",
-    "multi_window.open_windows": "열린 창"
+    "multi_window.open_windows": "열린 창",
+    "multi_window.replace_tile": "타일 바꾸기"
   },
   "vi": {
     "multi_window.display_number": "Màn hình {n}",
     "multi_window.drop_new": "Thả để mở cửa sổ tại đây",
-    "multi_window.open_windows": "Các cửa sổ đang mở"
+    "multi_window.open_windows": "Các cửa sổ đang mở",
+    "multi_window.replace_tile": "Thay ô"
   },
   "zh": {
     "multi_window.display_number": "显示器 {n}",
     "multi_window.drop_new": "在此处松开以打开窗口",
-    "multi_window.open_windows": "已打开的窗口"
+    "multi_window.open_windows": "已打开的窗口",
+    "multi_window.replace_tile": "替换视图格"
   }
 }

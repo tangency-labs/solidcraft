@@ -286,6 +286,8 @@ struct Zone {
     placement: Placement,
     rect: Rect,
     preview: Rect,
+    neighbors: Vec<Rect>,
+    focused: bool,
 }
 
 fn zones(app: &SolveApp, view: u64, area: Rect, covers: &[Rect]) -> Vec<Zone> {
@@ -294,8 +296,12 @@ fn zones(app: &SolveApp, view: u64, area: Rect, covers: &[Rect]) -> Vec<Zone> {
     let mut zones = Vec::new();
     let mut add = |placement: Placement, rect: Rect| {
         let Some(tiles) = app.docs.views.preview_placement(view, placement) else { return };
-        if let Some((_, result)) = tiles.rects(to_tile(area), GUTTER).into_iter().find(|(id, _)| *id == view) {
-            zones.push(Zone { placement, rect, preview: from_tile(result) });
+        let result = tiles.rects(to_tile(area), GUTTER);
+        if let Some((_, destination)) = result.iter().find(|(id, _)| *id == view) {
+            let neighbors = result.iter().filter(|(id, _)| *id != view).map(|(_, rect)| from_tile(*rect)).collect();
+            let active = app.docs.views.active().id;
+            let focused = active == view || !tiles.contains(active);
+            zones.push(Zone { placement, rect, preview: from_tile(*destination), neighbors, focused });
         }
     };
     let mut empty = 0;
@@ -327,7 +333,8 @@ fn zones(app: &SolveApp, view: u64, area: Rect, covers: &[Rect]) -> Vec<Zone> {
 
 fn place(app: &mut SolveApp, view: u64, placement: Placement) {
     use solidcraft_engine::schema::tab_views::TabViewPlacement;
-    let _ = app.run("tab.view.beside", serde_json::json!({ "id": view, "placement": TabViewPlacement::from(placement) }));
+    let window = app.view_windows.current_window();
+    let _ = app.run("tab.view.beside", serde_json::json!({ "id": view, "window": window, "placement": TabViewPlacement::from(placement) }));
 }
 
 /// Paint workspace targets for a dragged tab or the view menu's click placement.
@@ -347,15 +354,25 @@ pub(crate) fn placement_overlay(app: &mut SolveApp, ctx: &egui::Context) {
         let hit = (!crate::shell::covered(app, drag.pointer))
             .then(|| zones(app, drag.view, free, &covers).into_iter().find(|zone| zone.rect.contains(drag.pointer)))
             .flatten();
-        if let Some(zone) = hit {
-            let painter = ctx.layer_painter(egui::LayerId::new(egui::Order::Foreground, egui::Id::unique("view_tile_drop")));
-            paint_preview(&painter, zone.preview);
-            ctx.set_cursor_icon(egui::CursorIcon::Grabbing);
-            if drag.released {
+        if drag.released {
+            if let Some(zone) = hit {
                 place(app, drag.view, zone.placement);
             }
-        } else if !drag.released && free.contains(drag.pointer) {
-            ctx.set_cursor_icon(egui::CursorIcon::NotAllowed);
+        } else if let Some(view) = app.docs.views.get(drag.view) {
+            use crate::view_window_drag::{Preview, paint_preview};
+            let preview = if let Some(zone) = &hit {
+                ctx.set_cursor_icon(egui::CursorIcon::Grabbing);
+                let label = if matches!(zone.placement, Placement::Replace(_)) {
+                    app.tr("multi_window.replace_tile")
+                } else {
+                    app.tr(placement_label(zone.placement))
+                };
+                Preview::Tile { rect: zone.preview, neighbors: &zone.neighbors, label, focused: zone.focused }
+            } else {
+                ctx.set_cursor_icon(egui::CursorIcon::NotAllowed);
+                Preview::Held(None)
+            };
+            paint_preview(ctx, view, drag.pointer, preview);
         }
         return;
     }
@@ -377,14 +394,7 @@ pub(crate) fn placement_overlay(app: &mut SolveApp, ctx: &egui::Context) {
         buttons += 1;
         let size = button.size().min(vec2(132.0, 30.0));
         let anchor = egui::Id::unique(("view_placement", ctx.viewport_id(), tab, view, i));
-        let label = match zone.placement {
-            Placement::Empty(_) => "design_view.place_empty",
-            Placement::Replace(_) => "design_view.place_center",
-            Placement::Split { edge: Edge::Left, .. } => "design_view.place_left",
-            Placement::Split { edge: Edge::Right, .. } => "design_view.place_right",
-            Placement::Split { edge: Edge::Top, .. } => "design_view.place_top",
-            Placement::Split { edge: Edge::Bottom, .. } => "design_view.place_bottom",
-        };
+        let label = placement_label(zone.placement);
         container
             .area(anchor)
             .order(egui::Order::Foreground)
@@ -408,6 +418,17 @@ pub(crate) fn placement_overlay(app: &mut SolveApp, ctx: &egui::Context) {
         place(app, view, placement);
     } else if buttons == 0 || ctx.input(|i| i.pointer.secondary_clicked()) {
         app.docs.view_placement = None;
+    }
+}
+
+fn placement_label(placement: Placement) -> &'static str {
+    match placement {
+        Placement::Empty(_) => "design_view.place_empty",
+        Placement::Replace(_) => "design_view.place_center",
+        Placement::Split { edge: Edge::Left, .. } => "design_view.place_left",
+        Placement::Split { edge: Edge::Right, .. } => "design_view.place_right",
+        Placement::Split { edge: Edge::Top, .. } => "design_view.place_top",
+        Placement::Split { edge: Edge::Bottom, .. } => "design_view.place_bottom",
     }
 }
 
