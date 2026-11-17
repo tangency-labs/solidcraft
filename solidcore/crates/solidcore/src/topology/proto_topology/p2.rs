@@ -87,11 +87,11 @@
 //!   twice the proto vertex's containment radius instead, which is at least the capture
 //!   distance (0.01 in the Boolean), so it absorbed real closed curves (a circle of radius
 //!   1e-3) and replaced upstream's `2 * m_dTol` test instead of adding to it.
-//! - **Not upstream (WR-579, #1517).**
-//!   [`ProtoTopologyManager::resolve_proto_edge`] splits a proto edge from a proto vertex
-//!   back to itself whose curve ends find two of its definitions at each other definition
-//!   of that proto vertex lying on the curve, then resolves the proto vertex (the SMLib
-//!   fork's tangency-labs/smlib@9eec159); upstream keeps the edge whole past that vertex.
+//! - **Not upstream (WR-579, #1517).** [`ProtoTopologyManager::resolve_proto_edge`]
+//!   splits a proto edge from a proto vertex back to itself whose curve ends find two of
+//!   its definitions at each other definition of that proto vertex lying on the curve,
+//!   then resolves the proto vertex (the SMLib fork's tangency-labs/smlib@9eec159);
+//!   upstream keeps the edge whole past that vertex.
 //! - **Not upstream (WR-580, #1519; the SMLib fork's tangency-labs/smlib@81cd61a).**
 //!   [`ProtoTopologyManager::imprint_edge_definition`] takes an edge Brep2's face already
 //!   has between the definition's two vertices along its curve as the definition's edge
@@ -2932,9 +2932,10 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
     /// Not upstream (WR-579, #1517; the fork's tangency-labs/smlib@9eec159): the proto
     /// edge `pe` from `start` back to itself, whose curve ends `ends` find the two
     /// definitions `joined`, is split at each other definition of `start` that lies on
-    /// its curve, then `start` is resolved. The capture ball holds the curve's ends and a third definition as one
-    /// place, the definitions stay three vertices: kept whole, the edge ran past the
-    /// third one, a vertex of its own face (two tubes a hair apart end to end).
+    /// its curve, then `start` is resolved. The capture ball holds the curve's ends and a
+    /// third definition as one place, the definitions stay three vertices: kept whole,
+    /// the edge ran past the third one, a vertex of its own face (two tubes a hair apart
+    /// end to end).
     ///
     /// A definition counts when it is farther than twice `on_tol` from both ends and
     /// `DropPoint` (no guess, `on_tol` = the larger of the proto edge's raw tolerance

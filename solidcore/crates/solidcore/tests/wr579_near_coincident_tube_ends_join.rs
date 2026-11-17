@@ -16,11 +16,12 @@
 //! `issue_1517_tube_ends.json` does on both sides.
 //!
 //! Expected: one manifold solid, its volume between the larger tube's and both together,
-//! and its check is clean, in either order of the tubes. On the side of the seat's seam its end circle
-//! meets the top tube's start circle (the corner), 8.6e-5 on its own seam vertex, and 2.9e-4
-//! further it crosses the top tube's wall: three points farther apart than their
-//! tolerances (1e-5 each), so three vertices, where the capture distance once made them one
-//! (docs/booleans.md, "One point or two"; the WR-579 split was for that one proto vertex).
+//! and its check is clean, in either order of the tubes. On the side of the seat's seam
+//! its end circle meets the top tube's start circle (the corner), 8.6e-5 on its own seam
+//! vertex, and 2.9e-4 further it crosses the top tube's wall: three points farther apart
+//! than their tolerances (1e-5 each), so three vertices, where the capture distance once
+//! made them one (docs/booleans.md, "One point or two"; the WR-579 split was for that one
+//! proto vertex).
 //! Between the seam vertex and the crossing the intersection curve (the top tube's wall
 //! cut by the seat's end plane, an ellipse of radii 71 and 16) runs 4e-9 inside the seat's
 //! end circle: it is that circle's piece, proved by enclosure, and no second edge is made
