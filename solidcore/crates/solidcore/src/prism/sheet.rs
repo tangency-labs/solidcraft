@@ -130,87 +130,207 @@ pub fn sheet_regions(k: &Kernel, b: &Brep, frame: &Frame, tol: f64) -> Result<Sh
         if up.abs() < 1.0 - 1e-9 {
             return Err(refused("a face not in the plane of the regions"));
         }
-        let loops = face_get_boundary_loops(b, face)?;
-        let mut pieces = Vec::new();
-        let mut uses = loops.edges.iter().zip(&loops.orientations);
-        for &count in &loops.edge_counts {
-            let mut segs: Vec<(Option<VertexId>, Seg2)> = Vec::new();
-            for (&e, o) in uses.by_ref().take(count) {
-                let forward = matches!(o, OrientType::Same);
-                let ed = b.edge(e)?;
-                let curve = ed
-                    .curve
-                    .as_ref()
-                    .ok_or_else(|| refused("an edge without a curve"))?;
-                let (v0, v1) = (edge::start_vertex(b, e)?, edge::end_vertex(b, e)?);
-                let (Some(v0), Some(v1)) = (v0, v1) else {
-                    return Err(refused("an edge without its vertices"));
-                };
-                let (p0, p1) = (b.vertex(v0)?.point, b.vertex(v1)?.point);
-                let run = Run {
-                    curve,
-                    interval: ed.interval,
-                    forward,
-                    ends: if forward { [p0, p1] } else { [p1, p0] },
-                };
-                // no closer than the kernel holds the edge
-                let tol = tol.max(edge::tolerance(b, e)?);
-                let read = planar_pieces(k, &run, frame, tol, &mut work, true)
-                    .ok_or_else(|| refused("an edge not read exactly in the plane"))?;
-                // the first piece of the edge starts on the use's first vertex
-                let start = if forward { v0 } else { v1 };
-                segs.extend(
-                    read.into_iter()
-                        .enumerate()
-                        .map(|(i, s)| ((i == 0).then_some(start), s)),
-                );
-                for v in [v0, v1] {
-                    out.touching |= *owner.entry(v).or_insert(f) != f;
-                }
-            }
-            for piece in simple_loops(segs, |a, b| a.is_some() && a == b) {
-                pieces.push(if up > 0.0 { piece } else { piece.reversed() });
-            }
-        }
-        let first = out.regions.len();
-        let mut holes = Vec::new();
-        for piece in pieces {
-            match piece.signed_area()?.sign() {
-                Some(true) => out.regions.push(Region2 {
-                    outer: piece,
-                    holes: Vec::new(),
-                }),
-                Some(false) => holes.push(piece),
-                None => return Err(refused("a loop whose turning its area does not decide")),
-            }
-        }
-        for hole in holes {
-            let mid = hole
-                .segs
-                .first()
-                .map(|s| s.point_at(0.5))
-                .ok_or_else(|| refused("an empty loop"))?;
-            let mut best: Option<(f64, usize)> = None;
-            for (i, r) in out.regions.iter().enumerate().skip(first) {
-                if r.outer
-                    .holds(mid)
-                    .ok_or_else(|| refused("a hole whose place is not decided"))?
-                {
-                    let area = r.outer.signed_area()?.value;
-                    if best.is_none_or(|(a, _)| area < a) {
-                        best = Some((area, i));
-                    }
-                }
-            }
-            let (_, i) = best.ok_or_else(|| refused("a hole outside its face's material"))?;
-            out.regions
-                .get_mut(i)
-                .ok_or_else(|| refused("a hole outside its face's material"))?
-                .holes
-                .push(hole);
-        }
+        let mut read = FaceRead {
+            work: &mut work,
+            owner: &mut owner,
+            touching: &mut out.touching,
+        };
+        out.regions.extend(face_regions(
+            k,
+            b,
+            face,
+            f,
+            up > 0.0,
+            frame,
+            tol,
+            &mut read,
+        )?);
     }
     canonical(&mut out.regions, tol)?;
+    Ok(out)
+}
+
+/// What the reading of one face shares with the reading of the others: the work left, which face
+/// first used each vertex and whether two faces touch.
+struct FaceRead<'a> {
+    work: &'a mut usize,
+    owner: &'a mut HashMap<VertexId, usize>,
+    touching: &'a mut bool,
+}
+
+/// The planar face `face` (the `f`th, `up` when its normal is along the frame's) as regions of
+/// `frame`, as [`sheet_regions`] reads each face: loops read exactly, split where a loop passes
+/// one vertex twice, turned to run counter-clockwise seen from the face's normal, holes given to
+/// the smallest material piece holding them. Not in canonical order.
+#[allow(clippy::too_many_arguments)]
+fn face_regions(
+    k: &Kernel,
+    b: &Brep,
+    face: crate::topology::FaceId,
+    f: usize,
+    up: bool,
+    frame: &Frame,
+    tol: f64,
+    read: &mut FaceRead<'_>,
+) -> Result<Vec<Region2>> {
+    let loops = face_get_boundary_loops(b, face)?;
+    let mut pieces = Vec::new();
+    let mut uses = loops.edges.iter().zip(&loops.orientations);
+    for &count in &loops.edge_counts {
+        let mut segs: Vec<(Option<VertexId>, Seg2)> = Vec::new();
+        for (&e, o) in uses.by_ref().take(count) {
+            let forward = matches!(o, OrientType::Same);
+            let ed = b.edge(e)?;
+            let curve = ed
+                .curve
+                .as_ref()
+                .ok_or_else(|| refused("an edge without a curve"))?;
+            let (v0, v1) = (edge::start_vertex(b, e)?, edge::end_vertex(b, e)?);
+            let (Some(v0), Some(v1)) = (v0, v1) else {
+                return Err(refused("an edge without its vertices"));
+            };
+            let (p0, p1) = (b.vertex(v0)?.point, b.vertex(v1)?.point);
+            let run = Run {
+                curve,
+                interval: ed.interval,
+                forward,
+                ends: if forward { [p0, p1] } else { [p1, p0] },
+            };
+            // no closer than the kernel holds the edge
+            let tol = tol.max(edge::tolerance(b, e)?);
+            let pieces_read = planar_pieces(k, &run, frame, tol, read.work, true)
+                .ok_or_else(|| refused("an edge not read exactly in the plane"))?;
+            // the first piece of the edge starts on the use's first vertex
+            let start = if forward { v0 } else { v1 };
+            segs.extend(
+                pieces_read
+                    .into_iter()
+                    .enumerate()
+                    .map(|(i, s)| ((i == 0).then_some(start), s)),
+            );
+            for v in [v0, v1] {
+                *read.touching |= *read.owner.entry(v).or_insert(f) != f;
+            }
+        }
+        for piece in simple_loops(segs, |a, b| a.is_some() && a == b) {
+            pieces.push(if up { piece } else { piece.reversed() });
+        }
+    }
+    let mut regions: Vec<Region2> = Vec::new();
+    let mut holes = Vec::new();
+    for piece in pieces {
+        match piece.signed_area()?.sign() {
+            Some(true) => regions.push(Region2 {
+                outer: piece,
+                holes: Vec::new(),
+            }),
+            Some(false) => holes.push(piece),
+            None => return Err(refused("a loop whose turning its area does not decide")),
+        }
+    }
+    for hole in holes {
+        let mid = hole
+            .segs
+            .first()
+            .map(|s| s.point_at(0.5))
+            .ok_or_else(|| refused("an empty loop"))?;
+        let mut best: Option<(f64, usize)> = None;
+        for (i, r) in regions.iter().enumerate() {
+            if r.outer
+                .holds(mid)
+                .ok_or_else(|| refused("a hole whose place is not decided"))?
+            {
+                let area = r.outer.signed_area()?.value;
+                if best.is_none_or(|(a, _)| area < a) {
+                    best = Some((area, i));
+                }
+            }
+        }
+        let (_, i) = best.ok_or_else(|| refused("a hole outside its face's material"))?;
+        regions
+            .get_mut(i)
+            .ok_or_else(|| refused("a hole outside its face's material"))?
+            .holes
+            .push(hole);
+    }
+    Ok(regions)
+}
+
+/// One planar face of a body parallel to a frame, read as regions of the frame.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ParallelFace {
+    /// The face's regions, outer loops counter-clockwise in the frame, holes clockwise, in
+    /// canonical order.
+    pub regions: Vec<Region2>,
+    /// The face's level along the frame's normal (0 in the frame's plane).
+    pub level: f64,
+    /// Whether the face's outward normal is the frame's normal (`+n`).
+    pub up: bool,
+}
+
+/// A body's faces seen along a frame's normal: the planar faces parallel to the frame, read as
+/// regions, and the count of faces that are neither those nor walls along the normal.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct ParallelFaces {
+    /// The planar faces parallel to the frame, in the body's face order.
+    pub faces: Vec<ParallelFace>,
+    /// Faces along the normal: planes square to the frame and sweeps along `n` (a cylinder
+    /// whose axis is along `n`).
+    pub walls: usize,
+    /// The other faces (a chamfer, a rounded edge, a slanted side): counted, not read.
+    pub other: usize,
+}
+
+/// The faces of `b` seen along `frame`'s normal `n`: every planar face parallel to the frame read
+/// exactly as regions of the frame (as [`sheet_regions`] reads a face, then in canonical order),
+/// with its level along `n` and whether its outward normal is `+n`; the faces along `n` (a plane
+/// square to the frame, a surface swept along `n`) counted as walls and the rest as `other`.
+/// `tol` (mm, at least the body's edges') is how far an edge's curve may end from its vertices.
+///
+/// # Errors
+///
+/// `Unsupported` for an edge of a parallel face not read exactly in the frame, a hole held by no
+/// piece or not decided; those of the topology walk and the surface queries.
+pub fn parallel_faces(k: &Kernel, b: &Brep, frame: &Frame, tol: f64) -> Result<ParallelFaces> {
+    let (o, _, _, n) = super::profile::axes(frame);
+    let mut work = READ_WORK;
+    let mut owner: HashMap<VertexId, usize> = HashMap::new();
+    let mut touching = false;
+    let mut out = ParallelFaces::default();
+    for (f, face) in get_faces(b)?.into_iter().enumerate() {
+        let surface = b
+            .face(face)?
+            .surface
+            .as_ref()
+            .ok_or_else(|| refused("a face without a surface"))?;
+        if let SurfaceKind::Plane(plane) = surface.kind() {
+            let up = plane.evaluate_normal().dot(n);
+            if up.abs() >= 1.0 - 1e-9 {
+                let mut read = FaceRead {
+                    work: &mut work,
+                    owner: &mut owner,
+                    touching: &mut touching,
+                };
+                let mut regions = face_regions(k, b, face, f, up > 0.0, frame, tol, &mut read)?;
+                canonical(&mut regions, tol)?;
+                let (point, _, _) = plane.is_planar();
+                out.faces.push(ParallelFace {
+                    regions,
+                    level: (point - o).dot(n),
+                    up: up > 0.0,
+                });
+                continue;
+            }
+            if up.abs() <= 1e-9 {
+                out.walls += 1;
+                continue;
+            }
+        } else if surface.is_parallel_to_vector(k, n)? {
+            out.walls += 1;
+            continue;
+        }
+        out.other += 1;
+    }
     Ok(out)
 }
 
