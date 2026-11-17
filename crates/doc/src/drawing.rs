@@ -433,7 +433,8 @@ pub struct OnSheet {
     pub tables: Vec<u64>,
     /// The notes on it and in its views.
     pub notes: Vec<u64>,
-    /// Authored sketches whose coordinates are in this sheet's paper frame.
+    /// The sketches on it and in its views, each in its owner's frame: paper millimetres for the
+    /// sheet's own, model millimetres in the view's plane for a view's.
     pub sketches: Vec<u64>,
     pub fills: Vec<u64>,
 }

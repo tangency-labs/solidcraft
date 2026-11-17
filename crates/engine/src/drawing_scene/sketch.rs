@@ -78,22 +78,20 @@ pub fn paper_group(solved: &SolvedSheetSketch, width_mm: f64) -> Result<Group> {
 
 /// A view's sketch strokes ([`paper_group`]'s, in the view plane's own coordinates) on paper through
 /// the view's `frame`: its scale and where it puts the plane, centred on the view as the view's lines
-/// are. Widths are paper widths already, so they stay.
-pub fn through(group: &Group, frame: &ViewFrame) -> Group {
-    let items = group
-        .items
-        .iter()
-        .map(|item| match item {
-            Item::Stroke { path, closed, width_mm, pattern } => Item::Stroke {
-                path: path.iter().map(|seg| frame.seg_to_paper(seg)).collect(),
-                closed: *closed,
-                width_mm: *width_mm,
-                pattern: pattern.clone(),
-            },
-            other => other.clone(),
-        })
-        .collect();
-    Group { items, ..*group }
+/// are. Widths are paper widths already, so they stay. [`paper_group`] makes strokes only: any other
+/// kind of item is refused, so none reaches paper in the plane's coordinates.
+pub fn through(group: &Group, frame: &ViewFrame) -> std::result::Result<Group, String> {
+    let item = |item: &Item| match item {
+        Item::Stroke { path, closed, width_mm, pattern } => Ok(Item::Stroke {
+            path: path.iter().map(|seg| frame.seg_to_paper(seg)).collect(),
+            closed: *closed,
+            width_mm: *width_mm,
+            pattern: pattern.clone(),
+        }),
+        Item::Fill { .. } | Item::Text(_) | Item::Picture(_) => Err("not supported yet: a fill, text or picture in a view's sketch".to_string()),
+    };
+    let items = group.items.iter().map(item).collect::<std::result::Result<_, _>>()?;
+    Ok(Group { items, ..*group })
 }
 
 /// Refuse the tiny nonzero sweep that the shared analytic helper widens to a full turn.

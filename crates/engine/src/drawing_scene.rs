@@ -1579,7 +1579,10 @@ impl Assembly {
                 let admitted = match drawn.view {
                     None => self.admit(group, &[], DrawnFor::Sheet, || group.clone()),
                     Some(view) => match self.placed.get(&view).copied() {
-                        Some((frame, centre)) => self.admit(group, &[], DrawnFor::View, || moved(&sketch::through(group, &frame), centre)),
+                        Some((frame, centre)) => match sketch::through(group, &frame) {
+                            Ok(placed) => self.admit(group, &[], DrawnFor::View, || moved(&placed, centre)),
+                            Err(why) => Err(LeftOut::Invalid(why)),
+                        },
                         None => Err(LeftOut::Invalid(NOT_DRAWN.into())),
                     },
                 };
