@@ -68,6 +68,7 @@ impl BarRig {
             settings: BarButton { id: "settings", icon: "settings", tip: "Settings", enabled: true, narrow: false, wide_only: false },
             report: Report { label: "Report", tip: "Report a problem", icon_only: false },
             pills: vec![],
+            offer_reserve: 0.0,
             search: false,
             search_shortcut: Some("S"),
             assistant: true,

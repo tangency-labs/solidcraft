@@ -628,6 +628,38 @@ fn the_title_bar_offers_the_new_version_and_opens_the_update_window() {
     assert!(h.widget(&label).is_none(), "Remind me later hides it");
 }
 
+/// The first frame after an update is found must reserve room before placing community
+/// links. A later frame cannot repair a layout whose registry is cleared each frame (#18688).
+#[test]
+fn update_notice_and_community_links_have_separate_title_bar_slots() {
+    let mut h = crate::scenario::Harness::new();
+    h.app.home.open = false;
+    h.app.run("solid.box", json!({"length":10,"width":10,"height":10})).unwrap();
+    h.call("ui.resize", json!({"width":1500,"height":720}));
+    assert!(crate::scenario::rect_of("titlebar:update").is_none());
+
+    h.app.updater.release = Some(Release::parse(br#"{"tag_name":"v999.0.0","assets":[]}"#).unwrap());
+    assert!(offered(&h.app).is_some());
+    h.frame();
+    let rect = |name: &str| crate::scenario::rect_of(name).unwrap_or_else(|| panic!("missing {name}"));
+    let (donate, discord, update) = (rect("titlebar:kofi"), rect("titlebar:discord"), rect("titlebar:update"));
+    assert!(donate.right() + 2.0 <= discord.left(), "Donate and Discord overlap: {donate:?} {discord:?}");
+    assert!(discord.right() + 2.0 <= update.left(), "Discord and Update overlap: {discord:?} {update:?}");
+    assert!(rect("tab:design:0").right() <= donate.left(), "document tabs reach the notifications");
+    assert!(update.right() < rect("titlebar:assistant").left(), "Update remains beside the assistant");
+
+    // The named links may drop away in a narrow bar; anything that remains has its own space.
+    for width in [1200.0, 1000.0, 850.0] {
+        h.call("ui.resize", json!({"width":width,"height":720}));
+        let Some(update) = crate::scenario::rect_of("titlebar:update") else { continue };
+        for id in ["titlebar:kofi", "titlebar:discord"] {
+            if let Some(link) = crate::scenario::rect_of(id) {
+                assert!(!link.intersects(update), "at {width}: {id} {link:?} overlaps Update {update:?}");
+            }
+        }
+    }
+}
+
 #[test]
 fn the_pill_shortens_in_a_narrow_title_bar() {
     let dir = scratch();

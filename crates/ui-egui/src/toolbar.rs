@@ -266,6 +266,7 @@ pub fn app_bar(app: &mut SolveApp, ui: &mut egui::Ui) {
                     icon_only: app.header.report == ReportButton::Icon,
                 },
                 pills: crate::links::pills(app, r.width() >= app_bar::PILL_LABEL_MIN),
+                offer_reserve: crate::update::reserved_width(app, ui),
                 search: search_in_header(app) && design_shown(app),
                 search_shortcut: palette_shortcut.as_deref(),
                 assistant: crate::agent_chat::app_bar_button_shown(app),
@@ -332,7 +333,9 @@ pub fn app_bar(app: &mut SolveApp, ui: &mut egui::Ui) {
             let badge_right = update.map_or(out.controls_left, |u| u.left().min(out.controls_left)) - 6.0;
             let badge_span = Rect::from_min_max(out.offer.min, pos2(badge_right.max(out.offer.min.x), out.offer.max.y));
             let badge = crate::policy::badge(app, ui, badge_span, out.offer_labeled);
-            let tabs_end = badge.or(update).map_or(out.controls_left, |u| u.left()) - 8.0;
+            // Link pills are left of Update: keep document tabs out of their reserved space,
+            // even when a policy badge is not present (#18688).
+            let tabs_end = badge.or(update).map_or(out.controls_left, |u| u.left().min(out.controls_left)) - 8.0;
             // Narrow title bars can fit only part of the tab strip. Its hit regions must not
             // extend into the persistent report and window controls.
             let tabs_rect = Rect::from_min_max(pos2(out.tabs_start.min(tabs_end), r.top()), pos2(tabs_end, r.bottom()));

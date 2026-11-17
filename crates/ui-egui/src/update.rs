@@ -981,6 +981,19 @@ pub fn take_launch(app: &mut SolveApp) -> Option<(PathBuf, Vec<String>)> {
 
 // ---- user interface ---------------------------------------------------------------------------
 
+/// The largest Update pill width for this frame, including a gap before the adjacent link.
+/// Measure before the app bar places Donate and Discord, rather than asking its per-frame
+/// widget registry for a rectangle it has not painted yet (#18688).
+pub(crate) fn reserved_width(app: &SolveApp, ui: &egui::Ui) -> f32 {
+    let Some(release) = offered(app) else { return 0.0 };
+    let version = release.version().to_string();
+    let full = solidcraft_ui_text::format("update.button_version", &[("version", &version)]);
+    let t = Tokens::get();
+    let width = ui.fonts_mut(|fonts| fonts.layout_no_wrap(full, FontId::proportional(t.font_label), t.app_bar_text).size().x);
+    // Same padding as toolbar::offer_pill, and its icon-only fallback is 26 points wide.
+    (29.0 + width + 11.0).max(crate::toolbar::PILL_HEIGHT + 4.0) + 4.0
+}
+
 /// The application bar's Update pill ("Update to 0.14.0"), at the right of `span`: it opens and
 /// closes the Update window. Returns its rect (None: not shown).
 pub fn button(app: &mut SolveApp, ui: &mut egui::Ui, span: egui::Rect, labeled: bool) -> Option<egui::Rect> {
