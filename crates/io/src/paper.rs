@@ -3,6 +3,7 @@
 mod png;
 mod svg;
 
+pub(crate) use png::picture_png;
 pub use png::{DPI, MAX_PICTURE_DPI, MAX_POINTS, PICTURE_DPI, PngColour, PngOptions, PngReport, paper_png};
 pub use svg::{SvgReport, paper_svg, paper_svg_on};
 

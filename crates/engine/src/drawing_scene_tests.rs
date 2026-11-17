@@ -1097,6 +1097,80 @@ fn a_drawing_not_opened_keeps_its_files_lines_through_a_save() {
     assert_eq!((bytes(&after.scene), opened.drawing_scenes.projections), (bytes(&before.scene), 0));
 }
 
+/// The shaded block's drawing settled and saved (closed first if `close`), and the design opened
+/// from that file in another session: the picture's rows before the save, the opened session, the
+/// sheet and the drawing.
+fn shaded_saved_and_opened(folder: &crate::tests::Folder, close: bool) -> (Arc<[u8]>, Session, u64, Value) {
+    let (mut s, sheet, _) = shaded_front([200.0, 150.0]);
+    let drawing = json!({"drawing": ids::encode(s.drawing("test").unwrap().id)});
+    let rows = only_picture(&settled(&mut s, sheet)).rows.clone().unwrap();
+    if close {
+        run(&mut s, "drawing.close", json!({}));
+    }
+    run(&mut s, "file.save", json!({"path": folder.path("shaded.sc")}));
+    let mut opened = Session::default();
+    run(&mut opened, "doc.open", json!({"path": folder.path("shaded.sc")}));
+    (rows, opened, sheet, drawing)
+}
+
+/// A shaded drawing opened from its design's file shows its picture current at once, pixel for pixel
+/// as saved, and draws neither its view nor its picture while its bodies look the same: saved open,
+/// or closed after its picture was drawn.
+#[test]
+fn a_shaded_drawing_opened_from_its_file_draws_no_picture_when_its_bodies_look_the_same() {
+    for close in [false, true] {
+        let (rows, mut s, sheet, drawing) = shaded_saved_and_opened(&crate::tests::Folder::new("sheet-pictures-opened"), close);
+        run(&mut s, "drawing.open", drawing);
+        let opened = extract(&mut s, sheet).unwrap();
+        let picture = only_picture(&opened);
+        assert!(!picture.stale && !opened.drawing_pictures && picture.why.is_none(), "closed {close}: {picture:?}");
+        assert!(**picture.rows.as_ref().unwrap() == *rows, "closed {close}");
+        settled(&mut s, sheet);
+        assert_eq!((s.drawing_scenes.projections, s.drawing_scenes.bands), (0, 0), "closed {close}");
+    }
+}
+
+/// Bodies that look otherwise since the save, or a sheet of another dpi, show the file's picture
+/// stale until it is drawn again; the view's lines are the file's, and aren't drawn again.
+#[test]
+fn a_shaded_drawing_opened_from_its_file_draws_its_picture_again_when_it_looks_otherwise() {
+    for what in ["colour", "dpi"] {
+        let (rows, mut s, sheet, drawing) = shaded_saved_and_opened(&crate::tests::Folder::new("sheet-pictures-otherwise"), false);
+        if what == "colour" {
+            run(&mut s, "appearance.assign", json!({"bodies": ["Block"], "color": "#20a080"}));
+        }
+        run(&mut s, "drawing.open", drawing);
+        if what == "dpi" {
+            run(&mut s, "drawing.sheet.set", json!({"sheet": ids::encode(sheet), "dpi": DEFAULT_DPI / 2.0}));
+        }
+        let opened = extract(&mut s, sheet).unwrap();
+        let picture = only_picture(&opened);
+        assert!(picture.stale && opened.drawing_pictures && **picture.rows.as_ref().unwrap() == *rows, "{what}: the file's picture, stale");
+        let after = settled(&mut s, sheet);
+        let picture = only_picture(&after);
+        assert!(!picture.stale && **picture.rows.as_ref().unwrap() != *rows, "{what}: drawn again");
+        assert!(s.drawing_scenes.bands > 0 && s.drawing_scenes.projections == 0, "{what}");
+    }
+}
+
+/// A shaded drawing not opened since its design was keeps its file's picture through a save: the
+/// copy saved opens with it current, drawing nothing.
+#[test]
+fn a_shaded_drawing_not_opened_keeps_its_files_picture_through_a_save() {
+    let folder = crate::tests::Folder::new("sheet-pictures-kept");
+    let (rows, s, sheet, drawing) = shaded_saved_and_opened(&folder, false);
+    let mut copy = s.scratch_for_save();
+    run(&mut copy, "file.save_as", json!({"path": folder.path("again.sc")}));
+    let mut opened = Session::default();
+    run(&mut opened, "doc.open", json!({"path": folder.path("again.sc")}));
+    run(&mut opened, "drawing.open", drawing);
+    let answer = extract(&mut opened, sheet).unwrap();
+    let picture = only_picture(&answer);
+    assert!(!picture.stale && **picture.rows.as_ref().unwrap() == *rows, "{picture:?}");
+    settled(&mut opened, sheet);
+    assert_eq!((opened.drawing_scenes.projections, opened.drawing_scenes.bands), (0, 0));
+}
+
 /// Opened again with nothing changed, before any sheet is drawn, `drawing.status` says its views are
 /// current: the lines kept for them show what the model shows, so none waits to be drawn.
 #[test]

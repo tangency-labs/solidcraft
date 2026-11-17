@@ -69,8 +69,8 @@
 
 use std::borrow::Borrow;
 use std::collections::{BTreeMap, BTreeSet};
-use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, OnceLock};
 
 use solidcore_record::{Loop2, Region2, Seg2, Vec2};
 use solidcraft_doc::bom::{Tree, Unlisted};
@@ -110,7 +110,7 @@ pub mod fill;
 #[path = "drawing_scene_kept.rs"]
 mod kept;
 use kept::{Kept, KeptDimension, KeptFill, KeptLines, KeptSketch, KeptView};
-use solidcraft_io::SheetLines;
+use solidcraft_io::{FiledSheet, SheetLines, SheetPixels};
 pub mod sketch;
 
 /// The command the sheet scene answers for, in its errors.
@@ -1695,7 +1695,7 @@ pub struct Cache {
     kept: KeptLines,
     /// Each drawing's lines its design's file kept, unread: taken up when it opens
     /// ([`Self::take_kept`]), and saved again as they came until then. They outlive the rest too.
-    pub(crate) filed: BTreeMap<u64, Arc<[u8]>>,
+    pub(crate) filed: BTreeMap<u64, FiledSheet>,
     /// What a copy of the session made to save it saves ([`Session::scratch_for_save`]): the
     /// session's lines, as [`sheet_lines`] collected them. The copy has none of its own.
     pub(crate) saving: Option<Arc<Vec<(u64, SheetLines)>>>,
@@ -1831,12 +1831,35 @@ struct Pixels {
     from: DrawnFrom,
     /// The pixel tests it cost: its view's pictures together stay within the renderer's limit.
     tests: u64,
+    /// The looks it was drawn from as a number ([`Looks::digest`]): for pixels from the design's file,
+    /// whose `from.looks` is none, and for pixels kept as their drawing closed, drawn for its view's
+    /// drawing then ([`forget_closed`]).
+    filed: Option<u64>,
 }
 
 impl Pixels {
-    /// Drawn from what its picture would be drawn from now.
+    /// Drawn from what its picture would be drawn from now. Pixels from the design's file were drawn
+    /// for their view's drawing as the file kept it ([`Cache::take_kept`]), at their dpi, from looks
+    /// that are equal to the bodies' now when their numbers are.
     fn current(&self, now: &DrawnFrom) -> bool {
-        self.from.same(now)
+        let filed = |looks: u64| self.from.serial == now.serial && self.from.dpi == now.dpi && now.looks.digest() == Some(looks);
+        self.from.same(now) || self.filed.is_some_and(filed)
+    }
+
+    /// The looks it was drawn from as a number, when it was drawn for its view's drawing `serial`.
+    fn looks_for(&self, serial: u64) -> Option<u64> {
+        if self.from.serial != serial {
+            return None;
+        }
+        self.filed.or_else(|| self.from.looks.digest())
+    }
+
+    /// Picture `source`'s pixels for the design's file to keep, drawn from looks numbered `looks`:
+    /// none without rows, a dpi or that number.
+    fn for_file(&self, source: u64, looks: Option<u64>) -> Option<SheetPixels> {
+        let (Ok(rows), Some(dpi), Some(looks)) = (&self.rows, self.from.dpi, looks) else { return None };
+        let size = [self.grid.width, self.grid.height];
+        Some(SheetPixels { source, looks, dpi, tests: self.tests, size, rows: Some(rows.clone()) })
     }
 }
 
@@ -1872,26 +1895,36 @@ fn dpi_now(s: &Session) -> Option<f64> {
 /// How the bodies of a world state stand and look in a picture: each body's geometry key and its
 /// colours, in the world state's order. Pictures drawn from equal looks are the same pixels. None,
 /// equal to no other, when a body's geometry has no key or the bodies couldn't be read.
-#[derive(Debug)]
-struct Looks(Option<Vec<(u64, Look)>>);
+#[derive(Debug, Default)]
+struct Looks {
+    rows: Option<Vec<(u64, Look)>>,
+    /// [`Self::digest`], worked out the first time it is asked.
+    digest: OnceLock<Option<u64>>,
+}
 
 /// A body's colours in a picture, as [`ProductScene`] gives them.
 type Look = ([u8; 3], f64, Option<OpaqueSurface>, Option<Transmission>, Vec<FaceAppearance>);
 
 impl PartialEq for Looks {
     fn eq(&self, other: &Looks) -> bool {
-        matches!((&self.0, &other.0), (Some(a), Some(b)) if a == b)
+        matches!((&self.rows, &other.rows), (Some(a), Some(b)) if a == b)
     }
 }
 
 impl Looks {
     /// `scene`'s, the bodies of world state `state` in its order.
     fn of(state: &ModelState, scene: Option<&ProductScene>) -> Looks {
-        let Some(scene) = scene.filter(|scene| scene.meshes.len() == state.bodies.len()) else { return Looks(None) };
+        let Some(scene) = scene.filter(|scene| scene.meshes.len() == state.bodies.len()) else { return Looks::default() };
         let look = |(body, mesh): (&solidcraft_doc::ModelBody, &solidcraft_render::ProductMesh)| {
             Some((body.geometry_key()?, (mesh.color, mesh.opacity, mesh.surface, mesh.transmission, mesh.faces.clone())))
         };
-        Looks(state.bodies.iter().zip(&scene.meshes).map(look).collect())
+        Looks { rows: state.bodies.iter().zip(&scene.meshes).map(look).collect(), digest: OnceLock::new() }
+    }
+
+    /// As a number the design's file keeps ([`kept::digest`]): equal looks have equal numbers in every
+    /// run of one build. None for looks equal to no other.
+    fn digest(&self) -> Option<u64> {
+        *self.digest.get_or_init(|| self.rows.as_ref().map(kept::digest))
     }
 }
 
@@ -2022,12 +2055,16 @@ impl Cache {
     fn take_kept(&mut self, d: &Drawing) {
         let gone: Arc<ModelState> = Arc::default();
         let filed = self.filed.remove(&d.id);
-        let kept = match filed {
-            Some(bytes) if self.kept.of(d.id).is_none() => kept::from_file(d, &bytes),
-            _ => self.kept.take(d.id),
+        let (kept, from_file) = match filed {
+            Some(filed) if self.kept.of(d.id).is_none() => (kept::from_file(d, &filed), true),
+            _ => (self.kept.take(d.id), false),
         };
-        for (id, kept) in kept.views {
+        for (id, mut kept) in kept.views {
             self.serial += 1;
+            // The file's pictures were drawn for the lines it kept, so for this drawing of the view.
+            if from_file {
+                kept.pixels.values_mut().for_each(|pixels| pixels.from.serial = self.serial);
+            }
             let entry =
                 Entry { state: gone.clone(), shows: kept.shows, view: kept.view, drawn: kept.drawn, serial: self.serial, pixels: kept.pixels };
             self.views.insert(id, entry);
@@ -2890,7 +2927,7 @@ fn bodies(s: &mut Session, state: &Arc<ModelState>) -> (std::result::Result<Arc<
     if let (Err(why), Some(was)) = (&scene, &s.drawing_scenes.bodies) {
         return (Err(why.clone()), was.looks.clone());
     }
-    let looks = copy.world_state().map_or(Looks(None), |placed| Looks::of(&placed, scene.as_ref().ok()));
+    let looks = copy.world_state().map_or(Looks::default(), |placed| Looks::of(&placed, scene.as_ref().ok()));
     let looks = match &s.drawing_scenes.bodies {
         Some(was) if *was.looks == looks => was.looks.clone(),
         _ => Arc::new(looks),
@@ -2980,7 +3017,7 @@ fn step_pictures(s: &mut Session, on: &[(u64, ResolvedView, Vec2)], state: &Arc<
         }
     };
     let Some(Picturing { view, source, from, grid, tests, .. }) = cache.picturing.take() else { return false };
-    keep_pixels(s, view, source, Pixels { grid, rows, from, tests });
+    keep_pixels(s, view, source, Pixels { grid, rows, from, tests, filed: None });
     waiting_picture(s, on, state).is_some()
 }
 
@@ -3080,7 +3117,7 @@ fn finish_picture(s: &mut Session, done: PictureDone) -> bool {
         Ok((grid, tests, rows)) => s.drawing_scenes.picturing = Some(Picturing { view, source: picture.source, from, grid, tests, rows }),
         Err((grid, why)) => {
             s.drawing_scenes.picturing = None;
-            keep_pixels(s, view, picture.source, Pixels { grid, rows: Err(why), from, tests: 0 });
+            keep_pixels(s, view, picture.source, Pixels { grid, rows: Err(why), from, tests: 0, filed: None });
         }
     }
     true
@@ -3132,6 +3169,8 @@ fn sheet_pictures(s: &mut Session, d: &Drawing, on: &[(u64, ResolvedView, Vec2)]
 /// the drawing open and of those closed that are current ([`kept::saved`]), and, for a drawing not
 /// opened since the design was, the lines its file kept, as they came. Nothing is drawn: a view not
 /// up to date is left out. A copy made to save the session has the session's ([`Cache::saving`]).
+/// Each view keeps its pictures' pixels drawn for its drawing, with the looks they were drawn from,
+/// so the design opened again shows them current only if its bodies look the same.
 pub(crate) fn sheet_lines(s: &Session) -> Arc<Vec<(u64, SheetLines)>> {
     let cache = &s.drawing_scenes;
     if let Some(saving) = &cache.saving {
@@ -3140,19 +3179,23 @@ pub(crate) fn sheet_lines(s: &Session) -> Arc<Vec<(u64, SheetLines)>> {
     // What the model shows, worked out once, and only for a drawing with lines to check.
     let mut now: Option<Option<Arc<SourceKey>>> = None;
     let mut lines = Vec::new();
+    // A view's pictures for the file, each with the number of the looks it was drawn from.
+    let pictures = |pixels: &BTreeMap<u64, Pixels>, looks: &dyn Fn(&Pixels) -> Option<u64>| -> Vec<SheetPixels> {
+        pixels.iter().filter_map(|(source, p)| p.for_file(*source, looks(p))).collect()
+    };
     for d in &s.doc.drawings {
-        let views: Vec<(u64, &ResolvedView, &Drawn, Option<&SourceKey>)> = if cache.drawing == Some(d.id) {
-            cache.views.iter().map(|(id, e)| (*id, &e.view, &e.drawn, e.shows.as_deref())).collect()
+        let views: Vec<(u64, &ResolvedView, &Drawn, Option<&SourceKey>, Vec<SheetPixels>)> = if cache.drawing == Some(d.id) {
+            cache.views.iter().map(|(id, e)| (*id, &e.view, &e.drawn, e.shows.as_deref(), pictures(&e.pixels, &|p| p.looks_for(e.serial)))).collect()
         } else if let Some(kept) = cache.kept.of(d.id) {
-            kept.views.iter().map(|(id, k)| (*id, &k.view, &k.drawn, k.shows.as_deref())).collect()
+            kept.views.iter().map(|(id, k)| (*id, &k.view, &k.drawn, k.shows.as_deref(), pictures(&k.pixels, &|p| p.filed))).collect()
         } else {
-            if let Some(bytes) = cache.filed.get(&d.id) {
-                lines.push((d.id, SheetLines::Kept(bytes.clone())));
+            if let Some(filed) = cache.filed.get(&d.id) {
+                lines.push((d.id, SheetLines::Kept(filed.clone())));
             }
             continue;
         };
         let Some(now) = now.get_or_insert_with(|| SourceKey::of(&crate::drawing_view::shown(s))).as_deref() else { continue };
-        let saved = views.into_iter().filter_map(|(id, view, drawn, shows)| kept::saved(d, id, view, drawn, shows, now));
+        let saved = views.into_iter().filter_map(|(id, view, drawn, shows, pictures)| kept::saved(d, id, view, drawn, shows, now, pictures));
         lines.push((d.id, SheetLines::Views(saved.collect())));
     }
     Arc::new(lines)
@@ -3165,9 +3208,14 @@ pub(crate) fn forget_closed(s: &mut Session) {
     let cache = &mut s.drawing_scenes;
     if let Some(drawing) = cache.drawing.filter(|d| s.open_drawing != Some(*d)) {
         let mut kept = std::mem::take(&mut cache.kept);
+        // A picture drawn for its view's drawing keeps the number of its looks, so a save keeps it.
+        let numbered = |serial: u64, mut pixels: BTreeMap<u64, Pixels>| {
+            pixels.values_mut().for_each(|p| p.filed = p.looks_for(serial));
+            pixels
+        };
         let views = std::mem::take(&mut cache.views)
             .into_iter()
-            .map(|(id, e)| (id, KeptView { view: e.view, drawn: e.drawn, shows: e.shows, pixels: e.pixels }));
+            .map(|(id, e)| (id, KeptView { view: e.view, drawn: e.drawn, shows: e.shows, pixels: numbered(e.serial, e.pixels) }));
         let dimensions = std::mem::take(&mut cache.dimensions)
             .into_iter()
             .map(|(id, e)| (id, KeptDimension { record: e.record, view_serial: e.view_serial, lettering: e.lettering, drawn: e.drawn }));

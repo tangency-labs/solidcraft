@@ -4,7 +4,7 @@
 //! last, each view's pictures' last pixels, shown stale until drawn again. No world state is held, so a
 //! closed drawing keeps no model. The views' lines are also kept in the design's file
 //! ([`solidcraft_io::SheetView`]): a drawing opened from it starts from them as from lines kept in
-//! memory ([`from_file`], [`saved`]). The pixels are only in memory.
+//! memory ([`from_file`], [`saved`]), with their pictures' pixels and the looks they were drawn from.
 
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -12,10 +12,11 @@ use std::sync::Arc;
 use solidcraft_doc::drawing::Drawing;
 use solidcraft_doc::drawing::view::ResolvedView;
 use solidcraft_geom::drawing_view::ViewFrame;
-use solidcraft_io::{SheetView, ShownBody};
+use solidcraft_io::{FiledSheet, SheetPixels, SheetView, ShownBody};
 
 use super::{
-    Annotation, Drawn, DrawnDimension, DrawnFill, DrawnSketch, Lettering, Pixels, SketchContext, SourceInputs, SourceKey, Status, ThreadInfo, Vec2,
+    Annotation, Drawn, DrawnDimension, DrawnFill, DrawnFrom, DrawnSketch, Lettering, MAX_PICTURE_PIXEL_TESTS, Pixels, SketchContext, SourceInputs,
+    SourceKey, Status, ThreadInfo, Vec2,
 };
 
 /// Each closed drawing's last lines, by drawing.
@@ -102,8 +103,9 @@ impl KeptLines {
 /// Drawing `d`'s lines its file kept ([`solidcraft_io::sheet_views`]), as lines kept in memory: each
 /// view's that still draws as it did when it was saved. Whether they show what the model shows now
 /// is asked as of any kept lines ([`super::keep_what_shows_the_same`]). Their lines name no body
-/// (picking draws them again, [`super::line_at`]); their dimensions are read again.
-pub(super) fn from_file(d: &Drawing, bytes: &[u8]) -> Kept {
+/// (picking draws them again, [`super::line_at`]); their dimensions are read again. Each view's
+/// pictures the file kept come with them ([`pixels`]).
+pub(super) fn from_file(d: &Drawing, filed: &FiledSheet) -> Kept {
     let kept = |saved: SheetView| -> Option<(u64, KeptView)> {
         let view = d.resolve_view(saved.view).ok().filter(|view| view.flat.is_none() && digest(view) == saved.resolved)?;
         let frame = ViewFrame::new(view.basis, view.scale.value, saved.model_centre, Vec2::ZERO).ok()?;
@@ -118,14 +120,39 @@ pub(super) fn from_file(d: &Drawing, bytes: &[u8]) -> Kept {
             owners: None,
             why: saved.why,
         };
-        Some((saved.view, KeptView { view, drawn, shows: Some(Arc::new(SourceKey(shows))), pixels: BTreeMap::new() }))
+        let pixels = saved.pictures.into_iter().filter_map(|picture| pixels(&drawn, picture)).collect();
+        Some((saved.view, KeptView { view, drawn, shows: Some(Arc::new(SourceKey(shows))), pixels }))
     };
-    Kept { views: solidcraft_io::sheet_views(bytes).into_iter().filter_map(kept).collect(), ..Kept::default() }
+    Kept { views: solidcraft_io::sheet_views(filed).into_iter().filter_map(kept).collect(), ..Kept::default() }
+}
+
+/// A picture's pixels the file kept, for the view `drawn` from the file: when the view draws that
+/// picture and they fill its grid at their dpi ([`super::window_grid`]), within the pixel tests a
+/// view's pictures may cost. Drawn from looks numbered as the file says, for the drawing the view is
+/// given when it opens ([`super::Cache::take_kept`]).
+fn pixels(drawn: &Drawn, picture: SheetPixels) -> Option<(u64, Pixels)> {
+    let SheetPixels { source, looks, dpi, tests, size, rows } = picture;
+    let drawn_picture = super::pictures_of(drawn).find(|p| p.source == source)?;
+    let grid = (dpi.is_finite() && dpi > 0.0).then(|| super::window_grid(drawn_picture, dpi).ok()).flatten()?;
+    if [grid.width, grid.height] != size || tests > MAX_PICTURE_PIXEL_TESTS {
+        return None;
+    }
+    let from = DrawnFrom { serial: 0, looks: Arc::default(), dpi: Some(dpi) };
+    Some((source, Pixels { grid, rows: Ok(rows?), from, tests, filed: Some(looks) }))
 }
 
 /// View `id` of `d` as its file keeps it, when it is current: drawn as `d` draws it now, from a model
-/// that showed `now`. A flat pattern view's lines are quick to draw again, and aren't kept.
-pub(super) fn saved(d: &Drawing, id: u64, view: &ResolvedView, drawn: &Drawn, shows: Option<&SourceKey>, now: &SourceKey) -> Option<SheetView> {
+/// that showed `now`, with `pictures`. A flat pattern view's lines are quick to draw again, and aren't
+/// kept.
+pub(super) fn saved(
+    d: &Drawing,
+    id: u64,
+    view: &ResolvedView,
+    drawn: &Drawn,
+    shows: Option<&SourceKey>,
+    now: &SourceKey,
+    pictures: Vec<SheetPixels>,
+) -> Option<SheetView> {
     let current = view.flat.is_none() && shows == Some(now) && d.resolve_view(id).ok().as_ref() == Some(view);
     let (true, Status::Drawn, Some(group), Some(_)) = (current, &drawn.status, &drawn.group, drawn.frame) else { return None };
     let shown = |(path, body, reference, geometry, threads): &(Vec<u64>, String, bool, u64, Vec<ThreadInfo>)| ShownBody {
@@ -143,16 +170,18 @@ pub(super) fn saved(d: &Drawing, id: u64, view: &ResolvedView, drawn: &Drawn, sh
         boundary: drawn.boundary,
         model_centre: drawn.centre,
         why: drawn.why.clone(),
+        pictures,
     })
 }
 
-/// A view as it draws, as a number: the same in every run of one build (its `Debug` text holds no
-/// hash map, and [`DefaultHasher::new`] is the same in each), which is the only build that reads it.
+/// A view as it draws, or the bodies' looks, as a number: the same in every run of one build (their
+/// `Debug` text holds no hash map, and [`DefaultHasher::new`] is the same in each), which is the only
+/// build that reads it.
 ///
 /// [`DefaultHasher::new`]: std::collections::hash_map::DefaultHasher::new
-fn digest(view: &ResolvedView) -> u64 {
+pub(super) fn digest(value: &impl std::fmt::Debug) -> u64 {
     use std::hash::{Hash, Hasher};
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
-    format!("{view:?}").hash(&mut hasher);
+    format!("{value:?}").hash(&mut hasher);
     hasher.finish()
 }

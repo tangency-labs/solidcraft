@@ -20,7 +20,7 @@ pub use provenance::{
     OpenPgpSignature, OpenPgpSigner, ProvenanceChain, ProvenanceRecord, ProvenanceReport, ProvenanceSave, ProvenanceSigner, ProvenanceStatus,
     ProvenanceSummary, SignatureSource, Signer,
 };
-pub use sheet_cache::{SheetLines, SheetView, ShownBody, sheet_views};
+pub use sheet_cache::{FiledSheet, SheetLines, SheetPixels, SheetView, ShownBody, sheet_views};
 pub use thumbnail::{THUMBNAIL_SIZE, read_design_thumbnail, read_design_thumbnail_file};
 
 use serde_json::{Map, Value, json};
@@ -832,7 +832,7 @@ pub fn read_design_file(path: &str, notify: Option<impl FnOnce(DesignPreview)>) 
 pub fn read_design_file_with_sheets(
     path: &str,
     notify: Option<impl FnOnce(DesignPreview)>,
-) -> Result<(Document, Option<solidcraft_doc::SavedModel>, BTreeMap<u64, Arc<[u8]>>)> {
+) -> Result<(Document, Option<solidcraft_doc::SavedModel>, BTreeMap<u64, FiledSheet>)> {
     let _span = solidcraft_profile::span("io", "read_design_file");
     let mut source = open_regular_file(path)?;
     if is_container_source(&mut source)? {
@@ -2157,12 +2157,25 @@ mod tests {
             boundary: None,
             model_centre: Vec2::new(50.0, 25.0),
             why: None,
+            pictures: Vec::new(),
         }
     }
 
     /// Each drawing's sheet cache entry as the file keeps it.
-    fn sheet_entries(bytes: &[u8]) -> BTreeMap<u64, Arc<[u8]>> {
+    fn sheet_entries(bytes: &[u8]) -> BTreeMap<u64, FiledSheet> {
         sheet_cache::read(&mut PackageReader::new(Cursor::new(bytes)).unwrap())
+    }
+
+    /// The views of an entry with no picture parts.
+    fn views_of(entry: &[u8]) -> Vec<SheetView> {
+        sheet_views(&FiledSheet::from(entry))
+    }
+
+    /// View `view` with picture `source`: 3 by 2 pixels, each its own colour.
+    fn pictured(view: u64, source: u64) -> SheetView {
+        let rows: Vec<u8> = (0..24).map(|k| (k * 10 + source as usize) as u8).collect();
+        let picture = SheetPixels { source, looks: 11, dpi: 150.0, tests: 6, size: [3, 2], rows: Some(Arc::from(rows)) };
+        SheetView { pictures: vec![picture], ..sheet_view(view) }
     }
 
     /// A drawing's lines come back as saved; lines kept unread are saved again byte for byte; a
@@ -2175,6 +2188,7 @@ mod tests {
         let entries = sheet_entries(&bytes);
         assert_eq!(entries.keys().copied().collect::<Vec<_>>(), [3]);
         assert_eq!(sheet_views(&entries[&3]), [sheet_view(30), sheet_view(31)]);
+        assert!(entries[&3].pictures.is_empty());
         assert_eq!(crate::read_design(&bytes).unwrap().to_json(), doc.to_json());
         let kept = [(3, SheetLines::Kept(entries[&3].clone()))];
         let again = write_design_container_with_sheets(&doc, DesignCompression::Fast, None, None, None, &kept).unwrap();
@@ -2197,13 +2211,13 @@ mod tests {
     fn a_sheet_cache_mismatch_is_only_a_miss() {
         let lines = [(3, SheetLines::Views(vec![sheet_view(30)]))];
         let bytes = write_design_container_with_sheets(&document(), DesignCompression::Fast, None, None, None, &lines).unwrap();
-        let entry: Value = serde_json::from_slice(&sheet_entries(&bytes)[&3]).unwrap();
+        let entry: Value = serde_json::from_slice(&sheet_entries(&bytes)[&3].entry).unwrap();
         for (key, value) in [("build", json!("another/x86_64-linux")), ("format", json!("solidcraft-sheet-cache/0")), ("more", json!(1))] {
             let mut changed = entry.clone();
             changed[key] = value;
-            assert!(sheet_views(&serde_json::to_vec(&changed).unwrap()).is_empty(), "{key}");
+            assert!(views_of(&serde_json::to_vec(&changed).unwrap()).is_empty(), "{key}");
         }
-        assert!(sheet_views(b"{").is_empty());
+        assert!(views_of(b"{").is_empty());
         // A line reaching past the paper scene's coordinate bound.
         let mut far = sheet_view(31);
         let line = solidcore_record::Seg2::Line { a: solidcore_record::Vec2::new(0.0, 0.0), b: solidcore_record::Vec2::new(1e6, 0.0) };
@@ -2211,18 +2225,80 @@ mod tests {
         Arc::make_mut(&mut far.group).items = vec![stroke];
         let mut two = entry.clone();
         two["views"].as_array_mut().unwrap().push(serde_json::to_value(&far).unwrap());
-        assert_eq!(sheet_views(&serde_json::to_vec(&two).unwrap()), [sheet_view(30)]);
+        assert_eq!(views_of(&serde_json::to_vec(&two).unwrap()), [sheet_view(30)]);
+    }
+
+    /// A shaded view's picture comes back pixel for pixel from a PNG part of its own, stored as it is;
+    /// an unread drawing's parts are saved again byte for byte.
+    #[test]
+    fn a_views_pictures_come_back_from_the_file() {
+        let doc = document();
+        let lines = [(3, SheetLines::Views(vec![pictured(30, 40), sheet_view(31)]))];
+        let bytes = write_design_container_with_sheets(&doc, DesignCompression::Fast, None, None, None, &lines).unwrap();
+        let entries = sheet_entries(&bytes);
+        assert_eq!(entries[&3].pictures.keys().copied().collect::<Vec<_>>(), [(30, 40)]);
+        assert_eq!(sheet_views(&entries[&3]), [pictured(30, 40), sheet_view(31)]);
+        let kept = [(3, SheetLines::Kept(entries[&3].clone()))];
+        let again = write_design_container_with_sheets(&doc, DesignCompression::Fast, None, None, None, &kept).unwrap();
+        assert_eq!(sheet_entries(&again)[&3], entries[&3]);
+    }
+
+    /// A picture whose part is missing, doesn't decode, or isn't the size or type its entry says is a
+    /// miss for that picture alone: its view's lines and the other pictures still read.
+    #[test]
+    fn a_picture_that_doesnt_match_its_entry_is_only_a_miss() {
+        let lines = [(3, SheetLines::Views(vec![pictured(30, 40), pictured(31, 41)]))];
+        let bytes = write_design_container_with_sheets(&document(), DesignCompression::Fast, None, None, None, &lines).unwrap();
+        let filed = sheet_entries(&bytes).remove(&3).unwrap();
+        let png = filed.pictures[&(30, 40)].clone();
+        let grey = {
+            let mut out = Vec::new();
+            let mut encoder = ::png::Encoder::new(&mut out, 3, 2);
+            encoder.set_color(::png::ColorType::Grayscale);
+            encoder.write_header().unwrap().write_image_data(&[0; 6]).unwrap();
+            out
+        };
+        for (what, part) in
+            [("missing", None), ("cut short", Some(&png[..png.len() / 2])), ("grey", Some(&grey[..])), ("not a PNG", Some(&b"PNG"[..]))]
+        {
+            let mut broken = filed.clone();
+            match part {
+                Some(bytes) => broken.pictures.insert((30, 40), Arc::from(bytes)),
+                None => broken.pictures.remove(&(30, 40)),
+            };
+            let views = sheet_views(&broken);
+            assert_eq!((views[0].pictures.len(), views[1].pictures.len()), (0, 1), "{what}");
+            assert_eq!(views[0], sheet_view(30), "{what}");
+        }
+        let mut entry: Value = serde_json::from_slice(&filed.entry).unwrap();
+        for size in [json!([3, 3]), json!([0, 0]), json!([65536, 65536])] {
+            entry["views"][0]["pictures"][0]["size"] = size.clone();
+            let sized = FiledSheet { entry: Arc::from(serde_json::to_vec(&entry).unwrap()), ..filed.clone() };
+            assert!(sheet_views(&sized)[0].pictures.is_empty(), "{size}");
+        }
     }
 
     #[test]
     fn sheet_cache_prefixes_and_mutations_never_panic() {
         let lines = [(3, SheetLines::Views(vec![sheet_view(30)]))];
         let bytes = write_design_container_with_sheets(&document(), DesignCompression::Fast, None, None, None, &lines).unwrap();
-        let entry = sheet_entries(&bytes)[&3].to_vec();
+        let entry = sheet_entries(&bytes)[&3].entry.to_vec();
         for n in 0..entry.len() {
             let mut changed = entry.clone();
             changed[n] ^= 0xff;
-            assert!(std::panic::catch_unwind(|| (sheet_views(&entry[..n]), sheet_views(&changed))).is_ok());
+            assert!(std::panic::catch_unwind(|| (views_of(&entry[..n]), views_of(&changed))).is_ok());
+        }
+        let lines = [(3, SheetLines::Views(vec![pictured(30, 40)]))];
+        let pictured = write_design_container_with_sheets(&document(), DesignCompression::Fast, None, None, None, &lines).unwrap();
+        let filed = sheet_entries(&pictured).remove(&3).unwrap();
+        let png = filed.pictures[&(30, 40)].to_vec();
+        for n in 0..png.len() {
+            let mut changed = png.clone();
+            changed[n] ^= 0xff;
+            for part in [&png[..n], &changed[..]] {
+                let broken = FiledSheet { pictures: [((30, 40), Arc::from(part))].into(), ..filed.clone() };
+                assert!(std::panic::catch_unwind(|| sheet_views(&broken)).is_ok());
+            }
         }
         for n in (0..bytes.len()).step_by((bytes.len() / 128).max(1)) {
             let mut changed = bytes.clone();

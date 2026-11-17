@@ -904,7 +904,7 @@ fn open(s: &mut Session, p: &Value) -> Result<Value> {
 }
 
 /// Each drawing's lines a design file keeps, unread ([`solidcraft_io::read_design_file_with_sheets`]).
-type Sheets = std::collections::BTreeMap<u64, std::sync::Arc<[u8]>>;
+type Sheets = std::collections::BTreeMap<u64, solidcraft_io::FiledSheet>;
 
 /// Read the design file at `path` for `doc.open`, under its file's name if it has none of its own,
 /// with the model and the drawings' lines the file keeps.
