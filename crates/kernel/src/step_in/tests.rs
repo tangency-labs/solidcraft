@@ -4018,6 +4018,77 @@ fn a_ball_end_split_through_its_pole_imports_closed() {
     assert_closed_solid(&w.solid(&[north, south, disk]), 3, std::f64::consts::PI * cap * cap * (3.0 * r - cap) / 3.0);
 }
 
+/// A lens-like solid: a dome turned about the x axis from a quadratic B-spline profile that
+/// starts on the axis, a cylindrical band and a flat back, each split into halves along the
+/// plane z = 0, with no pcurves in the file (as a 2016 lens export has it). Each dome half is a
+/// SURFACE_OF_REVOLUTION face bounded by its two meridians (B-spline edges meeting at the pole)
+/// and half the rim circle, and its loop starts on a meridian, runs into the pole and comes back
+/// out on the other one. The band's frame is turned 45° about the axis, so the rim is labelled
+/// on it and has no closed-form pcurve on the dome. The meridian out of the pole and the rim's
+/// first point were projected from the last point before the pole, across the axis, and
+/// settled on the pole: each half's box stopped a sample short of its meridian, the rim's pcurve
+/// was cut back to that box, and both dome halves were left out. They read whole and the solid
+/// is closed, its volume the dome's π ∫ y² dx and the band's π r² l.
+#[test]
+fn a_dome_of_revolution_split_through_its_pole_keeps_both_halves() {
+    // Profile (0, 0), (0, 2), (1.5, 3): x = 1.5 t², y = 4t − t², so π ∫ y² x' dt = 7.7 π.
+    let (h, r, back) = (1.5_f64, 3.0_f64, 2.5_f64);
+    let k = std::f64::consts::FRAC_1_SQRT_2;
+    let mut w = Entities::default();
+    let point = |w: &mut Entities, p: [f64; 3]| w.add(format!("CARTESIAN_POINT('',({:?},{:?},{:?}))", p[0], p[1], p[2]));
+    let quadratic = |w: &mut Entities, side: f64| {
+        let ps: Vec<String> = [[0.0, 0.0, 0.0], [0.0, 2.0 * side, 0.0], [h, r * side, 0.0]].iter().map(|p| format!("#{}", point(w, *p))).collect();
+        w.add(format!("B_SPLINE_CURVE_WITH_KNOTS('',2,({}),.UNSPECIFIED.,.F.,.F.,(3,3),(0.,1.),.UNSPECIFIED.)", ps.join(",")))
+    };
+    let pole = w.vertex([0.0, 0.0, 0.0]);
+    let (east, west) = (w.vertex([h, r, 0.0]), w.vertex([h, -r, 0.0]));
+    let (east2, west2) = (w.vertex([back, r, 0.0]), w.vertex([back, -r, 0.0]));
+    let (east_c, west_c) = (quadratic(&mut w, 1.0), quadratic(&mut w, -1.0));
+    let mer_east = w.add(format!("EDGE_CURVE('',#{pole},#{east},#{east_c},.T.)"));
+    let mer_west = w.add(format!("EDGE_CURVE('',#{pole},#{west},#{west_c},.T.)"));
+    // Circles about the axis from +y, turning towards +z: halves from +y to −y and back.
+    let circle = |w: &mut Entities, x: f64| {
+        let a = w.axis([x, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]);
+        w.add(format!("CIRCLE('',#{a},{r:?})"))
+    };
+    let (rim_c, back_c) = (circle(&mut w, h), circle(&mut w, back));
+    let rim_up = w.add(format!("EDGE_CURVE('',#{east},#{west},#{rim_c},.T.)"));
+    let rim_down = w.add(format!("EDGE_CURVE('',#{west},#{east},#{rim_c},.T.)"));
+    let back_up = w.add(format!("EDGE_CURVE('',#{east2},#{west2},#{back_c},.T.)"));
+    let back_down = w.add(format!("EDGE_CURVE('',#{west2},#{east2},#{back_c},.T.)"));
+    let line = |w: &mut Entities, y: f64| {
+        let o = point(w, [h, y, 0.0]);
+        let d = w.add("DIRECTION('',(1.,0.,0.))");
+        let v = w.add(format!("VECTOR('',#{d},{:?})", back - h));
+        w.add(format!("LINE('',#{o},#{v})"))
+    };
+    let (line_e_c, line_w_c) = (line(&mut w, r), line(&mut w, -r));
+    let line_e = w.add(format!("EDGE_CURVE('',#{east},#{east2},#{line_e_c},.T.)"));
+    let line_w = w.add(format!("EDGE_CURVE('',#{west},#{west2},#{line_w_c},.T.)"));
+    let band = |w: &mut Entities| {
+        let a = w.axis([h, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, k, k]);
+        w.add(format!("CYLINDRICAL_SURFACE('',#{a},{r:?})"))
+    };
+    let dome = |w: &mut Entities| {
+        let o = point(w, [0.0; 3]);
+        let d = w.add("DIRECTION('',(1.,0.,0.))");
+        let axis = w.add(format!("AXIS1_PLACEMENT('',#{o},#{d})"));
+        w.add(format!("SURFACE_OF_REVOLUTION('',#{east_c},#{axis})"))
+    };
+    let (b_up, b_down, s_up, s_down) = (band(&mut w), band(&mut w), dome(&mut w), dome(&mut w));
+    let band_up = w.face(&[(rim_up, true), (line_w, true), (back_up, false), (line_e, false)], b_up);
+    let band_down = w.face(&[(rim_down, true), (line_e, true), (back_down, false), (line_w, false)], b_down);
+    let up = w.face(&[(mer_east, false), (mer_west, true), (rim_up, false)], s_up);
+    let down = w.face(&[(mer_west, false), (mer_east, true), (rim_down, false)], s_down);
+    let base = w.axis([back, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]);
+    let plane = w.add(format!("PLANE('',#{base})"));
+    let disc = w.face(&[(back_up, true), (back_down, true)], plane);
+    // The band first, as the lens export lists its faces: the rim takes the band's frame.
+    let text = w.solid(&[band_up, band_down, up, down, disc]);
+    let pi = std::f64::consts::PI;
+    assert_closed_solid(&text, 5, 7.7 * pi + pi * r * r * (back - h));
+}
+
 /// An elliptic cylinder written as a SURFACE_OF_LINEAR_EXTRUSION of an ellipse, its side a band
 /// between two closed ellipse edges, each loop going once round the profile: the profile is
 /// built over its whole turn (not over the samples' angles, which leave gaps of an eighth of a
