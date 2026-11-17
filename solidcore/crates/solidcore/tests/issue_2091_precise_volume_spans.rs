@@ -886,3 +886,108 @@ fn a_dense_grid_face_costs_few_evaluations_per_cell() {
     }
     assert!(per_cell[0] <= 450.0, "iso evaluations a cell {per_cell:?}");
 }
+
+/// A latitude-longitude rectangle on a sphere about the origin, between longitudes `lon` and
+/// latitudes `lat` (degrees), as the sphere and its four trims (iso lines of its NURBS
+/// parameters, run counter-clockwise in them), with its domain.
+fn sphere_rectangle(
+    k: &Kernel,
+    r: f64,
+    lon: (f64, f64),
+    lat: (f64, f64),
+) -> (Surface, Vec<Curve>, Extent2d) {
+    use solidcore::geom::axis2_placement::Axis2Placement;
+    use solidcore::geom::vector2d::Point2;
+    use solidcore::surface::sphere::Sphere;
+    let frame = Axis2Placement::new(
+        Point3::new(0.0, 0.0, 0.0),
+        Vec3::new(0.0, 0.0, 1.0),
+        Vec3::new(1.0, 0.0, 0.0),
+    );
+    let surface = Surface::from(Sphere::create_canonical(k, &frame, r).unwrap());
+    let at = |u: f64, v: f64| {
+        let p = surface
+            .convert_uv_from_step_to_nurbs(k, Point2::new(u, v))
+            .unwrap();
+        (p.x, p.y)
+    };
+    let corners = [
+        at(lon.0, lat.0),
+        at(lon.1, lat.0),
+        at(lon.1, lat.1),
+        at(lon.0, lat.1),
+    ];
+    let line = |a: (f64, f64), b: (f64, f64)| {
+        Curve::from(
+            solidcore::primitive::api_curves::create_line_segment(
+                Point3::new(a.0, a.1, 0.0),
+                Point3::new(b.0, b.1, 0.0),
+            )
+            .unwrap(),
+        )
+    };
+    let trims = (0..4)
+        .map(|i| line(corners[i], corners[(i + 1) % 4]))
+        .collect();
+    let domain = surface.natural_uv_domain_with_nurb(k).unwrap();
+    (surface, trims, domain)
+}
+
+/// A sphere face's precise properties, integrated along its trims: at each trim point an
+/// iso-u integral up the sphere's rational form, a smooth integrand that is no polynomial.
+/// A latitude-longitude rectangle's area is `r² Δλ (sin φ₁ − sin φ₀)`, and its volume
+/// component, `∫ x nₓ dA` (x = r cos φ cos λ, nₓ = x / r, dA = r² cos φ dφ dλ), is
+/// `r³ [Δλ/2 + (sin 2λ₁ − sin 2λ₀)/4] [sin φ − sin³φ / 3]` from φ₀ to φ₁, both held to the
+/// accuracy asked (their sign is the face's orientation); and the iso-curve evaluations it
+/// costs are bounded.
+#[test]
+fn a_sphere_faces_trim_integrals_cost_few_evaluations() {
+    let k = Kernel::default();
+    let r = 2.0;
+    let (lon, lat) = ((20.0_f64, 110.0_f64), (-30.0_f64, 50.0_f64));
+    let (surface, trims, domain) = sphere_rectangle(&k, r, lon, lat);
+    let area = r
+        * r
+        * (lon.1 - lon.0).to_radians()
+        * (lat.1.to_radians().sin() - lat.0.to_radians().sin());
+    let face_box = Extent3d::from_points(Point3::new(-r, -r, -r), Point3::new(r, r, r));
+    let accuracy = 1e-8;
+    k.work_counters.reset();
+    let p = boundary_properties(
+        &k,
+        &surface,
+        &trims,
+        &domain,
+        &face_box,
+        OrientType::Same,
+        accuracy,
+        Point3::new(0.0, 0.0, 0.0),
+        area,
+        0.0,
+        PPF_ALL,
+    )
+    .unwrap();
+    let evaluations = k.work_counters.mass_iso_evaluations();
+    eprintln!(
+        "area {} vs {area}, volume {}, {evaluations} iso evaluations",
+        p.area, p.volume
+    );
+    assert!(
+        (p.area.abs() - area).abs() <= accuracy * area,
+        "{} vs {area}",
+        p.area
+    );
+    let (l0, l1) = (lon.0.to_radians(), lon.1.to_radians());
+    let g = |phi: f64| phi.to_radians().sin() - phi.to_radians().sin().powi(3) / 3.0;
+    let volume = r.powi(3)
+        * ((l1 - l0) / 2.0 + ((2.0 * l1).sin() - (2.0 * l0).sin()) / 4.0)
+        * (g(lat.1) - g(lat.0));
+    assert!(
+        (p.volume.abs() - volume).abs() <= accuracy * volume,
+        "{} vs {volume}",
+        p.volume
+    );
+    // each trim point's iso line by the 15-point rule: 3 780 (the 7-point rule took 19 404,
+    // upstream's Runge-Kutta pair 23 244)
+    assert!(evaluations <= 8_000, "{evaluations} iso evaluations");
+}
