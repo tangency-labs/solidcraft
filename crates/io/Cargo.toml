@@ -43,6 +43,9 @@ cadmpeg-registry = { workspace = true }
 # Sheet PNGs (src/paper/png.rs).
 png = { workspace = true }
 tiny-skia = { workspace = true }
+# Sheet PDFs (src/paper/pdf.rs).
+pdf-writer = { workspace = true }
+flate2 = { workspace = true }
 
 # The model cache's key (build.rs).
 [build-dependencies]

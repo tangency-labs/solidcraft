@@ -21,6 +21,7 @@ use solidcraft_doc::drawing::{Drawing, Sheet};
 use solidcraft_doc::drawing_view::{Exploded, Pose, StudyStep, ViewConfiguration};
 use solidcraft_doc::{MAX_PLACEMENT_DEPTH, MAX_PLACEMENTS, ModelBody, ModelState, ids};
 use solidcraft_geom::drawing_view::{Scale, ViewFrame};
+use solidcraft_geom::paper::line::LineGroup;
 use solidcraft_geom::{Aabb2, EPS};
 use solidcraft_render::VisualStyle;
 
@@ -29,12 +30,15 @@ use crate::{Result, Session};
 
 #[path = "drawing_view_exact.rs"]
 mod exact;
+#[path = "drawing_view_hatch.rs"]
+mod hatch;
 #[path = "drawing_view_lines.rs"]
 mod lines;
 #[path = "drawing_view_threads.rs"]
 mod threads;
 
 pub use exact::{Fallback, PreparedBodies};
+pub use hatch::{BodyHatch, CutFaces, FLATTEN_MM, Hatching, hatches};
 pub use lines::{CHORD_MM, CHORD_RANGE, LineRequest, Lines, MIN_MODEL_CHORD_MM, Made, Piece, Stats, ViewLine, lines, paper_group, paper_lines};
 pub use threads::ThreadLine;
 
@@ -168,6 +172,9 @@ pub struct ShownSet {
     pub bodies: Vec<Shown>,
     /// In a section view, which of its parts it draws uncut, and why ([`measured`]).
     pub uncut: Option<String>,
+    /// In a section view, the bodies its plane cut, by their index among the state's bodies (the
+    /// ones it hatches), and how each tells its cut faces ([`CutFaces`]).
+    pub cut: BTreeMap<usize, CutFaces>,
 }
 
 impl ShownSet {
@@ -501,7 +508,7 @@ pub fn shown(s: &Session) -> std::result::Result<ShownSet, Unmeasured> {
             Shown { index, path, body, reference }
         })
         .collect();
-    if bodies.is_empty() { Err(Unmeasured::NoBodies) } else { Ok(ShownSet { state, bodies, uncut: None }) }
+    if bodies.is_empty() { Err(Unmeasured::NoBodies) } else { Ok(ShownSet { state, bodies, uncut: None, cut: BTreeMap::new() }) }
 }
 
 /// A saved view on its sheet.
@@ -646,6 +653,7 @@ fn sectioned(set: &ShownSet, cut: &Cut) -> std::result::Result<ShownSet, Unmeasu
     let plane = cut.line.planes(&cut.parent).map_err(|e| e.to_string()).and_then(|p| p.into_iter().next().ok_or_else(|| "no plane".into()));
     let mut state = ModelState::clone(&set.state);
     let (mut bodies, mut meshes, mut failed, mut why_failed) = (Vec::new(), 0usize, 0usize, None);
+    let mut cut_bodies = BTreeMap::new();
     for shown in &set.bodies {
         let Some(body) = set.body(shown) else { continue };
         if shown.reference {
@@ -660,6 +668,11 @@ fn sectioned(set: &ShownSet, cut: &Cut) -> std::result::Result<ShownSet, Unmeasu
         match plane.clone().and_then(|plane| body.section(&plane).map_err(|e| e.to_string())) {
             Ok(Some(section)) => {
                 if let Some(slot) = state.bodies.get_mut(shown.index) {
+                    // A body that only touches the plane is shown whole, and nothing of it is hatched.
+                    let telling = plane.as_ref().ok().and_then(|plane| hatch::cut_faces(&body.body, &section.body, plane));
+                    if let Some(telling) = telling {
+                        cut_bodies.insert(shown.index, telling);
+                    }
                     *slot = section;
                 }
                 bodies.push(shown.clone());
@@ -682,7 +695,7 @@ fn sectioned(set: &ShownSet, cut: &Cut) -> std::result::Result<ShownSet, Unmeasu
         (Some(meshes), Some(failed)) => Some(format!("{meshes}; {failed}")),
         (meshes, failed) => meshes.or(failed),
     };
-    Ok(ShownSet { state: Arc::new(state), bodies, uncut })
+    Ok(ShownSet { state: Arc::new(state), bodies, uncut, cut: cut_bodies })
 }
 
 /// The extents of the bodies `shown` holds, seen on `basis`, or that they have nothing to measure:
@@ -732,6 +745,49 @@ pub fn frame(basis: Plane, scale: Scale, model: &Aabb2, centre: Vec2, cmd: &str)
 /// design ([`copy_for`]); the design is unchanged.
 pub fn on_sheet(s: &Session, drawing: &Drawing, id: u64, cmd: &str) -> Result<OnSheet> {
     on_sheet_from(&mut ViewSessions::new(s), drawing, id, cmd)
+}
+
+/// Where a saved view puts what it draws on its sheet ([`on_its_sheet`]).
+pub(crate) struct ViewOnSheet {
+    /// The frame its records are laid out through, centred on the view.
+    pub frame: ViewFrame,
+    /// The view's centre, in paper mm from the sheet's lower-left corner.
+    pub centre: Vec2,
+    /// Its sheet's size, in paper mm.
+    pub size: Vec2,
+    /// The line group its lines and records are drawn in.
+    pub line_group: LineGroup,
+}
+
+/// Where saved view `id` of `d` puts what it draws on its sheet, as the sheet draws it: its frame,
+/// centre, sheet size and line group, measured from where the design places its parts ([`on_sheet`];
+/// an occurrence move not captured yet is left out). Or, in the sheet's words
+/// ([`crate::drawing_scene::NOT_DRAWN`]), that it isn't drawn: no such view, a style the sheet can't
+/// draw yet, a section view (what points at its cut faces is in no part yet, #13046), or nothing to
+/// measure. A view that draws no model edges, a flat
+/// pattern view ([`no_model_edges`]), has no place for what points at the model
+/// ([`crate::drawing_scene::NO_PLACE`]).
+pub(crate) fn on_its_sheet(s: &Session, d: &Drawing, id: u64, cmd: &str) -> std::result::Result<ViewOnSheet, &'static str> {
+    use crate::drawing_scene::{NO_PLACE, NOT_DRAWN, designed};
+    let copy = (!s.pending_moves.is_empty()).then(|| designed(s));
+    let s = copy.as_ref().unwrap_or(s);
+    let view = d.resolve_view(id).map_err(|_| NOT_DRAWN)?;
+    if d.view(id).and_then(no_model_edges).is_some() {
+        return Err(NO_PLACE);
+    }
+    let unstyled = not_drawable(view.visual_style.value, view.reference_style.value);
+    // Not yet on a section view: its cut faces' edges are in no part (#13046).
+    if unstyled.or_else(|| not_drawable_apart(&view)).is_some() || view.cut.is_some() {
+        return Err(NOT_DRAWN);
+    }
+    let on = on_sheet(s, d, id, cmd).ok().filter(|on| on.unmeasured.is_none()).ok_or(NOT_DRAWN)?;
+    let sheet = d.views.iter().find(|v| v.id == id).and_then(|v| d.sheets.iter().find(|sheet| sheet.id == v.sheet));
+    let (Ok(through), Ok(centre), Some(Ok(size))) =
+        (frame(view.basis, view.scale.value, &on.extents.model, Vec2::ZERO, cmd), d.view_centre(id), sheet.map(|sheet| sheet.sheet.size_mm()))
+    else {
+        return Err(NOT_DRAWN);
+    };
+    Ok(ViewOnSheet { frame: through, centre, size, line_group: view.line_group.value })
 }
 
 /// [`on_sheet`], drawn from `sessions`: one read of several views makes each copy once.

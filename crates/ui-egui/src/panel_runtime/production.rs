@@ -222,7 +222,8 @@ impl Product {
                 ("references", "render.stage_panels.surfaces_references", "library"),
             ],
             Self::RenderInspector => vec![("remove", "render.inspector_remove", "delete")],
-            Self::Browser | Self::RenderShots | Self::SketchOptions | Self::Bom | Self::DrawingSheets | Self::DrawingInspector => Vec::new(),
+            Self::DrawingSheets => vec![("add-sheet", "ui.drawing_sheets.add", "plus")],
+            Self::Browser | Self::RenderShots | Self::SketchOptions | Self::Bom | Self::DrawingInspector => Vec::new(),
         };
         entries.into_iter().map(|(id, key, icon)| HeaderActionSpec { id: ControlId(id.into()), label_key: key.into(), icon: icon.into() }).collect()
     }
@@ -244,6 +245,9 @@ impl Product {
         }
         if self == Self::DrawingInspector {
             presentation.title = crate::drawing_workspace::inspector_title(app).into();
+        }
+        if self == Self::Browser && crate::drawing_workspace::active(app) && app.session.drawing("drawing.inspect").is_ok() {
+            presentation.status = Some(app.tr("ui.drawing_browser_one_drawing").into());
         }
         presentation.actions = match self {
             Self::History => crate::ui_kit::HistoryTransport::shown(app.preferences.history_play_button)
@@ -313,7 +317,20 @@ impl Product {
                     .into_iter()
                     .collect()
             }
-            Self::Browser | Self::RenderShots | Self::SketchOptions | Self::Bom | Self::DrawingSheets | Self::DrawingInspector => Vec::new(),
+            Self::DrawingSheets => {
+                presentation.status = app.session.drawing("drawing.inspect").ok().map(|drawing| drawing.sheets.len().to_string());
+                self.header_actions()
+                    .into_iter()
+                    .map(|action| RuntimeAction {
+                        id: action.id,
+                        label: solidcraft_ui_text::tr(&action.label_key).into(),
+                        enabled: true,
+                        disabled_reason: None,
+                        pressed: None,
+                    })
+                    .collect()
+            }
+            Self::Browser | Self::RenderShots | Self::SketchOptions | Self::Bom | Self::DrawingInspector => Vec::new(),
         };
         presentation
     }
@@ -574,7 +591,12 @@ pub(crate) fn drain_production_actions(app: &mut crate::SolveApp) -> PanelResult
                 crate::render_workspace::library::set_library_mode(app, mode);
             }
             Product::RenderInspector => crate::render_workspace::inspector_panel::shared_remove(app),
-            Product::Browser | Product::RenderShots | Product::SketchOptions | Product::Bom | Product::DrawingSheets | Product::DrawingInspector => {}
+            Product::DrawingSheets => {
+                if action.action.0 == "add-sheet" {
+                    crate::drawing_workspace::start(app, "drawing.sheet.add");
+                }
+            }
+            Product::Browser | Product::RenderShots | Product::SketchOptions | Product::Bom | Product::DrawingInspector => {}
         }
     }
     Ok(())
@@ -1434,10 +1456,7 @@ impl FramePanelContent for ProductionFrame<'_> {
             )
         });
         match product {
-            Product::Browser => {
-                crate::drawing_workspace::sheet_settings_entry(self.app, ui);
-                crate::browser::panel_contents(self.app, ui);
-            }
+            Product::Browser => crate::browser::panel_contents(self.app, ui),
             Product::DrawingSheets => crate::drawing_workspace::sheets_section(self.app, ui),
             Product::DrawingInspector => crate::drawing_workspace::inspector_contents(self.app, ui),
             Product::RenderBrowser => crate::browser::panel_contents(self.app, ui),

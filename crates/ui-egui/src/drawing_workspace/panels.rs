@@ -72,12 +72,23 @@ fn segments(ui: &mut egui::Ui, label: &str, mut selected: usize, options: &[&str
     });
 }
 
-fn pending(ui: &mut egui::Ui, label: &str) {
+pub(super) fn pending(ui: &mut egui::Ui, label: &str) {
     ui_kit::button(ui, label, ui_kit::Button::Enabled(false)).backing_on_disabled_hover_text(tr("ui.drawing_panel.planned"));
 }
 
 fn caption(ui: &mut egui::Ui, id: &'static str) {
     ui_kit::text(ui, tr(id), ui_kit::Text::Note(id));
+}
+
+pub(super) fn finish_placement(ui: &mut egui::Ui) -> bool {
+    ui.separator();
+    ui.horizontal(|ui| {
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            ui_kit::button(ui, tr("ui.drawing_panel.finish"), Button::Normal).clicked()
+        })
+        .inner
+    })
+    .inner
 }
 
 pub(super) fn footer(ui: &mut egui::Ui, tool: Tool) -> bool {
@@ -334,8 +345,15 @@ pub(super) fn size_caption(size: PaperSize) -> String {
 
 impl AddSheet {
     pub(super) fn open(app: &SolveApp) -> Option<Self> {
+        Self::open_after(app, None)
+    }
+
+    pub(super) fn open_after(app: &SolveApp, sheet: Option<u64>) -> Option<Self> {
         let drawing = app.session.drawing("drawing.inspect").ok()?;
-        let after = drawing.sheets.len().checked_sub(1)?;
+        let after = match sheet {
+            Some(id) => drawing.sheets.iter().position(|sheet| sheet.id == id)?,
+            None => drawing.sheets.len().checked_sub(1)?,
+        };
         let paper = PaperChoice::new(drawing.sheets.get(after)?.sheet);
         Some(Self { name: String::new(), after, paper, title_block: 0 })
     }
@@ -652,6 +670,9 @@ fn sheet_fields(app: &mut SolveApp, ui: &mut egui::Ui, sheet: &Sheet) {
     let mut name = context.data(|data| data.get_temp::<String>(name_id)).unwrap_or_else(|| sheet.name.clone());
     ui_kit::section_heading(ui, tr("ui.drawing_panel.sheet"));
     let (enter, response) = ui_kit::row(ui, tr("ui.drawing_panel.name"), |ui| ui_kit::text_field_reserving(ui, &mut name, "", 0.0));
+    if app.drawing_workspace.rename_sheet.take() == Some(sheet.id) {
+        response.request_focus();
+    }
     if enter || response.lost_focus() {
         if !name.trim().is_empty() && name.len() <= MAX_NAME_BYTES && name != sheet.name {
             change_sheet(app, sheet.id, "name", json!(name));
