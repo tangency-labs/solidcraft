@@ -44,7 +44,8 @@ not modelling a part through MCP.
   own claim (you may start from its branch). The bot's automatic cleanup deadlines in CONTRIBUTING.md
   are separate.
 - **One topic and one issue per PR.** Never commit `plan/`, build directories (`target*/`) or generated
-  reference data; check `git ls-files` before pushing. Run `cargo xtask ci` before every commit.
+  reference data; check `git ls-files` before pushing. Run `cargo xtask fast` before every commit;
+  CI runs the full gate (`cargo xtask ci`) on the pull request.
   Commit after every feature arc that builds.
 - **Merge flow.** The heavy CI jobs start when a maintainer adds `approved-for-ci`. Contributors don't
   queue or merge their own PRs: a maintainer or steward adds `ready to merge` (and `approved-for-ci` for
@@ -83,7 +84,7 @@ not modelling a part through MCP.
 - **Update the roadmap** when a milestone task lands: `docs/roadmap-detail.md` tracks status, milestones and estimates; `ROADMAP.md` is the short user-facing roadmap.
 - **Start here.** What to work on: `ROADMAP.md`, "Where help is wanted most" in CONTRIBUTING.md and the open issues labelled `help wanted`, `good first issue`, `needs-triage`; check what is already open first. Architecture: `docs/architecture.md` and "How the code is laid out" in CONTRIBUTING.md; kernel work goes in `solidcore/` ("Kernel work goes in solidcore/" in CONTRIBUTING.md). Licence rules: `deny.toml` and `cargo xtask licences --check`; only `crates/smlib` may use `solidcore`. When the code, docs and rules settle a question, act; ask on the issue or PR only when the answer changes what users see or what the change covers.
 - **Do not open a second PR** for an issue a lower-numbered open PR already closes, and keep the `Changes a default:` line filled in: `pr-checks.yml` fails both.
-- **The gate reads the working tree.** Do not switch branches while `cargo xtask ci` runs: it compiles the other branch's code and fails on a change not in the PR. Run it in the background and wait for its log.
+- **The gate reads the working tree.** Do not switch branches while `cargo xtask fast` or `cargo xtask ci` runs: it compiles the other branch's code and fails on a change not in the PR. Run it in the background and wait for its log.
 
 ## Working as an agent
 
@@ -220,12 +221,13 @@ Use the affected crate and test module in commands such as:
 cargo test --profile ci -p solidcraft-engine --lib -- tests::feature_inputs_are_parameters
 cargo clippy -p solidcraft-engine --all-targets -- -D warnings
 cargo xtask fmt --check
-cargo xtask ci
+cargo xtask fast
 ```
 
-Run `cargo xtask ci` before each implementation commit on a capable environment.
-On small environments, use targeted tests and report exactly what passed and what
-could not run; leave the full suite to CI rather than claiming it passed. Follow
+Run `cargo xtask fast` before each implementation commit: it checks what the change
+touches. CI runs the full suite; run `cargo xtask ci` locally only to reproduce a CI
+failure. Report exactly what passed and what could not run; do not claim the full
+suite passed. Follow
 [testing guidance](../../docs/book/src/dev/testing.md) for applicable checks.
 Review the diff, keep one topic, and commit the finished change. Before an approved
 push, follow "Rules for every PR" above; do not push solely to catch up

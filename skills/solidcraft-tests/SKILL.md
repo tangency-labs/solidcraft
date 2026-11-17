@@ -23,7 +23,7 @@ A failing test cannot merge without its fix (it turns `main` red): include it, o
 
 ## Running
 - `cargo xtask test` builds with the `ci` profile and runs every test binary at once; arguments after `--` go to each binary (`cargo xtask test -- shell`). It builds several times faster than `--release`; a test failing only in a debug build: say so in the PR.
-- `SOLIDCRAFT_TEST_JOBS=N` bounds concurrent commands. `cargo xtask ci` is the gate before a commit (fmt, lints, clippy `-D warnings`, tests, wasm).
+- `SOLIDCRAFT_TEST_JOBS=N` bounds concurrent commands. `cargo xtask fast` before a commit (the changed packages); CI runs the full `cargo xtask ci`.
 - Tests run in their own processes: no shared state, no wall-clock timing.
 
 ## Goldens, matrices and skipped tests
