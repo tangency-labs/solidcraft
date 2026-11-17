@@ -49,7 +49,7 @@ pub(super) fn editor(app: &mut SolveApp, ui: &mut egui::Ui, selected: Option<u64
         .show(ui, |ui| {
             let mut valid = false;
             if let Some(draft) = app.drawing_workspace.note.as_mut() {
-                let field = ui_kit::multiline_text_field(ui, tr("ui.drawing_panel.text"), ui.id().with("note_text"), &mut draft.text);
+                let field = ui_kit::multiline_text_field(ui, tr("ui.drawing_panel.text"), ui.scope_id().with("note_text"), &mut draft.text);
                 crate::scenario::publish_rect("drawing:note:text", field.rect);
                 valid = ready(&draft.text);
                 if selected.is_none() {
