@@ -12,5 +12,40 @@
     "prefs.plugin_job_invalid": "Geben Sie die längste Plugin-Aufgabe in Minuten ein, mehr als 0 und höchstens 60.",
     "prefs.plugin_job_note": "Ein Plugin-Befehl, der als lange Aufgabe gekennzeichnet ist, läuft höchstens so lange, zeigt seinen Fortschritt unten rechts in der Ansicht und stoppt, wenn Sie auf sein rotes X klicken. Andere Plugin-Befehle behalten ihr eigenes Limit von höchstens 30 Sekunden.",
     "prefs.plugin_max_job": "Längste Plugin-Aufgabe (Minuten)"
+  },
+  "ar": {
+    "operations.plugin_job": "{plugin}: {entry}",
+    "operations.plugin_job_step": "{plugin}: {entry}، {step}",
+    "prefs.plugin_job_invalid": "أدخل أطول مهمة إضافة بالدقائق، أكثر من 0 وبحد أقصى 60.",
+    "prefs.plugin_job_note": "أمر الإضافة المعلَّم كمهمة طويلة يعمل هذه المدة على الأكثر، ويعرض تقدّمه أسفل يمين العرض، ويتوقف عند الضغط على علامة X الحمراء. تحتفظ أوامر الإضافات الأخرى بحدّها الخاص البالغ 30 ثانية على الأكثر.",
+    "prefs.plugin_max_job": "أطول مهمة إضافة (دقائق)"
+  },
+  "he": {
+    "operations.plugin_job": "{plugin}: {entry}",
+    "operations.plugin_job_step": "{plugin}: {entry}, {step}",
+    "prefs.plugin_job_invalid": "הזן את משימת התוסף הארוכה ביותר בדקות, יותר מ-0 ולכל היותר 60.",
+    "prefs.plugin_job_note": "פקודת תוסף שמסומנת כמשימה ארוכה רצה לכל היותר זמן זה, מציגה את ההתקדמות שלה בפינה הימנית התחתונה של התצוגה ונעצרת כשלוחצים על ה-X האדום שלה. פקודות תוסף אחרות שומרות על המגבלה שלהן, לכל היותר 30 שניות.",
+    "prefs.plugin_max_job": "משימת התוסף הארוכה ביותר (דקות)"
+  },
+  "ja": {
+    "operations.plugin_job": "{plugin}: {entry}",
+    "operations.plugin_job_step": "{plugin}: {entry}、{step}",
+    "prefs.plugin_job_invalid": "プラグインの最長ジョブを分単位で、0 より大きく 60 以下で入力してください。",
+    "prefs.plugin_job_note": "長いジョブとして指定されたプラグインのコマンドは最長でこの時間だけ実行され、進行状況をビューの右下に表示し、赤い X を押すと停止します。その他のプラグインのコマンドには、最長 30 秒の独自の制限がそのまま適用されます。",
+    "prefs.plugin_max_job": "プラグインの最長ジョブ (分)"
+  },
+  "vi": {
+    "operations.plugin_job": "{plugin}: {entry}",
+    "operations.plugin_job_step": "{plugin}: {entry}, {step}",
+    "prefs.plugin_job_invalid": "Nhập thời gian tác vụ plugin dài nhất theo phút, lớn hơn 0 và tối đa 60.",
+    "prefs.plugin_job_note": "Lệnh plugin được đánh dấu là tác vụ dài chạy tối đa chừng này thời gian, hiện tiến độ ở góc dưới bên phải khung nhìn và dừng khi bạn nhấn dấu X đỏ của nó. Các lệnh plugin khác giữ giới hạn riêng, tối đa 30 giây.",
+    "prefs.plugin_max_job": "Tác vụ plugin dài nhất (phút)"
+  },
+  "zh": {
+    "operations.plugin_job": "{plugin}：{entry}",
+    "operations.plugin_job_step": "{plugin}：{entry}，{step}",
+    "prefs.plugin_job_invalid": "请输入插件最长任务的分钟数，大于 0 且不超过 60。",
+    "prefs.plugin_job_note": "标记为长任务的插件命令最多运行这么长时间，在视图右下角显示进度，按下其红色 X 即停止。其他插件命令保留各自最多 30 秒的限制。",
+    "prefs.plugin_max_job": "插件最长任务（分钟）"
   }
 }
