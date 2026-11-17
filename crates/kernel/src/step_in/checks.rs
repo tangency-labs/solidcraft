@@ -171,14 +171,24 @@ struct ItemHeal {
 /// The items to heal: each item one of whose checks fails or cannot run, with its jobs, in
 /// read order.
 fn to_heal(jobs: &[Job], outcomes: &[Outcome]) -> Vec<(u64, Vec<usize>)> {
+    // A file whose checks all pass (most) costs one pass over the outcomes.
+    let failing: std::collections::HashSet<u64> = jobs
+        .iter()
+        .zip(outcomes)
+        .filter(|(_, o)| matches!(o, Outcome::NeedsRepair(_) | Outcome::CouldNotRun(_)))
+        .map(|(j, _)| j.item)
+        .collect();
     let mut items: Vec<(u64, Vec<usize>)> = Vec::new();
-    for (k, job) in jobs.iter().enumerate() {
-        match items.iter_mut().find(|(item, _)| *item == job.item) {
+    let mut at: HashMap<u64, usize> = HashMap::new();
+    for (k, job) in jobs.iter().enumerate().filter(|(_, j)| failing.contains(&j.item)) {
+        match at.get(&job.item).and_then(|i| items.get_mut(*i)) {
             Some((_, of)) => of.push(k),
-            None => items.push((job.item, vec![k])),
+            None => {
+                at.insert(job.item, items.len());
+                items.push((job.item, vec![k]));
+            }
         }
     }
-    items.retain(|(_, of)| of.iter().any(|k| matches!(outcomes.get(*k), Some(Outcome::NeedsRepair(_) | Outcome::CouldNotRun(_)))));
     items
 }
 
