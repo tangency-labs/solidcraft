@@ -676,6 +676,28 @@ The selection alone is the engine command `selection.get` (run it with `engine.e
 
 Commands never open dialogs when run this way. `solidcraft-cli commands` prints the same registry.
 
+### View windows
+
+Run these commands through `engine.execute` with the following parameter objects. Window ids
+belong to the active design. The main window has id `0`.
+
+| Command | Parameters | Result |
+| --- | --- | --- |
+| `tab.view.move_to_window` | `view` (required, from `tab.view.list`), `window?` (`"new"`), `display?` (name or zero-based index), `x?`, `y?`, `w?`, `h?` (logical points), `level?` (`"views_only"`) | `{view, window, created, from, closed_source, placement}` |
+| `tab.window.list` | `{}` | `{windows: [{id, level, views, active, layout, display, placement, tool_window}]}` |
+| `tab.window.focus` | `{window}` | `{window}` |
+| `tab.window.close` | `{window}` (a pop-out id) | `{returned}`, the ids returned to the main strip in order |
+| `tab.view.activate` | `id` or zero-based `index`, and optional `window` | The active view id and the supplied window id |
+
+A placement is `{x, y, w, h, maximised, fullscreen}` or `null`. Positions are relative to the
+requested display. A pop-out opens as Views only. Closing it returns the live views to the main
+window. It does not close the design or create a design undo step. A request for a second
+pop-out returns `too_many_windows`. Trying to move the last main-window view returns
+`last_view_of_main_window`. Closing window `0` returns `cannot_close_main_window`. Invalid ids
+return `no_such_view` or `no_such_window`, and invalid geometry returns `bad_geometry`.
+A browser host returns `windows_unavailable` when asked to open a native window.
+A headless tab host reports its virtual windows with `display: null`.
+
 `document.export`, `document.import` and `document.saved` are control methods, not commands: they
 act on the app's open design rather than on an engine session, and they are not among the methods
 the agent chat may use.

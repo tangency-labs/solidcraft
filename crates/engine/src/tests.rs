@@ -1438,6 +1438,7 @@ fn unknown_commands_suggest_the_closest_ids() {
     let mut msg = |id: &str| s.execute(id, &serde_json::json!({})).unwrap_err().to_string();
     assert_eq!(msg("file.open"), "unknown command `file.open` (did you mean `doc.open`, `panel.open` or `drawing.open`?)");
     assert!(msg("solid.extrud").starts_with("unknown command `solid.extrud` (did you mean `solid.extrude`"), "{}", msg("solid.extrud"));
+    assert!(msg("tab.window.clsoe").starts_with("unknown command `tab.window.clsoe` (did you mean `tab.window.close`"));
     assert!(msg("Extrude").contains("`solid.extrude`"), "{}", msg("Extrude"));
     assert_eq!(msg("FusionFilletEdgesCommand"), "unknown command `FusionFilletEdgesCommand`");
     let long = "x".repeat(10_000);
