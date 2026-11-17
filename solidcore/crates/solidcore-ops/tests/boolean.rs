@@ -2332,3 +2332,256 @@ fn a_join_past_an_imported_edge_that_lies_off_its_face_keeps_the_tool() {
     assert_eq!(corner().counts().unwrap(), [7, 15, 10]);
     joins_as_both_less_the_shared(&corner, &slab, true, [12, 27, 18], 1e-4);
 }
+
+/// `b` written to a record and read back, as the app hands its operands to the kernel.
+fn through_record(b: &Body) -> Body {
+    Body::from_record(&b.to_record().unwrap().0, true)
+        .unwrap()
+        .0
+}
+
+/// #17596: a block with a bore of radius 149 up to z = 100 and one of radius 143 on through the
+/// top, the bore's ceiling edge rounded 2 mm, less a cylinder of radius 155 up to z = 100. The
+/// tool's top merges with the ceiling, an annulus with the 143 bore as its inner loop, and the
+/// merge turns the surviving face over: the inner loop must move onto the face use that keeps its
+/// side. It landed on the other one, and the result was refused as no solid (in the app: "Face
+/// Loop has bad orientation", "Edgeuses share same region"). The round lies inside the tool (r 147
+/// to 149, z 98 to 100), so the result is the block less the r 155 cylinder up to z = 100 and the
+/// r 143 one above it: 400 · 400 · 108 − π (155² · 100 + 143² · 8).
+#[test]
+fn a_cylinder_cut_flush_with_a_rounded_bore_ceiling_is_one_valid_solid() {
+    all_fixes();
+    let block = make_box([-200.0, -200.0, 0.0], [400.0, 400.0, 108.0]).unwrap();
+    let bore = solidcore_ops::make_cylinder([0.0, 0.0, -1.0], 149.0, 101.0).unwrap();
+    let block = boolean(block, bore, BooleanOp::Subtract).unwrap().unwrap();
+    let upper = solidcore_ops::make_cylinder([0.0, 0.0, 99.0], 143.0, 10.0).unwrap();
+    let block = boolean(block, upper, BooleanOp::Subtract).unwrap().unwrap();
+    let ceiling = common::edge_at(&block, [0.0, 149.0, 100.0]);
+    blend(
+        &block,
+        Blend::Round,
+        &[ceiling],
+        &[2.0],
+        &[],
+        Corners::Filled,
+    )
+    .unwrap();
+    assert!(block.check(CheckLevel::All).unwrap().is_valid());
+    let tool = solidcore_ops::make_cylinder([0.0, 0.0, -11.0], 155.0, 111.0).unwrap();
+    let r = boolean(
+        through_record(&block),
+        through_record(&tool),
+        BooleanOp::Subtract,
+    )
+    .unwrap()
+    .unwrap();
+    let want = 400.0 * 400.0 * 108.0 - PI * (155.0 * 155.0 * 100.0 + 143.0 * 143.0 * 8.0);
+    one_valid_solid_of_volume(&r, [9, 18, 12], want, 1e-9);
+}
+
+/// The closed drum of #16133: radius 105.5, 82 tall, walls 3 thick all round (a void of radius
+/// 102.5 from z = 3 to 79), a radius 9 hole through its axis.
+fn drum_with_a_hole() -> Body {
+    let drum = solidcore_ops::make_cylinder([0.0; 3], 105.5, 82.0).unwrap();
+    let void = solidcore_ops::make_cylinder([0.0, 0.0, 3.0], 102.5, 76.0).unwrap();
+    let drum = boolean(drum, void, BooleanOp::Subtract).unwrap().unwrap();
+    let hole = solidcore_ops::make_cylinder([0.0, 0.0, -1.0], 9.0, 97.0).unwrap();
+    boolean(drum, hole, BooleanOp::Subtract).unwrap().unwrap()
+}
+
+/// #16133: Split Body keeps what lies on each side of a plane by intersecting with a box whose
+/// face lies in it, here the plane of the drum's void ceiling, z = 79. Above it, the box's bottom
+/// merges with the ceiling, an annulus whose inner loop is the hole, and the merge turns the
+/// surviving face over: the hole's loop must move onto the face use that keeps its side. It
+/// landed on the other one and the part was refused as no solid (in the app: "Face Loop has bad
+/// orientation", "Edgeuses share same region"). Operands go through the record as the app's do.
+/// Below: π (105.5² · 79 − 102.5² · 76 − 9² · 3); above, the 3 mm lid: π (105.5² − 9²) · 3.
+#[test]
+fn a_drum_cut_on_its_void_ceiling_with_a_hole_through_both_is_two_valid_solids() {
+    all_fixes();
+    let drum = drum_with_a_hole();
+    assert!(drum.check(CheckLevel::All).unwrap().is_valid());
+    let below = make_box([-200.0, -200.0, -10.0], [400.0, 400.0, 89.0]).unwrap();
+    let above = make_box([-200.0, -200.0, 79.0], [400.0, 400.0, 20.0]).unwrap();
+    for (tool, counts, want) in [
+        (
+            below,
+            [6, 9, 6],
+            PI * (105.5 * 105.5 * 79.0 - 102.5 * 102.5 * 76.0 - 9.0 * 9.0 * 3.0),
+        ),
+        (above, [4, 6, 4], PI * (105.5 * 105.5 - 9.0 * 9.0) * 3.0),
+    ] {
+        let r = boolean(
+            through_record(&drum_with_a_hole()),
+            through_record(&tool),
+            BooleanOp::Intersect,
+        )
+        .unwrap()
+        .unwrap();
+        one_valid_solid_of_volume(&r, counts, want, 1e-9);
+    }
+}
+
+/// #18064's bin: a 168 x 252 x 35 block with a pocket from z = 7 up, its walls x = 2.85 and
+/// 165.15, y = 2.85 and 249.15, its corners rounds of radius 1.15 about (4, 4), (4, 248),
+/// (164, 4) and (164, 248).
+fn pocketed_bin() -> Body {
+    let (x0, x1, y0, y1, r, z) = (2.85, 165.15, 2.85, 249.15, 1.15, 7.0);
+    let line = |a: [f64; 2], b: [f64; 2]| Curve::Line {
+        start: [a[0], a[1], z],
+        end: [b[0], b[1], z],
+    };
+    let round = |c: [f64; 2], start: f64| Curve::Arc {
+        center: [c[0], c[1], z],
+        axis: [0.0, 0.0, 1.0],
+        reference: [1.0, 0.0, 0.0],
+        radius: r,
+        start,
+        end: start + PI / 2.0,
+    };
+    let outline = [
+        line([x0 + r, y0], [x1 - r, y0]),
+        round([x1 - r, y0 + r], -PI / 2.0),
+        line([x1, y0 + r], [x1, y1 - r]),
+        round([x1 - r, y1 - r], 0.0),
+        line([x1 - r, y1], [x0 + r, y1]),
+        round([x0 + r, y1 - r], PI / 2.0),
+        line([x0, y1 - r], [x0, y0 + r]),
+        round([x0 + r, y0 + r], PI),
+    ];
+    let pocket = extrude(
+        &outline,
+        [0.0, 0.0, 1.0],
+        35.0,
+        0.0,
+        DraftCorner::Curvature,
+        true,
+    )
+    .unwrap();
+    let block = make_box([0.0, 0.0, 0.0], [168.0, 252.0, 35.0]).unwrap();
+    boolean(block, pocket, BooleanOp::Subtract)
+        .unwrap()
+        .unwrap()
+}
+
+/// The top of #18064's insert: the quadratic spline from (y, z) = (2.85, 28) through the
+/// control point (200, 7) to (249.15, 7), tangent there to the pocket's floor z = 7, as
+/// (y, height above the floor, dy/dt) at `t`.
+fn insert_top(t: f64) -> [f64; 3] {
+    let (y0, ym, y1) = (2.85, 200.0, 249.15);
+    let u = 1.0 - t;
+    let y = u * u * y0 + 2.0 * t * u * ym + t * t * y1;
+    let dy = 2.0 * (1.0 - t) * (ym - y0) + 2.0 * t * (y1 - ym);
+    [y, 21.0 * u * u, dy]
+}
+
+/// The parameter of `insert_top` at `y`.
+#[allow(clippy::disallowed_methods)] // the test's closed form, not ops computing it
+fn insert_top_at(y: f64) -> f64 {
+    let (y0, ym, y1) = (2.85_f64, 200.0_f64, 249.15_f64);
+    let (a, b, c) = (y0 - 2.0 * ym + y1, 2.0 * (ym - y0), y0 - y);
+    (-b + (b * b - 4.0 * a * c).sqrt()) / (2.0 * a)
+}
+
+/// #18064's insert against the pocket's wall x = 2.85: a prism along y from 2.85 to 249.15
+/// whose section is the quadrilateral of the wall from z = 7 to 28, the floor out to
+/// x = 26.868841 and a side up to x = 9.247749 at z = 28, cut through along x by the region
+/// above `insert_top`. Its top meets the floor tangentially along the line y = 249.15, which
+/// touches the corner round there at its end.
+fn insert_flush_with_a_wall() -> Body {
+    let (f, top) = (7.0, 28.0);
+    let q = [[2.85, f], [26.868841, f], [9.247749, top], [2.85, top]];
+    let section: Vec<Curve> = (0..4)
+        .map(|i| {
+            let (a, b) = (q[i], q[(i + 1) % 4]);
+            Curve::Line {
+                start: [a[0], 2.85, a[1]],
+                end: [b[0], 2.85, b[1]],
+            }
+        })
+        .collect();
+    let prism = extrude(
+        &section,
+        [0.0, 1.0, 0.0],
+        246.3,
+        0.0,
+        DraftCorner::Curvature,
+        true,
+    )
+    .unwrap();
+    let x = -5.0;
+    let above = [
+        Curve::Nurbs {
+            degree: 2,
+            points: vec![[x, 2.85, top, 1.0], [x, 200.0, f, 1.0], [x, 249.15, f, 1.0]],
+            knots: vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0],
+        },
+        Curve::Line {
+            start: [x, 249.15, f],
+            end: [x, 249.15, top],
+        },
+        Curve::Line {
+            start: [x, 249.15, top],
+            end: [x, 2.85, top],
+        },
+    ];
+    let cut = extrude(
+        &above,
+        [1.0, 0.0, 0.0],
+        200.0,
+        0.0,
+        DraftCorner::Curvature,
+        true,
+    )
+    .unwrap();
+    boolean(prism, cut, BooleanOp::Subtract).unwrap().unwrap()
+}
+
+/// `f` integrated over [a, b] by Simpson's rule on `n` (even) intervals.
+fn simpson(f: impl Fn(f64) -> f64, a: f64, b: f64, n: u32) -> f64 {
+    let h = (b - a) / f64::from(n);
+    let inner: f64 = (1..n)
+        .map(|i| f(a + f64::from(i) * h) * if i % 2 == 1 { 4.0 } else { 2.0 })
+        .sum();
+    (f(a) + f(b) + inner) * h / 3.0
+}
+
+/// #18064: a Gridfinity bin's insert joined into it, flush with the pocket's wall x = 2.85,
+/// its floor and its end walls, its spline top meeting the floor tangentially along the far
+/// wall y = 249.15. That line is tangent to the corner round about (4, 248) at its end
+/// (4, 249.15), and the curve where the top crosses the round runs within 1e-10 of the
+/// round's floor edge for 0.027 before it ends there, touching it to fourth order. The
+/// curve/edge intersection took the last 0.027 for a coincident stretch (both its ends
+/// within the scaled zero) and split the curve there, which the insert's own topology did
+/// not follow: the join was refused (`SM_ERR`; on the issue's insert, "not a closed solid"),
+/// while the mirror image against x = 165.15, whose subdivision found the touching point,
+/// joined. The range is the flank of the tangency at the touching point and is dropped. The
+/// join is the bin and the insert less what they share: the insert's corners
+/// inside the walls outside the two rounds, its full section there, of height the top's.
+#[test]
+fn an_insert_whose_top_is_tangent_to_the_floor_at_a_corner_round_joins_its_bin() {
+    all_fixes();
+    let r = 1.15_f64;
+    // what the insert shares with the bin: over each corner square outside its round, the
+    // insert's height above the floor
+    #[allow(clippy::disallowed_methods)] // the test's closed form, not ops computing it
+    let width = |dy: f64| 4.0 - (r * r - dy * dy).max(0.0).sqrt() - 2.85;
+    let shared_over = |ya: f64, yb: f64, centre: f64| {
+        simpson(
+            |t| {
+                let [y, h, dy] = insert_top(t);
+                width(y - centre) * h * dy
+            },
+            insert_top_at(ya),
+            insert_top_at(yb),
+            200_000,
+        )
+    };
+    let shared = shared_over(2.85, 4.0, 4.0) + shared_over(248.0, 249.15, 248.0);
+    let bin = pocketed_bin();
+    let insert = insert_flush_with_a_wall();
+    let want = bin.volume(1e-11).unwrap() + insert.volume(1e-11).unwrap() - shared;
+    let joined = boolean(bin, insert, BooleanOp::Union).unwrap().unwrap();
+    // the bin's 15 faces with the insert's top and slanted side
+    one_valid_solid_of_volume(&joined, [17, 41, 27], want, 1e-9);
+}
