@@ -1,8 +1,9 @@
 //! Extrude by dragging: press on a planar face (or a sketch profile) and pull. Once the pointer
 //! has moved far enough upward, or along the surface's normal on screen, Extrude starts on the
 //! pick; the distance follows the pointer along the normal in steps. Moving the pointer sideways
-//! while pulling sets the step: to the right it grows (1, 2, 3 ... 10 mm), to the left it
-//! shrinks (0.8, 0.5 ... 0.1 mm). The step and the distance show beside the pointer. Letting go
+//! while pulling sets the step: to the right it grows, to the left it shrinks. The step
+//! follows the design's units (0.01 mm or 0.001 in at the fine end), regardless of camera
+//! zoom. The step and the distance show beside the pointer. Letting go
 //! leaves the Extrude window open to adjust and confirm with OK. A press that goes any other
 //! way stays a box selection.
 
@@ -21,11 +22,20 @@ const START_PX: f32 = 6.0;
 const ALIGNED: f32 = 0.8;
 /// Screen distance the pointer travels sideways for one step of the ladder.
 const PX_PER_STEP: f32 = 44.0;
-/// The step sizes (mm) a pull can snap to, finest first.
+/// The step ladder in design units, finest first. Inch designs use one tenth of
+/// each number, starting at 0.001 in rather than 0.01 in.
 const STEPS: [f64; 25] =
     [0.01, 0.02, 0.05, 0.1, 0.2, 0.3, 0.4, 0.5, 0.65, 0.7, 0.8, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 8.0, 10.0, 20.0, 50.0, 100.0, 200.0, 500.0, 1000.0];
 
-/// The ladder position nearest to `step`.
+/// One ladder unit expressed in model millimetres. Camera zoom changes travel per pixel,
+/// not the increments written to the model (#9035).
+fn step_scale(doc: &solidcraft_engine::doc::Document) -> f64 {
+    let unit = crate::length_input::unit(doc);
+    let mm_per_unit = solidcraft_engine::doc::expr::unit_info(unit).map_or(1.0, |(_, scale)| scale);
+    if unit == "in" { mm_per_unit / 10.0 } else { mm_per_unit }
+}
+
+/// The ladder position nearest to `step`, in the ladder's units.
 fn nearest_step(step: f64) -> usize {
     (0..STEPS.len()).min_by(|a, b| (STEPS[*a] / step).ln().abs().total_cmp(&(STEPS[*b] / step).ln().abs())).unwrap_or(0)
 }
@@ -100,7 +110,7 @@ pub fn press(app: &mut SolveApp, proj: &Proj, at: Pos2) {
         normal,
         grab,
         started: false,
-        step0: nearest_step(crate::canvas::snap_step(app.cam.half_height())),
+        step0: 0, // minimum increment follows the design unit, not zoom
         x0: at.x,
         step: 0.0,
         at,
@@ -140,7 +150,7 @@ pub fn to(app: &mut SolveApp, proj: &Proj, p: Pos2) {
         g = Gesture { started: true, x0: p.x, ..g };
     }
     g.at = p;
-    g.step = STEPS[step_index(g.step0, p.x - g.x0)];
+    g.step = STEPS[step_index(g.step0, p.x - g.x0)] * step_scale(&app.session.doc);
     let Some(v) = crate::canvas::along(proj, p, g.base, g.normal) else {
         app.viewport.drag_extrude.gesture = Some(g);
         return;
@@ -177,7 +187,7 @@ pub fn tick(app: &mut SolveApp) {
 /// The step of the last pull, for the value box next to the distance.
 pub fn step_note(app: &SolveApp) -> Option<String> {
     let step = app.viewport.drag_extrude.last_step?;
-    Some(format!("Step {}", crate::canvas::format_len(&app.session.doc, step)))
+    Some(format!("Step {}", crate::length_input::shown(&app.session.doc, step)))
 }
 
 /// The ladder of steps beside the pointer while pulling: the one in use between its neighbours.
@@ -185,11 +195,12 @@ pub fn step_note(app: &SolveApp) -> Option<String> {
 pub fn show(app: &SolveApp, painter: &egui::Painter) {
     let Some(g) = app.viewport.drag_extrude.gesture.as_ref().filter(|g| g.started) else { return };
     let t = solidcraft_theme::Tokens::get();
-    let now = nearest_step(g.step);
+    let scale = step_scale(&app.session.doc);
+    let now = nearest_step(g.step / scale);
     let galley = |i: usize, current: bool| {
         let size = if current { t.font_body * 1.25 } else { t.font_body };
         let color = if current { t.accent } else { t.text_dim };
-        let text = STEPS.get(i).map(|s| crate::canvas::format_len(&app.session.doc, *s)).unwrap_or_default();
+        let text = STEPS.get(i).map(|s| crate::length_input::shown(&app.session.doc, *s * scale)).unwrap_or_default();
         painter.layout_no_wrap(text, egui::FontId::proportional(size), color)
     };
     let cells: Vec<_> = (now.saturating_sub(2)..=(now + 2).min(STEPS.len() - 1)).map(|i| (galley(i, i == now), i == now)).collect();
@@ -212,6 +223,20 @@ pub fn show(app: &SolveApp, painter: &egui::Painter) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn drag_steps_follow_design_units() {
+        let mut session = solidcraft_engine::Session::default();
+        assert_eq!(crate::length_input::unit(&session.doc), "mm");
+        assert!((STEPS[0] * step_scale(&session.doc) - 0.01).abs() < 1e-12);
+        assert_eq!(crate::length_input::shown(&session.doc, STEPS[0] * step_scale(&session.doc)), "0.01 mm");
+
+        session.doc_mut().units = "in".to_string();
+        let scale = step_scale(&session.doc);
+        assert!((STEPS[0] * scale - 0.0254).abs() < 1e-12);
+        assert_eq!(crate::length_input::shown(&session.doc, STEPS[0] * scale), "0.001 in");
+        assert!((STEPS[nearest_step(0.1)] * scale - 0.254).abs() < 1e-12);
+    }
 
     #[test]
     fn sideways_moves_walk_the_step_ladder() {
