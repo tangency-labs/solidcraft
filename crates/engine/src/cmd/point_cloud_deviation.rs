@@ -349,7 +349,7 @@ mod tests {
 
     /// A session with a 20 × 20 × 10 mm box from the origin, named `Box`, and the cloud `points`.
     fn box_and_cloud(test: &str, points: &[[f32; 3]]) -> Session {
-        let mut s = Session::new();
+        let mut s = Session::default();
         s.execute("solid.box", &json!({"length": 20, "width": 20, "height": 10, "corner": [0, 0, 0], "body_name": "Box"})).unwrap();
         s.execute("pointcloud.insert", &json!({"path": ply(test, points), "name": "scan"})).unwrap();
         s
@@ -419,7 +419,7 @@ mod tests {
 
     #[test]
     fn a_sphere_gives_radial_offsets_with_their_sign() {
-        let mut s = Session::new();
+        let mut s = Session::default();
         s.execute("solid.sphere", &json!({"center": [0, 0, 0], "radius": 10, "body_name": "Ball"})).unwrap();
         let pts = [[10.5, 0.0, 0.0], [0.0, -9.0, 0.0], [0.0, 0.0, 12.0]];
         s.execute("pointcloud.insert", &json!({"path": ply("sphere", &pts), "name": "scan"})).unwrap();
