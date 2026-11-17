@@ -391,13 +391,18 @@ pub enum JointSkip {
     /// Its slots meet those of the earlier joint at this index on the same slot plate (design
     /// 5.7 `meets_other_joint`).
     MeetsOtherJoint(usize),
+    /// One of its plates already takes the earlier joint at this index in another direction
+    /// (design 5.7 `other_direction`): a slot plate's is its `n`, a tab plate's its `m`.
+    OtherDirection(usize),
 }
 
 /// One feature's joints in pick order (design 5.7): each `(t, s, p)` names the tab plate and
 /// the slot plate by index into `plates` and the plane P of S. Each joint is planned
 /// ([`Body::tab_slot_plan`]); a later joint whose slot outlines meet (by
 /// [`solidcore::tab_slot::apart`], `spec.min_land`) a slot of an earlier made joint on the same S
-/// and P is skipped, naming that joint. The answer has one entry per joint, `None` for a joint
+/// and P is skipped, naming that joint; before that, a joint asking a plate for another
+/// direction (up to sign, [`solidcore::plate_contact::bearing`]) than an earlier made joint
+/// gave it is skipped `other_direction`, naming that joint. The answer has one entry per joint, `None` for a joint
 /// that is made. No plate changes. Only slots on one plane of S are compared so far.
 ///
 /// # Errors
@@ -411,6 +416,8 @@ pub fn tab_slot_joints(
 ) -> Result<Vec<Option<JointSkip>>> {
     // (joint, slot plate, P, slot outline) of every made joint's slots.
     let mut cuts: Vec<(usize, usize, Plane, Region2)> = Vec::new();
+    // The direction each plate takes and the joint that gave it.
+    let mut dirs: Vec<Option<(solidcore::Vec3, usize)>> = vec![None; plates.len()];
     let mut out = Vec::with_capacity(joints.len());
     for (j, &(t, s, p)) in joints.iter().enumerate() {
         let (Some(tab), Some(slot)) = (plates.get(t), plates.get(s)) else {
@@ -423,6 +430,29 @@ pub fn tab_slot_joints(
                 continue;
             }
         };
+        let m = match tab.plate_pair(slot, p, tol)? {
+            Ok(joint) => joint.faces.b.normal,
+            Err(skip) => {
+                out.push(Some(JointSkip::Pair(skip)));
+                continue;
+            }
+        };
+        let mut other_direction = None;
+        for (plate, dir) in [(s, p.normal), (t, m)] {
+            if let Some(Some((had, by))) = dirs.get(plate) {
+                if !matches!(
+                    pc::bearing(*had, dir).map_err(status)?,
+                    pc::Bearing::Same | pc::Bearing::Opposite
+                ) {
+                    other_direction = Some(*by);
+                    break;
+                }
+            }
+        }
+        if let Some(by) = other_direction {
+            out.push(Some(JointSkip::OtherDirection(by)));
+            continue;
+        }
         let mine: Vec<Region2> = plan
             .iter()
             .filter_map(|st| st.tabs.as_ref().ok())
@@ -447,6 +477,11 @@ pub fn tab_slot_joints(
             continue;
         }
         cuts.extend(mine.into_iter().map(|o| (j, s, p, o)));
+        for (plate, dir) in [(s, p.normal), (t, m)] {
+            if let Some(d @ None) = dirs.get_mut(plate) {
+                *d = Some((dir, j));
+            }
+        }
         out.push(None);
     }
     Ok(out)
@@ -885,6 +920,34 @@ mod tests {
         assert_eq!(
             tab_slot_joints(&plates, &[(9, 0, p)], spec2(), TOL),
             Err(Error::Argument)
+        );
+    }
+
+    /// 16.2 another direction (design 5.7 `other_direction`): Bottom takes the wall's joint along
+    /// Z; a post on Bottom's end face x = 160 asks it for X, so it is skipped naming joint 0. The
+    /// wall again on P (Z, the same axis) is not skipped for direction.
+    #[test]
+    fn a_plate_takes_one_direction() {
+        let (s, p) = bottom();
+        let side = Plane {
+            normal: Vec3::X,
+            offset: 160.0,
+        };
+        let wall = make_box([20.0, 30.0, 6.0], [120.0, 6.0, 60.0]).unwrap();
+        let post = make_box([160.0, 20.0, 1.0], [40.0, 60.0, 4.0]).unwrap();
+        let other = make_box([20.0, 60.0, 6.0], [120.0, 6.0, 60.0]).unwrap();
+        assert!(post.plate_pair(&s, side, TOL).unwrap().is_ok());
+        let plates = [s, wall, post, other];
+        let run = |joints: &[(usize, usize, Plane)]| {
+            tab_slot_joints(&plates, joints, spec2(), TOL).unwrap()
+        };
+        assert_eq!(
+            run(&[(1, 0, p), (2, 0, side), (3, 0, p)]),
+            vec![None, Some(JointSkip::OtherDirection(0)), None]
+        );
+        assert_eq!(
+            run(&[(2, 0, side), (1, 0, p)]),
+            vec![None, Some(JointSkip::OtherDirection(0))]
         );
     }
 }
