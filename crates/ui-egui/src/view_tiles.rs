@@ -21,6 +21,7 @@ use solidcraft_theme::Tokens;
 use solidcraft_views::{Axis, Rect as TileRect};
 
 use crate::SolveApp;
+use crate::ui_kit::BackingTooltipExt as _;
 
 /// The space between neighbouring views.
 const GUTTER: f32 = 12.0;
@@ -100,7 +101,7 @@ pub(crate) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     let empties: Vec<Rect> = places.iter().filter(|(id, _)| *id == solidcraft_views::EMPTY).map(|(_, cell)| *cell).collect();
     places.retain(|(id, _)| *id != solidcraft_views::EMPTY);
     let press = ui.input(|i| i.pointer.any_pressed().then(|| i.pointer.interact_pos()).flatten()).filter(|p| !crate::shell::covered(app, *p));
-    let mut pressed = None;
+    app.viewport.pending_tile_focus = None;
     let mut cards = Vec::new();
     let mut ground = free;
     // Set aside under everything the cards draw: the ground's picture fills the whole area.
@@ -111,10 +112,7 @@ pub(crate) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         let frame = frame_of(cell);
         // A press on a header button is the button's: focusing the card first would take its buttons away before the click ends.
         let on_button = press.is_some_and(|p| !is_ground && (0..3).any(|slot| button_rect(cell, slot as f32).contains(p)));
-        if !on_button && press.is_some_and(|p| if is_ground { frame.contains(p) } else { cell.contains(p) }) {
-            pressed = Some(id);
-        }
-        let mut tile = ui.new_child(UiBuilder::new().id_salt(("view_tile", id)).max_rect(frame));
+        let mut tile = ui.new_child(UiBuilder::new().id_salt(("view_tile", app.session.uid, id)).max_rect(frame));
         tile.set_clip_rect(ui.clip_rect().intersect(if is_ground { area } else { frame }));
         app.viewport.tile = Some(slot(id));
         app.viewport.card = !is_ground;
@@ -127,7 +125,16 @@ pub(crate) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             }
             ground = frame;
         } else {
-            crate::documents::with_view_look(app, id, |app| crate::viewport::show(app, &mut tile));
+            crate::documents::with_view_look(app, id, |app| {
+                app.step_view_animation(ui.ctx());
+                crate::viewport::show(app, &mut tile);
+                let controls = app.viewport.layout.as_ref().filter(|layout| layout.viewport == frame);
+                if !on_button
+                    && press.is_some_and(|p| cell.contains(p) && !controls.is_some_and(|l| l.axis_view.contains(p) || l.navigation.contains(p)))
+                {
+                    app.viewport.pending_tile_focus = Some(id);
+                }
+            });
             cards.push((id, frame));
         }
         app.viewport.tile = None;
@@ -179,12 +186,19 @@ pub(crate) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         Some((id, CardAction::Close)) => {
             crate::documents::view_close(app, id);
         }
-        None => {
-            if let Some(id) = pressed.filter(|id| *id != focus) {
-                crate::documents::focus_view(app, id);
-            }
-        }
+        None => {}
     }
+}
+
+/// Apply a canvas press after all controls for this frame have run with the old focus.
+pub(crate) fn focus_pressed(app: &mut SolveApp) -> bool {
+    let Some(id) = app.viewport.pending_tile_focus.take() else { return false };
+    let Some((_, rect)) = app.viewport.cards.iter().find(|(view, _)| *view == id).copied() else { return false };
+    if !crate::documents::focus_view(app, id) {
+        return false;
+    }
+    app.viewport.rect = Some(rect);
+    true
 }
 
 /// Where the header button in `slot` (0 the rightmost) of the card `card` lies.
@@ -256,7 +270,7 @@ fn empty_picker(app: &SolveApp, ui: &mut egui::Ui, ordinal: usize, cell: Rect) -
     let close = Rect::from_center_size(cell.right_top() + vec2(-18.0, 18.0), vec2(22.0, 22.0));
     let resp = ui
         .interact(close, ui.scope_id().with(("empty_cell_close", ordinal)), Sense::click())
-        .on_hover_text(solidcraft_ui_text::tr_label("Close this cell"));
+        .backing_on_hover_text(solidcraft_ui_text::tr_label("Close this cell"));
     let ink = Stroke::new(1.6, if resp.hovered() { t.text } else { t.text_dim });
     let c = close.center();
     painter.line_segment([c + vec2(-4.5, -4.5), c + vec2(4.5, 4.5)], ink);
@@ -276,21 +290,32 @@ enum CardAction {
     Close,
 }
 
-/// The controls of the cards (the compass), each acting on its own view. The focused view's are
+/// The controls of the cards, each acting on its own view. The focused view's are
 /// the host's, drawn after this.
 pub(crate) fn card_controls(app: &mut SolveApp, ui: &mut egui::Ui) {
     let ground = app.viewport.rect;
     let cards = std::mem::take(&mut app.viewport.cards);
-    let bar = std::mem::replace(&mut app.ui.show_navigation_bar, false);
     for (id, rect) in &cards {
-        let mut controls = ui.new_child(UiBuilder::new().id_salt(("card_controls", id)).max_rect(*rect));
-        controls.set_clip_rect(ui.clip_rect().intersect(*rect));
+        let mut controls = controls_ui(ui, app.session.uid, *id, *rect);
         app.viewport.rect = Some(*rect);
-        crate::documents::with_view_look(app, *id, |app| crate::viewport::show_card_controls(app, &mut controls, *rect));
+        app.viewport.card = true;
+        crate::documents::with_view_look(app, *id, |app| {
+            crate::viewport::show_card_controls(app, &mut controls, *rect);
+            if app.pending_fit.is_some() {
+                app.resolve_fit(ui.ctx());
+            }
+        });
+        app.viewport.card = false;
     }
-    app.ui.show_navigation_bar = bar;
     app.viewport.rect = ground;
     app.viewport.cards = cards;
+}
+
+/// Use the same widget identities with or without focus, so a gesture or menu follows its owner.
+pub(crate) fn controls_ui(ui: &mut egui::Ui, document: u64, id: u64, rect: Rect) -> egui::Ui {
+    let mut child = ui.new_child(UiBuilder::new().id_salt(("view_controls", document, id)).max_rect(rect));
+    child.set_clip_rect(ui.clip_rect().intersect(rect));
+    child
 }
 
 /// A card lifted off the focused view: a soft shadow around it, its frame, and a header with the
@@ -333,7 +358,7 @@ fn card_chrome(app: &SolveApp, ui: &mut egui::Ui, id: u64, card: Rect) -> Option
             CardAction::Remove => solidcraft_ui_text::tr_label("Remove from this window"),
             CardAction::Close => solidcraft_ui_text::tr_label("Close view"),
         };
-        let resp = resp.on_hover_text(tip);
+        let resp = resp.backing_on_hover_text(tip);
         if resp.hovered() {
             painter.rect_filled(rect, CornerRadius::same(5), t.accent_soft);
         }
@@ -431,6 +456,83 @@ fn splitter_handle(app: &mut SolveApp, ui: &mut egui::Ui, splitter: &solidcraft_
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    use serde_json::json;
+
+    #[test]
+    fn tiled_navigation_controls_only_change_their_own_view() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.app.ui.show_browser = false;
+        h.app.ui.show_timeline = false;
+        h.app.ui.show_navigation_bar = true;
+        h.app.ui.perspective = false;
+        h.app.ui.auto_ortho_faces = false;
+        h.app.ui.visual_style = 1;
+        h.app.preferences.navigation_bar.slots = vec!["projection".into(), "visual_style".into()];
+        let ground = h.app.docs.views.active().id;
+        assert_eq!(crate::documents::view_layout(&mut h.app, solidcraft_views::Preset::SideBySide), 2);
+        h.frames(4);
+        let (card, rect) = h.app.viewport.cards[0];
+        let ctx = h.ctx.clone();
+        let bar = crate::documents::with_view_look(&mut h.app, card, |app| crate::navigation_bar_view::measured(app, &ctx, rect));
+        assert!(bar.rect.is_positive() && rect.contains_rect(bar.rect));
+        let click_slot = |h: &mut crate::scenario::Harness, id: &str| {
+            let at = bar.slots.iter().find(|(slot, _)| slot.id == id).unwrap().1.center();
+            h.step(&json!({"click":[at.x,at.y]})).unwrap();
+        };
+        click_slot(&mut h, "projection");
+        assert_eq!(h.app.docs.views.active().id, ground);
+        assert!(!h.app.perspective_view());
+        assert!(crate::documents::with_view_look(&mut h.app, card, |app| app.perspective_view()));
+
+        click_slot(&mut h, "visual_style");
+        crate::test_support::click(&mut h, "nav:style:wireframe");
+        assert_eq!(h.app.docs.views.active().id, ground);
+        assert_eq!(h.app.ui.visual_style, 1);
+        assert!(crate::documents::focus_view(&mut h.app, card));
+        assert!(h.app.perspective_view());
+        assert_eq!(h.app.ui.visual_style, 2);
+        assert!(crate::documents::focus_view(&mut h.app, ground));
+        assert!(!h.app.perspective_view());
+        assert_eq!(h.app.ui.visual_style, 1);
+    }
+
+    #[test]
+    fn tiled_compass_drag_stays_with_its_view_after_crossing_the_gutter() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.app.ui.show_browser = false;
+        h.app.ui.show_timeline = false;
+        h.app.preferences.navigator_style = crate::prefs::NavigatorStyle::Axes;
+        h.app.preferences.orbit_cursor_wrap = false;
+        let ground = h.app.docs.views.active().id;
+        assert_eq!(crate::documents::view_layout(&mut h.app, solidcraft_views::Preset::SideBySide), 2);
+        h.frames(4);
+        let (card, rect) = h.app.viewport.cards[0];
+        let ground_rect = h.app.viewport.rect.unwrap();
+        let ctx = h.ctx.clone();
+        let (axis, before_card) = crate::documents::with_view_look(&mut h.app, card, |app| {
+            app.viewport.rect = Some(rect);
+            app.viewport.card = true;
+            crate::viewport::refresh_layout(app, &ctx);
+            let axis = crate::viewport::axis_rect(app, rect);
+            app.viewport.rect = Some(ground_rect);
+            app.viewport.card = false;
+            (axis, app.cam)
+        });
+        assert!(axis.is_positive() && rect.contains_rect(axis));
+        let at = axis.center();
+        let target = pos2(ground_rect.center().x, at.y + 20.0);
+        let ground_cam = h.app.cam;
+        h.call("ui.drag", json!({"x0":at.x,"y0":at.y,"x1":target.x,"y1":target.y,"steps":12}));
+        assert_eq!(h.app.docs.views.active().id, ground);
+        assert_eq!(h.app.cam, ground_cam);
+        crate::documents::with_view_look(&mut h.app, card, |app| {
+            assert_ne!(app.cam, before_card);
+            assert!(app.viewport.axis_drag.is_none());
+        });
+    }
 
     #[test]
     fn a_view_keeps_its_frame_whether_it_is_the_ground_or_a_card() {
