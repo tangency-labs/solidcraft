@@ -383,6 +383,75 @@ pub fn slot_prism(p: Plane, outline: &Region2, t_s: f64, over: f64) -> Result<Bo
     .map(Body::new)
 }
 
+/// Why a joint of one feature ([`tab_slot_joints`]) is not made.
+#[derive(Clone, Debug, PartialEq)]
+pub enum JointSkip {
+    /// The pair itself has no joint ([`Body::tab_slot_plan`]).
+    Pair(PairSkip),
+    /// Its slots meet those of the earlier joint at this index on the same slot plate (design
+    /// 5.7 `meets_other_joint`).
+    MeetsOtherJoint(usize),
+}
+
+/// One feature's joints in pick order (design 5.7): each `(t, s, p)` names the tab plate and
+/// the slot plate by index into `plates` and the plane P of S. Each joint is planned
+/// ([`Body::tab_slot_plan`]); a later joint whose slot outlines meet (by
+/// [`solidcore::tab_slot::apart`], `spec.min_land`) a slot of an earlier made joint on the same S
+/// and P is skipped, naming that joint. The answer has one entry per joint, `None` for a joint
+/// that is made. No plate changes. Only slots on one plane of S are compared so far.
+///
+/// # Errors
+/// [`crate::Error::Argument`] for a plate index out of range; those of
+/// [`Body::tab_slot_plan`] and of the kernel's checks.
+pub fn tab_slot_joints(
+    plates: &[Body],
+    joints: &[(usize, usize, Plane)],
+    spec: TabSlotSpec,
+    tol: f64,
+) -> Result<Vec<Option<JointSkip>>> {
+    // (joint, slot plate, P, slot outline) of every made joint's slots.
+    let mut cuts: Vec<(usize, usize, Plane, Region2)> = Vec::new();
+    let mut out = Vec::with_capacity(joints.len());
+    for (j, &(t, s, p)) in joints.iter().enumerate() {
+        let (Some(tab), Some(slot)) = (plates.get(t), plates.get(s)) else {
+            return Err(Error::Argument);
+        };
+        let plan = match tab.tab_slot_plan(slot, p, spec, tol)? {
+            Ok((_, plan)) => plan,
+            Err(skip) => {
+                out.push(Some(JointSkip::Pair(skip)));
+                continue;
+            }
+        };
+        let mine: Vec<Region2> = plan
+            .iter()
+            .filter_map(|st| st.tabs.as_ref().ok())
+            .flatten()
+            .filter(|tp| tp.skip.is_none() && tp.tab.is_ok())
+            .map(|tp| tp.slot.clone())
+            .collect();
+        let mut meets = None;
+        'earlier: for (other, _, _, cut) in cuts.iter().filter(|c| c.1 == s && c.2 == p) {
+            for o in &mine {
+                if ts::apart(&[cut.clone(), o.clone()], spec.min_land, tol)
+                    .map_err(status)?
+                    .is_some()
+                {
+                    meets = Some(*other);
+                    break 'earlier;
+                }
+            }
+        }
+        if let Some(other) = meets {
+            out.push(Some(JointSkip::MeetsOtherJoint(other)));
+            continue;
+        }
+        cuts.extend(mine.into_iter().map(|o| (j, s, p, o)));
+        out.push(None);
+    }
+    Ok(out)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -781,5 +850,41 @@ mod tests {
         assert_eq!(pick([160.0, 33.0, 3.0]).unwrap().0, side);
         assert_eq!(pick([150.0, 33.0, 6.0]), Err(PairSkip::SeveralContacts));
         assert_eq!(t.plate_pair_near(&s, &[], None, TOL), Err(Error::Argument));
+    }
+
+    /// 16.2 two joints on one S meeting (design 5.7 `meets_other_joint`): walls apart (y 30..36
+    /// and 60..66) are both made; a wall crossing the first (x 27..33, y 20..100) has a slot
+    /// meeting the first wall's, so it is skipped naming joint 0. A pair with no joint keeps its
+    /// own skip; a bad plate index is refused.
+    #[test]
+    fn two_walls_meeting_on_one_s() {
+        let (s, p) = bottom();
+        let a = make_box([20.0, 30.0, 6.0], [120.0, 6.0, 60.0]).unwrap();
+        let b = make_box([20.0, 60.0, 6.0], [120.0, 6.0, 60.0]).unwrap();
+        let cross = make_box([27.0, 20.0, 6.0], [6.0, 80.0, 60.0]).unwrap();
+        let beside = make_box([200.0, 30.0, 6.0], [120.0, 6.0, 60.0]).unwrap();
+        let plates = [s, a, b, cross, beside];
+        let run = |joints: &[(usize, usize, Plane)]| {
+            tab_slot_joints(&plates, joints, spec2(), TOL).unwrap()
+        };
+        assert_eq!(run(&[(1, 0, p), (2, 0, p)]), vec![None, None]);
+        assert_eq!(
+            run(&[(1, 0, p), (3, 0, p), (2, 0, p)]),
+            vec![None, Some(JointSkip::MeetsOtherJoint(0)), None]
+        );
+        assert_eq!(
+            run(&[(3, 0, p), (1, 0, p)]),
+            vec![None, Some(JointSkip::MeetsOtherJoint(0))]
+        );
+        assert!(matches!(
+            run(&[(4, 0, p)]).as_slice(),
+            [Some(JointSkip::Pair(PairSkip::Contact(
+                Contact::NoContact { .. }
+            )))]
+        ));
+        assert_eq!(
+            tab_slot_joints(&plates, &[(9, 0, p)], spec2(), TOL),
+            Err(Error::Argument)
+        );
     }
 }

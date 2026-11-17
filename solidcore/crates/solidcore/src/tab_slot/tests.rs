@@ -309,3 +309,31 @@ fn check_slot_refuses_bad_tolerances() {
     assert!(check_slot(&s, &face, MIN_LAND, f64::NAN).is_err());
     assert!(check_slot(&s, &face, TOL, TOL).is_err());
 }
+
+/// Design 5.7: cut outlines apart by at least the least land pass; nearer, touching, crossing
+/// or one holding the other is the first such pair.
+#[test]
+fn apart_names_the_first_pair_that_meets() {
+    let a = rectangle((0.0, 0.0), (10.0, 6.0));
+    let far = rectangle((10.5, 0.0), (20.0, 6.0));
+    let near = rectangle((10.4, 0.0), (20.0, 6.0));
+    let crossing = rectangle((5.0, 3.0), (8.0, 9.0));
+    let inner = rectangle((2.0, 2.0), (4.0, 4.0));
+    assert_eq!(
+        apart(&[a.clone(), far.clone()], MIN_LAND, TOL).unwrap(),
+        None
+    );
+    assert_eq!(
+        apart(&[a.clone(), near], MIN_LAND, TOL).unwrap(),
+        Some((0, 1))
+    );
+    assert_eq!(
+        apart(&[far.clone(), a.clone(), crossing], MIN_LAND, TOL).unwrap(),
+        Some((1, 2))
+    );
+    assert_eq!(
+        apart(&[inner, a.clone()], MIN_LAND, TOL).unwrap(),
+        Some((0, 1))
+    );
+    assert!(apart(&[a, far], TOL, TOL).is_err());
+}

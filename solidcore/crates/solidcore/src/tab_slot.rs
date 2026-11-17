@@ -17,6 +17,7 @@
 //! | [`laser_g_min`]              | none     |
 //! | [`TabSkip`], [`tab_outline`] | none     |
 //! | [`slot_outline`], [`slot_outline_along`] | none |
+//! | [`apart`]                    | none     |
 
 use crate::error::{Result, SolidError};
 use crate::math::Point2;
@@ -377,6 +378,37 @@ pub fn check_slot(
             return Ok(Some(SlotSkip::OverHole {
                 web: if holds { 0.0 } else { web },
             }));
+        }
+    }
+    Ok(None)
+}
+
+/// The first pair `(i, j)`, `i < j`, of `outlines` (one plate's cut outlines, all in one frame)
+/// that are not apart: their outer loops cross, touch, hold one another, or come nearer than
+/// `min_land` (design 5.7, v2 5.7 [M16]); `None` when every pair is apart, what makes one
+/// plate's tools legal for `join_apart`.
+///
+/// # Errors
+/// [`SolidError::InvalidInput`] for a `tol` not finite and positive, a `min_land` not finite or
+/// not more than `tol`, or a placement the loops do not decide.
+pub fn apart(outlines: &[Region2], min_land: f64, tol: f64) -> Result<Option<(usize, usize)>> {
+    if !(tol.is_finite() && tol > 0.0) {
+        return Err(invalid("the tolerance must be finite and positive"));
+    }
+    if !(min_land.is_finite() && min_land > tol) {
+        return Err(invalid(
+            "the least land must be finite and more than the tolerance",
+        ));
+    }
+    let undecided = || invalid("the cut outlines' places cannot be decided");
+    for (j, b) in outlines.iter().enumerate() {
+        for (i, a) in outlines.iter().enumerate().take(j) {
+            let (a, b) = (&a.outer, &b.outer);
+            let outside = a.placement(b, tol).ok_or_else(undecided)? == LoopPlacement::Outside
+                && b.placement(a, tol).ok_or_else(undecided)? == LoopPlacement::Outside;
+            if !outside || a.nearest(b, tol).ok_or_else(undecided)? < min_land - tol {
+                return Ok(Some((i, j)));
+            }
         }
     }
     Ok(None)
