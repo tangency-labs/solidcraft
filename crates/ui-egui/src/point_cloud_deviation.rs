@@ -297,23 +297,31 @@ fn legend(ui: &mut egui::Ui, shown: &Shown) {
         ui.label(mm(lo));
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| ui.label(mm(shown.scale)));
     });
-    ui.label(solidcraft_ui_text::format("ui.deviation_band", &[("tolerance", &mm(tol))]));
-    ui.label(solidcraft_ui_text::tr(if signed { "ui.deviation_signed" } else { "ui.deviation_unsigned" }));
-    ui.label(solidcraft_ui_text::tr("ui.deviation_grey"));
+    note(ui, &solidcraft_ui_text::format("ui.deviation_band", &[("tolerance", &mm(tol))]));
+    note(ui, solidcraft_ui_text::tr(if signed { "ui.deviation_signed" } else { "ui.deviation_unsigned" }));
+    note(ui, solidcraft_ui_text::tr("ui.deviation_grey"));
+}
+
+/// A line of the card that wraps rather than being cut short.
+fn note(ui: &mut egui::Ui, text: &str) {
+    ui.add(egui::Label::new(text).wrap());
+}
+
+/// A wrapping line in the warning colour.
+fn warn(ui: &mut egui::Ui, color: egui::Color32, text: &str) {
+    ui.add(egui::Label::new(egui::RichText::new(text).color(color)).wrap());
 }
 
 /// The numbers of a result.
 fn numbers(ui: &mut egui::Ui, r: &Report) {
     let none = || "-".to_string();
     ui_kit::row(ui, solidcraft_ui_text::tr("ui.deviation_measured"), |ui| {
+        ui.label(solidcraft_ui_text::format("ui.deviation_counts", &[("measured", &r.measured.to_string()), ("sampled", &r.sampled.to_string())]))
+    });
+    ui_kit::row(ui, solidcraft_ui_text::tr("ui.deviation_sampled"), |ui| {
         ui.label(solidcraft_ui_text::format(
-            "ui.deviation_counts",
-            &[
-                ("measured", &r.measured.to_string()),
-                ("sampled", &r.sampled.to_string()),
-                ("points", &r.cloud_points.to_string()),
-                ("step", &r.sample_step.to_string()),
-            ],
+            "ui.deviation_sampling",
+            &[("step", &r.sample_step.to_string()), ("points", &r.cloud_points.to_string())],
         ))
     });
     if r.failed > 0 {
@@ -334,7 +342,7 @@ fn numbers(ui: &mut egui::Ui, r: &Report) {
         }))
     });
     for w in &r.warnings {
-        ui.label(w);
+        note(ui, w);
     }
 }
 
@@ -384,14 +392,14 @@ pub(crate) fn card(app: &mut SolveApp, ctx: &egui::Context) {
                 measure = ui_kit::primary_button(ui, solidcraft_ui_text::tr("ui.deviation_measure")).clicked();
             }
             if let Some(e) = &card.error {
-                ui.colored_label(t.form_error, e);
+                warn(ui, t.form_error, e);
             }
             if let Some(shown) = card.shown.as_ref() {
                 if fresh {
                     legend(ui, shown);
                     numbers(ui, &shown.report);
                 } else {
-                    ui.colored_label(t.form_error, solidcraft_ui_text::tr("ui.deviation_stale"));
+                    warn(ui, t.form_error, solidcraft_ui_text::tr("ui.deviation_stale"));
                 }
             }
         });
@@ -440,7 +448,10 @@ pub(crate) fn probe(app: &SolveApp, painter: &Painter, proj: &Proj) {
         ],
     );
     let galley = painter.layout_no_wrap(text, egui::FontId::proportional(t.font_body), t.text);
-    let rect = egui::Rect::from_min_size(at + vec2(12.0, -12.0 - galley.size().y), galley.size()).expand(4.0);
+    // Beside the point, on the side of the view with more room.
+    let size = galley.size();
+    let left = if at.x > proj.rect.center().x { at.x - 12.0 - size.x } else { at.x + 12.0 };
+    let rect = egui::Rect::from_min_size(egui::pos2(left, at.y - 12.0 - size.y), size).expand(4.0);
     painter.rect_filled(rect, t.radius_sm, t.panel);
     painter.galley(rect.min + vec2(4.0, 4.0), galley, t.text);
 }
