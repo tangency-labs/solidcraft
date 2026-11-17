@@ -472,7 +472,10 @@ fn walls_meeting_across_the_offset_method_are_refused_where_they_meet() {
     assert_eq!(refusal.reason, TaperCornerRefusal::WallCloses);
     let at = refusal.corner;
     assert!((at.x - at.z).abs() <= 1e-5, "{at:?}");
-    assert!(at.z > 0.0 && at.z < 0.3 && at.y > 0.0 && at.y < 0.875, "{at:?}");
+    assert!(
+        at.z > 0.0 && at.z < 0.3 && at.y > 0.0 && at.y < 0.875,
+        "{at:?}"
+    );
 
     let result = create_taper_extrude_with_corner(
         &mut k,
