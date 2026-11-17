@@ -63,7 +63,6 @@ const SOLIDCRAFT_C494A18: &[&str] = &[
     "fillet_rail_trim_at_near_knot",
     "fillet_refuse_face_consuming_blends",
     "fillet_refuse_overlapping_bands",
-    "fillet_removal_takes_ring_fillets",
     "fillet_statuses_pass_on",
     "fillet_trace_reaches_rails",
     "fillet_trim_status",

@@ -44,7 +44,6 @@
   "point_class_gap_3d_propagates_no_drop_error",
   "fillet_variable_span_follows_fillet",
   "box_face_failures_propagate",
-  "fillet_removal_takes_ring_fillets",
   "boolean_union_refuses_solid_leak",
   "simple_coincidence_crossing_is_point",
   "keep_exact_pcurves",
