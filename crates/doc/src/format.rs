@@ -641,7 +641,7 @@ pub(crate) fn decode(mut v: Value, version: u32, applied: Option<&[String]>) -> 
         group.features.retain(|feature| feature_ids.contains(feature) && grouped_features.insert(*feature));
     }
     for group in &d.timeline_groups {
-        if group.name.trim().is_empty() || group.name.len() > 128 || !group_ids.insert(group.id) {
+        if group.name.trim().is_empty() || group.name.chars().count() > 128 || !group_ids.insert(group.id) {
             return Err(DocError::Invalid("damaged design: invalid timeline folder".into()));
         }
         if group.parent.is_some_and(|parent| parent == group.id) {
@@ -1978,7 +1978,9 @@ mod tests {
                         to_offset: Some("offset + 1 mm".into()),
                         from: Some(crate::FacePick(solidcore_record::Vec3::new(0.0, 0.0, 5.0))),
                         to_body_apart: false,
+                        from_level: false,
                         picked_placements: Vec::new(),
+                        one_sided_direction: None,
                     },
                     operation: Operation::NewBody,
                     targets: vec![],
@@ -2011,6 +2013,9 @@ mod tests {
         assert_eq!(upgraded.features[1].param_names.len(), 3);
         assert_eq!(upgraded.features[1].param_names[2], "d6");
         let saved: Value = serde_json::from_str(&upgraded.to_json()).unwrap();
+        // The extent is kept, and its From Object keeps starting at the face's level (#17639).
+        let mut old_kind = old_kind;
+        old_kind["extent"]["from_level"] = Value::Bool(true);
         for field in ["extent", "sketch", "operation", "profiles"] {
             assert_eq!(saved["features"][1][field], old_kind[field]);
         }

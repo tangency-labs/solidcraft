@@ -32,6 +32,7 @@ pub use design::{
 };
 pub use glb::{DEFAULT_COLOR as GLB_DEFAULT_COLOR, MAX_GLB_BYTES, export_glb};
 mod legacy_dir;
+pub mod library_files;
 pub mod limits;
 #[cfg(test)]
 mod mutate;
@@ -71,7 +72,7 @@ pub use gerber_set::{
 pub use legacy_dir::{APP_ID, PREVIOUS_APP_IDS, adopt_legacy_dir, legacy_flatpak_paths};
 pub use safe_write::{backup_path, write_atomic};
 pub use sketch2d::{Geom2, MAX_DRAWING_BYTES};
-pub use svg::{decode_svg, read_svg, svg_nothing_to_import, svg_sheet};
+pub use svg::{CurveWarning, SvgDrawing, decode_svg, read_svg, read_svg_drawing, svg_nothing_to_import, svg_sheet};
 mod gltf_in;
 pub use gltf_in::{GltfImport, Loader, MeshPlan, PlanPlace, glb_container, is_gltf_path, read_gltf};
 mod kicad_in;
@@ -223,6 +224,50 @@ fn body_name(b: &solidcraft_kernel::ImportedBody, names: StepNames) -> String {
         StepNames::Instance => b.instance.as_ref().filter(usable).or(b.path.last().filter(usable)),
     };
     chosen.cloned().unwrap_or_else(|| b.name.clone())
+}
+
+/// A name a flattened body should not keep: one [`generic_name`] gives up on, a name an exporting
+/// translator makes up for a shape it has no name for (Open CASCADE writes `Open CASCADE STEP
+/// translator 7.5 2.1.1` for each sub-shape), or a bare number (a library model's id).
+fn placeholder_name(n: &str) -> bool {
+    let n = n.trim();
+    let lower = n.to_ascii_lowercase();
+    generic_name(n)
+        || lower.contains("step translator")
+        || lower.contains("step processor")
+        || n.chars().all(|c| c.is_ascii_digit() || matches!(c, '.' | '-' | '_' | ' '))
+}
+
+/// The names of a STEP file's bodies brought in flat (`file.insert_step`'s `flatten`), where no
+/// component says which part a body belongs to any more. `chosen` holds the names the `names`
+/// option chose, by body. Each body is named after the outermost named product it sits in below
+/// the file's root (`R63: Terminal`): a body whose chosen name is a placeholder takes the nearest
+/// named product's name instead (`Terminal`), and a body that is that product itself only its
+/// name (`R63`). A body in no named product keeps its name, or its nearest product's. Names are
+/// not made unique here: the Import feature numbers repeats, as for any import.
+pub fn flat_body_names(imp: &solidcraft_kernel::StepImport, chosen: &[String]) -> Vec<String> {
+    // One root product is the import itself (its component); several are parts of it.
+    let below_root = usize::from(imp.tree.len() == 1);
+    imp.bodies
+        .iter()
+        .enumerate()
+        .map(|(k, b)| {
+            let named = |n: &&String| !placeholder_name(n);
+            let own = chosen
+                .get(k)
+                .filter(named)
+                .or_else(|| b.path.iter().rev().find(named))
+                .or_else(|| b.instance.as_ref().filter(named))
+                .or_else(|| chosen.get(k).filter(|n| !n.trim().is_empty()))
+                .unwrap_or(&b.name)
+                .trim();
+            match b.path.iter().skip(below_root).find(named).map(|top| top.trim()) {
+                Some(top) if top != own && !placeholder_name(own) => format!("{top}: {own}"),
+                Some(top) => top.to_string(),
+                None => own.to_string(),
+            }
+        })
+        .collect()
 }
 
 /// A STEP file read as an import feature.
@@ -580,10 +625,21 @@ fn mesh_notes(stats: &solidcraft_kernel::PlanStats, spec: &solidcraft_kernel::Me
         });
     }
     for o in &stats.over_tolerance {
-        let caps = o.caps.iter().map(|c| format!("{c:?}")).collect::<Vec<_>>().join(", ");
-        let how = if o.within { "still within it" } else { "past it" };
+        let reason = if o.caps.is_empty() {
+            String::from("its shared boundary was kept")
+        } else {
+            let caps = o.caps.iter().map(|c| format!("{c:?}")).collect::<Vec<_>>().join(", ");
+            format!("its refinement stopped at a bound ({caps})")
+        };
+        let how = if o.within {
+            "still within it"
+        } else if o.sag > o.tol {
+            "past it"
+        } else {
+            "within it where measured"
+        };
         notes.push(format!(
-            "face {}: its refinement stopped at a bound ({caps}); its triangles lie up to {:.3e} mm off the surface, {how} (chord tolerance {:.3e} mm{})",
+            "face {}: {reason}. Its triangles lie up to {:.3e} mm off the surface, {how} (chord tolerance {:.3e} mm{})",
             o.face,
             o.sag,
             o.tol,
@@ -1355,6 +1411,18 @@ mod tests {
     use super::*;
     use solidcore_record::Vec3;
     use solidcraft_doc::{FeatureKind, Model, Operation, point_expr};
+
+    /// What a flattened import treats as a placeholder: what `generic_name` gives up on, an
+    /// exporting translator's own names and a library model's bare number; a part's name is kept.
+    #[test]
+    fn placeholder_names_are_the_ones_that_say_nothing_about_the_part() {
+        for n in ["", "  ", "Body1", "Solid 2", "Open CASCADE STEP translator 7.5 2.51.1.1.1", "open cascade step translator 6.8 1.1", "7417113264"] {
+            assert!(placeholder_name(n), "{n:?}");
+        }
+        for n in ["Terminal", "R63ARK FPV", "SM08B-GHS-TB", "Mid_Body", "0603 capacitor"] {
+            assert!(!placeholder_name(n), "{n:?}");
+        }
+    }
 
     fn model() -> (Document, Model) {
         let mut doc = Document::new("t");

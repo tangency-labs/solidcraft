@@ -241,6 +241,10 @@ fn the_types_read_each_key_as_the_handlers_do() {
     assert_eq!(p.a, Some(PointOperand::Midpoint("l1".into())));
     let msg = |v: Value| whole_message(parse::<CoincidentParams>(v).map(|_| ()).unwrap_err());
     assert_eq!(msg(json!({"a": {"midpoint": 3}, "b": "p1"})), "`midpoint` must be a curve id");
+    assert_eq!(msg(json!({"a": {"midpoint": {"vertex": [0, 0, 0]}}, "b": "p1"})), "`midpoint` must be a curve id");
+    let edge = json!({"edge": [1, 2, 3], "body": "Body1"});
+    let p: CoincidentParams = parse(json!({"a": "p1", "b": {"midpoint": edge}})).unwrap();
+    assert_eq!(p.b, Some(PointOperand::ModelMidpoint(edge)));
     assert_eq!(msg(json!({"a": "p1", "b": 3})), "`b` must be a point or curve");
     assert_eq!(msg(json!({"a": 3, "b": "p1"})), "`a` must be a point reference");
     // The handler reads `b` before `a`.

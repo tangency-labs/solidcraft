@@ -396,6 +396,7 @@ pub(super) fn eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, 
             scale,
             rails,
             rail_fit,
+            spline_as_samples,
         } => {
             let ss = st.sketch(sketch.0).ok_or_else(|| DocError::Unknown(format!("sketch {sketch} (it must come earlier in the timeline)")))?;
             // The path is a chain of a body's edges (#2216) or the curves of a sketch.
@@ -434,7 +435,11 @@ pub(super) fn eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, 
                     let pts = path.points();
                     let rails = crate::eval::rail_polylines(doc, st, rails, f.component, pts.first().copied().unwrap_or(start))?;
                     let ctl = crate::eval::sweep_control(vals, orientation, twist, scale, rails, *rail_fit)?;
-                    kernel::sweep_sheet_points_with(&ss.plane, &chains, &pts, &ctl)?
+                    if *spline_as_samples {
+                        kernel::sweep_sheet_points_with(&ss.plane, &chains, &pts, &ctl)?
+                    } else {
+                        kernel::sweep_sheet_point_path_with(&ss.plane, &chains, &path, &ctl)?
+                    }
                 }
                 None => {
                     let segs = path_segments_at(ps, path, start, Some(&ss.plane))?;
