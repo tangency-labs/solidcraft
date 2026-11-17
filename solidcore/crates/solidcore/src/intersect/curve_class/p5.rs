@@ -945,6 +945,14 @@ impl<O: ClassObject> CurveClassification<O> {
                     }
                 });
                 if let Some(b) = b {
+                    // The box holds the curve exactly, so the drop's tolerance alone would do
+                    // in exact arithmetic. On top of it: the analytic replacement meets the
+                    // curve within its scaled zero, `EFF_ZERO * (1 + |x|)` (1e-12 at part
+                    // scale), and the box's corners (control points out of their homogeneous
+                    // form) and the point the solve would compare are each a few ulps of
+                    // their coordinates off. Both are below 1e-11 * (1 + |x|); 1e-9 leaves a
+                    // hundredfold of that, and too wide a margin only costs a drop, never
+                    // passes over a contact.
                     let margin = tolerance
                         + 1e-9 * (1.0 + b.max_dimension().abs() + point.max_dimension().abs());
                     if !b.contains_point(point, margin) {

@@ -465,6 +465,7 @@ fn solid_plate_vertex_drops(n: u32) -> u64 {
         fixes: UpstreamFixes::all(),
         ..Kernel::default()
     };
+    k.memoize_curve_caches = true; // the count is the shortcut's, whatever `curve-memo-off` says
     let w = STEP * f64::from(n + 1);
     let mut plate = create_box(&mut k, Point3::new(0.0, 0.0, 0.0), w, w, 2.0).unwrap();
     let holes: Vec<Brep> = (0..n * n)
