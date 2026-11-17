@@ -2639,13 +2639,17 @@ mod tests {
 
     /// `WR-63`, the record's trigger: `SmCone::CreateCanonical(O, 1, 30, &h, cone, FALSE,
     /// TRUE)` keeps `inside_out`, where upstream passes `FALSE` as `bInsideOut` and the
-    /// caller's `bInsideOut` as `bMakeNurbGenCurve` (`SmCone.cpp:341-348`). The cone is
-    /// the two-radius overload's frustum for the same request: its NURB runs from the top
-    /// circle, and its normal is opposite the outward cone's at the same point.
+    /// caller's `bInsideOut` as `bMakeNurbGenCurve` (`SmCone.cpp:341-348`).
+    ///
+    /// The proof is by construction: the canonical data (placement and axis, base radius,
+    /// signed semi-angle, `swap_uv`, `inside_out`) and the STEP heights are asserted
+    /// exactly equal to the two-radius overload's inside-out frustum, and exactly equal
+    /// to the outward cone's except for `inside_out`, which reverses the NURB's linear
+    /// direction and so the normal. Nothing is sampled; the domain-start and midpoint
+    /// evaluations below are spot checks of what `inside_out` means.
     #[test]
     fn wr63_semi_angle_with_height_keeps_inside_out() {
-        let k_def = k();
-        let k_opt = k();
+        let k = k();
 
         let bot = 1.0;
         let semi_deg = 30.0;
@@ -2654,7 +2658,7 @@ mod tests {
 
         for swap_uv in [false, true] {
             let def_cone = Cone::create_canonical_with_semi_angle(
-                &k_def,
+                &k,
                 &std_placement(),
                 bot,
                 semi_deg,
@@ -2664,7 +2668,7 @@ mod tests {
             )
             .unwrap();
             let opt_cone = Cone::create_canonical_with_semi_angle(
-                &k_opt,
+                &k,
                 &std_placement(),
                 bot,
                 semi_deg,
@@ -2673,16 +2677,36 @@ mod tests {
                 true,
             )
             .unwrap();
-            let two_radii = Cone::create_canonical(
-                &k_opt,
-                &std_placement(),
-                bot,
-                expected_top,
-                h,
+            let two_radii =
+                Cone::create_canonical(&k, &std_placement(), bot, expected_top, h, swap_uv, true)
+                    .unwrap();
+
+            // Certificate: exact canonical data. The axis is the placement's +Z, the base
+            // radius is `bot`, and the semi-angle is the two-radius constructor's
+            // `atan2(top - bot, h)`, positive (the cone opens toward +Z).
+            let want = ConeCanonical {
+                origin: std_placement(),
+                radius: bot,
+                semi_angle_deg: (expected_top - bot).atan2(h) * 180.0 / PI,
                 swap_uv,
-                true,
-            )
-            .unwrap();
+                inside_out: true,
+            };
+            assert_eq!(want.origin.z_axis(), Vec3::Z);
+            assert!(want.semi_angle_deg > 0.0 && want.radius > 0.0);
+            assert_eq!(opt_cone.canonical(), want, "swap_uv = {swap_uv}");
+            assert_eq!(two_radii.canonical(), want, "swap_uv = {swap_uv}");
+            assert_eq!(
+                def_cone.canonical(),
+                ConeCanonical {
+                    inside_out: false,
+                    ..want
+                },
+                "swap_uv = {swap_uv}"
+            );
+            for cone in [&opt_cone, &two_radii, &def_cone] {
+                assert_eq!((cone.bot_height(), cone.top_height()), (0.0, h));
+                assert!(!cone.rev().make_nurb_gen_curve(), "swap_uv = {swap_uv}");
+            }
 
             // The outward cone (`inside_out == false`) has a line generator too.
             assert!(!def_cone.inside_out(), "swap_uv = {swap_uv}");
@@ -2708,8 +2732,8 @@ mod tests {
             // top circle for the inside-out one.
             let def_dom = def_cone.rev().base().natural_uv_domain();
             let opt_dom = opt_cone.rev().base().natural_uv_domain();
-            let def_start = def_cone.evaluate_point(&k_def, def_dom.min()).unwrap();
-            let opt_start = opt_cone.evaluate_point(&k_opt, opt_dom.min()).unwrap();
+            let def_start = def_cone.evaluate_point(&k, def_dom.min()).unwrap();
+            let opt_start = opt_cone.evaluate_point(&k, opt_dom.min()).unwrap();
             assert!(
                 close(def_start, Vec3::new(bot, 0.0, 0.0)),
                 "swap_uv = {swap_uv}: {def_start:?}"
@@ -2719,15 +2743,16 @@ mod tests {
                 "swap_uv = {swap_uv}: {opt_start:?}"
             );
 
-            // At the midpoint of the NURBS domain, both cones evaluate to the same 3D
-            // point with opposite unit surface normals.
+            // Spot check (the certificate is the canonical data above): at the midpoint of
+            // the NURBS domain, both cones evaluate to the same 3D point with opposite
+            // unit surface normals.
             let def_mid = Point2::new(def_dom.u_interval().mid(), def_dom.v_interval().mid());
             let opt_mid = Point2::new(opt_dom.u_interval().mid(), opt_dom.v_interval().mid());
             let def_rows = def_cone
-                .evaluate_rows(&k_def, def_mid, 1, 1, EvaluateFlags::default())
+                .evaluate_rows(&k, def_mid, 1, 1, EvaluateFlags::default())
                 .unwrap();
             let opt_rows = opt_cone
-                .evaluate_rows(&k_opt, opt_mid, 1, 1, EvaluateFlags::default())
+                .evaluate_rows(&k, opt_mid, 1, 1, EvaluateFlags::default())
                 .unwrap();
             assert!(
                 close(def_rows[0][0], opt_rows[0][0]),
@@ -2744,14 +2769,10 @@ mod tests {
 
             // STEP <-> NURBS parameter conversions and evaluations remain consistent.
             for step in [Point2::new(42.0, 0.4), Point2::new(215.0, 1.6)] {
-                let nurb = opt_cone
-                    .convert_uv_from_step_to_nurbs(&k_opt, step)
-                    .unwrap();
-                let back = opt_cone
-                    .convert_uv_from_nurbs_to_step(&k_opt, nurb)
-                    .unwrap();
+                let nurb = opt_cone.convert_uv_from_step_to_nurbs(&k, step).unwrap();
+                let back = opt_cone.convert_uv_from_nurbs_to_step(&k, nurb).unwrap();
                 assert!((back - step).length() < 1e-9, "swap_uv = {swap_uv}");
-                let p_nurb = opt_cone.evaluate_point(&k_opt, nurb).unwrap();
+                let p_nurb = opt_cone.evaluate_point(&k, nurb).unwrap();
                 let p_step = opt_cone.evaluate_step_point(step).unwrap();
                 assert!(p_nurb.distance(p_step) < 1e-9, "swap_uv = {swap_uv}");
             }
@@ -2761,9 +2782,11 @@ mod tests {
     /// `WR-63`: `SmCone::CreateCanonical` with two radii and a height not above 0 builds
     /// the infinite cone (the header's "0 = make infinite cone"), `top_radius` being its
     /// semi-angle in degrees as upstream's call documents (`SmCone.cpp:392-400`); it is
-    /// never refused. It is the semi-angle overload's infinite cone, and for a positive
-    /// semi-angle `a` its point at STEP `(u, v)` is the closed form `(r cos u, r sin u,
-    /// v)` with `r = 1 + v tan(a)`.
+    /// never refused. By construction it is the semi-angle overload's infinite cone: the
+    /// canonical data (placement, base radius `1`, semi-angle exactly `top_radius`,
+    /// `swap_uv`, `inside_out`) are asserted exactly equal. For a positive semi-angle `a`,
+    /// three points are spot-checked against the closed form `(r cos u, r sin u, v)` at
+    /// STEP `(u, v)` with `r = 1 + v tan(a)`.
     #[test]
     fn wr63_two_radii_non_positive_height_builds_the_infinite_cone() {
         let k_def = k();
@@ -2798,6 +2821,15 @@ mod tests {
                     )
                     .unwrap();
                     assert!(def_cone.approx_eq(&semi), "height = {height}");
+                    let want = ConeCanonical {
+                        origin: std_placement(),
+                        radius: 1.0,
+                        semi_angle_deg: top_radius,
+                        swap_uv,
+                        inside_out,
+                    };
+                    assert_eq!(def_cone.canonical(), want, "height = {height}");
+                    assert_eq!(semi.canonical(), want, "height = {height}");
 
                     if top_radius > 0.0 {
                         let t = deg2rad(top_radius).tan();
