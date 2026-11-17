@@ -143,6 +143,7 @@ fn set_projection(app: &mut SolveApp, perspective: bool) {
     if !projection_locked(app) {
         app.ui.auto_ortho_faces = false;
         app.ui.perspective = perspective;
+        crate::render_workspace::apply_camera_projection(app);
     }
 }
 

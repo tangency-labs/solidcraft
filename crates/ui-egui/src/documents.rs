@@ -742,7 +742,13 @@ fn change_views<T>(app: &mut SolveApp, change: impl FnOnce(&mut ViewSet) -> T) -
     if active.id != before {
         let active = active.clone();
         switch_navigation(app, before, active.id);
+        let perspective = app.ui.perspective;
         apply_view(app, &active);
+        if active.kind == ViewKind::Model {
+            // Leaving Render restores the Model projection from which it was entered.
+            // An explicitly selected Model view already supplied its own projection.
+            app.ui.perspective = perspective;
+        }
         show_look(app, &active);
     }
     result
@@ -1142,30 +1148,30 @@ pub fn view_duplicate(app: &mut SolveApp, id: u64) -> Option<u64> {
     Some(copy)
 }
 
-/// Show the Model views of the shown design together as `preset`. A design with fewer Model views
-/// than the layout has places for gets copies of the shown view until it has enough (a second
-/// angle each). Returns how many views are shown now.
+/// Arrange the available views, adding Model views or leaving picker cells as requested.
 pub fn view_layout(app: &mut SolveApp, preset: solidcraft_views::Preset) -> usize {
-    let shown = app.docs.views.active().clone();
-    if shown.kind != ViewKind::Model {
+    if preset == solidcraft_views::Preset::Single {
+        app.docs.views.untile();
+        return 1;
+    }
+    if !app.docs.views.active().kind.can_tile() {
         return 1;
     }
     let fill = app.docs.layout_fill;
-    if preset != solidcraft_views::Preset::Single && fill != LayoutFill::Picker {
-        let have = app.docs.views.views().iter().filter(|view| view.kind == ViewKind::Model).count();
-        for n in have..preset.tiles() {
-            let copied = match fill {
-                LayoutFill::Standard => view_copy_at(app, FILL_ANGLES[(n - 1).min(FILL_ANGLES.len() - 1)]),
-                _ => view_duplicate(app, shown.id),
-            };
-            if copied.is_none() {
-                break;
-            }
+    if fill == LayoutFill::Picker {
+        return app.docs.views.set_layout_padded(preset);
+    }
+    let shown = app.docs.views.active().clone();
+    for n in app.docs.views.layout_view_count()..preset.tiles() {
+        let added = match fill {
+            LayoutFill::Standard => view_copy_at(app, FILL_ANGLES[n.saturating_sub(1).min(FILL_ANGLES.len() - 1)]),
+            _ if shown.kind == ViewKind::Model => view_duplicate(app, shown.id),
+            _ => new_model_at(app, None),
+        };
+        if added.is_none() {
+            break;
         }
         view_activate(app, shown.id);
-    }
-    if fill == LayoutFill::Picker {
-        return change_views(app, |views| views.set_layout_padded(preset));
     }
     change_views(app, |views| views.set_layout(preset))
 }
@@ -1177,6 +1183,9 @@ const FILL_ANGLES: [solidcraft_viewport::StandardView; 3] =
 /// A new Model view of the shown design looking from `angle`, next to the shown one, which stays
 /// the shown one. None when the design has no room for another view.
 fn view_copy_at(app: &mut SolveApp, angle: solidcraft_viewport::StandardView) -> Option<u64> {
+    if app.docs.views.active().kind != ViewKind::Model {
+        return new_model_at(app, Some(angle));
+    }
     let shown = app.docs.views.active().id;
     let copy = view_duplicate(app, shown)?;
     // The copy is shown now, its look in the app: turn it, and going back to the first keeps that.
@@ -1185,13 +1194,30 @@ fn view_copy_at(app: &mut SolveApp, angle: solidcraft_viewport::StandardView) ->
     Some(copy)
 }
 
+/// Start a Model view at the saved Model camera when a different workspace is showing.
+fn new_model_at(app: &mut SolveApp, angle: Option<solidcraft_viewport::StandardView>) -> Option<u64> {
+    if app.docs.views.len() >= solidcraft_views::MAX_VIEWS {
+        return None;
+    }
+    let active = app.docs.views.active().id;
+    let mut camera =
+        app.docs.views.views().iter().find(|view| view.kind == ViewKind::Model).and_then(|view| view.spec).map_or(app.cam, |spec| spec.camera);
+    if let Some(angle) = angle {
+        camera.set_view(angle);
+    }
+    let id = app.docs.views.open(ViewKind::Model, None, false);
+    app.docs.views.set_spec(id, solidcraft_viewport::ViewSpec::new(camera));
+    app.docs.views.activate(active);
+    Some(id)
+}
+
 /// Show a new view looking from `angle` in the empty cell number `ordinal` of the layout.
 pub fn view_fill_angle(app: &mut SolveApp, ordinal: usize, angle: solidcraft_viewport::StandardView) -> Option<u64> {
     let copy = view_copy_at(app, angle)?;
     change_views(app, |views| views.fill_empty(ordinal, copy)).then_some(copy)
 }
 
-/// Show the open Model view `id` in the empty cell number `ordinal` of the layout.
+/// Show the open view `id` in the empty cell number `ordinal` of the layout.
 pub fn view_fill_open(app: &mut SolveApp, ordinal: usize, id: u64) -> bool {
     change_views(app, |views| views.fill_empty(ordinal, id))
 }
@@ -1201,16 +1227,16 @@ pub fn view_close_empty(app: &mut SolveApp, ordinal: usize) -> bool {
     change_views(app, |views| views.remove_empty(ordinal))
 }
 
-/// Show the Model view `id` beside the shown one, on `edge` of it; `None`: a new view that starts
-/// as a copy of the shown one. Returns the view now shown beside it, None when it cannot be (four
-/// views are shown, or either is not a Model view).
+/// Show an open view beside the active view. With no id, start another Model view.
 pub fn view_beside(app: &mut SolveApp, id: Option<u64>, edge: solidcraft_views::Edge) -> Option<u64> {
     let shown = app.docs.views.active().clone();
-    if shown.kind != ViewKind::Model || app.docs.views.tiles().is_some_and(|tiles| tiles.len() >= solidcraft_views::MAX_TILES) {
+    if !shown.kind.can_tile() || (app.docs.views.is_tiled() && app.docs.views.tiles().is_some_and(|tiles| tiles.len() >= solidcraft_views::MAX_TILES))
+    {
         return None;
     }
     let id = match id {
         Some(id) => id,
+        None if shown.kind == ViewKind::Render => new_model_at(app, None)?,
         None => {
             let copy = view_duplicate(app, shown.id)?;
             view_activate(app, shown.id);
@@ -1316,7 +1342,7 @@ pub(crate) fn view_command(app: &mut SolveApp, command: &str, mut v: Value) -> R
                 _ => solidcraft_views::Edge::Right,
             };
             let asked = v.get("id").and_then(Value::as_u64);
-            let id = view_beside(app, asked, edge).ok_or("a view is shown beside a Model view, at most four at a time")?;
+            let id = view_beside(app, asked, edge).ok_or("a layout holds up to four Model and Render views, including one Render view")?;
             v["shown"] = json!(app.docs.views.tiles().map_or(1, solidcraft_views::Tiles::len));
             Some(id)
         }
@@ -4313,6 +4339,34 @@ mod tests {
         assert_eq!(h.app.cam.yaw, 2.0, "the other view kept the angle it was orbited to");
         assert_eq!(view_layout(&mut h.app, solidcraft_views::Preset::Single), 1);
         assert!(!h.app.docs.views.is_tiled());
+    }
+
+    #[test]
+    fn a_render_tile_keeps_its_camera_when_focused_beside_model() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        let model = h.app.docs.views.active().id;
+        h.app.cam.yaw = 0.25;
+        let render = view_open(&mut h.app, ViewKind::Render, None, false);
+        assert!(crate::render_workspace::active(&h.app));
+        h.app.cam.yaw = 1.25;
+        assert_eq!(view_beside(&mut h.app, Some(model), solidcraft_views::Edge::Left), Some(model));
+        assert!(view_activate(&mut h.app, model));
+        assert_eq!(h.app.cam.yaw, 0.25);
+
+        crate::render_workspace::with_tile_camera(&mut h.app, |app| {
+            assert!(crate::render_workspace::active(app));
+            assert_eq!(app.cam.yaw, 1.25);
+            app.cam.yaw = 1.75;
+        });
+        assert!(!crate::render_workspace::active(&h.app));
+        assert_eq!(h.app.cam.yaw, 0.25);
+        assert!(view_activate(&mut h.app, render));
+        assert_eq!(h.app.cam.yaw, 1.75);
+        assert!(crate::view_tiles::shown(&h.app));
+        assert_eq!(view_layout(&mut h.app, solidcraft_views::Preset::Single), 1);
+        assert!(!crate::view_tiles::shown(&h.app));
+        assert!(crate::render_workspace::active(&h.app), "maximising keeps the Render workspace");
     }
 
     /// Each Model view keeps its own section and analysis too, so one design can be inspected two

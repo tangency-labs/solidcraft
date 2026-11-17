@@ -1,5 +1,5 @@
 //! The window showing several views of the design at once: the area split by the design's
-//! [`Tiles`], each Model view drawn by the one viewport code with its own camera and analyses.
+//! [`Tiles`]. Each workspace paints its own canvas in the view's fixed frame.
 //!
 //! The focused view is the *ground*: its picture fills the window behind the ribbon, the panels and
 //! the other views, with no frame and no header, so the app feels the same as with one view. The
@@ -18,7 +18,7 @@
 
 use egui::{CornerRadius, Rect, Sense, Stroke, StrokeKind, UiBuilder, pos2, vec2};
 use solidcraft_theme::Tokens;
-use solidcraft_views::{Axis, Rect as TileRect};
+use solidcraft_views::{Axis, Rect as TileRect, ViewKind};
 
 use crate::SolveApp;
 use crate::ui_kit::BackingTooltipExt as _;
@@ -35,6 +35,32 @@ const CARD_RADIUS: u8 = 8;
 /// The window shows more than one view of the design.
 pub(crate) fn shown(app: &SolveApp) -> bool {
     app.docs.views.is_tiled()
+        && app.session.active_sketch.is_none()
+        && (app.docs.views.active().kind == ViewKind::Render) == crate::render_workspace::active(app)
+}
+
+/// Scope workspace-specific canvas and navigation behaviour to an unfocused tile.
+fn with_card_kind<T>(app: &mut SolveApp, id: u64, draw: impl FnOnce(&mut SolveApp) -> T) -> T {
+    match app.docs.views.get(id).map(|view| view.kind) {
+        Some(ViewKind::Render) => crate::render_workspace::with_tile_camera(app, draw),
+        _ if crate::render_workspace::active(app) => {
+            let tab = std::mem::replace(&mut app.ui.tab, "MODEL".into());
+            let result = draw(app);
+            app.ui.tab = tab;
+            result
+        }
+        _ => draw(app),
+    }
+}
+
+fn draw_canvas(app: &mut SolveApp, ui: &mut egui::Ui, kind: ViewKind) {
+    match kind {
+        ViewKind::Render => {
+            crate::dim_view::set_model_drawn(Vec::new());
+            crate::render_workspace::show(app, ui);
+        }
+        _ => crate::viewport::show(app, ui),
+    }
 }
 
 fn to_tile(rect: Rect) -> TileRect {
@@ -86,6 +112,7 @@ pub(crate) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     let area = ui.max_rect();
     let Some(tiles) = app.docs.views.tiles().cloned() else { return };
     let focus = app.docs.views.active().id;
+    let render_ground = app.docs.views.active().kind == ViewKind::Render;
     // Below the ribbon and above the bottom strip: they float over the ground, but a card is never put under them.
     let free = crate::shell::bottom_readout_rect(
         app,
@@ -109,28 +136,35 @@ pub(crate) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     let mut ground = free;
     // Set aside under everything the cards draw: the ground's picture fills the whole area.
     let layer = ui.layer_id();
+    if render_ground {
+        let [top, bottom] = crate::render_workspace::tile_background(app);
+        solidcraft_viewport_egui::paint_background(ui.painter(), area, top, bottom);
+    }
     let slots: Vec<_> = (0..BACKDROP_SLOTS).map(|_| ui.painter().add(egui::Shape::Noop)).collect();
     for (id, cell) in places {
         let is_ground = id == focus;
         let frame = frame_of(cell);
+        let Some(kind) = app.docs.views.get(id).map(|view| view.kind) else { continue };
         // A press on a header button is the button's: focusing the card first would take its buttons away before the click ends.
         let on_button = press.is_some_and(|p| !is_ground && (0..3).any(|slot| button_rect(cell, slot as f32).contains(p)));
         let mut tile = ui.new_child(UiBuilder::new().id_salt(("view_tile", app.session.uid, id)).max_rect(frame));
-        tile.set_clip_rect(ui.clip_rect().intersect(if is_ground { area } else { frame }));
+        tile.set_clip_rect(ui.clip_rect().intersect(if is_ground && !render_ground { area } else { frame }));
         app.viewport.tile = Some(slot(id));
         app.viewport.card = !is_ground;
         if is_ground {
-            app.viewport.bleed = Some(area);
+            app.viewport.bleed = (!render_ground).then_some(area);
             app.viewport.window = Some(free);
-            crate::viewport::show(app, &mut tile);
+            draw_canvas(app, &mut tile, kind);
             if let Some(range) = app.viewport.backdrop.take() {
                 lay_under(ui.ctx(), layer, &slots, range);
             }
             ground = frame;
         } else {
             crate::documents::with_view_look(app, id, |app| {
-                app.step_view_animation(ui.ctx());
-                crate::viewport::show(app, &mut tile);
+                with_card_kind(app, id, |app| {
+                    app.step_view_animation(ui.ctx());
+                    draw_canvas(app, &mut tile, kind);
+                });
                 let controls = app.viewport.layout.as_ref().filter(|layout| layout.viewport == frame);
                 if !on_button
                     && press.is_some_and(|p| cell.contains(p) && !controls.is_some_and(|l| l.axis_view.contains(p) || l.navigation.contains(p)))
@@ -138,6 +172,7 @@ pub(crate) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                     app.viewport.pending_tile_focus = Some(id);
                 }
             });
+            app.viewport.backdrop = None;
             cards.push((id, frame));
         }
         app.viewport.tile = None;
@@ -220,7 +255,7 @@ enum EmptyAction {
 }
 
 /// An empty cell: a dashed frame that asks what to show there. The standard angles, then the
-/// Model views that are open and not shown, and a button that closes the cell.
+/// open views that can join the layout, and a button that closes the cell.
 fn empty_picker(app: &SolveApp, ui: &mut egui::Ui, ordinal: usize, cell: Rect) -> Option<EmptyAction> {
     use solidcraft_viewport::StandardView;
     let t = Tokens::get();
@@ -236,7 +271,7 @@ fn empty_picker(app: &SolveApp, ui: &mut egui::Ui, ordinal: usize, cell: Rect) -
         .views
         .views()
         .iter()
-        .filter(|view| view.kind == solidcraft_views::ViewKind::Model && !app.docs.views.tiles().is_some_and(|tiles| tiles.contains(view.id)))
+        .filter(|view| app.docs.views.can_show_beside(view.id))
         .take(4)
         .map(|view| (view.id, view.name.clone()))
         .collect();
@@ -303,10 +338,15 @@ pub(crate) fn card_controls(app: &mut SolveApp, ui: &mut egui::Ui) {
         app.viewport.rect = Some(*rect);
         app.viewport.card = true;
         crate::documents::with_view_look(app, *id, |app| {
-            crate::viewport::show_card_controls(app, &mut controls, *rect);
-            if app.pending_fit.is_some() {
-                app.resolve_fit(ui.ctx());
-            }
+            with_card_kind(app, *id, |app| {
+                if crate::render_workspace::active(app) {
+                    crate::render_workspace::finish_result_navigation(app, &mut controls, *rect);
+                }
+                crate::viewport::show_card_controls(app, &mut controls, *rect);
+                if app.pending_fit.is_some() {
+                    app.resolve_fit(ui.ctx());
+                }
+            });
         });
         app.viewport.card = false;
     }
@@ -345,9 +385,11 @@ fn card_chrome(app: &SolveApp, ui: &mut egui::Ui, id: u64, card: Rect) -> Option
     painter.text(label.left_center(), egui::Align2::LEFT_CENTER, name, egui::FontId::proportional(t.font_body), t.text);
     // The picture is square: the ground's colour fills what the rounded corners leave out.
     let area = ui.max_rect();
+    let [top, bottom] =
+        if crate::render_workspace::active(app) { crate::render_workspace::tile_background(app) } else { [t.viewport_top, t.viewport_bottom] };
     let backdrop = |y: f32| {
         let k = ((y - area.top()) / area.height().max(1.0)).clamp(0.0, 1.0);
-        t.viewport_top.lerp_to_gamma(t.viewport_bottom, k)
+        top.lerp_to_gamma(bottom, k)
     };
     corner_mask(&painter, card.left_bottom(), [1.0, -1.0], backdrop(card.bottom()));
     corner_mask(&painter, card.right_bottom(), [-1.0, -1.0], backdrop(card.bottom()));

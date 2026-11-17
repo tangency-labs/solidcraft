@@ -33,6 +33,11 @@ impl ViewKind {
     /// Every kind, in the order the "+" menu lists them.
     pub const ALL: [ViewKind; 5] = [ViewKind::Model, ViewKind::Sketch, ViewKind::Sheet, ViewKind::Render, ViewKind::Animation];
 
+    /// This workspace can draw its contents in the frame of a tile.
+    pub fn can_tile(self) -> bool {
+        matches!(self, Self::Model | Self::Render)
+    }
+
     /// The kind's stable key: its name in commands and in the saved form.
     pub fn key(self) -> &'static str {
         match self {
@@ -84,8 +89,7 @@ pub struct ViewSet {
     /// Closed views with the place each had, the latest last.
     closed: Vec<(usize, DesignView)>,
     next_id: u64,
-    /// How the window lays its Model views out side by side; None: one view at a time. Dormant
-    /// while the active view is not in it (a Sketch shows alone).
+    /// How the window lays its views out side by side. Dormant while the active view is outside it.
     tiles: Option<Tiles>,
 }
 
@@ -325,48 +329,84 @@ impl ViewSet {
         self.tiles.as_ref().is_some_and(|tiles| tiles.contains(self.active))
     }
 
-    /// Show the Model views as `preset`, in tab order, the active one among them. Returns how
-    /// many views are shown: fewer than the preset has places for when the design has fewer Model
-    /// views (the caller opens more first when it wants them all). One (or the active view not a
-    /// Model view) shows one view at a time again.
+    /// Show the available workspace views as `preset`, in tab order, with the active one among them.
     pub fn set_layout(&mut self, preset: Preset) -> usize {
-        let mut order: Vec<u64> = self.views.iter().filter(|view| view.kind == ViewKind::Model).map(|view| view.id).collect();
-        if !order.contains(&self.active) {
-            self.tiles = None;
-            return 1;
-        }
-        order.truncate(preset.tiles().max(1));
-        if !order.contains(&self.active)
-            && let Some(last) = order.last_mut()
-        {
-            *last = self.active;
-        }
+        let order = self.layout_order(preset.tiles().max(1));
         self.tiles = Tiles::preset(preset, &order).filter(|tiles| tiles.len() > 1);
         self.tiles.as_ref().map_or(1, Tiles::len)
     }
 
-    /// Like [`Self::set_layout`], but a place without a view of its own is an empty cell, for the
-    /// window to ask what to show there. Returns how many cells the layout has.
+    /// Like [`Self::set_layout`], but a place without a view is an empty cell.
     pub fn set_layout_padded(&mut self, preset: Preset) -> usize {
-        let mut order: Vec<u64> = self.views.iter().filter(|view| view.kind == ViewKind::Model).map(|view| view.id).collect();
-        if !order.contains(&self.active) {
-            self.tiles = None;
-            return 1;
+        let order = self.layout_order(preset.tiles().max(1));
+        self.tiles = if order.is_empty() { None } else { Tiles::preset_padded(preset, &order).filter(|tiles| tiles.len() > 1) };
+        self.tiles.as_ref().map_or(1, Tiles::len)
+    }
+
+    /// Number of views that can fill the current layout's preset, before adding new angles.
+    pub fn layout_view_count(&self) -> usize {
+        self.layout_order(crate::MAX_TILES).len()
+    }
+
+    fn layout_order(&self, limit: usize) -> Vec<u64> {
+        if !self.active().kind.can_tile() {
+            return Vec::new();
         }
-        order.truncate(preset.tiles().max(1));
+        // The Render workspace owns one preview and one selected result for this design.
+        let render = if self.active().kind == ViewKind::Render {
+            Some(self.active)
+        } else {
+            self.tiles
+                .as_ref()
+                .filter(|tiles| tiles.contains(self.active))
+                .and_then(|tiles| self.views.iter().find(|view| view.kind == ViewKind::Render && tiles.contains(view.id)).map(|view| view.id))
+        };
+        let mut order: Vec<_> = self
+            .views
+            .iter()
+            .filter(|view| view.kind.can_tile() && (view.kind != ViewKind::Render || render == Some(view.id)))
+            .map(|view| view.id)
+            .take(limit)
+            .collect();
         if !order.contains(&self.active)
             && let Some(last) = order.last_mut()
         {
             *last = self.active;
         }
-        self.tiles = Tiles::preset_padded(preset, &order).filter(|tiles| tiles.len() > 1);
-        self.tiles.as_ref().map_or(1, Tiles::len)
+        if limit > 1
+            && let Some(render) = render
+            && !order.contains(&render)
+            && let Some(other) = order.iter_mut().rev().find(|id| **id != self.active)
+        {
+            *other = render;
+        }
+        order
     }
 
-    /// Show the Model view `id` in the empty cell number `ordinal` of the layout. False when
-    /// there is no such cell, or `id` is not a Model view that is not shown yet.
+    /// Both views have tile canvases and can share one layout.
+    pub fn can_tile_with(&self, id: u64, other: u64) -> bool {
+        let kind = |id| self.get(id).map(|view| view.kind).filter(|kind| kind.can_tile());
+        match (kind(id), kind(other)) {
+            (Some(ViewKind::Render), Some(ViewKind::Render)) => id == other,
+            (Some(_), Some(_)) => true,
+            _ => false,
+        }
+    }
+
+    /// Whether the view could join the layout without replacing an occupied cell.
+    pub fn can_show_beside(&self, id: u64) -> bool {
+        id != self.active
+            && self.can_tile_with(id, self.active)
+            && self
+                .tiles
+                .as_ref()
+                .filter(|tiles| tiles.contains(self.active))
+                .is_none_or(|tiles| !tiles.contains(id) && tiles.views().into_iter().all(|other| self.can_tile_with(id, other)))
+    }
+
+    /// Show the open view `id` in the empty cell number `ordinal` of the layout.
     pub fn fill_empty(&mut self, ordinal: usize, id: u64) -> bool {
-        self.get(id).is_some_and(|view| view.kind == ViewKind::Model) && self.tiles.as_mut().is_some_and(|tiles| tiles.fill_empty(ordinal, id))
+        self.is_tiled() && self.can_show_beside(id) && self.tiles.as_mut().is_some_and(|tiles| tiles.fill_empty(ordinal, id))
     }
 
     /// Close the empty cell number `ordinal`; a layout left with one cell is none.
@@ -378,11 +418,9 @@ impl ViewSet {
         removed
     }
 
-    /// Show the Model view `id` beside the active one, on `edge` of it. False when either is not a
-    /// Model view, `id` is the active view or shown already, or four views are shown.
+    /// Show the view `id` beside the active one, on `edge` of it.
     pub fn show_beside(&mut self, id: u64, edge: Edge) -> bool {
-        let model = |view: u64| self.get(view).is_some_and(|v| v.kind == ViewKind::Model);
-        if id == self.active || !model(id) || !model(self.active) {
+        if !self.can_show_beside(id) {
             return false;
         }
         let tiles = self.tiles.get_or_insert(Tiles::Leaf(self.active));
@@ -419,12 +457,18 @@ impl ViewSet {
         self.tiles = None;
     }
 
-    /// Drop from the layout the views that are gone or not Model views; under two views left it
-    /// is no layout.
+    /// Drop views that are gone, lack a tile canvas or duplicate the Render workspace.
     fn prune_tiles(&mut self) {
         let Some(tiles) = &mut self.tiles else { return };
-        for id in tiles.views() {
-            if self.views.iter().all(|view| view.id != id || view.kind != ViewKind::Model) {
+        let kind = |id| self.views.iter().find(|view| view.id == id).map(|view| view.kind);
+        let members = tiles.views();
+        let render = if tiles.contains(self.active) && kind(self.active) == Some(ViewKind::Render) {
+            Some(self.active)
+        } else {
+            members.iter().copied().find(|id| kind(*id) == Some(ViewKind::Render))
+        };
+        for id in members {
+            if kind(id).is_none_or(|kind| !kind.can_tile() || (kind == ViewKind::Render && render != Some(id))) {
                 tiles.remove(id);
             }
         }
@@ -908,6 +952,33 @@ mod tests {
     }
 
     #[test]
+    fn render_and_model_share_presets_and_picker_cells() {
+        let mut set = models(2);
+        let first = set.open(ViewKind::Render, None, false);
+        let second = set.duplicate(first).unwrap();
+        assert_eq!(set.set_layout(Preset::Grid), 3);
+        assert!(set.tiles().unwrap().contains(second));
+        assert!(!set.tiles().unwrap().contains(first));
+        set.activate_index(0);
+        assert!(!set.show_beside(first, Edge::Bottom));
+        set.untile();
+        assert!(set.show_beside(first, Edge::Right));
+        set.activate(first);
+        assert_eq!(set.set_layout_padded(Preset::Grid), 4);
+        assert!(!set.fill_empty(0, second));
+        let model = set.open(ViewKind::Model, None, false);
+        set.activate(first);
+        assert!(set.fill_empty(0, model));
+        assert_eq!(ViewSet::from_json(&set.to_json()), Some(set.clone()));
+        assert!(set.activate_index(0));
+        assert_eq!(set.set_layout(Preset::SideBySide), 2);
+        assert!(set.tiles().unwrap().contains(first), "a preset keeps the Render tile already shown");
+        set.untile();
+        assert_eq!(set.set_layout(Preset::SideBySide), 2);
+        assert!(!set.tiles().unwrap().contains(first), "a hidden Render tab does not replace a Model preset angle");
+    }
+
+    #[test]
     fn a_view_taken_out_of_the_layout_stays_open() {
         let mut set = models(3);
         set.set_layout(Preset::Grid);
@@ -932,7 +1003,7 @@ mod tests {
         assert!(set.tiles().is_some() && !set.is_tiled(), "the layout waits while a Sketch shows alone");
         set.activate_index(0);
         assert!(set.is_tiled());
-        assert!(!set.show_beside(sketch, Edge::Right), "only Model views are shown beside");
+        assert!(!set.show_beside(sketch, Edge::Right), "only implemented canvases are shown beside");
     }
 
     #[test]
