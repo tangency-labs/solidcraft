@@ -2994,7 +2994,9 @@ impl<O: LoopObject> HealData<O> {
 
     /// `Fix_TolSizes`: picks the model size from the longest edge, sets the B-rep's
     /// model size estimate and tolerance from it, then gives every face, edge and
-    /// vertex with a bad tolerance the one its gaps call for.
+    /// vertex with a bad tolerance the one its gaps call for. Not upstream (#17739): a vertex's
+    /// new tolerance is at least twice its largest gap with the gap gain, the check's rule,
+    /// where its old tolerance was that large; a smaller old tolerance is not shrunk.
     ///
     /// # Errors
     ///
@@ -3205,6 +3207,16 @@ impl<O: LoopObject> HealData<O> {
                 b,
                 Some(max_edge_tol_3d),
             );
+            // not upstream (#17739): the check holds a vertex's gaps to half its tolerance, and
+            // `gain * gap / 2` and `gain * gap - def` are under twice the gap, so a reset could
+            // leave the vertex failing a gap its old tolerance covered. The tolerance is not
+            // shrunk below twice its largest gap with the gap gain, nor raised past its old value.
+            let covered = zone_tol3d(
+                k,
+                2.0 * crate::geom::tol::gap_gain(k)
+                    * max_vertex_edge_gap_3d_length.max(max_vertex_face_gap_3d_length),
+            );
+            let zone_tol_3d = zone_tol_3d.max(covered.min(vertex::tolerance(b, bad_tol_vertex)?));
             if p.orig_zone_tol_3d == UNDEF_DOUBLE {
                 let t = vertex::tolerance(b, bad_tol_vertex)?;
                 self.vertex_props.props_mut(id)?.orig_zone_tol_3d = t;
