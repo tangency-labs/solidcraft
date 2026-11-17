@@ -190,9 +190,8 @@ fn quantity_name(q: &DeclaredQuantity) -> &'static str {
 fn measure(records: &ImportRecords, origins: &[Origin], built: &HashMap<usize, &solidcraft_kernel::ImportedBody>, k: usize) -> Option<Measured> {
     let b = built.get(&k)?;
     let m = solidcraft_kernel::measure(&b.body).ok()?;
-    let w = origins.get(k)?.world;
-    // The inverse of a rigid placement: its rotation transposed, and the move taken back.
-    let p = [m.centroid.x - w[3][0], m.centroid.y - w[3][1], m.centroid.z - w[3][2]];
-    let centroid = std::array::from_fn(|i| (0..3).map(|j| w[i][j] * p[j]).sum());
+    let back = solidcraft_doc::mat_inverse(&origins.get(k)?.world)?;
+    let c = solidcraft_doc::apply_point(&back, m.centroid);
+    let centroid = [c.x, c.y, c.z];
     Some(Measured { volume: m.volume, area: m.area, shells: m.shells, centroid, sheet: records.bodies.get(k).is_some_and(|r| r.sheet) || !b.closed })
 }
