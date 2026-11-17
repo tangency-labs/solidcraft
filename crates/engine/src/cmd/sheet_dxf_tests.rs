@@ -1187,7 +1187,19 @@ mod byte_regressions {
     // Windows (MSVC), which needed its own set before the re-recording (#18073, #18088). The
     // glibc 2.44 set of the first recording was not re-captured. Keep exact (length, SHA-256)
     // pairs: no numeric normalization or loose tolerance.
-    const UBUNTU_MATH_OUTPUTS: &[ExpectedOutput] = &[];
+    const UBUNTU_MATH_OUTPUTS: &[ExpectedOutput] = &[
+        ("ellipse-arcs.dxf", 16674, "b85882adb682ef4b317d401f369ebb4da50229a0927b8fa7d560cef4a556c98a"),
+        ("text-outlines-arcs.dxf", 25324, "0edcf6e207c586623964ae923d5f5e840b43ee91881c813dd68d91735efeb522"),
+        ("tray-arcs-cut-bends-true-roles.dxf", 43149, "739272a05f099899508184acf72e635d0ce693f170735d5b66f69922bf4a63aa"),
+        ("tray-arcs-cut-bends-true-single.dxf", 41575, "1210571398f89a0dfee572599ff33b801fbce967f2acc1fa9aced346aba67d29"),
+        ("tray-arcs-cut-bends-false-roles.dxf", 42627, "38091fc035d512b5763ba9e106e2fb2a158d4ed97755144acce104302ea8c31e"),
+        ("tray-arcs-cut-bends-false-single.dxf", 41079, "f51192bf3d3758062cb490b6bb14221bfa226d79332f94df9f6c3d647d687f09"),
+        ("tray-arcs-etch-bends-true-roles.dxf", 43149, "a678be43519ad0ee2bd474b1d8666a2e2b62cc6b366fb60e171f467db79f45c8"),
+        ("tray-arcs-etch-bends-true-single.dxf", 41575, "d55f2de65ca3a08c1688e7af1fdcd0c0cb596f9e41c776dd2f153cf4f713933c"),
+        ("tray-arcs-etch-bends-false-roles.dxf", 42627, "7d73520ff3b3b0ca58e98594b809421b438856f231f296b635c2324acd33478a"),
+        ("tray-arcs-etch-bends-false-single.dxf", 41079, "ebf1d836d92b6a54ec026ebb63831711648e3942405d0e83a48422de7d376d6d"),
+        ("pocket-and-engraved-text-arcs.dxf", 39080, "fdaad9b32f5df58bf0448957c597572ee53ad1f1a517791e11b00c2bc6acdc8c"),
+    ];
 
     struct BytePins {
         expected: &'static [ExpectedOutput; 53],
