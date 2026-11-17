@@ -449,8 +449,8 @@ fn rib_to_the_next_face_fills_the_corner() {
 
 /// A rib whose curve stops short of a curved wall runs its end on to the wall (#13019): a base,
 /// a wall at x = 0..5 and above them a cylinder along X (bottom at z = 29 in the sketch plane);
-/// the rib's line runs up from the base at x = 20 and stops at z = 25. Without `extend` (a
-/// design saved before the option) the rib ends at the line's end as it did.
+/// the rib's line runs up from the base at x = 20 and stops at z = 25. Without `extend` (the
+/// default, and every design saved before the option) the rib ends at the line's end as it did.
 #[test]
 fn rib_runs_its_ends_on_to_a_curved_wall() {
     let added = |extend: bool| {
@@ -462,7 +462,11 @@ fn rib_runs_its_ends_on_to_a_curved_wall() {
         run(&mut s, "sketch.line", json!({"points": [[20, 5], [20, 25]], "ids": ["l1"]}));
         run(&mut s, "sketch.finish", json!({}));
         let before = volume(&mut s);
-        run(&mut s, "solid.rib", json!({"sketch": "RibSketch", "curves": ["l1"], "thickness": 4, "extend": extend}));
+        let mut rib = json!({"sketch": "RibSketch", "curves": ["l1"], "thickness": 4});
+        if extend {
+            rib["extend"] = json!(true);
+        }
+        run(&mut s, "solid.rib", rib);
         assert_eq!(measure(&mut s)["body_count"], 1);
         volume(&mut s) - before
     };
@@ -493,8 +497,7 @@ fn rib_ending_flush_with_a_wall_keeps_a_square_end() {
         run(&mut s, "sketch.create", json!({"plane": "XZ", "offset": 20, "name": "R"}));
         run(&mut s, "sketch.line", json!({"points": [[from, -12.0], [to, -12.0]], "ids": ["l1"]}));
         run(&mut s, "sketch.finish", json!({}));
-        // The ends as drawn: a run-on end would carry an end short of a wall on to it.
-        run(&mut s, "solid.rib", json!({"sketch": "R", "curves": ["l1"], "thickness": 4, "extend": false}));
+        run(&mut s, "solid.rib", json!({"sketch": "R", "curves": ["l1"], "thickness": 4}));
         let v = volume(&mut s);
         assert!(rel(v, volume_expected) < 1e-6, "{from} -> {to}: {v}, expected {volume_expected}");
         assert_eq!(measure(&mut s)["body_count"], 1, "{from} -> {to}");
@@ -506,7 +509,8 @@ fn rib_finds_a_tray_floor_whatever_the_tray_length() {
     // An open tray L x 30 x 12 with 2 mm walls and floor, a rib line across it at z = 8 on the
     // mid plane x = L / 2: the rib runs down to the floor. Finding the material side and the
     // floor by samples spaced by the tray's size passed over the 2 mm floor at some lengths
-    // and refused the rib (#16874). With its ends run on (the default, #13019) the rib reaches
+    // and refused the rib (#16874). Without `extend` (the default) it builds as before; with its
+    // ends run on (`extend`, #13019) the rib reaches
     // the side walls at y = 2 and 28 and is 26 long; a thin rib's outline closes there too.
     let sizes = [(40.0, 0.1), (80.0, 0.1), (100.0, 0.1), (150.0, 0.1), (160.0, 0.1), (200.0, 0.1), (400.0, 0.1), (400.0, 4.0)];
     for ((l, t), extend) in sizes.into_iter().flat_map(|size| [(size, false), (size, true)]) {
@@ -518,7 +522,11 @@ fn rib_finds_a_tray_floor_whatever_the_tray_length() {
         run(&mut s, "sketch.create", json!({"plane": "YZ", "offset": l / 2.0, "name": "R"}));
         run(&mut s, "sketch.line", json!({"points": [[5, 8], [25, 8]], "closed": false}));
         run(&mut s, "sketch.finish", json!({}));
-        run(&mut s, "solid.rib", json!({"sketch": "R", "curves": ["l1"], "thickness": t, "extend": extend}));
+        let mut rib = json!({"sketch": "R", "curves": ["l1"], "thickness": t});
+        if extend {
+            rib["extend"] = json!(true);
+        }
+        run(&mut s, "solid.rib", rib);
         // 20 long (26 with its ends run on), 6 from the line down to the floor; it goes into the
         // 2 mm floor to merge but not out below it, however thick the rib.
         let long = if extend { 26.0 } else { 20.0 };

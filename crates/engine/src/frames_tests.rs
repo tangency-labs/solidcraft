@@ -728,8 +728,7 @@ fn a_root_rib_stops_at_a_moved_part_that_does_not_take_part() {
     run(&mut s, "sketch.create", json!({"plane": {"origin": [0, 15, 0], "x_dir": [1, 0, 0], "y_dir": [0, 0, 1]}, "name": "RibSketch"}));
     run(&mut s, "sketch.line", json!({"points": [[30, 17], [60, 17]], "ids": ["l1"]}));
     run(&mut s, "sketch.finish", json!({}));
-    // The ends as drawn (no run-on ends), so the wall spans x 30..60.
-    run(&mut s, "solid.rib", json!({"sketch": "RibSketch", "curves": ["l1"], "thickness": 4, "participants": ["Base block"], "extend": false}));
+    run(&mut s, "solid.rib", json!({"sketch": "RibSketch", "curves": ["l1"], "thickness": 4, "participants": ["Base block"]}));
     // The wall is 4 thick and runs from the line at 17 down to a face, 2 mm into the body there (the
     // overlap, as the samples are 1 mm apart): above Base's top (10) it is 7 tall over x 30..40
     // (area 70), and above Cap's shown top (12) it reaches down to 10, 7 tall over x 40..60 (area

@@ -1006,7 +1006,7 @@ impl Dialog {
                     depth: String::new(),
                     flip: false,
                     normal: false,
-                    extend: true,
+                    extend: false,
                 },
                 vec![SelInput::new("Curves", CURVES, true)],
             ),
