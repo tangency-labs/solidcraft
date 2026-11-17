@@ -630,7 +630,7 @@ fn taper(
 /// cannot split the section at (#18452). A piece whose ends lie within `tol` of each other
 /// is left out: chaining drops it, and it ends at its neighbours' ends.
 fn offset_junction(k: &Kernel, pieces: &[OffsetPiece], tol: f64) -> Result<Option<Point3>> {
-    let mut ends = Vec::with_capacity(2 * pieces.len());
+    let mut ends = Vec::new();
     for piece in pieces {
         let e = piece.curve.ends(k)?;
         if e.start.distance(e.end) > tol {
