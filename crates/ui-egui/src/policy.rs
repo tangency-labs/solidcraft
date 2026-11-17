@@ -270,6 +270,18 @@ pub fn enforce(app: &mut SolveApp) {
     enforce_keeping(app, false);
 }
 
+/// [`enforce`] after the person's preferences were loaded: every loaded value of a preference the
+/// policy sets is the person's choice, the policy's own value included, so it replaces the kept one.
+pub fn enforce_loaded(app: &mut SolveApp) {
+    let prefs: Vec<_> = app.policy.mandatory.settings.keys().copied().collect();
+    for pref in prefs {
+        if let Some(loaded) = get(&app.preferences, pref) {
+            app.policy.own.insert(pref, loaded);
+        }
+    }
+    enforce_keeping(app, true);
+}
+
 /// [`enforce`] after Restore defaults: the person's kept value stays, the default is not a choice.
 pub fn enforce_after_reset(app: &mut SolveApp) {
     enforce_keeping(app, true);
@@ -616,6 +628,22 @@ mod tests {
         after.app.load_prefs(&h.app.prefs());
         assert_eq!(after.app.preferences.default_units, "mm", "without the policy the person's choice is back");
         assert_eq!(after.app.preferences.language, "de");
+        // Loaded preferences are the person's choice, even one equal to the policy's value.
+        let file = |units: &str, app: &SolveApp| {
+            let mut file = serde_json::from_str::<serde_json::Value>(&app.prefs()).unwrap_or_default();
+            file["preferences"]["default_units"] = json!(units);
+            file.to_string()
+        };
+        let reload = file("in", &h.app);
+        h.app.load_prefs(&reload);
+        assert_eq!(saved(&h.app)["default_units"], json!("in"), "the reloaded choice replaces the kept one");
+        assert_eq!(saved(&h.app)["language"], json!("de"));
+        let reload = file("cm", &h.app);
+        h.app.load_prefs(&reload);
+        assert_eq!(h.app.preferences.default_units, "in", "the policy's value stays in force");
+        assert_eq!(saved(&h.app)["default_units"], json!("cm"));
+        let reload = file("mm", &h.app);
+        h.app.load_prefs(&reload);
         // The control channel reports the stored choices, the values in force, and refuses a change.
         let reply = h.call("ui.prefs", json!({"open": "General"}));
         assert_eq!(reply["result"]["default_units"], json!("mm"), "{reply}");
