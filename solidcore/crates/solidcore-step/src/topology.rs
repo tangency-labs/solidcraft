@@ -1376,7 +1376,13 @@ fn map_edge(curve: &Curve, ps: P3, pe: P3, same_sense: bool, closed: bool, full:
             let radii = [*semi_axis_1, *semi_axis_2];
             conic(BCurve::Ellipse { frame: frame(position), radii }, position, radii, ps, pe, same_sense, full)
         }
-        Curve::BSpline(b) => open_or_closed(map_bspline_curve(b)?, ps, pe, same_sense, closed, tol),
+        // A rational spline that is exactly a circular arc of at most a turn (an exporter's NURBS
+        // circle) is that circle where the edge is an arc of the spline, so its pcurves on a
+        // round face are in closed form.
+        Curve::BSpline(b) => match circle_edge(b, ps, pe, same_sense, full) {
+            Some(m) => Ok(m),
+            None => open_or_closed(map_bspline_curve(b)?, ps, pe, same_sense, closed, tol),
+        },
         Curve::Polyline(points) => {
             if points.windows(2).any(|w| w.first() == w.get(1)) {
                 return Err("a polyline with a repeated point".into());
@@ -1432,6 +1438,26 @@ fn conic(curve: BCurve, position: &Placement, radii: [f64; 2], ps: P3, pe: P3, s
         return Err("a degenerate edge on a conic".into());
     }
     Ok(Mapped { curve, interval: [lo, lo + d], with_step: same_sense, sense_mismatch: false })
+}
+
+/// The edge from `ps` to `pe` on spline `b` as an arc of a circle, when `b` is exactly a circle
+/// sweeping at most one turn ([`swept::spline_circle`]) and the arc lies on it: a closed edge on a
+/// spline that closes in one turn, or an open one whose arc the spline sweeps. `None` otherwise.
+fn circle_edge(b: &crate::geom::BSplineCurve, ps: P3, pe: P3, same_sense: bool, full: bool) -> Option<Mapped> {
+    let (circle, swept) = swept::spline_circle(b)?;
+    let Curve::Circle { position, radius } = &circle else { return None };
+    let slack = 1e-9 * TAU;
+    if !(swept <= TAU + slack) {
+        return None;
+    }
+    let m = conic(BCurve::Circle { frame: frame(position), radius: *radius }, position, [*radius; 2], ps, pe, same_sense, full).ok()?;
+    // The circle starts at the spline's start: the arc lies on the spline when it ends within
+    // the angle the spline sweeps.
+    let [lo, hi] = m.interval;
+    let from = lo.rem_euclid(TAU);
+    let from = if from > TAU - slack { from - TAU } else { from };
+    let on = if full { (swept - TAU).abs() <= slack } else { from + (hi - lo) <= swept + slack };
+    on.then_some(m)
 }
 
 /// A spline or polyline: the vertices' parameters by projection. On an open curve the edge runs

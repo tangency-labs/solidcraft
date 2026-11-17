@@ -1234,6 +1234,8 @@ fn main() -> eframe::Result {
     #[cfg(target_os = "macos")]
     objc2_foundation::NSProcessInfo::processInfo().setProcessName(objc2_foundation::ns_string!("SolidCraft"));
     mark("main");
+    // The kernel's fix set, named to solidcore-ops before any call runs on it.
+    solidcraft_engine::kernel::start();
     solidcraft_ui_egui::i18n::install();
     solidcraft_look::install_tables();
     solidcraft_ui_egui::workspace::install_tabs();
@@ -1316,6 +1318,13 @@ fn main() -> eframe::Result {
             return Ok(());
         }
     }
+    // The log on disk, which a problem report attaches the end of (`log_file`); the run
+    // before's log is kept beside it. After the hand-off above: a launch that only passes its
+    // files to the running window must not move that window's log aside.
+    if let Some(dir) = solidcraft_engine::recovery::data_dir() {
+        solidcraft_ui_egui::log_file::install(&dir.join("logs"));
+    }
+    log::info!("SolidCraft {} ({}) started", solidcraft_ui_egui::help::VERSION, solidcraft_ui_egui::help::COMMIT);
     // `--max-file-size 2GB`: the largest files this run reads, over Preferences, never saved (#4086).
     if let Some(value) = max_file_size {
         let applied = startup::max_file_size(value.as_deref()).and_then(|bytes| solidcraft_engine::io::limits::set_override(Some(bytes)));
@@ -1874,11 +1883,13 @@ fn wgpu_options(cpu: bool, preference: Option<&str>) -> eframe::egui_wgpu::WgpuC
         let environment = std::env::var("WGPU_ADAPTER_NAME").ok();
         let adapter = graphics().and_then(|v| v.get("adapter").and_then(serde_json::Value::as_str).map(str::to_string));
         startup::configure_adapter(setup, cpu, environment, adapter);
-        // A float depth buffer with a stencil, wherever the adapter has it (see `FLOAT_DEPTH_BITS`).
+        // A float depth buffer with a stencil (see `FLOAT_DEPTH_BITS`), and indirect draws that
+        // start at an instance (instanced meshes drawn a call per pipeline), wherever the adapter
+        // has them.
         let base = setup.device_descriptor.clone();
         setup.device_descriptor = std::sync::Arc::new(move |adapter| {
             let mut d = base(adapter);
-            d.required_features |= adapter.features() & startup::FLOAT_DEPTH_STENCIL;
+            d.required_features |= adapter.features() & (startup::FLOAT_DEPTH_STENCIL | solidcraft_viewport_gpu::INDIRECT_DRAWS);
             d
         });
     }

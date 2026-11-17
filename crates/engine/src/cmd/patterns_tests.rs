@@ -1815,3 +1815,147 @@ fn pattern_copies_share_their_bodys_meshes_through_a_move_to_a_component() {
     run(&mut s, "component.move_bodies", json!({"bodies": copies, "component": "Grid"}));
     check(&s, "moved into a component");
 }
+
+/// The box of `body` as the world shows it.
+fn world_bounds(s: &Session, body: &str) -> (solidcore_record::Vec3, solidcore_record::Vec3) {
+    let b = s.world_state().unwrap().body(body).unwrap_or_else(|| panic!("no body `{body}`")).mesh().bounds();
+    (b.min, b.max)
+}
+
+/// A part "Arm" holding "ArmBody", placed twice (turned and moved, then a further instance
+/// above it), with the design itself active: the further instance's world name.
+fn arm_placed_twice(s: &mut Session) -> String {
+    let c = run(s, "component.create", json!({"name": "Arm", "grounded": false}));
+    run(s, "solid.box", json!({"corner": [10, 0, 0], "length": 20, "width": 4, "height": 6, "body_name": "ArmBody"}));
+    run(s, "component.activate", json!({"component": 0}));
+    run(s, "occurrence.move", json!({"occurrence": c["occurrence"], "axis": [1, 0, 0], "angle": "90 deg", "translate": [30, 50, 0]}));
+    run(s, "occurrence.copy", json!({"component": c["component"], "translate": [0, 0, 40]}));
+    let names: Vec<String> = s.world_state().unwrap().bodies.iter().map(|b| b.name.clone()).collect();
+    names.into_iter().find(|n| n.starts_with("ArmBody") && n != "ArmBody").unwrap_or_else(|| panic!("no further instance"))
+}
+
+/// A body pattern of every body an assembly shows, picked as the Browser names them: a body of a
+/// part placed twice is copied where each placement shows it. Before, the world name of the
+/// second placement was "no body", and the whole pattern was refused.
+#[test]
+fn a_pattern_copies_each_placement_of_a_part_where_it_is_shown() {
+    let mut s = Session::default();
+    let instance = arm_placed_twice(&mut s);
+    let r = run(&mut s, "solid.pattern.rectangular", json!({"bodies": ["ArmBody", instance], "dir1": [1, 0, 0], "count1": 2, "spacing1": 100}));
+    let pattern = s.doc.features.last().unwrap().id;
+    let copies: Vec<String> = s.model.state().bodies.iter().filter(|b| b.feature == pattern).map(|b| b.name.clone()).collect();
+    assert_eq!(copies.len(), 2, "{r}");
+    let shifted = |(lo, hi): (solidcore_record::Vec3, solidcore_record::Vec3)| {
+        let d = solidcore_record::Vec3::new(100.0, 0.0, 0.0);
+        (lo + d, hi + d)
+    };
+    let close = |a: (solidcore_record::Vec3, solidcore_record::Vec3), b: (solidcore_record::Vec3, solidcore_record::Vec3)| {
+        a.0.dist(b.0) < 1e-6 && a.1.dist(b.1) < 1e-6
+    };
+    let wanted = [shifted(world_bounds(&s, "ArmBody")), shifted(world_bounds(&s, &instance))];
+    for (copy, want) in copies.iter().zip(wanted) {
+        assert!(close(world_bounds(&s, copy), want), "{copy}: {:?}, want {want:?}", world_bounds(&s, copy));
+    }
+    // It reads back the same from a saved design.
+    let t = Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap());
+    for (copy, want) in copies.iter().zip(wanted) {
+        assert!(close(world_bounds(&t, copy), want), "{copy} after reopening");
+    }
+}
+
+/// A body the pattern cannot copy any more (here: the placement it was picked at is gone) is left
+/// out with a warning, and every other body is still copied. Before, one such body failed the
+/// whole pattern.
+#[test]
+fn a_pattern_leaves_out_a_body_it_cannot_copy_and_copies_the_rest() {
+    let mut s = Session::default();
+    let instance = arm_placed_twice(&mut s);
+    run(&mut s, "solid.box", json!({"corner": [0, -50, 0], "length": 5, "width": 5, "height": 5, "body_name": "Block"}));
+    run(&mut s, "solid.pattern.rectangular", json!({"bodies": ["ArmBody", instance, "Block"], "dir1": [1, 0, 0], "count1": 3, "spacing1": 100}));
+    let pattern = s.doc.features.last().unwrap().id;
+    if let Some(f) = Arc::make_mut(&mut s.doc).feature_mut(pattern)
+        && let solidcraft_doc::FeatureKind::Pattern { placements, .. } = &mut f.kind
+    {
+        assert_eq!(placements.len(), 3, "{placements:?}");
+        // The further instance's placement, as if its occurrence were deleted since.
+        if let Some(path) = placements.get_mut(1) {
+            *path = vec![u64::MAX];
+        }
+    }
+    s.refresh();
+    let result = s.model.result(pattern).unwrap();
+    assert!(result.error.is_none(), "{:?}", result.error);
+    let warning = result.warning.clone().unwrap_or_default();
+    assert!(warning.contains("1 of the bodies could not be copied") && warning.contains("ArmBody"), "{warning}");
+    let copies = s.model.state().bodies.iter().filter(|b| b.feature == pattern).count();
+    assert_eq!(copies, 4, "two copies each of ArmBody and Block");
+}
+
+/// While a pattern leaves a body out, the names stored for that body's copies stay in their
+/// places: once the body is back, every copy has the name it had before. Before, the names of
+/// the copies made were stored one after another, so the body's copies took another body's
+/// names when it came back, and that body's copies had new ones.
+#[test]
+fn a_pattern_keeps_the_names_of_a_left_out_bodys_copies() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"corner": [0, 0, 0], "length": 5, "width": 5, "height": 5, "body_name": "A"}));
+    let a = s.doc.features.last().unwrap().id;
+    run(&mut s, "solid.box", json!({"corner": [0, 50, 0], "length": 5, "width": 5, "height": 5, "body_name": "B"}));
+    run(&mut s, "solid.pattern.rectangular", json!({"bodies": ["A", "B"], "dir1": [1, 0, 0], "count1": 3, "spacing1": 20}));
+    let pattern = s.doc.features.last().unwrap().id;
+    // Each copy's name with where it is (its box's lowest corner, rounded).
+    let copies = |s: &Session| -> Vec<(String, (i64, i64))> {
+        let mut copies: Vec<(String, (i64, i64))> = s
+            .model
+            .state()
+            .bodies
+            .iter()
+            .filter(|b| b.feature == pattern)
+            .map(|b| {
+                let lo = b.mesh().bounds().min;
+                (b.name.clone(), (lo.x.round() as i64, lo.y.round() as i64))
+            })
+            .collect();
+        copies.sort();
+        copies
+    };
+    let before = copies(&s);
+    assert_eq!(before.len(), 4, "{before:?}");
+    run(&mut s, "timeline.suppress", json!({"feature": a, "suppressed": true}));
+    let result = s.model.result(pattern).unwrap();
+    assert!(result.error.is_none() && result.warning.as_deref().is_some_and(|w| w.contains("A")), "{result:?}");
+    let b_copies: Vec<_> = before.iter().filter(|(_, (_, y))| *y == 50).cloned().collect();
+    assert_eq!(copies(&s), b_copies, "B's copies keep their names while A is left out");
+    run(&mut s, "timeline.suppress", json!({"feature": a, "suppressed": false}));
+    assert_eq!(copies(&s), before, "every copy has its name back");
+}
+
+/// Placing a part many times moves none of its bodies' records: the placed world keeps each
+/// part's record with each placement's motion, and a placement's record is moved only when its
+/// own exact geometry is needed. Every placement of a large assembly placed a hundred times was
+/// moved as it was placed, tens of gigabytes.
+#[test]
+fn placing_a_part_many_times_moves_no_record_until_one_is_needed() {
+    let mut s = Session::default();
+    let c = run(&mut s, "component.create", json!({"name": "Part", "grounded": false}));
+    for k in 0..3 {
+        run(&mut s, "solid.cylinder", json!({"base": [12 * k, 0, 0], "radius": 5, "height": 20, "body_name": format!("B{k}")}));
+    }
+    run(&mut s, "component.activate", json!({"component": 0}));
+    for k in 1..=10 {
+        run(&mut s, "occurrence.copy", json!({"component": c["component"], "translate": [0, 40 * k, 0]}));
+    }
+    let before = solidcraft_kernel::lazy_moves_made();
+    let world = s.world_state().unwrap();
+    assert_eq!(world.bodies.len(), 3 * 11);
+    // Their shapes are drawn, named and framed from the part's: meshes, face counts, outlines,
+    // whether they are closed (the viewport asks every frame it builds).
+    for b in &world.bodies {
+        let _ = (b.body.face_count(), b.mesh_in_place(), b.outline_bounds(), b.is_closed());
+    }
+    assert_eq!(solidcraft_kernel::lazy_moves_made(), before, "no placement's record moved to place or draw it");
+    // A measure of one placement needs its own geometry: that one is moved, once.
+    let placed = world.bodies.iter().find(|b| b.placed_definition().is_some()).unwrap();
+    let _ = placed.body.record();
+    assert_eq!(solidcraft_kernel::lazy_moves_made(), before + 1);
+}

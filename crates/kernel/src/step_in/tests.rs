@@ -256,6 +256,55 @@ fn seam_only_torus_imports_as_a_whole_ring() {
     }
 }
 
+/// A torus (R 12, r 2) as SolidCraft 0.30.1 wrote it (#17930): two faces sharing one loop, a
+/// patch a third of the way round and half way round the tube, and the rest of the torus round
+/// it, each on its own TOROIDAL_SURFACE, both as written. The rest runs clockwise round the
+/// patch: it is the outside of its loop, and was read as the patch turned over, both faces on
+/// the patch and no volume. The same torus written again by 0.30.1 has its faces on
+/// SURFACE_OF_REVOLUTIONs of a rational circle (#17929), and the rest face got no pcurves. Both
+/// read as the closed torus: volume 2π²Rr², area 4π²Rr.
+#[test]
+fn a_torus_written_as_a_patch_and_the_rest_round_it_imports_whole() {
+    use std::f64::consts::PI;
+    let (major, minor) = (12.0_f64, 2.0_f64);
+    let (volume, area) = (2.0 * PI * PI * major * minor * minor, 4.0 * PI * PI * major * minor);
+    for (what, text) in [
+        ("toroidal", include_str!("../../../../tests/step-regressions/torus_patch_and_rest.step")),
+        ("revolved", include_str!("../../../../tests/step-regressions/torus_patch_and_rest_revolved.step")),
+    ] {
+        let imp = step_import(text).unwrap_or_else(|e| panic!("{what}: {e}"));
+        assert_eq!(imp.bodies.len(), 1, "{what}: {:?}", imp.warnings);
+        assert!(
+            !imp.warnings.iter().any(|w| w.contains("turned over") || w.contains("left out") || w.contains("surfaces")),
+            "{what}: {:?}",
+            imp.warnings
+        );
+        assert!(imp.bodies[0].closed, "{what}: {:?}", imp.warnings);
+        let m = measure(&imp.bodies[0].body).unwrap();
+        assert!(rel(m.volume, volume) < 1e-6, "{what}: volume {} vs {volume}", m.volume);
+        assert!(rel(m.area, area) < 1e-6, "{what}: area {} vs {area}", m.area);
+    }
+}
+
+/// A 30 × 30 × 10 block with a Ø14 hole through it, its top edge rounded at 1 mm, as SolidCraft
+/// 0.30.1 wrote it after reading its own file (#17929): the round on a SURFACE_OF_REVOLUTION of
+/// a rational circle, which got no pcurves, so the block came in open. The round reads as a
+/// torus and the block is closed: the box less the hole, 9000 − 490π, less the round's corner,
+/// the area 1 − π/4 outside a quarter circle of radius 1, turned about the axis at its
+/// centroid's radius 7 + (10 − 3π)/(12 − 3π) (Pappus).
+#[test]
+fn a_round_on_a_revolved_rational_circle_imports_as_a_torus() {
+    use std::f64::consts::PI;
+    let imp = step_import(include_str!("../../../../tests/step-regressions/hole_round_revolved.step")).unwrap();
+    assert_eq!(imp.bodies.len(), 1, "{:?}", imp.warnings);
+    assert!(imp.bodies[0].closed, "{:?}", imp.warnings);
+    let corner = 1.0 - PI / 4.0;
+    let centroid = 7.0 + (10.0 - 3.0 * PI) / (12.0 - 3.0 * PI);
+    let volume = 9000.0 - 490.0 * PI - 2.0 * PI * centroid * corner;
+    let m = measure(&imp.bodies[0].body).unwrap();
+    assert!(rel(m.volume, volume) < 1e-6, "volume {} vs {volume}", m.volume);
+}
+
 #[test]
 #[ignore = "manual STEP import timing; run without concurrent builds"]
 fn benchmark_independent_step_solids() {
@@ -1009,6 +1058,69 @@ fn two_instance_assembly() -> String {
     }
     t += TAIL;
     t
+}
+
+// A centimetre tetrahedron replaces the second block occurrence (rotated and moved 100 mm).
+fn tessellated_assembly(item: &str) -> String {
+    two_instance_assembly()
+        .replace("AUTOMOTIVE_DESIGN { 1 0 10303 214 1 1 1 1 }", "AP242_MANAGED_MODEL_BASED_3D_ENGINEERING_MIM_LF { 1 0 10303 442 1 1 4 }")
+        .replace("'Block:1','',#70,#50", "'Block:1','',#70,#750")
+        .replace("RELATIONSHIP('','',#60,#80)REPRESENTATION_RELATIONSHIP_WITH_TRANSFORMATION(#612)",
+                 "RELATIONSHIP('','',#760,#80)REPRESENTATION_RELATIONSHIP_WITH_TRANSFORMATION(#612)")
+        .replace(TAIL, &format!(
+            "{}#760=TESSELLATED_SHAPE_REPRESENTATION('',(#770),#20);\n#761=SHAPE_DEFINITION_REPRESENTATION(#754,#760);\n#771=COORDINATES_LIST('',4,((0.,0.,0.),(1.,0.,0.),(0.,1.,0.),(0.,0.,1.)));\n#770={item};\n{TAIL}",
+            product(750, "Tetrahedron")))
+}
+
+const TETRAHEDRON: &str = "TRIANGULATED_SURFACE_SET('',#771,4,(),(),((1,3,2),(1,2,4),(2,3,4),(3,1,4)))";
+
+#[test]
+fn ap242_tessellated_part_keeps_assembly_placement() {
+    let imp = step_import(&tessellated_assembly(TETRAHEDRON)).unwrap();
+    assert_eq!(imp.bodies.len(), 2, "{:?}", imp.warnings);
+    assert!(imp.warnings.is_empty(), "{:?}", imp.warnings);
+    assert!(!imp.bodies[0].body.is_mesh());
+    let mesh = &imp.bodies[1];
+    assert_eq!(mesh.name, "Tetrahedron");
+    assert!(mesh.body.is_mesh() && mesh.closed);
+    let m = measure(&mesh.body).unwrap();
+    assert_eq!(m.faces, 4);
+    assert_eq!([m.bbox.min.x, m.bbox.min.y, m.bbox.min.z], [90., 0., 0.]);
+    assert_eq!([m.bbox.max.x, m.bbox.max.y, m.bbox.max.z], [100., 10., 10.]);
+    assert_eq!(imp.tree[0].children[1].bodies, vec![1]);
+}
+
+#[test]
+fn ap242_tessellated_part_maps_coordinate_indices() {
+    let item = TETRAHEDRON.replace("4,(),()", "4,(),(2,3,4,5)");
+    let text = tessellated_assembly(&item).replace("COORDINATES_LIST('',4,(", "COORDINATES_LIST('',5,((50.,50.,50.),");
+    let imp = step_import(&text).unwrap();
+    assert_eq!(imp.bodies.len(), 2, "{:?}", imp.warnings);
+    let mesh = &imp.bodies[1].body;
+    assert!(mesh.is_mesh());
+    let m = measure(mesh).unwrap();
+    assert_eq!(m.faces, 4);
+    assert!(rel(m.volume, 1000. / 6.) < 1e-8);
+    assert_eq!([m.bbox.min.x, m.bbox.min.y, m.bbox.min.z], [90., 0., 0.]);
+    assert_eq!([m.bbox.max.x, m.bbox.max.y, m.bbox.max.z], [100., 10., 10.]);
+}
+
+#[test]
+fn ap242_unreadable_tessellation_warns_with_product_name() {
+    let text = tessellated_assembly(TETRAHEDRON);
+    for text in [
+        text.replace("(1,3,2)", "(0,3,2)"),
+        text.replace("(1,3,2)", "(999999999999,3,2)"),
+        text.replace("4,(),()", "1000001,(),()"),
+        text.replace("4,(),()", "4,(),(1,2,3,9)"),
+        text.replace("TRIANGULATED_SURFACE_SET", "COMPLEX_TRIANGULATED_SURFACE_SET"),
+        text.replace("COORDINATES_LIST('',4", "COORDINATES_LIST('',1000001"),
+        text.replace("(0.,0.,1.)));", "(0.,0.,1.E100)));"),
+    ] {
+        let imp = step_import(&text).unwrap();
+        assert_eq!(imp.bodies.len(), 1);
+        assert!(imp.warnings.iter().any(|w| w.contains("Tetrahedron") && w.contains("tessellat")), "{:?}", imp.warnings);
+    }
 }
 
 #[test]
@@ -3726,8 +3838,9 @@ fn colour_names_come_in_with_their_colours_and_go_out_again() {
     assert_eq!(back_paint.faces.iter().map(|f| f.name.as_deref()).collect::<Vec<_>>(), [Some("Accent")]);
 }
 
-/// A body an `INVISIBILITY` record names, through its styled item or its representation, is
-/// read hidden; the body is still there, so it can be shown again.
+/// A body an `INVISIBILITY` record names, through its styled item, its representation or a
+/// presentation layer it is assigned to, is read hidden; the body is still there, so it can be
+/// shown again.
 #[test]
 fn an_invisibility_record_hides_its_styled_item_and_representation() {
     let import = |extra: &str| {
@@ -3748,6 +3861,16 @@ fn an_invisibility_record_hides_its_styled_item_and_representation() {
     let represented = import("#459=INVISIBILITY((#60));\n");
     assert_eq!(represented.bodies.len(), 1, "{:?}", represented.warnings);
     assert!(represented.bodies[0].hidden);
+    // A layer: every item assigned to it is hidden, whether the layer lists the solid or its
+    // representation.
+    let layered = import("#80=PRESENTATION_LAYER_ASSIGNMENT('Hidden parts','',(#101));\n#459=INVISIBILITY((#80));\n");
+    assert_eq!(layered.bodies.len(), 1, "{:?}", layered.warnings);
+    assert!(layered.bodies[0].hidden, "a body on a hidden layer");
+    let layered = import("#80=PRESENTATION_LAYER_ASSIGNMENT('Hidden parts','',(#60));\n#459=INVISIBILITY((#80));\n");
+    assert!(layered.bodies[0].hidden, "a representation on a hidden layer");
+    // A layer no INVISIBILITY record names leaves its items shown.
+    let shown_layer = import("#80=PRESENTATION_LAYER_ASSIGNMENT('Parts','',(#101));\n");
+    assert!(!shown_layer.bodies[0].hidden);
     // A file with no INVISIBILITY record leaves the body shown.
     let shown = import("");
     assert_eq!(shown.bodies.len(), 1, "{:?}", shown.warnings);
