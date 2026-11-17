@@ -969,3 +969,23 @@ fn case_a_turned_by_thirty_degrees_plans_the_same_slots() {
         assert_same(&got, &want);
     }
 }
+
+#[test]
+fn slots_shorter_than_the_bridge_are_still_cut() {
+    // Slot 10, bridge 12 (design 3.1: a warning, not a refusal): a whole slot is never shorter
+    // than itself, so the short-piece rule (6.9) must not leave every slot out.
+    let s = LivingHingeSpec {
+        slot_length: 10.0,
+        bridge: 12.0,
+        row_spacing: 3.0,
+        ..spec(HingeClip::RunOut, 12.0)
+    };
+    let (_, plan) = plan_band(&s);
+    assert!(plan.count(SlotKind::Whole) > 0, "{plan:?}");
+    for slot in plan.slots.iter().filter(|s| s.kind == SlotKind::Whole) {
+        assert!(close(slot.a1 - slot.a0 + 0.2, 10.0), "{slot:?}");
+    }
+    for slot in plan.slots.iter().filter(|s| s.kind == SlotKind::Shortened) {
+        assert!(slot.a1 - slot.a0 + 0.2 >= 10.0 - TOL, "{slot:?}");
+    }
+}
