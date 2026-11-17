@@ -1490,13 +1490,13 @@ pub(crate) fn view_command(app: &mut SolveApp, command: &str, mut v: Value) -> R
         }
         "tab.view.reopen" => Some(view_reopen(app).ok_or("there is no closed view to reopen")?),
         "tab.view.activate" => {
-            let id = match place("index") {
-                Some(index) => app.docs.views.views().get(index).map(|view| view.id),
-                None => Some(asked),
-            };
             let window = v.get("window").and_then(Value::as_u64).and_then(|id| u32::try_from(id).ok());
-            crate::view_windows::focus_view(app, id.ok_or("no_such_view")?, window)?;
-            id
+            let id = match place("index") {
+                Some(index) => crate::view_windows::view_at(app, window, index)?,
+                None => asked,
+            };
+            crate::view_windows::focus_view(app, id, window)?;
+            Some(id)
         }
         "tab.view.rename" => {
             match v.get("name").and_then(Value::as_str) {
@@ -3175,6 +3175,8 @@ mod tests {
         assert_eq!(listed["windows"][1]["views"], json!([second]));
         assert_eq!(listed["windows"][1]["display"], Value::Null);
         app.run("tab.view.activate", json!({"id":second,"window":window})).unwrap();
+        assert_eq!(app.run("tab.view.activate", json!({"index":0,"window":window})).unwrap()["id"], second);
+        assert_eq!(app.run("tab.view.activate", json!({"index":0})).unwrap()["id"], second);
         assert_eq!(app.docs.views.active().id, first);
         assert_eq!(app.run("tab.window.close", json!({"window":window})).unwrap()["returned"], json!([second]));
         assert_eq!(app.session.uid, uid);

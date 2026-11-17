@@ -16,6 +16,7 @@ pub(crate) struct Windows {
     closing: Option<Option<u64>>,
     parked: Option<(u64, Vec<u64>)>,
     focus: Option<(u64, WindowId)>,
+    last_focus: Option<(u64, WindowId)>,
     root_rect: Option<egui::Rect>,
     monitor_size: Option<egui::Vec2>,
     root_scale: Option<f32>,
@@ -87,6 +88,21 @@ pub(crate) fn detached_views(app: &SolveApp) -> impl Iterator<Item = (WindowId, 
     app.docs.views.windows().iter().flat_map(|window| window.views.views().iter().map(|view| (window.id, view)))
 }
 
+pub(crate) fn view_at(app: &SolveApp, window: Option<WindowId>, index: usize) -> Result<u64, String> {
+    if let Some(child) = app.view_windows.painting
+        && window.is_none_or(|window| window == child)
+    {
+        return app.docs.views.views().get(index).map(|view| view.id).ok_or_else(|| "no_such_view".into());
+    }
+    let current = app
+        .view_windows
+        .last_focus
+        .filter(|(tab, window)| *tab == app.docs.current_tab() && app.docs.views.views_of(*window).is_some())
+        .map_or(0, |(_, window)| window);
+    let views = app.docs.views.views_of(window.unwrap_or(current)).ok_or("no_such_window")?;
+    views.views().get(index).map(|view| view.id).ok_or_else(|| "no_such_view".into())
+}
+
 pub(crate) fn focus_view(app: &mut SolveApp, view: u64, window: Option<WindowId>) -> Result<(), String> {
     if let Some(child) = app.view_windows.painting
         && window.is_none_or(|window| window == child)
@@ -98,7 +114,11 @@ pub(crate) fn focus_view(app: &mut SolveApp, view: u64, window: Option<WindowId>
         return Err(if app.docs.views.views_of(window).is_some() { "no_such_view" } else { "no_such_window" }.into());
     }
     if owner == 0 {
-        return documents::activate_local_view(app, view).then_some(()).ok_or_else(|| "no_such_view".into());
+        if !documents::activate_local_view(app, view) {
+            return Err("no_such_view".into());
+        }
+        app.view_windows.last_focus = Some((app.docs.current_tab(), 0));
+        return Ok(());
     }
     let child = app.docs.views.window_mut(owner).ok_or("no_such_window")?;
     if !child.views.activate(view) {
@@ -111,7 +131,9 @@ fn focus(app: &mut SolveApp, id: WindowId) -> Result<(), String> {
     if app.view_windows.painting != Some(id) && app.docs.views.views_of(id).is_none() {
         return Err("no_such_window".into());
     }
-    app.view_windows.focus = Some((app.docs.active_tab(), id));
+    let target = (app.docs.active_tab(), id);
+    app.view_windows.focus = Some(target);
+    app.view_windows.last_focus = Some(target);
     Ok(())
 }
 
@@ -173,6 +195,7 @@ pub(crate) fn detach(app: &mut SolveApp, view: u64, request: &Value) -> Result<V
     let placement = placement(app, view, request);
     let moved = documents::move_view_to_window(app, view, WindowTarget::New { placement }).map_err(|error| error.code().to_owned())?;
     app.view_windows.focus = Some((tab, moved.window));
+    app.view_windows.last_focus = Some((tab, moved.window));
     Ok(json!({"view":moved.view,"window":moved.window,"created":moved.created,"from":moved.from,
         "closed_source":moved.closed_source,"placement":placement_json(moved.placement.as_ref())}))
 }
@@ -241,6 +264,9 @@ pub fn prepare(app: &mut SolveApp, ctx: &Context) {
     app.view_windows.embedded = ctx.embed_viewports();
     let render_open = detached_views(app).any(|(_, view)| view.kind == solidcraft_views::ViewKind::Render);
     app.view_windows.render_open = render_open;
+    if ctx.input(|input| input.viewport().focused == Some(true)) {
+        app.view_windows.last_focus = Some((app.docs.current_tab(), 0));
+    }
     (app.view_windows.root_rect, app.view_windows.monitor_size, app.view_windows.root_scale) = ctx
         .input(|i| (i.viewport().outer_rect, i.viewport().monitor_size, i.viewport().native_pixels_per_point.map(|scale| scale * ctx.zoom_factor())));
     if app.view_windows.focus == Some((app.docs.current_tab(), 0)) {
@@ -495,6 +521,9 @@ pub fn show(app: &mut SolveApp, ctx: &Context, render_state: Option<&egui_wgpu::
             if app.view_windows.focus == Some((tab, id)) {
                 ui.ctx().send_viewport_cmd(ViewportCommand::Focus);
                 app.view_windows.focus = None;
+            }
+            if ui.input(|input| input.viewport().focused == Some(true)) {
+                app.view_windows.last_focus = Some((tab, id));
             }
             documents::park_active_look(app);
             app.view_windows.parked = Some((tab, app.docs.views.ids().collect()));
