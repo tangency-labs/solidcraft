@@ -6859,6 +6859,60 @@ fn mirroring_or_copying_a_sheet_body_leaves_the_original_sheet_as_it_was() {
     }
 }
 
+/// A mirror or a pattern of an Edge Flange builds the flange again on the copy of its edge (it
+/// was refused: "EdgeFlange1 cannot be patterned or mirrored yet"). A 120 x 90 base has a flange
+/// on its left edge, whole or split into a 45° stretch and a 90° one. Mirrored across x = 60, or
+/// turned half round about the base's middle, the copy is on the right edge, the same flange
+/// there: the volume is the base and two flanges, and the centre of mass is where the mirror
+/// image (or the half turn) of the flange puts it. A mirror runs the split edge the other way, so
+/// its stretches are mirrored along the edge, not left in the order the source has them.
+#[test]
+fn a_mirror_or_pattern_of_an_edge_flange_flanges_the_copied_edge() {
+    let com = |s: &mut Session| -> [f64; 3] {
+        let c = run(s, "inspect.measure", json!({}))["bodies"][0]["center_of_mass"].clone();
+        [0, 1, 2].map(|i| c[i].as_f64().unwrap_or(f64::NAN))
+    };
+    let whole = json!([[0, 45, 2]]);
+    let split = json!([{"point": [0, 45, 2], "segments": [{"from": 0, "to": 0.3, "angle": "45 deg"}, {"from": 0.3, "to": 1}]}]);
+    let copies = [
+        ("solid.mirror", json!({"features": ["EdgeFlange1"], "plane": {"origin": [60, 0, 0], "normal": [1, 0, 0]}})),
+        ("solid.pattern.circular", json!({"features": ["EdgeFlange1"], "axis": {"origin": [60, 45, 0], "dir": [0, 0, 1]}, "count": 2})),
+    ];
+    for edges in [whole, split] {
+        for (copy, params) in &copies {
+            let mut s = Session::default();
+            run(&mut s, "sheet.manage_rules", json!({"name":"AL2","thickness":"2 mm","k_factor":0.5,"bend_radius":"1 mm","active":true}));
+            base(&mut s, 120.0, 90.0);
+            let (v0, c0) = (volume(&mut s), com(&mut s));
+            run(&mut s, "sheet.flange", json!({"type": "edge", "edges": edges, "height": 20, "name": "EdgeFlange1"}));
+            let (v1, c1) = (volume(&mut s), com(&mut s));
+            // The flange alone: its volume and centre of mass.
+            let fv = v1 - v0;
+            let fc = [0, 1, 2].map(|i| (v1 * c1[i] - v0 * c0[i]) / fv);
+            let r = run(&mut s, copy, params.clone());
+            assert!(r["error"].is_null() && no_errors_or_warnings(&s), "{copy} {edges}: {r} {:?}", s.model.results);
+            let moved = if *copy == "solid.mirror" { [120.0 - fc[0], fc[1], fc[2]] } else { [120.0 - fc[0], 90.0 - fc[1], fc[2]] };
+            let want_v = v0 + 2.0 * fv;
+            let want_c = [0, 1, 2].map(|i| (v0 * c0[i] + fv * (fc[i] + moved[i])) / want_v);
+            assert!(rel(volume(&mut s), want_v) < 1e-6, "{copy} {edges}: {} mm³ vs {want_v}", volume(&mut s));
+            let got = com(&mut s);
+            assert!((0..3).all(|i| (got[i] - want_c[i]).abs() < 1e-3), "{copy} {edges}: centre of mass {got:?} vs {want_c:?}");
+            assert_eq!(s.model.state().sheets.len(), 1, "the copy is on the same sheet");
+            assert_eq!(flat(&mut s)["bends"].as_array().map(Vec::len), Some(if edges.is_array() && edges[0].is_object() { 4 } else { 2 }));
+            // The copies keep edge names of their own: the flanges' tags are all different.
+            let tags: Vec<String> = s.model.state().sheets[0].flanges.iter().map(|f| f.tag.clone()).collect();
+            let mut unique = tags.clone();
+            unique.sort_unstable();
+            unique.dedup();
+            assert_eq!(unique.len(), tags.len(), "{tags:?}");
+            // Reopened, it builds the same.
+            let mut reopened = Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap());
+            assert!(no_errors_or_warnings(&reopened), "{:?}", reopened.model.results);
+            assert!(rel(volume(&mut reopened), want_v) < 1e-6);
+        }
+    }
+}
+
 /// The top and bottom face names of every panel of the first sheet body, by sheet face.
 fn panel_face_names(s: &mut Session) -> std::collections::BTreeMap<String, String> {
     let body = s.model.state().bodies[0].name.clone();

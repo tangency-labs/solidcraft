@@ -9640,6 +9640,12 @@ fn replay(
             }
             continue;
         }
+        // An Edge Flange is built again on the copies of its edges, with its own heights, angles
+        // and sides.
+        if matches!(src.kind, FeatureKind::SheetFlange { .. }) {
+            more::sheet_flange_copies(doc, vals, f, src, mats, st, warning)?;
+            continue;
+        }
         let (op, targets) = feature_op(src);
         // A primitive's or a hole's targets are its participants (#1108): the copies change
         // those bodies only, like the feature itself (#2755).
