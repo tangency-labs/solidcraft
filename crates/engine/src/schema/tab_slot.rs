@@ -44,7 +44,7 @@ pub struct TabSlotParams {
     /// From a stretch's end to the nearest tab, 0 or more. Default: the tab width.
     #[serde(default)]
     pub end_distance: Option<LengthExpr>,
-    /// The gap on every side of a tab in its slot, 0 or more. Default: 0.1 mm.
+    /// The room on every side of a tab in its slot, 0 or more. Default: 0.1 mm.
     #[serde(default)]
     pub clearance: Option<LengthExpr>,
     /// How far a tab stands out past the slot plate's far face. Default: 0.

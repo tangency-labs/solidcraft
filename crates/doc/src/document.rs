@@ -1600,7 +1600,7 @@ pub enum FeatureKind {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         #[walk(length = "End Distance")]
         end_distance: Option<Expr>,
-        /// The gap on every side of a tab in its slot (the command writes 0.1 mm).
+        /// The room on every side of a tab in its slot (the command writes 0.1 mm).
         #[walk(length = "Clearance")]
         clearance: Expr,
         /// How far a tab stands out past the slot plate's far face (default 0).
