@@ -482,6 +482,139 @@ fn a_placement_off_a_similarity_is_refused_on_a_carrier_too_large_for_its_roundi
     );
 }
 
+/// A sheet square 10 mm across bounded by two edges on one periodic spline (the degree-one square
+/// on knots -1..5, period 4), one of them over [3.5, 4.5], past the spline's range and across its
+/// seam at the corner (0, 0, 0): read through the reader, its edges meet their vertices and the
+/// square's area is 100 mm².
+#[test]
+fn an_edge_across_a_periodic_splines_seam_is_read_with_its_points() {
+    use cadmpeg_ir::geometry::analytic::PlaneSurface;
+    use cadmpeg_ir::geometry::nurbs::{NurbsCurve, NurbsPoles3};
+    use cadmpeg_ir::geometry::{Curve, CurveGeometry, SolvedCurveGeometry, Surface};
+    use cadmpeg_ir::topology::{Body, EdgeCarrier, LoopRing, Point, Region, Vertex};
+    let mut ir = CadIr::empty();
+    for (i, c) in [[0.0, 5.0, 0.0], [5.0, 0.0, 0.0]].iter().enumerate() {
+        let at = cadmpeg_ir::features::FinitePoint3::new(Point3::new(c[0], c[1], c[2])).unwrap();
+        ir.model.points.push(Point::new(tid("point", i), at, None));
+        ir.model.vertices.push(Vertex {
+            id: tid("vertex", i),
+            point: tid("point", i),
+            tolerance: None,
+        });
+    }
+    let p = |x: f64, y: f64| Point3::new(x, y, 0.0);
+    let square = NurbsCurve::new(
+        1,
+        vec![-1.0, 0.0, 1.0, 2.0, 3.0, 4.0, 5.0],
+        NurbsPoles3::Polynomial {
+            points: vec![
+                p(0.0, 0.0),
+                p(10.0, 0.0),
+                p(10.0, 10.0),
+                p(0.0, 10.0),
+                p(0.0, 0.0),
+            ],
+        },
+        true,
+    )
+    .unwrap();
+    ir.model.curves.push(Curve {
+        id: tid("curve", 0),
+        geometry: CurveGeometry::Solved(SolvedCurveGeometry::Nurbs(square)),
+        parameter_range: None,
+        source_object: None,
+    });
+    // (interval, start, end): down the left side and along the bottom across the seam, then
+    // the rest of the way round.
+    for (i, (interval, a, z)) in [([3.5, 4.5], 0, 1), ([0.5, 3.5], 1, 0)]
+        .into_iter()
+        .enumerate()
+    {
+        ir.model.edges.push(cadmpeg_ir::topology::Edge {
+            id: tid("edge", i),
+            carrier: EdgeCarrier::new(Some(tid("curve", 0)), Some(interval)).unwrap(),
+            start: tid("vertex", a),
+            end: tid("vertex", z),
+            tolerance: None,
+        });
+        ir.model.coedges.push(Coedge {
+            id: tid("coedge", i),
+            owner_loop: tid("loop", 0),
+            edge: tid("edge", i),
+            radial_next: tid("coedge", i),
+            sense: Sense::Forward,
+            pcurves: Vec::new(),
+            use_curve: None,
+        });
+    }
+    ir.model.surfaces.push(Surface {
+        id: tid("surface", 0),
+        geometry: SurfaceGeometry::Solved(SolvedSurfaceGeometry::Plane(
+            PlaneSurface::try_new(
+                Point3::new(0.0, 0.0, 0.0),
+                Vector3::new(0.0, 0.0, 1.0),
+                Vector3::new(1.0, 0.0, 0.0),
+            )
+            .unwrap(),
+        )),
+        source_object: None,
+    });
+    ir.model.loops.push(cadmpeg_ir::topology::Loop {
+        id: tid("loop", 0),
+        face: tid("face", 0),
+        boundary: LoopBoundary::Ring(
+            LoopRing::new(vec![tid("coedge", 0), tid("coedge", 1)], Vec::new()).unwrap(),
+        ),
+    });
+    ir.model.faces.push(Face {
+        id: tid("face", 0),
+        shell: tid("shell", 0),
+        surface: tid("surface", 0),
+        sense: Sense::Forward,
+        loops: FaceLoops::unspecified(vec![tid("loop", 0)]),
+        name: None,
+        color: None,
+        tolerance: None,
+    });
+    ir.model.shells.push(
+        Shell::new(
+            tid("shell", 0),
+            tid("region", 0),
+            vec![tid("face", 0)],
+            Vec::new(),
+            Vec::new(),
+        )
+        .unwrap(),
+    );
+    ir.model.regions.push(Region {
+        id: tid("region", 0),
+        body: tid("body", 0),
+        shells: vec![tid("shell", 0)],
+    });
+    ir.model.bodies.push(Body {
+        id: tid("body", 0),
+        kind: BodyKind::Sheet,
+        regions: vec![tid("region", 0)],
+        transform: None,
+        name: Some("square".into()),
+        color: None,
+        visible: None,
+    });
+    ir.finalize();
+    let s = one(&ir);
+    assert_eq!(
+        (
+            s.brep.faces.len(),
+            s.brep.edges.len(),
+            s.brep.vertices.len()
+        ),
+        (1, 2, 2)
+    );
+    let (body, _) = solidcore_ops::Body::from_record(&s.brep, false).unwrap();
+    let area = body.area(1e-9).unwrap();
+    assert!((area - 100.0).abs() < 1e-6, "{area}");
+}
+
 /// A curve-less edge between two vertices at one point collapses, and the loops through it run on
 /// from the one vertex the two are: the cube with one corner split into two vertices at its
 /// point, joined by such an edge in both loops that pass there, is still the cube.
