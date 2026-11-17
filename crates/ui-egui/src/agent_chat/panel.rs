@@ -2621,7 +2621,7 @@ fn attachment_chips(chat: &mut AgentChat, ui: &mut egui::Ui) {
     }
 }
 
-/// What a chip says when the pointer rests on it: the file's name; for one that goes by its place,
+/// What a chip says when the pointer rests on it: the file's name; for one that goes by its path,
 /// that place and what the agent does with it.
 #[cfg(not(target_arch = "wasm32"))]
 pub(super) fn chip_tip(f: &attach::Attachment) -> String {

@@ -37,6 +37,10 @@ pub struct AcpBackend {
     init: Value,
     /// The system note the next session gets ([`acp::system_note`]).
     note: String,
+    /// Claude Code's read tools are on (asking), for the next session ([`ChatBackend::set_reads_files`]).
+    reads_files: bool,
+    /// The session that is open, or being opened, was asked for with them on.
+    session_reads: bool,
     next_id: u64,
     pending: HashMap<u64, Pending>,
     session: Option<String>,
@@ -67,6 +71,8 @@ impl AcpBackend {
             bridge,
             init: Value::Null,
             note: acp::SYSTEM_NOTE.to_string(),
+            reads_files: false,
+            session_reads: false,
             next_id: 0,
             pending: HashMap::new(),
             session: None,
@@ -94,7 +100,19 @@ impl AcpBackend {
     fn new_session(&mut self) {
         self.config_pending = None;
         self.pending.retain(|_, request| *request != Pending::SetConfig);
-        let params = acp::session_new_params(&self.cwd, self.bridge.as_ref(), &self.init, &self.note);
+        let mut params = acp::session_new_params(&self.cwd, self.bridge.as_ref(), &self.init, &self.note);
+        if self.reads_files {
+            acp::turn_on_reads(&mut params, None);
+        }
+        self.session_reads = self.reads_files;
+        self.request(Pending::SessionNew, "session/new", params);
+    }
+
+    /// The open session again, with Claude Code's read tools on: the same conversation goes on.
+    fn resume_with_reads(&mut self) {
+        let mut params = acp::session_new_params(&self.cwd, self.bridge.as_ref(), &self.init, &self.note);
+        acp::turn_on_reads(&mut params, self.session.as_deref());
+        self.session_reads = true;
         self.request(Pending::SessionNew, "session/new", params);
     }
 
@@ -123,6 +141,12 @@ impl AcpBackend {
                                 out.push(Event::TurnEnded { reason: "cancelled".into() });
                             }
                             self.session = Some(s.to_string());
+                            // Read tools were turned on while this session was being opened: open it
+                            // again with them on before saying it is ready.
+                            if self.reads_files && !self.session_reads {
+                                self.resume_with_reads();
+                                return;
+                            }
                             match acp::config_options(&v) {
                                 acp::ConfigParse::Snapshot(options) => {
                                     self.modern_config = true;
@@ -198,10 +222,10 @@ impl AcpBackend {
             Incoming::Text { thought, text } => out.push(Event::Text { thought, text }),
             Incoming::Tool { id, title, kind, status, input, output } => out.push(Event::Tool { id, title, kind, status, input, output }),
             Incoming::Plan(p) => out.push(Event::Plan(p)),
-            Incoming::Permission { rpc, title, kind, options } => {
+            Incoming::Permission { rpc, title, kind, options, reads } => {
                 self.next_key += 1;
                 self.permissions.insert(self.next_key, rpc);
-                out.push(Event::Permission { key: self.next_key, title, kind, options });
+                out.push(Event::Permission { key: self.next_key, title, kind, options, reads });
             }
             Incoming::AuthStatus(s) => out.push(Event::AuthStatus(s)),
             Incoming::ModeChanged(m) if !self.modern_config => out.push(Event::Modes { current: m, available: Vec::new() }),
@@ -293,6 +317,18 @@ impl ChatBackend for AcpBackend {
 
     fn set_instructions(&mut self, text: &str) {
         self.note = acp::system_note(text);
+    }
+
+    fn set_reads_files(&mut self, on: bool) -> bool {
+        if on == self.reads_files {
+            return false;
+        }
+        self.reads_files = on;
+        if on && self.session.is_some() && !self.session_reads && !self.pending.values().any(|p| *p == Pending::SessionNew) {
+            self.resume_with_reads();
+            return true;
+        }
+        false
     }
 
     fn answer_permission(&mut self, key: u64, option: Option<&str>) {
@@ -391,6 +427,32 @@ mod tests {
         backend.handle(Incoming::Reply { id: 1, result: Ok(json!({"agentInfo":{"name":"fake"}})) }, &mut events);
         backend.handle(Incoming::Reply { id: 2, result: Ok(json!({"sessionId":"s1"})) }, &mut events);
         Ok(backend)
+    }
+
+    /// Turning the read tools on in an open session opens it again (resuming it) before it is ready;
+    /// turned on while the first session is still being opened, that one is opened again as soon as
+    /// it answers, so no message goes out without them.
+    #[test]
+    fn turning_reads_on_reopens_the_session_before_it_is_ready() {
+        let mut backend = ready_backend().unwrap();
+        assert!(backend.set_reads_files(true), "an open session is opened again");
+        assert!(!backend.set_reads_files(true), "once");
+        let mut events = Vec::new();
+        backend.handle(Incoming::Reply { id: backend.next_id, result: Ok(json!({"sessionId":"s1"})) }, &mut events);
+        assert!(matches!(events.last(), Some(Event::Ready { .. })), "{events:?}");
+        backend.shutdown(true);
+
+        let ctx = StartContext { cwd: std::env::temp_dir(), bridge: None, tools: None, wake: Box::new(|| {}) };
+        let mut starting = AcpBackend::start(&["sh".into(), "-c".into(), "cat >/dev/null".into()], ctx).unwrap();
+        let mut events = Vec::new();
+        starting.handle(Incoming::Reply { id: 1, result: Ok(json!({"agentInfo":{"name":"fake"}})) }, &mut events);
+        assert!(!starting.set_reads_files(true), "no session yet: it opens with them");
+        starting.handle(Incoming::Reply { id: 2, result: Ok(json!({"sessionId":"s1"})) }, &mut events);
+        assert!(!events.iter().any(|e| matches!(e, Event::Ready { .. })), "opened again first: {events:?}");
+        assert!(starting.pending.values().any(|p| *p == Pending::SessionNew));
+        starting.handle(Incoming::Reply { id: starting.next_id, result: Ok(json!({"sessionId":"s1"})) }, &mut events);
+        assert!(matches!(events.last(), Some(Event::Ready { .. })), "{events:?}");
+        starting.shutdown(true);
     }
 
     #[test]

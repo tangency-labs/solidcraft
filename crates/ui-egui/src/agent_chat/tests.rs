@@ -809,15 +809,137 @@ fn the_agents_own_questions_are_answered_by_the_mode_or_asked() {
             PermissionOption { id: "no".into(), name: "Reject".into(), kind: "reject_once".into() },
         ]
     };
-    on_permission(&mut app, 1, "mcp__solidcraft-app__batch".into(), Some("other"), opts());
+    on_permission(&mut app, 1, "mcp__solidcraft-app__batch".into(), Some("other"), opts(), None);
     assert!(matches!(app.agent_chat.items.last(), Some(Item::Notice { text, .. }) if text.contains("mcp__solidcraft-app__batch")));
-    on_permission(&mut app, 2, "Run ls".into(), None, opts());
+    on_permission(&mut app, 2, "Run ls".into(), None, opts(), None);
     assert!(matches!(app.agent_chat.items.last(), Some(Item::Permission { answer: None, .. })));
     let n = app.agent_chat.items.len() - 1;
     answer_permission(&mut app, n, Some("always"));
     assert!(agents::always_allowed(&app.preferences, "claude", "Run ls"));
-    on_permission(&mut app, 3, "Run ls".into(), None, opts());
+    on_permission(&mut app, 3, "Run ls".into(), None, opts(), None);
     assert!(matches!(app.agent_chat.items.last(), Some(Item::Notice { .. })), "remembered");
+}
+
+/// Claude Code's read tools are off until a message sends a file or folder by path: then the
+/// session is opened again with them on (the same conversation) and the message waits for it to be
+/// ready. Later messages don't reopen it; New chat turns them off again.
+#[test]
+fn the_first_message_sent_by_path_turns_the_read_tools_on() {
+    let d = attachable("reads-on");
+    let (mut app, script, ctx) = app_with_script();
+    script.reopens_for_reads.store(true, std::sync::atomic::Ordering::Relaxed);
+    send(&mut app, &ctx, "hello".into());
+    ended(&script, "");
+    poll(&mut app, &ctx);
+    assert!(!script.calls().iter().any(|c| c.starts_with("reads:")), "nothing sent by path yet: {:?}", script.calls());
+    attach_path(&mut app, &d.to_string_lossy()).unwrap();
+    send(&mut app, &ctx, "look in this folder".into());
+    assert_eq!(script.calls().iter().filter(|c| *c == "reads: true").count(), 1, "{:?}", script.calls());
+    assert_eq!(script.prompts().len(), 1, "the message waits for the session to open again");
+    assert_eq!(app.agent_chat.state(), State::Starting);
+    script.report(Event::Ready { agent: "Test".into(), images: true });
+    poll(&mut app, &ctx);
+    assert_eq!(script.prompts().len(), 2, "sent once it is ready");
+    assert!(text_of(&script.prompts()[1]).starts_with("look in this folder"), "{}", text_of(&script.prompts()[1]));
+    ended(&script, "");
+    poll(&mut app, &ctx);
+    attach_path(&mut app, &d.to_string_lossy()).unwrap();
+    send(&mut app, &ctx, "and again".into());
+    assert_eq!(script.prompts().len(), 3, "already on: sent at once");
+    assert_eq!(script.calls().iter().filter(|c| c.starts_with("reads: true")).count(), 1);
+    ended(&script, "");
+    poll(&mut app, &ctx);
+    new_chat(&mut app);
+    assert!(script.calls().iter().any(|c| c == "reads: false"), "New chat turns them off: {:?}", script.calls());
+    let _ = std::fs::remove_dir_all(&d);
+}
+
+/// The first file or folder that goes by its path, in a chat with Claude Code, makes the chat say
+/// once that sending it turns Claude Code's read tools on; other agents' own tools are theirs, so
+/// nothing is said for them.
+#[test]
+fn attaching_by_path_warns_once_that_it_turns_claudes_read_tools_on() {
+    let d = attachable("reads-warn");
+    let mut app = SolveApp::new(solidcraft_engine::Session::default(), crate::Services::default());
+    app.preferences.agents.push(agents::AgentConfig {
+        id: "codex-test".into(),
+        name: "Codex".into(),
+        command: "codex-acp".into(),
+        ..Default::default()
+    });
+    app.preferences.agents.push(agents::AgentConfig {
+        id: "claude-test".into(),
+        name: "Claude Code".into(),
+        command: "/opt/homebrew/bin/claude-agent-acp".into(),
+        ..Default::default()
+    });
+    let warnings = |app: &SolveApp| {
+        app.agent_chat
+            .items
+            .iter()
+            .filter(|i| matches!(i, Item::Notice { text, error: false } if text.contains("turns on Claude Code's read tools")))
+            .count()
+    };
+    app.agent_chat.agent_id = Some("codex-test".into());
+    attach_path(&mut app, &d.to_string_lossy()).unwrap();
+    assert_eq!(warnings(&app), 0, "another agent's tools are its own");
+    app.agent_chat.agent_id = Some("claude-test".into());
+    attach_path(&mut app, &at(&d, "brief.md")).unwrap();
+    assert_eq!(warnings(&app), 0, "a text file goes in the message");
+    attach_path(&mut app, &d.to_string_lossy()).unwrap();
+    assert_eq!(warnings(&app), 1);
+    std::fs::write(d.join("fixtures.zip"), [0u8; 10]).unwrap();
+    attach_path(&mut app, &at(&d, "fixtures.zip")).unwrap();
+    assert_eq!(warnings(&app), 1, "said once");
+    let _ = std::fs::remove_dir_all(&d);
+}
+
+/// Claude Code's own read tools ask before every read. A read inside a file or folder sent by
+/// path in this conversation is answered at once, and the chat says so; a read before anything
+/// was sent, of anything else, through a link in the folder that leads out of it, or after New
+/// chat waits for the user.
+#[test]
+fn reads_of_what_was_sent_by_path_are_allowed_and_others_wait() {
+    let d = attachable("reads");
+    let (photos, outside) = (d.join("photos"), d.join("outside"));
+    std::fs::create_dir_all(&photos).unwrap();
+    std::fs::create_dir_all(&outside).unwrap();
+    std::fs::write(photos.join("a.jpg"), b"x").unwrap();
+    std::fs::write(outside.join("secret.txt"), b"x").unwrap();
+    let (mut app, _script, ctx) = app_with_script();
+    let opts = || {
+        vec![
+            PermissionOption { id: "allow".into(), name: "Allow".into(), kind: "allow_once".into() },
+            PermissionOption { id: "no".into(), name: "Reject".into(), kind: "reject_once".into() },
+        ]
+    };
+    let asked = |app: &SolveApp| matches!(app.agent_chat.items.last(), Some(Item::Permission { answer: None, .. }));
+    let photo = photos.join("a.jpg");
+    on_permission(&mut app, 1, "Read photos/a.jpg".into(), Some("read"), opts(), Some(&photo));
+    assert!(asked(&app), "nothing was sent by path yet");
+    attach_path(&mut app, &photos.to_string_lossy()).unwrap();
+    send(&mut app, &ctx, "look at these".into());
+    on_permission(&mut app, 2, "Read photos/a.jpg".into(), Some("read"), opts(), Some(&photo));
+    assert!(
+        matches!(app.agent_chat.items.last(), Some(Item::Notice { text, error: false }) if text.contains("Read photos/a.jpg") && text.contains("attached")),
+        "answered at once"
+    );
+    on_permission(&mut app, 3, "Find photos".into(), Some("search"), opts(), Some(&photos));
+    assert!(!asked(&app), "the folder itself");
+    on_permission(&mut app, 4, "Read secret.txt".into(), Some("read"), opts(), Some(&outside.join("secret.txt")));
+    assert!(asked(&app), "outside what was sent");
+    on_permission(&mut app, 5, "Read secret.txt".into(), Some("read"), opts(), Some(&photos.join("../outside/secret.txt")));
+    assert!(asked(&app), "stepping out of the folder");
+    #[cfg(unix)]
+    {
+        std::os::unix::fs::symlink(outside.join("secret.txt"), photos.join("link.txt")).unwrap();
+        on_permission(&mut app, 6, "Read link.txt".into(), Some("read"), opts(), Some(&photos.join("link.txt")));
+        assert!(asked(&app), "a link in the folder that leads out of it");
+    }
+    new_chat(&mut app);
+    on_permission(&mut app, 7, "Read photos/a.jpg".into(), Some("read"), opts(), Some(&photo));
+    assert!(asked(&app), "a new chat starts with nothing sent");
+    let _ = std::fs::remove_dir_all(&d);
 }
 
 /// A title that only mentions SolidCraft is no tool of SolidCraft's: in every mode but Allow
@@ -837,17 +959,17 @@ fn a_title_that_mentions_solidcraft_goes_through_the_users_mode() {
     for mode in [agents::Mode::Ask, agents::Mode::Edits] {
         app.preferences.agent_permissions.insert("codex".into(), mode);
         for (title, kind) in titles {
-            on_permission(&mut app, 1, title.into(), kind, opts());
+            on_permission(&mut app, 1, title.into(), kind, opts(), None);
             assert!(matches!(app.agent_chat.items.last(), Some(Item::Permission { answer: None, .. })), "{mode:?}: {title}");
             app.agent_chat.items.clear();
         }
         // The chat's own tool stays a single question, the gate's.
-        on_permission(&mut app, 2, "mcp__solidcraft-app__batch".into(), Some("other"), opts());
+        on_permission(&mut app, 2, "mcp__solidcraft-app__batch".into(), Some("other"), opts(), None);
         assert!(matches!(app.agent_chat.items.last(), Some(Item::Notice { .. })), "{mode:?}");
         app.agent_chat.items.clear();
     }
     app.preferences.agent_permissions.insert("codex".into(), agents::Mode::All);
-    on_permission(&mut app, 3, titles[0].0.into(), titles[0].1, opts());
+    on_permission(&mut app, 3, titles[0].0.into(), titles[0].1, opts(), None);
     assert!(matches!(app.agent_chat.items.last(), Some(Item::Notice { .. })), "Allow everything answers it");
 }
 
@@ -862,6 +984,9 @@ struct Script {
     events: Arc<Mutex<Vec<Event>>>,
     /// Every prompt in full (its text and pictures).
     prompts: Arc<Mutex<Vec<Vec<PromptPart>>>>,
+    /// Turning the read tools on opens the session again (as Claude Code's adapter does), so the
+    /// panel waits for Ready.
+    reopens_for_reads: Arc<std::sync::atomic::AtomicBool>,
 }
 
 impl Script {
@@ -899,6 +1024,10 @@ impl ChatBackend for Script {
     }
     fn set_config_option(&mut self, id: &str, value: &str) {
         self.calls.lock().unwrap().push(format!("set_config_option: {id}={value}"));
+    }
+    fn set_reads_files(&mut self, on: bool) -> bool {
+        self.calls.lock().unwrap().push(format!("reads: {on}"));
+        on && self.reopens_for_reads.load(std::sync::atomic::Ordering::Relaxed)
     }
     fn authenticate(&mut self, _: &str) {}
     fn shutdown(&mut self, _: bool) {}
@@ -1009,6 +1138,7 @@ fn a_late_sign_in_retry_or_permission_cannot_restart_a_departed_turn() {
         title: "mcp__solidcraft-app__batch".into(),
         kind: None,
         options: vec![PermissionOption { id: "allow".into(), name: "Allow".into(), kind: "allow_once".into() }],
+        reads: None,
     });
     ended(&script, "auth");
     script.report(Event::AuthRequired { methods: Vec::new() });
@@ -1494,7 +1624,14 @@ fn send_now_cancels_then_sends_with_a_note() {
     assert_eq!(script.calls().len(), 2);
     ended(&script, "cancelled");
     poll(&mut app, &ctx);
-    assert_eq!(script.calls(), ["prompt: build a gearbox".to_string(), "cancel".into(), format!("prompt: {INTERRUPT_NOTE}\n\nuse 12 teeth instead")]);
+    assert_eq!(
+        script.calls(),
+        [
+            "prompt: build a gearbox".to_string(),
+            "cancel".into(),
+            format!("prompt: <solidcraft-note>\n{INTERRUPT_NOTE}\n</solidcraft-note>\n\nuse 12 teeth instead")
+        ]
+    );
     assert!(matches!(app.agent_chat.items.last(), Some(Item::User { text, .. }) if text == "use 12 teeth instead"));
     // Stop after Send now wins: nothing more is sent by itself.
     send(&mut app, &ctx, "one more".into());
@@ -1580,9 +1717,13 @@ fn a_change_by_hand_between_messages_is_told_to_the_agent() {
     let sent = text_of(script.prompts().last().unwrap());
     // The new box may bring parameters of its own after `w`.
     let new = expr(&app);
-    assert!(sent.starts_with(&format!("[The user changed the design by hand since your last reply (parameters: w {old} -> {new}")), "{sent}");
+    assert!(
+        sent.starts_with(&format!("<solidcraft-note>\n[The user changed the design by hand since your last reply (parameters: w {old} -> {new}")),
+        "{sent}"
+    );
+    assert!(sent.contains("</solidcraft-note>\n\nchamfer it"), "the note stands before the words: {sent}");
     assert!(sent.contains(&format!("; features: {added} (new)). Read it again before")), "{sent}");
-    assert!(sent.ends_with("chat.]\n\nchamfer it"), "{sent}");
+    assert!(sent.ends_with("chat.]\n</solidcraft-note>\n\nchamfer it"), "{sent}");
     assert!(
         matches!(app.agent_chat.items.iter().rev().find(|i| matches!(i, Item::User { .. })), Some(Item::User { text, .. }) if text == "chamfer it")
     );
@@ -1680,7 +1821,7 @@ done
             "session/new".into(),
             "session/prompt: slow job".into(),
             "session/cancel".into(),
-            format!("session/prompt: {INTERRUPT_NOTE}\n\ndo this instead"),
+            format!("session/prompt: <solidcraft-note>\n{INTERRUPT_NOTE}\n</solidcraft-note>\n\ndo this instead"),
         ]
     );
     disconnect(&mut app);
@@ -1701,7 +1842,7 @@ fn new_chat_clears_everything_and_keeps_the_agent_and_mode() {
     send(&mut app, &ctx, "queued".into());
     assert!(new_chat_needs_confirm(&app), "a running message and a queue ask first");
     new_chat(&mut app);
-    assert_eq!(script.calls(), ["prompt: first", "cancel", "new_session"]);
+    assert_eq!(script.calls(), ["prompt: first", "cancel", "reads: false", "new_session"], "New chat starts with the read tools off");
     assert!(app.agent_chat.items.is_empty() && app.agent_chat.pending.is_empty());
     assert_eq!(app.agent_chat.state(), State::Starting);
     assert_eq!(app.agent_chat.agent_id.as_deref(), Some("claude"));
@@ -3032,7 +3173,8 @@ fn a_message_carries_its_files() {
     assert_eq!(sent.len(), 1);
     let text = text_of(&sent[0]);
     assert!(text.starts_with("make the case like this"), "{text}");
-    assert!(text.contains("Attached pictures: target.png.") && text.contains("wall 2 mm, Pi 5 inside"), "{text}");
+    assert!(text.contains("1. Image 1 of 1: `target.png`, 40×30 px.") && text.contains("wall 2 mm, Pi 5 inside"), "{text}");
+    assert!(text.contains("<solidcraft-attachments>") && text.trim_end().ends_with("</solidcraft-attachments>"), "{text}");
     assert_eq!(sent[0].iter().filter(|p| matches!(p, PromptPart::Image { mime, .. } if mime == "image/png")).count(), 1);
     assert!(app.agent_chat.attachments.is_empty(), "the files went with the message");
     // The picture shows as a thumbnail with the viewer (its name is the note); the text file by name.
@@ -3139,13 +3281,9 @@ fn past_eight_files_the_rest_go_by_their_place() {
         .items
         .iter()
         .filter_map(|i| if let Item::Notice { text, error } = i { Some((text.as_str(), *error)) } else { None })
-        .filter(|(t, _)| t.contains("by their place"))
+        .filter(|(t, _)| t.contains("by their path"))
         .collect();
-    assert_eq!(
-        told,
-        [("Past 8 files, the rest go by their place on disk: the agent reads them with its own tools, at full size", false)],
-        "said once for the batch"
-    );
+    assert_eq!(told, [("Past 8 files, the rest go by their path: the agent reads them with its own tools", false)], "said once for the batch");
     assert!(attach_rgba(&mut app, 2, 2, &[9; 16]).unwrap_err().contains("save the picture as a file"));
     assert!(attach_path(&mut app, &at(&d, "missing.png")).is_err(), "a missing file is still refused");
     assert!(control(&mut app, &ctx, &json!({"remove_file": 11})).is_err(), "no twelfth file to take off");
@@ -3155,9 +3293,10 @@ fn past_eight_files_the_rest_go_by_their_place() {
     let sent = &script.prompts()[0];
     let text = text_of(sent);
     assert_eq!(pictures_in(sent), 0, "the picture past the eight goes by its place: {text}");
-    assert_eq!(text.matches("Attached file `brief.md`:").count(), attach::MAX_FILES - 1, "seven in full: {text}");
-    assert!(text.contains("Attached file `target.png` (image/png, 40×30 px, "), "{text}");
-    assert_eq!(text.matches("read it with your own tools; it is not in this message").count(), 3, "{text}");
+    assert_eq!(text.matches("complete, below: `brief.md`.").count(), attach::MAX_FILES - 1, "seven in full: {text}");
+    assert!(text.contains("By path, not in this message: `target.png` (image/png, "), "{text}");
+    assert_eq!(text.matches("By path, not in this message: ").count(), 3, "{text}");
+    assert!(text.contains("Open what is given by path with your own read tools"), "{text}");
     let more = attach::MAX_ON_MESSAGE - app.agent_chat.files();
     for _ in 0..more {
         attach_path(&mut app, &at(&d, "brief.md")).unwrap();
@@ -3215,21 +3354,20 @@ fn choose_files_takes_several_and_choose_a_folder_one_folder() {
 /// A folder attached through the control channel, as a path, is listed off the window thread and
 /// goes to the agent as its place and what it holds; a folder doesn't take one of the eight.
 #[test]
-fn an_attached_folder_tells_the_agent_where_it_is_and_what_it_holds() {
+fn an_attached_folder_tells_the_agent_where_it_is() {
     let d = attachable("folder");
     let (mut app, script, ctx) = app_with_script();
     control(&mut app, &ctx, &json!({"attach": d.to_string_lossy()})).unwrap();
-    assert_eq!(app.agent_chat.files_sent(), 0, "a folder being listed takes none of the eight");
-    settle_files(&mut app, &ctx);
-    assert_eq!(app.agent_chat.files_sent(), 0);
+    assert!(app.agent_chat.loading.is_empty(), "nothing in it is read");
+    assert_eq!(app.agent_chat.files_sent(), 0, "a folder takes none of the eight");
     for _ in 0..attach::MAX_FILES {
         attach_path(&mut app, &at(&d, "brief.md")).unwrap();
     }
     assert_eq!(app.agent_chat.files_sent(), attach::MAX_FILES, "eight more in full");
     send(&mut app, &ctx, "look in here".into());
     let text = text_of(&script.prompts()[0]);
-    assert!(text.contains(&format!("Attached folder `{}/` (at ", d.file_name().unwrap().to_string_lossy())), "{text}");
-    assert!(text.contains("2 files, ") && text.contains("In it: brief.md (") && text.contains("target.png ("), "{text}");
+    assert!(text.contains(&format!("1. Folder by path, not in this message: `{}/` at ", d.file_name().unwrap().to_string_lossy())), "{text}");
+    assert!(!text.contains("target.png"), "nothing in it is listed: {text}");
     let _ = std::fs::remove_dir_all(&d);
 }
 
@@ -3258,7 +3396,7 @@ fn a_queued_message_keeps_its_files_through_stop_and_sends_them() {
     let last = sent.last().expect("the queue went");
     let text = text_of(last);
     assert!(text.starts_with("like this") && !text.contains("\n\n\n\n"), "a message of files alone adds no empty paragraph: {text:?}");
-    assert!(text.contains("Attached pictures: target.png.") && text.contains("wall 2 mm"), "{text}");
+    assert!(text.contains("Image 1 of 1: `target.png`") && text.contains("wall 2 mm"), "{text}");
     assert_eq!(pictures_in(last), 1);
     let sent = status(&app)["items"].as_array().and_then(|i| i.last()).cloned().unwrap_or_default();
     assert_eq!((sent["files"].clone(), sent["pictures"].clone()), (json!(["brief.md"]), json!(1)));
@@ -3283,8 +3421,8 @@ fn the_queue_sends_at_most_eight_files_and_names_the_rest() {
     poll(&mut app, &ctx);
     let sent = script.prompts();
     assert_eq!(sent.len(), 2);
-    assert_eq!(text_of(&sent[1]).matches("Attached file `brief.md`").count(), attach::MAX_FILES);
-    assert_eq!(text_of(&sent[1]).matches("Attached file `target.png` (image/png").count(), 3, "every file by its place goes");
+    assert_eq!(text_of(&sent[1]).matches("complete, below: `brief.md`.").count(), attach::MAX_FILES);
+    assert_eq!(text_of(&sent[1]).matches("By path, not in this message: `target.png` (image/png").count(), 3, "every file by its path goes");
     let told = app
         .agent_chat
         .items
@@ -3719,7 +3857,7 @@ fn a_cad_file_joins_the_message_once_its_import_is_in() {
     h.call("ui.agent_chat", json!({"send": "fit around this"}));
     h.frames(2);
     let text = text_of(&script.prompts()[0]);
-    assert!(text.contains("`block.stl` to the design") && !text.contains("broken.stl"), "{text}");
+    assert!(text.contains("Imported into the design as a component of its own: `block.stl`.") && !text.contains("broken.stl"), "{text}");
     let _ = std::fs::remove_dir_all(&d);
 }
 
@@ -3892,7 +4030,8 @@ fn an_attached_selection_goes_as_text_for_the_agent_and_as_chips_in_the_conversa
     app.agent_chat.attach_selection = true;
     send(&mut app, &ctx, "round this".into());
     let prompt = script.calls().pop().expect("a prompt");
-    assert!(prompt.starts_with("prompt: round this\n\n[Selected in SolidCraft"), "{prompt}");
+    assert!(prompt.starts_with("prompt: round this\n\n<solidcraft-selection>\n[Selected in SolidCraft"), "{prompt}");
+    assert!(prompt.trim_end().ends_with("</solidcraft-selection>"), "{prompt}");
     for want in ["Elements:", "- Flat face ", "planar", "area ", "- Edge ", "length ", "name ", "Features:", "feature id", "Bodies:", "- Body1"] {
         assert!(prompt.contains(want), "{want:?} missing from {prompt}");
     }
@@ -3925,7 +4064,7 @@ fn queued_messages_keep_the_selection_they_were_typed_with() {
     ended(&script, "");
     poll(&mut app, &ctx);
     let prompt = script.calls().pop().expect("the queue went");
-    assert!(prompt.starts_with("prompt: second\n\nthird\n\n[Selected"), "{prompt}");
+    assert!(prompt.starts_with("prompt: second\n\nthird\n\n<solidcraft-selection>\n[Selected"), "{prompt}");
     assert!(prompt.contains("- Alpha") && prompt.contains("- Beta"), "{prompt}");
     let Some(Item::User { context, .. }) = app.agent_chat.items.last() else { panic!("a sent message") };
     assert_eq!(context.items.iter().map(|i| i.label.as_str()).collect::<Vec<_>>(), ["Alpha", "Beta"]);
@@ -4485,7 +4624,7 @@ fn picks_reach_the_agent_at_the_place_they_were_made() {
     send(&mut app, &ctx, text);
     let prompt = script.calls().pop().expect("a prompt");
     assert!(prompt.starts_with("prompt: make «1: Flat face"), "the face picked second stands first and is 1: {prompt}");
-    assert!(prompt.contains(" match «2: Body1» \n\n[Selected"), "the body's mark follows 'match': {prompt}");
+    assert!(prompt.contains(" match «2: Body1» \n\n<solidcraft-selection>\n[Selected"), "the body's mark follows 'match': {prompt}");
     let block = &prompt[prompt.find("[Selected in SolidCraft").expect("the block")..];
     assert!(block.contains("stands for the numbered group below"), "{block}");
     let g1 = block.find("\n«1: ").expect("group 1");

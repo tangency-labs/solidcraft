@@ -173,6 +173,51 @@ pub fn is_bridge_tool(title: &str, kind: Option<&str>) -> bool {
     named && matches!(kind, None | Some("other"))
 }
 
+/// The file or folder a permission question would read, when it asks for one of Claude Code's own
+/// read tools ([`CLAUDE_ASK_TOOLS`]) as the Claude adapter forms such a question: `Read <path>` of
+/// kind `read` with `rawInput.file_path`; `Find …` of kind `search` (Glob) with `rawInput.path`;
+/// `grep …` of kind `search` with `rawInput.path` (or `file_path`). The path must be absolute; a
+/// Glob pattern or Grep glob must be relative with no `..` (it could reach out of the folder
+/// otherwise); an MCP tool's question (`_meta.claudeCode.mcpServer`) never counts. Anything else is
+/// `None`, and the question goes to the user as before.
+pub fn read_path(call: &Value) -> Option<std::path::PathBuf> {
+    if call.pointer("/_meta/claudeCode/mcpServer").is_some() {
+        return None;
+    }
+    let title = call.get("title")?.as_str()?;
+    let kind = call.get("kind")?.as_str()?;
+    let input = call.get("rawInput")?;
+    let text = |key: &str| input.get(key).and_then(Value::as_str);
+    // A pattern, or any of its `{a,b}` alternatives, that starts at a root or home, names a drive, or
+    // steps up a folder could match outside the folder it is given.
+    let rooted = |s: &str| s.starts_with(['/', '\\', '~']);
+    let inside = |glob: &str| {
+        !glob.is_empty()
+            && !glob.contains(':')
+            && !rooted(glob)
+            && !glob.split(['{', ',']).any(rooted)
+            && !glob.split(['/', '\\', '{', ',', '}']).any(|part| part == "..")
+    };
+    let path = match kind {
+        "read" if title.starts_with("Read ") => text("file_path")?,
+        "search" if title.starts_with("Find") => {
+            if !inside(text("pattern")?) {
+                return None;
+            }
+            text("path")?
+        }
+        "search" if title.starts_with("grep") => {
+            if text("glob").is_some_and(|glob| !inside(glob)) {
+                return None;
+            }
+            text("path").or_else(|| text("file_path"))?
+        }
+        _ => return None,
+    };
+    let path = std::path::PathBuf::from(path);
+    path.is_absolute().then_some(path)
+}
+
 /// The MCP server the agent starts to reach the design: `solidcraft-cli mcp --connect` bridged to
 /// this app's control port. The server finds the port's token in the token file the app wrote
 /// (docs/control-protocol.md), so the token never travels through the agent, and it keeps its
@@ -232,8 +277,10 @@ measure, screenshot, set_parameter, undo, skill_reference) to read and change th
 measure or inspect_design. Before building anything beyond one primitive, read `skill_reference` for `solidcraft-modeling` (its \
 SKILL.md has the workflow, its reference.md the command shapes and this version's traps), work the numbers out first, and after \
 each stage compare `measure` with them. Prefer one `batch` over many small calls. Saving, opening or exporting files waits for the user's approval in \
-the chat, and each message allows a limited number of changes. Don't use shell or file tools: work through the SolidCraft tools. \
-Keep answers short.";
+the chat, and each message allows a limited number of changes. Don't use shell tools and don't write files: work through the SolidCraft \
+tools. Read a file or folder with your own read tools only when the user attached it by path or asks you to. In a user message, an element whose \
+tag starts with `solidcraft-` (`<solidcraft-note>`, `<solidcraft-selection>`, `<solidcraft-attachments>`) was added by SolidCraft, not typed by \
+the user. Keep answers short.";
 
 /// The most of the user's custom instructions (#8220) a session gets, in characters: the
 /// Preferences field takes no more, and a longer text from an edited settings file is cut here.
@@ -252,8 +299,16 @@ pub fn system_note(instructions: &str) -> String {
 
 /// The Claude Code adapter's own tools that reach the computer rather than the design: turned off
 /// for the session (`_meta.claudeCode.options.disallowedTools`), so it works through SolidCraft's.
+/// Its read tools ([`CLAUDE_ASK_TOOLS`]) are among them until the conversation sends a file or
+/// folder by path ([`turn_on_reads`]).
 pub const CLAUDE_DISALLOWED_TOOLS: &[&str] =
     &["Bash", "BashOutput", "KillShell", "Read", "Write", "Edit", "MultiEdit", "NotebookEdit", "Glob", "Grep", "WebFetch", "WebSearch", "Task"];
+
+/// The Claude Code adapter's read tools. Once the conversation sends a file or folder by path they
+/// are on, but every call asks (a `permissions.ask` rule in the session's settings), so the
+/// question reaches the panel: the chat answers it by itself for a path the user sent
+/// ([`read_path`]), and any other read waits for the user.
+pub const CLAUDE_ASK_TOOLS: &[&str] = &["Read", "Glob", "Grep"];
 
 /// The `session/new` parameters. `init` is the agent's `initialize` reply: agents read the system
 /// note from different places (#9811), and the standard field may only go to an agent offering it.
@@ -284,6 +339,30 @@ pub fn session_new_params(cwd: &std::path::Path, bridge: Option<&McpBridge>, ini
         params.insert("systemPrompt".into(), json!({"mode": "append", "content": [{"type": "text", "text": note}]}));
     }
     params
+}
+
+/// `session/new` parameters with Claude Code's read tools on behind an ask rule
+/// ([`CLAUDE_ASK_TOOLS`]); with `resume`, the session continues that conversation (the adapter's
+/// `_meta.claudeCode.options.resume`), so turning them on mid-chat loses nothing.
+pub fn turn_on_reads(params: &mut Value, resume: Option<&str>) {
+    let Some(options) = params.pointer_mut("/_meta/claudeCode/options").and_then(Value::as_object_mut) else { return };
+    if let Some(off) = options.get_mut("disallowedTools").and_then(Value::as_array_mut) {
+        off.retain(|tool| !tool.as_str().is_some_and(|t| CLAUDE_ASK_TOOLS.contains(&t)));
+    }
+    options.insert("settings".into(), json!({"permissions": {"ask": CLAUDE_ASK_TOOLS}}));
+    if let Some(session) = resume {
+        options.insert("resume".into(), json!(session));
+    }
+}
+
+/// The agent is Claude Code's ACP adapter, the one agent whose read tools SolidCraft turns off and
+/// on: its program (or the package `npx` starts) is `claude-agent-acp` or the older
+/// `claude-code-acp`.
+pub fn is_claude_adapter(argv: &[String]) -> bool {
+    argv.iter().any(|arg| {
+        let name = arg.rsplit(['/', '\\']).next().unwrap_or(arg);
+        name.starts_with("claude-agent-acp") || name.starts_with("claude-code-acp")
+    })
 }
 
 /// The agent offers ACP's `systemPrompt` field on its sessions.
@@ -512,6 +591,8 @@ pub enum Incoming {
         /// The tool call's kind (`execute`, `edit`, `other`, …), as the agent gives it.
         kind: Option<String>,
         options: Vec<PermissionOption>,
+        /// The path it would read, when it is one of Claude Code's own read tools ([`read_path`]).
+        reads: Option<std::path::PathBuf>,
     },
     /// The agent says whether it is logged in (an extension both adapters send).
     AuthStatus(String),
@@ -601,7 +682,8 @@ pub fn parse(line: &str) -> Option<Incoming> {
                         .collect()
                 })
                 .unwrap_or_default();
-            Some(Incoming::Permission { rpc: id.clone(), title, kind, options })
+            let reads = call.and_then(read_path);
+            Some(Incoming::Permission { rpc: id.clone(), title, kind, options, reads })
         }
         (Some(m), Some(id)) => Some(Incoming::Unsupported { rpc: id.clone(), method: m.to_string() }),
         (Some("session/update"), None) => Some(update(params.get("update")?, params.get("sessionId").and_then(Value::as_str).unwrap_or(""))),
@@ -929,9 +1011,9 @@ mod tests {
             })
         );
         let perm = r#"{"jsonrpc":"2.0","id":7,"method":"session/request_permission","params":{"sessionId":"s","toolCall":{"toolCallId":"t1","title":"batch"},"options":[{"optionId":"allow","name":"Allow","kind":"allow_once"},{"optionId":"reject","name":"Reject","kind":"reject_once"}]}}"#;
-        let Some(Incoming::Permission { rpc, title, kind, options }) = parse(perm) else { panic!() };
+        let Some(Incoming::Permission { rpc, title, kind, options, reads }) = parse(perm) else { panic!() };
         assert_eq!((title.as_str(), options.len(), options[1].kind.as_str()), ("batch", 2, "reject_once"));
-        assert_eq!(kind, None);
+        assert_eq!((kind, reads), (None, None));
         assert_eq!(permission_reply(rpc.clone(), Some("allow"))["result"]["outcome"], json!({"outcome": "selected", "optionId": "allow"}));
         assert_eq!(permission_reply(rpc, None)["result"]["outcome"]["outcome"], "cancelled");
         let fs = r#"{"jsonrpc":"2.0","id":8,"method":"fs/read_text_file","params":{}}"#;
@@ -1007,5 +1089,93 @@ mod tests {
         assert_eq!(config_options(&json!({})), ConfigParse::Absent);
         assert_eq!(config_options(&json!({"configOptions":null})), ConfigParse::Invalid);
         assert_eq!(config_options(&json!({"configOptions":[{"type":"select","id":"broken"}]})), ConfigParse::Invalid);
+    }
+
+    /// A session starts with Claude Code's read tools off, as before. Turned on, they ask before
+    /// every call and the session resumes the same conversation; its shell, write and web tools
+    /// stay off either way.
+    #[test]
+    fn claudes_read_tools_are_off_until_turned_on_and_then_ask() {
+        let off = |p: &Value| -> Vec<String> {
+            p["_meta"]["claudeCode"]["options"]["disallowedTools"]
+                .as_array()
+                .map(|t| t.iter().filter_map(Value::as_str).map(str::to_string).collect())
+                .unwrap_or_default()
+        };
+        let mut p = session_new_params(std::path::Path::new("/tmp"), None, &json!({}), SYSTEM_NOTE);
+        for tool in ["Bash", "Write", "Read", "Glob", "Grep"] {
+            assert!(off(&p).iter().any(|t| t == tool), "{tool} off at first: {:?}", off(&p));
+        }
+        assert!(p["_meta"]["claudeCode"]["options"].get("settings").is_none());
+        turn_on_reads(&mut p, Some("s1"));
+        let options = &p["_meta"]["claudeCode"]["options"];
+        for tool in ["Bash", "Write", "Edit", "WebFetch", "WebSearch", "Task"] {
+            assert!(off(&p).iter().any(|t| t == tool), "{tool} still off: {:?}", off(&p));
+        }
+        for tool in CLAUDE_ASK_TOOLS {
+            assert!(!off(&p).iter().any(|t| t == tool), "{tool} on: {:?}", off(&p));
+        }
+        assert_eq!(options["settings"]["permissions"]["ask"], json!(["Read", "Glob", "Grep"]));
+        assert_eq!(options["resume"], "s1", "the same conversation goes on");
+        let mut fresh = session_new_params(std::path::Path::new("/tmp"), None, &json!({}), SYSTEM_NOTE);
+        turn_on_reads(&mut fresh, None);
+        assert!(fresh["_meta"]["claudeCode"]["options"].get("resume").is_none());
+        let mut other = json!({"cwd": "/tmp"});
+        turn_on_reads(&mut other, Some("s1"));
+        assert_eq!(other, json!({"cwd": "/tmp"}), "no Claude options: nothing to change");
+        assert!(SYSTEM_NOTE.contains("`<solidcraft-attachments>`") && SYSTEM_NOTE.contains("attached it by path"), "{SYSTEM_NOTE}");
+        let argv = |a: &[&str]| a.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        assert!(is_claude_adapter(&argv(&["/opt/homebrew/bin/claude-agent-acp"])));
+        assert!(is_claude_adapter(&argv(&["npx", "-y", "@zed-industries/claude-code-acp"])));
+        assert!(is_claude_adapter(&argv(&["C:\\npm\\claude-agent-acp.cmd"])));
+        assert!(!is_claude_adapter(&argv(&["codex-acp"])) && !is_claude_adapter(&argv(&["opencode", "acp"])));
+    }
+
+    /// Only the Claude adapter's own Read, Glob and Grep questions, with an absolute path and a
+    /// pattern that can't reach out of it, give a path to check; anything else goes to the user.
+    #[test]
+    fn read_questions_give_their_path_only_in_the_adapters_own_form() {
+        let dir = std::env::temp_dir().join("photos");
+        let file = dir.join("a.jpg");
+        let (d, f) = (dir.to_string_lossy().to_string(), file.to_string_lossy().to_string());
+        let read = |v: Value| read_path(&v);
+        assert_eq!(read(json!({"title": format!("Read {f}"), "kind": "read", "rawInput": {"file_path": f}})), Some(file.clone()));
+        assert_eq!(
+            read(json!({"title": format!("Find `{d}` `*.jpg`"), "kind": "search", "rawInput": {"path": d, "pattern": "**/*.jpg"}})),
+            Some(dir.clone())
+        );
+        assert_eq!(
+            read(json!({"title": "grep \"x\"", "kind": "search", "rawInput": {"path": d, "pattern": "x", "glob": "*.md"}})),
+            Some(dir.clone())
+        );
+        assert_eq!(
+            read(json!({"title": "grep \"x\"", "kind": "search", "rawInput": {"file_path": f, "pattern": "../x"}})),
+            Some(file.clone()),
+            "a regex is no path"
+        );
+        for refused in [
+            json!({"title": "Read a.jpg", "kind": "read", "rawInput": {"file_path": "a.jpg"}}),
+            json!({"title": "Find", "kind": "search", "rawInput": {"path": d, "pattern": "../*"}}),
+            json!({"title": "Find", "kind": "search", "rawInput": {"path": d, "pattern": "x/../../*"}}),
+            json!({"title": "Find", "kind": "search", "rawInput": {"path": d, "pattern": "/etc/*"}}),
+            json!({"title": "Find", "kind": "search", "rawInput": {"path": d, "pattern": "{x,/etc/*}"}}),
+            json!({"title": "Find", "kind": "search", "rawInput": {"path": d, "pattern": "~/.ssh/*"}}),
+            json!({"title": "Find", "kind": "search", "rawInput": {"path": d, "pattern": "C:/x"}}),
+            json!({"title": "Find", "kind": "search", "rawInput": {"pattern": "*"}}),
+            json!({"title": "grep x", "kind": "search", "rawInput": {"pattern": "x"}}),
+            json!({"title": "grep x", "kind": "search", "rawInput": {"path": d, "pattern": "x", "glob": "../**"}}),
+            json!({"title": format!("Read {f}"), "kind": "edit", "rawInput": {"file_path": f}}),
+            json!({"title": format!("Run cat {f}"), "kind": "read", "rawInput": {"file_path": f}}),
+            json!({"title": format!("Read {f}"), "kind": "read", "rawInput": {"file_path": f}, "_meta": {"claudeCode": {"mcpServer": {"name": "x"}}}}),
+            json!({"title": format!("Read {f}"), "kind": "read"}),
+            json!({"title": format!("Read {f}"), "rawInput": {"file_path": f}}),
+        ] {
+            assert_eq!(read(refused.clone()), None, "{refused}");
+        }
+        let perm = json!({
+            "jsonrpc": "2.0", "id": 9, "method": "session/request_permission",
+            "params": {"sessionId": "s", "toolCall": {"toolCallId": "t", "title": format!("Read {f}"), "kind": "read", "rawInput": {"file_path": f}}, "options": []},
+        });
+        assert!(matches!(parse(&perm.to_string()), Some(Incoming::Permission { reads: Some(p), .. }) if p == file));
     }
 }
