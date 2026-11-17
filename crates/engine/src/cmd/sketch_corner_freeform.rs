@@ -159,9 +159,7 @@ fn refuse_kept_corner(sk: &Sketch, q: usize, own: [usize; 2], cmd: &str) -> Resu
         })
     };
     match why {
-        Some(why) => {
-            Err(bad(cmd, format!("a corner of a conic or spline cannot stay as a virtual sharp corner, and this one would have to: {why}")))
-        }
+        Some(why) => Err(bad(cmd, format!("a corner of a conic or spline cannot stay as a virtual sharp corner, and this one would have to: {why}"))),
         None => Ok(()),
     }
 }
@@ -332,9 +330,11 @@ fn cut_back(sk: &mut Sketch, c: usize, side: &Side, u: f64, q: usize, n: usize, 
             // spline of exactly those pieces: their control points, and knots that repeat at
             // each join as often as the degree, where there is more than one piece.
             let kept = if side.at_start { span(&side.segs, u, side.n()) } else { span(&side.segs, 0.0, u) };
-            let controls: Vec<Vec<Vec2>> = kept.iter().map(bezier_controls).collect::<Option<_>>().ok_or_else(|| {
-                bad(cmd, format!("not supported yet: a fillet on a corner of `{id}`, whose spans are not Béziers"))
-            })?;
+            let controls: Vec<Vec<Vec2>> = kept
+                .iter()
+                .map(bezier_controls)
+                .collect::<Option<_>>()
+                .ok_or_else(|| bad(cmd, format!("not supported yet: a fillet on a corner of `{id}`, whose spans are not Béziers")))?;
             let d = controls.first().map(|c| c.len().saturating_sub(1)).unwrap_or(0);
             if d == 0 || d > solidcore_record::MAX_BEZIER_DEGREE || controls.iter().any(|c| c.len() != d + 1) {
                 return Err(bad(cmd, format!("not supported yet: a fillet on a corner of `{id}`, whose spans differ in degree")));
@@ -343,7 +343,10 @@ fn cut_back(sk: &mut Sketch, c: usize, side: &Side, u: f64, q: usize, n: usize, 
             if count > solidcraft_sketch::MAX_SPLINE_POINTS {
                 return Err(bad(
                     cmd,
-                    format!("not supported yet: a fillet on a corner of `{id}`, whose kept part needs {count} control points (at most {})", solidcraft_sketch::MAX_SPLINE_POINTS),
+                    format!(
+                        "not supported yet: a fillet on a corner of `{id}`, whose kept part needs {count} control points (at most {})",
+                        solidcraft_sketch::MAX_SPLINE_POINTS
+                    ),
                 ));
             }
             let far = if side.at_start { *pts.last().unwrap_or(&q) } else { *pts.first().unwrap_or(&q) };

@@ -2193,12 +2193,12 @@ fn wrong_side(sk: &Sketch, c: usize, cmd: &str) -> crate::EngineError {
 
 /// The refusal of corner point `q` where the lines alone make no corner. It names the first
 /// curve at the corner (one that ends there, or a closed curve that runs through it) of a kind
-/// the command does not take. Otherwise the corner joins too many or too few curves.
+/// the command does not take. Otherwise the corner joins too many or too few curves (named as
+/// lines when all of them are lines, as before fillets took conics and splines).
 fn not_two_lines(sk: &Sketch, q: usize, cmd: &str) -> crate::EngineError {
     let pq = sk.point(q);
-    let through = |i: usize| {
-        pq.is_some_and(|pq| sk.exact_pieces(i).iter().any(|s| s.point_at(s.closest_param(pq)).dist(pq) <= 1e-9 * (1.0 + pq.len())))
-    };
+    let through =
+        |i: usize| pq.is_some_and(|pq| sk.exact_pieces(i).iter().any(|s| s.point_at(s.closest_param(pq)).dist(pq) <= 1e-9 * (1.0 + pq.len())));
     let at: Vec<usize> = (0..sk.curves.len())
         .filter(|i| {
             !sk.is_linked_curve(*i)
@@ -2210,9 +2210,10 @@ fn not_two_lines(sk: &Sketch, q: usize, cmd: &str) -> crate::EngineError {
         })
         .collect();
     let at: Vec<usize> = if at.len() == 2 { at } else { at.into_iter().filter(|i| sk.curves.get(*i).is_some_and(|c| !c.construction)).collect() };
+    let lines = at.iter().all(|i| sk.curves.get(*i).is_some_and(|c| matches!(c.kind, CurveKind::Line { .. })));
     match at.into_iter().find(|i| !takes_side(sk, *i, cmd)) {
         Some(wrong) => wrong_side(sk, wrong, cmd),
-        None if cmd == "sketch.fillet" => bad(cmd, "the corner must join exactly two curves (or give the two curves as `a` and `b`)"),
+        None if cmd == "sketch.fillet" && !lines => bad(cmd, "the corner must join exactly two curves (or give the two curves as `a` and `b`)"),
         None => bad(cmd, "the corner must join exactly two lines (or give the two lines as `a` and `b`)"),
     }
 }
@@ -2240,8 +2241,8 @@ fn corner(sk: &Sketch, p: &Value, cmd: &str) -> Result<(usize, usize, usize, usi
             _ => return Err(not_two_lines(sk, q, cmd)),
         }
     } else {
-        let a = str_(p, "a").and_then(|i| sk.curve_index(i)).ok_or_else(|| bad(cmd, "`a` must be a curve of this sketch"))?;
-        let b = str_(p, "b").and_then(|i| sk.curve_index(i)).ok_or_else(|| bad(cmd, "`b` must be a curve of this sketch"))?;
+        let a = str_(p, "a").and_then(|i| sk.curve_index(i)).ok_or_else(|| bad(cmd, "`a` must be a line"))?;
+        let b = str_(p, "b").and_then(|i| sk.curve_index(i)).ok_or_else(|| bad(cmd, "`b` must be a line"))?;
         if sk.is_ellipse_axis(a) || sk.is_ellipse_axis(b) {
             return Err(bad(cmd, "an ellipse's axis is not a side of a corner"));
         }
@@ -2496,6 +2497,11 @@ fn fillet_corner(sk: &mut Sketch, p: &Value, r: f64, cmd: &str) -> Result<(usize
             };
         }
     };
+    // A spline's tangent handle is a construction line from a fit point, never a side. Where one
+    // ends at the corner, the spline has handles (#9178).
+    if let Some(spline) = [la, lb].into_iter().find_map(|l| sk.curves.get(l).and_then(|c| c.spline_handle_of.clone())) {
+        return Err(bad(cmd, format!("`{spline}` has tangent handles: reset them first (sketch.spline.reset_handles)")));
+    }
     let (pc, pa, pb) = (sk.point(c).unwrap_or_default(), sk.point(fa).unwrap_or_default(), sk.point(fb).unwrap_or_default());
     let u = (pa - pc).normalized().ok_or_else(|| bad(cmd, "degenerate line"))?;
     let v = (pb - pc).normalized().ok_or_else(|| bad(cmd, "degenerate line"))?;

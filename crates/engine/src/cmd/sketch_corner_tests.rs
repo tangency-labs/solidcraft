@@ -613,21 +613,36 @@ fn rounds_with_a_conic_or_spline_side_refuse_with_the_cause_named() {
     };
     let refused = |s: &mut Session, cmd: &str, p: Value, why: &str| {
         let before = sk(s);
-        let e = s.execute(cmd, &p).unwrap_err().to_string();
+        let e = match s.execute(cmd, &p) {
+            Ok(v) => panic!("{cmd} {p} is not refused: {v}"),
+            Err(e) => e.to_string(),
+        };
         assert!(e.contains(why), "{cmd} {p}: {e}");
         assert_eq!(sk(s), before, "{cmd} {p} changes nothing");
     };
     let (mut s, l, c) = line_conic();
     refused(&mut s, "sketch.fillet", json!({"point": format!("{l}.end"), "radius": 50}), "does not fit");
-    refused(&mut s, "sketch.chamfer.equal_distance", json!({"point": format!("{l}.end"), "distance": 1}), &format!("chamfers work on lines: `{c}` is a conic"));
+    refused(
+        &mut s,
+        "sketch.chamfer.equal_distance",
+        json!({"point": format!("{l}.end"), "distance": 1}),
+        &format!("chamfers work on lines: `{c}` is a conic"),
+    );
     refused(&mut s, "sketch.chamfer.equal_distance", json!({"a": l, "b": c, "distance": 1}), &format!("chamfers work on lines: `{c}` is a conic"));
     let e = curves(&run(&mut s, "sketch.ellipse", json!({"center": [50, 50], "major": [70, 50], "minor_radius": 8})))[0].clone();
-    refused(&mut s, "sketch.fillet", json!({"a": l, "b": e, "radius": 1}), &format!("fillets work on lines, arcs, conics and open splines: `{e}` is an ellipse"));
+    refused(
+        &mut s,
+        "sketch.fillet",
+        json!({"a": l, "b": e, "radius": 1}),
+        &format!("fillets work on lines, arcs, conics and open splines: `{e}` is an ellipse"),
+    );
     let arc = curves(&run(&mut s, "sketch.arc.three_point", json!({"start": [40, 0], "end": [50, 10], "through": [47, 3]})))[0].clone();
     refused(&mut s, "sketch.fillet", json!({"a": arc, "b": e, "radius": 1}), &format!("`{e}` is an ellipse"));
     refused(&mut s, "sketch.fillet", json!({"a": arc, "b": c, "radius": 1}), "the curves must share a corner point");
-    let (mut s, l, _) = line_conic();
-    let closed = curves(&run(&mut s, "sketch.spline.fit_point", json!({"points": [format!("{l}.end"), [5, -5], [0, -8]], "periodic": true})))[0].clone();
+    let mut s = new_sketch();
+    let l = curves(&run(&mut s, "sketch.line", json!({"points": [[0, 0], [10, 0]], "connect": false})))[0].clone();
+    let closed =
+        curves(&run(&mut s, "sketch.spline.fit_point", json!({"points": [format!("{l}.end"), [5, -5], [0, -8]], "periodic": true})))[0].clone();
     refused(&mut s, "sketch.fillet", json!({"point": format!("{l}.end"), "radius": 1}), &format!("`{closed}` is a closed spline"));
     // A dimension to the corner.
     let (mut s, l, _) = line_conic();
