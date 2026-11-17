@@ -173,7 +173,7 @@ pub use blend_corner::fillet_radii;
 pub use blend_variable::{RadiusSpline, Taper, fillet_chord, fillet_tapered, fillet_variable, fillet_variable_points, fillet_variable_spline, taper};
 pub use body::{
     Body, COLOUR_NAME_MAX, CapSignature, DISPLAY_ANGLE, DisplayShare, EdgeInfo, FaceInfo, FacePaint, FaceSource, MESH_MIN_ANGLE, MeshSpec,
-    MeshTolerance, Paint, PlanStats, PointClass, RayPick, Refusal, SurfaceKind, colour_name, placed_mesh,
+    MeshTolerance, Paint, PlanStats, PointClass, RayPick, Refusal, SurfaceKind, colour_name, lazy_moves_made, placed_mesh,
 };
 pub use boundary::{Boundary, boundary_patch};
 pub use boundary_network::{BoundaryCurve, CurveSource, MAX_CHAIN_CURVES, MAX_EDGE_PICKS, boundary_join, boundary_surface};
@@ -225,6 +225,7 @@ pub use prism_measure::{PrismSection, certified_prism_equivalent, certified_pris
 pub use repair::{Hole, RebuiltFace, RefusedFace, RepairOptions, RepairRefusal, RepairReport, SewnGap, repair};
 pub use sew::{EdgeSpec, FaceSpec, SurfSpec, sew, sew_touching};
 pub use solidcraft_smlib::hold_a_kernel;
+pub use solidcraft_smlib::start;
 pub use solidcraft_smlib::stop::Stop;
 pub use solidcraft_smlib::trace as smlib_trace;
 pub use splitface::{SplitTool, face_split_if_on_face, has_cap_at, split_body, split_faces, split_faces_with_map};

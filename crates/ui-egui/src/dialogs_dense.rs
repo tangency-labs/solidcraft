@@ -547,6 +547,8 @@ pub(super) fn rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: 
             // stops before the next frame makes it.
             if crate::op_auto::op_row(ui, "ex_op", operation) {
                 *auto_op = false;
+                // Cutting air does nothing: Cut points into the body unless the direction was set (#18243).
+                smart.point_cut = crate::dialogs::OPS.get(*operation) == Some(&"cut") && !smart.manual_dir;
             }
             // Join and Cut take their bodies in Target Bodies. A body picked there is a
             // choice by hand, so Extrude's automatic operation stops changing it.

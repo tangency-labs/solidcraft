@@ -973,9 +973,11 @@ copied into SolidCraft.
 
 ## Vendored renderer compatibility fix
 
-`vendor/egui-wgpu` is egui-wgpu 0.37.0 from https://github.com/emilk/egui
-(MIT OR Apache-2.0; both original licence texts are included). Rust sources and
-its original `egui.wgsl` shader are retained; no images or other artwork are copied.
+`vendor/egui` is egui 0.37.0 from https://github.com/emilk/egui, added whole with
+`git subtree` (MIT OR Apache-2.0; both original licence texts are included). It is a third-party
+project SolidCraft depends on, kept as upstream has it, with its own licences, images (as Git LFS
+pointers, never downloaded) and fonts. The egui-wgpu crate in it carries the
+compatibility fix below (`vendor/README.md` lists every change).
 SolidCraft's narrow patch selects a safe 1x MSAA path on the chosen OpenGL adapter
 and shares that effective count with the surface attachments and CAD callbacks.
 Vulkan, DirectX 12, Metal and WebGPU retain their requested multisampling.
