@@ -272,11 +272,18 @@ fn restore_exact(segs: Vec<Seg2>, tags: &[Option<(Piece, bool)>], exact: &std::c
         let run: Vec<usize> = (i..j).map(|x| (r + x) % n).collect();
         let plain: Vec<Seg2> = run.iter().filter_map(|x| segs.get(*x).copied()).collect();
         let full = k0.and_then(|(ci, k, fwd)| exact.get(&ci).and_then(|e| e.get(k)).map(|s| if fwd { *s } else { s.reversed() }));
+        // A run over every piece in order is the whole segment only from end to end: one that
+        // starts or stops at a crossing inside its first or last piece (a split piece keeps its
+        // tag) has as many pieces but is a part of it (#17462).
         let whole = match (full, tags.get(run[0]).copied().flatten()) {
-            (Some(_), Some(((_, _, _, cnt), fwd))) if run.len() == cnt => {
+            (Some(seg), Some(((_, _, _, cnt), fwd))) if run.len() == cnt => {
                 let order: Vec<usize> = run.iter().filter_map(|x| tags.get(*x).copied().flatten().map(|((_, _, p, _), _)| p)).collect();
                 let want: Vec<usize> = if fwd { (0..cnt).collect() } else { (0..cnt).rev().collect() };
-                order == want
+                let ends = match (plain.first(), plain.last()) {
+                    (Some(a), Some(b)) => a.start().dist(seg.start()) < 1e-6 && b.end().dist(seg.end()) < 1e-6,
+                    _ => false,
+                };
+                order == want && ends
             }
             _ => false,
         };
@@ -1677,9 +1684,9 @@ fn island_loops(sk: &Sketch, curves: &[usize], max_edges: usize) -> Island {
                 ps.push(b);
                 // Pieces split by other curves keep their free-form segment's tag, so a loop that
                 // turns at the crossing gets the exact sub-segment up to the true crossing
-                // ([`restore_exact`]) rather than the polyline chord to it (#17462). A loop that
-                // runs over a split piece never counts as the whole segment there: its run has one
-                // piece more than the segment, or misses one.
+                // ([`restore_exact`]) rather than the polyline chord to it (#17462). A run that
+                // starts or stops at such a crossing is never the whole segment there: it does not
+                // run from the segment's start to its end.
                 let tag = tags.get(k).copied().flatten();
                 for (piece, w) in ps.windows(2).enumerate() {
                     let (p, q) = (w[0], w[1]);
@@ -2756,6 +2763,9 @@ mod tests {
         let (circle, spline) = (sk.curves[circle].id.clone(), sk.curves[spline].id.clone());
         let profiles = find_profiles(&sk);
         assert_eq!(profiles.len(), 2, "the lens outside the spline and the rest of the disc: {profiles:?}");
+        // Together they are the disc: neither loop takes more or less of the spline.
+        let area: f64 = profiles.iter().map(|p| p.area).sum();
+        assert!((area - 25.0 * std::f64::consts::PI).abs() < 1e-6, "{area}");
         for p in &profiles {
             assert!(p.outer_curves.contains(&circle) && p.outer_curves.contains(&spline), "{:?}", p.outer_curves);
             let segs = &p.region.outer.segs;
