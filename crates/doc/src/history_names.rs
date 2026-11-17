@@ -278,7 +278,12 @@ impl<'a> OperandNames<'a> {
                 };
                 Some((names.get(edge)?.clone(), verified))
             }
-            Operand::Copy { .. } | Operand::Inner(_) | Operand::Made(_) | Operand::CopiedTool { .. } | Operand::Rebuilt { .. } | Operand::Grown { .. } => None,
+            Operand::Copy { .. }
+            | Operand::Inner(_)
+            | Operand::Made(_)
+            | Operand::CopiedTool { .. }
+            | Operand::Rebuilt { .. }
+            | Operand::Grown { .. } => None,
         }
     }
 }

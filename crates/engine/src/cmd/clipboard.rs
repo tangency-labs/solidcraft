@@ -197,6 +197,7 @@ fn paste(s: &mut Session, p: &Value) -> Result<Value> {
         shift[3][1] = t.y;
         shift[3][2] = t.z;
     }
+    let world_shift = solidcraft_doc::mat_mul(&target_frame, &solidcraft_doc::mat_mul(&shift, &to_target));
     let copied_frames: BTreeMap<u64, solidcraft_doc::Mat> =
         feats.iter().map(|f| (f.id, solidcraft_doc::mat_mul(&shift, frame_change.get(&f.component).unwrap_or(&solidcraft_doc::IDENTITY)))).collect();
     let mut names: BTreeMap<String, String> = BTreeMap::new();
@@ -291,6 +292,7 @@ fn paste(s: &mut Session, p: &Value) -> Result<Value> {
                     *param = Some(doc.new_model_param(&e, &u));
                 }
             }
+            super::clipboard_foreign::reframe_wires(sketch, doc, &m, &world_shift);
         }
         if moved {
             if let FeatureKind::Sketch { plane, .. } | FeatureKind::ConstructionPlane { plane } = &mut kind {
