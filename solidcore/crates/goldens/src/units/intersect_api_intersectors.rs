@@ -1752,4 +1752,100 @@ mod tests {
             );
         }
     }
+
+    /// The surfaces, natural domains and answer of a surface-pair case of
+    /// tangency-labs/solidcraft#17720 at the tolerance `tol` (`None`: the default), and
+    /// the API's curve count, which the case records.
+    fn global_answer(
+        name: &str,
+        tol: Option<f64>,
+    ) -> (
+        Kernel,
+        [Surface; 2],
+        [Extent2d; 2],
+        solidcore::surface::surface::p2::SurfaceIntersection,
+        usize,
+    ) {
+        let case = crate::case::regression_case(&Runner, name);
+        let Inputs::Surfaces { surface1, surface2 } = case.parse().unwrap() else {
+            panic!("{name}: expected a surface pair");
+        };
+        let mut k = Kernel::default();
+        let s1 = build_surface(&mut k, &surface1).unwrap();
+        let s2 = build_surface(&mut k, &surface2).unwrap();
+        let d1 = s1.natural_uv_domain_with_nurb(&k).unwrap();
+        let d2 = s2.natural_uv_domain_with_nurb(&k).unwrap();
+        let r = s1
+            .global_surface_intersect(&k, &d1, &s2, &d2, [true, true], tol, None)
+            .unwrap();
+        let api = intersect_surfaces(&k, &s1, &s2).0.len();
+        (k, [s1, s2], [d1, d2], r, api)
+    }
+
+    /// tangency-labs/solidcraft#17720: the rows whose curve count the default from both
+    /// surfaces moved, replayed through the tube certificate: each curve is one
+    /// component.
+    #[test]
+    fn moved_count_rows_are_certified_components() {
+        for name in ["ssi0022", "ssi0054", "ssi0058"] {
+            let (k, s, d, r, api) = global_answer(name, None);
+            assert_eq!(api, r.curves_3d.len(), "{name}: the API's answer");
+            crate::units::intersect_surface_intersector_p5::assert_certified_components(
+                &k,
+                [&s[0], &s[1]],
+                [&d[0], &d[1]],
+                &r.curves_3d,
+                [&r.surface1_uv_curves, &r.surface2_uv_curves],
+                &r.curve_types,
+                &[&[0], &[1]],
+                &[],
+            );
+        }
+    }
+
+    /// tangency-labs/solidcraft#17720: `ssi-revolution-revolution-offset-axis` keeps its
+    /// one tangent curve, and the 4 touching points the first surface's default (5.15e-3)
+    /// also returned are no contacts: a box about 2e-3 across in space around each holds
+    /// no zero of `S1 - S2` (`certify::tube::no_zero`).
+    #[test]
+    fn offset_axis_drops_only_points_that_are_no_contacts() {
+        use crate::certify::tube::{self, System};
+        use solidcore::math::Point2;
+        use solidcore::surface::surface::p2::TsectCurveType;
+        let name = "ssi-revolution-revolution-offset-axis";
+        let (k, s, d, r, api) = global_answer(name, None);
+        assert_eq!(api, 1);
+        assert_eq!(r.curve_types, [TsectCurveType::Tangent]);
+        let at = |p| s[0].evaluate_point(&k, p).unwrap();
+        let (a, m, b) = (at(d[0].min()), at(d[0].evaluate(0.5, 0.5)), at(d[0].max()));
+        let coarse = (a.distance(m) + m.distance(b)) / 1000.0;
+        let (.., old, _) = global_answer(name, Some(coarse));
+        let points: Vec<usize> = (0..old.curves_3d.len())
+            .filter(|&i| old.curve_types[i] == TsectCurveType::Touching)
+            .collect();
+        assert_eq!(points.len(), 4, "{:?}", old.curve_types);
+        let sys = System::new(&k, [&s[0], &s[1]], [&d[0], &d[1]]);
+        for i in points {
+            let uv = |c: &Option<Curve>| {
+                let p = c.as_ref().unwrap().evaluate_point(&k, 0.0).unwrap();
+                Point2::new(p.x, p.y)
+            };
+            let uv = [uv(&old.surface1_uv_curves[i]), uv(&old.surface2_uv_curves[i])];
+            // each parameter's half-width: 1e-3 over the surface's speed in it (a
+            // difference quotient into the domain)
+            let half = |j: usize| {
+                let speed = |du: f64, dv: f64| {
+                    let q = Point2::new(uv[j].x + du, uv[j].y + dv);
+                    let q = if d[j].contains_point(q, 0.0) { q } else { Point2::new(uv[j].x - du, uv[j].y - dv) };
+                    let e = s[j].evaluate_point(&k, q).unwrap().distance(s[j].evaluate_point(&k, uv[j]).unwrap());
+                    e / (du + dv)
+                };
+                Point2::new(1e-3 / speed(1e-7, 0.0), 1e-3 / speed(0.0, 1e-7))
+            };
+            let y = tube::unknowns(&sys, uv);
+            let radius = tube::unknowns(&sys, [half(0), half(1)]);
+            tube::no_zero(&sys, &y, &radius)
+                .unwrap_or_else(|e| panic!("point {i} at {y:?}: {e}"));
+        }
+    }
 }

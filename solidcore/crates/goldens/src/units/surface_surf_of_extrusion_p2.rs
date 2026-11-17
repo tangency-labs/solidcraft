@@ -2730,4 +2730,125 @@ mod tests {
             assert!(r.curves_3d.is_empty(), "{name}");
         }
     }
+
+    /// The surfaces, domains and answer of a `GlobalSurfaceIntersect` regression case, as
+    /// the case runs it (a plane target not taken as a surface through the extrusion's
+    /// plane path).
+    fn global_answer(
+        k: &Kernel,
+        name: &str,
+    ) -> (
+        [Surface; 2],
+        [Extent2d; 2],
+        ExtrusionIntersection,
+    ) {
+        let case = crate::case::regression_case(&Runner, name);
+        let Inputs::Op { src, op } = case.parse().unwrap() else {
+            panic!("{name}: expected an operation");
+        };
+        let OpIn::Global {
+            target,
+            dom,
+            other_dom,
+            tol,
+            ang,
+        } = &*op
+        else {
+            panic!("{name}: expected GlobalSurfaceIntersect");
+        };
+        let first = rust_src(k, &src)
+            .unwrap()
+            .unwrap_or_else(|_| panic!("{name}: the extrusion builds"));
+        let d = dom.map_or_else(|| first.base().natural_uv_domain(), dom4);
+        let (other, od) = match target {
+            TargetIn::Plane { plane, as_surface } => {
+                let pl = rust_plane(plane);
+                let od = other_dom.map_or_else(|| pl.natural_uv_domain(), dom4);
+                if !*as_surface {
+                    let target = IntersectTarget::Plane(&pl);
+                    let r = first
+                        .global_surface_intersect(k, &d, target, &od, [true, true], *tol, *ang)
+                        .unwrap();
+                    return ([Surface::from(first), Surface::from(pl)], [d, od], r);
+                }
+                (Surface::from(pl), od)
+            }
+            TargetIn::Cone { cone } => {
+                let c = rust_cone(k, cone).unwrap();
+                let od = other_dom.map_or_else(|| c.rev().base().natural_uv_domain(), dom4);
+                (Surface::from(c), od)
+            }
+            TargetIn::Extrusion { other } => {
+                let e = rust_src(k, other).unwrap().unwrap_or_else(|_| panic!("{name}"));
+                let od = other_dom.map_or_else(|| e.base().natural_uv_domain(), dom4);
+                (Surface::from(e), od)
+            }
+            TargetIn::Bspline { other } => {
+                let e = rust_src(k, other).unwrap().unwrap_or_else(|_| panic!("{name}"));
+                let b = nurb_surface(&e).unwrap();
+                let od = other_dom.map_or_else(|| b.natural_uv_domain(), dom4);
+                (Surface::from(b), od)
+            }
+        };
+        let this = Surface::from(first);
+        let x = this
+            .global_surface_intersect(k, &d, &other, &od, [true, true], *tol, *ang)
+            .unwrap();
+        let r = ExtrusionIntersection {
+            needs_more_intersections: false,
+            curves_3d: x.curves_3d,
+            surface1_uv_curves: x.surface1_uv_curves,
+            surface2_uv_curves: x.surface2_uv_curves,
+            curve_types: x.curve_types,
+            deviations: x.deviations,
+        };
+        ([this, other], [d, od], r)
+    }
+
+    /// tangency-labs/solidcraft#17720: the rows whose curve count the default from both
+    /// surfaces moved, replayed through the tube certificate: each curve is one
+    /// component, except in these known rows (tangency-labs/solidcraft#18488):
+    /// - `gen0197`, `gen0401`, `gen0467`, `gen0510`: the intersector splits one component
+    ///   at a knot line of a degree-1 profile, and the pieces meet end to end on it;
+    /// - `gen0188`, `gen1119`: curves 1 and 2 end inside both domains, with an arc of their
+    ///   component in no curve between them (main leaves the same arc uncovered).
+    #[test]
+    fn moved_count_rows_are_certified_components() {
+        let each = |n: usize| -> Vec<Vec<usize>> { (0..n).map(|i| vec![i]).collect() };
+        let rows = [
+            ("gen0010", each(2), vec![]),
+            ("gen0035", each(2), vec![]),
+            ("gen0247", each(2), vec![]),
+            ("gen0581", each(2), vec![]),
+            ("gen0586", each(5), vec![]),
+            ("gen0652", each(4), vec![]),
+            ("gen0730", each(2), vec![]),
+            ("gen0874", each(3), vec![]),
+            ("gen1055", each(1), vec![]),
+            ("gen1107", each(2), vec![]),
+            ("gen1140", each(2), vec![]),
+            ("global_cylinder_class", each(2), vec![]),
+            ("gen0197", vec![vec![0, 1]], vec![]),
+            ("gen0401", vec![vec![0, 2, 1]], vec![]),
+            ("gen0467", vec![vec![0, 1]], vec![]),
+            ("gen0510", vec![vec![0, 1]], vec![]),
+            ("gen0188", each(1), vec![1, 2]),
+            ("gen1119", each(1), vec![1, 2]),
+        ];
+        for (name, chains, open) in rows {
+            let k = Kernel::default();
+            let (s, d, r) = global_answer(&k, name);
+            let chains: Vec<&[usize]> = chains.iter().map(Vec::as_slice).collect();
+            crate::units::intersect_surface_intersector_p5::assert_certified_components(
+                &k,
+                [&s[0], &s[1]],
+                [&d[0], &d[1]],
+                &r.curves_3d,
+                [&r.surface1_uv_curves, &r.surface2_uv_curves],
+                &r.curve_types,
+                &chains,
+                &open,
+            );
+        }
+    }
 }
