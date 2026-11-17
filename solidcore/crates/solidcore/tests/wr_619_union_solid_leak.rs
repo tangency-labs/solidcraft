@@ -199,7 +199,7 @@ fn wr_619_union_leaking_one_of_two_solids_is_refused() {
                         store: &store,
                         key_of: &|_| ObjectKey(0),
                     };
-                    let v = brep_volume(&mut k, &mut u, 1e-6, &attrs).unwrap_or(f64::NAN);
+                    let v = brep_volume(&k, &mut u, 1e-6, &attrs).unwrap_or(f64::NAN);
                     panic!(
                         "pocket {cut:?}, cube in A {cube_in_a}: union returned a body with {} \
                          solid regions, volume {v}",
