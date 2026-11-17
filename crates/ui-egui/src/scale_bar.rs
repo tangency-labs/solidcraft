@@ -192,6 +192,28 @@ mod tests {
         assert!(crate::scenario::rect_of("view:scale_bar").is_none(), "turned off again");
     }
 
+    /// In a narrow view, the bar keeps clear of the compatibility analysis legend and of the
+    /// placement hint, which share its corner and the bottom of the view.
+    #[test]
+    fn the_bar_keeps_clear_of_the_analysis_legend_and_the_placement_hint() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.call("ui.resize", serde_json::json!({"width": 700, "height": 520}));
+        h.call("ui.prefs", serde_json::json!({"scale_bar": true, "viewport_analysis_status": false}));
+        h.app.run("solid.box", serde_json::json!({"length": 10, "width": 20, "height": 30})).unwrap();
+        h.app.run("inspect.draft", serde_json::json!({"angle": 3.5})).unwrap();
+        h.frames(3);
+        let legend = crate::scenario::rect_of("analysis:legend").expect("the legacy legend is drawn");
+        let bar = crate::scenario::rect_of("view:scale_bar").expect("the bar is drawn");
+        assert!(!bar.intersects(legend), "{bar:?} clear of the legend {legend:?}");
+        h.app.tool = crate::tools::Tool::for_command("canvas.insert");
+        h.frames(3);
+        let hint = crate::scenario::rect_of("toast:placement").expect("the placement hint is shown");
+        if let Some(bar) = crate::scenario::rect_of("view:scale_bar") {
+            assert!(!bar.intersects(hint), "{bar:?} clear of the hint {hint:?}");
+        }
+    }
+
     #[test]
     fn a_perspective_label_says_where_the_scale_holds() {
         crate::i18n::install();
