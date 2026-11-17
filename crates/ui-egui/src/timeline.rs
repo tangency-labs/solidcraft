@@ -3209,6 +3209,11 @@ mod tests {
                 assert!(!item.enabled, "{menu}: {id} takes one feature");
                 assert_eq!(item.tip.as_deref(), Some(SELECT_ONE), "{menu}: {id} says why it is off");
             }
+            // The fillet has no profile sketch: where the entry is listed it is off as it always
+            // was, without the reason, which would promise that one feature turns it on.
+            for item in entries.iter().filter(|item| item.id == "ui.editSketch") {
+                assert!(!item.enabled && item.tip.is_none(), "{menu}: Edit Profile Sketch");
+            }
             let suppress: Vec<_> = entries.iter().filter(|item| item.id == "timeline.suppress").collect();
             assert_eq!(suppress.len(), 1, "{menu}: one Suppress entry");
             assert_eq!(suppress[0].label, "Suppress 2 Selected Features", "{menu}");
@@ -3318,6 +3323,31 @@ mod tests {
         h.step(&json!({"click": {"handle": "timeline:Third"}, "button": "right"})).unwrap();
         for label in ["Edit Feature", "Rename Feature", "Suppress Feature", "Roll Back Here"] {
             assert_eq!(row(&h, label).map(|(enabled, _)| enabled), Some(true), "{label}");
+        }
+        h.step(&json!({"key": "Escape"})).unwrap();
+
+        // One feature's message is not offered for two.
+        h.app
+            .run("solid.fillet", json!({"edges": [[0, 0, 5], [10, 0, 5], [10, 10, 5], [0, 10, 5]], "radius": 6, "fit": "reduce", "body": "One"}))
+            .unwrap();
+        h.frames(4);
+        let fillet = format!("timeline:{}", h.app.session.doc.features.last().map(|f| f.name.clone()).unwrap());
+        h.step(&json!({"click": {"handle": fillet}, "button": "right"})).unwrap();
+        assert_eq!(row(&h, "Copy Warning Message").map(|(enabled, _)| enabled), Some(true));
+        h.step(&json!({"key": "Escape"})).unwrap();
+        h.step(&json!({"click": {"handle": "timeline:Second"}, "ctrl": true})).unwrap();
+        h.step(&json!({"click": {"handle": fillet}, "button": "right"})).unwrap();
+        assert_eq!(row(&h, "Suppress 2 Selected Features").map(|(enabled, _)| enabled), Some(true));
+        assert_eq!(row(&h, "Copy Warning Message"), None);
+        h.step(&json!({"key": "Escape"})).unwrap();
+
+        // With the preference off the menu is as it was: every entry in use, on the
+        // right-clicked feature, and its message offered.
+        crate::prefs::set(&mut h.app, &json!({"feature_menus_act_on_selection": false})).unwrap();
+        h.step(&json!({"click": {"handle": fillet}, "button": "right"})).unwrap();
+        for label in ["Edit Feature", "Rename Feature", "Suppress Feature", "Suppress 2 Selected Features", "Roll Back Here", "Copy Warning Message"]
+        {
+            assert_eq!(row(&h, label), Some((true, None)), "{label}");
         }
     }
 

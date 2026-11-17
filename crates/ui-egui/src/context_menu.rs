@@ -624,7 +624,12 @@ fn feature_items(app: &SolveApp, id: u64) -> Vec<Item> {
     let one = |item: Item| rule.one(item);
     [
         one(act("ui.editFeature", "Edit Feature", "edit").with(json!({"feature":id})).on(exists)),
-        one(act("ui.editSketch", "Edit Profile Sketch", "sketch").with(json!({"sketch": sketch.map(|s| s.0)})).on(sketch.is_some())),
+        // Off without a reason for a feature that has no profile sketch: selecting one feature
+        // would not turn it on.
+        match act("ui.editSketch", "Edit Profile Sketch", "sketch").with(json!({"sketch": sketch.map(|s| s.0)})).on(sketch.is_some()) {
+            item if sketch.is_some() => one(item),
+            item => Some(item),
+        },
         one(act("ui.rename", "Rename", "rename").key("F2").with(json!({"feature":id})).on(exists)),
         Some(suppress.on(exists)),
         one(act("timeline.roll_to", "Roll Back Here", "rollback").with(json!({"feature":id})).on(exists)),
