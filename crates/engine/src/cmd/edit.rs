@@ -1470,6 +1470,11 @@ fn edit_feature(s: &mut Session, p: &Value) -> Result<Value> {
         solidcraft_doc::validate_body_transfer(&s.doc, &solidcraft_doc::plain(bodies), *from, *to, transform)?;
         nf.component = *to;
     }
+    // Tab and Slot refuses, before evaluation, what its command refuses (design 11.1), against
+    // the model the feature is added to.
+    if matches!(nf.kind, FeatureKind::TabSlot { .. }) {
+        super::tab_slot::check(s, &s.model.state_before(id), &nf.kind)?;
+    }
     if let (FeatureKind::Sketch { sketch: a, .. }, FeatureKind::Sketch { sketch: b, .. }) = (&nf.kind, &f.kind)
         && a != b
     {

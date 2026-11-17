@@ -70,3 +70,38 @@ fn a_tab_slot_refuses_what_cannot_be_cut() {
     }
     assert_eq!(s.doc.features.len(), n, "a refused command added a feature");
 }
+
+#[test]
+fn a_tab_slot_with_every_pair_skipped_fails_no_plate_joint() {
+    let mut s = fixture_f();
+    // Far stands 4 mm above Bottom: it meets no slot plate.
+    run(&mut s, "solid.box", json!({"corner": [20, 30, 10], "length": 120, "width": 6, "height": 60, "body_name": "Far", "operation": "new"}));
+    let n = s.doc.features.len();
+    let (wall, bottom) = (volume(&s, "Wall"), volume(&s, "Bottom"));
+    let e = tab_slot(&mut s, json!({"tab_plates": ["Far"]})).expect_err("every pair skipped").to_string();
+    assert!(e.contains("no_plate_joint"), "{e}");
+    assert_eq!(s.doc.features.len(), n, "a failed tab and slot was added: {e}");
+    assert!((volume(&s, "Wall") - wall).abs() < 1e-6 && (volume(&s, "Bottom") - bottom).abs() < 1e-6, "{e}");
+}
+
+#[test]
+fn a_tab_slot_edit_is_checked_against_the_model_before_it() {
+    let mut s = fixture_f();
+    tab_slot(&mut s, json!({})).unwrap();
+    for (set, words) in [
+        (json!({"count": 0}), "count"),
+        (json!({"count": 2, "spacing": 30}), "not both"),
+        (json!({"tab_width": 0}), "tab_width"),
+        (json!({"tab_plates": [{"key": 1, "body": "Nothing"}]}), "no body named Nothing"),
+        (json!({"slot_plates": [{"key": 2, "body": "Wall"}]}), "Wall is both a tab plate and a slot plate"),
+    ] {
+        let e = s.execute("timeline.edit", &json!({"feature": "Joints", "set": set.clone()})).expect_err(&set.to_string()).to_string();
+        assert!(e.contains(words), "{set}: {e}");
+        let f = s.doc.features.last().unwrap();
+        let solidcraft_doc::FeatureKind::TabSlot { count, .. } = &f.kind else { panic!("{:?}", f.kind) };
+        assert_eq!(count.as_ref().map(ToString::to_string).as_deref(), Some("3"), "{set}: a refused edit changed the feature");
+    }
+    // A good edit recomputes: two tabs of 20 x 6 x 6 on the 120 x 6 x 60 wall.
+    run(&mut s, "timeline.edit", json!({"feature": "Joints", "set": {"count": 2}}));
+    assert!((volume(&s, "Wall") - 44_640.0).abs() < 1e-3, "{}", volume(&s, "Wall"));
+}
