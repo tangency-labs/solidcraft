@@ -100,7 +100,10 @@ pub(crate) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     // The cells with no view in them ask what to show instead of drawing one.
     let empties: Vec<Rect> = places.iter().filter(|(id, _)| *id == solidcraft_views::EMPTY).map(|(_, cell)| *cell).collect();
     places.retain(|(id, _)| *id != solidcraft_views::EMPTY);
-    let press = ui.input(|i| i.pointer.any_pressed().then(|| i.pointer.interact_pos()).flatten()).filter(|p| !crate::shell::covered(app, *p));
+    // A foreground popover (such as a card's display menu) owns presses over the canvas.
+    let press = ui
+        .input(|i| i.pointer.any_pressed().then(|| i.pointer.interact_pos()).flatten())
+        .filter(|p| ui.is_enabled() && ui.rect_contains_pointer(area) && !crate::shell::covered(app, *p));
     app.viewport.pending_tile_focus = None;
     let mut cards = Vec::new();
     let mut ground = free;
