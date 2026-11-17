@@ -52,8 +52,7 @@ fn fixture(curved: bool) -> (Kernel, ProceduralBlend) {
 }
 
 fn fixture_order(curved: bool, order: u32) -> (Kernel, ProceduralBlend) {
-    let mut k = Kernel::default();
-    k.fixes.fillet_round_as_definition = true;
+    let k = Kernel::default();
     let wall = Surface::from(
         BSplineSurface::create_bilinear_surface(
             Point3::ZERO,
@@ -174,8 +173,8 @@ fn frozen_plan_keeps_original_widths_and_full_sided_jumps() {
 }
 
 #[test]
-fn preparation_refuses_invalid_partitions_and_missing_opt_ins() {
-    let (mut k, pb) = fixture(false);
+fn preparation_refuses_invalid_partitions() {
+    let (k, pb) = fixture(false);
     for ss in [
         vec![],
         vec![0.0],
@@ -192,9 +191,6 @@ fn preparation_refuses_invalid_partitions_and_missing_opt_ins() {
         stations[0].parameter() + stations[0].lambda()
             < stations[1].parameter() - stations[1].lambda()
     );
-    k.fixes.fillet_round_as_definition = false;
-    assert!(plan.jump_at(&k, 0, 0.5).is_err());
-    assert!(SmoothInteriorPlan::prepare(&k, &pb, &[0.0, 0.5, 1.0]).is_err());
 }
 
 #[test]

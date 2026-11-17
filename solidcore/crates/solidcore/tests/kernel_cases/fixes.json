@@ -49,7 +49,6 @@
   "fillet_removal_takes_ring_fillets",
   "boolean_union_refuses_solid_leak",
   "simple_coincidence_crossing_is_point",
-  "fillet_round_as_definition",
   "keep_exact_pcurves",
   "face_swap_uv_transposes_trims",
   "closed_smooth_pole_tangent_limit",
