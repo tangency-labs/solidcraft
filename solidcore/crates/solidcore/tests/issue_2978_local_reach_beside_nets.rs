@@ -878,10 +878,11 @@ fn closed_fit_spline(points: &[(f64, f64)]) -> solidcore::curve::curve::Curve {
 /// tangency-labs/solidcraft#18510: the top of a 1 mm extrusion of a closed fit spline
 /// through eight points, 1000 wide, offset up 0.4. The wall is the spline's extrusion, a
 /// net closed round its seam; the top's reach beside it is the plane's trace meeting it,
-/// proved by Krawczyk's boxes near the seam on the net's copy past an end. A box wholly
-/// past an end was enclosed from the seam all the way to it, too wide to prove anything,
-/// and the top was refused for want of a certified bound. It builds the prism 1.4 tall:
-/// 1.4 times the volume, sound.
+/// proved by Krawczyk's boxes. Near the seam Newton's root, carried from piece to piece,
+/// lands on the net's parameters a period or more off the knots: a box there was not
+/// enclosed at all (or, wholly past an end, from the seam all the way to it), and the top
+/// was refused for want of a certified bound. It builds the prism 1.4 tall: 1.4 times the
+/// volume, sound.
 #[test]
 fn a_closed_spline_extrusions_top_offsets_beside_its_seam() {
     use solidcore::offset::offset_faces::OffsetFacesExecutive;
@@ -900,7 +901,7 @@ fn a_closed_spline_extrusions_top_offsets_beside_its_seam() {
     let mut b = solidcore::sweep::api_brep::create_linear_sweep(
         &mut k,
         &[Some(&outline)],
-        solidcore::Vec3::Z,
+        Vec3::Z,
         1.0,
         true,
     )
