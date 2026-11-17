@@ -1302,6 +1302,17 @@ fn mesh_bodies_move_measure_and_refuse_solid_ops() {
     assert!(crate::mesh_body(&pos, &[[0, 1, 99]]).is_err());
     assert!(crate::mesh_body(&[Vec3::new(f64::NAN, 0.0, 0.0)], &[[0, 0, 0]]).is_err());
     assert!(crate::mesh_body(&pos, &[[0, 0, 1]]).is_err());
+
+    // A ray meets the closed mesh with its outward normal, from outside and from inside alike.
+    let hit = |b: &Body, o: Vec3, d: Vec3| b.fire_ray(o, d).unwrap().map(|h| (h.depth, h.normal));
+    assert_eq!(hit(&b, Vec3::new(5.0, 5.0, 25.0), Vec3::new(0.0, 0.0, -1.0)), Some((15.0, Vec3::Z)));
+    assert_eq!(hit(&b, Vec3::new(5.0, 5.0, 5.0), Vec3::Z), Some((5.0, Vec3::Z)));
+    assert_eq!(hit(&b, Vec3::new(5.0, 5.0, 5.0), Vec3::new(-1.0, 0.0, 0.0)), Some((5.0, Vec3::new(-1.0, 0.0, 0.0))));
+    // An open mesh has no outside: its normal faces the ray, from either side.
+    let sheet = crate::mesh_body(&[Vec3::ZERO, Vec3::new(10.0, 0.0, 0.0), Vec3::new(0.0, 10.0, 0.0)], &[[0, 1, 2]]).unwrap();
+    assert!(!sheet.is_closed_mesh());
+    assert_eq!(hit(&sheet, Vec3::new(2.0, 2.0, 4.0), Vec3::new(0.0, 0.0, -1.0)), Some((4.0, Vec3::Z)));
+    assert_eq!(hit(&sheet, Vec3::new(2.0, 2.0, -4.0), Vec3::Z), Some((4.0, Vec3::new(0.0, 0.0, -1.0))));
 }
 
 #[test]

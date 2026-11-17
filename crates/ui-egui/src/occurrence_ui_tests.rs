@@ -4,6 +4,52 @@ use serde_json::json;
 use solidcraft_engine::Sel;
 use solidcraft_engine::geom::MeshGeom;
 
+/// A completed unground command shows both lost-origin and conflicting-joint reports, even
+/// when the part stays where it was. The saved language applies outside a rendered frame too.
+#[test]
+fn unground_joint_issues_reach_status_and_messages_in_the_saved_language() {
+    let mut h = Harness::new();
+    let occurrence = h.app.run("component.create", json!({"name":"Part"})).unwrap()["occurrence"].as_u64().unwrap();
+    for language in ["en", "ja"] {
+        h.app.preferences.language = language.into();
+        h.app.session.log.clear();
+        h.app.messages.clear();
+        h.app.status = None;
+        let reply = json!({
+            "occurrence": occurrence, "grounded": false, "moved": [],
+            "errors": [{"joint": 10, "name": "Foot joint", "why": "the face no longer exists"}],
+            "conflicts": [{"joint": 11, "name": "Brace joint", "why": "the other joints give a different placement"}]
+        });
+        assert_eq!(h.app.command_completed("occurrence.ground", Ok(reply.clone())).unwrap(), reply);
+        let locale = solidcraft_ui_text::Locale::for_language(language);
+        let expected: Vec<String> = [("Foot joint", "the face no longer exists"), ("Brace joint", "the other joints give a different placement")]
+            .iter()
+            .map(|(joint, reason)| locale.format("joint.unground_issue", &[("occurrence", "Part:1"), ("joint", joint), ("reason", reason)]))
+            .collect();
+        assert_eq!(h.app.session.log.iter().skip(1).collect::<Vec<_>>(), expected.iter().collect::<Vec<_>>());
+        assert_eq!(h.app.messages.iter().map(|m| (&m.text, m.error)).collect::<Vec<_>>(), expected.iter().map(|m| (m, false)).collect::<Vec<_>>());
+        assert_eq!(h.app.status.as_ref().map(|(text, _, error)| (text, *error)), expected.last().map(|text| (text, false)));
+        assert!(!expected[0].contains("joint.unground_issue"), "the pending message must be embedded");
+    }
+}
+
+/// An unchanged part is normal when no joint needs to move it. Grounding does not show the
+/// unground notice, even when the assembly already has an unrelated joint issue.
+#[test]
+fn unchanged_or_grounded_occurrences_do_not_show_an_unground_issue() {
+    let mut h = Harness::new();
+    for reply in [
+        json!({"occurrence": 1, "grounded": false, "moved": [], "errors": [], "conflicts": []}),
+        json!({"occurrence": 1, "grounded": true, "errors": [{"joint": 2, "name": "Other", "why": "lost origin"}], "conflicts": []}),
+    ] {
+        h.app.messages.clear();
+        h.app.status = None;
+        h.app.command_completed("occurrence.ground", Ok(reply)).unwrap();
+        assert!(h.app.messages.iter().next().is_none());
+        assert!(h.app.status.is_none());
+    }
+}
+
 /// A new component lists its own expandable Origin in the Browser: the design's Origin stays
 /// closed when the component's opens, and all seven items carry their rows and handles (#7313).
 #[test]
@@ -21,6 +67,56 @@ fn new_component_has_its_own_origin_folder() {
         assert!(crate::scenario::rect_of(&format!("row_label:o:{occurrence}/origin/{item}")).is_some(), "missing component origin label {item}");
     }
     assert!(!h.app.tree.expanded.contains("origin"), "opening the component origin must not open the design origin");
+}
+
+/// #15658: a part's Origin is off by default, yet hovering its rows in the Browser shows each
+/// item where the part is placed, and only while hovered: the folder's eye, the saved visibility
+/// and the pick lists stay as they were. With the preference off, an axis or point row sets no
+/// hover.
+#[test]
+fn hovering_a_parts_hidden_origin_rows_shows_them_where_the_part_is() {
+    use crate::viewport::HoveredOrigin;
+    use solidcore_record::Vec3;
+    let mut h = Harness::new();
+    let created = h.app.run("component.create", json!({"name":"Part","grounded":false})).unwrap();
+    let occurrence = created["occurrence"].as_u64().unwrap();
+    h.app.run("occurrence.move", json!({"occurrence":occurrence,"translate":[60,40,0]})).unwrap();
+    h.frames(3);
+    h.step(&json!({"click":{"handle":format!("fold:occurrence:{occurrence}")}})).unwrap();
+    h.step(&json!({"click":{"handle":format!("fold:o:{occurrence}/origin")}})).unwrap();
+    let shown = h.app.session.visibility.shown_component_origins.clone();
+    assert!(crate::viewport::construction_points(&h.app).is_empty(), "the part's Origin is off");
+    let at = Vec3::new(60., 40., 0.);
+    for item in ["O", "X", "XY"] {
+        let key = solidcraft_engine::origins::key(&[occurrence], item);
+        let row = crate::scenario::handle_at(&format!("row:{key}")).expect("the origin row");
+        h.call("ui.move", json!({"x": row.x, "y": row.y}));
+        assert_eq!(h.app.viewport.hover_origin.as_deref(), Some(key.as_str()), "{item}: its row is hovered");
+        let (name, shown_item) = crate::viewport::hovered_hidden_origin(&h.app).expect("drawn for the hover");
+        assert_eq!(name, key);
+        // The placement only moves the part, so its Origin's items are the design's, moved.
+        match (item, shown_item) {
+            ("O", HoveredOrigin::Point(p)) => assert_eq!(p, at),
+            ("X", HoveredOrigin::Axis { origin, dir, .. }) => assert_eq!((origin, dir), (at, Vec3::X)),
+            ("XY", HoveredOrigin::Plane(q)) => {
+                assert_eq!(q[0], at, "{q:?}");
+                assert!(q.iter().all(|c| c.z == 0.0), "in the XY plane: {q:?}");
+            }
+            (item, other) => panic!("{item}: {other:?}"),
+        }
+        assert_eq!(h.app.session.visibility.shown_component_origins, shown, "{item}: the folder stays off");
+        assert!(crate::viewport::construction_quads(&h.app).iter().all(|(n, _, _)| !n.contains("/origin/")), "{item}: not pickable");
+    }
+    // The pointer off the Browser: nothing is drawn for the part's Origin.
+    h.call("ui.move", json!({"x": 900.0, "y": 400.0}));
+    assert_eq!(crate::viewport::hovered_hidden_origin(&h.app), None);
+    // Preference off: an axis row under the pointer sets no hover, as before.
+    h.app.preferences.browser_hover_shows_origin = false;
+    let key = solidcraft_engine::origins::key(&[occurrence], "X");
+    let row = crate::scenario::handle_at(&format!("row:{key}")).expect("the X row");
+    h.call("ui.move", json!({"x": row.x, "y": row.y}));
+    assert_eq!(h.app.viewport.hover_origin, None);
+    assert_eq!(h.app.viewport.hover_plane, None, "an axis row lights no plane");
 }
 
 /// A sketch started on a shown component origin plane follows the component: after an
@@ -354,12 +450,12 @@ fn occurrence_second_row_selects_exact_path_and_menu_actions() {
     assert!((h.app.menu.props.as_ref().unwrap().1["total"]["center_of_mass"][0].as_f64().unwrap() - 55.0).abs() < 1e-8);
     let movement = items.iter().find(|i| i.id == "ui.moveOccurrence").unwrap();
     context_menu::run_item(&mut h.app, movement, egui::Pos2::ZERO);
-    assert_eq!(h.app.tree.occurrence_move.as_ref().unwrap().path, vec![second]);
+    assert_eq!(crate::dialogs_move::moving(&h.app), Some(vec![second]), "Move/Copy opens on this placement");
     let ground = items.iter().find(|i| i.id == "occurrence.ground").unwrap();
     context_menu::run_item(&mut h.app, ground, egui::Pos2::ZERO);
     assert!(h.app.session.doc.occurrences.iter().find(|o| o.id == second).unwrap().grounded);
     assert!(!h.app.session.doc.occurrences.iter().find(|o| o.id == first).unwrap().grounded);
-    h.app.tree.occurrence_move = None;
+    crate::dialogs::cancel(&mut h.app);
     click(&mut h, &[second], "activate");
     assert_eq!(h.app.session.active_component, component);
     assert_eq!(h.app.session.active_occurrence_path, Some(vec![second]));
@@ -401,39 +497,51 @@ fn occurrence_eye_and_fold_are_independent_and_survive_rename() {
     assert!(h.app.session.occurrence_visible(&[second]));
 }
 
+/// Sets the open Move/Copy dialog's X distance as typed, and whether OK captures.
+fn set_move(h: &mut Harness, x: &str, capture: bool) {
+    let d = h.app.dialog.as_mut().unwrap();
+    if let crate::dialogs::Kind::Move { x: value, .. } = &mut d.kind {
+        *value = x.into();
+    }
+    d.extra.insert("capture".into(), json!(capture));
+    h.frames(2);
+}
+
+fn press_ok(h: &mut Harness) {
+    h.step(&json!({"click": {"handle": "dialog:ok"}})).unwrap();
+    h.settle();
+    assert!(h.app.dialog.is_none(), "{:?}", h.app.dialog.as_ref().and_then(|d| d.error.clone()));
+}
+
 #[test]
-fn occurrence_move_dialog_keeps_other_pending_moves_and_reuses_initial_baseline() {
+fn move_copy_on_a_component_moves_on_from_its_pending_move_and_keeps_the_others() {
     let (mut h, _, first, second) = fixture();
     h.app.run("occurrence.move", json!({"occurrence":first,"translate":[0,10,0],"capture":false})).unwrap();
     h.app.run("occurrence.move", json!({"occurrence":second,"translate":[5,0,0],"capture":false})).unwrap();
     let first_pending = h.app.session.pending_moves[&first];
+    let x = |h: &Harness| {
+        solidcraft_engine::doc::apply_point(&h.app.session.occurrence_placement(&[second]).unwrap().world, solidcore_record::Vec3::ZERO).x
+    };
     let items = context_menu::items(&h.app, &Target::Occurrence { path: vec![second] });
     let movement = items.iter().find(|i| i.id == "ui.moveOccurrence").unwrap();
     context_menu::run_item(&mut h.app, movement, egui::Pos2::ZERO);
-    let mut m = h.app.tree.occurrence_move.clone().unwrap();
-    m.pivot = Some(solidcraft_engine::doc::apply_point(&h.app.session.occurrence_placement(&[second]).unwrap().world, solidcore_record::Vec3::ZERO));
-    m.translate = [10.0, 0.0, 0.0];
-    crate::browser::apply_occurrence_move(&mut h.app, &m);
-    let at = h.app.session.occurrence_placement(&[second]).unwrap();
-    assert!((solidcraft_engine::doc::apply_point(&at.world, solidcore_record::Vec3::ZERO).x - 65.0).abs() < 1e-8);
-    m.translate = [3.0, 0.0, 0.0];
-    crate::browser::apply_occurrence_move(&mut h.app, &m);
-    let at = h.app.session.occurrence_placement(&[second]).unwrap();
-    assert!((solidcraft_engine::doc::apply_point(&at.world, solidcore_record::Vec3::ZERO).x - 58.0).abs() < 1e-8);
+    assert!(h.app.tree.capture_prompt.is_none(), "moving a component on asks nothing first");
+    set_move(&mut h, "10 mm", false);
+    press_ok(&mut h);
+    assert!((x(&h) - 65.0).abs() < 1e-8, "on from its pending move: {}", x(&h));
     assert_eq!(h.app.session.pending_moves[&first], first_pending);
-    crate::browser::revert_occurrence_dialog(&mut h.app, &m);
-    let restored = h.app.session.occurrence_placement(&[second]).unwrap();
-    assert!((solidcraft_engine::doc::apply_point(&restored.world, solidcore_record::Vec3::ZERO).x - 55.0).abs() < 1e-8);
-    assert_eq!(h.app.session.pending_moves[&first], first_pending);
-    h.app.run("component.revert_position", json!({"occurrences":[second]})).unwrap();
+
     context_menu::run_item(&mut h.app, movement, egui::Pos2::ZERO);
-    let mut fresh = h.app.tree.occurrence_move.clone().unwrap();
-    assert!(!fresh.had_pending);
-    fresh.translate = [2.0, 0.0, 0.0];
-    crate::browser::apply_occurrence_move(&mut h.app, &fresh);
-    crate::browser::revert_occurrence_dialog(&mut h.app, &fresh);
-    assert!(!h.app.session.pending_moves.contains_key(&second));
+    set_move(&mut h, "3 mm", false);
+    crate::dialogs::cancel(&mut h.app);
+    assert!((x(&h) - 65.0).abs() < 1e-8, "Cancel leaves it where it was: {}", x(&h));
     assert_eq!(h.app.session.pending_moves[&first], first_pending);
+
+    context_menu::run_item(&mut h.app, movement, egui::Pos2::ZERO);
+    set_move(&mut h, "0 mm", true);
+    press_ok(&mut h);
+    assert!(h.app.session.pending_moves.is_empty(), "Capture All Positions captures the other component's move too");
+    assert!((x(&h) - 65.0).abs() < 1e-8);
 }
 
 #[test]
@@ -522,21 +630,15 @@ fn occurrence_distance_editor_reads_inches_and_keeps_four_digits_in_model_space(
     context_menu::run_item(&mut h.app, movement, egui::Pos2::ZERO);
     h.settle();
     let original = h.app.session.doc.to_json();
-    let point = h.call("ui.at", json!({"handle":"occurrence-move:distance:0"}));
-    let at = &point["result"];
-    h.call("ui.click", json!({"x":at[0],"y":at[1],"double":true}));
-    h.settle();
-    h.step(&json!({"key":"A","cmd":true})).unwrap();
-    h.step(&json!({"text":"1.2345"})).unwrap();
-    h.step(&json!({"key":"Enter"})).unwrap();
-    let m = h.app.tree.occurrence_move.as_ref().unwrap();
-    assert!((m.translate[0] - 31.3563).abs() < 1e-8, "{:?}", m.translate);
-    assert_eq!(h.app.session.doc.to_json(), original, "pending movement does not alter the stored design");
+    set_move(&mut h, "1.2345", false);
+    press_ok(&mut h);
+    let moved = h.app.session.pending_moves[&first];
+    assert!((moved[3][0] - 31.3563).abs() < 1e-8, "{moved:?}");
+    assert_eq!(h.app.session.doc.to_json(), original, "a pending move does not alter the stored design");
     h.app.session.selection = vec![Sel::Occurrence { path: vec![first] }];
     let bounds = crate::viewport::selection_bounds(&h.app).unwrap();
     assert!((bounds.min.x - 31.3563).abs() < 1e-6);
-    let movement = h.app.tree.occurrence_move.clone().unwrap();
-    crate::browser::revert_occurrence_dialog(&mut h.app, &movement);
+    h.app.run("component.revert_position", json!({"occurrences":[first]})).unwrap();
     assert!(h.app.session.pending_moves.is_empty());
 }
 

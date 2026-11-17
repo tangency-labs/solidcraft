@@ -18,6 +18,7 @@
 //! | [`OffsetFailure::ExactCurveUncut`]     | `SM_ERR` (solidcore-native)               |
 //! | [`OffsetFailure::TangentBranchUncertified`] | `SM_ERR` (solidcore-native)            |
 //! | [`OffsetFailure::TangentEndOffCurve`]  | `SM_ERR` (solidcore-native)               |
+//! | [`OffsetFailure::LooseTangentEdge`]    | `SM_ERR` (WR-530, solidcore-native)       |
 //! | [`OffsetFailure::FacesApart`]          | `SM_ERR` (solidcore-native)               |
 //! | [`OffsetFailure::ReachUncertified`]    | `SM_ERR` (solidcore-native)               |
 //! | [`OffsetFailure::LoopGapUncertified`]  | `SM_ERR` (solidcore-native)               |
@@ -161,6 +162,21 @@ pub enum OffsetFailure {
     /// vertex on the curve: the end is not where the edges meet, and no cut chosen by
     /// distance stands in for it.
     TangentEndOffCurve,
+    /// In a local operation, an edge tangent in the input whose new curve, lifted onto
+    /// one face's new surface, lands on the other face's new surface farther than ten
+    /// times the larger of the edge tolerance and the approximation tolerance (WR-530):
+    /// only one of the two faces moved, so they no longer meet along the edge, and no
+    /// later step of a local operation closes the gap.
+    LooseTangentEdge {
+        /// The tangent edge, of the operation's input, where the handle names one.
+        edge: Option<EdgeId>,
+        /// How far the new curve, dropped onto the other face's new surface, lands from
+        /// it at most (`max_drop_to_surf`; NaN where the drop gave no finite distance).
+        max_drop_to_surf: f64,
+        /// The limit it was held to: ten times the larger of the edge tolerance and the
+        /// approximation tolerance.
+        meet_tol: f64,
+    },
     /// Two curved faces tangent at the old edge now cross, but the intersection
     /// branch on their retained sides has not been certified.
     TangentBranchUncertified,
@@ -346,6 +362,7 @@ impl OffsetFailure {
                 .map(EntityRef::Edge)
                 .or_else(|| face.map(EntityRef::Face)),
             Self::LoopGapUncertified { face } => face.map(EntityRef::Face),
+            Self::LooseTangentEdge { edge, .. } => edge.map(EntityRef::Edge),
             Self::Unsound { what } => what.entity(),
             Self::ExactCurveUncut
             | Self::TangentEndOffCurve
@@ -396,6 +413,7 @@ impl OffsetFailure {
             | Self::SeamOpened { .. }
             | Self::ExactCurveUncut
             | Self::TangentEndOffCurve
+            | Self::LooseTangentEdge { .. }
             | Self::TangentBranchUncertified
             | Self::FacesApart { .. }
             | Self::ReachUncertified { .. }
@@ -428,6 +446,7 @@ impl OffsetFailure {
             | Self::SeamOpened { .. }
             | Self::ExactCurveUncut
             | Self::TangentEndOffCurve
+            | Self::LooseTangentEdge { .. }
             | Self::TangentBranchUncertified
             | Self::FacesApart { .. }
             | Self::ReachUncertified { .. }
@@ -450,6 +469,7 @@ impl OffsetFailure {
             | Self::ReachUncertified { .. }
             | Self::ExactCurveUncut
             | Self::TangentEndOffCurve
+            | Self::LooseTangentEdge { .. }
             | Self::TangentBranchUncertified
             | Self::LoopGapUncertified { .. }
             | Self::Unsound { .. }
@@ -481,6 +501,7 @@ impl OffsetFailure {
             | Self::ReachUncertified { .. }
             | Self::ExactCurveUncut
             | Self::TangentEndOffCurve
+            | Self::LooseTangentEdge { .. }
             | Self::TangentBranchUncertified
             | Self::LoopGapUncertified { .. }
             | Self::Unsound { .. } => ErrorKind::Unsupported,
@@ -719,6 +740,17 @@ impl core::fmt::Display for OffsetFailure {
             Self::TangentBranchUncertified => f.write_str(
                 "two curved faces tangent at the old edge now cross, but the intersection \
                  branch on their retained sides has no certificate",
+            ),
+            Self::LooseTangentEdge {
+                edge,
+                max_drop_to_surf,
+                meet_tol,
+            } => write!(
+                f,
+                "in a local operation, the new faces beside {} that was tangent no longer \
+                 meet along it: one moved off the other ({max_drop_to_surf:e} apart, limit {meet_tol:e}), and \
+                 nothing closes the gap",
+                edge.map_or_else(|| "an edge".to_owned(), |e| format!("edge {}", e.index()))
             ),
             Self::TangentEndOffCurve => f.write_str(
                 "an edge ends beside a tangent edge whose new faces now cross, and that edge's new \
@@ -990,6 +1022,16 @@ mod tests {
             ),
             // a stage that failed with no reason the kernel names: its fault, in its class
             (O::StageFailed, ErrorKind::StageFailed, false, true),
+            (
+                O::LooseTangentEdge {
+                    edge: None,
+                    max_drop_to_surf: 0.5,
+                    meet_tol: 1e-4,
+                },
+                ErrorKind::Unsupported,
+                false,
+                false,
+            ),
         ];
         let row = |o: &O| -> usize {
             match o {
@@ -1014,6 +1056,7 @@ mod tests {
                 O::Inconsistent(_) => 18,
                 O::TangentBranchUncertified => 19,
                 O::StageFailed => 20,
+                O::LooseTangentEdge { .. } => 21,
             }
         };
         for (i, (o, class, phrase, defect)) in pinned.iter().enumerate() {

@@ -2720,7 +2720,7 @@
   "render.cpu_body_choose": "Velg en kropp",
   "render.cpu_body_filter": "Filtrer kropper etter navn",
   "render.cpu_body_filter_more": "Avgrens filteret for å se flere kropper.",
-  "render.cpu_body_missing": "Et refleksjonsmål mangler, er skjult, er flertydig eller har et navn som er lengre enn 128 byte. Velg det på nytt.",
+  "render.cpu_body_missing": "Et refleksjonsmål mangler, er skjult, er flertydig eller har et navn som er lengre enn 512 byte. Velg det på nytt.",
   "render.cpu_budget": "CPU-ressursprofil",
   "render.cpu_budget_bodies": "Øvre grense for kropper",
   "render.cpu_budget_compact": "Kompakt (eldre grenser)",
