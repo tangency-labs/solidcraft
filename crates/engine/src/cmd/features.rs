@@ -3899,10 +3899,27 @@ fn sketch_hole_points(s: &Session, sketch: u64) -> Vec<String> {
     let st = s.model.state();
     let Some(ss) = st.sketch(sketch) else { return Vec::new() };
     let mut ends: Vec<usize> = Vec::new();
+    // An arc's centre (a filleted corner's, say) is geometry of the arc, not a hole site, unless a
+    // circle is centred there too.
+    let circle_centres: Vec<usize> = ss
+        .sketch
+        .curves
+        .iter()
+        .filter_map(|c| match &c.kind {
+            solidcraft_sketch::CurveKind::Circle { c, .. } => Some(*c),
+            _ => None,
+        })
+        .collect();
     for c in &ss.sketch.curves {
         match &c.kind {
             solidcraft_sketch::CurveKind::Circle { .. } => {}
-            solidcraft_sketch::CurveKind::Arc { a, b, .. } | solidcraft_sketch::CurveKind::Line { a, b } => ends.extend([*a, *b]),
+            solidcraft_sketch::CurveKind::Arc { c, a, b } => {
+                ends.extend([*a, *b]);
+                if !circle_centres.contains(c) {
+                    ends.push(*c);
+                }
+            }
+            solidcraft_sketch::CurveKind::Line { a, b } => ends.extend([*a, *b]),
             solidcraft_sketch::CurveKind::Ellipse { m, .. } => ends.push(*m),
             solidcraft_sketch::CurveKind::Spline { pts, .. } => ends.extend(pts.iter().copied()),
             solidcraft_sketch::CurveKind::Conic { a, b, apex, .. } => ends.extend([*a, *b, *apex]),
