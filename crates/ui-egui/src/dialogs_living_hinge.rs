@@ -245,8 +245,15 @@ fn slow_warning(reply: &Value) -> Option<String> {
 fn report_args(doc: &solidcraft_engine::doc::Document, reply: &Value) -> Vec<(&'static str, Vec<(&'static str, String)>)> {
     let n = |k: &str| reply.get(k).and_then(Value::as_u64).unwrap_or(0).to_string();
     let len = |k: &str| crate::length_input::shown(doc, reply.get(k).and_then(Value::as_f64).unwrap_or(0.0));
+    // "1 slot", "2 slots": the `_one` key when the count is 1 (as constrain.dof_one).
+    let count = |k: &str, one: &str, many: &str| {
+        let c = reply.get(k).and_then(Value::as_u64).unwrap_or(0);
+        solidcraft_ui_text::format(if c == 1 { one } else { many }, &[("count", &c.to_string())])
+    };
+    let slots = count("slots", "ui.living_hinge.slots_one", "ui.living_hinge.slots");
+    let rows = count("rows", "ui.living_hinge.rows_one", "ui.living_hinge.rows");
     vec![
-        ("ui.living_hinge.report_slots", vec![("slots", n("slots")), ("rows", n("rows"))]),
+        ("ui.living_hinge.report_slots", vec![("slots", slots), ("rows", rows)]),
         ("ui.living_hinge.report_kinds", vec![("run_out", n("run_out")), ("shortened", n("shortened")), ("left_out", n("left_out"))]),
         ("ui.living_hinge.report_cut", vec![("length", len("cut_length_mm"))]),
         ("ui.living_hinge.report_band", vec![("width", len("band_width_mm"))]),
@@ -395,8 +402,18 @@ mod tests {
             "cut_length_mm": 1757.8, "outline_length_mm": 3566.5, "band_width_mm": 40.0});
         let args = report_args(&s.doc, &reply);
         let flat: Vec<String> = args.iter().flat_map(|(_, a)| a.iter().map(|(k, v)| format!("{k}={v}"))).collect();
-        assert_eq!(flat, ["slots=95", "rows=27", "run_out=28", "shortened=0", "left_out=26", "length=1757.8 mm", "width=40 mm"]);
+        assert_eq!(flat, ["slots=95 slots", "rows=27 rows", "run_out=28", "shortened=0", "left_out=26", "length=1757.8 mm", "width=40 mm"]);
         assert_eq!(report_lines(&s.doc, &reply).len(), 4);
+    }
+
+    /// One slot in one row says "1 slot in 1 row", not "1 slots in 1 rows".
+    #[test]
+    fn living_hinge_report_says_one_slot_and_one_row() {
+        let s = Session::default();
+        let line = |slots: u64, rows: u64| report_lines(&s.doc, &json!({"slots": slots, "rows": rows}))[0].clone();
+        assert_eq!(line(1, 1), "1 slot in 1 row");
+        assert_eq!(line(2, 1), "2 slots in 1 row");
+        assert_eq!(line(0, 0), "0 slots in 0 rows");
     }
 
     /// A new dialog's lengths follow the design unit's row (design 13.3), not the number with the
