@@ -998,6 +998,8 @@ listed, or is `null`.
 
 ### `ui.prefs` settings
 
+- `show_document_browser` (default false): show the document browser beside open designs; also available in Preferences → Layout → Panels and through the app-bar Show/Hide Documents toggle. Explicit visibility choices from earlier document-browser builds are preserved.
+
 `render_previous_geometry_budget` (Graphics, default false) restores the previous fixed Render preview geometry budget: 512 MiB on 64-bit desktop, 128 MiB elsewhere. With it off, desktop uses the device-based budget.
 
 

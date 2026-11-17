@@ -244,6 +244,7 @@ pub fn app_bar(app: &mut SolveApp, ui: &mut egui::Ui) {
             let bar = app_bar::AppBar {
                 mark: &|painter, at| solidcraft_look::glyphs::brand_mark(painter, at),
                 name: "SolidCraft",
+                leading: (crate::library::available(app) && !app.home.open).then_some(vec2(26.0, 26.0)),
                 home: app_bar::BarButton { id: "home", icon: "home", tip: app.tr("ui.start_page"), enabled: idle, narrow: false, wide_only: false },
                 file: app.tr("ui.file"),
                 file_open,
@@ -272,6 +273,9 @@ pub fn app_bar(app: &mut SolveApp, ui: &mut egui::Ui) {
                 handles: APP_BAR_HANDLES,
             };
             let out = app_bar::show(ui, &bar, r, content);
+            if let Some(rect) = out.leading {
+                crate::library::app_bar_toggle(app, ui, rect);
+            }
             ui.ctx().data_mut(|d| d.insert_temp(egui::Id::unique("sc_file_menu_x"), out.file.left()));
             for action in &out.actions {
                 match action {
