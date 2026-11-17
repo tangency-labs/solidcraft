@@ -7842,7 +7842,7 @@ mod tests {
             let mut surface = Surface::from(original.clone_exact());
             let domain = original.base().natural_uv_domain();
             // Exercise the public wrapper before taking its exact concrete snapshot.
-            // Do not use Surface::clone: its copy path may repair the knot vectors.
+            // clone_exact preserves the stored knot vectors for the refusal comparison.
             let points: Vec<_> = [0.25, 0.5, 0.75]
                 .into_iter()
                 .flat_map(|u| {
@@ -8002,8 +8002,8 @@ mod tests {
                             _ => panic!("the constructed canonical kind"),
                         };
                         assert_eq!(built, !lazy);
-                        // Do not evaluate the lazy candidate before Reverse: the public edit
-                        // must make its own net, rather than reusing an evaluation copy.
+                        // The lazy candidate reaches Reverse before evaluation, so the
+                        // public edit constructs its own net.
                         surface.reverse(&k, param).unwrap();
                         let domain = surface.natural_uv_domain_with_nurb(&k).unwrap();
                         for u in [0.25, 0.5, 0.75] {
