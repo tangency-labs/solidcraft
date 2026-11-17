@@ -431,18 +431,21 @@ fn prisms_keep_their_pinned_volumes() {
 }
 
 /// WR-729 (#17902): the exact trim transpose moves three pins one last bit FARTHER from their
-/// 70-digit references (the r 8 cylinder boss by 5.0e-12, the cone boss by 1.2e-12, the cone pit
-/// by 1.7e-12, MEASURED). Each pinned volume, main's and this branch's, lies within the rounding
-/// bound of the volume's own sum, so the move is a change of rounding, not of the integral:
+/// 70-digit references (the r 8 cylinder boss by 3.64e-12, the cone boss by 1.18e-12, the cone
+/// pit by 3.19e-12, MEASURED on the exact doubles). Each pinned volume, main's and this
+/// branch's, lies within the rounding bound of the volume's own sum, so the move is a change of
+/// rounding, not of the integral:
 ///
 /// `brep_volume` adds one term per face (and more for the gaps it closes, #16735) into
 /// `total.volume`. For `m` terms `t_i` that recursive sum is off its exact value by at most
-/// `gamma(m - 1) sum |t_i|` (Higham, Lemma 3.1, `solidcore::mass::integrator::gamma`), before
-/// each term's own error and the inputs' (`L e_in`), which only add. With `n <= m` the face count
-/// and `|v| <= sum |t_i|`, `B = gamma(n - 1) |v|` is at most that bound, so asserting
-/// `|v - exact| <= B` asserts more than the certificate needs. `exact` is the 70-digit reference
-/// (`pins-ref70-gk.py`, tanh-sinh), held here as its nearest double, whose own rounding (half an
-/// ulp) is added to the distance.
+/// `R = gamma(m - 1) sum |t_i|` (Higham, Lemma 3.1, `solidcore::mass::integrator::gamma`),
+/// before each term's own error and the inputs' (`L e_in`), which only add. With `n <= m` the
+/// face count and `|v| <= (1 + gamma(m - 1)) sum |t_i|` (the computed sum is off `sum t_i` by
+/// `R` too), `B = gamma(n - 1) |v|` is at most `(1 + gamma(m - 1)) R`, a factor within
+/// 1e-14 of one. The test asserts `2 |v - exact| <= B`, so `|v - exact| <= R`: the margin of
+/// two covers that factor. `exact` is the 70-digit reference (`pins-ref70-gk.py`, tanh-sinh at level 7,
+/// which moves each reference by at most 5.7e-45 from level 6), held here as its nearest
+/// double, whose own rounding (half an ulp) is added to the distance.
 #[test]
 fn transposed_pins_lie_within_their_sums_rounding_of_the_references() {
     // (feature, pinned volume, main's pin before WR-729, 70-digit reference, its nearest
@@ -486,9 +489,9 @@ fn transposed_pins_lie_within_their_sums_rounding_of_the_references() {
             let bound = gamma(u32::try_from(n - 1).unwrap()) * x.abs();
             println!("{side} {x:.17}: {off:e} off {reference}, sum's rounding bound {bound:e}");
             assert!(
-                off <= bound,
-                "{side} volume {x:.17} is {off:e} off its reference {reference}, past the \
-                 sum's rounding bound {bound:e}"
+                2.0 * off <= bound,
+                "{side} volume {x:.17} is {off:e} off its reference {reference}, at least half \
+                 the sum's rounding bound {bound:e}"
             );
         }
     }
