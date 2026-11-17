@@ -61,6 +61,7 @@ pub mod dialogs_surface;
 pub mod dialogs_sweep;
 mod dialogs_thread;
 pub mod dialogs_view_dxf;
+mod dialogs_wood_edge_profile;
 pub mod dim_view;
 #[cfg(test)]
 mod dimension_create_ui_tests;

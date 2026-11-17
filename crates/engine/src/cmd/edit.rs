@@ -1434,7 +1434,7 @@ fn inspect_feature(s: &mut Session, p: &Value) -> Result<Value> {
     reply(cmd, TimelineInspectResult { inspected: Inspected::Feature(Box::new(info)), param_warnings: Vec::new() })
 }
 
-fn edit_feature(s: &mut Session, p: &Value) -> Result<Value> {
+pub(super) fn edit_feature(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "timeline.edit";
     let id = feature_id(s, p.get("feature"), cmd)?;
     let set = p.get("set").filter(|v| v.is_object()).ok_or_else(|| bad(cmd, "`set` must be an object of fields"))?;
@@ -2279,6 +2279,7 @@ fn redefine(s: &mut Session, p: &Value) -> Result<Value> {
                 | "plastic.rest"
                 | "frame.end_cap"
                 | "frame.member"
+                | "wood.edge_profile"
         );
     if !constructor {
         return Err(bad(cmd, format!("`{cid}` does not make a feature")));

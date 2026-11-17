@@ -1756,6 +1756,26 @@ pub enum FeatureKind {
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         bends: Vec<Position>,
     },
+    /// A router cut along one body's edges. None retains the feature and restores its input.
+    WoodEdgeProfile {
+        edges: Vec<Position>,
+        body: Option<BodyName>,
+        profile: String,
+        #[walk(length = "Radius")]
+        radius: Expr,
+        #[walk(length = "Width")]
+        width: Expr,
+        #[walk(length = "Depth")]
+        depth: Expr,
+        #[walk(angle = "Angle")]
+        angle: Expr,
+        #[walk(length = "Step")]
+        step: Expr,
+        #[walk(length = "Fillet")]
+        fillet: Expr,
+        #[serde(default)]
+        tangent_chain: bool,
+    },
     /// Plastic boss: a round post on a face (draft, root fillet, hole, ribs).
     Boss {
         position: FacePick,
@@ -3030,6 +3050,7 @@ impl FeatureKind {
             FeatureKind::FrameEndCap { .. } => "EndCapFeature",
             FeatureKind::FrameMember { .. } => "FrameMemberFeature",
             FeatureKind::Emboss { .. } => "EmbossFeature",
+            FeatureKind::WoodEdgeProfile { .. } => "WoodEdgeProfileFeature",
             FeatureKind::Boss { .. } => "BossFeature",
             FeatureKind::Lip { groove: false, .. } => "LipFeature",
             FeatureKind::Lip { .. } => "GrooveFeature",
@@ -3128,6 +3149,7 @@ impl FeatureKind {
             FeatureKind::SheetPath { .. } => "sheet_path",
             FeatureKind::SheetUnfold { .. } => "sheet_unfold",
             FeatureKind::SheetConvert { .. } => "sheet_convert",
+            FeatureKind::WoodEdgeProfile { .. } => "chamfer",
             FeatureKind::Boss { .. } => "boss",
             FeatureKind::Lip { .. } => "lip",
             FeatureKind::SnapFit { .. } => "snap_fit",
@@ -3285,6 +3307,7 @@ impl FeatureKind {
             FeatureKind::FrameEndCap { .. } => "EndCap",
             FeatureKind::FrameMember { .. } => "Member",
             FeatureKind::Emboss { .. } => "Emboss",
+            FeatureKind::WoodEdgeProfile { .. } => "Edge Profile",
             FeatureKind::Boss { .. } => "Boss",
             FeatureKind::Lip { groove: false, .. } => "Lip",
             FeatureKind::Lip { .. } => "Groove",
