@@ -570,6 +570,17 @@ fn size_with_length(family: &str, size: &str, len: f64) -> String {
     }
 }
 
+/// A metric size as the head tables write it (`M6`, `M1.6`), from any form `clearance` takes:
+/// `6`, `m6`, `M6.0`, `M6x1`. A size that is not a number is returned as written (trimmed, without
+/// the pitch), so the error can name it.
+fn metric_size_key(size: &str) -> String {
+    let nominal = size.trim().split(['x', 'X']).next().unwrap_or("").trim();
+    match nominal.trim_start_matches(['M', 'm']).parse::<f64>() {
+        Ok(d) if d.is_finite() && d > 0.0 => format!("M{d}"),
+        _ => nominal.to_string(),
+    }
+}
+
 fn metric(size: &str) -> Option<(f64, f64)> {
     METRIC.iter().find(|(s, _, _)| s.eq_ignore_ascii_case(size)).map(|(_, d, p)| (*d, *p))
 }
@@ -589,13 +600,13 @@ pub(crate) fn cap_screw_head(standard: &str, size: &str) -> std::result::Result<
             ));
         }
     };
-    let size = size.trim().split(['x', 'X']).next().unwrap_or("").trim();
+    let size = metric_size_key(size);
     let (first, last) = (table.first().map_or("", |r| r.0), table.last().map_or("", |r| r.0));
     table
         .iter()
-        .find(|r| r.0.eq_ignore_ascii_case(size))
+        .find(|r| r.0.eq_ignore_ascii_case(&size))
         .map(|r| (r.1, r.2))
-        .ok_or_else(|| format!("no {name} head for `{}`: {first} to {last}", super::features::brief(size)))
+        .ok_or_else(|| format!("no {name} head for `{}`: {first} to {last}", super::features::brief(&size)))
 }
 
 /// The head a countersink seats, for `solid.hole`'s `head`: the theoretical head diameter dk of
@@ -607,13 +618,13 @@ pub(crate) fn countersunk_head(standard: &str, size: &str) -> Option<std::result
     if !(s.eq_ignore_ascii_case("ISO 10642") || s.eq_ignore_ascii_case("countersunk_socket_screw")) {
         return None;
     }
-    let size = size.trim().split(['x', 'X']).next().unwrap_or("").trim();
+    let size = metric_size_key(size);
     let (first, last) = (CSK.first().map_or("", |r| r.0), CSK.last().map_or("", |r| r.0));
     Some(
         CSK.iter()
-            .find(|r| r.0.eq_ignore_ascii_case(size))
+            .find(|r| r.0.eq_ignore_ascii_case(&size))
             .map(|r| r.1)
-            .ok_or_else(|| format!("no ISO 10642 head for `{}`: {first} to {last}", super::features::brief(size))),
+            .ok_or_else(|| format!("no ISO 10642 head for `{}`: {first} to {last}", super::features::brief(&size))),
     )
 }
 
@@ -1789,6 +1800,23 @@ mod tests {
     /// #13361: a countersunk socket screw (ISO 10642) takes the same parameters as the other
     /// screws, with a 90° cone sunk below its seating plane: the top of the head is level with
     /// the face, and the length counts the head.
+    #[test]
+    fn head_sizes_are_read_in_every_form_clearance_takes() {
+        // `clearance` reads `6`, `m6`, `M6.0` and `M6x1` as M6 (clearance_diameter); `head` must too.
+        for size in ["M6", "6", "m6", "M6.0", " M6x1 ", "6X1"] {
+            assert_eq!(
+                super::countersunk_head("ISO 10642", size).unwrap().unwrap(),
+                super::countersunk_head("ISO 10642", "M6").unwrap().unwrap(),
+                "{size}"
+            );
+            assert_eq!(super::cap_screw_head("ISO 4762", size).unwrap(), super::cap_screw_head("ISO 4762", "M6").unwrap(), "{size}");
+        }
+        assert_eq!(super::cap_screw_head("ISO 4762", "3.0").unwrap(), super::cap_screw_head("ISO 4762", "M3").unwrap());
+        // Still refused, and named as written: a size the table lacks, or not a size at all.
+        assert!(super::countersunk_head("ISO 10642", "2").unwrap().unwrap_err().contains("`M2`"));
+        assert!(super::cap_screw_head("ISO 4762", "big").unwrap_err().contains("`big`"));
+    }
+
     #[test]
     fn a_countersunk_head_is_a_cone_sunk_below_the_seating_plane() {
         let l = run(&mut Session::default(), "parts.library", json!({"family": "countersunk_socket_screw"}));
