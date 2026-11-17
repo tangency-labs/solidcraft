@@ -103,13 +103,13 @@ impl ToolbarCustom {
                 self.quick_access.push(id.to_string());
             }
         }
-        self.plugin_unpinned = v.get("plugin_unpinned")
+        self.plugin_unpinned = v
+            .get("plugin_unpinned")
             .and_then(Value::as_array)
             .into_iter()
             .flatten()
             .filter_map(Value::as_str)
             .filter(|id| id.starts_with(crate::plugin_menu::RIBBON_PREFIX) && id.len() <= 256)
-            .take(1000)
             .map(str::to_string)
             .collect();
         if !current {
@@ -693,5 +693,19 @@ mod plugin_pin_tests {
         assert_eq!(settings.plugin_unpinned.len(), 1);
         assert!(!settings.plugin_pinned("plugin_entry:workshop:run"));
         assert!(settings.plugin_pinned("solid.box"));
+    }
+
+    #[test]
+    fn all_unpinned_plugin_commands_survive_preference_reload() {
+        let mut settings = ToolbarCustom::default();
+        for n in 0..=1000 {
+            settings.toggle_plugin_pin(&format!("plugin_entry:workshop:command-{n}"));
+        }
+        let mut restored = ToolbarCustom::default();
+        restored.load(&settings.prefs());
+        assert_eq!(restored.plugin_unpinned.len(), 1001);
+        for n in 0..=1000 {
+            assert!(!restored.plugin_pinned(&format!("plugin_entry:workshop:command-{n}")));
+        }
     }
 }
