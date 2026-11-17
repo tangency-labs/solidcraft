@@ -1995,7 +1995,7 @@ E	topology.edgeuse_p3	cos_open_bicubic_sub_eu2_bin_0.3_3d1	state	46	0.8999999999
 E	topology.edgeuse_p3	cos_open_bicubic_sub_eu2_bin_1.0_3d0	state	0	2.4	2.4000000000000004	AtRounding
 E	topology.edgeuse_p3	cos_open_bicubic_sub_eu2_bin_1.0_3d0	state	1	2.6999999999999997	2.7	AtRounding
 E	topology.edgeuse_p3	cos_open_bicubic_sub_eu2_bin_1.0_3d0	state	2	-0.03156320000000003	-0.03156320000000001	AtRounding
-E	topology.edgeuse_p3	cos_open_bicubic_sub_eu2_bin_1.0_3d0	state	4	-1.4178882225569981e-5	-1.417888222601519e-5	Closer
+E	topology.edgeuse_p3	cos_open_bicubic_sub_eu2_bin_1.0_3d0	state	4	-1.4178882225569981e-5	-1.417888222601519e-5	AtRounding
 E	topology.edgeuse_p3	cos_open_bicubic_sub_eu2_bin_1.0_3d0	state	5	0.12659716273098715	0.12659716273098723	AtRounding
 E	topology.edgeuse_p3	cos_open_bicubic_sub_eu2_bin_1.0_3d0	state	6	8.88178419700125e-16	-4.440892098500626e-16	AtRounding
 E	topology.edgeuse_p3	cos_open_bicubic_sub_eu2_bin_1.0_3d0	state	8	0.0003359999999998364	0.00033599999999994745	AtRounding
@@ -2010,7 +2010,7 @@ E	topology.edgeuse_p3	cos_open_bicubic_sub_eu2_bin_1.0_3d0	state	46	0.8999999999
 E	topology.edgeuse_p3	cos_open_bicubic_sub_eu2_bin_1.0_3d1	state	0	2.4	2.4000000000000004	AtRounding
 E	topology.edgeuse_p3	cos_open_bicubic_sub_eu2_bin_1.0_3d1	state	1	2.6999999999999997	2.7	AtRounding
 E	topology.edgeuse_p3	cos_open_bicubic_sub_eu2_bin_1.0_3d1	state	2	-0.03156320000000003	-0.03156320000000001	AtRounding
-E	topology.edgeuse_p3	cos_open_bicubic_sub_eu2_bin_1.0_3d1	state	4	-1.4178882225569981e-5	-1.417888222601519e-5	Closer
+E	topology.edgeuse_p3	cos_open_bicubic_sub_eu2_bin_1.0_3d1	state	4	-1.4178882225569981e-5	-1.417888222601519e-5	AtRounding
 E	topology.edgeuse_p3	cos_open_bicubic_sub_eu2_bin_1.0_3d1	state	5	0.12659716273098715	0.12659716273098723	AtRounding
 E	topology.edgeuse_p3	cos_open_bicubic_sub_eu2_bin_1.0_3d1	state	6	8.88178419700125e-16	-4.440892098500626e-16	AtRounding
 E	topology.edgeuse_p3	cos_open_bicubic_sub_eu2_bin_1.0_3d1	state	8	0.0003359999999998364	0.00033599999999994745	AtRounding
@@ -2126,7 +2126,7 @@ E	topology.edgeuse_p3	cos_open_bicubic_sub_eu6_bin_0.3_3d1	state	53	0.8999999999
 E	topology.edgeuse_p3	cos_open_bicubic_sub_eu6_bin_1.0_3d0	state	0	2.4	2.4000000000000004	AtRounding
 E	topology.edgeuse_p3	cos_open_bicubic_sub_eu6_bin_1.0_3d0	state	1	2.6999999999999997	2.7	AtRounding
 E	topology.edgeuse_p3	cos_open_bicubic_sub_eu6_bin_1.0_3d0	state	2	-0.03156320000000003	-0.03156320000000001	AtRounding
-E	topology.edgeuse_p3	cos_open_bicubic_sub_eu6_bin_1.0_3d0	state	4	-1.4178882225569981e-5	-1.417888222601519e-5	Closer
+E	topology.edgeuse_p3	cos_open_bicubic_sub_eu6_bin_1.0_3d0	state	4	-1.4178882225569981e-5	-1.417888222601519e-5	AtRounding
 E	topology.edgeuse_p3	cos_open_bicubic_sub_eu6_bin_1.0_3d0	state	5	0.12659716273098715	0.12659716273098723	AtRounding
 E	topology.edgeuse_p3	cos_open_bicubic_sub_eu6_bin_1.0_3d0	state	6	-8.88178419700125e-16	4.440892098500626e-16	AtRounding
 E	topology.edgeuse_p3	cos_open_bicubic_sub_eu6_bin_1.0_3d0	state	8	-0.0003359999999998364	-0.00033599999999994745	AtRounding
@@ -2141,7 +2141,7 @@ E	topology.edgeuse_p3	cos_open_bicubic_sub_eu6_bin_1.0_3d0	state	53	0.8999999999
 E	topology.edgeuse_p3	cos_open_bicubic_sub_eu6_bin_1.0_3d1	state	0	2.4	2.4000000000000004	AtRounding
 E	topology.edgeuse_p3	cos_open_bicubic_sub_eu6_bin_1.0_3d1	state	1	2.6999999999999997	2.7	AtRounding
 E	topology.edgeuse_p3	cos_open_bicubic_sub_eu6_bin_1.0_3d1	state	2	-0.03156320000000003	-0.03156320000000001	AtRounding
-E	topology.edgeuse_p3	cos_open_bicubic_sub_eu6_bin_1.0_3d1	state	4	-1.4178882225569981e-5	-1.417888222601519e-5	Closer
+E	topology.edgeuse_p3	cos_open_bicubic_sub_eu6_bin_1.0_3d1	state	4	-1.4178882225569981e-5	-1.417888222601519e-5	AtRounding
 E	topology.edgeuse_p3	cos_open_bicubic_sub_eu6_bin_1.0_3d1	state	5	0.12659716273098715	0.12659716273098723	AtRounding
 E	topology.edgeuse_p3	cos_open_bicubic_sub_eu6_bin_1.0_3d1	state	6	-8.88178419700125e-16	4.440892098500626e-16	AtRounding
 E	topology.edgeuse_p3	cos_open_bicubic_sub_eu6_bin_1.0_3d1	state	8	-0.0003359999999998364	-0.00033599999999994745	AtRounding
@@ -4929,3 +4929,34 @@ E	topology.vertexuse	face3_vu3_sector1	state	12	-5.511864503509738e-16	-2.832571
 E	topology.vertexuse	face3_vu3_sector1	state	14	89.99999999999997	90.0	Closer
 M	topology.vertexuse	face3_vu3_sector1	state	0000000000000000,4008000000000000,4008000000000000,4000000000000000,3fe6666666666666,3feccccccccccccd,3fe6666666666666,3feccccccccccccd,3fe6666666666631,3feccccccccccccd,bff0000000000000,3ca4c3a689834522,bcc3dbcc35a021b9,bff0000000000000,40567ffffffffffe,0000000000000000,0000000000000000,0000000000000000,0000000000000000,0000000000000000,0000000000000000
 O	topology.vertexuse	face3_vu3_sector1	state	{"blocks":[[100.79999999999997,104.79999999999997,1384.2999999999995]],"n":21}
+E	blend.fillet_solver_p2	gen0008_rail_eu	flat	5	0.8828224718839737	0.8828224718839732	AtRounding
+E	blend.fillet_solver_p2	gen0008_rail_eu	flat	6	0.11274813233049485	0.11274813233049441	AtRounding
+E	blend.fillet_solver_p2	gen0008_rail_eu	flat	8	0.8828224718839737	0.8828224718839732	AtRounding
+E	blend.fillet_solver_p2	gen0008_rail_eu	flat	11	0.8828224718839737	0.8828224718839732	AtRounding
+M	blend.fillet_solver_p2	gen0008_rail_eu	flat	0000000000000000,0000000000000000,3fec4014e99d4c30,3fec4014e99d4c30,3ff0000000000000,3fec4014e99d4c28,3fbcdd0fc50b6800,3fec4014e99d4c2a,3fec4014e99d4c28,3fbcdd0fc50b6800,bff80e0c04c97761,3fec4014e99d4c28,4000000000000000
+O	blend.fillet_solver_p2	gen0008_rail_eu	flat	[0.0,0.0,0.8828224718839746,0.8828224718839746,1.0,0.8828224718839737,0.11274813233049485,0.8828224718839739,0.8828224718839737,0.11274813233049485,-1.503429430674679,0.8828224718839737,2.0]
+E	blend.fillet_solver_p2	gen0066_rail_eu	flat	5	1.210667632706619	1.2106676327066186	AtRounding
+E	blend.fillet_solver_p2	gen0066_rail_eu	flat	7	1.2106676327066195	1.2106676327066186	AtRounding
+E	blend.fillet_solver_p2	gen0066_rail_eu	flat	9	-3.8985817868190065	-3.8985817868190074	AtRounding
+E	blend.fillet_solver_p2	gen0066_rail_eu	flat	13	1.210667632706619	1.2106676327066186	AtRounding
+M	blend.fillet_solver_p2	gen0066_rail_eu	flat	0000000000000000,0000000000000000,3ff35ee5060ccf8c,3ff35ee5060ccf8c,3ff0000000000000,3ff35ee5060ccf8a,c00f304ba5d959dc,3ff35ee5060ccf8c,3ff35ee5060ccf8c,c00f304ba5d959dc,3fe58c7c354bfd90,3ffac63e1aa5fec8,4005631f0d52ff64,3ff35ee5060ccf8a,401c000000000000
+O	blend.fillet_solver_p2	gen0066_rail_eu	flat	[0.0,0.0,1.2106676327066195,1.2106676327066195,1.0,1.210667632706619,-3.8985817868190065,1.2106676327066195,1.2106676327066195,-3.8985817868190065,0.6733990708307136,1.6733990708307136,2.6733990708307136,1.210667632706619,7.0]
+E	blend.fillet_solver_p2	gen0089_rail_eu	flat	5	0.8607142869723752	0.8607142869723751	AtRounding
+E	blend.fillet_solver_p2	gen0089_rail_eu	flat	7	0.8607142869723745	0.860714286972375	AtRounding
+E	blend.fillet_solver_p2	gen0089_rail_eu	flat	9	5.143251389797068	5.143251389797069	AtRounding
+E	blend.fillet_solver_p2	gen0089_rail_eu	flat	10	0.8607142869723752	0.8607142869723751	AtRounding
+M	blend.fillet_solver_p2	gen0089_rail_eu	flat	0000000000000000,0000000000000000,3feb8af8b037e1c8,3feb8af8b037e1c8,3ff0000000000000,3feb8af8b037e1c6,401492b07e0923cb,3feb8af8b037e1c0,3feb8af8b037e1b8,401492b07e0923cb,3feb8af8b037e1c6,4010000000000000
+O	blend.fillet_solver_p2	gen0089_rail_eu	flat	[0.0,0.0,0.8607142869723754,0.8607142869723754,1.0,0.8607142869723752,5.143251389797068,0.8607142869723745,0.8607142869723736,5.143251389797068,0.8607142869723752,4.0]
+E	blend.fillet_solver_p2	gen0217_rail_eu	flat	5	1.7609126480827277	1.760912648082726	AtRounding
+E	blend.fillet_solver_p2	gen0217_rail_eu	flat	7	1.7609126480827264	1.7609126480827255	AtRounding
+E	blend.fillet_solver_p2	gen0217_rail_eu	flat	8	1.7609126480827273	1.7609126480827282	AtRounding
+E	blend.fillet_solver_p2	gen0217_rail_eu	flat	9	-3.572619483277007	-3.5726194832770095	AtRounding
+E	blend.fillet_solver_p2	gen0217_rail_eu	flat	10	1.7609126480827277	1.760912648082726	AtRounding
+M	blend.fillet_solver_p2	gen0217_rail_eu	flat	0000000000000000,0000000000000000,3ffc2cb2bdaa0c91,3ffc2cb2bdaa0c91,3ff0000000000000,3ffc2cb2bdaa0c96,c00c94b9860dd13e,3ffc2cb2bdaa0c90,3ffc2cb2bdaa0c94,c00c94b9860dd13b,3ffc2cb2bdaa0c96,4000000000000000
+O	blend.fillet_solver_p2	gen0217_rail_eu	flat	[0.0,0.0,1.7609126480827266,1.7609126480827266,1.0,1.7609126480827277,-3.572619483277008,1.7609126480827264,1.7609126480827273,-3.572619483277007,1.7609126480827277,2.0]
+E	blend.fillet_solver_p2	gen0235_rail_eu	flat	5	0.7219990467098998	0.721999046709898	AtRounding
+E	blend.fillet_solver_p2	gen0235_rail_eu	flat	7	0.7219990467098998	0.7219990467098985	AtRounding
+E	blend.fillet_solver_p2	gen0235_rail_eu	flat	9	5.114850016734574	5.114850016734573	AtRounding
+E	blend.fillet_solver_p2	gen0235_rail_eu	flat	11	0.7219990467098998	0.721999046709898	AtRounding
+M	blend.fillet_solver_p2	gen0235_rail_eu	flat	0000000000000000,0000000000000000,3fe71a9dbeab971c,3fe71a9dbeab971c,3ff0000000000000,3fe71a9dbeab971c,4014759b3e2747ba,3fe71a9dbeab971c,3fe71a9dbeab9710,4014759b3e2747bb,bfdf42aae95ace98,3fe71a9dbeab971c,4000000000000000
+O	blend.fillet_solver_p2	gen0235_rail_eu	flat	[0.0,0.0,0.7219990467098998,0.7219990467098998,1.0,0.7219990467098998,5.114850016734573,0.7219990467098998,0.7219990467098985,5.114850016734574,-0.4884440687994611,0.7219990467098998,2.0]
