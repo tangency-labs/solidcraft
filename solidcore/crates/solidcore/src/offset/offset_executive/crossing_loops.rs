@@ -1382,8 +1382,9 @@ impl OffsetExecutive {
     /// edge) points along the face's normal there for one edge use's walls and against it
     /// for the other's. Two such walls meet only at the crossing, on their edges, so the
     /// stitch closes the body there once their edges are split; walls on one side pass
-    /// through each other, which only the merge cuts. An edge use with no wall across it
-    /// (a sheet's open edge) has none to pass through.
+    /// through each other, which only the merge cuts. An edge use with no offset face across
+    /// it (a sheet's open edge) does not tell: a thickened sheet's wall is built along it
+    /// later, so it is not proved apart.
     ///
     /// # Errors
     ///
@@ -1406,7 +1407,11 @@ impl OffsetExecutive {
             )?;
             let mut sides = [0.0_f64; 2];
             for (side, &edgeuse) in sides.iter_mut().zip(&crossing.edgeuses) {
-                for wall in self.walls_across(original, b, f, edgeuse)? {
+                let walls = self.walls_across(original, b, f, edgeuse)?;
+                if walls.is_empty() {
+                    return Ok(false);
+                }
+                for wall in walls {
                     let Some(cp) = closest_point(kernel, b, wall, crossing.point)? else {
                         return Ok(false);
                     };
@@ -1431,7 +1436,7 @@ impl OffsetExecutive {
                     *side = into;
                 }
             }
-            if sides[0] * sides[1] > 0.0 {
+            if sides[0] * sides[1] >= 0.0 {
                 return Ok(false);
             }
         }
@@ -1447,7 +1452,6 @@ impl OffsetExecutive {
     ///
     /// [`LoopCrossing::Unmerged`] where a wall does not pass the crossing; those of the
     /// closest points and the splits.
-    #[allow(clippy::too_many_arguments)]
     fn split_walls_at_crossings(
         &mut self,
         kernel: &mut Kernel,
