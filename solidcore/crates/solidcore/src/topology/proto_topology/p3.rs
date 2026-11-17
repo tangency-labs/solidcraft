@@ -1508,11 +1508,12 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
                     if dist > xs {
                         continue;
                     }
-                    // Not upstream: the vertex that stays is the first definition's, unless
-                    // only the other is the operand's own vertex at the end of a seam edge
-                    // (its definition found it on that vertex): a seam's vertex keeps its
-                    // place on the seam (`resolve_vertex_definition`), and the edges of the
-                    // one squeezed or glued away come to it.
+                    // `seam_vertex_stays_on_seam` (not upstream): the vertex that stays is
+                    // the first definition's, unless only the other is the operand's own
+                    // vertex at the end of a seam edge (its definition found it on that
+                    // vertex): a seam's vertex keeps its place on the seam
+                    // (`resolve_vertex_definition`), and the edges of the one squeezed or
+                    // glued away come to it.
                     let on_seam = |s: &Self, vd: VertexDefId, v: O| -> Result<bool> {
                         let def = s
                             .vertex_def(vd)
@@ -1522,7 +1523,9 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
                                 && ends_seam(&*brep, v)?,
                         )
                     };
-                    let keep_second = on_seam(self, vd2, v2)? && !on_seam(self, vd1, v1)?;
+                    let keep_second = k.fixes.seam_vertex_stays_on_seam
+                        && on_seam(self, vd2, v2)?
+                        && !on_seam(self, vd1, v1)?;
                     let (keep, gone) = if keep_second { (v2, v1) } else { (v1, v2) };
                     let merge_away = |s: &mut Self, deleted_v: &mut [Option<O>]| -> Result<()> {
                         set_slot(deleted_v, jj, gone);

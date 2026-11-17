@@ -3170,14 +3170,14 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
     /// with the smaller gap but within both objects' zone tolerances. The status
     /// output is always 0.
     ///
-    /// Not upstream: a definition on a vertex that ends a seam edge
-    /// ([`vertex::seam_edge`]) is put onto that seam, at the seam's point under the position
-    /// worked out as upstream ([`onto_seam`]). The seam edge's curve is the seam, an iso
-    /// line of its face's surface, and its vertex ends that line; a vertex moved off it
-    /// leaves the seam edge's trims off the seam, which the face's seam test refuses (test
-    /// 36, a suspicious edge near the seam) however small the move. Along the seam the
-    /// definition still moves as upstream's, sharing the gap with the other object. With
-    /// both sides on seam vertices the first's seam holds it.
+    /// With `seam_vertex_stays_on_seam` (not upstream): a definition on a vertex that ends
+    /// a seam edge ([`vertex::seam_edge`]) is put onto that seam, at the seam's point under
+    /// the position worked out as upstream ([`onto_seam`]). The seam edge's curve is the
+    /// seam, an iso line of its face's surface, and its vertex ends that line; a vertex
+    /// moved off it leaves the seam edge's trims off the seam, which the face's seam test
+    /// refuses (test 36, a suspicious edge near the seam) when another edge runs beside the
+    /// seam there. Along the seam the definition still moves as upstream's, sharing the gap
+    /// with the other object. With both sides on seam vertices the first's seam holds it.
     ///
     /// # Errors
     ///
@@ -3213,10 +3213,14 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
         self.pv(v.proto_vertex)?;
         let tol = self.tolerance(k);
 
-        // (not upstream) the seam a definition on a seam's vertex keeps to
-        let seam = match seam_curve(geometry, &v.pc1)? {
-            Some(c) => Some(c),
-            None => seam_curve(geometry, &v.pc2)?,
+        // (`seam_vertex_stays_on_seam`) the seam a definition on a seam's vertex keeps to
+        let seam = if k.fixes.seam_vertex_stays_on_seam {
+            match seam_curve(geometry, &v.pc1)? {
+                Some(c) => Some(c),
+                None => seam_curve(geometry, &v.pc2)?,
+            }
+        } else {
+            None
         };
 
         if dist > tol && dist1 + dist2 > EFF_ZERO {
