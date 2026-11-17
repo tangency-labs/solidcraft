@@ -262,7 +262,7 @@ pub struct PrismSection {
     pub hi: f64,
     /// Its section, exact: lines and arcs, the outer loop counter-clockwise, the holes clockwise.
     pub region: Region2,
-    /// How far the levels may be off the body's caps.
+    /// How far the levels and section may be off the body's caps, including frame conversion.
     pub tolerance: f64,
     /// An enclosure of its volume.
     pub volume: Interval,
@@ -299,7 +299,7 @@ pub fn prism_equivalent(a: &Body, b: &Body) -> Result<Option<bool>> {
         });
     }
     run_on("prism_equivalent", &[("a", a), ("b", b)], |k| {
-        let (ga, gb) = (a.lock(), b.lock());
+        let (ga, gb) = Body::lock_pair(a, b);
         Ok(measure::equivalent(k, &ga, &gb))
     })
 }
@@ -391,11 +391,106 @@ pub fn region_area(region: &Region2) -> Result<kp::Area> {
         .map_err(|_| Error::Profile(ProfileRefusal::FreeForm))
 }
 
+/// The section loop a closed chain of nodes samples ([`solidcore::prism::fit::fit_loop`]): a
+/// full circle where the nodes are one within `tolerance`, else the polygon of their corners,
+/// each straight run joined within three times `epsilon`. For a mesh's cap boundary, which the
+/// caller certifies against the mesh afterwards.
+///
+/// # Errors
+/// [`Error::Status`] (input refused) past the straight-run join's work bound.
+pub fn fitted_loop(points: &[Vec2], tolerance: f64, epsilon: f64) -> Result<Loop2> {
+    let points: Vec<_> = points.iter().map(|p| convert::vec2(*p)).collect();
+    Ok(
+        match solidcore::prism::fit::fit_loop(&points, tolerance, epsilon)
+            .map_err(crate::error::status)?
+        {
+            solidcore::prism::fit::FittedLoop::Circle { center, radius } => {
+                Loop2::circle(convert::record_vec2(center), radius)
+            }
+            solidcore::prism::fit::FittedLoop::Polygon(corners) => Loop2::polygon(
+                &corners
+                    .into_iter()
+                    .map(convert::record_vec2)
+                    .collect::<Vec<_>>(),
+            ),
+        },
+    )
+}
+
 /// Whether `lp` holds `p` by the even–odd rule, decided exactly ([`kp::Loop2::holds`]): `None`
 /// when `p` is on the loop or within rounding of it.
 #[must_use]
 pub fn loop_holds(lp: &Loop2, p: Vec2) -> Option<bool> {
     convert::loop2(lp).holds(convert::vec2(p))
+}
+
+/// The directed parameter interval of a recognized ellipse arc, in the input plane.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct EllipseArc {
+    /// The centre in the input plane.
+    pub center: Vec2,
+    /// The directed major semiaxis.
+    pub major: Vec2,
+    /// The positive minor-to-major axis ratio.
+    pub ratio: f64,
+    /// The starting parameter in radians.
+    pub start: f64,
+    /// The ending parameter in radians, retaining direction.
+    pub end: f64,
+}
+
+/// Recognize the supporting ellipse of the given rational quadratic, or refuse.
+pub fn conic_ellipse(a: Vec2, apex: Vec2, b: Vec2, w: f64) -> Option<EllipseArc> {
+    let arc = solidcore::prism::recognition::conic_ellipse(
+        convert::vec2(a),
+        convert::vec2(apex),
+        convert::vec2(b),
+        w,
+    )?;
+    Some(EllipseArc {
+        center: convert::record_vec2(arc.center),
+        major: convert::record_vec2(arc.major),
+        ratio: arc.ratio,
+        start: arc.start,
+        end: arc.end,
+    })
+}
+
+/// Recognize one directed turn of arcs with the same stored support.
+pub fn loop_circle(lp: &Loop2) -> Option<(Vec2, f64)> {
+    if lp.segs.len() > 200_000 {
+        return None;
+    }
+    let (center, radius) = solidcore::prism::recognition::loop_circle(&convert::loop2(lp))?;
+    Some((convert::record_vec2(center), radius))
+}
+
+/// Recognize one ellipse turn without changing any input control point.
+pub fn loop_ellipse(lp: &Loop2) -> Option<(Vec2, Vec2, f64)> {
+    if lp.segs.len() > 200_000 {
+        return None;
+    }
+    let (center, major, ratio) = solidcore::prism::recognition::loop_ellipse(&convert::loop2(lp))?;
+    Some((
+        convert::record_vec2(center),
+        convert::record_vec2(major),
+        ratio,
+    ))
+}
+
+/// Read the signed single winding of ordered points already admitted on one round wall.
+pub fn certified_round_wall_turn(points: &[Vec2], center: Vec2) -> Option<f64> {
+    if points.len() > 200_000 {
+        return None;
+    }
+    solidcore::prism::recognition::certified_round_wall_turn(
+        &points
+            .iter()
+            .copied()
+            .map(convert::vec2)
+            .collect::<Vec<_>>(),
+        convert::vec2(center),
+    )
 }
 
 /// Where `lp` lies against `other` (both in one plane's coordinates), loops within `tol` of each

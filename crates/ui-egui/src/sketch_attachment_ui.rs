@@ -109,7 +109,7 @@ pub(crate) fn plane_description(doc: &solidcraft_engine::doc::Document, plane: &
         let base = |b: &PlaneRef| if depth < 8 { describe(doc, b, depth + 1) } else { solidcraft_ui_text::tr("sketch_panel.plane_fixed").to_owned() };
         match plane {
             PlaneRef::Origin { name } => solidcraft_ui_text::format("sketch_panel.plane_origin", &[("plane", name)]),
-            PlaneRef::Construction { feature } => {
+            PlaneRef::Construction { feature, .. } => {
                 doc.feature(feature.0).map(|f| f.name.clone()).unwrap_or_else(|| solidcraft_ui_text::tr("sketch_panel.plane_fixed").to_owned())
             }
             PlaneRef::Offset { base: b, distance } => {

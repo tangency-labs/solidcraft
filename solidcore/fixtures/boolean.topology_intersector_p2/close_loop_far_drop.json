@@ -2,7 +2,7 @@
  "cases": [
   {
    "name": "close_loop_far_drop_quarter_arc_common_ends",
-   "upstream_ref": "source/SMLib/src/SmTopologyIntersector.cpp:6108-6354 CloseIntersectionLoop (single common edge, DropPoint with SM_SO_MINIMIZE): a straight chord and an exact rational quarter arc share both ends, so both vertex gaps are zero and the chord midpoint is 1.1716 from the arc; the pin still relates the edge pair",
+   "upstream_ref": "source/SMLib/src/SmTopologyIntersector.cpp:6108-6354 CloseIntersectionLoop (single common edge, DropPoint with SM_SO_MINIMIZE): a straight chord and an exact rational quarter arc share both ends, so both vertex gaps are zero and the chord midpoint is 1.1716 from the arc; the pinned C++ relates the edge pair, the port does not (WR-528, always on since its flag was retired: the midpoint is past max(2 * dMaxDist, the edge tolerances)), so the loop is not closed and the chord has no mate",
    "inputs": {
     "brep_a": {
      "kind": "wire",
@@ -45,7 +45,7 @@
   },
   {
    "name": "close_loop_far_drop_quarter_arc_shifted_ends",
-    "upstream_ref": "source/SMLib/src/SmTopologyIntersector.cpp:6108-6354 CloseIntersectionLoop: the same exact quarter arc moved 0.1 off the chord's plane, so both vertex gaps are 0.1 (2*max_dist = 0.2) while the chord midpoint is about 1.176 from the arc",
+    "upstream_ref": "source/SMLib/src/SmTopologyIntersector.cpp:6108-6354 CloseIntersectionLoop: the same exact quarter arc moved 0.1 off the chord's plane, so both vertex gaps are 0.1 (2*max_dist = 0.2) while the chord midpoint is about 1.176 from the arc; as above, the port (WR-528) does not relate the pair",
    "inputs": {
     "brep_a": {
      "kind": "wire",

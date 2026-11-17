@@ -65,6 +65,68 @@ fn reversed_seam_only_sphere_imports_as_a_whole_ball() {
 }
 
 #[test]
+fn spherical_band_with_a_placement_pole_on_its_inner_rim_stays_closed() {
+    // A radius-5 ball sliced at z=3 and z=4. Its arbitrary placement puts the south
+    // parameter pole on the upper rim, although the face is a regular spherical band.
+    let text = format!(
+        "{HEAD}
+#1=CARTESIAN_POINT('',(0.,0.,0.));
+#2=DIRECTION('',(-0.6,0.,-0.8));
+#3=DIRECTION('',(0.,-1.,0.));
+#4=AXIS2_PLACEMENT_3D('',#1,#2,#3);
+#5=SPHERICAL_SURFACE('',#4,5.);
+#6=DIRECTION('',(0.,0.,1.));
+#7=DIRECTION('',(1.,0.,0.));
+#8=CARTESIAN_POINT('',(0.,0.,3.));
+#9=CARTESIAN_POINT('',(0.,0.,4.));
+#10=AXIS2_PLACEMENT_3D('',#8,#6,#7);
+#11=AXIS2_PLACEMENT_3D('',#9,#6,#7);
+#12=CIRCLE('',#10,4.);
+#13=CIRCLE('',#11,3.);
+#14=CARTESIAN_POINT('',(0.,4.,3.));
+#15=CARTESIAN_POINT('',(0.,-4.,3.));
+#16=CARTESIAN_POINT('',(3.,0.,4.));
+#17=CARTESIAN_POINT('',(-3.,0.,4.));
+#18=VERTEX_POINT('',#14);
+#19=VERTEX_POINT('',#15);
+#20=VERTEX_POINT('',#16);
+#21=VERTEX_POINT('',#17);
+#22=EDGE_CURVE('',#18,#19,#12,.T.);
+#23=EDGE_CURVE('',#19,#18,#12,.T.);
+#24=EDGE_CURVE('',#20,#21,#13,.T.);
+#25=EDGE_CURVE('',#21,#20,#13,.T.);
+#26=ORIENTED_EDGE('',*,*,#22,.T.);
+#27=ORIENTED_EDGE('',*,*,#23,.T.);
+#28=ORIENTED_EDGE('',*,*,#24,.F.);
+#29=ORIENTED_EDGE('',*,*,#25,.F.);
+#30=EDGE_LOOP('',(#26,#27));
+#31=EDGE_LOOP('',(#29,#28));
+#32=FACE_OUTER_BOUND('',#30,.T.);
+#33=FACE_BOUND('',#31,.T.);
+#34=ADVANCED_FACE('',(#32,#33),#5,.T.);
+#35=FACE_OUTER_BOUND('',#30,.F.);
+#36=FACE_OUTER_BOUND('',#31,.F.);
+#37=PLANE('',#10);
+#38=PLANE('',#11);
+#39=ADVANCED_FACE('',(#35),#37,.F.);
+#40=ADVANCED_FACE('',(#36),#38,.T.);
+#41=CLOSED_SHELL('',(#34,#39,#40));
+#42=MANIFOLD_SOLID_BREP('Spherical slice',#41);
+#43=SHAPE_REPRESENTATION('',(#42),$);
+{TAIL}"
+    );
+    let imp = step_import(&text).unwrap();
+    assert_eq!(imp.bodies.len(), 1, "{:?}", imp.warnings);
+    let body = &imp.bodies[0];
+    assert!(body.closed && !body.body.is_surface(), "{:?}", imp.warnings);
+    assert_eq!(body.file_faces, 3);
+    let m = measure(&body.body).unwrap();
+    let pi = std::f64::consts::PI;
+    assert!(rel(m.volume, 38.0 * pi / 3.0) < 1e-6, "{}", m.volume);
+    assert!(rel(m.area, 35.0 * pi) < 1e-6, "{}", m.area);
+}
+
+#[test]
 fn seam_only_sphere_whose_placement_axis_misses_its_poles_imports_as_a_whole_ball() {
     // The seam runs between poles on the X axis, while the surface's placement points along Z.
     let text = seam_sphere_step(Vec3::new(5.0, 6.0, 7.0), 3.0, Vec3::X, Vec3::Y, 0.4, false, std::f64::consts::PI);
@@ -386,9 +448,10 @@ fn parallel_import_does_not_prepare_past_body_budget_with_duplicates_or_mapped_i
         reader.rep_bodies(60, &IDENTITY, &[], "Budget", None, &mut out, 0);
         assert!(reader.oriented.is_empty() && reader.unreadable.is_empty(), "the walk only plans the solids");
         while reader.convert_next(workers == 1) {}
-        let out = reader.remap(&out);
+        let (out, _, left_out) = reader.remap(&out);
         assert_eq!(reader.bodies.len(), MAX_BODIES);
         assert_eq!(out, vec![MAX_BODIES - 2, MAX_BODIES - 1]);
+        assert!(left_out.is_empty(), "{left_out:?}");
         assert_eq!(reader.bodies.last().unwrap().name, "Second");
         assert_eq!(reader.oriented.len(), 2);
         assert!(!reader.oriented.contains_key(&2003) && !reader.unreadable.contains_key(&2003));
@@ -946,6 +1009,69 @@ fn two_instance_assembly() -> String {
     }
     t += TAIL;
     t
+}
+
+// A centimetre tetrahedron replaces the second block occurrence (rotated and moved 100 mm).
+fn tessellated_assembly(item: &str) -> String {
+    two_instance_assembly()
+        .replace("AUTOMOTIVE_DESIGN { 1 0 10303 214 1 1 1 1 }", "AP242_MANAGED_MODEL_BASED_3D_ENGINEERING_MIM_LF { 1 0 10303 442 1 1 4 }")
+        .replace("'Block:1','',#70,#50", "'Block:1','',#70,#750")
+        .replace("RELATIONSHIP('','',#60,#80)REPRESENTATION_RELATIONSHIP_WITH_TRANSFORMATION(#612)",
+                 "RELATIONSHIP('','',#760,#80)REPRESENTATION_RELATIONSHIP_WITH_TRANSFORMATION(#612)")
+        .replace(TAIL, &format!(
+            "{}#760=TESSELLATED_SHAPE_REPRESENTATION('',(#770),#20);\n#761=SHAPE_DEFINITION_REPRESENTATION(#754,#760);\n#771=COORDINATES_LIST('',4,((0.,0.,0.),(1.,0.,0.),(0.,1.,0.),(0.,0.,1.)));\n#770={item};\n{TAIL}",
+            product(750, "Tetrahedron")))
+}
+
+const TETRAHEDRON: &str = "TRIANGULATED_SURFACE_SET('',#771,4,(),(),((1,3,2),(1,2,4),(2,3,4),(3,1,4)))";
+
+#[test]
+fn ap242_tessellated_part_keeps_assembly_placement() {
+    let imp = step_import(&tessellated_assembly(TETRAHEDRON)).unwrap();
+    assert_eq!(imp.bodies.len(), 2, "{:?}", imp.warnings);
+    assert!(imp.warnings.is_empty(), "{:?}", imp.warnings);
+    assert!(!imp.bodies[0].body.is_mesh());
+    let mesh = &imp.bodies[1];
+    assert_eq!(mesh.name, "Tetrahedron");
+    assert!(mesh.body.is_mesh() && mesh.closed);
+    let m = measure(&mesh.body).unwrap();
+    assert_eq!(m.faces, 4);
+    assert_eq!([m.bbox.min.x, m.bbox.min.y, m.bbox.min.z], [90., 0., 0.]);
+    assert_eq!([m.bbox.max.x, m.bbox.max.y, m.bbox.max.z], [100., 10., 10.]);
+    assert_eq!(imp.tree[0].children[1].bodies, vec![1]);
+}
+
+#[test]
+fn ap242_tessellated_part_maps_coordinate_indices() {
+    let item = TETRAHEDRON.replace("4,(),()", "4,(),(2,3,4,5)");
+    let text = tessellated_assembly(&item).replace("COORDINATES_LIST('',4,(", "COORDINATES_LIST('',5,((50.,50.,50.),");
+    let imp = step_import(&text).unwrap();
+    assert_eq!(imp.bodies.len(), 2, "{:?}", imp.warnings);
+    let mesh = &imp.bodies[1].body;
+    assert!(mesh.is_mesh());
+    let m = measure(mesh).unwrap();
+    assert_eq!(m.faces, 4);
+    assert!(rel(m.volume, 1000. / 6.) < 1e-8);
+    assert_eq!([m.bbox.min.x, m.bbox.min.y, m.bbox.min.z], [90., 0., 0.]);
+    assert_eq!([m.bbox.max.x, m.bbox.max.y, m.bbox.max.z], [100., 10., 10.]);
+}
+
+#[test]
+fn ap242_unreadable_tessellation_warns_with_product_name() {
+    let text = tessellated_assembly(TETRAHEDRON);
+    for text in [
+        text.replace("(1,3,2)", "(0,3,2)"),
+        text.replace("(1,3,2)", "(999999999999,3,2)"),
+        text.replace("4,(),()", "1000001,(),()"),
+        text.replace("4,(),()", "4,(),(1,2,3,9)"),
+        text.replace("TRIANGULATED_SURFACE_SET", "COMPLEX_TRIANGULATED_SURFACE_SET"),
+        text.replace("COORDINATES_LIST('',4", "COORDINATES_LIST('',1000001"),
+        text.replace("(0.,0.,1.)));", "(0.,0.,1.E100)));"),
+    ] {
+        let imp = step_import(&text).unwrap();
+        assert_eq!(imp.bodies.len(), 1);
+        assert!(imp.warnings.iter().any(|w| w.contains("Tetrahedron") && w.contains("tessellat")), "{:?}", imp.warnings);
+    }
 }
 
 #[test]
@@ -3663,8 +3789,9 @@ fn colour_names_come_in_with_their_colours_and_go_out_again() {
     assert_eq!(back_paint.faces.iter().map(|f| f.name.as_deref()).collect::<Vec<_>>(), [Some("Accent")]);
 }
 
-/// A body an `INVISIBILITY` record names, through its styled item or its representation, is
-/// read hidden; the body is still there, so it can be shown again.
+/// A body an `INVISIBILITY` record names, through its styled item, its representation or a
+/// presentation layer it is assigned to, is read hidden; the body is still there, so it can be
+/// shown again.
 #[test]
 fn an_invisibility_record_hides_its_styled_item_and_representation() {
     let import = |extra: &str| {
@@ -3685,6 +3812,16 @@ fn an_invisibility_record_hides_its_styled_item_and_representation() {
     let represented = import("#459=INVISIBILITY((#60));\n");
     assert_eq!(represented.bodies.len(), 1, "{:?}", represented.warnings);
     assert!(represented.bodies[0].hidden);
+    // A layer: every item assigned to it is hidden, whether the layer lists the solid or its
+    // representation.
+    let layered = import("#80=PRESENTATION_LAYER_ASSIGNMENT('Hidden parts','',(#101));\n#459=INVISIBILITY((#80));\n");
+    assert_eq!(layered.bodies.len(), 1, "{:?}", layered.warnings);
+    assert!(layered.bodies[0].hidden, "a body on a hidden layer");
+    let layered = import("#80=PRESENTATION_LAYER_ASSIGNMENT('Hidden parts','',(#60));\n#459=INVISIBILITY((#80));\n");
+    assert!(layered.bodies[0].hidden, "a representation on a hidden layer");
+    // A layer no INVISIBILITY record names leaves its items shown.
+    let shown_layer = import("#80=PRESENTATION_LAYER_ASSIGNMENT('Parts','',(#101));\n");
+    assert!(!shown_layer.bodies[0].hidden);
     // A file with no INVISIBILITY record leaves the body shown.
     let shown = import("");
     assert_eq!(shown.bodies.len(), 1, "{:?}", shown.warnings);
@@ -3870,4 +4007,64 @@ fn a_band_round_an_extruded_ellipse_imports_closed() {
     let floor = w.face(&[(bottom, false)], p0);
     let roof = w.face(&[(top, false)], p1);
     assert_closed_solid(&w.solid(&[bands, floor, roof]), 3, std::f64::consts::PI * a * b * height);
+}
+
+/// #13736: the edition an AP242 file declares is read, and a file whose edition is unknown is still
+/// read in full, with one warning about the file.
+#[test]
+fn an_unknown_ap242_edition_is_read_with_a_warning() {
+    let body = box_solid(Vec3::ZERO, Vec3::new(10.0, 20.0, 30.0)).unwrap();
+    let ours = step_export(&[&body], "edition").unwrap();
+    let edition_1 = "{ 1 0 10303 442 1 1 4 }";
+    assert!(ours.contains(edition_1), "SolidCraft writes an AP242 identifier");
+    for (id, warned) in [(edition_1, false), ("{ 1 0 10303 442 7 1 4 }", false), ("{ 1 0 10303 442 9 1 4 }", true)] {
+        let imp = step_import(&ours.replace(edition_1, id)).unwrap();
+        assert_eq!(imp.bodies.len(), 1, "{id}: {:?}", imp.warnings);
+        assert!((measure(&imp.bodies[0].body).unwrap().volume - 6000.0).abs() < 1e-6, "{id}");
+        let files: Vec<_> = imp.report.issues.iter().filter(|i| i.kind == IssueKind::File).map(|i| i.detail.as_str()).collect();
+        if warned {
+            assert_eq!(files.len(), 1, "{id}: {files:?}");
+            assert!(files[0].contains("442 9 1 4") && files[0].contains("read as AP242"), "{files:?}");
+        } else {
+            assert!(imp.warnings.is_empty(), "{id}: {:?}", imp.warnings);
+        }
+    }
+}
+
+/// A plate 4 µm thick in a file that states 0.01 mm, as exporters do beside geometry far finer:
+/// taken as the solid's tolerance, the plate's 4 µm edges are shorter than the tolerance can
+/// tell from a point, and SMLib's full check refuses the body. The reader reads such a solid
+/// again at a quarter of its shortest edge and says so; the body then passes the check.
+#[test]
+fn a_solid_with_edges_shorter_than_the_stated_tolerance_is_read_at_its_own() {
+    // A plate of this thickness, as exported and as a file stating 0.01 mm.
+    let stating_coarse = |thickness: f64| {
+        let plate = crate::box_solid(Vec3::new(0.0, 0.0, 0.0), Vec3::new(10.0, 10.0, thickness)).unwrap();
+        let text = step_export(&[&plate], "test").unwrap();
+        let line = text.lines().find(|l| l.contains("UNCERTAINTY_MEASURE_WITH_UNIT")).unwrap();
+        let (head, rest) = line.split_once("LENGTH_MEASURE(").unwrap();
+        let (_, tail) = rest.split_once(')').unwrap();
+        let coarse = text.replace(line, &format!("{head}LENGTH_MEASURE(0.01){tail}"));
+        (text, coarse)
+    };
+    let (text, coarse) = stating_coarse(0.004);
+    let imp = step_import(&coarse).unwrap_or_else(|e| panic!("{e}"));
+    assert_eq!(imp.bodies.len(), 1, "{:?}", imp.warnings);
+    let note = "solid 'Body1': the file states a tolerance of 0.01 mm, but the part has edges as short as 4.000e-3 mm: read at 1.000e-3 mm";
+    assert_eq!(imp.warnings, [note]);
+    let body = &imp.bodies[0].body;
+    assert_eq!(body.record().tolerance, 1e-3);
+    let report = body.smlib().unwrap().check(solidcraft_smlib::CheckLevel::All).unwrap();
+    assert!(report.is_valid(), "{report}");
+    let m = measure(body).unwrap();
+    assert!(rel(m.volume, 0.4) < 1e-9, "volume {}", m.volume);
+
+    // A file whose stated tolerance resolves every edge is read once, at what it states.
+    let imp = step_import(&text).unwrap_or_else(|e| panic!("{e}"));
+    assert!(imp.warnings.is_empty(), "{:?}", imp.warnings);
+    // So is one whose shortest edge is longer than the stated tolerance, however little.
+    let (_, coarse) = stating_coarse(0.02);
+    let imp = step_import(&coarse).unwrap_or_else(|e| panic!("{e}"));
+    assert!(imp.warnings.is_empty(), "{:?}", imp.warnings);
+    assert_eq!(imp.bodies[0].body.record().tolerance, 0.01);
 }

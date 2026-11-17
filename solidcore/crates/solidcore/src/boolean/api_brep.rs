@@ -55,7 +55,7 @@
 //! - **2D booleans.** [`boolean_2d`] runs `SmPrimitiveCreation::Boolean2D` (static
 //!   upstream) on a [`PrimitiveCreation`] without primitive B-rep, as `merge::p3` does
 //!   for planar list operands, with the operands' marks and an arena-only notification
-//!   store ([`ArenaNotifyState`]).
+//!   store ([`CopyNotifyState`]).
 //! - **Piecewise merge.** [`piecewise_merge`] builds `SmMerge(*pContext, pBrep1,
 //!   pBrep2)` as a merge session of a [`PrimitiveModel`] over both operands and runs its
 //!   `PiecewiseMerge(NULL, FALSE, bCreateNewBrepsForFaces, rpResult)`.
@@ -101,7 +101,7 @@ use crate::primitive::primitive_creation::model::PrimitiveModel;
 use crate::primitive::primitive_creation::p1::PrimitiveCreation;
 use crate::surface::surface::Surface;
 use crate::topology::brep::p1::{self as brep_p1, BoundaryTessellation};
-use crate::topology::brep::p2::ArenaNotifyState;
+use crate::topology::brep::p2::CopyNotifyState;
 use crate::topology::{Brep, EdgeId};
 
 /// The planar 2D boolean operations of [`boolean_2d`] (`Sm2DBooleanOperationType`).
@@ -318,7 +318,7 @@ fn copy_pairs(
 ///   other, so each edge's point at `t` is within it of the other's point at the same `t`.
 ///   Rational and 2D NURBs, and NURBs on different domains, have no bound.
 /// - Every other pair: no bound.
-fn coincidence_bound(
+pub(crate) fn coincidence_bound(
     a: &crate::curve::curve::p2::Curve,
     ia: &crate::geom::extent1d::Extent1d,
     b: &crate::curve::curve::p2::Curve,
@@ -400,8 +400,8 @@ fn coincidence_bound(
 ///   `edge_remove` of the pair, the sector's mate and loop tests, `set_orientation`,
 ///   `add_oriented_eu_pair`, a surviving wire's `edge_remove` and vertex-use unlinking, the
 ///   surviving edge's `set_tolerance` and `destroy` of the deleted edge; then `merge_shells`,
-///   `test_closure_split_region_attempt` (whose status passes on with
-///   `brep_edit_statuses_pass_on`, and which may draw from `k.rng`), `is_spine` and
+///   `test_closure_split_region_attempt` (whose status is ignored, as upstream, and which
+///   may draw from `k.rng`), `is_spine` and
 ///   `test_closure_split_region_edge`.
 ///
 /// A failure at an "after" site would leave the operand half glued, so a check up front
@@ -858,8 +858,13 @@ pub fn piecewise_merge(
 /// (`SmApiBoolean2d`, `SmPrimitiveCreation::Boolean2D`): union, intersection, A minus
 /// B, exclusive or or merge of their regions. On success with faces on both sides the
 /// first operand is modified into the result and the second consumed; an operand
-/// without faces leaves both unchanged ([`Boolean2dOutcome::Unassigned`]). The first
-/// operand's attributes ([`Brep::add_attribute`]) carry through to the result.
+/// without faces leaves both unchanged ([`Boolean2dOutcome::Unassigned`]). Both
+/// operands' edge attributes ([`Brep::add_attribute`]) carry through to the
+/// corresponding result edges. If coincident edges carry attributes with the same
+/// identifier, only one attribute with that identifier is propagated to the
+/// result edge; which operand's attribute is retained is unspecified. Use distinct
+/// identifiers when both attributes must be retained. When input edges are merged,
+/// attributes apply to the resulting edge and do not identify source subintervals.
 ///
 /// # Errors
 ///
@@ -878,12 +883,8 @@ pub fn boolean_2d(
     let mut other_marks = Marks::default();
     let mut result = None;
     {
-        // (not upstream) with the primary operand's own attributes, given back to the
-        // result afterwards, as upstream's live on the objects Boolean2D splits, glues
-        // and keeps; the other operand is notified under identities disjoint from the
-        // primary's, so that its edits never reach the primary's attributes
-        let mut state = ArenaNotifyState::with_attributes_of(&mut primary);
-        state.seed_tagged(&other);
+        // Both operands carry attributes under distinct notification identities.
+        let mut state = CopyNotifyState::with_attributes_of(&mut other, &mut primary)?;
         let r = PrimitiveCreation::boolean_2d_keyed(
             k,
             &mut primary,
@@ -894,7 +895,8 @@ pub fn boolean_2d(
             &mut state.env(None),
             Some(&crate::topology::brep::p2::copy_source_ref),
         );
-        let restored = state.restore_attributes(result.as_mut().unwrap_or(&mut primary));
+        let restored =
+            state.restore_attributes(&mut other, result.as_mut().unwrap_or(&mut primary));
         r?;
         restored?;
     }

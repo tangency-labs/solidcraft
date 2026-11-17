@@ -20,6 +20,7 @@ use crate::pbr;
 mod ao;
 pub use ao::GroundAo;
 mod clouds;
+mod indirect;
 pub use clouds::{CELL_SIZE, Cell, CloudFilter, CloudStyle, ColorMode, FILTERS, GpuCloud, cloud_cell};
 #[cfg(not(target_arch = "wasm32"))]
 mod msaa_check;
@@ -309,6 +310,11 @@ impl Tally {
     fn triangles(&self, vertices: u32, instances: u32) {
         self.call();
         self.triangles.set(self.triangles.get().saturating_add(u64::from(vertices / 3) * u64::from(instances)));
+    }
+
+    /// Triangles an indirect draw drew (its call counted on its own, [`Tally::call`]).
+    fn add_triangles(&self, n: u64) {
+        self.triangles.set(self.triangles.get().saturating_add(n));
     }
 
     /// A draw call of `n` line segments.
@@ -723,16 +729,17 @@ pub struct BlockTris {
 }
 
 /// A body's edge lines in a model scene block ([`BlockBytes::lines`], by line), drawn again in
-/// three styles ([`lit_line_style`]): a halo, the line over it, and where the model hides the
-/// edge, a dimmed line.
+/// up to three styles ([`lit_line_style`]): a halo, the line over it, and where the model hides
+/// the edge, a dimmed line. A style left out (`None`) is not drawn: a hovered body has no dimmed
+/// line, a selected body's hidden edges (a preference) only that one.
 #[derive(Clone, Debug, PartialEq)]
 pub struct LitEdges {
     /// The block's key ([`SceneBlock::key`]).
     pub block: u64,
     pub lines: std::ops::Range<u32>,
-    pub halo: u32,
-    pub core: u32,
-    pub hidden: u32,
+    pub halo: Option<u32>,
+    pub core: Option<u32>,
+    pub hidden: Option<u32>,
 }
 
 /// The largest palette index a lit line can name: its style rides in the draw's first vertex,
@@ -1513,6 +1520,8 @@ pub fn placed_box_in_view(rows: &[[f32; 4]; 3], bounds: &[[f32; 3]; 2], vp: &[[f
 #[derive(Clone)]
 struct LevelDraw {
     tris: Arc<SharedGpu>,
+    /// The triangles `tris` were uploaded from (the indirect arena's, [`indirect`]).
+    src: Arc<SharedTris>,
     flat: bool,
     /// How far it strays from the full triangles (mm; 0 for them).
     error: f32,
@@ -1744,16 +1753,17 @@ fn lit_lines(
     p: &wgpu::RenderPipeline,
     blocks: &std::collections::HashMap<u64, BlockGpu>,
     edges: &[LitEdges],
-    style: fn(&LitEdges) -> u32,
+    style: fn(&LitEdges) -> Option<u32>,
     tally: &Tally,
 ) {
-    if edges.is_empty() {
+    if edges.iter().all(|e| style(e).is_none()) {
         return;
     }
     pass.set_pipeline(p);
     for e in edges {
+        let Some(style) = style(e) else { continue };
         let Some(batch) = blocks.get(&e.block).and_then(|b| b.lines.as_ref()) else { continue };
-        let first = style(e).saturating_mul(6);
+        let first = style.saturating_mul(6);
         // The block's lines may span several buffers: each draws its share of the range.
         let mut at = 0u32;
         for (buffer, count) in &batch.parts {
@@ -2020,6 +2030,8 @@ struct Batches {
     guide_lines: Option<Batch>,
     planned: Vec<PlannedDraw>,
     instanced: Vec<InstancedDraw>,
+    /// `instanced` drawn by indirect draws, where the device can ([`indirect`]).
+    indirect: Option<indirect::Indirect>,
     /// Whole highlighted bodies redrawn from `planned` (the scene's own plans are not used).
     hover_planned: Vec<Arc<solidcore_tess::TessPlan>>,
     selected_planned: Vec<Arc<solidcore_tess::TessPlan>>,
@@ -2133,6 +2145,7 @@ impl Batches {
                 None => Vec::new(),
             };
             self.instanced = self.instanced(device, &sc.instanced, donor.as_deref());
+            self.indirect = if indirect::supported(device) { indirect::Indirect::new(device, &self.instanced, self.indirect.as_ref()) } else { None };
             self.hover_planned = sc.hover_planned.clone();
             self.selected_planned = sc.selected_planned.clone();
             self.hover_blocks = sc.hover_blocks.clone();
@@ -2272,7 +2285,7 @@ impl Batches {
                 };
                 self.uploads.placements += placements.len() as u64;
                 let count = if i == 0 { count } else { 0 };
-                levels.push(LevelDraw { tris: gpu.1.clone(), flat: tris.flat, error, instances, count });
+                levels.push(LevelDraw { tris: gpu.1.clone(), src: tris.clone(), flat: tris.flat, error, instances, count });
                 self.instanced_tris.insert(key, gpu);
             }
             if !levels.is_empty() {
@@ -2306,10 +2319,12 @@ impl Batches {
     /// Each placement's level of detail is chosen here too: the coarsest whose error stays under
     /// [`LOD_PX`] where it is drawn ([`placement_scale`], [`level_for`]), in a view of `size`
     /// pixels.
-    fn cull(&mut self, queue: &wgpu::Queue, vp: &[[f32; 4]; 4], size: [f32; 2]) {
+    fn cull(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, vp: &[[f32; 4]; 4], size: [f32; 2]) {
         self.cull_blocks(vp);
+        let mut changed = false;
         let f = |b: &[u8], i: usize| b.get(i..i + 4).and_then(|x| x.try_into().ok()).map_or(0.0, f32::from_le_bytes);
-        for d in &mut self.instanced {
+        for (n, d) in self.instanced.iter_mut().enumerate() {
+            let batched = self.indirect.as_ref().is_some_and(|x| x.batches(n));
             let errors: Vec<f32> = d.levels.iter().map(|l| l.error).collect();
             let mut shown: Vec<(u32, u8)> = d
                 .placements
@@ -2342,6 +2357,12 @@ impl Batches {
             if d.shown.as_ref() == Some(&shown) {
                 continue;
             }
+            changed = true;
+            if batched {
+                // Its placements go to the indirect draws' one buffer, written below.
+                d.shown = Some(shown);
+                continue;
+            }
             for (k, level) in d.levels.iter_mut().enumerate() {
                 let bytes: Vec<u8> = shown
                     .iter()
@@ -2356,6 +2377,31 @@ impl Batches {
                 level.count = u32::try_from(bytes.len() / INSTANCE_SIZE).unwrap_or(u32::MAX);
             }
             d.shown = Some(shown);
+        }
+        if changed && let Some(indirect) = self.indirect.as_mut() {
+            indirect.write(device, queue, &self.instanced);
+        }
+    }
+
+    /// Draw the instanced placements of look `look` (only closed bodies' when `closed_only`):
+    /// indirectly, a call per pipeline, where the device can; the rest one mesh and level at a
+    /// time.
+    fn draw_instanced(
+        &self,
+        pass: &mut wgpu::RenderPass<'_>,
+        look: InstanceLook,
+        closed_only: bool,
+        smooth: &wgpu::RenderPipeline,
+        flat: &wgpu::RenderPipeline,
+        tally: &Tally,
+    ) {
+        if let Some(indirect) = &self.indirect {
+            indirect.draw(pass, look, closed_only, smooth, flat, tally);
+        }
+        for (n, d) in self.instanced.iter().enumerate() {
+            if d.look == look && (d.closed || !closed_only) && !self.indirect.as_ref().is_some_and(|x| x.batches(n)) {
+                d.draw(pass, smooth, flat, tally);
+            }
         }
     }
 
@@ -4113,7 +4159,7 @@ impl Renderer {
         if !see_through {
             res.model.sort_glass(queue, cb.back);
         }
-        res.model.cull(queue, &cb.view_proj, cb.size_px);
+        res.model.cull(device, queue, &cb.view_proj, cb.size_px);
         let ground_visible = res.model.ground_input.is_some_and(|ground| ground.visible_from(cb.back));
         let ground_key = (cb.key, cb.pv_key, cb.pv_hide, cb.ao_radius.to_bits(), ground_visible);
         if res.ground_ao_key != Some(ground_key) {
@@ -4352,9 +4398,7 @@ impl Renderer {
         // Instanced meshes, with the pipeline for smooth and for flat triangles.
         let instanced =
             |pass: &mut wgpu::RenderPass<'static>, smooth: &wgpu::RenderPipeline, flat: &wgpu::RenderPipeline, b: &Batches, counting: bool| {
-                for d in b.instanced.iter().filter(|d| d.look == InstanceLook::Opaque && (d.closed || !counting)) {
-                    d.draw(pass, smooth, flat, tally);
-                }
+                b.draw_instanced(pass, InstanceLook::Opaque, counting, smooth, flat, tally);
             };
         // Whole highlighted bodies: the model's own evaluated plan triangles, drawn again in a
         // highlight colour (the pipeline adds or replaces the vertex colour).
@@ -4474,9 +4518,7 @@ impl Renderer {
         }
         in_moving(pass, &|pass, mv| tris(pass, &res.pbr, &mv.pbr));
         block_class(pass, &res.pbr_palette, TriClass::Pbr);
-        for d in m.instanced.iter().filter(|d| d.look == InstanceLook::Pbr) {
-            d.draw(pass, &res.pbr_instanced, &res.pbr_instanced, tally);
-        }
+        m.draw_instanced(pass, InstanceLook::Pbr, false, &res.pbr_instanced, &res.pbr_instanced, tally);
         // Whole-body tints first, so a face or an edge highlighted over the body (in `h.tris`
         // and `h.lines`) keeps its own colour, as it did when the body's triangles were built
         // into the same list before them.
@@ -4576,9 +4618,7 @@ impl Renderer {
         // See-through instanced meshes (placements back to front) with the rest of their kind.
         let see_through =
             |pass: &mut wgpu::RenderPass<'static>, look: InstanceLook, (smooth, flat): &(wgpu::RenderPipeline, wgpu::RenderPipeline), b: &Batches| {
-                for d in b.instanced.iter().filter(|d| d.look == look) {
-                    d.draw(pass, smooth, flat, tally);
-                }
+                b.draw_instanced(pass, look, false, smooth, flat, tally);
             };
         tris(pass, &res.glass_far, &m.glass);
         see_through(pass, InstanceLook::Glass, &res.glass_far_instanced, m);
@@ -4674,8 +4714,8 @@ impl Renderer {
                 tally.triangles(d.mesh.index_count, 1);
             }
         }
-        for d in m.instanced.iter().filter(|d| d.look != InstanceLook::Opaque) {
-            d.draw(pass, &p.instanced, &p.instanced_flat, tally);
+        for look in [InstanceLook::Pbr, InstanceLook::Faded, InstanceLook::Glass] {
+            m.draw_instanced(pass, look, false, &p.instanced, &p.instanced_flat, tally);
         }
     }
 }

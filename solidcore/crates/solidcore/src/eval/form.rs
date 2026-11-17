@@ -8,10 +8,11 @@
 //! frame therefore has the same parameter at the same angle, whatever quarters it spans: a circle
 //! edge's form and its cylinder's form agree along it, so its pcurve is a straight line in (u, v).
 //! A form spans the quarters its interval needs (at most five for one turn), so an arc across the
-//! frame's x axis has a form like any other. A face of five would cover part of its surface twice:
-//! its frame is turned about its axis first ([`turned`], [`turn_quarters`]), so that it starts on
-//! a quarter line and its form spans four; a torus face's tube likewise starts from its tube start
-//! ([`tube_turned`], [`tube_quarters`]).
+//! frame's x axis has a form like any other. A curve's form of five is cut to its interval's ends
+//! ([`cut_to`]): whole, it would run a quarter past one turn. A face of five would cover part of
+//! its surface twice: its frame is turned about its axis first ([`turned`], [`turn_quarters`]),
+//! so that it starts on a quarter line and its form spans four; a torus face's tube likewise
+//! starts from its tube start ([`tube_turned`], [`tube_quarters`]).
 //!
 //! A circle or ellipse is the arcs (an ellipse scaled by its radii, which keeps it exact: its
 //! parameter is the eccentric angle). A cylinder or cone is the arcs times a degree-1 line along the
@@ -267,7 +268,10 @@ fn axes(f: &Frame) -> Option<(Vec3, Vec3, Vec3, Vec3)> {
 }
 
 /// The NURBS form of a line, circle or ellipse edge and its interval in the form's parameter;
-/// `None` for another kind, or an arc of more than one turn.
+/// `None` for another kind, or an arc of more than one turn. An arc's form is the quarters of its
+/// frame's grid that it needs; where those are five (it starts inside a quarter and ends past
+/// the fourth quarter line on from it), the first and the last are cut to the arc's ends, so
+/// the form does not run past one turn.
 pub fn curve(c: &Curve, [t0, t1]: [f64; 2]) -> Option<(Curve, [f64; 2])> {
     match c {
         Curve::Line { start, end } => {
@@ -290,15 +294,64 @@ pub fn curve(c: &Curve, [t0, t1]: [f64; 2]) -> Option<(Curve, [f64; 2])> {
 fn conic(frame: &Frame, [rx, ry]: [f64; 2], t: [f64; 2]) -> Option<(Curve, [f64; 2])> {
     let (o, x, y, _) = axes(frame)?;
     let grid = quarters(t, 0.0)?;
-    let (knots, pts) = arcs(grid.0, grid.1);
+    let on = params(t, grid);
+    let whole = arcs(grid.0, grid.1);
+    let (knots, pts) = match grid.1 {
+        5 => cut_to(&whole, on).unwrap_or(whole),
+        _ => whole,
+    };
     let homogeneous = pts
         .iter()
         .map(|([c, s], w)| hom(o + x * (rx * c) + y * (ry * s), *w))
         .collect();
-    Some((
-        Curve::RationalSpline { knots, homogeneous },
-        params(t, grid),
-    ))
+    Some((Curve::RationalSpline { knots, homogeneous }, on))
+}
+
+/// Quarter arcs ([`arcs`]) with the first and the last cut to `[s0, s1]`, form parameters inside
+/// those two arcs: the same curve at the same parameters, from `s0` to `s1` and no further. Five
+/// whole quarters run a quarter past one turn, and the kernel takes a conic's form for at most
+/// one (`curve::from_parameters::conic_on_form`); cut to an arc of at most one turn they are
+/// that arc. Each cut is the arc's blossom at its new ends, in homogeneous coordinates. `None`
+/// where an end is not inside its arc.
+fn cut_to(
+    (knots, pts): &(Vec<f64>, Vec<([f64; 2], f64)>),
+    [s0, s1]: [f64; 2],
+) -> Option<(Vec<f64>, Vec<([f64; 2], f64)>)> {
+    let (mut knots, mut pts) = (knots.clone(), pts.clone());
+    let (k, n) = (knots.len(), pts.len());
+    // Each new end as its own arc's parameter in [0, 1].
+    let (a, b) = (s0 - knots.first()?, s1 - (knots.last()? - 1.0));
+    if !(n >= 5 && (0.0..1.0).contains(&a) && b > 0.0 && b <= 1.0) {
+        return None;
+    }
+    let blossom = |arc: &[([f64; 2], f64)], u: f64, v: f64| -> Option<([f64; 2], f64)> {
+        let [([x0, y0], w0), ([x1, y1], w1), ([x2, y2], w2)] = arc else {
+            return None;
+        };
+        let (c0, c1, c2) = (
+            (1.0 - u) * (1.0 - v) * w0,
+            ((1.0 - u) * v + u * (1.0 - v)) * w1,
+            u * v * w2,
+        );
+        let w = c0 + c1 + c2;
+        (w > 0.0).then(|| {
+            (
+                [
+                    (c0 * x0 + c1 * x1 + c2 * x2) / w,
+                    (c0 * y0 + c1 * y1 + c2 * y2) / w,
+                ],
+                w,
+            )
+        })
+    };
+    let (start, end) = (pts.get(..3)?, pts.get(n - 3..)?);
+    let head = [blossom(start, a, a)?, blossom(start, a, 1.0)?];
+    let tail = [blossom(end, 0.0, b)?, blossom(end, b, b)?];
+    pts.splice(..2, head);
+    pts.splice(n - 2.., tail);
+    knots.get_mut(..3)?.fill(s0);
+    knots.get_mut(k - 3..)?.fill(s1);
+    Some((knots, pts))
 }
 
 /// The NURBS form of a cylinder, cone, sphere or torus face over `domain` (in the label's
@@ -535,14 +588,37 @@ fn surface_on(
         if !valid_interval(along) {
             return None;
         }
-        let (ring_grid, fa) = face_quarters(angles, 0.0)?;
-        let (a_knots, arcs_r) = arcs(ring_grid.0, ring_grid.1);
         let (p_knots, h) = profile_nurbs(profile, Some(along))?;
         let fp = match profile.as_ref() {
             Curve::Circle { .. } | Curve::Ellipse { .. } => curve(profile, along)?.1,
             _ => along,
         };
         let (o, x, y, k) = revolution_frame(&h, *origin, *axis)?;
+        // The angle `tolerance` makes on the widest circle the face's profile reaches about the
+        // axis, as a cylinder's ([`reaches`]): no wider than its control points' (the profile
+        // lies in their hull). A matrix that is not the identity may scale the placed surface,
+        // so its angle ends are taken as they are.
+        let identity = *matrix
+            == [
+                [1.0, 0.0, 0.0, 0.0],
+                [0.0, 1.0, 0.0, 0.0],
+                [0.0, 0.0, 1.0, 0.0],
+                [0.0, 0.0, 0.0, 1.0],
+            ];
+        let widest = h
+            .iter()
+            .map(|hp| {
+                let d = Vec3::new(hp[0] / hp[3], hp[1] / hp[3], hp[2] / hp[3]) - o;
+                (d - k * d.dot(k)).len()
+            })
+            .fold(0.0, f64::max);
+        let reach = if identity && tolerance > 0.0 && widest > 0.0 && widest.is_finite() {
+            tolerance / widest
+        } else {
+            0.0
+        };
+        let (ring_grid, fa) = face_quarters(angles, reach)?;
+        let (a_knots, arcs_r) = arcs(ring_grid.0, ring_grid.1);
         let net: Vec<Vec<[f64; 4]>> = arcs_r
             .iter()
             .map(|([c, s], wu)| {

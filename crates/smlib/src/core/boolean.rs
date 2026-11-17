@@ -6,8 +6,6 @@
 //! As there, every operation works on copies of its operands (`SmApiBrepCopy`): `SM_API` edits
 //! the first operand in place and consumes the second, and a SolidCraft body never changes.
 
-use std::sync::PoisonError;
-
 use solidcore::Result as SolidResult;
 use solidcore::SolidError;
 use solidcore::boolean::api_brep::{self as sm, Boolean2dOutcome};
@@ -97,7 +95,7 @@ fn copies(k: &mut Kernel, bodies: &[&Body]) -> SolidResult<Vec<Brep>> {
     // One body's lock at a time, here as everywhere: two calls never deadlock on them.
     let mut out = Vec::with_capacity(bodies.len());
     for b in bodies {
-        let c = brep_copy(k, &b.0.lock().unwrap_or_else(PoisonError::into_inner))?;
+        let c = brep_copy(k, &b.kernel())?;
         out.push(c);
     }
     Ok(out)
@@ -105,7 +103,7 @@ fn copies(k: &mut Kernel, bodies: &[&Body]) -> SolidResult<Vec<Brep>> {
 
 fn result(d: Done, empty: Result<Option<Body>>) -> Result<Option<Body>> {
     match d {
-        Done::Body(b) => Ok(Some(Body::new(*b))),
+        Done::Body(b) => Ok(Some(Body::from_kernel(*b))),
         Done::Empty => empty,
         Done::NotSolid => Err(Error::NotSolid),
         Done::NoCut => Ok(None),
@@ -132,7 +130,7 @@ fn all_solid(bodies: &[Brep]) -> SolidResult<bool> {
 
 /// Fails when a panic left one of `bodies` half-edited: it is never used again.
 fn usable(call: &'static str, bodies: &[&Body]) -> Result<()> {
-    if bodies.iter().any(|b| b.0.is_poisoned()) {
+    if bodies.iter().any(|b| b.kernel_left_unfinished()) {
         return Err(Error::Internal(format!("{call}: the body was left unfinished by an earlier panic")));
     }
     Ok(())
@@ -149,17 +147,23 @@ pub(crate) fn boolean(a: &Body, b: &Body, op: BooleanOp) -> Result<Option<Body>>
             return Err(SolidError::invalid_input("smlib_boolean", "no operand"));
         };
         let solid_in = p2::is_manifold_solid(&ca)? && p2::is_manifold_solid(&cb)?;
-        let mut r = sm::boolean(k, ca, cb, operation(op))?;
-        // Grow the result's tolerances to cover marginal edge/vertex, vertex/face and
-        // edge/face gaps, so an otherwise-sound union is not refused as "Bad Gap" for a
-        // sub-micron gap (SolidCraft issue #10, fuzzer seed 73). Tolerances only grow:
-        // a body that already passes is unchanged; a marginal failure becomes sound.
-        // Offset and shell already grow their results' tolerances this way. First, a vertex
-        // a grazing cut left wider than the check allows is centred on its edges' ends.
-        solidcore::topology::brep::validation::update_tolerances_after_boolean(k, &mut r.result)?;
-        finish(r.result, solid_in, true)
+        finish(merged(k, ca, cb, op)?, solid_in, true)
     })?;
     result(d, Ok(None))
+}
+
+/// `SmApiBoolean` of `a` and `b` in the kernel `k` (both consumed), with the result's
+/// tolerances grown as [`boolean`] grows them.
+pub(crate) fn merged(k: &mut Kernel, a: Brep, b: Brep, op: BooleanOp) -> SolidResult<Brep> {
+    let mut r = sm::boolean(k, a, b, operation(op))?;
+    // Grow the result's tolerances to cover marginal edge/vertex, vertex/face and
+    // edge/face gaps, so an otherwise-sound union is not refused as "Bad Gap" for a
+    // sub-micron gap (SolidCraft issue #10, fuzzer seed 73). Tolerances only grow:
+    // a body that already passes is unchanged; a marginal failure becomes sound.
+    // Offset and shell already grow their results' tolerances this way. First, a vertex
+    // a grazing cut left wider than the check allows is centred on its edges' ends.
+    solidcore::topology::brep::validation::update_tolerances_after_boolean(k, &mut r.result)?;
+    Ok(r.result)
 }
 
 /// `smlib_boolean_union_all`: copies of `bodies` unioned pairwise, level by level (an odd one

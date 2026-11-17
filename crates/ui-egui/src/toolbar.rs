@@ -75,7 +75,7 @@ fn ribbon_shows_pressed(app: &SolveApp, id: &str) -> bool {
 pub(crate) const PILL_HEIGHT: f32 = 22.0;
 
 /// An application-bar pill for something on offer (Update) at the right of `span` (the bar's free
-/// space): accent-filled, with `icon` and the first of `labels` that fits (the icon alone when
+/// space): accent-filled (outlined on the bar when `quiet`, for a notice such as Managed by), with `icon` and the first of `labels` that fits (the icon alone when
 /// none does or `labeled` is false). Every label but the last also leaves `keep` points of the
 /// span free (for the document tabs). None when even the icon doesn't fit: it never covers the
 /// bar's other buttons. `handle` names it for scenarios.
@@ -87,6 +87,7 @@ pub(crate) fn offer_pill(
     keep: f32,
     icon: &str,
     handle: &str,
+    quiet: bool,
 ) -> Option<(Rect, egui::Response)> {
     let t = Tokens::get();
     let font = FontId::proportional(t.font_label);
@@ -108,9 +109,14 @@ pub(crate) fn offer_pill(
     response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, ui.is_enabled(), &name));
     crate::scenario::publish_target(handle, rect);
     let hot = response.hovered() || response.has_focus();
-    let fill = if hot { t.app_bar_hover_button } else { t.accent };
     let radius = PILL_HEIGHT / 2.0 * f32::from(t.radius_xl) / 10.0;
-    ui.painter().rect_filled(rect, radius, fill);
+    if hot {
+        ui.painter().rect_filled(rect, radius, t.app_bar_hover_button);
+    } else if quiet {
+        ui.painter().rect_stroke(rect, radius, Stroke::new(1.0, t.app_bar_separator), egui::StrokeKind::Inside);
+    } else {
+        ui.painter().rect_filled(rect, radius, t.accent);
+    }
     if response.has_focus() {
         ui.painter().rect_stroke(rect.expand(2.0), Tokens::outset_radius(radius, 2.0), Stroke::new(1.0, t.app_bar_text), egui::StrokeKind::Outside);
     }
@@ -189,7 +195,6 @@ const APP_BAR_HANDLES: app_bar::Handles<'static> = app_bar::Handles {
     home_rect: &["titlebar:home", "appbar:home"],
     file: &["appbar:file", "appbar:folder"],
     file_rect: &["appbar:file"],
-    plugins: "appbar:plugins",
     button: &["appbar:", "titlebar:"],
     separator: "titlebar:separator:",
     search: "titlebar:search",
@@ -210,8 +215,10 @@ pub fn app_bar(app: &mut SolveApp, ui: &mut egui::Ui) {
     Container::new(ui.ctx(), Surface::ApplicationBar).show_edge(ui, app_bar.exact_size(APP_BAR_HEIGHT).show_separator_line(false), frame, |ui| {
         let r = ui.max_rect();
         // The bar is the window's title bar: its empty space moves the window, the traffic lights
-        // or the caption buttons take its ends.
-        let chrome = crate::window_chrome::TitleBar { traffic_lights: app.integrated_titlebar, caption_buttons: app.custom_titlebar };
+        // or the caption buttons take its ends. In full screen macOS shows the traffic lights in
+        // its own title bar that slides down over the window, not in the bar: no room for them.
+        let fullscreen = ui.ctx().input(|i| i.viewport().fullscreen.unwrap_or(false));
+        let chrome = crate::window_chrome::TitleBar { traffic_lights: app.integrated_titlebar && !fullscreen, caption_buttons: app.custom_titlebar };
         let action = chrome.show(ui, r, |ui, content| {
             // While a file loads the design waits: no menus or commands from the bar.
             let idle = !app.file_load_holds();
@@ -237,12 +244,10 @@ pub fn app_bar(app: &mut SolveApp, ui: &mut egui::Ui) {
             let bar = app_bar::AppBar {
                 mark: &|painter, at| solidcraft_look::glyphs::brand_mark(painter, at),
                 name: "SolidCraft",
+                leading: (crate::library::available(app) && !app.home.open).then_some(vec2(26.0, 26.0)),
                 home: app_bar::BarButton { id: "home", icon: "home", tip: app.tr("ui.start_page"), enabled: idle, narrow: false, wide_only: false },
                 file: app.tr("ui.file"),
                 file_open,
-                // The web build runs no plugins: no Plugins menu there. Its accessible name says
-                // "menu", so it is not taken for Preferences' Plugins page.
-                plugins: (!cfg!(target_arch = "wasm32")).then(|| (app.tr("ui.plugins"), app.plugin_menu.open, app.tr("ui.plugin_menu_name"))),
                 actions: vec![
                     action("save", "save", &save_tip, shown, false),
                     action("undo", "undo", &undo_tip, shown, true),
@@ -253,7 +258,11 @@ pub fn app_bar(app: &mut SolveApp, ui: &mut egui::Ui) {
                 settings: app_bar::BarButton { id: "settings", icon: "settings", tip: &prefs_tip, enabled: true, narrow: false, wide_only: false },
                 report: app_bar::Report {
                     label: solidcraft_ui_text::tr("ui.report_a_bug"),
-                    tip: solidcraft_ui_text::tr_label("Report a bug — review a screenshot and open a GitHub draft"),
+                    tip: if crate::issue_report::ticket::enabled(app) {
+                        solidcraft_ui_text::tr("report.pill_tip")
+                    } else {
+                        solidcraft_ui_text::tr_label("Report a bug — review a screenshot and open a GitHub draft")
+                    },
                     icon_only: app.header.report == ReportButton::Icon,
                 },
                 pills: crate::links::pills(app, r.width() >= app_bar::PILL_LABEL_MIN),
@@ -264,21 +273,16 @@ pub fn app_bar(app: &mut SolveApp, ui: &mut egui::Ui) {
                 handles: APP_BAR_HANDLES,
             };
             let out = app_bar::show(ui, &bar, r, content);
-            app.plugin_menu.in_file_menu = out.plugins_in_file;
+            if let Some(rect) = out.leading {
+                crate::library::app_bar_toggle(app, ui, rect);
+            }
             ui.ctx().data_mut(|d| d.insert_temp(egui::Id::unique("sc_file_menu_x"), out.file.left()));
             for action in &out.actions {
                 match action {
                     app_bar::BarAction::Home => app.home.show(app.session.revision),
-                    app_bar::BarAction::Plugins { rect } => {
-                        app.ui.palette_open = false;
-                        crate::plugin_menu::toggle(app, &ui.ctx().clone(), *rect);
-                    }
                     app_bar::BarAction::File { .. } => {
                         app.ui.palette_open = false;
                         app.plugin_menu.open = false;
-                        if app.plugin_menu.in_file_menu {
-                            crate::plugin_menu::refresh(app);
-                        }
                         let ctx = ui.ctx().clone();
                         let open = ctx.data(|d| d.get_temp::<bool>(egui::Id::unique("sc_file_menu")).unwrap_or(false));
                         let pass = ctx.cumulative_pass_nr();
@@ -322,9 +326,13 @@ pub fn app_bar(app: &mut SolveApp, ui: &mut egui::Ui) {
                 // shortcut_box::show draws the one search editor wherever this rectangle is.
                 ui.ctx().data_mut(|d| d.insert_temp(egui::Id::unique("sc_ribbon_search"), search));
             }
-            // A newer release: its Update button stays before the right cluster.
+            // A newer release: its Update button stays before the right cluster, and the
+            // organization's Managed by badge left of it and of the link pills.
             let update = crate::update::button(app, ui, out.offer, out.offer_labeled);
-            let tabs_end = update.map_or(out.controls_left, |u| u.left()) - 8.0;
+            let badge_right = update.map_or(out.controls_left, |u| u.left().min(out.controls_left)) - 6.0;
+            let badge_span = Rect::from_min_max(out.offer.min, pos2(badge_right.max(out.offer.min.x), out.offer.max.y));
+            let badge = crate::policy::badge(app, ui, badge_span, out.offer_labeled);
+            let tabs_end = badge.or(update).map_or(out.controls_left, |u| u.left()) - 8.0;
             // Narrow title bars can fit only part of the tab strip. Its hit regions must not
             // extend into the persistent report and window controls.
             let tabs_rect = Rect::from_min_max(pos2(out.tabs_start.min(tabs_end), r.top()), pos2(tabs_end, r.bottom()));
@@ -468,7 +476,7 @@ fn file_menu(app: &mut SolveApp, ctx: &egui::Context) {
 }
 
 /// The File menu's rows, each named by what it runs ([`run_file_row`]).
-fn file_rows(app: &SolveApp) -> Vec<app_bar::FileRow> {
+pub(crate) fn file_rows(app: &SolveApp) -> Vec<app_bar::FileRow> {
     use app_bar::{FileItem, FileRow};
     let row = |id: &str, label: &str, key: &str, icon: &str, enabled: bool| {
         FileRow::Item(FileItem { id: id.to_string(), label: label.to_string(), key: key.to_string(), icon: icon.to_string(), enabled })
@@ -526,9 +534,10 @@ fn file_rows(app: &SolveApp) -> Vec<app_bar::FileRow> {
     rows.push(FileRow::Separator);
     rows.push(row("document.metadata", &format!("{}…", app.tr_label("Design Properties")), "", "settings", shown));
     rows.push(FileRow::Separator);
-    // A narrow app bar has no room for the Plugins button: its menu is here instead.
-    if app.plugin_menu.in_file_menu {
-        rows.push(crate::plugin_menu::file_submenu(app));
+    // Plugins… opens Preferences on the Plugins page: install, turn on or off, and remove plugins
+    // there. The web build runs no plugins.
+    if !cfg!(target_arch = "wasm32") {
+        rows.push(row("plugins.preferences", &format!("{}…", app.tr("ui.plugins")), "", "prefs_plugins", true));
         rows.push(FileRow::Separator);
     }
     // The browser can install SolidCraft as an app (`install`): only while it offers to.
@@ -543,15 +552,15 @@ fn file_rows(app: &SolveApp) -> Vec<app_bar::FileRow> {
         rows.push(FileRow::Separator);
     }
     for item in entries {
-        rows.push(row(&item.command, &item.label, "", "prefs_plugins", shown));
+        rows.push(row(&item.command, &item.label, "", "prefs_plugins", shown || item.importer));
     }
     rows
 }
 
 /// Runs the File menu's row `id` ([`file_rows`]).
-fn run_file_row(app: &mut SolveApp, id: &str) {
-    if let Some(id) = id.strip_prefix("plugins:") {
-        crate::plugin_menu::choose(app, id);
+pub(crate) fn run_file_row(app: &mut SolveApp, id: &str) {
+    if id == "plugins.preferences" {
+        crate::prefs::open_at(app, crate::prefs::PAGE_PLUGINS);
         return;
     }
     if crate::plugin_slots::items(app, crate::plugin_slots::Slot::Menu("File")).iter().any(|item| item.command == id) {
@@ -1958,7 +1967,9 @@ fn quick_access_bar(app: &mut SolveApp, ui: &mut egui::Ui, bar: Rect, mut x: f32
     }
     if let Some((id, br)) = start {
         // The exact pinned command, without replacing its family's remembered ribbon choice.
-        app.start_pinned(id, Some(br));
+        if !end_running_tool(app, id) {
+            app.start_pinned(id, Some(br));
+        }
     }
     if let Some((at, id)) = menu {
         crate::context_menu::open_for(app, at, crate::context_menu::Target::ToolbarCommand { id: id.to_string() });
@@ -2373,7 +2384,7 @@ pub(crate) fn selection_filter(app: &mut SolveApp, ui: &mut egui::Ui) {
     let t = Tokens::get();
     ui.label(egui::RichText::new(solidcraft_ui_text::tr_label("Selection filter")).color(t.text_dim).size(t.font_small));
     for (mode, label) in [("body", app.tr_label("Select bodies (a face picks its body)")), ("component", app.tr("ui.select_components_by_face"))] {
-        let mut on = app.ui.pick_mode() == mode;
+        let mut on = app.pick_mode() == mode;
         if ui_kit::checkbox(ui, label, &mut on).changed() {
             // The Faces checkbox below is independent. The standalone command enables faces.
             let filters = std::mem::take(&mut app.ui.pick_off);
@@ -2404,17 +2415,30 @@ pub(crate) fn selection_filter(app: &mut SolveApp, ui: &mut egui::Ui) {
     ui_kit::checkbox(ui, &label, &mut app.ui.lasso_select);
 }
 
-/// A click on the lit button of the sketch tool that is running ends the tool, as a toggle does,
-/// so clicks in the view select again (#10151). With Preferences › Sketch "Clicking the running
-/// tool's button ends it" off, the click starts the tool again, as it did before. Returns whether
-/// the tool was ended. A persistent analysis button already turns its analysis off its own way.
-fn end_running_tool(app: &mut SolveApp, id: &str) -> bool {
-    if !app.preferences.ribbon_click_ends_tool || persistent_available(app, id) || !app.tool.as_ref().is_some_and(|t| t.cmd == id) {
+/// Ends the active sketch tool or dialog when `id` is its command, as `Esc` does.
+/// Returns whether anything was closed.
+pub(crate) fn end_running_command(app: &mut SolveApp, id: &str) -> bool {
+    if persistent_available(app, id) {
         return false;
     }
-    crate::dim_view::cancel();
-    app.tool = None;
-    true
+    if app.tool.as_ref().is_some_and(|t| t.cmd == id) {
+        crate::dim_view::cancel();
+        app.tool = None;
+        return true;
+    }
+    if app.dialog.as_ref().and_then(|d| d.command()) == Some(id) {
+        crate::dialogs::cancel(app);
+        return true;
+    }
+    false
+}
+
+/// A click on the lit button of the tool or dialog that is running ends it, as a toggle does,
+/// so clicks in the view select again (#10151). With Preferences › Sketch "Clicking the running
+/// tool's button ends it" off, the click starts the tool again, as it did before. Returns whether
+/// it was ended. A persistent analysis button already turns its analysis off its own way.
+fn end_running_tool(app: &mut SolveApp, id: &str) -> bool {
+    app.preferences.ribbon_click_ends_tool && end_running_command(app, id)
 }
 
 /// Two Esc presses within this many seconds finish the open sketch.
@@ -2439,6 +2463,10 @@ pub(crate) fn cancel_unfinished(app: &mut SolveApp) -> bool {
     }
     if crate::select_other::is_open(app) {
         crate::select_other::close(app);
+    } else if !app.preferences.escape_closes_analyses && app.tool.as_ref().is_some_and(|t| t.cmd == "inspect.curvature_comb") {
+        // Escape puts the comb tool down and keeps its combs on; a right click or the button
+        // still turns them off. `escape_closes_analyses` brings back Escape turning them off.
+        app.tool = None;
     } else if app.tool.is_some() {
         crate::tools::finish(app);
     } else {
@@ -2651,7 +2679,7 @@ pub fn shortcuts(app: &mut SolveApp, ctx: &egui::Context) {
                 // Not while a tool is still out (its first Esc only ended a chain): this press
                 // puts it down, and the next quick one finishes.
                 if again
-                    && !(crate::viewport_status::enabled(app) && (app.viewport_status.open_key.is_some() || crate::viewport_status::has_effect(app)))
+                    && !(crate::viewport_status::enabled(app) && crate::viewport_status::owns_escape(app))
                     && app.tool.is_none()
                     && app.dialog.is_none()
                     && let Some(sketch) = app.session.active_sketch
@@ -3385,6 +3413,31 @@ mod header_report_tests {
         assert_eq!(search.right(), rect("titlebar:preferences").left() - HEADER_SEARCH_GAP);
         h.step(&json!({"click":{"handle":"titlebar:search"}})).unwrap();
         assert!(h.app.ui.palette_open, "the magnifier opens search");
+    }
+
+    /// macOS keeps room for the traffic lights at the bar's left end in a window, but not in full
+    /// screen, where they are in the title bar that slides down from the top of the screen: the
+    /// logo starts at the left edge there, as it does on Windows and Linux.
+    #[test]
+    fn full_screen_bar_has_no_room_for_the_traffic_lights() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        let home_left = |h: &mut crate::scenario::Harness, fullscreen: bool| {
+            for _ in 0..3 {
+                let mut raw = egui::RawInput { screen_rect: Some(Rect::from_min_size(egui::Pos2::ZERO, vec2(1600.0, 1000.0))), ..Default::default() };
+                raw.viewports.get_mut(&egui::ViewportId::ROOT).unwrap().fullscreen = Some(fullscreen);
+                let app = &mut h.app;
+                h.ctx.run_ui(raw, |ui| app.ui(ui)).textures_delta.clear();
+            }
+            crate::scenario::rect_of("titlebar:home").unwrap().left()
+        };
+        let room = crate::window_chrome::TRAFFIC_LIGHTS;
+        for traffic_lights in [true, false, true] {
+            h.app.integrated_titlebar = traffic_lights;
+            let (window, full) = (home_left(&mut h, false), home_left(&mut h, true));
+            let expected = if traffic_lights { room } else { 0.0 };
+            assert!((window - full - expected).abs() < 0.1, "traffic lights {traffic_lights}: {window} in a window, {full} in full screen");
+        }
     }
 
     /// With native menus the bar keeps its own Settings, so search the host put in the bar sits
@@ -4307,6 +4360,21 @@ mod dropdown_toggle_tests {
         h.frames(30);
         h.step(&json!({"click": {"handle": "button:sketch.line"}})).unwrap();
         assert_eq!(h.app.tool.as_ref().map(|t| t.cmd), Some("sketch.line"));
+        // A second click on a dialog command's button (Extrude) also closes it when enabled.
+        h.app.preferences.ribbon_click_ends_tool = true;
+        h.app.finish_sketch();
+        h.settle();
+        h.step(&json!({"click": {"handle": "button:solid.extrude"}})).unwrap();
+        assert_eq!(h.app.dialog.as_ref().and_then(|d| d.command()), Some("solid.extrude"));
+        h.frames(30);
+        h.step(&json!({"click": {"handle": "button:solid.extrude"}})).unwrap();
+        assert!(h.app.dialog.is_none(), "second click closes the extrude dialog");
+        h.app.preferences.ribbon_click_ends_tool = false;
+        h.step(&json!({"click": {"handle": "button:solid.extrude"}})).unwrap();
+        assert_eq!(h.app.dialog.as_ref().and_then(|d| d.command()), Some("solid.extrude"));
+        h.frames(30);
+        h.step(&json!({"click": {"handle": "button:solid.extrude"}})).unwrap();
+        assert_eq!(h.app.dialog.as_ref().and_then(|d| d.command()), Some("solid.extrude"));
     }
 
     /// A tool pinned into the Finish Sketch group, the one at the ribbon's right edge, shows
@@ -4555,11 +4623,11 @@ mod app_bar_tests {
         h.step(&json!({"click":{"handle":"appbar:file"}})).unwrap();
         h.step(&json!({"widget":"Workshop helper · measure"})).unwrap();
         h.frames(2);
-        let slot_dialog = h.app.plugin_menu.dialog.take().expect("a File slot click opens the Plugins entry dialog");
+        let slot_dialog = h.app.plugin_menu.dialogs.pop().expect("a File slot click opens the Plugins entry dialog");
         assert_eq!(slot_dialog.entry, "measure");
         assert_eq!(slot_dialog.ready(&h.app), Ok(json!({"length":12.0})));
         crate::plugin_menu::open_entry(&mut h.app, 0, 0);
-        let menu_dialog = h.app.plugin_menu.dialog.take().unwrap();
+        let menu_dialog = h.app.plugin_menu.dialogs.pop().unwrap();
         assert_eq!(slot_dialog.fields, menu_dialog.fields);
         assert_eq!(slot_dialog.plugin.approval, menu_dialog.plugin.approval);
         assert_eq!(slot_dialog.plugin.path, menu_dialog.plugin.path);
@@ -4570,19 +4638,19 @@ mod app_bar_tests {
         h.frames(3);
         h.step(&json!({"click":{"handle":"button:workshop-helper.report"}})).unwrap();
         h.frames(2);
-        assert_eq!(h.app.plugin_menu.dialog.as_ref().unwrap().entry, "report", "a ribbon slot opens the same entry dialog");
-        h.app.plugin_menu.dialog = None;
+        assert_eq!(h.app.plugin_menu.dialog().unwrap().entry, "report", "a ribbon slot opens the same entry dialog");
+        h.app.plugin_menu.dialogs.clear();
         h.app.home.show(h.app.session.revision);
         h.frames(3);
         h.step(&json!({"click":{"handle":"appbar:help"}})).unwrap();
         h.step(&json!({"widget":"Workshop helper · report"})).unwrap();
         h.frames(3);
         assert!(h.app.home.open, "the Help slot opens over Home");
-        assert_eq!(h.app.plugin_menu.dialog.as_ref().unwrap().entry, "report");
+        assert_eq!(h.app.plugin_menu.dialog().unwrap().entry, "report");
         assert!(crate::scenario::handle_at("plugin_dialog:run").is_some(), "the entry dialog is drawn while Home is open");
         h.step(&json!({"click":{"handle":"plugin_dialog:cancel"}})).unwrap();
         h.frames(2);
-        assert!(h.app.plugin_menu.dialog.is_none() && h.app.home.open);
+        assert!(h.app.plugin_menu.dialogs.is_empty() && h.app.home.open);
         h.app.home.open = false;
         if let Ok(dir) = std::env::var("SOLIDCRAFT_PLUGINS_EVIDENCE") {
             let dir = std::path::PathBuf::from(dir);
@@ -4605,7 +4673,7 @@ mod app_bar_tests {
                 if (2..4).contains(&capture) {
                     crate::plugin_slots::begin(&mut h.app, "workshop-helper.measure");
                 } else if capture >= 4 {
-                    h.app.plugin_menu.dialog = None;
+                    h.app.plugin_menu.dialogs.clear();
                     h.app.ui.tab = "INSPECT".into();
                     h.ctx.data_mut(|data| data.remove::<egui::Id>(egui::Id::unique("sc_panel_open")));
                 }
@@ -4653,9 +4721,9 @@ mod app_bar_tests {
         }
         h.app.preferences.disabled_plugins.insert("workshop-helper".into());
         assert!(crate::plugin_slots::items(&h.app, crate::plugin_slots::Slot::Menu("File")).is_empty());
-        h.app.plugin_menu.dialog = None;
+        h.app.plugin_menu.dialogs.clear();
         run_file_row(&mut h.app, "workshop-helper.measure");
-        assert!(h.app.plugin_menu.dialog.is_none(), "turned-off plugins cannot open a slot dialog");
+        assert!(h.app.plugin_menu.dialogs.is_empty(), "turned-off plugins cannot open a slot dialog");
         h.app.plugin_menu.listed = crate::plugin_menu::list(&h.app, h.app.session.plugin_state.plugins_dir().as_deref());
         assert!(h.app.plugin_menu.listed[0].disabled);
         assert_eq!(h.app.plugin_menu.listed[0].entries.len(), 2, "the Plugins menu keeps all disabled entries");
