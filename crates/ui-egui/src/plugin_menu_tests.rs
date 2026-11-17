@@ -549,6 +549,23 @@ fn ungranted_command_groups_keep_run_off_and_are_named() {
     assert!(app.plugin_menu.dialog().unwrap().ready(&app).is_ok());
 }
 
+#[test]
+fn a_previewed_run_has_none_of_the_plugins_grants() {
+    let mut session = solidcraft_engine::Session::default();
+    let grants = session.plugin_state.grants.entry("inserts".into()).or_default();
+    grants.package_hash = Some("hash".into());
+    grants.command_groups.insert("file".into());
+    grants.folders.push(serde_json::from_value(json!({"name":"out","folder":"/tmp/out","read":true,"write":true})).unwrap());
+    grants.input_folder = true;
+    session.plugin_state.grants.entry("other".into()).or_default().command_groups.insert("doc".into());
+    dry_run(&mut session, "inserts");
+    let grants = &session.plugin_state.grants["inserts"];
+    assert!(grants.folders.is_empty() && grants.command_groups.is_empty() && !grants.input_folder, "no files, no groups");
+    assert_eq!(grants.package_hash.as_deref(), Some("hash"), "still the approved package");
+    assert!(session.plugin_state.file_grants.is_empty());
+    assert!(session.plugin_state.grants["other"].command_groups.contains("doc"), "other plugins keep theirs");
+}
+
 #[cfg(all(not(target_arch = "wasm32"), any(target_arch = "x86_64", target_arch = "aarch64")))]
 mod native {
     use super::*;
@@ -707,6 +724,58 @@ mod native {
         h.frames(2);
         assert_eq!(h.app.plugin_menu.dialog().map(|d| d.entry.as_str()), Some("make"));
         assert!(crate::scenario::handle_at("plugin_dialog:field:length").is_some());
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    /// Frames until the preview is computed.
+    fn previewed(h: &mut crate::scenario::Harness) {
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+        h.frames(2);
+        while h.app.preview.busy {
+            assert!(std::time::Instant::now() < deadline, "the preview did not finish");
+            std::thread::sleep(std::time::Duration::from_millis(10));
+            h.frames(1);
+        }
+        h.frames(1);
+    }
+
+    #[test]
+    fn the_host_previews_what_run_would_change_and_changes_nothing() {
+        let root = package("preview");
+        let mut h = crate::scenario::Harness::new();
+        h.app.plugin_menu.listed = list(&h.app, Some(&root));
+        h.app.plugin_menu.loaded = true;
+        let (doc, undo) = (h.app.session.doc.clone(), h.app.session.undo.len());
+        open_entry(&mut h.app, 0, 0);
+        previewed(&mut h);
+        assert!(h.app.preview.active, "the box the entry makes is drawn: {:?}", h.app.preview.error);
+        let size = |h: &crate::scenario::Harness| {
+            let b = h.app.preview.bounds;
+            ((b.max.x - b.min.x).round(), (b.max.y - b.min.y).round(), (b.max.z - b.min.z).round())
+        };
+        assert_eq!(size(&h), (20.0, 10.0, 3.0), "the defaults");
+        assert!(std::sync::Arc::ptr_eq(&doc, &h.app.session.doc), "the design is untouched");
+        assert_eq!(h.app.session.undo.len(), undo, "no undo step");
+        // A changed value is previewed again.
+        h.app.plugin_menu.dialogs[0].fields.as_mut().unwrap().iter_mut().find(|(f, _)| f.key == "length").unwrap().1 = Input::Number(30.0);
+        previewed(&mut h);
+        assert_eq!(size(&h), (30.0, 10.0, 3.0));
+        // Preview off: nothing is drawn. A read entry or a native tool is never previewed here.
+        h.app.plugin_menu.dialogs[0].preview = false;
+        previewed(&mut h);
+        assert!(!h.app.preview.active);
+        h.app.plugin_menu.dialogs[0].preview = true;
+        h.step(&json!({"start":"solid.fillet"})).unwrap();
+        assert!(preview_commands(&h.app).is_none(), "the open tool's preview is the one shown");
+        h.app.dialog = None;
+        // Run applies the same box, once.
+        previewed(&mut h);
+        run(&mut h.app).unwrap();
+        settle(&mut h);
+        assert_eq!(h.app.session.undo.len(), undo + 1);
+        assert!(h.app.plugin_menu.dialogs.is_empty());
+        h.frames(2);
+        assert!(!h.app.preview.active, "no dialog, no preview");
         let _ = std::fs::remove_dir_all(root);
     }
 }

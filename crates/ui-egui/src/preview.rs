@@ -574,8 +574,11 @@ pub fn update(app: &mut SolveApp, ctx: &egui::Context) {
         d.extra.insert("combine".into(), Value::Bool(meets));
         app.preview.mirror_decided = Some(key);
     }
+    // A plugin command's dialog: its run, on a scratch session without the plugin's grants.
+    let plugin = crate::plugin_menu::preview_commands(app);
     let cmds = match app.dialog.as_ref().filter(|d| d.previews() && d.preview_enabled).map(|d| crate::dialogs::preview_commands(app, d)) {
         Some(Ok(c)) if !c.is_empty() => c,
+        _ if plugin.is_some() => plugin.as_ref().map(|(_, _, c)| c.clone()).unwrap_or_default(),
         _ if crate::sketch_attachment_ui::commands(app).is_some() => crate::sketch_attachment_ui::commands(app).unwrap_or_default(),
         // A parameter being edited in Change Parameters.
         _ if app.params.as_ref().and_then(|p| p.preview_commands()).is_some() => {
@@ -622,7 +625,10 @@ pub fn update(app: &mut SolveApp, ctx: &egui::Context) {
             app.preview.busy = false;
             return;
         }
-        let scratch = app.session.scratch();
+        let mut scratch = app.session.scratch();
+        if let Some((_, id, _)) = &plugin {
+            crate::plugin_menu::dry_run(&mut scratch, id);
+        }
         spawn(&mut app.preview, key, scratch, cmds, colors, tool, Arc::new(Progress::default()));
     }
     app.preview.busy = app.preview.running.is_some();

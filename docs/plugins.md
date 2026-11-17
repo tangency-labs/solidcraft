@@ -206,6 +206,25 @@ key is the argument the plugin receives. The design follows the
   through the same `plugin.run` request. Programs calling `plugin.run` pass the same references
   themselves; nothing fills them from the selection.
 
+### Preview
+
+A command entry that edits the design is previewed the way native tools are: while its dialog's
+fields make parameters, the host runs the entry on a scratch copy of the design and draws what
+it would change in the viewport (new material tinted, removed material as a see-through ghost).
+The dialog has a **Preview** box, on when it opens; with it off, nothing runs until Run.
+
+- The preview is a dry run of the same `plugin.run`: the plugin's code is unchanged and declares
+  nothing new. It runs on a scratch session that is thrown away, so the design, the undo history
+  and the selection never change. The run has none of the plugin's folder or command-group grants,
+  so it reads and writes no file and reaches nothing past the design; a plugin that needs them
+  shows "Preview:" with the refusal under its fields, and Run still runs it with its grants.
+- It runs again only when the parameters or the design change, under the plugin's own fuel,
+  memory and deadline limits, off the window's thread. A run left behind by newer inputs is
+  dropped.
+- The most recently opened dialog on the design is previewed (the one picking in the viewport,
+  when one is). While a native tool is open, its own preview is the one shown. Read entries and
+  importers are not previewed.
+
 ## Versions
 
 The WIT package is `craft:plugin@0.1.0`. Today's surface is one capability, `commands@0.1`:

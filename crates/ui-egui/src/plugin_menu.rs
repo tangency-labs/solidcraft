@@ -681,6 +681,8 @@ pub(crate) struct EntryDialog {
     pub(crate) picked_on: Option<Arc<solidcraft_engine::doc::Document>>,
     /// The picks were cleared because the design changed: the dialog says so until the next pick.
     pub(crate) picks_cleared: bool,
+    /// The dialog's Preview box: the host draws what Run would change while the fields are filled.
+    pub(crate) preview: bool,
 }
 
 /// A run waiting for its reply.
@@ -729,6 +731,7 @@ pub(crate) fn open_entry(app: &mut SolveApp, p: usize, e: usize) {
         opens,
         picked_on: prefilled.then(|| app.session.doc.clone()),
         picks_cleared: false,
+        preview: true,
     });
     // The new dialog's first selection field takes the viewport's picks, unless another tool is
     // picking: that tool keeps them until a field here is clicked.
@@ -908,6 +911,38 @@ impl EntryDialog {
             Problem::Invalid(label) => solidcraft_ui_text::format("ui.plugin_dialog_invalid", &[("field", &label)]),
         })
     }
+}
+
+/// The dialog the viewport previews, and the `plugin.run` it previews: the dialog picking in the
+/// viewport, else the most recently opened one, when it is a command that edits the design on
+/// this design, has Preview on, is not running and its fields make parameters. `None` while a
+/// native tool is open: its own preview is the one shown.
+pub(crate) fn preview_commands(app: &SolveApp) -> Option<(u64, String, Vec<(String, Value)>)> {
+    if app.dialog.as_ref().is_some_and(|d| !matches!(d.kind, crate::dialogs::Kind::PluginPick { .. })) {
+        return None;
+    }
+    let dialog = match picking(app) {
+        Some(id) => app.plugin_menu.dialogs.iter().find(|d| d.id == id),
+        None => app.plugin_menu.dialogs.iter().rev().find(|d| d.session == app.session.uid),
+    }?;
+    if dialog.read || dialog.opens.is_some() || !dialog.preview || dialog.running.is_some() {
+        return None;
+    }
+    let params = dialog.ready(app).ok()?;
+    let run = json!({"path": dialog.plugin.path, "approval": dialog.plugin.approval, "entry": dialog.entry, "params": params});
+    Some((dialog.id, dialog.plugin.id.clone(), vec![("plugin.run".to_owned(), run)]))
+}
+
+/// Make `scratch` a dry run of plugin `id`: none of its folder or command-group grants, so a
+/// previewed run reads and writes no file and reaches nothing past the design. Its changes stay
+/// in the scratch session, which is thrown away: nothing is committed or published.
+pub(crate) fn dry_run(scratch: &mut solidcraft_engine::Session, id: &str) {
+    if let Some(grants) = scratch.plugin_state.grants.get_mut(id) {
+        grants.folders.clear();
+        grants.command_groups.clear();
+        grants.input_folder = false;
+    }
+    scratch.plugin_state.file_grants.clear();
 }
 
 /// Run the most recently opened dialog's entry.
@@ -1122,6 +1157,18 @@ fn body(
                     }
                 }
             });
+        }
+    }
+    // Preview: a command that edits the design, as the native tools have it.
+    if !dialog.read && dialog.opens.is_none() && dialog.fields.is_some() {
+        ui.add_enabled_ui(editable, |ui| ui_kit::checkbox(ui, app.tr_label("Preview"), &mut dialog.preview));
+        if dialog.preview
+            && editable
+            && app.preview.error.is_some()
+            && preview_commands(app).is_some_and(|(id, _, _)| id == dialog.id)
+            && let Some(error) = &app.preview.error
+        {
+            ui_kit::status_line(ui, &solidcraft_ui_text::format("ui.plugin_dialog_preview_failed", &[("error", error)]), ui_kit::StatusTone::Dim);
         }
     }
     if dialog.picks_cleared {
