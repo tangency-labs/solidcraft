@@ -1343,7 +1343,7 @@ fn the_ruled_product_form_past_the_largest_degree_keeps_the_rows_refusal() {
 /// leader (0, 2, 2) -> (10, 2, 2), of order `order`, on a toy net (a unit square, bound
 /// 1e-3); with `certified`, on its own net and bound ([`net_of_definition`]). The planes
 /// run to x = 20, so the feet have room along.
-fn round_blend(order: u32, certified: bool) -> (Kernel, ProceduralBlend) {
+pub(crate) fn round_blend(order: u32, certified: bool) -> (Kernel, ProceduralBlend) {
     round_blend_with(order, certified, 0.5)
 }
 
@@ -1354,8 +1354,7 @@ fn round_blend_with(order: u32, certified: bool, thumbweight: f64) -> (Kernel, P
     use crate::geom::vector3d::Point3;
     use crate::nurbs::b_spline_curve::BSplineCurve;
     use crate::surface::procedural_blend::BlendDefinitionInput;
-    let mut kk = k();
-    kk.fixes.fillet_round_as_definition = true;
+    let kk = k();
     let (l, r) = (10.0, 2.0);
     let bilinear =
         |p: [Point3; 4]| BSplineSurface::create_bilinear_surface(p[0], p[1], p[2], p[3]).unwrap();

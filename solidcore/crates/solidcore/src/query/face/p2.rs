@@ -26,9 +26,10 @@
 //! | [`face_cache_tree`] | `SmSurfaceCache::GetTree` of a face surface's trimmed cache |
 //!
 //! Deviations:
-//! - **Opt-in fix (WR-305, #1057).** With `Kernel::fixes.classify_edge_interval`,
-//!   `CurveOnClassify` runs the fork's `ClassifyEdgeInterval` on each interval before
-//!   `ClassifyFaceInterval` (`CurveClassification::classify_edge_interval`).
+//! - **WR-305 (#1057).** `CurveOnClassify` runs the fork's `ClassifyEdgeInterval` on each
+//!   interval before `ClassifyFaceInterval` (`CurveClassification::classify_edge_interval`):
+//!   for a straight interval along a straight edge always, certified by its ends; for
+//!   curves only with `Kernel::fixes.classify_edge_interval` (a midpoint sample).
 //! - **Classification B-rep (temporary).** [`curve_on_classify_mut`] runs on the face's own
 //!   B-rep through [`CurveOnClassifyBrep`] and makes upstream's lazy edits (UV trim curves,
 //!   gap caches, the trimmed cache's tolerance growth) on it in place, in upstream order.
@@ -37,7 +38,8 @@
 //!   (`SnapshotObjects` over `CurveOnClassifyCache`'s snapshot; the healer copies some of
 //!   its edits back). That entry goes once its last callers are converted: the stage 3 /
 //!   `ClassifyLoops` path, the `intersect::topology_solver` (its face silhouettes'
-//!   `CreateCurvesByTrimming`, through `topology::face::p2`'s snapshot entry) and
+//!   `CreateCurvesByTrimming`, through `topology::face::p2`'s snapshot entry, and its
+//!   range classifications on adapters that lend no live B-rep) and
 //!   `blend::fillet_solver` classifications, `sm_CountContainedSamples`'
 //!   `CalculateAnInternalPoint` in `query::api_queries`, the `&self`
 //!   `ProtoBrep::face_curve_on_classify` (proto-topology's coincident-curve
@@ -161,7 +163,7 @@ use crate::intersect::curve_class::p2::ResetOptions;
 use crate::intersect::curve_class::p5::ClassGeometryMut;
 use crate::intersect::curve_class::p9::{
     BoundaryEdge, BoundaryEdgeuse, BoundaryFace, BoundaryLoop, BoundaryVertex,
-    IntersectEdgesOptions,
+    IntersectEdgesOptions, SeamEnds,
 };
 use crate::intersect::point_class::{
     ClassGeometry, ClassObject, ClassObjectKind, PointClassType, PointClassification,
@@ -1701,7 +1703,34 @@ fn boundary_edge<O: ClassObject>(
         interval: record.interval,
         zone_tol_3d: record.tolerance,
         face_gap,
+        seam: seam_ends(objects.brep(), edge, face)?,
     })
+}
+
+/// Not upstream: for a seam of `face` (the face on both sides of `edge`), its two ends
+/// that bound material: a vertex that is no pole of the face
+/// ([`crate::topology::vertex::inside_face`]), with its point and tolerance
+/// (docs/booleans.md, "Seams and poles"). `None` for an edge that is no seam.
+fn seam_ends(b: &Brep, edge: EdgeId, face: FaceId) -> Result<Option<SeamEnds>> {
+    if !crate::topology::edge::face_on_both_sides(b, edge, face)? {
+        return Ok(None);
+    }
+    let first = crate::topology::edge::vertex(b, edge)?;
+    let second = match first {
+        Some(v) => crate::topology::edge::other_vertex(b, edge, Some(v))?,
+        None => None,
+    };
+    let mut ends = [None, None];
+    for (slot, v) in ends.iter_mut().zip([first, second]) {
+        let Some(v) = v else { continue };
+        if !crate::topology::vertex::inside_face(b, v, face)? {
+            *slot = Some((
+                b.vertex(v)?.point,
+                crate::topology::vertex::tolerance(b, v)?,
+            ));
+        }
+    }
+    Ok(Some(ends))
 }
 
 /// The caller's classification objects `inner` over a private copy `snapshot` of the
@@ -2296,10 +2325,9 @@ pub fn curve_on_classify_mut<O: ClassObject>(
         }
 
         // WR-305: an interval running along a boundary edge between two points on it is
-        // on that edge
-        if k.fixes.classify_edge_interval {
-            cc.classify_edge_interval(k, &*objects, ii)?;
-        }
+        // on that edge (straight pieces always, by their ends; curved ones with
+        // `classify_edge_interval`)
+        cc.classify_edge_interval(k, &*objects, ii)?;
 
         // classify the interval - avoiding point classification if possible
         if cc.at(ii)?.mid.point_class() == PointClassType::Unknown {

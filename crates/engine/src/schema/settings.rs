@@ -12,8 +12,9 @@
 //! (`profile_name`, `name_message`, `path_value`, `path_message`, `EITHER_MESSAGE` in
 //! `cmd/settings.rs`), so it can't drift. A key the handler refuses when it is left out is
 //! optional in the type and required in the schema, so that the handler's message, not the
-//! check's "is required", is what a caller sees. `settings.profile.import` reads `name` only when
-//! it is there and not `null`, so its `name` is not required and `null` reads as left out.
+//! check's "is required", is what a caller sees. Where the handler reads a `null` as the key being
+//! left out (`settings.profile.import`'s `name`, the `path` of `export` and `import`) the schema
+//! says so too; where it refuses one (`name` everywhere else) it does not.
 //!
 //! Which name exists, how many profiles there are, what a profile applies and what a profile file
 //! holds stay the app's to answer.
@@ -51,6 +52,27 @@ impl JsonSchema for ProfileName {
     }
 }
 
+/// The same, where `null` reads as the key being left out (`settings.profile.import`'s `name`).
+/// Only the schema: the value is still read by [`import_name_field`].
+pub struct ProfileNameOrNull;
+
+impl JsonSchema for ProfileNameOrNull {
+    fn schema_name() -> Cow<'static, str> {
+        "ProfileNameOrNull".into()
+    }
+
+    fn json_schema(_: &mut SchemaGenerator) -> Schema {
+        json_schema!({
+            "description": format!(
+                "A settings profile's name: 1 to {MAX_PROFILE_NAME} characters, without control characters. \
+                 Surrounding whitespace is trimmed away, so the name that is kept can be shorter. \
+                 `null` is the same as leaving it out.",
+            ),
+            "type": ["string", "null"],
+        })
+    }
+}
+
 /// A profile file's path, as `cmd/settings.rs` reads it: text that is not blank and at most
 /// [`MAX_PATH`] bytes.
 #[derive(Debug)]
@@ -65,6 +87,25 @@ impl JsonSchema for ProfilePath {
         json_schema!({
             "description": format!("A file path: not blank, at most {MAX_PATH} bytes."),
             "type": "string",
+        })
+    }
+}
+
+/// The same, where `null` reads as the key being left out (`path` of `export` and `import`).
+/// Only the schema: the value is still read by [`path_field`].
+pub struct ProfilePathOrNull;
+
+impl JsonSchema for ProfilePathOrNull {
+    fn schema_name() -> Cow<'static, str> {
+        "ProfilePathOrNull".into()
+    }
+
+    fn json_schema(_: &mut SchemaGenerator) -> Schema {
+        json_schema!({
+            "description": format!(
+                "A file path: not blank, at most {MAX_PATH} bytes. `null` is the same as leaving it out."
+            ),
+            "type": ["string", "null"],
         })
     }
 }
@@ -280,7 +321,7 @@ pub struct ProfileExportParams {
     pub name: Option<ProfileName>,
     /// Where to write it. Left out, nothing is written; the app answers with the document itself.
     #[serde(default, deserialize_with = "path_field")]
-    #[schemars(with = "ProfilePath")]
+    #[schemars(with = "ProfilePathOrNull")]
     pub path: Option<ProfilePath>,
 }
 
@@ -305,7 +346,7 @@ pub struct ProfileExportResult {
 pub struct ProfileImportParams {
     /// The file to read the profile from. Give this or `profile`.
     #[serde(default, deserialize_with = "path_field")]
-    #[schemars(with = "ProfilePath")]
+    #[schemars(with = "ProfilePathOrNull")]
     pub path: Option<ProfilePath>,
     /// The profile to add, as `settings.profile.export` answers with one. Give this or `path`.
     #[serde(default, deserialize_with = "profile_field")]
@@ -314,7 +355,7 @@ pub struct ProfileImportParams {
     /// What to call the new profile. The app makes the name it uses unique.
     /// Default: the name the profile document carries.
     #[serde(default, deserialize_with = "import_name_field")]
-    #[schemars(with = "ProfileName")]
+    #[schemars(with = "ProfileNameOrNull")]
     pub name: Option<ProfileName>,
 }
 

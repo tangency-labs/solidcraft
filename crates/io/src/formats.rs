@@ -22,6 +22,8 @@ pub enum ImportTarget {
     Design,
     /// B-rep CAD read as an Import base feature (`doc.open` / `file.insert_step`).
     Brep,
+    /// A KiCad board read as a design of its own (`doc.open`).
+    Kicad,
     /// Mesh read as a MeshImport feature (`doc.open` / `file.insert_mesh`).
     Mesh,
     /// A reference scan, separate from model bodies (`doc.open` / `pointcloud.insert`).
@@ -147,6 +149,19 @@ const HISTORY: OptionSpec = OptionSpec {
 
 const FREECAD_IMPORT: &[OptionSpec] = &[UP_Z, STEP_NAMES, HISTORY];
 
+/// A KiCad PCB's import options (see `doc.open`). The board's own thickness and colour are used
+/// unless the command is given others, so neither is offered here.
+const KICAD_IMPORT: &[OptionSpec] = &[
+    OptionSpec { param: "components", label: "Include components", kind: OptionKind::Bool { default: true } },
+    OptionSpec {
+        param: "copper",
+        label: "Copper (traces, vias, zones, pads)",
+        kind: OptionKind::Choice { choices: &[("none", "None"), ("overlay", "Overlay on the board"), ("mesh", "Modelled")], default: 0 },
+    },
+    OptionSpec { param: "silkscreen", label: "Include silkscreen", kind: OptionKind::Bool { default: true } },
+    OptionSpec { param: "representation", label: "Board", kind: OptionKind::Choice { choices: &[("brep", "Solid"), ("mesh", "Mesh")], default: 0 } },
+];
+
 /// Binary is the `stl` format value, ASCII is `stla` (see `file.export`).
 const STL_ENCODING: OptionSpec =
     OptionSpec { param: "format", label: "Encoding", kind: OptionKind::Choice { choices: &[("stl", "Binary"), ("stla", "ASCII")], default: 0 } };
@@ -190,7 +205,7 @@ pub static FORMATS: &[FormatSpec] = &[
     FormatSpec {
         id: "design",
         label: "SolidCraft design",
-        extensions: &[crate::DESIGN_EXTS[0], crate::DESIGN_EXTS[1], crate::DESIGN_EXTS[2], "json"],
+        extensions: &[crate::DESIGN_EXTS[0], crate::DESIGN_EXTS[1], "json"],
         role: Role::Design,
         import: Some(ImportSpec { target: ImportTarget::Design, options: &[], native_only: false }),
         export: None,
@@ -225,6 +240,14 @@ pub static FORMATS: &[FormatSpec] = &[
         extensions: &["3dm"],
         role: Role::Artifact,
         import: Some(ImportSpec { target: ImportTarget::Brep, options: BREP_IMPORT, native_only: true }),
+        export: None,
+    },
+    FormatSpec {
+        id: "kicad",
+        label: "KiCad PCB",
+        extensions: &["kicad_pcb", "kicad_pro"],
+        role: Role::Artifact,
+        import: Some(ImportSpec { target: ImportTarget::Kicad, options: KICAD_IMPORT, native_only: false }),
         export: None,
     },
     FormatSpec {
@@ -419,12 +442,29 @@ pub fn import_filters(native: bool) -> Vec<(&'static str, Vec<&'static str>)> {
             ImportTarget::Design => add("SolidCraft design (container or JSON)", f.extensions),
             ImportTarget::Brep if import.native_only => add("FreeCAD and Rhino", f.extensions),
             ImportTarget::Brep => add(f.label, f.extensions),
+            ImportTarget::Kicad => add(f.label, f.extensions),
             ImportTarget::Mesh => add("Mesh (3MF, STL, OBJ, glTF)", f.extensions),
             ImportTarget::PointCloud => add("Point cloud (PLY, XYZ, PTS)", f.extensions),
             ImportTarget::Sketch => add("Sketch drawings (DXF, SVG)", f.extensions),
         }
     }
     groups
+}
+
+/// The Open dialog's groups for installed importer plugins: (plugin name, lower-case extensions).
+/// The app sets them before it shows the dialog; hosts add them after the built-in groups.
+static PLUGIN_OPEN_FILTERS: std::sync::RwLock<Vec<(String, Vec<String>)>> = std::sync::RwLock::new(Vec::new());
+
+/// Set the importer plugins' Open dialog groups (see [`plugin_open_filters`]).
+pub fn set_plugin_open_filters(filters: Vec<(String, Vec<String>)>) {
+    if let Ok(mut current) = PLUGIN_OPEN_FILTERS.write() {
+        *current = filters;
+    }
+}
+
+/// The importer plugins' Open dialog groups the app last set.
+pub fn plugin_open_filters() -> Vec<(String, Vec<String>)> {
+    PLUGIN_OPEN_FILTERS.read().map(|filters| filters.clone()).unwrap_or_default()
 }
 
 #[cfg(test)]
@@ -459,6 +499,9 @@ mod tests {
         }
         for e in ["step", "stp", "igs", "iges", "fcstd", "3dm"] {
             assert!(with_target(ImportTarget::Brep).contains(&e), "registry misses B-rep .{e}");
+        }
+        for e in with_target(ImportTarget::Kicad) {
+            assert!(crate::is_kicad_path(&format!("board.{e}")), "is_kicad_path misses .{e}");
         }
         for e in with_target(ImportTarget::Mesh) {
             assert!(crate::is_mesh_path(&format!("part.{e}")), "is_mesh_path misses .{e}");
@@ -531,7 +574,7 @@ mod tests {
     fn import_filter_groups_hold_the_expected_extensions() {
         let native = import_filters(true);
         let find = |label: &str| native.iter().find(|(l, _)| *l == label).map(|(_, e)| e.clone()).unwrap_or_default();
-        assert_eq!(find("SolidCraft design (container or JSON)"), vec!["sc", "solidcraft", "solvecraft", "json"]);
+        assert_eq!(find("SolidCraft design (container or JSON)"), vec!["sc", "solidcraft", "json"]);
         assert_eq!(find("STEP"), vec!["step", "stp"]);
         assert_eq!(find("IGES"), vec!["igs", "iges"]);
         assert_eq!(find("FreeCAD and Rhino"), vec!["fcstd", "3dm"]);

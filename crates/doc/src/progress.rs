@@ -160,6 +160,11 @@ pub fn watch<R>(progress: Arc<Progress>, f: impl FnOnce() -> R) -> R {
     stop.within(|| solidcraft_kernel::watch::watching(kernel, f))
 }
 
+/// The progress watching this thread, to watch work this thread hands to another one.
+pub fn current() -> Option<Arc<Progress>> {
+    CURRENT.with(|c| c.borrow().as_ref().map(|cur| cur.progress.clone()))
+}
+
 /// Whether the watch over this thread's evaluations asked them to stop. Work done after that may
 /// have been cut short: it is not kept.
 pub fn cancelled() -> bool {
