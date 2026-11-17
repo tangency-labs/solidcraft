@@ -179,14 +179,19 @@ if ($Arch -eq 'x64' -and -not $PortableOnly) {
   $Policies = Join-Path $Root 'packaging\windows\policies'
   $Templates = Join-Path $Dist "solidcraft-$Version-windows-policy-templates.zip"
   Remove-Item -Force $Templates -ErrorAction SilentlyContinue
-  Compress-Archive -Path (Join-Path $Policies 'solidcraft.admx'), (Join-Path $Policies 'en-US') -DestinationPath $Templates
-  Add-Type -AssemblyName System.IO.Compression.FileSystem
+  # Entries written one by one with '/' in their names: Compress-Archive in Windows PowerShell 5.1
+  # (Archive module before 1.2.3) stores 'en-US\solidcraft.adml', which other unzip tools take as
+  # one file name with a backslash in it.
+  $Names = 'solidcraft.admx', 'en-US/solidcraft.adml'
+  Add-Type -AssemblyName System.IO.Compression, System.IO.Compression.FileSystem
+  $zip = [IO.Compression.ZipFile]::Open($Templates, 'Create')
+  try {
+    foreach ($name in $Names) { $null = [IO.Compression.ZipFileExtensions]::CreateEntryFromFile($zip, (Join-Path $Policies $name), $name) }
+  } finally { $zip.Dispose() }
   $zip = [IO.Compression.ZipFile]::OpenRead($Templates)
-  try { $entries = @($zip.Entries | Where-Object { $_.Length -gt 0 } | ForEach-Object { $_.FullName -replace '\\', '/' }) }
+  try { $entries = @($zip.Entries | ForEach-Object { $_.FullName }) }
   finally { $zip.Dispose() }
-  foreach ($want in 'solidcraft.admx', 'en-US/solidcraft.adml') {
-    if ($entries -notcontains $want) { throw "$Templates has no $want (it holds: $($entries -join ', '))" }
-  }
+  if (($entries -join '|') -cne ($Names -join '|')) { throw "$Templates holds $($entries -join ', '), expected $($Names -join ', ')" }
   Write-Output "ok $(Split-Path -Leaf $Templates): $($entries -join ', ')"
   $Outputs += $Templates
 }
