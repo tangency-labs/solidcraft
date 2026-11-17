@@ -6,9 +6,10 @@
 //! `fillet_mitre_concave_face_corners`; the refusal of rails leaving their faces, the rail
 //! end on the continued surface and the cliff overflow, once flags too, are the only path).
 //!
-//! The Boolean's copy of the cut box's trims is exact; the cut box's faces at x = 15 and
-//! y = 30 carry the exact degree-1 B-spline trims `SwapUV` mirrors onto them, the other
-//! walls lines. WR-610's run-on (`fillet_trace_reaches_rails`) widens a side edge's
+//! The Boolean copied the cut box's trims: its faces at x = 15 and y = 30 carry the exact
+//! degree-1 B-spline trims `SwapUV` mirrors onto them, the other walls lines (since
+//! solidcraft#17896 a plane keeps MakeFace's exact UV line for a line edge instead, but a
+//! lone box still mixes the two, as below). WR-610's run-on (`fillet_trace_reaches_rails`) widens a side edge's
 //! parameter interval past its ends, but a B-spline trim clamps the parameter to its own
 //! interval, so one wall's rail met the pocket's vertical edge past the floor and the
 //! other's not at all, and the bevel vertex split. The widened B-spline trim now runs on

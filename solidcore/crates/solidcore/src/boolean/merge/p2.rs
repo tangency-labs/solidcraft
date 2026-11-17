@@ -26,7 +26,11 @@
 //!   parameter. Points compared at some parameters cannot tell a closed curve from the
 //!   same curve run the other way round (a circle's ends and middle are the same points
 //!   either way), and a trim copied onto the reversed curve runs backwards along its
-//!   edge use (#17285). Upstream builds the face without them.
+//!   edge use (#17285). A line edge on a plane keeps `MakeFace`'s trim, the exact UV
+//!   line `Plane::drop_curve` makes through the edge's projected ends: the copy would
+//!   gain nothing there and would bring the other operand's representation instead (a
+//!   box's degree-1 B-spline trims, ends an ulp off), which later operations read
+//!   differently (#17896). Upstream builds the face without them.
 //! - Operands, mates and notification storage are borrowed explicitly, as in
 //!   [`p1`] and [`p5`](super::p5); arena ids replace pointers.
 //!   `MergeEdge` and `MakeFaceuse` work on concrete [`Brep`] operands and the
@@ -97,7 +101,7 @@
 use crate::boolean::merge::p1::{self, MergeOptions, MergeState, VertexCopy};
 use crate::boolean::topology_intersector::p1::{IntersectorBrep, Relations, TopologyIntersector};
 use crate::boolean::topology_intersector::p2::IntersectorBrepP2;
-use crate::curve::curve::p2::Curve;
+use crate::curve::curve::p2::{Curve, CurveKind};
 use crate::error::boolean::BooleanStage;
 use crate::error::{Result, SolidError};
 use crate::geom::context::Context;
@@ -109,6 +113,7 @@ use crate::intersect::point_class::{ClassObject, ClassObjectKind};
 use crate::kernel::Kernel;
 use crate::math::{max2, min2, BIG_DOUBLE, EFF_ZERO, PI};
 use crate::nurbs::b_spline_surface_n_lib::p2::OrientType;
+use crate::surface::surface::p2::SurfaceKind;
 use crate::topology::brep::p7::{self as brep_p7, MakeFaceOptions};
 use crate::topology::edgeuse::{p1 as eu, p3 as eu3};
 use crate::topology::topology as topo;
@@ -1013,7 +1018,8 @@ pub fn make_faceuse_attempt_with(
 /// (the same definition, [`Curve::same_definition`](crate::curve::curve::Curve::same_definition):
 /// a closed curve run the other way round, or a re-fit, is not one) over the same
 /// interval, has at least the other edge's tolerance, and the
-/// new face lies on the copy `MakeFaceuse` made of the other face's surface. The caller
+/// new face lies on the copy `MakeFaceuse` made of the other face's surface, unless the
+/// edge is a line and the face a plane (`MakeFace`'s trim is already exact there). The caller
 /// calls it only when that copy keeps the other surface's parameterisation (not for a
 /// B-spline recognised as an analytic in its own parameterisation). The new face's
 /// face use of the other face use's orientation lists its edge
@@ -1046,6 +1052,10 @@ fn copy_uv_trim_curves_of_other_face(
     } else {
         fu2
     };
+    let plane = matches!(
+        brep.face(new_face)?.surface.as_ref().map(|s| s.kind()),
+        Some(SurfaceKind::Plane(_))
+    );
     let other_uses = eu::faceuse_edgeuses(other, other_fu, false, None)?;
     let new_uses = eu::faceuse_edgeuses(brep, new_fu, false, None)?;
     if other_uses.len() != new_uses.len() {
@@ -1095,6 +1105,16 @@ fn copy_uv_trim_curves_of_other_face(
         // equal defining data, so the same point at every parameter (a closed curve run
         // the other way round, or a re-fit, has other data and keeps MakeFace's trim)
         if !other_curve.same_definition(new_curve) {
+            continue;
+        }
+        // On a plane, the trim MakeFace leaves for a line edge is `Plane::drop_curve`'s
+        // UV line through the edge's two projected ends: exact but for the rounding of
+        // those two projections, so the copy gains nothing there. It would carry the
+        // other operand's representation instead (a box's degree-1 B-spline trims, their
+        // ends an ulp off the lines), which later operations read differently (#17896: a
+        // fillet whose corner patch an ulp-moved edge splits the drop of, and an edge
+        // tolerance 2.6 times what the trims need)
+        if plane && matches!(new_curve.kind(), CurveKind::Line(_)) {
             continue;
         }
         let copy = trim.copy(k)?;
