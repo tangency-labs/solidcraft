@@ -538,6 +538,12 @@ fn feature_row(
         acts.hovered = true;
     }
     if let Some(at) = r.secondary {
+        // A right-click on a feature outside the selection selects it first, as in both
+        // History layouts, so the menu's Copy and Delete act on the same features. A sketch row
+        // keeps its own menu's rule.
+        if !is_sketch && !app.session.selection.contains(&Sel::Feature { id }) {
+            click_select(app, None, Some(Sel::Feature { id }));
+        }
         acts.menu = Some((at, if is_sketch { Target::Sketch { id } } else { Target::Feature { id } }));
     }
     // In the History: a drag of the row (not of its fold arrow or eye) moves the feature (#9565).
@@ -844,6 +850,49 @@ mod tests {
         assert_eq!(at["ok"], true, "{at}");
         assert_eq!(h.app.session.doc.to_json(), saved);
         assert_eq!(h.app.session.undo.len(), undo);
+    }
+
+    /// A right-click on a feature row outside the selection selects that feature alone, so its
+    /// menu acts on it; inside the selection it keeps the selection, and the menu's Copy and
+    /// Delete both take every selected feature.
+    #[test]
+    fn browser_feature_right_click_selects_outside_and_keeps_inside() {
+        let mut h = Harness::new();
+        let ids: Vec<u64> = (0..4)
+            .map(|i| {
+                h.app.run("solid.box", json!({"length":10,"width":10,"height":10,"body_name":format!("B{i}")})).unwrap()["feature"].as_u64().unwrap()
+            })
+            .collect();
+        h.app.tree.expanded.insert("c0/features".into());
+        h.frames(2);
+        let row = |id: u64| json!({"handle": format!("row:browser-feature:c0:{id}")});
+        for id in &ids[..3] {
+            h.step(&json!({"click": row(*id), "ctrl": true})).unwrap();
+            h.frames(2);
+        }
+        h.step(&json!({"click": row(ids[3]), "button": "right"})).unwrap();
+        h.frames(2);
+        assert_eq!(h.app.session.selection, [Sel::Feature { id: ids[3] }], "outside: the clicked feature alone");
+        h.step(&json!({"widget": "Suppress"})).unwrap();
+        h.settle();
+        let suppressed: Vec<u64> = h.app.session.doc.features.iter().filter(|f| f.suppressed).map(|f| f.id).collect();
+        assert_eq!(suppressed, [ids[3]]);
+
+        h.step(&json!({"click": row(ids[0])})).unwrap();
+        h.step(&json!({"click": row(ids[1]), "ctrl": true})).unwrap();
+        h.step(&json!({"click": row(ids[1]), "button": "right"})).unwrap();
+        h.frames(2);
+        assert_eq!(h.app.session.selection, [Sel::Feature { id: ids[0] }, Sel::Feature { id: ids[1] }], "inside keeps it");
+        h.step(&json!({"widget": "Copy"})).unwrap();
+        h.frames(2);
+        let copied: Vec<&str> = h.app.session.clipboard.iter().map(|f| f.name.as_str()).collect();
+        assert_eq!(copied.len(), 2, "Copy takes both: {copied:?}");
+        h.step(&json!({"click": row(ids[1]), "button": "right"})).unwrap();
+        h.frames(2);
+        h.step(&json!({"widget": "Delete 2 Selected Features"})).unwrap();
+        h.settle();
+        let left: Vec<u64> = h.app.session.doc.features.iter().map(|f| f.id).collect();
+        assert_eq!(left, ids[2..], "Delete takes the same two");
     }
 
     #[test]
