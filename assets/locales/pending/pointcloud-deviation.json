@@ -1,0 +1,8 @@
+{
+  "en": {
+    "cmd.pointcloud_deviation": "Point Cloud Deviation"
+  },
+  "ja": {
+    "cmd.pointcloud_deviation": "点群の偏差"
+  }
+}

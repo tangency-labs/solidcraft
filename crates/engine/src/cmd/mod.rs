@@ -100,6 +100,7 @@ mod notes;
 mod parts;
 mod plugin;
 mod point_cloud;
+mod point_cloud_deviation;
 mod script;
 mod section;
 mod selection;
@@ -363,6 +364,7 @@ pub fn command_specs() -> Vec<&'static CommandSpec> {
     v.extend(sketch_canvas::COMMANDS.iter());
     v.extend(canvas_sketch::COMMANDS.iter());
     v.extend(point_cloud::COMMANDS.iter());
+    v.extend(point_cloud_deviation::COMMANDS.iter());
     v.extend(sketch_3d::COMMANDS.iter());
     v.extend(surface_analysis::COMMANDS.iter());
     v.extend(surface_boundary::COMMANDS.iter());
