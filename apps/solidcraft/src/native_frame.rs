@@ -178,7 +178,10 @@ unsafe extern "system" fn frame_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lpara
             let result = call_previous();
             // SAFETY: for a nonzero wParam, lParam points to the NCCALCSIZE_PARAMS the system
             // passed, whose first rect winit has just set (the maximized window's client area).
-            if let Some(params) = unsafe { (lparam as *mut NCCALCSIZE_PARAMS).as_mut() }.filter(|_| wparam != 0) {
+            // For a zero wParam lParam is a bare RECT, so no NCCALCSIZE_PARAMS reference is made.
+            if wparam != 0
+                && let Some(params) = unsafe { (lparam as *mut NCCALCSIZE_PARAMS).as_mut() }
+            {
                 leave_auto_hide_taskbar_reachable(hwnd, &mut params.rgrc[0]);
             }
             result
