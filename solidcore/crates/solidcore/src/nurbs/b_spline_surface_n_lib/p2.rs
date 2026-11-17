@@ -2239,6 +2239,66 @@ fn coons_side_normal(
     evaluate_normal(k, surface, Point2::new(uv.x, uv.y))
 }
 
+/// The unit normal of `surface` at its point nearest `point`, a point of a Coons patch's
+/// side, searched from the side's UV curve at patch parameter `s` (as
+/// [`coons_side_normal`]).
+///
+/// Not the fork, which takes the normal at the UV curve's point itself. A side's 3D
+/// curve and its UV curve's image need not coincide: the loop curves of the generated
+/// corner cases leave their neighbours by up to a tenth of the patch's size (analytic064:
+/// 428 off a torus of minor radius 1223 at mid-side), so the UV curve's point is another
+/// place on the neighbour, and its normal differs from the neighbour's at the side by up
+/// to the gap times the neighbour's curvature (0.2 radians there). G1 with the
+/// neighbour is the angle at the side's own point, so that is what is measured.
+///
+/// Gauss-Newton on `|S(uv) - point|^2` from the UV curve's point: each step solves the
+/// normal equations of the first derivatives, and the search stops when a step moves the
+/// surface point by at most `EFF_ZERO` of the point's size, the derivatives are (near)
+/// parallel, an evaluation fails (the last point evaluated is kept) or after 64 steps.
+fn coons_side_normal_nearest(
+    k: &crate::kernel::Kernel,
+    uv_curve: &BSplineCurve,
+    surface: &SmSurface,
+    patch_ivl: &Extent1d,
+    s: f64,
+    point: Point3,
+) -> Result<Vec3> {
+    let ivl = uv_curve.natural_interval();
+    let t = ivl.evaluate((s - patch_ivl.min()) / patch_ivl.length());
+    let start = uv_curve.evaluate_point(t)?;
+    let mut uv = Point2::new(start.x, start.y);
+    let size = point.length().max(1.0);
+    for _ in 0..64 {
+        let Ok((at, su, sv)) = crate::surface::surface::p1::evaluate_1st_derivatives(
+            k,
+            surface,
+            uv,
+            Side::Left,
+            Side::Left,
+        ) else {
+            break;
+        };
+        let r = point - at;
+        let (a11, a12, a22) = (su.dot(su), su.dot(sv), sv.dot(sv));
+        let (b1, b2) = (su.dot(r), sv.dot(r));
+        let det = a11 * a22 - a12 * a12;
+        if det.is_nan() || det <= EFF_ZERO_SQ * a11 * a22 {
+            break;
+        }
+        let du = (a22 * b1 - a12 * b2) / det;
+        let dv = (a11 * b2 - a12 * b1) / det;
+        let next = Point2::new(uv.x + du, uv.y + dv);
+        if !(next.x.is_finite() && next.y.is_finite()) {
+            break;
+        }
+        uv = next;
+        if (su * du + sv * dv).length() <= EFF_ZERO * size {
+            break;
+        }
+    }
+    evaluate_normal(k, surface, uv)
+}
+
 /// Side `ii`'s UV curve and surface, `None` when either is missing.
 fn coons_side<'a>(
     uv_curves: &'a [Option<BSplineCurve>],
@@ -2250,15 +2310,60 @@ fn coons_side<'a>(
     Some((uv, srf))
 }
 
-/// The largest angle [`coons_side_angle`] measured, with a bound on its rounding error.
-#[derive(Debug, Clone, Copy)]
-struct SideAngle {
-    /// The largest computed angle (radians) over the stations measured.
+/// The largest angle [`coons_side_angle`] measured along one side, over its certified
+/// stations, with a bound on its rounding error.
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct SideSup {
+    /// The largest computed angle (radians) over the side's certified stations.
     max: f64,
     /// An a-priori bound on `|max - exact|`, where `exact` is the largest angle the same
     /// stations have in exact arithmetic (patch evaluated exactly from its control net,
-    /// against the computed side normals); `PI` where no bound is known.
+    /// against the computed side normals); below `PI`, as every station counted has one.
     err: f64,
+}
+
+/// What [`coons_side_angle`] measured, per side (left, bottom, right, top): `None` for a
+/// side that does not vote, having no surface or no certified station.
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct SideAngle {
+    /// Each side's certified sup.
+    sides: [Option<SideSup>; 4],
+}
+
+impl SideAngle {
+    /// The largest angle and error bound over the sides in `voting`.
+    fn sup_over(&self, voting: impl Fn(usize) -> bool) -> Option<SideSup> {
+        let mut sup: Option<SideSup> = None;
+        for (ii, side) in self.sides.iter().enumerate() {
+            let Some(side) = side else { continue };
+            if !voting(ii) {
+                continue;
+            }
+            sup = Some(match sup {
+                None => *side,
+                Some(s) => SideSup {
+                    max: if side.max > s.max { side.max } else { s.max },
+                    err: s.err.max(side.err),
+                },
+            });
+        }
+        sup
+    }
+
+    /// The largest angle over every side that votes; `None` when none does.
+    fn sup(&self) -> Option<SideSup> {
+        self.sup_over(|_| true)
+    }
+
+    /// The sups of `self` and `other` over the sides that vote in both; `None` when no
+    /// side does.
+    fn joint(&self, other: &SideAngle) -> Option<(SideSup, SideSup)> {
+        let both = |ii: usize| other.sides.get(ii).is_some_and(Option::is_some);
+        let mine = self.sup_over(both)?;
+        let both = |ii: usize| self.sides.get(ii).is_some_and(Option::is_some);
+        let theirs = other.sup_over(both)?;
+        Some((mine, theirs))
+    }
 }
 
 /// The rounding data of a patch the angle bound needs: `(eu, ev)`, bounds on the
@@ -2366,7 +2471,59 @@ fn coons_station_error(
 /// even spacing steps over the short spans, and a refined copy whose projected rows bend
 /// the patch inside them read as tangent as the bare patch (WR-713: analytic034's sides
 /// leave the cylinder by 26 degrees inside the last span, against 20 at the corner).
+///
+/// Nor does the fork add [`coons_corner_stations`] in the first and last gaps.
 fn coons_stations(patch: &BSplineSurface, dir: SurfParamType, along: &Extent1d) -> Vec<f64> {
+    let mut stations = coons_span_stations(patch, dir, along);
+    let corners = coons_corner_stations(&stations);
+    stations.extend(corners);
+    stations
+}
+
+/// `2^(-j/4)` for `j` in `0..4`, rounded to nearest: the fractions of an octave
+/// [`coons_corner_stations`] steps by.
+const QUARTER_OCTAVES: [f64; 4] = [
+    1.0,
+    0.840_896_415_253_714_5,
+    std::f64::consts::FRAC_1_SQRT_2,
+    0.594_603_557_501_360_5,
+];
+
+/// Stations towards both corners of a side: in the first gap `[s0, s1]` of `stations`
+/// (ascending), `s0 + (s1 - s0) 2^(-e/4)` for `e` in `9..=64` (four an octave, from just
+/// under a quarter of the gap down to `2^-16` of it), and likewise from the last
+/// station back into the last gap.
+///
+/// Not the fork. A side's corner normal is set by the loop curves, so every candidate
+/// reads the same angle there, and next to the corner the patch normal turns from it
+/// faster than anywhere else on the side. A copy whose projected rows twist the corner's
+/// first span can rise above the corner's angle well inside the span's first station
+/// (WR-713: analytic064's refined copies leave the torus by 0.51721 radians `4.2e-6`
+/// along a side whose first span is `4.9e-4` long, above the corner's 0.51715), and that
+/// rise decides between candidates whose maxima are otherwise the corner's.
+fn coons_corner_stations(stations: &[f64]) -> Vec<f64> {
+    let mut corners = Vec::new();
+    let (Some(&s0), Some(&s1)) = (stations.first(), stations.get(1)) else {
+        return corners;
+    };
+    let n = stations.len();
+    let (Some(&t0), Some(&t1)) = (stations.get(n - 1), stations.get(n.wrapping_sub(2))) else {
+        return corners;
+    };
+    for e in 9..=64_usize {
+        let Some(&q) = QUARTER_OCTAVES.get(e % 4) else {
+            continue;
+        };
+        // 2^-(e / 4) is exact, and so the product's only rounding is the one of `q`
+        let f = q * 0.5_f64.powi(i32::try_from(e / 4).unwrap_or(0));
+        corners.push(s0 + (s1 - s0) * f);
+        corners.push(t0 - (t0 - t1) * f);
+    }
+    corners
+}
+
+/// The stations [`coons_stations`] spaces by the knot spans (without the corner ones).
+fn coons_span_stations(patch: &BSplineSurface, dir: SurfParamType, along: &Extent1d) -> Vec<f64> {
     let even = |count: usize| -> Vec<f64> {
         (0..count)
             .map(|kk| along.evaluate(kk as f64 / (count - 1) as f64))
@@ -2412,18 +2569,24 @@ fn coons_stations(patch: &BSplineSurface, dir: SurfParamType, along: &Extent1d) 
 /// top (v max); a side with no surface is skipped, and so is a station where the
 /// patch has no normal (a degenerate side's point).
 ///
-/// Not the fork: the result carries a rounding bound ([`SideAngle::err`], the largest
-/// [`coons_station_error`] over the stations, since the error of a maximum is at most
-/// the largest error of its terms), which [`make_coons_patch_tangent_to_sides`] uses to
-/// tell a real difference between candidates from rounding.
+/// Not the fork: the result is per side and carries a rounding bound ([`SideSup::err`],
+/// the largest [`coons_station_error`] over the side's stations, since the error of a
+/// maximum is at most the largest error of its terms), which
+/// [`make_coons_patch_tangent_to_sides`] uses to tell a real difference between
+/// candidates from rounding; a station with no such bound (its normal not certified) is
+/// left out, and a side left with none does not vote; and the side normal is the
+/// neighbour's at its point nearest the side ([`coons_side_normal_nearest`]), not at the
+/// UV curve's point. The side point is read from `sides`, the unrefined patch every
+/// candidate shares its sides with, so each station's side normal is the same vector in
+/// every candidate.
 fn coons_side_angle(
     k: &crate::kernel::Kernel,
     patch: &BSplineSurface,
+    sides: &BSplineSurface,
     uv_curves: &[Option<BSplineCurve>],
     surfaces: &[Option<&SmSurface>],
 ) -> Result<SideAngle> {
-    let mut max_angle = 0.0;
-    let mut max_err = 0.0_f64;
+    let mut per_side = [None; 4];
     let deriv_err = coons_derivative_errors(patch);
     let domain = patch.natural_uv_domain();
     let su = Extent1d::from_min_max(domain.min.x, domain.max.x);
@@ -2439,6 +2602,7 @@ fn coons_side_angle(
         } else {
             SurfParamType::V
         };
+        let mut sup: Option<SideSup> = None;
         for s in coons_stations(patch, dir, along) {
             let uv = match ii {
                 LEFT => Point2::new(su.min(), s),
@@ -2465,23 +2629,40 @@ fn coons_side_angle(
                 continue;
             }
             normal /= normal_length;
-            let side_normal = coons_side_normal(k, uv_curve, surface, along, s)?;
+            let (side_point, _, _) = crate::surface::surface::p1::evaluate_1st_derivatives(
+                k,
+                sides,
+                uv,
+                side(uv.x < su.max()),
+                side(uv.y < sv.max()),
+            )?;
+            let side_normal =
+                coons_side_normal_nearest(k, uv_curve, surface, along, s, side_point)?;
             let cos = normal.dot(side_normal).abs();
             let angle = acos(if cos < 1.0 { cos } else { 1.0 });
-            if angle > max_angle {
-                max_angle = angle;
-            }
             let err = match deriv_err {
                 Some(e) => coons_station_error(du, dv, e, side_normal, cos, angle),
                 None => PI,
             };
-            max_err = max_err.max(err);
+            // G1 is undefined where the patch normal is: a station whose normal is not
+            // certified (no derivative bound, or the cross product within its rounding of
+            // zero, as next to a collapsed corner) is left out, neither a tie nor a win
+            if err >= PI {
+                continue;
+            }
+            sup = Some(match sup {
+                None => SideSup { max: angle, err },
+                Some(m) => SideSup {
+                    max: if angle > m.max { angle } else { m.max },
+                    err: m.err.max(err),
+                },
+            });
+        }
+        if let Some(slot) = per_side.get_mut(ii) {
+            *slot = sup;
         }
     }
-    Ok(SideAngle {
-        max: max_angle,
-        err: max_err,
-    })
+    Ok(SideAngle { sides: per_side })
 }
 
 /// The fork's `sm_RefineToSpans`: knots inserted in `param`'s direction until no span
@@ -2665,7 +2846,10 @@ fn project_coons_side_rows(
 /// (WR-713: analytic028 kept the bare bicubic patch). Here two largest angles within
 /// the sum of their rounding bounds ([`coons_station_error`]) are tied, and a tie goes
 /// to the finer copy: the refinement's intent, with a largest angle at most that sum
-/// above the coarser one's. The choice depends only on the computed values, so it is
+/// above the coarser one's. G1 is undefined where the normal is, so only certified
+/// stations count ([`coons_side_angle`]), two candidates are compared over the sides
+/// that vote in both, and with no such side the choice stands (where the bare patch
+/// has none, it is kept). The choice depends only on the computed values, so it is
 /// deterministic.
 fn make_coons_patch_tangent_to_sides(
     k: &crate::kernel::Kernel,
@@ -2683,19 +2867,24 @@ fn make_coons_patch_tangent_to_sides(
     if tangency_tol_radians < target {
         target = tangency_tol_radians;
     }
-    let mut best_angle = coons_side_angle(k, patch, uv_curves, surfaces)?;
+    let mut best_angle = coons_side_angle(k, patch, patch, uv_curves, surfaces)?;
     let mut best = None;
     let mut spans = 8;
-    while spans <= 64 && best_angle.max > target {
+    while spans <= 64 && best_angle.sup().is_some_and(|sup| sup.max > target) {
         let mut attempt = patch.clone();
         refine_to_spans(&mut attempt, SurfParamType::U, spans)?;
         refine_to_spans(&mut attempt, SurfParamType::V, spans)?;
         project_coons_side_rows(k, &mut attempt, uv_curves, surfaces)?;
-        let angle = coons_side_angle(k, &attempt, uv_curves, surfaces)?;
-        // Not the fork (`angle < best_angle`): maxima within their rounding bounds of each
-        // other are tied, and a tie goes to the finer attempt.
-        let tied = (angle.max - best_angle.max).abs() <= angle.err + best_angle.err;
-        if tied || angle.max < best_angle.max {
+        let angle = coons_side_angle(k, &attempt, patch, uv_curves, surfaces)?;
+        // Not the fork (`angle < best_angle`): only the sides certified in both vote, and
+        // maxima within their rounding bounds of each other are tied, a tie going to the
+        // finer attempt. With no side voting the choice stands.
+        let Some((cand, held)) = angle.joint(&best_angle) else {
+            spans *= 2;
+            continue;
+        };
+        let tied = (cand.max - held.max).abs() <= cand.err + held.err;
+        if tied || cand.max < held.max {
             best_angle = angle;
             best = Some(attempt);
         }
