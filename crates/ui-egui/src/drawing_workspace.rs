@@ -874,6 +874,11 @@ mod tests {
         let mm_x = 175.0;
         let x = paper.left() + paper.width() * (mm_x / 420.0);
         let y = paper.bottom() - paper.height() * (140.0 / 297.0);
+        h.step(&json!({"move":[x,y]})).unwrap();
+        let hover = &crate::drawing_sheet_page::inspect(&h.app)["hover"];
+        assert_eq!(hover["object"], created["view"]);
+        assert_eq!(hover["on_edge"], false);
+        assert_eq!(hover["outlined"], true);
         h.step(&json!({"click":[x,y]})).unwrap();
         h.frames(3);
         assert!(crate::scenario::handle_at("drawing:view_selection:project").is_some());
