@@ -15,7 +15,11 @@
 //! in a loop (a zero-speed rib's grows by the spans it halves, to at most 1024), each
 //! Newton solve takes at most 40 steps.
 
+mod certificate;
+
+use crate::blend::fillet_section::certificate::NurbsCurve;
 use crate::blend::fillet_section::section::GnSectionFsg;
+use crate::blend::fillet_section::station::{as_b_spline, Nurbs};
 use crate::blend::fillet_solver::p1::{FilletSolver, FilletSurfaceGeneratorType};
 use crate::curve::curve::Curve;
 use crate::error::{Result, SolidError};
@@ -29,7 +33,7 @@ use crate::nurbs::b_spline_surface_n_lib::p2::EvaluateFlags;
 use crate::nurbs::crv_fit::p1::ParamMethod;
 use crate::nurbs::knots::Side;
 use crate::surface::surface::p5::DropPointOptions;
-use crate::surface::surface::Surface;
+use crate::surface::surface::{Surface, SurfaceKind};
 
 const OP_ORDER: &str = "blend::fillet_geom::tangent_end_rib::section_contact_order";
 const OP_RIB: &str = "blend::fillet_geom::tangent_end_rib::tangent_end_rib";
@@ -204,6 +208,10 @@ pub struct TangentEndRib {
     pub fillet_uv: BSplineCurve,
     /// `rpEndUV`: its UV curve on the end surface.
     pub end_uv: BSplineCurve,
+    /// Not upstream (#17744): the largest distance, certified span by span, of each curve
+    /// from the rib at the same parameter (the 3D curve's point, a UV curve's point on its
+    /// surface), at most the tolerance.
+    pub bound: f64,
 }
 
 /// `sm_TangentEndRib`: the end rib of a fillet at a tangent end, the fillet surface's
@@ -436,6 +444,25 @@ pub fn tangent_end_rib(
         #[allow(clippy::neg_cmp_op_on_partial_ord)]
         Ok(found.filter(|&(a, _, _)| !((a - alpha0) * (alpha1 - alpha0) <= 0.0)))
     };
+    let newton = |t: f64, y: [f64; 3]| -> Result<Option<[f64; 3]>> {
+        let [a, u, v] = y;
+        Ok(solve(t, a, Point2::new(u, v))?.map(|(a, e, _)| [a, e.x, e.y]))
+    };
+    // the faces' NURBS data for the certificate (#17744): a blend as the net it is
+    // evaluated by here; none where a face has none, or a blend is evaluated by its
+    // definition, and then no span is certified
+    let nurbs = |s: &Surface| -> Result<Option<Nurbs>> {
+        if let SurfaceKind::ProceduralBlend(pb) = s.kind() {
+            if !pb.net_answers(k) {
+                return Ok(None);
+            }
+        }
+        Ok(as_b_spline(k, s)?.and_then(|b| Nurbs::of(&b).ok()))
+    };
+    let faces = match (nurbs(fillet)?, nurbs(end)?) {
+        (Some(f), Some(e)) => Some((f, e)),
+        _ => None,
+    };
 
     // The stations, and the exact points there. A regular rib's stations are
     // t = j / spans, the spans doubled until the curves are within the tolerance. A
@@ -534,10 +561,28 @@ pub fn tangent_end_rib(
         let mut c_fil = interpolate(&fil_pts, &ts, d2_fil)?;
         let mut c_end = interpolate(&end_pts, &ts, d2_end)?;
 
-        // each span's midpoint against the exact rib point there; the spans off it, with
-        // that point
+        // each span's certified bound (#17744); the spans not bounded within the tolerance,
+        // with the exact rib point at their midpoint
+        let rib = match &faces {
+            Some((f, e)) => Some(certificate::Rib {
+                fillet: f,
+                end: e,
+                section,
+                sigma0,
+                d_sigma: sigma1 - sigma0,
+                odd,
+                order,
+                curves: [
+                    NurbsCurve::of(&c3d)?,
+                    NurbsCurve::of(&c_fil)?,
+                    NurbsCurve::of(&c_end)?,
+                ],
+            }),
+            None => None,
+        };
         let mut solved = true;
         let mut off: Vec<(usize, f64, Point2, Point3)> = Vec::new();
+        let mut bound = 0.0_f64;
         for jj in 0..spans {
             if !(zero_speed || off.is_empty()) {
                 break;
@@ -555,20 +600,24 @@ pub fn tangent_end_rib(
             let t = 0.5 * (t0 + t1);
             let alpha = 0.5 * (a0 + a1);
             let uv = Point2::new(0.5 * (e0.x + e1.x), 0.5 * (e0.y + e1.y));
-            let Some((alpha, uv, exact)) = solve(t, alpha, uv)? else {
-                solved = false;
-                break;
+            let ends = ((t0, [a0, e0.x, e0.y]), (t1, [a1, e1.x, e1.y]));
+            let within = match &rib {
+                // the span at the tangent end, on pieces graded toward it
+                Some(rib) if jj == 0 => rib
+                    .first_span_bound(&newton, ends.0 .1, ends.1, approx_tol)?
+                    .map(|(b, _)| b),
+                Some(rib) => rib.span_bound(&newton, ends.0, ends.1, approx_tol)?,
+                None => None,
             };
-            let on_3d = c3d.evaluate_point(t)?;
-            let on_fil_uv = c_fil.evaluate_point(t)?;
-            let on_end_uv = c_end.evaluate_point(t)?;
-            let on_fil = fillet.evaluate_point(k, Point2::new(on_fil_uv.x, on_fil_uv.y))?;
-            let on_end = end.evaluate_point(k, Point2::new(on_end_uv.x, on_end_uv.y))?;
-            if on_3d.distance(exact) > approx_tol
-                || on_fil.distance(exact) > approx_tol
-                || on_end.distance(exact) > approx_tol
-            {
-                off.push((jj, alpha, uv, exact));
+            match within {
+                Some(d) if d <= approx_tol => bound = bound.max(d),
+                _ => {
+                    let Some((alpha, uv, exact)) = solve(t, alpha, uv)? else {
+                        solved = false;
+                        break;
+                    };
+                    off.push((jj, alpha, uv, exact));
+                }
             }
         }
 
@@ -585,6 +634,7 @@ pub fn tangent_end_rib(
                 curve_3d: c3d,
                 fillet_uv: c_fil,
                 end_uv: c_end,
+                bound,
             });
         }
 
