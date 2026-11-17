@@ -2132,6 +2132,12 @@ impl SolveApp {
             let _ = self.run(id, json!({}));
             return;
         }
+        // The View ribbon's Save View captures the on-screen camera, like the Browser's
+        // New Named View action. Programmatic view.save still takes an explicit camera.
+        if id == "view.save" {
+            let _ = browser::save_view(self, None);
+            return;
+        }
         if id == "timeline.play" {
             if let Err(why) = self.run(id, json!({})) {
                 self.set_status(why, true);

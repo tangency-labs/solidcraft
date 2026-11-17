@@ -197,7 +197,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .icon("plane_angle")
         .contract(&PLANE_AT_ANGLE_CONTRACT)
         .output(output_schema_for::<FeatureResult>)
-        .params("base: XY|XZ|YZ|plane name, or a planar face {face: [x,y,z], body?, index?, path?}; axis: X|Y|Z|construction axis name (followed: the plane moves with the axis)|{origin, dir} (fixed) | {edge|face: [x,y,z]} (a straight or circular edge, or a cylinder, cone or torus face: about its axis, followed as the model changes); angle: expr; direction_only?: bool (default false: turn about the axis as a line; true: project the axis direction onto base and turn about the line through pivot, or the base origin); pivot?: point ref (only with direction_only; vertex, sketch point, construction point); name?"),
+        .params("base: XY|XZ|YZ|plane name, or a planar face {face: [x,y,z], body?, index?, path?}; axis: X|Y|Z|construction axis name (followed: the plane moves with the axis)|{origin, dir} (origin: [x,y,z] of numbers or length expressions, followed as the parameters change) | {edge|face: [x,y,z]} (a straight or circular edge, or a cylinder, cone or torus face: about its axis, followed as the model changes); angle: expr; direction_only?: bool (default false: turn about the axis as a line; true: project the axis direction onto base and turn about the line through pivot, or the base origin); pivot?: point ref (only with direction_only; vertex, sketch point, construction point); name?"),
     CommandSpec::new("solid.split_face", "Split Face", crate::checked!("solid.split_face", split_face))
         .at("SOLID", "MODIFY")
         .icon("split_face")
@@ -2731,7 +2731,7 @@ fn named_axis_line(s: &Session, p: &Value, cmd: &str) -> Result<(Vec3, Vec3, Opt
 pub(crate) fn axis_line_object(o: &Value) -> std::result::Result<(Vec3, Vec3), &'static str> {
     let origin = match o.get("origin") {
         None => Vec3::ZERO,
-        Some(v) => vec3(v).ok_or("axis.origin must contain three finite numeric coordinates in millimetres; expressions are not supported")?,
+        Some(v) => vec3(v).ok_or("axis.origin must contain three finite numeric coordinates in millimetres")?,
     };
     let dir = o.get("dir").and_then(vec3).and_then(|d| d.normalized()).ok_or("axis needs a non-zero `dir`")?;
     Ok((origin, dir))
@@ -2829,9 +2829,10 @@ fn pattern_rect(s: &mut Session, p: &Value) -> Result<Value> {
     finish_pattern(s, p, features, pattern, bodies)
 }
 
-/// The line a circular pattern turns about, as [`axis_line`] reads it, except that the origin of
-/// `{origin, dir}` may be length expressions, kept so the pattern follows them (#10852).
-fn pattern_axis(s: &Session, p: &Value, cmd: &str) -> Result<(PointExpr, Vec3, Option<solidcraft_doc::construct::GeoRef>, Option<FeatureName>)> {
+/// The line a circular pattern or a plane at an angle turns about, as [`axis_line`] reads it,
+/// except that the origin of `{origin, dir}` may be length expressions, kept so the feature
+/// follows them (#10852).
+fn axis_line_exprs(s: &Session, p: &Value, cmd: &str) -> Result<(PointExpr, Vec3, Option<solidcraft_doc::construct::GeoRef>, Option<FeatureName>)> {
     if let Some(a @ Value::Object(o)) = p.get("axis")
         && o.contains_key("origin")
         && !super::is_model_axis(a)
@@ -2848,7 +2849,7 @@ fn pattern_axis(s: &Session, p: &Value, cmd: &str) -> Result<(PointExpr, Vec3, O
 fn pattern_circ(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "solid.pattern.circular";
     let (features, bodies) = pattern_sources(s, p, cmd)?;
-    let (origin, axis, axis_ref, axis_feature) = pattern_axis(s, p, cmd)?;
+    let (origin, axis, axis_ref, axis_feature) = axis_line_exprs(s, p, cmd)?;
     let count = req_expr(cmd, p, "count")?;
     check_count(s, &count, cmd, "count")?;
     let angle = expr(p, "angle").unwrap_or_else(|| "360 deg".into());
@@ -3225,13 +3226,19 @@ fn plane_offset(s: &mut Session, p: &Value) -> Result<Value> {
 
 fn plane_angle(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "construct.plane.at_angle";
-    // The plane follows the edge, face or construction axis it turns about.
-    let (axis_origin, axis_dir, line, axis_feature) = axis_line(s, p, cmd)?;
+    // The plane follows the edge, face or construction axis it turns about, or the length
+    // expressions of an `{origin, dir}` axis's origin.
+    let (axis_origin, axis_dir, line, axis_feature) = axis_line_exprs(s, p, cmd)?;
     let line = line.or_else(|| axis_feature.map(|name| solidcraft_doc::construct::GeoRef::Axis { name }));
     let angle = req_expr(cmd, p, "angle")?;
     check_expr(s, &angle, Kind::Angle, cmd, "angle")?;
     let line = line.map(Box::new);
     let direction_only = crate::params::bool_(p, "direction_only").unwrap_or(false);
+    // With `direction_only` the plane turns about the pivot and never reads the origin, so a
+    // parameter in it would only block deleting that parameter.
+    if direction_only && line.is_none() && axis_origin.iter().any(|c| !solidcraft_doc::expr::references(c.as_str()).is_empty()) {
+        return Err(bad(cmd, "`axis.origin` is not used with `direction_only`: true, so it can't refer to parameters; give `pivot` instead"));
+    }
     let pivot = match p.get("pivot").filter(|t| !t.is_null()) {
         Some(_) if !direction_only => return Err(bad(cmd, "`pivot` needs `direction_only`: true")),
         Some(t) => Some(Box::new(super::construct::geo(s, Some(t), cmd, "pivot")?)),
@@ -3239,7 +3246,7 @@ fn plane_angle(s: &mut Session, p: &Value) -> Result<Value> {
     };
     let at_angle = |base: solidcraft_doc::PlaneRef| solidcraft_doc::PlaneRef::AtAngle {
         base: Box::new(base),
-        axis_origin,
+        axis_origin: axis_origin.clone(),
         axis_dir,
         angle: angle.clone(),
         line: line.clone(),

@@ -290,7 +290,7 @@ fn nested_anchor_saved_fixed_conversion_preserves_rotated_second_author_plane() 
     };
     *plane = PlaneRef::AtAngle {
         base: Box::new(PlaneRef::Offset { base: Box::new(plane.clone()), distance: "2 mm".into() }),
-        axis_origin: Vec3::ZERO,
+        axis_origin: solidcraft_engine::doc::point_expr(Vec3::ZERO),
         axis_dir: Vec3::X,
         angle: "15 deg".into(),
         line: None,
