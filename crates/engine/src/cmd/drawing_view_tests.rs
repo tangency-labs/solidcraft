@@ -4795,6 +4795,7 @@ fn drawn_hatches(s: &Session, id: u64) -> (ShownSet, Vec<crate::drawing_view::Bo
     let frame = crate::drawing_view::frame(view.basis, view.scale.value, &extents.model, Vec2::ZERO, "test").unwrap();
     let hatching = crate::drawing_view::hatches(&set, view.cut.as_ref().unwrap(), &frame, view.line_group.value);
     assert_eq!(hatching.refused, vec![], "every cut body is hatched");
+    assert_eq!(hatching.doubted, vec![], "no body is hatched in doubt");
     (set.into_owned(), hatching.bodies)
 }
 
@@ -4968,6 +4969,63 @@ fn mesh_bodies_and_reference_parts_are_not_hatched() {
     let (set, hatches) = drawn_hatches(&s, cut);
     let names: Vec<&str> = hatches.iter().map(|h| set.bodies[h.shown].body.as_str()).collect();
     assert_eq!(names, ["Plate"]);
+}
+
+/// Two blocks side by side, cut along the face where they meet, and a bar across the plane beside
+/// them. The block on the kept side is shown whole: its face on the plane faces out of the kept
+/// side, but no material was cut there, so it isn't cut or hatched. The bar is cut and hatched.
+#[test]
+fn a_cut_along_a_mating_face_hatches_no_uncut_face() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 20, "width": 20, "height": 20, "body_name": "A"}));
+    run(&mut s, "solid.box", json!({"length": 20, "width": 20, "height": 20, "corner": [20, 0, 0], "operation": "new", "body_name": "B"}));
+    run(&mut s, "solid.box", json!({"length": 20, "width": 10, "height": 20, "corner": [10, 40, 0], "operation": "new", "body_name": "Bar"}));
+    let (s, cut) = front_section(s, &[[20.0, -10.0], [20.0, 30.0]]);
+    let (set, hatches) = drawn_hatches(&s, cut);
+    // The case is reached: the block on the kept side is shown, and no cut failed.
+    let shown: Vec<&str> = set.bodies.iter().map(|b| b.body.as_str()).collect();
+    assert!(set.uncut.is_none() && shown.iter().any(|n| matches!(*n, "A" | "B")), "{shown:?} {:?}", set.uncut);
+    let cut_bodies: Vec<&str> = set.bodies.iter().filter(|b| set.cut.contains_key(&b.index)).map(|b| b.body.as_str()).collect();
+    assert_eq!(cut_bodies, ["Bar"]);
+    let names: Vec<&str> = hatches.iter().map(|h| set.bodies[h.shown].body.as_str()).collect();
+    assert_eq!(names, ["Bar"]);
+}
+
+/// `s`'s bodies written to STEP and read back as the one feature of a new design, as an imported
+/// part arrives: no modelling history of its own.
+fn imported(s: &Session) -> Session {
+    let step = solidcraft_io::export(&s.model.state(), &[], solidcraft_io::Format::Step, "Parts").unwrap();
+    let imported = solidcraft_io::step_import_feature(&step, "parts.step").unwrap();
+    let mut doc = solidcraft_doc::Document::new("Imported parts");
+    let import = doc.add_feature(imported.kind, None).unwrap();
+    doc.feature_mut(import).unwrap().body_names = imported.body_names;
+    Session::new(doc)
+}
+
+/// A 20 mm block imported from STEP and cut through its middle: its cut face is hatched, and the
+/// view has no doubt to report (nothing of the block lay on the plane before the cut).
+#[test]
+fn an_imported_part_cut_through_its_middle_is_hatched() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 20, "width": 20, "height": 20, "body_name": "Block"}));
+    let (s, cut) = front_section(imported(&s), &[[10.0, -10.0], [10.0, 30.0]]);
+    let (set, hatches) = drawn_hatches(&s, cut);
+    assert_eq!(set.cut.len(), 1, "{:?}", set.cut);
+    assert!(hatches.len() == 1 && !hatches[0].filled && !hatches[0].strokes.is_empty(), "{hatches:?}");
+}
+
+/// The two blocks of [`a_cut_along_a_mating_face_hatches_no_uncut_face`], imported from STEP and cut
+/// along the face where they meet: the block on the kept side only touches the plane, so nothing of
+/// it is cut or hatched, whatever history the cut kept.
+#[test]
+fn an_imported_part_touching_the_plane_is_not_hatched() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 20, "width": 20, "height": 20, "body_name": "A"}));
+    run(&mut s, "solid.box", json!({"length": 20, "width": 20, "height": 20, "corner": [20, 0, 0], "operation": "new", "body_name": "B"}));
+    let (s, cut) = front_section(imported(&s), &[[20.0, -10.0], [20.0, 30.0]]);
+    let (set, hatches) = drawn_hatches(&s, cut);
+    assert!(set.uncut.is_none() && !set.bodies.is_empty(), "{:?}", set.uncut);
+    assert!(set.cut.is_empty() && hatches.is_empty(), "{:?} {hatches:?}", set.cut);
 }
 
 /// A section view's sheet draws its hatching under its lines, and `drawing.scene` lists it per body:

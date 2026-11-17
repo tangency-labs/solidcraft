@@ -37,7 +37,7 @@ mod lines;
 mod threads;
 
 pub use exact::{Fallback, PreparedBodies};
-pub use hatch::{BodyHatch, FLATTEN_MM, Hatching, hatches};
+pub use hatch::{BodyHatch, CutFaces, FLATTEN_MM, Hatching, hatches};
 pub use lines::{CHORD_MM, CHORD_RANGE, LineRequest, Lines, MIN_MODEL_CHORD_MM, Made, Piece, Stats, ViewLine, lines, paper_group, paper_lines};
 pub use threads::ThreadLine;
 
@@ -171,9 +171,9 @@ pub struct ShownSet {
     pub bodies: Vec<Shown>,
     /// In a section view, which of its parts it draws uncut, and why ([`measured`]).
     pub uncut: Option<String>,
-    /// In a section view, the bodies its plane cut, by their index among the state's bodies: the
-    /// ones it hatches.
-    pub cut: BTreeSet<usize>,
+    /// In a section view, the bodies its plane cut, by their index among the state's bodies (the
+    /// ones it hatches), and how each tells its cut faces ([`CutFaces`]).
+    pub cut: BTreeMap<usize, CutFaces>,
 }
 
 impl ShownSet {
@@ -507,7 +507,7 @@ pub fn shown(s: &Session) -> std::result::Result<ShownSet, Unmeasured> {
             Shown { index, path, body, reference }
         })
         .collect();
-    if bodies.is_empty() { Err(Unmeasured::NoBodies) } else { Ok(ShownSet { state, bodies, uncut: None, cut: BTreeSet::new() }) }
+    if bodies.is_empty() { Err(Unmeasured::NoBodies) } else { Ok(ShownSet { state, bodies, uncut: None, cut: BTreeMap::new() }) }
 }
 
 /// A saved view on its sheet.
@@ -615,7 +615,7 @@ fn sectioned(set: &ShownSet, cut: &Cut) -> std::result::Result<ShownSet, Unmeasu
     let plane = cut.line.planes(&cut.parent).map_err(|e| e.to_string()).and_then(|p| p.into_iter().next().ok_or_else(|| "no plane".into()));
     let mut state = ModelState::clone(&set.state);
     let (mut bodies, mut meshes, mut failed, mut why_failed) = (Vec::new(), 0usize, 0usize, None);
-    let mut cut_bodies = BTreeSet::new();
+    let mut cut_bodies = BTreeMap::new();
     for shown in &set.bodies {
         let Some(body) = set.body(shown) else { continue };
         if shown.reference {
@@ -630,8 +630,12 @@ fn sectioned(set: &ShownSet, cut: &Cut) -> std::result::Result<ShownSet, Unmeasu
         match plane.clone().and_then(|plane| body.section(&plane).map_err(|e| e.to_string())) {
             Ok(Some(section)) => {
                 if let Some(slot) = state.bodies.get_mut(shown.index) {
+                    // A body that only touches the plane is shown whole, and nothing of it is hatched.
+                    let telling = plane.as_ref().ok().and_then(|plane| hatch::cut_faces(&body.body, &section.body, plane));
+                    if let Some(telling) = telling {
+                        cut_bodies.insert(shown.index, telling);
+                    }
                     *slot = section;
-                    cut_bodies.insert(shown.index);
                 }
                 bodies.push(shown.clone());
             }

@@ -880,7 +880,12 @@ fn draw(
                 let name = set.bodies.get(*at).map_or("a body", |b| b.body.as_str());
                 format!("{name} isn't hatched: {why}")
             });
-            let says = why.clone().into_iter().chain(refused).reduce(|a, b| format!("{a}; {b}"));
+            // A body hatched in doubt, too.
+            let doubted = hatched.doubted.iter().map(|(at, why)| {
+                let name = set.bodies.get(*at).map_or("a body", |b| b.body.as_str());
+                format!("{name}: {why}")
+            });
+            let says = why.clone().into_iter().chain(refused).chain(doubted).reduce(|a, b| format!("{a}; {b}"));
             let hatches = hatched
                 .bodies
                 .iter()
