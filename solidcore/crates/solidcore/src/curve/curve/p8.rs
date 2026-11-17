@@ -76,9 +76,21 @@
 //!   again on the first parameter, which the later passes assume; a move landing exactly on a
 //!   contact another solution names is dropped instead (the contact is not reported
 //!   twice).
+//! - **Crossings seen through the tolerance (WR-647).** Before the range classification
+//!   (and at the single leaf pair exit), a merged range is taken for the one crossing
+//!   inside it when all four of its end points lie farther than the tolerance from both
+//!   curves' interval ends and the curves change sides across it (the separations at its
+//!   ends, taken across this curve, both past the scaled zero with a negative dot
+//!   product); [`local_curve_intersect`] finds the crossing from where the separation,
+//!   taken as linear, vanishes, and none found is `Failed`. Upstream keeps such a range,
+//!   which becomes a tiny edge (#1979). A coincidence of two curves lying on each other
+//!   ends where one of them stops, so a fitted copy of a curve, whose tolerance-scale
+//!   separation can change sides, stays a range (#1036). The fork decided this per span
+//!   pair (tangency-labs/smlib@c2e3d9d), where the two cannot be told apart.
 
 use crate::curve::curve::p1::refine_cc_solutions;
 use crate::curve::curve::p2::{at, CciGlobalSolver, Curve, CurveKind};
+use crate::curve::curve::p3::local_curve_intersect;
 use crate::curve::curve::p4::{analytic_curve_intersect, AnalyticOperand};
 use crate::curve::curve::p5::{make_curve_cache_with_zone_tol, memoized_cache_top_box};
 use crate::curve::curve_cache::CurveCache;
@@ -1232,6 +1244,16 @@ impl Curve {
 
                 // exit criteria - No Solution or 1 intersection Solution far from tangency
                 if finished {
+                    // Not upstream (WR-647): the one leaf pair's range is the whole stretch
+                    // where the curves are within tolerance (no other leaf boxes meet).
+                    self.crossing_ranges_to_points(
+                        k,
+                        &mut sols,
+                        other,
+                        interval,
+                        other_interval,
+                        dist_tol,
+                    )?;
                     return Ok(sols);
                 }
             }
@@ -1566,6 +1588,10 @@ impl Curve {
             &this_whole_domain,
             &other_whole_domain,
         )?;
+
+        // Not upstream (WR-647): a merged range that ends where the curves part on both
+        // sides and across which they change sides is their crossing.
+        self.crossing_ranges_to_points(k, &mut sols, other, interval, other_interval, dist_tol)?;
 
         // check each coincident interval solution: very short or diverging intervals
         // become point solutions.
@@ -2297,6 +2323,113 @@ impl Curve {
             } else {
                 ii += 1;
             }
+        }
+        Ok(())
+    }
+
+    /// Not upstream (WR-647; the fork's tangency-labs/smlib@c2e3d9d, decided here on the
+    /// merged range instead of on one span pair): turns each range solution that is a
+    /// crossing of two distinct curves, seen through the tolerance, into that crossing.
+    ///
+    /// The span pairs report a range wherever the curves stay within `dist_tol` of each
+    /// other. Two distinct curves crossing at a shallow angle (two equal circles a little
+    /// apart) do so over a short stretch about the crossing, and the range becomes a tiny
+    /// edge. A range is such a crossing when
+    /// - both its ends lie inside both curves: the end's point on each curve is farther
+    ///   than `dist_tol` from both ends of that curve's interval. The range ends where the
+    ///   curves part, not where one of them stops, as a coincidence does: an edge and a
+    ///   fitted copy of it, whose separation is tolerance-scale fit error that can change
+    ///   sides anywhere, coincide up to where one of them ends. On one span pair the two
+    ///   cannot be told apart, which is why this is decided on the merged range;
+    /// - the separations at its ends, taken across this curve (the tangent's component
+    ///   removed), are both longer than the scaled zero and point to opposite sides (a
+    ///   negative dot product). A NaN fails these tests and keeps the range.
+    ///
+    /// The crossing is the one [`local_curve_intersect`] finds within `dist_tol` in the
+    /// range, started where the separation, taken as linear between the ends, vanishes.
+    ///
+    /// # Errors
+    ///
+    /// Those of the evaluations and of [`local_curve_intersect`]; `Failed` when the
+    /// curves change sides across the range but no crossing is found in it.
+    pub(crate) fn crossing_ranges_to_points<O: SolutionObject>(
+        &self,
+        k: &Kernel,
+        sols: &mut SolutionArray<O>,
+        other: &Self,
+        interval: &Extent1d,
+        other_interval: &Extent1d,
+        dist_tol: f64,
+    ) -> Result<()> {
+        if !sols
+            .as_slice()
+            .iter()
+            .any(|s| s.solution_type == SolutionType::RangeOfValues)
+        {
+            return Ok(());
+        }
+        let self_ends = [
+            self.evaluate_point(k, interval.min())?,
+            self.evaluate_point(k, interval.max())?,
+        ];
+        let other_ends = [
+            other.evaluate_point(k, other_interval.min())?,
+            other.evaluate_point(k, other_interval.max())?,
+        ];
+        // farther than the tolerance from both ends (NaN is not)
+        let inside = |p: Vec3, ends: &[Vec3; 2]| ends.iter().all(|e| p.distance(*e) > dist_tol);
+        for ii in 0..sols.len() {
+            let mut sol = sol_at(sols, ii)?;
+            if sol.solution_type != SolutionType::RangeOfValues {
+                continue;
+            }
+            let (s, e) = (sol.start.parameters, sol.end.parameters);
+            let this_a = self.evaluate_point(k, s[0])?;
+            let this_b = self.evaluate_point(k, e[0])?;
+            let other_a = other.evaluate_point(k, s[1])?;
+            let other_b = other.evaluate_point(k, e[1])?;
+            if !(inside(this_a, &self_ends)
+                && inside(this_b, &self_ends)
+                && inside(other_a, &other_ends)
+                && inside(other_b, &other_ends))
+            {
+                continue;
+            }
+            let separation_a = self.across_tangent(k, s[0], other_a - this_a)?;
+            let separation_b = self.across_tangent(k, e[0], other_b - this_b)?;
+            let scaled_zero =
+                EFF_ZERO * (1.0 + max2(this_a.max_dimension(), this_b.max_dimension()));
+            let (da, db) = (separation_a.length(), separation_b.length());
+            if !(da > scaled_zero && db > scaled_zero && separation_a.dot(separation_b) < 0.0) {
+                continue;
+            }
+            // start where the separation, taken as linear between the ends, vanishes
+            let w = da / (da + db);
+            let mut ivl1 = Extent1d::from_value(s[0]);
+            ivl1.add_value(e[0]);
+            let mut ivl2 = Extent1d::from_value(s[1]);
+            ivl2.add_value(e[1]);
+            let found = local_curve_intersect(
+                k,
+                self,
+                &ivl1,
+                other,
+                &ivl2,
+                dist_tol,
+                s[0] + w * (e[0] - s[0]),
+                s[1] + w * (e[1] - s[1]),
+            )?;
+            let Some(cross) = found else {
+                return Err(SolidError::curve_failed(
+                    OP_GCI,
+                    "the curves change sides across a range but no crossing was found in it",
+                ));
+            };
+            sol.start.parameters[0] = cross.my_param;
+            sol.start.parameters[1] = cross.other_param;
+            sol.start.solution_value = cross.deviation;
+            sol.solution_type = SolutionType::SingleValue;
+            put_at(sols, ii, &sol)?;
         }
         Ok(())
     }

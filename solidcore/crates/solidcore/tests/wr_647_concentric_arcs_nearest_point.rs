@@ -1,10 +1,15 @@
-//! WR-647 addendum (the fork's tangency-labs/smlib@04b42b4, case 3e of
-//! `SmCurve::SimpleCoincidenceChecker`): two curves within tolerance whose separation keeps
-//! one side without vanishing do not coincide, they come nearest at one point. Two concentric
-//! 90 degree arcs, r 5 and r 5 + `gap`, checked against each other at tolerance 1e-5: upstream
-//! (and the port by default) returns one coincidence range over the whole arcs. With
-//! `Kernel::fixes.simple_coincidence_crossing_is_point` it is one point, the arcs `gap`
-//! apart there. The same arc twice (separation at numeric zero) stays a range either way.
+//! WR-647: which contacts of two curves within tolerance are a coincidence range.
+//!
+//! Two concentric 90 degree arcs, r 5 and r 5 + `gap`, at tolerance 1e-5, are `gap` apart at
+//! every angle (closed form: the points at one angle lie on one ray from the centre). Within
+//! the tolerance they are the same curve: `SimpleCoincidenceChecker` and
+//! `GlobalCurveIntersect` return one coincidence range over the whole arcs, as upstream.
+//! (The fork's 04b42b4, "case 3e", took such a range for the one point where the curves
+//! come nearest; with a constant separation every point is nearest, and an edge against a
+//! fitted copy of itself, whose separation is never zero, fell apart into points: the
+//! coincident skins of tangency-labs/solidcore#1036.) A crossing of two distinct curves
+//! seen through the tolerance is decided on the merged range in `GlobalCurveIntersect`
+//! (`issue_1979_ring_lip_crossing_not_coincidence.rs`, and the crossing test below).
 #![allow(
     clippy::unwrap_used,
     clippy::expect_used,
@@ -12,18 +17,23 @@
     clippy::indexing_slicing
 )] // test helpers
 
+use solidcore::curve::curve::p8::CurveIntersectOptions;
 use solidcore::curve::curve::Curve;
-use solidcore::geom::solution_array::{Solution, SolutionType};
+use solidcore::geom::solution_array::{ObjectKind, Solution, SolutionObject, SolutionType};
 use solidcore::math::Point3;
 use solidcore::primitive::api_curves::create_arc;
 use solidcore::Kernel;
 
 const TOL: f64 = 1e-5;
 
-fn kernel(fix: bool) -> Kernel {
-    let mut k = Kernel::default();
-    k.fixes.simple_coincidence_crossing_is_point = fix;
-    k
+/// A curve handle for the solutions of `GlobalCurveIntersect` (none are named here).
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct H;
+
+impl SolutionObject for H {
+    fn kind(&self) -> ObjectKind {
+        ObjectKind::Curve
+    }
 }
 
 fn arc(r: f64) -> Curve {
@@ -32,8 +42,8 @@ fn arc(r: f64) -> Curve {
 
 /// `SimpleCoincidenceChecker` of the arc r 5 against the arc r 5 + `gap`, over their natural
 /// intervals.
-fn check(fix: bool, gap: f64) -> (Curve, Curve, Vec<Solution<u8>>) {
-    let k = kernel(fix);
+fn check(gap: f64) -> (Curve, Curve, Vec<Solution<u8>>) {
+    let k = Kernel::default();
     let a = arc(5.0);
     let b = arc(5.0 + gap);
     let (ia, ib) = (a.natural_interval(), b.natural_interval());
@@ -43,16 +53,12 @@ fn check(fix: bool, gap: f64) -> (Curve, Curve, Vec<Solution<u8>>) {
     (a, b, sols)
 }
 
+/// One coincidence range over the whole arcs, and the arcs are `gap` apart along it.
 #[test]
-fn wr_647_crossing_is_point_is_off_by_default() {
-    assert!(!Kernel::default().fixes.simple_coincidence_crossing_is_point);
-}
-
-/// Upstream: one coincidence range over the whole arcs.
-#[test]
-fn wr_647_concentric_arcs_within_tolerance_are_a_range_by_default() {
+fn wr_647_concentric_arcs_within_tolerance_are_a_range() {
+    let k = Kernel::default();
     for gap in [1e-6, 5e-6, 1e-9] {
-        let (a, b, sols) = check(false, gap);
+        let (a, b, sols) = check(gap);
         assert_eq!(sols.len(), 1, "gap {gap}: {sols:?}");
         let s = &sols[0];
         assert_eq!(s.solution_type, SolutionType::RangeOfValues, "gap {gap}");
@@ -73,54 +79,61 @@ fn wr_647_concentric_arcs_within_tolerance_are_a_range_by_default() {
             (s.end.parameters[1] - ib.max()).abs() < 1e-9,
             "gap {gap}: {s:?}"
         );
+        // the range's ends pair the arcs' ends, `gap` apart (closed form)
+        for (t, u) in [(ia.min(), ib.min()), (ia.max(), ib.max())] {
+            let d = a
+                .evaluate_point(&k, t)
+                .unwrap()
+                .distance(b.evaluate_point(&k, u).unwrap());
+            assert!((d - gap).abs() <= 1e-12, "gap {gap}: ends {d} apart");
+        }
     }
 }
 
-/// With the fix (04b42b4's case 3e): one point, where the arcs are `gap` apart.
+/// The merged answer of `GlobalCurveIntersect` is the same range: it ends where the arcs end,
+/// so it is no crossing seen through the tolerance.
 #[test]
-fn wr_647_concentric_arcs_within_tolerance_are_their_nearest_point() {
+fn wr_647_concentric_arcs_intersect_in_one_range() {
     let k = Kernel::default();
-    for gap in [1e-6, 5e-6, 1e-9] {
-        let (a, b, sols) = check(true, gap);
-        eprintln!("WR647 3e gap {gap}: {sols:?}");
-        assert_eq!(sols.len(), 1, "gap {gap}: {sols:?}");
-        let s = &sols[0];
-        assert_eq!(s.solution_type, SolutionType::SingleValue, "gap {gap}");
-        let p = a.evaluate_point(&k, s.start.parameters[0]).unwrap();
-        let q = b.evaluate_point(&k, s.start.parameters[1]).unwrap();
-        assert!(
-            (p.distance(q) - gap).abs() <= 1e-12,
-            "gap {gap}: the points are {} apart",
-            p.distance(q)
+    for gap in [1e-6, 5e-6] {
+        let a = arc(5.0);
+        let b = arc(5.0 + gap);
+        let (ia, ib) = (a.natural_interval(), b.natural_interval());
+        let sols = a
+            .global_curve_intersect(
+                &k,
+                &ia,
+                &b,
+                &ib,
+                TOL,
+                &CurveIntersectOptions::<H>::default(),
+            )
+            .unwrap();
+        let all = sols.as_slice();
+        assert_eq!(all.len(), 1, "gap {gap}: {all:?}");
+        assert_eq!(
+            all[0].solution_type,
+            SolutionType::RangeOfValues,
+            "gap {gap}: {all:?}"
         );
     }
 }
 
-/// The same arc twice: the separation vanishes, so it stays a range in both settings.
+/// The same arc twice: the separation vanishes, so it stays a range.
 #[test]
 fn wr_647_the_same_arc_twice_stays_a_range() {
-    for fix in [false, true] {
-        let (_, _, sols) = check(fix, 0.0);
-        assert_eq!(sols.len(), 1, "fix {fix}: {sols:?}");
-        assert_eq!(
-            sols[0].solution_type,
-            SolutionType::RangeOfValues,
-            "fix {fix}"
-        );
-    }
+    let (_, _, sols) = check(0.0);
+    assert_eq!(sols.len(), 1, "{sols:?}");
+    assert_eq!(sols[0].solution_type, SolutionType::RangeOfValues);
 }
 
 /// An arc against a copy of itself that stops 4.8e-6 short of each end (an edge against
-/// its coincident copy in a body cut by itself): the curves lie on each other, yet the end
-/// pairs' separations run along the curves, forward at one end and back at the other. With
-/// `simple_coincidence_crossing_is_point` upstream read that as a crossing: one point (where
-/// the curves cannot cross, they lie on each other), or a failure where no crossing is
-/// found. The side is taken across the curve, nothing changes sides, and the answer is the
-/// coincidence range over the shorter arc.
+/// its coincident copy in a body cut by itself): the curves lie on each other, and the answer
+/// is the coincidence range over the shorter arc.
 #[test]
 fn an_arc_and_its_shorter_copy_coincide_over_the_copy() {
     let shortfall_deg = (4.8e-6 / 5.0_f64).to_degrees();
-    let k = kernel(true);
+    let k = Kernel::default();
     let a = arc(5.0);
     let b = Curve::from(
         create_arc(
@@ -153,6 +166,41 @@ fn an_arc_and_its_shorter_copy_coincide_over_the_copy() {
         assert!(
             gap <= 4.8e-6 + 1e-12,
             "the range's ends lie on each other: {gap}"
+        );
+    }
+}
+
+/// Two equal arcs (r 5, 0..180 degrees) whose centres are `e` apart along x cross once, at
+/// x = e / 2, y = sqrt(25 - e^2 / 4) (closed form), at an angle of about e / 5 radians, so
+/// they stay within the tolerance over a stretch about the crossing whose ends lie inside
+/// both arcs. `GlobalCurveIntersect` gives that crossing as one point, not a range.
+#[test]
+fn wr_647_equal_arcs_a_little_apart_cross_at_one_point() {
+    let k = Kernel::default();
+    for e in [1e-4, 1e-3] {
+        let a = Curve::from(create_arc(Point3::new(0.0, 0.0, 0.0), 5.0, 0.0, 180.0).unwrap());
+        let b = Curve::from(create_arc(Point3::new(e, 0.0, 0.0), 5.0, 0.0, 180.0).unwrap());
+        let (ia, ib) = (a.natural_interval(), b.natural_interval());
+        let sols = a
+            .global_curve_intersect(
+                &k,
+                &ia,
+                &b,
+                &ib,
+                TOL,
+                &CurveIntersectOptions::<H>::default(),
+            )
+            .unwrap();
+        let all = sols.as_slice();
+        assert_eq!(all.len(), 1, "e {e}: {all:?}");
+        let s = &all[0];
+        assert_eq!(s.solution_type, SolutionType::SingleValue, "e {e}: {s:?}");
+        let want = Point3::new(e / 2.0, (25.0 - e * e / 4.0).sqrt(), 0.0);
+        let p = a.evaluate_point(&k, s.start.parameters[0]).unwrap();
+        let q = b.evaluate_point(&k, s.start.parameters[1]).unwrap();
+        assert!(
+            p.distance(want) <= TOL && q.distance(want) <= TOL,
+            "e {e}: {p:?} {q:?}"
         );
     }
 }

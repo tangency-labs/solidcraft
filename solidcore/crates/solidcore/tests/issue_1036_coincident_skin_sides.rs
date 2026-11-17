@@ -1,9 +1,13 @@
 //! tangency-labs/solidcore#1036: two capped degree-1 skins sharing three section curves
 //! (A through sections 0..4, B through 2..6), so their side faces coincide between z = 20
 //! and z = 40. Upstream (C++ at `c9c5979` and v1.0.1 `3fd5b95`) returns an empty A − B and
-//! all of A for A ∩ B, and fails A ∪ B (1001) (WR-473); the port does the same with
-//! `simple_coincidence_crossing_is_point` (WR-647). By default the port refuses all three
-//! (1001, `MergeCurveClasses`); before #17200 it read a vertex a failed merge had squeezed.
+//! all of A for A ∩ B, and fails A ∪ B (1001) (WR-473). The port refuses all three (1001,
+//! `MergeCurveClasses`); before #17200 it read a vertex a failed merge had squeezed. The
+//! fitted z = 20/40 section curves and B's section edges are 2.6e-6..1.7e-5 apart at
+//! tolerance 2e-5, and their separation changes sides: the retired
+//! `simple_coincidence_crossing_is_point` took such a span pair for a crossing, and the
+//! Booleans then gave the wrong bodies (A − B empty, A ∩ B = A). A crossing is now decided
+//! on the merged range, which ends where one of the coincident curves stops (WR-647).
 #![allow(
     clippy::unwrap_used,
     clippy::expect_used,
@@ -224,7 +228,9 @@ fn outcome(k: &mut Kernel, op: usize) -> solidcore::Result<f64> {
 /// vertex as a loop end and `FixGaps` failed reading it ("topology handle is unknown").
 /// `MarkCommon` ignores the closure's own failure, as upstream does, and starts a new pass;
 /// each Boolean must then give the right body or a typed refusal. Today all three refuse
-/// with 1001 from a later `MergeCurveClasses` (the coincident side faces, WR-473).
+/// with 1001 from a later `MergeCurveClasses` (the coincident side faces, WR-473); taking
+/// the coincident section edges for crossings per span pair (WR-647, the retired flag)
+/// gave A − B an empty body here.
 /// The right volumes follow from the operands: A ∩ B is the skin through sections 2..4
 /// (both skins are ruled through the same sections there), A − B = A − A ∩ B and
 /// A ∪ B = A + B − A ∩ B.

@@ -102,6 +102,11 @@
 //!   solves, cylinder guesses, `LocalCurveSolve`), `GlobalCurveSolve`'s boxes and
 //!   `SolveIt`s, the tight boxes' evaluations and `IsOnPlane`; `IsOnPositiveSideOfPlanes`
 //!   is `FALSE` when the classification fails.
+//! - **Projected crossings (WR-647).** The projected intersections of `GlobalCurveSolve`
+//!   take a merged range for the crossing inside it by the rule of `GlobalCurveIntersect`
+//!   (unit `curve.curve_p8`), decided on the curves as projected
+//!   ([`ProjectedCurve`]s built as the solver's leaf solve builds them). A projection
+//!   without its vectors is `InvalidInput` there.
 
 use crate::curve::curve::p2::{
     proj_signed_angle, CcGlobalSolver, CciGlobalSolver, Curve, CurveKind, CurvePropertyType,
@@ -115,6 +120,7 @@ use crate::curve::curve::p6::is_measurable_box;
 use crate::curve::curve::p7::PropertyAnalysisOptions;
 use crate::curve::curve::p8::{operand_handles, CurveIntersectOptions};
 use crate::curve::curve_cache::CurveCache;
+use crate::curve::projected_curve::{OwnsCurve, ProjectedCurve};
 use crate::error::{ignored, Result, SolidError};
 use crate::geom::extent1d::Extent1d;
 use crate::geom::extent3d::Extent3d;
@@ -1510,6 +1516,51 @@ impl Curve {
                 },
                 &mut sols,
             )?;
+            // Not upstream (WR-647): a merged range is a crossing seen through the
+            // tolerance when it ends where the projected curves part, inside both, and they
+            // change sides across it, as in `GlobalCurveIntersect`; decided on the curves as
+            // projected, which the solver compared
+            let vecs = opts.opt_vectors.unwrap_or(&[]);
+            let vector = |i: usize| {
+                vecs.get(i).copied().ok_or(SolidError::invalid_input(
+                    OP_GCS,
+                    "projected intersection without its projection vectors",
+                ))
+            };
+            let (point, unit, aux) = match projection_type {
+                ProjectionType::Parallel => (
+                    Vec3::new(0.0, 0.0, 0.0),
+                    vector(0)?,
+                    Vec3::new(0.0, 0.0, 0.0),
+                ),
+                _ => (vector(0)?, vector(1)?, vector(2)?),
+            };
+            let project = |c: &Curve| {
+                ProjectedCurve::new(
+                    c.clone(),
+                    Some(point),
+                    Some(unit),
+                    Some(aux),
+                    projection_type,
+                    OwnsCurve::No,
+                )
+                .map(Curve::from)
+            };
+            if sols
+                .as_slice()
+                .iter()
+                .any(|s| s.solution_type == SolutionType::RangeOfValues)
+            {
+                let (p1, p2) = (project(self)?, project(other)?);
+                p1.crossing_ranges_to_points(
+                    k,
+                    &mut sols,
+                    &p2,
+                    interval,
+                    other_interval,
+                    dist_tol,
+                )?;
+            }
             // all done
             return Ok(sols);
         }

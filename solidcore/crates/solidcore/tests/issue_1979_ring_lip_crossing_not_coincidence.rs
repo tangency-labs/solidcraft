@@ -3,11 +3,10 @@
 //! y >= 10, z 2..20), both linear sweeps of their outlines. The r 5 walls intersect through
 //! the curve/curve global solver on the two circles, whose span ends lie within 1e-9 of the
 //! other circle: `SmCurve::SimpleCoincidenceChecker` takes the span pair as a coincidence
-//! range, although the circles cross inside it, and the range becomes a tiny edge. Upstream
-//! (the default) is then non-manifold at e = 1e-4 (`SmTrimmingTools` #0/#2/#3/#4, as the fork
-//! reports) and gives no solid (volume 0) at e = 1e-3; with
-//! `Kernel::fixes.simple_coincidence_crossing_is_point` the range is the crossing and every
-//! offset is a valid manifold solid of the analytic volume.
+//! range, although the circles cross inside it, and upstream keeps the range, which becomes a
+//! tiny edge: no solid (volume 0) at e = 1e-3. `GlobalCurveIntersect` now takes a merged range
+//! that ends where the circles part on both sides, and across which they change sides, for
+//! their crossing, and every offset is a valid manifold solid of the analytic volume.
 #![allow(
     clippy::unwrap_used,
     clippy::expect_used,
@@ -70,9 +69,8 @@ fn ring_and_lip(k: &mut Kernel, e: f64) -> solidcore::Result<Brep> {
 
 /// Whether the union is a manifold solid, its level-2 check failures and its volume; or
 /// the union's refusal.
-fn union_at(e: f64, fix: bool) -> solidcore::Result<(bool, Vec<String>, f64)> {
+fn union_at(e: f64) -> solidcore::Result<(bool, Vec<String>, f64)> {
     let mut k = Kernel::default();
-    k.fixes.simple_coincidence_crossing_is_point = fix;
     let mut b = ring_and_lip(&mut k, e)?;
     let manifold = is_manifold_solid(&b).unwrap();
     let check = check_brep(&mut k, &mut b, CheckLevel::Level2).unwrap();
@@ -86,30 +84,14 @@ fn want() -> f64 {
 }
 
 #[test]
-fn issue_1979_ring_lip_union_is_valid_at_every_offset_with_the_fix() {
+fn issue_1979_ring_lip_union_is_valid_at_every_offset() {
     let mut report = Vec::new();
     for e in [0.0, 1e-4, 1e-3, 1e-2] {
-        let got = union_at(e, true).unwrap();
+        let got = union_at(e).unwrap();
         let ok = got.0 && got.1.is_empty() && (got.2 - want()).abs() <= 1e-5 * want();
         if !ok {
             report.push(format!("e = {e}: {got:?}"));
         }
     }
     assert!(report.is_empty(), "want {}: {report:#?}", want());
-}
-
-/// Upstream (the default) is non-manifold at 1e-4 (`SmTrimmingTools` #4) and gives no
-/// solid at 1e-3. The tiny edge's two ends at 1e-4 are one point: each is fixed along its
-/// circle only to its tolerance over the sine of the angle at which the circles cross
-/// (docs/booleans.md, "One point or two"), so the default union there is now the valid
-/// solid too. At 1e-3 it still has no solid.
-#[test]
-fn issue_1979_ring_lip_union_by_default() {
-    let (manifold, lines, v) = union_at(1e-4, false).unwrap();
-    assert!(
-        manifold && lines.is_empty() && (v - want()).abs() <= 1e-5 * want(),
-        "e = 1e-4: {manifold} {lines:?} {v}"
-    );
-    let (_, lines, v) = union_at(1e-3, false).unwrap();
-    assert!(!lines.is_empty() && v == 0.0, "e = 1e-3: {lines:?} {v}");
 }
