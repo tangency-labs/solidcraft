@@ -170,4 +170,30 @@ mod tests {
             }
         }
     }
+
+    /// WR-57 (#17856), the moved rows `degen_props_*` with a 1e-5 sliver: the sliver's far
+    /// vertex is its bilinear surface's corner, so its vertex-face gap is 0. Main recorded
+    /// 7.4e-6 or 1e-5 there (its drop answered the parameters of the opposite corner);
+    /// every cached vertex-face gap is now certified ([`shared::certificates::vertex_face_gaps`]) in an enclosure of
+    /// the vertex's distance to its surface, and each below 1e-11 (main's values lie
+    /// above it). The problem flags and histogram counts that moved follow
+    /// from the gaps.
+    #[test]
+    fn wr57_sliver_vertex_face_gaps_are_enclosed() {
+        for name in [
+            "degen_props_curved_sliver",
+            "degen_props_sliver_w1e-05_s10_a0",
+            "degen_props_sliver_w1e-05_s10_a0.7",
+            "degen_props_sliver_w1e-05_s1_a0",
+            "degen_props_sliver_w1e-05_s1_a0.7",
+        ] {
+            let case = crate::case::regression_case(&Runner, name);
+            let script: Inputs = case.parse().expect("a heal script");
+            // (the state after the property caching, the script's second step: its next
+            // step ends the script with a status, before any dump)
+            let gaps = shared::certificates::vertex_face_gaps(name, &script, 2);
+            assert!(!gaps.is_empty(), "{name}: no cached vertex-face gap");
+            assert!(gaps.iter().all(|g| g.gap < 1e-11 && g.enclosure.hi < 1e-11), "{name}: {gaps:?}");
+        }
+    }
 }

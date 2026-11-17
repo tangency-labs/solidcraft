@@ -2946,6 +2946,57 @@ pub(crate) mod certificates {
         out
     }
 
+    /// One cached vertex-face gap and the enclosure of its vertex's distance to the face's
+    /// surface.
+    #[derive(Debug)]
+    pub(crate) struct CertifiedVertex {
+        pub(crate) gap: f64,
+        pub(crate) enclosure: Enclosure,
+    }
+
+    /// Runs the first `steps` steps of `script` and encloses, for every cached vertex-face
+    /// gap of the B-rep their dump read, the distance from the vertex to its face's
+    /// surface ([`crate::certify::nearest`] around the gap's own parameters); asserts each
+    /// gap lies in its enclosure.
+    pub(crate) fn vertex_face_gaps(name: &str, script: &super::Inputs, steps: usize) -> Vec<CertifiedVertex> {
+        let mut script = script.clone();
+        if let super::Inputs::Heal { steps: s, .. } = &mut script {
+            s.truncate(steps);
+        }
+        KEPT.with(|k| *k.borrow_mut() = None);
+        super::run_rust(&script).expect("rust");
+        let b = KEPT
+            .with(|k| k.borrow_mut().take())
+            .expect("the script dumped its state");
+        let k = Kernel::default();
+        let mut out = Vec::new();
+        for (vu, r) in b.vertexuses().iter() {
+            let cached = r.vertex_face_gap;
+            if !cached.is_init() {
+                continue;
+            }
+            let v = r.vertex.expect("a vertex");
+            let point = b.vertex(v).expect("vertex").point;
+            let fu = solidcore::topology::vertexuse::faceuse(&b, vu)
+                .expect("faceuse")
+                .expect("a faceuse");
+            let face = b.faceuse(fu).expect("faceuse").face.expect("a face");
+            let surface = b.face(face).expect("face").surface.as_ref().expect("surface");
+            let enclosure = crate::certify::nearest(&k, surface, None, point, cached.face_uv);
+            let gap = cached.gap_3d;
+            eprintln!(
+                "{name} vertex use {}: gap {gap:e} at {:?} in [{:e}, {:e}]",
+                vu.index(),
+                cached.face_uv,
+                enclosure.lo,
+                enclosure.hi
+            );
+            assert!(enclosure.holds(gap), "{name} vertex use {}: {gap:e} outside {enclosure:?}", vu.index());
+            out.push(CertifiedVertex { gap, enclosure });
+        }
+        out
+    }
+
     /// WR-56 (#17467): certifies a moved row, `case` of `runner`: every cached edge-face
     /// gap of its last state is enclosed ([`edge_face_gaps`]), and each moved value is one
     /// of them. `moved` holds (value before WR-56, value now) pairs.

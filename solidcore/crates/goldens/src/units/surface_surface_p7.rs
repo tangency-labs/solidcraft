@@ -1893,6 +1893,188 @@ mod tests {
         assert!((row[1] - 0.347_690_232_833).abs() < 1e-6, "{row:?}");
     }
 
+    /// The `FindDegenParamForDirection` rows WR-57's retirement moved (#17856): each case's
+    /// name, main's row (3740d2254) and the new row (`[status, u, v]`, status 0 for a
+    /// converged answer and 1001 for one that is not).
+    #[rustfmt::skip]
+    const WR57_MOVED: &[(&str, &[f64], &[f64])] = &[
+        ("gen0039", &[1001.0, 1.0, 0.4139075512791188], &[0.0, 1.0, 0.4139075512791188]),
+        ("gen0097", &[1001.0, 0.0, 1.5502567193135035], &[0.0, 0.0, 1.5502567193135035]),
+        ("gen0114", &[0.0, 1.1334521839603298, 2.0780190823361337], &[0.0, 1.1334521839603298, 1.5665666640091418]),
+        ("gen0193", &[1001.0, 0.0, 1.5667278101457573], &[0.0, 0.0, 1.5667278101457573]),
+        ("gen0257", &[0.0, 1.0, 0.7444015760840781], &[0.0, 1.0, 0.06957962499308079]),
+        ("gen0328", &[1001.0, 1.0, 1.0], &[0.0, 1.0, 1.0]),
+        ("gen0397", &[1001.0, 1.0, 1.0], &[0.0, 1.0, 1.0]),
+        ("gen0415", &[1001.0, -0.36357990428492837, 1.9227275705997569], &[0.0, -0.36357990428492837, 1.9227275705997569]),
+        ("gen0435", &[0.0, 1.8100854975491047, 2.7106658347953982], &[0.0, 1.7368716422907917, 2.7106658347953982]),
+        ("gen0469", &[0.0, 0.8794673375124886, 1.0], &[0.0, 1.0, 1.0]),
+        ("gen0547", &[1001.0, 1.0, 2.058530688984697], &[0.0, 1.0, 2.058530688984697]),
+        ("gen0591", &[1001.0, 0.0, 0.0], &[0.0, 0.0, 0.0]),
+        ("gen0599", &[0.0, 1.3327582995469855, 0.16760955922782844], &[0.0, 1.3327582995469855, 1.0]),
+        ("gen0664", &[1001.0, 1.6111458568168486, 1.007624170833962], &[0.0, 1.6111458568168486, 1.007624170833962]),
+        ("gen0701", &[1001.0, 1.182293349939774, 1.1622911437579049], &[0.0, 1.182293349939774, 1.1622911437579049]),
+        ("gen0771", &[1001.0, 1.0, 1.7267181568619319], &[0.0, 1.0, 1.7267181568619319]),
+        ("gen0822", &[1001.0, 3.2467180155819317, 0.0], &[0.0, 3.2467180155819317, 0.0]),
+        ("gen0851", &[1001.0, 2.098624521735972, 0.4981730659903305], &[0.0, 2.098624521735972, 0.4981730659903305]),
+        ("gen0873", &[1001.0, -0.582632817431498, 0.0], &[0.0, -0.582632817431498, 0.0]),
+        ("gen0887", &[1001.0, 0.0, 0.0], &[0.0, 0.0, 0.0]),
+        ("gen0895", &[0.0, 1.3202268808361248, 2.3267590783994643], &[0.0, 1.3202268808361248, 1.6155146085409768]),
+        ("gen0968", &[1001.0, 2.300936874771631, 1.0], &[0.0, 2.300936874771631, 1.0]),
+        ("gen0971", &[0.0, 1.1718734235298043, -1.906188619905042], &[0.0, 1.1718734235298043, -1.4388991613641415]),
+        ("gen1044", &[1001.0, 1.0, 0.2787816171738582], &[0.0, 1.0, 0.2787816171738582]),
+        ("gen1066", &[0.0, -0.476503019599675, 3.084234032008041], &[0.0, 0.07800433074466473, 3.084234032008041]),
+        ("gen1112", &[1001.0, -0.677947189759065, 0.0], &[0.0, -0.677947189759065, 0.0]),
+        ("gen1168", &[0.0, 2.8080556406238455, -0.570922898620593], &[0.0, 3.166065130586924, -0.570922898620593]),
+        ("gen1209", &[1001.0, 1.2859079785078893, 0.1111111111111111], &[0.0, 1.2859079785078893, 0.1084320451993164]),
+        ("gen1213", &[1001.0, 0.841851725605939, 0.0], &[0.0, 0.841851725605939, 0.0]),
+        ("gen1295", &[1001.0, 0.0, 0.0], &[0.0, 0.0, 0.0]),
+        ("gen1305", &[1001.0, -0.6225519990713999, 0.32278962852062465], &[0.0, -0.6225519990713999, 0.32278962852062465]),
+        ("gen1325", &[1001.0, 2.9323433330930433, -0.8777231470795726], &[0.0, 2.9323433330930433, -0.8777231470795726]),
+        ("gen1341", &[0.0, 1.0, 0.1825044901118578], &[0.0, 1.0, 0.0]),
+        ("gen1415", &[0.0, 0.4946269012170479, 3.7364247050577073], &[0.0, 0.8467403521341613, 3.7364247050577073]),
+        ("gen1416", &[0.0, 0.0, 0.6666666666666666], &[0.0, 0.0, 0.6450747233279532]),
+        ("gen1425", &[1001.0, 1.0, 1.0], &[0.0, 1.0, 1.0]),
+        ("gen1454", &[0.0, 1.1365742380509563, -0.1767243002663077], &[0.0, 1.1365742380509563, 0.2698513655156045]),
+        ("gen1505", &[1001.0, 1.0, 0.23332919192759682], &[0.0, 1.0, 0.23332919192759682]),
+        ("gen1557", &[1001.0, 0.8690545544002823, -0.5231511784976446], &[0.0, 0.8690545544002823, -0.5231511784976446]),
+        ("gen1693", &[1001.0, 0.0, 4.34133977120981], &[0.0, 0.0, 4.34133977120981]),
+        ("gen1849", &[1001.0, 0.4767081039891621, 0.8912012948181007], &[0.0, 0.34769023283303463, 0.8912012948181007]),
+        ("gen1862", &[1001.0, 1.6679772235268522, 0.0], &[0.0, 1.6679772235268522, 0.0]),
+        ("gen1925", &[0.0, 0.6534994007434488, 1.8004735119948383], &[0.0, 0.0, 1.8004735119948383]),
+        ("gen1950", &[1001.0, 1.0, 1.0], &[0.0, 1.0, 1.0]),
+        ("gen1970", &[1001.0, 0.0, 1.0], &[0.0, 0.0, 1.0]),
+        ("gen2007", &[1001.0, 1.0, 0.0], &[0.0, 1.0, 0.0]),
+        ("gen2031", &[0.0, 1.5325658371422331e-09, 0.0], &[0.0, 1.0, 0.0]),
+        ("gen2054", &[1001.0, 0.0, 1.0], &[0.0, 0.0, 1.0]),
+        ("gen2100", &[0.0, 0.27262060958688394, 0.8888888888888888], &[0.0, 0.27262060958688394, 0.9045105503155376]),
+        ("gen2129", &[1001.0, -1.408332790465563, 1.0], &[0.0, -1.385932094518435, 1.0]),
+        ("gen2168", &[1001.0, 0.7486806102408945, 1.0], &[0.0, 0.7486806102408945, 1.0]),
+        ("gen2237", &[1001.0, 1.0, 0.0], &[0.0, 1.0, 0.0]),
+        ("gen2249", &[1001.0, 0.0, 0.0], &[0.0, 0.0, 0.0]),
+        ("gen2289", &[1001.0, -1.9044776287280283, 1.0], &[0.0, -1.9044776287280283, 1.0]),
+        ("gen2532", &[0.0, 0.30721245371530664, 0.0], &[0.0, 0.30721244378658225, 0.0]),
+        ("gen2573", &[1001.0, 0.0, -0.7431879794538867], &[0.0, 0.0, -0.7431879794538867]),
+        ("gen2597", &[1001.0, 3.1677635589459467, 0.0], &[0.0, 3.1677635589459467, 0.0]),
+        ("gen2714", &[1001.0, 0.0, -1.708666031231957], &[0.0, 0.0, -1.708666031231957]),
+        ("gen2721", &[1001.0, 1.0, 1.0], &[0.0, 1.0, 1.0]),
+        ("gen2764", &[0.0, -0.33002165078585133, 1.7041963136955], &[0.0, -0.155139705680514, 1.7041963136955]),
+        ("gen2821", &[1001.0, 1.0, 1.067819011444675], &[0.0, 1.0, 1.067819011444675]),
+        ("gen2842", &[1001.0, 1.0, 1.0], &[0.0, 1.0, 1.0]),
+        ("gen2939", &[0.0, 1.6520317297095517, 1.69750644596655], &[0.0, 1.118586373579102, 1.69750644596655]),
+        ("gen2955", &[0.0, 0.8548967786376014, -1.9302366276332217], &[0.0, 0.8548968118086484, -1.9302366276332217]),
+        ("gen2973", &[0.0, 3.7618090048440345, 2.013883631429436], &[0.0, 3.7618090048440345, 1.4437042287932131]),
+        ("gen2997", &[1001.0, 1.0, 0.9984474015655054], &[0.0, 1.0, 0.9984474015655054]),
+    ];
+
+    /// The alignment `A = w / |w| . dir` of the derivative `w` across the singular direction
+    /// at `uv` with the direction, and a bound on its rounding: `w` and its error `e` come
+    /// from the certified partials of the surface's NURBS form
+    /// ([`solidcore::eval::collapse::certified_partials`]); the unit vector moves by at
+    /// most `2 e / |w|` (`|a / |a| - b / |b|| <= 2 |a - b| / |a|`), and its own computation
+    /// and the dot product round by at most `2 gamma(16)`. `None` where `2 e >= |w|`.
+    fn wr57_alignment(k: &Kernel, s: &Surface, uv: Point2, dir: Vec3, singular_u: bool) -> Option<(f64, f64)> {
+        use solidcore::eval::collapse::certified_partials;
+        use solidcore::eval::spline::EvalSurface;
+        use solidcore::nurbs::math::gamma;
+        let net = solidcore::blend::fillet_section::station::as_b_spline(k, crate::certify::measured(s))
+            .expect("the NURBS form")
+            .expect("a NURBS form");
+        let nurb = net.gw_nurb().expect("a NURB");
+        let cp = nurb.cpts();
+        let (nu, nv) = (cp.len(), cp[0].len());
+        let mut ctrl = Vec::new();
+        for j in 0..nv {
+            for row in &cp {
+                let c = row[j];
+                let w = if c.w == NOW { 1.0 } else { c.w };
+                let z = if c.z == NOZ { 0.0 } else { c.z };
+                ctrl.push([c.x, c.y, z, w]);
+            }
+        }
+        let eval = EvalSurface::nurbs_closed(
+            [nurb.p(), nurb.q()],
+            [nurb.u_knots().to_vec(), nurb.v_knots().to_vec()],
+            [nu, nv],
+            ctrl,
+            [false; 2],
+        );
+        let (d, e) = certified_partials(&eval, [uv.x, uv.y]).expect("certified partials");
+        let (w, ew) = if singular_u { (d[0][1], e[0][1]) } else { (d[1][0], e[1][0]) };
+        let len = w.length();
+        if 2.0 * ew >= len {
+            return None;
+        }
+        let a = (w / len).dot(dir);
+        Some((a, 2.0 * ew / len + 2.0 * gamma(16)))
+    }
+
+    /// WR-57 (#17856): every row of `FindDegenParamForDirection` that moved from main is
+    /// replayed (the row agrees with the golden: the code checked is the code that blessed)
+    /// and its answer is certified not less aligned than main's: the alignment of the unit
+    /// derivative across the singular direction with the (oriented) direction, enclosed
+    /// at both answers ([`wr57_alignment`]), is at the new answer at least main's less the
+    /// two roundings. Where the answer is main's own parameter and only the status moved
+    /// (main 1001, not converged, now 0), the status follows from the search's local-maximum
+    /// test, whose signs are charged with the same certified bounds (ARGUED there, not
+    /// replayed here).
+    #[test]
+    fn wr57_moved_degen_answers_are_not_less_aligned() {
+        let k = Kernel::default();
+        let (mut more, mut same_param, mut undefined) = (0usize, 0usize, 0usize);
+        for &(name, main, new) in WR57_MOVED {
+            let case = crate::case::regression_case(&Runner, name);
+            let i: Inputs = case.parse().expect("inputs");
+            let row = rust_run(&k, &i).unwrap_or_else(|_| panic!("{name}: rust"));
+            assert!(
+                row.len() == new.len()
+                    && row.iter().zip(new).all(|(a, b)| (a - b).abs() <= crate::REL_TOL * a.abs().max(b.abs())),
+                "{name}: the code gives {row:?}, not the new row"
+            );
+            let OpIn::Degen { uv, dir, from_pole, sdir, .. } = &i.op else {
+                panic!("{name}: not a degen case");
+            };
+            let s = surface_of(&i.surface).expect("surface");
+            let singular_u = param_of(*sdir).expect("sdir") == SurfParamType::U;
+            // (the search's orientation of the direction: toward or away from the pole)
+            let domain = s.natural_uv_domain_with_nurb(&k).expect("domain");
+            let (t, t_mid) = if singular_u {
+                (uv[1], 0.5 * (domain.min().y + domain.max().y))
+            } else {
+                (uv[0], 0.5 * (domain.min().x + domain.max().x))
+            };
+            let mut d = v3(*dir).unitize().expect("a direction");
+            if (t > t_mid && *from_pole) || (t <= t_mid && !*from_pole) {
+                d = -d;
+            }
+            let at = |r: &[f64]| wr57_alignment(&k, &s, Point2::new(r[1], r[2]), d, singular_u);
+            if main[1..] == new[1..] {
+                same_param += 1;
+                eprintln!("{name}: the same parameter, status {} -> {}", main[0], new[0]);
+                continue;
+            }
+            let (m, n) = (at(main), at(new));
+            let Some(n) = n else {
+                panic!("{name}: the new answer's alignment cannot be enclosed (main {m:?})");
+            };
+            let Some(m) = m else {
+                // (main's answer is where the derivative is not enclosed away from zero:
+                // its tangent, and so its alignment, is not defined to the rounding)
+                undefined += 1;
+                eprintln!("{name}: main {main:?} has no enclosed alignment, new {new:?} {n:?}");
+                continue;
+            };
+            assert!(n.0 >= m.0 - m.1 - n.1, "{name}: new {n:?} proven less aligned than main {m:?}");
+            if n.0 - n.1 > m.0 + m.1 {
+                more += 1;
+            }
+            eprintln!("{name}: main {main:?} {m:?}, new {new:?} {n:?}");
+        }
+        eprintln!(
+            "{more} answers proven more aligned than main's, {same_param} at main's parameter, \
+             {undefined} where main's alignment is not enclosed"
+        );
+    }
+
     /// Generated cases cover every op, most of the comparable ones not deferred.
     #[test]
     fn generated_cases_are_diverse() {
