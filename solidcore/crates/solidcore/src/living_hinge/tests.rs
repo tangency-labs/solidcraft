@@ -820,3 +820,46 @@ fn a_slot_region_is_a_closed_stadium() {
     let want = 10.0 * 0.2 + std::f64::consts::PI * 0.01;
     assert!((area - want).abs() < 1e-12, "{area}");
 }
+
+fn frame_disc(c: (f64, f64), r: f64) -> Vec<NearEdge> {
+    [0.0, std::f64::consts::PI]
+        .iter()
+        .map(|&start| NearEdge::Arc {
+            center: c,
+            radius: r,
+            start,
+            sweep: std::f64::consts::PI,
+        })
+        .collect()
+}
+
+#[test]
+fn an_area_meets_a_plate_only_by_overlapping_it() {
+    let plate = vec![frame_rect(0.0, 0.0, 120.0, 80.0)];
+    let holed = vec![
+        frame_rect(0.0, 0.0, 120.0, 80.0),
+        frame_rect(20.0, 20.0, 40.0, 40.0),
+    ];
+    let meets_plate = |field: Vec<NearEdge>, plate: &[Vec<NearEdge>]| meets(&[field], plate);
+    assert!(meets_plate(frame_rect(40.0, 0.0, 80.0, 80.0), &plate));
+    assert!(meets_plate(frame_rect(0.0, 0.0, 120.0, 80.0), &plate));
+    assert!(meets_plate(frame_rect(110.0, 70.0, 130.0, 90.0), &plate));
+    assert!(meets_plate(frame_rect(-10.0, -10.0, 130.0, 90.0), &plate));
+    assert!(meets_plate(frame_disc((125.0, 40.0), 10.0), &plate));
+    assert!(meets_plate(frame_rect(10.0, 10.0, 50.0, 50.0), &holed));
+    // Touching along an edge or at a corner, beside, apart, inside a hole: no.
+    assert!(!meets_plate(frame_rect(120.0, 0.0, 160.0, 80.0), &plate));
+    assert!(!meets_plate(frame_rect(120.0, 80.0, 140.0, 100.0), &plate));
+    assert!(!meets_plate(frame_rect(200.0, 0.0, 240.0, 80.0), &plate));
+    assert!(!meets_plate(frame_disc((130.0, 40.0), 10.0), &plate));
+    assert!(!meets_plate(frame_rect(20.0, 20.0, 40.0, 40.0), &holed));
+    assert!(!meets_plate(frame_rect(25.0, 25.0, 35.0, 35.0), &holed));
+    // A diamond whose corners lie outside, its sides across the plate's corner.
+    let diamond = vec![
+        NearEdge::Line((130.0, 75.0), (125.0, 90.0)),
+        NearEdge::Line((125.0, 90.0), (110.0, 85.0)),
+        NearEdge::Line((110.0, 85.0), (115.0, 70.0)),
+        NearEdge::Line((115.0, 70.0), (130.0, 75.0)),
+    ];
+    assert!(meets_plate(diamond, &plate));
+}

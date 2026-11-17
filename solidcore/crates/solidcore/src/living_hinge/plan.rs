@@ -10,7 +10,7 @@ use super::lattice::{FrameBox, Lattice};
 use super::near::{sweeps, NearEdge};
 use super::rows::plan_rows_zoned;
 use super::spans::{clean_ends, row_spans, row_zone};
-use super::{HingeSlot, LivingHingeError, LivingHingePlan, LivingHingeSpec, CHORD, ON_EDGE};
+use super::{HingeSlot, LivingHingeError, LivingHingePlan, LivingHingeSpec, CHORD, GRAZE, ON_EDGE};
 use crate::math::Vec2;
 use crate::prism::profile::{Loop2, Region2, Seg2};
 
@@ -276,4 +276,108 @@ pub fn slot_region(slot: &HingeSlot, slot_width: f64) -> Region2 {
         },
         holes: Vec::new(),
     }
+}
+
+/// An edge's carrier: the whole line through a line or chord, the whole circle of an arc.
+#[derive(Clone, Copy)]
+enum Carrier {
+    Line((f64, f64), (f64, f64)),
+    Circle((f64, f64), f64),
+}
+
+fn carrier(e: &NearEdge) -> Carrier {
+    match *e {
+        NearEdge::Line(a, b) | NearEdge::Chord(a, b) => Carrier::Line(a, b),
+        NearEdge::Arc { center, radius, .. } => Carrier::Circle(center, radius),
+    }
+}
+
+/// The `v` of the points where the lines through `a, b` and `p, d` and circles meet. Points of the
+/// carriers outside the edges come too: an extra row costs a sample, never a wrong answer.
+fn crossing_vs(x: &Carrier, y: &Carrier, out: &mut Vec<f64>) {
+    let line_circle = |a: (f64, f64), b: (f64, f64), c: (f64, f64), r: f64, out: &mut Vec<f64>| {
+        let (dx, dy) = (b.0 - a.0, b.1 - a.1);
+        let (fx, fy) = (a.0 - c.0, a.1 - c.1);
+        let qa = dx * dx + dy * dy;
+        if qa <= 0.0 {
+            return;
+        }
+        let qb = 2.0 * (fx * dx + fy * dy);
+        let qc = fx * fx + fy * fy - r * r;
+        let disc = qb * qb - 4.0 * qa * qc;
+        if disc < 0.0 {
+            return;
+        }
+        let s = disc.sqrt();
+        for t in [(-qb - s) / (2.0 * qa), (-qb + s) / (2.0 * qa)] {
+            out.push(a.1 + t * dy);
+        }
+    };
+    match (*x, *y) {
+        (Carrier::Line(a, b), Carrier::Line(p, d)) => {
+            let (r, s) = ((b.0 - a.0, b.1 - a.1), (d.0 - p.0, d.1 - p.1));
+            let den = r.0 * s.1 - r.1 * s.0;
+            if den.abs() > GRAZE {
+                let t = ((p.0 - a.0) * s.1 - (p.1 - a.1) * s.0) / den;
+                out.push(a.1 + t * r.1);
+            }
+        }
+        (Carrier::Line(a, b), Carrier::Circle(c, r)) | (Carrier::Circle(c, r), Carrier::Line(a, b)) => {
+            line_circle(a, b, c, r, out);
+        }
+        (Carrier::Circle(c0, r0), Carrier::Circle(c1, r1)) => {
+            let (dx, dy) = (c1.0 - c0.0, c1.1 - c0.1);
+            let d2 = dx * dx + dy * dy;
+            if d2 <= GRAZE {
+                return;
+            }
+            // The radical line, then the circle against it.
+            let k = (r0 * r0 - r1 * r1 + d2) / (2.0 * d2);
+            let m = (c0.0 + k * dx, c0.1 + k * dy);
+            line_circle(m, (m.0 - dy, m.1 + dx), c0, r0, out);
+        }
+    }
+}
+
+/// The rows where the slices of two regions can change their order: every edge end, every arc's
+/// top and bottom, every crossing of an edge of `a` with one of `b`.
+fn critical_vs(a: &[Vec<NearEdge>], b: &[Vec<NearEdge>]) -> Vec<f64> {
+    let mut vs = Vec::new();
+    for e in a.iter().chain(b).flatten() {
+        match *e {
+            NearEdge::Line(p, q) | NearEdge::Chord(p, q) => vs.extend([p.1, q.1]),
+            NearEdge::Arc { center, radius, start, sweep } => {
+                vs.push(center.1 + radius * start.sin());
+                vs.push(center.1 + radius * (start + sweep).sin());
+                for t in [FRAC_PI_2, -FRAC_PI_2] {
+                    if sweeps(start, sweep, t) {
+                        vs.push(center.1 + radius * t.sin());
+                    }
+                }
+            }
+        }
+    }
+    for x in a.iter().flatten() {
+        for y in b.iter().flatten() {
+            crossing_vs(&carrier(x), &carrier(y), &mut vs);
+        }
+    }
+    vs.retain(|v| v.is_finite());
+    vs.sort_by(f64::total_cmp);
+    vs.dedup();
+    vs
+}
+
+/// Whether the area `field` and the plate's outline `plate` overlap (design 3.5): some row holds
+/// a stretch inside both, longer than [`ON_EDGE`]. Touching along an edge or at a point is not
+/// meeting. Exact: between two rows of [`critical_vs`] no slice changes order, so the slab's
+/// middle row answers for it; slabs thinner than [`ON_EDGE`] count as touching.
+pub fn meets(field: &[Vec<NearEdge>], plate: &[Vec<NearEdge>]) -> bool {
+    critical_vs(field, plate).windows(2).any(|w| {
+        let &[lo, hi] = w else { return false };
+        hi - lo > ON_EDGE
+            && row_spans(field, plate, (lo + hi) / 2.0)
+                .iter()
+                .any(|s| s.hi - s.lo > ON_EDGE)
+    })
 }
