@@ -122,3 +122,24 @@ fn a_tab_slot_near_point_lands_in_the_plates_component() {
     assert!((near.x - 80.0).abs() < 1e-6 && (near.y - 33.0).abs() < 1e-6 && (near.z - 6.0).abs() < 1e-6, "{kind}");
     assert!((volume(&s, "Wall") - 45_360.0).abs() < 1e-3, "{reply}");
 }
+
+#[test]
+fn a_plate_added_by_timeline_edit_gets_a_fresh_key() {
+    let mut s = fixture_f();
+    run(&mut s, "solid.box", json!({"corner": [20, 70, 6], "length": 120, "width": 6, "height": 60, "body_name": "Wall2", "operation": "new"}));
+    tab_slot(&mut s, json!({})).unwrap();
+    let keys = |s: &Session| {
+        let f = s.doc.features.last().unwrap();
+        let solidcraft_doc::FeatureKind::TabSlot { tab_plates, slot_plates, next_plate_key, .. } = &f.kind else { panic!("{:?}", f.kind) };
+        (tab_plates.iter().chain(slot_plates).map(|p| p.key).collect::<Vec<_>>(), *next_plate_key)
+    };
+    assert_eq!(keys(&s), (vec![Some(1), Some(2)], 3));
+    let wall = json!({"key": 1, "body": "Wall"});
+    run(&mut s, "timeline.edit", json!({"feature": "Joints", "set": {"tab_plates": [wall.clone(), {"body": "Wall2"}]}}));
+    assert_eq!(keys(&s), (vec![Some(1), Some(3), Some(2)], 4));
+    assert!((volume(&s, "Wall2") - 45_360.0).abs() < 1e-3, "{}", volume(&s, "Wall2"));
+    // A plate taken out and put back is a new pick: its old key is not handed out again.
+    run(&mut s, "timeline.edit", json!({"feature": "Joints", "set": {"tab_plates": [wall.clone()]}}));
+    run(&mut s, "timeline.edit", json!({"feature": "Joints", "set": {"tab_plates": [wall, {"body": "Wall2"}]}}));
+    assert_eq!(keys(&s), (vec![Some(1), Some(4), Some(2)], 5));
+}
