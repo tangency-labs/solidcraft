@@ -87,6 +87,7 @@ pub(crate) fn detach(app: &mut SolveApp, id: u64) -> Result<(), String> {
     }
     .into();
     let mut viewport = crate::viewport::ViewportState::default();
+    viewport.isolate_window_scenes();
     viewport.gpu = app.viewport.gpu;
     viewport.gpu_unavailable = app.viewport.gpu_unavailable;
     app.view_windows.next_window = app.view_windows.next_window.saturating_add(1);
@@ -118,11 +119,12 @@ pub fn prepare(app: &mut SolveApp, ctx: &Context) {
 
 /// Run the same app UI for each native window, borrowing the design for the duration of its
 /// frame. Views never round-trip through a file, and the document never needs to be cloned.
-pub fn show(app: &mut SolveApp, ctx: &Context, draw: fn(&mut SolveApp, &mut Ui)) {
+pub fn show(app: &mut SolveApp, ctx: &Context, draw: fn(&mut SolveApp, &mut Ui), render_state: Option<&egui_wgpu::RenderState>) {
     if !app.view_windows.available || app.view_windows.is_child() || app.quit_requested {
         return;
     }
     let ids: Vec<_> = app.view_windows.windows.iter().map(|window| window.id).collect();
+    let mut retired_scenes = Vec::new();
     for id in ids {
         let Some(index) = app.view_windows.windows.iter().position(|window| window.id == id) else {
             continue;
@@ -130,6 +132,7 @@ pub fn show(app: &mut SolveApp, ctx: &Context, draw: fn(&mut SolveApp, &mut Ui))
         let mut window = app.view_windows.windows.remove(index);
         if !app.docs.tab_open(window.tab) {
             ctx.send_viewport_cmd_to(id, egui::ViewportCommand::Close);
+            retired_scenes.extend(window.viewport.window_scene_slots());
             continue;
         }
         let builder = ViewportBuilder::default().with_title("SolidCraft").with_inner_size([1000.0, 700.0]).with_min_inner_size([480.0, 320.0]);
@@ -215,6 +218,7 @@ pub fn show(app: &mut SolveApp, ctx: &Context, draw: fn(&mut SolveApp, &mut Ui))
         });
         if closed {
             ctx.send_viewport_cmd_to(id, egui::ViewportCommand::Close);
+            retired_scenes.extend(window.viewport.window_scene_slots());
             if return_views {
                 documents::reattach_window_views(app, window.tab, window.views);
             }
@@ -225,4 +229,10 @@ pub fn show(app: &mut SolveApp, ctx: &Context, draw: fn(&mut SolveApp, &mut Ui))
     }
     let tab = app.docs.active_tab();
     app.view_windows.sync_limits(tab, &mut app.docs.views, None);
+    if !retired_scenes.is_empty()
+        && let Some(state) = render_state
+        && let Some(renderer) = state.renderer.write().callback_resources.get_mut::<solidcraft_viewport_gpu::view::Renderer>()
+    {
+        renderer.discard_views(&retired_scenes);
+    }
 }
