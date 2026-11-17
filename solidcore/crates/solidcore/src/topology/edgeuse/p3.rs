@@ -1671,7 +1671,8 @@ pub(crate) fn trim_raise_distance(
     if !raises {
         return Ok(upstream);
     }
-    let raise_by = match trim_deviation_bound(k, b, eu, trim)? {
+    // (a bound not below `upstream` is not taken)
+    let raise_by = match trim_deviation_bound(k, b, eu, trim, upstream)? {
         Some(bound) if bound < upstream => bound,
         _ => return Ok(upstream),
     };
@@ -1681,7 +1682,7 @@ pub(crate) fn trim_raise_distance(
     // not uncover it. Where the lowered tolerance does not cover each other trim's proved
     // distance (or one is not enclosed), the raise is upstream's.
     let lowered = tol.max(2.0 * raise_by);
-    match other_trims_bound(k, b, eu)? {
+    match other_trims_bound(k, b, eu, lowered)? {
         Some(others) if others <= lowered => Ok(raise_by),
         _ => Ok(upstream),
     }
@@ -1689,12 +1690,13 @@ pub(crate) fn trim_raise_distance(
 
 /// Not upstream (#18162): the largest [`trim_deviation_bound`] of the UV trims of `eu`'s
 /// edge other than the one `eu` and its mate share (the one being replaced), `0` without
-/// any; `None` where one is not enclosed.
+/// any; `None` where one is not enclosed or is above `lowered` (the caller only asks whether
+/// they are all within it).
 ///
 /// # Errors
 ///
 /// Those of [`trim_deviation_bound`].
-fn other_trims_bound(k: &Kernel, b: &Brep, eu: EdgeuseId) -> Result<Option<f64>> {
+fn other_trims_bound(k: &Kernel, b: &Brep, eu: EdgeuseId, lowered: f64) -> Result<Option<f64>> {
     let Some(e) = edge(b, eu)? else {
         return Ok(Some(0.0));
     };
@@ -1707,7 +1709,7 @@ fn other_trims_bound(k: &Kernel, b: &Brep, eu: EdgeuseId) -> Result<Option<f64>>
         let Some(other) = b.edgeuse(x)?.uv_trim_curve.as_ref() else {
             continue;
         };
-        match trim_deviation_bound(k, b, x, other)? {
+        match trim_deviation_bound(k, b, x, other, lowered)? {
             Some(bound) if bound.is_finite() => worst = worst.max(bound),
             _ => return Ok(None),
         }
@@ -1725,12 +1727,19 @@ fn other_trims_bound(k: &Kernel, b: &Brep, eu: EdgeuseId) -> Result<Option<f64>>
 ///
 /// [`SolidError::NotFound`] for a dangling id; the kernel's unported and cancelled statuses.
 ///
+/// A bound above `over` is `Some(f64::INFINITY)`, found without bounding the rest of the trim
+/// ([`trim_image_gap_bound_up_to`]): every caller only compares such a bound with `over`, and
+/// on a surface with a dense net the full bound of a trim far off its edge costs many times
+/// more (a union in the `crashes/2992` rig case took 153 s instead of 43 s).
+///
 /// [`trim_image_gap_bound`]: crate::query::curve_surface_gap::trim_image_gap_bound
+/// [`trim_image_gap_bound_up_to`]: crate::query::curve_surface_gap::trim_image_gap_bound_up_to
 pub(crate) fn trim_deviation_bound(
     k: &Kernel,
     b: &Brep,
     eu: EdgeuseId,
     trim: &Curve,
+    over: f64,
 ) -> Result<Option<f64>> {
     let (Some(e), Some(fu)) = (edge(b, eu)?, faceuse(b, eu)?) else {
         return Ok(None);
@@ -1749,13 +1758,14 @@ pub(crate) fn trim_deviation_bound(
     let ivl = edge_rec.interval;
     // (below a thousandth of the edge's tolerance a tighter bound changes nothing)
     let floor = TRIM_BOUND_FLOOR * edge_rec.tolerance;
-    crate::query::curve_surface_gap::trim_image_gap_bound(
+    crate::query::curve_surface_gap::trim_image_gap_bound_up_to(
         k,
         &surface,
         curve,
         trim,
         [ivl.min(), ivl.max()],
         floor,
+        over,
     )
 }
 

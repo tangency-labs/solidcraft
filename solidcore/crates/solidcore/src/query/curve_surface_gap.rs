@@ -457,20 +457,29 @@ fn certified_gap(
     if !(lo.is_finite() && hi.is_finite() && d0 <= lo && lo < hi && hi <= d1) {
         return Ok(None);
     }
-    bisect([lo, hi], first_pieces, CLOSE_RELATIVE, floor, |a, b| {
-        piece(&cn, &wn, surface, a, b)
-    })
+    bisect(
+        [lo, hi],
+        first_pieces,
+        CLOSE_RELATIVE,
+        floor,
+        f64::INFINITY,
+        |a, b| piece(&cn, &wn, surface, a, b),
+    )
 }
 
 /// The bisection of `[lo, hi]` that bounds a gap `max |g|` from `piece`'s bound of each piece
 /// (its end values and its second-order term): a piece closes once its second term is at most a
 /// `relative` of its end values or `floor`, and one that cannot be cut further is bounded as it
-/// stands. `None` when some piece has no bound at all.
+/// stands. `None` when some piece has no bound at all. Once a closed piece's bound is above
+/// `over`, so is the whole bound, and the bisection stops there with an infinite bound (an
+/// `over` of `f64::INFINITY` never stops it): the pieces before it are cut exactly as without
+/// it, so the comparison of the bound with `over` is the same.
 fn bisect(
     [lo, hi]: [f64; 2],
     first_pieces: usize,
     relative: f64,
     floor: f64,
+    over: f64,
     piece: impl Fn(f64, f64) -> Result<Option<(f64, f64)>>,
 ) -> Result<Option<f64>> {
     if !(lo.is_finite() && hi.is_finite() && lo < hi) || first_pieces == 0 {
@@ -500,6 +509,9 @@ fn bisect(
             Ok(Some((ends, term))) => {
                 let bound = (Ivl::from(ends) + Ivl::from(term)).hi;
                 if last || term <= (relative * ends).max(floor).max(CLOSE_ABSOLUTE) {
+                    if bound > over {
+                        return Ok(Some(f64::INFINITY));
+                    }
                     worst = worst.max(bound);
                     continue;
                 }
@@ -922,6 +934,26 @@ pub fn trim_image_gap_bound(
     range: [f64; 2],
     floor: f64,
 ) -> Result<Option<f64>> {
+    trim_image_gap_bound_up_to(k, surface, curve, uv, range, floor, f64::INFINITY)
+}
+
+/// [`trim_image_gap_bound`] for a caller that only asks whether the bound is above `over`: the
+/// same bound where it is at most `over`, and `Some(f64::INFINITY)` as soon as a piece shows it
+/// is above it, without bounding the rest. Every piece before that one is cut exactly as in
+/// [`trim_image_gap_bound`], so the answer to that question is the same.
+///
+/// # Errors
+///
+/// The kernel's unported and cancelled statuses.
+pub fn trim_image_gap_bound_up_to(
+    k: &Kernel,
+    surface: &Surface,
+    curve: &Curve,
+    uv: &Curve,
+    range: [f64; 2],
+    floor: f64,
+    over: f64,
+) -> Result<Option<f64>> {
     use crate::error::ignored;
     use crate::surface::surface::exact_pieces::exact_nurbs_surface;
 
@@ -980,13 +1012,17 @@ pub fn trim_image_gap_bound(
         trim_kinks: kinks(&wn, range),
         range,
     };
-    let Some(gap) = bisect(range, FIRST_PIECES, CLOSE_RELATIVE, floor, |a, b| {
+    // (the bound adds the curve's slack, at least 0, to the gap: a gap above `over` is enough)
+    let Some(gap) = bisect(range, FIRST_PIECES, CLOSE_RELATIVE, floor, over, |a, b| {
         k.check_cancelled(OP)?;
         piece_reparametrised(&sides, &net, a, b)
     })?
     else {
         return Ok(None);
     };
+    if gap == f64::INFINITY {
+        return Ok(Some(gap));
+    }
     let bound = (Ivl::from(gap) + Ivl::from(c_slack)).hi;
     Ok(bound.is_finite().then_some(bound))
 }
@@ -1181,6 +1217,37 @@ mod tests {
         assert!(seen > 1e-2, "{seen:e}");
         let g = t.bound(&curve, &trim).unwrap();
         assert!(g >= seen && g <= 2.0 * seen, "{g:e} against {seen:e}");
+    }
+
+    /// The bowed trim of [`a_trim_off_its_curve_is_not_bounded_close`] asked only whether it is
+    /// above `over`: at or above its full bound the answer is that bound, below it infinity.
+    #[test]
+    fn a_bound_up_to_a_cutoff_answers_as_the_full_bound() {
+        let t = Top::new();
+        let (a, b) = ([0.2, 0.3], [0.7, 0.6]);
+        let bow = [0.45 - 0.03, 0.45 + 0.05];
+        let trim = Top::curve(
+            &[t.uv(a), t.uv(bow), t.uv(b)],
+            2,
+            vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0],
+            true,
+        );
+        let curve = Top::curve(
+            &[t.point(a, 0.0), t.point(b, 0.0)],
+            1,
+            vec![0.0, 0.0, 1.0, 1.0],
+            false,
+        );
+        let up_to = |over: f64| {
+            trim_image_gap_bound_up_to(&t.k, &t.surface, &curve, &trim, [0.0, 1.0], 1e-9, over)
+                .unwrap()
+                .unwrap()
+        };
+        let g = up_to(f64::INFINITY);
+        assert_eq!(g, t.bound(&curve, &trim).unwrap());
+        assert_eq!(up_to(g).to_bits(), g.to_bits());
+        assert_eq!(up_to(2.0 * g).to_bits(), g.to_bits());
+        assert_eq!(up_to(0.5 * g), f64::INFINITY);
     }
 
     /// A curve with a corner (a degree-1 polyline with an interior knot of full multiplicity)
