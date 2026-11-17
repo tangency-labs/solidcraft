@@ -401,16 +401,18 @@ fn a_box_is_two_triangles_a_face() {
     }
 }
 
-/// SolidCraft's coil from SMLib, its lower half: the counts the bake-off recorded for
-/// `793-coil-split-by-a-plane-across-its-axis` at the display and export tolerances, plus what
-/// shaping adds (18 triangles on its flat cut face, and at display 10 on its curved faces).
+/// SolidCraft's coil from SMLib, its lower half (`793-coil-split-by-a-plane-across-its-axis`), at
+/// the display and export tolerances: the triangle counts pin the planner, and no face is over its
+/// tolerance. Its longest side is a fifth of its extent over its vertices and its edges' points
+/// (57.3 mm); its two vertices alone, the coil's ends, lie 20.4 mm apart.
 #[test]
 fn the_spline_coil_keeps_its_triangles() {
     let name = "smlib_coil_lower_half";
     let (b, size) = (crate::fixtures::fixture(name), crate::fixtures::size_of(name));
-    for (t, want) in [(crate::MeshTolerance::display_of(size), 30_658), (crate::MeshTolerance::export_of(size), 30_680)] {
-        let Ok((p, _)) = plan(&b, &t, size) else { panic!("plans") };
+    for (t, want) in [(crate::MeshTolerance::display_of(size), 15_392), (crate::MeshTolerance::export_of(size), 30_678)] {
+        let Ok((p, stats)) = plan(&b, &t, size) else { panic!("plans") };
         assert_eq!(p.evaluate().0.triangles.len(), want);
+        assert!(stats.over_tolerance.is_empty(), "{:?}", stats.over_tolerance);
     }
 }
 
