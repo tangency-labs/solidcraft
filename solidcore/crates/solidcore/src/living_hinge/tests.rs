@@ -863,3 +863,109 @@ fn an_area_meets_a_plate_only_by_overlapping_it() {
     ];
     assert!(meets_plate(diamond, &plate));
 }
+
+/// A sketch rectangle as a loop of four lines, counter-clockwise.
+fn sketch_rect(x0: f64, y0: f64, x1: f64, y1: f64) -> crate::prism::profile::Loop2 {
+    use crate::math::Vec2;
+    use crate::prism::profile::{Loop2, Seg2};
+    let p = [(x0, y0), (x1, y0), (x1, y1), (x0, y1)];
+    Loop2 {
+        segs: p
+            .iter()
+            .zip(p.iter().cycle().skip(1))
+            .map(|(&a, &b)| Seg2::Line {
+                a: Vec2::new(a.0, a.1),
+                b: Vec2::new(b.0, b.1),
+            })
+            .collect(),
+    }
+}
+
+/// Case A in the sketch (plate 100 x 60, area (30, 0)-(70, 60)) turned by `angle`; the frame
+/// leaves rounding errors of about 1e-15 at the open ends.
+fn case_a_turned(angle: f64) -> (Vec<Vec<NearEdge>>, Vec<Vec<NearEdge>>) {
+    let field = vec![frame_loop(&sketch_rect(30.0, 0.0, 70.0, 60.0), angle).unwrap()];
+    let plate = vec![frame_loop(&sketch_rect(0.0, 0.0, 100.0, 60.0), angle).unwrap()];
+    (field, plate)
+}
+
+#[test]
+fn case_a_at_ninety_degrees_has_case_i_spans_row_by_row() {
+    // At pi/2 the frame is u = y, v = -x: case I mirrored in v. Every row's spans after rule 1
+    // must match case I's at -v, ends within 1e-9, open tags and chain presence equal.
+    let s = spec(HingeClip::RunOut, 3.0);
+    let (field, plate) = case_a_turned(std::f64::consts::FRAC_PI_2);
+    let closed = closed_edges(&field, &plate);
+    assert_eq!(closed.len(), 2);
+    let i_field = [frame_rect(0.0, 30.0, 60.0, 70.0)];
+    let i_plate = [frame_rect(0.0, 0.0, 60.0, 100.0)];
+    let i_closed = closed_edges(&i_field, &i_plate);
+    let (rho, reach) = (s.edge_reach(), s.radius() + s.margin);
+    for k in 0..27 {
+        let v = 30.5 + 1.5 * f64::from(k);
+        let mut want = row_spans(&i_field, &i_plate, v);
+        clean_ends(&mut want, &i_plate, &i_closed, v, rho, reach);
+        let mut got = row_spans(&field, &plate, -v);
+        clean_ends(&mut got, &plate, &closed, -v, rho, reach);
+        assert_eq!(got.len(), want.len(), "row v {v}: {got:?} against {want:?}");
+        for (g, w) in got.iter().zip(&want) {
+            assert!(
+                close(g.lo, w.lo)
+                    && close(g.hi, w.hi)
+                    && (g.lo_open, g.hi_open) == (w.lo_open, w.hi_open)
+                    && g.lo_chain.is_some() == w.lo_chain.is_some()
+                    && g.hi_chain.is_some() == w.hi_chain.is_some(),
+                "row v {v}: {g:?} against {w:?}"
+            );
+        }
+    }
+    let p = plan(&field, &plate, None, &s, None).unwrap();
+    assert_eq!((p.rows, p.slots.len(), p.left_out), (27, 95, 0));
+    assert_eq!(
+        (
+            p.count(SlotKind::Whole),
+            p.count(SlotKind::Shortened),
+            p.count(SlotKind::RunOut)
+        ),
+        (41, 26, 28)
+    );
+}
+
+/// The sketch rectangle `(x0, y0)-(x1, y1)` turned by `angle` about the origin.
+fn turned_rect(x0: f64, y0: f64, x1: f64, y1: f64, angle: f64) -> crate::prism::profile::Loop2 {
+    use crate::math::Vec2;
+    use crate::prism::profile::Seg2;
+    let mut lp = sketch_rect(x0, y0, x1, y1);
+    let turn = |p: Vec2| {
+        let (x, y) = frame_point((p.x, p.y), -angle);
+        Vec2::new(x, y)
+    };
+    for seg in &mut lp.segs {
+        if let Seg2::Line { a, b } = seg {
+            (*a, *b) = (turn(*a), turn(*b));
+        }
+    }
+    lp
+}
+
+#[test]
+fn case_a_turned_by_thirty_degrees_plans_the_same_slots() {
+    // Design 17 test 5: case I (plate 60 x 100, band v 30..70, slots along X) with the plate, the
+    // area and the angle all turned by 30 degrees plans the same slots in the frame.
+    let s = spec(HingeClip::RunOut, 3.0);
+    let want = plan(
+        &[frame_rect(0.0, 30.0, 60.0, 70.0)],
+        &[frame_rect(0.0, 0.0, 60.0, 100.0)],
+        None,
+        &s,
+        None,
+    )
+    .unwrap();
+    for deg in [30.0_f64, -30.0, 120.0] {
+        let a = deg.to_radians();
+        let field = [frame_loop(&turned_rect(0.0, 30.0, 60.0, 70.0, a), a).unwrap()];
+        let plate = [frame_loop(&turned_rect(0.0, 0.0, 60.0, 100.0, a), a).unwrap()];
+        let got = plan(&field, &plate, None, &s, None).unwrap();
+        assert_same(&got, &want);
+    }
+}

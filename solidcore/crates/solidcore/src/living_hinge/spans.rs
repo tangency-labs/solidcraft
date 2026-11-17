@@ -182,12 +182,12 @@ pub fn row_spans(field: &[Vec<NearEdge>], plate: &[Vec<NearEdge>], v: f64) -> Ve
     let mut cuts: Vec<f64> = f.iter().chain(&m).copied().collect();
     cuts.sort_by(f64::total_cmp);
     cuts.dedup();
-    // The chain of the plate crossing an end lies on (within ON_EDGE), the nearest one.
+    // The plate crossing an end lies on (within ON_EDGE), the nearest one, with its chain.
     let on_plate_edge = |x: f64| {
         mc.iter()
             .filter(|c| (c.0 - x).abs() <= ON_EDGE)
             .min_by(|a, b| (a.0 - x).abs().total_cmp(&(b.0 - x).abs()))
-            .map(|c| c.1)
+            .copied()
     };
     let mut spans: Vec<RowSpan> = Vec::new();
     for w in cuts.windows(2) {
@@ -197,7 +197,9 @@ pub fn row_spans(field: &[Vec<NearEdge>], plate: &[Vec<NearEdge>], v: f64) -> Ve
             continue;
         }
         match spans.last_mut() {
-            Some(last) if last.hi == lo => last.hi = hi,
+            // Kept stretches meeting at a cut, or a rounding apart (a sliver between an area
+            // crossing and a plate crossing that should coincide), are one span.
+            Some(last) if lo - last.hi <= ON_EDGE => last.hi = hi,
             _ => spans.push(RowSpan {
                 lo,
                 hi,
@@ -208,11 +210,15 @@ pub fn row_spans(field: &[Vec<NearEdge>], plate: &[Vec<NearEdge>], v: f64) -> Ve
             }),
         }
     }
+    // An open end is moved onto its plate crossing: an area crossing a rounding away from it
+    // (a turned frame) must not leave the end off the plate's edge.
     for s in &mut spans {
-        s.lo_chain = on_plate_edge(s.lo);
-        s.hi_chain = on_plate_edge(s.hi);
-        s.lo_open = s.lo_chain.is_some();
-        s.hi_open = s.hi_chain.is_some();
+        if let Some((x, c)) = on_plate_edge(s.lo) {
+            (s.lo, s.lo_chain, s.lo_open) = (x, Some(c), true);
+        }
+        if let Some((x, c)) = on_plate_edge(s.hi) {
+            (s.hi, s.hi_chain, s.hi_open) = (x, Some(c), true);
+        }
     }
     spans
 }

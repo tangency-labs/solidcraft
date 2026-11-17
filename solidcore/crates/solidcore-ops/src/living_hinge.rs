@@ -151,7 +151,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "open: at 90 deg 5 of the 28 run-outs come back shortened (41/31/23), see handoff leg 11"]
     fn case_a_angle_90_plans_the_same_slots() {
         // Plate 100 x 60, area (30, 0)-(70, 60), slots along Y.
         let p = plan_living_hinge(

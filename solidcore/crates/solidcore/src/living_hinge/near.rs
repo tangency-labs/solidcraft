@@ -7,7 +7,7 @@
 
 use std::f64::consts::TAU;
 
-use super::{CHORD, GRAZE, MIN_CROSSING};
+use super::{CHORD, GRAZE, MIN_CROSSING, ON_EDGE};
 
 /// An edge in the hinge frame, `(u, v)` coordinates.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -215,7 +215,7 @@ pub fn component(zone: &[(f64, f64)], x: f64) -> Option<(f64, f64)> {
 
 /// Whether the crossing of a row with the plate's edge at `x` is clean (design 6.6 rule 1).
 /// `chain` is the near set of the crossing's chain with reach `rho`, `air_below` whether the air is
-/// at `u < x`, `crossings` every crossing of the row with the plate's boundary (`x` among them),
+/// at `u < x`, `crossings` every crossing of the row with the plate's boundary (`x` among them, within `ON_EDGE`),
 /// `others` the union of the other near sets (closed edges and the plate's other chains). Clean
 /// when the component `K` of `chain` holding `x` reaches at most `rho / sin(MIN_CROSSING)` into the
 /// material, holds no other crossing, and meets no other near set.
@@ -234,7 +234,10 @@ pub fn clean_crossing(
     if into > rho / MIN_CROSSING.sin() + GRAZE {
         return false;
     }
-    if crossings.iter().any(|&c| c != x && lo < c && c < hi) {
+    if crossings
+        .iter()
+        .any(|&c| (c - x).abs() > ON_EDGE && lo < c && c < hi)
+    {
         return false;
     }
     !others.iter().any(|&(a, b)| a < hi && lo < b)
