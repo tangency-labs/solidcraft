@@ -338,9 +338,10 @@ pub enum LoopCrossing {
     ArriveMoreThanOneWay,
     /// The face comes apart around a hole.
     ComesApartAroundHole,
-    /// The offset's results are not merged, so the walls the crossing loops come from
-    /// are not cut where they pass through each other; only the merge cuts them (the local
-    /// operation, always unmerged, included).
+    /// The offset's results are not merged, so the walls the crossing loops come from,
+    /// leaving the face on one side of it at a crossing, are not cut where they pass
+    /// through each other; only the merge cuts them (the local operation, always unmerged,
+    /// included).
     Unmerged,
 }
 

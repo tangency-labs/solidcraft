@@ -37,8 +37,11 @@
 //! too short to build, though its closed curve's two ends meet (the fork refuses an uncut
 //! hole circle beside a crossing as three loops at one point). Where the offset's results
 //! are not merged (the local operation's included), a face whose loops cross is refused
-//! ([`crate::error::offset::LoopCrossing::Unmerged`]): only the merge cuts the walls the
-//! crossing loops come from where they pass through each other.
+//! ([`crate::error::offset::LoopCrossing::Unmerged`]) where, at a crossing, the walls the
+//! two loops come from leave the face on one side: only the merge cuts them where they
+//! pass through each other. Where at every crossing they leave it on opposite sides
+//! (solidcraft#18374: a boss whose foot the drafted side now runs inside), they meet only
+//! at the crossing, and each is split there before the stitch.
 //!
 //! Not in the fork (solidcraft#16983): a face of one loop is resolved as well. Where the
 //! offsets of the faces either side of a face cross over each other (a wall thicker than
@@ -47,6 +50,8 @@
 //! where it crosses itself and closed into simple loops (`classify_one_loop`); those whose
 //! signed area is negative are regions turned inside out, kept reversed where they are the
 //! cavity's floor and dropped otherwise, by the same rule as fork 1b016ca's.
+
+use std::collections::BTreeMap;
 
 use super::p1::OffsetExecutive;
 use super::p2::OffsetNotifications;
@@ -69,12 +74,14 @@ use crate::nurbs::b_spline_curve_n_lib::TrimMode;
 use crate::nurbs::b_spline_surface_n_lib::p2::OrientType;
 use crate::nurbs::knots::Side;
 use crate::query::brep::BrepQuery;
+use crate::query::edge::closest_point;
 use crate::query::r#loop::contains_uv_point;
 use crate::surface::surface::p1::{map_to_2d, zone_tol_3d};
 use crate::surface::surface::p4::NoObject;
 use crate::topology::brep::p1 as bp1;
 use crate::topology::brep::p3::{delete_face_with_body_identity, DeleteFaceOptions};
 use crate::topology::brep::p7::{make_face_with_curves_with_kernel_context, FaceCurvesInput};
+use crate::topology::brep::p9::make_vertex_split_edge_with_state;
 use crate::topology::edge::{self, NotificationStores, NotifyState};
 use crate::topology::edgeuse::{p1 as eu, p3 as eu3};
 use crate::topology::face::p2 as face;
@@ -532,6 +539,52 @@ fn edge_closest_distance(k: &Kernel, b: &Brep, e: EdgeId, point: Point3) -> Resu
         .map(|solution| solution.start.solution_value))
 }
 
+/// (not in the fork, solidcraft#18374) A crossing of the loops of an offset face: where it
+/// is, and the two edge uses of the face it cuts.
+struct Crossing {
+    point: Point3,
+    uv: Point2,
+    edgeuses: [EdgeuseId; 2],
+}
+
+/// (not in the fork, solidcraft#18374) The crossings `cuts` holds (per edge use of
+/// `edgeuses`, whose UV trim curves are `uvs`: its parameter and crossing there), each at
+/// the point of the first edge use cut there.
+fn crossings_of(
+    kernel: &Kernel,
+    b: &Brep,
+    edgeuses: &[EdgeuseId],
+    uvs: &[Curve],
+    cuts: &[Vec<(f64, i64)>],
+) -> Result<Vec<Crossing>> {
+    let mut found: BTreeMap<i64, (Point3, Point2, Vec<EdgeuseId>)> = BTreeMap::new();
+    for (gg, edge_cuts) in cuts.iter().enumerate() {
+        let edgeuse = *at(edgeuses, gg)?;
+        for &(t, crossing) in edge_cuts {
+            let entry = match found.entry(crossing) {
+                std::collections::btree_map::Entry::Occupied(o) => o.into_mut(),
+                std::collections::btree_map::Entry::Vacant(v) => {
+                    let p = edge_curve(b, edge_of(b, edgeuse)?)?.evaluate_point(kernel, t)?;
+                    let uv = at(uvs, gg)?.evaluate_point(kernel, t)?;
+                    v.insert((p, Point2::new(uv.x, uv.y), Vec::new()))
+                }
+            };
+            entry.2.push(edgeuse);
+        }
+    }
+    found
+        .into_values()
+        .map(|(point, uv, uses)| match uses.as_slice() {
+            [a, bb] => Ok(Crossing {
+                point,
+                uv,
+                edgeuses: [*a, *bb],
+            }),
+            _ => Err(unresolved(LoopCrossing::Unmerged)),
+        })
+        .collect()
+}
+
 /// (not in the fork) Whether a stretch whose ends are `distance` apart is too short to
 /// build (`LoopCrossing::ThreeAtOnePoint`): its ends lie within `tol_3d`, unless it starts
 /// and ends at the same node, a vertex (`< 0`). That is a loop of one edge use that no
@@ -730,12 +783,50 @@ impl OffsetExecutive {
         // through each other they stay whole: the stitch encloses no region (the face
         // rebuilt) or the face keeps loops that cross (`SmFace` test #38, the face left as
         // it is). Body type does not tell where that happens: an open sheet with a hole
-        // through a face of its own has the same two walls as a solid. Every unmerged
-        // offset whose face's loops cross is therefore refused; with the results merged
-        // the same offset is built. The local operation (always unmerged) is no exception:
-        // its offset faces are stitched alike before they are moved into the body.
+        // through a face of its own has the same two walls as a solid. An unmerged offset
+        // whose face's loops cross is therefore refused, unless at every crossing the
+        // walls of the two loops leave the face on opposite sides of it (solidcraft#18374:
+        // a boss on a face whose drafted side now runs inside the boss's foot): there the
+        // two walls meet only at the crossing, on their edges, and each wall's edge is
+        // split at it (`split_walls_at_crossings`), so the stitch joins every stretch to
+        // the wall it bounds. With the results merged the same offset is built either way.
+        // The local operation (always unmerged) is no exception: its offset faces are
+        // stitched alike before they are moved into the body.
         if !self.merge_results() {
-            return Err(unresolved(LoopCrossing::Unmerged));
+            // (a face turned inside out whole, crossing nowhere, comes of walls that
+            // passed each other)
+            let crossings = crossings_of(kernel, b, &edgeuses, &uvs, &cuts)?;
+            if crossings.is_empty()
+                || !self.walls_part_at_crossings(kernel, original, b, f, &crossings, tol_3d)?
+            {
+                return Err(unresolved(LoopCrossing::Unmerged));
+            }
+            self.split_walls_at_crossings(
+                kernel,
+                original,
+                b,
+                f,
+                &crossings,
+                tol_3d,
+                notifications,
+            )?;
+            // the face is rebuilt from its stretches, each edge new (cut at a crossing, or
+            // run the other way round a region turned over): no edge of it is kept as it
+            // was ([`OffsetExecutive::keep_unmoved_edges`])
+            for &edgeuse in &edgeuses {
+                for offset_use in [Some(edgeuse), eu::mate(b, edgeuse)?].into_iter().flatten() {
+                    for source in self.edgeuse_to_edgeuses.firsts(offset_use) {
+                        let Some(e) = eu::edge(original, source)? else {
+                            continue;
+                        };
+                        if self.kept_edges.remove(&e) {
+                            for u in edge::edgeuses(original, e, None, None)? {
+                                self.kept_edgeuses.remove(&u);
+                            }
+                        }
+                    }
+                }
+            }
         }
 
         // Until the merge every offset face is a sheet of its own: its edges bound it
@@ -1253,6 +1344,174 @@ impl OffsetExecutive {
                 body,
             )
         })?;
+        Ok(())
+    }
+
+    /// (not in the fork, solidcraft#18374) The edges of the other offset faces across the
+    /// edge of offset edge use `edgeuse` of face `f`: the offsets, on the faces beside it,
+    /// of the original edge it comes from (the walls that edge bounds).
+    fn walls_across(
+        &self,
+        original: &Brep,
+        b: &Brep,
+        f: FaceId,
+        edgeuse: EdgeuseId,
+    ) -> Result<Vec<EdgeId>> {
+        let mut walls = Vec::new();
+        for offset_use in [Some(edgeuse), eu::mate(b, edgeuse)?].into_iter().flatten() {
+            for source in self.edgeuse_to_edgeuses.firsts(offset_use) {
+                let Some(e) = eu::edge(original, source)? else {
+                    continue;
+                };
+                for across in edge::edgeuses(original, e, None, None)? {
+                    for wall_use in self.edgeuse_to_edgeuses.seconds(across) {
+                        let wall = edge_of(b, wall_use)?;
+                        if eu::face(b, wall_use)? != Some(f) && !walls.contains(&wall) {
+                            walls.push(wall);
+                        }
+                    }
+                }
+            }
+        }
+        Ok(walls)
+    }
+
+    /// (not in the fork, solidcraft#18374) Whether at every crossing of `crossings` the
+    /// walls across the two edge uses it cuts leave offset face `f` on opposite sides of
+    /// its surface: each wall's binormal at the crossing (into the wall, square to its
+    /// edge) points along the face's normal there for one edge use's walls and against it
+    /// for the other's. Two such walls meet only at the crossing, on their edges, so the
+    /// stitch closes the body there once their edges are split; walls on one side pass
+    /// through each other, which only the merge cuts. An edge use with no wall across it
+    /// (a sheet's open edge) has none to pass through.
+    ///
+    /// # Errors
+    ///
+    /// Those of the closest points, binormals and normals.
+    fn walls_part_at_crossings(
+        &self,
+        kernel: &Kernel,
+        original: &Brep,
+        b: &mut Brep,
+        f: FaceId,
+        crossings: &[Crossing],
+        tol_3d: f64,
+    ) -> Result<bool> {
+        for crossing in crossings {
+            let normal = required(b.face(f)?.surface.as_ref())?.evaluate_normal(
+                kernel,
+                crossing.uv,
+                Side::Left,
+                Side::Left,
+            )?;
+            let mut sides = [0.0_f64; 2];
+            for (side, &edgeuse) in sides.iter_mut().zip(&crossing.edgeuses) {
+                for wall in self.walls_across(original, b, f, edgeuse)? {
+                    let Some(cp) = closest_point(kernel, b, wall, crossing.point)? else {
+                        return Ok(false);
+                    };
+                    if cp.distance > tol_3d {
+                        return Ok(false);
+                    }
+                    let wall_use = required(b.edge(wall)?.edgeuses.first().copied())?;
+                    let into = eu3::evaluate_binormal(
+                        kernel,
+                        b,
+                        wall_use,
+                        cp.parameter,
+                        false,
+                        &eu3::BinormalOptions::default(),
+                    )?
+                    .binormal
+                    .dot(normal);
+                    // every wall across one edge use leaves the face the same way
+                    if into == 0.0 || *side * into < 0.0 {
+                        return Ok(false);
+                    }
+                    *side = into;
+                }
+            }
+            if sides[0] * sides[1] > 0.0 {
+                return Ok(false);
+            }
+        }
+        Ok(true)
+    }
+
+    /// (not in the fork, solidcraft#18374) Splits each wall across the edge uses a
+    /// crossing of offset face `f` cuts (`walls_across`) at the crossing, where it does not
+    /// end there already, so that the stretches either side of the crossing each meet an
+    /// edge of their own.
+    ///
+    /// # Errors
+    ///
+    /// [`LoopCrossing::Unmerged`] where a wall does not pass the crossing; those of the
+    /// closest points and the splits.
+    #[allow(clippy::too_many_arguments)]
+    fn split_walls_at_crossings(
+        &mut self,
+        kernel: &mut Kernel,
+        original: &Brep,
+        b: &mut Brep,
+        f: FaceId,
+        crossings: &[Crossing],
+        tol_3d: f64,
+        notifications: &mut OffsetNotifications<'_>,
+    ) -> Result<()> {
+        for crossing in crossings {
+            for &edgeuse in &crossing.edgeuses {
+                // the faces of the walls across it; after a split the crossing may lie on
+                // either part, so each face's edges are searched
+                let mut wall_faces: Vec<FaceId> = Vec::new();
+                for wall in self.walls_across(original, b, f, edgeuse)? {
+                    for wf in edge::faces(b, wall, None)? {
+                        if !wall_faces.contains(&wf) {
+                            wall_faces.push(wf);
+                        }
+                    }
+                }
+                for wf in wall_faces {
+                    let mut through = None;
+                    for e in face_edges(b, wf)? {
+                        let Some(cp) = closest_point(kernel, b, e, crossing.point)? else {
+                            continue;
+                        };
+                        if cp.distance > tol_3d {
+                            continue;
+                        }
+                        let ends = [edge::start_vertex(b, e)?, edge::end_vertex(b, e)?];
+                        if ends.iter().any(|&v| {
+                            vertex_point(b, v).is_ok_and(|p| p.distance(crossing.point) <= tol_3d)
+                        }) {
+                            // the wall ends at the crossing already
+                            through = None;
+                            break;
+                        }
+                        through = Some((e, cp.parameter));
+                    }
+                    let Some((e, t)) = through else {
+                        continue;
+                    };
+                    let mut stores = NotificationStores {
+                        records: &mut *notifications.records,
+                        attributes: &mut *notifications.attributes,
+                        key_of: notifications.result_key_of,
+                    };
+                    let mut state = NotifyState::from_kernel_stores(&mut stores);
+                    let output = make_vertex_split_edge_with_state(
+                        kernel,
+                        b,
+                        e,
+                        t,
+                        &mut state,
+                        notifications.result_curve_ref,
+                    )?;
+                    if !output.split {
+                        return Err(unresolved(LoopCrossing::Unmerged));
+                    }
+                }
+            }
+        }
         Ok(())
     }
 
