@@ -597,12 +597,12 @@ pub enum HistorySketches {
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum SectionHatch {
-    /// Each body in its own hatch (`solidcraft_viewport::hatch`): 45 or 135 degrees in one of the
-    /// theme's hatch colours, touching bodies never alike. Also what a value this version doesn't
-    /// know reads as (`lenient`).
+    /// Each body in its own hatch (`solidcraft_viewport::hatch`): one of the theme's hatch
+    /// colours, at its section plane's angle or a quarter turn round, touching bodies never alike.
+    /// Also what a value this version doesn't know reads as (`lenient`).
     #[default]
     ByPart,
-    /// Every cut face in the cap colour at 45 degrees (how it was before by part).
+    /// Every cut face in the cap colour at its section plane's angle (how it was before by part).
     One,
 }
 
@@ -785,6 +785,44 @@ impl StandUpUnknown {
             Self::Ask => "prefs.stand_up_unknown.ask",
             Self::Note => "prefs.stand_up_unknown.note",
             Self::Off => "prefs.stand_up_unknown.off",
+        }
+    }
+}
+
+/// Where a new Extrude dialog starts its distance (Preferences, Tools: "New extrude distance").
+/// Editing an extrude always keeps its own distance.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ExtrudeStart {
+    /// The distance of the last new extrude applied (`extrude_last_distance`); 10 until there is one.
+    LastUsed,
+    /// The length typed in `extrude_custom_distance`; 10 while it isn't a usable length.
+    Custom,
+    /// 10 in the design's unit, as before (the default). A saved value this version doesn't know
+    /// reads as this.
+    #[default]
+    #[serde(other)]
+    Fixed,
+}
+
+impl ExtrudeStart {
+    pub const ALL: [Self; 3] = [Self::Fixed, Self::LastUsed, Self::Custom];
+
+    /// The choice as `ui.prefs` and the saved preferences spell it.
+    pub fn id(self) -> &'static str {
+        match self {
+            Self::Fixed => "fixed",
+            Self::LastUsed => "last_used",
+            Self::Custom => "custom",
+        }
+    }
+
+    /// The message id of the choice's label.
+    pub fn label_id(self) -> &'static str {
+        match self {
+            Self::Fixed => "prefs.extrude_start.fixed",
+            Self::LastUsed => "prefs.extrude_start.last_used",
+            Self::Custom => "prefs.extrude_start.custom",
         }
     }
 }
@@ -1425,6 +1463,10 @@ preference_settings! {
     /// A design's views (Model, Sketch, Sheet, Render, Animation) are tabs inside its tab; off, the
     /// design keeps one tab and a view switcher lists them.
     design_views_as_tabs: bool = false, PAGE_LAYOUT;
+    /// With views as tabs off, a design's tab always shows its view switcher (even with one view),
+    /// and entering a sketch or Render opens a view of its own, as in 0.43.0. Off: the tab looks as
+    /// it did before design views, with no switcher until the user opens a second view.
+    show_design_view_switcher: bool = false, PAGE_LAYOUT;
     /// A drawing sheet opens as a view (a sub-tab) of its design.
     design_sub_tab_sheets: bool = true, PAGE_LAYOUT;
     /// Editing a sketch opens it as a view of its design; Finish Sketch returns to the previous view.
@@ -1582,6 +1624,14 @@ preference_settings! {
     /// switches the extent to To Object (off: picks only add profiles, as before). A click into the
     /// Profiles box makes the next picks profiles again.
     extrude_auto_to_object: bool = true, PAGE_TOOLS => check_tr("ui.extrude_auto_to_object");
+    /// Where a new Extrude starts its distance: `fixed` (the default: 10 in the design's unit, as
+    /// before), `last_used` (the last new extrude's distance) or `custom` (`extrude_custom_distance`).
+    extrude_start: ExtrudeStart = ExtrudeStart::default(), PAGE_TOOLS;
+    /// The length a new Extrude starts at with `extrude_start` `custom` (any length expression).
+    extrude_custom_distance: String = "10 mm".into(), PAGE_TOOLS;
+    /// The distance the last new extrude was applied with, in mm (empty until one is); kept when
+    /// defaults are restored.
+    extrude_last_distance: String = String::new();
     /// Extrude turns the view to isometric each time it opens, so the depth can be seen (#9176).
     /// Off (the default): the view stays as it is.
     extrude_view_isometric: bool = false, PAGE_TOOLS => check_id("prefs.extrude_view_isometric");
@@ -1773,6 +1823,9 @@ preference_settings! {
     /// Snap a drawing point to where the two most recent centre or midpoint guides cross.
     /// Off: the guides stay visual and the cursor does not move (#8694).
     sketch_recent_snap: bool = false, PAGE_SKETCH;
+    /// Shift while drawing a Two-Point or Center Rectangle makes it a square and adds an Equal
+    /// constraint (#18114). Off (the default): Shift prefers a line midpoint there, as it always has.
+    sketch_square_rectangles: bool = false, PAGE_SKETCH => check_tr("prefs.sketch_square_rectangles");
     /// Drawing lines a point up with the sketch's points on both axes at once, keeping the
     /// horizontal or vertical snap to the previous point, and the click adds the alignments
     /// (#7828). Off by default: only with the previous point, one axis at a time, as before.
@@ -4543,6 +4596,11 @@ fn prepare_preferences(
     {
         return Err("`stand_up_unknown` must be ask, note or off".into());
     }
+    if let Some(v) = p.get("extrude_start")
+        && !ExtrudeStart::ALL.iter().any(|c| v.as_str() == Some(c.id()))
+    {
+        return Err("`extrude_start` must be fixed, last_used or custom".into());
+    }
     if let Some(v) = p.get("dimension_input")
         && !matches!(v.as_str(), Some("view" | "window"))
     {
@@ -7127,6 +7185,7 @@ mod tests {
             ("pinned_constraints_in_grid", json!(false), PAGE_LAYOUT),
             ("tab_double_click_renames", json!(false), PAGE_LAYOUT),
             ("design_views_as_tabs", json!(false), PAGE_LAYOUT),
+            ("show_design_view_switcher", json!(true), PAGE_LAYOUT),
             ("design_sub_tab_sheets", json!(false), PAGE_LAYOUT),
             ("design_sub_tab_sketches", json!(false), PAGE_LAYOUT),
             ("design_sub_tab_render", json!(false), PAGE_LAYOUT),
@@ -7628,12 +7687,14 @@ mod tests {
             "design_sub_tab_render",
             "design_reuse_views",
             "design_reopen_views",
+            "show_design_view_switcher",
         ];
         let mut h = crate::scenario::Harness::new();
         let on = DesignTabPrefs::from(&h.app.preferences);
+        // Test change: the owner asked for "Show the design view switcher", off by default.
         assert_eq!(
-            [on.views_as_tabs, on.sub_tab_sheets, on.sub_tab_sketches, on.sub_tab_render, on.reuse_views, on.reopen_views],
-            [false, true, true, true, true, false]
+            [on.views_as_tabs, on.sub_tab_sheets, on.sub_tab_sketches, on.sub_tab_render, on.reuse_views, on.reopen_views, on.show_switcher],
+            [false, true, true, true, true, false, false]
         );
         let old = lenient(&json!({"theme": "light"}));
         assert_eq!(DesignTabPrefs::from(&old), on, "saved before they existed");
@@ -7657,9 +7718,10 @@ mod tests {
                 flipped.sub_tab_sketches,
                 flipped.sub_tab_render,
                 flipped.reuse_views,
-                flipped.reopen_views
+                flipped.reopen_views,
+                flipped.show_switcher
             ],
-            [true, false, false, false, false, true]
+            [true, false, false, false, false, true, true]
         );
         defaults(&mut h.app, PAGE_LAYOUT);
         assert_eq!(DesignTabPrefs::from(&h.app.preferences), on, "Layout's Restore Defaults");
@@ -11743,7 +11805,7 @@ mod tests {
             assert_eq!(s.continuity.len(), 1);
             assert_eq!(s.status_items().len(), 2);
             assert_eq!(s.status_items()[0].command, "inspect.continuity");
-            assert!(s.section.is_some());
+            assert!(!s.section.is_empty());
             assert!(!s.is_dirty());
         }
         assert!(std::sync::Arc::ptr_eq(&doc, &app.session.doc));
