@@ -654,13 +654,13 @@ fn chord(
 /// the side's coordinate exactly, the same point as the side segments' ends at that
 /// `mu`); an uncut end is `p + v E` (the copies' end there). `on_side`: the directrix
 /// lies along that side parallel to the sweep, whose coordinate it keeps exactly.
-/// `None` outside the domain or of no length.
+/// `Edge::Nothing` outside the domain or of no length.
 fn directrix(
     inputs: &PatchInputs<'_>,
     frame: &Frame,
     p: Point3,
     on_side: Option<Side>,
-) -> Result<Option<Curve>> {
+) -> Result<Edge> {
     let plane = inputs.plane;
     let dom = inputs.plane_domain;
     let e = inputs.extrusion_vec;
@@ -674,10 +674,10 @@ fn directrix(
     fix(&mut uv);
     let finite = uv.x.is_finite() && uv.y.is_finite();
     if !finite {
-        return Ok(None);
+        return Ok(Edge::Nothing);
     }
     let Some((dlo, lo_side, dhi, hi_side)) = chord(frame, &dom, uv) else {
-        return Ok(None);
+        return Ok(Edge::Nothing);
     };
     let mu = frame.mu(uv);
     let end = |v: f64, cut: Option<Side>| -> Point3 {
@@ -707,21 +707,52 @@ fn directrix(
     };
     let spans = v0 < v1;
     if !spans {
-        return Ok(None);
+        return Ok(Edge::Nothing);
     }
     segment(end(v0, cut0), end(v1, cut1))
 }
 
-/// The segment `a`-`b`, or `None` when it has no length (within `SM_EFF_ZERO`
-/// relative to its coordinates).
-fn segment(a: Point3, b: Point3) -> Result<Option<Curve>> {
-    let short = a.distance(b) <= EFF_ZERO * a.max_dimension().max(b.max_dimension());
-    if short {
-        return Ok(None);
+/// A straight boundary edge between two computed points.
+enum Edge {
+    /// The edge.
+    Line(Box<Curve>),
+    /// No edge: its ends are one point to the rounding of their coordinates.
+    Nothing,
+    /// An edge longer than that rounding but too short to build (a line needs
+    /// `SM_EFF_ZERO`): the patch declines rather than leave its boundary open.
+    Unbuildable,
+}
+
+/// The segment `a`-`b`. Its ends are each a few roundings of their coordinates off
+/// their exact place, so within `16 eps m` (`m` their largest coordinate) they are one
+/// point and the segment is `Nothing` (the boundary still closes to that gap). Every
+/// longer segment is an edge of the region, however small against `m`: a threshold
+/// relative to the coordinates (as `SM_EFF_ZERO m`) would drop real closing edges of a
+/// small region far from the origin. One too short to build is `Unbuildable`.
+fn segment(a: Point3, b: Point3) -> Result<Edge> {
+    let d = a.distance(b);
+    let one_point = d <= 16.0 * f64::EPSILON * a.max_dimension().max(b.max_dimension());
+    if one_point {
+        return Ok(Edge::Nothing);
     }
-    Ok(Some(Curve::from(BSplineCurve::create_line_segment(
-        3, a, b,
-    )?)))
+    // (create_line_segment's own check; a NaN distance fails it too)
+    let buildable = d >= EFF_ZERO;
+    if !buildable {
+        return Ok(Edge::Unbuildable);
+    }
+    Ok(Edge::Line(Box::new(Curve::from(
+        BSplineCurve::create_line_segment(3, a, b)?,
+    ))))
+}
+
+/// Pushes `edge` onto `out`; `None` when it is `Unbuildable` (the region declines).
+fn push_edge(out: &mut Vec<Curve>, edge: Edge) -> Option<()> {
+    match edge {
+        Edge::Line(c) => out.push(*c),
+        Edge::Nothing => {}
+        Edge::Unbuildable => return None,
+    }
+    Some(())
 }
 
 /// A generator range, split from the generator and certified in the plane, with its
@@ -1233,7 +1264,9 @@ fn monotone_region(
                 Bound::Side(side) => {
                     let pa = plane.evaluate_point_fast(side_point(frame, &dom, side, run.mu_a));
                     let pb = plane.evaluate_point_fast(side_point(frame, &dom, side, run.mu_b));
-                    out.extend(segment(pa, pb)?);
+                    if push_edge(out, segment(pa, pb)?).is_none() {
+                        return Ok(None);
+                    }
                 }
             }
         }
@@ -1259,7 +1292,9 @@ fn monotone_region(
             let mu = side_mu(side);
             parallel(side) && (mu - mu_s).abs() <= slack_of(mu)
         });
-        out.extend(directrix(inputs, frame, p, at_side.copied())?);
+        if push_edge(out, directrix(inputs, frame, p, at_side.copied())?).is_none() {
+            return Ok(None);
+        }
     }
     for side in sides.iter().filter(|s| parallel(s)) {
         let mu = side_mu(side);
@@ -1281,7 +1316,9 @@ fn monotone_region(
             return Ok(None);
         };
         let p = gen.evaluate_point(k, *r)?;
-        out.extend(directrix(inputs, frame, p, Some(*side))?);
+        if push_edge(out, directrix(inputs, frame, p, Some(*side))?).is_none() {
+            return Ok(None);
+        }
     }
     Ok(Some(()))
 }
@@ -1369,7 +1406,9 @@ fn slab_region(
             inputs.plane.evaluate_point_fast(p),
             inputs.plane.evaluate_point_fast(q),
         );
-        out.extend(segment(a, b)?);
+        if push_edge(out, segment(a, b)?).is_none() {
+            return Ok(None);
+        }
     }
     Ok(Some(()))
 }

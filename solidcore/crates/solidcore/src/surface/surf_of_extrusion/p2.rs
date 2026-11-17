@@ -2774,6 +2774,29 @@ mod tests {
         }
     }
 
+    /// Review r5: a `0.5 x 0.5` swept square at `x = 1e12`, swept
+    /// along `x` and along `y`. Its directrices (`0.5` long) are below `SM_EFF_ZERO`
+    /// of their coordinates (`1.0`) but are real edges: the boundary is the whole
+    /// closed square, as at the origin, not its two copies alone.
+    #[test]
+    fn small_regions_far_from_the_origin_are_closed() {
+        let k = k();
+        for x0 in [0.0, 1e12] {
+            for euv in [(1.0, 0.0), (0.0, 1.0)] {
+                let dom = Extent2d::from_bounds(x0 - 10.0, -10.0, x0 + 10.0, 10.0);
+                let plane = xy_plane(dom);
+                let gen: &[(f64, f64)] = if euv.0 == 1.0 {
+                    &[(x0, 0.0), (x0, 0.5)]
+                } else {
+                    &[(x0, 0.0), (x0 + 0.5, 0.0)]
+                };
+                let r = uv_polyline(&k, &plane, gen, euv, (0.0, 0.5));
+                assert_eq!(r.curves_3d.len(), 4, "x0 {x0:e}, sweep {euv:?}");
+                assert_region(&r, &plane, 0.25);
+            }
+        }
+    }
+
     #[test]
     fn non_parallel_extrusions_need_more() {
         let k = k();
