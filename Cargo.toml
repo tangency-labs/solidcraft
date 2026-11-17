@@ -199,8 +199,17 @@ debug = "line-tables-only"
 
 # Vendored crates with SolidCraft fixes (see vendor/README.md and ATTRIBUTION.md).
 [patch.crates-io]
-# Keep OpenGL pipelines, resolve textures and CAD callbacks at the same safe sample count.
-egui-wgpu = { path = "vendor/egui-wgpu" }
+# egui 0.37.0, vendored with `git subtree` so SolidCraft can carry its own changes (vendor/README.md).
+# egui-wgpu keeps OpenGL pipelines, resolve textures and CAD callbacks at the same safe sample count.
+ecolor = { path = "vendor/egui/crates/ecolor" }
+eframe = { path = "vendor/egui/crates/eframe" }
+egui = { path = "vendor/egui/crates/egui" }
+egui-wgpu = { path = "vendor/egui/crates/egui-wgpu" }
+egui-winit = { path = "vendor/egui/crates/egui-winit" }
+egui_glow = { path = "vendor/egui/crates/egui_glow" }
+emath = { path = "vendor/egui/crates/emath" }
+epaint = { path = "vendor/egui/crates/epaint" }
+epaint_default_fonts = { path = "vendor/egui/crates/epaint_default_fonts" }
 
 # Deliver trackpad pinch and rotation gestures on Wayland (zwp_pointer_gestures_v1), which
 # winit 0.30 never binds and eframe 0.37 still requires winit 0.30.
