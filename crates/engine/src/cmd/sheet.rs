@@ -94,9 +94,9 @@ pub static COMMANDS: &[CommandSpec] = &[
         .contract(&FOLD_CONTRACT)
         .output(output_schema_for::<FeatureResult>)
         .params(
-        "line: sketch + curve (a sketch line on the sheet's base face; followed when the sketch changes) or points: [[x,y,z], [x,y,z]]; \
+        "line: sketch + curve (a sketch line on a flat face of the sheet; followed when the sketch changes) or points: [[x,y,z], [x,y,z]]; \
          angle? (default 90 deg); radius? (default: rule); position?: centerline|start|end|mould (where the line sits in the bend, default centerline); \
-         stays?: left|right (the side of the line as drawn that stays, seen from the sheet's surface) or fixed?: [x,y,z] on that side \
+         stays?: left|right (the side of the line as drawn that stays, seen from the sheet's surface) or fixed?: [x,y,z] on the sheet, on that side \
          (default: the side with more of the sheet joined to it; decided once, as the fold is made, and kept); flip? (fold the other way); body?",
     ),
     CommandSpec::new("sheet.unfold", "Unfold", crate::checked!("sheet.unfold", unfold))
@@ -157,7 +157,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .contract(&MANAGE_RULES_CONTRACT).output(output_schema_for::<ManageRulesResult>).at("SHEET METAL", "MODIFY").icon("sheet_rules").params(
         "name (new or existing); thickness?, k_factor?, bend_radius?, relief_width?, relief_depth?, corner_relief?, hem_gap?, gap? (expressions; `Thickness` is the rule's; \
          gap: between flanges that meet at a corner, whose ends are closed toward each other at any angle); \
-         corner_relief_shape?: notch|round|rectangular|tear (what is cut where two bends meet at a corner of the base: round and rectangular a relief \
+         corner_relief_shape?: notch|round|rectangular|tear (what is cut where two bends meet at a corner of the panel they stand on: round and rectangular a relief \
          `corner_relief` across; tear none, each bend's end is cut straight from the corner to its flange's end; default notch); \
          angle_display?: bend|included (how the DXF bend notes read the bend angles: the bend angle, default, or the included angle \
          left between the bend's sides, 180° less it; the bend table gives both, and a flange's `angle` is always the bend angle); \
@@ -697,7 +697,7 @@ fn fold(s: &mut Session, p: &Value) -> Result<Value> {
         None => None,
     };
     // A side given says which side stays: `fixed` is then ignored, neither read nor kept, so it
-    // is neither checked here nor refused off the sheet below.
+    // is not checked against the sheet below.
     let fixed = match p.get("fixed") {
         Some(v) if stays.is_none() => Some(vec3(v).ok_or_else(|| bad(cmd, "`fixed` must be a point [x, y, z]"))?),
         _ => None,
@@ -717,9 +717,10 @@ fn fold(s: &mut Session, p: &Value) -> Result<Value> {
         body: body.map(BodyName),
     };
     // Which side stays is decided once, here, on the sheet as it is now: by `fixed`, else as the
-    // sheet joins on either side. The fold keeps it, so no later edit decides it again. A fold
-    // this cannot decide is left to fail as it is evaluated. It is decided on the fold as it
-    // will be evaluated: in the active component's frame, bare lengths in the design's unit.
+    // sheet joins on either side. The fold keeps that side and not the point, so no later edit
+    // decides it again. A fold this cannot decide keeps its point and is left to decide, or fail,
+    // as it is evaluated. It is decided on the fold as it will be evaluated: in the active
+    // component's frame, bare lengths in the design's unit.
     if stays.is_none() {
         let mut authored = kind.clone();
         super::component::to_active_frame(s, &mut authored);
@@ -729,27 +730,25 @@ fn fold(s: &mut Session, p: &Value) -> Result<Value> {
                 *e = doc.with_design_unit(e, k).into();
             }
         }
-        if let Ok(Some(side)) = s.doc.fold_side_at(&s.model.state(), &authored)
-            && let FeatureKind::SheetFold { stays, .. } = &mut kind
+        let st = s.model.state();
+        // A fixed point that touches no material of the sheet picks no side: refused, here and
+        // only here, against the sheet the fold is made on (#263).
+        if let Some(f) = fixed
+            && s.doc.fold_fixed_off_sheet(&st, &authored)
         {
-            *stays = Some(side);
-        }
-    }
-    let r = add_feature(s, p, kind)?;
-    // A recompute keeps a stored fold whose fixed point no longer touches the sheet (with a
-    // warning); a new fold refuses one, since it picks no side (#263).
-    if let Some(f) = fixed {
-        let id = r.get("feature").and_then(Value::as_u64);
-        let off =
-            id.and_then(|id| s.model.result(id)).and_then(|res| res.warning.as_deref()).is_some_and(|w| w.contains(sheet::FOLD_FIXED_OFF_SHEET));
-        if off {
             return Err(bad(
                 cmd,
                 format!("the fixed point ({:.3}, {:.3}, {:.3}) is not on the sheet: pick a point on the face of the side that stays", f.x, f.y, f.z),
             ));
         }
+        if let Ok(Some(side)) = s.doc.fold_side_at(&st, &authored)
+            && let FeatureKind::SheetFold { stays, fixed, .. } = &mut kind
+        {
+            *stays = Some(side);
+            *fixed = None;
+        }
     }
-    Ok(r)
+    add_feature(s, p, kind)
 }
 
 fn path_flange(s: &mut Session, p: &Value) -> Result<Value> {
@@ -1113,7 +1112,7 @@ fn surface_flat_json(sk: &solidcraft_doc::SurfaceSheet) -> Value {
         .collect();
     let mut out = json!({"body": sk.body, "rule": sk.rule, "thickness": sk.thickness, "k_factor": sk.k_factor, "flat_size_mm": [size.x, size.y, sk.thickness],
         "outline": outline, "cutouts": holes, "cutout_shapes": hole_shapes, "pockets": pockets, "bends": bends, "roll_lines": roll_lines, "roll_table": roll_table, "unfolded": sk.unfolded,
-        "perforations": perforations, "bend_zones": bend_zones, "surfaces": true, "rolls": sk.rolls});
+        "perforations": perforations, "bend_zones": bend_zones, "rolls": sk.rolls});
     if !bores.is_empty() {
         out["bores"] = Value::Array(bores);
     }

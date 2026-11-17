@@ -3862,7 +3862,6 @@
   "sketch_panel.plane_offset": "{plane}, смещение {distance}",
   "sketch_panel.plane_origin": "Плоскость {plane}",
   "sketch_panel.redefine_title": "{command}: {name}",
-  "sketch_panel.sheet_attachment": "Привязано к плоской грани листового тела; следует за этой панелью при изменении листа.",
   "sketch_panel.text_hint": "Измените текст и его размещение, затем нажмите OK.",
   "sketch_panel.use_plane": "Использовать плоскость {plane}",
   "sketch_text.align_center": "По центру",

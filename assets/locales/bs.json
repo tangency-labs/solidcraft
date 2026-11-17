@@ -3902,7 +3902,6 @@
   "sketch_panel.plane_offset": "{plane}, odmaknuta za {distance}",
   "sketch_panel.plane_origin": "Ravan {plane}",
   "sketch_panel.redefine_title": "{command}: {name}",
-  "sketch_panel.sheet_attachment": "Pričvršćeno za ravno lice limenog tijela; prati taj panel kada se lim promijeni.",
   "sketch_panel.text_hint": "Uredite tekst i njegov položaj, a zatim pritisnite U redu.",
   "sketch_panel.use_plane": "Koristi ravan {plane}",
   "sketch_text.align_center": "Centar",

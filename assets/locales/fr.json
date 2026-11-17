@@ -4224,7 +4224,6 @@
   "sketch_panel.plane_offset": "{plane}, décalé de {distance}",
   "sketch_panel.plane_origin": "Le plan {plane}",
   "sketch_panel.redefine_title": "{command} : {name}",
-  "sketch_panel.sheet_attachment": "Attaché à une face plane d’un corps de tôlerie ; suit ce panneau lorsque la tôle change.",
   "sketch_panel.text_hint": "Modifiez le texte et son placement, puis appuyez sur OK.",
   "sketch_panel.use_plane": "Utiliser le plan {plane}",
   "sketch_text.align_center": "Centre",

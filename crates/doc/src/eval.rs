@@ -4804,13 +4804,13 @@ fn absorb_sheet_cuts(
     for (i, absorbed) in crate::sheet_surface_cuts::absorb(before, after, f, weigh || !cuts, drawn.as_ref())? {
         let (mut sk, built) = match absorbed {
             crate::sheet_surface_cuts::Absorbed::Read(sk, built) => (*sk, built),
-            // An intersect keeps what lies in its tool and takes the rest: refused, it says so in
-            // the words a flat-first sheet uses for machining it can't keep.
+            // An intersect keeps what lies in its tool and takes the rest: refused, it says what
+            // the sheet can read back instead.
             crate::sheet_surface_cuts::Absorbed::Refused(why)
                 if cuts && matches!(&f.kind, FeatureKind::Extrude { operation: Operation::Intersect, .. }) =>
             {
                 return Err(DocError::Invalid(format!(
-                    "{why}; this sheet machining cannot be preserved in its flat material: use a parallel extrude, or unfold the sheet before intersecting"
+                    "{why}; this sheet machining cannot be read back onto the sheet: use a parallel extrude, or unfold the sheet before intersecting"
                 )));
             }
             crate::sheet_surface_cuts::Absorbed::Refused(why) if cuts => return Err(DocError::Invalid(why)),
@@ -5024,8 +5024,10 @@ fn intersection_tool_union(tools: Vec<Traced>) -> Result<Vec<Traced>> {
 }
 
 /// Refuses a cut or intersect of `tools` that would change the sheet's body `body`, for machining
-/// the sheet can't keep: a cut that meets the body changes it, as does an intersect whose tools
-/// leave some of it out.
+/// the sheet can't read back: a cut is a 3D boolean on the folded body, which the sheet reads back
+/// onto its panels square through them or as a pocket, so walls not square to the sheet have no
+/// place on it. A cut that meets the body changes it, as does an intersect whose tools leave some
+/// of it out.
 fn sheet_boolean_unchanged(body: &Body, tools: &[Body], op: Operation) -> Result<()> {
     let united;
     let tools: &[Body] = if op == Operation::Intersect {
@@ -5037,7 +5039,7 @@ fn sheet_boolean_unchanged(body: &Body, tools: &[Body], op: Operation) -> Result
     let test = if op == Operation::Cut { BoolOp::Intersect } else { BoolOp::Cut };
     for tool in tools {
         if kernel::boolean(body, tool, test)?.is_some() {
-            return Err(DocError::Invalid("this sheet machining cannot be preserved in its flat material: use a parallel, untapered extrude pocket/cut, or unfold before intersecting; unsupported 3D sheet machining is refused to prevent material restoration".into()));
+            return Err(DocError::Invalid("this sheet machining cannot be read back onto the sheet: its walls are not square to the sheet (a tapered cut that stops inside a panel's thickness, or a tapered intersect); use a parallel, untapered extrude cut or pocket, or unfold the sheet before intersecting".into()));
         }
     }
     Ok(())

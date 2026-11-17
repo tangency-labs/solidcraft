@@ -21,15 +21,10 @@ use crate::{DocError, Document, Result};
 #[path = "sheet_face_names.rs"]
 mod face_names;
 pub use crate::sheet_surface_convert::bend_edge_names;
-pub use face_names::body_sheet_face_names;
-pub(crate) use face_names::{FaceNamer, FaceRole, carried, ranked, rims};
+pub(crate) use face_names::{FaceNamer, FaceRole, carried, ranked};
 
 /// The most work one sheet's flat may take (see [`FlatWork`]).
 const MAX_FLAT_WORK: usize = 500_000_000;
-
-/// Starts the warning a fold gives when its `fixed` point touches no material: a recompute keeps
-/// the side the point lies on, and the `sheet.fold` command refuses such a point (#263).
-pub const FOLD_FIXED_OFF_SHEET: &str = "the fold's fixed point is not on the sheet";
 
 fn flat_budget_error() -> DocError {
     DocError::Invalid("sheet metal flat geometry exceeds the bounded processing budget".into())
@@ -437,10 +432,9 @@ pub const MAX_PATH_LINES: usize = 64;
 
 /// A straight round bore of panel `panel`, in that panel's chart (see `SurfaceSheet::bores`): a
 /// cylinder from `base` along the unit `axis` for `height`, cut only from that panel's material.
-/// A bore that names no panel has no place to be cut.
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub struct SheetBore {
-    pub panel: Option<usize>,
+    pub panel: usize,
     pub base: Vec3,
     pub axis: Vec3,
     pub radius: f64,
@@ -551,24 +545,6 @@ impl Letters {
 /// a name finds no face: a sketch attached by one has lost its face.
 pub fn sheet_face_name(body: &str, face: &str) -> String {
     format!("sheet:{body}:{face}")
-}
-
-/// Point the sheet face a sketch plane is attached to (also beneath an offset or a rotation)
-/// at body `new`, when it is on body `old`.
-pub fn rename_plane_sheet_body(plane: &mut crate::PlaneRef, old: &str, new: &str) {
-    match plane {
-        crate::PlaneRef::Face { name: Some(name), anchor: None, .. } => {
-            let renamed = split_sheet_face_name(name).filter(|(body, _)| *body == old).map(|(_, face)| sheet_face_name(new, face));
-            if let Some(renamed) = renamed {
-                *name = renamed;
-            }
-        }
-        crate::PlaneRef::Offset { base, .. }
-        | crate::PlaneRef::ThroughPoint { base, .. }
-        | crate::PlaneRef::AtAngle { base, .. }
-        | crate::PlaneRef::Flipped { base, .. } => rename_plane_sheet_body(base, old, new),
-        _ => {}
-    }
 }
 
 /// The sheet face a sketch plane is attached to (also beneath an offset or a rotation): its

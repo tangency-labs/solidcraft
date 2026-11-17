@@ -2553,7 +2553,6 @@
   "sketch_panel.plane_offset": "{plane}, offset by {distance}",
   "sketch_panel.plane_origin": "The {plane} plane",
   "sketch_panel.redefine_title": "{command}: {name}",
-  "sketch_panel.sheet_attachment": "Attached to a flat face of a sheet metal body; it follows that panel when the sheet changes.",
   "sketch_panel.text_hint": "Edit the text and its placement, then press OK.",
   "sketch_panel.use_plane": "Use {plane} plane",
   "sketch_text.align_center": "Center",

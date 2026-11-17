@@ -1398,8 +1398,6 @@ fn sketch_on_plane(s: &mut Session, p: &Value, mut plane: PlaneRef, internal_bod
     let attachment = s.doc.feature(id).and_then(|feature| match &feature.kind {
         FeatureKind::Sketch { plane, .. } => Some(if face::anchor(plane).is_some() {
             Attachment::ExactFace
-        } else if solidcraft_doc::sheet::plane_sheet_face(plane).is_some() {
-            Attachment::SheetFace
         } else if internal_body.is_some() {
             Attachment::InternalLegacyFace
         } else {

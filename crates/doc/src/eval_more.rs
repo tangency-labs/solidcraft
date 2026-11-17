@@ -1032,6 +1032,17 @@ impl Document {
         sk.fold_side(a, b, ang, rr, position, *flip, fixed.map(Vec3::from)).map(Some)
     }
 
+    /// Whether a fold's `fixed` point touches no material of the sheet made from surfaces the
+    /// fold is on, as `st` has it before the fold (see `SurfaceSheet::touches`): such a
+    /// point picks no side, and the `sheet.fold` command refuses it (#263). False for a fold with
+    /// no fixed point, or one on no folded sheet (which fails as it is evaluated).
+    pub fn fold_fixed_off_sheet(&self, st: &ModelState, kind: &FeatureKind) -> bool {
+        let FeatureKind::SheetFold { sketch, curve, a, b, fixed: Some(p), body, .. } = kind else { return false };
+        let Some((i, _, _)) = surface_fold_sheet(st, body, sketch, curve, a, b) else { return false };
+        let Some(sk) = st.surface_sheets.get(i).filter(|sk| !sk.unfolded) else { return false };
+        !sk.touches(p.0, (sk.thickness * 1e-3).max(1e-6))
+    }
+
     /// This design with each fold that keeps no side that stays (a design saved before folds
     /// kept one) given the side it folds now, as `model`, this design's evaluation, has the sheet
     /// before it: from then on that side stays, wherever the line moves. None where no fold
@@ -1403,17 +1414,9 @@ pub(super) fn sheet_eval(
                 Some(e) => val(vals, e, Kind::Length)?,
                 None => doc.rule_values_at(vals, &doc.sheet_rule(Some(&sk.rule)), Some(sk.thickness))?.bend_radius,
             };
-            // A fixed point that touches no material at all still keeps its fold recomputing (the
-            // side it was made with stays); it says so (#371).
-            let t = sk.thickness;
-            if let Some(p) = fixed
-                && !sk.touches(p.0, (t * 1e-3).max(1e-6))
-            {
-                let kept = if stays.is_some() { "the side the fold was made with stays" } else { "the side of the fold line it lies on stays" };
-                *warning = Some(format!("{} at ({:.3}, {:.3}, {:.3}); {kept}", sheet::FOLD_FIXED_OFF_SHEET, p.x, p.y, p.z));
-            }
             // The side that stays is the fold's own, decided when it was made; a fold saved
-            // before it kept one decides it as it was made (and keeps it once opened).
+            // before it kept one decides it as it was made (and keeps it once opened), by its
+            // fixed point where it has one, wherever that point lies now.
             let stays = match stays {
                 Some(side) => *side,
                 None => sk.fold_side(a, b, ang, rr, position, *flip, fixed.map(Vec3::from))?,
@@ -1737,7 +1740,7 @@ pub(super) fn surface_prism_cut(
                 // stays, a loose piece, as the body's cut reads it; pieces that each hold a joint
                 // are left to the body's cut, which keeps the panel whole. A bore runs in from the
                 // panel's edge, which the cut moves: the body's cut reads what it leaves of one.
-                if out.bores.iter().any(|b| b.panel == Some(p)) {
+                if out.bores.iter().any(|b| b.panel == p) {
                     return Ok(Vec::new());
                 }
                 let Ok((kept, parted)) = crate::sheet_surface_cuts::left_of_panel(&out, p, std::slice::from_ref(&mapped), tol) else {
@@ -1963,7 +1966,7 @@ pub(super) fn surface_hole_cut(f: &Feature, st: &mut ModelState, tools: &[(Trace
                 panel.region.holes.push(circle.outer.ccw().reversed());
             } else {
                 // Through the panel's material only, a hair past it where it runs out of it.
-                out.bores.push(crate::sheet::SheetBore { panel: Some(p), base: b + a * (u0 - p0), axis: a, radius, height: u1 - u0 + p0 + p1 });
+                out.bores.push(crate::sheet::SheetBore { panel: p, base: b + a * (u0 - p0), axis: a, radius, height: u1 - u0 + p0 + p1 });
             }
         }
         plans.push((i, out));

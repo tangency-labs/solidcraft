@@ -1438,12 +1438,9 @@ impl SurfaceSheet {
             b.base.x = -b.base.x;
             b.axis.x = -b.axis.x;
         }
-        // Each panel's own sketch lines and its rims as its own layout would keep them: each edge
-        // where its chart turned it, the material still on its left.
+        // Each panel's own sketch lines as its own layout would keep them: each edge where its
+        // chart turned it, the material still on its left.
         for (_, _, a, b) in &mut self.sketch_curves {
-            (*a, *b) = (f(*b), f(*a));
-        }
-        for (_, a, b, _) in &mut self.rims {
             (*a, *b) = (f(*b), f(*a));
         }
         // The holes' loops and their sketch curves as drawn, where the chart turned them: each

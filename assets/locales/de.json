@@ -5121,7 +5121,6 @@
   "sketch_panel.plane_offset": "{plane}, versetzt um {distance}",
   "sketch_panel.plane_origin": "Die {plane}-Ebene",
   "sketch_panel.redefine_title": "{command}: {name}",
-  "sketch_panel.sheet_attachment": "An eine ebene Fläche eines Blechkörpers angehängt; folgt diesem Bereich bei Änderungen am Blech.",
   "sketch_panel.text_hint": "Text und Platzierung bearbeiten, dann OK drücken.",
   "sketch_panel.use_plane": "Ebene {plane} verwenden",
   "sketch_text.align_center": "Mitte",

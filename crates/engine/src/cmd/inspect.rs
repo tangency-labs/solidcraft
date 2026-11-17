@@ -101,9 +101,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .output(output_schema_for::<ModelFaces>)
         .params(
         "body: name → per face: index, name (what face.delete, sheet.convert `face`, solid.shell … take in place of a point), exact, area, centroid (not always on the face), \
-         plane_normal, point (a point on the face that picks it), cylinder? ({origin, axis, radius} of a cylindrical face), \
-         sheet_face? (a flat-model sheet's face: `sheet:<body>:<panel>:<side>`, side top | bottom | rim.<edge> | bend.inner | bend.outer; \
-         taken wherever a face name is; a sheet made from surfaces has none: its faces' names are the model's, after what made each)",
+         plane_normal, point (a point on the face that picks it), cylinder? ({origin, axis, radius} of a cylindrical face)",
     ),
     CommandSpec::new("model.threads", "List Threads", crate::checked!("model.threads", model_threads))
         .icon("inspect")
@@ -761,10 +759,6 @@ fn model_faces(s: &mut Session, p: &Value) -> Result<Value> {
     let names = solidcraft_doc::naming::face_names(b);
     let tol = (b.body.size() * 2e-3).max(1e-3);
     let spots = solidcraft_doc::naming::face_spots(b);
-    // A folded sheet's faces also have the readable names its sheet gives them, worked out in
-    // the body's own coordinates.
-    let model = s.model.state();
-    let sheet_names = model.body(&b.name).map(|own| solidcraft_doc::sheet::body_sheet_face_names(&model, own)).unwrap_or_default();
     let faces = b
         .body
         .faces(tol)?
@@ -786,7 +780,6 @@ fn model_faces(s: &mut Session, p: &Value) -> Result<Value> {
                 plane_normal: f.plane_normal.map(Into::into),
                 point: spot.map(|x| x.point.into()),
                 cylinder,
-                sheet_face: sheet_names.get(f.index).and_then(|n| n.as_ref().map(|n| n.to_string())),
             }
         })
         .collect();
