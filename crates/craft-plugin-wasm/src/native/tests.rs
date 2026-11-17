@@ -744,6 +744,30 @@ fn source(bytes: &[u8], stack: usize, disk: &crate::CompileCache) -> cache::Sour
     compile_uncached(bytes, stack, Some(disk)).unwrap().2
 }
 
+/// How many times `loaded` runs the host's command.
+fn host_calls(engine: Engine, loaded: Component) -> usize {
+    let manifest = manifest();
+    let runtime = manifest.runtime.as_ref().unwrap();
+    let mut app = App::default();
+    let commands = app.command_catalog().into_iter().map(|s| (s.name.clone(), s)).collect();
+    app.begin_transaction().unwrap();
+    let (state, outcome) = execute(app, runtime, &runtime.entries[0], "{}".into(), engine, loaded, (commands, BTreeSet::new()), BTreeMap::new());
+    outcome.unwrap();
+    state.host.value
+}
+/// Compiles `bytes` into `disk` and returns the entry it added.
+fn new_entry(bytes: &[u8], disk: &crate::CompileCache) -> PathBuf {
+    let before = if disk.dir.join(cache::LAYOUT).exists() { cache_entries(disk) } else { BTreeSet::new() };
+    assert_eq!(source(bytes, STACK, disk), cache::Source::Compiled);
+    std::thread::sleep(Duration::from_millis(20));
+    cache_entries(disk).difference(&before).next().unwrap().clone()
+}
+#[cfg(unix)]
+fn set_mode(path: &Path, mode: u32) {
+    use std::os::unix::fs::PermissionsExt;
+    std::fs::set_permissions(path, std::fs::Permissions::from_mode(mode)).unwrap();
+}
+
 #[test]
 fn a_compiled_component_is_kept_on_disk_the_next_run_loads_it_and_the_least_recently_used_go_first() {
     use cache::Source::{Compiled, Disk};
@@ -757,14 +781,7 @@ fn a_compiled_component_is_kept_on_disk_the_next_run_loads_it_and_the_least_rece
     eprintln!("compiled in {compiled:?}, loaded from disk in {:?}", started.elapsed());
     assert_eq!(from, Disk);
     // The loaded component runs like a compiled one.
-    let manifest = manifest();
-    let runtime = manifest.runtime.as_ref().unwrap();
-    let mut app = App::default();
-    let commands = app.command_catalog().into_iter().map(|s| (s.name.clone(), s)).collect();
-    app.begin_transaction().unwrap();
-    let (state, outcome) = execute(app, runtime, &runtime.entries[0], "{}".into(), engine, loaded, (commands, BTreeSet::new()), BTreeMap::new());
-    outcome.unwrap();
-    assert_eq!(state.host.value, 2);
+    assert_eq!(host_calls(engine, loaded), 2);
 
     // Room for about two and a half entries: a third pushes out the one used longest ago.
     let one = bytes_under(&disk.dir.join(cache::LAYOUT));
@@ -835,5 +852,68 @@ fn another_runtime_configuration_never_reuses_a_cache_entry() {
     assert_eq!(source(&bytes, STACK * 2, &disk), cache::Source::Compiled);
     assert_eq!(cache_entries(&disk).len(), 2);
     assert_eq!(source(&bytes, STACK * 2, &disk), cache::Source::Disk);
+    std::fs::remove_dir_all(&disk.dir).unwrap();
+}
+
+#[cfg(unix)]
+#[test]
+fn a_rejected_entry_that_cannot_be_removed_is_never_loaded_the_component_compiles_without_the_cache() {
+    let disk = compile_cache(1 << 30);
+    let once = component("call $box");
+    let rejected = new_entry(&once, &disk);
+    let other = new_entry(&component("call $box call $box"), &disk);
+    // The record is gone and the code is another component's, which would run as this one's if loaded.
+    let code = cached_code(&rejected);
+    std::fs::copy(cached_code(&other), &code).unwrap();
+    std::fs::remove_file(rejected.join(cache::RECORD)).unwrap();
+    let folder = code.parent().unwrap().to_path_buf();
+    set_mode(&folder, 0o555);
+    // Permissions don't bind for a superuser: there is nothing to test then.
+    if std::fs::write(folder.join("probe"), b"").is_err() {
+        let (engine, loaded, from) = compile_uncached(&once, STACK, Some(&disk)).unwrap();
+        assert_eq!(from, cache::Source::Compiled);
+        assert!(code.exists(), "the rejected code could not be removed");
+        assert_eq!(host_calls(engine, loaded), 1);
+    }
+    set_mode(&folder, 0o755);
+    std::fs::remove_dir_all(&disk.dir).unwrap();
+}
+
+#[cfg(unix)]
+#[test]
+fn an_entry_whose_folder_cannot_be_read_is_never_counted_as_empty_and_the_cache_is_evicted_around_it() {
+    let disk = compile_cache(1 << 30);
+    let unreadable = new_entry(&component("call $box"), &disk);
+    let older = new_entry(&component("call $box call $box"), &disk);
+    // Room for about two and a half entries: the unreadable one's code, counted as nothing, would let all three stay.
+    let disk = crate::CompileCache { max_bytes: bytes_under(&disk.dir.join(cache::LAYOUT)) * 5 / 4, ..disk };
+    let folder = cached_code(&unreadable).parent().unwrap().to_path_buf();
+    set_mode(&folder, 0o000);
+    if std::fs::read_dir(&folder).is_err() {
+        let newest = new_entry(&component("call $box call $box call $box"), &disk);
+        assert!(!older.exists(), "the cache can't be shown to fit while an entry can't be read");
+        assert_eq!(cache_entries(&disk), BTreeSet::from([unreadable.clone(), newest]));
+    }
+    set_mode(&folder, 0o755);
+    std::fs::remove_dir_all(&disk.dir).unwrap();
+}
+
+#[cfg(unix)]
+#[test]
+fn an_entry_that_cannot_be_removed_still_counts_and_eviction_moves_on_to_the_next() {
+    let disk = compile_cache(1 << 30);
+    let stuck = new_entry(&component("call $box"), &disk);
+    new_entry(&component("call $box call $box"), &disk);
+    new_entry(&component("call $box call $box call $box"), &disk);
+    // Room for about two and a half entries.
+    let disk = crate::CompileCache { max_bytes: bytes_under(&disk.dir.join(cache::LAYOUT)) * 5 / 6, ..disk };
+    let folder = cached_code(&stuck).parent().unwrap().to_path_buf();
+    set_mode(&folder, 0o555);
+    if std::fs::write(folder.join("probe"), b"").is_err() {
+        let newest = new_entry(&component("call $box call $box call $box call $box"), &disk);
+        // The oldest stays, so both of the next ones go to fit, not just one.
+        assert_eq!(cache_entries(&disk), BTreeSet::from([stuck.clone(), newest]));
+    }
+    set_mode(&folder, 0o755);
     std::fs::remove_dir_all(&disk.dir).unwrap();
 }

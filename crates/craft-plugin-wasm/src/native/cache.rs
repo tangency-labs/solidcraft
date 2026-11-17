@@ -6,7 +6,8 @@
 //! every file Wasmtime wrote. An entry is read only while all of that still matches. Anything else
 //! (a damaged, truncated or replaced file, an extra file, a link, a missing or unreadable record)
 //! is a miss, not an error: the folder is removed and the component compiled again, which writes
-//! the entry anew. The record's modification time is the entry's last use, and the least recently
+//! the entry anew. When the folder can't be removed, the component is compiled without the cache,
+//! so what was rejected is never loaded. The record's modification time is the entry's last use, and the least recently
 //! used entries go first when the cache is over its size.
 
 use super::trap;
@@ -87,8 +88,11 @@ pub(super) fn compile(config: &Config, bytes: &[u8], stack_bytes: usize, cache: 
     let root = cache.dir.join(LAYOUT);
     let entry = root.join(key.folder());
     let verified = verify(&entry, &key);
-    if !verified {
-        remove(&entry);
+    if !verified && !remove(&entry) {
+        // The rejected files are still there, and Wasmtime's cache reads whatever it finds: compile
+        // without the cache, so they are never loaded.
+        let component = from_binary(&plain, bytes)?;
+        return Ok((plain, component, Source::Compiled));
     }
     let Some(store) = open(&cache.dir, &entry) else {
         // The folder can't be written: compile as if there were no cache.
@@ -105,7 +109,8 @@ pub(super) fn compile(config: &Config, bytes: &[u8], stack_bytes: usize, cache: 
     }
     if store.cache_misses() > 0 {
         if write_record(&entry, &key).is_none() {
-            remove(&entry);
+            // A failed removal leaves an entry without a record, which the next load rejects.
+            let _ = remove(&entry);
         }
         evict(&root, cache.max_bytes, &entry);
     }
@@ -240,49 +245,101 @@ fn touch(entry: &Path) {
     }
 }
 
-fn remove(entry: &Path) {
+/// Removes `entry`; whether it is gone.
+fn remove(entry: &Path) -> bool {
     match fs::remove_dir_all(entry) {
-        Ok(()) => {}
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
-        Err(e) => log::warn!("plugin compile cache: could not remove {}: {e}", entry.display()),
+        Ok(()) => true,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => true,
+        Err(e) => {
+            log::warn!("plugin compile cache: could not remove {}: {e}", entry.display());
+            false
+        }
     }
 }
 
-/// Every byte under `dir`, links not followed.
-fn size(dir: &Path, depth: usize) -> u64 {
-    let Ok(items) = fs::read_dir(dir) else { return 0 };
-    items
-        .flatten()
-        .map(|item| match item.file_type() {
-            Ok(kind) if kind.is_dir() && depth < MAX_DEPTH => size(&item.path(), depth + 1),
-            Ok(kind) if kind.is_file() => item.metadata().map_or(0, |m| m.len()),
-            _ => 0,
-        })
-        .fold(0u64, u64::saturating_add)
+/// The bytes found under a folder, and whether every part of it could be read.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct Scan {
+    bytes: u64,
+    complete: bool,
+}
+
+/// Every byte under `dir`, links not followed. A part that can't be read makes the scan incomplete,
+/// never zero bytes.
+fn size(dir: &Path, depth: usize) -> Scan {
+    let mut scan = Scan { bytes: 0, complete: true };
+    let Ok(items) = fs::read_dir(dir) else {
+        scan.complete = false;
+        return scan;
+    };
+    for item in items {
+        let Ok(item) = item else {
+            scan.complete = false;
+            continue;
+        };
+        match item.file_type() {
+            Ok(kind) if kind.is_dir() => {
+                if depth >= MAX_DEPTH {
+                    scan.complete = false;
+                    continue;
+                }
+                let inner = size(&item.path(), depth + 1);
+                scan.bytes = scan.bytes.saturating_add(inner.bytes);
+                scan.complete &= inner.complete;
+            }
+            Ok(kind) if kind.is_file() => match item.metadata() {
+                Ok(metadata) => scan.bytes = scan.bytes.saturating_add(metadata.len()),
+                Err(_) => scan.complete = false,
+            },
+            // A link counts its own few bytes at most; it is not followed.
+            Ok(_) => {}
+            Err(_) => scan.complete = false,
+        }
+    }
+    scan
 }
 
 /// Removes the least recently used entries until the cache fits in `max_bytes`. `keep`, the entry
 /// just written, stays even when it alone is larger; the next entry written then replaces it.
+///
+/// An entry that can't be fully read can't be loaded either, and its unread bytes are unknown, so it
+/// goes first, and while one is left the cache is not known to fit: the other entries go too. An
+/// entry's bytes count as freed only once it is removed; when a removal fails, what is left of it is
+/// still counted and the next entry is tried.
 fn evict(root: &Path, max_bytes: u64, keep: &Path) {
     let Ok(items) = fs::read_dir(root) else { return };
-    let mut entries: Vec<(SystemTime, u64, PathBuf)> = items
+    let mut entries: Vec<(bool, SystemTime, Scan, PathBuf)> = items
         .flatten()
         .filter(|item| item.file_type().is_ok_and(|kind| kind.is_dir()))
         .map(|item| {
             let path = item.path();
             let used = fs::metadata(path.join(RECORD)).or_else(|_| item.metadata()).and_then(|m| m.modified()).unwrap_or(SystemTime::UNIX_EPOCH);
-            (used, size(&path, 0), path)
+            let scan = size(&path, 0);
+            (scan.complete, used, scan, path)
         })
         .collect();
-    let mut total = entries.iter().map(|(_, size, _)| *size).fold(0u64, u64::saturating_add);
-    entries.sort_by_key(|(used, _, _)| *used);
-    for (_, size, path) in entries {
-        if total <= max_bytes {
+    let mut total = entries.iter().map(|(_, _, scan, _)| scan.bytes).fold(0u64, u64::saturating_add);
+    let mut unknown = entries.iter().filter(|(complete, _, _, path)| !complete && path != keep).count();
+    // Incomplete entries first (`false` sorts before `true`), then the least recently used.
+    entries.sort_by_key(|(complete, used, _, _)| (*complete, *used));
+    for (complete, _, scan, path) in entries {
+        if total <= max_bytes && unknown == 0 {
             break;
         }
-        if path != keep {
-            remove(&path);
-            total = total.saturating_sub(size);
+        if path == keep {
+            continue;
+        }
+        if remove(&path) {
+            total = total.saturating_sub(scan.bytes);
+            if !complete {
+                unknown = unknown.saturating_sub(1);
+            }
+        } else {
+            // Part of it may be gone: credit only what a complete scan shows was freed.
+            let left = size(&path, 0);
+            if left.complete && complete {
+                total = total.saturating_sub(scan.bytes.saturating_sub(left.bytes));
+            }
         }
     }
 }
