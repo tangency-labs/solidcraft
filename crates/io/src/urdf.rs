@@ -200,10 +200,10 @@ fn sanitise(raw: &str, file: bool) -> String {
 
 /// Unique names over links, joints and files (SDFormat refuses a joint named like a link).
 #[derive(Default)]
-struct Names(HashSet<String>);
+pub(crate) struct Names(HashSet<String>);
 
 impl Names {
-    fn take(&mut self, raw: &str) -> String {
+    pub(crate) fn take(&mut self, raw: &str) -> String {
         self.unique(sanitise(raw, false))
     }
     /// A mesh file name, unique without regard to case: Windows and macOS file systems ignore
@@ -220,7 +220,7 @@ impl Names {
     }
     /// A file name with extension `ext` (a decal's mesh or image), unique without regard to case
     /// among the files of that extension. Link and joint names hold no `.`, so they never meet.
-    fn file_with(&mut self, raw: &str, ext: &str) -> String {
+    pub(crate) fn file_with(&mut self, raw: &str, ext: &str) -> String {
         let base = sanitise(raw, true);
         let mut name = format!("{base}.{ext}");
         let mut k = 2;
@@ -242,7 +242,7 @@ impl Names {
 }
 
 /// One body's mass properties in its component's frame: (mass kg, centre mm, inertia kg mm²).
-type BodyMass = (f64, Vec3, [[f64; 3]; 3]);
+pub(crate) type BodyMass = (f64, Vec3, [[f64; 3]; 3]);
 
 /// A component's meshes and masses.
 struct Part {
@@ -264,7 +264,7 @@ fn decal_files(decals: &[UrdfDecal], c: u64, prefix: &str, names: &mut Names, ou
             continue;
         };
         let image = names.file_with(&format!("{prefix}-{}", d.name), ext);
-        let Some(dae) = decal_dae(d, &image) else {
+        let Some(dae) = decal_dae(&d.name, &d.corners, &image) else {
             out.warnings.push(format!("decal `{}`: its corners lie on one line or are not finite: left out", d.name));
             continue;
         };
@@ -277,7 +277,7 @@ fn decal_files(decals: &[UrdfDecal], c: u64, prefix: &str, names: &mut Names, ou
 }
 
 /// A decal image's file extension, from its first bytes.
-fn image_kind(bytes: &[u8]) -> Option<&'static str> {
+pub(crate) fn image_kind(bytes: &[u8]) -> Option<&'static str> {
     if bytes.starts_with(b"\x89PNG\r\n\x1a\n") {
         Some("png")
     } else if bytes.starts_with(&[0xFF, 0xD8, 0xFF]) {
@@ -697,12 +697,12 @@ pub fn urdf(doc: &Document, st: &ModelState, stem: &str, options: &UrdfOptions) 
     Ok(out)
 }
 
-fn token() -> Inertial {
+pub(crate) fn token() -> Inertial {
     Inertial { mass: TOKEN_MASS, com: Vec3::ZERO, inertia: [[TOKEN_INERTIA, 0.0, 0.0], [0.0, TOKEN_INERTIA, 0.0], [0.0, 0.0, TOKEN_INERTIA]] }
 }
 
 /// Bodies' masses (component frame) combined in the link frame (`to_link`: component to link).
-fn inertial(masses: &[BodyMass], to_link: &Mat) -> Option<Inertial> {
+pub(crate) fn inertial(masses: &[BodyMass], to_link: &Mat) -> Option<Inertial> {
     let mass: f64 = masses.iter().map(|m| m.0).sum();
     if !(mass > 0.0) {
         return None;
@@ -739,7 +739,7 @@ fn append(into: &mut Mesh, m: &Mesh) {
     into.triangles.extend(m.triangles.iter().map(|t| t.map(|i| i.saturating_add(base))));
 }
 
-fn metres(m: &Mesh) -> Mesh {
+pub(crate) fn metres(m: &Mesh) -> Mesh {
     Mesh { positions: m.positions.iter().map(|p| *p * 1e-3).collect(), triangles: m.triangles.clone(), ..Mesh::default() }
 }
 
@@ -752,22 +752,22 @@ fn metres(m: &Mesh) -> Mesh {
 /// The material is opaque: COLLADA readers disagree on what a `<transparency>` of 1 means, and
 /// one that takes it for a clear surface hides an RGBA image (every SVG is drawn into one)
 /// altogether.
-fn decal_dae(d: &UrdfDecal, image: &str) -> Option<String> {
-    if !d.corners.iter().all(|p| p.is_finite()) {
+pub(crate) fn decal_dae(name: &str, corners: &[Vec3; 4], image: &str) -> Option<String> {
+    if !corners.iter().all(|p| p.is_finite()) {
         return None;
     }
-    let [bl, br, _, tl] = d.corners;
+    let [bl, br, _, tl] = *corners;
     let normal = (br - bl).cross(tl - bl).normalized()?;
     let lift = normal * DECAL_LIFT_MM;
-    let front = d.corners.iter().map(|p| (*p + lift) * 1e-3);
-    let back = d.corners.iter().map(|p| (*p - lift) * 1e-3);
+    let front = corners.iter().map(|p| (*p + lift) * 1e-3);
+    let back = corners.iter().map(|p| (*p - lift) * 1e-3);
     let positions = front.chain(back).map(triple).collect::<Vec<_>>().join(" ");
     let normals = format!("{} {}", triple(normal), triple(-normal));
     // Per corner: position, normal, texture coordinate. The front is counter-clockwise about the
     // normal (bottom-left, bottom-right, top-right; bottom-left, top-right, top-left), the back
     // the same corners the other way round.
     let indices = "0 0 0 1 0 1 2 0 2 0 0 0 2 0 2 3 0 3 4 1 0 6 1 2 5 1 1 4 1 0 7 1 3 6 1 2";
-    let (name, image) = (attr(&d.name), attr(image));
+    let (name, image) = (attr(name), attr(image));
     Some(format!(
         r##"<?xml version="1.0" encoding="utf-8"?>
 <COLLADA xmlns="http://www.collada.org/2005/11/COLLADASchema" version="1.4.1">
@@ -869,11 +869,11 @@ fn xyz_rpy(m: &Mat) -> (Vec3, Vec3) {
     (t, Vec3::new(roll, pitch, yaw))
 }
 
-fn attr(s: &str) -> String {
+pub(crate) fn attr(s: &str) -> String {
     quick_xml::escape::escape(s).into_owned()
 }
 
-fn num(x: f64) -> String {
+pub(crate) fn num(x: f64) -> String {
     // No "-0" and no non-finite values in the XML. Shortest round-trip digits either way; very
     // small or large values with an exponent rather than a run of zeros.
     if !x.is_finite() || x == 0.0 {
@@ -885,7 +885,7 @@ fn num(x: f64) -> String {
     }
 }
 
-fn triple(v: Vec3) -> String {
+pub(crate) fn triple(v: Vec3) -> String {
     format!("{} {} {}", num(v.x), num(v.y), num(v.z))
 }
 

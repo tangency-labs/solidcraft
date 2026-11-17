@@ -46,6 +46,7 @@ mod point_cloud;
 pub use point_cloud::{CloudFile, DEFAULT_MAX_POINTS, MAX_POINT_CLOUD_BYTES, is_ply_path, is_point_cloud_path, read_point_cloud};
 pub mod safe_write;
 pub mod safe_zip;
+pub mod sdf;
 mod sketch2d;
 mod svg;
 /// Explicit development-test seams; absent from ordinary production builds.
@@ -83,6 +84,7 @@ pub use kicad_in::{
 };
 mod obj;
 pub use obj::read_obj;
+pub use sdf::{SdfDecal, SdfOptions, SdfPackage, sdf_model};
 pub use threemf::{
     MAX_3MF_BYTES, MeshObject, model_xml, model_xml_parts, model_xml_with, read_3mf, weld, write_3mf, write_3mf_parts, write_3mf_with,
 };
@@ -501,6 +503,9 @@ pub enum Format {
     /// Binary glTF with the bodies' looks ([`export_glb`]); written from the document, which
     /// holds the looks.
     Glb,
+    /// A Gazebo model folder of the design ([`sdf_model`]): `model.config`, `model.sdf`, meshes
+    /// and decal images; written by the engine, since it is several files.
+    Sdf,
 }
 
 impl Format {
@@ -517,6 +522,7 @@ impl Format {
             "3mf-tagged" => Format::ThreeMfTagged,
             "urdf" => Format::Urdf,
             "glb" => Format::Glb,
+            "sdf" => Format::Sdf,
             e if e == "json" || is_design_ext(e) => Format::Design,
             _ => return Err(IoError::Format(ext)),
         })
@@ -1215,6 +1221,7 @@ pub fn export_with_parts_noted(
         Format::Design => return Err(IoError::Format("sc (save the document instead)".into())),
         Format::Urdf => return Err(IoError::Format("urdf (an assembly package; use file.export)".into())),
         Format::Glb => return Err(IoError::Format("glb (its looks come from the design; use file.export)".into())),
+        Format::Sdf => return Err(IoError::Format("sdf (a model folder; use file.export)".into())),
     };
     Ok((bytes, notes))
 }

@@ -1,6 +1,6 @@
 //! Contracts and result types for the commands in `cmd/file.rs`: so far `file.export` and the
 //! export command of each format (`file.export_step`, `file.export_stl`, `file.export_3mf`,
-//! `file.export_obj`, `file.export_urdf`), which take what `file.export` takes for that format,
+//! `file.export_obj`, `file.export_urdf`, `file.export_sdf`), which take what `file.export` takes for that format,
 //! without `format`, and `doc.open` and the recovery commands (`doc.recovery_list`,
 //! `doc.recover`, `doc.recovery_discard`), and local import-cache maintenance.
 
@@ -127,10 +127,39 @@ pub struct ExportUrdfParams {
     pub velocity: Option<f64>,
 }
 
+/// Export the design as a Gazebo model folder (docs/sdf.md): `model.config`, `model.sdf`, an STL
+/// mesh for each body and, for each shown decal, its image and a textured COLLADA quad, which
+/// `model.sdf` names as the visual's mesh and its albedo map.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct ExportSdfParams {
+    /// The model folder to write, made if missing; a `.sdf` ending is dropped. Files of the model
+    /// already in it are replaced, other files are left alone.
+    pub path: String,
+    /// The model's name. Default: the folder's name.
+    #[serde(default)]
+    pub name: Option<String>,
+    /// True: scenery Gazebo never moves. False: the link has the bodies' mass and inertia.
+    /// Default: true.
+    #[serde(default, rename = "static")]
+    pub is_static: Option<bool>,
+    /// True names each file as `model://<name>/<file>`; false relative to `model.sdf`. Default:
+    /// false.
+    #[serde(default)]
+    pub model_uris: Option<bool>,
+    /// The bodies to export, by name. Default: every body.
+    #[serde(default)]
+    pub bodies: Option<StringList>,
+    /// How closely the meshes follow curved faces. Default: standard.
+    #[serde(default)]
+    pub quality: Option<MeshQualityParam>,
+}
+
 /// Export bodies, or the whole design, to a file. `format` names the format; without it the
 /// path's extension does. STL, OBJ and 3MF take `quality` (and 3MF `objects`); URDF takes
-/// `mesh_prefix`, `effort` and `velocity` and exports the whole assembly; design JSON the
-/// complete document.
+/// `mesh_prefix`, `effort` and `velocity` and exports the whole assembly; SDF takes `name`,
+/// `static`, `model_uris` and `quality` and writes a model folder; design JSON the complete
+/// document.
 #[derive(Debug, JsonSchema)]
 #[schemars(deny_unknown_fields, transform = export_required)]
 pub struct ExportParams {
@@ -139,8 +168,8 @@ pub struct ExportParams {
     /// The file to write.
     #[serde(default)]
     pub path: Option<String>,
-    /// The format: stl, stla, obj, step, 3mf, 3mf-tagged, glb, urdf or json, or a file name whose
-    /// extension names it. Default: from the path's extension.
+    /// The format: stl, stla, obj, step, 3mf, 3mf-tagged, glb, urdf, sdf or json, or a file name
+    /// whose extension names it. Default: from the path's extension.
     #[serde(default)]
     pub format: Option<String>,
     /// The bodies to export, by name. Default: every body. Design JSON and URDF export the
@@ -168,6 +197,15 @@ pub struct ExportParams {
     /// `file.export_stl` has it; refused for the other formats. Default: false. Not read for URDF.
     #[serde(default)]
     pub lay_on_print_faces: Option<bool>,
+    /// SDF only: the model's name. Default: the folder's name.
+    #[serde(default)]
+    pub name: Option<String>,
+    /// SDF only: true for scenery Gazebo never moves, false gives the link its mass. Default: true.
+    #[serde(default, rename = "static")]
+    pub is_static: Option<bool>,
+    /// SDF only: true names each file as `model://<name>/<file>`. Default: false.
+    #[serde(default)]
+    pub model_uris: Option<bool>,
 }
 
 fn export_required(schema: &mut Schema) {
@@ -187,6 +225,28 @@ fn text<E: serde::de::Error>(m: &Map<String, Value>, key: &str) -> Result<Option
         Some(Value::String(s)) => Ok(Some(s.clone())),
         Some(_) => Err(E::custom(format!("`{key}` must be text"))),
     }
+}
+
+/// A key the handler reads as true or false: `null` is left out, anything else refused.
+fn flag<E: serde::de::Error>(m: &Map<String, Value>, key: &str) -> Result<Option<bool>, E> {
+    match m.get(key) {
+        None | Some(Value::Null) => Ok(None),
+        Some(Value::Bool(b)) => Ok(Some(*b)),
+        Some(_) => Err(E::custom(format!("`{key}` must be true or false"))),
+    }
+}
+
+/// `quality` as the handler reads it (`MeshQuality::from_name`): `null` is left out.
+fn quality<E: serde::de::Error>(m: &Map<String, Value>) -> Result<Option<MeshQualityParam>, E> {
+    Ok(match m.get("quality") {
+        None | Some(Value::Null) => None,
+        Some(v) => Some(match v.as_str().and_then(solidcraft_io::MeshQuality::from_name) {
+            Some(solidcraft_io::MeshQuality::Standard) => MeshQualityParam::Standard,
+            Some(solidcraft_io::MeshQuality::Fine) => MeshQualityParam::Fine,
+            Some(solidcraft_io::MeshQuality::Finest) => MeshQualityParam::Finest,
+            None => return Err(refuse(format!("`quality` must be standard, fine or finest, not {v}"))),
+        }),
+    })
 }
 
 /// `bodies` as the handler reads it (`params::string_list`), with its messages: `null` is left out.
@@ -217,6 +277,9 @@ impl<'de> Deserialize<'de> for ExportParams {
             effort: None,
             velocity: None,
             lay_on_print_faces: None,
+            name: None,
+            is_static: None,
+            model_uris: None,
         };
         // The handler reads `path` first and refuses anything but a name it can write to; the
         // other keys are read only once it has one, and the format is known.
@@ -248,16 +311,15 @@ impl<'de> Deserialize<'de> for ExportParams {
             out.velocity = positive("velocity")?;
             return Ok(out);
         }
-        // `mesh_prefix`, `effort` and `velocity` are not read for the other formats.
-        out.quality = match m.get("quality") {
-            None | Some(Value::Null) => None,
-            Some(v) => Some(match v.as_str().and_then(solidcraft_io::MeshQuality::from_name) {
-                Some(solidcraft_io::MeshQuality::Standard) => MeshQualityParam::Standard,
-                Some(solidcraft_io::MeshQuality::Fine) => MeshQualityParam::Fine,
-                Some(solidcraft_io::MeshQuality::Finest) => MeshQualityParam::Finest,
-                None => return Err(refuse(format!("`quality` must be standard, fine or finest, not {v}"))),
-            }),
-        };
+        out.quality = quality::<D::Error>(&m)?;
+        if format == Format::Sdf {
+            // SDF reads its own keys and `quality`; `objects` and `lay_on_print_faces` are not read.
+            out.name = text::<D::Error>(&m, "name")?;
+            out.is_static = flag::<D::Error>(&m, "static")?;
+            out.model_uris = flag::<D::Error>(&m, "model_uris")?;
+            return Ok(out);
+        }
+        // `mesh_prefix`, `effort`, `velocity` and SDF's keys are not read for the other formats.
         out.objects = match m.get("objects") {
             None | Some(Value::Null) => None,
             Some(v) => match v.as_str() {
@@ -318,6 +380,27 @@ pub struct UrdfExportResult {
     pub links: usize,
     /// How many joints the robot has.
     pub joints: usize,
+    /// What the export could not carry over as it is in the design.
+    pub warnings: Vec<String>,
+    /// In the warn parameter-check mode: what the call's parameters got wrong.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub param_warnings: Vec<String>,
+}
+
+/// What `file.export_sdf` returns.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct SdfExportResult {
+    /// The model folder written.
+    pub path: String,
+    /// Always Sdf.
+    pub format: String,
+    /// The model's name.
+    pub name: String,
+    /// Every file written, the meshes and images first, `model.config` and `model.sdf` last.
+    pub files: Vec<String>,
+    /// How many bodies and decals the model draws.
+    pub bodies: usize,
+    pub decals: usize,
     /// What the export could not carry over as it is in the design.
     pub warnings: Vec<String>,
     /// In the warn parameter-check mode: what the call's parameters got wrong.
@@ -922,6 +1005,8 @@ pub enum FileExportResult {
     File(ExportResult),
     /// URDF.
     Urdf(UrdfExportResult),
+    /// A Gazebo model folder (SDF).
+    Sdf(SdfExportResult),
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]

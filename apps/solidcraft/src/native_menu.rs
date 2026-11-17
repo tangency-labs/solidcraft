@@ -36,13 +36,14 @@ const INSERTS: [(&str, FileAction); 3] = [
 ];
 
 /// File > Export entries.
-const EXPORTS: [(&str, FileAction); 7] = [
+const EXPORTS: [(&str, FileAction); 8] = [
     ("Export STL\u{2026}", FileAction::ExportMesh("stl")),
     ("Export 3MF\u{2026}", FileAction::ExportMesh("3mf")),
     ("Export STEP\u{2026}", FileAction::Export("step")),
     ("Export Current View as DXF\u{2026}", FileAction::Command("file.export_view_dxf")),
     ("Export OBJ\u{2026}", FileAction::Export("obj")),
     ("Export URDF\u{2026}", FileAction::Export("urdf")),
+    ("Export SDF Model\u{2026}", FileAction::Export("sdf")),
     ("Export Design as JSON\u{2026}", FileAction::Export("json")),
 ];
 

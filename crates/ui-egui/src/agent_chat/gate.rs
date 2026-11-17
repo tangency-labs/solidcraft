@@ -57,6 +57,7 @@ const FILE_EXTENSIONS: &[&str] = &[
     "jpg",
     "jpeg",
     "urdf",
+    "sdf",
     "txt",
     "py",
     "toml",
