@@ -3006,11 +3006,12 @@ mod tests {
         }
     }
 
-    /// The menu of a selected feature adds an entry that suppresses the whole selection in one
-    /// undo step and says how many; when every selected feature is already suppressed it offers
-    /// to unsuppress them instead, and a mixed selection is suppressed. The single-feature entry
-    /// stays and still acts on the right-clicked feature alone. The same in both timelines
-    /// (#16245).
+    /// The menu of several selected features has one Suppress entry, which suppresses them all in
+    /// one undo step and says how many; when every selected feature is already suppressed it
+    /// offers to unsuppress them instead, and a mixed selection is suppressed. The same in both
+    /// timelines (#16245). With Preferences › Layout › Feature menus act on the whole selection
+    /// off, the single-feature entry stays beside it and still acts on the right-clicked feature
+    /// alone, as before.
     #[test]
     fn the_feature_menu_suppresses_the_selected_features() {
         fn suppressed(h: &Harness) -> Vec<String> {
@@ -3023,43 +3024,238 @@ mod tests {
             h.step(&json!({"click": {"handle": "timeline:Second"}, "ctrl": true})).unwrap();
             h.step(&json!({"click": {"handle": "timeline:Second"}, "button": "right"})).unwrap();
         }
-        for left in [false, true] {
+        for (left, rule) in [(false, true), (true, true), (false, false), (true, false)] {
             let mut h = three_boxes(left);
-            // The single-feature entry stays as it was beside the new one, and still acts on
-            // the right-clicked feature alone.
             let single = if left { "Suppress Feature" } else { "Suppress Features" };
-            menu_on_first_and_second(&mut h);
-            h.step(&json!({"widget": single})).unwrap();
-            h.settle();
-            assert_eq!(suppressed(&h), ["Second"], "left: {left}");
-            h.app.run("edit.undo", json!({})).unwrap();
-            h.settle();
-            assert!(suppressed(&h).is_empty(), "left: {left}");
+            if rule {
+                // One feature's menu keeps the single entry.
+                h.step(&json!({"click": {"handle": "timeline:Third"}, "button": "right"})).unwrap();
+                assert!(h.widget(single).is_some(), "left: {left}");
+                h.step(&json!({"key": "Escape"})).unwrap();
+            } else {
+                crate::prefs::set(&mut h.app, &json!({"feature_menus_act_on_selection": false})).unwrap();
+                // The single-feature entry stays as it was beside the other one, and still acts
+                // on the right-clicked feature alone.
+                menu_on_first_and_second(&mut h);
+                h.step(&json!({"widget": single})).unwrap();
+                h.settle();
+                assert_eq!(suppressed(&h), ["Second"], "left: {left}");
+                h.app.run("edit.undo", json!({})).unwrap();
+                h.settle();
+                assert!(suppressed(&h).is_empty(), "left: {left}");
+            }
 
             menu_on_first_and_second(&mut h);
-            assert!(h.widget(single).is_some(), "left: {left}");
-            assert!(h.widget("Unsuppress 2 Selected Features").is_none(), "left: {left}");
+            assert_eq!(h.widget(single).is_some(), !rule, "the single entry gives way to the one for the selection, left: {left}");
+            assert!(h.widget("Unsuppress 2 Selected Features").is_none(), "left: {left}, rule: {rule}");
             h.step(&json!({"widget": "Suppress 2 Selected Features"})).unwrap();
             h.settle();
-            assert_eq!(suppressed(&h), ["First", "Second"], "left: {left}");
+            assert_eq!(suppressed(&h), ["First", "Second"], "left: {left}, rule: {rule}");
             h.app.run("edit.undo", json!({})).unwrap();
             h.settle();
-            assert!(suppressed(&h).is_empty(), "one undo step restores both, left: {left}");
+            assert!(suppressed(&h).is_empty(), "one undo step restores both, left: {left}, rule: {rule}");
 
             h.app.run("timeline.suppress", json!({"features": ["First", "Second"], "suppressed": true})).unwrap();
             h.settle();
             menu_on_first_and_second(&mut h);
-            assert!(h.widget("Suppress 2 Selected Features").is_none(), "left: {left}");
+            assert!(h.widget("Suppress 2 Selected Features").is_none(), "left: {left}, rule: {rule}");
             h.step(&json!({"widget": "Unsuppress 2 Selected Features"})).unwrap();
             h.settle();
-            assert!(suppressed(&h).is_empty(), "left: {left}");
+            assert!(suppressed(&h).is_empty(), "left: {left}, rule: {rule}");
 
             h.app.run("timeline.suppress", json!({"feature": "First", "suppressed": true})).unwrap();
             h.settle();
             menu_on_first_and_second(&mut h);
             h.step(&json!({"widget": "Suppress 2 Selected Features"})).unwrap();
             h.settle();
-            assert_eq!(suppressed(&h), ["First", "Second"], "a mixed selection is suppressed, left: {left}");
+            assert_eq!(suppressed(&h), ["First", "Second"], "a mixed selection is suppressed, left: {left}, rule: {rule}");
+        }
+    }
+
+    /// The reason a one-feature entry gives while several features are selected.
+    const SELECT_ONE: &str = "Select a single feature to use this.";
+
+    /// Two boxes, a fillet with a warning on the first one and a sketch, in the bottom History.
+    fn boxes_fillet_and_sketch() -> (Harness, u64, u64, u64) {
+        let mut h = two_boxes(false);
+        // Too large for the box, so it is reduced to what fits, which the feature's warning says.
+        h.app
+            .run("solid.fillet", json!({"edges": [[0, 0, 5], [10, 0, 5], [10, 10, 5], [0, 10, 5]], "radius": 6, "fit": "reduce", "body": "One"}))
+            .unwrap();
+        let fillet = h.app.session.doc.features.last().map(|f| f.id).unwrap();
+        h.app.run("sketch.create", json!({"plane": "XY", "name": "Outline"})).unwrap();
+        h.app.run("sketch.finish", json!({})).unwrap();
+        h.app.run("select.clear", json!({})).unwrap();
+        h.frames(4);
+        let ids = ids(&h, &["Second", "Outline"]);
+        (h, ids[0], fillet, ids[1])
+    }
+
+    fn select_features(h: &mut Harness, features: &[u64]) {
+        let items: Vec<serde_json::Value> = features.iter().map(|id| json!({"type": "feature", "id": id})).collect();
+        h.app.run("select.set", json!({ "items": items })).unwrap();
+        h.frames(2);
+    }
+
+    /// Which of `features` a menu entry's parameters name, wherever they are in them.
+    fn named(params: Option<&serde_json::Value>, features: &[u64]) -> Vec<u64> {
+        fn walk(value: &serde_json::Value, features: &[u64], found: &mut Vec<u64>) {
+            match value {
+                serde_json::Value::Number(n) => found.extend(n.as_u64().filter(|n| features.contains(n))),
+                serde_json::Value::Array(list) => list.iter().for_each(|v| walk(v, features, found)),
+                serde_json::Value::Object(map) => map.values().for_each(|v| walk(v, features, found)),
+                _ => {}
+            }
+        }
+        let mut found = Vec::new();
+        if let Some(params) = params {
+            walk(params, features, &mut found);
+        }
+        found.sort_unstable();
+        found.dedup();
+        found
+    }
+
+    /// With several features selected, every entry that can be used in the History bar's and
+    /// the Browser's feature menu acts on all of them (its parameters name each one) or on none
+    /// by name (Paste, Cut); the entries that take one feature are off and say why; one Suppress
+    /// entry takes them all; one feature's message is not offered.
+    #[test]
+    fn a_feature_menu_on_several_features_acts_on_all_of_them_or_says_why() {
+        use crate::context_menu::{Target, items};
+        let (mut h, second, fillet, sketch) = boxes_fillet_and_sketch();
+        let message = |h: &Harness| items(&h.app, &Target::Timeline { feature: fillet }).iter().any(|item| item.id == "ui.copyMessage");
+        select_features(&mut h, &[fillet]);
+        assert!(message(&h), "the fillet's own menu offers its warning");
+
+        let mut selected = vec![second, fillet];
+        selected.sort_unstable();
+        select_features(&mut h, &selected);
+        for (menu, target) in [("History bar", Target::Timeline { feature: fillet }), ("Browser", Target::Feature { id: fillet })] {
+            let entries: Vec<_> = items(&h.app, &target).into_iter().filter(|item| !item.is_sep()).collect();
+            for item in entries.iter().filter(|item| item.enabled) {
+                let acts_on = named(item.params.as_ref(), &selected);
+                assert!(
+                    acts_on.is_empty() || acts_on == selected,
+                    "{menu}: `{}` ({}) acts on {acts_on:?} of the selected {selected:?}",
+                    item.label,
+                    item.id
+                );
+            }
+            for id in ["ui.editFeature", "ui.rename", "timeline.roll_to"] {
+                let item = entries.iter().find(|item| item.id == id).unwrap_or_else(|| panic!("{menu}: {id} stays in the menu"));
+                assert!(!item.enabled, "{menu}: {id} takes one feature");
+                assert_eq!(item.tip.as_deref(), Some(SELECT_ONE), "{menu}: {id} says why it is off");
+            }
+            let suppress: Vec<_> = entries.iter().filter(|item| item.id == "timeline.suppress").collect();
+            assert_eq!(suppress.len(), 1, "{menu}: one Suppress entry");
+            assert_eq!(suppress[0].label, "Suppress 2 Selected Features", "{menu}");
+            assert_eq!(named(suppress[0].params.as_ref(), &selected), selected, "{menu}");
+            let find = entries.iter().find(|item| item.id.starts_with("ui.find")).unwrap();
+            assert_eq!(named(find.params.as_ref(), &selected), selected, "{menu}: `{}` finds them all", find.label);
+        }
+        assert!(!message(&h), "one feature's message is not offered for two");
+
+        // A sketch's Redefine Sketch Plane takes one sketch too.
+        select_features(&mut h, &[second, sketch]);
+        let redefine = items(&h.app, &Target::Timeline { feature: sketch }).into_iter().find(|item| item.id == "ui.redefineSketch").unwrap();
+        assert!(!redefine.enabled);
+        assert_eq!(redefine.tip.as_deref(), Some(SELECT_ONE));
+    }
+
+    /// Preferences › Layout › Feature menus act on the whole selection, off: the menus are as they
+    /// were. Edit, Rename and Roll back stay usable on the right-clicked feature, its own
+    /// Suppress entry stays (beside the one for the selection in the History bar; the Browser
+    /// has no such entry), Find takes that feature and its message is offered.
+    #[test]
+    fn feature_menus_keep_their_one_feature_entries_when_preferences_say_so() {
+        use crate::context_menu::{Target, items};
+        let (mut h, second, fillet, _) = boxes_fillet_and_sketch();
+        assert_eq!(h.call("ui.prefs", json!({}))["result"]["feature_menus_act_on_selection"], true, "on by default");
+        crate::prefs::set(&mut h.app, &json!({"feature_menus_act_on_selection": false})).unwrap();
+        select_features(&mut h, &[second, fillet]);
+        for (menu, target, suppress_entries) in
+            [("History bar", Target::Timeline { feature: fillet }, 2), ("Browser", Target::Feature { id: fillet }, 1)]
+        {
+            let entries = items(&h.app, &target);
+            for id in ["ui.editFeature", "ui.rename", "timeline.roll_to"] {
+                let item = entries.iter().find(|item| item.id == id).unwrap();
+                assert!(item.enabled && item.tip.is_none(), "{menu}: {id}");
+                assert_eq!(named(item.params.as_ref(), &[second, fillet]), [fillet], "{menu}: {id} takes the right-clicked feature");
+            }
+            let suppress: Vec<_> = entries.iter().filter(|item| item.id == "timeline.suppress").collect();
+            assert_eq!(suppress.len(), suppress_entries, "{menu}");
+            assert_eq!(named(suppress[0].params.as_ref(), &[second, fillet]), [fillet], "{menu}: its own Suppress entry");
+            let find = entries.iter().find(|item| item.id.starts_with("ui.find")).unwrap();
+            assert_eq!(named(find.params.as_ref(), &[second, fillet]), [fillet], "{menu}");
+        }
+        assert!(items(&h.app, &Target::Timeline { feature: fillet }).iter().any(|item| item.id == "ui.copyMessage"));
+
+        // The box on the Layout page turns the rule on again.
+        h.call("ui.prefs", json!({"language": "en", "open": "Layout"}));
+        crate::prefs::reveal_preference(&mut h, "prefs:feature_menus_act_on_selection");
+        h.step(&json!({"click": {"handle": "prefs:feature_menus_act_on_selection"}})).unwrap();
+        assert_eq!(h.call("ui.prefs", json!({}))["result"]["feature_menus_act_on_selection"], true, "a click turns it on");
+    }
+
+    /// Find in Browser on several selected features selects what each of them made, and a
+    /// feature that made no body stays selected; Find in Timeline from the Browser keeps them
+    /// all selected.
+    #[test]
+    fn find_from_a_feature_menu_takes_every_selected_feature() {
+        use crate::context_menu::{Target, items, run_item};
+        use solidcraft_engine::Sel;
+        let (mut h, second, _, sketch) = boxes_fillet_and_sketch();
+        let first = ids(&h, &["First"])[0];
+        select_features(&mut h, &[first, second, sketch]);
+        let find = items(&h.app, &Target::Timeline { feature: second }).into_iter().find(|item| item.id == "ui.findBrowser").unwrap();
+        run_item(&mut h.app, &find, egui::pos2(0.0, 0.0));
+        h.frames(2);
+        assert_eq!(
+            h.app.session.selection,
+            [Sel::Body { name: "One".into() }, Sel::Body { name: "Two".into() }, Sel::Feature { id: sketch }],
+            "the bodies of both boxes, and the sketch itself"
+        );
+
+        select_features(&mut h, &[first, second]);
+        let find = items(&h.app, &Target::Feature { id: second }).into_iter().find(|item| item.id == "ui.findTimeline").unwrap();
+        run_item(&mut h.app, &find, egui::pos2(0.0, 0.0));
+        h.frames(2);
+        assert_eq!(h.app.session.selection, [Sel::Feature { id: first }, Sel::Feature { id: second }]);
+    }
+
+    /// The vertical History's menu on several selected features: the entries that take one
+    /// feature are greyed out with the reason, a click on one does nothing, and the single
+    /// Suppress entry gives way to the one for the selection.
+    #[test]
+    fn the_vertical_history_menu_on_several_features_greys_out_the_one_feature_entries() {
+        /// Whether the menu row `label` can be used and what it says on hover; `None` when there is no such row.
+        fn row(h: &Harness, label: &str) -> Option<(bool, Option<String>)> {
+            let nodes = &h.output.accesskit_update.as_ref()?.nodes;
+            let found = nodes.iter().find(|(_, n)| n.role() == egui::accesskit::Role::Button && n.label() == Some(label));
+            found.map(|(_, n)| (!n.is_disabled(), n.description().map(str::to_string)))
+        }
+        let mut h = three_boxes(true);
+        h.step(&json!({"click": {"handle": "timeline:First"}})).unwrap();
+        h.step(&json!({"click": {"handle": "timeline:Second"}, "ctrl": true})).unwrap();
+        h.step(&json!({"click": {"handle": "timeline:Second"}, "button": "right"})).unwrap();
+        for label in ["Edit Feature", "Rename Feature", "Roll Back Here"] {
+            assert_eq!(row(&h, label), Some((false, Some(SELECT_ONE.to_string()))), "{label}");
+        }
+        assert_eq!(row(&h, "Suppress Feature"), None);
+        for label in ["Suppress 2 Selected Features", "Copy", "Add to New Folder", "Delete 2 Selected Features"] {
+            assert_eq!(row(&h, label).map(|(enabled, _)| enabled), Some(true), "{label}");
+        }
+        h.step(&json!({"widget": "Roll Back Here"})).unwrap();
+        h.settle();
+        assert_eq!(h.app.session.doc.marker, None, "a greyed-out entry does nothing");
+        assert!(h.app.menu.rename.is_none() && h.app.dialog.is_none());
+        h.step(&json!({"key": "Escape"})).unwrap();
+
+        // One feature's menu has them all in use.
+        h.step(&json!({"click": {"handle": "timeline:Third"}, "button": "right"})).unwrap();
+        for label in ["Edit Feature", "Rename Feature", "Suppress Feature", "Roll Back Here"] {
+            assert_eq!(row(&h, label).map(|(enabled, _)| enabled), Some(true), "{label}");
         }
     }
 
