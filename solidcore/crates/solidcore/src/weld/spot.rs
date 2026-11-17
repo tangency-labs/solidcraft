@@ -11,6 +11,7 @@
 //! | [`SpotZone`]                  | Which part of the look a body is (for the app's colours)|
 //! | [`spot_weld`]                 | The spot's bodies                                       |
 //! | [`proposed_spot_diameter`]    | The diameter the weld tool proposes, `5 √t`             |
+//! | [`pin_dish_depth`]            | How deep the concave pin ends are dished                |
 //!
 //! # The geometry
 //!
@@ -52,7 +53,7 @@ pub const MARK_THICKNESS: f64 = 0.006;
 /// Small ball ([`SpotLook::MarksSmallBall`]): diameter as a fraction of the spot diameter.
 pub const SMALL_BALL: f64 = 0.6;
 /// Concave pin ends ([`SpotLook::MarksPinConcaveEnds`]): dish depth as a fraction of the
-/// thinner sheet.
+/// thinner sheet, held to the pin's radius ([`pin_dish_depth`]).
 pub const PIN_DISH: f64 = 0.3;
 /// Dent ([`SpotLook::Dent`]): height at the rim as a fraction of the spot diameter
 /// (0.20 mm at 5 mm).
@@ -75,7 +76,7 @@ pub enum SpotLook {
     /// outer faces.
     MarksThinPin,
     /// The marks and a pin of the spot diameter through both sheets, both ends dished in by
-    /// `0.3` of the thinner sheet.
+    /// `0.3` of the thinner sheet, at most a half sphere ([`pin_dish_depth`]).
     MarksPinConcaveEnds,
     /// The marks as a shallow inverted dome on each outer face: `0.04 d` high at the rim,
     /// `0.004 d` in the middle, read as the electrode's dent. Lies on the face; the face
@@ -143,6 +144,16 @@ pub struct SpotWeld {
 #[must_use]
 pub fn proposed_spot_diameter(upper_thickness: f64, lower_thickness: f64) -> f64 {
     5.0 * upper_thickness.min(lower_thickness).sqrt()
+}
+
+/// The depth of each dished end of [`SpotLook::MarksPinConcaveEnds`]' pin: `0.3` of the
+/// thinner sheet, held to the pin's radius `d / 2`. A deeper dish would need a sphere wider
+/// than the pin, which cuts the pin short below the outer faces instead of dishing its end
+/// (a spot diameter under `0.6` of the thinner sheet); held there, the dish is a half
+/// sphere and the pin's rim stays on the faces.
+#[must_use]
+pub fn pin_dish_depth(diameter: f64, upper_thickness: f64, lower_thickness: f64) -> f64 {
+    (PIN_DISH * upper_thickness.min(lower_thickness)).min(diameter / 2.0)
 }
 
 /// The bodies of `spot`, placed at the spot.
@@ -221,7 +232,7 @@ fn local_pieces(k: &mut Kernel, spot: &SpotWeld) -> Result<Vec<SpotPiece>> {
         }
         SpotLook::MarksPinConcaveEnds => {
             let r = d / 2.0;
-            let c = PIN_DISH * t_u.min(t_l);
+            let c = pin_dish_depth(d, t_u, t_l);
             let rs = (r * r + c * c) / (2.0 * c);
             let mut pin = create_cylinder(k, at(-t_l), r, t_u + t_l)?;
             let upper = create_sphere(k, at(t_u - c + rs), rs)?;
