@@ -1555,10 +1555,7 @@ mod recognition {
                         "{major:?}"
                     );
                     assert!(major.cross(u).abs() < 1e-9, "{major:?} {u:?}");
-                    assert!(
-                        (ratio - 8.0 / u.length_hypot()).abs() < 1e-12,
-                        "{ratio}"
-                    );
+                    assert!((ratio - 8.0 / u.length_hypot()).abs() < 1e-12, "{ratio}");
                     for seg in &path.segs {
                         for t in [0.0, 0.25, 0.5, 0.75, 1.0] {
                             let d = seg.point_at(t) - c;
