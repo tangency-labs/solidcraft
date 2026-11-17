@@ -802,6 +802,8 @@ fn run_rust(
     }
     // (a soundness probe's measure of the result: nothing unless capture is on)
     crate::soundness::measure(&mut body);
+    // (a certificate's look at the result: nothing unless a test installs a hook)
+    crate::trim_hook::observe(&mut body);
     Ok(values)
 }
 /// Configure one actual retained corner between native corner creation and filleting.
@@ -1147,6 +1149,10 @@ fn shell_rust(k: &mut Kernel, input: &RealSolid, shell: ShellAfter) -> SolidResu
         ]),
         Err(error) => values.push(status(error)?),
     }
+    // (a soundness probe's measure and a certificate's look at the shelled body: nothing
+    // unless capture is on or a test installs a hook)
+    crate::soundness::measure(&mut result);
+    crate::trim_hook::observe(&mut result);
     let mut geometry = Vec::new();
     crate::util::primitive::append(k, &result, &mut geometry)?;
     section(&mut values, &geometry);

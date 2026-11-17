@@ -1250,3 +1250,481 @@ mod trim_blocks {
 
     include!("operand_trim_rows/drop_rows.rs");
 }
+
+/// The rows of `blend.fillet_executive_p3` the copy moves: a fillet (or fillet then shell)
+/// of a Boolean's result, whose faces now keep their operands' UV trims. A row is certified
+/// as follows.
+/// * **Replay.** The case's Rust side is run again; its output has the digest ([`digest`])
+///   recorded for this branch, so the run is the row.
+/// * **Only the listed values moved, up to a relabeling.** The output's vertices and edges
+///   are renumbered by the row's committed permutations (`vertices`, `edges`: this branch's
+///   index to main's; in `result_topology` and the blocks of `result_geometry`), each
+///   `reversed` edge's use list read backwards (the same (face, side) uses, stored in the
+///   other order), and each listed moved value put back to main's (7d4445c0c): the output
+///   then has main's digest, bit for bit. So the body is main's, entity for entity, but for
+///   the listed values.
+/// * **Soundness.** The result body's `check_brep` level 2 reports nothing (as main's
+///   bodies: all nine clean), it is one manifold solid of positive volume, and its volume is
+///   enclosed ([`enclose_volume`], refined towards a relative width of 1e-9).
+/// * **Geometry.** Each moved vertex point, edge sample or face sample is classed as in the
+///   module docs (enclosed distances to the surfaces of the faces it lies on), each moved
+///   vertex or edge tolerance against its need ([`vertex_need`], [`edge_need`], from the
+///   body's trims certified on their edges); a moved edge interval or face domain bound is
+///   classed as the most distant of its edge's or face's moved samples (one must have moved).
+/// * **Mass.** A moved volume is classed by its distance to the true volume, enclosed by
+///   the enclosure (`equal` where main's and this branch's distances meet). The other mass properties (area,
+///   centroid, inertia; at most 4.8e-7 relative) have no enclosure here: they are reported,
+///   counted as measured, not classed.
+///
+/// [`enclose_volume`]: solidcore::mass::enclosure::enclose_volume
+mod fillet_p3 {
+    use super::{
+        digest, edge_faces, edge_need, point_class, vertex_edges, vertex_need, Class, Moved,
+    };
+    use crate::trims_on_edges::certify_brep;
+    use crate::units::blend_fillet_executive_p3::Runner;
+    use crate::{Output, UnitDiff};
+    use solidcore::kernel::Kernel;
+    use solidcore::mass::enclosure::VolumeSign;
+    use solidcore::math::Point3;
+    use solidcore::topology::brep::p1;
+    use solidcore::topology::Brep;
+    use std::cell::RefCell;
+    use std::ops::Range;
+    use std::rc::Rc;
+
+    struct Row {
+        case: &'static str,
+        main: u64,
+        new: u64,
+        /// this branch's vertex index -> main's (the others fixed)
+        vertices: &'static [(usize, usize)],
+        /// this branch's edge index -> main's (the others fixed)
+        edges: &'static [(usize, usize)],
+        /// this branch's edges whose use list is main's read backwards
+        reversed: &'static [usize],
+        moved: &'static [Moved],
+    }
+
+    include!("operand_trim_rows/fillet_p3.rs");
+
+    type Uses = Vec<[i64; 2]>;
+    /// An edge of `result_topology`: its type, vertices and uses.
+    type TopoEdge = (i64, Vec<i64>, Uses);
+    /// A face of `result_topology`: its type and loops.
+    type TopoFace = (i64, Vec<Uses>);
+
+    /// `result_topology`: per edge its type, vertices and (face, side) uses; per face its
+    /// type and loops of (edge, side).
+    fn parse(t: &[i64]) -> (Vec<TopoEdge>, Vec<TopoFace>) {
+        let mut it = t.iter().copied();
+        let mut next = || it.next().expect("result_topology ends early");
+        let mut edges = Vec::new();
+        for _ in 0..next() {
+            let ty = next();
+            let vs = (0..next()).map(|_| next()).collect();
+            let us = (0..next()).map(|_| [next(), next()]).collect();
+            edges.push((ty, vs, us));
+        }
+        let mut faces = Vec::new();
+        for _ in 0..next() {
+            let ty = next();
+            let loops = (0..next())
+                .map(|_| (0..next()).map(|_| [next(), next()]).collect())
+                .collect();
+            faces.push((ty, loops));
+        }
+        assert!(it.next().is_none(), "result_topology has a tail");
+        (edges, faces)
+    }
+
+    /// The blocks of `result_geometry` ([`crate::util::primitive::append`]): per vertex,
+    /// edge and face its range.
+    fn blocks(g: &[f64], nv: usize, ne: usize, nf: usize) -> [Vec<Range<usize>>; 3] {
+        let samples = |mut i: usize| {
+            for _ in 0..3 {
+                i += if g[i] == 0.0 { 4 } else { 1 };
+            }
+            i
+        };
+        let mut i = 0;
+        let vs = (0..nv)
+            .map(|_| {
+                i += 4;
+                i - 4..i
+            })
+            .collect();
+        let es = (0..ne)
+            .map(|_| {
+                let j = i;
+                i += 4;
+                if g[j + 3] == 1.0 {
+                    i = samples(i);
+                }
+                i += 2;
+                j..i
+            })
+            .collect();
+        let fs = (0..nf)
+            .map(|_| {
+                let j = i;
+                i += 6;
+                if g[j + 5] == 1.0 {
+                    i = samples(i);
+                }
+                j..i
+            })
+            .collect();
+        assert_eq!(i, g.len(), "result_geometry's blocks");
+        [vs, es, fs]
+    }
+
+    fn map(perm: &[(usize, usize)], a: usize) -> usize {
+        perm.iter().find(|p| p.0 == a).map_or(a, |p| p.1)
+    }
+
+    fn unmap(perm: &[(usize, usize)], b: usize) -> usize {
+        perm.iter().find(|p| p.1 == b).map_or(b, |p| p.0)
+    }
+
+    /// `out` renumbered to main's labels (the row's permutations and reversed use lists).
+    fn relabel(out: &Output, row: &Row) -> Output {
+        let mut r = out.clone();
+        let Some(t) = out.ints.get("result_topology") else {
+            assert!(row.vertices.is_empty() && row.edges.is_empty() && row.reversed.is_empty());
+            return r;
+        };
+        let (edges, faces) = parse(t);
+        let nv = out.ints["api_status_vertex_edge_face_counts"][1] as usize;
+        let g = &out.values["result_geometry"];
+        let [vb, eb, fb] = blocks(g, nv, edges.len(), faces.len());
+        let lab = |v: i64| map(row.vertices, v as usize) as i64;
+        let mut ti = vec![edges.len() as i64];
+        let mut go = Vec::new();
+        for b in 0..nv {
+            go.extend_from_slice(&g[vb[unmap(row.vertices, b)].clone()]);
+        }
+        for b in 0..edges.len() {
+            let a = unmap(row.edges, b);
+            let (ty, vs, us) = &edges[a];
+            ti.extend([*ty, vs.len() as i64]);
+            ti.extend(vs.iter().map(|&v| lab(v)));
+            ti.push(us.len() as i64);
+            let us: Vec<_> = if row.reversed.contains(&a) {
+                us.iter().rev().collect()
+            } else {
+                us.iter().collect()
+            };
+            ti.extend(us.into_iter().flatten());
+            go.extend_from_slice(&g[eb[a].clone()]);
+        }
+        ti.push(faces.len() as i64);
+        for (ty, loops) in &faces {
+            ti.extend([*ty, loops.len() as i64]);
+            for l in loops {
+                ti.push(l.len() as i64);
+                for [e, o] in l {
+                    ti.extend([map(row.edges, *e as usize) as i64, *o]);
+                }
+            }
+        }
+        for f in fb {
+            go.extend_from_slice(&g[f]);
+        }
+        r.ints.insert("result_topology".into(), ti);
+        r.values.insert("result_geometry".into(), go);
+        r
+    }
+
+    fn worst(of: &[Class]) -> Class {
+        assert!(!of.is_empty(), "a moved bound with no moved sample");
+        if of.contains(&Class::Farther) {
+            Class::Farther
+        } else if of.contains(&Class::Equal) {
+            Class::Equal
+        } else {
+            Class::Closer
+        }
+    }
+
+    /// Classes `row`'s moved geometry values (in the relabeled array `g`, key `key`) on this
+    /// branch's body `b`.
+    fn certify_geometry(row: &Row, key: &str, g: &[f64], b: &Brep) -> Vec<Class> {
+        let k = Kernel::default();
+        let name = row.case;
+        let vertices = p1::vertices(b, None).unwrap();
+        let edges = p1::edges(b, None).unwrap();
+        let faces = p1::faces(b, None).unwrap();
+        let [vb, eb, fb] = blocks(g, vertices.len(), edges.len(), faces.len());
+        let certs = certify_brep(&k, b).unwrap_or_else(|e| panic!("{name}: {e}"));
+        let moved: Vec<&Moved> = row.moved.iter().filter(|m| m.0 == key).collect();
+        let main_of = |j: usize| moved.iter().find(|m| m.1 == j).map_or(g[j], |m| m.2);
+        let point = |s: usize| {
+            (
+                Point3::new(main_of(s), main_of(s + 1), main_of(s + 2)),
+                Point3::new(g[s], g[s + 1], g[s + 2]),
+            )
+        };
+        let tolerance = |what: String, i: usize, need: f64| {
+            let (m, n) = (main_of(i), g[i]);
+            assert!(
+                m >= need && n >= need,
+                "{name}: {what} tolerance {m:e} / {n:e} under {need:e}"
+            );
+            let class = if n < m {
+                Class::Closer
+            } else if n - m <= need {
+                Class::Equal
+            } else {
+                Class::Farther
+            };
+            eprintln!(
+                "  {what} tolerance: main {m:e}, now {n:e}, need at most {need:e}: {class:?}"
+            );
+            class
+        };
+        // the sample (its first coordinate's index) at `i` of a block starting at `j`, its
+        // samples from `j + head`
+        let sample_at = |j: usize, head: usize, i: usize| {
+            let mut s = j + head;
+            for n in 0..3 {
+                let len = if g[s] == 0.0 { 4 } else { 1 };
+                if i < s + len {
+                    assert!(len == 4 && i > s, "{name}: a moved sample status at {i}");
+                    return Some((n, s + 1));
+                }
+                s += len;
+            }
+            None
+        };
+        let mut classes = Vec::new();
+        let mut done = Vec::new();
+        // per edge or face: its moved samples' classes, and whether a bound moved
+        let mut edge_samples: Vec<(usize, Class)> = Vec::new();
+        let mut face_samples: Vec<(usize, Class)> = Vec::new();
+        let (mut bound_edges, mut bound_faces) = (Vec::new(), Vec::new());
+        for &&(_, i, _, _) in &moved {
+            if let Some(bv) = vb.iter().position(|r| r.contains(&i)) {
+                let vid = vertices[unmap(row.vertices, bv)];
+                let j = vb[bv].start;
+                if i - j == 3 {
+                    classes.push(tolerance(
+                        format!("vertex {bv}"),
+                        i,
+                        vertex_need(b, &certs, vid),
+                    ));
+                    continue;
+                }
+                if done.contains(&j) {
+                    continue;
+                }
+                done.push(j);
+                let (main, now) = point(j);
+                assert_eq!(b.vertex(vid).unwrap().point, now, "{name}: vertex {bv}");
+                let mut fs = Vec::new();
+                for e in vertex_edges(b, vid) {
+                    for f in edge_faces(b, e) {
+                        if !fs.contains(&f) {
+                            fs.push(f);
+                        }
+                    }
+                }
+                let class = point_class(&k, b, &fs, main, now);
+                eprintln!("  vertex {bv}: main {main:?}, now {now:?}: {class:?}");
+                classes.push(class);
+            } else if let Some(be) = eb.iter().position(|r| r.contains(&i)) {
+                let eid = edges[unmap(row.edges, be)];
+                let j = eb[be].start;
+                match i - j {
+                    0 => {
+                        let need = edge_need(b, &certs, eid);
+                        assert_eq!(b.edge(eid).unwrap().tolerance, g[i], "{name}: edge {be}");
+                        classes.push(tolerance(format!("edge {be}"), i, need));
+                    }
+                    1 | 2 => {
+                        eprintln!(
+                            "  edge {be} interval: main {:e}, now {:e}",
+                            main_of(i),
+                            g[i]
+                        );
+                        bound_edges.push(be);
+                    }
+                    _ => {
+                        let (n, s) = sample_at(j, 4, i)
+                            .unwrap_or_else(|| panic!("{name}: edge {be} slot {} moved", i - j));
+                        if done.contains(&s) {
+                            continue;
+                        }
+                        done.push(s);
+                        let (main, now) = point(s);
+                        let class = point_class(&k, b, &edge_faces(b, eid), main, now);
+                        eprintln!("  edge {be} sample {n}: main {main:?}, now {now:?}: {class:?}");
+                        edge_samples.push((be, class));
+                        classes.push(class);
+                    }
+                }
+            } else if let Some(bf) = fb.iter().position(|r| r.contains(&i)) {
+                let j = fb[bf].start;
+                if (1..=4).contains(&(i - j)) {
+                    eprintln!("  face {bf} domain: main {:e}, now {:e}", main_of(i), g[i]);
+                    bound_faces.push(bf);
+                } else {
+                    let (n, s) = sample_at(j, 6, i)
+                        .unwrap_or_else(|| panic!("{name}: face {bf} slot {} moved", i - j));
+                    if done.contains(&s) {
+                        continue;
+                    }
+                    done.push(s);
+                    let (main, now) = point(s);
+                    let class = point_class(&k, b, &faces[bf..=bf], main, now);
+                    eprintln!("  face {bf} sample {n}: main {main:?}, now {now:?}: {class:?}");
+                    face_samples.push((bf, class));
+                    classes.push(class);
+                }
+            } else {
+                panic!("{name}: {key}[{i}] past the blocks");
+            }
+        }
+        for (bounds, samples, what) in [
+            (bound_edges, &edge_samples, "edge"),
+            (bound_faces, &face_samples, "face"),
+        ] {
+            let mut bounds = bounds;
+            bounds.sort_unstable();
+            bounds.dedup();
+            for x in bounds {
+                let of: Vec<Class> = samples.iter().filter(|s| s.0 == x).map(|s| s.1).collect();
+                if of.is_empty() {
+                    // OPEN: a bound moved, none of its samples did: not classed yet
+                    eprintln!("  {what} {x} bound: NO MOVED SAMPLE (unclassed)");
+                    classes.push(Class::Farther);
+                    continue;
+                }
+                let class = worst(&of);
+                eprintln!("  {what} {x} bound: {class:?}");
+                classes.push(class);
+            }
+        }
+        classes
+    }
+
+    #[test]
+    #[ignore = "OPEN (#17896): 3 of 9 rows not yet certified: corner3x2-union-overhang-front-edges15-24-r1 \
+                (v20/v21/e28 tolerance 4e-5 -> 1.0356e-4, need 1.29e-5: farther), \
+                overhang-union-y-both-overhang-all-edges-r0.5 (edge 38 samples 3.09e-6 -> 3.24e-6 off \
+                face 40: farther), real-box-fillet4v-r3-shell-closed (face 16 domain bound moved, no \
+                sample moved: unclassed)"]
+    fn fillet_p3_rows_are_certified() {
+        let (mut closer, mut equal, mut measured) = (0, 0, 0);
+        let mut farther = Vec::new();
+        for row in ROWS {
+            let name = row.case;
+            let case = crate::case::regression_case(&Runner, name);
+            let bodies: Rc<RefCell<Vec<Brep>>> = Rc::default();
+            let into = Rc::clone(&bodies);
+            crate::soundness::start_enclosing(1e-9);
+            let out = crate::trim_hook::with_hook(
+                Box::new(move |b: &mut Brep| {
+                    into.borrow_mut()
+                        .push(b.clone_standing_for_self().expect("a copy"));
+                }),
+                || Runner.run_rust(&case),
+            );
+            let found = crate::soundness::take();
+            let out = out.unwrap_or_else(|e| panic!("{name}: {e:?}"));
+            // replay
+            assert_eq!(
+                digest(&out.values, &out.ints),
+                row.new,
+                "{name}: not the row"
+            );
+            let mut r = relabel(&out, row);
+            for &(key, i, main, now) in row.moved {
+                let a = r.values.get_mut(key).unwrap_or_else(|| panic!("no {key}"));
+                assert_eq!(a[i], now, "{name}: {key}[{i}]");
+                a[i] = main;
+            }
+            assert_eq!(
+                digest(&r.values, &r.ints),
+                row.main,
+                "{name}: more than the relabeling and the listed values moved"
+            );
+            let r = relabel(&out, row);
+            // soundness
+            assert_eq!(found.len(), 1, "{name}: one result body");
+            let s = &found[0];
+            eprintln!("{name}: {}", s.line());
+            assert!(s.sound(), "{name}: {}", s.line());
+            assert_eq!(s.manifold, Some(true), "{name}: {}", s.line());
+            assert!(
+                matches!(s.volume, Some(VolumeSign::Positive(_))),
+                "{name}: {}",
+                s.line()
+            );
+            let e = match &s.enclosure {
+                Some(Ok(e)) => *e,
+                other => panic!("{name}: no enclosure: {other:?}"),
+            };
+            let bodies = bodies.borrow();
+            let b = bodies.last().expect("the result body");
+            let (gk, mk) = if r.values.contains_key("result_geometry") {
+                ("result_geometry", "mass_properties")
+            } else {
+                ("shell_geometry", "shell_mass_properties")
+            };
+            let volume = r.values[mk][1];
+            let main_volume = row
+                .moved
+                .iter()
+                .find(|m| m.0 == mk && m.1 == 1)
+                .map_or(volume, |m| m.2);
+            eprintln!(
+                "  volume enclosure [{}, {}] (relative width {:e}): main {main_volume}, now {volume}",
+                e.lo,
+                e.hi,
+                (e.hi - e.lo) / e.hi
+            );
+            // each value's distance to the true volume, which the enclosure holds
+            let off = |v: f64| crate::certify::Enclosure {
+                lo: (e.lo - v).max(v - e.hi).max(0.0).next_down().max(0.0),
+                hi: (e.hi - v).max(v - e.lo).next_up(),
+            };
+            let volume_class = super::class_of(off(main_volume), off(volume));
+            eprintln!(
+                "  volume off the true by main {:?}, now {:?}: {volume_class:?}",
+                off(main_volume),
+                off(volume)
+            );
+            for &(key, i, main, now) in row.moved.iter().filter(|m| m.0 == mk) {
+                if i == 1 {
+                    match volume_class {
+                        Class::Closer => closer += 1,
+                        Class::Equal => equal += 1,
+                        Class::Farther => farther.push(name),
+                    }
+                } else {
+                    eprintln!(
+                        "  {key}[{i}]: main {main}, now {now} (relative {:e}): measured",
+                        (now - main).abs() / main.abs()
+                    );
+                    measured += 1;
+                }
+            }
+            for c in certify_geometry(row, gk, &r.values[gk], b) {
+                match c {
+                    Class::Closer => closer += 1,
+                    Class::Equal => equal += 1,
+                    Class::Farther => farther.push(name),
+                }
+            }
+        }
+        eprintln!(
+            "{} rows: moved values closer {closer}, equal {equal}, farther {} {farther:?}; mass \
+             properties measured {measured}",
+            ROWS.len(),
+            farther.len()
+        );
+        assert!(farther.is_empty(), "moved values farther in {farther:?}");
+        assert_eq!(ROWS.len(), 9);
+    }
+}
