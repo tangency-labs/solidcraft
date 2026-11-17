@@ -1,0 +1,34 @@
+{
+  "en": {
+    "ui.glb_export_hierarchy": "GLB export keeps the assembly's parts",
+    "ui.glb_export_hierarchy_help": "Each component placement becomes a named node holding its part's bodies, so viewers such as PowerPoint or Blender can move each part on its own. Off: every body is written in world coordinates under one root, as SolidCraft 0.40 did."
+  },
+  "ar": {
+    "ui.glb_export_hierarchy": "تصدير GLB يحتفظ بأجزاء التجميعة",
+    "ui.glb_export_hierarchy_help": "يصبح كل موضع لمكوّن عقدة مسمّاة تضم أجسام جزئه، فتتمكن عارضات مثل PowerPoint أو Blender من تحريك كل جزء على حدة. عند الإيقاف: تُكتب كل الأجسام بإحداثيات العالم تحت جذر واحد، كما في SolidCraft 0.40."
+  },
+  "de": {
+    "ui.glb_export_hierarchy": "GLB-Export behält die Teile der Baugruppe bei",
+    "ui.glb_export_hierarchy_help": "Jede Platzierung einer Komponente wird zu einem benannten Knoten mit den Körpern ihres Teils, sodass Programme wie PowerPoint oder Blender jedes Teil einzeln bewegen können. Aus: Alle Körper werden in Weltkoordinaten unter einem Wurzelknoten geschrieben, wie in SolidCraft 0.40."
+  },
+  "he": {
+    "ui.glb_export_hierarchy": "ייצוא GLB שומר על חלקי ההרכבה",
+    "ui.glb_export_hierarchy_help": "כל מיקום של רכיב הופך לצומת בעל שם המכיל את הגופים של החלק שלו, כך שמציגים כמו PowerPoint או Blender יכולים להזיז כל חלק בנפרד. כבוי: כל הגופים נכתבים בקואורדינטות עולם תחת שורש אחד, כמו ב-SolidCraft 0.40."
+  },
+  "ja": {
+    "ui.glb_export_hierarchy": "GLB エクスポートでアセンブリの部品を保持",
+    "ui.glb_export_hierarchy_help": "各コンポーネントの配置が、その部品のボディを含む名前付きノードになり、PowerPoint や Blender などのビューアで部品ごとに動かせます。オフ: SolidCraft 0.40 と同様に、すべてのボディをワールド座標で 1 つのルートの下に書き出します。"
+  },
+  "ko": {
+    "ui.glb_export_hierarchy": "GLB 내보내기에서 어셈블리의 부품 유지",
+    "ui.glb_export_hierarchy_help": "각 구성 요소 배치가 해당 부품의 바디를 담은 이름 있는 노드가 되어 PowerPoint나 Blender 같은 뷰어에서 각 부품을 따로 움직일 수 있습니다. 끄면 SolidCraft 0.40처럼 모든 바디를 하나의 루트 아래에 월드 좌표로 씁니다."
+  },
+  "vi": {
+    "ui.glb_export_hierarchy": "Xuất GLB giữ các chi tiết của cụm lắp ráp",
+    "ui.glb_export_hierarchy_help": "Mỗi vị trí đặt thành phần trở thành một nút có tên chứa các khối của chi tiết đó, để các trình xem như PowerPoint hoặc Blender có thể di chuyển riêng từng chi tiết. Tắt: mọi khối được ghi theo tọa độ thế giới dưới một gốc, như SolidCraft 0.40."
+  },
+  "zh": {
+    "ui.glb_export_hierarchy": "GLB 导出保留装配的零件",
+    "ui.glb_export_hierarchy_help": "每个组件放置都会成为一个命名节点，包含其零件的实体，因此 PowerPoint 或 Blender 等查看器可以单独移动每个零件。关闭：与 SolidCraft 0.40 一样，所有实体以世界坐标写在一个根节点下。"
+  }
+}

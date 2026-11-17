@@ -472,25 +472,64 @@ fn backends(s: &mut Session, params: &Value) -> Result<Value> {
     typed_reply(cmd, reply)
 }
 
-/// The placed bodies (by world name) that a saved render setup gives an image texture or optics,
-/// each with the first such setup's name and what it gives: what a file without render setups
-/// cannot hold (GLB export, #1553). A binding whose body is gone binds nothing.
-pub(super) fn bound_bodies(s: &Session, cmd: &str) -> Result<std::collections::BTreeMap<String, (String, &'static str)>> {
+/// The placed bodies (by world name) that a saved render setup gives an image texture, each with
+/// the first such setup's name: what a file without render setups cannot hold (GLB export,
+/// #1553). A binding whose body is gone binds nothing.
+pub(super) fn textured_bodies(s: &Session, cmd: &str) -> Result<std::collections::BTreeMap<String, String>> {
     let mut out = std::collections::BTreeMap::new();
     let setups = &s.doc.render.setups;
-    if setups.values().all(|x| x.surfaces.is_empty() && x.optics.is_empty()) {
+    if setups.values().all(|x| x.surfaces.is_empty()) {
         return Ok(out);
     }
     let names = surface_bindings::targets(s, cmd)?;
     for (setup, x) in setups {
-        let bound = x.surfaces.iter().map(|b| (&b.target, "an image texture")).chain(x.optics.iter().map(|b| (&b.target, "optics")));
-        for (target, what) in bound {
-            if let Some(name) = names.get(target) {
-                out.entry(name.clone()).or_insert_with(|| (setup.clone(), what));
+        for b in x.surfaces.iter() {
+            if let Some(name) = names.get(&b.target) {
+                out.entry(name.clone()).or_insert_with(|| setup.clone());
             }
         }
     }
     Ok(out)
+}
+
+/// The Glass saved render setups give placed bodies, by world name (GLB export, #5296). A body
+/// two setups give different Glass is refused, naming both: the file holds one. Only the bodies
+/// in `bodies` are read (all when it is empty), so leaving one out clears its refusal. A binding
+/// whose body is gone binds nothing.
+pub(super) fn glass_bodies(
+    s: &Session,
+    cmd: &str,
+    bodies: &[String],
+) -> Result<std::collections::BTreeMap<String, solidcraft_doc::render_optics::OpticalMaterial>> {
+    let mut out: std::collections::BTreeMap<String, (String, solidcraft_doc::render_optics::OpticalMaterial)> = std::collections::BTreeMap::new();
+    let setups = &s.doc.render.setups;
+    if setups.values().all(|x| x.optics.is_empty()) {
+        return Ok(std::collections::BTreeMap::new());
+    }
+    let names = surface_bindings::targets(s, cmd)?;
+    for (setup, x) in setups {
+        for b in x.optics.iter() {
+            let Some(name) = names.get(&b.target) else { continue };
+            if !bodies.is_empty() && !bodies.contains(name) {
+                continue;
+            }
+            match out.get(name) {
+                Some((first, optics)) if *optics != b.optics => {
+                    return Err(bad(
+                        cmd,
+                        format!(
+                            "{name}: render setups `{first}` and `{setup}` give it different Glass, and a GLB file holds one; make them the same, or leave the body out with `bodies`"
+                        ),
+                    ));
+                }
+                Some(_) => {}
+                None => {
+                    out.insert(name.clone(), (setup.clone(), b.optics));
+                }
+            }
+        }
+    }
+    Ok(out.into_iter().map(|(name, (_, optics))| (name, optics)).collect())
 }
 
 #[cfg(test)]
