@@ -281,7 +281,10 @@ exporters, author tooling and browser execution follow.
 
 An importer turns a file of another format into a SolidCraft design. Its manifest says
 `"capabilities": ["formats@0.1"]`, and each of its entries has `"kind": "importer"` and the
-extensions it claims, lowercase without the dot:
+extensions it claims, lowercase without the dot. An importer's effect is `open`: it opens a file
+as a new design and leaves the open one as it is. It need not say so; `plugin.list` and
+`plugin.install` report it, and an importer that says `"effect": "edit"` is still read as `open`.
+Only an importer may say `open`.
 
 ```json
 {"id": "sample", "name": "Sample", "version": "1.0.0", "capabilities": ["formats@0.1"],
