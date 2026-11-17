@@ -132,6 +132,9 @@ struct Model<'a> {
     surfaces: HashMap<&'a str, &'a cadmpeg_ir::geometry::Surface>,
     procedural_surfaces: HashMap<&'a str, &'a cadmpeg_ir::geometry::ProceduralSurface>,
     curves: HashMap<&'a str, &'a cadmpeg_ir::geometry::Curve>,
+    /// What a placed carrier is held to: the tolerance, and how far from the origin the model's
+    /// points reach.
+    fit: geometry::Fit,
 }
 
 impl<'a> Model<'a> {
@@ -158,6 +161,17 @@ impl<'a> Model<'a> {
                 .map(|x| (x.id.as_str(), x))
                 .collect(),
             curves: m.curves.iter().map(|x| (x.id.as_str(), x)).collect(),
+            fit: geometry::Fit {
+                tolerance: tolerance(ir),
+                extent: m
+                    .points
+                    .iter()
+                    .map(|p| {
+                        let p = p.position().get();
+                        solidcore::Vec3::new(p.x, p.y, p.z).length()
+                    })
+                    .fold(0.0, f64::max),
+            },
         }
     }
 
@@ -341,7 +355,8 @@ impl<'a> Builder<'_, 'a, '_> {
                     .curves
                     .get(c.as_str())
                     .ok_or_else(|| format!("missing curve {c}"))?;
-                geometry::curve(&carrier.geometry).map_err(|m| format!("edge {id}: {m}"))?
+                geometry::curve(&carrier.geometry, self.model.fit)
+                    .map_err(|m| format!("edge {id}: {m}"))?
             }
             None => None,
         };
@@ -406,7 +421,7 @@ impl<'a> Builder<'_, 'a, '_> {
             .surfaces
             .get(face.surface.as_str())
             .ok_or_else(|| format!("face {id}: missing surface {}", face.surface))?;
-        let read = match geometry::surface(&surface.geometry) {
+        let read = match geometry::surface(&surface.geometry, self.model.fit) {
             Ok(Some(read)) => Ok(read),
             Ok(None) => self.procedural(&surface.geometry),
             Err(m) => Err(m),
@@ -494,7 +509,7 @@ impl<'a> Builder<'_, 'a, '_> {
             .curves
             .get(directrix.as_str())
             .ok_or_else(|| format!("missing curve {directrix}"))?;
-        let profile = geometry::curve(&curve.geometry)?
+        let profile = geometry::curve(&curve.geometry, self.model.fit)?
             .ok_or_else(|| geometry::unsupported("a degenerate curve swept or revolved"))?;
         let (definition, reversed) = geometry::swept(procedural.definition(), profile)?;
         Ok((geometry::FaceSurface::Swept(definition), reversed))
