@@ -690,8 +690,14 @@ fn panel_body(app: &mut SolveApp, ui: &mut egui::Ui) {
 
 fn panel_fields(app: &mut SolveApp, ui: &mut egui::Ui) {
     if let Some(placement) = &mut app.drawing_workspace.placement {
-        placement.fields(ui, &app.session.doc.name);
-        if panels::finish_placement(ui) {
+        let finished = egui::Frame::NONE
+            .inner_margin(Tokens::get().space_12)
+            .show(ui, |ui| {
+                placement.fields(ui, &app.session.doc.name);
+                panels::finish_placement(ui)
+            })
+            .inner;
+        if finished {
             close_panel(app);
         }
     } else if let Some(tool) = app.drawing_workspace.options {
