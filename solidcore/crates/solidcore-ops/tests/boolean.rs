@@ -269,6 +269,49 @@ fn two_large_cylinders_touching_along_a_line_union() {
     }
 }
 
+/// Two equal holes of radius 0.9 crossing at right angles in a 25 x 20.9 x 4.5 block, one
+/// along z, the other along y with its axis `d` off the first's along x
+/// (tangency-labs/solidcraft#18475). Within the model tolerance of each other the axes meet and
+/// the walls cross in the two ellipses of equal bores; past it they miss, and the walls cross in
+/// two loops that pass about 2√(0.9 d) apart where the walls are within `d` of each other. The
+/// second cut was refused as not a closed solid for d = −1e-5 and −2e-5. Each cut is one valid
+/// solid of the block less both holes plus what they share, 16/3 · 0.9³ (the miss changes that
+/// by under 2e-5).
+#[test]
+#[allow(clippy::disallowed_methods)] // the test's operand geometry, not ops computing it
+fn a_hole_whose_axis_misses_an_equal_crossing_holes_by_a_hair_cuts() {
+    all_fixes();
+    let r = 0.9;
+    let want = 25.0 * 20.9 * 4.5 - PI * r * r * (4.5 + 20.9) + 16.0 / 3.0 * r * r * r;
+    for d in [0.0, -1e-6, -1e-5, -2e-5, 1e-5, -1e-4, 1e-3] {
+        let block = make_box([0.0, -10.45, 0.0], [25.0, 20.9, 4.5]).unwrap();
+        let along_z = solidcore_ops::make_cylinder([12.5, 0.0, -1.0], r, 6.5).unwrap();
+        let first = boolean(block, along_z, BooleanOp::Subtract)
+            .unwrap()
+            .unwrap();
+        let rim = [Curve::Arc {
+            center: [12.5 + d, -11.45, 2.25],
+            axis: [0.0, 1.0, 0.0],
+            reference: [1.0, 0.0, 0.0],
+            radius: r,
+            start: 0.0,
+            end: TAU,
+        }];
+        let along_y = extrude(&rim, [0.0, 1.0, 0.0], 22.9, 0.0, DraftCorner::Curvature, true)
+            .unwrap();
+        let cut = boolean(first, along_y, BooleanOp::Subtract);
+        let cut = cut.unwrap_or_else(|e| panic!("{d}: {e:?}")).unwrap();
+        let report = cut.check(CheckLevel::All).unwrap();
+        assert!(report.is_valid(), "{d}: {}", report.text);
+        assert_eq!(cut.solid_count().unwrap(), 1, "{d}");
+        assert!(
+            near(volume(&cut), want),
+            "{d}: {}, closed form {want}",
+            volume(&cut)
+        );
+    }
+}
+
 /// The area two circles of radius `r` whose centres are `d` apart have in common.
 #[allow(clippy::disallowed_methods)] // the test's closed form, not ops computing geometry
 fn lens_area(r: f64, d: f64) -> f64 {
@@ -2584,4 +2627,27 @@ fn an_insert_whose_top_is_tangent_to_the_floor_at_a_corner_round_joins_its_bin()
     let joined = boolean(bin, insert, BooleanOp::Union).unwrap().unwrap();
     // the bin's 15 faces with the insert's top and slanted side
     one_valid_solid_of_volume(&joined, [17, 41, 27], want, 1e-9);
+}
+
+#[test]
+#[allow(clippy::disallowed_methods)]
+fn zz_diag_18475() {
+    all_fixes();
+    let r = 0.9;
+    let want = 25.0 * 20.9 * 4.5 - PI * r * r * (4.5 + 20.9) + 16.0 / 3.0 * r * r * r;
+    for d in [0.0, -1e-6, -5e-6, -9e-6, -9.99e-6, -1e-5, -1.01e-5, -1.2e-5, -1.5e-5, -2e-5, -2.1e-5, -3e-5, -5e-5, -1e-4, 1e-5, 1.01e-5, 2e-5, 3e-5, 1e-3] {
+        let block = make_box([0.0, -10.45, 0.0], [25.0, 20.9, 4.5]).unwrap();
+        let along_z = solidcore_ops::make_cylinder([12.5, 0.0, -1.0], r, 6.5).unwrap();
+        let first = boolean(block, along_z, BooleanOp::Subtract).unwrap().unwrap();
+        let rim = [Curve::Arc { center: [12.5 + d, -11.45, 2.25], axis: [0.0, 1.0, 0.0], reference: [1.0, 0.0, 0.0], radius: r, start: 0.0, end: TAU }];
+        let along_y = extrude(&rim, [0.0, 1.0, 0.0], 22.9, 0.0, DraftCorner::Curvature, true).unwrap();
+        match boolean(first, along_y, BooleanOp::Subtract) {
+            Err(e) => eprintln!("DIAG {d}: ERR {e:?}"),
+            Ok(None) => eprintln!("DIAG {d}: none"),
+            Ok(Some(c)) => {
+                let rep = c.check(CheckLevel::All).unwrap();
+                eprintln!("DIAG {d}: valid {} solids {} counts {:?} dv {}", rep.is_valid(), c.solid_count().unwrap(), c.counts().unwrap(), volume(&c) - want);
+            }
+        }
+    }
 }
