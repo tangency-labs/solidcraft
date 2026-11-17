@@ -814,10 +814,8 @@ fn component_error(reason: impl Into<String>) -> HostError {
 }
 
 pub(super) fn check_component(manifest: &Manifest, bytes: &[u8], options: RuntimeOptions) -> Result<()> {
-    let runtime = manifest
-        .runtime
-        .as_ref()
-        .ok_or_else(|| HostError::InvalidManifest { field: "runtime".into(), reason: "no executable runtime".into() })?;
+    let runtime =
+        manifest.runtime.as_ref().ok_or_else(|| HostError::InvalidManifest { field: "runtime".into(), reason: "no executable runtime".into() })?;
     runtime.validate()?;
     if bytes.len() > runtime.max_component_bytes() {
         return Err(limit(&format!("component size: {} bytes is over {} MiB", bytes.len(), runtime.max_component_bytes() >> 20)));

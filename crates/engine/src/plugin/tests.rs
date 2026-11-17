@@ -753,7 +753,12 @@ mod native {
         std::fs::write(f.0.join("sample/.notes"), b"x").unwrap();
         assert_eq!(check(&mut s, &f.path())["problems"], json!([]));
         let fields = |reply: &Value| -> Vec<(String, String)> {
-            reply["problems"].as_array().unwrap().iter().map(|p| (p["severity"].as_str().unwrap().into(), p["field"].as_str().unwrap().into())).collect()
+            reply["problems"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|p| (p["severity"].as_str().unwrap().into(), p["field"].as_str().unwrap().into()))
+                .collect()
         };
         for (mutate, field) in [
             ((|m: &mut Value| m["runtime"]["permissions"] = json!({"net": true})) as fn(&mut Value), "runtime.permissions.net"),

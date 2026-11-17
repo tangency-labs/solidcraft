@@ -1,8 +1,8 @@
 //! One-shot plugins share the engine's command surface, file scope and undo history.
 use super::CommandSpec;
 use crate::schema::plugin::{
-    CheckParams, ImportParams, ImportedDesign, InspectParams, InspectResult, InstallParams, InstallResult, ListParams, ListResult, ListedPlugin, MeshParams,
-    MeshResult, RemoveParams, RemoveResult, RunParams, RunResult,
+    CheckParams, ImportParams, ImportedDesign, InspectParams, InspectResult, InstallParams, InstallResult, ListParams, ListResult, ListedPlugin,
+    MeshParams, MeshResult, RemoveParams, RemoveResult, RunParams, RunResult,
 };
 use crate::{
     Result, Session, checked,

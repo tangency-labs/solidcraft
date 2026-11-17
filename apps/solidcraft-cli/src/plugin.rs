@@ -226,7 +226,8 @@ fn test(args: &[String]) -> Result<(), String> {
                 continue;
             }
             match smoke_params(entry) {
-                Some(params) => cases.push((format!("{} (defaults)", entry.name), Ok(Case { entry: entry.name.clone(), params: Some(params), ..Default::default() }))),
+                Some(params) => cases
+                    .push((format!("{} (defaults)", entry.name), Ok(Case { entry: entry.name.clone(), params: Some(params), ..Default::default() }))),
                 None => outcomes.push(Outcome {
                     name: entry.name.clone(),
                     entry: entry.name.clone(),
@@ -295,7 +296,11 @@ fn test(args: &[String]) -> Result<(), String> {
                 "failed" => "FAIL",
                 _ => "skip",
             };
-            let entry = if o.entry.is_empty() || o.name == o.entry || o.name == format!("{} (defaults)", o.entry) { String::new() } else { format!(" ({})", o.entry) };
+            let entry = if o.entry.is_empty() || o.name == o.entry || o.name == format!("{} (defaults)", o.entry) {
+                String::new()
+            } else {
+                format!(" ({})", o.entry)
+            };
             let message = if o.message.is_empty() { String::new() } else { format!(": {}", o.message) };
             println!("{status}  {}{entry}, {} ms{message}", o.name, o.ms);
         }
@@ -307,8 +312,7 @@ fn test(args: &[String]) -> Result<(), String> {
 /// The test cases in `tests`, by file name, each parsed or with why it could not be.
 fn read_cases(tests: &Path) -> Result<Vec<(String, Result<Case, String>)>, String> {
     let Ok(entries) = std::fs::read_dir(tests) else { return Ok(Vec::new()) };
-    let mut files: Vec<PathBuf> =
-        entries.flatten().map(|e| e.path()).filter(|p| p.extension().is_some_and(|e| e == "json") && p.is_file()).collect();
+    let mut files: Vec<PathBuf> = entries.flatten().map(|e| e.path()).filter(|p| p.extension().is_some_and(|e| e == "json") && p.is_file()).collect();
     files.sort();
     if files.len() > MAX_CASES {
         return Err(format!("{} holds more than {MAX_CASES} test cases", tests.display()));
@@ -415,7 +419,16 @@ fn copy_tree(from: &Path, to: &Path) -> Result<(), String> {
 }
 
 #[allow(clippy::too_many_arguments)]
-fn run_case(manifest: &Manifest, installed: &Path, plugins: &Path, tests: &Path, work: &Path, case: &Case, out: Option<&Path>, name: &str) -> CaseResult {
+fn run_case(
+    manifest: &Manifest,
+    installed: &Path,
+    plugins: &Path,
+    tests: &Path,
+    work: &Path,
+    case: &Case,
+    out: Option<&Path>,
+    name: &str,
+) -> CaseResult {
     let mut journal = None;
     let mut design = None;
     let failure = (|| -> Result<(), String> {

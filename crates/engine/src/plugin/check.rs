@@ -32,9 +32,8 @@ fn error_problem(field: impl Into<String>, text: impl Into<String>, fix: impl In
 pub fn read(path: &str) -> std::result::Result<(Unpacked, Source), CheckProblem> {
     let is_zip = Path::new(path).extension().is_some_and(|e| e.eq_ignore_ascii_case("zip"));
     if is_zip {
-        let zip = solidcraft_io::vfs::read(path, install::MAX_ZIP_BYTES).map_err(|e| {
-            error_problem("package", format!("could not read {path}: {e}"), "Give the path of the plugin's .zip, at most 80 MiB.")
-        })?;
+        let zip = solidcraft_io::vfs::read(path, install::MAX_ZIP_BYTES)
+            .map_err(|e| error_problem("package", format!("could not read {path}: {e}"), "Give the path of the plugin's .zip, at most 80 MiB."))?;
         return install::unpack(&zip).map(|u| (u, Source::Zip)).map_err(|e| install_problem(&e));
     }
     let meta = solidcraft_io::vfs::check(path).and_then(|()| std::fs::metadata(path)).map_err(|e| {
@@ -129,22 +128,38 @@ fn fix_for(field: &str) -> String {
         "manifest" => "plugin.json must be one JSON object with only the fields the plugin guide lists; the message names the field and where it is.",
         "plugin.json" => "Put plugin.json at the top of the package (in a .zip, at its top or in its one folder), at most 16 KiB.",
         "runtime" => "Add a \"runtime\" with the component's \"module\", its \"entries\" and the \"commands\" it calls.",
-        "runtime.module" => "Name the component in \"runtime.module\": one lowercase file name ending in .wasm, such as \"gear-maker.wasm\", beside plugin.json.",
-        "runtime.commands" => "List exact command ids from `solidcraft-cli commands`; a command that reaches past the open design also needs its group in runtime.permissions.command_groups. An importer lists none.",
+        "runtime.module" => {
+            "Name the component in \"runtime.module\": one lowercase file name ending in .wasm, such as \"gear-maker.wasm\", beside plugin.json."
+        }
+        "runtime.commands" => {
+            "List exact command ids from `solidcraft-cli commands`; a command that reaches past the open design also needs its group in runtime.permissions.command_groups. An importer lists none."
+        }
         "runtime.entries" => "Declare 1 to 32 entries with distinct lowercase names, all commands or all importers.",
-        "runtime.entries.slots" => "Give each entry at most 16 slots, each {\"kind\": \"menu\" or \"ribbon\", \"name\": \"...\"} with a name of at most 80 characters.",
-        "runtime.permissions" => "An importer reads only its file (and, with input_folder, the files beside it): remove \"files\" and \"command_groups\".",
+        "runtime.entries.slots" => {
+            "Give each entry at most 16 slots, each {\"kind\": \"menu\" or \"ribbon\", \"name\": \"...\"} with a name of at most 80 characters."
+        }
+        "runtime.permissions" => {
+            "An importer reads only its file (and, with input_folder, the files beside it): remove \"files\" and \"command_groups\"."
+        }
         "runtime.permissions.command_groups" => "Ask only for the groups app, doc, file and plugin, and only for those the listed commands need.",
-        "runtime.permissions.files" => "Give each folder a distinct lowercase name and ask for read, write or both: {\"name\": \"exports\", \"write\": true}.",
+        "runtime.permissions.files" => {
+            "Give each folder a distinct lowercase name and ask for read, write or both: {\"name\": \"exports\", \"write\": true}."
+        }
         "runtime.permissions.input_folder" => "Remove \"input_folder\": only an importer reads the folder of the file it opens.",
-        "runtime.permissions.net" => "Remove \"net\": SolidCraft gives plugins no network access. Read and write files through named folder grants instead.",
+        "runtime.permissions.net" => {
+            "Remove \"net\": SolidCraft gives plugins no network access. Read and write files through named folder grants instead."
+        }
         "runtime.limits.fuel" => "Set \"fuel\" to a positive number that fits the app's ceiling (100000000000 unless the user raised it).",
-        "runtime.limits.memory_mib" => "Set \"memory_mib\" to 1..4096. Above the user's ceiling (128 unless raised), Install asks the user to approve it.",
+        "runtime.limits.memory_mib" => {
+            "Set \"memory_mib\" to 1..4096. Above the user's ceiling (128 unless raised), Install asks the user to approve it."
+        }
         "runtime.limits.deadline_ms" => "Set \"deadline_ms\" to at most 30000 for a command, 600000 for an importer.",
         "runtime.limits.stack_kib" => "Set \"stack_kib\" to 64..65536; a command may ask for at most 1024.",
         "capabilities" => "",
         "component" => "Build the component for this app's WIT (crates/craft-plugin/wit/plugin.wit) and wrap it with `wasm-tools component new`.",
-        "package" => "Ship one plugin: plugin.json and its component, at the top of the .zip or in its one folder, with plain relative paths and no links.",
+        "package" => {
+            "Ship one plugin: plugin.json and its component, at the top of the .zip or in its one folder, with plain relative paths and no links."
+        }
         _ => "",
     };
     if field == "capabilities" {
@@ -197,7 +212,9 @@ fn host_problem(e: &HostError) -> CheckProblem {
             limit.clone(),
             "A command's component may be 16 MiB and an importer's 64 MiB: build in release mode with LTO and strip debug sections (`wasm-tools strip`).",
         ),
-        HostError::LimitExceeded { limit } if limit.contains("stack") => error_problem("runtime.limits.stack_kib", limit.clone(), fix_for("runtime.limits.stack_kib")),
+        HostError::LimitExceeded { limit } if limit.contains("stack") => {
+            error_problem("runtime.limits.stack_kib", limit.clone(), fix_for("runtime.limits.stack_kib"))
+        }
         HostError::InvalidInput { field, reason } if field == "component" || field == "stack_bytes" => {
             error_problem("component", reason.clone(), component_fix(reason))
         }
