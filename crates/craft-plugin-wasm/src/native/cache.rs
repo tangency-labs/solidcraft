@@ -270,10 +270,7 @@ fn evict(root: &Path, max_bytes: u64, keep: &Path) {
         .filter(|item| item.file_type().is_ok_and(|kind| kind.is_dir()))
         .map(|item| {
             let path = item.path();
-            let used = fs::metadata(path.join(RECORD))
-                .or_else(|_| item.metadata())
-                .and_then(|m| m.modified())
-                .unwrap_or(SystemTime::UNIX_EPOCH);
+            let used = fs::metadata(path.join(RECORD)).or_else(|_| item.metadata()).and_then(|m| m.modified()).unwrap_or(SystemTime::UNIX_EPOCH);
             (used, size(&path, 0), path)
         })
         .collect();
