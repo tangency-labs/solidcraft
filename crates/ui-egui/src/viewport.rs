@@ -63,6 +63,45 @@ pub enum NavMode {
     Zoom,
 }
 
+/// Each GPU callback consumes its view's pending scenes after all tiles are laid out. Keep the
+/// slots separate, along with the keys and geometry used to build those scenes.
+#[derive(Default)]
+pub(crate) struct ViewScenes {
+    slot: SceneSlot,
+    key: u64,
+    sketch_slot: SceneSlot,
+    sketch_key: u64,
+    wireframe: crate::wireframe_silhouettes::Outlines,
+    hl_slot: SceneSlot,
+    hl_key: u64,
+    scene_target: Option<u32>,
+    drag: Option<drag_layer::DragLayer>,
+    scene_world: Option<drag_layer::SceneWorld>,
+    moving_slot: SceneSlot,
+    moving_key: u64,
+    body_tris: std::sync::Mutex<std::collections::HashMap<String, crate::gpu::BlockTris>>,
+    body_lines: std::sync::Mutex<std::collections::HashMap<String, (u64, std::ops::Range<u32>)>>,
+}
+
+impl ViewScenes {
+    pub(crate) fn swap(&mut self, vp: &mut ViewportState) {
+        std::mem::swap(&mut self.slot, &mut vp.slot);
+        std::mem::swap(&mut self.key, &mut vp.key);
+        std::mem::swap(&mut self.sketch_slot, &mut vp.sketch_slot);
+        std::mem::swap(&mut self.sketch_key, &mut vp.sketch_key);
+        std::mem::swap(&mut self.wireframe, &mut vp.wireframe);
+        std::mem::swap(&mut self.hl_slot, &mut vp.hl_slot);
+        std::mem::swap(&mut self.hl_key, &mut vp.hl_key);
+        std::mem::swap(&mut self.scene_target, &mut vp.scene_target);
+        std::mem::swap(&mut self.drag, &mut vp.drag);
+        std::mem::swap(&mut self.scene_world, &mut vp.scene_world);
+        std::mem::swap(&mut self.moving_slot, &mut vp.moving_slot);
+        std::mem::swap(&mut self.moving_key, &mut vp.moving_key);
+        std::mem::swap(&mut self.body_tris, &mut vp.body_tris);
+        std::mem::swap(&mut self.body_lines, &mut vp.body_lines);
+    }
+}
+
 #[derive(Default)]
 pub struct ViewportState {
     /// Touchscreen gesture ownership and contacts for the shared camera handler.
@@ -219,6 +258,8 @@ pub struct ViewportState {
     patches: u64,
     /// Model scenes built since the viewport started (a scene with levels filled in is not one).
     pub(crate) scenes_built: u64,
+    /// The GPU target that last received this view's scene uploads.
+    scene_target: Option<u32>,
     /// Ground geometry is reused independently of the camera-dependent sketch/grid scene.
     shadow: std::sync::Mutex<Option<ShadowGeometry>>,
     pub(crate) sketch_slot: SceneSlot,
@@ -6873,7 +6914,21 @@ fn preparing_note(app: &SolveApp, painter: &egui::Painter, rect: Rect) {
     painter.text(rect.center(), Align2::CENTER_CENTER, app.tr("starting.view"), FontId::proportional(t.font_body), t.text_dim);
 }
 
+impl ViewportState {
+    pub(crate) fn invalidate_view_uploads(&mut self) {
+        self.key = 0;
+        self.sketch_key = 0;
+        self.hl_key = 0;
+        self.drag = None;
+        self.scene_world = None;
+    }
+}
+
 pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
+    if app.viewport.scene_target != app.viewport.tile {
+        app.viewport.invalidate_view_uploads();
+        app.viewport.scene_target = app.viewport.tile;
+    }
     crate::joint_handles::sync(app);
     let t = Tokens::get();
     let rect = ui.max_rect();
