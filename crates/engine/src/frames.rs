@@ -97,6 +97,7 @@ fn table(id: &str) -> &'static [(&'static str, K)] {
         "sheet.path_flange" => &[("edge", Pick), ("body", Body)],
         "sheet.perforate" => &[("body", Body)],
         "solid.cell_grid" => &[("anchor", Make), ("targets", Body), ("participants", Body)],
+        "solid.living_hinge" => &[("anchor", Make), ("targets", Body), ("participants", Body)],
         "sketch.create" | "sketch.redefine" => &[("plane", HerePlane)],
         "canvas.decal" => &[("face", Here)],
         "canvas.insert" => &[("plane", HerePlane), ("at", Here)],
