@@ -1391,8 +1391,10 @@ mod web {
                             // The empty design takes Units of new designs (#1205). The sample
                             // part is built in millimetres and is left that way.
                             solidcraft_ui_egui::prefs::apply_new_design(&mut app);
-                            let rev = app.session.revision;
-                            app.home.show(rev);
+                            if app.preferences.home_on_launch(false, false, false) {
+                                let rev = app.session.revision;
+                                app.home.show(rev);
+                            }
                         }
                         let mouse_buttons = crate::mouse_buttons::install(&window, &mouse_canvas, &cc.egui_ctx);
                         let wheel_samples = crate::wheel_samples::install(&window);

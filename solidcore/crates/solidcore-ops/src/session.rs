@@ -7,9 +7,9 @@
 //!   run at once and a long call holds up only the calls on its own bodies: a call waits for a
 //!   body another call holds on that body's own lock. A call that holds two bodies at once
 //!   locks them in one order ([`Body::lock_pair`]), so calls on the same bodies in other orders
-//!   never wait on each other for good. Calls one after another all get the same kernel, so
-//!   they see the state it keeps as one process kernel would (its random draws, caches and
-//!   context); calls side by side see the states of different kernels. At most
+//!   never wait on each other for good. Every call starts from the state a fresh kernel has
+//!   ([`start_clean`]: its random draws from the default seed, no blend station remembered),
+//!   so its result does not depend on the calls before it or on the kernel it is handed. At most
 //!   [`most_idle`] kernels wait between calls, however many once ran side by side. A kernel
 //!   holds no global state and a body's identities are valid only in the kernel that issued
 //!   them, so any kernel takes any body.
@@ -49,7 +49,8 @@ use std::num::NonZeroUsize;
 use std::panic::{catch_unwind, resume_unwind, AssertUnwindSafe};
 use std::sync::{Arc, Mutex, OnceLock, PoisonError};
 
-use solidcore::kernel::{CancelToken, Kernel, KernelOptions, UpstreamFixes};
+use solidcore::blend::fillet_section::definition::StationMemo;
+use solidcore::kernel::{CancelToken, Kernel, KernelOptions, Rng, UpstreamFixes};
 use solidcore::topology::brep::p3::brep_copy;
 use solidcore::{Brep, SolidError};
 
@@ -219,6 +220,17 @@ fn most_idle() -> usize {
 fn take() -> Kernel {
     let idle = IDLE.lock().unwrap_or_else(PoisonError::into_inner).pop();
     idle.unwrap_or_else(fresh)
+}
+
+/// A call starts from the state a fresh kernel has, whatever kernel it was handed and whatever
+/// ran on it before: its random draws start from the default seed, and the stations the blend
+/// definitions solved last are forgotten. A call's result is then the same after any history
+/// and on any kernel of the pool, so calls side by side on several threads give what they give
+/// one after another. (The kernel's other caches never change a result, only its speed, and
+/// stay.)
+fn start_clean(k: &mut Kernel) {
+    k.rng = Rng::new(KernelOptions::default().seed);
+    *k.blend_station_memo.borrow_mut() = StationMemo::default();
 }
 
 /// A call's kernel, fit to use again, back among the idle ones (dropped when [`most_idle`] wait
@@ -422,6 +434,7 @@ fn run_with<T: Answer>(
         return Err(Error::Cancelled);
     }
     let mut k = take();
+    start_clean(&mut k);
     k.fixes = current_fixes();
     k.cancel.clone_from(&token);
     CURRENT.with(|c| c.set(Some(call)));
