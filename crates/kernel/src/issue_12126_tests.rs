@@ -145,3 +145,44 @@ fn a_sweep_clear_of_its_bends_is_swept_whole() {
     assert_eq!(crate::smlib_sweeps::UNION_LOAD.with(std::cell::Cell::get), 0, "a sweep clear of its bends takes no unions");
     close(volume(&b), 2.0 * (rounded_square_area(42.0, 4.0) - rounded_square_area(36.0, 1.0)), "frame");
 }
+
+#[test]
+fn a_profile_reaching_far_from_where_it_starts_is_swept_whole_round_a_bend() {
+    // A 12.5 mm circle drawn from its point nearest the path, 0.5 mm behind it, turned a quarter
+    // round a 1.5 mm bend: the cut along the bend's axis has to reach the circle's far side, 24.5
+    // mm out, not only where its one segment starts. The two sides turn into quarters on opposite
+    // sides of the axis, so the volume is a quarter turn of the circle's first moment about it.
+    let (cx, r, a) = (12.0, 12.5, 1.5);
+    let circle = Region2 {
+        outer: Loop2 {
+            segs: vec![solidcore_record::Seg2::Arc {
+                center: Vec2::new(cx, 0.0),
+                radius: r,
+                start: std::f64::consts::PI,
+                sweep: std::f64::consts::TAU,
+            }],
+        },
+        holes: vec![],
+    };
+    let bend = [PathSeg::Arc { a: Vec3::ZERO, center: Vec3::new(0.0, a, 0.0), axis: Vec3::Z, angle: FRAC_PI_2 }];
+    let b = sweep(&across_start(), &circle, &bend).expect("the profile is cut along the bend's axis");
+    // ∫ |x - a| dA over the disc, by Simpson's rule across its width.
+    let n = 20_000;
+    let h = 2.0 * r / f64::from(n);
+    let moment: f64 = (0..=n)
+        .map(|i| {
+            let x = cx - r + h * f64::from(i);
+            let w = if i == 0 || i == n {
+                1.0
+            } else if i % 2 == 1 {
+                4.0
+            } else {
+                2.0
+            };
+            w * (x - a).abs() * 2.0 * (r * r - (x - cx) * (x - cx)).max(0.0).sqrt()
+        })
+        .sum::<f64>()
+        * h
+        / 3.0;
+    close(volume(&b), FRAC_PI_2 * moment, "circle round a tight bend");
+}

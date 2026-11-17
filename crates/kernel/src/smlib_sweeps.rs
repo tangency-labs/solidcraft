@@ -1159,7 +1159,19 @@ mod imp {
         let mut loops = loops.into_iter();
         let outer = loops.next().ok_or_else(bad)?;
         let region = Region2 { outer, holes: loops.collect() };
-        let size = pieces.iter().map(|x| x.seg.start().len()).fold(1.0, f64::max);
+        // How far the profile reaches from the plane's origin, whole segments not only their
+        // starts: an arc's circle, a curve's control points (it lies in their hull).
+        let size = pieces
+            .iter()
+            .map(|x| match x.seg {
+                Seg2::Line { a, b } => a.len().max(b.len()),
+                Seg2::Arc { center, radius, .. } => center.len() + radius.abs(),
+                Seg2::Cubic { p0, p1, p2, p3 } => [p0, p1, p2, p3].into_iter().map(Vec2::len).fold(0.0, f64::max),
+                Seg2::Conic { a, apex, b, .. } => [a, apex, b].into_iter().map(Vec2::len).fold(0.0, f64::max),
+                Seg2::Bezier { n, ref p } => p.iter().take(usize::from(n) + 1).map(|q| q.len()).fold(0.0, f64::max),
+            })
+            .filter(|s| s.is_finite())
+            .fold(1.0, f64::max);
         let c = plane.to_local(center);
         let u = Vec2::new(toward.dot(plane.x), toward.dot(plane.y)).normalized().ok_or_else(|| KernelError::Invalid("bend axis".into()))?;
         let v = Vec2::new(-u.y, u.x);
