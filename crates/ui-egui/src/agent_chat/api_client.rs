@@ -50,8 +50,8 @@ const ANTHROPIC_VERSION: &str = "2023-06-01";
 /// The connection test's own timeout: it asks for a token or two, not a whole answer.
 const TEST_TIMEOUT_S: u64 = 60;
 
-/// Tools the model is not offered.
-const HIDDEN_TOOLS: &[&str] = &["crash_reports"];
+/// Tools the Assistant gate refuses, so the model must not be offered them.
+const HIDDEN_TOOLS: &[&str] = &["agent_cursor", "crash_reports", "documents", "preferences", "quit_app"];
 
 /// Chat counter for OpenCode Go session IDs, next to the wall clock below.
 static GO_SESSION_COUNTER: AtomicU64 = AtomicU64::new(1);
@@ -1800,10 +1800,14 @@ mod tests {
     use super::*;
 
     #[test]
-    fn mcp_tools_become_function_tools_without_crash_reports() {
+    fn mcp_tools_become_function_tools_without_external_app_tools() {
         let list = json!({"tools": [
             {"name": "batch", "description": "Run commands", "inputSchema": {"type": "object", "properties": {"commands": {"type": "array"}}}},
             {"name": "crash_reports", "description": "x", "inputSchema": {"type": "object"}},
+            {"name": "documents", "inputSchema": {"type": "object"}},
+            {"name": "quit_app", "inputSchema": {"type": "object"}},
+            {"name": "preferences", "inputSchema": {"type": "object"}},
+            {"name": "agent_cursor", "inputSchema": {"type": "object"}},
             {"name": "measure"},
         ]});
         let t = openai_tools(&list);
@@ -2897,10 +2901,14 @@ mod tests {
     }
 
     #[test]
-    fn mcp_tools_become_anthropic_tools_without_crash_reports() {
+    fn mcp_tools_become_anthropic_tools_without_external_app_tools() {
         let list = json!({"tools": [
             {"name": "batch", "description": "Run commands", "inputSchema": {"type": "object", "properties": {"commands": {"type": "array"}}}},
             {"name": "crash_reports", "description": "x", "inputSchema": {"type": "object"}},
+            {"name": "documents", "inputSchema": {"type": "object"}},
+            {"name": "quit_app", "inputSchema": {"type": "object"}},
+            {"name": "preferences", "inputSchema": {"type": "object"}},
+            {"name": "agent_cursor", "inputSchema": {"type": "object"}},
             {"name": "measure"},
         ]});
         let t = anthropic_tools(&list);

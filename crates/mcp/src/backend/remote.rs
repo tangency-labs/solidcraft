@@ -114,7 +114,10 @@ impl Remote {
             method: method.to_string(),
             what: control_pending::describe(method, &params),
             effect: control_pending::effect(method, &params),
-            once: method == "engine.batch",
+            // A lost close/new reply must not close another tab or open a second one.
+            once: method == "engine.batch"
+                || method == "app.quit"
+                || (method == "ui.documents" && params.get("action").and_then(Value::as_str).is_some()),
             params: Self::scoped(params),
         };
         let reply = self.conn.exchange(request, retry_busy)?;
