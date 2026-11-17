@@ -141,6 +141,9 @@ struct App {
     /// Preferences › Layout's `windows_smooth_window_drag`, as winit was given it.
     #[cfg(target_os = "windows")]
     window_move: native_frame::WindowMove,
+    /// Brackets the touchpad's swipes (winit sends pixels only for it, #15353).
+    #[cfg(target_os = "windows")]
+    wheel_gestures: solidcraft_ui_egui::WebWheelGestures,
 }
 
 /// Settings written to the settings file soon after they change (#8275). eframe saves them
@@ -403,6 +406,14 @@ impl eframe::App for App {
         solidcraft_ui_egui::window_chrome::release_press_taken_by_os(ctx, raw);
         // A native dialog or lost focus may have kept a release (#16460).
         solidcraft_ui_egui::window_chrome::release_stale_input(ctx, raw);
+        // Windows touchpad: winit sends its two-finger scroll as pixels, which this brackets (#15353).
+        #[cfg(target_os = "windows")]
+        {
+            let now = raw.time.unwrap_or_else(|| ctx.input(|i| i.time));
+            if let Some(delay) = self.wheel_gestures.update(raw, now, solidcraft_ui_egui::prefs::BrowserScrollWheel::Automatic) {
+                ctx.request_repaint_after(delay);
+            }
+        }
         // Wayland shows the last program's cursor until the window sets its own again (#16581).
         solidcraft_ui_egui::window_chrome::reapply_cursor_on_return(ctx, raw);
         #[cfg(target_os = "macos")]
@@ -1634,6 +1645,10 @@ fn main() -> eframe::Result {
     // 3D mouse driver then too.
     #[cfg(target_os = "macos")]
     let _driver_client = DriverClient;
+    // Windows touchpad two-finger scroll arrives as pixels, not wheel notches (#15353). winit reads
+    // this when the event loop is built, so it is set before eframe builds it.
+    #[cfg(target_os = "windows")]
+    winit::platform::windows::set_touchpad_wheels(true);
     mark("run_native");
     let result = eframe::run_native(
         "SolidCraft",
@@ -1898,6 +1913,8 @@ fn main() -> eframe::Result {
                 ctx: cc.egui_ctx.clone(),
                 #[cfg(target_os = "windows")]
                 window_move,
+                #[cfg(target_os = "windows")]
+                wheel_gestures: solidcraft_ui_egui::WebWheelGestures::every_point_swipes(),
             }))
         }),
     );

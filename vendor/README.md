@@ -213,3 +213,13 @@ SolidCraft changes:
   `dark_mode.rs` passes the structure size to `RtlGetVersion`, as its documentation requires,
   since this choice depends on the build number it returns. eframe 0.37 requires
   winit 0.30, so this cannot come from a newer winit.
+- `src/platform_impl/windows/event_loop.rs`, `util.rs`, `mod.rs`, `src/platform/windows.rs`
+  (`set_touchpad_wheels`): a process-wide switch, off by default, which is winit's own behaviour.
+  Windows sends a precision touchpad's two-finger scroll as the wheel messages a mouse sends, so
+  winit reported it as lines, and in the SolidCraft presets it zoomed (vertical) or did nothing
+  (horizontal) (#15353). On, the event loop thread is registered with
+  `RegisterTouchpadCapableThread` (looked up by name; absent or failing means off), touchpad
+  `WM_POINTER` contacts go to `DefWindowProc` instead of becoming touches, and a touchpad's wheel
+  message is reported as `PixelDelta`: 40 px per `WHEEL_DELTA` (120), times the window scale
+  factor, which is egui's default line speed, so a pinch keeps its speed. Mouse wheels stay
+  `LineDelta`. The registration is undone when the event loop drops.
