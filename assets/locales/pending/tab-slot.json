@@ -14,7 +14,15 @@
     "ui.tab_slot.clearance": "Clearance",
     "ui.tab_slot.protrusion": "Protrusion",
     "error.tab_slot_plates": "Pick the plates that get tabs and the plates that get slots",
-    "help.solid.tab_slot": "Cuts tabs on the edge of one plate and matching slots in the plate it meets at a right angle. Use it to make flat parts that slot together for laser cutting or CNC."
+    "help.solid.tab_slot": "Cuts tabs on the edge of one plate and matching slots in the plate it meets at a right angle. Use it to make flat parts that slot together for laser cutting or CNC.",
+    "ui.tab_slot.tab_plates_tip": "Pick the plates whose edges get tabs",
+    "ui.tab_slot.slot_plates_tip": "Pick the plates that get the slots",
+    "ui.tab_slot.count_tip": "How many tabs on each stretch where the plates meet. Empty: as many as fit",
+    "ui.tab_slot.spacing_tip": "Distance from one tab's centre to the next. Empty: as many as fit",
+    "ui.tab_slot.tab_width_tip": "Width of each tab along the edge. Empty: three times the plate's thickness",
+    "ui.tab_slot.end_distance_tip": "From the end of a stretch to the nearest tab. Empty: the tab width",
+    "ui.tab_slot.clearance_tip": "Gap on every side of a tab in its slot, so the parts fit together",
+    "ui.tab_slot.protrusion_tip": "How far a tab stands out past the far face of the slot plate. 0 keeps it flush"
   },
   "ar": {
     "cmd.solid_tab_slot": "لسان وشق",
@@ -31,7 +39,15 @@
     "ui.tab_slot.clearance": "الخلوص",
     "ui.tab_slot.protrusion": "البروز",
     "error.tab_slot_plates": "اختر الألواح التي تأخذ الألسنة والألواح التي تأخذ الشقوق",
-    "help.solid.tab_slot": "يقطع ألسنة على حافة لوح وفتحات مطابقة لها في اللوح الذي يلتقي به بزاوية قائمة. استخدمه لصنع أجزاء مسطحة تتعشق معًا للقطع بالليزر أو بالتحكم الرقمي."
+    "help.solid.tab_slot": "يقطع ألسنة على حافة لوح وفتحات مطابقة لها في اللوح الذي يلتقي به بزاوية قائمة. استخدمه لصنع أجزاء مسطحة تتعشق معًا للقطع بالليزر أو بالتحكم الرقمي.",
+    "ui.tab_slot.tab_plates_tip": "اختر الألواح التي تحصل حوافها على ألسنة",
+    "ui.tab_slot.slot_plates_tip": "اختر الألواح التي تحصل على الشقوق",
+    "ui.tab_slot.count_tip": "عدد الألسنة في كل امتداد تلتقي فيه الألواح. فارغ: أكبر عدد يتسع",
+    "ui.tab_slot.spacing_tip": "المسافة من مركز لسان إلى التالي. فارغ: أكبر عدد يتسع",
+    "ui.tab_slot.tab_width_tip": "عرض كل لسان على طول الحافة. فارغ: ثلاثة أضعاف سماكة اللوح",
+    "ui.tab_slot.end_distance_tip": "من نهاية الامتداد إلى أقرب لسان. فارغ: عرض اللسان",
+    "ui.tab_slot.clearance_tip": "الفراغ على كل جانب من اللسان داخل شقه حتى تتركب الأجزاء معًا",
+    "ui.tab_slot.protrusion_tip": "مقدار بروز اللسان خلف الوجه البعيد للوح الشق. 0 يبقيه مستويًا"
   },
   "de": {
     "cmd.solid_tab_slot": "Lasche und Schlitz",
@@ -48,7 +64,15 @@
     "ui.tab_slot.clearance": "Spiel",
     "ui.tab_slot.protrusion": "Überstand",
     "error.tab_slot_plates": "Wählen Sie die Platten mit Laschen und die Platten mit Schlitzen",
-    "help.solid.tab_slot": "Schneidet Laschen an die Kante einer Platte und passende Schlitze in die Platte, auf die sie rechtwinklig trifft. Damit bauen Sie flache Teile, die sich für Laserschneiden oder CNC ineinanderstecken lassen."
+    "help.solid.tab_slot": "Schneidet Laschen an die Kante einer Platte und passende Schlitze in die Platte, auf die sie rechtwinklig trifft. Damit bauen Sie flache Teile, die sich für Laserschneiden oder CNC ineinanderstecken lassen.",
+    "ui.tab_slot.tab_plates_tip": "Wählen Sie die Platten, deren Kanten Laschen bekommen",
+    "ui.tab_slot.slot_plates_tip": "Wählen Sie die Platten, die die Schlitze bekommen",
+    "ui.tab_slot.count_tip": "Wie viele Laschen auf jedem Abschnitt, an dem sich die Platten treffen. Leer: so viele wie passen",
+    "ui.tab_slot.spacing_tip": "Abstand von der Mitte einer Lasche zur nächsten. Leer: so viele wie passen",
+    "ui.tab_slot.tab_width_tip": "Breite jeder Lasche entlang der Kante. Leer: dreimal die Plattendicke",
+    "ui.tab_slot.end_distance_tip": "Vom Ende eines Abschnitts bis zur nächsten Lasche. Leer: die Laschenbreite",
+    "ui.tab_slot.clearance_tip": "Spalt auf jeder Seite einer Lasche im Schlitz, damit die Teile zusammenpassen",
+    "ui.tab_slot.protrusion_tip": "Wie weit eine Lasche über die Rückseite der Schlitzplatte hinausragt. 0 lässt sie bündig"
   },
   "he": {
     "cmd.solid_tab_slot": "לשונית וחריץ",
@@ -65,7 +89,15 @@
     "ui.tab_slot.clearance": "מרווח חופשי",
     "ui.tab_slot.protrusion": "בליטה",
     "error.tab_slot_plates": "בחר את הלוחות שמקבלים לשוניות ואת הלוחות שמקבלים חריצים",
-    "help.solid.tab_slot": "חותך לשוניות בקצה של לוח וחריצים תואמים בלוח שהוא פוגש בזווית ישרה. השתמשו בו כדי ליצור חלקים שטוחים שמשתלבים זה בזה לחיתוך בלייזר או ב-CNC."
+    "help.solid.tab_slot": "חותך לשוניות בקצה של לוח וחריצים תואמים בלוח שהוא פוגש בזווית ישרה. השתמשו בו כדי ליצור חלקים שטוחים שמשתלבים זה בזה לחיתוך בלייזר או ב-CNC.",
+    "ui.tab_slot.tab_plates_tip": "בחר את הלוחות שבקצותיהם יהיו לשוניות",
+    "ui.tab_slot.slot_plates_tip": "בחר את הלוחות שיקבלו את החריצים",
+    "ui.tab_slot.count_tip": "כמה לשוניות בכל קטע שבו הלוחות נפגשים. ריק: כמה שנכנסות",
+    "ui.tab_slot.spacing_tip": "המרחק ממרכז לשונית אחת לבאה. ריק: כמה שנכנסות",
+    "ui.tab_slot.tab_width_tip": "רוחב כל לשונית לאורך הקצה. ריק: פי שלושה מעובי הלוח",
+    "ui.tab_slot.end_distance_tip": "מקצה הקטע ועד הלשונית הקרובה. ריק: רוחב הלשונית",
+    "ui.tab_slot.clearance_tip": "מרווח בכל צד של לשונית בתוך החריץ, כדי שהחלקים יתאימו",
+    "ui.tab_slot.protrusion_tip": "כמה הלשונית בולטת מעבר לפאה הרחוקה של לוח החריץ. 0 משאיר אותה בקו אחד"
   },
   "ja": {
     "cmd.solid_tab_slot": "タブとスロット",
@@ -82,7 +114,15 @@
     "ui.tab_slot.clearance": "クリアランス",
     "ui.tab_slot.protrusion": "突き出し",
     "error.tab_slot_plates": "タブを付けるプレートとスロットを付けるプレートを選択してください",
-    "help.solid.tab_slot": "板の縁にタブを、直角に接する板に合うスロットを切ります。レーザー加工やCNCで差し込んで組み立てる平らな部品を作るときに使います。"
+    "help.solid.tab_slot": "板の縁にタブを、直角に接する板に合うスロットを切ります。レーザー加工やCNCで差し込んで組み立てる平らな部品を作るときに使います。",
+    "ui.tab_slot.tab_plates_tip": "縁にタブを付けるプレートを選択",
+    "ui.tab_slot.slot_plates_tip": "スロットを付けるプレートを選択",
+    "ui.tab_slot.count_tip": "プレートが接する各区間のタブ数。空欄: 入るだけ",
+    "ui.tab_slot.spacing_tip": "タブの中心から次のタブの中心までの距離。空欄: 入るだけ",
+    "ui.tab_slot.tab_width_tip": "縁に沿った各タブの幅。空欄: プレート厚さの3倍",
+    "ui.tab_slot.end_distance_tip": "区間の端から最も近いタブまでの距離。空欄: タブ幅",
+    "ui.tab_slot.clearance_tip": "スロット内のタブの各辺の隙間。部品がはまるように",
+    "ui.tab_slot.protrusion_tip": "タブがスロットプレートの奥の面から突き出す量。0で面一"
   },
   "ko": {
     "cmd.solid_tab_slot": "탭과 슬롯",
@@ -99,7 +139,15 @@
     "ui.tab_slot.clearance": "여유",
     "ui.tab_slot.protrusion": "돌출",
     "error.tab_slot_plates": "탭을 받을 판과 슬롯을 받을 판을 선택하세요",
-    "help.solid.tab_slot": "한 판의 가장자리에 탭을, 직각으로 만나는 판에 맞는 슬롯을 만듭니다. 레이저 절단이나 CNC로 끼워 맞추는 평평한 부품을 만들 때 사용하세요."
+    "help.solid.tab_slot": "한 판의 가장자리에 탭을, 직각으로 만나는 판에 맞는 슬롯을 만듭니다. 레이저 절단이나 CNC로 끼워 맞추는 평평한 부품을 만들 때 사용하세요.",
+    "ui.tab_slot.tab_plates_tip": "가장자리에 탭을 만들 판을 선택",
+    "ui.tab_slot.slot_plates_tip": "슬롯을 만들 판을 선택",
+    "ui.tab_slot.count_tip": "판이 만나는 각 구간의 탭 수. 비우면: 들어가는 만큼",
+    "ui.tab_slot.spacing_tip": "한 탭의 중심에서 다음 탭까지의 거리. 비우면: 들어가는 만큼",
+    "ui.tab_slot.tab_width_tip": "가장자리를 따라 각 탭의 폭. 비우면: 판 두께의 3배",
+    "ui.tab_slot.end_distance_tip": "구간 끝에서 가장 가까운 탭까지. 비우면: 탭 폭",
+    "ui.tab_slot.clearance_tip": "슬롯 안 탭의 각 면 틈새로 부품이 맞물리게 합니다",
+    "ui.tab_slot.protrusion_tip": "탭이 슬롯 판의 먼 면 밖으로 튀어나오는 길이. 0이면 평평"
   },
   "nb": {
     "cmd.solid_tab_slot": "Tapp og spor",
@@ -116,7 +164,15 @@
     "ui.tab_slot.clearance": "Klaring",
     "ui.tab_slot.protrusion": "Utstikk",
     "error.tab_slot_plates": "Velg platene som får tapper og platene som får spor",
-    "help.solid.tab_slot": "Skjærer tapper i kanten av én plate og tilsvarende spor i platen den møter i rett vinkel. Bruk det til å lage flate deler som stikkes sammen, for laserskjæring eller CNC."
+    "help.solid.tab_slot": "Skjærer tapper i kanten av én plate og tilsvarende spor i platen den møter i rett vinkel. Bruk det til å lage flate deler som stikkes sammen, for laserskjæring eller CNC.",
+    "ui.tab_slot.tab_plates_tip": "Velg platene som får tapper på kanten",
+    "ui.tab_slot.slot_plates_tip": "Velg platene som får sporene",
+    "ui.tab_slot.count_tip": "Hvor mange tapper på hver strekning der platene møtes. Tomt: så mange som får plass",
+    "ui.tab_slot.spacing_tip": "Avstand fra midten av én tapp til den neste. Tomt: så mange som får plass",
+    "ui.tab_slot.tab_width_tip": "Bredden på hver tapp langs kanten. Tomt: tre ganger platetykkelsen",
+    "ui.tab_slot.end_distance_tip": "Fra enden av en strekning til nærmeste tapp. Tomt: tappbredden",
+    "ui.tab_slot.clearance_tip": "Klaring på alle sider av en tapp i sporet, så delene passer sammen",
+    "ui.tab_slot.protrusion_tip": "Hvor langt en tapp stikker ut forbi baksiden av sporplaten. 0 gir den i flukt"
   },
   "vi": {
     "cmd.solid_tab_slot": "Mộng và rãnh",
@@ -133,7 +189,15 @@
     "ui.tab_slot.clearance": "Khe hở",
     "ui.tab_slot.protrusion": "Phần nhô",
     "error.tab_slot_plates": "Chọn các tấm có mộng và các tấm có rãnh",
-    "help.solid.tab_slot": "Cắt các mộng trên cạnh một tấm và các rãnh khớp trong tấm gặp nó theo góc vuông. Dùng để làm các chi tiết phẳng lắp khớp vào nhau khi cắt laser hoặc CNC."
+    "help.solid.tab_slot": "Cắt các mộng trên cạnh một tấm và các rãnh khớp trong tấm gặp nó theo góc vuông. Dùng để làm các chi tiết phẳng lắp khớp vào nhau khi cắt laser hoặc CNC.",
+    "ui.tab_slot.tab_plates_tip": "Chọn các tấm có mộng trên cạnh",
+    "ui.tab_slot.slot_plates_tip": "Chọn các tấm có rãnh",
+    "ui.tab_slot.count_tip": "Số mộng trên mỗi đoạn nơi các tấm gặp nhau. Để trống: càng nhiều càng vừa",
+    "ui.tab_slot.spacing_tip": "Khoảng cách từ tâm mộng này đến mộng kế tiếp. Để trống: càng nhiều càng vừa",
+    "ui.tab_slot.tab_width_tip": "Chiều rộng mỗi mộng dọc theo cạnh. Để trống: ba lần độ dày tấm",
+    "ui.tab_slot.end_distance_tip": "Từ đầu đoạn đến mộng gần nhất. Để trống: chiều rộng mộng",
+    "ui.tab_slot.clearance_tip": "Khe hở mỗi bên của mộng trong rãnh để các chi tiết lắp vừa",
+    "ui.tab_slot.protrusion_tip": "Mộng nhô ra bao xa qua mặt sau của tấm có rãnh. 0 giữ phẳng"
   },
   "zh": {
     "cmd.solid_tab_slot": "凸舌与槽",
@@ -150,6 +214,14 @@
     "ui.tab_slot.clearance": "间隙",
     "ui.tab_slot.protrusion": "伸出量",
     "error.tab_slot_plates": "选择要做凸舌的板和要开槽的板",
-    "help.solid.tab_slot": "在一块板的边缘切出凸榫，并在与其成直角相接的板上切出匹配的槽。用于制作可插接组装、用于激光切割或 CNC 的平板零件。"
+    "help.solid.tab_slot": "在一块板的边缘切出凸榫，并在与其成直角相接的板上切出匹配的槽。用于制作可插接组装、用于激光切割或 CNC 的平板零件。",
+    "ui.tab_slot.tab_plates_tip": "选择边缘上开凸榫的板",
+    "ui.tab_slot.slot_plates_tip": "选择开槽的板",
+    "ui.tab_slot.count_tip": "板相接的每一段上的凸榫数。留空：尽量多",
+    "ui.tab_slot.spacing_tip": "相邻凸榫中心之间的距离。留空：尽量多",
+    "ui.tab_slot.tab_width_tip": "每个凸榫沿边缘的宽度。留空：板厚的三倍",
+    "ui.tab_slot.end_distance_tip": "从段的端部到最近凸榫的距离。留空：凸榫宽度",
+    "ui.tab_slot.clearance_tip": "凸榫在槽中每侧的间隙，使零件能装配在一起",
+    "ui.tab_slot.protrusion_tip": "凸榫伸出槽板远侧面的距离。0 表示齐平"
   }
 }

@@ -5,7 +5,7 @@ use crate::{
     SolveApp,
     dialogs::Kind,
     selection::{BODIES, SelInput, SelectionExt as _},
-    ui_kit::{choice_row, expr_row},
+    ui_kit::{BackingTooltipExt as _, choice_row, expr_row},
 };
 use serde_json::{Map, Value, json};
 use solidcraft_engine::{Sel, doc::FeatureKind};
@@ -33,7 +33,10 @@ pub fn start(app: &SolveApp, id: &str) -> Option<(Kind, Vec<SelInput>)> {
     (id == CMD).then(|| {
         (
             Kind::TabSlot(new_tab_slot(&app.session.doc)),
-            vec![SelInput::new("ui.tab_slot.tab_plates", BODIES, true), SelInput::new("ui.tab_slot.slot_plates", BODIES, true)],
+            vec![
+                SelInput::new("ui.tab_slot.tab_plates", BODIES, true).tip("ui.tab_slot.tab_plates_tip"),
+                SelInput::new("ui.tab_slot.slot_plates", BODIES, true).tip("ui.tab_slot.slot_plates_tip"),
+            ],
         )
     })
 }
@@ -42,15 +45,22 @@ pub fn rows(_app: &SolveApp, ui: &mut egui::Ui, t: &mut TabSlot, _inputs: &mut [
     choice_row(ui, "ui.tab_slot.layout", "tab_slot_layout", &mut t.layout, &["ui.tab_slot.by_count", "ui.tab_slot.by_spacing"]);
     let mut enter = false;
     if t.layout == 0 {
-        enter |= expr_row(ui, "ui.tab_slot.count", &mut t.count);
+        enter |= tipped(ui, "ui.tab_slot.count_tip", |ui| expr_row(ui, "ui.tab_slot.count", &mut t.count));
     } else {
-        enter |= expr_row(ui, "ui.tab_slot.spacing", &mut t.spacing);
+        enter |= tipped(ui, "ui.tab_slot.spacing_tip", |ui| expr_row(ui, "ui.tab_slot.spacing", &mut t.spacing));
     }
-    enter |= expr_row(ui, "ui.tab_slot.tab_width", &mut t.tab_width);
-    enter |= expr_row(ui, "ui.tab_slot.end_distance", &mut t.end_distance);
-    enter |= expr_row(ui, "ui.tab_slot.clearance", &mut t.clearance);
-    enter |= expr_row(ui, "ui.tab_slot.protrusion", &mut t.protrusion);
+    enter |= tipped(ui, "ui.tab_slot.tab_width_tip", |ui| expr_row(ui, "ui.tab_slot.tab_width", &mut t.tab_width));
+    enter |= tipped(ui, "ui.tab_slot.end_distance_tip", |ui| expr_row(ui, "ui.tab_slot.end_distance", &mut t.end_distance));
+    enter |= tipped(ui, "ui.tab_slot.clearance_tip", |ui| expr_row(ui, "ui.tab_slot.clearance", &mut t.clearance));
+    enter |= tipped(ui, "ui.tab_slot.protrusion_tip", |ui| expr_row(ui, "ui.tab_slot.protrusion", &mut t.protrusion));
     enter
+}
+
+/// One row with a tooltip over the whole of it (label and field).
+fn tipped(ui: &mut egui::Ui, tip: &str, row: impl FnOnce(&mut egui::Ui) -> bool) -> bool {
+    let row = ui.scope(row);
+    row.response.backing_on_hover_text(solidcraft_ui_text::tr(tip));
+    row.inner
 }
 
 pub fn commands(app: &SolveApp, t: &TabSlot, inputs: &[SelInput], extra: &Map<String, Value>) -> Result<Vec<(String, Value)>, String> {
