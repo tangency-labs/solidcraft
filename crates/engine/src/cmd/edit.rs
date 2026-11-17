@@ -18,8 +18,8 @@ use crate::schema::edit::{
     TimelineUngroupParams, TimelineUngrouped,
 };
 use crate::schema::select::{
-    PartialPick, SameLookParams, SelectClearParams, SelectClearResult, SelectFilterParams, SelectFilterResult, SelectItem, SelectMode,
-    SelectSetParams, SelectSetResult, read_item,
+    PartialPick, SameLookParams, SelectAllParams, SelectClearParams, SelectClearResult, SelectFilterParams, SelectFilterResult, SelectItem,
+    SelectMode, SelectSetParams, SelectSetResult, SharpEdgesParams, read_item,
 };
 use crate::schema::{TypedContract, output_schema_for};
 use crate::{EngineError, Result, Sel, Session, Snapshot};
@@ -229,12 +229,27 @@ pub static COMMANDS: &[CommandSpec] = &[
         .contract(&SAME_LOOK_CONTRACT)
         .output(output_schema_for::<SelectSetResult>)
         .params("body?: world body name, face?: face index; defaults to the current body/face selection → selects objects using the resolved appearance"),
+    CommandSpec::new("select.sharp_edges", "Select Sharp Edges", crate::checked!("select.sharp_edges", select_sharp_edges))
+        .icon("select")
+        .noundo()
+        .doc_only()
+        .contract(&SHARP_EDGES_CONTRACT)
+        .output(output_schema_for::<SelectSetResult>)
+        .params("angle_deg?: 1…179 (default 30), body?: solid body name (default: every shown solid body), add?: bool → selects the edges whose faces' normals turn by more than angle_deg, measured on the exact surfaces; tangent edges never"),
+    CommandSpec::new("select.all", "Select All", crate::checked!("select.all", select_all))
+        .icon("select")
+        .key("Ctrl+A")
+        .noundo()
+        .contract(&SELECT_ALL_CONTRACT)
+        .output(output_schema_for::<SelectSetResult>),
 ];
 
 const SELECT_SET_CONTRACT: TypedContract<SelectSetParams> = TypedContract::new();
 const SELECT_FILTER_CONTRACT: TypedContract<SelectFilterParams> = TypedContract::new();
 const SELECT_CLEAR_CONTRACT: TypedContract<SelectClearParams> = TypedContract::new();
+const SELECT_ALL_CONTRACT: TypedContract<SelectAllParams> = TypedContract::new();
 const SAME_LOOK_CONTRACT: TypedContract<SameLookParams> = TypedContract::new();
+const SHARP_EDGES_CONTRACT: TypedContract<SharpEdgesParams> = TypedContract::new();
 const COMPUTE_ALL_CONTRACT: TypedContract<TimelineComputeAllParams> = TypedContract::new();
 const DELETE_CONTRACT: TypedContract<TimelineDeleteParams> = TypedContract::new();
 const RENAME_CONTRACT: TypedContract<TimelineRenameParams> = TypedContract::new();
@@ -694,7 +709,7 @@ fn group(s: &mut Session, p: &Value) -> Result<Value> {
     let joints = group_joints(s, p, cmd)?;
     let groups = group_ids(s, p, false, cmd)?;
     let name = match str_(p, "name").map(str::trim).filter(|name| !name.is_empty()) {
-        Some(name) if name.len() <= 128 => name.to_string(),
+        Some(name) if name.chars().count() <= 128 => name.to_string(),
         Some(_) => return Err(bad(cmd, "`name` must be 1…128 characters")),
         None => format!("Folder{}", s.doc.timeline_groups.len() + 1),
     };
@@ -947,14 +962,15 @@ fn feature_ids(s: &Session, p: &Value, cmd: &str) -> Result<Vec<u64>> {
 /// renamed (#1109). The suppressed feature keeps its own too: the counter passes the names of
 /// suppressed features by, so a body made meanwhile does not take `Body1` and lose it again when
 /// the feature is back.
-fn counted_names_from(s: &Session, ids: &[u64]) -> Vec<(u64, Vec<String>)> {
+fn counted_names_from(s: &Session, ids: &[u64]) -> Vec<(u64, Vec<String>, Vec<usize>)> {
     let made = |f: &Feature| -> Vec<String> {
         s.model.result(f.id).map(|r| r.state.bodies.iter().filter(|b| b.feature == f.id).map(|b| b.name.clone()).collect()).unwrap_or_default()
     };
     let makes_counted = |f: &Feature| (0..made(f).len()).any(|i| super::browser::counted(f, i));
     let first = s.doc.features.iter().position(|f| ids.contains(&f.id) && !f.suppressed && makes_counted(f));
     let Some(at) = first else { return Vec::new() };
-    s.doc.features.iter().skip(at).filter(|f| makes_counted(f)).map(|f| (f.id, made(f))).collect()
+    let left_out = |f: &Feature| s.model.result(f.id).map(|r| r.state.pattern_left_out(f.id).to_vec()).unwrap_or_default();
+    s.doc.features.iter().skip(at).filter(|f| makes_counted(f)).map(|f| (f.id, made(f), left_out(f))).collect()
 }
 
 fn suppress(s: &mut Session, p: &Value) -> Result<Value> {
@@ -981,9 +997,9 @@ fn suppress(s: &mut Session, p: &Value) -> Result<Value> {
     let keep = if want { counted_names_from(s, &ids) } else { Vec::new() };
     // One command, so one undo step however many features it changes.
     let doc = s.doc_mut();
-    for (id, made) in &keep {
+    for (id, made, left_out) in &keep {
         if let Some(f) = doc.feature_mut(*id) {
-            f.pin_body_names(made);
+            f.pin_body_names(made, left_out);
         }
     }
     for id in &ids {
@@ -1677,6 +1693,99 @@ fn select_same_look(s: &mut Session, p: &Value) -> Result<Value> {
         return Err(bad("select.same_look", "too many objects"));
     }
     select_set(s, &json!({"items":items}))
+}
+
+/// Faces whose normals turn by no more than this many degrees across an edge meet tangentially:
+/// such an edge is never sharp, whatever the threshold.
+const TANGENT_DEG: f64 = 1.0;
+
+/// The angle Select Sharp Edges takes when the call gives none (command search, a key, the menu).
+const SHARP_DEG: f64 = 30.0;
+
+fn select_sharp_edges(s: &mut Session, p: &Value) -> Result<Value> {
+    const CMD: &str = "select.sharp_edges";
+    if !p.is_object() {
+        return Err(bad(CMD, "the parameters must be an object"));
+    }
+    let request: SharpEdgesParams = serde_json::from_value(p.clone()).map_err(|e| bad(CMD, e.to_string()))?;
+    let angle = request.angle_deg.unwrap_or(SHARP_DEG);
+    if !(TANGENT_DEG..=179.0).contains(&angle) {
+        return Err(bad(CMD, "`angle_deg` must be 1…179 degrees"));
+    }
+    let state = s.world_state()?;
+    let bodies: Vec<&solidcraft_doc::ModelBody> = match request.body.as_deref() {
+        Some(name) => {
+            let body = state.body(name).ok_or_else(|| bad(CMD, format!("no body `{name}`")))?;
+            if body.body.is_mesh() {
+                return Err(bad(CMD, format!("`{name}` is a mesh body: sharp edges are found on solid bodies")));
+            }
+            if body.is_surface() {
+                return Err(bad(CMD, format!("`{name}` is a surface body: sharp edges are found on solid bodies")));
+            }
+            vec![body]
+        }
+        None => state.bodies.iter().filter(|b| !b.body.is_mesh() && !b.is_surface() && s.body_visible(&b.name)).collect(),
+    };
+    // The normal angle is judged on the faces' exact surfaces at stations along each edge's own
+    // curve (the continuity analysis's measure), never on the mesh.
+    let tolerances = crate::kernel::ContinuityTolerances { angle_deg: TANGENT_DEG, ..Default::default() };
+    let mut items = Vec::new();
+    for body in bodies {
+        let report = crate::kernel::seam_diagnostics(&body.body, &[], crate::kernel::DEFAULT_SAMPLES, tolerances)?;
+        for seam in &report.seams {
+            let worst = seam.normal_angle_deg.value;
+            if seam.order.is_none() || !(worst > angle.max(TANGENT_DEG)) {
+                continue;
+            }
+            let Some(point) = seam.points.get(seam.points.len() / 2) else { continue };
+            items.push(Sel::Edge { body: body.name.clone(), index: seam.edge, point: *point });
+            if items.len() > 10_000 {
+                return Err(bad(CMD, "more than 10,000 sharp edges: name a `body` or raise `angle_deg`"));
+            }
+        }
+    }
+    let add = request.add.unwrap_or(false);
+    if add {
+        // An edge already selected is the same edge whatever point it was picked at: the items'
+        // points are the analysis's stations, not the user's.
+        let picked =
+            |body: &str, index: usize| s.selection.iter().any(|x| matches!(x, Sel::Edge { body: b, index: i, .. } if b == body && *i == index));
+        items.retain(|x| !matches!(x, Sel::Edge { body, index, .. } if picked(body, *index)));
+    }
+    select_set(s, &json!({"items": items, "add": add}))
+}
+
+/// In an open sketch, every curve of it (construction ones too) and every point of it on no
+/// curve, leaving out its origin and projected geometry; outside a sketch, every shown body.
+fn select_all(s: &mut Session, _p: &Value) -> Result<Value> {
+    let all: Vec<Sel> = match s.active_sketch {
+        Some(id) => {
+            let sk = super::sketch_store::read(&s.doc, id)?;
+            let own = sk.curves.iter().filter(|c| c.link.is_none());
+            let on_curve = |q: usize| own.clone().any(|c| c.kind.uses(q));
+            own.clone()
+                .map(|c| Sel::SketchCurve { id: c.id.clone(), sketch: None })
+                .chain(
+                    sk.points
+                        .iter()
+                        .enumerate()
+                        .filter(|(q, p)| p.link.is_none() && p.id != "origin" && !on_curve(*q))
+                        .map(|(_, p)| Sel::SketchPoint { id: p.id.clone() }),
+                )
+                .take(10_001)
+                .collect()
+        }
+        None => {
+            let hidden = &s.visibility.hidden_bodies;
+            s.world_state()?.bodies.iter().filter(|b| !hidden.contains(&b.name)).take(10_001).map(|b| Sel::Body { name: b.name.clone() }).collect()
+        }
+    };
+    if all.len() > 10_000 {
+        return Err(bad("select.all", "too many items"));
+    }
+    s.selection = all;
+    s.refresh_display();
+    reply("select.all", SelectSetResult { selected: s.selection.len(), param_warnings: Vec::new() })
 }
 
 fn select_clear(s: &mut Session, _p: &Value) -> Result<Value> {

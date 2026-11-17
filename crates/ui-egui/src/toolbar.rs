@@ -75,7 +75,7 @@ fn ribbon_shows_pressed(app: &SolveApp, id: &str) -> bool {
 pub(crate) const PILL_HEIGHT: f32 = 22.0;
 
 /// An application-bar pill for something on offer (Update) at the right of `span` (the bar's free
-/// space): accent-filled, with `icon` and the first of `labels` that fits (the icon alone when
+/// space): accent-filled (outlined on the bar when `quiet`, for a notice such as Managed by), with `icon` and the first of `labels` that fits (the icon alone when
 /// none does or `labeled` is false). Every label but the last also leaves `keep` points of the
 /// span free (for the document tabs). None when even the icon doesn't fit: it never covers the
 /// bar's other buttons. `handle` names it for scenarios.
@@ -87,6 +87,7 @@ pub(crate) fn offer_pill(
     keep: f32,
     icon: &str,
     handle: &str,
+    quiet: bool,
 ) -> Option<(Rect, egui::Response)> {
     let t = Tokens::get();
     let font = FontId::proportional(t.font_label);
@@ -108,9 +109,14 @@ pub(crate) fn offer_pill(
     response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, ui.is_enabled(), &name));
     crate::scenario::publish_target(handle, rect);
     let hot = response.hovered() || response.has_focus();
-    let fill = if hot { t.app_bar_hover_button } else { t.accent };
     let radius = PILL_HEIGHT / 2.0 * f32::from(t.radius_xl) / 10.0;
-    ui.painter().rect_filled(rect, radius, fill);
+    if hot {
+        ui.painter().rect_filled(rect, radius, t.app_bar_hover_button);
+    } else if quiet {
+        ui.painter().rect_stroke(rect, radius, Stroke::new(1.0, t.app_bar_separator), egui::StrokeKind::Inside);
+    } else {
+        ui.painter().rect_filled(rect, radius, t.accent);
+    }
     if response.has_focus() {
         ui.painter().rect_stroke(rect.expand(2.0), Tokens::outset_radius(radius, 2.0), Stroke::new(1.0, t.app_bar_text), egui::StrokeKind::Outside);
     }
@@ -238,6 +244,7 @@ pub fn app_bar(app: &mut SolveApp, ui: &mut egui::Ui) {
             let bar = app_bar::AppBar {
                 mark: &|painter, at| solidcraft_look::glyphs::brand_mark(painter, at),
                 name: "SolidCraft",
+                leading: (crate::library::available(app) && !app.home.open).then_some(vec2(26.0, 26.0)),
                 home: app_bar::BarButton { id: "home", icon: "home", tip: app.tr("ui.start_page"), enabled: idle, narrow: false, wide_only: false },
                 file: app.tr("ui.file"),
                 file_open,
@@ -266,6 +273,9 @@ pub fn app_bar(app: &mut SolveApp, ui: &mut egui::Ui) {
                 handles: APP_BAR_HANDLES,
             };
             let out = app_bar::show(ui, &bar, r, content);
+            if let Some(rect) = out.leading {
+                crate::library::app_bar_toggle(app, ui, rect);
+            }
             ui.ctx().data_mut(|d| d.insert_temp(egui::Id::unique("sc_file_menu_x"), out.file.left()));
             for action in &out.actions {
                 match action {
@@ -316,9 +326,13 @@ pub fn app_bar(app: &mut SolveApp, ui: &mut egui::Ui) {
                 // shortcut_box::show draws the one search editor wherever this rectangle is.
                 ui.ctx().data_mut(|d| d.insert_temp(egui::Id::unique("sc_ribbon_search"), search));
             }
-            // A newer release: its Update button stays before the right cluster.
+            // A newer release: its Update button stays before the right cluster, and the
+            // organization's Managed by badge left of it and of the link pills.
             let update = crate::update::button(app, ui, out.offer, out.offer_labeled);
-            let tabs_end = update.map_or(out.controls_left, |u| u.left()) - 8.0;
+            let badge_right = update.map_or(out.controls_left, |u| u.left().min(out.controls_left)) - 6.0;
+            let badge_span = Rect::from_min_max(out.offer.min, pos2(badge_right.max(out.offer.min.x), out.offer.max.y));
+            let badge = crate::policy::badge(app, ui, badge_span, out.offer_labeled);
+            let tabs_end = badge.or(update).map_or(out.controls_left, |u| u.left()) - 8.0;
             // Narrow title bars can fit only part of the tab strip. Its hit regions must not
             // extend into the persistent report and window controls.
             let tabs_rect = Rect::from_min_max(pos2(out.tabs_start.min(tabs_end), r.top()), pos2(tabs_end, r.bottom()));
@@ -538,7 +552,7 @@ pub(crate) fn file_rows(app: &SolveApp) -> Vec<app_bar::FileRow> {
         rows.push(FileRow::Separator);
     }
     for item in entries {
-        rows.push(row(&item.command, &item.label, "", "prefs_plugins", shown || item.importer));
+        rows.push(row(&item.command, &item.label, "", &item.icon, shown || item.importer));
     }
     rows
 }
@@ -1321,7 +1335,7 @@ impl RibbonPanels {
                         run: &b.id,
                         label: &b.label,
                         name: &b.name,
-                        icon: b.icon,
+                        icon: &b.icon,
                         size: *size,
                         enabled: true,
                         pressed: false,
@@ -1350,7 +1364,7 @@ impl RibbonPanels {
                             .map(|b| ribbon::MoreRow {
                                 id: &b.id,
                                 label: &b.label,
-                                icon: b.icon,
+                                icon: &b.icon,
                                 shortcut: "",
                                 enabled: true,
                                 checked: None,
@@ -5401,17 +5415,52 @@ mod command_start_tab_tests {
         }
     }
 
-    /// The issue's exact repro through the control channel: Ground from MODEL says `occurrence`
-    /// must be an id or name; the status line keeps the refusal, the ribbon does not move to
-    /// ASSEMBLE.
+    /// The issue's exact repro through the control channel: Ground from MODEL with nothing
+    /// selected says to pick a component (#14911; it used to say `occurrence` must be an id or
+    /// name); the status line shows it, the ribbon does not move to ASSEMBLE.
     #[test]
-    fn ground_from_command_search_names_the_missing_occurrence_and_stays_on_model() {
+    fn ground_from_command_search_asks_for_a_component_and_stays_on_model() {
         let mut h = on_model_with_a_box();
         h.call("ui.start", json!({"command": "occurrence.ground"}));
         assert_eq!(h.app.ui.tab, "MODEL", "Ground started nothing: the ribbon stays on MODEL");
-        let (status, _, error) = h.app.status.clone().expect("the refusal reaches the status line");
-        assert!(error, "{status}");
-        assert!(status.contains("occurrence"), "{status}");
+        let (status, _, _) = h.app.status.clone().expect("the refusal reaches the status line");
+        assert_eq!(status, h.app.tr("ui.ground_select_first"));
+    }
+
+    /// #14911: a placement selected in the Browser plus the ribbon's Ground grounds it, as the
+    /// Browser's Placement > Ground does; a second press ungrounds it again.
+    #[test]
+    fn ribbon_ground_grounds_the_selected_placement() {
+        let mut h = on_model_with_a_box();
+        let occurrence = h.app.run("component.create", json!({"name": "Part"})).unwrap()["occurrence"].as_u64().unwrap();
+        h.app.run("occurrence.ground", json!({"occurrence": occurrence, "grounded": false})).unwrap();
+        h.app.run("select.set", json!({"items": [{"type": "occurrence", "path": [occurrence]}]})).unwrap();
+        let grounded = |h: &Harness| h.app.session.occurrence_placement(&[occurrence]).is_ok_and(|p| p.grounded);
+        assert!(!grounded(&h));
+        h.app.start("occurrence.ground");
+        assert!(grounded(&h), "the selected placement is grounded: {:?}", h.app.status);
+        h.app.start("occurrence.ground");
+        assert!(!grounded(&h), "a second press ungrounds it: {:?}", h.app.status);
+    }
+
+    /// #14911: most people pick the part in the view, not the Browser. A body or a face of a
+    /// placed component, selected in the view, makes the ribbon's Ground ground that placement.
+    #[test]
+    fn ribbon_ground_grounds_the_placement_of_a_body_or_face_picked_in_the_view() {
+        let mut h = Harness::new();
+        h.app.home.open = false;
+        let occurrence = h.app.run("component.create", json!({"name": "Part"})).unwrap()["occurrence"].as_u64().unwrap();
+        h.app.run("solid.box", json!({"length": 40, "width": 30, "height": 20})).unwrap();
+        h.app.run("component.activate", json!({"component": 0})).unwrap();
+        h.app.run("occurrence.ground", json!({"occurrence": occurrence, "grounded": false})).unwrap();
+        let grounded = |h: &Harness| h.app.session.occurrence_placement(&[occurrence]).is_ok_and(|p| p.grounded);
+        h.app.run("select.set", json!({"items": [{"type": "body", "name": "Body1"}]})).unwrap();
+        h.app.start("occurrence.ground");
+        assert!(grounded(&h), "the picked body's placement is grounded: {:?}", h.app.status);
+        let face = solidcraft_engine::Sel::Face { body: "Body1".into(), index: 0, point: Default::default() };
+        h.app.session.selection = vec![face];
+        h.app.start("occurrence.ground");
+        assert!(!grounded(&h), "a picked face toggles its placement back: {:?}", h.app.status);
     }
 
     /// #10540: View Fit, Home and the other view display commands act on the view the same way

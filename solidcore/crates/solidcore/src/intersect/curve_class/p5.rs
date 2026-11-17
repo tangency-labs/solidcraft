@@ -64,6 +64,7 @@ use crate::curve::crv_on_surf::CrvOnSurf;
 use crate::curve::curve::p2::{Curve, CurveKind};
 use crate::error::{ignore_status, ignored, Result, SolidError};
 use crate::geom::extent1d::Extent1d;
+use crate::geom::extent3d::Extent3d;
 use crate::geom::global_solver::{SolutionRequested, SolverOperation};
 use crate::geom::solution_array::{
     ObjectKind, Solution, SolutionArray, SolutionObject, SolutionType,
@@ -77,7 +78,9 @@ use crate::intersect::point_class::{
 };
 use crate::kernel::Kernel;
 use crate::math::{max3, Point2, Point3, BIG_DOUBLE, EFF_ZERO, PI};
+use crate::nurbs::b_spline_curve::BoundingBoxRequest;
 use crate::nurbs::b_spline_curve_n_lib::TrimMode;
+use crate::nurbs::math::NOW;
 use crate::surface::surface::{Surface, SurfaceKind};
 use crate::topology::Brep;
 use crate::EntityRef;
@@ -400,6 +403,75 @@ fn append_unique<O: PartialEq>(dst: &mut Vec<O>, src: impl IntoIterator<Item = O
     }
 }
 
+/// Not upstream (with `Kernel::memoize_curve_caches`): an axis aligned box holding every
+/// point the vertex drop of [`CurveClassification::intersect_vertices_in`] can find on
+/// `curve` over `interval`, so that a vertex farther from it than the drop's tolerance
+/// has no solution there and can be passed over. `None` (no vertex is passed over)
+/// where that cannot be given:
+///
+/// - The drop finds only points within its tolerance of the vertex: every path of
+///   `Curve::global_point_solve_cached` with the target distance 0 (the line and circle
+///   drops drop a solution farther than the target distance plus the tolerance, the
+///   global solver culls one farther than the best answer, 0, plus the tolerance, and
+///   the analytic polish only takes a nearer point).
+/// - The points are the curve's own or its analytic replacement's. A line is its segment
+///   over `interval`. A conic and a B-spline the replacement cannot be made from
+///   (`create_analytic_curve`: only a degree 1 curve of two control points, whose
+///   replacement meets it within the scaled zero the margin of the caller covers, or a
+///   rational quadratic) are evaluated on their B-spline form, which lies in the convex
+///   hull of its control points (positive weights): the box is that of the control points
+///   themselves, not [`Curve::calculate_bounding_box`], which gives a Bezier span it takes
+///   for a line (sampled, for a rational one or uneven control points) the box of its ends
+///   only, and a span whose middle control points lie past its ends reaches farther. A
+///   rational quadratic, whose circle is checked at samples only, and every other kind
+///   give `None`.
+/// - `interval` lies in the natural interval, so nothing is evaluated past its ends.
+fn drop_reach_box(k: &Kernel, curve: &Curve, interval: &Extent1d) -> Option<Extent3d> {
+    let spline = match curve.kind() {
+        CurveKind::BSpline(c) => {
+            if c.degree().ok()? == 2 && c.is_rational().ok()? {
+                return None;
+            }
+            Some(c)
+        }
+        CurveKind::Ellipse(c) => Some(c.base()),
+        CurveKind::Hyperbola(c) => Some(c.base()),
+        CurveKind::Parabola(c) => Some(c.base()),
+        CurveKind::Line(_) => None,
+        _ => return None,
+    };
+    let natural = curve.natural_interval();
+    if !(interval.min() >= natural.min() && interval.max() <= natural.max()) {
+        return None;
+    }
+    let b = if let Some(c) = spline {
+        let cpts = c.nurb.as_ref()?.cpts();
+        if cpts.is_empty() || !cpts.iter().all(|p| p.w == NOW || p.w > 0.0) {
+            return None;
+        }
+        let mut b = Extent3d::new();
+        for p in cpts {
+            b.add_point(p.to_euclid());
+        }
+        b
+    } else {
+        let req = BoundingBoxRequest {
+            normal: true,
+            pseudo: false,
+            polar: false,
+        };
+        curve
+            .calculate_bounding_box(k, interval, req, true)
+            .ok()?
+            .normal?
+    };
+    let (lo, hi) = (b.min(), b.max());
+    let finite = [lo.x, lo.y, lo.z, hi.x, hi.y, hi.z]
+        .iter()
+        .all(|v| v.is_finite());
+    (finite && lo.x <= hi.x && lo.y <= hi.y && lo.z <= hi.z).then_some(b)
+}
+
 /// Native `sBigGapXSectTol3d`: a face gap overrides the default constructor only
 /// when both large-gap processing and a face are present.
 fn vertex_big_gap_tolerance<O: Copy>(
@@ -427,6 +499,30 @@ fn vertex_big_gap_tolerance<O: Copy>(
             SolidError::invalid_input(OP, "unresolved classification vertex/face gap")
         })?;
     Ok(if gap > tolerance { gap } else { tolerance })
+}
+
+/// Not upstream: whether `vertex` is a pole of `face`, the face around it on every side
+/// ([`crate::topology::vertex::inside_face`]); `false` where the adapter resolves either
+/// to no topology or the two lie in different B-reps.
+fn pole_of_face<O: ClassObject>(
+    geometry: &impl ClassGeometry<O>,
+    vertex: O,
+    face: Option<O>,
+) -> Result<bool> {
+    let Some(face) = face else {
+        return Ok(false);
+    };
+    match (
+        geometry.topology_entity(vertex),
+        geometry.topology_entity(face),
+    ) {
+        (Some((b, EntityRef::Vertex(v))), Some((fb, EntityRef::Face(f))))
+            if std::ptr::eq(b, fb) =>
+        {
+            crate::topology::vertex::inside_face(b, v, f)
+        }
+        _ => Ok(false),
+    }
 }
 
 impl<O: ClassObject> CurveClassification<O> {
@@ -820,10 +916,31 @@ impl<O: ClassObject> CurveClassification<O> {
         // the classification curve's cache, kept across the vertex drops as upstream keeps
         // it on the curve; dropped when the surf/surf/surf block may edit the curve
         let mut curve_cache = None;
+        // (not upstream) the box the drops below can reach ([`drop_reach_box`]), taken
+        // again after the surf/surf/surf block may edit the curve; `None` until taken
+        let mut reach: Option<Option<Extent3d>> = None;
         for &vertex in vertices {
             let geometry = access.geometry();
             let vertex_zone = object_zone_tol_3d(k, geometry, Some(vertex))?;
-            let tolerance = xsect_tol_3d_from_zones(k, source_zone, vertex_zone);
+            // Not upstream: a vertex the face surrounds on every side (a pole) bounds no
+            // material, so its tolerance adds nothing; the curve meets it only within its
+            // own reach (docs/booleans.md, "Seams and poles")
+            let summed = xsect_tol_3d_from_zones(k, source_zone, vertex_zone);
+            // whether a contact is held to the curve's region: at a pole, for every curve
+            // but the face's own seam curve (checked as upstream does)
+            let mut regional = false;
+            let tolerance = if pole_of_face(geometry, vertex, self.face())? {
+                let working = match &wrapped {
+                    Some(lifted) => lifted,
+                    None => self.curve_geometry(geometry)?,
+                };
+                let reach = self.source_reach_in(k, geometry, working)?;
+                self.set_source_reach(reach);
+                regional = reach.has_region();
+                reach.contact_tolerance(xsect_tol3d(k, source_zone), summed)
+            } else {
+                summed
+            };
             // The curve may carry a larger approximation allowance than its body.
             // Using that allowance alone captures a nearby corner and splits the
             // blend arc there, even though the retained vertex cannot satisfy the
@@ -854,6 +971,38 @@ impl<O: ClassObject> CurveClassification<O> {
                 has_big_gaps,
                 tolerance,
             )?;
+            // (not upstream, with `Kernel::memoize_curve_caches`) a vertex farther from the
+            // curve's reach than the drop's tolerance has no solution: it is passed over
+            // after everything above, which may fail, and before anything that may edit
+            if k.memoize_curve_caches {
+                let curve = match &wrapped {
+                    Some(c) => c,
+                    None => self.curve_geometry(geometry)?,
+                };
+                let b = *reach.get_or_insert_with(|| {
+                    if wrapped.is_some() {
+                        None
+                    } else {
+                        drop_reach_box(k, curve, &self.interval())
+                    }
+                });
+                if let Some(b) = b {
+                    // The box holds the curve exactly, so the drop's tolerance alone would do
+                    // in exact arithmetic. On top of it: the analytic replacement meets the
+                    // curve within its scaled zero, `EFF_ZERO * (1 + |x|)` (1e-12 at part
+                    // scale), and the box's corners (control points out of their homogeneous
+                    // form) and the point the solve would compare are each a few ulps of
+                    // their coordinates off. Both are below 1e-11 * (1 + |x|); 1e-9 leaves a
+                    // hundredfold of that, and too wide a margin only costs a drop, never
+                    // passes over a contact.
+                    let margin = tolerance
+                        + 1e-9 * (1.0 + b.max_dimension().abs() + point.max_dimension().abs());
+                    if !b.contains_point(point, margin) {
+                        continue;
+                    }
+                }
+            }
+            k.work_counters.add_vertex_drop();
             let mut solutions = {
                 let curve = match &wrapped {
                     Some(c) => c,
@@ -888,6 +1037,7 @@ impl<O: ClassObject> CurveClassification<O> {
                         })))
             {
                 curve_cache = None;
+                reach = None;
                 self.refine_vertex_solutions(
                     k,
                     access,
@@ -912,6 +1062,20 @@ impl<O: ClassObject> CurveClassification<O> {
                     Some(c) => c,
                     None => self.curve_geometry(geometry)?,
                 };
+                // not upstream: the curve reaches a pole across itself by its reach, along
+                // itself by its own tolerance (docs/booleans.md, "Seams and poles")
+                if regional
+                    && !super::p1::in_reach_region(
+                        k,
+                        curve,
+                        solution.start.param(0)?,
+                        point,
+                        xsect_tol3d(k, source_zone),
+                        tolerance,
+                    )?
+                {
+                    continue;
+                }
                 if solution.start.solution_value > tolerance {
                     if !has_big_gaps || solution.start.solution_value > big_tolerance {
                         continue;
@@ -2413,5 +2577,59 @@ mod tests {
             "{fresh}"
         );
         assert_eq!(classify(true), fresh);
+    }
+
+    /// The box the vertex drops can reach holds the whole curve where a cubic Bezier's middle
+    /// control points lie past its ends on the line through them, rational or not: there
+    /// the curve runs past its ends, which the B-spline's own box, taking such a span for a
+    /// line, does not reach (#7942).
+    #[test]
+    fn drop_reach_box_holds_a_cubic_running_past_its_ends() {
+        use crate::nurbs::b_spline_curve::BSplineCurve;
+        use crate::nurbs::crv_basic::Curve as NlCurve;
+        use crate::nurbs::math::CPoint;
+
+        let k = Kernel::default();
+        let xs = [0.0, 4.0, -3.0, 1.0];
+        for weights in [[1.0; 4], [1.0, 2.0, 0.5, 1.0], [1.0, 0.5, 3.0, 1.0]] {
+            for (dy, dz) in [(0.0, 0.0), (1e-9, 0.0), (0.5, 0.25)] {
+                let pw = xs
+                    .iter()
+                    .zip(weights)
+                    .enumerate()
+                    .map(|(i, (&x, w))| {
+                        let (y, z) = if i == 1 || i == 2 {
+                            (dy, dz)
+                        } else {
+                            (0.0, 0.0)
+                        };
+                        CPoint::new(x * w, y * w, z * w, w)
+                    })
+                    .collect();
+                let nl = NlCurve::new(pw, 3, vec![0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0]).unwrap();
+                let spline = BSplineCurve::from_nurb(nl, 3, false);
+                let curve = Curve::from(spline.clone());
+                let natural = curve.natural_interval();
+                let b = drop_reach_box(&k, &curve, &natural).unwrap();
+                let (lo, hi) = (b.min(), b.max());
+                let (mut least, mut most) = (f64::INFINITY, f64::NEG_INFINITY);
+                for i in 0..=200 {
+                    let p = spline.evaluate_point(f64::from(i) / 200.0).unwrap();
+                    least = least.min(p.x);
+                    most = most.max(p.x);
+                    for (v, l, h) in [(p.x, lo.x, hi.x), (p.y, lo.y, hi.y), (p.z, lo.z, hi.z)] {
+                        assert!(
+                            v >= l - 1e-12 && v <= h + 1e-12,
+                            "{p:?} outside {b:?} ({weights:?}, {dy}, {dz})"
+                        );
+                    }
+                }
+                // the curve does run past its ends
+                assert!(
+                    least < -1e-3 || most > 1.0 + 1e-3,
+                    "{least} {most} ({weights:?})"
+                );
+            }
+        }
     }
 }

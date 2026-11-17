@@ -380,6 +380,7 @@ impl Writer {
             "named_faces": self.named_faces(&st.named_faces),
             "blend_edges": serde_json::to_value(&st.blend_edges).ok()?, "fitted": serde_json::to_value(&st.fitted).ok()?,
             "tapered": serde_json::to_value(&st.tapered).ok()?,
+            "pattern_left_out": serde_json::to_value(&st.pattern_left_out).ok()?,
         });
         self.states.push(r);
         self.state_index.insert(id, self.states.len() - 1);
@@ -699,6 +700,11 @@ impl SavedModel {
                 blend_edges: serde_json::from_value(field("blend_edges")?).map_err(invalid)?,
                 fitted: serde_json::from_value(field("fitted")?).map_err(invalid)?,
                 tapered: serde_json::from_value(field("tapered")?).map_err(invalid)?,
+                // Older saved models have none: their patterns left no body out.
+                pattern_left_out: match s.get("pattern_left_out") {
+                    Some(v) => serde_json::from_value(v.clone()).map_err(invalid)?,
+                    None => BTreeMap::new(),
+                },
                 named_faces,
                 // A join's notice is for the evaluation that made it, not kept with the cache.
                 kept_separate: BTreeMap::new(),

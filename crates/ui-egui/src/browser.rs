@@ -754,9 +754,6 @@ pub fn group_action(app: &mut SolveApp, action: &str, p: &Value) {
                 let _ = app.run("browser.ungroup", json!({ "group": g }));
             }
         }
-        "ui.renameGroup" => {
-            let _ = app.run("browser.rename_group", p.clone());
-        }
         _ => {}
     }
 }
@@ -2709,7 +2706,9 @@ impl Entry {
         match &self.sel {
             Some(Sel::Body { name }) => !app.session.visibility.hidden_bodies.contains(name),
             Some(Sel::Feature { id }) => sketch_visible(app, *id),
-            Some(Sel::Plane { name }) => !app.session.visibility.hidden_origin.contains(name),
+            // Construction planes, axes and points alike: the rows are cached per evaluation, and a
+            // visibility change (an eye, Show/Hide Reference Geometry) evaluates nothing.
+            Some(Sel::Plane { name } | Sel::Axis { name } | Sel::ConstructionPoint { name }) => !app.session.visibility.hidden_origin.contains(name),
             _ => self.visible,
         }
     }
@@ -2768,7 +2767,7 @@ fn entries(app: &SolveApp, comp: u64, folder: &str) -> Vec<Entry> {
     }
 }
 
-fn construction_sel(f: &solidcraft_engine::doc::Feature) -> Sel {
+pub(crate) fn construction_sel(f: &solidcraft_engine::doc::Feature) -> Sel {
     let name = f.name.clone();
     match f.kind {
         FeatureKind::ConstructionPoint { .. } => Sel::ConstructionPoint { name },
@@ -3329,14 +3328,16 @@ fn entry_row(
         }
         // A double-click or a slower second click renames the row (sketch double-clicks edit
         // instead), like F2.
-        if (r.double || r.slow_rename) && !dialog_pick {
-            crate::context_menu::rename_selection(app, r.rect.map(|x| x.left_bottom()).unwrap_or_default());
-            if let Some(rename) = app.menu.rename.as_mut()
-                && let Some(row_id) = r.row_id
-            {
-                rename.inline = true;
-                rename.inline_id = Some(row_id);
-            }
+        // Only a rename this click started is edited in the row: a refused one still open belongs
+        // to its own row.
+        if (r.double || r.slow_rename)
+            && !dialog_pick
+            && crate::context_menu::rename_selection(app, r.rect.map(|x| x.left_bottom()).unwrap_or_default())
+            && let Some(rename) = app.menu.rename.as_mut()
+            && let Some(row_id) = r.row_id
+        {
+            rename.inline = true;
+            rename.inline_id = Some(row_id);
         }
     }
     inline_rename(app, rows.ui(), r.name_at(), &e.label);
@@ -3561,7 +3562,15 @@ pub fn dims_overlay(app: &SolveApp, painter: &egui::Painter, proj: &crate::viewp
                 crate::prefs::dimension_colour(&app.preferences, c.driven)
             };
             let galley = painter.layout_no_wrap(
-                crate::dim_view::frame_label(&frame, &c.kind, expr, c.driven, &app.session.doc.units, app.preferences.length_decimals),
+                crate::dim_view::frame_label(
+                    &frame,
+                    &c.kind,
+                    expr,
+                    c.driven,
+                    &app.session.doc.units,
+                    app.preferences.length_decimals,
+                    app.preferences.angle_decimals,
+                ),
                 FontId::proportional(tk.font_caption * crate::prefs::dimension_text_scale(&app.preferences)),
                 col,
             );

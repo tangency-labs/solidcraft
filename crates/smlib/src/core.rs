@@ -94,7 +94,6 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.fillet_refuse_overlapping_bands = true;
     f.ssi_tangent_curve_tracer = true;
     f.fillet_knife_edge_rounds = true;
-    f.proto_edge_splits_at_captured_vertices = true;
     f.linear_sweep_arc_is_cylinder = true;
     f.fillet_trace_reaches_rails = true;
     f.box_face_failures_propagate = true;
@@ -120,15 +119,12 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.degen_param_tiebreak_uses_actual_param = true;
     f.local_surface_intersect_guards_max_boundary_retry = true;
     f.edgeuse_convexity_propagates_step_off_failure = true;
-    f.cone_create_canonical_preserves_inside_out_and_checks_height = true;
     f.point_class_gap_3d_propagates_no_drop_error = true;
     f.cone_iso_circle_at_axial_height = true;
     // Held back: see `HELD_BACK`.
     f.fillet_refuse_rounds_breaking_through = false;
     f.cone_unbounded_parameterized_as_nurb = true;
-    f.fillet_round_as_definition = true;
     f.keep_exact_pcurves = true;
-    f.face_swap_uv_transposes_trims = true;
     f.closed_smooth_pole_tangent_limit = true;
     // Held back: see `HELD_BACK`.
     f.fillet_round_ends_on_outline = false;
