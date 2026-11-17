@@ -878,6 +878,19 @@ fn is_container_source(source: &mut FileSource) -> Result<bool> {
     Ok(is_design_container(&prefix))
 }
 
+/// Whether a newer build's import records read as this build's with nothing left over: saved
+/// again, they are what the file has (serde passes over a field this build does not have, which
+/// a save would then drop).
+fn records_read_whole(text: &[u8]) -> Result<()> {
+    let records: solidcraft_kernel::ImportRecords = serde_json::from_slice(text).map_err(invalid)?;
+    let original: Value = serde_json::from_slice(text).map_err(invalid)?;
+    let again: Value = serde_json::from_str(&solidcraft_kernel::records_text(&records)?).map_err(invalid)?;
+    if again != original {
+        return Err(invalid("records with fields this build does not read"));
+    }
+    Ok(())
+}
+
 /// A newer build's container: a feature, picture or point cloud whose payload doesn't read here
 /// is kept as the file has it, and so is every part this build has no use for.
 fn hydrate_newer<R: Read + Seek>(doc: &mut Document, metadata: &Value, container: Value, reader: &mut PackageReader<R>) -> Result<()> {
@@ -885,14 +898,14 @@ fn hydrate_newer<R: Read + Seek>(doc: &mut Document, metadata: &Value, container
     for (index, feature) in doc.features.iter_mut().enumerate() {
         let Some(value) = metadata.get("features").and_then(|v| v.get(index)) else { continue };
         let readable = match &mut feature.kind {
-            // The records must read as this build's records, or the import is kept as the file
-            // has it rather than failing the whole design when it is hydrated.
+            // The records must read as this build's records, all of them, or the import is kept as
+            // the file has it rather than failing the whole design when it is hydrated, or losing
+            // on save what this build does not read of them.
             FeatureKind::Import { .. } => reader.blob(value, "step_blob", "step").map(|_| ()).map_err(IoError::from).and_then(|()| {
                 if value.get("records_blob").is_none() {
                     return Ok(());
                 }
-                let text = reader.blob(value, "records_blob", "records")?;
-                serde_json::from_slice::<solidcraft_kernel::ImportRecords>(text).map(|_| ()).map_err(invalid)
+                records_read_whole(reader.blob(value, "records_blob", "records")?)
             }),
             FeatureKind::MeshImport { meshes, .. } => {
                 let mut check = meshes.clone();
@@ -2383,7 +2396,9 @@ mod tests {
     }
 
     /// A newer build's import whose records this build cannot read costs that feature, which is
-    /// kept as the file has it, not the whole design.
+    /// kept as the file has it, not the whole design; so do records this build reads but with a
+    /// field it does not have (at the top or within a body), which saving its reading would drop.
+    /// Records this build wrote read whole.
     #[test]
     fn a_newer_builds_records_this_build_cannot_read_cost_only_their_import() {
         use solidcore_record::Vec3;
@@ -2407,23 +2422,34 @@ mod tests {
         let kind =
             FeatureKind::Import { file: "block.FCStd".into(), step: "".into(), components: Vec::new(), skip: Vec::new(), records: Some(records) };
         doc.add_feature(kind, Some("Imported block")).unwrap();
-        let mut entries = parts(&write_design_container(&doc).unwrap());
+        let entries = parts(&write_design_container(&doc).unwrap());
         let mut metadata: Value = serde_json::from_slice(&entries["document.json"]).unwrap();
         metadata["format"] = json!(solidcraft_doc::format::format_string(solidcraft_doc::format::FORMAT + 1));
-        // The newer records: a shape this build's records do not have.
-        let newer = br#"{"bodies":{"a later shape":true}}"#.to_vec();
-        let blob = format!("blobs/{}.records", digest(&newer));
-        let import = metadata["features"].as_array_mut().unwrap().iter_mut().find(|f| f.get("records_blob").is_some()).unwrap();
+        let import = metadata["features"].as_array().unwrap().iter().find(|f| f.get("records_blob").is_some()).unwrap();
         let old = import["records_blob"].as_str().unwrap().to_string();
-        import["records_blob"] = json!(blob);
-        entries.remove(&old);
-        entries.insert(blob.clone(), newer.clone());
-        entries.insert("document.json".into(), serde_json::to_vec(&metadata).unwrap());
-        let opened = crate::read_design(&package(&entries)).unwrap();
-        let said = &opened.newer_file.as_ref().unwrap().not_understood;
-        assert!(said.iter().any(|what| what.contains("Imported block")), "{said:?}");
-        assert_eq!(opened.features.len(), doc.features.len());
-        assert_eq!(parts(&write_design_container(&opened).unwrap())[&blob], newer, "the records are kept as the file has them");
+        let ours: Value = serde_json::from_slice(&entries[&old]).unwrap();
+        assert!(records_read_whole(&entries[&old]).is_ok(), "this build's own records");
+        let mut top = ours.clone();
+        top["future_metadata"] = json!({"keep": true});
+        let mut within = ours.clone();
+        within["bodies"][0]["future_field"] = json!(1);
+        // The newer records: a shape this build's records do not have, and this build's with a
+        // field more.
+        for newer in [br#"{"bodies":{"a later shape":true}}"#.to_vec(), serde_json::to_vec(&top).unwrap(), serde_json::to_vec(&within).unwrap()] {
+            let mut entries = entries.clone();
+            let mut metadata = metadata.clone();
+            let blob = format!("blobs/{}.records", digest(&newer));
+            let import = metadata["features"].as_array_mut().unwrap().iter_mut().find(|f| f.get("records_blob").is_some()).unwrap();
+            import["records_blob"] = json!(blob);
+            entries.remove(&old);
+            entries.insert(blob.clone(), newer.clone());
+            entries.insert("document.json".into(), serde_json::to_vec(&metadata).unwrap());
+            let opened = crate::read_design(&package(&entries)).unwrap();
+            let said = &opened.newer_file.as_ref().unwrap().not_understood;
+            assert!(said.iter().any(|what| what.contains("Imported block")), "{said:?}");
+            assert_eq!(opened.features.len(), doc.features.len());
+            assert_eq!(parts(&write_design_container(&opened).unwrap())[&blob], newer, "the records are kept as the file has them");
+        }
     }
 
     /// Plugin data under `plugins/<plugin-id>/` opens and saves back byte for byte with no plugin
