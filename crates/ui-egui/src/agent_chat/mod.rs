@@ -2093,8 +2093,8 @@ pub fn answer_permission(app: &mut SolveApp, index: usize, option: Option<&str>)
 /// user is asked.
 fn on_permission(app: &mut SolveApp, key: u64, title: String, kind: Option<&str>, options: Vec<PermissionOption>) {
     let agent = app.agent_chat.running_id.clone();
-    let mode = agents::mode_for(&app.preferences, &agent);
-    let remembered = agents::always_allowed(&app.preferences, &agent, &title);
+    let mode = agents::mode_in_force(app, &agent);
+    let remembered = agents::always_allowed_in_force(app, &agent, &title);
     let why = if acp::is_bridge_tool(&title, kind) {
         Some("ui.ai_auto_ours")
     } else if remembered {
@@ -2238,6 +2238,8 @@ fn pump_tools(app: &mut SolveApp) {
     let Some(rx) = app.agent_chat.tools_rx.take() else { return };
     let configured = app.preferences.agent_chat_turn_limit;
     let limit = if configured == 0 { u32::MAX } else { configured.clamp(1, 1000) };
+    // The organization's permissions, when its policy sets them (see `agents::mode_in_force`).
+    let policy_mode = app.policy.locks("ai_permissions").then_some(app.preferences.ai_permissions);
     for mut req in rx.try_iter().take(64) {
         let refuse = |req: ControlRequest, e: String| {
             let _ = req.reply.send(json!({"ok": false, "error": e}));
@@ -2261,9 +2263,9 @@ fn pump_tools(app: &mut SolveApp) {
         }
         let undo_left = undo_len.saturating_sub(turn.start_undo);
         // The permission mode (the agent's own, else the global one) and "always allow" answers.
-        let mode = agents::mode_for(&app.preferences, &app.agent_chat.running_id);
+        let mode = policy_mode.unwrap_or_else(|| agents::mode_for(&app.preferences, &app.agent_chat.running_id));
         let tool = gate::tool_key(&req.method, &req.params);
-        let always = agents::always_allowed(&app.preferences, &app.agent_chat.running_id, &tool);
+        let always = policy_mode.is_none() && agents::always_allowed(&app.preferences, &app.agent_chat.running_id, &tool);
         let plugin_run = req
             .params
             .get("command")

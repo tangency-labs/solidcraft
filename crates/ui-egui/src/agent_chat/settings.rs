@@ -500,15 +500,18 @@ pub fn page(app: &mut SolveApp, ui: &mut egui::Ui) {
     ui_kit::settings_page(ui, |ui| {
         ui_kit::settings_heading(ui, tr("prefs.assistant"), tr("ai.prefs.intro"));
         ui_kit::settings_section(ui, "assistant_availability", tr("ai.prefs.availability"), |ui| {
+            let locked = app.policy.locks("ai_features");
             ui.horizontal(|ui| {
-                let response = ui_kit::checkbox(ui, tr("ui.ai_show_features"), &mut app.preferences.ai_features)
+                let response = crate::policy::row(ui, locked, |ui| ui_kit::checkbox(ui, tr("ui.ai_show_features"), &mut app.preferences.ai_features))
                     .backing_on_hover_text(tr("ui.ai_show_features_note"));
                 solidcraft_ui_registry::publish_handle("prefs:ai_features", response.rect.center());
                 ui_kit::help_icon(ui, tr("ui.ai_show_features_note"));
             });
+            let locked = app.policy.locks("ai_toolbar_button");
             ui.add_enabled_ui(app.preferences.ai_features && !cfg!(target_arch = "wasm32"), |ui| {
-                let response = ui_kit::checkbox(ui, tr("ui.ai_toolbar_button"), &mut app.preferences.ai_toolbar_button)
-                    .backing_on_hover_text(tr("ui.ai_toolbar_button_note"));
+                let response =
+                    crate::policy::row(ui, locked, |ui| ui_kit::checkbox(ui, tr("ui.ai_toolbar_button"), &mut app.preferences.ai_toolbar_button))
+                        .backing_on_hover_text(tr("ui.ai_toolbar_button_note"));
                 solidcraft_ui_registry::publish_handle("prefs:ai_toolbar_button", response.rect.center());
             });
             if cfg!(target_arch = "wasm32") {
@@ -537,6 +540,7 @@ pub fn page(app: &mut SolveApp, ui: &mut egui::Ui) {
 
 fn connecting_section(app: &mut SolveApp, ui: &mut egui::Ui) {
     ui_kit::settings_section(ui, "assistant_connecting", tr("prefs.assistant_connecting"), |ui| {
+        let connect_locked = app.policy.locks("connect_ai_apps");
         for (label, help, handle, value) in [
             ("ai.prefs.connect_apps", "ai.prefs.connect_apps_note", "connect_ai_apps", &mut app.preferences.connect_ai_apps),
             ("ai.prefs.background_commands", "ui.agent_off_thread_note", "agent_off_thread", &mut app.preferences.agent_off_thread),
@@ -544,7 +548,8 @@ fn connecting_section(app: &mut SolveApp, ui: &mut egui::Ui) {
             ("ai.prefs.open_at_start", "ai.prefs.open_at_start_note", "agent_chat_open_at_start", &mut app.preferences.agent_chat_open_at_start),
         ] {
             ui.horizontal(|ui| {
-                let response = ui_kit::checkbox(ui, tr(label), value).backing_on_hover_text(tr(help));
+                let locked = connect_locked && handle == "connect_ai_apps";
+                let response = crate::policy::row(ui, locked, |ui| ui_kit::checkbox(ui, tr(label), value)).backing_on_hover_text(tr(help));
                 solidcraft_ui_registry::publish_handle(&format!("prefs:{handle}"), response.rect.center());
                 ui_kit::help_icon(ui, tr(help));
             });
@@ -597,10 +602,15 @@ fn permissions_section(app: &mut SolveApp, ui: &mut egui::Ui) {
                 detail: &all_help,
             },
         ];
-        if ui_kit::settings_choices(ui, &choices, &mut selected)
+        let locked = app.policy.locks("ai_permissions");
+        if crate::policy::row(ui, locked, |ui| ui_kit::settings_choices(ui, &choices, &mut selected))
             && let Some(mode) = Mode::ALL.get(selected)
         {
             app.preferences.ai_permissions = *mode;
+        }
+        if locked {
+            // An agent's own mode and the "always allow" answers don't apply (they are kept).
+            ui_kit::text(ui, tr("policy.ai_permissions_hold"), ui_kit::Text::Hint("permissions_policy"));
         }
         if app.preferences.ai_permissions == Mode::All {
             ui_kit::text(ui, tr("ui.ai_mode_all_warning"), ui_kit::Text::Report("permissions_warning", true));
@@ -652,40 +662,43 @@ fn panel_section(app: &mut SolveApp, ui: &mut egui::Ui) {
                     .backing_on_hover_text(tr("ui.agent_thinking_folded_note"));
                 solidcraft_ui_registry::publish_handle("prefs:agent_thinking_folded", response.rect.center());
             });
+            let locked = app.policy.locks("agent_chat_turn_limit");
             ui_kit::row(ui, tr("ui.agent_chat_turn_limit"), |ui| {
-                let p = &mut app.preferences;
-                let previous = usize::from(p.agent_chat_turn_limit != 0);
-                let mut limit = previous;
-                let options = [tr("ui.agent_chat_turn_unlimited"), tr("prefs.assistant_limited")];
-                crate::ui_kit::settings_search::note_current(ui, &options.join(" "));
-                let dropdown_width = ui_kit::ContentWidth::dropdown(ui, &options);
-                let response =
-                    ui_kit::settings_control_width(ui, dropdown_width, |ui| ui_kit::dropdown(ui, "assistant_turn_limit", &mut limit, &options));
-                let query = crate::ui_kit::settings_search::query(ui);
-                if let Some(option) = options
-                    .iter()
-                    .find(|option| option.to_lowercase() == query)
-                    .or_else(|| options.iter().find(|option| crate::ui_kit::settings_search::texts_hit(ui, &[*option])))
-                {
-                    crate::ui_kit::settings_search::remember(ui, option, response.rect);
-                }
-                for option in options {
-                    crate::ui_kit::settings_search::follow(ui, option, response.rect);
-                }
-                solidcraft_ui_registry::publish_target("prefs:agent_chat_turn_limit:mode", response.rect);
-                if limit != previous {
-                    p.agent_chat_turn_limit = if limit == 0 { 0 } else { gate::SEEDED_TURN_LIMIT };
-                }
-                if limit != 0 {
+                crate::policy::row(ui, locked, |ui| {
+                    let p = &mut app.preferences;
+                    let previous = usize::from(p.agent_chat_turn_limit != 0);
+                    let mut limit = previous;
+                    let options = [tr("ui.agent_chat_turn_unlimited"), tr("prefs.assistant_limited")];
+                    crate::ui_kit::settings_search::note_current(ui, &options.join(" "));
+                    let dropdown_width = ui_kit::ContentWidth::dropdown(ui, &options);
                     let response =
-                        ui_kit::settings_number(ui, &mut p.agent_chat_turn_limit, 1..=200, 1.0).backing_on_hover_text(tr("ai.prefs.turn_limit_hint"));
-                    response.widget_info(|| {
-                        let mut info = egui::WidgetInfo::drag_value(ui.is_enabled(), f64::from(p.agent_chat_turn_limit));
-                        info.label = Some(tr("prefs.assistant_limit").to_owned());
-                        info
-                    });
-                    solidcraft_ui_registry::publish_target("prefs:agent_chat_turn_limit:value", response.rect);
-                }
+                        ui_kit::settings_control_width(ui, dropdown_width, |ui| ui_kit::dropdown(ui, "assistant_turn_limit", &mut limit, &options));
+                    let query = crate::ui_kit::settings_search::query(ui);
+                    if let Some(option) = options
+                        .iter()
+                        .find(|option| option.to_lowercase() == query)
+                        .or_else(|| options.iter().find(|option| crate::ui_kit::settings_search::texts_hit(ui, &[*option])))
+                    {
+                        crate::ui_kit::settings_search::remember(ui, option, response.rect);
+                    }
+                    for option in options {
+                        crate::ui_kit::settings_search::follow(ui, option, response.rect);
+                    }
+                    solidcraft_ui_registry::publish_target("prefs:agent_chat_turn_limit:mode", response.rect);
+                    if limit != previous {
+                        p.agent_chat_turn_limit = if limit == 0 { 0 } else { gate::SEEDED_TURN_LIMIT };
+                    }
+                    if limit != 0 {
+                        let response = ui_kit::settings_number(ui, &mut p.agent_chat_turn_limit, 1..=200, 1.0)
+                            .backing_on_hover_text(tr("ai.prefs.turn_limit_hint"));
+                        response.widget_info(|| {
+                            let mut info = egui::WidgetInfo::drag_value(ui.is_enabled(), f64::from(p.agent_chat_turn_limit));
+                            info.label = Some(tr("prefs.assistant_limit").to_owned());
+                            info
+                        });
+                        solidcraft_ui_registry::publish_target("prefs:agent_chat_turn_limit:value", response.rect);
+                    }
+                })
             });
         });
         ui_kit::text(ui, tr("ai.prefs.privacy_note"), ui_kit::Text::Hint("privacy_note"));
@@ -762,7 +775,8 @@ fn control_channel(app: &mut SolveApp, ui: &mut egui::Ui) {
     use crate::control_switch::{MIN_PORT, StartError, Status};
     let status = app.control_switch.status();
     ui.with_layout(egui::Layout::left_to_right(egui::Align::Min).with_main_wrap(true), |ui| {
-        let response = ui_kit::checkbox(ui, tr("ai.prefs.allow_control"), &mut app.preferences.agent_control)
+        let locked = app.policy.locks("agent_control");
+        let response = crate::policy::row(ui, locked, |ui| ui_kit::checkbox(ui, tr("ai.prefs.allow_control"), &mut app.preferences.agent_control))
             .backing_on_hover_text(tr("ai.prefs.allow_control_note"));
         crate::scenario::publish_handle("prefs:agent_control", response.rect.center());
         ui_kit::help_icon(ui, tr("ai.prefs.allow_control_note"));
@@ -896,44 +910,47 @@ fn agents_section(app: &mut SolveApp, ui: &mut egui::Ui) {
                                 .map(|label| ui_kit::ContentWidth::label(ui, label) + t.space_4)
                                 .fold(0.0, f32::max);
                             ui_kit::settings_form(ui, label_w, |ui| {
+                                let locked = app.policy.locks("ai_permissions");
                                 ui_kit::row(ui, tr("ui.ai_permissions"), |ui| {
-                                    let current = app.preferences.agent_permissions.get(&entry.id).copied();
-                                    let shown = current.map_or_else(|| tr("ui.ai_mode_global").to_owned(), |mode| mode.label().to_owned());
-                                    let mut pick: Option<Option<Mode>> = None;
-                                    let options: Vec<_> = std::iter::once(tr("ui.ai_mode_global")).chain(Mode::ALL.map(Mode::label)).collect();
-                                    crate::ui_kit::settings_search::note_current(ui, &options.join(" "));
-                                    let response = ui_kit::settings_control_width(ui, t.space_24 * 9.0 + t.space_4, |ui| {
-                                        ui_kit::dropdown_menu(ui, ("sc_ai_mode", &entry.id), &shown, |ui| {
-                                            if ui_kit::list_picker(ui, "global", tr("ui.ai_mode_global"), current.is_none()).clicked() {
-                                                pick = Some(None);
-                                            }
-                                            for mode in Mode::ALL {
-                                                if ui_kit::list_picker(ui, mode.id(), mode.label(), current == Some(mode)).clicked() {
-                                                    pick = Some(Some(mode));
+                                    crate::policy::row(ui, locked, |ui| {
+                                        let current = app.preferences.agent_permissions.get(&entry.id).copied();
+                                        let shown = current.map_or_else(|| tr("ui.ai_mode_global").to_owned(), |mode| mode.label().to_owned());
+                                        let mut pick: Option<Option<Mode>> = None;
+                                        let options: Vec<_> = std::iter::once(tr("ui.ai_mode_global")).chain(Mode::ALL.map(Mode::label)).collect();
+                                        crate::ui_kit::settings_search::note_current(ui, &options.join(" "));
+                                        let response = ui_kit::settings_control_width(ui, t.space_24 * 9.0 + t.space_4, |ui| {
+                                            ui_kit::dropdown_menu(ui, ("sc_ai_mode", &entry.id), &shown, |ui| {
+                                                if ui_kit::list_picker(ui, "global", tr("ui.ai_mode_global"), current.is_none()).clicked() {
+                                                    pick = Some(None);
                                                 }
+                                                for mode in Mode::ALL {
+                                                    if ui_kit::list_picker(ui, mode.id(), mode.label(), current == Some(mode)).clicked() {
+                                                        pick = Some(Some(mode));
+                                                    }
+                                                }
+                                            })
+                                        });
+                                        let query = crate::ui_kit::settings_search::query(ui);
+                                        if let Some(option) = options
+                                            .iter()
+                                            .find(|option| option.to_lowercase() == query)
+                                            .or_else(|| options.iter().find(|option| crate::ui_kit::settings_search::texts_hit(ui, &[*option])))
+                                        {
+                                            crate::ui_kit::settings_search::remember(ui, option, response.rect);
+                                        }
+                                        for option in options {
+                                            crate::ui_kit::settings_search::follow(ui, option, response.rect);
+                                        }
+                                        match pick {
+                                            Some(Some(mode)) => {
+                                                app.preferences.agent_permissions.insert(entry.id.clone(), mode);
                                             }
-                                        })
-                                    });
-                                    let query = crate::ui_kit::settings_search::query(ui);
-                                    if let Some(option) = options
-                                        .iter()
-                                        .find(|option| option.to_lowercase() == query)
-                                        .or_else(|| options.iter().find(|option| crate::ui_kit::settings_search::texts_hit(ui, &[*option])))
-                                    {
-                                        crate::ui_kit::settings_search::remember(ui, option, response.rect);
-                                    }
-                                    for option in options {
-                                        crate::ui_kit::settings_search::follow(ui, option, response.rect);
-                                    }
-                                    match pick {
-                                        Some(Some(mode)) => {
-                                            app.preferences.agent_permissions.insert(entry.id.clone(), mode);
+                                            Some(None) => {
+                                                app.preferences.agent_permissions.remove(&entry.id);
+                                            }
+                                            None => {}
                                         }
-                                        Some(None) => {
-                                            app.preferences.agent_permissions.remove(&entry.id);
-                                        }
-                                        None => {}
-                                    }
+                                    })
                                 });
                             });
                             if entry.kind == Kind::Api
