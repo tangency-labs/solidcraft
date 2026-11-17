@@ -1096,10 +1096,16 @@ impl Surface {
     /// Newton solve starts at the chosen guess. An answer has converged only where it is
     /// a local maximum of the alignment on the closed interval (an end where the
     /// alignment grows outward, unless the direction is closed across the seam and the
-    /// alignment does not also grow toward it at the other end, a stationary point whose curvature is not positive, or
-    /// a knot where the slope changes from `+` to `-`); of the maxima found the most
-    /// aligned is kept when the first is less aligned than the best sample; otherwise
-    /// the best sample is returned, unconverged. Upstream has no input guess,
+    /// alignment does not also grow toward it at the other end, a stationary point whose
+    /// curvature is not positive, or a knot where the slope changes from `+` to `-`).
+    /// The answer is the most aligned of the maxima the solve reaches from the chosen
+    /// guess and from the best sample and of the interval's ends (the first on a tie
+    /// within rounding); when that is less aligned than the best sample the solve also
+    /// starts at every sample and at upstream's ten starts, and then on each bracket
+    /// between neighbouring ends, starts, samples and knots whose one-sided slopes are
+    /// `+` then `-` (a peak narrower than the starts' spacing). A maximum less aligned than
+    /// the best sample is not the largest: then the most aligned of it, the best sample
+    /// and upstream's return is returned, unconverged. Upstream has no input guess,
     /// compares the `[0, 1]` sample fractions with the input parameter, starts at (and
     /// returns unconverged) the fraction mapped onto the whole interval and accepts any
     /// answer the solve reports found (WR-57).
@@ -1119,6 +1125,33 @@ impl Surface {
         singular_dir: SurfParamType,
         tol: f64,
     ) -> Result<DegenParam> {
+        Ok(self
+            .degen_param_search(k, uv, dir, dir_from_pole, singular_dir, tol, false)?
+            .0)
+    }
+
+    /// [`Surface::find_degen_param_for_direction`], and with `with_roots` also the
+    /// singular parameters where its Newton solve reports found from each of upstream's
+    /// ten starts (the `[0, 1]` sample fractions mapped onto the whole interval), in
+    /// start order: every answer upstream's search can give converged is among them
+    /// (WR-57). [`Surface::invert_point_near_singularity`] drops onto the iso curve at
+    /// each.
+    ///
+    /// # Errors
+    ///
+    /// Those of [`Surface::find_degen_param_for_direction`]; [`SolidError::Unported`]
+    /// from the extra solves (their failing statuses only drop that start).
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn degen_param_search(
+        &self,
+        k: &Kernel,
+        uv: Point2,
+        dir: Vec3,
+        dir_from_pole: bool,
+        singular_dir: SurfParamType,
+        tol: f64,
+        with_roots: bool,
+    ) -> Result<(DegenParam, Vec<f64>)> {
         // copy and unitize direction to match
         let mut s_dir = dir.unitize()?;
 
@@ -1377,63 +1410,163 @@ impl Surface {
         // domain boundary, possibly a collapsed corner)
         let first =
             singular_param_solve(k, self, uv, s_dir, singular_dir, &s_ivl, near_best_s, tol);
-        let (stat_ok, mut answer) = match ignored(first)? {
+        let (stat_ok, first_max) = match ignored(first)? {
             Some((_, t)) => (true, local_max(t)?),
             None => (false, None),
         };
         let best_s = sample_domain.evaluate(best_param);
-        // WR-57: a maximum less aligned than the best sample is not the largest one
-        // (the sample's alignment exceeds it); then the solve also starts at the best
-        // sample, the end is tried where the best sample is an end sample, and the
-        // most aligned maximum found is kept (the first on a tie). The comparison
-        // with the best sample allows for rounding only (`SM_EFF_ZERO`), so on a
-        // plateau the answer from the input stays.
-        let settled = match answer {
+        // WR-57: the answer is the most aligned of the maxima the solve reaches from
+        // the near best guess and from the best sample, and of the interval's ends
+        // where they are maxima (an end's alignment growing outward), the first on a
+        // tie within rounding (`SM_EFF_ZERO`), so on a plateau the answer from the
+        // input stays. Of nearly equal guesses upstream keeps the one nearest the
+        // input (`f_tol`), but two maxima are not two guesses: a maximum less aligned
+        // than another is not the largest. Where none is found the solve also starts
+        // at each of upstream's ten starts and at each sample.
+        let first_settled = match first_max {
             Some(t) => alignment_at(t)?.is_some_and(|a| a >= best_f - scaled_zero()),
             None => false,
         };
-        if !settled {
-            let mut candidates: Vec<f64> = answer.into_iter().collect();
-            // (status ignored upstream; passed on as the fork does)
-            let (_, t) =
-                singular_param_solve(k, self, uv, s_dir, singular_dir, &s_ivl, best_s, tol)?;
+        let mut candidates: Vec<f64> = first_max.into_iter().collect();
+        let second = singular_param_solve(k, self, uv, s_dir, singular_dir, &s_ivl, best_s, tol);
+        // (status ignored upstream; passed on as the fork does where upstream runs this
+        // solve, the first not settled)
+        let second = if first_settled {
+            ignored(second)?
+        } else {
+            Some(second?)
+        };
+        if let Some((_, t)) = second {
             candidates.extend(local_max(t)?);
-            // the best sample is an end sample: the end itself, where it is a maximum
-            // (its tangent defined and the alignment growing outward)
-            if best_param == 0.0 || best_param == 1.0 {
-                let end = if best_param == 0.0 {
-                    s_ivl.min()
-                } else {
-                    s_ivl.max()
-                };
-                candidates.extend(local_max(end)?);
-            }
-            answer = None;
-            let mut answer_a = f64::NEG_INFINITY;
-            for c in candidates {
+        }
+        for end in [s_ivl.min(), s_ivl.max()] {
+            candidates.extend(local_max(end)?);
+        }
+        // the most aligned candidate, the first on a tie within rounding
+        let most_aligned = |cands: &[f64]| -> Result<Option<(f64, f64)>> {
+            let mut best: Option<(f64, f64)> = None;
+            for &c in cands {
                 if let Some(a) = alignment_at(c)? {
-                    if a > answer_a {
-                        answer_a = a;
-                        answer = Some(c);
+                    if best.is_none_or(|(_, ba)| a > ba + scaled_zero()) {
+                        best = Some((c, a));
                     }
                 }
             }
+            Ok(best)
+        };
+        // a maximum less aligned than the best sample is not the largest
+        let below_best_sample =
+            |best: Option<(f64, f64)>| best.is_none_or(|(_, a)| a < best_f - scaled_zero());
+        let full_start = |ii: usize| s_ivl.evaluate(ii as f64 / (num_guesses - 1) as f64);
+        let mut best = most_aligned(&candidates)?;
+        if below_best_sample(best) && stat_ok {
+            for ii in 0..num_guesses {
+                let starts = [
+                    full_start(ii),
+                    sample_domain.evaluate(ii as f64 / (num_guesses - 1) as f64),
+                ];
+                for start in starts {
+                    let r =
+                        singular_param_solve(k, self, uv, s_dir, singular_dir, &s_ivl, start, tol);
+                    if let Some((_, t)) = ignored(r)? {
+                        candidates.extend(local_max(t)?);
+                    }
+                }
+            }
+            // a peak narrower than the starts' spacing: between neighbouring
+            // parameters of the ends, starts, samples and knots, where the slope from
+            // the right of the lower is `+` and from the left of the upper `-`, a
+            // maximum lies between (`A'` is continuous inside a knot span); the solve
+            // runs on that bracket from its middle
+            let mut points: Vec<f64> = vec![s_ivl.min(), s_ivl.max()];
+            for ii in 0..num_guesses {
+                points.push(full_start(ii));
+                points.push(sample_domain.evaluate(ii as f64 / (num_guesses - 1) as f64));
+            }
+            points.extend(knots.iter().copied());
+            points.retain(|x| x.is_finite());
+            points.sort_by(f64::total_cmp);
+            points.dedup();
+            for pair in points.windows(2) {
+                let [a, b] = [pair.first().copied(), pair.get(1).copied()];
+                let (Some(a), Some(b)) = (a, b) else {
+                    continue;
+                };
+                let rises = side_slope(a, Side::Left)?.is_some_and(|f| f > 0.0);
+                if !rises || !side_slope(b, Side::Right)?.is_some_and(|f| f < 0.0) {
+                    continue;
+                }
+                let mut bracket = Extent1d::new();
+                if ignored(bracket.set_min_max(a, b))?.is_none() {
+                    continue;
+                }
+                let r = singular_param_solve(
+                    k,
+                    self,
+                    uv,
+                    s_dir,
+                    singular_dir,
+                    &bracket,
+                    bracket.mid(),
+                    tol,
+                );
+                if let Some((_, t)) = ignored(r)? {
+                    candidates.extend(local_max(t)?);
+                }
+            }
+            best = most_aligned(&candidates)?;
         }
+        let answer = if below_best_sample(best) {
+            None
+        } else {
+            best.map(|(t, _)| t)
+        };
 
-        // Leave our best value in the return arg (WR-57: the best sample itself when
-        // no maximum was found)
+        // Leave our best value in the return arg (WR-57: where no maximum at least as
+        // aligned as the best sample was found, the most aligned of the best maximum
+        // found, the best sample and upstream's return, the best sample's fraction
+        // mapped onto the whole interval)
         let found = answer.is_some();
-        let value = answer.unwrap_or(best_s);
+        let value = if let Some(t) = answer {
+            t
+        } else {
+            let mut fallback: Vec<f64> = vec![best_s, s_ivl.evaluate(best_param)];
+            fallback.extend(best.map(|(t, _)| t));
+            most_aligned(&fallback)?.map_or(best_s, |(t, _)| t)
+        };
         let mut out = uv;
         if singular_u {
             out.x = value;
         } else {
             out.y = value;
         }
-        Ok(DegenParam {
-            uv: out,
-            converged: stat_ok && found,
-        })
+
+        // the roots from upstream's starts, for the inversion
+        let mut roots = Vec::new();
+        if with_roots {
+            for ii in 0..num_guesses {
+                let r = singular_param_solve(
+                    k,
+                    self,
+                    uv,
+                    s_dir,
+                    singular_dir,
+                    &s_ivl,
+                    full_start(ii),
+                    tol,
+                );
+                if let Some((true, t)) = ignored(r)? {
+                    roots.push(t);
+                }
+            }
+        }
+        Ok((
+            DegenParam {
+                uv: out,
+                converged: stat_ok && found,
+            },
+            roots,
+        ))
     }
 
     /// The extrema of the distance from `test_point` to the surface over `uv_domain`

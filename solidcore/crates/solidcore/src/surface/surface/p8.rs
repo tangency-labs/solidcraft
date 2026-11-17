@@ -3194,8 +3194,8 @@ impl Surface {
         }
 
         let sing_dir;
-        let mut degen_param; // the one that doesn't move the point
-        let mut good_param; // the one leaving the singularity
+        let degen_param; // the one that doesn't move the point
+        let good_param; // the one leaving the singularity
         let good_domain;
         let mut sing_uv = Point2::UNDEF;
 
@@ -3251,53 +3251,82 @@ impl Surface {
         // test point.
         let pole_pt = self.evaluate_point(k, sing_uv)?;
         let diff_vec = test_pt - pole_pt; // we know this isn't zero.
-        let degen =
-            self.find_degen_param_for_direction(k, sing_uv, diff_vec, true, sing_dir, tol)?;
-        if !degen.converged {
+        let (degen, roots) =
+            self.degen_param_search(k, sing_uv, diff_vec, true, sing_dir, tol, true)?;
+        // (not upstream) The degenerate parameters to drop onto: the search's answer,
+        // then every parameter where upstream's search solve reports found from one of
+        // its starts. The iso curve through the closest point is the most aligned one
+        // only where the boundary is a collapsed pole; where it is not collapsed, or the
+        // alignment is flat along it, a less aligned iso curve can pass nearer the test
+        // point (goldens `surface_p8` gen1651, gen1460). The nearest drop is kept, the
+        // search's answer unless another is proven nearer; upstream drops onto the
+        // search's answer only.
+        let mut degen_params: Vec<f64> = Vec::new();
+        if degen.converged {
+            degen_params.push(if sing_dir == SurfParamType::U {
+                degen.uv.x
+            } else {
+                degen.uv.y
+            });
+        }
+        for r in roots {
+            if !degen_params.contains(&r) {
+                degen_params.push(r);
+            }
+        }
+        if degen_params.is_empty() {
             // Probably out of bounds (SM_TR_OUT_OF_BOUNDS / SM_TR_UNABLE_TO_CONVERGE).
             return Err(SolidError::surface_failed(
                 OP_INVERT,
                 "the degenerate parameter toward the point did not converge",
             ));
         }
-        sing_uv = degen.uv;
 
-        // Now find the non-degenerate param: drop to iso-curve.
-        degen_param = if sing_dir == SurfParamType::U {
-            sing_uv.x
-        } else {
-            sing_uv.y
-        };
-        // (CreateIsoParametricCurve with the tolerance dTol, status checked)
-        let mut iso_curve = self
-            .create_iso_parametric_curve(k, sing_dir, degen_param, tol, None, false)?
-            .curve;
-        enable_out_of_bounds(&mut iso_curve);
-
-        // Get a guess param. First re-evaluate at the param that's going in the right
-        // direction.
-        let (_, su, sv) = self.evaluate_1st_derivatives(k, sing_uv, false, false)?;
-        let good_deriv = if sing_dir == SurfParamType::U { sv } else { su };
-        let mut guess_t = diff_vec.dot(good_deriv) / good_deriv.dot(good_deriv);
-        guess_t = good_domain.clamp_value(guess_t);
-
-        // same-point tol for close solutions
-        let dropped = iso_curve.drop_point(
-            k,
-            &good_domain,
-            test_pt,
-            None,
-            tol,
-            Some(guess_t),
-            SolverOperation::Minimize,
-        )?;
-        // DropPoint always writes rdDroppedParameter (initialised to 0.0), used as is
-        good_param = dropped.parameter;
-
-        let uv = if sing_dir == SurfParamType::U {
-            Point2::new(degen_param, good_param)
-        } else {
-            Point2::new(good_param, degen_param)
+        let mut nearest: Option<(certified::Bounded, Point2, Point3)> = None;
+        let mut first_err = None;
+        for param in degen_params {
+            sing_uv = if sing_dir == SurfParamType::U {
+                Point2::new(param, sing_uv.y)
+            } else {
+                Point2::new(sing_uv.x, param)
+            };
+            // (a failing drop drops that parameter; with none left, the first failure
+            // is returned, as upstream returns its one drop's)
+            let dropped =
+                self.drop_to_degen_iso(k, sing_uv, sing_dir, diff_vec, &good_domain, test_pt, tol);
+            let (uv, found_pt) = match dropped {
+                Ok(v) => v,
+                Err(e)
+                    if e.is_unported_or_cancelled()
+                        || matches!(e, SolidError::PreparationRequired { .. }) =>
+                {
+                    return Err(e)
+                }
+                Err(e) => {
+                    first_err.get_or_insert(e);
+                    continue;
+                }
+            };
+            // (a later drop replaces the kept one only where it is proven nearer: the
+            // upper end of its certified distance below the lower end of the kept
+            // one's, so drops equally near within the distances' rounding keep the
+            // search's answer; a distance that is not a number ranks last)
+            let d = certified::distance(found_pt, test_pt);
+            let replaces = match nearest {
+                None => true,
+                Some((nd, _, _)) if !nd.value.is_finite() => d.value.is_finite(),
+                Some((nd, _, _)) => d
+                    .at_most(certified::next_down(nd.value - nd.bound))
+                    .is_yes(),
+            };
+            if replaces {
+                nearest = Some((d, uv, found_pt));
+            }
+        }
+        let Some((_, uv, found_pt)) = nearest else {
+            return Err(first_err.unwrap_or_else(|| {
+                SolidError::surface_failed(OP_INVERT, "no iso curve drop succeeded")
+            }));
         };
 
         // (not upstream) The answer is the closest point only if it is not farther from
@@ -3309,7 +3338,6 @@ impl Surface {
         // boundary at `sSingUV` is a pole; where it is not collapsed, the iso curve at the
         // degenerate parameter can lie far from the test point (goldens `surface_p8`
         // gen1191: 35505.9 away, the guess 1395.2), and upstream reports it found.
-        let found_pt = self.evaluate_point(k, uv)?;
         let d_guess = certified::distance(srf_pt, test_pt);
         let allowance = 16.0
             * f64::EPSILON
@@ -3332,6 +3360,65 @@ impl Surface {
             ));
         }
         Ok(SingularityInversion { uv, reason })
+    }
+
+    /// The drop of `InvertPointNearSingularity` onto the iso curve at the degenerate
+    /// parameter of `sing_uv` (singular in `sing_dir`): the parameters of the dropped
+    /// point and the point. `diff_vec` is the test point's offset from the pole, which
+    /// with the surviving derivative at `sing_uv` gives the drop's guess.
+    ///
+    /// # Errors
+    ///
+    /// Those of iso curve creation, the evaluations and the curve drop.
+    #[allow(clippy::too_many_arguments)]
+    fn drop_to_degen_iso(
+        &self,
+        k: &Kernel,
+        sing_uv: Point2,
+        sing_dir: SurfParamType,
+        diff_vec: Vec3,
+        good_domain: &Extent1d,
+        test_pt: Point3,
+        tol: f64,
+    ) -> Result<(Point2, Point3)> {
+        // Now find the non-degenerate param: drop to iso-curve.
+        let degen_param = if sing_dir == SurfParamType::U {
+            sing_uv.x
+        } else {
+            sing_uv.y
+        };
+        // (CreateIsoParametricCurve with the tolerance dTol, status checked)
+        let mut iso_curve = self
+            .create_iso_parametric_curve(k, sing_dir, degen_param, tol, None, false)?
+            .curve;
+        enable_out_of_bounds(&mut iso_curve);
+
+        // Get a guess param. First re-evaluate at the param that's going in the right
+        // direction.
+        let (_, su, sv) = self.evaluate_1st_derivatives(k, sing_uv, false, false)?;
+        let good_deriv = if sing_dir == SurfParamType::U { sv } else { su };
+        let mut guess_t = diff_vec.dot(good_deriv) / good_deriv.dot(good_deriv);
+        guess_t = good_domain.clamp_value(guess_t);
+
+        // same-point tol for close solutions
+        let dropped = iso_curve.drop_point(
+            k,
+            good_domain,
+            test_pt,
+            None,
+            tol,
+            Some(guess_t),
+            SolverOperation::Minimize,
+        )?;
+        // DropPoint always writes rdDroppedParameter (initialised to 0.0), used as is
+        let good_param = dropped.parameter;
+
+        let uv = if sing_dir == SurfParamType::U {
+            Point2::new(degen_param, good_param)
+        } else {
+            Point2::new(good_param, degen_param)
+        };
+        Ok((uv, self.evaluate_point(k, uv)?))
     }
 }
 

@@ -1853,6 +1853,46 @@ mod tests {
         println!("{}", serde_json::to_string(&v).unwrap());
     }
 
+    /// The `FindDegenParamForDirection` row of the generated case `name`.
+    fn degen_row(name: &str) -> Vec<f64> {
+        let case = crate::case::regression_case(&Runner, name);
+        let i: Inputs = case.parse().expect("inputs");
+        assert!(matches!(i.op, OpIn::Degen { .. }), "{name}: not a degen case");
+        let Ok(row) = rust_run(&Kernel::default(), &i) else {
+            panic!("{name}: rust");
+        };
+        row
+    }
+
+    /// WR-57 (#17856): the answer is the most aligned of the maxima found. `gen0415`'s
+    /// alignment has a maximum at each end of its interval: 0.1461 at the input's end
+    /// -1.9672, 0.1611 at -0.3636 (main does not converge, 1001, and returns the
+    /// latter). Within upstream's `f_tol` of each other, but two maxima are not two
+    /// guesses: the larger is kept. Fails with the near-best guess's maximum kept.
+    #[test]
+    fn wr57_degen_keeps_the_most_aligned_maximum() {
+        let row = degen_row("gen0415");
+        assert_eq!(row[0], 0.0, "{row:?}");
+        assert!((row[1] - -0.363_579_904_284_928_37).abs() < 1e-9, "{row:?}");
+    }
+
+    /// WR-57 (#17856): a peak narrower than the starts' spacing is found by bracketing.
+    /// `gen0971`'s alignment peaks at 0.8447 at s = -1.4389 (`A''` about -563), which
+    /// no start's solve reaches; main reports the end -1.9062 (0.5634, not a maximum)
+    /// found. `gen1849`'s maximum 0.6845 at 0.3477 is likewise found where main returns
+    /// the sample 0.4767 (0.6595) unconverged. The pass solves on each neighbouring
+    /// pair of starts, samples and knots whose one-sided slopes are `+` then `-`.
+    /// Fails without the bracket pass.
+    #[test]
+    fn wr57_degen_finds_a_narrow_peak_by_bracketing() {
+        let row = degen_row("gen0971");
+        assert_eq!(row[0], 0.0, "{row:?}");
+        assert!((row[2] - -1.438_899_161_364).abs() < 1e-6, "{row:?}");
+        let row = degen_row("gen1849");
+        assert_eq!(row[0], 0.0, "{row:?}");
+        assert!((row[1] - 0.347_690_232_833).abs() < 1e-6, "{row:?}");
+    }
+
     /// Generated cases cover every op, most of the comparable ones not deferred.
     #[test]
     fn generated_cases_are_diverse() {

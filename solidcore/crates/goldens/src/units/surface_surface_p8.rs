@@ -906,12 +906,13 @@ mod tests {
     /// guess is at u = 0.996, and the boundary u = 1 runs from 4.003 to 36085 away from
     /// the test point). The degenerate-parameter search converges there at the end
     /// v = -0.652, the maximum of its alignment, and the iso-curve drop at that `v` lands
-    /// 35505.9 from the test point, against 1395.2 at the guess. An answer proven farther
-    /// than the guess is not the closest point: the inversion refuses it (1001, main's
-    /// status) where it reported success. Fails with the farther-than-the-guess refusal
-    /// removed.
+    /// 35505.9 from the test point, against 1395.2 at the guess; main refuses (1001).
+    /// The drops at the parameters upstream's starts reach are candidates too, and the
+    /// nearest is kept: the one at v = 0.4624 lands 1163.2 away, proven nearer than the
+    /// guess (certified enclosures). Fails with only the search's drop (refused).
     #[test]
-    fn invert_near_singularity_refuses_an_answer_farther_than_its_guess() {
+    fn invert_near_singularity_keeps_the_nearest_drop() {
+        use solidcore::geom::certified;
         let case = crate::case::regression_case(&Runner, "gen1191");
         let i: Inputs = case.parse().expect("inputs");
         let OpIn::Invert { p, dom, uv, tol } = &i.op else {
@@ -920,10 +921,37 @@ mod tests {
         let k = Kernel::default();
         let s = surface_of(&k, &i.surface).expect("surface").expect("a surface");
         let r = s.invert_point_near_singularity(&k, v3(*p), &dom_of(*dom), p2(*uv), *tol);
-        let e = r.expect_err("gen1191: an answer farther than the guess is refused");
-        assert_eq!(status(&e), 1001.0, "gen1191: {e}");
-        let row = rust_run(&i).unwrap_or_else(|_| panic!("gen1191: rust"));
-        assert_eq!(row, [1001.0], "gen1191: row");
+        let inv = r.expect("gen1191: the nearest drop is an answer");
+        let found = s.evaluate_point(&k, inv.uv).expect("evaluate");
+        let guess = s.evaluate_point(&k, p2(*uv)).expect("evaluate");
+        let d = certified::distance(found, v3(*p));
+        let g = certified::distance(guess, v3(*p));
+        assert!(
+            d.value + d.bound < g.value - g.bound,
+            "gen1191: {d:?} is not proven nearer than the guess's {g:?}"
+        );
+        assert!((inv.uv.y - 0.462_430_875_879_150_77).abs() < 1e-12, "{:?}", inv.uv);
+    }
+
+    /// `InvertPointNearSingularity` refuses an answer proven farther than its guess
+    /// (`gen0158`: the guess is 2.2566 from the test point, and the nearest drop is
+    /// proven farther; main reports the drop at u = 0.1249, 9.1456 away, found). Status 1001, main's for a
+    /// search that does not converge. Fails with the farther-than-the-guess refusal
+    /// removed.
+    #[test]
+    fn invert_near_singularity_refuses_an_answer_farther_than_its_guess() {
+        let case = crate::case::regression_case(&Runner, "gen0158");
+        let i: Inputs = case.parse().expect("inputs");
+        let OpIn::Invert { p, dom, uv, tol } = &i.op else {
+            panic!("gen0158: not an invert case");
+        };
+        let k = Kernel::default();
+        let s = surface_of(&k, &i.surface).expect("surface").expect("a surface");
+        let r = s.invert_point_near_singularity(&k, v3(*p), &dom_of(*dom), p2(*uv), *tol);
+        let e = r.expect_err("gen0158: an answer farther than the guess is refused");
+        assert_eq!(status(&e), 1001.0, "gen0158: {e}");
+        let row = rust_run(&i).unwrap_or_else(|_| panic!("gen0158: rust"));
+        assert_eq!(row, [1001.0], "gen0158: row");
     }
 
     /// Generated cases reach every op, and the comparable ones mostly compare values.
