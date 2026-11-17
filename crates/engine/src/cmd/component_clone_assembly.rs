@@ -276,6 +276,9 @@ fn origin(
     out.occurrence = *occurrences.get(&origin.occurrence)?;
     out.inside = origin.inside.iter().map(|o| occurrences.get(o).copied()).collect::<Option<_>>()?;
     datum_side(&mut out.snap, occurrences, doc)?;
+    if let Some(feature) = out.snap.secondary_axis_feature_mut() {
+        *feature = *features.get(feature)?;
+    }
     for face in out.snap.face_names_mut() {
         *face = face_name(face, features, bodies)?;
     }

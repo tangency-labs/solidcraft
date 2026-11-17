@@ -13,6 +13,114 @@ pub(super) fn run(s: &mut Session, id: &str, p: Value) -> Value {
     }
 }
 
+#[test]
+fn secondary_construction_axis_follows_edits_undo_and_uncached_reopen() {
+    use solidcraft_doc::joints::{self, XRef};
+    use solidcraft_doc::{Document, apply_point, apply_vector};
+    let mut s = Session::default();
+    let id = run(
+        &mut s,
+        "construct.axis.two_points",
+        json!({
+            "a": {"point": [0, 0, 0]}, "b": {"point": [1, 0, 0]}, "name": "Clocking",
+        }),
+    )["feature"]
+        .as_u64()
+        .unwrap();
+    let x = json!({"reference": {"type": "construction", "feature": id}});
+    run(&mut s, "joint.origin", json!({"occurrence": 0, "plane": "XY", "x": x, "name": "Seat"}));
+    let made = run(&mut s, "component.create", json!({"name": "Peg", "grounded": false}));
+    let occurrence = made["occurrence"].as_u64().unwrap();
+    run(
+        &mut s,
+        "joint.create",
+        json!({"type": "rigid", "a": {"occurrence": 0, "plane": "XY", "x": x},
+        "b": {"occurrence": occurrence, "plane": "XY"}, "flip": true, "angle": 0}),
+    );
+    let check = |s: &Session, expected: Vec3| {
+        let j = &s.doc.assembly.joints[0];
+        assert!(matches!(j.a.snap, joints::Snap::Plane { x: Some(XRef::Reference { .. }), .. }));
+        let m = joints::resolve_origin(&s.doc, &s.model.state(), &j.a).unwrap();
+        assert_eq!(apply_vector(&m, Vec3::X), expected);
+        assert_eq!(apply_vector(&m, Vec3::Z), Vec3::Z);
+        assert_eq!(apply_point(&m, Vec3::ZERO), Vec3::ZERO);
+        assert_eq!(apply_vector(&joints::occurrence_world(&s.doc, occurrence), Vec3::X), expected);
+    };
+    check(&s, Vec3::X);
+    let joint = s.doc.assembly.joints[0].id;
+    run(&mut s, "joint.edit", json!({"joint": joint, "a": {"occurrence": 0, "plane": "XY", "x": x}}));
+    check(&s, Vec3::X);
+    run(&mut s, "timeline.rename", json!({"feature": id, "name": "Renamed"}));
+    run(
+        &mut s,
+        "timeline.redefine",
+        json!({"feature": id, "command": "construct.axis.two_points",
+        "params": {"a": {"point": [0, 0, 0]}, "b": {"point": [0, 1, 0]}}}),
+    );
+    check(&s, Vec3::Y);
+    run(&mut s, "edit.undo", json!({}));
+    check(&s, Vec3::X);
+    run(&mut s, "edit.redo", json!({}));
+    check(&s, Vec3::Y);
+    let mut reopened = Session::new(Document::from_json(&s.doc.to_json()).unwrap());
+    reopened.refresh();
+    check(&reopened, Vec3::Y);
+    for dir in [[-0.6, 0.8, 0.0], [-0.8, 0.6, 0.0]] {
+        run(
+            &mut reopened,
+            "timeline.redefine",
+            json!({"feature": id, "command": "construct.axis.two_points",
+            "params": {"a": {"point": [0, 0, 0]}, "b": {"point": dir}}}),
+        );
+        check(&reopened, Vec3::new(dir[0], dir[1], dir[2]));
+    }
+    let before = reopened.doc.clone();
+    assert!(reopened.execute("joint.origin", &json!({"occurrence": occurrence, "plane": "XY", "x": x})).is_err());
+    assert_eq!(reopened.doc, before, "cross-component X is refused transactionally");
+}
+
+#[test]
+fn secondary_construction_axis_does_not_disappear_into_circle_point_fallback() {
+    let mut s = Session::default();
+    let before = s.doc.clone();
+    for z in [json!([0, 0, 1]), Value::Null] {
+        let p = json!({"occurrence": 0, "circle": [0, 0, 0], "z": z,
+            "x": {"reference": {"type": "construction", "feature": 999}}, "name": "Bad"});
+        assert!(s.execute("joint.origin", &p).is_err());
+        assert_eq!(s.doc, before, "a missing axis must not leave a point origin");
+    }
+}
+
+#[test]
+fn secondary_construction_axis_is_not_ignored_by_unsupported_origins() {
+    let mut s = Session::default();
+    let x = json!({"reference": {"type": "construction", "feature": 999}});
+    for primary in [
+        json!({"frame": {"origin": [0, 0, 0], "z": [0, 0, 1]}}),
+        json!({"frame": {"origin": [0, 0, 0], "z": [0, 0, 1], "x": [1, 0, 0]}}),
+        json!({"edge": [1, 2, 3], "z": [0, 0, 1]}),
+        json!({"edge": [1, 2, 3]}),
+    ] {
+        let mut p = primary;
+        p["occurrence"] = json!(0);
+        p["x"] = x.clone();
+        let before = s.doc.clone();
+        assert!(s.execute("joint.origin", &p).is_err(), "unsupported primary silently discarded X: {p}");
+        assert_eq!(s.doc, before);
+    }
+}
+
+#[test]
+fn secondary_construction_axis_cannot_hide_inside_a_point_vector() {
+    let mut s = Session::default();
+    let before = s.doc.clone();
+    let p = json!({"occurrence": 0, "point": [0, 0, 0],
+        "x": {"x": 1, "y": 0, "z": 0, "reference": {"type": "construction", "feature": 999}}});
+    assert!(s.execute("joint.origin", &p).is_err());
+    assert_eq!(s.doc, before);
+    run(&mut s, "joint.origin", json!({"occurrence": 0, "point": [0, 0, 0], "x": {"x": 1, "y": 0, "z": 0}}));
+}
+
 pub(super) fn occ(s: &Session, component: &str) -> u64 {
     let c = s.doc.find_component(component).unwrap_or(0);
     s.doc.occurrence_of(c).map(|o| o.id).unwrap_or(0)
