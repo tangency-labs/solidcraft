@@ -828,6 +828,20 @@ fn plane_at_angle_direction_only_projects_the_axis_and_pivots() {
     assert!(error.contains("square to the plane") || error.contains("no direction"), "{error}");
     assert_eq!(s.doc.to_json(), before);
 
+    // The origin is unused with the option, so a parameter in it is refused rather than kept as
+    // a dependency the plane never reads.
+    run(&mut s, "parameters.add", json!({"name": "unused_r", "expression": "12 mm"}));
+    let before = s.doc.to_json();
+    let error = s
+        .execute(
+            "construct.plane.at_angle",
+            &json!({"base": "XY", "axis": {"origin": ["unused_r", 0, 0], "dir": [0, 1, 0]}, "angle": "10 deg", "direction_only": true}),
+        )
+        .unwrap_err()
+        .to_string();
+    assert!(error.contains("direction_only") && error.contains("pivot"), "{error}");
+    assert_eq!(s.doc.to_json(), before);
+
     // A pivot without the option is refused.
     let error = s
         .execute("construct.plane.at_angle", &json!({"base": "XY", "axis": "Y", "angle": "10 deg", "pivot": {"point": [1, 0, 0]}}))

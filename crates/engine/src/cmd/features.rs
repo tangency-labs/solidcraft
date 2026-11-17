@@ -2730,7 +2730,7 @@ fn named_axis_line(s: &Session, p: &Value, cmd: &str) -> Result<(Vec3, Vec3, Opt
 pub(crate) fn axis_line_object(o: &Value) -> std::result::Result<(Vec3, Vec3), &'static str> {
     let origin = match o.get("origin") {
         None => Vec3::ZERO,
-        Some(v) => vec3(v).ok_or("axis.origin must contain three finite numeric coordinates in millimetres; expressions are not supported")?,
+        Some(v) => vec3(v).ok_or("axis.origin must contain three finite numeric coordinates in millimetres")?,
     };
     let dir = o.get("dir").and_then(vec3).and_then(|d| d.normalized()).ok_or("axis needs a non-zero `dir`")?;
     Ok((origin, dir))
@@ -3233,6 +3233,11 @@ fn plane_angle(s: &mut Session, p: &Value) -> Result<Value> {
     check_expr(s, &angle, Kind::Angle, cmd, "angle")?;
     let line = line.map(Box::new);
     let direction_only = crate::params::bool_(p, "direction_only").unwrap_or(false);
+    // With `direction_only` the plane turns about the pivot and never reads the origin, so a
+    // parameter in it would only block deleting that parameter.
+    if direction_only && line.is_none() && axis_origin.iter().any(|c| !solidcraft_doc::expr::references(c.as_str()).is_empty()) {
+        return Err(bad(cmd, "`axis.origin` is not used with `direction_only`: true, so it can't refer to parameters; give `pivot` instead"));
+    }
     let pivot = match p.get("pivot").filter(|t| !t.is_null()) {
         Some(_) if !direction_only => return Err(bad(cmd, "`pivot` needs `direction_only`: true")),
         Some(t) => Some(Box::new(super::construct::geo(s, Some(t), cmd, "pivot")?)),
