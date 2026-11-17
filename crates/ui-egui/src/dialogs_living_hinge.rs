@@ -26,6 +26,9 @@ pub struct LivingHinge {
     /// An index into [`CLIPS`].
     pub clip: usize,
     pub margin: String,
+    /// The Plate pick was pre-filled (or left alone) once the area was picked; not again, so a
+    /// plate the user clears stays cleared.
+    pub plate_filled: bool,
 }
 
 impl Default for LivingHinge {
@@ -40,6 +43,7 @@ impl Default for LivingHinge {
             slot_width: "0.2 mm".into(),
             clip: 0,
             margin: "0 mm".into(),
+            plate_filled: false,
         }
     }
 }
@@ -88,7 +92,58 @@ fn tipped<R>(ui: &mut egui::Ui, tip: &str, row: impl FnOnce(&mut egui::Ui) -> R)
     row.inner
 }
 
-pub fn rows(app: &SolveApp, ui: &mut egui::Ui, h: &mut LivingHinge, _: &[SelInput]) -> bool {
+/// The one body under the picked area, seen along the sketch's normal: the body whose box,
+/// projected on the sketch plane, holds a point inside each picked profile. None when no profile
+/// is picked, or no body or more than one qualifies.
+fn plate_under(app: &SolveApp, inputs: &[SelInput]) -> Option<String> {
+    use solidcore_record::{Vec2, Vec3};
+    use solidcraft_engine::geom::prelude::*;
+    let ps = crate::selection::items(inputs, 0).profiles();
+    let sketch = ps.first()?.0;
+    let st = crate::open_meshing::session_world(&app.session);
+    let ss = st.sketch(sketch)?;
+    let points: Vec<_> = ps.iter().filter(|p| p.0 == sketch).filter_map(|p| ss.profiles.get(p.1)).map(|p| p.region.interior_point()).collect();
+    if points.is_empty() {
+        return None;
+    }
+    let mut found = st.bodies.iter().filter(|b| {
+        let b3 = b.body.outline_bounds();
+        if b3.min.x > b3.max.x {
+            return false;
+        }
+        let (mut lo, mut hi) = (Vec2::new(f64::INFINITY, f64::INFINITY), Vec2::new(f64::NEG_INFINITY, f64::NEG_INFINITY));
+        for i in 0..8 {
+            let c = Vec3::new(
+                if i & 1 == 0 { b3.min.x } else { b3.max.x },
+                if i & 2 == 0 { b3.min.y } else { b3.max.y },
+                if i & 4 == 0 { b3.min.z } else { b3.max.z },
+            );
+            let q = ss.plane.to_local(c);
+            (lo.x, lo.y, hi.x, hi.y) = (lo.x.min(q.x), lo.y.min(q.y), hi.x.max(q.x), hi.y.max(q.y));
+        }
+        let eps = 1e-6;
+        points.iter().all(|p| p.x >= lo.x - eps && p.x <= hi.x + eps && p.y >= lo.y - eps && p.y <= hi.y + eps)
+    });
+    let one = found.next()?;
+    found.next().is_none().then(|| one.name.clone())
+}
+
+/// Once the area is picked and the Plate pick is still empty, pick the one plate under the area
+/// (design 13: the user sees it highlighted). Tried once per dialog.
+fn prefill_plate(app: &SolveApp, h: &mut LivingHinge, inputs: &mut [SelInput]) {
+    if h.plate_filled || crate::selection::items(inputs, 0).profiles().is_empty() {
+        return;
+    }
+    h.plate_filled = true;
+    if inputs.get(1).is_some_and(|i| i.items.is_empty())
+        && let Some(name) = plate_under(app, inputs)
+    {
+        inputs[1].items = vec![Sel::Body { name }];
+    }
+}
+
+pub fn rows(app: &SolveApp, ui: &mut egui::Ui, h: &mut LivingHinge, inputs: &mut [SelInput]) -> bool {
+    prefill_plate(app, h, inputs);
     choice_row(
         ui,
         "ui.living_hinge.bend_axis",
@@ -227,6 +282,7 @@ pub fn for_feature(app: &SolveApp, kind: &FeatureKind) -> Option<(Kind, Vec<SelI
             HingeClip::Whole => 2,
         },
         margin: margin.as_deref().map_or(d.margin, str::to_string),
+        plate_filled: true,
     };
     let st = crate::open_meshing::session_world(&app.session);
     let indices = st.sketch(sketch.0).map(|ss| crate::dialogs::profile_indices(ss, profiles)).unwrap_or_default();
@@ -326,5 +382,42 @@ mod tests {
         assert!(slow_warning(&json!({"slots": limit})).is_none());
         assert!(slow_warning(&json!({})).is_none());
         assert!(slow_warning(&json!({"slots": limit + 1})).is_some());
+    }
+
+    /// Picking the area pre-fills the Plate with the one body under it, once; a second plate under
+    /// the area leaves the pick to the user.
+    #[test]
+    fn living_hinge_plate_prefilled_from_the_area() {
+        let mut s = Session::default();
+        let run = |s: &mut Session, id: &str, p: Value| {
+            s.execute(id, &p).unwrap_or_else(|e| panic!("{id}: {e}"));
+        };
+        run(&mut s, "solid.box", json!({"length": 120, "width": 80, "height": 3, "body_name": "Wall"}));
+        run(&mut s, "solid.box", json!({"length": 50, "width": 50, "height": 3, "corner": [300, 0, 0], "body_name": "Away"}));
+        run(&mut s, "sketch.create", json!({"plane": "XY", "offset": 3, "name": "HingeArea"}));
+        run(&mut s, "sketch.rectangle.two_point", json!({"p0": [40, 0], "p1": [80, 80]}));
+        run(&mut s, "sketch.finish", json!({}));
+        let mut app = SolveApp::new(s, Services::default());
+        let area = |app: &SolveApp| {
+            let st = crate::open_meshing::session_world(&app.session);
+            let ss = st.sketch(app.session.doc.find_feature("HingeArea").unwrap().id).unwrap();
+            (0..ss.profiles.len()).map(|index| Sel::Profile { sketch: ss.feature, index }).collect::<Vec<_>>()
+        };
+        let (Kind::LivingHinge(mut h), mut inputs) = start(&app, CMD).unwrap() else { panic!("not a living hinge") };
+        prefill_plate(&app, &mut h, &mut inputs);
+        assert!(inputs[1].items.is_empty() && !h.plate_filled, "nothing before the area is picked");
+        inputs[0].items = area(&app);
+        prefill_plate(&app, &mut h, &mut inputs);
+        assert_eq!(crate::selection::items(&inputs, 1).body_names(), vec!["Wall".to_string()]);
+        // Cleared by the user, it stays cleared.
+        inputs[1].items.clear();
+        prefill_plate(&app, &mut h, &mut inputs);
+        assert!(inputs[1].items.is_empty());
+        // A second plate under the area: no guess.
+        app.session.execute("solid.box", &json!({"length": 120, "width": 80, "height": 3, "corner": [0, 0, -10], "body_name": "Second"})).unwrap();
+        let (Kind::LivingHinge(mut h), mut inputs) = start(&app, CMD).unwrap() else { panic!("not a living hinge") };
+        inputs[0].items = area(&app);
+        prefill_plate(&app, &mut h, &mut inputs);
+        assert!(inputs[1].items.is_empty(), "{:?}", inputs[1].items);
     }
 }
