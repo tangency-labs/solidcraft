@@ -53,8 +53,10 @@ fn read(k: &mut Kernel, name: &str) -> Brep {
 
 /// Every loop edge use's edge/face gap is within its edge's tolerance, and the check
 /// reports no edge/face gap. `named` are the edges (by index) the healer raised: each
-/// has a use with a gap that is checked, and at least `uses` edge uses are checked.
-fn assert_gaps_covered(name: &str, named: &[u32], uses: usize) {
+/// has a use with a gap that is checked. `uses` is `(checked, all)`: exactly `checked`
+/// of the B-rep's `all` edge uses have a gap (`max_edge_face_gap` is `Some`) and are
+/// checked.
+fn assert_gaps_covered(name: &str, named: &[u32], uses: (usize, usize)) {
     use solidcore::topology::EdgeId;
     let mut k = Kernel::default();
     let mut b = read(&mut k, name);
@@ -77,7 +79,11 @@ fn assert_gaps_covered(name: &str, named: &[u32], uses: usize) {
         checked += 1;
         checked_edges.push(e);
     }
-    assert_eq!(checked, uses, "{name}: edge uses checked");
+    assert_eq!(
+        (checked, b.edgeuses().iter().count()),
+        uses,
+        "{name}: edge uses checked, of all"
+    );
     for &i in named {
         let e = EdgeId::from_index(i);
         assert!(checked_edges.contains(&e), "{name}: {e:?} not checked");
@@ -92,10 +98,12 @@ fn assert_gaps_covered(name: &str, named: &[u32], uses: usize) {
     assert!(lines.is_empty(), "{name}: {lines:?}");
 }
 
-/// Edge uses of `Fillet/sphere_plane.smb` with an edge/face gap.
-const USES_SPHERE_PLANE: usize = 12;
-/// Edge uses of `Solids/revolution_mold.smb` with an edge/face gap.
-const USES_REVOLUTION_MOLD: usize = 352;
+/// Edge uses of `Fillet/sphere_plane.smb` with an edge/face gap (all of them), and all
+/// its edge uses.
+const USES_SPHERE_PLANE: (usize, usize) = (12, 12);
+/// Edge uses of `Solids/revolution_mold.smb` with an edge/face gap (all of them: four
+/// per edge, 4 x 88), and all its edge uses.
+const USES_REVOLUTION_MOLD: (usize, usize) = (352, 352);
 
 #[test]
 fn sphere_plane_circle_edge_covers_its_gap() {
@@ -847,9 +855,13 @@ const MAIN: [(&str, [u64; 5]); 28] = [
 ///   with the moved tolerances set back to main's, and as read differ only on
 ///   `Fillet/corner_box.smb` and `Fillet/test1.smb`, by 1 ulp: the volume integrates
 ///   about the middle of the B-rep's box, which is grown by the edge and vertex
-///   tolerances (`CalculateBoundingBox`, `bExpandByZoneTol3d`), and the volume does not
-///   depend on that origin (the #16735 closure), so the two are one integral rounded at
-///   two origins, within `gamma_2 * |V|`.
+///   tolerances (`CalculateBoundingBox`, `bExpandByZoneTol3d`). Each pair is classified
+///   against a certified enclosure `[lo, hi]` of the exact volume
+///   (`mass::enclosure::enclose_volume`, which reads no edge tolerance), asked
+///   `1e-9 * |V|` wide, the goldens' relative tolerance. On `test1` it reaches 7.7e-7 and
+///   both values lie below `lo`, so the larger, this branch's, is closer to the exact
+///   volume. On `corner_box` it stops at its cell budget, 3.1e-3 wide, holding both
+///   values: neither can be told farther.
 ///
 /// Stacked on the WR-493 retirement, the two files here with a sphere or torus found in a
 /// NURBS (`Fillet/sphere_plane.smb`, `Solids/revolution_mold.smb`) also keep the file's
@@ -864,6 +876,7 @@ fn corpus_reads_change_only_the_covered_tolerances() {
     let mut raised = 0;
     let mut moved = 0;
     let mut moved_volumes = Vec::new();
+    let mut volume_classes = Vec::new();
     for (name, [read_main, lazy_main, rebuild_main, area_main, volume_main]) in MAIN {
         let edges = entries(RAISED_EDGES, name);
         let vertices = entries(MOVED_VERTICES, name);
@@ -917,13 +930,31 @@ fn corpus_reads_change_only_the_covered_tolerances() {
             continue;
         }
         if volume.to_bits() != volume_main {
+            // (classified against a certified enclosure of the exact volume, asked
+            // 1e-9 * |V| wide, the goldens' relative tolerance)
             let main = f64::from_bits(volume_main);
-            // gamma_2 = 2u / (1 - 2u), u = 2^-53
-            let u = f64::EPSILON / 2.0;
-            let bound = 2.0 * u / (1.0 - 2.0 * u) * main.abs();
-            if (volume - main).abs() > bound {
-                failures.push(format!("{name}: volume {volume:e} main {main:e}"));
-            }
+            let mut k = Kernel::default();
+            let mut b = read_corpus(&mut k, name, false);
+            let e =
+                solidcore::mass::enclosure::enclose_volume(&k, &mut b, 1e-9 * main.abs()).unwrap();
+            let class = if e.lo <= volume.min(main) && volume.max(main) <= e.hi {
+                "both enclosed"
+            } else if volume.max(main) < e.lo {
+                if volume > main {
+                    "closer"
+                } else {
+                    "farther"
+                }
+            } else if volume.min(main) > e.hi {
+                if volume < main {
+                    "closer"
+                } else {
+                    "farther"
+                }
+            } else {
+                "straddles"
+            };
+            volume_classes.push((name, class, e.lo, e.hi));
             moved_volumes.push(name);
         }
     }
@@ -932,6 +963,15 @@ fn corpus_reads_change_only_the_covered_tolerances() {
         moved_volumes,
         ["Fillet/corner_box.smb", "Fillet/test1.smb"],
         "{failures:#?}"
+    );
+    let classes: Vec<_> = volume_classes.iter().map(|&(n, c, _, _)| (n, c)).collect();
+    assert_eq!(
+        classes,
+        [
+            ("Fillet/corner_box.smb", "both enclosed"),
+            ("Fillet/test1.smb", "closer")
+        ],
+        "{volume_classes:?}"
     );
     assert!(failures.is_empty(), "{failures:#?}");
     assert_eq!(wr493, WR493_READS);
@@ -1703,7 +1743,9 @@ fn fillet_result(name: &str, edge: usize, radius: f64) -> (u64, Vec<u64>) {
 }
 
 /// Main 3a0f49b09's [`fillet_result`] digests per [`FILLETS`] entry, made by this file's
-/// functions on main.
+/// functions on main. The 19 equal digests (`0x30d463838d7fca03`) are bottle
+/// fillets: main refuses each (status 1001) and leaves the read body, so all digest the
+/// same body and status.
 const FILLET_MAIN: [u64; 29] = [
     0x24f613f551b1b3ab,
     0x241377ca06fbe761,

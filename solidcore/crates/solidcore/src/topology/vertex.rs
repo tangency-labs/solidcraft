@@ -23,7 +23,7 @@
 //! | [`is_connected_to`]                         | `SmVertex::IsConnectedTo`                        |
 //! | [`are_edges_tangent`]                       | `SmVertex::AreEdgesTangent`                      |
 //! | [`is_topological_vertex`], [`is_on_pole`]   | `SmVertex::IsTopologicalVertex`, `IsOnPole`      |
-//! | [`is_on_face_seam`]                         | none (not upstream, below)                       |
+//! | [`is_on_face_seam`], [`ends_seam_edge`], [`seam_edge`] | none (not upstream, below)          |
 //! | [`is_wire_vertex`], [`is_lamina_vertex`]    | `SmVertex::IsWireVertex`, `IsLaminaVertex`       |
 //! | [`is_shell_vertex`], [`is_loop_vertex`]     | `SmVertex::IsShellVertex`, `IsLoopVertex`        |
 //! | [`max_up_dim_gap_3d`], [`max_gap_3d`], [`VertexGap`], [`HeldGap`] | `SmVertex::GetMaxUpDimGap3d`, `GetMaxGap3d` (the `SmGap*` results) |
@@ -888,6 +888,42 @@ pub fn is_on_face_seam(k: &Kernel, b: &mut Brep, v: VertexId) -> Result<bool> {
         }
     }
     Ok(false)
+}
+
+/// Not upstream: whether the vertex ends a seam edge ([`seam_edge`]).
+///
+/// # Errors
+///
+/// Those of [`seam_edge`].
+pub fn ends_seam_edge(b: &Brep, v: VertexId) -> Result<bool> {
+    Ok(seam_edge(b, v)?.is_some())
+}
+
+/// Not upstream: the first seam edge the vertex ends, an edge that one face use runs
+/// along twice (the two sides of the seam of the face's closed surface). Read from the
+/// topology alone, so it holds for the B-rep as it stands, before any geometry is
+/// measured.
+///
+/// # Errors
+///
+/// [`SolidError::NotFound`] for a dangling id; those of [`edges`] and the edge use queries.
+pub fn seam_edge(b: &Brep, v: VertexId) -> Result<Option<EdgeId>> {
+    for e in edges(b, v, None)? {
+        let mut uses: Vec<FaceuseId> = Vec::new();
+        for eu in crate::topology::edge::edgeuses(b, e, None, None)? {
+            if !eu1::is_loop_edgeuse(b, eu)? {
+                continue;
+            }
+            let Some(fu) = eu1::faceuse(b, eu)? else {
+                continue;
+            };
+            if uses.contains(&fu) {
+                return Ok(Some(e));
+            }
+            uses.push(fu);
+        }
+    }
+    Ok(None)
 }
 
 /// `IsTopologicalVertex`: whether the vertex could be removed without changing the

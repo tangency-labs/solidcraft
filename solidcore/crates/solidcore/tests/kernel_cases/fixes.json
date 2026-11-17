@@ -45,10 +45,10 @@
   "fillet_variable_span_follows_fillet",
   "box_face_failures_propagate",
   "fillet_removal_takes_ring_fillets",
-  "boolean_union_refuses_solid_leak",
   "simple_coincidence_crossing_is_point",
   "keep_exact_pcurves",
   "closed_smooth_pole_tangent_limit",
   "fillet_chamfer_corner",
-  "brep_ray_classifies_current_trims"
+  "brep_ray_classifies_current_trims",
+  "seam_vertex_stays_on_seam"
 ]

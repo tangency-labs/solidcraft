@@ -37,6 +37,7 @@ pub mod solidcraft;
 pub mod soundness;
 pub mod ssi;
 pub mod step;
+pub(crate) mod tolsub;
 pub mod util;
 #[cfg(test)]
 mod wr493_rows;

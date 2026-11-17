@@ -83,6 +83,8 @@
 //!   most the gap gain times it): there it fits at the healer's tolerance for that gap
 //!   without the edge/edge term, capped by the edge tolerance (`fit_tolerance`).
 //!   A tolerance raised to cover a gap so never loosens a trim fitted later. The
+//!   other edge uses' trims (`trim_other_uv_curves`, upstream `GetZoneTol3d` of the
+//!   curve, the edge tolerance) snap to knots within the same value. The
 //!   fillet's solver takes its approximation tolerance from the same value
 //!   (`blend::fillet_executive` `SetFilletParameters`). The edge is told apart by its
 //!   tolerance's value, not by what set it: a tolerance another operation set inside
@@ -1155,6 +1157,8 @@ fn finish(
 /// attached UV trim curve's `SmEdgeuse` owner to `e` and returns `pEdge->GetTolerance()`
 /// (`SM_USE_OLDTOL`), rather than the system zone tolerance that owner-less
 /// [`Curve::trim`] reads from `k` (as in `sm_TrimRail`, `blend::fillet_solver::p1`).
+/// Not upstream: that tolerance is the fit tolerance ([`fit_tolerance`]), so a tolerance
+/// raised to cover the edge's gap does not widen the knot snap either.
 fn trim_other_uv_curves(
     k: &Kernel,
     b: &mut Brep,
@@ -1164,7 +1168,7 @@ fn trim_other_uv_curves(
 ) -> Result<()> {
     let mut tk = Kernel::new(&crate::kernel::KernelOptions {
         tolerances: crate::kernel::Tolerances {
-            zone_tol_3d: zone_tol3d(k, crate::topology::edge::tolerance(b, e)?),
+            zone_tol_3d: zone_tol3d(k, fit_tolerance(k, b, e)?),
             ..k.tolerances
         },
         ..crate::kernel::KernelOptions::default()
