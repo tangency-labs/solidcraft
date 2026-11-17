@@ -81,6 +81,7 @@ drawing.balloon.inspect           a drawing: its tests in crates/engine/src/cmd/
 drawing.balloon.repair            a drawing: its tests in crates/engine/src/cmd/drawing*_tests.rs
 drawing.check                     a drawing: its tests in crates/engine/src/cmd/drawing*_tests.rs
 drawing.close                     a drawing: its tests in crates/engine/src/cmd/drawing*_tests.rs
+drawing.copy                      a drawing: its tests in crates/engine/src/cmd/drawing*_tests.rs
 drawing.create                    a drawing: its tests in crates/engine/src/cmd/drawing*_tests.rs
 drawing.delete                    a drawing: its tests in crates/engine/src/cmd/drawing*_tests.rs
 drawing.dimension.add             a drawing: its tests in crates/engine/src/cmd/drawing*_tests.rs
@@ -100,6 +101,7 @@ drawing.note.add                  a drawing: its tests in crates/engine/src/cmd/
 drawing.note.edit                 a drawing: its tests in crates/engine/src/cmd/drawing*_tests.rs
 drawing.note.inspect              a drawing: its tests in crates/engine/src/cmd/drawing*_tests.rs
 drawing.open                      a drawing: its tests in crates/engine/src/cmd/drawing*_tests.rs
+drawing.paste                     a drawing: its tests in crates/engine/src/cmd/drawing*_tests.rs
 drawing.pattern.delete            paper hatch patterns: crates/engine/src/cmd/drawing_tests.rs
 drawing.pattern.import            paper hatch patterns: crates/engine/src/cmd/drawing_tests.rs and crates/io/src/pat_tests.rs
 drawing.pattern.inspect           paper hatch patterns: crates/engine/src/cmd/drawing_tests.rs

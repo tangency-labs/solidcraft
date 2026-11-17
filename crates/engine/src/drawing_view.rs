@@ -320,32 +320,48 @@ impl<'a> ViewSessions<'a> {
         }
     }
 
+    /// Each state of the assembly the views `views` of `d` draw (each a view's id, as its records
+    /// list them), once: `on` is given the session the state draws from ([`ViewSessions::of_view`])
+    /// and the places in `views` of the views that draw it. One call per state, so whatever `on`
+    /// works out per body is worked out once per state, not per record.
+    pub fn each_on<E>(
+        &mut self,
+        d: &Drawing,
+        views: &[u64],
+        mut on: impl FnMut(&Session, &[usize]) -> std::result::Result<(), E>,
+    ) -> std::result::Result<(), E> {
+        let mut states: BTreeMap<Choice, Vec<usize>> = BTreeMap::new();
+        for (at, view) in views.iter().enumerate() {
+            let choice = d.resolve_view(*view).map(|view| self.choice(&view)).unwrap_or_default();
+            states.entry(choice).or_default().push(at);
+        }
+        let placed = self.placed;
+        for (choice, ats) in states {
+            on(self.drawing(&choice).map_or(placed, |(from, _)| from), &ats)?;
+        }
+        Ok(())
+    }
+
     /// What `read` (a resolver: [`solidcraft_doc::Document::resolve_dimensions`], `resolve_notes`
     /// or `resolve_balloons`) gives for `records` of `d`, each its id and its view's, each read on
-    /// the session its view draws from ([`ViewSessions::of_view`]), in `records`' order. One call per
-    /// state of the assembly, so each body's names are worked out once per state, not per record.
+    /// the session its view draws from ([`ViewSessions::each_on`]), in `records`' order.
     pub fn read_on<T>(
         &mut self,
         d: &Drawing,
         records: &[(u64, u64)],
         read: impl Fn(&solidcraft_doc::Document, &solidcraft_doc::Model, &Drawing, &[u64]) -> solidcraft_doc::Result<Vec<T>>,
     ) -> solidcraft_doc::Result<Vec<T>> {
-        let mut states: BTreeMap<Choice, Vec<usize>> = BTreeMap::new();
-        for (at, (_, view)) in records.iter().enumerate() {
-            let choice = d.resolve_view(*view).map(|view| self.choice(&view)).unwrap_or_default();
-            states.entry(choice).or_default().push(at);
-        }
+        let views: Vec<u64> = records.iter().map(|(_, view)| *view).collect();
         let mut out: Vec<Option<T>> = records.iter().map(|_| None).collect();
-        let placed = self.placed;
-        for (choice, ats) in states {
-            let from = self.drawing(&choice).map_or(placed, |(from, _)| from);
+        self.each_on(d, &views, |from, ats| {
             let ids: Vec<u64> = ats.iter().filter_map(|at| records.get(*at)).map(|(id, _)| *id).collect();
-            for (at, one) in ats.into_iter().zip(read(&from.doc, &from.model, d, &ids)?) {
-                if let Some(slot) = out.get_mut(at) {
+            for (at, one) in ats.iter().zip(read(&from.doc, &from.model, d, &ids)?) {
+                if let Some(slot) = out.get_mut(*at) {
                     *slot = Some(one);
                 }
             }
-        }
+            Ok::<(), solidcraft_doc::DocError>(())
+        })?;
         Ok(out.into_iter().flatten().collect())
     }
 }

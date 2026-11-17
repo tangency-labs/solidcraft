@@ -1,0 +1,34 @@
+{
+  "en": {
+    "cmd.drawing_copy": "Copy Drawing Items",
+    "cmd.drawing_paste": "Paste Drawing Items"
+  },
+  "ar": {
+    "cmd.drawing_copy": "نسخ عناصر الرسم",
+    "cmd.drawing_paste": "لصق عناصر الرسم"
+  },
+  "de": {
+    "cmd.drawing_copy": "Zeichnungselemente kopieren",
+    "cmd.drawing_paste": "Zeichnungselemente einfügen"
+  },
+  "he": {
+    "cmd.drawing_copy": "העתקת פריטי שרטוט",
+    "cmd.drawing_paste": "הדבקת פריטי שרטוט"
+  },
+  "ja": {
+    "cmd.drawing_copy": "図面要素をコピー",
+    "cmd.drawing_paste": "図面要素を貼り付け"
+  },
+  "ko": {
+    "cmd.drawing_copy": "도면 항목 복사",
+    "cmd.drawing_paste": "도면 항목 붙여넣기"
+  },
+  "vi": {
+    "cmd.drawing_copy": "Sao chép mục bản vẽ",
+    "cmd.drawing_paste": "Dán mục bản vẽ"
+  },
+  "zh": {
+    "cmd.drawing_copy": "复制图纸项目",
+    "cmd.drawing_paste": "粘贴图纸项目"
+  }
+}

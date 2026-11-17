@@ -8,6 +8,9 @@
 //! Nothing reattaches to a nearby edge: an annotation that doesn't come across keeps its old
 //! record, which names the old part, so its view leaves it undrawn and `drawing.status` says why.
 //! One undo step; no model is evaluated.
+//!
+//! [`Retarget`] is the one entry both `drawing.source.replace` and `drawing.paste` (with `to`, or
+//! from another design) take: the part the views showed, the part they show now, and what follows.
 
 use std::collections::BTreeSet;
 use std::sync::Arc;
@@ -20,9 +23,10 @@ use solidcraft_doc::drawing::table::Kind;
 use solidcraft_doc::drawing::view::ViewKind;
 use solidcraft_doc::drawing::{Drawing, SheetComponent};
 use solidcraft_doc::feature_pairs::{FeaturePairs, Side};
-use solidcraft_doc::{Document, ids};
+use solidcraft_doc::{Document, ModelState, ids};
 
 use super::CommandSpec;
+use crate::drawing_view::ViewSessions;
 use crate::params::bad;
 use crate::schema::drawing_source::{DroppedHideResult, KeptResult, LostResult, ReplaceParams, ReplaceResult, ToParam};
 use crate::schema::{TypedContract, output_schema_for};
@@ -54,6 +58,141 @@ pub static COMMANDS: &[CommandSpec] = &[CommandSpec::new(REPLACE, "Replace Model
 struct Part {
     component: u64,
     path: Vec<u64>,
+}
+
+/// Where the views a [`Retarget`] moves came from.
+pub(super) struct Origin<'a> {
+    /// The design they were drawn in, and its evaluated model.
+    pub(super) doc: &'a Document,
+    pub(super) state: &'a ModelState,
+    /// The drawing they were in, as it was: the part its base views show is read there.
+    pub(super) drawing: &'a Drawing,
+    /// Those base views, by their ids there: none when only tables or sheets move.
+    pub(super) bases: &'a BTreeSet<u64>,
+    /// Whether that is another design: its occurrence paths name nothing in this one.
+    pub(super) other_design: bool,
+}
+
+/// Which of a [`Scope`]'s sheets and parts lists follow the part.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(super) enum Follows {
+    /// Those that documented or listed the old part (a replace).
+    OldPart,
+    /// Every sheet that documents a component, and every parts list (a paste).
+    Any,
+}
+
+/// What a [`Retarget`] changes in the drawing it is applied to, each by its id there.
+pub(super) struct Scope<'a> {
+    pub(super) views: &'a BTreeSet<u64>,
+    /// The base views among `views`: each shows the new part.
+    pub(super) bases: &'a BTreeSet<u64>,
+    pub(super) sheets: &'a BTreeSet<u64>,
+    pub(super) tables: &'a BTreeSet<u64>,
+    /// The drawing's source: the design a followed sheet or parts list names.
+    pub(super) source: u64,
+    pub(super) follows: Follows,
+}
+
+/// What a [`Retarget`] changed: the annotations kept and lost, the hide paths dropped, and the
+/// sheets and parts lists that follow the part now.
+#[derive(Default)]
+pub(super) struct Retargeted {
+    pub(super) kept: Vec<KeptResult>,
+    pub(super) lost: Vec<LostResult>,
+    pub(super) dropped_hide: Vec<DroppedHideResult>,
+    pub(super) sheets: Vec<String>,
+    pub(super) parts_lists: Vec<String>,
+}
+
+/// Views made to show another part of this design, with the same history: the part they showed
+/// (none when no base view moves), the part they show now, and the two parts' features paired.
+pub(super) struct Retarget {
+    from: Option<Part>,
+    to: Part,
+    pairs: FeaturePairs,
+    /// The hide paths dropped are those under this path: all of them from another design.
+    under: Vec<u64>,
+}
+
+impl Retarget {
+    /// From the one part `origin`'s base views show to the part `to` names in `s`'s design.
+    /// Refused when either isn't one part ([`one_part`], [`target`]).
+    pub(super) fn new(s: &Session, origin: Origin, to: &ToParam, cmd: &str) -> Result<Retarget> {
+        let from = if origin.bases.is_empty() { None } else { Some(one_part(origin.doc, origin.drawing, origin.bases, cmd)?) };
+        let to = target(&s.doc, to, cmd)?;
+        let pairs = match &from {
+            Some(from) => {
+                let state = s.model.state();
+                let old = Side { doc: origin.doc, state: origin.state, component: from.component };
+                FeaturePairs::between(old, Side { doc: &s.doc, state: &state, component: to.component })
+            }
+            None => FeaturePairs::default(),
+        };
+        let under = match &from {
+            Some(from) if !origin.other_design => from.path.clone(),
+            _ => Vec::new(),
+        };
+        Ok(Retarget { from, to, pairs, under })
+    }
+
+    /// Whether the views show the new part already.
+    pub(super) fn same_part(&self) -> bool {
+        self.from.as_ref() == Some(&self.to)
+    }
+
+    /// `scope`'s views of `d` made to show the new part: each base view shows it, a hide path under
+    /// the old part is dropped (a copy's nested occurrences have other ids), and each annotation on
+    /// them moves onto it when it finds its one thing there, read where its view draws
+    /// ([`move_annotations`]). Then the sheets and parts lists `scope.follows` names document and
+    /// list it.
+    pub(super) fn apply(&self, s: &Session, d: &mut Drawing, scope: Scope) -> Retargeted {
+        let mut done = Retargeted::default();
+        if let Some(from) = &self.from {
+            done.dropped_hide = point_views(d, scope.views, scope.bases, &self.under, &self.to.path);
+            let moves = move_annotations(&mut ViewSessions::new(s), d, scope.views, &self.pairs, (&from.path, &self.to.path));
+            (done.kept, done.lost) = (moves.kept, moves.lost);
+        }
+        let new = SheetComponent { source: scope.source, component: self.to.component };
+        let old = self.from.as_ref().map(|from| SheetComponent { source: scope.source, component: from.component });
+        let follows = |of: SheetComponent| match scope.follows {
+            Follows::OldPart => Some(of) == old,
+            Follows::Any => true,
+        };
+        for sheet in d.sheets.iter_mut().filter(|sheet| scope.sheets.contains(&sheet.id) && sheet.documents.is_some_and(follows)) {
+            Arc::make_mut(sheet).documents = Some(new);
+            done.sheets.push(ids::encode(sheet.id));
+        }
+        for table in d.tables.iter_mut().filter(|table| scope.tables.contains(&table.id)) {
+            let id = table.id;
+            match &mut Arc::make_mut(table).kind {
+                Kind::PartsList(list) if follows(list.of) => {
+                    list.of = new;
+                    done.parts_lists.push(ids::encode(id));
+                }
+                Kind::PartsList(_) | Kind::Revision => {}
+            }
+        }
+        done
+    }
+}
+
+/// `views` made to show the part at occurrence path `to`: each of `bases` shows it, and every hide
+/// path under `under` is dropped. The dropped paths, by view.
+fn point_views(d: &mut Drawing, views: &BTreeSet<u64>, bases: &BTreeSet<u64>, under: &[u64], to: &[u64]) -> Vec<DroppedHideResult> {
+    let mut dropped = Vec::new();
+    for view in d.views.iter_mut().filter(|v| views.contains(&v.id)) {
+        let view = Arc::make_mut(view);
+        if bases.contains(&view.id) {
+            view.settings.occurrences = Some(Arc::from(vec![to.to_vec()]));
+        }
+        if let Some(hide) = view.settings.hide.take() {
+            let (gone, kept): (Vec<Vec<u64>>, Vec<Vec<u64>>) = hide.iter().cloned().partition(|path| path.starts_with(under));
+            dropped.extend(gone.into_iter().map(|path| DroppedHideResult { view: ids::encode(view.id), path }));
+            view.settings.hide = (!kept.is_empty()).then(|| Arc::from(kept));
+        }
+    }
+    dropped
 }
 
 fn replace(s: &mut Session, p: &Value) -> Result<Value> {
@@ -93,58 +232,28 @@ fn replace(s: &mut Session, p: &Value) -> Result<Value> {
         patterns: _,
     } = &*record;
     let (bases, sheets) = scope(&record, &request)?;
-    let from = one_part(&s.doc, &record, &bases)?;
-    let to = target(&s.doc, &request.to)?;
-    if to == from {
+    let state = s.model.state();
+    let origin = Origin { doc: &s.doc, state: &state, drawing: &record, bases: &bases, other_design: false };
+    let retarget = Retarget::new(s, origin, &request.to, REPLACE)?;
+    if retarget.same_part() {
         return Err(bad(REPLACE, "the views show that part already"));
     }
-    let state = s.model.state();
-    let side = |part: &Part| Side { doc: &s.doc, state: &state, component: part.component };
-    let pairs = FeaturePairs::between(side(&from), side(&to));
     let mut d = Drawing::clone(&record);
     let views = record.with_projected(&bases);
-    let mut reply = ReplaceResult {
+    let tables: BTreeSet<u64> = d.tables.iter().filter(|table| sheets.contains(&table.sheet)).map(|table| table.id).collect();
+    let source = d.resolve_view(bases.first().copied().unwrap_or_default()).map_err(|e| bad(REPLACE, e.to_string()))?.source;
+    let within = Scope { views: &views, bases: &bases, sheets: &sheets, tables: &tables, source, follows: Follows::OldPart };
+    let done = retarget.apply(s, &mut d, within);
+    let reply = ReplaceResult {
         views: views.iter().map(|v| ids::encode(*v)).collect(),
-        kept: Vec::new(),
-        lost: Vec::new(),
-        dropped_hide: Vec::new(),
-        sheets: Vec::new(),
-        parts_lists: Vec::new(),
+        kept: done.kept,
+        lost: done.lost,
+        dropped_hide: done.dropped_hide,
+        sheets: done.sheets,
+        parts_lists: done.parts_lists,
         dry_run: request.dry_run.unwrap_or(false),
         param_warnings: Vec::new(),
     };
-    for view in d.views.iter_mut().filter(|v| views.contains(&v.id)) {
-        let view = Arc::make_mut(view);
-        if bases.contains(&view.id) {
-            view.settings.occurrences = Some(Arc::from(vec![to.path.clone()]));
-        }
-        // A copy's nested occurrences have other ids, so a hide path under the old part names
-        // nothing in the new one.
-        if let Some(hide) = view.settings.hide.take() {
-            let (under, kept): (Vec<Vec<u64>>, Vec<Vec<u64>>) = hide.iter().cloned().partition(|path| path.starts_with(&from.path));
-            reply.dropped_hide.extend(under.into_iter().map(|path| DroppedHideResult { view: ids::encode(view.id), path }));
-            view.settings.hide = (!kept.is_empty()).then(|| Arc::from(kept));
-        }
-    }
-    let moves = move_annotations(s, &mut d, &views, &pairs, (&from.path, &to.path));
-    (reply.kept, reply.lost) = (moves.kept, moves.lost);
-    // What a sheet documents and what its parts lists list follow the part, from the same design.
-    let source = d.resolve_view(bases.first().copied().unwrap_or_default()).map_err(|e| bad(REPLACE, e.to_string()))?.source;
-    let (old, new) = (SheetComponent { source, component: from.component }, SheetComponent { source, component: to.component });
-    for sheet in d.sheets.iter_mut().filter(|sheet| sheets.contains(&sheet.id) && sheet.documents == Some(old)) {
-        Arc::make_mut(sheet).documents = Some(new);
-        reply.sheets.push(ids::encode(sheet.id));
-    }
-    for table in d.tables.iter_mut().filter(|table| sheets.contains(&table.sheet)) {
-        let id = table.id;
-        match &mut Arc::make_mut(table).kind {
-            Kind::PartsList(list) if list.of == old => {
-                list.of = new;
-                reply.parts_lists.push(ids::encode(id));
-            }
-            Kind::PartsList(_) | Kind::Revision => {}
-        }
-    }
     if !reply.dry_run {
         s.edit_drawing(REPLACE, |live| {
             *live = d;
@@ -194,12 +303,12 @@ fn scope(d: &Drawing, request: &ReplaceParams) -> Result<(BTreeSet<u64>, BTreeSe
 
 /// The one part every view of `bases` shows ([`shown_part`]); refused when they show different
 /// parts.
-fn one_part(doc: &Document, d: &Drawing, bases: &BTreeSet<u64>) -> Result<Part> {
-    let mut parts = bases.iter().map(|view| shown_part(doc, d, *view));
-    let first = parts.next().unwrap_or_else(|| Err(bad(REPLACE, "there are no views to replace there")))?;
+fn one_part(doc: &Document, d: &Drawing, bases: &BTreeSet<u64>, cmd: &str) -> Result<Part> {
+    let mut parts = bases.iter().map(|view| shown_part(doc, d, *view, cmd));
+    let first = parts.next().unwrap_or_else(|| Err(bad(cmd, "there are no views of a part there")))?;
     for part in parts {
         if part? != first {
-            return Err(bad(REPLACE, "the views there show different parts: replace each view on its own"));
+            return Err(bad(cmd, "the views there show different parts: name each view on its own"));
         }
     }
     Ok(first)
@@ -207,16 +316,16 @@ fn one_part(doc: &Document, d: &Drawing, bases: &BTreeSet<u64>) -> Result<Part> 
 
 /// The part base view `view` shows: the component at its one occurrence path, or the design's own
 /// bodies (component 0, no path) when it draws them alone or the design places nothing else.
-fn shown_part(doc: &Document, d: &Drawing, view: u64) -> Result<Part> {
-    let resolved = d.resolve_view(view).map_err(|e| bad(REPLACE, e.to_string()))?;
-    let several = || bad(REPLACE, format!("not supported yet: view {} shows more than one part", ids::encode(view)));
+fn shown_part(doc: &Document, d: &Drawing, view: u64, cmd: &str) -> Result<Part> {
+    let resolved = d.resolve_view(view).map_err(|e| bad(cmd, e.to_string()))?;
+    let several = || bad(cmd, format!("not supported yet: view {} shows more than one part", ids::encode(view)));
     let path = match resolved.occurrences.value.as_deref() {
         Some([path]) => path.clone(),
         None if doc.occurrences.is_empty() => Vec::new(),
         _ => return Err(several()),
     };
-    let part = placed(doc, &path)
-        .ok_or_else(|| bad(REPLACE, format!("view {} shows occurrence path {path:?}, which no longer exists", ids::encode(view))))?;
+    let part =
+        placed(doc, &path).ok_or_else(|| bad(cmd, format!("view {} shows occurrence path {path:?}, which no longer exists", ids::encode(view))))?;
     if holds_parts(doc, &part) {
         return Err(several());
     }
@@ -225,7 +334,7 @@ fn shown_part(doc: &Document, d: &Drawing, view: u64) -> Result<Part> {
 
 /// The part the request's `to` names: refused when the design doesn't have it, it is placed more
 /// than once and no path says which, or it holds other parts.
-fn target(doc: &Document, to: &ToParam) -> Result<Part> {
+fn target(doc: &Document, to: &ToParam, cmd: &str) -> Result<Part> {
     let path = match &to.path {
         Some(path) => path.clone(),
         None if to.component == 0 => Vec::new(),
@@ -233,15 +342,15 @@ fn target(doc: &Document, to: &ToParam) -> Result<Part> {
             let mut paths = doc.placements().into_iter().filter(|(c, _, _)| *c == to.component).map(|(_, path, _)| path);
             match (paths.next(), paths.next()) {
                 (Some(path), None) => path,
-                (Some(_), Some(_)) => return Err(bad(REPLACE, format!("component {} is placed more than once: give to.path", to.component))),
-                (None, _) => return Err(bad(REPLACE, format!("the design has no placed component {}", to.component))),
+                (Some(_), Some(_)) => return Err(bad(cmd, format!("component {} is placed more than once: give to.path", to.component))),
+                (None, _) => return Err(bad(cmd, format!("the design has no placed component {}", to.component))),
             }
         }
     };
     let part = placed(doc, &path).filter(|part| part.component == to.component);
-    let part = part.ok_or_else(|| bad(REPLACE, format!("occurrence path {path:?} doesn't place component {}", to.component)))?;
+    let part = part.ok_or_else(|| bad(cmd, format!("occurrence path {path:?} doesn't place component {}", to.component)))?;
     if holds_parts(doc, &part) {
-        return Err(bad(REPLACE, format!("not supported yet: component {} holds other parts", to.component)));
+        return Err(bad(cmd, format!("not supported yet: component {} holds other parts", to.component)));
     }
     Ok(part)
 }
@@ -294,22 +403,41 @@ impl Moves {
 
 /// Each dimension, note and balloon on `views` moved through `pairs` from occurrence path `from`
 /// to `to` by its own record's rule ([`Dimension::moved`], [`Note::moved`], [`Balloon::moved`])
-/// when every reference it has then finds its one thing, and listed as kept or lost. A note that
-/// points at nothing stays as it is.
-fn move_annotations(s: &Session, d: &mut Drawing, views: &BTreeSet<u64>, pairs: &FeaturePairs, (from, to): (&[u64], &[u64])) -> Moves {
+/// when every reference it has then finds its one thing where its view draws (`sessions`), and
+/// listed as kept or lost. A note that points at nothing stays as it is.
+fn move_annotations(
+    sessions: &mut ViewSessions,
+    d: &mut Drawing,
+    views: &BTreeSet<u64>,
+    pairs: &FeaturePairs,
+    (from, to): (&[u64], &[u64]),
+) -> Moves {
     let dimensions: Vec<(u64, Option<Dimension>)> =
         d.dimensions.iter().filter(|r| views.contains(&r.view)).map(|r| (r.id, r.moved(pairs, from, to))).collect();
     let on_views = |n: &&Arc<Note>| n.on_model() && n.anchor.view().is_some_and(|v| views.contains(&v));
     let notes: Vec<(u64, Option<Note>)> = d.notes.iter().filter(on_views).map(|n| (n.id, n.moved(pairs, from, to))).collect();
     let balloons: Vec<(u64, Option<Balloon>)> =
         d.balloons.iter().filter(|b| views.contains(&b.view)).map(|b| (b.id, b.moved(pairs, from, to))).collect();
-    // One look-up for every moved reference, each record's own list, in the order sorted below.
-    let found: Vec<bool> = {
-        let dimension = dimensions.iter().filter_map(|(_, r)| r.as_ref()).map(|r| r.kind.references());
-        let note = notes.iter().filter_map(|(_, n)| n.as_ref()).map(|n| n.references().collect());
-        let balloon = balloons.iter().filter_map(|(_, b)| b.as_ref()).map(|b| b.references().to_vec());
-        s.doc.finds_each(&s.model, &dimension.chain(note).chain(balloon).collect::<Vec<Vec<Reference<'_>>>>())
+    // Each moved record's references and its view, in the order sorted below, looked up once per
+    // state of the assembly the views draw.
+    let (groups, on): (Vec<Vec<Reference<'_>>>, Vec<u64>) = {
+        let dimension = dimensions.iter().filter_map(|(_, r)| r.as_ref()).map(|r| (r.kind.references(), r.view));
+        let note = notes.iter().filter_map(|(_, n)| n.as_ref()).map(|n| (n.references().collect(), n.anchor.view().unwrap_or_default()));
+        let balloon = balloons.iter().filter_map(|(_, b)| b.as_ref()).map(|b| (b.references().to_vec(), b.view));
+        dimension.chain(note).chain(balloon).unzip()
     };
+    let mut found = vec![false; groups.len()];
+    // A view whose state can't be made reads on the design as it places its parts
+    // ([`ViewSessions::of_view`]): nothing here fails.
+    let Ok(()) = sessions.each_on(d, &on, |session, ats| {
+        let these: Vec<Vec<Reference<'_>>> = ats.iter().filter_map(|at| groups.get(*at).cloned()).collect();
+        for (at, one) in ats.iter().zip(session.doc.finds_each(&session.model, &these)) {
+            if let Some(slot) = found.get_mut(*at) {
+                *slot = one;
+            }
+        }
+        Ok::<(), std::convert::Infallible>(())
+    });
     let (mut found, mut moves) = (found.into_iter(), Moves::default());
     for record in moves.sort(dimensions, "dimension", &mut found) {
         if let Ok(at) = d.dimensions.binary_search_by_key(&record.id, |r| r.id)
@@ -333,4 +461,4 @@ fn move_annotations(s: &Session, d: &mut Drawing, views: &BTreeSet<u64>, pairs: 
 
 #[cfg(test)]
 #[path = "drawing_source_tests.rs"]
-mod tests;
+pub(super) mod tests;

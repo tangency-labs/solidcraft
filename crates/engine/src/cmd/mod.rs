@@ -40,6 +40,7 @@ pub(crate) mod diagnostics;
 mod drawing;
 mod drawing_balloon;
 mod drawing_check;
+pub mod drawing_clipboard;
 mod drawing_dimension;
 mod drawing_export;
 mod drawing_fill;
@@ -493,6 +494,7 @@ pub fn command_specs() -> Vec<&'static CommandSpec> {
     v.extend(drawing::COMMANDS.iter());
     v.extend(drawing_balloon::COMMANDS.iter());
     v.extend(drawing_check::COMMANDS.iter());
+    v.extend(drawing_clipboard::COMMANDS.iter());
     v.extend(drawing_image::COMMANDS.iter());
     v.extend(drawing_note::COMMANDS.iter());
     v.extend(drawing_symbol::COMMANDS.iter());

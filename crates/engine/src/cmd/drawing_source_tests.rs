@@ -7,6 +7,10 @@ use solidcraft_geom::drawing_view::NamedView;
 
 use super::*;
 
+/// Why an annotation is lost when a feature or body it names has no pair, for the paste's tests:
+/// the reason stays private to the replace.
+pub(crate) const NO_PAIR: &str = super::NO_PAIR;
+
 fn run(s: &mut Session, id: &str, p: Value) -> Value {
     s.execute(id, &p).unwrap_or_else(|e| panic!("{id}: {e}"))
 }
@@ -23,16 +27,16 @@ fn saved(s: &Session) -> String {
 /// 10 mm hole through its middle; plate B, A's Paste New copy 100 mm towards -Y, made 120 long;
 /// then a 2 mm chamfer on A's top front edge, which B doesn't have. A drawing of them, open, with a
 /// front view of A alone at 1:1.
-struct Plates {
-    s: Session,
-    a: u64,
-    b: u64,
-    a_at: u64,
-    b_at: u64,
-    view: u64,
+pub(crate) struct Plates {
+    pub(crate) s: Session,
+    pub(crate) a: u64,
+    pub(crate) b: u64,
+    pub(crate) a_at: u64,
+    pub(crate) b_at: u64,
+    pub(crate) view: u64,
 }
 
-fn plates() -> Plates {
+pub(crate) fn plates() -> Plates {
     let mut s = Session::default();
     let made = run(&mut s, "component.create", json!({"name": "Plate A"}));
     let (a, a_at) = (made["component"].as_u64().unwrap(), made["occurrence"].as_u64().unwrap());
@@ -69,7 +73,7 @@ fn plates() -> Plates {
 /// On A's front view: its bottom front edge's length (100), a note on the hole's top edge, a
 /// balloon on its front right edge, and the length of the front edge the chamfer made (100). Their
 /// ids, in that order.
-fn annotated(p: &mut Plates) -> [Value; 4] {
+pub(crate) fn annotated(p: &mut Plates) -> [Value; 4] {
     let (v, at) = (json!(ids::encode(p.view)), json!([p.a_at]));
     let length = |s: &mut Session, point: [f64; 3]| {
         run(s, "drawing.dimension.add", json!({"view": v, "kind": {"length": {"edge": {"point": point, "path": at}}}}))["dimension"].clone()
@@ -244,6 +248,22 @@ fn a_sheets_documented_part_and_parts_list_follow() {
 /// The pairs between A and B: A's box and cut pair with B's, and their bodies; A's chamfer, made
 /// after the copy, has no pair. A part built the other way round (the cut first) pairs nothing,
 /// and a part with itself pairs everything with itself.
+/// A replace moves only what documented or listed the old part: a sheet that documents the design
+/// itself and a parts list of the design stay as they are.
+#[test]
+fn a_sheet_and_a_parts_list_of_another_part_stay() {
+    let mut p = plates();
+    let source = ids::encode(p.s.drawing("test").unwrap().sources[0].id);
+    run(&mut p.s, "drawing.sheet.set", json!({"sheet": "Sheet 1", "documents": {"source": source, "component": 0}}));
+    let list = run(&mut p.s, "drawing.table.add", json!({"sheet": "Sheet 1", "kind": "parts_list"}))["table"].clone();
+    let reply = run(&mut p.s, REPLACE, json!({"sheet": "Sheet 1", "to": {"component": p.b}}));
+    assert_eq!((&reply["sheets"], &reply["parts_lists"]), (&json!([]), &json!([])), "{reply}");
+    let d = p.s.drawing("test").unwrap();
+    assert_eq!(d.sheets[0].documents.map(|c| c.component), Some(0));
+    let Kind::PartsList(of) = &d.tables.by_id(ids::decode(list.as_str().unwrap()).unwrap()).unwrap().kind else { panic!("{list}") };
+    assert_eq!(of.of.component, 0);
+}
+
 #[test]
 fn features_pair_by_timeline_order_and_kind() {
     let mut p = plates();

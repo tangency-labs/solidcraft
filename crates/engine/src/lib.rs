@@ -309,6 +309,8 @@ pub struct ForeignCopy {
     pub doc: Arc<Document>,
     pub model: Model,
     pub pending_moves: std::collections::BTreeMap<u64, solidcraft_doc::Mat>,
+    /// Drawing items copied (`drawing.paste` with `from_design`).
+    pub drawing: Option<Arc<cmd::drawing_clipboard::DrawingClip>>,
 }
 
 impl ForeignCopy {
@@ -328,14 +330,30 @@ impl ForeignCopy {
             doc: session.doc.clone(),
             model: session.model.clone(),
             pending_moves: session.pending_moves.clone(),
+            drawing: None,
         })
     }
 
     /// Timeline Copy's snapshot. No placed body geometry is needed to paste sketches.
     pub fn of_features(session: &Session) -> ForeignCopy {
+        ForeignCopy::of_copied(session, session.clipboard.clone(), None)
+    }
+
+    /// Drawing Copy's snapshot: the drawing items, with the design and model their references
+    /// name.
+    pub fn of_drawing(session: &Session, drawing: Arc<cmd::drawing_clipboard::DrawingClip>) -> ForeignCopy {
+        ForeignCopy::of_copied(session, Vec::new(), Some(drawing))
+    }
+
+    /// A snapshot of `features` or `drawing` items, with no bodies or placements.
+    fn of_copied(
+        session: &Session,
+        features: Vec<solidcraft_doc::Feature>,
+        drawing: Option<Arc<cmd::drawing_clipboard::DrawingClip>>,
+    ) -> ForeignCopy {
         ForeignCopy {
             design: session.doc.name.clone(),
-            features: session.clipboard.clone(),
+            features,
             world: session.model.state(),
             bodies: Vec::new(),
             names: Vec::new(),
@@ -344,6 +362,7 @@ impl ForeignCopy {
             doc: session.doc.clone(),
             model: session.model.clone(),
             pending_moves: session.pending_moves.clone(),
+            drawing,
         }
     }
 }
@@ -704,6 +723,8 @@ pub struct Session {
     pub clipboard: Vec<solidcraft_doc::Feature>,
     /// Sketch geometry copied with `sketch.copy` (pasted by `sketch.paste`).
     pub sketch_clipboard: Option<cmd::sketch_clipboard::SketchClip>,
+    /// Drawing items copied with `drawing.copy` (pasted by `drawing.paste`).
+    pub drawing_clipboard: Option<Arc<cmd::drawing_clipboard::DrawingClip>>,
     /// Resolved appearance copied by appearance.copy; transient, outside design/history.
     pub appearance_clipboard: Option<solidcraft_doc::appearance::Look>,
     /// What was copied in another design, to paste here (`component.paste_from_design`). The
@@ -1005,6 +1026,7 @@ impl Session {
             contact_meshes: Default::default(),
             clipboard: Vec::new(),
             sketch_clipboard: None,
+            drawing_clipboard: None,
             appearance_clipboard: None,
             foreign_copy: None,
             section: None,
@@ -2444,6 +2466,7 @@ impl Session {
             contact_meshes: self.contact_meshes.clone(),
             clipboard: self.clipboard.clone(),
             sketch_clipboard: self.sketch_clipboard.clone(),
+            drawing_clipboard: self.drawing_clipboard.clone(),
             appearance_clipboard: self.appearance_clipboard.clone(),
             foreign_copy: self.foreign_copy.clone(),
             section: None,
