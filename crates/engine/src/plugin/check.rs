@@ -68,6 +68,8 @@ fn read_folder(root: &Path) -> std::result::Result<Vec<safe_zip::File>, CheckPro
     };
     let mut files = Vec::new();
     let mut total = 0u64;
+    // Files and folders alike, so a deep tree of empty folders ends too.
+    let mut seen = 0usize;
     let mut pending = vec![(root.to_path_buf(), String::new())];
     while let Some((dir, prefix)) = pending.pop() {
         solidcraft_io::vfs::check(&dir.to_string_lossy()).map_err(|e| unreadable(&dir, &e))?;
@@ -77,6 +79,10 @@ fn read_folder(root: &Path) -> std::result::Result<Vec<safe_zip::File>, CheckPro
             let name = entry.file_name().to_string_lossy().into_owned();
             if name.starts_with('.') || (prefix.is_empty() && name == TESTS_FOLDER) {
                 continue;
+            }
+            seen += 1;
+            if seen > super::MAX_FILES {
+                return Err(too_big(format!("the package holds more than {} files and folders", super::MAX_FILES)));
             }
             let relative = format!("{prefix}{name}");
             let kind = entry.file_type().map_err(|e| unreadable(&entry.path(), &e))?;
