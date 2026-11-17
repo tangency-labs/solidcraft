@@ -1,0 +1,391 @@
+{
+  "area": "booleans",
+  "bodies": {},
+  "calls": [
+    {
+      "inputs": [],
+      "op": "extrude",
+      "outputs": [
+        "b1"
+      ],
+      "params": {
+        "cap": true,
+        "corner": "curvature",
+        "direction": [
+          0.0,
+          0.0,
+          1.0
+        ],
+        "distance": 6.0,
+        "draft": 0.0,
+        "profile": [
+          {
+            "line": {
+              "end": [
+                160.0,
+                0.0,
+                0.0
+              ],
+              "start": [
+                0.0,
+                0.0,
+                0.0
+              ]
+            }
+          },
+          {
+            "line": {
+              "end": [
+                160.0,
+                100.0,
+                0.0
+              ],
+              "start": [
+                160.0,
+                0.0,
+                0.0
+              ]
+            }
+          },
+          {
+            "line": {
+              "end": [
+                0.0,
+                100.0,
+                0.0
+              ],
+              "start": [
+                160.0,
+                100.0,
+                0.0
+              ]
+            }
+          },
+          {
+            "line": {
+              "end": [
+                0.0,
+                0.0,
+                0.0
+              ],
+              "start": [
+                0.0,
+                100.0,
+                0.0
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "inputs": [],
+      "op": "extrude",
+      "outputs": [
+        "b2"
+      ],
+      "params": {
+        "cap": true,
+        "corner": "curvature",
+        "direction": [
+          0.0,
+          0.0,
+          1.0
+        ],
+        "distance": 7.0,
+        "draft": 0.0,
+        "profile": [
+          {
+            "line": {
+              "end": [
+                50.1,
+                29.9,
+                -0.5
+              ],
+              "start": [
+                29.9,
+                29.9,
+                -0.5
+              ]
+            }
+          },
+          {
+            "line": {
+              "end": [
+                50.1,
+                36.1,
+                -0.5
+              ],
+              "start": [
+                50.1,
+                29.9,
+                -0.5
+              ]
+            }
+          },
+          {
+            "line": {
+              "end": [
+                29.9,
+                36.1,
+                -0.5
+              ],
+              "start": [
+                50.1,
+                36.1,
+                -0.5
+              ]
+            }
+          },
+          {
+            "line": {
+              "end": [
+                29.9,
+                29.9,
+                -0.5
+              ],
+              "start": [
+                29.9,
+                36.1,
+                -0.5
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "inputs": [],
+      "op": "extrude",
+      "outputs": [
+        "b3"
+      ],
+      "params": {
+        "cap": true,
+        "corner": "curvature",
+        "direction": [
+          0.0,
+          0.0,
+          1.0
+        ],
+        "distance": 7.0,
+        "draft": 0.0,
+        "profile": [
+          {
+            "line": {
+              "end": [
+                90.1,
+                29.9,
+                -0.5
+              ],
+              "start": [
+                69.9,
+                29.9,
+                -0.5
+              ]
+            }
+          },
+          {
+            "line": {
+              "end": [
+                90.1,
+                36.1,
+                -0.5
+              ],
+              "start": [
+                90.1,
+                29.9,
+                -0.5
+              ]
+            }
+          },
+          {
+            "line": {
+              "end": [
+                69.9,
+                36.1,
+                -0.5
+              ],
+              "start": [
+                90.1,
+                36.1,
+                -0.5
+              ]
+            }
+          },
+          {
+            "line": {
+              "end": [
+                69.9,
+                29.9,
+                -0.5
+              ],
+              "start": [
+                69.9,
+                36.1,
+                -0.5
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "inputs": [],
+      "op": "extrude",
+      "outputs": [
+        "b4"
+      ],
+      "params": {
+        "cap": true,
+        "corner": "curvature",
+        "direction": [
+          0.0,
+          0.0,
+          1.0
+        ],
+        "distance": 7.0,
+        "draft": 0.0,
+        "profile": [
+          {
+            "line": {
+              "end": [
+                130.1,
+                29.9,
+                -0.5
+              ],
+              "start": [
+                109.9,
+                29.9,
+                -0.5
+              ]
+            }
+          },
+          {
+            "line": {
+              "end": [
+                130.1,
+                36.1,
+                -0.5
+              ],
+              "start": [
+                130.1,
+                29.9,
+                -0.5
+              ]
+            }
+          },
+          {
+            "line": {
+              "end": [
+                109.9,
+                36.1,
+                -0.5
+              ],
+              "start": [
+                130.1,
+                36.1,
+                -0.5
+              ]
+            }
+          },
+          {
+            "line": {
+              "end": [
+                109.9,
+                29.9,
+                -0.5
+              ],
+              "start": [
+                109.9,
+                36.1,
+                -0.5
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "inputs": [
+        "b2",
+        "b3",
+        "b4"
+      ],
+      "op": "union_all",
+      "outputs": [
+        "b5"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b1"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b6"
+      ],
+      "params": {
+        "operand": 0
+      }
+    },
+    {
+      "inputs": [
+        "b5"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b7"
+      ],
+      "params": {
+        "operand": 1
+      }
+    },
+    {
+      "inputs": [
+        "b6",
+        "b7"
+      ],
+      "op": "boolean",
+      "outputs": [
+        "b8"
+      ],
+      "params": {
+        "op": "subtract"
+      }
+    }
+  ],
+  "case": "17422-tab-slot-laser-relieved-slot-cut",
+  "expected": {
+    "body_count": 1,
+    "edges": 48,
+    "faces": 18,
+    "method": "Fixture F of the Tab and Slot design: Bottom, the slot plate, x 0..160, y 0..100, z 0..6; Wall, the tab plate, x 20..140, y 30..36, z 6..66, standing on Bottom's top face z = 6. Laser row: count 3, tab width W 20, end distance e 10, clearance c 0.1, protrusion 0, overshoot 0.5. The tabs start at u = 20 + e = 30, at 140 - e - W = 110 and evenly between: 30, 70, 110. Each slot takes 20.2 * 6.2 * 6 = 751.44 out of Bottom's 160 * 100 * 6 = 96000, and the three are 19.8 apart (no overlap, each a through hole well inside Bottom): 96000 - 3 * 751.44 = 93745.68. Topology by hand: Bottom's 6 faces plus 4 walls per hole = 18 faces; 12 box edges plus 12 per hole (4 walls, 4 on top, 4 on the bottom) = 48 edges; 8 + 8 per hole = 32 vertices. One body of genus 3: V - E + F - rings = 32 - 48 + 18 - 6 = -4 = 2(1 - 3). body_count 1",
+    "outcome": "solid",
+    "source": "analytic",
+    "sources": [
+      "tangency-labs/solidcraft#17422"
+    ],
+    "tolerance": {
+      "rel": 1e-06
+    },
+    "vertices": 32,
+    "volume_mm3": 93745.68,
+    "what": "Tab and Slot, laser row, the slot plate's cut: Bottom less the union of three relieved slots, each the tab's 20 x 6 footprint grown by the clearance 0.1 on every side (x u-0.1..u+20.1, y 29.9..36.1) and run through Bottom with 0.5 overshoot on both faces (z -0.5..6.5), as solidcore-ops' Body::tab_slot_cut does it (union_all of the slot prisms, then one subtract)"
+  },
+  "expressible": true,
+  "operation_expressible": true,
+  "result": [
+    {
+      "body": "t1",
+      "made": "b8"
+    }
+  ],
+  "sources": [
+    "tangency-labs/solidcraft#17422"
+  ],
+  "ungraded": [],
+  "what": "Tab and Slot, laser row, the slot plate's cut: Bottom less the union of three relieved slots, each the tab's 20 x 6 footprint grown by the clearance 0.1 on every side (x u-0.1..u+20.1, y 29.9..36.1) and run through Bottom with 0.5 overshoot on both faces (z -0.5..6.5), as solidcore-ops' Body::tab_slot_cut does it (union_all of the slot prisms, then one subtract)",
+  "why_not": []
+}
