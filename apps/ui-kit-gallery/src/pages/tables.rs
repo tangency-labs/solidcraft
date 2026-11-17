@@ -19,7 +19,7 @@ pub const TABLE: Page = Page {
         "Sort",
         "bin_button",
         "removable_header",
-        "plus_header",
+        "add_column_button",
         "label_actions",
     ],
     what: "A dense editable table, such as Parameters: columns sized from the form's label column, cells that hold editors, a bin per row and a dashed row at the end that adds one.",

@@ -7103,7 +7103,7 @@ dependencies = [
 
 [[package]]
 name = "ui-kit-gallery"
-version = "0.41.0"
+version = "0.44.0"
 dependencies = [
  "eframe",
  "egui",

@@ -14,7 +14,10 @@ fn context() -> egui::Context {
 fn frame(ctx: &egui::Context, gallery: &mut Gallery, events: Vec<egui::Event>) -> egui::FullOutput {
     let input =
         egui::RawInput { screen_rect: Some(Rect::from_min_size(egui::Pos2::ZERO, vec2(1280.0, 720.0))), events, focused: true, ..Default::default() };
-    ctx.run_ui(input, |ui| gallery.show(ui))
+    let mut output = ctx.run_ui(input, |ui| gallery.show(ui));
+    // No renderer takes the frame's texture deltas: epaint requires them handled before a drop.
+    output.textures_delta.clear();
+    output
 }
 
 #[test]

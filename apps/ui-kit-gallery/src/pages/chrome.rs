@@ -37,10 +37,10 @@ for action in out.actions { /* BarAction::Home, File { rect }, Button { id }, â€
         let data = app_bar::AppBar {
             mark: &|painter, at| solidcraft_look::glyphs::brand_mark(painter, at),
             name: "SolidCraft",
+            leading: None,
             home: app_bar::BarButton { narrow: false, ..button("home", "home", "Home") },
             file: "File",
             file_open: false,
-            plugins: None,
             actions: vec![
                 button("save", "save", "Save"),
                 app_bar::BarButton { enabled: false, wide_only: true, ..button("undo", "undo", "Undo") },
@@ -49,6 +49,7 @@ for action in out.actions { /* BarAction::Home, File { rect }, Button { id }, â€
             quick: 0,
             help: app_bar::BarButton { narrow: false, ..button("help", "help", "Help") },
             settings: app_bar::BarButton { narrow: false, ..button("settings", "settings", "Settings") },
+            pills: Vec::new(),
             report: app_bar::Report { label: "Report a bug", tip: "Report a problem", icon_only: false },
             search: false,
             search_shortcut: None,
@@ -59,8 +60,8 @@ for action in out.actions { /* BarAction::Home, File { rect }, Button { id }, â€
                 home_rect: &["gallery:bar:home"],
                 file: &["gallery:bar:file"],
                 file_rect: &["gallery:bar:file"],
-                plugins: "gallery:bar:plugins",
                 button: &["gallery:bar:"],
+                pill: "gallery:bar:pill:",
                 separator: "gallery:bar:separator:",
                 search: "gallery:bar:search",
                 report: "gallery:bar:report",
@@ -198,7 +199,7 @@ struct Steps<'a> {
 
 impl history_bar::Contents for Steps<'_> {
     fn entries(&mut self, strip: &mut history_bar::Strip<'_, '_>) {
-        let tip = || String::new();
+        let tip = kit::StatusTip::default;
         for (slot, (label, icon)) in self.steps.iter().enumerate() {
             strip.step(&history_bar::Step {
                 id: slot as u64,
@@ -211,6 +212,7 @@ impl history_bar::Contents for Steps<'_> {
                 warning: false,
                 ink: None,
                 tip: &tip,
+                handle: None,
             });
         }
     }
