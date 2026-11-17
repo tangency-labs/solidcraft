@@ -813,7 +813,6 @@ impl SurfOfExtrusion {
                     } else {
                         uv_domain.v_interval()
                     },
-                    is_closed,
                     plane,
                     plane_domain: *other_uv_domain,
                     tol,
@@ -1811,8 +1810,55 @@ mod tests {
         r
     }
 
-    /// A bounded plane covering part of an in-plane extrusion: the boundary is cut
-    /// by the plane's domain, whose side `x = 0.5` closes it.
+    /// The plane `z = 0` over the UV box `dom` (unit scale).
+    fn xy_plane(dom: Extent2d) -> Plane {
+        let mut plane = Plane::new(
+            Point3::ZERO,
+            Vec3::X,
+            Vec3::Y,
+            crate::geom::vector2d::Vec2::new(1.0, 1.0),
+            &dom,
+        );
+        plane.make_nurb().unwrap();
+        plane
+    }
+
+    /// Asserts the answer is exactly the segments `expected` (each once, either
+    /// orientation, ends within `1e-9` relative): the boundary is complete, and no
+    /// curve repeats or overlaps another.
+    fn assert_segments(k: &Kernel, r: &ExtrusionIntersection, expected: &[[(f64, f64); 2]]) {
+        let got: Vec<(Point3, Point3)> = r
+            .curves_3d
+            .iter()
+            .map(|c| {
+                let ivl = c.natural_interval();
+                let a = c.evaluate(k, ivl.min(), 0, true, true).unwrap()[0];
+                let b = c.evaluate(k, ivl.max(), 0, true, true).unwrap()[0];
+                // a straight segment: its middle is the ends' midpoint
+                let m = c.evaluate(k, ivl.mid(), 0, true, true).unwrap()[0];
+                assert!(m.distance((a + b) / 2.0) <= 1e-9 * (1.0 + a.max_dimension()));
+                (a, b)
+            })
+            .collect();
+        let near = |p: Point3, q: (f64, f64)| {
+            let q = Point3::new(q.0, q.1, 0.0);
+            p.distance(q) <= 1e-9 * (1.0 + q.max_dimension())
+        };
+        assert_eq!(got.len(), expected.len(), "{got:?}");
+        let mut used = vec![false; got.len()];
+        for [p, q] in expected {
+            let hit = got.iter().enumerate().position(|(i, &(a, b))| {
+                !used[i] && ((near(a, *p) && near(b, *q)) || (near(a, *q) && near(b, *p)))
+            });
+            let Some(i) = hit else {
+                panic!("missing {p:?}-{q:?} in {got:?}");
+            };
+            used[i] = true;
+        }
+    }
+
+    /// A bounded plane covering part of an in-plane extrusion (`mu = x` monotone):
+    /// the region `0.5 <= x <= 2` of the box, closed by the domain's side `x = 0.5`.
     #[test]
     fn extrusion_in_a_bounded_plane_gives_the_clipped_patch() {
         let k = k();
@@ -1822,23 +1868,128 @@ mod tests {
             None,
             Vec3::Y,
         );
-        let dom = Extent2d::from_bounds(0.5, -5.0, 5.0, 5.0);
-        let mut plane = Plane::new(
-            Point3::ZERO,
-            Vec3::X,
-            Vec3::Y,
-            crate::geom::vector2d::Vec2::new(1.0, 1.0),
-            &dom,
-        );
-        plane.make_nurb().unwrap();
+        let plane = xy_plane(Extent2d::from_bounds(0.5, -5.0, 5.0, 5.0));
         let r = patch_in_xy_plane(&k, &s, &plane);
-        let on_side = r.curves_3d.iter().any(|c| {
-            let ivl = c.natural_interval();
-            let a = c.evaluate(&k, ivl.min(), 0, true, true).unwrap()[0];
-            let b = c.evaluate(&k, ivl.max(), 0, true, true).unwrap()[0];
-            (a.x - 0.5).abs() <= 1e-12 && (b.x - 0.5).abs() <= 1e-12 && a.distance(b) > 0.1
-        });
-        assert!(on_side, "the domain side closes the clipped patch");
+        assert_segments(
+            &k,
+            &r,
+            &[
+                [(0.5, -5.0), (0.5, 5.0)],
+                [(2.0, -5.0), (2.0, 5.0)],
+                [(0.5, -5.0), (2.0, -5.0)],
+                [(0.5, 5.0), (2.0, 5.0)],
+            ],
+        );
+    }
+
+    /// A generator folding back across the sweep (`y`: 0, 1, 0.5, swept along `x`):
+    /// the region is the strip `0 <= y <= 1` of the domain, bounded by the fold's
+    /// directrix at `y = 1`, not by the end's at `y = 0.5` (inside the strip).
+    #[test]
+    fn folded_generator_gives_its_strip() {
+        let k = k();
+        let s = swept(
+            &k,
+            &[(0.0, 0.0, 0.0), (1.0, 1.0, 0.0), (2.0, 0.5, 0.0)],
+            None,
+            Vec3::X,
+        );
+        let plane = xy_plane(Extent2d::from_bounds(-5.0, -5.0, 5.0, 5.0));
+        let r = patch_in_xy_plane(&k, &s, &plane);
+        assert_segments(
+            &k,
+            &r,
+            &[
+                [(-5.0, 0.0), (5.0, 0.0)],
+                [(-5.0, 1.0), (5.0, 1.0)],
+                [(-5.0, 0.0), (-5.0, 1.0)],
+                [(5.0, 0.0), (5.0, 1.0)],
+            ],
+        );
+    }
+
+    /// An infinite extrusion in an unbounded plane whose copies lie on the domain's
+    /// sides: each boundary piece once (no copy and side both).
+    #[test]
+    fn copies_on_the_domain_sides_are_not_repeated() {
+        let k = k();
+        let s = swept(&k, &[(0.0, 0.0, 0.0), (0.0, 1.0, 0.0)], None, Vec3::X);
+        let plane = Plane::from_normal(Point3::ZERO, Vec3::Z);
+        let r = patch_in_xy_plane(&k, &s, &plane);
+        let big = plane.natural_uv_domain().u_interval().max();
+        let v = s.base().natural_uv_domain().v_interval();
+        assert_eq!(v.max(), big, "the copies lie on the sides");
+        assert_segments(
+            &k,
+            &r,
+            &[
+                [(-big, 0.0), (big, 0.0)],
+                [(-big, 1.0), (big, 1.0)],
+                [(-big, 0.0), (-big, 1.0)],
+                [(big, 0.0), (big, 1.0)],
+            ],
+        );
+    }
+
+    /// Two ranges in the plane apart across the sweep: two regions, each closed once.
+    #[test]
+    fn two_ranges_give_two_regions() {
+        let k = k();
+        let s = swept(
+            &k,
+            &[
+                (0.0, 0.0, 0.0),
+                (1.0, 0.0, 0.0),
+                (2.0, 0.0, 1.0),
+                (3.0, 0.0, 0.0),
+                (4.0, 0.0, 0.0),
+            ],
+            None,
+            Vec3::Y,
+        );
+        let plane = xy_plane(Extent2d::from_bounds(-1.0, -5.0, 5.0, 5.0));
+        let r = patch_in_xy_plane(&k, &s, &plane);
+        let rb: Vec<_> = r
+            .curve_types
+            .iter()
+            .filter(|t| **t == TsectCurveType::RegionBoundary)
+            .collect();
+        assert_eq!(rb.len(), r.curves_3d.len(), "{:?}", r.curve_types);
+        assert_segments(
+            &k,
+            &r,
+            &[
+                [(0.0, -5.0), (0.0, 5.0)],
+                [(1.0, -5.0), (1.0, 5.0)],
+                [(0.0, -5.0), (1.0, -5.0)],
+                [(0.0, 5.0), (1.0, 5.0)],
+                [(3.0, -5.0), (3.0, 5.0)],
+                [(4.0, -5.0), (4.0, 5.0)],
+                [(3.0, -5.0), (4.0, -5.0)],
+                [(3.0, 5.0), (4.0, 5.0)],
+            ],
+        );
+    }
+
+    /// A finite sweep of a folded generator whose copies lie inside the domain: no
+    /// certificate covers the region (its slices need not be one interval), so the
+    /// general intersection, as upstream.
+    #[test]
+    fn folded_generator_with_a_short_sweep_declines() {
+        let k = k();
+        let gen = swept(
+            &k,
+            &[(0.0, 0.0, 0.0), (1.0, 1.0, 0.0), (3.0, 0.5, 0.0)],
+            None,
+            Vec3::X,
+        );
+        let plane = xy_plane(Extent2d::from_bounds(-5.0, -5.0, 5.0, 5.0));
+        let dom = Extent2d::from_bounds(0.0, 0.0, 2.0, 1.0);
+        let r = gen
+            .intersect_with_plane(&k, &dom, &plane, &plane.natural_uv_domain(), None)
+            .unwrap();
+        assert!(r.needs_more_intersections);
+        assert!(r.curves_3d.is_empty());
     }
 
     /// A generator part in the plane and part crossing it: the patch for the part,
@@ -1870,10 +2021,20 @@ mod tests {
                 (a.x - 1.5).abs() <= 1e-9 && a.z.abs() <= 1e-12
             });
         assert!(crossing, "the directrix at x = 1.5: {:?}", r.curve_types);
+        assert_eq!(
+            r.curve_types
+                .iter()
+                .filter(|t| **t == TsectCurveType::RegionBoundary)
+                .count(),
+            4,
+            "{:?}",
+            r.curve_types
+        );
     }
 
-    /// A rational (circular) profile in the plane: the certificate takes the
-    /// weights, and the patch is answered.
+    /// A rational (circular) profile in the plane, monotone across the sweep: the
+    /// certificate takes the weights; the boundary is its two copies (arcs) and the
+    /// two end directrices, in a bounded plane holding them.
     #[test]
     fn rational_profile_in_the_plane_gives_its_patch() {
         let k = k();
@@ -1884,8 +2045,31 @@ mod tests {
             Some(w),
             Vec3::new(2.0, 0.0, 0.0),
         );
-        let plane = Plane::from_normal(Point3::ZERO, Vec3::Z);
-        patch_in_xy_plane(&k, &s, &plane);
+        let plane = xy_plane(Extent2d::from_bounds(-5.0, -5.0, 5.0, 5.0));
+        let dom = Extent2d::from_bounds(0.0, 0.0, 1.0, 1.0);
+        let r = s
+            .intersect_with_plane(&k, &dom, &plane, &plane.natural_uv_domain(), None)
+            .unwrap();
+        assert!(!r.needs_more_intersections);
+        assert_eq!(r.curves_3d.len(), 4, "{:?}", r.curve_types);
+        // the copies: the arc at x and at x + 2; the directrices at y = 0 and y = 1
+        let mut arcs = 0;
+        for c in &r.curves_3d {
+            let ivl = c.natural_interval();
+            let a = c.evaluate(&k, ivl.min(), 0, true, true).unwrap()[0];
+            let m = c.evaluate(&k, ivl.mid(), 0, true, true).unwrap()[0];
+            if m.distance((a + c.evaluate(&k, ivl.max(), 0, true, true).unwrap()[0]) / 2.0) > 0.1 {
+                // on the circle of radius 1 about (0, 0) or (2, 0)
+                let centre = if m.x > 1.5 {
+                    Point3::new(2.0, 0.0, 0.0)
+                } else {
+                    Point3::ZERO
+                };
+                assert!((m.distance(centre) - 1.0).abs() <= 1e-12, "{m:?}");
+                arcs += 1;
+            }
+        }
+        assert_eq!(arcs, 2);
     }
 
     /// A profile 1e-9 off the plane (within the analysis tolerance, so a range,

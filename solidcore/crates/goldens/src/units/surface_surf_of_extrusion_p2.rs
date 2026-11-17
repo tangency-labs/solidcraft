@@ -2045,9 +2045,10 @@ mod tests {
                     .any(|(j, q)| j != i && (*p - *q).length() <= 1e-9 * scale);
                 assert!(met, "{name}: open boundary end {p:?}");
             }
-            // τ-independent
+            // τ-independent. The special case caps τ at 1e-6, so these are five
+            // distinct effective tolerances (larger values would all act as 1e-6).
             let first = curve_ends(&k, &r);
-            for t in [1e-2, 1e-4, 1e-6, 1e-8] {
+            for t in [1e-6, 1e-7, 1e-8, 1e-9, 1e-10] {
                 let rt = s.intersect_with_plane(&k, &d, &pl, &od, Some(t)).unwrap();
                 assert_eq!(rt.curve_types, r.curve_types, "{name}: types at τ = {t}");
                 let other = curve_ends(&k, &rt);
@@ -2064,50 +2065,13 @@ mod tests {
         }
     }
 
-    /// The distance of `x` (in the plane of normal `n`, which holds the sweep `E`)
-    /// from the extrusion's lines through the generator points `C(s)` with
-    /// `m . C(s) = m . x` (`m = n x E`, the in-plane normal to the sweep): a witness
-    /// `C(s) + v E` evaluated, not a search over the surface.
-    fn off_extrusion(k: &Kernel, s: &SurfOfExtrusion, n: Vec3, x: Vec3) -> f64 {
-        use solidcore::curve::curve::p7::PropertyAnalysisOptions;
-        use solidcore::curve::curve::CurvePropertyType;
-        use solidcore::surface::surface::p4::NoObject;
-        let gen = s.gen_curve().unwrap();
-        let e = s.extrusion_vector();
-        let m = n.cross(e);
-        let mu = m / m.length();
-        let vecs = [mu];
-        let opts = PropertyAnalysisOptions::<NoObject> {
-            property_value: Some(-mu.dot(x)),
-            opt_vectors: &vecs,
-            want_comb: false,
-            handle: None,
-        };
-        let ivl = gen.natural_interval();
-        let sols = gen
-            .global_property_analysis(k, &ivl, CurvePropertyType::PlaneIntersection, 1e-9, &opts)
-            .unwrap()
-            .solutions;
-        let mut best = f64::INFINITY;
-        for sol in sols.as_slice() {
-            for t in sol.start.parameters.first().into_iter().chain(sol.end.parameters.first()) {
-                if !ivl.contains_value(*t, 0.0) {
-                    continue;
-                }
-                let c = gen.evaluate(k, *t, 0, true, true).unwrap()[0];
-                let v = e.dot(x - c) / e.dot(e);
-                best = best.min((c + e * v - x).length());
-            }
-        }
-        best
-    }
-
-    /// The rows this change moved: the special case declined (`needs_more`, no curve)
-    /// where the extrusion lies in the plane, and now answers the coincident patch.
-    const COINCIDENT_ROWS: [&str; 15] = [
+    /// The rows this change moved, answered: the special case declined
+    /// (`needs_more`, no curve) where the extrusion lies in the plane, and now answers
+    /// the coincident region's boundary (an empty one where the region misses the
+    /// plane's domain).
+    const COINCIDENT_ROWS: [&str; 12] = [
         "gen0158",
         "gen0163",
-        "gen0260",
         "gen0301",
         "gen0355",
         "gen0404",
@@ -2117,78 +2081,211 @@ mod tests {
         "gen0666",
         "gen0787",
         "gen0970",
-        "gen1043",
-        "gen1048",
         "line_plane_containing",
     ];
 
-    /// Certifies every moved row's answer without sampling:
-    /// - every curve's Euclidean control points (positive weights) lie within
-    ///   `1e-12 (1 + |P|)` of the plane and inside its domain, so by the convex hull
-    ///   the whole curve does (the plane and its domain box are convex);
-    /// - every curve end lies on the extrusion: the end's inverted parameters
-    ///   evaluate back to it within `1e-9 (1 + |X|)` (a witness, not a search);
-    /// - every `RegionBoundary` end meets another end (the boundary closes);
-    /// - an empty answer has the plane's domain apart from the extrusion: the UV box
-    ///   of the extrusion's whole control net (with `v` at the domain's ends) misses
-    ///   the plane's domain, so no point of the surface lies over it.
-    #[test]
-    fn moved_coincident_rows_are_certified() {
-        use solidcore::curve::curve::{Curve, CurveKind};
-        use solidcore::surface::surface::p2::TsectCurveType;
-        let base_of = |c: &Curve| match c.kind() {
+    /// Rows whose extrusion lies in the plane but whose region no certificate covers
+    /// (a folded generator swept a finite length inside the domain): the special case
+    /// still declines, as upstream.
+    const DECLINED_ROWS: [&str; 3] = ["gen0260", "gen1043", "gen1048"];
+
+    /// The plane's UV frame of a case: `E` in UV, `mu` across the sweep and `nu`
+    /// along it (in units of the extrusion parameter), for UV points.
+    struct TestFrame {
+        eu: f64,
+        ew: f64,
+    }
+
+    impl TestFrame {
+        fn new(pl: &Plane, e: Vec3) -> TestFrame {
+            let pos = *pl.position();
+            let sc = pl.uv_scale();
+            TestFrame {
+                eu: pos.x_axis().dot(e) / sc.x,
+                ew: pos.y_axis().dot(e) / sc.y,
+            }
+        }
+        fn mu(&self, p: Point2) -> f64 {
+            -self.ew * p.x + self.eu * p.y
+        }
+        fn nu(&self, p: Point2) -> f64 {
+            (self.eu * p.x + self.ew * p.y) / (self.eu * self.eu + self.ew * self.ew)
+        }
+    }
+
+    /// The Euclidean control points of `c` over `ivl` (positive weights asserted:
+    /// the curve lies in their convex hull).
+    fn net_3d(k: &Kernel, c: &solidcore::curve::curve::Curve, ivl: Extent1d) -> Vec<Vec3> {
+        use solidcore::curve::curve::CurveKind;
+        use solidcore::nurbs::b_spline_curve_n_lib::TrimMode;
+        let mut piece = c.clone();
+        let mut t = ivl;
+        piece.trim(k, &mut t, TrimMode::Silent).unwrap();
+        let base = match piece.kind() {
             CurveKind::BSpline(b) => b.clone(),
             CurveKind::Line(l) => l.base().clone(),
             CurveKind::Ellipse(e) => e.base().clone(),
+            CurveKind::Hyperbola(h) => h.base().clone(),
+            CurveKind::Parabola(p) => p.base().clone(),
             _ => panic!("an unexpected curve kind"),
         };
+        let canon = base.canonical().unwrap();
+        assert!(canon.weights.iter().all(|w| *w > 0.0));
+        canon.control_points
+    }
+
+    /// The UV images of [`net_3d`].
+    fn net_uv(k: &Kernel, c: &solidcore::curve::curve::Curve, ivl: Extent1d, pl: &Plane) -> Vec<Point2> {
+        net_3d(k, c, ivl)
+            .into_iter()
+            .map(|p| pl.project_point_to_uv_domain(p))
+            .collect()
+    }
+
+    /// Brackets the least of `f(C(s))` over `ivl` without sampling for acceptance:
+    /// the lower bound is the least over the control points of a subdivision (convex
+    /// hull), the upper bound the least evaluated value; the piece with the lowest
+    /// hull bound is split until the bracket is within `width`.
+    fn bracket_min(
+        k: &Kernel,
+        gen: &solidcore::curve::curve::Curve,
+        ivl: Extent1d,
+        pl: &Plane,
+        f: &dyn Fn(Point2) -> f64,
+        width: f64,
+    ) -> (f64, f64) {
+        let at = |s: f64| f(pl.project_point_to_uv_domain(gen.evaluate(k, s, 0, true, true).unwrap()[0]));
+        let hull_min = |iv: Extent1d| {
+            net_uv(k, gen, iv, pl)
+                .into_iter()
+                .map(f)
+                .fold(f64::INFINITY, f64::min)
+        };
+        let mut pieces = vec![(hull_min(ivl), ivl)];
+        let mut upper = at(ivl.min()).min(at(ivl.max()));
+        for _ in 0..4000 {
+            pieces.sort_by(|a, b| a.0.total_cmp(&b.0));
+            let (lo, iv) = pieces[0];
+            if upper - lo <= width {
+                return (lo, upper);
+            }
+            pieces.remove(0);
+            let m = iv.mid();
+            upper = upper.min(at(m));
+            for half in [Extent1d::from_min_max(iv.min(), m), Extent1d::from_min_max(m, iv.max())] {
+                pieces.push((hull_min(half), half));
+            }
+        }
+        panic!("no bracket within {width}");
+    }
+
+    /// The domain box cut to `alpha <= mu <= beta` (test-side Sutherland-Hodgman).
+    fn slab_polygon(od: &Extent2d, f: &TestFrame, alpha: f64, beta: f64) -> Vec<Point2> {
+        let mut poly = vec![
+            Point2::new(od.u_interval().min(), od.v_interval().min()),
+            Point2::new(od.u_interval().max(), od.v_interval().min()),
+            Point2::new(od.u_interval().max(), od.v_interval().max()),
+            Point2::new(od.u_interval().min(), od.v_interval().max()),
+        ];
+        for (bound, above) in [(alpha, true), (beta, false)] {
+            let inside = |p: Point2| if above { f.mu(p) >= bound } else { f.mu(p) <= bound };
+            let mut next = Vec::new();
+            for i in 0..poly.len() {
+                let (p, q) = (poly[i], poly[(i + 1) % poly.len()]);
+                if inside(p) {
+                    next.push(p);
+                }
+                if inside(p) != inside(q) {
+                    let t = (bound - f.mu(p)) / (f.mu(q) - f.mu(p));
+                    next.push(Point2::new(p.x + t * (q.x - p.x), p.y + t * (q.y - p.y)));
+                }
+            }
+            poly = next;
+        }
+        poly
+    }
+
+    /// Asserts the answer's curves are exactly `expected` UV segments, each once
+    /// (ends within `1e-9` relative, straight), so no curve repeats or overlaps and
+    /// none is missing.
+    fn assert_uv_segments(k: &Kernel, name: &str, r: &ExtrusionIntersection, pl: &Plane, expected: &[(Point2, Point2)]) {
+        let near = |a: Point2, b: Point2| {
+            (a - b).length() <= 1e-9 * (1.0 + a.x.abs().max(a.y.abs()).max(b.x.abs()).max(b.y.abs()))
+        };
+        let got: Vec<(Point2, Point2)> = r
+            .curves_3d
+            .iter()
+            .map(|c| {
+                let ivl = c.natural_interval();
+                let ev = |t: f64| pl.project_point_to_uv_domain(c.evaluate(k, t, 0, true, true).unwrap()[0]);
+                let (a, b, m) = (ev(ivl.min()), ev(ivl.max()), ev(ivl.mid()));
+                assert!(near(m, (a + b) / 2.0), "{name}: a straight segment");
+                (a, b)
+            })
+            .collect();
+        assert_eq!(got.len(), expected.len(), "{name}: {got:?} vs {expected:?}");
+        let mut used = vec![false; got.len()];
+        for &(p, q) in expected {
+            let hit = got.iter().enumerate().position(|(i, &(a, b))| {
+                !used[i] && ((near(a, p) && near(b, q)) || (near(a, q) && near(b, p)))
+            });
+            let i = hit.unwrap_or_else(|| panic!("{name}: missing {p:?}-{q:?} in {got:?}"));
+            used[i] = true;
+        }
+    }
+
+    /// Certifies every moved row's answer as the boundary of the coincident region
+    /// `R = I ∩ D` (`I` the generator swept over `V`, `D` the plane's domain), with
+    /// no sampled acceptance. Every row's generator lies in the plane over its whole
+    /// interval (control points within `1e-12`, convex hull), and the row is one of:
+    /// - **empty**: the domain is apart from the surface (the UV box of its control
+    ///   net, or across the sweep), so `R` is empty and so is the answer;
+    /// - **slab**: every `nu` of `D` cut to the slab `alpha <= mu <= beta` lies within
+    ///   `[nu_max + vmin, nu_min + vmax]` (`nu` bounded on the control points), so `R`
+    ///   is that convex polygon. `alpha`, `beta` (the generator's extremes of `mu`)
+    ///   are bracketed by subdivision hulls and evaluated values, and the answer must
+    ///   be exactly the polygon's edges, each once;
+    /// - **quad**: `mu` is monotone on the control polygon (variation diminishing:
+    ///   every slice of `I` is one interval) and both copies' control points lie in
+    ///   `D`, so `R = I`, bounded by the two copies and the two end directrices; the
+    ///   answer must be exactly those four curves.
+    #[test]
+    fn moved_coincident_rows_are_certified() {
+        use solidcore::surface::surface::p2::TsectCurveType;
+        let mut forms = BTreeMap::new();
         for name in COINCIDENT_ROWS {
             let k = Kernel::default();
             let (s, d, pl, od, tol) = coincident_plane_case(&k, name);
             let r = s.intersect_with_plane(&k, &d, &pl, &od, tol).unwrap();
             assert!(!r.needs_more_intersections, "{name}: answered");
+            assert!(
+                r.curve_types.iter().all(|t| *t == TsectCurveType::RegionBoundary),
+                "{name}: {:?}",
+                r.curve_types
+            );
             let n = pl.position().z_axis();
             let o = pl.position().origin();
-            let in_dom = |p: Vec3| {
-                let uv = pl.project_point_to_uv_domain(p);
-                let e = 1e-12 * (1.0 + p.max_dimension());
-                od.u_interval().min() - e <= uv.x
-                    && uv.x <= od.u_interval().max() + e
-                    && od.v_interval().min() - e <= uv.y
-                    && uv.y <= od.v_interval().max() + e
+            let gen = s.gen_curve().unwrap();
+            let e = s.extrusion_vector();
+            // the generator's parameter is the surface's v when its UV are swapped
+            let (s_ivl, v_ivl) = if s.swap_uv() {
+                (d.v_interval(), d.u_interval())
+            } else {
+                (d.u_interval(), d.v_interval())
             };
-            let mut ends = Vec::new();
-            for (c, t) in r.curves_3d.iter().zip(&r.curve_types) {
-                let canon = base_of(c).canonical().unwrap();
-                assert!(canon.weights.iter().all(|w| *w > 0.0), "{name}: weights");
-                for p in &canon.control_points {
-                    let bound = 1e-12 * (1.0 + p.max_dimension() + o.max_dimension());
-                    assert!(n.dot(*p - o).abs() <= bound, "{name}: {p:?} off the plane");
-                    assert!(in_dom(*p), "{name}: {p:?} outside the plane's domain");
-                }
-                let ivl = c.natural_interval();
-                for t_end in [ivl.min(), ivl.max()] {
-                    let x = c.evaluate(&k, t_end, 0, true, true).unwrap()[0];
-                    let gap = off_extrusion(&k, &s, n, x);
-                    assert!(
-                        gap <= 1e-9 * (1.0 + x.max_dimension()),
-                        "{name}: end {x:?} off the extrusion by {gap}"
-                    );
-                    if *t == TsectCurveType::RegionBoundary {
-                        ends.push(x);
-                    }
-                }
+            let (vmin, vmax) = (v_ivl.min(), v_ivl.max());
+            // the generator lies in the plane over its whole interval
+            for p in net_3d(&k, gen, s_ivl) {
+                let bound = 1e-12 * (1.0 + p.max_dimension() + o.max_dimension());
+                assert!(n.dot(p - o).abs() <= bound, "{name}: generator off the plane");
             }
-            for (i, p) in ends.iter().enumerate() {
-                let met = ends.iter().enumerate().any(|(j, q)| {
-                    j != i && (*p - *q).length() <= 1e-9 * (1.0 + p.max_dimension())
-                });
-                assert!(met, "{name}: open boundary end {p:?}");
-            }
+            let f = TestFrame::new(&pl, e);
+            let net = net_uv(&k, gen, s_ivl, &pl);
+
             if r.curves_3d.is_empty() {
-                let net = nurb_surface(&s).unwrap();
+                let net3 = nurb_surface(&s).unwrap();
                 let (mut lo, mut hi) = ([f64::MAX; 2], [f64::MIN; 2]);
-                let (_, _, cps) = net.control_points().unwrap();
+                let (_, _, cps) = net3.control_points().unwrap();
                 for c in &cps {
                     let w = if c.w == NOW { 1.0 } else { c.w };
                     let p = Vec3::new(c.x / w, c.y / w, c.z / w);
@@ -2200,28 +2297,184 @@ mod tests {
                     || lo[0] > od.u_interval().max()
                     || hi[1] < od.v_interval().min()
                     || lo[1] > od.v_interval().max();
-                // or apart across the sweep: m . S(s, v) = m . C(s) (m = n x E), so
-                // the generator's control net bounds the whole surface's m range
-                let m = n.cross(s.extrusion_vector());
-                let gen_net = base_of(s.gen_curve().unwrap()).canonical().unwrap();
-                let (glo, ghi) = gen_net
-                    .control_points
+                // or apart across the sweep: mu(S(s, v)) = mu(C(s)), so the
+                // generator's control net bounds the whole surface's mu range
+                let (glo, ghi) = net
                     .iter()
-                    .map(|p| m.dot(*p))
+                    .map(|p| f.mu(*p))
                     .fold((f64::MAX, f64::MIN), |(a, b), x| (a.min(x), b.max(x)));
-                let (dlo, dhi) = [
-                    (od.u_interval().min(), od.v_interval().min()),
-                    (od.u_interval().min(), od.v_interval().max()),
-                    (od.u_interval().max(), od.v_interval().min()),
-                    (od.u_interval().max(), od.v_interval().max()),
-                ]
-                .iter()
-                .map(|&(u, v)| m.dot(pl.evaluate_point(Point2::new(u, v))))
-                .fold((f64::MAX, f64::MIN), |(a, b), x| (a.min(x), b.max(x)));
+                let corners = slab_polygon(&od, &f, f64::MIN, f64::MAX);
+                let (dlo, dhi) = corners
+                    .iter()
+                    .map(|p| f.mu(*p))
+                    .fold((f64::MAX, f64::MIN), |(a, b), x| (a.min(x), b.max(x)));
                 let margin = 1e-9 * (1.0 + glo.abs().max(ghi.abs()).max(dlo.abs()).max(dhi.abs()));
                 let across = ghi + margin < dlo || glo - margin > dhi;
                 assert!(apart || across, "{name}: an empty answer over the domain");
+                forms.insert(name, "empty");
+                continue;
             }
+
+            // the quad: monotone mu, both copies in the domain
+            let mus: Vec<f64> = net.iter().map(|p| f.mu(*p)).collect();
+            let rising = mus.windows(2).all(|w| w[1] >= w[0]) && mus[0] < mus[mus.len() - 1];
+            let falling = mus.windows(2).all(|w| w[1] <= w[0]) && mus[0] > mus[mus.len() - 1];
+            let in_dom = |p: Point2| {
+                let slack = 1e-12 * (1.0 + p.x.abs().max(p.y.abs()));
+                od.u_interval().min() - slack <= p.x
+                    && p.x <= od.u_interval().max() + slack
+                    && od.v_interval().min() - slack <= p.y
+                    && p.y <= od.v_interval().max() + slack
+            };
+            let e_uv = Point2::new(f.eu, f.ew);
+            let copies_inside = net
+                .iter()
+                .all(|p| in_dom(*p + e_uv * vmin) && in_dom(*p + e_uv * vmax));
+            if (rising || falling) && copies_inside {
+                assert_eq!(r.curves_3d.len(), 4, "{name}");
+                let ends: Vec<Point2> = [s_ivl.min(), s_ivl.max()]
+                    .iter()
+                    .map(|&t| pl.project_point_to_uv_domain(gen.evaluate(&k, t, 0, true, true).unwrap()[0]))
+                    .collect();
+                let mut straight = Vec::new();
+                let mut copies = Vec::new();
+                for c in &r.curves_3d {
+                    let ivl = c.natural_interval();
+                    let ev = |t: f64| pl.project_point_to_uv_domain(c.evaluate(&k, t, 0, true, true).unwrap()[0]);
+                    let (a, b, m) = (ev(ivl.min()), ev(ivl.max()), ev(ivl.mid()));
+                    let scale = 1.0 + a.x.abs().max(a.y.abs());
+                    if ((a + b) / 2.0 - m).length() <= 1e-9 * scale && ((b - a).length() - (e_uv * (vmax - vmin)).length()).abs() <= 1e-9 * scale {
+                        straight.push(c);
+                    } else {
+                        copies.push(c);
+                    }
+                }
+                let expected: Vec<(Point2, Point2)> = ends
+                    .iter()
+                    .map(|&p| (p + e_uv * vmin, p + e_uv * vmax))
+                    .collect();
+                let directrices = ExtrusionIntersection {
+                    curves_3d: straight.into_iter().cloned().collect(),
+                    ..Default::default()
+                };
+                assert_uv_segments(&k, name, &directrices, &pl, &expected);
+                // the copies: the generator's net translated by v E
+                assert_eq!(copies.len(), 2, "{name}");
+                let mut seen = Vec::new();
+                for c in copies {
+                    let cn = net_uv(&k, c, c.natural_interval(), &pl);
+                    assert_eq!(cn.len(), net.len(), "{name}");
+                    let v = f.nu(cn[0]) - f.nu(net[0]);
+                    let v = if (v - vmin).abs() <= (v - vmax).abs() { vmin } else { vmax };
+                    for (q, p) in cn.iter().zip(&net) {
+                        let x = *p + e_uv * v;
+                        assert!((*q - x).length() <= 1e-9 * (1.0 + x.x.abs().max(x.y.abs())), "{name}: copy at {v}");
+                    }
+                    seen.push(v);
+                }
+                seen.sort_by(f64::total_cmp);
+                assert_eq!(seen, vec![vmin, vmax], "{name}");
+                forms.insert(name, "quad");
+                continue;
+            }
+
+            // the slab: alpha and beta bracketed; the cover; the polygon's edges
+            let span = net
+                .iter()
+                .map(|p| f.mu(*p).abs())
+                .fold(1.0_f64, f64::max);
+            let width = 1e-12 * span;
+            let (alo, ahi) = bracket_min(&k, gen, s_ivl, &pl, &|p| f.mu(p), width);
+            let (bnlo, bnhi) = bracket_min(&k, gen, s_ivl, &pl, &|p| -f.mu(p), width);
+            let (alpha, beta) = ((alo + ahi) / 2.0, -(bnlo + bnhi) / 2.0);
+            let poly = slab_polygon(&od, &f, alpha, beta);
+            assert!(poly.len() >= 3, "{name}: the slab meets the domain");
+            let (nlo, nhi) = net
+                .iter()
+                .map(|p| f.nu(*p))
+                .fold((f64::MAX, f64::MIN), |(a, b), x| (a.min(x), b.max(x)));
+            for p in &poly {
+                let slack = 1e-12 * (1.0 + f.nu(*p).abs() + nlo.abs().max(nhi.abs()) + vmin.abs().max(vmax.abs()));
+                assert!(f.nu(*p) - nhi >= vmin - slack && f.nu(*p) - nlo <= vmax + slack, "{name}: the cover");
+            }
+            let expected: Vec<(Point2, Point2)> = (0..poly.len())
+                .map(|i| (poly[i], poly[(i + 1) % poly.len()]))
+                .filter(|(a, b)| (*a - *b).length() > 1e-9 * (1.0 + a.x.abs().max(a.y.abs())))
+                .collect();
+            assert_uv_segments(&k, name, &r, &pl, &expected);
+            forms.insert(name, "slab");
+        }
+        // every moved row is certified, in the form its geometry takes
+        let expected = [
+            ("gen0158", "empty"),
+            ("gen0163", "slab"),
+            ("gen0301", "quad"),
+            ("gen0355", "slab"),
+            ("gen0404", "empty"),
+            ("gen0566", "empty"),
+            ("gen0576", "slab"),
+            ("gen0654", "slab"),
+            ("gen0666", "slab"),
+            ("gen0787", "slab"),
+            ("gen0970", "slab"),
+            ("line_plane_containing", "quad"),
+        ];
+        assert_eq!(forms, expected.into_iter().collect::<BTreeMap<_, _>>());
+    }
+
+    /// gen0355, the row #18179 needs: a bounded plane over part of an infinite
+    /// zigzag extrusion. Its region is the strip between the generator's extremes
+    /// across the sweep (a polyline: attained at control points), not the lines at
+    /// its ends inside the strip.
+    #[test]
+    fn gen0355_answers_the_strip_between_its_extremes() {
+        let k = Kernel::default();
+        let (s, d, pl, od, tol) = coincident_plane_case(&k, "gen0355");
+        let r = s.intersect_with_plane(&k, &d, &pl, &od, tol).unwrap();
+        let n = pl.position().z_axis();
+        let e = s.extrusion_vector();
+        let m = n.cross(e) / e.length();
+        let gen = s.gen_curve().unwrap();
+        assert!(!s.swap_uv());
+        // a polyline: its extremes across the sweep are at its control points
+        let net: Vec<f64> = net_3d(&k, gen, d.u_interval()).iter().map(|p| m.dot(*p)).collect();
+        let (lo, hi) = net.iter().fold((f64::MAX, f64::MIN), |(a, b), x| (a.min(*x), b.max(*x)));
+        // the hull bounds are attained: both are values of the generator at its
+        // breakpoints, so they are its exact extremes
+        let ivl = d.u_interval();
+        let at: Vec<f64> = (0..=4)
+            .map(|i| m.dot(gen.evaluate(&k, ivl.min() + ivl.length() * f64::from(i) / 4.0, 0, true, true).unwrap()[0]))
+            .collect();
+        for x in [lo, hi] {
+            assert!(at.iter().any(|y| (x - y).abs() <= 1e-12 * (1.0 + x.abs())), "{x} in {at:?}");
+        }
+        // (the strip's ends, as measured in review)
+        assert!((lo - 1.3668).abs() < 1e-4 && (hi - 2.9180).abs() < 1e-4, "{lo} {hi}");
+        let mut long = Vec::new();
+        for c in &r.curves_3d {
+            let ivl = c.natural_interval();
+            let a = c.evaluate(&k, ivl.min(), 0, true, true).unwrap()[0];
+            let b = c.evaluate(&k, ivl.max(), 0, true, true).unwrap()[0];
+            if (b - a).length() > 10.0 {
+                assert!((m.dot(a) - m.dot(b)).abs() <= 1e-9 * (1.0 + a.max_dimension()));
+                long.push(m.dot(a));
+            }
+        }
+        long.sort_by(f64::total_cmp);
+        assert_eq!(long.len(), 2, "{long:?}");
+        assert!((long[0] - lo).abs() <= 1e-9 * (1.0 + lo.abs()), "{long:?} vs {lo}");
+        assert!((long[1] - hi).abs() <= 1e-9 * (1.0 + hi.abs()), "{long:?} vs {hi}");
+    }
+
+    /// Rows outside both certificates keep upstream's answer (`needs_more`, no curve).
+    #[test]
+    fn rows_beyond_the_certificates_decline() {
+        for name in DECLINED_ROWS {
+            let k = Kernel::default();
+            let (s, d, pl, od, tol) = coincident_plane_case(&k, name);
+            let r = s.intersect_with_plane(&k, &d, &pl, &od, tol).unwrap();
+            assert!(r.needs_more_intersections, "{name}");
+            assert!(r.curves_3d.is_empty(), "{name}");
         }
     }
 }

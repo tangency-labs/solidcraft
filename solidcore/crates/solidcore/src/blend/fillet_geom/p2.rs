@@ -1655,11 +1655,12 @@ pub fn srf_srf_intersection_with_context(
 
     // general surf/surf intersector
     if curves_3d.is_empty() {
-        let xs = if let Some((context, handles)) = context {
+        let mut context = context;
+        let xs = if let Some((context, handles)) = context.as_mut() {
             surf1.global_surface_intersect_with_context(
                 k,
-                handles,
-                context,
+                *handles,
+                &mut **context,
                 &domain1,
                 surf2,
                 &domain2,
@@ -1677,6 +1678,37 @@ pub fn srf_srf_intersection_with_context(
                 Some(ssi_tol),
                 Some(angle_tol),
             )?
+        };
+        // The plane / extrusion dispatch answers an extrusion lying in the plane with
+        // its coincident region's boundary, no section curve (as for the special cases
+        // above): the general intersection, as that dispatch ran when the special case
+        // asked for more (with its tolerance: the plane's dispatch passes it on, the
+        // extrusion's converts it).
+        let plane_extrusion = match (surf1.kind(), surf2.kind()) {
+            (SurfaceKind::Plane(_), SurfaceKind::SurfOfExtrusion(_)) => Some(Some(ssi_tol)),
+            (SurfaceKind::SurfOfExtrusion(_), SurfaceKind::Plane(_)) => {
+                Some(Some(approx_tol3d(k, ssi_tol)))
+            }
+            _ => None,
+        };
+        let region = xs
+            .curve_types
+            .contains(&crate::surface::surface::p2::TsectCurveType::RegionBoundary);
+        let xs = match plane_extrusion {
+            Some(tol) if region => crate::surface::surface::p2::base_global_surface_intersect_in(
+                k,
+                surf1,
+                &domain1,
+                surf2,
+                &domain2,
+                [true, true],
+                tol,
+                Some(angle_tol),
+                context.map(|(solver, handles)| {
+                    crate::surface::surface::p1::SurfaceIntersectContext { solver, handles }
+                }),
+            )?,
+            _ => xs,
         };
         curves_3d.extend(xs.curves_3d);
         surface1_uv_curves.extend(xs.surface1_uv_curves);
