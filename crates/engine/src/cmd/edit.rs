@@ -236,12 +236,6 @@ pub static COMMANDS: &[CommandSpec] = &[
         .contract(&PARALLEL_EDGES_CONTRACT)
         .output(output_schema_for::<SelectSetResult>)
         .params("body?: solid body name, edge?: edge index; both default to the selected edge → selects the body's straight edges parallel to that straight edge (exact lines)"),
-    CommandSpec::new("select.all", "Select All", crate::checked!("select.all", select_all))
-        .icon("select")
-        .key("Ctrl+A")
-        .noundo()
-        .contract(&SELECT_ALL_CONTRACT)
-        .output(output_schema_for::<SelectSetResult>),
     CommandSpec::new("select.sharp_edges", "Select Sharp Edges", crate::checked!("select.sharp_edges", select_sharp_edges))
         .icon("select")
         .noundo()
