@@ -39,10 +39,13 @@ const MAX_FLAT_WORK: usize = 500_000_000;
 /// Pieces of flat material sharing less area than this (mm²) only touch.
 const TOUCH_AREA: f64 = 1e-6;
 
-/// Starts the warning a fold gives when its `fixed` point touches no material: a recompute keeps
-/// the side the point lies on, and the `sheet.fold` command refuses such a point (#263).
 /// Tabs folded on one line whose material beyond the bend joins again.
 const FOLD_TABS_REJOIN: &str = "not supported yet: folding tabs that join again beyond the bend";
+/// A fold whose bend zone has edges of the sheet across it that neither run straight nor pass
+/// through it once each way, nor are notches that close off (see `notches_across`).
+const FOLD_CURVED_ZONE: &str = "not supported yet: folds whose bend zone crosses a slanted or curved edge of the sheet";
+/// Starts the warning a fold gives when its `fixed` point touches no material: a recompute keeps
+/// the side the point lies on, and the `sheet.fold` command refuses such a point (#263).
 pub const FOLD_FIXED_OFF_SHEET: &str = "the fold's fixed point is not on the sheet";
 
 /// A bend radius at or below this (mm) is a sharp bend. Its inner face has collapsed to the bend's
@@ -1397,6 +1400,11 @@ fn rect(a: Vec2, b: Vec2, c: Vec2, d: Vec2) -> Region2 {
     Region2 { outer: lp, holes: Vec::new() }
 }
 
+/// Where a fold goes on its panel (see `SheetBody::fold_across`): the side that moves `n` and the
+/// line's direction `d`, the zone's start `s0` along `n` and width `ba`, the span of the line's
+/// points along `d`, the angle and radius, and whether it folds the other way.
+type FoldAt = ((Vec2, Vec2), (f64, f64), (f64, f64), (f64, f64), bool);
+
 /// How a fold's bend runs along its line `d`: where its start line starts and ends, how far its far
 /// edge runs on past those ends, and which ends are cut askew (`SheetFlange::ext`, `tear`).
 type FoldEnds = (f64, f64, (f64, f64), (bool, bool));
@@ -1701,6 +1709,111 @@ fn tab_cut(outline: &Loop2, n: Vec2, d: Vec2, s0: f64, ba: f64) -> Option<TabCut
         return None;
     }
     Some(TabCut { near, tabs })
+}
+
+/// The corners of the convex hull of `pts`, as indices into it, in increasing order: round a
+/// counter-clockwise loop they come in its own order. A point on a hull edge is not a corner.
+fn hull_corners(pts: &[Vec2]) -> Vec<usize> {
+    let at = |i: usize| pts.get(i).copied().unwrap_or_default();
+    let mut order: Vec<usize> = (0..pts.len()).collect();
+    order.sort_by(|&i, &j| at(i).x.total_cmp(&at(j).x).then(at(i).y.total_cmp(&at(j).y)));
+    let mut hull: Vec<usize> = Vec::with_capacity(order.len() + 1);
+    let turns_left = |hull: &[usize], i: usize| match hull {
+        [.., o, a] => (at(*a) - at(*o)).cross(at(i) - at(*o)) > 0.0,
+        _ => true,
+    };
+    // The lower hull left to right, then the upper one back.
+    for &i in &order {
+        while hull.len() >= 2 && !turns_left(&hull, i) {
+            hull.pop();
+        }
+        hull.push(i);
+    }
+    let lower = hull.len() + 1;
+    for &i in order.iter().rev().skip(1) {
+        while hull.len() >= lower && !turns_left(&hull, i) {
+            hull.pop();
+        }
+        hull.push(i);
+    }
+    hull.pop();
+    hull.sort_unstable();
+    hull.dedup();
+    hull
+}
+
+/// The notches of `outline` that reach into the zone between the lines at `s0` and `s0 + ba`
+/// along `n`: each a stretch of the outline that leaves the edge of its convex hull and comes back
+/// to it, closed by the straight line across its mouth. The outline with those lines in place of
+/// its notches, and the notches as counter-clockwise loops, every curve as drawn. `None` when no
+/// notch reaches the zone, or a curve of one bulges out past its mouth.
+fn notches_across(outline: &Loop2, n: Vec2, s0: f64, ba: f64) -> Option<(Loop2, Vec<Loop2>)> {
+    const ON_LINE: f64 = 1e-6;
+    let m = outline.segs.len();
+    if m < 3 || m > MAX_FLAT_POINTS || !s0.is_finite() || !(ba > 0.0) {
+        return None;
+    }
+    let outline = outline.ccw();
+    let corners = hull_corners(&outline.segs.iter().map(Seg2::start).collect::<Vec<_>>());
+    // Round the outline from a corner of the hull, so that no notch runs past the loop's end.
+    let first = *corners.first()?;
+    let segs: Vec<Seg2> = (0..m).filter_map(|k| outline.segs.get((first + k) % m).copied()).collect();
+    let mut ends: Vec<usize> = corners.iter().map(|&c| c - first).collect();
+    ends.push(m);
+    let in_zone = |seg: &Seg2| {
+        let (mut near, mut pieces) = (Vec::new(), Vec::new());
+        cut_at_level(seg, n, s0, &mut near);
+        for piece in &near {
+            cut_at_level(piece, n, s0 + ba, &mut pieces);
+        }
+        pieces.iter().any(|piece| {
+            let v = piece.mid().dot(n);
+            v > s0 + ON_LINE && v < s0 + ba - ON_LINE
+        })
+    };
+    let (mut closed, mut notches) = (Vec::with_capacity(m), Vec::new());
+    for pair in ends.windows(2) {
+        let &[i, j] = pair else { continue };
+        let (Some(p), Some(q)) = (segs.get(i).map(Seg2::start), segs.get(j % m).map(Seg2::start)) else { return None };
+        let stretch = segs.get(i..j)?;
+        let Some(along) = (q - p).normalized() else {
+            closed.extend_from_slice(stretch);
+            continue;
+        };
+        // How far inside the hull's edge from `p` to `q`; edges along it are the outline's own,
+        // and each stretch between the points where the outline meets it is a notch.
+        let inside = |v: Vec2| along.cross(v - p);
+        let on_edge = |s: &Seg2| matches!(s, Seg2::Line { .. }) && inside(s.start()).abs() <= ON_LINE && inside(s.end()).abs() <= ON_LINE;
+        let mut run: Vec<Seg2> = Vec::new();
+        for (k, seg) in stretch.iter().enumerate() {
+            run.push(*seg);
+            if k + 1 < stretch.len() && inside(seg.end()).abs() > ON_LINE {
+                continue;
+            }
+            let notch = std::mem::take(&mut run);
+            let (Some(mouth0), Some(mouth1)) = (notch.first().map(Seg2::start), notch.last().map(Seg2::end)) else { continue };
+            if notch.iter().all(on_edge) || mouth0.dist(mouth1) <= ON_LINE || !notch.iter().any(in_zone) {
+                closed.extend(notch);
+                continue;
+            }
+            if notch.iter().flat_map(|s| s.polyline(1e-4)).any(|v| inside(v) < -ON_LINE) {
+                return None;
+            }
+            closed.push(Seg2::Line { a: mouth0, b: mouth1 });
+            let mut lp = notch;
+            lp.push(Seg2::Line { a: mouth1, b: mouth0 });
+            let lp = Loop2 { segs: lp };
+            // A notch is a gap in the material: round a counter-clockwise outline it runs clockwise.
+            if lp.signed_area() >= 0.0 {
+                return None;
+            }
+            notches.push(lp.reversed());
+        }
+    }
+    if notches.is_empty() {
+        return None;
+    }
+    Some((Loop2 { segs: closed }, notches))
 }
 
 /// Two counter-clockwise loops joined along a straight edge they share, running opposite ways:
@@ -5756,9 +5869,22 @@ impl SheetBody {
             "mould" | "mold" => l - (radius + self.t) * (angle / 2.0).tan(),
             o => return Err(DocError::Invalid(format!("unknown fold position `{o}` (centerline, start, end or mould)"))),
         };
-        let fixed_part = clip(&pts, n * s0, n * -1.0);
-        let moving = clip(&pts, n * (s0 + ba), n);
-        let strip = clip(&clip(&pts, n * s0, n), n * (s0 + ba), n * -1.0);
+        let span = (a2.dot(d).min(b2.dot(d)), a2.dot(d).max(b2.dot(d)));
+        let at = ((n, d), (s0, ba), span, (angle, radius), flip);
+        match self.fold_across(panel, (&pts, &outline), at) {
+            Err(DocError::Invalid(m)) if m == FOLD_CURVED_ZONE => self.fold_notched(panel, (&pts, &outline), at)?.ok_or(DocError::Invalid(m)),
+            r => r,
+        }
+    }
+
+    /// A fold of `panel` (its outline as `pts` and exactly) across the zone between the lines at
+    /// `s0` and `s0 + ba` along `n`, `n` toward the side that moves, `d` along the line and `span`
+    /// the line's points along `d`.
+    fn fold_across(&mut self, panel: Option<usize>, (pts, outline): (&[Vec2], &Loop2), at: FoldAt) -> Result<usize> {
+        let ((n, d), (s0, ba), span, (angle, radius), flip) = at;
+        let fixed_part = clip(pts, n * s0, n * -1.0);
+        let moving = clip(pts, n * (s0 + ba), n);
+        let strip = clip(&clip(pts, n * s0, n), n * (s0 + ba), n * -1.0);
         if signed_area(&fixed_part).abs() < 1e-9 || signed_area(&moving).abs() < 1e-9 {
             return Err(DocError::Invalid("the fold line must cross the sheet with material on both sides of the bend".into()));
         }
@@ -5772,9 +5898,8 @@ impl SheetBody {
             _ => strip,
         };
         if strips.len() > 1 {
-            let span = (a2.dot(d).min(b2.dot(d)), a2.dot(d).max(b2.dot(d)));
             let angle = if flip { -angle } else { angle };
-            return self.fold_tabs(panel, (&pts, &outline), (n, d), (s0, ba), span, (angle, radius), &strips);
+            return self.fold_tabs(panel, (pts, outline), (n, d), (s0, ba), span, (angle, radius), &strips);
         }
         // The bend zone is a rectangle across the panel, or straight edges of the sheet slant
         // across it, or curved ones do. Those ends fold to helices and curves, as torn ends and
@@ -5785,7 +5910,7 @@ impl SheetBody {
         let mut zone_shape = None;
         // An outline with curves is cut exactly, wherever the curves are, so they stay as drawn in
         // the flat pattern; a cut that doesn't come out whole falls back on the chords.
-        let cut = if outline.segs.iter().all(|e| matches!(e, Seg2::Line { .. })) { None } else { curved_fold(&outline, n, d, s0, ba) };
+        let cut = if outline.segs.iter().all(|e| matches!(e, Seg2::Line { .. })) { None } else { curved_fold(outline, n, d, s0, ba) };
         if ((u1 - u0) * ba - signed_area(&strip).abs()).abs() > 1e-6 * (u1 - u0).max(1.0) * ba.max(1.0) {
             if let Some(slanted) = slanted_zone(&strip, n, d, s0, ba) {
                 ends = slanted;
@@ -5793,7 +5918,7 @@ impl SheetBody {
                 // A corner of the outline inside the zone (e.g. a fold right at a tab's root): name
                 // it and how far the line has to move to clear it.
                 let corners: Vec<(Vec2, f64)> =
-                    outline_corners(&outline).into_iter().map(|q| (q, q.dot(n) - s0)).filter(|(_, s)| *s > 1e-6 && *s < ba - 1e-6).collect();
+                    outline_corners(outline).into_iter().map(|q| (q, q.dot(n) - s0)).filter(|(_, s)| *s > 1e-6 && *s < ba - 1e-6).collect();
                 if let Some(&(c, _)) = corners.first() {
                     let on = corners.iter().fold(0.0_f64, |m, (_, s)| m.max(*s));
                     let back = corners.iter().fold(0.0_f64, |m, (_, s)| m.max(ba - *s));
@@ -5805,7 +5930,7 @@ impl SheetBody {
                     )));
                 }
                 let Some(curved) = &cut else {
-                    return Err(DocError::Invalid("not supported yet: folds whose bend zone crosses a slanted or curved edge of the sheet".into()));
+                    return Err(DocError::Invalid(FOLD_CURVED_ZONE.into()));
                 };
                 ends = curved.ends;
                 zone_shape = Some(curved.zone.clone());
@@ -5877,6 +6002,37 @@ impl SheetBody {
         Ok(i)
     }
 
+    /// [`Self::fold_across`] for an outline that passes through the zone more than once each way
+    /// because notches reach into it (#18560): the outline with its notches closed off folds, and
+    /// the notches are cut out of the folded sheet, through the zone and across the bend wherever
+    /// they reach. `None` when the outline has no such notches, when closing them off joins tabs
+    /// on one line that the line's points don't all span (those fold one by one, see
+    /// [`Self::fold_tabs`]), or when the closed outline doesn't fold either.
+    fn fold_notched(&mut self, panel: Option<usize>, (pts, outline): (&[Vec2], &Loop2), at: FoldAt) -> Result<Option<usize>> {
+        let ((n, d), (s0, ba), span, _, _) = at;
+        let Some((closed, notches)) = notches_across(outline, n, s0, ba) else { return Ok(None) };
+        let strip = clip(&clip(pts, n * s0, n), n * (s0 + ba), n * -1.0);
+        let strips = merge_loops(std::slice::from_ref(&strip), &mut FlatWork::new())?;
+        let spanned = |p: &Vec<Vec2>| {
+            let (lo, hi) = p.iter().fold((f64::MAX, f64::MIN), |(lo, hi), q| (lo.min(q.dot(d)), hi.max(q.dot(d))));
+            hi.min(span.1) - lo.max(span.0) > 1e-6
+        };
+        if strips.len() > 1 && !strips.iter().all(spanned) {
+            return Ok(None);
+        }
+        let closed_pts = dedup(&closed.polyline(1e-3));
+        let mut folded = self.clone();
+        match folded.fold_across(panel, (&closed_pts, &closed), at) {
+            Ok(i) => {
+                folded.holes.extend(notches.into_iter().map(|outer| Region2 { outer, holes: Vec::new() }));
+                *self = folded;
+                Ok(Some(i))
+            }
+            Err(DocError::Invalid(m)) if m == FOLD_CURVED_ZONE => Ok(None),
+            Err(e) => Err(e),
+        }
+    }
+
     /// A fold whose bend zone falls apart into several pieces (`strips`: tabs on one line). The
     /// pieces the line's points span (`span`, along `d`) bend, each with the material beyond it;
     /// the rest of the panel stays put. `n` points to the moving side, the zone is `s0..s0 + ba`.
@@ -5942,7 +6098,7 @@ impl SheetBody {
             let (Some(strip), Some(&(u0, u1))) = (strips.get(i), strip_u.get(i)) else { continue };
             // Each piece of the zone must be a rectangle (see `add_fold`).
             if ((u1 - u0) * ba - signed_area(strip).abs()).abs() > 1e-6 * (u1 - u0).max(1.0) * ba.max(1.0) {
-                return Err(DocError::Invalid("not supported yet: folds whose bend zone crosses a slanted or curved edge of the sheet".into()));
+                return Err(DocError::Invalid(FOLD_CURVED_ZONE.into()));
             }
             let moving = match hangs.get(i).map(Vec::as_slice) {
                 Some([k]) => beyond.get(*k).cloned().ok_or_else(|| DocError::Invalid("fold".into()))?,
@@ -8076,6 +8232,63 @@ mod tests {
                 assert!(body.validity().is_empty(), "{what}: {:?}", body.validity());
                 assert!(vol(&body) < v0 - 1.0, "{what}: {} vs {v0}", vol(&body));
             }
+        }
+    }
+
+    /// A plate with a notch in from its edge beyond a fold, 6.1 wide with a round end (what a
+    /// 6 mm router leaves), its sides across the bend zone: the outline passes through the zone
+    /// four times (#18560). With the round end in the flat that stays, just past the zone's start
+    /// and inside the zone, the plate folds 90° into one valid solid of the flat's volume (K = 0.5
+    /// puts the neutral surface mid-thickness, so the bend keeps the flat's volume), the notch open
+    /// through the flange, and the flat pattern keeps the notch. The last two were refused.
+    #[test]
+    fn a_plate_folds_across_a_round_ended_notch_in_its_outline() {
+        use std::f64::consts::{FRAC_PI_2, PI};
+        let rule = RuleValues { thickness: 1.5, k_factor: 0.5, bend_radius: 0.2, ..alu() };
+        let (r, x0) = (3.05, 50.0);
+        let v = Vec2::new;
+        let line = |a: Vec2, b: Vec2| Seg2::Line { a, b };
+        let ba = FRAC_PI_2 * (rule.bend_radius + rule.k_factor * rule.thickness);
+        for deepest in [75.0, 79.16, 79.5] {
+            let what = format!("round end down to y = {deepest}");
+            let c = deepest + r;
+            let outline = Loop2 {
+                segs: vec![
+                    line(v(0.0, 0.0), v(200.0, 0.0)),
+                    line(v(200.0, 0.0), v(200.0, 100.0)),
+                    line(v(200.0, 100.0), v(x0 + 2.0 * r, 100.0)),
+                    line(v(x0 + 2.0 * r, 100.0), v(x0 + 2.0 * r, c)),
+                    Seg2::Arc { center: v(x0 + r, c), radius: r, start: 0.0, sweep: -PI },
+                    line(v(x0, c), v(x0, 100.0)),
+                    line(v(x0, 100.0), v(0.0, 100.0)),
+                    line(v(0.0, 100.0), v(0.0, 0.0)),
+                ],
+            };
+            // One way in and one way out, as a curved edge across the zone folds, it is not.
+            assert!(curved_fold(&outline, v(0.0, 1.0), v(1.0, 0.0), 80.0 - ba / 2.0, ba).is_none(), "{what}");
+            let mut s = base_flange("Body1", "R1", &rule, Plane::XY, Region2 { outer: outline, holes: vec![] });
+            let t = s.t;
+            let mut warning = None;
+            let (a, b, fixed) = (Vec3::new(0.0, 80.0, t), Vec3::new(200.0, 80.0, t), Vec3::new(100.0, 10.0, t));
+            let i = s
+                .add_fold(a, b, FRAC_PI_2, rule.bend_radius, "centerline", false, Some(fixed), &mut warning)
+                .unwrap_or_else(|e| panic!("{what}: {e}"));
+            assert!(warning.is_none(), "{what}: {warning:?}");
+            let body = s.solid().unwrap_or_else(|e| panic!("{what}: {e}"));
+            assert!(body.validity().is_empty(), "{what}: {:?}", body.validity());
+            let area = 200.0 * 100.0 - (2.0 * r * (100.0 - c) + PI * r * r / 2.0);
+            assert!((vol(&body) - area * t).abs() < 1e-6 * area * t, "{what}: {} vs {}", vol(&body), area * t);
+            // Mid-thickness on the flange, halfway up it: in the notch is no material, beside it is.
+            let on_flange = |x: f64| apply_point(&s.world(Some(i)), Vec3::new(x, 95.0, t / 2.0));
+            assert!(matches!(body.classify_point(on_flange(x0 + r)), Ok(kernel::PointClass::Outside)), "{what}");
+            assert!(matches!(body.classify_point(on_flange(x0 - 10.0)), Ok(kernel::PointClass::Inside)), "{what}");
+            let flat: f64 = s
+                .flat_regions()
+                .unwrap_or_else(|e| panic!("{what}: {e}"))
+                .iter()
+                .map(|f| f.outer.signed_area().abs() - f.holes.iter().map(|h| h.signed_area().abs()).sum::<f64>())
+                .sum();
+            assert!((flat - area).abs() < 0.02, "{what}: flat {flat} vs {area}");
         }
     }
 
