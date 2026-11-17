@@ -254,7 +254,7 @@ The dialog has a **Preview** box, on when it opens; with it off, nothing runs un
   memory and deadline limits, off the window's thread. A run left behind by newer inputs is
   dropped.
 - The most recently opened dialog on the design is previewed (the one picking in the viewport,
-  when one is). While a native tool is open, its own preview is the one shown. Read entries and
+  when one is). While a native tool is open, its own preview is the one shown. Read entries, long jobs and
   importers are not previewed.
 
 ## Long jobs
@@ -278,6 +278,7 @@ A command entry that takes a while, such as computing a toolpath, declares `"job
   `control.cancelled()` returns true, and any host call or loop stops it within a few
   milliseconds. Nothing of a cancelled run is kept: the design and the undo history are as they
   were. A run whose design changed while it computed is not kept either.
+- A job's dialog has no **Preview** box: a preview would run the whole job on every change.
 - An importer already runs this way (its deadline is up to ten minutes), so only a command is
   declared a job.
 
