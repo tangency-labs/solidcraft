@@ -396,11 +396,10 @@ thread_local! {
     pub(super) static VALIDATED: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 }
 
-/// A build of unknown source (no git) never trusts a cache, unless `in_tests`: test builds
-/// trust it so the cache tests also pass in a source tarball (the `trust-unknown-source`
-/// feature is only enabled by dev-dependencies).
-pub(super) fn source_trusted(commit: &str, in_tests: bool) -> bool {
-    commit != "unknown" || in_tests
+/// A build whose evaluation source could not be hashed (`"unknown"`) never trusts a cache,
+/// unless `in_tests` (the `trust-unknown-source` feature is only enabled by dev-dependencies).
+pub(super) fn source_trusted(source: &str, in_tests: bool) -> bool {
+    source != "unknown" || in_tests
 }
 
 pub(super) fn read_geometry_with<R: Read + Seek>(reader: &mut PackageReader<R>, document: &[u8]) -> Result<SavedModel> {
