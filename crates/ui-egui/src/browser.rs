@@ -255,6 +255,8 @@ pub struct TreeState {
     pub canvas_panel: Option<CanvasPanel>,
     /// The Edit Point Cloud panel.
     pub cloud_panel: Option<CloudPanel>,
+    /// The Point Cloud Deviation card.
+    pub deviation_card: Option<crate::point_cloud_deviation::DeviationCard>,
     /// A Section Analysis hidden with its eye in the Analysis folder: its plane (origin,
     /// normal), so the eye can bring it back (#822).
     pub hidden_section: Option<(solidcore_record::Vec3, solidcore_record::Vec3)>,
@@ -1531,6 +1533,7 @@ pub(crate) fn editors(app: &mut SolveApp, ui: &mut egui::Ui) {
     crate::browser_prompts::capture_prompt(app, ui.ctx());
     crate::browser_canvas::panel(app, ui.ctx());
     point_clouds::panel(app, ui.ctx());
+    crate::point_cloud_deviation::card(app, ui.ctx());
     crate::sketch_attachment_ui::panel(app, ui.ctx());
 }
 

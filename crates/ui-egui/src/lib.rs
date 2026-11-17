@@ -238,6 +238,7 @@ pub mod plugin_install;
 pub(crate) mod plugin_menu;
 mod plugin_slots;
 pub(crate) mod plugins;
+pub(crate) mod point_cloud_deviation;
 pub mod point_clouds;
 pub mod policy;
 pub mod prefs;

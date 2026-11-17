@@ -137,9 +137,27 @@ step. It does not align the cloud, scale it or leave points out as outliers.
   `within_tolerance` count each measured point once; they are not weighted by area.
   `within_tolerance_fraction` is `within_tolerance` / `measured`. With no measured point, each is
   `null`, not 0. `worst` lists the farthest points with their closest point on the body, and
-  `per_point: true` adds every distance in sampling order.
+  `per_point: true` adds every distance in sampling order (`distances`) and each point's closest
+  point on the body (`closest`).
+- **Cancel.** Run with a progress that is cancelled, the command stops measuring and answers that
+  it was cancelled, with no result.
 - **Filters and visibility** change only what the view shows. Every point of the cloud is a
   candidate to measure.
+
+In the app, **Point Cloud Deviation** in a cloud's menu opens a card that runs the command for a
+body and a tolerance:
+
+- The measurement runs beside the window, and Cancel stops it. A cancelled measurement shows
+  nothing.
+- The cloud is coloured by each sampled point's distance on a bar from the largest distance to
+  its opposite (signed) or from 0 (unsigned), with the tolerance marked on the bar. Points not
+  sampled or not measured are grey. The colours belong to the card: the cloud's own colours, the
+  design and the undo stack do not change, and closing the card puts the cloud back as it was.
+- With the pointer on a measured point, the view shows its distance and its closest point on the
+  body, read from the same result as the card's numbers.
+- A result is current only for what it measured. Once the cloud's points, placement or units, the
+  body, or the tolerance change (a cloud read again under the same id included), the colours come
+  off and the card says the result is out of date.
 
 What the numbers do and do not say:
 

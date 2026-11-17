@@ -241,6 +241,8 @@ pub fn gpu_clouds(app: &SolveApp, ctx: &egui::Context) -> Vec<GpuCloud> {
         m.retain(|id, _| doc.point_clouds.iter().any(|c| c.id == *id));
         solidcraft_engine::view::shown_point_clouds(&app.session)
             .map(|c| {
+                // Coloured by its distances while the Point Cloud Deviation card shows them.
+                let c = &*crate::point_cloud_deviation::drawn(app, c);
                 let key = Key::of(c);
                 let (version, [dots, segments, triangles]) = match m.get(&c.id) {
                     Some((k, version, records)) if *k == key => (*version, records.clone()),
@@ -274,6 +276,7 @@ pub fn show(app: &SolveApp, painter: &Painter, proj: &Proj) {
     let stride = total.div_ceil(MAX_CPU_POINTS).max(1);
     let mut shapes = Vec::new();
     for c in clouds {
+        let c = &*crate::point_cloud_deviation::drawn(app, c);
         let r = (c.point_size as f32 / painter.ctx().pixels_per_point() * 0.5).max(0.5);
         let shade = c.shade(color_range(painter.ctx(), c));
         for i in (0..c.len()).step_by(stride) {
