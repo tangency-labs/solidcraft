@@ -112,7 +112,6 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.fillet_statuses_pass_on = true;
     f.fillet_rail_trim_at_near_knot = true;
     f.corner_patch_face_side_twist = true;
-    f.boolean_union_refuses_solid_leak = true;
     f.fillet_exact_round_classes = true;
     f.surface_continuity_checks_last_v_knot = true;
     f.geometric_g2_continuity = true;
@@ -130,6 +129,7 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.fillet_round_ends_on_outline = false;
     f.fillet_chamfer_corner = true;
     f.brep_ray_classifies_current_trims = true;
+    f.seam_vertex_stays_on_seam = true;
     f
 }
 
