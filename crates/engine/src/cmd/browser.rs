@@ -337,8 +337,10 @@ fn ungroup(s: &mut Session, p: &Value) -> Result<Value> {
 fn rename_group(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "browser.rename_group";
     let id = group_id(s, p, cmd)?;
-    let name =
-        str_(p, "name").map(str::trim).filter(|n| !n.is_empty() && n.len() <= 128).ok_or_else(|| bad(cmd, "`name` must be 1…128 characters"))?;
+    let name = str_(p, "name")
+        .map(str::trim)
+        .filter(|n| !n.is_empty() && n.chars().count() <= 128)
+        .ok_or_else(|| bad(cmd, "`name` must be 1…128 characters"))?;
     if let Some(g) = s.doc_mut().browser_groups.iter_mut().find(|g| g.id == id) {
         g.name = name.to_string();
     }
@@ -1215,8 +1217,10 @@ fn view_index(s: &Session, p: &Value, cmd: &str) -> Result<usize> {
 fn view_rename(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "view.rename";
     let i = view_index(s, p, cmd)?;
-    let name =
-        str_(p, "name").map(str::trim).filter(|n| !n.is_empty() && n.len() <= 128).ok_or_else(|| bad(cmd, "`name` must be 1…128 characters"))?;
+    let name = str_(p, "name")
+        .map(str::trim)
+        .filter(|n| !n.is_empty() && n.chars().count() <= 128)
+        .ok_or_else(|| bad(cmd, "`name` must be 1…128 characters"))?;
     if s.doc.named_views.iter().enumerate().any(|(j, v)| j != i && v.name == name) {
         return Err(bad(cmd, format!("another view is called `{name}`")));
     }
@@ -1356,7 +1360,7 @@ fn rename_body(s: &mut Session, p: &Value) -> Result<Value> {
     fn new_name<'a>(cmd: &str, p: &'a Value) -> Result<&'a str> {
         str_(p, "name")
             .map(str::trim)
-            .filter(|n| !n.is_empty() && n.len() <= MAX_BODY_NAME)
+            .filter(|n| !n.is_empty() && n.chars().count() <= MAX_BODY_NAME)
             .ok_or_else(|| bad(cmd, "`name` must be 1…128 characters"))
     }
     let Some(list) = p.get("bodies").filter(|v| !v.is_null()) else {
@@ -1647,10 +1651,11 @@ fn redefine_sketch(s: &mut Session, p: &Value) -> Result<Value> {
             _ => None,
         })
         .cloned();
-    let plane = super::sketch::plane_ref_numbers(&trial, p, cmd)?;
+    let mut plane = super::sketch::plane_ref_numbers(&trial, p, cmd)?;
     if super::sketch::face::is_face(p) {
         super::sketch::face::capture_positions(&mut trial, &plane)?;
     }
+    solidcraft_doc::capture_sketch_plane_placement(&trial.design_document(), &mut plane, component, &trial.active_component_frame())?;
     if let Some(anchor) = old_anchor
         && super::sketch::face::anchor(&plane)
             .is_none_or(|next| next.target != anchor.target || next.component != anchor.component || next.path != anchor.path)
@@ -3556,5 +3561,31 @@ mod tests {
         // The components folder takes placements of that component, and nothing else.
         refused(&mut s, "browser.order", json!({"folder": "components", "order": ["424242"]}));
         refused(&mut s, "browser.order", json!({"folder": "components", "order": [outer]}));
+    }
+
+    /// A body's, a named view's and a group's name is 1…128 characters, as the refusal says, not
+    /// 128 bytes of its UTF-8: a hundred `ł` (200 bytes) is taken, 129 characters are not.
+    #[test]
+    fn body_view_and_group_names_count_characters_not_bytes() {
+        let mut s = Session::default();
+        run(&mut s, "solid.box", json!({"body_name": "Block", "length": 10, "width": 10, "height": 10}));
+        run(&mut s, "view.save", json!({"name": "Photo", "camera": {"target": [0, 0, 0], "yaw": 0, "pitch": 0, "distance": 100}}));
+        let group = run(&mut s, "browser.group", json!({"folder": "bodies", "items": ["Block"], "name": "Held"}))["group"].as_u64().unwrap();
+        let long = "ł".repeat(100);
+        run(&mut s, "body.rename", json!({"body": "Block", "name": long}));
+        assert_eq!(names(&s), vec![long.clone()]);
+        run(&mut s, "view.rename", json!({"view": "Photo", "name": long}));
+        assert_eq!(s.doc.named_views[0].name, long);
+        run(&mut s, "browser.rename_group", json!({"group": group, "name": long}));
+        assert_eq!(s.doc.browser_group(group).map(|g| g.name.as_str()), Some(long.as_str()));
+        let too_long = "ł".repeat(129);
+        for (command, params) in [
+            ("body.rename", json!({"body": long, "name": too_long})),
+            ("view.rename", json!({"view": long, "name": too_long})),
+            ("browser.rename_group", json!({"group": group, "name": too_long})),
+        ] {
+            let error = s.execute(command, &params).unwrap_err().to_string();
+            assert!(error.contains("1…128 characters"), "{command}: {error}");
+        }
     }
 }

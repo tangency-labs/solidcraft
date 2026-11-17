@@ -106,6 +106,7 @@ const PROFILE_KEYS: &[&str] = &[
     "right_drag_orbits",
     "select_other_hidden",
     "selection_shift_add_only",
+    "shortcut_again_ends_tool",
     "shortcut_cycles_modes",
     "show_selected_hidden_edges",
     "sketch_align_points",

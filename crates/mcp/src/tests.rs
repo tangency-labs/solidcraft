@@ -2894,6 +2894,22 @@ fn compact_move_points_reply_lists_only_missed_moves() {
     assert!(missed[0]["at"].is_array() && missed[0].get("reached").is_none(), "{compact}");
 }
 
+/// The headless server answers `view.pick` with world rays (#16240): the bar of radius 20 along
+/// X, hit straight down at y = 10, at z = √300 on its exact surface. Pixels still need the app.
+#[test]
+fn headless_view_pick_answers_rays_on_the_exact_surface() {
+    let mut s = server();
+    let bar = json!({"radius": 20, "height": 60, "base": [-30, 0, 0], "axis": "X", "name": "Bar", "body_name": "Bar"});
+    tool(&mut s, "execute", json!({"command": "solid.cylinder", "params": bar}));
+    let r = tool(&mut s, "execute", json!({"command": "view.pick", "params": {"rays": [{"origin": [0, 10, 50], "dir": [0, 0, -1]}]}}));
+    let hit = &r["hits"][0];
+    assert_eq!(hit["body"], "Bar", "{r}");
+    let z = hit["point"][2].as_f64().unwrap_or(f64::NAN);
+    assert!((z - 300f64.sqrt()).abs() < 1e-9, "{r}");
+    let refused = raw_tool(&mut s, "execute", json!({"command": "view.pick", "params": {"pixels": [[1, 1]]}}));
+    assert!(refused.to_string().contains("running SolidCraft app"), "{refused}");
+}
+
 /// A connected app sees exactly one engine call; no inventory inspection is needed.
 #[test]
 fn compact_execute_uses_one_backend_call_and_keeps_removed_bodies() {

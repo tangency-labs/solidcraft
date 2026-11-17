@@ -211,6 +211,7 @@ pub(crate) mod edge_detail;
 mod file_load_ui_tests;
 #[cfg(test)]
 mod fillet_spline_handle_tests;
+pub(crate) mod import_report;
 pub mod mouse_gesture;
 use solidcraft_ui_kit::nav_bar;
 pub(crate) mod navigation;
@@ -657,6 +658,8 @@ pub struct SolveApp {
     pub(crate) easyprint: easyprint_ui::State,
     /// Install plugin…: the plugin waiting for the user's answer.
     pub(crate) plugin_install: plugin_install::State,
+    /// What an importer plugin could not carry over from the file it just opened.
+    pub(crate) import_report: Option<import_report::Shown>,
     /// A Save or Save As being written on a worker (see [`save_job`]).
     saving: Option<save_job::Saving>,
     /// A signature check running on a worker (see [`verify_job`]).
@@ -1008,6 +1011,7 @@ impl SolveApp {
             slicer_wait: None,
             easyprint: Default::default(),
             plugin_install: Default::default(),
+            import_report: None,
             saving: None,
             verifying: None,
             viewport: viewport::ViewportState::default(),
@@ -1230,6 +1234,7 @@ impl SolveApp {
     /// says so where the model would be, and the status line says it too.
     pub fn gpu_unavailable(&mut self) {
         self.viewport.gpu_unavailable = true;
+        self.viewport.gpu_preparing = false;
         let text = self.tr("starting.view_unavailable").to_owned();
         self.set_status(text, true);
     }
@@ -1242,6 +1247,7 @@ impl SolveApp {
         }
         let (installed, stats, tess_ready) = solidcraft_viewport_egui::adopt(rs, built.built);
         self.viewport.gpu = Some(installed);
+        self.viewport.gpu_preparing = false;
         self.viewport.tess_ready = tess_ready;
         self.viewport.draw_stats = Some(stats);
         // The device's own limits (what it was created with), not the adapter's: uploads are split
@@ -1819,6 +1825,9 @@ impl SolveApp {
                 if id == "sketch.move" {
                     released_status(self, language, v);
                 }
+                if id == "occurrence.ground" {
+                    unground_joint_status(self, language, v);
+                }
                 if id == "file.new" {
                     // `file.new` starts from millimetres. Units of new designs still apply (#1205).
                     prefs::apply_new_design(self);
@@ -2200,9 +2209,10 @@ impl SolveApp {
             joint_handles::start(self);
             return;
         }
-        // One selected placement moves as a component, the same way as its Browser menu,
-        // retaining the exact instance path and the grounding/rigid-group restrictions.
-        // A selected body, or a component picked in the tree, opens Move/Copy on those bodies.
+        // One selected placement opens Move/Copy on it the same way as its Browser menu (it
+        // moves by its placement), retaining the exact instance path and the grounding and
+        // rigid-group restrictions, and asking nothing about its pending move first. Selected
+        // bodies, or a component picked in the tree, open Move/Copy on those.
         if id == "solid.move"
             && let [solidcraft_engine::Sel::Occurrence { path }] = self.session.selection.as_slice()
         {
@@ -2538,6 +2548,11 @@ impl SolveApp {
             return;
         }
         if let Some(mut t) = tools::Tool::for_command(id) {
+            t.classic = self.preferences.construction_line_classic;
+            if t.classic && solidcraft_engine::cmd::construction_line_mode(id).is_some() {
+                // The classic switch starts at Construction, whatever the palette chose last.
+                t.line_type = 3;
+            }
             let state = crate::open_meshing::session_world(&self.session);
             let sketch = self.session.active_sketch.and_then(|s| state.sketch(s)).map(|ss| &ss.sketch);
             if let Some(params) = tools::constraint_preselection(id, &self.session.selection, sketch) {
@@ -3997,6 +4012,7 @@ impl SolveApp {
         delete::show(self, ui.ctx());
         easyprint_ui::show(self, ui.ctx());
         plugin_install::show(self, ui.ctx());
+        import_report::show(self, ui.ctx());
         linked_source::show_copies(self, ui.ctx());
         joint_handles::show_warning(self, ui.ctx());
         shortcut_box::show(self, ui.ctx());
@@ -4177,6 +4193,30 @@ fn released_status(app: &mut SolveApp, language: solidcraft_ui_text::Locale, v: 
     let msg = language.format(id, &[("count", &count), ("names", &names.join(", "))]);
     app.set_status(msg, false);
     app.status_undo = true;
+}
+
+/// Grounding succeeds even when a joint has lost its origin or conflicts with another joint.
+/// Keep every reported issue in Messages without treating an unchanged placement as a failure.
+fn unground_joint_status(app: &mut SolveApp, language: solidcraft_ui_text::Locale, v: &Value) {
+    use i18n::LocaleNames;
+
+    if v.get("grounded").and_then(Value::as_bool) != Some(false) {
+        return;
+    }
+    let Some(id) = v.get("occurrence").and_then(Value::as_u64) else { return };
+    let occurrence = app.session.doc.occurrences.iter().find(|o| o.id == id).map(|o| o.name.clone()).unwrap_or_else(|| id.to_string());
+    let occurrence = language.given_name(&occurrence);
+    for problem in ["errors", "conflicts"].iter().filter_map(|key| v.get(key).and_then(Value::as_array)).flatten() {
+        let (Some(joint), Some(reason)) = (problem.get("name").and_then(Value::as_str), problem.get("why").and_then(Value::as_str)) else {
+            continue;
+        };
+        let msg = language.format(
+            "joint.unground_issue",
+            &[("occurrence", &occurrence), ("joint", &language.given_name(joint)), ("reason", &language.diagnostic(reason))],
+        );
+        app.session.echo(msg.clone());
+        app.set_status(msg, false);
+    }
 }
 
 /// An edit in place command's result, saying when it waits for the end of the agent's turn.

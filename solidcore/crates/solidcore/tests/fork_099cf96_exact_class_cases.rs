@@ -48,10 +48,6 @@
 //! R 10 below z = 4 is 4000 pi / 3 - 288 pi = 3284.011520552530, and the round r 2 (the
 //! ball's centre ring at z = 2, radius sqrt 60) takes away pi (40.5 - 2 sqrt 60 (pi -
 //! sqrt 3.75 / 4 - 2 asin 1 / 4)) = 22.492758031488, which leaves 3261.518762521043.
-//! One difference from the fork: the two pipes' union itself fails 1001 here without
-//! `ssi_split_curves_at_singular_points` (WR-77), so the pipes get that flag wherever the
-//! fork's mark is about their round.
-//!
 //! How this test drives the kernel differs from the capi: edges are picked as the nearest
 //! within 0.1 of each point, and `fillet_edges` runs with section type 1, continuity 1 and
 //! thumbweight 1, the arguments `round_edges` gives `SetFilletParameters`, without the capi's
@@ -73,7 +69,7 @@ use solidcore::mass::integrator::properties::{brep_volume, PropertyAttributes};
 use solidcore::math::{Point3, Vec3, PI};
 use solidcore::nurbs::b_spline_surface::SurfParamType;
 use solidcore::primitive::api_primitives::{create_cone, create_cylinder, create_sphere};
-use solidcore::query::api_queries::edge_closest_point;
+use solidcore::query::api_queries::{brep_is_manifold_solid, edge_closest_point};
 use solidcore::surface::surface::SurfaceKind;
 use solidcore::topology::brep::validation::{check_brep, CheckLevel};
 use solidcore::topology::face::p2 as face;
@@ -449,8 +445,8 @@ fn off_ball(
 /// What grading a case found.
 #[derive(Debug)]
 enum Graded {
-    /// The body before the round did not build.
-    Body(String),
+    /// The body before the round did not build (the error, shown through `Debug`).
+    Body(#[expect(dead_code, reason = "read only through Debug")] String),
     /// The round returned an error.
     Round(String),
     /// The round built: what's wrong with it and how far it lies off the ball.
@@ -590,8 +586,6 @@ fn mark_with_section_fixes(name: &str) -> Mark {
     }
 }
 
-const PIPES: &str = "cylinders_touching_at_a_point";
-
 fn check_all(mark: fn(&str) -> Mark, kernel: fn() -> Kernel, fitted_kind: RoundKind) {
     let mut wrong = Vec::new();
     for mut case in cases() {
@@ -599,9 +593,6 @@ fn check_all(mark: fn(&str) -> Mark, kernel: fn() -> Kernel, fitted_kind: RoundK
             case.kind = fitted_kind;
         }
         let mut k = kernel();
-        if case.name == PIPES {
-            k.fixes.ssi_split_curves_at_singular_points = true;
-        }
         let got = grade(&case, &mut k);
         println!("{}: {got:?}", case.name);
         if !holds(mark(case.name), &got) {
@@ -658,14 +649,29 @@ fn with_solidcraft_s_fixes_the_fitted_round_is_its_definition() {
     );
 }
 
+/// The two pipes' union, which upstream's unsplit intersection curves fail with status
+/// 1001, builds (the curves are split at the node where the cylinders touch, WR-77), and
+/// cut to z <= -2 it is a manifold solid, clean at level 2, of the closed-form volume:
+/// A (R 10 about x, |x| <= 20, axis at z = -10) and B (R 5 about y, |y| <= 20, axis at
+/// z = -5) below z = -2 are 40 (100 pi - segA) and 40 (25 pi - segB), the circular
+/// segments above the cut `segA = 100 acos 0.8 - 48`, `segB = 25 acos 0.6 - 12`; their
+/// common part is `V_int`, the integral over z in [-10, -2] of
+/// `4 sqrt(25 - (z + 5)^2) sqrt(100 - (z + 10)^2)` (with z + 5 = 5 sin phi a smooth
+/// integrand; Romberg and 64-point Gauss-Legendre agree to 2e-16): 1168.9215656744247.
 #[test]
-fn the_pipes_join_only_with_wr77() {
-    let case = cases().into_iter().find(|c| c.name == PIPES).unwrap();
-    let got = grade(&case, &mut Kernel::default());
-    assert!(
-        matches!(&got, Graded::Body(e) if e.contains("status: 1001")),
-        "{got:?}"
-    );
+fn the_pipes_join() {
+    let mut k = Kernel::default();
+    let mut b = cylinders_touching_at_a_point(&mut k).unwrap();
+    assert!(brep_is_manifold_solid(&b).unwrap());
+    let lines = check_brep(&mut k, &mut b, CheckLevel::Level2)
+        .unwrap()
+        .lines();
+    assert!(lines.is_empty(), "{lines:?}");
+    let seg_a = 100.0 * 0.8f64.acos() - 48.0;
+    let seg_b = 25.0 * 0.6f64.acos() - 12.0;
+    let want = 40.0 * (100.0 * PI - seg_a) + 40.0 * (25.0 * PI - seg_b) - 1_168.921_565_674_424_7;
+    let v = volume(&k, &mut b).unwrap();
+    assert!((v - want).abs() <= 1e-6 * want, "volume {v}, want {want}");
 }
 
 /// The grading sees what it's for: on a case that passes, a volume one part in 1e5 off and

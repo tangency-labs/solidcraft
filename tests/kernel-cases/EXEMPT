@@ -87,6 +87,7 @@ explode.list                      exploded views: display offsets
 expr.evaluate                     expression evaluation
 file.gerber_files                 a listing of a board's files: crates/engine/src/cmd/board_import_tests.rs
 file.gpg_keys                     GnuPG key listing: tested in crates/engine/src/gpg.rs tests
+file.import                       opens a file through an importer plugin: tested in crates/engine/src/plugin/tests.rs
 file.import_cache_clear           clears a cache of imported files
 file.insert_gerber                board import, tested in crates/engine/src/cmd/board_import_tests.rs
 file.open_in_easyprint            hands the file to another program
@@ -397,6 +398,7 @@ view.next_tab                     the view: camera, layout, display
 view.normal_to                    the view: camera, layout, display
 view.origin_axes_across_view       display-only preference: crates/engine/src/cmd/view_navigation.rs and crates/ui-egui/src/view_home_tests.rs
 view.perspective                  the view: camera, layout, display
+view.pick                         read-only ray pick, no geometry made: tested in crates/engine/src/cmd/view_pick.rs and solidcore/crates/solidcore-ops/tests/measure.rs
 view.previous_tab                 the view: camera, layout, display
 view.rename                       the view: camera, layout, display
 view.render_browser               the view: camera, layout, display

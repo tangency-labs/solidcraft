@@ -2324,7 +2324,7 @@ fn resolver_order_is_feature_first_at_every_site() {
 
     // plane_param: a sketch on the named plane is attached to the feature, not the datum.
     let sid = run(&mut s, "sketch.create", json!({"plane": &plane_key, "name": "On the feature"}))["sketch"].as_u64().unwrap();
-    let FeatureKind::Sketch { plane: PlaneRef::Construction { feature }, .. } = &s.doc.feature(sid).unwrap().kind else {
+    let FeatureKind::Sketch { plane: PlaneRef::Construction { feature, .. }, .. } = &s.doc.feature(sid).unwrap().kind else {
         panic!("{:?}", s.doc.feature(sid).unwrap().kind)
     };
     let named = s.doc.features.iter().find(|f| f.name == plane_key).unwrap().id;
@@ -2736,4 +2736,17 @@ fn moves_that_cancel_each_other_still_keep_up_with_their_parameter() {
     run(&mut s, "occurrence.ground", json!({"occurrence": occ, "grounded": true}));
     run(&mut s, "parameters.change", json!({"name": "q", "expression": "5 mm"}));
     at(centre(&mut s, occ), [1.0, 0.5, 0.5]);
+}
+
+/// A component's name is 1…128 characters, as the refusal says, not 128 bytes of its UTF-8: a
+/// hundred `ł` (200 bytes) is taken, 129 characters are not.
+#[test]
+fn component_names_count_characters_not_bytes() {
+    let mut s = Session::default();
+    let (component, _) = created(&mut s, "A");
+    let long = "ł".repeat(100);
+    run(&mut s, "component.rename", json!({"component": component, "name": long}));
+    assert_eq!(s.doc.find_component(&long), Some(component));
+    let error = s.execute("component.rename", &json!({"component": component, "name": "ł".repeat(129)})).unwrap_err().to_string();
+    assert!(error.contains("1…128 characters"), "{error}");
 }

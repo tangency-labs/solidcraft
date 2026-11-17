@@ -388,6 +388,13 @@ impl ModelBody {
         self.mesh.clone()
     }
 
+    /// For a rigidly placed copy of another body (a placement of a component's body, a pattern
+    /// copy), whose display cells are its definition's moved: the identity of that definition,
+    /// the same for every copy of it. `None` for a body with display cells of its own.
+    pub fn placed_definition(&self) -> Option<usize> {
+        self.mesh_placement.as_deref().map(placed_mesh::PlacedMesh::definition_id)
+    }
+
     /// Identity of the display cells of the solid this body shows: its own, or for a rigidly
     /// placed copy its definition's (shared by every placement of it).
     fn solid_id(&self) -> usize {
@@ -605,6 +612,39 @@ fn removed_note(gone: &[Vec3]) -> String {
     }
 }
 
+/// A blend's picks (per body index, the picks on that body) without those that take a smooth
+/// edge (its faces meet tangentially: a seam or split edge, easy to take with a window pick),
+/// each left out named in `notes`, and without a body left with none, when a pick on any body
+/// remains; else all of them, for the blend to refuse (a single pick, or only smooth edges:
+/// #17919).
+fn without_smooth(st: &ModelState, groups: Vec<(usize, Vec<Vec3>)>, notes: &mut Vec<String>) -> Result<Vec<(usize, Vec<Vec3>)>> {
+    if groups.iter().map(|(_, picks)| picks.len()).sum::<usize>() < 2 {
+        return Ok(groups);
+    }
+    let mut smooth = Vec::with_capacity(groups.len());
+    for (ti, picks) in &groups {
+        let mb = st.bodies.get(*ti).ok_or_else(|| DocError::Invalid("body".into()))?;
+        smooth.push(kernel::smooth_picks(&mb.body, picks)?);
+    }
+    if smooth.iter().flatten().all(|s| *s) || !smooth.iter().flatten().any(|s| *s) {
+        return Ok(groups);
+    }
+    let mut at = Vec::new();
+    let mut kept = Vec::with_capacity(groups.len());
+    for ((ti, picks), smooth) in groups.into_iter().zip(smooth) {
+        let (skipped, rest): (Vec<_>, Vec<_>) = picks.into_iter().zip(smooth).partition(|(_, s)| *s);
+        at.extend(skipped.iter().map(|(p, _)| format!("({}, {}, {})", show_mm(p.x), show_mm(p.y), show_mm(p.z))));
+        if !rest.is_empty() {
+            kept.push((ti, rest.into_iter().map(|(p, _)| p).collect()));
+        }
+    }
+    notes.push(match at.as_slice() {
+        [one] => format!("1 edge skipped: its faces meet tangentially, so there is nothing to blend (the edge at {one})"),
+        _ => format!("{} edges skipped: their faces meet tangentially, so there is nothing to blend (the edges at {})", at.len(), at.join(", ")),
+    });
+    Ok(kept)
+}
+
 thread_local! {
     /// Current feature evaluation validation mode (`EachStep`, `EachFeature`, or `Off`).
     static EVAL_VALIDATION: std::cell::Cell<kernel::Validation> = const { std::cell::Cell::new(kernel::Validation::EachFeature) };
@@ -686,8 +726,10 @@ fn with_largest_fit(
         Ok(kernel::FitSearch { found: Some((largest, _)), .. }) => {
             kernel::KernelError::TooLarge(format!("{why}; {}", kernel::largest_fit_note(size, largest)))
         }
-        Ok(kernel::FitSearch { found: None, smallest_refused: Some((at, e)), .. }) => kernel::KernelError::TooLarge(format!(
-            "{}; no smaller {size} builds either (down to {} mm: {})",
+        // The search samples sizes and building is not monotone in the size, so it says what it
+        // tried, not that nothing smaller builds.
+        Ok(kernel::FitSearch { found: None, smallest_refused: Some((at, e)), tried, .. }) => kernel::KernelError::TooLarge(format!(
+            "{}; none of the {tried} sizes tried builds (the smallest, {} mm: {})",
             kernel::without_fit_note(&why),
             show_mm(at),
             kernel::without_fit_note(&e.to_string())
@@ -2478,6 +2520,8 @@ impl Feature {
                 read.dedup();
                 bodies(read)
             }
+            // A turn about an edge or round face of the model reads that geometry too (#17974).
+            FeatureKind::Move { rotate_about: Some(_), .. } => None,
             FeatureKind::Move { bodies: moved, .. } => bodies(named(&crate::plain::<String, _>(moved))?),
             FeatureKind::Combine { target, tools, .. } => {
                 let mut names = vec![target.0.clone()];
@@ -2957,6 +3001,11 @@ fn placement_digest(doc: &Document, f: &Feature, st: Option<&ModelState>) -> u64
             for tool in tools {
                 reads.placed_body(st, tool);
             }
+        }
+        FeatureKind::Split { body, tool: Some(tool), tool_plane: true, .. } => {
+            frame = st.and_then(|st| st.body(body)).map(|b| body_world(doc, b));
+            reads.placed_body(st, body);
+            reads.placed_body(st, &tool.body);
         }
         // A pattern of bodies copies them along its directions or about its axis in its own
         // component's frame, so it follows where each body it copies is placed relative to that
@@ -4098,7 +4147,8 @@ mod largest_fit_tests {
         })
         .to_string();
         assert!(!e.contains("that fits is"), "{e}");
-        assert!(e.contains("no smaller radius builds either (down to 0.001 mm: "), "{e}");
+        assert!(!e.contains("no smaller"), "{e}");
+        assert!(e.contains("none of the 14 sizes tried builds (the smallest, 0.001 mm: "), "{e}");
         assert!(e.contains("the trim leaks"), "{e}");
     }
 
@@ -6331,8 +6381,10 @@ fn hole_drill_scope(f: &Feature) -> &[String] {
 /// it. When the hole cuts every body, or none, every body counts.
 pub fn hole_start(st: &ModelState, f: &Feature, p: Vec3, dir: Vec3) -> Vec3 {
     let anywhere = hole_on_surface(st, p, dir, &[]);
-    // `hole_on_surface` hands `p` itself back when `p` is on a face (or meets no body at all).
-    if anywhere == p {
+    // `hole_on_surface` hands `p` itself back when `p` is on a face's mesh (or meets no body at
+    // all). On a round face, a point between its mesh's vertices lies off the mesh: the B-rep
+    // says whether it is on the face.
+    if anywhere == p || on_a_brep_face(st, p) {
         return p;
     }
     let targets = hole_targets(st, f);
@@ -6341,6 +6393,17 @@ pub fn hole_start(st: &ModelState, f: &Feature, p: Vec3, dir: Vec3) -> Vec3 {
     }
     let scope: Vec<String> = targets.iter().map(|b| b.name.clone()).collect();
     hole_on_surface(st, p, dir, &scope)
+}
+
+/// Whether `p` lies on a face of a B-rep body, within the body's chord tolerance
+/// ([`ModelBody::display_tol`], so the face's mesh is within reach): solidcore decides it on the
+/// face's surface and trim ([`solidcraft_kernel::Body::point_lies_on_face`]); the mesh only
+/// names the faces to ask.
+fn on_a_brep_face(st: &ModelState, p: Vec3) -> bool {
+    let reach = st.bodies.iter().map(ModelBody::display_tol).fold(0.0, f64::max);
+    faces_near(st, p, reach, &[])
+        .into_iter()
+        .any(|(_, i, face, _)| st.bodies.get(i).is_some_and(|b| matches!(b.body.point_lies_on_face(face as usize, p, b.display_tol()), Ok(Some(_)))))
 }
 
 fn in_hole_scope(scope: &[String], b: &ModelBody) -> bool {
@@ -6861,6 +6924,27 @@ fn hole_tools_and_prisms(
     if bottom >= 0.0 {
         return Err(DocError::Invalid("hole depth must be positive".into()));
     }
+    // A hole exactly as deep as the material (To Object on the face it exits by, or a depth of
+    // the wall's thickness) is a through hole. Exact classification against every body: material
+    // just above the bottom, air just past it; a point within a body's tolerance of its boundary
+    // is neither, and the hole is then not taken to exit there; nor is it where the kernel
+    // cannot tell.
+    let at = |h: f64| *position + dir * (-h);
+    let eps = size * 1e-6;
+    let classes = |h: f64| st.bodies.iter().map(|b| b.body.classify_point(at(h))).collect::<std::result::Result<Vec<_>, _>>();
+    let exits = depth.is_some()
+        && classes(bottom + eps).is_ok_and(|c| c.contains(&kernel::PointClass::Inside))
+        && classes(bottom - eps).is_ok_and(|c| c.iter().all(|c| *c == kernel::PointClass::Outside));
+    // Its bore runs on past the exit face as it does above the entry, never to the material
+    // beyond: a floor ending on that face, which is rarely square to the axis to the last 1e-5 rad,
+    // crossed it and the cut left half of it across the exit (#17873).
+    let bore_end = match exits.then(|| Plane::from_normal(at(bottom), dir)).flatten() {
+        Some(exit) => match hole_run_on(st, &exit, r, (size * 0.01).max(0.1)) {
+            (run, near) if near.is_empty() => bottom - run,
+            _ => bottom,
+        },
+        None => bottom,
+    };
     // Each tool's circle seam at its own angle, so seams don't line up between tools.
     let seam = std::cell::Cell::new(0.0);
     let disc = |rad: f64| {
@@ -6879,16 +6963,7 @@ fn hole_tools_and_prisms(
             let half = val(vals, tip_angle, Kind::Angle)? / 2.0;
             // A hole exactly as deep as the material: the point is in the air past the exit
             // face, which would lie on the drill point's shoulder (a through hole, as drilled).
-            let at = |h: f64| *position + dir * (-h);
-            let eps = size * 1e-6;
-            // Exact classification against every body: material where one has the point inside,
-            // air where all have it outside; a point within a body's tolerance of its boundary is
-            // neither, and the hole is then not taken to exit at its shoulder.
-            let classes = |h: f64| st.bodies.iter().map(|b| b.body.classify_point(at(h))).collect::<std::result::Result<Vec<_>, _>>();
-            let solid = classes(bottom + eps)?.contains(&kernel::PointClass::Inside);
-            let air = classes(bottom - eps)?.iter().all(|c| *c == kernel::PointClass::Outside);
-            let exits_at_shoulder = solid && air;
-            if depth.is_some() && half > 1e-3 && half < std::f64::consts::FRAC_PI_2 && !exits_at_shoulder {
+            if depth.is_some() && half > 1e-3 && half < std::f64::consts::FRAC_PI_2 && !exits {
                 // One revolved tool (cylinder with a drill point).
                 let tip = r / half.tan();
                 let up = -dir;
@@ -6902,7 +6977,7 @@ fn hole_tools_and_prisms(
                     .collect());
             }
         }
-        Ok(vec![cyl(r, bottom, top, "bore")?])
+        Ok(vec![cyl(r, bore_end, top, "bore")?])
     };
     let mut tools = Vec::new();
     match hole {
@@ -10423,6 +10498,23 @@ fn eval_feature_kind(
             };
             let Some(mb) = st.bodies.get(i).cloned() else { return Err(DocError::Invalid("body".into())) };
             let picks = crate::plain(faces);
+            let face_count = mb.body.face_count();
+            if face_count > 0 && picks.len() >= face_count {
+                // Match the shell's picking reach, using exact faces. Every authored pick must
+                // resolve; leave a bad pick to the normal selection error. Repeated picks count once.
+                let reach = mb.body.size() * 1e-3 + 1e-6;
+                let picked: Option<Vec<_>> = picks.iter().map(|p| mb.body.nearest_face(*p).filter(|(d, _)| *d < reach).map(|(_, f)| f)).collect();
+                if let Some(mut picked) = picked {
+                    picked.sort_unstable();
+                    picked.dedup();
+                    if picked.len() == face_count {
+                        return Err(DocError::Invalid(
+                            "Removing every face leaves no walls. Select the body without faces for a closed hollow body, or select fewer faces."
+                                .into(),
+                        ));
+                    }
+                }
+            }
             let open = if *tangent_chain {
                 let chain = tangent_face_chain(&mb, &picks);
                 if !chain.is_empty() && chain.len() == mb.body.face_count() {
@@ -10625,7 +10717,7 @@ fn eval_feature_kind(
             }
             Ok(())
         }
-        FeatureKind::Split { body, plane, tool, sketch, line } => {
+        FeatureKind::Split { body, plane, tool, tool_plane, sketch, line } => {
             let i = st.bodies.iter().position(|b| &b.name == body).ok_or_else(|| DocError::Unknown(format!("body `{body}`")))?;
             let Some(mb) = st.bodies.get(i).cloned() else { return Err(DocError::Unknown(format!("body `{body}`"))) };
             let input = mb.traced();
@@ -10642,11 +10734,26 @@ fn eval_feature_kind(
                     let tb = st.body(&t.body).ok_or_else(|| DocError::Unknown(format!("body `{}`", t.body)))?;
                     let face = crate::appearance::face_index_at(tb, t.point.0)
                         .ok_or_else(|| DocError::Invalid(format!("no face of `{}` at the tool point", t.body)))?;
-                    // The pieces keep the planar roles of the faces they share with the body (#565).
-                    kernel::split_body(&mb.body, &kernel::SplitTool::Face { body: &tb.body, face })?
-                        .into_iter()
-                        .map(|part| Ok(Traced::step(part.with_preserved_planar_sources(&mb.body)?, &[&input])))
-                        .collect::<Result<Vec<_>>>()?
+                    if *tool_plane {
+                        let plane =
+                            tb.body.planar_face(face).ok_or_else(|| DocError::Invalid("the splitting tool face is no longer planar".into()))?;
+                        let source = body_world(doc, tb);
+                        let target = body_world(doc, &mb);
+                        let plane = if source == target {
+                            plane
+                        } else {
+                            let inverse = crate::mat_inverse(&target)
+                                .ok_or_else(|| DocError::Invalid(format!("the component holding `{body}` has a singular placement")))?;
+                            placed_plane(&crate::mat_mul(&inverse, &source), &plane)?
+                        };
+                        split_by_plane_traced(&input, &plane)?
+                    } else {
+                        // The pieces keep the planar roles of the faces they share with the body (#565).
+                        kernel::split_body(&mb.body, &kernel::SplitTool::Face { body: &tb.body, face })?
+                            .into_iter()
+                            .map(|part| Ok(Traced::step(part.with_preserved_planar_sources(&mb.body)?, &[&input])))
+                            .collect::<Result<Vec<_>>>()?
+                    }
                 }
                 None => {
                     let pl = doc.resolve_plane_in(vals, plane, 0, f.component, Some(st))?;
@@ -10825,16 +10932,20 @@ fn eval_feature_kind(
                 FeatureKind::Chamfer { tangent_chain, .. } => *tangent_chain,
                 _ => false,
             };
-            let mut blended = Vec::new();
+            let mut picks = Vec::with_capacity(groups.len());
             for (ti, idx) in &groups {
                 let Some(mb) = st.bodies.get(*ti) else { return Err(DocError::Invalid("body".into())) };
                 let mut w = None;
-                let edges = blend_edges_on(mb, f, edges, idx, &mut w)?;
-                let picked = edges.len();
-                let edges = if chain { kernel::tangent_chain(&mb.body, &edges)? } else { edges };
+                picks.push((*ti, blend_edges_on(mb, f, edges, idx, &mut w)?));
                 if let Some(w) = w {
                     notes.push(w);
                 }
+            }
+            let mut blended = Vec::new();
+            for (ti, edges) in without_smooth(st, picks, &mut notes)? {
+                let Some(mb) = st.bodies.get(ti) else { return Err(DocError::Invalid("body".into())) };
+                let picked = edges.len();
+                let edges = if chain { kernel::tangent_chain(&mb.body, &edges)? } else { edges };
                 let mut note = None;
                 let propagated = edges.len() > picked;
                 let (nb, used, tapered) =
@@ -10848,7 +10959,7 @@ fn eval_feature_kind(
                 // A pattern repeats each edge at a moved copy of a point on it: the edge's middle,
                 // never the pick, which at a vertex two edges share finds either on a copy (#16934).
                 found.extend(kernel::blend_edge_middles(&mb.body, &edges)?);
-                blended.push((*ti, nb));
+                blended.push((ti, nb));
             }
             if !notes.is_empty() {
                 *warning = Some(notes.join("; "));
@@ -11058,7 +11169,7 @@ fn eval_feature_kind(
             st.bodies.push(ModelBody::traced_new(name, b, f.id));
             Ok(())
         }
-        FeatureKind::Move { bodies, translate, rotate_axis, origin, angle, copy, copy_frames } => {
+        FeatureKind::Move { bodies, translate, rotate_axis, rotate_about, origin, angle, copy, copy_frames } => {
             if !copy_frames.is_empty()
                 && (!*copy || copy_frames.len() != bodies.len() || copy_frames.iter().any(|m| !crate::valid_transfer_matrix(m)))
             {
@@ -11072,6 +11183,11 @@ fn eval_feature_kind(
             };
             let axis = rotate_axis.map(Vec3::from).unwrap_or(Vec3::Z);
             let origin = origin.as_ref().map(|p| point(vals, p)).transpose()?.unwrap_or(Vec3::ZERO);
+            // A turn picked on an edge follows the edge where it is now (#17974).
+            let (origin, axis) = match rotate_about {
+                Some(about) => move_turn_line(doc, st, f.component, about, origin, axis, warning)?,
+                None => (origin, axis),
+            };
             // With `copy` set, the source body is kept in place and the transform lands on a new
             // body pushed beside it instead of replacing it.
             let mut output = 0;
@@ -11305,12 +11421,18 @@ fn mesh_bodies(meshes: &[crate::MeshData]) -> Result<Vec<(String, Body)>> {
 
 /// The names an Import feature gives the file's bodies, added after the bodies of `st`, in the
 /// file's order: `None` for a body it skips (a later instance of a repeated part). `body_names`
-/// are the feature's stored names (by index), else the file's own.
+/// are the feature's stored names (by index), else the file's own; the ones past the file's
+/// bodies are kept for solids the reader left out.
 pub fn import_body_names(st: &ModelState, body_names: &[String], imp: &kernel::StepImport, skip: &[u64]) -> Vec<Option<String>> {
     let skip: std::collections::HashSet<u64> = skip.iter().copied().collect();
     // Files from board and assembly tools give thousands of bodies the same name: name them
     // from a set, not by searching the bodies for every candidate (cubic).
     let mut names = BodyNames::new(st);
+    // Names kept after the file's bodies belong to solids this reader leaves out (#16857): no
+    // other body takes them.
+    for kept in body_names.iter().skip(imp.bodies.len()).map(|n| n.trim()).filter(|n| !n.is_empty()) {
+        names.taken.insert(kept.to_string());
+    }
     imp.bodies
         .iter()
         .enumerate()
@@ -11386,6 +11508,33 @@ fn construction_state<'a>(doc: &Document, st: &'a ModelState, comp: u64) -> Resu
         return Ok(std::borrow::Cow::Owned(world_state(doc, st)?));
     }
     state_in_frame(doc, st, comp)
+}
+
+/// The line a Move's turn picked on the edge or round face `about` turns about now: where `about`
+/// is in the model before the move, pointing the way the saved `axis` does, so the turn keeps its
+/// sense (#17974). `origin` and `axis` are the line saved when it was picked.
+fn move_turn_line(
+    doc: &Document,
+    st: &ModelState,
+    comp: u64,
+    about: &crate::construct::GeoRef,
+    origin: Vec3,
+    axis: Vec3,
+    warning: &mut Option<String>,
+) -> Result<(Vec3, Vec3)> {
+    let found = construction_state(doc, st, comp).and_then(|cs| crate::construct::model_axis_in(Some(doc), &cs, about, comp));
+    match found {
+        Ok((o, d)) if o.is_finite() && d.is_finite() && d.len() > 1e-12 => Ok((o, if d.dot(axis) < 0.0 { -d } else { d })),
+        Ok(_) => lost_turn_line(origin, axis, "it has no direction".into(), warning),
+        Err(e) => lost_turn_line(origin, axis, e.to_string(), warning),
+    }
+}
+
+/// What a Move does when the edge its turn was picked on is not found: it turns about the line
+/// saved when it was picked and says so (#17974). The one place to change to refuse instead.
+fn lost_turn_line(origin: Vec3, axis: Vec3, why: String, warning: &mut Option<String>) -> Result<(Vec3, Vec3)> {
+    append_warning(warning, format!("the edge this turn was picked on was not found ({why}): it turns about where that edge was"));
+    Ok((origin, axis))
 }
 
 /// Construction axes and points built on bodies a Move moves go with them (#10127): an axis
@@ -12106,7 +12255,8 @@ pub fn world_state_reusing(doc: &Document, st: &ModelState, placed_before: &mut 
 /// (under any offset or flip of it) given as the plane where that component puts it, in `comp`'s
 /// frame (#11734). A construction plane is kept in its own component's frame, as the axes are
 /// (`construction_axis_in`), so a plane read as it is would fall in the wrong place for a feature
-/// of a component placed differently.
+/// of a component placed differently. A captured construction plane is resolved directly in its
+/// saved frame by `resolve_plane_in`, keeping assembly motion out of the sketch's definition.
 fn construction_planes_in_frame<'a>(doc: &Document, st: &ModelState, comp: u64, plane: &'a PlaneRef) -> Result<std::borrow::Cow<'a, PlaneRef>> {
     use std::borrow::Cow;
     // The component of a feature, read from the timeline without `Document::feature`'s search counter.
@@ -12115,7 +12265,7 @@ fn construction_planes_in_frame<'a>(doc: &Document, st: &ModelState, comp: u64, 
     }
     fn foreign(doc: &Document, comp: u64, plane: &PlaneRef) -> bool {
         match plane {
-            PlaneRef::Construction { feature } => owner_of(doc, feature.0).is_some_and(|owner| owner != comp),
+            PlaneRef::Construction { feature, placement } => placement.is_none() && owner_of(doc, feature.0).is_some_and(|owner| owner != comp),
             PlaneRef::Offset { base, .. } | PlaneRef::Flipped { base, .. } | PlaneRef::AtAngle { base, .. } | PlaneRef::ThroughPoint { base, .. } => {
                 foreign(doc, comp, base)
             }
@@ -12124,7 +12274,10 @@ fn construction_planes_in_frame<'a>(doc: &Document, st: &ModelState, comp: u64, 
     }
     fn map(doc: &Document, st: &ModelState, comp: u64, plane: &mut PlaneRef) -> Result<()> {
         match plane {
-            PlaneRef::Construction { feature } => {
+            PlaneRef::Construction { feature, placement } => {
+                if placement.is_some() {
+                    return Ok(());
+                }
                 let owner = owner_of(doc, feature.0).unwrap_or(comp);
                 if owner == comp {
                     return Ok(());
@@ -12544,6 +12697,79 @@ mod chain_tests {
         let (off, faces) = build(false);
         assert_eq!(off, None);
         assert_eq!(faces, Some(8));
+    }
+
+    /// A 40 × 16 × 10 plate ending in a half cylinder of radius 8: its sides run into the
+    /// cylinder's wall tangentially, along smooth edges such as the one at x 40, y 0. A fillet of
+    /// the back top edge and that smooth edge rounds the back edge and says it skipped the
+    /// smooth one (#17919): 6400 + 320π − (1 − π/4)·16 mm³. Beside it a 10 mm cube, a body of its
+    /// own: a fillet of a cube edge and the plate's smooth edge rounds the cube edge and leaves
+    /// the plate as it was (the plate's picks, all smooth, are skipped, not refused). The smooth
+    /// edge alone is refused.
+    #[test]
+    fn a_smooth_edge_among_the_picks_is_skipped_with_a_note() {
+        use std::f64::consts::{FRAC_PI_4, PI};
+        let build = |edges: &[Vec3]| {
+            let mut doc = Document::new("T");
+            let plate = FeatureKind::Box {
+                corner: crate::point_expr(Vec3::ZERO),
+                length: "40".into(),
+                width: "16".into(),
+                height: "10".into(),
+                operation: Operation::NewBody,
+                centred: false,
+            };
+            doc.add_feature(plate, None).unwrap();
+            let end = FeatureKind::Cylinder {
+                base: crate::point_expr(Vec3::new(40.0, 8.0, 0.0)),
+                axis: crate::Dir(Vec3::Z),
+                radius: "8".into(),
+                height: "10".into(),
+                operation: Operation::Join,
+                references: Vec::new(),
+            };
+            doc.add_feature(end, None).unwrap();
+            let cube = FeatureKind::Box {
+                corner: crate::point_expr(Vec3::new(100.0, 0.0, 0.0)),
+                length: "10".into(),
+                width: "10".into(),
+                height: "10".into(),
+                operation: Operation::NewBody,
+                centred: false,
+            };
+            doc.add_feature(cube, None).unwrap();
+            let mut round = fillet(Vec3::ZERO, "1", true);
+            if let FeatureKind::Fillet { edges: e, .. } = &mut round {
+                *e = edges.iter().map(|p| crate::Position(*p)).collect();
+            }
+            let last = doc.add_feature(round, None).unwrap();
+            let mut m = Model::new();
+            m.evaluate(&doc);
+            let r = m.result(last).cloned();
+            let volumes: Vec<f64> = m.state().bodies.iter().map(|b| kernel::measure(&b.body).unwrap().volume).collect();
+            (r, volumes)
+        };
+        let (plate, cube) = (6400.0 + 320.0 * PI, 1000.0);
+        // A round of r 1 along an edge of length l takes (1 − π/4)·l mm³.
+        let round = |l: f64| (1.0 - FRAC_PI_4) * l;
+        for (picks, expected) in [
+            ([Vec3::new(0.0, 8.0, 10.0), Vec3::new(40.0, 0.0, 5.0)], [plate - round(16.0), cube]),
+            ([Vec3::new(105.0, 0.0, 10.0), Vec3::new(40.0, 0.0, 5.0)], [plate, cube - round(10.0)]),
+        ] {
+            let (r, volumes) = build(&picks);
+            let r = r.expect("a result");
+            assert_eq!(r.error, None, "{picks:?}");
+            let warning = r.warning.unwrap_or_default();
+            assert!(warning.contains("1 edge skipped: its faces meet tangentially") && warning.contains("(40, 0, 5)"), "{warning}");
+            assert_eq!(volumes.len(), 2);
+            for (v, e) in volumes.iter().zip(expected) {
+                // Far tighter than the 2.1 mm³ the smaller round takes away.
+                assert!((v - e).abs() < 1e-6 * e, "{picks:?}: {volumes:?} vs {expected:?}");
+            }
+        }
+        let (alone, _) = build(&[Vec3::new(40.0, 0.0, 5.0)]);
+        let error = alone.and_then(|r| r.error).unwrap_or_default();
+        assert!(error.contains("is smooth"), "{error}");
     }
 }
 
