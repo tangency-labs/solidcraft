@@ -77,23 +77,24 @@
 //!   contact another solution names is dropped instead (the contact is not reported
 //!   twice).
 //! - **Contacts seen through the tolerance (WR-647).** Before the range classification
-//!   (and at the single leaf pair exit), a merged range one of whose ends lies inside
-//!   both curves (its points farther than the tolerance from both ends of each curve's
-//!   interval: there the curves part) is taken for the one contact inside it: the
-//!   crossing when the curves change sides across it (the separations at its ends,
-//!   taken across this curve, both past the scaled zero with a negative dot product),
-//!   found by [`local_curve_intersect`] from where the separation, taken as linear,
-//!   vanishes; otherwise the touch, the nearest point ([`Curve::local_curve_solve`],
-//!   `Minimize`) from the end where the curves are nearer, or that end when the solver
-//!   finds nothing nearer, when the range is the curves' only solution (otherwise one
-//!   coincidence whose fit error passes the tolerance here and there, #1036, or several
-//!   touches, kept as upstream). No crossing found is `Failed`.
-//!   Upstream keeps such a range, which becomes a tiny edge or a false overlap (#1979).
-//!   A coincidence of two curves lying on each other ends where one of them stops, so a
-//!   fitted copy of a curve, whose tolerance-scale separation can change sides, stays a
-//!   range (#1036). The fork decided this per span pair (tangency-labs/smlib@c2e3d9d,
-//!   04b42b4), where the two cannot be told apart. A coincidence that goes on into a
-//!   tangential departure inside both curves is taken for the touch.
+//!   (and at the single leaf pair exit), a stretch of range solutions (ranges meeting or
+//!   overlapping) one of whose ends lies inside both curves (its points farther than the
+//!   tolerance from both ends of each curve's interval: there the curves part) is taken
+//!   for the one contact inside it: the crossing when the curves change sides across it
+//!   (the separations at its ends, taken across this curve, both past the scaled zero
+//!   with a negative dot product), found by [`local_curve_intersect`] from where the
+//!   separation, taken as linear, vanishes; otherwise, when the stretch is all the
+//!   solutions, the touch: the least distance over it ([`Curve::local_curve_solve`],
+//!   `Minimize`, from the end where the curves are nearer, or that end). Curves that come
+//!   back within the tolerance elsewhere are one coincidence whose fit error passes the
+//!   tolerance here and there (#1036), or several touches, kept as upstream; so is a
+//!   stretch whose crossing the solver does not find. Upstream keeps such a stretch,
+//!   which becomes a tiny edge or a false overlap (#1979). A coincidence of two curves
+//!   lying on each other ends where one of them stops, so a fitted copy of a curve, whose
+//!   tolerance-scale separation can change sides, stays a range (#1036). The fork decided
+//!   this per span pair (tangency-labs/smlib@c2e3d9d, 04b42b4), where the two cannot be
+//!   told apart. A coincidence that goes on into a tangential departure inside both
+//!   curves is taken for the touch.
 
 use crate::curve::curve::p1::refine_cc_solutions;
 use crate::curve::curve::p2::{at, CciGlobalSolver, Curve, CurveKind};
@@ -2342,46 +2343,51 @@ impl Curve {
     }
 
     /// Not upstream (WR-647; the fork's tangency-labs/smlib@c2e3d9d and 04b42b4, decided
-    /// here on the merged range instead of on one span pair): turns each range solution
-    /// that is a contact of two distinct curves seen through the tolerance, not a stretch
-    /// where they lie on each other, into that contact's point.
+    /// here on the merged ranges instead of on one span pair): turns each stretch of range
+    /// solutions that is a contact of two distinct curves seen through the tolerance, not
+    /// a stretch where they lie on each other, into that contact's point.
     ///
     /// The span pairs report a range wherever the curves stay within `dist_tol` of each
     /// other: two distinct curves crossing at a shallow angle (two equal circles a little
     /// apart) or touching (a curve tangent to another) do so over a stretch about the
-    /// contact, and the range becomes a tiny edge or a false overlap. Two curves lying on
-    /// each other stay within the tolerance until one of them stops, so their range ends
-    /// at an end of a curve. A range is a contact when one of its ends lies inside both
-    /// curves (that end's point on each curve is farther than `dist_tol` from both ends of
-    /// that curve's interval): there the curves part. On one span pair this cannot be
-    /// told: an edge and a fitted copy of it, whose separation is tolerance-scale fit
-    /// error that can change sides anywhere, look like a crossing there (#1036), and two
-    /// concentric arcs a constant distance apart like a touch.
+    /// contact, and the stretch becomes a tiny edge or a false overlap. A stretch is the
+    /// ranges that meet end to end or overlap (in this curve's parameter, or their ends
+    /// within `dist_tol`), as the solver splits one at a span or at the crossing. Two curves
+    /// lying on each other stay within the tolerance until one of them stops, so their
+    /// stretch ends at an end of a curve. A stretch is a contact when one of its ends lies
+    /// inside both curves (that end's point on each curve is farther than `dist_tol` from
+    /// both ends of that curve's interval, and for a curve against itself not where the
+    /// curve folds back onto itself): there the curves part. On one span pair this
+    /// cannot be told: an edge and a fitted copy of it, whose separation is
+    /// tolerance-scale fit error that can change sides anywhere, look like a crossing there
+    /// (#1036), and two concentric arcs a constant distance apart like a touch.
     ///
     /// The contact is
-    /// - a crossing when the separations at the range's ends, taken across this curve (the
-    ///   tangent's component removed), are both longer than the scaled zero and point to
-    ///   opposite sides (a negative dot product): the one [`local_curve_intersect`] finds
-    ///   within `dist_tol` in the range, started where the separation, taken as linear
-    ///   between the ends, vanishes;
-    /// - otherwise, when it is the curves' only range, the point where they come nearest
-    ///   in it: the least distance over the closed range, the solver's interior minimum
-    ///   ([`Curve::local_curve_solve`], `Minimize`, started at the end where the curves are
-    ///   nearer) when it finds one nearer than that end, else that end (a round leaving a
-    ///   line it is tangent to at their shared end touches it there). The curves part at a
-    ///   range end, so their separation is not constant and they touch where it is least. Curves that come back within the
-    ///   tolerance in another range without changing sides are one coincidence whose
-    ///   separation passes the tolerance here and there (a fitted copy of a closed
-    ///   section, #1036), and keep their ranges; so do two separate touches of the same
-    ///   two curves, as upstream.
+    /// - a crossing when the separations at the stretch's ends, taken across this curve
+    ///   (the tangent's component removed), are both longer than the scaled zero and point
+    ///   to opposite sides (a negative dot product): the one [`local_curve_intersect`]
+    ///   finds within `dist_tol` in the stretch, started where the separation, taken as
+    ///   linear between the ends, vanishes;
+    /// - otherwise, when the stretch is all the curves' solutions, the point where they come
+    ///   nearest in it: the least distance over the closed stretch, the solver's interior
+    ///   minimum ([`Curve::local_curve_solve`], `Minimize`, started at the end where the
+    ///   curves are nearer) when it finds one nearer than that end, else that end (a round
+    ///   leaving a line it is tangent to at their shared end touches it there). The curves
+    ///   part at an end, so their separation is not constant and they touch where it is
+    ///   least: a stretch whose parting ends are not farther apart than its touch (by
+    ///   more than the scaled zero) keeps its ranges, a constant separation (concentric
+    ///   arcs). Curves that come back within the tolerance
+    ///   elsewhere without changing sides
+    ///   are one coincidence whose separation passes the tolerance here and there (a fitted
+    ///   copy of a closed section, #1036), and keep their ranges; so do two separate touches
+    ///   of the same two curves, as upstream.
     ///
-    /// A NaN fails these tests and keeps the range.
+    /// A NaN fails these tests, and a crossing the solver does not find, keep the ranges.
     ///
     /// # Errors
     ///
     /// Those of the evaluations, of [`local_curve_intersect`] and of
-    /// [`Curve::local_curve_solve`]; `Failed` when the curves change sides across the
-    /// range but no crossing is found in it.
+    /// [`Curve::local_curve_solve`].
     pub(crate) fn contacts_seen_through_tolerance<O: SolutionObject>(
         &self,
         k: &Kernel,
@@ -2391,16 +2397,53 @@ impl Curve {
         other_interval: &Extent1d,
         dist_tol: f64,
     ) -> Result<()> {
-        let ranges = sols
-            .as_slice()
-            .iter()
-            .filter(|s| s.solution_type == SolutionType::RangeOfValues)
-            .count();
-        if ranges == 0 {
+        let ranges: Vec<usize> = (0..sols.len())
+            .filter(|&i| {
+                sols.get(i)
+                    .is_some_and(|s| s.solution_type == SolutionType::RangeOfValues)
+            })
+            .collect();
+        if ranges.is_empty() {
             return Ok(());
         }
-        // the curves come within the tolerance nowhere else
-        let alone = sols.len() == 1;
+        // each range's ends on this curve: parameters and points
+        let mut ends = Vec::new();
+        for &i in &ranges {
+            let r = sol_at(sols, i)?;
+            let (s, e) = (r.start.parameters, r.end.parameters);
+            ends.push((
+                [s[0], s[1]],
+                [e[0], e[1]],
+                self.evaluate_point(k, s[0])?,
+                self.evaluate_point(k, e[0])?,
+            ));
+        }
+        // the stretches: ranges that meet or overlap, by a union of their indices
+        let mut stretch_of: Vec<usize> = (0..ranges.len()).collect();
+        for i in 0..ranges.len() {
+            for j in i + 1..ranges.len() {
+                let (Some(ri), Some(rj)) = (ends.get(i), ends.get(j)) else {
+                    continue;
+                };
+                let (lo_i, hi_i) = (min2(ri.0[0], ri.1[0]), max2(ri.0[0], ri.1[0]));
+                let (lo_j, hi_j) = (min2(rj.0[0], rj.1[0]), max2(rj.0[0], rj.1[0]));
+                let overlap = lo_i <= hi_j && lo_j <= hi_i;
+                let meet = [ri.2, ri.3]
+                    .iter()
+                    .any(|p| [rj.2, rj.3].iter().any(|q| p.distance(*q) <= dist_tol));
+                if overlap || meet {
+                    let (Some(&si), Some(&sj)) = (stretch_of.get(i), stretch_of.get(j)) else {
+                        continue;
+                    };
+                    let (keep, gone) = (si.min(sj), si.max(sj));
+                    for s in stretch_of.iter_mut() {
+                        if *s == gone {
+                            *s = keep;
+                        }
+                    }
+                }
+            }
+        }
         let self_ends = [
             self.evaluate_point(k, interval.min())?,
             self.evaluate_point(k, interval.max())?,
@@ -2411,18 +2454,46 @@ impl Curve {
         ];
         // farther than the tolerance from both ends (NaN is not)
         let inside = |p: Vec3, ends: &[Vec3; 2]| ends.iter().all(|e| p.distance(*e) > dist_tol);
-        for ii in 0..sols.len() {
-            let mut sol = sol_at(sols, ii)?;
-            if sol.solution_type != SolutionType::RangeOfValues {
+        let mut gone: Vec<usize> = Vec::new();
+        for stretch in 0..ranges.len() {
+            let members: Vec<usize> = (0..ranges.len())
+                .filter(|&m| stretch_of.get(m) == Some(&stretch))
+                .collect();
+            let Some(&first) = members.first() else {
+                continue;
+            };
+            // the stretch's ends: its least and greatest parameters on this curve
+            let mut s = [f64::INFINITY, 0.0];
+            let mut e = [f64::NEG_INFINITY, 0.0];
+            for &m in &members {
+                let Some(r) = ends.get(m) else { continue };
+                for end in [r.0, r.1] {
+                    if end[0] < s[0] {
+                        s = end;
+                    }
+                    if end[0] > e[0] {
+                        e = end;
+                    }
+                }
+            }
+            if !(s[0].is_finite() && e[0].is_finite()) {
                 continue;
             }
-            let (s, e) = (sol.start.parameters, sol.end.parameters);
             let this_a = self.evaluate_point(k, s[0])?;
             let this_b = self.evaluate_point(k, e[0])?;
             let other_a = other.evaluate_point(k, s[1])?;
             let other_b = other.evaluate_point(k, e[1])?;
-            let parts_a = inside(this_a, &self_ends) && inside(other_a, &other_ends);
-            let parts_b = inside(this_b, &self_ends) && inside(other_b, &other_ends);
+            // a curve against itself: an end where the stretch reaches the diagonal, the
+            // curve between its two parameters within the tolerance, is a fold of the
+            // curve back onto itself, not a parting
+            let fold = |end: [f64; 2], p: Vec3| -> Result<bool> {
+                Ok(core::ptr::eq(self, other)
+                    && self.evaluate_point(k, (end[0] + end[1]) * 0.5)?.distance(p) <= dist_tol)
+            };
+            let parts_a =
+                inside(this_a, &self_ends) && inside(other_a, &other_ends) && !fold(s, this_a)?;
+            let parts_b =
+                inside(this_b, &self_ends) && inside(other_b, &other_ends) && !fold(e, this_b)?;
             if !(parts_a || parts_b) {
                 continue;
             }
@@ -2434,6 +2505,10 @@ impl Curve {
             if da.is_nan() || db.is_nan() || separation_a.dot(separation_b).is_nan() {
                 continue;
             }
+            let Some(&first_index) = ranges.get(first) else {
+                continue;
+            };
+            let mut sol = sol_at(sols, first_index)?;
             let mut ivl1 = Extent1d::from_value(s[0]);
             ivl1.add_value(e[0]);
             let mut ivl2 = Extent1d::from_value(s[1]);
@@ -2452,22 +2527,19 @@ impl Curve {
                     s[1] + w * (e[1] - s[1]),
                 )?;
                 let Some(cross) = found else {
-                    return Err(SolidError::curve_failed(
-                        OP_GCI,
-                        "the curves change sides across a range but no crossing was found in it",
-                    ));
+                    continue;
                 };
                 sol.start.parameters[0] = cross.my_param;
                 sol.start.parameters[1] = cross.other_param;
                 sol.start.solution_value = cross.deviation;
-            } else if alone {
-                // the least distance over the closed range: the solver's interior minimum,
-                // started at the end where the curves are nearer, or that end
+            } else if members.len() == sols.len() {
+                // the least distance over the closed stretch: the solver's interior
+                // minimum, started at the end where the curves are nearer, or that end
                 let (gap_a, gap_b) = (this_a.distance(other_a), this_b.distance(other_b));
                 let (guess, gap) = if gap_b < gap_a {
-                    ([e[0], e[1]], gap_b)
+                    (e, gap_b)
                 } else {
-                    ([s[0], s[1]], gap_a)
+                    (s, gap_a)
                 };
                 let (found, nearest) = self.local_curve_solve(
                     k,
@@ -2481,22 +2553,41 @@ impl Curve {
                     guess,
                     [sol.objects[0], sol.objects[1]],
                 )?;
-                if found && nearest.start.solution_value < gap {
-                    sol.start.parameters[0] = nearest.start.parameters[0];
-                    sol.start.parameters[1] = nearest.start.parameters[1];
-                    sol.start.solution_value = nearest.start.solution_value;
+                let touch = if found && nearest.start.solution_value < gap {
+                    [
+                        nearest.start.parameters[0],
+                        nearest.start.parameters[1],
+                        nearest.start.solution_value,
+                    ]
                 } else {
-                    sol.start.parameters[0] = guess[0];
-                    sol.start.parameters[1] = guess[1];
-                    sol.start.solution_value = gap;
+                    [guess[0], guess[1], gap]
+                };
+                // where the curves part they are apart: farther than at the touch (a
+                // constant separation is a coincidence)
+                let apart = |parts: bool, end_gap: f64| !parts || end_gap > touch[2] + scaled_zero;
+                if !(apart(parts_a, gap_a) && apart(parts_b, gap_b)) {
+                    continue;
                 }
+                sol.start.parameters[0] = touch[0];
+                sol.start.parameters[1] = touch[1];
+                sol.start.solution_value = touch[2];
             } else {
                 // the curves come back within the tolerance elsewhere: one coincidence
                 // whose tolerance-scale separation passes the tolerance here and there
                 continue;
             }
             sol.solution_type = SolutionType::SingleValue;
-            put_at(sols, ii, &sol)?;
+            put_at(sols, first_index, &sol)?;
+            gone.extend(
+                members
+                    .iter()
+                    .skip(1)
+                    .filter_map(|&m| ranges.get(m).copied()),
+            );
+        }
+        gone.sort_unstable();
+        for &i in gone.iter().rev() {
+            sols.remove_at(i, 1);
         }
         Ok(())
     }
