@@ -144,7 +144,7 @@ fn main() -> ExitCode {
     let mut args: Vec<String> = std::env::args().skip(1).collect();
     logger::init(&mut args);
     // The kernel's fix set, named to solidcore-ops before any call runs on it.
-    solidcraft_kernel::start();
+    solidcraft_engine::kernel::start();
     // `--profile` / `--profile-out` (run, eval, bench-open) or SOLIDCRAFT_PROFILE (any command):
     // record from here, and print the table when the command ends.
     let profiling = match args.first().map(String::as_str) {
