@@ -137,6 +137,11 @@ impl ViewSet {
         !self.closed.is_empty()
     }
 
+    /// Whether a view can still be shown, including by reopening it.
+    pub fn has_open_or_closed(&self, id: u64) -> bool {
+        self.get(id).is_some() || self.closed.iter().any(|(_, view)| view.id == id)
+    }
+
     /// Open a view of `kind` showing `subject` and make it the active one. With `reuse`, a view
     /// already showing the same kind and subject is activated instead. A new view is named by
     /// kind and number ("Sketch 2") and goes last. Full (`MAX_VIEWS`): the active view stays.
