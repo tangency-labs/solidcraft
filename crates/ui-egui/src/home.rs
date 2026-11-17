@@ -13,6 +13,28 @@ use crate::start_page;
 /// Recent designs kept.
 pub const MAX_RECENT: usize = 12;
 const THUMB: [usize; 2] = solidcraft_engine::io::THUMBNAIL_SIZE;
+
+/// A design whose placed world holds more bodies than this gets no picture on Home (its card
+/// shows without one). Each placed body is a copy of its part where it stands, made to draw the
+/// picture: a large assembly placed a hundred times took tens of gigabytes for it, enough to
+/// stall the machine while the design opened. One large assembly placed once is about 600.
+const PICTURE_MAX_BODIES: usize = 5_000;
+
+/// How many bodies the design's placed world holds, counted from the design: each component's
+/// own bodies at each of its placements, as the world is placed, without placing anything.
+fn placed_bodies(s: &Session) -> usize {
+    let st = s.model.state();
+    let mut per_component: HashMap<u64, usize> = HashMap::new();
+    for c in s.doc.model_body_components(&st) {
+        *per_component.entry(c).or_default() += 1;
+    }
+    if s.doc.occurrences.is_empty() {
+        return st.bodies.len();
+    }
+    let placements = s.doc.placements();
+    let root = if placements.iter().any(|(c, _, _)| *c == 0) { 0 } else { per_component.get(&0).copied().unwrap_or(0) };
+    root + placements.iter().map(|(c, _, _)| per_component.get(c).copied().unwrap_or(0)).sum::<usize>()
+}
 const SAMPLE_PICTURES: [&[u8]; 6] = [
     include_bytes!("../../../assets/samples/exports/0.png"),
     include_bytes!("../../../assets/samples/exports/1.png"),
@@ -145,6 +167,10 @@ impl HomeState {
 
 /// A picture of a design: iso view, fitted.
 pub fn thumbnail(s: &Session) -> Option<egui::ColorImage> {
+    // Decided before anything is placed: placing the world is what costs.
+    if placed_bodies(s) > PICTURE_MAX_BODIES {
+        return None;
+    }
     let mut cam = Camera::default();
     cam.set_view(StandardView::Iso);
     // No picture of a model that cannot be placed.
@@ -1189,6 +1215,36 @@ fn dispatch(app: &mut SolveApp, ctx: &egui::Context, action: FileAction) {
 
 #[cfg(test)]
 mod tests {
+    /// The count that decides whether a design gets a picture is the number of bodies its placed
+    /// world holds, counted without placing it: a part's bodies at each of its placements, and
+    /// the design's own. Past [`PICTURE_MAX_BODIES`] no picture is made.
+    #[test]
+    fn a_designs_picture_is_left_out_past_a_count_of_its_placed_bodies() {
+        let mut s = Session::default();
+        s.execute("solid.box", &serde_json::json!({"length": 5, "width": 5, "height": 5, "body_name": "Own"})).unwrap();
+        let c = s.execute("component.create", &serde_json::json!({"name": "Part", "grounded": false})).unwrap();
+        for k in 0..10 {
+            s.execute(
+                "solid.box",
+                &serde_json::json!({"corner": [10 * k, 0, 0], "length": 5, "width": 5, "height": 5, "body_name": format!("B{k}")}),
+            )
+            .unwrap();
+        }
+        s.execute("component.activate", &serde_json::json!({"component": 0})).unwrap();
+        for k in 1..5 {
+            s.execute("occurrence.copy", &serde_json::json!({"component": c["component"], "translate": [0, 20 * k, 0]})).unwrap();
+        }
+        let world = s.world_state().unwrap().bodies.len();
+        assert_eq!(world, 1 + 10 * 5, "the design's own body and the part's ten at five placements");
+        assert_eq!(placed_bodies(&s), world, "counted as the world places them");
+        // Placed past the limit: no picture, decided without placing the world.
+        // Ten bodies at 600 more placements (a 30 by 20 pattern): 6,000 bodies and more.
+        let pattern = serde_json::json!({"components": ["Part"], "dir1": [1, 0, 0], "count1": 30, "spacing1": 40, "dir2": [0, 1, 0], "count2": 20, "spacing2": 40});
+        s.execute("solid.pattern.rectangular", &pattern).unwrap();
+        assert!(placed_bodies(&s) > PICTURE_MAX_BODIES);
+        assert!(thumbnail(&s).is_none());
+    }
+
     use super::*;
 
     #[test]
