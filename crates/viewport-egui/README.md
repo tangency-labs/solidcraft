@@ -7,10 +7,10 @@ first. Its workspace dependency is `solidcraft-viewport-gpu`.
 The host passes what is its own: whether bodies may be built on the GPU and whether they must be
 built on the CPU, the background's colours, and how to report a GPU error no error scope caught.
 
-egui-wgpu must carry the fix in the repository's vendored copy (`vendor/egui-wgpu`, listed in
-`vendor/README.md`): the window's drawable is acquired before paint callbacks are prepared, without
-which the cached offscreen picture is never drawn. A host workspace patches egui-wgpu to that copy
-with `[patch.crates-io]`, as the repository's root `Cargo.toml` does.
+egui-wgpu must carry the fix in the repository's vendored egui (`vendor/egui/crates/egui-wgpu`,
+listed in `vendor/README.md`): the window's drawable is acquired before paint callbacks are prepared,
+without which the cached offscreen picture is never drawn. A host workspace patches the egui crates
+to that tree with `[patch.crates-io]`, as the repository's root `Cargo.toml` does.
 
 ## API
 

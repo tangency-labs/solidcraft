@@ -41,8 +41,29 @@ pub struct RunResult {
     /// Sketches closed by accepted guest commands, for the caller's authoring-state cleanup.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub sketch_exits: Vec<Option<u64>>,
+    /// The last view command the plugin called. The window moves the camera from this after
+    /// the run is accepted. Omitted when the plugin called none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub view: Option<PluginView>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub param_warnings: Vec<String>,
+}
+
+/// A view command a plugin called, for the window to apply after the run lands.
+/// The last one in call order is the only one kept.
+#[derive(Clone, Debug, Serialize, JsonSchema)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum PluginView {
+    /// `view.fit`: frame the model, keeping the view direction.
+    Fit,
+    /// `view.home`: frame the model from the home direction.
+    Home,
+    /// A command stored this camera on its session (`view.apply` and the others that do).
+    /// `null` when the command cleared it.
+    Camera { camera: Value },
+    /// `view.navigate`: the window applies this reply the way the navigator does.
+    /// The command does not store a camera on the session.
+    Navigate { reply: Value },
 }
 
 /// Read a body's evaluated triangle mesh in its owning component's coordinates (millimetres).
@@ -253,4 +274,59 @@ impl From<InstallApproval> for crate::plugin::Grants {
             input_folder: approve.input_folder,
         }
     }
+}
+
+/// Check a plugin package without running it: what Install and a call would check.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct CheckParams {
+    /// A package folder (`plugin.json` and its component; its `tests` folder is left out) or a
+    /// plugin `.zip`; subject to the caller's file scope.
+    pub path: String,
+}
+
+/// How bad a problem is: an error stops the plugin installing or running; a warning does not.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, JsonSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum Severity {
+    Error,
+    Warning,
+}
+
+/// One thing wrong with a package, and how to fix it.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, JsonSchema)]
+pub struct CheckProblem {
+    pub severity: Severity,
+    /// The manifest field (`runtime.limits.fuel`), `plugin.json`, `package` or `component`.
+    pub field: String,
+    /// What is wrong, as the app says it when it refuses the package.
+    pub problem: String,
+    /// What to change.
+    pub fix: String,
+}
+
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct CheckResult {
+    /// Whether the package has no errors: it installs, and its component links to this app.
+    pub ok: bool,
+    pub path: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub version: Option<String>,
+    /// `command`, `importer`, or `metadata` for a manifest with no runtime.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub kind: Option<String>,
+    /// SHA-256 of the exact manifest and component, as `plugin.inspect` and `plugin.install` report it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub approval: Option<String>,
+    /// The entries it declares.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub entries: Vec<craft_plugin::Entry>,
+    /// Every problem found, errors first.
+    pub problems: Vec<CheckProblem>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub param_warnings: Vec<String>,
 }

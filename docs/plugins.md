@@ -92,6 +92,7 @@ The command surface exposes management without opening dialogs:
 
 | Command | Parameters | Result |
 |---|---|---|
+| `plugin.check` | `{path}`: a package folder or `.zip` | `{ok, id, name, version, kind, approval, entries, problems: [{severity, field, problem, fix}]}`; installs nothing |
 | `plugin.install` | `{path, approval?, archive?, replace?, dry_run?, approve?: {command_groups, folders: [{name, path, read, write}], memory_mib?, input_folder?}}` | Package description and installation status, including declared `entry_points` |
 | `plugin.list` | `{}` | `{plugins: [{manifest, commands, disabled}]}` |
 | `plugin.remove` | `{id}` | `{id, removed: true}` |
@@ -274,8 +275,28 @@ past the open design are grouped (`file`, `doc`, `app`, `plugin`) and refused un
 manifest asks for the group in `permissions.command_groups` and the user grants it.
 File access requires approved folder grants. The reserved `net` permission is
 refused with a typed error. Traps, missing permissions, failed commands, limits
-and invalid manifest fields return structured errors. Phase 2 adds importers (below);
-exporters, author tooling and browser execution follow.
+and invalid manifest fields return structured errors. Phase 2 adds importers (below) and the
+author tools (`plugin check` and `plugin test`, below); exporters and browser execution follow.
+
+## Checking and testing a plugin
+
+[Writing a plugin](book/src/dev/plugins.md) walks from an empty folder to a working command
+plugin and importer.
+
+- `plugin.check` (`solidcraft-cli plugin check <folder|plugin.zip>`) checks a package without
+  running it, through the code Install and a call use: the installer's reader and limits, the
+  manifest, the permissions (`net` is refused), the limits against the app's ceilings, and the
+  component against its world (`command-plugin` or `importer-plugin`) and this app's WIT version,
+  with no WASI or network import. Each problem has a severity, the field, what is wrong and how to
+  fix it. In a folder, `tests/` and hidden files are left out. It runs no plugin code, installs
+  nothing and never opens a dialog.
+- `solidcraft-cli plugin test <folder|plugin.zip> [--json] [--out DIR]` checks the package, installs
+  it into a scratch plugins folder with the app's installer, and runs its test cases, `tests/*.json`,
+  through `plugin.run` and `file.import` with the app's limits. A case names the entry, its
+  parameters or file, the grants (default: everything the manifest asks for), and what to expect:
+  an error kind, values in the reply, values `inspect.measure` gives, files written. An entry
+  with no case runs once with its defaults when it needs nothing else. It exits with an error when
+  a case fails.
 
 ## Importers
 
