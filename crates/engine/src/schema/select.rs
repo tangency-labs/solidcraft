@@ -167,9 +167,10 @@ pub struct SharpEdgesParams {
     #[serde(default)]
     pub body: Option<String>,
     /// The threshold in degrees, 1 to 179: an edge is selected where its faces' normals turn by
-    /// more than this.
+    /// more than this. Default: 30.
+    #[serde(default)]
     #[schemars(range(min = 1.0, max = 179.0))]
-    pub angle_deg: f64,
+    pub angle_deg: Option<f64>,
     /// Add to the current selection instead of replacing it. Default: false.
     #[serde(default)]
     pub add: Option<bool>,

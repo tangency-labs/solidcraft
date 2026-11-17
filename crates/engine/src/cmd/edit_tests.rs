@@ -1649,14 +1649,16 @@ fn select_sharp_edges_takes_creases_over_the_angle_and_never_a_rounds_tangent_ed
     }
     assert_eq!(run(&mut s, "select.sharp_edges", json!({"angle_deg": 89, "body": "Block"}))["selected"], 13);
     assert_eq!(run(&mut s, "select.sharp_edges", json!({"angle_deg": 91}))["selected"], 0);
+    // With no angle (command search, a key, the menu) it takes 30°.
+    assert_eq!(run(&mut s, "select.sharp_edges", json!({}))["selected"], 13);
+    assert_eq!(run(&mut s, "select.sharp_edges", Value::Null)["selected"], 13);
     run(&mut s, "select.set", json!({"items":[{"type":"body","name":"Block"}]}));
     assert_eq!(run(&mut s, "select.sharp_edges", json!({"angle_deg": 45, "add": true}))["selected"], 14);
     let selected = s.selection.clone();
     for params in [
-        json!({}),
         json!({"angle_deg": 0}),
         json!({"angle_deg": 180}),
-        json!({"angle_deg": f64::NAN}),
+        json!({"angle_deg": "30"}),
         json!({"angle_deg": 30, "body": "missing"}),
         json!({"angle_deg": 30, "extra": 1}),
         json!([]),

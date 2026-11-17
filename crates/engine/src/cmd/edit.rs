@@ -235,7 +235,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .doc_only()
         .contract(&SHARP_EDGES_CONTRACT)
         .output(output_schema_for::<SelectSetResult>)
-        .params("angle_deg: 1…179, body?: solid body name (default: every shown solid body), add?: bool → selects the edges whose faces' normals turn by more than angle_deg, measured on the exact surfaces; tangent edges never"),
+        .params("angle_deg?: 1…179 (default 30), body?: solid body name (default: every shown solid body), add?: bool → selects the edges whose faces' normals turn by more than angle_deg, measured on the exact surfaces; tangent edges never"),
 ];
 
 const SELECT_SET_CONTRACT: TypedContract<SelectSetParams> = TypedContract::new();
@@ -1688,10 +1688,16 @@ fn select_same_look(s: &mut Session, p: &Value) -> Result<Value> {
 /// such an edge is never sharp, whatever the threshold.
 const TANGENT_DEG: f64 = 1.0;
 
+/// The angle Select Sharp Edges takes when the call gives none (command search, a key, the menu).
+const SHARP_DEG: f64 = 30.0;
+
 fn select_sharp_edges(s: &mut Session, p: &Value) -> Result<Value> {
     const CMD: &str = "select.sharp_edges";
+    if !p.is_object() {
+        return Err(bad(CMD, "the parameters must be an object"));
+    }
     let request: SharpEdgesParams = serde_json::from_value(p.clone()).map_err(|e| bad(CMD, e.to_string()))?;
-    let angle = request.angle_deg;
+    let angle = request.angle_deg.unwrap_or(SHARP_DEG);
     if !(TANGENT_DEG..=179.0).contains(&angle) {
         return Err(bad(CMD, "`angle_deg` must be 1…179 degrees"));
     }
