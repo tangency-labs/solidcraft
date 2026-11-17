@@ -11,6 +11,8 @@
 //! The goldens WR-56 moved (#17467) are certified with it: each moved drop answer is enclosed,
 //! and an old answer outside the enclosure was wrong.
 
+pub(crate) mod tube;
+
 use solidcore::blend::fillet_section::station::as_b_spline;
 use solidcore::geom::extent2d::Extent2d;
 use solidcore::kernel::Kernel;

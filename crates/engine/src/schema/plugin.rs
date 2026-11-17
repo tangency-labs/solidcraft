@@ -41,8 +41,29 @@ pub struct RunResult {
     /// Sketches closed by accepted guest commands, for the caller's authoring-state cleanup.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub sketch_exits: Vec<Option<u64>>,
+    /// The last view command the plugin called. The window moves the camera from this after
+    /// the run is accepted. Omitted when the plugin called none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub view: Option<PluginView>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub param_warnings: Vec<String>,
+}
+
+/// A view command a plugin called, for the window to apply after the run lands.
+/// The last one in call order is the only one kept.
+#[derive(Clone, Debug, Serialize, JsonSchema)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum PluginView {
+    /// `view.fit`: frame the model, keeping the view direction.
+    Fit,
+    /// `view.home`: frame the model from the home direction.
+    Home,
+    /// A command stored this camera on its session (`view.apply` and the others that do).
+    /// `null` when the command cleared it.
+    Camera { camera: Value },
+    /// `view.navigate`: the window applies this reply the way the navigator does.
+    /// The command does not store a camera on the session.
+    Navigate { reply: Value },
 }
 
 /// Read a body's evaluated triangle mesh in its owning component's coordinates (millimetres).
