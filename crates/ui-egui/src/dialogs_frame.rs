@@ -1158,20 +1158,27 @@ fn member_rows(app: &SolveApp, ui: &mut egui::Ui, m: &mut Member, inputs: &[SelI
 /// the view) or other values changed rewrite the offset from it.
 fn sync_offset(app: &SolveApp, m: &mut Member, inputs: &[SelInput], extra: &mut Map<String, Value>) {
     if m.offset != m.seen {
-        m.seen = m.offset.clone();
-        match offset_mm(app, m) {
+        let applied = match offset_mm(app, m) {
             Ok(None) => {
                 extra.remove("locate");
+                true
             }
-            Ok(Some(off)) => {
-                if let Some(at) = base_view(app, m, inputs, extra).and_then(|v| locate_for(&v, m.anchor, off)) {
+            Ok(Some(off)) => match base_view(app, m, inputs, extra).and_then(|v| locate_for(&v, m.anchor, off)) {
+                Some(at) => {
                     extra.insert("locate".into(), json!(at));
+                    true
                 }
-            }
+                // No section yet (no line, an unfinished value): the offset waits for one, tried
+                // again each frame, rather than being taken as applied and later wiped.
+                None => false,
+            },
             // Refused when the dialog runs; `locate` stays as it was meanwhile.
-            Err(_) => {}
+            Err(_) => true,
+        };
+        if applied {
+            m.seen = m.offset.clone();
+            m.shown = params(app, m, inputs, extra).ok().map(|p| p.to_string());
         }
-        m.shown = params(app, m, inputs, extra).ok().map(|p| p.to_string());
         return;
     }
     let Ok(p) = params(app, m, inputs, extra) else { return };

@@ -197,6 +197,23 @@ fn offset_fields_move_the_member_from_its_anchor() {
     assert_eq!(locate(&h), None);
 }
 
+/// An offset typed before the dialog can lay out a section (no line picked yet) is kept and
+/// applied once a line is picked, not wiped.
+#[test]
+fn an_offset_typed_before_a_line_is_picked_applies_once_one_is() {
+    let mut h = post();
+    let line = std::mem::take(&mut h.app.dialog.as_mut().unwrap().inputs[0].items);
+    h.settle();
+    member(&mut h).anchor = index("bottom");
+    member(&mut h).offset = [String::new(), "50 mm".into()];
+    h.settle();
+    h.app.dialog.as_mut().unwrap().inputs[0].items = line;
+    h.settle();
+    assert_eq!(member(&mut h).offset, [String::new(), "50 mm".to_string()], "the typed offset stays");
+    let c = crate::dialogs::apply_commands(&h.app, h.app.dialog.as_ref().unwrap()).unwrap();
+    assert_eq!(c[0].1["locate"], json!([0.0, -70.0]), "{}", c[0].1);
+}
+
 /// Off, the dialog behaves as before: no section, no hot points, no marker.
 #[test]
 fn with_the_preference_off_nothing_is_drawn() {
