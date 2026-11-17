@@ -395,3 +395,51 @@ certified_units! {
     edgeuse_p3: "topology.edgeuse_p3",
     face_p3: "topology.face_p3",
 }
+
+/// #18162 regression: `heal.stitch_p2` `cov_tjunc11_do_nonmanifold_gaps` closes a corner's
+/// UV gap by moving the ends of two trims onto the vertex's UV point
+/// (`topology::face::p2::fix_uv_trim_curves_notified`, upstream `sm_FixUVTrimCurves`) after
+/// their edges' tolerances were set. A step of 1.4e-7 in UV is 1.4e-5 in 3D on those faces,
+/// and upstream leaves the tolerances as they were: edge 0 kept 1.311e-5 (upstream) under a
+/// trim 1.424e-5 away. Every edge of the stitched body now has each of its trims within
+/// its tolerance by the enclosure `B` ([`trim_bounds`]).
+#[test]
+fn stitched_corner_fix_keeps_its_edges_covering_their_trims() {
+    let unit = "heal.stitch_p2";
+    let runner = crate::registry()
+        .into_iter()
+        .find(|u| u.id() == unit)
+        .expect("the unit");
+    let ctx = CaseContext {
+        root: repo_root(),
+        seeds: 16,
+    };
+    let cases = runner.cases(&ctx).expect("cases");
+    let case = cases
+        .iter()
+        .find(|c| c.name == "cov_tjunc11_do_nonmanifold_gaps")
+        .expect("the case");
+    super::watch_written();
+    let out = runner.run_rust(case);
+    let bodies = super::take_written();
+    out.expect("the case runs");
+    let k = Kernel::default();
+    let mut bad = Vec::new();
+    let mut trims = 0;
+    for (i, b) in bodies.iter().enumerate() {
+        for (e, rec) in b.edges().iter() {
+            for x in trim_bounds(&k, b, e) {
+                trims += 1;
+                if !matches!(x, Some(x) if x <= rec.tolerance) {
+                    bad.push(format!(
+                        "body {i} edge {}: tol {:e}, B {x:?}",
+                        e.index(),
+                        rec.tolerance
+                    ));
+                }
+            }
+        }
+    }
+    assert!(trims > 0, "no trims");
+    assert!(bad.is_empty(), "{}", bad.join("\n"));
+}

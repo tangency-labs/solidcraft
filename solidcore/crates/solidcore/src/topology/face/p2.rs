@@ -74,6 +74,13 @@
 //!   Each `Trim` uses the tolerance of the edge reached through the UV curve's actual
 //!   holding edge use, matching `SmTol::GetZoneTol3d(curve)`; an owner path without an
 //!   edge uses the system tolerance. Notification probes use that same tolerance.
+//! - **Not upstream (#18162): the edited trims stay covered.** Upstream moves the two
+//!   trims' ends in UV and leaves their edges' tolerances as they were, so a trim whose
+//!   image was within its edge's tolerance can leave it (a 1.4e-7 step in UV is 1.4e-5 in
+//!   3D on a face whose surface moves 100 per unit of UV). Where the edge's tolerance
+//!   provably covered a trim before the edit (`trim_deviation_bound` at most the
+//!   tolerance), it is raised to the edited trim's proved distance from the edge curve
+//!   when that is larger (`keep_trim_covered`); it is never lowered.
 //! - **Edit notifications.** [`fix_uv_trim_curves_notified`] notifies its two
 //!   `EditEndPoint`s (`SM_NO_PRE_EDIT` / `SM_NO_POST_EDIT`, caller and first data
 //!   object the UV trim curve under its kernel-issued identity) through the caller's
@@ -3212,6 +3219,11 @@ pub fn fix_uv_trim_curves_notified(
     let _prev_edge_gap = surf_vertex.distance(prev_edge_point);
     let _ = tol_3d;
 
+    // Not upstream (#18162): which of the two trims its edge's tolerance provably covers
+    // before they are edited, so that it still does after.
+    let curr_covered = covered_trim(k, b, eu_current, curr_holder)?;
+    let prev_covered = covered_trim(k, b, eu_previous, prev_holder)?;
+
     // drop sUVVertex to each UVTrimCurve, trim there and stretch back (upstream). The
     // opt-in WR-255 fix (#959/#570) skips this and only moves the end points below.
     if !k.fixes.uv_trim_corner_end_points_only {
@@ -3338,8 +3350,59 @@ pub fn fix_uv_trim_curves_notified(
         notified_end_point_edit(b, env, prev_holder, uv_vertex_3d, edit_prev_start, None)?;
     }
 
+    // Not upstream (#18162): the edits moved the trims' ends in UV, where a step is
+    // scaled by the surface's speed in 3D, and upstream leaves the edge tolerances as
+    // they were.
+    keep_trim_covered(k, b, eu_current, curr_holder, curr_covered)?;
+    keep_trim_covered(k, b, eu_previous, prev_holder, prev_covered)?;
+
     // all done
     Ok(true)
+}
+
+/// Not upstream (#18162): whether the edge tolerance of `eu` provably covers the UV trim
+/// held at `holder` (`trim_deviation_bound`, an enclosed bound on the distance between
+/// the trim's image and the edge curve, at most the tolerance). A bound that does not
+/// certify the tolerance before an edit is not one to raise the tolerance to after it.
+fn covered_trim(k: &Kernel, b: &Brep, eu: EdgeuseId, holder: EdgeuseId) -> Result<bool> {
+    let Some(e) = eu1::edge(b, eu)? else {
+        return Ok(false);
+    };
+    let tolerance = b.edge(e)?.tolerance;
+    let trim = held_curve(b, holder)?;
+    Ok(matches!(
+        crate::topology::edgeuse::p3::trim_deviation_bound(k, b, eu, trim)?,
+        Some(bound) if bound <= tolerance
+    ))
+}
+
+/// Not upstream (#18162): after [`fix_uv_trim_curves_notified`] edited the UV trim held at
+/// `holder` for `eu`, raises the edge's tolerance to the trim's enclosed distance from the
+/// edge curve (`trim_deviation_bound`) where the tolerance covered the trim before the edit
+/// (`covered`, [`covered_trim`]) and no longer does. Never lowers it.
+fn keep_trim_covered(
+    k: &Kernel,
+    b: &mut Brep,
+    eu: EdgeuseId,
+    holder: EdgeuseId,
+    covered: bool,
+) -> Result<()> {
+    if !covered {
+        return Ok(());
+    }
+    let Some(e) = eu1::edge(b, eu)? else {
+        return Ok(());
+    };
+    let bound = {
+        let trim = held_curve(b, holder)?;
+        crate::topology::edgeuse::p3::trim_deviation_bound(k, b, eu, trim)?
+    };
+    if let Some(bound) = bound {
+        if bound.is_finite() && bound > b.edge(e)?.tolerance {
+            crate::topology::edge::set_tolerance(b, e, bound, true, true)?;
+        }
+    }
+    Ok(())
 }
 
 /// `sm_FindBestUVCurve`: of the candidate UV curves (`None` entries skipped) with their

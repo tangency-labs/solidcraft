@@ -110,8 +110,8 @@ use crate::surface::surface::p4::NoObject;
 use crate::surface::surface::Surface;
 use crate::topology::edgeuse::p1::{
     are_seam_curves, brep_handle, calc_dist_and_dev, delete_uv_trim_curve, drop_curve_fail, edge,
-    faceuse, faceuse_face, max_edge_face_gap, orientation, primary_edgeuse, set_uv_trim_curve,
-    tolerance, uv_trim_curve, uv_trim_curve_pointer, UvTrimCurveArg,
+    faceuse, faceuse_face, mate, max_edge_face_gap, orientation, primary_edgeuse,
+    set_uv_trim_curve, tolerance, uv_trim_curve, uv_trim_curve_pointer, UvTrimCurveArg,
 };
 use crate::topology::edgeuse::p2::BinormalEval;
 use crate::topology::{Brep, EdgeId, EdgeuseId, FaceId, ObjectHandle};
@@ -1641,9 +1641,16 @@ pub fn get_or_create_uv_trim_curve(
 /// `upstream` raises nothing (the tolerance already covers twice it), `upstream`, as
 /// upstream.
 ///
-/// A raise never exceeds upstream's: where `B` is larger than `upstream` the trim lies
-/// farther from the edge than its drop reported, and covering it would hide that from the
-/// checks that rebuild such trims.
+/// `B` is taken only where the tolerance it leaves still covers the proved distance of every
+/// other UV trim of the edge (`other_trims_bound`); otherwise, or where one of them is not
+/// enclosed, `upstream`. A trim set without a raise (read from a file, or attached by an
+/// operation that does not raise) may be covered by upstream's larger raise only, and a
+/// smaller raise must not uncover it. Such a trim is not covered by raising further: its
+/// bound can be loose by orders of magnitude, and a tolerance raised to it changes what
+/// later operations accept.
+///
+/// Where `B` is larger than `upstream` the trim lies farther from the edge than its drop
+/// reported, and the raise is upstream's.
 ///
 /// # Errors
 ///
@@ -1656,17 +1663,56 @@ pub(crate) fn trim_raise_distance(
     upstream: f64,
 ) -> Result<f64> {
     // (`SetUVTrimCurve` raises only a tolerance below twice the distance)
-    let raises = match edge(b, eu)? {
-        Some(e) => b.edge(e)?.tolerance < 2.0 * upstream,
-        None => false,
+    let Some(e) = edge(b, eu)? else {
+        return Ok(upstream);
     };
+    let tol = b.edge(e)?.tolerance;
+    let raises = tol < 2.0 * upstream;
     if !raises {
         return Ok(upstream);
     }
-    Ok(match trim_deviation_bound(k, b, eu, trim)? {
-        Some(bound) => upstream.min(bound),
-        None => upstream,
-    })
+    let raise_by = match trim_deviation_bound(k, b, eu, trim)? {
+        Some(bound) if bound < upstream => bound,
+        _ => return Ok(upstream),
+    };
+    // A smaller raise than upstream's must still leave the edge covering its other trims:
+    // a trim set without a raise (read from a file, or attached by an operation that does
+    // not raise) may be covered by upstream's larger raise only, and the smaller one must
+    // not uncover it. Where the lowered tolerance does not cover each other trim's proved
+    // distance (or one is not enclosed), the raise is upstream's.
+    let lowered = tol.max(2.0 * raise_by);
+    match other_trims_bound(k, b, eu)? {
+        Some(others) if others <= lowered => Ok(raise_by),
+        _ => Ok(upstream),
+    }
+}
+
+/// Not upstream (#18162): the largest [`trim_deviation_bound`] of the UV trims of `eu`'s
+/// edge other than the one `eu` and its mate share (the one being replaced), `0` without
+/// any; `None` where one is not enclosed.
+///
+/// # Errors
+///
+/// Those of [`trim_deviation_bound`].
+fn other_trims_bound(k: &Kernel, b: &Brep, eu: EdgeuseId) -> Result<Option<f64>> {
+    let Some(e) = edge(b, eu)? else {
+        return Ok(Some(0.0));
+    };
+    let pair = [Some(eu), mate(b, eu)?];
+    let mut worst = 0.0_f64;
+    for &x in &b.edge(e)?.edgeuses {
+        if pair.contains(&Some(x)) {
+            continue;
+        }
+        let Some(other) = b.edgeuse(x)?.uv_trim_curve.as_ref() else {
+            continue;
+        };
+        match trim_deviation_bound(k, b, x, other)? {
+            Some(bound) if bound.is_finite() => worst = worst.max(bound),
+            _ => return Ok(None),
+        }
+    }
+    Ok(Some(worst))
 }
 
 /// Not upstream (#18162): a proved upper bound on how far the image of `trim` (a UV trim of
