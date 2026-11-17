@@ -619,18 +619,25 @@ pub(super) fn sheet_settings(app: &mut SolveApp, ui: &mut egui::Ui) {
         return;
     };
     let t = Tokens::get();
-    ui_kit::settings_page(ui, |ui| {
+    ui.scope(|ui| {
+        ui.spacing_mut().item_spacing.y = t.space_2;
         ui_kit::settings_form(ui, t.form_label_width + t.space_24, |ui| {
             sheet_notice(app, ui, &drawing, sheet);
             sheet_fields(app, ui, sheet);
 
-            ui_kit::section_heading(ui, tr("ui.drawing_panel.screen"));
+            next_sheet_section(ui, "ui.drawing_panel.screen");
             ui_kit::row(ui, tr("ui.sheet_page.colour"), |ui| crate::drawing_sheet_page::colour_choice(app, ui));
             ui_kit::row(ui, tr("ui.drawing_backdrop.label"), |ui| crate::drawing_sheet_page::backdrop_choice(app, ui));
         });
+        ui.add_space(t.space_8);
         ui.separator();
         settings_note(ui, "ui.drawing_settings.immediate");
     });
+}
+
+fn next_sheet_section(ui: &mut egui::Ui, key: &'static str) {
+    ui.add_space(Tokens::get().space_12);
+    ui_kit::section_heading(ui, tr(key));
 }
 
 fn settings_note(ui: &mut egui::Ui, key: &'static str) {
@@ -653,7 +660,7 @@ fn sheet_fields(app: &mut SolveApp, ui: &mut egui::Ui, sheet: &Sheet) {
         context.data_mut(|data| data.insert_temp(name_id, name));
     }
 
-    ui_kit::section_heading(ui, tr("ui.drawing_panel.paper"));
+    next_sheet_section(ui, "ui.drawing_panel.paper");
     let selected = match sheet.sheet.size {
         SheetSize::Standard(size) => size_caption(size),
         SheetSize::Custom { sides_mm: [a, b] } => format!("{a} × {b} mm"),
@@ -718,7 +725,7 @@ fn sheet_fields(app: &mut SolveApp, ui: &mut egui::Ui, sheet: &Sheet) {
     } else if response.changed() {
         context.data_mut(|data| data.insert_temp(dpi_id, dpi));
     }
-    ui_kit::section_heading(ui, tr("ui.drawing_panel.border_title"));
+    next_sheet_section(ui, "ui.drawing_panel.border_title");
     paper_border(ui, Some(sheet.sheet), sheet.border.as_ref());
     let built_in = tr("ui.drawing_panel.built_in");
     let none = tr("ui.drawing_panel.none");
@@ -748,7 +755,7 @@ fn sheet_fields(app: &mut SolveApp, ui: &mut egui::Ui, sheet: &Sheet) {
     ui_kit::below_row_control(ui, template, ui.available_width(), |ui| {
         settings_note(ui, "ui.drawing_settings.template_help");
     });
-    ui_kit::section_heading(ui, tr("ui.drawing_panel.counting"));
+    next_sheet_section(ui, "ui.drawing_panel.counting");
     let mut count = !sheet.excluded.count;
     if ui_kit::checkbox(ui, tr("ui.drawing_panel.count_sheet"), &mut count).changed() {
         change_sheet(app, sheet.id, "excluded", json!({"count": !count}));
