@@ -2958,7 +2958,7 @@ fn c_coincident(s: &mut Session, p: &Value) -> Result<Value> {
         return coincident_circles(s, p, cmd, a, b);
     }
     // Two straight lines made coincident lie along one line: Collinear, as in other CAD tools (#18232).
-    if let Some((a, b)) = two_lines(sk, p, cmd)? {
+    if let Some((a, b)) = two_lines(&sk, p, cmd)? {
         if let Some(c) =
             sk.constraints.iter().find(|c| matches!(c.kind, ConstraintKind::Collinear { a: x, b: y } if (x, y) == (a, b) || (x, y) == (b, a)))
         {
@@ -2970,8 +2970,7 @@ fn c_coincident(s: &mut Session, p: &Value) -> Result<Value> {
         return reply(cmd, CoincidentResult { made: CoincidentMade::Added(made), param_warnings: Vec::new() });
     }
     let pt = |k: &str| p.get(k).and_then(Value::as_str).and_then(|r| sk.resolve_point(r));
-    let line_points = coincident_line_points(&sk, p, cmd)?;
-    if let Some((a, b)) = line_points.or_else(|| pt("a").zip(pt("b")))
+    if let Some((a, b)) = pt("a").zip(pt("b"))
         && let Some(c) = sk.constraints.iter().find(|c| matches!(c.kind, ConstraintKind::Coincident { p, q } if (p, q) == (a, b) || (p, q) == (b, a)))
     {
         let rep = solve(&mut sk.clone());

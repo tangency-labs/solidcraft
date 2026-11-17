@@ -2961,7 +2961,7 @@ fn sheet_reviewer_coincident_curve_preflight_refuses_foreign_targets_atomically(
 }
 
 #[test]
-fn sheet_reviewer_coincident_lines_join_only_their_local_endpoints() {
+fn sheet_reviewer_coincident_lines_lie_along_one_line_on_their_sheet() {
     let (mut s, drawing, sketch, _) = sheet_editor();
     run(&mut s, "sketch.line", json!({"points": [[20, 20], [60, 20]], "ids": ["first"], "connect": false}));
     run(&mut s, "sketch.line", json!({"points": [[70, 25], [70, 55]], "ids": ["second"], "connect": false}));
@@ -2973,10 +2973,8 @@ fn sheet_reviewer_coincident_lines_join_only_their_local_endpoints() {
     let after = s.doc.drawing(drawing).unwrap().sheet_sketch(sketch).unwrap().sketch.clone();
     let matched = after.constraints.last().unwrap();
     assert_eq!(applied["constraint"], matched.id);
-    let solidcraft_sketch::ConstraintKind::Coincident { p, q } = &matched.kind else {
-        panic!("joining two lines must join their nearest endpoints");
-    };
-    assert!(after.point(*p).unwrap().dist(after.point(*q).unwrap()) < 1e-7);
+    // Coincident on two lines lays them along one line (#18281), on a sheet as in a model sketch.
+    assert!(matches!(matched.kind, solidcraft_sketch::ConstraintKind::Collinear { .. }), "{:?}", matched.kind);
     assert_eq!((s.undo.len(), s.undo.last().unwrap().part), (steps + 1, Some(drawing)));
     assert_eq!((&s.doc.features, &s.doc.params), (&source.features, &source.params));
     assert!(Arc::ptr_eq(&s.model.state(), &model));
