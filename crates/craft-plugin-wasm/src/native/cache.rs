@@ -185,36 +185,37 @@ fn sha256_file(path: &Path) -> Option<String> {
 
 /// Whether `entry` holds exactly what its record says, for this key.
 fn verify(entry: &Path, key: &Key) -> bool {
-    (|| {
-        let record_path = entry.join(RECORD);
-        let metadata = fs::symlink_metadata(&record_path).ok()?;
-        if !metadata.is_file() || metadata.len() > MAX_RECORD_BYTES {
+    matches_record(entry, key).is_some()
+}
+
+fn matches_record(entry: &Path, key: &Key) -> Option<()> {
+    let record_path = entry.join(RECORD);
+    let metadata = fs::symlink_metadata(&record_path).ok()?;
+    if !metadata.is_file() || metadata.len() > MAX_RECORD_BYTES {
+        return None;
+    }
+    let record: Value = serde_json::from_slice(&fs::read(&record_path).ok()?).ok()?;
+    if record.get("layout")?.as_str()? != LAYOUT
+        || record.get("component")?.as_str()? != key.component
+        || record.get("engine")?.as_str()? != key.engine
+    {
+        return None;
+    }
+    let mut expected = BTreeMap::new();
+    for file in record.get("files")?.as_array()? {
+        expected.insert(file.get("path")?.as_str()?, (file.get("size")?.as_u64()?, file.get("sha256")?.as_str()?));
+    }
+    let found = files(entry)?;
+    if expected.is_empty() || found.len() != expected.len() {
+        return None;
+    }
+    for (relative, path, size) in found {
+        let (want_size, want_sha) = expected.get(relative.as_str())?;
+        if *want_size != size || sha256_file(&path)?.as_str() != *want_sha {
             return None;
         }
-        let record: Value = serde_json::from_slice(&fs::read(&record_path).ok()?).ok()?;
-        if record.get("layout")?.as_str()? != LAYOUT
-            || record.get("component")?.as_str()? != key.component
-            || record.get("engine")?.as_str()? != key.engine
-        {
-            return None;
-        }
-        let mut expected = BTreeMap::new();
-        for file in record.get("files")?.as_array()? {
-            expected.insert(file.get("path")?.as_str()?, (file.get("size")?.as_u64()?, file.get("sha256")?.as_str()?));
-        }
-        let found = files(entry)?;
-        if expected.is_empty() || found.len() != expected.len() {
-            return None;
-        }
-        for (relative, path, size) in found {
-            let (want_size, want_sha) = expected.get(relative.as_str())?;
-            if *want_size != size || sha256_file(&path)?.as_str() != *want_sha {
-                return None;
-            }
-        }
-        Some(())
-    })()
-    .is_some()
+    }
+    Some(())
 }
 
 /// Records what Wasmtime just wrote in `entry`, replacing the record in one step.
