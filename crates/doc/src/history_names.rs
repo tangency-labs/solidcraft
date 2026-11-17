@@ -381,16 +381,20 @@ fn qualify_at(named: Vec<Named>, adjacent: &[(usize, usize)], centres: Option<&d
     };
     let n = named.len();
     let mut bounds: Vec<BTreeSet<String>> = vec![BTreeSet::new(); n];
+    // A face named only by its place in the kernel's order (`F7:face:12`, unverified) does not
+    // tell its neighbours apart: the next evaluation can give that number to another face, and
+    // a piece qualified by it would change its name, or take another's, while still exact.
+    let tells_apart = |x: &Named, stem: &str| x.verified || !named_by_index(stem);
     for &(a, b) in adjacent {
         let (Some(na), Some(nb)) = (named.get(a), named.get(b)) else { continue };
         let (sa, sb) = (crate::naming::strip_piece(&na.name), crate::naming::strip_piece(&nb.name));
         if a == b || sa == sb {
             continue;
         }
-        if let Some(set) = bounds.get_mut(a) {
+        if let Some(set) = bounds.get_mut(a).filter(|_| tells_apart(nb, sb)) {
             set.insert(sb.to_string());
         }
-        if let Some(set) = bounds.get_mut(b) {
+        if let Some(set) = bounds.get_mut(b).filter(|_| tells_apart(na, sa)) {
             set.insert(sa.to_string());
         }
     }
@@ -495,6 +499,11 @@ fn qualify_at(named: Vec<Named>, adjacent: &[(usize, usize)], centres: Option<&d
         .map(|((x, bounds), verified)| FaceInfo { aliases: x.aliases, synonyms: x.synonyms, bounds, verified })
         .collect();
     Names { faces: Arc::new(names), info }
+}
+
+/// Whether `stem` names a face by its index alone (`F7:face:12`, `Body1:face:3`).
+fn named_by_index(stem: &str) -> bool {
+    stem.rsplit_once(":face:").is_some_and(|(_, index)| !index.is_empty() && index.bytes().all(|c| c.is_ascii_digit()))
 }
 
 /// The most bytes a face name may take: a command takes a face name of at most this many
