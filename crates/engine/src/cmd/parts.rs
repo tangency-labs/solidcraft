@@ -1172,13 +1172,17 @@ fn part_name(family: &str, size: &str, sh: &Shape) -> String {
 
 /// A standard part's part number and description: its standard and size (`ISO 4762 M6x20`,
 /// `GOST 7798-70 M12x60`, `ASME B18.2.1 1/2-13 UNC x 2`, an inch washer with its series: `ANSI B18.22.1 1/2 N`), or a
-/// bearing's designation, and the family's name with the size.
-fn identity(family: &str, size: &str, sh: &Shape) -> (String, String) {
+/// bearing's designation, and the family's name with the size. A hex bolt is ISO 4017 (threaded to
+/// the head) unless its modelled thread leaves a plain shank under the head: that one is ISO 4014.
+fn identity(family: &str, size: &str, sh: &Shape, mode: ThreadMode) -> (String, String) {
     let size = match sh {
         Shape::Screw { len, .. } | Shape::Rod { len, .. } => size_with_length(family, size, *len),
         _ => size.to_string(),
     };
+    let plain_shank =
+        mode == ThreadMode::Modeled && matches!(*sh, Shape::Screw { d, pitch: Some(p), len, .. } if thread_length(family, d, p, len).is_some());
     let standard = match family {
+        "hex_bolt" if plain_shank => "ISO 4014",
         "socket_head_cap_screw" => "ISO 4762",
         "button_head_cap_screw" => "ISO 7380-1",
         "countersunk_socket_screw" => "ISO 10642",
@@ -1313,7 +1317,7 @@ fn insert(s: &mut Session, p: &Value) -> Result<Value> {
     s.doc_mut()
         .parts
         .insert(comp, solidcraft_doc::StandardPart { family: family.clone(), size: size.clone(), length: shape_len(&sh), thread: mode.saved() });
-    set_identity(s, comp, identity(&family, &size, &sh), None);
+    set_identity(s, comp, identity(&family, &size, &sh, mode), None);
     run(s, "component.activate", json!({"component": active}))?;
     let mut out = InsertedPart {
         component: comp,
@@ -1684,8 +1688,8 @@ fn resize(s: &mut Session, p: &Value) -> Result<Value> {
         marker.saturating_add(active)
     });
     let name = part_name(&part.family, &size, &sh);
-    let was = shape(&part.family, &part.size, part.length).ok().map(|old| identity(&part.family, &part.size, &old));
-    set_identity(s, comp, identity(&part.family, &size, &sh), was);
+    let was = shape(&part.family, &part.size, part.length).ok().map(|old| identity(&part.family, &part.size, &old, ThreadMode::of(&part)));
+    set_identity(s, comp, identity(&part.family, &size, &sh, mode), was);
     s.doc_mut()
         .parts
         .insert(comp, solidcraft_doc::StandardPart { family: part.family.clone(), size: size.clone(), length: shape_len(&sh), thread: mode.saved() });
@@ -2489,6 +2493,25 @@ mod tests {
         let e = s.execute("parts.insert", &json!({"family": "hex_nut", "size": "M6", "thread": "cut"})).unwrap_err().to_string();
         assert!(e.contains("cosmetic, modeled or none"), "{e}");
         assert_eq!(s.doc.components.len(), made, "nothing is made for a refused call");
+    }
+
+    /// A hex bolt whose modelled thread leaves a plain shank is an ISO 4014 bolt, and its part
+    /// number says so; threaded to the head, or with a cosmetic thread, it stays ISO 4017.
+    #[test]
+    fn a_modeled_hex_bolt_with_a_plain_shank_is_iso_4014() {
+        let mut s = Session::default();
+        let number = |s: &Session, comp: u64| {
+            s.doc.components.iter().find(|c| c.id == comp).and_then(|c| c.metadata.text(solidcraft_doc::metadata::PART_NUMBER)).map(str::to_string)
+        };
+        let r = run(&mut s, "parts.insert", json!({"family": "hex_bolt", "size": "M6", "length": 60, "thread": "modeled"}));
+        let comp = r["component"].as_u64().unwrap();
+        assert_eq!(number(&s, comp).as_deref(), Some("ISO 4014 M6x60"));
+        run(&mut s, "parts.resize", json!({"component": comp, "thread": "cosmetic"}));
+        assert_eq!(number(&s, comp).as_deref(), Some("ISO 4017 M6x60"), "a cosmetic thread runs to the head");
+        run(&mut s, "parts.resize", json!({"component": comp, "thread": "modeled"}));
+        assert_eq!(number(&s, comp).as_deref(), Some("ISO 4014 M6x60"));
+        run(&mut s, "parts.resize", json!({"component": comp, "length": 16}));
+        assert_eq!(number(&s, comp).as_deref(), Some("ISO 4017 M6x16"), "a short modelled bolt is threaded to the head");
     }
 
     /// The thread type is saved with the part: Change Part Size keeps it when it is left out,
