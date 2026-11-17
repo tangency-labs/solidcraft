@@ -235,10 +235,12 @@ pub struct SelectFilterResult {
 /// its mesh: the edges that bound exactly one face of the set. `body` and `faces` name the set;
 /// `body` alone means the whole body, whose boundary is its free edges (an open surface's rim; a
 /// closed solid has none). Without either, the selected faces, or else the last selected body.
-/// The boundary comes in closed loops. On a face set only the outer loops are selected unless
-/// `holes` is true: a loop is a hole when its exact box lies inside the box of a bigger loop of
-/// the set (a hole in a plate, an island in a face). Both rims of a tube are kept. A body's free
-/// edges are all selected. A mesh body has no edge topology and is refused. Not an undo step.
+/// The boundary comes in closed loops, walked round the faces (two loops that only meet at a
+/// vertex are two). On a face set only the outer loops are selected unless `holes` is true: a
+/// loop is a hole when all its edges come from the faces' inner loops (a hole in a plate, the
+/// edge of an island the set leaves out), from the topology, not from geometry. Both rims of a
+/// tube are kept. A body's free edges are all selected. With `add`, an edge already selected
+/// stays as it was picked. A mesh body has no edge topology and is refused. Not an undo step.
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 #[schemars(deny_unknown_fields)]

@@ -223,7 +223,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .doc_only()
         .contract(&BOUNDARY_CONTRACT)
         .output(output_schema_for::<crate::schema::select::BoundaryResult>)
-        .params("body?: world body name, faces?: face indices of it (default: the selected faces, else the last selected body), holes?: bool, add?: bool → selects the edges that bound exactly one face of the set (exact topology), outer loops only unless holes; a body alone gives its free edges → selected, body, edges, loops, holes_left"),
+        .params("body?: world body name, faces?: face indices of it (default: the selected faces, else the last selected body), holes?: bool, add?: bool → selects the edges that bound exactly one face of the set (exact topology), outer loops only unless holes (a hole: a walk of the faces' inner loops only); a body alone gives its free edges → selected, body, edges, loops, holes_left"),
     CommandSpec::new("select.clear", "Clear Selection", crate::checked!("select.clear", select_clear))
         .icon("select")
         .noundo()
@@ -1787,113 +1787,98 @@ fn select_boundary(s: &mut Session, p: &Value) -> Result<Value> {
         },
         None => (0..record.faces.len()).collect(),
     };
-    // How often the set's loops use each edge: once is the boundary; twice is an edge between two
-    // faces of the set, or a seam of one face.
-    let mut uses: BTreeMap<usize, usize> = BTreeMap::new();
-    for face in set.iter().filter_map(|f| record.faces.get(*f)) {
-        for l in &face.loops {
-            if let Loop::Edges { edges } = l {
-                for u in edges {
-                    *uses.entry(u.edge as usize).or_default() += 1;
+    // Every use of an edge in the set's loops: (face, loop, place in the loop). One use is the
+    // boundary; two are an edge between two faces of the set, or a seam of one face.
+    let mut uses: BTreeMap<usize, Vec<(usize, usize, usize)>> = BTreeMap::new();
+    for f in &set {
+        for (l, lp) in record.faces.get(*f).map(|face| face.loops.as_slice()).unwrap_or_default().iter().enumerate() {
+            if let Loop::Edges { edges } = lp {
+                for (i, u) in edges.iter().enumerate() {
+                    uses.entry(u.edge as usize).or_default().push((*f, l, i));
                 }
             }
         }
     }
-    // The boundary edges in closed loops: edges that meet at a vertex are in one loop.
-    let mut root: BTreeMap<u32, u32> = BTreeMap::new();
-    let find = |root: &BTreeMap<u32, u32>, mut v: u32| {
-        while let Some(&up) = root.get(&v) {
-            v = up;
-        }
-        v
-    };
-    let open: Vec<(usize, [u32; 2])> =
-        uses.iter().filter(|(_, n)| **n == 1).filter_map(|(e, _)| record.edges.get(*e).map(|edge| (*e, edge.vertices))).collect();
-    for (_, [a, b]) in &open {
-        let (ra, rb) = (find(&root, *a), find(&root, *b));
-        if ra != rb {
-            root.insert(ra, rb);
-        }
-    }
-    let mut grouped: BTreeMap<u32, Vec<usize>> = BTreeMap::new();
-    for (e, [a, _]) in &open {
-        grouped.entry(find(&root, *a)).or_default().push(*e);
-    }
-    let loops: Vec<Vec<usize>> = grouped.into_values().collect();
+    let loops = boundary_walks(record, &uses);
     if loops.is_empty() {
         return Err(bad(CMD, if face_set { format!("the faces of `{name}` have no boundary") } else { format!("`{name}` has no free edges") }));
     }
-    // On a face set, a loop whose box lies inside a bigger loop's box is a hole or an island.
-    let boxes: Vec<Option<[[f64; 3]; 2]>> = loops.iter().map(|l| loop_box(record, l)).collect();
-    let is_hole = |i: usize| {
-        let Some(Some(a)) = boxes.get(i) else { return false };
-        boxes.iter().enumerate().any(|(j, b)| j != i && b.as_ref().is_some_and(|b| box_holds(b, a)))
-    };
+    // A face's first loop is its outer loop (SMLib's form, which every B-rep body is imported
+    // into); a walk made only of inner loops' edges goes round a hole or an island of the set.
+    let is_hole = |walk: &Vec<usize>| walk.iter().all(|e| uses.get(e).and_then(|u| u.first()).is_some_and(|(_, l, _)| *l > 0));
     let keep_holes = !face_set || request.holes.unwrap_or(false);
-    let (kept, left): (Vec<usize>, Vec<usize>) = (0..loops.len()).partition(|i| keep_holes || !is_hole(*i));
-    let edges: Vec<usize> = kept.iter().filter_map(|i| loops.get(*i)).flatten().copied().collect();
-    let items: Vec<Value> = edges.iter().map(|e| json!({"type": "edge", "body": name, "index": e})).collect();
+    let (kept, left): (Vec<Vec<usize>>, Vec<Vec<usize>>) = loops.into_iter().partition(|walk| keep_holes || !is_hole(walk));
+    if kept.is_empty() {
+        return Err(bad(CMD, format!("the faces of `{name}` are bounded by holes only: give holes: true")));
+    }
+    let edges: Vec<usize> = kept.iter().flatten().copied().collect();
+    let add = request.add.unwrap_or(false);
+    // An edge already selected stays as it was picked (its pick point is part of the selection).
+    let new: Vec<Value> = edges
+        .iter()
+        .filter(|e| !add || !s.selection.iter().any(|x| matches!(x, Sel::Edge { body, index, .. } if *body == name && index == *e)))
+        .map(|e| json!({"type": "edge", "body": name, "index": e}))
+        .collect();
     drop(state);
-    let set = select_set(s, &json!({"items": items, "add": request.add.unwrap_or(false)}))?;
-    let selected = set.get("selected").and_then(Value::as_u64).unwrap_or_default() as usize;
+    let selected = if new.is_empty() {
+        s.selection.len()
+    } else {
+        let set = select_set(s, &json!({"items": new, "add": add}))?;
+        set.get("selected").and_then(Value::as_u64).unwrap_or_default() as usize
+    };
     let result =
         crate::schema::select::BoundaryResult { selected, body: name, edges, loops: kept.len(), holes_left: left.len(), param_warnings: Vec::new() };
     reply(CMD, result)
 }
 
-/// A box round a loop of edges from their exact curves: a circle's or an ellipse's whole turn, a
-/// spline's control points (which hold the curve). None when a curve has no such box.
-fn loop_box(record: &solidcore_record::brep::Brep, edges: &[usize]) -> Option<[[f64; 3]; 2]> {
-    use solidcore_record::brep::{Curve, Frame};
-    fn ellipse(frame: &Frame, r: [f64; 2], out: &mut Vec<[f64; 3]>) {
-        let reach: [f64; 3] = std::array::from_fn(|i| (r[0] * frame.x_axis[i]).hypot(r[1] * frame.y_axis[i]));
-        out.push(std::array::from_fn(|i| frame.origin[i] - reach[i]));
-        out.push(std::array::from_fn(|i| frame.origin[i] + reach[i]));
-    }
-    fn points(curve: &Curve, out: &mut Vec<[f64; 3]>) -> Option<()> {
-        match curve {
-            // A line edge runs between its vertices, which the loop's box already holds.
-            Curve::Line { .. } => {}
-            Curve::Polyline { points } | Curve::Spline { points, .. } => out.extend(points.iter().copied()),
-            Curve::RationalSpline { homogeneous, .. } => {
-                for [x, y, z, w] in homogeneous {
-                    if !w.is_finite() || *w <= 0.0 {
-                        return None;
-                    }
-                    out.push([x / w, y / w, z / w]);
+/// The closed walks round the boundary of a face set: each boundary edge (one use in the set) is
+/// followed by the next use round its face's loop; where that edge is inside the set, the walk
+/// crosses to the edge's other use and goes on round that face's loop. So two loops that only
+/// meet at a vertex are two walks. `uses` holds every use of an edge in the set's loops.
+fn boundary_walks(record: &solidcore_record::brep::Brep, uses: &BTreeMap<usize, Vec<(usize, usize, usize)>>) -> Vec<Vec<usize>> {
+    use solidcore_record::brep::Loop;
+    let loop_of = |f: usize, l: usize| match record.faces.get(f).and_then(|face| face.loops.get(l)) {
+        Some(Loop::Edges { edges }) => edges.as_slice(),
+        _ => &[],
+    };
+    let edge_at = |(f, l, i): (usize, usize, usize)| loop_of(f, l).get(i).map(|u| u.edge as usize);
+    let next = |(f, l, i): (usize, usize, usize)| (f, l, (i + 1) % loop_of(f, l).len().max(1));
+    // Every step moves to another use, so a walk takes at most this many.
+    let limit = uses.values().map(Vec::len).sum::<usize>() + 1;
+    let mut seen: std::collections::BTreeSet<usize> = std::collections::BTreeSet::new();
+    let mut walks = Vec::new();
+    for (start, first) in uses.iter().filter_map(|(e, u)| match u.as_slice() {
+        [one] => Some((*e, *one)),
+        _ => None,
+    }) {
+        if seen.contains(&start) {
+            continue;
+        }
+        let mut walk = Vec::new();
+        let mut at = first;
+        for _ in 0..limit {
+            let Some(edge) = edge_at(at) else { break };
+            if !seen.insert(edge) {
+                break;
+            }
+            walk.push(edge);
+            // The use after this one, crossing inner edges to the face on their other side.
+            let mut n = next(at);
+            for _ in 0..limit {
+                match edge_at(n).and_then(|e| uses.get(&e)).map(Vec::as_slice) {
+                    Some([a, b]) => n = next(if *a == n { *b } else { *a }),
+                    _ => break,
                 }
             }
-            Curve::Circle { frame, radius } => ellipse(frame, [*radius, *radius], out),
-            Curve::Ellipse { frame, radii } => ellipse(frame, *radii, out),
-            Curve::SurfaceIntersection { leader, tolerance, .. } => {
-                let mut near = Vec::new();
-                points(leader, &mut near)?;
-                for p in near {
-                    out.push(p.map(|c| c - tolerance));
-                    out.push(p.map(|c| c + tolerance));
-                }
+            // An edge used by three or more faces of the set ends the walk.
+            if edge_at(n).and_then(|e| uses.get(&e)).map(Vec::len) != Some(1) {
+                break;
             }
+            at = n;
         }
-        Some(())
+        walks.push(walk);
     }
-    let mut all = Vec::new();
-    for e in edges {
-        let edge = record.edges.get(*e)?;
-        for v in edge.vertices {
-            all.push(record.vertices.get(v as usize)?.point);
-        }
-        points(&edge.curve, &mut all)?;
-    }
-    let first = *all.first()?;
-    let b = all.iter().fold([first, first], |[lo, hi], p| [std::array::from_fn(|i| lo[i].min(p[i])), std::array::from_fn(|i| hi[i].max(p[i]))]);
-    b.iter().flatten().all(|c| c.is_finite()).then_some(b)
-}
-
-/// Whether box `outer` holds box `inner` and is bigger than it.
-fn box_holds(outer: &[[f64; 3]; 2], inner: &[[f64; 3]; 2]) -> bool {
-    const SLACK: f64 = 1e-6;
-    let size = |b: &[[f64; 3]; 2]| (0..3).map(|i| b[1][i] - b[0][i]).sum::<f64>();
-    (0..3).all(|i| outer[0][i] <= inner[0][i] + SLACK && inner[1][i] <= outer[1][i] + SLACK) && size(outer) > size(inner) + SLACK
+    walks
 }
 
 /// Features that worked in `before` and fail in `after`: (name, error).

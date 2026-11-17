@@ -2646,3 +2646,39 @@ fn select_boundary_takes_the_rim_of_a_face_set_and_leaves_its_holes() {
         assert_eq!(s.selection, selected, "{params}");
     }
 }
+
+/// #18098 (review): a hole is told from the faces' loops, not from boxes, so a square face that
+/// sits in the box of an L-shaped face, but outside the face, keeps its edges; two loops that only
+/// meet at a vertex are two loops; and `add` keeps an edge the user picked as it was picked.
+#[test]
+fn select_boundary_tells_holes_by_topology_and_walks_each_loop() {
+    // An L-shaped top at z = 2 round a pocket, and a 1 × 1 boss in the pocket up to z = 2.
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"body_name":"Part", "length":10, "width":10, "height":2}));
+    run(&mut s, "solid.box", json!({"corner":[2,2,1], "length":8, "width":8, "height":2, "operation":"cut"}));
+    run(&mut s, "solid.box", json!({"corner":[4,4,1], "length":1, "width":1, "height":1, "operation":"join"}));
+    let faces =
+        |s: &Session| s.selection.iter().filter_map(|x| if let Sel::Face { index, .. } = x { Some(*index) } else { None }).collect::<Vec<_>>();
+    run(&mut s, "select.set", json!({"items":[{"type":"face","body":"Part","point":[1,1,2]}, {"type":"face","body":"Part","point":[4.5,4.5,2]}]}));
+    let both = faces(&s);
+    assert_eq!(both.len(), 2, "{:?}", s.selection);
+    let r = run(&mut s, "select.boundary", json!({}));
+    assert_eq!((r["selected"].as_u64(), r["loops"].as_u64(), r["holes_left"].as_u64()), (Some(10), Some(2), Some(0)), "{r}");
+
+    // A user's pick on the L's edge at y = 0 stays as it was picked when the L's loop is added.
+    run(&mut s, "select.set", json!({"items":[{"type":"edge","body":"Part","point":[3,0,2]}]}));
+    let picked = s.selection.clone();
+    let r = run(&mut s, "select.boundary", json!({"body":"Part", "faces":[both[0]], "add":true}));
+    assert_eq!((r["selected"].as_u64(), r["edges"].as_array().map(Vec::len)), (Some(6), Some(6)), "{r}");
+    assert!(picked.iter().all(|p| s.selection.contains(p)), "{:?}", s.selection);
+
+    // A top split into four quadrants: two opposite quadrants meet only at the centre.
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"body_name":"Quad", "length":10, "width":10, "height":1}));
+    run(&mut s, "solid.split_face", json!({"faces":[[2,2,1]], "plane":{"origin":[5,0,0], "normal":[1,0,0]}}));
+    run(&mut s, "solid.split_face", json!({"faces":[[2,2,1], [8,2,1]], "plane":{"origin":[0,5,0], "normal":[0,1,0]}}));
+    run(&mut s, "select.set", json!({"items":[{"type":"face","body":"Quad","point":[2,2,1]}, {"type":"face","body":"Quad","point":[8,8,1]}]}));
+    assert_eq!(faces(&s).len(), 2, "{:?}", s.selection);
+    let r = run(&mut s, "select.boundary", json!({}));
+    assert_eq!((r["selected"].as_u64(), r["loops"].as_u64(), r["holes_left"].as_u64()), (Some(8), Some(2), Some(0)), "{r}");
+}
