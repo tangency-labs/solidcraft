@@ -1435,11 +1435,11 @@ fn clipped_distance(
             }
             ts.sort_by(f64::total_cmp);
             let at = |t: f64| crate::math::Point2::new(p0.x + t * ex, p0.y + t * ey);
-            for w in ts.windows(2) {
-                if closed_holds(y, at(0.5 * (w[0] + w[1]))) {
+            for (&t0, &t1) in ts.iter().zip(ts.iter().skip(1)) {
+                if closed_holds(y, at(0.5 * (t0 + t1))) {
                     let piece = Seg2::Line {
-                        a: at(w[0]),
-                        b: at(w[1]),
+                        a: at(t0),
+                        b: at(t1),
                     };
                     best = best.min(seg_distance(&piece, q));
                 }
