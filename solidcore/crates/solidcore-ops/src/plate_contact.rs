@@ -653,4 +653,32 @@ mod tests {
         let joint = flush.plate_pair(&s, p, TOL).unwrap().expect("joint");
         assert_eq!(joint.contact, Contact::Overlap);
     }
+
+    /// 16.2 two joints on one S, apart: walls at y 30..36 and 60..66 on Bottom are each a joint;
+    /// cut one after the other (the second on the first's S), S loses four slots and each wall
+    /// gains two tabs.
+    #[test]
+    fn two_walls_apart_on_one_s() {
+        let (s, p) = bottom();
+        let a = make_box([20.0, 30.0, 6.0], [120.0, 6.0, 60.0]).unwrap();
+        let b = make_box([20.0, 60.0, 6.0], [120.0, 6.0, 60.0]).unwrap();
+        let first = a.tab_slot_cut(&s, p, spec2(), TOL).unwrap().expect("joint");
+        let second = b
+            .tab_slot_cut(&first.slot_plate, p, spec2(), TOL)
+            .unwrap()
+            .expect("joint");
+        let v = |b: &Body| b.mass_properties(1e-9).unwrap().volume;
+        let slot = 10.2 * 6.2 * 6.0;
+        assert!((v(&second.slot_plate) - (96000.0 - 4.0 * slot)).abs() < 1e-6);
+        assert!((v(&first.tab_plate) - 44040.0).abs() < 1e-6);
+        assert!((v(&second.tab_plate) - 44040.0).abs() < 1e-6);
+        let tabs = |c: &TabSlotCut| {
+            c.plan
+                .iter()
+                .flat_map(|st| st.tabs.as_ref().unwrap())
+                .filter(|t| t.skip.is_none())
+                .count()
+        };
+        assert_eq!((tabs(&first), tabs(&second)), (2, 2));
+    }
 }
