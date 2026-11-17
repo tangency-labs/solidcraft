@@ -22,6 +22,7 @@ mod blend_tests;
 pub(crate) mod boolean;
 #[cfg(test)]
 mod boolean_tests;
+pub(crate) mod call;
 mod convert;
 #[cfg(test)]
 mod convert_tests;
@@ -259,10 +260,10 @@ thread_local! {
     static IN_CALL: std::cell::Cell<u32> = const { std::cell::Cell::new(0) };
 }
 
-/// Is this thread inside a solidcore call, whose panic [`run_on`] catches? (Crash reports mark such
-/// a panic recovered.)
+/// Is this thread inside a solidcore call, whose panic [`run_on`] or solidcore-ops' session
+/// catches? (Crash reports mark such a panic recovered.)
 pub(crate) fn in_call() -> bool {
-    IN_CALL.with(std::cell::Cell::get) > 0
+    IN_CALL.with(std::cell::Cell::get) > 0 || solidcore_ops::session::in_call()
 }
 
 /// [`run`] for a call that reads the bodies `inputs`: should it fail while a dump folder is set,

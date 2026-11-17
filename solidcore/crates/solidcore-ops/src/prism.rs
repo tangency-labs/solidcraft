@@ -27,8 +27,9 @@ pub use solidcore::prism::measure::Interval;
 pub use solidcore::prism::placement::LoopPlacement;
 pub use solidcore::prism::profile::{tapered_flange_ends, ProfileRefusal};
 
+use crate::body::Contract;
 use crate::body::{finish, Body, Expect};
-use crate::boolean::{union_all, BooleanOp};
+use crate::boolean::{union_all_with, BooleanOp};
 use crate::order::{self, Order};
 use crate::session::{read_body, run, run_on, Answer};
 use crate::{Error, Result};
@@ -250,7 +251,10 @@ pub fn extrude_planar_regions(
         }
         Ok(Out(Ok(solids)))
     })?;
-    union_all(pieces.0?.into_iter().map(Body::new).collect())
+    union_all_with(
+        pieces.0?.into_iter().map(Body::new).collect(),
+        Contract::Proved,
+    )
 }
 
 /// A uniform prism along a plane's normal, as [`prism_section`] proves it.
