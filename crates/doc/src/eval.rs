@@ -2197,7 +2197,12 @@ fn kept_refused(name: &str, e: &kernel::KernelError, inputs: &[(String, Body, bo
             many.iter().map(|n| format!("`{n}`")).collect::<Vec<_>>().join(", ")
         ),
     };
-    kernel::KernelError::Failed(format!("body `{name}`{before}: {e}"))
+    let message = format!("body `{name}`{before}: {e}");
+    match e {
+        // A panic the check caught stays one, so it is not cached as an ordinary refusal.
+        kernel::KernelError::Internal(_) => kernel::KernelError::Internal(message),
+        _ => kernel::KernelError::Failed(message),
+    }
 }
 
 /// Whether `after`, a state feature `f` evaluated to from `before` in an earlier evaluation, is
@@ -13282,5 +13287,17 @@ mod kept_refused_tests {
             "{}",
             msg("Box1", &joined)
         );
+    }
+
+    /// A panic caught while checking a kept body stays an internal error with the body named, so
+    /// the evaluation does not cache it as an ordinary refusal.
+    #[test]
+    fn a_panic_in_the_check_stays_internal() {
+        let good = kernel::box_solid(Vec3::ZERO, Vec3::new(1.0, 1.0, 1.0)).unwrap();
+        let inputs = [("Box1".to_string(), good, false)];
+        let internal = kept_refused("Box1", &kernel::KernelError::Internal("SMLib copy: boom".into()), &inputs);
+        assert!(matches!(&internal, kernel::KernelError::Internal(m) if m.contains("body `Box1`")), "{internal:?}");
+        let refused = kept_refused("Box1", &kernel::KernelError::Failed("refused".into()), &inputs);
+        assert!(matches!(refused, kernel::KernelError::Failed(_)), "{refused:?}");
     }
 }

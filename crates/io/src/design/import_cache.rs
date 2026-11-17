@@ -10,9 +10,47 @@ const MAX_ENTRIES: usize = 500;
 const IMPORT_CACHE_BYTES: u64 = 512 << 20;
 static WRITER: std::sync::Mutex<()> = std::sync::Mutex::new(());
 /// Writes still waiting for what they store to be complete ([`ImportCache::write_after`]), by
-/// entry path.
-type Pending = Vec<(PathBuf, std::thread::JoinHandle<()>)>;
+/// entry path. Each stays listed until it is done, so every reader and [`ImportCache::clear`]
+/// that comes while it runs waits for it.
+type Pending = Vec<(PathBuf, std::sync::Arc<Done>)>;
 static PENDING: std::sync::Mutex<Pending> = std::sync::Mutex::new(Vec::new());
+
+/// Whether a pending write has finished (the write returned, or its thread ended), and how many
+/// wait for it.
+#[derive(Default)]
+struct Done {
+    state: std::sync::Mutex<(bool, usize)>,
+    changed: std::sync::Condvar,
+}
+
+impl Done {
+    fn lock(&self) -> std::sync::MutexGuard<'_, (bool, usize)> {
+        self.state.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+
+    fn is_done(&self) -> bool {
+        self.lock().0
+    }
+
+    fn wait(&self) {
+        let mut state = self.lock();
+        state.1 += 1;
+        while !state.0 {
+            state = self.changed.wait(state).unwrap_or_else(std::sync::PoisonError::into_inner);
+        }
+        state.1 -= 1;
+    }
+}
+
+/// Marks its write done when dropped: after the write returned, or if it panicked.
+struct Finished(std::sync::Arc<Done>);
+
+impl Drop for Finished {
+    fn drop(&mut self) {
+        self.0.lock().0 = true;
+        self.0.changed.notify_all();
+    }
+}
 
 /// One bounded store across application updates. Old builds' entries are evicted along with
 /// current ones, but the normal model reader never adopts another build's evaluation.
@@ -114,7 +152,10 @@ impl ImportCache {
     ) {
         let Some(path) = self.path(&key) else { return };
         let cache = self.clone();
+        let done = std::sync::Arc::new(Done::default());
+        let finished = Finished(done.clone());
         let write = move || {
+            let _finished = finished;
             finish(&mut model);
             if let Err(e) = cache.write(&key, &doc, &model, &reply) {
                 log::info!("import was not cached: {e}");
@@ -122,32 +163,42 @@ impl ImportCache {
         };
         #[cfg(target_arch = "wasm32")]
         {
-            let _ = path;
+            let _ = (path, done);
             write();
         }
         #[cfg(not(target_arch = "wasm32"))]
-        match std::thread::Builder::new().name("import-cache".into()).spawn(write) {
-            Ok(handle) => {
+        {
+            // Listed before the thread starts, so no reader can come between them; a write
+            // that cannot start drops its closure, which marks it done.
+            {
                 let mut pending = PENDING.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
-                pending.retain(|(_, h)| !h.is_finished());
-                pending.push((path, handle));
+                pending.retain(|(_, d)| !d.is_done());
+                pending.push((path, done));
             }
-            Err(e) => log::info!("import was not cached: {e}"),
+            if let Err(e) = std::thread::Builder::new().name("import-cache".into()).spawn(write) {
+                log::info!("import was not cached: {e}");
+            }
         }
     }
 
-    /// Wait for the pending writes of the entry at `path`, or of every entry of this cache.
+    /// Wait for the pending writes of the entry at `path`, or of every entry of this cache. They
+    /// stay listed while waited for, so a reader or clear that comes meanwhile waits too.
     fn join_pending(&self, path: Option<&Path>) {
-        let mine: Vec<std::thread::JoinHandle<()>> = {
+        let mine: Vec<std::sync::Arc<Done>> = {
             let mut pending = PENDING.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
-            let (mine, rest): (Pending, Pending) =
-                std::mem::take(&mut *pending).into_iter().partition(|(p, _)| path.map_or(p.starts_with(&self.directory), |path| p == path));
-            *pending = rest;
-            mine.into_iter().map(|(_, h)| h).collect()
+            pending.retain(|(_, d)| !d.is_done());
+            pending.iter().filter(|(p, _)| path.map_or(p.starts_with(&self.directory), |path| p == path)).map(|(_, d)| d.clone()).collect()
         };
-        for handle in mine {
-            let _ = handle.join();
+        for done in mine {
+            done.wait();
         }
+    }
+
+    /// How many wait for the pending writes of the entry at `path`.
+    #[cfg(test)]
+    pub(super) fn waiting_for(path: &Path) -> usize {
+        let pending = PENDING.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        pending.iter().filter(|(p, _)| p == path).map(|(_, d)| d.lock().1).sum()
     }
 
     fn entries(&self) -> Result<Vec<(std::time::SystemTime, PathBuf, u64)>> {
