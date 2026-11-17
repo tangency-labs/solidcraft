@@ -2,15 +2,15 @@
 //! face's domain returned UV ends a few ulps off the side (`v = 0.8999999999999999` for the
 //! side `v = 0.9`). The iso-line drop (`Surface::drop_iso_curve`) does not invert the end
 //! points: its start is the Newton point solve's and its end extrapolates the start by the
-//! measured speed ratio `|S_v| / |C'|`. A side of the domain is a known parameter, so an
-//! end on it now takes that side's exact value when the surface and curve points agree
-//! within their certified evaluation error bounds.
+//! measured speed ratio `|S_v| / |C'|`. A curve that is, by construction, the surface's iso
+//! curve at a side `f` of the domain (equal to the trimmed `CreateIsoParametricCurve`, as a
+//! face's natural edges are) is `t -> S(f, t)`, so its UV ends are now exactly `(f, t0)` and
+//! `(f, t1)`. A curve made any other way keeps the computed ends.
 //!
 //! The input is the adversarial golden case `adversarial_b102_eu0_binormal_3d`
 //! (`fixtures/topology.edgeuse_p3/adversarial.json`): a biquadratic 4 x 4 surface whose
 //! `u = 0` row collapses to a point, cut to the face domain `[0.1, 0.8] x [0.2, 0.9]`. Each
 //! of the four natural trim curves drops to a UV line between two exact domain corners.
-//! A curve that stops short of a side by more than rounding keeps its computed end.
 
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::indexing_slicing)] // test helpers
 
@@ -149,7 +149,7 @@ fn natural_trim_curves_drop_to_exact_domain_corners() {
 }
 
 #[test]
-fn a_curve_short_of_the_side_keeps_its_end() {
+fn a_sub_interval_of_an_iso_edge_drops_to_its_exact_parameters() {
     let k = Kernel::default();
     let s = surface();
     let natural = s
@@ -157,34 +157,46 @@ fn a_curve_short_of_the_side_keeps_its_end() {
         .unwrap();
     for ii in 0..4 {
         let full = natural.curves_3d[ii].natural_interval();
-        // stop 1e-9 of the side's length short of its far end: far above rounding
-        let short =
-            Extent1d::from_min_max(full.min(), full.max() - 1e-9 * (full.max() - full.min()));
+        let short = Extent1d::from_min_max(full.min() + 0.1, full.max() - 1e-9);
         let [start, end] = drop_ends(&k, &s, ii, Some(short));
-        for x in start {
-            assert!(
-                [0.1, 0.8, 0.2, 0.9].contains(&x),
-                "side {ii}: start {start:?}"
-            );
-        }
-        // the coordinate along the side stops short; the fixed one stays on its side
-        let off: Vec<f64> = end
-            .iter()
-            .copied()
-            .filter(|x| ![0.1, 0.8, 0.2, 0.9].contains(x))
-            .collect();
-        assert_eq!(
-            off.len(),
-            1,
-            "side {ii}: end {end:?} has one coordinate off the sides"
-        );
-        let gap = [0.1, 0.8, 0.2, 0.9]
-            .iter()
-            .map(|b| (off[0] - b).abs())
-            .fold(f64::INFINITY, f64::min);
+        // the side is the fixed coordinate; the other is the curve parameter itself
+        let fixed = if ii % 2 == 0 { start[0] } else { start[1] };
+        let (t0, t1) = if ii % 2 == 0 {
+            (start[1], end[1])
+        } else {
+            (start[0], end[0])
+        };
         assert!(
-            gap > 1e-11 && gap < 1e-8,
-            "side {ii}: end {end:?} gap {gap:e}"
+            [0.1, 0.8, 0.2, 0.9].contains(&fixed),
+            "side {ii}: {start:?}"
+        );
+        assert_eq!(
+            (t0, t1),
+            (short.min(), short.max()),
+            "side {ii}: {start:?} -> {end:?}"
         );
     }
+}
+
+#[test]
+fn a_curve_that_is_not_the_iso_curve_keeps_the_computed_ends() {
+    let k = Kernel::default();
+    let s = surface();
+    let natural = s
+        .create_natural_uv_trim_curves(&k, &domain(), SurfParamType::U, false)
+        .unwrap();
+    // the u = 0.1 side, reparameterised: no longer the surface's iso curve
+    let mut curve = natural.curves_3d[0].clone();
+    let ivl = curve.natural_interval();
+    let moved = Extent1d::from_min_max(ivl.min() + 1.0, ivl.max() + 1.0);
+    curve.edit_parameterization(&k, &moved).unwrap();
+    let out = s
+        .drop_curve_base::<Obj>(&k, &domain(), &curve, &moved, TOL, false, None)
+        .unwrap();
+    assert_eq!(out.uv_curves.len(), 1, "one UV curve");
+    let cp = out.uv_curves[0].control_points().unwrap();
+    let end = cp.last().unwrap();
+    // the computed end of the issue: a few ulps off the side
+    assert_ne!(end.y, 0.9, "end {end:?}");
+    assert!((end.y - 0.9).abs() < 1e-12, "end {end:?}");
 }

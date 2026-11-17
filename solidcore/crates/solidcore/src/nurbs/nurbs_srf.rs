@@ -17,7 +17,6 @@
 //! | [`is_nsrf_degenerate`]                | `sm_IsNSrfDegenerate`                       |
 //! | [`srf_span_boxes`]                    | none (not upstream)                         |
 //! | [`srf_piece_box`]                     | none (not upstream)                         |
-//! | [`srf_point_error`]                   | none (not upstream)                         |
 //!
 //! Deviations:
 //! - [`srf_span_boxes`] is not upstream: the boxes of the control points of every knot
@@ -25,9 +24,6 @@
 //! - [`srf_piece_box`] is not upstream: the box of the control points of the piece of
 //!   the surface over a parameter rectangle alone, which shrinks with the rectangle, for
 //!   clearance proofs that split a face's domain until its boxes are clear.
-//! - [`srf_point_error`] is not upstream: a bound on the rounding error of each
-//!   coordinate of `N_SrfEvalPt` inside the natural domain, the surface counterpart of
-//!   the curves' `crv_point_error` (#18325).
 //! - Out-params become return values. The optional `double*` outputs of
 //!   `sm_ComputeNetConstants` / `sm_ComputeSurfConstants` (NULL = not wanted) are a
 //!   [`ConstantsRequest`] in and [`NetConstants`] (`Some` for each requested value)
@@ -95,7 +91,7 @@ use crate::limits;
 use crate::math::{max2, Point2, Point3, Vec3, EFF_ZERO, EFF_ZERO_SQ, PI};
 use crate::nurbs::index::oob;
 use crate::nurbs::knots::Side;
-use crate::nurbs::math::{CPoint, NOW, NOZ};
+use crate::nurbs::math::CPoint;
 use crate::nurbs::nurbs_crv::{
     hull_point, is_clamped, nonempty_spans, piece_slack, points_box, to_euclid,
 };
@@ -1228,60 +1224,6 @@ pub fn srf_piece_box(sur: &Surface, u: (f64, f64), v: (f64, f64)) -> Option<Exte
     )?;
     bounds.expand_absolute(slack);
     Some(bounds)
-}
-
-/// Not upstream (#18325): a bound on the error of each coordinate of the point
-/// [`Surface::eval`] returns at any `(u, v)` of the natural domain
-/// `[U[p], U[n+1]] x [V[q], V[m+1]]`: `16 (2 (p + q) + 2) eps M (w_max / w_min)`, `M` the
-/// largest Euclidean coordinate of all control points (a missing `z` is `0`), the
-/// surface counterpart of [`crv_point_error`](crate::nurbs::nurbs_crv).
-///
-/// Derivation (inside the natural domain every basis value is non-negative and each
-/// direction's values sum to 1): the two basis recursions run `p` and `q` levels, each
-/// adding at most `6 eps` relative (`saved + N (r / d)` with `r`, `d = r + l` and the
-/// quotient, product and sum each rounded once, all terms non-negative), so a product
-/// `N_i(u) N_j(v)` is within `6 (p + q) eps` relative; the inner sum over the `q + 1`
-/// points of a row adds `γ_{q+2}` and the outer sum over the `p + 1` rows `γ_{p+2}`, of
-/// `w_max M` since the homogeneous coordinates are at most `w_max M`; the division by the
-/// computed weight (at least `w_min` up to the same relative error), a reciprocal and a
-/// product, at most doubles the relative error, plus two roundings, and multiplies it by
-/// `w_max / w_min`. In all at most `2 (7 (p + q) + 5) eps M w_max / w_min`, within the
-/// stated bound (`32 (p + q) + 32 >= 14 (p + q) + 10`).
-///
-/// `None`, meaning no bound, when the knot vectors are not finite, non-decreasing and
-/// sized for the net, a control point is not finite, a weight is not positive and
-/// finite, or the points do not all agree on having a `z` and a weight (the evaluation
-/// takes both from the first point).
-#[must_use]
-pub fn srf_point_error(sur: &Surface) -> Option<f64> {
-    let (p, q) = sur.degrees();
-    nonempty_spans(sur.u_knots(), p, sur.n())?;
-    nonempty_spans(sur.v_knots(), q, sur.m())?;
-    let p00 = *sur.rows().next()?.first()?;
-    let (noz, now) = (p00.z == NOZ, p00.w == NOW);
-    let (mut size, mut w_min, mut w_max) = (0.0_f64, f64::INFINITY, 0.0_f64);
-    for &c in sur.rows().flatten() {
-        if (c.z == NOZ) != noz || (c.w == NOW) != now {
-            return None;
-        }
-        let z = if noz { 0.0 } else { c.z };
-        let (x, y, z, w) = if now {
-            (c.x, c.y, z, 1.0)
-        } else if c.w.is_finite() && c.w > 0.0 {
-            (c.x / c.w, c.y / c.w, z / c.w, c.w)
-        } else {
-            return None;
-        };
-        if !(x.is_finite() && y.is_finite() && z.is_finite()) {
-            return None;
-        }
-        size = size.max(x.abs()).max(y.abs()).max(z.abs());
-        w_min = w_min.min(w);
-        w_max = w_max.max(w);
-    }
-    let levels = p.checked_add(q)?.checked_mul(2)?.checked_add(2)?;
-    let slack = 16.0 * levels as f64 * f64::EPSILON * size * (w_max / w_min);
-    slack.is_finite().then_some(slack)
 }
 
 /// The control-point boxes of `pieces` (`None` when a point has no hull point).

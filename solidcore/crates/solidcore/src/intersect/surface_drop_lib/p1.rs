@@ -73,10 +73,11 @@
 //! - **Exact iso-line ends (#18325).** `DropIsoCurve` extrapolates its end from the
 //!   Newton start by the measured speed ratio and builds the segment as
 //!   `start + (end - start)`, so an edge cut at a side of the face's domain dropped to
-//!   ends a few ulps off it (`0.8999999999999999` for `v = 0.9`). Each end coordinate
-//!   on a side of the domain now takes the side's exact value when the surface and
-//!   curve points there agree within their certified evaluation error bounds
-//!   (`snap_iso_ends`); the segment then ends exactly there. Other ends are unchanged.
+//!   ends a few ulps off it (`0.8999999999999999` for `v = 0.9`). A curve that is, by
+//!   construction, the surface's iso curve at a side `f` of the domain (equal to
+//!   `CreateIsoParametricCurve`'s, trimmed to the domain, as a face's natural edges are)
+//!   is `t -> S(f, t)`, so its exact UV ends are `(f, t0)` and `(f, t1)`; the segment now
+//!   ends exactly there (`exact_iso_ends`). Other curves are unchanged.
 //! - **Not ported here.** The `SM_DEBUG_CODE` blocks, `Dump`, `Draw`,
 //!   `my_AssertAndDrawDropCurve` (graphics) and the `SM_ASSERT`s.
 
@@ -98,10 +99,9 @@ use crate::intersect::surface_tracer::tracer_surface_cache;
 use crate::kernel::Kernel;
 use crate::math::{max2, rad_to_deg, EFF_ZERO, EFF_ZERO_SQ, EFF_ZERO_SQRT, PI, UNDEF_DOUBLE};
 use crate::nurbs::b_spline_curve::{BSplineCurve, ControlPointForm};
-use crate::nurbs::b_spline_surface::{BSplineSurfaceForm, SurfParamType};
+use crate::nurbs::b_spline_surface::{IsoCurveOptions, SurfParamType};
 use crate::nurbs::knots::Side;
-use crate::nurbs::math::{gamma, NOZ};
-use crate::nurbs::nurbs_srf::srf_point_error;
+use crate::nurbs::math::NOZ;
 use crate::surface::surface::p2::{
     CreateUvTrimCurvePathType, DropCurveFail, DropCurveFailArgs, UNSURE,
 };
@@ -1292,9 +1292,9 @@ impl Surface {
     /// starting at `start_uv` with the same parameterisation, the UV line segment
     /// (`DropIsoCurve`): the start tangent must be parallel (within a degree) to a
     /// first derivative, and the curve points at evenly spaced parameters must lie
-    /// within `approx_tol_3d` of the surface normal lines along that line. Ends on a side
-    /// of `uv_domain` take the side's exact value (not upstream, #18325: see
-    /// `snap_iso_ends`).
+    /// within `approx_tol_3d` of the surface normal lines along that line. A curve that is
+    /// the surface's iso curve at a side of `uv_domain` drops to its exact ends (not
+    /// upstream, #18325: see `exact_iso_ends`).
     ///
     /// # Errors
     ///
@@ -1464,19 +1464,13 @@ impl Surface {
 
         // get the surface parameter start/end points
         let uv_end = uv_domain.clamp_point(start_uv + dir_vec * ivl_size / scale);
-        // not upstream (#18325): ends on a side of the domain take its exact value
-        let (uv_start, snapped_end) = self.snap_iso_ends(
-            k,
-            uv_domain,
-            curve,
-            interval,
-            dir_vec.x == 0.0,
-            start_uv,
-            uv_end,
-        );
-        let end_snapped = snapped_end != uv_end;
-        let uv_start = Point3::from(uv_start);
-        let uv_end = Point3::from(snapped_end);
+        // not upstream (#18325): a curve that is this surface's iso curve at a side of the
+        // domain drops to its exact parameters
+        let exact = self.exact_iso_ends(k, uv_domain, curve, interval, dir_vec.x == 0.0, start_uv);
+        let (uv_start, uv_end) = match exact {
+            Some((s, e)) => (Point3::from(s), Point3::from(e)),
+            None => (Point3::from(start_uv), Point3::from(uv_end)),
+        };
 
         // skip degenerate parameter space curves
         let uv_size = uv_start.distance(uv_end);
@@ -1488,12 +1482,14 @@ impl Surface {
 
         // Passed all tests - make and output a parameter space line.
         let mut line = BSplineCurve::create_line_segment(2, uv_start, uv_end)?;
-        if end_snapped {
+        if exact.is_some() {
             // not upstream (#18325): the segment's end is `start + (end - start)`, which
-            // rounds (`0.2 + 0.7 = 0.8999999999999999`); a snapped end is exact, so the
-            // line ends there (`z` stays absent, as `create_line_segment`'s `to_2d`)
-            let end = Point3::new(uv_end.x, uv_end.y, NOZ);
-            line.set_control_point(ControlPointForm::NonRational, 1, end, 1.0)?;
+            // rounds (`0.2 + 0.7 = 0.8999999999999999`); exact ends are written as they
+            // are (`z` stays absent, as `create_line_segment`'s `to_2d`)
+            for (i, p) in [(0, uv_start), (1, uv_end)] {
+                let p = Point3::new(p.x, p.y, NOZ);
+                line.set_control_point(ControlPointForm::NonRational, i, p, 1.0)?;
+            }
         }
         line.edit_parameterization(interval)?;
         Ok(IsoDrop {
@@ -1504,41 +1500,28 @@ impl Surface {
         })
     }
 
-    /// Not upstream (#18325): the ends of [`Surface::drop_iso_curve`]'s UV line with each
-    /// coordinate that lies on a side of `uv_domain` set to that side's exact value.
+    /// Not upstream (#18325): the exact ends of [`Surface::drop_iso_curve`]'s UV line
+    /// when `curve` is, by construction, this surface's iso curve at a side of
+    /// `uv_domain`; `None` otherwise (the computed ends stay).
     ///
-    /// The line's ends are not inversions of the curve's end points: the start is the
-    /// Newton point solve's and the end extrapolates it by the measured speed ratio
+    /// The line's computed ends are not inversions of the curve's end points: the start is
+    /// the Newton point solve's and the end extrapolates it by the measured speed ratio
     /// `|S_w| / |C'|`, so both carry a few ulps of error (`0.8999999999999999` for an edge
-    /// cut at `v = 0.9`). A natural trim edge of a face is cut from the surface at a side
-    /// of the face's domain, a known parameter; this returns that parameter.
+    /// cut at `v = 0.9`).
     ///
-    /// A coordinate `x` of an end `E` (curve parameter `t`, the interval's end) is replaced
-    /// by the side `b` of `uv_domain` nearest to it, when `b` is in the surface's natural
-    /// domain, and when the surface point at the replaced end and the curve point at `t`
-    /// agree in every coordinate within the sum of their certified evaluation error bounds
-    /// ([`srf_point_error`] and [`Curve::point_error_bound`]), the comparison itself
-    /// rounded conservatively (`γ_3` on each side): the exact points then lie within twice
-    /// that sum of each other, so the replaced end is consistent with the data. The fixed
-    /// coordinate of the iso line (`u` when `iso_u`) is replaced at both ends or at none,
-    /// so the line stays an iso line; the moving one at each end on its own. Both ends
-    /// keep their computed values for surfaces other than a B-spline not of polynomial
-    /// form, curves without a point error bound, or when an evaluation fails (the
-    /// replacement is never an error). The caller writes a replaced end into the line
-    /// as is, since `create_line_segment` rounds its end (`start + (end - start)`).
-    ///
-    /// Why the side is the closest double: the edge was cut at the side's value, a
-    /// double, so that value is the exact parameter, and the check shows the data agree
-    /// with it to rounding. The computed end (Newton start, speed-ratio extrapolation,
-    /// the segment's rounded end) is a few ulps off it.
-    ///
-    /// A side point no closer than rounding to the curve point is never taken. The one
-    /// ambiguity left, a surface whose side collapses to a point (a pole), cannot move a
-    /// coordinate: the fixed coordinate must also match at the other end, which a non-
-    /// degenerate edge has off the pole, and a moving coordinate that matches at a pole
-    /// is that pole's side.
-    #[allow(clippy::too_many_arguments)]
-    fn snap_iso_ends(
+    /// The premise that makes the answer exact is checked, not inferred from distances:
+    /// the surface is a B-spline and `curve` is a B-spline equal, control point for control
+    /// point and knot for knot, to the iso curve
+    /// [`BSplineSurface::create_iso_parametric_curve`](crate::nurbs::b_spline_surface::BSplineSurface::create_iso_parametric_curve)
+    /// makes at the side `f` nearest the computed start (the fixed coordinate: `u` when
+    /// `iso_u`), trimmed to `uv_domain`, as `CreateNaturalUVTrimCurves` makes a face's
+    /// natural edges. That curve is defined as `t -> S(f, t)` (extraction and trimming keep
+    /// the surface's parameter along it), so the curve point at `t` is the surface point at
+    /// `(f, t)` by construction and the exact UV ends are `(f, t0)` and `(f, t1)` for the
+    /// interval `[t0, t1]`, both doubles. Both must lie in `uv_domain` (the computed ends
+    /// are clamped to it). A curve made any other way (another surface or side, a split or
+    /// reparameterised edge, a different domain) is not equal and keeps the computed ends.
+    fn exact_iso_ends(
         &self,
         k: &Kernel,
         uv_domain: &Extent2d,
@@ -1546,130 +1529,63 @@ impl Surface {
         interval: &Extent1d,
         iso_u: bool,
         start: Point2,
-        end: Point2,
-    ) -> (Point2, Point2) {
-        let Some(snap) = IsoSnap::new(k, self, curve) else {
-            return (start, end);
+    ) -> Option<(Point2, Point2)> {
+        let SurfaceKind::BSpline(surface) = self.kind() else {
+            return None;
         };
-        let ends = [(start, interval.min()), (end, interval.max())];
-        let nearest = |x: f64, lo: f64, hi: f64| {
-            if (x - lo).abs() <= (hi - x).abs() {
-                lo
-            } else {
-                hi
-            }
+        let CurveKind::BSpline(b) = curve.kind() else {
+            return None;
         };
-        let (fixed_lo, fixed_hi, moving_lo, moving_hi) = if iso_u {
+        let nurb = b.gw_nurb()?;
+        let (fixed, lo, hi, moving, param) = if iso_u {
             (
+                start.x,
                 uv_domain.u_min(),
                 uv_domain.u_max(),
-                uv_domain.v_min(),
-                uv_domain.v_max(),
+                uv_domain.v_interval(),
+                SurfParamType::U,
             )
         } else {
             (
+                start.y,
                 uv_domain.v_min(),
                 uv_domain.v_max(),
-                uv_domain.u_min(),
-                uv_domain.u_max(),
+                uv_domain.u_interval(),
+                SurfParamType::V,
             )
         };
-        // (fixed, moving) coordinates of a point and back
-        let split = |p: Point2| if iso_u { (p.x, p.y) } else { (p.y, p.x) };
-        let join = |f: f64, m: f64| {
+        let side = if (fixed - lo).abs() <= (hi - fixed).abs() {
+            lo
+        } else {
+            hi
+        };
+        let (t0, t1) = (interval.min(), interval.max());
+        let inside = |t: f64| moving.min() <= t && t <= moving.max();
+        if !inside(t0) || !inside(t1) {
+            return None;
+        }
+        let options = IsoCurveOptions {
+            domain: Some(*uv_domain),
+            uv_iso_curve: false,
+        };
+        let iso = surface
+            .create_iso_parametric_curve(k, param, side, options)
+            .ok()?;
+        let made = iso.curve.gw_nurb()?;
+        let same = made.degree() == nurb.degree()
+            && made.cpts() == nurb.cpts()
+            && made.knots() == nurb.knots();
+        if !same {
+            return None;
+        }
+        let at = |t: f64| {
             if iso_u {
-                Point2::new(f, m)
+                Point2::new(side, t)
             } else {
-                Point2::new(m, f)
+                Point2::new(t, side)
             }
         };
-
-        // per end, the best end for a fixed coordinate `f`: the moving coordinate replaced
-        // when that passes, else kept; `None` when neither passes
-        let best = |f: f64, (p, t): (Point2, f64), check_kept: bool| -> Option<Point2> {
-            let (_, m) = split(p);
-            let side = nearest(m, moving_lo, moving_hi);
-            if side != m && snap.matches(join(f, side), t) {
-                return Some(join(f, side));
-            }
-            (!check_kept || snap.matches(join(f, m), t)).then_some(join(f, m))
-        };
-
-        let (f0, _) = split(start);
-        let fixed_side = nearest(f0, fixed_lo, fixed_hi);
-        if fixed_side != f0 {
-            if let [Some(s), Some(e)] = ends.map(|end| best(fixed_side, end, true)) {
-                return (s, e);
-            }
-        }
-        let [s, e] = ends.map(|end| best(split(end.0).0, end, false));
-        (s.unwrap_or(start), e.unwrap_or(end))
-    }
-}
-
-/// The evaluations [`Surface::snap_iso_ends`] compares: a B-spline surface not of
-/// polynomial form (evaluated by [`crate::nurbs::srf_nurb::Surface::eval`]) with its
-/// point error bound and natural domain, and the curve.
-struct IsoSnap<'a> {
-    k: &'a Kernel,
-    surface: &'a Surface,
-    curve: &'a Curve,
-    surface_error: f64,
-    natural: Extent2d,
-}
-
-impl<'a> IsoSnap<'a> {
-    fn new(k: &'a Kernel, surface: &'a Surface, curve: &'a Curve) -> Option<Self> {
-        let SurfaceKind::BSpline(b) = surface.kind() else {
-            return None;
-        };
-        if b.form() == BSplineSurfaceForm::Polynomial {
-            return None;
-        }
-        let nurb = b.gw_nurb()?;
-        let surface_error = srf_point_error(nurb)?;
-        let (p, q) = nurb.degrees();
-        let u = (
-            nurb.u_knots().get(p)?,
-            nurb.u_knots().get(nurb.n().checked_add(1)?)?,
-        );
-        let v = (
-            nurb.v_knots().get(q)?,
-            nurb.v_knots().get(nurb.m().checked_add(1)?)?,
-        );
-        let natural = Extent2d::from_bounds(*u.0, *v.0, *u.1, *v.1);
-        Some(Self {
-            k,
-            surface,
-            curve,
-            surface_error,
-            natural,
-        })
-    }
-
-    /// Whether the surface point at `uv` (in the natural domain) and the curve point at `t`
-    /// agree in every coordinate within the sum of their evaluation error bounds.
-    fn matches(&self, uv: Point2, t: f64) -> bool {
-        let inside = |x: f64, lo: f64, hi: f64| lo <= x && x <= hi;
-        if !inside(uv.x, self.natural.u_min(), self.natural.u_max())
-            || !inside(uv.y, self.natural.v_min(), self.natural.v_max())
-        {
-            return false;
-        }
-        let Some(curve_error) = self.curve.point_error_bound(t) else {
-            return false;
-        };
-        let (Ok(s), Ok(c)) = (
-            self.surface.evaluate_point(self.k, uv),
-            self.curve.evaluate_point(self.k, t),
-        ) else {
-            return false;
-        };
-        let allowed = (self.surface_error + curve_error) * (1.0 - gamma(3));
-        let d = s - c;
-        [d.x, d.y, d.z]
-            .iter()
-            .all(|&g| g.abs() * (1.0 + gamma(3)) <= allowed)
+        Some((at(t0), at(t1)))
     }
 }
 
