@@ -4241,9 +4241,12 @@ fn selected_sketches(app: &SolveApp, items: &[Sel]) -> Vec<u64> {
     out
 }
 
-fn displayed_selection(app: &SolveApp, item: &Sel) -> Vec<Sel> {
+pub(crate) fn displayed_selection(app: &SolveApp, item: &Sel) -> Vec<Sel> {
     match item {
-        Sel::Feature { id } => feature_geometry(app, *id),
+        Sel::Feature { id } => match crate::timeline::viewport_sel_of_feature(&app.session.doc, *id) {
+            Some(construction) => vec![construction],
+            None => feature_geometry(app, *id),
+        },
         Sel::Occurrence { path } => app
             .session
             .occurrence_bodies(path, true)
