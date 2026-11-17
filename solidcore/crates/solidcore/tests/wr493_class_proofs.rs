@@ -626,7 +626,7 @@ fn sphere_face_trim_area(k: &Kernel, b: &Brep, f: FaceId, n: usize, origin: Vec3
                     let (qx, qy, qz) = (q.dot(e1), q.dot(e2), q.dot(e3));
                     let dphi = (qx * dp.dot(e2) - qy * dp.dot(e1)) / (qx * qx + qy * qy);
                     gb += sense * wt * h * (1.0 - qz / q.length()) * dphi;
-                    va = va + q.cross(dp) * (0.5 * sense * wt * h);
+                    va += q.cross(dp) * (0.5 * sense * wt * h);
                     let o = p - origin;
                     al += sense * wt * h * (-o.y * o.z * dp.x + o.x * o.z * dp.y) / 3.0;
                     // G(u, v): u0 to u along v, split at the u knots between them
