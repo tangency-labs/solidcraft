@@ -29,9 +29,23 @@
 //! upstream unitizes to zero and replaces by `Z`. Reading such a tiny axis as the
 //! direction it has (`(0, -1, 0)`), and so the frame the inputs define, is a convention
 //! (ARGUED, not PROVEN: the input is a nonzero vector, and upstream's `Z` is its own
-//! choice); the rows that rest on it are those two, `surface.cone_p2`'s
-//! `nopolar_bounded_y_trim_o0_full` and `nopolar_bounded_apex_y_trim_o0_full`, and
-//! `surface.cone_p3`'s `rejected_tiny_axis_*` and `rejected_below_unitize_threshold_axis`.
+//! choice). So is reading a huge axis (`(0, -1e300, 1)`) as its direction, and an axis
+//! of `5e-13`, below upstream's unitize threshold. The 32 rows that rest on these
+//! readings, all ARGUED:
+//! * `surface.cone_p1` (2): `height_without_polar_tiny_axis_swap0_inside1` and
+//!   `_swap1_inside1`;
+//! * `surface.cone_p2` (16), every `nopolar_*` row (input `Y` of `(0, -1e-300, 0)`):
+//!   `nopolar_bounded_{off_pos, off_trunc, rebuild, recognize, trim, y_trim_o0_full}`, the
+//!   same six with `nopolar_bounded_apex_`, `nopolar_bounded_cone_{rebuild, recognize,
+//!   trim}` and `nopolar_bounded_cone_x_trim_oneg_full`. That last one goes from one
+//!   interval to none: on the cone the inputs define, the trim ellipse lies inside the
+//!   solid nappe, away from the surface (certified by `cert_trim`), while main's cone
+//!   (its `Y` replaced by `Z`) is another cone;
+//! * `surface.cone_p3` (14): `rejected_tiny_axis_{0, 3, cylinders}_{cone, other}`,
+//!   `rejected_below_unitize_threshold_axis` (`5e-13`), `fuzz_axis_overflow_zero_y` with
+//!   `_swapped` and `_trimmed`, `fuzz_height_06674` (axis `(0, -1e300, 1)`),
+//!   `fuzz_height_06289` (`1e-300`) and `missing_polar_height_plane_1_y` and `_2_y`
+//!   (`-1e-300`).
 //! Every other state row checks the data bit-equal old and new (the semi-angle modulo
 //! 180), so both sides answer for the same cone. `T` has the STEP domain `D`, itself certified by the
 //! state certificate: `u` over
@@ -72,11 +86,12 @@
 //!   G0. Each patch side equals its loop curve (or its half for an n-sided patch), by
 //!   Bézier blossoms after degree elevation. The rows moved because the neighbour did:
 //!   a bounded cylinder on non-unit axes, whose NURB main built with radius `r |X|`
-//!   (the curves, STEP points, are certified on the data's cylinder). G1: the largest
-//!   angle between the patch normal and the data cylinder's normal along each side with
-//!   a neighbour, bounded above and below for both runs (Bernstein hulls, forward error
-//!   bounds); the new bound must not lie above the old one. All 6 rows are EQUAL (the
-//!   largest angle is at the patch corners, set by the shared loop curves).
+//!   (the curves, STEP points, are certified on the data's cylinder). G1 is NOT proven
+//!   here: the check below bounds the largest angle per side, which sits at the patch
+//!   corners and is fixed by the shared loop curves in both runs, so its EQUAL verdict
+//!   says nothing about the sides. At matched parameters along the sides the new
+//!   patches are worse on analytic028 and analytic100 (the fork's refinement loop keeps
+//!   the bare Coons patch when its corner-saturated maximum ties); that is open.
 //! * **Extrusion and cone curves** (`surface.surf_of_extrusion_p2`): every Bézier segment
 //!   lies within `tol` of the extrusion's planes (convex hull) and of the cone (a Bernstein
 //!   bound of the implicit equation, by de Casteljau halving).
