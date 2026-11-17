@@ -1251,19 +1251,18 @@ fn feature_row_body(
         // On several selected features an entry acts on them all or cannot be used; the entries
         // that take one feature go through `one_row`.
         let rule = crate::timeline::menu_rule(app, id);
-        let clicked = |row: Option<egui::Response>| row.is_some_and(|row| row.clicked());
-        if clicked(rule.one_row(|on| crate::ui_kit::menu::button_enabled(ui, "Edit Feature", "edit", on))) {
+        if rule.one_row(|on| crate::ui_kit::menu::button_enabled(ui, "Edit Feature", "edit", on)).clicked() {
             edit = true;
             ui.close();
         }
         crate::timeline::sketch_plane_button(app, ui, id);
         if let Some(sketch) = sketch
-            && clicked(rule.one_row(|on| crate::ui_kit::menu::button_enabled(ui, "Edit Profile Sketch", "sketch", on)))
+            && rule.one_row(|on| crate::ui_kit::menu::button_enabled(ui, "Edit Profile Sketch", "sketch", on)).clicked()
         {
             app.edit_sketch(sketch.0);
             ui.close();
         }
-        if clicked(rule.one_row(|on| crate::ui_kit::menu::button_enabled(ui, "Rename Feature", "rename", on))) {
+        if rule.one_row(|on| crate::ui_kit::menu::button_enabled(ui, "Rename Feature", "rename", on)).clicked() {
             crate::context_menu::start_rename(app, crate::context_menu::RenameWhat::Feature(id), rect.center());
             ui.close();
         }
@@ -1279,7 +1278,7 @@ fn feature_row_body(
             let _ = app.run_heavy("timeline.suppress", params);
             ui.close();
         }
-        if clicked(rule.one_row(|on| crate::ui_kit::menu::button_enabled(ui, "Roll Back Here", "rollback", on))) {
+        if rule.one_row(|on| crate::ui_kit::menu::button_enabled(ui, "Roll Back Here", "rollback", on)).clicked() {
             let _ = app.run_heavy("timeline.roll_to", json!({"feature": id}));
             ui.close();
         }

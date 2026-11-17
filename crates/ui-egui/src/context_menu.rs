@@ -622,33 +622,26 @@ fn feature_items(app: &SolveApp, id: u64) -> Vec<Item> {
     // Every selected feature is found, the row's own first.
     let find = if rule.many { json!({"feature": id, "features": targets}) } else { json!({"feature": id}) };
     let one = |item: Item| rule.one(item);
-    [
+    let profile = act("ui.editSketch", "Edit Profile Sketch", "sketch").with(json!({"sketch": sketch.map(|s| s.0)})).on(sketch.is_some());
+    vec![
         one(act("ui.editFeature", "Edit Feature", "edit").with(json!({"feature":id})).on(exists)),
         // Off without a reason for a feature that has no profile sketch: selecting one feature
         // would not turn it on.
-        match act("ui.editSketch", "Edit Profile Sketch", "sketch").with(json!({"sketch": sketch.map(|s| s.0)})).on(sketch.is_some()) {
-            item if sketch.is_some() => one(item),
-            item => Some(item),
-        },
+        if sketch.is_some() { one(profile) } else { profile },
         one(act("ui.rename", "Rename", "rename").key("F2").with(json!({"feature":id})).on(exists)),
-        Some(suppress.on(exists)),
+        suppress.on(exists),
         one(act("timeline.roll_to", "Roll Back Here", "rollback").with(json!({"feature":id})).on(exists)),
-        Some(act("ui.cut", "Cut", "cut").key("Ctrl+X").on(exists && crate::edit_clipboard::can_cut(app))),
-        Some(act("ui.copy", "Copy", "copy").key("Ctrl+C").on(exists && crate::edit_clipboard::something_to_copy(app))),
+        act("ui.cut", "Cut", "cut").key("Ctrl+X").on(exists && crate::edit_clipboard::can_cut(app)),
+        act("ui.copy", "Copy", "copy").key("Ctrl+C").on(exists && crate::edit_clipboard::something_to_copy(app)),
         // The selected features when the row is among them, as Copy and Cut and both History
         // layouts' Delete act on (#5005).
-        Some(
-            act("ui.delete", &crate::timeline::delete_label(targets.len()), "delete")
-                .key("Del")
-                .with(json!({"items": targets.iter().map(|id| json!({"type": "feature", "id": id})).collect::<Vec<_>>()}))
-                .on(exists),
-        ),
-        Some(Item::sep()),
-        Some(act("ui.findTimeline", "Find in Timeline", "rollback").with(find).on(exists)),
+        act("ui.delete", &crate::timeline::delete_label(targets.len()), "delete")
+            .key("Del")
+            .with(json!({"items": targets.iter().map(|id| json!({"type": "feature", "id": id})).collect::<Vec<_>>()}))
+            .on(exists),
+        Item::sep(),
+        act("ui.findTimeline", "Find in Timeline", "rollback").with(find).on(exists),
     ]
-    .into_iter()
-    .flatten()
-    .collect()
 }
 
 /// The canvas menus put Repeat on
@@ -895,11 +888,17 @@ fn sketch_items(app: &SolveApp, id: u64) -> Vec<Item> {
     let sketches = if selected.contains(&id.to_string()) { selected } else { vec![id.to_string()] };
     let targets = crate::timeline::menu_targets(app, id);
     let parts = !app.session.doc.components.is_empty();
+    // With several features selected, the entries the feature menus have too follow their rule
+    // ([`crate::timeline::MenuRule`]): Edit Sketch, Redefine Sketch Plane and Rename take one
+    // sketch and are off with the reason; Find in Timeline finds them all. The sketch's own
+    // entries (Extrude, Replace, Export, Look At, the Show/Hide toggles) act on this sketch.
+    let rule = crate::timeline::menu_rule(app, id);
+    let find = if rule.many { json!({ "feature": id, "features": targets }) } else { json!({ "feature": id }) };
     let mut items = vec![
         act("ui.extrudeSketch", "Extrude", "extrude").key("E").with(json!({ "sketch": id })).on(has_profiles && !editing),
         Item::sep(),
-        act("ui.editSketch", "Edit Sketch", "sketch").with(json!({ "sketch": id })).on(!editing),
-        act("ui.redefineSketch", "Redefine Sketch Plane", "plane").with(json!({ "sketch": id })),
+        rule.one(act("ui.editSketch", "Edit Sketch", "sketch").with(json!({ "sketch": id })).on(!editing)),
+        rule.one(act("ui.redefineSketch", "Redefine Sketch Plane", "plane").with(json!({ "sketch": id }))),
         replace_sketch_item(app, id).on(!editing),
         act("ui.exportDxf", "Export DXF…", "export").with(json!({ "sketch": id })),
         Item::sep(),
@@ -911,7 +910,7 @@ fn sketch_items(app: &SolveApp, id: u64) -> Vec<Item> {
         act("ui.delete", &crate::timeline::delete_label(targets.len()), "delete")
             .key("Del")
             .with(json!({ "items": targets.iter().map(|id| json!({"type": "feature", "id": id})).collect::<Vec<_>>() })),
-        act("ui.rename", "Rename", "rename").key("F2").with(json!({ "feature": id })),
+        rule.one(act("ui.rename", "Rename", "rename").key("F2").with(json!({ "feature": id }))),
         crate::browser::sketches_to_parts_item(sketches).on(parts && !editing),
         Item::sep(),
         act("ui.lookAt", "Look At", "lookat").with(json!({ "sketch": id })),
@@ -919,7 +918,7 @@ fn sketch_items(app: &SolveApp, id: u64) -> Vec<Item> {
         act("ui.sketchDims", if dims { "Hide Dimension" } else { "Show Dimension" }, "dimension").with(json!({ "sketch": id })),
         act(if visible { "ui.hideSketch" } else { "ui.showSketch" }, "Show/Hide", "eye").key("V").with(json!({ "sketch": id })),
         Item::sep(),
-        act("ui.findTimeline", "Find in Timeline", "rollback").with(json!({ "feature": id })),
+        act("ui.findTimeline", "Find in Timeline", "rollback").with(find),
     ];
     items.retain(|item| parts || item.id != "component.move_sketches.to_parts");
     items
@@ -1824,7 +1823,22 @@ pub fn run_item(app: &mut SolveApp, item: &Item, at: Pos2) {
         "ui.findTimeline" => {
             let body = p.get("body").and_then(Value::as_str);
             let f = id_of(&p, "feature").or_else(|| body.and_then(|b| body_feature(app, b)));
-            if let Some(f) = f {
+            if let Some(f) = f.filter(|f| app.session.doc.feature(*f).is_some()) {
+                // Every selected feature stays selected and has its folders opened. An id that
+                // names no feature is left out. `f`, the row the menu was opened on, is revealed
+                // last: the Browser has one reveal slot, and the timeline scrolls to `f`.
+                let listed = ids_of(&p, "features").unwrap_or_default();
+                let others: Vec<u64> = listed.into_iter().filter(|id| *id != f && app.session.doc.feature(*id).is_some()).collect();
+                let mut all = others.clone();
+                all.push(f);
+                all.sort_by_key(|id| app.session.doc.feature_index(*id));
+                for other in &others {
+                    if app.preferences.history_in_browser {
+                        crate::browser::reveal_in_history(app, *other);
+                    } else {
+                        crate::timeline_left::reveal_feature(app, *other);
+                    }
+                }
                 if app.preferences.history_in_browser {
                     crate::browser::reveal_in_history(app, f);
                 } else {
@@ -1834,16 +1848,6 @@ pub fn run_item(app: &mut SolveApp, item: &Item, at: Pos2) {
                     // sketch, plane or feature row there is no body: that row is the Browser's view.
                     if let Some(body) = body {
                         crate::browser::reveal_feature(app, f, body);
-                    }
-                }
-                // Every selected feature stays selected and has its folders opened; the timeline
-                // scrolls to `f`, the row the menu was opened on.
-                let all = ids_of(&p, "features").unwrap_or_else(|| vec![f]);
-                for other in all.iter().filter(|other| **other != f) {
-                    if app.preferences.history_in_browser {
-                        crate::browser::reveal_in_history(app, *other);
-                    } else {
-                        crate::timeline_left::reveal_feature(app, *other);
                     }
                 }
                 let items: Vec<Value> = all.iter().map(|id| json!({"type": "feature", "id": id})).collect();
