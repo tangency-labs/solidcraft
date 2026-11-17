@@ -1304,13 +1304,14 @@ impl Surface {
         // sign is charged its rounding ([`slope_charges`], from the certified partials
         // of the surface's net; none for the kinds that evaluate their own way): an
         // end's and a kink's slopes must be proven, and a stationary point's curvature
-        // counts as not positive unless it is proven above `SM_EFF_ZERO`.
-        let certified = certified_evaluator(k, self)?;
+        // counts as not positive unless it is proven above `SM_EFF_ZERO`. Where the
+        // net has a certified evaluator but a charge cannot be bounded (`|w|` not above
+        // its error near a collapsed corner, the partials failing, a charge not
+        // finite) the charge is infinite: no sign is proven there, so no end or kink
+        // is a maximum, and a stationary point's curvature is not proven positive.
+        let certified = certified_alignment_evaluator(k, self)?;
         let charges_at = |t: f64, f: f64, f_prime: f64| -> (f64, f64, f64) {
-            certified
-                .as_ref()
-                .and_then(|e| slope_charges(e, uv, s_dir, singular_dir, t, f, f_prime))
-                .unwrap_or((0.0, 0.0, 0.0))
+            charges_or_unproven(certified.as_ref(), uv, s_dir, singular_dir, t, f, f_prime)
         };
         let charges = |t: f64, f: f64, f_prime: f64| -> (f64, f64) {
             let (cf, cfp, _) = charges_at(t, f, f_prime);
@@ -3613,7 +3614,7 @@ fn alignment_slope(
 /// # Errors
 ///
 /// Those of making the surface's NURB.
-fn certified_evaluator(k: &Kernel, surface: &Surface) -> Result<Option<EvalSurface>> {
+pub fn certified_alignment_evaluator(k: &Kernel, surface: &Surface) -> Result<Option<EvalSurface>> {
     let Some(net) = super::p8::evaluation_net(k, surface)? else {
         return Ok(None);
     };
@@ -3673,6 +3674,66 @@ fn slope_charges(
     f: f64,
     f_prime: f64,
 ) -> Option<(f64, f64, f64)> {
+    let e = alignment_slopes(eval, uv, dir, singular_dir, s)?;
+    let scale = 1.0 + gamma(16);
+    let cf = (e.f_error + (e.f - f).abs()) * scale;
+    let cfp = (e.f_prime_error + (e.f_prime - f_prime).abs()) * scale;
+    let curvature = (e.f_prime.abs() + e.f_prime_error) * scale;
+    (cf.is_finite() && cfp.is_finite() && curvature.is_finite()).then_some((cf, cfp, curvature))
+}
+
+/// [`slope_charges`] where `eval` (the net's certified evaluator) is given, infinite
+/// charges where it cannot bound them (no sign is proven then), and none for the
+/// kinds without a certified evaluator, which evaluate their own way (WR-57).
+#[allow(clippy::too_many_arguments)]
+fn charges_or_unproven(
+    eval: Option<&EvalSurface>,
+    uv: Point2,
+    dir: Vec3,
+    singular_dir: SurfParamType,
+    s: f64,
+    f: f64,
+    f_prime: f64,
+) -> (f64, f64, f64) {
+    match eval {
+        Some(e) => slope_charges(e, uv, dir, singular_dir, s, f, f_prime).unwrap_or((
+            f64::INFINITY,
+            f64::INFINITY,
+            f64::INFINITY,
+        )),
+        None => (0.0, 0.0, 0.0),
+    }
+}
+
+/// The certified slopes of `FindDegenParamForDirection`'s alignment `A(s)` (WR-57):
+/// [`alignment_slopes`]' values of `F = A'(s)` and `F' = A''(s)` and their error
+/// bounds, `|F_exact - f| <= f_error` and `|F'_exact - f_prime| <= f_prime_error`
+/// (before the rounding of adding them, at most `gamma(16)` relative).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct AlignmentSlopes {
+    /// The certified evaluation of `F = A'(s)`.
+    pub f: f64,
+    /// The bound on `F`'s error.
+    pub f_error: f64,
+    /// The certified evaluation of `F' = A''(s)`.
+    pub f_prime: f64,
+    /// The bound on `F'`'s error.
+    pub f_prime_error: f64,
+}
+
+/// The certified `F = A'(s)` and `F' = A''(s)` of `FindDegenParamForDirection`'s
+/// alignment `A(s) = T(s).dir` (`T` the unit derivative across the singular
+/// direction, `s` along it, at `uv` with `s` replacing its singular coordinate) for
+/// `eval`, the net of [`certified_alignment_evaluator`], with their error bounds (the
+/// derivation is `slope_charges`'). `None` where the evaluator gives no bound or
+/// `|w|` is not above its error.
+pub fn alignment_slopes(
+    eval: &EvalSurface,
+    uv: Point2,
+    dir: Vec3,
+    singular_dir: SurfParamType,
+    s: f64,
+) -> Option<AlignmentSlopes> {
     let (q, w, ws, wss) = if singular_dir == SurfParamType::U {
         ([s, uv.y], (0, 1), (1, 1), (2, 1))
     } else {
@@ -3709,11 +3770,12 @@ fn slope_charges(
     // (and the rounding of the certified values' own formulas, at most a few dozen
     // operations on terms each at most `|c| / r + 3 tau^2 + tau`)
     let own = gamma(64) * (cl / r + 3.0 * tau * tau + tau + 1.0);
-    let scale = 1.0 + gamma(16);
-    let cf = ((d1 + own) + (fc - f).abs()) * scale;
-    let cfp = ((d2 + own) + (fpc - f_prime).abs()) * scale;
-    let curvature = (fpc.abs() + d2 + own) * scale;
-    (cf.is_finite() && cfp.is_finite() && curvature.is_finite()).then_some((cf, cfp, curvature))
+    Some(AlignmentSlopes {
+        f: fc,
+        f_error: d1 + own,
+        f_prime: fpc,
+        f_prime_error: d2 + own,
+    })
 }
 
 /// The Newton solve of `FindDegenParamForDirection`
@@ -4881,6 +4943,53 @@ mod tests {
         assert!(
             (got - want).abs() < 1e-12,
             "alignment {got} vs closed form {want}"
+        );
+    }
+
+    /// WR-57 (#17856 r2): at gen0435's collapsed corner (`u_min`, where the first
+    /// control row is one point) the derivative across the singular direction is zero,
+    /// so its certified error is not below its length and the slopes have no bound:
+    /// the charges are then infinite, and no sign of `F` or `F'` is proven there, where
+    /// a zero charge would let the raw float signs decide. Inside the span they are
+    /// bounded.
+    #[test]
+    fn wr57_an_unbounded_charge_proves_no_sign() {
+        let (s, u_knots, v1) = wr57_gen0435_surface();
+        let k = Kernel::default();
+        let eval = certified_alignment_evaluator(&k, &s)
+            .unwrap()
+            .expect("a certified evaluator");
+        let uv = Point2::new(1.7156161692711094, v1);
+        let dir = Vec3::new(0.9109237931558096, -0.11434982158434526, 0.6569538269953288)
+            .unitize()
+            .unwrap();
+        let u_min = u_knots[0];
+        assert_eq!(
+            alignment_slopes(&eval, uv, dir, SurfParamType::U, u_min),
+            None
+        );
+        let (cf, cfp, curvature) =
+            charges_or_unproven(Some(&eval), uv, dir, SurfParamType::U, u_min, 0.25, -0.5);
+        assert!(
+            cf == f64::INFINITY && cfp == f64::INFINITY && curvature == f64::INFINITY,
+            "{cf} {cfp} {curvature}"
+        );
+        // (neither sign of a finite `F` is proven against it)
+        let signed = |f: f64| f > cf || f < -cf;
+        assert!(!signed(0.25) && !signed(-0.25));
+        let inside = alignment_slopes(&eval, uv, dir, SurfParamType::U, 1.78)
+            .expect("bounded inside the span");
+        assert!(
+            inside.f_error.is_finite() && inside.f_error < 1e-6,
+            "{inside:?}"
+        );
+        let (cf, _, _) =
+            charges_or_unproven(Some(&eval), uv, dir, SurfParamType::U, 1.78, inside.f, 0.0);
+        assert!(cf.is_finite(), "{cf}");
+        // (a kind without a certified evaluator is charged nothing)
+        assert_eq!(
+            charges_or_unproven(None, uv, dir, SurfParamType::U, u_min, 0.25, -0.5),
+            (0.0, 0.0, 0.0)
         );
     }
 

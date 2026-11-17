@@ -88,6 +88,53 @@ pub(crate) fn evaluation_slack(k: &Kernel, surface: &Surface) -> f64 {
     gamma(8 * (p + q + 2)) * m * 3.0_f64.sqrt()
 }
 
+/// [`evaluation_slack`] at the parameters `uv`, which may lie past the net's knots (the
+/// evaluation extrapolates the end spans' polynomials): inside the knots the slack itself;
+/// past them each direction's de Boor steps take affine rather than convex combinations,
+/// with factors at most `1 + 2 d / span` for `d` the distance past the end knot and `span`
+/// the end span's length, so the rounding grows by at most that factor to the degree per
+/// direction (as `solidcore`'s own `point_rounding` charges it). `None` for a rational net
+/// past its knots, whose weight sum is not bounded away from zero there, and for
+/// parameters that are not finite: no enclosure is claimed.
+pub(crate) fn evaluation_slack_at(k: &Kernel, surface: &Surface, uv: Point2) -> Option<f64> {
+    let measured = measured(surface);
+    let form = as_b_spline(k, measured).ok()??;
+    let nurb = form.gw_nurb()?;
+    let grow = extrapolation(nurb.u_knots(), nurb.p(), uv.x)?
+        * extrapolation(nurb.v_knots(), nurb.q(), uv.y)?;
+    let rational = nurb.rows().flatten().any(|c| c.w != NOW);
+    if rational && grow > 1.0 {
+        return None;
+    }
+    let slack = evaluation_slack(k, surface) * grow;
+    slack.is_finite().then_some(slack)
+}
+
+/// The growth of a degree-`p` B-spline evaluation's rounding at `t` past `knots`' ends
+/// ([`evaluation_slack_at`]): 1 inside, `((1 + 2 d / span)(1 + u_4))^p (1 + gamma(p + 1))`
+/// past an end. `None` for `t` not finite or an end span that is empty.
+fn extrapolation(knots: &[f64], p: usize, t: f64) -> Option<f64> {
+    let lo = *knots.get(p)?;
+    let hi = *knots.get(knots.len().checked_sub(p + 1)?)?;
+    if !t.is_finite() {
+        return None;
+    }
+    if t >= lo && t <= hi {
+        return Some(1.0);
+    }
+    let (d, span) = if t < lo {
+        (lo - t, knots.iter().copied().find(|&x| x > lo)? - lo)
+    } else {
+        (t - hi, hi - knots.iter().rev().copied().find(|&x| x < hi)?)
+    };
+    if span <= 0.0 || span.is_nan() {
+        return None;
+    }
+    let ratio = (1.0 + 2.0 * d / span) * (1.0 + gamma(4));
+    let grow = ratio.powi(i32::try_from(p).ok()?) * (1.0 + gamma(p + 1));
+    grow.is_finite().then_some(grow)
+}
+
 /// The enclosure of the distance from `p` to `surface` over `uv_box` (its NURB parameters;
 /// `None` for the whole surface) around the drop answer `foot`.
 ///
@@ -105,8 +152,9 @@ pub(crate) fn nearest(
     let q = surface.evaluate_point(k, foot).expect("the foot");
     // the evaluation's rounding, and the distance's own (a difference per coordinate, three
     // squares, two sums and a root, on coordinates at most the larger point's size)
+    // (past a rational net's knots the evaluation is not bounded: no upper end)
     let hi = p.distance(q)
-        + evaluation_slack(k, surface)
+        + evaluation_slack_at(k, surface, foot).unwrap_or(f64::INFINITY)
         + gamma(8) * p.max_dimension().max(q.max_dimension()) * 3.0_f64.sqrt();
     // ask for the foot's distance: the subdivision stops once the nearest piece is that far
     let lo = surface_distance_lower_bound(k, surface, uv_box, p, p.distance(q))

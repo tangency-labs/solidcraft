@@ -595,7 +595,8 @@ mod review_geometry_tests {
     /// WR-57 (#17856): every local solve that moved from main is replayed (the row agrees
     /// with the golden: the code checked is the code that blessed) and certified with
     /// enclosed distances from the test point (the evaluation's rounding
-    /// [`crate::certify::evaluation_slack`] and the distance's own charged): a minimize's or
+    /// [`crate::certify::evaluation_slack_at`], grown past the knots, and the distance's own
+    /// charged): a minimize's or
     /// intersection's new answer is not proven farther than main's, a maximize's not proven nearer (each
     /// proven better where the enclosures part), and another operation's is main's point
     /// to the rounding (the enclosures meet). A surface without a NURBS form (the
@@ -627,12 +628,15 @@ mod review_geometry_tests {
                 continue;
             }
             let at = |r: &[f64]| {
-                let q = surface.evaluate_point(&k, p2([r[4], r[5]])).unwrap();
+                let uv = p2([r[4], r[5]]);
+                let q = surface.evaluate_point(&k, uv).unwrap();
                 let d = solidcore::geom::certified::distance(q, v3(input.test));
-                let slack = crate::certify::evaluation_slack(&k, &surface);
-                (d.value - d.bound - slack, d.value + d.bound + slack)
+                let slack = crate::certify::evaluation_slack_at(&k, &surface, uv)?;
+                Some((d.value - d.bound - slack, d.value + d.bound + slack))
             };
-            let (m, n) = (at(main), at(new));
+            let (Some(m), Some(n)) = (at(main), at(new)) else {
+                panic!("{name}: past a rational net's knots, no enclosure (main {main:?}, new {new:?})");
+            };
             match solver_op(input.solver).unwrap() {
                 SolverOperation::Maximize => {
                     assert!(n.1 >= m.0, "{name}: new {n:?} proven nearer than main {m:?}");
@@ -652,5 +656,6 @@ mod review_geometry_tests {
             eprintln!("{name} ({:?}): main {m:?} new {n:?}", solver_op(input.solver).unwrap());
         }
         eprintln!("{proven_better} answers proven better than main's");
+        assert_eq!(proven_better, 4, "the certified count moved");
     }
 }

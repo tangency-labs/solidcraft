@@ -1137,12 +1137,15 @@ mod tests {
     /// a closest-point (`sop` 3) or intersection (`sop` 0) solve with one answer in both, the new answer's point lies
     /// in the solve's domain wherever main's does and is not proven farther from the test point than main's
     /// (its certified distance's lower end at most main's upper end, the evaluation's
-    /// rounding [`crate::certify::evaluation_slack`] and the distance's own charged), and
-    /// is proven nearer where the enclosures part.
+    /// rounding [`crate::certify::evaluation_slack_at`], grown past the knots, and the
+    /// distance's own charged). The rows proven nearer (the enclosures part) are counted and
+    /// the count asserted; a row past a rational net's knots has no enclosure and is listed
+    /// as unproven, the list asserted.
     #[test]
     fn wr57_moved_thin_solves_are_not_farther() {
         let k = Kernel::default();
         let (mut proven_nearer, mut outside) = (0usize, 0usize);
+        let mut unproven: Vec<&str> = Vec::new();
         for &(name, main, new) in WR57_MOVED {
             let case = crate::case::regression_case(&Runner, name);
             let i: Inputs = case.parse().expect("inputs");
@@ -1161,10 +1164,11 @@ mod tests {
             let s = surface_of(&i.surface).expect("surface");
             let p = v3(*p);
             let at = |r: &[f64]| {
-                let q = s.evaluate_point(&k, solidcore::geom::vector2d::Point2::new(r[3], r[4])).expect("evaluate");
+                let uv = solidcore::geom::vector2d::Point2::new(r[3], r[4]);
+                let q = s.evaluate_point(&k, uv).expect("evaluate");
                 let d = solidcore::geom::certified::distance(q, p);
-                let slack = crate::certify::evaluation_slack(&k, &s);
-                (d.value - d.bound - slack, d.value + d.bound + slack)
+                let slack = crate::certify::evaluation_slack_at(&k, &s, uv)?;
+                Some((d.value - d.bound - slack, d.value + d.bound + slack))
             };
             let [u0, v0, u1, v1] = *dom;
             let inside = |r: &[f64]| (u0..=u1).contains(&r[3]) && (v0..=v1).contains(&r[4]);
@@ -1178,14 +1182,22 @@ mod tests {
                 outside += 1;
                 eprintln!("{name}: main {main:?} and new {new:?} outside the domain {dom:?}");
             }
-            let (m, n) = (at(main), at(new));
+            let (Some(m), Some(n)) = (at(main), at(new)) else {
+                unproven.push(name);
+                eprintln!("{name}: unproven (past a rational net's knots), main {main:?} new {new:?}");
+                continue;
+            };
             assert!(n.0 <= m.1, "{name}: new {n:?} proven farther than main {m:?}");
             if n.1 < m.0 {
                 proven_nearer += 1;
             }
             eprintln!("{name}: main {m:?} new {n:?}");
         }
-        eprintln!("{proven_nearer} answers proven nearer than main's, {outside} outside the domain as main's");
+        eprintln!(
+            "{proven_nearer} answers proven nearer than main's, {outside} outside the domain as main's, \
+             unproven {unproven:?}"
+        );
+        assert_eq!((proven_nearer, unproven.as_slice()), (21, &[] as &[&str]), "the certified counts moved");
     }
 
     /// Generated cases cover every op, most of the comparable ones not deferred.

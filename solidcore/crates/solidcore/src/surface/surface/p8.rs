@@ -3176,7 +3176,8 @@ impl Surface {
     ///
     /// The status of a failing degenerate parameter search (`SM_ERR` when it does not
     /// converge) or iso curve creation or curve drop; `SM_ERR` for an answer proven
-    /// farther from `test_pt` than the guess, or for a distance that is not a number;
+    /// farther from `test_pt` than the guess, or for a distance that is not enclosed (not
+    /// a number, or at a point past a rational net's knots);
     /// [`SolidError::Unported`] from the evaluations and drops.
     pub fn invert_point_near_singularity(
         &self,
@@ -3192,11 +3193,11 @@ impl Surface {
     /// [`Surface::invert_point_near_singularity`] for a closest point (`farthest`
     /// false) or for a maximize (`farthest` true, not upstream): of the drops the
     /// farthest from `test_pt` is kept, and where it is proven nearer than the guess
-    /// the guess is kept, reported [`TerminationReason::UnableToConverge`] (the
-    /// point-solve stepper's `Maximize` ends its iteration at an inversion's answer;
-    /// the nearest drop ended goldens `surface_point_solve_p3` `matrix_0105` at 18192
-    /// against the guess's 21900, and the drops minimize along their iso curves, so
-    /// none of this shows the guess is a maximum).
+    /// the guess is kept; either is reported [`TerminationReason::UnableToConverge`]
+    /// (the point-solve stepper's `Maximize` ends its iteration at an inversion's
+    /// answer; the nearest drop ended goldens `surface_point_solve_p3` `matrix_0105` at
+    /// 18192 against the guess's 21900, and the drops minimize along their iso curves,
+    /// so nothing here shows that the guess or a drop is a maximum).
     ///
     /// # Errors
     ///
@@ -3392,13 +3393,16 @@ impl Surface {
         // its evaluation's rounding: the guess's own point (a pole, where every
         // degenerate parameter gives the same point) differs from the answer's only by
         // that rounding, which no comparison below can mistake for a distance. A
-        // distance that is not a number is refused, never compared.
+        // distance without an enclosure is refused, never compared: one that is not a
+        // number, or one at a point past a rational net's knots, where the evaluation's
+        // rounding has no bound ([`point_rounding`]; the guess's is bounded here).
         let (Some((found_lo, found_hi)), Some((guess_lo, guess_hi))) =
             (found_d, enclose(uv_guess, srf_pt)?)
         else {
             return Err(SolidError::surface_failed(
                 OP_INVERT,
-                "a distance from the test point is not a number",
+                "a distance from the test point is not enclosed: not a number, or past a \
+                 rational net's knots",
             ));
         };
         // (not upstream) For a maximize the guess is kept where the drop kept is proven
@@ -3406,16 +3410,14 @@ impl Surface {
         // and stepping on from the guess ends nearer still (goldens
         // `surface_point_solve_p3` matrix_0105: the one drop 18192 away, the guess
         // 21900; matrix_0822 and matrix_0957 end at 0.591 and 0.619 when stepping on).
-        // The drops minimize along their iso curves, so nothing here shows the guess is
-        // a maximum: it is reported unconverged.
+        // The drops minimize along their iso curves, so nothing here shows that the
+        // guess or the farthest drop is a maximum: either is reported unconverged.
         if farthest {
-            if found_hi < guess_lo {
-                return Ok(SingularityInversion {
-                    uv: uv_guess,
-                    reason: TerminationReason::UnableToConverge,
-                });
-            }
-            return Ok(SingularityInversion { uv, reason });
+            let uv = if found_hi < guess_lo { uv_guess } else { uv };
+            return Ok(SingularityInversion {
+                uv,
+                reason: TerminationReason::UnableToConverge,
+            });
         }
         // (not upstream) The answer is the closest point only if it is not farther from
         // the test point than the guess: one proven farther is not an answer. The method
@@ -4131,6 +4133,123 @@ mod tests {
         assert!(f > g + 16.0 * f64::EPSILON * g, "{f} {g}");
         assert!(f - g < e, "{f} {g} {e:e}");
         assert_eq!(inv.reason, TerminationReason::FoundAnswerConverged);
+    }
+
+    /// WR-57 (#17856 r2): goldens `surface_p8` gen0158's inversion. The degree (2, 1)
+    /// surface's boundary `u = u_min` is collapsed (its control row is one point), but
+    /// the guess `(0.4125, 0.9012)` lies far from it; the drop at the search's
+    /// degenerate parameter lands at `u = 0.1249`, 9.1456 from the test point, against
+    /// the guess's 2.2566. That answer is proven farther than the guess, so it is
+    /// refused (`SM_ERR`); upstream (and this test with the refusal removed) answers it.
+    #[test]
+    fn invert_near_singularity_refuses_a_drop_farther_than_its_guess() {
+        use crate::nurbs::math::CPoint;
+        use crate::nurbs::srf_basic::Surface as NlSurface;
+        let k = Kernel::default();
+        let rows: [[[f64; 3]; 2]; 6] = [
+            [
+                [-35.483050698468425, 17.741525349234212, 7.818788891325907],
+                [-35.483050698468425, 17.741525349234212, 7.818788891325907],
+            ],
+            [
+                [32.507621345817455, -4.046571938157584, 17.969583229361014],
+                [35.81919849788494, 36.638534977766746, -4.400698408821642],
+            ],
+            [
+                [65.75281164802853, -0.6945300360676128, 20.89004839445563],
+                [77.05678784270278, 28.750838858371857, -3.0921440790612267],
+            ],
+            [
+                [106.41857367023484, 5.906525165692014, 19.556106044942442],
+                [101.46836131428677, 35.546300480416825, -11.126939017671038],
+            ],
+            [
+                [141.24074159750157, 4.0381312349654355, 16.113810566398357],
+                [136.96967186601904, 37.93876060737041, -2.5870594151057227],
+            ],
+            [
+                [172.53549211004483, -4.669618867331914, -19.96803802632554],
+                [184.19656544797408, 37.01336146994187, -0.15366479946000275],
+            ],
+        ];
+        let net = rows
+            .iter()
+            .map(|r| {
+                r.iter()
+                    .map(|&[x, y, z]| CPoint::new(x, y, z, NOW))
+                    .collect()
+            })
+            .collect();
+        let (u0, u1) = (-1.130128346952732, 1.8419707993298213);
+        let u = vec![
+            u0,
+            u0,
+            u0,
+            -0.05690903781019041,
+            0.3585174179267241,
+            1.3801017560592084,
+            u1,
+            u1,
+            u1,
+        ];
+        let nl = NlSurface::new(net, 2, 1, u, vec![0.0, 0.0, 1.0, 1.0]).unwrap();
+        let mut b = BSplineSurface::from_nurb(nl, false);
+        b.set_b_spline_surface_form(BSplineSurfaceForm::from_code(11).unwrap());
+        let s = Surface::from(b);
+        let dom = Extent2d::from_bounds(u0, 0.0, u1, 1.0);
+        let test = Point3::new(83.53257797923465, 27.43436202346898, -2.523781785556575);
+        let guess = Point2::new(0.4125072351599867, 0.901196840920948);
+        let at_guess = s.evaluate_point(&k, guess).unwrap().distance(test);
+        assert!((at_guess - 2.2566).abs() < 1e-3, "{at_guess}");
+        let r = s.invert_point_near_singularity(&k, test, &dom, guess, 1e-6);
+        let e = r.expect_err("an answer farther than the guess is refused");
+        assert!(
+            e.to_string()
+                .contains("farther from the test point than the guess"),
+            "{e}"
+        );
+    }
+
+    /// WR-57 (#17856 r2, goldens `surface_point_solve_p3` `matrix_0105`'s rule): a
+    /// maximize stepping into a pole keeps its guess where every drop is proven nearer
+    /// the test point than the guess, and reports it unable to converge. The triangle
+    /// `(2u, 3uv, uv)` collapses `u = 0` to the origin; the guess `(1e-3, 0.5)` is
+    /// `1.27` from the test point, `0.1` above the triangle's point at `(0.5, 0.5)`,
+    /// and the one drop (onto the iso curve `v = 0.5`, the tangent leaving the pole
+    /// toward the point) is about `0.1` away. A closest-point inversion answers that
+    /// drop, converged; the maximize keeps the guess (it fails with that rule removed,
+    /// answering the drop), and neither is shown to be a maximum.
+    #[test]
+    fn invert_near_singularity_maximize_keeps_a_guess_farther_than_its_drops() {
+        let k = Kernel::default();
+        let s = Surface::from(
+            BSplineSurface::create_bilinear_surface(
+                Vec3::new(0.0, 0.0, 0.0),
+                Vec3::new(2.0, 0.0, 0.0),
+                Vec3::new(0.0, 0.0, 0.0),
+                Vec3::new(2.0, 3.0, 1.0),
+            )
+            .unwrap(),
+        );
+        let dom = Extent2d::from_bounds(0.0, 0.0, 1.0, 1.0);
+        let n = Vec3::new(0.0, -1.0, 3.0) / 10.0_f64.sqrt();
+        let test = s.evaluate_point(&k, Point2::new(0.5, 0.5)).unwrap() + n * 0.1;
+        let guess = Point2::new(1e-3, 0.5);
+        let at_guess = s.evaluate_point(&k, guess).unwrap().distance(test);
+        assert!(at_guess > 1.2, "{at_guess}");
+
+        let nearest = s
+            .invert_point_near_singularity(&k, test, &dom, guess, 1e-9)
+            .unwrap();
+        let drop = s.evaluate_point(&k, nearest.uv).unwrap().distance(test);
+        assert!(drop < 0.11, "{nearest:?} {drop}");
+        assert_eq!(nearest.reason, TerminationReason::FoundAnswerConverged);
+
+        let farthest = s
+            .invert_point_near_singularity_for(&k, test, &dom, guess, 1e-9, true)
+            .unwrap();
+        assert_eq!(farthest.uv, guess, "{farthest:?}");
+        assert_eq!(farthest.reason, TerminationReason::UnableToConverge);
     }
 
     /// WR-57 (#17856): a distance that is not a number is never compared; the

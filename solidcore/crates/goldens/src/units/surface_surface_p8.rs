@@ -1036,29 +1036,38 @@ mod tests {
     ];
 
     /// The certified distance from `p` to `s`'s point at `uv`: `[lo, hi]`, the evaluation's
-    /// rounding ([`crate::certify::evaluation_slack`]) and the distance's own
-    /// ([`solidcore::geom::certified::distance`]) charged.
-    fn wr57_distance(k: &Kernel, s: &Surface, p: Vec3, uv: Point2) -> (f64, f64) {
+    /// rounding ([`crate::certify::evaluation_slack_at`], grown past the knots) and the
+    /// distance's own ([`solidcore::geom::certified::distance`]) charged; `None` where the
+    /// evaluation is not bounded (a rational net past its knots).
+    fn wr57_distance(k: &Kernel, s: &Surface, p: Vec3, uv: Point2) -> Option<(f64, f64)> {
         let q = s.evaluate_point(k, uv).expect("evaluate");
         let d = solidcore::geom::certified::distance(q, p);
-        let slack = crate::certify::evaluation_slack(k, s);
-        (d.value - d.bound - slack, d.value + d.bound + slack)
+        let slack = crate::certify::evaluation_slack_at(k, s, uv)?;
+        Some((d.value - d.bound - slack, d.value + d.bound + slack))
     }
 
     /// WR-57 (#17856): every row of `InvertPointNearSingularity` that moved from main is
     /// replayed (the code checked is the code that blessed: the row agrees with the golden)
     /// and certified with enclosed distances from the test point:
     /// - answered in both: the new answer is not proven farther than main's (its lower end
-    ///   at most main's upper end), and is proven nearer where the enclosures part;
+    ///   at most main's upper end); the rows where the enclosures part (proven nearer) are
+    ///   counted and the count asserted, the rest are ties within the rounding;
     /// - refused by main (1001), answered now: the new answer is not proven farther than
-    ///   the guess, the acceptance rule of the search;
+    ///   the guess, the acceptance rule of the search. That is not a proof that it is the
+    ///   closest point (ARGUED): the surface's certified lower bound is printed per row, and
+    ///   the rows where it is within `1e-6` relative of the answer's upper end (the answer
+    ///   proven the closest point to that) are counted and the count asserted;
     /// - answered by main, refused now: main's answer is proven farther than the guess
     ///   (its lower end above the guess's upper end), so main returned an answer worse
     ///   than the starting point it was asked to improve.
+    ///
+    /// A row whose answer (or guess) lies past a rational net's knots has no enclosure
+    /// ([`wr57_distance`]): it is listed as unproven, and the list asserted.
     #[test]
     fn wr57_moved_inversions_are_certified() {
         let k = Kernel::default();
-        let mut proven_nearer = 0usize;
+        let (mut proven_nearer, mut ties, mut globally_nearest, mut argued) = (0usize, 0usize, 0usize, 0usize);
+        let mut unproven: Vec<&str> = Vec::new();
         for &(name, main, new) in WR57_MOVED {
             let case = crate::case::regression_case(&Runner, name);
             let i: Inputs = case.parse().expect("inputs");
@@ -1077,28 +1086,63 @@ mod tests {
             let guess = wr57_distance(&k, &s, v3(*p), p2(*uv));
             match (main.len(), new.len()) {
                 (4, 4) => {
-                    let (m, n) = (at(main), at(new));
+                    let (Some(m), Some(n)) = (at(main), at(new)) else {
+                        unproven.push(name);
+                        eprintln!("{name}: unproven (past a rational net's knots), main {main:?} new {new:?}");
+                        continue;
+                    };
                     assert!(n.0 <= m.1, "{name}: new {n:?} proven farther than main {m:?}");
                     if n.1 < m.0 {
                         proven_nearer += 1;
+                    } else {
+                        ties += 1;
                     }
                     eprintln!("{name}: both answered, main {m:?} new {n:?}");
                 }
                 (1, 4) => {
-                    let n = at(new);
+                    let (Some(n), Some(guess)) = (at(new), guess) else {
+                        unproven.push(name);
+                        eprintln!("{name}: unproven (past a rational net's knots), new {new:?}");
+                        continue;
+                    };
                     assert!(n.0 <= guess.1, "{name}: new {n:?} proven farther than the guess {guess:?}");
-                    eprintln!("{name}: answered now, new {n:?} guess {guess:?}");
+                    let global = crate::certify::nearest(&k, &s, None, v3(*p), Point2::new(new[2], new[3]));
+                    if global.hi - global.lo <= 1e-6 * global.hi {
+                        globally_nearest += 1;
+                    } else {
+                        argued += 1;
+                    }
+                    eprintln!("{name}: answered now, new {n:?} guess {guess:?} surface's lower bound {}", global.lo);
                 }
                 (4, 1) => {
-                    let m = at(main);
+                    let (Some(m), Some(guess)) = (at(main), guess) else {
+                        unproven.push(name);
+                        eprintln!("{name}: unproven (past a rational net's knots), main {main:?}");
+                        continue;
+                    };
                     assert!(m.0 > guess.1, "{name}: main {m:?} not proven farther than the guess {guess:?}");
                     eprintln!("{name}: refused now, main {m:?} guess {guess:?}");
                 }
                 _ => panic!("{name}: an unexpected transition {main:?} -> {new:?}"),
             }
         }
-        eprintln!("{proven_nearer} answers proven nearer than main's");
+        eprintln!(
+            "{proven_nearer} answers proven nearer than main's, {ties} ties; {globally_nearest} answers \
+             now proven the closest point, {argued} not farther than the guess only (ARGUED); unproven {unproven:?}"
+        );
+        assert_eq!(
+            (proven_nearer, ties, globally_nearest, argued, unproven.as_slice()),
+            WR57_COUNTS,
+            "the certified counts moved"
+        );
     }
+
+    /// [`wr57_moved_inversions_are_certified`]'s counts: proven nearer, ties, answered now
+    /// and proven the closest point, answered now and not farther than the guess only, and
+    /// the rows without an enclosure. The tie is gen1668 (the enclosures an ulp apart);
+    /// the two answered rows only not farther than the guess are gen0074 (the surface's
+    /// lower bound 0.2260 against the answer's 0.2310) and gen1191 (lower bound 0).
+    const WR57_COUNTS: (usize, usize, usize, usize, &[&str]) = (31, 1, 24, 2, &[]);
 
     /// Generated cases reach every op, and the comparable ones mostly compare values.
     #[test]

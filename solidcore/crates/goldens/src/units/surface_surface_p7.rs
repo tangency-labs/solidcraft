@@ -2014,13 +2014,28 @@ mod tests {
     /// derivative across the singular direction with the (oriented) direction, enclosed
     /// at both answers ([`wr57_alignment`]), is at the new answer at least main's less the
     /// two roundings. Where the answer is main's own parameter and only the status moved
-    /// (main 1001, not converged, now 0), the status follows from the search's local-maximum
-    /// test, whose signs are charged with the same certified bounds (ARGUED there, not
-    /// replayed here).
+    /// (main 1001, not converged, now 0), the answer is checked to be a local maximum of
+    /// the alignment `A(s)` with the certified slopes
+    /// ([`solidcore::surface::surface::p7::alignment_slopes`], each sign charged its
+    /// error bound):
+    /// - an end of the interval where `A` is proven to grow outward (`F = A'` proven
+    ///   negative at the start, positive at the end) on a surface not closed in the
+    ///   singular direction, or closed with `A` proven to grow outward at both ends (a
+    ///   crease at the seam): PROVEN a local maximum;
+    /// - an interior answer where `F' = A''` is proven negative: a strict local maximum
+    ///   within `|F| / |F'|` of the answer, the solve's accuracy (ARGUED only in that
+    ///   the maximum is beside the answer, not at it);
+    /// - otherwise (a plateau, where `F'` is not proven negative, or a kink at a knot)
+    ///   ARGUED: the search's own test, which accepts a curvature not proven positive so
+    ///   that a plateau keeps its input, or its one-sided signs at the knot. These rows
+    ///   are listed, and the list asserted.
     #[test]
     fn wr57_moved_degen_answers_are_not_less_aligned() {
+        use solidcore::surface::surface::p7::{alignment_slopes, certified_alignment_evaluator};
         let k = Kernel::default();
         let (mut more, mut same_param, mut undefined) = (0usize, 0usize, 0usize);
+        let (mut end_proven, mut stationary_proven) = (0usize, 0usize);
+        let mut argued: Vec<&str> = Vec::new();
         for &(name, main, new) in WR57_MOVED {
             let case = crate::case::regression_case(&Runner, name);
             let i: Inputs = case.parse().expect("inputs");
@@ -2049,7 +2064,46 @@ mod tests {
             let at = |r: &[f64]| wr57_alignment(&k, &s, Point2::new(r[1], r[2]), d, singular_u);
             if main[1..] == new[1..] {
                 same_param += 1;
-                eprintln!("{name}: the same parameter, status {} -> {}", main[0], new[0]);
+                let sd = if singular_u { SurfParamType::U } else { SurfParamType::V };
+                let (lo, hi) = if singular_u {
+                    (domain.min().x, domain.max().x)
+                } else {
+                    (domain.min().y, domain.max().y)
+                };
+                let answer = Point2::new(new[1], new[2]);
+                let at_s = if singular_u { new[1] } else { new[2] };
+                let scale = 1.0 + solidcore::nurbs::math::gamma(16);
+                let eval = certified_alignment_evaluator(&k, &s).expect("the evaluator");
+                let slopes = |x: f64| eval.as_ref().and_then(|e| alignment_slopes(e, answer, d, sd, x));
+                // (`A` proven to grow outward at the end `x`)
+                let outward = |x: f64| {
+                    slopes(x).is_some_and(|e| {
+                        let err = e.f_error * scale;
+                        (x == lo && e.f < -err) || (x == hi && e.f > err)
+                    })
+                };
+                let closed = s.is_closed(&k, &domain, sd, None, true).expect("is_closed").0;
+                let kind = if at_s == lo || at_s == hi {
+                    let other = if at_s == lo { hi } else { lo };
+                    if outward(at_s) && (!closed || outward(other)) {
+                        end_proven += 1;
+                        "an end, proven"
+                    } else {
+                        argued.push(name);
+                        "an end, ARGUED"
+                    }
+                } else if s.knots_with_nurb(&k, sd, None).map_or(true, |(kv, _)| kv.contains(&at_s)) {
+                    // (at a knot `A'` may jump: a kink, not judged by one span's slopes)
+                    argued.push(name);
+                    "a knot, ARGUED"
+                } else if slopes(at_s).is_some_and(|e| e.f_prime + e.f_prime_error * scale < 0.0) {
+                    stationary_proven += 1;
+                    "interior, curvature proven negative"
+                } else {
+                    argued.push(name);
+                    "interior, ARGUED"
+                };
+                eprintln!("{name}: the same parameter, status {} -> {}: {kind} {:?}", main[0], new[0], slopes(at_s));
                 continue;
             }
             let (m, n) = (at(main), at(new));
@@ -2070,10 +2124,25 @@ mod tests {
             eprintln!("{name}: main {main:?} {m:?}, new {new:?} {n:?}");
         }
         eprintln!(
-            "{more} answers proven more aligned than main's, {same_param} at main's parameter, \
-             {undefined} where main's alignment is not enclosed"
+            "{more} answers proven more aligned than main's, {same_param} at main's parameter \
+             ({end_proven} ends proven, {stationary_proven} interior with curvature proven \
+             negative, ARGUED {argued:?}), {undefined} where main's alignment is not enclosed"
+        );
+        assert_eq!(
+            (more, same_param, end_proven, stationary_proven, undefined, argued.as_slice()),
+            WR57_COUNTS,
+            "the certified counts moved"
         );
     }
+
+    /// [`wr57_moved_degen_answers_are_not_less_aligned`]'s counts: proven more aligned,
+    /// at main's parameter, of those the ends proven and the interior answers with their
+    /// curvature proven negative, main's alignment not enclosed, and the ARGUED rows:
+    /// gen1950 and gen2597, ends at a collapsed corner, where the derivative across the
+    /// singular direction is not above its certified error, so the slopes have no bound
+    /// (the search accepts them by its stationary test, its curvature not proven
+    /// positive).
+    const WR57_COUNTS: (usize, usize, usize, usize, usize, &[&str]) = (18, 42, 40, 0, 1, &["gen1950", "gen2597"]);
 
     /// Generated cases cover every op, most of the comparable ones not deferred.
     #[test]
