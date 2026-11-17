@@ -20,6 +20,7 @@
 
 use crate::error::{Result, SolidError};
 use crate::math::Point2;
+use crate::prism::placement::LoopPlacement;
 use crate::prism::profile::{Loop2, Region2, Seg2};
 
 /// The relative slack with which a spacing fits a whole number of times (design 5.1, 6.2): `n`
@@ -262,6 +263,63 @@ pub fn slot_outline(start: f64, width: f64, faces: (f64, f64), clearance: f64) -
         (start - clearance, wa - clearance),
         (start + width + clearance, wb + clearance),
     ))
+}
+
+/// Why one slot is not cut (design 7.4, the checks before cutting).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum SlotSkip {
+    /// `at_edge`: the slot is not held clear inside the outer loop of S's face (it would open
+    /// S's outline).
+    AtEdge,
+    /// `over_hole`: the slot comes closer than `MIN_LAND` to a hole of S's face, holds it, or
+    /// lies in it (v4 7.4). `web` is the least web of S left beside the hole (0 when they meet).
+    OverHole {
+        /// The least distance from the slot to the hole.
+        web: f64,
+    },
+}
+
+/// Design 7.4 for one slot (its outline with the clearance, and in PR B its dogbones) against
+/// `face`, the region of S's face in P's frame: `at_edge` unless the slot is `Inside` the outer
+/// loop at `tol`; `over_hole` when a hole is nearer than `min_land − tol` (the web the kernel's
+/// Apart allows, design 5), or the slot holds a point of the hole. The first failing check
+/// names the skip; `Ok(None)` cuts it.
+///
+/// # Errors
+///
+/// [`SolidError::InvalidInput`] for a `tol` that is not finite and positive, a `min_land` not
+/// finite and greater than `tol`, or loops the placement cannot decide.
+pub fn check_slot(
+    slot: &Region2,
+    face: &Region2,
+    min_land: f64,
+    tol: f64,
+) -> Result<Option<SlotSkip>> {
+    if !(tol.is_finite() && tol > 0.0) {
+        return Err(invalid("the tolerance must be finite and positive"));
+    }
+    if !(min_land.is_finite() && min_land > tol) {
+        return Err(invalid(
+            "the least land must be finite and more than the tolerance",
+        ));
+    }
+    let undecided = || invalid("the slot's place on S's face cannot be decided");
+    let outline = &slot.outer;
+    match outline.placement(&face.outer, tol).ok_or_else(undecided)? {
+        LoopPlacement::Inside => {}
+        _ => return Ok(Some(SlotSkip::AtEdge)),
+    }
+    for hole in &face.holes {
+        let web = outline.nearest(hole, tol).ok_or_else(undecided)?;
+        let probe = hole.segs.first().ok_or_else(undecided)?.start();
+        let holds = web > tol && outline.holds(probe).ok_or_else(undecided)?;
+        if web < min_land - tol || holds {
+            return Ok(Some(SlotSkip::OverHole {
+                web: if holds { 0.0 } else { web },
+            }));
+        }
+    }
+    Ok(None)
 }
 
 /// The counter-clockwise rectangle with corners `lo` and `hi` (`lo < hi` both ways).

@@ -213,3 +213,99 @@ fn random_finite_inputs_never_panic() {
         let _ = slot_outline(a, w, (b, e), g);
     }
 }
+
+// Design v4 7.4 / 16.1 `over_hole` web: the Stretches fixture's Bottom face with the Ø20 hole
+// at (80, 33), slot plate faces w in [30, 36], c = 0.1, laser MIN_LAND 0.5.
+const TOL: f64 = 1e-6;
+const MIN_LAND: f64 = 0.5;
+
+fn circle(cx: f64, cy: f64, r: f64) -> Loop2 {
+    Loop2 {
+        segs: vec![Seg2::Arc {
+            center: Point2::new(cx, cy),
+            radius: r,
+            start: 0.0,
+            sweep: -std::f64::consts::TAU,
+        }],
+    }
+}
+
+fn bottom(holes: Vec<Loop2>) -> Region2 {
+    Region2 {
+        outer: rectangle((0.0, 0.0), (160.0, 66.0)).outer,
+        holes,
+    }
+}
+
+/// The slot of the tab ending `end_distance` before the hole's edge at u = 70.
+fn slot_before_hole(end_distance: f64) -> Region2 {
+    slot_outline(60.0 - end_distance, 10.0, (30.0, 36.0), 0.1).unwrap()
+}
+
+#[test]
+fn a_slot_leaving_too_thin_a_web_beside_a_hole_is_over_hole() {
+    let face = bottom(vec![circle(80.0, 33.0, 10.0)]);
+    match check_slot(&slot_before_hole(0.5), &face, MIN_LAND, TOL).unwrap() {
+        Some(SlotSkip::OverHole { web }) => assert!((web - 0.4).abs() < 1e-9, "web {web}"),
+        other => panic!("{other:?}"),
+    }
+    assert_eq!(
+        check_slot(&slot_before_hole(0.7), &face, MIN_LAND, TOL).unwrap(),
+        None
+    );
+}
+
+#[test]
+fn the_laser_over_hole_boundary_is_an_end_distance_of_c_plus_min_land() {
+    let face = bottom(vec![circle(80.0, 33.0, 10.0)]);
+    assert_eq!(
+        check_slot(&slot_before_hole(0.6 + 1e-4), &face, MIN_LAND, TOL).unwrap(),
+        None
+    );
+    assert!(matches!(
+        check_slot(&slot_before_hole(0.6 - 1e-4), &face, MIN_LAND, TOL).unwrap(),
+        Some(SlotSkip::OverHole { .. })
+    ));
+}
+
+#[test]
+fn a_tangent_slot_and_a_slot_holding_a_hole_are_over_hole() {
+    let tangent = bottom(vec![circle(80.0, 33.0, 10.0)]);
+    assert_eq!(
+        check_slot(&slot_before_hole(0.1), &tangent, MIN_LAND, TOL).unwrap(),
+        Some(SlotSkip::OverHole { web: 0.0 })
+    );
+    let inside = bottom(vec![circle(64.5, 33.0, 1.0)]);
+    assert_eq!(
+        check_slot(&slot_before_hole(0.5), &inside, MIN_LAND, TOL).unwrap(),
+        Some(SlotSkip::OverHole { web: 0.0 })
+    );
+}
+
+#[test]
+fn a_slot_running_out_through_the_face_edge_is_at_edge() {
+    let face = bottom(Vec::new());
+    let out = slot_outline(-5.0, 10.0, (30.0, 36.0), 0.1).unwrap();
+    assert_eq!(
+        check_slot(&out, &face, MIN_LAND, TOL).unwrap(),
+        Some(SlotSkip::AtEdge)
+    );
+    let flush = slot_outline(5.0, 10.0, (60.0, 65.9), 0.1).unwrap();
+    assert_eq!(
+        check_slot(&flush, &face, MIN_LAND, TOL).unwrap(),
+        Some(SlotSkip::AtEdge)
+    );
+    assert_eq!(
+        check_slot(&slot_before_hole(0.5), &face, MIN_LAND, TOL).unwrap(),
+        None
+    );
+}
+
+#[test]
+fn check_slot_refuses_bad_tolerances() {
+    let face = bottom(Vec::new());
+    let s = slot_before_hole(0.5);
+    assert!(check_slot(&s, &face, MIN_LAND, 0.0).is_err());
+    assert!(check_slot(&s, &face, MIN_LAND, f64::NAN).is_err());
+    assert!(check_slot(&s, &face, TOL, TOL).is_err());
+}

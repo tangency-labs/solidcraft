@@ -45,6 +45,30 @@ impl Loop2 {
     /// positive and finite, or a hold [`Loop2::holds`] cannot decide.
     #[must_use]
     pub fn placement(&self, other: &Loop2, tol: f64) -> Option<LoopPlacement> {
+        let nearest = self.nearest(other, tol)?;
+        if nearest <= tol {
+            let along = self.segs.iter().all(|a| covered(a, &other.segs, tol));
+            return Some(if along {
+                LoopPlacement::Coincident
+            } else {
+                LoopPlacement::Crossing
+            });
+        }
+        let probe = self.segs.first()?.start();
+        Some(if other.holds(probe)? {
+            LoopPlacement::Inside
+        } else {
+            LoopPlacement::Outside
+        })
+    }
+}
+
+impl Loop2 {
+    /// How close this loop comes to `other` (both in one frame): zero where they cross within
+    /// `tol`, else the least distance between their segments, exact on lines and arcs (the rule
+    /// of [`Loop2::placement`]). `None` where [`Loop2::placement`] refuses before placing.
+    #[must_use]
+    pub fn nearest(&self, other: &Loop2, tol: f64) -> Option<f64> {
         if !(tol.is_finite() && tol > 0.0)
             || self.segs.is_empty()
             || other.segs.is_empty()
@@ -67,20 +91,7 @@ impl Loop2 {
                 nearest = nearest.min(d);
             }
         }
-        if nearest <= tol {
-            let along = self.segs.iter().all(|a| covered(a, &other.segs, tol));
-            return Some(if along {
-                LoopPlacement::Coincident
-            } else {
-                LoopPlacement::Crossing
-            });
-        }
-        let probe = self.segs.first()?.start();
-        Some(if other.holds(probe)? {
-            LoopPlacement::Inside
-        } else {
-            LoopPlacement::Outside
-        })
+        Some(nearest)
     }
 }
 
