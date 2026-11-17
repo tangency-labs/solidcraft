@@ -223,4 +223,6 @@ move
 import
 mesh_convert
 mesh_import
+wood_edge_profile
+  moves: edges[0][0], edges[0][1], edges[0][2]
 repair

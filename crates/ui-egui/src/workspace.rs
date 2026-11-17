@@ -191,7 +191,7 @@ pub fn groups(tab: &str, panel: &str) -> &'static [CommandGroup] {
             },
         ],
         ("MODEL", "MODIFY") => &[
-            CommandGroup { label: "Edges", ids: &["solid.fillet", "solid.chamfer"] },
+            CommandGroup { label: "Edges", ids: &["solid.fillet", "solid.chamfer", "wood.edge_profile"] },
             CommandGroup {
                 label: "Faces",
                 ids: &["solid.press_pull", "solid.draft", "solid.offset_face", "solid.replace_face", "solid.split_face", "face.delete"],
@@ -731,6 +731,7 @@ pub fn feature_icon(k: &FeatureKind) -> Option<&'static str> {
         FeatureKind::SheetUnfold { refold: false, .. } => "unfold",
         FeatureKind::SheetUnfold { .. } => "refold",
         FeatureKind::SheetConvert { .. } => "convert_sheet",
+        FeatureKind::WoodEdgeProfile { .. } => "chamfer",
         FeatureKind::Boss { .. } => "boss",
         FeatureKind::Lip { .. } => "lip",
         FeatureKind::SnapFit { .. } => "snap_fit",
@@ -1056,6 +1057,7 @@ mod tests {
             [
                 "solid.fillet",
                 "solid.chamfer",
+                "wood.edge_profile",
                 "solid.press_pull",
                 "solid.draft",
                 "solid.offset_face",

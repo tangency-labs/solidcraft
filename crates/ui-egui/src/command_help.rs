@@ -331,6 +331,7 @@ pub const DOCUMENTED: &[&str] = &[
     "view.spin",
     "view.tool",
     "view.visual_style",
+    "wood.edge_profile",
     "wood.grain",
     "wood.grain.query",
 ];
