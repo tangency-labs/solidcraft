@@ -723,3 +723,56 @@ fn the_strip_read_from_the_bodies() {
     );
     assert!(crate::plate_contact::strip(&mut k, &wall, &bottom, p, 0.0).is_err());
 }
+
+#[test]
+fn the_defects_of_a_notched_strip() {
+    use crate::math::Vec2;
+    use crate::prism::profile::{Loop2, Region2, Seg2};
+    let lines = |ps: &[(f64, f64)]| Loop2 {
+        segs: (0..ps.len())
+            .map(|i| {
+                let (a, b) = (ps[i], ps[(i + 1) % ps.len()]);
+                Seg2::Line {
+                    a: Vec2::new(a.0, a.1),
+                    b: Vec2::new(b.0, b.1),
+                }
+            })
+            .collect(),
+    };
+    let plain = Region2 {
+        outer: lines(&[(10.0, 30.0), (150.0, 30.0), (150.0, 36.0), (10.0, 36.0)]),
+        holes: Vec::new(),
+    };
+    let (band, defects) = strip_defects(&plain, Vec2::new(1.0, 0.0), TOL).expect("plain");
+    assert_eq!(band, (10.0, 150.0));
+    assert!(defects.is_empty(), "{defects:?}");
+    let notched = Region2 {
+        outer: lines(&[
+            (10.0, 30.0),
+            (70.0, 30.0),
+            (70.0, 33.0),
+            (80.0, 33.0),
+            (80.0, 30.0),
+            (150.0, 30.0),
+            (150.0, 36.0),
+            (10.0, 36.0),
+        ]),
+        holes: vec![lines(&[
+            (100.0, 32.0),
+            (100.0, 34.0),
+            (104.0, 34.0),
+            (104.0, 32.0),
+        ])],
+    };
+    let (band, defects) = strip_defects(&notched, Vec2::new(1.0, 0.0), TOL).expect("notched");
+    assert_eq!(band, (10.0, 150.0));
+    assert_eq!(defects.len(), 2, "{defects:?}");
+    let mut along: Vec<_> = defects.iter().map(|d| d.along).collect();
+    along.sort_by(|a, b| a.0.total_cmp(&b.0));
+    assert_eq!(along, vec![(70.0, 80.0), (100.0, 104.0)]);
+    assert_eq!(
+        stretches(band, &defects, TOL).expect("stretches"),
+        vec![(10.0, 70.0), (80.0, 100.0), (104.0, 150.0)]
+    );
+    assert!(strip_defects(&plain, Vec2::new(2.0, 0.0), TOL).is_err());
+}

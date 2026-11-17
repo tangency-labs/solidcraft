@@ -384,6 +384,82 @@ pub fn stretches(band: (f64, f64), defects: &[Defect], tol: f64) -> Result<Vec<(
     Ok(out)
 }
 
+/// The band and defects of a strip Σ (design 5.5) for [`stretches`], in Σ's 2D frame with the
+/// strip running along the unit `d`: the band `Σ`'s extent along `d` (`u`), and one [`Defect`]
+/// per hole of Σ and per run of Σ's outer loop off the band's boundary (a notch, a chamfered
+/// end), each with its extent along `u` and across (along `d` turned a quarter left). A segment
+/// lies on the boundary when its ends and middle are within `tol` of one side of the band; a
+/// run's extent is read from its segments' ends and middles (exact for lines).
+///
+/// # Errors
+///
+/// [`SolidError::InvalidInput`] for a `tol` not positive and finite, a `d` not unit, or a Σ
+/// whose extent cannot be found.
+pub fn strip_defects(
+    sigma: &crate::prism::profile::Region2,
+    d: crate::math::Vec2,
+    tol: f64,
+) -> Result<((f64, f64), Vec<Defect>)> {
+    use crate::math::Vec2;
+    use crate::prism::profile::{Region2, Seg2};
+    if !(tol.is_finite() && tol > 0.0) {
+        return Err(invalid("tol must be positive and finite"));
+    }
+    if !(d.x.is_finite() && d.y.is_finite() && ((d.x * d.x + d.y * d.y).sqrt() - 1.0).abs() <= 1e-9)
+    {
+        return Err(invalid("the strip's direction is not unit"));
+    }
+    let w = Vec2::new(-d.y, d.x);
+    let extent = |r: &Region2, v: Vec2| {
+        r.extent_along(v, tol)
+            .ok_or_else(|| invalid("the strip's extent could not be found"))
+    };
+    let band = extent(sigma, d)?;
+    let across = extent(sigma, w)?;
+    let mut out = Vec::new();
+    for h in &sigma.holes {
+        let r = Region2 {
+            outer: h.clone(),
+            holes: Vec::new(),
+        };
+        let (a, b) = extent(&r, w)?;
+        out.push(Defect {
+            along: extent(&r, d)?,
+            across: b - a,
+        });
+    }
+    let uw = |p: Vec2| (p.x * d.x + p.y * d.y, p.x * w.x + p.y * w.y);
+    let points = |s: &Seg2| [s.point_at(0.0), s.point_at(0.5), s.point_at(1.0)].map(uw);
+    let near = |x: f64, to: f64| (x - to).abs() <= tol;
+    let on_side = |ps: &[(f64, f64); 3]| {
+        ps.iter().all(|p| near(p.0, band.0))
+            || ps.iter().all(|p| near(p.0, band.1))
+            || ps.iter().all(|p| near(p.1, across.0))
+            || ps.iter().all(|p| near(p.1, across.1))
+    };
+    let segs = &sigma.outer.segs;
+    let off: Vec<bool> = segs.iter().map(|s| !on_side(&points(s))).collect();
+    let n = segs.len();
+    // Start the walk just after a segment on the boundary, so no run wraps around.
+    if let Some(first) = off.iter().position(|o| !o) {
+        let mut run: Option<((f64, f64), (f64, f64))> = None;
+        for (seg, &is_off) in segs.iter().zip(&off).cycle().skip(first + 1).take(n) {
+            if is_off {
+                for (u, v) in points(seg) {
+                    let ((ul, uh), (vl, vh)) = run.unwrap_or(((u, u), (v, v)));
+                    run = Some(((ul.min(u), uh.max(u)), (vl.min(v), vh.max(v))));
+                }
+            } else if let Some((along, (vl, vh))) = run.take() {
+                out.push(Defect {
+                    along,
+                    across: vh - vl,
+                });
+            }
+        }
+    }
+    Ok((band, out))
+}
+
 /// The `on` half of T's footprint on P (design v2 5.3): the regions, in `frame` (P's plane, its
 /// normal `n` = x × y), of T's planar faces that lie in P and face `−n`. A face lies in P when
 /// every vertex of it is within `tol` of P (its edges then lie in its plane, which is parallel
