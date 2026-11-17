@@ -1356,10 +1356,10 @@ mod tests {
     use std::collections::BTreeMap;
 
     /// #18342: the loops of a natural cylinder face 3.5e-3 tall (scale 1e-3) classify.
-    /// Its complete seams send ClassifyLoops through the bisector, an axial line over
+    /// Its complete seams send `ClassifyLoops` through the bisector, an axial line over
     /// the ±1234567 sentinel range; its two circle crossings, 1.43e-9 apart in the
     /// bisector's parameter, were merged into one boundary, so the touches were only
-    /// [In, Out] and the loop tree had no root (`classifiable` 3, NoLoopTreeRoot).
+    /// [In, Out] and the loop tree had no root (`classifiable` 3, `NoLoopTreeRoot`).
     #[test]
     fn short_natural_cylinder_classifies_through_both_circle_crossings() {
         let i = Inputs {
