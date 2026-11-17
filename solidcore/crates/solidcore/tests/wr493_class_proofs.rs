@@ -19,6 +19,12 @@
 //! - `box_w_slot_sphere_corners_are_the_area_their_trims_bound`: each sphere corner of
 //!   `Fillet/box_w_slot.smb` now measures the area its own trims bound (Gauss-Bonnet and
 //!   Green in UV agree to 1e-11), to 2e-9; the old areas were 5.5e-9 to 2.9e-8 off.
+//! - `box_w_slot_volume_and_mass_are_those_their_trims_bound`: integrated tightly, each
+//!   corner's volume and moments are those its trims bound (Stokes and Green agree), so
+//!   the geometry is exact. The `corpus.parity` volume is 5.1e-12 off the trims-bound
+//!   reference (old 9.8e-11). The `blend.fillet_executive_p3` mass row is closer in area,
+//!   volume, cx, the inertia and Pzx; cy, Pyz and Pxy are off by the corners' quadrature
+//!   at the row's requested accuracy 1e-4 (at most 1.6e-10), within 1e-9 relative.
 //! - `point_just_outside_the_sphere_pole_is_in_the_infinite_region`: the
 //!   `query.brep` `sphere_vertex3_off_region` point lies outside the sphere exactly.
 #![allow(
@@ -479,6 +485,51 @@ fn knot_cuts(
     cuts
 }
 
+/// The integrator's volume group integrands at `x` (relative to the origin) for the area
+/// vector `n`: the volume `z n_z`, then the static moments, the second moments, the
+/// products (yz, zx, xy) and the axial moments, each times `z n_z` (as the integrator's
+/// closure strips take them, `mass::integrator::properties::closure_integrands`).
+fn volume_integrands(x: Vec3, n: Vec3) -> [f64; 13] {
+    let vd = x.z * n.z;
+    [
+        vd,
+        x.x * vd,
+        x.y * vd,
+        x.z * vd / 2.0,
+        (x.x * x.x) * vd,
+        (x.y * x.y) * vd,
+        (x.z * x.z / 3.0) * vd,
+        (x.y * x.z) * vd / 2.0,
+        (x.z * x.x) * vd / 2.0,
+        (x.x * x.y) * vd,
+        (x.y * x.y + x.z * x.z / 3.0) * vd,
+        (x.x * x.x + x.z * x.z / 3.0) * vd,
+        (x.x * x.x + x.y * x.y) * vd,
+    ]
+}
+
+/// The integrals of a sphere face over its own trims (see [`sphere_face_trim_area`]).
+struct TrimIntegrals {
+    /// The area by Gauss-Bonnet: `r^2 * |sum of (1 - cos theta) d phi|` along the trims'
+    /// images about the direction of the face's middle.
+    gauss_bonnet: f64,
+    /// The area by Green in UV: `|sum of G(u, v) dv|`, `G(u, v)` the integral of
+    /// `|S_u x S_v|` from the domain's `u0` to `u` (itself split at the u knots).
+    green: f64,
+    /// The volume integral `integral of z n_z dA` (relative to the origin, `n` out of the
+    /// sphere) by line integrals alone: on the sphere `x . n = r + (c - origin) . n`, so
+    /// with `a = (-y z, x z, 0) / 3`, whose curl is `z e_z - x / 3`, it is
+    /// `(r A + (c - origin) . S) / 3 + sum of a . dx`. `A` is the Gauss-Bonnet area and
+    /// `S` the vector area `1/2 * sum of (x - c) x dx` (Stokes); both line sums run round
+    /// the loop the way that makes the Gauss-Bonnet sum positive (anticlockwise about the
+    /// face's middle seen from outside the sphere).
+    stokes_volume: f64,
+    /// The volume group of [`volume_integrands`] by Green in UV as `green`, with the
+    /// integrand's `S_u x S_v` in place of its length, taken out of the sphere (the sign of
+    /// [`Self::stokes_volume`]).
+    green_volume: [f64; 13],
+}
+
 /// The area of the sphere face `f` bounded by its own UV trims, two ways, with `n` Gauss
 /// points on every piece between trim knots and surface knot crossings:
 /// - Gauss-Bonnet along the trims' images, `r^2 * |sum of (1 - cos theta) d phi|` about the
@@ -486,8 +537,9 @@ fn knot_cuts(
 /// - Green in UV, `|sum of G(u, v) dv|` with `G(u, v)` the integral of `|S_u x S_v|` from
 ///   the domain's `u0` to `u` (itself split at the u knots).
 ///
-/// Returns `(gauss_bonnet, green)`.
-fn sphere_face_trim_area(k: &Kernel, b: &Brep, f: FaceId, n: usize) -> (f64, f64) {
+/// Also the face's share of the volume group (see [`TrimIntegrals`]) about `origin`, on
+/// the sphere's outward side.
+fn sphere_face_trim_area(k: &Kernel, b: &Brep, f: FaceId, n: usize, origin: Vec3) -> TrimIntegrals {
     use solidcore::math::Point2;
     let face = b.face(f).unwrap();
     let s = face.surface.as_ref().unwrap();
@@ -553,6 +605,9 @@ fn sphere_face_trim_area(k: &Kernel, b: &Brep, f: FaceId, n: usize) -> (f64, f64
     let g = gauss(n);
     let u0 = face.uv_domain.min().x;
     let (mut gb, mut green) = (0.0, 0.0);
+    let mut va = Vec3::new(0.0, 0.0, 0.0);
+    let mut al = 0.0;
+    let mut volume = [0.0; 13];
     for ((t, iv), sense) in &chain {
         let (knots, _) = t.knots(k, Some(iv)).unwrap();
         for w in knots.windows(2) {
@@ -571,15 +626,19 @@ fn sphere_face_trim_area(k: &Kernel, b: &Brep, f: FaceId, n: usize) -> (f64, f64
                     let (qx, qy, qz) = (q.dot(e1), q.dot(e2), q.dot(e3));
                     let dphi = (qx * dp.dot(e2) - qy * dp.dot(e1)) / (qx * qx + qy * qy);
                     gb += sense * wt * h * (1.0 - qz / q.length()) * dphi;
+                    va = va + q.cross(dp) * (0.5 * sense * wt * h);
+                    let o = p - origin;
+                    al += sense * wt * h * (-o.y * o.z * dp.x + o.x * o.z * dp.y) / 3.0;
                     // G(u, v): u0 to u along v, split at the u knots between them
                     let mut br = vec![u0, u];
                     br.extend(uk.iter().filter(|&&kn| kn > u0.min(u) && kn < u0.max(u)));
                     br.sort_by(|x, y| x.partial_cmp(y).unwrap());
                     let mut gu = 0.0;
+                    let mut gv = [0.0; 13];
                     for s2 in br.windows(2) {
                         let h2 = (s2[1] - s2[0]) / 2.0;
                         for &(x2, wt2) in &g {
-                            let (_, a1, a2) = s
+                            let (p2, a1, a2) = s
                                 .evaluate_1st_derivatives(
                                     k,
                                     Point2::new(s2[0] + h2 * (x2 + 1.0), v),
@@ -588,17 +647,44 @@ fn sphere_face_trim_area(k: &Kernel, b: &Brep, f: FaceId, n: usize) -> (f64, f64
                                 )
                                 .unwrap();
                             gu += wt2 * h2 * a1.cross(a2).length();
+                            for (o, val) in gv
+                                .iter_mut()
+                                .zip(volume_integrands(p2 - origin, a1.cross(a2)))
+                            {
+                                *o += wt2 * h2 * val;
+                            }
                         }
                     }
                     if u < u0 {
                         gu = -gu;
+                        for o in &mut gv {
+                            *o = -*o;
+                        }
                     }
                     green += sense * wt * h * gu * d[1].y;
+                    for (o, val) in volume.iter_mut().zip(gv) {
+                        *o += sense * wt * h * val * d[1].y;
+                    }
                 }
             }
         }
     }
-    (radius * radius * gb.abs(), green.abs())
+    let way = if gb < 0.0 { -1.0 } else { 1.0 };
+    let (area, vector_area, a_line) = (radius * radius * gb.abs(), va * way, al * way);
+    let stokes_volume = (radius * area + (centre - origin).dot(vector_area)) / 3.0 + a_line;
+    // Green's sum has the sign of the UV loop's way round and of S_u x S_v: take the
+    // outward one, that of the volume by Stokes
+    let out = if (volume[0] < 0.0) == (stokes_volume < 0.0) {
+        1.0
+    } else {
+        -1.0
+    };
+    TrimIntegrals {
+        gauss_bonnet: area,
+        green: green.abs(),
+        stokes_volume,
+        green_volume: volume.map(|x| x * out),
+    }
 }
 
 /// `corpus.parity` `Fillet__box_w_slot.smb` area (5.914389913639413 to 5.914390008545681)
@@ -641,8 +727,12 @@ fn box_w_slot_sphere_corners_are_the_area_their_trims_bound() {
             old_total += area;
             continue;
         }
-        let (gb24, green24) = sphere_face_trim_area(&k, &b, f, 24);
-        let (gb32, green32) = sphere_face_trim_area(&k, &b, f, 32);
+        let (t24, t32) = (
+            sphere_face_trim_area(&k, &b, f, 24, Vec3::ZERO),
+            sphere_face_trim_area(&k, &b, f, 32, Vec3::ZERO),
+        );
+        let (gb24, green24, gb32, green32) =
+            (t24.gauss_bonnet, t24.green, t32.gauss_bonnet, t32.green);
         assert!((gb24 - gb32).abs() <= 1e-12 * gb32, "{f:?}: {gb24} {gb32}");
         assert!(
             (green24 - green32).abs() <= 1e-12 * green32,
@@ -678,4 +768,255 @@ fn box_w_slot_sphere_corners_are_the_area_their_trims_bound() {
         (old_row - reference).abs() > 1e3 * (total - reference).abs(),
         "old {old_row}, new {total}, trims bound {reference}"
     );
+}
+
+/// The integrator's share of the sphere face `f` in the volume group and area, about
+/// `origin`, for the faceuse bounding the solid, and the same over the face's own trims
+/// (`n = 32`, after checking it against `n = 24` and the Stokes volume against Green's).
+/// Returns `(integrator, trims)`, each `[area, volume group (13)]`.
+fn sphere_face_shares(
+    k: &Kernel,
+    b: &Brep,
+    m: &mut Brep,
+    f: FaceId,
+    accuracy: f64,
+    origin: Vec3,
+    estimated: f64,
+) -> ([f64; 14], [f64; 14]) {
+    use solidcore::topology::face::p2::PPF_ALL;
+    let face = b.face(f).unwrap();
+    let up = face.faceuse.unwrap();
+    let mate = b.faceuse(up).unwrap().mate.unwrap();
+    let fu = if solidcore::topology::edgeuse::p1::faceuse_region(b, up).unwrap()
+        == b.infinite_region()
+    {
+        mate
+    } else {
+        up
+    };
+    let p = face_properties(
+        k,
+        m,
+        f,
+        b.faceuse(fu).unwrap().orientation,
+        accuracy,
+        origin,
+        estimated,
+        0.0,
+        PPF_ALL,
+    )
+    .unwrap();
+    let mut integ = [0.0; 14];
+    integ[0] = p.area.abs();
+    integ[1] = p.volume;
+    for (i, v) in p.moments[4..].iter().enumerate() {
+        integ[2 + 3 * i] = v.x;
+        integ[3 + 3 * i] = v.y;
+        integ[4 + 3 * i] = v.z;
+    }
+    let (t24, t32) = (
+        sphere_face_trim_area(k, b, f, 24, origin),
+        sphere_face_trim_area(k, b, f, 32, origin),
+    );
+    // The trims' integrals have converged, and the volume by Stokes is the volume by Green.
+    let scale = t32.gauss_bonnet.abs().max(1.0);
+    assert!((t32.gauss_bonnet - t24.gauss_bonnet).abs() <= 1e-14 * scale);
+    for (a, b) in t32.green_volume.iter().zip(t24.green_volume) {
+        assert!((a - b).abs() <= 1e-14 * scale, "{f:?}: n=32 {a} n=24 {b}");
+    }
+    assert!(
+        // the Stokes form cancels terms of order |c - origin| |S| ~ 1 (measured 8.8e-14)
+        (t32.stokes_volume - t32.green_volume[0]).abs() <= 2e-13 * scale,
+        "{f:?}: Stokes {} Green {}",
+        t32.stokes_volume,
+        t32.green_volume[0]
+    );
+    let mut trims = [0.0; 14];
+    trims[0] = t32.gauss_bonnet;
+    trims[1..].copy_from_slice(&t32.green_volume);
+    (integ, trims)
+}
+
+/// `Fillet/box_w_slot.smb`: the `corpus.parity` volume and the
+/// `blend.fillet_executive_p3` `source-file-box_w_slot-all-edges` mass properties (the
+/// fillet is refused, so the body is the file as read). Only the eight sphere corners move.
+/// The reference is each row with the corners' integrated shares replaced by their
+/// shares over their own trims ([`sphere_face_trim_area`]: line integrals on the file's own
+/// NURB and trims); the rest of each row (the other faces and the edge gap closures) is
+/// the integrator's on both sides.
+#[test]
+fn box_w_slot_volume_and_mass_are_those_their_trims_bound() {
+    use solidcore::mass::integrator::properties::{
+        brep_mass_properties_default, brep_volume_default,
+    };
+    use solidcore::query::brep::{
+        calculate_bounding_box, calculate_tight_bounding_box, BoundingBoxOptions,
+    };
+    let name = "Fillet/box_w_slot.smb";
+    let mut k = Kernel::default();
+    let b = read(&mut k, name);
+    let spheres: Vec<FaceId> = bl::faces(&b, None)
+        .unwrap()
+        .into_iter()
+        .filter(|&f| {
+            matches!(
+                b.face(f).unwrap().surface.as_ref().unwrap().kind(),
+                SurfaceKind::Sphere(_)
+            )
+        })
+        .collect();
+    assert_eq!(spheres.len(), 8);
+    let size = |e: solidcore::geom::extent3d::Extent3d| {
+        let s = e.size();
+        let d = s.x.max(s.y).max(s.z);
+        d * d / 100.0
+    };
+
+    // corpus.parity: brep_volume at 1e-6 about the box's middle
+    let mut v = read(&mut k, name);
+    let bbox = calculate_bounding_box(&k, &mut v, BoundingBoxOptions::default()).unwrap();
+    let row = brep_volume_default(&k, &mut v, 1e-6).unwrap();
+    assert_eq!(row, 0.680_748_106_613_681_3);
+    let mut m = read(&mut k, name);
+    let mut delta = 0.0;
+    for &f in &spheres {
+        let (integ, trims) = sphere_face_shares(&k, &b, &mut m, f, 1e-6, bbox.mid(), size(bbox));
+        delta += integ[1] - trims[1];
+    }
+    let reference = row - delta;
+    let old_row = 0.680_748_106_510_291_7;
+    // CLOSER: the new row is 5.1e-12 off, the old row 9.8e-11 (the reference is good to
+    // 8 * 2e-13, the Stokes/Green agreement above).
+    assert!((row - reference).abs() * 10.0 < (old_row - reference).abs());
+    assert!((row - reference).abs() <= 1e-11 * reference.abs());
+
+    // The geometry is exact: integrated tightly, each corner's shares are those its trims
+    // bound, so what remains of a row's distance from its reference is the quadrature at
+    // the row's own accuracy.
+    let mut m = read(&mut k, name);
+    for &f in &spheres {
+        let (integ, trims) = sphere_face_shares(&k, &b, &mut m, f, 1e-12, Vec3::ZERO, size(bbox));
+        for (i, (a, r)) in integ.iter().zip(trims).enumerate() {
+            assert!(
+                (a - r).abs() <= 1e-14,
+                "{f:?} share {i}: integrated {a} trims {r}"
+            );
+        }
+    }
+
+    // fillet_executive_p3: brep_mass_properties at 1e-4, density 1, about the origin
+    let mut w = read(&mut k, name);
+    let tight = calculate_tight_bounding_box(&k, &mut w).unwrap();
+    let mid = tight.mid();
+    let mp = brep_mass_properties_default(&k, &mut w, 1e-4, 1.0, Vec3::ZERO).unwrap();
+    let flat = |area: f64, volume: f64, c: Vec3, i: Vec3, p: Vec3| {
+        [
+            area, volume, volume, c.x, c.y, c.z, i.x, i.y, i.z, p.x, p.y, p.z,
+        ]
+    };
+    let new_row = [
+        5.914390008518431,
+        0.6807481065892809,
+        0.6807481065892809,
+        1.9999999999999845,
+        -0.21949084166711508,
+        0.19830878452084486,
+        0.3158247468374329,
+        2.796768143572408,
+        3.0415735197104565,
+        -0.029630896983732523,
+        0.26999665916517174,
+        -0.29883594975713673,
+    ];
+    let old_row = [
+        5.9143899129759,
+        0.6807481065534877,
+        0.6807481065534877,
+        1.999999999999982,
+        -0.21949084146911574,
+        0.19830878452084486,
+        0.3158247467306677,
+        2.796768143424426,
+        3.041573519459353,
+        -0.02963089695544498,
+        0.2699966591509754,
+        -0.2988359494718497,
+    ];
+    assert_eq!(
+        flat(
+            mp.properties.area,
+            mp.properties.volume,
+            mp.centroid,
+            mp.inertia,
+            mp.products
+        ),
+        new_row
+    );
+    // the row's precise properties about `mid`, the corners swapped for their trims' shares
+    let mut total = [0.0; 14];
+    total[0] = mp.properties.area;
+    total[1] = mp.properties.volume;
+    for (i, v) in mp.properties.moments[4..].iter().enumerate() {
+        total[2 + 3 * i] = v.x;
+        total[3 + 3 * i] = v.y;
+        total[4 + 3 * i] = v.z;
+    }
+    let mut m = read(&mut k, name);
+    for &f in &spheres {
+        let (integ, trims) = sphere_face_shares(&k, &b, &mut m, f, 1e-4, mid, size(tight));
+        for ((t, a), r) in total.iter_mut().zip(integ).zip(trims) {
+            *t -= a - r;
+        }
+    }
+    // `brep_mass_properties`' moments about the origin, from those about `mid`
+    let (volume, s) = (total[1], Vec3::new(total[2], total[3], total[4]));
+    let (m6, m7) = (
+        Vec3::new(total[8], total[9], total[10]),
+        Vec3::new(total[11], total[12], total[13]),
+    );
+    let d = mid;
+    let comp = |v: Vec3, i: usize| match i {
+        0 => v.x,
+        1 => v.y,
+        _ => v.z,
+    };
+    let shift = |a: usize, b: usize| {
+        comp(d, a) * comp(s, b) + comp(d, b) * comp(s, a) + comp(d, a) * comp(d, b) * volume
+    };
+    let inertia = m7
+        + Vec3::new(
+            shift(1, 1) + shift(2, 2),
+            shift(0, 0) + shift(2, 2),
+            shift(0, 0) + shift(1, 1),
+        );
+    let products = m6 + Vec3::new(shift(1, 2), shift(2, 0), shift(0, 1));
+    let reference = flat(
+        total[0],
+        volume,
+        mid + s * (1.0 / volume),
+        inertia,
+        products,
+    );
+    for i in 0..12 {
+        let (new_off, old_off) = (new_row[i] - reference[i], old_row[i] - reference[i]);
+        // every component is within 1e-9 relative of the trims-bound reference
+        assert!(
+            new_off.abs() <= 1e-9 * reference[i].abs(),
+            "mass[{i}]: new {} reference {}",
+            new_row[i],
+            reference[i]
+        );
+        match i {
+            // cz: no corner moves it
+            5 => assert_eq!(new_off, old_off),
+            // cy, Pyz, Pxy: the corners' quadrature at the requested 1e-4 (the geometry
+            // is exact, above); the old row was nearer only by its corners' errors cancelling
+            4 | 9 | 11 => {}
+            // area, volume, cx, inertia and Pzx: CLOSER
+            _ => assert!(
+                new_off.abs() < old_off.abs(),
+                "mass[{i}]: new off {new_off:e} old off {old_off:e}"
+            ),
+        }
+    }
 }

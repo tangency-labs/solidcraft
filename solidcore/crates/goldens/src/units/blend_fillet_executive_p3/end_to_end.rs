@@ -2195,3 +2195,129 @@ mod wr56_certificates {
         }
     }
 }
+
+/// WR-493 (#18195): `stubs4-sphere_plane-e3-r0.5` rounds the circle edge of
+/// `Fillet/sphere_plane.smb` (the ball of radius 5 about the origin cut by the plane
+/// x = -4) with radius 0.5. Its result geometry moved: the file's sphere now keeps its own
+/// NURB and trims. The exact round is closed form: the ball of radius 0.5 rolls with its
+/// centre on x = -3.5 at distance 4.5 from the origin, so the round is the torus about the
+/// x axis with major radius sqrt(8) and minor radius 0.5, through the circle x = -4,
+/// rho = sqrt(8) on the plane and the circle on the sphere at 10/9 of the centre circle.
+/// The round face, its contact edge on the sphere and its contact edge on the plane are
+/// each closer to that torus than before (CLOSER, measured against the closed form), and
+/// each lies within its own tolerance of it.
+#[cfg(test)]
+mod wr493_certificates {
+    use super::{apply, build, RealSolid};
+    use solidcore::kernel::Kernel;
+    use solidcore::math::Vec3;
+    use solidcore::surface::surface::SurfaceKind;
+    use solidcore::topology::brep::p1;
+    use solidcore::topology::brep::validation::{check_brep, CheckLevel};
+    use solidcore::topology::face::p1::calculate_uv_domain_from_uv_trim_curves;
+
+    const NAME: &str = "stubs4-sphere_plane-e3-r0.5";
+
+    fn load() -> RealSolid {
+        let case = crate::case::regression_case(&super::super::Runner, NAME);
+        let inputs: super::super::Inputs = case.parse().expect("inputs");
+        inputs.real_solid.expect("a real_solid case")
+    }
+
+    /// Distance from the exact round, the torus about the x axis through (-3.5, sqrt(8)).
+    fn off_torus(p: Vec3) -> f64 {
+        let a = (p.y * p.y + p.z * p.z).sqrt() - 8.0_f64.sqrt();
+        let b = p.x + 3.5;
+        ((a * a + b * b).sqrt() - 0.5).abs()
+    }
+
+    #[test]
+    fn the_round_is_closer_to_its_torus() {
+        let off_plane = |p: Vec3| (p.x + 4.0).abs();
+        let off_sphere = |p: Vec3| (p.length() - 5.0).abs();
+        let input = load();
+        let mut k = Kernel::default();
+        let mut body = build(&mut k, &input).expect("fixture").expect("file");
+        let edges = p1::edges(&body, None).expect("edges");
+        let selected: Vec<_> = input
+            .edge_indices()
+            .expect("edge indices")
+            .iter()
+            .map(|&i| *edges.get(i).expect("selected edge"))
+            .collect();
+        apply(&mut k, &mut body, &selected, &input).expect("the round");
+        let lines = check_brep(&mut k, &mut body, CheckLevel::Level2)
+            .expect("check")
+            .lines();
+        assert!(lines.is_empty(), "{NAME}: Level 2: {lines:?}");
+
+        // the round face: the one neither the file's plane nor its sphere
+        let faces = p1::faces(&body, None).expect("faces");
+        let round: Vec<_> = faces
+            .iter()
+            .copied()
+            .filter(|&f| {
+                let s = body.face(f).expect("face").surface.as_ref().expect("surface");
+                !matches!(s.kind(), SurfaceKind::Sphere(_) | SurfaceKind::Plane(_))
+            })
+            .collect();
+        let &[f] = round.as_slice() else {
+            panic!("{NAME}: {} round faces, not one", round.len());
+        };
+        let domain = calculate_uv_domain_from_uv_trim_curves(&k, &mut body, f, false, false, false)
+            .expect("domain")
+            .domain;
+        let face = body.face(f).expect("face");
+        let (surface, face_tol) = (face.surface.clone().expect("surface"), face.tolerance);
+        let mut face_off = 0.0_f64;
+        for i in 0..=64 {
+            for j in 0..=64 {
+                let uv = domain.evaluate(f64::from(i) / 64.0, f64::from(j) / 64.0);
+                face_off = face_off.max(off_torus(surface.evaluate_point(&k, uv).expect("point")));
+            }
+        }
+
+        // the edges, each sampled at 257 points: (torus, plane, sphere, tolerance)
+        let mut contact_plane = None;
+        let mut contact_sphere = None;
+        for e in p1::edges(&body, None).expect("edges") {
+            let edge = body.edge(e).expect("edge");
+            let curve = edge.curve.as_ref().expect("curve");
+            let (mut t, mut pl, mut sp) = (0.0_f64, 0.0_f64, 0.0_f64);
+            for i in 0..=256 {
+                let p = curve
+                    .evaluate_point(&k, edge.interval.evaluate(f64::from(i) / 256.0))
+                    .expect("point");
+                t = t.max(off_torus(p));
+                pl = pl.max(off_plane(p));
+                sp = sp.max(off_sphere(p));
+            }
+            if t > 1e-3 {
+                continue; // an edge of the sphere's or the plane's own
+            }
+            if pl <= 1e-12 {
+                contact_plane = Some((t, edge.tolerance));
+            } else if sp <= 1e-3 {
+                contact_sphere = Some((t.max(sp), edge.tolerance));
+            }
+        }
+        let (plane_off, plane_tol) = contact_plane.expect("the contact edge on the plane");
+        let (sphere_off, sphere_tol) = contact_sphere.expect("the contact edge on the sphere");
+        eprintln!(
+            "{NAME}: face {face_off:e} (tol {face_tol:e}), on plane {plane_off:e} \
+             (tol {plane_tol:e}), on sphere {sphere_off:e} (tol {sphere_tol:e})"
+        );
+
+        // Before (the refit sphere's rebuilt trims): face 6.66e-5, plane edge 9.09e-9,
+        // sphere edge 6.66e-5 off the torus.
+        let old = [6.659_272_874_603_994e-5, 9.094_153_319_288_978e-9, 6.659_884_231_030_588e-5];
+        for (now, before, tol, what) in [
+            (face_off, old[0], face_tol, "face"),
+            (plane_off, old[1], plane_tol, "edge on the plane"),
+            (sphere_off, old[2], sphere_tol, "edge on the sphere"),
+        ] {
+            assert!(now < before, "{NAME}: {what} {now:e} off the torus, before {before:e}");
+            assert!(now <= tol, "{NAME}: {what} {now:e} off the torus, beyond its tolerance {tol:e}");
+        }
+    }
+}
