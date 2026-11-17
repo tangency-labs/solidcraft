@@ -242,6 +242,18 @@ fn pair_skip_text(skip: &kernel_ts::PairSkip) -> String {
     }
 }
 
+/// Why the plate `name` cannot take a tab or a slot (design v3 4.4 / 11.3), as (reason id, text):
+/// sheet metal in the state before the feature (`sheet_metal`), or a mesh body (`not_solid`).
+fn plate_unusable(st: &ModelState, name: &str, body: Option<&Body>) -> Option<(&'static str, String)> {
+    if st.sheets.iter().any(|s| s.body == name) {
+        Some(("sheet_metal", format!("cannot be cut: {name} is sheet metal")))
+    } else if body.is_some_and(Body::is_mesh) {
+        Some(("not_solid", format!("cannot be cut: {name} is a mesh body")))
+    } else {
+        None
+    }
+}
+
 /// A joint's skip in the user's words (design 11.3), naming the earlier joint (`earlier[j]`,
 /// "Back → Bottom") a skip refers to.
 fn joint_skip_text(skip: &kernel_ts::JointSkip, earlier: &[String]) -> String {
@@ -320,10 +332,24 @@ pub(crate) fn apply(vals: &BTreeMap<String, Value>, k: &FeatureKind, st: &mut Mo
     // The pairs with a joint, in pick order, with their settings.
     let mut list: Vec<(usize, usize, Plane)> = Vec::new();
     let mut specs: Vec<TabSlotSpec> = Vec::new();
+    // Pairs with a plate the cut cannot take (design v3 4.4 / 11.3): sheet metal or a mesh body in
+    // the state before the feature. Every pair with such a plate is skipped and named.
+    let mut unusable: Vec<TabSlotJoint> = Vec::new();
     for t in tab_plates {
         for s in slot_plates {
             let (ti, si) = (index(&t.body), index(&s.body));
             if ti == si {
+                continue;
+            }
+            if let Some((reason, text)) = [ti, si].into_iter().find_map(|i| plate_unusable(st, &names[i], plates.get(i))) {
+                unusable.push(TabSlotJoint {
+                    tab: names[ti].clone(),
+                    slot: names[si].clone(),
+                    skipped: Some(text),
+                    reason: Some(reason.into()),
+                    tabs: 0,
+                    left_out: Vec::new(),
+                });
                 continue;
             }
             let near = s.near.or(t.near).map(Into::into);
@@ -334,14 +360,18 @@ pub(crate) fn apply(vals: &BTreeMap<String, Value>, k: &FeatureKind, st: &mut Mo
         }
     }
     if specs.is_empty() {
-        append_warning(warning, "tab and slot: no tab plate stands on a slot plate".into());
-        return Ok(TabSlotReport::default());
+        let report = TabSlotReport { joints: unusable, tool_faces: Vec::new() };
+        match skipped_note(&report.joints) {
+            Some(note) => append_warning(warning, note),
+            None => append_warning(warning, "tab and slot: no tab plate stands on a slot plate".into()),
+        }
+        return Ok(report);
     }
     let refs: Vec<&Body> = plates.iter().collect();
     let (skips, tool_faces) = kernel_ts::joints_each(&refs, &list, &specs, JOINT_TOL)?;
     let pair_names: Vec<String> = list.iter().map(|(ti, si, _)| format!("{} → {}", names[*ti], names[*si])).collect();
     check_tool_faces(&tool_faces, &names, kernel_ts::MAX_TOOL_FACES, kernel_ts::SLOW_TOOL_FACES, warning)?;
-    let mut report = TabSlotReport { joints: Vec::new(), tool_faces: names.iter().cloned().zip(tool_faces).collect() };
+    let mut report = TabSlotReport { joints: unusable, tool_faces: names.iter().cloned().zip(tool_faces).collect() };
     for (j, ((ti, si, p), spec)) in list.iter().zip(&specs).enumerate() {
         let (tab_name, slot_name) = (names[*ti].clone(), names[*si].clone());
         let (mut tabs, mut left_out) = (0, Vec::new());
@@ -627,5 +657,42 @@ mod tests {
         assert!(warning.contains("skipped 1 plate joint: Thick → Bottom made no tab") && warning.contains("too short"), "{warning}");
         let volume = |n: &str| kernel::measure_mass(&st.body(n).unwrap().body).unwrap().volume;
         assert!((volume("Thick") - 72_000.0).abs() < 1e-6 && (volume("Bottom") - 96_000.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn tab_slot_skips_every_pair_with_a_sheet_metal_plate() {
+        use crate::sheet::{AngleDisplay, ReliefShape, RuleValues, base_flange};
+        use solidcore_record::{Loop2, Region2, Vec2, Vec3};
+        use solidcraft_kernel as kernel;
+        let mut st = ModelState::default();
+        let bottom = kernel::box_solid(Vec3::new(0.0, 0.0, 0.0), Vec3::new(160.0, 100.0, 6.0)).unwrap();
+        let wall = kernel::box_solid(Vec3::new(20.0, 60.0, 6.0), Vec3::new(140.0, 66.0, 66.0)).unwrap();
+        st.bodies.push(super::super::ModelBody::new("Bottom".into(), bottom, 0));
+        st.bodies.push(super::super::ModelBody::new("Wall".into(), wall, 0));
+        let rv = RuleValues {
+            thickness: 6.0,
+            k_factor: 0.44,
+            bend_radius: 6.0,
+            relief_width: 6.0,
+            relief_depth: 3.0,
+            corner_relief: 10.0,
+            corner_relief_shape: ReliefShape::Notch,
+            hem_gap: 0.01,
+            gap: 6.0,
+            angle_display: AngleDisplay::Bend,
+        };
+        let outline = [Vec2::new(0.0, 0.0), Vec2::new(160.0, 0.0), Vec2::new(160.0, 100.0), Vec2::new(0.0, 100.0)];
+        let region = Region2 { outer: Loop2::polygon(&outline), holes: Vec::new() };
+        let frame = solidcore_record::Plane { origin: Vec3::ZERO, x: Vec3::X, y: Vec3::Y };
+        st.sheets.push(base_flange("Bottom", "Steel (mm)", &rv, frame, region));
+        let mut warning = None;
+        let report = apply(&BTreeMap::new(), &kind(serde_json::json!({})), &mut st, &mut warning).unwrap();
+        assert_eq!(report.joints.len(), 1, "{report:?}");
+        let joint = &report.joints[0];
+        assert_eq!((joint.tabs, joint.reason.as_deref()), (0, Some("sheet_metal")), "{report:?}");
+        let warning = warning.unwrap_or_default();
+        assert!(warning.contains("skipped 1 plate joint: Wall → Bottom cannot be cut: Bottom is sheet metal"), "{warning}");
+        let volume = |n: &str| kernel::measure_mass(&st.body(n).unwrap().body).unwrap().volume;
+        assert!((volume("Wall") - 43_200.0).abs() < 1e-6 && (volume("Bottom") - 96_000.0).abs() < 1e-6);
     }
 }
