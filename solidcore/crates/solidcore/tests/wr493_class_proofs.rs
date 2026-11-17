@@ -7,16 +7,16 @@
 //! trims no longer mapped onto their edges. `check_and_fix_uv_trim_curves` then dropped
 //! them and the face measures were taken on trims rebuilt on the refit surface.
 //!
-//! - [`found_spheres_and_tori_keep_the_file_nurb_and_trims`] (structural identity): the
+//! - `found_spheres_and_tori_keep_the_file_nurb_and_trims` (structural identity): the
 //!   found surface is the file's NURB bit for bit, so the file's trims keep their meaning
 //!   on it. The parameter, UV, trim and written-file rows of these files now record the
 //!   file's own geometry.
-//! - [`ss_plane_sph_area_is_the_area_its_edges_bound`]: on the four `ss_plane_sph` parts the
+//! - `ss_plane_sph_area_is_the_area_its_edges_bound`: on the four `ss_plane_sph` parts the
 //!   face area equals the area its edge loop bounds on the sphere. Gauss-Bonnet gives that
 //!   area as a line integral, here converged to 1e-12. The old value was 2.8e-3 off.
-//! - [`sphere_plane_area_is_closed_form`]: the band, cap and disk of
+//! - `sphere_plane_area_is_closed_form`: the band, cap and disk of
 //!   `Fillet/sphere_plane.smb` in closed form; the area is closer to it than before.
-//! - [`point_just_outside_the_sphere_pole_is_in_the_infinite_region`]: the
+//! - `point_just_outside_the_sphere_pole_is_in_the_infinite_region`: the
 //!   `query.brep` `sphere_vertex3_off_region` point lies outside the sphere exactly.
 #![allow(
     clippy::unwrap_used,
