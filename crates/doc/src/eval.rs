@@ -10559,7 +10559,7 @@ struct FaceGrid<'a> {
 
 /// Where a face pattern puts each copy: a placement at each grid point on the face, the copied
 /// bodies' `anchor` on the face, their +Z along its normal and their X along the grid; with
-/// attractors, each copy scaled, moved along the normal and turned about it by its distance to
+/// attractors, each copy scaled, moved along the normal and rotated about it by its distance to
 /// the nearest attractor point.
 fn face_pattern(
     doc: &Document,
@@ -10767,7 +10767,7 @@ fn face_pattern(
             };
             scale = ramp(&a.scale_near, &a.scale_far, Kind::Unitless, 1.0)?;
             offset = ramp(&a.offset_near, &a.offset_far, Kind::Length, 0.0)?;
-            spin = ramp(&a.turn_near, &a.turn_far, Kind::Angle, 0.0)?;
+            spin = ramp(&a.rotate_near, &a.rotate_far, Kind::Angle, 0.0)?;
             if !(scale.is_finite() && scale > 1e-6) {
                 return Err(DocError::Invalid(format!("attractors: a copy's scale came to {scale}; scales must stay above zero")));
             }

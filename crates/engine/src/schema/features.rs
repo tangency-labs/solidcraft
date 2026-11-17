@@ -1201,12 +1201,12 @@ pub struct AttractParams {
     /// The same at the far distance. Default: 0.
     #[serde(default)]
     pub offset_far: Option<LengthExpr>,
-    /// How far a copy turns about the face's normal at the near distance. Default: 0.
+    /// How far a copy rotates about the face's normal at the near distance. Default: 0.
     #[serde(default)]
-    pub turn_near: Option<AngleExpr>,
+    pub rotate_near: Option<AngleExpr>,
     /// The same at the far distance. Default: 0.
     #[serde(default)]
-    pub turn_far: Option<AngleExpr>,
+    pub rotate_far: Option<AngleExpr>,
     /// No copy farther than this from every attractor point.
     #[serde(default)]
     pub cutoff: Option<LengthExpr>,

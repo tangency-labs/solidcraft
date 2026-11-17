@@ -4,6 +4,6 @@
 //! margin), `overhang` (copies may hang over the face's edges; absent, none does), `avoid` (points, faces and bodies, `geometry` and `bodies`, and its own `margin`), `flip`,
 //! `anchor` (absent: the centre of the bottom of the copied bodies' bounding box) and `attract`:
 //! the attractors (`geometry` and `bodies`, and optionally `far_geometry` and `far_bodies`) and the
-//! scale, offset and turn each copy takes from its distance to them. Older designs have no such
+//! scale, offset and rotation each copy takes from its distance to them. Older designs have no such
 //! pattern, so nothing in them is rewritten. The last release does not know the pattern type: it
 //! warns about the newer format number, opens what it can read and keeps the rest.

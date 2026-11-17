@@ -70,8 +70,8 @@ pub struct Form {
     pub scale_far: String,
     pub offset_near: String,
     pub offset_far: String,
-    pub turn_near: String,
-    pub turn_far: String,
+    pub rotate_near: String,
+    pub rotate_far: String,
     pub cutoff: String,
     /// 0: linear; 1: smooth.
     pub falloff: usize,
@@ -108,8 +108,8 @@ impl Default for Form {
             scale_far: "1".into(),
             offset_near: String::new(),
             offset_far: String::new(),
-            turn_near: String::new(),
-            turn_far: String::new(),
+            rotate_near: String::new(),
+            rotate_far: String::new(),
             cutoff: String::new(),
             falloff: 0,
             saved_face: None,
@@ -184,8 +184,8 @@ pub(crate) fn draw(app: &SolveApp, d: &mut Dialog, ui: &mut egui::Ui) -> bool {
             enter |= expr_row(ui, "Scale far", &mut f.scale_far);
             enter |= hint_row(ui, "Offset near", &mut f.offset_near, "none");
             enter |= hint_row(ui, "Offset far", &mut f.offset_far, "none");
-            enter |= hint_row(ui, "Turn near", &mut f.turn_near, "none");
-            enter |= hint_row(ui, "Turn far", &mut f.turn_far, "none");
+            enter |= hint_row(ui, "Rotate near", &mut f.rotate_near, "none");
+            enter |= hint_row(ui, "Rotate far", &mut f.rotate_far, "none");
             enter |= hint_row(ui, "Cutoff", &mut f.cutoff, "none");
             choice_row(ui, "Falloff", "fp_falloff", &mut f.falloff, &["Linear", "Smooth"]);
         }
@@ -291,8 +291,8 @@ pub(crate) fn params(app: &SolveApp, d: &Dialog) -> Result<Value, String> {
             ("scale_far", &f.scale_far),
             ("offset_near", &f.offset_near),
             ("offset_far", &f.offset_far),
-            ("turn_near", &f.turn_near),
-            ("turn_far", &f.turn_far),
+            ("rotate_near", &f.rotate_near),
+            ("rotate_far", &f.rotate_far),
             ("cutoff", &f.cutoff),
         ] {
             if !v.trim().is_empty() {
@@ -352,8 +352,8 @@ pub(crate) fn form_of(pattern: &PatternKind) -> Option<Form> {
             scale_far,
             offset_near,
             offset_far,
-            turn_near,
-            turn_far,
+            rotate_near,
+            rotate_far,
             cutoff,
             falloff,
         } = a;
@@ -368,8 +368,8 @@ pub(crate) fn form_of(pattern: &PatternKind) -> Option<Form> {
         f.scale_far = scale_far.as_deref().unwrap_or("1").to_string();
         f.offset_near = s(offset_near);
         f.offset_far = s(offset_far);
-        f.turn_near = s(turn_near);
-        f.turn_far = s(turn_far);
+        f.rotate_near = s(rotate_near);
+        f.rotate_far = s(rotate_far);
         f.cutoff = s(cutoff);
         f.falloff = usize::from(*falloff == Falloff::Smooth);
     }
