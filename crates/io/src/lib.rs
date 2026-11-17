@@ -226,6 +226,50 @@ fn body_name(b: &solidcraft_kernel::ImportedBody, names: StepNames) -> String {
     chosen.cloned().unwrap_or_else(|| b.name.clone())
 }
 
+/// A name a flattened body should not keep: one [`generic_name`] gives up on, a name an exporting
+/// translator makes up for a shape it has no name for (Open CASCADE writes `Open CASCADE STEP
+/// translator 7.5 2.1.1` for each sub-shape), or a bare number (a library model's id).
+fn placeholder_name(n: &str) -> bool {
+    let n = n.trim();
+    let lower = n.to_ascii_lowercase();
+    generic_name(n)
+        || lower.contains("step translator")
+        || lower.contains("step processor")
+        || n.chars().all(|c| c.is_ascii_digit() || matches!(c, '.' | '-' | '_' | ' '))
+}
+
+/// The names of a STEP file's bodies brought in flat (`file.insert_step`'s `flatten`), where no
+/// component says which part a body belongs to any more. `chosen` holds the names the `names`
+/// option chose, by body. Each body is named after the outermost named product it sits in below
+/// the file's root (`R63: Terminal`): a body whose chosen name is a placeholder takes the nearest
+/// named product's name instead (`Terminal`), and a body that is that product itself only its
+/// name (`R63`). A body in no named product keeps its name, or its nearest product's. Names are
+/// not made unique here: the Import feature numbers repeats, as for any import.
+pub fn flat_body_names(imp: &solidcraft_kernel::StepImport, chosen: &[String]) -> Vec<String> {
+    // One root product is the import itself (its component); several are parts of it.
+    let below_root = usize::from(imp.tree.len() == 1);
+    imp.bodies
+        .iter()
+        .enumerate()
+        .map(|(k, b)| {
+            let named = |n: &&String| !placeholder_name(n);
+            let own = chosen
+                .get(k)
+                .filter(named)
+                .or_else(|| b.path.iter().rev().find(named))
+                .or_else(|| b.instance.as_ref().filter(named))
+                .or_else(|| chosen.get(k).filter(|n| !n.trim().is_empty()))
+                .unwrap_or(&b.name)
+                .trim();
+            match b.path.iter().skip(below_root).find(named).map(|top| top.trim()) {
+                Some(top) if top != own && !placeholder_name(own) => format!("{top}: {own}"),
+                Some(top) => top.to_string(),
+                None => own.to_string(),
+            }
+        })
+        .collect()
+}
+
 /// A STEP file read as an import feature.
 pub struct StepFeature {
     /// Timeline name: the root product's name, else the file name.
@@ -1356,6 +1400,18 @@ mod tests {
     use super::*;
     use solidcore_record::Vec3;
     use solidcraft_doc::{FeatureKind, Model, Operation, point_expr};
+
+    /// What a flattened import treats as a placeholder: what `generic_name` gives up on, an
+    /// exporting translator's own names and a library model's bare number; a part's name is kept.
+    #[test]
+    fn placeholder_names_are_the_ones_that_say_nothing_about_the_part() {
+        for n in ["", "  ", "Body1", "Solid 2", "Open CASCADE STEP translator 7.5 2.51.1.1.1", "open cascade step translator 6.8 1.1", "7417113264"] {
+            assert!(placeholder_name(n), "{n:?}");
+        }
+        for n in ["Terminal", "R63ARK FPV", "SM08B-GHS-TB", "Mid_Body", "0603 capacitor"] {
+            assert!(!placeholder_name(n), "{n:?}");
+        }
+    }
 
     fn model() -> (Document, Model) {
         let mut doc = Document::new("t");

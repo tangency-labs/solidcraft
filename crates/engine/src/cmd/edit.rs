@@ -18,8 +18,8 @@ use crate::schema::edit::{
     TimelineUngroupParams, TimelineUngrouped,
 };
 use crate::schema::select::{
-    PartialPick, SameLookParams, SelectClearParams, SelectClearResult, SelectFilterParams, SelectFilterResult, SelectItem, SelectMode,
-    SelectSetParams, SelectSetResult, read_item,
+    PartialPick, SameLookParams, SelectAllParams, SelectClearParams, SelectClearResult, SelectFilterParams, SelectFilterResult, SelectItem,
+    SelectMode, SelectSetParams, SelectSetResult, read_item,
 };
 use crate::schema::{TypedContract, output_schema_for};
 use crate::{EngineError, Result, Sel, Session, Snapshot};
@@ -229,11 +229,18 @@ pub static COMMANDS: &[CommandSpec] = &[
         .contract(&SAME_LOOK_CONTRACT)
         .output(output_schema_for::<SelectSetResult>)
         .params("body?: world body name, face?: face index; defaults to the current body/face selection → selects objects using the resolved appearance"),
+    CommandSpec::new("select.all", "Select All", crate::checked!("select.all", select_all))
+        .icon("select")
+        .key("Ctrl+A")
+        .noundo()
+        .contract(&SELECT_ALL_CONTRACT)
+        .output(output_schema_for::<SelectSetResult>),
 ];
 
 const SELECT_SET_CONTRACT: TypedContract<SelectSetParams> = TypedContract::new();
 const SELECT_FILTER_CONTRACT: TypedContract<SelectFilterParams> = TypedContract::new();
 const SELECT_CLEAR_CONTRACT: TypedContract<SelectClearParams> = TypedContract::new();
+const SELECT_ALL_CONTRACT: TypedContract<SelectAllParams> = TypedContract::new();
 const SAME_LOOK_CONTRACT: TypedContract<SameLookParams> = TypedContract::new();
 const COMPUTE_ALL_CONTRACT: TypedContract<TimelineComputeAllParams> = TypedContract::new();
 const DELETE_CONTRACT: TypedContract<TimelineDeleteParams> = TypedContract::new();
@@ -947,14 +954,15 @@ fn feature_ids(s: &Session, p: &Value, cmd: &str) -> Result<Vec<u64>> {
 /// renamed (#1109). The suppressed feature keeps its own too: the counter passes the names of
 /// suppressed features by, so a body made meanwhile does not take `Body1` and lose it again when
 /// the feature is back.
-fn counted_names_from(s: &Session, ids: &[u64]) -> Vec<(u64, Vec<String>)> {
+fn counted_names_from(s: &Session, ids: &[u64]) -> Vec<(u64, Vec<String>, Vec<usize>)> {
     let made = |f: &Feature| -> Vec<String> {
         s.model.result(f.id).map(|r| r.state.bodies.iter().filter(|b| b.feature == f.id).map(|b| b.name.clone()).collect()).unwrap_or_default()
     };
     let makes_counted = |f: &Feature| (0..made(f).len()).any(|i| super::browser::counted(f, i));
     let first = s.doc.features.iter().position(|f| ids.contains(&f.id) && !f.suppressed && makes_counted(f));
     let Some(at) = first else { return Vec::new() };
-    s.doc.features.iter().skip(at).filter(|f| makes_counted(f)).map(|f| (f.id, made(f))).collect()
+    let left_out = |f: &Feature| s.model.result(f.id).map(|r| r.state.pattern_left_out(f.id).to_vec()).unwrap_or_default();
+    s.doc.features.iter().skip(at).filter(|f| makes_counted(f)).map(|f| (f.id, made(f), left_out(f))).collect()
 }
 
 fn suppress(s: &mut Session, p: &Value) -> Result<Value> {
@@ -981,9 +989,9 @@ fn suppress(s: &mut Session, p: &Value) -> Result<Value> {
     let keep = if want { counted_names_from(s, &ids) } else { Vec::new() };
     // One command, so one undo step however many features it changes.
     let doc = s.doc_mut();
-    for (id, made) in &keep {
+    for (id, made, left_out) in &keep {
         if let Some(f) = doc.feature_mut(*id) {
-            f.pin_body_names(made);
+            f.pin_body_names(made, left_out);
         }
     }
     for id in &ids {
@@ -1677,6 +1685,39 @@ fn select_same_look(s: &mut Session, p: &Value) -> Result<Value> {
         return Err(bad("select.same_look", "too many objects"));
     }
     select_set(s, &json!({"items":items}))
+}
+
+/// In an open sketch, every curve of it (construction ones too) and every point of it on no
+/// curve, leaving out its origin and projected geometry; outside a sketch, every shown body.
+fn select_all(s: &mut Session, _p: &Value) -> Result<Value> {
+    let all: Vec<Sel> = match s.active_sketch {
+        Some(id) => {
+            let sk = super::sketch_store::read(&s.doc, id)?;
+            let own = sk.curves.iter().filter(|c| c.link.is_none());
+            let on_curve = |q: usize| own.clone().any(|c| c.kind.uses(q));
+            own.clone()
+                .map(|c| Sel::SketchCurve { id: c.id.clone(), sketch: None })
+                .chain(
+                    sk.points
+                        .iter()
+                        .enumerate()
+                        .filter(|(q, p)| p.link.is_none() && p.id != "origin" && !on_curve(*q))
+                        .map(|(_, p)| Sel::SketchPoint { id: p.id.clone() }),
+                )
+                .take(10_001)
+                .collect()
+        }
+        None => {
+            let hidden = &s.visibility.hidden_bodies;
+            s.world_state()?.bodies.iter().filter(|b| !hidden.contains(&b.name)).take(10_001).map(|b| Sel::Body { name: b.name.clone() }).collect()
+        }
+    };
+    if all.len() > 10_000 {
+        return Err(bad("select.all", "too many items"));
+    }
+    s.selection = all;
+    s.refresh_display();
+    reply("select.all", SelectSetResult { selected: s.selection.len(), param_warnings: Vec::new() })
 }
 
 fn select_clear(s: &mut Session, _p: &Value) -> Result<Value> {

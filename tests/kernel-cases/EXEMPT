@@ -252,6 +252,7 @@ render.status                     rendering: images, cameras, stages
 render.surface.import             rendering image resources; crates/engine/src/cmd/render/library_tests.rs::imported_wood_maps_reopen_without_source_and_keep_geometry_history_and_resource_users
 render.texture.list               rendering image resources; crates/engine/src/cmd/render/library_tests.rs::imported_wood_maps_reopen_without_source_and_keep_geometry_history_and_resource_users
 render.texture.remove             rendering image resources; crates/engine/src/cmd/render/library_tests.rs::imported_wood_maps_reopen_without_source_and_keep_geometry_history_and_resource_users
+select.all                        the selection
 select.clear                      the selection
 select.filter                     the selection
 select.same_look                  the selection
