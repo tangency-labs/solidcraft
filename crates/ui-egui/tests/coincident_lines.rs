@@ -1,4 +1,4 @@
-//! Coincident accepts clicked line bodies as well as explicit sketch points.
+//! Coincident accepts clicked line bodies as well as explicit sketch points: two lines become collinear (#18232).
 
 mod support;
 
@@ -12,7 +12,7 @@ fn setup() -> Harness {
 }
 
 #[test]
-fn clicked_lines_join_closest_endpoints_in_both_orders() {
+fn clicked_lines_become_collinear_in_both_orders() {
     for reverse in [false, true] {
         let mut h = setup();
         let before = serde_json::to_value(&h.app.session.doc).unwrap();
@@ -24,14 +24,22 @@ fn clicked_lines_join_closest_endpoints_in_both_orders() {
         .unwrap();
         assert!(!h.app.status.as_ref().is_some_and(|(_, _, error)| *error));
         let sk = h.app.session.doc.sketch(h.app.session.active_sketch.unwrap()).unwrap();
-        let a = sk.resolve_point("l1.end").unwrap();
-        let b = sk.resolve_point("l2.start").unwrap();
-        assert!(sk.point(a).unwrap().dist(sk.point(b).unwrap()) < 1e-6);
-        assert!(sk.constraints.iter().any(|c| matches!(c.kind, ConstraintKind::Coincident {p,q} if (p,q)==(a,b) || (p,q)==(b,a))));
-        let fixed_ref = if reverse { "l2.end" } else { "l1.start" };
-        let expected = if reverse { [35.0, 40.0] } else { [10.0, 10.0] };
-        let fixed = sk.point(sk.resolve_point(fixed_ref).unwrap()).unwrap();
-        assert!((fixed.x - expected[0]).abs() < 1e-6 && (fixed.y - expected[1]).abs() < 1e-6);
+        let collinear = sk.constraints.iter().filter(|c| matches!(c.kind, ConstraintKind::Collinear { .. })).count();
+        assert_eq!(collinear, 1, "Coincident on two lines makes them collinear");
+        assert!(!sk.constraints.iter().any(|c| matches!(c.kind, ConstraintKind::Coincident { .. })), "no endpoint is joined");
+        // Both lines lie on one line: the second pick's ends are on the first's line.
+        let (first, second) = if reverse { ("l2", "l1") } else { ("l1", "l2") };
+        let end = |id: &str| sk.point(sk.resolve_point(id).unwrap()).unwrap();
+        let (a, b) = (end(&format!("{first}.start")), end(&format!("{first}.end")));
+        let dir = (b - a).normalize();
+        for q in [end(&format!("{second}.start")), end(&format!("{second}.end"))] {
+            let off = q - a;
+            assert!((off.x * dir.y - off.y * dir.x).abs() < 1e-6, "{second} is on {first}'s line");
+        }
+        // The line picked first stays where it was.
+        let original = if reverse { [[35.0, 15.0], [35.0, 40.0]] } else { [[10.0, 10.0], [30.0, 10.0]] };
+        assert!((a.x - original[0][0]).abs() < 1e-6 && (a.y - original[0][1]).abs() < 1e-6);
+        assert!((b.x - original[1][0]).abs() < 1e-6 && (b.y - original[1][1]).abs() < 1e-6);
         assert_eq!(h.app.session.undo.len(), undo + 1);
         let after = serde_json::to_value(&h.app.session.doc).unwrap();
         h.run(&json!([{"call":"engine.execute","params":{"command":"edit.undo","params":{}}}])).unwrap();

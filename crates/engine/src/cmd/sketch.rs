@@ -2889,7 +2889,9 @@ fn c_coincident(s: &mut Session, p: &Value) -> Result<Value> {
     }
     // Two straight lines made coincident lie along one line: Collinear, as in other CAD tools (#18232).
     if let Some((a, b)) = two_lines(sk, p, cmd)? {
-        if let Some(c) = sk.constraints.iter().find(|c| matches!(c.kind, ConstraintKind::Collinear { a: x, b: y } if (x, y) == (a, b) || (x, y) == (b, a))) {
+        if let Some(c) =
+            sk.constraints.iter().find(|c| matches!(c.kind, ConstraintKind::Collinear { a: x, b: y } if (x, y) == (a, b) || (x, y) == (b, a)))
+        {
             let rep = solve(&mut sk.clone());
             let made = CoincidentMade::Existing { constraint: c.id.clone(), existing: true, sketch: report_json(&rep) };
             return reply(cmd, CoincidentResult { made, param_warnings: Vec::new() });
