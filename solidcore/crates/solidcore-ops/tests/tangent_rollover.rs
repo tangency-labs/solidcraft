@@ -2454,3 +2454,129 @@ fn four_rounds_on_a_seamed_disc_build_across_its_seam() {
         "volume {v}, expected {expected}"
     );
 }
+
+/// SolidCraft #18411's part: a block 56.5 x 10 x 27.5 with a pocket 28.2 wide, 4 deep and 11.8
+/// long cut into its top y = 10, the pocket's two long floor edges (x = 12.8 and x = 41, y = 6)
+/// rounded R3. Each long wall keeps a 1 wide flat (y = 9 to 10) above its floor round, which
+/// runs on into it tangentially.
+fn pocket_with_floor_rounds() -> Body {
+    let block = make_box([1.5, 0.0, 0.0], [56.5, 10.0, 27.5]).unwrap();
+    let pocket = make_box([12.8, 6.0, 7.4], [28.2, 5.0, 11.8]).unwrap();
+    let b = boolean(block, pocket, BooleanOp::Subtract)
+        .unwrap()
+        .unwrap();
+    let floor: Vec<usize> = [12.8, 41.0]
+        .iter()
+        .map(|&x| edge_at(&b, [x, 6.0, 13.3]))
+        .collect();
+    blend(&b, Blend::Round, &floor, &[3.0; 2], &[], Corners::Filled).unwrap();
+    b
+}
+
+/// The section area a rim round `r` of [`pocket_with_floor_rounds`] takes, past the 1 wide flat:
+/// in the wall's frame (the wall x = 0, the top y = 0, the material x > 0, y < 0), the floor
+/// round's centre is (-3, -1) and the ball's (c, -r), (c + 3)^2 + (1 - r)^2 = (3 + r)^2; the
+/// region bounded by the top from the wall to the ball's contact (c, 0), the ball to its contact
+/// on the floor round, the floor round up to the flat's end (0, -1) and the flat, by Green's
+/// theorem over its two lines and two arcs.
+fn pocket_rim_area(r: f64) -> f64 {
+    let c = ((3.0 + r).powi(2) - (r - 1.0).powi(2)).sqrt() - 3.0;
+    let to_floor = (-1.0 + r).atan2(-3.0 - c);
+    let floor_contact = (-3.0 - 3.0 * to_floor.cos(), -1.0 - 3.0 * to_floor.sin());
+    let on_floor = (floor_contact.1 + 1.0).atan2(floor_contact.0 + 3.0);
+    let arc = |cx: f64, cy: f64, rad: f64, from: f64, to: f64| {
+        0.5 * (rad * rad * (to - from) + cx * rad * (to.sin() - from.sin())
+            - cy * rad * (to.cos() - from.cos()))
+    };
+    let ball_to = (floor_contact.1 + r)
+        .atan2(floor_contact.0 - c)
+        .rem_euclid(2.0 * PI);
+    let total = arc(c, -r, r, PI / 2.0, ball_to) + arc(-3.0, -1.0, 3.0, on_floor, 0.0);
+    total.abs()
+}
+
+/// The rims of [`pocket_with_floor_rounds`]'s long walls at `xs` rounded R2.5 in one blend:
+/// built, valid at the full check, the input's faces, edges, vertices and shells (each rim's
+/// round takes its wall's flat and adds one face), each round its exact class, the cylinder of
+/// radius 2.5 along z about (41 + c, 7.5) or (12.8 - c, 7.5), and the volume the input's less
+/// [`pocket_rim_area`] along the pocket's 11.8 for each.
+fn assert_pocket_rims_round(xs: &[f64]) {
+    use solidcore::surface::surface::SurfaceKind;
+    let r = 2.5;
+    fixes();
+    let b = pocket_with_floor_rounds();
+    let before = b.volume(1e-9).unwrap();
+    let (_, input) = common::kernel_copy(&b);
+    let topology = (
+        input.face_list().len(),
+        input.edge_list().len(),
+        input.vertex_list().len(),
+        input.shells().len(),
+    );
+    assert_eq!(topology, (13, 30, 20, 2), "the input");
+    let rims: Vec<usize> = xs.iter().map(|&x| edge_at(&b, [x, 10.0, 13.3])).collect();
+    blend(
+        &b,
+        Blend::Round,
+        &rims,
+        &vec![r; xs.len()],
+        &[],
+        Corners::Filled,
+    )
+    .unwrap_or_else(|err| panic!("rims {xs:?}: {err:?}"));
+    let report = b.check(CheckLevel::All).unwrap();
+    assert!(report.is_valid(), "rims {xs:?}: {report}");
+    let (_, brep) = common::kernel_copy(&b);
+    let counts = (
+        brep.face_list().len(),
+        brep.edge_list().len(),
+        brep.vertex_list().len(),
+        brep.shells().len(),
+    );
+    assert_eq!(
+        counts, topology,
+        "rims {xs:?}: faces, edges, vertices, shells"
+    );
+    let c = ((3.0_f64 + r).powi(2) - (r - 1.0).powi(2)).sqrt() - 3.0;
+    for &x in xs {
+        let axis_x = if x > 20.0 { x + c } else { x - c };
+        let rounds = brep
+            .face_list()
+            .iter()
+            .filter(|&&f| {
+                let surface = brep.face(f).unwrap().surface.as_ref().unwrap();
+                match surface.kind() {
+                    SurfaceKind::Cone(cone)
+                        if cone.is_cylinder() && (cone.bot_radius() - r).abs() < 1e-9 =>
+                    {
+                        let place = cone.rev().position();
+                        let (o, a) = (place.origin(), place.z_axis());
+                        (o.x - axis_x).hypot(o.y - (10.0 - r)) < 1e-9
+                            && a.x.hypot(a.y) < 1e-9 * a.length()
+                    }
+                    _ => false,
+                }
+            })
+            .count();
+        assert_eq!(rounds, 1, "rims {xs:?}: the round's cylinder at x {x}");
+    }
+    let expected = before - xs.len() as f64 * 11.8 * pocket_rim_area(r);
+    let v = b.volume(1e-9).unwrap();
+    assert!(
+        (v - expected).abs() < 1e-6,
+        "rims {xs:?}: volume {v}, expected {expected}"
+    );
+}
+
+/// SolidCraft #18411: R2.5 on both long rims of the pocket in one fillet. The 1 wide flat under
+/// each rim is narrower than the ball reaches, so each round rolls over the flat's smooth lower
+/// edge onto the floor round, the whole length. Each rim alone builds (a lone round, its rollover
+/// decided in closed form); both in one blend were refused as having no room (SolidCraft: "the
+/// largest radius that fits is 1 mm"), because each rolled rail ends on the pocket's end walls,
+/// faces across its floor round's edges.
+#[test]
+fn both_pocket_rims_roll_onto_their_floor_rounds_in_one_fillet() {
+    assert_pocket_rims_round(&[41.0]);
+    assert_pocket_rims_round(&[12.8]);
+    assert_pocket_rims_round(&[41.0, 12.8]);
+}
