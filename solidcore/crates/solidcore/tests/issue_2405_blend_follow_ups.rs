@@ -530,14 +530,14 @@ fn an_opposite_face_keeps_the_pcurves_it_is_given() {
     }
 }
 
-/// Item 6: `SmSurface::DropPoint` from a guess takes a stalled local solve for the foot
-/// without `good_drop_result_distances_in_order` (WR-56's fork eaa998a). On a wavy bicubic
+/// Item 6: `SmSurface::DropPoint` from a guess took a stalled local solve for the foot
+/// before WR-56's fork eaa998a. On a wavy bicubic
 /// (an 8 x 8 net over 10 x 10, its heights alternating +-1), the point 3 below
 /// `S(0.1, 0.8)` along the normal, dropped from the guess (0.3, 0.9): `LocalPointSolve_1`
 /// stops without converging (unable to go on) 1e-8 off a stationary point that is not the
 /// foot, its gap's components along the tangents summing to 7.7e-9. That is under
-/// upstream's 1e-4, so upstream returns it, at 2.99999944 from the point. With the flag
-/// only a foot within the local solve's own tolerance `EFF_ZERO (1 + max|P|)` is taken, so
+/// upstream's 1e-4, so upstream returns it, at 2.99999944 from the point. Now only a
+/// foot the local solve converged to at its own tolerance `EFF_ZERO (1 + max|P|)` is taken, so
 /// the drop goes on to the global solve and returns the foot, 4.5e-5 nearer (its gap
 /// 1.4e-8 off the normal, the global solve's own convergence): no point of a 201 x 201
 /// sampling of the surface is nearer.
@@ -596,30 +596,26 @@ fn a_drop_from_a_guess_does_not_take_a_stalled_local_solve() {
     );
     assert!(along > 100.0 * tight && along < 1e-4, "{along:e}");
 
-    let drop = |flag: bool| {
-        let mut k = Kernel::default();
-        k.fixes.good_drop_result_distances_in_order = flag;
-        let opts = DropPointOptions {
-            guess_uv: Some(guess),
-            ..DropPointOptions::default()
-        };
-        let d = s.drop_point::<NoObject>(&k, p, &dom, &opts).unwrap();
-        assert!(d.success);
-        d
+    let opts = DropPointOptions {
+        guess_uv: Some(guess),
+        ..DropPointOptions::default()
     };
-    // upstream: the stalled result is the foot
-    let up = drop(false);
-    eprintln!("upstream {:?} at {}", up.result_uv, up.gap);
-    assert_eq!(up.result_uv, stalled);
-    // with the flag: the global solve's foot, nearer
-    let fixed = drop(true);
-    eprintln!("with the flag {:?} at {}", fixed.result_uv, fixed.gap);
+    // the global solve's foot, nearer than the stalled result upstream returned
+    let fixed = s.drop_point::<NoObject>(&k, p, &dom, &opts).unwrap();
+    assert!(fixed.success);
+    eprintln!("drop {:?} at {}", fixed.result_uv, fixed.gap);
+    assert_ne!(fixed.result_uv, stalled);
+    let stalled_gap = s.evaluate_point(&k, stalled).unwrap().distance(p);
     assert!(
         gap_along(fixed.result_uv) < 1e-7,
         "{:e}",
         gap_along(fixed.result_uv)
     );
-    assert!(up.gap - fixed.gap > 4e-5, "{} {}", up.gap, fixed.gap);
+    assert!(
+        stalled_gap - fixed.gap > 4e-5,
+        "{stalled_gap} {}",
+        fixed.gap
+    );
     let mut nearest = f64::INFINITY;
     for i in 0..=200 {
         for j in 0..=200 {
