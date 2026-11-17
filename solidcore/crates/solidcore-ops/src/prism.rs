@@ -456,6 +456,15 @@ pub fn conic_ellipse(a: Vec2, apex: Vec2, b: Vec2, w: f64) -> Option<EllipseArc>
     })
 }
 
+/// Whether a piece of a planar curve within the reading tolerance of its chord is read as the
+/// arc it is proved on before that line ([`read::arc_before_line`]): `spans` its Bézier spans
+/// (`[x w, y w, w]` in the plane), `zone` the model's zone tolerance
+/// ([`crate::sweep::zone_tolerance`]).
+#[must_use]
+pub fn arc_before_line(spans: &[Vec<[f64; 3]>], zone: f64) -> bool {
+    read::arc_before_line(spans, zone)
+}
+
 /// Recognize one directed turn of arcs with the same stored support.
 pub fn loop_circle(lp: &Loop2) -> Option<(Vec2, f64)> {
     if lp.segs.len() > 200_000 {

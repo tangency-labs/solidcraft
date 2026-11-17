@@ -1,7 +1,7 @@
 //! #3142: the continuity measure across an edge (G0 to G4) and the curvature vectors combs are
 //! drawn from, against closed forms: a box's right-angled edges, a round between two planes
-//! (tangent, its curvature jumping by 1 / r, constant on both sides), and a cylinder's circles
-//! and parameter lines.
+//! (tangent, its curvature jumping by 1 / r, constant on both sides), a cylinder's circles
+//! and parameter lines, and the seam where a disc caps a separate tube, measured on the circle.
 
 #![allow(
     clippy::unwrap_used,
@@ -10,14 +10,26 @@
     clippy::indexing_slicing
 )]
 
-use std::f64::consts::FRAC_PI_2;
+use std::f64::consts::{FRAC_PI_2, TAU};
 
 use solidcore::blend::fillet_executive::api::fillet_edges;
+use solidcore::curve::arc::ArcDefinition;
+use solidcore::curve::curve::Curve;
+use solidcore::curve::path::PathPiece;
+use solidcore::curve::proximity::Overlap;
+use solidcore::geom::extent1d::Extent1d;
+use solidcore::geom::tol::USE_DEFAULT;
 use solidcore::math::{Point3, Vec3};
 use solidcore::primitive::api_primitives::{create_box, create_cylinder};
 use solidcore::query::brep::evaluate_surface_normal;
-use solidcore::query::continuity::{continuity_at, curve_curvature, iso_curvature};
+use solidcore::query::continuity::{
+    continuity_at, continuity_over, curve_curvature, iso_curvature,
+};
 use solidcore::surface::surface::SurfaceKind;
+use solidcore::sweep::api_surfaces::create_skin_primitive;
+use solidcore::sweep::segments::build_faces;
+use solidcore::topology::brep::p3::new_brep;
+use solidcore::topology::brep::p8::create_planar_faces_with_3d_curves;
 use solidcore::topology::edge::faces;
 use solidcore::topology::face::p2::faceuses;
 use solidcore::topology::{EdgeId, FaceId, FaceuseId};
@@ -204,4 +216,69 @@ fn a_cylinder_s_circles_and_parameter_lines_bend_by_their_closed_forms() {
     };
     assert!((round - 1.0 / radius).abs() <= 1e-12, "{seen:?}");
     assert!(straight <= 1e-12, "{seen:?}");
+}
+
+/// A circle of radius 5 about the z axis at height `z`, angle 0 (its seam) along `reference`.
+fn circle(k: &Kernel, z: f64, reference: Vec3) -> Curve {
+    let arc = ArcDefinition {
+        centre: Point3::new(0.0, 0.0, z),
+        axis: Vec3::Z,
+        reference,
+        radius: 5.0,
+        start: 0.0,
+        end: TAU,
+    };
+    PathPiece::of_arc(k, &arc).unwrap().curve().clone()
+}
+
+/// Edge `e`'s curve and interval, and a use of its one face.
+fn boundary(b: &Brep, e: EdgeId) -> (&Curve, Extent1d, FaceuseId) {
+    let rec = b.edge(e).unwrap();
+    let fs = faces(b, e, None).unwrap();
+    let (Some(fu), _) = faceuses(b, fs[0]).unwrap() else {
+        panic!("face {:?} has no use", fs[0]);
+    };
+    (rec.curve.as_ref().unwrap(), rec.interval, fu)
+}
+
+/// A disc of radius 5 in z = 0 capping a tube of radius 5 from z = 0 to 10, two separate
+/// sheets (#18163): the disc's edge and the tube's lower one run together round the whole
+/// circle, whether the tube's seam falls on the disc's (both along x) or a quarter turn round
+/// (along y), and the seam's stations over that run lie on the circle.
+#[test]
+fn a_disc_capping_a_tube_meets_it_at_stations_on_the_circle() {
+    let mut k = Kernel::default();
+    let o = Point3::new(0.0, 0.0, 0.0);
+    let rim = circle(&k, 0.0, Vec3::X);
+    let mut disc = new_brep(&mut k, USE_DEFAULT, USE_DEFAULT).unwrap();
+    let region = disc.infinite_region();
+    build_faces(&mut disc, |b, fenv| {
+        create_planar_faces_with_3d_curves(&mut k, b, region, &[rim], 0.01, fenv)
+    })
+    .unwrap();
+    disc.refresh_cached_topology();
+    let (ca, va, fa) = boundary(&disc, edge_at(&k, &disc, o));
+    for reference in [Vec3::X, Vec3::Y] {
+        let (low, high) = (circle(&k, 0.0, reference), circle(&k, 10.0, reference));
+        let tube = create_skin_primitive(&mut k, &[1, 1], &[Some(&low), Some(&high)], 1, false)
+            .unwrap()
+            .brep;
+        // the lower circle's middle is 5 from the origin, the seam line's and the upper's farther
+        let (cb, vb, fb) = boundary(&tube, edge_at(&k, &tube, o));
+        // a hundredth of a millimetre, the zone sheet seams are found in
+        let Overlap::Proved(run) = ca.proved_overlap(&k, &va, cb, &vb, 1e-2).unwrap() else {
+            panic!("{reference:?}: not proved");
+        };
+        assert_eq!(run.fractions, [[0.0, 1.0]; 2], "{reference:?}: {run:?}");
+        let stations =
+            continuity_over(&k, ca, va, run.fractions[0], [(&disc, fa), (&tube, fb)], 9).unwrap();
+        assert_eq!(stations.len(), 9, "{reference:?}");
+        for st in &stations {
+            let p = st.measure.point;
+            assert!(
+                (p.x * p.x + p.y * p.y - 25.0).abs() <= 1e-9 && p.z.abs() <= 1e-12,
+                "{reference:?}: {st:?}"
+            );
+        }
+    }
 }
