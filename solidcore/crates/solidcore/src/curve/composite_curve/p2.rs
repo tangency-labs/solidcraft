@@ -988,8 +988,8 @@ impl CompositeCurve {
         // gap larger than the intersection tolerance. Split B-splines with an
         // angle derived from that tolerance and the offset distance.
         let distance = p.offset_distance.abs();
-        let mut expanded = Vec::with_capacity(curves.len());
-        let mut source_indices = Vec::with_capacity(curves.len());
+        let mut expanded = Vec::new();
+        let mut source_indices = Vec::new();
         let mut origin_indices = Vec::new();
         let mut original_base = 0usize;
         for comp in curves {
