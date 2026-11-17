@@ -4,7 +4,7 @@
 
 use super::*;
 use solidcore_record::Loop2;
-use solidcore_record::living_hinge::{LivingHingePlan, LivingHingeSpec};
+use solidcore_record::living_hinge::{LivingHingePlan, LivingHingeSpec, SlotKind};
 
 /// The most slots one living hinge cuts into a body. The kernel's boolean and its check take time
 /// that grows with the square of the faces they meet, as for a cell grid's cells.
@@ -13,8 +13,8 @@ pub const MAX_CUT_SLOTS: usize = 250;
 /// Past this many slots the cut takes noticeable time, and the feature says so.
 pub const SLOW_CUT_SLOTS: usize = 100;
 
-/// What a living hinge made: the counts of its plan.
-#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+/// What a living hinge made: the counts and the sizes of its plan (design 8.1).
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct HingeReport {
     /// Slots cut.
     pub slots: usize,
@@ -22,13 +22,39 @@ pub struct HingeReport {
     pub rows: usize,
     /// Lattice slots that met the material and were left out.
     pub left_out: usize,
+    /// Slots cut as the lattice has them.
+    pub whole: usize,
+    /// Slots shortened by an edge.
+    pub shortened: usize,
+    /// Slots that run out through the plate's edge.
+    pub run_out: usize,
+    /// The slots' centre lines, summed (mm).
+    pub cut_length: f64,
+    /// The slots' outlines, summed (mm).
+    pub outline_length: f64,
+    /// The area the slots open (mm²).
+    pub open_area: f64,
+    /// The band's width across the rows (mm).
+    pub band_width: f64,
 }
 
 impl HingeReport {
-    /// The counts of `plan`.
+    /// The counts and the sizes of `plan`.
     #[must_use]
     pub fn of(plan: &LivingHingePlan) -> Self {
-        Self { slots: plan.slots.len(), rows: plan.rows, left_out: plan.left_out }
+        let count = |k: SlotKind| plan.slots.iter().filter(|s| s.kind == k).count();
+        Self {
+            slots: plan.slots.len(),
+            rows: plan.rows,
+            left_out: plan.left_out,
+            whole: count(SlotKind::Whole),
+            shortened: count(SlotKind::Shortened),
+            run_out: count(SlotKind::RunOut),
+            cut_length: plan.cut_length,
+            outline_length: plan.outline_length,
+            open_area: plan.open_area,
+            band_width: plan.band_width,
+        }
     }
 }
 

@@ -153,6 +153,10 @@ fn a_living_hinge_reports_what_it_cut() {
     assert!(r.error.is_none(), "{:?}", r.error);
     let report = r.state.living_hinge_report(id).expect("the hinge's report");
     assert!(report.slots > 0 && report.rows > 0 && report.rows <= report.slots, "{report:?}");
+    assert_eq!(report.whole + report.shortened + report.run_out, report.slots, "{report:?}");
+    assert!(report.cut_length > 0.0 && report.outline_length > report.cut_length, "{report:?}");
+    assert!(report.open_area > 0.0, "{report:?}");
+    assert!(report.band_width > 0.0 && report.band_width <= 40.0 + 1e-9, "{report:?}");
 }
 
 #[test]
