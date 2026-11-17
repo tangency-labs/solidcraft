@@ -86,6 +86,7 @@ use crate::curve::hermite_curve::HermiteCurve;
 use crate::curve::tangent_field::{CurveEnd as TangentFieldEnd, TangentDirType, TangentField};
 use crate::error::nurbs::BSplineFailure;
 use crate::error::{ignored, Result, SolidError};
+use crate::geom::certified::{next_down, next_up};
 use crate::geom::extent1d::Extent1d;
 use crate::geom::extent2d::{Extent2d, SS_UMAX, SS_UMIN, SS_VMIN};
 use crate::geom::extent3d::Extent3d;
@@ -2253,8 +2254,10 @@ fn coons_side_normal(
 ///
 /// Gauss-Newton on `|S(uv) - point|^2` from the UV curve's point: each step solves the
 /// normal equations of the first derivatives, and the search stops when a step moves the
-/// surface point by at most `EFF_ZERO` of the point's size, the derivatives are (near)
-/// parallel, an evaluation fails (the last point evaluated is kept) or after 64 steps.
+/// surface point by at most `EFF_ZERO` of the point's size. `None` where the search
+/// finds no nearest point: an evaluation fails, the derivatives are (near) parallel, a
+/// step is not finite, or 64 steps do not settle; the station is then left out rather
+/// than measured against a normal at another point.
 fn coons_side_normal_nearest(
     k: &crate::kernel::Kernel,
     uv_curve: &BSplineCurve,
@@ -2262,7 +2265,7 @@ fn coons_side_normal_nearest(
     patch_ivl: &Extent1d,
     s: f64,
     point: Point3,
-) -> Result<Vec3> {
+) -> Result<Option<Vec3>> {
     let ivl = uv_curve.natural_interval();
     let t = ivl.evaluate((s - patch_ivl.min()) / patch_ivl.length());
     let start = uv_curve.evaluate_point(t)?;
@@ -2276,27 +2279,27 @@ fn coons_side_normal_nearest(
             Side::Left,
             Side::Left,
         ) else {
-            break;
+            return Ok(None);
         };
         let r = point - at;
         let (a11, a12, a22) = (su.dot(su), su.dot(sv), sv.dot(sv));
         let (b1, b2) = (su.dot(r), sv.dot(r));
         let det = a11 * a22 - a12 * a12;
         if det.is_nan() || det <= EFF_ZERO_SQ * a11 * a22 {
-            break;
+            return Ok(None);
         }
         let du = (a22 * b1 - a12 * b2) / det;
         let dv = (a11 * b2 - a12 * b1) / det;
         let next = Point2::new(uv.x + du, uv.y + dv);
         if !(next.x.is_finite() && next.y.is_finite()) {
-            break;
+            return Ok(None);
         }
         uv = next;
         if (su * du + sv * dv).length() <= EFF_ZERO * size {
-            break;
+            return evaluate_normal(k, surface, uv).map(Some);
         }
     }
-    evaluate_normal(k, surface, uv)
+    Ok(None)
 }
 
 /// Side `ii`'s UV curve and surface, `None` when either is missing.
@@ -2310,71 +2313,134 @@ fn coons_side<'a>(
     Some((uv, srf))
 }
 
-/// The largest angle [`coons_side_angle`] measured along one side, over its certified
-/// stations, with a bound on its rounding error.
-#[derive(Debug, Clone, Copy, PartialEq)]
-struct SideSup {
-    /// The largest computed angle (radians) over the side's certified stations.
-    max: f64,
-    /// An a-priori bound on `|max - exact|`, where `exact` is the largest angle the same
-    /// stations have in exact arithmetic (patch evaluated exactly from its control net,
-    /// against the computed side normals); below `PI`, as every station counted has one.
-    err: f64,
+/// The angle [`coons_side_angle`] computed at one station and its rounding bound
+/// (`coons_station_error`), `None` where the angle is not certified: the patch has no
+/// normal there, the derivatives no rounding bound, the neighbour no nearest point, or
+/// the bound is `PI / 2` or more (the angle lies in `[0, PI / 2]`, so such a bound
+/// encloses nothing).
+type StationAngle = Option<(f64, f64)>;
+
+/// An enclosure `[lo, hi]` of a station's exact angle: its computed angle less and plus
+/// its bound, each rounded outwards by a step (a correctly rounded sum is within half a
+/// step of the exact one).
+fn station_enclosure((angle, err): (f64, f64)) -> (f64, f64) {
+    (next_down(angle - err), next_up(angle + err))
+}
+
+/// How a candidate's side compares with a copy's side, over the stations the copy
+/// certifies ([`compare_side`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SideVerdict {
+    /// Shown no worse: the candidate's largest angle is at most the copy's plus the
+    /// resolution, by the enclosures.
+    NoWorse,
+    /// The candidate leaves out a station the copy certifies: no worse is not shown there.
+    Uncertified,
+    /// The candidate's largest angle is certainly larger than the copy's.
+    Worse,
+    /// Neither: the enclosures are too wide to show the candidate no worse.
+    Undecided,
+}
+
+/// Compares one side of a candidate `cand` with the same side of a copy `held`, both
+/// measured at the same stations, over the stations `held` certifies: the largest angle
+/// of each over them lies in `[max lo, max hi]` of its enclosures
+/// ([`station_enclosure`]). The candidate is [`SideVerdict::Worse`] where its lower end
+/// is above the copy's upper end, and shown no worse where its upper end is at most the
+/// copy's lower end plus `resolution`; an undecided comparison does not count as no
+/// worse. A side `held` certifies nowhere constrains nothing. Comparisons are written so
+/// that a NaN decides against the candidate.
+fn compare_side(cand: &[StationAngle], held: &[StationAngle], resolution: f64) -> SideVerdict {
+    if cand.len() != held.len() {
+        return SideVerdict::Uncertified;
+    }
+    let mut c = (f64::NEG_INFINITY, f64::NEG_INFINITY);
+    let mut h = (f64::NEG_INFINITY, f64::NEG_INFINITY);
+    let mut any = false;
+    for (sc, sh) in cand.iter().zip(held) {
+        let Some(sh) = *sh else { continue };
+        let Some(sc) = *sc else {
+            return SideVerdict::Uncertified;
+        };
+        let (cl, ch) = station_enclosure(sc);
+        let (hl, hh) = station_enclosure(sh);
+        c = (c.0.max(cl), c.1.max(ch));
+        h = (h.0.max(hl), h.1.max(hh));
+        any = true;
+    }
+    if !any {
+        return SideVerdict::NoWorse;
+    }
+    if c.0 > h.1 || c.0.is_nan() || h.1.is_nan() {
+        return SideVerdict::Worse;
+    }
+    if c.1 <= next_down(h.0 + resolution) {
+        SideVerdict::NoWorse
+    } else {
+        SideVerdict::Undecided
+    }
 }
 
 /// What [`coons_side_angle`] measured, per side (left, bottom, right, top): `None` for a
-/// side that does not vote, having no surface or no certified station.
-#[derive(Debug, Clone, Copy, PartialEq)]
+/// side with no surface, else the station angles at the side's common stations
+/// ([`coons_common_stations`]), the same stations for every candidate.
+#[derive(Debug, Clone, PartialEq)]
 struct SideAngle {
-    /// Each side's certified sup.
-    sides: [Option<SideSup>; 4],
+    /// Each side's station angles.
+    sides: [Option<Vec<StationAngle>>; 4],
 }
 
 impl SideAngle {
-    /// The largest angle and error bound over the sides in `voting`.
-    fn sup_over(&self, voting: impl Fn(usize) -> bool) -> Option<SideSup> {
-        let mut sup: Option<SideSup> = None;
-        for (ii, side) in self.sides.iter().enumerate() {
-            let Some(side) = side else { continue };
-            if !voting(ii) {
-                continue;
-            }
+    /// The largest computed angle over every certified station; `None` when there is
+    /// none (the loop's stop test, as the fork's, on the computed values).
+    fn sup(&self) -> Option<f64> {
+        let mut sup: Option<f64> = None;
+        for (angle, _) in self.sides.iter().flatten().flatten().flatten() {
             sup = Some(match sup {
-                None => *side,
-                Some(s) => SideSup {
-                    max: if side.max > s.max { side.max } else { s.max },
-                    err: s.err.max(side.err),
-                },
+                Some(s) if s >= *angle => s,
+                _ => *angle,
             });
         }
         sup
     }
 
-    /// The largest angle over every side that votes; `None` when none does.
-    fn sup(&self) -> Option<SideSup> {
-        self.sup_over(|_| true)
+    /// The verdict of each side of `self` against `held` (`NoWorse` where `held` has no
+    /// such side; `Uncertified` where `self` lacks a side `held` has).
+    fn verdicts(&self, held: &SideAngle, resolution: f64) -> [SideVerdict; 4] {
+        let mut out = [SideVerdict::NoWorse; 4];
+        for (v, (c, h)) in out.iter_mut().zip(self.sides.iter().zip(&held.sides)) {
+            *v = match (c, h) {
+                (_, None) => SideVerdict::NoWorse,
+                (None, Some(h)) if h.iter().all(Option::is_none) => SideVerdict::NoWorse,
+                (None, Some(_)) => SideVerdict::Uncertified,
+                (Some(c), Some(h)) => compare_side(c, h, resolution),
+            };
+        }
+        out
     }
 
-    /// The sups of `self` and `other` over the sides that vote in both; `None` when no
-    /// side does.
-    fn joint(&self, other: &SideAngle) -> Option<(SideSup, SideSup)> {
-        let both = |ii: usize| other.sides.get(ii).is_some_and(Option::is_some);
-        let mine = self.sup_over(both)?;
-        let both = |ii: usize| self.sides.get(ii).is_some_and(Option::is_some);
-        let theirs = other.sup_over(both)?;
-        Some((mine, theirs))
+    /// Whether `self` is shown no worse than `held` on every side.
+    fn no_worse_than(&self, held: &SideAngle, resolution: f64) -> bool {
+        self.verdicts(held, resolution)
+            .iter()
+            .all(|v| *v == SideVerdict::NoWorse)
     }
+}
 
-    /// Whether some side that votes in both reads a larger angle in `self` than in
-    /// `other` by more than the sum of their rounding bounds: a certified regression on
-    /// that side, which a tie of the two sups (decided by the largest bound of any side)
-    /// does not show.
-    fn worse_on_a_side(&self, other: &SideAngle) -> bool {
-        self.sides.iter().zip(&other.sides).any(|pair| match pair {
-            (Some(a), Some(b)) => a.max - b.max > a.err + b.err,
-            _ => false,
-        })
-    }
+/// Whether [`make_coons_patch_tangent_to_sides`] takes a candidate measured as `cand`:
+/// it is shown no worse ([`SideAngle::no_worse_than`], at [`COONS_RESOLUTION`]) than
+/// every copy held so far, the bare patch first. Against every one, not only the last
+/// taken: each tie may let a copy rise by up to the resolution, and a chain of them
+/// would drift without bound from the bare patch.
+fn coons_takes(held: &[SideAngle], cand: &SideAngle) -> bool {
+    held.iter().all(|h| cand.no_worse_than(h, COONS_RESOLUTION))
+}
+
+/// A station's angle and rounding bound as [`coons_side_angle`] certifies it: `None`
+/// unless the bound is below `PI / 2`. The exact angle lies in `[0, PI / 2]`, so a bound
+/// of `PI / 2` or more encloses every angle there is and bounds nothing.
+fn certified_station(angle: f64, err: f64) -> StationAngle {
+    (err < std::f64::consts::FRAC_PI_2).then_some((angle, err))
 }
 
 /// One station of a side angle measurement ([`CoonsCandidateLog`]): what
@@ -2397,13 +2463,15 @@ pub struct CoonsStationLog {
     pub derivative_errors: Option<(f64, f64)>,
     /// The point of the unrefined patch at `uv` (the side point every candidate shares)
     /// and the neighbour's computed unit normal nearest it; `None` where the station is
-    /// skipped before they are evaluated (`angle` is then `None`).
+    /// skipped before they are evaluated, or the neighbour has no nearest point (`angle`
+    /// is then `None`).
     pub neighbour: Option<(Point3, Vec3)>,
     /// The computed angle (radians), `None` where the patch has no normal (the
-    /// derivatives (near) parallel or vanishing) and the station is skipped.
+    /// derivatives (near) parallel or vanishing) or the neighbour no nearest point, and
+    /// the station is skipped.
     pub angle: Option<f64>,
-    /// The rounding bound of `angle` (`coons_station_error`); `PI` for a station that is
-    /// left out (no normal, no derivative bound, or a normal not certified).
+    /// The rounding bound of `angle` (`coons_station_error`), `PI` where there is none.
+    /// The station is certified, and counts, only where this is below `PI / 2`.
     pub err: f64,
 }
 
@@ -2414,11 +2482,9 @@ pub struct CoonsCandidateLog {
     pub spans: usize,
     /// The candidate patch.
     pub patch: BSplineSurface,
-    /// Every station measured, in order.
+    /// Every station measured, in order: each side's common stations, the same for
+    /// every candidate.
     pub stations: Vec<CoonsStationLog>,
-    /// Each side's certified `(max, err)` (left, bottom, right, top), `None` for a side
-    /// that does not vote.
-    pub sides: [Option<(f64, f64)>; 4],
 }
 
 /// The record of one `make_coons_patch_tangent_to_sides` run, kept while
@@ -2429,6 +2495,9 @@ pub struct CoonsCandidateLog {
 pub struct CoonsTangencyLog {
     /// The angle (radians) below which refinement stops.
     pub target: f64,
+    /// The resolution of the comparisons: a candidate is shown no worse along a side
+    /// where its largest angle's upper end is at most a held copy's lower end plus this.
+    pub resolution: f64,
     /// The candidates measured, in order (`candidates[0]` the unrefined patch).
     pub candidates: Vec<CoonsCandidateLog>,
     /// The index of the candidate returned; `None` when the unrefined patch is kept (or
@@ -2556,12 +2625,56 @@ fn coons_station_error(
 /// leave the cylinder by 26 degrees inside the last span, against 20 at the corner).
 ///
 /// Nor does the fork add [`coons_corner_stations`] in the first and last gaps.
-fn coons_stations(patch: &BSplineSurface, dir: SurfParamType, along: &Extent1d) -> Vec<f64> {
-    let mut stations = coons_span_stations(patch, dir, along);
+fn coons_stations(knots: Option<&[f64]>, fallback_spans: usize, along: &Extent1d) -> Vec<f64> {
+    let mut stations = coons_span_stations(knots, fallback_spans, along);
     let corners = coons_corner_stations(&stations);
     stations.extend(corners);
     stations
 }
+
+/// The stations every candidate of [`make_coons_patch_tangent_to_sides`] is measured at
+/// along a side of `patch` in direction `dir`: the union, ascending and without repeats,
+/// of the [`coons_stations`] of the patch's knot vector and of each refinement's
+/// ([`refinement_knots`], 8, 16, 32 and 64 spans).
+///
+/// Not the fork, which measures each copy at its own stations. Copies compared at
+/// different stations compare different maxima: a coarse copy's peak between its
+/// stations is unseen where a finer copy's is seen, and the coarse copy reads better
+/// for being looked at less (review of WR-713). At common stations a candidate's
+/// largest angle and a held copy's are maxima over the same points of the side.
+fn coons_common_stations(patch: &BSplineSurface, dir: SurfParamType, along: &Extent1d) -> Vec<f64> {
+    let fallback = patch
+        .number_control_points(dir)
+        .saturating_sub(patch.degree(dir));
+    let knots = patch.gw_nurb().map(|nurb| {
+        if dir == SurfParamType::U {
+            nurb.u_knots().to_vec()
+        } else {
+            nurb.v_knots().to_vec()
+        }
+    });
+    let mut all = coons_stations(knots.as_deref(), fallback, along);
+    if let Some(knots) = &knots {
+        for spans in COONS_REFINEMENTS {
+            let refined = refinement_knots(knots, spans);
+            all.extend(coons_stations(Some(&refined), fallback, along));
+        }
+    }
+    all.retain(|s| s.is_finite());
+    all.sort_by(f64::total_cmp);
+    all.dedup();
+    all
+}
+
+/// The refinements [`make_coons_patch_tangent_to_sides`] tries, in spans each way.
+const COONS_REFINEMENTS: [usize; 4] = [8, 16, 32, 64];
+
+/// The resolution (radians) of [`make_coons_patch_tangent_to_sides`]'s comparisons:
+/// `SM_CONTINUITY_ANGLE`, the angle within which SMLib calls a seam tangent. A candidate
+/// is no worse than a held copy along a side where its largest angle is certainly at
+/// most the copy's plus this. Fixed, not the caller's tangency tolerance (which may be
+/// zero), so that ties are decided the same for every caller.
+const COONS_RESOLUTION: f64 = ANG_TOL_DEG * (PI / 180.0);
 
 /// `2^(-j/4)` for `j` in `0..4`, rounded to nearest: the fractions of an octave
 /// [`coons_corner_stations`] steps by.
@@ -2605,23 +2718,16 @@ fn coons_corner_stations(stations: &[f64]) -> Vec<f64> {
     corners
 }
 
-/// The stations [`coons_stations`] spaces by the knot spans (without the corner ones).
-fn coons_span_stations(patch: &BSplineSurface, dir: SurfParamType, along: &Extent1d) -> Vec<f64> {
+/// The stations [`coons_stations`] spaces by the knot spans (without the corner ones);
+/// with no knot vector, `4 * fallback_spans + 1` (33 at least) evenly spaced.
+fn coons_span_stations(knots: Option<&[f64]>, fallback_spans: usize, along: &Extent1d) -> Vec<f64> {
     let even = |count: usize| -> Vec<f64> {
         (0..count)
             .map(|kk| along.evaluate(kk as f64 / (count - 1) as f64))
             .collect()
     };
-    let Some(nurb) = patch.gw_nurb() else {
-        let spans = patch
-            .number_control_points(dir)
-            .saturating_sub(patch.degree(dir));
-        return even((4 * spans + 1).max(33));
-    };
-    let knots = if dir == SurfParamType::U {
-        nurb.u_knots()
-    } else {
-        nurb.v_knots()
+    let Some(knots) = knots else {
+        return even((4 * fallback_spans + 1).max(33));
     };
     let mut breaks: Vec<f64> = vec![along.min()];
     for &t in knots {
@@ -2646,39 +2752,61 @@ fn coons_span_stations(patch: &BSplineSurface, dir: SurfParamType, along: &Exten
     stations
 }
 
-/// The fork's `sm_CoonsSideAngle`: the largest angle (radians) between a Coons patch's
-/// normal and the normals of the surfaces along its sides, at four stations a knot
-/// span (33 at least, [`coons_stations`]). Sides are ordered left (u min), bottom (v min), right (u max),
-/// top (v max); a side with no surface is skipped, and so is a station where the
-/// patch has no normal (a degenerate side's point).
-///
-/// Not the fork: the result is per side and carries a rounding bound ([`SideSup::err`],
-/// the largest [`coons_station_error`] over the side's stations, since the error of a
-/// maximum is at most the largest error of its terms), which
-/// [`make_coons_patch_tangent_to_sides`] uses to tell a real difference between
-/// candidates from rounding; a station with no such bound (its normal not certified) is
-/// left out, and a side left with none does not vote; and the side normal is the
-/// neighbour's at its point nearest the side ([`coons_side_normal_nearest`]), not at the
-/// UV curve's point. The side point is read from `sides`, the unrefined patch every
-/// candidate shares its sides with, so each station's side normal is the same vector in
-/// every candidate.
-fn coons_side_angle(
+/// One station of a side ([`CoonsSideFrames`]): its parameter along the side and, where
+/// there is one, the unrefined patch's side point and the neighbour's unit normal
+/// nearest it.
+type CoonsSideFrame = (f64, Option<(Point3, Vec3)>);
+
+/// What every candidate of [`make_coons_patch_tangent_to_sides`] is measured against,
+/// read once from the unrefined patch: per side (left, bottom, right, top), `None` for a
+/// side with no UV curve or surface, else a frame at each common station
+/// ([`coons_common_stations`]). The side point and normal do not depend on the
+/// candidate (refinement and the projection of the side rows leave the sides in
+/// place), so each station's side normal is the same vector for every candidate.
+struct CoonsSideFrames {
+    /// Each side's frames, in station order.
+    sides: [Option<Vec<CoonsSideFrame>>; 4],
+}
+
+/// The station `s` of side `ii` as a point of the parameter domain `su` x `sv`.
+fn coons_station_uv(ii: usize, s: f64, su: &Extent1d, sv: &Extent1d) -> Point2 {
+    match ii {
+        LEFT => Point2::new(su.min(), s),
+        BOT => Point2::new(s, sv.min()),
+        RIGHT => Point2::new(su.max(), s),
+        _ => Point2::new(s, sv.max()),
+    }
+}
+
+/// The evaluation flags [`coons_side_angle`] and [`coons_side_frames`] read a station
+/// with: the side of each knot that lies inside the domain, and the derivatives as
+/// computed, without `Evaluate1stDerivatives`'s repair of a short one (a stand-in from
+/// the second derivatives, which no rounding bound covers).
+fn coons_station_flags(uv: Point2, su: &Extent1d, sv: &Extent1d) -> EvaluateFlags {
+    let side = |below_max: bool| if below_max { Side::Left } else { Side::Right };
+    EvaluateFlags {
+        u_side: side(uv.x < su.max()),
+        v_side: side(uv.y < sv.max()),
+        only_upper_half: true,
+        non_zero_tangents: false,
+    }
+}
+
+/// The [`CoonsSideFrames`] of the unrefined `patch`: at each common station the patch's
+/// side point and the neighbour's normal nearest it ([`coons_side_normal_nearest`], not
+/// the fork's normal at the UV curve's point). A station where the neighbour has no
+/// nearest point, or its normal fails to evaluate, has no frame and certifies nothing.
+fn coons_side_frames(
     k: &crate::kernel::Kernel,
     patch: &BSplineSurface,
-    sides: &BSplineSurface,
     uv_curves: &[Option<BSplineCurve>],
     surfaces: &[Option<&SmSurface>],
-    mut log: Option<&mut Vec<CoonsStationLog>>,
-) -> Result<SideAngle> {
-    let mut per_side = [None; 4];
-    // the derivative bound holds for the B-spline basis of a non-rational patch
-    let nurb = patch
-        .gw_nurb()
-        .filter(|_| !patch.is_rational() && patch.form() != BSplineSurfaceForm::Polynomial);
+) -> Result<CoonsSideFrames> {
+    let mut sides: [Option<Vec<CoonsSideFrame>>; 4] = [None, None, None, None];
     let domain = patch.natural_uv_domain();
     let su = Extent1d::from_min_max(domain.min.x, domain.max.x);
     let sv = Extent1d::from_min_max(domain.min.y, domain.max.y);
-    for ii in 0..4 {
+    for (ii, slot) in sides.iter_mut().enumerate() {
         let Some((uv_curve, surface)) = coons_side(uv_curves, surfaces, ii) else {
             continue;
         };
@@ -2689,29 +2817,68 @@ fn coons_side_angle(
         } else {
             SurfParamType::V
         };
-        let mut sup: Option<SideSup> = None;
-        for s in coons_stations(patch, dir, along) {
-            let uv = match ii {
-                LEFT => Point2::new(su.min(), s),
-                BOT => Point2::new(s, sv.min()),
-                RIGHT => Point2::new(su.max(), s),
-                _ => Point2::new(s, sv.max()),
-            };
-            let side = |below_max: bool| if below_max { Side::Left } else { Side::Right };
-            // the derivatives as computed, without `Evaluate1stDerivatives`'s repair of a
-            // short one (a stand-in from the second derivatives, which no rounding bound
-            // covers): next to a collapsed corner the station is then skipped or left out
-            let d = patch.evaluate(
-                uv,
-                1,
-                1,
-                EvaluateFlags {
-                    u_side: side(uv.x < su.max()),
-                    v_side: side(uv.y < sv.max()),
-                    only_upper_half: true,
-                    non_zero_tangents: false,
-                },
-            )?;
+        let mut frames = Vec::new();
+        for s in coons_common_stations(patch, dir, along) {
+            let uv = coons_station_uv(ii, s, &su, &sv);
+            // only the point is used: no tangent repair, which can fail where a
+            // derivative of the patch vanishes though the station is valid
+            let side_point = patch
+                .evaluate(uv, 1, 1, coons_station_flags(uv, &su, &sv))?
+                .first()
+                .and_then(|row| row.first())
+                .copied()
+                .ok_or_else(|| {
+                    SolidError::b_spline(
+                        OP_CORNER,
+                        BSplineFailure::Failed("the evaluation returned no point"),
+                    )
+                })?;
+            let normal = ignored(coons_side_normal_nearest(
+                k, uv_curve, surface, along, s, side_point,
+            ))?
+            .flatten();
+            frames.push((s, normal.map(|n| (side_point, n))));
+        }
+        *slot = Some(frames);
+    }
+    Ok(CoonsSideFrames { sides })
+}
+
+/// The fork's `sm_CoonsSideAngle`: the angles (radians) between a Coons patch's normal
+/// and the normals of the surfaces along its sides. Sides are ordered left (u min),
+/// bottom (v min), right (u max), top (v max); a side with no surface is skipped, and
+/// so is a station where the patch has no normal (a degenerate side's point).
+///
+/// Not the fork, which returns the largest angle at its own `4 * spans + 1` stations:
+/// the result is every station's angle with its rounding bound
+/// ([`coons_station_error`]), at the common stations of `frames`, the same for every
+/// candidate, against the side normals read once from the unrefined patch
+/// ([`coons_side_frames`]). [`make_coons_patch_tangent_to_sides`] compares candidates
+/// station by station. G1 is undefined where the normal is: a station is certified only
+/// where its bound is below `PI / 2` (the angle lies in `[0, PI / 2]`, so a wider bound
+/// encloses nothing); elsewhere, and where there is no frame, it is `None`.
+fn coons_side_angle(
+    patch: &BSplineSurface,
+    frames: &CoonsSideFrames,
+    mut log: Option<&mut Vec<CoonsStationLog>>,
+) -> Result<SideAngle> {
+    let mut per_side: [Option<Vec<StationAngle>>; 4] = [None, None, None, None];
+    // the derivative bound holds for the B-spline basis of a non-rational patch
+    let nurb = patch
+        .gw_nurb()
+        .filter(|_| !patch.is_rational() && patch.form() != BSplineSurfaceForm::Polynomial);
+    let domain = patch.natural_uv_domain();
+    let su = Extent1d::from_min_max(domain.min.x, domain.max.x);
+    let sv = Extent1d::from_min_max(domain.min.y, domain.max.y);
+    for (ii, (slot, side_frames)) in per_side.iter_mut().zip(&frames.sides).enumerate() {
+        let Some(side_frames) = side_frames else {
+            continue;
+        };
+        let mut angles = Vec::with_capacity(side_frames.len());
+        for &(s, frame) in side_frames {
+            let uv = coons_station_uv(ii, s, &su, &sv);
+            // next to a collapsed corner the station is then skipped or left out
+            let d = patch.evaluate(uv, 1, 1, coons_station_flags(uv, &su, &sv))?;
             let deriv = |i: usize, j: usize| -> Result<Vec3> {
                 d.get(i).and_then(|row| row.get(j)).copied().ok_or_else(|| {
                     SolidError::b_spline(
@@ -2729,7 +2896,9 @@ fn coons_side_angle(
             // tangency-labs/smlib@701da4b): `unitize`'s absolute floor, 1e-12, refused the
             // normal of a station near a collapsing side of a patch 0.01 across.
             let normal_length = normal.length();
-            if scale < EFF_ZERO_SQ || normal_length <= EFF_ZERO_SQRT * scale {
+            let frame =
+                frame.filter(|_| scale >= EFF_ZERO_SQ && normal_length > EFF_ZERO_SQRT * scale);
+            let Some((side_point, side_normal)) = frame else {
                 if let Some(log) = log.as_deref_mut() {
                     log.push(CoonsStationLog {
                         side: ii,
@@ -2743,34 +2912,10 @@ fn coons_side_angle(
                         err: PI,
                     });
                 }
+                angles.push(None);
                 continue;
-            }
+            };
             normal /= normal_length;
-            // only the point is used: no tangent repair, which can fail where a
-            // derivative of the sides patch vanishes though the station is valid
-            let side_point = sides
-                .evaluate(
-                    uv,
-                    1,
-                    1,
-                    EvaluateFlags {
-                        u_side: side(uv.x < su.max()),
-                        v_side: side(uv.y < sv.max()),
-                        only_upper_half: true,
-                        non_zero_tangents: false,
-                    },
-                )?
-                .first()
-                .and_then(|row| row.first())
-                .copied()
-                .ok_or_else(|| {
-                    SolidError::b_spline(
-                        OP_CORNER,
-                        BSplineFailure::Failed("the evaluation returned no point"),
-                    )
-                })?;
-            let side_normal =
-                coons_side_normal_nearest(k, uv_curve, surface, along, s, side_point)?;
             let cos = normal.dot(side_normal).abs();
             let angle = acos(if cos < 1.0 { cos } else { 1.0 });
             let err = match deriv_err {
@@ -2791,23 +2936,13 @@ fn coons_side_angle(
                     err,
                 });
             }
-            // G1 is undefined where the patch normal is: a station whose normal is not
-            // certified (no derivative bound, or the cross product within its rounding of
-            // zero, as next to a collapsed corner) is left out, neither a tie nor a win
-            if err >= PI {
-                continue;
-            }
-            sup = Some(match sup {
-                None => SideSup { max: angle, err },
-                Some(m) => SideSup {
-                    max: if angle > m.max { angle } else { m.max },
-                    err: m.err.max(err),
-                },
-            });
+            // G1 is undefined where the patch normal is: a station whose angle is not
+            // certified (no derivative bound, or a bound of `PI / 2` or more, as where the
+            // cross product is within its rounding of zero next to a collapsed corner) is
+            // left out, neither a tie nor a win
+            angles.push(certified_station(angle, err));
         }
-        if let Some(slot) = per_side.get_mut(ii) {
-            *slot = sup;
-        }
+        *slot = Some(angles);
     }
     Ok(SideAngle { sides: per_side })
 }
@@ -2817,18 +2952,25 @@ fn coons_side_angle(
 fn refine_to_spans(surface: &mut BSplineSurface, param: SurfParamType, spans: usize) -> Result<()> {
     const OP: &str = OP_CORNER;
     let (knots, _) = surface.knots(param, None)?;
-    let (Some(&first), Some(&last)) = (knots.first(), knots.last()) else {
-        return Err(SolidError::b_spline(
-            OP,
-            BSplineFailure::Failed("the surface has fewer than two knots"),
-        ));
-    };
     if knots.len() < 2 {
         return Err(SolidError::b_spline(
             OP,
             BSplineFailure::Failed("the surface has fewer than two knots"),
         ));
     }
+    let new_knots = refinement_new_knots(&knots, spans);
+    if !new_knots.is_empty() {
+        surface.insert_knots(param, &new_knots)?;
+    }
+    Ok(())
+}
+
+/// The knots [`refine_to_spans`] inserts into `knots` (ascending): each span longer
+/// than `1 / spans` of the whole cut into equal pieces no longer than that.
+fn refinement_new_knots(knots: &[f64], spans: usize) -> Vec<f64> {
+    let (Some(&first), Some(&last)) = (knots.first(), knots.last()) else {
+        return Vec::new();
+    };
     let max_span = (last - first) / spans as f64;
     let mut new_knots = Vec::new();
     for pair in knots.windows(2) {
@@ -2841,10 +2983,17 @@ fn refine_to_spans(surface: &mut BSplineSurface, param: SurfParamType, spans: us
             new_knots.push(lo + length * kk as f64 / pieces as f64);
         }
     }
-    if !new_knots.is_empty() {
-        surface.insert_knots(param, &new_knots)?;
-    }
-    Ok(())
+    new_knots
+}
+
+/// The knot vector [`refine_to_spans`] leaves: `knots` with the
+/// [`refinement_new_knots`] merged in (the stations only need its distinct values).
+fn refinement_knots(knots: &[f64], spans: usize) -> Vec<f64> {
+    let mut all = knots.to_vec();
+    all.extend(refinement_new_knots(knots, spans));
+    all.retain(|t| t.is_finite());
+    all.sort_by(f64::total_cmp);
+    all
 }
 
 /// The fork's `sm_ProjectCoonsSideRows`: each control point next to a side of a Coons
@@ -2982,26 +3131,33 @@ fn project_coons_side_rows(
 /// curvature meet, `sm_CreateCoonsSrf` takes the mean twist and the patch leaves both
 /// rounds at an angle. A copy of the patch is refined to 8, 16, 32 and 64 spans each
 /// way and the control points next to each side moved into the side's tangent planes,
-/// until every side reads within tolerance. Returns the first copy within it, or else
-/// the one nearest it if that is nearer than `patch`; `None` when `patch` is rational,
-/// within tolerance already, or no copy is nearer.
+/// until every side reads within tolerance. Returns the last copy taken, `None` when
+/// `patch` is rational, within tolerance already, or no copy is taken.
 ///
-/// Not the fork: the fork keeps a copy only when its largest angle is strictly smaller.
-/// Refinement leaves the corner normals where they are (they are set by the shared
-/// loop curves), so where the largest angle sits at a corner every copy reads the same
-/// angle up to rounding, and the fork's choice was decided by about `1e-14` of it
-/// (WR-713: analytic028 kept the bare bicubic patch). Here two largest angles within
-/// the sum of their rounding bounds ([`coons_station_error`]) are tied, and a tie goes
-/// to the finer copy: the refinement's intent, with a largest angle at most that sum
-/// above the coarser one's. Not where the finer copy is certainly worse along a side
-/// ([`SideAngle::worse_on_a_side`]): the sups' bound is the largest of any side, and a side
-/// read to `1e-5` can be ten degrees worse inside a tie that a side read to a radian
-/// makes (WR-713: `vase_rev_corner_blend_3`'s bottom side, 1.3896 radians on the bare
-/// patch against 1.5708 on every refined copy). G1 is undefined where the normal is, so
-/// only certified stations count ([`coons_side_angle`]), two candidates are compared over
-/// the sides that vote in both, and with no such side the choice stands (where the bare
-/// patch has none, it is kept). The choice depends only on the computed values, so it is
-/// deterministic.
+/// Not the fork: the fork takes a copy when its largest angle (over all sides, each
+/// copy at its own stations) is strictly smaller than the held one's. Refinement leaves
+/// the corner normals where they are (they are set by the shared loop curves), so where
+/// the largest angle sits at a corner every copy reads the same angle up to rounding,
+/// and the fork's choice was decided by about `1e-14` of it (WR-713: analytic028 kept
+/// the bare bicubic patch). Here every candidate is measured at the same stations
+/// ([`coons_common_stations`]) with a rounding bound at each ([`coons_side_angle`]), and
+/// is taken only where it is shown no worse, side by side, than the bare patch and
+/// every copy taken before it ([`SideAngle::no_worse_than`]): on each side its largest
+/// angle's enclosure must lie below the held copy's lower end plus [`COONS_RESOLUTION`],
+/// over the stations the held copy certifies. So
+/// - a tie within the resolution goes to the finer copy, the refinement's intent;
+/// - a side certainly worse vetoes the copy even where the largest angle over all sides
+///   improves (WR-713: `vase_rev_corner_blend_3`'s bottom side, 1.3896 radians on the
+///   bare patch against 1.5708 on every refined copy);
+/// - a comparison the bounds leave undecided, or a station the held copy certifies and
+///   the candidate does not, does not take the copy (WR-713: `Endcap_corner_blend_3`,
+///   whose sides read to a radian next to its collapsed corners);
+/// - comparing with every held copy, not only the last, keeps a chain of ties from
+///   drifting: the copy returned is within the resolution of the bare patch on every
+///   side.
+///
+/// G1 is undefined where the normal is, so only certified stations count. The choice
+/// depends only on the computed values, so it is deterministic.
 fn make_coons_patch_tangent_to_sides(
     k: &crate::kernel::Kernel,
     patch: &BSplineSurface,
@@ -3024,70 +3180,48 @@ fn make_coons_patch_tangent_to_sides(
         .is_ok_and(|log| log.is_some());
     let mut candidates: Vec<CoonsCandidateLog> = Vec::new();
     let mut chosen = None;
-    let record =
-        |spans: usize, attempt: &BSplineSurface, angle: &SideAngle, stations| CoonsCandidateLog {
-            spans,
-            patch: attempt.clone(),
-            stations,
-            sides: angle.sides.map(|s| s.map(|s| (s.max, s.err))),
-        };
+    let record = |spans: usize, attempt: &BSplineSurface, stations| CoonsCandidateLog {
+        spans,
+        patch: attempt.clone(),
+        stations,
+    };
+    let frames = coons_side_frames(k, patch, uv_curves, surfaces)?;
     let mut stations = Vec::new();
-    let mut best_angle = coons_side_angle(
-        k,
-        patch,
-        patch,
-        uv_curves,
-        surfaces,
-        logging.then_some(&mut stations),
-    )?;
+    let bare = coons_side_angle(patch, &frames, logging.then_some(&mut stations))?;
     if logging {
-        candidates.push(record(0, patch, &best_angle, std::mem::take(&mut stations)));
+        candidates.push(record(0, patch, std::mem::take(&mut stations)));
     }
+    // the bare patch and every copy taken, each a bar the next candidate must clear
+    let mut held: Vec<SideAngle> = vec![bare];
     let mut best = None;
-    let mut spans = 8;
-    while spans <= 64 && best_angle.sup().is_some_and(|sup| sup.max > target) {
+    for spans in COONS_REFINEMENTS {
+        let above = held
+            .last()
+            .and_then(SideAngle::sup)
+            .is_some_and(|sup| sup > target);
+        if !above {
+            break;
+        }
         let mut attempt = patch.clone();
         refine_to_spans(&mut attempt, SurfParamType::U, spans)?;
         refine_to_spans(&mut attempt, SurfParamType::V, spans)?;
         project_coons_side_rows(k, &mut attempt, uv_curves, surfaces)?;
-        let angle = coons_side_angle(
-            k,
-            &attempt,
-            patch,
-            uv_curves,
-            surfaces,
-            logging.then_some(&mut stations),
-        )?;
+        let angle = coons_side_angle(&attempt, &frames, logging.then_some(&mut stations))?;
         if logging {
-            candidates.push(record(
-                spans,
-                &attempt,
-                &angle,
-                std::mem::take(&mut stations),
-            ));
+            candidates.push(record(spans, &attempt, std::mem::take(&mut stations)));
         }
-        // Not the fork (`angle < best_angle`): only the sides certified in both vote, and
-        // maxima within their rounding bounds of each other are tied, a tie going to the
-        // finer attempt unless it is certainly worse along some side. With no side voting
-        // the choice stands.
-        let Some((cand, held)) = angle.joint(&best_angle) else {
-            spans *= 2;
-            continue;
-        };
-        let tied = (cand.max - held.max).abs() <= cand.err + held.err;
-        let better = !tied && cand.max < held.max;
-        if better || (tied && !angle.worse_on_a_side(&best_angle)) {
-            best_angle = angle;
+        if coons_takes(&held, &angle) {
+            held.push(angle);
             best = Some(attempt);
             chosen = logging.then(|| candidates.len().saturating_sub(1));
         }
-        spans *= 2;
     }
     if logging {
         if let Ok(mut log) = k.coons_tangency_log.try_borrow_mut() {
             if let Some(log) = log.as_mut() {
                 log.push(CoonsTangencyLog {
                     target,
+                    resolution: COONS_RESOLUTION,
                     candidates,
                     chosen,
                 });
@@ -3552,15 +3686,16 @@ mod tests {
 
     /// Near a collapsed corner far from the origin the patch normal is lost in rounding:
     /// the stations whose cross product is within its rounding bound of zero are left out
-    /// (bound `PI`), so they neither decide nor tie, and the side's sup is that of the
-    /// certified stations, with a bound below `PI`.
+    /// (bound `PI`), so they neither decide nor tie; every other station is kept with its
+    /// angle and bound.
     #[test]
     fn coons_side_angle_leaves_out_a_collapsed_corner() {
         let k = &crate::Kernel::default();
         let (patch, plane, uvs) = far_triangle(Vec3::new(1e8, 1e8, 1e8));
         let surfaces = [Some(&plane), Some(&plane), Some(&plane), None];
+        let frames = coons_side_frames(k, &patch, &uvs, &surfaces).unwrap();
         let mut log = Vec::new();
-        let angle = coons_side_angle(k, &patch, &patch, &uvs, &surfaces, Some(&mut log)).unwrap();
+        let angle = coons_side_angle(&patch, &frames, Some(&mut log)).unwrap();
         assert!(
             angle.sides[TOP].is_none(),
             "the collapsed side has no surface"
@@ -3579,93 +3714,190 @@ mod tests {
                     .any(|s| s.angle.is_some() && s.err == PI && s.s > 0.999),
                 "side {ii}: no station next to the apex left out"
             );
-            let certified: Vec<&&CoonsStationLog> = st.iter().filter(|s| s.err < PI).collect();
-            assert!(certified.len() > 20, "side {ii}: few certified stations");
-            let max = certified
-                .iter()
-                .filter_map(|s| s.angle)
-                .fold(0.0_f64, f64::max);
-            let err = certified.iter().map(|s| s.err).fold(0.0_f64, f64::max);
-            let sup = angle.sides[ii].expect("the side votes");
-            assert_eq!((sup.max, sup.err), (max, err), "side {ii}");
-            assert!(sup.err < PI, "side {ii}: an uncertified sup");
+            let side = angle.sides[ii].as_ref().expect("the side has a surface");
+            assert_eq!(side.len(), st.len(), "side {ii}: one angle a station");
+            for (a, s) in side.iter().zip(&st) {
+                let expect = s.angle.and_then(|angle| certified_station(angle, s.err));
+                assert_eq!(*a, expect, "side {ii} at {}", s.s);
+            }
+            assert!(
+                side.iter().flatten().count() > 20,
+                "side {ii}: few certified stations"
+            );
         }
     }
 
-    /// A side with no certified station does not vote, and with no side voting the
-    /// unrefined patch is kept: at `1e13` from the origin every station's rounding bound
-    /// is `PI`, and no refined copy can be told from it.
+    /// A patch with no certified station keeps the unrefined patch: at `1e13` from the
+    /// origin every station's rounding bound is `PI`, and no refined copy can be shown
+    /// no worse than it.
     #[test]
     fn a_patch_with_no_certified_station_is_kept() {
         let k = &crate::Kernel::default();
         let (patch, plane, uvs) = far_triangle(Vec3::new(1e13, 1e13, 1e13));
         let surfaces = [Some(&plane), Some(&plane), Some(&plane), None];
-        let angle = coons_side_angle(k, &patch, &patch, &uvs, &surfaces, None).unwrap();
-        assert_eq!(angle.sides, [None; 4]);
+        let frames = coons_side_frames(k, &patch, &uvs, &surfaces).unwrap();
+        let angle = coons_side_angle(&patch, &frames, None).unwrap();
+        assert!(angle.sides.iter().flatten().flatten().all(Option::is_none));
         assert_eq!(angle.sup(), None);
         let kept = make_coons_patch_tangent_to_sides(k, &patch, &uvs, &surfaces, 0.0).unwrap();
         assert!(kept.is_none(), "a refined copy replaced the patch");
     }
 
-    /// Two candidates compare over the sides that vote in both only.
-    #[test]
-    fn side_angles_compare_over_the_sides_both_certify() {
-        let sup = |max: f64| Some(SideSup { max, err: 1e-12 });
-        let a = SideAngle {
-            sides: [sup(0.1), None, sup(0.5), None],
-        };
-        let b = SideAngle {
-            sides: [sup(0.2), sup(0.9), None, None],
-        };
-        let (ja, jb) = a.joint(&b).unwrap();
-        assert_eq!((ja.max, jb.max), (0.1, 0.2));
-        let (jb, ja) = b.joint(&a).unwrap();
-        assert_eq!((ja.max, jb.max), (0.1, 0.2));
-        let c = SideAngle {
-            sides: [None, None, None, sup(0.3)],
-        };
-        assert_eq!(a.joint(&c), None);
+    /// One side of station angles, every station certified.
+    fn side_of(angles: &[(f64, f64)]) -> Vec<StationAngle> {
+        angles.iter().map(|&a| Some(a)).collect()
     }
 
-    /// A tie of the sups hides a side read precisely: `vase_rev_corner_blend_3`'s refined
-    /// copies tie the bare patch within the radian that the left and right sides' bounds
-    /// leave, while their bottom side is certainly ten degrees worse.
+    /// A [`SideAngle`] with one station a side.
+    fn one_station(sides: [Option<(f64, f64)>; 4]) -> SideAngle {
+        SideAngle {
+            sides: sides.map(|s| s.map(|a| side_of(&[a]))),
+        }
+    }
+
+    /// M4 (review of WR-713): a bound of `PI / 2` or more bounds nothing (the exact angle
+    /// lies in `[0, PI / 2]`), so such a station is not certified; the old rule kept every
+    /// bound below `PI`.
+    #[test]
+    fn a_bound_of_a_right_angle_certifies_nothing() {
+        let half = std::f64::consts::FRAC_PI_2;
+        assert_eq!(certified_station(0.3, half), None);
+        assert_eq!(certified_station(0.3, 2.0), None);
+        assert_eq!(certified_station(0.3, f64::NAN), None);
+        let below = next_down(half);
+        assert_eq!(certified_station(0.3, below), Some((0.3, below)));
+    }
+
+    /// M5 (review of WR-713): every candidate is measured at the same stations, which
+    /// hold every station of the bare patch and of each refinement; a side measured at
+    /// other stations does not compare.
+    #[test]
+    fn candidates_are_measured_at_common_stations() {
+        let (patch, _, _) = far_triangle(Vec3::new(0.0, 0.0, 0.0));
+        let along = Extent1d::from_min_max(0.0, 1.0);
+        let common = coons_common_stations(&patch, SurfParamType::U, &along);
+        assert!(common.windows(2).all(|w| w[0] < w[1]), "not ascending");
+        let knots = [0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0];
+        let mut levels = vec![knots.to_vec()];
+        levels.extend(COONS_REFINEMENTS.map(|spans| refinement_knots(&knots, spans)));
+        for level in &levels {
+            for s in coons_stations(Some(level), 1, &along) {
+                assert!(common.contains(&s), "station {s} missing");
+            }
+        }
+        // a peak the held copy sees only at a station the candidate is not measured at
+        // is not compared away
+        let held = [Some((0.2, 1e-9)), Some((0.8, 1e-9)), Some((0.2, 1e-9))];
+        assert_eq!(
+            compare_side(&[Some((0.1, 1e-9)), Some((0.1, 1e-9))], &held, 0.0),
+            SideVerdict::Uncertified
+        );
+        let cand = [Some((0.1, 1e-9)), Some((0.9, 1e-9)), Some((0.1, 1e-9))];
+        assert_eq!(compare_side(&cand, &held, 0.0), SideVerdict::Worse);
+    }
+
+    /// M3 (review of WR-713): a candidate that loses a station the held copy certifies is
+    /// not shown no worse there, whatever its other stations read; a station only the
+    /// candidate certifies constrains nothing.
+    #[test]
+    fn a_lost_certification_is_not_better() {
+        let held = [Some((0.5, 1e-9)), Some((0.9, 1e-9))];
+        assert_eq!(
+            compare_side(&[Some((0.1, 1e-9)), None], &held, COONS_RESOLUTION),
+            SideVerdict::Uncertified
+        );
+        let held_angle = SideAngle {
+            sides: [Some(side_of(&[(0.5, 1e-9)])), None, None, None],
+        };
+        let lost = SideAngle {
+            sides: [Some(vec![None]), None, None, None],
+        };
+        assert!(!lost.no_worse_than(&held_angle, COONS_RESOLUTION));
+        let gained = SideAngle {
+            sides: [Some(vec![None]), None, None, None],
+        };
+        assert!(held_angle.no_worse_than(&gained, COONS_RESOLUTION));
+    }
+
+    /// M2 (review of WR-713): a side certainly worse vetoes a candidate even where its
+    /// largest angle over all sides improves (0.9 down to 0.5).
+    #[test]
+    fn a_worse_side_vetoes_a_better_maximum() {
+        let held = one_station([Some((0.9, 1e-6)), Some((0.1, 1e-6)), None, None]);
+        let cand = one_station([Some((0.5, 1e-6)), Some((0.4, 1e-6)), None, None]);
+        assert!(cand.sup() < held.sup());
+        assert_eq!(
+            cand.verdicts(&held, COONS_RESOLUTION),
+            [
+                SideVerdict::NoWorse,
+                SideVerdict::Worse,
+                SideVerdict::NoWorse,
+                SideVerdict::NoWorse
+            ]
+        );
+        assert!(!coons_takes(&[held], &cand));
+    }
+
+    /// M1 (review of WR-713): each candidate must be no worse than every copy held, not
+    /// only the last: two rises of 0.004 radians, each a tie with the copy before (within
+    /// both bounds of 0.002 and within the resolution), would carry the chosen copy
+    /// 0.008 above the bare patch, which is certainly worse than it.
+    #[test]
+    fn a_chain_of_ties_does_not_drift() {
+        let bare = one_station([None, Some((1.000, 2e-3)), None, None]);
+        let first = one_station([None, Some((1.004, 2e-3)), None, None]);
+        let second = one_station([None, Some((1.008, 2e-3)), None, None]);
+        assert!(coons_takes(std::slice::from_ref(&bare), &first));
+        assert!(second.no_worse_than(&first, COONS_RESOLUTION));
+        assert!(!coons_takes(&[bare, first], &second));
+    }
+
+    /// B2 (review of WR-713): a comparison the bounds leave undecided does not take the
+    /// candidate. `Endcap_corner_blend_3`'s left side reads 1.566 within 1.03 on the bare
+    /// patch: a refined copy reading 1.2 within 1.0 there is not shown better, and its
+    /// bottom side (1.1353 against 1.0752, each within 0.0034) is certainly worse.
+    #[test]
+    fn an_undecided_side_is_not_no_worse() {
+        let bare = one_station([Some((1.566, 1.03)), Some((1.0752, 0.0034)), None, None]);
+        let refined = one_station([Some((1.2, 1.0)), Some((1.0752, 0.0034)), None, None]);
+        assert_eq!(
+            refined.verdicts(&bare, COONS_RESOLUTION)[LEFT],
+            SideVerdict::Undecided
+        );
+        assert!(!coons_takes(std::slice::from_ref(&bare), &refined));
+        let worse = one_station([Some((1.2, 1.0)), Some((1.1353, 0.0034)), None, None]);
+        assert_eq!(
+            worse.verdicts(&bare, COONS_RESOLUTION)[BOT],
+            SideVerdict::Worse
+        );
+        // a tie within the resolution, every side decided, takes the finer copy
+        let tie = one_station([None, Some((1.0752 + 1e-3, 0.0034)), None, None]);
+        let bare_bot = one_station([None, Some((1.0752, 0.0034)), None, None]);
+        assert!(coons_takes(&[bare_bot], &tie));
+    }
+
+    /// A tie of the largest angles hides a side read precisely: `vase_rev_corner_blend_3`'s
+    /// refined copies tie the bare patch within the radian that the left and right sides'
+    /// bounds leave, while their bottom side is certainly ten degrees worse.
     #[test]
     fn a_tie_does_not_hide_a_worse_side() {
-        let side = |max: f64, err: f64| Some(SideSup { max, err });
-        let bare = SideAngle {
-            sides: [
-                side(0.0059, 1.38),
-                side(1.3896, 2.6e-5),
-                side(1.5705, 1.41),
-                None,
-            ],
-        };
-        let finer = SideAngle {
-            sides: [
-                side(0.1565, 1.16),
-                side(1.570_779, 3.3e-5),
-                side(1.570_780, 1.01),
-                None,
-            ],
-        };
-        let (cand, held) = finer.joint(&bare).unwrap();
-        assert!(
-            (cand.max - held.max).abs() <= cand.err + held.err,
-            "not a tie"
+        let bare = one_station([
+            Some((0.0059, 1.38)),
+            Some((1.3896, 2.6e-5)),
+            Some((1.5705, 1.41)),
+            None,
+        ]);
+        let finer = one_station([
+            Some((0.1565, 1.16)),
+            Some((1.570_779, 3.3e-5)),
+            Some((1.570_780, 1.01)),
+            None,
+        ]);
+        assert_eq!(
+            finer.verdicts(&bare, COONS_RESOLUTION)[BOT],
+            SideVerdict::Worse
         );
-        assert!(finer.worse_on_a_side(&bare));
-        assert!(!bare.worse_on_a_side(&finer));
-        // within the bounds on every side: no regression
-        let close = SideAngle {
-            sides: [
-                side(0.0059, 1.38),
-                side(1.3896 + 1e-5, 2.6e-5),
-                side(1.5705, 1.41),
-                None,
-            ],
-        };
-        assert!(!close.worse_on_a_side(&bare));
+        assert!(!coons_takes(std::slice::from_ref(&bare), &finer));
     }
 
     #[test]

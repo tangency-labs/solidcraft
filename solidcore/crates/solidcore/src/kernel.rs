@@ -1065,9 +1065,10 @@ pub struct Kernel {
     /// ([`crate::blend::definition_check`]), for the check that every blend face is a
     /// definition. `None` (the default) marks and keeps nothing; it changes no result.
     pub blend_face_log: Option<crate::blend::definition_check::BlendFaceLog>,
-    /// Not upstream: while `Some`, each Coons corner patch made tangent to its sides
-    /// appends the record of its refinement (every candidate, its stations and side
-    /// angles, and the one kept), for tests that replay the choice. `None` (the default)
+    /// Not upstream; diagnostic, tests only: while `Some`, each Coons corner patch made
+    /// tangent to its sides appends the record of its refinement (every candidate, its
+    /// stations and side angles, and the one kept), for tests that replay the choice.
+    /// No library code reads it. `None` (the default)
     /// keeps nothing; it changes no result. A [`RefCell`] so the corner blend can append
     /// through the `&Kernel` it takes (the kernel stays `Send`).
     pub coons_tangency_log:
