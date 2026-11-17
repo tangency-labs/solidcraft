@@ -1,4 +1,5 @@
 use serde_json::json;
+use solidcore_record::Vec3;
 use solidcraft_geom::drawing_measure::{LinearDirection, Reading};
 use solidcraft_geom::drawing_sheet::{Margins, Orientation, PaperSize, SheetSize};
 use solidcraft_geom::drawing_view::{NamedView, ProjectedSide};
@@ -2037,4 +2038,232 @@ fn sheet_sketch_unsupported_equations_and_centerlines_are_refused_before_solving
         let raw = serde_json::to_value(&drawing).unwrap();
         assert!(refusal(&raw).contains(expected));
     }
+}
+
+// W38c: a view sketch's links to the model edges its view draws (#5425).
+
+/// The sketch on the front view of [`view_edge_design`].
+const VIEW_SKETCH: u64 = 42;
+
+/// A design with a parameter `Len` (80 mm) and a box `Box`, Len by 40 by 30 from the origin, made by
+/// its first feature; a drawing of it with its front view at 1:2 (x along X, y along Z), and an empty
+/// sketch, [`VIEW_SKETCH`], on that view. The design, its model, the drawing's id and the view's.
+fn view_edge_design() -> (crate::Document, crate::Model, u64, u64) {
+    let mut doc = crate::Document::new("View edges");
+    doc.set_param("Len", "80", Some("mm"), None).unwrap();
+    let kind = serde_json::from_value(json!({"type": "box", "corner": [0, 0, 0], "length": "Len", "width": "40", "height": "30"})).unwrap();
+    let feature = doc.add_feature(kind, None).unwrap();
+    doc.feature_mut(feature).unwrap().body_names = vec!["Box".into()];
+    let mut ids = IdSource::seeded(SEED);
+    let a3 = drawing_sheet::Sheet::standard(PaperSize::A3, Orientation::Landscape);
+    let mut d = Drawing::new("Box", "en-GB", "Box", a3, Some(DrawingBorderProfile::iso()), &BTreeSet::new(), &mut ids).unwrap();
+    let source = d.allocate_id(&mut ids).unwrap();
+    d.sources.push(Source { id: source, path: None });
+    let view = d.allocate_id(&mut ids).unwrap();
+    let half = ViewOverrides { scale: Some("1:2".parse().unwrap()), ..ViewOverrides::default() };
+    let kind = ViewKind::Base { source, view: ViewDirection::Named(NamedView::Front) };
+    let sheet = d.sheets[0].id;
+    d.add_views([Arc::new(View {
+        id: view,
+        sheet,
+        kind,
+        place: ViewPlace::At([200.0, 150.0]),
+        settings: half,
+        reference_shown_percent: 0.0,
+        label: None,
+    })]);
+    let sketch = solidcraft_sketch::Sketch::new();
+    d.sketches.push(Arc::new(SheetSketch { id: VIEW_SKETCH, owner: Owner::View(view), name: "Edges".into(), sketch }));
+    d.validate().unwrap();
+    let id = d.id;
+    doc.put_drawing(Arc::new(d));
+    let mut model = crate::Model::new();
+    model.evaluate(&doc);
+    (doc, model, id, view)
+}
+
+/// The view sketch of `drawing` in `doc`, with a link added to the edge through `at` (the design's
+/// frame) placed through `path`, at a placeholder line: the record and the link's id.
+fn with_view_edge(doc: &crate::Document, model: &crate::Model, drawing: u64, at: Vec3, path: &[u64]) -> (Drawing, String) {
+    let mut d = (**doc.drawing(drawing).unwrap()).clone();
+    let edge = doc.edge_reference(model, &dimension::EdgePick::Point(at), path).unwrap();
+    let record = Arc::make_mut(d.sketches.iter_mut().find(|r| r.id == VIEW_SKETCH).unwrap());
+    let placeholder = [solidcraft_sketch::LinkGeom::Line(Vec2::new(0.0, 0.0), Vec2::new(1.0, 0.0))];
+    let link = record.sketch.add_link(solidcraft_sketch::LinkKind::Project, edge.to_source(), &placeholder).unwrap();
+    (d, link)
+}
+
+/// The two ends of the one line `link` of `sketch` owns, lower first.
+fn linked_line(sketch: &solidcraft_sketch::Sketch, link: &str) -> [Vec2; 2] {
+    let curves = sketch.link_curves(link);
+    let [curve] = curves.as_slice() else { panic!("{link} owns {curves:?}") };
+    let solidcraft_sketch::CurveKind::Line { a, b } = sketch.curves[*curve].kind else { panic!("{:?}", sketch.curves[*curve].kind) };
+    let mut ends = [sketch.points[a].pos, sketch.points[b].pos];
+    ends.sort_by(|p, q| p.y.total_cmp(&q.y));
+    ends
+}
+
+fn view_sketch(d: &Drawing) -> solidcraft_sketch::Sketch {
+    d.sheet_sketch(VIEW_SKETCH).unwrap().sketch.clone()
+}
+
+/// A view edge is the model edge where the view draws it, in the view's own plane coordinates: it
+/// follows a parameter. When its edge isn't found it keeps the line it last showed, marked lost
+/// with the reason, and the sketch still solves; found again, it is no longer lost.
+#[test]
+fn a_view_edge_follows_its_model_and_keeps_its_line_when_lost() {
+    let (mut doc, mut model, id, view) = view_edge_design();
+    let basis = doc.drawing(id).unwrap().resolve_view(view).unwrap().basis;
+    assert_eq!((basis.origin, basis.x, basis.y), (Vec3::ZERO, Vec3::X, Vec3::Z), "the front view: x along X, y along Z");
+    // The right edge of the front face, (80, 0, 0) to (80, 0, 30).
+    let (mut d, link) = with_view_edge(&doc, &model, id, Vec3::new(80.0, 0.0, 15.0), &[]);
+    let mut sketch = view_sketch(&d);
+    let states = doc.refresh_view_links(&model, &d, view, &mut sketch).unwrap();
+    assert_eq!(states, [ViewLinkState { link: link.clone(), status: dimension::Status::Ok, warning: None }]);
+    assert_eq!(linked_line(&sketch, &link), [Vec2::new(80.0, 0.0), Vec2::new(80.0, 30.0)]);
+    assert!(!sketch.link(&link).unwrap().lost);
+    Arc::make_mut(d.sketches.iter_mut().find(|r| r.id == VIEW_SKETCH).unwrap()).sketch = sketch;
+    d.validate().unwrap();
+    doc.put_drawing(Arc::new(d.clone()));
+
+    // Len 90: solved on the model, the line is at x = 90; read without one, where it was stored.
+    doc.set_param("Len", "90", Some("mm"), None).unwrap();
+    model.evaluate(&doc);
+    let solved = d.solve_sheet_sketch_on(&doc, Some(&model), VIEW_SKETCH).unwrap();
+    assert_eq!(linked_line(&solved.sketch, &link), [Vec2::new(90.0, 0.0), Vec2::new(90.0, 30.0)]);
+    assert_eq!(linked_line(&d.solve_sheet_sketch(&doc, VIEW_SKETCH).unwrap().sketch, &link)[0], Vec2::new(80.0, 0.0));
+    let (_, edited) = d.edit_sheet_sketch_on(&doc, Some(&model), VIEW_SKETCH, |_| Ok(())).unwrap();
+    assert_eq!(linked_line(&edited.sketch, &link)[0], Vec2::new(90.0, 0.0));
+    assert_eq!(linked_line(&view_sketch(&d), &link)[0], Vec2::new(90.0, 0.0), "an edit keeps what its links read");
+
+    // Its feature suppressed: suppressed, lost, the line where it was, and the sketch still solves.
+    let feature = doc.features[0].id;
+    doc.feature_mut(feature).unwrap().suppressed = true;
+    model.evaluate(&doc);
+    let mut sketch = view_sketch(&d);
+    let states = doc.refresh_view_links(&model, &d, view, &mut sketch).unwrap();
+    assert_eq!(states[0].status, dimension::Status::Suppressed);
+    assert!(sketch.link(&link).unwrap().lost);
+    assert_eq!(linked_line(&sketch, &link), [Vec2::new(90.0, 0.0), Vec2::new(90.0, 30.0)]);
+    let solved = d.solve_sheet_sketch_on(&doc, Some(&model), VIEW_SKETCH).unwrap();
+    assert_eq!(linked_line(&solved.sketch, &link)[0], Vec2::new(90.0, 0.0));
+    assert!(solved.sketch.link(&link).unwrap().lost);
+
+    // Its body named otherwise: lost, with why.
+    doc.feature_mut(feature).unwrap().suppressed = false;
+    doc.feature_mut(feature).unwrap().body_names = vec!["Block".into()];
+    model.evaluate(&doc);
+    let mut sketch = view_sketch(&d);
+    let states = doc.refresh_view_links(&model, &d, view, &mut sketch).unwrap();
+    assert!(matches!(&states[0].status, dimension::Status::Lost(why, _) if why == "body `Box` no longer exists"), "{states:?}");
+    assert_eq!(linked_line(&sketch, &link)[0], Vec2::new(90.0, 0.0));
+
+    // Back as it was: found again, and no longer lost.
+    doc.feature_mut(feature).unwrap().body_names = vec!["Box".into()];
+    model.evaluate(&doc);
+    let mut sketch = solved.sketch;
+    let states = doc.refresh_view_links(&model, &d, view, &mut sketch).unwrap();
+    assert_eq!(states[0].status, dimension::Status::Ok);
+    assert!(!sketch.link(&link).unwrap().lost);
+}
+
+/// An edge the view sees end-on, or at an angle, has no line in the view's plane yet: it is kept
+/// where it was, marked lost, and says why; nothing is fitted to its mesh.
+#[test]
+fn a_view_edge_the_view_sees_end_on_is_kept_and_says_why() {
+    let (doc, model, id, view) = view_edge_design();
+    // The top front edge runs along X; the top right edge, (80, 0, 30) to (80, 40, 30), along Y.
+    let (d, link) = with_view_edge(&doc, &model, id, Vec3::new(80.0, 20.0, 30.0), &[]);
+    let mut sketch = view_sketch(&d);
+    let before = linked_line(&sketch, &link);
+    let states = doc.refresh_view_links(&model, &d, view, &mut sketch).unwrap();
+    assert!(matches!(&states[0].status, dimension::Status::Unmeasurable(why) if why.ends_with("isn't parallel to this view")), "{states:?}");
+    assert!(sketch.link(&link).unwrap().lost);
+    assert_eq!(linked_line(&sketch, &link), before);
+}
+
+/// A part placed twice: each view edge follows its own copy, through its occurrence path, and moves
+/// with that copy only.
+#[test]
+fn a_view_edge_on_a_part_placed_twice_follows_its_own_copy() {
+    let (mut doc, _, id, view) = view_edge_design();
+    let part = doc.add_component(Some("Part"), 0).unwrap();
+    doc.features[0].component = part;
+    let first = doc.occurrences.iter().find(|o| o.component == part).unwrap().id;
+    let shift = |x: f64| crate::rigid(Vec3::new(x, 0.0, 0.0), Vec3::ZERO, Vec3::Z, 0.0);
+    let second = doc.add_occurrence(part, 0, shift(200.0)).unwrap();
+    let mut model = crate::Model::new();
+    model.evaluate(&doc);
+    let (d, link) = with_view_edge(&doc, &model, id, Vec3::new(280.0, 0.0, 15.0), &[second]);
+    let mut sketch = view_sketch(&d);
+    doc.refresh_view_links(&model, &d, view, &mut sketch).unwrap();
+    assert_eq!(linked_line(&sketch, &link), [Vec2::new(280.0, 0.0), Vec2::new(280.0, 30.0)]);
+    doc.occurrences.iter_mut().find(|o| o.id == second).unwrap().transform = shift(210.0);
+    model.evaluate(&doc);
+    doc.refresh_view_links(&model, &d, view, &mut sketch).unwrap();
+    assert_eq!(linked_line(&sketch, &link)[0], Vec2::new(290.0, 0.0));
+    doc.occurrences.iter_mut().find(|o| o.id == first).unwrap().transform = shift(5.0);
+    model.evaluate(&doc);
+    doc.refresh_view_links(&model, &d, view, &mut sketch).unwrap();
+    assert_eq!(linked_line(&sketch, &link)[0], Vec2::new(290.0, 0.0), "the other copy moved, not this one");
+}
+
+/// A view sketch holds view-edge links: projected, each naming its edge by the drawing's edge
+/// reference rules, its linked points and curves naming one of them. A sheet sketch holds no link,
+/// as before. The file reads back and saves the same bytes.
+#[test]
+fn a_view_sketch_keeps_its_view_edges_to_the_edge_references_rules() {
+    let (doc, model, id, _) = view_edge_design();
+    let (d, link) = with_view_edge(&doc, &model, id, Vec3::new(80.0, 0.0, 15.0), &[]);
+    d.validate().unwrap();
+    let saved = d.to_json().unwrap();
+    assert_eq!(Drawing::from_json(&saved).unwrap().to_json().unwrap(), saved);
+    let why = |change: &dyn Fn(&mut solidcraft_sketch::Sketch)| {
+        let mut e = d.clone();
+        change(&mut Arc::make_mut(e.sketches.iter_mut().find(|r| r.id == VIEW_SKETCH).unwrap()).sketch);
+        e.validate().map_or_else(|e| e.to_string(), |()| "kept".into())
+    };
+    fn source(change: impl Fn(&mut String, &mut u64, &mut Vec<u64>)) -> impl Fn(&mut solidcraft_sketch::Sketch) {
+        move |sk| {
+            if let solidcraft_sketch::LinkSource::ViewEdge { name, origin_feature, path, .. } = &mut sk.links[0].source {
+                change(name, origin_feature, path);
+            }
+        }
+    }
+    let long = |n: usize| "e".repeat(n);
+    assert_eq!(why(&source(|name, _, _| *name = long(1))), "kept");
+    assert_eq!(why(&source(|name, _, _| *name = long(512))), "kept");
+    assert!(why(&source(|name, _, _| *name = long(513))).contains("1 to 512 bytes"));
+    assert!(why(&source(|name, _, _| name.clear())).contains("1 to 512 bytes"));
+    assert!(why(&source(|_, feature, _| *feature = 0)).contains("names the feature that made its body"));
+    assert_eq!(why(&source(|_, _, path| *path = vec![7; crate::MAX_PLACEMENT_DEPTH])), "kept");
+    assert!(why(&source(|_, _, path| *path = vec![7; crate::MAX_PLACEMENT_DEPTH + 1])).contains("occurrence path"));
+    assert!(why(&source(|_, _, path| *path = vec![7, 0])).contains("occurrence path"));
+    assert!(why(&|sk| sk.links[0].kind = solidcraft_sketch::LinkKind::Include).contains("projects its view's edges"));
+    assert!(why(&|sk| sk.links[0].source = solidcraft_sketch::LinkSource::Origin).contains("projects its view's edges"));
+    assert!(why(&|sk| sk.links[0].edge_name = Some("F1:front|F1:right".into())).contains("projects its view's edges"));
+    assert!(why(&|sk| sk.links.push(sk.links[0].clone())).contains("unique"));
+    assert!(why(&|sk| sk.curves[0].link = Some("nothing".into())).contains("names no link of its sketch"));
+    assert!(why(&|sk| sk.points[1].link = Some("nothing".into())).contains("names no link of its sketch"));
+    assert_eq!(why(&|sk| sk.curves[0].link = Some(link.clone())), "kept");
+    // The same link in a sheet sketch is refused with the words a sheet sketch always had.
+    let mut on_sheet = d.clone();
+    Arc::make_mut(on_sheet.sketches.iter_mut().find(|r| r.id == VIEW_SKETCH).unwrap()).owner = Owner::Sheet(d.sheets[0].id);
+    assert!(on_sheet.validate().unwrap_err().to_string().contains("not supported yet: sheet sketch links, patterns, offsets or 3D wires"));
+    assert!(refusal(&serde_json::to_value(&on_sheet).unwrap()).contains("not supported yet: sheet sketch links"));
+}
+
+/// A newer build's drawing whose sketch this build can't read opens without that sketch, names it,
+/// and writes it back on save, as it does a sheet or a source it can't read.
+#[test]
+fn a_newer_drawings_unreadable_sketch_is_set_aside_and_kept() {
+    let mut v = view_sketch_file();
+    v["format"] = json!(DRAWING.format_string(DRAWING.current() + 1));
+    v["sketches"][0]["sketch"]["links"] = json!([{"id": "j1", "source": {"type": "seen_from_afar"}}]);
+    let d = read(&v).unwrap();
+    assert_eq!(d.sketches.iter().map(|r| r.id).collect::<Vec<_>>(), [41]);
+    let newer = d.newer_file.as_ref().unwrap();
+    assert!(newer.not_understood.iter().any(|what| what.starts_with("sketch `Weld symbol outline`")), "{:?}", newer.not_understood);
+    let saved = file(&d);
+    assert!(saved["sketches"].as_array().unwrap().iter().any(|r| r["sketch"]["links"][0]["source"]["type"] == "seen_from_afar"));
 }

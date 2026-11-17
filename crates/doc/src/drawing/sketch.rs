@@ -1,6 +1,7 @@
 //! W38a's first record slice: sheet-owned, paper-mm geometry, with no model evaluation.
-//! The Sketch payload stays the shared type. Links, patterns and offsets await the
-//! receiver-aware store: refusing them here is explicit, never silent data loss.
+//! The Sketch payload stays the shared type. A view's sketch may link to the model edges its
+//! view draws ([`crate::Document::refresh_view_links`]). Other links, patterns and offsets await
+//! the receiver-aware store: refusing them here is explicit, never silent data loss.
 
 use std::collections::BTreeSet;
 use std::sync::Arc;
@@ -8,8 +9,9 @@ use std::sync::Arc;
 use serde::{Deserialize, Serialize, Serializer};
 use serde_json::Value;
 use solidcore_record::Vec2;
-use solidcraft_sketch::{ConstraintKind, CurveKind, MAX_CONSTRAINTS, MAX_COORD, MAX_CURVES, MAX_POINTS, MAX_SPLINE_POINTS, Sketch};
+use solidcraft_sketch::{ConstraintKind, CurveKind, Link, LinkKind, MAX_CONSTRAINTS, MAX_COORD, MAX_CURVES, MAX_POINTS, MAX_SPLINE_POINTS, Sketch};
 
+use super::dimension::{Lookup, ModelEdge, Status, check_edge};
 use super::{Drawing, MAX_DRAWING_BYTES, check_name, require};
 use crate::{DocError, Result};
 
@@ -85,14 +87,17 @@ pub(super) fn check_raw(value: &Value) -> Result<()> {
     for record in records {
         raw_tree(record, 0, &mut nodes, &mut bytes)?;
         let Some(sketch) = record.get("sketch") else { continue };
-        for (key, limit) in [("points", MAX_POINTS), ("curves", MAX_CURVES), ("constraints", MAX_CONSTRAINTS)] {
+        // A view sketch holds links to its view's edges ([`check_view_link`]); each makes a curve.
+        let on_view = record.get("owner").and_then(|owner| owner.get("view")).is_some();
+        let links = on_view.then_some(("links", MAX_CURVES));
+        for (key, limit) in [("points", MAX_POINTS), ("curves", MAX_CURVES), ("constraints", MAX_CONSTRAINTS)].into_iter().chain(links) {
             if let Some(array) = sketch.get(key) {
                 let array = array.as_array().ok_or_else(|| invalid(format!("{key} must be an array")))?;
                 require(array.len() <= limit, || format!("sheet sketch {key} limit exceeded"))?;
                 charge(&mut total, array.len(), MAX_ENTITIES, "drawing sketch entity")?;
             }
         }
-        for key in AUXILIARY {
+        for key in AUXILIARY.into_iter().filter(|key| !(on_view && *key == "links")) {
             if let Some(array) = sketch.get(key) {
                 let array = array.as_array().ok_or_else(|| invalid(format!("{key} must be an array")))?;
                 require(array.is_empty(), || format!("not supported yet: sheet sketch {key}"))?;
@@ -149,7 +154,9 @@ fn check_budget<'a>(records: impl Iterator<Item = &'a SheetSketch>) -> Result<()
     let mut work = 0;
     for record in records {
         let sk = &record.sketch;
-        for (count, cap) in [(sk.points.len(), MAX_POINTS), (sk.curves.len(), MAX_CURVES), (sk.constraints.len(), MAX_CONSTRAINTS)] {
+        let counts =
+            [(sk.points.len(), MAX_POINTS), (sk.curves.len(), MAX_CURVES), (sk.constraints.len(), MAX_CONSTRAINTS), (sk.links.len(), MAX_CURVES)];
+        for (count, cap) in counts {
             require(count <= cap, || "sheet sketch array limit exceeded".into())?;
             charge(&mut entities, count, MAX_ENTITIES, "drawing sketch entity")?;
         }
@@ -191,9 +198,22 @@ pub(super) fn check_drawing(drawing: &Drawing) -> Result<()> {
 fn check_payload(record: &SheetSketch) -> Result<()> {
     check_name(&record.name, "sheet sketch")?;
     let sk = &record.sketch;
-    require(sk.links.is_empty() && sk.patterns.is_empty() && sk.offsets.is_empty() && sk.freeform_offsets.is_empty() && sk.wires.is_empty(), || {
-        "not supported yet: sheet sketch links, patterns, offsets or 3D wires".into()
-    })?;
+    let on_view = matches!(record.owner, Owner::View(_));
+    require(
+        (on_view || sk.links.is_empty()) && sk.patterns.is_empty() && sk.offsets.is_empty() && sk.freeform_offsets.is_empty() && sk.wires.is_empty(),
+        || "not supported yet: sheet sketch links, patterns, offsets or 3D wires".into(),
+    )?;
+    let mut links = BTreeSet::new();
+    for link in &sk.links {
+        check_view_link(link)?;
+        identity(&mut links, &link.id)?;
+    }
+    // A linked point or curve names one of its sketch's links: only a view sketch has any.
+    let linked = |link: &Option<String>, what: &str| match link {
+        None => Ok(()),
+        Some(_) if !on_view => Err(invalid(format!("not supported yet: linked sheet sketch {what}"))),
+        Some(id) => require(links.contains(id.as_str()), || format!("sheet sketch {what} names no link of its sketch")),
+    };
     require(sk.equations.is_empty(), || "not supported yet: sheet sketch equations".into())?;
     require(!sk.view.three_d && !sk.view.slice, || "model-only sketch view is not a sheet sketch".into())?;
     let origin = sk.points.first().ok_or_else(|| invalid("missing sketch origin"))?;
@@ -204,7 +224,7 @@ fn check_payload(record: &SheetSketch) -> Result<()> {
     for point in &sk.points {
         identity(&mut seen, &point.id)?;
         position(point.pos)?;
-        require(point.link.is_none(), || "not supported yet: linked sheet sketch point".into())?;
+        linked(&point.link, "point")?;
         if let Some(expressions) = &point.exprs {
             for expression in [&expressions.x, &expressions.y].into_iter().flatten() {
                 text(expression)?;
@@ -214,7 +234,7 @@ fn check_payload(record: &SheetSketch) -> Result<()> {
     for curve in &sk.curves {
         identity(&mut seen, &curve.id)?;
         require(!curve.centerline, || "not supported yet: paper centerline styling".into())?;
-        require(curve.link.is_none(), || "not supported yet: linked sheet sketch curve".into())?;
+        linked(&curve.link, "curve")?;
         if let CurveKind::Spline { pts, degree, control, .. } = &curve.kind {
             require(
                 (2..=MAX_SPLINE_POINTS).contains(&pts.len()) && (1..=5).contains(degree) && (!control || pts.len() > usize::from(*degree)),
@@ -248,6 +268,20 @@ fn check_payload(record: &SheetSketch) -> Result<()> {
     Ok(())
 }
 
+/// A view sketch's link: a projection of one model edge its view draws, kept to an edge
+/// reference's rules. Its curves are in the view plane's coordinates.
+fn check_view_link(link: &Link) -> Result<()> {
+    let plain = matches!(link.kind, LinkKind::Project)
+        && link.face_name.is_none()
+        && link.edge_name.is_none()
+        && link.vertex_name.is_none()
+        && !link.auto_face;
+    let edge = ModelEdge::from_source(&link.source)
+        .filter(|_| plain)
+        .ok_or_else(|| invalid("a view sketch link projects its view's edges, nothing else"))?;
+    check_edge(&edge)
+}
+
 /// Sort references, not the live geometry. Sheet order stays authored; sketch
 /// record order depends only on ids, so insertion order never changes saved bytes.
 pub(super) fn serialize_sorted<S: Serializer>(records: &[Arc<SheetSketch>], serializer: S) -> std::result::Result<S::Ok, S::Error> {
@@ -269,6 +303,8 @@ pub struct SolvedSheetSketch {
     pub id: u64,
     pub sketch: Sketch,
     pub report: solidcraft_sketch::SolveReport,
+    /// A view sketch's links as the model has their edges, when a model was given.
+    pub links: Vec<ViewLinkState>,
 }
 
 impl crate::Document {
@@ -288,11 +324,9 @@ impl Drawing {
     /// Resolve one admitted record against the read-only source design. Checks
     /// owner identities, cumulative budgets and this payload, not every unrelated
     /// payload. File reads/saves and Session::edit_drawing validate the whole drawing.
+    /// A view sketch's links keep their last curves ([`Drawing::solve_sheet_sketch_on`] follows them).
     pub fn solve_sheet_sketch(&self, design: &crate::Document, sketch: u64) -> Result<SolvedSheetSketch> {
-        self.validate_structure()?;
-        check_budget(self.sketches.iter().map(AsRef::as_ref))?;
-        let original = self.sheet_sketch(sketch).ok_or_else(|| invalid("the selected drawing has no such sheet sketch"))?;
-        solve_record(design, self, original, (**original).clone())
+        self.solve_sheet_sketch_on(design, None, sketch)
     }
 
     /// Stage an atomic edit of one sketch on this drawing, without writing to the
@@ -303,10 +337,80 @@ impl Drawing {
     /// Failed callbacks, unsafe candidates and solve failures leave self unchanged.
     /// Only the selected record is checked deeply here; unchanged Arcs are NOT a
     /// certificate that other records are valid. Their validation is never skipped
-    /// by the outer publication boundary or the file reader/writer.
+    /// by the outer publication boundary or the file reader/writer. A view sketch's links keep
+    /// their last curves ([`Drawing::edit_sheet_sketch_on`] follows them).
     pub fn edit_sheet_sketch<T>(
         &mut self,
         design: &crate::Document,
+        sketch: u64,
+        change: impl FnOnce(&mut Sketch) -> Result<T>,
+    ) -> Result<(T, SolvedSheetSketch)> {
+        self.edit_sheet_sketch_on(design, None, sketch, change)
+    }
+}
+
+/// How a view sketch's link to a model edge stands with the model ([`crate::Document::refresh_view_links`]).
+#[derive(Clone, Debug, PartialEq)]
+pub struct ViewLinkState {
+    pub link: String,
+    pub status: Status,
+    /// What following the edge did to the user's own work: constraints on a link rebuilt with
+    /// another shape are removed.
+    pub warning: Option<String>,
+}
+
+impl crate::Document {
+    /// Each link of `sketch`, a sketch of view `view` of `drawing` (one of this design's drawings),
+    /// followed to its model edge as `model` (this design's) has it now: its curves moved to where
+    /// the view sees the edge, in the view plane's coordinates. A link whose edge is gone, hidden,
+    /// split or not seen face on is marked lost and keeps its last curves: the sketch never fails
+    /// for it. Edge names are worked out once per body for the call. `Err` only for a view the
+    /// drawing doesn't have.
+    pub fn refresh_view_links(&self, model: &crate::Model, drawing: &Drawing, view: u64, sketch: &mut Sketch) -> Result<Vec<ViewLinkState>> {
+        let basis = drawing.resolve_view(view)?.basis;
+        let mut lookup = Lookup::new(self, model);
+        let links = sketch.links.clone();
+        Ok(links
+            .iter()
+            .map(|link| {
+                let edge = ModelEdge::from_source(&link.source).ok_or_else(|| Status::Unmeasurable("a view sketch's link names a model edge".into()));
+                let mut warn = Vec::new();
+                let status = match edge.and_then(|edge| lookup.view_edge(&edge, &basis)) {
+                    Ok(geom) => {
+                        crate::project::apply_resolved(sketch, link, &geom, false, &mut warn);
+                        Status::Ok
+                    }
+                    Err(status) => {
+                        sketch.set_link_lost(&link.id, true);
+                        status
+                    }
+                };
+                let status = match sketch.link(&link.id) {
+                    Some(now) if now.lost && status == Status::Ok => Status::lost(warn.pop().unwrap_or_default()),
+                    _ => status,
+                };
+                ViewLinkState { link: link.id.clone(), status, warning: warn.pop() }
+            })
+            .collect())
+    }
+}
+
+impl Drawing {
+    /// [`Drawing::solve_sheet_sketch`], with a view sketch's links first followed to their edges
+    /// on `model` (`design`'s). Without a model they keep their last curves.
+    pub fn solve_sheet_sketch_on(&self, design: &crate::Document, model: Option<&crate::Model>, sketch: u64) -> Result<SolvedSheetSketch> {
+        self.validate_structure()?;
+        check_budget(self.sketches.iter().map(AsRef::as_ref))?;
+        let original = self.sheet_sketch(sketch).ok_or_else(|| invalid("the selected drawing has no such sheet sketch"))?;
+        solve_record(design, model, self, original, (**original).clone())
+    }
+
+    /// [`Drawing::edit_sheet_sketch`], with a view sketch's links followed to their edges on
+    /// `model` (`design`'s) before the solve.
+    pub fn edit_sheet_sketch_on<T>(
+        &mut self,
+        design: &crate::Document,
+        model: Option<&crate::Model>,
         sketch: u64,
         change: impl FnOnce(&mut Sketch) -> Result<T>,
     ) -> Result<(T, SolvedSheetSketch)> {
@@ -317,7 +421,7 @@ impl Drawing {
         let mut candidate = (*original).clone();
         let out = change(&mut candidate.sketch)?;
         check_budget(self.sketches.iter().map(|record| if record.id == sketch { &candidate } else { record.as_ref() }))?;
-        let solved = solve_record(design, self, &original, candidate)?;
+        let solved = solve_record(design, model, self, &original, candidate)?;
         if solved.sketch != original.sketch {
             let next = SheetSketch { sketch: solved.sketch.clone(), ..(*original).clone() };
             check_budget(self.sketches.iter().map(|record| if record.id == sketch { &next } else { record.as_ref() }))?;
@@ -328,10 +432,27 @@ impl Drawing {
     }
 }
 
-fn solve_record(design: &crate::Document, owner: &Drawing, original: &SheetSketch, mut candidate: SheetSketch) -> Result<SolvedSheetSketch> {
+fn solve_record(
+    design: &crate::Document,
+    model: Option<&crate::Model>,
+    owner: &Drawing,
+    original: &SheetSketch,
+    mut candidate: SheetSketch,
+) -> Result<SolvedSheetSketch> {
     // Only the candidate is admitted before the solver sees its input-derived
     // indices. No link/pattern/offset or 3D path bypasses the existing checks.
     check_payload(&candidate)?;
+    // A view sketch's links follow the model first. Only when the record is otherwise as stored
+    // does the solve walk from the stored state, as a model sketch's does after its links moved;
+    // an edit solves from where the edit put things.
+    let unedited = candidate.sketch == original.sketch;
+    let links = match (candidate.owner, model) {
+        (Owner::View(view), Some(model)) if !candidate.sketch.links.is_empty() => {
+            design.refresh_view_links(model, owner, view, &mut candidate.sketch)?
+        }
+        _ => Vec::new(),
+    };
+    let moved_from = (unedited && !links.is_empty()).then_some(&original.sketch);
     let names = parameter_names(&candidate.sketch)?;
     let mut values = if names.is_empty() {
         std::collections::BTreeMap::new()
@@ -365,12 +486,12 @@ fn solve_record(design: &crate::Document, owner: &Drawing, original: &SheetSketc
         }
     }
     let stored = original.sketch.driving_values();
-    let report = design.solve_sketch(&values, &mut candidate.sketch, &stored, None)?;
+    let report = design.solve_sketch(&values, &mut candidate.sketch, &stored, moved_from)?;
     require(report.keeps_orientation(), || report.failure(|conflicts| format!("sheet sketch edit would conflict with {conflicts}")))?;
     check_budget(std::iter::once(&candidate))?;
     check_payload(&candidate)?;
     let sheet = owner.sketch_sheet(original).ok_or_else(|| invalid("its owner is not in this drawing"))?;
-    Ok(SolvedSheetSketch { drawing: owner.id, sheet, id: original.id, sketch: candidate.sketch, report })
+    Ok(SolvedSheetSketch { drawing: owner.id, sheet, id: original.id, sketch: candidate.sketch, report, links })
 }
 
 /// Names are collected after record admission, with cumulative expression work

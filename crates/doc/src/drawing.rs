@@ -88,7 +88,7 @@ pub use fill::{
     FillPaint, FillRegionStatus, MAX_FILL_REGION_PIECES, MAX_FILLED_SKETCHES, MAX_PATTERN_SNAPSHOTS, MAX_SKETCH_FILLS, PatternSnapshot,
     ResolvedSketchFill, SheetFillProfile, SheetFillProfiles, SketchFill,
 };
-pub use sketch::{MAX_SHEET_SKETCHES, Owner, SheetSketch, SolvedSheetSketch};
+pub use sketch::{MAX_SHEET_SKETCHES, Owner, SheetSketch, SolvedSheetSketch, ViewLinkState};
 
 use balloon::Balloon;
 use by_id::ById;
@@ -589,6 +589,7 @@ impl Drawing {
             }
             take_unread::<Sheet>(top, "sheets", "sheet", &mut file);
             take_unread::<Source>(top, "sources", "source", &mut file);
+            take_unread::<SheetSketch>(top, "sketches", "sketch", &mut file);
             read = can_read(v);
         }
         let d = read.map_err(|why| {
