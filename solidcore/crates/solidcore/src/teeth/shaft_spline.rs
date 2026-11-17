@@ -4,9 +4,10 @@
 //! command or a cut.
 //!
 //! [`plan`] takes [`SplineNumbers`] (lengths in millimetres, angles in degrees) and gives a
-//! [`SplinePlan`], or a [`SplineRefusal`] that names the number to change, in backticks, and says
-//! why in plain words. A caller that draws the teeth, one that cuts them and one that reports them
-//! all ask [`plan`], so they cannot disagree about a value.
+//! [`SplinePlan`], or refuses with a [`crate::error::teeth::PlanRefusal`] (a
+//! [`crate::SolidError`] whose `teeth_failure()` is `Refused`) that names the number to change, in
+//! backticks, and says why in plain words. A caller that draws the teeth, one that cuts them and
+//! one that reports them all ask [`plan`], so they cannot disagree about a value.
 //!
 //! The kinds of teeth, what a new part is, the finish of a straight-sided tooth's tip corners and
 //! the master spline are [`SplineForm`], [`SplineMake`], [`SplineCorner`] and [`SplineMaster`].
@@ -15,10 +16,12 @@
 //! any client could use (docs/layers.md §1). No recursion. Inputs are hostile: every number is
 //! checked before it is used.
 
+use crate::error::teeth::{PlanRefusal, TeethFailure, Why, FILLET_SEPARATION};
 use crate::teeth::involute::{self, External};
 use crate::teeth::master_spline::{self, Form};
 use crate::teeth::straight::{self, Serration, StraightSpline, TipCorner};
-use crate::teeth::{fit, Error as TeethError, Pair};
+use crate::teeth::{fit, Pair};
+use crate::SolidError;
 
 /// The kind of teeth of a shaft spline.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -206,33 +209,6 @@ pub struct SplineMade {
     pub flank_tolerance: Option<f64>,
 }
 
-/// Why the numbers make nothing: the number the refusal is about, and the words, which name it in
-/// backticks first.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct SplineRefusal {
-    /// The number to change, where the refusal names one.
-    pub key: Option<String>,
-    /// The refusal in plain words.
-    pub words: String,
-}
-
-impl SplineRefusal {
-    /// A refusal in these words: the number it is about is the first word in backticks.
-    fn new(words: impl Into<String>) -> SplineRefusal {
-        let words = words.into();
-        let is_key =
-            |k: &&str| !k.is_empty() && k.chars().all(|c| c.is_ascii_lowercase() || c == '_');
-        let key = words.split('`').nth(1).filter(is_key).map(str::to_string);
-        SplineRefusal { key, words }
-    }
-}
-
-impl std::fmt::Display for SplineRefusal {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(&self.words)
-    }
-}
-
 /// The largest length or diameter taken, in mm: the tooth modules' own limit.
 const MOST_MM: f64 = crate::teeth::MAX_LENGTH;
 
@@ -243,12 +219,14 @@ pub const LEAST_LENGTH: f64 = 1e-3;
 /// the teeth.
 const LEAST_RIM: f64 = 0.5;
 
-/// The tooth modules' names for the numbers they check, and the number of a spline each comes from.
-type Numbers = &'static [(&'static str, &'static str)];
-/// Words of the tooth modules' reasons, and the number to change for each. The first match counts.
-type Reasons = &'static [(&'static str, &'static str)];
+/// The tooth modules' names for the numbers they check (an `OutOfRange` `what`, a `NotProved`
+/// `what`), and the number of a spline each comes from.
+pub(super) type Numbers = &'static [(&'static str, &'static str)];
+/// The tooth modules' reasons, and the number to change for each.
+pub(super) type Reasons = &'static [(Why, &'static str)];
 
-const INVOLUTE_SHAFT: (Numbers, Reasons) = (
+/// The numbers and reasons of an involute shaft.
+pub(super) const INVOLUTE_SHAFT: (Numbers, Reasons) = (
     &[
         ("module", "module"),
         ("teeth", "teeth"),
@@ -258,30 +236,23 @@ const INVOLUTE_SHAFT: (Numbers, Reasons) = (
         ("profile shift", "profile_shift"),
         ("tool tip radius", "root_fillet"),
         ("thinning", "thinning"),
+        (FILLET_SEPARATION, "root_fillet"),
     ],
     &[
-        ("come to a point", "addendum"),
-        (
-            "tip circle is at or below the start of the flank",
-            "addendum",
-        ),
-        ("tool's tip radius is too large", "root_fillet"),
-        (
-            "root must lie below the pitch circle by more",
-            "root_fillet",
-        ),
-        (
-            "root fillets of neighbouring teeth would cross",
-            "root_fillet",
-        ),
-        ("root fillet and the flank would not meet", "root_fillet"),
-        ("undercut would cut the tooth through", "profile_shift"),
-        ("root circle would be inside the axis", "dedendum"),
-        ("thinner than nothing or as wide as the pitch", "thinning"),
+        (Why::PointedBelowTip, "addendum"),
+        (Why::NoFlankLeft, "addendum"),
+        (Why::TipRoundsOverlap, "root_fillet"),
+        (Why::RootAboveTipRound, "root_fillet"),
+        (Why::FilletsCross, "root_fillet"),
+        (Why::FilletMissesFlank, "root_fillet"),
+        (Why::CutThrough, "profile_shift"),
+        (Why::RootInsideAxis, "dedendum"),
+        (Why::ToothThickness, "thinning"),
     ],
 );
 
-const INVOLUTE_FIT: (Numbers, Reasons) = (
+/// The numbers and reasons of the hub that fits an involute shaft.
+pub(super) const INVOLUTE_FIT: (Numbers, Reasons) = (
     &[
         ("side clearance", "side_clearance"),
         ("hub addendum", "hub_addendum"),
@@ -293,29 +264,18 @@ const INVOLUTE_FIT: (Numbers, Reasons) = (
         ("major radius", "tip_clearance"),
     ],
     &[
-        (
-            "hub's teeth would reach into the shaft's root fillet",
-            "hub_addendum",
-        ),
-        (
-            "hub's root rounds would reach the shaft's tip corners",
-            "hub_root_round",
-        ),
-        ("spaces would be as wide as the pitch", "side_clearance"),
-        (
-            "tips of the teeth would be below the base circle",
-            "hub_addendum",
-        ),
-        (
-            "roots must lie outside the tips by more than the fillet radius",
-            "hub_root_round",
-        ),
-        ("spaces would meet at the tips", "side_clearance"),
-        ("root rounds are too large", "hub_root_round"),
+        (Why::HubReachesFillet, "hub_addendum"),
+        (Why::HubRoundsReachTips, "hub_root_round"),
+        (Why::SpacesAsWideAsPitch, "side_clearance"),
+        (Why::TipsBelowBase, "hub_addendum"),
+        (Why::RootsInsideRound, "hub_root_round"),
+        (Why::SpacesMeetAtTips, "side_clearance"),
+        (Why::RootRoundsOverlap, "hub_root_round"),
     ],
 );
 
-const STRAIGHT_SHAFT: (Numbers, Reasons) = (
+/// The numbers and reasons of a straight-sided shaft.
+pub(super) const STRAIGHT_SHAFT: (Numbers, Reasons) = (
     &[
         ("teeth", "teeth"),
         ("major diameter", "major_diameter"),
@@ -327,32 +287,34 @@ const STRAIGHT_SHAFT: (Numbers, Reasons) = (
         ("tip round radius", "tip_size"),
     ],
     &[
-        ("flank does not cross both circles", "tooth_width"),
-        ("chamfer is too large", "tip_size"),
-        ("round at the major circle is too large", "tip_size"),
-        ("round at the minor circle is too large", "root_round"),
-        ("corners of a tooth would meet", "tip_size"),
-        ("neighbouring teeth would meet at the root", "tooth_width"),
-        ("corners leave no straight flank", "tip_size"),
-        ("minor diameter must be smaller", "minor_diameter"),
+        (Why::FlankMissesCircles, "tooth_width"),
+        (Why::ChamferTooLarge, "tip_size"),
+        (Why::MajorRoundTooLarge, "tip_size"),
+        (Why::MinorRoundTooLarge, "root_round"),
+        (Why::TipCornersMeet, "tip_size"),
+        (Why::TeethMeetAtRoot, "tooth_width"),
+        (Why::NoStraightFlank, "tip_size"),
+        (Why::MinorNotSmaller, "minor_diameter"),
     ],
 );
 
-const SERRATION_SHAFT: (Numbers, Reasons) = (
+/// The numbers and reasons of a serrated shaft.
+pub(super) const SERRATION_SHAFT: (Numbers, Reasons) = (
     STRAIGHT_SHAFT.0,
     &[
-        ("flank does not cross both circles", "flank_angle"),
-        ("chamfer is too large", "tip_size"),
-        ("round at the major circle is too large", "tip_size"),
-        ("round at the minor circle is too large", "root_round"),
-        ("corners of a tooth would meet", "tip_size"),
-        ("neighbouring teeth would meet at the root", "flank_angle"),
-        ("corners leave no straight flank", "tip_size"),
-        ("minor diameter must be smaller", "minor_diameter"),
+        (Why::FlankMissesCircles, "flank_angle"),
+        (Why::ChamferTooLarge, "tip_size"),
+        (Why::MajorRoundTooLarge, "tip_size"),
+        (Why::MinorRoundTooLarge, "root_round"),
+        (Why::TipCornersMeet, "tip_size"),
+        (Why::TeethMeetAtRoot, "flank_angle"),
+        (Why::NoStraightFlank, "tip_size"),
+        (Why::MinorNotSmaller, "minor_diameter"),
     ],
 );
 
-const STRAIGHT_FIT: (Numbers, Reasons) = (
+/// The numbers and reasons of the hub that fits a straight-sided or serrated shaft.
+pub(super) const STRAIGHT_FIT: (Numbers, Reasons) = (
     &[
         ("side clearance", "side_clearance"),
         ("major clearance", "major_clearance"),
@@ -364,124 +326,98 @@ const STRAIGHT_FIT: (Numbers, Reasons) = (
         ("tip round", "hub_tip_round"),
     ],
     &[
-        (
-            "minor clearance would take the hub's teeth out",
-            "minor_clearance",
-        ),
-        ("hub's root rounds would come closer", "hub_root_round"),
-        ("tips of the hub's teeth would come closer", "hub_tip_round"),
-        ("hub's root rounds would meet", "hub_root_round"),
-        ("hub's teeth would be too narrow", "side_clearance"),
-        ("round at the major circle is too large", "hub_root_round"),
-        ("round at the minor circle is too large", "hub_tip_round"),
-        ("corners leave no straight flank", "hub_root_round"),
-        ("flank does not cross both circles", "side_clearance"),
-        (
-            "neighbouring teeth would meet at the root",
-            "side_clearance",
-        ),
-        ("can turn freely", "side_clearance"),
+        (Why::MinorClearanceTooLarge, "minor_clearance"),
+        (Why::HubRootRoundsTooClose, "hub_root_round"),
+        (Why::HubTipsTooClose, "hub_tip_round"),
+        (Why::HubRootRoundsMeet, "hub_root_round"),
+        (Why::HubTeethTooNarrow, "side_clearance"),
+        (Why::MajorRoundTooLarge, "hub_root_round"),
+        (Why::MinorRoundTooLarge, "hub_tip_round"),
+        (Why::NoStraightFlank, "hub_root_round"),
+        (Why::FlankMissesCircles, "side_clearance"),
+        (Why::TeethMeetAtRoot, "side_clearance"),
+        (Why::TurnsFreely, "side_clearance"),
     ],
 );
 
-/// A number in plain words: no trailing zeros, at most six decimals, and a number too small for six
-/// decimals in the form 1e-9.
-fn plain(x: f64) -> String {
-    let s = format!("{x:.6}");
-    let s = s.trim_end_matches('0').trim_end_matches('.');
-    if s != "0" && s != "-0" {
-        s.to_string()
-    } else if x != 0.0 && x.is_finite() {
-        format!("{x:e}")
-    } else {
-        "0".to_string()
-    }
-}
-
-/// A refusal of the tooth modules as a shaft spline's: the number it comes from named, in plain
-/// words. The tables are asked in turn and the first that knows the name or the reason counts. A
-/// number no table knows is named in the tooth modules' words, not as a number of the spline.
-fn refused(tables: &[(Numbers, Reasons)], e: TeethError) -> SplineRefusal {
+/// A refusal of the tooth modules as a shaft spline's: the number it comes from, found in the
+/// tables, and the failure as data ([`PlanRefusal`]), whose words name that number. The tables are
+/// asked in turn and the first that knows the name or the reason counts. A number no table knows
+/// is named in the tooth modules' words, not as a number of the spline. A refusal of the planner
+/// itself comes through as it is.
+pub(super) fn refused(tables: &[(Numbers, Reasons)], e: TeethFailure) -> TeethFailure {
+    let number_key = |what: &str| {
+        tables
+            .iter()
+            .flat_map(|(numbers, _)| numbers.iter())
+            .find(|(name, _)| *name == what)
+            .map(|(_, key)| *key)
+    };
     match e {
-        TeethError::OutOfRange {
+        TeethFailure::OutOfRange {
             what,
             value,
             above,
             up_to,
-        } => {
+        } => TeethFailure::Refused(PlanRefusal::Number {
+            key: number_key(what),
+            what,
+            value,
+            above,
+            up_to,
+        }),
+        TeethFailure::Invalid(why) => {
             let key = tables
                 .iter()
-                .flat_map(|(numbers, _)| numbers.iter())
-                .find(|(name, _)| *name == what)
+                .flat_map(|(_, reasons)| reasons.iter())
+                .find(|(reason, _)| *reason == why)
                 .map(|(_, key)| *key);
-            let name = key.map_or_else(|| format!("the {what}"), |key| format!("`{key}`"));
-            // A lower limit a hair above nothing is "more than 0" in plain words.
-            let above = if above > 0.0 && above < 1e-4 {
-                0.0
-            } else {
-                above
-            };
-            let text = if !value.is_finite() {
-                format!("{name} must be a number")
-            } else if value > up_to {
-                format!(
-                    "{name} must be at most {}, not {}",
-                    plain(up_to),
-                    plain(value)
-                )
-            } else if value == up_to {
-                format!("{name} must be less than {}", plain(up_to))
-            } else if value < 0.0 && above == 0.0 {
-                format!("{name} cannot be negative, not {}", plain(value))
-            } else {
-                format!(
-                    "{name} must be more than {}, not {}",
-                    plain(above),
-                    plain(value)
-                )
-            };
-            SplineRefusal::new(text)
+            TeethFailure::Refused(PlanRefusal::Reason { key, why })
         }
-        TeethError::Invalid { why } => match tables
-            .iter()
-            .flat_map(|(_, reasons)| reasons.iter())
-            .find(|(words, _)| why.contains(words))
-        {
-            Some((_, key)) => SplineRefusal::new(format!(
-                "`{key}`: {}",
-                why.replace("the tool's tip radius", "the root fillet")
-            )),
-            None => SplineRefusal::new(why),
-        },
+        TeethFailure::NotProved {
+            what,
+            asked,
+            reached,
+        } => TeethFailure::Refused(PlanRefusal::Unproved {
+            key: number_key(what),
+            what,
+            asked,
+            reached,
+        }),
+        planner @ TeethFailure::Refused(_) => planner,
     }
 }
 
 /// A refusal of the master spline: one that the form asked for cannot be made on these teeth names
-/// `master_spline` and says what to change. Matched on the tooth modules' whole reasons.
-fn master_refused(e: TeethError) -> SplineRefusal {
+/// `master_spline` and says what to change. Matched on the tooth modules' reasons.
+pub(super) fn master_refused(e: TeethFailure) -> TeethFailure {
     match e {
-        TeethError::Invalid { why } if why == master_spline::NO_SMALLEST => SplineRefusal::new(format!(
-            "`master_spline`: a tooth cannot be left out of these teeth: {why}; make a wide tooth instead (wide_tooth), or make the shaft's root rounds and the hub's tip rounds smaller"
-        )),
-        TeethError::Invalid { why } if why == master_spline::NO_LARGEST => SplineRefusal::new(format!(
-            "`master_spline`: a wide tooth cannot be made on these teeth: {why}; leave a tooth out instead (tooth_out), or use plain or chamfered tip corners and smaller root rounds in the hub"
-        )),
+        TeethFailure::Invalid(Why::NoCornerOnSmallest) => {
+            TeethFailure::Refused(PlanRefusal::MasterToothOut)
+        }
+        TeethFailure::Invalid(Why::NoCornerOnLargest) => {
+            TeethFailure::Refused(PlanRefusal::MasterWideTooth)
+        }
         other => refused(&[(&[("teeth", "teeth")], &[])], other),
     }
 }
 
 /// A number the numbers may give: none, or a finite number.
-fn number(value: Option<f64>, key: &str) -> Result<Option<f64>, SplineRefusal> {
+fn number(value: Option<f64>, key: &'static str) -> Result<Option<f64>, TeethFailure> {
     match value {
         None => Ok(None),
         Some(x) if x.is_finite() => Ok(Some(x)),
-        Some(_) => Err(SplineRefusal::new(format!("`{key}` must be a number"))),
+        Some(_) => Err(TeethFailure::Refused(PlanRefusal::NotANumber { key })),
     }
 }
 
 /// A number the numbers must give for this kind of teeth.
-fn required(value: Option<f64>, key: &str, unit: &str) -> Result<f64, SplineRefusal> {
-    number(value, key)?.ok_or_else(|| SplineRefusal::new(format!("`{key}` is required ({unit})")))
+fn required(
+    value: Option<f64>,
+    key: &'static str,
+    unit: &'static str,
+) -> Result<f64, TeethFailure> {
+    number(value, key)?.ok_or(TeethFailure::Refused(PlanRefusal::Required { key, unit }))
 }
 
 /// What the numbers make before the master spline: the pair, and the numbers so far.
@@ -501,7 +437,7 @@ fn made_of(teeth: u32) -> SplineMade {
 
 /// An involute shaft and its hub: the pair with flanks and fillets fitted as splines, and the
 /// numbers.
-fn involute_pair(n: &SplineNumbers) -> Result<Made, SplineRefusal> {
+fn involute_pair(n: &SplineNumbers) -> Result<Made, TeethFailure> {
     let module = required(n.module, "module", "mm")?;
     let shaft = External {
         module,
@@ -526,23 +462,25 @@ fn involute_pair(n: &SplineNumbers) -> Result<Made, SplineRefusal> {
     };
     let no = |e| refused(&[INVOLUTE_SHAFT], e);
     let (r, rb, ra, rf) = (
-        shaft.pitch_radius().map_err(no)?,
-        shaft.base_radius().map_err(no)?,
-        shaft.tip_radius().map_err(no)?,
-        shaft.root_radius().map_err(no)?,
+        shaft.pitch_radius_typed().map_err(no)?,
+        shaft.base_radius_typed().map_err(no)?,
+        shaft.tip_radius_typed().map_err(no)?,
+        shaft.root_radius_typed().map_err(no)?,
     );
-    let form = shaft.form_radius().map_err(no)?;
-    let undercut = shaft.is_undercut().map_err(no)?;
+    let form = shaft.form_radius_typed().map_err(no)?;
+    let undercut = shaft.is_undercut_typed().map_err(no)?;
     // The splines stay within this of the true curves; the points they are fitted to, within a
-    // tenth of it.
+    // fortieth of it (SOURCE_SHARE).
     let within = (module * 5e-4).clamp(1e-6, 1e-2);
-    shaft.outline(within * fit::SOURCE_SHARE).map_err(no)?;
+    shaft
+        .outline_typed(within * fit::SOURCE_SHARE)
+        .map_err(no)?;
     let fit_no = |e| refused(&[INVOLUTE_FIT, INVOLUTE_SHAFT], e);
-    let hub = involute::hub_for(&shaft, &fit).map_err(fit_no)?;
+    let hub = involute::hub_for_typed(&shaft, &fit).map_err(fit_no)?;
     let mut pair =
-        involute::spline_pair(&shaft, &fit, within * fit::SOURCE_SHARE).map_err(fit_no)?;
-    pair.first.outline = fit::fitted(&pair.first.outline, within).map_err(no)?;
-    pair.second.outline = fit::fitted(&pair.second.outline, within).map_err(fit_no)?;
+        involute::spline_pair_typed(&shaft, &fit, within * fit::SOURCE_SHARE).map_err(fit_no)?;
+    pair.first.outline = fit::fitted_typed(&pair.first.outline, within).map_err(no)?;
+    pair.second.outline = fit::fitted_typed(&pair.second.outline, within).map_err(fit_no)?;
     let mut made = made_of(n.teeth);
     made.shaft_major_diameter = 2.0 * ra;
     made.shaft_minor_diameter = 2.0 * rf;
@@ -564,7 +502,7 @@ fn involute_pair(n: &SplineNumbers) -> Result<Made, SplineRefusal> {
 }
 
 /// A straight-sided or serrated shaft and its hub, all exact lines and arcs, and the numbers.
-fn straight_pair(n: &SplineNumbers) -> Result<Made, SplineRefusal> {
+fn straight_pair(n: &SplineNumbers) -> Result<Made, TeethFailure> {
     let major = required(n.major_diameter, "major_diameter", "mm")?;
     let minor = required(n.minor_diameter, "minor_diameter", "mm")?;
     let root_round = number(n.root_round, "root_round")?.unwrap_or(0.0);
@@ -612,12 +550,12 @@ fn straight_pair(n: &SplineNumbers) -> Result<Made, SplineRefusal> {
             root_round,
             tip,
         };
-        shaft.outline(tolerance).map_err(no)?;
-        let hub = straight::hub_for(&shaft, &fit).map_err(fit_no)?;
+        shaft.outline_typed(tolerance).map_err(no)?;
+        let hub = straight::hub_for_typed(&shaft, &fit).map_err(fit_no)?;
         (
-            straight::spline_pair(&shaft, &fit, tolerance).map_err(fit_no)?,
+            straight::spline_pair_typed(&shaft, &fit, tolerance).map_err(fit_no)?,
             (hub.major_diameter, hub.minor_diameter),
-            straight::turning_play(&shaft, &fit).map_err(fit_no)?,
+            straight::turning_play_typed(&shaft, &fit).map_err(fit_no)?,
         )
     } else {
         let no = |e| refused(&[SERRATION_SHAFT], e);
@@ -629,17 +567,17 @@ fn straight_pair(n: &SplineNumbers) -> Result<Made, SplineRefusal> {
             tip,
             root_round,
         };
-        shaft.outline(tolerance).map_err(no)?;
-        made.sharp_tip_diameter = shaft.sharp_tip_radius().ok().map(|r| 2.0 * r);
-        let hub = straight::serration_hub_for(&shaft, &fit).map_err(fit_no)?;
+        shaft.outline_typed(tolerance).map_err(no)?;
+        made.sharp_tip_diameter = shaft.sharp_tip_radius_typed().ok().map(|r| 2.0 * r);
+        let hub = straight::serration_hub_for_typed(&shaft, &fit).map_err(fit_no)?;
         let diameters = (
-            hub.major_diameter().map_err(fit_no)?,
-            hub.minor_diameter().map_err(fit_no)?,
+            hub.major_diameter_typed().map_err(fit_no)?,
+            hub.minor_diameter_typed().map_err(fit_no)?,
         );
         (
-            straight::serration_pair(&shaft, &fit, tolerance).map_err(fit_no)?,
+            straight::serration_pair_typed(&shaft, &fit, tolerance).map_err(fit_no)?,
             diameters,
-            straight::serration_play(&shaft, &fit).map_err(fit_no)?,
+            straight::serration_play_typed(&shaft, &fit).map_err(fit_no)?,
         )
     };
     made.shaft_major_diameter = major;
@@ -747,62 +685,74 @@ pub fn tool_margin(depth: f64) -> f64 {
     (0.1 * depth.max(0.0)).max(1e-3)
 }
 
-/// The radius of the cutter of diameter `diameter` that ends the tooth spaces of a shaft, or the
-/// words of its refusal. The cutter's section (the tooth space from `root` out to `out_to`) must
-/// lie on one side of the cutter's axis with `margin` to spare, so the radius must reach past the
-/// depth it cuts.
-pub fn cutter_radius(diameter: f64, root: f64, out_to: f64, margin: f64) -> Result<f64, String> {
+/// The radius of the cutter of diameter `diameter` that ends the tooth spaces of a shaft, or why
+/// there is none. The cutter's section (the tooth space from `root` out to `out_to`) must lie on
+/// one side of the cutter's axis with `margin` to spare, so the radius must reach past the depth it
+/// cuts.
+pub fn cutter_radius(diameter: f64, root: f64, out_to: f64, margin: f64) -> crate::Result<f64> {
+    cutter_radius_typed(diameter, root, out_to, margin)
+        .map_err(|e| SolidError::teeth("teeth::shaft_spline::cutter_radius", e))
+}
+
+/// [`cutter_radius`] with its failure as a [`TeethFailure`], for the tooth module's own callers:
+/// always a [`TeethFailure::Refused`] that names `cutter_diameter`.
+pub(crate) fn cutter_radius_typed(
+    diameter: f64,
+    root: f64,
+    out_to: f64,
+    margin: f64,
+) -> Result<f64, TeethFailure> {
     if !(diameter.is_finite() && diameter <= MOST_MM) {
-        return Err(format!(
-            "`cutter_diameter` must be a number of at most {} mm",
-            plain(MOST_MM)
-        ));
+        return Err(TeethFailure::Refused(PlanRefusal::CutterNotANumber {
+            most: MOST_MM,
+        }));
     }
     let least = out_to - root + margin;
     if !(diameter / 2.0 > least) {
-        return Err(format!(
-            "`cutter_diameter` must be more than {} mm: the cutter's radius must reach past the depth of the teeth",
-            plain(2.0 * least)
-        ));
+        return Err(TeethFailure::Refused(PlanRefusal::CutterTooSmall {
+            at_least: 2.0 * least,
+        }));
     }
     Ok(diameter / 2.0)
 }
 
 /// What the numbers make, or why they make nothing: the checks of the values and the tooth modules'
 /// work. A number that does not apply to the chosen kind of teeth is not read.
-pub fn plan(n: &SplineNumbers) -> Result<SplinePlan, SplineRefusal> {
+pub fn plan(n: &SplineNumbers) -> crate::Result<SplinePlan> {
+    plan_typed(n).map_err(|e| SolidError::teeth("teeth::shaft_spline::plan", e))
+}
+
+/// [`plan`] with its failure as a [`TeethFailure`], for the tooth module's own callers: always a
+/// [`TeethFailure::Refused`].
+pub(crate) fn plan_typed(n: &SplineNumbers) -> Result<SplinePlan, TeethFailure> {
     if !n.length.is_finite() {
-        return Err(SplineRefusal::new("`length` must be a number"));
+        return Err(TeethFailure::Refused(PlanRefusal::NotANumber {
+            key: "length",
+        }));
     }
     if !(n.length >= LEAST_LENGTH && n.length <= MOST_MM) {
-        return Err(SplineRefusal::new(format!(
-            "`length` must be from {} to {} mm, not {}",
-            plain(LEAST_LENGTH),
-            plain(MOST_MM),
-            plain(n.length)
-        )));
+        return Err(TeethFailure::Refused(PlanRefusal::LengthRange {
+            least: LEAST_LENGTH,
+            most: MOST_MM,
+            value: n.length,
+        }));
     }
     let makes_hub = n.make != SplineMake::Shaft;
     if !makes_hub && n.hub_diameter.is_some() {
-        return Err(SplineRefusal::new(
-            "`hub_diameter` is the hub's outside diameter: give it only when `make` is hub or both",
-        ));
+        return Err(TeethFailure::Refused(PlanRefusal::HubDiameterWithoutHub));
     }
     let hub_diameter = number(n.hub_diameter, "hub_diameter")?;
     if makes_hub && hub_diameter.is_none() {
-        return Err(SplineRefusal::new(
-            "`hub_diameter` is required to make the hub (mm, its outside diameter)",
-        ));
+        return Err(TeethFailure::Refused(PlanRefusal::HubDiameterRequired));
     }
     if n.master == SplineMaster::None && n.master_angle.is_some() {
-        return Err(SplineRefusal::new("`master_angle` is where the master spline sits: give it only with `master_spline` tooth_out or wide_tooth"));
+        return Err(TeethFailure::Refused(PlanRefusal::MasterAngleWithoutMaster));
     }
     let master_angle = number(n.master_angle, "master_angle")?.unwrap_or(0.0);
     if !(master_angle.abs() <= master_spline::MOST_ANGLE) {
-        return Err(SplineRefusal::new(format!(
-            "`master_angle` must be from -360 to 360 (degrees), not {}",
-            plain(master_angle)
-        )));
+        return Err(TeethFailure::Refused(PlanRefusal::MasterAngleRange {
+            value: master_angle,
+        }));
     }
     number(n.cutter_diameter, "cutter_diameter")?;
     for (chamfer, key) in [
@@ -811,11 +761,11 @@ pub fn plan(n: &SplineNumbers) -> Result<SplinePlan, SplineRefusal> {
     ] {
         if let Some(size) = number(chamfer, key)? {
             if !(0.0..=MOST_MM).contains(&size) {
-                return Err(SplineRefusal::new(format!(
-                    "`{key}` must be from 0 to {} mm, not {}",
-                    plain(MOST_MM),
-                    plain(size)
-                )));
+                return Err(TeethFailure::Refused(PlanRefusal::ChamferRange {
+                    key,
+                    most: MOST_MM,
+                    value: size,
+                }));
             }
         }
     }
@@ -829,7 +779,7 @@ pub fn plan(n: &SplineNumbers) -> Result<SplinePlan, SplineRefusal> {
     if let Some(diameter) = n.cutter_diameter {
         let (root, top) = pair.first.outline.radii();
         let margin = tool_margin(top - root);
-        cutter_radius(diameter, root, top + margin, margin).map_err(SplineRefusal::new)?;
+        cutter_radius_typed(diameter, root, top + margin, margin)?;
     }
     let hub_diameter = hub_diameter.filter(|_| makes_hub);
     if let Some(od) = hub_diameter {
@@ -839,19 +789,15 @@ pub fn plan(n: &SplineNumbers) -> Result<SplinePlan, SplineRefusal> {
         );
         let least = hub_major + LEAST_RIM * (hub_major - shaft_minor).max(0.0);
         if od > MOST_MM {
-            return Err(SplineRefusal::new(format!(
-                "`hub_diameter` must be at most {} mm, not {}",
-                plain(MOST_MM),
-                plain(od)
-            )));
+            return Err(TeethFailure::Refused(PlanRefusal::HubDiameterTooLarge {
+                most: MOST_MM,
+                value: od,
+            }));
         }
         if !(od / 2.0 > least) {
             // Up to the next hundredth, past rounding in the last digit.
             let at_least = (2.0 * least * 100.0 - 1e-6).ceil() / 100.0;
-            return Err(SplineRefusal::new(format!(
-                "`hub_diameter` leaves no rim around the hub's teeth: it must be more than {} mm",
-                plain(at_least)
-            )));
+            return Err(TeethFailure::Refused(PlanRefusal::NoRim { at_least }));
         }
     }
     let form = match n.master {
@@ -861,8 +807,8 @@ pub fn plan(n: &SplineNumbers) -> Result<SplinePlan, SplineRefusal> {
     };
     let mut placed = None;
     if let Some(form) = form {
-        let keyed =
-            master_spline::master_spline(&pair, form, master_angle).map_err(master_refused)?;
+        let keyed = master_spline::master_spline_typed(&pair, form, master_angle)
+            .map_err(master_refused)?;
         pair = keyed.pair.clone();
         made.positions = 1;
         made.master_tooth = Some(keyed.placement.tooth);

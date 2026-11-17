@@ -6,7 +6,7 @@ use std::f64::consts::TAU;
 
 use super::common::Dice;
 use crate::teeth::mesh::{gap, Body, Material};
-use crate::teeth::{Error, Point};
+use crate::teeth::Point;
 
 /// The distance from a point to a chord.
 fn to_chord(p: Point, a: Point, b: Point) -> f64 {
@@ -48,7 +48,7 @@ fn star(dice: &mut Dice, centre: Point, corners: usize, low: f64, high: f64) -> 
 }
 
 #[test]
-fn the_gap_is_the_gap_found_the_slow_way() -> Result<(), Error> {
+fn the_gap_is_the_gap_found_the_slow_way() -> crate::Result<()> {
     let mut dice = Dice(0x6A9);
     for round in 0..300 {
         // One part of few long chords or many short ones, the other likewise, apart by a random
@@ -98,7 +98,7 @@ fn the_gap_is_the_gap_found_the_slow_way() -> Result<(), Error> {
 }
 
 #[test]
-fn a_corner_at_a_repeated_point_is_judged_by_the_chords_on_either_side() -> Result<(), Error> {
+fn a_corner_at_a_repeated_point_is_judged_by_the_chords_on_either_side() -> crate::Result<()> {
     // A thin counter-clockwise triangle whose tip is given twice: the chord between the two is
     // of no length. Above the tip, apart from it, a small square.
     let triangle = Body::new(
@@ -128,7 +128,7 @@ fn a_corner_at_a_repeated_point_is_judged_by_the_chords_on_either_side() -> Resu
 }
 
 #[test]
-fn a_long_bar_beside_a_fine_wheel_is_measured_rightly() -> Result<(), Error> {
+fn a_long_bar_beside_a_fine_wheel_is_measured_rightly() -> crate::Result<()> {
     // A bar of four chords, one of them 400 mm long, 0.25 mm from a circle of 20,000 chords.
     let bar = Body::new(
         vec![

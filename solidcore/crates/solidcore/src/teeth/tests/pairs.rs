@@ -5,13 +5,12 @@ use std::f64::consts::TAU;
 
 use crate::teeth::involute::{hub_for, External, Fit};
 use crate::teeth::mesh::{gap, Body, Gap, Material};
-use crate::teeth::Error;
 
 /// How far the chords of the outlines may be from the curves: the gaps below are good to a few
 /// times this.
 const TOLERANCE: f64 = 1e-7;
 
-fn body(e: &External) -> Result<Body, Error> {
+fn body(e: &External) -> crate::Result<Body> {
     Body::new(e.outline(TOLERANCE)?.points(), Material::Inside)
 }
 
@@ -42,7 +41,7 @@ fn fit(side_clearance: f64) -> Fit {
     }
 }
 
-fn shaft_in_hub(side_clearance: f64, turned: f64) -> Result<Option<Gap>, Error> {
+fn shaft_in_hub(side_clearance: f64, turned: f64) -> crate::Result<Option<Gap>> {
     let shaft = shaft();
     let hub = hub_for(&shaft, &fit(side_clearance))?;
     let hub_body = Body::new(hub.outline(TOLERANCE)?.points(), Material::Outside)?;
@@ -50,7 +49,7 @@ fn shaft_in_hub(side_clearance: f64, turned: f64) -> Result<Option<Gap>, Error> 
 }
 
 #[test]
-fn a_shaft_sits_in_its_hub_with_the_clearance_asked_for() -> Result<(), Error> {
+fn a_shaft_sits_in_its_hub_with_the_clearance_asked_for() -> crate::Result<()> {
     // Between flanks the play asked for on the pitch circle appears turned by the pressure angle,
     // half on each side.
     for side in [0.06, 0.02, 0.2] {
@@ -69,7 +68,7 @@ fn a_shaft_sits_in_its_hub_with_the_clearance_asked_for() -> Result<(), Error> {
 }
 
 #[test]
-fn a_shaft_turns_in_its_hub_by_half_the_play_and_no_further() -> Result<(), Error> {
+fn a_shaft_turns_in_its_hub_by_half_the_play_and_no_further() -> crate::Result<()> {
     let (side, pitch_radius) = (0.06, shaft().pitch_radius()?);
     let half_play = side / 2.0 / pitch_radius; // the angle
     let touching = shaft_in_hub(side, half_play)?.expect("touching");
@@ -85,7 +84,7 @@ fn a_shaft_turns_in_its_hub_by_half_the_play_and_no_further() -> Result<(), Erro
 }
 
 #[test]
-fn bodies_and_reach_are_checked() -> Result<(), Error> {
+fn bodies_and_reach_are_checked() -> crate::Result<()> {
     let square = vec![[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]];
     let clockwise: Vec<[f64; 2]> = square.iter().rev().copied().collect();
     assert!(Body::new(clockwise, Material::Inside).is_err());

@@ -7,9 +7,11 @@
 
 use std::f64::consts::TAU;
 
-use crate::teeth::mesh::{gap, looked_from, Body, Gap, Material};
+use crate::error::teeth::{TeethFailure, Why};
+use crate::teeth::mesh::{gap_typed, looked_from, Body, Gap, Material};
 use crate::teeth::outline::{Outline, Point};
-use crate::teeth::{in_range, Error, MAX_LENGTH};
+use crate::teeth::{in_range, MAX_LENGTH};
+use crate::SolidError;
 
 /// One part of a pair.
 #[derive(Clone, Debug, PartialEq)]
@@ -74,8 +76,7 @@ pub const MAX_STEPS: u32 = 100_000;
 /// step rather than run slowly: fewer steps, a coarser tolerance or a larger reach make it smaller.
 pub const MOST_TURNING_WORK: u64 = 50_000_000;
 
-const TOO_MUCH_TURNING: Error =
-    Error::Invalid { why: "the outlines are too fine, or the reach too small, to be turned through so many steps in one go" };
+const TOO_MUCH_TURNING: TeethFailure = TeethFailure::Invalid(Why::TooMuchTurning);
 
 impl Pair {
     /// The angle and the place of the second part's axis when the first part is turned by `turn`.
@@ -86,7 +87,13 @@ impl Pair {
     }
 
     /// The two parts as bodies about their own axes, not yet placed.
-    pub fn bodies(&self) -> Result<(Body, Body), Error> {
+    pub fn bodies(&self) -> crate::Result<(Body, Body)> {
+        self.bodies_typed()
+            .map_err(|e| SolidError::teeth("teeth::pair::Pair::bodies", e))
+    }
+
+    /// [`Self::bodies`] with its failure as a [`TeethFailure`], for the tooth module's own callers.
+    pub(crate) fn bodies_typed(&self) -> Result<(Body, Body), TeethFailure> {
         Ok((
             Body::of_outline(&self.first.outline, self.first.material)?,
             Body::of_outline(&self.second.outline, self.second.material)?,
@@ -95,8 +102,14 @@ impl Pair {
 
     /// The smallest gap between the two parts when the first is turned by `turn`, looking no
     /// farther than `reach`.
-    pub fn gap_at(&self, turn: f64, reach: f64) -> Result<Option<Gap>, Error> {
-        let (first, second) = self.bodies()?;
+    pub fn gap_at(&self, turn: f64, reach: f64) -> crate::Result<Option<Gap>> {
+        self.gap_at_typed(turn, reach)
+            .map_err(|e| SolidError::teeth("teeth::pair::Pair::gap_at", e))
+    }
+
+    /// [`Self::gap_at`] with its failure as a [`TeethFailure`], for the tooth module's own callers.
+    pub(crate) fn gap_at_typed(&self, turn: f64, reach: f64) -> Result<Option<Gap>, TeethFailure> {
+        let (first, second) = self.bodies_typed()?;
         self.gap_of(&first, &second, turn, reach)
     }
 
@@ -106,7 +119,7 @@ impl Pair {
         second: &Body,
         turn: f64,
         reach: f64,
-    ) -> Result<Option<Gap>, Error> {
+    ) -> Result<Option<Gap>, TeethFailure> {
         let turn = in_range("turn", turn, -1e6, 1e6)?;
         if !self
             .first
@@ -114,17 +127,13 @@ impl Pair {
             .iter()
             .all(|v| v.is_finite() && v.abs() <= MAX_LENGTH)
         {
-            return Err(Error::Invalid {
-                why: "the first part's axis is not at a finite place",
-            });
+            return Err(TeethFailure::Invalid(Why::FirstAxisNotFinite));
         }
         let (angle, axis) = self.second_at(turn);
         if !(angle.is_finite() && axis.iter().all(|v| v.is_finite() && v.abs() <= MAX_LENGTH)) {
-            return Err(Error::Invalid {
-                why: "the second part would not be at a finite place",
-            });
+            return Err(TeethFailure::Invalid(Why::SecondNotFinite));
         }
-        gap(
+        gap_typed(
             &first.placed(turn, self.first.axis),
             &second.placed(angle, axis),
             reach,
@@ -136,9 +145,22 @@ impl Pair {
     ///
     /// Refused before the first step when the steps times the points each measurement looks from
     /// would be more than [`MOST_TURNING_WORK`].
-    pub fn through(&self, from: f64, to: f64, steps: u32, reach: f64) -> Result<Gaps, Error> {
+    pub fn through(&self, from: f64, to: f64, steps: u32, reach: f64) -> crate::Result<Gaps> {
+        self.through_typed(from, to, steps, reach)
+            .map_err(|e| SolidError::teeth("teeth::pair::Pair::through", e))
+    }
+
+    /// [`Self::through`] with its failure as a [`TeethFailure`], for the tooth module's own
+    /// callers.
+    pub(crate) fn through_typed(
+        &self,
+        from: f64,
+        to: f64,
+        steps: u32,
+        reach: f64,
+    ) -> Result<Gaps, TeethFailure> {
         if !(1..=MAX_STEPS).contains(&steps) {
-            return Err(Error::OutOfRange {
+            return Err(TeethFailure::OutOfRange {
                 what: "steps",
                 value: f64::from(steps),
                 above: 0.0,
@@ -146,7 +168,7 @@ impl Pair {
             });
         }
         let reach = in_range("reach", reach, 0.0, MAX_LENGTH)?;
-        let (first, second) = self.bodies()?;
+        let (first, second) = self.bodies_typed()?;
         // The count of points looked from does not change as the parts turn: it hangs on the
         // lengths of the chords alone.
         let work = f64::from(steps) * looked_from(&first, &second, reach);
@@ -177,12 +199,23 @@ impl Pair {
     }
 
     /// The gaps through one cycle of the pair, in `steps` equal steps.
-    pub fn through_a_cycle(&self, steps: u32, reach: f64) -> Result<Gaps, Error> {
+    pub fn through_a_cycle(&self, steps: u32, reach: f64) -> crate::Result<Gaps> {
+        self.through_a_cycle_typed(steps, reach)
+            .map_err(|e| SolidError::teeth("teeth::pair::Pair::through_a_cycle", e))
+    }
+
+    /// [`Self::through_a_cycle`] with its failure as a [`TeethFailure`], for the tooth module's own
+    /// callers.
+    pub(crate) fn through_a_cycle_typed(
+        &self,
+        steps: u32,
+        reach: f64,
+    ) -> Result<Gaps, TeethFailure> {
         let cycle = if self.cycle.is_finite() && self.cycle != 0.0 {
             self.cycle
         } else {
             TAU
         };
-        self.through(0.0, cycle, steps, reach)
+        self.through_typed(0.0, cycle, steps, reach)
     }
 }

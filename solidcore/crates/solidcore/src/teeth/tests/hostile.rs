@@ -10,19 +10,21 @@
 use std::collections::BTreeSet;
 use std::f64::consts::PI;
 
-use super::common::{Dice, HOSTILE, HOSTILE_COUNTS};
+use super::common::{operation, refusal, Dice, HOSTILE, HOSTILE_COUNTS};
+use crate::error::teeth::{PlanRefusal, TeethFailure, Why, CHORD, FILLET_SEPARATION, FIT_DISTANCE};
+use crate::error::ErrorKind;
 use crate::teeth::involute::{External, Fit, Internal};
 use crate::teeth::master_spline::{self, Circle, Form as MasterForm};
 use crate::teeth::mesh::{Body, Material};
 use crate::teeth::shaft_spline::{
-    self, SplineCorner, SplineForm, SplineMake, SplineMaster, SplineNumbers,
+    self, master_refused, refused, Numbers, Reasons, SplineCorner, SplineForm, SplineMake,
+    SplineMaster, SplineNumbers, INVOLUTE_FIT, INVOLUTE_SHAFT, SERRATION_SHAFT, STRAIGHT_FIT,
+    STRAIGHT_SHAFT,
 };
 use crate::teeth::straight::{
     self, SerratedHub, Serration, StraightHub, StraightSpline, TipCorner,
 };
-use crate::teeth::{
-    bspline, fit, involute, mesh, Error, Motion, Outline, Pair, Part, Piece, Point, Role,
-};
+use crate::teeth::{bspline, fit, involute, mesh, Motion, Outline, Pair, Part, Piece, Point, Role};
 
 /// Every public function and method of the tooth modules, as `module::Type::name` for a method and
 /// `module::name` for a function, in the order of the sources.
@@ -179,13 +181,31 @@ impl Sweep {
         f()
     }
 
+    /// Calls `f`, a public function that can refuse, as the function `name`: a refusal must be a
+    /// tooth failure whose operation is that function's own path, `teeth::name`.
+    fn checked<T>(
+        &mut self,
+        name: &'static str,
+        f: impl FnOnce() -> crate::Result<T>,
+    ) -> crate::Result<T> {
+        let out = self.call(name, f);
+        if let Err(e) = &out {
+            assert!(
+                e.teeth_failure().is_some(),
+                "{name}: not a tooth failure: {e}"
+            );
+            assert_eq!(e.operation(), format!("teeth::{name}"), "{name}: {e}");
+        }
+        out
+    }
+
     /// A call that gives a number: an accepted one must be finite.
     fn number(
         &mut self,
         name: &'static str,
-        f: impl FnOnce() -> Result<f64, Error>,
-    ) -> Result<f64, Error> {
-        let out = self.call(name, f);
+        f: impl FnOnce() -> crate::Result<f64>,
+    ) -> crate::Result<f64> {
+        let out = self.checked(name, f);
         if let Ok(v) = out {
             if !v.is_finite() && !KNOWN_NOT_FINITE.contains(&name) {
                 self.not_finite.push(format!("{name} gave {v}"));
@@ -198,9 +218,9 @@ impl Sweep {
     fn outline(
         &mut self,
         name: &'static str,
-        f: impl FnOnce() -> Result<Outline, Error>,
-    ) -> Result<Outline, Error> {
-        let out = self.call(name, f);
+        f: impl FnOnce() -> crate::Result<Outline>,
+    ) -> crate::Result<Outline> {
+        let out = self.checked(name, f);
         if let Ok(o) = &out {
             sound(name, o);
         }
@@ -211,9 +231,9 @@ impl Sweep {
     fn pair(
         &mut self,
         name: &'static str,
-        f: impl FnOnce() -> Result<Pair, Error>,
-    ) -> Result<Pair, Error> {
-        let out = self.call(name, f);
+        f: impl FnOnce() -> crate::Result<Pair>,
+    ) -> crate::Result<Pair> {
+        let out = self.checked(name, f);
         if let Ok(p) = &out {
             sound(name, &p.first.outline);
             sound(name, &p.second.outline);
@@ -360,13 +380,13 @@ fn spline_fit() -> Fit {
 /// A pair turned a little: every method of a pair, with hostile turns and reaches.
 fn pair_methods(s: &mut Sweep, pair: &Pair, k: usize) {
     let _ = s.call("pair::Pair::second_at", || pair.second_at(arg(k)));
-    let _ = s.call("pair::Pair::bodies", || pair.bodies());
-    let _ = s.call("pair::Pair::gap_at", || pair.gap_at(arg(k), 0.5));
-    let _ = s.call("pair::Pair::gap_at", || pair.gap_at(0.1, arg(k + 7)));
-    let _ = s.call("pair::Pair::through", || {
+    let _ = s.checked("pair::Pair::bodies", || pair.bodies());
+    let _ = s.checked("pair::Pair::gap_at", || pair.gap_at(arg(k), 0.5));
+    let _ = s.checked("pair::Pair::gap_at", || pair.gap_at(0.1, arg(k + 7)));
+    let _ = s.checked("pair::Pair::through", || {
         pair.through(arg(k), arg(k + 3), 2, 0.5)
     });
-    let _ = s.call("pair::Pair::through_a_cycle", || {
+    let _ = s.checked("pair::Pair::through_a_cycle", || {
         pair.through_a_cycle(2, 0.5)
     });
 }
@@ -395,7 +415,7 @@ fn sweep_involute(s: &mut Sweep, dice: &mut Dice) {
             g.tooth_thickness()
         });
         let _ = s.number("involute::External::form_radius", || g.form_radius());
-        let _ = s.call("involute::External::is_undercut", || g.is_undercut());
+        let _ = s.checked("involute::External::is_undercut", || g.is_undercut());
         let _ = s.number("involute::External::half_angle_at", || {
             g.half_angle_at(arg(k))
         });
@@ -403,7 +423,7 @@ fn sweep_involute(s: &mut Sweep, dice: &mut Dice) {
             g.half_angle_at(18.0)
         });
         let _ = s.outline("involute::External::outline", || g.outline(TOL));
-        let hub = s.call("involute::hub_for", || involute::hub_for(&g, &spline_fit()));
+        let hub = s.checked("involute::hub_for", || involute::hub_for(&g, &spline_fit()));
         if let Ok(hub) = hub {
             let _ = s.outline("involute::Internal::outline", || hub.outline(TOL));
         }
@@ -423,7 +443,7 @@ fn sweep_involute(s: &mut Sweep, dice: &mut Dice) {
             3 => f.hub_fillet_radius = fit_numbers[0],
             _ => f.form_clearance = fit_numbers[0],
         }
-        let _ = s.call("involute::hub_for", || {
+        let _ = s.checked("involute::hub_for", || {
             involute::hub_for(&plain_shaft(), &f)
         });
     }
@@ -498,7 +518,7 @@ fn sweep_straight(s: &mut Sweep, dice: &mut Dice) {
         };
         let f = fits[k % fits.len()];
         let _ = s.outline("straight::StraightSpline::outline", || shaft.outline(TOL));
-        if let Ok(hub) = s.call("straight::hub_for", || straight::hub_for(&shaft, &f)) {
+        if let Ok(hub) = s.checked("straight::hub_for", || straight::hub_for(&shaft, &f)) {
             let _ = s.outline("straight::StraightHub::outline", || hub.outline(TOL));
         }
         let _ = s.number("straight::turning_play", || {
@@ -578,7 +598,7 @@ fn sweep_straight(s: &mut Sweep, dice: &mut Dice) {
         let _ = s.number("straight::Serration::sharp_tip_radius", || {
             shaft.sharp_tip_radius()
         });
-        if let Ok(hub) = s.call("straight::serration_hub_for", || {
+        if let Ok(hub) = s.checked("straight::serration_hub_for", || {
             straight::serration_hub_for(&shaft, &f)
         }) {
             let _ = s.outline("straight::SerratedHub::outline", || hub.outline(TOL));
@@ -619,43 +639,43 @@ fn sweep_fit(s: &mut Sweep) {
     let outline = plain_shaft().outline(1e-4).expect("a shaft");
     let (teeth, top) = (outline.teeth(), outline.radii().1);
     for (k, &v) in HOSTILE.iter().enumerate() {
-        let _ = s.call("fit::one_piece", || fit::one_piece(outline.tooth(), v));
-        let _ = s.call("outline::space_section", || {
+        let _ = s.checked("fit::one_piece", || fit::one_piece(outline.tooth(), v));
+        let _ = s.checked("outline::space_section", || {
             crate::teeth::outline::space_section(&outline, v, 40.0)
         });
-        let _ = s.call("outline::space_section", || {
+        let _ = s.checked("outline::space_section", || {
             crate::teeth::outline::space_section(&outline, 0.0, v)
         });
         // The same outline held as its plain parts, each of them hostile in turn.
         let count = HOSTILE_COUNTS[k % HOSTILE_COUNTS.len()];
         let section = crate::teeth::outline::space_section_of;
-        let _ = s.call("outline::space_section_of", || {
+        let _ = s.checked("outline::space_section_of", || {
             section(teeth, outline.tooth(), top, v, 40.0)
         });
-        let _ = s.call("outline::space_section_of", || {
+        let _ = s.checked("outline::space_section_of", || {
             section(teeth, outline.tooth(), top, 0.0, v)
         });
-        let _ = s.call("outline::space_section_of", || {
+        let _ = s.checked("outline::space_section_of", || {
             section(teeth, outline.tooth(), v, 0.0, 40.0)
         });
-        let _ = s.call("outline::space_section_of", || {
+        let _ = s.checked("outline::space_section_of", || {
             section(count, outline.tooth(), top, 0.0, 40.0)
         });
-        let _ = s.call("outline::space_section_of", || {
+        let _ = s.checked("outline::space_section_of", || {
             section(teeth, &[], top, 0.0, 40.0)
         });
         let points = crate::teeth::outline::points_of;
         let found = [
-            s.call("outline::points_of", || {
+            s.checked("outline::points_of", || {
                 points(teeth, outline.tooth(), v, 0.0)
             }),
-            s.call("outline::points_of", || {
+            s.checked("outline::points_of", || {
                 points(teeth, outline.tooth(), 1e-3, v)
             }),
-            s.call("outline::points_of", || {
+            s.checked("outline::points_of", || {
                 points(count, outline.tooth(), 1e-3, 0.0)
             }),
-            s.call("outline::points_of", || points(teeth, &[], 1e-3, 0.0)),
+            s.checked("outline::points_of", || points(teeth, &[], 1e-3, 0.0)),
         ];
         for chain in found.into_iter().flatten() {
             assert!(chain.len() <= crate::teeth::MAX_OUTLINE_POINTS);
@@ -666,11 +686,11 @@ fn sweep_fit(s: &mut Sweep) {
         }
         let _ = s.outline("fit::fitted", || fit::fitted(&outline, v));
         for degree in [0, 1, 2, 3, 5, 9, 10, usize::MAX] {
-            let _ = s.call("fit::fit", || fit::fit(&outline, v, degree));
+            let _ = s.checked("fit::fit", || fit::fit(&outline, v, degree));
         }
     }
     for degree in [2, 3, 5] {
-        if let Ok(fitted) = s.call("fit::fit", || fit::fit(&outline, 1e-2, degree)) {
+        if let Ok(fitted) = s.checked("fit::fit", || fit::fit(&outline, 1e-2, degree)) {
             sound("fit::fit", &fitted.outline);
             for piece in fitted.outline.tooth() {
                 if let Piece::Spline {
@@ -680,10 +700,10 @@ fn sweep_fit(s: &mut Sweep) {
                     ..
                 } = piece
                 {
-                    let _ = s.call("fit::bezier_pieces", || {
+                    let _ = s.checked("fit::bezier_pieces", || {
                         fit::bezier_pieces(*degree, knots, control)
                     });
-                    let _ = s.call("fit::cubic_beziers", || fit::cubic_beziers(knots, control));
+                    let _ = s.checked("fit::cubic_beziers", || fit::cubic_beziers(knots, control));
                 }
             }
         }
@@ -695,13 +715,13 @@ fn sweep_fit(s: &mut Sweep) {
             .map(|_| dice.pick(&HOSTILE))
             .collect();
         let right: Vec<f64> = (0..size + round % 2).map(|_| dice.pick(&HOSTILE)).collect();
-        let _ = s.call("fit::solve_symmetric", || {
+        let _ = s.checked("fit::solve_symmetric", || {
             fit::solve_symmetric(size, &matrix, &right)
         });
         let identity: Vec<f64> = (0..size * size)
             .map(|i| if i % (size + 1) == 0 { 2.0 } else { 0.1 })
             .collect();
-        let _ = s.call("fit::solve_symmetric", || {
+        let _ = s.checked("fit::solve_symmetric", || {
             fit::solve_symmetric(size, &identity, &right)
         });
         let degree = dice.roll() % 12;
@@ -715,19 +735,19 @@ fn sweep_fit(s: &mut Sweep) {
         if round % 3 == 0 {
             knots.sort_by(f64::total_cmp);
         }
-        let _ = s.call("fit::bezier_pieces", || {
+        let _ = s.checked("fit::bezier_pieces", || {
             fit::bezier_pieces(degree, &knots, &control)
         });
-        let _ = s.call("fit::cubic_beziers", || {
+        let _ = s.checked("fit::cubic_beziers", || {
             fit::cubic_beziers(&knots, &control)
         });
-        let _ = s.call("bspline::range", || {
+        let _ = s.checked("bspline::range", || {
             bspline::range(degree, &knots, &control)
         });
-        let _ = s.call("bspline::point", || {
+        let _ = s.checked("bspline::point", || {
             bspline::point(degree, &knots, &control, dice.pick(&HOSTILE))
         });
-        let _ = s.call("bspline::breaks", || {
+        let _ = s.checked("bspline::breaks", || {
             bspline::breaks(degree, &knots, &control)
         });
         let piece = Piece::Spline {
@@ -801,7 +821,7 @@ fn sweep_outline_mesh_pair(s: &mut Sweep, dice: &mut Dice) {
         } else {
             Material::Outside
         };
-        if let Ok(body) = s.call("mesh::Body::new", || Body::new(points, material)) {
+        if let Ok(body) = s.checked("mesh::Body::new", || Body::new(points, material)) {
             body_methods(s, &body, dice);
         }
     }
@@ -889,12 +909,11 @@ fn sweep_outline_mesh_pair(s: &mut Sweep, dice: &mut Dice) {
         ];
         for pair in &pairs {
             pair_methods(s, pair, k);
-            let _ = s.call("pair::Pair::through", || {
+            let _ = s.checked("pair::Pair::through", || {
                 pair.through(0.0, 1.0, HOSTILE_COUNTS[k % HOSTILE_COUNTS.len()].min(3), v)
             });
-            let _ = s.call("pair::Pair::through_a_cycle", || {
+            let _ = s.checked("pair::Pair::through_a_cycle", || {
                 pair.through_a_cycle(HOSTILE_COUNTS[k % HOSTILE_COUNTS.len()], 0.5)
-                    .ok()
             });
         }
     }
@@ -919,13 +938,13 @@ fn body_methods(s: &mut Sweep, body: &Body, dice: &mut Dice) {
         )
     });
     let reach = dice.pick(&HOSTILE);
-    if let Ok(Some(found)) = s.call("mesh::gap", || mesh::gap(body, &placed, reach)) {
+    if let Ok(Some(found)) = s.checked("mesh::gap", || mesh::gap(body, &placed, reach)) {
         assert!(
             found.distance.is_finite() && found.at.iter().all(|v| v.is_finite()),
             "{found:?}"
         );
     }
-    let _ = s.call("mesh::gap", || mesh::gap(&placed, body, 0.5));
+    let _ = s.checked("mesh::gap", || mesh::gap(&placed, body, 0.5));
 }
 
 /// A serration whose flanks are all but parallel (a flank angle of the smallest positive number of
@@ -943,7 +962,7 @@ fn a_serration_with_all_but_parallel_flanks_has_no_sharp_tip_to_give() {
     };
     let radius = serration.sharp_tip_radius();
     assert!(
-        radius.is_err() || radius.is_ok_and(f64::is_finite),
+        radius.as_ref().is_ok_and(|r| r.is_finite()) || radius.is_err(),
         "{radius:?}"
     );
 }
@@ -1023,8 +1042,10 @@ fn sweep_master_spline(s: &mut Sweep, dice: &mut Dice) {
         hub_fillet_radius: 0.3,
         form_clearance: 0.05,
     };
+    // Made at the share of the fit's tolerance that a fit's source must keep.
+    let source = 1e-2 * fit::SOURCE_SHARE;
     let involute_pair =
-        involute::spline_pair(&involute_shaft, &involute_fit, TOL).map(|mut pair| {
+        involute::spline_pair(&involute_shaft, &involute_fit, source).map(|mut pair| {
             pair.first.outline = fit::fitted(&pair.first.outline, 1e-2).expect("the shaft fitted");
             pair.second.outline = fit::fitted(&pair.second.outline, 1e-2).expect("the hub fitted");
             pair
@@ -1084,7 +1105,7 @@ fn sweep_master_spline(s: &mut Sweep, dice: &mut Dice) {
             (f64::from(round) * 7.3) % 720.0 - 360.0
         };
         let _ = s.call("master_spline::Form::circle", || form.circle());
-        let _ = s.call("master_spline::placement", || {
+        let _ = s.checked("master_spline::placement", || {
             master_spline::placement(dice.pick(&HOSTILE_COUNTS), form, angle).map(|p| {
                 assert!(p.turn.is_finite() && p.middle.is_finite(), "{p:?}");
             })
@@ -1258,7 +1279,7 @@ fn sweep_shaft_spline(s: &mut Sweep, dice: &mut Dice) {
             if shaft_is_made && slow >= SLOW_PLANS {
                 continue;
             }
-            match s.call("shaft_spline::plan", || shaft_spline::plan(&n)) {
+            match s.checked("shaft_spline::plan", || shaft_spline::plan(&n)) {
                 Ok(made) => {
                     slow += usize::from(involute);
                     sound("shaft_spline::plan", &made.pair.first.outline);
@@ -1277,7 +1298,10 @@ fn sweep_shaft_spline(s: &mut Sweep, dice: &mut Dice) {
                     ];
                     assert!(sizes.iter().all(|v| v.is_finite()), "{n:?} gave {m:?}");
                 }
-                Err(refusal) => assert!(!refusal.words.is_empty(), "{n:?}"),
+                Err(e) => assert!(
+                    matches!(e.teeth_failure(), Some(TeethFailure::Refused(_))),
+                    "{n:?}"
+                ),
             }
         }
     }
@@ -1286,14 +1310,14 @@ fn sweep_shaft_spline(s: &mut Sweep, dice: &mut Dice) {
         let _ = s.call("shaft_spline::tool_margin", || shaft_spline::tool_margin(v));
         let radius = shaft_spline::cutter_radius;
         let found = [
-            s.call("shaft_spline::cutter_radius", || radius(v, 11.5, 14.0, 0.1)),
-            s.call("shaft_spline::cutter_radius", || {
+            s.checked("shaft_spline::cutter_radius", || radius(v, 11.5, 14.0, 0.1)),
+            s.checked("shaft_spline::cutter_radius", || {
                 radius(arg(k + 3), v, 14.0, 0.1)
             }),
-            s.call("shaft_spline::cutter_radius", || {
+            s.checked("shaft_spline::cutter_radius", || {
                 radius(arg(k + 3), 11.5, v, 0.1)
             }),
-            s.call("shaft_spline::cutter_radius", || {
+            s.checked("shaft_spline::cutter_radius", || {
                 radius(arg(k + 3), 11.5, 14.0, v)
             }),
         ];
@@ -1331,7 +1355,7 @@ fn involute_shaft_of(n: &SplineNumbers) -> Option<External> {
 }
 
 /// What every accepted outline of a splined shaft or hub must be. Returns whether one was accepted.
-fn sound_with_teeth(outline: Result<Outline, Error>) -> bool {
+fn sound_with_teeth(outline: crate::Result<Outline>) -> bool {
     let Ok(outline) = outline else { return false };
     assert!(outline.teeth() >= 2);
     for piece in outline.tooth() {
@@ -1368,4 +1392,657 @@ fn plausible_numbers_give_sound_outlines_or_a_refusal() {
         }
     }
     assert!(accepted > 1500, "{accepted}");
+}
+
+// -------------------------------------------------------------------------------------------------
+// The planner's refusals as data, against the words it gave before they were typed
+// -------------------------------------------------------------------------------------------------
+
+/// The planner's names of the numbers the tooth modules check, as it held them before its refusals
+/// were typed.
+type OldNumbers = &'static [(&'static str, &'static str)];
+/// The planner's words of the tooth modules' reasons, as it held them before its refusals were
+/// typed: the first fragment the reason contains counts.
+type OldReasons = &'static [(&'static str, &'static str)];
+
+const OLD_INVOLUTE_SHAFT: (OldNumbers, OldReasons) = (
+    &[
+        ("module", "module"),
+        ("teeth", "teeth"),
+        ("pressure angle", "pressure_angle"),
+        ("addendum", "addendum"),
+        ("dedendum", "dedendum"),
+        ("profile shift", "profile_shift"),
+        ("tool tip radius", "root_fillet"),
+        ("thinning", "thinning"),
+    ],
+    &[
+        ("come to a point", "addendum"),
+        (
+            "tip circle is at or below the start of the flank",
+            "addendum",
+        ),
+        ("tool's tip radius is too large", "root_fillet"),
+        (
+            "root must lie below the pitch circle by more",
+            "root_fillet",
+        ),
+        (
+            "root fillets of neighbouring teeth would cross",
+            "root_fillet",
+        ),
+        ("root fillet and the flank would not meet", "root_fillet"),
+        ("undercut would cut the tooth through", "profile_shift"),
+        ("root circle would be inside the axis", "dedendum"),
+        ("thinner than nothing or as wide as the pitch", "thinning"),
+    ],
+);
+
+const OLD_INVOLUTE_FIT: (OldNumbers, OldReasons) = (
+    &[
+        ("side clearance", "side_clearance"),
+        ("hub addendum", "hub_addendum"),
+        ("tip clearance", "tip_clearance"),
+        ("form clearance", "form_clearance"),
+        ("fillet radius", "hub_root_round"),
+        ("space width", "side_clearance"),
+        ("minor radius", "hub_addendum"),
+        ("major radius", "tip_clearance"),
+    ],
+    &[
+        (
+            "hub's teeth would reach into the shaft's root fillet",
+            "hub_addendum",
+        ),
+        (
+            "hub's root rounds would reach the shaft's tip corners",
+            "hub_root_round",
+        ),
+        ("spaces would be as wide as the pitch", "side_clearance"),
+        (
+            "tips of the teeth would be below the base circle",
+            "hub_addendum",
+        ),
+        (
+            "roots must lie outside the tips by more than the fillet radius",
+            "hub_root_round",
+        ),
+        ("spaces would meet at the tips", "side_clearance"),
+        ("root rounds are too large", "hub_root_round"),
+    ],
+);
+
+const OLD_STRAIGHT_SHAFT: (OldNumbers, OldReasons) = (
+    &[
+        ("teeth", "teeth"),
+        ("major diameter", "major_diameter"),
+        ("minor diameter", "minor_diameter"),
+        ("tooth width", "tooth_width"),
+        ("flank angle", "flank_angle"),
+        ("root round", "root_round"),
+        ("chamfer size", "tip_size"),
+        ("tip round radius", "tip_size"),
+    ],
+    &[
+        ("flank does not cross both circles", "tooth_width"),
+        ("chamfer is too large", "tip_size"),
+        ("round at the major circle is too large", "tip_size"),
+        ("round at the minor circle is too large", "root_round"),
+        ("corners of a tooth would meet", "tip_size"),
+        ("neighbouring teeth would meet at the root", "tooth_width"),
+        ("corners leave no straight flank", "tip_size"),
+        ("minor diameter must be smaller", "minor_diameter"),
+    ],
+);
+
+const OLD_SERRATION_SHAFT: (OldNumbers, OldReasons) = (
+    OLD_STRAIGHT_SHAFT.0,
+    &[
+        ("flank does not cross both circles", "flank_angle"),
+        ("chamfer is too large", "tip_size"),
+        ("round at the major circle is too large", "tip_size"),
+        ("round at the minor circle is too large", "root_round"),
+        ("corners of a tooth would meet", "tip_size"),
+        ("neighbouring teeth would meet at the root", "flank_angle"),
+        ("corners leave no straight flank", "tip_size"),
+        ("minor diameter must be smaller", "minor_diameter"),
+    ],
+);
+
+const OLD_STRAIGHT_FIT: (OldNumbers, OldReasons) = (
+    &[
+        ("side clearance", "side_clearance"),
+        ("major clearance", "major_clearance"),
+        ("minor clearance", "minor_clearance"),
+        ("hub root round", "hub_root_round"),
+        ("hub tip round", "hub_tip_round"),
+        ("space width", "side_clearance"),
+        ("root round", "hub_root_round"),
+        ("tip round", "hub_tip_round"),
+    ],
+    &[
+        (
+            "minor clearance would take the hub's teeth out",
+            "minor_clearance",
+        ),
+        ("hub's root rounds would come closer", "hub_root_round"),
+        ("tips of the hub's teeth would come closer", "hub_tip_round"),
+        ("hub's root rounds would meet", "hub_root_round"),
+        ("hub's teeth would be too narrow", "side_clearance"),
+        ("round at the major circle is too large", "hub_root_round"),
+        ("round at the minor circle is too large", "hub_tip_round"),
+        ("corners leave no straight flank", "hub_root_round"),
+        ("flank does not cross both circles", "side_clearance"),
+        (
+            "neighbouring teeth would meet at the root",
+            "side_clearance",
+        ),
+        ("can turn freely", "side_clearance"),
+    ],
+);
+
+/// The master spline's two reasons as the planner matched them, letter for letter.
+const OLD_NO_SMALLEST: &str =
+    "no corner of the teeth lies on the smallest circle: no tooth or space can be closed there";
+const OLD_NO_LARGEST: &str = "no corner of the teeth lies on the largest circle: the tops of the \
+                              teeth and the bottoms of the spaces need a flat part to join";
+
+/// A tooth module's failure as the planner read it before the failures were typed.
+#[derive(Clone, Copy, Debug)]
+enum OldError {
+    OutOfRange {
+        what: &'static str,
+        value: f64,
+        above: f64,
+        up_to: f64,
+    },
+    Invalid {
+        why: &'static str,
+    },
+}
+
+/// The planner's number in plain words, as it was.
+fn old_plain(x: f64) -> String {
+    let s = format!("{x:.6}");
+    let s = s.trim_end_matches('0').trim_end_matches('.');
+    if s != "0" && s != "-0" {
+        s.to_string()
+    } else if x != 0.0 && x.is_finite() {
+        format!("{x:e}")
+    } else {
+        "0".to_string()
+    }
+}
+
+/// The planner's key of a refusal, as it was: the first word in backticks, when it is lowercase or
+/// `_`.
+fn old_key(words: &str) -> Option<String> {
+    let is_key = |k: &&str| !k.is_empty() && k.chars().all(|c| c.is_ascii_lowercase() || c == '_');
+    words.split('`').nth(1).filter(is_key).map(str::to_string)
+}
+
+/// The planner's words for a tooth module's failure, as they were.
+fn old_refused(tables: &[(OldNumbers, OldReasons)], e: OldError) -> String {
+    match e {
+        OldError::OutOfRange {
+            what,
+            value,
+            above,
+            up_to,
+        } => {
+            let key = tables
+                .iter()
+                .flat_map(|(numbers, _)| numbers.iter())
+                .find(|(name, _)| *name == what)
+                .map(|(_, key)| *key);
+            let name = key.map_or_else(|| format!("the {what}"), |key| format!("`{key}`"));
+            // A lower limit a hair above nothing is "more than 0" in plain words.
+            let above = if above > 0.0 && above < 1e-4 {
+                0.0
+            } else {
+                above
+            };
+            if !value.is_finite() {
+                format!("{name} must be a number")
+            } else if value > up_to {
+                format!(
+                    "{name} must be at most {}, not {}",
+                    old_plain(up_to),
+                    old_plain(value)
+                )
+            } else if value == up_to {
+                format!("{name} must be less than {}", old_plain(up_to))
+            } else if value < 0.0 && above == 0.0 {
+                format!("{name} cannot be negative, not {}", old_plain(value))
+            } else {
+                format!(
+                    "{name} must be more than {}, not {}",
+                    old_plain(above),
+                    old_plain(value)
+                )
+            }
+        }
+        OldError::Invalid { why } => match tables
+            .iter()
+            .flat_map(|(_, reasons)| reasons.iter())
+            .find(|(words, _)| why.contains(words))
+        {
+            Some((_, key)) => format!(
+                "`{key}`: {}",
+                why.replace("the tool's tip radius", "the root fillet")
+            ),
+            None => why.to_string(),
+        },
+    }
+}
+
+/// The planner's words for a failure of the master spline, as they were.
+fn old_master_refused(e: OldError) -> String {
+    match e {
+        OldError::Invalid { why } if why == OLD_NO_SMALLEST => format!(
+            "`master_spline`: a tooth cannot be left out of these teeth: {why}; make a wide tooth \
+             instead (wide_tooth), or make the shaft's root rounds and the hub's tip rounds smaller"
+        ),
+        OldError::Invalid { why } if why == OLD_NO_LARGEST => format!(
+            "`master_spline`: a wide tooth cannot be made on these teeth: {why}; leave a tooth out \
+             instead (tooth_out), or use plain or chamfered tip corners and smaller root rounds in \
+             the hub"
+        ),
+        other => old_refused(&[(&[("teeth", "teeth")], &[])], other),
+    }
+}
+
+/// Every name a tooth module gives a number it refuses, and one that no table knows.
+const WHATS: &[&str] = &[
+    "tolerance",
+    "module",
+    "pressure angle",
+    "addendum",
+    "dedendum",
+    "profile shift",
+    "thinning",
+    "space width",
+    "minor radius",
+    "major radius",
+    "hub addendum",
+    "tip clearance",
+    "radius",
+    "reach",
+    "largest radius",
+    "turn",
+    "major diameter",
+    "minor diameter",
+    "tooth width",
+    "flank angle",
+    "tool tip radius",
+    "fillet radius",
+    "side clearance",
+    "form clearance",
+    "chamfer size",
+    "tip round radius",
+    "major clearance",
+    "minor clearance",
+    "hub root round",
+    "hub tip round",
+    "root round",
+    "tip round",
+    "degree",
+    "teeth",
+    "points of the outline",
+    "tooth",
+    "steps",
+    "nothing known",
+];
+
+/// The limits a refused number is given against: above nothing, above a number, a hair above
+/// nothing (named "more than 0"), above a negative number.
+const BOUNDS: &[(f64, f64)] = &[
+    (0.0, 1000.0),
+    (2.0, 2000.0),
+    (1e-5, 100_000.0),
+    (1e-9, 3.0),
+    (-1.0, 19.0),
+];
+
+/// A set of the planner's tables, as it asks them.
+type Tables = &'static [(Numbers, Reasons)];
+
+/// The same set as it was.
+type OldTables = &'static [(OldNumbers, OldReasons)];
+
+/// The table sets the planner asks, each with its copy as it was; the last is the master spline's
+/// fallback.
+const SETS: &[(Tables, OldTables)] = &[
+    (&[INVOLUTE_SHAFT], &[OLD_INVOLUTE_SHAFT]),
+    (
+        &[INVOLUTE_FIT, INVOLUTE_SHAFT],
+        &[OLD_INVOLUTE_FIT, OLD_INVOLUTE_SHAFT],
+    ),
+    (&[STRAIGHT_SHAFT], &[OLD_STRAIGHT_SHAFT]),
+    (&[SERRATION_SHAFT], &[OLD_SERRATION_SHAFT]),
+    (
+        &[STRAIGHT_FIT, STRAIGHT_SHAFT],
+        &[OLD_STRAIGHT_FIT, OLD_STRAIGHT_SHAFT],
+    ),
+    (
+        &[STRAIGHT_FIT, SERRATION_SHAFT],
+        &[OLD_STRAIGHT_FIT, OLD_SERRATION_SHAFT],
+    ),
+    (
+        &[(&[("teeth", "teeth")], &[])],
+        &[(&[("teeth", "teeth")], &[])],
+    ),
+];
+
+/// The planner's refusals as data give the keys and the words it gave when it built them from
+/// words: every reason and every refused number through every table set it asks, and the master
+/// spline's refusals, against a copy of the planner as it was; then each refusal of the planner's
+/// own checks against its words written out. The new refusals (a bound not proved) have no old
+/// counterpart and are asserted as they are meant.
+#[test]
+fn the_planner_gives_todays_keys_and_words() {
+    let mut compared = 0_usize;
+    let mut mismatches: Vec<String> = Vec::new();
+    let mut compare = |case: &dyn Fn() -> String, new: TeethFailure, old: &str| {
+        compared += 1;
+        let found = (new.key().map(str::to_string), new.to_string());
+        let wanted = (old_key(old), old.to_string());
+        if found != wanted {
+            mismatches.push(format!("{}: {found:?}, before {wanted:?}", case()));
+        }
+    };
+    for (set, &(tables, old_tables)) in SETS.iter().enumerate() {
+        for &why in Why::ALL {
+            let old = old_refused(old_tables, OldError::Invalid { why: why.words() });
+            compare(
+                &|| format!("set {set}, {why:?}"),
+                refused(tables, TeethFailure::Invalid(why)),
+                &old,
+            );
+        }
+        for &what in WHATS {
+            for &(above, up_to) in BOUNDS {
+                for value in [
+                    f64::NAN,
+                    f64::INFINITY,
+                    f64::NEG_INFINITY,
+                    up_to + 1.0,
+                    up_to,
+                    -1.0,
+                    above - 1.0,
+                    above,
+                    0.5 * (above + up_to),
+                    above + 1e-5,
+                    1e-5,
+                ] {
+                    let new = TeethFailure::OutOfRange {
+                        what,
+                        value,
+                        above,
+                        up_to,
+                    };
+                    let old = OldError::OutOfRange {
+                        what,
+                        value,
+                        above,
+                        up_to,
+                    };
+                    compare(
+                        &|| format!("set {set}, {what} {value} above {above} up to {up_to}"),
+                        refused(tables, new),
+                        &old_refused(old_tables, old),
+                    );
+                }
+            }
+        }
+    }
+    for &why in Why::ALL {
+        let old = old_master_refused(OldError::Invalid { why: why.words() });
+        compare(
+            &|| format!("master spline, {why:?}"),
+            master_refused(TeethFailure::Invalid(why)),
+            &old,
+        );
+    }
+    for value in [f64::NAN, 1.0, 2001.0, 2000.0] {
+        let new = TeethFailure::OutOfRange {
+            what: "teeth",
+            value,
+            above: 1.0,
+            up_to: 2000.0,
+        };
+        let old = OldError::OutOfRange {
+            what: "teeth",
+            value,
+            above: 1.0,
+            up_to: 2000.0,
+        };
+        compare(
+            &|| format!("master spline, teeth {value}"),
+            master_refused(new),
+            &old_master_refused(old),
+        );
+    }
+    let per_set = Why::ALL.len() + WHATS.len() * BOUNDS.len() * 11;
+    let expected = SETS.len() * per_set + Why::ALL.len() + 4;
+    assert_eq!(compared, expected, "every case is compared");
+    assert!(
+        mismatches.is_empty(),
+        "{} of {compared} refusals differ from the words before: {:?}",
+        mismatches.len(),
+        mismatches.iter().take(8).collect::<Vec<_>>()
+    );
+
+    // A bound that could not be proved: the root fillets' separation names the root fillet, a
+    // chord or a fitted spline's distance names no number. Each is a refusal of the kind
+    // "unsupported", as an undecided certificate is.
+    for (set, &(tables, _)) in SETS.iter().enumerate() {
+        for what in [CHORD, FIT_DISTANCE] {
+            let unproved = refused(
+                tables,
+                TeethFailure::NotProved {
+                    what,
+                    asked: 1e-6,
+                    reached: 3e-6,
+                },
+            );
+            assert!(
+                matches!(
+                    unproved,
+                    TeethFailure::Refused(PlanRefusal::Unproved { key: None, .. })
+                ),
+                "set {set}: {unproved:?}"
+            );
+            assert_eq!(unproved.key(), None, "set {set}");
+            assert_eq!(unproved.kind(), ErrorKind::Unsupported, "set {set}");
+        }
+    }
+    // The two involute sets: the shaft's, and the hub's before the shaft's.
+    for &(tables, _) in SETS.iter().take(2) {
+        let unproved = refused(
+            tables,
+            TeethFailure::NotProved {
+                what: FILLET_SEPARATION,
+                asked: 0.0,
+                reached: -1e-12,
+            },
+        );
+        assert!(
+            matches!(
+                unproved,
+                TeethFailure::Refused(PlanRefusal::Unproved {
+                    key: Some("root_fillet"),
+                    what: FILLET_SEPARATION,
+                    ..
+                })
+            ),
+            "{unproved:?}"
+        );
+        assert_eq!(unproved.key(), Some("root_fillet"));
+        assert_eq!(unproved.kind(), ErrorKind::Unsupported);
+        assert!(
+            unproved.to_string().starts_with("`root_fillet`: "),
+            "{unproved}"
+        );
+    }
+
+    // The planner's own checks, each against its words written out.
+    let [straight_base, _, involute_base] = plan_bases();
+    let made = shaft_spline::plan(&straight_base).expect("the straight-sided base");
+    let (root, top) = made.pair.first.outline.radii();
+    let margin = shaft_spline::tool_margin(top - root);
+    let least = (top + margin) - root + margin;
+    let cases: Vec<(SplineNumbers, &str, String)> = vec![
+        (
+            SplineNumbers {
+                length: f64::NAN,
+                ..straight_base.clone()
+            },
+            "length",
+            "`length` must be a number".to_string(),
+        ),
+        (
+            SplineNumbers {
+                module: Some(f64::NAN),
+                ..involute_base.clone()
+            },
+            "module",
+            "`module` must be a number".to_string(),
+        ),
+        (
+            SplineNumbers {
+                module: None,
+                ..involute_base.clone()
+            },
+            "module",
+            "`module` is required (mm)".to_string(),
+        ),
+        (
+            SplineNumbers {
+                length: 0.0,
+                ..straight_base.clone()
+            },
+            "length",
+            "`length` must be from 0.001 to 100000 mm, not 0".to_string(),
+        ),
+        (
+            SplineNumbers {
+                make: SplineMake::Shaft,
+                ..straight_base.clone()
+            },
+            "hub_diameter",
+            "`hub_diameter` is the hub's outside diameter: give it only when `make` is hub or both"
+                .to_string(),
+        ),
+        (
+            SplineNumbers {
+                hub_diameter: None,
+                ..straight_base.clone()
+            },
+            "hub_diameter",
+            "`hub_diameter` is required to make the hub (mm, its outside diameter)".to_string(),
+        ),
+        (
+            SplineNumbers {
+                master_angle: Some(10.0),
+                ..straight_base.clone()
+            },
+            "master_angle",
+            "`master_angle` is where the master spline sits: give it only with `master_spline` \
+             tooth_out or wide_tooth"
+                .to_string(),
+        ),
+        (
+            SplineNumbers {
+                master: SplineMaster::ToothOut,
+                master_angle: Some(400.0),
+                ..straight_base.clone()
+            },
+            "master_angle",
+            "`master_angle` must be from -360 to 360 (degrees), not 400".to_string(),
+        ),
+        (
+            SplineNumbers {
+                end_chamfer: Some(-1.0),
+                ..straight_base.clone()
+            },
+            "end_chamfer",
+            "`end_chamfer` must be from 0 to 100000 mm, not -1".to_string(),
+        ),
+        (
+            SplineNumbers {
+                entry_chamfer: Some(2e5),
+                ..straight_base.clone()
+            },
+            "entry_chamfer",
+            "`entry_chamfer` must be from 0 to 100000 mm, not 200000".to_string(),
+        ),
+        (
+            SplineNumbers {
+                cutter_diameter: Some(2e5),
+                ..straight_base.clone()
+            },
+            "cutter_diameter",
+            "`cutter_diameter` must be a number of at most 100000 mm".to_string(),
+        ),
+        (
+            SplineNumbers {
+                cutter_diameter: Some(1.0),
+                ..straight_base.clone()
+            },
+            "cutter_diameter",
+            format!(
+                "`cutter_diameter` must be more than {} mm: the cutter's radius must reach past \
+                 the depth of the teeth",
+                old_plain(2.0 * least)
+            ),
+        ),
+        (
+            SplineNumbers {
+                hub_diameter: Some(2e5),
+                ..straight_base.clone()
+            },
+            "hub_diameter",
+            "`hub_diameter` must be at most 100000 mm, not 200000".to_string(),
+        ),
+        (
+            SplineNumbers {
+                hub_diameter: Some(28.7),
+                ..straight_base.clone()
+            },
+            "hub_diameter",
+            "`hub_diameter` leaves no rim around the hub's teeth: it must be more than 31.4 mm"
+                .to_string(),
+        ),
+        (
+            SplineNumbers {
+                tooth_width: Some(-1.0),
+                ..straight_base.clone()
+            },
+            "tooth_width",
+            "`tooth_width` cannot be negative, not -1".to_string(),
+        ),
+    ];
+    for (n, key, words) in cases {
+        let planned = shaft_spline::plan(&n);
+        assert_eq!(refusal(&planned), Some((Some(key), words.clone())), "{n:?}");
+        assert_eq!(
+            operation(&planned),
+            Some("teeth::shaft_spline::plan"),
+            "{words}"
+        );
+        let failure = planned
+            .as_ref()
+            .err()
+            .and_then(crate::SolidError::teeth_failure);
+        assert!(
+            matches!(failure, Some(TeethFailure::Refused(_))),
+            "{words}: {failure:?}"
+        );
+        assert_eq!(
+            failure.map(TeethFailure::kind),
+            Some(ErrorKind::InvalidInput),
+            "{words}"
+        );
+    }
 }

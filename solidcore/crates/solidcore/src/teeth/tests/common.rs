@@ -2,8 +2,10 @@
 
 #![allow(dead_code)]
 
+use crate::error::teeth::{TeethFailure, Why};
 use crate::teeth::outline::rotated;
-use crate::teeth::{Error, Gaps, Outline, Pair, Piece, Point};
+use crate::teeth::{Gaps, Outline, Pair, Piece, Point};
+use crate::SolidError;
 
 /// The distance between two points.
 pub fn dist(a: Point, b: Point) -> f64 {
@@ -71,7 +73,7 @@ pub fn assert_gap(
     reach: f64,
     expected: f64,
     within: f64,
-) -> Result<(), Error> {
+) -> crate::Result<()> {
     let gaps = pair.through_a_cycle(steps, reach)?;
     let (least, most) = (least(&gaps), most(&gaps));
     assert!(
@@ -147,7 +149,7 @@ pub const HOSTILE: [f64; 30] = [
 pub const HOSTILE_COUNTS: [u32; 12] = [0, 1, 2, 3, 4, 5, 7, 20, 100, 2000, 2001, u32::MAX];
 
 /// What every accepted outline must be; whether one was accepted.
-pub fn sound(outline: Result<Outline, Error>) -> bool {
+pub fn sound(outline: crate::Result<Outline>) -> bool {
     let Ok(outline) = outline else { return false };
     for piece in outline.tooth() {
         let (start, end) = (
@@ -162,4 +164,53 @@ pub fn sound(outline: Result<Outline, Error>) -> bool {
     let (low, high) = outline.radii();
     assert!(low.is_finite() && high.is_finite() && low <= high);
     true
+}
+
+/// The tooth failure of a refused public call (None for Ok or for another kind of error).
+pub fn failure<T>(r: &crate::Result<T>) -> Option<TeethFailure> {
+    r.as_ref()
+        .err()
+        .and_then(SolidError::teeth_failure)
+        .copied()
+}
+
+/// The reason of a refused public call, for an Invalid.
+pub fn why<T>(r: &crate::Result<T>) -> Option<Why> {
+    failure(r).as_ref().and_then(TeethFailure::why)
+}
+
+/// The `what` of an `OutOfRange` refusal.
+pub fn out_of_range<T>(r: &crate::Result<T>) -> Option<&'static str> {
+    match failure(r) {
+        Some(TeethFailure::OutOfRange { what, .. }) => Some(what),
+        _ => None,
+    }
+}
+
+/// The `what` of a `NotProved` refusal.
+pub fn not_proved<T>(r: &crate::Result<T>) -> Option<&'static str> {
+    match failure(r) {
+        Some(TeethFailure::NotProved { what, .. }) => Some(what),
+        _ => None,
+    }
+}
+
+/// The operation path of a refused public call.
+pub fn operation<T>(r: &crate::Result<T>) -> Option<&'static str> {
+    r.as_ref().err().map(SolidError::operation)
+}
+
+/// The planner's key and words of a refused public call: the failure's `key()` and its words.
+pub fn refusal<T>(r: &crate::Result<T>) -> Option<(Option<&'static str>, String)> {
+    failure(r).map(|f| (f.key(), f.to_string()))
+}
+
+/// A crate-private result as a public one, for `?` in tests: operation `"teeth::tests"`.
+pub fn lift<T>(r: Result<T, TeethFailure>) -> crate::Result<T> {
+    r.map_err(|e| SolidError::teeth("teeth::tests", e))
+}
+
+/// The reason of a crate-private result.
+pub fn typed_why<T>(r: &Result<T, TeethFailure>) -> Option<Why> {
+    r.as_ref().err().and_then(TeethFailure::why)
 }

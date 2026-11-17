@@ -26,7 +26,7 @@ pub use solidcore::teeth::MAX_LENGTH;
 pub fn plan(numbers: &SplineNumbers) -> Result<SplinePlan, SplineRefusal> {
     planner::plan(&convert::numbers(numbers))
         .map(|made| convert::record_plan(&made))
-        .map_err(|refusal| convert::record_refusal(&refusal))
+        .map_err(|e| convert::record_refusal(&e))
 }
 
 /// The numbers of a spline cut on a shaft that is there, whose radius is `radius`: the size left
@@ -74,7 +74,7 @@ pub fn tool_margin(depth: f64) -> f64 {
 /// The words of the refusal: the diameter is not a number the kernel takes, or the cutter does
 /// not reach past the depth it cuts.
 pub fn cutter_radius(diameter: f64, root: f64, out_to: f64, margin: f64) -> Result<f64, String> {
-    planner::cutter_radius(diameter, root, out_to, margin)
+    planner::cutter_radius(diameter, root, out_to, margin).map_err(|e| convert::refusal_words(&e))
 }
 
 /// The section of the tooth space of the shaft `outline` after the tooth whose top lies nearest
@@ -97,7 +97,7 @@ pub fn space_section(
         out_to,
     )
     .map(|section| convert::record_section(&section))
-    .map_err(|e| e.to_string())
+    .map_err(|e| convert::refusal_words(&e))
 }
 
 /// The whole `outline` as a closed chain of points, counter-clockwise, without repeating the
@@ -115,7 +115,7 @@ pub fn outline_points(outline: &ToothOutline, turn: f64) -> Result<Vec<[f64; 2]>
         outline.tolerance,
         turn,
     )
-    .map_err(|e| e.to_string())
+    .map_err(|e| convert::refusal_words(&e))
 }
 
 /// A B-spline as its polynomial pieces between knots, in order, each as `degree + 1` control
@@ -129,7 +129,7 @@ pub fn bezier_pieces(
     knots: &[f64],
     control: &[[f64; 2]],
 ) -> Result<Vec<Vec<[f64; 2]>>, String> {
-    kernel::fit::bezier_pieces(degree, knots, control).map_err(|e| e.to_string())
+    kernel::fit::bezier_pieces(degree, knots, control).map_err(|e| convert::refusal_words(&e))
 }
 
 #[cfg(test)]
@@ -189,6 +189,45 @@ mod tests {
         .unwrap_err();
         assert_eq!(refused.key.as_deref(), Some("tooth_width"));
         assert!(refused.words.starts_with("`tooth_width`"), "{refused}");
+    }
+
+    /// The words the four outline functions give are the kernel's refusal itself, as they were
+    /// before the kernel's errors named their operation: never prefixed by the operation's path.
+    #[test]
+    fn the_kernel_words_come_without_the_operation() {
+        let made = plan(&straight()).unwrap();
+        let refusals = [
+            (
+                outline_points(&made.shaft, f64::NAN).map(|_| ()),
+                "the outline would not be finite",
+            ),
+            (
+                space_section(&made.shaft, f64::NAN, 14.5).map(|_| ()),
+                "the angle of the tooth is not a number",
+            ),
+            (
+                space_section(&made.shaft, 0.0, 13.0).map(|_| ()),
+                "radius is 13; it must be above 14 and at most 100000",
+            ),
+            (
+                bezier_pieces(3, &[], &[]).map(|_| ()),
+                "the knots and control points do not describe a spline",
+            ),
+            (
+                cutter_radius(f64::NAN, 11.5, 14.0, 0.1).map(|_| ()),
+                "`cutter_diameter` must be a number of at most 100000 mm",
+            ),
+            (
+                cutter_radius(1.0, 11.5, 14.0, 0.1).map(|_| ()),
+                "`cutter_diameter` must be more than 5.2 mm: the cutter's radius must reach past \
+                 the depth of the teeth",
+            ),
+        ];
+        for (refused, words) in refusals {
+            let refused = refused.unwrap_err();
+            assert_eq!(refused, words);
+            assert!(!refused.starts_with("teeth::"), "{refused}");
+        }
     }
 
     #[test]

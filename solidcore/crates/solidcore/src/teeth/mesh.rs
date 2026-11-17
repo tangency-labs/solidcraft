@@ -12,8 +12,10 @@
 
 use std::cell::Cell;
 
+use crate::error::teeth::{TeethFailure, Why};
 use crate::teeth::outline::{rotated, Outline, Point, Ring};
-use crate::teeth::{Error, MAX_LENGTH};
+use crate::teeth::MAX_LENGTH;
+use crate::SolidError;
 
 /// On which side of its outline a part's material is.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -39,10 +41,16 @@ impl Body {
     /// (as [`crate::teeth::Outline::points`] gives it), without repeating the first point, and does
     /// not cross itself. Points that meet, chords that share an end and stretches that only touch
     /// do not cross.
-    pub fn new(points: Vec<Point>, material: Material) -> Result<Body, Error> {
+    pub fn new(points: Vec<Point>, material: Material) -> crate::Result<Body> {
+        Body::new_typed(points, material)
+            .map_err(|e| SolidError::teeth("teeth::mesh::Body::new", e))
+    }
+
+    /// [`Body::new`] with its failure as a [`TeethFailure`], for the tooth module's own callers.
+    pub(crate) fn new_typed(points: Vec<Point>, material: Material) -> Result<Body, TeethFailure> {
         if points.len() < 3 || points.len() > MAX_POINTS {
             let (value, up_to) = (points.len() as f64, MAX_POINTS as f64);
-            return Err(Error::OutOfRange {
+            return Err(TeethFailure::OutOfRange {
                 what: "points of the outline",
                 value,
                 above: 2.0,
@@ -54,38 +62,32 @@ impl Body {
             .flatten()
             .any(|v| !(v.is_finite() && v.abs() <= MAX_LENGTH))
         {
-            return Err(Error::Invalid {
-                why: "the outline is not finite",
-            });
+            return Err(TeethFailure::Invalid(Why::BodyNotFinite));
         }
         let ring = Ring {
             chain: &points,
             teeth: 1,
         };
         if !(ring.doubled_area() > 0.0) {
-            return Err(Error::Invalid {
-                why: "the outline must run counter-clockwise around an area",
-            });
+            return Err(TeethFailure::Invalid(Why::NotCounterClockwise));
         }
         let size = points
             .iter()
             .flatten()
             .fold(0.0_f64, |most, v| most.max(v.abs()));
         if ring.crosses_itself(1e-9 * (1.0 + size))? {
-            return Err(Error::Invalid {
-                why: "the outline crosses itself",
-            });
+            return Err(TeethFailure::Invalid(Why::BodyCrossesItself));
         }
         Ok(Body { points, material })
     }
 
     /// A part from an outline, which [`crate::teeth::Outline::new`] has already checked as
     /// [`Body::new`] would.
-    pub(super) fn of_outline(outline: &Outline, material: Material) -> Result<Body, Error> {
+    pub(super) fn of_outline(outline: &Outline, material: Material) -> Result<Body, TeethFailure> {
         let points = outline.points();
         if points.len() < 3 || points.len() > MAX_POINTS {
             let (value, up_to) = (points.len() as f64, MAX_POINTS as f64);
-            return Err(Error::OutOfRange {
+            return Err(TeethFailure::OutOfRange {
                 what: "points of the outline",
                 value,
                 above: 2.0,
@@ -163,20 +165,23 @@ pub struct Gap {
 /// measurement would need more than [`MOST_WORK`] comparisons are refused rather than measured
 /// slowly. Parts with points that are not numbers (a body placed at a turn or a place that is not a
 /// number) are refused.
-pub fn gap(a: &Body, b: &Body, reach: f64) -> Result<Option<Gap>, Error> {
+pub fn gap(a: &Body, b: &Body, reach: f64) -> crate::Result<Option<Gap>> {
+    gap_typed(a, b, reach).map_err(|e| SolidError::teeth("teeth::mesh::gap", e))
+}
+
+/// [`gap`] with its failure as a [`TeethFailure`], for the tooth module's own callers.
+pub(crate) fn gap_typed(a: &Body, b: &Body, reach: f64) -> Result<Option<Gap>, TeethFailure> {
     let reach = crate::teeth::in_range("reach", reach, 0.0, MAX_LENGTH)?;
     let mut size = 0.0_f64;
     for v in a.points.iter().chain(&b.points).flatten() {
         if !v.is_finite() {
-            return Err(Error::Invalid {
-                why: "a part is not at a finite place",
-            });
+            return Err(TeethFailure::Invalid(Why::PartNotFinite));
         }
         size = size.max(v.abs());
     }
     let finest = 1e-9 * (1.0 + size);
     if !(reach > finest) {
-        return Err(Error::OutOfRange {
+        return Err(TeethFailure::OutOfRange {
             what: "reach",
             value: reach,
             above: finest,
@@ -272,9 +277,7 @@ pub fn gap(a: &Body, b: &Body, reach: f64) -> Result<Option<Gap>, Error> {
 /// measurement may make: about a second's work. A measurement that would need more is refused.
 pub const MOST_WORK: u64 = 400_000_000;
 
-const TOO_INTRICATE: Error = Error::Invalid {
-    why: "the outlines are too fine or too intricate to be measured against each other in one go",
-};
+const TOO_INTRICATE: TeethFailure = TeethFailure::Invalid(Why::MeasureTooIntricate);
 
 /// How far apart the points are that a chord is looked at from: the reach, or more where the two
 /// parts together would otherwise need more than four points along their chords for each of their
@@ -337,7 +340,7 @@ fn crossing(
     near: &[u32],
     step: f64,
     reach: f64,
-) -> Result<Option<Gap>, Error> {
+) -> Result<Option<Gap>, TeethFailure> {
     const CROSSINGS: u32 = 4096; // the most crossings looked at closely
     let mut looked = 0;
     for &index in near {

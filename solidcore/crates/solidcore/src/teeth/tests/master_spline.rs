@@ -3,14 +3,14 @@
 
 use std::f64::consts::TAU;
 
-use super::common::{check_outline, HOSTILE};
+use super::common::{check_outline, operation, out_of_range, why, HOSTILE};
+use crate::error::teeth::{TeethFailure, Why};
 use crate::teeth::involute::{self, External};
 use crate::teeth::master_spline::{
     self, master_pair, master_spline, placement, replaced_period, Circle, Form, Placement,
-    NOT_A_NUMBER, NOT_A_SHAFT_AND_HUB, NO_LARGEST, NO_SMALLEST,
 };
 use crate::teeth::straight::{self, Serration, StraightSpline, TipCorner};
-use crate::teeth::{Error, Material, Motion, Outline, Pair, Piece, Point, Role};
+use crate::teeth::{Material, Motion, Outline, Pair, Piece, Point, Role};
 
 /// The three kinds of spline as the dialog's defaults make them: an involute shaft of 20 teeth, a
 /// straight-sided one of 6 and a serration of 36, each with its hub, the tolerance its outlines are
@@ -454,18 +454,18 @@ fn the_tooth_left_out_or_the_space_filled_is_the_one_at_the_angle_and_the_rest_i
 fn refusals_and_hostile_numbers() {
     let pairs = default_pairs();
     let (_, pair, _, _) = &pairs[0];
-    assert!(matches!(
-        placement(1, Form::ToothLeftOut, 0.0),
-        Err(Error::OutOfRange { what: "teeth", .. })
-    ));
-    assert!(matches!(
-        placement(0, Form::WideTooth, 0.0),
-        Err(Error::OutOfRange { what: "teeth", .. })
-    ));
-    assert!(matches!(
-        placement(u32::MAX, Form::WideTooth, 0.0),
-        Err(Error::OutOfRange { what: "teeth", .. })
-    ));
+    assert_eq!(
+        out_of_range(&placement(1, Form::ToothLeftOut, 0.0)),
+        Some("teeth")
+    );
+    assert_eq!(
+        out_of_range(&placement(0, Form::WideTooth, 0.0)),
+        Some("teeth")
+    );
+    assert_eq!(
+        out_of_range(&placement(u32::MAX, Form::WideTooth, 0.0)),
+        Some("teeth")
+    );
     for angle in [
         361.0,
         -361.0,
@@ -475,42 +475,44 @@ fn refusals_and_hostile_numbers() {
         1e300,
     ] {
         assert_eq!(
-            placement(20, Form::ToothLeftOut, angle),
-            Err(Error::Invalid {
-                why: "the angle of the master spline must be from -360 to 360 degrees"
-            }),
+            why(&placement(20, Form::ToothLeftOut, angle)),
+            Some(Why::MasterAngleRange),
             "{angle}"
         );
     }
-    assert!(matches!(
-        master_pair(pair, Form::ToothLeftOut, 20),
-        Err(Error::OutOfRange { what: "tooth", .. })
-    ));
-    assert!(matches!(
-        master_pair(pair, Form::ToothLeftOut, u32::MAX),
-        Err(Error::OutOfRange { what: "tooth", .. })
-    ));
+    assert_eq!(
+        out_of_range(&master_pair(pair, Form::ToothLeftOut, 20)),
+        Some("tooth")
+    );
+    assert_eq!(
+        out_of_range(&master_pair(pair, Form::ToothLeftOut, u32::MAX)),
+        Some("tooth")
+    );
     // An outline of one tooth has no period to spare.
     let once = replaced_period(&pair.first.outline, Material::Inside, Circle::Smallest, 0.0)
         .expect("replaced")
         .outline;
-    assert!(matches!(
-        replaced_period(&once, Material::Inside, Circle::Smallest, 0.0),
-        Err(Error::OutOfRange { what: "teeth", .. })
-    ));
+    assert_eq!(
+        out_of_range(&replaced_period(
+            &once,
+            Material::Inside,
+            Circle::Smallest,
+            0.0
+        )),
+        Some("teeth")
+    );
     // An angle that is not a number is refused in plain words.
-    let not_a_number = Err(Error::Invalid { why: NOT_A_NUMBER });
     for v in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
         assert_eq!(
-            master_spline::turned(&pair.first.outline, v).map(|_| ()),
-            not_a_number,
+            why(&master_spline::turned(&pair.first.outline, v)),
+            Some(Why::AngleNotANumber),
             "{v}"
         );
         let replaced = replaced_period(&pair.first.outline, Material::Inside, Circle::Largest, v);
-        assert_eq!(replaced.map(|_| ()), not_a_number, "{v}");
+        assert_eq!(why(&replaced), Some(Why::AngleNotANumber), "{v}");
     }
     assert_eq!(
-        Error::Invalid { why: NOT_A_NUMBER }.to_string(),
+        TeethFailure::Invalid(Why::AngleNotANumber).to_string(),
         "the angle is not a number"
     );
     for v in HOSTILE {
@@ -536,9 +538,7 @@ fn refusals_and_hostile_numbers() {
 #[test]
 fn a_pair_that_is_not_a_shaft_and_its_hub_is_refused() {
     let pair = small_pair(6);
-    let refused = Err(Error::Invalid {
-        why: NOT_A_SHAFT_AND_HUB,
-    });
+    let refused = Some(Why::NotAShaftAndHub);
     let mut other_count = pair.clone();
     other_count.second = small_pair(5).second;
     let mut opposite = pair.clone();
@@ -560,14 +560,10 @@ fn a_pair_that_is_not_a_shaft_and_its_hub_is_refused() {
         ("inside out", inside_out),
     ] {
         for form in [Form::ToothLeftOut, Form::WideTooth] {
+            assert_eq!(why(&master_pair(&odd, form, 0)), refused, "{what} {form:?}");
             assert_eq!(
-                master_pair(&odd, form, 0).map(|_| ()),
-                refused.clone(),
-                "{what} {form:?}"
-            );
-            assert_eq!(
-                master_spline(&odd, form, 0.0).map(|_| ()),
-                refused.clone(),
+                why(&master_spline(&odd, form, 0.0)),
+                refused,
                 "{what} {form:?}"
             );
         }
@@ -613,30 +609,42 @@ fn a_period_needs_a_corner_on_its_circle_and_its_arc_takes_the_role_that_circle_
     let tips = curved(6, 11.0, false);
     let spaces = curved(6, 9.0, false);
     assert_eq!(
-        replaced_period(&tips, Material::Inside, Circle::Largest, 0.0).map(|_| ()),
-        Err(Error::Invalid { why: NO_LARGEST })
+        why(&replaced_period(
+            &tips,
+            Material::Inside,
+            Circle::Largest,
+            0.0
+        )),
+        Some(Why::NoCornerOnLargest)
     );
     assert_eq!(
-        replaced_period(&spaces, Material::Inside, Circle::Smallest, 0.0).map(|_| ()),
-        Err(Error::Invalid { why: NO_SMALLEST })
+        why(&replaced_period(
+            &spaces,
+            Material::Inside,
+            Circle::Smallest,
+            0.0
+        )),
+        Some(Why::NoCornerOnSmallest)
     );
     assert!(replaced_period(&tips, Material::Inside, Circle::Smallest, 0.0).is_ok());
     assert!(replaced_period(&spaces, Material::Inside, Circle::Largest, 0.0).is_ok());
-    // On a pair, the shaft's refusal comes through master_pair and master_spline as it is.
+    // On a pair, the shaft's refusal comes through master_pair and master_spline as it is: the
+    // same reason, named by the function that was called.
     let mut pair = small_pair(6);
     pair.first.outline = tips;
+    let keyed = master_pair(&pair, Form::WideTooth, 0);
+    assert_eq!(why(&keyed), Some(Why::NoCornerOnLargest));
+    assert_eq!(operation(&keyed), Some("teeth::master_spline::master_pair"));
+    let turned = master_spline(&pair, Form::WideTooth, 10.0);
+    assert_eq!(why(&turned), Some(Why::NoCornerOnLargest));
     assert_eq!(
-        master_pair(&pair, Form::WideTooth, 0).map(|_| ()),
-        Err(Error::Invalid { why: NO_LARGEST })
-    );
-    assert_eq!(
-        master_spline(&pair, Form::WideTooth, 10.0).map(|_| ()),
-        Err(Error::Invalid { why: NO_LARGEST })
+        operation(&turned),
+        Some("teeth::master_spline::master_spline")
     );
     pair.first.outline = spaces;
     assert_eq!(
-        master_pair(&pair, Form::ToothLeftOut, 0).map(|_| ()),
-        Err(Error::Invalid { why: NO_SMALLEST })
+        why(&master_pair(&pair, Form::ToothLeftOut, 0)),
+        Some(Why::NoCornerOnSmallest)
     );
     // With corners on both circles but no arc about the axis on either, the arc takes the circle's
     // role on the part: root and tip on a shaft, tip and root in a hub's opening.

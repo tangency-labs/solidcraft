@@ -3,19 +3,18 @@
 //! overlap.
 
 use crate::teeth::mesh::{gap, Body, Material};
-use crate::teeth::Error;
 
 /// A bar with its sides along the axes: from (x0, y0) to (x1, y1), counter-clockwise.
-fn bar(x0: f64, y0: f64, x1: f64, y1: f64, material: Material) -> Result<Body, Error> {
+fn bar(x0: f64, y0: f64, x1: f64, y1: f64, material: Material) -> crate::Result<Body> {
     Body::new(vec![[x0, y0], [x1, y0], [x1, y1], [x0, y1]], material)
 }
 
-fn found(a: &Body, b: &Body, reach: f64) -> Result<f64, Error> {
+fn found(a: &Body, b: &Body, reach: f64) -> crate::Result<f64> {
     Ok(gap(a, b, reach)?.map_or(f64::NAN, |g| g.distance))
 }
 
 #[test]
-fn two_long_bars_that_cross_overlap_though_no_corner_is_inside_the_other() -> Result<(), Error> {
+fn two_long_bars_that_cross_overlap_though_no_corner_is_inside_the_other() -> crate::Result<()> {
     // A plus sign: each bar 100 long and 2 wide. Every corner of each is 49 mm outside the other.
     let across = bar(-50.0, -1.0, 50.0, 1.0, Material::Inside)?;
     let upright = bar(-1.0, -50.0, 1.0, 50.0, Material::Inside)?;
@@ -44,7 +43,7 @@ fn two_long_bars_that_cross_overlap_though_no_corner_is_inside_the_other() -> Re
 }
 
 #[test]
-fn a_sliver_thinner_than_the_reach_is_still_an_overlap() -> Result<(), Error> {
+fn a_sliver_thinner_than_the_reach_is_still_an_overlap() -> crate::Result<()> {
     // A blade 0.004 thick through a bar 2 thick, looked at with a reach of half a millimetre and
     // more.
     let thick = bar(-50.0, -1.0, 50.0, 1.0, Material::Inside)?;
@@ -73,7 +72,7 @@ fn a_sliver_thinner_than_the_reach_is_still_an_overlap() -> Result<(), Error> {
 }
 
 #[test]
-fn parts_that_only_touch_do_not_overlap() -> Result<(), Error> {
+fn parts_that_only_touch_do_not_overlap() -> crate::Result<()> {
     let left = bar(-10.0, -1.0, 0.0, 1.0, Material::Inside)?;
     // Side against side, corner against side, corner against corner, and a T: all touch, none
     // overlaps.
@@ -112,7 +111,7 @@ fn parts_that_only_touch_do_not_overlap() -> Result<(), Error> {
 }
 
 #[test]
-fn a_part_lying_in_the_material_of_the_other_overlaps() -> Result<(), Error> {
+fn a_part_lying_in_the_material_of_the_other_overlaps() -> crate::Result<()> {
     // A peg beside its hole instead of in it: every point of the peg is in the plate.
     let peg = bar(-1.0, -1.0, 1.0, 1.0, Material::Inside)?;
     let hole = bar(-1.1, -1.1, 1.1, 1.1, Material::Outside)?;

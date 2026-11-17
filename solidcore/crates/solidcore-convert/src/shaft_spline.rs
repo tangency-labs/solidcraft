@@ -2,10 +2,12 @@
 //! numbers go to the kernel, the plan and its outlines come back, and an outline's pieces go
 //! both ways.
 
+use solidcore::error::teeth::TeethFailure;
 use solidcore::teeth as k;
 use solidcore::teeth::master_spline::Span;
 use solidcore::teeth::outline::SpaceSection as KernelSection;
 use solidcore::teeth::shaft_spline as ks;
+use solidcore::SolidError;
 use solidcore_record::shaft_spline::{
     MasterArc, MasterPlaced, OutlinePiece, SpaceSection, SplineCorner, SplineForm, SplineMade,
     SplineMake, SplineMaster, SplineNumbers, SplinePlan, SplineRefusal, ToothOutline, ToothRole,
@@ -117,13 +119,24 @@ pub fn record_made(m: &ks::SplineMade) -> SplineMade {
     }
 }
 
-/// A kernel refusal as the record's.
+/// A refusal of the kernel's planner as the record's: the number to change and the words, which are
+/// the tooth failure's own Display (never `SolidError`'s, which names the operation first).
 #[must_use]
-pub fn record_refusal(r: &ks::SplineRefusal) -> SplineRefusal {
+pub fn record_refusal(e: &SolidError) -> SplineRefusal {
     SplineRefusal {
-        key: r.key.clone(),
-        words: r.words.clone(),
+        key: e
+            .teeth_failure()
+            .and_then(TeethFailure::key)
+            .map(str::to_string),
+        words: refusal_words(e),
     }
+}
+
+/// The words of a kernel tooth refusal: the tooth failure's Display; another error's Display.
+#[must_use]
+pub fn refusal_words(e: &SolidError) -> String {
+    e.teeth_failure()
+        .map_or_else(|| e.to_string(), ToString::to_string)
 }
 
 /// A record role of an outline's piece as the kernel's.

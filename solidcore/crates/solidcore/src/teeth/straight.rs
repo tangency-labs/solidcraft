@@ -30,10 +30,12 @@
 
 use std::f64::consts::{PI, TAU};
 
+use crate::error::teeth::{TeethFailure, Why};
 use crate::teeth::mesh::Material;
 use crate::teeth::outline::{checked_tolerance, rotated, Outline, Piece, Point, Role};
 use crate::teeth::pair::{Motion, Pair, Part};
-use crate::teeth::{in_range, zero_up_to, Error, MAX_LENGTH, MAX_TEETH};
+use crate::teeth::{in_range, zero_up_to, MAX_LENGTH, MAX_TEETH};
+use crate::SolidError;
 
 // -------------------------------------------------------------------------------------------------
 // Plane geometry
@@ -375,15 +377,14 @@ pub(super) fn first_touch(fixed: &[Piece], turning: &[Piece], limit: f64) -> Opt
 
 /// The turning play of a pair that turns as one on one axis: how far the second part turns
 /// counter-clockwise from where it stands before it touches the first.
-pub(super) fn play_of(pair: &Pair) -> Result<f64, Error> {
+pub(super) fn play_of(pair: &Pair) -> Result<f64, TeethFailure> {
     let fixed = pieces_near(&pair.first.outline);
     let turning: Vec<Piece> = pieces_near(&pair.second.outline)
         .iter()
         .map(|p| turned_piece(p, pair.second_start))
         .collect();
-    first_touch(&fixed, &turning, pair.cycle.abs().min(TAU)).ok_or(Error::Invalid {
-        why: "the parts can turn freely: nothing stops the one on the other",
-    })
+    first_touch(&fixed, &turning, pair.cycle.abs().min(TAU))
+        .ok_or(TeethFailure::Invalid(Why::TurnsFreely))
 }
 
 // -------------------------------------------------------------------------------------------------
@@ -417,7 +418,7 @@ enum Corner {
 }
 
 impl Corner {
-    fn of(tip: TipCorner) -> Result<Corner, Error> {
+    fn of(tip: TipCorner) -> Result<Corner, TeethFailure> {
         Ok(match tip {
             TipCorner::Plain => Corner::Plain,
             TipCorner::Chamfer { size } => match zero_up_to("chamfer size", size, MAX_LENGTH)? {
@@ -449,8 +450,8 @@ struct Kind {
     outer_corner: Role,
     inner_arc: Role,
     inner_round: Role,
-    outer_meet: &'static str,
-    inner_meet: &'static str,
+    outer_meet: Why,
+    inner_meet: Why,
 }
 
 const SHAFT: Kind = Kind {
@@ -458,8 +459,8 @@ const SHAFT: Kind = Kind {
     outer_corner: Role::Tip,
     inner_arc: Role::Root,
     inner_round: Role::Fillet,
-    outer_meet: "the corners of a tooth would meet: no tip is left on the major circle",
-    inner_meet: "neighbouring teeth would meet at the root: no space is left between them",
+    outer_meet: Why::TipCornersMeet,
+    inner_meet: Why::TeethMeetAtRoot,
 };
 
 const HUB: Kind = Kind {
@@ -467,8 +468,8 @@ const HUB: Kind = Kind {
     outer_corner: Role::Fillet,
     inner_arc: Role::Tip,
     inner_round: Role::Tip,
-    outer_meet: "the hub's root rounds would meet: no root is left at the bottom of the space",
-    inner_meet: "the hub's teeth would be too narrow: neighbouring spaces would meet",
+    outer_meet: Why::HubRootRoundsMeet,
+    inner_meet: Why::HubTeethTooNarrow,
 };
 
 /// A tooth (or, in a hub, a space) between two circles about the axis, centred on the x axis. Its
@@ -530,12 +531,10 @@ impl Profile {
         ))
     }
 
-    fn laid(&self) -> Result<Laid, Error> {
+    fn laid(&self) -> Result<Laid, TeethFailure> {
         let (c, n, w) = (self.offset, self.normal, self.inward());
         let pitch = TAU / f64::from(self.teeth.max(1));
-        let missing = Error::Invalid {
-            why: "the flank does not cross both circles: the teeth are too wide",
-        };
+        let missing = TeethFailure::Invalid(Why::FlankMissesCircles);
         let outer_apex = self.crossing(c, self.outer).ok_or(missing)?;
         let inner_apex = self.crossing(c, self.inner).ok_or(missing)?;
         let (flank_outer, outer_half, outer) = match self.outer_corner {
@@ -543,9 +542,7 @@ impl Profile {
             Corner::Chamfer(size) => {
                 let on_flank = add(outer_apex, scaled(w, size));
                 if !(length(on_flank) < self.outer) {
-                    return Err(Error::Invalid {
-                        why: "the chamfer is too large for the tooth",
-                    });
+                    return Err(TeethFailure::Invalid(Why::ChamferTooLarge));
                 }
                 let way = scaled(sub([0.0, 0.0], add(w, n)), std::f64::consts::FRAC_1_SQRT_2);
                 let (b, k) = (
@@ -566,9 +563,7 @@ impl Profile {
                 let centre = self
                     .crossing(c - radius, self.outer - radius)
                     .filter(|_| radius < self.outer)
-                    .ok_or(Error::Invalid {
-                        why: "the round at the major circle is too large for the tooth",
-                    })?;
+                    .ok_or(TeethFailure::Invalid(Why::MajorRoundTooLarge))?;
                 (
                     add(centre, scaled(n, radius)),
                     angle_of(centre),
@@ -580,27 +575,19 @@ impl Profile {
             let rho = self.inner_round;
             let centre = self
                 .crossing(c + rho, self.inner + rho)
-                .ok_or(Error::Invalid {
-                    why: "the round at the minor circle is too large for the tooth",
-                })?;
+                .ok_or(TeethFailure::Invalid(Why::MinorRoundTooLarge))?;
             (sub(centre, scaled(n, rho)), angle_of(centre), Some(centre))
         } else {
             (inner_apex, angle_of(inner_apex), None)
         };
         if !(outer_half >= -1e-12) {
-            return Err(Error::Invalid {
-                why: self.kind.outer_meet,
-            });
+            return Err(TeethFailure::Invalid(self.kind.outer_meet));
         }
         if !(inner_half <= pitch / 2.0 + 1e-12 && outer_half < pitch / 2.0) {
-            return Err(Error::Invalid {
-                why: self.kind.inner_meet,
-            });
+            return Err(TeethFailure::Invalid(self.kind.inner_meet));
         }
         if !(dot(flank_inner, w) - dot(flank_outer, w) >= -1e-12 * self.outer) {
-            return Err(Error::Invalid {
-                why: "the corners leave no straight flank between them",
-            });
+            return Err(TeethFailure::Invalid(Why::NoStraightFlank));
         }
         Ok(Laid {
             outer_apex,
@@ -617,7 +604,7 @@ impl Profile {
     /// The pieces of one pitch, counter-clockwise: lower flank, lower outer corner, outer arc,
     /// upper outer corner, upper flank, upper inner round, inner arc, and the inner round of the
     /// next tooth's lower flank.
-    fn pieces(&self) -> Result<Vec<Piece>, Error> {
+    fn pieces(&self) -> Result<Vec<Piece>, TeethFailure> {
         let laid = self.laid()?;
         let kind = self.kind;
         let pitch = TAU / f64::from(self.teeth.max(1));
@@ -724,9 +711,9 @@ impl Profile {
         Ok(tooth)
     }
 
-    fn outline(&self, tolerance: f64) -> Result<Outline, Error> {
+    fn outline(&self, tolerance: f64) -> Result<Outline, TeethFailure> {
         let tolerance = checked_tolerance(tolerance)?;
-        Outline::new(self.teeth, self.pieces()?, tolerance)
+        Outline::new_typed(self.teeth, self.pieces()?, tolerance)
     }
 }
 
@@ -757,7 +744,7 @@ fn corners_keep(
     hub: &Profile,
     hub_laid: &Laid,
     gap: f64,
-) -> Result<(), Error> {
+) -> Result<(), TeethFailure> {
     let (n, w) = (shaft.normal, shaft.inward());
     let slack = 1e-9 * (1.0 + hub.outer);
     for (q, own) in outer_circles(shaft_laid) {
@@ -771,7 +758,7 @@ fn corners_keep(
             }
         }
         if !fits {
-            return Err(Error::Invalid { why: "the hub's root rounds would come closer to the shaft's tips than the smallest clearance" });
+            return Err(TeethFailure::Invalid(Why::HubRootRoundsTooClose));
         }
     }
     let (q, own) = (
@@ -788,16 +775,16 @@ fn corners_keep(
         }
     }
     if !fits {
-        return Err(Error::Invalid { why: "the tips of the hub's teeth would come closer to the shaft's root rounds than the smallest clearance" });
+        return Err(TeethFailure::Invalid(Why::HubTipsTooClose));
     }
     Ok(())
 }
 
-fn checked_teeth(teeth: u32) -> Result<u32, Error> {
+fn checked_teeth(teeth: u32) -> Result<u32, TeethFailure> {
     if (2..=MAX_TEETH).contains(&teeth) {
         Ok(teeth)
     } else {
-        Err(Error::OutOfRange {
+        Err(TeethFailure::OutOfRange {
             what: "teeth",
             value: f64::from(teeth),
             above: 1.0,
@@ -807,13 +794,11 @@ fn checked_teeth(teeth: u32) -> Result<u32, Error> {
 }
 
 /// The major and minor radius from two diameters, the major the larger.
-fn radii(major_diameter: f64, minor_diameter: f64) -> Result<(f64, f64), Error> {
+fn radii(major_diameter: f64, minor_diameter: f64) -> Result<(f64, f64), TeethFailure> {
     let major = in_range("major diameter", major_diameter, 0.0, MAX_LENGTH)? / 2.0;
     let minor = in_range("minor diameter", minor_diameter, 0.0, MAX_LENGTH)? / 2.0;
     if !(minor < major) {
-        return Err(Error::Invalid {
-            why: "the minor diameter must be smaller than the major diameter",
-        });
+        return Err(TeethFailure::Invalid(Why::MinorNotSmaller));
     }
     Ok((major, minor))
 }
@@ -837,7 +822,7 @@ pub struct Fit {
 }
 
 /// The three clearances of a fit, checked, and the smallest of them.
-fn clearances(fit: &Fit) -> Result<(f64, f64, f64, f64), Error> {
+fn clearances(fit: &Fit) -> Result<(f64, f64, f64, f64), TeethFailure> {
     let side = zero_up_to("side clearance", fit.side_clearance, MAX_LENGTH)?;
     let major = zero_up_to("major clearance", fit.major_clearance, MAX_LENGTH)?;
     let minor = zero_up_to("minor clearance", fit.minor_clearance, MAX_LENGTH)?;
@@ -847,7 +832,7 @@ fn clearances(fit: &Fit) -> Result<(f64, f64, f64, f64), Error> {
 }
 
 /// The hub's profile for a shaft's profile and a fit, checked against the shaft.
-fn hub_profile(shaft: &Profile, fit: &Fit) -> Result<Profile, Error> {
+fn hub_profile(shaft: &Profile, fit: &Fit) -> Result<Profile, TeethFailure> {
     let (side, major, minor, least) = clearances(fit)?;
     let hub = Profile {
         teeth: shaft.teeth,
@@ -860,14 +845,14 @@ fn hub_profile(shaft: &Profile, fit: &Fit) -> Result<Profile, Error> {
         kind: HUB,
     };
     if !(hub.inner < shaft.outer) {
-        return Err(Error::Invalid { why: "the minor clearance would take the hub's teeth out beyond the shaft's tips: nothing would drive" });
+        return Err(TeethFailure::Invalid(Why::MinorClearanceTooLarge));
     }
     let (shaft_laid, hub_laid) = (shaft.laid()?, hub.laid()?);
     corners_keep(shaft, &shaft_laid, &hub, &hub_laid, least)?;
     Ok(hub)
 }
 
-fn pair_of(shaft: &Profile, hub: &Profile, tolerance: f64) -> Result<Pair, Error> {
+fn pair_of(shaft: &Profile, hub: &Profile, tolerance: f64) -> Result<Pair, TeethFailure> {
     Ok(Pair {
         first: Part {
             outline: shaft.outline(tolerance)?,
@@ -887,7 +872,7 @@ fn pair_of(shaft: &Profile, hub: &Profile, tolerance: f64) -> Result<Pair, Error
 
 /// The turning play of a hub on its shaft from the two profiles. The tolerance only cuts the arcs
 /// into points for the outline's own use; the play comes from the exact pieces.
-fn play_of_profiles(shaft: &Profile, hub: &Profile) -> Result<f64, Error> {
+fn play_of_profiles(shaft: &Profile, hub: &Profile) -> Result<f64, TeethFailure> {
     play_of(&pair_of(shaft, hub, 1e-3 * (1.0 + shaft.outer))?)
 }
 
@@ -915,7 +900,7 @@ pub struct StraightSpline {
 }
 
 impl StraightSpline {
-    fn profile(&self) -> Result<Profile, Error> {
+    fn profile(&self) -> Result<Profile, TeethFailure> {
         let teeth = checked_teeth(self.teeth)?;
         let (outer, inner) = radii(self.major_diameter, self.minor_diameter)?;
         let width = in_range("tooth width", self.tooth_width, 0.0, MAX_LENGTH)?;
@@ -935,7 +920,14 @@ impl StraightSpline {
 
     /// The outline of the shaft, a tooth centred on the x axis: all exact lines and arcs. The
     /// `tolerance` (millimetres) only says how finely [`Outline::points`] cuts the arcs.
-    pub fn outline(&self, tolerance: f64) -> Result<Outline, Error> {
+    pub fn outline(&self, tolerance: f64) -> crate::Result<Outline> {
+        self.outline_typed(tolerance)
+            .map_err(|e| SolidError::teeth("teeth::straight::StraightSpline::outline", e))
+    }
+
+    /// [`Self::outline`] with its failure as a [`TeethFailure`], for the tooth module's own
+    /// callers.
+    pub(crate) fn outline_typed(&self, tolerance: f64) -> Result<Outline, TeethFailure> {
         self.profile()?.outline(tolerance)
     }
 }
@@ -962,7 +954,7 @@ pub struct StraightHub {
 }
 
 impl StraightHub {
-    fn profile(&self) -> Result<Profile, Error> {
+    fn profile(&self) -> Result<Profile, TeethFailure> {
         let teeth = checked_teeth(self.teeth)?;
         let (outer, inner) = radii(self.major_diameter, self.minor_diameter)?;
         let width = in_range("space width", self.space_width, 0.0, MAX_LENGTH)?;
@@ -981,7 +973,14 @@ impl StraightHub {
     }
 
     /// The outline of the hub's opening, a space centred on the x axis: all exact lines and arcs.
-    pub fn outline(&self, tolerance: f64) -> Result<Outline, Error> {
+    pub fn outline(&self, tolerance: f64) -> crate::Result<Outline> {
+        self.outline_typed(tolerance)
+            .map_err(|e| SolidError::teeth("teeth::straight::StraightHub::outline", e))
+    }
+
+    /// [`Self::outline`] with its failure as a [`TeethFailure`], for the tooth module's own
+    /// callers.
+    pub(crate) fn outline_typed(&self, tolerance: f64) -> Result<Outline, TeethFailure> {
         self.profile()?.outline(tolerance)
     }
 }
@@ -992,7 +991,15 @@ impl StraightHub {
 ///
 /// Refused when the hub cannot be made (its spaces would meet, its rounds do not fit) or when its
 /// rounds would come closer to the shaft than the smallest of the three clearances.
-pub fn hub_for(shaft: &StraightSpline, fit: &Fit) -> Result<StraightHub, Error> {
+pub fn hub_for(shaft: &StraightSpline, fit: &Fit) -> crate::Result<StraightHub> {
+    hub_for_typed(shaft, fit).map_err(|e| SolidError::teeth("teeth::straight::hub_for", e))
+}
+
+/// [`hub_for`] with its failure as a [`TeethFailure`], for the tooth module's own callers.
+pub(crate) fn hub_for_typed(
+    shaft: &StraightSpline,
+    fit: &Fit,
+) -> Result<StraightHub, TeethFailure> {
     let hub = hub_profile(&shaft.profile()?, fit)?;
     Ok(StraightHub {
         teeth: shaft.teeth,
@@ -1007,14 +1014,30 @@ pub fn hub_for(shaft: &StraightSpline, fit: &Fit) -> Result<StraightHub, Error> 
 /// A straight-sided spline and the hub that fits it ([`hub_for`]) as a pair on one axis. They turn
 /// as one; adding to [`Pair::second_start`] turns the hub on the shaft. The smallest gap between
 /// them is the smallest of the three clearances.
-pub fn spline_pair(shaft: &StraightSpline, fit: &Fit, tolerance: f64) -> Result<Pair, Error> {
+pub fn spline_pair(shaft: &StraightSpline, fit: &Fit, tolerance: f64) -> crate::Result<Pair> {
+    spline_pair_typed(shaft, fit, tolerance)
+        .map_err(|e| SolidError::teeth("teeth::straight::spline_pair", e))
+}
+
+/// [`spline_pair`] with its failure as a [`TeethFailure`], for the tooth module's own callers.
+pub(crate) fn spline_pair_typed(
+    shaft: &StraightSpline,
+    fit: &Fit,
+    tolerance: f64,
+) -> Result<Pair, TeethFailure> {
     let profile = shaft.profile()?;
     pair_of(&profile, &hub_profile(&profile, fit)?, tolerance)
 }
 
 /// How far, in radians, the hub of [`spline_pair`] turns on its shaft either way from centred
 /// before a flank touches: found exactly from the lines and arcs of the two outlines.
-pub fn turning_play(shaft: &StraightSpline, fit: &Fit) -> Result<f64, Error> {
+pub fn turning_play(shaft: &StraightSpline, fit: &Fit) -> crate::Result<f64> {
+    turning_play_typed(shaft, fit)
+        .map_err(|e| SolidError::teeth("teeth::straight::turning_play", e))
+}
+
+/// [`turning_play`] with its failure as a [`TeethFailure`], for the tooth module's own callers.
+pub(crate) fn turning_play_typed(shaft: &StraightSpline, fit: &Fit) -> Result<f64, TeethFailure> {
     let profile = shaft.profile()?;
     play_of_profiles(&profile, &hub_profile(&profile, fit)?)
 }
@@ -1047,7 +1070,7 @@ pub struct Serration {
 }
 
 impl Serration {
-    fn profile(&self) -> Result<Profile, Error> {
+    fn profile(&self) -> Result<Profile, TeethFailure> {
         let teeth = checked_teeth(self.teeth)?;
         let (outer, inner) = radii(self.major_diameter, self.minor_diameter)?;
         let half = in_range("flank angle", self.flank_angle, 0.0, 170.0)?.to_radians() / 2.0;
@@ -1073,25 +1096,35 @@ impl Serration {
 
     /// The outline of the shaft, a tooth centred on the x axis: all exact lines and arcs. The
     /// `tolerance` (millimetres) only says how finely [`Outline::points`] cuts the arcs.
-    pub fn outline(&self, tolerance: f64) -> Result<Outline, Error> {
+    pub fn outline(&self, tolerance: f64) -> crate::Result<Outline> {
+        self.outline_typed(tolerance)
+            .map_err(|e| SolidError::teeth("teeth::straight::Serration::outline", e))
+    }
+
+    /// [`Self::outline`] with its failure as a [`TeethFailure`], for the tooth module's own
+    /// callers.
+    pub(crate) fn outline_typed(&self, tolerance: f64) -> Result<Outline, TeethFailure> {
         self.profile()?.outline(tolerance)
     }
 
     /// Where the two flanks of a tooth, carried on, would meet: the radius of the sharp point of a
     /// tooth.
-    pub fn sharp_tip_radius(&self) -> Result<f64, Error> {
+    pub fn sharp_tip_radius(&self) -> crate::Result<f64> {
+        self.sharp_tip_radius_typed()
+            .map_err(|e| SolidError::teeth("teeth::straight::Serration::sharp_tip_radius", e))
+    }
+
+    /// [`Self::sharp_tip_radius`] with its failure as a [`TeethFailure`], for the tooth module's
+    /// own callers.
+    pub(crate) fn sharp_tip_radius_typed(&self) -> Result<f64, TeethFailure> {
         let p = self.profile()?;
         // On the x axis: q = (x, 0) with x * normal.x = offset.
         if !(p.normal[0] > 0.0) {
-            return Err(Error::Invalid {
-                why: "the flanks are parallel: they do not meet",
-            });
+            return Err(TeethFailure::Invalid(Why::FlanksParallel));
         }
         let radius = p.offset / p.normal[0];
         if !(radius.is_finite() && radius <= MAX_LENGTH) {
-            return Err(Error::Invalid {
-                why: "the flanks are so nearly parallel that they meet too far away to say",
-            });
+            return Err(TeethFailure::Invalid(Why::FlanksNearlyParallel));
         }
         Ok(radius)
     }
@@ -1109,17 +1142,38 @@ pub struct SerratedHub {
 
 impl SerratedHub {
     /// The outline of the hub's opening, a space centred on the x axis: all exact lines and arcs.
-    pub fn outline(&self, tolerance: f64) -> Result<Outline, Error> {
+    pub fn outline(&self, tolerance: f64) -> crate::Result<Outline> {
+        self.outline_typed(tolerance)
+            .map_err(|e| SolidError::teeth("teeth::straight::SerratedHub::outline", e))
+    }
+
+    /// [`Self::outline`] with its failure as a [`TeethFailure`], for the tooth module's own
+    /// callers.
+    pub(crate) fn outline_typed(&self, tolerance: f64) -> Result<Outline, TeethFailure> {
         hub_profile(&self.shaft.profile()?, &self.fit)?.outline(tolerance)
     }
 
     /// The diameter at the bottom of the hub's spaces, in millimetres.
-    pub fn major_diameter(&self) -> Result<f64, Error> {
+    pub fn major_diameter(&self) -> crate::Result<f64> {
+        self.major_diameter_typed()
+            .map_err(|e| SolidError::teeth("teeth::straight::SerratedHub::major_diameter", e))
+    }
+
+    /// [`Self::major_diameter`] with its failure as a [`TeethFailure`], for the tooth module's own
+    /// callers.
+    pub(crate) fn major_diameter_typed(&self) -> Result<f64, TeethFailure> {
         Ok(2.0 * hub_profile(&self.shaft.profile()?, &self.fit)?.outer)
     }
 
     /// The diameter over the tips of the hub's teeth, in millimetres.
-    pub fn minor_diameter(&self) -> Result<f64, Error> {
+    pub fn minor_diameter(&self) -> crate::Result<f64> {
+        self.minor_diameter_typed()
+            .map_err(|e| SolidError::teeth("teeth::straight::SerratedHub::minor_diameter", e))
+    }
+
+    /// [`Self::minor_diameter`] with its failure as a [`TeethFailure`], for the tooth module's own
+    /// callers.
+    pub(crate) fn minor_diameter_typed(&self) -> Result<f64, TeethFailure> {
         Ok(2.0 * hub_profile(&self.shaft.profile()?, &self.fit)?.inner)
     }
 }
@@ -1130,7 +1184,17 @@ impl SerratedHub {
 ///
 /// Refused when the hub cannot be made or its rounds would come closer to the shaft than the
 /// smallest clearance.
-pub fn serration_hub_for(shaft: &Serration, fit: &Fit) -> Result<SerratedHub, Error> {
+pub fn serration_hub_for(shaft: &Serration, fit: &Fit) -> crate::Result<SerratedHub> {
+    serration_hub_for_typed(shaft, fit)
+        .map_err(|e| SolidError::teeth("teeth::straight::serration_hub_for", e))
+}
+
+/// [`serration_hub_for`] with its failure as a [`TeethFailure`], for the tooth module's own
+/// callers.
+pub(crate) fn serration_hub_for_typed(
+    shaft: &Serration,
+    fit: &Fit,
+) -> Result<SerratedHub, TeethFailure> {
     hub_profile(&shaft.profile()?, fit)?;
     Ok(SerratedHub {
         shaft: *shaft,
@@ -1139,14 +1203,30 @@ pub fn serration_hub_for(shaft: &Serration, fit: &Fit) -> Result<SerratedHub, Er
 }
 
 /// A serrated shaft and the hub that fits it as a pair on one axis, turning as one.
-pub fn serration_pair(shaft: &Serration, fit: &Fit, tolerance: f64) -> Result<Pair, Error> {
+pub fn serration_pair(shaft: &Serration, fit: &Fit, tolerance: f64) -> crate::Result<Pair> {
+    serration_pair_typed(shaft, fit, tolerance)
+        .map_err(|e| SolidError::teeth("teeth::straight::serration_pair", e))
+}
+
+/// [`serration_pair`] with its failure as a [`TeethFailure`], for the tooth module's own callers.
+pub(crate) fn serration_pair_typed(
+    shaft: &Serration,
+    fit: &Fit,
+    tolerance: f64,
+) -> Result<Pair, TeethFailure> {
     let profile = shaft.profile()?;
     pair_of(&profile, &hub_profile(&profile, fit)?, tolerance)
 }
 
 /// How far, in radians, the hub of [`serration_pair`] turns on its shaft either way from centred
 /// before a flank touches: found exactly from the lines and arcs of the two outlines.
-pub fn serration_play(shaft: &Serration, fit: &Fit) -> Result<f64, Error> {
+pub fn serration_play(shaft: &Serration, fit: &Fit) -> crate::Result<f64> {
+    serration_play_typed(shaft, fit)
+        .map_err(|e| SolidError::teeth("teeth::straight::serration_play", e))
+}
+
+/// [`serration_play`] with its failure as a [`TeethFailure`], for the tooth module's own callers.
+pub(crate) fn serration_play_typed(shaft: &Serration, fit: &Fit) -> Result<f64, TeethFailure> {
     let profile = shaft.profile()?;
     play_of_profiles(&profile, &hub_profile(&profile, fit)?)
 }

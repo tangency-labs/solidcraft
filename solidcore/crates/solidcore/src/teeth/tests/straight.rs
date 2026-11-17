@@ -5,12 +5,13 @@
 use std::f64::consts::{PI, TAU};
 
 use super::common::{check_outline, dist, sound, HOSTILE, HOSTILE_COUNTS};
+use crate::error::teeth::Why;
 use crate::teeth::mesh::{gap, Body};
 use crate::teeth::straight::{
     hub_for, serration_hub_for, serration_pair, serration_play, spline_pair, turning_play, Fit,
     Serration, StraightHub, StraightSpline, TipCorner,
 };
-use crate::teeth::{Error, Outline, Pair, Piece, Point, Role};
+use crate::teeth::{Outline, Pair, Piece, Point, Role};
 
 /// How far the chords of the outlines may be from the curves: the gaps below are good to a few
 /// times this.
@@ -265,7 +266,7 @@ fn on_construction(
 }
 
 #[test]
-fn every_piece_of_a_spline_is_exact_and_where_its_construction_puts_it() -> Result<(), Error> {
+fn every_piece_of_a_spline_is_exact_and_where_its_construction_puts_it() -> crate::Result<()> {
     for (name, shaft) in splines() {
         let outline = shaft.outline(1e-3)?;
         check_outline(name, &outline);
@@ -311,7 +312,7 @@ fn every_piece_of_a_spline_is_exact_and_where_its_construction_puts_it() -> Resu
 }
 
 #[test]
-fn every_piece_of_a_serration_is_exact_and_where_its_construction_puts_it() -> Result<(), Error> {
+fn every_piece_of_a_serration_is_exact_and_where_its_construction_puts_it() -> crate::Result<()> {
     for (name, shaft, rounds) in serrations() {
         let outline = shaft.outline(1e-3)?;
         check_outline(name, &outline);
@@ -346,7 +347,7 @@ fn every_piece_of_a_serration_is_exact_and_where_its_construction_puts_it() -> R
 /// The two parts of a pair as bodies, with every chord longer than a fiftieth of a millimetre cut
 /// into shorter ones on the same line: the same outlines, but quicker to measure, since the
 /// measurement sorts chords into cells no smaller than the longest chord.
-fn fine_bodies(pair: &Pair) -> Result<(Body, Body), Error> {
+fn fine_bodies(pair: &Pair) -> crate::Result<(Body, Body)> {
     let fine = |points: Vec<Point>| -> Vec<Point> {
         let mut out = Vec::with_capacity(points.len());
         for (a, b) in points.iter().zip(points.iter().cycle().skip(1)) {
@@ -372,15 +373,15 @@ fn gap_of(
     extra: f64,
     moved: Point,
     reach: f64,
-) -> Result<Option<f64>, Error> {
+) -> crate::Result<Option<f64>> {
     let placed = bodies.1.placed(pair.second_start + extra, moved);
     Ok(gap(&bodies.0, &placed, reach)?.map(|g| g.distance))
 }
 
 /// The turn of the hub on its shaft at which the gap closes, found by trying: turning further until
 /// the parts overlap, then halving between a turn with a gap and a turn with an overlap.
-fn play_by_trying(bodies: &(Body, Body), pair: &Pair, reach: f64) -> Result<f64, Error> {
-    let gap = |turn: f64| -> Result<f64, Error> {
+fn play_by_trying(bodies: &(Body, Body), pair: &Pair, reach: f64) -> crate::Result<f64> {
+    let gap = |turn: f64| -> crate::Result<f64> {
         Ok(gap_of(bodies, pair, turn, [0.0, 0.0], reach)?.unwrap_or(f64::INFINITY))
     };
     let (mut free, mut stuck) = (0.0, pair.cycle / 256.0);
@@ -406,7 +407,7 @@ fn play_by_trying(bodies: &(Body, Body), pair: &Pair, reach: f64) -> Result<f64,
 }
 
 #[test]
-fn a_spline_sits_in_its_hub_with_the_smallest_clearance_all_round() -> Result<(), Error> {
+fn a_spline_sits_in_its_hub_with_the_smallest_clearance_all_round() -> crate::Result<()> {
     let shaft = spline(TipCorner::Chamfer { size: 0.3 }, 0.3);
     for (side, major, minor) in [
         (0.05, 0.3, 0.2),
@@ -432,7 +433,7 @@ fn a_spline_sits_in_its_hub_with_the_smallest_clearance_all_round() -> Result<()
 }
 
 #[test]
-fn a_spline_hub_turns_by_its_play_and_no_further() -> Result<(), Error> {
+fn a_spline_hub_turns_by_its_play_and_no_further() -> crate::Result<()> {
     for (name, shaft) in [
         ("chamfered", spline(TipCorner::Chamfer { size: 0.3 }, 0.3)),
         ("rounded", splines()[2].1),
@@ -467,7 +468,7 @@ fn a_spline_hub_turns_by_its_play_and_no_further() -> Result<(), Error> {
 
 #[test]
 fn a_serrated_shaft_sits_in_its_hub_with_the_smallest_clearance_and_turns_by_its_play(
-) -> Result<(), Error> {
+) -> crate::Result<()> {
     for (name, shaft, rounds) in serrations() {
         for (side, major, minor) in [
             (0.02, 0.05, 0.05),
@@ -557,14 +558,15 @@ fn what_cannot_be_made_is_refused() {
         hub_tip_round,
         ..fit(0.05, 0.3, 0.2)
     };
-    let why = |f: Fit| match hub_for(&good, &f) {
-        Err(Error::Invalid { why }) => why,
-        other => panic!("not refused: {other:?}"),
+    let why = |f: Fit| {
+        let found = hub_for(&good, &f);
+        super::common::why(&found).unwrap_or_else(|| panic!("not refused for a reason: {found:?}"))
     };
-    assert!(why(close(1.0, 0.3)).contains("root rounds"));
-    assert!(
-        why(close(0.2, 0.0)).contains("tips of the hub's teeth"),
-        "{}",
+    assert_eq!(why(close(1.0, 0.3)), Why::HubRootRoundsTooClose);
+    assert_eq!(
+        why(close(0.2, 0.0)),
+        Why::HubTipsTooClose,
+        "{:?}",
         why(close(0.2, 0.0))
     );
     // The largest hub root round that fits keeps exactly the clearance; a little more does not fit.
@@ -584,7 +586,7 @@ fn what_cannot_be_made_is_refused() {
 
 #[test]
 fn the_refusal_of_hub_rounds_is_where_the_measured_gap_falls_below_the_clearance(
-) -> Result<(), Error> {
+) -> crate::Result<()> {
     // The largest hub root round accepted, found by halving between accepted and refused.
     let shaft = spline(TipCorner::Round { radius: 0.4 }, 0.3);
     let base = fit(0.05, 0.3, 0.2);
@@ -618,7 +620,7 @@ fn the_refusal_of_hub_rounds_is_where_the_measured_gap_falls_below_the_clearance
             ..base
         },
     )?;
-    let measured = |hub: &StraightHub| -> Result<f64, Error> {
+    let measured = |hub: &StraightHub| -> crate::Result<f64> {
         let pair = Pair {
             second: crate::teeth::Part {
                 outline: hub.outline(TOLERANCE)?,

@@ -2,7 +2,12 @@
 
 use std::f64::consts::TAU;
 
-use crate::teeth::{bspline, in_range, Error, MAX_CURVE_POINTS, MAX_LENGTH, MAX_OUTLINE_POINTS};
+use crate::error::teeth::{TeethFailure, Why, CHORD};
+use crate::geom::certified::{gamma, next_up};
+use crate::nurbs::math::UNIT;
+use crate::teeth::bound::{self, Bend};
+use crate::teeth::{bspline, in_range, MAX_CURVE_POINTS, MAX_LENGTH, MAX_OUTLINE_POINTS};
+use crate::SolidError;
 
 /// A point of the plane of the teeth, in millimetres. The part's axis is at the origin.
 pub type Point = [f64; 2];
@@ -100,8 +105,8 @@ impl Piece {
                 control,
                 ..
             } => {
-                let (from, _) = bspline::range(*degree, knots, control).ok()?;
-                bspline::point(*degree, knots, control, from).ok()
+                let (from, _) = bspline::range_typed(*degree, knots, control).ok()?;
+                bspline::point_typed(*degree, knots, control, from).ok()
             }
         }
     }
@@ -124,18 +129,16 @@ impl Piece {
                 control,
                 ..
             } => {
-                let (_, to) = bspline::range(*degree, knots, control).ok()?;
-                bspline::point(*degree, knots, control, to).ok()
+                let (_, to) = bspline::range_typed(*degree, knots, control).ok()?;
+                bspline::point_typed(*degree, knots, control, to).ok()
             }
         }
     }
 
     /// The piece as points, all but its last (the next piece starts there): an arc or a spline cut
-    /// into chords that stay within `tolerance` of it.
-    fn chain(&self, tolerance: f64) -> Result<Vec<Point>, Error> {
-        const TOO_FINE: Error = Error::Invalid {
-            why: "the tolerance is too fine: a curve would need too many points",
-        };
+    /// into chords proved within `tolerance` of it, a line its start, a curve its own points.
+    pub(super) fn chain(&self, tolerance: f64) -> Result<Vec<Point>, TeethFailure> {
+        const TOO_FINE: TeethFailure = TeethFailure::Invalid(Why::CurveTooFine);
         match self {
             Piece::Arc {
                 centre,
@@ -144,7 +147,7 @@ impl Piece {
                 sweep,
                 ..
             } => {
-                let steps = arc_steps(*radius, *sweep, tolerance);
+                let steps = arc_steps(*centre, *radius, *start, *sweep, tolerance)?;
                 if steps > MAX_CURVE_POINTS {
                     return Err(TOO_FINE);
                 }
@@ -170,14 +173,16 @@ impl Piece {
                 control,
                 ..
             } => {
-                // Each stretch between two knots is one polynomial: smooth, so halving finds its
-                // bends. The spline is checked once, not at every point.
+                // Each stretch between two knots is one polynomial: the Bezier points of a part of
+                // it bound its bends there (`stretch_bends`), so every chord is proved. The spline
+                // is checked once, not at every point.
                 let spline = bspline::Checked::new(*degree, knots, control)?;
                 let at = |t: f64| spline.point(t).unwrap_or([f64::NAN, f64::NAN]);
                 let mut out = Vec::new();
-                for stretch in bspline::breaks(*degree, knots, control)?.windows(2) {
+                for stretch in bspline::breaks_typed(*degree, knots, control)?.windows(2) {
                     if let [from, to] = stretch {
-                        let points = sampled(&at, *from, *to, tolerance)?;
+                        let near = stretch_bends(*degree, knots, control, *from, *to);
+                        let points = sampled(&at, &near, *from, *to, tolerance)?;
                         out.extend(points.iter().take(points.len().saturating_sub(1)));
                         if out.len() > MAX_CURVE_POINTS {
                             return Err(TOO_FINE);
@@ -242,27 +247,222 @@ pub(super) fn on_circle(centre: Point, radius: f64, angle: f64) -> Point {
     [cx + radius * angle.cos(), cy + radius * angle.sin()]
 }
 
-/// Into how many chords an arc is cut so that each stays within `tolerance` of it. More than
-/// [`MAX_CURVE_POINTS`] means the tolerance is too fine for the arc.
-fn arc_steps(radius: f64, sweep: f64, tolerance: f64) -> usize {
-    if !(radius > 0.0) || sweep == 0.0 {
-        return 1;
+/// Into how many chords an arc is cut, proved: each chord between two of the points
+/// [`Piece::chain`] computes (`on_circle` at `start + sweep i / n`) stays within `tolerance` of the
+/// arc, the rounding of those points counted. More than [`MAX_CURVE_POINTS`] means the tolerance
+/// is too fine for the arc.
+///
+/// The count starts from the angle whose sagitta `2 r sin^2(step / 4)` is the tolerance (written
+/// with `asin`, which loses no digits where `1 - ratio` would), and is then verified, at most
+/// `ARC_ROUNDS` times, each failed round adding `1 + n / 16` chords:
+///
+/// - the angles `start + sweep i / n` are within `gamma(3) (|start| + |sweep|)` of exact (three
+///   operations), so the widest step taken is `delta = |sweep| / n + 2 gamma(3) (..)`, in `Ivl`;
+/// - the sagitta of that step, `2 r sin^2(delta / 4)`, with the sine enclosed by
+///   [`bound::sin_cos`] (libm two units in the last place) and the square by [`bound::sqr`];
+/// - a point `centre + r (cos a, sin a)` is within `E = 2 (4 u r + gamma(2) (|cx| + |cy| + 2 r))`
+///   of the exact one at its angle (cos and sin two units in the last place each, the product and
+///   the sum two operations, the factor 2 for both coordinates), computed in `Ivl`.
+///
+/// A chord within the sagitta of its arc and points within `E` of it give the bound
+/// `sagitta + E`. Refused with `NotProved` where `E` alone is not below the tolerance, and after
+/// `ARC_ROUNDS` rounds that prove nothing; a count past [`MAX_CURVE_POINTS`] is returned as
+/// `MAX_CURVE_POINTS + 1` for the caller to refuse.
+pub(super) fn arc_steps(
+    centre: Point,
+    radius: f64,
+    start: f64,
+    sweep: f64,
+    tolerance: f64,
+) -> Result<usize, TeethFailure> {
+    const ARC_ROUNDS: u32 = 64;
+    const CAP: usize = MAX_CURVE_POINTS + 1;
+    // An arc whose numbers are not numbers, or whose radius is negative, has no proof.
+    if !(radius >= 0.0 && radius.is_finite() && start.is_finite() && sweep.is_finite()) {
+        return Err(not_proved(tolerance, f64::INFINITY));
+    }
+    // A point, or no turn at all: its one point is the whole of it.
+    if radius == 0.0 || sweep == 0.0 {
+        return Ok(1);
     }
     let ratio = (tolerance / radius).clamp(1e-15, 1.0);
-    // The angle of a chord that is this far from its arc in the middle
-    let step = 2.0 * (1.0 - ratio).acos();
+    // The angle of a chord that is this far from its arc in the middle: no cancellation.
+    let step = 4.0 * (0.5 * ratio).sqrt().asin();
     let steps = if step > 0.0 {
         (sweep.abs() / step).ceil()
     } else {
         f64::INFINITY
     };
     // A count in range, so the cast loses nothing.
-    if steps >= (MAX_CURVE_POINTS + 1) as f64 {
-        MAX_CURVE_POINTS + 1
+    let mut n = if steps >= CAP as f64 {
+        CAP
     } else if steps >= 1.0 {
         steps as usize
     } else {
         1
+    };
+    let [cx, cy] = centre;
+    let size = bound::exact(cx.abs()) + bound::exact(cy.abs()) + bound::exact(2.0 * radius);
+    let placed = bound::exact(4.0 * UNIT) * bound::exact(radius) + bound::exact(gamma(2)) * size;
+    let e = (bound::exact(2.0) * placed).hi;
+    if !(e < tolerance) {
+        return Err(not_proved(tolerance, e));
+    }
+    let angles = bound::exact(start.abs()) + bound::exact(sweep.abs());
+    let turn = (bound::exact(gamma(3)) * angles).hi;
+    let mut proved = f64::INFINITY;
+    for _ in 0..ARC_ROUNDS {
+        let delta = bound::exact(sweep.abs()) / bound::exact(n as f64) + bound::exact(2.0 * turn);
+        let (sine, _) = bound::sin_cos(delta * bound::exact(0.25));
+        let sag = bound::exact(2.0 * radius) * bound::sqr(sine);
+        proved = (sag + bound::exact(e)).hi;
+        if proved <= tolerance {
+            return Ok(n);
+        }
+        if n >= CAP {
+            return Ok(CAP);
+        }
+        n = (n + 1 + n / 16).min(CAP);
+    }
+    Err(not_proved(tolerance, proved))
+}
+
+/// The refusal of a chord that could not be proved within `asked`: `reached` is the best bound
+/// proved (infinite where it is not a number).
+fn not_proved(asked: f64, reached: f64) -> TeethFailure {
+    TeethFailure::NotProved {
+        what: CHORD,
+        asked,
+        reached: if reached.is_nan() {
+            f64::INFINITY
+        } else {
+            reached
+        },
+    }
+}
+
+/// The tolerance left for the chords of a piece when one of them has an end `gap` away from the
+/// piece itself. A chain drops each piece's last point, so the chord that closes a piece runs to
+/// the next piece's start, and pieces need only join within the join allowance; a run of pieces
+/// likewise starts a piece from the end of the one before it. A chord within `tolerance - gap` of
+/// its curve stays within `tolerance` of it when one end moves by at most `gap` (every point of the
+/// moved chord is within `gap` of the chord), so the gap is taken off the tolerance and not left
+/// out of the bound. No gap leaves the tolerance as it is.
+///
+/// Counted: the gap is a `hypot` of two differences, each rounded once and the `hypot` within two
+/// units in the last place (`teeth::bound`), so `1 + 8u` times the computed gap covers the true
+/// one; the product and the difference are `Ivl` operations and the lower end is taken. Refused
+/// with `NotProved` where the gap alone is not below the tolerance.
+pub(super) fn less_gap(tolerance: f64, gap: f64) -> Result<f64, TeethFailure> {
+    if gap == 0.0 {
+        return Ok(tolerance);
+    }
+    let wide = bound::exact(gap) * bound::exact(1.0 + 8.0 * UNIT);
+    let left = (bound::exact(tolerance) - wide).lo;
+    if gap > 0.0 && left > 0.0 {
+        Ok(left)
+    } else {
+        Err(not_proved(tolerance, gap))
+    }
+}
+
+/// For each piece of a tooth, the gap its closing chord has to bridge ([`less_gap`]): from the
+/// piece's end to the point the chord really ends on, which is the next piece's start, and for the
+/// last piece the first piece's start turned onto the next tooth. Zero where no gap is counted: an
+/// end that is missing or not finite, and a gap wider than the join allowance `1e-9 (1 + size)`
+/// (such pieces do not join, which [`Outline::new`] refuses in its own words).
+fn closing_gaps(teeth: u32, tooth: &[Piece]) -> Vec<f64> {
+    let reach = tooth
+        .iter()
+        .flat_map(|piece| [piece.start(), piece.end()])
+        .flatten()
+        .flatten()
+        .fold(0.0_f64, |most, v| {
+            if v.is_finite() {
+                most.max(v.abs())
+            } else {
+                most
+            }
+        });
+    let allowed = 1e-9 * (1.0 + reach);
+    let turned = tooth
+        .first()
+        .and_then(Piece::start)
+        .map(|p| rotated(p, TAU / f64::from(teeth)));
+    let onto = tooth
+        .iter()
+        .skip(1)
+        .map(Piece::start)
+        .chain(std::iter::once(turned));
+    tooth
+        .iter()
+        .zip(onto)
+        .map(|(piece, next)| {
+            let gap = piece
+                .end()
+                .zip(next)
+                .map_or(0.0, |(end, start)| distance(end, start));
+            if gap <= allowed {
+                gap
+            } else {
+                0.0
+            }
+        })
+        .collect()
+}
+
+/// The enclosures [`Piece::chain`] uses for the break stretch `[from, to]` of a spline that
+/// [`bspline::range`] accepted: those of the span `from` lies in ([`bspline::span_bend`]), with
+/// the rounding raised to cover the end point at `to`, which `Checked::point` evaluates in a later
+/// span at an interior break knot (or further on, past a repeated knot), from control points the
+/// first span's rounding does not cover. In effect `2 gamma(12 p + 4)` times the largest
+/// coordinate of the control points from the first span's first to the end span's last; constant
+/// over the stretch.
+pub(super) fn break_bend(
+    degree: usize,
+    knots: &[f64],
+    control: &[Point],
+    from: f64,
+    to: f64,
+) -> Bend {
+    let count = control.len();
+    let first = bspline::span_bend(
+        degree,
+        knots,
+        control,
+        bspline::span_of(degree, knots, count, from),
+    );
+    let end = bspline::span_bend(
+        degree,
+        knots,
+        control,
+        bspline::span_of(degree, knots, count, to),
+    );
+    let rounding = if first.rounding.is_nan() || end.rounding.is_nan() {
+        f64::INFINITY
+    } else {
+        first.rounding.max(end.rounding)
+    };
+    Bend { rounding, ..first }
+}
+
+/// What [`Piece::chain`] proves the chords of the break stretch `[from, to]` of a spline with: for
+/// a part `[lo, hi]` of the stretch, the enclosures of that part's own Bezier points
+/// ([`bspline::stretch_bend`]), with the rounding of the whole stretch ([`break_bend`], which
+/// covers the end point at `to`). The whole span's hodographs alone would bound a short part of a
+/// spline of a high degree many times too loosely, and the chain would be that much too fine.
+pub(super) fn stretch_bends<'a>(
+    degree: usize,
+    knots: &'a [f64],
+    control: &'a [Point],
+    from: f64,
+    to: f64,
+) -> impl Fn(f64, f64) -> Bend + 'a {
+    let whole = break_bend(degree, knots, control, from, to);
+    let span = bspline::span_of(degree, knots, control.len(), from);
+    move |lo: f64, hi: f64| Bend {
+        rounding: whole.rounding,
+        ..bspline::stretch_bend(degree, knots, control, span, lo, hi)
     }
 }
 
@@ -448,10 +648,8 @@ impl Ring<'_> {
     /// that meet at their ends, ends that touch, and stretches that only touch do not cross; nor
     /// does anything within `eps` of touching. Each tooth is looked at against itself and against
     /// the teeth near enough to reach it, never all against all.
-    pub(super) fn crosses_itself(&self, eps: f64) -> Result<bool, Error> {
-        const INTRICATE: Error = Error::Invalid {
-            why: "the outline is too intricate to check that it does not cross itself",
-        };
+    pub(super) fn crosses_itself(&self, eps: f64) -> Result<bool, TeethFailure> {
+        const INTRICATE: TeethFailure = TeethFailure::Invalid(Why::CrossingCheckTooIntricate);
         let m = self.chain.len();
         if m < 2 {
             return Ok(false);
@@ -618,24 +816,50 @@ fn chords_cross(a: &[Point], b: &[Point], i: usize, j: usize, same: bool, eps: f
 }
 
 /// The checked tolerance of an outline: above nothing, at most [`MAX_LENGTH`].
-pub(super) fn checked_tolerance(tolerance: f64) -> Result<f64, Error> {
+pub(super) fn checked_tolerance(tolerance: f64) -> Result<f64, TeethFailure> {
     in_range("tolerance", tolerance, 0.0, MAX_LENGTH)
 }
 
-/// Points of the curve `at` from the parameter `from` to `to`, both ends included, as few as keep
-/// the chords between them within `tolerance` of the curve: the curve is halved wherever a chord is
-/// farther from it than that, so the points are closest together where the curve bends most.
+/// Points of the curve `at` from `from` to `to`, both ends included, as few as keep the chords
+/// within `tolerance` of the curve, each chord PROVED by [`bound::chord_bound`] with `bend`.
+/// `bend(lo, hi)` (`lo <= hi`) encloses the curve over `[lo, hi]`.
+///
+/// The probes only nominate where to split; a chord is accepted only when `chord_bound` proves it
+/// (bound.rs), the rounding of the two end points counted by the caller's `Bend::rounding`. A
+/// stretch that cannot be halved and is not proved is refused.
+///
+/// The curve is first refused at once where the rounding of its points over the whole stretch
+/// (`bend` over all of it) is not below the tolerance: every caller's rounding over a stretch is
+/// computed from magnitudes over that stretch, so the whole stretch's bounds every part's. Then,
+/// from eight pieces, each stretch is probed at a quarter, the middle and three quarters: one whose
+/// probes lie farther than the tolerance from its chord is halved; another is accepted if
+/// `chord_bound` over it (its parameter width rounded up, `bend` over it) is within the tolerance,
+/// halved if it is not and can be, and refused with `NotProved` if it cannot. So the points are
+/// closest together where the curve bends most, and every chord is within the tolerance of the
+/// curve.
 pub(super) fn sampled(
     at: &dyn Fn(f64) -> Point,
+    bend: &dyn Fn(f64, f64) -> Bend,
     from: f64,
     to: f64,
     tolerance: f64,
-) -> Result<Vec<Point>, Error> {
-    const TOO_FINE: Error = Error::Invalid {
-        why: "the tolerance is too fine: a curve would need too many points",
-    };
+) -> Result<Vec<Point>, TeethFailure> {
+    const TOO_FINE: TeethFailure = TeethFailure::Invalid(Why::CurveTooFine);
+    const NOT_FINITE: TeethFailure = TeethFailure::Invalid(Why::OutlineNotFinite);
     const START: u32 = 8; // pieces to begin with, so that no bend is overlooked
-    let place = |i: u32| from + (to - from) * f64::from(i) / f64::from(START);
+    let whole = bend(from.min(to), from.max(to));
+    if !(whole.rounding < tolerance) {
+        return Err(not_proved(tolerance, whole.rounding));
+    }
+    // The last place is `to` itself, not a rounded sum that only comes close to it: the proof then
+    // covers the curve to the very parameter the next stretch of a piece starts from.
+    let place = |i: u32| {
+        if i >= START {
+            to
+        } else {
+            from + (to - from) * f64::from(i) / f64::from(START)
+        }
+    };
     let mut out = vec![at(from)];
     // The stretches still to settle, the next one on top.
     let mut waiting: Vec<(f64, Point, f64, Point)> = (0..START)
@@ -649,25 +873,41 @@ pub(super) fn sampled(
             0.25 * t0 + 0.75 * t1,
         );
         let at_middle = at(middle);
+        // The largest of the three, and not a number if any of them is not (`f64::max` would drop
+        // it, and the curve would pass for finite).
         let off = [at(quarter), at_middle, at(three_quarters)]
             .into_iter()
             .map(|p| off_chord(p, p0, p1))
-            .fold(0.0, f64::max);
+            .fold(
+                0.0,
+                |most: f64, d| if d.is_nan() || d > most { d } else { most },
+            );
         // A stretch that cannot be halved any more is as fine as numbers allow.
         let halvable = middle > t0.min(t1) && middle < t0.max(t1);
         if off.is_nan() {
-            return Err(Error::Invalid {
-                why: "the outline would not be finite",
-            });
+            return Err(NOT_FINITE);
         }
-        if off > tolerance && halvable {
+        let split = if off > tolerance && halvable {
+            true
+        } else {
+            let width = next_up((t1 - t0).abs());
+            let near = bend(t0.min(t1), t0.max(t1));
+            let proved = bound::chord_bound(width, p0, p1, &near);
+            if proved <= tolerance {
+                out.push(p1);
+                false
+            } else if halvable {
+                true
+            } else {
+                return Err(not_proved(tolerance, proved));
+            }
+        };
+        if split {
             if out.len() + waiting.len() >= MAX_CURVE_POINTS {
                 return Err(TOO_FINE);
             }
             waiting.push((middle, at_middle, t1, p1));
             waiting.push((t0, p0, middle, at_middle));
-        } else {
-            out.push(p1);
         }
     }
     Ok(out)
@@ -701,20 +941,24 @@ impl Outline {
     /// `teeth` is how many times the tooth repeats around the axis; a shape that does not repeat (a
     /// keyed bore, a spline with a master tooth) is an outline of one tooth that closes onto
     /// itself.
-    pub fn new(teeth: u32, tooth: Vec<Piece>, tolerance: f64) -> Result<Outline, Error> {
-        const OPEN: Error = Error::Invalid {
-            why: "the pieces of the tooth would not join into a closed outline",
-        };
-        const TOO_FINE: Error = Error::Invalid {
-            why: "the tolerance is too fine: the outline would need too many points",
-        };
-        const NOT_FINITE: Error = Error::Invalid {
-            why: "the outline would not be finite",
-        };
+    pub fn new(teeth: u32, tooth: Vec<Piece>, tolerance: f64) -> crate::Result<Outline> {
+        Self::new_typed(teeth, tooth, tolerance)
+            .map_err(|e| SolidError::teeth("teeth::outline::Outline::new", e))
+    }
+
+    /// [`Outline::new`] with its failure as a [`TeethFailure`], for the tooth module's own callers.
+    pub(crate) fn new_typed(
+        teeth: u32,
+        tooth: Vec<Piece>,
+        tolerance: f64,
+    ) -> Result<Outline, TeethFailure> {
+        const OPEN: TeethFailure = TeethFailure::Invalid(Why::PiecesDoNotJoin);
+        const TOO_FINE: TeethFailure = TeethFailure::Invalid(Why::OutlineTooFine);
+        const NOT_FINITE: TeethFailure = TeethFailure::Invalid(Why::OutlineNotFinite);
         let tolerance = checked_tolerance(tolerance)?;
         if teeth == 0 || teeth > crate::teeth::MAX_TEETH {
             let (value, up_to) = (f64::from(teeth), f64::from(crate::teeth::MAX_TEETH));
-            return Err(Error::OutOfRange {
+            return Err(TeethFailure::OutOfRange {
                 what: "teeth",
                 value,
                 above: 0.0,
@@ -724,7 +968,10 @@ impl Outline {
         let mut size = 0.0_f64;
         let mut chain = Vec::new();
         let mut radii = (f64::INFINITY, 0.0_f64);
-        for piece in &tooth {
+        // The chord that closes a piece ends on the next piece's start: a gap there, within the
+        // join allowance, is counted in that piece's tolerance.
+        let gaps = closing_gaps(teeth, &tooth);
+        for (piece, gap) in tooth.iter().zip(&gaps) {
             for p in [piece.start(), piece.end()] {
                 let [x, y] = p.ok_or(OPEN)?;
                 if !(x.is_finite()
@@ -762,7 +1009,7 @@ impl Outline {
                     return Err(NOT_FINITE);
                 }
             }
-            let of_piece = piece.chain(tolerance)?;
+            let of_piece = piece.chain(less_gap(tolerance, *gap)?)?;
             let (low, high) = piece.radii(&of_piece);
             radii = (radii.0.min(low), radii.1.max(high));
             chain.extend(of_piece);
@@ -787,23 +1034,17 @@ impl Outline {
             return Err(OPEN);
         }
         if chain.len().saturating_mul(teeth as usize) < 3 {
-            return Err(Error::Invalid {
-                why: "the tolerance is too coarse: the outline would have fewer than three points",
-            });
+            return Err(TeethFailure::Invalid(Why::TooCoarse));
         }
         let ring = Ring {
             chain: &chain,
             teeth,
         };
         if !(ring.doubled_area() > 0.0) {
-            return Err(Error::Invalid {
-                why: "the outline must run counter-clockwise around an area",
-            });
+            return Err(TeethFailure::Invalid(Why::NotCounterClockwise));
         }
         if ring.crosses_itself(1e-9 * (1.0 + size.max(radii.1)))? {
-            return Err(Error::Invalid {
-                why: "the outline would cross itself",
-            });
+            return Err(TeethFailure::Invalid(Why::CrossesItself));
         }
         Ok(Outline {
             teeth,
@@ -865,17 +1106,24 @@ pub fn points_of(
     tooth: &[Piece],
     tolerance: f64,
     turn: f64,
-) -> Result<Vec<Point>, Error> {
-    const TOO_FINE: Error = Error::Invalid {
-        why: "the tolerance is too fine: the outline would need too many points",
-    };
-    const NOT_FINITE: Error = Error::Invalid {
-        why: "the outline would not be finite",
-    };
+) -> crate::Result<Vec<Point>> {
+    points_of_typed(teeth, tooth, tolerance, turn)
+        .map_err(|e| SolidError::teeth("teeth::outline::points_of", e))
+}
+
+/// [`points_of`] with its failure as a [`TeethFailure`], for the tooth module's own callers.
+pub(crate) fn points_of_typed(
+    teeth: u32,
+    tooth: &[Piece],
+    tolerance: f64,
+    turn: f64,
+) -> Result<Vec<Point>, TeethFailure> {
+    const TOO_FINE: TeethFailure = TeethFailure::Invalid(Why::OutlineTooFine);
+    const NOT_FINITE: TeethFailure = TeethFailure::Invalid(Why::OutlineNotFinite);
     let tolerance = checked_tolerance(tolerance)?;
     if teeth == 0 || teeth > crate::teeth::MAX_TEETH {
         let (value, up_to) = (f64::from(teeth), f64::from(crate::teeth::MAX_TEETH));
-        return Err(Error::OutOfRange {
+        return Err(TeethFailure::OutOfRange {
             what: "teeth",
             value,
             above: 0.0,
@@ -883,8 +1131,10 @@ pub fn points_of(
         });
     }
     let mut chain: Vec<Point> = Vec::new();
-    for piece in tooth {
-        chain.extend(piece.chain(tolerance)?);
+    // As in `Outline::new`: the gap a piece's closing chord bridges is counted in its tolerance.
+    let gaps = closing_gaps(teeth, tooth);
+    for (piece, gap) in tooth.iter().zip(&gaps) {
+        chain.extend(piece.chain(less_gap(tolerance, *gap)?)?);
         if chain.len().saturating_mul(teeth as usize) > MAX_OUTLINE_POINTS {
             return Err(TOO_FINE);
         }
@@ -1023,8 +1273,18 @@ fn near_angle(angle: f64, near: f64) -> f64 {
 /// Refused: an angle that is not a number, a radius that is not above the outline's largest radius
 /// (and at most [`MAX_LENGTH`]), an outline with no tooth top or point near the angle, and two tops
 /// with nothing between them.
-pub fn space_section(outline: &Outline, tooth_at: f64, out_to: f64) -> Result<SpaceSection, Error> {
-    space_section_of(
+pub fn space_section(outline: &Outline, tooth_at: f64, out_to: f64) -> crate::Result<SpaceSection> {
+    space_section_typed(outline, tooth_at, out_to)
+        .map_err(|e| SolidError::teeth("teeth::outline::space_section", e))
+}
+
+/// [`space_section`] with its failure as a [`TeethFailure`], for the tooth module's own callers.
+pub(crate) fn space_section_typed(
+    outline: &Outline,
+    tooth_at: f64,
+    out_to: f64,
+) -> Result<SpaceSection, TeethFailure> {
+    space_section_of_typed(
         outline.teeth(),
         outline.tooth(),
         outline.radii().1,
@@ -1044,21 +1304,28 @@ pub fn space_section_of(
     top: f64,
     tooth_at: f64,
     out_to: f64,
-) -> Result<SpaceSection, Error> {
-    const NO_TOP: Error = Error::Invalid {
-        why: "no top of a tooth lies near the angle asked for",
-    };
-    const NO_SPACE: Error = Error::Invalid {
-        why: "the tops of two teeth meet: there is no space between them",
-    };
+) -> crate::Result<SpaceSection> {
+    space_section_of_typed(teeth, tooth, top, tooth_at, out_to)
+        .map_err(|e| SolidError::teeth("teeth::outline::space_section_of", e))
+}
+
+/// [`space_section_of`] with its failure as a [`TeethFailure`], for the tooth module's own
+/// callers.
+pub(crate) fn space_section_of_typed(
+    teeth: u32,
+    tooth: &[Piece],
+    top: f64,
+    tooth_at: f64,
+    out_to: f64,
+) -> Result<SpaceSection, TeethFailure> {
+    const NO_TOP: TeethFailure = TeethFailure::Invalid(Why::NoTopNearAngle);
+    const NO_SPACE: TeethFailure = TeethFailure::Invalid(Why::TopsMeet);
     if !tooth_at.is_finite() {
-        return Err(Error::Invalid {
-            why: "the angle of the tooth is not a number",
-        });
+        return Err(TeethFailure::Invalid(Why::ToothAngleNotANumber));
     }
     if teeth == 0 || teeth > crate::teeth::MAX_TEETH {
         let (value, up_to) = (f64::from(teeth), f64::from(crate::teeth::MAX_TEETH));
-        return Err(Error::OutOfRange {
+        return Err(TeethFailure::OutOfRange {
             what: "teeth",
             value,
             above: 0.0,

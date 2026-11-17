@@ -36,10 +36,12 @@
 
 use std::f64::consts::TAU;
 
+use crate::error::teeth::{TeethFailure, Why};
 use crate::teeth::mesh::Material;
 use crate::teeth::outline::{rotated, Outline, Piece, Point, Role};
 use crate::teeth::pair::{Motion, Pair};
-use crate::teeth::{Error, MAX_TEETH};
+use crate::teeth::MAX_TEETH;
+use crate::SolidError;
 
 /// Which part gives up a tooth for the master spline.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -180,32 +182,22 @@ fn angle_of(p: Point) -> f64 {
 
 /// The outline turned about its axis by `angle` (radians, counter-clockwise): the same pieces at
 /// their new places, with the same count of teeth and the same tolerance.
-pub fn turned(outline: &Outline, angle: f64) -> Result<Outline, Error> {
+pub fn turned(outline: &Outline, angle: f64) -> crate::Result<Outline> {
+    turned_typed(outline, angle).map_err(|e| SolidError::teeth("teeth::master_spline::turned", e))
+}
+
+/// [`turned`] with its failure as a [`TeethFailure`], for the tooth module's own callers.
+pub(crate) fn turned_typed(outline: &Outline, angle: f64) -> Result<Outline, TeethFailure> {
     if !angle.is_finite() {
-        return Err(Error::Invalid { why: NOT_A_NUMBER });
+        return Err(TeethFailure::Invalid(Why::AngleNotANumber));
     }
     let tooth = outline
         .tooth()
         .iter()
         .map(|p| turned_piece(p, angle))
         .collect();
-    Outline::new(outline.teeth(), tooth, outline.tolerance())
+    Outline::new_typed(outline.teeth(), tooth, outline.tolerance())
 }
-
-/// Why an angle that is not a number is refused.
-pub const NOT_A_NUMBER: &str = "the angle is not a number";
-
-/// Why no period can be closed on the smallest circle.
-pub const NO_SMALLEST: &str =
-    "no corner of the teeth lies on the smallest circle: no tooth or space can be closed there";
-
-/// Why no period can be closed on the largest circle.
-pub const NO_LARGEST: &str =
-    "no corner of the teeth lies on the largest circle: the tops of the teeth and the bottoms of the spaces need a flat part to join";
-
-/// Why a pair that is not a shaft and its hub is refused.
-pub const NOT_A_SHAFT_AND_HUB: &str =
-    "a master spline needs a shaft and its hub: the same count of teeth on one axis, the hub around the shaft and turning with it";
 
 /// One period of an outline that starts and ends on one of its circles about the axis.
 struct Period {
@@ -225,7 +217,7 @@ impl Period {
     /// The period of an outline taken from a joint of its pieces that lies on the circle asked for:
     /// the pieces before that joint come after the others, turned on by one pitch. Refused if no
     /// joint lies on that circle.
-    fn of(outline: &Outline, circle: Circle) -> Result<Period, Error> {
+    fn of(outline: &Outline, circle: Circle) -> Result<Period, TeethFailure> {
         let tooth = outline.tooth();
         let on = match circle {
             Circle::Smallest => outline.radii().0,
@@ -239,12 +231,10 @@ impl Period {
             .filter(|(_, _, r)| (r - on).abs() <= near)
             .min_by(|a, b| (a.2 - on).abs().total_cmp(&(b.2 - on).abs()));
         let Some((at, first, radius)) = joint else {
-            return Err(Error::Invalid {
-                why: match circle {
-                    Circle::Smallest => NO_SMALLEST,
-                    Circle::Largest => NO_LARGEST,
-                },
-            });
+            return Err(TeethFailure::Invalid(match circle {
+                Circle::Smallest => Why::NoCornerOnSmallest,
+                Circle::Largest => Why::NoCornerOnLargest,
+            }));
         };
         let pitch = outline.pitch_angle();
         let pieces = tooth
@@ -293,17 +283,28 @@ impl Period {
 /// opening (material outside) it is the other way round.
 ///
 /// Refused when the outline has fewer than two teeth (nothing would be left of it), when `at` is
-/// not a number ([`NOT_A_NUMBER`]), and when no joint of its pieces lies on the circle
-/// ([`NO_SMALLEST`], [`NO_LARGEST`]).
+/// not a number ([`Why::AngleNotANumber`]), and when no joint of its pieces lies on the circle
+/// ([`Why::NoCornerOnSmallest`], [`Why::NoCornerOnLargest`]).
 pub fn replaced_period(
     outline: &Outline,
     material: Material,
     circle: Circle,
     at: f64,
-) -> Result<Replaced, Error> {
+) -> crate::Result<Replaced> {
+    replaced_period_typed(outline, material, circle, at)
+        .map_err(|e| SolidError::teeth("teeth::master_spline::replaced_period", e))
+}
+
+/// [`replaced_period`] with its failure as a [`TeethFailure`], for the tooth module's own callers.
+pub(crate) fn replaced_period_typed(
+    outline: &Outline,
+    material: Material,
+    circle: Circle,
+    at: f64,
+) -> Result<Replaced, TeethFailure> {
     if outline.teeth() < 2 {
         let (value, up_to) = (f64::from(outline.teeth()), f64::from(MAX_TEETH));
-        return Err(Error::OutOfRange {
+        return Err(TeethFailure::OutOfRange {
             what: "teeth",
             value,
             above: 1.0,
@@ -311,7 +312,7 @@ pub fn replaced_period(
         });
     }
     if !at.is_finite() {
-        return Err(Error::Invalid { why: NOT_A_NUMBER });
+        return Err(TeethFailure::Invalid(Why::AngleNotANumber));
     }
     let period = Period::of(outline, circle)?;
     // The arc takes the role of the arc about the axis on that circle, where there is one.
@@ -357,7 +358,7 @@ pub fn replaced_period(
         }
     }
     Ok(Replaced {
-        outline: Outline::new(1, pieces, outline.tolerance())?,
+        outline: Outline::new_typed(1, pieces, outline.tolerance())?,
         arc,
     })
 }
@@ -366,10 +367,20 @@ pub fn replaced_period(
 /// (counter-clockwise from the x axis, from -360 to 360): the tooth nearest to that angle (for a
 /// wide tooth, the space nearest to it), and the turn of the whole spline, at most half a pitch,
 /// that puts the middle exactly there. An angle just between two takes the one further on.
-pub fn placement(teeth: u32, form: Form, angle: f64) -> Result<Placement, Error> {
+pub fn placement(teeth: u32, form: Form, angle: f64) -> crate::Result<Placement> {
+    placement_typed(teeth, form, angle)
+        .map_err(|e| SolidError::teeth("teeth::master_spline::placement", e))
+}
+
+/// [`placement`] with its failure as a [`TeethFailure`], for the tooth module's own callers.
+pub(crate) fn placement_typed(
+    teeth: u32,
+    form: Form,
+    angle: f64,
+) -> Result<Placement, TeethFailure> {
     if !(2..=MAX_TEETH).contains(&teeth) {
         let (value, up_to) = (f64::from(teeth), f64::from(MAX_TEETH));
-        return Err(Error::OutOfRange {
+        return Err(TeethFailure::OutOfRange {
             what: "teeth",
             value,
             above: 1.0,
@@ -377,9 +388,7 @@ pub fn placement(teeth: u32, form: Form, angle: f64) -> Result<Placement, Error>
         });
     }
     if !(angle.is_finite() && angle.abs() <= MOST_ANGLE) {
-        return Err(Error::Invalid {
-            why: "the angle of the master spline must be from -360 to 360 degrees",
-        });
+        return Err(TeethFailure::Invalid(Why::MasterAngleRange));
     }
     let z = f64::from(teeth);
     // The middle of a wide tooth is half a pitch on from the tooth before it.
@@ -405,23 +414,31 @@ pub fn placement(teeth: u32, form: Form, angle: f64) -> Result<Placement, Error>
 ///
 /// The arcs it returns, on the shaft and in the hub's own coordinates, are where each part differs
 /// from its ordinary teeth. Refused as [`replaced_period`] refuses, when `tooth` is not one of the
-/// shaft's teeth, and when the pair is not a shaft and its hub ([`NOT_A_SHAFT_AND_HUB`]): the same
-/// count of teeth, the first part's material inside its outline and the second's outside, one axis,
-/// and turning as one.
-pub fn master_pair(pair: &Pair, form: Form, tooth: u32) -> Result<(Pair, Span, Span), Error> {
+/// shaft's teeth, and when the pair is not a shaft and its hub ([`Why::NotAShaftAndHub`]): the
+/// same count of teeth, the first part's material inside its outline and the second's outside, one
+/// axis, and turning as one.
+pub fn master_pair(pair: &Pair, form: Form, tooth: u32) -> crate::Result<(Pair, Span, Span)> {
+    master_pair_typed(pair, form, tooth)
+        .map_err(|e| SolidError::teeth("teeth::master_spline::master_pair", e))
+}
+
+/// [`master_pair`] with its failure as a [`TeethFailure`], for the tooth module's own callers.
+pub(crate) fn master_pair_typed(
+    pair: &Pair,
+    form: Form,
+    tooth: u32,
+) -> Result<(Pair, Span, Span), TeethFailure> {
     let teeth = pair.first.outline.teeth();
     let one_axis = pair.first.axis == pair.second.axis;
     let as_one = matches!(pair.motion, Motion::Turning { ratio } if ratio == 1.0);
     let shaft_and_hub =
         pair.first.material == Material::Inside && pair.second.material == Material::Outside;
     if !(pair.second.outline.teeth() == teeth && shaft_and_hub && one_axis && as_one) {
-        return Err(Error::Invalid {
-            why: NOT_A_SHAFT_AND_HUB,
-        });
+        return Err(TeethFailure::Invalid(Why::NotAShaftAndHub));
     }
     if tooth >= teeth {
         let (value, up_to) = (f64::from(tooth), f64::from(teeth.saturating_sub(1)));
-        return Err(Error::OutOfRange {
+        return Err(TeethFailure::OutOfRange {
             what: "tooth",
             value,
             above: -1.0,
@@ -429,17 +446,15 @@ pub fn master_pair(pair: &Pair, form: Form, tooth: u32) -> Result<(Pair, Span, S
         });
     }
     if !pair.second_start.is_finite() {
-        return Err(Error::Invalid {
-            why: "the hub's start is not a number",
-        });
+        return Err(TeethFailure::Invalid(Why::HubStartNotANumber));
     }
     let circle = form.circle();
     // The middle of the master spline, on the shaft and in the hub's own coordinates: the tooth
     // left out, or the space that is filled, half a pitch on.
     let half = if form == Form::WideTooth { 0.5 } else { 0.0 };
     let at = pair.first.outline.pitch_angle() * (f64::from(tooth) + half);
-    let shaft = replaced_period(&pair.first.outline, Material::Inside, circle, at)?;
-    let hub = replaced_period(
+    let shaft = replaced_period_typed(&pair.first.outline, Material::Inside, circle, at)?;
+    let hub = replaced_period_typed(
         &pair.second.outline,
         Material::Outside,
         circle,
@@ -458,12 +473,22 @@ pub fn master_pair(pair: &Pair, form: Form, tooth: u32) -> Result<(Pair, Span, S
 /// to put it there.
 ///
 /// Refused as [`placement`] and [`master_pair`] refuse.
-pub fn master_spline(pair: &Pair, form: Form, angle: f64) -> Result<MasterSpline, Error> {
-    let placement = placement(pair.first.outline.teeth(), form, angle)?;
-    let (mut keyed, shaft_arc, hub_arc) = master_pair(pair, form, placement.tooth)?;
+pub fn master_spline(pair: &Pair, form: Form, angle: f64) -> crate::Result<MasterSpline> {
+    master_spline_typed(pair, form, angle)
+        .map_err(|e| SolidError::teeth("teeth::master_spline::master_spline", e))
+}
+
+/// [`master_spline`] with its failure as a [`TeethFailure`], for the tooth module's own callers.
+pub(crate) fn master_spline_typed(
+    pair: &Pair,
+    form: Form,
+    angle: f64,
+) -> Result<MasterSpline, TeethFailure> {
+    let placement = placement_typed(pair.first.outline.teeth(), form, angle)?;
+    let (mut keyed, shaft_arc, hub_arc) = master_pair_typed(pair, form, placement.tooth)?;
     let turn = placement.turn;
-    keyed.first.outline = turned(&keyed.first.outline, turn)?;
-    keyed.second.outline = turned(&keyed.second.outline, turn)?;
+    keyed.first.outline = turned_typed(&keyed.first.outline, turn)?;
+    keyed.second.outline = turned_typed(&keyed.second.outline, turn)?;
     let moved = |s: Span| Span {
         radius: s.radius,
         start: s.start + turn,

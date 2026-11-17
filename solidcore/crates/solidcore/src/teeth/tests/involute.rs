@@ -7,10 +7,14 @@
 
 use std::f64::consts::{PI, TAU};
 
-use super::common::Dice;
-use crate::teeth::involute::{hub_for, inv, spline_pair, External, Fit, Internal};
-use crate::teeth::outline::rotated;
-use crate::teeth::{Error, Gaps, Material, Outline, Pair, Part, Piece, Point, Role};
+use super::basics::old_sampled;
+use super::common::{failure, lift, not_proved, operation, typed_why, why, Dice};
+use crate::blend::fillet_section::interval::Ivl;
+use crate::error::teeth::{TeethFailure, Why, FILLET_SEPARATION};
+use crate::teeth::bound::Bend;
+use crate::teeth::involute::{hub_for, inv, spline_pair, External, Fillet, Fit, Internal, Wedge};
+use crate::teeth::outline::{rotated, sampled};
+use crate::teeth::{Gaps, Material, Outline, Pair, Part, Piece, Point, Role};
 
 fn shaft_of(module: f64, teeth: u32, shift: f64) -> External {
     External {
@@ -83,7 +87,7 @@ fn dist(a: Point, b: Point) -> f64 {
 }
 
 #[test]
-fn the_circles_of_a_plain_shaft() -> Result<(), Error> {
+fn the_circles_of_a_plain_shaft() -> crate::Result<()> {
     let g = shaft_of(2.0, 20, 0.0);
     assert!((g.pitch_radius()? - 20.0).abs() < 1e-12);
     assert!((g.base_radius()? - 20.0 * 20f64.to_radians().cos()).abs() < 1e-12);
@@ -134,7 +138,7 @@ fn check_chain(name: &str, outline: &Outline) {
 }
 
 #[test]
-fn every_outline_is_a_closed_chain_between_root_and_tip() -> Result<(), Error> {
+fn every_outline_is_a_closed_chain_between_root_and_tip() -> crate::Result<()> {
     for (name, e) in cases() {
         let outline = e.outline(1e-6)?;
         check_chain(name, &outline);
@@ -175,7 +179,7 @@ fn every_outline_is_a_closed_chain_between_root_and_tip() -> Result<(), Error> {
 }
 
 #[test]
-fn the_flank_is_the_involute_of_the_base_circle() -> Result<(), Error> {
+fn the_flank_is_the_involute_of_the_base_circle() -> crate::Result<()> {
     for (name, e) in cases() {
         let outline = e.outline(1e-3)?;
         let (r, rb) = (e.pitch_radius()?, e.base_radius()?);
@@ -211,7 +215,7 @@ fn the_flank_is_the_involute_of_the_base_circle() -> Result<(), Error> {
 }
 
 #[test]
-fn the_fillet_runs_into_the_flank_smoothly_unless_the_tooth_is_undercut() -> Result<(), Error> {
+fn the_fillet_runs_into_the_flank_smoothly_unless_the_tooth_is_undercut() -> crate::Result<()> {
     for (name, e) in cases() {
         let outline = e.outline(1e-8)?;
         let [Piece::Curve { points: fillet, .. }, Piece::Curve { points: flank, .. }, ..] =
@@ -349,7 +353,7 @@ impl Rack {
 }
 
 #[test]
-fn an_external_tooth_is_exactly_what_the_rack_leaves() -> Result<(), Error> {
+fn an_external_tooth_is_exactly_what_the_rack_leaves() -> crate::Result<()> {
     for (name, e) in cases() {
         let rack = Rack::of(&e);
         let outline = e.outline(2e-3)?;
@@ -455,7 +459,7 @@ fn fit() -> Fit {
 }
 
 #[test]
-fn an_internal_outline_is_a_closed_chain_with_round_corners_that_touch() -> Result<(), Error> {
+fn an_internal_outline_is_a_closed_chain_with_round_corners_that_touch() -> crate::Result<()> {
     for rho in [0.3, 0.0, 0.05] {
         let hub = hub_for(
             &spline_shaft(),
@@ -521,7 +525,7 @@ fn an_internal_outline_is_a_closed_chain_with_round_corners_that_touch() -> Resu
 }
 
 #[test]
-fn a_hub_follows_its_shaft() -> Result<(), Error> {
+fn a_hub_follows_its_shaft() -> crate::Result<()> {
     let shaft = spline_shaft();
     let hub = hub_for(&shaft, &fit())?;
     assert_eq!(
@@ -561,7 +565,7 @@ fn a_hub_follows_its_shaft() -> Result<(), Error> {
 }
 
 #[test]
-fn internal_teeth_that_cannot_be_made_are_refused() -> Result<(), Error> {
+fn internal_teeth_that_cannot_be_made_are_refused() -> crate::Result<()> {
     let ok = hub_for(&spline_shaft(), &fit())?;
     assert!(ok.outline(1e-3).is_ok());
     assert!(Internal {
@@ -615,11 +619,8 @@ fn internal_teeth_that_cannot_be_made_are_refused() -> Result<(), Error> {
 // A tooth cut through at its root
 // -------------------------------------------------------------------------------------------------
 
-const CUT_THROUGH: &str =
-    "the undercut would cut the tooth through at its root: its two root fillets would meet";
-
 fn cut_through(e: &External) -> bool {
-    matches!(e.outline(1e-3), Err(Error::Invalid { why }) if why == CUT_THROUGH)
+    why(&e.outline(1e-3)) == Some(Why::CutThrough)
 }
 
 /// A deeply undercut tooth whose two root fillets would cut through each other is refused, exactly
@@ -627,7 +628,7 @@ fn cut_through(e: &External) -> bool {
 /// rack never reaches the middle of the tooth; a little more, it passes through it. Undercut teeth
 /// that still stand (the cases above) are cut.
 #[test]
-fn a_tooth_the_rack_would_cut_through_at_its_root_is_refused_exactly_there() -> Result<(), Error> {
+fn a_tooth_the_rack_would_cut_through_at_its_root_is_refused_exactly_there() -> crate::Result<()> {
     let families = [
         External {
             pressure_angle: 14.5,
@@ -792,10 +793,7 @@ fn an_undercut_tooth_cut_through_at_its_root_is_refused_and_no_accepted_outline_
                 thinning,
                 ..twelve_crossings
             };
-            assert!(
-                matches!(e.outline(2e-3), Err(Error::Invalid { why }) if why.contains("cut the tooth through")),
-                "{e:?}"
-            );
+            assert_eq!(why(&e.outline(2e-3)), Some(Why::CutThrough), "{e:?}");
         }
     }
     // Ordinary proportions, few teeth, drawn back: whatever is accepted stands.
@@ -874,7 +872,7 @@ fn an_undercut_tooth_cut_through_at_its_root_is_refused_and_no_accepted_outline_
 /// clearance lets it. Small rounds leave the side play asked for.
 #[test]
 fn a_hub_whose_root_rounds_would_reach_the_shafts_tips_is_refused_exactly_there(
-) -> Result<(), Error> {
+) -> crate::Result<()> {
     let shaft = spline_shaft();
     for (side, tip) in [(0.0, 0.05), (0.02, 0.05), (0.06, 0.1)] {
         let fit = |round: f64| Fit {
@@ -919,10 +917,7 @@ fn a_hub_whose_root_rounds_would_reach_the_shafts_tips_is_refused_exactly_there(
             );
         }
         let refused = hub_for(&shaft, &fit(fits + 2e-3));
-        assert!(
-            matches!(refused, Err(Error::Invalid { why }) if why.contains("tip corners")),
-            "{refused:?}"
-        );
+        assert_eq!(why(&refused), Some(Why::HubRoundsReachTips), "{refused:?}");
         // A hub made by hand with rounds a little past the limit, turned as far as it goes: the
         // rounds are in the shaft's tip corners.
         let hub = Internal {
@@ -945,4 +940,610 @@ fn a_hub_whose_root_rounds_would_reach_the_shafts_tips_is_refused_exactly_there(
         );
     }
     Ok(())
+}
+
+// -------------------------------------------------------------------------------------------------
+// The root fillets proved apart
+// -------------------------------------------------------------------------------------------------
+
+/// The corpus of the proofs' oracles: module 1, addendum 1, dedendum 1.25, no thinning, and every
+/// count of teeth, pressure angle, shift and tool tip radius of the lists below (880 teeth).
+fn corpus() -> Vec<External> {
+    let mut out = Vec::new();
+    for teeth in [6, 7, 8, 9, 10, 12, 15, 20, 30, 50, 80] {
+        for pressure_angle in [14.5, 20.0, 25.0, 30.0] {
+            for shift in [-0.8, -0.4, 0.0, 0.4, 0.8] {
+                for tool_tip_radius in [0.0, 0.1, 0.25, 0.4] {
+                    out.push(External {
+                        module: 1.0,
+                        teeth,
+                        pressure_angle,
+                        addendum: 1.0,
+                        dedendum: 1.25,
+                        shift,
+                        tool_tip_radius,
+                        thinning: 0.0,
+                    });
+                }
+            }
+        }
+    }
+    out
+}
+
+/// The old `Cut::fillet_angles`, letter for letter over the hook's point function: the smallest
+/// and the largest angle from the middle of the tooth of the points of its upper root fillet,
+/// sampled at 256 steps and refined by thirds around the extreme step.
+fn old_fillet_angles(fillet: &Fillet) -> (f64, f64) {
+    const STEPS: u32 = 256;
+    let angle = |phi: f64| {
+        let [x, y] = fillet.point(phi);
+        y.atan2(x)
+    };
+    let at = |i: u32| {
+        fillet.phi_root + (fillet.phi_join - fillet.phi_root) * f64::from(i) / f64::from(STEPS)
+    };
+    // The extreme among the steps, then closer between its neighbours (the curve is smooth
+    // there).
+    let extreme = |sign: f64| {
+        let (mut best, mut best_i) = (f64::INFINITY, 0);
+        for i in 0..=STEPS {
+            let value = sign * angle(at(i));
+            if value < best {
+                (best, best_i) = (value, i);
+            }
+        }
+        let (mut lo, mut hi) = (at(best_i.saturating_sub(1)), at((best_i + 1).min(STEPS)));
+        for _ in 0..100 {
+            let (a, b) = (lo + (hi - lo) / 3.0, hi - (hi - lo) / 3.0);
+            if sign * angle(a) < sign * angle(b) {
+                hi = b;
+            } else {
+                lo = a;
+            }
+        }
+        sign * best.min(sign * angle(0.5 * (lo + hi)))
+    };
+    (extreme(1.0), extreme(-1.0))
+}
+
+/// What a test of the root fillets decides.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Decision {
+    Kept,
+    CutThrough,
+    FilletsCross,
+    NotProved,
+    Other,
+}
+
+/// The proof's decision on a fillet.
+fn proved(fillet: &Fillet) -> Decision {
+    match fillet.separation() {
+        Ok(()) => Decision::Kept,
+        Err(TeethFailure::Invalid(Why::CutThrough)) => Decision::CutThrough,
+        Err(TeethFailure::Invalid(Why::FilletsCross)) => Decision::FilletsCross,
+        Err(TeethFailure::NotProved { what, .. }) if what == FILLET_SEPARATION => {
+            Decision::NotProved
+        }
+        Err(_) => Decision::Other,
+    }
+}
+
+/// The proof that the root fillets stay apart decides as the old sampling did wherever the old
+/// margin (the least angle of the fillet from the middle of the tooth or from the middle of the
+/// space) is at least 1e-9, and never leaves such a fillet unproved. Fillets nearer the edge than
+/// that are only counted.
+#[test]
+fn the_fillet_proof_decides_as_the_old_sampling_did() {
+    let (mut checked, mut differ, mut unproved, mut near) = (0, 0, 0, 0);
+    let mut first = None;
+    for e in corpus() {
+        // Refused before the fillet's stretch is known: nothing to compare.
+        let Ok(fillet) = e.fillet() else { continue };
+        checked += 1;
+        let (lowest, highest) = old_fillet_angles(&fillet);
+        let beta = PI / fillet.z;
+        let old = if !(lowest > 0.0) {
+            Decision::CutThrough
+        } else if !(highest < beta) {
+            Decision::FilletsCross
+        } else {
+            Decision::Kept
+        };
+        let margin = lowest.min(beta - highest);
+        let new = proved(&fillet);
+        if !(margin.abs() >= 1e-9) {
+            near += 1;
+            continue;
+        }
+        if new == Decision::NotProved {
+            unproved += 1;
+        } else if new != old {
+            differ += 1;
+        }
+        // The old sampling never leaves a fillet unproved, so a NotProved always differs.
+        if new != old {
+            first
+                .get_or_insert_with(|| format!("{e:?}: old {old:?}, new {new:?}, margin {margin}"));
+        }
+    }
+    assert!(
+        checked > 0 && near < 880,
+        "checked {checked}, near the edge {near}"
+    );
+    assert_eq!(
+        (differ, unproved),
+        (0, 0),
+        "near the edge: {near} of {checked}; first: {first:?}"
+    );
+}
+
+/// Teeth whose root fillet reaches the root circle just short of the middle of the space, by the
+/// relative margins 1e-6, 1e-8 and 1e-12 (the rack's tip round chosen so that its centre stands
+/// at `pitch/2 (1 - eps)`): the first two are made; the last is made or named unproved, never
+/// refused as crossing.
+#[test]
+fn a_fillet_near_the_edge_is_proved_or_named_unproved() -> crate::Result<()> {
+    for (teeth, pressure_angle) in [(24, 20.0), (30, 25.0), (40, 30.0)] {
+        for eps in [1e-6, 1e-8, 1e-12] {
+            let (m, z) = (1.0, f64::from(teeth));
+            let (sin, cos) = f64::to_radians(pressure_angle).sin_cos();
+            // No shift and no thinning: the tooth is half the pitch thick.
+            let half_pitch = PI * m / 2.0;
+            let s = half_pitch;
+            let depth = 1.25 * m;
+            let rho = ((half_pitch * (1.0 - eps) - s / 2.0) * cos - depth * sin) / (1.0 - sin);
+            let e = External {
+                module: m,
+                teeth,
+                pressure_angle,
+                addendum: 1.0,
+                dedendum: 1.25,
+                shift: 0.0,
+                tool_tip_radius: rho / m,
+                thinning: 0.0,
+            };
+            // The fillet reaches the root circle at pi/z (1 - eps), as asked.
+            let fillet = lift(e.fillet())?;
+            let margin = (PI / z - fillet.phi_root) / (PI / z);
+            assert!(
+                (margin / eps - 1.0).abs() < 0.05,
+                "{teeth} {pressure_angle} {eps}: margin {margin}"
+            );
+            let made = e.outline(1e-4);
+            if eps >= 1e-8 {
+                assert!(
+                    made.is_ok(),
+                    "{teeth} {pressure_angle} {eps}: {:?}",
+                    made.err()
+                );
+            } else {
+                assert!(
+                    made.is_ok() || not_proved(&made) == Some(FILLET_SEPARATION),
+                    "{teeth} {pressure_angle} {eps}: {:?}",
+                    made.err()
+                );
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Whether `value` lies in `range`, allowing `slack`.
+fn holds(range: Ivl, value: f64, slack: f64) -> bool {
+    range.lo - slack <= value && value <= range.hi + slack
+}
+
+/// The first and second derivative of `curve` at `t` by central differences, each extrapolated
+/// from a step and its half (Richardson), at the step among `scale` times 1e-1 to 1e-4 whose two
+/// estimates agree best; with each, its own error: that disagreement plus the rounding of the
+/// points divided by the step.
+fn derivatives(curve: &dyn Fn(f64) -> Point, t: f64, scale: f64) -> [(Point, f64); 2] {
+    let p = curve(t);
+    let size = 1.0 + p[0].abs() + p[1].abs();
+    let mut best = [([f64::NAN; 2], f64::INFINITY); 2];
+    for h in [1e-1, 1e-2, 1e-3, 1e-4].map(|k| k * scale) {
+        let (a, b) = (curve(t + h), curve(t - h));
+        let (c, d) = (curve(t + h / 2.0), curve(t - h / 2.0));
+        let first = |i: usize| {
+            let (wide, narrow) = ((a[i] - b[i]) / (2.0 * h), (c[i] - d[i]) / h);
+            ((4.0 * narrow - wide) / 3.0, (narrow - wide).abs())
+        };
+        let second = |i: usize| {
+            let wide = (a[i] - 2.0 * p[i] + b[i]) / (h * h);
+            let narrow = (c[i] - 2.0 * p[i] + d[i]) / (h * h / 4.0);
+            ((4.0 * narrow - wide) / 3.0, (narrow - wide).abs())
+        };
+        let (f0, f1, s0, s1) = (first(0), first(1), second(0), second(1));
+        let found = [
+            ([f0.0, f1.0], f0.1.max(f1.1) + 1e-14 * size / h),
+            ([s0.0, s1.0], s0.1.max(s1.1) + 1e-13 * size / (h * h)),
+        ];
+        for (kept, new) in best.iter_mut().zip(found) {
+            if new.1 < kept.1 {
+                *kept = new;
+            }
+        }
+    }
+    best
+}
+
+/// The enclosures the fillet's proof stands on hold the fillet: for 20 teeth of the corpus and 64
+/// stretches of each fillet (some from its first end, some to its last, some the whole), the
+/// enclosures of both tests (the centred form, and the end forms where the stretch has an end of
+/// the fillet) contain the tests' values at 1,000 points of the stretch, and the fillet's bend
+/// (its first and second derivative boxes) contains the central differences there, with a slack
+/// of 1e-6 of the box's size plus 1e-9 and the differences' own estimated error.
+#[test]
+fn the_fillet_enclosures_hold_every_dense_point() {
+    let fillets: Vec<Fillet> = corpus().iter().filter_map(|e| e.fillet().ok()).collect();
+    let every = (fillets.len() / 20).max(1);
+    let mut dice = Dice(5);
+    let mut teeth = 0;
+    for fillet in fillets.iter().step_by(every).take(20) {
+        teeth += 1;
+        let (lo, hi) = (
+            fillet.phi_root.min(fillet.phi_join),
+            fillet.phi_root.max(fillet.phi_join),
+        );
+        let beta = PI / fillet.z;
+        let curve = |phi: f64| fillet.point(phi);
+        for k in 0..64 {
+            let mut pick = || lo + (hi - lo) * (dice.roll() % 1_000_001) as f64 / 1e6;
+            let (a, b) = (pick(), pick());
+            let (p0, p1) = match k % 8 {
+                0 => (lo, a.max(b)),
+                1 => (a.min(b), hi),
+                2 => (lo, hi),
+                _ => (a.min(b), a.max(b)),
+            };
+            if p1 <= p0 {
+                continue;
+            }
+            let (start, end) = (p0 == lo, p1 == hi);
+            let above = fillet.enclosure(Wedge::AboveMiddle, p0, p1, start, end);
+            let below = fillet.enclosure(Wedge::BelowSpace, p0, p1, start, end);
+            let bend = fillet.bend(p0, p1);
+            for j in 0..1000 {
+                let t = p0 + (p1 - p0) * f64::from(j) / 999.0;
+                let [x, y] = curve(t);
+                let slack = 1e-12 * (1.0 + x.abs() + y.abs());
+                let across = beta.sin() * x - beta.cos() * y;
+                assert!(
+                    holds(above, y, slack) && holds(below, across, slack),
+                    "{fillet:?} [{p0}, {p1}] at {t}: {y} in {above:?}, {across} in {below:?}"
+                );
+                let scale = ((fillet.r * t - fillet.uc).hypot(fillet.vc) / fillet.r).min(1.0);
+                let [(first, first_error), (second, second_error)] = derivatives(&curve, t, scale);
+                let fits = |i: usize| {
+                    let (f, s) = (bend.first[i], bend.second[i]);
+                    holds(f, first[i], 1e-6 * f.mag() + 1e-9 + first_error)
+                        && holds(s, second[i], 1e-6 * s.mag() + 1e-9 + second_error)
+                };
+                assert!(
+                    fits(0) && fits(1),
+                    "{fillet:?} [{p0}, {p1}] at {t}: {first:?} ({first_error}) and {second:?} \
+                     ({second_error}) against {bend:?}"
+                );
+            }
+        }
+    }
+    assert_eq!(teeth, 20, "of {} fillets", fillets.len());
+}
+
+/// The deeply undercut teeth of the cut-through corpus are refused for the same reason, in the
+/// same words, by the function asked, and the proof alone gives that reason.
+#[test]
+fn a_deeply_undercut_tooth_is_refused_in_the_same_words() {
+    let twelve_crossings = External {
+        module: 2.0,
+        teeth: 6,
+        pressure_angle: 14.5,
+        addendum: 1.0,
+        dedendum: 1.25,
+        shift: -0.6,
+        tool_tip_radius: 0.0,
+        thinning: 0.0,
+    };
+    for tool_tip_radius in [0.0, 0.3] {
+        for thinning in [0.0, 0.1] {
+            for tolerance in [2e-3, 1e-5] {
+                let e = External {
+                    tool_tip_radius,
+                    thinning,
+                    ..twelve_crossings
+                };
+                let refused = e.outline(tolerance);
+                assert_eq!(why(&refused), Some(Why::CutThrough), "{e:?}");
+                assert_eq!(
+                    failure(&refused)
+                        .as_ref()
+                        .map(ToString::to_string)
+                        .as_deref(),
+                    Some(
+                        "the undercut would cut the tooth through at its root: its two root \
+                         fillets would meet"
+                    ),
+                    "{e:?}"
+                );
+                assert_eq!(
+                    operation(&refused),
+                    Some("teeth::involute::External::outline"),
+                    "{e:?}"
+                );
+                assert_eq!(
+                    typed_why(&e.fillet().and_then(|f| f.separation())),
+                    Some(Why::CutThrough),
+                    "{e:?}"
+                );
+            }
+        }
+    }
+}
+
+// -------------------------------------------------------------------------------------------------
+// The chords of flanks and fillets proved
+// -------------------------------------------------------------------------------------------------
+
+/// What the chord oracle counts over its curves.
+#[derive(Debug, Default)]
+struct Chains {
+    /// Curves compared (those the old sampling made).
+    curves: usize,
+    /// Curves where a proved chain has fewer points than the old one.
+    coarser: usize,
+    /// Curves where a proved chain has more points than its limit, 4 old + 16.
+    too_many: usize,
+    /// Curves the old sampling made and the proved one refused.
+    refused: usize,
+    /// Curves whose proved chain is not the old one.
+    grew: usize,
+    /// The largest growth, proved points over old points.
+    largest: f64,
+    /// The first curve that broke a rule.
+    first: Option<String>,
+}
+
+/// The points of the curve a chain is checked against.
+const DENSE: usize = 20_000;
+
+/// How far `p` is from the chord between `a` and `b`.
+fn off_chord(p: Point, a: Point, b: Point) -> f64 {
+    let (ex, ey) = (b[0] - a[0], b[1] - a[1]);
+    let length2 = ex * ex + ey * ey;
+    if length2 > 0.0 {
+        let t = (((p[0] - a[0]) * ex + (p[1] - a[1]) * ey) / length2).clamp(0.0, 1.0);
+        dist(p, [a[0] + t * ex, a[1] + t * ey])
+    } else {
+        dist(p, a)
+    }
+}
+
+/// The distance from `p` to the polyline `line`, looking at its chords from `*from` on, as long as
+/// a nearer one may follow, and moving `*from` to the nearest: points taken along the curve in
+/// order meet the chords of a chain of the same curve in order.
+fn to_polyline(p: Point, line: &[Point], from: &mut usize) -> f64 {
+    const AHEAD: usize = 16;
+    let chords = line.len().saturating_sub(1);
+    if chords == 0 {
+        return line.first().map_or(f64::INFINITY, |&a| dist(p, a));
+    }
+    let (mut best, mut best_at) = (f64::INFINITY, *from);
+    let mut j = *from;
+    while j < chords && j < best_at + AHEAD {
+        let d = off_chord(p, line[j], line[j + 1]);
+        if d < best {
+            (best, best_at) = (d, j);
+        }
+        j += 1;
+    }
+    *from = best_at;
+    best
+}
+
+/// Asserts that `chain`, made for the curve `at` over `[from, to]`, is within `tolerance` of it
+/// both ways, against `DENSE` points of the curve: each dense point within the tolerance of the
+/// chain, and the points at a quarter, a half and three quarters of each chord within the
+/// tolerance of the dense points' polyline plus that polyline's own sag; each allowing for the
+/// rounding of the points.
+fn assert_within(
+    name: &str,
+    chain: &[Point],
+    at: &dyn Fn(f64) -> Point,
+    from: f64,
+    to: f64,
+    tolerance: f64,
+) {
+    let dense: Vec<Point> = (0..=DENSE)
+        .map(|i| at(from + (to - from) * i as f64 / DENSE as f64))
+        .collect();
+    let size = dense.iter().flatten().fold(0.0_f64, |m, v| m.max(v.abs()));
+    let slack = 1e-12 * (1.0 + size);
+    // A chord's sag is about an eighth of the second difference of its neighbours; a quarter is
+    // taken.
+    let sag = dense
+        .windows(3)
+        .map(|w| (w[0][0] - 2.0 * w[1][0] + w[2][0]).hypot(w[0][1] - 2.0 * w[1][1] + w[2][1]))
+        .fold(0.0_f64, f64::max)
+        / 4.0;
+    let mut k = 0;
+    for (i, &p) in dense.iter().enumerate() {
+        let d = to_polyline(p, chain, &mut k);
+        assert!(
+            d <= tolerance + slack,
+            "{name}: the dense point {i} is {d} from the chain (tolerance {tolerance})"
+        );
+    }
+    let mut k = 0;
+    for (i, pair) in chain.windows(2).enumerate() {
+        for s in [0.25, 0.5, 0.75] {
+            let c = [
+                pair[0][0] + s * (pair[1][0] - pair[0][0]),
+                pair[0][1] + s * (pair[1][1] - pair[0][1]),
+            ];
+            let d = to_polyline(c, &dense, &mut k);
+            assert!(
+                d <= tolerance + sag + slack,
+                "{name}: chord {i} at {s} is {d} from the curve (tolerance {tolerance}, sag {sag})"
+            );
+        }
+    }
+}
+
+/// One curve of the chord oracle: the old sampling against the proved one, counted, and the proved
+/// chain checked against dense points of the curve.
+fn compare_chains(
+    counts: &mut Chains,
+    name: &str,
+    at: &dyn Fn(f64) -> Point,
+    bend: &dyn Fn(f64, f64) -> Bend,
+    from: f64,
+    to: f64,
+    tolerance: f64,
+) {
+    let Ok(old) = old_sampled(at, from, to, tolerance) else {
+        return;
+    };
+    counts.curves += 1;
+    let proved = match sampled(at, bend, from, to, tolerance) {
+        Ok(proved) => proved,
+        Err(e) => {
+            counts.refused += 1;
+            counts
+                .first
+                .get_or_insert_with(|| format!("{name}: refused, {e}"));
+            return;
+        }
+    };
+    let n = old.len();
+    if proved.len() < n {
+        counts.coarser += 1;
+        counts
+            .first
+            .get_or_insert_with(|| format!("{name}: {} points, old {n}", proved.len()));
+    }
+    if proved.len() > 4 * n + 16 {
+        counts.too_many += 1;
+        counts
+            .first
+            .get_or_insert_with(|| format!("{name}: {} points, old {n}", proved.len()));
+    }
+    if proved != old {
+        counts.grew += 1;
+    }
+    counts.largest = counts.largest.max(proved.len() as f64 / n as f64);
+    assert_within(name, &proved, at, from, to, tolerance);
+}
+
+/// Every chord of an external tooth's fillet and flank and of a hub's flank is proved within the
+/// tolerance, and the proved chains are never coarser than the old sampling's (its probes still
+/// nominate, so every old split is made) and grow by at most the limits: over the 880 teeth of the
+/// corpus and the hubs of 40 of them, at 1e-3, 1e-5 and 1e-7 of the module. No curve is refused.
+/// Each proved chain is checked against 20,000 points of its curve.
+#[test]
+fn the_flank_and_fillet_chains_are_proved_and_never_coarser() -> crate::Result<()> {
+    const TOLERANCES: [f64; 3] = [1e-3, 1e-5, 1e-7];
+    let mut counts = Chains::default();
+    let mut hubs = Vec::new();
+    for e in corpus() {
+        let Ok(flank) = e.flank() else { continue };
+        let fillet = lift(e.fillet())?;
+        if hubs.len() < 40 {
+            if let Ok(hub) = hub_for(&e, &fit()) {
+                hubs.push(hub);
+            }
+        }
+        for tolerance in TOLERANCES {
+            compare_chains(
+                &mut counts,
+                &format!("the fillet of {e:?} at {tolerance}"),
+                &|phi| fillet.point(phi),
+                &|lo, hi| fillet.bend(lo, hi),
+                fillet.phi_root,
+                fillet.phi_join,
+                tolerance,
+            );
+            compare_chains(
+                &mut counts,
+                &format!("the flank of {e:?} at {tolerance}"),
+                &|v| flank.point(v),
+                &|lo, hi| flank.bend(lo, hi),
+                flank.from,
+                flank.to,
+                tolerance,
+            );
+        }
+    }
+    assert_eq!(hubs.len(), 40, "hubs of the corpus");
+    for hub in &hubs {
+        let flank = lift(hub.flank())?;
+        for tolerance in TOLERANCES {
+            compare_chains(
+                &mut counts,
+                &format!("the flank of {hub:?} at {tolerance}"),
+                &|roll| flank.point(roll),
+                &|lo, hi| flank.bend(lo, hi),
+                flank.from,
+                flank.to,
+                tolerance,
+            );
+        }
+    }
+    assert!(counts.curves > 0, "{counts:?}");
+    assert_eq!(
+        (counts.coarser, counts.too_many, counts.refused),
+        (0, 0, 0),
+        "{counts:?}"
+    );
+    Ok(())
+}
+
+/// The rounding counted for a fillet's point covers its conditioning. Where the centre of the
+/// tool's tip round lies a hair below the line of rolling, the unit vector from the point of
+/// rolling contact to that centre is ill conditioned, and the rounding of the rolling `r phi`
+/// moves the point far more than a count of operations on its size allows: the count carries the
+/// factor `1 + rho / |vc|` for it. The reference rolls with one rounding (`mul_add`), so its own
+/// error there is far below the difference measured.
+#[test]
+fn a_fillet_close_to_the_line_of_rolling_counts_its_conditioning() {
+    let fillet = |vc: f64| Fillet {
+        r: 10.0,
+        uc: 0.4,
+        vc,
+        rho: 0.3,
+        z: 20.0,
+        phi_root: 0.0,
+        phi_join: 0.1,
+    };
+    // The point as `Fillet::point` computes it, with the rolling rounded once instead of twice.
+    let reference = |f: &Fillet, phi: f64| -> Point {
+        let (du, dv) = (f.r.mul_add(phi, -f.uc), -f.vc);
+        let len = du.hypot(dv);
+        let (qu, qv) = (f.uc - f.rho * du / len, f.vc - f.rho * dv / len);
+        let (sn, cs) = phi.sin_cos();
+        let along = qu - f.r * phi;
+        [(f.r + qv) * cs - along * sn, (f.r + qv) * sn + along * cs]
+    };
+    // Angles of rolling about the one where the contact passes under the centre (`r phi = uc`).
+    let (close, steps) = (fillet(-1e-9), 200_i32);
+    let angle = |k: i32| 0.04 + 2e-11 * f64::from(k);
+    let (lo, hi) = (angle(-steps), angle(steps));
+    let mut worst = 0.0_f64;
+    for k in -steps..=steps {
+        let (p, q) = (close.point(angle(k)), reference(&close, angle(k)));
+        worst = worst.max((p[0] - q[0]).hypot(p[1] - q[1]));
+    }
+    let counted = close.bend(lo, hi).rounding;
+    assert!(worst <= counted, "moved {worst:e}, counted {counted:e}");
+    // A count that left the conditioning out (that of a fillet well below the line, whose sizes
+    // are no smaller) would be short by orders of magnitude.
+    let without = fillet(-0.9).bend(lo, hi).rounding;
+    assert!(without > 0.0 && without < 1e-12, "{without:e}");
+    assert!(
+        worst > 1e3 * without,
+        "moved {worst:e}, uncarried {without:e}"
+    );
+    // A centre on the line of rolling has no count at all: nothing is proved with it.
+    assert_eq!(fillet(0.0).bend(lo, hi).rounding, f64::INFINITY);
 }

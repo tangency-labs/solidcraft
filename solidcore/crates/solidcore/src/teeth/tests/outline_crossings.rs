@@ -5,9 +5,10 @@
 
 use std::f64::consts::{PI, TAU};
 
-use super::common::Dice;
+use super::common::{why, Dice};
+use crate::error::teeth::Why;
 use crate::teeth::mesh::{Body, Material};
-use crate::teeth::{Error, Outline, Piece, Point, Role};
+use crate::teeth::{Outline, Piece, Point, Role};
 
 fn line(from: Point, to: Point) -> Piece {
     Piece::Line {
@@ -18,7 +19,7 @@ fn line(from: Point, to: Point) -> Piece {
 }
 
 /// A closed polygon of lines as an outline of one tooth.
-fn polygon(points: &[Point]) -> Result<Outline, Error> {
+fn polygon(points: &[Point]) -> crate::Result<Outline> {
     let tooth = (0..points.len())
         .map(|i| line(points[i], points[(i + 1) % points.len()]))
         .collect();
@@ -55,8 +56,8 @@ fn crossings(points: &[Point]) -> usize {
     count
 }
 
-fn refused_as_crossing(outline: &Result<Outline, Error>) -> bool {
-    matches!(outline, Err(Error::Invalid { why }) if why.contains("cross itself"))
+fn refused_as_crossing(outline: &crate::Result<Outline>) -> bool {
+    why(outline) == Some(Why::CrossesItself)
 }
 
 #[test]
@@ -76,9 +77,7 @@ fn shapes_that_cross_themselves_or_run_the_wrong_way_are_refused() {
     let bow = [[1.0, 1.0], [-1.0, -1.0], [-1.0, 1.0], [1.0, -1.0]];
     assert!(polygon(&bow).is_err() && Body::new(bow.to_vec(), Material::Inside).is_err());
     let clockwise = [[1.0, 0.0], [0.0, -1.0], [-1.0, 0.0], [0.0, 1.0]];
-    assert!(
-        matches!(polygon(&clockwise), Err(Error::Invalid { why }) if why.contains("counter-clockwise"))
-    );
+    assert_eq!(why(&polygon(&clockwise)), Some(Why::NotCounterClockwise));
     assert!(Body::new(clockwise.to_vec(), Material::Outside).is_err());
     // A figure of eight with one loop larger, so that its area is positive: it still crosses.
     let eight = [[2.0, 2.0], [-1.0, -1.0], [-1.0, 1.0], [2.0, -2.0]];
@@ -126,7 +125,7 @@ fn shapes_that_cross_themselves_or_run_the_wrong_way_are_refused() {
 }
 
 #[test]
-fn shapes_that_only_touch_themselves_are_accepted() -> Result<(), Error> {
+fn shapes_that_only_touch_themselves_are_accepted() -> crate::Result<()> {
     // Two squares that touch at one corner, run as one chain through that corner twice.
     let corners = [
         [0.0, 0.0],
@@ -296,7 +295,7 @@ fn random_polygons_are_judged_as_the_slow_way_judges_them() {
 }
 
 #[test]
-fn large_outlines_are_checked_in_good_time() -> Result<(), Error> {
+fn large_outlines_are_checked_in_good_time() -> crate::Result<()> {
     // One tooth of eight million points: a circle as 160 curves of 50,000 points each.
     let pieces = 160;
     let each = 50_000;

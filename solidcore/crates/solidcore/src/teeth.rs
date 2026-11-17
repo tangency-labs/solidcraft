@@ -51,6 +51,10 @@
 //! itself, so that no module hands out an outline that cannot be made. The modules refuse such
 //! numbers earlier with reasons of their own where they can.
 //!
+//! Every public function returns [`crate::Result`]; a refusal is a [`crate::SolidError::Failed`]
+//! whose reason is a [`TeethFailure`] (read it with [`crate::SolidError::teeth_failure`]) and
+//! whose operation names the function.
+//!
 //! ```
 //! use solidcore::teeth::involute::{External, Fit, hub_for, spline_pair};
 //!
@@ -82,7 +86,7 @@
 //! let gaps = spline_pair(&shaft, &fit, 1e-6)?.through_a_cycle(4, 0.5)?;
 //! let least = gaps.least.map(|g| g.distance).unwrap_or(f64::NAN);
 //! assert!((least - 0.06 * 30f64.to_radians().cos() / 2.0).abs() < 1e-5);
-//! # Ok::<(), solidcore::teeth::Error>(())
+//! # Ok::<(), solidcore::SolidError>(())
 //! ```
 //!
 //! Not upstream: SolidCraft's tooth outlines, kernel primitives because they compute geometry any
@@ -93,6 +97,7 @@
 
 #![allow(clippy::neg_cmp_op_on_partial_ord)] // NaN-refusing range tests, kept as written
 
+pub(crate) mod bound;
 pub mod bspline;
 pub mod fit;
 pub mod involute;
@@ -106,65 +111,23 @@ pub mod straight;
 #[cfg(test)]
 mod tests;
 
+pub use crate::error::teeth::{PlanRefusal, TeethFailure, Why};
 pub use mesh::Material;
 pub use outline::{Outline, Piece, Point, Role};
 pub use pair::{Gaps, Motion, Pair, Part};
 
-/// Why a set of numbers gives no teeth.
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub enum Error {
-    /// A number is not finite or lies outside what is accepted: it must be above `above` and at
-    /// most `up_to`.
-    OutOfRange {
-        /// Which number.
-        what: &'static str,
-        /// What was given.
-        value: f64,
-        /// It must be above this.
-        above: f64,
-        /// It must be at most this.
-        up_to: f64,
-    },
-    /// Each number is acceptable, but together they do not make teeth.
-    Invalid {
-        /// What goes wrong, in plain words.
-        why: &'static str,
-    },
-}
-
-impl std::fmt::Display for Error {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Error::OutOfRange {
-                what,
-                value,
-                above,
-                up_to,
-            } => {
-                write!(
-                    f,
-                    "{what} is {value}; it must be above {above} and at most {up_to}"
-                )
-            }
-            Error::Invalid { why } => f.write_str(why),
-        }
-    }
-}
-
-impl std::error::Error for Error {}
-
-/// `value` if it is finite, above `above` and at most `up_to`; otherwise [`Error::OutOfRange`]
-/// naming `what`.
+/// `value` if it is finite, above `above` and at most `up_to`; otherwise
+/// [`TeethFailure::OutOfRange`] naming `what`.
 pub(crate) fn in_range(
     what: &'static str,
     value: f64,
     above: f64,
     up_to: f64,
-) -> Result<f64, Error> {
+) -> Result<f64, TeethFailure> {
     if value.is_finite() && value > above && value <= up_to {
         Ok(value)
     } else {
-        Err(Error::OutOfRange {
+        Err(TeethFailure::OutOfRange {
             what,
             value,
             above,
@@ -173,13 +136,13 @@ pub(crate) fn in_range(
     }
 }
 
-/// `value` if it is finite, at least zero and at most `up_to`; otherwise [`Error::OutOfRange`]
-/// naming `what`.
-pub(crate) fn zero_up_to(what: &'static str, value: f64, up_to: f64) -> Result<f64, Error> {
+/// `value` if it is finite, at least zero and at most `up_to`; otherwise
+/// [`TeethFailure::OutOfRange`] naming `what` (above 0).
+pub(crate) fn zero_up_to(what: &'static str, value: f64, up_to: f64) -> Result<f64, TeethFailure> {
     if value.is_finite() && value >= 0.0 && value <= up_to {
         Ok(value)
     } else {
-        Err(Error::OutOfRange {
+        Err(TeethFailure::OutOfRange {
             what,
             value,
             above: 0.0,

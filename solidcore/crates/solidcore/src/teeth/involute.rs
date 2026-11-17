@@ -10,15 +10,29 @@
 //! An internal tooth space ([`Internal`]) is formed: the same involute flanks, with circular rounds
 //! at the root corners, as a broach leaves them.
 //!
+//! What is decided about a tooth is proved, not sampled: the root fillets are proved apart (each
+//! stays strictly between the middle of its tooth and the middle of the space), and every chord of
+//! a flank or fillet is proved within the tolerance of the curve (`outline::sampled`), each in
+//! rounded intervals with the rounding of the computed points counted.
+//!
 //! Lengths are millimetres. Heights of the tooth are given in modules, as usual for involute
 //! splines.
 
 use std::f64::consts::{FRAC_PI_2, PI, TAU};
 
+use crate::blend::fillet_section::interval::Ivl;
+use crate::error::teeth::{TeethFailure, Why, FILLET_SEPARATION};
+use crate::geom::certified::{gamma, next_up};
+use crate::nurbs::math::UNIT;
+use crate::teeth::bound::{
+    atan_over, exact, half_width, magnitude, neg, pi, rotated_ivl, sqr, taylor, taylor_from_end,
+    Bend,
+};
 use crate::teeth::mesh::Material;
 use crate::teeth::outline::{checked_tolerance, on_circle, sampled, Outline, Piece, Point, Role};
 use crate::teeth::pair::{Motion, Pair, Part};
-use crate::teeth::{in_range, zero_up_to, Error, MAX_LENGTH, MAX_TEETH};
+use crate::teeth::{in_range, zero_up_to, MAX_LENGTH, MAX_TEETH};
+use crate::SolidError;
 
 /// The involute function `tan a - a` of an angle in radians.
 pub fn inv(angle: f64) -> f64 {
@@ -42,10 +56,10 @@ struct Base {
     inv: f64,
 }
 
-fn base(module: f64, teeth: u32, pressure_angle: f64) -> Result<Base, Error> {
+fn base(module: f64, teeth: u32, pressure_angle: f64) -> Result<Base, TeethFailure> {
     let m = in_range("module", module, 0.0, 1000.0)?;
     if !(3..=MAX_TEETH).contains(&teeth) {
-        return Err(Error::OutOfRange {
+        return Err(TeethFailure::OutOfRange {
             what: "teeth",
             value: f64::from(teeth),
             above: 2.0,
@@ -77,6 +91,19 @@ impl Base {
         } else {
             None
         }
+    }
+}
+
+/// The larger of `|lo|` and `|hi|`; NaN when either is NaN (so that a bound built on it is never
+/// finite by mistake).
+fn size(lo: f64, hi: f64) -> f64 {
+    let (a, b) = (lo.abs(), hi.abs());
+    if a >= b {
+        a
+    } else if b > a {
+        b
+    } else {
+        f64::NAN
     }
 }
 
@@ -134,35 +161,397 @@ struct Cut {
     tip_half_angle: f64,
 }
 
-const NO_JOIN: Error = Error::Invalid {
-    why: "the root fillet and the flank would not meet",
-};
+const NO_JOIN: TeethFailure = TeethFailure::Invalid(Why::FilletMissesFlank);
 
-impl Cut {
+/// The most stretches one test of [`Fillet::separation`] looks at before it gives up.
+const MAX_SEPARATION_PIECES: usize = 4096;
+
+/// The upper flank of an external tooth: the involute that the rack's straight flank cuts, by the
+/// height `v` in the rack of its cutting point.
+#[derive(Clone, Copy, Debug)]
+pub(super) struct Flank {
+    /// The radius of the pitch circle.
+    pub(super) r: f64,
+    /// The thickness of the tooth on the pitch circle.
+    pub(super) s: f64,
+    /// The sine and cosine of the pressure angle.
+    pub(super) sin: f64,
+    /// See `sin`.
+    pub(super) cos: f64,
+    /// The height in the rack where the flank begins (where it meets the fillet).
+    pub(super) from: f64,
+    /// The height in the rack where the flank ends (on the tip circle).
+    pub(super) to: f64,
+}
+
+impl Flank {
     /// The point of the upper flank cut by the point of the rack's flank at height `v` above the
     /// line of rolling.
     ///
     /// That point of the rack touches the tooth when its normal passes through the point of rolling
     /// contact, which is at the angle `phi` below.
-    fn flank(&self, v: f64) -> Point {
-        let b = &self.base;
-        let phi = (self.s / 2.0 - v / (b.sin * b.cos)) / b.r;
+    pub(super) fn point(&self, v: f64) -> Point {
+        let phi = (self.s / 2.0 - v / (self.sin * self.cos)) / self.r;
         let (sn, cs) = phi.sin_cos();
-        let along = v * b.cos / b.sin;
-        [(b.r + v) * cs - along * sn, (b.r + v) * sn + along * cs]
+        let along = v * self.cos / self.sin;
+        [
+            (self.r + v) * cs - along * sn,
+            (self.r + v) * sn + along * cs,
+        ]
     }
 
+    /// What the flank does over the heights `[lo, hi]`, for `outline::sampled`.
+    ///
+    /// The point is `R(phi(v)) l(v)` with `l(v) = (r + v, v cot)`, `phi(v) = (s/2 - v/(sin cos))/r`
+    /// and `k = 1/(r sin cos)`, so `P' = R(phi) (1 + k v cot, cot - k (r + v))` and
+    /// `P'' = R(phi) (2 k cot - k^2 (r + v), -2 k - k^2 v cot)`, each enclosed in rounded
+    /// intervals over the heights (the doubles `r`, `s`, `sin`, `cos` are the curve's definition);
+    /// the size of `P''` is that of the unrotated vector.
+    ///
+    /// The rounding of a computed point, with `V` the larger of `|lo|`, `|hi|` and
+    /// `A = r + V + V cot`: `phi` is four operations, `gamma(4) (|s|/2 + V/(sin cos))/r`; `sin`,
+    /// `cos` are libm, two ulps each (`4u`, the values being at most 1); the point,
+    /// `(r + v) cos - along sin` and its pair with `along = v cos / sin`, is at most sixteen
+    /// operations on terms of size at most `A`; the factor 2 covers both coordinates:
+    /// `2 (A (dphi + 4u) + gamma(16) A)`, computed in rounded intervals and taken at its upper end.
+    pub(super) fn bend(&self, lo: f64, hi: f64) -> Bend {
+        let (r, sin, cos) = (exact(self.r), exact(self.sin), exact(self.cos));
+        let (one, two) = (exact(1.0), exact(2.0));
+        let v = Ivl::new(lo, hi);
+        let sc = sin * cos;
+        let k = one / (r * sc);
+        let cot = cos / sin;
+        let phi = (exact(self.s) * exact(0.5) - v / sc) / r;
+        let rv = r + v;
+        let first = [one + k * v * cot, cot - k * rv];
+        let second = [two * k * cot - sqr(k) * rv, neg(two * k) - sqr(k) * v * cot];
+        let most = exact(size(lo, hi));
+        let a = r + most + most * cot;
+        let dphi = exact(gamma(4)) * (exact(self.s.abs()) * exact(0.5) + most / sc) / r;
+        let rounding = two * (a * (dphi + exact(4.0 * UNIT)) + exact(gamma(16)) * a);
+        Bend {
+            first: rotated_ivl(phi, first),
+            second: rotated_ivl(phi, second),
+            second_size: magnitude(second),
+            rounding: rounding.hi,
+        }
+    }
+}
+
+/// Which side of the wedge between the middle of a tooth and the middle of the next space a test
+/// of [`Fillet::separation`] keeps the upper root fillet on.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum Wedge {
+    /// Above the middle of the tooth: every angle above 0, else the two fillets of one tooth
+    /// meet. The test's function is the height `y` of the fillet's point.
+    AboveMiddle,
+    /// Below the middle of the space: every angle below `pi / z`, else the fillets of neighbouring
+    /// teeth cross. The test's function is `sin(pi/z) x - cos(pi/z) y`.
+    BelowSpace,
+}
+
+/// The upper root fillet of an external tooth: what defines it and the stretch of rolling it
+/// spans.
+///
+/// The doubles `r`, `uc`, `vc` and `rho` are its definition: with `w = r phi - uc`,
+/// `len = sqrt(w^2 + vc^2)` and `lam = 1 + rho/len`, its point at the angle of rolling `phi` is
+/// `R(phi) (r + vc lam, -w lam)`.
+#[derive(Clone, Copy, Debug)]
+pub(super) struct Fillet {
+    /// The radius of the pitch circle.
+    pub(super) r: f64,
+    /// The centre of the rack's tip round, along the line of rolling.
+    pub(super) uc: f64,
+    /// The centre of the rack's tip round, across the line of rolling (below it: negative).
+    pub(super) vc: f64,
+    /// The radius of the rack's tip round.
+    pub(super) rho: f64,
+    /// The count of teeth, as a number.
+    pub(super) z: f64,
+    /// The angle of rolling at which the fillet reaches the root circle.
+    pub(super) phi_root: f64,
+    /// The angle of rolling at which the fillet meets the flank.
+    pub(super) phi_join: f64,
+}
+
+impl Fillet {
     /// The point of the upper root fillet cut by the rack's tip round at the angle of rolling
     /// `phi`: the point of the round on the line from the point of rolling contact through the
     /// round's centre, on the far side.
-    fn fillet(&self, phi: f64) -> Point {
-        let b = &self.base;
-        let (du, dv) = (b.r * phi - self.uc, -self.vc);
+    pub(super) fn point(&self, phi: f64) -> Point {
+        let (du, dv) = (self.r * phi - self.uc, -self.vc);
         let len = du.hypot(dv);
         let (qu, qv) = (self.uc - self.rho * du / len, self.vc - self.rho * dv / len);
         let (sn, cs) = phi.sin_cos();
-        let along = qu - b.r * phi;
-        [(b.r + qv) * cs - along * sn, (b.r + qv) * sn + along * cs]
+        let along = qu - self.r * phi;
+        [
+            (self.r + qv) * cs - along * sn,
+            (self.r + qv) * sn + along * cs,
+        ]
+    }
+
+    /// The fillet's point before its turn by `phi`, and the vectors that its first and second
+    /// derivatives turn, enclosed for every angle of rolling of `phi`: `q = (a, b)`,
+    /// `p1 = q' + J q` and `p2 = q'' + 2 J q' - q`, so that `P = R(phi) q`, `P' = R(phi) p1` and
+    /// `P'' = R(phi) p2` (`J` the quarter turn). With `lam' = -rho r w / len^3` and
+    /// `lam'' = -rho r^2 (vc^2 - 2 w^2) / len^5`: `q' = (vc lam', -(r lam + w lam'))` and
+    /// `q'' = (vc lam'', -(2 r lam' + w lam''))`. Every operation is a rounded interval one.
+    fn local(&self, phi: Ivl) -> [[Ivl; 2]; 3] {
+        let (r, vc, rho) = (exact(self.r), exact(self.vc), exact(self.rho));
+        let (one, two) = (exact(1.0), exact(2.0));
+        let w = r * phi - exact(self.uc);
+        let len2 = sqr(w) + sqr(vc);
+        let len = len2.sqrt();
+        let lam = one + rho / len;
+        let lam1 = neg(rho * r * w / (len2 * len));
+        let lam2 = neg(rho * sqr(r) * (sqr(vc) - two * sqr(w)) / (len2 * len2 * len));
+        let (a, b) = (r + vc * lam, neg(w * lam));
+        let (q1x, q1y) = (vc * lam1, neg(r * lam + w * lam1));
+        let (q2x, q2y) = (vc * lam2, neg(two * r * lam1 + w * lam2));
+        [
+            [a, b],
+            [q1x - b, q1y + a],
+            [q2x - two * q1y - a, q2y + two * q1x - b],
+        ]
+    }
+
+    /// The test's function of a vector `v` turned by `angle`: the height of `R(angle) v` for
+    /// [`Wedge::AboveMiddle`]; for [`Wedge::BelowSpace`], minus the height of
+    /// `R(angle - pi/z) v`, which is `sin(pi/z) x - cos(pi/z) y` of `R(angle) v`.
+    fn signed_height(&self, wedge: Wedge, angle: Ivl, v: [Ivl; 2]) -> Ivl {
+        match wedge {
+            Wedge::AboveMiddle => {
+                let [_, y] = rotated_ivl(angle, v);
+                y
+            }
+            Wedge::BelowSpace => {
+                let beta = pi() / exact(self.z);
+                let [_, y] = rotated_ivl(angle + neg(beta), v);
+                neg(y)
+            }
+        }
+    }
+
+    /// The test's function at the angle of rolling `phi`, enclosed (no Taylor form).
+    pub(super) fn value(&self, wedge: Wedge, phi: f64) -> Ivl {
+        let at = exact(phi);
+        let [q, _, _] = self.local(at);
+        self.signed_height(wedge, at, q)
+    }
+
+    /// The test's function and its derivative at `phi`, enclosed.
+    fn value_and_slope(&self, wedge: Wedge, phi: f64) -> (Ivl, Ivl) {
+        let at = exact(phi);
+        let [q, first, _] = self.local(at);
+        (
+            self.signed_height(wedge, at, q),
+            self.signed_height(wedge, at, first),
+        )
+    }
+
+    /// An enclosure of the test's function over every angle of rolling of `[p0, p1]`
+    /// (`p0 <= p1`): the second-order Taylor form about the middle, with the value and slope at
+    /// the middle and the second derivative enclosed over the whole stretch. Where the stretch
+    /// starts at the fillet's first end (`at_start`) or ends at its last (`at_end`), the same form
+    /// anchored at that end is formed too, and the enclosure with the larger lower end is
+    /// returned (each is sound): it settles a stretch whose end is where the margin is smallest.
+    pub(super) fn enclosure(
+        &self,
+        wedge: Wedge,
+        p0: f64,
+        p1: f64,
+        at_start: bool,
+        at_end: bool,
+    ) -> Ivl {
+        let (m, r) = half_width(p0, p1);
+        let (value, slope) = self.value_and_slope(wedge, m);
+        let stretch = Ivl::new(p0, p1);
+        let [_, _, second] = self.local(stretch);
+        let curvature = self.signed_height(wedge, stretch, second);
+        let mut best = taylor(value, slope, curvature, r);
+        let h = next_up(p1 - p0);
+        if at_start {
+            let (value, slope) = self.value_and_slope(wedge, p0);
+            best = higher(best, taylor_from_end(value, slope, curvature, h, true));
+        }
+        if at_end {
+            let (value, slope) = self.value_and_slope(wedge, p1);
+            best = higher(best, taylor_from_end(value, slope, curvature, h, false));
+        }
+        best
+    }
+
+    /// Proves that every point of the upper root fillet over its whole stretch of rolling,
+    /// `[phi_root, phi_join]` in either order, lies strictly inside the wedge `0 < theta < pi/z`
+    /// between the middle of its tooth and the middle of the next space; refuses where a point is
+    /// shown outside it.
+    ///
+    /// First the whole stretch is kept above the middle of the tooth (else
+    /// [`Why::CutThrough`]: the two fillets of one tooth meet), then below the middle of the space
+    /// (else [`Why::FilletsCross`]). For each, a stack of stretches starting with the whole: a
+    /// stretch whose enclosure ([`Fillet::enclosure`]) has its lower end above 0 is proved; one
+    /// whose function is shown at most 0 at its start, middle or end (a point enclosure whose
+    /// upper end is at most 0) refuses; another is halved. A stretch that cannot be halved, or
+    /// more than [`MAX_SEPARATION_PIECES`] stretches, refuses with
+    /// `NotProved` naming `FILLET_SEPARATION` and the least lower end found.
+    ///
+    /// Counted: the operations are rounded interval ones (`Ivl`, outward rounded) on the fillet's
+    /// doubles as its definition; libm `sin` and `cos` of a stretch's middle are counted as two
+    /// units in the last place (`teeth::bound`); pi is `[PI, next_up(PI)]`; the half width is
+    /// rounded up; the Taylor remainder comes from the enclosure of the second derivative over the
+    /// whole stretch.
+    pub(super) fn separation(&self) -> Result<(), TeethFailure> {
+        self.keeps(Wedge::AboveMiddle)?;
+        self.keeps(Wedge::BelowSpace)
+    }
+
+    /// One test of [`Fillet::separation`].
+    fn keeps(&self, wedge: Wedge) -> Result<(), TeethFailure> {
+        let refused = TeethFailure::Invalid(match wedge {
+            Wedge::AboveMiddle => Why::CutThrough,
+            Wedge::BelowSpace => Why::FilletsCross,
+        });
+        let unproved = |reached: f64| TeethFailure::NotProved {
+            what: FILLET_SEPARATION,
+            asked: 0.0,
+            reached,
+        };
+        if !(self.phi_root.is_finite() && self.phi_join.is_finite()) {
+            return Err(unproved(f64::INFINITY));
+        }
+        let (lo, hi) = if self.phi_root <= self.phi_join {
+            (self.phi_root, self.phi_join)
+        } else {
+            (self.phi_join, self.phi_root)
+        };
+        if lo == hi {
+            let at = self.value(wedge, lo);
+            if at.lo > 0.0 {
+                return Ok(());
+            }
+            if at.hi <= 0.0 {
+                return Err(refused);
+            }
+            return Err(unproved(if at.lo.is_nan() { f64::INFINITY } else { at.lo }));
+        }
+        let mut waiting = vec![(lo, hi)];
+        let mut reached = f64::INFINITY;
+        let mut popped = 0_usize;
+        while let Some((p0, p1)) = waiting.pop() {
+            if popped >= MAX_SEPARATION_PIECES {
+                return Err(unproved(reached));
+            }
+            popped += 1;
+            let enclosed = self.enclosure(wedge, p0, p1, p0 == lo, p1 == hi);
+            if enclosed.lo > 0.0 {
+                continue;
+            }
+            if enclosed.lo < reached {
+                reached = enclosed.lo;
+            }
+            let (m, _) = half_width(p0, p1);
+            if [p0, m, p1]
+                .into_iter()
+                .any(|t| self.value(wedge, t).hi <= 0.0)
+            {
+                return Err(refused);
+            }
+            if m > p0 && m < p1 {
+                waiting.push((m, p1));
+                waiting.push((p0, m));
+            } else {
+                return Err(unproved(reached));
+            }
+        }
+        Ok(())
+    }
+
+    /// What the fillet does over the angles of rolling `[lo, hi]`, for `outline::sampled`:
+    /// `P' = R(phi) p1(phi)`, `P'' = R(phi) p2(phi)` with the vectors of [`Fillet::local`]
+    /// enclosed over the stretch, and the size of `P''` that of the unrotated `p2`.
+    ///
+    /// The rounding of a computed point, with `Phi` the larger of `|lo|`, `|hi|`,
+    /// `W = r Phi + |uc|` and `M = r (1 + Phi) + |uc| + |vc| + 3 rho + W` (a bound on every term):
+    /// `w` (2 operations), `hypot` (libm), `rho du / len` (2), `qu`, `qv` (3), `sin` and `cos`
+    /// (libm, two ulps each: `4u` on terms of size at most `M`), `along` (2) and the turn (4), at
+    /// most sixteen operations in all: `gamma(16) M + 4u M` for a coordinate.
+    ///
+    /// The rounding of `w` is also carried through the unit vector `(w, -vc) / len`, which is not
+    /// well conditioned where the round's centre lies close to the line of rolling: as functions
+    /// of `w` its two parts have slopes `vc^2 / len^3` and `vc w / len^3`, neither above `1 / |vc|`
+    /// for any `w`, so an error of at most `gamma(2) W` in `w` moves `qu` and `qv` by at most
+    /// `rho gamma(2) W / |vc|` each. That is covered by the factor `1 + rho / |vc|` on the first
+    /// term (`W <= M`): `2 (gamma(16) M (1 + rho / |vc|) + 4u M)`, the factor 2 for both
+    /// coordinates, computed in rounded intervals and taken at its upper end. A centre on the line
+    /// of rolling (`vc = 0`) gives an infinite rounding, which proves nothing.
+    pub(super) fn bend(&self, lo: f64, hi: f64) -> Bend {
+        let stretch = Ivl::new(lo, hi);
+        let [_, first, second] = self.local(stretch);
+        let r = exact(self.r);
+        let most = exact(size(lo, hi));
+        let w = r * most + exact(self.uc.abs());
+        let m = r * (exact(1.0) + most)
+            + exact(self.uc.abs())
+            + exact(self.vc.abs())
+            + exact(3.0) * exact(self.rho)
+            + w;
+        let carried = exact(1.0) + exact(self.rho.abs()) / exact(self.vc.abs());
+        let rounding = exact(2.0) * (exact(gamma(16)) * m * carried + exact(4.0 * UNIT) * m);
+        Bend {
+            first: rotated_ivl(stretch, first),
+            second: rotated_ivl(stretch, second),
+            second_size: magnitude(second),
+            rounding: rounding.hi,
+        }
+    }
+}
+
+/// Of two enclosures of one value, the one with the larger lower end (a NaN lower end never
+/// wins).
+fn higher(a: Ivl, b: Ivl) -> Ivl {
+    if b.lo > a.lo || (a.lo.is_nan() && !b.lo.is_nan()) {
+        b
+    } else {
+        a
+    }
+}
+
+impl Cut {
+    /// The upper flank, from where it meets the fillet to the tip circle.
+    fn upper_flank(&self) -> Flank {
+        let b = &self.base;
+        Flank {
+            r: b.r,
+            s: self.s,
+            sin: b.sin,
+            cos: b.cos,
+            from: self.v_join,
+            to: self.v_tip,
+        }
+    }
+
+    /// The upper root fillet, from the root circle to where it meets the flank.
+    fn upper_fillet(&self) -> Fillet {
+        Fillet {
+            r: self.base.r,
+            uc: self.uc,
+            vc: self.vc,
+            rho: self.rho,
+            z: self.base.z,
+            phi_root: self.phi_root,
+            phi_join: self.phi_join,
+        }
+    }
+
+    /// The point of the upper flank cut by the point of the rack's flank at height `v` above the
+    /// line of rolling ([`Flank::point`]).
+    fn flank(&self, v: f64) -> Point {
+        self.upper_flank().point(v)
+    }
+
+    /// The point of the upper root fillet at the angle of rolling `phi` ([`Fillet::point`]).
+    fn fillet(&self, phi: f64) -> Point {
+        self.upper_fillet().point(phi)
     }
 
     /// Half the angle the tooth spans at `radius`, were its flanks involutes all the way down to
@@ -182,7 +571,7 @@ impl Cut {
     ///
     /// From the root upward the fillet is the tooth's boundary for as long as it runs inside the
     /// involute. It starts below the base circle, where there is no involute at all.
-    fn crossing(&self, phi_tangent: f64) -> Result<(f64, f64), Error> {
+    fn crossing(&self, phi_tangent: f64) -> Result<(f64, f64), TeethFailure> {
         const STEPS: u32 = 4096;
         let outside = |phi: f64| {
             let [x, y] = self.fillet(phi);
@@ -213,49 +602,12 @@ impl Cut {
         }
         Ok((outside_at, v))
     }
-
-    /// The smallest and the largest angle from the middle of the tooth of the points of its upper
-    /// root fillet.
-    ///
-    /// The fillet runs from the root circle up to the flank. Where the rack undercuts the tooth
-    /// deeply, the fillet swings back past the middle of the tooth, and then the two fillets of one
-    /// tooth cut through each other.
-    fn fillet_angles(&self) -> (f64, f64) {
-        const STEPS: u32 = 256;
-        let angle = |phi: f64| {
-            let [x, y] = self.fillet(phi);
-            y.atan2(x)
-        };
-        let at = |i: u32| {
-            self.phi_root + (self.phi_join - self.phi_root) * f64::from(i) / f64::from(STEPS)
-        };
-        // The extreme among the steps, then closer between its neighbours (the curve is smooth
-        // there).
-        let extreme = |sign: f64| {
-            let (mut best, mut best_i) = (f64::INFINITY, 0);
-            for i in 0..=STEPS {
-                let value = sign * angle(at(i));
-                if value < best {
-                    (best, best_i) = (value, i);
-                }
-            }
-            let (mut lo, mut hi) = (at(best_i.saturating_sub(1)), at((best_i + 1).min(STEPS)));
-            for _ in 0..100 {
-                let (a, b) = (lo + (hi - lo) / 3.0, hi - (hi - lo) / 3.0);
-                if sign * angle(a) < sign * angle(b) {
-                    hi = b;
-                } else {
-                    lo = a;
-                }
-            }
-            sign * best.min(sign * angle(0.5 * (lo + hi)))
-        };
-        (extreme(1.0), extreme(-1.0))
-    }
 }
 
 impl External {
-    fn cut(&self) -> Result<Cut, Error> {
+    /// The tooth worked out up to where its root fillet meets the flank: the numbers checked, the
+    /// rack placed and the fillet's stretch of rolling found, before the fillets are proved apart.
+    fn joined(&self) -> Result<Cut, TeethFailure> {
         let b = base(self.module, self.teeth, self.pressure_angle)?;
         let addendum = in_range("addendum", self.addendum, 0.0, 5.0)?;
         let dedendum = in_range("dedendum", self.dedendum, 0.0, 5.0)?;
@@ -266,28 +618,20 @@ impl External {
 
         let s = b.pitch / 2.0 + 2.0 * shift * b.m * tan - thinning;
         if !(s > 0.0 && s < b.pitch) {
-            return Err(Error::Invalid {
-                why: "the tooth would be thinner than nothing or as wide as the pitch",
-            });
+            return Err(TeethFailure::Invalid(Why::ToothThickness));
         }
         let depth = (dedendum - shift) * b.m; // of the rack's tip below the line of rolling
         let vc = rho - depth;
         if !(vc < 0.0) {
-            return Err(Error::Invalid {
-                why: "the root must lie below the pitch circle by more than the tool's tip radius",
-            });
+            return Err(TeethFailure::Invalid(Why::RootAboveTipRound));
         }
         let rf = b.r - depth;
         if !(rf > 1e-9 * b.m) {
-            return Err(Error::Invalid {
-                why: "the root circle would be inside the axis",
-            });
+            return Err(TeethFailure::Invalid(Why::RootInsideAxis));
         }
         let uc = s / 2.0 + (rho - vc * b.sin) / b.cos;
         if uc > b.pitch / 2.0 * (1.0 + 1e-12) {
-            return Err(Error::Invalid {
-                why: "the tool's tip radius is too large: its two rounds would overlap",
-            });
+            return Err(TeethFailure::Invalid(Why::TipRoundsOverlap));
         }
         let ra = b.r + (addendum + shift) * b.m;
 
@@ -319,61 +663,111 @@ impl External {
         } else {
             (phi_tangent, v_tangent)
         };
-        let (lowest, highest) = cut.fillet_angles();
-        if !(lowest > 0.0) {
-            return Err(Error::Invalid { why: "the undercut would cut the tooth through at its root: its two root fillets would meet" });
-        }
-        if !(highest < PI / b.z) {
-            return Err(Error::Invalid {
-                why: "the root fillets of neighbouring teeth would cross",
-            });
-        }
+        Ok(cut)
+    }
 
+    fn cut(&self) -> Result<Cut, TeethFailure> {
+        let mut cut = self.joined()?;
+        cut.upper_fillet().separation()?;
+
+        let (ra, rb) = (cut.ra, cut.base.rb);
         let [jx, jy] = cut.flank(cut.v_join);
-        if !(ra > jx.hypot(jy) * (1.0 + 1e-12) && ra > b.rb) {
-            return Err(Error::Invalid {
-                why: "the tip circle is at or below the start of the flank: no flank is left",
-            });
+        if !(ra > jx.hypot(jy) * (1.0 + 1e-12) && ra > rb) {
+            return Err(TeethFailure::Invalid(Why::NoFlankLeft));
         }
         cut.v_tip = cut.flank_height(ra);
         let [tx, ty] = cut.flank(cut.v_tip);
         cut.tip_half_angle = ty.atan2(tx);
         if !(cut.tip_half_angle > 0.0) {
-            return Err(Error::Invalid {
-                why: "the teeth would come to a point below the tip circle",
-            });
+            return Err(TeethFailure::Invalid(Why::PointedBelowTip));
         }
         Ok(cut)
     }
 
+    /// The upper root fillet of the tooth, worked out up to where it meets the flank (the fillets
+    /// not yet proved apart): the hook of the tests of the fillet's proof.
+    #[cfg(test)]
+    pub(super) fn fillet(&self) -> Result<Fillet, TeethFailure> {
+        Ok(self.joined()?.upper_fillet())
+    }
+
+    /// The upper flank of the tooth, from the fillet to the tip circle: the hook of the tests of
+    /// the flank's chords.
+    #[cfg(test)]
+    pub(super) fn flank(&self) -> Result<Flank, TeethFailure> {
+        Ok(self.cut()?.upper_flank())
+    }
+
     /// The radius of the pitch circle: half of module times teeth.
-    pub fn pitch_radius(&self) -> Result<f64, Error> {
+    pub fn pitch_radius(&self) -> crate::Result<f64> {
+        self.pitch_radius_typed()
+            .map_err(|e| SolidError::teeth("teeth::involute::External::pitch_radius", e))
+    }
+
+    /// [`Self::pitch_radius`] with its failure as a [`TeethFailure`], for the tooth module's own
+    /// callers.
+    pub(crate) fn pitch_radius_typed(&self) -> Result<f64, TeethFailure> {
         Ok(self.cut()?.base.r)
     }
 
     /// The radius of the base circle, from which the flanks unwind.
-    pub fn base_radius(&self) -> Result<f64, Error> {
+    pub fn base_radius(&self) -> crate::Result<f64> {
+        self.base_radius_typed()
+            .map_err(|e| SolidError::teeth("teeth::involute::External::base_radius", e))
+    }
+
+    /// [`Self::base_radius`] with its failure as a [`TeethFailure`], for the tooth module's own
+    /// callers.
+    pub(crate) fn base_radius_typed(&self) -> Result<f64, TeethFailure> {
         Ok(self.cut()?.base.rb)
     }
 
     /// The radius of the tip circle.
-    pub fn tip_radius(&self) -> Result<f64, Error> {
+    pub fn tip_radius(&self) -> crate::Result<f64> {
+        self.tip_radius_typed()
+            .map_err(|e| SolidError::teeth("teeth::involute::External::tip_radius", e))
+    }
+
+    /// [`Self::tip_radius`] with its failure as a [`TeethFailure`], for the tooth module's own
+    /// callers.
+    pub(crate) fn tip_radius_typed(&self) -> Result<f64, TeethFailure> {
         Ok(self.cut()?.ra)
     }
 
     /// The radius of the root circle.
-    pub fn root_radius(&self) -> Result<f64, Error> {
+    pub fn root_radius(&self) -> crate::Result<f64> {
+        self.root_radius_typed()
+            .map_err(|e| SolidError::teeth("teeth::involute::External::root_radius", e))
+    }
+
+    /// [`Self::root_radius`] with its failure as a [`TeethFailure`], for the tooth module's own
+    /// callers.
+    pub(crate) fn root_radius_typed(&self) -> Result<f64, TeethFailure> {
         Ok(self.cut()?.rf)
     }
 
     /// The thickness of the tooth as an arc on the pitch circle.
-    pub fn tooth_thickness(&self) -> Result<f64, Error> {
+    pub fn tooth_thickness(&self) -> crate::Result<f64> {
+        self.tooth_thickness_typed()
+            .map_err(|e| SolidError::teeth("teeth::involute::External::tooth_thickness", e))
+    }
+
+    /// [`Self::tooth_thickness`] with its failure as a [`TeethFailure`], for the tooth module's
+    /// own callers.
+    pub(crate) fn tooth_thickness_typed(&self) -> Result<f64, TeethFailure> {
         Ok(self.cut()?.s)
     }
 
     /// The radius at which the involute flank starts: below it the tooth is root fillet. The hub
     /// must not reach below this radius.
-    pub fn form_radius(&self) -> Result<f64, Error> {
+    pub fn form_radius(&self) -> crate::Result<f64> {
+        self.form_radius_typed()
+            .map_err(|e| SolidError::teeth("teeth::involute::External::form_radius", e))
+    }
+
+    /// [`Self::form_radius`] with its failure as a [`TeethFailure`], for the tooth module's own
+    /// callers.
+    pub(crate) fn form_radius_typed(&self) -> Result<f64, TeethFailure> {
         let cut = self.cut()?;
         let [x, y] = cut.flank(cut.v_join);
         Ok(x.hypot(y))
@@ -381,12 +775,26 @@ impl External {
 
     /// Whether the rack cuts into the flank near the base circle, as it does when the teeth are
     /// few.
-    pub fn is_undercut(&self) -> Result<bool, Error> {
+    pub fn is_undercut(&self) -> crate::Result<bool> {
+        self.is_undercut_typed()
+            .map_err(|e| SolidError::teeth("teeth::involute::External::is_undercut", e))
+    }
+
+    /// [`Self::is_undercut`] with its failure as a [`TeethFailure`], for the tooth module's own
+    /// callers.
+    pub(crate) fn is_undercut_typed(&self) -> Result<bool, TeethFailure> {
         Ok(self.cut()?.undercut)
     }
 
     /// Half the angle (radians) the tooth spans at `radius`, for a radius on the flank.
-    pub fn half_angle_at(&self, radius: f64) -> Result<f64, Error> {
+    pub fn half_angle_at(&self, radius: f64) -> crate::Result<f64> {
+        self.half_angle_at_typed(radius)
+            .map_err(|e| SolidError::teeth("teeth::involute::External::half_angle_at", e))
+    }
+
+    /// [`Self::half_angle_at`] with its failure as a [`TeethFailure`], for the tooth module's own
+    /// callers.
+    pub(crate) fn half_angle_at_typed(&self, radius: f64) -> Result<f64, TeethFailure> {
         let cut = self.cut()?;
         let [x, y] = cut.flank(cut.v_join);
         let r = in_range(
@@ -402,17 +810,33 @@ impl External {
     /// points whose chords stay within `tolerance` (millimetres) of the true curves.
     ///
     /// One tooth is six pieces, counter-clockwise: fillet, flank, tip arc, flank, fillet, root arc.
-    pub fn outline(&self, tolerance: f64) -> Result<Outline, Error> {
+    pub fn outline(&self, tolerance: f64) -> crate::Result<Outline> {
+        self.outline_typed(tolerance)
+            .map_err(|e| SolidError::teeth("teeth::involute::External::outline", e))
+    }
+
+    /// [`Self::outline`] with its failure as a [`TeethFailure`], for the tooth module's own
+    /// callers.
+    pub(crate) fn outline_typed(&self, tolerance: f64) -> Result<Outline, TeethFailure> {
         let tolerance = checked_tolerance(tolerance)?;
         let cut = self.cut()?;
-        // The upper side, each from the lower end upward.
+        // The upper side, each from the lower end upward, each chord proved within the tolerance.
+        let upper_fillet = cut.upper_fillet();
+        let upper_flank = cut.upper_flank();
         let fillet = sampled(
-            &|phi| cut.fillet(phi),
-            cut.phi_root,
-            cut.phi_join,
+            &|phi| upper_fillet.point(phi),
+            &|lo, hi| upper_fillet.bend(lo, hi),
+            upper_fillet.phi_root,
+            upper_fillet.phi_join,
             tolerance,
         )?;
-        let flank = sampled(&|v| cut.flank(v), cut.v_join, cut.v_tip, tolerance)?;
+        let flank = sampled(
+            &|v| upper_flank.point(v),
+            &|lo, hi| upper_flank.bend(lo, hi),
+            upper_flank.from,
+            upper_flank.to,
+            tolerance,
+        )?;
         let mirrored =
             |points: &[Point]| points.iter().map(|&[x, y]| [x, -y]).collect::<Vec<Point>>();
         let reversed = |points: &[Point]| points.iter().rev().copied().collect::<Vec<Point>>();
@@ -452,7 +876,7 @@ impl External {
                 role: Role::Root,
             });
         }
-        Outline::new(self.teeth, tooth, tolerance)
+        Outline::new_typed(self.teeth, tooth, tolerance)
     }
 }
 
@@ -500,37 +924,102 @@ struct Formed {
     centre_angle: f64,
 }
 
-impl Formed {
+/// The upper flank of a hub's tooth space: the involute of the base circle, by the length `roll`
+/// unwound from it.
+#[derive(Clone, Copy, Debug)]
+pub(super) struct HubFlank {
+    /// The radius of the base circle.
+    pub(super) rb: f64,
+    /// Half the angle a space would span on the base circle.
+    pub(super) half_at_base: f64,
+    /// The length unwound where the flank begins (at the tips of the hub's teeth).
+    pub(super) from: f64,
+    /// The length unwound where the flank ends (where the root round begins).
+    pub(super) to: f64,
+}
+
+impl HubFlank {
     /// The point of the upper flank at which a length `roll` is unwound from the base circle.
-    fn flank(&self, roll: f64) -> Point {
-        let rb = self.base.rb;
+    pub(super) fn point(&self, roll: f64) -> Point {
+        let rb = self.rb;
         let angle = self.half_at_base - (roll / rb - (roll / rb).atan());
         on_circle([0.0, 0.0], rb.hypot(roll), angle)
+    }
+
+    /// What the flank does over the unwound lengths `[lo, hi]`, for `outline::sampled`.
+    ///
+    /// The point is `rho (cos psi, sin psi)` with `rho = sqrt(rb^2 + L^2)` and
+    /// `psi = c - L/rb + atan(L/rb)` (`c` the half angle at the base circle), so with
+    /// `rho' = L/rho`, `rho'' = rb^2/rho^3`, `psi' = -L^2/(rb rho^2)` and
+    /// `psi'' = -2 L rb / rho^4`, in the turning frame of `psi`: `P' = (rho', rho psi')` and
+    /// `P'' = (rho'' - rho psi'^2, 2 rho' psi' + rho psi'')`, each enclosed in rounded intervals
+    /// over the lengths and turned by the enclosure of `psi` (with `atan` over an interval,
+    /// `teeth::bound::atan_over`); the size of `P''` is that of the unturned vector. At the cusp on
+    /// the base circle `P'` is 0 and `P''` stays finite.
+    ///
+    /// The rounding of a computed point, with `L` the larger of `|lo|`, `|hi|`,
+    /// `rhomax = sqrt(rb^2 + L^2)`: the angle is four operations on terms of size at most
+    /// `|c| + 2 L/rb` plus libm `atan`, two ulps of at most pi/2 (`2 pi u`); `hypot` (libm, two
+    /// ulps), `cos` and `sin` (libm, two ulps each) and the products: `8u` and `gamma(16)`
+    /// relative to `rhomax`; the factor 2 covers both coordinates:
+    /// `2 rhomax (dpsi + gamma(16) + 8u)`, computed in rounded intervals and taken at its upper
+    /// end.
+    pub(super) fn bend(&self, lo: f64, hi: f64) -> Bend {
+        let (rb, two) = (exact(self.rb), exact(2.0));
+        let l = Ivl::new(lo, hi);
+        let rb2 = sqr(rb);
+        let rho2 = rb2 + sqr(l);
+        let rho = rho2.sqrt();
+        let rho1 = l / rho;
+        let rho_second = rb2 / (rho2 * rho);
+        let psi1 = neg(sqr(l) / (rb * rho2));
+        let psi2 = neg(two * l * rb / sqr(rho2));
+        let ratio = l / rb;
+        let psi = exact(self.half_at_base) - ratio + atan_over(ratio);
+        let first = [rho1, rho * psi1];
+        let second = [rho_second - rho * sqr(psi1), two * rho1 * psi1 + rho * psi2];
+        let most = exact(size(lo, hi));
+        let rhomax = (rb2 + sqr(most)).sqrt();
+        let dpsi = exact(gamma(4)) * (exact(self.half_at_base.abs()) + two * most / rb)
+            + two * pi() * exact(UNIT);
+        let rounding = two * rhomax * (dpsi + exact(gamma(16)) + exact(8.0 * UNIT));
+        Bend {
+            first: rotated_ivl(psi, first),
+            second: rotated_ivl(psi, second),
+            second_size: magnitude(second),
+            rounding: rounding.hi,
+        }
+    }
+}
+
+impl Formed {
+    /// The upper flank, from the tips of the hub's teeth to the root round.
+    fn upper_flank(&self) -> HubFlank {
+        HubFlank {
+            rb: self.base.rb,
+            half_at_base: self.half_at_base,
+            from: self.roll_minor,
+            to: self.roll_round,
+        }
     }
 }
 
 impl Internal {
-    fn formed(&self) -> Result<Formed, Error> {
+    fn formed(&self) -> Result<Formed, TeethFailure> {
         let b = base(self.module, self.teeth, self.pressure_angle)?;
         let space = in_range("space width", self.space_width, 0.0, MAX_LENGTH)?;
         let minor = in_range("minor radius", self.minor_radius, 0.0, MAX_LENGTH)?;
         let major = in_range("major radius", self.major_radius, 0.0, MAX_LENGTH)?;
         let rho = zero_up_to("fillet radius", self.fillet_radius, MAX_LENGTH)?;
         if !(space < b.pitch) {
-            return Err(Error::Invalid {
-                why: "the spaces would be as wide as the pitch: no tooth is left",
-            });
+            return Err(TeethFailure::Invalid(Why::SpacesAsWideAsPitch));
         }
         if minor < b.rb {
-            return Err(Error::Invalid {
-                why: "the tips of the teeth would be below the base circle",
-            });
+            return Err(TeethFailure::Invalid(Why::TipsBelowBase));
         }
         let centre_radius = major - rho;
         if !(centre_radius > minor) {
-            return Err(Error::Invalid {
-                why: "the roots must lie outside the tips by more than the fillet radius",
-            });
+            return Err(TeethFailure::Invalid(Why::RootsInsideRound));
         }
         let half_at_base = space / (2.0 * b.r) + b.inv;
         let roll_of = |radius: f64| (radius * radius - b.rb * b.rb).max(0.0).sqrt();
@@ -538,17 +1027,13 @@ impl Internal {
         let turned = |roll: f64| roll / b.rb - (roll / b.rb).atan();
         let half_at_minor = half_at_base - turned(roll_minor);
         if !(half_at_minor < PI / b.z) {
-            return Err(Error::Invalid {
-                why: "the spaces would meet at the tips: no tooth is left",
-            });
+            return Err(TeethFailure::Invalid(Why::SpacesMeetAtTips));
         }
         // The round's centre is on the involute that runs beside the flank at the round's radius,
         // inside the space: the same involute, turned back by the radius over the base radius.
         let centre_angle = half_at_base - rho / b.rb - turned(roll_centre);
         if !(centre_angle >= 0.0) {
-            return Err(Error::Invalid {
-                why: "the root rounds are too large: they would overlap",
-            });
+            return Err(TeethFailure::Invalid(Why::RootRoundsOverlap));
         }
         Ok(Formed {
             base: b,
@@ -564,18 +1049,46 @@ impl Internal {
         })
     }
 
+    /// The upper flank of a space, from the tips to the root round: the hook of the tests of the
+    /// flank's chords.
+    #[cfg(test)]
+    pub(super) fn flank(&self) -> Result<HubFlank, TeethFailure> {
+        Ok(self.formed()?.upper_flank())
+    }
+
     /// The radius of the pitch circle.
-    pub fn pitch_radius(&self) -> Result<f64, Error> {
+    pub fn pitch_radius(&self) -> crate::Result<f64> {
+        self.pitch_radius_typed()
+            .map_err(|e| SolidError::teeth("teeth::involute::Internal::pitch_radius", e))
+    }
+
+    /// [`Self::pitch_radius`] with its failure as a [`TeethFailure`], for the tooth module's own
+    /// callers.
+    pub(crate) fn pitch_radius_typed(&self) -> Result<f64, TeethFailure> {
         Ok(self.formed()?.base.r)
     }
 
     /// The radius of the base circle.
-    pub fn base_radius(&self) -> Result<f64, Error> {
+    pub fn base_radius(&self) -> crate::Result<f64> {
+        self.base_radius_typed()
+            .map_err(|e| SolidError::teeth("teeth::involute::Internal::base_radius", e))
+    }
+
+    /// [`Self::base_radius`] with its failure as a [`TeethFailure`], for the tooth module's own
+    /// callers.
+    pub(crate) fn base_radius_typed(&self) -> Result<f64, TeethFailure> {
         Ok(self.formed()?.base.rb)
     }
 
     /// The radius at which the flank ends and the root round begins.
-    pub fn form_radius(&self) -> Result<f64, Error> {
+    pub fn form_radius(&self) -> crate::Result<f64> {
+        self.form_radius_typed()
+            .map_err(|e| SolidError::teeth("teeth::involute::Internal::form_radius", e))
+    }
+
+    /// [`Self::form_radius`] with its failure as a [`TeethFailure`], for the tooth module's own
+    /// callers.
+    pub(crate) fn form_radius_typed(&self) -> Result<f64, TeethFailure> {
         let f = self.formed()?;
         Ok(f.base.rb.hypot(f.roll_round))
     }
@@ -585,11 +1098,25 @@ impl Internal {
     ///
     /// One pitch is six pieces, counter-clockwise: flank, root round, root arc, root round, flank,
     /// tip arc (four when the corners are sharp).
-    pub fn outline(&self, tolerance: f64) -> Result<Outline, Error> {
+    pub fn outline(&self, tolerance: f64) -> crate::Result<Outline> {
+        self.outline_typed(tolerance)
+            .map_err(|e| SolidError::teeth("teeth::involute::Internal::outline", e))
+    }
+
+    /// [`Self::outline`] with its failure as a [`TeethFailure`], for the tooth module's own
+    /// callers.
+    pub(crate) fn outline_typed(&self, tolerance: f64) -> Result<Outline, TeethFailure> {
         let tolerance = checked_tolerance(tolerance)?;
         let f = self.formed()?;
-        // From the tip outward
-        let upper = sampled(&|roll| f.flank(roll), f.roll_minor, f.roll_round, tolerance)?;
+        // From the tip outward, each chord proved within the tolerance.
+        let flank = f.upper_flank();
+        let upper = sampled(
+            &|roll| flank.point(roll),
+            &|lo, hi| flank.bend(lo, hi),
+            flank.from,
+            flank.to,
+            tolerance,
+        )?;
         let lower: Vec<Point> = upper.iter().map(|&[x, y]| [x, -y]).collect();
         let centre = on_circle([0.0, 0.0], f.centre_radius, f.centre_angle);
         // From the root circle's direction to the flank's normal: a quarter turn less what the
@@ -638,7 +1165,7 @@ impl Internal {
             sweep: TAU / f.base.z - 2.0 * f.half_at_minor,
             role: Role::Tip,
         });
-        Outline::new(self.teeth, tooth, tolerance)
+        Outline::new_typed(self.teeth, tooth, tolerance)
     }
 }
 
@@ -665,17 +1192,20 @@ pub struct Fit {
 /// Refused where the hub's teeth would reach into the shaft's root fillets (closer than the form
 /// clearance), and where the rounds at the hub's root corners would reach the shaft's tip corners
 /// with the hub turned on the shaft as far as the side clearance lets it.
-pub fn hub_for(shaft: &External, fit: &Fit) -> Result<Internal, Error> {
+pub fn hub_for(shaft: &External, fit: &Fit) -> crate::Result<Internal> {
+    hub_for_typed(shaft, fit).map_err(|e| SolidError::teeth("teeth::involute::hub_for", e))
+}
+
+/// [`hub_for`] with its failure as a [`TeethFailure`], for the tooth module's own callers.
+pub(crate) fn hub_for_typed(shaft: &External, fit: &Fit) -> Result<Internal, TeethFailure> {
     let cut = shaft.cut()?;
     let side = zero_up_to("side clearance", fit.side_clearance, MAX_LENGTH)?;
     let reach = in_range("hub addendum", fit.hub_addendum, 0.0, 5.0)? * cut.base.m;
     let tip = in_range("tip clearance", fit.tip_clearance, 0.0, MAX_LENGTH)?;
     let form = zero_up_to("form clearance", fit.form_clearance, MAX_LENGTH)?;
     let minor = cut.base.r - reach;
-    if !(minor >= shaft.form_radius()? + form) {
-        return Err(Error::Invalid {
-            why: "the hub's teeth would reach into the shaft's root fillet",
-        });
+    if !(minor >= shaft.form_radius_typed()? + form) {
+        return Err(TeethFailure::Invalid(Why::HubReachesFillet));
     }
     let hub = Internal {
         module: shaft.module,
@@ -698,10 +1228,7 @@ pub fn hub_for(shaft: &External, fit: &Fit) -> Result<Internal, Error> {
         // as it goes, the flanks touching, a tip corner stands that much nearer a round.
         let turned = side / (2.0 * cut.base.r);
         if !(cut.tip_half_angle + turned <= (f.centre_angle + reach_of_round) * (1.0 + 1e-12)) {
-            return Err(Error::Invalid {
-                why: "the hub's root rounds would reach the shaft's tip corners: the rounds are too large for the \
-                      tip clearance",
-            });
+            return Err(TeethFailure::Invalid(Why::HubRoundsReachTips));
         }
     }
     Ok(hub)
@@ -714,16 +1241,26 @@ pub fn hub_for(shaft: &External, fit: &Fit) -> Result<Internal, Error> {
 /// each side; centred or turned on the shaft until the flanks touch, the parts do not overlap: the
 /// hub's tips clear the shaft's fillets by the form clearance, its roots clear the shaft's tips,
 /// and its root rounds clear the shaft's tip corners.
-pub fn spline_pair(shaft: &External, fit: &Fit, tolerance: f64) -> Result<Pair, Error> {
-    let hub = hub_for(shaft, fit)?;
+pub fn spline_pair(shaft: &External, fit: &Fit, tolerance: f64) -> crate::Result<Pair> {
+    spline_pair_typed(shaft, fit, tolerance)
+        .map_err(|e| SolidError::teeth("teeth::involute::spline_pair", e))
+}
+
+/// [`spline_pair`] with its failure as a [`TeethFailure`], for the tooth module's own callers.
+pub(crate) fn spline_pair_typed(
+    shaft: &External,
+    fit: &Fit,
+    tolerance: f64,
+) -> Result<Pair, TeethFailure> {
+    let hub = hub_for_typed(shaft, fit)?;
     Ok(Pair {
         first: Part {
-            outline: shaft.outline(tolerance)?,
+            outline: shaft.outline_typed(tolerance)?,
             material: Material::Inside,
             axis: [0.0, 0.0],
         },
         second: Part {
-            outline: hub.outline(tolerance)?,
+            outline: hub.outline_typed(tolerance)?,
             material: Material::Outside,
             axis: [0.0, 0.0],
         },
