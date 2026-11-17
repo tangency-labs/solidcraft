@@ -13,9 +13,7 @@ use solidcraft_kernel::{Members, PointClass};
 
 use super::CommandSpec;
 use crate::params::bad;
-use crate::schema::point_cloud_deviation::{
-    DeviationFailure, DeviationPoint, MAX_FACES, PointCloudDeviationParams, PointCloudDeviationResult,
-};
+use crate::schema::point_cloud_deviation::{DeviationFailure, DeviationPoint, MAX_FACES, PointCloudDeviationParams, PointCloudDeviationResult};
 use crate::schema::{TypedContract, output_schema_for};
 use crate::{EngineError, Result, Session};
 
@@ -126,7 +124,11 @@ fn f32_precision(m: f64) -> f64 {
 /// One sampled point's outcome.
 enum Outcome {
     /// The unsigned distance, the point and the closest point.
-    Measured { distance: f64, point: Vec3, closest: Vec3 },
+    Measured {
+        distance: f64,
+        point: Vec3,
+        closest: Vec3,
+    },
     Failed(String),
 }
 
@@ -195,11 +197,7 @@ fn deviation(s: &mut Session, p: &Value) -> Result<Value> {
     }
     // How exactly the cloud stores its points: its coordinates are 32-bit floats from its origin,
     // then placed.
-    let magnitude = cloud
-        .points
-        .bounds()
-        .map(|(lo, hi)| lo.iter().chain(hi.iter()).fold(0.0_f64, |m, v| m.max(f64::from(*v).abs())))
-        .unwrap_or(0.0);
+    let magnitude = cloud.points.bounds().map(|(lo, hi)| lo.iter().chain(hi.iter()).fold(0.0_f64, |m, v| m.max(f64::from(*v).abs()))).unwrap_or(0.0);
     let point_precision_mm = f32_precision(magnitude);
 
     let outcomes: Vec<Outcome> = solidcraft_kernel::map_on_threads(&indices, THREADS, |&i| {
@@ -225,7 +223,12 @@ fn deviation(s: &mut Session, p: &Value) -> Result<Value> {
         match body.classify_points(&measured_points) {
             Ok(c) if c.len() == measured_points.len() => Some(c),
             Ok(_) => return Err(EngineError::Other(format!("{cmd}: the point classification gave the wrong number of answers"))),
-            Err(e) => return Err(bad(cmd, format!("the points could not be classified inside or outside `{body_name}` ({e}); measure with signed: false"))),
+            Err(e) => {
+                return Err(bad(
+                    cmd,
+                    format!("the points could not be classified inside or outside `{body_name}` ({e}); measure with signed: false"),
+                ));
+            }
         }
     } else {
         None
