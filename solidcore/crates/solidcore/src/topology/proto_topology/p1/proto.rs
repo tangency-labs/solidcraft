@@ -40,6 +40,8 @@ const OP_REMOVE_COINCIDENT: &str =
 /// two combinable edge definitions, in units of their summed tolerances (upstream's).
 pub const ED_TOL_FACTOR: f64 = 5.0;
 const OP_POSITION: &str = "topology::proto_topology::p1::find_position_from_pcs";
+const OP_RESOLVE: &str =
+    "topology::proto_topology::p1::ProtoTopologyManager::resolve_vertex_definition";
 const OP_SET_POSITION: &str = "topology::proto_topology::p1::VertexDefinition::set_position";
 const OP_EVALUATE: &str = "topology::proto_topology::p1::ProtoTopologyManager::proto_edge_evaluate";
 const OP_SRC_TOPO: &str = "topology::proto_topology::p1::VertexDefinition::set_src_topo";
@@ -372,6 +374,64 @@ pub struct PositionFromPcs {
     /// `rdDeviation`: the distance between the two object points (0 when only one
     /// was known at the start).
     pub deviation: f64,
+}
+
+/// Not upstream: the curve of the seam edge that the vertex `pc` classifies onto ends
+/// ([`vertex::seam_edge`]); `None` when `pc` is not on a vertex, that vertex ends no seam
+/// edge, or the adapter cannot resolve its handle.
+///
+/// # Errors
+///
+/// Those of [`vertex::seam_edge`] and [`edge::curve`].
+fn seam_curve<'g, O: ClassObject>(
+    geometry: &'g impl ClassGeometry<O>,
+    pc: &PointClassification<O>,
+) -> Result<Option<&'g Curve>> {
+    if pc.point_class() != PointClassType::Vertex {
+        return Ok(None);
+    }
+    let Some((b, EntityRef::Vertex(v))) = pc.object().and_then(|o| geometry.topology_entity(o))
+    else {
+        return Ok(None);
+    };
+    match vertex::seam_edge(b, v)? {
+        Some(e) => edge::curve(b, e),
+        None => Ok(None),
+    }
+}
+
+/// Not upstream: the point of the seam `curve` that `p` lies over: `p`'s foot on the curve
+/// over its natural interval, moved along the curve's tangent there by `p`'s offset along
+/// that tangent. With the foot inside the interval the offset is zero and the point is the
+/// seam's nearest to `p`; where the curve stops short of `p` (a seam line ending at the
+/// vertex, `p` past that end) it carries on along the seam's direction, as the seam of the
+/// closed surface does.
+///
+/// # Errors
+///
+/// Those of [`Curve::drop_point`] and [`Curve::evaluate`]; a topology failure when `p`
+/// does not drop onto the curve.
+fn onto_seam(k: &Kernel, curve: &Curve, p: Point3) -> Result<Point3> {
+    let natural = curve.natural_interval();
+    let foot = curve.drop_point(k, &natural, p, None, 0.0, None, SolverOperation::Minimize)?;
+    if !foot.success {
+        return Err(SolidError::topology_failed(
+            OP_RESOLVE,
+            "the definition's position does not drop onto its vertex's seam",
+        ));
+    }
+    let eval = curve.evaluate(k, foot.parameter, 1, false, false)?;
+    let (Some(&at), Some(&tangent)) = (eval.first(), eval.get(1)) else {
+        return Err(SolidError::topology_failed(
+            OP_RESOLVE,
+            "the seam does not evaluate at the definition's foot",
+        ));
+    };
+    let len2 = tangent.dot(tangent);
+    if len2 <= 0.0 {
+        return Ok(at);
+    }
+    Ok(at + ((p - at).dot(tangent) / len2) * tangent)
 }
 
 /// The position two point classifications define (`sm_FindPositionFromPCs`). A
@@ -3134,6 +3194,15 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
     /// [`VertexDefinition::set_position`], so the tolerance grows to keep every absorbed
     /// hull point covered.
     ///
+    /// With `seam_vertex_stays_on_seam` (not upstream): a definition on a vertex that ends
+    /// a seam edge ([`vertex::seam_edge`]) is put onto that seam, at the seam's point under
+    /// the position worked out as upstream ([`onto_seam`]). The seam edge's curve is the
+    /// seam, an iso line of its face's surface, and its vertex ends that line; a vertex
+    /// moved off it leaves the seam edge's trims off the seam, which the face's seam test
+    /// refuses (test 36, a suspicious edge near the seam) when another edge runs beside the
+    /// seam there. Along the seam the definition still moves as upstream's, sharing the gap
+    /// with the other object. With both sides on seam vertices the first's seam holds it.
+    ///
     /// # Errors
     ///
     /// [`SolidError::InvalidInput`] without a proto vertex; [`SolidError::Unported`]
@@ -3172,6 +3241,16 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
         // the manager's tolerance (through the proto vertex back pointer)
         self.pv(v.proto_vertex)?;
         let tol = self.tolerance(k);
+
+        // (`seam_vertex_stays_on_seam`) the seam a definition on a seam's vertex keeps to
+        let seam = if k.fixes.seam_vertex_stays_on_seam {
+            match seam_curve(geometry, &v.pc1)? {
+                Some(c) => Some(c),
+                None => seam_curve(geometry, &v.pc2)?,
+            }
+        } else {
+            None
+        };
 
         if dist > tol && dist1 + dist2 > EFF_ZERO {
             // Put it proportionally closer to the topo object with the smaller gap,
@@ -3214,6 +3293,12 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
             }
             if let Some(v) = self.vertex_def_mut(vd) {
                 v.set_position(k, position)?;
+            }
+        }
+        if let Some(curve) = seam {
+            let position = onto_seam(k, curve, self.vd(vd)?.position)?;
+            if let Some(v) = self.vertex_def_mut(vd) {
+                v.position = position;
             }
         }
         Ok(0)
